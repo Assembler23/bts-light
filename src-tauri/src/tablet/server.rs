@@ -11,7 +11,7 @@
 //! ([`ServerCtx`], [`process_result`], [`handle_score`], [`match_brief`])
 //! ist `pub(crate)` und wird von beiden Modi geteilt.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -37,6 +37,7 @@ use crate::btp::{client, proto};
 use crate::config::{AppConfig, CourtMonitorConfig};
 use crate::tablet::assets::{self, TABLET_HTML};
 use crate::tablet::monitor;
+use crate::tablet::perf;
 use crate::tablet::state::{reconnect_decision, ReconnectDecision, TabletState};
 
 /// Fester Port des Tablet-Servers im Hallen-LAN.
@@ -63,9 +64,167 @@ pub struct ServerCtx {
     /// App-Log-Verzeichnis (wie „Logs öffnen"). Hierhin schreibt der Server die
     /// von den Tablets hochgeladenen Diagnoselogs (Unterordner `tablet-logs`).
     pub log_dir: PathBuf,
+    /// Derselbe In-Memory-Konfigurationsstand wie `AppState.config`
+    /// (`commands.rs`) — ein einziges, geteiltes `Arc<Mutex<_>>` statt zweier
+    /// getrennter Kopien. `ServerCtx::mutate_app_config` (TlAction-
+    /// Ausführungen, Panel-Profile, Spec tl-web-panelsystem, ADR 0025) und
+    /// `commands::mutate_config` (Tauri-Commands wie `save_config`,
+    /// `tl_device_add`) sperren so exakt dasselbe Schloss: Egal welcher der
+    /// beiden Wege zuerst dran ist, der zweite sieht garantiert den Stand
+    /// des ersten als Ausgangspunkt seines eigenen Lesen-Ändern-Schreiben-
+    /// Zyklus — kein Lost-Update mehr zwischen den beiden Schreibpfaden.
+    /// (Vorher schrieb `mutate_app_config` direkt an der Platte vorbei am
+    /// In-Memory-Stand; ein `save_config` danach überschrieb die Datei mit
+    /// dem veralteten In-Memory-Stand und löschte den Platten-Schreibvorgang
+    /// wieder kommentarlos.)
+    shared_config: Arc<std::sync::Mutex<AppConfig>>,
+    /// Warteschlange der Live-Score-Pushes an badhub, je Feld serialisiert
+    /// und gebündelt — siehe [`ScorePushQueue`].
+    score_push: Arc<ScorePushQueue>,
+    /// Zwischenstand des Config-Lesens: `(Änderungszeit, Größe, geparst)`.
+    ///
+    /// `app_config()` läuft auf den heißesten Pfaden — jede TL-Anfrage
+    /// prüft damit ihren Zugang, jeder Monitor-Abruf seine Einstellungen —
+    /// und las bisher **jedes Mal** `config.json` von der Platte und
+    /// parste sie neu. Jetzt entscheidet ein Blick auf Änderungszeit und
+    /// Größe: Ist die Datei unverändert, gibt es die gemerkte Fassung.
+    /// Die Semantik bleibt exakt dieselbe (jede geschriebene Änderung
+    /// wird erkannt, ein unlesbarer Stand meldet weiterhin einen Fehler) —
+    /// nur ohne das Lesen und Parsen (Review-Vorschlag 18.08.2026).
+    config_cache: std::sync::Mutex<Option<(std::time::SystemTime, u64, Arc<AppConfig>)>>,
+    /// Zwischenstand der Werbebild-Liste: `(Änderungszeit des Ordners,
+    /// Dateinamen)`. `list_ads` macht ein `read_dir` samt Sortieren —
+    /// auf den Monitor-Pfaden lief das bei **jedem** Abruf, bei zwanzig
+    /// Anzeigen also achtzigmal je Sekunde. Der Ordner ändert sich nur,
+    /// wenn jemand ein Bild hochlädt oder löscht (Review 18.08.2026).
+    ads_cache: std::sync::Mutex<Option<(std::time::SystemTime, Vec<String>)>>,
+    /// Das dekodierte Turnierlogo, gemerkt an `(Länge, MIME)` der
+    /// Base64-Daten: Sonst dekodierte jeder Abruf der Logo-Route die bis
+    /// zu 2,7 MB Base64 neu — bei zwanzig Anzeigen regelmäßig.
+    logo_cache: std::sync::Mutex<LogoCache>,
+    /// Zwischenstand der „Leisten-Sponsor"-Markierungen, gemerkt an
+    /// `(Änderungszeit, Größe)` der Datei. Sie wird nur beim Setzen eines
+    /// Häkchens im Setup geschrieben, aber von jedem `/info/ad/state`
+    /// gelesen und geparst — das ist die Werbe-Seite im 5-Sekunden-Takt
+    /// plus die Sponsor-Leiste jeder Anzeige im Minuten-Takt.
+    bar_cache: std::sync::Mutex<BarCache>,
+}
+
+/// Das dekodierte Turnierlogo, geschlüsselt nach der Marke seines Inhalts.
+type LogoCache = Option<(String, Arc<Vec<u8>>)>;
+
+/// Die „Leisten-Sponsor"-Markierungen, geschlüsselt nach
+/// `(Änderungszeit, Größe)` ihrer Datei.
+type BarCache = Option<((std::time::SystemTime, u64), Arc<HashSet<String>>)>;
+
+/// Die Live-Score-Pushes an badhub, **je Feld serialisiert und
+/// gebündelt** — und vor allem: **außerhalb** der Tablet-Verbindung.
+///
+/// Vorher lief der Push mitten in der WebSocket-Schleife des Tablets, mit
+/// 15 s Timeout. Der Server erwartet aber spätestens nach 10 s ein
+/// Lebenszeichen desselben Sockets (`STALE_AFTER`) — ein hängendes badhub
+/// ließ die Verbindung also auflaufen, der Server schloss sie **und gab
+/// das Feld frei**. Bei zwanzig Feldern hätte das alle zugleich getroffen
+/// (Analyse 18.08.2026). Der Push gehört deshalb hinter die Verbindung,
+/// nicht hinein.
+///
+/// Trotzdem kein blindes `spawn` je Punkt: Zwei Pushes desselben Felds
+/// dürfen sich nicht überholen (badhub zeigte sonst kurzzeitig den
+/// älteren Stand). Deshalb ist je Feld immer nur einer unterwegs, und
+/// während er läuft, sammelt sich nur der **neueste** Stand an — ein
+/// Punkteregen wird so zusätzlich zusammengefasst statt in eine
+/// Anfragen-Lawine übersetzt.
+#[derive(Default)]
+struct ScorePushQueue {
+    /// Beides unter EINEM Schloss, damit „nichts mehr da, ich höre auf"
+    /// und „ich stelle etwas ein" nicht ineinander rutschen können — sonst
+    /// bliebe ein zuletzt eingestellter Stand ungesendet liegen.
+    inner: std::sync::Mutex<ScorePushState>,
+}
+
+#[derive(Default)]
+struct ScorePushState {
+    /// Feld → neuester noch nicht gesendeter Stand, mit dem Spiel, zu dem
+    /// er gehört.
+    pending: HashMap<i64, (i64, crate::badhub::diff::Update)>,
+    /// Felder, für die gerade ein Push unterwegs ist.
+    busy: std::collections::HashSet<i64>,
+}
+
+impl ScorePushQueue {
+    /// Stellt einen Stand ein. `true` = für dieses Feld läuft noch kein
+    /// Arbeiter, der Aufrufer muss einen starten.
+    fn einstellen(
+        &self,
+        court_id: i64,
+        match_id: i64,
+        update: crate::badhub::diff::Update,
+    ) -> bool {
+        let mut g = self.inner.lock().expect("Score-Push-Mutex nicht vergiftet");
+        g.pending.insert(court_id, (match_id, update));
+        g.busy.insert(court_id)
+    }
+
+    /// Der nächste zu sendende Stand eines Felds — oder `None`, wenn
+    /// nichts mehr ansteht. Im `None`-Fall meldet sich der Arbeiter
+    /// **unter demselben Schloss** ab: Ein Stand, der genau jetzt
+    /// eingestellt wird, sieht uns dann nicht mehr als beschäftigt und
+    /// startet seinen eigenen Arbeiter — so bleibt kein Stand liegen.
+    fn naechster(&self, court_id: i64) -> Option<(i64, crate::badhub::diff::Update)> {
+        let mut g = self.inner.lock().expect("Score-Push-Mutex nicht vergiftet");
+        match g.pending.remove(&court_id) {
+            Some(eintrag) => Some(eintrag),
+            None => {
+                g.busy.remove(&court_id);
+                None
+            }
+        }
+    }
 }
 
 impl ServerCtx {
+    /// Stellt einen Live-Score zum Senden ein und kehrt **sofort** zurück.
+    fn queue_score_push(&self, court_id: i64, match_id: i64, update: crate::badhub::diff::Update) {
+        if !self.score_push.einstellen(court_id, match_id, update) {
+            // Für dieses Feld läuft schon einer — er nimmt den neuen
+            // Stand mit, sobald er fertig ist.
+            return;
+        }
+        let queue = self.score_push.clone();
+        let tablet = self.tablet.clone();
+        let http = self.http.clone();
+        let url = self.config.badhub.url.clone();
+        let password = self.config.badhub.password.clone();
+        tokio::spawn(async move {
+            while let Some((match_id, update)) = queue.naechster(court_id) {
+                // Veraltet-Prüfung DIREKT vor dem Senden (Review-Fund
+                // 18.08.2026): Zwischen Einstellen und Senden kann ein
+                // hängendes badhub Minuten liegen lassen. In der Zeit kann
+                // das Spiel enden und die Turnierleitung das Ergebnis
+                // **korrigiert** haben — ein nachträglich eintreffender
+                // Live-Stand überschriebe die Korrektur im Liveticker, und
+                // der Diff des Sync-Zyklus schickt ein beendetes Match nie
+                // wieder mit. Steht das Spiel nicht mehr auf dem Feld oder
+                // ist es in BTP finalisiert, wird der Stand verworfen.
+                if match_id != 0 {
+                    let noch_aktuell =
+                        tablet.match_for_court(court_id).map(|m| m.id) == Some(match_id);
+                    if !noch_aktuell || tablet.is_match_finalized(court_id, match_id) {
+                        tracing::info!(
+                            "Live-Score für Match {match_id} verworfen: nicht mehr aktuell \
+                             (Spiel beendet oder Feld neu belegt)"
+                        );
+                        continue;
+                    }
+                }
+                if let Err(e) = push::push_update(&http, &url, &password, &update).await {
+                    tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
+                }
+            }
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tablet: Arc<TabletState>,
         config: AppConfig,
@@ -74,6 +233,7 @@ impl ServerCtx {
         config_path: PathBuf,
         assignments_path: PathBuf,
         log_dir: PathBuf,
+        shared_config: Arc<std::sync::Mutex<AppConfig>>,
     ) -> Self {
         Self {
             tablet,
@@ -84,6 +244,12 @@ impl ServerCtx {
             config_path,
             assignments_path,
             log_dir,
+            shared_config,
+            config_cache: std::sync::Mutex::new(None),
+            ads_cache: std::sync::Mutex::new(None),
+            logo_cache: std::sync::Mutex::new(None),
+            bar_cache: std::sync::Mutex::new(None),
+            score_push: Arc::new(ScorePushQueue::default()),
         }
     }
 
@@ -94,7 +260,7 @@ impl ServerCtx {
     /// Lädt die aktuelle Court-Monitor-Konfiguration frisch von der Platte.
     /// Schlägt das Lesen fehl, gelten die Default-Werte.
     pub fn monitor_config(&self) -> CourtMonitorConfig {
-        AppConfig::load_from(&self.config_path)
+        self.app_config_result()
             .map(|c| c.court_monitor)
             .unwrap_or_default()
     }
@@ -102,7 +268,124 @@ impl ServerCtx {
     /// Gesamte App-Config frisch von der Platte (Default bei Fehler) – für
     /// Aufrufer, die mehrere Felder daraus brauchen, ohne doppelt zu lesen.
     pub fn app_config(&self) -> AppConfig {
-        AppConfig::load_from(&self.config_path).unwrap_or_default()
+        self.app_config_result().unwrap_or_default()
+    }
+
+    /// Wie [`Self::app_config`], aber **ohne Kopie** — für die heißen
+    /// Pfade.
+    ///
+    /// `AppConfig` trägt unter anderem das Turnierlogo als Base64-Text
+    /// (bis 2,7 MB). Auf den Monitor-Routen wurde es bei jedem Abruf
+    /// mitkopiert, teils zweimal — bei zwanzig Anzeigen mit ihrem
+    /// 250-ms-Takt ergab das hunderte Megabyte reines Kopieren pro
+    /// Sekunde (Analyse 18.08.2026). Wer nur lesen will, nimmt das
+    /// `Arc`.
+    pub fn app_config_arc(&self) -> Arc<AppConfig> {
+        self.app_config_arc_result().unwrap_or_default()
+    }
+
+    fn app_config_arc_result(&self) -> Result<Arc<AppConfig>, String> {
+        let meta = std::fs::metadata(&self.config_path).map_err(|e| e.to_string())?;
+        let stempel = (meta.modified().map_err(|e| e.to_string())?, meta.len());
+        {
+            let cache = self
+                .config_cache
+                .lock()
+                .expect("Config-Cache nicht vergiftet");
+            if let Some((zeit, groesse, config)) = cache.as_ref() {
+                if (*zeit, *groesse) == stempel {
+                    return Ok(config.clone());
+                }
+            }
+        }
+        let config = Arc::new(AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())?);
+        *self
+            .config_cache
+            .lock()
+            .expect("Config-Cache nicht vergiftet") = Some((stempel.0, stempel.1, config.clone()));
+        Ok(config)
+    }
+
+    /// Das dekodierte Turnierlogo — aus dem Zwischenstand, solange die
+    /// Marke des Inhalts gleich bleibt (siehe `logo_cache`). `marke` ist
+    /// dieselbe, die die Route als `ETag` ausgibt.
+    fn logo_bytes(&self, logo: &crate::config::LogoConfig, marke: &str) -> Option<Arc<Vec<u8>>> {
+        use base64::Engine;
+        let schluessel = marke.to_string();
+        {
+            let cache = self.logo_cache.lock().expect("Logo-Cache nicht vergiftet");
+            if let Some((gemerkt, bytes)) = cache.as_ref() {
+                if *gemerkt == schluessel {
+                    return Some(bytes.clone());
+                }
+            }
+        }
+        let bytes = Arc::new(
+            base64::engine::general_purpose::STANDARD
+                .decode(logo.data.as_bytes())
+                .ok()?,
+        );
+        *self.logo_cache.lock().expect("Logo-Cache nicht vergiftet") =
+            Some((schluessel, bytes.clone()));
+        Some(bytes)
+    }
+
+    /// Werbebilder des Court-Monitors — aus dem Zwischenstand, solange
+    /// sich der Ordner nicht geändert hat (siehe `ads_cache`).
+    fn ads(&self) -> Vec<String> {
+        let zeit = std::fs::metadata(&self.monitor_dir)
+            .and_then(|m| m.modified())
+            .ok();
+        if let Some(zeit) = zeit {
+            {
+                let cache = self.ads_cache.lock().expect("Ads-Cache nicht vergiftet");
+                if let Some((gemerkt, namen)) = cache.as_ref() {
+                    if *gemerkt == zeit {
+                        return namen.clone();
+                    }
+                }
+            }
+            let namen = monitor::list_ads(&self.monitor_dir);
+            // Eine LEERE Liste nicht merken: `list_ads` liefert sie auch
+            // dann, wenn das Verzeichnis-Lesen fehlschlug (Virenscanner,
+            // kurze Sperre). Gemerkt würde daraus „dieses Turnier hat
+            // keine Werbung", bis jemand ein Bild anfasst oder die App neu
+            // startet — vorher versuchte es jeder Abruf erneut. Dieselbe
+            // Abwägung wie beim Config-Zwischenstand: Fehler merkt man
+            // sich nicht (Review-Fund 18.08.2026).
+            if !namen.is_empty() {
+                *self.ads_cache.lock().expect("Ads-Cache nicht vergiftet") =
+                    Some((zeit, namen.clone()));
+            }
+            return namen;
+        }
+        // Kein Zeitstempel lesbar (Ordner fehlt): wie bisher direkt lesen.
+        monitor::list_ads(&self.monitor_dir)
+    }
+
+    /// Die als „Leisten-Sponsor" markierten Dateinamen — aus dem
+    /// Zwischenstand, solange die Datei unverändert ist (siehe `bar_cache`).
+    /// Fehlt die Datei (Normalfall ohne Sponsoren), bleibt es beim leeren
+    /// Ergebnis ohne Zwischenstand.
+    fn ad_bar(&self) -> Arc<HashSet<String>> {
+        let pfad = self.monitor_dir.join(monitor::AD_BAR_FILE);
+        let stempel = std::fs::metadata(&pfad)
+            .and_then(|m| Ok((m.modified()?, m.len())))
+            .ok();
+        let Some(stempel) = stempel else {
+            return Arc::new(HashSet::new());
+        };
+        {
+            let cache = self.bar_cache.lock().expect("Bar-Cache nicht vergiftet");
+            if let Some((gemerkt, namen)) = cache.as_ref() {
+                if *gemerkt == stempel {
+                    return namen.clone();
+                }
+            }
+        }
+        let namen = Arc::new(monitor::read_ad_bar(&pfad));
+        *self.bar_cache.lock().expect("Bar-Cache nicht vergiftet") = Some((stempel, namen.clone()));
+        namen
     }
 
     /// Wie [`Self::app_config`], aber **mit** dem Lesefehler.
@@ -115,7 +398,70 @@ impl ServerCtx {
     /// zugelassen", und alle Turnierleitungs-Geräte flögen für einen Takt
     /// hinaus.
     pub fn app_config_result(&self) -> Result<AppConfig, String> {
-        AppConfig::load_from(&self.config_path).map_err(|e| e.to_string())
+        // Datei-Stempel statt Datei-Inhalt: Ändert sich weder Zeitpunkt
+        // noch Größe, ist es dieselbe Datei — dann genügt die gemerkte
+        // Fassung. Beides gemeinsam, weil eine Änderung innerhalb
+        // derselben Zeitstempel-Auflösung sonst durchrutschen könnte.
+        // Der Datei-Stempel entscheidet (siehe `app_config_arc_result`);
+        // hier nur die Kopie für Aufrufer, die eine eigene Fassung
+        // brauchen.
+        self.app_config_arc_result().map(|c| (*c).clone())
+    }
+
+    /// Lässt `f` den **geteilten** In-Memory-Stand ändern (`shared_config`,
+    /// dasselbe `Arc<Mutex<_>>` wie `AppState.config`) und schreibt das
+    /// Ergebnis nach `config.json` — für TlAction-Ausführungen, die
+    /// `AppConfig`-Zustand pflegen (Panel-Profile, Spec tl-web-panelsystem,
+    /// ADR 0025). `f` darf die Änderung selbst ablehnen (`Err`) — dann
+    /// bleiben weder Datei noch In-Memory-Stand angetastet.
+    ///
+    /// **Kein Lost-Update mehr zwischen den zwei Schreibpfaden:** Der Guard
+    /// auf `shared_config` wird über den ganzen Lesen-Ändern-Schreiben-
+    /// Zyklus gehalten (nicht nur ums Schreiben) — dasselbe Schloss, das
+    /// auch `commands::mutate_config` (Tauri-Commands: `save_config`,
+    /// `tl_device_add`, …) hält. Zwei praktisch gleichzeitige Aufrufe (z. B.
+    /// zwei Geräte, die im selben Moment ein Profil speichern, ODER ein
+    /// Profil-Speichern gleichzeitig mit einer Einstellungsänderung im
+    /// Setup-Assistenten) laufen so strikt nacheinander, und jeder sieht als
+    /// Ausgangspunkt garantiert den Stand des jeweils anderen — „der letzte
+    /// gewinnt" (von der Spec ausdrücklich erlaubt), nie ein stiller
+    /// Datenverlust.
+    pub(crate) fn mutate_app_config<T>(
+        &self,
+        f: impl FnOnce(&mut AppConfig) -> Result<T, relay_proto::TlResponse>,
+    ) -> Result<T, relay_proto::TlResponse> {
+        let mut guard = self
+            .shared_config
+            .lock()
+            .expect("Config-Mutex nicht vergiftet");
+        let mut config = guard.clone();
+        let result = f(&mut config)?;
+        config.save_to(&self.config_path).map_err(|e| {
+            relay_proto::TlResponse::err(
+                relay_proto::TlErrorCode::NotAllowed,
+                format!("Konfiguration nicht schreibbar: {e}"),
+            )
+        })?;
+        // Gemerkte Fassung verwerfen: Der Datei-Stempel ist zwar frisch,
+        // aber eine Änderung innerhalb derselben Zeitstempel-Auflösung
+        // (gleiche Größe, gleiche Zeit) würde sonst übersehen. Bei einem
+        // Schreibvorgang, den wir selbst auslösen, ist das billig zu
+        // vermeiden.
+        *self
+            .config_cache
+            .lock()
+            .expect("Config-Cache nicht vergiftet") = None;
+        *guard = config;
+        // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
+        // (Hallen-Farben, Aufruf-Timer) — nach einem Schreibvorgang ist er
+        // überholt (Spec monitor-livestand-push, S1).
+        //
+        // **Zuletzt**, nach dem Verwerfen der gemerkten Fassung: Ein
+        // gleichzeitiges `/health` sähe sonst die neue Revision und über
+        // `app_config_arc()` noch die alte Konfiguration — und legte deren
+        // Hallen-Farben unter der neuen Revision ab (Review-Fund 19.08.2026).
+        self.tablet.bump_overview_rev();
+        Ok(result)
     }
 
     /// Lädt die Geräte→Target-Zuweisungen frisch von der Platte. Ein
@@ -129,6 +475,7 @@ impl ServerCtx {
 /// Startet den Server auf `0.0.0.0:8088` und bedient ihn, bis der Task
 /// abgebrochen wird.
 pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
+    let ctx_fuer_takt = ctx.clone();
     let app = Router::new()
         // TV-Launcher: kurze Root-Adresse landet auf einem Auswahl-Menü
         // (Fernbedienung statt langer ?halle=-URLs). Kurz-Pfade leiten direkt.
@@ -149,6 +496,9 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         .route("/flags/{file}", get(flag_route))
         .route("/ads/{file}", get(ad_image))
         .route("/health", get(health))
+        // Ablesestand der Perf-Zähler (Spec monitor-livestand-push, S0) —
+        // nur hier, nicht am Relay (siehe `debug_perf`).
+        .route("/debug/perf", get(debug_perf))
         .route("/info/overview", get(info_overview_page))
         .route("/info/preparation", get(info_preparation_page))
         .route("/info/preparation/state", get(info_preparation_state))
@@ -172,6 +522,12 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         // Punktverlauf on-demand (AK-5): gleicher Pfad wie über den Relay,
         // damit tl.html in beiden Modi identisch abruft.
         .route("/tl/api/timeline/{match_id}", get(tl_timeline))
+        .route("/tl/api/officials/{official_id}", get(tl_official_detail))
+        // TL-Push (Spec tl-web-push): Anstoß-Kanal `{"rev":n}` — nie Daten,
+        // die holt die Seite über `/tl/api/state`. Auth im ersten Frame
+        // (Browser-WebSockets können keine Header setzen, und der Zugang
+        // gehört nie in eine URL). Siehe `tl_ws_upgrade`.
+        .route("/tl-ws", get(tl_ws_upgrade))
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
@@ -184,7 +540,70 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", TABLET_PORT)).await?;
     tracing::info!("Tablet-Server lauscht auf http://{}", lan_host());
+    // TL-Erkennungstakt (Spec tl-web-push): lebt und stirbt mit dem
+    // LAN-Server — er versorgt dessen Antwort-Cache und `/tl-ws`-Nudges.
+    // Im reinen Cloud-Modus läuft weder Server noch Takt; dort erkennt der
+    // Relay-Client Änderungen selbst (TICK) und der Relay nudgt.
+    //
+    // Der Wächter ist Absicht: Das Stoppen der Übertragung bricht diese
+    // Funktion mitten in `axum::serve` ab (`handle.abort()` in
+    // `commands.rs`) — ein bloßes `takt.abort()` DANACH liefe nie, und ein
+    // fallengelassenes `JoinHandle` beendet in Tokio gar nichts, es löst
+    // die Aufgabe nur ab. Jedes Stoppen/Starten hinterließe damit einen
+    // weiteren Takt, der bis zum Programmende sekündlich weiterrechnet
+    // (Review-Fund 18.08.2026). `Drop` läuft auch beim Abbruch.
+    let _takt = TaktWaechter(tokio::spawn(tl_push_takt(ctx_fuer_takt)));
     axum::serve(listener, app).await
+}
+
+/// Beendet den TL-Erkennungstakt, sobald der Server-Task endet — egal ob
+/// regulär oder per Abbruch.
+struct TaktWaechter(tokio::task::JoinHandle<()>);
+
+impl Drop for TaktWaechter {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Zentraler TL-Erkennungstakt (Spec tl-web-push): baut den Zustand EINMAL
+/// pro Sekunde, legt die fertige Antwort in den Cache und nudgt die
+/// `/tl-ws`-Zuhörer bei jeder neuen Revision. Ersetzt die frühere
+/// Je-Gerät-und-Anfrage-Rechnung (Snapshot-Clone + zwei Serialisierungen
+/// pro Poll) durch genau eine pro Takt — und macht Änderungen in unter
+/// einer Sekunde sichtbar statt erst beim nächsten 2-s-Poll.
+async fn tl_push_takt(ctx: Arc<ServerCtx>) {
+    let mut takt = tokio::time::interval(Duration::from_secs(1));
+    takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut letzte_rev = 0u64;
+    loop {
+        takt.tick().await;
+        let now = now_ms();
+        // Nur arbeiten, wenn jemand zusieht: kein offener Push-Kanal und
+        // seit einer Minute kein Abruf → gar nichts tun. Sonst läse ein
+        // Turnier ohne ein einziges TL-Gerät sekündlich die Config von
+        // Platte, klonte den BTP-Schnappschuss und serialisierte den
+        // vollen Zustand (Review-Fund 18.08.2026). Diese Prüfung ist ein
+        // Atomar-Lesen plus ein Blick in eine Liste.
+        if !ctx.tablet.tl_interest(now) {
+            continue;
+        }
+        // Config je Takt frisch (wie der Relay-TICK): Ein- und Ausschalten
+        // von TL-Web greift ohne Neustart.
+        let config = ctx.app_config();
+        if !config.tl_web.enabled {
+            continue;
+        }
+        let state = crate::tablet::tl::build_state_with_rev(&ctx.tablet, &config, now);
+        let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
+        let rev = state.rev;
+        let json = serde_json::to_string(&state).unwrap_or_default();
+        ctx.tablet.set_tl_state_cache(rev, etag, json, now);
+        if rev != letzte_rev {
+            letzte_rev = rev;
+            ctx.tablet.notify_tl(rev);
+        }
+    }
 }
 
 /// LAN-Adresse `<ip>:<port>` für Tablet-URLs und QR-Codes.
@@ -510,6 +929,20 @@ async fn qr_svg(Path(court_id): Path<i64>) -> impl IntoResponse {
 struct DeviceHeartbeat {
     #[serde(default)]
     device: Option<String>,
+    /// Was den Abruf ausgelöst hat: `push` (ein Nudge kam) oder `poll`
+    /// (Fallback-Takt). **Additiv** angehängt (Spec monitor-livestand-push,
+    /// S0) — eine Seite aus einem älteren Stand sendet ihn nicht, und ihr
+    /// Abruf zählt dann als `poll`, was er auch ist.
+    #[serde(default)]
+    src: Option<String>,
+    /// Nur dieses eine Feld liefern (Spec monitor-livestand-push, S7).
+    ///
+    /// **Bewusst `String`, nicht `i64`.** Als Zahl deklariert, beantwortete
+    /// axum ein `?court=abc` mit einem 400er — eine andere Antwort als für
+    /// ein unbekanntes Feld, und damit ein Fingerzeig darauf, was gültig
+    /// ist. So liefert alles Unbrauchbare dieselbe leere Liste.
+    #[serde(default)]
+    court: Option<String>,
 }
 
 /// Markiert das Geraet als „gesehen", falls eine Device-ID im Query
@@ -525,31 +958,281 @@ fn note_heartbeat(ctx: &ServerCtx, q: &DeviceHeartbeat) {
     }
 }
 
+/// Höchstalter des `/health`-Antwortcaches (Spec monitor-livestand-push,
+/// S1). Kurz genug, dass eine übersehene Änderungsquelle nur eine
+/// Viertelsekunde durchschlägt — und lang genug, dass bei zwanzig Anzeigen
+/// im 250-ms-Takt aus rund siebzig Bauten je Sekunde vier werden.
+const OVERVIEW_CACHE_TTL_MS: u64 = 250;
+
 /// Status-Schnappschuss für die bts-light-Oberfläche. Optional
 /// `?device=<id>` als Lebenszeichen-Markierung von der Info-Page.
 async fn health(
     State(ctx): State<Arc<ServerCtx>>,
     Query(q): Query<DeviceHeartbeat>,
-) -> Json<serde_json::Value> {
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
     note_heartbeat(&ctx, &q);
-    let ct = &ctx.app_config().call_timer;
-    Json(serde_json::json!({
-        "ok": true,
-        "courts": ctx.tablet.overview(),
-        // Server-Zeit, damit das Tablet seinen Uhr-Offset zum Server
-        // bestimmen kann und Pausen-`endsAt` in Server-Zeit setzt — so
-        // zeigen Tablet und TV denselben Countdown (sonst Drift durch
-        // abweichende Geraeteuhren). v0.9.32.
-        "serverNowMs": monitor::now_ms(),
-        // Aufruf-Timer-Konfiguration (camelCase wie im MonitorState), damit
-        // die Multifeld-Übersicht (overview.html) „Zeit seit Aufruf" je Feld
-        // gleich wie die Einzelanzeige gaten und beschriften kann (Plan 4).
-        "callTimer": {
-            "enabled": ct.enabled,
-            "secondCallMinutes": ct.second_call_minutes,
-            "thirdCallMinutes": ct.third_call_minutes,
-        },
-    }))
+    // Ohne Kopie: Diese Route ist der Zustands-Abruf der Feld-Übersicht
+    // und der Kombi-Anzeigen — sie kommt im 250-ms-Takt je Gerät und war
+    // damit die heißeste verbliebene Stelle, an der die ganze
+    // Konfiguration samt Turnierlogo kopiert wurde (Review-Fund
+    // 18.08.2026).
+    // **Revision zuerst.** Ein Config-Schreibvorgang setzt sie hoch, nachdem
+    // er den Config-Zwischenstand verworfen hat. Läse der Handler die
+    // Konfiguration vorher und die Revision danach, könnte er den alten
+    // Stand unter der neuen Revision ablegen — bis zur Hart-TTL bekämen alle
+    // Anzeigen die alten Hallen-Farben, ETag-Halter sogar „nichts Neues".
+    // In dieser Reihenfolge kann nur der harmlose Fall auftreten: alte
+    // Revision, neue Eingaben — der nächste Abruf baut ohnehin neu
+    // (Review-Fund 19.08.2026).
+    let rev = ctx.tablet.overview_rev();
+    let cfg = ctx.app_config_arc();
+    let ct = &cfg.call_timer;
+    let jetzt = monitor::now_ms();
+    // Über `serde_json` statt von Hand: Die Minuten sind `f64`, und
+    // `format!("{}", f64::INFINITY)` schriebe `inf` — kein gültiges JSON,
+    // womit die ganze Antwort unlesbar wäre. `serde_json` macht daraus
+    // `null`, wie schon vor dem Umbau auf den handgebauten Umschlag
+    // (Review-Fund 19.08.2026).
+    let call_timer_json = serde_json::json!({
+        "enabled": ct.enabled,
+        "secondCallMinutes": ct.second_call_minutes,
+        "thirdCallMinutes": ct.third_call_minutes,
+        // Darf die Anzeige ihren Sicherheits-Poll verlangsamen (Spec
+        // monitor-livestand-push, S6)? Reist im selben Umschlag mit und geht
+        // deshalb mit in die Marke — sonst bekäme eine Seite nach dem
+        // Umlegen des Schalters so lange „nichts Neues", bis sich zufällig
+        // ein Feld ändert, und pollte weiter im alten Takt.
+        "pushFallbackSlow": cfg.court_monitor.push_fallback_slow,
+    })
+    .to_string();
+    let (mut courts_json, mut etag, mut seqs_json) =
+        uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
+
+    // Schmaler Abruf je Feld (Spec monitor-livestand-push, S7): Ein fester
+    // Court-Monitor zeichnet eine einzige Kachel und holt dafür bisher die
+    // ganze Halle. Geschnitten wird aus **demselben** Bau, den der
+    // Antwortcache ohnehin hält — sonst nähme S7 zurück, was S1 gebracht hat.
+    //
+    // Und geschnitten wird **einmal je Cache-Generation**, nicht je Abruf:
+    // Der Schnitt ersetzt keinen Neubau, er kommt obendrauf, und er liegt vor
+    // der Marken-Prüfung — sonst zahlte selbst die sonst fast kostenlose
+    // Bestätigung „nichts Neues" den vollen Parse (Review-Funde 19.08.2026).
+    if let Some(wunsch) = q.court.as_deref() {
+        // Über die **geparste** Zahl, nicht den Rohtext: `?court=0101` meint
+        // dasselbe Feld wie `?court=101`, und über den Rohtext ließen sich
+        // beliebig viele Cache-Schlüssel erzeugen.
+        let id = wunsch.parse::<i64>().ok();
+        let prozess = ctx.tablet.process_tag();
+        // Schlüssel ist die **Marke** der vollen Antwort, nicht die Revision:
+        // Sie ist ein Inhalts-Hash und deckt damit auch die Hart-TTL des
+        // Übersichts-Caches ab. An der Revision allein hinge der Ausschnitt
+        // fest, sobald sich die Anzeige ohne Revisions-Erhöhung ändert —
+        // `attach_tablet`, `detach_tablet` und `record_battery` tun genau das
+        // (Review-Fund 19.08.2026).
+        let (feld, zahl, marke) = ctx.tablet.feld_ausschnitt(&etag, id, || {
+            alle_feld_ausschnitte(&courts_json, &seqs_json, prozess, &call_timer_json)
+        });
+        // Eigene Marke: Sie hängt am Inhalt, und der ist hier ein anderer.
+        // Mit der Marke der ganzen Liste bekäme ein schmaler Abrufer sonst
+        // „nichts Neues" auf einen Stand, den er nie gesehen hat.
+        courts_json = feld;
+        seqs_json = zahl;
+        etag = marke;
+    }
+
+    // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
+    // Fallback-Poll die ganzen Nutzdaten (Spec monitor-livestand-push, S1);
+    // die Anzeige zeigt einfach weiter, was sie hat.
+    if marke_bekannt(&headers, &etag) {
+        ctx.tablet
+            .perf()
+            .note_health(perf::Quelle::aus_query(q.src.as_deref()), 0);
+        return (
+            StatusCode::NOT_MODIFIED,
+            [(header::ETAG, etag.as_str())],
+            String::new(),
+        )
+            .into_response();
+    }
+
+    // Umschlag je Abruf: `serverNowMs` ist bei jedem Abruf ein anderer und
+    // gehört deshalb nicht in den Cache. Von Hand zusammengesetzt statt über
+    // `serde_json::json!`, damit die zwischengespeicherte Feld-Liste nicht
+    // erst wieder geparst und neu serialisiert werden muss.
+    let json = format!(
+        // Server-Zeit für den Uhr-Offset des Tablets (Pausen-`endsAt` in
+        // Server-Zeit, sonst Drift durch abweichende Geräteuhren, v0.9.32);
+        // `callTimer` (camelCase wie im MonitorState), damit die
+        // Multifeld-Übersicht „Zeit seit Aufruf" gleich gaten kann (Plan 4).
+        // `seqs` (Spec monitor-livestand-push, S4): Ordnungszahl je Feld,
+        // CourtID → Zahl. Neben der Feld-Liste statt darin, damit die Marke
+        // der Antwort stabil bleibt, solange sich die Anzeige nicht ändert.
+        "{{\"ok\":true,\"courts\":{courts_json},\"seqs\":{seqs_json},\
+         \"serverNowMs\":{jetzt},\"callTimer\":{call_timer_json}}}"
+    );
+    ctx.tablet
+        .perf()
+        .note_health(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::ETAG, etag.as_str()),
+        ],
+        json,
+    )
+        .into_response()
+}
+
+/// Die Feld-Liste als fertiges JSON samt ihrer Marke — aus dem Antwortcache,
+/// wenn er zur aktuellen Revision passt und jung genug ist, sonst frisch
+/// gebaut (Spec monitor-livestand-push, S1).
+///
+/// Der Cache ist **Beschleuniger, nicht Wahrheit**: Jeder Zweifel führt zum
+/// Direktbau. Zwei Bedingungen müssen stimmen — die Revision (steigt bei
+/// Nudge, neuem BTP-Stand und Config-Schreibvorgang) **und** die Hart-TTL.
+/// Die TTL ist das Sicherheitsnetz gegen eine Quelle, an die niemand
+/// gedacht hat: Schlimmstenfalls ist die Anzeige eine Viertelsekunde alt,
+/// statt bis zum nächsten Ereignis falsch zu bleiben.
+fn uebersicht_json(
+    ctx: &ServerCtx,
+    cfg: &AppConfig,
+    jetzt: u64,
+    call_timer_json: &str,
+    rev: u64,
+) -> (String, String, String) {
+    if let Some(c) = ctx.tablet.overview_cache() {
+        if c.rev == rev && jetzt.saturating_sub(c.gebaut_ms) < OVERVIEW_CACHE_TTL_MS {
+            return (c.courts_json, c.etag, c.seqs_json);
+        }
+    }
+    // Ordnungszahlen **vor** dem Inhalt lesen (Spec monitor-livestand-push,
+    // S4): So ist eine Zahl höchstens älter als der Stand, zu dem sie
+    // ausgeliefert wird — und das ist die harmlose Richtung. Umgekehrt
+    // merkte sich die Anzeige eine Zahl für einen Stand, den sie nie
+    // gesehen hat, und verwürfe den zugehörigen Nudge als „schon bekannt".
+    //
+    // Sie wandern **neben** die Feld-Liste, nicht hinein: Die Marke ist ein
+    // Streuwert über die Liste, und die Zahlen steigen bei jedem Anstoß —
+    // auch bei einem ohne sichtbare Folge. Steckten sie darin, wechselte die
+    // Marke jedes Mal und die Bestätigung ohne Nutzdaten aus S1 wäre
+    // wirkungslos (Review-Fund 19.08.2026).
+    let seqs_json =
+        serde_json::to_string(&ctx.tablet.monitor_seqs()).unwrap_or_else(|_| "{}".to_string());
+    // Hallen-Farben (Spec hallen-farben) für die Multifeld-Übersicht —
+    // gleiche kanonische Hallenliste wie Desktop und TL-Web.
+    let mut courts = ctx.tablet.overview();
+    crate::hall_colors::paint(&mut courts, cfg, &ctx.tablet.hall_names());
+    let courts_json = serde_json::to_string(&courts).unwrap_or_else(|_| "[]".to_string());
+    // **Die Marke hängt am Inhalt, nicht an der Revision.** Sonst hinge der
+    // 304-Pfad an derselben Annahme wie der Cache — nur ohne dessen
+    // Sicherheitsnetz: Die Hart-TTL erzwingt zwar einen Neubau, aber bei
+    // unveränderter Revision bliebe die Marke gleich, und ein Abrufer mit
+    // gemerkter Marke bekäme auf einen geänderten Stand dauerhaft „nichts
+    // Neues". Dieselbe Falle wie beim Bild-Caching (Review 18.08.2026).
+    //
+    // Angenehme Nebenwirkung: Ein Ereignis, das die Anzeige gar nicht
+    // verändert (Nudge ohne sichtbare Folge), lässt die Marke stehen — die
+    // Anzeige spart sich dann sogar die Nutzdaten.
+    //
+    // Der Hash läuft nur beim **Neubau**, nicht bei jedem Abruf; gegen die
+    // Rechnung, die ihn erzeugt hat, fällt er nicht ins Gewicht.
+    // Der Aufruf-Timer gehört in die Marke, obwohl er nicht im Cache steckt:
+    // Er reist im Umschlag mit, und die Anzeige übernimmt ihn NUR aus einer
+    // vollen Antwort. Ohne ihn bekäme eine Seite nach einer geänderten
+    // Schwelle so lange „nichts Neues", bis sich zufällig ein Feld ändert —
+    // und rechnete bis dahin mit den alten Minuten (Review-Fund 19.08.2026).
+    let etag = inhalts_marke(ctx.tablet.process_tag(), &courts_json, call_timer_json);
+    ctx.tablet.set_overview_cache(
+        rev,
+        etag.clone(),
+        courts_json.clone(),
+        seqs_json.clone(),
+        jetzt,
+    );
+    (courts_json, etag, seqs_json)
+}
+
+/// Schneidet **alle** Ein-Feld-Ausschnitte aus der fertigen Übersicht (Spec
+/// monitor-livestand-push, S7): je CourtID die Feld-Liste mit einem Eintrag,
+/// die eigene Ordnungszahl und die eigene Marke — alles in derselben Form
+/// wie die volle Antwort.
+///
+/// **Jede unbrauchbare Feldnummer bekommt denselben leeren Ausschnitt:**
+/// unbekannte, negative, nicht-numerische, leere. Ein 404 oder 400 für die
+/// eine und eine leere Liste für die andere wäre ein Fingerzeig darauf,
+/// welche Felder es gibt — am Relay, der im Internet steht, wäre das eine
+/// Auskunft über ein fremdes Turnier.
+///
+/// Die Zusage gilt dem **Wert**, nicht einer kaputten Query: Ein doppeltes
+/// `?court=1&court=2` weist schon der Extractor mit 400 ab, bevor irgendein
+/// Feld angesehen wird. Das ist kein Leck (die Antwort hängt nur an der Form
+/// der Anfrage, nie am Serverzustand) und gilt für `?device=` seit jeher
+/// genauso (Sicherheits-Review 19.08.2026).
+///
+/// Geschnitten wird auf der JSON-Ebene, weil der Antwortcache aus S1 die
+/// Liste als fertigen String hält. **Der Schnitt ersetzt keinen Neubau, er
+/// kommt obendrauf** — deshalb läuft er nur einmal je Cache-Generation
+/// (`TabletState::feld_ausschnitt`) und nicht bei jedem Abruf: Sonst zahlte
+/// selbst die sonst fast kostenlose Bestätigung „nichts Neues" den vollen
+/// Parse, und ein Gerät im Turnier-WLAN hätte mit wenigen Byte je Anfrage
+/// einen billigen Hebel auf die Rechenzeit des Turnier-PCs.
+fn alle_feld_ausschnitte(
+    courts_json: &str,
+    seqs_json: &str,
+    prozess: u64,
+    call_timer_json: &str,
+) -> crate::tablet::state::FeldCache {
+    let leer_liste = "[]".to_string();
+    let leer = (
+        leer_liste.clone(),
+        "{}".to_string(),
+        inhalts_marke(prozess, &leer_liste, call_timer_json),
+    );
+    let mut cache = crate::tablet::state::FeldCache {
+        leer,
+        ..Default::default()
+    };
+    let Ok(felder) = serde_json::from_str::<Vec<serde_json::Value>>(courts_json) else {
+        return cache;
+    };
+    let zahlen = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(seqs_json)
+        .unwrap_or_default();
+    for feld in felder {
+        let Some(id) = feld.get("court_id").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        let Ok(liste) = serde_json::to_string(&[feld]) else {
+            continue;
+        };
+        // Nur die eigene Ordnungszahl: Die fremden sagen dem Feld-Monitor
+        // nichts und wären am Relay eine Auskunft über die Nachbarhalle.
+        let zahl = zahlen
+            .get(&id.to_string())
+            .map(|v| serde_json::json!({ id.to_string(): v }).to_string())
+            .unwrap_or_else(|| "{}".to_string());
+        let marke = inhalts_marke(prozess, &liste, call_timer_json);
+        cache.felder.insert(id, (liste, zahl, marke));
+    }
+    cache
+}
+
+/// `GET /debug/perf` — der Ablesestand der Perf-Zähler (Spec
+/// monitor-livestand-push, S0).
+///
+/// **Bewusst nur am LAN-Server.** Der Relay steht im Internet; dort hätte
+/// eine parameterlose, unauthentifizierte Route, die Lastdaten aller
+/// Namespaces zusammenfasst, nichts zu suchen. Im LAN ist sie das
+/// Ablesegerät für den Messlauf — und trägt ausschließlich Zahlen
+/// (Wächter-Test `debug_perf_enthaelt_keine_personendaten` in `perf.rs`).
+async fn debug_perf(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    let s = ctx.tablet.perf().snapshot();
+    let mut v = serde_json::to_value(s).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = v.as_object_mut() {
+        // Ohne Uhrzeit ist aus zwei Abrufen keine Rate zu bilden.
+        obj.insert("serverNowMs".into(), monitor::now_ms().into());
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Json(v))
 }
 
 // ─────────────────────────────── Court-Monitor ────────────────────────────
@@ -587,26 +1270,57 @@ async fn monitor_device_page() -> impl IntoResponse {
 async fn monitor_state(
     State(ctx): State<Arc<ServerCtx>>,
     Path(court_id): Path<i64>,
+    Query(q): Query<DeviceHeartbeat>,
 ) -> impl IntoResponse {
     let label = court_label_for(&ctx, court_id);
     let court = ctx.tablet.monitor_court(court_id);
-    let cfg = ctx.app_config();
-    let ads = monitor::list_ads(&ctx.monitor_dir);
+    // EIN Config-Zugriff für alles (vorher zwei, jeder mit voller Kopie
+    // inklusive Turnierlogo) und die Werbebild-Liste aus dem
+    // Zwischenstand statt per Verzeichnis-Lesen (Analyse 18.08.2026).
+    let cfg = ctx.app_config_arc();
     let state = monitor::build_monitor_state(
         court_id,
         label,
+        hall_color_for(&ctx, &cfg, court_id),
         court,
         &cfg.court_monitor,
         &cfg.call_timer,
-        ads,
+        ctx.ads(),
     );
-    ([(header::CACHE_CONTROL, "no-store")], Json(state))
+    // Wie bei `/health` selbst serialisiert, um die Antwortgröße zu kennen
+    // (Spec monitor-livestand-push, S0).
+    let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
+    ctx.tablet
+        .perf()
+        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
+    (
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        json,
+    )
+}
+
+/// Effektive Hallen-Farbe des Felds (Spec hallen-farben) — über die
+/// kanonische Turnier-Hallenliste aufgelöst; `None` bei Ein-Hallen-
+/// Turnieren oder Feldern ohne Halle.
+fn hall_color_for(ctx: &ServerCtx, config: &AppConfig, court_id: i64) -> Option<String> {
+    let hall = ctx.tablet.court_hall(court_id);
+    if hall.is_empty() {
+        return None;
+    }
+    crate::hall_colors::color_for(config, &ctx.tablet.hall_names(), &hall)
 }
 
 /// Query-Parameter der Geräte-Modus-Abfrage: die Geräte-ID.
 #[derive(serde::Deserialize)]
 struct DeviceQuery {
     device: String,
+    /// Wie bei [`DeviceHeartbeat`]: was den Abruf ausgelöst hat (Spec
+    /// monitor-livestand-push, S0). Fehlt er, zählt der Abruf als `poll`.
+    #[serde(default)]
+    src: Option<String>,
 }
 
 /// Anzeige-Zustand für ein Monitor-Gerät: löst die Feld-Zuweisung auf,
@@ -625,15 +1339,17 @@ async fn monitor_device_state(
         Some(relay_proto::MonitorTarget::Court { court_id }) => {
             let label = court_label_for(&ctx, court_id);
             let court_data = ctx.tablet.monitor_court(court_id);
-            let cfg = ctx.app_config();
-            let ads = monitor::list_ads(&ctx.monitor_dir);
+            // Wie in `monitor_state`: eine Config ohne Kopie, Werbebilder
+            // aus dem Zwischenstand.
+            let cfg = ctx.app_config_arc();
             monitor::build_monitor_state(
                 court_id,
                 label,
+                hall_color_for(&ctx, &cfg, court_id),
                 court_data,
                 &cfg.court_monitor,
                 &cfg.call_timer,
-                ads,
+                ctx.ads(),
             )
         }
         // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
@@ -646,7 +1362,7 @@ async fn monitor_device_state(
             // Kombi nebeneinander (Hochformat je Feld): globaler Schalter aus
             // den Court-Monitor-Einstellungen hängt `&dir=v` an die Kombi-URL.
             if matches!(target, relay_proto::MonitorTarget::CourtCombo { .. })
-                && ctx.app_config().court_monitor.combo_vertical
+                && ctx.app_config_arc().court_monitor.combo_vertical
             {
                 if let Some(p) = path.as_mut() {
                     p.push_str("&dir=v");
@@ -661,7 +1377,20 @@ async fn monitor_device_state(
     };
     state.command = command;
     state.device_code = device_code(&device);
-    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+    // Wie `monitor_state` selbst serialisiert, um die Antwortgröße zu
+    // kennen (Spec monitor-livestand-push, S0).
+    let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
+    ctx.tablet
+        .perf()
+        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
+    (
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        json,
+    )
+        .into_response()
 }
 
 // ─────────────────────────────── Info-Monitore ────────────────────────────
@@ -803,16 +1532,16 @@ async fn info_ad_state(
     Query(q): Query<DeviceHeartbeat>,
 ) -> impl IntoResponse {
     note_heartbeat(&ctx, &q);
-    let ads = monitor::list_ads(&ctx.monitor_dir);
+    let ads = ctx.ads();
     // Die als „Leisten-Sponsor" markierten Bilder gesondert ausweisen — die
     // obere Leiste zeigt genau diese (neben dem Turnierlogo), ohne die
     // Vollbild-Rotation (`ads`) anzufassen. Nur existierende Dateien.
-    let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
+    let bar = ctx.ad_bar();
     let bar_ads: Vec<&String> = ads.iter().filter(|f| bar.contains(*f)).collect();
-    // Config nur EINMAL laden — sowohl Intervall als auch das Logo-Flag daraus,
-    // sonst würde bei jedem Poll (~5 s je Anzeige) das base64-Logo doppelt
-    // geparst.
-    let config = ctx.app_config();
+    // Config nur EINMAL laden — sowohl Intervall als auch das Logo-Flag
+    // daraus. Ohne Kopie: Hier wird nur gelesen, und die Fassung trägt
+    // das Base64-Logo mit.
+    let config = ctx.app_config_arc();
     let payload = serde_json::json!({
         "ads": ads,
         "barAds": bar_ads,
@@ -833,9 +1562,12 @@ async fn info_ad_state(
 /// Logo binnen ~1 Min erscheint. Ein *Wechsel* eines bestehenden Logos schlägt
 /// entsprechend erst nach dem 200-Cache-Fenster durch — akzeptabel, weil das
 /// Logo praktisch einmal je Turnier gesetzt wird.
-async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
-    use base64::Engine;
-    let logo = ctx.app_config().tournament_logo;
+async fn info_tournament_logo(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let config = ctx.app_config_arc();
+    let logo = &config.tournament_logo;
     if logo.data.is_empty() {
         return (
             [(header::CACHE_CONTROL, "public, max-age=60")],
@@ -843,8 +1575,32 @@ async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoRes
         )
             .into_response();
     }
-    match base64::engine::general_purpose::STANDARD.decode(logo.data.as_bytes()) {
-        Ok(bytes) => {
+    // Kennung aus dem Inhalt: Damit kann eine Anzeige nach Ablauf der
+    // Cache-Frist mit ~200 Byte bestätigt bekommen, dass ihr Bild noch
+    // stimmt, statt megabyteweise dasselbe erneut zu laden — bei zwanzig
+    // TVs macht das den Unterschied (Analyse 18.08.2026).
+    //
+    // Bewusst über den Inhalt und nicht über `(Länge, MIME)`: Diese Marke
+    // ist zugleich der Schlüssel des Dekodier-Zwischenstands, und zwei
+    // verschiedene Logos gleicher Base64-Länge und gleichen Typs hätten
+    // sonst auch **frischen** Anzeigen dauerhaft die alten Bytes geliefert
+    // (Review-Fund 18.08.2026). Den Logo-Schreibpfad (`save_config`)
+    // erreicht der ServerCtx nicht, es gäbe also kein Netz darunter.
+    let etag = bild_marke(logo.data.as_bytes());
+    if marke_bekannt(&headers, &etag) {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CACHE_CONTROL, "public, max-age=300"),
+            ],
+        )
+            .into_response();
+    }
+    // Dekodiert zwischengespeichert: Ohne das rechnete jeder Abruf die
+    // vollen Base64-Daten neu aus.
+    match ctx.logo_bytes(logo, &etag) {
+        Some(bytes) => {
             let mime = if logo.mime.is_empty() {
                 "image/png".to_string()
             } else {
@@ -854,12 +1610,15 @@ async fn info_tournament_logo(State(ctx): State<Arc<ServerCtx>>) -> impl IntoRes
                 [
                     (header::CONTENT_TYPE, mime),
                     (header::CACHE_CONTROL, "public, max-age=300".to_string()),
+                    (header::ETAG, etag),
                 ],
-                bytes,
+                // Aus dem geteilten Zwischenstand in den Antwort-Body:
+                // eine Kopie statt einer Neu-Dekodierung.
+                bytes.as_ref().clone(),
             )
                 .into_response()
         }
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -949,16 +1708,55 @@ async fn info_preparation_state(
         }
     };
     let calls = ctx.tablet.preparation_calls();
+    let manual_halls = ctx.tablet.manual_halls();
+    let auto_halls = ctx.tablet.auto_hall_store().halls();
+    // Hallen-Farben (Spec hallen-farben) einmal je Antwort auflösen.
+    let hallen_farben =
+        crate::hall_colors::effective_hall_colors(&ctx.app_config_arc(), &ctx.tablet.hall_names());
 
-    let mut candidates: Vec<serde_json::Value> = snapshot
+    // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`,
+    // **derselbe** gemeinsame Helfer wie an den übrigen Sortier-Stellen —
+    // sonst zeigte diese Liste eine andere Reihenfolge als TL-Web/Desktop).
+    let mut ordered: Vec<(
+        crate::tablet::assign::ManualOrderSortKey,
+        &crate::btp::model::BtpMatch,
+        String,
+    )> = snapshot
         .matches
         .iter()
         .filter(|m| {
             m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
         })
         .map(|m| {
-            let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
-                let hall = c
+            let call = calls.iter().find(|c| c.match_id == m.id);
+            let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.as_str())
+            });
+            let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                &ctx.config,
+                &snapshot,
+                m,
+                manual_hall,
+                called_hall,
+                auto_halls.get(&m.id).map(String::as_str),
+                call.is_some(),
+                ctx.tablet.queue_order_store(),
+            );
+            (key, m, hall)
+        })
+        .collect();
+    ordered.sort_by_key(|(key, _, _)| *key);
+
+    let candidates: Vec<serde_json::Value> = ordered
+        .into_iter()
+        .map(|(_, m, hall)| {
+            let call_info = calls.iter().find(|c| c.match_id == m.id).map(|c| {
+                let call_hall = c
                     .location_id
                     .and_then(|lid| {
                         snapshot
@@ -968,11 +1766,25 @@ async fn info_preparation_state(
                             .map(|l| l.name.clone())
                     })
                     .unwrap_or_default();
+                (call_hall, c.called_at_ms)
+            });
+            // Die Farbe gehört zur ANGEZEIGTEN Halle (Review 2026-08-16):
+            // preparation.html rendert den Punkt neben `call.hall` — bei
+            // einem Aufruf muss dessen Halle die Farbe stellen (wie der
+            // Cloud-Weg über build_prepared_list), sonst widersprächen
+            // sich LAN- und Cloud-TV, sobald Kaskaden- und Aufruf-Halle
+            // auseinanderfallen. Ohne Aufruf gilt die Kaskaden-Halle.
+            let anzeige_halle = match &call_info {
+                Some((call_hall, _)) if !call_hall.is_empty() => call_hall.clone(),
+                _ => hall.clone(),
+            };
+            let call = call_info.map(|(call_hall, called_at_ms)| {
                 serde_json::json!({
-                    "hall": hall,
-                    "called_at_ms": c.called_at_ms,
+                    "hall": call_hall,
+                    "called_at_ms": called_at_ms,
                 })
             });
+            let manual = ctx.tablet.queue_order_store().rank(m.id).is_some();
             serde_json::json!({
                 "match_id": m.id,
                 "label": format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
@@ -982,24 +1794,12 @@ async fn info_preparation_state(
                 "planned_time": m.planned_time,
                 "draw_id": m.draw_id,
                 "call": call,
+                "hall": hall,
+                "hall_color": crate::hall_colors::farbe_fuer(&hallen_farben, &anzeige_halle),
+                "manual": manual,
             })
         })
         .collect();
-
-    // Gerufene zuerst, dann die Ansetzung des Turnierplans (Zeit, dann
-    // Reihenfolge im Zeitfenster), danach die Spielnummer – dieselbe
-    // Definition wie in `assign::sort_key`, damit Tablet, Monitor,
-    // Turnierleitung und Automatik dieselbe Liste zeigen.
-    candidates.sort_by_key(|c| {
-        let zahl = |feld: &str| c.get(feld).and_then(|v| v.as_i64());
-        crate::tablet::assign::sort_key_parts(
-            c.get("call").map(|v| !v.is_null()).unwrap_or(false),
-            zahl("planned_time"),
-            zahl("draw_id"),
-            zahl("match_num"),
-            zahl("match_id").unwrap_or(0),
-        )
-    });
 
     (
         [(header::CACHE_CONTROL, "no-store")],
@@ -1024,24 +1824,124 @@ async fn flag_route(Path(file): Path<String>) -> impl IntoResponse {
 }
 
 /// Liefert ein hochgeladenes Werbebild aus dem `court-ads`-Verzeichnis.
+///
+/// Mit Marke (`ETag`) und kurzer Cache-Frist. Vorher stand hier `no-store`,
+/// und weil die Anzeigen ihr Bild alle `ad_interval_s` (Standard 10 s)
+/// wechseln, lud jedes Gerät dabei jedes Mal die vollen Bilddaten neu — bei
+/// 1 MB rund 360 MB je Stunde und Gerät, im Cloud-Betrieb über die
+/// Internetleitung (Analyse 18.08.2026).
+///
+/// Bewusst **kein** `immutable`: Zwar vergibt `add_court_ad` eindeutige
+/// Namen (`ad-<ms>.<endung>`), aber das Verzeichnis liegt offen — wer eine
+/// Datei von Hand hineinlegt und später ersetzt, bekäme sonst tagelang das
+/// alte Bild. Die Marke aus Größe und Änderungszeit macht den Austausch
+/// billig sichtbar, ohne das Bild dafür zu lesen.
 async fn ad_image(
     State(ctx): State<Arc<ServerCtx>>,
     Path(file): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if !monitor::is_safe_image_name(&file) {
         return (StatusCode::NOT_FOUND, "Nicht gefunden").into_response();
     }
-    match tokio::fs::read(ctx.monitor_dir.join(&file)).await {
+    let pfad = ctx.monitor_dir.join(&file);
+    let etag = match tokio::fs::metadata(&pfad).await {
+        Ok(meta) => {
+            // Nanosekunden statt Millisekunden: Eine gleich große
+            // Ersetzung innerhalb derselben Millisekunde bliebe sonst
+            // unbemerkt (Review-Fund 18.08.2026), und feiner kostet nichts.
+            let zeit = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("\"ad-{}-{zeit}\"", meta.len())
+        }
+        Err(_) => return (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response(),
+    };
+    if marke_bekannt(&headers, &etag) {
+        // Unverändert: ~200 Byte statt des ganzen Bildes, und die Datei
+        // muss dafür nicht einmal gelesen werden.
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CACHE_CONTROL, AD_CACHE_CONTROL),
+            ],
+        )
+            .into_response();
+    }
+    match tokio::fs::read(&pfad).await {
         Ok(bytes) => (
             [
-                (header::CONTENT_TYPE, monitor::image_mime(&file)),
-                (header::CACHE_CONTROL, "no-store"),
+                (header::CONTENT_TYPE, monitor::image_mime(&file).to_string()),
+                (header::CACHE_CONTROL, AD_CACHE_CONTROL.to_string()),
+                (header::ETAG, etag),
             ],
             bytes,
         )
             .into_response(),
         Err(_) => (StatusCode::NOT_FOUND, "Werbebild nicht gefunden").into_response(),
     }
+}
+
+/// Cache-Frist der Bild-Routen. Fünf Minuten sind lang genug, dass die
+/// Rotation der Anzeigen (Sekundentakt) ohne eine einzige Anfrage auskommt,
+/// und kurz genug, dass ein ausgetauschtes Bild zeitnah durchschlägt.
+const AD_CACHE_CONTROL: &str = "public, max-age=300";
+
+/// Marke der `/health`-Antwort, gebildet über ihren **Inhalt** (Spec
+/// monitor-livestand-push, S1). Die Prozess-Kennung kommt hinzu, damit zwei
+/// Läufe mit zufällig gleichem Hash nicht verwechselt werden können.
+///
+/// Beide veränderlichen Teile der Antwort gehen ein: die Feld-Liste **und**
+/// der Aufruf-Timer aus der Konfiguration. Nur `serverNowMs` bleibt außen
+/// vor — es ändert sich bei jedem Abruf und würde jede Bestätigung
+/// verhindern.
+fn inhalts_marke(prozess: u64, courts_json: &str, call_timer_json: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    courts_json.hash(&mut hasher);
+    call_timer_json.hash(&mut hasher);
+    format!(
+        "\"ov-{}-{}-{:x}\"",
+        prozess,
+        courts_json.len(),
+        hasher.finish()
+    )
+}
+
+/// Marke eines Bildes: Länge plus ein Streuwert über den Inhalt. Muss nur
+/// innerhalb eines Programmlaufs stabil sein und sich bei anderem Inhalt
+/// ändern — beides leistet der Standard-Streuer. Gleiches Format wie im
+/// Relay (`bild_marke` dort), damit beide Betriebsarten gleich aussehen.
+fn bild_marke(bytes: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    format!("\"img-{}-{:x}\"", bytes.len(), hasher.finish())
+}
+
+/// Kennt der Abrufer die Marke bereits? Prüft `If-None-Match` so, wie es
+/// RFC 9110 vorsieht: eine **Liste** von Marken, `*` als Joker, und der
+/// Vergleich ist der schwache (das `W/`-Präfix zählt nicht mit).
+///
+/// Der naive Gleichheitstest wäre nicht falsch, aber still wirkungslos:
+/// Ein Zwischenspeicher auf dem Weg (nginx vor dem Relay) darf eine Marke
+/// abschwächen, und dann käme dauerhaft der volle Inhalt zurück statt der
+/// Bestätigung (Review-Fund 18.08.2026).
+fn marke_bekannt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
+    let Some(feld) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    let schwach = |m: &str| m.trim().trim_start_matches("W/").to_string();
+    let gesucht = schwach(etag);
+    feld.split(',')
+        .any(|m| m.trim() == "*" || schwach(m) == gesucht)
 }
 
 // ─────────────────────────────── Ergebnis → BTP ───────────────────────────
@@ -1065,7 +1965,7 @@ fn tl_device(ctx: &ServerCtx, headers: &axum::http::HeaderMap) -> Option<crate::
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
-    crate::tablet::tl::authorize(&ctx.app_config(), token)
+    crate::tablet::tl::authorize(&ctx.app_config_arc(), token)
 }
 
 /// Die Turnierleitungs-Oberfläche.
@@ -1080,33 +1980,78 @@ async fn tl_page() -> impl IntoResponse {
 }
 
 /// Der Anzeige-Zustand für die Turnierleitungs-Oberfläche.
+/// Antwort-Header mit dem Panel-Profil des aufrufenden Geräts (Spec
+/// tl-web-panelsystem, ADR 0025) — derselbe Name wie `X_TL_ACTIVE_PROFILE`
+/// im Relay (`relay/src/main.rs`), damit `tl.html` LAN und Cloud identisch
+/// lesen kann. Auf `/tl/api/state` gesetzt, auch bei 304 (Header werden
+/// unabhängig vom gecachten Body immer gesendet).
+const X_TL_ACTIVE_PROFILE: &str = "x-tl-active-profile";
+
 async fn tl_state(
     State(ctx): State<Arc<ServerCtx>>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    if tl_device(&ctx, &headers).is_none() {
+    let Some(device) = tl_device(&ctx, &headers) else {
         return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    };
+    // „Es sieht jemand zu" — hält den Erkennungstakt am Laufen, auch wenn
+    // gerade kein Push-Kanal offen ist (Seite im Poll-Fallback).
+    ctx.tablet.note_tl_request(now_ms());
+    // Antwort-Cache des Erkennungstakts (Spec tl-web-push): Der Takt baut
+    // den Zustand einmal zentral pro Sekunde — die Anfragen aller Geräte
+    // werden damit zu Cache-Reads statt je Anfrage Snapshot zu klonen und
+    // zweimal zu serialisieren. Nur FRISCHE Einträge zählen (3 s: Takt 1 s
+    // plus Luft) — ist der Cache kalt oder alt (Takt läuft nicht, z. B.
+    // Übertragung gerade gestartet), rechnet der Handler wie eh und je
+    // selbst. Der Cache ist Beschleuniger, nicht Wahrheit.
+    let (etag, json) = match ctx.tablet.tl_state_cache() {
+        Some(cache) if now_ms().saturating_sub(cache.gebaut_ms) <= 3_000 => {
+            (cache.etag, cache.json)
+        }
+        _ => {
+            // Dieselbe Revision wie im Cloud-Weg: Ein Gerät im Hallennetz
+            // und eines aus dem Internet müssen mit derselben Zahl
+            // denselben Stand meinen, sonst träfe die Altersprüfung am
+            // Turnier-PC zufällige Entscheidungen.
+            let state = crate::tablet::tl::build_state_with_rev(
+                &ctx.tablet,
+                &ctx.app_config_arc(),
+                now_ms(),
+            );
+            // Die Prozess-Kennung gehört in den ETag: Nach einem Neustart
+            // der App beginnt die Revision wieder bei 1, und ein Gerät mit
+            // gemerkter Fassung „1" bekäme sonst „unverändert" auf einen
+            // völlig anderen Turnierstand.
+            let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
+            (etag, serde_json::to_string(&state).unwrap_or_default())
+        }
+    };
+    // Die Seite schickt ihre letzte Fassung mit. Hat sich nichts geändert,
+    // spart „unverändert" den ganzen Stand — auf demselben Rechner, der
+    // nebenher BTP und die Tablets bedient.
+    let unveraendert = marke_bekannt(&headers, &etag);
+    let mut response = if unveraendert {
+        (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response()
+    } else {
+        (
+            StatusCode::OK,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CONTENT_TYPE, "application/json"),
+            ],
+            json,
+        )
+            .into_response()
+    };
+    // Frisch bei JEDER Antwort, auch bei 304 — konsistent mit dem
+    // Cloud-Pfad (`relay::tl_state_route`). Leer (kein Profil gewählt) ist
+    // ein gültiger, erlaubter Wert (Standardprofil); nur ein ungültiger
+    // Header-Wert (sollte am gepflegten `profile_id` nie vorkommen) bleibt
+    // ohne Header statt die Antwort scheitern zu lassen.
+    if let Ok(value) = axum::http::HeaderValue::from_str(&device.profile_id) {
+        response.headers_mut().insert(X_TL_ACTIVE_PROFILE, value);
     }
-    // Dieselbe Revision wie im Cloud-Weg: Ein Gerät im Hallennetz und eines
-    // aus dem Internet müssen mit derselben Zahl denselben Stand meinen,
-    // sonst träfe die Altersprüfung am Turnier-PC zufällige Entscheidungen.
-    let state = crate::tablet::tl::build_state_with_rev(&ctx.tablet, &ctx.app_config(), now_ms());
-    // Die Seite fragt alle zwei Sekunden und schickt ihre letzte Fassung mit.
-    // Hat sich nichts geändert, spart „unverändert" den ganzen Stand — auf
-    // demselben Rechner, der nebenher BTP und die Tablets bedient.
-    //
-    // Die Prozess-Kennung gehört mit hinein: Nach einem Neustart der App
-    // beginnt die Revision wieder bei 1, und ein Gerät mit gemerkter Fassung
-    // „1" bekäme sonst „unverändert" auf einen völlig anderen Turnierstand.
-    let etag = format!("\"{}-{}\"", ctx.tablet.process_tag(), state.rev);
-    let unveraendert = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == etag);
-    if unveraendert {
-        return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag.as_str())]).into_response();
-    }
-    (StatusCode::OK, [(header::ETAG, etag.as_str())], Json(state)).into_response()
+    response
 }
 
 /// Punktverlauf eines Matches für die TL-Oberfläche (AK-5) — on-demand,
@@ -1133,6 +2078,27 @@ async fn tl_timeline(
         )
             .into_response(),
     }
+}
+
+/// Sperrlisten und Einsätze **eines** Schiedsrichters (Spec
+/// schiedsrichter-management) — bewusst on-demand und nie Teil des
+/// Zustands-Pushes: Sperrlisten kodieren persönliche Beziehungen und
+/// gehören nicht in den Stand, den jedes gekoppelte Gerät bekommt.
+/// Gleicher Zugang wie `tl_state` (Geräte-Token).
+async fn tl_official_detail(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(official_id): axum::extract::Path<i64>,
+) -> impl IntoResponse {
+    if tl_device(&ctx, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    }
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        crate::tablet::tl::official_detail_json(&ctx.tablet, official_id),
+    )
+        .into_response()
 }
 
 /// Rumpf eines Kommandos: die Aktion plus die Vorgangskennung, mit der eine
@@ -1315,8 +2281,9 @@ pub(crate) fn build_manual_result_update(
     sets: Vec<(i64, i64)>,
     on_court_since: Option<u64>,
     now: u64,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
-    build_manual_result_update_opt(m, sets, on_court_since, now, false)
+    build_manual_result_update_opt(m, sets, on_court_since, now, false, officials)
 }
 
 /// Wie [`build_manual_result_update`], aber mit ausdrücklicher
@@ -1332,6 +2299,7 @@ pub(crate) fn build_manual_result_update_opt(
     on_court_since: Option<u64>,
     now: u64,
     overwrite: bool,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
     if m.winner.is_some() && !overwrite {
         return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
@@ -1354,6 +2322,7 @@ pub(crate) fn build_manual_result_update_opt(
         free_court_id,
         player_ids,
         end_ts_ms,
+        officials,
     })
 }
 
@@ -1367,6 +2336,14 @@ fn manual_finish_fields(
     on_court_since: Option<u64>,
     now: u64,
 ) -> (Option<i64>, Vec<i64>, i64, Option<u64>) {
+    // Die Dauer hängt NICHT am Feld (Review 2026-08-16): auch ein bereits
+    // freigegebenes Spiel trägt seine gemessene Bruttozeit (der Aufrufer
+    // reicht sie aus dem Zeiten-Store herein). Nur Feldfreigabe,
+    // Auschecken und Endzeit je Spieler brauchen ein Feld. Unplausible
+    // Dauern (über Nacht geparkt) gelten als unbekannt.
+    let dur = on_court_since
+        .and_then(|since| crate::tablet::match_times::plausible_duration_mins(since, now))
+        .unwrap_or(0);
     match m.court_id {
         Some(cid) => {
             let ids: Vec<i64> = m
@@ -1376,12 +2353,9 @@ fn manual_finish_fields(
                 .map(|p| p.id)
                 .filter(|&id| id != 0)
                 .collect();
-            let dur = on_court_since
-                .map(|since| (now.saturating_sub(since) / 60_000) as i64)
-                .unwrap_or(0);
             (Some(cid), ids, dur, Some(now))
         }
-        None => (None, Vec::new(), 0, None),
+        None => (None, Vec::new(), dur, None),
     }
 }
 
@@ -1403,6 +2377,7 @@ pub(crate) fn build_manual_dq_update(
     sets: Vec<(i64, i64)>,
     on_court_since: Option<u64>,
     now: u64,
+    officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
     if m.winner.is_some() {
         return Err("Dieses Spiel ist in BTP bereits gewertet.".to_string());
@@ -1429,6 +2404,7 @@ pub(crate) fn build_manual_dq_update(
         free_court_id,
         player_ids,
         end_ts_ms,
+        officials,
     })
 }
 
@@ -1530,16 +2506,42 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             return ResultResponse::err(e);
         }
     }
-    // Spieldauer aus dem Aufruf-Zeitstempel (seit wann steht das Match auf
-    // dem Feld) — leichte Überschätzung (inkl. Einspielen), wie beim
-    // Original-BTS in ganzen Minuten. 0, wenn kein Stempel vorliegt
-    // (z. B. App-Neustart mitten im Spiel).
-    let end_ms = now_ms();
-    let duration_mins = ctx
+    // Spieldauer = Bruttozeit (Spec `spielzeiten-prognose`, E1): erste
+    // Feldzuweisung → Ergebnis-Eingang, in ganzen Minuten wie beim
+    // Original-BTS. Quelle ist der persistierte Zeiten-Store (überlebt
+    // App-Neustart und Feldwechsel). Eine KORREKTUR rechnet mit dem
+    // ursprünglichen Ende (E3-Stempel) statt mit „jetzt" — sonst
+    // überschriebe sie eine korrekte Duration mit Stunden. Kampflos (E1)
+    // bleibt 0, und jenseits der Plausibilitätsgrenze (über Nacht
+    // geparktes Feld) gilt die Dauer als unbekannt.
+    // Korrektur-Anker nur bei REGULÄREM Erst-Stempel (Review 2026-08-16,
+    // Runde 3): Ein irrtümlicher Backend-/TL-Web-Stempel (regular=false)
+    // darf dem echten Tablet-Ergebnis nicht sein altes Ende unterschieben —
+    // sonst gingen Duration 0 und eine rückdatierte LastTimeOnCourt nach
+    // BTP. Eine Korrektur eines ECHTEN Tablet-Endes rechnet weiter mit dem
+    // Original (E3).
+    let end_ms = ctx
         .tablet
-        .on_court_since_ms(body.court_id, m.id)
-        .map(|since| (end_ms.saturating_sub(since) / 60_000) as i64)
-        .unwrap_or(0);
+        .match_times_store()
+        .entry(m.id)
+        .filter(|e| e.regular)
+        .and_then(|e| e.finished_ms)
+        .unwrap_or_else(now_ms);
+    let duration_mins = if score_status == 1 {
+        0
+    } else {
+        ctx.tablet
+            .brutto_start_ms(m.id, Some(body.court_id))
+            .and_then(|since| crate::tablet::match_times::plausible_duration_mins(since, end_ms))
+            .unwrap_or(0)
+    };
+    // Spielende stempeln (E3): genau einmal, beim ersten Host-Eingang —
+    // eine spätere Korrektur ändert weder Zeit noch Einstufung. Regulär
+    // (E11, Messwert für die Prognose) ist nur der ausgespielte Tablet-Weg
+    // (ScoreStatus 0, kein Walkover/keine Aufgabe).
+    ctx.tablet
+        .match_times_store()
+        .stamp_finished(m.id, score_status == 0, end_ms);
     // Spieler-BTP-IDs beider Teams — bekommen im selben Request das
     // Spielende (`LastTimeOnCourt` + `CheckedIn: false`).
     let player_ids: Vec<i64> = m
@@ -1564,6 +2566,7 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         free_court_id: Some(body.court_id),
         player_ids,
         end_ts_ms: Some(end_ms),
+        officials: ctx.tablet.officials_for_result(m.id),
     };
 
     // Log-Label: Das Tablet liefert sein courtLabel nicht auf jedem Pfad
@@ -1747,11 +2750,51 @@ pub(crate) async fn write_courts_to_btp(
         .map_err(|e| e.to_string())
 }
 
+/// Schreibt **nur** die Schiedsrichter-Besetzung nach BTP (ADR 0021),
+/// Muster [`write_courts_to_btp`]: eigene Sitzung, ein `SENDUPDATE`, Antwort
+/// geprüft. Der Aufrufer übernimmt den Stand erst bei `Ok` — ein Fehlschlag
+/// wird im nächsten Sync-Zyklus wiederholt.
+///
+/// Läuft über [`proto::court_assign_request`] mit leerem `courts`-Block —
+/// jeder Eintrag trägt seine aktuelle `CourtID` mit (siehe
+/// [`proto::MatchCourt::court_id`]), damit dieser eigenständige Write nie
+/// eine gerade erst angekommene Feldzuweisung überschreiben kann.
+pub(crate) async fn write_officials_to_btp(
+    config: &AppConfig,
+    entries: &[proto::MatchCourt],
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let host = &config.btp.host;
+    let port = config.btp.port;
+    let pw = config.btp.password.as_deref();
+
+    let login_raw = client::send_request(host, port, &proto::login_request(pw))
+        .await
+        .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    let session = proto::parse_login_response(
+        &proto::decode_response(&login_raw).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let upd_raw = client::send_request(
+        host,
+        port,
+        &proto::court_assign_request(&[], entries, &session, pw),
+    )
+    .await
+    .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
+    proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
 /// Schreibt `Match.Highlight`-Flags nach BTP (P1): macht „in Vorbereitung"-
-/// Aufrufe in BTP sichtbar. Eigener Login + `highlight_request` (Match-Knoten
-/// nur mit Identität + Highlight, kein `Status`/Ergebnis). Best-effort-Aufrufer
-/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand bleibt
-/// davon unberührt.
+/// Aufrufe im BTP-Planer sichtbar. Eigene Sitzung, ein `SENDUPDATE`
+/// (`proto::highlight_request`, Match-Knoten nur mit Identität +
+/// Highlight, kein `Status`/Ergebnis). Best-effort: Aufrufer
+/// (Aufruf/Rücknahme) fangen den Fehler ab — der interne Aufruf-Zustand
+/// bleibt davon unberührt.
 pub(crate) async fn write_highlight_to_btp(
     config: &AppConfig,
     entries: &[proto::HighlightEntry],
@@ -1799,6 +2842,7 @@ pub(crate) fn match_brief(
     scorekeeper_assigned: bool,
     display: &crate::config::DisplayConfig,
     finalized: bool,
+    officials: (Vec<String>, Vec<String>),
 ) -> MatchBrief {
     let team = |players: &[crate::btp::model::BtpPlayer], base: i64| {
         players
@@ -1831,6 +2875,8 @@ pub(crate) fn match_brief(
         show_club_names: display.show_club_names,
         show_club_logos: display.show_club_logos,
         finalized,
+        sr_names: officials.0,
+        ar_names: officials.1,
     }
 }
 
@@ -1862,10 +2908,13 @@ async fn monitor_ws_upgrade(
 /// Vollstand daraufhin über ihre bestehende Poll-Route. So bleibt der
 /// Poll-Endpunkt die **einzige** Datenquelle (ein Renderpfad, kein Flackern).
 ///
-/// TODO(A1): Match-Zuweisung wird noch nicht angestoßen — sie ist
-/// BTP-Snapshot-getrieben (Sync-Loop), nicht ein einzelner State-Aufruf wie
-/// Score/Alert/Räumung. Bis dahin deckt der ~250-ms-Poll-Fallback die
-/// Zuweisungs-Latenz ab (Score ist das Muss, Spec Paket A).
+/// Angestoßen wird alles, was eine Anzeige verändert: Satzstand, Meldungen,
+/// Räumung — **und seit v0.9.238 die Match-Zuweisung** (Spec
+/// monitor-livestand-push, S3). Letztere ist BTP-Snapshot-getrieben statt
+/// ein einzelner State-Aufruf; `set_snapshot` vergleicht dafür die Belegung
+/// je Feld mit der des Vorgänger-Stands und weckt nur die Abweichungen.
+/// Damit deckt der Poll-Fallback keine Latenz mehr ab, die der Nudge nicht
+/// schon einholt.
 async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Option<i64>) {
     // Kanal hier anlegen und das Sende-Ende dem State reichen (wie im Relay),
     // damit wir es am Verbindungsende per `unsubscribe_monitor` gezielt wieder
@@ -1878,10 +2927,17 @@ async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Optio
         let _ = socket.send(Message::Close(None)).await;
         return;
     }
-    // Herzschlag: hält die Leitung wach und erkennt tote Sockets (analog zum
-    // Tablet-WS-Ping). Fällt die Verbindung weg, endet die Schleife und wir
-    // tragen das Abo unten explizit wieder aus.
-    let mut ping = tokio::time::interval(Duration::from_secs(15));
+    // Herzschlag alle 10 s (Spec monitor-livestand-push, S6): ein WS-Ping
+    // hält die Leitung wach, ein **sichtbares** Text-Frame `{"hb":…}` sagt
+    // der Anzeige, dass ihr Kanal lebt.
+    //
+    // Beides zusammen, weil der Ping für JavaScript unsichtbar ist: Eine
+    // Anzeige konnte bisher „Kanal lebt" nicht von „es passiert gerade
+    // nichts" unterscheiden — in einer ruhigen Halle sah ein toter Socket
+    // genauso aus wie eine Pause zwischen zwei Ballwechseln. Solange der
+    // Fallback-Poll viermal je Sekunde lief, fiel das nicht auf; mit dem
+    // langsameren Takt aus dieser Etappe schon.
+    let mut ping = tokio::time::interval(Duration::from_millis(relay_proto::MONITOR_HEARTBEAT_MS));
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
@@ -1907,12 +2963,98 @@ async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Optio
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
                     break;
                 }
+                // Sichtbarer Herzschlag für die Anzeige (S6). Ohne
+                // `court`-Feld, damit eine Seite aus einem älteren Stand ihn
+                // folgenlos verwirft.
+                let hb = relay_proto::monitor_heartbeat_frame(monitor::now_ms());
+                if socket.send(Message::Text(Utf8Bytes::from(hb))).await.is_err() {
+                    break;
+                }
             }
         }
     }
     // Verbindungsende: Abo explizit austragen (nicht nur lazy beim nächsten
     // Nudge) — sonst hielte ein stiller Court tote Sender beliebig lange.
     ctx.tablet.unsubscribe_monitor(court, &tx);
+}
+
+/// TL-Push-Kanal (Spec tl-web-push): reine Anstöße `{"rev":n}` an die
+/// Turnierleitungs-Seite — die Daten holt sie über `/tl/api/state`
+/// (eine Wahrheit für Auth/ETag/Profile-Header, Muster ADR 0016).
+async fn tl_ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(ctx): State<Arc<ServerCtx>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| tl_ws_socket(socket, ctx))
+}
+
+/// Erste Nachricht des Clients auf `/tl-ws`: der Zugang.
+#[derive(serde::Deserialize)]
+struct TlWsAuth {
+    #[serde(default)]
+    token: String,
+}
+
+async fn tl_ws_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
+    // In-Band-Auth: Die erste Nachricht muss binnen 10 s `{"token":…}`
+    // sein. Vor erfolgreicher Prüfung sendet der Server NICHTS — auch
+    // keinen Ablehnungsgrund. Warum in-band: Browser-WebSockets können
+    // keine Header setzen, und der Zugang gehört nie in eine URL (Pfade
+    // landen in Zugriffsprotokollen — dieselbe Regel wie bei den
+    // HTTP-Routen, siehe `tl_device`).
+    let erste = tokio::time::timeout(Duration::from_secs(10), socket.recv()).await;
+    let token = match erste {
+        Ok(Some(Ok(Message::Text(text)))) => serde_json::from_str::<TlWsAuth>(&text)
+            .map(|a| a.token)
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
+    if token.is_empty() || crate::tablet::tl::authorize(&ctx.app_config_arc(), &token).is_none() {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    // Fan-out-Deckel wie beim Monitor-Nudge: Über der Grenze sauber
+    // schließen, die Seite bedient sich aus ihrem Poll-Fallback.
+    if !ctx.tablet.subscribe_tl(&tx) {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
+    // Den aktuellen Stand sofort melden: Eine Revision, die während des
+    // Verbindens durchrutschte, läge sonst bis zum 30-s-Fallback-Poll.
+    if let Some(cache) = ctx.tablet.tl_state_cache() {
+        let _ = tx.send(format!("{{\"rev\":{}}}", cache.rev));
+    }
+    let mut ping = tokio::time::interval(Duration::from_secs(15));
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            nudge = rx.recv() => {
+                match nudge {
+                    Some(json) => {
+                        if socket.send(Message::Text(Utf8Bytes::from(json))).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            incoming = socket.recv() => {
+                // Nach der Auth sendet die Seite nichts Fachliches; wir
+                // lesen nur, um Close/Fehler zu bemerken.
+                match incoming {
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    _ => {}
+                }
+            }
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    ctx.tablet.unsubscribe_tl(&tx);
 }
 
 /// Sendet eine `ServerMsg` über den Tablet-Socket.
@@ -1936,7 +3078,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     // Tablet sein altes (längst entferntes) Match, weil `None == None` (kein
     // Match) den Dedup auslöste. `finalized` im Schlüssel, weil der Übergang
     // OnCourt→Finished die matchId nicht ändert, das Tablet aber erreichen muss.
-    let mut last_match: Option<(i64, bool)> = Some((i64::MIN, false));
+    let mut last_match: Option<(i64, bool, String)> = Some((i64::MIN, false, String::new()));
     // Token der Court-Übernahme: `Some`, wenn dieses Tablet aktiv schiedst.
     let mut my_token: Option<u64> = None;
     let mut superseded = false;
@@ -2201,13 +3343,20 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     }
 }
 
+/// Fingerabdruck der Besetzung für den Push-Schlüssel: Ändert sich
+/// Schiedsrichter oder Aufschlagrichter, ändert sich der Schlüssel — nur so
+/// erreicht eine Zuweisung mitten im Spiel das Tablet.
+pub(crate) fn officials_key(officials: &(Vec<String>, Vec<String>)) -> String {
+    format!("{}|{}", officials.0.join("/"), officials.1.join("/"))
+}
+
 /// Sendet `match_assigned`/`match_cleared`, sobald sich das Match des
 /// Felds (per CourtID) gegenüber dem zuletzt gemeldeten Stand geändert hat.
 async fn push_match(
     court_id: i64,
     ctx: &ServerCtx,
     socket: &mut WebSocket,
-    last: &mut Option<(i64, bool)>,
+    last: &mut Option<(i64, bool, String)>,
 ) {
     // A2 / ADR 0017, Regel b: Ein gerade in BTP finalisiertes Match liefert
     // `match_for_court` nicht mehr (Status Finished ≠ OnCourt), das Tablet trägt
@@ -2226,9 +3375,18 @@ async fn push_match(
     };
     // `finalized` nur echt, wenn wir das Match auch nachreichen können.
     let finalized = finalized && effective.is_some();
-    // Zustands-Schlüssel inkl. `finalized`: der Übergang OnCourt→Finished
-    // ändert die matchId NICHT, muss das Tablet aber erreichen.
-    let key = effective.as_ref().map(|m| (m.id, finalized));
+    // Zustands-Schlüssel inkl. `finalized` UND Besetzung: Der Übergang
+    // OnCourt→Finished ändert die matchId nicht, muss das Tablet aber
+    // erreichen — und ebenso wenig ändert sie sich, wenn die Turnierleitung
+    // mitten im Spiel einen Schiedsrichter einteilt. Ohne die Besetzung im
+    // Schlüssel bliebe das Tablet beim Stand der Zuweisung stehen.
+    let key = effective.as_ref().map(|m| {
+        (
+            m.id,
+            finalized,
+            officials_key(&ctx.tablet.match_officials(m)),
+        )
+    });
     if key == *last {
         return;
     }
@@ -2242,7 +3400,14 @@ async fn push_match(
             ServerMsg::MatchAssigned {
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(m, sk, ska, &ctx.app_config().display, finalized)
+                    match_brief(
+                        m,
+                        sk,
+                        ska,
+                        &ctx.app_config_arc().display,
+                        finalized,
+                        ctx.tablet.match_officials(m),
+                    )
                 },
             }
         }
@@ -2330,20 +3495,30 @@ pub(crate) async fn handle_score(
         sets.push((score_a, score_b));
     }
     ctx.tablet.record_score(court_id, m.id, sets.clone());
+    // Nettostart (Spec `spielzeiten-prognose`, E2/ADR 0027): der erste beim
+    // Host eingehende Stand > 0 stempelt — host-seitig, eine Uhr für LAN,
+    // Cloud und Zähltafel. Steht hinter Finalisiert-Gate und Stale-Filter:
+    // ein verworfener Score stempelt nicht. Ein Undo zurück auf 0:0 löscht
+    // den Stempel bewusst nicht (der erste Punkt ist gefallen).
+    // `match_id != 0`: Legacy-Scores alter Tablet-Seiten passieren beide
+    // Gates ungeprüft — ein Nachzügler des Vorspiels dürfte sonst dem
+    // neuen Feld-Match den Nettostart stempeln (Review 2026-08-16, F2).
+    // Solche Seiten liefern dann eben keinen Netto-Messwert.
+    if match_id != 0 && sets.iter().any(|&(a, b)| a > 0 || b > 0) {
+        ctx.tablet
+            .match_times_store()
+            .stamp_first_point(m.id, now_ms());
+    }
 
     let mut live = m;
     live.sets = sets;
     let update = Update::Single(build_tupdate(&live, ctx.next_rid()));
-    if let Err(e) = push::push_update(
-        &ctx.http,
-        &ctx.config.badhub.url,
-        &ctx.config.badhub.password,
-        &update,
-    )
-    .await
-    {
-        tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
-    }
+    // Einstellen statt warten: Der Push läuft hinter der Verbindung, je
+    // Feld serialisiert und gebündelt (siehe `ScorePushQueue`). Vorher
+    // hing hier die Tablet-WebSocket bis zu 15 s an einem lahmen badhub —
+    // und wurde dabei vom eigenen Server als tot geschlossen, samt
+    // Freigabe des Felds.
+    ctx.queue_score_push(court_id, live.id, update);
 }
 
 #[cfg(test)]
@@ -2469,7 +3644,7 @@ mod tests {
             show_club_names: true,
             show_club_logos: true,
         };
-        let brief = match_brief(&m, Vec::new(), false, &on, false);
+        let brief = match_brief(&m, Vec::new(), false, &on, false, (Vec::new(), Vec::new()));
         assert!(brief.show_club_names);
         assert!(brief.show_club_logos);
         assert!(!brief.finalized);
@@ -2482,6 +3657,7 @@ mod tests {
             false,
             &crate::config::DisplayConfig::default(),
             false,
+            (Vec::new(), Vec::new()),
         );
         assert!(!brief_off.show_club_names);
         assert!(!brief_off.show_club_logos);
@@ -2521,9 +3697,17 @@ mod tests {
                 port,
                 password: None,
             },
+            // Toter Port statt echtem badhub: Tests, die bis zum
+            // Liveticker-Push laufen (handle_score), bleiben hermetisch.
+            badhub: crate::config::BadhubConfig {
+                url: "http://127.0.0.1:1/".into(),
+                password: String::new(),
+                live_url: String::new(),
+            },
             ..Default::default()
         };
         let tmp = std::env::temp_dir();
+        let shared_config = Arc::new(std::sync::Mutex::new(config.clone()));
         ServerCtx::new(
             tablet,
             config,
@@ -2532,7 +3716,47 @@ mod tests {
             tmp.join("bts_test_config.json"),
             tmp.join("bts_test_assign.json"),
             tmp,
+            shared_config,
         )
+    }
+
+    #[test]
+    fn monitor_state_for_multi_hall_court_carries_its_hall_color() {
+        // Spec hallen-farben: Der LAN-Monitor bekommt die Farbe seines
+        // Felds über die kanonische Hallenliste — alphabetisch bekommt
+        // „Halle A" Ton 0, „Halle B" (mit Feld 101) Ton 1.
+        let ctx = make_ctx(1);
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: Vec::new(),
+            courts: vec!["1".into()],
+            locations: vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".into(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".into(),
+                },
+            ],
+            court_infos: vec![crate::btp::model::BtpCourt {
+                id: 101,
+                name: "1".into(),
+                location_id: Some(2),
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let cfg = ctx.app_config();
+        assert_eq!(
+            hall_color_for(&ctx, &cfg, 101).as_deref(),
+            Some(crate::hall_colors::HALL_PALETTE[1])
+        );
+        assert_eq!(hall_color_for(&ctx, &cfg, 999), None, "unbekanntes Feld");
     }
 
     /// Standard-Ergebnis-Body (Match 42 / Court 101) mit gegebenen Sätzen.
@@ -2657,12 +3881,30 @@ mod tests {
     // ─────────────── Turnierleitungs-Ergebnis (build_manual_result_update) ───────────────
 
     #[test]
+    fn manual_result_reasserts_the_given_officials() {
+        // Live-Befund 14.08.2026: Ohne dieses Feld verlor BTP die
+        // Schiedsrichter-Besetzung eines Matches, sobald das Ergebnis
+        // eintraf. `build_manual_result_update` muss den übergebenen Wert
+        // unverändert in den `MatchUpdate` durchreichen.
+        let m = match_on_court();
+        let u = build_manual_result_update(
+            &m,
+            vec![(21, 10), (21, 15)],
+            Some(1_000),
+            61_000,
+            Some((4, 0)),
+        )
+        .unwrap();
+        assert_eq!(u.officials, Some((4, 0)));
+    }
+
+    #[test]
     fn manual_result_on_court_frees_field_and_checks_out() {
         // Match 42 auf Feld 101, 2:0 → Feld wird freigegeben, Spieler
         // ausgecheckt (Endzeit gesetzt), Dauer aus dem Aufruf-Stempel.
         let m = match_on_court(); // court_id 101, scoring default (21/30)
-        let u =
-            build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000).unwrap();
+        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000, None)
+            .unwrap();
         assert_eq!(u.btp_match_id, 42);
         assert!(u.team1_won);
         assert_eq!(u.score_status, 0);
@@ -2679,7 +3921,8 @@ mod tests {
         let mut m = match_on_court();
         m.court_id = None;
         m.status = MatchStatus::Scheduled;
-        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000).unwrap();
+        let u =
+            build_manual_result_update(&m, vec![(21, 10), (21, 15)], None, 61_000, None).unwrap();
         assert_eq!(u.free_court_id, None);
         assert!(u.player_ids.is_empty());
         assert_eq!(u.end_ts_ms, None);
@@ -2691,16 +3934,21 @@ mod tests {
         // Bereits gewertet → nie überschreiben.
         let mut done = match_on_court();
         done.winner = Some(1);
-        assert!(build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0).is_err());
+        assert!(
+            build_manual_result_update(&done, vec![(21, 10), (21, 15)], None, 0, None).is_err()
+        );
         // Laufender Satz (5:3) → abgelehnt (nicht regulär zu Ende).
         let m = match_on_court();
-        let err = build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0).unwrap_err();
+        let err =
+            build_manual_result_update(&m, vec![(21, 10), (5, 3)], Some(0), 0, None).unwrap_err();
         assert!(
             err.contains("5:3"),
             "Fehler nennt den unfertigen Satz: {err}"
         );
         // Unentschiedener Satzstand (1:1) → kein Sieger.
-        assert!(build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0).is_err());
+        assert!(
+            build_manual_result_update(&m, vec![(21, 10), (15, 21)], Some(0), 0, None).is_err()
+        );
     }
 
     #[test]
@@ -2709,7 +3957,8 @@ mod tests {
         // ScoreStatus 3, ein LAUFENDER Satz (5:3) bleibt erhalten (anders als
         // beim regulären Eintrag, der ihn ablehnt), Feld wird freigegeben.
         let m = match_on_court(); // court_id 101
-        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000).unwrap();
+        let u = build_manual_dq_update(&m, 1, vec![(21, 10), (5, 3)], Some(1_000), 61_000, None)
+            .unwrap();
         assert_eq!(u.score_status, 3);
         assert!(!u.team1_won, "disqualifiziertes Team 1 verliert");
         assert_eq!(u.sets, vec![(21, 10), (5, 3)], "Teil-Satz bleibt");
@@ -2722,11 +3971,11 @@ mod tests {
     fn manual_dq_rejects_invalid_team_and_already_decided() {
         let m = match_on_court();
         // Ungültiges Team (nur 1/2 erlaubt).
-        assert!(build_manual_dq_update(&m, 3, vec![], None, 0).is_err());
+        assert!(build_manual_dq_update(&m, 3, vec![], None, 0, None).is_err());
         // Bereits gewertet → nie überschreiben.
         let mut done = match_on_court();
         done.winner = Some(2);
-        assert!(build_manual_dq_update(&done, 1, vec![], None, 0).is_err());
+        assert!(build_manual_dq_update(&done, 1, vec![], None, 0, None).is_err());
     }
 
     #[test]
@@ -2736,7 +3985,7 @@ mod tests {
         let mut m = match_on_court();
         m.court_id = None;
         m.status = MatchStatus::Scheduled;
-        let u = build_manual_dq_update(&m, 2, vec![], None, 61_000).unwrap();
+        let u = build_manual_dq_update(&m, 2, vec![], None, 61_000, None).unwrap();
         assert_eq!(u.score_status, 3);
         assert!(u.team1_won, "Team 2 disqualifiziert → Team 1 gewinnt");
         assert_eq!(u.free_court_id, None);
@@ -2753,6 +4002,44 @@ mod tests {
         assert!(!match_decided(3, &[(21, 7), (15, 21)])); // 1:1 – Entscheidungssatz
         assert!(match_decided(3, &[(21, 7), (21, 15)])); // 2:0 – entschieden
         assert!(match_decided(3, &[(21, 7), (15, 21), (21, 18)])); // 2:1 – entschieden
+    }
+
+    #[test]
+    fn score_push_queue_serialises_per_court_and_keeps_only_the_newest() {
+        // Der Kern der Warteschlange (Spec-frei, reine Zustandslogik):
+        // je Feld genau EIN Arbeiter, und während er läuft, überlebt nur
+        // der neueste Stand — ein Punkteregen wird gebündelt statt in
+        // eine Anfragen-Lawine übersetzt.
+        let q = ScorePushQueue::default();
+        let update = |n: i64| {
+            crate::badhub::diff::Update::Single(build_tupdate(&match_on_court(), n as u64))
+        };
+
+        assert!(
+            q.einstellen(1, 42, update(1)),
+            "erster startet den Arbeiter"
+        );
+        assert!(
+            !q.einstellen(1, 42, update(2)),
+            "zweiter reiht sich beim laufenden Arbeiter ein"
+        );
+        assert!(
+            !q.einstellen(1, 42, update(3)),
+            "dritter ebenso — er ersetzt nur den wartenden Stand"
+        );
+        // Ein anderes Feld ist davon unberührt: eigener Arbeiter.
+        assert!(q.einstellen(2, 7, update(9)), "Feld 2 hat seinen eigenen");
+
+        // Der Arbeiter bekommt genau EINEN Stand — den zuletzt
+        // eingestellten (die dazwischen sind überholt).
+        let (match_id, _) = q.naechster(1).expect("ein Stand wartet");
+        assert_eq!(match_id, 42);
+        assert!(
+            q.naechster(1).is_none(),
+            "danach ist nichts mehr da — der Arbeiter meldet sich ab"
+        );
+        // Abgemeldet heißt: Der nächste Aufrufer startet wieder einen.
+        assert!(q.einstellen(1, 42, update(4)), "neuer Arbeiter nötig");
     }
 
     #[test]
@@ -2780,6 +4067,251 @@ mod tests {
             vec![(10, 8)],
             "Stand des aktuellen Matches bleibt unangetastet"
         );
+    }
+
+    /// Spec `spielzeiten-prognose` (E2): Der Host stempelt den Nettostart
+    /// beim ERSTEN eingehenden Punktestand > 0 — genau einmal; 0:0 und
+    /// Folgestände ändern nichts.
+    #[tokio::test]
+    async fn handle_score_stempelt_den_ersten_punkt_genau_einmal() {
+        let ctx = make_ctx(1); // tote Ports — kein BTP, kein badhub
+        handle_score(101, 0, 0, &[], 42, &ctx).await; // 0:0 stempelt nicht
+        assert!(ctx
+            .tablet
+            .match_times_store()
+            .entry(42)
+            .is_none_or(|e| e.first_point_ms.is_none()));
+
+        handle_score(101, 1, 0, &[], 42, &ctx).await; // erster Punkt
+        let first = ctx
+            .tablet
+            .match_times_store()
+            .entry(42)
+            .and_then(|e| e.first_point_ms);
+        assert!(first.is_some(), "erster Stand > 0 stempelt");
+
+        handle_score(101, 5, 3, &[], 42, &ctx).await; // Folgestand
+        assert_eq!(
+            ctx.tablet
+                .match_times_store()
+                .entry(42)
+                .and_then(|e| e.first_point_ms),
+            first,
+            "Folgestände ändern den Stempel nicht"
+        );
+    }
+
+    /// Spec `spielzeiten-prognose` (E2): Verworfene Scores (Stale-Filter,
+    /// Finalisiert-Gate) stempeln keinen ersten Punkt.
+    #[tokio::test]
+    async fn ein_verworfener_score_stempelt_keinen_ersten_punkt() {
+        let ctx = make_ctx(1);
+        // Stale: Tablet zählt Match 7, Feld hat Match 42.
+        handle_score(101, 5, 3, &[], 7, &ctx).await;
+        assert!(ctx.tablet.match_times_store().entry(42).is_none());
+        assert!(ctx.tablet.match_times_store().entry(7).is_none());
+
+        // Finalisiert-Gate: Match 42 ist in BTP fertig eingegeben.
+        ctx.tablet.mark_finalized(101, 42);
+        handle_score(101, 5, 3, &[], 42, &ctx).await;
+        assert!(ctx.tablet.match_times_store().entry(42).is_none());
+    }
+
+    /// Review 2026-08-16 (F2): Eine alte Tablet-Seite sendet matchId 0 und
+    /// passiert Finalisiert-Gate und Stale-Filter ungeprüft — so ein
+    /// Nachzügler-Score des Vorspiels darf dem NEUEN Feld-Match keinen
+    /// Nettostart stempeln (er wäre nie korrigierbar und verfälschte den
+    /// Klassen-Median massiv).
+    #[tokio::test]
+    async fn ein_legacy_score_ohne_match_id_stempelt_keinen_ersten_punkt() {
+        let ctx = make_ctx(1);
+        handle_score(101, 15, 12, &[], 0, &ctx).await;
+        assert!(
+            ctx.tablet.match_times_store().entry(42).is_none(),
+            "matchId 0 ist nicht zuordenbar — kein Stempel"
+        );
+    }
+
+    /// Spec `spielzeiten-prognose` (E1): Nach einem App-Neustart mitten im
+    /// Spiel liefert der persistierte Erst-Stempel die BTP-`Duration` —
+    /// wo bisher 0 stand (`on_court_since` lebt nur im RAM).
+    #[tokio::test]
+    async fn process_result_nimmt_die_dauer_aus_dem_zeiten_store() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // Neustart-Lage: kein on_court_since, aber der Store kennt die
+        // erste Feldzuweisung von vor 10 Minuten.
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE", "")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(600_000),
+        );
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        let fields = match_fields(&reqs[0]);
+        assert_eq!(int(&fields, "Duration"), Some(10));
+    }
+
+    /// Spec `spielzeiten-prognose` (E3/E11): Der Tablet-Pfad stempelt das
+    /// Spielende beim Host-Eingang — regulär nur bei ScoreStatus 0.
+    #[tokio::test]
+    async fn process_result_stempelt_das_ende_als_regulaer() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert!(e.finished_ms.is_some());
+        assert!(e.regular, "regulär ausgespielt → Messwert");
+    }
+
+    /// Spec `spielzeiten-prognose` (E3): Eine Ergebniskorrektur überschreibt
+    /// den Ende-Stempel nicht; E11: eine Aufgabe zählt nicht als regulär.
+    #[tokio::test]
+    async fn process_result_ueberschreibt_den_ende_stempel_nicht() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        // Das Ende steht schon (z. B. frühere Wertung) …
+        ctx.tablet
+            .match_times_store()
+            .stamp_finished(42, false, 123);
+        // … eine Korrektur mit anderem Ergebnis ändert daran nichts.
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 17)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert_eq!(e.finished_ms, Some(123));
+        assert!(!e.regular, "die Erst-Einstufung bleibt");
+    }
+
+    /// Spec `spielzeiten-prognose` (E11): Aufgabe (retired) stempelt das
+    /// Ende, zählt aber nicht als regulärer Messwert.
+    #[tokio::test]
+    async fn process_result_aufgabe_ist_kein_regulaerer_messwert() {
+        let (port, _recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let mut body = body_with(&[(21, 10), (5, 2)]);
+        body.retired = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let e = ctx.tablet.match_times_store().entry(42).unwrap();
+        assert!(e.finished_ms.is_some());
+        assert!(!e.regular, "Aufgabe → kein Messwert für die Statistik");
+    }
+
+    /// Review-Befund 2026-08-16: Ein manuelles Ergebnis für ein Spiel, das
+    /// nicht (mehr) auf einem Feld steht, muss die Dauer trotzdem tragen —
+    /// nur Feldfreigabe, Auschecken und Endzeit hängen am Feld.
+    #[test]
+    fn ein_manuelles_ergebnis_ohne_feld_traegt_trotzdem_die_dauer() {
+        let mut m = match_on_court();
+        m.court_id = None;
+        m.court = None;
+        let u = build_manual_result_update(
+            &m,
+            vec![(21, 10), (21, 15)],
+            Some(1_000),
+            1_000 + 40 * 60_000,
+            None,
+        )
+        .unwrap();
+        assert_eq!(u.duration_mins, 40);
+        assert_eq!(u.free_court_id, None, "kein Feld freizugeben");
+        assert_eq!(u.end_ts_ms, None, "kein Spielende je Spieler ohne Feld");
+        assert!(u.player_ids.is_empty());
+    }
+
+    /// Spec `spielzeiten-prognose` (E1): Auch ein über das TABLET gemeldeter
+    /// Walkover sendet `Duration: 0` — kampflos wurde nicht gespielt.
+    #[tokio::test]
+    async fn process_result_walkover_sendet_dauer_null() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE", "")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(2_400_000),
+        );
+        let mut body = body_with(&[]);
+        body.walkover = true;
+        body.winner = Some(1);
+        let resp = process_result(&ctx, &body).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(0));
+    }
+
+    /// Review-Befund 2026-08-16: Eine Korrektur rechnet mit dem
+    /// URSPRÜNGLICHEN Ende (E3-Stempel), nicht mit „jetzt" — sonst
+    /// überschriebe sie eine korrekte BTP-Duration mit Stunden.
+    #[tokio::test]
+    async fn eine_korrektur_rechnet_mit_dem_urspruenglichen_ende() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let start = now_ms().saturating_sub(7_200_000); // vor 2 h zugewiesen
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE", "")],
+            &std::collections::HashSet::new(),
+            start,
+        );
+        // Ursprüngliches Ende nach 40 Minuten.
+        ctx.tablet
+            .match_times_store()
+            .stamp_finished(42, true, start + 40 * 60_000);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 17)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(40));
+    }
+
+    /// Review-Befund 2026-08-16 (bestätigt, Runde 3): Eine irrtümliche
+    /// NICHT-reguläre Wertung (Backend/TL-Web, z. B. fürs falsche Spiel
+    /// während einer Störung) darf dem später eintreffenden ECHTEN
+    /// Tablet-Ergebnis nicht ihr altes Ende unterschieben — sonst gingen
+    /// `Duration: 0` und eine rückdatierte `LastTimeOnCourt` nach BTP
+    /// (Phantom-Mindestpause). Der Tablet-Pfad vertraut deshalb nur einem
+    /// REGULÄREN Erst-Stempel als Korrektur-Anker.
+    #[tokio::test]
+    async fn eine_fremde_backend_wertung_datiert_das_tablet_ende_nicht_zurueck() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let start = now_ms().saturating_sub(40 * 60_000);
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE", "")],
+            &std::collections::HashSet::new(),
+            start,
+        );
+        // Irrtümlicher manueller Stempel, eine Stunde VOR dem Bruttostart.
+        ctx.tablet
+            .match_times_store()
+            .stamp_finished(42, false, start.saturating_sub(3_600_000));
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(
+            int(&match_fields(&reqs[0]), "Duration"),
+            Some(40),
+            "Ende = jetzt — der fremde Stempel zählt nicht"
+        );
+    }
+
+    /// Review-Befund 2026-08-16: Ein über Nacht auf dem Feld „geparktes"
+    /// Spiel (Mehrtages-Turnier) darf keine absurde Duration nach BTP
+    /// melden — jenseits der Plausibilitätsgrenze gilt „unbekannt" (0).
+    #[tokio::test]
+    async fn eine_unplausible_dauer_geht_als_unbekannt_nach_btp() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        ctx.tablet.match_times_store().reconcile(
+            &[(42, "A", "HE", "")],
+            &std::collections::HashSet::new(),
+            now_ms().saturating_sub(16 * 3_600_000), // gestern Abend
+        );
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        let reqs = recorded.lock().unwrap();
+        assert_eq!(int(&match_fields(&reqs[0]), "Duration"), Some(0));
     }
 
     /// A2 / ADR 0017: `ownership_active` spiegelt exakt den Legacy-Schalter.
@@ -3115,6 +4647,7 @@ mod tests {
             free_court_id: Some(101),
             player_ids: vec![],
             end_ts_ms: None,
+            officials: None,
         }
     }
 
@@ -3306,5 +4839,1123 @@ mod tests {
         let mut b = body_with(&[(21, 10), (21, 12)]);
         b.court_id = 999; // kein Match auf diesem Feld
         assert!(!rejected(b).await.ok);
+    }
+
+    // ───────────── Panel-Profile (Spec tl-web-panelsystem, ADR 0025) ────────
+
+    /// `ServerCtx` mit einer `config.json` in einem eigenen Temp-Verzeichnis
+    /// (nicht der geteilte `bts_test_config.json`-Pfad von [`make_ctx`], der
+    /// bei parallel laufenden Tests kollidieren könnte) und den gegebenen
+    /// Turnierleitungs-Geräten. Gibt das `TempDir` mit zurück, damit es nicht
+    /// vor Testende gelöscht wird — sowie den geteilten `Arc<Mutex<AppConfig>>`,
+    /// denselben, den `ServerCtx::mutate_app_config` benutzt (Lost-Update-
+    /// Regressionstest unten braucht Zugriff darauf, um den zweiten,
+    /// unabhängigen Schreibpfad — `commands::mutate_config_at` — auf
+    /// demselben Schloss nachzustellen).
+    fn make_tl_ctx(
+        devices: Vec<crate::config::TlDevice>,
+    ) -> (
+        ServerCtx,
+        Arc<std::sync::Mutex<AppConfig>>,
+        tempfile::TempDir,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut config = AppConfig::default();
+        config.tl_web.enabled = true;
+        config.tl_web.devices = devices;
+        config.save_to(&config_path).unwrap();
+
+        let tablet = Arc::new(TabletState::default());
+        let tmp = std::env::temp_dir();
+        let shared_config = Arc::new(std::sync::Mutex::new(config.clone()));
+        let ctx = ServerCtx::new(
+            tablet,
+            config,
+            reqwest::Client::new(),
+            tmp.clone(),
+            config_path,
+            dir.path().join("bts_test_assign_tl.json"),
+            tmp,
+            shared_config.clone(),
+        );
+        (ctx, shared_config, dir)
+    }
+
+    fn bearer_headers(token: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn tl_state_lan_sets_active_profile_header_matching_device() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: "profil-wand".into(),
+        }]);
+        let response = tl_state(State(Arc::new(ctx)), bearer_headers("tok-a"))
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(X_TL_ACTIVE_PROFILE).unwrap(),
+            "profil-wand"
+        );
+    }
+
+    #[tokio::test]
+    async fn tl_state_lan_no_header_leak_across_devices() {
+        // Zwei Geräte mit unterschiedlichem Zugang UND unterschiedlichem
+        // Profil, in derselben Testreihe abgefragt — jedes bekommt exakt
+        // sein eigenes Profil im Header, nie das des anderen.
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![
+            crate::config::TlDevice {
+                id: "dev-a".into(),
+                token: "tok-a".into(),
+                label: "Tablet A".into(),
+                created_at_ms: 1,
+                hall: String::new(),
+                profile_id: "profil-a".into(),
+            },
+            crate::config::TlDevice {
+                id: "dev-b".into(),
+                token: "tok-b".into(),
+                label: "Tablet B".into(),
+                created_at_ms: 1,
+                hall: String::new(),
+                profile_id: "profil-b".into(),
+            },
+        ]);
+        let ctx = Arc::new(ctx);
+
+        let response_a = tl_state(State(ctx.clone()), bearer_headers("tok-a"))
+            .await
+            .into_response();
+        assert_eq!(
+            response_a.headers().get(X_TL_ACTIVE_PROFILE).unwrap(),
+            "profil-a"
+        );
+
+        let response_b = tl_state(State(ctx.clone()), bearer_headers("tok-b"))
+            .await
+            .into_response();
+        assert_eq!(
+            response_b.headers().get(X_TL_ACTIVE_PROFILE).unwrap(),
+            "profil-b",
+            "Gerät B darf niemals das Profil von Gerät A bekommen"
+        );
+    }
+
+    /// Regressionstest für den kritischen Review-Fund am
+    /// `AppState.config`/`ServerCtx.shared_config`-Umbau: **echtes**
+    /// Temp-Verzeichnis, **echtes** Schreiben auf beiden Wegen — kein reiner
+    /// Unit-Test einer isolierten Funktion (das täuschte beim vorherigen
+    /// `commands::tests::keep_host_managed_fields_preserves_the_given_current_profiles`
+    /// -Test (damals noch `save_config_keeps_live_edited_profiles`) Sicherheit
+    /// vor, ohne die reale In-Memory/Platte-Divergenz abzubilden).
+    ///
+    /// Szenario: (a) ein TL speichert ein Panel-Profil über den Profil-Pfad
+    /// (`tl::execute` → `execute_profile_action` → `ServerCtx
+    /// ::mutate_app_config`) — genau der Weg, den `tl.html` beim Speichern
+    /// eines Profils nimmt. (b) Direkt danach ändert der **bestehende**
+    /// Tauri-Command-Schreibpfad (`commands::mutate_config_at`, die reale
+    /// Kernlogik hinter `save_config`/`tl_device_add`/…) irgendeine andere
+    /// Einstellung — auf demselben geteilten `Arc<Mutex<AppConfig>>`, wie
+    /// es beide Wege in der echten App auch tun (`AppState.config` ==
+    /// `ServerCtx.shared_config`). (c) Das Profil aus (a) muss danach
+    /// sowohl auf der Platte als auch im geteilten In-Memory-Stand noch da
+    /// sein — vorher (getrennte Schreibpfade: `mutate_app_config` direkt
+    /// auf der Platte, `mutate_config` nur im veralteten In-Memory-Stand)
+    /// hätte (b) das Profil aus (a) kommentarlos wieder gelöscht.
+    #[tokio::test]
+    async fn profile_save_survives_a_later_settings_save_lost_update_regression() {
+        let (ctx, shared, dir) = make_tl_ctx(vec![]);
+        let config_path = dir.path().join("config.json");
+        let ctx = Arc::new(ctx);
+        let device = crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        };
+
+        // (a) Profil-Pfad: TL legt in tl.html ein Profil an.
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &device,
+            "op-profile-save",
+            1,
+            0,
+            relay_proto::TlAction::ProfileSave {
+                profile: relay_proto::TlPanelProfileWire {
+                    id: String::new(),
+                    name: "Wandmonitor Halle 2".into(),
+                    panels: vec![],
+                    display: relay_proto::TlDisplaySettingsWire::default(),
+                    updated_at_ms: 0, // wird vom Host gestempelt, s. profile_save
+                    ..Default::default()
+                },
+            },
+        )
+        .await;
+        assert!(response.ok, "Profil-Speichern soll gelingen: {response:?}");
+
+        // (b) Bestehender Tauri-Command-Pfad: irgendeine andere Einstellung
+        // wird gespeichert — über dieselbe Kernlogik wie `save_config`, auf
+        // demselben geteilten Arc<Mutex<AppConfig>>.
+        crate::commands::mutate_config_at(&config_path, &shared, |cfg| {
+            cfg.badhub.url = "https://geaendert.example".to_string();
+            Ok(())
+        })
+        .expect("Einstellungsänderung soll sich speichern lassen");
+
+        // (c) Das Profil aus (a) ist NICHT verschwunden — weder auf der
+        // Platte noch im geteilten In-Memory-Stand.
+        let on_disk = AppConfig::load_from(&config_path).expect("config.json lesbar");
+        assert_eq!(
+            on_disk.tl_web.profiles.len(),
+            1,
+            "Profil darf durch die spätere Einstellungsänderung nicht verloren gehen"
+        );
+        assert_eq!(on_disk.tl_web.profiles[0].name, "Wandmonitor Halle 2");
+        assert_eq!(
+            on_disk.badhub.url, "https://geaendert.example",
+            "die spätere Einstellungsänderung selbst muss ebenfalls ankommen"
+        );
+
+        let in_memory = shared.lock().expect("Config-Mutex nicht vergiftet");
+        assert_eq!(
+            in_memory.tl_web.profiles.len(),
+            1,
+            "auch der geteilte In-Memory-Stand kennt das Profil noch"
+        );
+    }
+
+    /// Finding 2 (Review): Profil-Aktionen sind turnierunabhängige, reine
+    /// Layout-Einstellungen — `execute()` darf sie nicht hinter dem
+    /// „kein Turnier geladen"-Gate verstecken (das griff früher VOR der
+    /// Profil-Verzweigung). Ein TL, der morgens vor dem ersten BTP-Import
+    /// schon einen Wandmonitor einrichten will, muss das können.
+    #[tokio::test]
+    async fn profile_action_succeeds_without_a_loaded_tournament_snapshot() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![]);
+        // Kein `ctx.tablet.set_snapshot(...)` — `snapshot_clone()` liefert
+        // `None`, genau das Szenario „noch kein Turnier geladen".
+        assert!(ctx.tablet.snapshot_clone().is_none());
+        let ctx = Arc::new(ctx);
+        let device = crate::config::TlDevice {
+            id: "dev-a".into(),
+            token: "tok-a".into(),
+            label: "Tablet A".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        };
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &device,
+            "op-profile-no-snapshot",
+            1,
+            0,
+            relay_proto::TlAction::ProfileSave {
+                profile: relay_proto::TlPanelProfileWire {
+                    id: String::new(),
+                    name: "Vor dem ersten Import".into(),
+                    panels: vec![],
+                    display: relay_proto::TlDisplaySettingsWire::default(),
+                    updated_at_ms: 0,
+                    ..Default::default()
+                },
+            },
+        )
+        .await;
+
+        assert!(
+            response.ok,
+            "Profil-Aktionen dürfen nicht am Snapshot-Gate scheitern: {response:?}"
+        );
+    }
+
+    // ─────────────────────── Bild-Auslieferung (Cache) ──────────────────────
+
+    /// Kontext mit **eigenem** Werbebild-Verzeichnis. `make_ctx` teilt sich
+    /// `temp_dir()` mit allen anderen Tests — für Bild-Tests, die Dateien
+    /// anlegen und ändern, wäre das ein Rennen.
+    fn make_bild_ctx() -> (Arc<ServerCtx>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let config = AppConfig::default();
+        let shared_config = Arc::new(std::sync::Mutex::new(config.clone()));
+        let ctx = ServerCtx::new(
+            Arc::new(TabletState::default()),
+            config,
+            reqwest::Client::new(),
+            dir.path().to_path_buf(),
+            dir.path().join("config.json"),
+            dir.path().join("assign.json"),
+            dir.path().to_path_buf(),
+            shared_config,
+        );
+        (Arc::new(ctx), dir)
+    }
+
+    fn if_none_match(marke: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::IF_NONE_MATCH, marke.parse().unwrap());
+        headers
+    }
+
+    /// Wartet, bis die Datei-Änderungszeit garantiert weitergesprungen ist.
+    /// Windows aktualisiert sie nur im Takt des Systemtimers (~15,6 ms);
+    /// zwei gleich große Schreibvorgänge unmittelbar hintereinander wären
+    /// sonst nicht auseinanderzuhalten. In der Praxis liegen zwischen zwei
+    /// Änderungen Sekunden — im Test müssen wir es erzwingen.
+    fn zeit_tickt_weiter() {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn ein_unveraendertes_werbebild_wird_nur_bestaetigt_statt_geschickt() {
+        // Die Anzeigen wechseln ihr Bild alle paar Sekunden. Ohne Marke lud
+        // jedes Gerät dabei jedes Mal die vollen Bilddaten neu.
+        let (ctx, dir) = make_bild_ctx();
+        std::fs::write(dir.path().join("ad-1.png"), b"bilddaten").unwrap();
+
+        let erst = ad_image(
+            State(ctx.clone()),
+            Path("ad-1.png".to_string()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        assert_eq!(erst.status(), StatusCode::OK);
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Werbebilder brauchen eine Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let zweit = ad_image(
+            State(ctx),
+            Path("ad-1.png".to_string()),
+            if_none_match(&marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn ein_ausgetauschtes_werbebild_bekommt_eine_neue_marke() {
+        // Ein Turnierleiter kann eine Datei auch von Hand ins
+        // `court-ads`-Verzeichnis legen und später ersetzen — dann darf die
+        // alte Marke nicht mehr passen (deshalb kein `immutable`).
+        let (ctx, dir) = make_bild_ctx();
+        let pfad = dir.path().join("sponsor.png");
+        // Bewusst GLEICH LANG ersetzt: Sonst genügte der Größenanteil der
+        // Marke, und der eigentlich tragende Teil — die Änderungszeit —
+        // bliebe ungeprüft (Review-Fund 18.08.2026).
+        std::fs::write(&pfad, b"alt").unwrap();
+        let erst = ad_image(
+            State(ctx.clone()),
+            Path("sponsor.png".to_string()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let alte_marke = erst
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        zeit_tickt_weiter();
+        std::fs::write(&pfad, b"neu").unwrap();
+        let zweit = ad_image(
+            State(ctx),
+            Path("sponsor.png".to_string()),
+            if_none_match(&alte_marke),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            zweit.status(),
+            StatusCode::OK,
+            "Ein geändertes Bild muss neu ausgeliefert werden"
+        );
+    }
+
+    #[test]
+    fn der_gemerkte_leisten_marker_folgt_der_datei() {
+        // Der Zwischenstand darf eine Änderung nicht verschlucken: Wer im
+        // Setup ein Häkchen setzt, will es sofort in der Leiste sehen.
+        let (ctx, dir) = make_bild_ctx();
+        let pfad = dir.path().join(monitor::AD_BAR_FILE);
+        std::fs::write(&pfad, br#"["ad-1.png"]"#).unwrap();
+        assert!(ctx.ad_bar().contains("ad-1.png"));
+
+        // Umhaken statt Hinzufügen: Die Datei bleibt **exakt gleich groß**,
+        // also trägt allein die Änderungszeit. Der realistische Fall — und
+        // der einzige, der den Zwischenstand wirklich prüft.
+        zeit_tickt_weiter();
+        std::fs::write(&pfad, br#"["ad-2.png"]"#).unwrap();
+        let leiste = ctx.ad_bar();
+        assert!(
+            leiste.contains("ad-2.png") && !leiste.contains("ad-1.png"),
+            "Ein umgehaktes Bild muss sofort in der Leiste stehen, das alte weg"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_ausgetauschtes_turnierlogo_bekommt_eine_neue_marke() {
+        // Die Marke hing früher an (Base64-Länge, MIME) und war zugleich
+        // der Schlüssel des Dekodier-Zwischenstands: Zwei verschiedene
+        // Logos gleicher Länge und gleichen Typs hätten auch frischen
+        // Anzeigen dauerhaft das alte Bild geliefert.
+        let (ctx, _dir) = make_bild_ctx();
+        let setze = |daten: &'static str| {
+            ctx.mutate_app_config(|c| {
+                c.tournament_logo.data = daten.into();
+                c.tournament_logo.mime = "image/png".into();
+                Ok(())
+            })
+            .unwrap();
+        };
+        setze("aGFsbG8="); // "hallo"
+        let erst = info_tournament_logo(State(ctx.clone()), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let alte_marke = erst
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        setze("d2VsdGU="); // "welte" — gleich lang, anderer Inhalt
+        let zweit = info_tournament_logo(State(ctx.clone()), if_none_match(&alte_marke))
+            .await
+            .into_response();
+        assert_eq!(
+            zweit.status(),
+            StatusCode::OK,
+            "Ein gleich langes, aber anderes Logo muss neu ausgeliefert werden"
+        );
+        let bytes = axum::body::to_bytes(zweit.into_body(), 4096).await.unwrap();
+        assert_eq!(
+            &bytes[..],
+            b"welte",
+            "Der Dekodier-Zwischenstand darf nicht das alte Logo festhalten"
+        );
+    }
+
+    #[tokio::test]
+    async fn eine_marken_liste_und_eine_geschwaechte_marke_werden_erkannt() {
+        // RFC 9110: `If-None-Match` darf eine Liste sein, `*` enthalten und
+        // schwache Marken (`W/"…"`) tragen. Ein Zwischenspeicher auf dem Weg
+        // darf eine Marke abschwächen — ein reiner Gleichheitstest wäre dann
+        // still wirkungslos (Review-Fund 18.08.2026).
+        let etag = "\"img-5-abc\"";
+        assert!(marke_bekannt(&if_none_match(etag), etag));
+        assert!(marke_bekannt(
+            &if_none_match(&format!("\"img-9-xyz\", {etag}")),
+            etag
+        ));
+        assert!(marke_bekannt(&if_none_match(&format!("W/{etag}")), etag));
+        assert!(marke_bekannt(&if_none_match("*"), etag));
+        assert!(!marke_bekannt(&if_none_match("\"img-9-xyz\""), etag));
+        assert!(!marke_bekannt(&axum::http::HeaderMap::new(), etag));
+    }
+
+    #[tokio::test]
+    async fn das_turnierlogo_wird_beim_zweiten_abruf_nur_bestaetigt() {
+        // Das Logo hängt in der Kopfleiste JEDER Anzeigeseite und wurde
+        // bisher bei jedem Neuaufbau vollständig neu übertragen.
+        let (ctx, _dir) = make_bild_ctx();
+        ctx.mutate_app_config(|c| {
+            c.tournament_logo.data = "aGFsbG8=".into(); // "hallo"
+            c.tournament_logo.mime = "image/png".into();
+            Ok(())
+        })
+        .unwrap();
+
+        let erst = info_tournament_logo(State(ctx.clone()), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(erst.status(), StatusCode::OK);
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Das Logo braucht eine Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let zweit = info_tournament_logo(State(ctx), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    // ── Perf-Messung der Anzeige-Strecke (Spec monitor-livestand-push, S0) ──
+
+    /// Query wie ihn eine Anzeige schickt.
+    fn takt(src: Option<&str>) -> Query<DeviceHeartbeat> {
+        Query(DeviceHeartbeat {
+            device: None,
+            src: src.map(|s| s.to_string()),
+            court: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn health_zaehlt_push_und_poll_getrennt_mit_bytes() {
+        // Die Trennung ist der Kern der Vorher-Messung: Wie viel Last
+        // erzeugt der Nudge-Weg, wie viel der Fallback-Takt?
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(
+            State(ctx.clone()),
+            takt(Some("push")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ = health(
+            State(ctx.clone()),
+            takt(Some("poll")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        // Eine Seite aus einem älteren Stand kennt `src` nicht.
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+
+        let s = ctx.tablet.perf().snapshot();
+        assert_eq!(s.health_push, 1);
+        assert_eq!(s.health_poll, 2, "ohne `src` zählt der Abruf als Poll");
+        assert!(
+            s.health_push_bytes > 0 && s.health_poll_bytes > 0,
+            "die Antwortgröße ist die Kennzahl, um die es geht (Bytes/s)"
+        );
+        assert!(
+            s.health_poll_bytes > s.health_push_bytes,
+            "zwei Poll-Antworten wiegen mehr als eine Push-Antwort"
+        );
+    }
+
+    #[tokio::test]
+    async fn court_state_zaehlt_seinen_abruf() {
+        // Der feste Court-Monitor ist der billige Fall — gezählt wird er
+        // trotzdem, sonst fehlte der Vergleich zur teuren Übersicht.
+        let ctx = Arc::new(make_ctx(1));
+        let _ = monitor_state(State(ctx.clone()), Path(101), takt(Some("push"))).await;
+        let _ = monitor_state(State(ctx.clone()), Path(101), takt(None)).await;
+
+        let s = ctx.tablet.perf().snapshot();
+        assert_eq!(s.court_state_push, 1);
+        assert_eq!(s.court_state_poll, 1);
+        assert!(s.court_state_push_bytes > 0 && s.court_state_poll_bytes > 0);
+    }
+
+    // ── Antwortcache für /health (Spec monitor-livestand-push, S1) ─────────
+
+    /// Körper einer Antwort als geparstes JSON.
+    async fn koerper(antwort: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(antwort.into_body(), 1024 * 1024)
+            .await
+            .expect("Antwort lesbar");
+        serde_json::from_slice(&bytes).expect("JSON")
+    }
+
+    // ── Schmaler Abruf je Feld (Spec monitor-livestand-push, S7) ──────────
+
+    /// Query einer Anzeige mit Feld-Auswahl.
+    fn takt_feld(court: &str) -> Query<DeviceHeartbeat> {
+        Query(DeviceHeartbeat {
+            device: None,
+            src: Some("poll".to_string()),
+            court: Some(court.to_string()),
+        })
+    }
+
+    /// Testkontext mit ZWEI Feldern — sonst wäre „genau ein Feld" nicht
+    /// von „alle Felder" zu unterscheiden.
+    fn make_ctx_zwei_felder() -> ServerCtx {
+        let ctx = make_ctx(1);
+        let mut zweites = match_on_court();
+        zweites.id = 43;
+        zweites.court = Some("2".into());
+        zweites.court_id = Some(102);
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court(), zweites],
+            courts: vec!["1".into(), "2".into()],
+            locations: vec![],
+            court_infos: vec![
+                crate::btp::model::BtpCourt {
+                    id: 101,
+                    name: "1".into(),
+                    location_id: None,
+                    sort_order: 1,
+                },
+                crate::btp::model::BtpCourt {
+                    id: 102,
+                    name: "2".into(),
+                    location_id: None,
+                    sort_order: 2,
+                },
+            ],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        ctx
+    }
+
+    #[tokio::test]
+    async fn health_mit_court_liefert_genau_ein_feld() {
+        // Der Kern von S7: Ein fester Court-Monitor holt heute die ganze
+        // Halle, um eine einzige Kachel zu zeichnen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let voll = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        let schmal = koerper(
+            health(
+                State(ctx.clone()),
+                takt_feld("102"),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response(),
+        )
+        .await;
+
+        assert_eq!(voll["courts"].as_array().unwrap().len(), 2);
+        let felder = schmal["courts"].as_array().unwrap();
+        assert_eq!(felder.len(), 1, "genau ein Feld");
+        // **Inhaltlich identisch** zum Eintrag in der vollen Antwort — sonst
+        // zeigten zwei Anzeigen desselben Felds Verschiedenes.
+        let aus_voll = voll["courts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["court_id"] == 102)
+            .expect("Feld 102 in der vollen Antwort");
+        assert_eq!(&felder[0], aus_voll);
+        // Die Ordnungszahl reist mit, aber nur die des angefragten Felds.
+        assert!(schmal["seqs"].get("102").is_some(), "eigene Zahl");
+        assert!(
+            schmal["seqs"].get("101").is_none(),
+            "keine fremden Zahlen im schmalen Abruf"
+        );
+        // Umschlag unverändert, damit dieselbe Seite beide Formen liest.
+        assert_eq!(schmal["ok"], serde_json::json!(true));
+        assert_eq!(schmal["callTimer"], voll["callTimer"]);
+    }
+
+    #[tokio::test]
+    async fn health_ohne_court_bleibt_unveraendert() {
+        // Verträglichkeit: Die Feld-Übersicht schickt keinen Selektor.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let antwort = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        assert_eq!(antwort["courts"].as_array().unwrap().len(), 2);
+        assert_eq!(antwort["seqs"].as_object().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck() {
+        // Kein Existenz-Leck: Die Antwort darf sich nicht danach
+        // unterscheiden, ob es das Feld gibt. Sonst könnte jemand am Relay
+        // die Feldnummern eines fremden Turniers durchprobieren.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        for eingabe in ["999", "-5", "abc", "", "1e3", "9999999999999999999999"] {
+            let antwort = health(
+                State(ctx.clone()),
+                takt_feld(eingabe),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response();
+            assert_eq!(
+                antwort.status(),
+                StatusCode::OK,
+                "Eingabe {eingabe} ist kein Fehler"
+            );
+            let v = koerper(antwort).await;
+            assert_eq!(
+                v["courts"],
+                serde_json::json!([]),
+                "Eingabe {eingabe} liefert eine leere Liste"
+            );
+            assert_eq!(
+                v["seqs"],
+                serde_json::json!({}),
+                "Eingabe {eingabe} ohne Zahlen"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn der_schmale_abruf_hat_eine_eigene_marke() {
+        // Sonst bekäme ein schmaler Abrufer die Bestätigung „nichts Neues"
+        // auf die Marke der ganzen Liste — und umgekehrt hielte ein
+        // Übersichts-TV eine Ein-Feld-Marke für seinen Stand.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let voll = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let m_voll = voll
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let schmal = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let m_schmal = schmal
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(m_voll, m_schmal, "verschiedener Inhalt, verschiedene Marke");
+
+        // Und die eigene Marke bestätigt auch: unveränderter Stand → 304.
+        let wieder = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            if_none_match(&m_schmal),
+        )
+        .await
+        .into_response();
+        assert_eq!(wieder.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn der_schnitt_laeuft_je_cache_generation_nur_einmal() {
+        // Sicherheits-Review-Fund: Der Schnitt ersetzt keinen Neubau, er kam
+        // obendrauf — und lag sogar VOR der Marken-Prüfung, sodass auch die
+        // bisher fast kostenlose Bestätigung „nichts Neues" die ganze Liste
+        // parsen musste. Bei einem Gerät im Turnier-WLAN, das die Route in
+        // Schleife ruft, ist das ein deutlich billigerer Hebel als ein
+        // normaler Abruf: wenige Byte hin, voller Parse hier.
+        //
+        // Also einmal je Cache-Generation schneiden, danach nachschlagen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        for _ in 0..5 {
+            let _ = health(
+                State(ctx.clone()),
+                takt_feld("101"),
+                axum::http::HeaderMap::new(),
+            )
+            .await;
+        }
+        assert_eq!(
+            ctx.tablet.perf().snapshot().overview_builds,
+            1,
+            "ein Bau (S1)"
+        );
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
+            1,
+            "fünf Abrufe, ein Schnitt — die übrigen schlagen nach"
+        );
+
+        // Ein Anstoß allein schneidet NICHT neu: Er hebt die Revision, aber
+        // die Anzeige sieht danach genauso aus, und der Schlüssel ist die
+        // Marke — ein Inhalts-Hash. Die Ordnungszahl im Ausschnitt bleibt
+        // damit die des Baus, aus dem er stammt. Das ist die harmlose
+        // Richtung aus S4 („höchstens älter als der Stand, zu dem sie
+        // ausgeliefert wird"): Inhalt und Zahl gehören zusammen, und sobald
+        // sich wirklich etwas ändert, kommen beide gemeinsam nach.
+        ctx.tablet.notify_monitor(101);
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
+            1,
+            "gleicher Inhalt, kein neuer Schnitt"
+        );
+
+        // Ein geänderter Inhalt dagegen schon.
+        let mut anders = match_on_court();
+        anders.court_id = Some(101);
+        anders.sets = vec![(11, 4)];
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![anders],
+            courts: vec!["1".into(), "2".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
+            2,
+            "neuer Satzstand = neuer Inhalt = neuer Schnitt"
+        );
+    }
+
+    #[tokio::test]
+    async fn zwei_schmale_abrufe_bauen_den_zustand_nur_einmal() {
+        // S7 darf den Antwortcache aus S1 nicht aushebeln: Der schmale
+        // Abruf schneidet aus demselben Bau, statt einen eigenen anzustoßen.
+        let ctx = Arc::new(make_ctx_zwei_felder());
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("102"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.perf().snapshot().overview_builds,
+            1,
+            "zwei Felder, ein Bau"
+        );
+    }
+
+    #[tokio::test]
+    async fn zwei_abrufe_ohne_aenderung_bauen_den_zustand_nur_einmal() {
+        // Der Kern von S1. Gemessen mit dem Zähler aus S0 — die Messung
+        // dieser Etappe belegt die nächste.
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        let nach_erstem = ctx.tablet.perf().snapshot().overview_builds;
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        let nach_zweitem = ctx.tablet.perf().snapshot().overview_builds;
+
+        assert_eq!(nach_erstem, 1, "der erste Abruf baut");
+        assert_eq!(nach_zweitem, 1, "der zweite bedient sich am Cache");
+    }
+
+    #[tokio::test]
+    async fn die_cache_antwort_traegt_dieselben_felder_wie_der_direktbau() {
+        // Der Cache ist Beschleuniger, nicht Wahrheit: Was er ausliefert,
+        // muss Zeichen für Zeichen das sein, was der Direktbau geliefert
+        // hätte. (Nur `serverNowMs` im Umschlag ist naturgemäß neu.)
+        let ctx = Arc::new(make_ctx(1));
+        let kalt = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        let warm = koerper(
+            health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+                .await
+                .into_response(),
+        )
+        .await;
+        assert_eq!(kalt["courts"], warm["courts"]);
+        assert_eq!(kalt["callTimer"], warm["callTimer"]);
+        assert_eq!(kalt["ok"], warm["ok"]);
+    }
+
+    #[tokio::test]
+    async fn ein_nudge_macht_den_cache_ungueltig() {
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        ctx.tablet.notify_monitor(101);
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        assert_eq!(
+            ctx.tablet.perf().snapshot().overview_builds,
+            2,
+            "nach einem Nudge muss neu gebaut werden"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_neuer_btp_stand_macht_den_cache_ungueltig() {
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court()],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        assert_eq!(ctx.tablet.perf().snapshot().overview_builds, 2);
+    }
+
+    #[tokio::test]
+    async fn eine_gemeldete_config_aenderung_macht_den_cache_ungueltig() {
+        // Die Hallen-Farben stecken in der Konfiguration und reisen in der
+        // Feld-Liste mit — ein Cache, der das überlebt, zeigte alte Farben.
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        ctx.tablet.bump_overview_rev();
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        assert_eq!(ctx.tablet.perf().snapshot().overview_builds, 2);
+    }
+
+    #[tokio::test]
+    async fn nach_der_hart_ttl_wird_trotzdem_neu_gebaut() {
+        // Sicherheitsnetz gegen eine vergessene Invalidierungs-Quelle: Auch
+        // ohne jedes Ereignis ist der Cache nach 250 ms abgestanden.
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        let c = ctx.tablet.overview_cache().expect("Cache steht");
+        // Denselben Eintrag um 300 ms zurückdatieren — schneller und
+        // verlässlicher als 300 ms zu warten.
+        ctx.tablet.set_overview_cache(
+            c.rev,
+            c.etag.clone(),
+            c.courts_json.clone(),
+            c.seqs_json.clone(),
+            c.gebaut_ms.saturating_sub(300),
+        );
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+        assert_eq!(ctx.tablet.perf().snapshot().overview_builds, 2);
+    }
+
+    #[tokio::test]
+    async fn ein_unveraenderter_stand_wird_mit_304_bestaetigt() {
+        let ctx = Arc::new(make_ctx(1));
+        // Wie im Marken-Test: ohne `court_infos` wäre die Feld-Liste leer und
+        // könnte sich nicht ändern.
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court()],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![crate::btp::model::BtpCourt {
+                id: 101,
+                name: "Feld 1".into(),
+                location_id: None,
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let erst = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(erst.status(), StatusCode::OK);
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Antwort trägt eine Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let zweit = health(State(ctx.clone()), takt(None), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(zweit.status(), StatusCode::NOT_MODIFIED);
+
+        // Nach einer **echten** Änderung gilt die alte Marke nicht mehr.
+        // Bewusst ein gezählter Punkt und nicht bloß ein Nudge: Die Marke
+        // hängt am Inhalt (siehe `die_marke_haengt_am_inhalt_nicht_an_der_revision`).
+        ctx.tablet.record_score(101, 42, vec![(5, 3)]);
+        let dritt = health(State(ctx.clone()), takt(None), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(dritt.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn die_marke_haengt_am_inhalt_nicht_an_der_revision() {
+        // Wäre die Marke aus der Revision gebildet, hinge der 304-Pfad an
+        // derselben Annahme wie der Cache — nur ohne dessen Sicherheitsnetz:
+        // Die Hart-TTL erzwingt zwar einen Neubau, aber bei unveränderter
+        // Revision bliebe die Marke gleich, und ein Abrufer mit gemerkter
+        // Marke bekäme auf einen **geänderten** Stand dauerhaft „nichts
+        // Neues". Dieselbe Falle wie beim Bild-Caching (Review 18.08.2026):
+        // Eine Marke, die zugleich Cache-Schlüssel ist, muss am Inhalt hängen.
+        //
+        // Die Gegenprobe hier ist die angenehme Richtung derselben Regel:
+        // Ein Ereignis, das die Anzeige gar nicht verändert, darf die Marke
+        // nicht wechseln — die Anzeige spart sich dann sogar den Inhalt.
+        let ctx = Arc::new(make_ctx(1));
+        // Das Fixture von `make_ctx` trägt keine `court_infos` — dann ist die
+        // Feld-Liste leer und könnte sich gar nicht ändern. Hier braucht es
+        // ein echtes Feld.
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court()],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![crate::btp::model::BtpCourt {
+                id: 101,
+                name: "Feld 1".into(),
+                location_id: None,
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let erst = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let marke = erst
+            .headers()
+            .get(header::ETAG)
+            .expect("Marke")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        // Revision hochzählen, ohne irgendetwas an der Anzeige zu ändern.
+        ctx.tablet.bump_overview_rev();
+        let zweit = health(State(ctx.clone()), takt(None), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(
+            zweit.status(),
+            StatusCode::NOT_MODIFIED,
+            "gleicher Inhalt = gleiche Marke, auch bei neuer Revision"
+        );
+
+        // Und andersherum: Ändert sich der Zustand wirklich, wechselt sie.
+        ctx.tablet.record_score(101, 42, vec![(5, 3)]);
+        let dritt = health(State(ctx.clone()), takt(None), if_none_match(&marke))
+            .await
+            .into_response();
+        assert_eq!(dritt.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn die_marke_deckt_auch_den_aufruf_timer_ab() {
+        // Der Aufruf-Timer reist im Umschlag mit, steckt aber nicht im
+        // Cache. Fehlte er in der Marke, bekäme eine Anzeige nach einer
+        // geänderten Schwelle so lange „nichts Neues", bis sich zufällig ein
+        // Feld ändert — und rechnete bis dahin mit den alten Minuten. Die
+        // Anzeige übernimmt `callTimer` nur aus einer vollen Antwort
+        // (Review-Fund 19.08.2026).
+        let felder = r#"[{"court_id":1}]"#;
+        let timer_an = r#"{"enabled":true,"secondCallMinutes":2.0}"#;
+        let timer_aus = r#"{"enabled":false,"secondCallMinutes":2.0}"#;
+
+        assert_eq!(
+            inhalts_marke(7, felder, timer_an),
+            inhalts_marke(7, felder, timer_an),
+            "gleiche Eingaben, gleiche Marke"
+        );
+        assert_ne!(
+            inhalts_marke(7, felder, timer_an),
+            inhalts_marke(7, felder, timer_aus),
+            "ein geänderter Aufruf-Timer muss die Marke wechseln"
+        );
+        assert_ne!(
+            inhalts_marke(7, felder, timer_an),
+            inhalts_marke(7, r#"[{"court_id":2}]"#, timer_an),
+            "und eine geänderte Feld-Liste erst recht"
+        );
+    }
+
+    #[tokio::test]
+    async fn auch_der_geraete_monitor_zaehlt_seinen_abruf() {
+        // `monitor.html` im Geräte-Modus fragt `/monitor/state` statt
+        // `/court/{id}/state`. Ohne diese Zählung fehlte in der Messung
+        // genau die Bauform, die im Verleih-Set auf den Pis läuft.
+        let ctx = Arc::new(make_ctx(1));
+        let q = |src: Option<&str>| {
+            Query(DeviceQuery {
+                device: "pi-1".to_string(),
+                src: src.map(|s| s.to_string()),
+            })
+        };
+        let _ = monitor_device_state(State(ctx.clone()), q(Some("push"))).await;
+        let _ = monitor_device_state(State(ctx.clone()), q(None)).await;
+
+        let s = ctx.tablet.perf().snapshot();
+        assert_eq!(s.court_state_push, 1);
+        assert_eq!(s.court_state_poll, 1);
+        assert!(s.court_state_push_bytes > 0 && s.court_state_poll_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn debug_perf_liefert_die_zaehler_als_zahlen() {
+        // Die Ableseroute der Vorher-Messung: Sie gibt aus, was die Zähler
+        // stehen haben — und ausschließlich Zahlen (Wächter in `perf.rs`).
+        let ctx = Arc::new(make_ctx(1));
+        let _ = health(
+            State(ctx.clone()),
+            takt(Some("push")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new()).await;
+
+        let antwort = debug_perf(State(ctx.clone())).await.into_response();
+        assert_eq!(antwort.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(antwort.into_body(), 64 * 1024)
+            .await
+            .expect("Antwort lesbar");
+        let v: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
+
+        assert_eq!(v["health_push"], 1);
+        assert_eq!(v["health_poll"], 1);
+        // Seit S1 bauen zwei aufeinanderfolgende Abrufe nur EINMAL — dieser
+        // Test hielt bis dahin `>= 2` fest, und dass er umgeschrieben werden
+        // musste, ist der Beleg der Etappe. Die Gegenprobe dazu führt
+        // `zwei_abrufe_ohne_aenderung_bauen_den_zustand_nur_einmal`.
+        assert_eq!(
+            v["overview_builds"].as_u64().unwrap(),
+            1,
+            "der zweite Abruf bedient sich am Antwortcache: {v}"
+        );
+        // Die Uhrzeit gehört dazu, sonst ist keine Rate zu bilden.
+        assert!(v["serverNowMs"].as_u64().unwrap_or(0) > 0);
     }
 }

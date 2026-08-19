@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Megaphone, Volume2, X } from "lucide-react";
+import { ArrowUpDown, GripVertical, Megaphone, RotateCcw, Volume2, X } from "lucide-react";
 import {
   callPreparation,
+  hallColorsView,
   preparationCandidates,
+  queueOrderReset,
+  queueReorder,
   retractPreparation,
 } from "../api";
 import {
@@ -10,6 +13,7 @@ import {
   resolveAnnouncementLanguage,
 } from "../io/announcer";
 import { azureOption } from "../io/azureAnnounce";
+import { useDragReorder } from "../state/useDragReorder";
 import type {
   AnnounceConfig,
   AzureTtsConfig,
@@ -98,6 +102,45 @@ export function PreparationPanel({ announce, azureTts }: Props) {
     [candidates],
   );
 
+  // Hallenname → Farbe (Spec hallen-farben): einmal je Hallen-Topologie
+  // laden — Farbwechsel passieren auf der Felderübersicht, das nächste
+  // Öffnen/Umbauen dieses Panels zieht nach. Leer bei einer Halle.
+  // Schlüssel statt `locations` als Dependency: der 4-s-Poll liefert jedes
+  // Mal eine neue Array-Referenz, die Topologie ändert sich aber fast nie
+  // (Review 2026-08-16 — sonst ein IPC-Aufruf je Poll).
+  const [hallColor, setHallColor] = useState<Map<string, string>>(new Map());
+  const locKey = locations.map((l) => l.id).join(",");
+  useEffect(() => {
+    hallColorsView()
+      .then((v) =>
+        setHallColor(
+          new Map(v.halls.map((h) => [h.hall.trim().toLowerCase(), h.color])),
+        ),
+      )
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locKey]);
+
+  // Hallenname → Kürzel für die Anzeige in der Spielzeile (ADR 0026: eine
+  // Liste statt Hallen-Abschnitten, die Halle steht dafür an der Zeile).
+  // So kurz wie möglich, aber eindeutig: das kürzeste Präfix (2…12 Zeichen),
+  // unter dem sich alle Hallen des Turniers noch unterscheiden — sonst der
+  // volle Name. Eine Abkürzung, unter der zwei Hallen gleich aussehen, wäre
+  // schlimmer als ein langer Name. (Logik aus `tl.html::hallenKuerzel`.)
+  const hallShort = useMemo(() => {
+    const names = locations.map((l) => l.name);
+    const map = new Map<string, string>();
+    for (let n = 2; n <= 12; n++) {
+      const shorts = names.map((s) => s.trim().slice(0, n));
+      if (new Set(shorts).size === names.length) {
+        names.forEach((name, i) => map.set(name, shorts[i]));
+        return map;
+      }
+    }
+    for (const name of names) map.set(name, name);
+    return map;
+  }, [locations]);
+
   // Auswahl auf noch offene Kandidaten beschränken (gerufene rausfiltern).
   useEffect(() => {
     setChecked((prev) => {
@@ -123,6 +166,31 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         setLocations(v.locations);
       })
       .catch(() => {});
+
+  // Ein noch nicht gerufenes Spiel vor ein anderes ziehen (Spec
+  // `spielliste-manuelle-reihenfolge`) — die Reihenfolge ist eine einzige
+  // globale Liste (ADR 0026), übertragen wird nur (id, beforeId).
+  const reorderOpen = (matchId: number, beforeMatchId: number | null) => {
+    queueReorder(matchId, beforeMatchId)
+      .then(refresh)
+      .catch(() => {});
+  };
+
+  const resetQueueOrder = () => {
+    queueOrderReset()
+      .then(refresh)
+      .catch(() => {});
+  };
+
+  // Eine einzige ziehbare Liste in der Reihenfolge, die der Host liefert
+  // (R2: der Host ist die Wahrheit — hier wird weder sortiert noch
+  // gruppiert). Der Hook darf genau einmal aufgerufen werden; mit der
+  // globalen Reihenfolge reicht dieser eine Aufruf für die ganze Liste.
+  const { order: openOrder, registerRow, dragHandleProps } = useDragReorder(
+    open,
+    (c) => c.match_id,
+    reorderOpen,
+  );
 
   const callSelected = async () => {
     if (checked.size === 0) return;
@@ -244,10 +312,45 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         </p>
       ) : (
         <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          {/* Reset-Knopf: verwirft die manuelle Reihenfolge komplett (Spec
+              `spielliste-manuelle-reihenfolge`) — nur sichtbar, solange
+              irgendein Spiel manuell einsortiert ist. */}
+          {candidates.some((c) => c.manual) && (
+            <div className="flex justify-end">
+              <button
+                onClick={resetQueueOrder}
+                title="Verwirft die manuelle Sortierung — danach gilt wieder BTPs eigene Reihenfolge"
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs
+                           font-medium text-slate-500 transition-colors hover:bg-slate-100
+                           hover:text-slate-700"
+              >
+                <RotateCcw size={13} />
+                Reihenfolge zurücksetzen
+              </button>
+            </div>
+          )}
+          {/* Eine durchgehende Liste (ADR 0026), ziehbar per
+              `useDragReorder` — gleiche Bausteine wie im `OfficialsPanel`. */}
           <ul className="flex flex-col gap-1.5">
-            {open.map((c) => (
-              <li key={c.match_id}>
-                <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-slate-200 px-3 py-2 transition-colors hover:bg-slate-50">
+            {openOrder.map((c) => (
+              <li
+                key={c.match_id}
+                ref={(el) => registerRow(c.match_id, el)}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200
+                           px-1.5 py-1 transition-colors hover:bg-slate-50"
+              >
+                <span
+                  {...dragHandleProps(c.match_id)}
+                  tabIndex={0}
+                  role="button"
+                  title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+                  aria-label={`${c.label || "Spiel"} in der Reihenfolge verschieben — ziehen oder Pfeiltasten`}
+                  className="cursor-grab touch-none rounded text-slate-400 outline-none
+                             focus-visible:ring-2 focus-visible:ring-sky-400 active:cursor-grabbing"
+                >
+                  <GripVertical size={16} />
+                </span>
+                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 py-1">
                   <input
                     type="checkbox"
                     checked={checked.has(c.match_id)}
@@ -256,12 +359,55 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                   />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="text-sm">
+                      {/* Hallen-Kürzel statt Hallen-Überschrift; nur bei
+                          mehreren Hallen sinnvoll. Spiele ohne Hallen-
+                          zuordnung tragen an derselben Stelle „ohne" in
+                          Warnfarbe — sie kämen bei Aufruf-Pflicht auf kein
+                          Feld, das darf nicht unsichtbar sein. */}
+                      {multiHall &&
+                        (c.hall ? (
+                          <span
+                            title={c.hall}
+                            className="mr-1.5 inline-flex items-center gap-1 rounded bg-slate-100 px-1 py-0.5
+                                       text-[11px] font-semibold text-slate-500"
+                          >
+                            {/* Hallen-Farbmarke — Zusatz-Kennung, das
+                                Kürzel bleibt immer stehen. */}
+                            {hallColor.get(c.hall.trim().toLowerCase()) && (
+                              <span
+                                aria-hidden
+                                className="inline-block h-2 w-2 shrink-0 rounded-full"
+                                style={{
+                                  backgroundColor: hallColor.get(
+                                    c.hall.trim().toLowerCase(),
+                                  ),
+                                }}
+                              />
+                            )}
+                            {hallShort.get(c.hall) ?? c.hall}
+                          </span>
+                        ) : (
+                          <span
+                            title="Ohne Hallenzuordnung"
+                            className="mr-1.5 rounded bg-amber-50 px-1 py-0.5 text-[11px]
+                                       font-semibold text-amber-700"
+                          >
+                            ohne
+                          </span>
+                        ))}
                       <span className="font-medium">{c.label || "Spiel"}</span>
                       {c.match_num !== null && (
                         <span className="text-slate-400">
                           {" "}
                           · Nr. {c.match_num}
                         </span>
+                      )}
+                      {c.manual && (
+                        <ArrowUpDown
+                          size={12}
+                          className="ml-1.5 inline text-sky-600"
+                          aria-label="Manuell in die Spielreihenfolge einsortiert"
+                        />
                       )}
                     </span>
                     <span className="truncate text-xs text-slate-500">

@@ -1,4 +1,8 @@
 import { useEffect, useRef } from "react";
+import {
+  diffOccupiedCourts,
+  type Stand as BaselineStand,
+} from "../io/announceBaseline.mjs";
 import { tabletOverview } from "../api";
 import type {
   AnnounceConfig,
@@ -53,8 +57,14 @@ interface Props {
 export function MatchAnnouncer({ announce, azureTts }: Props) {
   // CourtID → zuletzt gesehene Match-ID. Per CourtID, damit gleichnamige
   // Felder eines Mehr-Hallen-Turniers nicht denselben Eintrag teilen.
-  const seenRef = useRef<Map<number, number>>(new Map());
-  const baselineRef = useRef(false);
+  // Stand der Baseline-Logik (src/io/announceBaseline.mjs) — dort getestet,
+  // weil der Fehler „beim Start werden alle laufenden Spiele angesagt" genau
+  // hier saß (der erste Abruf kommt vor dem ersten BTP-Schnappschuss und ist
+  // leer; als Baseline genommen galt danach jedes belegte Feld als neu).
+  const standRef = useRef<BaselineStand>({
+    baseline: new Map(),
+    hatBaseline: false,
+  });
   const prevEnabledRef = useRef(announce.enabled);
   // Aktuelle Config in einer Ref, damit der Poll-Effekt stabil bleibt.
   const cfgRef = useRef(announce);
@@ -77,7 +87,12 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
   const prevHallRef = useRef(announce.announce_hall);
   useEffect(() => {
     if (prevHallRef.current !== announce.announce_hall) {
-      seenRef.current.clear();
+      // Nur die gesehenen Stände leeren, die Baseline bleibt gesetzt —
+      // unverändertes Verhalten. (Damit gelten nach dem Wechsel zunächst
+      // alle belegten Felder der neuen Halle als frisch aufgerufen; das ist
+      // dieselbe Fehlerklasse wie der leere Start-Abruf, aber ein anderer
+      // Fall — hier bewusst nicht mitgeändert.)
+      standRef.current = { baseline: new Map(), hatBaseline: true };
       prevHallRef.current = announce.announce_hall;
     }
   }, [announce.announce_hall]);
@@ -99,27 +114,13 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
           const cfg = cfgRef.current;
           // Mehr-Hallen-Turnier: nur die eingestellte Halle ansagen (leer = alle).
           // So hört in einem 2-Hallen-Setup jede Halle/Instanz nur ihre Spiele.
-          const announceHall = (cfg.announce_hall || "").trim();
-          const newMatches: CourtOverview[] = [];
-          for (const court of info.courts) {
-            const prev = seenRef.current.get(court.court_id) ?? 0;
-            seenRef.current.set(court.court_id, court.match_id);
-            const hallOk =
-              !announceHall || (court.location || "").trim() === announceHall;
-            if (
-              baselineRef.current &&
-              court.match_id !== 0 &&
-              court.match_id !== prev &&
-              hallOk
-            ) {
-              newMatches.push(court);
-            }
-          }
-          // Erster Poll: nur Baseline füllen, nichts ansagen.
-          if (!baselineRef.current) {
-            baselineRef.current = true;
-            return;
-          }
+          const { neue, stand } = diffOccupiedCourts(
+            standRef.current,
+            info.courts,
+            cfg.announce_hall || "",
+          );
+          standRef.current = stand;
+          const newMatches = neue as CourtOverview[];
           if (!cfg.enabled || newMatches.length === 0) return;
 
           const now = Date.now();

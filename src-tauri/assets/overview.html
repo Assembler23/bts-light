@@ -286,7 +286,15 @@ main {
   var hallTimer = null;
   // Aufruf-Timer: Server-Zeit + Config aus dem letzten /health-Poll (Plan 4),
   // damit renderCourt „Zeit seit Aufruf" relativ zur Server-Uhr rechnen kann.
-  var callNow = 0;
+  //
+  // Gemerkt wird der **Versatz** zur eigenen Uhr, nicht der Zeitpunkt: Seit
+  // dem Antwortcache (Spec monitor-livestand-push, S1) beantwortet der Server
+  // einen unveränderten Stand mit einer leeren Bestätigung — dann kommt keine
+  // neue Server-Zeit, und eine gemerkte Uhrzeit stünde still. Der Versatz
+  // dagegen bleibt gültig; die Uhr läuft aus der lokalen Zeit weiter und
+  // bleibt trotzdem an der Server-Uhr ausgerichtet (gegen Geräte-Drift).
+  var callOffset = 0;
+  function serverJetzt() { return Date.now() + callOffset; }
   var callTimer = null;
 
   // Anzeige-Cap bei sehr großen Turnieren (sollte nicht greifen, dient
@@ -348,7 +356,7 @@ main {
   function callChip(c) {
     if (!callTimer || !callTimer.enabled) return null;
     if (typeof c.on_court_since_ms !== 'number' || c.on_court_since_ms <= 0) return null;
-    var sec = Math.max(0, Math.floor((callNow - c.on_court_since_ms) / 1000));
+    var sec = Math.max(0, Math.floor((serverJetzt() - c.on_court_since_ms) / 1000));
     var min = sec / 60;
     var label = '1. Aufruf', tone = 'ok';
     if (typeof callTimer.thirdCallMinutes === 'number' && callTimer.thirdCallMinutes > 0
@@ -369,6 +377,25 @@ main {
     if (c.serving_team && c.serving_team > 0) return true;
     var sets = Array.isArray(c.sets) ? c.sets : [];
     return sets.some(function (s) { return (setVal(s, 0) + setVal(s, 1)) > 0; });
+  }
+
+  /** Die Satzstand-Spalte einer Mannschaft. Eigene Funktion, weil der
+   *  Teil-Patch (Spec monitor-livestand-push, S5) genau sie erneuert —
+   *  Aufbau und Nachbesserung müssen dasselbe Ergebnis liefern, sonst
+   *  unterschiede sich eine gepatchte Karte von einer frisch gebauten. */
+  function satzSpalte(c, selfIdx, otherIdx) {
+    var sets = Array.isArray(c.sets) ? c.sets : [];
+    var lastIdx = sets.length - 1;
+    var running = !(c.injury || c.official_call);
+    var setsEl = h('div', 'trow__sets');
+    sets.forEach(function (s, i) {
+      var mine = setVal(s, selfIdx), theirs = setVal(s, otherIdx);
+      var cls = 'sset';
+      if (i === lastIdx && running) cls += ' current';
+      else if (mine > theirs) cls += ' won';
+      setsEl.appendChild(h('span', cls, String(mine)));
+    });
+    return setsEl;
   }
 
   function renderCourt(c) {
@@ -405,10 +432,6 @@ main {
       if (chip) card.appendChild(chip);
     }
 
-    var sets = Array.isArray(c.sets) ? c.sets : [];
-    var lastIdx = sets.length - 1;
-    var running = !isPause;
-
     // Eine Team-Zeile: bei Doppel die zwei Partner UNTEREINANDER (je Flagge +
     // Name), bei Einzel eine einzelne Zeile; Satzstand rechts.
     function teamRow(names, nats, selfIdx, otherIdx) {
@@ -422,15 +445,7 @@ main {
         nameBox.appendChild(pl);
       });
       row.appendChild(nameBox);
-      var setsEl = h('div', 'trow__sets');
-      sets.forEach(function (s, i) {
-        var mine = setVal(s, selfIdx), theirs = setVal(s, otherIdx);
-        var cls = 'sset';
-        if (i === lastIdx && running) cls += ' current';
-        else if (mine > theirs) cls += ' won';
-        setsEl.appendChild(h('span', cls, String(mine)));
-      });
-      row.appendChild(setsEl);
+      row.appendChild(satzSpalte(c, selfIdx, otherIdx));
       return row;
     }
 
@@ -455,18 +470,44 @@ main {
     // Dynamische Spaltenzahl: wenige Felder → wenige Spalten → grosse Kacheln,
     // die (zusammen mit grid-auto-rows:minmax(0,1fr)) den Schirm füllen.
     grid.style.gridTemplateColumns = 'repeat(' + gridColsFor(g.courts.length) + ', 1fr)';
-    g.courts.forEach(function (c) { grid.appendChild(renderCourt(c)); });
+    g.courts.forEach(function (c) {
+      var karte = renderCourt(c);
+      // Karte je Feld merken (Spec monitor-livestand-push, S5): Der
+      // Teil-Patch bessert später genau diese Elemente nach, statt das
+      // Brett neu zu bauen.
+      kartenNachFeld[c.court_id] = karte;
+      grid.appendChild(karte);
+    });
     return grid;
   }
 
   // Eine Halle als Vollbild-Section: Kopf (Name [+ Zyklus „1 / N"]) + Grid.
   // Hallenname (+ Zyklus „1 / N" bei Rotation) in die Kopfzeile schreiben –
   // statt einer eigenen Zeile im Body (spart vertikalen Platz).
-  function setBarHall(name, idx, total) {
+  function setBarHall(name, idx, total, color) {
     var el = document.getElementById('bar-hall');
     if (!el) return;
-    if (!name) { el.textContent = ''; return; }
-    el.textContent = total > 1 ? (name + '  ' + (idx + 1) + ' / ' + total) : name;
+    el.textContent = '';
+    if (!name) return;
+    // Hallen-Farbmarke (Spec hallen-farben): kleiner Punkt vor dem Namen.
+    // Strikte #rrggbb-Form erzwingen — der Wert landet in einem Style.
+    if (color && /^#[0-9a-f]{6}$/.test(color)) {
+      var dot = document.createElement('span');
+      dot.setAttribute('aria-hidden', 'true');
+      dot.style.cssText = 'display:inline-block;width:.5em;height:.5em;border-radius:50%;margin-right:.4em;background:' + color;
+      el.appendChild(dot);
+    }
+    el.appendChild(document.createTextNode(
+      total > 1 ? (name + '  ' + (idx + 1) + ' / ' + total) : name));
+  }
+
+  // Farbe einer Hallen-Gruppe: vom ersten Feld, das eine trägt (alle Felder
+  // einer Halle tragen dieselbe; alte Hosts liefern keine → undefined).
+  function groupColor(g) {
+    for (var i = 0; i < g.courts.length; i++) {
+      if (g.courts[i].hall_color) return g.courts[i].hall_color;
+    }
+    return '';
   }
 
   function stopHallRotation() {
@@ -477,15 +518,230 @@ main {
     if (hallTimer) return; // läuft bereits
     hallTimer = setInterval(function () {
       hallIdx += 1; // render() nimmt modulo der aktuellen Hallenzahl
-      render(lastData);
+      // Voll-Render: Die Rotation tauscht die gezeigte Halle komplett aus.
+      // (Die Sicht-Signatur erkennt das ohnehin — hier ausdrücklich, damit
+      // es beim nächsten Umbau nicht stillschweigend verloren geht.)
+      render(lastData, true);
     }, hallSeconds * 1000);
   }
 
-  function render(data) {
+  /** Abschaltbare Render-Messung (Spec monitor-livestand-push, S0 c).
+   *  In der Browser-Konsole `localStorage.ovRenderMessen = "1"` setzen, dann
+   *  meldet die Seite alle zehn Sekunden, wie oft und wie lange sie gezeichnet
+   *  hat; mit `"2"` zusätzlich jeden einzelnen Render.
+   *
+   *  Abweichung vom Vorbild `tlRenderMessen` (tl.html), bewusst: Dort läuft
+   *  ein 2-s-Render, hier bis zu vier je Sekunde — eine Zeile je Render wäre
+   *  in einem Messlauf nicht auswertbar. Die Sammelzeile hat denselben Takt
+   *  wie die Perf-Zeile des Servers und lässt sich direkt danebenlegen.
+   *  `ueber16ms` ist die Näherung für „verlorene Frames": Ein Render, der
+   *  länger als ein 60-Hz-Bild dauert, hat auf dem Pi eines verschluckt. */
+  var renderMessen = (function () {
+    try { return localStorage.getItem('ovRenderMessen') || '0'; } catch (e) { return '0'; }
+  })();
+  var messZahl = 0, messSumme = 0, messMax = 0, messUeber16 = 0, messSeit = 0;
+  function messVermerken(dauer) {
+    messZahl++; messSumme += dauer;
+    if (dauer > messMax) messMax = dauer;
+    if (dauer > 16) messUeber16++;
+    if (renderMessen === '2') console.log('[ov] render: ' + dauer.toFixed(1) + ' ms');
+    var jetzt = Date.now();
+    if (!messSeit) { messSeit = jetzt; return; }
+    if (jetzt - messSeit < 10000) return;
+    console.log('[ov] ' + messZahl + ' Renders in ' + ((jetzt - messSeit) / 1000).toFixed(0)
+      + ' s (' + (messZahl / ((jetzt - messSeit) / 1000)).toFixed(1) + '/s), Ø '
+      + (messSumme / messZahl).toFixed(1) + ' ms, max ' + messMax.toFixed(1)
+      + ' ms, ' + messUeber16 + ' über 16 ms');
+    messZahl = 0; messSumme = 0; messMax = 0; messUeber16 = 0; messSeit = jetzt;
+  }
+
+  // ── Teil-Patch statt Board-Neuaufbau (Spec monitor-livestand-push, S5) ──
+  //
+  // Bis hierher warf jeder eintreffende Stand das komplette Board weg und
+  // baute es neu — bei zwanzig Feldern rund siebzig Mal je Sekunde ein
+  // voller DOM-Neuaufbau auf jedem Pi, für eine Änderung von zwei Ziffern.
+  var kartenNachFeld = {};        // court_id → Karten-Element des letzten Baus
+  var letzterVollRender = 0;      // Zeitpunkt (ms), für den Zwangs-Neubau
+  var letzteSicht = '';           // Anordnung, die gerade auf dem Schirm steht
+  var VOLL_RENDER_SPAETESTENS_MS = 30000;
+
+  /** Darf die Karte dieses Felds nachgebessert werden?
+   *
+   *  **Inline-Kopie von `src/io/courtPatch.mjs`** — dort steht die
+   *  kanonische Fassung samt Test (`scripts/test-court-patch.mjs`, eigener
+   *  CI-Schritt). Änderungen hier und dort gemeinsam.
+   *
+   *  Die Regel ist bewusst streng: Gepatcht wird nur der Normalfall, ein
+   *  gezählter Punkt im laufenden Satz. Ein zu vorsichtiges „nein" kostet
+   *  einen Neubau, den es vorher ohnehin gab; ein zu großzügiges „ja"
+   *  hinterlässt eine Karte, die dauerhaft etwas Falsches zeigt. */
+  function istPatchbar(vorher, nachher, brettGleich, timer) {
+    if (!brettGleich || !vorher || !nachher) return false;
+    if (vorher.court_id !== nachher.court_id) return false;
+    // Beschriftung, Halle und Farbe gelten für freie wie belegte Karten.
+    if ((vorher.court || '') !== (nachher.court || '')) return false;
+    if ((vorher.location || '') !== (nachher.location || '')) return false;
+    if ((vorher.hall_color || '') !== (nachher.hall_color || '')) return false;
+    if ((vorher.match_id || 0) !== (nachher.match_id || 0)) return false;
+    var liveV = istLiveFeld(vorher), liveN = istLiveFeld(nachher);
+    if (liveV !== liveN) return false;
+    // Ein durchgehend freies Feld ist patchbar — es gibt nichts zu tun.
+    // Stünde hier `false`, wäre die ganze Etappe wirkungslos: Die Übersicht
+    // listet ALLE Felder, in jeder Halle ist ständig eines zwischen zwei
+    // Spielen, und ein einziges „nein" zwingt das ganze Brett in den Neubau.
+    if (!liveN) return true;
+    if (!!vorher.injury !== !!nachher.injury) return false;
+    if (!!vorher.official_call !== !!nachher.official_call) return false;
+    var satzZahl = function (c) { return Array.isArray(c.sets) ? c.sets.length : 0; };
+    if (satzZahl(vorher) !== satzZahl(nachher)) return false;
+    if (uhrSichtbar(vorher, timer) !== uhrSichtbar(nachher, timer)) return false;
+    if ((vorher.match_name || '') !== (nachher.match_name || '')) return false;
+    if (!listeGleich(vorher.team1, nachher.team1)) return false;
+    if (!listeGleich(vorher.team2, nachher.team2)) return false;
+    if (!listeGleich(vorher.team1_nationalities, nachher.team1_nationalities)) return false;
+    if (!listeGleich(vorher.team2_nationalities, nachher.team2_nationalities)) return false;
+    return true;
+  }
+  function istLiveFeld(c) {
+    return !!(c && c.match_id && c.match_id > 0 && c.team1 && c.team1.length);
+  }
+  /** Hat sich am Satzstand etwas geändert? Nur dann muss die Karte angefasst
+   *  werden — sonst tauschte ein Punkt auf Feld 3 die Ziffern ALLER Felder
+   *  aus und gäbe einen großen Teil der Ersparnis wieder her. */
+  function satzstandGleich(vorher, nachher) {
+    var a = Array.isArray(vorher && vorher.sets) ? vorher.sets : [];
+    var b = Array.isArray(nachher && nachher.sets) ? nachher.sets : [];
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (setVal(a[i], 0) !== setVal(b[i], 0)) return false;
+      if (setVal(a[i], 1) !== setVal(b[i], 1)) return false;
+    }
+    return true;
+  }
+  function uhrSichtbar(c, timer) {
+    if (!timer || !timer.enabled) return false;
+    if (!c || typeof c.on_court_since_ms !== 'number' || c.on_court_since_ms <= 0) return false;
+    return !(c.injury || c.official_call) && !hasStarted(c);
+  }
+  function listeGleich(a, b) {
+    var x = Array.isArray(a) ? a : [], y = Array.isArray(b) ? b : [];
+    if (x.length !== y.length) return false;
+    return x.every(function (v, i) { return v === y[i]; });
+  }
+  /** Kennung der gezeigten Anordnung: Felder samt Halle, dazu der
+   *  Rotationsstand und ein etwaiger Filter. Ohne Rotationsstand hielte der
+   *  Patch das Umschalten der Halle für „nichts geändert".
+   *
+   *  Inline-Kopie von `sichtSignatur` in `src/io/courtPatch.mjs`; dort mit
+   *  Test (`scripts/test-court-patch.mjs`). Die Anzeige reicht ihre eigenen
+   *  Zustandsgrößen herein, statt sie im Modul vorauszusetzen. */
+  function sichtSignatur(courts) {
+    var list = Array.isArray(courts) ? courts : [];
+    var felder = list.map(function (c) { return c.court_id + ':' + (c.location || ''); }).join('|');
+    return felder + '#' + (hallIdx || 0) + '#' + (hallFilter || '');
+  }
+
+  /** Die Satzstände der **gezeigten** Felder erneuern, soweit sie sich
+   *  geändert haben. Gibt `false` zurück, wenn eine Karte nicht (mehr) im
+   *  Dokument steht — dann baut der Aufrufer neu.
+   *
+   *  Nur die gezeigten: Bei Hallen-Rotation und mit `?halle=` zeichnet die
+   *  Seite nur eine Gruppe, und über `MAX_COURTS` hinaus schneidet sie ab.
+   *  Liefe die Schleife über die volle Feld-Liste, fände sie für jedes nicht
+   *  gezeichnete Feld keine Karte und erzwänge dauerhaft den Neubau — genau
+   *  in den Turnieren, um die es hier geht (Review-Fund 19.08.2026). */
+  function patcheKarten(nachFeldNeu) {
+    var ids = Object.keys(kartenNachFeld);
+    for (var i = 0; i < ids.length; i++) {
+      var c = nachFeldNeu[ids[i]];
+      if (!c) return false;              // gezeigtes Feld fehlt jetzt → Neubau
+      if (!istLiveFeld(c)) continue;     // freie Karte hat keine Satz-Zeilen
+      var karte = kartenNachFeld[ids[i]];
+      if (!karte || !karte.isConnected) return false;
+      var zeilen = karte.querySelectorAll('.trow');
+      if (zeilen.length !== 2) return false;
+      for (var t = 0; t < 2; t++) {
+        var alt = zeilen[t].querySelector('.trow__sets');
+        if (!alt) return false;
+        zeilen[t].replaceChild(satzSpalte(c, t, 1 - t), alt);
+      }
+    }
+    return true;
+  }
+
+  /** `voll = true` erzwingt den Neubau — für Aufrufer, die etwas anderes als
+   *  die Satzstände ändern (der Sekundentakt der Aufruf-Uhr). */
+  function render(data, voll) {
+    // Die Messung umschließt den ganzen Aufbau — `renderIntern` kehrt an
+    // mehreren Stellen zurück (Leerstand, Hallen-Rotation), eine Messung im
+    // Rumpf träfe deshalb nur einen Teil der Fälle.
+    if (renderMessen === '0') return renderMitPatch(data, voll);
+    var start = performance.now();
+    try { return renderMitPatch(data, voll); }
+    finally { messVermerken(performance.now() - start); }
+  }
+
+  /** Nachbessern, wo es reicht — sonst neu bauen. */
+  function renderMitPatch(data, voll) {
+    var jetzt = Date.now();
+    var alt = lastData;
+    var neueCourts = Array.isArray(data && data.courts) ? data.courts : [];
+    var alteCourts = Array.isArray(alt && alt.courts) ? alt.courts : [];
+    // Zwangs-Neubau spätestens alle 30 s: Der Patch fasst nur die Ziffern an;
+    // hat sich unbemerkt etwas anderes verschoben (fehlende Karte, Fehler in
+    // der Regel), heilt sich die Anzeige so von selbst, statt bis zum
+    // nächsten Match-Wechsel falsch zu bleiben.
+    var faellig = voll || jetzt - letzterVollRender >= VOLL_RENDER_SPAETESTENS_MS;
+    var timer = (data && data.callTimer) || null;
+    // Gegen die Sicht des letzten BAUS vergleichen, nicht gegen eine frisch
+    // gebildete: Beim Umschalten der Hallen-Rotation sind die Felder
+    // dieselben, nur `hallIdx` ist weiter — würden beide Signaturen jetzt
+    // gebildet, wären sie gleich und die Rotation bliebe stehen.
+    var jetztSicht = sichtSignatur(neueCourts);
+    var brettGleich = letzteSicht !== '' && letzteSicht === jetztSicht
+      && alteCourts.length > 0
+      // Ein Wechsel der Aufruf-Timer-Einstellung ändert Chips auf allen Karten.
+      && JSON.stringify((alt && alt.callTimer) || null) === JSON.stringify(timer);
+
+    if (!faellig && brettGleich) {
+      var alteNachFeld = {}, neueNachFeld = {};
+      alteCourts.forEach(function (c) { alteNachFeld[c.court_id] = c; });
+      neueCourts.forEach(function (c) { neueNachFeld[c.court_id] = c; });
+      // Geprüft wird nur, was auch auf dem Schirm steht — bei Rotation oder
+      // `?halle=` ist das eine Teilmenge.
+      var gezeigt = Object.keys(kartenNachFeld);
+      var allePatchbar = gezeigt.length > 0 && gezeigt.every(function (id) {
+        return istPatchbar(alteNachFeld[id], neueNachFeld[id], true, timer);
+      });
+      // Hat sich an keinem gezeigten Feld der Satzstand geändert, ist gar
+      // nichts zu tun (etwa ein Anstoß, der nur eine Meldung betraf).
+      var etwasNeu = gezeigt.some(function (id) {
+        return !satzstandGleich(alteNachFeld[id], neueNachFeld[id]);
+      });
+      if (allePatchbar && (!etwasNeu || patcheKarten(neueNachFeld))) {
+        // `lastData` fortschreiben, auch wenn nicht neu gebaut wurde: Die
+        // Hallen-Rotation und der Uhr-Takt zeichnen später aus diesen Daten.
+        lastData = data;
+        return;
+      }
+    }
+    letzterVollRender = jetzt;
+    kartenNachFeld = {};
+    renderIntern(data);
+    // **Nach** dem Bauen: `renderIntern` kann `stopHallRotation()` aufrufen
+    // und dabei `hallIdx` zurücksetzen. Vorher gemerkt, beschriebe der
+    // Schlüssel eine Sicht, die so nie gezeichnet wurde — und der nächste
+    // unveränderte Abruf löste einen überflüssigen Neubau aus
+    // (Review-Fund 19.08.2026).
+    letzteSicht = sichtSignatur(neueCourts);
+  }
+
+  function renderIntern(data) {
     lastData = data;
-    // Aufruf-Timer-Bezug aus dem Poll übernehmen (Server-Uhr gegen Geräte-Drift).
-    callNow = (data && typeof data.serverNowMs === 'number' && data.serverNowMs > 0)
-      ? data.serverNowMs : Date.now();
+    // Der Uhr-Versatz wird NICHT hier gesetzt, sondern beim Empfang der
+    // Antwort: `render` läuft auch mit gemerkten Daten (Hallen-Rotation,
+    // Uhr-Takt), und deren `serverNowMs` ist dann längst alt — der Versatz
+    // liefe mit jedem solchen Render weiter zurück.
     callTimer = (data && data.callTimer) || null;
     var board = document.getElementById('board');
     board.textContent = '';
@@ -514,7 +770,7 @@ main {
     if (rotating) {
       var idx = hallIdx % groups.length;
       var g = groups[idx];
-      setBarHall(g.name, idx, groups.length); // Name + „1 / N" in die Kopfzeile
+      setBarHall(g.name, idx, groups.length, groupColor(g)); // Name + „1 / N" in die Kopfzeile
       board.appendChild(buildGrid(g));
       startHallRotation();
       return;
@@ -525,7 +781,7 @@ main {
     // Mehr-Gruppen-Fall (benannt + unbenannt) fällt auf gestapelte Grids zurück.
     stopHallRotation();
     if (groups.length === 1) {
-      setBarHall(groups[0].name || '');
+      setBarHall(groups[0].name || '', 0, 1, groupColor(groups[0]));
       board.appendChild(buildGrid(groups[0]));
     } else {
       setBarHall('');
@@ -546,17 +802,85 @@ main {
   // Renderpfad → kein Flackern. Der Monitor-WS-Nudge (irgendein Feld hat sich
   // geändert) löst den Fetch niedrig-latent aus; der 250-ms-Poll ist nur noch
   // der Stille-/Ausfall-Fallback und pausiert, solange frische Nudges kommen.
-  var FALLBACK_MS = 250;      // Fallback-Poll-Takt (früher POLL_OK_MS = 5000)
   var FAIL_MS = 2000;         // nach Fehler kurz ruhiger (früher POLL_FAIL_MS = 8000)
-  var PUSH_FRESH_MS = 1200;   // so lange nach dem letzten Nudge gilt Push als „frisch"
   var COALESCE_MS = 60;       // Nudge-Bursts bündeln: höchstens ~1 Fetch/60 ms
   var errorCount = 0;
-  var lastNudgeAt = 0;
   var mwsOpen = false;
+  var mwsOffenSeitMs = 0;     // seit wann die aktuelle Leitung steht (S6)
+
+  // ── Gesundheit des Push-Kanals (Spec monitor-livestand-push, S6) ────────
+  //
+  // Die alte Regel („Socket offen UND letzter Anstoß < 1,2 s her")
+  // verwechselte „der Kanal lebt" mit „es passiert gerade etwas". Solange
+  // der Fallback viermal je Sekunde lief, fiel das nicht auf; mit dem
+  // langsameren Takt schon: Eine ruhige Halle zwischen zwei Ballwechseln
+  // sähe aus wie ein toter Kanal — und ein halbtoter Socket meldet umgekehrt
+  // minutenlang OPEN, ohne dass je etwas ankommt.
+  //
+  // Deshalb zählt jetzt JEDES Frame vom Server, auch der Herzschlag alle
+  // zehn Sekunden.
+  //
+  // **Inline-Kopie von `src/io/pushHealth.mjs`** — dort steht die kanonische
+  // Fassung samt Test (`scripts/test-push-health.mjs`, eigener CI-Schritt).
+  // Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+  // `monitor.html`.
+  var HERZSCHLAG_STILL_MS = 25000;
+  var FALLBACK_LANGSAM_MS = 4000;
+  var FALLBACK_SCHNELL_MS = 250;
+  var lastServerFrameAt = 0;  // letztes Frame: Anstoß ODER Herzschlag
+  var lastFetchOk = true;
+  var langsamErlaubt = false; // aus der Konfiguration (`pushFallbackSlow`)
+  function pushGesund(z, nowMs) {
+    if (!z || !z.wsOpen) return false;
+    if (z.lastFetchOk === false) return false;
+    if ((z.failures || 0) > 0) return false;
+    var letztes = z.lastServerFrameMs || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes < HERZSCHLAG_STILL_MS;
+  }
+  function fallbackTakt(gesund, erlaubt) {
+    return gesund && erlaubt ? FALLBACK_LANGSAM_MS : FALLBACK_SCHNELL_MS;
+  }
+  function kanalIstTot(wsOffen, letztesFrame, nowMs) {
+    if (!wsOffen) return false;
+    var letztes = letztesFrame || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes >= HERZSCHLAG_STILL_MS;
+  }
+  /** Der Zustand, wie ihn die Regel erwartet. */
+  function kanalZustand() {
+    return {
+      wsOpen: mwsOpen,
+      lastServerFrameMs: lastServerFrameAt,
+      lastFetchOk: lastFetchOk,
+      failures: errorCount,
+    };
+  }
   var fetching = false, refetchQueued = false;
   var backoffUntil = 0;                 // nach einem Fehler kurz zurückhalten
   var coalesceTimer = null, lastFetchStart = 0;
-  var lastSeqByCourt = {};              // lastSeq-Guard je Feld
+  var lastSeqByCourt = {};              // zuletzt gezeigte Ordnungszahl je Feld
+
+  /** Soll ein eintreffender Stand angewendet werden? (Spec
+   *  monitor-livestand-push, S4)
+   *
+   *  Push nur bei echt neuerer Ordnungszahl; ein Voll-Abruf darf gleichziehen
+   *  — er trägt denselben Stand, den der Nudge angekündigt hat, und darf ihn
+   *  auch dann noch berichtigen (BTP-Rückfall). `0` heißt „keine Ordnung
+   *  bekannt" (älterer Server) und blockiert nie: Eine eingefrorene Anzeige
+   *  wäre der schlimmere Fehler.
+   *
+   *  **Inline-Kopie von `src/io/monitorSeq.mjs`** — dort steht die kanonische
+   *  Fassung samt Test (`scripts/test-monitor-seq.mjs`, eigener CI-Schritt).
+   *  Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `monitor.html`. */
+  function seqAnwenden(gezeigtSeq, seq, quelle) {
+    var gezeigt = Number.isFinite(gezeigtSeq) ? gezeigtSeq : 0;
+    var neu = Number.isFinite(seq) ? seq : 0;
+    if (neu <= 0) return true;
+    if (gezeigt <= 0) return true;
+    return quelle === 'push' ? neu > gezeigt : neu >= gezeigt;
+  }
 
   function showOffline(show) {
     var el = document.getElementById('offline');
@@ -599,7 +923,12 @@ main {
   var DEASSIGN_AFTER = 3;
   function checkReassignment() {
     if (!deviceId) return;
-    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+    // `src=check` statt `push`/`poll`: Dieser Abruf ist KEINE Anzeige-
+    // Aktualisierung, sondern die sekündliche Frage „bin ich noch diesem
+    // Ziel zugewiesen?". Ohne eigene Kennzeichnung liefe er in den
+    // Court-Monitor-Zähler und verfälschte die Messung, an der alle
+    // Folge-Etappen hängen (Review-Fund 19.08.2026).
+    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;
@@ -675,26 +1004,91 @@ main {
     identifyTimer = setTimeout(function () { ov.classList.remove('show'); }, 10000);
   }
 
-  function healthUrl() {
+  // Was den nächsten Abruf ausgelöst hat (Spec monitor-livestand-push, S0).
+  // Fallen Nudge und Fallback-Takt zusammen, gewinnt 'push': Der Abruf wäre
+  // durch den Nudge ohnehin gekommen, der Takt hat ihn nicht verursacht.
+  //
+  // Zurückgesetzt wird beim **Start** des Fetchs, nicht an seinem Ende: Trifft
+  // ein Nudge WÄHREND eines laufenden Fetchs ein, merkt der In-Flight-Schutz
+  // nur einen Nachschlag vor (`refetchQueued`) — und genau dieser Nachschlag
+  // ist der vom Nudge verursachte Abruf. Ein Rücksetzen in `pollDone` hätte
+  // ihn als 'poll' abgeschickt und damit die Push-Zahl systematisch klein
+  // gerechnet (Review-Fund 19.08.2026); bei zwanzig Feldern ist der
+  // Nachschlag-Fall der Normalfall, nicht die Ausnahme.
+  var naechsteQuelle = 'poll';
+  function healthUrl(quelle) {
     // Geraete-ID als Heartbeat-Markierung (v0.9.22) — Server zaehlt
     // den /health-Poll dann als Online-Lebenszeichen.
-    return deviceId
+    var u = deviceId
       ? BASE + 'health?device=' + encodeURIComponent(deviceId)
       : BASE + 'health';
+    // `src` trennt in der Messung nudge-getriebene von Fallback-Abrufen.
+    return u + (u.indexOf('?') >= 0 ? '&' : '?') + 'src=' + quelle;
   }
   // Der eigentliche Health-Fetch (ohne eigene Terminierung). In-Flight-Schutz:
   // Nudge und Fallback teilen sich diesen Fetch; läuft schon einer, wird EIN
   // Nachschlag gemerkt, damit am Ende sicher der neueste Stand geholt wird.
+  // Marke der zuletzt empfangenen Antwort. Damit fragt der Fallback-Poll
+  // „hat sich etwas geändert?" statt „gib mir alles" — bei unverändertem
+  // Stand kommt eine leere Bestätigung (HTTP 304) statt rund 16 KB
+  // (Spec monitor-livestand-push, S1). Der Browser fragt nicht von selbst
+  // bedingt nach: `cache: 'no-store'` schaltet seinen eigenen Zwischen-
+  // speicher ab, deshalb setzen wir den Kopf hier von Hand.
+  var letzteMarke = null;
   function pollHealth() {
     if (fetching) { refetchQueued = true; return; }
     fetching = true;
-    fetch(healthUrl(), { cache: 'no-store' })
+    // Quelle beim Abschicken festhalten und sofort zurücksetzen: Ein Nudge,
+    // der jetzt noch eintrifft, gehört zum NÄCHSTEN Abruf, nicht zu diesem.
+    var quelle = naechsteQuelle;
+    naechsteQuelle = 'poll';
+    var kopf = letzteMarke ? { 'If-None-Match': letzteMarke } : undefined;
+    fetch(healthUrl(quelle), { cache: 'no-store', headers: kopf })
       .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        // Erst prüfen, DANN entwarnen: Ein dauerhaft fehlerhafter Status
+        // (Relay-404 bei unbekanntem Namespace, 502/503) setzte sonst bei
+        // jeder Antwort den Fehlerzähler zurück, bevor er geworfen wird —
+        // die Schwelle für die Offline-Blende wäre nie erreicht und der TV
+        // zeigte endlos den eingefrorenen Stand (Review-Fund 19.08.2026).
+        if (r.status !== 304 && !r.ok) throw new Error('HTTP ' + r.status);
+        errorCount = 0; backoffUntil = 0; showOffline(false);
+        lastFetchOk = true;
+        // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
+        // nichts zu rendern — und kein Grund, „offline" zu melden.
+        if (r.status === 304) { pollDone(); return null; }
+        var marke = r.headers.get('ETag');
+        if (marke) letzteMarke = marke;
         return r.json();
       })
       .then(function (data) {
-        errorCount = 0; backoffUntil = 0; showOffline(false);
+        if (!data) return;   // war ein 304
+        // Uhr-Versatz genau hier — nur eine frisch empfangene Antwort trägt
+        // eine gültige Server-Zeit (siehe Kommentar in `renderIntern`).
+        if (typeof data.serverNowMs === 'number' && data.serverNowMs > 0) {
+          callOffset = data.serverNowMs - Date.now();
+        }
+        // Ordnungszahlen je Feld fortschreiben (Spec monitor-livestand-push,
+        // S4). Sie stehen NEBEN der Feld-Liste (`seqs`: CourtID → Zahl),
+        // nicht darin — sonst wechselte die Marke der Antwort bei jedem
+        // Anstoß und die Bestätigung ohne Nutzdaten wäre wirkungslos.
+        //
+        // Die Übersicht rendert heute immer alles auf einmal; sobald sie mit
+        // S5 einzelne Karten patcht, entscheidet `seqAnwenden` je Feld, ob
+        // der neue Stand angewendet wird. Bis dahin ist das Mitführen die
+        // Vorbereitung — und schon jetzt der Grund, warum ein überholter
+        // Nudge keinen zweiten Abruf auslöst.
+        // Schalter aus der Konfiguration (Spec monitor-livestand-push, S6).
+        // Fehlt er (älterer Server), bleibt es beim schnellen Takt — der
+        // Schalter kann nur entlasten, nie etwas kaputt machen.
+        langsamErlaubt = !!(data.callTimer && data.callTimer.pushFallbackSlow);
+        var seqs = data.seqs || {};
+        Object.keys(seqs).forEach(function (id) {
+          var wert = seqs[id];
+          if (!Number.isFinite(wert) || wert <= 0) return;
+          var feld = Number(id);
+          if (!Number.isFinite(feld)) return;
+          if (wert > (lastSeqByCourt[feld] || 0)) lastSeqByCourt[feld] = wert;
+        });
         render(data);
         // Turniername könnten wir aus health nicht, /api/snapshot wäre besser —
         // erstmal leer lassen, kein Drama für die Funktionalität.
@@ -702,6 +1096,11 @@ main {
       })
       .catch(function () {
         errorCount++;
+        // Ein EINZIGER Fehlversuch macht den Kanal ungesund und schaltet
+        // sofort auf den schnellen Takt zurück (Spec
+        // monitor-livestand-push, S6). Lieber ein paar überflüssige Abrufe
+        // als eine Anzeige, die einen Ausfall verschläft.
+        lastFetchOk = false;
         if (errorCount >= 2) showOffline(true);
         backoffUntil = Date.now() + FAIL_MS; // moderat: nach Fehler kurz warten
         pollDone();
@@ -725,10 +1124,10 @@ main {
       }, wait);
     }
   }
-  // Push gilt als „frisch", solange die WS offen ist UND kürzlich ein Nudge
-  // (irgendein Feld) kam. Dann pausiert der Fallback-Poll.
+  // Solange der Kanal gesund ist, pausiert der Sicherheits-Poll bzw. läuft
+  // langsam. Siehe `pushGesund` oben.
   function pushHealthy() {
-    return mwsOpen && (Date.now() - lastNudgeAt) < PUSH_FRESH_MS;
+    return pushGesund(kanalZustand(), Date.now());
   }
   // Sponsor-Leiste (Turnierlogo + als „in Leiste" markierte Werbebilder) —
   // unabhängig vom Health-Poll, selten aktualisiert (Bilder ändern sich kaum).
@@ -736,6 +1135,7 @@ main {
   (function sponsorBar() {
     var box = document.getElementById('sponsor-bar');
     if (!box) return;
+    // Ohne Abgleich auf Unverändertheit — Begründung siehe monitor.html.
     function paint(st) {
       var h = '';
       if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
@@ -755,10 +1155,71 @@ main {
 
   // ── Poll-Fallback + Monitor-WS-Nudge-Client (A1, ADR 0016) ────────────
   requestPoll();
-  // Fallback-Takt: nur pollen, wenn KEIN frischer Push da ist. Solange Nudges
-  // (irgendein Feld) kommen, ist der Poll pausiert; nach >~1,2 s Stille ODER
-  // bei WS-Abriss (mwsOpen=false) läuft er sofort wieder.
-  setInterval(function () { if (!pushHealthy()) requestPoll(); }, FALLBACK_MS);
+  // Sicherheits-Poll (Spec monitor-livestand-push, S6). Er läuft im
+  // 250-ms-Raster und entscheidet bei jedem Tick neu, wie lange die Seite
+  // ohne eigenen Abruf auskommen darf:
+  //
+  // - Kanal **nicht** gesund → 250 ms (wie bisher, viermal je Sekunde).
+  // - Kanal gesund, Schalter gesetzt → 4 s.
+  // - Kanal gesund, Schalter aus → weiterhin 250 ms.
+  //
+  // **Er hört nie ganz auf**, auch bei kerngesundem Kanal nicht. Vor dieser
+  // Etappe konnte er pausieren, weil „gesund" an einen Anstoß < 1,2 s hing
+  // und damit von selbst kurzlebig war; der Herzschlag hält ihn jetzt
+  // dauerhaft. Nicht jede Änderung stößt an: Feld-Beschriftungen,
+  // Hallen-Zuordnung und alles aus der Konfiguration (Aufruf-Schwellen,
+  // Hallen-Farben) heben nur die Revision. Ohne Abruf bliebe die Tafel
+  // darauf stehen (Review-Fund 19.08.2026).
+  //
+  // Gemessen wird gegen den **tatsächlich letzten Abruf**, nicht gegen einen
+  // eigenen Zähler: In einer Halle mit vielen Anstößen fällt so gar kein
+  // zusätzlicher Abruf an.
+  //
+  // Bleibt der Herzschlag länger als 25 s aus, gilt der Kanal als tot: Der
+  // Socket wird aktiv geschlossen und der Reconnect geplant. Bewusste Umkehr
+  // des früheren „kein Force-Close bei Stille" — das galt nur, weil der
+  // schnelle Poll ohnehin alles auffing.
+  setInterval(function () {
+    var jetzt = Date.now();
+    // `|| mwsOffenSeitMs`: Eine Leitung, die seit dem Verbinden NIE etwas
+    // geliefert hat (WLAN-Roam direkt nach dem Handschlag), stünde sonst für
+    // immer auf 0 — und 0 heißt „hat sich noch nicht bewährt", also niemals
+    // tot. Sie bliebe dauerhaft im schnellen Takt hängen, genau der Last,
+    // die diese Etappe loswerden will (Review-Fund 19.08.2026).
+    if (kanalIstTot(mwsOpen, lastServerFrameAt || mwsOffenSeitMs, jetzt)) {
+      mlog('warn', 'mws_stale_close', { stillMs: jetzt - (lastServerFrameAt || mwsOffenSeitMs) });
+      mwsTrennen();
+    }
+    var takt = fallbackTakt(pushGesund(kanalZustand(), jetzt), langsamErlaubt);
+    if (jetzt - lastFetchStart >= takt) requestPoll();
+  }, FALLBACK_SCHNELL_MS);
+
+  // Sekundentakt der Aufruf-Uhr. Bis zum Antwortcache (Spec
+  // monitor-livestand-push, S1) lief sie beiläufig mit: Viermal je Sekunde
+  // kam ein voller Stand und die Seite zeichnete komplett neu. Seit ein
+  // unveränderter Stand mit einer leeren Bestätigung beantwortet wird, gäbe
+  // es ohne diesen Takt keinen Anlass mehr zu zeichnen — die Minutenzahl
+  // stünde still. Er läuft nur, solange überhaupt eine Uhr sichtbar ist,
+  // und ein Render je Sekunde bleibt deutlich sparsamer als die vier davor.
+  setInterval(function () {
+    if (!callTimer || !callTimer.enabled || !lastData) return;
+    var courts = (lastData && lastData.courts) || [];
+    // Dieselbe Bedingung wie `renderCourt`: Der Chip erscheint NUR in der
+    // Wartephase (aufgerufen, noch nicht am Zählen). `on_court_since_ms`
+    // allein zu prüfen genügt nicht — es bleibt auch am laufenden Spiel
+    // gesetzt, und in einer Halle, in der überall gezählt wird, baute die
+    // Seite dann jede Sekunde das ganze Board neu, ohne dass sich etwas
+    // ändert: genau der Posten, den diese Etappe einsparen soll
+    // (Review-Fund 19.08.2026).
+    var hatUhr = courts.some(function (c) {
+      if (typeof c.on_court_since_ms !== 'number' || c.on_court_since_ms <= 0) return false;
+      var isPause = !!(c.injury || c.official_call);
+      return !isPause && !hasStarted(c);
+    });
+    // Voll-Render erzwingen: Der Teil-Patch fasst nur die Satzstände an, die
+    // Uhr steht im Kopf der Karte — sie bliebe sonst stehen.
+    if (hatUhr) render(lastData, true);
+  }, 1000);
 
   // Der Server schickt über den Monitor-WS nur „Feld X geändert, seq N" (keine
   // Score-Daten); wir lösen daraufhin den bestehenden Health-Fetch aus. Die
@@ -778,29 +1239,58 @@ main {
     catch (e) { mwsSchedule(); return; }
     mws.onopen = function () {
       mwsOpen = true; mwsBackoff = 1000;
-      // Nach Server-/Relay-Neustart springt die seq wieder auf 0. Der alte
-      // lastSeq-Höchstwert würde dann JEDEN neuen Nudge als „veraltet"
-      // verwerfen, bis der Server den alten Wert überholt → Anzeige hängt.
-      // Darum je frischer Verbindung zurücksetzen (innerhalb einer Verbindung
-      // ist der Guard dank TCP-Ordnung ohnehin redundant).
+      // Die frische Verbindung hat sich noch nicht bewährt: 0 heißt „noch
+      // kein Frame" — beide Regeln lesen das als „nicht gesund, aber auch
+      // nicht tot". Bliebe hier der alte, über 25 s alte Zeitpunkt stehen,
+      // erklärte der nächste Tick den eben verbundenen Socket sofort wieder
+      // für tot (Review-Fund 19.08.2026). Der Zeitpunkt des Verbindens dient
+      // als Ersatz-Bezug, damit eine Leitung, die nie etwas liefert, nicht
+      // ewig als „noch nicht bewährt" durchgeht.
+      lastServerFrameAt = 0;
+      mwsOffenSeitMs = Date.now();
+      // Zurücksetzen je frischer Verbindung. Seit S4 startet die Sequenz
+      // beim Server bei der Uhrzeit und ist über Neustarts monoton — das
+      // Zurücksetzen bleibt trotzdem: Es kostet nichts, und innerhalb einer
+      // Verbindung ist der Guard dank TCP-Ordnung ohnehin redundant.
       lastSeqByCourt = {};
       mlog('info', 'mws_open');
     };
     mws.onmessage = function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      // **Jedes** Frame vom Server beweist, dass der Kanal lebt — auch der
+      // Herzschlag, der gar keine Nachricht über ein Feld ist (Spec
+      // monitor-livestand-push, S6).
+      lastServerFrameAt = Date.now();
       if (typeof msg.court !== 'number' || typeof msg.seq !== 'number') return;
-      // lastSeq-Guard je Feld: veraltete/doppelte Nudges (seq ≤ zuletzt) weg.
-      var prev = lastSeqByCourt[msg.court] || 0;
-      if (msg.seq <= prev) return;
+      // Veraltete/doppelte Nudges verwerfen (Spec monitor-livestand-push, S4).
+      if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, 'push')) return;
       lastSeqByCourt[msg.court] = msg.seq;
-      // Jedes gültige Nudge beweist: der Push-Kanal lebt → Poll pausieren und
-      // den Voll-Stand niedrig-latent holen (coalesct).
-      lastNudgeAt = Date.now();
+      // Ein gültiger Anstoß heißt: Es hat sich etwas geändert → den
+      // Voll-Stand niedrig-latent holen (coalesct).
+      naechsteQuelle = 'push';
       requestPoll();
     };
     mws.onclose = function () { mwsOpen = false; mwsSchedule(); };
     mws.onerror = function () { /* onclose folgt und plant den Reconnect */ };
+  }
+  // Aktives Trennen bei totem Kanal (S6). `close()` allein genügt nicht: Ein
+  // schwarzlochender Socket hängt danach bis zum Handshake-Timeout des
+  // Browsers in CLOSING, und der Wächter unten verbindet nur bei CLOSED neu.
+  // Deshalb hängen wir die Ereignisse ab, geben die Referenz frei und planen
+  // den Reconnect selbst — sonst meldete das späte `onclose` des alten
+  // Sockets `mwsOpen = false` für den längst neuen.
+  function mwsTrennen() {
+    var alt = mws;
+    mws = null;
+    mwsOpen = false;
+    if (alt) {
+      alt.onopen = null; alt.onmessage = null; alt.onclose = null; alt.onerror = null;
+      try { alt.close(); } catch (e) { /* egal, die Referenz ist weg */ }
+    }
+    lastServerFrameAt = 0;
+    mwsOffenSeitMs = 0;
+    mwsSchedule();
   }
   function mwsSchedule() {
     // Exponentielles Backoff – schont im Cloud-Modus den Relay, wenn noch kein
@@ -811,7 +1301,9 @@ main {
   }
   // Watchdog: einziger Reconnect-Treiber (Muster aus tablet.html). Verbindet
   // neu, sobald der Socket fehlt/geschlossen ist und das Backoff-Fenster
-  // abgelaufen ist. KEIN Force-Close bei Stille – die deckt der Poll-Fallback ab.
+  // abgelaufen ist. Den Force-Close bei ausbleibendem Herzschlag erledigt
+  // seit S6 `mwsTrennen()` im Sicherheits-Poll oben — es setzt `mws` auf
+  // null, sodass hier sofort der `!mws`-Zweig greift.
   setInterval(function () {
     if ((!mws || mws.readyState === WebSocket.CLOSED) && Date.now() >= mwsNextAt) {
       mwsConnect();

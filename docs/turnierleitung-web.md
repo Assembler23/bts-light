@@ -6,7 +6,8 @@ das Internet. Mehrere Helfer können gleichzeitig arbeiten.
 
 Diese Datei beschreibt **Einrichtung und Betrieb**. Wie es innen aussieht,
 steht in [features/turnierleitung-web.md](features/turnierleitung-web.md)
-(Spezifikation) und [cloud-relay.md](cloud-relay.md) (Wire-Ebene).
+(Spezifikation), [features/tl-web-panelsystem.md](features/tl-web-panelsystem.md)
+(Panels und Profile) und [cloud-relay.md](cloud-relay.md) (Wire-Ebene).
 
 ## Einrichten
 
@@ -56,29 +57,77 @@ LAN+Cloud voraus.
   als flüchtiger Toast, der weg wäre, während noch getippt wird.
 - **Aufrufen:** Der Knopf am Feld löst den zweiten bzw. dritten Aufruf aus.
   Die Stufe zählt der Turnier-PC — alle Geräte, auch die Desktop-App, zeigen
-  dieselbe Zahl.
+  dieselbe Zahl. Im Regelfall endet der Knopf nach dem dritten Aufruf und
+  verschwindet, sobald Punkte gefallen sind. Mit der Profil-Option
+  **„Aufrufe unbegrenzt"** (Anzeige-Abschnitt des Profil-Editors, seit
+  17.08.2026) bleibt er dagegen immer da — auch bei laufendem Spiel und
+  über den dritten Aufruf hinaus („Erneut aufrufen"). Ab dem vierten
+  Aufruf erklingt die schlichte Feld-Ansage ohne Stufenwort; „Dritter und
+  letzter Aufruf" wird nicht wiederholt. Bei einem **laufenden** Spiel
+  (Punkte gefallen) spricht das Ansage-Gerät grundsätzlich ohne
+  Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
+  Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
+  Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
+- **Bitte anfangen:** Steht ein Spiel auf dem Feld, ohne dass ein Punkt
+  fällt, löst „Bitte anfangen" im ⋯-Menü der Kachel die Ansage
+  **„Feld X. Bitte mit dem Spielen beginnen."** aus. Das ist **kein**
+  Aufruf: Die Aufruf-Zählung bleibt stehen, das Abzeichen springt nicht,
+  und du kannst beliebig oft nachfassen. Der Knopf verschwindet, sobald
+  gezählt wird.
+- **Bedienung nachrufen:** Ist dem Feld ein Zähltafelbediener zugewiesen,
+  ruft „Bedienung nachrufen" im ⋯-Menü der Kachel ihn aus
+  („Feld 3. Meier, bitte als Tabletbedienung melden."). Ab dem zweiten Mal
+  mit Stufenwort. Das ist **kein** Spieler-Aufruf: Die Aufruf-Zählung der
+  Spieler bleibt stehen. Ohne zugewiesene Bedienung gibt es den Knopf nicht.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
-  den Aufruf zurück. Daneben der **Nachruf** (beide Parteien oder nur eine).
+  den Aufruf zurück.
+- **Das ⋮-Menü an einer Wartelisten-Zeile:** Alles, was seltener gebraucht
+  wird, steckt dahinter — **Nachruf** (beide Parteien oder nur eine), der
+  **Auto-Vergabe**-Umschalter und der **Hallen-Wähler**. Sichtbar bleibt
+  an der Zeile nur, was ständig gebraucht wird; so passt eine Zeile auch
+  auf einem schmalen Tablet in eine Zeile statt in vier.
 - **Was steht wo:** Jedes Spiel nennt seine **Klasse** in der gewohnten
   Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
   benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es
   geht. Fehlt eine der beiden Hälften, steht die andere für sich.
+- **Bereitschaft als Farbe statt Text** (seit 17.08.2026): Die früheren
+  Hinweistexte („nicht bereit", „X spielt gerade", „pausiert noch bis …",
+  „ohne Halle") machten die Liste unübersichtlich und sind weg. Stattdessen:
+  Ein Name mit **rotem** Hintergrund steht gerade auf einem Feld, einer mit
+  **orangem** Hintergrund ist noch in seiner Mindestpause — daneben zählt
+  eine **Eieruhr** die verbleibende Wartezeit sekündlich herunter. Wer es
+  in Worten will: Der Mauszeiger (bzw. langes Tippen) auf dem Namen zeigt
+  „spielt gerade" bzw. „pausiert noch bis …". Ein Spiel ohne
+  Hallenzuordnung erkennst du schlicht am **fehlenden Hallen-Kürzel**.
+- **Jeder Name ist ein Link** auf die Spielerseite von badhub
+  (`badhub.de/spieler/<Nr>/live`), erkennbar an der gepunkteten
+  Unterstreichung; er öffnet in einem neuen Tab. Spieler ohne
+  Lizenznummer in BTP bleiben unverlinkt. Seit 18.08.2026 gilt das an
+  **allen drei Stellen**: in der Spielliste, in den **Feld-Kacheln** der
+  laufenden Spiele und in der Liste der **beendeten Spiele**. Ein Klick
+  auf den Namen einer Feld-Kachel öffnet nur die Spielerseite — er nimmt
+  das Spiel **nicht** zusätzlich auf; ein vom Namen aus begonnener **Zug**
+  auf ein anderes Feld funktioniert weiterhin.
 - **Die Felder bleiben immer vollständig sichtbar**, nur die Spielliste
   scrollt für sich (Wunsch vom 10.08.2026 nach dem Turniertest): Auch ein
   Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen. Bei
   sehr vielen Feldern verkleinern sich die Kacheln dafür stufenweise
   (kleinere Abstände, dann kleinere Schrift), bevor überhaupt gerollt wird.
 - **Zähltafel-Warteschlange:** Ist die Zähltafel-Verwaltung in bts-light
-  eingeschaltet, erscheint rechts ein eigener aufklappbarer Abschnitt mit
-  den wartenden Zähltafelbedienern. Von dort lässt sich jemand **vorziehen**
-  (an den Anfang der Schlange), aus der Schlange **entfernen** oder von Hand
-  neu **hinzufügen** — dieselben Aktionen wie am Turnier-PC. Ist die
-  Verwaltung ausgeschaltet, bleibt der Abschnitt unsichtbar.
-- **Beendet:** ein zugeklappter Abschnitt unter der Spielliste, neueste
-  zuerst. Aufgabe, kampflos gewertete und disqualifizierte Spiele tragen
-  eine eigene Kennzeichnung neben dem Satzstand. Über den Cloud-Weg ist auch
-  diese Liste ggf. gekürzt.
+  eingeschaltet, erscheint ein eigenes Panel mit den wartenden
+  Zähltafelbedienern. Von dort lässt sich jemand **vorziehen** (an den
+  Anfang der Schlange), aus der Schlange **entfernen** oder von Hand neu
+  **hinzufügen** — dieselben Aktionen wie am Turnier-PC. Ist die Verwaltung
+  ausgeschaltet, gibt es das Panel gar nicht.
+- **Beendet:** ein eigenes Panel unter der Spielliste, neueste zuerst.
+  Aufgabe, kampflos gewertete und disqualifizierte Spiele tragen eine eigene
+  Kennzeichnung neben dem Satzstand. Über den Cloud-Weg ist auch diese Liste
+  ggf. gekürzt.
+- **Was zu sehen ist, bestimmst du:** Jeder Abschnitt der Seite ist ein
+  **Panel**, das sich einzeln ausblenden, umsortieren und in der Höhe
+  verteilen lässt — gespeichert in einem **Profil** je Gerät. Siehe
+  „Panels" und „Profile" weiter unten.
 
 ### Die Farbe eines Feldes
 
@@ -104,13 +153,27 @@ gegenüber „auf dem Feld seit") sagen dasselbe in Worten.
 
 Zusätzlich zum Zustands-Streifen bekommt eine laufende Kachel bei Satz- oder
 Matchball einen zweiten, umlaufenden Rahmen plus Abzeichen: **„Satzball"**
-(gelb) für den letzten Punkt eines Satzes, **„Matchball"** (rot, pulsierend
-— das Feld wird gleich frei) für den letzten Punkt des Matches. Das ist nur
-eine Planungshilfe für die Turnierleitung, keine Wertungslogik, und
-erscheint **ausschließlich hier**, nie auf den Hallen-TVs (Court-Monitor/
-Overview) — bewusste Scope-Entscheidung vom 20.07.2026, Plan 16. Die
-Streifenfarbe bleibt davon unberührt: Rot heißt am Streifen weiterhin
-„überfällig", nicht „Matchball".
+für den letzten Punkt eines Satzes, **„Matchball"** (pulsierend — das Feld
+wird gleich frei) für den letzten Punkt des Matches. Das ist nur eine
+Planungshilfe für die Turnierleitung, keine Wertungslogik, und erscheint
+**ausschließlich hier**, nie auf den Hallen-TVs (Court-Monitor/Overview) —
+bewusste Scope-Entscheidung vom 20.07.2026, Plan 16.
+
+#### Abzeichen: drei Dringlichkeitsstufen
+
+Alle kleinen Abzeichen an Feldkacheln und Listenzeilen folgen **einer**
+Skala — man muss sich nicht je Abzeichen merken, was seine Farbe bedeutet:
+
+| Stufe | Sieht so aus | Was da steht |
+|---|---|---|
+| **Info** | ruhig, nur umrandet | „Satzball", „Matchball", „manuell einsortiert" — Planungshilfe, nichts zu tun |
+| **Warnung** | gelb-orange gefüllt | „⏸ Auto-Vergabe aus", Schiedsrichter-Konflikt — bewusst gesetzt oder nachsehen |
+| **Alarm** | rot gefüllt | überfällig, gesperrt, Verletzung, „TL gerufen" — da muss jemand hin |
+
+Info-Abzeichen sind bewusst nur **umrandet** statt ausgefüllt: „Matchball"
+ist dadurch auf den ersten Blick von einem Alarm zu unterscheiden, auch
+wenn beide rötlich sind. Am Feld-**Streifen** heißt Rot weiterhin
+„überfällig", nie „Matchball".
 
 ### Spielort
 
@@ -151,6 +214,24 @@ Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
 
+### Ein Spiel von der automatischen Feldvergabe ausnehmen
+
+Im **⋮-Menü** jeder Wartelisten-Zeile steht ein Pause-Umschalter
+(⏸ Auto-Vergabe). Gedrückt heißt: Dieses Spiel wird von der
+**automatischen** Feldvergabe übersprungen, solange die Ausnahme aktiv ist
+— ein Abzeichen „⏸ Auto-Vergabe aus" markiert die Zeile zusätzlich. Praktisch,
+wenn ein Spieler kurzfristig nicht greifbar ist, das Spiel aber nicht
+sofort gewertet oder manuell verschoben werden soll.
+
+**Manuelles Zuweisen bleibt immer möglich** — die Ausnahme betrifft
+ausschließlich die Automatik. Ein erneuter Klick nimmt die Ausnahme
+zurück; sie räumt sich außerdem von selbst auf, sobald das Spiel gewertet
+ist. Bedienbar sowohl hier in TL-Web als auch am Turnier-PC (Felder-
+übersicht, Tabelle „Nicht zugewiesene Spiele") — beide Wege zeigen
+denselben Stand. Die Ausnahme überlebt einen Neustart des Turnier-PCs
+(`excluded-matches.json`, turniergebunden wie die Schiedsrichter-
+Einteilung).
+
 ### Anordnung wie in der Halle
 
 Statt Feldern in Formularreihenfolge lässt sich für jede Halle ein
@@ -167,35 +248,137 @@ Fließ-Darstellung.
 Details zum Datenmodell und zur Vergleichsregel für Hallennamen:
 [features/feld-raster.md](features/feld-raster.md).
 
-### Anzeige (Klappmenü im Kopf)
+### Panels: was auf dieser Seite steht
 
-Drei Einstellungen, die **je Gerät** gelten und dort gespeichert bleiben —
-der eine Helfer sucht nach der Spielnummer aus dem Papierplan, der andere
-kann damit nichts anfangen:
+Die Seite besteht aus bis zu acht **Panels** — Felder, Aufgaben
+(Walkover), Zähltafel-Warteschlange, Schiedsrichter, Spiele, „Beendete
+Spiele", „Spielzeiten" (nur mit Prognose) und „Anfangszeiten" (nur mit
+eingerichtetem Check-In). Neue Panels erscheinen in Bestandsprofilen
+automatisch in der letzten Spalte.
+Jedes trägt dieselbe Kopfzeile: Titel, Anzahl, ein **Auge** zum Aus- und
+Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
+
+- **Ausblenden ist dauerhaft** (nicht nur zugeklappt): Ein ausgeblendetes
+  Panel belegt keinen Platz mehr und bleibt nach einem Neuladen der Seite
+  ausgeblendet. Wer keine Schiedsrichter einteilt, wird den Abschnitt
+  dadurch wirklich los.
+- **Reihenfolge ändern**: Am Kopf jedes Panels sitzt ein Verschiebe-Griff
+  (drei Balken — bewusst ein anderes Symbol als der ⠿-Griff, mit dem man
+  einzelne *Zeilen* zieht). Ziehen oder mit den Pfeiltasten verschieben.
+- **Höhe verteilen**: Zwischen je zwei sichtbaren Panels EINER Spalte
+  sitzt ein Trennsteg. Ziehen gibt dem einen Panel mehr Platz und dem
+  anderen weniger; **Doppeltipp** stellt die gleichmäßige Verteilung
+  wieder her. Kein Panel lässt sich auf null ziehen. Ist ein Panel
+  dazwischen ausgeblendet, greift der Steg automatisch das nächste
+  sichtbare.
+  **Die Verteilung hängt nur am gezogenen Verhältnis, nicht am Inhalt**
+  (seit v0.9.229): Wie viele Zeilen ein Panel gerade zeigt, ändert seine
+  Höhe nicht. Vorher wuchs die Spielliste beim Nachladen auf Kosten ihrer
+  Nachbarn, und der Steg ließ sich danach nicht mehr sinnvoll ziehen.
+  Umgekehrt heißt das: Ein Panel mit wenig Inhalt behält seinen Anteil,
+  auch wenn darunter Platz frei bleibt — wer das anders will, zieht den
+  Steg (das wirkt jetzt wieder zuverlässig). Das Panel **„Felder"** bildet
+  die Ausnahme: Es gibt ungenutzte Höhe automatisch an die übrigen Panels
+  seiner Spalte zurück, solange du seine Höhe nicht selbst gezogen hast.
+  Ziehst du, tritt die Automatik zurück und dein Maß gilt; **Doppeltipp**
+  auf den Steg schaltet sie wieder ein.
+
+#### Spalten (1 bis 3)
+
+Wie viele Spalten die Seite nebeneinander zeigt, steht im Profil — **eine,
+zwei oder drei**. Jedes Panel trägt seine Spaltennummer; automatisch
+umgebrochen wird nichts.
+
+- **Voreinstellung: zwei Spalten**, Felder links, alles Übrige rechts —
+  genau das Bild, das die Seite vorher als festes Zweiergespann hatte.
+- **„Felder" ist ein Panel wie jedes andere** und darf in jeder Spalte
+  stehen. Die frühere feste Ankerposition oben/links gibt es nicht mehr.
+- **Spaltenbreite ziehen**: Zwischen zwei Spalten sitzt derselbe Steg wie
+  zwischen zwei Panels, nur senkrecht. Ziehen verschiebt die Grenze,
+  **Doppeltipp** verteilt wieder gleichmäßig. Eine Spalte lässt sich nicht
+  beliebig schmal ziehen.
+- **Panel in eine andere Spalte ziehen**: Am Verschiebe-Griff über die
+  Spaltengrenze ziehen — das ändert Reihenfolge und Spalte in einem Zug.
+  Eine noch leere Spalte lässt sich so nicht befüllen (sie ist gar nicht
+  da); dafür gibt es die Spaltenauswahl je Panel im Profil-Editor.
+- **Eine Spalte ohne sichtbares Panel** hinterlässt keinen leeren Streifen
+  — die übrigen teilen sich den Platz.
+- **Auf schmalen Geräten stehen die Spalten immer untereinander**
+  (Tablet-Hochformat, Telefon), egal was das Profil sagt: Ein
+  Wandmonitor-Profil darf ein Tablet nicht unbenutzbar machen.
+
+Die frühere Einstellung „Spielliste rechts/darunter" geht in den Spalten
+auf: „rechts" ist das Zwei-Spalten-Preset, „darunter" das mit einer
+Spalte. Ein Profil aus einer älteren Version wird beim ersten Öffnen
+entsprechend übersetzt und sieht dadurch unverändert aus.
+
+### Profile (Knopf im Kopf)
+
+Alles, was diese Seite unterschiedlich aussehen lässt, steckt in einem
+**Profil**: welche Panels sichtbar sind, in welcher Reihenfolge, wie hoch,
+und die Anzeige-Häkchen weiter unten. Ein Tablet in der Hand braucht etwas
+anderes als ein Wandmonitor — statt an jedem Gerät einzeln zu schrauben,
+legst du einmal ein „Tablet"- und ein „Wandmonitor"-Profil an und wählst
+am jeweiligen Gerät seins.
+
+- **Anlegen/Bearbeiten/Löschen** über den **Profile**-Knopf im Kopf.
+  Löschen fragt nach und ist nicht rückgängig zu machen.
+- **Für dieses Gerät wählen** — die Wahl hängt am Gerät (nicht am Browser)
+  und übersteht ein Neuladen, im Hallennetz wie über die Cloud.
+- **Als Standard markieren** — welches Profil ein Gerät bekommt, das noch
+  keins gewählt hat.
+- Profile gelten **turnierübergreifend** und bleiben bei einem Neustart
+  des Turnier-PCs erhalten (sie stehen in der Konfiguration, nicht in den
+  Turnierdaten).
+- Wird ein Profil gelöscht, das ein Gerät gerade nutzt, fällt dieses Gerät
+  beim nächsten Abruf **von selbst auf das Standardprofil** zurück — ohne
+  Fehlermeldung.
+- Ändern zwei Geräte gleichzeitig dasselbe Profil, gewinnt die zuletzt
+  gespeicherte Fassung. Keine Warnung, kein Konfliktdialog — in der Praxis
+  richtet man Profile einmal vor dem Turnier ein, nicht gleichzeitig zu
+  zweit.
+- **Das Profil gilt verbindlich.** Anders als früher kann ein Gerät
+  einzelne Häkchen nicht mehr für sich überstimmen — wer es anders will,
+  legt ein eigenes Profil an. Dafür sieht man an jedem Gerät auch
+  wirklich das, was im gewählten Profil steht.
+- Ohne angelegtes Profil läuft die Seite auf einem eingebauten Standard
+  (alle Panels sichtbar, Voreinstellungen wie unten). Die erste eigene
+  Änderung macht daraus automatisch ein echtes Profil.
+- **Schriftgröße — nur dieses Gerät** (seit 17.08.2026): unten im selben
+  Overlay, vier Stufen 85/100/115/130 %. Bewusst **kein** Teil des
+  Profils — wie groß die Schrift sein muss, hängt am Display und
+  Betrachtungsabstand genau dieses Geräts. Die Wahl hängt am Gerät
+  (`localStorage`) und übersteht ein Neuladen; die Feldkacheln passen
+  ihre Kompaktstufe automatisch an.
+
+Die Anzeige-Häkchen im Profil-Editor:
 
 - **Spielnummer zeigen** (Standard: an) — die Zahl ganz links in der Liste.
 - **Nationen zeigen** (Standard: **aus**) — die **Flagge** neben jedem
   Namen, dieselben Bilder wie auf dem Court-Monitor. Zu einer Nation ohne
   Flaggendatei erscheint das Kürzel. Hilfreich bei internationalen
   Turnieren.
-- **Spielliste rechts / darunter** (Standard: rechts) — auf einem
-  schmaleren Tablet steht die Liste lieber unter den Feldern als daneben.
-  Reine Anzeigefrage, keine Turniereinstellung: Gerät A kann „rechts"
-  zeigen, Gerät B gleichzeitig „darunter".
 - **Disziplin/Klasse, Runde, Gruppe zeigen** (Standard: alle drei an) —
   einzeln abschaltbar in der Meta-Zeile der Warteliste; Feldkacheln und
   „Beendet" zeigen sie unverändert weiter.
+- **Restzeit laufender Spiele zeigen** (Standard: **aus**) — die geschätzte
+  Restzeit des laufenden Spiels („~12 min Rest") in der Fußzeile jeder
+  belegten Feldkachel, zwischen Satzstand und Aufruf-Uhr. Die Schätzung
+  rechnet der Turnier-PC aus Live-Satzstand und gemessenen Spielzeiten
+  (siehe [spielzeiten-prognose.md](spielzeiten-prognose.md), Etappe D);
+  ohne eingeschaltete Prognose erscheint nichts. Erfordert einen Host ab
+  v0.9.212 — ältere Hosts senden das Feld nicht, die Kachel bleibt dann
+  unverändert.
 
-Daneben, nicht Teil dieses Menüs, aber am selben Kopfbereich: **Automatik**
+Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts.
 
 #### Vereine (Vereinsname/-logo)
 
-Im Anzeige-Menü stehen **„Vereinsnamen zeigen"** und **„Vereinslogos zeigen"**
-— wie die übrigen Schalter **je Gerät** und dort gespeichert. Die
-**Voreinstellung** kommt aus dem Setup unter **„Vereine anzeigen"** (die
-turnierweite Wahl, die zugleich die Tablet-Spielzettel steuert); jedes Gerät
-darf sie für sich überstimmen. Standard turnierweit: **aus**.
+Im Profil-Editor stehen **„Vereinsnamen zeigen"** und **„Vereinslogos zeigen"**.
+Die **Voreinstellung** kommt aus dem Setup unter **„Vereine anzeigen"** (die
+turnierweite Wahl, die zugleich die Tablet-Spielzettel steuert); ein Profil
+kann sie überschreiben. Standard turnierweit: **aus**.
 
 - **Vereinsnamen zeigen** — der Vereinsname in einer eigenen kleinen Zeile
   **unter** dem Spielernamen (mit Wappen davor, wenn Logos an sind).
@@ -205,17 +388,21 @@ darf sie für sich überstimmen. Standard turnierweit: **aus**.
   ohne hinterlegtes Logo bleibt es beim Namen.
 
 Im Hallennetz (LAN) holt der Turnier-PC die Logos (funktioniert ohne Internet
-am Anzeigegerät und matcht Vereinsnamen unscharf). Im Cloud-Modus lädt die
-Seite die Logos direkt über den öffentlichen badhub-Logo-Resolver
-(`/api/v1/club-logo`); dort zählt der **exakte** Vereinsname, ein Verein mit
-Zusatz wie „(Berlin)" wird also nur getroffen, wenn er in badhub genauso
-heißt. Fehlt ein Logo, bleibt es beim Namen. Der **Verein** ist wie die
-Nationalität ein bewusst zuschaltbares, standardmäßig ausgeschaltetes
-Anzeige-Feld (Datenschutz).
+am Anzeigegerät). Im Cloud-Modus lädt die Seite die Logos direkt über den
+öffentlichen badhub-Logo-Resolver (`/api/v1/club-logo`). **Beide Wege fragen
+denselben Endpoint ab** — die Zuordnung des BTP-Vereinsnamens (inklusive
+gängiger Abkürzungen wie „BC" für „Badminton Club" und Klammerzusätzen wie
+„(Berlin)") macht badhub selbst, LAN und Cloud verhalten sich also gleich
+(Befund 15.08.2026: eine frühere, bts-light-eigene Zuordnung im LAN-Modus war
+schwächer als badhubs eigener Abgleich und ließ manche Vereine ohne Logo
+stehen, obwohl badhub eines hatte). Fehlt ein Logo bei badhub tatsächlich,
+bleibt es beim Namen. Der **Verein** ist wie die Nationalität ein bewusst
+zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Datenschutz).
 
 ### Punktverlauf ansehen
 
-Der **📈-Knopf** an einer belegten Feldkachel und an Zeilen der
+Der **📈-Knopf** im ⋯-Menü einer belegten Feldkachel (seit 17.08.2026
+dort statt auf der Kachel — eine Fläche weniger) und an Zeilen der
 Beendet-Liste öffnet den **Punktverlauf** des Spiels: je Satz ein
 Liniendiagramm (x = Ballwechsel, y = Punkte, eine Linie je Partei).
 Bei laufenden Spielen wächst die Kurve mit. Der Knopf erscheint nur,
@@ -228,7 +415,9 @@ Zwischen Feldern und Spielliste sitzt ein **Trennsteg** (kleine Pille in
 der Lücke). Ziehen verschiebt die Grenze: nebeneinander die **Breite** der
 Liste, gestapelt („Spielliste darunter") ihre **Höhe**. Das Maß gilt
 **je Gerät** und je Anordnung getrennt und bleibt gespeichert
-(`localStorage`, wie die übrigen Anzeige-Einstellungen).
+(`localStorage`). Nicht zu verwechseln mit den Stegen **zwischen den
+Panels** innerhalb der Liste (siehe „Panels") — dieser hier trennt die
+beiden großen Bereiche voneinander.
 
 **Doppeltipp/Doppelklick auf den Steg** stellt die automatische,
 bedarfsgerechte Aufteilung der aktuellen Anordnung wieder her. Grenzen
@@ -239,6 +428,194 @@ auch nach einem Fenster-Resize.
 Gesprochen wird nie auf diesem Gerät: Die Seite beauftragt die Ansage, und
 gesprochen wird sie dort, wo die Anlage hängt. Hört in der Zielhalle gerade
 kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.
+
+### Schiedsrichter einteilen
+
+Spielt das Turnier mit Schiedsrichtern (Einstellungen → Schiedsrichter),
+zeigt die Seite zusätzlich:
+
+- **Abschnitt „Schiedsrichter"** unter der Zähltafel-Warteschlange: die
+  Liste in Rotationsreihenfolge mit Dienst-Marke, Pause-Knopf, Zieh-Griff
+  zum Umsortieren (Drag & Drop, auch auf dem Tablet — seit 14.08.2026,
+  ersetzt die frühere Pfeil-Bedienung) und der Zahl der bisherigen Einsätze.
+  Ein Tipp auf die Zahl öffnet die Pflege: Stammverein, gesperrte Vereine,
+  gesperrte Spieler und die Einsatz-Liste im Detail. Auch bei eingeklappter
+  Liste steht in der Kopfzeile, wer als Nächstes zugeteilt würde.
+- **An jeder belegten Feld-Kachel** „SR: … · AR: …" samt Warnfarbe, wenn ein
+  Konflikt besteht (Kategorie „Verein" oder „Person" — der Grund bleibt am
+  Turnier-PC), plus den Knopf **einteilen** für die Auswahl je Dienst.
+
+Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
+Turnierleitung entscheidet. Steht in BTP schon ein Schiedsrichter am Spiel,
+gilt dieser — die Auswahl hier wirkt dann nicht.
+
+Sperrlisten, Verein und Einsatz-Liste stehen **nicht** im Zustand, den alle
+gekoppelten Geräte bekommen: Sie kodieren persönliche Beziehungen und werden
+erst beim Öffnen der Pflege gezielt und mit dem Geräte-Zugang abgerufen
+(`/tl/api/officials/{id}`, gleiches Muster wie der Punktverlauf).
+
+**Im Cloud-Betrieb** funktioniert die Schiedsrichter-Bedienung erst, wenn der
+Relay auf badhub.de die neuen Aktionen kennt (Deploy vor dem Client-Release);
+im Hallennetz sofort.
+
+### Pausen am Feld
+
+Läuft auf einem Feld eine BWF-Pause (60 s bei 11 Punkten, 120 s Satzpause),
+zeigt die Feldkachel **„Pause 1:23"** mit laufendem Countdown. Nach Ablauf
+wechselt die Marke auf rotes **„überzogen +0:41"** und zählt hoch, bis am
+Tablet weitergespielt wird — das Tablet hält die Pause seit v0.9.207
+bewusst, statt sie automatisch zu beenden (ADR
+[0028](adr/0028-pause-haelt-bis-weiterspielen.md)). Eine Behandlungspause
+erscheint als **„Behandlung seit 3 min"** (ohne Countdown). Ein Tablet mit
+älterer Seite beendet die Pause weiter automatisch bei 0 — dann verschwindet
+die Marke einfach, „überzogen" erscheint nie fälschlich.
+
+### Automatische Hallen-Vorverteilung (Mehr-Hallen)
+
+> Spec: [features/hallen-vorverteilung.md](features/hallen-vorverteilung.md) ·
+> ADR [0029](adr/0029-hallen-vorverteilung-eigener-store.md)/[0030](adr/0030-halle-bindet-die-feldvergabe.md)
+
+Im Kopf des Panels **„Spiele"** (nur bei Mehr-Hallen-Turnieren): Der
+Schalter **„Vorverteilung an (N)"** gibt den vordersten **x** Spielen der
+Liste automatisch eine Halle — im Verhältnis der entsperrten Felder je
+Halle und gemischt (bei 2:1 also A, A, B, A, A, B). Das x-Feld daneben
+setzt die Fenstergröße (leer/0 = automatisch: Gesamtzahl der Felder).
+Endet ein Spiel oder kommen neue hinzu, füllt die Automatik nach. Die
+Zuordnung erscheint als Hallen-Kürzel mit **„·A"** an der Zeile, auf den
+Hallen-Monitoren und im badhub-Aushang (`display=next&halle=…`) — Spieler
+können also früh in ihre Halle gehen, das Feld folgt kurz vorher.
+
+Regeln: Die Automatik füllt nur Spiele **ohne** Halle (Regel/Hand/Aufruf
+bleiben und zählen aufs Verhältnis an); einmal verteilt heißt fest — nur
+du änderst (Hallenwähler im ⋮-Menü ersetzt die Auto-Halle; ein
+Vorbereitungs-Aufruf ebenso). **„Auto-Hallen räumen"** nimmt ausschließlich
+die automatischen Zuordnungen zurück. Bei gesetzter **Tages-Halle** ist die
+Vorverteilung ausgegraut — die beiden Modi schließen sich aus.
+
+**Wichtig — Verhaltensänderung seit v0.9.208 (ADR 0030):** Eine gesetzte
+Halle (Regel, Hand oder Auto) **bindet** jetzt die automatische
+Feldvergabe: Das Spiel bekommt nur Felder seiner Halle, auch wenn woanders
+eines frei ist. Und ein automatisch vorverteiltes Spiel wird **ohne
+Vorbereitungs-Aufruf** vergeben — wer weiterhin Ansagen will, ruft wie
+gewohnt (der Aufruf übernimmt dann die Halle).
+
+### Hallen-Farben (Mehr-Hallen)
+
+> Spec: [features/hallen-farben.md](features/hallen-farben.md) ·
+> ADR [0031](adr/0031-hallen-farben-eigener-config-store.md)/[0032](adr/0032-hallen-farben-deterministische-auto-palette.md)/[0033](adr/0033-hallen-farben-hex-auf-dem-draht.md)
+
+Bei Mehr-Hallen-Turnieren trägt jede Halle eine kleine **Farbmarke** neben
+jeder Nennung: am Hallen-Filter, an den Hallen-Überschriften der
+Feld-Gruppen, im Hallen-Kürzel der Wartelisten-Zeilen (auch bei „·A"-
+Vorverteilung), an den Beendet-Zeilen und im Spielort-Wähler des ⋮-Menüs.
+Die Farben vergibt der Turnier-PC automatisch (gleiche Farbe auf allen
+Geräten, Monitoren und dem Aushang); ändern lässt sich die Farbe je Halle
+auf der **Felderübersicht** der Desktop-App (Zahnrad am Gruppenkopf).
+Kürzel und Name bleiben immer stehen — die Farbe ist eine Zusatz-Kennung,
+nie die einzige Information. An einem alten Turnier-PC ohne das Feature
+bleibt die Seite schlicht farblos.
+
+### Startzeit-Prognose & Spielzeiten
+
+**Gruppieren nach (seit v0.9.231).** Die Auswertung zeigt dieselben
+Messwerte wahlweise nach **Konkurrenz** (Klasse × Disziplin, z. B. „HE-A" —
+die Voreinstellung), nach **Klasse**, nach **Disziplin** oder nach **Halle**.
+Die Wahl steht im Profil-Editor unter „Spielzeiten gruppieren nach" und gilt
+damit für alle Geräte mit diesem Profil.
+
+Die Hallen-Auswertung beantwortet die Frage, wegen der man bei zwei Hallen
+überhaupt auf die Uhr schaut: Läuft eine Halle systematisch langsamer? Zwei
+Dinge dazu:
+
+- Bei **Ein-Hallen-Turnieren** wird die Hallen-Achse gar nicht erst zur
+  Auswahl angeboten — dort stünde nur eine einzige Zeile. Trägt ein Profil
+  sie bereits (von einem anderen Turnier), bleibt die Auswahl erhalten und
+  das Panel sagt, dass es ersatzweise nach Konkurrenz gruppiert.
+- Die Halle wird beim **ersten Aufruf aufs Feld** festgehalten. Spiele, die
+  vor dem Update auf v0.9.231 gemessen wurden, kennen ihre Halle nicht mehr
+  und stehen in einer eigenen Zeile **„ohne Halle"**. Wer mitten im Turnier
+  aktualisiert, fängt die Hallen-Auswertung also praktisch neu an; die
+  übrigen drei Achsen sind davon nicht betroffen.
+
+
+> Details und Messregeln: [spielzeiten-prognose.md](spielzeiten-prognose.md) ·
+> Spec [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md)
+
+Jedes wartende Spiel in der Liste trägt den **voraussichtlichen Aufruf**
+(„🕐 14:32"), simuliert aus den gemessenen Spielzeiten dieses Turniers
+(Median je Klasse × Disziplin), den Feldern, der Reihenfolge, Hallen-Regeln
+und Spieler-Mindestpausen. **„~14:32"** heißt: noch keine Messwerte, es gilt
+der Startwert aus dem SetupWizard („Startzeit-Prognose", Standard 25 min);
+**„gleich"** heißt: als Nächstes dran. Ausgenommene Spiele bekommen keine
+Prognose. Das Panel **„Spielzeiten"** zeigt die Auswertung: je Klasse und
+Disziplin die Mediane von Brutto (Feldzuweisung → Ende), Netto (1. Punkt →
+Ende) und Anlaufzeit, dazu die Zahl der Messungen; beendete Spiele tragen
+ihre Ist-Zeiten in der Beendet-Zeile. Alles reine Anzeige — es geht nichts
+davon an Monitore oder den Liveticker.
+
+## Anfangszeiten (Check-In-Zeitplan, seit 17.08.2026)
+
+Ist der **Hallen-Check-In** eingerichtet
+([spieler-check-in.md](spieler-check-in.md)), gibt es das Panel
+**„Anfangszeiten"**: der heutige Check-In-Zeitplan, wie ihn badhubs
+öffentliche `…/zeitplan`-Seite zeigt — je Klasse **Anfangszeit**,
+**Anmeldeschluss** (ohne eigenen gilt die Anfangszeit, wie bei der
+Lautsprecher-Ansage) und der Stand **„eingecheckt/gemeldet"** (ohne
+Abgemeldete, grün wenn alle da sind — dieselbe Rechnung wie die
+Desktop-Check-In-Seite). Sortiert nach Anfangszeit; durchgelaufene
+Schlüsse bleiben ausgegraut stehen, damit man sieht, was schon durch
+ist. Bewusst **nur Zähler, keine Namen** — wer wissen will, *wer* fehlt,
+nimmt die Check-In-Seite der Desktop-App. Der Turnier-PC fragt badhub
+dafür höchstens minütlich, unabhängig vom Liveticker-Takt; kurze
+Internet-Aussetzer leeren das Panel nicht — dauert der Aussetzer länger
+als fünf Minuten, sagt eine ⚠-Zeile ehrlich, dass der Stand alt sein
+kann.
+
+## Aktualisierung: Push statt Dauerfragen (seit 18.08.2026)
+
+Die Seite wird vom Turnier-PC **geweckt**, statt alle zwei Sekunden zu
+fragen: Ein schmaler Kanal meldet „es gibt einen neuen Stand", die Seite
+holt ihn daraufhin sofort über denselben Weg wie bisher. Sichtbar wird
+das als **kürzere Reaktionszeit** (unter einer Sekunde statt bis zu
+zwei) und als deutlich ruhigeres Netz — ein Tablet fragt im ruhigen
+Betrieb nur noch alle 30 Sekunden nach, statt zweimal pro Sekunde.
+
+Steht der Kanal nicht (älterer Turnier-PC, älterer Relay, Firmennetz
+ohne WebSocket), fällt die Seite **geräuschlos** auf das bisherige
+Verhalten zurück — alle zwei Sekunden fragen. Es gibt nichts
+einzustellen und nichts zu bemerken; auch die Verbindungsanzeige oben
+rechts bedeutet unverändert dasselbe.
+
+Technisch: `/tl-ws` trägt nur die Revisionsnummer, nie Turnierdaten
+(Spec [features/tl-web-push.md](features/tl-web-push.md), ADR 0034).
+Nebeneffekt am Turnier-PC: Er rechnet den Zustand jetzt **einmal
+zentral** je Sekunde statt einmal je Gerät und Anfrage — bei acht
+Geräten ist das der Unterschied zwischen acht Rechnungen pro Sekunde und
+einer.
+
+## Render-Sparsamkeit (seit 17.08.2026, erweitert 18.08.2026)
+
+Nachtrag: Die **Beendet-Liste** wird jetzt je Spiel abgeglichen — ein
+neues Ergebnis fügt eine Zeile ein, statt die Liste neu zu bauen (sie
+selbst bleibt kurz: der Turnier-PC liefert höchstens 30 beendete
+Spiele). Ihre Zeilen kosten außerhalb des sichtbaren Ausschnitts kein
+Layout mehr (`content-visibility`). Spielzeilen und Feldkacheln bleiben
+davon ausgenommen: Erstere tragen ihr fest positioniertes ⋮-Menü, das
+sonst an der Zeilenkante abgeschnitten würde, und bei den Kacheln wird
+die echte Größe gemessen.
+
+
+Die Seite pollt weiter alle 2 s mit ETag-Kurzschluss, zeichnet bei einer
+echten Änderung aber nicht mehr alles neu: Jedes Panel überspringt den
+Neuaufbau, wenn sein Inhalt unverändert ist (`setzeHtmlWennNeu`), und die
+zwei heißesten Listen — Feldkacheln und Spielzeilen — werden je
+`court_id`/`match_id` **keyed abgeglichen** (`reconcileKeyed`): Ein
+Punktgewinn ersetzt genau eine Kachel, alles andere bleibt samt offenem
+⋯-Menü, Fokus und Scroll-Position stehen. Sekündliche Zeittexte stehen
+deshalb nicht mehr im erzeugten HTML; `tickClocks()` füllt sie nach jedem
+Render und weiter im Sekundentakt. Für Messungen:
+`localStorage.tlRenderMessen = "1"` in der Browser-Konsole protokolliert
+jede Render-Dauer.
 
 ## Grenzen, die im Betrieb auffallen
 
@@ -254,10 +631,18 @@ kein Ansage-Gerät zu, sagt die Seite das ausdrücklich.
   abgelehnt — die Ablehnung erscheint im Dialog, nicht als Toast — was BTP
   beim Überschreiben mit dem Turnierbaum macht, ist noch nicht abschließend
   geklärt ([btp_protocol.md](btp_protocol.md)). Bis dahin: in BTP von Hand.
-- Über den **Cloud-Weg** ist die Warteliste auf 40 Spiele je Halle gekürzt
-  (im Hallennetz sind es 120). Der Zustand geht bei jedem Ballwechsel neu
-  über die Leitung; die volle Liste wäre ein Dauerstrom über Mobilfunk. Was
-  fehlt, sagt die Seite.
+- **Eine Halle ohne bedienbare Felder hält ihre Spiele fest.** Seit ADR
+  0030 bindet eine gesetzte Halle (Regel, Hand oder Auto) die Feldvergabe.
+  Automatische Zuordnungen räumt die App selbst, wenn ihre Halle keine
+  Felder mehr hat — bei **Regel- oder Hand-Hallen** dagegen wartet das
+  Spiel still, bis dort wieder ein Feld frei/entsperrt ist. Abhilfe von
+  Hand: im Hallenwähler des ⋮-Menüs „–" wählen (Halle entfernen) oder eine
+  andere Halle setzen.
+- Über den **Cloud-Weg** ist die Warteliste turnierweit auf 40 Spiele
+  gekürzt (im Hallennetz sind es 120; seit ADR 0026 gilt beide Grenzen
+  hallenübergreifend, nicht mehr je Halle). Der Zustand geht bei jedem
+  Ballwechsel neu über die Leitung; die volle Liste wäre ein Dauerstrom
+  über Mobilfunk. Was fehlt, sagt die Seite.
 
 ## Wenn etwas nicht geht
 

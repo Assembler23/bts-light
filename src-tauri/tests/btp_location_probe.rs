@@ -972,6 +972,7 @@ async fn does_assign_then_free_leave_the_location_behind() {
                 draw_id,
                 planning_id,
                 court_id: feld.id,
+                officials: None,
             }],
         )
     };
@@ -986,6 +987,7 @@ async fn does_assign_then_free_leave_the_location_behind() {
                 draw_id,
                 planning_id,
                 court_id: 0,
+                officials: None,
             }],
         )
     };

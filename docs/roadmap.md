@@ -287,6 +287,60 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Automatische Hallen-Vorverteilung** — die vordersten x Spiele bekommen
+  automatisch eine Halle im Verhältnis der entsperrten Felder (gemischt,
+  fortlaufend nachgefüllt); Halle bindet die Feldvergabe, Auto-Spiele
+  brauchen keinen Aufruf mehr; Spieler sehen die Halle früh (Monitore,
+  badhub `display=next&halle=…`).
+  Spec: [features/hallen-vorverteilung.md](features/hallen-vorverteilung.md) ·
+  ADR [0029](adr/0029-hallen-vorverteilung-eigener-store.md) ·
+  ADR [0030](adr/0030-halle-bindet-die-feldvergabe.md).
+  **Offen:** Feldtest am Mehr-Hallen-Turnier.
+
+- **Spielzeiten-Messung & Startzeit-Prognose (Etappen A+B, v0.9.206)** —
+  Brutto-/Nettozeit je Match host-seitig gemessen (`match-times.json`,
+  ADR 0027), BTP-`Duration` neustartfest und auf allen Pfaden, Prognose
+  („dran ca. hh:mm") + Panel „Spielzeiten" in TL-Web, SetupWizard-Abschnitt.
+  Spec: [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md) ·
+  Bedienung: [spielzeiten-prognose.md](spielzeiten-prognose.md).
+  Etappe C (v0.9.207): Pausen-Countdown + Überziehung in TL-Web, Tablet
+  hält die Pause bis „Weiterspielen" (ADR 0028), Behandlungspause sichtbar.
+  **Offen:** Feldtest am Testturnier (Erfolgsmaß E12: ±10 min bei ≥70 %,
+  Auswertung über die „Prognose-Kontrolle"-Zeilen im Diagnose-Log);
+  Relay-Deploy verteilt tablet.html/tl.html automatisch beim main-Merge.
+
+- **TL-Web Panelsystem** — Grundfassung released mit v0.9.203 (PR #218,
+  gemergt, Relay-Deploy gelaufen). **Zweite Runde umgesetzt 15.08.2026,
+  noch nicht released** (Version 0.9.204 vorbereitet): Die 6 Panels
+  (Felder, Walkover, Zähltafel, Schiedsrichter, Spiele, Beendete Spiele)
+  sind einzeln aus-/einblendbar, **zuklappbar** (mit Vorschau im Kopf),
+  umsortierbar, einer von **1–3 Spalten** zuordenbar und höhenverteilbar;
+  benannte, server-seitige **Profile** (an der Geräte-Identität hängend,
+  turnierübergreifend) ersetzen das verstreute `localStorage`-Anzeige-Menü;
+  dazu ein 3-stufiges Abzeichen-System. Zusätzlich in derselben Runde:
+  die manuelle Spielreihenfolge ist jetzt **hallenübergreifend** (ADR
+  0026, löst ADR 0023 in der Hallen-Frage ab), die vier
+  Wartelisten-Unterabschnitte sind zu einem Panel „Spiele" mit Status als
+  Zeilen-Abzeichen zusammengeführt, Feldkachel und Spielzeile haben
+  erweiterte ⋮-/⋯-Menüs (u. a. „Nach oben schieben", „Ergebnis
+  eintragen", 2. Aufruf je Partei am Feld). Spec:
+  [features/tl-web-panelsystem.md](features/tl-web-panelsystem.md)
+  (Nachtrag am Ende) · ADR [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md) ·
+  [0025](adr/0025-tl-panel-profile-transport-persistenz.md) ·
+  [0026](adr/0026-spielliste-eine-globale-reihenfolge-eine-liste.md).
+
+  **Blocker vor dem ersten echten Einsatz:** Das in der Spec verlangte
+  **dedizierte Testturnier** steht aus. Es ersetzt hier den sonst
+  üblichen Sicherheitsnetz-Fallback — die Datei wurde vollständig
+  ersetzt, es gibt bewusst keinen Umschalter zurück auf die alte
+  Oberfläche, und ein Rollback mitten im Turnier ist praktisch nicht
+  durchführbar. Checkliste in der Spec (iPad Safari · Android Chrome ·
+  Wandmonitor; Profil anlegen/bearbeiten/löschen/wählen; Profilwechsel
+  übersteht Reload; gelöschtes zugewiesenes Profil fällt auf Standard
+  zurück; WLAN aus/an bei offenem Editor; BTP-Neustart; zwei Geräte
+  bearbeiten gleichzeitig dasselbe Profil; Steg bindet an den nächsten
+  sichtbaren Nachbarn bei ausgeblendetem Zwischen-Panel).
+
 - **Turnierleitungs-Weboberfläche („TL-Web")** — ausgeliefert mit
   **v0.9.176** (Schritte 1–13 der Spec). Bedienung und Grenzen:
   [turnierleitung-web.md](turnierleitung-web.md) · Spec mit ehrlicher Bilanz
@@ -313,6 +367,91 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Ausgefüllte Schiedsrichterzettel drucken** — für jedes mit Tablet gezählte
+  Spiel ein ausgefüllter Zettel: Punktverlauf, Aufschlagfolge, Karten,
+  Verletzungen mit Beginn und Ende, Unterbrechungen, Zeiten. **Internes
+  Turnier-Archiv, kein amtlicher Beleg** (offizielle Turniere laufen weiter
+  über das Original-BTS). Der PIN-Schiri-Modus am Tablet erfasst schon heute
+  Karten — sie sterben aber im `localStorage`; das Feature verstetigt sie zum
+  Host. Ereignisse laufen als **eigener Strom neben** dem Punktverlauf, der
+  unverändert bleibt; gejoint wird erst beim Rendern. Gedruckt wird ein einmal
+  am Host erzeugtes HTML-Dokument im WebView — keine neue Abhängigkeit, keine
+  neue Tauri-Permission. Acht Etappen-PRs, Relay vor App.
+  Spec: [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md) ·
+  ADR [0037](adr/0037-zettel-ereignisse-eigener-strom.md) ·
+  [0038](adr/0038-ereignisse-append-only.md) ·
+  [0039](adr/0039-zettel-html-im-webview.md).
+- **Monitor-Livestand per Push — VOLLSTÄNDIG umgesetzt** (S0–S7, v0.9.235–242,
+  PRs #256–#264). **S0** Messung (Zähler, 10-Sekunden-Log-Zeile,
+  `GET /debug/perf` nur LAN, Lastskript `scripts/last-monitor.mjs`), **S1**
+  Antwortcache mit 250-ms-Hart-TTL und ETag/304, **S2** entprellte
+  `live-scores.json`, **S3** Zuweisungs-Nudge in Host und Relay, **S4** `seq`
+  in den Voll-Antworten, **S5** Teil-Patch statt Board-Neuaufbau, **S6**
+  Herzschlag + neue Gesundheits-Definition + 4-s-Schalter (Default aus),
+  **S7** schmaler Abruf `/health?court=<id>`.
+
+  **Nachmessung vom 19.08.2026 (v0.9.242, 20 belegte Felder, Debug-Build):**
+  Im Leerlauf **−99 % Nutzdaten** (1,13 MB/s → 0,01 MB/s, 99 % der Antworten
+  sind „nichts Neues") und **−87 % Vollberechnungen** (74,0 → 9,8 je Sekunde);
+  mit gesetztem Schalter **−93 % Abrufe** (75,4 → 5,3/s). Im Spielbetrieb mit
+  20 zählenden Tablets: **Latenz Punkt → Anzeige p50 15 ms / p95 68 ms** gegen
+  eine 300-ms-Grenze, und `persist_scores` läuft **56-mal für 222 Punkte** mit
+  6,6 ms statt bei jedem Punkt mit 20,0 ms. Die Ausbaustufe „Nutzlast im
+  Nudge" wird damit **nicht** gebaut — ihr Auslösekriterium waren mehr als
+  20 Requests/s je Übersichts-Gerät, gemessen sind 7,45/s.
+
+  **Offen:** die Pi-Zeile (`ovRenderMessen` auf einem echten Kiosk) und die
+  Cloud-Spalte der Messung; beide sind Feldtest, kein Code. Und der
+  Release-Tag — die App ist seit v0.9.226 nicht getaggt.
+- **Monitor-Livestand per Push** — ein gezählter Punkt soll nur noch kosten,
+  was er wert ist. Heute weckt jeder Punkt jede Übersichts-Anzeige, die
+  daraufhin den Zustand **aller** Felder holt und ihr Board komplett neu
+  aufbaut (grob 1,6–8 MB/s WLAN bei 20 Feldern × 20 TVs für ~20 Byte
+  Information). Sieben Etappen, Reihenfolge durch eine Vorab-Messung
+  gesteuert: Perf-Zähler + Lastskript (S0), Antwortcache für `/health` (S1),
+  Entprellung von `persist_scores` — heute ein Vollschreibvorgang **je
+  Punkt** (S2), Zuweisungs-Nudge (S3, schließt die beiden offenen
+  A1-TODOs), `seq` in den Voll-Antworten als Ordnung zwischen Push und
+  Abruf (S4), Teil-Patch statt Board-Neuaufbau (S5), neue Definition von
+  „Push-Kanal ist gesund" mit sichtbarem Heartbeat und 4-s-Fallback
+  (S6, Config-Schalter, Default aus), schmaler Abruf `/health?court=<id>`
+  (S7). „Nutzlast im Nudge" ist bewusst **zurückgestellt** und wird nur bei
+  Verfehlen der Nachmess-Schwellen gebaut.
+  Spec: [features/monitor-livestand-push.md](features/monitor-livestand-push.md) ·
+  ADR [0035](adr/0035-monitor-livestand-ordnung.md).
+- **Feinschliff Turnierleitungssicht (18.08.2026)** — vier unabhängige
+  Punkte aus dem Turnierbetrieb: (1) die Spielzeiten-Statistik wird
+  **mehrachsig** (Klasse · Disziplin · Halle · Klasse×Disziplin), die Achse
+  ist eine Profil-Einstellung; die Halle wird dafür beim E4-Stempel im
+  Messwert festgehalten und bleibt **reine Anzeige** (Prognose unberührt).
+  (2) **Nachruf für Zähltafelbediener** am Feld-Aufruf („… bitte als
+  Tabletbedienung melden") — der seit ADR 0007 offene Baustein; der
+  Vorbereitungs-Aufruf bleibt bewusst außen vor. (3) Neue TL-Web-Ansage
+  **„Feld X. Bitte mit dem Spielen beginnen."**, die die Aufruf-Zählung
+  **nicht** anfasst. (4) **Spielerlinks** auch in laufenden Feld-Kacheln und
+  bei beendeten Spielen — hebt die Beschränkung der Lizenznummern auf die
+  Warteliste auf (beide Wächter-Tests werden angepasst und begründet).
+  Spec: [features/tl-sicht-feinschliff.md](features/tl-sicht-feinschliff.md) ·
+  ADR [0036](adr/0036-hallen-achse-im-messwert.md) (Punkt 1) ·
+  Nachtrag an ADR [0007](adr/0007-zaehltafelbediener.md) (Punkt 2).
+  **Umsetzung in vier PRs, Reihenfolge 4 → 3 → 1 → 2** (Nutzer-Vorgabe:
+  Spielerlinks und Spielbeginn-Ansage zuerst). Punkt 2 und 3 brauchen
+  **Relay-Deploy vor dem Client-Tag** (neue `TlAction` → altes Relay
+  antwortet 422); der Punkt-3-PR trägt zusätzlich die Absicherung, die
+  einen Ansage-Slave mit älterem Stand vor dem Verlust der ganzen
+  Auftragscharge schützt.
+
+- **Hallen-Farben** — jede Halle eines Mehr-Hallen-Turniers bekommt eine
+  Farbe (Auto-Palette, deterministisch alphabetisch; Übersteuerung per
+  Palettenton auf der Felderübersicht), sichtbar als Marke neben jeder
+  Hallen-Nennung: Desktop, TL-Web, Monitor-Seiten (LAN + Cloud) und
+  badhub-Aushang (display=next + display=monitor; badhub-Anzeige als
+  Folge-PR im badhub-Repo). Farbe nie einziger Informationsträger;
+  Ein-Hallen-Turniere bleiben unberührt.
+  Spec: [features/hallen-farben.md](features/hallen-farben.md) ·
+  ADR [0031](adr/0031-hallen-farben-eigener-config-store.md) ·
+  [0032](adr/0032-hallen-farben-deterministische-auto-palette.md) ·
+  [0033](adr/0033-hallen-farben-hex-auf-dem-draht.md).
 - **Schiedsrichtermanagement** — BTP-Schiedsrichterliste in BTS Light:
   SR/AR je Spiel zuweisen (Client + TL-Web, auch bei laufendem Spiel),
   Konflikt-Warnungen (Verein/Sperr-Spieler, nie blockierend), automatische
@@ -403,8 +542,8 @@ mitgeändert worden:
   (ADR [0014](adr/0014-punktverlauf-expliziter-rally-frame.md),
   [0015](adr/0015-punktverlauf-datei-je-turnier.md)). Folge-Features
   (je eigene Spec, offen): badhub-Push + Anzeige auf badhub.de ·
-  **ausgefüllte Schiedsrichterzettel als PDF drucken** (Hinweis vom
-  11.08.2026; Datenbasis ist der Punktverlauf).
+  ~~**ausgefüllte Schiedsrichterzettel drucken**~~ → **spezifiziert**
+  2026-08-19, siehe unten.
 
 ## Wünsche vom 10.08.2026 (nach dem v0.9.178-Test)
 
@@ -611,3 +750,73 @@ verliehen):
 - **`docs/ops/deployment.md` teils veraltet** (badhub-Repo): Der Abschnitt
   „Deploy: Produktion" beschreibt noch das KAS-`deploy_prod.sh`, obwohl
   Prod längst über `deploy_hetzner.sh` auf Hetzner läuft.
+- **Das Turnierlogo reist in jedem vollen `tset` mit** (`sync.rs`,
+  Base64, bis 2,7 MB). Ein voller `tset` geht mindestens jede Minute als
+  Lebenszeichen raus und zusätzlich immer dann, wenn der Diff bei
+  mehreren geänderten Matches zum Vollstand degeneriert — bei vielen
+  Feldern also alle paar Sekunden. Weglassen ging bisher nicht: Ein
+  `tset` ersetzt bei badhub den kompletten Snapshot-Datensatz
+  (`liveticker_state.snapshot_json`), ein fehlendes Feld löschte das Logo
+  also, und der Liveticker blendete es beim nächsten 5-s-Poll aus —
+  ebenso die Check-In-Seite, wenn dort kein eigenes Branding-Logo
+  hinterlegt ist (Recherche 18.08.2026).
+  **Umstellung in drei Schritten, Reihenfolge zwingend:**
+  1. ✅ **v0.9.226:** bts-light schickt die Logo-Felder auch leer mit
+     (`""` statt weglassen) — sonst wäre ein Logo nach Schritt 2 nicht
+     mehr löschbar. Gegen das heutige badhub verhaltensgleich, deshalb
+     gefahrlos vorab.
+  2. **badhub-PR #473** (offen): `liveticker_logo_uebernehmen()` gibt den
+     Feldern den Vertrag „weglassen = unverändert, `""` = löschen" — den,
+     den `checkin_branding_apply()` schon hat. **Braucht einen Deploy.**
+  3. ⚠️ **v0.9.227 gebaut, DARF ERST NACH SCHRITT 2 AUSGELIEFERT WERDEN:**
+     bts-light schickt das Logo nur noch bei Änderung (`Option`-Felder,
+     Marke aus Turnier + Bildinhalt, Auffrischung alle 10 Min, Stempel
+     erst nach geglücktem Push). Ohne den badhub-Deploy würde ein
+     weggelassenes Logo dort als „kein Logo" gelten.
+  Zu beachten: Im badhub-Repo liegt (lokal, ungepusht) der Umbau
+  `feat/turnierlogo-zentralisierung` — Logo als inhaltsadressierte Datei,
+  im Snapshot nur noch `tournament_logo_url`. Er löst diesen Punkt
+  **nicht** von allein (ein `tset` ohne Logo lässt die URL schlicht aus
+  dem Snapshot fallen) und kollidiert an derselben Codezeile mit #473;
+  beim Auflösen muss die Übernahme **oben** stehen, sonst holt sie den
+  Base64-Blob zurück.
+
+## Schiedsrichtermanagement — umgesetzt (v0.9.201)
+
+Die Spec [features/schiedsrichter-management.md](features/schiedsrichter-management.md)
+ist vollständig umgesetzt (Doku: [schiedsrichter-management.md](schiedsrichter-management.md)).
+Offen bleiben der Feldtest an einem Turnier mit Schiedsrichtern und — für
+den Cloud-Weg — der Relay-Deploy auf badhub.de vor dem Client-Release.
+
+## Spiele von der automatischen Feldvergabe ausnehmen — umgesetzt, noch nicht released
+
+Die Spec [features/feldvergabe-ausnahme.md](features/feldvergabe-ausnahme.md)
+ist vollständig umgesetzt: Turnierleitung kann ein einzelnes Spiel per
+Knopfdruck (TL-Web und Turnier-PC) temporär von `sync.rs::auto_assign`
+ausschließen, bis es manuell reaktiviert wird oder das Match endet;
+manuelles Zuweisen bleibt unberührt. Persistenz nach dem ADR-0022-Muster
+(eigene turniergebundene Datei `excluded-matches.json`). Doku:
+[turnierleitung-web.md](turnierleitung-web.md). Offen bleiben der
+Feldtest an einem laufenden Turnier und der Versions-Bump für ein Release.
+
+## Spielliste per Drag&Drop manuell sortierbar — umgesetzt, noch nicht released
+
+Die Spec [features/spielliste-manuelle-reihenfolge.md](features/spielliste-manuelle-reihenfolge.md)
+ist vollständig umgesetzt (ADR [0023](adr/0023-manuelle-spielreihenfolge-praefix-je-halle.md)):
+Turnierleitung zieht spielbereite, noch nicht gerufene Spiele in eine
+eigene, je Halle getrennte Reihenfolge (Präfix-Mechanik — jeder Zug
+speichert die effektive Reihenfolge vom Hallenanfang bis zum neuen Platz
+des gezogenen Spiels, alles danach folgt weiter BTPs eigener Reihenfolge).
+Wirkt an allen fünf Sortier-Stellen (`assign::resolve_and_sort_key`,
+gemeinsamer Helfer, abgesichert durch
+`tests/queue_order_consistency.rs`) sowie bei der automatischen
+Feldvergabe. Globaler Reset-Knopf (TL-Web + Desktop). Messung 14.08.2026
+(`btp_displayorder_probe.rs`, gegen TEST Köpi-Cup) belegt: `DisplayOrder`
+lässt sich nicht nach BTP zurückschreiben (stiller No-Op wie
+`LocationID`) — die Reihenfolge bleibt rein host-lokal. Persistenz nach
+dem ADR-0022-Muster (`queue-order.json`). Doku:
+[btp_protocol.md](btp_protocol.md), [preparation.md](preparation.md).
+Offen bleiben der Feldtest an einem Mehr-Hallen-Turnier, der manuelle
+Touch-/Drag-Test auf einem echten Tablet (wie schon bei der
+Schiedsrichter-Reihenfolge ausstehend) und der Versions-Bump für ein
+Release.

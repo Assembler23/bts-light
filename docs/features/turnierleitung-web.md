@@ -6,6 +6,17 @@
 > ADR: [0011 — Schreibender Cloud-Pfad für Turnierleitungs-Geräte](../adr/0011-tl-web-schreibender-cloud-pfad.md) ·
 > [0012 — Geräte-Identität für Turnierleitungs-Geräte](../adr/0012-tl-web-geraete-identitaet.md) ·
 > ADR zur Ergebniskorrektur folgt nach dem BTP-Experiment (Schritt 12).
+> Verwandt: [feldvergabe-ausnahme.md](feldvergabe-ausnahme.md) (eigene Spec)
+> ergänzt die Warteliste um einen Pause-Umschalter je Spiel, der es von der
+> automatischen Feldvergabe ausnimmt — nutzt dieselbe `TlAction`-Infrastruktur.
+> **Abgelöst in Teilen:** [tl-web-panelsystem.md](tl-web-panelsystem.md)
+> (2026-08-15) ersetzt die hier beschriebenen, geräte-lokal in
+> `localStorage` gehaltenen Anzeige-Einstellungen („Anzeige"-Klappmenü)
+> durch benannte, server-seitige **Profile** und macht die neun Abschnitte
+> der Seite zu einzeln ein-/ausblendbaren, umsortierbaren **Panels**.
+> Akzeptanzkriterien dieser Spec, die sich auf das alte Anzeige-Menü oder
+> auf `localStorage`-Persistenz der Anzeige-Schalter beziehen, gelten
+> dadurch als abgelöst.
 
 ## Kontext / Problem
 
@@ -53,7 +64,13 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
   BTP-Verbindung, Setup-Assistent, Geräte-Kopplung, Diagnose.
 - **Kein Setup und keine Einstellungen aus dem Web** — BTP-Verbindung,
   Verbindungsmodus, Passwörter, Gerätekopplung bleiben in der Desktop-App.
-  Einzige Ausnahme: der Schalter für die automatische Feldvergabe.
+  Zwei benannte Ausnahmen: der Schalter für die automatische Feldvergabe,
+  und (seit 2026-08-15) die **Panel-Profil-Verwaltung** — Anlegen,
+  Bearbeiten, Löschen und Wählen der reinen Darstellungs-Profile läuft
+  direkt in `tl.html`. Begründung und Abgrenzung:
+  [ADR 0024](../adr/0024-tl-panel-profile-verwaltung-im-web.md) — Profile
+  sind sicherheitsneutrale Anzeige-Präferenzen, anders als Zugänge und
+  Verbindungen.
 - **Kein Zugriff auf Diagnose, Logs oder Log-Upload** aus dem Web.
 - **Kein Start/Stopp des Liveticker-Pushs** aus dem Web.
 - **Keine Schiedsrichter-Anzeige.** BTP führt zwar `Officials` und
@@ -134,12 +151,22 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 - Kein Geburtsjahr — kommt in keiner View-Struct vor und darf nicht
   nachgerüstet werden.
-- **Keine `member_id`/Lizenznummer im Browser.** Die Spieleridentität
-  (`player_key`) bleibt am Host; TL-Web bekommt nur das *Ergebnis* der
-  Verfügbarkeitsprüfung (`blocked_reason`, `ready_at_ms`,
-  `blocking_players` als Namen).
-- **Keine Nationalitäten.** Die existieren allein für die automatische
-  Sprachwahl der Ansage — da TL-Web nicht spricht, entfallen sie.
+- ~~**Keine `member_id`/Lizenznummer im Browser.**~~ **Revidiert am
+  17.08.2026, ausgeweitet am 18.08.2026** (Nutzer-Entscheidung, wie zuvor
+  Nation 09.08. und Verein 12.08.): Wartelisten-Einträge, **laufende
+  Feld-Kacheln und beendete Spiele** tragen die Lizenznummer
+  (`team1_ids`/`team2_ids`) als Link-Ziel der badhub-Spielerseite
+  (`/spieler/<Nr>/live` — die Nummer ist der **öffentliche** URL-Schlüssel
+  genau dieser Seite); die Warteliste zusätzlich `blocked.player_keys`
+  (Lizenznummer bzw. normalisierter Name) für die punktgenaue
+  Namens-Färbung. Aufgeschriebener Zweck an allen drei Stellen:
+  *Nachschlagen der Spielerhistorie auf der öffentlichen badhub-Seite
+  während des Turniers* (Spec `tl-sicht-feinschliff`, Punkt 4). Die
+  ursprüngliche Beschränkung auf die Warteliste war keine
+  Datenschutz-Grenze, sondern schlicht die Stelle, an der zuerst verlinkt
+  wurde. Spieler ohne Lizenznummer bleiben unverlinkt.
+- ~~**Keine Nationalitäten.**~~ Revidiert am 09.08.2026 — als
+  zuschaltbares ISO-Kürzel neben dem Namen (Standard: aus).
 - **Kein Akkustand, keine `serving_*`-Felder** (nicht im Scope bzw. reine
   Zählhilfe).
 - Spielernamen und Zähltafelbediener-Namen laufen über eine aus dem
@@ -147,9 +174,17 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
   ist, die Zahl der Geräte begrenzt und vom Master ausgestellt. Der Relay
   hält sie nur im RAM, kappt sie, persistiert sie nicht und **loggt sie
   nie** — dieselbe Regel wie beim Azure-Key.
-- Ein **Datensparsamkeits-Test** prüft das serialisierte `TlState` gegen
-  `member_id`, Geburtsjahr und Nationalitäten und schlägt fehl, wenn jemand
-  ein solches Feld nachrüstet.
+- Ein **Datensparsamkeits-Test** prüft das serialisierte `TlState`
+  (`the_state_never_carries_personal_data_beyond_its_purpose`): Das
+  Geburtsjahr bleibt überall draußen, ebenso Check-In-Spielernamen sowie
+  Sperrlisten und Stammverein der Schiedsrichter. Die Lizenznummern sind
+  seit 18.08.2026 an allen drei Stellen **positiv** geprüft — fiele eine
+  weg, wäre der Link dort tot, ohne dass es jemand merkte.
+  **Achtung beim Nachrüsten:** Der zweite Wächter
+  (`every_published_field_is_deliberately_allowed`) führt eine **flache**
+  Feldnamen-Liste und schlägt deshalb nicht an, wenn ein bereits erlaubter
+  Feldname in einer **weiteren** Struktur auftaucht — die Ausweitung vom
+  18.08.2026 fing allein der Datensparsamkeits-Test.
 
 **Abhängigkeiten**
 
@@ -303,8 +338,11 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 
 **Aufrufe und Ansagen**
 
-- [x] Die Aufruf-Stufe (1./2./3.) ist auf **allen** Geräten gleich —
-      inklusive der Desktop-App; sie zählt am Host, nicht im Browser.
+- [x] Die Aufruf-Stufe ist auf **allen** Geräten gleich — inklusive der
+      Desktop-App; sie zählt am Host, nicht im Browser. (Ursprünglich
+      1./2./3.; seit der Profil-Option „Aufrufe unbegrenzt", 17.08.2026,
+      zählt der Host über 3 hinaus, sobald ein Profil die Option führt —
+      ab Stufe 4 spricht das Ansage-Gerät ohne Stufenwort.)
 - [~] Eine aus TL-Web ausgelöste Ansage wird **genau einmal** und auf
       **genau einem** Gerät je Halle gesprochen — mit demselben Text, Gong
       und derselben Stimme wie eine Ansage aus der Desktop-App, inklusive
@@ -314,6 +352,18 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
       Aufruf-Stufe zählt hoch.
 - [x] Eine Ansage, die länger als 60 s nicht abgespielt werden konnte,
       verfällt und wird nicht nachträglich gesprochen.
+- [x] **Nicht jede Ansage ist ein Aufruf** (seit v0.9.230, Spec
+      `tl-sicht-feinschliff` Punkt 3): Neben den Aufrufen gibt es die
+      Schiedsrichter-Ansage und „Feld X. Bitte mit dem Spielen beginnen."
+      (`TlAction::AnnounceStartPlay`). Beide lassen `call_stages`
+      unberührt — keine Stufe, kein Abzeichen, keine Fälligkeit — und sind
+      daher beliebig oft auslösbar. Die Warnung „kein Ansage-Gerät
+      verbunden" spricht deshalb von *der Ansage*, nicht *dem Aufruf*.
+- [x] **Ein Ansage-Gerät mit älterem Stand verstummt nicht komplett**
+      (v0.9.230): Aufträge, die es nicht lesen kann — unbekannte Ansageart
+      oder bekannter Typ mit verändertem Rumpf —, überspringt es einzeln
+      und spricht die übrigen. Vorher scheiterte daran die ganze Charge.
+      Was übersprungen wurde, steht im Protokoll.
 
 **Ergebnis und Korrektur**
 

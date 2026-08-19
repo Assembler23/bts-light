@@ -16,6 +16,8 @@ import {
   ChartLine,
   Lock,
   Megaphone,
+  Pause,
+  Play,
   Settings,
   Trash2,
   Unlock,
@@ -25,14 +27,18 @@ import {
   addScorekeeper,
   advanceScorekeeper,
   assignCourt,
+  autoAssignExclude,
   disqualifyMatch,
   enterResult,
   finishedMatches,
   freeCourt,
+  hallColorsView,
   matchTimeline,
   noteCourtCall,
   preparationCandidates,
+  removeHallColor,
   removeHallLayout,
+  setHallColor,
   removeScorekeeper,
   scorekeeperQueue,
   setCourtLocked,
@@ -55,6 +61,7 @@ import type {
   DisciplineHallRule,
   FinishedMatchRow,
   MatchTimeline,
+  HallColorsView,
   HallLayoutConfig,
   LayoutOrigin,
   PreparationCandidate,
@@ -94,11 +101,17 @@ export function FieldOverviewPage({
   disciplineHallRules,
   manageScorekeepers,
   hallLayouts,
+  unlimitedCalls,
   onConfigSaved,
 }: {
   callTimer: CallTimerConfig;
   announce: AnnounceConfig;
   azureTts?: AzureTtsConfig;
+  /** Führt irgendein TL-Web-Profil „Aufrufe unbegrenzt"? Dann zählt der
+   *  Turnier-PC über 3 hinaus, und dieser Knopf bietet ab dem vierten
+   *  Aufruf die schlichte Ansage ohne Stufenwort an — dieselbe Regel wie
+   *  `unlimited_court_calls` in `tablet/tl.rs`. */
+  unlimitedCalls: boolean;
   /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): nicht erlaubte Felder werden
    *  ausgegraut; eine Vergabe dorthin wird abgewiesen (Backend erzwingt es). */
   disciplineHallRules: DisciplineHallRule[];
@@ -170,6 +183,9 @@ export function FieldOverviewPage({
   // Popover offen) + die Formularwerte. `""` ist ein gültiger Schlüssel
   // (Einzel-Halle-Turniere gruppieren unter dem leeren Hallennamen).
   const [editingHall, setEditingHall] = useState<string | null>(null);
+  // Palette + effektive Hallen-Farben für den Picker (Spec hallen-farben).
+  // Leer-Liste bei Ein-Hallen-Turnieren → Picker unsichtbar.
+  const [hallColors, setHallColors] = useState<HallColorsView | null>(null);
   const [layoutColumns, setLayoutColumns] = useState(4);
   const [layoutOrigin, setLayoutOrigin] = useState<LayoutOrigin>(
     "bottom_left",
@@ -240,6 +256,26 @@ export function FieldOverviewPage({
     }
   }
 
+  // Hallen-Farbe wählen bzw. auf „Automatisch" zurücksetzen (Spec
+  // hallen-farben). Popover bleibt offen — man will das Ergebnis der
+  // Farbwahl direkt am Gruppenkopf sehen und ggf. weiterklicken.
+  async function chooseHallColor(hall: string, color: string | null) {
+    setBusy(true);
+    setError("");
+    try {
+      const cfg = color
+        ? await setHallColor(hall, color)
+        : await removeHallColor(hall);
+      onConfigSaved(cfg);
+      setHallColors(await hallColorsView());
+      void refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const refresh = useCallback(async () => {
     try {
       const [info, prep, fin] = await Promise.all([
@@ -273,6 +309,20 @@ export function FieldOverviewPage({
       if (timer.current) window.clearInterval(timer.current);
     };
   }, [refresh]);
+
+  // Hallen-Farben nachladen, sobald sich die Hallenmenge ändert (Review
+  // 2026-08-16): Die Seite kann offen sein, BEVOR BTP verbindet — mit
+  // Mount-only bliebe der Picker dann leer, bis jemand den Tab wechselt.
+  // Der Schlüssel ist die sortierte Hallenmenge, nicht das courts-Array —
+  // sonst liefe der Effekt bei jedem 2,5-s-Poll.
+  const hallsKey = [...new Set(courts.map((c) => c.location))]
+    .sort()
+    .join(" ");
+  useEffect(() => {
+    hallColorsView()
+      .then(setHallColors)
+      .catch(() => {});
+  }, [hallsKey]);
 
   // Zähltafelbediener-Warteschlange separat pollen (nur wenn aktiviert).
   const refreshSk = useCallback(() => {
@@ -526,7 +576,16 @@ export function FieldOverviewPage({
           <section key={g.hall || "_"} className="flex flex-col gap-2">
             <div className="relative flex items-center gap-1">
               {multiHall && (
-                <h2 className="text-sm font-semibold text-slate-600">
+                <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-600">
+                  {/* Hallen-Farbmarke (Spec hallen-farben): reine Zusatz-
+                      Kennung, der Name bleibt immer stehen. */}
+                  {g.courts[0]?.hall_color && (
+                    <span
+                      aria-hidden
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: g.courts[0].hall_color }}
+                    />
+                  )}
                   {g.hall || "Ohne Halle"}
                 </h2>
               )}
@@ -614,6 +673,52 @@ export function FieldOverviewPage({
                       </span>
                     </label>
                   </div>
+                  {/* Hallen-Farbe (Spec hallen-farben): nur bei Mehr-Hallen-
+                      Turnieren — Ein-Hallen-Turniere bleiben farblos. */}
+                  {(() => {
+                    const info = hallColors?.halls.find(
+                      (h) =>
+                        h.hall.trim().toLowerCase() ===
+                        g.hall.trim().toLowerCase(),
+                    );
+                    if (!info || !hallColors) return null;
+                    return (
+                      <div className="mt-3 border-t border-slate-100 pt-2">
+                        <p className="text-xs font-semibold text-slate-700">
+                          Hallen-Farbe
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {hallColors.palette.map((tone) => (
+                            <button
+                              key={tone}
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void chooseHallColor(g.hall, tone)}
+                              title={tone}
+                              aria-label={`Farbe ${tone} wählen`}
+                              className={`h-6 w-6 rounded-full border disabled:opacity-50 ${
+                                info.color === tone
+                                  ? "border-slate-800 ring-2 ring-slate-400"
+                                  : "border-slate-300"
+                              }`}
+                              style={{ backgroundColor: tone }}
+                            />
+                          ))}
+                          {info.overridden && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void chooseHallColor(g.hall, null)}
+                              className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600
+                                         hover:bg-slate-200 disabled:opacity-50"
+                            >
+                              Automatisch
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="mt-3 flex justify-end gap-2">
                     {layout && (
                       <button
@@ -676,9 +781,16 @@ export function FieldOverviewPage({
                 // einer Karte in dieser Oberfläche: Sonst böte sie erneut den
                 // zweiten Aufruf an, während die Halle über die
                 // Turnierleitungs-Seite längst den dritten gehört hat.
-                const nextCallStage = Math.min(
-                  Math.max((c.call_stage || 1) + 1, timeStage),
-                  3,
+                // Mit „Aufrufe unbegrenzt" läuft die Stufe über 3 hinaus
+                // (der Zähler des Turnier-PCs tut es dann auch); gesprochen
+                // wird ab 4 die schlichte Ansage ohne Stufenwort — sonst
+                // spräche dieser Knopf „Dritter und letzter Aufruf" als
+                // vierten (Review 17.08.2026).
+                const nextCallStage = unlimitedCalls
+                  ? Math.max((c.call_stage || 1) + 1, timeStage)
+                  : Math.min(Math.max((c.call_stage || 1) + 1, timeStage), 3);
+                const spokenCallStage = (
+                  nextCallStage >= 4 ? 1 : nextCallStage
                 ) as 1 | 2 | 3;
                 const clickable = !c.locked && !occupied && !busy;
                 // Disziplin/Klasse→Halle: freies Feld, das fürs gewählte Spiel
@@ -829,11 +941,28 @@ export function FieldOverviewPage({
                               {ball === "match" ? "Matchball" : "Satzball"}
                             </div>
                           )}
-                          {/* Tabletbediener (= „Schiedsrichter"-Spalte, bis das
-                              Schiri-Modul echte Schiris liefert). */}
+                          {/* Tabletbediener (Zähltafel, ADR 0007). */}
                           {c.scorekeeper.length > 0 && (
                             <div className="truncate text-[11px] text-slate-400">
                               Bediener: {c.scorekeeper.join(" / ")}
+                            </div>
+                          )}
+                          {/* Schiedsrichter/Aufschlagrichter (Spec
+                              schiedsrichter-management). Nur gefüllt, wenn mit
+                              Schiedsrichtern gespielt wird. */}
+                          {(c.sr.length > 0 || c.ar.length > 0) && (
+                            <div className="truncate text-[11px] text-slate-500">
+                              {c.sr.length > 0 && <>SR: {c.sr.join(" / ")}</>}
+                              {c.sr.length > 0 && c.ar.length > 0 && " · "}
+                              {c.ar.length > 0 && <>AR: {c.ar.join(" / ")}</>}
+                              {c.official_warn && (
+                                <span
+                                  className="ml-1 rounded bg-amber-200 px-1 font-medium text-amber-900"
+                                  title={`Konflikt: ${c.official_warn}`}
+                                >
+                                  ⚠ {c.official_warn}
+                                </span>
+                              )}
                             </div>
                           )}
                           {callTimer.enabled &&
@@ -862,7 +991,7 @@ export function FieldOverviewPage({
                                     c,
                                     announce,
                                     azureTts,
-                                    nextCallStage,
+                                    spokenCallStage,
                                   );
                                   void noteCourtCall(
                                     c.court_id,
@@ -874,12 +1003,16 @@ export function FieldOverviewPage({
                                 aria-label={`Feld ${c.court} ${
                                   nextCallStage === 1
                                     ? "aufrufen"
-                                    : `${nextCallStage}. Aufruf`
+                                    : nextCallStage >= 4
+                                      ? "erneut aufrufen"
+                                      : `${nextCallStage}. Aufruf`
                                 }`}
                                 title={
                                   nextCallStage === 1
                                     ? "Dieses Feld aufrufen (Ansage)"
-                                    : `${nextCallStage}. Aufruf ansagen (Gong, Feld, Disziplin, „${nextCallStage === 2 ? "Zweiter" : "Dritter und letzter"} Aufruf", Spieler)`
+                                    : nextCallStage >= 4
+                                      ? "Erneut aufrufen (Ansage ohne Stufenwort)"
+                                      : `${nextCallStage}. Aufruf ansagen (Gong, Feld, Disziplin, „${nextCallStage === 2 ? "Zweiter" : "Dritter und letzter"} Aufruf", Spieler)`
                                 }
                                 className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1
                                            text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
@@ -887,7 +1020,9 @@ export function FieldOverviewPage({
                                 <Megaphone size={13} />{" "}
                                 {nextCallStage === 1
                                   ? "Aufrufen"
-                                  : `${nextCallStage}. Aufruf`}
+                                  : nextCallStage >= 4
+                                    ? "Erneut aufrufen"
+                                    : `${nextCallStage}. Aufruf`}
                               </button>
                             )}
                             <button
@@ -948,6 +1083,7 @@ export function FieldOverviewPage({
                   <th className="px-3 py-2 font-medium">Spiel</th>
                   <th className="px-3 py-2 font-medium">Spieler</th>
                   <th className="px-3 py-2 font-medium">Halle</th>
+                  <th className="px-3 py-2 font-medium">Auto-Vergabe</th>
                 </tr>
               </thead>
               <tbody>
@@ -1003,6 +1139,41 @@ export function FieldOverviewPage({
                             —
                           </span>
                         )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <button
+                          disabled={busy}
+                          onClick={(e) => {
+                            // Nicht bis zur Zeile durchreichen — sonst
+                            // würde der Klick zusätzlich das Spiel
+                            // auswählen (Drag&Drop-Ziel).
+                            e.stopPropagation();
+                            void run(() =>
+                              autoAssignExclude(m.match_id, !m.excluded),
+                            );
+                          }}
+                          title={
+                            m.excluded
+                              ? "Wieder in die automatische Feldvergabe aufnehmen"
+                              : "Von der automatischen Feldvergabe ausnehmen"
+                          }
+                          aria-pressed={m.excluded}
+                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs disabled:opacity-50 ${
+                            m.excluded
+                              ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                              : active
+                                ? "text-white hover:bg-white/20"
+                                : "text-slate-400 hover:bg-slate-100"
+                          }`}
+                        >
+                          {m.excluded ? (
+                            <>
+                              <Pause size={13} /> ausgenommen
+                            </>
+                          ) : (
+                            <Play size={13} />
+                          )}
+                        </button>
                       </td>
                     </tr>
                   );

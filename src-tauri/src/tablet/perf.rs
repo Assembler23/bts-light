@@ -1,0 +1,618 @@
+//! Perf-Zähler der Anzeige-Strecke (Spec `monitor-livestand-push`, Etappe S0).
+//!
+//! Die Spec verbietet, den Netz-Teil ohne Vorher-Zahlen zu beginnen: Erst
+//! messen, dann bauen. Gezählt wird deshalb genau das, was die Analyse als
+//! Lastposten benannt hat — die Zustands-Abrufe (getrennt nach
+//! nudge-getrieben und Fallback-Poll), die Rechnung je Abruf, der
+//! Plattenschreibvorgang je Punkt und die verschickten Nudges.
+//!
+//! **Nur Zahlen.** Diese Werte wandern über den Log-Upload aus echten
+//! Turnieren zurück und über `/debug/perf` aus dem LAN heraus; ein
+//! Personenbezug hätte hier nichts zu suchen. Der Wächter-Test
+//! `debug_perf_enthaelt_keine_personendaten` macht das durchsetzbar.
+//!
+//! **Was diese Zähler im Cloud-Betrieb NICHT sehen:** Dort bedient der
+//! Relay `/health` und `/court/{id}/state`, nicht dieser Prozess —
+//! `health_*` und `court_state_*` bleiben deshalb bei null, während
+//! `nudges_sent`, `persist_calls` und `overview_builds` weiterlaufen. Eine
+//! Zeile ohne Abrufe heißt im Cloud-Modus also **nicht** „keine Anzeigen".
+//! Die Abruf-Seite der Cloud misst das Lastskript von außen
+//! (`scripts/last-monitor.mjs` gegen die Relay-Adresse); den Relay selbst
+//! zu instrumentieren ist bewusst nicht Teil dieser Etappe.
+
+use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Woher ein Zustands-Abruf kam. Die Trennung ist der Kern der Messung: Sie
+/// beantwortet, wie viel Last der Push erzeugt und wie viel der Fallback —
+/// ohne sie wäre nach S6 nicht zu sagen, welcher Hebel gewirkt hat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quelle {
+    /// Der Abruf folgte einem Nudge (`&src=push`).
+    Push,
+    /// Fallback-Takt — oder eine alte Seite, die noch kein `src` sendet.
+    Poll,
+    /// **Keine Anzeige-Aktualisierung** (`&src=check`): die sekündliche
+    /// Frage der Info-Seiten „bin ich noch diesem Ziel zugewiesen?".
+    ///
+    /// Sie trifft dieselbe Route wie der Court-Monitor, hat aber nichts mit
+    /// der Anzeige-Last zu tun. Ohne eigene Kennzeichnung stünden bei zwanzig
+    /// Info-Displays zwanzig Abrufe je Sekunde im Court-Monitor-Zähler,
+    /// obwohl kein einziger Court-Monitor hängt — die Vorher-Messung, auf
+    /// der alle Folge-Etappen aufsetzen, mäße zwei verschiedene Dinge in
+    /// einem Wert (Review-Fund 19.08.2026).
+    Pruefung,
+}
+
+impl Quelle {
+    /// Liest die Quelle aus dem `src`-Query. **Alles außer genau `push`
+    /// zählt als `poll`**, insbesondere das Fehlen: Eine Seite aus einem
+    /// älteren Stand sendet den Parameter nicht, und ihre Abrufe sind
+    /// tatsächlich Poll-Abrufe. Lieber die Push-Zahl zu klein als die
+    /// Entlastung schöngerechnet.
+    pub fn aus_query(src: Option<&str>) -> Self {
+        match src {
+            Some("push") => Quelle::Push,
+            Some("check") => Quelle::Pruefung,
+            _ => Quelle::Poll,
+        }
+    }
+}
+
+/// Zahl der Histogramm-Fächer für `overview_build_ns`. Fach `i` sammelt
+/// Dauern von 2^i bis 2^(i+1) Nanosekunden; 32 Fächer reichen bis gut 4 s
+/// und damit weit über jeden realen Bau.
+const FAECHER: usize = 32;
+
+/// Die Zähler selbst. Alles `AtomicU64` mit `Relaxed`: Diese Werte sitzen in
+/// den heißesten Pfaden der App (jeder Punkt, jeder Abruf jeder Anzeige) und
+/// dürfen dort nichts kosten. Sie ordnen keinen anderen Speicherzugriff —
+/// eine um eins verzählte Messgröße wäre folgenlos, eine Lock-Kontention im
+/// Score-Pfad nicht.
+#[derive(Debug, Default)]
+pub struct PerfCounters {
+    health_push: AtomicU64,
+    health_push_bytes: AtomicU64,
+    health_poll: AtomicU64,
+    health_poll_bytes: AtomicU64,
+    court_state_push: AtomicU64,
+    court_state_push_bytes: AtomicU64,
+    court_state_poll: AtomicU64,
+    court_state_poll_bytes: AtomicU64,
+    overview_builds: AtomicU64,
+    overview_build_ns: AtomicU64,
+    overview_build_ns_max: AtomicU64,
+    /// Verteilung der Bau-Dauern, damit die Messtabelle ein p95 tragen kann.
+    /// Ein reiner Mittelwert verstecke genau die Ausreißer, die auf dem Pi
+    /// als Ruckeln ankommen.
+    overview_faecher: [AtomicU64; FAECHER],
+    persist_calls: AtomicU64,
+    persist_ns: AtomicU64,
+    persist_bytes: AtomicU64,
+    nudges_sent: AtomicU64,
+}
+
+impl PerfCounters {
+    /// Ein `/health`-Abruf mit seiner Antwortgröße.
+    pub fn note_health(&self, quelle: Quelle, bytes: u64) {
+        let (n, b) = match quelle {
+            Quelle::Push => (&self.health_push, &self.health_push_bytes),
+            Quelle::Poll => (&self.health_poll, &self.health_poll_bytes),
+            Quelle::Pruefung => return,
+        };
+        n.fetch_add(1, Ordering::Relaxed);
+        b.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Ein `/court/{id}/state`-Abruf mit seiner Antwortgröße.
+    pub fn note_court_state(&self, quelle: Quelle, bytes: u64) {
+        let (n, b) = match quelle {
+            Quelle::Push => (&self.court_state_push, &self.court_state_push_bytes),
+            Quelle::Poll => (&self.court_state_poll, &self.court_state_poll_bytes),
+            Quelle::Pruefung => return,
+        };
+        n.fetch_add(1, Ordering::Relaxed);
+        b.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Ein **Direktbau** des Übersichts-Zustands. Ab S1 zählt hier nur noch,
+    /// was den Antwortcache verfehlt — die Zahl ist dann die Gegenprobe zur
+    /// Trefferquote.
+    ///
+    /// **Beim Ablesen beachten:** Diese Zahl ist absichtlich größer als die
+    /// der `/health`-Abrufe. `overview()` speist außerdem die Kombi-Anzeige
+    /// (`/combo/state`), die Desktop-Oberfläche (`tablet_info`) und die
+    /// Hallen-Kurzlinks. Das ist kein Messfehler, sondern der Punkt: Der
+    /// Antwortcache aus S1 entlastet all diese Aufrufer, nicht nur `/health`.
+    pub fn note_overview_build(&self, ns: u64) {
+        self.overview_builds.fetch_add(1, Ordering::Relaxed);
+        self.overview_build_ns.fetch_add(ns, Ordering::Relaxed);
+        self.overview_build_ns_max.fetch_max(ns, Ordering::Relaxed);
+        self.overview_faecher[fach(ns)].fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Ein abgeschlossener Schreibvorgang der `live-scores.json`.
+    pub fn note_persist(&self, ns: u64, bytes: u64) {
+        self.persist_calls.fetch_add(1, Ordering::Relaxed);
+        self.persist_ns.fetch_add(ns, Ordering::Relaxed);
+        self.persist_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Ein verschickter Monitor-Nudge.
+    pub fn note_nudge(&self) {
+        self.nudges_sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Aktueller Stand aller Zähler.
+    pub fn snapshot(&self) -> PerfSnapshot {
+        let lies = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        PerfSnapshot {
+            health_push: lies(&self.health_push),
+            health_push_bytes: lies(&self.health_push_bytes),
+            health_poll: lies(&self.health_poll),
+            health_poll_bytes: lies(&self.health_poll_bytes),
+            court_state_push: lies(&self.court_state_push),
+            court_state_push_bytes: lies(&self.court_state_push_bytes),
+            court_state_poll: lies(&self.court_state_poll),
+            court_state_poll_bytes: lies(&self.court_state_poll_bytes),
+            overview_builds: lies(&self.overview_builds),
+            overview_build_ns: lies(&self.overview_build_ns),
+            overview_build_ns_max: lies(&self.overview_build_ns_max),
+            overview_build_ns_p95: self.perzentil_ns(95),
+            persist_calls: lies(&self.persist_calls),
+            persist_ns: lies(&self.persist_ns),
+            persist_bytes: lies(&self.persist_bytes),
+            nudges_sent: lies(&self.nudges_sent),
+        }
+    }
+
+    /// Obere Grenze des Fachs, in dem das `p`-te Perzentil der Bau-Dauern
+    /// liegt. Ohne Messwerte 0.
+    fn perzentil_ns(&self, p: u64) -> u64 {
+        let werte: Vec<u64> = self
+            .overview_faecher
+            .iter()
+            .map(|f| f.load(Ordering::Relaxed))
+            .collect();
+        let gesamt: u64 = werte.iter().sum();
+        if gesamt == 0 {
+            return 0;
+        }
+        // Aufgerundeter Rang: Bei 100 Werten und p=95 ist der 95. der
+        // gesuchte — abgerundet träfe man den 94. und meldete zu wenig.
+        let ziel = (gesamt * p).div_ceil(100).max(1);
+        let mut gesehen = 0u64;
+        for (i, n) in werte.iter().enumerate() {
+            gesehen += n;
+            if gesehen >= ziel {
+                return fach_obergrenze(i);
+            }
+        }
+        fach_obergrenze(FAECHER - 1)
+    }
+}
+
+/// Fach-Index einer Dauer: `floor(log2(ns))`, gedeckelt. `0 ns` landet in
+/// Fach 0 — eine Dauer unterhalb der Uhrenauflösung ist für die Verteilung
+/// dasselbe wie „unmessbar kurz".
+fn fach(ns: u64) -> usize {
+    if ns == 0 {
+        return 0;
+    }
+    ((63 - ns.leading_zeros()) as usize).min(FAECHER - 1)
+}
+
+/// Obere Grenze eines Fachs in Nanosekunden.
+fn fach_obergrenze(i: usize) -> u64 {
+    1u64 << (i + 1).min(63)
+}
+
+/// Ein Lesestand der Zähler — die Form, in der sie geloggt und über
+/// `/debug/perf` ausgeliefert werden. Ausschließlich Zahlen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct PerfSnapshot {
+    pub health_push: u64,
+    pub health_push_bytes: u64,
+    pub health_poll: u64,
+    pub health_poll_bytes: u64,
+    pub court_state_push: u64,
+    pub court_state_push_bytes: u64,
+    pub court_state_poll: u64,
+    pub court_state_poll_bytes: u64,
+    pub overview_builds: u64,
+    pub overview_build_ns: u64,
+    pub overview_build_ns_max: u64,
+    /// Obere Grenze des Fachs, in dem das 95. Perzentil liegt (0 ohne
+    /// Messwerte). Bewusst die Grenze statt eines interpolierten Werts:
+    /// Das Fach ist die Auflösung, die wirklich gemessen wurde.
+    pub overview_build_ns_p95: u64,
+    pub persist_calls: u64,
+    pub persist_ns: u64,
+    pub persist_bytes: u64,
+    pub nudges_sent: u64,
+}
+
+impl PerfSnapshot {
+    /// Was seit `vorher` hinzugekommen ist. Die Zähler werden abgezogen,
+    /// **`max` und `p95` bleiben absolut** — sie beschreiben die Verteilung
+    /// seit Programmstart, und eine „Differenz zweier Perzentile" wäre
+    /// keine sinnvolle Größe.
+    pub fn seit(&self, vorher: &PerfSnapshot) -> PerfSnapshot {
+        // `saturating_sub`: Die Zähler laufen nur vorwärts, aber ein
+        // Vergleich über einen Neustart hinweg (Takt hält den alten Stand,
+        // die Zähler starten bei 0) darf keine Riesenzahl erfinden.
+        let d = |neu: u64, alt: u64| neu.saturating_sub(alt);
+        PerfSnapshot {
+            health_push: d(self.health_push, vorher.health_push),
+            health_push_bytes: d(self.health_push_bytes, vorher.health_push_bytes),
+            health_poll: d(self.health_poll, vorher.health_poll),
+            health_poll_bytes: d(self.health_poll_bytes, vorher.health_poll_bytes),
+            court_state_push: d(self.court_state_push, vorher.court_state_push),
+            court_state_push_bytes: d(self.court_state_push_bytes, vorher.court_state_push_bytes),
+            court_state_poll: d(self.court_state_poll, vorher.court_state_poll),
+            court_state_poll_bytes: d(self.court_state_poll_bytes, vorher.court_state_poll_bytes),
+            overview_builds: d(self.overview_builds, vorher.overview_builds),
+            overview_build_ns: d(self.overview_build_ns, vorher.overview_build_ns),
+            persist_calls: d(self.persist_calls, vorher.persist_calls),
+            persist_ns: d(self.persist_ns, vorher.persist_ns),
+            persist_bytes: d(self.persist_bytes, vorher.persist_bytes),
+            nudges_sent: d(self.nudges_sent, vorher.nudges_sent),
+            // Verteilungswerte beschreiben den ganzen Lauf, nicht das Fenster.
+            overview_build_ns_max: self.overview_build_ns_max,
+            overview_build_ns_p95: self.overview_build_ns_p95,
+        }
+    }
+}
+
+/// Drossel für die Perf-Zeile im Diagnose-Log (Spec monitor-livestand-push,
+/// S0). Sie sitzt im Sync-Loop, weil der in **beiden** Betriebsarten läuft —
+/// der LAN-Server tut das nicht, und im reinen Cloud-Modus fehlte die Zeile
+/// sonst genau dort, wo die Messung am meisten hergibt.
+///
+/// Der Zweck ist der Rückweg: Diese Zeilen kommen über den Log-Upload aus
+/// einem echten Turnier zurück, wo kein Messgerät steht.
+#[derive(Debug)]
+pub struct PerfLog {
+    letzte: PerfSnapshot,
+    /// Zeitpunkt des letzten Fensters. `None` = noch kein Bezugspunkt.
+    /// Bewusst ein `Option` statt der Null als Sentinel: Ein Bezugspunkt
+    /// bei `now_ms == 0` ist zwar nur im Test erreichbar, aber ein Sentinel,
+    /// der einen gültigen Wert verschluckt, ist genau die Art Fehler, die
+    /// man erst im Feld bemerkt.
+    letzte_ms: Option<u64>,
+}
+
+/// Abstand zweier Perf-Zeilen. Zehn Sekunden sind grob genug, um das Log
+/// nicht zu fluten, und fein genug, um einen Lastwechsel zu sehen.
+const LOG_FENSTER_MS: u64 = 10_000;
+
+impl PerfLog {
+    pub fn neu() -> Self {
+        PerfLog {
+            letzte: PerfSnapshot::default(),
+            letzte_ms: None,
+        }
+    }
+
+    /// Die nächste Log-Zeile, falls das Fenster voll **und** überhaupt etwas
+    /// passiert ist. Ein Turnier-PC, an dem gerade keine Anzeige hängt,
+    /// schreibt nichts — eine Zeile aus lauter Nullen wäre kein Messwert,
+    /// sondern Rauschen im Diagnose-Log.
+    pub fn faellig(&mut self, zaehler: &PerfCounters, now_ms: u64) -> Option<String> {
+        let Some(seit) = self.letzte_ms else {
+            // Erster Durchlauf: nur den Bezugspunkt setzen, sonst meldete
+            // die erste Zeile das Fenster „seit Unix-Epoche".
+            self.letzte_ms = Some(now_ms);
+            self.letzte = zaehler.snapshot();
+            return None;
+        };
+        let vergangen = now_ms.saturating_sub(seit);
+        if vergangen < LOG_FENSTER_MS {
+            return None;
+        }
+        let jetzt = zaehler.snapshot();
+        let delta = jetzt.seit(&self.letzte);
+        self.letzte = jetzt;
+        self.letzte_ms = Some(now_ms);
+        if delta.ist_still() {
+            return None;
+        }
+        Some(delta.log_zeile(vergangen))
+    }
+}
+
+impl PerfSnapshot {
+    /// Hat sich im Fenster überhaupt nichts getan?
+    pub fn ist_still(&self) -> bool {
+        self.health_push == 0
+            && self.health_poll == 0
+            && self.court_state_push == 0
+            && self.court_state_poll == 0
+            && self.overview_builds == 0
+            && self.persist_calls == 0
+            && self.nudges_sent == 0
+    }
+
+    /// Die Zeile fürs Diagnose-Log. Absolute Zahlen des Fensters plus die
+    /// Rate — die Rate ist das, was man vergleichen will, die absolute Zahl
+    /// das, woran man einen verkürzten Takt erkennt.
+    pub fn log_zeile(&self, fenster_ms: u64) -> String {
+        let s = (fenster_ms as f64 / 1000.0).max(0.001);
+        let rate = |n: u64| n as f64 / s;
+        let mb = |bytes: u64| bytes as f64 / 1_048_576.0 / s;
+        let ms = |ns: u64| ns as f64 / 1_000_000.0;
+        let persist_schnitt = self.persist_ns / self.persist_calls.max(1);
+        format!(
+            "Perf-Anzeigen ({:.0} s): /health {} push + {} poll = {:.1}/s, {:.2} MB/s · \
+             /court/state {} push + {} poll, {:.2} MB/s · overview {} Bauten ({:.1}/s), \
+             p95 {:.2} ms / max {:.2} ms (seit Start) · live-scores {} Schreibvorgänge ({:.1}/s, \
+             {:.2} MB/s, Ø {:.2} ms) · {} Nudges ({:.1}/s)",
+            s,
+            self.health_push,
+            self.health_poll,
+            rate(self.health_push + self.health_poll),
+            mb(self.health_push_bytes + self.health_poll_bytes),
+            self.court_state_push,
+            self.court_state_poll,
+            mb(self.court_state_push_bytes + self.court_state_poll_bytes),
+            self.overview_builds,
+            rate(self.overview_builds),
+            ms(self.overview_build_ns_p95),
+            ms(self.overview_build_ns_max),
+            self.persist_calls,
+            rate(self.persist_calls),
+            mb(self.persist_bytes),
+            ms(persist_schnitt),
+            self.nudges_sent,
+            rate(self.nudges_sent),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zaehler_trennt_push_und_poll() {
+        // Der Kern der Messung: nudge-getriebene und Fallback-Abrufe landen
+        // in getrennten Zählern, samt ihrer Bytes.
+        let p = PerfCounters::default();
+        p.note_health(Quelle::Push, 1_000);
+        p.note_health(Quelle::Push, 1_500);
+        p.note_health(Quelle::Poll, 2_000);
+        p.note_court_state(Quelle::Push, 300);
+        p.note_court_state(Quelle::Poll, 400);
+        let s = p.snapshot();
+        assert_eq!(s.health_push, 2);
+        assert_eq!(s.health_push_bytes, 2_500);
+        assert_eq!(s.health_poll, 1);
+        assert_eq!(s.health_poll_bytes, 2_000);
+        assert_eq!(s.court_state_push, 1);
+        assert_eq!(s.court_state_push_bytes, 300);
+        assert_eq!(s.court_state_poll, 1);
+        assert_eq!(s.court_state_poll_bytes, 400);
+    }
+
+    #[test]
+    fn zaehler_ohne_src_zaehlt_als_poll() {
+        // Akzeptanzkriterium: Ein Abruf ohne `src` (alte Seite) wird als
+        // `poll` gezählt, nie als `push`. Ebenso alles Unbekannte.
+        assert_eq!(Quelle::aus_query(None), Quelle::Poll);
+        assert_eq!(Quelle::aus_query(Some("")), Quelle::Poll);
+        assert_eq!(Quelle::aus_query(Some("irgendwas")), Quelle::Poll);
+        assert_eq!(Quelle::aus_query(Some("poll")), Quelle::Poll);
+        assert_eq!(Quelle::aus_query(Some("push")), Quelle::Push);
+        assert_eq!(Quelle::aus_query(Some("check")), Quelle::Pruefung);
+    }
+
+    #[test]
+    fn ein_zuweisungs_check_zaehlt_gar_nicht() {
+        // Die Info-Seiten fragen sekündlich „bin ich noch zugewiesen?" über
+        // dieselbe Route wie der Court-Monitor. Zwanzig Info-Displays
+        // stünden sonst als zwanzig Court-Monitor-Abrufe je Sekunde in der
+        // Messung, obwohl kein einziger Court-Monitor hängt.
+        let p = PerfCounters::default();
+        p.note_court_state(Quelle::Pruefung, 500);
+        p.note_health(Quelle::Pruefung, 500);
+        let s = p.snapshot();
+        assert_eq!(s.court_state_poll, 0);
+        assert_eq!(s.court_state_push, 0);
+        assert_eq!(s.court_state_poll_bytes, 0);
+        assert_eq!(s.health_poll, 0);
+        assert_eq!(s.health_push, 0);
+    }
+
+    #[test]
+    fn overview_build_ns_steigt_je_direktbau() {
+        let p = PerfCounters::default();
+        assert_eq!(p.snapshot().overview_builds, 0);
+        p.note_overview_build(1_000);
+        p.note_overview_build(3_000);
+        let s = p.snapshot();
+        assert_eq!(s.overview_builds, 2);
+        assert_eq!(s.overview_build_ns, 4_000);
+        assert_eq!(s.overview_build_ns_max, 3_000);
+    }
+
+    #[test]
+    fn p95_kommt_aus_dem_histogramm() {
+        // Die Messtabelle der Spec verlangt ein p95. 100 Bauten: 95 schnelle
+        // (~1 µs) und 5 langsame (~8 ms) — das Perzentil muss im Fach der
+        // schnellen liegen, nicht beim Mittelwert der beiden Wolken.
+        let p = PerfCounters::default();
+        for _ in 0..95 {
+            p.note_overview_build(1_024);
+        }
+        for _ in 0..5 {
+            p.note_overview_build(8_000_000);
+        }
+        let s = p.snapshot();
+        assert!(
+            s.overview_build_ns_p95 >= 1_024 && s.overview_build_ns_p95 <= 4_096,
+            "p95 sollte im Fach der 95 schnellen Bauten liegen, war {}",
+            s.overview_build_ns_p95
+        );
+        assert_eq!(s.overview_build_ns_max, 8_000_000);
+    }
+
+    #[test]
+    fn persist_und_nudges_werden_gezaehlt() {
+        let p = PerfCounters::default();
+        p.note_persist(500_000, 2_048);
+        p.note_persist(400_000, 2_050);
+        p.note_nudge();
+        p.note_nudge();
+        p.note_nudge();
+        let s = p.snapshot();
+        assert_eq!(s.persist_calls, 2);
+        assert_eq!(s.persist_ns, 900_000);
+        assert_eq!(s.persist_bytes, 4_098);
+        assert_eq!(s.nudges_sent, 3);
+    }
+
+    #[test]
+    fn seit_zieht_die_vorherigen_zaehler_ab() {
+        // Die 10-s-Logzeile meldet, was im Fenster passiert ist — sonst
+        // stünde in jeder Zeile die Summe seit Programmstart und die Rate
+        // wäre nicht ablesbar.
+        let p = PerfCounters::default();
+        p.note_health(Quelle::Poll, 100);
+        p.note_overview_build(2_000);
+        let erst = p.snapshot();
+        p.note_health(Quelle::Poll, 900);
+        p.note_health(Quelle::Push, 50);
+        p.note_overview_build(6_000);
+        let delta = p.snapshot().seit(&erst);
+        assert_eq!(delta.health_poll, 1);
+        assert_eq!(delta.health_poll_bytes, 900);
+        assert_eq!(delta.health_push, 1);
+        assert_eq!(delta.overview_builds, 1);
+        assert_eq!(delta.overview_build_ns, 6_000);
+        // Verteilungswerte bleiben absolut — sie beschreiben den ganzen Lauf.
+        assert_eq!(delta.overview_build_ns_max, 6_000);
+    }
+
+    #[test]
+    fn die_logzeile_nennt_die_gemessenen_kennzahlen() {
+        // Diese Zeile ist der Rückweg aus einem echten Turnier — dort steht
+        // kein Messgerät. Sie muss die vier Posten der Analyse tragen:
+        // Abrufe (getrennt), ihre Bytes, die Bau-Dauer und die Schreib-
+        // vorgänge, jeweils als Rate.
+        let p = PerfCounters::default();
+        for _ in 0..40 {
+            p.note_health(Quelle::Push, 20_000);
+        }
+        for _ in 0..800 {
+            p.note_health(Quelle::Poll, 20_000);
+        }
+        for _ in 0..840 {
+            p.note_overview_build(1_200_000);
+        }
+        for _ in 0..210 {
+            p.note_persist(500_000, 2_048);
+            p.note_nudge();
+        }
+        let zeile = p.snapshot().log_zeile(10_000);
+
+        assert!(zeile.contains("40 push"), "Push-Abrufe fehlen: {zeile}");
+        assert!(zeile.contains("800 poll"), "Poll-Abrufe fehlen: {zeile}");
+        assert!(zeile.contains("84.0/s"), "Abruf-Rate fehlt: {zeile}");
+        assert!(zeile.contains("MB/s"), "Bytes-Rate fehlt: {zeile}");
+        assert!(zeile.contains("840 Bauten"), "Bauten fehlen: {zeile}");
+        assert!(zeile.contains("p95"), "p95 fehlt: {zeile}");
+        // p95/max beschreiben den ganzen Lauf, nicht das Fenster (siehe
+        // `seit`). Ohne diese Beschriftung läse man einen frühen Ausreißer
+        // in JEDER Folgezeile als frisches Ereignis (Review 19.08.2026).
+        assert!(
+            zeile.contains("seit Start"),
+            "die nicht gefensterten Werte müssen als solche kenntlich sein: {zeile}"
+        );
+        assert!(
+            zeile.contains("210 Schreibvorgänge"),
+            "Schreibvorgänge fehlen: {zeile}"
+        );
+        assert!(zeile.contains("210 Nudges"), "Nudges fehlen: {zeile}");
+    }
+
+    #[test]
+    fn die_logzeile_kommt_erst_nach_zehn_sekunden() {
+        let p = PerfCounters::default();
+        let mut log = PerfLog::neu();
+        // Erster Aufruf setzt nur den Bezugspunkt.
+        assert!(log.faellig(&p, 1_000).is_none());
+        p.note_health(Quelle::Poll, 100);
+        assert!(
+            log.faellig(&p, 5_000).is_none(),
+            "vier Sekunden sind noch kein Fenster"
+        );
+        assert!(
+            log.faellig(&p, 11_000).is_some(),
+            "nach zehn Sekunden ist die Zeile fällig"
+        );
+    }
+
+    #[test]
+    fn die_logzeile_meldet_nur_das_fenster_nicht_den_ganzen_lauf() {
+        // Sonst stünde in jeder Zeile die Summe seit Programmstart und die
+        // Rate wäre nicht ablesbar.
+        let p = PerfCounters::default();
+        let mut log = PerfLog::neu();
+        assert!(log.faellig(&p, 0).is_none());
+        for _ in 0..100 {
+            p.note_health(Quelle::Poll, 10);
+        }
+        let erste = log.faellig(&p, 10_000).expect("erste Zeile");
+        assert!(erste.contains("100 poll"), "{erste}");
+
+        p.note_health(Quelle::Poll, 10);
+        let zweite = log.faellig(&p, 20_000).expect("zweite Zeile");
+        assert!(
+            zweite.contains("1 poll"),
+            "die zweite Zeile zählt nur das neue Fenster: {zweite}"
+        );
+    }
+
+    #[test]
+    fn ein_ruhiger_turnier_pc_schreibt_keine_zeile() {
+        // Läuft keine Anzeige, wäre eine Zeile aus lauter Nullen kein
+        // Messwert, sondern Rauschen im Diagnose-Log.
+        let p = PerfCounters::default();
+        let mut log = PerfLog::neu();
+        assert!(log.faellig(&p, 0).is_none());
+        assert!(log.faellig(&p, 60_000).is_none(), "Stille schreibt nichts");
+        assert!(PerfSnapshot::default().ist_still());
+        p.note_nudge();
+        assert!(
+            !p.snapshot().ist_still(),
+            "ein einziger Nudge ist schon nicht mehr still"
+        );
+    }
+
+    #[test]
+    fn debug_perf_enthaelt_keine_personendaten() {
+        // Wächter (Muster `the_state_never_carries_personal_data_beyond_its_purpose`
+        // in `tl.rs`): Der Perf-Bericht verlässt das Gerät — über den
+        // Log-Upload und über `/debug/perf`. Er darf ausschließlich Zahlen
+        // tragen. Der Test prüft die STRUKTUR, nicht einzelne Feldnamen:
+        // Sobald jemand ein Feld nachrüstet, das einen Namen, eine Match-ID
+        // als Text oder eine Liste transportiert, schlägt er fehl — auch
+        // wenn das Feld hier niemandem einfiel.
+        let p = PerfCounters::default();
+        p.note_health(Quelle::Push, 1_234);
+        p.note_court_state(Quelle::Poll, 99);
+        p.note_overview_build(4_711);
+        p.note_persist(1_000, 64);
+        p.note_nudge();
+        let json = serde_json::to_value(p.snapshot()).expect("Snapshot ist serialisierbar");
+        let obj = json.as_object().expect("Snapshot ist ein Objekt");
+        assert!(!obj.is_empty(), "leerer Bericht wäre kein Beleg");
+        for (feld, wert) in obj {
+            assert!(
+                wert.is_u64() || wert.is_i64(),
+                "Feld `{feld}` ist keine Zahl, sondern {wert} — der Perf-Bericht \
+                 trägt ausschließlich Zahlen (Spec monitor-livestand-push, S0)"
+            );
+        }
+    }
+}

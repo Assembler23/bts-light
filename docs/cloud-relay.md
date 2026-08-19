@@ -74,7 +74,33 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `POST /{ns}/pairing-code` | Telefon-Kopplungscode ausstellen (ADR 0004, nur bei verbundenem Host) |
 | `GET /pair/{code}` | Telefon-Code → Namespace auflösen (1 h TTL, Fehlversuchs-Limit) |
 | `GET /tl`, `GET /tl/api/state`, `POST /tl/api/command` | Turnierleitungs-Oberfläche — **ohne Namespace in der Adresse**, siehe unten |
+| `GET /tl-ws` | TL-Push-Anstoß (Spec `tl-web-push`, ADR 0034): sendet nur `{"rev":n}`, Zugang im **ersten Frame** |
+| `GET /{ns}/ads/{index}` | Hochgeladenes Werbebild (per **Position** in der Liste) |
+| `GET /{ns}/info/logo` | Hochgeladenes Turnierlogo |
+| `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`) |
 | `GET /health` | Status-Schnappschuss |
+
+Die beiden Bild-Routen antworten mit einer Kennung (`ETag`) und dürfen
+zwischengespeichert werden — Werbebilder **eine** Minute, das Turnierlogo
+fünf. Ein unverändertes Bild kostet dann rund 200 Byte statt der vollen
+Nutzlast; vorher (`no-store`) zog jede Anzeige bei jedem Motivwechsel das
+ganze Bild erneut über die Internetleitung. Zwei Feinheiten, die hier
+anders liegen als im LAN:
+
+- Die Kennung wird beim **Hochladen** aus dem Bildinhalt berechnet, nicht
+  aus dem Upload-Vorgang. Der Host lädt sein Monitor-Bündel bei jedem
+  Verbindungsaufbau neu hoch — an den Upload gebunden entwertete jeder
+  Verbindungsabbruch sämtliche Bild-Zwischenspeicher der Geräte.
+- Werbebilder werden über ihre **Position** adressiert. Beim Löschen eines
+  Bildes rücken alle folgenden auf, die Adresse zeigt also plötzlich auf ein
+  anderes Motiv — daher die kurze Frist. Das Turnierlogo hat eine feste
+  Adresse je Namespace.
+
+Kennt der Abrufer die Kennung schon, entfällt zusätzlich das Kopieren der
+Bilddaten unter dem globalen Namespace-Mutex. `If-None-Match` wird nach
+RFC 9110 ausgewertet (Liste, `*`, schwacher Vergleich) — nginx davor darf
+eine Kennung abschwächen, ein reiner Gleichheitstest wäre dann still
+wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
 
 ### Datenfluss
 
@@ -85,6 +111,17 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 3. Der Host pusht alle 2 s die Court→Match-Zuweisung; der Relay leitet sie
    an das jeweilige Tablet.
 4. Jeder Punkt am Tablet → `score_update` → Relay → Host → Liveticker.
+   **Rückrichtung (v0.9.200):** Der Host spiegelt jeden Feld-Stand als
+   `HostFrame::ScoreUpdate` (Satzliste + opaker `court_state`) an den
+   Relay — nudge-getrieben (A1-Abo auf dem eigenen Monitor-Kanal) plus
+   ein 2-s-Sweep **nach** dem Zuweisungs-Push (fängt Reconnects,
+   Court-Wechsel und BTP-Handeingaben ein), dedupliziert per
+   Fingerabdruck. Nur so sehen Cloud-Monitor/-Übersicht auch die Stände
+   von **LAN**-Tablets (`LanAndCloud`-Mischbetrieb); der Relay übernimmt
+   sie mit demselben Stale-Schutz wie beim Tablet-Weg (plus: leere Sätze
+   überschreiben keinen Live-Stand, ein `state` mit fremder eingebetteter
+   Match-ID wird verworfen) und weckt die Monitor-Abonnenten. Details:
+   [court-monitor.md](court-monitor.md) („Score-Spiegel des Hosts").
    Zusätzlich seit dem Punktverlauf-Graph
    ([Spec](features/punktverlauf-graph.md), ADR 0014): je Ballwechsel ein
    `rally`-Frame und nach Undo/Reconnect/Übernahme ein `rally_sync`
@@ -112,6 +149,21 @@ hält sie je Namespace (`Namespace.prepared`) und gibt sie in
 Partei **lokal** in seiner Halle an (kein Rückkanal zum Master). Details:
 [announcements.md](announcements.md).
 
+**Hallen-Farben (Spec [features/hallen-farben.md](features/hallen-farben.md),
+ADR 0033):** Drei bestehende Frames tragen ein **optionales** Farb-Feld als
+Hex-String (`#rrggbb`, `#[serde(default)]`/`skip_serializing_if`):
+`CourtBrief.hall_color` (im `HostFrame::Courts`-Push),
+`PreparedMatch.hallColor` und `MonitorState.hallColor`. Der Relay reicht
+die Werte unverändert an `overview_health` (JSON-Schlüssel `hall_color`,
+identisch zur LAN-`/health`), `preparation_state` und den Monitor-Zustand
+durch — **kein neuer Frame, kein Paletten-Spiegel**. Alte Hosts liefern
+das Feld nicht, alte Seiten ignorieren es: Jede Versions-Mischung
+degradiert zu „farblos", nie zu „kaputt". TL-Web bekommt die Farben
+separat über das opake `TlState`-JSON (`TlHall.color`).
+**Deploy-Reihenfolge:** Relay vor App-Release (läuft automatisch beim
+main-Merge); die Seiten prüfen die strikte `#rrggbb`-Form, bevor ein Wert
+in ein Style-Attribut gelangt.
+
 ### Turnierleitungs-Geräte (TL-Web) — Wire-Ebene
 
 > **Stand:** Der Weg steht in beiden Richtungen — im **LAN** (siehe
@@ -134,11 +186,39 @@ sie schreiben ausschließlich **über den Host**. Sie landen nie in der
 Tablet-Liste eines Namespace und übernehmen nie eine Court-Session — R4
 („ein aktives Tablet je Court") bleibt unberührt.
 
+**Anstoß statt Dauerfragen** (Spec
+[features/tl-web-push.md](features/tl-web-push.md), ADR 0034, seit
+v0.9.221): Neben den HTTP-Routen gibt es `GET /tl-ws`. Der Relay legt
+den vom Host gepushten `TlState` wie gehabt ab — und weckt dabei die
+Zuhörer dieses Namespace mit `{"rev":n}`, sobald die Revision **neu**
+ist. Der Kanal trägt **nie** Turnierdaten; die Seite holt sie über ihr
+bestehendes `GET /tl/api/state` (eine Wahrheit für Auth, ETag,
+Kürzungsleiter und `X-Tl-Active-Profile`). Eigenheiten:
+
+- **Zugang im ersten Frame** (`{"token":…}`, 10-s-Frist), nicht im Pfad
+  und nicht im Query: WebSockets tragen keine Kopfzeilen, und Adressen
+  landen in Zugriffsprotokollen. Vor erfolgreicher Prüfung antwortet der
+  Relay nichts — auch keinen Grund; unbekannter Zugang oder
+  abwesender Host schließen die Verbindung.
+- **Deckel 16 Zuhörer je Namespace** (`MAX_TL_SUBS`, doppelter
+  Geräte-Cap als Reconnect-Reserve). Darüber bleibt die Verbindung
+  ungenutzt, die Seite bedient sich aus ihrem Poll.
+- **Der 8-Geräte-Platz hängt weiter am Poll** (`claim_tl_slot`, TTL
+  60 s): Ein Kanal allein belegt keinen Platz, der 30-s-Fallback-Poll
+  der Seite hält ihn frisch.
+- Beim Verbinden schickt der Relay sofort die aktuelle Revision — eine
+  Änderung, die während des Verbindens durchrutschte, läge sonst bis
+  zum nächsten Fallback-Poll.
+- nginx bleibt unangetastet: Der Kanal läuft über die vorhandene
+  `Upgrade`-Konfiguration (`ops/nginx-bts-relay.conf`), kein
+  `proxy_buffering`-Eingriff nötig — genau der Grund, aus dem SSE hier
+  ausscheidet (ADR 0016/0034).
+
 Die geteilten Typen in `relay-proto`:
 
 | Typ | Zweck |
 |---|---|
-| `TlAction` | Der **geschlossene** Satz erlaubter Aktionen (Feld belegen/räumen/umhängen, Vorbereitungs-Aufruf, erneuter Aufruf, Ergebnis, Walkover, Zähltafelbediener, Auto-Vergabe). Was hier nicht steht, ist nicht darstellbar. |
+| `TlAction` | Der **geschlossene** Satz erlaubter Aktionen (Feld belegen/räumen/umhängen, Vorbereitungs-Aufruf, erneuter Aufruf — wahlweise je Partei, siehe unten —, Ergebnis, Walkover, Zähltafelbediener, Auto-Vergabe). Was hier nicht steht, ist nicht darstellbar. |
 | `CourtExpectation` | Was das Gerät auf dem Feld **vorgefunden** hat (`any` / `free` / `match`). Stimmt es nicht mehr, lehnt der Host ab — so überschreiben zwei Geräte einander nicht stillschweigend. |
 | `TlResponse` + `TlErrorCode` | Antwort mit **maschinenlesbarem** Grund, damit die Seite gezielt reagieren kann, plus der Revision, auf die sie sich neu ausrichten soll. Kennt auch „ausgeführt, aber mit Hinweis" (etwa: in dieser Halle ist kein Ansage-Gerät verbunden) — ausdrücklich kein Fehler. |
 | `RelayFrame::TlCommand` | Kommando an den Host; `reqId` korreliert die Antwort, `opId` ist der Idempotenzschlüssel gegen doppelte Schreibvorgänge nach einem Netzwackler, `viewRev` die Revision der Ansicht, auf der die Aktion beruhte (Grundlage der Altersprüfung). |
@@ -188,7 +268,118 @@ dem Turnierstand. Ein Fehler im Relay kann deshalb keine Wertung erfinden.
 keiner: Ein Gerät im Hallennetz und eines aus dem Internet meinten mit
 derselben Zahl verschiedene Stände. Der Fingerabdruck lässt Uhrzeit und
 Revision selbst außen vor — sonst zählte sie im Sekundentakt hoch, obwohl
-sich nichts geändert hat.
+sich nichts geändert hat. Seit der Startzeit-Prognose (Spec
+`spielzeiten-prognose`) gilt das auch für `predicted_start_ms` an den
+Wartelisten-Einträgen: Der Wert ist zeitabgeleitet und bewegt die Revision
+nicht; die Seite klemmt eine dadurch ältere Prognose selbst auf „gleich".
+Die neuen `TlState`-Felder (`predicted_*`, `brutto_mins`/`netto_mins`,
+`time_stats`) sind **additiv** — der Zustand reist weiterhin als opakes
+JSON, der Relay bleibt unverändert; alte `tl.html`-Stände ignorieren sie.
+Cloud-Geräte sehen die neue Anzeige erst nach einem **Relay-Deploy**
+(`tl.html` ist einkompiliert) — Deploy vor dem Client-Release.
+
+**Spielliste ohne Hinweistexte** (17.08.2026): Drei weitere additive
+`TlState`-Felder an den Wartelisten-Einträgen — `team1_ids`/`team2_ids`
+(BTP-Lizenznummern, parallel zu den Namen; Link-Ziel der
+badhub-Spielerseite, bewusste Datenschutz-Freigabe wie Nation/Verein) und
+`blocked.player_keys` (`assign::player_key`-Schlüssel für die punktgenaue
+Namens-Färbung; eine neue Seite an einem alten Host fällt auf den
+Namensvergleich zurück). Der Zustand bleibt opakes JSON, der Relay
+unverändert — aber auch hier: **Relay-Deploy** nötig, damit Cloud-Geräte
+die neue Anzeige (Farb-Marken, Eieruhr, Links) bekommen.
+
+**Spielerlinks überall** (18.08.2026, Spec `tl-sicht-feinschliff` Punkt 4):
+`team1_ids`/`team2_ids` stehen zusätzlich an den **Feld-Kacheln**
+(`TlCourt`) und den **beendeten Spielen** (`TlFinished`) — beide additiv
+mit `#[serde(default)]`, der Relay bleibt unverändert, Relay-Deploy nur
+für die Anzeige nötig.
+
+**Größenwirkung — die Kürzungskaskade hat eine Stufe dazubekommen.** Bei 26
+Feldern und 30 Ergebnissen sind das bis zu 112 zusätzliche String-Arrays.
+Der Größen-Wächter maß den Fall bisher gar nicht: Sein Fixture kannte nur
+die Warteliste, keine belegten Felder, keine Ergebnisse — und keine
+**Vereinsnamen**, die unabhängig von `display.show_club_names` **immer**
+mitreisen. Mit realistischem Fixture (26 Felder, 30 Ergebnisse, 400
+wartende, Doppelpaarungen mit Verein und Lizenznummer, 40 Schiedsrichter,
+20 Zähltafelbediener) liegt der Stand bei **62 467 von 65 536 Bytes** —
+rund 5 % Reserve, Warteliste bereits auf unterster Stufe.
+
+Die Kaskade lautet deshalb jetzt: **`queue` (40/20/10/5) →
+`checkin_times` → `finished` (10/3)**. Die Ergebnisliste ist reine
+Rückschau; die Feldkacheln bleiben in jeder Stufe vollständig, weil sie
+das Bedienelement der Seite sind. Ohne die neue Stufe reißt ein
+40-Felder-Turnier die Grenze mit 73 942 Bytes — der Relay verwirft dann
+das ganze Frame samt Vorgänger, und die Cloud-Turnierleitung sieht **gar
+nichts** mehr. Wer den Zustand um eine weitere Liste erweitert (nächster
+Kandidat: die vierachsige Spielzeiten-Statistik aus Punkt 1), misst nach
+und nimmt sie in die Kaskade auf — die verbleibende Reserve trägt keine
+zweite Erweiterung.
+
+**Hallen-Vorverteilung** (Spec `hallen-vorverteilung`): zwei neue
+`TlAction`-Varianten `set_hall_prefill { enabled, window }` und
+`clear_auto_halls` — der Relay parst Aktionen **typisiert**, ein alter
+Relay lehnt sie ab → auch hier Relay-Deploy vor dem Client-Release. Das
+zusätzliche `TlState`-Feld `hall_prefill` und der neue
+`hall_source`-Wire-Wert `"auto"` sind additiv; alte Seiten tolerieren
+beide (Feature-Detection über das State-Feld — eine neue Seite an einem
+alten Host zeigt die Bedienelemente gar nicht).
+
+**Spielzeiten-Auswertung mehrachsig** (Spec `tl-sicht-feinschliff` Punkt 1,
+v0.9.231): `TlState.time_stats` trägt zusätzlich `by_class`,
+`by_discipline` und `by_hall`, jede Zeile zusätzlich `hall`; das Profil trägt
+`timeStatsAxis`. Alles additiv mit `#[serde(default)]` — alte Seiten
+ignorieren die neuen Felder, ein altes Profil liest sich als `group` (die
+bisherige Ansicht). Der Relay bleibt unverändert; **Relay-Deploy** nur nötig,
+damit Cloud-Geräte die neue Anzeige bekommen.
+
+Alle vier Achsen reisen **gemeinsam** mit, obwohl je Gerät nur eine gezeigt
+wird: Der Zustand entsteht seit ADR 0034 einmal zentral für alle Geräte,
+während die Achsen-Wahl im Profil je Gerät liegt. Der Host könnte also gar
+nicht nur die gewählte liefern — das Umschalten ist dafür ein reiner
+Client-Vorgang ohne Rückfrage.
+
+**Größenwirkung — die Kürzungskaskade hat eine weitere Stufe bekommen.** Die
+Auswertung wiegt bei einem großen Turnier mehr als die Warteliste: gemessen
+**14 760 Bytes** bei 110/22/5/2 Zeilen (22 Klassen × 5 Disziplinen, zwei
+Hallen). Die Kaskade lautet deshalb jetzt **`queue` (40/20/10/5) →
+`checkin_times` → `time_stats`**. Ohne die letzte Stufe ginge ein solcher
+Zustand mit gut **70 000 von erlaubten 65 536 Bytes** hinaus — der Relay
+verwürfe ihn samt Vorgänger, und die Cloud-Turnierleitung sähe gar nichts
+mehr, auch keine Felder. Mit ihr sind es 55 286 Bytes; das Panel verschwindet
+dann ehrlich, statt den ganzen Stand zu kippen. Rückschau ist verzichtbar,
+Bedienung nicht.
+
+Das Feld `hall` reist dabei nur auf der Hallen-Achse mit
+(`skip_serializing_if`): Auf den anderen drei wäre es ein leerer String je
+Zeile — beim Messfixture allein 1 370 Bytes. Das geht nur, weil das Feld neu
+ist; `class_label`/`discipline` lassen sich nicht weglassen, alte Seiten
+lesen sie unbedingt.
+**Spielbeginn-Ansage** (Spec `tl-sicht-feinschliff` Punkt 3, v0.9.230): eine
+neue `TlAction`-Variante `announce_start_play { courtId, matchId }`. Der
+Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**, die
+Seite zeigt dann „Der Turnier-PC hat die Anfrage abgewiesen (422)". Also
+auch hier: **Relay-Deploy vor dem Client-Release**. Der Zustand wächst
+nicht mit; der Knopf steht im ⋯-Menü und braucht kein neues `TlState`-Feld.
+
+Dazu ein neuer **Ansage-Auftragstyp** `start_play` (`AnnounceJobKind`,
+`tablet/state.rs`). Der reist **nicht** über den Relay, sondern nur vom
+Master zu den Ansage-Geräten seiner Halle — im LAN über
+`/info/announce/jobs`. Wichtig für den Mischbetrieb: Ein Ansage-Slave mit
+älterem Stand überspringt seit v0.9.230 unbekannte Auftragstypen einzeln,
+statt an einem die ganze Charge zu verlieren (siehe
+[announcements.md](announcements.md)). In einer per Relay angebundenen
+**fernen** Halle erklingt die Ansage weiterhin gar nicht — dort holt der
+Slave bewusst keine Aufträge ab.
+**Nachruf an die Zähltafelbedienung** (Spec `tl-sicht-feinschliff` Punkt 2,
+v0.9.232): eine neue `TlAction`-Variante `announce_scorekeeper { courtId }`.
+Der Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**.
+Also auch hier: **Relay-Deploy vor dem Client-Release**. Der Zustand wächst
+nicht mit; der Zählerstand bleibt bewusst am Host (er bestimmt allein die
+Ansage-Stufe).
+
+Dazu ein neuer **Ansage-Auftragstyp** `scorekeeper_call`, der wie alle
+Ansage-Aufträge nur vom Master zu den Ansage-Geräten seiner Halle reist,
+nicht über den Relay.
 
 **`viewRev` wird bewusst nicht gegen eine Schwelle geprüft.** Eine Grenze in
 Revisionen wäre willkürlich: Sie steigt bei jeder Änderung, in einem vollen
@@ -272,6 +463,146 @@ BTP-Status des Hosts). **Legacy-Rollback im Cloud:** der Host reicht
 Relay setzt daraus `ownership_active`. Ältere Tablets/Relays ohne die Felder
 fallen per `serde(default)` auf das alte `rev`-Verhalten zurück. Details:
 [tablet.md](tablet.md).
+
+### Erneute Aufrufe — je Partei
+
+Beide Aufruf-Aktionen können auf **eine Partei** eingegrenzt werden; die
+Partei reist als `relay_proto::PrepCallSide` (`"both"` / `"team1"` /
+`"team2"`).
+
+| `TlAction` | Partei-Feld | Verhalten |
+|---|---|---|
+| `announce_prep_call` | `side` — **Pflicht** | Nachruf am Meeting Point. Die Stufe wird **je Partei** gezählt (`prep_call_stages`); die eine kann längst da sein, während die andere fehlt. |
+| `announce_court_call` | `side` — **optional**, fehlend = beide | Erneuter Aufruf am Feld. Die Stufe gehört dem **Feld**, nicht der Partei — alle Geräte zeigen dieselbe Zahl. |
+
+`announce_court_call.side` ist die **einzige** Ausnahme von der Regel „kein
+Feld in `TlAction` trägt `#[serde(default)]`" — hier ist `None` die
+*neutralere* Variante (beide Parteien, das Verhalten von jeher), nicht die
+weitreichendere. Dieselbe Abwägung wie bei `EnterResult.winner` und
+`CallPreparation.location_id`. Ein älterer Browser, der das Feld nicht
+kennt, ruft damit unverändert beide Parteien.
+
+**Stufenzählung am Feld:** Die Stufe steigt einmal je *Aufruf-Runde*. Ruft
+die Turnierleitung nacheinander Partei A und Partei B, ist das **eine**
+Runde (beide hören „Zweiter Aufruf"); erst ein Aufruf an eine bereits
+gerufene Partei eröffnet die nächste Stufe. Der Host merkt sich dazu je
+Feld, welche Parteien auf der aktuellen Stufe schon dran waren
+(`TabletState::call_stages`). Ein Aufruf aus der Desktop-Oberfläche
+(`reached_court_call`) gilt immer beiden und schließt die Runde ab.
+
+### Schiedsrichter (Spec schiedsrichter-management)
+
+Neue `TlAction`-Varianten (geschlossener Satz, ADR 0011):
+`official_assign`, `official_clear`, `official_pause`, `official_reorder`,
+`official_set_club`, `official_blocklist_set`, `officials_court_toggle`,
+`announce_officials`. Die Rolle reist als `"sr"`/`"ar"`
+(`relay_proto::TlOfficialRole`).
+
+Dazu ein Frame-Paar für den **gezielten** Detail-Abruf, Muster Punktverlauf:
+`RelayFrame::OfficialDetailRequest { req_id, official_id }` →
+`HostFrame::OfficialDetail { req_id, json }`, ausgeliefert über
+`GET /tl/api/officials/{official_id}` (Geräte-Token). Der Relay hält diese
+Antwort **nie** vor — Sperrlisten sind Personendaten; er korreliert nur über
+`req_id` und lässt offene Anfragen beim Host-Abriss fallen (wie beim
+Punktverlauf), statt sie leer zu beantworten.
+
+Der Broadcast-`TlState` trägt dagegen nur: `officials_managed`, die Liste
+`officials` (Name, Pause, Dienst-Feld, Einsatz-Zähler) und je Feld
+`sr`/`ar`/`official_warn` samt den drei Feld-Schaltern. Zwei Wächter-Tests in
+`tl.rs` halten das durchsetzbar fest.
+
+**Reihenfolge beim Ausrollen:** Ein alter Relay lehnt unbekannte Aktionen ab
+— erst Relay deployen, dann den Client veröffentlichen.
+
+### Panel-Profile (Spec [tl-web-panelsystem](features/tl-web-panelsystem.md), ADR [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md)/[0025](adr/0025-tl-panel-profile-transport-persistenz.md))
+
+Benannte Profile bündeln Panel-Sichtbarkeit/-Reihenfolge/-Höhe und die
+turnierweiten Anzeige-Schalter an einem Ort, damit ein Tablet im Handbetrieb
+und ein Wandmonitor mit demselben Turnier-PC unterschiedlich aussehen
+können. **Hybrid-Transport** (ADR 0025), weil `tl_state_route` einen
+einzigen, je Namespace gecachten Blob liefert — identisch für jedes
+Gerät — und eine per-Gerät unterschiedliche Information (welches Profil ist
+meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
+
+- **Katalog** (alle Profile inkl. Inhalt) → eingebettet in `TlState`
+  (`profiles: Vec<TlPanelProfileWire>`, `default_profile_id`), Muster
+  `layouts`/`TlHallLayout` — geteilt, klein, unkritisch, folgt demselben
+  Cache-/ETag-Modell wie der übrige Zustand.
+  Ein Profil trägt neben Name, Panel-Liste und Anzeige-Schaltern die
+  Layout-Aufteilung: `columns` (1…3), `columnWidths` (relative
+  Spaltenbreiten, leer = gleichmäßig) und je Panel `heightFr`, `collapsed`
+  und `column` (1-basiert). Alle drei Layout-Felder tragen
+  `#[serde(default)]` — dieselbe Abwägung wie bei `TlAuthDevice.profile_id`
+  unten: `0`/leer ist die **neutralste** Lesart, nicht die
+  weitreichendere. Der Host **reicht sie nur durch**; was `0` bedeutet
+  („aus `listPosition` ableiten" bzw. „Spalte 1"), entscheidet
+  ausschließlich `tl.html`. Serverseitig begrenzt sind lediglich die
+  Längen (`MAX_TL_PROFILE_PANELS`, `MAX_TL_PROFILE_COLUMN_WIDTHS`), damit
+  ein einzelner Aufruf den `TlState` nicht über `MAX_TL_STATE_LEN` treiben
+  kann (R4). Seit Spec `spielzeiten-prognose` Etappe D trägt
+  `TlDisplaySettingsWire` zusätzlich `showCourtRemaining`
+  (`#[serde(default)]` — alte Browser-Profile ohne das Feld lesen sich als
+  „aus"); das zugehörige Anzeigedatum reist als `TlCourt.remaining_min`
+  im opaken `TlState`-JSON mit (Serde-Default, alte Gegenstellen
+  ignorieren es). Seit 17.08.2026 trägt `TlDisplaySettingsWire` außerdem
+  `unlimitedCourtCalls` (inzwischen Container-weites `#[serde(default)]`
+  wie beim Config-Zwilling: fehlende Häkchen-Felder lesen sich als „aus").
+  Der Turnier-PC zählt Aufruf-Stufen nur dann über 3 hinaus, wenn
+  irgendein Profil die Option führt (`tablet/tl.rs`
+  `unlimited_court_calls`) — ohne sie hält er den alten 3er-Deckel
+  selbst, das Client-Gating ist nicht die einzige Sicherung. Seit
+  v0.9.218 trägt der opake `TlState` außerdem optional `checkin_times`
+  samt `checkin_stale`-Marke (Panel „Anfangszeiten": heutiger
+  Check-In-Zeitplan je Klasse mit Zählern, ohne Personendaten;
+  `#[serde(default)]`, alte Gegenstellen ignorieren es). Die
+  Relay-Kürzungsleiter (`state_for_relay`) kennt die Liste: Reichen alle
+  Warteliste-Stufen nicht, wird zuletzt das Anfangszeiten-Panel geopfert,
+  bevor der Zustand die Relay-Grenze reißen dürfte.
+- **Individuelle Geräte-Zuordnung** → reitet auf dem bestehenden
+  `HostFrame::TlAuth`-Spiegel: `TlAuthDevice.profile_id` (neu, siehe unten).
+  Der Relay hält eine zweite Parallel-Map neben `tl_tokens` (Zugang →
+  `profile_id`), **strikt Namespace-lokal**, und liefert sie als
+  Antwort-Header `X-Tl-Active-Profile` auf **jede** `GET /tl/api/state`-
+  Antwort — auch bei `304`, da Header unabhängig vom gecachten Body immer
+  gesendet werden und der Body dadurch weiter cachebar bleibt. Fehlt der
+  Zugang in der Map (kein Profil zugewiesen), bleibt der Header schlicht
+  weg — kein geratener Fallback. Der LAN-Pfad setzt denselben Header direkt
+  aus dem authentifizierten `TlDevice` (`tablet::server::tl_state`).
+- **Schreiben** (Anlegen/Bearbeiten/Löschen/Wählen/Default) läuft in
+  beiden Betriebsarten identisch über vier neue `TlAction`-Varianten,
+  einmal geprüft in `tl.rs::execute` (R5):
+
+  | `TlAction` | Zweck |
+  |---|---|
+  | `profile_save` | Profil anlegen/überschreiben (Upsert nach `id`; leere `id` = neu, der Host vergibt dann eine Kennung). Last-Write-Wins — bewusst **keine** Konfliktprüfung gegen `updated_at_ms`, die Spec verlangt ausdrücklich keine Fehlermeldung bei gleichzeitiger Bearbeitung. Der Host stempelt `updated_at_ms` immer selbst. |
+  | `profile_delete` | Profil löschen; Geräte, die es trugen, fallen auf das Standardprofil zurück (leere `profile_id`) — kein Fehlerzustand. |
+  | `profile_select` | Für das **aufrufende** Gerät ein Profil wählen — bewusst ohne Geräte-Feld im Payload, das Gerät ist aus der Bearer-Token-Auth bekannt (Sicherheitsgrenze: ein Gerät darf nur sich selbst binden). |
+  | `profile_set_default` | Das turnierweite Standardprofil setzen (leer = eingebautes Standardprofil in `tl.html`). |
+
+`TlAuthDevice` trägt dafür ein neues Feld `profile_id: String`, mit
+`#[serde(default)]` **auf Feldebene** — eine bewusste, dokumentierte
+Ausnahme von der oben stehenden Regel „kein `#[serde(default)]` auf
+TL-Feldern": Diese Regel schützt davor, dass ein still ergänzter Wert die
+*weitreichendere* oder *ungeprüfte* Variante auslöst (fehlendes `expect`,
+fehlendes `tokens`, fehlendes `side`). Hier ist „leer" dagegen die
+**neutralste** Lesart — sie bedeutet „Standardprofil", keine erweiterten
+Rechte und keine größere Sichtbarkeit. Ein alter Host, der das Feld noch
+nicht kennt, sendet es schlicht nicht mit; der Relay bleibt damit
+abwärtskompatibel lauffähig (ADR 0025).
+
+**Sicherheitsgrenze, die `security-reviewer` explizit geprüft hat:** Ein
+Zugang aus Namespace A darf niemals einen `X-Tl-Active-Profile`-Wert aus
+Namespace B bekommen — die Map lebt strikt innerhalb ihres `Namespace`, kein
+globaler Zustand, genau wie `tl_tokens`.
+
+Persistenz bewusst **installationsweit** in `AppConfig` (`tl_web.profiles`
++ `tl_web.default_profile_id`), nicht turniergebunden: Profile sind
+geräteklassen-/installationsbezogen (welcher Wandmonitor zeigt was), nicht
+turnierbezogen. `keep_host_managed_fields` schützt live editierte Profile
+vor dem Setup-Assistenten (Muster `devices`); `identity_bundle` strippt den
+Profil-**Katalog** NICHT (kein Zugang/Secret, wandert bei PC-Umzug mit wie
+`hall_layouts`) — nur `TlDevice.profile_id` verschwindet implizit, weil der
+Identitäts-Export die komplette Geräteliste ohnehin leert (ADR 0012).
 
 ## Sicherheit
 

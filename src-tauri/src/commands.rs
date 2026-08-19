@@ -21,6 +21,20 @@ use crate::tablet::state::TabletState;
 /// Abstand zwischen zwei Poll-Push-Zyklen.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Beendet einen Nebentakt, sobald der Task endet, der ihn gestartet hat —
+/// auch beim Abbruch (`Drop` läuft dann ebenfalls). Ein fallengelassenes
+/// `JoinHandle` beendet in Tokio nichts, es löst die Aufgabe nur ab; ohne
+/// diesen Wächter hinterließe jedes Stoppen/Starten der Übertragung einen
+/// weiteren Takt, der bis zum Programmende weiterliefe. Gleiches Muster wie
+/// `TaktWaechter` in `tablet/server.rs`.
+struct TaktWaechter(tauri::async_runtime::JoinHandle<()>);
+
+impl Drop for TaktWaechter {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Status der Sync-Schleife, wie ihn das Dashboard anzeigt.
 #[derive(Clone, Serialize)]
 pub struct SyncStatus {
@@ -49,7 +63,17 @@ impl Default for SyncStatus {
 #[derive(Default)]
 pub struct AppState {
     /// Zuletzt geladene bzw. gespeicherte Konfiguration.
-    pub config: Mutex<AppConfig>,
+    ///
+    /// **Bewusst `Arc<Mutex<_>>`, nicht nur `Mutex<_>`:** Dasselbe Arc wird
+    /// 1:1 an `ServerCtx` gereicht (Konstruktion in `start_sync`/`run_sync`)
+    /// — LAN-Server, Relay-Client UND alle Tauri-Commands (`save_config`,
+    /// `tl_device_add`, … über `mutate_config`) mutieren so denselben
+    /// In-Memory-Stand statt zweier getrennter, gegeneinander driftender
+    /// Kopien. Vorher schrieb `ServerCtx::mutate_app_config` (Panel-Profile,
+    /// ADR 0025) direkt an der Platte vorbei am In-Memory-Stand — ein Lost-
+    /// Update, sobald danach `mutate_config`/`save_config` seinen eigenen
+    /// (veralteten) In-Memory-Stand komplett zurückschrieb.
+    pub config: Arc<Mutex<AppConfig>>,
     /// Aktueller Status der Sync-Schleife.
     pub status: Mutex<SyncStatus>,
     /// Handle der laufenden Polling-Schleife, falls aktiv.
@@ -176,6 +200,52 @@ fn tablet_btp_retry_path(app: &AppHandle) -> std::path::PathBuf {
         .join("btp-retry.json")
 }
 
+/// Pfad des Schiedsrichter-Rosters (ADR 0022). Bewusst **außerhalb** der
+/// config.json: Sperrlisten sind Personendaten und dürfen nicht ins
+/// Identitäts-Bündel wandern; der Stand gilt zudem nur für ein Turnier.
+fn tablet_officials_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("officials-state.json")
+}
+
+/// Pfad der Auto-Vergabe-Ausnahmeliste (Spec `feldvergabe-ausnahme`, Muster
+/// ADR 0022). Bewusst **außerhalb** der config.json: der Stand gilt nur für
+/// ein Turnier, wie beim Schiedsrichter-Roster.
+fn tablet_exclusions_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("excluded-matches.json")
+}
+
+fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("queue-order.json")
+}
+
+/// Pfad der Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster
+/// ADR 0022). Bewusst **außerhalb** der config.json: der Stand gilt nur
+/// für ein Turnier.
+fn tablet_match_times_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("match-times.json")
+}
+
+/// Pfad der automatisch vorverteilten Hallen (Spec `hallen-vorverteilung`,
+/// ADR 0029). Turniergebunden wie die anderen ADR-0022-Stores.
+fn tablet_auto_halls_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("auto-halls.json")
+}
+
 /// Lädt die gespeicherte Konfiguration (oder Defaults beim ersten Start).
 #[tauri::command]
 pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -203,9 +273,23 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     } else {
         incoming.tl_web.devices.clear();
     }
+    // Der Panel-Profil-Katalog wird ausschließlich über TlAction aus
+    // tl.html gepflegt (ADR 0024), nie über den Setup-Assistenten — dessen
+    // Speichern darf ihn nicht zurücksetzen. Anders als bei `devices` gibt
+    // es hier kein „Ausschalten löscht" (Profile bleiben auch bei
+    // abgeschalteter Oberfläche erhalten, sie sind keine Zugänge).
+    incoming.tl_web.profiles = current.tl_web.profiles.clone();
+    incoming.tl_web.default_profile_id = current.tl_web.default_profile_id.clone();
     // Die Hallen-Anordnung wird auf der Felderübersicht gepflegt, nicht im
     // Assistenten — dessen Speichern darf sie nicht zurücksetzen.
     incoming.hall_layouts = current.hall_layouts.clone();
+    // Die Hallen-Vorverteilung wird ausschließlich in TL-Web geschaltet —
+    // der Assistent kennt das Feld nicht (serde-Default = aus) und würde
+    // sie mit jedem Speichern stumm abschalten.
+    incoming.hall_prefill = current.hall_prefill.clone();
+    // Die Hallen-Farben werden auf der Felderübersicht gepflegt (Spec
+    // hallen-farben) — auch sie kennt der Assistent nicht.
+    incoming.hall_colors = current.hall_colors.clone();
     incoming
 }
 
@@ -232,7 +316,23 @@ pub fn save_config(
     // 2 MB) Bilddaten nicht erneut über die Leitung schicken. Vor dem Verschieben
     // von `config` in den State prüfen.
     let logo_changed = config.tournament_logo.data != current.tournament_logo.data;
+    // Schiedsrichter-Schalter sofort wirksam machen: Der Sync-Lauf liest
+    // seine Konfiguration nur beim Start, deshalb hält der Roster-Speicher
+    // die globalen Schalter — sonst bliebe das Häkchen bis zum nächsten
+    // Stoppen/Starten der Übertragung wirkungslos.
+    state
+        .tablet
+        .officials_store()
+        .set_enabled(config.officials.enabled);
+    state
+        .tablet
+        .officials_store()
+        .set_rotation(config.officials.rotation_sr, config.officials.rotation_ar);
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = config;
+    // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
+    // (Hallen-Farben, Aufruf-Timer) — nach dem Speichern ist er überholt
+    // (Spec monitor-livestand-push, S1).
+    state.tablet.bump_overview_rev();
     if logo_changed {
         push_logo_to_badhub(&state);
     }
@@ -259,6 +359,14 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     // alte PC über die exportierten Tokens schreibberechtigt, und das Bündel
     // wäre zugleich ein Satz gültiger Zugänge. Die Geräte koppeln sich am
     // neuen PC neu — ein QR-Scan je Gerät. Der Schalter bleibt erhalten.
+    //
+    // Der Panel-Profil-KATALOG (`tl_web.profiles`) wird bewusst NICHT
+    // gestrippt — anders als die Geräte ist er kein Zugang/Secret, sondern
+    // reine Layout-Konfiguration, und soll den Umzug überstehen wie
+    // `hall_layouts` (ADR 0025). Die GERÄTE-Zuordnung eines Profils
+    // (`TlDevice.profile_id`) verschwindet trotzdem vollständig — nicht
+    // durch einen eigenen Schritt, sondern automatisch, weil die Zeile
+    // darüber die komplette `devices`-Liste leert.
     cfg.tl_web.devices.clear();
     cfg
 }
@@ -290,6 +398,24 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     // altem Bündel die hier schon eingerichteten Raster stillschweigend wegwischen.
     if imported.hall_layouts.is_empty() {
         imported.hall_layouts = current.hall_layouts.clone();
+    }
+    // Hallen-Farben: derselbe Fall — ein Bündel von vor dem Feature trägt
+    // ein leeres Feld, das die hier gewählten Übersteuerungen nicht
+    // stillschweigend wegwischen darf.
+    if imported.hall_colors.is_empty() {
+        imported.hall_colors = current.hall_colors.clone();
+    }
+    // Derselbe Fall wie bei den Rastern (Task 9/11): Ein Bündel aus einer
+    // Version vor diesem Feature — oder eins von einer Installation ohne
+    // eingerichtete Profile — trägt ein leeres `profiles`. Das darf die am
+    // aktuellen PC schon eingerichteten Profile nicht stillschweigend
+    // löschen (ADR 0025). `default_profile_id` folgt mit derselben
+    // Bedingung: Er zeigt in den jeweils geltenden Katalog — ihn mit dem
+    // Katalog der anderen Quelle zu mischen ergäbe eine Kennung, die im
+    // übernommenen Katalog gar nicht existiert.
+    if imported.tl_web.profiles.is_empty() {
+        imported.tl_web.profiles = current.tl_web.profiles.clone();
+        imported.tl_web.default_profile_id = current.tl_web.default_profile_id.clone();
     }
     imported
 }
@@ -375,7 +501,7 @@ struct PronunciationsResp {
 }
 
 /// Basis-Origin (`https://badhub.de`) aus der konfigurierten Badhub-URL.
-fn badhub_origin(url: &str) -> Option<String> {
+pub(crate) fn badhub_origin(url: &str) -> Option<String> {
     let base = reqwest::Url::parse(url)
         .ok()
         .map(|u| u.origin().ascii_serialization())?;
@@ -768,6 +894,27 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Geladen wird die Queue erst beim ersten Snapshot — dann liegt der
     // Turnier-Guard (`tournament_name`) vor.
     tablet.set_btp_retry_path(tablet_btp_retry_path(&app));
+    // Schiedsrichter-Roster (ADR 0022): Pfad jetzt, das Turnier kommt mit dem
+    // ersten Snapshot — passt der Datei-Kopf nicht, wird der Stand verworfen.
+    tablet
+        .officials_store()
+        .set_path(tablet_officials_path(&app));
+    tablet
+        .officials_store()
+        .set_enabled(config.officials.enabled);
+    tablet
+        .officials_store()
+        .set_rotation(config.officials.rotation_sr, config.officials.rotation_ar);
+    // Ausnahmeliste der automatischen Feldvergabe (Spec
+    // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
+    // kommt mit dem ersten Snapshot.
+    tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
+    tablet.set_queue_order_path(tablet_queue_order_path(&app));
+    // Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster ADR 0022):
+    // Pfad jetzt, das Turnier kommt mit dem ersten Snapshot.
+    tablet.set_match_times_path(tablet_match_times_path(&app));
+    // Auto-Hallen (Spec `hallen-vorverteilung`, ADR 0029): ebenso.
+    tablet.set_auto_halls_path(tablet_auto_halls_path(&app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
@@ -791,7 +938,43 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let handle = tauri::async_runtime::spawn(async move {
         let http = push::build_client();
         let mut engine = SyncEngine::new();
+        // Check-In-Lese-Weg fürs TL-Panel „Anfangszeiten": als eigener,
+        // je Zyklus gespawnter Tick statt Teil von `run_once` — er drosselt
+        // sich selbst auf höchstens minütlich, hängt nicht hinter den
+        // BTP-Frühausstiegen und kann den Liveticker-Takt nicht strecken
+        // (Review 17.08.2026; Details an `sync::CheckinLese`).
+        let checkin_lese =
+            std::sync::Arc::new(std::sync::Mutex::new(crate::sync::CheckinLese::neu()));
+        // Sekundentakt für den Live-Stand (Spec monitor-livestand-push, S2)
+        // als **eigener** Task, nicht als Teil dieser Schleife: Hängt BTP
+        // oder badhub in seinen Zeitüberschreitungen, steht `run_once`
+        // zwanzig Sekunden und länger — die Tablets zählen derweil weiter,
+        // und der Verlust bei einem Absturz wäre um ein Vielfaches größer
+        // als die zugesagte eine Sekunde (Review-Fund 19.08.2026).
+        //
+        // `spawn_blocking` für den Schreibvorgang selbst (gemessene 20 ms),
+        // damit er keinen Async-Worker belegt. Der Wächter beendet den Takt
+        // zusammen mit dieser Schleife — auch beim Abbruch (Muster
+        // `TaktWaechter` in `tablet/server.rs`).
+        let flush_tablet = sync_tablet.clone();
+        let _flush_takt = TaktWaechter(tauri::async_runtime::spawn(async move {
+            let mut takt = tokio::time::interval(Duration::from_secs(1));
+            takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                takt.tick().await;
+                let tab = flush_tablet.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || tab.flush_scores()).await;
+            }
+        }));
         loop {
+            {
+                let lese = checkin_lese.clone();
+                let cfg = sync_config.clone();
+                let tab = sync_tablet.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::sync::checkin_lese_tick(&lese, &cfg, &tab).await;
+                });
+            }
             let outcome = engine.run_once(&sync_config, &http, &sync_tablet).await;
             let mut status = status_from(&outcome);
             status.running = true;
@@ -824,6 +1007,11 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         cfg_path,
         assignments_path,
         log_dir,
+        // Dasselbe Arc wie `AppState.config` — siehe Feld-Kommentar dort:
+        // `ServerCtx::mutate_app_config` (Panel-Profile) und `mutate_config`
+        // (Tauri-Commands) mutieren so einen einzigen In-Memory-Stand statt
+        // zweier gegeneinander driftender Kopien.
+        state.config.clone(),
     ));
     // LAN und Cloud sind unabhängig voneinander schaltbar – im
     // Doppelmodus (`LanAndCloud`) laufen beide Wege für dieselbe
@@ -922,6 +1110,18 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     Ok(())
 }
 
+/// Sichert den aufgelaufenen Live-Stand sofort (Spec
+/// monitor-livestand-push, S2).
+///
+/// Für die Oberfläche gedacht, wenn sie den Prozess auf einem Weg beendet,
+/// der nicht durch `stop_sync` oder das Fenster-Ereignis läuft — heute der
+/// Neustart nach einem Auto-Update. Ohne diesen Aufruf gingen dort bis zu
+/// eine Sekunde Spielstand verloren, die vorher schon sicher gewesen wäre.
+#[tauri::command]
+pub fn flush_live_scores(state: State<'_, AppState>) {
+    state.tablet.flush_scores();
+}
+
 /// Stoppt die Hintergrund-Polling-Schleife und den Tablet-Server.
 #[tauri::command]
 pub fn stop_sync(state: State<'_, AppState>) {
@@ -973,6 +1173,13 @@ pub fn stop_sync(state: State<'_, AppState>) {
     {
         let _ = daemon.shutdown();
     }
+    // Den aufgelaufenen Live-Stand sichern (Spec monitor-livestand-push, S2)
+    // — **zuletzt**, nachdem Sync-Task und Tablet-Server abgebrochen sind.
+    // Davor bliebe ein Fenster: Ein Punkt, der noch durch den Handler läuft
+    // (`abort()` greift erst am nächsten Await-Punkt), würde nur vormerken,
+    // und danach schreibt niemand mehr (Review-Fund 19.08.2026). Synchron,
+    // damit dieser Aufruf erst zurückkehrt, wenn die Datei steht.
+    state.tablet.flush_scores();
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus::default();
 }
 
@@ -1037,13 +1244,16 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
         ConnectionMode::LanAndCloud => "lan+cloud",
     }
     .to_string();
+    let mut courts = state.tablet.overview();
+    // Hallen-Farben hier statt in `overview_from` — dort fehlt die Config.
+    crate::hall_colors::paint(&mut courts, &config, &state.tablet.hall_names());
     TabletInfo {
         server_host,
         mode,
         relay_base,
         lan_enabled,
         cloud_enabled,
-        courts: state.tablet.overview(),
+        courts,
     }
 }
 
@@ -1367,6 +1577,8 @@ pub async fn confirm_walkover(
             sets: Vec::new(),
             // Sieger ist die jeweils NICHT aufgebende Mannschaft.
             team1_won: !cand.retired_is_team1,
+            // Bewusst 0 (Spec `spielzeiten-prognose`, E1): kampflos wurde
+            // nicht gespielt — hier keine Dauer aus dem Zeiten-Store füllen.
             duration_mins: 0,
             score_status: 1, // 1 = Walkover
             // Kampflose Spiele stehen auf keinem Feld → nichts freizugeben,
@@ -1374,6 +1586,7 @@ pub async fn confirm_walkover(
             free_court_id: None,
             player_ids: Vec::new(),
             end_ts_ms: None,
+            officials: tablet.officials_for_result(cand.match_id),
         };
         match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
             Ok(()) => {
@@ -1435,13 +1648,28 @@ pub async fn enter_result(
     // Poll-Staleness-Grundlage wie assign_court/free_court/confirm_walkover
     // (R2); der `winner.is_some()`-Guard deckt den bereits-gewertet-Fall ab.
     let end_ms = now_ms();
-    let on_court_since = m
-        .court_id
-        .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
-    let update =
-        crate::tablet::server::build_manual_result_update(m, sets, on_court_since, end_ms)?;
+    // Bruttostart aus dem Zeiten-Store (Spec `spielzeiten-prognose`, E1):
+    // neustartfest; on_court_since bleibt Fallback. Damit sendet auch die
+    // Backend-Wertung eine echte Duration statt 0. Als Ende zählt bei
+    // einer Korrektur der ursprüngliche E3-Stempel, nicht „jetzt".
+    let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
+    let btp_end_ms = tablet.result_end_ms(m.id, end_ms);
+    let officials = tablet.officials_for_result(m.id);
+    let update = crate::tablet::server::build_manual_result_update(
+        m,
+        sets,
+        on_court_since,
+        btp_end_ms,
+        officials,
+    )?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
+    // Spielende stempeln (E3): auch die Backend-Wertung hält den
+    // Eingangszeitpunkt fest — aber als NICHT-regulär (E11): tablet-lose
+    // Ergebnisse liefern keinen Messwert für die Prognose-Statistik.
+    tablet
+        .match_times_store()
+        .stamp_finished(mid, false, end_ms);
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {
@@ -1493,13 +1721,26 @@ pub async fn disqualify_match(
         .find(|m| m.id == match_id)
         .ok_or("Spiel nicht gefunden.")?;
     let end_ms = now_ms();
-    let on_court_since = m
-        .court_id
-        .and_then(|cid| tablet.on_court_since_ms(cid, m.id));
-    let update =
-        crate::tablet::server::build_manual_dq_update(m, loser_team, sets, on_court_since, end_ms)?;
+    // Bruttostart/Ende aus dem Zeiten-Store (Spec `spielzeiten-prognose`,
+    // E1/E3) — wie bei `enter_result`.
+    let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
+    let btp_end_ms = tablet.result_end_ms(m.id, end_ms);
+    let officials = tablet.officials_for_result(m.id);
+    let update = crate::tablet::server::build_manual_dq_update(
+        m,
+        loser_team,
+        sets,
+        on_court_since,
+        btp_end_ms,
+        officials,
+    )?;
     let mid = update.btp_match_id;
     let free_court_id = update.free_court_id;
+    // Spielende stempeln (E3/E11): Eingangszeitpunkt festhalten, aber eine
+    // Disqualifikation ist kein regulärer Messwert.
+    tablet
+        .match_times_store()
+        .stamp_finished(mid, false, end_ms);
     match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
         Ok(()) => {
             if let Some(cid) = free_court_id {
@@ -1569,6 +1810,12 @@ pub async fn assign_court(
             draw_id,
             planning_id,
             court_id,
+            // Beim Ruf aufs Feld wandert die Besetzung mit (ADR 0021) —
+            // ein Request statt zwei.
+            officials: state
+                .tablet
+                .snapshot_match(match_id)
+                .and_then(|m| state.tablet.officials_for_write(&m)),
         }],
         None => Vec::new(),
     };
@@ -1604,6 +1851,9 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
             draw_id: m.draw_id,
             planning_id: m.planning_id,
             court_id: 0, // 0 = Feldzuordnung am Match löschen
+            // Beim Freigeben die Besetzung nicht anfassen: Das Spiel ist
+            // nicht zu Ende, es wird nur vom Feld genommen.
+            officials: None,
         }],
         None => Vec::new(),
     };
@@ -1690,6 +1940,15 @@ pub struct PreparationCandidate {
     pub match_num: Option<i64>,
     /// Aufruf-Daten, falls das Match bereits gerufen wurde; sonst `null`.
     pub call: Option<PreparationCallInfo>,
+    /// Von der automatischen Feldvergabe ausgenommen (Spec
+    /// `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon unberührt.
+    pub excluded: bool,
+    /// In welche Halle das Spiel gehört (leer = unbekannt) — Grundlage der
+    /// Hallen-Abschnitte in der Vorbereitungs-Liste (Spec
+    /// `spielliste-manuelle-reihenfolge`).
+    pub hall: String,
+    /// Steht dieses Spiel gerade im manuellen Präfix seiner Halle?
+    pub manual: bool,
 }
 
 /// Rückgabe von [`preparation_candidates`]: die Kandidaten-Spiele und die
@@ -1718,7 +1977,19 @@ pub struct PreparationLocation {
 /// (`apply_preparation_calls` in `run_once`) auf.
 #[tauri::command]
 pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
-    let tablet = &state.tablet;
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    preparation_candidates_for(&state.tablet, &cfg)
+}
+
+/// Kernlogik von [`preparation_candidates`] ohne den Tauri-`State`-Wrapper —
+/// direkt testbar und Grundlage des Cross-Site-Regressionstests
+/// (`tests/queue_order_consistency.rs`, ADR 0023): ein Vergleich gegen
+/// `tl.rs::build_state` und `badhub/payload.rs::build_tset` für dieselben
+/// Testdaten. `pub`, damit der Integrationstest sie erreicht.
+pub fn preparation_candidates_for(
+    tablet: &crate::tablet::state::TabletState,
+    cfg: &AppConfig,
+) -> PreparationView {
     let Some(snapshot) = tablet.snapshot_clone() else {
         return PreparationView {
             candidates: Vec::new(),
@@ -1726,16 +1997,52 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
         };
     };
     let calls = tablet.preparation_calls();
+    let manual_halls = tablet.manual_halls();
+    let auto_halls = tablet.auto_hall_store().halls();
 
-    let mut candidates: Vec<PreparationCandidate> = snapshot
+    // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`)
+    // — **derselbe** gemeinsame Helfer wie an den anderen vier Sortier-
+    // Stellen, sonst zeigte diese Liste eine andere Reihenfolge als TL-Web.
+    let mut ordered: Vec<(
+        crate::tablet::assign::ManualOrderSortKey,
+        &crate::btp::model::BtpMatch,
+        String,
+    )> = snapshot
         .matches
         .iter()
         .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
         // Nur echte Paarungen – beide Mannschaften müssen feststehen.
         .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
         .map(|m| {
+            let call = calls.iter().find(|c| c.match_id == m.id);
+            let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+            let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
+                snapshot
+                    .locations
+                    .iter()
+                    .find(|l| l.id == lid)
+                    .map(|l| l.name.as_str())
+            });
+            let (hall, _, key) = crate::tablet::assign::resolve_and_sort_key(
+                cfg,
+                &snapshot,
+                m,
+                manual_hall,
+                called_hall,
+                auto_halls.get(&m.id).map(String::as_str),
+                call.is_some(),
+                tablet.queue_order_store(),
+            );
+            (key, m, hall)
+        })
+        .collect();
+    ordered.sort_by_key(|(key, _, _)| *key);
+
+    let candidates: Vec<PreparationCandidate> = ordered
+        .into_iter()
+        .map(|(_, m, hall)| {
             let call = calls.iter().find(|c| c.match_id == m.id).map(|c| {
-                let hall = c.location_id.and_then(|lid| {
+                let call_hall = c.location_id.and_then(|lid| {
                     snapshot
                         .locations
                         .iter()
@@ -1744,10 +2051,11 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                 });
                 PreparationCallInfo {
                     location_id: c.location_id,
-                    hall: hall.unwrap_or_default(),
+                    hall: call_hall.unwrap_or_default(),
                     called_at_ms: c.called_at_ms,
                 }
             });
+            let manual = tablet.queue_order_store().rank(m.id).is_some();
             PreparationCandidate {
                 match_id: m.id,
                 label: format!("{} {}", m.draw_name, m.round_name)
@@ -1772,27 +2080,12 @@ pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
                     .collect(),
                 match_num: m.match_num,
                 call,
+                excluded: tablet.auto_assign_excluded(m.id),
+                hall,
+                manual,
             }
         })
         .collect();
-    // Gerufene zuerst, dann nach BTP-Ansetzung (PlannedTime), dann nach der
-    // Ansetzungsreihenfolge des Turnierplans (DisplayOrder), danach nach
-    // Spielnummer – konsistent zur Auto-Feldvergabe.
-    let plan: std::collections::HashMap<i64, (Option<i64>, Option<i64>)> = snapshot
-        .matches
-        .iter()
-        .map(|m| (m.id, (m.planned_time, Some(m.draw_id))))
-        .collect();
-    candidates.sort_by_key(|c| {
-        let (zeit, reihenfolge) = plan.get(&c.match_id).copied().unwrap_or((None, None));
-        crate::tablet::assign::sort_key_parts(
-            c.call.is_some(),
-            zeit,
-            reihenfolge,
-            c.match_num,
-            c.match_id,
-        )
-    });
 
     let locations = snapshot
         .locations
@@ -2128,9 +2421,13 @@ pub async fn pending_announce_jobs(
             Ok(r) if r.status().is_success() => r,
             _ => return Ok(Vec::new()),
         };
-        resp.json::<Vec<crate::tablet::state::AnnounceJob>>()
-            .await
-            .map_err(|e| e.to_string())
+        // Bewusst als Text lesen und tolerant auswerten: Ein Master mit
+        // neuerem Stand kann eine Ansageart erteilen, die dieser Slave noch
+        // nicht kennt. Typisiertes Lesen der ganzen Liste scheiterte daran
+        // komplett — die zweite Halle bliebe eine Minute stumm, auch für
+        // normale Aufrufe (siehe `announce_jobs_aus_json`).
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        Ok(crate::tablet::state::announce_jobs_aus_json(&text))
     } else {
         Ok(state.tablet.announce_jobs_since(&hall, since, now_ms()))
     }
@@ -2453,6 +2750,10 @@ pub fn tl_device_add(
         label: label.trim().chars().take(60).collect(),
         created_at_ms: now_ms(),
         hall: hall.trim().to_string(),
+        // Neu gekoppelte Geräte starten ohne Profilbindung — sie zeigen das
+        // turnierweite Standardprofil, bis eine Turnierleitung eines wählt
+        // (Spec tl-web-panelsystem).
+        profile_id: String::new(),
     };
     let neu = device.clone();
     let cfg = mutate_config(&app, &state, move |cfg| {
@@ -2531,6 +2832,47 @@ pub fn remove_hall_layout(
     })
 }
 
+/// Übersteuert die Farbe einer Halle (Spec hallen-farben). Validierung
+/// (Palettenzwang, Trim, case-insensitiver Ersatz) steckt testbar in
+/// `AppConfig::upsert_hall_color` — der Command ist nur der dünne Wrapper.
+#[tauri::command]
+pub fn set_hall_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hall: String,
+    color: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.upsert_hall_color(&hall, &color)
+    })
+}
+
+/// Entfernt die Farb-Übersteuerung einer Halle — zurück zur Auto-Palette.
+#[tauri::command]
+pub fn remove_hall_color(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    hall: String,
+) -> Result<AppConfig, String> {
+    mutate_config(&app, &state, move |cfg| {
+        cfg.remove_hall_color(&hall);
+        Ok(())
+    })
+}
+
+/// Palette + effektive Farbe je Halle für den Picker der Felderübersicht.
+/// Die Hallenliste ist die kanonische des Turniers (`hall_names`) — dieselbe
+/// Quelle wie `paint` und TL-Web (eine Wahrheit, R1; Review 2026-08-16).
+#[tauri::command]
+pub fn hall_colors_view(state: State<'_, AppState>) -> crate::hall_colors::HallColorsView {
+    let cfg = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    crate::hall_colors::view(&cfg, &state.tablet.hall_names())
+}
+
 /// Ändert die Konfiguration **unter durchgehend gehaltener Sperre** und
 /// liefert den neuen Stand.
 ///
@@ -2552,10 +2894,35 @@ fn mutate_config<F>(
 where
     F: FnOnce(&mut AppConfig) -> Result<(), String>,
 {
-    let mut guard = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    let ergebnis = mutate_config_at(&config_path(app), &state.config, aendern);
+    // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
+    // (Hallen-Farben, Aufruf-Timer) — nach einem Schreibvorgang ist er
+    // überholt (Spec monitor-livestand-push, S1). Auch bei einem Fehlschlag
+    // gemeldet: Dann ist im Zweifel schon geschrieben worden.
+    state.tablet.bump_overview_rev();
+    ergebnis
+}
+
+/// Kernlogik von [`mutate_config`], ohne `AppHandle`/`State` — dieselbe
+/// Sperre (`shared`), derselbe Lesen-Ändern-Schreiben-Zyklus, nur ohne die
+/// Tauri-Anbindung. Existiert, damit Tests aus anderen Modulen (namentlich
+/// `tablet::server`) den **echten** Tauri-Command-Schreibpfad gegen den
+/// echten `ServerCtx::mutate_app_config`-Schreibpfad testen können, statt
+/// beide Male dieselbe Logik ein zweites Mal nachzubauen — genau das
+/// Lost-Update-Regressionsszenario (kritischer Review-Fund, s. Feld-
+/// Kommentar `AppState.config`).
+pub(crate) fn mutate_config_at<F>(
+    config_path: &std::path::Path,
+    shared: &Arc<Mutex<AppConfig>>,
+    aendern: F,
+) -> Result<AppConfig, String>
+where
+    F: FnOnce(&mut AppConfig) -> Result<(), String>,
+{
+    let mut guard = shared.lock().expect("Config-Mutex nicht vergiftet");
     let mut cfg = guard.clone();
     aendern(&mut cfg)?;
-    cfg.save_to(&config_path(app)).map_err(|e| e.to_string())?;
+    cfg.save_to(config_path).map_err(|e| e.to_string())?;
     *guard = cfg.clone();
     Ok(cfg)
 }
@@ -2671,6 +3038,9 @@ pub fn call_preparation(state: State<'_, AppState>, match_ids: Vec<i64>, locatio
                 location_id,
                 called_at_ms: now,
             });
+        // Der Aufruf räumt eine automatisch vorverteilte Halle (E3, Spec
+        // `hallen-vorverteilung`) — wie im TL-Web-Pfad.
+        state.tablet.auto_hall_store().remove(match_id);
     }
 }
 
@@ -2706,6 +3076,403 @@ pub fn advance_scorekeeper(state: State<'_, AppState>, key: String) {
 #[tauri::command]
 pub fn add_scorekeeper(state: State<'_, AppState>, names: Vec<String>) {
     state.tablet.add_scorekeeper_manual(names, now_ms());
+}
+
+// ──────────────── Schiedsrichter (Spec schiedsrichter-management) ─────────
+
+/// Ein Official für die Bedienoberfläche: BTP-Stammdaten plus die in
+/// BTS Light gepflegten Zusatzdaten. Die **Inhalte** der Sperrlisten sind
+/// bewusst nicht dabei (nur ihre Anzahl) — sie kommen auf gezielte Anfrage
+/// über [`official_blocklists`], damit sie nicht in jeder Listen-Abfrage
+/// mitreisen.
+#[derive(Serialize)]
+pub struct OfficialView {
+    pub id: i64,
+    /// Anzeigename „Vorname Nachname" aus BTP.
+    pub name: String,
+    /// Position in der Rotationsreihenfolge (0-basiert).
+    pub position: usize,
+    pub paused: bool,
+    /// In BTS Light gepflegter Stammverein (BTP liefert keinen).
+    pub club: String,
+    /// Anzahl gesperrter Vereine + Spieler (nur die Zahl).
+    pub blocked_count: usize,
+    /// Feld-ID, auf der er gerade Dienst tut, plus Rolle — sonst `None`.
+    pub on_duty_court_id: Option<i64>,
+    pub on_duty_role: Option<String>,
+    /// Zahl der bisherigen Einsätze (aus den beendeten Spielen abgeleitet).
+    pub appearances: usize,
+}
+
+/// Ein abgeleiteter Einsatz für das Detail-Overlay.
+#[derive(Serialize)]
+pub struct AppearanceView {
+    pub match_id: i64,
+    /// „sr" oder „ar".
+    pub role: String,
+    /// Spielbezeichnung, z. B. „HE VF".
+    pub match_name: String,
+    /// Feldname, falls BTP das Feld noch führt.
+    pub court: String,
+    /// Endezeit in Unix-ms.
+    pub finished_at: Option<u64>,
+}
+
+/// Die Sperrlisten eines Officials (Personendaten — nur auf Anfrage),
+/// zusammen mit den Auswahllisten für die Pflege.
+#[derive(Serialize)]
+pub struct BlocklistView {
+    pub clubs: Vec<String>,
+    pub players: Vec<i64>,
+    /// Alle Spieler des Turniers zur Auswahl (statt PlayerID-Tipperei).
+    pub pick_players: Vec<crate::tablet::officials::PickPlayer>,
+    /// Alle Vereine des Turniers zur Auswahl.
+    pub pick_clubs: Vec<String>,
+}
+
+/// Feldweise Schalter für die Bedienoberfläche.
+#[derive(Serialize)]
+pub struct CourtSwitchesView {
+    pub court_id: i64,
+    pub court: String,
+    pub sr: bool,
+    pub ar: bool,
+    pub operator: bool,
+}
+
+/// Läuft dieses Turnier mit Schiedsrichtern? Schreibende Officials-Commands
+/// beginnen damit — sonst landeten Zusatzdaten (darunter Sperrlisten, also
+/// Personendaten) in der Turnierdatei eines Turniers ohne Schiedsrichter.
+fn officials_an(state: &State<'_, AppState>) -> Result<(), String> {
+    if state.tablet.officials_store().enabled() {
+        return Ok(());
+    }
+    Err("Dieses Turnier läuft ohne Schiedsrichter.".to_string())
+}
+
+/// „sr"/„ar" in die Rolle übersetzen; alles andere ist ein Bedienfehler.
+fn parse_role(role: &str) -> Result<crate::tablet::officials::OfficialRole, String> {
+    match role {
+        "sr" => Ok(crate::tablet::officials::OfficialRole::Sr),
+        "ar" => Ok(crate::tablet::officials::OfficialRole::Ar),
+        _ => Err(format!("unbekannte Rolle: {role}")),
+    }
+}
+
+fn role_str(role: crate::tablet::officials::OfficialRole) -> String {
+    match role {
+        crate::tablet::officials::OfficialRole::Sr => "sr".to_string(),
+        crate::tablet::officials::OfficialRole::Ar => "ar".to_string(),
+    }
+}
+
+/// Beendete Spiele des Snapshots in der Form, die die Einsatz-Ableitung
+/// braucht.
+fn officials_finished_input(
+    snap: &crate::btp::model::BtpSnapshot,
+) -> Vec<crate::tablet::officials::FinishedMatch> {
+    snap.matches
+        .iter()
+        .filter(|m| m.status == crate::btp::model::MatchStatus::Finished)
+        .map(|m| crate::tablet::officials::FinishedMatch {
+            match_id: m.id,
+            btp_sr: m.official1_id,
+            btp_ar: m.official2_id,
+            court_id: m.court_id,
+            finished_at: m.finished_at,
+        })
+        .collect()
+}
+
+/// Die Schiedsrichterliste des Turniers in Rotationsreihenfolge, angereichert
+/// um Zusatzdaten, Dienst und Einsatz-Zähler. Leer, wenn BTP keine Officials
+/// führt oder ohne Schiedsrichter gespielt wird.
+#[tauri::command]
+pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
+    let store = state.tablet.officials_store();
+    let Some(snap) = state.tablet.snapshot_clone() else {
+        return Vec::new();
+    };
+    let einsaetze = store.appearances(&officials_finished_input(&snap));
+    // Wer tut gerade wo Dienst? Aus den laufenden Spielen.
+    let mut dienst: std::collections::HashMap<i64, (i64, String)> =
+        std::collections::HashMap::new();
+    for m in snap
+        .matches
+        .iter()
+        .filter(|m| m.status == crate::btp::model::MatchStatus::OnCourt)
+    {
+        let w = store.effective(m.id, m.official1_id, m.official2_id);
+        let Some(court_id) = m.court_id else { continue };
+        if let Some(id) = w.sr {
+            dienst.insert(id, (court_id, "sr".to_string()));
+        }
+        if let Some(id) = w.ar {
+            dienst.insert(id, (court_id, "ar".to_string()));
+        }
+    }
+    let reihenfolge = store.order();
+    let mut out: Vec<OfficialView> = snap
+        .officials
+        .iter()
+        .map(|o| {
+            let extra = store.extra(o.id);
+            let position = reihenfolge
+                .iter()
+                .position(|id| *id == o.id)
+                .unwrap_or(usize::MAX);
+            OfficialView {
+                id: o.id,
+                name: o.display_name(),
+                position,
+                paused: extra.paused,
+                club: extra.club,
+                blocked_count: extra.blocked_clubs.len() + extra.blocked_players.len(),
+                on_duty_court_id: dienst.get(&o.id).map(|(c, _)| *c),
+                on_duty_role: dienst.get(&o.id).map(|(_, r)| r.clone()),
+                appearances: einsaetze.get(&o.id).map(Vec::len).unwrap_or(0),
+            }
+        })
+        .collect();
+    // In Rotationsreihenfolge ausliefern — das ist die Reihenfolge, in der
+    // die Turnierleitung sie zugeteilt bekommt.
+    out.sort_by_key(|v| (v.position, v.id));
+    out
+}
+
+/// Einen Official einem Spiel zuweisen. Gibt die Konflikt-Kategorie zurück,
+/// falls einer besteht: Die Zuweisung wird **trotzdem ausgeführt** (Spec
+/// Nr. 2) — die Turnierleitung entscheidet, nicht die App.
+#[tauri::command]
+pub fn official_assign(
+    state: State<'_, AppState>,
+    match_id: i64,
+    role: String,
+    official_id: i64,
+) -> Result<Option<String>, String> {
+    officials_an(&state)?;
+    let role = parse_role(&role)?;
+    let store = state.tablet.officials_store();
+    store.assign(match_id, role, official_id);
+    let warnung = state.tablet.snapshot_clone().and_then(|snap| {
+        let m = snap.matches.iter().find(|m| m.id == match_id)?;
+        let spieler: Vec<crate::btp::model::BtpPlayer> =
+            m.team1.iter().chain(m.team2.iter()).cloned().collect();
+        crate::tablet::officials::official_conflict(&store.extra(official_id), &spieler)
+            .map(|k| k.label().to_string())
+    });
+    Ok(warnung)
+}
+
+/// Eine Zuweisung lösen.
+#[tauri::command]
+pub fn official_clear(
+    state: State<'_, AppState>,
+    match_id: i64,
+    role: String,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    state
+        .tablet
+        .officials_store()
+        .clear_assignment(match_id, parse_role(&role)?);
+    Ok(())
+}
+
+/// Einen Official pausieren oder wieder aktivieren (Pause, kommt später,
+/// geht früher). Seine Position in der Reihenfolge bleibt.
+#[tauri::command]
+pub fn official_pause(
+    state: State<'_, AppState>,
+    official_id: i64,
+    paused: bool,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    state
+        .tablet
+        .officials_store()
+        .set_paused(official_id, paused);
+    Ok(())
+}
+
+/// Ein Spiel von der automatischen Feldvergabe ausnehmen oder die Ausnahme
+/// zurücknehmen (Spec `feldvergabe-ausnahme`). Derselbe Speicher wie der
+/// TL-Web-Weg (`TlAction::ExcludeFromAutoAssign`) — beide Wege mutieren
+/// `TabletState::set_auto_assign_excluded`, keine BTP-Rückschreibung.
+/// Unabhängig vom Schiedsrichter-Betrieb, deshalb ohne `officials_an`-Gate.
+#[tauri::command]
+pub fn auto_assign_exclude(
+    state: State<'_, AppState>,
+    match_id: i64,
+    excluded: bool,
+) -> Result<(), String> {
+    state.tablet.set_auto_assign_excluded(match_id, excluded);
+    Ok(())
+}
+
+/// Ein noch nicht gerufenes Spiel in der manuellen Präfix-Reihenfolge
+/// seiner Halle vor ein anderes ziehen (Spec
+/// `spielliste-manuelle-reihenfolge`, ADR 0023). Derselbe Einstiegspunkt
+/// wie der TL-Web-Weg (`TlAction::QueueReorder`) —
+/// `TabletState::queue_reorder` leitet die Halle selbst aus dem Match ab.
+#[tauri::command]
+pub fn queue_reorder(
+    state: State<'_, AppState>,
+    match_id: i64,
+    before_match_id: Option<i64>,
+) -> Result<(), String> {
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    state.tablet.queue_reorder(&cfg, match_id, before_match_id);
+    Ok(())
+}
+
+/// Die manuelle Spielreihenfolge **aller** Hallen auf einmal verwerfen
+/// (globaler Reset-Knopf, Spec `spielliste-manuelle-reihenfolge`).
+#[tauri::command]
+pub fn queue_order_reset(state: State<'_, AppState>) -> Result<(), String> {
+    state.tablet.queue_order_reset();
+    Ok(())
+}
+
+/// Einen Official in der Reihenfolge vor einen anderen ziehen
+/// (`before_official_id` weggelassen ⇒ ans Ende).
+#[tauri::command]
+pub fn official_reorder(
+    state: State<'_, AppState>,
+    official_id: i64,
+    before_official_id: Option<i64>,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    state
+        .tablet
+        .officials_store()
+        .reorder(official_id, before_official_id);
+    Ok(())
+}
+
+/// Stammverein pflegen (BTP liefert am Official keinen — Messung 13.08.2026).
+#[tauri::command]
+pub fn official_set_club(
+    state: State<'_, AppState>,
+    official_id: i64,
+    club: String,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    state.tablet.officials_store().set_club(official_id, &club);
+    Ok(())
+}
+
+/// Die Sperrlisten eines Officials — **nur auf gezielte Anfrage**, damit
+/// diese Personendaten nicht in jeder Roster-Abfrage mitreisen.
+#[tauri::command]
+pub fn official_blocklists(state: State<'_, AppState>, official_id: i64) -> BlocklistView {
+    let extra = state.tablet.officials_store().extra(official_id);
+    // Die Auswahllisten kommen mit derselben Antwort: Der Dialog wird
+    // bewusst geöffnet, ein zweiter Rundlauf brächte nichts.
+    let (pick_players, pick_clubs) = state
+        .tablet
+        .snapshot_clone()
+        .map(|snap| crate::tablet::officials::pick_lists(&snap.entries))
+        .unwrap_or_default();
+    BlocklistView {
+        clubs: extra.blocked_clubs,
+        players: extra.blocked_players,
+        pick_players,
+        pick_clubs,
+    }
+}
+
+/// Sperrlisten setzen (ersetzt beide Listen).
+#[tauri::command]
+pub fn official_set_blocklists(
+    state: State<'_, AppState>,
+    official_id: i64,
+    clubs: Vec<String>,
+    players: Vec<i64>,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    state
+        .tablet
+        .officials_store()
+        .set_blocklists(official_id, clubs, players);
+    Ok(())
+}
+
+/// Die Einsätze eines Officials im Detail (Spiel, Rolle, Feld, Endezeit) —
+/// abgeleitet aus den beendeten Spielen, ohne eigene Historien-Datenhaltung.
+#[tauri::command]
+pub fn official_appearances(state: State<'_, AppState>, official_id: i64) -> Vec<AppearanceView> {
+    let Some(snap) = state.tablet.snapshot_clone() else {
+        return Vec::new();
+    };
+    let store = state.tablet.officials_store();
+    let alle = store.appearances(&officials_finished_input(&snap));
+    alle.get(&official_id)
+        .map(|liste| {
+            liste
+                .iter()
+                .map(|a| {
+                    let m = snap.matches.iter().find(|m| m.id == a.match_id);
+                    AppearanceView {
+                        match_id: a.match_id,
+                        role: role_str(a.role),
+                        match_name: m
+                            .map(|m| {
+                                format!("{} {}", m.draw_name, m.round_name)
+                                    .trim()
+                                    .to_string()
+                            })
+                            .unwrap_or_default(),
+                        court: a
+                            .court_id
+                            .and_then(|c| snap.court_infos.iter().find(|ci| ci.id == c))
+                            .map(|ci| ci.name.clone())
+                            .unwrap_or_default(),
+                        finished_at: a.finished_at,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Die feldweisen Schalter aller Felder (Default: alles aktiv).
+#[tauri::command]
+pub fn officials_court_switches(state: State<'_, AppState>) -> Vec<CourtSwitchesView> {
+    let store = state.tablet.officials_store();
+    let Some(snap) = state.tablet.snapshot_clone() else {
+        return Vec::new();
+    };
+    snap.court_infos
+        .iter()
+        .map(|c| {
+            let s = store.court_switches(c.id);
+            CourtSwitchesView {
+                court_id: c.id,
+                court: c.name.clone(),
+                sr: s.sr,
+                ar: s.ar,
+                operator: s.operator,
+            }
+        })
+        .collect()
+}
+
+/// Feldweise Schalter setzen.
+#[tauri::command]
+pub fn officials_set_court_switches(
+    state: State<'_, AppState>,
+    court_id: i64,
+    sr: bool,
+    ar: bool,
+    operator: bool,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    state.tablet.officials_store().set_court_switches(
+        court_id,
+        crate::tablet::officials::CourtSwitches { sr, ar, operator },
+    );
+    Ok(())
 }
 
 // ───────────────────────────── Siegerehrung ───────────────────────────────
@@ -3250,6 +4017,7 @@ mod tests {
             label: "gerade gekoppelt".to_string(),
             created_at_ms: 2,
             hall: String::new(),
+            profile_id: String::new(),
         });
 
         // Der Stand aus dem Fenster kennt das Gerät noch nicht.
@@ -3286,6 +4054,49 @@ mod tests {
     }
 
     #[test]
+    fn the_wizard_cannot_wipe_the_hall_colors() {
+        // Die Hallen-Farben werden auf der Felderübersicht gepflegt, nicht im
+        // Assistenten — dessen Speichern darf die Übersteuerungen nicht
+        // zurücksetzen (dieselbe Falle wie bei hall_layouts).
+        let mut current = AppConfig::default();
+        current
+            .upsert_hall_color("Nord", crate::hall_colors::HALL_PALETTE[2])
+            .unwrap();
+        let incoming = AppConfig::default(); // Wizard-Stand ohne Farben
+        let ergebnis = keep_host_managed_fields(incoming, &current);
+        assert_eq!(ergebnis.hall_colors, current.hall_colors);
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_hall_colors_when_bundle_has_none() {
+        // Ein Identitäts-Bündel aus einer Version vor den Hallen-Farben trägt
+        // ein leeres Feld — das heißt „unbekannt", nicht „absichtlich
+        // gelöscht" (dasselbe Muster wie hall_layouts).
+        let mut current = AppConfig::default();
+        current
+            .upsert_hall_color("Nord", crate::hall_colors::HALL_PALETTE[5])
+            .unwrap();
+        let bundle = AppConfig::default();
+        let ergebnis = apply_imported_identity(bundle, &current);
+        assert_eq!(ergebnis.hall_colors, current.hall_colors);
+    }
+
+    #[test]
+    fn the_wizard_cannot_wipe_the_hall_prefill() {
+        // Die Hallen-Vorverteilung wird ausschließlich in TL-Web geschaltet
+        // (Spec hallen-vorverteilung E-TLW) — der Assistent kennt das Feld
+        // nicht und schickt beim Speichern den serde-Default (aus, 0).
+        // Ohne Schutz wäre jedes Wizard-Speichern ein stilles Abschalten.
+        let mut current = AppConfig::default();
+        current.hall_prefill.enabled = true;
+        current.hall_prefill.window = 7;
+        let incoming = AppConfig::default(); // Wizard-Stand ohne hall_prefill
+        let ergebnis = keep_host_managed_fields(incoming, &current);
+        assert!(ergebnis.hall_prefill.enabled);
+        assert_eq!(ergebnis.hall_prefill.window, 7);
+    }
+
+    #[test]
     fn turning_the_feature_off_still_clears_the_devices() {
         // Gegenprobe: Der Schutz darf keine Einbahnstraße sein. Schaltet
         // die Turnierleitung die Oberfläche aus, sollen die Zugänge auch
@@ -3298,6 +4109,7 @@ mod tests {
             label: "l".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         });
 
         let from_ui = AppConfig::default(); // tl_web aus
@@ -3324,6 +4136,7 @@ mod tests {
             label: "Tablet TL".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         });
 
         let bundle = identity_bundle(cfg);
@@ -3353,6 +4166,7 @@ mod tests {
             label: "Tablet TL".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         });
         let imported = cfg_id("inst-neu", None, "", "");
 
@@ -3438,6 +4252,146 @@ mod tests {
             "das importierte Raster gilt, nicht das lokale"
         );
         assert_eq!(merged.hall_layouts[0].hall, "Halle Neu");
+    }
+
+    /// Minimales Panel-Profil für Identitäts-/Persistenz-Tests (Spec
+    /// tl-web-panelsystem).
+    fn profile(id: &str) -> crate::config::TlPanelProfile {
+        crate::config::TlPanelProfile {
+            id: id.to_string(),
+            name: format!("Profil {id}"),
+            panels: Vec::new(),
+            display: crate::config::TlDisplaySettings::default(),
+            updated_at_ms: 1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn identity_bundle_strips_tl_device_profile_ids() {
+        // Regressionsschutz: identity_bundle löscht die komplette
+        // devices-Liste (ADR 0012) — das nimmt jede darin gespeicherte
+        // profile_id automatisch mit, ohne dass ein eigener Schritt nötig
+        // wäre. Dieser Test verankert genau diese implizite Garantie.
+        let mut cfg = cfg_id("inst-xyz", None, "", "");
+        cfg.tl_web.enabled = true;
+        cfg.tl_web.profiles.push(profile("profil-a"));
+        cfg.tl_web.devices.push(crate::config::TlDevice {
+            id: "dev-1".to_string(),
+            token: "tok-geheim".to_string(),
+            label: "Tablet TL".to_string(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: "profil-a".to_string(),
+        });
+
+        let bundle = identity_bundle(cfg);
+        assert!(
+            bundle.tl_web.devices.is_empty(),
+            "mit den Geräten verschwindet auch jede profile_id"
+        );
+    }
+
+    #[test]
+    fn identity_bundle_keeps_profile_catalog() {
+        // Anders als die Geräte-Tokens ist der Profil-KATALOG kein
+        // Zugang/Secret — er wandert beim Identitäts-Umzug mit (ADR 0025),
+        // wie `hall_layouts`.
+        let mut cfg = cfg_id("inst-xyz", None, "", "");
+        cfg.tl_web.profiles.push(profile("profil-a"));
+        cfg.tl_web.default_profile_id = "profil-a".to_string();
+
+        let bundle = identity_bundle(cfg);
+        assert_eq!(bundle.tl_web.profiles.len(), 1, "Katalog bleibt erhalten");
+        assert_eq!(bundle.tl_web.profiles[0].id, "profil-a");
+        assert_eq!(bundle.tl_web.default_profile_id, "profil-a");
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_profiles_when_bundle_has_none() {
+        // Bündel aus einer Version vor diesem Feature (oder eins ohne
+        // eingerichtete Profile) trägt ein leeres `profiles` — das darf die
+        // am aktuellen PC eingerichteten Profile NICHT stillschweigend
+        // löschen (Muster hall_layouts, ADR 0025).
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.tl_web.profiles.push(profile("profil-lokal"));
+        current.tl_web.default_profile_id = "profil-lokal".to_string();
+        let imported = cfg_id("inst-neu", None, "", "");
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(merged.install_id, "inst-neu", "Identität wird übernommen");
+        assert_eq!(
+            merged.tl_web.profiles.len(),
+            1,
+            "lokal eingerichtete Profile bleiben, wenn das Bündel keine trägt"
+        );
+        assert_eq!(merged.tl_web.profiles[0].id, "profil-lokal");
+        assert_eq!(merged.tl_web.default_profile_id, "profil-lokal");
+    }
+
+    #[test]
+    fn apply_imported_identity_takes_bundle_profiles_when_present() {
+        // Trägt das Bündel eigene Profile, gelten die (echter Umzug einer
+        // Installation, die den Katalog schon eingerichtet hatte) — nicht
+        // die am neuen PC ggf. schon vorhandenen. `default_profile_id`
+        // folgt demselben Katalog, sonst zeigte er womöglich auf eine
+        // Kennung, die im übernommenen Katalog gar nicht existiert.
+        let mut current = cfg_id("inst-alt", None, "", "");
+        current.tl_web.profiles.push(profile("profil-alt"));
+        current.tl_web.default_profile_id = "profil-alt".to_string();
+        let mut imported = cfg_id("inst-neu", None, "", "");
+        imported.tl_web.profiles.push(profile("profil-neu"));
+        imported.tl_web.default_profile_id = "profil-neu".to_string();
+
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(
+            merged.tl_web.profiles.len(),
+            1,
+            "der importierte Katalog gilt, nicht der lokale"
+        );
+        assert_eq!(merged.tl_web.profiles[0].id, "profil-neu");
+        assert_eq!(merged.tl_web.default_profile_id, "profil-neu");
+    }
+
+    #[test]
+    fn keep_host_managed_fields_preserves_the_given_current_profiles() {
+        // Muster `saving_settings_does_not_revert_the_paired_device_list`:
+        // Die Einstellungsseite schickt IHREN (beim Öffnen aufgenommenen)
+        // Stand zurück; der Profil-Katalog wächst aber währenddessen über
+        // tl.html (ADR 0024/0025) — `keep_host_managed_fields` muss das
+        // `current` übergebene `tl_web.profiles` unangetastet in den
+        // gemergten Stand übernehmen.
+        //
+        // **Testet NUR diese Merge-Funktion isoliert** — mit einem von Hand
+        // gebauten `current`. Das prüft NICHT, ob `current` (in der echten
+        // App: `state.config.lock()`) zum Zeitpunkt des Aufrufs auch
+        // tatsächlich das gerade in tl.html gespeicherte Profil kennt — das
+        // war der eigentliche kritische Review-Fund: Vorher lief
+        // `ServerCtx::mutate_app_config` (TL-Profil-Speichern) komplett
+        // ohne den `AppState.config`-In-Memory-Stand zu berühren, sodass
+        // `current` hier in der Praxis veraltet gewesen wäre — dieser Test
+        // hätte den Fehler NICHT gefunden. Der echte End-zu-Ende-
+        // Regressionstest für dieses Szenario (beide Schreibpfade über
+        // denselben `Arc<Mutex<AppConfig>>`, echtes Temp-Verzeichnis, echtes
+        // Schreiben) liegt in `tablet::server::tests
+        // ::profile_save_survives_a_later_settings_save_lost_update_regression`.
+        let mut current = AppConfig::default();
+        current.tl_web.profiles.push(profile("frisch-angelegt"));
+        current.tl_web.default_profile_id = "frisch-angelegt".to_string();
+
+        // Der Stand aus dem Fenster kennt das Profil noch nicht.
+        let mut from_ui = AppConfig::default();
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert", "Einstellung wird übernommen");
+        assert_eq!(
+            merged.tl_web.profiles.len(),
+            1,
+            "das inzwischen angelegte Profil bleibt"
+        );
+        assert_eq!(merged.tl_web.profiles[0].id, "frisch-angelegt");
+        assert_eq!(merged.tl_web.default_profile_id, "frisch-angelegt");
     }
 
     #[test]

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use relay_proto::{MonitorCommand, MonitorCommandKind, MonitorDeviceInfo};
 
 use crate::btp::model::{BtpCourt, BtpMatch, BtpSnapshot, Discipline, MatchStatus};
+use crate::tablet::perf;
 
 /// Aktuelle Unix-Zeit in Millisekunden.
 fn now_ms() -> u64 {
@@ -33,6 +34,12 @@ const MAX_MONITOR_DEVICES: usize = 128;
 /// Poll-Fallback zurück. Schützt Speicher und Broadcast-Kosten gegen einen
 /// Zuschauer-DoS (viele TVs/Tabs, die den Monitor-WS öffnen).
 const MAX_MONITOR_SUBS: usize = 256;
+
+/// Fan-out-Deckel der TL-Push-Abos (`/tl-ws`, Spec tl-web-push): das
+/// Doppelte des 8-Geräte-Caps — Reserve für Reconnect-Überlappung, aber
+/// kein offenes Scheunentor. Über der Grenze lehnt `subscribe_tl` ab und
+/// die Seite fällt still auf ihren Poll zurück (Muster Monitor-Nudge).
+const MAX_TL_PUSH_SUBS: usize = 16;
 
 /// Lebensdauer des Finalisiert-Merkers (A2 / ADR 0017, Regel b). Lang genug,
 /// dass ein kurz abgerissenes Tablet nach seiner Rückkehr noch „finalized"
@@ -103,7 +110,9 @@ struct CourtSession {
 }
 
 /// Eine Court-Zeile für die Felder-Übersicht der Turnierleitung.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+/// `Default` existiert für Tests und den `paint`-Helfer — im Betrieb baut
+/// ausschließlich `overview_from` die Zeilen.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct CourtOverview {
     /// Stabile BTP-CourtID des Felds – die Identität. Feldnamen wiederholen
     /// sich bei Mehr-Hallen-Turnieren, die CourtID nicht.
@@ -114,6 +123,11 @@ pub struct CourtOverview {
     /// Gruppierung im Frontend. Leerer String bei Ein-Hallen-Turnieren
     /// oder wenn das Feld keiner auflösbaren Halle zugeordnet ist.
     pub location: String,
+    /// Effektive Hallen-Farbe (Hex, Spec hallen-farben) — von
+    /// `hall_colors::paint` an den Serving-Stellen gefüllt, weil dort die
+    /// Config greifbar ist. `None` bei Ein-Hallen-Turnieren oder Feldern
+    /// ohne Halle.
+    pub hall_color: Option<String>,
     /// BTP-Match-ID des aktuellen Spiels (0 = kein Match). Damit erkennt
     /// die Oberfläche, wenn ein Feld ein neues Spiel bekommt (Sprachansage).
     pub match_id: i64,
@@ -173,9 +187,11 @@ pub struct CourtOverview {
     /// steht. `None`, wenn kein Spiel auf dem Feld ist. Grundlage des
     /// Aufruf-Timers (hochzählende Uhr + 2./3. Aufruf).
     pub on_court_since_ms: Option<u64>,
-    /// Wie oft dieses Spiel schon aufgerufen wurde (1–3), gezählt am
-    /// Turnier-PC. Damit zeigen Desktop-Übersicht und Turnierleitungs-Seite
-    /// dieselbe Stufe — auch wenn die eine gerufen hat und die andere nicht.
+    /// Wie oft dieses Spiel schon aufgerufen wurde, gezählt am Turnier-PC
+    /// (0 = noch nie; mit „Aufrufe unbegrenzt" nach oben offen, sonst
+    /// maximal 3 — Konsumenten dürfen KEIN `min(…, 3)` daraufsetzen).
+    /// Damit zeigen Desktop-Übersicht und Turnierleitungs-Seite dieselbe
+    /// Stufe — auch wenn die eine gerufen hat und die andere nicht.
     pub call_stage: u8,
     /// Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap), damit die
     /// Felderübersicht Satz-/Matchball berechnen kann (Plan 16). 0 = kein
@@ -187,6 +203,21 @@ pub struct CourtOverview {
     /// punktverlauf-graph)? Felderübersicht und TL-Web bieten den
     /// Graph-Klick nur dann an.
     pub has_timeline: bool,
+    /// Schiedsrichter des laufenden Spiels (Spec `schiedsrichter-management`).
+    /// Leer, wenn keiner zugewiesen ist oder ohne Schiedsrichter gespielt
+    /// wird. Als Liste, damit die Anzeige dieselbe Form hat wie `scorekeeper`.
+    pub sr: Vec<String>,
+    /// Aufschlagrichter des laufenden Spiels.
+    pub ar: Vec<String>,
+    /// Konflikt-Kategorie („Verein"/„Person"), wenn ein zugewiesener
+    /// Official nicht zu diesem Spiel passt. Bewusst nur die Kategorie —
+    /// der Grund (welcher Verein, welcher Spieler) bleibt am Turnier-PC.
+    pub official_warn: Option<String>,
+    /// IDs der wirksamen Besetzung (0 = keiner). Die **Bedienung** braucht
+    /// sie: Zwei Schiedsrichter können denselben Anzeigenamen tragen, und
+    /// eine Auswahl über den Namen träfe dann den Falschen.
+    pub sr_id: i64,
+    pub ar_id: i64,
 }
 
 /// Ein noch nicht gespieltes Match, das nach einer Aufgabe kampflos
@@ -358,6 +389,10 @@ pub struct TabletState {
     /// CourtID → gespiegelter Spielzustand (JSON) des aktiven Tablets –
     /// wird einem übernehmenden Gerät übergeben.
     court_state: RwLock<HashMap<i64, String>>,
+    /// Derselbe Stand ohne `history`/`rallyLog` — die Fassung, die an
+    /// Anzeigen geht (siehe [`TabletState::display_court_state`]).
+    /// Einmal beim Eingang gerechnet statt bei jedem Abruf.
+    display_court_state: RwLock<HashMap<i64, String>>,
     /// Offene Walkover-Vorschläge nach Aufgaben (je EntryID höchstens einer).
     walkovers: RwLock<Vec<WalkoverProposal>>,
     /// „In Vorbereitung" gerufene Spiele (je Match-ID höchstens einer).
@@ -383,10 +418,30 @@ pub struct TabletState {
     /// Warteschlange gezogene Zähltafelbediener dieses Felds (ADR 0007,
     /// Scheibe 2). Wird geräumt, sobald das Feld frei ist / das Spiel wechselt.
     assigned_scorekeeper: RwLock<HashMap<i64, (i64, Vec<String>)>>,
+    /// Nachrufe an den Zähltafelbediener je Feld: `(Match-ID, Stufe)`.
+    /// Die Match-ID im Wert setzt den Zähler bei einem Spielwechsel von
+    /// selbst zurück — dasselbe Muster wie `call_stages`.
+    ///
+    /// Bewusst **getrennt** von `call_stages`: Der Bediener-Nachruf ist
+    /// kein Spieler-Aufruf. Liefen sie über denselben Zähler, zöge ein
+    /// Nachruf an die Bedienung die an der Kachel angezeigte Aufruf-Zahl
+    /// der Spieler hoch — und an der dritten hängt die kampflose Wertung.
+    ///
+    /// Der Stand wird **nicht** ausgeliefert (Nicht-Ziel N-7 der Spec): Er
+    /// bestimmt allein die Ansage-Stufe. Anders als beim Spieler-Aufruf
+    /// steht hinter dem letzten Nachruf keine Rechtsfolge, die man anzeigen
+    /// müsste.
+    scorekeeper_call_stages: RwLock<HashMap<i64, (i64, u8)>>,
     /// Pfad der `live-scores.json` (CourtID → Match-ID + Satzstand). Beim
-    /// Start gesetzt; jeder `record_score`/`clear_court` schreibt die Datei,
-    /// damit ein App-Neustart den laufenden Live-Stand nicht verliert (sonst
-    /// fiele der TV auf BTPs 0:0 zurück). `None` = Persistenz aus.
+    /// Start gesetzt, damit ein App-Neustart den laufenden Live-Stand nicht
+    /// verliert (sonst fiele der TV auf BTPs 0:0 zurück). `None` =
+    /// Persistenz aus.
+    ///
+    /// **Geschrieben wird seit v0.9.237 entprellt** (Spec
+    /// monitor-livestand-push, S2): Ein gezählter Punkt merkt nur vor
+    /// ([`TabletState::mark_scores_dirty`]), die Datei entsteht im
+    /// Sekundentakt des Sync-Loops. Wo ein Verlust nicht hinnehmbar ist —
+    /// Ergebnis, Räumung, Stoppen, App-Ende — wird ausdrücklich geflusht.
     scores_path: RwLock<Option<PathBuf>>,
     /// Serialisiert die Schreibvorgänge auf `live-scores.json` – mehrere
     /// Felder können (LAN, mehrere WS-Handler) gleichzeitig zählen; ohne das
@@ -429,14 +484,20 @@ pub struct TabletState {
     /// dazwischenfunken. Er gilt bis zum nächsten Start; danach zählt wieder
     /// die Grundeinstellung aus der Konfiguration.
     auto_assign_paused: RwLock<bool>,
-    /// Erfolgte Aufrufe je Feld: `court_id → (match_id, Stufe)`.
+    /// Erfolgte Aufrufe je Feld:
+    /// `court_id → (match_id, Stufe, bereits gerufene Parteien)`.
     ///
     /// Gehört an den Turnier-PC und nicht in die Geräte: Zählte jede Seite
     /// für sich, riefe ein Helfer zum zweiten Mal, während der nächste schon
     /// beim dritten ist — und niemand wüsste, ob das Spiel gleich gestrichen
     /// wird. Die Zahl ist die Zahl der **Aufrufe**, nicht der Zeitablauf; die
     /// Fälligkeitsanzeige bleibt davon unberührt.
-    call_stages: RwLock<HashMap<i64, (i64, u8)>>,
+    ///
+    /// Die Parteien-Maske ([`SIDE_TEAM1`]/[`SIDE_TEAM2`]) merkt sich, wer auf
+    /// der **aktuellen** Stufe schon gerufen wurde — damit „Partei A rufen"
+    /// und direkt danach „Partei B rufen" **eine** Aufruf-Runde bleiben und
+    /// die Stufe nicht zweimal hochzählen (Spec tl-liste-vereinfachen E1).
+    call_stages: RwLock<HashMap<i64, (i64, u8, u8)>>,
     /// Nachrufe am Meeting Point: `(match_id, Partei) → Stufe`. Getrennt nach
     /// Partei, weil in der Regel nur eine fehlt.
     prep_call_stages: RwLock<HashMap<(i64, String), u8>>,
@@ -445,6 +506,62 @@ pub struct TabletState {
     /// Er hängt hier, weil LAN-Server, Relay-Client und Tauri-Commands
     /// denselben Stand sehen müssen — wie beim übrigen Tablet-Zustand.
     timeline: crate::tablet::timeline::TimelineStore,
+    /// Schiedsrichter-Roster (Spec `schiedsrichter-management`, ADR 0022):
+    /// Rotationsreihenfolge, Pausen, Sperrlisten, feldweise Schalter und
+    /// lokale SR/AR-Zuweisungen — turniergebunden persistiert. Er hängt hier,
+    /// weil LAN-Server, Relay-Client und Tauri-Commands denselben Stand
+    /// sehen müssen; die Stammliste selbst bleibt BTPs (R2).
+    officials: crate::tablet::officials::OfficialsStore,
+    /// Ausnahmeliste der automatischen Feldvergabe (Spec
+    /// `feldvergabe-ausnahme`, Muster ADR 0022): Match-IDs, die die
+    /// Turnierleitung von `sync.rs::auto_assign` ausgenommen hat —
+    /// turniergebunden persistiert, kein Personendatum. Er hängt hier aus
+    /// demselben Grund wie `officials`: TL-Web-Actions und Tauri-Commands
+    /// müssen denselben Stand sehen.
+    auto_assign_exclusions: crate::tablet::exclusion::AutoAssignExclusionStore,
+    /// Manuelle Spielreihenfolge je Halle (Spec
+    /// `spielliste-manuelle-reihenfolge`, ADR 0023): Match-IDs im
+    /// Präfix-Block ihrer Halle, turniergebunden persistiert. Er hängt hier
+    /// aus demselben Grund wie `officials`/`auto_assign_exclusions`: TL-Web
+    /// und Desktop müssen denselben Stand sehen; die BTP-Reihenfolge selbst
+    /// bleibt unangetastet (R2).
+    queue_order: crate::tablet::queue_order::QueueOrderStore,
+    /// Spielzeiten-Messung je Match (Spec `spielzeiten-prognose`, ADR 0027):
+    /// erste Feldzuweisung, erster Punkt, Spielende — turniergebunden
+    /// persistiert (`match-times.json`). Er hängt hier, weil Sync-Loop,
+    /// Ergebnis-Pfade (LAN/Cloud/TL-Web/Desktop) und die TL-Anzeige
+    /// denselben Stand sehen müssen; `on_court_since` bleibt reiner
+    /// RAM-Zubringer für den Aufruf-Timer.
+    match_times: crate::tablet::match_times::MatchTimesStore,
+    /// Automatisch vorverteilte Hallen (Spec `hallen-vorverteilung`,
+    /// ADR 0029): turniergebunden persistiert (`auto-halls.json`). Hier,
+    /// weil Sync-Loop (verteilt), TL-Web (Badge, Räumen) und die Kaskade
+    /// denselben Stand sehen müssen.
+    auto_halls: crate::tablet::hall_assign::AutoHallStore,
+    /// Match-ID → zuletzt publizierte Startzeit-Prognose (Unix-ms) — reines
+    /// Diagnose-Gedächtnis für den Prognose/Wirklichkeit-Vergleich (E12),
+    /// gepflegt von `tl::build_state_limited`.
+    predicted_starts: RwLock<HashMap<i64, u64>>,
+    /// (Messwert-Generation, Statistik): Cache für `cached_time_stats` —
+    /// neu gerechnet nur, wenn sich am Zeiten-Store etwas geändert hat.
+    time_stats_cache: Mutex<Option<(u64, std::sync::Arc<crate::tablet::predict::TimeStats>)>>,
+    /// Letzter Check-In-Klassenstand von badhub fürs TL-Panel
+    /// „Anfangszeiten" (Feldtest 17.08.2026) — **ohne** Spielerlisten, die
+    /// streift der Sync-Zyklus vor dem Ablegen ab (Datensparsamkeit; der
+    /// TL-Zustand zeigt Zeitplan und Zähler, nie Namen). Reiner
+    /// RAM-Zwischenstand, bewusst nicht persistiert — die
+    /// „kein Cache"-Regel des Check-Ins (AK-C13) betrifft Gespeichertes.
+    /// `None` = Check-In nicht eingerichtet oder von badhub abgelehnt →
+    /// die TL-Seite zeigt das Panel gar nicht. Der [`std::time::Instant`]
+    /// ist der Abrufzeitpunkt — daraus leitet `tl::build_state` die
+    /// Stale-Marke ab (ein Offline-Aussetzer lässt den Stand bewusst
+    /// stehen, aber nicht unmarkiert, Review 17.08.2026).
+    checkin_classes: RwLock<
+        Option<(
+            std::time::Instant,
+            Vec<crate::badhub::checkin_state::CheckinClass>,
+        )>,
+    >,
     /// Match-ID → Halle, die die Turnierleitung diesem Spiel **von Hand**
     /// gegeben hat.
     ///
@@ -514,9 +631,84 @@ pub struct TabletState {
     /// (`overview.html`) will Signale ALLER Felder. Jeder `notify_monitor`
     /// weckt zusätzlich diese Liste.
     monitor_subs_all: RwLock<Vec<MonitorNudgeTx>>,
+    /// TL-Push-Abonnenten (`/tl-ws`, Spec tl-web-push): bekommen bei jeder
+    /// neuen TL-Revision den winzigen Anstoß `{"rev":n}` — nie Daten, die
+    /// holt die Seite über ihren bestehenden Poll-Pfad (eine Wahrheit für
+    /// Auth/ETag/Kürzung, Muster ADR 0016).
+    tl_subs: RwLock<Vec<MonitorNudgeTx>>,
+    /// Antwort-Cache des TL-Erkennungstakts (Spec tl-web-push): der
+    /// Sekundentakt baut den LAN-Zustand EINMAL zentral; die
+    /// `GET /tl/api/state`-Anfragen aller Geräte bedienen sich hier statt
+    /// je Anfrage Snapshot zu klonen und zweimal zu serialisieren. Reiner
+    /// Beschleuniger, keine Wahrheit — ist er kalt oder abgestanden,
+    /// rechnet der Handler wie eh und je selbst.
+    tl_state_cache: RwLock<Option<TlStateCache>>,
+    /// Wann zuletzt ein TL-Gerät den Zustand abgerufen hat (Unix-ms) —
+    /// zusammen mit `tl_subs` die Antwort auf „sieht überhaupt jemand
+    /// zu?". `0` = noch nie.
+    tl_last_request_ms: AtomicU64,
     /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
     /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
     monitor_seq: RwLock<HashMap<i64, u64>>,
+    /// Zuletzt an die Anzeigen gemeldete Belegung je Feld: CourtID →
+    /// (Match-ID, Satzstand aus BTP). Grundlage des Zuweisungs-Nudges (Spec
+    /// monitor-livestand-push, S3).
+    ///
+    /// Warum der Satzstand mit hineingehört, obwohl die Zuweisung schon an
+    /// der Match-ID hängt: Trägt jemand in BTP von Hand einen Stand ein,
+    /// ändert sich nur er — ohne diesen Vergleich blieb der Sprung für die
+    /// Anzeigen still (das zweite offene A1-TODO). Ein Punkt **vom Tablet**
+    /// steht hier nie drin: `set_snapshot` legt den rohen BTP-Stand ab,
+    /// `apply_tablet_scores` arbeitet danach auf einer eigenen Kopie.
+    monitor_belegung: RwLock<HashMap<i64, CourtBelegung>>,
+    /// Steht ein Schreibvorgang der `live-scores.json` aus (Spec
+    /// monitor-livestand-push, S2)? Gesetzt von jedem Punkt, geleert vom
+    /// Flush. Ein `AtomicBool` genügt: Es gibt nur einen Zustand („es hat
+    /// sich etwas geändert"), und die Daten selbst liegen ohnehin in
+    /// `courts`.
+    scores_dirty: AtomicBool,
+    /// Fingerabdruck des zuletzt **geschriebenen** Standes. Verhindert, dass
+    /// ein Flush eine inhaltsgleiche Datei erneut schreibt — bei 20 ms je
+    /// Schreibvorgang (gemessen in S0) lohnt sich der Hash.
+    scores_fingerprint: AtomicU64,
+    /// Revision des Anzeige-Zustands für den `/health`-Antwortcache (Spec
+    /// monitor-livestand-push, S1). Steigt bei jedem Ereignis, das die
+    /// Übersicht verändern kann: Nudge, neuer BTP-Schnappschuss,
+    /// Config-Schreibvorgang.
+    ///
+    /// Bewusst **kein** Fingerabdruck wie bei `tl_state_rev`: Diese Zahl
+    /// muss nur „hat sich etwas geändert" beantworten, und sie wird auf dem
+    /// heißesten Pfad gelesen. Ein zu häufiges Hochzählen kostet einen
+    /// überflüssigen Neubau — ein zu seltenes zeigte einen alten Stand.
+    /// Deshalb im Zweifel hochzählen, plus die Hart-TTL im Handler.
+    overview_rev: AtomicU64,
+    /// Die zuletzt gebaute Feld-Liste als fertiges JSON (Spec
+    /// monitor-livestand-push, S1). Reiner **Beschleuniger, keine
+    /// Wahrheit**: Ist er kalt oder abgestanden, baut der Handler direkt,
+    /// genau wie vorher.
+    overview_cache: RwLock<Option<OverviewCache>>,
+    /// Ein-Feld-Ausschnitte zur aktuellen Übersicht (Spec
+    /// monitor-livestand-push, S7) — faul gefüllt, siehe [`FeldCache`].
+    feld_cache: RwLock<Option<FeldCache>>,
+    /// Wie oft die Ausschnitte gebaut wurden. Nur Messung: Der Test hält
+    /// damit fest, dass fünf schmale Abrufe **einen** Schnitt kosten.
+    feld_schnitte: AtomicU64,
+    /// Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
+    /// Reine Messgrößen — sie beeinflussen nichts, sie beschreiben nur, was
+    /// die Anzeigen kosten. Ohne diese Vorher-Zahlen wird laut Spec keine
+    /// der folgenden Etappen begonnen.
+    perf: perf::PerfCounters,
+}
+
+/// Der Monitor-Nudge auf der Wire: `{"court":<id>,"seq":<n>}` (A1, ADR 0016).
+/// Geteilter Typ für Erzeuger ([`TabletState::notify_monitor`]) und
+/// Verbraucher (LAN-Monitor-WS reicht den String 1:1 durch; der
+/// Relay-Client parst ihn für den Score-Spiegel) — Producer und Consumer
+/// können so nicht stillschweigend auseinanderlaufen.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct MonitorNudge {
+    pub court: i64,
+    pub seq: u64,
 }
 
 /// Sende-Ende eines Monitor-Nudge-Kanals (A1, ADR 0016). Trägt den fertig
@@ -524,6 +716,109 @@ pub struct TabletState {
 /// reicht ihn 1:1 auf seinen Socket. Unbounded, weil `notify_monitor` NIE
 /// blockieren darf (es läuft unter dem `record_score`-Lock).
 pub type MonitorNudgeTx = tokio::sync::mpsc::UnboundedSender<String>;
+
+/// Streicht aus einem Tablet-Stand die beiden schweren Wiedergabe-Felder
+/// (`history`, `rallyLog`) — alles Übrige bleibt.
+///
+/// **Bewusst eine Streichliste, keine Positivliste:** Welche Felder eine
+/// Anzeige liest, wächst mit jedem Feature (Aufschlag, Pause, Aufgabe,
+/// Startzeit …). Eine Positivliste hätte dem nächsten neuen Feld
+/// stillschweigend den Boden weggezogen; hier fällt nur weg, was
+/// nachweislich niemand anzeigt. Unparsbares bleibt unverändert — lieber
+/// zu viel schicken als einen Stand verlieren.
+fn schlanker_anzeige_stand(state: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(state) else {
+        return state.to_string();
+    };
+    let Some(obj) = v.as_object_mut() else {
+        return state.to_string();
+    };
+    obj.remove("history");
+    obj.remove("rallyLog");
+    serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
+}
+
+/// Belegung eines Felds, wie die Anzeigen sie sehen: Match-ID plus
+/// Satzstand aus BTP (Spec monitor-livestand-push, S3).
+type CourtBelegung = (i64, Vec<(i64, i64)>);
+
+/// Ein Eintrag des `/health`-Antwortcaches (Spec monitor-livestand-push, S1).
+/// Gehalten wird **nur die Feld-Liste**, nicht die ganze Antwort: Der
+/// Umschlag trägt `serverNowMs` und ist bei jedem Abruf ein anderer.
+#[derive(Debug, Clone)]
+pub struct OverviewCache {
+    pub rev: u64,
+    pub etag: String,
+    pub courts_json: String,
+    /// Ordnungszahlen je Feld als fertiges JSON-Objekt (Spec
+    /// monitor-livestand-push, S4). Gehören zum **selben Bau** wie
+    /// `courts_json` — sonst könnte eine gecachte Liste mit frisch gelesenen
+    /// Zahlen ausgeliefert werden, und die wären neuer als der Inhalt.
+    /// Fließen bewusst **nicht** in `etag` ein (siehe `monitor_seqs`).
+    pub seqs_json: String,
+    pub gebaut_ms: u64,
+}
+
+/// Die Ein-Feld-Ausschnitte einer Cache-Generation (Spec
+/// monitor-livestand-push, S7).
+///
+/// **Faul gefüllt.** Der Schnitt ersetzt keinen Neubau — er kommt obendrauf,
+/// und heute ruft ihn kein einziger Client. Würde er bei jedem Bau der
+/// Übersicht mitberechnet, zahlte ihn also jeder, ohne dass ihn jemand
+/// nutzt. Deshalb entsteht er erst beim ersten schmalen Abruf und gilt dann
+/// für alle weiteren derselben Generation.
+///
+/// Der Schlüssel ist die **geparste** Zahl, nicht der Rohtext: `?court=0101`
+/// und `?court=101` meinen dasselbe Feld, und über den Rohtext ließen sich
+/// beliebig viele Schlüssel erzeugen (Sicherheits-Review 19.08.2026).
+#[derive(Debug, Clone)]
+pub struct FeldCache {
+    /// Zu welchem Bau der vollen Antwort diese Ausschnitte gehören — deren
+    /// **Marke**, nicht deren Revision.
+    ///
+    /// Die Revision allein wäre schwächer als die Quelle: Der Übersichts-Cache
+    /// verlangt gleiche Revision **und** nicht abgelaufene Hart-TTL, und die
+    /// TTL ist das Netz gegen Änderungen, die niemand meldet — `attach_tablet`,
+    /// `detach_tablet` und `record_battery` ändern die Anzeige, ohne die
+    /// Revision zu heben. Der volle Weg richtet sich nach 250 ms von selbst,
+    /// der schmale hinge bei stehender Revision für immer fest
+    /// (Review-Fund 19.08.2026). Die Marke ist ein Inhalts-Hash und deckt
+    /// beides ab; ergab ein TTL-Neubau denselben Inhalt, erspart sie sogar den
+    /// Neuschnitt.
+    pub marke: String,
+    /// CourtID → (Feld-Liste mit einem Eintrag, Ordnungszahl, Marke).
+    pub felder: HashMap<i64, (String, String, String)>,
+    /// Antwort auf jede unbrauchbare Feldnummer — eine leere Liste. Auch sie
+    /// hat eine Marke, damit der Bestätigungs-Pfad für sie genauso arbeitet.
+    pub leer: (String, String, String),
+}
+
+impl Default for FeldCache {
+    /// **Von Hand, nicht abgeleitet.** Der leere Ausschnitt geht unverändert
+    /// in den Antwort-Umschlag; mit abgeleiteten Leerstrings entstünde dort
+    /// `"courts":,` — eine unparsbare Antwort und damit eine tote Anzeige.
+    /// Als abgeleitetes `Default` wäre das ein stiller Fallstrick statt eines
+    /// Compile-Fehlers (Review-Fund 19.08.2026).
+    fn default() -> Self {
+        Self {
+            marke: String::new(),
+            felder: HashMap::new(),
+            leer: ("[]".to_string(), "{}".to_string(), String::new()),
+        }
+    }
+}
+
+/// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
+/// serialisierte Zustands-Antwort samt ETag, wie der LAN-Handler sie
+/// ausliefert. `gebaut_ms` entscheidet über Frische (Handler akzeptiert
+/// nur junge Einträge, sonst rechnet er selbst).
+#[derive(Debug, Clone)]
+pub struct TlStateCache {
+    pub rev: u64,
+    pub etag: String,
+    pub json: String,
+    pub gebaut_ms: u64,
+}
 /// Empfangs-Ende eines Monitor-Nudge-Kanals; der WS-Handler leert es auf
 /// seinen Socket. Fällt die Verbindung weg, wird das `Rx` fallengelassen und
 /// der zugehörige `Tx` beim nächsten `notify_monitor` ausgesiebt.
@@ -553,6 +848,35 @@ pub struct FreetextItem {
     pub text: String,
 }
 
+/// Parteien-Maske der Aufruf-Zählung (siehe `TabletState::call_stages`):
+/// Bit 0 = erste Partei, Bit 1 = zweite Partei.
+///
+/// Bewusst eine Bitmaske statt eines zweiten `HashMap`-Schlüssels wie bei
+/// den Vorbereitungs-Nachrufen (`prep_call_stages`): Dort ist die Stufe je
+/// Partei eigenständig, hier bleibt sie **eine** Zahl je Feld (die Zusage
+/// „alle Geräte zeigen dieselbe Zahl"). Die Maske sagt nur, wer auf dieser
+/// Stufe schon dran war.
+pub const SIDE_TEAM1: u8 = 0b01;
+/// Siehe [`SIDE_TEAM1`].
+pub const SIDE_TEAM2: u8 = 0b10;
+/// Beide Parteien — das bisherige Verhalten eines Aufrufs.
+pub const SIDE_BOTH: u8 = SIDE_TEAM1 | SIDE_TEAM2;
+
+/// Übersetzt die Wire-Partei in die Maske der Aufruf-Zählung. `None` =
+/// beide (neutralste Variante, siehe `TlAction::AnnounceCourtCall`).
+pub fn side_mask(side: Option<relay_proto::PrepCallSide>) -> u8 {
+    match side {
+        Some(relay_proto::PrepCallSide::Team1) => SIDE_TEAM1,
+        Some(relay_proto::PrepCallSide::Team2) => SIDE_TEAM2,
+        Some(relay_proto::PrepCallSide::Both) | None => SIDE_BOTH,
+    }
+}
+
+/// Serde-Default für [`AnnounceJobKind::CourtCall::side`].
+fn both_side() -> relay_proto::PrepCallSide {
+    relay_proto::PrepCallSide::Both
+}
+
 /// Worum es bei einem Ansage-Auftrag geht.
 ///
 /// Bewusst **keine** fertigen Worte: Text, Gong, Stimme und die Aussprache
@@ -571,6 +895,35 @@ pub enum AnnounceJobKind {
         match_id: i64,
         /// Die Stufe, die der Turnier-PC gezählt hat (2 oder 3).
         stage: u8,
+        /// Welche Partei gemeint ist — Vorbild [`AnnounceJobKind::PrepCall`].
+        /// Das Ansage-Gerät nennt dann nur diese Partei, genau wie beim
+        /// Vorbereitungs-Nachruf. Fehlt das Feld (Auftrag aus einer älteren
+        /// Fassung), gilt `Both`.
+        #[serde(default = "both_side")]
+        side: relay_proto::PrepCallSide,
+    },
+    /// Nur die Besetzung eines Felds ansagen (Schiedsrichter,
+    /// Aufschlagrichter) — der manuelle Knopf aus Client und TL-Web. Eine
+    /// nachträgliche Zuweisung sagt nie von selbst an (Spec Nr. 8).
+    Officials {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
+    /// Nachruf für den Zähltafelbediener eines Felds („… bitte als
+    /// Tabletbedienung melden", ADR 0007). Eigene Ansageart statt eines
+    /// vierten Werts an `PrepCall.side`: Es ist ein anderer Satz, ein
+    /// anderer Adressat und ein eigener Zähler — die Spieler-Nachrufzahl
+    /// darf davon nicht hochgezogen werden (Spec `tl-sicht-feinschliff`,
+    /// Punkt 2).
+    ScorekeeperCall {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        /// Damit das Ansage-Gerät verstummt, wenn inzwischen ein anderes
+        /// Spiel auf dem Feld steht — wie beim Feld-Aufruf.
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        /// 1 = erster Nachruf, 2/3 mit Stufenwort davor.
+        stage: u8,
     },
     /// Erneuter Aufruf eines in Vorbereitung gerufenen Spiels.
     PrepCall {
@@ -582,6 +935,21 @@ pub enum AnnounceJobKind {
         /// erführen nie, dass es der letzte vor der kampflosen Wertung war.
         stage: u8,
     },
+    /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+    /// besetztes Feld, auf dem noch kein Punkt gefallen ist. **Kein
+    /// Aufruf:** Sie trägt keine Stufe, und der Host zählt bei ihr keine
+    /// (Spec `tl-sicht-feinschliff`, Punkt 3).
+    StartPlay {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        /// Damit das Ansage-Gerät verstummt, wenn inzwischen ein anderes
+        /// Spiel auf dem Feld steht — wie beim Feld-Aufruf.
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+    /// Auffang für Ansagearten, die dieser Stand noch nicht kennt.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Ein Ansage-Auftrag für die Geräte einer Halle.
@@ -598,6 +966,58 @@ pub struct AnnounceJob {
     pub created_at_ms: u64,
     #[serde(flatten)]
     pub kind: AnnounceJobKind,
+}
+
+/// Ansage-Aufträge aus einer HTTP-Antwort lesen, **ohne** an einem einzelnen
+/// Eintrag die ganze Charge zu verlieren.
+///
+/// Der Fall ist real: Im Auto-Update-Fenster steht ein Master mit neuerem
+/// Stand neben einem Ansage-Slave mit älterem. Ein typisiertes Lesen der
+/// **ganzen Liste** scheiterte dann an einem einzigen Eintrag — die zweite
+/// Halle bliebe 60 Sekunden stumm, auch für ganz normale Aufrufe.
+///
+/// Zwei Fehlerarten, und sie brauchen **zwei** Vorkehrungen:
+///
+/// 1. **Unbekannte Ansageart** (neuer `kind`-Wert) — fängt
+///    [`AnnounceJobKind::Unknown`] per `#[serde(other)]`.
+/// 2. **Bekannte Ansageart mit verändertem Rumpf** (ein neues Pflichtfeld,
+///    ein Enum-Wert, den dieser Stand nicht kennt) — dagegen hilft
+///    `#[serde(other)]` **nicht**, es greift nur beim Tag. Deshalb wird die
+///    Liste hier Element für Element ausgewertet und ein unlesbarer Eintrag
+///    einzeln verworfen. Genau so ist `CourtCall.side` einmal dazugekommen;
+///    es überlebte nur, weil jemand an einen Serde-Default gedacht hat —
+///    darauf soll sich der Schutz nicht verlassen müssen (Review
+///    18.08.2026).
+///
+/// Was übersprungen wurde, steht im Protokoll: Am Turniertag ist „die
+/// zweite Halle ruft nicht" sonst ein Symptom ohne jede Spur.
+pub fn announce_jobs_aus_json(json: &str) -> Vec<AnnounceJob> {
+    let roh: Vec<serde_json::Value> = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(e) => {
+            // Abgeschnittene Antwort, HTML-Fehlerseite des Masters: Hier ist
+            // nichts zu retten, aber es darf nicht lautlos passieren.
+            tracing::warn!(
+                "Ansage-Aufträge nicht lesbar ({e}) — Anfang der Antwort: {:.120}",
+                json
+            );
+            return Vec::new();
+        }
+    };
+    let gesamt = roh.len();
+    let jobs: Vec<AnnounceJob> = roh
+        .into_iter()
+        .filter_map(|wert| serde_json::from_value::<AnnounceJob>(wert).ok())
+        .filter(|job| job.kind != AnnounceJobKind::Unknown)
+        .collect();
+    if jobs.len() < gesamt {
+        tracing::info!(
+            "{} von {gesamt} Ansage-Aufträgen übersprungen (unbekannt oder unlesbar) \
+             — vermutlich ein Turnier-PC mit neuerem Stand",
+            gesamt - jobs.len()
+        );
+    }
+    jobs
 }
 
 /// Nach dieser Zeit wird ein Auftrag nicht mehr gesprochen.
@@ -661,6 +1081,11 @@ struct PersistedMatchUpdate {
     free_court_id: Option<i64>,
     player_ids: Vec<i64>,
     end_ts_ms: Option<u64>,
+    /// Schiedsrichter-Besetzung (Live-Befund 14.08.2026, siehe
+    /// `MatchUpdate::officials`). `#[serde(default)]`, damit eine vor diesem
+    /// Feld persistierte Queue-Datei beim App-Neustart weiter lesbar bleibt.
+    #[serde(default)]
+    officials: Option<(i64, i64)>,
 }
 
 impl From<&crate::btp::proto::MatchUpdate> for PersistedMatchUpdate {
@@ -676,6 +1101,7 @@ impl From<&crate::btp::proto::MatchUpdate> for PersistedMatchUpdate {
             free_court_id: u.free_court_id,
             player_ids: u.player_ids.clone(),
             end_ts_ms: u.end_ts_ms,
+            officials: u.officials,
         }
     }
 }
@@ -693,6 +1119,7 @@ impl From<PersistedMatchUpdate> for crate::btp::proto::MatchUpdate {
             free_court_id: p.free_court_id,
             player_ids: p.player_ids,
             end_ts_ms: p.end_ts_ms,
+            officials: p.officials,
         }
     }
 }
@@ -721,6 +1148,24 @@ impl TabletState {
         // Punktverlauf folgt dem Turnier des Snapshots (öffnet/lädt bei
         // Wechsel die zugehörige Datei) — ein leerer Name ändert nichts.
         self.timeline.set_tournament(&snapshot.tournament_name);
+        // Schiedsrichter-Roster ebenso (ADR 0022) — und danach die
+        // BTP-Officials-Liste in die Rotationsreihenfolge aufnehmen: neue
+        // hinten dran, bekannte auf ihrem Platz. Reihenfolge der beiden
+        // Aufrufe zählt: erst binden/verwerfen, dann füllen.
+        self.officials.set_tournament(&snapshot.tournament_name);
+        let official_ids: Vec<i64> = snapshot.officials.iter().map(|o| o.id).collect();
+        self.officials.sync_roster(&official_ids);
+        // Ausnahmeliste der Auto-Vergabe ebenso turniergebunden (Muster
+        // ADR 0022, Spec `feldvergabe-ausnahme`).
+        self.auto_assign_exclusions
+            .set_tournament(&snapshot.tournament_name);
+        // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
+        self.queue_order.set_tournament(&snapshot.tournament_name);
+        // Spielzeiten-Messung ebenso turniergebunden (Spec
+        // `spielzeiten-prognose`, Muster ADR 0022).
+        self.match_times.set_tournament(&snapshot.tournament_name);
+        // Auto-Hallen ebenso turniergebunden (Spec `hallen-vorverteilung`).
+        self.auto_halls.set_tournament(&snapshot.tournament_name);
         // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
         // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
         *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
@@ -734,13 +1179,406 @@ impl TabletState {
         {
             self.load_btp_retry();
         }
+        // S3 (Spec monitor-livestand-push): Belegung je Feld festhalten, bevor
+        // der Snapshot verschoben wird — geweckt wird gleich danach.
+        let belegung: HashMap<i64, CourtBelegung> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| m.court_id.map(|cid| (cid, (m.id, m.sets.clone()))))
+            .collect();
         *self.snapshot.write().unwrap() = Some(snapshot);
+        // Anzeigen der Felder wecken, deren Belegung sich geändert hat —
+        // Zuweisung, Räumung, Feldwechsel und der in BTP von Hand
+        // eingetragene Satzstand. **Nach** dem Ablegen: Die geweckte Anzeige
+        // holt sofort und muss den neuen Stand sehen.
+        self.nudge_belegungs_wechsel(belegung);
+        // S1 (Spec monitor-livestand-push): Ein neuer BTP-Stand kann jedes
+        // Feld verändern — Zuweisung, Räumung, Ergebnis, Satzstand. Der
+        // Antwortcache der Übersicht ist damit in jedem Fall überholt.
+        //
+        // **Nach** dem Ablegen des Snapshots, nicht davor: Ein `/health`,
+        // das dazwischen fiele, läse schon die neue Revision, baute aber
+        // noch aus dem alten Stand — und legte ihn unter der neuen Revision
+        // ab. Bis zum nächsten Sync-Zyklus lieferte der Server dann den
+        // alten Stand, ETag-Abrufer bekämen sogar „nichts Neues"
+        // (Review-Fund 19.08.2026; `notify_monitor` macht es ebenso: erst
+        // schreiben, dann melden).
+        //
+        // Bewusst unbedingt und ohne Vergleich: Ein übersehener Unterschied
+        // wäre ein falscher Stand auf allen Anzeigen, ein überflüssiger
+        // Neubau kostet eine Millisekunde.
+        self.bump_overview_rev();
     }
 
     /// Der Punktverlauf-Speicher (geteilt von LAN-Server, Relay-Client
     /// und Tauri-Commands).
     pub fn timeline_store(&self) -> &crate::tablet::timeline::TimelineStore {
         &self.timeline
+    }
+
+    /// Der Schiedsrichter-Roster (Spec `schiedsrichter-management`).
+    pub fn officials_store(&self) -> &crate::tablet::officials::OfficialsStore {
+        &self.officials
+    }
+
+    /// Ist dieses Match gerade von der automatischen Feldvergabe ausgenommen
+    /// (Spec `feldvergabe-ausnahme`)? Aufrufer bleiben `auto_assign`
+    /// (sync.rs) und beide Anzeigen (TL-Web-Warteliste,
+    /// Desktop-Kandidatenliste) — nie der Store direkt, damit es nur diese
+    /// eine Prüfung gibt.
+    pub fn auto_assign_excluded(&self, match_id: i64) -> bool {
+        self.auto_assign_exclusions.is_excluded(match_id)
+    }
+
+    /// Ausnahme setzen oder zurücknehmen — Ziel sowohl des TL-Web-Actions-
+    /// Pfads (`tl.rs`) als auch des Desktop-Commands (`commands.rs`), beide
+    /// auf demselben Speicher.
+    pub fn set_auto_assign_excluded(&self, match_id: i64, excluded: bool) {
+        self.auto_assign_exclusions.set_excluded(match_id, excluded);
+    }
+
+    /// Aufräumen bei Spielende (aus `sync.rs::reconcile_auto_assign_exclusions`):
+    /// entfernt jede Ausnahme, deren Match nicht mehr in `keep` steht.
+    pub fn retain_auto_assign_exclusions(&self, keep: &std::collections::HashSet<i64>) {
+        self.auto_assign_exclusions.retain(keep);
+    }
+
+    /// Der Speicher der manuellen Spielreihenfolge (Spec
+    /// `spielliste-manuelle-reihenfolge`) — geteilt von TL-Web-Actions,
+    /// Tauri-Commands und `sync.rs`.
+    pub fn queue_order_store(&self) -> &crate::tablet::queue_order::QueueOrderStore {
+        &self.queue_order
+    }
+
+    /// Ein noch nicht gerufenes Spiel vor ein anderes ziehen (Spec
+    /// `spielliste-manuelle-reihenfolge`) — **geteilter Einstiegspunkt**
+    /// für den TL-Web-Dispatch (`tl.rs::apply_state_action`) und den
+    /// Desktop-Command (`commands::queue_reorder`), damit ein Zug auf
+    /// beiden Oberflächen identisch wirkt (Konsistenz-Pflicht, ADR 0023).
+    /// Die Reihenfolge gilt turnierweit, nicht je Halle (ADR 0026).
+    /// Liefert `false`, wenn das Match nicht (mehr) im aktuellen Snapshot
+    /// steht.
+    pub fn queue_reorder(
+        &self,
+        config: &crate::config::AppConfig,
+        match_id: i64,
+        before_match_id: Option<i64>,
+    ) -> bool {
+        let Some(snap) = self.snapshot_clone() else {
+            return false;
+        };
+        if !snap.matches.iter().any(|m| m.id == match_id) {
+            return false;
+        }
+        let manual = self.manual_halls();
+        let auto = self.auto_halls.halls();
+        let called: HashSet<i64> = self
+            .preparation_calls()
+            .iter()
+            .map(|c| c.match_id)
+            .collect();
+        let effective = crate::tablet::assign::ready_queue(
+            config,
+            &snap,
+            &manual,
+            &auto,
+            &called,
+            &self.queue_order,
+        );
+        // TL-Web zeigt nur die ersten `QUEUE_LIMIT` Spiele
+        // (`tl::build_state_limited`) — der neue Präfix darf serverseitig nie
+        // mehr Spiele umfassen, als die ziehende Oberfläche überhaupt zeigen
+        // konnte. Sonst zöge ein Zug ans (dort unsichtbare) Ende der vollen
+        // Liste Spiele in den Präfix, die auf TL-Web niemand gesehen hat
+        // (Code-Review-Fund 14.08.2026). Das gezogene und das Zielspiel
+        // selbst bleiben immer erreichbar — auch wenn sie (nur vom
+        // unbegrenzten Desktop-Weg aus möglich) jenseits der Grenze liegen.
+        let visible = [
+            Some(crate::tablet::tl::QUEUE_LIMIT),
+            effective
+                .iter()
+                .position(|id| *id == match_id)
+                .map(|p| p + 1),
+            before_match_id
+                .and_then(|b| effective.iter().position(|id| *id == b))
+                .map(|p| p + 1),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(effective.len())
+        .min(effective.len());
+        self.queue_order
+            .reorder(&effective[..visible], match_id, before_match_id);
+        true
+    }
+
+    /// Die manuelle Reihenfolge auf einmal verwerfen
+    /// (globaler Reset-Knopf, Spec `spielliste-manuelle-reihenfolge`).
+    pub fn queue_order_reset(&self) {
+        self.queue_order.reset_all();
+    }
+
+    /// Ablage-Datei der Auto-Vergabe-Ausnahmeliste setzen (beim App-Start).
+    pub fn set_auto_assign_exclusions_path(&self, path: std::path::PathBuf) {
+        self.auto_assign_exclusions.set_path(path);
+    }
+
+    /// Ablage-Datei der manuellen Spielreihenfolge setzen (beim App-Start).
+    pub fn set_queue_order_path(&self, path: std::path::PathBuf) {
+        self.queue_order.set_path(path);
+    }
+
+    /// Der Spielzeiten-Speicher (Spec `spielzeiten-prognose`) — geteilt von
+    /// Sync-Loop, Ergebnis-Pfaden und TL-Web.
+    pub fn match_times_store(&self) -> &crate::tablet::match_times::MatchTimesStore {
+        &self.match_times
+    }
+
+    /// Ablage-Datei der Spielzeiten-Messung setzen (beim App-Start).
+    pub fn set_match_times_path(&self, path: std::path::PathBuf) {
+        self.match_times.set_path(path);
+    }
+
+    /// Der Speicher der automatisch vorverteilten Hallen (Spec
+    /// `hallen-vorverteilung`) — geteilt von Sync-Loop, TL-Web und Kaskade.
+    pub fn auto_hall_store(&self) -> &crate::tablet::hall_assign::AutoHallStore {
+        &self.auto_halls
+    }
+
+    /// Ablage-Datei der Auto-Hallen setzen (beim App-Start).
+    pub fn set_auto_halls_path(&self, path: std::path::PathBuf) {
+        self.auto_halls.set_path(path);
+    }
+
+    /// Zuletzt publizierte Startzeit-Prognosen merken (Match-ID → Unix-ms) —
+    /// nur fürs Diagnose-Log: Beim echten Aufruf vergleicht der Sync-Loop
+    /// Prognose und Wirklichkeit (Erfolgsmaß E12, ±10 min / 70 %).
+    ///
+    /// **Gemergt statt ersetzt** (Review 2026-08-16, F6): Die Relay-
+    /// Größenleiter baut denselben Zustand mit kleineren Wartelisten —
+    /// ein Ersetzen ließe nur die Matches der kleinsten Stufe übrig und
+    /// die Prognose-Kontrolle bliebe für alle dahinter stumm. Aufgeräumt
+    /// wird über [`Self::take_predicted_start`] (geloggt) und
+    /// [`Self::retain_predicted_starts`] (aus dem Turnier verschwunden).
+    pub(crate) fn merge_predicted_starts(&self, map: std::collections::HashMap<i64, u64>) {
+        self.predicted_starts.write().unwrap().extend(map);
+    }
+
+    /// Alle bekannten Prognosen als Kopie — für den `sched`-Versand an badhub.
+    ///
+    /// Bewusst eine Momentaufnahme statt eines Lock-Durchgriffs: der Aufrufer
+    /// baut daraus eine Nachricht und soll dafür nicht den Schreib-Lock der
+    /// Prognose-Berechnung blockieren.
+    pub(crate) fn predicted_starts_snapshot(&self) -> std::collections::HashMap<i64, u64> {
+        self.predicted_starts.read().unwrap().clone()
+    }
+
+    /// Zuletzt publizierte Prognose eines Matches — nur die Tests lesen
+    /// hier; die Produktion konsumiert über [`Self::take_predicted_start`].
+    #[cfg(test)]
+    pub(crate) fn predicted_start_ms(&self, match_id: i64) -> Option<u64> {
+        self.predicted_starts
+            .read()
+            .unwrap()
+            .get(&match_id)
+            .copied()
+    }
+
+    /// Prognose eines Matches herausnehmen (genau eine Log-Zeile je
+    /// Aufruf — der Eintrag ist danach verbraucht).
+    pub(crate) fn take_predicted_start(&self, match_id: i64) -> Option<u64> {
+        self.predicted_starts.write().unwrap().remove(&match_id)
+    }
+
+    /// Prognosen von Matches vergessen, die nicht mehr warten (beendet,
+    /// kampflos, aus dem Snapshot verschwunden) — sonst wüchse das
+    /// Gedächtnis über das Turnier hinweg.
+    pub(crate) fn retain_predicted_starts(&self, keep: &std::collections::HashSet<i64>) {
+        self.predicted_starts
+            .write()
+            .unwrap()
+            .retain(|id, _| keep.contains(id));
+    }
+
+    /// Endzeitpunkt eines Ergebnisses für die BTP-`Duration` (Spec
+    /// `spielzeiten-prognose`, E3): der ursprüngliche Ende-Stempel, falls
+    /// vorhanden (eine Korrektur rechnet nicht mit „jetzt"), sonst `now`.
+    /// **Der** gemeinsame Weg aller Ergebnis-Pfade — Gegenstück zu
+    /// [`Self::brutto_start_ms`] (Review 2026-08-16, F9).
+    pub(crate) fn result_end_ms(&self, match_id: i64, now: u64) -> u64 {
+        self.match_times
+            .entry(match_id)
+            .and_then(|e| e.finished_ms)
+            .unwrap_or(now)
+    }
+
+    /// Median-Statistik der Spielzeiten — je Messwert-Generation genau
+    /// einmal gerechnet (Review 2026-08-16, F8): Der TL-Zustand wird alle
+    /// ~2 s je Gerät gebaut (Relay-Leiter: mehrfach je Push); ohne Cache
+    /// klonte und sortierte jeder Aufruf die komplette Zeiten-Map, obwohl
+    /// sich Messwerte nur beim Stempeln ändern.
+    pub(crate) fn cached_time_stats(&self) -> std::sync::Arc<crate::tablet::predict::TimeStats> {
+        let generation = self.match_times.generation();
+        let mut cache = self.time_stats_cache.lock().unwrap();
+        if let Some((g, stats)) = cache.as_ref() {
+            if *g == generation {
+                return stats.clone();
+            }
+        }
+        let stats = std::sync::Arc::new(crate::tablet::predict::time_stats(
+            &self.match_times.entries(),
+        ));
+        *cache = Some((generation, stats.clone()));
+        stats
+    }
+
+    /// Check-In-Klassenstand fürs „Anfangszeiten"-Panel ablegen (Lese-Takt)
+    /// bzw. räumen (`None`, wenn der Check-In aus ist oder badhub ablehnt).
+    /// Stempelt den Abrufzeitpunkt für die Stale-Marke.
+    pub fn set_checkin_classes(
+        &self,
+        classes: Option<Vec<crate::badhub::checkin_state::CheckinClass>>,
+    ) {
+        if classes.is_none() && self.checkin_classes.read().unwrap().is_none() {
+            // Nichts zu räumen — kein Write-Lock im 5-Sekunden-Takt, nur
+            // weil der Check-In gar nicht eingerichtet ist (Review
+            // 17.08.2026).
+            return;
+        }
+        *self.checkin_classes.write().unwrap() = classes.map(|c| (std::time::Instant::now(), c));
+    }
+
+    /// Der abgelegte Check-In-Klassenstand samt Abrufzeitpunkt — `None`,
+    /// solange keiner da ist.
+    pub fn checkin_classes(
+        &self,
+    ) -> Option<(
+        std::time::Instant,
+        Vec<crate::badhub::checkin_state::CheckinClass>,
+    )> {
+        self.checkin_classes.read().unwrap().clone()
+    }
+
+    /// Bruttostart eines Matches für die BTP-`Duration` (Spec
+    /// `spielzeiten-prognose`, E1): der persistierte Erst-Stempel, mit
+    /// `on_court_since` (RAM) als Zubringer-Fallback, solange der Sync-Poll
+    /// noch nicht gestempelt hat. **Der** gemeinsame Weg aller
+    /// Ergebnis-Pfade — vier verschiedene Schreibweisen derselben Kaskade
+    /// wären der sichere Weg, eine davon zu vergessen.
+    pub(crate) fn brutto_start_ms(&self, match_id: i64, court_id: Option<i64>) -> Option<u64> {
+        self.match_times
+            .first_assigned_ms(match_id)
+            .or_else(|| court_id.and_then(|cid| self.on_court_since_ms(cid, match_id)))
+    }
+
+    /// [`Self::brutto_start_ms`] plus Erster-Punkt-Stempel in EINEM
+    /// Store-Zugriff — für den TL-State-Bau, der beide je belegtem Feld
+    /// alle ~2 s liest (Review 2026-08-17). Die Fallback-Kaskade des
+    /// Bruttostarts lebt damit weiterhin nur HIER, nicht in tl.rs
+    /// nachbuchstabiert.
+    pub(crate) fn court_time_stamps(
+        &self,
+        match_id: i64,
+        court_id: Option<i64>,
+    ) -> (Option<u64>, Option<u64>) {
+        let (assigned, first_point) = self.match_times.stamps(match_id);
+        let start =
+            assigned.or_else(|| court_id.and_then(|cid| self.on_court_since_ms(cid, match_id)));
+        (start, first_point)
+    }
+
+    /// Die Schiedsrichter-Besetzung, die beim Ruf aufs Feld **mit nach BTP**
+    /// geschrieben werden soll (ADR 0021): `(Official1ID, Official2ID)`,
+    /// `0` = kein Dienst.
+    ///
+    /// `None` heißt „gar nicht anfassen": ohne Schiedsrichter-Betrieb und
+    /// bei einem Spiel, das in BTS Light nie eingeteilt wurde, bleibt der
+    /// Request exakt wie im Bestand.
+    ///
+    /// Hier — und **nur** hier — schlägt die lokale Absicht den BTP-Stand:
+    /// Wer von Hand umteilt oder eine Zuweisung löst, will genau das nach
+    /// BTP schreiben; sonst ließe sich eine einmal geschriebene Besetzung nie
+    /// wieder ändern. Die **Anzeige** folgt weiter der Spec-Regel „BTP
+    /// gewinnt" (`OfficialsStore::effective`) — bestätigt ist erst, was der
+    /// nächste Snapshot zeigt. Ein Dienst, den BTS Light nie angefasst hat,
+    /// wird unverändert mitgeschrieben statt gelöscht.
+    pub fn officials_for_write(&self, m: &BtpMatch) -> Option<(i64, i64)> {
+        if !self.officials.enabled() {
+            return None;
+        }
+        let lokal = self.officials.assignment(m.id);
+        if lokal.sr.is_none() && lokal.ar.is_none() {
+            return None;
+        }
+        Some((
+            lokal.sr.or(m.official1_id).unwrap_or(0),
+            lokal.ar.or(m.official2_id).unwrap_or(0),
+        ))
+    }
+
+    /// Die wirksamen Official-IDs eines Spiels (0 = keiner) — für die
+    /// Bedienung, die eine Person eindeutig treffen muss.
+    pub fn court_official_ids(&self, m: Option<&BtpMatch>) -> (i64, i64) {
+        if !self.officials.enabled() {
+            return (0, 0);
+        }
+        let Some(m) = m else { return (0, 0) };
+        let w = self
+            .officials
+            .effective(m.id, m.official1_id, m.official2_id);
+        (w.sr.unwrap_or(0), w.ar.unwrap_or(0))
+    }
+
+    /// Nur die Namen von SR und AR eines Spiels — die Form, die ins
+    /// [`MatchBrief`](relay_proto::MatchBrief) ans Tablet geht (LAN wie
+    /// Cloud, ferne Halle eingeschlossen). Holt sich den Snapshot selbst,
+    /// weil die Push-Pfade keinen zur Hand haben.
+    pub fn match_officials(&self, m: &BtpMatch) -> (Vec<String>, Vec<String>) {
+        let Some(snap) = self.snapshot_clone() else {
+            return (Vec::new(), Vec::new());
+        };
+        let (sr, ar, _) = self.court_officials(Some(m), &snap);
+        (sr, ar)
+    }
+
+    /// Namen von SR und AR eines Spiels plus Konflikt-Kategorie — die Form,
+    /// die Feldübersicht, TL-State und Tablet gleichermaßen anzeigen.
+    ///
+    /// Ohne SR-Betrieb (`officials.enabled` aus) ist alles leer: Ein Turnier,
+    /// das ohne Schiedsrichter spielt, soll auch dann keinen sehen, wenn in
+    /// BTP zufällig einer am Spiel steht (Spec Nr. 1).
+    pub fn court_officials(
+        &self,
+        m: Option<&BtpMatch>,
+        snap: &BtpSnapshot,
+    ) -> (Vec<String>, Vec<String>, Option<String>) {
+        let leer = (Vec::new(), Vec::new(), None);
+        if !self.officials.enabled() {
+            return leer;
+        }
+        let Some(m) = m else { return leer };
+        let wirksam = self
+            .officials
+            .effective(m.id, m.official1_id, m.official2_id);
+        let name = |id: Option<i64>| -> Vec<String> {
+            id.and_then(|id| snap.official(id))
+                .map(|o| vec![o.display_name()])
+                .unwrap_or_default()
+        };
+        // Konflikt-Warnung: Der Grund bleibt hier, nach außen geht nur die
+        // Kategorie. Beide Dienste werden geprüft, der erste Treffer zählt.
+        let spieler: Vec<crate::btp::model::BtpPlayer> =
+            m.team1.iter().chain(m.team2.iter()).cloned().collect();
+        let warn = [wirksam.sr, wirksam.ar]
+            .into_iter()
+            .flatten()
+            .find_map(|id| {
+                crate::tablet::officials::official_conflict(&self.officials.extra(id), &spieler)
+            })
+            .map(|k| k.label().to_string());
+        (name(wirksam.sr), name(wirksam.ar), warn)
     }
 
     /// Reiht einen fehlgeschlagenen BTP-Ergebnis-Write in die
@@ -995,7 +1833,20 @@ impl TabletState {
     /// gespielt hat (`from_court_id`), sonst den ältesten Wartenden. Idempotent
     /// je (Feld, Match): steht schon ein Bediener für genau dieses Spiel, passiert
     /// nichts. Ist die Schlange leer, bleibt das Feld ohne Bediener.
+    /// Felder, auf denen die Bediener-Vergabe abgeschaltet ist (Spec
+    /// `schiedsrichter-management` Nr. 6 — dort bedient der Schiedsrichter
+    /// selbst), bleiben außen vor und verbrauchen **keinen** Eintrag aus der
+    /// Warteschlange. Ohne Eintrag gilt „aktiv", das Bestandsverhalten.
+    ///
+    /// Der Schalter greift **nur bei eingeschaltetem Schiedsrichter-Betrieb**:
+    /// Seine einzige Bedienstelle liegt in der Schiedsrichter-Oberfläche, und
+    /// die ist ohne das Feature nicht erreichbar. Ohne diese Bedingung bliebe
+    /// ein einmal ausgenommenes Feld nach dem Abschalten für immer ohne
+    /// Bediener, ohne dass es irgendwo zurückzunehmen wäre.
     pub fn assign_scorekeeper_for_court(&self, court_id: i64, match_id: i64) {
+        if self.officials.enabled() && !self.officials.court_switches(court_id).operator {
+            return;
+        }
         {
             let assigned = self.assigned_scorekeeper.read().unwrap();
             if assigned.get(&court_id).map(|(m, _)| *m) == Some(match_id) {
@@ -1026,6 +1877,37 @@ impl TabletState {
         } else {
             (self.scorekeeper(court_id), false)
         }
+    }
+
+    /// Einen Nachruf an die Zähltafelbedienung eines Felds verbuchen und
+    /// die Stufe zurückgeben (1, 2, dann dauerhaft 3).
+    ///
+    /// Gedeckelt wie der Vorbereitungs-Nachruf: Über „Dritter und letzter
+    /// Aufruf" hinaus gibt es kein Sprachbild — und anders als beim
+    /// Spieler-Aufruf auch keinen Grund, weiterzuzählen.
+    pub fn note_scorekeeper_call(&self, court_id: i64, match_id: i64) -> u8 {
+        let mut g = self.scorekeeper_call_stages.write().unwrap();
+        let entry = g.entry(court_id).or_insert((match_id, 0));
+        // Anderes Spiel auf dem Feld: von vorn. Sonst erbte die neue
+        // Paarung die Nachrufe ihres Vorgängers.
+        if entry.0 != match_id {
+            *entry = (match_id, 0);
+        }
+        entry.1 = (entry.1 + 1).min(3);
+        entry.1
+    }
+
+    /// Wie oft die Bedienung dieses Felds für dieses Spiel schon nachgerufen
+    /// wurde (0 = noch nie). Nur für Tests und die Ansage-Stufe — der Wert
+    /// verlässt den Host nicht.
+    pub fn scorekeeper_calls_made(&self, court_id: i64, match_id: i64) -> u8 {
+        self.scorekeeper_call_stages
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .filter(|(id, _)| *id == match_id)
+            .map(|(_, stage)| *stage)
+            .unwrap_or(0)
     }
 
     /// Zugewiesener Zähltafelbediener eines Felds (Namen), falls vorhanden.
@@ -1100,7 +1982,7 @@ impl TabletState {
         self.call_stages
             .write()
             .unwrap()
-            .retain(|court_id, (mid, _)| oncourt.get(court_id) == Some(mid));
+            .retain(|court_id, (mid, _, _)| oncourt.get(court_id) == Some(mid));
     }
 
     /// Zeitpunkt (Unix-ms) des 1. Aufrufs für ein Feld, sofern dort das
@@ -1202,6 +2084,26 @@ impl TabletState {
             .unwrap_or_default()
     }
 
+    /// Die Hallennamen des Turniers (BTP-`Locations`, getrimmt, ohne leere).
+    /// DIE kanonische Hallenliste der Hallen-Farben (Review 2026-08-16):
+    /// Desktop-`paint`, Farb-Picker und TL-Web müssen aus derselben Liste
+    /// auflösen — sonst trüge dieselbe Halle je Oberfläche verschiedene
+    /// Auto-Farben, sobald eine Location ohne Felder existiert.
+    pub fn hall_names(&self) -> Vec<String> {
+        self.snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|s| {
+                s.locations
+                    .iter()
+                    .map(|l| l.name.trim().to_string())
+                    .filter(|n| !n.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Das Match, das BTP gerade diesem Feld (per CourtID) zugewiesen hat.
     pub fn match_for_court(&self, court_id: i64) -> Option<BtpMatch> {
         let guard = self.snapshot.read().unwrap();
@@ -1222,6 +2124,29 @@ impl TabletState {
             .iter()
             .find(|m| m.id == match_id)
             .map(|m| (m.draw_id, m.planning_id))
+    }
+
+    /// Die Schiedsrichter-Besetzung, die ein Ergebnis-`SENDUPDATE` für dieses
+    /// Match reassertieren soll (Live-Befund 14.08.2026, siehe
+    /// `MatchUpdate::officials`): `None`, wenn ohne Schiedsrichter-Betrieb
+    /// gespielt wird — dann bleibt der Request unverändert zum Bestand.
+    /// Sonst immer `Some((sr, ar))` (`0` = kein Dienst), auch wenn nie
+    /// jemand zugewiesen war — das schreibt explizit „niemand" und ist
+    /// dieselbe Werte-Reassertion wie beim Feld selbst.
+    pub fn officials_for_result(&self, match_id: i64) -> Option<(i64, i64)> {
+        if !self.officials.enabled() {
+            return None;
+        }
+        let (btp_sr, btp_ar) = self
+            .snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .and_then(|s| s.matches.iter().find(|m| m.id == match_id))
+            .map(|m| (m.official1_id, m.official2_id))
+            .unwrap_or((None, None));
+        let wirksam = self.officials.effective(match_id, btp_sr, btp_ar);
+        Some((wirksam.sr.unwrap_or(0), wirksam.ar.unwrap_or(0)))
     }
 
     /// Tablet hat sich für ein Feld verbunden. `match_id` startet auf 0 –
@@ -1272,8 +2197,11 @@ impl TabletState {
             session.match_id = match_id;
             session.sets = sets;
         }
-        // Stand auf Platte sichern, damit ein App-Neustart ihn behält.
-        self.persist_scores();
+        // Nur vormerken (Spec monitor-livestand-push, S2): Der Sekundentakt
+        // im Sync-Loop schreibt. Ein gezählter Punkt ist das häufigste
+        // Ereignis im Turnier und kostete hier gemessene 20 ms Plattenzeit —
+        // synchron, mitten im Tablet-Handler.
+        self.mark_scores_dirty();
         // Niedrig-latente Anzeige (A1, ADR 0016): Court-Monitor + Feld-
         // Übersicht sofort anstoßen, statt auf ihren nächsten Poll zu warten.
         self.notify_monitor(court_id);
@@ -1312,9 +2240,14 @@ impl TabletState {
     /// Aktuellen Live-Stand aller Felder in die Datei schreiben (best effort:
     /// Schreibfehler dürfen das Zählen nie stören). No-op, wenn kein Pfad
     /// gesetzt ist (z. B. in Tests).
-    fn persist_scores(&self) {
+    ///
+    /// Meldet `false`, wenn der Schreibvorgang **fehlgeschlagen** ist —
+    /// [`Self::flush_scores`] merkt die Arbeit dann erneut vor. Ein
+    /// inhaltsgleicher Stand und ein fehlender Pfad gelten als Erfolg: Da
+    /// gibt es nichts nachzuholen.
+    fn persist_scores(&self) -> bool {
         let Some(path) = self.scores_path.read().unwrap().clone() else {
-            return;
+            return true;
         };
         // Schreiber serialisieren: verhindert, dass zwei gleichzeitige
         // record_score den Temp-Pfad oder die Zieldatei gegenseitig zerlegen.
@@ -1336,14 +2269,47 @@ impl TabletState {
                 .collect()
         };
         if let Ok(json) = serde_json::to_string(&data) {
+            // Inhaltsgleiches nicht erneut schreiben (Spec
+            // monitor-livestand-push, S2). Der Sekundentakt fragt sonst einen
+            // ganzen Turniertag lang die Platte, obwohl sich nur zwischen den
+            // Ballwechseln etwas tut — und ein Schreibvorgang kostet gemessene
+            // 20 ms. Der Hash über die fertige Zeichenkette ist dagegen nichts.
+            let abdruck = {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                json.hash(&mut hasher);
+                hasher.finish()
+            };
+            if self.scores_fingerprint.load(Ordering::Relaxed) == abdruck {
+                return true;
+            }
+            let bytes = json.len() as u64;
+            let begonnen = std::time::Instant::now();
             // Atomar schreiben: erst in eine Temp-Datei, dann umbenennen –
             // so liegt nie eine halb geschriebene live-scores.json vor (ein
             // Absturz mitten im Schreiben würde sie sonst korrumpieren).
             let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
+            let geschrieben =
+                std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, &path).is_ok();
+            // **Erst nach dem geglückten Umbenennen vermerken.** Sonst
+            // behauptete der Fingerabdruck nach einem fehlgeschlagenen
+            // Schreibvorgang (volle Platte, Virenscanner auf der Temp-Datei,
+            // Verzeichnis weg), der Inhalt liege auf Platte — und jeder
+            // spätere Flush mit demselben Stand kehrte sofort zurück. Die
+            // Datei bliebe für den Rest des Laufs veraltet, obwohl vorher
+            // jeder Punkt es erneut versucht hätte (Review-Fund 19.08.2026).
+            if geschrieben {
+                self.scores_fingerprint.store(abdruck, Ordering::Relaxed);
             }
+            // Messung (Spec monitor-livestand-push, S0): der Posten, den
+            // diese Etappe entprellt — die Zahl belegt die Wirkung.
+            self.perf
+                .note_persist(begonnen.elapsed().as_nanos() as u64, bytes);
+            return geschrieben;
         }
+        // Unserialisierbar wäre ein Programmfehler, kein vorübergehendes
+        // Hindernis — ein Wiederholen brächte nichts.
+        true
     }
 
     /// Akkustand des Tablets an einem Feld übernehmen.
@@ -1445,13 +2411,32 @@ impl TabletState {
     /// unbounded, `send` kehrt sofort zurück; das Halten des `record_score`-
     /// Locks ist damit unkritisch.
     pub fn notify_monitor(&self, court_id: i64) {
+        // Messung (S0): gezählt wird der ANSTOSS, nicht der Fan-out — die
+        // Zahl beantwortet „wie oft wird geweckt", die Frage nach „wie viele
+        // Anzeigen holen daraufhin was" beantworten die `health_*`-Zähler.
+        self.perf.note_nudge();
+        // S1: Ein Nudge heißt „dieses Feld hat sich geändert" — der
+        // Antwortcache der Übersicht ist damit überholt. MUSS vor dem
+        // Verschicken stehen: Die geweckte Anzeige holt sofort, und sie darf
+        // nicht den Stand bekommen, der den Nudge gerade ausgelöst hat.
+        self.bump_overview_rev();
         let seq = {
             let mut seqs = self.monitor_seq.write().unwrap();
-            let s = seqs.entry(court_id).or_insert(0);
+            // Erstbelegung mit der Uhrzeit statt mit 0 (Spec
+            // monitor-livestand-push, S4; Muster `set_monitor_command`): Die
+            // Zahl bleibt so über Prozess-Neustarts monoton. Sonst begänne
+            // sie nach jedem Neustart wieder klein, und eine Anzeige mit
+            // gemerktem `seq` verwürfe jeden neuen Stand als veraltet, bis
+            // der Zähler den alten Wert überholt hätte.
+            let s = seqs.entry(court_id).or_insert_with(now_ms);
             *s += 1;
             *s
         };
-        let nudge = serde_json::json!({ "court": court_id, "seq": seq }).to_string();
+        let nudge = serde_json::to_string(&MonitorNudge {
+            court: court_id,
+            seq,
+        })
+        .unwrap_or_default();
         // Feld-spezifische Abonnenten: senden + tote aussieben, leere Liste
         // ganz entfernen (kein Speicher-Leck über die Turnierdauer).
         {
@@ -1468,6 +2453,269 @@ impl TabletState {
             .write()
             .unwrap()
             .retain(|tx| tx.send(nudge.clone()).is_ok());
+    }
+
+    /// Meldet eine TL-Seite als Push-Abonnenten an (`/tl-ws`, Spec
+    /// tl-web-push). `false` = Fan-out-Deckel erreicht — der Aufrufer
+    /// schließt die Verbindung, die Seite fällt still auf ihren Poll
+    /// zurück (Muster [`Self::subscribe_monitor`]).
+    pub fn subscribe_tl(&self, tx: &MonitorNudgeTx) -> bool {
+        let mut subs = self.tl_subs.write().unwrap();
+        if subs.len() >= MAX_TL_PUSH_SUBS {
+            return false;
+        }
+        subs.push(tx.clone());
+        true
+    }
+
+    /// Trägt eine TL-Push-Verbindung wieder aus (Verbindungsende) — per
+    /// `same_channel`, damit nur der eigene Sender verschwindet.
+    pub fn unsubscribe_tl(&self, tx: &MonitorNudgeTx) {
+        self.tl_subs
+            .write()
+            .unwrap()
+            .retain(|t| !t.same_channel(tx));
+    }
+
+    /// Weckt alle TL-Push-Abonnenten: `{"rev":n}` — nur die Nummer, nie
+    /// Daten. Tote Sender werden dabei ausgesiebt. Kein `.await`, der
+    /// Kanal ist unbounded (Muster [`Self::notify_monitor`]).
+    pub fn notify_tl(&self, rev: u64) {
+        let nudge = format!("{{\"rev\":{rev}}}");
+        self.tl_subs
+            .write()
+            .unwrap()
+            .retain(|tx| tx.send(nudge.clone()).is_ok());
+    }
+
+    /// Legt die zentral gebaute Zustands-Antwort ab (Erkennungstakt,
+    /// Spec tl-web-push).
+    pub fn set_tl_state_cache(&self, rev: u64, etag: String, json: String, gebaut_ms: u64) {
+        *self.tl_state_cache.write().unwrap() = Some(TlStateCache {
+            rev,
+            etag,
+            json,
+            gebaut_ms,
+        });
+    }
+
+    /// Die zuletzt zentral gebaute Zustands-Antwort — `None`, solange der
+    /// Erkennungstakt noch nichts abgelegt hat.
+    pub fn tl_state_cache(&self) -> Option<TlStateCache> {
+        self.tl_state_cache.read().unwrap().clone()
+    }
+
+    /// Weckt die Anzeigen jedes Felds, dessen Belegung sich gegenüber dem
+    /// letzten Schnappschuss geändert hat (Spec monitor-livestand-push, S3).
+    ///
+    /// Deckt in einem Griff ab, was bisher nur der Poll-Fallback auffing:
+    /// neue Zuweisung, Räumung, Feldwechsel und den in BTP von Hand
+    /// eingetragenen Satzstand. Ein Feld, dessen Belegung gleich geblieben
+    /// ist, wird **nicht** geweckt — sonst weckte jeder BTP-Poll alle
+    /// Anzeigen aller Felder.
+    ///
+    /// Nimmt die fertige Projektion statt des Snapshots: Der Aufrufer bildet
+    /// sie, bevor er den Snapshot ablegt (der wird dabei verschoben), und
+    /// spart so einen Klon des ganzen Turnierstands je Poll.
+    fn nudge_belegungs_wechsel(&self, neu: HashMap<i64, CourtBelegung>) {
+        // Betroffen ist jedes Feld, das in genau einer der beiden Fassungen
+        // steht oder in beiden mit unterschiedlichem Inhalt. Die Liste wird
+        // erst gesammelt und **nach** dem Freigeben des Schreib-Locks
+        // geweckt — `notify_monitor` nimmt selbst Locks (Muster
+        // `record_score`).
+        let betroffen: Vec<i64> = {
+            let alt = self.monitor_belegung.read().unwrap();
+            alt.keys()
+                .chain(neu.keys())
+                .filter(|cid| alt.get(cid) != neu.get(cid))
+                .copied()
+                .collect::<std::collections::BTreeSet<i64>>()
+                .into_iter()
+                .collect()
+        };
+        if betroffen.is_empty() {
+            return;
+        }
+        *self.monitor_belegung.write().unwrap() = neu;
+        for court_id in betroffen {
+            self.notify_monitor(court_id);
+        }
+    }
+
+    /// Meldet, dass sich der Live-Stand geändert hat (Spec
+    /// monitor-livestand-push, S2). Schreibt **nicht** — das tut der
+    /// Sekundentakt oder ein Pfad, der auf Nummer sicher gehen muss.
+    ///
+    /// Bewusst akzeptiert: Stürzt die App zwischen zwei Takten ab, fehlt bis
+    /// zu einer Sekunde auf Platte. Die Tablets sind die Wahrheit und
+    /// stellen den Stand beim Wiederverbinden per `state_sync` her — dafür
+    /// kostet ein gezählter Punkt keine 20 ms Plattenzeit mehr im
+    /// async-Handler.
+    pub fn mark_scores_dirty(&self) {
+        self.scores_dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// Schreibt den Live-Stand, falls seit dem letzten Schreibvorgang etwas
+    /// passiert ist. Synchron: Die kritischen Pfade (Ergebnis, Räumung,
+    /// Stoppen, App-Ende) dürfen erst zurückkehren, wenn die Datei steht.
+    pub fn flush_scores(&self) {
+        // Das Flag wird VOR dem Schreiben geleert: Eine Änderung, die
+        // währenddessen eintrifft, setzt es erneut und wird beim nächsten
+        // Takt geschrieben. Andersherum ginge sie verloren.
+        if !self.scores_dirty.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        // Schlug der Schreibvorgang fehl, bleibt es zu tun. Ohne dieses
+        // Zurücksetzen wäre der Versuch verloren: Das Flag ist leer, der
+        // Fingerabdruck unverändert — der nächste Takt kehrte sofort zurück
+        // und die Datei bliebe für den Rest des Laufs veraltet. Vor der
+        // Entprellung hätte jeder Punkt es erneut versucht
+        // (Review-Fund 19.08.2026).
+        if !self.persist_scores() {
+            self.mark_scores_dirty();
+        }
+    }
+
+    /// Ordnungszahl des Feld-Stands (Spec monitor-livestand-push, S4) —
+    /// dieselbe Zahl, die der letzte Nudge dieses Felds getragen hat.
+    /// `0`, solange das Feld noch nie geweckt wurde.
+    ///
+    /// Die Voll-Antworten (`/health`, `/court/{id}/state`) reichen sie mit,
+    /// damit die Anzeige Push und Abruf zueinander ordnen kann.
+    pub fn monitor_seq_of(&self, court_id: i64) -> u64 {
+        self.monitor_seq
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Alle Ordnungszahlen auf einmal — die Karte, die `/health` neben der
+    /// Feld-Liste ausliefert (Spec monitor-livestand-push, S4).
+    ///
+    /// **Sie steht bewusst NEBEN der Feld-Liste und nicht darin:** Die Marke
+    /// der Antwort ist ein Streuwert über die Feld-Liste, und die Zahlen
+    /// steigen bei jedem Anstoß — auch bei einem, der die Anzeige gar nicht
+    /// verändert (etwa ein Tablet-Abgleich mit unverändertem Anzeige-Stand).
+    /// Steckten sie in der Liste, wechselte die Marke jedes Mal und die
+    /// Bestätigung ohne Nutzdaten aus S1 wäre wirkungslos — auf genau der
+    /// Strecke, die sie entlasten soll (Review-Fund 19.08.2026).
+    pub fn monitor_seqs(&self) -> HashMap<i64, u64> {
+        self.monitor_seq.read().unwrap().clone()
+    }
+
+    /// Aktuelle Revision des Anzeige-Zustands (Spec monitor-livestand-push, S1).
+    pub fn overview_rev(&self) -> u64 {
+        self.overview_rev.load(Ordering::Relaxed)
+    }
+
+    /// Meldet eine Änderung, die die Übersicht betreffen kann.
+    pub fn bump_overview_rev(&self) {
+        self.overview_rev.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Legt die gebaute Feld-Liste samt ihrer Ordnungszahlen als Antwortcache
+    /// ab.
+    pub fn set_overview_cache(
+        &self,
+        rev: u64,
+        etag: String,
+        courts_json: String,
+        seqs_json: String,
+        ms: u64,
+    ) {
+        *self.overview_cache.write().unwrap() = Some(OverviewCache {
+            rev,
+            etag,
+            courts_json,
+            seqs_json,
+            gebaut_ms: ms,
+        });
+    }
+
+    /// Der abgelegte Antwortcache — `None`, solange nichts gebaut wurde.
+    pub fn overview_cache(&self) -> Option<OverviewCache> {
+        self.overview_cache.read().unwrap().clone()
+    }
+
+    /// Der Ausschnitt eines Felds aus der aktuellen Übersicht (Spec
+    /// monitor-livestand-push, S7): `(Feld-Liste, Ordnungszahl, Marke)`.
+    ///
+    /// Gehören die abgelegten Ausschnitte zu **demselben Bau** — erkennbar an
+    /// der Marke der vollen Antwort, einem Inhalts-Hash —, ist das ein
+    /// Nachschlagen; sonst baut `schneiden` die Ausschnitte einmal für
+    /// **alle** Felder, und sie gelten für den Rest dieses Baus. Eine
+    /// unbrauchbare Nummer bekommt immer denselben leeren Ausschnitt.
+    ///
+    /// Geklont wird unter der Sperre nur das eine Tripel — die ganze Karte
+    /// herauszugeben würde den häufigen Fall (volle Antwort) verteuern.
+    /// Während `schneiden` läuft, ist keine Sperre gehalten; zwei gleichzeitig
+    /// verfehlende Abrufe schneiden dann beide, was nur doppelt zählt.
+    pub fn feld_ausschnitt<F>(
+        &self,
+        voll_marke: &str,
+        id: Option<i64>,
+        schneiden: F,
+    ) -> (String, String, String)
+    where
+        F: FnOnce() -> FeldCache,
+    {
+        {
+            let c = self.feld_cache.read().unwrap();
+            if let Some(fc) = c.as_ref() {
+                if fc.marke == voll_marke {
+                    return Self::aus_feld_cache(fc, id);
+                }
+            }
+        }
+        let mut neu = schneiden();
+        neu.marke = voll_marke.to_string();
+        self.feld_schnitte.fetch_add(1, Ordering::Relaxed);
+        let ergebnis = Self::aus_feld_cache(&neu, id);
+        *self.feld_cache.write().unwrap() = Some(neu);
+        ergebnis
+    }
+
+    fn aus_feld_cache(fc: &FeldCache, id: Option<i64>) -> (String, String, String) {
+        id.and_then(|i| fc.felder.get(&i))
+            .cloned()
+            .unwrap_or_else(|| fc.leer.clone())
+    }
+
+    /// Wie oft die Ein-Feld-Ausschnitte gebaut wurden (nur für Tests).
+    pub fn feld_schnitte(&self) -> u64 {
+        self.feld_schnitte.load(Ordering::Relaxed)
+    }
+
+    /// Die Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
+    /// Die Routen vermerken hier ihre Abrufe, der Sync-Loop liest sie für
+    /// die Log-Zeile.
+    pub fn perf(&self) -> &perf::PerfCounters {
+        &self.perf
+    }
+
+    /// Hält fest, dass gerade ein TL-Gerät den Zustand abgerufen hat
+    /// (Spec tl-web-push): Der Erkennungstakt arbeitet nur, wenn wirklich
+    /// jemand zusieht.
+    pub fn note_tl_request(&self, now_ms: u64) {
+        self.tl_last_request_ms.store(now_ms, Ordering::Relaxed);
+    }
+
+    /// Sieht gerade jemand zu? `true`, wenn ein Push-Kanal offen ist oder
+    /// innerhalb der letzten Minute ein Zustand abgerufen wurde.
+    ///
+    /// Ohne diese Frage liefe der Erkennungstakt auch in einem Turnier
+    /// ohne ein einziges TL-Gerät sekündlich durch — mit Config-Lesen von
+    /// Platte, Snapshot-Kopie und voller Serialisierung (Review
+    /// 18.08.2026). Die Minute ist großzügig: Der Fallback-Poll einer
+    /// stillen Seite kommt alle 30 s.
+    pub fn tl_interest(&self, now_ms: u64) -> bool {
+        if !self.tl_subs.read().unwrap().is_empty() {
+            return true;
+        }
+        let letzte = self.tl_last_request_ms.load(Ordering::Relaxed);
+        letzte != 0 && now_ms.saturating_sub(letzte) <= 60_000
     }
 
     /// Beansprucht das Feld für ein Tablet und gibt dessen Token zurück.
@@ -1600,7 +2848,16 @@ impl TabletState {
     }
 
     /// Spiegelt den Spielzustand des aktiven Tablets am Feld.
+    ///
+    /// Legt zwei Fassungen ab: den **vollen** Stand (für ein Tablet, das
+    /// sich wieder verbindet oder das Feld übernimmt — es braucht seinen
+    /// Wiedergabe-Verlauf) und einen **schlanken** für alle Anzeigen
+    /// (siehe [`Self::display_court_state`]).
     pub fn set_court_state(&self, court_id: i64, state: String) {
+        self.display_court_state
+            .write()
+            .unwrap()
+            .insert(court_id, schlanker_anzeige_stand(&state));
         self.court_state.write().unwrap().insert(court_id, state);
         // Aufschlag/Pause (`court_state`) ist am Court-Monitor sichtbar →
         // Anzeige anstoßen (A1, ADR 0016). Der Schreib-Guard ist mit dem
@@ -1611,6 +2868,24 @@ impl TabletState {
     /// Liefert den gespiegelten Spielzustand eines Felds (für die Übernahme).
     pub fn court_state(&self, court_id: i64) -> Option<String> {
         self.court_state.read().unwrap().get(&court_id).cloned()
+    }
+
+    /// Derselbe Stand **ohne den Wiedergabe-Ballast** — für alles, was
+    /// anzeigt: Court-Monitore, Feld-Übersicht, Kombi, den
+    /// Cloud-Spiegel und die Turnierleitungs-Seite.
+    ///
+    /// Warum: Der volle Stand trägt `history` (bis zu 50 Zwischenstände,
+    /// jeder mit einer Vollkopie des Ballwechsel-Protokolls) und
+    /// `rallyLog`. Spät im Match sind das zweistellige Kilobyte — und die
+    /// gehen bei **jedem** Monitor-Abruf über das Hallen-WLAN, viermal je
+    /// Sekunde und Gerät. Keine Anzeige liest diese Felder; nur das
+    /// Tablet selbst braucht sie beim Wiederverbinden.
+    pub fn display_court_state(&self, court_id: i64) -> Option<String> {
+        self.display_court_state
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .cloned()
     }
 
     /// Court-Session entfernen (nach übermitteltem Ergebnis).
@@ -1806,7 +3081,8 @@ impl TabletState {
             .is_some_and(|s| s.sets.iter().any(|(a, b)| *a > 0 || *b > 0))
     }
 
-    /// Wie viele Aufrufe für dieses Spiel schon **gesprochen** wurden (0–3).
+    /// Wie viele Aufrufe für dieses Spiel schon **gesprochen** wurden
+    /// (0 = noch keiner; nach oben offen, siehe „Aufrufe unbegrenzt").
     ///
     /// `0` heißt: noch keiner. Das ist nicht dasselbe wie „Stufe 1" — auf dem
     /// Feld zu stehen ist noch kein gesprochener Aufruf, und der erste Druck
@@ -1819,7 +3095,7 @@ impl TabletState {
     /// nicht mehr.
     pub fn calls_made(&self, court_id: i64, match_id: i64) -> u8 {
         match self.call_stages.read().unwrap().get(&court_id) {
-            Some((known, made)) if *known == match_id => *made,
+            Some((known, made, _)) if *known == match_id => *made,
             _ => 0,
         }
     }
@@ -1829,22 +3105,62 @@ impl TabletState {
     /// Für die Turnierleitungs-Seite, die nur „noch einmal" weiß. Sie zeigt
     /// als erfolgte Stufe `max(1, calls_made)` und bietet die nächste an —
     /// die Rechnung hier muss dazu passen. `at_least` hebt auf die zeitlich
-    /// fällige Stufe an; über den dritten Aufruf hinaus wird nicht gezählt.
-    pub fn note_court_call_at_least(&self, court_id: i64, match_id: i64, at_least: u8) -> u8 {
+    /// fällige Stufe an.
+    ///
+    /// `unlimited` (Option „Aufrufe unbegrenzt", Feldtest 17.08.2026):
+    /// `true` lässt den Zähler über den dritten Aufruf hinaus ehrlich
+    /// weiterlaufen (4, 5, …). `false` behält den alten Deckel bei 3 —
+    /// host-seitig, damit ein Turnier ohne die Option sich nicht allein
+    /// auf das Client-Gating verlassen muss (Review 17.08.2026);
+    /// zurückgedreht wird dabei trotzdem nie.
+    ///
+    /// `sides` ist die Parteien-Maske des Aufrufs
+    /// ([`SIDE_BOTH`]/[`SIDE_TEAM1`]/[`SIDE_TEAM2`]). Die Stufe steigt nur,
+    /// wenn eine der gerufenen Parteien auf der aktuellen Stufe **schon
+    /// einmal** gerufen wurde — „Partei A rufen, dann Partei B rufen" ist
+    /// damit eine Runde und zählt einmal, „zweimal Partei A" sind zwei
+    /// (Spec tl-liste-vereinfachen E1).
+    pub fn note_court_call_at_least(
+        &self,
+        court_id: i64,
+        match_id: i64,
+        at_least: u8,
+        sides: u8,
+        unlimited: bool,
+    ) -> u8 {
         let mut g = self.call_stages.write().unwrap();
-        let entry = g.entry(court_id).or_insert((match_id, 0));
+        let entry = g.entry(court_id).or_insert((match_id, 0, 0));
         // Anderes Spiel auf dem Feld: von vorn, sonst erbte es die Aufrufe
         // seines Vorgängers und stünde sofort als dritter Aufruf da.
         if entry.0 != match_id {
-            *entry = (match_id, 0);
+            *entry = (match_id, 0, 0);
         }
-        entry.1 = (entry.1.max(1) + 1).max(at_least).min(3);
+        let vorher = entry.1;
+        // Neue Runde, sobald sich die gerufenen Parteien mit den auf dieser
+        // Stufe bereits gerufenen überschneiden — oder wenn überhaupt noch
+        // nichts gerufen wurde (dann ist dieser Aufruf der zweite, denn auf
+        // dem Feld zu stehen war der erste). Ab Stufe 4 spricht das
+        // Ansage-Gerät die schlichte Feld-Ansage ohne Stufenwort
+        // (`AnnounceJobPlayer`).
+        if entry.1 == 0 || entry.2 & sides != 0 {
+            entry.1 = entry.1.max(1).saturating_add(1);
+            entry.2 = 0;
+        }
+        entry.1 = entry.1.max(at_least);
+        if !unlimited {
+            // Ohne die Option gilt der alte Deckel bei 3 — aber nie unter
+            // einen Stand zurück, den ein Gerät MIT der Option schon
+            // erreicht hat (zwei Geräte, verschiedene Profile).
+            entry.1 = entry.1.min(vorher.max(3));
+        }
+        entry.2 |= sides;
         entry.1
     }
 
-    /// Wie [`Self::note_court_call_at_least`] ohne zeitliche Untergrenze.
-    pub fn note_court_call(&self, court_id: i64, match_id: i64) -> u8 {
-        self.note_court_call_at_least(court_id, match_id, 0)
+    /// Wie [`Self::note_court_call_at_least`] ohne zeitliche Untergrenze,
+    /// für beide Parteien.
+    pub fn note_court_call(&self, court_id: i64, match_id: i64, unlimited: bool) -> u8 {
+        self.note_court_call_at_least(court_id, match_id, 0, SIDE_BOTH, unlimited)
     }
 
     /// Hält fest, dass eine bestimmte Stufe **gesprochen wurde**.
@@ -1855,14 +3171,22 @@ impl TabletState {
     /// sie stattdessen hochzählen lassen, liefe die gemeinsame Zählung ihr
     /// dauerhaft um eins voraus.
     ///
+    /// Der Desktop-Aufruf gilt **immer beiden Parteien** — die Runde ist
+    /// damit voll, ein anschließender Partei-Aufruf von der TL-Seite
+    /// eröffnet also die nächste Stufe.
+    ///
     /// Zurückgedreht wird nie: Zwei Geräte können sich überholen.
     pub fn reached_court_call(&self, court_id: i64, match_id: i64, stage: u8) -> u8 {
         let mut g = self.call_stages.write().unwrap();
-        let entry = g.entry(court_id).or_insert((match_id, 0));
+        let entry = g.entry(court_id).or_insert((match_id, 0, 0));
         if entry.0 != match_id {
-            *entry = (match_id, 0);
+            *entry = (match_id, 0, 0);
         }
-        entry.1 = entry.1.max(stage).min(3);
+        // Kein Deckel bei 3: Steht der geteilte Zähler durch „Aufrufe
+        // unbegrenzt" schon höher, drückte `min(3)` ihn zurück — genau das
+        // verbietet der Satz unten.
+        entry.1 = entry.1.max(stage);
+        entry.2 = SIDE_BOTH;
         entry.1
     }
 
@@ -2038,7 +3362,25 @@ impl TabletState {
         if let Some(state) = mirrored {
             self.court_state.write().unwrap().insert(to_court_id, state);
         }
-        self.persist_scores();
+        // Die Anzeige-Fassung zieht mit um — sonst zeigte das Zielfeld
+        // Aufschlag und Pause des Vorgängers (bzw. gar nichts).
+        let schlank = self
+            .display_court_state
+            .write()
+            .unwrap()
+            .remove(&from_court_id);
+        if let Some(state) = schlank {
+            self.display_court_state
+                .write()
+                .unwrap()
+                .insert(to_court_id, state);
+        }
+        // Synchron (Spec monitor-livestand-push, S2): Ein Feldwechsel ist
+        // kein Ballwechsel, sondern ein seltener Eingriff — und ginge er bei
+        // einem Absturz verloren, stünde der Stand beim Neustart auf dem
+        // falschen Feld.
+        self.mark_scores_dirty();
+        self.flush_scores();
         // Der Stand wandert von Quell- auf Zielfeld — BEIDE Anzeigen sind
         // betroffen (Quellfeld wird leer, Zielfeld zeigt den Stand). Sonst
         // hinge jeder TV bis zu seinem nächsten Poll (A1, ADR 0016). Erst hier,
@@ -2055,13 +3397,18 @@ impl TabletState {
         // nach Ergebnis-Submit aufgerufen (nicht beim Disconnect), daher bleibt
         // der Crash-Restore eines laufenden Spiels unberührt.
         self.court_state.write().unwrap().remove(&court_id);
+        self.display_court_state.write().unwrap().remove(&court_id);
         // Eine noch offene Vormerkung gehört zum Spiel, das hier gerade
         // beendet wurde. Bliebe sie stehen, wies die nächste Zuweisung auf
         // dieses Feld mit „hat gerade jemand anderes belegt" ab — obwohl es
         // sichtbar leer ist.
         self.release_court_claim(court_id);
-        // Entfernten Stand auch aus der Datei nehmen.
-        self.persist_scores();
+        // Entfernten Stand auch aus der Datei nehmen — **synchron** (Spec
+        // monitor-livestand-push, S2): Die Räumung folgt dem Ergebnis, und
+        // ein danach neu verbundenes Tablet darf den beendeten Stand nicht
+        // aus der Datei zurückbekommen.
+        self.mark_scores_dirty();
+        self.flush_scores();
         // Match-Räumung ist am Monitor sichtbar (Feld wird leer) → anstoßen.
         self.notify_monitor(court_id);
     }
@@ -2215,6 +3562,30 @@ impl TabletState {
                 continue;
             }
             // In BTPs Schreibweise, damit der Filter greift.
+            let name = snapshot
+                .locations
+                .iter()
+                .find(|l| l.name.trim().eq_ignore_ascii_case(hall.trim()))
+                .map(|l| l.name.trim().to_string())
+                .unwrap_or_else(|| hall.trim().to_string());
+            m.preparation_hall = Some(name);
+        }
+        drop(manual);
+
+        // Automatisch vorverteilte Hallen als DRITTE Stufe einstempeln
+        // (Spec `hallen-vorverteilung`, E7) — gleiche Regeln wie die
+        // Hand-Hallen darüber (kein Aufruf-Zeitstempel, nur Scheduled,
+        // BTP-Schreibweise), und durch die Block-Reihenfolge gilt der
+        // Vorrang Aufruf > Hand > Auto von selbst. Damit sehen Spieler
+        // ihre Halle früh im Liveticker (`display=next&halle=…`) und auf
+        // den Hallen-Monitoren — genau der Zweck der Vorverteilung.
+        for (match_id, hall) in self.auto_halls.halls() {
+            let Some(m) = snapshot.matches.iter_mut().find(|m| m.id == match_id) else {
+                continue;
+            };
+            if m.preparation_hall.is_some() || m.status != MatchStatus::Scheduled {
+                continue;
+            }
             let name = snapshot
                 .locations
                 .iter()
@@ -2427,11 +3798,24 @@ impl TabletState {
     }
 
     pub fn overview(&self) -> Vec<CourtOverview> {
+        // Messung (Spec monitor-livestand-push, S0): Diese Rechnung läuft
+        // heute bei JEDEM `/health` — je Feld ein linearer Scan über alle
+        // Matches plus ein JSON-Parse des Tablet-Zustands. Sie ist der
+        // Posten, den S1 mit einem Antwortcache einspart; gezählt wird der
+        // **Direktbau**, damit die Trefferquote danach eine Gegenprobe hat.
+        //
+        // Ein leerer Schnappschuss zählt bewusst nicht mit: Vor dem ersten
+        // BTP-Kontakt gibt es nichts zu bauen, und die Nullen würden das
+        // p95 der echten Bauten verwässern.
+        let begonnen = std::time::Instant::now();
         let guard = self.snapshot.read().unwrap();
         let Some(snap) = guard.as_ref() else {
             return Vec::new();
         };
-        self.overview_from(snap)
+        let courts = self.overview_from(snap);
+        self.perf
+            .note_overview_build(begonnen.elapsed().as_nanos() as u64);
+        courts
     }
 
     /// Wie [`Self::overview`], aber auf einem **übergebenen** Schnappschuss.
@@ -2475,8 +3859,12 @@ impl TabletState {
                 // Tablet-court_state EINMAL lesen + parsen — so sind Aufschlag-
                 // und Pause-Info garantiert vom selben Stand abgeleitet (kein
                 // zweiter Lock, kein doppeltes Parsen).
+                // Die schlanke Fassung parsen, nicht die volle: Sie trägt
+                // dieselben Felder (Aufschlag, Pause), ist aber um den
+                // Wiedergabe-Verlauf erleichtert — und diese Stelle läuft
+                // je Feld bei JEDEM Übersichts-Abruf.
                 let court_state_json: Option<serde_json::Value> = self
-                    .court_state
+                    .display_court_state
                     .read()
                     .unwrap()
                     .get(&court.id)
@@ -2512,11 +3900,16 @@ impl TabletState {
                 } else {
                     None
                 };
+                let (sr_names, ar_names, official_warn) = self.court_officials(m, snap);
+                let official_ids = self.court_official_ids(m);
                 CourtOverview {
                     court_id: court.id,
                     court: court.name.clone(),
                     // Hallenname nur bei Mehr-Hallen-Turnieren; sonst leer.
                     location: snap.court_location_name(court.id),
+                    // Farbe füllt `hall_colors::paint` an den Serving-Stellen
+                    // nach — hier fehlt die Config.
+                    hall_color: None,
                     has_timeline: m.is_some_and(|mm| self.timeline.has_timeline(mm.id)),
                     match_id: m.map(|mm| mm.id).unwrap_or(0),
                     match_name: m
@@ -2582,6 +3975,15 @@ impl TabletState {
                     best_of: m.map(|mm| mm.scoring.best_of).unwrap_or(0),
                     target_score: m.map(|mm| mm.scoring.target_score).unwrap_or(0),
                     cap_score: m.map(|mm| mm.scoring.cap_score).unwrap_or(0),
+                    // Schiedsrichter/Aufschlagrichter des laufenden Spiels
+                    // (Spec schiedsrichter-management Nr. 7). BTP gewinnt
+                    // gegen die lokale Zuweisung; ohne SR-Betrieb bleibt
+                    // alles leer.
+                    sr: sr_names,
+                    ar: ar_names,
+                    official_warn,
+                    sr_id: official_ids.0,
+                    ar_id: official_ids.1,
                 }
             })
             .collect()
@@ -2591,7 +3993,55 @@ impl TabletState {
     /// effektivem Satzstand (Tablet-getrieben falls aktiv, sonst aus BTP)
     /// und der gespiegelte Tablet-Spielzustand (Aufschlag/Pause). Vom
     /// Court-Monitor-Endpunkt genutzt.
+    /// Schlanker Blick fürs Score-Spiegeln zum Relay (v0.9.200) — dieselbe
+    /// Auswahl wie [`Self::monitor_court`] (Tablet-Stand vor BTP-Stand, ohne
+    /// `connected`-Prüfung), aber ohne das Klonen des vollen `BtpMatch`: Der
+    /// Spiegel läuft bei jedem Nudge und im 2-s-Sweep über alle Felder.
+    /// `None` = kein Match auf dem Feld, nichts zu spiegeln.
+    pub fn score_mirror_of(&self, court_id: i64) -> Option<ScoreMirror> {
+        let (match_id, btp_sets) = {
+            let guard = self.snapshot.read().unwrap();
+            let m = guard.as_ref().and_then(|snap| {
+                snap.matches
+                    .iter()
+                    .find(|m| m.status == MatchStatus::OnCourt && m.court_id == Some(court_id))
+            })?;
+            (m.id, m.sets.clone())
+        };
+        let sets = {
+            let courts = self.courts.read().unwrap();
+            match courts.get(&court_id) {
+                Some(s) if s.match_id == match_id && !s.sets.is_empty() => s.sets.clone(),
+                _ => btp_sets,
+            }
+        };
+        Some(ScoreMirror {
+            match_id,
+            sets,
+            // **Voller** Stand, nicht die Anzeige-Fassung: Der Relay legt
+            // diesen Spiegel unter `namespace.court_state` ab und schickt
+            // ihn beim (Neu-)Verbinden oder Übernehmen als `StateRestore`
+            // an ein **Cloud-Tablet** zurück — nicht nur an Anzeigen. Ohne
+            // `history`/`rallyLog` stünde ein Ersatz-Tablet mitten im Spiel
+            // ohne Rückgängig-Gedächtnis da, der Punktverlauf begänne neu,
+            // und bei 0:0 würde aus „↩" sogar „Aufstellung ändern"
+            // (Review-Fund 18.08.2026). Die Anzeige-Ersparnis holt der
+            // LAN-Weg (`monitor_court`); hier wiegt die Wiederherstellung
+            // schwerer als die Übertragungsgröße.
+            state: self.court_state(court_id),
+        })
+    }
+
     pub fn monitor_court(&self, court_id: i64) -> MonitorCourt {
+        // Ordnungszahl **zuerst** (Spec monitor-livestand-push, S4): Wird sie
+        // nach dem Inhalt gelesen, kann sie neuer sein als er — die Anzeige
+        // merkte sich dann eine Zahl, die zu einem Stand gehört, den sie nie
+        // gesehen hat, und verwürfe den zugehörigen Nudge als „schon
+        // bekannt". Der Punkt erschiene erst beim nächsten Fallback-Poll.
+        // In dieser Reihenfolge ist die Zahl höchstens ÄLTER als der Inhalt,
+        // und das ist harmlos: Der nächste Nudge holt ihn nach
+        // (Review-Fund 19.08.2026).
+        let seq = self.monitor_seq_of(court_id);
         let guard = self.snapshot.read().unwrap();
         let tournament_name = guard
             .as_ref()
@@ -2625,8 +4075,12 @@ impl TabletState {
             tournament_name,
             current_match,
             sets,
-            court_state: self.court_state(court_id),
+            // Anzeige-Fassung: Court-Monitore lesen Aufschlag, Pause,
+            // Aufgabe und Startzeit — nie den Wiedergabe-Verlauf.
+            court_state: self.display_court_state(court_id),
             on_court_since_ms,
+            // Ordnung für die Anzeige — oben vor dem Inhalt gelesen.
+            seq,
         }
     }
 
@@ -2720,6 +4174,16 @@ impl TabletState {
 
 /// Monitor-relevante Daten eines Feldes (Rückgabe von
 /// [`TabletState::monitor_court`]). Reiner Transport – nicht serialisiert.
+/// Spiegel-Stand eines Felds fürs Relay ([`TabletState::score_mirror_of`]):
+/// Match, effektiver Satzstand und roher Tablet-Spielzustand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScoreMirror {
+    pub match_id: i64,
+    pub sets: Vec<(i64, i64)>,
+    /// Gespiegelter Tablet-Spielzustand (JSON-String), falls vorhanden.
+    pub state: Option<String>,
+}
+
 pub struct MonitorCourt {
     /// Turniername (für die Werbe-/Leerlauf-Anzeige).
     pub tournament_name: String,
@@ -2732,6 +4196,10 @@ pub struct MonitorCourt {
     /// Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
     /// steht; `None` = kein Spiel. Grundlage der Aufruf-Uhr am Monitor.
     pub on_court_since_ms: Option<u64>,
+    /// Ordnungszahl des Feld-Stands (Spec monitor-livestand-push, S4) —
+    /// wandert von hier in den `MonitorState`, damit die Anzeige Push und
+    /// Voll-Abruf zueinander ordnen kann.
+    pub seq: u64,
 }
 
 #[cfg(test)]
@@ -3238,6 +4706,41 @@ mod tests {
         assert_eq!(st.court_display_label(401), "Halle 2 · 1");
     }
 
+    /// Schlanker Spiegel-Blick fürs Relay (v0.9.200): dieselbe effektive
+    /// Satzstand-Auswahl wie `monitor_court` (Tablet-Stand vor BTP-Stand),
+    /// aber ohne das Klonen des vollen `BtpMatch` — der Spiegel läuft bei
+    /// jedem Nudge und im 2-s-Sweep über alle Felder.
+    #[test]
+    fn score_mirror_of_returns_the_effective_court_state() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1"), (102, "Court 2")],
+        ));
+        // Ohne Tablet: BTP-Stand (match_on setzt sets = [(5,3)]), kein State.
+        assert_eq!(
+            st.score_mirror_of(101),
+            Some(ScoreMirror {
+                match_id: 1,
+                sets: vec![(5, 3)],
+                state: None,
+            })
+        );
+        // Tablet zählt und spiegelt seinen Zustand: beides kommt mit.
+        st.record_score(101, 1, vec![(11, 9)]);
+        st.set_court_state(101, r#"{"match":{"matchId":1}}"#.into());
+        assert_eq!(
+            st.score_mirror_of(101),
+            Some(ScoreMirror {
+                match_id: 1,
+                sets: vec![(11, 9)],
+                state: Some(r#"{"match":{"matchId":1}}"#.to_string()),
+            })
+        );
+        // Feld ohne Match → nichts zu spiegeln.
+        assert_eq!(st.score_mirror_of(102), None);
+    }
+
     #[test]
     fn monitor_court_returns_match_with_effective_sets() {
         let st = TabletState::default();
@@ -3295,6 +4798,11 @@ mod tests {
         let st = TabletState::default();
         st.set_scores_path(path.clone());
         st.record_score(101, 7, vec![(21, 5), (2, 9)]);
+        // Seit der Entprellung (Spec monitor-livestand-push, S2) schreibt der
+        // Punkt nicht mehr selbst — im Betrieb tut es der Sekundentakt des
+        // Sync-Loops, hier der ausdrückliche Flush.
+        assert!(!path.exists(), "der Punkt allein schreibt nicht");
+        st.flush_scores();
         assert!(path.exists());
 
         // „Neustart": frische Instanz, gleiches Match noch OnCourt.
@@ -3342,14 +4850,146 @@ mod tests {
     }
 
     #[test]
+    fn the_display_state_drops_only_the_heavy_replay_fields() {
+        // Anzeigen (Court-Monitore, Übersicht, TL) brauchen den
+        // Wiedergabe-Ballast des Tabletts nicht: `history` (bis zu 50
+        // Stände, jeder mit einer Vollkopie des Ballwechsel-Protokolls)
+        // und `rallyLog` machen den Anzeige-Zustand spät im Match
+        // zweistellig kilobytegroß — und der geht bei jedem Abruf an
+        // jeden Monitor. Alles ANDERE bleibt bewusst drin: Ein
+        // Weglassen nach Positivliste risse jedem künftigen Feld den
+        // Boden weg, das eine Anzeige liest.
+        let st = TabletState::default();
+        st.set_court_state(
+            1,
+            r#"{"serving":{"team":"a"},"pause":null,"startedAt":7,
+                "history":[{"a":1,"rallyLog":["A","B"]}],"rallyLog":["A"],
+                "finished":false,"teamOnSide":{"a":"links"}}"#
+                .into(),
+        );
+        let schlank = st.display_court_state(1).expect("gerade gesetzt");
+        let v: serde_json::Value = serde_json::from_str(&schlank).unwrap();
+        assert!(v.get("history").is_none(), "Wiedergabe-Verlauf fällt weg");
+        assert!(
+            v.get("rallyLog").is_none(),
+            "Ballwechsel-Protokoll fällt weg"
+        );
+        assert_eq!(v["serving"]["team"], "a", "Aufschlag bleibt");
+        assert_eq!(v["startedAt"], 7, "Startzeit bleibt");
+        assert_eq!(v["finished"], false, "Ende-Kennzeichen bleibt");
+        assert!(v.get("teamOnSide").is_some(), "Seitenzuordnung bleibt");
+        assert!(
+            v.get("pause").is_some(),
+            "auch ein leeres Pausenfeld bleibt"
+        );
+
+        // Das Tablet bekommt beim Wiederverbinden weiterhin ALLES — sonst
+        // verlöre es sein Rückgängig-Gedächtnis.
+        let voll = st.court_state(1).expect("gerade gesetzt");
+        assert!(voll.contains("history"), "voller Stand bleibt vollständig");
+
+        // Und das gilt AUCH über die Cloud: Der Spiegel an den Relay wird
+        // dort zum `StateRestore` eines Cloud-Tabletts — er muss den
+        // vollen Stand tragen, nicht die Anzeige-Fassung (Review-Fund
+        // 18.08.2026).
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(1), MatchStatus::OnCourt)],
+            vec![(1, "Court 1")],
+        ));
+        let spiegel = st
+            .score_mirror_of(1)
+            .and_then(|m| m.state)
+            .expect("Spiegel vorhanden");
+        assert!(
+            spiegel.contains("history"),
+            "der Cloud-Spiegel trägt den vollen Stand — ein Ersatz-Tablet \
+             stellt daraus sein Rückgängig-Gedächtnis wieder her"
+        );
+
+        // Unparsbares bleibt unangetastet (lieber unverändert als leer).
+        st.set_court_state(2, "kein json".into());
+        assert_eq!(st.display_court_state(2).as_deref(), Some("kein json"));
+    }
+
+    #[test]
+    fn tl_push_nudges_reach_subscribers_and_dead_ones_are_dropped() {
+        // TL-Push (Spec tl-web-push): Der Anstoß-Kanal trägt nur die
+        // Revisionsnummer; tote Sender (Seite weg) werden beim nächsten
+        // Nudge ausgesiebt, ein ausgetragener bekommt nichts mehr.
+        let st = TabletState::default();
+        let (tx1, mut rx1) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (tx2, rx2) = tokio::sync::mpsc::unbounded_channel::<String>();
+        assert!(st.subscribe_tl(&tx1));
+        assert!(st.subscribe_tl(&tx2));
+        drop(rx2); // Gerät weg — der Sender ist tot.
+        st.notify_tl(7);
+        assert_eq!(rx1.try_recv().unwrap(), "{\"rev\":7}");
+        st.unsubscribe_tl(&tx1);
+        st.notify_tl(8);
+        assert!(
+            rx1.try_recv().is_err(),
+            "ausgetragen heißt: keine Nudges mehr"
+        );
+    }
+
+    #[test]
+    fn tl_push_subscriptions_are_capped() {
+        // Fan-out-Deckel wie beim Monitor-Nudge: Über der Grenze wird das
+        // Abo abgelehnt und die Seite fällt still auf ihren Poll zurück.
+        let st = TabletState::default();
+        let mut halter = Vec::new();
+        for _ in 0..MAX_TL_PUSH_SUBS {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            assert!(st.subscribe_tl(&tx));
+            halter.push((tx, rx));
+        }
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        assert!(!st.subscribe_tl(&tx), "über dem Deckel wird abgelehnt");
+    }
+
+    #[test]
+    fn the_tl_takt_only_works_while_someone_is_watching() {
+        // Ohne offenen Push-Kanal und ohne frischen Abruf hat der
+        // Erkennungstakt nichts zu tun — sonst läse ein Turnier ganz ohne
+        // TL-Gerät sekündlich die Config von Platte und serialisierte den
+        // vollen Zustand (Review 18.08.2026).
+        let st = TabletState::default();
+        assert!(!st.tl_interest(100_000), "niemand da");
+        st.note_tl_request(100_000);
+        assert!(st.tl_interest(130_000), "Abruf vor 30 s zählt");
+        assert!(
+            !st.tl_interest(200_000),
+            "eine Minute nach dem letzten Abruf ist Ruhe"
+        );
+        // Ein offener Kanal zählt für sich, auch ohne jeden Abruf.
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        st.subscribe_tl(&tx);
+        assert!(st.tl_interest(999_000), "offener Kanal zählt");
+    }
+
+    #[test]
+    fn the_tl_state_cache_round_trips() {
+        // Antwort-Cache des Erkennungstakts (Spec tl-web-push): Was der
+        // Takt ablegt, liest der LAN-Handler unverändert zurück.
+        let st = TabletState::default();
+        assert!(st.tl_state_cache().is_none(), "kalt = kein Cache");
+        st.set_tl_state_cache(3, "\"tag-3\"".into(), "{}".into(), 1_000);
+        let c = st.tl_state_cache().expect("gerade abgelegt");
+        assert_eq!(
+            (c.rev, c.etag.as_str(), c.json.as_str(), c.gebaut_ms),
+            (3, "\"tag-3\"", "{}", 1_000)
+        );
+    }
+
+    #[test]
     fn a_match_returning_to_a_court_starts_its_calls_from_the_beginning() {
         // Die Standzeit wird beim Verlassen des Feldes vergessen — die
         // Aufrufe müssen es auch. Sonst zeigte ein gerade erst aufgerufenes
         // Spiel „3. Aufruf erfolgt", und der Aufruf-Knopf verschwände
         // dauerhaft: Die Turnierleitung könnte es nicht mehr rufen.
         let st = TabletState::default();
-        st.note_court_call(101, 42);
-        st.note_court_call(101, 42);
+        st.note_court_call(101, 42, false);
+        st.note_court_call(101, 42, false);
         assert_eq!(st.calls_made(101, 42), 3);
 
         // Feld geräumt (Spiel 42 steht nirgends mehr).
@@ -3434,6 +5074,7 @@ mod tests {
                 court_id: 7,
                 match_id: 42,
                 stage: 2,
+                side: relay_proto::PrepCallSide::Both,
             },
             now,
         );
@@ -3479,6 +5120,7 @@ mod tests {
             court_id: 1,
             match_id: 7,
             stage: 2,
+            side: relay_proto::PrepCallSide::Both,
         };
         let first = st.publish_announce_job(String::new(), kind.clone(), 1_000);
         let second = st.publish_announce_job(String::new(), kind, 1_000);
@@ -3498,17 +5140,53 @@ mod tests {
         let st = TabletState::default();
         assert_eq!(st.calls_made(101, 7), 0, "noch kein Aufruf gesprochen");
         assert_eq!(
-            st.note_court_call(101, 7),
+            st.note_court_call(101, 7, false),
             2,
             "der erneute Aufruf ist der 2."
         );
-        assert_eq!(st.note_court_call(101, 7), 3);
-        assert_eq!(
-            st.note_court_call(101, 7),
-            3,
-            "über den dritten hinaus wird nicht gezählt"
-        );
+        assert_eq!(st.note_court_call(101, 7, false), 3);
         assert_eq!(st.calls_made(101, 7), 3, "und jedes Gerät liest dieselbe 3");
+    }
+
+    #[test]
+    fn repeated_calls_keep_counting_beyond_the_third() {
+        // Option „Aufrufe unbegrenzt" (Feldtest 17.08.2026): Die TL-Seite
+        // darf beliebig oft rufen — der Zähler läuft dann ehrlich weiter,
+        // statt bei drei festzuhängen. Ab dem vierten Aufruf spricht das
+        // Ansage-Gerät die schlichte Feld-Ansage ohne Stufenwort
+        // (`AnnounceJobPlayer`): „Dritter und letzter Aufruf" noch einmal
+        // wäre gelogen.
+        let st = TabletState::default();
+        st.note_court_call(101, 7, true);
+        st.note_court_call(101, 7, true);
+        assert_eq!(
+            st.note_court_call(101, 7, true),
+            4,
+            "nach dem dritten kommt der vierte, kein Deckel"
+        );
+        assert_eq!(st.note_court_call(101, 7, true), 5);
+        assert_eq!(st.calls_made(101, 7), 5, "jedes Gerät liest dieselbe 5");
+        // Eine zeitliche Untergrenze (Uhr, maximal 3) drückt den Zähler
+        // dabei nie wieder herunter.
+        assert_eq!(st.note_court_call_at_least(101, 7, 3, SIDE_BOTH, true), 6);
+        // Ein Gerät OHNE die Option dreht den geteilten Zähler nicht
+        // zurück — treibt ihn aber auch nicht weiter über seinen Deckel
+        // hinaus (sein Client bietet jenseits von 3 ohnehin keinen Knopf).
+        assert_eq!(st.note_court_call(101, 7, false), 6);
+    }
+
+    #[test]
+    fn without_the_option_the_counter_keeps_its_cap_of_three() {
+        // Sicherheitsnetz aus dem Review 17.08.2026: Ohne „Aufrufe
+        // unbegrenzt" bleibt der alte Deckel host-seitig bestehen — ein
+        // Turnier ohne die Option darf sich nicht allein auf das
+        // Client-Gating verlassen (alte tl.html-Stände, schnelle
+        // Doppel-Tipps über Geschwister-Knöpfe).
+        let st = TabletState::default();
+        st.note_court_call(101, 7, false);
+        st.note_court_call(101, 7, false);
+        assert_eq!(st.note_court_call(101, 7, false), 3, "Deckel hält");
+        assert_eq!(st.calls_made(101, 7), 3);
     }
 
     #[test]
@@ -3524,7 +5202,7 @@ mod tests {
         );
         st.set_snapshot(snap.clone());
         assert_eq!(st.overview()[0].call_stage, 0, "noch nichts gesprochen");
-        st.note_court_call(101, 7);
+        st.note_court_call(101, 7, false);
         assert_eq!(st.overview()[0].call_stage, 2);
     }
 
@@ -3556,15 +5234,61 @@ mod tests {
         // gemeinsame Zählung anheben, aber nie zurückdrehen.
         let st = TabletState::default();
         assert_eq!(
-            st.note_court_call_at_least(101, 7, 3),
+            st.note_court_call_at_least(101, 7, 3, SIDE_BOTH, false),
             3,
             "die Uhr war weiter"
         );
         assert_eq!(
-            st.note_court_call_at_least(101, 7, 2),
+            st.note_court_call_at_least(101, 7, 2, SIDE_BOTH, false),
             3,
             "und eine niedrigere Vorgabe dreht nicht zurück"
         );
+    }
+
+    #[test]
+    fn calling_both_parties_one_after_the_other_is_one_call_round() {
+        // Spec tl-liste-vereinfachen E1: Ein Partei-Aufruf ist ein
+        // vollwertiger Aufruf und zählt die Stufe hoch — aber nur EINMAL
+        // je Runde. Wer erst Partei A und dann Partei B ruft, hat einmal
+        // gerufen, nicht zweimal.
+        let st = TabletState::default();
+        assert_eq!(
+            st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1, false),
+            2,
+            "der erste Partei-Aufruf ist der zweite Aufruf"
+        );
+        assert_eq!(
+            st.note_court_call_at_least(101, 7, 0, SIDE_TEAM2, false),
+            2,
+            "die andere Partei gehört zur selben Runde"
+        );
+        assert_eq!(st.calls_made(101, 7), 2, "alle Geräte lesen dieselbe 2");
+
+        // Dieselbe Partei ein zweites Mal: das ist eine neue Runde.
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1, false), 3);
+        assert_eq!(st.calls_made(101, 7), 3);
+    }
+
+    #[test]
+    fn a_party_call_after_a_full_call_opens_the_next_stage() {
+        // Nach einem Aufruf an beide Parteien ist die Runde voll — der
+        // nächste Aufruf, egal an wen, ist der dritte und letzte.
+        let st = TabletState::default();
+        assert_eq!(st.note_court_call(101, 7, false), 2);
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM2, false), 3);
+        // Und die Gegenpartei schließt dieselbe (dritte) Runde ab.
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1, false), 3);
+    }
+
+    #[test]
+    fn a_desktop_call_closes_the_round_for_the_web_side_too() {
+        // Der Desktop-Aufruf gilt immer beiden Parteien und meldet nur
+        // seine Stufe (`reached_court_call`). Ein anschließender
+        // Partei-Aufruf von der TL-Seite muss deshalb die nächste Stufe
+        // eröffnen — sonst hörte die Halle zweimal „Zweiter Aufruf".
+        let st = TabletState::default();
+        assert_eq!(st.reached_court_call(101, 7, 2), 2);
+        assert_eq!(st.note_court_call_at_least(101, 7, 0, SIDE_TEAM1, false), 3);
     }
 
     #[test]
@@ -3572,10 +5296,10 @@ mod tests {
         // Sonst erbte das nächste Spiel die Stufe seines Vorgängers und
         // stünde sofort als „dritter Aufruf" da.
         let st = TabletState::default();
-        st.note_court_call(101, 7);
-        st.note_court_call(101, 7);
+        st.note_court_call(101, 7, false);
+        st.note_court_call(101, 7, false);
         assert_eq!(st.calls_made(101, 8), 0, "anderes Spiel, neue Zählung");
-        assert_eq!(st.note_court_call(101, 8), 2);
+        assert_eq!(st.note_court_call(101, 8, false), 2);
         assert_eq!(st.calls_made(101, 7), 0, "und der Vorgänger ist vergessen");
     }
 
@@ -3831,6 +5555,46 @@ mod tests {
         assert_eq!(
             m.preparation_call_ts, None,
             "einen Ort zu setzen ist kein Aufruf - sonst meldete der Monitor einen Aufruf, den es nie gab"
+        );
+    }
+
+    #[test]
+    fn eine_auto_verteilte_halle_erreicht_den_liveticker() {
+        // Spec `hallen-vorverteilung` (E7): Die automatisch vorverteilte
+        // Halle ist der Spieler-Kanal des Features — sie muss den
+        // Hallenfilter des Livetickers erreichen wie eine Hand-Halle,
+        // ohne als „aufgerufen" zu gelten. Hand schlägt Auto.
+        use crate::btp::model::BtpLocation;
+        let st = TabletState::default();
+        let mut snap = snapshot(
+            vec![
+                match_on(4, None, MatchStatus::Scheduled),
+                match_on(5, None, MatchStatus::Scheduled),
+            ],
+            vec![(101, "Court 1")],
+        );
+        snap.locations = vec![BtpLocation {
+            id: 7,
+            name: "Halle A".to_string(),
+        }];
+        st.auto_hall_store()
+            .insert_many(&[(4, "halle a".into()), (5, "halle a".into())]);
+        st.set_manual_hall(5, "Halle B");
+
+        st.apply_preparation_calls(&mut snap);
+
+        let m4 = snap.matches.iter().find(|m| m.id == 4).unwrap();
+        assert_eq!(
+            m4.preparation_hall.as_deref(),
+            Some("Halle A"),
+            "Auto-Halle in BTPs Schreibweise"
+        );
+        assert_eq!(m4.preparation_call_ts, None, "kein Aufruf");
+        let m5 = snap.matches.iter().find(|m| m.id == 5).unwrap();
+        assert_eq!(
+            m5.preparation_hall.as_deref(),
+            Some("Halle B"),
+            "die Hand-Halle behält Vorrang vor der Auto-Halle"
         );
     }
 
@@ -4156,6 +5920,7 @@ mod tests {
             free_court_id: None,
             player_ids: Vec::new(),
             end_ts_ms: None,
+            officials: None,
         }
     }
 
@@ -4209,6 +5974,242 @@ mod tests {
         let mut s = snapshot(Vec::new(), Vec::new());
         s.tournament_name = name.to_string();
         s
+    }
+
+    /// Ein Official mit dieser ID (Name nur zur Unterscheidung).
+    fn official(id: i64) -> crate::btp::model::BtpOfficial {
+        crate::btp::model::BtpOfficial {
+            id,
+            name: format!("Schiri{id}"),
+            first: String::new(),
+            nationality: None,
+        }
+    }
+
+    #[test]
+    fn overview_zeigt_schiedsrichter_nur_bei_aktivem_betrieb() {
+        let st = TabletState::default();
+        let mut snap = snapshot(
+            vec![match_on(1, Some(5), MatchStatus::OnCourt)],
+            vec![(5, "Feld 1"), (6, "Feld 2")],
+        );
+        snap.officials = vec![official(1), official(2)];
+        st.set_snapshot(snap);
+        st.officials_store()
+            .assign(1, crate::tablet::officials::OfficialRole::Sr, 1);
+
+        // Feature aus (Default) ⇒ kein Wort von Schiedsrichtern.
+        let c = &st.overview()[0];
+        assert!(c.sr.is_empty());
+        assert!(c.official_warn.is_none());
+
+        // Feature an ⇒ Name am belegten Feld, freies Feld bleibt leer.
+        st.officials_store().set_enabled(true);
+        let o = st.overview();
+        assert_eq!(o[0].sr, vec!["Schiri1".to_string()]);
+        assert!(o[0].ar.is_empty(), "kein AR zugewiesen");
+        assert!(o[1].sr.is_empty(), "Feld ohne Spiel");
+    }
+
+    #[test]
+    fn das_tablet_bekommt_die_namen_von_sr_und_ar() {
+        // Spec Nr. 7: Das Schiri-Tablet zeigt SR/AR des laufenden Spiels —
+        // als Namen, damit es nichts auflösen muss (LAN wie Cloud).
+        let st = TabletState::default();
+        let m = match_on(1, Some(5), MatchStatus::OnCourt);
+        let mut snap = snapshot(vec![m.clone()], vec![(5, "Feld 1")]);
+        snap.officials = vec![official(1), official(2)];
+        st.set_snapshot(snap);
+        st.officials_store()
+            .assign(1, crate::tablet::officials::OfficialRole::Sr, 1);
+        st.officials_store()
+            .assign(1, crate::tablet::officials::OfficialRole::Ar, 2);
+
+        // Ohne Schiedsrichter-Betrieb bleibt der Brief leer.
+        assert_eq!(st.match_officials(&m), (Vec::new(), Vec::new()));
+
+        st.officials_store().set_enabled(true);
+        assert_eq!(
+            st.match_officials(&m),
+            (vec!["Schiri1".to_string()], vec!["Schiri2".to_string()])
+        );
+    }
+
+    #[test]
+    fn overview_meldet_die_konflikt_kategorie_am_feld() {
+        // Manuelle Zuweisung mit Konflikt wird ausgeführt UND gewarnt
+        // (Spec Nr. 2) — die Anzeige trägt nur die Kategorie, nie den Grund.
+        let st = TabletState::default();
+        let mut m = match_on(1, Some(5), MatchStatus::OnCourt);
+        m.team1[0].club = Some("TSV Musterstadt".into());
+        let mut snap = snapshot(vec![m], vec![(5, "Feld 1")]);
+        snap.officials = vec![official(1)];
+        st.set_snapshot(snap);
+        st.officials_store().set_enabled(true);
+        st.officials_store().set_club(1, "TSV Musterstadt");
+        st.officials_store()
+            .assign(1, crate::tablet::officials::OfficialRole::Sr, 1);
+
+        let c = &st.overview()[0];
+        assert_eq!(c.official_warn.as_deref(), Some("Verein"));
+    }
+
+    #[test]
+    fn ein_feld_ohne_bedienervergabe_verbraucht_keinen_eintrag() {
+        // Spec Nr. 6: Felder, auf denen der Schiedsrichter selbst das Tablet
+        // bedient, brauchen keinen Spieler als Bediener — und dürfen der
+        // Warteschlange deshalb auch keinen wegnehmen.
+        let st = TabletState::default();
+        st.officials_store().set_enabled(true);
+        st.officials_store().set_court_switches(
+            5,
+            crate::tablet::officials::CourtSwitches {
+                sr: true,
+                ar: true,
+                operator: false,
+            },
+        );
+        st.enqueue_scorekeeper(1, vec!["A".into()], 9, 1_000);
+
+        st.assign_scorekeeper_for_court(5, 42);
+        assert!(st.assigned_scorekeeper(5).is_none(), "Feld ist ausgenommen");
+        assert_eq!(
+            st.scorekeeper_queue().len(),
+            1,
+            "der Eintrag bleibt für ein anderes Feld erhalten"
+        );
+
+        // Default (kein Eintrag) bleibt aktiv — Bestandsverhalten.
+        st.assign_scorekeeper_for_court(6, 43);
+        assert!(st.assigned_scorekeeper(6).is_some());
+        assert!(st.scorekeeper_queue().is_empty());
+
+        // Und ohne Schiedsrichter-Betrieb greift der Schalter gar nicht:
+        // Sonst bliebe ein ausgenommenes Feld nach dem Abschalten für immer
+        // ohne Bediener — die Bedienstelle dafür ist dann unerreichbar.
+        st.officials_store().set_enabled(false);
+        st.enqueue_scorekeeper(2, vec!["B".into()], 9, 2_000);
+        st.assign_scorekeeper_for_court(5, 44);
+        assert_eq!(st.assigned_scorekeeper(5), Some(vec!["B".to_string()]));
+    }
+
+    #[test]
+    fn snapshot_bindet_das_officials_roster_ans_turnier() {
+        // Der Roster folgt dem Snapshot: Turnier binden, neue Officials in
+        // die Rotationsreihenfolge aufnehmen — beim Turnierwechsel wird der
+        // Stand verworfen (ADR 0022).
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.officials_store()
+            .set_path(dir.path().join("officials-state.json"));
+
+        let mut snap = snap_named("Cup A");
+        snap.officials = vec![official(3), official(5)];
+        st.set_snapshot(snap);
+        assert_eq!(st.officials_store().tournament(), "Cup A");
+        assert_eq!(st.officials_store().order(), vec![3, 5]);
+
+        // Zusatzdaten des laufenden Turniers …
+        st.officials_store().set_paused(3, true);
+        let mut snap = snap_named("Cup A");
+        snap.officials = vec![official(3), official(5), official(8)];
+        st.set_snapshot(snap);
+        assert_eq!(
+            st.officials_store().order(),
+            vec![3, 5, 8],
+            "neuer kommt an"
+        );
+        assert!(st.officials_store().extra(3).paused, "Pause bleibt");
+
+        // … überleben den Turnierwechsel NICHT.
+        let mut snap = snap_named("Cup B");
+        snap.officials = vec![official(9)];
+        st.set_snapshot(snap);
+        assert_eq!(st.officials_store().order(), vec![9]);
+        assert!(!st.officials_store().extra(3).paused);
+    }
+
+    #[test]
+    fn officials_for_result_reasserts_the_known_occupation() {
+        // Live-Befund 14.08.2026: Das Ergebnis-SENDUPDATE verlor die
+        // Schiedsrichter-Besetzung, wenn der Match-Knoten sie wegliess.
+        // `officials_for_result` liefert deshalb immer einen konkreten
+        // Wert, solange der Schiedsrichter-Betrieb läuft.
+        let st = TabletState::default();
+
+        // Ohne Schiedsrichter-Betrieb: nichts anfassen.
+        let mut m = match_on(10, Some(5), MatchStatus::OnCourt);
+        st.set_snapshot(snapshot(vec![m.clone()], Vec::new()));
+        assert_eq!(st.officials_for_result(10), None);
+
+        st.officials_store().set_enabled(true);
+
+        // BTP kennt die Besetzung bereits — die gewinnt.
+        m.official1_id = Some(3);
+        st.set_snapshot(snapshot(vec![m.clone()], Vec::new()));
+        assert_eq!(st.officials_for_result(10), Some((3, 0)));
+
+        // BTP kennt nichts, aber lokal ist eine Zuweisung vorgemerkt.
+        m.official1_id = None;
+        st.set_snapshot(snapshot(vec![m.clone()], Vec::new()));
+        st.officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Sr, 4);
+        assert_eq!(st.officials_for_result(10), Some((4, 0)));
+
+        // Gar nichts bekannt: explizit „niemand" (0, 0), nicht None — sonst
+        // bliebe der Request unverändert und ein späterer BTP-Eintrag würde
+        // nie überschrieben.
+        let unbekannt = match_on(11, Some(6), MatchStatus::OnCourt);
+        st.set_snapshot(snapshot(vec![unbekannt], Vec::new()));
+        assert_eq!(st.officials_for_result(11), Some((0, 0)));
+    }
+
+    #[test]
+    fn snapshot_bindet_die_auto_vergabe_ausnahmeliste_ans_turnier() {
+        // Spec `feldvergabe-ausnahme`, Muster ADR 0022: Turnier binden, beim
+        // Wechsel wird der Stand verworfen.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.set_auto_assign_exclusions_path(dir.path().join("excluded-matches.json"));
+
+        st.set_snapshot(snap_named("Cup A"));
+        st.set_auto_assign_excluded(10, true);
+        assert!(st.auto_assign_excluded(10));
+
+        // Derselbe Turniername im nächsten Snapshot lässt die Ausnahme
+        // stehen …
+        st.set_snapshot(snap_named("Cup A"));
+        assert!(st.auto_assign_excluded(10));
+
+        // … ein Turnierwechsel verwirft sie.
+        st.set_snapshot(snap_named("Cup B"));
+        assert!(!st.auto_assign_excluded(10));
+    }
+
+    #[test]
+    fn queue_reorder_never_backfills_matches_beyond_what_tl_web_could_show() {
+        // Code-Review-Fund 14.08.2026: TL-Web zeigt nur die ersten
+        // `tl::QUEUE_LIMIT` (120) Spiele. Ohne Deckel würde ein Zug
+        // ans (dort unsichtbare) Ende der VOLLEN Liste auch Spiele jenseits
+        // der 120 in den Präfix ziehen, die niemand gesehen hat.
+        let matches: Vec<BtpMatch> = (1..=125)
+            .map(|id| match_on(id, None, MatchStatus::Scheduled))
+            .collect();
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(matches, Vec::new()));
+
+        // Match 119 liegt innerhalb der sichtbaren ersten 120 — ans Ende
+        // ziehen (before=None).
+        assert!(st.queue_reorder(&crate::config::AppConfig::default(), 119, None));
+
+        assert_eq!(
+            st.queue_order_store().rank(121),
+            None,
+            "Match 121 lag jenseits der TL-Web-Kappungsgrenze — darf nicht in den Präfix gezogen werden"
+        );
+        assert_eq!(st.queue_order_store().rank(125), None);
+        // Das gezogene Match selbst landet weiterhin im Präfix.
+        assert!(st.queue_order_store().rank(119).is_some());
     }
 
     #[test]
@@ -4498,7 +6499,10 @@ mod tests {
 
         // Court-5-Abonnent bekommt den Nudge fürs Feld 5.
         let (court, seq) = parse_nudge(&sub5.try_recv().expect("Court-5 wird geweckt"));
-        assert_eq!((court, seq), (5, 1));
+        assert_eq!(court, 5);
+        // Seit S4 startet die Sequenz bei der Uhrzeit (neustart-fest), nicht
+        // bei 1 — geprüft wird deshalb nur, dass sie gesetzt ist.
+        assert!(seq > 0);
         // „Alle Felder"-Abonnent ebenfalls.
         let (court_all, _) = parse_nudge(&sub_all.try_recv().expect("Übersicht wird geweckt"));
         assert_eq!(court_all, 5);
@@ -4509,6 +6513,10 @@ mod tests {
     #[test]
     fn monitor_seq_is_monotonic_per_court() {
         // `seq` steigt je Feld streng monoton und zählt getrennt je Feld.
+        //
+        // Seit S4 (Spec monitor-livestand-push) beginnt die Zählung bei der
+        // Uhrzeit statt bei 1, damit sie über Prozess-Neustarts monoton
+        // bleibt. Geprüft wird deshalb der Abstand, nicht der absolute Wert.
         let st = TabletState::default();
         let mut a = sub_monitor(&st, Some(1));
         let mut b = sub_monitor(&st, Some(2));
@@ -4517,10 +6525,26 @@ mod tests {
         st.notify_monitor(1);
         st.notify_monitor(2);
 
-        assert_eq!(parse_nudge(&a.try_recv().unwrap()).1, 1);
-        assert_eq!(parse_nudge(&a.try_recv().unwrap()).1, 2);
-        // Feld 2 hat seinen eigenen Zähler, beginnt also wieder bei 1.
-        assert_eq!(parse_nudge(&b.try_recv().unwrap()).1, 1);
+        let erst = parse_nudge(&a.try_recv().unwrap()).1;
+        let zweit = parse_nudge(&a.try_recv().unwrap()).1;
+        assert_eq!(zweit, erst + 1, "je Anstoß genau eins weiter");
+        let feld2 = parse_nudge(&b.try_recv().unwrap()).1;
+        assert!(feld2 > 0);
+
+        // Getrennte Zählung: Ein weiterer Anstoß auf Feld 1 lässt den Wert
+        // von Feld 2 unberührt.
+        //
+        // Bewusst SO geprüft und nicht über `feld2 != zweit`: Beide Zähler
+        // starten bei der Uhrzeit, und zwei Felder können dieselbe Zahl
+        // erreichen, wenn ihre Seeds eine Millisekunde auseinanderliegen —
+        // das ist erlaubt (die Zahlen gelten je Feld, nicht global) und
+        // machte den Test sonst zufällig rot (CI-Fund 19.08.2026).
+        st.notify_monitor(1);
+        assert_eq!(
+            st.monitor_seq_of(2),
+            feld2,
+            "Feld 1 rührt die Zählung von Feld 2 nicht an"
+        );
     }
 
     #[test]
@@ -4584,5 +6608,589 @@ mod tests {
         );
         let total: usize = st.monitor_subs.read().unwrap().values().map(Vec::len).sum();
         assert_eq!(total, MAX_MONITOR_SUBS, "genau der Deckel ist eingetragen");
+    }
+
+    #[test]
+    fn ein_unbekannter_auftragstyp_verwirft_nicht_die_ganze_charge() {
+        // Ein Master mit neuerem Stand erteilt eine Ansageart, die dieser
+        // Slave noch nicht kennt (Auto-Update-Fenster: zwei Rechner, einer
+        // aktualisiert). Wird die Liste als Ganzes typisiert gelesen,
+        // scheitert an dem einen unbekannten Eintrag die GESAMTE Antwort —
+        // die ferne Halle bliebe 60 Sekunden stumm, auch fuer voellig
+        // normale Aufrufe. Genau das darf nicht passieren.
+        let json = r#"[
+          {"id":1,"hall":"Halle A","createdAtMs":1000,"kind":"officials","courtId":3},
+          {"id":2,"hall":"Halle A","createdAtMs":1001,"kind":"was_ganz_neues","courtId":4},
+          {"id":3,"hall":"Halle A","createdAtMs":1002,"kind":"officials","courtId":5}
+        ]"#;
+
+        let jobs = announce_jobs_aus_json(json);
+
+        assert_eq!(jobs.len(), 2, "die beiden bekannten Auftraege ueberleben");
+        assert_eq!(jobs[0].id, 1);
+        assert_eq!(jobs[1].id, 3);
+    }
+
+    #[test]
+    fn ein_kaputter_auftrag_verwirft_die_uebrigen_ebenso_wenig() {
+        // Die zweite Haelfte desselben Risikos, und die wahrscheinlichere
+        // (Review 18.08.2026): Nicht nur ein UNBEKANNTER Typ kann kommen,
+        // sondern auch ein bekannter mit veraendertem Rumpf — ein neues
+        // Pflichtfeld, ein Enum-Wert, den dieser Stand nicht kennt. Genau so
+        // ist `CourtCall.side` einmal entstanden; es ueberlebte nur, weil
+        // jemand an einen Serde-Default gedacht hat. Darauf darf sich der
+        // Schutz nicht verlassen: `#[serde(other)]` greift NUR beim Tag.
+        let json = r#"[
+          {"id":1,"hall":"Halle A","createdAtMs":1000,"kind":"officials","courtId":3},
+          {"id":2,"hall":"Halle A","createdAtMs":1001,"kind":"court_call","courtId":4},
+          {"id":3,"hall":"Halle A","createdAtMs":1002,"kind":"officials","courtId":5}
+        ]"#;
+
+        let jobs = announce_jobs_aus_json(json);
+
+        assert_eq!(
+            jobs.len(),
+            2,
+            "der Auftrag ohne matchId faellt weg, die uebrigen bleiben"
+        );
+        assert_eq!(jobs[0].id, 1);
+        assert_eq!(jobs[1].id, 3);
+    }
+
+    #[test]
+    fn eine_voellig_kaputte_antwort_liefert_nichts_statt_zu_stuerzen() {
+        // Abgeschnittenes JSON, HTML-Fehlerseite des Masters: nichts
+        // Brauchbares, aber auch kein Absturz.
+        assert!(announce_jobs_aus_json("nicht mal JSON").is_empty());
+        assert!(announce_jobs_aus_json(r#"{"kein":"array"}"#).is_empty());
+    }
+
+    // ── Perf-Messung der Anzeige-Strecke (Spec monitor-livestand-push, S0) ──
+
+    #[test]
+    fn ein_gezaehlter_punkt_vermerkt_schreibvorgang_und_nudge() {
+        // Die beiden Posten, die die Analyse als eigentliche Last benannt
+        // hat: der Vollschreibvorgang der live-scores.json und der
+        // Nudge-Fan-out.
+        //
+        // **Bis S2 stand hier `persist_calls == 3` — ein Schreibvorgang je
+        // Punkt.** Dass daraus einer geworden ist, ist der Beleg jener
+        // Etappe; die Gegenprobe führt
+        // `drei_punkte_in_einer_sekunde_ergeben_einen_schreibvorgang`.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.set_scores_path(dir.path().join("live-scores.json"));
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.record_score(101, 7, vec![(6, 3)]);
+        st.record_score(101, 7, vec![(7, 3)]);
+        st.flush_scores();
+
+        let s = st.perf().snapshot();
+        assert_eq!(s.persist_calls, 1, "drei Punkte, ein Schreibvorgang");
+        assert!(s.persist_bytes > 0, "die geschriebene Größe wird vermerkt");
+        assert!(s.persist_ns > 0, "die Schreibdauer wird vermerkt");
+        assert_eq!(s.nudges_sent, 3, "jeder Punkt weckt die Anzeigen");
+    }
+
+    #[test]
+    fn ein_punkt_ohne_persistenz_vermerkt_trotzdem_den_nudge() {
+        // Ohne gesetzten Pfad (Tests, Cloud-Slave) schreibt niemand — der
+        // Zähler darf dann auch nichts melden, der Nudge aber schon.
+        let st = TabletState::default();
+        st.record_score(101, 7, vec![(1, 0)]);
+        let s = st.perf().snapshot();
+        assert_eq!(s.persist_calls, 0);
+        assert_eq!(s.nudges_sent, 1);
+    }
+
+    // ── Ordnung über `seq` (Spec monitor-livestand-push, S4) ───────────────
+
+    #[test]
+    fn die_feld_sequenz_startet_neustart_fest() {
+        // Sie muss über Prozess-Neustarts monoton bleiben: Eine Anzeige, die
+        // sich `seq` gemerkt hat, verwürfe sonst nach einem Neustart des
+        // Turnier-PCs jeden neuen Stand als „veraltet", bis der Zähler den
+        // alten Wert überholt hat — die Anzeige hinge fest.
+        let st = TabletState::default();
+        let vor = now_ms();
+        st.notify_monitor(101);
+        let seq = st.monitor_seq_of(101);
+        assert!(
+            seq >= vor,
+            "die Sequenz startet bei der Uhrzeit ({seq} < {vor})"
+        );
+    }
+
+    #[test]
+    fn die_feld_sequenz_steigt_mit_jedem_nudge_und_je_feld_getrennt() {
+        let st = TabletState::default();
+        st.notify_monitor(101);
+        let erst = st.monitor_seq_of(101);
+        st.notify_monitor(101);
+        let zweit = st.monitor_seq_of(101);
+        assert!(zweit > erst, "jeder Anstoß erhöht sie");
+
+        // Ein anderes Feld hat seine eigene Zählung.
+        assert_eq!(st.monitor_seq_of(999), 0, "unberührtes Feld: keine Ordnung");
+        st.notify_monitor(999);
+        assert!(st.monitor_seq_of(999) > 0);
+    }
+
+    #[test]
+    fn die_ordnungszahlen_stehen_neben_der_feldliste() {
+        // Sie gehören **nicht** in `CourtOverview`: Die Marke der
+        // `/health`-Antwort ist ein Streuwert über die Feld-Liste, und die
+        // Zahlen steigen bei jedem Anstoß — auch bei einem ohne sichtbare
+        // Folge. Steckten sie in der Liste, wechselte die Marke jedes Mal und
+        // die Bestätigung ohne Nutzdaten aus S1 wäre wirkungslos
+        // (Review-Fund 19.08.2026).
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Feld 1"), (102, "Feld 2")],
+        ));
+        st.notify_monitor(101);
+
+        let seqs = st.monitor_seqs();
+        assert_eq!(
+            seqs.get(&101).copied(),
+            Some(st.monitor_seq_of(101)),
+            "dieselbe Zahl wie im Nudge"
+        );
+        assert!(
+            !seqs.contains_key(&102),
+            "unberührtes Feld hat keinen Eintrag (die Anzeige liest das als 0)"
+        );
+
+        // Gegenprobe: Die Feld-Liste selbst bleibt von der Zählung unberührt.
+        // Zwei Bauten um einen Anstoß herum müssen zeichengleich sein.
+        let vorher = serde_json::to_string(&st.overview()).unwrap();
+        st.notify_monitor(101);
+        let nachher = serde_json::to_string(&st.overview()).unwrap();
+        assert_eq!(
+            vorher, nachher,
+            "ein Anstoß ohne Inhaltsänderung darf die Feld-Liste nicht ändern"
+        );
+    }
+
+    // ── Zuweisungs-Nudge (Spec monitor-livestand-push, S3) ─────────────────
+
+    /// Ein Snapshot mit einem Match auf einem Feld — Satzstand einstellbar.
+    fn snapshot_mit_stand(
+        match_id: i64,
+        court_id: Option<i64>,
+        sets: Vec<(i64, i64)>,
+    ) -> BtpSnapshot {
+        let mut snap = snapshot(
+            vec![match_on(match_id, court_id, MatchStatus::OnCourt)],
+            vec![(101, "Feld 1"), (102, "Feld 2")],
+        );
+        snap.matches[0].sets = sets;
+        snap
+    }
+
+    #[test]
+    fn ein_snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld() {
+        // Das erste der beiden offenen A1-TODOs: Bisher fing nur der
+        // Poll-Fallback eine Zuweisung auf.
+        let st = TabletState::default();
+        // Erster Snapshot: Feld 101 belegt. (Beim allerersten Stand ist noch
+        // keine Anzeige verbunden — die Nudges hier sind folgenlos.)
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        // Dasselbe Match wandert auf Feld 102.
+        st.set_snapshot(snapshot_mit_stand(7, Some(102), vec![]));
+
+        let nudges = st.perf().snapshot().nudges_sent - vorher;
+        assert_eq!(
+            nudges, 2,
+            "genau die zwei betroffenen Felder: 101 wird frei, 102 belegt"
+        );
+    }
+
+    #[test]
+    fn ein_unveraenderter_snapshot_nudgt_nicht() {
+        // Der BTP-Poll läuft alle fünf Sekunden. Weckte er jedes Mal alle
+        // Anzeigen, wäre der Nudge-Kanal wertlos.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent,
+            vorher,
+            "gleiche Belegung, gleicher Stand: kein Anstoß"
+        );
+    }
+
+    #[test]
+    fn eine_raeumung_im_snapshot_nudgt() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(21, 19)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        // Das Match ist beendet und steht auf keinem Feld mehr.
+        st.set_snapshot(snapshot_mit_stand(7, None, vec![(21, 19)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent - vorher,
+            1,
+            "das freigewordene Feld wird geweckt"
+        );
+    }
+
+    #[test]
+    fn ein_btp_satzstand_sprung_nudgt() {
+        // Das zweite offene A1-TODO: Trägt jemand den Stand in BTP von Hand
+        // ein, ist kein Tablet beteiligt — der Sprung war für die Anzeigen
+        // bisher still.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(5, 3)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 3)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent - vorher,
+            1,
+            "der Satzstand-Sprung weckt das Feld"
+        );
+    }
+
+    // ── Entprellter Schreibvorgang (Spec monitor-livestand-push, S2) ───────
+
+    #[test]
+    fn ein_gezaehlter_punkt_schreibt_nicht_mehr_sofort() {
+        // Der teuerste Einzelposten der Vorher-Messung: 20 ms je Punkt,
+        // synchron im async-Handler. Der Punkt meldet jetzt nur noch, dass
+        // etwas zu schreiben ist.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.set_scores_path(dir.path().join("live-scores.json"));
+
+        st.record_score(101, 7, vec![(5, 3)]);
+
+        assert_eq!(
+            st.perf().snapshot().persist_calls,
+            0,
+            "der Punkt selbst schreibt nicht mehr"
+        );
+    }
+
+    #[test]
+    fn drei_punkte_in_einer_sekunde_ergeben_einen_schreibvorgang() {
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(pfad.clone());
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.record_score(101, 7, vec![(6, 3)]);
+        st.record_score(101, 7, vec![(7, 3)]);
+        st.flush_scores();
+
+        assert_eq!(st.perf().snapshot().persist_calls, 1);
+        // Und es steht der NEUESTE Stand in der Datei, nicht der erste.
+        assert_eq!(gespeicherte_saetze(&pfad, 101), vec![(7, 3)]);
+    }
+
+    /// Die Sätze eines Felds, wie der Zustand sie im Speicher hält.
+    fn gehaltene_saetze(st: &TabletState, court_id: i64) -> Vec<(i64, i64)> {
+        st.courts
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .map(|s| s.sets.clone())
+            .unwrap_or_default()
+    }
+
+    /// Die Sätze eines Felds, wie sie in der `live-scores.json` stehen.
+    fn gespeicherte_saetze(pfad: &Path, court_id: i64) -> Vec<(i64, i64)> {
+        let Ok(roh) = std::fs::read_to_string(pfad) else {
+            return Vec::new();
+        };
+        serde_json::from_str::<HashMap<i64, PersistedScore>>(&roh)
+            .ok()
+            .and_then(|d| d.get(&court_id).map(|s| s.sets.clone()))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn ein_inhaltsgleicher_stand_schreibt_gar_nicht() {
+        // Ein Flush ohne Änderung darf die Platte nicht anfassen — sonst
+        // schriebe der Sekundentakt einen ganzen Turniertag lang durch.
+        let dir = tempfile::tempdir().unwrap();
+        let st = TabletState::default();
+        st.set_scores_path(dir.path().join("live-scores.json"));
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.flush_scores();
+        assert_eq!(st.perf().snapshot().persist_calls, 1);
+
+        st.flush_scores();
+        st.flush_scores();
+        assert_eq!(
+            st.perf().snapshot().persist_calls,
+            1,
+            "ohne neue Änderung wird nicht geschrieben"
+        );
+
+        // Auch ein Punkt, der denselben Stand erzeugt, schreibt nicht.
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.flush_scores();
+        assert_eq!(
+            st.perf().snapshot().persist_calls,
+            1,
+            "gleicher Inhalt = kein Schreibvorgang"
+        );
+    }
+
+    #[test]
+    fn eine_match_raeumung_schreibt_synchron() {
+        // Räumung, Ergebnis und Stoppen dürfen erst zurückkehren, wenn die
+        // Datei steht — hier darf nichts im Puffer hängen bleiben.
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(pfad.clone());
+        st.record_score(101, 7, vec![(21, 19)]);
+        st.flush_scores();
+
+        assert_eq!(gespeicherte_saetze(&pfad, 101), vec![(21, 19)]);
+
+        st.clear_court(101);
+
+        assert!(
+            gespeicherte_saetze(&pfad, 101).is_empty(),
+            "der geräumte Stand ist sofort aus der Datei verschwunden"
+        );
+    }
+
+    #[test]
+    fn ein_fehlgeschlagener_schreibvorgang_wird_nachgeholt() {
+        // Ohne dieses Nachholen wäre der Versuch verloren: Das Dirty-Flag ist
+        // geleert, der Fingerabdruck unverändert — der nächste Takt kehrte
+        // sofort zurück und die Datei bliebe für den Rest des Laufs
+        // veraltet. Vor der Entprellung hätte jeder Punkt es erneut versucht.
+        //
+        // Ein Schreibfehler wird hier erzeugt, indem der Zielpfad in einem
+        // Verzeichnis liegt, das es nicht gibt.
+        let dir = tempfile::tempdir().unwrap();
+        let fehlt = dir.path().join("gibt-es-nicht").join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(fehlt.clone());
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.flush_scores();
+        assert!(!fehlt.exists(), "der Schreibvorgang musste scheitern");
+
+        // Jetzt ist der Weg frei — der nächste Takt muss es erneut versuchen.
+        std::fs::create_dir_all(fehlt.parent().unwrap()).unwrap();
+        st.flush_scores();
+
+        assert_eq!(
+            gespeicherte_saetze(&fehlt, 101),
+            vec![(5, 3)],
+            "der Stand ist beim nächsten Takt nachgeholt worden"
+        );
+    }
+
+    #[test]
+    fn ein_verlorener_puffer_wird_vom_tablet_geheilt() {
+        // Der bewusst akzeptierte Preis der Entprellung: Stürzt die App
+        // zwischen zwei Takten ab, fehlt bis zu eine Sekunde auf Platte.
+        // Tragfähig ist das nur, weil die Tablets die Wahrheit sind und
+        // ihren Stand beim Wiederverbinden erneut schicken.
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("live-scores.json");
+
+        let st = TabletState::default();
+        st.set_scores_path(pfad.clone());
+        st.record_score(101, 7, vec![(15, 12)]);
+        st.flush_scores(); // dieser Stand ist gesichert
+        st.record_score(101, 7, vec![(16, 12)]);
+        // …und hier stürzt die App ab: kein Flush mehr.
+        assert_eq!(
+            gespeicherte_saetze(&pfad, 101),
+            vec![(15, 12)],
+            "der letzte Punkt fehlt auf Platte — genau der akzeptierte Verlust"
+        );
+
+        // Neustart: Die Instanz lädt den gesicherten Stand …
+        let neu = TabletState::default();
+        neu.set_scores_path(pfad.clone());
+        neu.load_scores(&pfad);
+        assert_eq!(gehaltene_saetze(&neu, 101), vec![(15, 12)]);
+
+        // … und das wiederverbundene Tablet schickt seinen Stand erneut.
+        neu.record_score(101, 7, vec![(16, 12)]);
+        neu.flush_scores();
+        assert_eq!(gehaltene_saetze(&neu, 101), vec![(16, 12)]);
+        assert_eq!(gespeicherte_saetze(&pfad, 101), vec![(16, 12)]);
+    }
+
+    #[test]
+    fn die_datei_bleibt_neustartfest_lesbar() {
+        // Das Plattenformat ändert sich in dieser Etappe NICHT (Rollback
+        // muss zustandsfrei bleiben, siehe Spec).
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(pfad.clone());
+        st.record_score(101, 7, vec![(21, 5), (2, 9)]);
+        st.record_score(102, 8, vec![(11, 11)]);
+        st.flush_scores();
+
+        let roh = std::fs::read_to_string(&pfad).expect("Datei steht");
+        let daten: std::collections::HashMap<i64, PersistedScore> =
+            serde_json::from_str(&roh).expect("unverändertes Format");
+        assert_eq!(daten.len(), 2);
+
+        assert_eq!(gespeicherte_saetze(&pfad, 101), vec![(21, 5), (2, 9)]);
+        assert_eq!(gespeicherte_saetze(&pfad, 102), vec![(11, 11)]);
+        // Und eine frische Instanz liest ihn wie vor der Änderung.
+        let st2 = TabletState::default();
+        st2.load_scores(&pfad);
+        st2.set_snapshot(snapshot(
+            vec![match_on(7, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        assert_eq!(st2.monitor_court(101).sets, vec![(21, 5), (2, 9)]);
+        // Keine Temp-Datei bleibt liegen (atomar: schreiben, dann umbenennen).
+        assert!(!pfad.with_extension("json.tmp").exists());
+    }
+
+    // ── Antwortcache der Übersicht (Spec monitor-livestand-push, S1) ───────
+
+    #[test]
+    fn die_anzeige_revision_steigt_bei_jedem_aenderungs_ereignis() {
+        // Der Cache-Schlüssel. Steigt er nicht, zeigte eine Anzeige bis zum
+        // Ablauf der Hart-TTL einen überholten Stand.
+        let st = TabletState::default();
+        let start = st.overview_rev();
+
+        st.notify_monitor(101);
+        let nach_nudge = st.overview_rev();
+        assert!(nach_nudge > start, "ein Nudge ändert die Anzeige");
+
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        let nach_snapshot = st.overview_rev();
+        assert!(
+            nach_snapshot > nach_nudge,
+            "ein neuer BTP-Stand ändert die Anzeige"
+        );
+
+        st.bump_overview_rev();
+        assert!(
+            st.overview_rev() > nach_snapshot,
+            "und jede weitere gemeldete Änderung (z. B. Config) ebenso"
+        );
+    }
+
+    #[test]
+    fn der_uebersichts_cache_gibt_zurueck_was_er_bekam() {
+        let st = TabletState::default();
+        assert!(st.overview_cache().is_none(), "kalt = kein Cache");
+        st.set_overview_cache(
+            7,
+            "\"tag-7\"".into(),
+            "[{\"court_id\":1}]".into(),
+            "{\"1\":42}".into(),
+            5_000,
+        );
+        let c = st.overview_cache().expect("gerade abgelegt");
+        assert_eq!(c.rev, 7);
+        assert_eq!(c.etag, "\"tag-7\"");
+        assert_eq!(c.courts_json, "[{\"court_id\":1}]");
+        // Die Ordnungszahlen liegen mit im Cache — sie gehören zum selben
+        // Bau wie die Feld-Liste (Spec monitor-livestand-push, S4).
+        assert_eq!(c.seqs_json, "{\"1\":42}");
+        assert_eq!(c.gebaut_ms, 5_000);
+    }
+
+    #[test]
+    fn der_feld_cache_haengt_am_inhalt_der_vollen_antwort() {
+        // Review-Fund 19.08.2026 (Spec monitor-livestand-push, S7): Zuerst
+        // hing der Feld-Cache nur an der Revision — und war damit **schwächer
+        // als die Quelle**, aus der er geschnitten ist. Der Übersichts-Cache
+        // verlangt zweierlei: gleiche Revision UND Hart-TTL nicht abgelaufen.
+        // Die TTL ist das Sicherheitsnetz gegen Änderungen, die niemand
+        // meldet — und die gibt es wirklich: `attach_tablet`, `detach_tablet`
+        // und `record_battery` ändern die Anzeige (`tablet_connected`,
+        // `battery`), ohne die Revision zu heben. Der volle Weg richtete sich
+        // nach 250 ms von selbst, der schmale nie: Bei stehender Revision
+        // hätte er den alten Ausschnitt bis in alle Ewigkeit ausgeliefert,
+        // mit gemerkter Marke sogar als endloses „nichts Neues".
+        //
+        // Die Marke der vollen Antwort deckt beides ab — sie ist ein
+        // Inhalts-Hash und heißt damit wörtlich „derselbe Bau".
+        let st = TabletState::default();
+        let schnitt = |wert: &str| {
+            let liste = format!("[{{\"court_id\":1,\"x\":\"{wert}\"}}]");
+            let mut c = FeldCache::default();
+            c.felder
+                .insert(1, (liste, "{\"1\":9}".to_string(), format!("\"m-{wert}\"")));
+            c
+        };
+
+        let (a, _, _) = st.feld_ausschnitt("\"voll-1\"", Some(1), || schnitt("alt"));
+        assert!(a.contains("alt"));
+        assert_eq!(st.feld_schnitte(), 1);
+
+        // Gleiche Marke → nachschlagen, nicht neu schneiden.
+        let (b, _, _) = st.feld_ausschnitt("\"voll-1\"", Some(1), || schnitt("neu"));
+        assert!(b.contains("alt"), "derselbe Bau, derselbe Ausschnitt");
+        assert_eq!(st.feld_schnitte(), 1);
+
+        // Andere Marke = anderer Inhalt → neu schneiden, auch ohne dass sich
+        // die Revision je bewegt hätte.
+        let (c, _, _) = st.feld_ausschnitt("\"voll-2\"", Some(1), || schnitt("neu"));
+        assert!(c.contains("neu"), "neuer Inhalt kommt durch");
+        assert_eq!(st.feld_schnitte(), 2);
+    }
+
+    #[test]
+    fn ein_leerer_feld_cache_liefert_gueltiges_json() {
+        // Der leere Ausschnitt geht unverändert in den Antwort-Umschlag.
+        // Kämen dort leere Strings an, entstünde `"courts":,` — eine
+        // unparsbare Antwort und damit eine tote Anzeige. Als abgeleitetes
+        // `Default` war das ein stiller Fallstrick, kein Compile-Fehler.
+        let leer = FeldCache::default();
+        let (liste, zahlen, _) = TabletState::aus_feld_cache(&leer, Some(7));
+        assert_eq!(liste, "[]");
+        assert_eq!(zahlen, "{}");
+        serde_json::from_str::<serde_json::Value>(&liste).expect("gültiges JSON");
+        serde_json::from_str::<serde_json::Value>(&zahlen).expect("gültiges JSON");
+    }
+
+    #[test]
+    fn jeder_uebersichts_bau_wird_vermerkt() {
+        // `overview()` scannt je Feld alle Matches und parst je Feld JSON —
+        // die Rechnung, die S1 mit einem Antwortcache einspart. Gezählt wird
+        // sie hier, damit die Trefferquote später eine Gegenprobe hat.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        assert_eq!(st.perf().snapshot().overview_builds, 0);
+
+        let _ = st.overview();
+        let _ = st.overview();
+
+        let s = st.perf().snapshot();
+        assert_eq!(s.overview_builds, 2);
+        assert!(
+            s.overview_build_ns > 0,
+            "die Bau-Dauer wird vermerkt (Grundlage des p95)"
+        );
     }
 }

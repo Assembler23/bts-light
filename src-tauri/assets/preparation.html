@@ -204,7 +204,20 @@ main {
     var status = h('div', 'row__status');
     if (called) {
       status.appendChild(h('span', 'pill', 'In Vorbereitung'));
-      if (c.call.hall) status.appendChild(h('span', 'row__hall', c.call.hall));
+      if (c.call.hall) {
+        var hallChip = h('span', 'row__hall');
+        // Hallen-Farbmarke (Spec hallen-farben): Punkt vor dem Namen —
+        // strikte #rrggbb-Form, der Wert landet in einem Style. Alte
+        // Hosts liefern kein hall_color → Chip bleibt wie bisher.
+        if (c.hall_color && /^#[0-9a-f]{6}$/.test(c.hall_color)) {
+          var dot = document.createElement('span');
+          dot.setAttribute('aria-hidden', 'true');
+          dot.style.cssText = 'display:inline-block;width:.55em;height:.55em;border-radius:50%;margin-right:.35em;background:' + c.hall_color;
+          hallChip.appendChild(dot);
+        }
+        hallChip.appendChild(document.createTextNode(c.call.hall));
+        status.appendChild(hallChip);
+      }
       if (c.call.called_at_ms) status.appendChild(h('span', 'row__since', sinceLabel(c.call.called_at_ms)));
     } else {
       status.appendChild(h('span', 'row__since', 'eingeplant'));
@@ -234,6 +247,24 @@ main {
       candidates = candidates.filter(function (c) {
         return c.call && hallKey(c.call.hall) === wanted;
       });
+      // Hallen-Farbmarke in der Kopfzeile (Spec hallen-farben): Farbe aus
+      // dem ersten Kandidaten dieser Halle; ohne Kandidaten/altem Host
+      // bleibt der Kopf wie bisher (nur Text).
+      var kopfFarbe = '';
+      for (var i = 0; i < candidates.length; i++) {
+        if (candidates[i].hall_color) { kopfFarbe = candidates[i].hall_color; break; }
+      }
+      var kopf = document.getElementById('hall-name');
+      if (kopf) {
+        kopf.textContent = '';
+        if (kopfFarbe && /^#[0-9a-f]{6}$/.test(kopfFarbe)) {
+          var kopfDot = document.createElement('span');
+          kopfDot.setAttribute('aria-hidden', 'true');
+          kopfDot.style.cssText = 'display:inline-block;width:.5em;height:.5em;border-radius:50%;margin-right:.35em;background:' + kopfFarbe;
+          kopf.appendChild(kopfDot);
+        }
+        kopf.appendChild(document.createTextNode('· ' + hallFilter));
+      }
     }
 
     candidates = candidates.slice(0, MAX_ROWS);
@@ -287,7 +318,7 @@ main {
   function resolveDest(redirectTo) { return BASE + String(redirectTo).replace(/^\//, ''); }
   function checkReassignment() {
     if (!deviceId) return;
-    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId), { cache: 'no-store' })
+    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s) return;
@@ -334,6 +365,7 @@ main {
   (function sponsorBar() {
     var box = document.getElementById('sponsor-bar');
     if (!box) return;
+    // Ohne Abgleich auf Unverändertheit — Begründung siehe monitor.html.
     function paint(st) {
       var h = '';
       if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';

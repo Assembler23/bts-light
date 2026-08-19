@@ -210,6 +210,19 @@ pub struct CourtMonitorConfig {
     /// übereinander. Sinnvoll, wenn ein TV zwischen zwei Feldern steht.
     /// Hängt `&dir=v` an die Kombi-URL.
     pub combo_vertical: bool,
+    /// Darf eine Anzeige mit gesundem Push-Kanal ihren Sicherheits-Poll auf
+    /// vier Sekunden verlangsamen (Spec monitor-livestand-push, S6)?
+    ///
+    /// **Standardmäßig aus.** Der langsame Takt ist der eigentliche
+    /// Last-Gewinn der Spec — und zugleich ihr größtes Risiko: Wer sich auf
+    /// den Push verlässt, hängt daran, dass „Kanal ist gesund" wirklich
+    /// stimmt. Deshalb bleibt er ein bewusst zu setzender Schalter, und eine
+    /// frisch aktualisierte Installation verhält sich exakt wie vorher.
+    ///
+    /// `#[serde(default)]` über die ganze Struktur hält ältere
+    /// `config.json` lesbar.
+    #[serde(default)]
+    pub push_fallback_slow: bool,
 }
 
 impl Default for CourtMonitorConfig {
@@ -225,6 +238,9 @@ impl Default for CourtMonitorConfig {
             show_ads: true,
             layout: "split".to_string(),
             combo_vertical: false,
+            // Aus (Spec monitor-livestand-push, S6): Eine frisch
+            // aktualisierte Installation verhält sich exakt wie vorher.
+            push_fallback_slow: false,
         }
     }
 }
@@ -262,6 +278,45 @@ impl Default for CallTimerConfig {
             not_started_minutes: 5.0,
         }
     }
+}
+
+/// Startzeit-Prognose in der Turnierleitungs-Oberfläche (Spec
+/// `docs/features/spielzeiten-prognose.md`, E7). Standardmäßig **an** —
+/// reine Anzeige ohne Schreibpfad; wer sie nicht will, schaltet sie im
+/// Setup ab.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PredictionConfig {
+    /// Prognostizierte Startzeiten in TL-Web anzeigen?
+    pub enabled: bool,
+    /// Angenommene Bruttodauer eines Spiels (Minuten), solange weder die
+    /// Gruppe (Klasse × Disziplin) noch Klasse oder Turnier mindestens
+    /// drei Messwerte haben.
+    pub default_duration_mins: f64,
+}
+
+impl Default for PredictionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_duration_mins: 25.0,
+        }
+    }
+}
+
+/// Automatische Hallen-Vorverteilung (Spec
+/// `docs/features/hallen-vorverteilung.md`, ADR 0029/0030). Opt-in —
+/// standardmäßig aus; nur bei Mehr-Hallen-Turnieren wirksam, und niemals
+/// zusammen mit einer gesetzten aktiven Halle (E2).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HallPrefillConfig {
+    /// Vorverteilung aktiv?
+    pub enabled: bool,
+    /// Fenstergröße x — wie viele Spiele im Voraus eine Halle bekommen.
+    /// 0 = automatisch (Gesamtzahl der Spielfelder, B4). Host klemmt auf
+    /// 1..=120 (Wartelisten-Limit).
+    pub window: u32,
 }
 
 /// Zähltafelbediener-Verwaltung (ADR 0007, Phase 1). Opt-in — standardmäßig
@@ -424,7 +479,8 @@ pub struct DisciplineHallRule {
 /// Turnierlogo für den badhub-Liveticker. BTP liefert kein Logo (verifiziert),
 /// deshalb lädt es der Operator in den Einstellungen hoch; bts-light schickt es
 /// im `tset`-Event mit, wo badhubs `#live-logo`-Element es anzeigt — genau wie
-/// das Original-BTS. Leere `data` ⇒ kein Logo (Felder werden dann nicht gesendet).
+/// das Original-BTS. Leere `data` ⇒ kein Logo; die Felder reisen dann **leer**
+/// mit (`""` heißt für badhub „löschen", ein fehlendes Feld „unverändert").
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct LogoConfig {
@@ -525,6 +581,15 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub call_timer: CallTimerConfig,
+    /// Startzeit-Prognose (Spec `spielzeiten-prognose`). `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub prediction: PredictionConfig,
+    /// Automatische Hallen-Vorverteilung (Spec `hallen-vorverteilung`).
+    /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar;
+    /// Default ist **aus**.
+    #[serde(default)]
+    pub hall_prefill: HallPrefillConfig,
     /// Zähltafelbediener-Verwaltung (ADR 0007). `#[serde(default)]` hält
     /// ältere Konfigurationsdateien lesbar.
     #[serde(default)]
@@ -572,6 +637,14 @@ pub struct AppConfig {
     /// leer = Fließ-Darstellung ohne festes Raster.
     #[serde(default)]
     pub hall_layouts: Vec<HallLayoutConfig>,
+    /// Farb-Übersteuerungen je Halle (Spec hallen-farben, ADR 0031). Bewusst
+    /// eine EIGENE namensbasierte Zuordnung neben `hall_layouts` — eine Halle
+    /// kann eine Farbe ohne Raster haben (und umgekehrt). Leer = alle Hallen
+    /// bekommen ihre Farbe aus der Auto-Palette (`hall_colors::HALL_PALETTE`,
+    /// ADR 0032). `#[serde(default)]` hält ältere Konfigurationsdateien
+    /// lesbar.
+    #[serde(default)]
+    pub hall_colors: Vec<HallColorConfig>,
     /// A2 / ADR 0017 (Reconnect-Wahrheit): Rückfall auf das alte
     /// rev-Zähler-Verhalten. `false` (Default) = NEUES Ownership-Verhalten
     /// aktiv — nach einem Tablet-Reconnect entscheidet der Slot-Halter, wessen
@@ -623,6 +696,16 @@ pub struct HallLayoutConfig {
     pub vertical: bool,
 }
 
+/// Farb-Übersteuerung einer Halle (Spec hallen-farben, ADR 0031/0033).
+/// `color` ist immer ein Palettenton als lowercase `#rrggbb` — validiert
+/// am einzigen Schreibpunkt `upsert_hall_color`, damit der Draht überall
+/// den Hex-Wert selbst tragen kann.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HallColorConfig {
+    pub hall: String,
+    pub color: String,
+}
+
 /// Ein gekoppeltes Turnierleitungs-Gerät (ADR 0012).
 ///
 /// Das `token` ist der Zugang — **vom Turnier-PC ausgestellt**, damit die
@@ -646,6 +729,14 @@ pub struct TlDevice {
     /// Stufe noch nicht erzwungen, aber vorgesehen, damit ein Helfer der
     /// zweiten Halle später nicht versehentlich in der ersten vergibt.
     pub hall: String,
+    /// Gewähltes Panel-Profil (Spec tl-web-panelsystem, ADR 0025). Leer =
+    /// `TlWebConfig.default_profile_id` (bzw. das eingebaute Standardprofil,
+    /// wenn auch das leer ist). Kein eigenes `#[serde(default)]` nötig — der
+    /// Container trägt bereits `#[serde(default)]`, das deckt fehlende
+    /// Felder in jeder Tiefe ab (siehe `tl_device_without_hall_loads_unrestricted`).
+    /// Wird bewusst NICHT vom Identitäts-Export mitgenommen (bleibt lokal an
+    /// diesem Gerät hängen, wie Token/Label).
+    pub profile_id: String,
 }
 
 /// Turnierleitungs-Oberfläche im Browser (ADR 0012/0012). Opt-in —
@@ -665,6 +756,24 @@ pub struct TlWebConfig {
     /// Die gekoppelten Geräte. Entfernen = Zugang entziehen; mehr braucht
     /// der Widerruf nicht.
     pub devices: Vec<TlDevice>,
+    /// Der Panel-Profil-Katalog (Spec tl-web-panelsystem, ADR 0024/0025) —
+    /// installationsweit, nicht turniergebunden (Profile sind
+    /// geräteklassen-, keine Turnierdaten). Angelegt/bearbeitet/gelöscht
+    /// wird ausschließlich über `TlAction` aus `tl.html` (R1 greift hier
+    /// nicht, siehe ADR 0024), nie über den Setup-Assistenten — deshalb
+    /// schützt `keep_host_managed_fields` dieses Feld wie `devices`.
+    ///
+    /// Kein eigenes `#[serde(default)]`: Dieser Struct trägt bereits
+    /// `#[serde(default)]` auf Container-Ebene (siehe oben), das deckt jedes
+    /// fehlende Feld ab — anders als `HallLayoutConfig.vertical`, dessen
+    /// Struct KEINEN Container-Default hat. Ein weiteres `#[serde(default)]`
+    /// hier wäre redundant.
+    pub profiles: Vec<TlPanelProfile>,
+    /// Turnierweiter Standard, wenn ein Gerät kein eigenes Profil gewählt
+    /// hat. Leer = eingebautes Standardprofil (`tl.html` kennt es, ohne dass
+    /// es hier ein Element bräuchte). Selbe Begründung wie bei `profiles`:
+    /// kein eigenes `#[serde(default)]` nötig.
+    pub default_profile_id: String,
 }
 
 impl TlWebConfig {
@@ -701,6 +810,164 @@ impl TlWebConfig {
         self.devices.retain(|d| d.id != id);
         self.devices.len() != vorher
     }
+}
+
+/// Seite, auf der die Warteliste/Ergebnis-Spalte im Panel-System erscheint
+/// (Spec tl-web-panelsystem). Muster [`LayoutOrigin`]: Rust-Enum statt
+/// String, `rename_all = "snake_case"` liefert dieselbe Wire-Form wie
+/// `relay_proto::TlListPositionWire`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlListPosition {
+    Right,
+    Bottom,
+}
+
+/// Nach welcher Achse das Panel „Spielzeiten" gruppiert (Spec
+/// `tl-sicht-feinschliff`, Punkt 1). Muster [`TlListPosition`]: Rust-Enum
+/// statt String, `rename_all = "snake_case"` liefert dieselbe Wire-Form wie
+/// `relay_proto::TlTimeStatsAxisWire`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlTimeStatsAxis {
+    /// Klasse × Disziplin („HE-A") — die ursprüngliche Ansicht.
+    ///
+    /// Bewusst **ohne** `#[serde(other)]`-Auffang: Serde verlangt den auf
+    /// der letzten Variante, und dieselbe Lücke hat der Nachbar
+    /// [`TlListPosition`] seit jeher. Folge: Rollt jemand von einer
+    /// künftigen Version mit einer fünften Achse zurück, scheitert das
+    /// Laden der `config.json`. Wenn das je auftritt, gehört der Auffang
+    /// an BEIDE Enums — nicht nur hier.
+    Group,
+    /// Nur die Klasse, über alle Disziplinen.
+    Class,
+    /// Nur die Disziplin, über alle Klassen.
+    Discipline,
+    /// Nur die Halle. Bei Ein-Hallen-Turnieren nicht wählbar.
+    Hall,
+}
+
+impl Default for TlTimeStatsAxis {
+    /// **Zugleich die fachliche Vorgabe**, anders als bei
+    /// [`TlListPosition`]: Ein Profil, das die Einstellung noch nicht
+    /// kennt (jedes vor v0.9.231 gespeicherte), landet damit auf der
+    /// bisherigen Ansicht — für niemanden ändert sich etwas, der nichts
+    /// umstellt (Akzeptanzkriterium A1.2).
+    fn default() -> Self {
+        Self::Group
+    }
+}
+
+impl Default for TlListPosition {
+    /// Reiner Serde-Nothilfe-Wert für ein einzelnes, unvollständig
+    /// gespeichertes Profil (siehe `TlDisplaySettings`) — **nicht** die
+    /// fachliche Vorgabe. Das eingebaute Standardprofil (Liste rechts) lebt
+    /// in `tl.html`, nicht hier.
+    fn default() -> Self {
+        Self::Right
+    }
+}
+
+/// Ein einzelnes Panel innerhalb eines [`TlPanelProfile`]: Sichtbarkeit +
+/// relative Höhe. `key` benennt den Abschnitt (`"courts"`, `"walkovers"`,
+/// `"scorekeepers"`, `"officials"`, `"queue_called"`, `"queue_ready"`,
+/// `"queue_waiting"`, `"queue_no_hall"`, `"finished"`) — als String statt
+/// Enum, damit künftige Panels ohne Protokolländerung dazukommen können.
+///
+/// `#[serde(default)]` auf Container-Ebene: Ein einzelnes Profil-Element,
+/// dem (z. B. nach einer künftigen Erweiterung) ein Feld fehlt, soll das
+/// Laden der GANZEN `config.json` nicht zum Scheitern bringen — Muster
+/// [`TlDevice`], nicht [`HallLayoutConfig`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TlPanelSetting {
+    pub key: String,
+    pub visible: bool,
+    /// Relative Höhen-Gewichtung; clientseitig gegen ein Mindestmaß
+    /// geklammert (`tl.html`), hier unbeschränkt gespeichert.
+    pub height_fr: f64,
+    /// Zugeklappt? **Zweite, unabhängige Dimension neben `visible`**:
+    /// ausgeblendet (`visible = false`) heißt „gar nicht da", zugeklappt
+    /// heißt „Kopfzeile sichtbar, Inhalt eingeklappt". Beide Zustände
+    /// liegen im Profil, überstehen also den Reload.
+    ///
+    /// Fehlt das Feld (Bestandsprofile), greift `false` — aufgeklappt,
+    /// also das bisherige Verhalten.
+    pub collapsed: bool,
+    /// In welcher Spalte des Mehrspalten-Layouts das Panel steht —
+    /// **1-basiert**, passend zu [`TlPanelProfile::columns`].
+    ///
+    /// `0`/fehlend heißt „Spalte 1". Die eine Ausnahme ist ein Profil, dem
+    /// auch `columns` fehlt: Dort leitet `tl.html` die ganze Aufteilung aus
+    /// `display.list_position` ab („rechts" = Felder links, Rest rechts).
+    /// Diese Ableitung sitzt bewusst **nur dort** — der Host reicht die
+    /// Zahlen durch und kennt die Panel-Fachlichkeit nicht.
+    pub column: u8,
+}
+
+/// Turnierweite Anzeige-Optionen eines Panel-Profils — dieselben Schalter,
+/// die vorher als lose `localStorage`-Werte in `tl.html` lebten (Spec
+/// tl-web-panelsystem). Container-`#[serde(default)]` wie
+/// [`TlPanelSetting`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TlDisplaySettings {
+    pub show_numbers: bool,
+    pub show_nations: bool,
+    pub show_club_names: bool,
+    pub show_club_logos: bool,
+    pub show_discipline: bool,
+    pub show_round: bool,
+    pub show_group: bool,
+    /// Geschätzte Restzeit laufender Spiele am Feld anzeigen (Spec
+    /// `spielzeiten-prognose`, Etappe D)? Default aus, wie die anderen
+    /// Zusatzfelder.
+    pub show_court_remaining: bool,
+    /// Aufrufe am Feld beliebig oft anbieten — auch über den dritten hinaus
+    /// und auch bei laufendem Spiel (Feldtest 17.08.2026). Default aus:
+    /// Dann endet der Knopf wie bisher nach dem dritten Aufruf.
+    pub unlimited_court_calls: bool,
+    pub list_position: TlListPosition,
+    /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
+    /// Gehört ins Profil und nicht ins Gerät: Sie beschreibt, WAS gezeigt
+    /// wird — dieselbe Regel, die das Panelsystem für alle Inhalts-Schalter
+    /// zieht (einzige Ausnahme dort ist der Schriftgrößen-Zoom, eine reine
+    /// Display-Eigenschaft).
+    pub time_stats_axis: TlTimeStatsAxis,
+}
+
+/// Ein benanntes Panel-Profil: Panel-Sichtbarkeit/-Reihenfolge/-Höhe +
+/// Anzeige-Optionen, an einem einzigen Ort statt auf drei Bedienstellen
+/// verstreut (Spec tl-web-panelsystem, ADR 0024/0025). `panels`-Reihenfolge
+/// = Panel-Reihenfolge auf der Seite.
+///
+/// Enthält **keine Personendaten** — reine Layout-/Sichtbarkeits-Angaben,
+/// deshalb ohne Bedenken auf einer aus dem Internet erreichbaren Seite
+/// pflegbar (ADR 0024) und ohne Bedenken im Identitäts-Export enthalten
+/// (`identity_bundle` strippt dieses Feld NICHT, anders als `TlDevice`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TlPanelProfile {
+    pub id: String,
+    pub name: String,
+    pub panels: Vec<TlPanelSetting>,
+    pub display: TlDisplaySettings,
+    /// Spaltenzahl des Seitenlayouts (1…3, feste Presets — kein freies
+    /// Dashboard). `0`/fehlend = aus `display.list_position` ableiten:
+    /// „rechts" ⇒ zwei Spalten (Felder links, alles Übrige rechts),
+    /// „darunter" ⇒ eine Spalte. Damit sehen Bestandsprofile unverändert
+    /// aus, ohne dass `list_position` entfernt werden müsste.
+    ///
+    /// Die Ableitung selbst steht **ausschließlich** in `tl.html`
+    /// (`normalizedLayout()`) — hier wird nur gespeichert, was ankommt.
+    pub columns: u8,
+    /// Relative Spaltenbreiten, wie [`TlPanelSetting::height_fr`] bei den
+    /// Panel-Höhen: leer = gleichmäßig. Geklammert wird clientseitig
+    /// (`tl.html`), hier unbeschränkt gespeichert.
+    pub column_widths: Vec<f64>,
+    /// Last-Write-Wins-Marker — **immer** vom Host beim Speichern
+    /// gestempelt (`tablet::tl::profile_save`), nie vom Client übernommen.
+    pub updated_at_ms: u64,
 }
 
 impl AppConfig {
@@ -777,6 +1044,44 @@ impl AppConfig {
             .retain(|l| !l.hall.trim().eq_ignore_ascii_case(hall));
         self.hall_layouts.len() != vorher
     }
+
+    /// Übersteuert die Farbe einer Halle (oder ersetzt die Übersteuerung).
+    /// Gleiche Matching-Regeln wie `upsert_hall_layout`: getrimmt gespeichert,
+    /// case-insensitiv ersetzt. Nur Palettentöne sind zulässig — das ist der
+    /// EINZIGE Punkt mit Palettenzwang (ADR 0033), der Draht trägt danach
+    /// den Hex-Wert selbst.
+    pub fn upsert_hall_color(&mut self, hall: &str, color: &str) -> Result<(), String> {
+        let hall = hall.trim();
+        if hall.is_empty() {
+            return Err("Halle darf nicht leer sein.".to_string());
+        }
+        let color = color.trim().to_lowercase();
+        if !crate::hall_colors::HALL_PALETTE.contains(&color.as_str()) {
+            return Err("Die Farbe muss ein Ton aus der Palette sein.".to_string());
+        }
+        // Voller `to_lowercase`-Vergleich statt `eq_ignore_ascii_case`:
+        // Hallennamen tragen Umlaute („Süd"), und der Lese-Resolver
+        // (`hall_colors::effective_hall_colors`) schlüsselt genauso —
+        // sonst ersetzte „süd" die Zeile „SÜD" nie (Review 2026-08-16).
+        let schluessel = hall.to_lowercase();
+        self.hall_colors
+            .retain(|c| c.hall.trim().to_lowercase() != schluessel);
+        self.hall_colors.push(HallColorConfig {
+            hall: hall.to_string(),
+            color,
+        });
+        Ok(())
+    }
+
+    /// Entfernt die Farb-Übersteuerung einer Halle — zurück zur Auto-Palette.
+    /// `true`, wenn es eine gab (Matching wie `upsert_hall_color`).
+    pub fn remove_hall_color(&mut self, hall: &str) -> bool {
+        let schluessel = hall.trim().to_lowercase();
+        let vorher = self.hall_colors.len();
+        self.hall_colors
+            .retain(|c| c.hall.trim().to_lowercase() != schluessel);
+        self.hall_colors.len() != vorher
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -846,6 +1151,45 @@ mod tests {
         let path = std::env::temp_dir().join("bts-light-does-not-exist-xyz.json");
         let _ = std::fs::remove_file(&path);
         assert_eq!(AppConfig::load_from(&path).unwrap(), AppConfig::default());
+    }
+
+    #[test]
+    fn prediction_config_defaults_and_roundtrip() {
+        // Alte Configs ohne `prediction`-Block laden mit Defaults (Spec
+        // `spielzeiten-prognose`, E7): Prognose an, 25 Minuten Startwert.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config lädt");
+        assert!(cfg.prediction.enabled);
+        assert_eq!(cfg.prediction.default_duration_mins, 25.0);
+        // … und geänderte Werte überleben den Roundtrip.
+        let mut cfg = cfg;
+        cfg.prediction.enabled = false;
+        cfg.prediction.default_duration_mins = 18.0;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(wieder.prediction, cfg.prediction);
+    }
+
+    #[test]
+    fn hall_prefill_defaults_and_roundtrip() {
+        // Alte Configs ohne `hall_prefill` laden mit Default AUS (Spec
+        // `hallen-vorverteilung`, B3); gesetzte Werte überleben.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config lädt");
+        assert!(!cfg.hall_prefill.enabled);
+        assert_eq!(cfg.hall_prefill.window, 0, "0 = automatisch");
+        let mut cfg = cfg;
+        cfg.hall_prefill.enabled = true;
+        cfg.hall_prefill.window = 18;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(wieder.hall_prefill, cfg.hall_prefill);
     }
 
     #[test]
@@ -948,6 +1292,142 @@ mod tests {
             !cfg.hall_layouts[0].vertical,
             "fehlendes vertical muss false sein (Bestandsverhalten reihenweise)"
         );
+    }
+
+    /// Spec tl-web-panelsystem: Ein Panel-Profil (inkl. verschachtelter
+    /// Panel-Liste + Anzeige-Optionen) übersteht Serialisieren + Laden
+    /// unverändert.
+    #[test]
+    fn tl_panel_profile_serde_roundtrip() {
+        let profile = TlPanelProfile {
+            id: "profil-1".to_string(),
+            name: "Wandmonitor Halle 2".to_string(),
+            panels: vec![
+                TlPanelSetting {
+                    key: "courts".to_string(),
+                    visible: true,
+                    height_fr: 3.0,
+                    collapsed: false,
+                    column: 1,
+                },
+                TlPanelSetting {
+                    key: "officials".to_string(),
+                    visible: true,
+                    height_fr: 1.0,
+                    collapsed: true,
+                    column: 2,
+                },
+                TlPanelSetting {
+                    key: "finished".to_string(),
+                    visible: false,
+                    height_fr: 1.0,
+                    collapsed: false,
+                    column: 3,
+                },
+            ],
+            display: TlDisplaySettings {
+                show_numbers: true,
+                show_nations: true,
+                show_club_names: false,
+                show_club_logos: false,
+                show_discipline: true,
+                show_round: true,
+                show_group: false,
+                show_court_remaining: true,
+                unlimited_court_calls: true,
+                list_position: TlListPosition::Bottom,
+                time_stats_axis: Default::default(),
+            },
+            columns: 3,
+            column_widths: vec![2.0, 1.0, 1.5],
+            updated_at_ms: 1_700_000_000_000,
+        };
+        let json = serde_json::to_string(&profile).expect("serialisiert");
+        let back: TlPanelProfile = serde_json::from_str(&json).expect("lädt");
+        assert_eq!(profile, back);
+    }
+
+    /// Ein Profil aus einer `config.json` von vor dem Mehrspalten-Layout
+    /// kennt weder `columns`/`column_widths` noch `column` am Panel. Es lädt
+    /// trotzdem — und zwar mit den Nullwerten, die `tl.html` als „aus
+    /// `list_position` ableiten" bzw. „Spalte 1" liest. Ohne das wäre die
+    /// ganze `config.json` unlesbar.
+    #[test]
+    fn tl_panel_profile_columns_default_to_zero_on_old_config() {
+        let profile: TlPanelProfile = serde_json::from_str(
+            r#"{"id":"profil-1","name":"Alt",
+                "panels":[{"key":"queue","visible":true,"height_fr":2.0,"collapsed":false}],
+                "display":{"list_position":"right"},
+                "updated_at_ms":1}"#,
+        )
+        .expect("altes Profil lädt");
+        assert_eq!(profile.columns, 0, "0 = aus list_position ableiten");
+        assert!(profile.column_widths.is_empty(), "leer = gleichmäßig");
+        assert_eq!(profile.panels[0].column, 0, "0 = Spalte 1");
+    }
+
+    /// Ein Profil aus einer `config.json` von vor dem Auf-/Zuklappen kennt
+    /// `collapsed` nicht — es lädt trotzdem, und zwar aufgeklappt (das
+    /// bisherige Verhalten), nicht zugeklappt.
+    #[test]
+    fn tl_panel_setting_collapsed_defaults_to_open_on_old_config() {
+        let profile: TlPanelProfile = serde_json::from_str(
+            r#"{"id":"profil-1","name":"Alt",
+                "panels":[{"key":"queue","visible":true,"height_fr":2.0}],
+                "updated_at_ms":1}"#,
+        )
+        .expect("altes Profil lädt");
+        assert_eq!(profile.panels.len(), 1);
+        assert!(!profile.panels[0].collapsed);
+    }
+
+    /// Ein neu gekoppeltes Gerät (bzw. eines aus einer `config.json` ohne
+    /// das Feld) hat keine Profilbindung — leer heißt „Standardprofil"
+    /// (ADR 0025).
+    #[test]
+    fn tl_device_profile_id_defaults_empty_on_old_config() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"h","port":1,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "tl_web":{"enabled":true,"devices":[
+                    {"id":"d","token":"t","label":"L","created_at_ms":1}]}}"#,
+        )
+        .expect("Config mit altem Geräte-Eintrag ohne profile_id lädt");
+        assert_eq!(cfg.tl_web.devices.len(), 1);
+        assert!(cfg.tl_web.devices[0].profile_id.is_empty());
+    }
+
+    /// Fehlt der ganze `profiles`/`default_profile_id`-Block (ältere
+    /// `config.json`), bleibt `tl_web` trotzdem ladbar — Container-Default
+    /// von `TlWebConfig` deckt beide neuen Felder ab.
+    #[test]
+    fn tl_web_config_profiles_default_empty_on_missing_field() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"h","port":1,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "tl_web":{"enabled":true,"devices":[]}}"#,
+        )
+        .expect("Config mit tl_web-Block ohne Profil-Felder lädt");
+        assert!(cfg.tl_web.profiles.is_empty());
+        assert!(cfg.tl_web.default_profile_id.is_empty());
+    }
+
+    /// Eine komplette `config.json` aus einer Version vor diesem Feature
+    /// (kein `tl_web`-Block überhaupt) lädt unverändert — dieselbe Prüfung
+    /// wie bei anderen Feature-Einführungen (`officials_default_off_and_old_config_stays_readable`),
+    /// hier über den ganzen Rollout-Weg hinweg: von „gar kein tl_web" bis
+    /// „tl_web ohne die neuen Felder".
+    #[test]
+    fn old_config_without_profiles_stays_readable() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config ganz ohne tl_web lädt");
+        assert!(!cfg.tl_web.enabled);
+        assert!(cfg.tl_web.devices.is_empty());
+        assert!(cfg.tl_web.profiles.is_empty());
+        assert!(cfg.tl_web.default_profile_id.is_empty());
     }
 
     fn rule(disc: &str, draw: &str, hall: &str) -> DisciplineHallRule {
@@ -1089,12 +1569,21 @@ mod tests {
                 show_ads: false,
                 layout: "split".to_string(),
                 combo_vertical: true,
+                push_fallback_slow: true,
             },
             call_timer: CallTimerConfig {
                 enabled: true,
                 second_call_minutes: 1.5,
                 third_call_minutes: 3.0,
                 not_started_minutes: 6.0,
+            },
+            prediction: PredictionConfig {
+                enabled: false,
+                default_duration_mins: 18.0,
+            },
+            hall_prefill: HallPrefillConfig {
+                enabled: true,
+                window: 12,
             },
             scorekeeper: ScorekeeperConfig {
                 enabled: true,
@@ -1136,7 +1625,29 @@ mod tests {
                     label: "Tablet Meeting Point".to_string(),
                     created_at_ms: 1_700_000_000_000,
                     hall: "Halle A".to_string(),
+                    profile_id: "profil-1".to_string(),
                 }],
+                profiles: vec![TlPanelProfile {
+                    id: "profil-1".to_string(),
+                    name: "Wandmonitor".to_string(),
+                    panels: vec![TlPanelSetting {
+                        key: "courts".to_string(),
+                        visible: true,
+                        height_fr: 2.0,
+                        collapsed: true,
+                        column: 1,
+                    }],
+                    display: TlDisplaySettings {
+                        show_numbers: true,
+                        list_position: TlListPosition::Bottom,
+                        time_stats_axis: Default::default(),
+                        ..Default::default()
+                    },
+                    columns: 2,
+                    column_widths: vec![1.5, 1.0],
+                    updated_at_ms: 1_700_000_000_500,
+                }],
+                default_profile_id: "profil-1".to_string(),
             },
             hall_layouts: vec![HallLayoutConfig {
                 hall: "Halle A".to_string(),
@@ -1144,6 +1655,10 @@ mod tests {
                 origin: LayoutOrigin::TopLeft,
                 serpentine: true,
                 vertical: true,
+            }],
+            hall_colors: vec![HallColorConfig {
+                hall: "Halle A".to_string(),
+                color: crate::hall_colors::HALL_PALETTE[0].to_string(),
             }],
             display: DisplayConfig {
                 show_club_names: true,
@@ -1258,6 +1773,7 @@ mod tests {
             label: "Tablet Turnierleitung".to_string(),
             created_at_ms: 1_700_000_000_000,
             hall: "Halle 2".to_string(),
+            profile_id: String::new(),
         });
         cfg.save_to(&path).unwrap();
 
@@ -1441,6 +1957,7 @@ mod tl_device_tests {
             label: "Tablet".to_string(),
             created_at_ms: 1,
             hall: String::new(),
+            profile_id: String::new(),
         }
     }
 
@@ -1554,5 +2071,108 @@ mod hall_layout_tests {
         cfg.upsert_hall_layout(layout("Halle 1", 2)).unwrap();
         assert!(!cfg.remove_hall_layout("Halle 2"));
         assert_eq!(cfg.hall_layouts.len(), 1, "unbekannte Halle ändert nichts");
+    }
+}
+
+#[cfg(test)]
+mod hall_color_tests {
+    use super::*;
+    use crate::hall_colors::HALL_PALETTE;
+
+    #[test]
+    fn hall_colors_survive_a_config_roundtrip_and_default_empty() {
+        // Alte Configs ohne das Feld müssen lesbar bleiben (Auto-Update!) —
+        // und gespeicherte Übersteuerungen den Neustart überleben.
+        let mut json: serde_json::Value =
+            serde_json::to_value(AppConfig::default()).expect("Default serialisiert");
+        json.as_object_mut()
+            .unwrap()
+            .remove("hall_colors")
+            .expect("Feld existiert im neuen Schema");
+        let alt: AppConfig = serde_json::from_value(json).expect("alte Config lädt");
+        assert!(
+            alt.hall_colors.is_empty(),
+            "Default ist leer = Auto-Palette"
+        );
+
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Nord", HALL_PALETTE[3]).unwrap();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(wieder.hall_colors, cfg.hall_colors);
+    }
+
+    #[test]
+    fn upsert_hall_color_trims_and_replaces_case_insensitive() {
+        // "Halle 1 " und "halle 1" müssen dieselbe Zeile treffen — sonst
+        // entstünde ein Duplikat und remove fände die Zeile nie wieder
+        // (dasselbe Muster wie upsert_hall_layout).
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Halle 1", HALL_PALETTE[0]).unwrap();
+        cfg.upsert_hall_color("  halle 1  ", HALL_PALETTE[4])
+            .unwrap();
+        assert_eq!(cfg.hall_colors.len(), 1, "keine Dublette");
+        assert_eq!(
+            cfg.hall_colors[0].color, HALL_PALETTE[4],
+            "neuer Stand gewinnt"
+        );
+        assert_eq!(cfg.hall_colors[0].hall, "halle 1", "getrimmt gespeichert");
+    }
+
+    #[test]
+    fn upsert_hall_color_rejects_a_tone_outside_the_palette() {
+        // Der Palettenzwang gilt am einzigen Schreibpunkt (ADR 0033) — auch
+        // ein gültiges Hex außerhalb der Palette wird abgelehnt.
+        let mut cfg = AppConfig::default();
+        let err = cfg.upsert_hall_color("Nord", "#123456").unwrap_err();
+        assert!(err.contains("Palette"), "deutsche Fehlermeldung: {err}");
+        assert!(cfg.hall_colors.is_empty(), "nichts gespeichert");
+        let err = cfg.upsert_hall_color("Nord", "rot").unwrap_err();
+        assert!(err.contains("Palette"), "auch kein freier Name: {err}");
+    }
+
+    #[test]
+    fn upsert_hall_color_accepts_palette_tones_case_insensitive() {
+        // tl.html/React reichen den Ton durch — eine Großschreibung aus
+        // fremder Quelle darf nicht an der Validierung scheitern, gespeichert
+        // wird normalisiert lowercase (ADR 0033).
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Nord", &HALL_PALETTE[1].to_uppercase())
+            .unwrap();
+        assert_eq!(cfg.hall_colors[0].color, HALL_PALETTE[1]);
+    }
+
+    #[test]
+    fn upsert_hall_color_rejects_an_empty_hall_name() {
+        let mut cfg = AppConfig::default();
+        let err = cfg.upsert_hall_color("   ", HALL_PALETTE[0]).unwrap_err();
+        assert!(err.contains("Halle"), "deutsche Fehlermeldung: {err}");
+    }
+
+    #[test]
+    fn umlaut_hall_names_replace_case_insensitive() {
+        // Review 2026-08-16: `eq_ignore_ascii_case` kennt keine Umlaute —
+        // „SÜD" und „süd" müssen trotzdem dieselbe Zeile treffen, sonst
+        // wirkt die neu gewählte Farbe nie (der Resolver nimmt die alte
+        // Zeile) und remove ließe die aktive Übersteuerung stehen.
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("SÜD", HALL_PALETTE[0]).unwrap();
+        cfg.upsert_hall_color("süd", HALL_PALETTE[1]).unwrap();
+        assert_eq!(cfg.hall_colors.len(), 1, "keine Umlaut-Dublette");
+        assert_eq!(cfg.hall_colors[0].color, HALL_PALETTE[1]);
+        assert!(cfg.remove_hall_color("Süd"));
+        assert!(cfg.hall_colors.is_empty());
+    }
+
+    #[test]
+    fn remove_hall_color_matches_trimmed_case_insensitive() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_hall_color("Halle 1", HALL_PALETTE[0]).unwrap();
+        assert!(cfg.remove_hall_color("  HALLE 1 "));
+        assert!(cfg.hall_colors.is_empty());
+        assert!(
+            !cfg.remove_hall_color("Halle 1"),
+            "zweites Entfernen: false"
+        );
     }
 }

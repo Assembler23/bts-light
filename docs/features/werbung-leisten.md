@@ -170,3 +170,57 @@ lokale DB. „Zeitplan" = Check-in-Anfangszeiten je Klasse (kein Match-Spielplan
   des Liveticker-Snapshots; Logo-Minimierung reduziert die laufende Last.
 - Cloud-Übersicht/Vorbereitung: ohne Protokoll-Ausbau nicht erreichbar — sauber
   als Nicht-Ziel markiert, kein stiller Teil-Zustand.
+
+## Nachtrag 18.08.2026 — Datenmenge im Betrieb (v0.9.225)
+
+Das oben genannte Risiko ist im Hallenbetrieb tatsächlich eingetreten, nur an
+anderer Stelle als erwartet: nicht im Liveticker-Snapshot, sondern in der
+laufenden Auslieferung an die Anzeigegeräte. Beide Bild-Routen standen auf
+`Cache-Control: no-store`, und weil die Vollbild-Werbung ihr Motiv alle zehn
+Sekunden wechselt, lud jedes Gerät dabei jedes Mal die vollen Bilddaten neu.
+Behoben durch Kennung (`ETag`) plus fünf Minuten Cache-Frist auf allen vier
+Routen (LAN und Cloud, Werbebild und Logo) sowie einen Änderungsabgleich in
+der Sponsor-Leiste, damit ihr Minuten-Takt nicht bei jedem Durchlauf neue
+`<img>` anlegt. Einzelheiten und die Begründung gegen `immutable`:
+[../court-monitor.md](../court-monitor.md).
+
+**Weiterhin offen:** Das Turnierlogo reist als Base64 in **jedem vollen
+`tset`** an badhub mit (`sync.rs`). Weglassen war bisher nicht möglich — ein
+`tset` ersetzt bei badhub den kompletten Snapshot-Datensatz, ein fehlendes
+Feld löschte das Logo also und blendete es im Liveticker sowie auf der
+Check-In-Seite aus.
+
+Die Umstellung läuft in drei Schritten, deren Reihenfolge zwingend ist:
+
+1. **v0.9.226 (erledigt):** bts-light schickt die Logo-Felder auch dann mit,
+   wenn kein Logo gesetzt ist (`""` statt weglassen). Ohne das ließe sich ein
+   einmal gesetztes Logo nach Schritt 2 nicht mehr entfernen. Gegen das
+   heutige badhub verhaltensgleich zum Status quo, deshalb gefahrlos vorab.
+2. **badhub-PR #473 (offen):** `liveticker_logo_uebernehmen()` gibt den
+   Logo-Feldern den Vertrag „weglassen = unverändert, `""` = löschen" — genau
+   den, den `checkin_branding_apply()` für den Branding-Weg schon hat.
+3. **v0.9.227 (gebaut, wartet auf Schritt 2):** bts-light schickt das Logo nur
+   noch bei Änderung. Das ist die eigentliche Ersparnis — und sie darf erst
+   nach dem Deploy von Schritt 2 ausgeliefert werden.
+
+### Wie Schritt 3 entscheidet
+
+Die Logo-Felder in `TsetEvent` sind `Option<String>` — nur so lassen sich die
+drei Zustände ausdrücken, die badhub unterscheidet:
+
+| Wert | Draht | Bedeutung |
+|---|---|---|
+| `None` | Feld fehlt | unverändert — badhub behält seinen Stand |
+| `Some("")` | `""` | löschen |
+| `Some(daten)` | Base64 | setzen |
+
+`SyncEngine::logo_in_tset_legen()` gibt das Logo mit, wenn es sich geändert
+hat, das **Turnier** gewechselt hat (badhub hält den Snapshot je Turnier),
+noch nie erfolgreich hinausging — oder die Auffrischungsfrist von zehn
+Minuten (`LOGO_AUFFRISCHUNG`) abgelaufen ist. Die Frist ist das
+Sicherheitsnetz gegen den einen Fall, den bts-light nicht sehen kann: einen
+verlorenen Snapshot auf badhub-Seite.
+
+Gestempelt wird die Marke **erst nach einem geglückten Push**
+(`logo_stempeln`). Andernfalls hielte bts-light das Logo für übertragen,
+obwohl es nie ankam, und ließe es ab dann weg.

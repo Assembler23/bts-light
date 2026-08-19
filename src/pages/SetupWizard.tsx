@@ -56,7 +56,7 @@ interface Props {
   mode?: "wizard" | "settings";
   /** Abschnitt, zu dem beim Öffnen gescrollt wird (Sprung aus einem
    *  ausgegrauten Menüpunkt der Seitenleiste). */
-  focus?: "ansagen" | "court-monitor" | "check-in";
+  focus?: "ansagen" | "court-monitor" | "check-in" | "schiedsrichter";
 }
 
 type TestState =
@@ -328,6 +328,13 @@ export function SetupWizard({
   const [ctNotStarted, setCtNotStarted] = useState(
     String(ct?.not_started_minutes ?? 5),
   );
+  // Startzeit-Prognose (Spec spielzeiten-prognose): Anzeige in TL-Web +
+  // Startwert, solange noch keine Spielzeiten gemessen sind.
+  const pred = initialConfig.prediction;
+  const [predEnabled, setPredEnabled] = useState(pred?.enabled ?? true);
+  const [predDefault, setPredDefault] = useState(
+    String(pred?.default_duration_mins ?? 25),
+  );
   // Zähltafelbediener-Verwaltung (ADR 0007): Verlierer-Warteschlange führen.
   const [skEnabled, setSkEnabled] = useState(
     initialConfig.scorekeeper?.enabled ?? false,
@@ -472,6 +479,11 @@ export function SetupWizard({
       },
       azure_tts: initialConfig.azure_tts,
       court_monitor: {
+        // Erst der gespeicherte Stand, dann die Felder des Assistenten:
+        // `push_fallback_slow` hat bewusst kein Bedienelement (nur
+        // `config.json`) und wäre beim Speichern sonst stillschweigend auf
+        // „aus" zurückgefallen. Der Spread hält auch künftige solche Felder.
+        ...initialConfig.court_monitor,
         enabled: cmEnabled,
         ad_interval_s: cmInterval,
         show_discipline: cmDiscipline,
@@ -497,6 +509,12 @@ export function SetupWizard({
             Number(ctNotStarted) > 0 ? Number(ctNotStarted) : 5,
         };
       })(),
+      // Startzeit-Prognose: ungültige/leere Dauer → Standard 25 Minuten.
+      prediction: {
+        enabled: predEnabled,
+        default_duration_mins:
+          Number(predDefault) > 0 ? Number(predDefault) : 25,
+      },
       scorekeeper: {
         enabled: skEnabled,
         break_seconds: initialConfig.scorekeeper?.break_seconds ?? 300,
@@ -1160,6 +1178,40 @@ export function SetupWizard({
         </div>
       </section>
 
+      {/* Startzeit-Prognose (Spec spielzeiten-prognose) */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader icon={Timer}>Startzeit-Prognose</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Die Turnierleitungs-Oberfläche zeigt an jedem wartenden Spiel, wann
+          es voraussichtlich aufgerufen wird — berechnet aus den gemessenen
+          Spielzeiten dieses Turniers (je Klasse und Disziplin), den freien
+          Feldern und der Spielreihenfolge.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={predEnabled}
+            onChange={(e) => setPredEnabled(e.currentTarget.checked)}
+          />
+          Prognose anzeigen
+        </label>
+        {predEnabled && (
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <Field
+              label="Angenommene Spieldauer ohne Messwerte (Minuten)"
+              value={predDefault}
+              onChange={setPredDefault}
+              type="number"
+            />
+            <p className="text-xs text-slate-500">
+              Gilt nur, solange eine Klasse noch keine drei gemessenen Spiele
+              hat — solche Prognosen zeigt die Spielliste als „~hh:mm".
+              Danach rechnet bts-light automatisch mit den echten Zeiten.
+            </p>
+          </div>
+        )}
+      </section>
+
       {/* Hallen-Check-In (ADR 0009). Die id ist der Sprungpunkt aus dem
           ausgegrauten Menüpunkt „Check-In" in der Seitenleiste. */}
       <section id="section-check-in" className="flex flex-col gap-2">
@@ -1253,7 +1305,7 @@ export function SetupWizard({
       </section>
 
       {/* Schiedsrichter (SR/AR) */}
-      <section className="flex flex-col gap-2">
+      <section id="section-schiedsrichter" className="flex flex-col gap-2 scroll-mt-4">
         <SectionHeader icon={Gavel}>Schiedsrichter</SectionHeader>
         <p className="text-xs text-slate-500">
           Für Turniere mit Schiedsrichtern: BTS Light übernimmt die

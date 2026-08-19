@@ -680,7 +680,18 @@
     var cfg = state.config || {};
     var cs = parseCourtState(state.courtState);
 
-    els.courtLabel.textContent = state.courtLabel || COURT_LABEL;
+    els.courtLabel.textContent = "";
+    // Hallen-Farbmarke (Spec hallen-farben) vor dem Feld-Label — strikte
+    // #rrggbb-Form, der Wert landet in einem Style. Alte Hosts/Relays
+    // liefern kein hallColor → Label wie bisher.
+    if (state.hallColor && /^#[0-9a-f]{6}$/.test(state.hallColor)) {
+      var hallenDot = document.createElement("span");
+      hallenDot.setAttribute("aria-hidden", "true");
+      hallenDot.style.cssText = "display:inline-block;width:.45em;height:.45em;border-radius:50%;margin-right:.3em;vertical-align:.06em;background:" + state.hallColor;
+      els.courtLabel.appendChild(hallenDot);
+    }
+    els.courtLabel.appendChild(
+      document.createTextNode(state.courtLabel || COURT_LABEL));
 
     // Spieldauer in der Kopfzeile (Stoppuhr + Minuten), wenn aktiviert und
     // der Tablet-Zustand einen Spielbeginn kennt. Ohne zaehlendes Tablet
@@ -835,10 +846,15 @@
       var nowMs = (typeof state.serverNowMs === "number" && state.serverNowMs > 0)
         ? state.serverNowMs
         : Date.now();
-      var secs = Math.max(0, Math.round((pause.endsAt - nowMs) / 1000));
+      // Seit ADR 0028 endet die Pause NICHT mehr automatisch bei 0 — das
+      // Tablet hält sie, bis weitergespielt wird. Statt eines eingefrorenen
+      // „0:00" zählt der TV die Überziehung mit „+m:ss" hoch (wie das
+      // Tablet-Overlay und die TL-Sicht).
+      var rest = Math.round((pause.endsAt - nowMs) / 1000);
+      var secs = Math.abs(rest);
       var mm = Math.floor(secs / 60);
       var ss = secs % 60;
-      text = mm + ":" + (ss < 10 ? "0" + ss : ss);
+      text = (rest < 0 ? "+" : "") + mm + ":" + (ss < 10 ? "0" + ss : ss);
     } else {
       // Behandlungspause ohne Countdown.
       text = "——";
@@ -938,6 +954,19 @@
   }
 
   function applyState(state) {
+    // Überholte Antwort verwerfen (Spec monitor-livestand-push, S4): Zwei
+    // Abrufe können sich überholen — der langsamere trägt dann den älteren
+    // Stand und würde die Anzeige zurückwerfen. Ein Voll-Abruf mit
+    // GLEICHER Ordnungszahl gilt dagegen: Er darf denselben Stand
+    // berichtigen, etwa wenn BTP einen Satzstand von Hand zurücknimmt.
+    //
+    // Nur für das eigene Feld — ein Wechsel des Felds (Reassignment) bringt
+    // eine fremde Zählung mit und darf nicht blockiert werden.
+    var feld = typeof state.courtId === "number" ? state.courtId : 0;
+    if (feld && feld === knownCourtId) {
+      if (!seqAnwenden(lastSeqByCourt[feld] || 0, state.seq || 0, "fetch")) return;
+      if (state.seq) lastSeqByCourt[feld] = state.seq;
+    }
     lastState = state;
     // Feld-Identität für den Nudge-Filter nachziehen (Geräte-Monitor kennt sie
     // erst hier; bei Reassignment wechselt sie). 0 = unbelegt → ignorieren.
@@ -954,6 +983,11 @@
 
     // Layout am Wurzelelement markieren – Vorbereitung fuer weitere Layouts.
     els.root.dataset.layout = cfg.layout || "split";
+
+    // Darf der Sicherheits-Poll langsamer laufen (Spec
+    // monitor-livestand-push, S6)? Fehlt das Feld (älterer Server), bleibt
+    // es beim schnellen Takt — der Schalter kann nur entlasten.
+    langsamErlaubt = !!cfg.pushFallbackSlow;
 
     // Info-Monitor-Zuweisung: bts-light schickt redirectTo, wir wechseln
     // sofort auf die zugehoerige Info-HTML. Geraete-Code als Query
@@ -1010,11 +1044,54 @@
   // den Fetch niedrig-latent aus; der 250-ms-Poll ist nur noch der Stille-/
   // Ausfall-Fallback und pausiert, solange frische Nudges fürs eigene Feld
   // kommen.
-  var FALLBACK_MS = 250;      // Fallback-Poll-Takt (früher 1000 ms)
-  var PUSH_FRESH_MS = 1200;   // so lange nach dem letzten eigenen Nudge gilt Push als „frisch"
   var COALESCE_MS = 60;       // Nudge-Bursts bündeln: höchstens ~1 Fetch/60 ms
-  var lastNudgeAt = 0;        // Zeit des letzten Nudges FÜRS EIGENE Feld
-  var mwsOpen = false;        // Monitor-WS gerade offen?
+  var mwsOpen = false;
+  var mwsOffenSeitMs = 0;     // seit wann die aktuelle Leitung steht (S6)        // Monitor-WS gerade offen?
+
+  // ── Gesundheit des Push-Kanals (Spec monitor-livestand-push, S6) ────────
+  //
+  // Die alte Regel verwechselte „der Kanal lebt" mit „es passiert gerade
+  // etwas": Ein Feld ohne Ballwechsel sah aus wie ein toter Kanal, und ein
+  // halbtoter Socket meldet umgekehrt minutenlang OPEN, ohne dass je etwas
+  // ankommt. Jetzt zählt JEDES Frame vom Server, auch der Herzschlag.
+  //
+  // **Inline-Kopie von `src/io/pushHealth.mjs`** — dort steht die kanonische
+  // Fassung samt Test (`scripts/test-push-health.mjs`, eigener CI-Schritt).
+  // Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+  // `overview.html`.
+  var HERZSCHLAG_STILL_MS = 25000;
+  var FALLBACK_LANGSAM_MS = 4000;
+  var FALLBACK_SCHNELL_MS = 250;
+  var lastServerFrameAt = 0;  // letztes Frame: Anstoß ODER Herzschlag
+  var lastFetchOk = true;
+  var fetchFehler = 0;
+  var langsamErlaubt = false; // aus `config.pushFallbackSlow`
+  var letzterAbrufMs = 0;     // Beginn des letzten losgeschickten Abrufs
+  function pushGesund(z, nowMs) {
+    if (!z || !z.wsOpen) return false;
+    if (z.lastFetchOk === false) return false;
+    if ((z.failures || 0) > 0) return false;
+    var letztes = z.lastServerFrameMs || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes < HERZSCHLAG_STILL_MS;
+  }
+  function fallbackTakt(gesund, erlaubt) {
+    return gesund && erlaubt ? FALLBACK_LANGSAM_MS : FALLBACK_SCHNELL_MS;
+  }
+  function kanalIstTot(wsOffen, letztesFrame, nowMs) {
+    if (!wsOffen) return false;
+    var letztes = letztesFrame || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes >= HERZSCHLAG_STILL_MS;
+  }
+  function kanalZustand() {
+    return {
+      wsOpen: mwsOpen,
+      lastServerFrameMs: lastServerFrameAt,
+      lastFetchOk: lastFetchOk,
+      failures: fetchFehler,
+    };
+  }
   var fetching = false, refetchQueued = false;
   var coalesceTimer = null, lastFetchStart = 0;
 
@@ -1027,7 +1104,40 @@
   }
   var fixedCourtId = MODE !== "device" ? courtIdFromPath() : null;
   var knownCourtId = fixedCourtId;   // wird in applyState nachgezogen
-  var lastSeqByCourt = {};           // lastSeq-Guard je Feld (veraltete Nudges verwerfen)
+  var lastSeqByCourt = {};           // zuletzt gezeigte Ordnungszahl je Feld
+
+  /** Soll ein eintreffender Stand angewendet werden? (Spec
+   *  monitor-livestand-push, S4)
+   *
+   *  Push nur bei echt neuerer Ordnungszahl; ein Voll-Abruf darf gleichziehen
+   *  — er trägt denselben Stand, den der Nudge angekündigt hat, und darf ihn
+   *  auch dann noch berichtigen (BTP-Rückfall). `0` heißt „keine Ordnung
+   *  bekannt" (älterer Server) und blockiert nie: Eine eingefrorene Anzeige
+   *  wäre der schlimmere Fehler.
+   *
+   *  **Inline-Kopie von `src/io/monitorSeq.mjs`** — dort steht die kanonische
+   *  Fassung samt Test (`scripts/test-monitor-seq.mjs`, eigener CI-Schritt).
+   *  Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `overview.html`. */
+  function seqAnwenden(gezeigtSeq, seq, quelle) {
+    var gezeigt = Number.isFinite(gezeigtSeq) ? gezeigtSeq : 0;
+    var neu = Number.isFinite(seq) ? seq : 0;
+    if (neu <= 0) return true;
+    if (gezeigt <= 0) return true;
+    return quelle === "push" ? neu > gezeigt : neu >= gezeigt;
+  }
+
+  // Was den nächsten Abruf ausgelöst hat (Spec monitor-livestand-push, S0).
+  // Fallen Nudge und Fallback-Takt zusammen, gewinnt "push": Der Abruf wäre
+  // durch den Nudge ohnehin gekommen.
+  //
+  // Zurückgesetzt wird beim **Start** des Fetchs, nicht an seinem Ende —
+  // sonst ginge ausgerechnet der vom Nudge angeforderte Nachschlag als
+  // "poll" hinaus (Review-Fund 19.08.2026, gleiche Stelle in overview.html).
+  var naechsteQuelle = "poll";
+  function stateUrl(quelle) {
+    return STATE_URL + (STATE_URL.indexOf("?") >= 0 ? "&" : "?") + "src=" + quelle;
+  }
 
   function poll() {
     // In-Flight-Schutz: Nudge und Fallback teilen sich denselben Fetch. Läuft
@@ -1035,19 +1145,29 @@
     // neueste Stand geholt wird (kein verpasstes Update).
     if (fetching) { refetchQueued = true; return; }
     fetching = true;
-    fetch(STATE_URL, { cache: "no-store" })
+    // Beginn des tatsächlich losgeschickten Abrufs — daran misst der
+    // Sicherheits-Poll seinen Abstand (S6), damit ein angestoßener Abruf ihn
+    // mitzählt und in einer regen Halle kein zusätzlicher anfällt.
+    letzterAbrufMs = Date.now();
+    var quelle = naechsteQuelle;
+    naechsteQuelle = "poll";
+    fetch(stateUrl(quelle), { cache: "no-store" })
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
       })
       .then(function (state) {
         if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
+        lastFetchOk = true; fetchFehler = 0;
         els.offline.classList.remove("show");
         applyState(state);
         pollDone();
       })
       .catch(function () {
         // Aussetzer tolerieren: letzten Stand halten, nur Hinweis zeigen.
+        // Ein EINZIGER Fehlversuch macht den Kanal ungesund und schaltet
+        // sofort auf den schnellen Takt zurück (S6).
+        lastFetchOk = false; fetchFehler++;
         if (!wasOffline) { wasOffline = true; mlog("warn", "offline"); uploadMonitorLog(); }
         els.offline.classList.add("show");
         pollDone();
@@ -1071,10 +1191,10 @@
       }, wait);
     }
   }
-  // Push gilt als „frisch", solange die WS offen ist UND kürzlich ein Nudge
-  // fürs eigene Feld kam. Dann pausiert der Fallback-Poll.
+  // Solange der Kanal gesund ist, pausiert der Sicherheits-Poll bzw. läuft
+  // langsam. Siehe `pushGesund` oben.
   function pushHealthy() {
-    return mwsOpen && (Date.now() - lastNudgeAt) < PUSH_FRESH_MS;
+    return pushGesund(kanalZustand(), Date.now());
   }
 
   // Pausen-Countdown UND Aufruf-Uhr jede Sekunde unabhängig vom Poll
@@ -1087,10 +1207,35 @@
   }, 1000);
 
   poll();
-  // Fallback-Takt: nur pollen, wenn KEIN frischer Push da ist. Solange Nudges
-  // fürs eigene Feld kommen, ist der Poll pausiert; nach >~1,2 s Stille ODER
-  // bei WS-Abriss (mwsOpen=false) läuft er sofort wieder.
-  setInterval(function () { if (!pushHealthy()) poll(); }, FALLBACK_MS);
+  // Sicherheits-Poll (Spec monitor-livestand-push, S6). 250-ms-Raster, bei
+  // jedem Tick neu entschieden, wie lange die Seite ohne eigenen Abruf
+  // auskommen darf: Kanal ungesund → 250 ms wie bisher; gesund und Schalter
+  // gesetzt → 4 s; gesund ohne Schalter → weiterhin 250 ms.
+  //
+  // **Er hört nie ganz auf.** An diesem einen Abruf hängt hier alles: das
+  // Lebenszeichen des Geräts (`record_monitor_poll`, 20-s-Fenster), die
+  // Fernbefehle, `redirectTo` und die Geräte→Feld-Zuweisung. Nichts davon
+  // wird angestoßen. Setzte die Seite bei gesundem Kanal aus, erschiene ein
+  // Gerät nach 20 s offline, erführe eine Umzuweisung nie und käme in einer
+  // ruhigen Halle nicht einmal von der Kopplungs-Seite herunter
+  // (Review-Fund 19.08.2026).
+  //
+  // Bleibt der Herzschlag länger als 25 s aus, gilt der Kanal als tot und
+  // die Verbindung wird aktiv getrennt, damit der Reconnect greift.
+  setInterval(function () {
+    var jetzt = Date.now();
+    // `|| mwsOffenSeitMs`: Eine Leitung, die seit dem Verbinden NIE etwas
+    // geliefert hat (WLAN-Roam direkt nach dem Handschlag), stünde sonst für
+    // immer auf 0 — und 0 heißt „hat sich noch nicht bewährt", also
+    // niemals tot. Sie bliebe dauerhaft im schnellen Takt hängen
+    // (Review-Fund 19.08.2026).
+    if (kanalIstTot(mwsOpen, lastServerFrameAt || mwsOffenSeitMs, jetzt)) {
+      mlog("warn", "mws_stale_close", { stillMs: jetzt - (lastServerFrameAt || mwsOffenSeitMs) });
+      mwsTrennen();
+    }
+    var takt = fallbackTakt(pushGesund(kanalZustand(), jetzt), langsamErlaubt);
+    if (jetzt - letzterAbrufMs >= takt) poll();
+  }, FALLBACK_SCHNELL_MS);
 
   // ── Monitor-WS-Nudge-Client (A1, ADR 0016) ────────────────────────────
   // Der Server schickt nur „Feld X geändert, seq N" (keine Score-Daten); wir
@@ -1121,27 +1266,54 @@
       // Darum je frischer Verbindung zurücksetzen (innerhalb einer Verbindung
       // ist der Guard dank TCP-Ordnung ohnehin redundant).
       lastSeqByCourt = {};
+      // Die frische Verbindung hat sich noch nicht bewährt: 0 heißt „noch
+      // kein Frame" — nicht gesund, aber auch nicht tot. Bliebe der alte,
+      // über 25 s alte Zeitpunkt stehen, erklärte der nächste Tick den eben
+      // verbundenen Socket sofort wieder für tot (Review-Fund 19.08.2026).
+      lastServerFrameAt = 0;
+      mwsOffenSeitMs = Date.now();
       mlog("info", "mws_open");
     };
     mws.onmessage = function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      // **Jedes** Frame vom Server beweist, dass der Kanal lebt — auch der
+      // Herzschlag, der gar keine Nachricht über ein Feld ist (Spec
+      // monitor-livestand-push, S6).
+      lastServerFrameAt = Date.now();
       if (typeof msg.court !== "number" || typeof msg.seq !== "number") return;
-      // lastSeq-Guard je Feld: veraltete/doppelte Nudges (seq ≤ zuletzt) weg.
-      var prev = lastSeqByCourt[msg.court] || 0;
-      if (msg.seq <= prev) return;
+      // Veraltete/doppelte Nudges verwerfen (Spec monitor-livestand-push, S4).
+      if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, "push")) return;
       lastSeqByCourt[msg.court] = msg.seq;
-      // Fetch, wenn es unser Feld ist ODER das Feld noch unbekannt ist. Nur
-      // beim bekannten eigenen Feld pausieren wir den Poll (lastNudgeAt) –
-      // solange das Feld unbekannt ist, muss der Poll für die Zuweisung
-      // weiterlaufen (die Zuweisung wird nicht genudgt).
+      // Fetch, wenn es unser Feld ist ODER das Feld noch unbekannt ist —
+      // solange es unbekannt ist, muss der Poll für die Zuweisung
+      // weiterlaufen. Die Gesundheit des Kanals hängt seit S6 nicht mehr an
+      // diesem Anstoß, sondern am Herzschlag (oben gesetzt).
       if (knownCourtId == null || msg.court === knownCourtId) {
-        if (knownCourtId != null) lastNudgeAt = Date.now();
+        naechsteQuelle = "push";
         requestFetch();
       }
     };
     mws.onclose = function () { mwsOpen = false; mwsSchedule(); };
     mws.onerror = function () { /* onclose folgt und plant den Reconnect */ };
+  }
+  // Aktives Trennen bei totem Kanal (S6). `close()` allein genügt nicht: Ein
+  // schwarzlochender Socket hängt danach bis zum Handshake-Timeout des
+  // Browsers in CLOSING, und der Wächter unten verbindet nur bei CLOSED neu.
+  // Deshalb Ereignisse abhängen, Referenz freigeben und den Reconnect selbst
+  // planen — sonst meldete das späte `onclose` des alten Sockets
+  // `mwsOpen = false` für den längst neuen.
+  function mwsTrennen() {
+    var alt = mws;
+    mws = null;
+    mwsOpen = false;
+    if (alt) {
+      alt.onopen = null; alt.onmessage = null; alt.onclose = null; alt.onerror = null;
+      try { alt.close(); } catch (e) { /* egal, die Referenz ist weg */ }
+    }
+    lastServerFrameAt = 0;
+    mwsOffenSeitMs = 0;
+    mwsSchedule();
   }
   function mwsSchedule() {
     // Exponentielles Backoff – schont im Cloud-Modus den Relay, wenn noch kein
@@ -1152,9 +1324,11 @@
   }
   // Watchdog: einziger Reconnect-Treiber (Muster aus tablet.html). Verbindet
   // neu, sobald der Socket fehlt/geschlossen ist und das Backoff-Fenster
-  // abgelaufen ist. KEIN Force-Close bei Stille – Stille ist am Monitor normal
-  // (ein Nudge kommt nur bei Score-Änderung); halbtote Sockets deckt der
-  // Poll-Fallback ab.
+  // abgelaufen ist. Stille allein ist am Monitor weiterhin normal (ein Nudge
+  // kommt nur bei Score-Änderung) — seit S6 unterscheidet aber der Herzschlag
+  // Stille von einem toten Kanal, und dann trennt `mwsTrennen()` im
+  // Sicherheits-Poll oben aktiv; es setzt `mws` auf null, sodass hier sofort
+  // der `!mws`-Zweig greift.
   setInterval(function () {
     if ((!mws || mws.readyState === WebSocket.CLOSED) && Date.now() >= mwsNextAt) {
       mwsConnect();
@@ -1170,6 +1344,17 @@
   (function sponsorBar() {
     var box = document.getElementById('sponsor-bar');
     if (!box) return;
+    // Bewusst bei JEDEM Durchlauf neu bauen, ohne Abgleich auf
+    // Unverändertheit: Ein solcher Abgleich könnte nur die Namen der
+    // Bilder vergleichen, nicht ihren Inhalt — ein ausgetauschtes Logo
+    // oder Werbebild unter gleicher Adresse bliebe dann für immer stehen,
+    // weil das <img> nie neu entsteht und der Browser die Adresse nie
+    // wieder anfragt (Review-Fund 18.08.2026). Teuer ist das nicht mehr:
+    // Seit die Bild-Routen eine Kennung mitgeben, kostet ein Neuaufbau
+    // höchstens eine Bestätigung von rund 200 Byte je Bild — im Hallennetz
+    // einmal je fünf Minuten, in der Cloud (dort gilt für Werbebilder eine
+    // Minute, weil sie über ihre Position adressiert werden) etwa einmal je
+    // Durchlauf dieser Schleife.
     function paint(st) {
       var h = '';
       if (st && st.hasLogo) h += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';

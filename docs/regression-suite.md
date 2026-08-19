@@ -31,8 +31,11 @@ anpassen:
 | **Feld-/Anzeige-Logik am Host**: Court→Match-Auflösung, Live-Score-Vertrauen (auch getrennt), Overview/Monitor, Walkover-Kandidaten, Vorbereitungs-Aufrufe | `tablet/state.rs` (21) |
 | **Auto-Feldvergabe**: nur freie/entsperrte Felder, Wartezeit, Spieler-Pause, keine Doppelvergabe, Mehr-Hallen nur mit Aufruf bzw. aktiver Halle | `sync.rs` — `auto_assign_*` (16) |
 | **Vergabe-Regeln** (geteilt mit der Turnierleitungs-Oberfläche): Belegt-Begriff, Feld-Erwartung, Sperre, Doppelvergabe, Hallenregel, Spieler-Verfügbarkeit, Reihenfolge, Hallen-Kaskade | `tablet/assign.rs` — `court_occupied_by`, `check_assign`, `check_free`, `PlayerAvailability`, `sort_key`, `hall_for_match` |
-| **Datensparsamkeit der Turnierleitungs-Ansicht**: der ausgelieferte Zustand enthält weder Lizenznummer noch Geburtsjahr, Nationalität, Akkustand oder Aufschlag-Anzeige | `tablet/tl.rs` — `every_published_field_is_deliberately_allowed`, `the_state_never_carries_personal_data_beyond_its_purpose` |
+| **Datensparsamkeit der Turnierleitungs-Ansicht**: der ausgelieferte Zustand enthält weder Geburtsjahr noch Check-In-Spielernamen, Sperrlisten/Stammverein der Schiedsrichter, Akkustand oder Aufschlag-Anzeige. Die Lizenznummern sind seit 18.08.2026 an allen drei Stellen (Warteliste, laufende, beendete Spiele) **positiv** geprüft. ⚠️ Der Allowlist-Wächter führt eine **flache** Feldnamen-Liste — er schlägt NICHT an, wenn ein bereits erlaubter Feldname in einer weiteren Struktur auftaucht | `tablet/tl.rs` — `every_published_field_is_deliberately_allowed`, `the_state_never_carries_personal_data_beyond_its_purpose` |
 | **Mehrbenutzer-Schutz der Feldvergabe**: eine frisch geschriebene Zuweisung blockiert das Feld bis zur BTP-Bestätigung (auch gegen die Automatik), verfällt aber von selbst; eine wiederholte Aktion schreibt nicht doppelt | `tablet/state.rs` — `a_fresh_assignment_reserves_*`, `a_reservation_expires_*`, `a_reservation_is_released_*`, `repeating_an_operation_*` · `sync.rs` — `auto_assign_skips_a_court_someone_just_claimed_by_hand` |
+| **Spielzeiten-Auswertung**: vier Achsen aus DENSELBEN Messwerten (Summen gleich), Halle beim Erststempel und immun gegen Hallenwechsel, alter Stand ohne Halle lesbar, Ein-Hallen-Turnier ohne Hallen-Achse — und **die Prognose-Fallback-Kette bleibt unberührt**; die Auswertung wird notfalls zugunsten des Zustands geopfert | `tablet/predict.rs` — `die_*_achse_*`, `die_vier_achsen_zaehlen_dieselben_messwerte`, `die_hallen_achse_aendert_die_prognose_kette_nicht` · `tablet/match_times.rs` — `der_erststempel_haelt_auch_die_halle_fest`, `ein_hallenwechsel_aendert_den_hallenstempel_nicht`, `ein_alter_stand_ohne_halle_bleibt_lesbar` · `sync.rs` — `der_e4_stempel_traegt_die_halle_des_felds` · `tablet/tl.rs` — `das_zeiten_panel_liefert_alle_vier_achsen`, `ein_ein_hallen_turnier_liefert_keine_hallen_achse`, `die_spielzeiten_auswertung_faellt_vor_dem_ganzen_zustand` |
+| **Ansage-Aufträge**: hallengenaue Zustellung, Verfall nach 60 s, ehrliche Warnung ohne Ansage-Gerät — und ein **unbekannter Auftragstyp verwirft nie die ganze Charge** (Slave mit älterem Stand im Auto-Update-Fenster; die Spielbeginn-Ansage lässt dabei `call_stages` unberührt) | `tablet/state.rs` — `ein_unbekannter_auftragstyp_verwirft_nicht_die_ganze_charge` · `tablet/tl.rs` — `die_spielbeginn_ansage_*`, `an_announcement_without_a_device_in_the_hall_still_counts_but_says_so` · `scripts/test-start-play-text.mjs` (Wortlaut, CI) |
+| **Bediener-Nachruf**: eigener Zähler je Feld (Spieler-Aufrufzahl bleibt stehen), Spielwechsel setzt zurück, Deckel bei 3, ohne zugewiesenen Bediener abgelehnt, Auftrag nur in der Halle des Felds | `tablet/tl.rs` — `der_bediener_nachruf_*`, `ein_neues_spiel_setzt_den_bediener_zaehler_zurueck`, `ein_bediener_nachruf_ohne_zugewiesenen_bediener_wird_abgelehnt` · `scripts/test-scorekeeper-call-text.mjs` (Wortlaut inkl. Stufenwort, CI) |
 | **Zähltafelbediener-Übergang + Endezeit-Stempel** | `sync.rs` — `track_scorekeepers_*`, `stamp_finished_*` |
 | **Liveticker-Diff/Heartbeat**: erster Push voll, unverändert = nichts, nach Fehler wieder voll | `sync.rs` — `*_plan_*`, `heartbeat_*` · `badhub/diff.rs`, `badhub/payload.rs` (17) |
 | **Wire-Kompatibilität App↔Relay**: Serde-Roundtrips aller Frames, `#[serde(default)]`-Abwärtskompatibilität, `merge_device_lists` | `relay-proto/lib.rs` (25) |
@@ -93,6 +96,34 @@ anpassen:
   **manuelle 36-Geräte-Messung** im echten WLAN ab. Ein volles E2E-WS-Harness
   ist bewusst zurückgestellt. Ebenso offen: **LAN-Server-Last**
   (`tablet/state.rs`, blockierender `std::sync::RwLock`) als Folge-Erweiterung.
+- **Last der Anzeige-Strecke** (Spec
+  [features/monitor-livestand-push.md](features/monitor-livestand-push.md),
+  Etappe S0): **manueller Lauf**, kein CI-Schritt — Muster ADR 0019.
+  `node scripts/last-monitor.mjs --base http://<turnier-pc>:8088/` fährt
+  zwanzig zählende Tablets, zwanzig Feld-Übersichten und wahlweise feste
+  Court-Monitore gegen einen **laufenden** Turnier-PC (LAN) bzw. gegen den
+  Relay (Cloud) und meldet Abrufe, Bytes und die Latenz Punkt → Anzeige.
+  Braucht **belegte Felder**: Ohne gültige Match-ID verwirft `handle_score`
+  den Stand, es entstünde weder Schreibvorgang noch Nudge. ⚠️ **Nur am
+  Probeaufbau, nie im echten Turnier** — das Skript belegt Felder und
+  seine erfundenen Stände laufen bis in den öffentlichen Liveticker;
+  `--trocken` verbindet kein Tablet und misst nur die Anzeige-Seite. Vor **und** nach
+  jeder Etappe der Spec fahren; die Server-Sicht dazu liefern
+  `GET /debug/perf` und die 10-Sekunden-Zeile im Diagnose-Log. Das
+  Zählwerk selbst (`tablet/perf.rs`) ist mit elf Unit-Tests abgedeckt,
+  darunter ein Wächter gegen Personenbezug im Bericht.
+  Das Skript spiegelt die Anzeige-Seiten, **auch ihre Gesundheits-Regel**: Es
+  importiert `src/io/pushHealth.mjs`, zählt Herzschläge getrennt von Anstößen
+  und pollt nur so schnell, wie es die echte Seite täte (S6). Mit `--schmal`
+  holen die Court-Monitore ihren Stand über `health?court=<id>` statt über
+  `/court/{id}/state` — nur so ist der schmale Abruf aus S7 überhaupt messbar.
+  Bewusst **nicht** nachgebildet: der Force-Close nach 25 s Stille samt
+  Reconnect, das Fehler-Backoff (ohne das meldet ein Lauf gegen einen
+  klemmenden Server eine höhere Rate als die Wirklichkeit) und das seq-Gate
+  vor dem angestoßenen Abruf. `--langsam` erzwingt den 4-s-Takt, ohne dass der
+  Server `push_fallback_slow` gesetzt haben muss — der Schalter wirkt ohnehin
+  nur im Client, und ein Server-Neustart kostet am Turnier-PC einen Handgriff
+  an der Oberfläche (die Übertragung startet **nicht** von selbst).
 
 ## Abgleich mit Tilos Original-BTS
 

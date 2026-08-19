@@ -14,6 +14,8 @@ import { reportAzureFallback } from "../state/azureStatus";
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
+import { startPlaySegments } from "./startPlayText.mjs";
+import { scorekeeperCallSegments } from "./scorekeeperCallText.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
 import { detectNameLang, transliterateToken } from "./transliterate";
 import type { NameLang } from "./transliterate";
@@ -39,6 +41,25 @@ export interface AnnounceMatchInput {
   /** Zugewiesener Zähltafelbediener (ADR 0007) — wird am Ende als
    *  „Tabletbedienung: {Name}." angesagt. Leer/fehlend = nicht ansagen. */
   scorekeeperNames?: string[];
+  /** Schiedsrichter und Aufschlagrichter (Spec schiedsrichter-management) —
+   *  werden nach der Tabletbedienung als „Schiedsrichter: {Name}." bzw.
+   *  „Aufschlagrichter: {Name}." angesagt. Leer/fehlend = nicht ansagen. */
+  umpireNames?: string[];
+  serviceJudgeNames?: string[];
+  /** Nur die Besetzung ansagen (manueller Knopf „SR/AR ansagen"): Feld,
+   *  Schiedsrichter, Aufschlagrichter — ohne Disziplin und Paarung. */
+  officialsOnly?: boolean;
+  /** Nur zum Spielbeginn auffordern („Feld 3. Bitte mit dem Spielen
+   *  beginnen."): Feld + Aufforderung, ohne Paarung und ohne Stufenwort.
+   *  Sie ist kein Aufruf — gerufen wurde längst, die Spieler stehen da
+   *  (Spec `tl-sicht-feinschliff`, Punkt 3). Hat Vorrang vor
+   *  `officialsOnly`, beide zugleich ergäben keinen sinnvollen Satz. */
+  startPlayOnly?: boolean;
+  /** Nur die Zähltafelbedienung nachrufen („Feld 3. Meier, bitte als
+   *  Tabletbedienung melden."): Feld, ggf. Stufenwort, Namen aus
+   *  `scorekeeperNames` — ohne Disziplin und Paarung. Hat Vorrang vor
+   *  `officialsOnly`; beide zugleich ergäben keinen sinnvollen Satz. */
+  scorekeeperOnly?: boolean;
   /** Aufruf-Stufe: 1 = normaler (erster) Aufruf, 2 = „Zweiter Aufruf",
    *  3 = „Dritter und letzter Aufruf". Ab Stufe 2 wird das Label als eigenes
    *  Segment hinter Disziplin/Runde vor die Paarung gesetzt. Default 1. */
@@ -604,6 +625,30 @@ export function buildAnnouncementSegments(
   const round = knockoutRoundLabel(input.roundName, lang);
 
   const segments: string[] = [`${court}.`];
+  // Nachruf an die Bedienung: Feld, Stufenwort, Namen — sonst nichts. Steht
+  // VOR dem Besetzungs-Gatter, weil beide Sonderansagen die reguläre
+  // Paarung überspringen (Spec `tl-sicht-feinschliff`, Punkt 2).
+  if (input.scorekeeperOnly) {
+    return scorekeeperCallSegments(
+      court,
+      input.scorekeeperNames ?? [],
+      (input.callStage ?? 1) as 1 | 2 | 3,
+      lang,
+    );
+  }
+  // „Bitte mit dem Spielen beginnen": nur Feld + Aufforderung, ohne
+  // Paarung und ohne Stufenwort. Steht VOR dem Besetzungs-Gatter, weil
+  // beide Sonderansagen die reguläre Paarung überspringen und diese hier
+  // auch keine Namen anhängt (Spec `tl-sicht-feinschliff`, Punkt 3).
+  if (input.startPlayOnly) {
+    return startPlaySegments(court, lang);
+  }
+  // Manueller Knopf „SR/AR ansagen": nur Feld + Besetzung. Eine
+  // nachträgliche Zuweisung soll nicht die ganze Paarung erneut aufrufen —
+  // das Spiel läuft ja schon (Spec Nr. 8).
+  if (input.officialsOnly) {
+    return segments.concat(officialSegments(input, lang));
+  }
   if (disc) segments.push(`${disc}.`);
   // Runde ab Viertelfinale vor der Paarung ansagen (wertet die Ansage auf).
   if (round) segments.push(`${round}.`);
@@ -622,7 +667,32 @@ export function buildAnnouncementSegments(
     const label = lang === "de" ? "Tabletbedienung" : "Scoreboard operator";
     segments.push(`${label}: ${sk.join(" / ")}.`);
   }
+  // Schiedsrichter/Aufschlagrichter nach der Bedienung (Spec Nr. 8). Namen
+  // ohne Aussprache-Korrektur, wie bei der Bedienung: Das ist eine
+  // Zuständigkeits-Ansage, keine Spieler-Vorstellung.
+  for (const seg of officialSegments(input, lang)) segments.push(seg);
   return segments;
+}
+
+/** Die SR/AR-Segmente — eine Quelle für Segment- und SSML-Bauer, damit
+ *  beide Wege dasselbe sagen (sie werden getrennt zusammengesetzt). */
+function officialSegments(
+  input: AnnounceMatchInput,
+  lang: AnnounceLang,
+): string[] {
+  const clean = (v?: string[]) => (v ?? []).map((n) => n.trim()).filter(Boolean);
+  const out: string[] = [];
+  const sr = clean(input.umpireNames);
+  const ar = clean(input.serviceJudgeNames);
+  if (sr.length > 0) {
+    const label = lang === "de" ? "Schiedsrichter" : "Umpire";
+    out.push(`${label}: ${sr.join(" / ")}.`);
+  }
+  if (ar.length > 0) {
+    const label = lang === "de" ? "Aufschlagrichter" : "Service judge";
+    out.push(`${label}: ${ar.join(" / ")}.`);
+  }
+  return out;
 }
 
 // ─── Azure-SSML (hochwertige Ansage am Stück) ────────────────────────────
@@ -800,6 +870,49 @@ export function buildAnnouncementSsml(
   const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap, sayMap);
 
   const parts: string[] = [`${court}.`];
+  // Dieselben Segmente wie im Web-Speech-Pfad (`scorekeeperCallSegments`),
+  // gebaut aus der ROHEN Feld-Phrase und danach escapt — `court` oben ist
+  // bereits escapt, das gäbe sonst eine doppelte Maskierung.
+  if (input.scorekeeperOnly) {
+    const teile = scorekeeperCallSegments(
+      resolveCourtPhrase(input.courtLabel, lang),
+      input.scorekeeperNames ?? [],
+      (input.callStage ?? 1) as 1 | 2 | 3,
+      lang,
+    ).map(xmlEscape);
+    // Nichts zu sagen (nur Leerraum-Namen): leeres SSML statt eines
+    // `<speak>`-Rahmens ohne Inhalt — den schickte der Azure-Pfad sonst
+    // ab, während der Web-Speech-Pfad sauber schweigt.
+    if (teile.length === 0) return "";
+    const speakLangSk = lang === "de" ? "de-DE" : "en-US";
+    return (
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangSk}">` +
+      `<voice name="${xmlEscape(voice)}">${teile.join(" ")}</voice></speak>`
+    );
+  }
+  // Dieselben Segmente wie im Web-Speech-Pfad (`startPlaySegments`), damit
+  // beide Wege Wort für Wort dasselbe sagen. Gebaut wird aus der ROHEN
+  // Feld-Phrase und danach escapt — `court` oben ist bereits escapt, das
+  // gäbe sonst eine doppelte Maskierung.
+  if (input.startPlayOnly) {
+    const teile = startPlaySegments(
+      resolveCourtPhrase(input.courtLabel, lang),
+      lang,
+    ).map(xmlEscape);
+    const speakLangStart = lang === "de" ? "de-DE" : "en-US";
+    return (
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangStart}">` +
+      `<voice name="${xmlEscape(voice)}">${teile.join(" ")}</voice></speak>`
+    );
+  }
+  if (input.officialsOnly) {
+    for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
+    const speakLangOnly = lang === "de" ? "de-DE" : "en-US";
+    return (
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangOnly}">` +
+      `<voice name="${xmlEscape(voice)}">${parts.join(" ")}</voice></speak>`
+    );
+  }
   if (disc) parts.push(`${disc}.`);
   if (round) parts.push(`${xmlEscape(round)}.`);
   const stageLabel = callStageLabel(input.callStage, lang);
@@ -814,6 +927,9 @@ export function buildAnnouncementSsml(
     const label = lang === "de" ? "Tabletbedienung" : "Scoreboard operator";
     parts.push(`${xmlEscape(label)}: ${xmlEscape(sk.join(" / "))}.`);
   }
+  // Dieselben Segmente wie im Web-Speech-Pfad (`officialSegments`), damit
+  // beide Wege Wort für Wort dasselbe ansagen.
+  for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
 
   const speakLang = lang === "de" ? "de-DE" : "en-US";
   return (

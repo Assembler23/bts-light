@@ -46,16 +46,60 @@ Erstell-Datum des Git-Tags (`git for-each-ref … refs/tags` →
 automatisch** neu erzeugt (`scripts/build-release-page.mjs` im
 publish-Job) und zusammen mit Installer + `latest.json` hochgeladen.
 Download-Knöpfe erscheinen nur für Versionen, deren Installer wirklich
-auf dem Server liegt. Derselbe Changelog-Auszug der Version landet in
+auf dem Server liegt. Der Changelog-Auszug landet zugleich in
 `latest.json → notes` — das Update-Fenster der App zeigt damit
 „Was ist neu". **Konsequenz:** `docs/changelog.md` muss VOR dem Taggen
 den Abschnitt `## vX.Y.Z` der neuen Version enthalten (ist ohnehin
 Commit-Pflicht laut CLAUDE.md).
 
+### Die Notes umfassen die ganze Strecke, nicht nur den Tag
+
+Zwischen zwei Tags liegen hier regelmäßig **mehrere** Versionssprünge —
+von v0.9.214 auf v0.9.223 waren es neun. Wer aktualisiert, springt genau
+über diese Strecke. Deshalb ermittelt der publish-Job den zuletzt
+veröffentlichten Tag (`git describe --tags --abbrev=0 "$TAG^"`) und
+reicht ihn als `--notes-since` weiter; die Notes decken dann alle
+Versionen **danach** bis zur getaggten ab, neueste zuerst.
+
+Bis zum 2026-08-18 war das nicht so: Das Update-Fenster zeigte nur den
+Abschnitt der getaggten Version. Acht ausgelieferte Änderungen — Push-Kanal
+statt Poll, Panel „Anfangszeiten", Schriftgröße pro Gerät und weitere —
+waren für den Nutzer schlicht unsichtbar, und nichts meldete das: Die
+`latest.json` war ja gültig.
+
+Zwei Ausgabeformen, die Grenze liegt bei 4000 Zeichen:
+
+- **Passt es**, steht je Version eine Kopfzeile `vX.Y.Z` mit ihren
+  vollständigen Stichpunkten da.
+- **Passt es nicht**, kürzt der Generator auf **eine Zeile je Version**
+  (die fett ausgezeichnete Kernaussage) und verweist auf die Release-Seite.
+  Ein Dialog ist kein Dokument — neun lesbare Zeilen schlagen eine Textwand.
+
+Ohne `--notes-since` bleibt es bei genau der getaggten Version. Das ist
+bewusst die sichere Richtung: Ein vergessenes Flag liefert zu wenig statt
+den kompletten Changelog seit v0.4.0. Dasselbe gilt für jeden Zweifelsfall —
+unbrauchbarer Wert (kein Versionsformat) oder `since >= version` (Tag auf
+demselben Commit, Tag ausserhalb der Ahnenlinie) führen zum selben Rückfall.
+**Wichtig dabei:** Der Rückfall behält die Stichpunkte der getaggten Version.
+Ohne ihn bliebe der Bereich leer, und das Update-Fenster zeigte nur noch
+„BTS Light X.Y.Z" — schlechter als der Zustand vorher.
+
+Deshalb steht im Workflow `--match 'v[0-9]*'`: Ohne die Einschränkung findet
+`git describe` irgendeinen erreichbaren Tag, dessen Name dann als
+`--notes-since` ankommt und dort unbrauchbar ist.
+
+Festgehalten von `scripts/test-release-notes.mjs` (läuft in der CI).
+
 Lokal testen:
 
 ```sh
+# Nur die getaggte Version
 node scripts/build-release-page.mjs --changelog docs/changelog.md --out /tmp/index.html
+
+# So, wie der Release-Workflow es tut — Strecke seit dem letzten Tag
+node scripts/build-release-page.mjs --changelog docs/changelog.md \
+  --out /tmp/index.html --notes-out /tmp/notes.txt \
+  --notes-since 0.9.214 --notes-version 0.9.223
 ```
 
 ## Einen Release veröffentlichen

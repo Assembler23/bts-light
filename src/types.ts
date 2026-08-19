@@ -92,6 +92,15 @@ export interface CallTimerConfig {
   not_started_minutes: number;
 }
 
+/** Startzeit-Prognose in der TL-Sicht (Rust: config::PredictionConfig,
+ *  Spec spielzeiten-prognose). */
+export interface PredictionConfig {
+  /** Prognostizierte Startzeiten in TL-Web anzeigen? */
+  enabled: boolean;
+  /** Angenommene Bruttodauer (Minuten), solange Messwerte fehlen. */
+  default_duration_mins: number;
+}
+
 /** Zähltafelbediener-Verwaltung (Rust: config::ScorekeeperConfig, ADR 0007). */
 export interface ScorekeeperConfig {
   enabled: boolean;
@@ -228,6 +237,13 @@ export interface CourtMonitorConfig {
   layout: string;
   /** Kombi-Anzeige: Felder nebeneinander (Hochformat) statt übereinander. */
   combo_vertical: boolean;
+  /**
+   * Darf eine Anzeige mit gesundem Push-Kanal ihren Sicherheits-Abruf auf
+   * vier Sekunden verlangsamen? Standard aus; bewusst nur über die
+   * `config.json` zu setzen, deshalb ohne Bedienelement im Assistenten —
+   * er reicht das Feld nur unverändert durch.
+   */
+  push_fallback_slow: boolean;
 }
 
 /** Ein Werbebild mit optionalem Anzeige-Label (Rust: commands::CourtAd).
@@ -484,6 +500,27 @@ export type AnnounceJob = {
       matchId: number;
       /** 2 oder 3 — gezählt am Turnier-PC, nicht hier. */
       stage: number;
+      /** Welche Partei gemeint ist — Vorbild `prep_call`. Bei `team1`/
+       *  `team2` nennt die Ansage nur diese eine Partei. Der Turnier-PC
+       *  setzt das Feld immer (Rust-Default `both`); optional bleibt es
+       *  hier nur für Aufträge aus einer älteren Fassung. */
+      side?: "both" | "team1" | "team2";
+    }
+  | {
+      /** Nur die Besetzung ansagen (Schiedsrichter/Aufschlagrichter). */
+      kind: "officials";
+      courtId: number;
+    }
+  | {
+      /** Nachruf an die Zähltafelbedienung eines Felds („… bitte als
+       *  Tabletbedienung melden"). **Kein Spieler-Aufruf** — der Host führt
+       *  dafür einen eigenen Zähler, die Aufruf-Stufe der Spieler bleibt
+       *  stehen (Spec `tl-sicht-feinschliff` Punkt 2). */
+      kind: "scorekeeper_call";
+      courtId: number;
+      matchId: number;
+      /** 1, 2 oder 3 — gezählt am Turnier-PC. */
+      stage: number;
     }
   | {
       kind: "prep_call";
@@ -492,6 +529,15 @@ export type AnnounceJob = {
       /** 2 oder 3 — gezählt am Turnier-PC, damit der Nachruf aus der Seite
        *  und der aus der Desktop-Oberfläche gleich staffeln. */
       stage: number;
+    }
+  | {
+      /** „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+       *  besetztes Feld, auf dem noch kein Punkt gefallen ist. Ausdrücklich
+       *  **kein** Aufruf: Sie zählt keine Aufruf-Stufe hoch (Spec
+       *  `tl-sicht-feinschliff` A3.3). */
+      kind: "start_play";
+      courtId: number;
+      matchId: number;
     }
 );
 
@@ -520,6 +566,8 @@ export interface AppConfig {
   court_monitor: CourtMonitorConfig;
   /** Einstellungen des Aufruf-Timers (1./2./3. Aufruf). */
   call_timer: CallTimerConfig;
+  /** Startzeit-Prognose in der TL-Sicht (Spec spielzeiten-prognose). */
+  prediction: PredictionConfig;
   /** Zähltafelbediener-Verwaltung (ADR 0007). */
   scorekeeper: ScorekeeperConfig;
   /** Einstellungen der automatischen Feldvergabe. */
@@ -575,6 +623,23 @@ export interface HallLayoutConfig {
   vertical: boolean;
 }
 
+/** Palette + effektive Farbe je Halle für den Picker der Felderübersicht
+ *  (Rust: `hall_colors::HallColorsView`, Spec hallen-farben). */
+export interface HallColorsView {
+  /** Die kuratierten ~10 Palettentöne (Hex, lowercase). */
+  palette: string[];
+  /** Je Halle die effektive Farbe; leer bei Ein-Hallen-Turnieren. */
+  halls: HallColorInfo[];
+}
+
+export interface HallColorInfo {
+  hall: string;
+  color: string;
+  /** true = persistierte Übersteuerung (der Picker bietet „Automatisch"
+   *  als Rückweg an). */
+  overridden: boolean;
+}
+
 /** Ein gekoppeltes Turnierleitungs-Gerät (ADR 0011). */
 export interface TlDevice {
   /** Stabile Kennung – erscheint im Protokoll, damit nachvollziehbar bleibt,
@@ -597,6 +662,21 @@ export interface TlWebConfig {
   enabled: boolean;
   /** Gekoppelte Geräte. Eintrag entfernen = Zugang entziehen. */
   devices: TlDevice[];
+  /** Panel-Profile der TL-Web-Seite (Rust: `config::TlPanelProfile`).
+   *  Gepflegt wird ausschließlich in `tl.html` (ADR 0024) — hier nur die
+   *  Felder, die die Desktop-App selbst liest. */
+  profiles?: TlPanelProfileMirror[];
+}
+
+/** Schmaler Spiegel eines TL-Web-Panel-Profils für die Desktop-App. */
+export interface TlPanelProfileMirror {
+  id: string;
+  name: string;
+  display?: {
+    /** Aufrufe am Feld beliebig oft (Feldtest 17.08.2026) — die Desktop-
+     *  Felderübersicht richtet ihren Aufruf-Knopf danach aus. */
+    unlimited_court_calls?: boolean;
+  };
 }
 
 /** Turnierlogo (Base64) für badhubs #live-logo. */
@@ -650,6 +730,9 @@ export interface CourtOverview {
   /** Hallenname (BTP-Location) des Felds – Grundlage der hallenweisen
    *  Gruppierung. Leer bei Ein-Hallen-Turnieren. */
   location: string;
+  /** Effektive Hallen-Farbe (Hex, Spec hallen-farben) — null bei
+   *  Ein-Hallen-Turnieren oder Feldern ohne Halle. */
+  hall_color: string | null;
   /** BTP-Match-ID des aktuellen Spiels (0 = kein Match). */
   match_id: number;
   /** Gibt es zum laufenden Spiel einen Punktverlauf? Nur dann erscheint
@@ -687,14 +770,29 @@ export interface CourtOverview {
   /** true, wenn `scorekeeper` aus einer echten Zuweisung stammt — nur dann
    *  wird er angesagt (ADR 0007). */
   scorekeeper_assigned: boolean;
+  /** Schiedsrichter des laufenden Spiels (Spec schiedsrichter-management).
+   *  Leer, wenn keiner zugewiesen ist oder ohne Schiedsrichter gespielt wird. */
+  sr: string[];
+  /** Aufschlagrichter des laufenden Spiels. */
+  ar: string[];
+  /** Konflikt-Kategorie („Verein"/„Person"), wenn ein zugewiesener Official
+   *  nicht zum Spiel passt; null = kein Konflikt. Nur die Kategorie — der
+   *  Grund bleibt am Turnier-PC. */
+  official_warn: string | null;
+  /** IDs der wirksamen Besetzung (0 = keiner) — die Auswahl trifft damit die
+   *  Person, nicht den Namen (Namensgleichheit kommt vor). */
+  sr_id: number;
+  ar_id: number;
   /** Feld vom Operator gesperrt (bts-light-seitig) → rot, keine Auto-Vergabe. */
   locked: boolean;
   /** Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
    *  steht; null = kein Spiel. Grundlage des Aufruf-Timers. */
   on_court_since_ms: number | null;
-  /** Wie oft dieses Spiel schon aufgerufen wurde (1–3), gezählt am
-   *  Turnier-PC. Damit zeigen diese Oberfläche und die Turnierleitungs-Seite
-   *  dieselbe Stufe — auch wenn die andere gerufen hat. */
+  /** Wie oft dieses Spiel schon aufgerufen wurde, gezählt am Turnier-PC
+   *  (0 = noch nie; mit „Aufrufe unbegrenzt" nach oben offen, sonst
+   *  maximal 3 — KEIN `Math.min(…, 3)` daraufsetzen). Damit zeigen diese
+   *  Oberfläche und die Turnierleitungs-Seite dieselbe Stufe — auch wenn
+   *  die andere gerufen hat. */
   call_stage: number;
   /** Zählformat des aktuellen Matches (Sätze/Zielpunkt/Cap) für die
    *  Satz-/Matchball-Anzeige (Plan 16); 0 = kein Match/unbekannt. */
@@ -801,6 +899,15 @@ export interface PreparationCandidate {
   match_num: number | null;
   /** Aufruf-Daten, falls das Spiel bereits gerufen wurde; sonst null. */
   call: PreparationCallInfo | null;
+  /** Von der automatischen Feldvergabe ausgenommen (Spec
+   *  `feldvergabe-ausnahme`)? Manuelles Zuweisen bleibt davon unberührt. */
+  excluded: boolean;
+  /** In welche Halle das Spiel gehört (leer = unbekannt) — Grundlage des
+   *  Hallen-Kürzels an der Spielzeile (ADR 0026). */
+  hall: string;
+  /** Steht dieses Spiel gerade im manuellen Präfix der (einen, globalen)
+   *  Reihenfolge? */
+  manual: boolean;
 }
 
 /** Eine Halle des Turniers (Rust: commands::PreparationLocation). */
@@ -859,4 +966,62 @@ export interface MatchTimeline {
   retired: boolean;
   /** Ergebnis abgegeben — es kommen keine Ballwechsel mehr. */
   finished: boolean;
+}
+
+/** Ein Schiedsrichter für die Bedienoberfläche (Rust: commands::OfficialView).
+ *  Die Inhalte der Sperrlisten sind bewusst nicht dabei — nur ihre Anzahl;
+ *  geladen werden sie auf gezielte Anfrage (Personendaten). */
+export interface OfficialView {
+  id: number;
+  /** Anzeigename „Vorname Nachname" aus BTP. */
+  name: string;
+  /** Position in der Rotationsreihenfolge (0-basiert). */
+  position: number;
+  paused: boolean;
+  /** In bts-light gepflegter Stammverein (BTP liefert am Official keinen). */
+  club: string;
+  /** Anzahl gesperrter Vereine + Spieler. */
+  blocked_count: number;
+  /** Feld, auf dem er gerade Dienst tut (null = frei), plus Rolle. */
+  on_duty_court_id: number | null;
+  on_duty_role: string | null;
+  /** Bisherige Einsätze, abgeleitet aus den beendeten Spielen. */
+  appearances: number;
+}
+
+/** Ein abgeleiteter Einsatz fürs Detail-Overlay (Rust: AppearanceView). */
+export interface AppearanceView {
+  match_id: number;
+  /** "sr" oder "ar". */
+  role: string;
+  match_name: string;
+  court: string;
+  finished_at: number | null;
+}
+
+/** Die Sperrlisten eines Officials (nur auf Anfrage geladen). */
+export interface BlocklistView {
+  clubs: string[];
+  players: number[];
+  /** Alle Spieler des Turniers zur Auswahl — niemand kennt PlayerIDs. */
+  pick_players: PickPlayer[];
+  /** Alle Vereine des Turniers zur Auswahl. */
+  pick_clubs: string[];
+}
+
+/** Ein Spieler zur Auswahl in der Sperrlisten-Pflege. */
+export interface PickPlayer {
+  id: number;
+  name: string;
+  /** Verein — unterscheidet Namensgleiche. */
+  club: string;
+}
+
+/** Feldweise Schalter: SR-Rotation, AR-Rotation, Zähltafelbediener-Vergabe. */
+export interface CourtSwitchesView {
+  court_id: number;
+  court: string;
+  sr: boolean;
+  ar: boolean;
+  operator: boolean;
 }

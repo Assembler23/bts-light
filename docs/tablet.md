@@ -81,7 +81,15 @@ Protokoll; die Seite legt ihn lokal ab und bereinigt die Adresszeile.
 1. **Match-Zuweisung** – der Server prüft alle 2 s `match_for_court` und
    schickt dem Tablet `match_assigned` / `match_cleared`.
 2. **Live-Score** – jeder Punkt am Tablet → `score_update` → bts-light baut
-   ein `tupdate_match` und pusht es an den Liveticker. `score_update` und
+   ein `tupdate_match` und pusht es an den Liveticker. Der Push läuft
+   seit v0.9.223 **hinter** der Tablet-Verbindung (`ScorePushQueue` in
+   `tablet/server.rs`), je Feld serialisiert: Vorher wartete die
+   WebSocket-Schleife bis zu 15 s auf badhub, während der Server sie
+   nach 10 s ohne Lebenszeichen als tot schloss **und das Feld
+   freigab** — bei einem hängenden badhub hätte das alle Felder
+   zugleich getroffen. Während ein Push unterwegs ist, sammelt sich nur
+   der jeweils neueste Stand des Felds an (kein Überholen, keine
+   Anfragen-Lawine bei Punkteregen). `score_update` und
    `state_sync` tragen die **Match-ID** des gezählten Spiels: Passt sie
    nicht (mehr) zum aktuellen Match des Felds, verwirft der Server den
    Frame (**Stale-Filter, Cluster A4** — ein nach Doze/Reconnect im alten
@@ -116,6 +124,16 @@ Ergebnis verliert und den Schiri nicht blockiert:
   Platte** persistiert (`btp-retry.json`, turnier-gegated über den
   Turniernamen) und beim Start wieder geladen — so übersteht ein Ergebnis auch
   einen **Host-App-Neustart** (Durabilität: App-Neustart, nicht Stromausfall).
+  Ein Durchlauf hat seit v0.9.223 ein **Startfenster von 20 s**
+  (`BTP_RETRY_FLUSH_BUDGET`): Er läuft innerhalb des Poll-Zyklus und
+  schreibt nacheinander — ohne Grenze hielten zwanzig gestaute
+  Ergebnisse bei trägem BTP den ganzen Zyklus minutenlang an (Liveticker,
+  Auto-Vergabe, TL-Anzeige). Nach 20 s wird **kein weiterer Write mehr
+  begonnen**; ein bereits laufender läuft aus (er kostet im Extremfall
+  ~30 s, zwei TCP-Verbindungen), der Rest bleibt in der Queue und kommt
+  beim nächsten Flush dran. Jeder Durchlauf beginnt eine Position weiter
+  in der Queue, damit ein zäher Eintrag am Anfang die hinteren nicht
+  dauerhaft blockiert.
 - **Cloud:** Der Relay wartet auf die `ResultAck` nur noch **8 s** (statt 20 s),
   damit `pending`-Slots bei zäher Leitung schneller frei werden; der Client retryt
   ohnehin (idempotent).
@@ -152,8 +170,16 @@ Aufstellung:
 
 - **Offizielle Pausen** (BWF): Bei 11 Punkten im Satz blendet das Tablet
   eine 60-Sekunden-Pause ein, zwischen den Sätzen eine 2-Minuten-Pause –
-  je mit Countdown. „Weiterspielen" beendet die Pause früher; bei 0 geht
-  es automatisch weiter. Während der Pause ist die Zähltafel gesperrt.
+  je mit Countdown. Während der Pause ist die Zähltafel gesperrt.
+  **Seit v0.9.207 endet die Pause nicht mehr automatisch bei 0**
+  (ADR [0028](adr/0028-pause-haelt-bis-weiterspielen.md), Spec
+  `spielzeiten-prognose` E9): Nach Ablauf zählt die Anzeige rot hoch
+  („überzogen +0:37"), bis der Schiedsrichter „Weiterspielen" tippt — die
+  Turnierleitung sieht die Überziehung feldgenau in TL-Web. Auch ein
+  Reload/eine Geräte-Übernahme behält eine (auch überzogene) Pause bei.
+  Der Pausen-Beginn (`startedAt`, Server-Zeit) reist im gespiegelten
+  Spielzustand mit; die Behandlungspause erscheint in TL-Web als
+  „Behandlung seit …".
 - **Spieldauer**: läuft als MM:SS in der Kopfzeile ab Matchstart.
 - **Court-Grafik**: zeigt Aufschläger (markiert mit einem **Federball**,
   dessen Korken in Flugrichtung zum diagonal gegenüberliegenden

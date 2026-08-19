@@ -119,6 +119,16 @@ pub struct MatchBrief {
     /// Frames lesbar (false → altes Verhalten).
     #[serde(default)]
     pub finalized: bool,
+    /// Schiedsrichter und Aufschlagrichter dieses Spiels — als **Namen**,
+    /// nicht als IDs: Das Tablet müsste sie sonst auflösen und dazu die
+    /// Officials-Liste kennen. Leer, wenn keiner zugewiesen ist oder ohne
+    /// Schiedsrichter gespielt wird. `#[serde(default)]` hält ältere Frames
+    /// lesbar. Gilt für LAN und Cloud gleichermaßen, ferne Halle
+    /// eingeschlossen (der Brief reist mit `MatchAssigned`).
+    #[serde(rename = "srNames", default)]
+    pub sr_names: Vec<String>,
+    #[serde(rename = "arNames", default)]
+    pub ar_names: Vec<String>,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -186,6 +196,15 @@ pub struct MonitorConfig {
     /// Anzeige-Layout (`split` = „A — Geteilt").
     #[serde(default = "default_layout")]
     pub layout: String,
+    /// Darf die Anzeige ihren Sicherheits-Poll auf vier Sekunden
+    /// verlangsamen, solange ihr Push-Kanal gesund ist (Spec
+    /// monitor-livestand-push, S6)?
+    ///
+    /// `#[serde(default)]` → `false` bei einem älteren Absender, und dann
+    /// pollt die Seite wie vorher im 250-ms-Takt. Der Schalter kann also nur
+    /// entlasten, nie etwas kaputt machen, das vorher lief.
+    #[serde(rename = "pushFallbackSlow", default)]
+    pub push_fallback_slow: bool,
 }
 
 fn default_true() -> bool {
@@ -207,6 +226,9 @@ impl Default for MonitorConfig {
             show_match_clock: true,
             show_ads: true,
             layout: default_layout(),
+            // Aus: Der langsame Sicherheits-Poll ist ein bewusst zu
+            // setzender Schalter (Spec monitor-livestand-push, S6).
+            push_fallback_slow: false,
         }
     }
 }
@@ -408,6 +430,11 @@ pub struct MonitorState {
     /// Feldname (Anzeige), z. B. „1" oder „Feld 3".
     #[serde(rename = "courtLabel")]
     pub court_label: String,
+    /// Effektive Hallen-Farbe des Felds (Hex, Spec hallen-farben) — der
+    /// Monitor zeigt sie als Marke neben dem Feld-Label. `None` bei
+    /// Ein-Hallen-Turnieren und von alten Hosts/Relays.
+    #[serde(rename = "hallColor", default, skip_serializing_if = "Option::is_none")]
+    pub hall_color: Option<String>,
     #[serde(rename = "tournamentName", default)]
     pub tournament_name: String,
     /// Aktuelles Match, oder `null` wenn das Feld frei ist (→ Werbemodus).
@@ -472,6 +499,22 @@ pub struct MonitorState {
     /// `#[serde(default)]` (= aus) hält ältere Frames lesbar.
     #[serde(rename = "callTimer", default)]
     pub call_timer: CallTimerView,
+    /// Ordnungszahl des Feld-Stands (Spec monitor-livestand-push, S4) —
+    /// dieselbe Zahl, die der Nudge auf der Monitor-WS trägt.
+    ///
+    /// Damit kann die Anzeige Push und Voll-Abruf zueinander ordnen, statt
+    /// beide blind anzuwenden: Ein Push gilt bei `seq > gezeigt`, eine
+    /// Voll-Antwort bei `seq >= gezeigt`. Das Gleichheitszeichen ist
+    /// Absicht — eine Voll-Antwort trägt denselben Stand, den der Nudge
+    /// angekündigt hat, und kann ihn auch dann noch berichtigen (etwa wenn
+    /// BTP einen Satzstand zurücknimmt).
+    ///
+    /// **Prozesslokal** (ADR 0035): Host und Relay zählen getrennt, die Zahl
+    /// ist nur innerhalb einer Verbindung zu derselben Gegenstelle
+    /// vergleichbar. `#[serde(default)]` → `0` bei einem älteren Absender,
+    /// und dann verhält sich die Seite wie vor dieser Etappe.
+    #[serde(default)]
+    pub seq: u64,
 }
 
 /// Aufruf-Timer-Einstellungen für die Monitor-Anzeige (gespiegelt aus der
@@ -567,6 +610,32 @@ pub struct MonitorControl {
 /// Hallen-/Verleih-WLAN sind einzelne >6-s-Aussetzer normal. Ein wirklich
 /// totes Gerät fällt weiterhin nach 20 s raus.
 pub const MONITOR_ONLINE_WINDOW_MS: u64 = 20_000;
+
+/// Abstand des **sichtbaren** Herzschlags auf der Monitor-Nudge-WS (Spec
+/// monitor-livestand-push, S6). Der daneben laufende WS-Ping ist für
+/// JavaScript unsichtbar — eine Anzeige kann daran nicht erkennen, ob ihr
+/// Kanal noch lebt.
+///
+/// Zehn Sekunden, damit die Anzeige die 25-Sekunden-Grenze
+/// ([`MONITOR_HEARTBEAT_STALE_MS`]) auch dann sicher hält, wenn zwei
+/// Herzschläge hintereinander im Netz hängenbleiben.
+pub const MONITOR_HEARTBEAT_MS: u64 = 10_000;
+
+/// Ab wann gilt der Nudge-Kanal einer Anzeige als tot (Spec
+/// monitor-livestand-push, S6)? Zweieinhalb Herzschläge — ein einzelner
+/// verlorener darf noch keinen Reconnect auslösen.
+pub const MONITOR_HEARTBEAT_STALE_MS: u64 = 25_000;
+
+/// Der sichtbare Herzschlag als fertiges Wire-Frame.
+///
+/// **Ohne `court`-Feld, und das ist die ganze Verträglichkeitszusage:** Eine
+/// Anzeige aus einem älteren Stand prüft `typeof msg.court === "number"` und
+/// verwirft alles andere folgenlos. So braucht der Kanal keine
+/// Protokollversion (ADR 0035 c) — fest verdrahtete Monitore haben keinen
+/// Reload-Kanal, über den man sie umstellen könnte.
+pub fn monitor_heartbeat_frame(now_ms: u64) -> String {
+    format!("{{\"hb\":{now_ms}}}")
+}
 
 /// Kurz-Code eines Geräts: die **letzten** vier alphanumerischen Zeichen der
 /// ID, groß – so wie der Monitor ihn auf dem TV anzeigt.
@@ -860,6 +929,12 @@ impl MatchTimeline {
 }
 
 /// Nachrichten vom Server an das Tablet.
+// Wie bei [`HostFrame`]: `MatchAssigned` trägt ein volles `MatchBrief` und
+// ist damit deutlich größer als die schlanken Varianten — bewusst
+// akzeptiert. Diese Frames gehen serialisiert über die Leitung, sie liegen
+// nicht in großer Zahl auf dem Stack; Boxing bliebe an jeder
+// Konstruktions- und Match-Stelle hängen, ohne realen Gewinn.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ServerMsg {
@@ -995,6 +1070,11 @@ pub struct CourtBrief {
     /// Hosts/Relays ohne dieses Feld lesbar.
     #[serde(default)]
     pub hall: String,
+    /// Effektive Hallen-Farbe (Hex `#rrggbb`, Spec hallen-farben, ADR 0033).
+    /// `None` bei Ein-Hallen-Turnieren und von alten Hosts — Relay und
+    /// Seiten fallen dann auf farblos zurück.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hall_color: Option<String>,
 }
 
 /// Die eindeutigen, nicht-leeren Hallennamen einer Feldliste – alphabetisch
@@ -1069,6 +1149,172 @@ impl PrepCallSide {
         [PrepCallSide::Both, PrepCallSide::Team1, PrepCallSide::Team2];
 }
 
+/// Dienst eines Officials an einem Spiel. BTP: `Official1ID` = Schiedsrichter,
+/// `Official2ID` = Aufschlagrichter (an der BTP-Maske verifiziert).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TlOfficialRole {
+    /// Schiedsrichter.
+    Sr,
+    /// Aufschlagrichter.
+    Ar,
+}
+
+/// Ein einzelnes Panel innerhalb eines [`TlPanelProfileWire`]: Sichtbarkeit +
+/// relative Höhe (Spec tl-web-panelsystem). `key` benennt den Abschnitt
+/// (`"courts"`, `"walkovers"`, `"scorekeepers"`, `"officials"`, `"queue"`,
+/// `"finished"`) — als String statt Enum, weil künftige Panels ohne
+/// Protokolländerung dazukommen können sollen; die Panel-**Liste** ist
+/// Konfiguration, kein geschlossener Aktions-Satz wie [`TlAction`] selbst.
+/// (Bis 15.08.2026 gab es statt `"queue"` vier getrennte Schlüssel
+/// `queue_called`/`queue_ready`/`queue_waiting`/`queue_no_hall` — seit ADR
+/// 0026 ein einziges Panel, Status ist ein Zeilen-Abzeichen.)
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TlPanelSettingWire {
+    pub key: String,
+    pub visible: bool,
+    #[serde(rename = "heightFr")]
+    pub height_fr: f64,
+    /// Zugeklappt? Zweite, von `visible` unabhängige Dimension:
+    /// ausgeblendet = gar nicht da, zugeklappt = Kopfzeile sichtbar,
+    /// Inhalt eingeklappt.
+    ///
+    /// `#[serde(default)]`, weil ein Profil aus einem älteren Browser das
+    /// Feld nicht mitschickt — `false` (aufgeklappt) ist dann das
+    /// bisherige Verhalten. Der Host reicht den Wert nur durch; die
+    /// Anzeige-Logik liegt in `tl.html`.
+    #[serde(default)]
+    pub collapsed: bool,
+    /// Spalte des Mehrspalten-Layouts, **1-basiert** (passend zu
+    /// [`TlPanelProfileWire::columns`]). `0`/fehlend = Spalte 1 — außer in
+    /// einem Profil ganz ohne `columns`, wo `tl.html` die Aufteilung aus
+    /// `display.listPosition` ableitet.
+    ///
+    /// `#[serde(default)]` aus demselben Grund wie `collapsed`: Ein Profil
+    /// aus einem älteren Browser schickt das Feld nicht mit, und „Spalte 1"
+    /// ist die harmlose Lesart. Der Host reicht nur durch.
+    #[serde(default)]
+    pub column: u8,
+}
+
+/// Seite, auf der die Warteliste/Ergebnis-Spalte im Panel-System erscheint
+/// (Spec tl-web-panelsystem).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlListPositionWire {
+    #[default]
+    Right,
+    Bottom,
+}
+
+/// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`, Punkt 1).
+///
+/// `Group` ist der Vorgabewert und zugleich die fachliche Voreinstellung:
+/// Ein Profil aus einem älteren Browser-Stand kennt das Feld nicht und
+/// landet damit auf der bisherigen Ansicht (Klasse × Disziplin).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlTimeStatsAxisWire {
+    #[default]
+    Group,
+    Class,
+    Discipline,
+    Hall,
+}
+
+/// Turnierweite Anzeige-Optionen eines Panel-Profils (Spec
+/// tl-web-panelsystem) — dieselben Schalter, die vorher als lose
+/// `localStorage`-Werte in `tl.html` lebten.
+///
+/// Container-weites `#[serde(default)]` wie beim Config-Zwilling
+/// `TlDisplaySettings`: Ein Profil aus einem älteren Browser-Stand darf
+/// nie als Ganzes an einem fehlenden Häkchen-Feld scheitern — jedes
+/// fehlende Feld liest sich als „aus" (Review 17.08.2026).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TlDisplaySettingsWire {
+    #[serde(rename = "showNumbers")]
+    pub show_numbers: bool,
+    #[serde(rename = "showNations")]
+    pub show_nations: bool,
+    #[serde(rename = "showClubNames")]
+    pub show_club_names: bool,
+    #[serde(rename = "showClubLogos")]
+    pub show_club_logos: bool,
+    #[serde(rename = "showDiscipline")]
+    pub show_discipline: bool,
+    #[serde(rename = "showRound")]
+    pub show_round: bool,
+    #[serde(rename = "showGroup")]
+    pub show_group: bool,
+    /// Geschätzte Restzeit laufender Spiele am Feld (Spec
+    /// `spielzeiten-prognose`, Etappe D). `#[serde(default)]`, weil alte
+    /// Browser-Stände Profile ohne dieses Feld speichern/senden.
+    #[serde(rename = "showCourtRemaining", default)]
+    pub show_court_remaining: bool,
+    /// Aufrufe am Feld beliebig oft und auch bei laufendem Spiel anbieten
+    /// (Feldtest 17.08.2026). `#[serde(default)]` wie `showCourtRemaining`:
+    /// Alte Browser-Stände kennen das Feld nicht — dann bleibt der Deckel
+    /// bei drei Aufrufen, das bisherige Verhalten.
+    #[serde(rename = "unlimitedCourtCalls", default)]
+    pub unlimited_court_calls: bool,
+    #[serde(rename = "listPosition")]
+    pub list_position: TlListPositionWire,
+    /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
+    /// `#[serde(default)]` wie die beiden Schalter darüber: Ein Profil aus
+    /// einem älteren Browser-Stand kennt das Feld nicht und bleibt damit
+    /// auf der bisherigen Ansicht.
+    #[serde(rename = "timeStatsAxis", default)]
+    pub time_stats_axis: TlTimeStatsAxisWire,
+}
+
+/// Ein benanntes Panel-Profil, wie es über die Wire-Grenze reist — sowohl als
+/// Payload von [`TlAction::ProfileSave`] (Browser → Host) als auch,
+/// unverändert wiederverwendet, als Element von `TlState.profiles` (Host →
+/// Browser; Spec tl-web-panelsystem, ADR 0025).
+///
+/// **Bewusst kein rohes `config::TlPanelProfile` über die Wire-Grenze**
+/// (dieselbe Trennung wie bei `TlDevice`/[`TlAuthDevice`]): `relay-proto`
+/// bleibt unabhängig von `src-tauri::config` — dort liegt die
+/// Host-interne, um Persistenz-Belange erweiterte Fassung. Der Host
+/// übersetzt in beide Richtungen (`tablet::tl::profile_to_wire`/
+/// `profile_from_wire`-Äquivalente).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TlPanelProfileWire {
+    /// Leer bei [`TlAction::ProfileSave`] = „neu anlegen" — der Host vergibt
+    /// dann eine Kennung.
+    pub id: String,
+    pub name: String,
+    /// Reihenfolge = Panel-Reihenfolge auf der Seite.
+    pub panels: Vec<TlPanelSettingWire>,
+    pub display: TlDisplaySettingsWire,
+    /// Spaltenzahl des Seitenlayouts (1…3). `0`/fehlend = aus
+    /// `display.listPosition` ableiten (Bestandsprofile sehen dadurch
+    /// unverändert aus) — die Ableitung sitzt in `tl.html`, nicht hier.
+    #[serde(default)]
+    pub columns: u8,
+    /// Relative Spaltenbreiten wie `heightFr` bei den Panel-Höhen; leer =
+    /// gleichmäßig. Der Host reicht sie nur durch.
+    #[serde(rename = "columnWidths", default)]
+    pub column_widths: Vec<f64>,
+    /// Vom Client mitgeschickt, aber beim Speichern vom Host **verworfen**
+    /// — der Host stempelt immer seine eigene Zeit (Last-Write-Wins-Marker;
+    /// verhindert, dass eine falsch gehende Client-Uhr eine neuere Änderung
+    /// verdrängt).
+    #[serde(rename = "updatedAtMs")]
+    pub updated_at_ms: u64,
+}
+
+/// Höchstzahl der Panel-Profile im Katalog (Spec tl-web-panelsystem).
+///
+/// Geteilt wie [`MAX_TL_DEVICES_MIRRORED`]: Der Katalog reist vollständig in
+/// jedem `TlState`-Push mit (R4 — `MAX_TL_STATE_LEN`), eine unbegrenzte
+/// Liste könnte den Zustand über das Limit treiben und die ganze
+/// Turnierleitungs-Oberfläche stumm schalten. 32 ist großzügig für die
+/// tatsächlichen Anwendungsfälle (Tablet/Wandmonitor-Varianten je Halle),
+/// ohne dass eine versehentliche Endlos-Anlage den Zustand sprengen kann.
+pub const MAX_TL_PROFILES: usize = 32;
+
 /// Die Aktionen, die ein Turnierleitungs-Gerät auslösen darf — ein **bewusst
 /// geschlossener** Satz (ADR 0011). Was hier nicht steht, ist nicht
 /// darstellbar; der Relay leitet nur weiter, entschieden und validiert wird
@@ -1078,7 +1324,12 @@ impl PrepCallSide {
 /// gibt es hier keine ältere Gegenstelle zu schonen; ein stillschweigend
 /// ergänzter Wert würde stattdessen die jeweils weitreichendere oder
 /// ungeprüfte Variante auslösen.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Kein `Eq`** (nur `PartialEq`): `ProfileSave` trägt über
+/// [`TlPanelProfileWire`]/[`TlPanelSettingWire`] ein `f64` (`height_fr`),
+/// und `f64` selbst ist nicht `Eq`. Für Tests/Vergleiche reicht
+/// `PartialEq` — `assert_eq!` verlangt kein `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum TlAction {
     /// Spiel auf ein freies Feld legen.
@@ -1145,14 +1396,76 @@ pub enum TlAction {
         match_id: i64,
         hall: String,
     },
+    /// Ein Spiel von der automatischen Feldvergabe ausnehmen oder die
+    /// Ausnahme zurücknehmen (Spec `feldvergabe-ausnahme`). Betrifft
+    /// ausschließlich `sync.rs::auto_assign` — manuelles Zuweisen
+    /// (`AssignCourt`/`MoveMatch`) bleibt für ein ausgenommenes Spiel
+    /// jederzeit möglich, bewusst ohne BTP-Rückschreibung (rein
+    /// host-lokaler Bedienzustand, wie `SetHall`).
+    ExcludeFromAutoAssign {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        excluded: bool,
+    },
+    /// Ein noch nicht gerufenes Spiel in der manuellen Präfix-Reihenfolge
+    /// vor ein anderes ziehen (Spec `spielliste-manuelle-reihenfolge`,
+    /// ADR 0026); `before_match_id = None` heißt „ans Ende des aktuell
+    /// sichtbaren Präfix-Blocks", nicht ans Ende der Gesamtliste. Die
+    /// Reihenfolge gilt turnierweit; ein Hallen-Parameter war hier nie
+    /// nötig und ist es seit ADR 0026 auch begrifflich nicht mehr — das
+    /// Frontend zieht nur zwei Match-IDs relativ zueinander.
+    QueueReorder {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        #[serde(
+            rename = "beforeMatchId",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
+        before_match_id: Option<i64>,
+    },
+    /// Die komplette manuelle Spielreihenfolge auf einmal verwerfen —
+    /// bewusst ohne Teil-Reset, weder je Halle noch je Spiel (Nicht-Ziel
+    /// der Spec).
+    QueueOrderReset,
+    /// Automatische Hallen-Vorverteilung schalten (Spec
+    /// `hallen-vorverteilung`, ADR 0029/0030). Schalter und Fenstergröße
+    /// reisen **atomar** — die Seite kennt beim Umschalten das aktuelle x,
+    /// ein Zwischenzustand „an mit altem x" kann nicht entstehen. Der Host
+    /// validiert (klemmt `window`, lehnt Einschalten bei gesetzter aktiver
+    /// Halle ab) und persistiert in der Config.
+    SetHallPrefill {
+        enabled: bool,
+        /// Fenstergröße x; 0 = automatisch (Gesamtzahl der Spielfelder).
+        window: u32,
+    },
+    /// Alle **automatisch** verteilten Hallen räumen (E10) — bewusst eine
+    /// eigene, destruktive Aktion und nie Nebeneffekt eines Set. Hand-,
+    /// Regel- und Aufruf-Hallen bleiben unberührt.
+    ClearAutoHalls,
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
+    ///
+    /// `side` grenzt den Aufruf auf **eine Partei** ein (Vorbild
+    /// [`TlAction::AnnouncePrepCall`]) — für den häufigen Fall, dass nur
+    /// eine Seite fehlt. `None`/fehlend = beide Parteien.
     AnnounceCourtCall {
         #[serde(rename = "courtId")]
         court_id: i64,
         #[serde(rename = "matchId")]
         match_id: i64,
+        /// **Ausnahme von der „kein `#[serde(default)]`"-Regel dieses
+        /// Enums** — dieselbe Abwägung wie bei `winner` in
+        /// [`TlAction::EnterResult`] und `location_id` in
+        /// [`TlAction::CallPreparation`]: `None` ist hier die
+        /// **neutralere**, nicht die weitreichendere Variante. Ein
+        /// fehlendes Feld löst genau das bisherige Verhalten aus (beide
+        /// Parteien rufen), niemals einen gezielteren oder ungeprüften
+        /// Eingriff. Genau deshalb darf ein älterer Browser, der `side`
+        /// noch nicht kennt, weiter senden.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        side: Option<PrepCallSide>,
     },
     /// Erneuter Aufruf eines in Vorbereitung gerufenen Spiels; `side` grenzt
     /// auf eine Partei ein.
@@ -1205,6 +1518,141 @@ pub enum TlAction {
     ScorekeeperAdd { names: Vec<String> },
     /// Automatische Feldvergabe an-/abschalten.
     SetAutoAssign { enabled: bool },
+
+    // ── Schiedsrichter (Spec schiedsrichter-management) ──────────────
+    /// Einem Spiel einen Schiedsrichter oder Aufschlagrichter zuweisen.
+    ///
+    /// Die Zuweisung hängt am **Spiel**, nicht am Feld — nach Spielende
+    /// bleibt sie ihm zugeordnet (Grundlage der Einsatz-Ableitung). Das
+    /// Feld reist trotzdem mit: Es ordnet die Aktion demselben Feld zu wie
+    /// die übrigen Feld-Aktionen und schützt so vor zwei gleichzeitigen
+    /// Zugriffen auf dasselbe Feld.
+    OfficialAssign {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        role: TlOfficialRole,
+    },
+    /// Eine Zuweisung lösen.
+    OfficialClear {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        role: TlOfficialRole,
+    },
+    /// Einen Schiedsrichter pausieren oder wieder einteilen.
+    OfficialPause {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        paused: bool,
+    },
+    /// Einen Schiedsrichter in der Reihenfolge vor einen anderen ziehen;
+    /// ohne Ziel ans Ende.
+    OfficialReorder {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        #[serde(
+            rename = "beforeOfficialId",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
+        before_official_id: Option<i64>,
+    },
+    /// Stammverein pflegen (BTP überträgt am Official keinen).
+    OfficialSetClub {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        club: String,
+    },
+    /// Sperrlisten setzen (ersetzt beide Listen).
+    ///
+    /// Diese Angaben sind Personendaten: Sie reisen **nur** in dieser
+    /// Aktion und in der Antwort der gezielten Leseroute — nie im
+    /// Broadcast-Zustand, den alle Geräte bekommen.
+    OfficialBlocklistSet {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        clubs: Vec<String>,
+        players: Vec<i64>,
+    },
+    /// Die drei Schalter eines Felds setzen (SR-Rotation, AR-Rotation,
+    /// Zähltafelbediener-Vergabe).
+    OfficialsCourtToggle {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        sr: bool,
+        ar: bool,
+        operator: bool,
+    },
+    /// Schiedsrichter und Aufschlagrichter eines Felds ansagen (manueller
+    /// Knopf — eine nachträgliche Zuweisung sagt nie von selbst an).
+    AnnounceOfficials {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
+    /// Den Zähltafelbediener eines Felds nachrufen („… bitte als
+    /// Tabletbedienung melden", ADR 0007 / Spec `tl-sicht-feinschliff`
+    /// Punkt 2).
+    ///
+    /// **Kein Spieler-Aufruf.** Der Host führt dafür einen eigenen Zähler;
+    /// `call_stages` und `prep_call_stages` bleiben unberührt, sonst zöge
+    /// ein Nachruf an die Bedienung die angezeigte Aufruf-Zahl der Spieler
+    /// hoch.
+    AnnounceScorekeeper {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
+    /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
+    /// besetztes Feld, auf dem noch kein Punkt gefallen ist (Spec
+    /// `tl-sicht-feinschliff`, Punkt 3).
+    ///
+    /// **Ausdrücklich kein Aufruf.** Der Host lässt `call_stages` dabei
+    /// unberührt: kein Stufenwort in der Ansage, kein Abzeichen an der
+    /// Kachel, keine Änderung an der Fälligkeit. Die Spieler stehen ja
+    /// längst am Feld — gerufen wurde vorher.
+    ///
+    /// `match_id` reist mit, damit die Ansage nicht mehr erklingt, wenn
+    /// inzwischen ein anderes Spiel auf dem Feld steht.
+    AnnounceStartPlay {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+
+    // ── Panel-Profile (Spec tl-web-panelsystem, ADR 0024/0025) ──────────
+    /// Ein Profil anlegen oder überschreiben (Upsert nach `id`; leere `id`
+    /// = neu anlegen, der Host vergibt dann eine Kennung). Last-Write-Wins
+    /// — bewusst KEINE Konfliktprüfung gegen ein zuvor gesehenes
+    /// `updated_at_ms`: Die Spec verlangt ausdrücklich keine Fehlermeldung
+    /// bei gleichzeitiger Bearbeitung durch zwei Geräte.
+    ProfileSave { profile: TlPanelProfileWire },
+    /// Ein Profil löschen. Geräte, die es trugen, fallen beim nächsten Poll
+    /// auf das Standardprofil zurück — kein Fehlerzustand (Spec, Grill-Punkt
+    /// 7), Löschen eines bereits verschwundenen Profils ist ein No-Op.
+    ProfileDelete {
+        #[serde(rename = "profileId")]
+        profile_id: String,
+    },
+    /// Für das AUFRUFENDE Gerät ein Profil wählen. Bewusst **ohne**
+    /// Geräte-Feld: Das aufrufende Gerät ist aus der Bearer-Token-Auth
+    /// bekannt — ein Client-Feld könnte sonst ein fremdes Gerät umbiegen
+    /// (Sicherheitsgrenze, von `tablet::tl::execute` durchgesetzt). Leere
+    /// `profile_id` ("Standard") ist immer gültig.
+    ProfileSelect {
+        #[serde(rename = "profileId")]
+        profile_id: String,
+    },
+    /// Das turnierweite Standardprofil setzen (leer = eingebautes
+    /// Standardprofil, gilt für jedes Gerät ohne eigene Wahl).
+    ProfileSetDefault {
+        #[serde(rename = "profileId")]
+        profile_id: String,
+    },
 }
 
 /// Grund einer Ablehnung — **maschinenlesbar**, damit die Seite gezielt
@@ -1373,6 +1821,30 @@ pub enum HostFrame {
         #[serde(default)]
         hall: String,
     },
+    /// Satzstand-Spiegel des Hosts (autoritativ). Im LAN(+Cloud)-Betrieb
+    /// zählen die Tablets am Relay vorbei direkt gegen den Host — ohne diesen
+    /// Spiegel bleiben Cloud-Monitor und Cloud-Übersicht auf 0:0 stehen
+    /// (Turnier-Befund 13.08.2026). Der Relay übernimmt `sets` (und, falls
+    /// vorhanden, den **opaken** Tablet-`court_state` mit Aufschlag/Pause) in
+    /// seinen Anzeige-Cache und weckt die Monitor-Abonnenten — derselbe Pfad,
+    /// den ein Cloud-Tablet über `TabletMsg::ScoreUpdate` nimmt.
+    ScoreUpdate {
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        /// Match, zu dem der Stand gehört — der Relay verwirft den Spiegel,
+        /// wenn das Feld inzwischen ein anderes Match trägt (Stale-Schutz,
+        /// gleiche Regel wie beim Tablet-Weg / HM-03).
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        /// Vollständige Satzliste (abgeschlossene Sätze + laufender Satz).
+        #[serde(default)]
+        sets: Vec<SetAb>,
+        /// Roher Tablet-Spielzustand (Aufschlag, Pause) als JSON-String —
+        /// opak wie beim Tablet-`state_sync`; `None` = kein Tablet-Zustand
+        /// bekannt (der bisherige Relay-Stand bleibt dann stehen).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        state: Option<String>,
+    },
     /// Freitext-Ansage (Master → Relay → ferne Halle). Der Cloud-Ansage-Slave
     /// holt sie über `GET /{ns}/info/announce/freetext` und spricht sie lokal.
     Freetext {
@@ -1470,6 +1942,18 @@ pub enum HostFrame {
         #[serde(default)]
         json: String,
     },
+    /// Antwort auf einen [`RelayFrame::OfficialDetailRequest`]: Sperrlisten,
+    /// Stammverein und Einsatz-Liste eines Schiedsrichters als **opaker**
+    /// JSON-String (Muster [`HostFrame::TimelineData`]).
+    ///
+    /// Kein `found`-Flag: Ein unbekannter Schiedsrichter liefert leere
+    /// Listen, damit die Pflege-Ansicht sich trotzdem öffnen lässt.
+    OfficialDetail {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(default)]
+        json: String,
+    },
 }
 
 /// Höchstzahl der Turnierleitungs-Geräte, die der Relay spiegelt.
@@ -1507,10 +1991,25 @@ pub const MAX_TL_STATE_LEN: usize = 64 * 1024;
 /// Die Kennung reist mit jedem Kommando zurück zum Host, damit sein
 /// Protokoll benennen kann, wer gehandelt hat. Der Zugang bleibt beim Relay
 /// und taucht nirgends sonst auf.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TlAuthDevice {
     pub id: String,
     pub token: String,
+    /// Gewähltes Panel-Profil dieses Geräts (Spec tl-web-panelsystem, ADR
+    /// 0025); leer = Standardprofil. Grundlage des
+    /// `X-Tl-Active-Profile`-Antwort-Headers (`relay::tl_state_route` /
+    /// `tablet::server::tl_state`).
+    ///
+    /// **Bewusste Ausnahme** von der oben dokumentierten Regel „kein
+    /// `#[serde(default)]` auf TL-Feldern": Diese Regel schützt davor, dass
+    /// ein still ergänzter Wert die weitreichendere/ungeprüfte Variante
+    /// auslöst (siehe [`TlAction`]-Dokkommentar). Hier ist „leer" aber die
+    /// NEUTRALSTE Lesart — sie bedeutet „Standardprofil", keine erweiterten
+    /// Rechte oder größere Sichtbarkeit. Ein alter Host, der dieses Feld
+    /// noch nicht kennt, sendet es schlicht nicht mit; `#[serde(default)]`
+    /// hält den Relay davon unabhängig lauffähig. Begründung: ADR 0025.
+    #[serde(default)]
+    pub profile_id: String,
 }
 
 /// Vom Master an Cloud-Slaves vererbte Azure-TTS-Konfiguration (ADR 0003).
@@ -1569,6 +2068,10 @@ pub struct PreparedMatch {
     /// Hallenfilterung am Relay (Slave sieht nur seine Halle).
     #[serde(default)]
     pub hall: String,
+    /// Effektive Hallen-Farbe des Aufrufs (Hex, Spec hallen-farben) —
+    /// `None` ohne Halle, bei Ein-Hallen-Turnieren und von alten Hosts.
+    #[serde(rename = "hallColor", default, skip_serializing_if = "Option::is_none")]
+    pub hall_color: Option<String>,
     /// Disziplin als snake_case-Schlüssel (`mens_singles`, …; leer = unbekannt)
     /// – der Slave lokalisiert die Ansage selbst.
     #[serde(default)]
@@ -1653,7 +2156,11 @@ pub struct SlaveInfo {
 }
 
 /// Frames vom Relay an den bts-light-Host.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// **Kein `Eq`** (nur `PartialEq`): `TlCommand` trägt ein [`TlAction`], und
+/// das ist seit den Panel-Profilen (`f64`-Feld `height_fr`) selbst nicht
+/// mehr `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RelayFrame {
     /// Ein Tablet hat sich für diesen Court verbunden.
@@ -1796,6 +2303,16 @@ pub enum RelayFrame {
         req_id: u64,
         #[serde(rename = "matchId")]
         match_id: i64,
+    },
+    /// Ein TL-Gerät möchte Sperrlisten und Einsätze eines Schiedsrichters
+    /// sehen (Spec schiedsrichter-management). Wie beim Punktverlauf
+    /// Request/Response über `req_id`; der Relay bleibt Briefträger und
+    /// hält diese Personendaten **nie** vor.
+    OfficialDetailRequest {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(rename = "officialId")]
+        official_id: i64,
     },
 }
 
@@ -2023,6 +2540,8 @@ mod tests {
                 show_club_names: true,
                 show_club_logos: false,
                 finalized: false,
+                sr_names: vec!["Sabine Schiedsmann".into()],
+                ar_names: Vec::new(),
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -2064,15 +2583,24 @@ mod tests {
             show_club_names: false,
             show_club_logos: false,
             finalized: true,
+            sr_names: vec!["Sabine Schiedsmann".into()],
+            ar_names: vec!["Alex Aufschlag".into()],
         };
         let json = serde_json::to_string(&brief).unwrap();
         assert!(json.contains(r#""finalized":true"#));
+        // Die Namen reisen in camelCase mit — das ist der Vertrag mit
+        // `tablet.html` (Spec schiedsrichter-management Nr. 7).
+        assert!(json.contains(r#""srNames":["Sabine Schiedsmann"]"#));
+        assert!(json.contains(r#""arNames":["Alex Aufschlag"]"#));
         roundtrip(&brief);
 
-        // Altes Frame ohne das Feld → Default false.
+        // Altes Frame ohne das Feld → Default false bzw. leere Listen: Ein
+        // älterer Relay/Client bleibt lesbar (Auto-Update-Sicherheit).
         let legacy = r#"{"matchId":7,"teamA":[],"teamB":[],"eventLabel":"HE G1","bestOfSets":3,"targetScore":21}"#;
         let parsed: MatchBrief = serde_json::from_str(legacy).unwrap();
         assert!(!parsed.finalized, "fehlendes Feld → finalized=false");
+        assert!(parsed.sr_names.is_empty());
+        assert!(parsed.ar_names.is_empty());
     }
 
     #[test]
@@ -2126,6 +2654,48 @@ mod tests {
         });
     }
 
+    /// Host→Relay-Score-Spiegel: Im LAN(+Cloud)-Betrieb zählen die Tablets am
+    /// Host vorbei am Relay — dieses Frame trägt den Satzstand (und optional
+    /// den opaken `court_state`) zum Relay, damit Cloud-Monitor und
+    /// Cloud-Übersicht nicht auf 0:0 stehen bleiben.
+    #[test]
+    fn host_score_update_roundtrips_with_camel_case_wire() {
+        let frame = HostFrame::ScoreUpdate {
+            court_id: 5,
+            match_id: 77,
+            sets: vec![SetAb { a: 21, b: 19 }, SetAb { a: 3, b: 1 }],
+            state: Some(r#"{"score":"3:1"}"#.into()),
+        };
+        roundtrip(&frame);
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains(r#""type":"score_update""#));
+        assert!(json.contains(r#""courtId":5"#));
+        assert!(json.contains(r#""matchId":77"#));
+
+        // Ohne `state` (kein Tablet-Zustand vorhanden) → Feld fehlt auf der
+        // Wire, parst als None; `sets` leer ist zulässig (Match ohne Punkte).
+        let json = serde_json::to_string(&HostFrame::ScoreUpdate {
+            court_id: 5,
+            match_id: 77,
+            sets: vec![],
+            state: None,
+        })
+        .unwrap();
+        assert!(!json.contains("state"), "None-state bleibt weg: {json}");
+        let parsed: HostFrame =
+            serde_json::from_str(r#"{"type":"score_update","courtId":5,"matchId":77,"sets":[]}"#)
+                .unwrap();
+        assert_eq!(
+            parsed,
+            HostFrame::ScoreUpdate {
+                court_id: 5,
+                match_id: 77,
+                sets: vec![],
+                state: None,
+            }
+        );
+    }
+
     #[test]
     fn prepared_frame_and_state_roundtrip() {
         // Prepared-Frame (Cluster C Stufe 2) hält den Roundtrip …
@@ -2133,6 +2703,7 @@ mod tests {
             prepared: vec![PreparedMatch {
                 match_id: 42,
                 hall: "Halle 2".into(),
+                hall_color: Some("#0ea5e9".into()),
                 discipline: "mens_singles".into(),
                 class_label: "A".into(),
                 round_name: "G1".into(),
@@ -2305,6 +2876,7 @@ mod tests {
             id: 401,
             label: "Halle 2 · 1".into(),
             hall: "Halle 2".into(),
+            hall_color: None,
         });
         // Älterer Host/Relay ohne `hall` bleibt lesbar (Default = leer).
         let old = r#"{"id":7,"label":"Feld 3"}"#;
@@ -2315,7 +2887,140 @@ mod tests {
                 id: 7,
                 label: "Feld 3".into(),
                 hall: String::new(),
+                hall_color: None,
             }
+        );
+    }
+
+    #[test]
+    fn court_brief_hall_color_roundtrips_and_defaults_none() {
+        // Spec hallen-farben: neues optionales Feld hält den Roundtrip …
+        roundtrip(&CourtBrief {
+            id: 401,
+            label: "Halle 2 · 1".into(),
+            hall: "Halle 2".into(),
+            hall_color: Some("#f59e0b".into()),
+        });
+        // … und ein alter Host ohne das Feld bleibt lesbar (farblos), ohne
+        // dass `None` überhaupt auf den Draht geht (skip_serializing_if).
+        let old = r#"{"id":7,"label":"Feld 3","hall":"Halle 1"}"#;
+        let brief: CourtBrief = serde_json::from_str(old).unwrap();
+        assert_eq!(brief.hall_color, None);
+        let json = serde_json::to_string(&brief).unwrap();
+        assert!(!json.contains("hall_color"), "None reist nicht mit: {json}");
+    }
+
+    #[test]
+    fn prepared_match_hall_color_defaults_none() {
+        let old = r#"{"matchId":42,"hall":"Halle 2","teamA":[],"teamB":[],"calledAtMs":0}"#;
+        let p: PreparedMatch = serde_json::from_str(old).unwrap();
+        assert_eq!(p.hall_color, None, "alter Host → farblos");
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("hallColor"), "None reist nicht mit: {json}");
+    }
+
+    #[test]
+    fn der_herzschlag_traegt_kein_court_feld() {
+        // Spec monitor-livestand-push, S6. Daran hängt die ganze
+        // Verträglichkeit: Eine Anzeige aus einem älteren Stand prüft auf ein
+        // `court`-Feld und verwirft alles andere folgenlos. Käme hier eines
+        // vor, hielte sie den Herzschlag für einen Anstoß und holte bei jedem
+        // den vollen Stand — auf allen Anzeigen, alle zehn Sekunden.
+        let frame = monitor_heartbeat_frame(1_787_000_000_042);
+        let v: serde_json::Value = serde_json::from_str(&frame).expect("gültiges JSON");
+        let obj = v.as_object().expect("Objekt");
+        assert!(!obj.contains_key("court"), "kein court-Feld: {frame}");
+        assert!(!obj.contains_key("seq"), "auch keine Sequenz: {frame}");
+        assert_eq!(
+            obj.get("hb").and_then(|h| h.as_u64()),
+            Some(1_787_000_000_042)
+        );
+        assert_eq!(obj.len(), 1, "nur der Zeitstempel: {frame}");
+    }
+
+    #[test]
+    fn der_herzschlag_takt_haelt_die_stale_grenze() {
+        // Zwei Herzschläge müssen in die Grenze passen — ein einzelner
+        // verlorener darf noch keinen Reconnect auslösen. Über Variablen,
+        // damit clippy den Vergleich nicht wegoptimiert (`assertions_on_constants`).
+        let takt = MONITOR_HEARTBEAT_MS;
+        let grenze = MONITOR_HEARTBEAT_STALE_MS;
+        assert!(takt * 2 < grenze, "{takt} · 2 muss unter {grenze} liegen");
+    }
+
+    #[test]
+    fn ein_monitor_state_ohne_seq_bleibt_lesbar() {
+        // Spec monitor-livestand-push, S4: `seq` ordnet Push und Voll-Abruf.
+        // Ein **alter** Relay (oder Host) schickt das Feld nicht — die Seite
+        // muss den Stand trotzdem verarbeiten und `seq = 0` sehen, damit sie
+        // sich wie vor der Etappe verhält.
+        // Frame eines alten Absenders simulieren: aktueller Zustand, aber
+        // ohne das neue Feld (Muster `monitor_state_hall_color_defaults_none`).
+        let mut json = serde_json::to_value(MonitorState {
+            court_id: 3,
+            court_label: "Feld 3".into(),
+            hall_color: None,
+            tournament_name: "T".into(),
+            match_info: None,
+            court_state: None,
+            config: MonitorConfig::default(),
+            ads: vec![],
+            command: None,
+            device_code: String::new(),
+            unassigned: false,
+            redirect_to: None,
+            server_now_ms: 0,
+            on_court_since_ms: None,
+            call_timer: CallTimerView::default(),
+            seq: 4711,
+        })
+        .expect("serialisierbar");
+        json.as_object_mut().expect("Objekt").remove("seq");
+        let state: MonitorState = serde_json::from_value(json).expect("altes Frame bleibt lesbar");
+        assert_eq!(
+            state.seq, 0,
+            "fehlendes Feld = 0 = „keine Ordnung bekannt\""
+        );
+
+        // Und mit Feld kommt der Wert an — hin und zurück.
+        let mut mit = state.clone();
+        mit.seq = 1_787_000_000_042;
+        let json = serde_json::to_string(&mit).expect("serialisierbar");
+        assert!(json.contains("\"seq\":1787000000042"), "{json}");
+        let zurueck: MonitorState = serde_json::from_str(&json).expect("lesbar");
+        assert_eq!(zurueck.seq, mit.seq);
+    }
+
+    #[test]
+    fn monitor_state_hall_color_defaults_none() {
+        // Frame eines alten Hosts/Relays simulieren: aktueller Zustand,
+        // aber ohne das neue Feld.
+        let mut json = serde_json::to_value(MonitorState {
+            court_id: 3,
+            court_label: "Feld 3".into(),
+            hall_color: Some("#f59e0b".into()),
+            tournament_name: String::new(),
+            match_info: None,
+            court_state: None,
+            config: MonitorConfig::default(),
+            ads: Vec::new(),
+            command: None,
+            device_code: String::new(),
+            unassigned: false,
+            redirect_to: None,
+            server_now_ms: 0,
+            on_court_since_ms: None,
+            call_timer: CallTimerView::default(),
+            seq: 0,
+        })
+        .unwrap();
+        json.as_object_mut().unwrap().remove("hallColor").unwrap();
+        let s: MonitorState = serde_json::from_value(json).unwrap();
+        assert_eq!(s.hall_color, None, "alter Host/Relay → farblos");
+        let wieder = serde_json::to_string(&s).unwrap();
+        assert!(
+            !wieder.contains("hallColor"),
+            "None reist nicht mit: {wieder}"
         );
     }
 
@@ -2326,22 +3031,26 @@ mod tests {
                 id: 101,
                 label: "Halle 1 · 1".into(),
                 hall: "Halle 1".into(),
+                hall_color: None,
             },
             CourtBrief {
                 id: 401,
                 label: "Halle 2 · 1".into(),
                 hall: "Halle 2".into(),
+                hall_color: None,
             },
             CourtBrief {
                 id: 102,
                 label: "Halle 1 · 2".into(),
                 hall: "Halle 1".into(),
+                hall_color: None,
             },
             // Leere Halle (unbekannt) wird ausgelassen.
             CourtBrief {
                 id: 9,
                 label: "Feld 9".into(),
                 hall: String::new(),
+                hall_color: None,
             },
         ];
         assert_eq!(
@@ -2356,6 +3065,7 @@ mod tests {
         let state = MonitorState {
             court_id: 3,
             court_label: "Feld 3".into(),
+            hall_color: Some("#14b8a6".into()),
             tournament_name: "Test-Cup".into(),
             match_info: Some(MonitorMatch {
                 match_id: 14,
@@ -2393,6 +3103,7 @@ mod tests {
                 second_call_minutes: 2.0,
                 third_call_minutes: 4.0,
             },
+            seq: 1_787_000_000_007,
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));
@@ -2730,9 +3441,29 @@ mod tests {
                 match_id: 4711,
                 hall: "Halle B".to_string(),
             },
+            TlAction::ExcludeFromAutoAssign {
+                match_id: 4711,
+                excluded: true,
+            },
+            TlAction::QueueReorder {
+                match_id: 4711,
+                before_match_id: Some(4712),
+            },
+            TlAction::QueueOrderReset,
+            TlAction::SetHallPrefill {
+                enabled: true,
+                window: 18,
+            },
+            TlAction::ClearAutoHalls,
             TlAction::AnnounceCourtCall {
                 court_id: 5,
                 match_id: 4711,
+                side: None,
+            },
+            TlAction::AnnounceCourtCall {
+                court_id: 5,
+                match_id: 4711,
+                side: Some(PrepCallSide::Team2),
             },
             TlAction::AnnouncePrepCall {
                 match_id: 4711,
@@ -2762,7 +3493,96 @@ mod tests {
                 names: vec!["Müller".to_string(), "Schmidt".to_string()],
             },
             TlAction::SetAutoAssign { enabled: true },
+            // Schiedsrichter (Spec schiedsrichter-management, Schritt 8)
+            TlAction::OfficialAssign {
+                court_id: 5,
+                match_id: 4711,
+                official_id: 3,
+                role: TlOfficialRole::Sr,
+            },
+            TlAction::OfficialClear {
+                court_id: 5,
+                match_id: 4711,
+                role: TlOfficialRole::Ar,
+            },
+            TlAction::OfficialPause {
+                official_id: 3,
+                paused: true,
+            },
+            TlAction::OfficialReorder {
+                official_id: 3,
+                before_official_id: Some(7),
+            },
+            TlAction::OfficialSetClub {
+                official_id: 3,
+                club: "TSV Musterstadt".to_string(),
+            },
+            TlAction::OfficialBlocklistSet {
+                official_id: 3,
+                clubs: vec!["SC Nachbar".to_string()],
+                players: vec![42, 43],
+            },
+            TlAction::OfficialsCourtToggle {
+                court_id: 5,
+                sr: true,
+                ar: false,
+                operator: true,
+            },
+            TlAction::AnnounceOfficials { court_id: 5 },
+            TlAction::AnnounceScorekeeper { court_id: 5 },
+            TlAction::AnnounceStartPlay {
+                court_id: 5,
+                match_id: 77,
+            },
+            // Panel-Profile (Spec tl-web-panelsystem)
+            TlAction::ProfileSave {
+                profile: TlPanelProfileWire {
+                    id: "profil-1".to_string(),
+                    name: "Wandmonitor Halle 2".to_string(),
+                    panels: vec![TlPanelSettingWire {
+                        key: "courts".to_string(),
+                        visible: true,
+                        height_fr: 2.0,
+                        collapsed: false,
+                        column: 1,
+                    }],
+                    display: TlDisplaySettingsWire {
+                        show_numbers: true,
+                        list_position: TlListPositionWire::Bottom,
+                        time_stats_axis: TlTimeStatsAxisWire::Group,
+                        ..Default::default()
+                    },
+                    columns: 2,
+                    column_widths: vec![2.0, 1.0],
+                    updated_at_ms: 1_700_000_000_000,
+                },
+            },
+            TlAction::ProfileDelete {
+                profile_id: "profil-1".to_string(),
+            },
+            TlAction::ProfileSelect {
+                profile_id: "profil-1".to_string(),
+            },
+            TlAction::ProfileSetDefault {
+                profile_id: "profil-1".to_string(),
+            },
         ]
+    }
+
+    #[test]
+    fn tl_official_assign_wire_form() {
+        // Wire-Vertrag mit tl.html — festgenagelt wie bei `assign_court`.
+        let json = serde_json::to_string(&TlAction::OfficialAssign {
+            court_id: 5,
+            match_id: 4711,
+            official_id: 3,
+            role: TlOfficialRole::Sr,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"action":"official_assign","courtId":5,"matchId":4711,"officialId":3,"role":"sr"}"#
+        );
     }
 
     #[test]
@@ -2857,10 +3677,12 @@ mod tests {
                 TlAuthDevice {
                     id: "tl-1".to_string(),
                     token: "tok-a".to_string(),
+                    ..Default::default()
                 },
                 TlAuthDevice {
                     id: "tl-2".to_string(),
                     token: "tok-b".to_string(),
+                    ..Default::default()
                 },
             ],
         });
@@ -2869,6 +3691,179 @@ mod tests {
         roundtrip(&HostFrame::TlAuth {
             devices: Vec::new(),
         });
+    }
+
+    #[test]
+    fn tl_auth_device_profile_id_roundtrips_with_and_without_value() {
+        // ADR 0025: leer = Standardprofil, gesetzt = konkrete Wahl — beide
+        // Formen müssen die Wire-Grenze unverändert überstehen.
+        roundtrip(&TlAuthDevice {
+            id: "tl-1".to_string(),
+            token: "tok-a".to_string(),
+            profile_id: String::new(),
+        });
+        roundtrip(&TlAuthDevice {
+            id: "tl-1".to_string(),
+            token: "tok-a".to_string(),
+            profile_id: "profil-wand".to_string(),
+        });
+        // Ein alter Host, der `profile_id` noch nicht kennt, sendet das
+        // Feld schlicht nicht mit — `#[serde(default)]` hält das lesbar.
+        let alt: TlAuthDevice = serde_json::from_str(r#"{"id":"tl-1","token":"tok-a"}"#).unwrap();
+        assert!(alt.profile_id.is_empty());
+    }
+
+    #[test]
+    fn tl_panel_profile_wire_serde_roundtrip() {
+        // Spec tl-web-panelsystem: Der eigens für die Wire-Grenze
+        // definierte Profil-Typ (kein rohes `config::TlPanelProfile`)
+        // übersteht Serialisieren + Laden unverändert, inklusive
+        // verschachtelter Panel-Liste und Anzeige-Optionen.
+        roundtrip(&TlPanelProfileWire {
+            id: "profil-1".to_string(),
+            name: "Wandmonitor Halle 2".to_string(),
+            panels: vec![
+                TlPanelSettingWire {
+                    key: "courts".to_string(),
+                    visible: true,
+                    height_fr: 3.0,
+                    collapsed: false,
+                    column: 1,
+                },
+                TlPanelSettingWire {
+                    key: "officials".to_string(),
+                    visible: true,
+                    height_fr: 1.0,
+                    collapsed: true,
+                    column: 2,
+                },
+                TlPanelSettingWire {
+                    key: "finished".to_string(),
+                    visible: false,
+                    height_fr: 1.0,
+                    collapsed: false,
+                    column: 3,
+                },
+            ],
+            display: TlDisplaySettingsWire {
+                show_numbers: true,
+                show_nations: true,
+                show_club_names: false,
+                show_club_logos: false,
+                show_discipline: true,
+                show_round: true,
+                show_group: false,
+                show_court_remaining: true,
+                unlimited_court_calls: false,
+                list_position: TlListPositionWire::Bottom,
+                time_stats_axis: TlTimeStatsAxisWire::Group,
+            },
+            columns: 3,
+            column_widths: vec![2.0, 1.0, 1.5],
+            updated_at_ms: 1_700_000_000_000,
+        });
+    }
+
+    /// Etappe D (`spielzeiten-prognose`): `showCourtRemaining` reist im
+    /// Profil mit; ein altes Profil ohne das Feld liest sich als `false`
+    /// (Auto-Update-Sicherheit — Browser-Stände altern langsam).
+    #[test]
+    fn display_settings_court_remaining_roundtrip_and_default() {
+        let d = TlDisplaySettingsWire {
+            show_court_remaining: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""showCourtRemaining":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert_eq!(zurueck, d);
+
+        let legacy = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,"showClubLogos":false,"showDiscipline":false,"showRound":false,"showGroup":false,"listPosition":"right"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(legacy).unwrap();
+        assert!(!alt.show_court_remaining);
+        assert!(alt.show_numbers);
+    }
+
+    /// Option „Aufrufe unbegrenzt" (Feldtest 17.08.2026): reist als
+    /// `unlimitedCourtCalls` im Profil; ein alter Browser-Stand ohne das
+    /// Feld liest sich als `false` — das bisherige Verhalten (Deckel bei
+    /// drei Aufrufen) bleibt dann unverändert.
+    #[test]
+    fn display_settings_unlimited_court_calls_roundtrip_and_default() {
+        let d = TlDisplaySettingsWire {
+            unlimited_court_calls: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""unlimitedCourtCalls":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert_eq!(zurueck, d);
+
+        let legacy = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,"showClubLogos":false,"showDiscipline":false,"showRound":false,"showGroup":false,"listPosition":"right"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(legacy).unwrap();
+        assert!(!alt.unlimited_court_calls);
+    }
+
+    #[test]
+    fn tl_panel_profile_column_layout_wire_names_and_defaults() {
+        // Mehrspalten-Layout (Plan tl-liste-vereinfachen F): Die Feldnamen
+        // auf der Leitung sind camelCase (`columns`, `columnWidths`,
+        // `column`) …
+        let json = serde_json::to_string(&TlPanelProfileWire {
+            id: "profil-1".to_string(),
+            name: "Wandmonitor".to_string(),
+            panels: vec![TlPanelSettingWire {
+                key: "queue".to_string(),
+                visible: true,
+                height_fr: 1.0,
+                collapsed: false,
+                column: 3,
+            }],
+            display: TlDisplaySettingsWire::default(),
+            columns: 3,
+            column_widths: vec![2.0, 1.0, 1.0],
+            updated_at_ms: 7,
+        })
+        .unwrap();
+        assert!(json.contains(r#""columns":3"#), "{json}");
+        assert!(json.contains(r#""columnWidths":[2.0,1.0,1.0]"#), "{json}");
+        assert!(json.contains(r#""column":3"#), "{json}");
+
+        // … und ein älterer Browser, der keines der drei Felder kennt,
+        // bleibt lesbar: `0`/leer heißt „aus `listPosition` ableiten" bzw.
+        // „Spalte 1" — beides entscheidet `tl.html`, nicht der Host.
+        let alt: TlPanelProfileWire = serde_json::from_str(
+            r#"{"id":"p","name":"Alt","panels":[{"key":"queue","visible":true,"heightFr":1.0}],
+                "display":{"showNumbers":true,"showNations":false,"showClubNames":false,
+                           "showClubLogos":false,"showDiscipline":true,"showRound":true,
+                           "showGroup":true,"listPosition":"right"},
+                "updatedAtMs":1}"#,
+        )
+        .unwrap();
+        assert_eq!(alt.columns, 0);
+        assert!(alt.column_widths.is_empty());
+        assert_eq!(alt.panels[0].column, 0);
+    }
+
+    #[test]
+    fn tl_panel_setting_collapsed_wire_name_and_default() {
+        // Feldname auf der Leitung ist camelCase-neutral („collapsed"),
+        // und ein älterer Browser, der das Feld nicht kennt, bleibt
+        // lesbar: fehlendes `collapsed` ⇒ aufgeklappt (bisheriges
+        // Verhalten), nicht zugeklappt.
+        let json = serde_json::to_string(&TlPanelSettingWire {
+            key: "queue".to_string(),
+            visible: true,
+            height_fr: 2.0,
+            collapsed: true,
+            column: 1,
+        })
+        .unwrap();
+        assert!(json.contains(r#""collapsed":true"#), "{json}");
+
+        let alt: TlPanelSettingWire =
+            serde_json::from_str(r#"{"key":"queue","visible":true,"heightFr":2.0}"#).unwrap();
+        assert!(!alt.collapsed, "fehlendes Feld heißt aufgeklappt");
     }
 
     #[test]
@@ -2893,6 +3888,37 @@ mod tests {
 
         for side in PrepCallSide::ALL {
             roundtrip(&side);
+        }
+    }
+
+    #[test]
+    fn court_call_side_is_optional_and_defaults_to_both() {
+        // Anders als beim Vorbereitungs-Nachruf ist `side` hier optional:
+        // Der Aufruf am Feld gilt seit jeher beiden Parteien, und genau das
+        // ist die NEUTRALERE Variante — ein älterer Browser, der das Feld
+        // nicht kennt, löst damit exakt das bisherige Verhalten aus.
+        let alt: TlAction =
+            serde_json::from_str(r#"{"action":"announce_court_call","courtId":3,"matchId":7}"#)
+                .expect("ein alter Client ohne `side` bleibt lesbar");
+        assert_eq!(
+            alt,
+            TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+                side: None,
+            }
+        );
+
+        // Ohne Partei taucht das Feld auch nicht auf der Leitung auf.
+        let json = serde_json::to_string(&alt).unwrap();
+        assert!(!json.contains("side"), "{json}");
+
+        for side in PrepCallSide::ALL {
+            roundtrip(&TlAction::AnnounceCourtCall {
+                court_id: 3,
+                match_id: 7,
+                side: Some(side),
+            });
         }
     }
 
@@ -3046,6 +4072,14 @@ mod tests {
             court_id: 7,
             match_id: 42,
             timeline: beispiel_timeline(),
+        });
+        roundtrip(&RelayFrame::OfficialDetailRequest {
+            req_id: 8,
+            official_id: 3,
+        });
+        roundtrip(&HostFrame::OfficialDetail {
+            req_id: 8,
+            json: r#"{"blocked_clubs":[]}"#.to_string(),
         });
         roundtrip(&RelayFrame::TimelineRequest {
             req_id: 9,

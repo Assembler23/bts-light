@@ -133,12 +133,27 @@ jobs:
           (cd rel && ls *-setup.exe) >> exes.txt
           # Release-Daten je Version aus den Tags (Version → Erstell-Datum).
           git for-each-ref --format '%(refname:short) %(creatordate:short)' refs/tags > dates.txt
+          # Zuletzt veroeffentlichter Tag VOR diesem: Damit umfassen die
+          # Update-Notes alle Versionen der Strecke, nicht nur die getaggte.
+          # Zwischen zwei Tags liegen regelmaessig mehrere Versionsspruenge
+          # (v0.9.214 → v0.9.223 waren neun) — genau darueber springt, wer
+          # aktualisiert. Faellt die Ermittlung aus (erster Tag ueberhaupt,
+          # flacher Checkout), bleibt --notes-since leer und der Generator
+          # verhaelt sich wie bisher: nur die getaggte Version.
+          # --match: NUR Versions-Tags. Ohne die Einschraenkung liefert
+          # git describe irgendeinen erreichbaren Tag (Marker, Test-Tag), sein
+          # Name landet als --notes-since im Generator und ist dort
+          # unbrauchbar — der Rueckfall greift dann zwar, aber die Strecke
+          # waere still verloren.
+          VORHER=$(git describe --tags --match 'v[0-9]*' --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          echo "vorheriger Tag: ${VORHER:-(keiner)}"
           node scripts/build-release-page.mjs \
             --changelog docs/changelog.md \
             --files exes.txt \
             --dates dates.txt \
             --out rel/index.html \
             --notes-out notes.txt \
+            ${VORHER:+--notes-since "${VORHER#v}"} \
             --notes-version "${GITHUB_REF_NAME#v}"
 
       # Tauri-2-Updater-Manifest. signature = Inhalt der .sig-Datei,

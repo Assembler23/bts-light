@@ -59,6 +59,19 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # Die Assets (tl.html, tablet.html, monitor.html …) durchlaufen KEINEN
+      # Build — ein Syntaxfehler darin lässt die Seite im Betrieb leer. Am
+      # 13.08.2026 ist genau das passiert (Zeilenumbruch in einem
+      # String-Literal), deshalb prüft die CI die Inline-Skripte.
+      - name: Asset-Syntax (JS in HTML)
+        run: node scripts/check-asset-syntax.mjs
+
+      # Baseline der Feld-Ansage: Ein leerer erster Abruf (Sync-Lauf hat noch
+      # keinen BTP-Schnappschuss) darf nicht als Baseline gelten — sonst sagt
+      # die App beim Start alle laufenden Spiele an (Befund 14.08.2026).
+      - name: Ansage-Baseline (JS)
+        run: node scripts/test-announce-baseline.mjs
+
       # BWF-Aufschlag-Positionierung des Tablets (Plan 12b) — reiner
       # Node-Test der sicherheitskritischen Positionslogik.
       - name: Tablet-Aufschlagpositionen (JS)
@@ -94,10 +107,44 @@ jobs:
       - name: Check-In-Doppel (JS)
         run: node scripts/test-checkin-pairs.mjs
 
+      # Wortlaut der Spielbeginn-Ansage: mit dem Nutzer abgestimmt und in
+      # beiden Synthese-Pfaden identisch — ohne Paarung, ohne Stufenwort
+      # (sie ist kein Aufruf).
+      - name: Spielbeginn-Ansage (JS)
+        run: node scripts/test-start-play-text.mjs
+      # Wortlaut des Zähltafelbediener-Nachrufs: in beiden Synthese-Pfaden
+      # identisch, Stufenwort ab dem zweiten Mal, ohne Adressat gar nichts.
+      - name: Bediener-Nachruf (JS)
+        run: node scripts/test-scorekeeper-call-text.mjs
+
+      # Ordnung zwischen Push und Voll-Abruf auf den Anzeige-Seiten: Push nur
+      # bei echt neuerer Sequenz, ein Voll-Abruf darf gleichziehen (der
+      # BTP-Rückfall-Fall). Eine falsche Regel hier friert Anzeigen ein.
+      - name: Anzeige-Ordnung seq (JS)
+        run: node scripts/test-monitor-seq.mjs
+
+      # Zuständigkeitsgrenze des Teil-Patches der Feld-Übersicht: Gepatcht
+      # wird nur der gezählte Punkt im laufenden Satz. Eine zu großzügige
+      # Regel hinterlässt eine Karte, die dauerhaft Falsches zeigt.
+      - name: Teil-Patch der Übersicht (JS)
+        run: node scripts/test-court-patch.mjs
+
+      # Wann gilt der Push-Kanal einer Anzeige als gesund? Laut Spec das
+      # höchste Risiko des Vorhabens: Eine falsche Regel hier friert alle
+      # Anzeigen einer Halle ein.
+      - name: Gesundheit des Push-Kanals (JS)
+        run: node scripts/test-push-health.mjs
+
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.
       - name: Release-Faellig-Regel (JS)
         run: node scripts/test-version-tagged.mjs
+
+      # Haelt fest, dass die Update-Notes die ganze Strecke seit dem letzten
+      # Tag abdecken — vorher sah der Nutzer nur den getaggten Eintrag, und
+      # bei neun gebuendelten Versionen fehlten acht.
+      - name: Update-Notes ueber die Release-Strecke (JS)
+        run: node scripts/test-release-notes.mjs
 
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check

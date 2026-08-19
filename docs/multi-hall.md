@@ -72,6 +72,28 @@ eine `LocationID`. Hat das Turnier **≥ 2 Hallen**, gilt:
   — dieselbe Anordnung wie in der Halle, statt Formularreihenfolge.
   Host-Einstellung je Halle, wirkt in beiden Oberflächen gleich. Details:
   [features/feld-raster.md](features/feld-raster.md).
+- **Hallen-Farben:** Jede Halle trägt eine Farbe als kleine Marke neben
+  jeder Hallen-Nennung — automatisch aus einer kuratierten 16-Ton-Palette
+  (`hall_colors.rs`, deterministisch über die alphabetisch sortierte
+  Hallenliste, ADR 0032), je Halle übersteuerbar auf der Felderübersicht
+  (eigenes Config-Feld `hall_colors`, ADR 0031; vom SetupWizard-Speichern
+  geschützt). Auf dem Draht reist immer der Hex-Wert (ADR 0033). Die
+  Farbe ist nie einziger Informationsträger — Kürzel/Name bleiben stehen.
+  Details: [features/hallen-farben.md](features/hallen-farben.md).
+  **Bedienung:** Zahnrad am Hallen-Gruppenkopf der Felderübersicht →
+  Abschnitt „Hallen-Farbe" im Popover: Palettenton anklicken = Halle
+  übersteuern, „Automatisch" = zurück zur Auto-Vergabe. Marken erscheinen
+  am Gruppenkopf der Felderübersicht und am Hallen-Kürzel im
+  Vorbereitungs-Panel; TL-Web, Monitore und badhub-Aushang folgen in den
+  weiteren Etappen der Spec.
+
+- **Spielzeiten je Halle** (seit v0.9.231): Das TL-Web-Panel „Spielzeiten"
+  wertet die gemessenen Dauern wahlweise **nach Halle** aus — die Frage,
+  wegen der man bei zwei Hallen überhaupt auf die Uhr schaut. Die Halle wird
+  beim ersten Aufruf aufs Feld im Messwert festgehalten (ADR 0036), nicht
+  zur Anzeigezeit nachgeschlagen: Sobald BTP ein beendetes Spiel vom Feld
+  nimmt, wäre sie nicht mehr auflösbar. Details:
+  [features/tl-sicht-feinschliff.md](features/tl-sicht-feinschliff.md).
 
 Bei **Ein-Hallen-Turnieren** ist die Halle leer und nichts gruppiert —
 alle Ansichten bleiben byte-für-byte wie vorher.
@@ -174,6 +196,13 @@ Azure-/Web-Speech-Stimme, ohne Audio-Übertragung.
 - **Architektur:** genau **ein Master** (mit BTP-Steuerung: Vergabe + Push);
   beliebig viele Slaves (read-only). Voraussetzung: der Slave erreicht den
   BTP-Rechner im selben Netz (LAN/WLAN).
+- **Mischbetrieb der Versionsstände** (seit v0.9.230): Im
+  Auto-Update-Fenster steht ein Master mit neuerem Stand neben einem Slave
+  mit älterem. Erteilt der Master eine Ansageart, die der Slave nicht
+  kennt, überspringt dieser den einen Auftrag und spricht die übrigen
+  normal. Vorher scheiterte daran die **ganze Charge** — die zweite Halle
+  blieb 60 Sekunden lang still, auch für gewöhnliche Aufrufe. Siehe
+  [announcements.md](announcements.md).
 
 ## Cloud-Ansage-Slave (B1a, v0.9.142)
 
@@ -310,6 +339,14 @@ Gestartet in `commands.rs::start_sync` nur bei gültigem `master_namespace`,
 beendet in `stop_sync`. **Tablets bleiben Direkt-Cloud** (Weg A) — die Brücke
 ist nur für Monitore, weil Tablet-Ergebnisse ins Master-BTP müssen.
 
+**Punktestand auf Cloud-Monitoren (v0.9.200):** Der Relay kannte Satzstand
+und Spielzustand nur von Tablets, die selbst über die Cloud zählen — zählten
+sie im LAN (Master-Halle im `LanAndCloud`-Betrieb), blieben alle
+Cloud-Anzeigen auf 0:0 (Turnier-Befund 13.08.2026). Seit v0.9.200 spiegelt
+der Master jeden Feld-Stand als `HostFrame::ScoreUpdate` an den Relay;
+Details in [court-monitor.md](court-monitor.md) („Score-Spiegel des Hosts")
+und [cloud-relay.md](cloud-relay.md).
+
 ### Hallen-Auswahl auf dem Cloud-Slave — warum eigens
 
 `announce_hall` ist die eine Einstellung, die **sowohl** die Ansage (welche
@@ -385,3 +422,25 @@ bei ≥2 Hallen keine Ansage-Halle gewählt ist (sonst sagt er beide an).
 | Geräte-Liste vereinen | `relay-proto/src/lib.rs` (`merge_device_lists`) | [cloud-relay.md](cloud-relay.md) |
 | Feld-Raster je Halle | `config.rs` (`hall_layouts`), `src/io/hallGrid.mjs`, `FieldOverviewPage.tsx`, `tablet/tl.rs` (`TlHallLayout`), `assets/tl.html` | [features/feld-raster.md](features/feld-raster.md), [turnierleitung-web.md](turnierleitung-web.md) |
 | Vorbereitungs-Aufrufe je Halle | `src-tauri/src/tablet/state.rs`, `src/pages/PreparationPanel.tsx` | [preparation.md](preparation.md) |
+
+## Schiedsrichter in mehreren Hallen
+
+Das [Schiedsrichtermanagement](schiedsrichter-management.md) folgt derselben
+Architektur: Die Besetzung hängt am Spiel (nicht am Feld), die Anzeige geht
+über `MatchBrief` an LAN- **und** Cloud-Tablets — die ferne Halle
+eingeschlossen —, und die Ansage wird in der Halle des Felds gesprochen
+(`AnnounceJobKind::Officials`). Die feldweisen Schalter sind an der CourtID
+geschlüsselt und damit hallenübergreifend eindeutig.
+
+## Automatische Hallen-Vorverteilung
+
+Die [Hallen-Vorverteilung](features/hallen-vorverteilung.md) macht die
+Hallen-Dimension planbar: Die vordersten x Spiele der globalen Warteliste
+bekommen automatisch eine Halle im Verhältnis der entsperrten Felder
+(gemischt, fortlaufend nachgefüllt; ADR 0029). Die Zuordnung ist seit
+ADR 0030 ein **Versprechen**: Regel-, Hand- und Auto-Hallen binden die
+automatische Feldvergabe, Auto-Spiele werden ohne Vorbereitungs-Aufruf in
+ihrer Halle vergeben. Spieler sehen die Halle früh auf den
+Hallen-Monitoren und im badhub-Aushang (`display=next&halle=…`); das
+konkrete Feld folgt wie bisher erst kurz vor dem Spiel. Vorverteilung und
+aktive Tages-Halle schließen sich aus.

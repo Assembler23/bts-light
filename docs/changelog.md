@@ -4,6 +4,871 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.243
+
+- **Die Cloud-Anzeigen laden nicht mehr bei jedem Abruf den ganzen Stand
+  herunter.** Hat sich nichts geändert, antwortet der Server jetzt auch dort
+  mit einer leeren Bestätigung — im Hallennetz war das schon seit v0.9.236 so.
+  Gemessen an einem Testturnier mit zwanzig Feldern: **0,61 MB/s vorher,
+  praktisch nichts nachher**, bei genau demselben Bild auf dem Bildschirm.
+- Das betrifft alle Turniere, die über die Cloud angebunden sind — also die,
+  die hinter einer Firmen-Firewall spielen.
+- Nachtrag zur Spec `monitor-livestand-push` (Etappe S8): Die Messung nach der
+  letzten Etappe hat gezeigt, dass diese Einsparung bisher nur im Hallennetz
+  ankam.
+
+## v0.9.242
+
+- **Eine Anzeige kann jetzt den Stand eines einzelnen Feldes abrufen**, statt
+  immer die ganze Halle zu bekommen: `…/health?court=<Feldnummer>` liefert
+  dieselbe Antwort wie sonst, nur mit diesem einen Feld darin. Im LAN wie in
+  der Cloud.
+- Ohne den Zusatz ändert sich nichts — die Feld-Übersicht bekommt weiterhin
+  alle Felder.
+- Eine unbekannte oder unsinnige Feldnummer liefert einfach eine leere Liste.
+  Bewusst so: Wer von außen Feldnummern durchprobiert, soll an der Antwort
+  nicht ablesen können, welche es gibt.
+- Achte Etappe (S7) und damit die letzte der Spec `monitor-livestand-push`.
+  Welche Anzeige den schmalen Abruf nutzen soll, entscheidet die Nachmessung —
+  heute holt der Einzelfeld-Monitor seinen Stand über einen eigenen Weg.
+
+## v0.9.241
+
+- **Die Anzeigen merken jetzt zuverlässig, ob ihre Leitung noch lebt.** Der
+  Server schickt alle zehn Sekunden ein stilles Lebenszeichen über dieselbe
+  Leitung, über die auch die Spielstände angestoßen werden. Vorher schloss
+  eine Anzeige aus „es kommt gerade nichts" auf „die Leitung ist tot" — in
+  einer ruhigen Halle zwischen zwei Ballwechseln also ständig. Umgekehrt
+  konnte eine Leitung stundenlang als offen gelten, ohne dass je etwas
+  ankam.
+- **Bleibt das Lebenszeichen über 25 Sekunden aus**, baut die Anzeige die
+  Verbindung von sich aus neu auf, statt auf eine tote zu warten. Ein
+  einzelner fehlgeschlagener Abruf genügt außerdem, um sofort wieder in den
+  schnellen Sicherheitstakt zu gehen.
+- **Neuer Schalter „Sicherheitsabruf entlasten"** (in der `config.json`:
+  `push_fallback_slow`, standardmäßig **aus**). Ist er gesetzt, fragt eine
+  Anzeige mit gesunder Leitung nur noch alle vier Sekunden nach, statt
+  viermal je Sekunde — die eigentliche Entlastung dieser Reihe. Wer ihn
+  nicht setzt, merkt von dieser Version nichts.
+- Siebte Etappe (S6) der Spec `monitor-livestand-push`; offen bleibt nur
+  noch der schmale Einzelfeld-Abruf.
+
+## v0.9.240
+
+- **Die Feld-Übersicht zeichnet bei einem Punkt nur noch die Ziffern neu.**
+  Bisher warf sie bei jedem eintreffenden Stand das komplette Bild weg und
+  baute alle Feldkacheln von vorn auf — bei zwanzig Feldern rund siebzig Mal
+  je Sekunde, für eine Änderung von zwei Ziffern. Das war der Grund, warum
+  die Anzeigen auf schwächeren Raspberry Pis ruckelten.
+- **Neu gebaut wird weiterhin, sobald sich mehr ändert als der Punktestand:**
+  neuer Satz, anderes Spiel, Feld wird frei oder belegt, Behandlungspause,
+  Turnierleitung gerufen, andere Feld-Reihenfolge, andere Halle oder
+  Hallen-Farbe, geänderte Namen — und beim Umschalten der Hallen-Anzeige.
+- **Spätestens alle 30 Sekunden** wird ohnehin einmal komplett neu gezeichnet.
+  Sollte sich also je etwas verschieben, richtet sich die Anzeige von selbst
+  wieder ein, statt bis zum nächsten Spielwechsel falsch zu bleiben.
+- Am Einzelfeld-Monitor ändert sich nichts — der hat nie ein ganzes Bild
+  weggeworfen.
+- Sechste von sieben Etappen der Spec `monitor-livestand-push`.
+
+## v0.9.239
+
+- **Die Anzeigen können jetzt erkennen, welcher Stand neuer ist.** Jeder
+  Feld-Stand trägt eine laufende Nummer — dieselbe, die schon im Anstoß
+  über die Leitung geht. Damit kann eine Anzeige zwei Antworten, die sich
+  überholen, richtig einordnen statt die zweite blind anzuwenden. Für die
+  Turnierleitung ändert sich nichts; es ist die Grundlage dafür, dass die
+  Anzeigen in der nächsten Etappe nur noch die betroffene Feldkachel neu
+  zeichnen statt das ganze Bild.
+- **Die Nummer übersteht einen Neustart.** Sie beginnt bei der Uhrzeit statt
+  bei eins — sonst hätte eine Anzeige nach einem Neustart des Turnier-PCs
+  jeden neuen Stand für veraltet gehalten und wäre stehengeblieben, bis der
+  Zähler den alten Wert überholt hat.
+- Ältere Stände ohne diese Nummer werden weiterhin normal angezeigt.
+- Fünfte von sieben Etappen der Spec `monitor-livestand-push`.
+
+## v0.9.238
+
+- **Eine Feldzuweisung erscheint jetzt sofort auf den Anzeigen.** Bisher
+  erfuhren Court-Monitore und Übersichts-TVs nur von gezählten Punkten
+  unmittelbar; dass ein Spiel neu aufs Feld kommt, das Feld frei wird oder
+  ein Spiel auf ein anderes Feld wandert, fanden sie erst bei ihrer nächsten
+  regelmäßigen Abfrage heraus.
+- **Auch ein in BTP von Hand eingetragener Spielstand erscheint sofort.**
+  Wird gezählt, ohne dass ein Tablet beteiligt ist, war dieser Sprung für
+  die Anzeigen bisher unsichtbar bis zur nächsten Abfrage.
+- Geweckt wird dabei **nur das betroffene Feld** — bei einem Feldwechsel
+  genau zwei: das frei gewordene und das neu belegte. Ändert sich nichts,
+  passiert nichts; sonst weckte jeder Abgleich mit BTP alle Anzeigen.
+- Gilt im Heim-Netz **und** über die Cloud.
+- Vierte von sieben Etappen der Spec `monitor-livestand-push`; damit sind
+  die beiden letzten offenen Punkte aus dem Anzeige-Umbau von v0.9.196
+  erledigt.
+
+## v0.9.237
+
+- **Ein gezählter Punkt schreibt nicht mehr auf die Festplatte.** Bisher
+  sicherte der Turnier-PC bei **jedem** Punkt den kompletten Spielstand
+  aller Felder — und wartete dabei, gemessene 20 Millisekunden, mitten in
+  der Verarbeitung des Tablet-Signals. Jetzt merkt er sich nur, dass etwas
+  zu sichern ist; geschrieben wird einmal pro Sekunde im Hintergrund.
+- **An den kritischen Stellen wird weiterhin sofort gesichert**, bevor
+  irgendetwas weitergeht: beim Eintragen eines Ergebnisses, beim Freigeben
+  eines Feldes, beim Stoppen der Übertragung und beim Beenden der App.
+- **Unverändertes wird gar nicht mehr geschrieben.** Läuft gerade kein
+  Spiel, bleibt die Platte still.
+- Bewusst in Kauf genommen: Stürzt der PC zwischen zwei Sekunden ab, fehlt
+  der letzte Punkt in der Datei. Die Tablets sind die Wahrheit — sie
+  schicken ihren Stand beim Wiederverbinden erneut, und der Stand ist
+  sofort wieder da.
+- Dritte von sieben Etappen der Spec `monitor-livestand-push`. Es war der
+  teuerste Einzelposten der Messung aus v0.9.235.
+
+## v0.9.236
+
+- **Der Turnier-PC rechnet für die Anzeigen nur noch, wenn sich etwas
+  geändert hat.** Bisher berechnete er bei jedem Abruf jeder Anzeige den
+  Zustand **aller** Felder neu — bei zwanzig Anzeigen rund siebzig Mal je
+  Sekunde für eine Information, die sich alle paar Sekunden um ein paar
+  Punkte ändert. Jetzt rechnet er einmal und gibt das Ergebnis aus, bis ein
+  Punkt fällt, BTP etwas Neues meldet oder eine Einstellung gespeichert
+  wird. Spätestens nach einer Viertelsekunde rechnet er ohnehin neu.
+- **Hat sich nichts geändert, kommt auch nichts über die Leitung.** Die
+  Anzeige fragt „ist es noch dasselbe?" und bekommt eine leere Bestätigung
+  statt rund 16 Kilobyte. Für die Turnierleitung ändert sich nichts: Die
+  Anzeigen reagieren genauso schnell wie vorher.
+- Zwei Dinge im Hintergrund, damit das nicht auffällt: Die Uhr „Zeit seit
+  Aufruf" läuft jetzt aus einem gemerkten Zeitversatz weiter, statt bei
+  jedem Abruf neu gestellt zu werden — sonst wäre sie stehengeblieben,
+  sobald nichts mehr übertragen wird.
+- Zweite von sieben Etappen der Spec `monitor-livestand-push`. Die
+  Vorher-Messung aus v0.9.235 hatte 74 Berechnungen je Sekunde und
+  1,13 MB/s gezeigt.
+
+## v0.9.235
+
+- **Der Turnier-PC misst jetzt, was seine Anzeigen kosten.** Für die
+  Turnierleitung ändert sich **nichts** — kein Knopf, keine andere
+  Darstellung, kein neues Verhalten. Im Hintergrund zählt bts-light mit,
+  wie oft Monitore und Übersichten ihren Stand holen, wie groß die
+  Antworten sind, wie lange die Berechnung dauert und wie oft der
+  Spielstand auf die Platte geschrieben wird.
+- Alle zehn Sekunden steht eine Zeile davon im Diagnose-Log — so kommen
+  die Zahlen über den Log-Upload auch aus einem echten Turnier zurück, wo
+  niemand mit einem Messgerät danebensteht. Läuft keine Anzeige, wird auch
+  nichts geschrieben.
+- Im Heim-Netz (nicht über die Cloud) gibt es die Werte zusätzlich unter
+  `http://<turnier-pc>:8088/debug/perf`. Sie enthalten ausschließlich
+  Zahlen — keine Namen, keine Spiele.
+- Dazu ein Lastskript (`scripts/last-monitor.mjs`), das ein volles Turnier
+  mit zwanzig Tablets und zwanzig Anzeigen nachstellt, und eine
+  abschaltbare Render-Messung auf den Monitor-Seiten.
+- Erste von sieben Etappen der Spec `monitor-livestand-push`: Bevor an der
+  Anzeige-Strecke etwas umgebaut wird, soll belegt sein, was sie heute
+  kostet. Die Entlastung selbst kommt in den folgenden Etappen.
+
+## v0.9.234
+
+- **Das Turnierlogo wird nur noch bei Änderung übertragen.** Bisher reiste
+  es als Base64 — bis zu 2,7 MB — in **jedem** vollen Turnier-Stand mit,
+  also mindestens jede Minute und bei vielen Feldern alle paar Sekunden.
+  Jetzt geht es hinaus, wenn es sich geändert hat, das Turnier gewechselt
+  hat oder der Turnier-PC neu gestartet wurde; ansonsten höchstens alle
+  zehn Minuten einmal zur Sicherheit. Auf einem Turniertag spart das
+  leicht mehrere Gigabyte.
+- Ein **fehlgeschlagener** Push zählt dabei nicht als übertragen: Kommt
+  der Stand nicht an, reist das Logo im nächsten Anlauf wieder mit.
+- ⚠️ **Setzt badhub-PR #473 voraus** (Vertrag „weggelassen heißt
+  unverändert"). Ohne diesen Stand auf badhub-Seite würde ein
+  weggelassenes Logo dort als „kein Logo" gelten und der Liveticker das
+  Bild ausblenden.
+
+## v0.9.232
+
+- **Die Zähltafelbedienung lässt sich jetzt nachrufen.** Kommt sie nicht ans
+  Feld, blieb bisher nur, die **Spieler** noch einmal zu rufen — was die
+  Aufruf-Zählung verfälscht. Der neue Knopf „Bedienung nachrufen" im
+  ⋯-Menü der Feld-Kachel sagt stattdessen:
+  **„Feld 3. Meier, bitte als Tabletbedienung melden."** Ab dem zweiten Mal
+  mit „Zweiter Aufruf." bzw. „Dritter und letzter Aufruf." davor.
+- **Die Aufruf-Zählung der Spieler bleibt davon unberührt.** Der Turnier-PC
+  führt für die Bedienung einen eigenen Zähler; das Abzeichen an der Kachel
+  steht still.
+- Den Knopf gibt es nur, wenn dem Feld überhaupt eine Bedienung zugewiesen
+  ist. Ein Spielwechsel auf dem Feld setzt den Zähler zurück.
+- Damit ist der letzte offene Baustein aus ADR 0007 erledigt — und die Spec
+  `tl-sicht-feinschliff` vollständig umgesetzt (Punkt 2 von 4).
+
+## v0.9.231
+
+- **Die Spielzeiten lassen sich jetzt nach vier Achsen auswerten.** Das
+  Panel „Spielzeiten" zeigt dieselben gemessenen Dauern wahlweise nach
+  **Konkurrenz** (wie bisher, z. B. „HE-A"), nach **Klasse**, nach
+  **Disziplin** oder nach **Halle**. Umgestellt wird im Profil-Editor
+  („Spielzeiten gruppieren nach"); die Wahl gilt für alle Geräte mit
+  diesem Profil.
+- Damit ist endlich die Frage beantwortbar, wegen der man bei zwei Hallen
+  überhaupt auf die Uhr schaut: **Läuft eine Halle systematisch langsamer
+  als die andere?**
+- **An den Prognosen ändert sich nichts.** Die Auswertung ist reine
+  Rückschau; „dran ca. hh:mm" rechnet unverändert weiter.
+- Zwei Dinge zur Hallen-Auswertung: Bei Ein-Hallen-Turnieren gibt es sie
+  nicht, und Spiele, die **vor** diesem Update gemessen wurden, kennen ihre
+  Halle nicht mehr — sie stehen in einer Zeile „ohne Halle". Wer mitten im
+  Turnier aktualisiert, beginnt die Hallen-Auswertung also praktisch neu.
+  Die anderen drei Achsen sind davon nicht betroffen.
+- Bei sehr großen Turnieren über die Cloud-Verbindung wird die Auswertung
+  notfalls weggelassen, damit Felder und Spielliste vollständig ankommen.
+- Dritte Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 1 von 4),
+  ADR 0036.
+## v0.9.230
+
+- **„Bitte anfangen" — neue Ansage für ein Feld, auf dem nichts passiert.**
+  Steht ein Spiel auf dem Feld, ohne dass ein Punkt fällt, löst der neue
+  Knopf im ⋯-Menü der Feld-Kachel die Ansage **„Feld 3. Bitte mit dem
+  Spielen beginnen."** aus (englisch: „Court 3. Please start playing.").
+  Bisher blieb der Turnierleitung nur hinzulaufen oder einen Aufruf zu
+  wiederholen — was die Aufruf-Zählung verfälschte.
+- **Die Ansage ist ausdrücklich kein Aufruf.** Sie zählt keine Stufe hoch,
+  lässt das Aufruf-Abzeichen stehen und darf beliebig oft wiederholt
+  werden. Die Zählung, an der die kampflose Wertung hängt, bleibt davon
+  unberührt.
+- **Ein Ansage-Rechner mit älterem Stand verstummt nicht mehr.** Kannte er
+  eine Ansageart nicht, verwarf er bisher die **gesamte** Auftragsliste —
+  die zweite Halle blieb eine Minute lang still, auch für ganz normale
+  Aufrufe. Jetzt überspringt er nur den unbekannten Auftrag. Das trifft
+  jeden Zwei-Rechner-Aufbau im Zeitfenster, in dem erst einer aktualisiert
+  ist.
+- Zweite Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 3 von 4).
+  ⚠️ **Relay-Deploy vor dem Client-Release** — die neue Aktion würde ein
+  altes Relay sonst abweisen. Der Deploy läuft automatisch beim Merge nach
+  `main`.
+## v0.9.229
+
+- **Die Spielliste schiebt die anderen Panels nicht mehr weg.** Lädt sie
+  beim Herunterscrollen weitere Spiele nach, wuchs bisher auch ihre
+  **Box** mit — die Nachbar-Panels wurden dabei bis auf ihre Mindesthöhe
+  zusammengedrückt. Schlimmer noch: Danach ließ sich der Trennsteg
+  zwischen den Panels **gar nicht mehr sinnvoll ziehen**; die Aufteilung
+  blieb einfach stehen, egal wie weit man zog.
+- Beides hatte dieselbe Ursache und ist behoben: Die Höhenverteilung
+  richtet sich jetzt allein nach dem gezogenen Verhältnis, nicht mehr
+  danach, wie viele Zeilen ein Panel gerade enthält.
+- **Das Panel „Felder" gibt ungenutzte Höhe jetzt wirklich ab.** Bei
+  wenigen Feldern blieb unter den Kacheln ein leerer Block stehen, statt
+  den Platz an die Spielliste weiterzureichen — die Automatik dafür rechnete
+  sich seit jeher selbst aus (sie maß den sichtbaren Ausschnitt statt der
+  Kacheln und kam damit immer auf die Höhe, die das Panel ohnehin schon
+  hatte).
+- **Und der Trennsteg über den Feldern lässt sich wieder ziehen.** Die
+  Bedarfs-Automatik nagelte das Panel fest: Man zog, nichts bewegte sich,
+  und beim Loslassen sprang es. Jetzt tritt die Automatik zurück, sobald
+  von Hand gezogen wird.
+- Sichtbare Folge der Umstellung: Ein Panel mit wenig Inhalt behält seinen
+  Anteil, auch wenn darunter Platz frei bleibt. Wer das anders möchte,
+  zieht den Steg — das wirkt jetzt wieder zuverlässig.
+## v0.9.228
+
+- **Spielernamen sind jetzt überall anklickbar.** Auf der
+  Turnierleitungs-Seite führte bisher nur die Spielliste auf die
+  badhub-Spielerseite. Jetzt tun es auch die **Feld-Kacheln der laufenden
+  Spiele** und die Liste der **beendeten Spiele** — also genau die
+  Stellen, an denen man während des Turniers nachschlägt. Erkennbar wie
+  gewohnt an der gepunkteten Unterstreichung; wer in BTP keine
+  Lizenznummer hat, bleibt unverlinkt.
+- Ein Klick auf einen Namen in der Feld-Kachel öffnet **nur** die
+  Spielerseite und nimmt das Spiel nicht zusätzlich auf. Ein vom Namen
+  aus begonnener Zug auf ein anderes Feld funktioniert weiter.
+- **Große Turniere bleiben in der Cloud bedienbar.** Beim Prüfen der
+  Zusatzdaten fiel auf, dass der Turnierstand für die Cloud-Verbindung bei
+  vielen Feldern an seine Größengrenze stößt — dann hätte die
+  Turnierleitungs-Seite gar nichts mehr angezeigt. Jetzt kürzt der
+  Turnier-PC notfalls die **Ergebnisliste** (reine Rückschau, in BTP
+  vollständig vorhanden); Felder und Spielliste bleiben in jedem Fall
+  vollständig. Betrifft Turniere ab etwa 30 Feldern.
+- Erste Umsetzungsstufe der Spec `tl-sicht-feinschliff` (Punkt 4 von 4).
+  ⚠️ Cloud-Geräte sehen die Links erst nach dem **Relay-Deploy** — der
+  läuft automatisch beim Merge nach `main`.
+
+## v0.9.226
+
+- **Ein entferntes Turnierlogo verschwindet auch im Liveticker.** Die
+  Logo-Felder reisen jetzt auch dann mit, wenn kein Logo gesetzt ist —
+  vorher blieben sie einfach weg. badhub bekommt für diese Felder gerade
+  den Vertrag „weggelassen heißt unverändert, leer heißt löschen"
+  (badhub-PR #473); ohne das ausdrücklich leere Feld ließe sich ein
+  einmal gesetztes Logo danach nicht mehr entfernen. Für den heutigen
+  Liveticker ändert sich nichts: Ein leeres Feld wirkt dort genauso wie
+  ein fehlendes.
+- Damit ist die Voraussetzung geschaffen, das Logo künftig **nur noch bei
+  Änderung** mitzuschicken. Heute reist es als Base64 in jedem vollen
+  Turnier-Stand mit — mindestens minütlich, bei vielen Feldern alle paar
+  Sekunden. Das kommt, sobald badhub den Vertrag ausgerollt hat.
+
+## v0.9.225
+
+- **Werbebilder und Turnierlogo werden nicht mehr bei jedem Blick neu
+  geladen.** Beide Bild-Routen (im Hallennetz wie über die Cloud) geben
+  jetzt eine Kennung mit und bestätigen ein unverändertes Bild mit rund
+  200 Byte, statt es erneut zu übertragen. Vorher waren sie ausdrücklich
+  vom Zwischenspeichern ausgenommen: Weil die Werbeanzeigen ihr Motiv
+  alle paar Sekunden wechseln, holte jedes Gerät dabei jedes Mal die
+  vollen Bilddaten — bei einem 1-MB-Motiv rund 360 MB je Stunde und
+  Anzeige, im Cloud-Betrieb über die Internetleitung.
+- **Ausgetauschte Bilder erscheinen weiterhin zeitnah:** im Hallennetz
+  binnen fünf Minuten, bei Werbebildern über die Cloud binnen einer
+  Minute. Die kürzere Frist hat einen Grund — über die Cloud werden
+  Werbebilder nach ihrer Position adressiert, und beim Löschen eines
+  Bildes rücken alle folgenden auf. Eine Anzeige zeigte sonst länger
+  nicht bloß ein altes, sondern ein falsches Motiv.
+- Die „Leisten-Sponsor"-Markierungen werden gemerkt statt bei jedem
+  Abruf von der Platte gelesen.
+
+## v0.9.224
+
+- **Cloud-Tablets bekommen beim Wiederverbinden wieder den vollen
+  Stand.** In v0.9.223 ging an den Relay versehentlich die schlanke
+  Anzeige-Fassung — der Relay reicht diesen Stand aber nicht nur an
+  Monitore weiter, sondern auch als Wiederherstellung an ein
+  **Cloud-Tablet**, das sich neu verbindet oder ein Feld übernimmt. Ein
+  Ersatz-Tablet hätte mitten im Spiel ohne Rückgängig-Gedächtnis
+  dagestanden. (Betraf keine ausgelieferte Version.) Die Ersparnis für
+  Anzeigen bleibt im Hallennetz unverändert erhalten; ein Test hält den
+  Unterschied jetzt fest.
+- **Weitere heiße Routen kopieren die Konfiguration nicht mehr:** die
+  Feld-Übersicht (`/health`, 250-ms-Takt je Anzeige), die
+  Zugangsprüfung jeder Turnierleitungs-Anfrage, Werbe-Status,
+  Turnierlogo und Hallenfarben.
+- **Nachschub nach BTP:** Der Mindestabstand zwischen zwei Durchläufen
+  wird jetzt am **Ende** gemessen. Vorher konnte ein langer Durchlauf
+  den Abstand selbst aufbrauchen und der nächste Zyklus sofort wieder
+  hineinlaufen — genau das Aushungern, das die Grenze verhindern soll.
+- Eine leere Werbebild-Liste wird nicht mehr gemerkt: Sie kann auch aus
+  einem kurzzeitig fehlgeschlagenen Verzeichnis-Lesen stammen, und
+  gemerkt hieße „dieses Turnier hat keine Werbung" bis zum Neustart.
+
+## v0.9.223
+
+- **Ein lahmes badhub kann keine Tablets mehr abwerfen.** Der
+  Live-Score-Push lief bisher **innerhalb** der Tablet-Verbindung, mit
+  15 Sekunden Zeitlimit — der Server erwartet aber spätestens nach 10
+  Sekunden ein Lebenszeichen desselben Sockets und schloss ihn sonst
+  **samt Freigabe des Felds**. Bei einem hängenden badhub hätte das alle
+  Felder gleichzeitig getroffen. Der Push läuft jetzt hinter der
+  Verbindung: je Feld immer nur einer unterwegs (keine überholenden,
+  veralteten Stände), währenddessen sammelt sich nur der neueste Stand
+  an — ein Punkteregen wird dadurch zusätzlich zusammengefasst statt in
+  eine Anfragen-Lawine übersetzt.
+- **Der Nachschub nach BTP hält den Zyklus nicht mehr auf.** Die
+  Wiederholungs-Warteschlange arbeitete alle Einträge nacheinander im
+  5-Sekunden-Zyklus ab; bei zwanzig gestauten Ergebnissen und trägem BTP
+  standen Liveticker, automatische Feldvergabe und
+  Turnierleitungs-Anzeige minutenlang. Jetzt werden nach 20 Sekunden
+  keine weiteren Writes mehr begonnen (ein laufender läuft aus), und
+  jeder Durchlauf beginnt eine Position weiter — so blockiert ein zäher
+  Eintrag die übrigen nicht. Der Rest folgt beim nächsten Versuch,
+  verloren geht nichts.
+- Der verzögerte Live-Score wird **vor dem Senden noch einmal geprüft**:
+  Ist das Spiel inzwischen beendet oder das Feld neu belegt, wird er
+  verworfen — sonst hätte ein spät eintreffender Stand ein bereits
+  korrigiertes Endergebnis im Liveticker überschreiben können.
+- **Court-Monitore kosten den Turnier-PC deutlich weniger.** Jeder Abruf
+  (bei zwanzig Anzeigen rund achtzig pro Sekunde) kopierte bisher
+  **zweimal** die komplette Konfiguration — darin das Turnierlogo als
+  Base64-Text, bis zu 2,7 MB — und las das Werbebild-Verzeichnis neu ein.
+  Jetzt wird die Konfiguration geteilt statt kopiert, einmal statt
+  zweimal gelesen, und die Bilderliste kommt aus einem Zwischenstand,
+  der nur bei Änderung des Ordners neu entsteht.
+- **Anzeigen bekommen den Spielstand ohne Wiedergabe-Ballast.** Der vom
+  Tablet gespiegelte Stand trägt dessen Verlaufsspeicher (bis zu 50
+  Zwischenstände, jeder mit einer Vollkopie des Ballwechsel-Protokolls) —
+  spät im Match zweistellige Kilobyte, die bei **jedem** Monitor-Abruf
+  durchs Hallen-WLAN gingen. Court-Monitore, Feld-Übersicht, Kombi,
+  Cloud-Spiegel und die Turnierleitungs-Seite bekommen jetzt eine
+  schlanke Fassung ohne `history`/`rallyLog`; das Tablet selbst erhält
+  beim Wiederverbinden weiterhin alles (sein Rückgängig-Gedächtnis).
+
+## v0.9.222
+
+- **Turnier-PC liest die Konfiguration nicht mehr bei jeder Anfrage von
+  der Platte.** `config.json` wurde auf den heißesten Pfaden (jede
+  TL-Anfrage prüft damit den Zugang, jeder Monitor-Abruf seine
+  Einstellungen) jedes Mal gelesen **und neu geparst**. Jetzt entscheidet
+  ein Blick auf Änderungszeit und Größe der Datei: unverändert = gemerkte
+  Fassung. Semantik unverändert — jede geschriebene Änderung greift
+  weiterhin sofort (ein Widerruf also auch), ein unlesbarer
+  Zwischenstand meldet weiterhin einen Fehler statt „keine Geräte".
+- **Beendet-Liste wird abgeglichen statt neu gebaut.** Bisher baute
+  jedes Spielende die ganze Liste neu und verdrahtete sie neu; jetzt
+  fügt ein neues Ergebnis genau eine Zeile ein (Abgleich je Spiel, wie
+  bei Feldern und Spielliste). Ein Nachlade-Fenster braucht sie nicht —
+  der Turnier-PC liefert ohnehin höchstens 30 beendete Spiele.
+- **Zeilen der Beendet-Liste außerhalb des Sichtbereichs kosten kein
+  Layout mehr** (`content-visibility`). Bewusst nur dort: Die Spielzeile
+  enthält ihr fest positioniertes ⋮-Menü, das dadurch an der Zeilenkante
+  abgeschnitten würde, und bei den Feldkacheln misst die
+  Kachel-Anpassung die echte Größe.
+
+## v0.9.221
+
+- **TL-Web wird geweckt, statt zu fragen** (Spec `tl-web-push`, ADR
+  0034). Neuer Anstoß-Kanal `/tl-ws` in LAN-Server **und** Relay: Er
+  trägt ausschließlich die Revisionsnummer (`{"rev":n}`) — die Daten
+  holt die Seite weiterhin über `GET /tl/api/state`, mit unveränderter
+  Auth, ETag-Logik, Kürzungsleiter und Profil-Header. Wirkung: Eine
+  Änderung ist in unter einer Sekunde sichtbar (statt bis zu zwei), und
+  ein Tablet fragt im ruhigen Betrieb nur noch alle 30 Sekunden nach
+  statt zweimal pro Sekunde. Der Zugang reist im **ersten Frame**
+  (WebSockets tragen keine Kopfzeilen, und in Adressen gehört er nicht).
+- **Turnier-PC rechnet den TL-Zustand zentral.** Ein Sekundentakt baut
+  ihn einmal, legt die fertige Antwort in einen Cache und nudgt bei
+  neuer Revision; die LAN-Anfragen aller Geräte werden damit zu
+  Cache-Reads. Bisher rechnete der PC je Gerät **und** Anfrage einen
+  vollen Snapshot-Clone plus zwei JSON-Serialisierungen — bei acht
+  Geräten rund acht Rechnungen pro Sekunde, jetzt eine.
+- **Kein Bruch:** Ohne erreichbaren Kanal (älterer Turnier-PC, älterer
+  Relay, Netz ohne WebSocket) verhält sich die Seite exakt wie zuvor
+  (2-Sekunden-Poll); nginx bleibt unangetastet.
+
+## v0.9.220
+
+- **TL-Web: Schriftgröße pro Gerät.** Im Profil-Overlay gibt es unten
+  einen geräte-lokalen Abschnitt „Schriftgröße — nur dieses Gerät"
+  (85/100/115/130 %, gespeichert in `localStorage`, bewusst NICHT im
+  geteilten Profil: jedes Tablet stellt seine Größe selbst ein). Der
+  Zoom wirkt auf die Root-Schriftgröße; dafür sind jetzt auch die
+  px-Trefflächen (Knopf-Mindesthöhen, Kebab-Flächen, Stege,
+  Logo-/Flaggen-Größen) auf rem umgestellt — alles skaliert mit, und
+  die Kompaktstufen der Feldkacheln passen sich über `fitCourts()` von
+  selbst an (Feldtest 17.08.2026, Punkt „Schriftgrößen optimieren").
+
+## v0.9.219
+
+- **TL-Web: Render-Sparsamkeit** (Feldtest 17.08.2026, „Performance im
+  Blick"). Bisher baute jede Zustandsänderung — auch ein einzelner
+  Punktgewinn — die komplette Seite per `innerHTML` neu, samt aller
+  Event-Listener. Jetzt zweistufig: (1) **Panel-Kurzschluss** — jedes
+  Panel überspringt Neuaufbau und Verdrahtung, wenn sein HTML unverändert
+  ist; ein Punktgewinn zeichnet nur noch das Felder-Panel. (2)
+  **Keyed-Abgleich** für die zwei heißesten Listen: Feldkacheln und
+  Spielzeilen werden je `court_id`/`match_id` abgeglichen — nur die
+  geänderte Kachel/Zeile wird ersetzt und neu verdrahtet, der Rest bleibt
+  samt offenem ⋯-Menü, Fokus und Scroll-Position stehen. Sekündlich
+  tickende Zeittexte stehen nicht mehr im erzeugten HTML (sie hebelten
+  den Abgleich aus) — `tickClocks()` füllt sie direkt nach jedem Render.
+  Diagnose: `localStorage.tlRenderMessen = "1"` protokolliert die
+  Render-Dauer in der Browser-Konsole. Nebenbei behoben: Die
+  Spielzeilen-Griffe bekamen bei jedem Neuzeichnen doppelte
+  Drag-Listener; neue Panels materialisieren wie gehabt, aber Listen
+  ohne Änderung verlieren ihre Listener nicht mehr.
+
+## v0.9.218
+
+- **TL-Web: neues Panel „Anfangszeiten".** Der heutige Check-In-Zeitplan
+  als Kachel (Feldtest 17.08.2026, Vorbild badhubs `…/zeitplan`-Seite):
+  je Klasse Anfangszeit, Anmeldeschluss und der Check-In-Stand
+  („12/16", grün wenn vollzählig) — nach Anfangszeit sortiert,
+  durchgelaufene Schlüsse bleiben ausgegraut sichtbar. Bewusst nur
+  Zähler, nie Spielernamen (die hat die Desktop-Check-In-Seite). Der
+  Turnier-PC fragt badhub dafür höchstens minütlich (`/tl/stand`) über
+  einen eigenen, vom Liveticker entkoppelten Tick; das Panel erscheint
+  nur, wenn Check-In **und** TL-Web eingerichtet sind und badhub
+  antwortet. Kurze Aussetzer leeren das Panel nicht; nach fünf Minuten
+  ohne Abruf erscheint eine ⚠-Veraltet-Zeile. Die Zähler rechnen
+  Abgemeldete heraus (wie die Desktop-Seite); ohne eigenen
+  Anmeldeschluss gilt die Anfangszeit (wie die Ansage); Ablehnungen
+  pausieren 30 Minuten statt minütlich anzuklopfen; neue Panels landen
+  in Bestandsprofilen in der letzten Spalte statt in der Felder-Spalte;
+  die Relay-Kürzungsleiter opfert das Panel notfalls, bevor der
+  Cloud-Zustand zu groß würde.
+
+## v0.9.217
+
+- **TL-Web: Punktverlauf-Knopf ins ⋯-Menü der Feldkachel.** Der 📈-Knopf
+  saß als letzte eigene Fläche in der Fußzeile der Kachel — jetzt steht
+  er als „📈 Punktverlauf" im Menü, wie alle anderen Kachel-Aktionen
+  (Feldtest 17.08.2026: weiter aufräumen). Verhalten unverändert: nur
+  sichtbar, wenn ein Verlauf existiert; geladen wird erst beim Klick.
+  Die Beendet-Liste behält ihren direkten 📈-Knopf.
+
+## v0.9.216
+
+- **TL-Web: Profil-Option „Aufrufe unbegrenzt".** Neues Häkchen im
+  Anzeige-Abschnitt des Profil-Editors (Feldtest 17.08.2026): Der
+  Aufruf-Knopf am Feld bleibt damit immer verfügbar — auch bei laufendem
+  Spiel und über den dritten Aufruf hinaus („Erneut aufrufen"). Der
+  Turnier-PC zählt die Stufe dann ehrlich weiter (4, 5, …); ab dem
+  vierten Aufruf — und bei laufenden Spielen grundsätzlich — spricht das
+  Ansage-Gerät die schlichte Feld-Ansage ohne Stufenwort statt noch
+  einmal „Dritter und letzter Aufruf". Führt **kein** Profil die Option,
+  hält der Turnier-PC den alten 3er-Deckel selbst — alles bleibt beim
+  Alten; alte Browser-Profile ohne das Feld lesen sich als „aus"
+  (`unlimitedCourtCalls`, `#[serde(default)]`). Der Aufruf-Knopf der
+  Desktop-Felderübersicht folgt derselben Regel, und der Uhr-Chip
+  („Letzter Aufruf") erlischt, sobald die Stufe gesprochen ist.
+
+## v0.9.215
+
+- **TL-Web: ⋮-Menü der Spielzeilen wird nicht mehr abgeschnitten.** Das
+  Menü einer Zeile am unteren Panel-Rand ragte nicht über die Panel-Kante
+  hinaus (die `overflow`-Klemmen der Panels schneiden auch hoch gestapelte
+  Kinder — ein höherer z-index hätte nichts geändert). Es hängt jetzt wie
+  das Kachel-Menü am Ansichtsfenster: `position: fixed` plus die geteilte
+  Platzierungsfunktion (`platziereKebabMenue`), die unter dem Auslöser
+  öffnet, wenn Platz ist, sonst darüber (Feldtest 17.08.2026). Offene
+  Menüs folgen ihrem Auslöser beim Rollen und bei Größenwechseln nach
+  (`folgeOffenenKebabs`); rollt er aus dem Sichtfenster, schließt das
+  Menü. z-index jetzt über der Action-Bar, damit ein nach oben
+  aufgeklapptes Menü nicht unter ihr verschwindet.
+
+## v0.9.214
+
+- **TL-Web-Spielliste: Symbolik statt Hinweistexte.** Die Texte „nicht
+  bereit", „X spielt gerade", „pausiert noch bis …" und „ohne Halle" sind
+  weg — sie machten die Liste unübersichtlich. Stattdessen: Wer gerade auf
+  einem Feld steht, trägt einen **roten** Namens-Hintergrund
+  (`title="spielt gerade"`); wer noch in der Mindestpause ist, einen
+  **orangen**, daneben zählt eine **Eieruhr** die verbleibende Wartezeit
+  sekündlich herunter. Ein Spiel ohne Hallenzuordnung erkennt man am
+  fehlenden Hallen-Kürzel.
+- **Jeder Name der Spielliste verlinkt auf die badhub-Spielerseite**
+  (`badhub.de/spieler/<Nr>/live`, neuer Tab). Dafür reist die BTP-
+  Lizenznummer (`MemberID`) jetzt in den Wartelisten-Einträgen des
+  TL-Zustands mit — bewusste Datenschutz-Freigabe wie zuvor Nation und
+  Verein: Die Nummer ist der öffentliche URL-Schlüssel genau dieser
+  badhub-Seite und steht hier hinter dem Gerätezugang. Laufende und
+  beendete Spiele bleiben ohne Lizenznummer (Wächter-Test angepasst).
+  Die Namens-Färbung ordnet über `blocked.player_keys`
+  (Lizenznummer statt Namensvergleich) — zwei gleichnamige Spieler einer
+  Paarung färben nicht mehr gemeinsam.
+
+## 0.9.213
+
+- **Disziplin und Klassenkürzel jetzt auch im `tset`**: Der Liveticker liest
+  `n` (= `draw_name + round_name`) und zeigte bei Gruppenturnieren deshalb
+  nur „Gruppe 1 G1" — die Disziplin kam dort nie an. Sie ging bisher nur im
+  `sched`-Kanal raus, der badhubs Spielerseite speist. Beide Felder sind
+  optional serialisiert: ein Empfänger, der sie nicht kennt, sieht keinen
+  Unterschied.
+
+## v0.9.212
+
+- **Startzeit-Prognose rechnet mit dem Live-Spielstand** (Spec
+  [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md),
+  Etappe D): Die Restzeit belegter Felder kommt jetzt aus Satzstand,
+  Zählsystem und dem gemessenen Eigentempo des laufenden Spiels — ein
+  Spiel bei 14:6 im dritten Satz gibt sein Feld in der Simulation gleich
+  frei, ein 0:0-Spiel hält es die volle erwartete Dauer. Ein möglicher
+  Entscheidungssatz zählt mit seiner Wahrscheinlichkeit (aus Satzstand
+  und Punktstärke: 15:5 + 10:6 vorn ⇒ dritter Satz fast ausgeschlossen,
+  15:5 + 7:11 hinten ⇒ sehr wahrscheinlich, 13:13 unter Gleichstarken
+  ⇒ etwa halber Satz). Alle Prognosen der Warteliste („dran ca. hh:mm")
+  werden dadurch deutlich genauer. Felder ohne Live-Zählung behalten das
+  bisherige Modell.
+- **Neu in TL-Web:** Profil-Schalter „Restzeit laufender Spiele zeigen"
+  (Standard: aus) — die Schätzung („~12 min Rest") in der Fußzeile jeder
+  belegten Feldkachel. Cloud: Relay-Deploy läuft beim Merge automatisch;
+  alte Hosts senden das Feld nicht, alte Seiten ignorieren es.
+
+## v0.9.211
+
+- **Disziplin, Klassenkürzel und Hallenfarbe im `sched`-Payload**: badhubs
+  Spielerseite zeigte bisher nur „Gruppe 1 G1" — das ist `draw_name +
+  round_name`, und `draw_name` ist bei Gruppenturnieren die
+  Auslosungsgruppe, nicht die Klasse. Die Disziplin („HE") und das
+  Klassenkürzel („A") lagen hier längst vor, wurden aber nie gesendet;
+  badhub konnte sie deshalb nicht anzeigen, egal was es tat. Dazu die
+  Farbmarke der Halle aus derselben Quelle wie im `tset`, damit Liveticker
+  und Spielerseite dieselbe Marke zeigen.
+
+## v0.9.210
+
+- **Hallen-Farben** (Spec
+  [features/hallen-farben.md](features/hallen-farben.md), ADR
+  [0031](adr/0031-hallen-farben-eigener-config-store.md)/[0032](adr/0032-hallen-farben-deterministische-auto-palette.md)/[0033](adr/0033-hallen-farben-hex-auf-dem-draht.md)):
+  Bei Mehr-Hallen-Turnieren trägt jede Halle eine Farbe als kleine Marke
+  neben jeder Hallen-Nennung — Felderübersicht und Vorbereitungs-Panel der
+  Desktop-App, TL-Web (Hallen-Filter, Feld-Gruppen, Wartelisten- und
+  Beendet-Zeilen inkl. „·A", Spielort-Wähler), Monitor-/Übersichts-/
+  Vorbereitungs-Seiten (LAN und Cloud) und der badhub-Push
+  (`hall_color` in `tset`-Courts und -Aufrufen; die badhub-Anzeige folgt
+  als eigener badhub-PR). Farben kommen automatisch aus einer kuratierten
+  16-Ton-Palette (deterministisch; Grün/Violett der Feldzustände bleiben
+  ausgespart, ein kräftiges Rot ist auf Nutzerwunsch dabei — die Marke ist
+  nie der Zustands-Streifen) und lassen
+  sich je Halle im Hallen-Editor der Felderübersicht übersteuern
+  („Automatisch" setzt zurück). Kürzel/Name bleiben überall stehen —
+  die Farbe ist nie einziger Informationsträger. Ein-Hallen-Turniere
+  bleiben unverändert. Cloud: Relay-Deploy vor App-Release (optionale
+  Felder, alte Gegenstellen degradieren farblos).
+- TL-Web-Beendet-Zeilen nennen jetzt ihre Halle (Kürzel + Marke); die
+  Vorbereitungs-Seite kann die Kopfzeile je `?halle=`-Filter einfärben.
+
+## v0.9.209
+
+- **Vollständiger Spielplan an badhub** (`sched`, Spec
+  [features/spielplan-an-badhub.md](features/spielplan-an-badhub.md)):
+  Neben dem `tset` geht jetzt höchstens minütlich ein zweiter Payload mit
+  **allen** Spielen des Turniers an badhub — je Spiel angesetzte Zeit
+  (BTP `PlannedTime` als Unix-ms), prognostizierte Startzeit aus der
+  Spielzeiten-Messung, Warteschlangen-Position innerhalb der Halle sowie
+  Halle und Feld. Damit zeigt badhubs Spielerseite
+  `/spieler/{lizenz}/live` einem Teilnehmer seinen ganzen Turniertag statt
+  nur des nächsten Spiels. Grund: der `tset` kappt bei 15 kommenden Spielen
+  des gesamten Turniers — wessen Spiel weiter hinten liegt, tauchte dort
+  nie auf.
+- Der Liveticker bleibt unverändert: `sched` läuft getrennt und mit eigenem
+  Fehlerpfad. Kennt badhub den Nachrichtentyp noch nicht (400/404), pausiert
+  der Versand, statt jeden Zyklus anzuklopfen.
+
+## v0.9.208
+
+- **Automatische Hallen-Vorverteilung** (Spec
+  [features/hallen-vorverteilung.md](features/hallen-vorverteilung.md),
+  ADR [0029](adr/0029-hallen-vorverteilung-eigener-store.md)/[0030](adr/0030-halle-bindet-die-feldvergabe.md)):
+  Bei Mehr-Hallen-Turnieren verteilt die Automatik die vordersten x Spiele
+  der Warteliste auf die Hallen — im Verhältnis der entsperrten Felder,
+  gemischt (2:1 → A, A, B, …) und fortlaufend nachgefüllt. Spieler sehen
+  ihre Halle früh (Hallen-Kürzel „·A" in TL-Web, Hallen-Monitore, badhub
+  `display=next&halle=…`). Bedienung im Kopf des Spiele-Panels (Schalter,
+  x, „Auto-Hallen räumen"); Hand-Eingriff und Vorbereitungs-Aufruf
+  übersteuern die Automatik; Tages-Halle und Vorverteilung schließen sich
+  aus. Neuer turniergebundener Store `auto-halls.json`.
+- **⚠ Verhaltensänderung (ADR 0030):** Eine gesetzte Halle (Regel, Hand
+  oder Auto) **bindet** jetzt die automatische Feldvergabe — bisher waren
+  Hand-Hallen reine Anzeige. Auto-vorverteilte Spiele werden ohne
+  Vorbereitungs-Aufruf vergeben. Cloud: Relay-Deploy nötig (neue
+  TL-Aktionen + Seite).
+
+## v0.9.207
+
+- **Satzpausen enden erst mit „Weiterspielen"** (Spec
+  `spielzeiten-prognose` E9, ADR
+  [0028](adr/0028-pause-haelt-bis-weiterspielen.md)): Das Tablet beendet
+  die BWF-Pausen (60 s/120 s) nicht mehr automatisch bei 0 — nach Ablauf
+  zählt das Overlay rot hoch („überzogen +0:37"), bis der Schiedsrichter
+  weiterspielt; auch Reload/Übernahme behalten die Pause. Diagnose-Log
+  meldet `break_overrun`.
+- **Pausen in der TL-Sicht**: Die Feldkachel zeigt den Pausen-Countdown,
+  nach Ablauf rot „überzogen +m:ss"; Behandlungspausen erscheinen erstmals
+  („Behandlung seit …" — sie fielen bisher beim Parse heraus). Cloud-Seiten
+  brauchen den Relay-Deploy (tablet.html + tl.html einkompiliert).
+
+## v0.9.206
+
+- **Startzeit-Prognose in TL-Web** (Spec
+  [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md),
+  Bedienung [spielzeiten-prognose.md](spielzeiten-prognose.md)): Jedes
+  wartende Spiel zeigt den voraussichtlichen Aufruf („🕐 14:32", „~" =
+  noch ohne Messwerte, „gleich" = als Nächstes dran) — simuliert aus den
+  Median-Spielzeiten je Klasse × Disziplin, Feldern, Reihenfolge,
+  Hallen-Regeln, Spieler-Mindestpausen und 2 min Übergangspuffer. Neues
+  Panel **„Spielzeiten"** mit Brutto/Netto/Anlaufzeit-Medianen je Gruppe;
+  beendete Spiele tragen ihre Ist-Zeiten. Neuer SetupWizard-Abschnitt
+  „Startzeit-Prognose" (an/aus, Startwert 25 min). Die Prognose bewegt die
+  TL-Revision nicht (zeitabgeleitet); Cloud-Seiten brauchen den
+  Relay-Deploy.
+- **Spielzeiten-Messung, Etappe A** (Spec
+  [features/spielzeiten-prognose.md](features/spielzeiten-prognose.md),
+  ADR [0027](adr/0027-spielzeit-stempel-hostseitig.md)): Der Host misst je
+  Match Bruttostart (erste Feldzuweisung), Nettostart (erster Punkt) und
+  Spielende — persistiert turniergebunden in `match-times.json`
+  (ADR-0022-Muster), immun gegen Feldwechsel und App-Neustart, Reset nur
+  bei bestätigter Feldabnahme durch BTP (3 Polls).
+- **BTP-`Duration` neustartfest und auf allen Pfaden.** Die Spieldauer
+  kommt jetzt aus dem Zeiten-Store: Ein Tablet-Ergebnis nach App-Neustart
+  mitten im Spiel sendet nicht mehr 0; das manuelle Backend-Ergebnis, die
+  Disqualifikation und die TL-Web-Wertung senden erstmals eine echte
+  Dauer. Walkover bleibt bewusst `Duration: 0` (kampflos wurde nicht
+  gespielt). Details: [btp_protocol.md](btp_protocol.md).
+
+## v0.9.204
+
+- **Spielliste vereinfacht: hallenübergreifende Reihenfolge, eine Liste**
+  (ADR [0026](adr/0026-spielliste-eine-globale-reihenfolge-eine-liste.md),
+  löst [ADR 0023](adr/0023-manuelle-spielreihenfolge-praefix-je-halle.md)
+  in der Hallen-Frage ab). Die manuelle Spielreihenfolge galt bisher **je
+  Halle getrennt** — die Warteliste zerschnitt zusätzlich in
+  Hallen-Gruppen und in vier Unterabschnitte („In Vorbereitung gerufen",
+  „Spielbereit", „Noch nicht bereit", „Ohne Hallenzuordnung"). Beides war
+  im Betrieb unpraktisch: Die Turnierleitung denkt die Spiele als eine
+  Abfolge, nicht als Blöcke. Jetzt gibt es **eine globale Reihenfolge**
+  und **ein Panel „Spiele"** (alle angesetzten Spiele, gerufene oben
+  angepinnt, Rest nach manueller bzw. BTP-Reihenfolge); der bisherige
+  Status steht als Abzeichen an der Zeile, die Halle als Kürzel. Alle
+  Spiele werden gezeigt, mit Nachladen beim Scrollen. Die Feldkacheln
+  bleiben nach Halle gruppiert — das bildet weiterhin die physische
+  Realität ab.
+- **Panels zuklappbar.** Zusätzlich zum Aus-/Einblenden lässt sich jedes
+  Panel auf seine Kopfzeile reduzieren; „Schiedsrichter" und „Spiele"
+  zeigen dabei den jeweils nächsten Eintrag im Kopf.
+- **Mehrspalten-Layout.** 1 bis 3 Spalten je Profil, jedes Panel bekommt
+  seine Spalte zugeordnet, Spaltenbreiten sind ziehbar. „Felder" ist damit
+  ein Panel wie jedes andere; die bisherige Einstellung „Spielliste
+  rechts/darunter" geht als Zwei-Spalten-Preset darin auf. Unter dem
+  Tablet-Breakpoint werden Spalten immer gestapelt, unabhängig vom Profil.
+- **Feldkachel und Spielzeile entschlackt.** Neues ⋯-Menü an der
+  Feldkachel (einteilen, ansagen, Aufruf wiederholen, 2. Aufruf Partei
+  A/B, Ergebnis eintragen); das ⋮-Menü der Spielzeile bekam „Nach oben
+  schieben" und „Ergebnis eintragen" dazu.
+- **Zweiter Aufruf am Feld — jetzt auch je Partei.** Bisher gab es am
+  Feld nur einen ungeteilten Nachruf; jetzt lässt sich gezielt „2. Aufruf
+  für Partei A" oder „für Partei B" auslösen (Roadmap-Wunsch vom
+  17.07.2026 damit erledigt). Die Aufruf-Stufe zählt weiterhin einmal je
+  Feld — ruft man nacheinander beide Parteien, zählt das als eine Runde.
+
+## v0.9.203
+
+- **Turnierleitungs-Oberfläche: Panels und Profile** (Spec
+  [tl-web-panelsystem](features/tl-web-panelsystem.md), ADR
+  [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md) ·
+  [0025](adr/0025-tl-panel-profile-transport-persistenz.md)). Die Seite war
+  durch die vielen Einzelfeatures der letzten Wochen unübersichtlich
+  geworden: neun fest verdrahtete Abschnitte, die sich nur zuklappen, aber
+  nie wirklich abschalten ließen, fünf gewachsene Abzeichen-Farbfamilien
+  und Wartelisten-Zeilen mit bis zu zehn Bedienelementen. Jetzt ist jeder
+  Abschnitt ein **Panel** mit einheitlicher Kopfzeile — einzeln dauerhaft
+  aus-/einblendbar, per eigenem Griff umsortierbar und über Trennstege in
+  der Höhe frei verteilbar. Was davon wie aussieht, steckt in **benannten
+  Profilen** („Tablet", „Wandmonitor"), die serverseitig liegen, an der
+  Geräte-Identität hängen (also ein Neuladen und den Wechsel zwischen
+  Hallennetz und Cloud überstehen) und turnierübergreifend erhalten
+  bleiben. Sie ersetzen das alte, auf `localStorage` verstreute
+  „Anzeige"-Klappmenü — ein Konfigurationsort statt drei. Dazu ein
+  vereinheitlichtes **Abzeichen-System mit drei Dringlichkeitsstufen**
+  (Info/Warnung/Alarm; „Matchball" bleibt als reine Info optisch klar vom
+  Alarm-Rot „überfällig" getrennt) und **entschlackte Wartelisten-Zeilen**
+  — Nachruf, Auto-Vergabe-Umschalter und Hallen-Wähler liegen jetzt hinter
+  einem ⋮-Menü. Die Profil-Verwaltung läuft bewusst direkt in der
+  Weboberfläche (zweite benannte Ausnahme von „kein Setup aus dem Web",
+  begründet in ADR 0024) — reine Darstellungs-Präferenzen ohne
+  Sicherheitsbezug. Bestehende Installationen aktualisieren ohne
+  Migration: Ohne angelegtes Profil läuft die Seite auf einem eingebauten
+  Standard mit den bisherigen Voreinstellungen.
+- **Datenverlust-Pfad in der Konfiguration geschlossen** (im Zuge des
+  Panelsystems gefunden). Bis hierher schrieb ausschließlich der
+  Setup-Assistent die `config.json`; mit den Profilen kam ein zweiter
+  Schreibweg aus der Weboberfläche dazu. Beide arbeiten jetzt auf
+  **einem** gemeinsamen Konfigurationsstand — sonst hätte ein späteres
+  Speichern im Setup-Assistenten die zwischenzeitlich in der
+  Weboberfläche angelegten Profile kommentarlos überschrieben.
+
+## v0.9.202
+
+- **Schiedsrichter-Rückschreib-Race nach frischer Feldzuweisung behoben**
+  (Live-Befund 14.08.2026, Zwei-Hallen-Turnier). Ein eigenständiges
+  Schiedsrichter-`SENDUPDATE` ohne `CourtID`-Feld ließ BTP, wenn es kurz
+  nach einer Feldzuweisung auf dasselbe Match traf, die eben erst
+  angekommene Feldzuweisung wieder verlieren — zwei `SENDUPDATE`s zum
+  selben Match in enger Folge brachten BTPs eigene Persistenz
+  durcheinander. Ein erster Fix (feste 10-Sekunden-Karenzzeit) reichte
+  nicht — der reale Abstand zwischen Feldzuweisung und Schiedsrichter-Write
+  lag am Turnier teils bei 11–18 Sekunden. Der eigentliche Fix: Der
+  Schiedsrichter-Abgleich schreibt jetzt bei **jedem** Write die aktuell
+  bekannte `CourtID` mit — dann ist die Reihenfolge zweier Requests zum
+  selben Match folgenlos, unabhängig vom zeitlichen Abstand. Dabei
+  zusätzlich behoben: Werden mehrere Felder im selben Zyklus fertig,
+  rücken ihre Schiedsrichter jetzt deterministisch nach Feldnummer
+  sortiert ans Ende der Rotation statt in zufälliger Reihenfolge.
+- **Schiedsrichter-Besetzung ging bei jedem Spielabschluss verloren,
+  behoben** (Live-Befund 14.08.2026, Fortsetzung). Das Ergebnis-`SENDUPDATE`
+  trug `Official1ID`/`Official2ID` gar nicht — BTP hat die Besetzung eines
+  Matches dadurch bei jedem Ergebnis-Eintrag gelöscht, egal wie alt die
+  Zuweisung war. Das erklärte drei Symptome auf einmal: Rotation rückte
+  niemanden ans Ende, der Einsatz-Zähler zählte nicht hoch, beendete Spiele
+  zeigten keine Schiedsrichter. Jeder Ergebnis-Schreibweg (Tablet, Desktop,
+  TL-Web, Disqualifikation, Walkover, Nachschub-Queue) reassertiert jetzt
+  die aktuell bekannte Besetzung im selben Request.
+- **Spiele von der automatischen Feldvergabe ausnehmen** (Spec
+  [feldvergabe-ausnahme](features/feldvergabe-ausnahme.md)). Die
+  Turnierleitung kann ein einzelnes Spiel per Knopfdruck — in TL-Web und
+  am Turnier-PC — temporär von der automatischen Feldvergabe ausnehmen,
+  bis es manuell reaktiviert wird oder das Match endet. Manuelles
+  Zuweisen bleibt für ein ausgenommenes Spiel jederzeit möglich; ein
+  Badge markiert die Zeile in beiden Oberflächen. Der Zustand ist
+  turniergebunden persistiert (eigene Datei, Muster ADR 0022) und
+  überlebt damit einen Neustart des Turnier-PCs.
+
+## v0.9.201
+
+- **Beim Start werden nicht mehr alle laufenden Spiele angesagt.** Die
+  ersten Abrufe der Feld-Ansage kommen, bevor der Sync-Lauf seinen ersten
+  BTP-Schnappschuss hat — sie liefern **null Felder**. Dieser leere Stand
+  galt als Baseline, und beim nächsten Abruf war damit jedes belegte Feld
+  „frisch aufgerufen": Wer die App mitten im Turnier startete, hörte alle
+  laufenden Spiele am Stück. Die Baseline gilt jetzt erst als gesetzt, wenn
+  überhaupt Felder dabei sind; Felder **ohne** Spiel bleiben ein gültiger
+  Anfangsstand, damit der erste Aufruf des Turniertags weiterhin angesagt
+  wird. (Der Fall „Ansage-Halle im Betrieb umschalten" hat dieselbe
+  Fehlerklasse und ist bewusst unverändert — siehe
+  [announcements.md](announcements.md).)
+- **Schiedsrichtermanagement** (Spec
+  [schiedsrichter-management](features/schiedsrichter-management.md),
+  ADR 0021/0022) — standardmäßig **aus**; Turniere ohne Schiedsrichter
+  verhalten sich unverändert. Eingeschaltet unter Einstellungen →
+  Schiedsrichter:
+  - **Liste aus BTP.** Der `Officials`-Container wird gelesen; BTS Light
+    pflegt nur die Zusatzdaten, die BTP nicht kennt — Rotationsreihenfolge,
+    Pausen, Stammverein (BTP überträgt keinen), Sperrlisten und die
+    feldweisen Schalter. Alles turniergebunden in
+    `officials-state.json`, beim Turnierwechsel verworfen.
+  - **Einteilung je Spiel** aus dem Client (neuer Menüpunkt
+    „Schiedsrichter") und aus TL-Web, jederzeit änderbar, auch mitten im
+    Spiel. Eine Zuweisung mit Konflikt (eigener Verein, gesperrter Verein,
+    gesperrter Spieler) wird **ausgeführt** und nur gekennzeichnet — die
+    Turnierleitung entscheidet.
+  - **Automatische Rotation**, getrennt für Schiedsrichter und
+    Aufschlagrichter und je Feld abschaltbar: Ein neu belegtes Feld bekommt
+    den nächsten nicht pausierten, dienstfreien, konfliktfreien Official;
+    nach dem Spiel rückt er ans Ende. Von Hand gelöste Zuweisungen füllt die
+    Rotation **nicht** wieder auf.
+  - **Feldweise Tabletbediener-Vergabe:** Auf Feldern, die der
+    Schiedsrichter selbst bedient, verbraucht das Feld keinen Wartenden aus
+    der Zähltafel-Schlange mehr (Default unverändert „alle Felder aktiv").
+  - **Anzeige** am Schiri-Tablet (LAN, Cloud und ferne Halle), in der
+    Spielübersicht und in TL-Web; **Ansage** von Schiedsrichter und
+    Aufschlagrichter am Ende der Feld-Ansage, plus manueller Knopf für
+    nachträgliche Zuweisungen.
+  - **Rücksync nach BTP** bei jeder Änderung (eigenständiges Match-Update,
+    Löschen als `0`, ohne `Status`-Feld) und zusätzlich eingebettet in das
+    Zuweisungs-Update beim Ruf aufs Feld. Ein fehlgeschlagener Write wird im
+    nächsten Sync-Zyklus wiederholt.
+  - **Datenschutz:** Sperrlisten und Stammverein stehen nie im Zustand, den
+    alle Turnierleitungs-Geräte bekommen — sie kommen nur auf gezielte, per
+    Geräte-Token authentifizierte Anfrage. Zwei Wächter-Tests halten das
+    fest.
+  - **Cloud-Hinweis:** Die Schiedsrichter-Bedienung in TL-Web funktioniert
+    über den Cloud-Weg erst nach dem Relay-Deploy; im Hallennetz sofort.
+
+## v0.9.200
+
+> **Nie veröffentlicht** — der Tag wurde nicht gesetzt. Die Änderungen sind
+> in `main` und gehen mit v0.9.201 gemeinsam an die Installationen.
+
+- **Cloud-Monitore und Cloud-Übersicht zeigen jetzt auch die Stände von
+  LAN-Tablets.** Der Relay kannte Punktestand und Spielzustand bisher nur
+  von Tablets, die selbst über die Cloud zählen — im `LanAndCloud`-
+  Mischbetrieb (Tablets im Hallen-LAN, Anzeigen über badhub.de) blieben
+  Cloud-Monitor, Court-Anzeige und Feld-Übersicht deshalb auf 0:0 stehen
+  (Turnier-Befund 13.08.2026, Zwei-Hallen-Turnier). Der Host spiegelt jetzt
+  jeden Feld-Stand (Satzliste + Tablet-Spielzustand mit Aufschlag/Pause) als
+  `HostFrame::ScoreUpdate` an den Relay — nudge-getrieben plus 2-s-Sweep
+  nach dem Zuweisungs-Push (fängt Relay-Neustarts, Court-Wechsel und
+  BTP-Handeingaben ein), dedupliziert per Fingerabdruck. Der Relay übernimmt
+  den Spiegel mit Stale-Schutz; leere Sätze überschreiben keinen Live-Stand
+  eines zählenden Cloud-Tablets. Nebeneffekt: Ein Ersatz-Cloud-Tablet
+  bekommt beim Verbinden den echten Stand statt 0:0 restauriert. Relay-Teil
+  greift mit dem automatischen Relay-Deploy sofort; die App braucht dieses
+  Update. Doku: `docs/court-monitor.md` („Score-Spiegel des Hosts").
+- **Schiedsrichter: die ersten Schalter im Setup.** Der neue Abschnitt
+  „Schiedsrichter" hat den globalen Schalter „Mit Schiedsrichtern spielen"
+  und die beiden Rotations-Schalter (SR/AR). **Standardmäßig aus** — wer
+  ohne Schiedsrichter arbeitet, merkt nichts. Die eigentliche Bedienung
+  (Zuweisung je Spiel, Reihenfolge, Sperrlisten, Ansage) kommt mit den
+  nächsten Schritten; der Hinweis im Abschnitt sagt das auch. Grundlage
+  ist der BTP-Parser für die Schiedsrichterliste und die SR-/AR-Felder am
+  Spiel. Spec `docs/features/schiedsrichter-management.md`, ADR 0021/0022.
+
 ## v0.9.199
 
 - **Tote Cloud-Verbindungen werden schneller erkannt (Cluster-Hebel D).** Zwei

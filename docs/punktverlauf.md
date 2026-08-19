@@ -15,7 +15,7 @@ Entscheidungen: [ADR 0014](adr/0014-punktverlauf-expliziter-rally-frame.md)
 | Oberfläche | laufend | beendet |
 |---|---|---|
 | **Tablet** (Zähltafel) | „📈 Verlauf"-Knopf am Score-Board — rendert aus den **lokalen** Daten, funktioniert offline | — (nach der Ergebnis-Abgabe verlässt das Tablet das Spiel) |
-| **TL-Web** | 📈 an der Feldkachel | 📈 an der Beendet-Zeile |
+| **TL-Web** | 📈 im ⋯-Menü der Feldkachel (bis 17.08.2026 direkt auf der Kachel) | 📈 an der Beendet-Zeile |
 | **Desktop** | 📈 an der Feld-Kachel der Felderübersicht | 📈 in der Beendet-Tabelle |
 
 Der Klick erscheint **nur**, wenn es wirklich einen Verlauf gibt

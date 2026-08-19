@@ -3,6 +3,7 @@ pub mod badhub;
 pub mod btp;
 pub mod commands;
 pub mod config;
+pub mod hall_colors;
 pub mod log_upload;
 pub mod sync;
 pub mod tablet;
@@ -68,7 +69,12 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main_window(app),
-            "quit" => app.exit(0),
+            // Über `beenden`, nicht `app.exit` direkt: Seit der Entprellung
+            // (Spec monitor-livestand-push, S2) schreibt nicht mehr jeder
+            // Punkt selbst, und dies ist der dokumentierte Weg, eine in den
+            // Infobereich minimierte App zu schließen — ohne den letzten
+            // Schreibvorgang ginge hier Spielstand verloren.
+            "quit" => beenden(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -102,6 +108,7 @@ pub fn run() {
             commands::azure_tts_speak,
             commands::start_sync,
             commands::stop_sync,
+            commands::flush_live_scores,
             commands::get_status,
             commands::wifi_status,
             commands::internet_status,
@@ -133,6 +140,20 @@ pub fn run() {
             commands::checkin_announcement,
             commands::finished_matches,
             commands::match_timeline,
+            commands::officials_roster,
+            commands::official_assign,
+            commands::official_clear,
+            commands::official_pause,
+            commands::auto_assign_exclude,
+            commands::queue_reorder,
+            commands::queue_order_reset,
+            commands::official_reorder,
+            commands::official_set_club,
+            commands::official_blocklists,
+            commands::official_set_blocklists,
+            commands::official_appearances,
+            commands::officials_court_switches,
+            commands::officials_set_court_switches,
             commands::publish_freetext,
             commands::pending_freetext,
             commands::pending_announce_jobs,
@@ -143,6 +164,9 @@ pub fn run() {
             commands::tl_web_set_enabled,
             commands::set_hall_layout,
             commands::remove_hall_layout,
+            commands::set_hall_color,
+            commands::remove_hall_color,
+            commands::hall_colors_view,
             commands::cloud_announce_state,
             commands::cloud_slaves,
             commands::pairing_code,
@@ -202,14 +226,26 @@ pub fn run() {
                         ))
                         .show(move |confirmed| {
                             if confirmed {
-                                app_for_dialog.exit(0);
+                                beenden(&app_for_dialog);
                             }
                         });
                 } else {
-                    app.exit(0);
+                    beenden(&app);
                 }
             }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Beendet die App — aber erst, nachdem der aufgelaufene Live-Stand auf der
+/// Platte steht (Spec `monitor-livestand-push`, S2).
+///
+/// Seit der Entprellung schreibt nicht mehr jeder gezählte Punkt selbst,
+/// sondern ein Sekundentakt. Ohne diesen letzten Schreibvorgang gingen beim
+/// Beenden bis zu einer Sekunde Spielstand verloren — und anders als bei
+/// einem Absturz gibt es hier keinen Grund, das hinzunehmen.
+fn beenden(app: &tauri::AppHandle) {
+    app.state::<commands::AppState>().tablet.flush_scores();
+    app.exit(0);
 }

@@ -483,6 +483,9 @@
       font-size: 6rem; font-weight: 800; line-height: 1;
       font-variant-numeric: tabular-nums; color: #fff;
     }
+    /* Überzogene Pause (E9, ADR 0028): zählt rot hoch, bis weitergespielt
+       wird — unmissverständlich auch aus einigen Metern Entfernung. */
+    .break-countdown.overrun { color: #f87171; }
     .break-hint { font-size: .95rem; color: #cbd5e1; max-width: 22rem; }
     /* Schiri-Ansage in der Pausen-Überlagerung (Satzende/„Bitte spielen" …). */
     .break-umpire {
@@ -726,6 +729,10 @@
   <div class="subtitle" id="setup-subtitle"></div>
   <!-- Hinweis Zähltafelbediener: Verlierer des Vorspiels auf diesem Feld. -->
   <div class="sk-hint" id="setup-scorekeeper" hidden></div>
+  <!-- Schiedsrichter/Aufschlagrichter dieses Spiels (Spec
+       schiedsrichter-management). Kommt als Namen im MatchBrief, LAN wie
+       Cloud; leer, wenn ohne Schiedsrichter gespielt wird. -->
+  <div class="sk-hint" id="setup-officials" hidden></div>
   <div class="options" id="setup-options"></div>
   <button type="button" class="setup-back" id="setup-back">← Zurück · Back</button>
 </div>
@@ -798,9 +805,10 @@
     Spiel abbrechen · Aufgabe
   </button>
   <div class="break-hint">
-    Tippe „Weiterspielen", wenn die Spieler:innen bereit sind — sonst geht
-    es nach Ablauf der Zeit automatisch weiter. „Korrektur" bricht die Pause
-    ab und nimmt den letzten Punkt zurück (z. B. Ball wiederholen).
+    Tippe „Weiterspielen", wenn die Spieler:innen bereit sind — nach Ablauf
+    der Zeit zählt die Anzeige rot weiter, bis es weitergeht. „Korrektur"
+    bricht die Pause ab und nimmt den letzten Punkt zurück (z. B. Ball
+    wiederholen).
   </div>
 </div>
 
@@ -1176,6 +1184,7 @@ const els = {
   setupSubtitle: document.getElementById('setup-subtitle'),
   setupOptions: document.getElementById('setup-options'),
   setupScorekeeper: document.getElementById('setup-scorekeeper'),
+  setupOfficials: document.getElementById('setup-officials'),
   setupBack: document.getElementById('setup-back'),
   finishedOverlay: document.getElementById('finished-overlay'),
   finishedUmpire: document.getElementById('finished-umpire'),
@@ -1597,8 +1606,11 @@ function showSwitchToast() {
 
 // ─────────────────────────────── Pausen (BWF-Intervalle) ──────────────
 // Offizielle Intervalle: 60 s sobald ein Team 11 Punkte erreicht, 120 s
-// zwischen den Sätzen. Während der Pause ist die Zähltafel gesperrt; bei 0
-// geht es automatisch weiter, „Weiterspielen" beendet die Pause früher.
+// zwischen den Sätzen. Während der Pause ist die Zähltafel gesperrt.
+// Seit Spec `spielzeiten-prognose` (E9, ADR 0028) endet die Pause NICHT
+// mehr automatisch bei 0: Sie bleibt bestehen, bis der Schiedsrichter
+// „Weiterspielen" tippt — nach Ablauf zählt die Anzeige rot hoch
+// („überzogen"), und die Turnierleitung sieht die Überziehung feldgenau.
 const BREAK_SECONDS = { eleven: 60, game: 120 };
 let breakTimer = null;
 
@@ -1611,7 +1623,11 @@ let breakTimer = null;
 let serverClockOffset = 0;
 function serverNow() { return Date.now() + serverClockOffset; }
 function syncServerClock() {
-  fetch('/health', { cache: 'no-store' })
+  // `src=check`: Dies ist keine Anzeige-Aktualisierung, sondern die
+  // Uhr-Synchronisation. Ohne die Kennzeichnung landeten bei zwanzig
+  // Tablets rund 0,7 Abrufe je Sekunde samt vollem Rumpf in der
+  // Anzeige-Messung (Spec monitor-livestand-push, S0).
+  fetch('/health?src=check', { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
       if (d && typeof d.serverNowMs === 'number' && d.serverNowMs > 0) {
@@ -1628,7 +1644,10 @@ setInterval(syncServerClock, 30000);
 // ein Punkt, der eine Pause auslöst, doppelt (Plan-13-Review).
 function startBreak(kind, skipCommit) {
   const secs = BREAK_SECONDS[kind]; // undefined bei 'injury' – kein Countdown
-  STATE.pause = { kind, endsAt: secs ? serverNow() + secs * 1000 : null };
+  // `startedAt` (Server-Zeit) reist opak über persistState zum Host — die
+  // Turnierleitung zeigt damit „Behandlung seit …" (E10) und die
+  // Pausen-Dauer, ohne dass sich am Protokoll etwas ändert.
+  STATE.pause = { kind, startedAt: serverNow(), endsAt: secs ? serverNow() + secs * 1000 : null };
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   if (STATE.pause.endsAt) breakTimer = setInterval(tickBreak, 250);
   tlog('info', 'break_start', { kind });
@@ -1669,15 +1688,21 @@ function maybeOpenServeReprompt() {
   return false;
 }
 
-// 4×/s: aktualisiert den Countdown; bei 0 endet die Pause automatisch.
+// 4×/s: aktualisiert den Countdown. Bei 0 endet die Pause NICHT mehr von
+// selbst (E9, ADR 0028) — die Anzeige wechselt auf „überzogen" und zählt
+// hoch, bis „Weiterspielen" gedrückt wird. So wird die Überziehung echt
+// gemessen und ist für die Turnierleitung sichtbar.
 function tickBreak() {
   if (!STATE.pause || !STATE.pause.endsAt) {
     if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
     return;
   }
-  if (serverNow() >= STATE.pause.endsAt) {
-    endBreak();
-    return;
+  if (serverNow() >= STATE.pause.endsAt && !STATE.pause.overrun) {
+    // Genau einmal beim Überschreiten: fürs Diagnose-Log und damit der
+    // gespiegelte Stand (persistState) den Übergang sofort transportiert.
+    STATE.pause.overrun = true;
+    tlog('warn', 'break_overrun', { kind: STATE.pause.kind });
+    persistState();
   }
   renderBreak();
 }
@@ -1690,12 +1715,18 @@ function renderBreak() {
   if (STATE.pause.kind === 'injury') {
     els.breakTitle.textContent = 'Behandlungspause';
     els.breakCountdown.textContent = '✚';
+    els.breakCountdown.classList.remove('overrun');
   } else {
-    const secs = Math.max(0, Math.round((STATE.pause.endsAt - serverNow()) / 1000));
-    els.breakCountdown.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-    els.breakTitle.textContent = STATE.pause.kind === 'eleven'
+    // Nach Ablauf zählt die Anzeige ROT hoch („+0:37") statt zu enden —
+    // die Pause hält, bis „Weiterspielen" gedrückt wird (E9, ADR 0028).
+    const rest = Math.round((STATE.pause.endsAt - serverNow()) / 1000);
+    const secs = Math.abs(rest);
+    const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    els.breakCountdown.textContent = rest < 0 ? `+${mmss}` : mmss;
+    els.breakCountdown.classList.toggle('overrun', rest < 0);
+    els.breakTitle.textContent = (STATE.pause.kind === 'eleven'
       ? 'Pause bei 11 Punkten'
-      : 'Satzpause';
+      : 'Satzpause') + (rest < 0 ? ' — überzogen' : '');
   }
   // „Spiel abbrechen" nur in der Behandlungspause anbieten.
   els.breakAbort.style.display = STATE.pause.kind === 'injury' ? '' : 'none';
@@ -1918,11 +1949,14 @@ function applyPersistedState(p) {
   STATE.finished = !!p.finished;
   STATE.midGameSwitchDone = !!p.midGameSwitchDone;
   STATE.intervalDoneThisGame = !!p.intervalDoneThisGame;
-  // Behandlungspause (ohne Countdown) immer übernehmen; eine BWF-Pause
-  // nur, wenn ihre Zeit noch nicht abgelaufen ist.
+  // Behandlungspause (ohne Countdown) immer übernehmen. Auch eine
+  // ABGELAUFENE BWF-Pause bleibt bestehen (E9, ADR 0028): Sie endet erst
+  // mit „Weiterspielen" — ein Reload oder eine Geräte-Übernahme mitten in
+  // einer (auch überzogenen) Pause darf sie nicht still beenden, sonst
+  // endete sie doch wieder automatisch.
   if (p.pause && p.pause.kind === 'injury') {
     STATE.pause = p.pause;
-  } else if (p.pause && typeof p.pause.endsAt === 'number' && p.pause.endsAt > serverNow()) {
+  } else if (p.pause && typeof p.pause.endsAt === 'number') {
     STATE.pause = p.pause;
     if (breakTimer) clearInterval(breakTimer);
     breakTimer = setInterval(tickBreak, 250);
@@ -3074,6 +3108,7 @@ function renderSetupModal() {
   // Hinweis Zähltafelbediener nur im ersten Schritt (Seitenwahl), wenn ein
   // Vorspiel auf dem Feld bekannt ist: der Verlierer bedient die Zähltafel.
   renderScorekeeperHint(STATE.setup === 'choose-side');
+  renderOfficialsHint(STATE.setup === 'choose-side');
   if (STATE.setup === 'choose-side') {
     setSetupText(
       'Welches Team steht links?', 'Which team is on the left?',
@@ -3164,6 +3199,33 @@ function renderScorekeeperHint(show) {
     `🧮 <span class="sk-label">Zähltafel / Scoreboard:</span> ` +
     `<span class="sk-names">${joined}</span>`;
   els.setupScorekeeper.hidden = false;
+}
+
+/**
+ * Schiedsrichter/Aufschlagrichter des Spiels (Spec schiedsrichter-management).
+ *
+ * Wie der Zähltafel-Hinweis nur in der Einrichtung: Während des Zählens
+ * zählt der Bildschirm, nicht die Besetzung. Namen kommen fertig im
+ * `MatchBrief` — das Tablet löst nichts auf.
+ */
+function renderOfficialsHint(show) {
+  const sr = (STATE.match && Array.isArray(STATE.match.srNames)) ? STATE.match.srNames : [];
+  const ar = (STATE.match && Array.isArray(STATE.match.arNames)) ? STATE.match.arNames : [];
+  if (!show || (sr.length === 0 && ar.length === 0)) {
+    els.setupOfficials.hidden = true;
+    return;
+  }
+  const teile = [];
+  if (sr.length) {
+    teile.push(`<span class="sk-label">Schiedsrichter / Umpire:</span> ` +
+      `<span class="sk-names">${sr.map(escapeHtml).join(' / ')}</span>`);
+  }
+  if (ar.length) {
+    teile.push(`<span class="sk-label">Aufschlagrichter / Service judge:</span> ` +
+      `<span class="sk-names">${ar.map(escapeHtml).join(' / ')}</span>`);
+  }
+  els.setupOfficials.innerHTML = `⚖️ ` + teile.join(' · ');
+  els.setupOfficials.hidden = false;
 }
 
 function renderPartnerHint(teamKey, playerId) {
@@ -3963,6 +4025,7 @@ if (STATE.pendingResult) trySubmitPending();
 (function sponsorBar() {
   var box = document.getElementById('sponsor-bar');
   if (!box) return;
+  // Ohne Abgleich auf Unverändertheit — Begründung siehe monitor.html.
   function paint(st) {
     var h = '';
     if (st && st.hasLogo) h += '<img src="' + BASE_PATH + '/info/logo" alt="" onerror="this.remove()">';

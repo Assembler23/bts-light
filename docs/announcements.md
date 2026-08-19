@@ -22,6 +22,20 @@ siehe [zaehltafelbediener.md](zaehltafelbediener.md).
   nachträglich angesagt. Danach löst jede neue `match_id` auf einem Feld
   eine Ansage aus. Eine Match-ID wird im 5-s-Fenster nicht doppelt
   angesagt.
+- **Eine leere Antwort taugt nicht als Baseline** (Befund 14.08.2026): Die
+  ersten Abrufe nach dem Start kommen, bevor der Sync-Lauf seinen ersten
+  BTP-Schnappschuss hat — `tablet_overview()` liefert dann **null Felder**.
+  Galt das als Baseline, war beim nächsten Abruf jedes belegte Feld „neu",
+  und die App sagte beim Start **alle laufenden Spiele** an. Die Baseline
+  gilt deshalb erst als gesetzt, wenn überhaupt Felder dabei sind; Felder
+  **ohne** Spiel sind dagegen ein gültiger Anfangsstand (Turniermorgen —
+  sonst bliebe der erste Aufruf des Tages stumm). Die Entscheidung liegt in
+  [`src/io/announceBaseline.mjs`](../src/io/announceBaseline.mjs) und ist
+  über `scripts/test-announce-baseline.mjs` (CI) festgehalten.
+- **Noch offen, gleiche Fehlerklasse:** Wird die Ansage-Halle im Betrieb
+  umgeschaltet, gelten die belegten Felder der neuen Halle als frisch
+  aufgerufen und werden angesagt. Unverändert gelassen, weil es ein anderer
+  Fall ist als der Start.
 - **Engine:** [`src/io/announcer.ts`](../src/io/announcer.ts) — portiert
   aus der Schwester-App badhub-tournament.
 
@@ -110,9 +124,12 @@ den Ansage-Geräten — mit demselben Code wie jeder andere Aufruf.
 
 | Baustein | Ort |
 |---|---|
-| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`) | `tablet/state.rs` |
+| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `start_play`) | `tablet/state.rs` |
 | Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
-| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`) | `tablet/tl.rs` |
+| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceStartPlay`) | `tablet/tl.rs` |
+| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `scorekeeper_call`) | `tablet/state.rs` |
+| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
+| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceScorekeeper`) | `tablet/tl.rs` |
 | Abholweg | Route `/info/announce/jobs`, Command `pending_announce_jobs` |
 | Sprecher | [`AnnounceJobPlayer.tsx`](../src/components/AnnounceJobPlayer.tsx) |
 
@@ -134,10 +151,125 @@ Eigenschaften, die im Turnierbetrieb zählen:
   was die Halle gehört hat.
 - **Nichts wird nachträglich falsch gesprochen.** Steht auf dem Feld
   inzwischen ein anderes Spiel, schweigt der Sprecher lieber.
+- **Je Partei ansagbar.** Beide Aufruf-Aufträge tragen eine Partei
+  (`side`: `both` / `team1` / `team2`) — siehe den nächsten Abschnitt.
+- **Eine unbekannte Ansageart bringt niemanden zum Schweigen.** Ein
+  Ansage-Slave mit älterem Stand (Auto-Update-Fenster: zwei Rechner, einer
+  aktualisiert) überspringt einen Auftragstyp, den er nicht kennt, und
+  spricht die übrigen normal. Vorher scheiterte an einem einzigen
+  unbekannten Eintrag die **ganze Charge**, und die zweite Halle blieb eine
+  Minute lang still — auch für gewöhnliche Aufrufe. Abgesichert an zwei
+  Stellen, die zusammengehören: `announce_jobs_aus_json` (`tablet/state.rs`)
+  überspringt Unbekanntes beim Lesen, und `AnnounceJobPlayer.tsx` schweigt
+  bei einer Art, die es nicht kennt, statt sie in den Vorbereitungs-Zweig
+  durchfallen zu lassen — dort spräche es sonst einen **falschen** Aufruf.
 - **Sind Ansagen ausgeschaltet, wird gar nicht erst abgefragt.** Sonst
   meldete sich das Gerät als Ansage-Gerät, ohne je zu sprechen — und die
   Turnierleitung bekäme ein beruhigendes „Aufruf ausgelöst", während in der
   Halle nichts passiert.
+
+### „Bitte mit dem Spielen beginnen" (seit v0.9.230)
+
+Ein Feld ist besetzt, die Spieler stehen da, es fällt kein Punkt. Die
+Turnierleitung sieht das an der roten Aufruf-Uhr — und kann es jetzt auch
+sagen, statt hinzulaufen oder einen Aufruf zu wiederholen.
+
+Der Knopf **„Bitte anfangen"** steht im ⋯-Menü der Feld-Kachel in TL-Web,
+sichtbar nur bei belegtem Feld, auf dem **noch kein Punkt** gefallen ist.
+Ansage-Bild:
+
+> 🔔 „**Feld 3. Bitte mit dem Spielen beginnen.**"
+> (englisch: „Court 3. Please start playing.")
+
+**Kein Aufruf.** Das ist der Kern dieser Ansage und in `tablet/tl.rs`
+ausdrücklich kommentiert: Sie zählt **keine** Aufruf-Stufe hoch, lässt das
+Aufruf-Abzeichen an der Kachel stehen und ändert nichts an der Fälligkeit.
+Zählte sie mit, glaubte die Turnierleitung, sie hätte schon zweimal
+gerufen — und die kampflose Wertung hängt am dritten Aufruf.
+
+Folgerichtig ohne Obergrenze: Wer nach fünf Minuten immer noch nicht
+spielt, wird eben erneut gebeten. Ohne Paarung (auf dem Feld steht genau
+eine) und ohne Stufenwort („Zweiter Aufruf. Bitte anfangen." wäre ein
+Widerspruch). Der Wortlaut liegt in
+[`src/io/startPlayText.mjs`](../src/io/startPlayText.mjs) und wird in der
+CI geprüft — beide Synthese-Pfade (Web Speech und Azure-SSML) nutzen
+dieselben Bausteine.
+
+Wie jede TL-Web-Ansage erklingt sie **nur in der Halle des Felds** und
+**nicht** in einer per Relay angebundenen fernen Halle (siehe „Cloud" oben).
+### Nachruf an die Zähltafelbedienung (seit v0.9.232)
+
+Kommt die zugewiesene Bedienung nicht ans Feld, ruft die Turnierleitung sie
+über „Bedienung nachrufen" im ⋯-Menü der Feld-Kachel:
+
+> 🔔 „**Feld 3. Meier / Kraus, bitte als Tabletbedienung melden.**"
+> Ab dem zweiten Mal mit „Zweiter Aufruf." bzw. „Dritter und letzter Aufruf."
+> davor.
+
+**Kein Spieler-Aufruf**, und das ist der Grund für die eigene Ansageart:
+Der Host führt einen **eigenen** Zähler; `call_stages` und
+`prep_call_stages` bleiben unberührt. Ohne die Trennung zöge ein Nachruf an
+die Bedienung die angezeigte Aufruf-Zahl der Spieler hoch. Der Zählerstand
+verlässt den Host nicht — er bestimmt allein die Ansage-Stufe.
+
+Sichtbar nur bei **zugewiesenem** Bediener. Die Namen laufen ohne
+Aussprache-Korrektur, wie bei „Tabletbedienung: …" am Ende der Feld-Ansage
+und bei den Schiedsrichtern: eine Zuständigkeits-Ansage, keine
+Spieler-Vorstellung. Details: [zaehltafelbediener.md](zaehltafelbediener.md).
+
+### Aufruf je Partei — am Meeting Point und am Feld
+
+Erscheint nur **eine** Partei, ruft die Turnierleitung gezielt sie nach.
+Das gibt es an zwei Orten, mit derselben Wire-Angabe
+(`relay_proto::PrepCallSide`: `both` / `team1` / `team2`) und demselben
+Ansage-Bild (nur die genannte Partei wird vorgelesen, die andere bleibt
+ungenannt):
+
+| Ort | Aktion | Partei | Wo die Stufe lebt |
+|---|---|---|---|
+| Meeting Point (Spiel in Vorbereitung) | `AnnouncePrepCall` | **Pflichtfeld** | je **(Spiel, Partei)** — `prep_call_stages` |
+| Feld (Spiel steht schon auf dem Court) | `AnnounceCourtCall` | **optional**, fehlend = beide | je **Feld** — `call_stages` |
+
+Der Unterschied ist Absicht: Am Meeting Point warten die Parteien
+unabhängig voneinander, am Feld gilt **eine** Stufe für alle Geräte
+(„Zweiter Aufruf" muss überall dieselbe Zahl sein).
+
+**Die Stufe am Feld zählt einmal je Aufruf-Runde.** Ein Partei-Aufruf ist
+ein vollwertiger Aufruf; wer aber nacheinander Partei A und Partei B ruft,
+hat **einmal** gerufen — beide hören „Zweiter Aufruf". Erst ein Aufruf an
+eine Partei, die auf dieser Stufe schon dran war, eröffnet die nächste
+(„Dritter und letzter Aufruf"). Der Turnier-PC merkt sich dazu je Feld die
+bereits gerufenen Parteien der aktuellen Stufe
+(`note_court_call_at_least`, Maske `SIDE_TEAM1`/`SIDE_TEAM2`). Ein Aufruf
+aus der Desktop-Oberfläche (`reached_court_call`) gilt immer beiden
+Parteien und schließt die Runde ab.
+
+**Über den dritten Aufruf hinaus** (Profil-Option „Aufrufe unbegrenzt" in
+TL-Web, seit 17.08.2026) zählt der Turnier-PC ehrlich weiter (4, 5, …) —
+gesprochen wird ab Stufe 4 aber die **schlichte Feld-Ansage ohne
+Stufenwort** (`AnnounceJobPlayer` bildet `stage >= 4` auf `callStage: 1`
+ab): „Dritter und letzter Aufruf" noch einmal wäre gelogen, und eine
+„vierte" Stufe gibt es im Sprachbild der Halle nicht. Die Klemme fällt
+nur, wenn irgendein TL-Web-Profil die Option führt — sonst hält der
+Turnier-PC den 3er-Deckel selbst (`tablet/tl.rs`
+`unlimited_court_calls`). Bei einem **laufenden** Spiel (Punkte gefallen)
+hebt der Host den Auftrag unabhängig von der Stufe auf `>= 4` — auch ein
+„zweiter" Aufruf mitten ins Spiel kommt ohne Stufenwort. Der Desktop-Knopf
+der Felderübersicht rechnet mit derselben Regel (`FieldOverviewPage`,
+Prop `unlimitedCalls`): ab Stufe 4 heißt er „Erneut aufrufen" und sagt
+ohne Stufenwort an.
+
+**Vorgelesen** wird die Angabe am Ansage-Gerät: Der Auftrag trägt sie mit
+(`AnnounceJobKind::CourtCall.side`), `AnnounceJobPlayer` reicht sie an
+`announceCourt(..., side)` weiter, und das setzt — exakt wie der
+Vorbereitungs-Nachruf — nur die genannte Partei als `teamANames` und lässt
+`teamBNames` leer. Auch die Sprachwahl richtet sich dann nur nach den
+Nationen der genannten Partei.
+
+Ein älterer Browser, der `side` beim Feld-Aufruf nicht mitschickt, ruft
+unverändert beide Parteien — `None` ist hier die neutralere, nicht die
+weitreichendere Variante (Begründung: [cloud-relay.md](cloud-relay.md),
+Abschnitt „Erneute Aufrufe — je Partei").
 
 ### Grenzen (Stand Schritt 9)
 
@@ -410,7 +542,8 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
 - `src/io/azureAnnounce.ts` — baut die `AnnounceOptions.azure`-Option (nur wenn aktiv).
 - `src-tauri/src/azure_tts.rs` + `commands::azure_tts_speak` — Azure-Synthese (Key im Backend) + Datei-Cache.
 - `src-tauri/src/tablet/state.rs` — `AnnounceJob`/`AnnounceJobKind`, `call_stages`
-  (Aufruf-Stufen am Host), `announce_listeners` (wer hört gerade zu).
+  (Aufruf-Stufen am Host, inkl. der Parteien-Maske der laufenden Runde),
+  `side_mask`/`SIDE_TEAM1`/`SIDE_TEAM2`, `announce_listeners` (wer hört gerade zu).
 - `src-tauri/src/tablet/tl.rs` — `AnnounceCourtCall`/`AnnouncePrepCall`,
   `due_call_stage` (zeitliche Fälligkeit), `announcement_response` (Warnung
   ohne Ansage-Gerät).
@@ -466,3 +599,22 @@ Stimme die Namen **nativ** spricht. Ablauf:
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
 - `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
 - `src/pages/SetupWizard.tsx` — Einstellungen.
+
+## Schiedsrichter und Aufschlagrichter
+
+Läuft das Turnier mit Schiedsrichtern (Spec
+[schiedsrichter-management](schiedsrichter-management.md)), nennt die
+Feld-Ansage nach der Tabletbedienung:
+
+- „Schiedsrichter: {Name}." / englisch „Umpire: {Name}."
+- „Aufschlagrichter: {Name}." / englisch „Service judge: {Name}."
+
+Angesagt wird nur, was auch zugewiesen ist; ohne Schiedsrichter-Betrieb
+entfällt beides ersatzlos. Segment- und SSML-Bauer nutzen dieselbe Quelle
+(`officialSegments` in `io/announcer.ts`), damit Browser-Stimme und
+Azure-Stimme identisch sprechen.
+
+**Nachträgliche Zuweisungen sagen nicht von selbst an.** Wer mitten im Spiel
+einen Schiedsrichter einteilt, löst die Ansage mit dem Knopf „ansagen" aus —
+in der Schiedsrichter-Seite des Clients oder an der Feld-Kachel in TL-Web.
+Diese Ansage nennt nur Feld und Besetzung, nicht noch einmal die Paarung.

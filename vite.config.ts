@@ -9,6 +9,17 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
+  // Nur die React-App ist Vite-Einstieg. Ohne diese Begrenzung crawlt der
+  // Dependency-Scanner ALLE HTML-Dateien im Repo — auch die eigenständigen
+  // Tablet-/Monitor-Seiten unter src-tauri/assets und sogar Build-Artefakte
+  // unter target/. Die erste Deps-Optimierung blockiert hier ohnehin schon
+  // minutenlang den Event-Loop (weißes Fenster bis zum fertigen
+  // node_modules/.vite-Cache, beobachtet 16.08.2026 mit Vite 8.2.1) — sie
+  // soll wenigstens nicht auch noch fremde Seiten mit einrechnen.
+  optimizeDeps: {
+    entries: ["index.html"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

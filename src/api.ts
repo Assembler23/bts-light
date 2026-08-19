@@ -11,6 +11,7 @@ import type {
   FinishedMatchRow,
   MatchTimeline,
   FreetextItem,
+  HallColorsView,
   HallLayoutConfig,
   MonitorDeviceInfo,
   MonitorTarget,
@@ -18,6 +19,10 @@ import type {
   PairingCode,
   PreparationView,
   ScorekeeperEntry,
+  OfficialView,
+  AppearanceView,
+  BlocklistView,
+  CourtSwitchesView,
   InternetStatus,
   SlaveInfo,
   SlaveDeviceInfo,
@@ -53,6 +58,14 @@ export const startSync = (): Promise<void> => invoke("start_sync");
 
 export const stopSync = (): Promise<void> => invoke("stop_sync");
 
+/** Sichert den aufgelaufenen Live-Stand sofort auf die Platte.
+ *
+ *  Nötig vor jedem Beenden, das nicht über `stopSync` oder das Schließen des
+ *  Fensters läuft — heute der Neustart nach einem Auto-Update. Seit der
+ *  Entprellung (Spec `monitor-livestand-push`, S2) schreibt nicht mehr jeder
+ *  gezählte Punkt selbst. */
+export const flushLiveScores = (): Promise<void> => invoke("flush_live_scores");
+
 export const getStatus = (): Promise<SyncStatus> => invoke("get_status");
 
 /** Aktuelles WLAN (SSID) des Turnier-PCs für die Kopfzeile. */
@@ -83,6 +96,26 @@ export const setCourtLocked = (
   courtId: number,
   locked: boolean,
 ): Promise<void> => invoke("set_court_locked", { courtId, locked });
+
+/** Spiel von der automatischen Feldvergabe ausnehmen/wieder aufnehmen (Spec
+ *  `feldvergabe-ausnahme`) — betrifft nie manuelles Zuweisen. */
+export const autoAssignExclude = (
+  matchId: number,
+  excluded: boolean,
+): Promise<void> => invoke("auto_assign_exclude", { matchId, excluded });
+
+/** Ein noch nicht gerufenes Spiel vor ein anderes ziehen (Spec
+ *  `spielliste-manuelle-reihenfolge`, ADR 0023) — die Halle wird
+ *  serverseitig aus dem Match abgeleitet. `beforeMatchId = null` heißt
+ *  „ans Ende des aktuell sichtbaren Präfix-Blocks". */
+export const queueReorder = (
+  matchId: number,
+  beforeMatchId: number | null,
+): Promise<void> => invoke("queue_reorder", { matchId, beforeMatchId });
+
+/** Verwirft die manuelle Spielreihenfolge ALLER Hallen auf einmal (globaler
+ *  Reset-Knopf, Spec `spielliste-manuelle-reihenfolge`). */
+export const queueOrderReset = (): Promise<void> => invoke("queue_order_reset");
 
 /** Öffnet das Log-Verzeichnis im Datei-Manager. */
 export const openLogDir = (): Promise<void> => invoke("open_log_dir");
@@ -285,6 +318,22 @@ export const setHallLayout = (layout: HallLayoutConfig): Promise<AppConfig> =>
 export const removeHallLayout = (hall: string): Promise<AppConfig> =>
   invoke("remove_hall_layout", { hall });
 
+/** Übersteuert die Farbe einer Halle (Palettenton, Spec hallen-farben);
+ *  liefert die neue Konfiguration. */
+export const setHallColor = (
+  hall: string,
+  color: string,
+): Promise<AppConfig> => invoke("set_hall_color", { hall, color });
+
+/** Entfernt die Farb-Übersteuerung einer Halle — zurück zur Auto-Palette;
+ *  liefert die neue Konfiguration. */
+export const removeHallColor = (hall: string): Promise<AppConfig> =>
+  invoke("remove_hall_color", { hall });
+
+/** Palette + effektive Farbe je Halle für den Picker der Felderübersicht. */
+export const hallColorsView = (): Promise<HallColorsView> =>
+  invoke("hall_colors_view");
+
 /** Ruft die ausgewählten Spiele „in Vorbereitung" (optional je Halle). */
 export const callPreparation = (
   matchIds: number[],
@@ -376,3 +425,78 @@ export const monitorCommand = (
  *  Backend abgelehnt). */
 export const forgetMonitorDevice = (deviceId: string): Promise<void> =>
   invoke("forget_monitor_device", { deviceId });
+
+// ───────────── Schiedsrichter (Spec schiedsrichter-management) ─────────────
+
+/** Die Schiedsrichterliste des Turniers in Rotationsreihenfolge, angereichert
+ *  um Pausen, Stammverein, aktuellen Dienst und Einsatz-Zähler. */
+export const officialsRoster = (): Promise<OfficialView[]> =>
+  invoke("officials_roster");
+
+/** Weist einem Spiel einen Schiedsrichter (`"sr"`) oder Aufschlagrichter
+ *  (`"ar"`) zu. Liefert die Konflikt-Kategorie, falls einer besteht — die
+ *  Zuweisung wird trotzdem ausgeführt (die Turnierleitung entscheidet). */
+export const officialAssign = (
+  matchId: number,
+  role: "sr" | "ar",
+  officialId: number,
+): Promise<string | null> =>
+  invoke("official_assign", { matchId, role, officialId });
+
+/** Löst die Zuweisung eines Spiels. */
+export const officialClear = (
+  matchId: number,
+  role: "sr" | "ar",
+): Promise<void> => invoke("official_clear", { matchId, role });
+
+/** Pausiert einen Schiedsrichter oder aktiviert ihn wieder. */
+export const officialPause = (
+  officialId: number,
+  paused: boolean,
+): Promise<void> => invoke("official_pause", { officialId, paused });
+
+/** Zieht einen Schiedsrichter in der Reihenfolge vor einen anderen
+ *  (`beforeOfficialId = null` ⇒ ans Ende). */
+export const officialReorder = (
+  officialId: number,
+  beforeOfficialId: number | null,
+): Promise<void> =>
+  invoke("official_reorder", { officialId, beforeOfficialId });
+
+/** Pflegt den Stammverein (BTP liefert am Official keinen). */
+export const officialSetClub = (
+  officialId: number,
+  club: string,
+): Promise<void> => invoke("official_set_club", { officialId, club });
+
+/** Lädt die Sperrlisten eines Schiedsrichters — gezielt auf Anfrage, damit
+ *  diese Personendaten nicht in jeder Listen-Abfrage mitreisen. */
+export const officialBlocklists = (
+  officialId: number,
+): Promise<BlocklistView> => invoke("official_blocklists", { officialId });
+
+/** Setzt die Sperrlisten eines Schiedsrichters (ersetzt beide Listen). */
+export const officialSetBlocklists = (
+  officialId: number,
+  clubs: string[],
+  players: number[],
+): Promise<void> =>
+  invoke("official_set_blocklists", { officialId, clubs, players });
+
+/** Die Einsätze eines Schiedsrichters im Detail (Spiel, Rolle, Feld, Ende). */
+export const officialAppearances = (
+  officialId: number,
+): Promise<AppearanceView[]> => invoke("official_appearances", { officialId });
+
+/** Feldweise Schalter (SR-Rotation, AR-Rotation, Bediener-Vergabe). */
+export const officialsCourtSwitches = (): Promise<CourtSwitchesView[]> =>
+  invoke("officials_court_switches");
+
+/** Setzt die feldweisen Schalter eines Felds. */
+export const officialsSetCourtSwitches = (
+  courtId: number,
+  sr: boolean,
+  ar: boolean,
+  operator: boolean,
+): Promise<void> =>
+  invoke("officials_set_court_switches", { courtId, sr, ar, operator });

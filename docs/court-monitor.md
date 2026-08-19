@@ -104,16 +104,84 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Nudges **aller** Felder (Feld-Übersicht `overview.html`); gesetzt → nur dieses
   Feld (fester Court-Monitor). Geräte-zugewiesene Monitore abonnieren alle Felder
   und filtern clientseitig auf ihr aktuelles Feld.
-- **`seq`** zählt je Feld monoton hoch; veraltete/doppelte Nudges verwirft der
-  Client (`lastSeq`-Guard).
-- **Poll bleibt Fallback:** Solange Nudges eintreffen, pausiert das
-  Intervall-Poll; bei WS-Abriss (WLAN-Wechsel, Cloud-Namespace noch nicht da)
-  oder >~1 s Nudge-Stille übernimmt es sofort wieder (250 ms). Ein
-  Reconnect-Watchdog verbindet den WS mit Backoff neu. **Kein Regress** — fällt
-  der Push aus, verhält sich die Anzeige wie zuvor, nur mit schnellerem Poll.
-- **Grenzen:** Die **Feld-/Match-Zuweisung** wird (noch) nicht genudgt (sie ist
-  BTP-Snapshot-getrieben, kein Einzel-Event) — hier greift der 250-ms-Poll. Der
-  Nudge ist reine Anzeige-Beschleunigung; er ändert keine Ownership/Zählung.
+- **`seq`** zählt je Feld monoton hoch und **beginnt bei der Uhrzeit** (seit
+  v0.9.239), damit die Zahl einen Neustart von Turnier-PC oder Relay
+  übersteht — sonst hielte eine Anzeige mit gemerktem Wert danach jeden
+  neuen Stand für veraltet und bliebe stehen.
+- **Seit v0.9.239 tragen auch die Voll-Antworten dieselbe Zahl** — in
+  `/health` als eigene Karte `seqs` (CourtID → Zahl) **neben** der
+  Feld-Liste, in `/court/{id}/state` als Feld `seq`; in LAN und Cloud
+  gleich. Die Karte steht bewusst neben der Liste: Die Marke der Antwort
+  hängt an der Liste, und eine Zahl darin wechselte bei jedem Anstoß —
+  damit wäre die Bestätigung ohne Nutzdaten wirkungslos. Damit ordnet die Anzeige Push und Abruf zueinander: Ein **Push**
+  gilt nur bei echt größerer Zahl (ein doppelter Anstoß löste sonst einen
+  Abruf ohne neuen Inhalt aus), eine **Voll-Antwort** schon bei gleicher —
+  sie darf denselben Stand berichtigen, etwa wenn in BTP ein Satzstand von
+  Hand zurückgenommen wird. Fehlt die Zahl (älterer Absender), gilt der
+  Stand immer. Die Regel steht als `src/io/monitorSeq.mjs` mit eigenem
+  CI-Schritt; beide Anzeige-Seiten tragen eine Inline-Kopie.
+- **Herzschlag alle 10 s** (seit v0.9.241, Spec `monitor-livestand-push` S6):
+  Neben dem WS-Ping — der für JavaScript unsichtbar ist — schicken Host und
+  Relay ein sichtbares `{"hb":<ms>}` **ohne** `court`-Feld, das ältere Seiten
+  folgenlos verwerfen. Erst dadurch kann eine Anzeige „die Leitung lebt" von
+  „es passiert gerade nichts" unterscheiden: In einer ruhigen Halle vergehen
+  zwischen zwei Ballwechseln Minuten, und ein halbtoter Socket meldet
+  stundenlang `OPEN`, ohne je etwas zu liefern.
+- **Der Relay verabschiedet Anzeigen aktiv** (ebenfalls seit v0.9.241): Kann
+  er eine Verbindung nicht eintragen (Host noch nicht da, oder Fan-out-Deckel
+  erreicht), schließt er sie sofort statt sie still offen zu lassen — der
+  Herzschlag hielte sie sonst für gesund, obwohl nie ein Anstoß käme. Ebenso
+  beim Aufräumen eines Namespace, dessen Host weg ist. Die Anzeige fällt
+  dadurch auf den Poll und in die Offline-Blende und verbindet sich über
+  ihren Reconnect-Wächter neu, sobald der Turnier-PC wieder da ist.
+- **Poll bleibt Fallback:** Der Sicherheits-Poll läuft **durchgehend** weiter
+  (seit v0.9.241 nicht mehr pausierend) — im 250-ms-Takt, und nur bei
+  **gesundem** Kanal und gesetztem Schalter im 4-s-Takt. Er hört **nie ganz**
+  auf, denn an ihm hängt mehr als der Spielstand: das Lebenszeichen des
+  Geräts (20-s-Fenster), seine Fernbefehle, `redirectTo`, die
+  Geräte→Feld-Zuweisung und jede Änderung, die nur die Antwort-Revision hebt,
+  ohne anzustoßen (Feld-Beschriftungen, Hallen-Zuordnung, Aufruf-Schwellen,
+  Hallen-Farben). Gemessen wird gegen den **letzten tatsächlichen Abruf** —
+  in einer regen Halle fällt dadurch kein zusätzlicher an. Gesund heißt: Socket
+  offen, letztes Frame (Anstoß **oder** Herzschlag) keine 25 s her, letzter
+  Abruf erfolgreich; ein **einziger** Fehlversuch schaltet sofort zurück.
+  Bleibt der Herzschlag über 25 s aus, schließt die Anzeige den Socket aktiv,
+  damit der Reconnect-Watchdog mit Backoff neu verbindet. Die Regel steht als
+  `src/io/pushHealth.mjs` mit eigenem CI-Schritt; beide Anzeige-Seiten tragen
+  eine Inline-Kopie. **Kein Regress** — fällt der Push aus, verhält sich die
+  Anzeige wie zuvor, nur mit schnellerem Poll.
+- **Schalter `push_fallback_slow`** (`config.json`, Abschnitt `court_monitor`;
+  **Standard aus**): Erst er erlaubt den 4-s-Takt. Ohne ihn pollt eine frisch
+  aktualisierte Installation exakt wie vorher — die Entlastung ist der
+  eigentliche Gewinn der Spec und zugleich ihr größtes Risiko, deshalb bleibt
+  sie eine bewusste Entscheidung. Der Schalter reist als `pushFallbackSlow`
+  zur Anzeige — in `/court/{id}/state` in der `config`, in `/health` im
+  `callTimer`-Umschlag (und damit in der Marke der Antwort, sonst käme das
+  Umlegen erst mit der nächsten Feld-Änderung an). Er wirkt nach dem nächsten
+  Abruf.
+- **Auch die Feld-/Match-Zuweisung wird angestoßen** (seit v0.9.238, Spec
+  `monitor-livestand-push` S3). Sie ist BTP-Snapshot-getrieben und damit kein
+  Einzel-Ereignis wie ein gezählter Punkt; deshalb vergleicht der Turnier-PC
+  bei jedem neuen BTP-Stand die Belegung je Feld — Match und Satzstand — mit
+  der des Vorgängers und weckt **nur die Abweichungen**. Das deckt Zuweisung,
+  Räumung, Feldwechsel und den in BTP von Hand eingetragenen Satzstand ab.
+  Über die Cloud tun dasselbe die Relay-Arme `MatchAssigned`/`MatchCleared`,
+  jeweils erst nachdem ihr Zwischenstand steht.
+- **Bestätigung „nichts Neues"** (im Hallennetz seit v0.9.236, in der Cloud
+  seit v0.9.243): Hat sich seit dem letzten Abruf nichts geändert, antwortet
+  der Server mit einer leeren Bestätigung statt mit dem vollen Stand. Die
+  Anzeige zeigt einfach weiter, was sie hat. Im Leerlauf sind das über 99 %
+  der Abrufe. Die Marke hängt am **ausgelieferten Inhalt**, nicht an der
+  Ordnungszahl — sonst wechselte sie bei jedem Anstoß, auch bei einem ohne
+  sichtbare Folge, und die Bestätigung wäre wirkungslos.
+- **Schmaler Abruf je Feld** (seit v0.9.242, Spec `monitor-livestand-push` S7):
+  `…/health?court=<CourtID>` liefert dieselbe Antwortform, aber nur dieses eine
+  Feld — samt seiner Ordnungszahl und **ohne** die der Nachbarfelder. In LAN
+  und Cloud gleich. Eine unbekannte, negative oder nicht-numerische Nummer
+  liefert `courts: []` mit HTTP 200; die Antwort verrät also nicht, welche
+  Felder es gibt. Ohne den Parameter ist die Antwort unverändert.
+- **Grenzen:** Der Nudge ist reine Anzeige-Beschleunigung; er ändert keine
+  Ownership und keine Zählung.
 
 ## Datenfluss
 
@@ -136,9 +204,42 @@ roher `court_state` + Konfiguration + Werbebild-Liste.
 
 | Wert            | Tablet zählt        | kein Tablet              |
 |-----------------|---------------------|--------------------------|
-| Satzstand       | live vom Tablet     | aus BTP (LAN) / 0:0 (Cloud) |
+| Satzstand       | live vom Tablet     | aus BTP                  |
 | Aufschlag       | angezeigt           | nicht angezeigt          |
 | Pausen-Timer    | angezeigt           | nicht angezeigt          |
+
+### Score-Spiegel des Hosts (v0.9.200): Cloud-Anzeigen auch bei LAN-Tablets
+
+Bis v0.9.199 kannte der Relay Satzstand und `court_state` **nur von
+Cloud-Tablets** (`score_update`/`state_sync` über die Tablet-WS). Zählte ein
+Tablet im LAN — der Normalfall im `LanAndCloud`-Mischbetrieb —, blieben
+Cloud-Monitor, Cloud-Court-Anzeige und Cloud-Übersicht auf 0:0 stehen
+(Turnier-Befund 13.08.2026, Zwei-Hallen-Turnier).
+
+Seit v0.9.200 spiegelt der Host jeden Feld-Stand als
+`HostFrame::ScoreUpdate` (Satzliste + opaker `court_state`) an den Relay,
+auf zwei Wegen:
+
+- **Nudge-getrieben** (niedrige Latenz): Der Relay-Client abonniert den
+  **eigenen** Monitor-Nudge-Kanal (A1, „alle Felder" wie die LAN-Übersicht)
+  und schickt bei jedem Signal den Stand des Felds.
+- **2-s-Sweep** im Zuweisungs-Tick, **nach** `push_all_courts` (gleiche
+  FIFO-Wire → der Relay kennt das Match, bevor der Spiegel eintrifft). Der
+  Sweep fängt die nudge-losen Fälle ein: Reconnect/Relay-Neustart (leerer
+  Cache dort), Court-Wechsel und BTP-Handeingaben ohne Tablet. Ein
+  Zuweisungs-Push verwirft den Fingerabdruck des Felds, damit der Sweep
+  einen zuvor vom Relay verworfenen Spiegel sicher wiederholt.
+
+Beide Wege deduplizieren über einen Fingerabdruck je Feld (das zuletzt
+gebaute Frame). Der Relay übernimmt den Stand in
+`court_scores`/`court_state` mit dem Stale-Schutz des Tablet-Wegs — plus
+zwei Spiegel-Regeln: **Leere Sätze überschreiben keinen vorhandenen
+Live-Stand** (frisch ersetzter Turnier-PC ohne `live-scores.json` darf ein
+zählendes Cloud-Tablet nicht auf 0:0 zurückwerfen), und ein `court_state`,
+dessen **eingebettete** `match.matchId` nicht zum gemeldeten Match passt,
+wird verworfen (wie `store_court_state`). Damit zeigen die Cloud-Anzeigen
+auch Aufschlag und Pausen-Timer des LAN-Tablets; nur das `serving_team` im
+`/{ns}/health` der Übersicht bleibt vorerst `null`.
 
 ## Sponsor-Leiste (kleine Werbung neben dem Turnierlogo)
 
@@ -154,6 +255,187 @@ laufenden Spiel, der Werbe-Leerlauf bleibt Vollbild) und **Tablet** (breite
 Geräte). In der Regel 1–2 Bilder, kein Rotieren. Fehlt ein Motiv, entfernt
 `onerror` es. Spec + Phasen (Cloud, badhub-Seiten):
 [features/werbung-leisten.md](features/werbung-leisten.md).
+
+## Zwischenspeichern der Bilder (seit v0.9.225)
+
+Werbebilder und Turnierlogo waren ausdrücklich vom Zwischenspeichern
+ausgenommen (`Cache-Control: no-store`). Weil die Werbeanzeige ihr Motiv
+alle `ad_interval_s` (Standard 10 s) wechselt, holte jedes Gerät dabei jedes
+Mal die vollen Bilddaten — bei einem 1-MB-Motiv rund 360 MB je Stunde und
+Anzeige, im Cloud-Betrieb über die Internetleitung.
+
+Beide Routen geben jetzt in **beiden** Betriebsarten eine Kennung (`ETag`)
+mit und dürfen zwischengespeichert werden. Nach Ablauf der Frist bestätigt
+der Server ein unverändertes Bild mit `304` (rund 200 Byte) statt es erneut
+zu senden.
+
+| Bild | Kennung aus | Frist |
+|---|---|---|
+| Werbebild (LAN, `/ads/{datei}`) | Größe + Änderungszeit der Datei — ohne sie zu lesen | 5 Min |
+| Werbebild (Cloud, `/{ns}/ads/{index}`) | Inhalt des hochgeladenen Bildes | **1 Min** |
+| Turnierlogo (LAN, `/info/logo`) | Inhalt der Base64-Daten | 5 Min |
+| Turnierlogo (Cloud, `/{ns}/info/logo`) | Inhalt des hochgeladenen Logos | 5 Min |
+
+Vier Entscheidungen, die dahinterstehen:
+
+- **Kein `immutable`.** Zwar vergibt der Upload eindeutige Namen
+  (`ad-<ms>.<endung>`), aber das `court-ads/`-Verzeichnis liegt offen: Wer
+  eine Datei von Hand hineinlegt und später ersetzt, bekäme sonst tagelang
+  das alte Bild.
+- **Cloud-Werbebilder nur eine Minute.** Im Hallennetz bindet der Dateiname
+  die Adresse an genau ein Bild, in der Cloud ist die Adresse der
+  Listen-**Index**. Löscht die Turnierleitung ein Werbebild, rücken alle
+  folgenden Indizes auf — eine Anzeige zeigte dann bis zum Ablauf der Frist
+  nicht bloß ein altes, sondern ein **falsches** Motiv. Bei Sponsoren ist
+  das etwas anderes als „veraltet". Das Turnierlogo hat eine feste Adresse
+  je Namespace und darf deshalb länger gelten.
+- **Die Cloud-Kennung hängt am Inhalt, nicht am Upload.** Der Host lädt sein
+  Monitor-Bündel bei jedem Verbindungsaufbau neu hoch; wären die Kennungen
+  an den Upload gebunden, entwertete jeder WLAN-Wackler sämtliche
+  Bild-Zwischenspeicher.
+- **Auch die Logo-Kennung hängt am Inhalt** und nicht an `(Länge, MIME)`.
+  Sie ist zugleich der Schlüssel des Dekodier-Zwischenstands: Zwei
+  verschiedene Logos gleicher Base64-Länge und gleichen Typs hätten sonst
+  auch frischen Anzeigen dauerhaft die alten Bytes geliefert.
+
+`If-None-Match` wird nach RFC 9110 ausgewertet — als Liste, mit `*` und mit
+schwachem Vergleich. Ein Zwischenspeicher auf dem Weg (nginx vor dem Relay)
+darf eine Marke abschwächen; ein reiner Gleichheitstest wäre dann still
+wirkungslos, und der ganze Gewinn wäre weg.
+
+**Die Sponsor-Leiste wird bewusst bei jedem Durchlauf neu gebaut**, ohne
+Abgleich auf Unverändertheit. Ein solcher Abgleich könnte nur die *Namen*
+der Bilder vergleichen, nicht ihren Inhalt — ein ausgetauschtes Logo oder
+Werbebild unter gleicher Adresse bliebe dann für immer stehen, weil das
+`<img>` nie neu entsteht und der Browser die Adresse nie wieder anfragt.
+Teuer ist der Neuaufbau nicht mehr: Mit Kennung und Cache-Frist kostet er
+höchstens einmal je Frist eine Bestätigung von rund 200 Byte je Bild.
+
+## Last am Turnier-PC (seit v0.9.223)
+
+Jeder Monitor fragt im 250-ms-Takt nach — der WS-Anstoß senkt die
+Latenz, nicht die Zahl der Abrufe (das „frisch"-Fenster von 1,2 s greift
+bei realem Ballwechsel-Abstand selten). Bei zwanzig Anzeigen sind das
+rund achtzig Abrufe pro Sekunde. Drei Dinge machen die inzwischen
+billig:
+
+- Die **Konfiguration** wird geteilt statt kopiert und nur **einmal** je
+  Abruf gelesen (vorher zweimal, jedes Mal inklusive des Turnierlogos als
+  Base64-Text von bis zu 2,7 MB).
+- Die **Werbebild-Liste** kommt aus einem Zwischenstand und wird nur neu
+  eingelesen, wenn sich der Ordner geändert hat (vorher ein
+  Verzeichnis-Lesen je Abruf). Dasselbe gilt seit v0.9.225 für die
+  „Leisten-Sponsor"-Markierungen (`court-ad-bar.json`).
+- Der gespiegelte **Spielstand** (`courtState`) geht ohne den
+  Verlaufsspeicher des Tabletts an die Anzeigen: `history` (bis zu 50
+  Zwischenstände, jeder mit einer Vollkopie des Ballwechsel-Protokolls)
+  und `rallyLog` fallen weg — spät im Match zweistellige Kilobyte je
+  Abruf. Die Anzeigen lesen daraus ohnehin nur Aufschlag, Pause, Aufgabe
+  und Startzeit; das Tablet selbst bekommt beim Wiederverbinden
+  weiterhin den vollen Stand (sein Rückgängig-Gedächtnis).
+
+## Antwortcache der Übersicht (seit v0.9.236)
+
+Die Route `/health` liefert allen Übersichts-Anzeigen den Zustand **aller**
+Felder. Berechnet wurde er bisher bei **jedem** Abruf neu — je Feld ein
+Durchlauf durch alle Spiele plus ein Auswerten des Tablet-Stands. Bei
+zwanzig Anzeigen im 250-ms-Takt waren das rund siebzig Berechnungen je
+Sekunde (gemessen, siehe Spec).
+
+Jetzt wird einmal gerechnet und das Ergebnis wiederverwendet. Es gilt,
+solange **beides** stimmt:
+
+- **die Revision** — sie steigt bei jedem Nudge (ein Feld hat sich
+  geändert), bei jedem neuen BTP-Stand und bei jedem Schreibvorgang an der
+  Konfiguration (dort stecken Hallen-Farben und Aufruf-Timer);
+- **die Hart-TTL von 250 ms** — das Sicherheitsnetz gegen eine
+  Änderungsquelle, an die niemand gedacht hat. Schlimmstenfalls ist eine
+  Anzeige eine Viertelsekunde alt, statt bis zum nächsten Ereignis falsch
+  zu bleiben.
+
+Ist der Zwischenstand kalt oder abgestanden, rechnet der Server wie vorher.
+**Er ist Beschleuniger, nicht Wahrheit.**
+
+Dazu bekommt jede Antwort eine Marke (`ETag`). Fragt eine Anzeige mit
+dieser Marke nach und hat sich nichts geändert, antwortet der Server mit
+einer leeren Bestätigung (HTTP 304) statt mit rund 16 KB. Der Relay kennt
+weder Marke noch Zwischenstand — im Cloud-Betrieb läuft alles wie bisher.
+
+Eine Folge davon steckt in der Anzeige selbst: Die Uhr „Zeit seit Aufruf"
+lief früher beiläufig mit, weil viermal je Sekunde ein voller Stand kam.
+Sie rechnet jetzt aus einem gemerkten Zeitversatz zur Server-Uhr und hat
+einen eigenen Sekundentakt, der nur läuft, solange überhaupt eine Uhr
+sichtbar ist.
+
+## Feld-Übersicht: nur noch die Ziffern neu (seit v0.9.240)
+
+Die Übersicht (`overview.html`) warf bei jedem eintreffenden Stand das
+komplette Board weg und baute alle Kacheln neu — bei zwanzig Feldern rund
+siebzig Mal je Sekunde, für eine Änderung von zwei Ziffern. Genau das
+ruckelte auf schwächeren Pis.
+
+Jetzt tauscht sie im Normalfall nur die Satzstand-Spalten der betroffenen
+Karten aus. **Neu gebaut wird**, sobald sich mehr ändert als der
+Punktestand: neuer Satz, anderes Spiel, Feld wird frei oder belegt,
+Behandlungspause, Turnierleitung gerufen, andere Feld-Menge oder
+-Reihenfolge, andere Halle oder Hallen-Farbe, geänderte Namen oder Nationen,
+gewechselte Sichtbarkeit der Aufruf-Uhr — und beim Umschalten der
+Hallen-Rotation. **Spätestens alle 30 Sekunden** ohnehin einmal komplett:
+Sollte sich je etwas verschoben haben, richtet sich die Anzeige damit von
+selbst wieder ein.
+
+Die Zuständigkeitsgrenze steht als `src/io/courtPatch.mjs` mit eigenem
+CI-Schritt (32 Prüfungen); `overview.html` trägt eine Inline-Kopie.
+
+Der **Einzelfeld-Monitor bleibt unverändert** — er hat nie ein ganzes Bild
+weggeworfen, sondern setzt seine Texte an bestehenden Elementen.
+
+## Messen, was die Anzeigen kosten (seit v0.9.235)
+
+Erste Etappe der Spec
+[features/monitor-livestand-push.md](features/monitor-livestand-push.md):
+Bevor an der Strecke etwas umgebaut wird, misst sie sich selbst. Drei
+Werkzeuge, alle abschaltbar und ohne Wirkung auf die Anzeige:
+
+**1. Zähler im Turnier-PC.** Gezählt werden die Zustands-Abrufe (`/health`
+und `/court/{id}/state`, jeweils **getrennt** nach nudge-getrieben und
+Fallback-Takt) samt ihrer Antwortgröße, die Bau-Dauer der Übersicht, die
+Schreibvorgänge der `live-scores.json` und die verschickten Nudges. Die
+Trennung liefert die Anzeige selbst über `&src=push|poll` am Abruf; eine
+Seite aus einem älteren Stand sendet den Parameter nicht, ihr Abruf zählt
+dann als `poll` — was er auch ist.
+
+**2. Ausgabe.** Alle zehn Sekunden eine Zeile im Diagnose-Log (kommt über
+den Log-Upload auch aus einem echten Turnier zurück, siehe
+[logging.md](logging.md)), und im LAN zusätzlich `GET /debug/perf` als
+JSON. Passiert nichts, wird auch nichts geschrieben. Die Route gibt es
+**nur im LAN** — im Internet hätte eine unauthentifizierte Lastauskunft
+nichts zu suchen. Sie trägt ausschließlich Zahlen, per Wächter-Test
+abgesichert.
+
+**3. Lastskript.** `node scripts/last-monitor.mjs --base
+http://<turnier-pc>:8088/` simuliert zwanzig zählende Tablets, zwanzig
+Feld-Übersichten und wahlweise feste Court-Monitore — mit demselben
+Coalescing und Fallback-Takt wie die echten Seiten. Es misst zusätzlich die
+Latenz vom gesendeten Punkt bis zu seinem Erscheinen in der Übersicht.
+Gegen den Relay läuft es unverändert, nur mit dessen Basis-Adresse.
+**Es braucht belegte Felder:** Ein Stand ohne passende Match-ID wird
+verworfen, dann entstünde weder Schreibvorgang noch Nudge.
+
+> ⚠️ **Nicht während eines echten Turniers.** Das Skript gibt sich als
+> zählendes Tablet aus: Es **belegt Felder** (ein echtes Tablet bekäme
+> danach „Feld belegt") und seine erfundenen Punktstände laufen den
+> regulären Weg — bis in den öffentlichen Liveticker auf badhub.de und in
+> die Spielzeiten-Statistik. Gedacht ist es für einen Probeaufbau. Der
+> Schalter `--trocken` verbindet **kein** Tablet und misst nur die
+> Anzeige-Seite; so ist es auch neben einem laufenden Turnier gefahrlos.
+
+**4. Render-Messung auf dem Pi.** In der Browser-Konsole der Übersicht
+`localStorage.ovRenderMessen = "1"` setzen; die Seite meldet dann alle zehn
+Sekunden, wie oft und wie lange sie gezeichnet hat und wie viele Renders
+länger als ein 60-Hz-Bild (16 ms) brauchten. Mit `"2"` zusätzlich jeden
+einzelnen Render. Rein diagnostisch, über `localStorage` statt über die
+Konfiguration — wie `tlRenderMessen` in der Turnierleitungs-Sicht.
 
 ## Endpunkte
 
@@ -177,6 +459,7 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Flaggen (TL-Seite)     | `/flags/{code}.svg`            | `/flags/{code}.svg` (ns-los)   |
 | Werbebild              | `/ads/{datei}`                 | `/{ns}/ads/{index}`            |
 | Werbe-/Leisten-Zustand | `/info/ad/state`               | `/{ns}/info/ad/state`          |
+| **Perf-Zähler** (S0)   | `/debug/perf`                  | — (bewusst nur LAN)            |
 | **Turnierlogo**        | `/info/logo`                   | `/{ns}/info/logo`              |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
@@ -241,6 +524,9 @@ synchronen Pi-Uhr driftet. Gated durch die `call_timer`-Einstellung
   `courts`/`court_matches`/`court_scores`/`court_on_court_since` baut. Bewusst
   weggelassen im Cloud: Aufschlag-Highlight, Verletzungs-/TL-Badges (stehen im
   Relay nicht bereit); Feld × Spiel × Satzstand × Aufruf-Uhr sind vollständig.
+  Der Satzstand kommt dabei seit v0.9.200 auch für LAN-Tablets an — über den
+  Score-Spiegel des Hosts (siehe oben); davor blieb er im Cloud leer, sobald
+  das Tablet nicht selbst über den Relay zählte.
 
 ## Entschiedenes Match (kein Geister-Satz)
 
@@ -274,6 +560,20 @@ ist daher kein zuverlässiger Satzgewinner. Der Match-Sieger (🏆 + grüne
 Hälfte) bleibt korrekt.
 
 Eingeführt in v0.9.15.
+
+## Hallen-Farbmarke (Mehr-Hallen)
+
+> Spec: [features/hallen-farben.md](features/hallen-farben.md)
+
+Bei Mehr-Hallen-Turnieren tragen die Anzeigen eine kleine Farbmarke in
+der Farbe ihrer Halle: `monitor.html` vor dem Feld-Label („● Halle 2 · 6"),
+`overview.html` in der Kopfzeile neben dem Hallennamen (auch in der
+Hallen-Rotation), `preparation.html` an den Hallen-Chips der Zeilen und —
+bei `?halle=`-Filter — in der Kopfzeile. Die Farbe kommt vom Turnier-PC
+(`hall_color`/`hallColor` in den bestehenden Zuständen, LAN wie Cloud);
+Name/Label bleiben immer stehen. Alte Hosts/Relays liefern das Feld
+nicht — die Seiten bleiben dann schlicht farblos. Jede Seite erzwingt die
+strikte `#rrggbb`-Form, bevor der Wert in ein Style-Attribut gelangt.
 
 ## Spielernamen (Broadcast-Stil)
 
@@ -471,15 +771,22 @@ Anzeige (`winners.html`):
   über die **volle Breite**. Footer zweizeilig: **Turniername** (klein) über der
   **Disziplin** (groß).
 - **Vereinslogos** neben dem Vereinsnamen (sofern in Badhub vorhanden):
-  - Quelle: `GET {base}/api/v1/club-logos` (key-frei, **verbandsübergreifend**) →
-    `{clubs:[{name, logo_url}]}`. `base` = Origin aus `badhub.url` (kein Slug
-    nötig → auch Teilnehmer aus anderen LVs bekommen ihr Logo). clubfinder war
-    geo-/verbandsgebunden, `/federations/…/clubs` braucht einen Key.
-  - Backend `tablet/club_logos.rs` matcht den BTP-Vereinsnamen (exakt → lose ohne
-    Klammerzusatz; mehrdeutige lose Treffer werden verworfen) und cacht
-    Vereinsliste (6 h / 60 s bei Fehler) + Bildbytes; Endpoint
-    `GET /info/club-logo?name=…` liefert das Bild lokal aus (auch für LAN-TVs ohne
-    Internet). SSRF-sicher: Bild-Origin == badhub-Origin; Slug streng validiert.
+  - Quelle: `GET {base}/api/v1/club-logo?name=<verein>` — derselbe Singular-
+    Resolver, den auch der Cloud-Modus der Turnierleitungs-Web direkt aus dem
+    Browser aufruft (`docs/turnierleitung-web.md`). `base` = Origin aus
+    `badhub.url` (kein Slug nötig → auch Teilnehmer aus anderen LVs bekommen
+    ihr Logo). Badhub löst den Vereinsnamen **selbst** auf, inklusive gängiger
+    Abkürzungen („BC" für „Badminton Club") und Klammerzusätzen
+    („(Berlin)") — `tablet/club_logos.rs` dupliziert diese Zuordnung
+    **nicht** mehr lokal (Befund 15.08.2026: die frühere Exakt-/Klammer-
+    Normalisierung gegen die Plural-Liste `/api/v1/club-logos` traf
+    Abkürzungen wie „BC" ≠ „Badminton Club" nicht — der Singular-Resolver
+    löst sie trotzdem auf, LAN und Cloud verwenden jetzt denselben Weg).
+  - Backend `tablet/club_logos.rs` fragt pro (normalisiertem) Vereinsnamen
+    einmal ab und cacht Bildbytes (6 h / 60 s bei Fehler); Endpoint
+    `GET /info/club-logo?name=…` liefert das Bild lokal aus (auch für LAN-TVs
+    ohne Internet — nur der Turnier-PC braucht welches). SSRF-sicher:
+    Bild-Origin (nach Redirect) == badhub-Origin.
   - Kein Treffer / kein Logo / offline → `<img onerror>` entfernt sich, es bleibt
     **nur der Name** (kein Platzhalter).
 - Sonderfall „zwei dritte Plätze" (kein Spiel um Platz 3): `?only=3` zeigt beide

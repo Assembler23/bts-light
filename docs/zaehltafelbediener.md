@@ -52,6 +52,17 @@ bleibt kein veralteter Name in der Anzeige hängen; angezeigt wird dann wieder
 der pro-Feld-Hinweis. Bei mehreren gleichzeitig neu belegten Feldern wird
 nach CourtID sortiert zugewiesen (deterministisch/fair).
 
+**Felder ohne Bediener-Vergabe.** Je Feld lässt sich die Vergabe abschalten
+(`CourtSwitches::operator`, turniergebunden gespeichert — siehe
+[schiedsrichter-management.md](schiedsrichter-management.md)). Auf so einem
+Feld bedient der Schiedsrichter das Tablet selbst: `assign_scorekeeper_for_court`
+kehrt sofort zurück, das Feld bekommt keinen Bediener und **verbraucht auch
+keinen Eintrag** aus der Warteschlange — der Wartende bleibt für ein anderes
+Feld übrig. Ohne Eintrag gilt „Vergabe aktiv"; für bestehende Installationen
+ändert sich nichts. Der Schalter wirkt nur, solange der
+Schiedsrichter-Betrieb eingeschaltet ist — sonst wäre er nach dem Abschalten
+nirgends mehr zurückzunehmen.
+
 ## Ansage (Scheibe 3, v0.9.165)
 
 Ist ein Bediener zugewiesen (`CourtOverview.scorekeeper_assigned == true`),
@@ -93,7 +104,55 @@ bedienen. Umgesetzt in `src-tauri/assets/tl.html`.
   Die Pause greift erst mit **Phase 2** (BTP-Auscheck mit künstlich
   verschobenem `last_time_on_court`), damit BTP den Bediener nicht zu früh für
   ein eigenes Spiel einplant. Das Config-Feld ist bereits vorhanden.
-- Optional: ein Zweitaufruf-Knopf „… bitte als Tabletbedienung melden".
+- ~~Optional: ein Zweitaufruf-Knopf „… bitte als Tabletbedienung melden".~~
+  **Umgesetzt in v0.9.232** — siehe „Nachruf" unten.
+
+## Nachruf an die Bedienung (v0.9.232)
+
+Der Bediener wird beim Feld-Aufruf genannt („Tabletbedienung: {Name}"),
+aber kommt niemand, blieb der Turnierleitung bisher nur, die **Spieler**
+erneut zu rufen. Jetzt gibt es im ⋯-Menü der Feld-Kachel in TL-Web den Knopf
+**„Bedienung nachrufen"**:
+
+> 🔔 „**Feld 3. Meier / Kraus, bitte als Tabletbedienung melden.**"
+> (englisch: „Court 3. Meier / Kraus, please report as scoreboard operator.")
+
+Ab dem zweiten Mal steht das Stufenwort davor („Zweiter Aufruf.", dann
+„Dritter und letzter Aufruf."), höchstens bis Stufe 3.
+
+**Das ist kein Spieler-Aufruf.** Der Turnier-PC führt dafür einen **eigenen**
+Zähler (`scorekeeper_call_stages`): `call_stages` und `prep_call_stages`
+bleiben unberührt, das Aufruf-Abzeichen an der Kachel steht still. Ohne diese
+Trennung zöge ein Nachruf an die Bedienung die angezeigte Aufruf-Zahl der
+**Spieler** hoch — und an der dritten Stufe hängt die kampflose Wertung. Ein
+Spielwechsel auf dem Feld setzt den Bediener-Zähler zurück.
+
+Der Zählerstand wird **nicht** ausgeliefert: Er bestimmt allein die
+Ansage-Stufe. Anders als beim Spieler-Aufruf steht hinter dem letzten Nachruf
+keine Rechtsfolge, die man anzeigen müsste.
+
+**Der Knopf erscheint nur bei zugewiesenem Bediener** — das eine Flag
+`scorekeeper_assigned` deckt alle drei Fälle ab, in denen es niemanden zu
+rufen gibt: leere Warteschlange, Feld mit abgeschalteter Bediener-Vergabe
+(`CourtSwitches::operator`) und global ausgeschaltete Verwaltung. In allen
+dreien weist der Sync-Lauf gar nicht erst zu.
+
+Eine Feinheit: Wird der Feld-Schalter **mitten im laufenden Spiel**
+abgeschaltet, bleibt die bereits erteilte Zuweisung (und damit der Knopf) bis
+zum Spielwechsel bestehen — die Person bedient ja tatsächlich gerade.
+
+**Bewusst nicht gebaut:** ein Bediener beim *Vorbereitungs*-Aufruf. Der
+Bediener hängt am **Feld**, nicht am Match — zugewiesen wird er erst, wenn
+das Feld belegt wird, und ein Vorbereitungs-Aufruf kennt nur die Halle. Eine
+Reservierung je Match hätte die erprobte Regel „bevorzugt der Verlierer des
+Vorspiels auf genau diesem Feld" abgelöst; das war den Nachruf nicht wert
+(Spec [`features/tl-sicht-feinschliff.md`](features/tl-sicht-feinschliff.md),
+Punkt 2).
+
+Wortlaut: [`src/io/scorekeeperCallText.mjs`](../src/io/scorekeeperCallText.mjs),
+in der CI geprüft; beide Synthese-Pfade (Web Speech und Azure-SSML) nutzen
+dieselben Bausteine. Wie jede TL-Web-Ansage erklingt der Nachruf nur in der
+Halle des Felds.
 
 ## Phase 2 (später, eigene Freigabe)
 

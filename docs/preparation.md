@@ -58,11 +58,23 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
 
 `auto_assign` (`src-tauri/src/sync.rs`) belegt freie Felder automatisch:
 
-- **Reihenfolge:** `(call.is_none(), planned_time, match_num, id)` — manuell
-  gerufene Spiele zuerst, sonst den **BTP-Zeitplan** (`PlannedTime`, geparst zu
-  `BtpMatch.planned_time` als `YYYYMMDDHHMM`), dann Spielnummer/ID. Die
-  Kandidatenliste (`preparation_candidates`, `info_preparation_state`) sortiert
-  identisch.
+- **Reihenfolge:** gerufene Spiele zuerst, danach der manuelle Präfix
+  (seit 15.08.2026 **hallenübergreifend**, ADR 0026), sonst der
+  **BTP-Zeitplan** (`PlannedTime`), dann Auslosung (`DrawID`)/
+  Spielnummer/ID — `assign::resolve_and_sort_key`, **eine** Definition an
+  allen fünf Sortier-Stellen (Details, Datenmodell und Messbefund zu
+  `DisplayOrder`: [`docs/btp_protocol.md`](btp_protocol.md), Spec
+  [`docs/features/spielliste-manuelle-reihenfolge.md`](features/spielliste-manuelle-reihenfolge.md)).
+  Die Kandidatenliste (`preparation_candidates`, `info_preparation_state`)
+  sortiert identisch.
+
+  **Liveticker-Hinweis:** `badhub/payload.rs::upcoming` zeigt die nächsten
+  15 Spiele (`display=next&halle=…`). Weil die Reihenfolge jetzt
+  hallenübergreifend gilt, kann ein langer manueller Präfix aus **einer**
+  Halle alle 15 Plätze belegen — der Meeting-Point-TV der anderen Halle
+  zeigt dann vorübergehend keine Spiele. Bewusst in Kauf genommen (ADR
+  0026): Die Turnierleitung bestimmt die Reihenfolge jetzt absichtlich
+  hallenübergreifend.
 - **Spieler-Verfügbarkeit:** Ein spielbereites Match wird übersprungen, wenn ein
   Spieler gerade OnCourt ist, in diesem Zyklus schon ein Feld bekam, oder noch in
   seiner **Pause** ist. Identität via `player_key` (Lizenznr., sonst Name).
@@ -116,6 +128,16 @@ nach dem Vorbild von `finished_at`.
 - `TsetMatch` bekommt `preparation_call_ts` und `hall` mit
   `#[serde(skip_serializing_if = "Option::is_none")]`.
 - `to_upcoming_match` füllt sie aus dem gestempelten `BtpMatch`.
+- **`hall_color`** (Spec [features/hallen-farben.md](features/hallen-farben.md)):
+  `TsetMatch.hall_color` trägt die Hex-Farbe zur `hall` des Aufrufs,
+  `TsetCourt.hall_color` die des Felds — beide `skip_serializing_if`,
+  bei Ein-Hallen-Turnieren fehlen sie komplett (alte badhub-Parser sehen
+  den bisherigen Payload). Die badhub-Anzeige (display=next +
+  display=monitor) ist ein Folge-PR im badhub-Repo. **Latenz:** Ein
+  reiner Farbwechsel im Picker ändert den `BtpSnapshot` nicht und löst
+  deshalb keinen sofortigen Push aus — er erreicht badhub mit dem
+  nächsten strukturellen Diff oder spätestens dem Heartbeat (≤ 60 s;
+  dasselbe bewusst hingenommene Muster wie bei `manual_halls`).
 - `upcoming()` sortiert gerufene Matches **vor** den ungerufenen, damit
   ein Aufruf nie aus `UPCOMING_LIMIT = 15` herausfällt. Ohne Aufrufe
   degeneriert die Sortierung zur bisherigen Spielnummern-Reihenfolge.
@@ -236,3 +258,21 @@ Frontend-Spiegel:
   `renderNextMonitor` + `filterUpcomingByHall`.
 - `docs/features/liveticker_bts.md` (badhub-Repo) — Doku des
   `display=next`-Monitors und des `&halle=`-Filters.
+
+## Kein Zähltafelbediener im Vorbereitungs-Aufruf
+
+Der Aufruf in die Vorbereitung nennt **bewusst keinen** Zähltafelbediener
+(Stand 18.08.2026, Spec `features/tl-sicht-feinschliff.md` Punkt 2). Grund
+ist kein Versäumnis, sondern das Datenmodell: Der Bediener hängt am **Feld**,
+nicht am Match — zugewiesen wird er erst, wenn das Feld belegt wird
+(ADR 0007). Ein Vorbereitungs-Aufruf kennt aber nur die **Halle**, kein Feld.
+
+Erwogen und verworfen wurden: den Kopf der Warteschlange ohne Bindung
+anzusagen (es kann beim Feld-Aufruf jemand anderes werden — die
+Turnierleitung müsste das erklären) und eine Reservierung je Match (hätte die
+erprobte Regel „bevorzugt der Verlierer des Vorspiels auf genau diesem Feld"
+abgelöst).
+
+Der **Nachruf** an die Bedienung setzt deshalb am Feld-Aufruf an, wo sie
+feststeht: [zaehltafelbediener.md](zaehltafelbediener.md).
+

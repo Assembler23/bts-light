@@ -8,6 +8,7 @@
 //     --files vorhandene-exes.txt \      (eine Datei je Zeile; optional)
 //     --out index.html \
 //     --notes-out notes.txt --notes-version 0.9.147   (optional)
+//     --notes-since 0.9.140                           (optional)
 //     --dates dates.txt                               (optional)
 //
 // --dates: Datei „<version> <YYYY-MM-DD>" je Zeile (Rest ignoriert) — die
@@ -16,9 +17,17 @@
 //
 // --files: nur Versionen, deren Installer wirklich auf dem Server liegt,
 // bekommen einen Download-Knopf (alte/TEST-Versionen fehlen teils).
-// --notes-out: schreibt die Stichpunkte EINER Version als Klartext —
-// der Workflow hängt sie an latest.json (`notes`), damit das
-// Update-Fenster in der App „Was ist neu" zeigt.
+// --notes-out: schreibt die Stichpunkte als Klartext — der Workflow hängt
+// sie an latest.json (`notes`), damit das Update-Fenster in der App
+// „Was ist neu" zeigt.
+//
+// --notes-since: Version des ZULETZT veröffentlichten Tags. Damit umfassen
+// die Notes ALLE Versionen dazwischen, nicht nur die getaggte. Das ist der
+// Normalfall, nicht die Ausnahme: Zwischen zwei Tags liegen regelmäßig
+// mehrere Versionssprünge (v0.9.214 → v0.9.223 waren neun), und wer
+// aktualisiert, springt genau über diese Strecke. Ohne die Angabe sah er im
+// Update-Fenster nur den letzten Eintrag und hielt acht Änderungen für
+// nicht vorhanden.
 
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -34,6 +43,7 @@ const filesPath = arg("files");
 const outPath = arg("out", "index.html");
 const notesOut = arg("notes-out");
 const notesVersion = arg("notes-version");
+const notesSince = arg("notes-since");
 // Optionale Datei „Version Datum" je Zeile (z. B. aus `git for-each-ref`
 // über die Tags). Fehlt sie, bleibt die Datumsangabe je Version leer.
 const datesPath = arg("dates");
@@ -121,24 +131,141 @@ function hasInstaller(version) {
   return available ? available.has(setupName(version)) : true;
 }
 
-// ── notes.txt für latest.json (eine Version, Klartext) ────────────────────
+// ── notes.txt für latest.json (Klartext) ──────────────────────────────────
+//
+// Umfang: alle Versionen seit dem zuletzt veröffentlichten Tag (--notes-since,
+// ausschliesslich) bis zur getaggten (--notes-version, einschliesslich). Ohne
+// --notes-since bleibt es bei der einen getaggten Version.
+//
+// LÄNGE: Das Update-Fenster ist ein Dialog, kein Dokument. Passen die
+// vollständigen Stichpunkte nicht in NOTES_MAX, wird auf je eine Kopfzeile
+// pro Version gekürzt (die fett ausgezeichnete Kernaussage) und auf die
+// Release-Seite verwiesen — lieber neun lesbare Zeilen als eine Textwand,
+// die niemand liest.
+const NOTES_MAX = 4000;
+
+/**
+ * "a.b.c" → [a, b, c]; alles andere → null.
+ *
+ * Bewusst streng: Ein stilles NaN→0 wuerde einen kaputten Wert (etwa einen
+ * Tag-Namen ohne Versionsform) in eine gueltig aussehende 0.0.0 verwandeln,
+ * und --notes-since waere wirkungslos, ohne dass jemand es merkt.
+ */
+function parseVersion(v) {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(v).trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+/** Versionen vergleichen: <0, 0, >0 wie bei sort(). Nur fuer geprueftes Format. */
+function cmpVersion(a, b) {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (!pa || !pb) throw new Error(`Unbrauchbare Version im Vergleich: '${a}' / '${b}'`);
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  return 0;
+}
+
+// Laengste Zeile der Kurzfassung. Haerte, keine Schaetzung: Ohne die Kappung
+// haengt die Einhaltung von NOTES_MAX allein daran, wie knapp jemand seine
+// Changelog-Kopfzeilen formuliert.
+const KOPFZEILE_MAX = 90;
+
+/** Kernaussage eines Stichpunkts: der erste **fette** Teil, sonst Satz 1. */
+function schlagzeile(bullet) {
+  const fett = bullet.match(/\*\*(.+?)\*\*/s);
+  const roh = fett ? fett[1] : bullet.split(/(?<=\.)\s/)[0];
+  const text = plainText(roh || "").replace(/\s+/g, " ").trim();
+  if (text === "") return "Änderungen";
+  return text.length > KOPFZEILE_MAX ? text.slice(0, KOPFZEILE_MAX - 1).trimEnd() + "…" : text;
+}
+
 if (notesOut && notesVersion) {
-  const sec = sections.find((s) => s.version === notesVersion);
-  if (!sec) {
-    // Sichtbar warnen: die Version fehlt im Changelog → das Update-Fenster
-    // bekäme nur einen generischen Einzeiler (release.md: Abschnitt VOR
-    // dem Taggen anlegen!). Kein Abbruch — der Release selbst ist gültig.
+  // Bereich bestimmen: neueste zuerst, damit oben steht, was gerade kommt.
+  // --notes-since wird geprueft, bevor es wirkt. Jeder Zweifelsfall faellt
+  // auf "nur die getaggte Version" zurueck — der Fehler geht damit in
+  // Richtung "zu wenig", nie in Richtung "kompletter Changelog seit v0.4.0".
+  //
+  // Drei Faelle fuehren zum Rueckfall:
+  //  - kein Flag (erster Tag ueberhaupt, flacher Checkout),
+  //  - unbrauchbarer Wert (git describe hat einen Nicht-Versions-Tag
+  //    geliefert — deshalb steht im Workflow --match 'v[0-9]*'),
+  //  - since >= version (Tag auf demselben Commit, Tag ausserhalb der
+  //    Ahnenlinie). Ohne diesen Zweig bliebe der Bereich LEER und die
+  //    Notes der getaggten Version gingen verloren.
+  let seit = null;
+  if (notesSince) {
+    if (!parseVersion(notesSince)) {
+      console.error(`WARNUNG: --notes-since '${notesSince}' ist keine Version — ignoriert.`);
+    } else if (!parseVersion(notesVersion)) {
+      console.error(`WARNUNG: --notes-version '${notesVersion}' ist keine Version — Bereich ignoriert.`);
+    } else if (cmpVersion(notesSince, notesVersion) >= 0) {
+      console.error(
+        `WARNUNG: --notes-since ${notesSince} liegt nicht vor ${notesVersion} — ignoriert.`
+      );
+    } else {
+      seit = notesSince;
+    }
+  }
+
+  const imBereich = sections
+    .filter((s) =>
+      seit
+        ? cmpVersion(s.version, notesVersion) <= 0 && cmpVersion(s.version, seit) > 0
+        : s.version === notesVersion
+    )
+    .sort((a, b) => cmpVersion(b.version, a.version));
+
+  if (!imBereich.some((s) => s.version === notesVersion)) {
+    // Sichtbar warnen: die getaggte Version fehlt im Changelog → das
+    // Update-Fenster bekäme nur einen generischen Einzeiler (docs/release.md:
+    // Abschnitt VOR dem Taggen anlegen!). Kein Abbruch — der Release gilt.
     console.error(
       `WARNUNG: docs/changelog.md hat keinen Abschnitt '## v${notesVersion}' — notes bleiben generisch.`
     );
   }
-  const text = sec
-    ? bullets(sec.lines)
-        .map((b) => "• " + plainText(b))
-        .join("\n")
-    : `BTS Light ${notesVersion}`;
+
+  let text;
+  if (imBereich.length === 0) {
+    text = `BTS Light ${notesVersion}`;
+  } else if (imBereich.length === 1) {
+    // Einzelne Version: unverändert wie bisher, ohne Kopfzeile.
+    text = bullets(imBereich[0].lines)
+      .map((b) => "• " + plainText(b))
+      .join("\n");
+  } else {
+    const kopf = `Dieses Update fasst ${imBereich.length} Versionen zusammen `
+      + `(v${imBereich[imBereich.length - 1].version} – v${imBereich[0].version}):`;
+    const voll = [kopf, ""];
+    for (const sec of imBereich) {
+      voll.push(`v${sec.version}`);
+      for (const b of bullets(sec.lines)) voll.push("• " + plainText(b));
+      voll.push("");
+    }
+    text = voll.join("\n").trimEnd();
+
+    if (text.length > NOTES_MAX) {
+      const kurz = [kopf, ""];
+      for (const sec of imBereich) {
+        const bs = bullets(sec.lines);
+        kurz.push(`• v${sec.version}: ${bs.length ? schlagzeile(bs[0]) : "Änderungen"}`);
+      }
+      kurz.push("", "Alle Einzelheiten: badhub.de/download/bts-light/");
+      text = kurz.join("\n");
+
+      // Letzte Sicherung: Selbst bei sehr vielen Versionen bleibt der Dialog
+      // endlich. Die Kopfzeilen sind zwar je Zeile gekappt, die ANZAHL ist
+      // es nicht — bei 200 gebuendelten Versionen reisst auch die Kurzform.
+      if (text.length > NOTES_MAX) {
+        const verweis = "\n\nAlle Einzelheiten: badhub.de/download/bts-light/";
+        text = text.slice(0, NOTES_MAX - verweis.length).trimEnd() + verweis;
+      }
+    }
+  }
+
   writeFileSync(notesOut, text);
-  console.error(`notes.txt für v${notesVersion} geschrieben (${text.length} Zeichen).`);
+  const umfang =
+    imBereich.length > 1 ? `v${imBereich[imBereich.length - 1].version}–v${notesVersion}` : `v${notesVersion}`;
+  console.error(`notes.txt für ${umfang} geschrieben (${text.length} Zeichen, ${imBereich.length} Version(en)).`);
 }
 
 // ── Seite rendern ─────────────────────────────────────────────────────────
