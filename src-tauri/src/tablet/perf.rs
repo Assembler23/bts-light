@@ -96,6 +96,12 @@ impl PerfCounters {
     /// Ein **Direktbau** des Übersichts-Zustands. Ab S1 zählt hier nur noch,
     /// was den Antwortcache verfehlt — die Zahl ist dann die Gegenprobe zur
     /// Trefferquote.
+    ///
+    /// **Beim Ablesen beachten:** Diese Zahl ist absichtlich größer als die
+    /// der `/health`-Abrufe. `overview()` speist außerdem die Kombi-Anzeige
+    /// (`/combo/state`), die Desktop-Oberfläche (`tablet_info`) und die
+    /// Hallen-Kurzlinks. Das ist kein Messfehler, sondern der Punkt: Der
+    /// Antwortcache aus S1 entlastet all diese Aufrufer, nicht nur `/health`.
     pub fn note_overview_build(&self, ns: u64) {
         self.overview_builds.fetch_add(1, Ordering::Relaxed);
         self.overview_build_ns.fetch_add(ns, Ordering::Relaxed);

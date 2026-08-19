@@ -213,6 +213,11 @@ So wird gemessen (Ablauf für den Messlauf):
 | Latenz Punkt → Anzeige p50/p95 | | | Skript |
 | Pi: Renders/s, Ø, über 16 ms | | | `ovRenderMessen` |
 
+Beim Ablesen zu beachten: `overview_builds` ist absichtlich **größer** als die Zahl der
+`/health`-Abrufe — `overview()` speist auch die Kombi-Anzeige (`/combo/state`), die
+Desktop-Oberfläche (`tablet_info`) und die Hallen-Kurzlinks. Kein Messfehler, sondern
+der Punkt: Der Antwortcache aus S1 entlastet all diese Aufrufer, nicht nur `/health`.
+
 Ergibt der Lauf ein deutlich anderes Bild als die Schätzung (4–7 Punkte/s turnierweit,
 10–30 KB je `/health`-Antwort), werden die Zielwerte oben einmalig nachgezogen und die
 Änderung hier vermerkt — so in „Offene Punkte / Annahmen" festgelegt.
