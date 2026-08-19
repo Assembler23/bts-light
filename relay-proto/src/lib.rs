@@ -2909,9 +2909,11 @@ mod tests {
         })
         .expect("serialisierbar");
         json.as_object_mut().expect("Objekt").remove("seq");
-        let state: MonitorState =
-            serde_json::from_value(json).expect("altes Frame bleibt lesbar");
-        assert_eq!(state.seq, 0, "fehlendes Feld = 0 = „keine Ordnung bekannt\"");
+        let state: MonitorState = serde_json::from_value(json).expect("altes Frame bleibt lesbar");
+        assert_eq!(
+            state.seq, 0,
+            "fehlendes Feld = 0 = „keine Ordnung bekannt\""
+        );
 
         // Und mit Feld kommt der Wert an — hin und zurück.
         let mut mit = state.clone();
