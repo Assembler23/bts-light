@@ -462,6 +462,24 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 - [x] Das Monitor-Lebenszeichen (`MONITOR_ONLINE_WINDOW_MS = 20 s`) bleibt auch bei 4-s-Takt
       erhalten — kein Gerät erscheint fälschlich offline. *(`record_monitor_poll` hängt am
       Abruf des Monitors; 4 s liegen mit fünffachem Abstand unter dem 20-s-Fenster.)*
+- [x] Der Sicherheits-Poll setzt **nie ganz** aus, auch bei kerngesundem Kanal nicht.
+      *(Nachgetragen nach dem Code-Review: Der erste Wurf las „gesund ohne Schalter" als
+      „gar nicht abrufen" — richtig für die alte, an 1,2 s Anstoß-Frische gebundene
+      Definition, falsch für die neue, die der Herzschlag dauerhaft hält. Am Monitor hängt
+      an demselben Abruf das Lebenszeichen, die Fernbefehle und die Geräte→Feld-Zuweisung;
+      an der Übersicht jede Änderung, die nur die Revision hebt, ohne anzustoßen. Der Takt
+      ist jetzt immer `fallbackTakt(...)`, gemessen gegen den letzten echten Abruf; ein
+      Wächter im Test hält fest, dass die Funktion nie „gar nicht" bedeutet.)*
+- [x] Nach dem Force-Close beginnt die Gesundheit bei null. *(`lastServerFrameAt = 0` in
+      `mwsTrennen` und `onopen` — sonst erklärte der nächste 250-ms-Tick die eben
+      verbundene Leitung sofort wieder für tot und die Seite liefe in eine
+      Verbinden/Schließen-Schleife.)*
+- [x] Der Relay weist eine Anzeige ab, die er nicht eintragen kann. *(Sicherheits-Review:
+      `subscribe_monitor` liefert `bool`, `monitor_conn` schließt bei `false` — ohne
+      Namespace oder über `MAX_MONITOR_SUBS` blieb die Verbindung sonst still offen und
+      der Herzschlag bescheinigte ihr Gesundheit, obwohl nie ein Anstoß käme. Dazu zählen
+      Monitor-Abonnenten jetzt in `Namespace::is_empty` mit, damit ein kurzer Host-Abriss
+      den Namespace nicht unter ihnen wegräumt.)*
 
 **Schmaler Abruf (S7)**
 - [ ] `/health?court=<id>` liefert genau ein Feld, inhaltlich identisch zu dessen Eintrag in der

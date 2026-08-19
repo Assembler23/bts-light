@@ -83,6 +83,22 @@ ok("gesund + Schalter aus = 250 ms", fallbackTakt(true, false), FALLBACK_SCHNELL
 ok("ungesund + Schalter an = 250 ms", fallbackTakt(false, true), FALLBACK_SCHNELL_MS);
 ok("ungesund + Schalter aus = 250 ms", fallbackTakt(false, false), FALLBACK_SCHNELL_MS);
 
+// Der Takt ist IMMER eine Zahl > 0 — es gibt kein „gar nicht abrufen".
+// Genau das war der Blocker im ersten Wurf der Etappe: Die Anzeige-Seiten
+// lasen „gesund ohne Schalter" als „Abruf ganz einstellen". Am Monitor hängt
+// an diesem Abruf aber auch das Lebenszeichen des Geräts, seine Fernbefehle
+// und die Feld-Zuweisung — nichts davon wird angestoßen.
+for (const g of [true, false]) {
+  for (const s of [true, false]) {
+    const takt = fallbackTakt(g, s);
+    ok(
+      `Takt bleibt endlich und > 0 (gesund=${g}, Schalter=${s})`,
+      Number.isFinite(takt) && takt > 0,
+      true,
+    );
+  }
+}
+
 // ── Aktiver Reconnect ─────────────────────────────────────────────────────
 ok("still seit 25 s = Kanal tot", kanalIstTot(true, JETZT - HERZSCHLAG_STILL_MS, JETZT), true);
 ok("still seit 24 s = noch nicht", kanalIstTot(true, JETZT - 24000, JETZT), false);

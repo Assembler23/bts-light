@@ -479,6 +479,11 @@ export function SetupWizard({
       },
       azure_tts: initialConfig.azure_tts,
       court_monitor: {
+        // Erst der gespeicherte Stand, dann die Felder des Assistenten:
+        // `push_fallback_slow` hat bewusst kein Bedienelement (nur
+        // `config.json`) und wäre beim Speichern sonst stillschweigend auf
+        // „aus" zurückgefallen. Der Spread hält auch künftige solche Felder.
+        ...initialConfig.court_monitor,
         enabled: cmEnabled,
         ad_interval_s: cmInterval,
         show_discipline: cmDiscipline,

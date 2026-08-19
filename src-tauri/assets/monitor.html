@@ -1065,6 +1065,7 @@
   var lastFetchOk = true;
   var fetchFehler = 0;
   var langsamErlaubt = false; // aus `config.pushFallbackSlow`
+  var letzterAbrufMs = 0;     // Beginn des letzten losgeschickten Abrufs
   function pushGesund(z, nowMs) {
     if (!z || !z.wsOpen) return false;
     if (z.lastFetchOk === false) return false;
@@ -1143,6 +1144,10 @@
     // neueste Stand geholt wird (kein verpasstes Update).
     if (fetching) { refetchQueued = true; return; }
     fetching = true;
+    // Beginn des tatsächlich losgeschickten Abrufs — daran misst der
+    // Sicherheits-Poll seinen Abstand (S6), damit ein angestoßener Abruf ihn
+    // mitzählt und in einer regen Halle kein zusätzlicher anfällt.
+    letzterAbrufMs = Date.now();
     var quelle = naechsteQuelle;
     naechsteQuelle = "poll";
     fetch(stateUrl(quelle), { cache: "no-store" })
@@ -1202,26 +1207,28 @@
 
   poll();
   // Sicherheits-Poll (Spec monitor-livestand-push, S6). 250-ms-Raster, bei
-  // jedem Tick neu entschieden: Kanal ungesund → abrufen wie bisher; gesund
-  // und Schalter gesetzt → höchstens alle vier Sekunden; gesund ohne
-  // Schalter → gar nicht (Verhalten vor dieser Etappe).
+  // jedem Tick neu entschieden, wie lange die Seite ohne eigenen Abruf
+  // auskommen darf: Kanal ungesund → 250 ms wie bisher; gesund und Schalter
+  // gesetzt → 4 s; gesund ohne Schalter → weiterhin 250 ms.
+  //
+  // **Er hört nie ganz auf.** An diesem einen Abruf hängt hier alles: das
+  // Lebenszeichen des Geräts (`record_monitor_poll`, 20-s-Fenster), die
+  // Fernbefehle, `redirectTo` und die Geräte→Feld-Zuweisung. Nichts davon
+  // wird angestoßen. Setzte die Seite bei gesundem Kanal aus, erschiene ein
+  // Gerät nach 20 s offline, erführe eine Umzuweisung nie und käme in einer
+  // ruhigen Halle nicht einmal von der Kopplungs-Seite herunter
+  // (Review-Fund 19.08.2026).
   //
   // Bleibt der Herzschlag länger als 25 s aus, gilt der Kanal als tot und
-  // der Socket wird aktiv geschlossen, damit der Reconnect greift.
-  var letzterLangsamerPoll = 0;
+  // die Verbindung wird aktiv getrennt, damit der Reconnect greift.
   setInterval(function () {
     var jetzt = Date.now();
     if (kanalIstTot(mwsOpen, lastServerFrameAt, jetzt)) {
       mlog("warn", "mws_stale_close", { stillMs: jetzt - lastServerFrameAt });
-      try { if (mws) mws.close(); } catch (e) { /* onclose plant den Reconnect */ }
-      mwsOpen = false;
+      mwsTrennen();
     }
-    if (!pushGesund(kanalZustand(), jetzt)) { poll(); return; }
-    if (fallbackTakt(true, langsamErlaubt) === FALLBACK_LANGSAM_MS
-        && jetzt - letzterLangsamerPoll >= FALLBACK_LANGSAM_MS) {
-      letzterLangsamerPoll = jetzt;
-      poll();
-    }
+    var takt = fallbackTakt(pushGesund(kanalZustand(), jetzt), langsamErlaubt);
+    if (jetzt - letzterAbrufMs >= takt) poll();
   }, FALLBACK_SCHNELL_MS);
 
   // ── Monitor-WS-Nudge-Client (A1, ADR 0016) ────────────────────────────
@@ -1253,6 +1260,11 @@
       // Darum je frischer Verbindung zurücksetzen (innerhalb einer Verbindung
       // ist der Guard dank TCP-Ordnung ohnehin redundant).
       lastSeqByCourt = {};
+      // Die frische Verbindung hat sich noch nicht bewährt: 0 heißt „noch
+      // kein Frame" — nicht gesund, aber auch nicht tot. Bliebe der alte,
+      // über 25 s alte Zeitpunkt stehen, erklärte der nächste Tick den eben
+      // verbundenen Socket sofort wieder für tot (Review-Fund 19.08.2026).
+      lastServerFrameAt = 0;
       mlog("info", "mws_open");
     };
     mws.onmessage = function (ev) {
@@ -1278,6 +1290,23 @@
     mws.onclose = function () { mwsOpen = false; mwsSchedule(); };
     mws.onerror = function () { /* onclose folgt und plant den Reconnect */ };
   }
+  // Aktives Trennen bei totem Kanal (S6). `close()` allein genügt nicht: Ein
+  // schwarzlochender Socket hängt danach bis zum Handshake-Timeout des
+  // Browsers in CLOSING, und der Wächter unten verbindet nur bei CLOSED neu.
+  // Deshalb Ereignisse abhängen, Referenz freigeben und den Reconnect selbst
+  // planen — sonst meldete das späte `onclose` des alten Sockets
+  // `mwsOpen = false` für den längst neuen.
+  function mwsTrennen() {
+    var alt = mws;
+    mws = null;
+    mwsOpen = false;
+    if (alt) {
+      alt.onopen = null; alt.onmessage = null; alt.onclose = null; alt.onerror = null;
+      try { alt.close(); } catch (e) { /* egal, die Referenz ist weg */ }
+    }
+    lastServerFrameAt = 0;
+    mwsSchedule();
+  }
   function mwsSchedule() {
     // Exponentielles Backoff – schont im Cloud-Modus den Relay, wenn noch kein
     // Host verbunden ist (Namespace existiert dann nicht → sofortiger Close).
@@ -1287,9 +1316,11 @@
   }
   // Watchdog: einziger Reconnect-Treiber (Muster aus tablet.html). Verbindet
   // neu, sobald der Socket fehlt/geschlossen ist und das Backoff-Fenster
-  // abgelaufen ist. KEIN Force-Close bei Stille – Stille ist am Monitor normal
-  // (ein Nudge kommt nur bei Score-Änderung); halbtote Sockets deckt der
-  // Poll-Fallback ab.
+  // abgelaufen ist. Stille allein ist am Monitor weiterhin normal (ein Nudge
+  // kommt nur bei Score-Änderung) — seit S6 unterscheidet aber der Herzschlag
+  // Stille von einem toten Kanal, und dann trennt `mwsTrennen()` im
+  // Sicherheits-Poll oben aktiv; es setzt `mws` auf null, sodass hier sofort
+  // der `!mws`-Zweig greift.
   setInterval(function () {
     if ((!mws || mws.readyState === WebSocket.CLOSED) && Date.now() >= mwsNextAt) {
       mwsConnect();

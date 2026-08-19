@@ -237,6 +237,13 @@ export interface CourtMonitorConfig {
   layout: string;
   /** Kombi-Anzeige: Felder nebeneinander (Hochformat) statt übereinander. */
   combo_vertical: boolean;
+  /**
+   * Darf eine Anzeige mit gesundem Push-Kanal ihren Sicherheits-Abruf auf
+   * vier Sekunden verlangsamen? Standard aus; bewusst nur über die
+   * `config.json` zu setzen, deshalb ohne Bedienelement im Assistenten —
+   * er reicht das Feld nur unverändert durch.
+   */
+  push_fallback_slow: boolean;
 }
 
 /** Ein Werbebild mit optionalem Anzeige-Label (Rust: commands::CourtAd).

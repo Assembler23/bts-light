@@ -70,6 +70,14 @@ export function pushGesund(zustand, nowMs) {
  * Kanal. Eine frisch aktualisierte Installation verhält sich damit exakt wie
  * vorher.
  *
+ * **Die Rückgabe ist immer ein Takt, nie „gar nicht".** Vor dieser Etappe
+ * durfte der Abruf bei gesundem Kanal pausieren — aber „gesund" hing damals
+ * an einem Anstoß unter 1,2 s und war deshalb von selbst kurzlebig. Der
+ * Herzschlag hält ihn jetzt dauerhaft, und an dem Abruf hängt mehr als der
+ * Spielstand: das Lebenszeichen des Geräts, seine Fernbefehle, die
+ * Feld-Zuweisung und jede Änderung, die nur die Revision hebt, ohne
+ * anzustoßen (Review-Fund 19.08.2026).
+ *
  * @param {boolean} gesund Ergebnis von {@link pushGesund}.
  * @param {boolean} langsamErlaubt Schalter `pushFallbackSlow` aus der Konfiguration.
  * @returns {number} Millisekunden.

@@ -129,7 +129,13 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   stundenlang `OPEN`, ohne je etwas zu liefern.
 - **Poll bleibt Fallback:** Der Sicherheits-Poll läuft **durchgehend** weiter
   (seit v0.9.241 nicht mehr pausierend) — im 250-ms-Takt, und nur bei
-  **gesundem** Kanal und gesetztem Schalter im 4-s-Takt. Gesund heißt: Socket
+  **gesundem** Kanal und gesetztem Schalter im 4-s-Takt. Er hört **nie ganz**
+  auf, denn an ihm hängt mehr als der Spielstand: das Lebenszeichen des
+  Geräts (20-s-Fenster), seine Fernbefehle, `redirectTo`, die
+  Geräte→Feld-Zuweisung und jede Änderung, die nur die Antwort-Revision hebt,
+  ohne anzustoßen (Feld-Beschriftungen, Hallen-Zuordnung, Aufruf-Schwellen,
+  Hallen-Farben). Gemessen wird gegen den **letzten tatsächlichen Abruf** —
+  in einer regen Halle fällt dadurch kein zusätzlicher an. Gesund heißt: Socket
   offen, letztes Frame (Anstoß **oder** Herzschlag) keine 25 s her, letzter
   Abruf erfolgreich; ein **einziger** Fehlversuch schaltet sofort zurück.
   Bleibt der Herzschlag über 25 s aus, schließt die Anzeige den Socket aktiv,

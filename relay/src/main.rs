@@ -418,14 +418,25 @@ impl Namespace {
     /// den Namespace weg, während eine TL-Seite noch daran hängt — ihr
     /// Sende-Ende läge dann in der verworfenen Fassung, der Kanal bliebe
     /// technisch offen und bekäme nie wieder einen Anstoß, während die
-    /// Seite sich für „live" hielte (Review-Fund 18.08.2026). Anders als
-    /// Monitore können TL-Zuhörer keinen Namespace erzeugen (`tl_ws_conn`
-    /// legt keinen an), es entsteht also kein Zombie-Namespace.
+    /// Seite sich für „live" hielte (Review-Fund 18.08.2026).
+    ///
+    /// **Monitor-Abonnenten seit v0.9.241 ebenso** (Sicherheits-Review zu
+    /// Spec monitor-livestand-push, S6): derselbe Fehler, nur eine Etappe
+    /// später scharf geworden. Bis S6 fiel eine verwaiste Anzeige mangels
+    /// Anstößen von selbst auf den schnellen Poll zurück; seither erklärt
+    /// der verbindungslokale Herzschlag ihren Kanal für gesund, und sie
+    /// bliebe dauerhaft hinterher.
+    ///
+    /// Ein Zombie-Namespace entsteht dadurch nicht: Weder `tl_ws_conn` noch
+    /// `subscribe_monitor` legen einen an, und beide tragen sich am
+    /// Verbindungsende wieder aus — mit anschließendem Aufräumen.
     fn is_empty(&self) -> bool {
         self.host.is_none()
             && self.tablets.is_empty()
             && self.pending.is_empty()
             && self.tl_subs.is_empty()
+            && self.monitor_subs.is_empty()
+            && self.monitor_subs_all.is_empty()
     }
 }
 
@@ -2004,12 +2015,23 @@ async fn monitor_ws(
 /// Tablet-Reconnect die Anzeigen nicht ohne Anlass holen lässt.
 async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: Option<i64>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
-    subscribe_monitor(&broker, &ns, court, &tx).await;
+    // Nicht eingetragen (kein Host / Deckel erreicht) → Verbindung sofort
+    // schließen, wie es der LAN-Server tut. Offen gehalten, würde sie durch
+    // den Herzschlag als gesund gelten, ohne je einen Anstoß zu bekommen.
+    if !subscribe_monitor(&broker, &ns, court, &tx).await {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
     // Kürzerer Takt als bei den übrigen WS-Verbindungen (Spec
     // monitor-livestand-push, S6): Hier hängt nicht nur die Leitung daran,
     // sondern die Anzeige entscheidet an diesem Herzschlag, ob ihr
     // Push-Kanal lebt — und schaltet sonst auf den schnellen Poll zurück.
     let mut ping = tokio::time::interval(Duration::from_millis(relay_proto::MONITOR_HEARTBEAT_MS));
+    // Verpasste Ticks nicht nachholen: Eine Verbindung, die lange im
+    // `socket.send` geparkt war, schickte sonst beim Freiwerden alle
+    // ausgefallenen Herzschläge am Stück — ausgerechnet an den langsamsten
+    // Client. Gleiches Verhalten wie im LAN-Server.
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             outgoing = rx.recv() => {
@@ -2042,20 +2064,27 @@ async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: 
 /// Trägt eine Monitor-Verbindung als Nudge-Abonnent ein (A1). Legt den
 /// Namespace **nicht** an, falls er fehlt: Ohne Host gibt es nichts zu
 /// melden, und ein von Zuschauer-TVs erzeugter Namespace hätte keinen
-/// Aufräum-Pfad (`is_empty` zählt Monitore bewusst nicht mit). Fehlt der
-/// Namespace, bleibt die Verbindung still (Poll-Fallback) und der Client
-/// verbindet sich neu, sobald der Host da ist.
-async fn subscribe_monitor(broker: &Broker, ns: &str, court: Option<i64>, tx: &Tx) {
+/// Aufräum-Pfad.
+///
+/// **Liefert `false`, wenn nicht eingetragen wurde** (kein Namespace oder
+/// Fan-out-Deckel erreicht) — der Aufrufer schließt die Verbindung dann.
+/// Vorher blieb sie still offen, weil die Anzeige ohne echten Anstoß ohnehin
+/// auf den schnellen Poll zurückfiel. Seit S6 (Spec monitor-livestand-push)
+/// gilt das nicht mehr: Der Herzschlag entsteht **verbindungslokal** und
+/// bescheinigt der Anzeige Gesundheit, auch wenn hier nie jemand eingetragen
+/// wurde. Ein TV, das vor dem Turnier-PC hochfährt, hinge sonst den ganzen
+/// Tag an einer Leitung ohne Anstöße (Sicherheits-Review 19.08.2026).
+async fn subscribe_monitor(broker: &Broker, ns: &str, court: Option<i64>, tx: &Tx) -> bool {
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(ns) else {
-        return;
+        return false;
     };
-    // Fan-out-Deckel: über der Grenze nicht eintragen (Verbindung degradiert
-    // still auf Poll). Schützt Speicher + Broadcast-Kosten je Namespace.
+    // Fan-out-Deckel: über der Grenze nicht eintragen. Schützt Speicher +
+    // Broadcast-Kosten je Namespace.
     let total = namespace.monitor_subs.values().map(Vec::len).sum::<usize>()
         + namespace.monitor_subs_all.len();
     if total >= MAX_MONITOR_SUBS {
-        return;
+        return false;
     }
     match court {
         Some(c) => namespace
@@ -2065,6 +2094,7 @@ async fn subscribe_monitor(broker: &Broker, ns: &str, court: Option<i64>, tx: &T
             .push(tx.clone()),
         None => namespace.monitor_subs_all.push(tx.clone()),
     }
+    true
 }
 
 /// Trägt eine Monitor-Verbindung wieder aus (Verbindungsende). Vergleicht per
@@ -4306,6 +4336,79 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         subscribe_monitor(&broker, "ns-ghost", None, &tx).await;
         assert!(broker.namespaces.lock().await.get("ns-ghost").is_none());
+    }
+
+    #[tokio::test]
+    async fn ein_nicht_eingetragener_monitor_erfaehrt_die_absage() {
+        // Sicherheits-Review-Fund zu S6 (Spec monitor-livestand-push): Bis
+        // dahin blieb ein nicht eingetragener Socket **still offen** — und
+        // das ging gut, weil die Anzeige ohne echten Anstoß ohnehin auf den
+        // schnellen Poll zurückfiel. Seit S6 hält der Herzschlag, der
+        // verbindungslokal entsteht, sie für gesund: Ein TV, das vor dem
+        // Turnier-PC hochfährt, hinge den ganzen Tag an einer Leitung, über
+        // die nie ein Anstoß kommt.
+        //
+        // Deshalb muss der Aufrufer die Absage erfahren und die Verbindung
+        // schließen — der Reconnect-Wächter der Anzeige verbindet dann mit
+        // Backoff neu, so wie es der LAN-Server längst tut.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        // Kein Namespace (Host noch nicht da).
+        assert!(
+            !subscribe_monitor(&broker, "ns-ghost", None, &tx).await,
+            "ohne Host keine Zusage"
+        );
+
+        // Und über dem Fan-out-Deckel ebenso.
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, "ns-voll", &host_tx).await;
+        let mut halter = Vec::new();
+        for _ in 0..MAX_MONITOR_SUBS {
+            let (t, r) = mpsc::unbounded_channel();
+            assert!(subscribe_monitor(&broker, "ns-voll", Some(1), &t).await);
+            halter.push((t, r));
+        }
+        let (tx_over, _rx_over) = mpsc::unbounded_channel();
+        assert!(
+            !subscribe_monitor(&broker, "ns-voll", Some(1), &tx_over).await,
+            "über dem Deckel keine Zusage"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_haengender_monitor_haelt_den_namespace() {
+        // Zweiter Sicherheits-Review-Fund zu S6, wörtlich derselbe Fehler,
+        // der am 18.08.2026 für `tl_subs` behoben wurde: Ein kurzer
+        // Host-Abriss räumte den Namespace weg, während Anzeigen noch daran
+        // hingen. Ihre Sende-Enden lägen dann in der verworfenen Fassung —
+        // die Leitung bliebe technisch offen und bekäme nie wieder einen
+        // Anstoß, während der Herzschlag (verbindungslokal!) sie weiter für
+        // gesund erklärt.
+        //
+        // Einen Zombie-Namespace kann das nicht erzeugen: `subscribe_monitor`
+        // legt selbst keinen an, und `unsubscribe_monitor` räumt hinter der
+        // letzten Verbindung auf.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, "ns1", &host_tx).await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        assert!(subscribe_monitor(&broker, "ns1", None, &tx).await);
+
+        // Host fällt weg — der Namespace muss bleiben, solange die Anzeige hängt.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut("ns1").expect("Namespace da");
+            n.host = None;
+            assert!(!n.is_empty(), "eine hängende Anzeige hält den Namespace");
+        }
+
+        // Erst mit ihrem Abgang ist er weg.
+        unsubscribe_monitor(&broker, "ns1", None, &tx).await;
+        assert!(
+            broker.namespaces.lock().await.get("ns1").is_none(),
+            "nach dem Austragen aufgeräumt — kein Zombie"
+        );
     }
 
     // ───────────────── Turnierleitungs-Oberfläche (TL-Web) ─────────────────
