@@ -153,7 +153,6 @@ function starteUebersicht(nr) {
   let mwsOpen = false;
   // Zeitpunkt des letzten Frames vom Server — Anstoß ODER Herzschlag (S6).
   let letztesFrame = 0;
-  let offenSeit = 0;
   let letzterAbrufOk = true;
   let fehlerInFolge = 0;
   let langsamErlaubt = false;
@@ -246,7 +245,6 @@ function starteUebersicht(nr) {
     ws.onopen = () => {
       mwsOpen = true;
       letztesFrame = 0;
-      offenSeit = Date.now();
     };
     ws.onmessage = (ev) => {
       // **Jedes** Frame beweist, dass der Kanal lebt — auch der Herzschlag,
@@ -269,7 +267,6 @@ function starteUebersicht(nr) {
     ws.onclose = () => {
       mwsOpen = false;
       letztesFrame = 0;
-      offenSeit = 0;
       setTimeout(verbinde, 1000);
     };
     ws.onerror = () => {};
@@ -305,7 +302,6 @@ function starteUebersicht(nr) {
 function starteCourtMonitor(courtId) {
   let mwsOpen = false;
   let letztesFrame = 0;
-  let offenSeit = 0;
   let letzterAbrufOk = true;
   let fehlerInFolge = 0;
   let langsamErlaubt = false;
@@ -369,7 +365,6 @@ function starteCourtMonitor(courtId) {
     ws.onopen = () => {
       mwsOpen = true;
       letztesFrame = 0;
-      offenSeit = Date.now();
     };
     ws.onmessage = (ev) => {
       letztesFrame = Date.now();
@@ -389,7 +384,6 @@ function starteCourtMonitor(courtId) {
     ws.onclose = () => {
       mwsOpen = false;
       letztesFrame = 0;
-      offenSeit = 0;
       setTimeout(verbinde, 1000);
     };
     ws.onerror = () => {};

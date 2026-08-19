@@ -771,16 +771,41 @@ pub struct OverviewCache {
 /// Der Schlüssel ist die **geparste** Zahl, nicht der Rohtext: `?court=0101`
 /// und `?court=101` meinen dasselbe Feld, und über den Rohtext ließen sich
 /// beliebig viele Schlüssel erzeugen (Sicherheits-Review 19.08.2026).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FeldCache {
-    /// Zu welcher Übersicht diese Ausschnitte gehören.
-    pub rev: u64,
-    pub gebaut_ms: u64,
+    /// Zu welchem Bau der vollen Antwort diese Ausschnitte gehören — deren
+    /// **Marke**, nicht deren Revision.
+    ///
+    /// Die Revision allein wäre schwächer als die Quelle: Der Übersichts-Cache
+    /// verlangt gleiche Revision **und** nicht abgelaufene Hart-TTL, und die
+    /// TTL ist das Netz gegen Änderungen, die niemand meldet — `attach_tablet`,
+    /// `detach_tablet` und `record_battery` ändern die Anzeige, ohne die
+    /// Revision zu heben. Der volle Weg richtet sich nach 250 ms von selbst,
+    /// der schmale hinge bei stehender Revision für immer fest
+    /// (Review-Fund 19.08.2026). Die Marke ist ein Inhalts-Hash und deckt
+    /// beides ab; ergab ein TTL-Neubau denselben Inhalt, erspart sie sogar den
+    /// Neuschnitt.
+    pub marke: String,
     /// CourtID → (Feld-Liste mit einem Eintrag, Ordnungszahl, Marke).
     pub felder: HashMap<i64, (String, String, String)>,
     /// Antwort auf jede unbrauchbare Feldnummer — eine leere Liste. Auch sie
     /// hat eine Marke, damit der Bestätigungs-Pfad für sie genauso arbeitet.
     pub leer: (String, String, String),
+}
+
+impl Default for FeldCache {
+    /// **Von Hand, nicht abgeleitet.** Der leere Ausschnitt geht unverändert
+    /// in den Antwort-Umschlag; mit abgeleiteten Leerstrings entstünde dort
+    /// `"courts":,` — eine unparsbare Antwort und damit eine tote Anzeige.
+    /// Als abgeleitetes `Default` wäre das ein stiller Fallstrick statt eines
+    /// Compile-Fehlers (Review-Fund 19.08.2026).
+    fn default() -> Self {
+        Self {
+            marke: String::new(),
+            felder: HashMap::new(),
+            leer: ("[]".to_string(), "{}".to_string(), String::new()),
+        }
+    }
 }
 
 /// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
@@ -2617,17 +2642,19 @@ impl TabletState {
     /// Der Ausschnitt eines Felds aus der aktuellen Übersicht (Spec
     /// monitor-livestand-push, S7): `(Feld-Liste, Ordnungszahl, Marke)`.
     ///
-    /// Passt der abgelegte Feld-Cache zur Revision, ist das ein Nachschlagen;
-    /// sonst baut `schneiden` die Ausschnitte einmal für **alle** Felder und
-    /// sie gelten für den Rest der Generation. Eine unbrauchbare Nummer
-    /// bekommt immer denselben leeren Ausschnitt.
+    /// Gehören die abgelegten Ausschnitte zu **demselben Bau** — erkennbar an
+    /// der Marke der vollen Antwort, einem Inhalts-Hash —, ist das ein
+    /// Nachschlagen; sonst baut `schneiden` die Ausschnitte einmal für
+    /// **alle** Felder, und sie gelten für den Rest dieses Baus. Eine
+    /// unbrauchbare Nummer bekommt immer denselben leeren Ausschnitt.
     ///
     /// Geklont wird unter der Sperre nur das eine Tripel — die ganze Karte
     /// herauszugeben würde den häufigen Fall (volle Antwort) verteuern.
+    /// Während `schneiden` läuft, ist keine Sperre gehalten; zwei gleichzeitig
+    /// verfehlende Abrufe schneiden dann beide, was nur doppelt zählt.
     pub fn feld_ausschnitt<F>(
         &self,
-        rev: u64,
-        jetzt: u64,
+        voll_marke: &str,
         id: Option<i64>,
         schneiden: F,
     ) -> (String, String, String)
@@ -2637,14 +2664,13 @@ impl TabletState {
         {
             let c = self.feld_cache.read().unwrap();
             if let Some(fc) = c.as_ref() {
-                if fc.rev == rev {
+                if fc.marke == voll_marke {
                     return Self::aus_feld_cache(fc, id);
                 }
             }
         }
         let mut neu = schneiden();
-        neu.rev = rev;
-        neu.gebaut_ms = jetzt;
+        neu.marke = voll_marke.to_string();
         self.feld_schnitte.fetch_add(1, Ordering::Relaxed);
         let ergebnis = Self::aus_feld_cache(&neu, id);
         *self.feld_cache.write().unwrap() = Some(neu);
@@ -7088,6 +7114,61 @@ mod tests {
         // Bau wie die Feld-Liste (Spec monitor-livestand-push, S4).
         assert_eq!(c.seqs_json, "{\"1\":42}");
         assert_eq!(c.gebaut_ms, 5_000);
+    }
+
+    #[test]
+    fn der_feld_cache_haengt_am_inhalt_der_vollen_antwort() {
+        // Review-Fund 19.08.2026 (Spec monitor-livestand-push, S7): Zuerst
+        // hing der Feld-Cache nur an der Revision — und war damit **schwächer
+        // als die Quelle**, aus der er geschnitten ist. Der Übersichts-Cache
+        // verlangt zweierlei: gleiche Revision UND Hart-TTL nicht abgelaufen.
+        // Die TTL ist das Sicherheitsnetz gegen Änderungen, die niemand
+        // meldet — und die gibt es wirklich: `attach_tablet`, `detach_tablet`
+        // und `record_battery` ändern die Anzeige (`tablet_connected`,
+        // `battery`), ohne die Revision zu heben. Der volle Weg richtete sich
+        // nach 250 ms von selbst, der schmale nie: Bei stehender Revision
+        // hätte er den alten Ausschnitt bis in alle Ewigkeit ausgeliefert,
+        // mit gemerkter Marke sogar als endloses „nichts Neues".
+        //
+        // Die Marke der vollen Antwort deckt beides ab — sie ist ein
+        // Inhalts-Hash und heißt damit wörtlich „derselbe Bau".
+        let st = TabletState::default();
+        let schnitt = |wert: &str| {
+            let liste = format!("[{{\"court_id\":1,\"x\":\"{wert}\"}}]");
+            let mut c = FeldCache::default();
+            c.felder
+                .insert(1, (liste, "{\"1\":9}".to_string(), format!("\"m-{wert}\"")));
+            c
+        };
+
+        let (a, _, _) = st.feld_ausschnitt("\"voll-1\"", Some(1), || schnitt("alt"));
+        assert!(a.contains("alt"));
+        assert_eq!(st.feld_schnitte(), 1);
+
+        // Gleiche Marke → nachschlagen, nicht neu schneiden.
+        let (b, _, _) = st.feld_ausschnitt("\"voll-1\"", Some(1), || schnitt("neu"));
+        assert!(b.contains("alt"), "derselbe Bau, derselbe Ausschnitt");
+        assert_eq!(st.feld_schnitte(), 1);
+
+        // Andere Marke = anderer Inhalt → neu schneiden, auch ohne dass sich
+        // die Revision je bewegt hätte.
+        let (c, _, _) = st.feld_ausschnitt("\"voll-2\"", Some(1), || schnitt("neu"));
+        assert!(c.contains("neu"), "neuer Inhalt kommt durch");
+        assert_eq!(st.feld_schnitte(), 2);
+    }
+
+    #[test]
+    fn ein_leerer_feld_cache_liefert_gueltiges_json() {
+        // Der leere Ausschnitt geht unverändert in den Antwort-Umschlag.
+        // Kämen dort leere Strings an, entstünde `"courts":,` — eine
+        // unparsbare Antwort und damit eine tote Anzeige. Als abgeleitetes
+        // `Default` war das ein stiller Fallstrick, kein Compile-Fehler.
+        let leer = FeldCache::default();
+        let (liste, zahlen, _) = TabletState::aus_feld_cache(&leer, Some(7));
+        assert_eq!(liste, "[]");
+        assert_eq!(zahlen, "{}");
+        serde_json::from_str::<serde_json::Value>(&liste).expect("gültiges JSON");
+        serde_json::from_str::<serde_json::Value>(&zahlen).expect("gültiges JSON");
     }
 
     #[test]

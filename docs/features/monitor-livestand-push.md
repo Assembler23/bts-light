@@ -522,6 +522,19 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
       ihn niemand zahlt, solange kein Client den schmalen Abruf nutzt, und ist nach der
       **geparsten** Zahl geschlüsselt — über den Rohtext ließen sich mit `?court=0101`,
       `00101`, … beliebig viele Schlüssel erzeugen.)*
+- [x] Der Feld-Cache ist nicht schwächer als die Quelle, aus der er geschnitten wurde.
+      *(`der_feld_cache_haengt_am_inhalt_der_vollen_antwort` — Review-Fund: Zuerst hing er
+      nur an der Revision, während der Übersichts-Cache **zweierlei** verlangt (Revision und
+      Hart-TTL). Die TTL ist das Netz gegen Änderungen, die niemand meldet, und die gibt es
+      wirklich: `attach_tablet`, `detach_tablet` und `record_battery` ändern die Anzeige
+      (`tablet_connected`, `battery`), ohne die Revision zu heben. Der volle Weg richtete
+      sich nach 250 ms von selbst, der schmale hätte den alten Ausschnitt bei stehender
+      Revision für immer geliefert — mit gemerkter Marke sogar als endloses „nichts Neues".
+      Der Schlüssel ist jetzt die **Marke der vollen Antwort**, ein Inhalts-Hash: Er deckt
+      beide Bedingungen ab und erspart den Neuschnitt, wenn ein TTL-Neubau denselben Inhalt
+      ergab. Ein Anstoß allein schneidet damit bewusst **nicht** neu — die Anzeige sieht
+      danach genauso aus, und die Ordnungszahl im Ausschnitt bleibt die des Baus, zu dem der
+      Inhalt gehört: genau die harmlose Richtung aus S4.)*
 - [x] Eine Ordnungszahl ohne zugehöriges Feld verrät nichts.
       *(`eine_verwaiste_ordnungszahl_verraet_kein_feld` — Review-Fund: Am Relay sind
       `monitor_seq` und `courts` zwei unabhängige Quellen. Die Zahlen entstehen aus Anstößen

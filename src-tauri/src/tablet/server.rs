@@ -1024,7 +1024,13 @@ async fn health(
         // beliebig viele Cache-Schlüssel erzeugen.
         let id = wunsch.parse::<i64>().ok();
         let prozess = ctx.tablet.process_tag();
-        let (feld, zahl, marke) = ctx.tablet.feld_ausschnitt(rev, jetzt, id, || {
+        // Schlüssel ist die **Marke** der vollen Antwort, nicht die Revision:
+        // Sie ist ein Inhalts-Hash und deckt damit auch die Hart-TTL des
+        // Übersichts-Caches ab. An der Revision allein hinge der Ausschnitt
+        // fest, sobald sich die Anzeige ohne Revisions-Erhöhung ändert —
+        // `attach_tablet`, `detach_tablet` und `record_battery` tun genau das
+        // (Review-Fund 19.08.2026).
+        let (feld, zahl, marke) = ctx.tablet.feld_ausschnitt(&etag, id, || {
             alle_feld_ausschnitte(&courts_json, &seqs_json, prozess, &call_timer_json)
         });
         // Eigene Marke: Sie hängt am Inhalt, und der ist hier ein anderer.
@@ -5585,7 +5591,13 @@ mod tests {
             "fünf Abrufe, ein Schnitt — die übrigen schlagen nach"
         );
 
-        // Ein neuer Stand macht beides ungültig.
+        // Ein Anstoß allein schneidet NICHT neu: Er hebt die Revision, aber
+        // die Anzeige sieht danach genauso aus, und der Schlüssel ist die
+        // Marke — ein Inhalts-Hash. Die Ordnungszahl im Ausschnitt bleibt
+        // damit die des Baus, aus dem er stammt. Das ist die harmlose
+        // Richtung aus S4 („höchstens älter als der Stand, zu dem sie
+        // ausgeliefert wird"): Inhalt und Zahl gehören zusammen, und sobald
+        // sich wirklich etwas ändert, kommen beide gemeinsam nach.
         ctx.tablet.notify_monitor(101);
         let _ = health(
             State(ctx.clone()),
@@ -5595,8 +5607,35 @@ mod tests {
         .await;
         assert_eq!(
             ctx.tablet.feld_schnitte(),
+            1,
+            "gleicher Inhalt, kein neuer Schnitt"
+        );
+
+        // Ein geänderter Inhalt dagegen schon.
+        let mut anders = match_on_court();
+        anders.court_id = Some(101);
+        anders.sets = vec![(11, 4)];
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![anders],
+            courts: vec!["1".into(), "2".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let _ = health(
+            State(ctx.clone()),
+            takt_feld("101"),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(
+            ctx.tablet.feld_schnitte(),
             2,
-            "nach einem Nudge wird neu geschnitten"
+            "neuer Satzstand = neuer Inhalt = neuer Schnitt"
         );
     }
 
