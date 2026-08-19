@@ -1045,13 +1045,21 @@
   var knownCourtId = fixedCourtId;   // wird in applyState nachgezogen
   var lastSeqByCourt = {};           // lastSeq-Guard je Feld (veraltete Nudges verwerfen)
 
+  // Was den nächsten Abruf ausgelöst hat (Spec monitor-livestand-push, S0).
+  // Fallen Nudge und Fallback-Takt zusammen, gewinnt "push": Der Abruf wäre
+  // durch den Nudge ohnehin gekommen. Nach jedem Fetch zurück auf "poll".
+  var naechsteQuelle = "poll";
+  function stateUrl() {
+    return STATE_URL + (STATE_URL.indexOf("?") >= 0 ? "&" : "?") + "src=" + naechsteQuelle;
+  }
+
   function poll() {
     // In-Flight-Schutz: Nudge und Fallback teilen sich denselben Fetch. Läuft
     // schon einer, merken wir EINEN Nachschlag, damit am Ende sicher der
     // neueste Stand geholt wird (kein verpasstes Update).
     if (fetching) { refetchQueued = true; return; }
     fetching = true;
-    fetch(STATE_URL, { cache: "no-store" })
+    fetch(stateUrl(), { cache: "no-store" })
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
@@ -1071,6 +1079,7 @@
   }
   function pollDone() {
     fetching = false;
+    naechsteQuelle = "poll";
     if (refetchQueued) { refetchQueued = false; requestFetch(); }
   }
   var wasOffline = false; // Offline-Wechsel nur einmal loggen (nicht je Poll)
@@ -1153,6 +1162,7 @@
       // weiterlaufen (die Zuweisung wird nicht genudgt).
       if (knownCourtId == null || msg.court === knownCourtId) {
         if (knownCourtId != null) lastNudgeAt = Date.now();
+        naechsteQuelle = "push";
         requestFetch();
       }
     };

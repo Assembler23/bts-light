@@ -500,7 +500,47 @@ main {
     }, hallSeconds * 1000);
   }
 
+  /** Abschaltbare Render-Messung (Spec monitor-livestand-push, S0 c).
+   *  In der Browser-Konsole `localStorage.ovRenderMessen = "1"` setzen, dann
+   *  meldet die Seite alle zehn Sekunden, wie oft und wie lange sie gezeichnet
+   *  hat; mit `"2"` zusätzlich jeden einzelnen Render.
+   *
+   *  Abweichung vom Vorbild `tlRenderMessen` (tl.html), bewusst: Dort läuft
+   *  ein 2-s-Render, hier bis zu vier je Sekunde — eine Zeile je Render wäre
+   *  in einem Messlauf nicht auswertbar. Die Sammelzeile hat denselben Takt
+   *  wie die Perf-Zeile des Servers und lässt sich direkt danebenlegen.
+   *  `ueber16ms` ist die Näherung für „verlorene Frames": Ein Render, der
+   *  länger als ein 60-Hz-Bild dauert, hat auf dem Pi eines verschluckt. */
+  var renderMessen = (function () {
+    try { return localStorage.getItem('ovRenderMessen') || '0'; } catch (e) { return '0'; }
+  })();
+  var messZahl = 0, messSumme = 0, messMax = 0, messUeber16 = 0, messSeit = 0;
+  function messVermerken(dauer) {
+    messZahl++; messSumme += dauer;
+    if (dauer > messMax) messMax = dauer;
+    if (dauer > 16) messUeber16++;
+    if (renderMessen === '2') console.log('[ov] render: ' + dauer.toFixed(1) + ' ms');
+    var jetzt = Date.now();
+    if (!messSeit) { messSeit = jetzt; return; }
+    if (jetzt - messSeit < 10000) return;
+    console.log('[ov] ' + messZahl + ' Renders in ' + ((jetzt - messSeit) / 1000).toFixed(0)
+      + ' s (' + (messZahl / ((jetzt - messSeit) / 1000)).toFixed(1) + '/s), Ø '
+      + (messSumme / messZahl).toFixed(1) + ' ms, max ' + messMax.toFixed(1)
+      + ' ms, ' + messUeber16 + ' über 16 ms');
+    messZahl = 0; messSumme = 0; messMax = 0; messUeber16 = 0; messSeit = jetzt;
+  }
+
   function render(data) {
+    // Die Messung umschließt den ganzen Aufbau — `renderIntern` kehrt an
+    // mehreren Stellen zurück (Leerstand, Hallen-Rotation), eine Messung im
+    // Rumpf träfe deshalb nur einen Teil der Fälle.
+    if (renderMessen === '0') return renderIntern(data);
+    var start = performance.now();
+    try { return renderIntern(data); }
+    finally { messVermerken(performance.now() - start); }
+  }
+
+  function renderIntern(data) {
     lastData = data;
     // Aufruf-Timer-Bezug aus dem Poll übernehmen (Server-Uhr gegen Geräte-Drift).
     callNow = (data && typeof data.serverNowMs === 'number' && data.serverNowMs > 0)
@@ -694,12 +734,20 @@ main {
     identifyTimer = setTimeout(function () { ov.classList.remove('show'); }, 10000);
   }
 
+  // Was den nächsten Abruf ausgelöst hat (Spec monitor-livestand-push, S0).
+  // Fallen Nudge und Fallback-Takt zusammen, gewinnt 'push': Der Abruf wäre
+  // durch den Nudge ohnehin gekommen, der Takt hat ihn nicht verursacht.
+  // Nach jedem Fetch zurück auf 'poll', damit ein einzelner Nudge nicht
+  // dauerhaft alle Folgeabrufe als push ausweist.
+  var naechsteQuelle = 'poll';
   function healthUrl() {
     // Geraete-ID als Heartbeat-Markierung (v0.9.22) — Server zaehlt
     // den /health-Poll dann als Online-Lebenszeichen.
-    return deviceId
+    var u = deviceId
       ? BASE + 'health?device=' + encodeURIComponent(deviceId)
       : BASE + 'health';
+    // `src` trennt in der Messung nudge-getriebene von Fallback-Abrufen.
+    return u + (u.indexOf('?') >= 0 ? '&' : '?') + 'src=' + naechsteQuelle;
   }
   // Der eigentliche Health-Fetch (ohne eigene Terminierung). In-Flight-Schutz:
   // Nudge und Fallback teilen sich diesen Fetch; läuft schon einer, wird EIN
@@ -728,6 +776,7 @@ main {
   }
   function pollDone() {
     fetching = false;
+    naechsteQuelle = 'poll';
     if (refetchQueued) { refetchQueued = false; requestPoll(); }
   }
   // Fetch coalescen: höchstens ~1 Fetch je COALESCE_MS. Nach einem Fehler bis
@@ -817,6 +866,7 @@ main {
       // Jedes gültige Nudge beweist: der Push-Kanal lebt → Poll pausieren und
       // den Voll-Stand niedrig-latent holen (coalesct).
       lastNudgeAt = Date.now();
+      naechsteQuelle = 'push';
       requestPoll();
     };
     mws.onclose = function () { mwsOpen = false; mwsSchedule(); };

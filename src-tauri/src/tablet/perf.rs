@@ -236,6 +236,111 @@ impl PerfSnapshot {
     }
 }
 
+/// Drossel für die Perf-Zeile im Diagnose-Log (Spec monitor-livestand-push,
+/// S0). Sie sitzt im Sync-Loop, weil der in **beiden** Betriebsarten läuft —
+/// der LAN-Server tut das nicht, und im reinen Cloud-Modus fehlte die Zeile
+/// sonst genau dort, wo die Messung am meisten hergibt.
+///
+/// Der Zweck ist der Rückweg: Diese Zeilen kommen über den Log-Upload aus
+/// einem echten Turnier zurück, wo kein Messgerät steht.
+#[derive(Debug)]
+pub struct PerfLog {
+    letzte: PerfSnapshot,
+    /// Zeitpunkt des letzten Fensters. `None` = noch kein Bezugspunkt.
+    /// Bewusst ein `Option` statt der Null als Sentinel: Ein Bezugspunkt
+    /// bei `now_ms == 0` ist zwar nur im Test erreichbar, aber ein Sentinel,
+    /// der einen gültigen Wert verschluckt, ist genau die Art Fehler, die
+    /// man erst im Feld bemerkt.
+    letzte_ms: Option<u64>,
+}
+
+/// Abstand zweier Perf-Zeilen. Zehn Sekunden sind grob genug, um das Log
+/// nicht zu fluten, und fein genug, um einen Lastwechsel zu sehen.
+const LOG_FENSTER_MS: u64 = 10_000;
+
+impl PerfLog {
+    pub fn neu() -> Self {
+        PerfLog {
+            letzte: PerfSnapshot::default(),
+            letzte_ms: None,
+        }
+    }
+
+    /// Die nächste Log-Zeile, falls das Fenster voll **und** überhaupt etwas
+    /// passiert ist. Ein Turnier-PC, an dem gerade keine Anzeige hängt,
+    /// schreibt nichts — eine Zeile aus lauter Nullen wäre kein Messwert,
+    /// sondern Rauschen im Diagnose-Log.
+    pub fn faellig(&mut self, zaehler: &PerfCounters, now_ms: u64) -> Option<String> {
+        let Some(seit) = self.letzte_ms else {
+            // Erster Durchlauf: nur den Bezugspunkt setzen, sonst meldete
+            // die erste Zeile das Fenster „seit Unix-Epoche".
+            self.letzte_ms = Some(now_ms);
+            self.letzte = zaehler.snapshot();
+            return None;
+        };
+        let vergangen = now_ms.saturating_sub(seit);
+        if vergangen < LOG_FENSTER_MS {
+            return None;
+        }
+        let jetzt = zaehler.snapshot();
+        let delta = jetzt.seit(&self.letzte);
+        self.letzte = jetzt;
+        self.letzte_ms = Some(now_ms);
+        if delta.ist_still() {
+            return None;
+        }
+        Some(delta.log_zeile(vergangen))
+    }
+}
+
+impl PerfSnapshot {
+    /// Hat sich im Fenster überhaupt nichts getan?
+    pub fn ist_still(&self) -> bool {
+        self.health_push == 0
+            && self.health_poll == 0
+            && self.court_state_push == 0
+            && self.court_state_poll == 0
+            && self.overview_builds == 0
+            && self.persist_calls == 0
+            && self.nudges_sent == 0
+    }
+
+    /// Die Zeile fürs Diagnose-Log. Absolute Zahlen des Fensters plus die
+    /// Rate — die Rate ist das, was man vergleichen will, die absolute Zahl
+    /// das, woran man einen verkürzten Takt erkennt.
+    pub fn log_zeile(&self, fenster_ms: u64) -> String {
+        let s = (fenster_ms as f64 / 1000.0).max(0.001);
+        let rate = |n: u64| n as f64 / s;
+        let mb = |bytes: u64| bytes as f64 / 1_048_576.0 / s;
+        let ms = |ns: u64| ns as f64 / 1_000_000.0;
+        let persist_schnitt = self.persist_ns / self.persist_calls.max(1);
+        format!(
+            "Perf-Anzeigen ({:.0} s): /health {} push + {} poll = {:.1}/s, {:.2} MB/s · \
+             /court/state {} push + {} poll, {:.2} MB/s · overview {} Bauten ({:.1}/s), \
+             p95 {:.2} ms, max {:.2} ms · live-scores {} Schreibvorgänge ({:.1}/s, \
+             {:.2} MB/s, Ø {:.2} ms) · {} Nudges ({:.1}/s)",
+            s,
+            self.health_push,
+            self.health_poll,
+            rate(self.health_push + self.health_poll),
+            mb(self.health_push_bytes + self.health_poll_bytes),
+            self.court_state_push,
+            self.court_state_poll,
+            mb(self.court_state_push_bytes + self.court_state_poll_bytes),
+            self.overview_builds,
+            rate(self.overview_builds),
+            ms(self.overview_build_ns_p95),
+            ms(self.overview_build_ns_max),
+            self.persist_calls,
+            rate(self.persist_calls),
+            mb(self.persist_bytes),
+            ms(persist_schnitt),
+            self.nudges_sent,
+            rate(self.nudges_sent),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,6 +445,95 @@ mod tests {
         assert_eq!(delta.overview_build_ns, 6_000);
         // Verteilungswerte bleiben absolut — sie beschreiben den ganzen Lauf.
         assert_eq!(delta.overview_build_ns_max, 6_000);
+    }
+
+    #[test]
+    fn die_logzeile_nennt_die_gemessenen_kennzahlen() {
+        // Diese Zeile ist der Rückweg aus einem echten Turnier — dort steht
+        // kein Messgerät. Sie muss die vier Posten der Analyse tragen:
+        // Abrufe (getrennt), ihre Bytes, die Bau-Dauer und die Schreib-
+        // vorgänge, jeweils als Rate.
+        let p = PerfCounters::default();
+        for _ in 0..40 {
+            p.note_health(Quelle::Push, 20_000);
+        }
+        for _ in 0..800 {
+            p.note_health(Quelle::Poll, 20_000);
+        }
+        for _ in 0..840 {
+            p.note_overview_build(1_200_000);
+        }
+        for _ in 0..210 {
+            p.note_persist(500_000, 2_048);
+            p.note_nudge();
+        }
+        let zeile = p.snapshot().log_zeile(10_000);
+
+        assert!(zeile.contains("40 push"), "Push-Abrufe fehlen: {zeile}");
+        assert!(zeile.contains("800 poll"), "Poll-Abrufe fehlen: {zeile}");
+        assert!(zeile.contains("84.0/s"), "Abruf-Rate fehlt: {zeile}");
+        assert!(zeile.contains("MB/s"), "Bytes-Rate fehlt: {zeile}");
+        assert!(zeile.contains("840 Bauten"), "Bauten fehlen: {zeile}");
+        assert!(zeile.contains("p95"), "p95 fehlt: {zeile}");
+        assert!(
+            zeile.contains("210 Schreibvorgänge"),
+            "Schreibvorgänge fehlen: {zeile}"
+        );
+        assert!(zeile.contains("210 Nudges"), "Nudges fehlen: {zeile}");
+    }
+
+    #[test]
+    fn die_logzeile_kommt_erst_nach_zehn_sekunden() {
+        let p = PerfCounters::default();
+        let mut log = PerfLog::neu();
+        // Erster Aufruf setzt nur den Bezugspunkt.
+        assert!(log.faellig(&p, 1_000).is_none());
+        p.note_health(Quelle::Poll, 100);
+        assert!(
+            log.faellig(&p, 5_000).is_none(),
+            "vier Sekunden sind noch kein Fenster"
+        );
+        assert!(
+            log.faellig(&p, 11_000).is_some(),
+            "nach zehn Sekunden ist die Zeile fällig"
+        );
+    }
+
+    #[test]
+    fn die_logzeile_meldet_nur_das_fenster_nicht_den_ganzen_lauf() {
+        // Sonst stünde in jeder Zeile die Summe seit Programmstart und die
+        // Rate wäre nicht ablesbar.
+        let p = PerfCounters::default();
+        let mut log = PerfLog::neu();
+        assert!(log.faellig(&p, 0).is_none());
+        for _ in 0..100 {
+            p.note_health(Quelle::Poll, 10);
+        }
+        let erste = log.faellig(&p, 10_000).expect("erste Zeile");
+        assert!(erste.contains("100 poll"), "{erste}");
+
+        p.note_health(Quelle::Poll, 10);
+        let zweite = log.faellig(&p, 20_000).expect("zweite Zeile");
+        assert!(
+            zweite.contains("1 poll"),
+            "die zweite Zeile zählt nur das neue Fenster: {zweite}"
+        );
+    }
+
+    #[test]
+    fn ein_ruhiger_turnier_pc_schreibt_keine_zeile() {
+        // Läuft keine Anzeige, wäre eine Zeile aus lauter Nullen kein
+        // Messwert, sondern Rauschen im Diagnose-Log.
+        let p = PerfCounters::default();
+        let mut log = PerfLog::neu();
+        assert!(log.faellig(&p, 0).is_none());
+        assert!(log.faellig(&p, 60_000).is_none(), "Stille schreibt nichts");
+        assert!(PerfSnapshot::default().ist_still());
+        p.note_nudge();
+        assert!(
+            !p.snapshot().ist_still(),
+            "ein einziger Nudge ist schon nicht mehr still"
+        );
     }
 
     #[test]

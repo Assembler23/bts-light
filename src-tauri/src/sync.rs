@@ -108,6 +108,10 @@ pub struct SyncEngine {
     /// Zuletzt geloggte Turnier-Topologie (Hallen, Felder, Matches) –
     /// das Diagnose-Log nennt sie nur bei Änderung, nicht jeden Zyklus.
     last_topology: Option<(usize, usize, usize)>,
+    /// Drossel der Perf-Zeile der Anzeige-Strecke (Spec
+    /// monitor-livestand-push, S0). Sitzt hier, weil der Sync-Loop in
+    /// **beiden** Betriebsarten läuft — der LAN-Server tut das nicht.
+    perf_log: crate::tablet::perf::PerfLog,
     /// CourtID → Match-ID des im letzten Zyklus dort OnCourt gewesenen
     /// Spiels. Wechselt das (Spiel verlässt das Feld) und ist es beendet,
     /// merkt sich der State den Verlierer als Zähltafelbediener fürs Feld.
@@ -387,6 +391,7 @@ impl SyncEngine {
             finished_at: HashMap::new(),
             last_push_at: None,
             last_topology: None,
+            perf_log: crate::tablet::perf::PerfLog::neu(),
             oncourt_prev: HashMap::new(),
             officials_oncourt_prev: HashMap::new(),
             officials_written: HashMap::new(),
@@ -1679,6 +1684,21 @@ impl SyncEngine {
         http: &reqwest::Client,
         tablet: &TabletState,
     ) -> SyncOutcome {
+        // Perf-Zeile der Anzeige-Strecke (Spec monitor-livestand-push, S0).
+        //
+        // **Ganz vorn, vor jedem Frühausstieg.** Steht BTP still, laufen die
+        // Anzeigen weiter (sie holen ihren Stand vom Tablet-Server) — und
+        // genau dann will man die Zahlen sehen. Hinter `fetch_snapshot`
+        // gesetzt, würde die Messung ausgerechnet im Störungsfall
+        // verstummen. Die Drossel selbst sitzt in `PerfLog` und meldet
+        // höchstens alle zehn Sekunden, bei Stille gar nicht.
+        if let Some(zeile) = self
+            .perf_log
+            .faellig(tablet.perf(), crate::tablet::monitor::now_ms())
+        {
+            tracing::info!("{zeile}");
+        }
+
         let mut snapshot = match client::fetch_snapshot(
             &config.btp.host,
             config.btp.port,
