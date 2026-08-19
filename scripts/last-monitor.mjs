@@ -243,7 +243,10 @@ function starteCourtMonitor(courtId) {
       const r = await fetch(`${BASE}court/${courtId}/state?src=${src}`, { cache: "no-store" });
       const text = await r.text();
       stat.courtAbrufe++;
-      stat.courtBytes += text.length;
+      // Wie bei `/health`: echte Bytes, nicht UTF-16-Codeunits — sonst
+      // stünden in der Vorher/Nachher-Tabelle zwei verschieden gerechnete
+      // MB/s-Werte nebeneinander.
+      stat.courtBytes += Buffer.byteLength(text, "utf8");
     } catch {
       // Eigener Zähler: Ein klemmendes `/court/{id}/state` sähe sonst in der
       // Zusammenfassung wie ein `/health`-Problem aus.

@@ -21,6 +21,20 @@ use crate::tablet::state::TabletState;
 /// Abstand zwischen zwei Poll-Push-Zyklen.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Beendet einen Nebentakt, sobald der Task endet, der ihn gestartet hat —
+/// auch beim Abbruch (`Drop` läuft dann ebenfalls). Ein fallengelassenes
+/// `JoinHandle` beendet in Tokio nichts, es löst die Aufgabe nur ab; ohne
+/// diesen Wächter hinterließe jedes Stoppen/Starten der Übertragung einen
+/// weiteren Takt, der bis zum Programmende weiterliefe. Gleiches Muster wie
+/// `TaktWaechter` in `tablet/server.rs`.
+struct TaktWaechter(tauri::async_runtime::JoinHandle<()>);
+
+impl Drop for TaktWaechter {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Status der Sync-Schleife, wie ihn das Dashboard anzeigt.
 #[derive(Clone, Serialize)]
 pub struct SyncStatus {
@@ -931,6 +945,27 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         // (Review 17.08.2026; Details an `sync::CheckinLese`).
         let checkin_lese =
             std::sync::Arc::new(std::sync::Mutex::new(crate::sync::CheckinLese::neu()));
+        // Sekundentakt für den Live-Stand (Spec monitor-livestand-push, S2)
+        // als **eigener** Task, nicht als Teil dieser Schleife: Hängt BTP
+        // oder badhub in seinen Zeitüberschreitungen, steht `run_once`
+        // zwanzig Sekunden und länger — die Tablets zählen derweil weiter,
+        // und der Verlust bei einem Absturz wäre um ein Vielfaches größer
+        // als die zugesagte eine Sekunde (Review-Fund 19.08.2026).
+        //
+        // `spawn_blocking` für den Schreibvorgang selbst (gemessene 20 ms),
+        // damit er keinen Async-Worker belegt. Der Wächter beendet den Takt
+        // zusammen mit dieser Schleife — auch beim Abbruch (Muster
+        // `TaktWaechter` in `tablet/server.rs`).
+        let flush_tablet = sync_tablet.clone();
+        let _flush_takt = TaktWaechter(tauri::async_runtime::spawn(async move {
+            let mut takt = tokio::time::interval(Duration::from_secs(1));
+            takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                takt.tick().await;
+                let tab = flush_tablet.clone();
+                let _ = tauri::async_runtime::spawn_blocking(move || tab.flush_scores()).await;
+            }
+        }));
         loop {
             {
                 let lese = checkin_lese.clone();
@@ -948,20 +983,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
                 .status
                 .lock()
                 .expect("Status-Mutex nicht vergiftet") = status;
-            // Sekundentakt für den Live-Stand (Spec monitor-livestand-push,
-            // S2). Die Wartezeit bis zum nächsten BTP-Abruf wird in
-            // Sekunden-Schritten abgesessen; nach jedem Schritt geht ein
-            // aufgelaufener Stand auf die Platte.
-            //
-            // Hier statt in `run_once`, weil dieser Loop in **beiden**
-            // Betriebsarten läuft und den Takt unabhängig von den
-            // BTP-Frühausstiegen hält. `spawn_blocking`, damit der
-            // Schreibvorgang (gemessene 20 ms) keinen Async-Worker belegt.
-            for _ in 0..POLL_INTERVAL.as_secs().max(1) {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                let tab = sync_tablet.clone();
-                let _ = tauri::async_runtime::spawn_blocking(move || tab.flush_scores()).await;
-            }
+            tokio::time::sleep(POLL_INTERVAL).await;
         }
     });
     *slot = Some(handle);

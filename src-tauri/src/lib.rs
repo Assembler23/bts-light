@@ -69,7 +69,12 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main_window(app),
-            "quit" => app.exit(0),
+            // Über `beenden`, nicht `app.exit` direkt: Seit der Entprellung
+            // (Spec monitor-livestand-push, S2) schreibt nicht mehr jeder
+            // Punkt selbst, und dies ist der dokumentierte Weg, eine in den
+            // Infobereich minimierte App zu schließen — ohne den letzten
+            // Schreibvorgang ginge hier Spielstand verloren.
+            "quit" => beenden(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

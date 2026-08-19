@@ -2180,7 +2180,7 @@ impl TabletState {
                 json.hash(&mut hasher);
                 hasher.finish()
             };
-            if self.scores_fingerprint.swap(abdruck, Ordering::Relaxed) == abdruck {
+            if self.scores_fingerprint.load(Ordering::Relaxed) == abdruck {
                 return;
             }
             let bytes = json.len() as u64;
@@ -2189,8 +2189,17 @@ impl TabletState {
             // so liegt nie eine halb geschriebene live-scores.json vor (ein
             // Absturz mitten im Schreiben würde sie sonst korrumpieren).
             let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
+            let geschrieben =
+                std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, &path).is_ok();
+            // **Erst nach dem geglückten Umbenennen vermerken.** Sonst
+            // behauptete der Fingerabdruck nach einem fehlgeschlagenen
+            // Schreibvorgang (volle Platte, Virenscanner auf der Temp-Datei,
+            // Verzeichnis weg), der Inhalt liege auf Platte — und jeder
+            // spätere Flush mit demselben Stand kehrte sofort zurück. Die
+            // Datei bliebe für den Rest des Laufs veraltet, obwohl vorher
+            // jeder Punkt es erneut versucht hätte (Review-Fund 19.08.2026).
+            if geschrieben {
+                self.scores_fingerprint.store(abdruck, Ordering::Relaxed);
             }
             // Messung (Spec monitor-livestand-push, S0): der Posten, den
             // diese Etappe entprellt — die Zahl belegt die Wirkung.
