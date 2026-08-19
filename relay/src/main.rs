@@ -1949,10 +1949,11 @@ async fn monitor_ws(
 /// Flackern). Der Sender liegt ausschließlich im eigenen Namespace →
 /// Namespace-Isolation strikt.
 ///
-/// TODO(A1): Match-Zuweisung/-Räumung stößt der Relay noch nicht an — der
-/// Cloud-Score-Weg (`forward_score`) ist der Muss; die ~250-ms-Poll deckt die
-/// Zuweisungs-Latenz ab (Score-Cache-Räumung folgt dem Host-Frame, nicht
-/// einem lokalen State-Aufruf).
+/// Angestoßen wird der Satzstand (`forward_score`) **und seit v0.9.238 die
+/// Match-Zuweisung samt Räumung** (Spec monitor-livestand-push, S3): Die
+/// Arme `MatchAssigned`/`MatchCleared` wecken das betroffene Feld, nachdem
+/// der Zwischenstand steht — aber nur bei einem echten Wechsel, damit ein
+/// Tablet-Reconnect die Anzeigen nicht ohne Anlass holen lässt.
 async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: Option<i64>) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     subscribe_monitor(&broker, &ns, court, &tx).await;
@@ -3604,6 +3605,17 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchAssigned { match_brief }));
             }
+            // Anzeigen anstoßen (Spec monitor-livestand-push, S3) — schließt
+            // das TODO(A1) an `monitor_conn`. **Nach** dem Eintrag in
+            // `court_matches`: Die geweckte Anzeige holt sofort, und sie darf
+            // nicht den Stand von vor der Zuweisung bekommen.
+            //
+            // Nur bei einem echten Wechsel: Ein erneutes `MatchAssigned`
+            // fürs selbe Match (Tablet-Reconnect) ändert für die Anzeigen
+            // nichts.
+            if !same_match {
+                notify_monitor(namespace, court_id);
+            }
         }
         HostFrame::MatchCleared {
             court_id,
@@ -3614,12 +3626,18 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 namespace.court_labels.insert(court_id, court_label);
             }
             namespace.court_hall.insert(court_id, hall);
-            namespace.court_matches.remove(&court_id);
+            let war_belegt = namespace.court_matches.remove(&court_id).is_some();
             namespace.court_scores.remove(&court_id);
             namespace.court_state.remove(&court_id);
             namespace.court_on_court_since.remove(&court_id);
             if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchCleared));
+            }
+            // Anzeigen anstoßen (Spec monitor-livestand-push, S3), nachdem
+            // der Zwischenstand geräumt ist. Nur wenn das Feld überhaupt
+            // belegt war — eine wiederholte Räumung ändert nichts.
+            if war_belegt {
+                notify_monitor(namespace, court_id);
             }
         }
         HostFrame::ScoreUpdate {
@@ -5515,6 +5533,107 @@ mod tests {
         // Nur das Tablet von Feld 401 bekommt das Match.
         assert!(rx_b.try_recv().is_ok(), "Feld 401 bekommt das Match");
         assert!(rx_a.try_recv().is_err(), "Feld 101 bleibt unberührt");
+    }
+
+    // ── Zuweisungs-Nudge (Spec monitor-livestand-push, S3) ─────────────────
+
+    /// Meldet eine Übersichts-Anzeige an (alle Felder) und gibt ihr
+    /// Empfangs-Ende zurück.
+    async fn uebersicht_anmelden(broker: &Broker, ns: &str) -> mpsc::UnboundedReceiver<Message> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        subscribe_monitor(broker, ns, None, &tx).await;
+        rx
+    }
+
+    #[tokio::test]
+    async fn match_assigned_nudgt_die_anzeigen() {
+        // Bis S3 stieß der Relay eine Zuweisung nicht an — die Anzeige
+        // erfuhr davon erst über ihren Poll (TODO(A1) an `monitor_conn`).
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, "ns1", &host).await;
+        let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+                match_brief: brief(7),
+                on_court_since_ms: None,
+            },
+            &host,
+        )
+        .await;
+
+        let (court, seq) = nudge_of(anzeige.try_recv().expect("Anstoß nach Zuweisung"));
+        assert_eq!(court, 101);
+        assert!(seq > 0);
+    }
+
+    #[tokio::test]
+    async fn match_cleared_nudgt_die_anzeigen() {
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.court_matches.insert(101, brief(7));
+        }
+        register_host(&broker, "ns1", &host).await;
+        let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchCleared {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+            },
+            &host,
+        )
+        .await;
+
+        let (court, _) = nudge_of(anzeige.try_recv().expect("Anstoß nach Räumung"));
+        assert_eq!(court, 101);
+    }
+
+    #[tokio::test]
+    async fn dasselbe_match_erneut_nudgt_nicht() {
+        // Ein Tablet-Reconnect löst ein erneutes `MatchAssigned` fürs selbe
+        // Match aus. Für die Anzeigen ändert sich dabei nichts — sie zu
+        // wecken hieße, sie den vollen Stand ohne Anlass zu holen.
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.court_matches.insert(101, brief(7));
+        }
+        register_host(&broker, "ns1", &host).await;
+        let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+                match_brief: brief(7),
+                on_court_since_ms: Some(1000),
+            },
+            &host,
+        )
+        .await;
+
+        assert!(
+            anzeige.try_recv().is_err(),
+            "gleiches Match, kein Anstoß an die Anzeigen"
+        );
     }
 
     #[tokio::test]

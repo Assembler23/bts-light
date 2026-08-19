@@ -334,13 +334,30 @@ BTP-Abruf in Sekundenschritten absitzt und nach jedem Schritt flusht. Dort statt
 von den BTP-Frühausstiegen bleibt. Geschrieben wird in `spawn_blocking`, damit die
 gemessenen 20 ms keinen Async-Worker belegen.
 
-**Zuweisungs-Nudge (S3)**
-- [ ] Eine neue Court→Match-Zuordnung nudgt genau das betroffene Feld, kein anderes.
-- [ ] Ein unveränderter Snapshot löst keinen Nudge aus.
-- [ ] Eine Räumung nudgt.
-- [ ] Ein BTP-Satzstand-Sprung ohne Tablet-Beteiligung nudgt (kein stiller Sprung mehr).
-- [ ] Am Relay nudgen `MatchAssigned` und `MatchCleared`, ein erneutes gleiches Match nicht.
+**Zuweisungs-Nudge (S3)** — umgesetzt v0.9.238
+- [x] Eine neue Court→Match-Zuordnung nudgt genau das betroffene Feld, kein anderes.
+      *(`ein_snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld` — beim Feldwechsel
+      sind es genau zwei: das frei gewordene und das neu belegte.)*
+- [x] Ein unveränderter Snapshot löst keinen Nudge aus.
+      *(`ein_unveraenderter_snapshot_nudgt_nicht` — sonst weckte jeder BTP-Poll alle
+      Anzeigen aller Felder.)*
+- [x] Eine Räumung nudgt. *(`eine_raeumung_im_snapshot_nudgt`)*
+- [x] Ein BTP-Satzstand-Sprung ohne Tablet-Beteiligung nudgt (kein stiller Sprung mehr).
+      *(`ein_btp_satzstand_sprung_nudgt`. Deshalb steht der Satzstand mit in der
+      Projektion, nicht nur `match_id`: Ein von Hand in BTP eingetragener Stand ändert
+      sonst nichts, was der Vergleich sähe. Ein Punkt **vom Tablet** taucht dort nie auf —
+      `set_snapshot` legt den rohen BTP-Stand ab, `apply_tablet_scores` arbeitet danach
+      auf einer eigenen Kopie, und das Tablet nudgt ohnehin selbst.)*
+- [x] Am Relay nudgen `MatchAssigned` und `MatchCleared`, ein erneutes gleiches Match nicht.
+      *(`match_assigned_nudgt_die_anzeigen` · `match_cleared_nudgt_die_anzeigen` ·
+      `dasselbe_match_erneut_nudgt_nicht` — jeweils **nach** dem Cache-Insert bzw. der
+      Räumung, damit die geweckte Anzeige nicht den Stand von vorher holt.)*
 - [ ] Zuweisung → sichtbare Anzeige dauert p95 ≤ 1 s, auch bei aktivem 4-s-Fallback.
+      *(Messwert — der 4-s-Fallback kommt erst mit S6. Gehört in die Nachmessung.)*
+
+**Damit sind beide offenen A1-TODOs geschlossen** (an `monitor_socket` im Host und
+`monitor_conn` im Relay): Die Match-Zuweisung war der letzte Anzeige-Wechsel, für den
+allein der Poll-Fallback die Latenz abdeckte.
 
 **Ordnung (S4)**
 - [ ] `/health` und `/court/{id}/state` tragen je Feld ein `seq`; die Cloud-Pendants ebenso.

@@ -2767,10 +2767,13 @@ async fn monitor_ws_upgrade(
 /// Vollstand daraufhin über ihre bestehende Poll-Route. So bleibt der
 /// Poll-Endpunkt die **einzige** Datenquelle (ein Renderpfad, kein Flackern).
 ///
-/// TODO(A1): Match-Zuweisung wird noch nicht angestoßen — sie ist
-/// BTP-Snapshot-getrieben (Sync-Loop), nicht ein einzelner State-Aufruf wie
-/// Score/Alert/Räumung. Bis dahin deckt der ~250-ms-Poll-Fallback die
-/// Zuweisungs-Latenz ab (Score ist das Muss, Spec Paket A).
+/// Angestoßen wird alles, was eine Anzeige verändert: Satzstand, Meldungen,
+/// Räumung — **und seit v0.9.238 die Match-Zuweisung** (Spec
+/// monitor-livestand-push, S3). Letztere ist BTP-Snapshot-getrieben statt
+/// ein einzelner State-Aufruf; `set_snapshot` vergleicht dafür die Belegung
+/// je Feld mit der des Vorgänger-Stands und weckt nur die Abweichungen.
+/// Damit deckt der Poll-Fallback keine Latenz mehr ab, die der Nudge nicht
+/// schon einholt.
 async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Option<i64>) {
     // Kanal hier anlegen und das Sende-Ende dem State reichen (wie im Relay),
     // damit wir es am Verbindungsende per `unsubscribe_monitor` gezielt wieder

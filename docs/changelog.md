@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.238
+
+- **Eine Feldzuweisung erscheint jetzt sofort auf den Anzeigen.** Bisher
+  erfuhren Court-Monitore und Übersichts-TVs nur von gezählten Punkten
+  unmittelbar; dass ein Spiel neu aufs Feld kommt, das Feld frei wird oder
+  ein Spiel auf ein anderes Feld wandert, fanden sie erst bei ihrer nächsten
+  regelmäßigen Abfrage heraus.
+- **Auch ein in BTP von Hand eingetragener Spielstand erscheint sofort.**
+  Wird gezählt, ohne dass ein Tablet beteiligt ist, war dieser Sprung für
+  die Anzeigen bisher unsichtbar bis zur nächsten Abfrage.
+- Geweckt wird dabei **nur das betroffene Feld** — bei einem Feldwechsel
+  genau zwei: das frei gewordene und das neu belegte. Ändert sich nichts,
+  passiert nichts; sonst weckte jeder Abgleich mit BTP alle Anzeigen.
+- Gilt im Heim-Netz **und** über die Cloud.
+- Vierte von sieben Etappen der Spec `monitor-livestand-push`; damit sind
+  die beiden letzten offenen Punkte aus dem Anzeige-Umbau von v0.9.196
+  erledigt.
+
 ## v0.9.237
 
 - **Ein gezählter Punkt schreibt nicht mehr auf die Festplatte.** Bisher

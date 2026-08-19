@@ -644,6 +644,17 @@ pub struct TabletState {
     /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
     /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
     monitor_seq: RwLock<HashMap<i64, u64>>,
+    /// Zuletzt an die Anzeigen gemeldete Belegung je Feld: CourtID →
+    /// (Match-ID, Satzstand aus BTP). Grundlage des Zuweisungs-Nudges (Spec
+    /// monitor-livestand-push, S3).
+    ///
+    /// Warum der Satzstand mit hineingehört, obwohl die Zuweisung schon an
+    /// der Match-ID hängt: Trägt jemand in BTP von Hand einen Stand ein,
+    /// ändert sich nur er — ohne diesen Vergleich blieb der Sprung für die
+    /// Anzeigen still (das zweite offene A1-TODO). Ein Punkt **vom Tablet**
+    /// steht hier nie drin: `set_snapshot` legt den rohen BTP-Stand ab,
+    /// `apply_tablet_scores` arbeitet danach auf einer eigenen Kopie.
+    monitor_belegung: RwLock<HashMap<i64, (i64, Vec<(i64, i64)>)>>,
     /// Steht ein Schreibvorgang der `live-scores.json` aus (Spec
     /// monitor-livestand-push, S2)? Gesetzt von jedem Punkt, geleert vom
     /// Flush. Ein `AtomicBool` genügt: Es gibt nur einen Zustand („es hat
@@ -1097,7 +1108,20 @@ impl TabletState {
         {
             self.load_btp_retry();
         }
+        // S3 (Spec monitor-livestand-push): Belegung je Feld festhalten, bevor
+        // der Snapshot verschoben wird — geweckt wird gleich danach.
+        let belegung: HashMap<i64, (i64, Vec<(i64, i64)>)> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| m.court_id.map(|cid| (cid, (m.id, m.sets.clone()))))
+            .collect();
         *self.snapshot.write().unwrap() = Some(snapshot);
+        // Anzeigen der Felder wecken, deren Belegung sich geändert hat —
+        // Zuweisung, Räumung, Feldwechsel und der in BTP von Hand
+        // eingetragene Satzstand. **Nach** dem Ablegen: Die geweckte Anzeige
+        // holt sofort und muss den neuen Stand sehen.
+        self.nudge_belegungs_wechsel(belegung);
         // S1 (Spec monitor-livestand-push): Ein neuer BTP-Stand kann jedes
         // Feld verändern — Zuweisung, Räumung, Ergebnis, Satzstand. Der
         // Antwortcache der Übersicht ist damit in jedem Fall überholt.
@@ -2393,6 +2417,43 @@ impl TabletState {
     /// Erkennungstakt noch nichts abgelegt hat.
     pub fn tl_state_cache(&self) -> Option<TlStateCache> {
         self.tl_state_cache.read().unwrap().clone()
+    }
+
+    /// Weckt die Anzeigen jedes Felds, dessen Belegung sich gegenüber dem
+    /// letzten Schnappschuss geändert hat (Spec monitor-livestand-push, S3).
+    ///
+    /// Deckt in einem Griff ab, was bisher nur der Poll-Fallback auffing:
+    /// neue Zuweisung, Räumung, Feldwechsel und den in BTP von Hand
+    /// eingetragenen Satzstand. Ein Feld, dessen Belegung gleich geblieben
+    /// ist, wird **nicht** geweckt — sonst weckte jeder BTP-Poll alle
+    /// Anzeigen aller Felder.
+    ///
+    /// Nimmt die fertige Projektion statt des Snapshots: Der Aufrufer bildet
+    /// sie, bevor er den Snapshot ablegt (der wird dabei verschoben), und
+    /// spart so einen Klon des ganzen Turnierstands je Poll.
+    fn nudge_belegungs_wechsel(&self, neu: HashMap<i64, (i64, Vec<(i64, i64)>)>) {
+        // Betroffen ist jedes Feld, das in genau einer der beiden Fassungen
+        // steht oder in beiden mit unterschiedlichem Inhalt. Die Liste wird
+        // erst gesammelt und **nach** dem Freigeben des Schreib-Locks
+        // geweckt — `notify_monitor` nimmt selbst Locks (Muster
+        // `record_score`).
+        let betroffen: Vec<i64> = {
+            let alt = self.monitor_belegung.read().unwrap();
+            alt.keys()
+                .chain(neu.keys())
+                .filter(|cid| alt.get(cid) != neu.get(cid))
+                .copied()
+                .collect::<std::collections::BTreeSet<i64>>()
+                .into_iter()
+                .collect()
+        };
+        if betroffen.is_empty() {
+            return;
+        }
+        *self.monitor_belegung.write().unwrap() = neu;
+        for court_id in betroffen {
+            self.notify_monitor(court_id);
+        }
     }
 
     /// Meldet, dass sich der Live-Stand geändert hat (Spec
@@ -6422,6 +6483,94 @@ mod tests {
         let s = st.perf().snapshot();
         assert_eq!(s.persist_calls, 0);
         assert_eq!(s.nudges_sent, 1);
+    }
+
+    // ── Zuweisungs-Nudge (Spec monitor-livestand-push, S3) ─────────────────
+
+    /// Ein Snapshot mit einem Match auf einem Feld — Satzstand einstellbar.
+    fn snapshot_mit_stand(
+        match_id: i64,
+        court_id: Option<i64>,
+        sets: Vec<(i64, i64)>,
+    ) -> BtpSnapshot {
+        let mut snap = snapshot(
+            vec![match_on(match_id, court_id, MatchStatus::OnCourt)],
+            vec![(101, "Feld 1"), (102, "Feld 2")],
+        );
+        snap.matches[0].sets = sets;
+        snap
+    }
+
+    #[test]
+    fn ein_snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld() {
+        // Das erste der beiden offenen A1-TODOs: Bisher fing nur der
+        // Poll-Fallback eine Zuweisung auf.
+        let st = TabletState::default();
+        // Erster Snapshot: Feld 101 belegt. (Beim allerersten Stand ist noch
+        // keine Anzeige verbunden — die Nudges hier sind folgenlos.)
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        // Dasselbe Match wandert auf Feld 102.
+        st.set_snapshot(snapshot_mit_stand(7, Some(102), vec![]));
+
+        let nudges = st.perf().snapshot().nudges_sent - vorher;
+        assert_eq!(
+            nudges, 2,
+            "genau die zwei betroffenen Felder: 101 wird frei, 102 belegt"
+        );
+    }
+
+    #[test]
+    fn ein_unveraenderter_snapshot_nudgt_nicht() {
+        // Der BTP-Poll läuft alle fünf Sekunden. Weckte er jedes Mal alle
+        // Anzeigen, wäre der Nudge-Kanal wertlos.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent,
+            vorher,
+            "gleiche Belegung, gleicher Stand: kein Anstoß"
+        );
+    }
+
+    #[test]
+    fn eine_raeumung_im_snapshot_nudgt() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(21, 19)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        // Das Match ist beendet und steht auf keinem Feld mehr.
+        st.set_snapshot(snapshot_mit_stand(7, None, vec![(21, 19)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent - vorher,
+            1,
+            "das freigewordene Feld wird geweckt"
+        );
+    }
+
+    #[test]
+    fn ein_btp_satzstand_sprung_nudgt() {
+        // Das zweite offene A1-TODO: Trägt jemand den Stand in BTP von Hand
+        // ein, ist kein Tablet beteiligt — der Sprung war für die Anzeigen
+        // bisher still.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(5, 3)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 3)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent - vorher,
+            1,
+            "der Satzstand-Sprung weckt das Feld"
+        );
     }
 
     // ── Entprellter Schreibvorgang (Spec monitor-livestand-push, S2) ───────
