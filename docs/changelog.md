@@ -4,6 +4,76 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.242
+
+- **Eine Anzeige kann jetzt den Stand eines einzelnen Feldes abrufen**, statt
+  immer die ganze Halle zu bekommen: `…/health?court=<Feldnummer>` liefert
+  dieselbe Antwort wie sonst, nur mit diesem einen Feld darin. Im LAN wie in
+  der Cloud.
+- Ohne den Zusatz ändert sich nichts — die Feld-Übersicht bekommt weiterhin
+  alle Felder.
+- Eine unbekannte oder unsinnige Feldnummer liefert einfach eine leere Liste.
+  Bewusst so: Wer von außen Feldnummern durchprobiert, soll an der Antwort
+  nicht ablesen können, welche es gibt.
+- Achte Etappe (S7) und damit die letzte der Spec `monitor-livestand-push`.
+  Welche Anzeige den schmalen Abruf nutzen soll, entscheidet die Nachmessung —
+  heute holt der Einzelfeld-Monitor seinen Stand über einen eigenen Weg.
+
+## v0.9.241
+
+- **Die Anzeigen merken jetzt zuverlässig, ob ihre Leitung noch lebt.** Der
+  Server schickt alle zehn Sekunden ein stilles Lebenszeichen über dieselbe
+  Leitung, über die auch die Spielstände angestoßen werden. Vorher schloss
+  eine Anzeige aus „es kommt gerade nichts" auf „die Leitung ist tot" — in
+  einer ruhigen Halle zwischen zwei Ballwechseln also ständig. Umgekehrt
+  konnte eine Leitung stundenlang als offen gelten, ohne dass je etwas
+  ankam.
+- **Bleibt das Lebenszeichen über 25 Sekunden aus**, baut die Anzeige die
+  Verbindung von sich aus neu auf, statt auf eine tote zu warten. Ein
+  einzelner fehlgeschlagener Abruf genügt außerdem, um sofort wieder in den
+  schnellen Sicherheitstakt zu gehen.
+- **Neuer Schalter „Sicherheitsabruf entlasten"** (in der `config.json`:
+  `push_fallback_slow`, standardmäßig **aus**). Ist er gesetzt, fragt eine
+  Anzeige mit gesunder Leitung nur noch alle vier Sekunden nach, statt
+  viermal je Sekunde — die eigentliche Entlastung dieser Reihe. Wer ihn
+  nicht setzt, merkt von dieser Version nichts.
+- Siebte Etappe (S6) der Spec `monitor-livestand-push`; offen bleibt nur
+  noch der schmale Einzelfeld-Abruf.
+
+## v0.9.240
+
+- **Die Feld-Übersicht zeichnet bei einem Punkt nur noch die Ziffern neu.**
+  Bisher warf sie bei jedem eintreffenden Stand das komplette Bild weg und
+  baute alle Feldkacheln von vorn auf — bei zwanzig Feldern rund siebzig Mal
+  je Sekunde, für eine Änderung von zwei Ziffern. Das war der Grund, warum
+  die Anzeigen auf schwächeren Raspberry Pis ruckelten.
+- **Neu gebaut wird weiterhin, sobald sich mehr ändert als der Punktestand:**
+  neuer Satz, anderes Spiel, Feld wird frei oder belegt, Behandlungspause,
+  Turnierleitung gerufen, andere Feld-Reihenfolge, andere Halle oder
+  Hallen-Farbe, geänderte Namen — und beim Umschalten der Hallen-Anzeige.
+- **Spätestens alle 30 Sekunden** wird ohnehin einmal komplett neu gezeichnet.
+  Sollte sich also je etwas verschieben, richtet sich die Anzeige von selbst
+  wieder ein, statt bis zum nächsten Spielwechsel falsch zu bleiben.
+- Am Einzelfeld-Monitor ändert sich nichts — der hat nie ein ganzes Bild
+  weggeworfen.
+- Sechste von sieben Etappen der Spec `monitor-livestand-push`.
+
+## v0.9.239
+
+- **Die Anzeigen können jetzt erkennen, welcher Stand neuer ist.** Jeder
+  Feld-Stand trägt eine laufende Nummer — dieselbe, die schon im Anstoß
+  über die Leitung geht. Damit kann eine Anzeige zwei Antworten, die sich
+  überholen, richtig einordnen statt die zweite blind anzuwenden. Für die
+  Turnierleitung ändert sich nichts; es ist die Grundlage dafür, dass die
+  Anzeigen in der nächsten Etappe nur noch die betroffene Feldkachel neu
+  zeichnen statt das ganze Bild.
+- **Die Nummer übersteht einen Neustart.** Sie beginnt bei der Uhrzeit statt
+  bei eins — sonst hätte eine Anzeige nach einem Neustart des Turnier-PCs
+  jeden neuen Stand für veraltet gehalten und wäre stehengeblieben, bis der
+  Zähler den alten Wert überholt hat.
+- Ältere Stände ohne diese Nummer werden weiterhin normal angezeigt.
+- Fünfte von sieben Etappen der Spec `monitor-livestand-push`.
+
 ## v0.9.238
 
 - **Eine Feldzuweisung erscheint jetzt sofort auf den Anzeigen.** Bisher

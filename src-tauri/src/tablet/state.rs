@@ -687,6 +687,12 @@ pub struct TabletState {
     /// Wahrheit**: Ist er kalt oder abgestanden, baut der Handler direkt,
     /// genau wie vorher.
     overview_cache: RwLock<Option<OverviewCache>>,
+    /// Ein-Feld-Ausschnitte zur aktuellen Übersicht (Spec
+    /// monitor-livestand-push, S7) — faul gefüllt, siehe [`FeldCache`].
+    feld_cache: RwLock<Option<FeldCache>>,
+    /// Wie oft die Ausschnitte gebaut wurden. Nur Messung: Der Test hält
+    /// damit fest, dass fünf schmale Abrufe **einen** Schnitt kosten.
+    feld_schnitte: AtomicU64,
     /// Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
     /// Reine Messgrößen — sie beeinflussen nichts, sie beschreiben nur, was
     /// die Anzeigen kosten. Ohne diese Vorher-Zahlen wird laut Spec keine
@@ -744,7 +750,62 @@ pub struct OverviewCache {
     pub rev: u64,
     pub etag: String,
     pub courts_json: String,
+    /// Ordnungszahlen je Feld als fertiges JSON-Objekt (Spec
+    /// monitor-livestand-push, S4). Gehören zum **selben Bau** wie
+    /// `courts_json` — sonst könnte eine gecachte Liste mit frisch gelesenen
+    /// Zahlen ausgeliefert werden, und die wären neuer als der Inhalt.
+    /// Fließen bewusst **nicht** in `etag` ein (siehe `monitor_seqs`).
+    pub seqs_json: String,
     pub gebaut_ms: u64,
+}
+
+/// Die Ein-Feld-Ausschnitte einer Cache-Generation (Spec
+/// monitor-livestand-push, S7).
+///
+/// **Faul gefüllt.** Der Schnitt ersetzt keinen Neubau — er kommt obendrauf,
+/// und heute ruft ihn kein einziger Client. Würde er bei jedem Bau der
+/// Übersicht mitberechnet, zahlte ihn also jeder, ohne dass ihn jemand
+/// nutzt. Deshalb entsteht er erst beim ersten schmalen Abruf und gilt dann
+/// für alle weiteren derselben Generation.
+///
+/// Der Schlüssel ist die **geparste** Zahl, nicht der Rohtext: `?court=0101`
+/// und `?court=101` meinen dasselbe Feld, und über den Rohtext ließen sich
+/// beliebig viele Schlüssel erzeugen (Sicherheits-Review 19.08.2026).
+#[derive(Debug, Clone)]
+pub struct FeldCache {
+    /// Zu welchem Bau der vollen Antwort diese Ausschnitte gehören — deren
+    /// **Marke**, nicht deren Revision.
+    ///
+    /// Die Revision allein wäre schwächer als die Quelle: Der Übersichts-Cache
+    /// verlangt gleiche Revision **und** nicht abgelaufene Hart-TTL, und die
+    /// TTL ist das Netz gegen Änderungen, die niemand meldet — `attach_tablet`,
+    /// `detach_tablet` und `record_battery` ändern die Anzeige, ohne die
+    /// Revision zu heben. Der volle Weg richtet sich nach 250 ms von selbst,
+    /// der schmale hinge bei stehender Revision für immer fest
+    /// (Review-Fund 19.08.2026). Die Marke ist ein Inhalts-Hash und deckt
+    /// beides ab; ergab ein TTL-Neubau denselben Inhalt, erspart sie sogar den
+    /// Neuschnitt.
+    pub marke: String,
+    /// CourtID → (Feld-Liste mit einem Eintrag, Ordnungszahl, Marke).
+    pub felder: HashMap<i64, (String, String, String)>,
+    /// Antwort auf jede unbrauchbare Feldnummer — eine leere Liste. Auch sie
+    /// hat eine Marke, damit der Bestätigungs-Pfad für sie genauso arbeitet.
+    pub leer: (String, String, String),
+}
+
+impl Default for FeldCache {
+    /// **Von Hand, nicht abgeleitet.** Der leere Ausschnitt geht unverändert
+    /// in den Antwort-Umschlag; mit abgeleiteten Leerstrings entstünde dort
+    /// `"courts":,` — eine unparsbare Antwort und damit eine tote Anzeige.
+    /// Als abgeleitetes `Default` wäre das ein stiller Fallstrick statt eines
+    /// Compile-Fehlers (Review-Fund 19.08.2026).
+    fn default() -> Self {
+        Self {
+            marke: String::new(),
+            felder: HashMap::new(),
+            leer: ("[]".to_string(), "{}".to_string(), String::new()),
+        }
+    }
 }
 
 /// Ein Eintrag des TL-Antwort-Caches (Spec tl-web-push): die fertig
@@ -2361,7 +2422,13 @@ impl TabletState {
         self.bump_overview_rev();
         let seq = {
             let mut seqs = self.monitor_seq.write().unwrap();
-            let s = seqs.entry(court_id).or_insert(0);
+            // Erstbelegung mit der Uhrzeit statt mit 0 (Spec
+            // monitor-livestand-push, S4; Muster `set_monitor_command`): Die
+            // Zahl bleibt so über Prozess-Neustarts monoton. Sonst begänne
+            // sie nach jedem Neustart wieder klein, und eine Anzeige mit
+            // gemerktem `seq` verwürfe jeden neuen Stand als veraltet, bis
+            // der Zähler den alten Wert überholt hätte.
+            let s = seqs.entry(court_id).or_insert_with(now_ms);
             *s += 1;
             *s
         };
@@ -2509,6 +2576,35 @@ impl TabletState {
         }
     }
 
+    /// Ordnungszahl des Feld-Stands (Spec monitor-livestand-push, S4) —
+    /// dieselbe Zahl, die der letzte Nudge dieses Felds getragen hat.
+    /// `0`, solange das Feld noch nie geweckt wurde.
+    ///
+    /// Die Voll-Antworten (`/health`, `/court/{id}/state`) reichen sie mit,
+    /// damit die Anzeige Push und Abruf zueinander ordnen kann.
+    pub fn monitor_seq_of(&self, court_id: i64) -> u64 {
+        self.monitor_seq
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Alle Ordnungszahlen auf einmal — die Karte, die `/health` neben der
+    /// Feld-Liste ausliefert (Spec monitor-livestand-push, S4).
+    ///
+    /// **Sie steht bewusst NEBEN der Feld-Liste und nicht darin:** Die Marke
+    /// der Antwort ist ein Streuwert über die Feld-Liste, und die Zahlen
+    /// steigen bei jedem Anstoß — auch bei einem, der die Anzeige gar nicht
+    /// verändert (etwa ein Tablet-Abgleich mit unverändertem Anzeige-Stand).
+    /// Steckten sie in der Liste, wechselte die Marke jedes Mal und die
+    /// Bestätigung ohne Nutzdaten aus S1 wäre wirkungslos — auf genau der
+    /// Strecke, die sie entlasten soll (Review-Fund 19.08.2026).
+    pub fn monitor_seqs(&self) -> HashMap<i64, u64> {
+        self.monitor_seq.read().unwrap().clone()
+    }
+
     /// Aktuelle Revision des Anzeige-Zustands (Spec monitor-livestand-push, S1).
     pub fn overview_rev(&self) -> u64 {
         self.overview_rev.load(Ordering::Relaxed)
@@ -2519,12 +2615,21 @@ impl TabletState {
         self.overview_rev.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Legt die gebaute Feld-Liste als Antwortcache ab.
-    pub fn set_overview_cache(&self, rev: u64, etag: String, courts_json: String, ms: u64) {
+    /// Legt die gebaute Feld-Liste samt ihrer Ordnungszahlen als Antwortcache
+    /// ab.
+    pub fn set_overview_cache(
+        &self,
+        rev: u64,
+        etag: String,
+        courts_json: String,
+        seqs_json: String,
+        ms: u64,
+    ) {
         *self.overview_cache.write().unwrap() = Some(OverviewCache {
             rev,
             etag,
             courts_json,
+            seqs_json,
             gebaut_ms: ms,
         });
     }
@@ -2532,6 +2637,55 @@ impl TabletState {
     /// Der abgelegte Antwortcache — `None`, solange nichts gebaut wurde.
     pub fn overview_cache(&self) -> Option<OverviewCache> {
         self.overview_cache.read().unwrap().clone()
+    }
+
+    /// Der Ausschnitt eines Felds aus der aktuellen Übersicht (Spec
+    /// monitor-livestand-push, S7): `(Feld-Liste, Ordnungszahl, Marke)`.
+    ///
+    /// Gehören die abgelegten Ausschnitte zu **demselben Bau** — erkennbar an
+    /// der Marke der vollen Antwort, einem Inhalts-Hash —, ist das ein
+    /// Nachschlagen; sonst baut `schneiden` die Ausschnitte einmal für
+    /// **alle** Felder, und sie gelten für den Rest dieses Baus. Eine
+    /// unbrauchbare Nummer bekommt immer denselben leeren Ausschnitt.
+    ///
+    /// Geklont wird unter der Sperre nur das eine Tripel — die ganze Karte
+    /// herauszugeben würde den häufigen Fall (volle Antwort) verteuern.
+    /// Während `schneiden` läuft, ist keine Sperre gehalten; zwei gleichzeitig
+    /// verfehlende Abrufe schneiden dann beide, was nur doppelt zählt.
+    pub fn feld_ausschnitt<F>(
+        &self,
+        voll_marke: &str,
+        id: Option<i64>,
+        schneiden: F,
+    ) -> (String, String, String)
+    where
+        F: FnOnce() -> FeldCache,
+    {
+        {
+            let c = self.feld_cache.read().unwrap();
+            if let Some(fc) = c.as_ref() {
+                if fc.marke == voll_marke {
+                    return Self::aus_feld_cache(fc, id);
+                }
+            }
+        }
+        let mut neu = schneiden();
+        neu.marke = voll_marke.to_string();
+        self.feld_schnitte.fetch_add(1, Ordering::Relaxed);
+        let ergebnis = Self::aus_feld_cache(&neu, id);
+        *self.feld_cache.write().unwrap() = Some(neu);
+        ergebnis
+    }
+
+    fn aus_feld_cache(fc: &FeldCache, id: Option<i64>) -> (String, String, String) {
+        id.and_then(|i| fc.felder.get(&i))
+            .cloned()
+            .unwrap_or_else(|| fc.leer.clone())
+    }
+
+    /// Wie oft die Ein-Feld-Ausschnitte gebaut wurden (nur für Tests).
+    pub fn feld_schnitte(&self) -> u64 {
+        self.feld_schnitte.load(Ordering::Relaxed)
     }
 
     /// Die Perf-Zähler der Anzeige-Strecke (Spec monitor-livestand-push, S0).
@@ -3879,6 +4033,15 @@ impl TabletState {
     }
 
     pub fn monitor_court(&self, court_id: i64) -> MonitorCourt {
+        // Ordnungszahl **zuerst** (Spec monitor-livestand-push, S4): Wird sie
+        // nach dem Inhalt gelesen, kann sie neuer sein als er — die Anzeige
+        // merkte sich dann eine Zahl, die zu einem Stand gehört, den sie nie
+        // gesehen hat, und verwürfe den zugehörigen Nudge als „schon
+        // bekannt". Der Punkt erschiene erst beim nächsten Fallback-Poll.
+        // In dieser Reihenfolge ist die Zahl höchstens ÄLTER als der Inhalt,
+        // und das ist harmlos: Der nächste Nudge holt ihn nach
+        // (Review-Fund 19.08.2026).
+        let seq = self.monitor_seq_of(court_id);
         let guard = self.snapshot.read().unwrap();
         let tournament_name = guard
             .as_ref()
@@ -3916,6 +4079,8 @@ impl TabletState {
             // Aufgabe und Startzeit — nie den Wiedergabe-Verlauf.
             court_state: self.display_court_state(court_id),
             on_court_since_ms,
+            // Ordnung für die Anzeige — oben vor dem Inhalt gelesen.
+            seq,
         }
     }
 
@@ -4031,6 +4196,10 @@ pub struct MonitorCourt {
     /// Zeitpunkt (Unix-ms) des 1. Aufrufs = seit wann das Spiel auf dem Feld
     /// steht; `None` = kein Spiel. Grundlage der Aufruf-Uhr am Monitor.
     pub on_court_since_ms: Option<u64>,
+    /// Ordnungszahl des Feld-Stands (Spec monitor-livestand-push, S4) —
+    /// wandert von hier in den `MonitorState`, damit die Anzeige Push und
+    /// Voll-Abruf zueinander ordnen kann.
+    pub seq: u64,
 }
 
 #[cfg(test)]
@@ -6330,7 +6499,10 @@ mod tests {
 
         // Court-5-Abonnent bekommt den Nudge fürs Feld 5.
         let (court, seq) = parse_nudge(&sub5.try_recv().expect("Court-5 wird geweckt"));
-        assert_eq!((court, seq), (5, 1));
+        assert_eq!(court, 5);
+        // Seit S4 startet die Sequenz bei der Uhrzeit (neustart-fest), nicht
+        // bei 1 — geprüft wird deshalb nur, dass sie gesetzt ist.
+        assert!(seq > 0);
         // „Alle Felder"-Abonnent ebenfalls.
         let (court_all, _) = parse_nudge(&sub_all.try_recv().expect("Übersicht wird geweckt"));
         assert_eq!(court_all, 5);
@@ -6341,6 +6513,10 @@ mod tests {
     #[test]
     fn monitor_seq_is_monotonic_per_court() {
         // `seq` steigt je Feld streng monoton und zählt getrennt je Feld.
+        //
+        // Seit S4 (Spec monitor-livestand-push) beginnt die Zählung bei der
+        // Uhrzeit statt bei 1, damit sie über Prozess-Neustarts monoton
+        // bleibt. Geprüft wird deshalb der Abstand, nicht der absolute Wert.
         let st = TabletState::default();
         let mut a = sub_monitor(&st, Some(1));
         let mut b = sub_monitor(&st, Some(2));
@@ -6349,10 +6525,26 @@ mod tests {
         st.notify_monitor(1);
         st.notify_monitor(2);
 
-        assert_eq!(parse_nudge(&a.try_recv().unwrap()).1, 1);
-        assert_eq!(parse_nudge(&a.try_recv().unwrap()).1, 2);
-        // Feld 2 hat seinen eigenen Zähler, beginnt also wieder bei 1.
-        assert_eq!(parse_nudge(&b.try_recv().unwrap()).1, 1);
+        let erst = parse_nudge(&a.try_recv().unwrap()).1;
+        let zweit = parse_nudge(&a.try_recv().unwrap()).1;
+        assert_eq!(zweit, erst + 1, "je Anstoß genau eins weiter");
+        let feld2 = parse_nudge(&b.try_recv().unwrap()).1;
+        assert!(feld2 > 0);
+
+        // Getrennte Zählung: Ein weiterer Anstoß auf Feld 1 lässt den Wert
+        // von Feld 2 unberührt.
+        //
+        // Bewusst SO geprüft und nicht über `feld2 != zweit`: Beide Zähler
+        // starten bei der Uhrzeit, und zwei Felder können dieselbe Zahl
+        // erreichen, wenn ihre Seeds eine Millisekunde auseinanderliegen —
+        // das ist erlaubt (die Zahlen gelten je Feld, nicht global) und
+        // machte den Test sonst zufällig rot (CI-Fund 19.08.2026).
+        st.notify_monitor(1);
+        assert_eq!(
+            st.monitor_seq_of(2),
+            feld2,
+            "Feld 1 rührt die Zählung von Feld 2 nicht an"
+        );
     }
 
     #[test]
@@ -6510,6 +6702,76 @@ mod tests {
         let s = st.perf().snapshot();
         assert_eq!(s.persist_calls, 0);
         assert_eq!(s.nudges_sent, 1);
+    }
+
+    // ── Ordnung über `seq` (Spec monitor-livestand-push, S4) ───────────────
+
+    #[test]
+    fn die_feld_sequenz_startet_neustart_fest() {
+        // Sie muss über Prozess-Neustarts monoton bleiben: Eine Anzeige, die
+        // sich `seq` gemerkt hat, verwürfe sonst nach einem Neustart des
+        // Turnier-PCs jeden neuen Stand als „veraltet", bis der Zähler den
+        // alten Wert überholt hat — die Anzeige hinge fest.
+        let st = TabletState::default();
+        let vor = now_ms();
+        st.notify_monitor(101);
+        let seq = st.monitor_seq_of(101);
+        assert!(
+            seq >= vor,
+            "die Sequenz startet bei der Uhrzeit ({seq} < {vor})"
+        );
+    }
+
+    #[test]
+    fn die_feld_sequenz_steigt_mit_jedem_nudge_und_je_feld_getrennt() {
+        let st = TabletState::default();
+        st.notify_monitor(101);
+        let erst = st.monitor_seq_of(101);
+        st.notify_monitor(101);
+        let zweit = st.monitor_seq_of(101);
+        assert!(zweit > erst, "jeder Anstoß erhöht sie");
+
+        // Ein anderes Feld hat seine eigene Zählung.
+        assert_eq!(st.monitor_seq_of(999), 0, "unberührtes Feld: keine Ordnung");
+        st.notify_monitor(999);
+        assert!(st.monitor_seq_of(999) > 0);
+    }
+
+    #[test]
+    fn die_ordnungszahlen_stehen_neben_der_feldliste() {
+        // Sie gehören **nicht** in `CourtOverview`: Die Marke der
+        // `/health`-Antwort ist ein Streuwert über die Feld-Liste, und die
+        // Zahlen steigen bei jedem Anstoß — auch bei einem ohne sichtbare
+        // Folge. Steckten sie in der Liste, wechselte die Marke jedes Mal und
+        // die Bestätigung ohne Nutzdaten aus S1 wäre wirkungslos
+        // (Review-Fund 19.08.2026).
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Feld 1"), (102, "Feld 2")],
+        ));
+        st.notify_monitor(101);
+
+        let seqs = st.monitor_seqs();
+        assert_eq!(
+            seqs.get(&101).copied(),
+            Some(st.monitor_seq_of(101)),
+            "dieselbe Zahl wie im Nudge"
+        );
+        assert!(
+            !seqs.contains_key(&102),
+            "unberührtes Feld hat keinen Eintrag (die Anzeige liest das als 0)"
+        );
+
+        // Gegenprobe: Die Feld-Liste selbst bleibt von der Zählung unberührt.
+        // Zwei Bauten um einen Anstoß herum müssen zeichengleich sein.
+        let vorher = serde_json::to_string(&st.overview()).unwrap();
+        st.notify_monitor(101);
+        let nachher = serde_json::to_string(&st.overview()).unwrap();
+        assert_eq!(
+            vorher, nachher,
+            "ein Anstoß ohne Inhaltsänderung darf die Feld-Liste nicht ändern"
+        );
     }
 
     // ── Zuweisungs-Nudge (Spec monitor-livestand-push, S3) ─────────────────
@@ -6837,12 +7099,76 @@ mod tests {
     fn der_uebersichts_cache_gibt_zurueck_was_er_bekam() {
         let st = TabletState::default();
         assert!(st.overview_cache().is_none(), "kalt = kein Cache");
-        st.set_overview_cache(7, "\"tag-7\"".into(), "[{\"court_id\":1}]".into(), 5_000);
+        st.set_overview_cache(
+            7,
+            "\"tag-7\"".into(),
+            "[{\"court_id\":1}]".into(),
+            "{\"1\":42}".into(),
+            5_000,
+        );
         let c = st.overview_cache().expect("gerade abgelegt");
         assert_eq!(c.rev, 7);
         assert_eq!(c.etag, "\"tag-7\"");
         assert_eq!(c.courts_json, "[{\"court_id\":1}]");
+        // Die Ordnungszahlen liegen mit im Cache — sie gehören zum selben
+        // Bau wie die Feld-Liste (Spec monitor-livestand-push, S4).
+        assert_eq!(c.seqs_json, "{\"1\":42}");
         assert_eq!(c.gebaut_ms, 5_000);
+    }
+
+    #[test]
+    fn der_feld_cache_haengt_am_inhalt_der_vollen_antwort() {
+        // Review-Fund 19.08.2026 (Spec monitor-livestand-push, S7): Zuerst
+        // hing der Feld-Cache nur an der Revision — und war damit **schwächer
+        // als die Quelle**, aus der er geschnitten ist. Der Übersichts-Cache
+        // verlangt zweierlei: gleiche Revision UND Hart-TTL nicht abgelaufen.
+        // Die TTL ist das Sicherheitsnetz gegen Änderungen, die niemand
+        // meldet — und die gibt es wirklich: `attach_tablet`, `detach_tablet`
+        // und `record_battery` ändern die Anzeige (`tablet_connected`,
+        // `battery`), ohne die Revision zu heben. Der volle Weg richtete sich
+        // nach 250 ms von selbst, der schmale nie: Bei stehender Revision
+        // hätte er den alten Ausschnitt bis in alle Ewigkeit ausgeliefert,
+        // mit gemerkter Marke sogar als endloses „nichts Neues".
+        //
+        // Die Marke der vollen Antwort deckt beides ab — sie ist ein
+        // Inhalts-Hash und heißt damit wörtlich „derselbe Bau".
+        let st = TabletState::default();
+        let schnitt = |wert: &str| {
+            let liste = format!("[{{\"court_id\":1,\"x\":\"{wert}\"}}]");
+            let mut c = FeldCache::default();
+            c.felder
+                .insert(1, (liste, "{\"1\":9}".to_string(), format!("\"m-{wert}\"")));
+            c
+        };
+
+        let (a, _, _) = st.feld_ausschnitt("\"voll-1\"", Some(1), || schnitt("alt"));
+        assert!(a.contains("alt"));
+        assert_eq!(st.feld_schnitte(), 1);
+
+        // Gleiche Marke → nachschlagen, nicht neu schneiden.
+        let (b, _, _) = st.feld_ausschnitt("\"voll-1\"", Some(1), || schnitt("neu"));
+        assert!(b.contains("alt"), "derselbe Bau, derselbe Ausschnitt");
+        assert_eq!(st.feld_schnitte(), 1);
+
+        // Andere Marke = anderer Inhalt → neu schneiden, auch ohne dass sich
+        // die Revision je bewegt hätte.
+        let (c, _, _) = st.feld_ausschnitt("\"voll-2\"", Some(1), || schnitt("neu"));
+        assert!(c.contains("neu"), "neuer Inhalt kommt durch");
+        assert_eq!(st.feld_schnitte(), 2);
+    }
+
+    #[test]
+    fn ein_leerer_feld_cache_liefert_gueltiges_json() {
+        // Der leere Ausschnitt geht unverändert in den Antwort-Umschlag.
+        // Kämen dort leere Strings an, entstünde `"courts":,` — eine
+        // unparsbare Antwort und damit eine tote Anzeige. Als abgeleitetes
+        // `Default` war das ein stiller Fallstrick, kein Compile-Fehler.
+        let leer = FeldCache::default();
+        let (liste, zahlen, _) = TabletState::aus_feld_cache(&leer, Some(7));
+        assert_eq!(liste, "[]");
+        assert_eq!(zahlen, "{}");
+        serde_json::from_str::<serde_json::Value>(&liste).expect("gültiges JSON");
+        serde_json::from_str::<serde_json::Value>(&zahlen).expect("gültiges JSON");
     }
 
     #[test]

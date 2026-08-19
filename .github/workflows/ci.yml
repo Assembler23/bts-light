@@ -117,6 +117,24 @@ jobs:
       - name: Bediener-Nachruf (JS)
         run: node scripts/test-scorekeeper-call-text.mjs
 
+      # Ordnung zwischen Push und Voll-Abruf auf den Anzeige-Seiten: Push nur
+      # bei echt neuerer Sequenz, ein Voll-Abruf darf gleichziehen (der
+      # BTP-Rückfall-Fall). Eine falsche Regel hier friert Anzeigen ein.
+      - name: Anzeige-Ordnung seq (JS)
+        run: node scripts/test-monitor-seq.mjs
+
+      # Zuständigkeitsgrenze des Teil-Patches der Feld-Übersicht: Gepatcht
+      # wird nur der gezählte Punkt im laufenden Satz. Eine zu großzügige
+      # Regel hinterlässt eine Karte, die dauerhaft Falsches zeigt.
+      - name: Teil-Patch der Übersicht (JS)
+        run: node scripts/test-court-patch.mjs
+
+      # Wann gilt der Push-Kanal einer Anzeige als gesund? Laut Spec das
+      # höchste Risiko des Vorhabens: Eine falsche Regel hier friert alle
+      # Anzeigen einer Halle ein.
+      - name: Gesundheit des Push-Kanals (JS)
+        run: node scripts/test-push-health.mjs
+
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.
       - name: Release-Faellig-Regel (JS)

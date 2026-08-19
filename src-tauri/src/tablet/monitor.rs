@@ -167,6 +167,7 @@ pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
         show_match_clock: c.show_match_clock,
         show_ads: c.show_ads,
         layout: c.layout.clone(),
+        push_fallback_slow: c.push_fallback_slow,
     }
 }
 
@@ -197,6 +198,9 @@ pub fn build_monitor_state(
         court_id,
         court_label,
         hall_color,
+        // Ordnung für die Anzeige (Spec monitor-livestand-push, S4) —
+        // dieselbe Zahl, die der Nudge dieses Felds trägt.
+        seq: court.seq,
         tournament_name: court.tournament_name,
         match_info,
         court_state: court.court_state,
@@ -335,6 +339,8 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
         court_label: String::new(),
         // Kopplungs-Seite: kein Feld, keine Halle.
         hall_color: None,
+        // Kein Feld, also keine Ordnung — die Seite zeigt nur ihren Code.
+        seq: 0,
         tournament_name: String::new(),
         match_info: None,
         court_state: None,
@@ -353,6 +359,27 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn der_langsame_fallback_schalter_erreicht_die_anzeige() {
+        // Spec monitor-livestand-push, S6. Der Schalter nützt nur, wenn er
+        // die ganze Strecke überlebt: config.json → MonitorConfig →
+        // JSON-Feld `pushFallbackSlow`, auf das die Seite schaut. Fällt er
+        // unterwegs weg, pollt die Anzeige stillschweigend weiter im
+        // 250-ms-Takt — die Entlastung bliebe unbemerkt aus.
+        let mut cfg = crate::config::CourtMonitorConfig::default();
+        assert!(!cfg.push_fallback_slow, "Standard ist aus");
+        cfg.push_fallback_slow = true;
+
+        let wire = to_monitor_config(&cfg);
+        assert!(wire.push_fallback_slow);
+
+        let json = serde_json::to_string(&wire).expect("serialisierbar");
+        assert!(
+            json.contains("\"pushFallbackSlow\":true"),
+            "Feldname wie im Asset erwartet: {json}"
+        );
+    }
 
     #[test]
     fn safe_image_name_accepts_plain_images_rejects_traversal() {

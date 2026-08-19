@@ -31,11 +31,29 @@
 //   --dauer N            Messdauer in Sekunden       (Vorgabe: 60)
 //   --punkte N           Punkte je Minute je Tablet  (Vorgabe: 12 = alle 5 s)
 //   --trocken            KEIN Tablet verbinden, nur die Anzeige-Seite messen
+//   --schmal             Court-Monitore holen `health?court=<id>` (Spec S7)
+//                        statt `/court/{id}/state` — so wird der schmale
+//                        Abruf ueberhaupt messbar
+//
+// Bewusst NICHT nachgebildet (bekannte Vereinfachungen): der Force-Close nach
+// 25 s Stille samt Reconnect, das Fehler-Backoff nach einem missglueckten
+// Abruf (ohne das meldet ein Lauf gegen einen klemmenden Server eine hoehere
+// Rate als die Wirklichkeit) und das seq-Gate vor dem angestossenen Abruf.
 //
 // Was gemessen wird: Abrufe und Bytes je Anzeigenart, die Latenz vom
 // gesendeten Punkt bis zu seinem Erscheinen in einer Übersichts-Antwort
 // (p50/p95) und — falls erreichbar — der Zählerstand des Servers aus
 // `/debug/perf` daneben.
+
+// Die Gesundheits-Regel der Anzeige-Seiten (Spec S6) — dasselbe Modul, das
+// overview.html und monitor.html als Inline-Kopie tragen. Ohne sie misst das
+// Skript einen Client, den es nicht mehr gibt: Vor S6 hing „gesund" an einem
+// Anstoß unter 1,2 s, jetzt am Herzschlag.
+import {
+  pushGesund,
+  fallbackTakt,
+  FALLBACK_SCHNELL_MS,
+} from "../src/io/pushHealth.mjs";
 
 const args = process.argv.slice(2);
 
@@ -61,12 +79,11 @@ const COURT_MONITORE = argZahl("court-monitore", 0);
 const DAUER_S = argZahl("dauer", 60);
 const PUNKTE_PRO_MIN = argZahl("punkte", 12);
 const TROCKEN = argFlag("trocken");
+const SCHMAL = argFlag("schmal");
 
 // Aus dem Original übernommen, sonst misst das Skript eine andere Anzeige als
-// die, die im Feld hängt (overview.html: COALESCE_MS, FALLBACK_MS).
+// die, die im Feld hängt (overview.html: COALESCE_MS, Fallback-Takt).
 const COALESCE_MS = 60;
-const FALLBACK_MS = 250;
-const PUSH_FRESH_MS = 1200;
 
 function wsUrl(pfad) {
   return BASE.replace(/^http/, "ws") + pfad;
@@ -80,7 +97,11 @@ const stat = {
   courtAbrufe: 0,
   courtBytes: 0,
   courtFehler: 0,
+  court304: 0,
   nudges: 0,
+  // Sichtbare Herzschläge (S6) — getrennt gezählt, damit sie die Nudge-Rate
+  // nicht aufblähen: Sie sagen „der Kanal lebt", nicht „hol den Stand".
+  herzschlaege: 0,
   punkte: 0,
   latenzen: [],
 };
@@ -130,7 +151,11 @@ function pruefeLatenz(courts) {
 // 250-ms-Fallback, wenn seit 1,2 s kein Nudge kam.
 function starteUebersicht(nr) {
   let mwsOpen = false;
-  let letzterNudge = 0;
+  // Zeitpunkt des letzten Frames vom Server — Anstoß ODER Herzschlag (S6).
+  let letztesFrame = 0;
+  let letzterAbrufOk = true;
+  let fehlerInFolge = 0;
+  let langsamErlaubt = false;
   let laeuft = false;
   let nachschlag = false;
   let letzterStart = 0;
@@ -154,6 +179,8 @@ function starteUebersicht(nr) {
       const kopf = marke ? { "If-None-Match": marke } : undefined;
       const r = await fetch(`${BASE}health?src=${src}`, { cache: "no-store", headers: kopf });
       stat.healthAbrufe++;
+      letzterAbrufOk = r.ok || r.status === 304;
+      fehlerInFolge = letzterAbrufOk ? 0 : fehlerInFolge + 1;
       if (r.status === 304) {
         stat.health304++;
         return;
@@ -165,6 +192,13 @@ function starteUebersicht(nr) {
       // Hallennamen wären sonst als ein Byte gezählt, während der Server
       // daneben `json.len()` meldet.
       stat.healthBytes += Buffer.byteLength(text, "utf8");
+      // Der Schalter reist im callTimer-Umschlag mit (S6). Fehlt er (älterer
+      // Server), bleibt es beim schnellen Takt.
+      try {
+        langsamErlaubt = !!JSON.parse(text).callTimer?.pushFallbackSlow;
+      } catch {
+        /* unlesbare Antwort ändert den Takt nicht */
+      }
       if (istMessend) {
         try {
           pruefeLatenz(JSON.parse(text).courts);
@@ -174,6 +208,8 @@ function starteUebersicht(nr) {
       }
     } catch {
       stat.healthFehler++;
+      letzterAbrufOk = false;
+      fehlerInFolge++;
     } finally {
       laeuft = false;
       if (nachschlag) {
@@ -208,15 +244,29 @@ function starteUebersicht(nr) {
     }
     ws.onopen = () => {
       mwsOpen = true;
+      letztesFrame = 0;
     };
-    ws.onmessage = () => {
+    ws.onmessage = (ev) => {
+      // **Jedes** Frame beweist, dass der Kanal lebt — auch der Herzschlag,
+      // der gar keine Nachricht über ein Feld ist (S6).
+      letztesFrame = Date.now();
+      let msg;
+      try {
+        msg = JSON.parse(typeof ev.data === "string" ? ev.data : String(ev.data));
+      } catch {
+        return;
+      }
+      if (typeof msg.court !== "number") {
+        stat.herzschlaege++;
+        return;
+      }
       stat.nudges++;
-      letzterNudge = Date.now();
       quelle = "push";
       anfordern();
     };
     ws.onclose = () => {
       mwsOpen = false;
+      letztesFrame = 0;
       setTimeout(verbinde, 1000);
     };
     ws.onerror = () => {};
@@ -224,25 +274,73 @@ function starteUebersicht(nr) {
 
   verbinde();
   anfordern();
+  // Sicherheits-Abruf im 250-ms-Raster; wie lange die Seite ohne eigenen
+  // Abruf auskommen darf, entscheidet `fallbackTakt` (S6). Gemessen gegen den
+  // letzten tatsächlichen Abruf, wie im Original.
   return setInterval(() => {
-    const frisch = mwsOpen && Date.now() - letzterNudge < PUSH_FRESH_MS;
-    if (!frisch) anfordern();
-  }, FALLBACK_MS);
+    const jetzt = Date.now();
+    // `letztesFrame` OHNE Ersatzwert — genau wie die echten Seiten. Die
+    // Ersatzbelegung mit dem Verbindungszeitpunkt nutzen sie ausschließlich
+    // für `kanalIstTot`; in `pushGesund` gilt „noch kein Frame" als nicht
+    // gesund, und die Seite bleibt bis zum ersten Herzschlag im schnellen
+    // Takt. Mit Ersatzwert liefe das Skript hier schon auf 4 s und meldete
+    // eine niedrigere Abrufrate als die Wirklichkeit (Review-Fund 19.08.).
+    const gesund = pushGesund(
+      {
+        wsOpen: mwsOpen,
+        lastServerFrameMs: letztesFrame,
+        lastFetchOk: letzterAbrufOk,
+        failures: fehlerInFolge,
+      },
+      jetzt,
+    );
+    if (jetzt - letzterStart >= fallbackTakt(gesund, langsamErlaubt)) anfordern();
+  }, FALLBACK_SCHNELL_MS);
 }
 
 // ── Fester Court-Monitor (monitor.html) ───────────────────────────────────
 function starteCourtMonitor(courtId) {
   let mwsOpen = false;
-  let letzterNudge = 0;
+  let letztesFrame = 0;
+  let letzterAbrufOk = true;
+  let fehlerInFolge = 0;
+  let langsamErlaubt = false;
+  let letzterAbrufMs = 0;
+  let marke = null; // ETag des schmalen Abrufs (S7)
   let quelle = "poll";
 
   async function hole() {
     const src = quelle;
     quelle = "poll";
+    letzterAbrufMs = Date.now();
     try {
-      const r = await fetch(`${BASE}court/${courtId}/state?src=${src}`, { cache: "no-store" });
-      const text = await r.text();
+      // Mit `--schmal` (Spec S7) holt der Feld-Monitor seinen Stand über den
+      // schmalen Abruf statt über `/court/{id}/state`. Nur so lässt sich
+      // messen, was der Feld-Selektor bringt — ohne ihn gäbe es kein
+      // Werkzeug für die Entscheidung, die die Nachmessung treffen soll.
+      const url = SCHMAL
+        ? `${BASE}health?court=${courtId}&src=${src}`
+        : `${BASE}court/${courtId}/state?src=${src}`;
+      const kopf = marke ? { "If-None-Match": marke } : undefined;
+      const r = await fetch(url, { cache: "no-store", headers: kopf });
       stat.courtAbrufe++;
+      letzterAbrufOk = r.ok || r.status === 304;
+      fehlerInFolge = letzterAbrufOk ? 0 : fehlerInFolge + 1;
+      if (r.status === 304) {
+        stat.court304++;
+        return;
+      }
+      const neueMarke = r.headers.get("etag");
+      if (neueMarke) marke = neueMarke;
+      const text = await r.text();
+      // Der Schalter steht im schmalen Abruf im callTimer-Umschlag, sonst in
+      // der Anzeige-Konfiguration (S6).
+      try {
+        const v = JSON.parse(text);
+        langsamErlaubt = !!(SCHMAL ? v.callTimer?.pushFallbackSlow : v.config?.pushFallbackSlow);
+      } catch {
+        /* unlesbare Antwort ändert den Takt nicht */
+      }
       // Wie bei `/health`: echte Bytes, nicht UTF-16-Codeunits — sonst
       // stünden in der Vorher/Nachher-Tabelle zwei verschieden gerechnete
       // MB/s-Werte nebeneinander.
@@ -251,6 +349,8 @@ function starteCourtMonitor(courtId) {
       // Eigener Zähler: Ein klemmendes `/court/{id}/state` sähe sonst in der
       // Zusammenfassung wie ein `/health`-Problem aus.
       stat.courtFehler++;
+      letzterAbrufOk = false;
+      fehlerInFolge++;
     }
   }
 
@@ -264,14 +364,26 @@ function starteCourtMonitor(courtId) {
     }
     ws.onopen = () => {
       mwsOpen = true;
+      letztesFrame = 0;
     };
-    ws.onmessage = () => {
-      letzterNudge = Date.now();
+    ws.onmessage = (ev) => {
+      letztesFrame = Date.now();
+      let msg;
+      try {
+        msg = JSON.parse(typeof ev.data === "string" ? ev.data : String(ev.data));
+      } catch {
+        return;
+      }
+      if (typeof msg.court !== "number") {
+        stat.herzschlaege++;
+        return;
+      }
       quelle = "push";
       hole();
     };
     ws.onclose = () => {
       mwsOpen = false;
+      letztesFrame = 0;
       setTimeout(verbinde, 1000);
     };
     ws.onerror = () => {};
@@ -280,9 +392,19 @@ function starteCourtMonitor(courtId) {
   verbinde();
   hole();
   return setInterval(() => {
-    const frisch = mwsOpen && Date.now() - letzterNudge < PUSH_FRESH_MS;
-    if (!frisch) hole();
-  }, FALLBACK_MS);
+    const jetzt = Date.now();
+    // Ohne Ersatzwert, siehe Übersicht oben.
+    const gesund = pushGesund(
+      {
+        wsOpen: mwsOpen,
+        lastServerFrameMs: letztesFrame,
+        lastFetchOk: letzterAbrufOk,
+        failures: fehlerInFolge,
+      },
+      jetzt,
+    );
+    if (jetzt - letzterAbrufMs >= fallbackTakt(gesund, langsamErlaubt)) hole();
+  }, FALLBACK_SCHNELL_MS);
 }
 
 // ── Zählendes Tablet ──────────────────────────────────────────────────────
@@ -437,6 +559,10 @@ async function main() {
   console.log(`Gesendete Punkte         ${stat.punkte} (${(stat.punkte / s).toFixed(2)}/s)`);
   console.log(`Empfangene Nudges        ${stat.nudges} (${(stat.nudges / s).toFixed(1)}/s)`);
   console.log(
+    `Empfangene Herzschläge   ${stat.herzschlaege} (${(stat.herzschlaege / s).toFixed(1)}/s)` +
+      ` — erwartet ~${(UEBERSICHTEN + COURT_MONITORE) / 10} /s bei 10-s-Takt`,
+  );
+  console.log(
     `/health                  ${stat.healthAbrufe} Abrufe (${(stat.healthAbrufe / s).toFixed(1)}/s), ` +
       `${mb(stat.healthBytes)} MB/s`,
   );
@@ -446,9 +572,17 @@ async function main() {
     } %) — HTTP 304, ohne Nutzdaten`,
   );
   console.log(
-    `/court/{id}/state        ${stat.courtAbrufe} Abrufe (${(stat.courtAbrufe / s).toFixed(1)}/s), ` +
+    `${SCHMAL ? "/health?court=<id>     " : "/court/{id}/state        "}` +
+      `${stat.courtAbrufe} Abrufe (${(stat.courtAbrufe / s).toFixed(1)}/s), ` +
       `${mb(stat.courtBytes)} MB/s`,
   );
+  if (SCHMAL) {
+    console.log(
+      `davon „nichts Neues"     ${stat.court304} (${
+        stat.courtAbrufe > 0 ? ((stat.court304 * 100) / stat.courtAbrufe).toFixed(0) : 0
+      } %) — HTTP 304, ohne Nutzdaten`,
+    );
+  }
   console.log(`Fehlgeschlagen           ${stat.healthFehler} × /health, ${stat.courtFehler} × /court/{id}/state`);
   console.log(
     `Latenz Punkt → Anzeige   p50 ${perzentil(stat.latenzen, 50)} ms, ` +

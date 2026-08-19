@@ -196,6 +196,15 @@ pub struct MonitorConfig {
     /// Anzeige-Layout (`split` = „A — Geteilt").
     #[serde(default = "default_layout")]
     pub layout: String,
+    /// Darf die Anzeige ihren Sicherheits-Poll auf vier Sekunden
+    /// verlangsamen, solange ihr Push-Kanal gesund ist (Spec
+    /// monitor-livestand-push, S6)?
+    ///
+    /// `#[serde(default)]` → `false` bei einem älteren Absender, und dann
+    /// pollt die Seite wie vorher im 250-ms-Takt. Der Schalter kann also nur
+    /// entlasten, nie etwas kaputt machen, das vorher lief.
+    #[serde(rename = "pushFallbackSlow", default)]
+    pub push_fallback_slow: bool,
 }
 
 fn default_true() -> bool {
@@ -217,6 +226,9 @@ impl Default for MonitorConfig {
             show_match_clock: true,
             show_ads: true,
             layout: default_layout(),
+            // Aus: Der langsame Sicherheits-Poll ist ein bewusst zu
+            // setzender Schalter (Spec monitor-livestand-push, S6).
+            push_fallback_slow: false,
         }
     }
 }
@@ -487,6 +499,22 @@ pub struct MonitorState {
     /// `#[serde(default)]` (= aus) hält ältere Frames lesbar.
     #[serde(rename = "callTimer", default)]
     pub call_timer: CallTimerView,
+    /// Ordnungszahl des Feld-Stands (Spec monitor-livestand-push, S4) —
+    /// dieselbe Zahl, die der Nudge auf der Monitor-WS trägt.
+    ///
+    /// Damit kann die Anzeige Push und Voll-Abruf zueinander ordnen, statt
+    /// beide blind anzuwenden: Ein Push gilt bei `seq > gezeigt`, eine
+    /// Voll-Antwort bei `seq >= gezeigt`. Das Gleichheitszeichen ist
+    /// Absicht — eine Voll-Antwort trägt denselben Stand, den der Nudge
+    /// angekündigt hat, und kann ihn auch dann noch berichtigen (etwa wenn
+    /// BTP einen Satzstand zurücknimmt).
+    ///
+    /// **Prozesslokal** (ADR 0035): Host und Relay zählen getrennt, die Zahl
+    /// ist nur innerhalb einer Verbindung zu derselben Gegenstelle
+    /// vergleichbar. `#[serde(default)]` → `0` bei einem älteren Absender,
+    /// und dann verhält sich die Seite wie vor dieser Etappe.
+    #[serde(default)]
+    pub seq: u64,
 }
 
 /// Aufruf-Timer-Einstellungen für die Monitor-Anzeige (gespiegelt aus der
@@ -582,6 +610,32 @@ pub struct MonitorControl {
 /// Hallen-/Verleih-WLAN sind einzelne >6-s-Aussetzer normal. Ein wirklich
 /// totes Gerät fällt weiterhin nach 20 s raus.
 pub const MONITOR_ONLINE_WINDOW_MS: u64 = 20_000;
+
+/// Abstand des **sichtbaren** Herzschlags auf der Monitor-Nudge-WS (Spec
+/// monitor-livestand-push, S6). Der daneben laufende WS-Ping ist für
+/// JavaScript unsichtbar — eine Anzeige kann daran nicht erkennen, ob ihr
+/// Kanal noch lebt.
+///
+/// Zehn Sekunden, damit die Anzeige die 25-Sekunden-Grenze
+/// ([`MONITOR_HEARTBEAT_STALE_MS`]) auch dann sicher hält, wenn zwei
+/// Herzschläge hintereinander im Netz hängenbleiben.
+pub const MONITOR_HEARTBEAT_MS: u64 = 10_000;
+
+/// Ab wann gilt der Nudge-Kanal einer Anzeige als tot (Spec
+/// monitor-livestand-push, S6)? Zweieinhalb Herzschläge — ein einzelner
+/// verlorener darf noch keinen Reconnect auslösen.
+pub const MONITOR_HEARTBEAT_STALE_MS: u64 = 25_000;
+
+/// Der sichtbare Herzschlag als fertiges Wire-Frame.
+///
+/// **Ohne `court`-Feld, und das ist die ganze Verträglichkeitszusage:** Eine
+/// Anzeige aus einem älteren Stand prüft `typeof msg.court === "number"` und
+/// verwirft alles andere folgenlos. So braucht der Kanal keine
+/// Protokollversion (ADR 0035 c) — fest verdrahtete Monitore haben keinen
+/// Reload-Kanal, über den man sie umstellen könnte.
+pub fn monitor_heartbeat_frame(now_ms: u64) -> String {
+    format!("{{\"hb\":{now_ms}}}")
+}
 
 /// Kurz-Code eines Geräts: die **letzten** vier alphanumerischen Zeichen der
 /// ID, groß – so wie der Monitor ihn auf dem TV anzeigt.
@@ -2866,6 +2920,78 @@ mod tests {
     }
 
     #[test]
+    fn der_herzschlag_traegt_kein_court_feld() {
+        // Spec monitor-livestand-push, S6. Daran hängt die ganze
+        // Verträglichkeit: Eine Anzeige aus einem älteren Stand prüft auf ein
+        // `court`-Feld und verwirft alles andere folgenlos. Käme hier eines
+        // vor, hielte sie den Herzschlag für einen Anstoß und holte bei jedem
+        // den vollen Stand — auf allen Anzeigen, alle zehn Sekunden.
+        let frame = monitor_heartbeat_frame(1_787_000_000_042);
+        let v: serde_json::Value = serde_json::from_str(&frame).expect("gültiges JSON");
+        let obj = v.as_object().expect("Objekt");
+        assert!(!obj.contains_key("court"), "kein court-Feld: {frame}");
+        assert!(!obj.contains_key("seq"), "auch keine Sequenz: {frame}");
+        assert_eq!(
+            obj.get("hb").and_then(|h| h.as_u64()),
+            Some(1_787_000_000_042)
+        );
+        assert_eq!(obj.len(), 1, "nur der Zeitstempel: {frame}");
+    }
+
+    #[test]
+    fn der_herzschlag_takt_haelt_die_stale_grenze() {
+        // Zwei Herzschläge müssen in die Grenze passen — ein einzelner
+        // verlorener darf noch keinen Reconnect auslösen. Über Variablen,
+        // damit clippy den Vergleich nicht wegoptimiert (`assertions_on_constants`).
+        let takt = MONITOR_HEARTBEAT_MS;
+        let grenze = MONITOR_HEARTBEAT_STALE_MS;
+        assert!(takt * 2 < grenze, "{takt} · 2 muss unter {grenze} liegen");
+    }
+
+    #[test]
+    fn ein_monitor_state_ohne_seq_bleibt_lesbar() {
+        // Spec monitor-livestand-push, S4: `seq` ordnet Push und Voll-Abruf.
+        // Ein **alter** Relay (oder Host) schickt das Feld nicht — die Seite
+        // muss den Stand trotzdem verarbeiten und `seq = 0` sehen, damit sie
+        // sich wie vor der Etappe verhält.
+        // Frame eines alten Absenders simulieren: aktueller Zustand, aber
+        // ohne das neue Feld (Muster `monitor_state_hall_color_defaults_none`).
+        let mut json = serde_json::to_value(MonitorState {
+            court_id: 3,
+            court_label: "Feld 3".into(),
+            hall_color: None,
+            tournament_name: "T".into(),
+            match_info: None,
+            court_state: None,
+            config: MonitorConfig::default(),
+            ads: vec![],
+            command: None,
+            device_code: String::new(),
+            unassigned: false,
+            redirect_to: None,
+            server_now_ms: 0,
+            on_court_since_ms: None,
+            call_timer: CallTimerView::default(),
+            seq: 4711,
+        })
+        .expect("serialisierbar");
+        json.as_object_mut().expect("Objekt").remove("seq");
+        let state: MonitorState = serde_json::from_value(json).expect("altes Frame bleibt lesbar");
+        assert_eq!(
+            state.seq, 0,
+            "fehlendes Feld = 0 = „keine Ordnung bekannt\""
+        );
+
+        // Und mit Feld kommt der Wert an — hin und zurück.
+        let mut mit = state.clone();
+        mit.seq = 1_787_000_000_042;
+        let json = serde_json::to_string(&mit).expect("serialisierbar");
+        assert!(json.contains("\"seq\":1787000000042"), "{json}");
+        let zurueck: MonitorState = serde_json::from_str(&json).expect("lesbar");
+        assert_eq!(zurueck.seq, mit.seq);
+    }
+
+    #[test]
     fn monitor_state_hall_color_defaults_none() {
         // Frame eines alten Hosts/Relays simulieren: aktueller Zustand,
         // aber ohne das neue Feld.
@@ -2885,6 +3011,7 @@ mod tests {
             server_now_ms: 0,
             on_court_since_ms: None,
             call_timer: CallTimerView::default(),
+            seq: 0,
         })
         .unwrap();
         json.as_object_mut().unwrap().remove("hallColor").unwrap();
@@ -2976,6 +3103,7 @@ mod tests {
                 second_call_minutes: 2.0,
                 third_call_minutes: 4.0,
             },
+            seq: 1_787_000_000_007,
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));

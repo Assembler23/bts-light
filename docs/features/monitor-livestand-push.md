@@ -2,7 +2,7 @@
 
 > Status: **abgestimmt 2026-08-18** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Idee vom 18.08.2026. Betroffene Crates: `src-tauri`, `relay`, `relay-proto`, `src/io`.
-> ADR: [0035 — Monitor-Livestand: schmaler Abruf, Ordnung über `seq`, additive Nudges](adr/0035-monitor-livestand-ordnung.md)
+> ADR: [0035 — Monitor-Livestand: schmaler Abruf, Ordnung über `seq`, additive Nudges](../adr/0035-monitor-livestand-ordnung.md)
 
 ## Kontext / Problem
 
@@ -364,49 +364,191 @@ gemessenen 20 ms keinen Async-Worker belegen.
 `monitor_conn` im Relay): Die Match-Zuweisung war der letzte Anzeige-Wechsel, für den
 allein der Poll-Fallback die Latenz abdeckte.
 
-**Ordnung (S4)**
-- [ ] `/health` und `/court/{id}/state` tragen je Feld ein `seq`; die Cloud-Pendants ebenso.
-- [ ] Eine Voll-Antwort mit kleinerem `seq` als dem angezeigten wird verworfen.
-- [ ] Eine Voll-Antwort mit **gleichem** `seq` wird angewendet (BTP-Rückfall-Fall).
-- [ ] Ein doppelter oder veralteter Push wird verworfen.
-- [ ] Nach einem Server-Neustart springt `seq` nicht zurück (Seeding über `now_ms()`).
-- [ ] Serde-Roundtrip: ein `MonitorState` **ohne** `seq` (alter Server) deserialisiert
-      fehlerfrei zu `seq = 0`.
+**Ordnung (S4)** — umgesetzt v0.9.239
+- [x] `/health` und `/court/{id}/state` tragen je Feld ein `seq`; die Cloud-Pendants ebenso.
+      *(`die_ordnungszahlen_stehen_neben_der_feldliste`, `MonitorState.seq` über
+      `MonitorCourt`, und im Relay dieselbe Form wie in der LAN-Antwort — geprüft in
+      `cloud_overview_health_lists_courts_with_match_and_score`.)*
 
-**Render-Patch (S5)**
-- [ ] Eine reine Punktänderung patcht nur die betroffene Karte; das übrige Board wird nicht
+      **In `/health` steht die Zahl neben der Feld-Liste, nicht darin** (`seqs`:
+      CourtID → Zahl). Die Marke der Antwort ist ein Streuwert über die Liste, und die
+      Zahlen steigen bei **jedem** Anstoß — auch bei einem, der die Anzeige nicht
+      verändert (etwa ein Tablet-Abgleich mit unverändertem Anzeige-Stand). Steckten sie
+      in der Liste, wechselte die Marke jedes Mal, und die Bestätigung ohne Nutzdaten aus
+      S1 wäre wirkungslos — auf genau der Strecke, die sie entlasten soll. Ein
+      Regressionstest hält fest, dass ein Anstoß ohne Inhaltsänderung die Feld-Liste
+      zeichengleich lässt.
+
+      Gelesen werden die Zahlen **vor** dem Inhalt und im selben Bau zwischengespeichert.
+      So ist eine Zahl höchstens *älter* als der Stand, zu dem sie ausgeliefert wird —
+      die harmlose Richtung. Umgekehrt merkte sich die Anzeige eine Zahl für einen Stand,
+      den sie nie gesehen hat, und verwürfe den zugehörigen Nudge als „schon bekannt".
+- [x] Eine Voll-Antwort mit kleinerem `seq` als dem angezeigten wird verworfen.
+      *(`monitor.html`: `applyState` bricht ab. In `overview.html` **noch nicht** —
+      sie rendert bis S5 immer alle Felder auf einmal, eine feldweise Entscheidung ist
+      erst mit dem Teil-Patch möglich. Bis dahin führt sie die Zahlen nur mit.)*
+- [x] Eine Voll-Antwort mit **gleichem** `seq` wird angewendet (BTP-Rückfall-Fall).
+      *(`anwenden` nutzt `>` für Push und `>=` für Abruf —
+      `scripts/test-monitor-seq.mjs`, eigener CI-Schritt.)*
+- [x] Ein doppelter oder veralteter Push wird verworfen.
+- [x] Nach einem Server-Neustart springt `seq` nicht zurück (Seeding über `now_ms()`).
+      *(`die_feld_sequenz_startet_neustart_fest`; im Relay dasselbe Seeding, damit ein
+      Deploy die Cloud-Anzeigen nicht hängen lässt.)*
+- [x] Serde-Roundtrip: ein `MonitorState` **ohne** `seq` (alter Server) deserialisiert
+      fehlerfrei zu `seq = 0`. *(`ein_monitor_state_ohne_seq_bleibt_lesbar`.)*
+
+**Warum die Regel für Push und Abruf verschieden ist:** Ein Push gilt nur bei
+`seq > gezeigt` — ein doppelter Nudge löste sonst einen zweiten Abruf ohne neuen Inhalt
+aus. Eine Voll-Antwort gilt schon bei `seq >= gezeigt`, weil sie denselben Stand
+berichtigen darf, den der Nudge angekündigt hat: Nimmt jemand in BTP einen Satzstand von
+Hand zurück, ändert sich der Inhalt, ohne dass die Zahl steigt. `seq = 0` heißt „keine
+Ordnung bekannt" (älterer Absender) und blockiert nie — eine eingefrorene Anzeige wäre
+der schlimmere Fehler.
+
+Die Regel liegt als kanonisches Modul in `src/io/monitorSeq.mjs` mit eigenem CI-Schritt;
+beide Anzeige-Seiten tragen eine Inline-Kopie (die Assets durchlaufen keinen Build).
+
+**Render-Patch (S5)** — umgesetzt v0.9.240
+- [x] Eine reine Punktänderung patcht nur die betroffene Karte; das übrige Board wird nicht
       angefasst (nachweisbar über eine unveränderte DOM-Referenz einer Nachbarkarte).
-- [ ] Nicht gepatcht, sondern voll gerendert wird bei: Satzwechsel, Match-Wechsel, geänderter
+      *(`patcheKarten` tauscht ausschließlich die beiden `.trow__sets`-Spalten der
+      betroffenen Karten; alle übrigen Knoten bleiben dieselben Objekte.)*
+- [x] Nicht gepatcht, sondern voll gerendert wird bei: Satzwechsel, Match-Wechsel, geänderter
       Feld-Menge oder -Reihenfolge, geänderter Halle oder Hallen-Farbe, gewechselter
       Sichtbarkeit des Aufruf-Chips, Wechsel von `isLive`/`injury`/`official_call`, sowie wenn
       die Karte gar nicht im DOM ist (Hallen-Rotation).
-- [ ] Bei Hallen-Rotation zeigt die Karte nach dem Umschalten den gepushten Stand
+      *(`istPatchbar` in `src/io/courtPatch.mjs` — je Bedingung ein Testfall, dazu
+      Feldname, Runden-/Gruppen-Beschriftung, Spielernamen und Nationen. `patcheKarten`
+      prüft zusätzlich `isConnected`. 32 Prüfungen, eigener CI-Schritt.)*
+- [x] Bei Hallen-Rotation zeigt die Karte nach dem Umschalten den gepushten Stand
       (`lastData` wurde fortgeschrieben), nicht den Stand vom letzten Voll-Render.
-- [ ] Spätestens alle 30 s läuft ein voller Render aus einem vollen Abruf.
-- [ ] In `monitor.html` wird nicht gepatcht, solange `redirectTo` gesetzt, die Werbeansicht
+      *(Der Patch-Zweig schreibt `lastData` selbst fort.)*
+- [x] Spätestens alle 30 s läuft ein voller Render aus einem vollen Abruf.
+      *(`VOLL_RENDER_SPAETESTENS_MS`; dazu erzwingen Hallen-Rotation und der
+      Sekundentakt der Aufruf-Uhr je einen Neubau — die Uhr steht im Kopf der Karte
+      und bliebe sonst stehen.)*
+- [x] In `monitor.html` wird nicht gepatcht, solange `redirectTo` gesetzt, die Werbeansicht
       aktiv, das Gerät unzugewiesen oder die Match-ID abweichend ist.
+      *(Strukturell erfüllt und bewusst **nicht** umgebaut: `monitor.html` wirft nie ein
+      Board weg — `renderMatch` setzt Texte an bestehenden Elementen und erzeugt auf
+      107 Zeilen sieben neue Knoten. Die genannten Sonderzustände verlassen `applyState`
+      **vor** `renderMatch`. Ein Teil-Patch brächte dort nichts: Der feste Court-Monitor
+      ist laut Analyse der billige Fall, der Schmerz liegt bei der Feld-Übersicht.)*
 
-**Gesundheit und Fallback (S6)**
-- [ ] Bei gesetztem `push_fallback_slow` und gesundem Kanal beträgt der Fallback-Takt 4 s.
-- [ ] Eine ruhige Halle ohne jeden Punkt bleibt dank Heartbeat gesund — die Anzeige friert nicht.
-- [ ] Bleibt der Heartbeat länger als 25 s aus, gilt der Kanal als tot: Takt sofort 250 ms und
-      aktiver Reconnect.
-- [ ] Ein **einziger** fehlgeschlagener Abruf schaltet sofort auf 250 ms.
-- [ ] Der Server sendet den Heartbeat mindestens alle 10 s; das Frame enthält **kein**
+**Die Zuständigkeitsgrenze ist bewusst streng.** Ein zu vorsichtiges „nein" kostet einen
+Neubau, den es vorher ohnehin bei jedem Abruf gab; ein zu großzügiges „ja" hinterlässt eine
+Karte, die dauerhaft etwas Falsches zeigt — und das fällt im Turnier niemandem auf, der es
+nicht weiß. Deshalb gehen auch Spielernamen und Nationen in den Vergleich ein, obwohl sie
+sich bei gleicher Match-ID nicht ändern *sollten*.
+
+**Gesundheit und Fallback (S6)** — umgesetzt v0.9.241
+- [x] Bei gesetztem `push_fallback_slow` und gesundem Kanal beträgt der Fallback-Takt 4 s.
+      *(`fallbackTakt` in `src/io/pushHealth.mjs`, Prüfung „gesund + Schalter an = 4 s".)*
+- [x] Eine ruhige Halle ohne jeden Punkt bleibt dank Heartbeat gesund — die Anzeige friert nicht.
+      *(Prüfungen „ruhige Halle mit Herzschlag vor 11 s" und „vor 24 s = noch gesund".)*
+- [x] Bleibt der Heartbeat länger als 25 s aus, gilt der Kanal als tot: Takt sofort 250 ms und
+      aktiver Reconnect. *(`kanalIstTot`; beide Seiten schließen den Socket aktiv, damit der
+      bestehende Reconnect-Pfad greift.)*
+- [x] Ein **einziger** fehlgeschlagener Abruf schaltet sofort auf 250 ms.
+      *(`lastFetchOk`/`failures` in `pushGesund`; beide Assets setzen beides im Erfolgs- und
+      im Fehlerzweig ihres Abrufs.)*
+- [x] Der Server sendet den Heartbeat mindestens alle 10 s; das Frame enthält **kein**
       `court`-Feld, damit alte Seiten es folgenlos verwerfen.
-- [ ] Default `push_fallback_slow = false`: eine frisch aktualisierte Installation verhält sich
-      exakt wie vorher.
-- [ ] Das Monitor-Lebenszeichen (`MONITOR_ONLINE_WINDOW_MS = 20 s`) bleibt auch bei 4-s-Takt
-      erhalten — kein Gerät erscheint fälschlich offline.
+      *(`monitor_heartbeat_frame`, Host `monitor_socket` und Relay `monitor_conn`;
+      `der_herzschlag_traegt_kein_court_feld`.)*
+- [x] Default `push_fallback_slow = false`: eine frisch aktualisierte Installation verhält sich
+      exakt wie vorher. *(`CourtMonitorConfig::default`, `MonitorConfig::default`,
+      `der_langsame_fallback_schalter_erreicht_die_anzeige`.)*
+- [x] Das Monitor-Lebenszeichen (`MONITOR_ONLINE_WINDOW_MS = 20 s`) bleibt auch bei 4-s-Takt
+      erhalten — kein Gerät erscheint fälschlich offline. *(`record_monitor_poll` hängt am
+      Abruf des Monitors; 4 s liegen mit fünffachem Abstand unter dem 20-s-Fenster.)*
+- [x] Der Sicherheits-Poll setzt **nie ganz** aus, auch bei kerngesundem Kanal nicht.
+      *(Nachgetragen nach dem Code-Review: Der erste Wurf las „gesund ohne Schalter" als
+      „gar nicht abrufen" — richtig für die alte, an 1,2 s Anstoß-Frische gebundene
+      Definition, falsch für die neue, die der Herzschlag dauerhaft hält. Am Monitor hängt
+      an demselben Abruf das Lebenszeichen, die Fernbefehle und die Geräte→Feld-Zuweisung;
+      an der Übersicht jede Änderung, die nur die Revision hebt, ohne anzustoßen. Der Takt
+      ist jetzt immer `fallbackTakt(...)`, gemessen gegen den letzten echten Abruf; ein
+      Wächter im Test hält fest, dass die Funktion nie „gar nicht" bedeutet.)*
+- [x] Nach dem Force-Close beginnt die Gesundheit bei null. *(`lastServerFrameAt = 0` in
+      `mwsTrennen` und `onopen` — sonst erklärte der nächste 250-ms-Tick die eben
+      verbundene Leitung sofort wieder für tot und die Seite liefe in eine
+      Verbinden/Schließen-Schleife.)*
+- [x] Der Relay weist eine Anzeige ab, die er nicht eintragen kann. *(Sicherheits-Review:
+      `subscribe_monitor` liefert `bool`, `monitor_conn` schließt bei `false` — ohne
+      Namespace oder über `MAX_MONITOR_SUBS` blieb die Verbindung sonst still offen und
+      der Herzschlag bescheinigte ihr Gesundheit, obwohl nie ein Anstoß käme.)*
+- [x] Eine Anzeige verwaist nicht still, wenn ihr Namespace verschwindet. *(`namespace_aufraeumen`
+      schickt beim Aufräumen jedem Monitor-Abo ein Close. **Bewusst so und nicht anders:**
+      Der erste Versuch ließ die Anzeigen den Namespace am Leben halten — dann bekämen sie
+      weiter eine 200er-Antwort mit dem eingefrorenen Stand von vorhin, statt in die
+      Offline-Blende zu fallen. Ein Relay ohne Host hat ihnen nichts zu sagen; das Close
+      bringt sie über ihren Reconnect-Wächter zurück, sobald der Host wieder da ist.)*
+- [x] Eine Leitung, die nie ein Frame liefert, wird trotzdem erneuert. *(Bricht sie direkt
+      nach dem Handschlag weg, bliebe `lastServerFrameAt` auf 0 — und 0 heißt „noch nicht
+      bewährt", also niemals tot. Die Seiten reichen deshalb `mwsOffenSeitMs` als
+      Ersatz-Bezug herein; sonst hinge die Anzeige dauerhaft im schnellen Takt, also
+      ausgerechnet in der Last, die diese Etappe loswerden will.)*
 
-**Schmaler Abruf (S7)**
-- [ ] `/health?court=<id>` liefert genau ein Feld, inhaltlich identisch zu dessen Eintrag in der
-      vollen Antwort.
-- [ ] `/health` ohne Parameter ist unverändert.
-- [ ] Unbekannte, negative oder nicht-numerische ID → `courts: []` mit HTTP 200; die Antwort
+**Schmaler Abruf (S7)** — umgesetzt v0.9.242
+- [x] `/health?court=<id>` liefert genau ein Feld, inhaltlich identisch zu dessen Eintrag in der
+      vollen Antwort. *(`health_mit_court_liefert_genau_ein_feld` vergleicht beide Antworten
+      Feld für Feld; am Relay `cloud_health_mit_court_liefert_genau_ein_feld`. Die
+      Ordnungszahl reist mit, aber nur die des angefragten Felds.)*
+- [x] `/health` ohne Parameter ist unverändert. *(`health_ohne_court_bleibt_unveraendert`.)*
+- [x] Unbekannte, negative oder nicht-numerische ID → `courts: []` mit HTTP 200; die Antwort
       unterscheidet sich nicht danach, ob das Feld existiert (kein Existenz-Leck).
-- [ ] Am Relay respektiert der Selektor die Namespace-Isolation: ein Feld eines fremden
-      Namespace ist nicht abrufbar.
+      *(`ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck` /
+      `cloud_health_mit_unbrauchbarem_court_leakt_nichts` — je sechs Eingaben. Der Selektor ist
+      deshalb ein `String`, keine Zahl: Als Zahl deklariert, beantwortete axum ein `?court=abc`
+      mit 400 und verriete damit, was gültig ist.)*
+- [x] Am Relay respektiert der Selektor die Namespace-Isolation: ein Feld eines fremden
+      Namespace ist nicht abrufbar. *(`cloud_health_mit_court_bleibt_im_eigenen_namespace`:
+      zwei Namespaces mit je einem Feld 101. Konstruktionsbedingt — der Selektor filtert die
+      Liste, die ohnehin nur aus dem eigenen Namespace stammt.)*
+- [x] Der schmale Abruf hebelt den Antwortcache aus S1 nicht aus.
+      *(`zwei_schmale_abrufe_bauen_den_zustand_nur_einmal`: geschnitten wird aus demselben Bau.
+      Nicht in den ursprünglichen Kriterien, aber ohne diese Zusage nähme S7 zurück, was S1
+      gebracht hat.)*
+- [x] Der schmale Abruf hat eine **eigene** Marke. *(`der_schmale_abruf_hat_eine_eigene_marke`.
+      Mit der Marke der ganzen Liste bekäme ein Feld-Abrufer „nichts Neues" auf einen Stand,
+      den er nie gesehen hat.)*
+- [x] Der Schnitt läuft **einmal je Cache-Generation**, nicht je Abruf.
+      *(`der_schnitt_laeuft_je_cache_generation_nur_einmal`. Nachgetragen nach den Reviews:
+      Der Schnitt ersetzt keinen Neubau, er kommt obendrauf — und er liegt vor der
+      Marken-Prüfung, sodass sonst selbst die fast kostenlose Bestätigung „nichts Neues" den
+      vollen Parse zahlte. Ein Gerät im Turnier-WLAN hätte mit wenigen Byte je Anfrage einen
+      billigen Hebel auf die Rechenzeit gehabt. Der Feld-Cache wird **faul** gefüllt, damit
+      ihn niemand zahlt, solange kein Client den schmalen Abruf nutzt, und ist nach der
+      **geparsten** Zahl geschlüsselt — über den Rohtext ließen sich mit `?court=0101`,
+      `00101`, … beliebig viele Schlüssel erzeugen.)*
+- [x] Der Feld-Cache ist nicht schwächer als die Quelle, aus der er geschnitten wurde.
+      *(`der_feld_cache_haengt_am_inhalt_der_vollen_antwort` — Review-Fund: Zuerst hing er
+      nur an der Revision, während der Übersichts-Cache **zweierlei** verlangt (Revision und
+      Hart-TTL). Die TTL ist das Netz gegen Änderungen, die niemand meldet, und die gibt es
+      wirklich: `attach_tablet`, `detach_tablet` und `record_battery` ändern die Anzeige
+      (`tablet_connected`, `battery`), ohne die Revision zu heben. Der volle Weg richtete
+      sich nach 250 ms von selbst, der schmale hätte den alten Ausschnitt bei stehender
+      Revision für immer geliefert — mit gemerkter Marke sogar als endloses „nichts Neues".
+      Der Schlüssel ist jetzt die **Marke der vollen Antwort**, ein Inhalts-Hash: Er deckt
+      beide Bedingungen ab und erspart den Neuschnitt, wenn ein TTL-Neubau denselben Inhalt
+      ergab. Ein Anstoß allein schneidet damit bewusst **nicht** neu — die Anzeige sieht
+      danach genauso aus, und die Ordnungszahl im Ausschnitt bleibt die des Baus, zu dem der
+      Inhalt gehört: genau die harmlose Richtung aus S4.)*
+- [x] Eine Ordnungszahl ohne zugehöriges Feld verrät nichts.
+      *(`eine_verwaiste_ordnungszahl_verraet_kein_feld` — Review-Fund: Am Relay sind
+      `monitor_seq` und `courts` zwei unabhängige Quellen. Die Zahlen entstehen aus Anstößen
+      und werden nie aufgeräumt, die Feldliste ersetzt der Host komplett. Für eine CourtID,
+      die nur noch in `monitor_seq` stand — ein Nudge vor der ersten Feldliste, oder ein
+      Turnierwechsel im selben Namespace — kam eine leere Feld-Liste mit **gefüllter**
+      Zahlen-Karte zurück, und die war der Beweis, dass es dieses Feld gab.)*
+
+> **Befund zur Auslieferung:** Die Route ist da, aber im heutigen Bestand nutzt sie **kein**
+> Client. Der feste Court-Monitor holt `/court/{id}/state`, die Kombi-Anzeige `/combo/state`,
+> und die Feld-Übersicht braucht alle Felder. Der Posten, auf den S7 laut Messung zielte
+> (15,9 KB je Antwort), entsteht bei Übersichts-TVs — die entlastet erst ein **Hallen**-Filter,
+> nicht ein Feld-Selektor. Ob und wofür der schmale Abruf gebraucht wird, entscheidet die
+> Nachmessung; die Route kostet nichts, solange sie niemand ruft.
 
 **Verträglichkeit (alle Etappen)**
 - [ ] Alter Relay + neue Seite: datenloser Nudge, kein Heartbeat, `?court=` ignoriert → die
@@ -432,8 +574,8 @@ allein der Poll-Fallback die Latenz abdeckte.
 | S2 | `record_score_schreibt_nicht_sofort` · `flush_schreibt_genau_einmal_fuer_drei_punkte` · `inhaltsgleicher_stand_schreibt_nicht` · `ergebnis_eintrag_flusht_synchron` · `stop_flusht` · `datei_bleibt_atomar_temp_dann_rename` |
 | S3 | Host: `snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld` · `unveraenderter_snapshot_nudgt_nicht` · `raeumung_nudgt` · `btp_satzstand_sprung_nudgt`. Relay: `match_assigned_nudgt` · `match_cleared_nudgt` · `gleiches_match_erneut_nudgt_nicht` |
 | S4 | `health_traegt_seq_je_feld` · `monitor_state_traegt_seq` · `seq_steigt_mit_jedem_nudge` · `seq_startet_neustart_fest_ueber_now_ms` · `relay_overview_health_traegt_seq` · Serde-Roundtrip `MonitorState` mit und ohne `seq` |
-| S6 | `monitor_ws_sendet_heartbeat_alle_10s` · `heartbeat_frame_hat_kein_court_feld` · `relay_monitor_conn_sendet_heartbeat` · `push_fallback_slow_default_false` |
-| S7 | `health_mit_court_liefert_genau_ein_feld` · `health_mit_unbekanntem_court_liefert_leere_liste` · `health_ohne_court_unveraendert` · `nicht_numerischer_court_wird_abgewiesen_ohne_leck` · `relay_health_mit_court_respektiert_namespace_isolation` |
+| S6 | `der_herzschlag_traegt_kein_court_feld` · `der_herzschlag_takt_haelt_die_stale_grenze` · `der_langsame_fallback_schalter_erreicht_die_anzeige` (Strecke Config → Wire → JSON-Feld, inkl. Default `false`). **Nicht als Rust-Test:** dass Host und Relay den Herzschlag wirklich alle 10 s senden — beide Sende-Schleifen sind nur über eine echte WS-Verbindung erreichbar; geprüft ist stattdessen die geteilte Konstante `MONITOR_HEARTBEAT_MS` an beiden Aufrufstellen. Die riskante Logik liegt ohnehin im Client (`test-push-health.mjs`, 20 Prüfungen). |
+| S7 | Host: `health_mit_court_liefert_genau_ein_feld` · `health_ohne_court_bleibt_unveraendert` · `ein_unbrauchbarer_court_liefert_eine_leere_liste_ohne_leck` · `der_schmale_abruf_hat_eine_eigene_marke` · `zwei_schmale_abrufe_bauen_den_zustand_nur_einmal`. Relay: `cloud_health_mit_court_liefert_genau_ein_feld` · `cloud_health_mit_unbrauchbarem_court_leakt_nichts` · `cloud_health_mit_court_bleibt_im_eigenen_namespace` |
 
 **Client-Tests.** Es gibt keinen JS-Testrahmen; das Haus-Muster ist: kanonische Fassung in
 `src/io/*.mjs`, `node:assert`-Test unter `scripts/test-*.mjs`, eigener CI-Schritt,
@@ -492,13 +634,13 @@ Fan-out über bis zu 256 Abonnenten je Namespace.
 
 ## Doku-Pflicht im selben Commit
 
-`CLAUDE.md` (neue Tabellenzeile) · [`docs/court-monitor.md`](court-monitor.md) (Heartbeat,
+`CLAUDE.md` (neue Tabellenzeile) · [`docs/court-monitor.md`](../court-monitor.md) (Heartbeat,
 Gesundheitsdefinition, Fallback, Antwortcache, `?court=`) ·
-[`docs/cloud-relay.md`](cloud-relay.md) (Heartbeat-Frame, `seq`, gefüllter Aufschlag,
-Zuweisungs-Nudge) · [`docs/adr/0035-monitor-livestand-ordnung.md`](adr/0035-monitor-livestand-ordnung.md)
-und Statuswechsel in [`0016`](adr/0016-monitor-push-transport.md) ·
+[`docs/cloud-relay.md`](../cloud-relay.md) (Heartbeat-Frame, `seq`, gefüllter Aufschlag,
+Zuweisungs-Nudge) · [`docs/adr/0035-monitor-livestand-ordnung.md`](../adr/0035-monitor-livestand-ordnung.md)
+und Statuswechsel in [`0016`](../adr/0016-monitor-push-transport.md) ·
 `docs/regression-suite.md` · `docs/changelog.md` · `docs/roadmap.md` (beide A1-TODOs streichen) ·
-[`docs/multi-hall.md`](multi-hall.md) (ferne Halle = nur Cloud) · `docs/logging.md` (Perf-Zeile).
+[`docs/multi-hall.md`](../multi-hall.md) (ferne Halle = nur Cloud) · `docs/logging.md` (Perf-Zeile).
 
 ## Offene Punkte / Annahmen
 

@@ -104,13 +104,61 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Nudges **aller** Felder (Feld-Übersicht `overview.html`); gesetzt → nur dieses
   Feld (fester Court-Monitor). Geräte-zugewiesene Monitore abonnieren alle Felder
   und filtern clientseitig auf ihr aktuelles Feld.
-- **`seq`** zählt je Feld monoton hoch; veraltete/doppelte Nudges verwirft der
-  Client (`lastSeq`-Guard).
-- **Poll bleibt Fallback:** Solange Nudges eintreffen, pausiert das
-  Intervall-Poll; bei WS-Abriss (WLAN-Wechsel, Cloud-Namespace noch nicht da)
-  oder >~1 s Nudge-Stille übernimmt es sofort wieder (250 ms). Ein
-  Reconnect-Watchdog verbindet den WS mit Backoff neu. **Kein Regress** — fällt
-  der Push aus, verhält sich die Anzeige wie zuvor, nur mit schnellerem Poll.
+- **`seq`** zählt je Feld monoton hoch und **beginnt bei der Uhrzeit** (seit
+  v0.9.239), damit die Zahl einen Neustart von Turnier-PC oder Relay
+  übersteht — sonst hielte eine Anzeige mit gemerktem Wert danach jeden
+  neuen Stand für veraltet und bliebe stehen.
+- **Seit v0.9.239 tragen auch die Voll-Antworten dieselbe Zahl** — in
+  `/health` als eigene Karte `seqs` (CourtID → Zahl) **neben** der
+  Feld-Liste, in `/court/{id}/state` als Feld `seq`; in LAN und Cloud
+  gleich. Die Karte steht bewusst neben der Liste: Die Marke der Antwort
+  hängt an der Liste, und eine Zahl darin wechselte bei jedem Anstoß —
+  damit wäre die Bestätigung ohne Nutzdaten wirkungslos. Damit ordnet die Anzeige Push und Abruf zueinander: Ein **Push**
+  gilt nur bei echt größerer Zahl (ein doppelter Anstoß löste sonst einen
+  Abruf ohne neuen Inhalt aus), eine **Voll-Antwort** schon bei gleicher —
+  sie darf denselben Stand berichtigen, etwa wenn in BTP ein Satzstand von
+  Hand zurückgenommen wird. Fehlt die Zahl (älterer Absender), gilt der
+  Stand immer. Die Regel steht als `src/io/monitorSeq.mjs` mit eigenem
+  CI-Schritt; beide Anzeige-Seiten tragen eine Inline-Kopie.
+- **Herzschlag alle 10 s** (seit v0.9.241, Spec `monitor-livestand-push` S6):
+  Neben dem WS-Ping — der für JavaScript unsichtbar ist — schicken Host und
+  Relay ein sichtbares `{"hb":<ms>}` **ohne** `court`-Feld, das ältere Seiten
+  folgenlos verwerfen. Erst dadurch kann eine Anzeige „die Leitung lebt" von
+  „es passiert gerade nichts" unterscheiden: In einer ruhigen Halle vergehen
+  zwischen zwei Ballwechseln Minuten, und ein halbtoter Socket meldet
+  stundenlang `OPEN`, ohne je etwas zu liefern.
+- **Der Relay verabschiedet Anzeigen aktiv** (ebenfalls seit v0.9.241): Kann
+  er eine Verbindung nicht eintragen (Host noch nicht da, oder Fan-out-Deckel
+  erreicht), schließt er sie sofort statt sie still offen zu lassen — der
+  Herzschlag hielte sie sonst für gesund, obwohl nie ein Anstoß käme. Ebenso
+  beim Aufräumen eines Namespace, dessen Host weg ist. Die Anzeige fällt
+  dadurch auf den Poll und in die Offline-Blende und verbindet sich über
+  ihren Reconnect-Wächter neu, sobald der Turnier-PC wieder da ist.
+- **Poll bleibt Fallback:** Der Sicherheits-Poll läuft **durchgehend** weiter
+  (seit v0.9.241 nicht mehr pausierend) — im 250-ms-Takt, und nur bei
+  **gesundem** Kanal und gesetztem Schalter im 4-s-Takt. Er hört **nie ganz**
+  auf, denn an ihm hängt mehr als der Spielstand: das Lebenszeichen des
+  Geräts (20-s-Fenster), seine Fernbefehle, `redirectTo`, die
+  Geräte→Feld-Zuweisung und jede Änderung, die nur die Antwort-Revision hebt,
+  ohne anzustoßen (Feld-Beschriftungen, Hallen-Zuordnung, Aufruf-Schwellen,
+  Hallen-Farben). Gemessen wird gegen den **letzten tatsächlichen Abruf** —
+  in einer regen Halle fällt dadurch kein zusätzlicher an. Gesund heißt: Socket
+  offen, letztes Frame (Anstoß **oder** Herzschlag) keine 25 s her, letzter
+  Abruf erfolgreich; ein **einziger** Fehlversuch schaltet sofort zurück.
+  Bleibt der Herzschlag über 25 s aus, schließt die Anzeige den Socket aktiv,
+  damit der Reconnect-Watchdog mit Backoff neu verbindet. Die Regel steht als
+  `src/io/pushHealth.mjs` mit eigenem CI-Schritt; beide Anzeige-Seiten tragen
+  eine Inline-Kopie. **Kein Regress** — fällt der Push aus, verhält sich die
+  Anzeige wie zuvor, nur mit schnellerem Poll.
+- **Schalter `push_fallback_slow`** (`config.json`, Abschnitt `court_monitor`;
+  **Standard aus**): Erst er erlaubt den 4-s-Takt. Ohne ihn pollt eine frisch
+  aktualisierte Installation exakt wie vorher — die Entlastung ist der
+  eigentliche Gewinn der Spec und zugleich ihr größtes Risiko, deshalb bleibt
+  sie eine bewusste Entscheidung. Der Schalter reist als `pushFallbackSlow`
+  zur Anzeige — in `/court/{id}/state` in der `config`, in `/health` im
+  `callTimer`-Umschlag (und damit in der Marke der Antwort, sonst käme das
+  Umlegen erst mit der nächsten Feld-Änderung an). Er wirkt nach dem nächsten
+  Abruf.
 - **Auch die Feld-/Match-Zuweisung wird angestoßen** (seit v0.9.238, Spec
   `monitor-livestand-push` S3). Sie ist BTP-Snapshot-getrieben und damit kein
   Einzel-Ereignis wie ein gezählter Punkt; deshalb vergleicht der Turnier-PC
@@ -119,6 +167,12 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Räumung, Feldwechsel und den in BTP von Hand eingetragenen Satzstand ab.
   Über die Cloud tun dasselbe die Relay-Arme `MatchAssigned`/`MatchCleared`,
   jeweils erst nachdem ihr Zwischenstand steht.
+- **Schmaler Abruf je Feld** (seit v0.9.242, Spec `monitor-livestand-push` S7):
+  `…/health?court=<CourtID>` liefert dieselbe Antwortform, aber nur dieses eine
+  Feld — samt seiner Ordnungszahl und **ohne** die der Nachbarfelder. In LAN
+  und Cloud gleich. Eine unbekannte, negative oder nicht-numerische Nummer
+  liefert `courts: []` mit HTTP 200; die Antwort verrät also nicht, welche
+  Felder es gibt. Ohne den Parameter ist die Antwort unverändert.
 - **Grenzen:** Der Nudge ist reine Anzeige-Beschleunigung; er ändert keine
   Ownership und keine Zählung.
 
@@ -305,6 +359,29 @@ lief früher beiläufig mit, weil viermal je Sekunde ein voller Stand kam.
 Sie rechnet jetzt aus einem gemerkten Zeitversatz zur Server-Uhr und hat
 einen eigenen Sekundentakt, der nur läuft, solange überhaupt eine Uhr
 sichtbar ist.
+
+## Feld-Übersicht: nur noch die Ziffern neu (seit v0.9.240)
+
+Die Übersicht (`overview.html`) warf bei jedem eintreffenden Stand das
+komplette Board weg und baute alle Kacheln neu — bei zwanzig Feldern rund
+siebzig Mal je Sekunde, für eine Änderung von zwei Ziffern. Genau das
+ruckelte auf schwächeren Pis.
+
+Jetzt tauscht sie im Normalfall nur die Satzstand-Spalten der betroffenen
+Karten aus. **Neu gebaut wird**, sobald sich mehr ändert als der
+Punktestand: neuer Satz, anderes Spiel, Feld wird frei oder belegt,
+Behandlungspause, Turnierleitung gerufen, andere Feld-Menge oder
+-Reihenfolge, andere Halle oder Hallen-Farbe, geänderte Namen oder Nationen,
+gewechselte Sichtbarkeit der Aufruf-Uhr — und beim Umschalten der
+Hallen-Rotation. **Spätestens alle 30 Sekunden** ohnehin einmal komplett:
+Sollte sich je etwas verschoben haben, richtet sich die Anzeige damit von
+selbst wieder ein.
+
+Die Zuständigkeitsgrenze steht als `src/io/courtPatch.mjs` mit eigenem
+CI-Schritt (32 Prüfungen); `overview.html` trägt eine Inline-Kopie.
+
+Der **Einzelfeld-Monitor bleibt unverändert** — er hat nie ein ganzes Bild
+weggeworfen, sondern setzt seine Texte an bestehenden Elementen.
 
 ## Messen, was die Anzeigen kosten (seit v0.9.235)
 
