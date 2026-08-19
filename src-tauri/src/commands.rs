@@ -2249,6 +2249,19 @@ pub struct FinishedMatchRow {
     pub has_timeline: bool,
 }
 
+/// Schiedsrichterzettel als fertiges HTML (Spec
+/// `schiedsrichterzettel-druck`, ADR 0039).
+///
+/// S-R1: Der Desktop holt ihn **ausschließlich** hierüber — kein `fetch`
+/// aus React auf `127.0.0.1:8088`, das bräche zusätzlich den
+/// Cloud-Only-Betrieb. Mehrere Kennungen ergeben einen Stapeldruck.
+/// `None` = zu keinem der Spiele liegt eine Aufzeichnung vor.
+#[tauri::command]
+pub fn match_scoresheet_html(state: State<'_, AppState>, match_ids: Vec<i64>) -> Option<String> {
+    let config = state.config.lock().ok()?.clone();
+    crate::tablet::scoresheet::html_fuer(&state.tablet, &config.display, &match_ids)
+}
+
 /// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser
 /// spricht nie selbst mit dem Store). `None` = kein Verlauf aufgezeichnet
 /// (Papier-Ergebnis oder Spiel vor Einführung).

@@ -183,6 +183,12 @@ impl ScorePushQueue {
 }
 
 impl ServerCtx {
+    /// Anzeige-Schalter (Vereinsnamen usw.) — der Zettel-Renderer im
+    /// Cloud-Pfad braucht sie, das Feld selbst bleibt privat.
+    pub(crate) fn display_config(&self) -> crate::config::DisplayConfig {
+        self.config.display.clone()
+    }
+
     /// Stellt einen Live-Score zum Senden ein und kehrt **sofort** zurück.
     fn queue_score_push(&self, court_id: i64, match_id: i64, update: crate::badhub::diff::Update) {
         if !self.score_push.einstellen(court_id, match_id, update) {
@@ -522,6 +528,10 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         // Punktverlauf on-demand (AK-5): gleicher Pfad wie über den Relay,
         // damit tl.html in beiden Modi identisch abruft.
         .route("/tl/api/timeline/{match_id}", get(tl_timeline))
+        // Schiedsrichterzettel (ADR 0039): gleicher Pfad wie über den
+        // Relay, damit tl.html in beiden Modi identisch abruft. Mehrere
+        // Kennungen mit Komma = Stapeldruck einer Runde.
+        .route("/tl/api/scoresheet/{ids}", get(tl_scoresheet))
         .route("/tl/api/officials/{official_id}", get(tl_official_detail))
         // TL-Push (Spec tl-web-push): Anstoß-Kanal `{"rev":n}` — nie Daten,
         // die holt die Seite über `/tl/api/state`. Auth im ersten Frame
@@ -2078,6 +2088,62 @@ async fn tl_timeline(
         )
             .into_response(),
     }
+}
+
+/// Schiedsrichterzettel als fertiges HTML (Spec
+/// `schiedsrichterzettel-druck`, ADR 0039) — on-demand, nie Teil des
+/// Zustands-Pushes: Er trägt Sanktionsdaten.
+///
+/// `{ids}` ist eine Komma-Liste (Stapeldruck). **Der Deckel greift vor
+/// der Arbeit:** Mehr als `MAX_SHEETS_PER_DOC` Kennungen werden
+/// abgewiesen, bevor je Kennung etwas zusammengesucht wird.
+async fn tl_scoresheet(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(ids): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if tl_device(&ctx, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    }
+    let Some(match_ids) = parse_sheet_ids(&ids) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Ungültige oder zu viele Spiel-Kennungen.",
+        )
+            .into_response();
+    };
+    match crate::tablet::scoresheet::html_fuer(&ctx.tablet, &ctx.config.display, &match_ids) {
+        Some(html) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            html,
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            "Zu diesem Spiel liegt keine Aufzeichnung vor.",
+        )
+            .into_response(),
+    }
+}
+
+/// Komma-Liste von Match-Kennungen aus dem Pfad.
+///
+/// `None` = abweisen. Der Deckel steht **hier**, vor jeder Arbeit je
+/// Kennung — ein Stapel von 10.000 Kennungen soll nicht erst zehntausend
+/// Store-Zugriffe kosten, bevor er auffällt.
+pub(crate) fn parse_sheet_ids(roh: &str) -> Option<Vec<i64>> {
+    let ids: Vec<i64> = roh
+        .split(',')
+        .map(|s| s.trim().parse::<i64>().ok())
+        .collect::<Option<Vec<i64>>>()?;
+    if ids.is_empty() || ids.len() > relay_proto::MAX_SHEETS_PER_DOC {
+        return None;
+    }
+    if ids.iter().any(|&id| id <= 0) {
+        return None;
+    }
+    Some(ids)
 }
 
 /// Sperrlisten und Einsätze **eines** Schiedsrichters (Spec

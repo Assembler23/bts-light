@@ -8837,6 +8837,110 @@ mod tests {
         assert_eq!(eins.clearing, Some(1), "Feld 1 hält das beendete Spiel");
     }
 
+    /// Sanktionsdaten (Karten, Disqualifikationen) gehören **ausschließlich**
+    /// auf den Zettel — nie in den Anzeige-Zustand, den jedes gekoppelte
+    /// TL-Gerät über eine aus dem Internet erreichbare Seite bekommt
+    /// (Spec `schiedsrichterzettel-druck`, ADR 0037).
+    ///
+    /// Der Wächter prüft **strukturell**, nicht per Textregel: erst der
+    /// Positiv-Nachweis, dass der Fixture wirklich Karten trägt, dann die
+    /// Gegenprobe gegen Text **und** Struktur des `TlState`. Ohne den
+    /// ersten Schritt bewiese der zweite nichts.
+    #[test]
+    fn sanktionsdaten_erreichen_den_anzeige_zustand_nie() {
+        let tablet = TabletState::default();
+        let mut laufend = a_match(42);
+        laufend.status = MatchStatus::OnCourt;
+        laufend.court_id = Some(1);
+        let mut schnappschuss = snap(Vec::new(), vec![laufend], Vec::new());
+        schnappschuss.tournament_name = "Test-Cup".into();
+        tablet.set_snapshot(schnappschuss);
+
+        // Fixture bewusst mit Sanktionsdaten bestücken.
+        let karte = relay_proto::MatchEvent {
+            id: "ff01".into(),
+            seq: 1,
+            set: 1,
+            after_n: 3,
+            score_a: 2,
+            score_b: 1,
+            ts_ms: 1_755_600_000_000,
+            kind: relay_proto::EventKind::CardRed,
+            team: 1,
+            player: 0,
+            receiver_team: 0,
+            receiver_player: 0,
+            phase: relay_proto::Phase::Play,
+            retracts: String::new(),
+        };
+        let schwarz = relay_proto::MatchEvent {
+            id: "ff02".into(),
+            seq: 2,
+            kind: relay_proto::EventKind::CardBlack,
+            ..karte.clone()
+        };
+        assert!(tablet.sheet_store().apply_event(42, karte));
+        assert!(tablet.sheet_store().apply_event(42, schwarz));
+
+        // Positiv-Nachweis: Die Karten sind wirklich im Store — sonst
+        // prüfte die Gegenprobe unten nichts.
+        let sheet = tablet.sheet_store().sheet(42).expect("Zettel-Stand");
+        assert_eq!(sheet.events.len(), 2, "Fixture trägt keine Karten");
+        assert!(
+            sheet.events.iter().any(|e| e.kind.is_sanction()),
+            "Fixture trägt keine Sanktionsdaten"
+        );
+
+        // Gegenprobe: weder im Text …
+        let state = build_state(&tablet, &AppConfig::default(), 1_000, 1);
+        let json = serde_json::to_string(&state).unwrap();
+        for verboten in [
+            "card_red",
+            "card_black",
+            "card_yellow",
+            "disqualified",
+            "ff01",
+            "ff02",
+            "sanktion",
+            "Sanktion",
+        ] {
+            assert!(
+                !json.contains(verboten),
+                "Sanktionsdatum '{verboten}' im Anzeige-Zustand: {json}"
+            );
+        }
+
+        // … noch in der Struktur: kein Feld heißt nach Ereignissen oder
+        // Karten. Ein nachgerüstetes Feld bricht hier, nicht erst im
+        // Turnier.
+        let wert: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let mut felder = Vec::new();
+        fn sammle(v: &serde_json::Value, out: &mut Vec<String>) {
+            match v {
+                serde_json::Value::Object(map) => {
+                    for (k, inner) in map {
+                        out.push(k.clone());
+                        sammle(inner, out);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for i in items {
+                        sammle(i, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        sammle(&wert, &mut felder);
+        for feld in &felder {
+            let klein = feld.to_lowercase();
+            assert!(
+                !klein.contains("card") && !klein.contains("karte") && !klein.contains("sanktion"),
+                "Feld '{feld}' im Anzeige-Zustand deutet auf Sanktionsdaten"
+            );
+        }
+    }
+
     #[test]
     fn the_state_never_carries_personal_data_beyond_its_purpose() {
         // Diese Daten laufen über eine aus dem Internet erreichbare Seite.

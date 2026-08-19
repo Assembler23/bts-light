@@ -234,6 +234,25 @@ Lesepfade · E6 Tablet-Erfassung · E7 Ausgabewege · E8 Advisories, Doku, ADRs,
 Karte bleibt Protokollnotiz ohne Ergebnisweg; `SheetStore` bekommt wie `TimelineStore` nur am
 Master ein Verzeichnis; `docs/adr/README.md` wird nachgezogen (führt den Index nur bis 0013).
 
+**In E6 mitzuerledigen (Befunde aus dem E3/E4-Review, 19.08.2026):**
+
+- **`after_n` MUSS nach dem Punkt gelesen werden.** `applyCard('red')` bucht erst den Punkt
+  (`addPointOnSide`) und protokolliert dann die Karte. Nur in dieser Reihenfolge zeigt `after_n`
+  auf genau den Ballwechsel, den die Karte erzeugt hat — die Projektion in E4 verlässt sich
+  darauf. Ein Test in E6 muss die Reihenfolge festnageln, sonst kippt sie unbemerkt.
+- **Kein End-zu-Ende-Test über einen echten Socket** deckt den Halter-/Match-Filter des Ingests
+  ab. Das ist Parität zum `Rally`-Pfad, der ebenfalls keinen hat — kein neues Loch, aber auch
+  keine Absicherung. Wer `handle_socket` testbar macht, sollte beide gleichzeitig mitnehmen.
+
+**Offen, nicht E3 anzulasten (Security-Review E3, 19.08.2026):** Der Relay setzt **keinen
+expliziten WebSocket-Nachrichten-Deckel**; es gilt der `tungstenite`-Default von 64 MiB. Ein
+Angreifer kann den Relay damit zum Parsen einer sehr großen Nachricht zwingen, **bevor**
+`match_events_valid` oder `MAX_SHEET_LEN` sie verwerfen. Das betrifft **alle vier Frame-Typen**
+gleichermaßen (auch `RallySync` seit ADR 0014), ist also ein eigenes Thema für den Relay
+insgesamt — Vorschlag: `WebSocketUpgrade::max_message_size` in den vier `ws`-Handlern auf eine
+Größe nahe der fachlichen Deckel setzen. **Nicht** in diese Spec einbauen, sondern als eigenes
+Ticket führen.
+
 **In E3 mitzuerledigen (Befunde aus Code- und Security-Review von E1, 19.08.2026):**
 
 - ~~**Die Deckel brauchen Aufrufer.**~~ **Erledigt in E3:** `match_events_valid` **und**
