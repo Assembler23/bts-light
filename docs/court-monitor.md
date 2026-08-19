@@ -111,9 +111,16 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   oder >~1 s Nudge-Stille übernimmt es sofort wieder (250 ms). Ein
   Reconnect-Watchdog verbindet den WS mit Backoff neu. **Kein Regress** — fällt
   der Push aus, verhält sich die Anzeige wie zuvor, nur mit schnellerem Poll.
-- **Grenzen:** Die **Feld-/Match-Zuweisung** wird (noch) nicht genudgt (sie ist
-  BTP-Snapshot-getrieben, kein Einzel-Event) — hier greift der 250-ms-Poll. Der
-  Nudge ist reine Anzeige-Beschleunigung; er ändert keine Ownership/Zählung.
+- **Auch die Feld-/Match-Zuweisung wird angestoßen** (seit v0.9.238, Spec
+  `monitor-livestand-push` S3). Sie ist BTP-Snapshot-getrieben und damit kein
+  Einzel-Ereignis wie ein gezählter Punkt; deshalb vergleicht der Turnier-PC
+  bei jedem neuen BTP-Stand die Belegung je Feld — Match und Satzstand — mit
+  der des Vorgängers und weckt **nur die Abweichungen**. Das deckt Zuweisung,
+  Räumung, Feldwechsel und den in BTP von Hand eingetragenen Satzstand ab.
+  Über die Cloud tun dasselbe die Relay-Arme `MatchAssigned`/`MatchCleared`,
+  jeweils erst nachdem ihr Zwischenstand steht.
+- **Grenzen:** Der Nudge ist reine Anzeige-Beschleunigung; er ändert keine
+  Ownership und keine Zählung.
 
 ## Datenfluss
 

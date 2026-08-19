@@ -969,6 +969,15 @@ async fn health(
     // damit die heißeste verbliebene Stelle, an der die ganze
     // Konfiguration samt Turnierlogo kopiert wurde (Review-Fund
     // 18.08.2026).
+    // **Revision zuerst.** Ein Config-Schreibvorgang setzt sie hoch, nachdem
+    // er den Config-Zwischenstand verworfen hat. Läse der Handler die
+    // Konfiguration vorher und die Revision danach, könnte er den alten
+    // Stand unter der neuen Revision ablegen — bis zur Hart-TTL bekämen alle
+    // Anzeigen die alten Hallen-Farben, ETag-Halter sogar „nichts Neues".
+    // In dieser Reihenfolge kann nur der harmlose Fall auftreten: alte
+    // Revision, neue Eingaben — der nächste Abruf baut ohnehin neu
+    // (Review-Fund 19.08.2026).
+    let rev = ctx.tablet.overview_rev();
     let cfg = ctx.app_config_arc();
     let ct = &cfg.call_timer;
     let jetzt = monitor::now_ms();
@@ -983,7 +992,7 @@ async fn health(
         "thirdCallMinutes": ct.third_call_minutes,
     })
     .to_string();
-    let (courts_json, etag) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json);
+    let (courts_json, etag) = uebersicht_json(&ctx, &cfg, jetzt, &call_timer_json, rev);
 
     // Unveränderter Stand → Bestätigung statt Inhalt. Spart dem
     // Fallback-Poll die ganzen Nutzdaten (Spec monitor-livestand-push, S1);
@@ -1040,8 +1049,8 @@ fn uebersicht_json(
     cfg: &AppConfig,
     jetzt: u64,
     call_timer_json: &str,
+    rev: u64,
 ) -> (String, String) {
-    let rev = ctx.tablet.overview_rev();
     if let Some(c) = ctx.tablet.overview_cache() {
         if c.rev == rev && jetzt.saturating_sub(c.gebaut_ms) < OVERVIEW_CACHE_TTL_MS {
             return (c.courts_json, c.etag);
@@ -2767,10 +2776,13 @@ async fn monitor_ws_upgrade(
 /// Vollstand daraufhin über ihre bestehende Poll-Route. So bleibt der
 /// Poll-Endpunkt die **einzige** Datenquelle (ein Renderpfad, kein Flackern).
 ///
-/// TODO(A1): Match-Zuweisung wird noch nicht angestoßen — sie ist
-/// BTP-Snapshot-getrieben (Sync-Loop), nicht ein einzelner State-Aufruf wie
-/// Score/Alert/Räumung. Bis dahin deckt der ~250-ms-Poll-Fallback die
-/// Zuweisungs-Latenz ab (Score ist das Muss, Spec Paket A).
+/// Angestoßen wird alles, was eine Anzeige verändert: Satzstand, Meldungen,
+/// Räumung — **und seit v0.9.238 die Match-Zuweisung** (Spec
+/// monitor-livestand-push, S3). Letztere ist BTP-Snapshot-getrieben statt
+/// ein einzelner State-Aufruf; `set_snapshot` vergleicht dafür die Belegung
+/// je Feld mit der des Vorgänger-Stands und weckt nur die Abweichungen.
+/// Damit deckt der Poll-Fallback keine Latenz mehr ab, die der Nudge nicht
+/// schon einholt.
 async fn monitor_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>, court: Option<i64>) {
     // Kanal hier anlegen und das Sende-Ende dem State reichen (wie im Relay),
     // damit wir es am Verbindungsende per `unsubscribe_monitor` gezielt wieder

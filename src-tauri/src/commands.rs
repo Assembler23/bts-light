@@ -1110,14 +1110,21 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     Ok(())
 }
 
+/// Sichert den aufgelaufenen Live-Stand sofort (Spec
+/// monitor-livestand-push, S2).
+///
+/// Für die Oberfläche gedacht, wenn sie den Prozess auf einem Weg beendet,
+/// der nicht durch `stop_sync` oder das Fenster-Ereignis läuft — heute der
+/// Neustart nach einem Auto-Update. Ohne diesen Aufruf gingen dort bis zu
+/// eine Sekunde Spielstand verloren, die vorher schon sicher gewesen wäre.
+#[tauri::command]
+pub fn flush_live_scores(state: State<'_, AppState>) {
+    state.tablet.flush_scores();
+}
+
 /// Stoppt die Hintergrund-Polling-Schleife und den Tablet-Server.
 #[tauri::command]
 pub fn stop_sync(state: State<'_, AppState>) {
-    // **Zuerst** den aufgelaufenen Live-Stand sichern (Spec
-    // monitor-livestand-push, S2): Der Sekundentakt hängt am Sync-Task, den
-    // die nächste Zeile abbricht — danach schreibt niemand mehr. Synchron,
-    // damit dieser Aufruf erst zurückkehrt, wenn die Datei steht.
-    state.tablet.flush_scores();
     if let Some(handle) = state
         .sync_task
         .lock()
@@ -1166,6 +1173,13 @@ pub fn stop_sync(state: State<'_, AppState>) {
     {
         let _ = daemon.shutdown();
     }
+    // Den aufgelaufenen Live-Stand sichern (Spec monitor-livestand-push, S2)
+    // — **zuletzt**, nachdem Sync-Task und Tablet-Server abgebrochen sind.
+    // Davor bliebe ein Fenster: Ein Punkt, der noch durch den Handler läuft
+    // (`abort()` greift erst am nächsten Await-Punkt), würde nur vormerken,
+    // und danach schreibt niemand mehr (Review-Fund 19.08.2026). Synchron,
+    // damit dieser Aufruf erst zurückkehrt, wenn die Datei steht.
+    state.tablet.flush_scores();
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus::default();
 }
 

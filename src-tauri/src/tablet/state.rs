@@ -433,9 +433,15 @@ pub struct TabletState {
     /// müsste.
     scorekeeper_call_stages: RwLock<HashMap<i64, (i64, u8)>>,
     /// Pfad der `live-scores.json` (CourtID → Match-ID + Satzstand). Beim
-    /// Start gesetzt; jeder `record_score`/`clear_court` schreibt die Datei,
-    /// damit ein App-Neustart den laufenden Live-Stand nicht verliert (sonst
-    /// fiele der TV auf BTPs 0:0 zurück). `None` = Persistenz aus.
+    /// Start gesetzt, damit ein App-Neustart den laufenden Live-Stand nicht
+    /// verliert (sonst fiele der TV auf BTPs 0:0 zurück). `None` =
+    /// Persistenz aus.
+    ///
+    /// **Geschrieben wird seit v0.9.237 entprellt** (Spec
+    /// monitor-livestand-push, S2): Ein gezählter Punkt merkt nur vor
+    /// ([`TabletState::mark_scores_dirty`]), die Datei entsteht im
+    /// Sekundentakt des Sync-Loops. Wo ein Verlust nicht hinnehmbar ist —
+    /// Ergebnis, Räumung, Stoppen, App-Ende — wird ausdrücklich geflusht.
     scores_path: RwLock<Option<PathBuf>>,
     /// Serialisiert die Schreibvorgänge auf `live-scores.json` – mehrere
     /// Felder können (LAN, mehrere WS-Handler) gleichzeitig zählen; ohne das
@@ -644,6 +650,17 @@ pub struct TabletState {
     /// Pro-Court monoton steigende Nudge-Sequenz. Der Client verwirft anhand
     /// dieses Werts veraltete Nudges (kein Rückwärtsspringen der Anzeige).
     monitor_seq: RwLock<HashMap<i64, u64>>,
+    /// Zuletzt an die Anzeigen gemeldete Belegung je Feld: CourtID →
+    /// (Match-ID, Satzstand aus BTP). Grundlage des Zuweisungs-Nudges (Spec
+    /// monitor-livestand-push, S3).
+    ///
+    /// Warum der Satzstand mit hineingehört, obwohl die Zuweisung schon an
+    /// der Match-ID hängt: Trägt jemand in BTP von Hand einen Stand ein,
+    /// ändert sich nur er — ohne diesen Vergleich blieb der Sprung für die
+    /// Anzeigen still (das zweite offene A1-TODO). Ein Punkt **vom Tablet**
+    /// steht hier nie drin: `set_snapshot` legt den rohen BTP-Stand ab,
+    /// `apply_tablet_scores` arbeitet danach auf einer eigenen Kopie.
+    monitor_belegung: RwLock<HashMap<i64, CourtBelegung>>,
     /// Steht ein Schreibvorgang der `live-scores.json` aus (Spec
     /// monitor-livestand-push, S2)? Gesetzt von jedem Punkt, geleert vom
     /// Flush. Ein `AtomicBool` genügt: Es gibt nur einen Zustand („es hat
@@ -714,6 +731,10 @@ fn schlanker_anzeige_stand(state: &str) -> String {
     obj.remove("rallyLog");
     serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
 }
+
+/// Belegung eines Felds, wie die Anzeigen sie sehen: Match-ID plus
+/// Satzstand aus BTP (Spec monitor-livestand-push, S3).
+type CourtBelegung = (i64, Vec<(i64, i64)>);
 
 /// Ein Eintrag des `/health`-Antwortcaches (Spec monitor-livestand-push, S1).
 /// Gehalten wird **nur die Feld-Liste**, nicht die ganze Antwort: Der
@@ -1097,7 +1118,20 @@ impl TabletState {
         {
             self.load_btp_retry();
         }
+        // S3 (Spec monitor-livestand-push): Belegung je Feld festhalten, bevor
+        // der Snapshot verschoben wird — geweckt wird gleich danach.
+        let belegung: HashMap<i64, CourtBelegung> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| m.court_id.map(|cid| (cid, (m.id, m.sets.clone()))))
+            .collect();
         *self.snapshot.write().unwrap() = Some(snapshot);
+        // Anzeigen der Felder wecken, deren Belegung sich geändert hat —
+        // Zuweisung, Räumung, Feldwechsel und der in BTP von Hand
+        // eingetragene Satzstand. **Nach** dem Ablegen: Die geweckte Anzeige
+        // holt sofort und muss den neuen Stand sehen.
+        self.nudge_belegungs_wechsel(belegung);
         // S1 (Spec monitor-livestand-push): Ein neuer BTP-Stand kann jedes
         // Feld verändern — Zuweisung, Räumung, Ergebnis, Satzstand. Der
         // Antwortcache der Übersicht ist damit in jedem Fall überholt.
@@ -2145,9 +2179,14 @@ impl TabletState {
     /// Aktuellen Live-Stand aller Felder in die Datei schreiben (best effort:
     /// Schreibfehler dürfen das Zählen nie stören). No-op, wenn kein Pfad
     /// gesetzt ist (z. B. in Tests).
-    fn persist_scores(&self) {
+    ///
+    /// Meldet `false`, wenn der Schreibvorgang **fehlgeschlagen** ist —
+    /// [`Self::flush_scores`] merkt die Arbeit dann erneut vor. Ein
+    /// inhaltsgleicher Stand und ein fehlender Pfad gelten als Erfolg: Da
+    /// gibt es nichts nachzuholen.
+    fn persist_scores(&self) -> bool {
         let Some(path) = self.scores_path.read().unwrap().clone() else {
-            return;
+            return true;
         };
         // Schreiber serialisieren: verhindert, dass zwei gleichzeitige
         // record_score den Temp-Pfad oder die Zieldatei gegenseitig zerlegen.
@@ -2181,7 +2220,7 @@ impl TabletState {
                 hasher.finish()
             };
             if self.scores_fingerprint.load(Ordering::Relaxed) == abdruck {
-                return;
+                return true;
             }
             let bytes = json.len() as u64;
             let begonnen = std::time::Instant::now();
@@ -2205,7 +2244,11 @@ impl TabletState {
             // diese Etappe entprellt — die Zahl belegt die Wirkung.
             self.perf
                 .note_persist(begonnen.elapsed().as_nanos() as u64, bytes);
+            return geschrieben;
         }
+        // Unserialisierbar wäre ein Programmfehler, kein vorübergehendes
+        // Hindernis — ein Wiederholen brächte nichts.
+        true
     }
 
     /// Akkustand des Tablets an einem Feld übernehmen.
@@ -2395,6 +2438,43 @@ impl TabletState {
         self.tl_state_cache.read().unwrap().clone()
     }
 
+    /// Weckt die Anzeigen jedes Felds, dessen Belegung sich gegenüber dem
+    /// letzten Schnappschuss geändert hat (Spec monitor-livestand-push, S3).
+    ///
+    /// Deckt in einem Griff ab, was bisher nur der Poll-Fallback auffing:
+    /// neue Zuweisung, Räumung, Feldwechsel und den in BTP von Hand
+    /// eingetragenen Satzstand. Ein Feld, dessen Belegung gleich geblieben
+    /// ist, wird **nicht** geweckt — sonst weckte jeder BTP-Poll alle
+    /// Anzeigen aller Felder.
+    ///
+    /// Nimmt die fertige Projektion statt des Snapshots: Der Aufrufer bildet
+    /// sie, bevor er den Snapshot ablegt (der wird dabei verschoben), und
+    /// spart so einen Klon des ganzen Turnierstands je Poll.
+    fn nudge_belegungs_wechsel(&self, neu: HashMap<i64, CourtBelegung>) {
+        // Betroffen ist jedes Feld, das in genau einer der beiden Fassungen
+        // steht oder in beiden mit unterschiedlichem Inhalt. Die Liste wird
+        // erst gesammelt und **nach** dem Freigeben des Schreib-Locks
+        // geweckt — `notify_monitor` nimmt selbst Locks (Muster
+        // `record_score`).
+        let betroffen: Vec<i64> = {
+            let alt = self.monitor_belegung.read().unwrap();
+            alt.keys()
+                .chain(neu.keys())
+                .filter(|cid| alt.get(cid) != neu.get(cid))
+                .copied()
+                .collect::<std::collections::BTreeSet<i64>>()
+                .into_iter()
+                .collect()
+        };
+        if betroffen.is_empty() {
+            return;
+        }
+        *self.monitor_belegung.write().unwrap() = neu;
+        for court_id in betroffen {
+            self.notify_monitor(court_id);
+        }
+    }
+
     /// Meldet, dass sich der Live-Stand geändert hat (Spec
     /// monitor-livestand-push, S2). Schreibt **nicht** — das tut der
     /// Sekundentakt oder ein Pfad, der auf Nummer sicher gehen muss.
@@ -2418,7 +2498,15 @@ impl TabletState {
         if !self.scores_dirty.swap(false, Ordering::Relaxed) {
             return;
         }
-        self.persist_scores();
+        // Schlug der Schreibvorgang fehl, bleibt es zu tun. Ohne dieses
+        // Zurücksetzen wäre der Versuch verloren: Das Flag ist leer, der
+        // Fingerabdruck unverändert — der nächste Takt kehrte sofort zurück
+        // und die Datei bliebe für den Rest des Laufs veraltet. Vor der
+        // Entprellung hätte jeder Punkt es erneut versucht
+        // (Review-Fund 19.08.2026).
+        if !self.persist_scores() {
+            self.mark_scores_dirty();
+        }
     }
 
     /// Aktuelle Revision des Anzeige-Zustands (Spec monitor-livestand-push, S1).
@@ -6424,6 +6512,94 @@ mod tests {
         assert_eq!(s.nudges_sent, 1);
     }
 
+    // ── Zuweisungs-Nudge (Spec monitor-livestand-push, S3) ─────────────────
+
+    /// Ein Snapshot mit einem Match auf einem Feld — Satzstand einstellbar.
+    fn snapshot_mit_stand(
+        match_id: i64,
+        court_id: Option<i64>,
+        sets: Vec<(i64, i64)>,
+    ) -> BtpSnapshot {
+        let mut snap = snapshot(
+            vec![match_on(match_id, court_id, MatchStatus::OnCourt)],
+            vec![(101, "Feld 1"), (102, "Feld 2")],
+        );
+        snap.matches[0].sets = sets;
+        snap
+    }
+
+    #[test]
+    fn ein_snapshot_mit_neuer_zuweisung_nudgt_genau_dieses_feld() {
+        // Das erste der beiden offenen A1-TODOs: Bisher fing nur der
+        // Poll-Fallback eine Zuweisung auf.
+        let st = TabletState::default();
+        // Erster Snapshot: Feld 101 belegt. (Beim allerersten Stand ist noch
+        // keine Anzeige verbunden — die Nudges hier sind folgenlos.)
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        // Dasselbe Match wandert auf Feld 102.
+        st.set_snapshot(snapshot_mit_stand(7, Some(102), vec![]));
+
+        let nudges = st.perf().snapshot().nudges_sent - vorher;
+        assert_eq!(
+            nudges, 2,
+            "genau die zwei betroffenen Felder: 101 wird frei, 102 belegt"
+        );
+    }
+
+    #[test]
+    fn ein_unveraenderter_snapshot_nudgt_nicht() {
+        // Der BTP-Poll läuft alle fünf Sekunden. Weckte er jedes Mal alle
+        // Anzeigen, wäre der Nudge-Kanal wertlos.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 8)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent,
+            vorher,
+            "gleiche Belegung, gleicher Stand: kein Anstoß"
+        );
+    }
+
+    #[test]
+    fn eine_raeumung_im_snapshot_nudgt() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(21, 19)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        // Das Match ist beendet und steht auf keinem Feld mehr.
+        st.set_snapshot(snapshot_mit_stand(7, None, vec![(21, 19)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent - vorher,
+            1,
+            "das freigewordene Feld wird geweckt"
+        );
+    }
+
+    #[test]
+    fn ein_btp_satzstand_sprung_nudgt() {
+        // Das zweite offene A1-TODO: Trägt jemand den Stand in BTP von Hand
+        // ein, ist kein Tablet beteiligt — der Sprung war für die Anzeigen
+        // bisher still.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(5, 3)]));
+        let vorher = st.perf().snapshot().nudges_sent;
+
+        st.set_snapshot(snapshot_mit_stand(7, Some(101), vec![(11, 3)]));
+
+        assert_eq!(
+            st.perf().snapshot().nudges_sent - vorher,
+            1,
+            "der Satzstand-Sprung weckt das Feld"
+        );
+    }
+
     // ── Entprellter Schreibvorgang (Spec monitor-livestand-push, S2) ───────
 
     #[test]
@@ -6530,6 +6706,35 @@ mod tests {
         assert!(
             gespeicherte_saetze(&pfad, 101).is_empty(),
             "der geräumte Stand ist sofort aus der Datei verschwunden"
+        );
+    }
+
+    #[test]
+    fn ein_fehlgeschlagener_schreibvorgang_wird_nachgeholt() {
+        // Ohne dieses Nachholen wäre der Versuch verloren: Das Dirty-Flag ist
+        // geleert, der Fingerabdruck unverändert — der nächste Takt kehrte
+        // sofort zurück und die Datei bliebe für den Rest des Laufs
+        // veraltet. Vor der Entprellung hätte jeder Punkt es erneut versucht.
+        //
+        // Ein Schreibfehler wird hier erzeugt, indem der Zielpfad in einem
+        // Verzeichnis liegt, das es nicht gibt.
+        let dir = tempfile::tempdir().unwrap();
+        let fehlt = dir.path().join("gibt-es-nicht").join("live-scores.json");
+        let st = TabletState::default();
+        st.set_scores_path(fehlt.clone());
+
+        st.record_score(101, 7, vec![(5, 3)]);
+        st.flush_scores();
+        assert!(!fehlt.exists(), "der Schreibvorgang musste scheitern");
+
+        // Jetzt ist der Weg frei — der nächste Takt muss es erneut versuchen.
+        std::fs::create_dir_all(fehlt.parent().unwrap()).unwrap();
+        st.flush_scores();
+
+        assert_eq!(
+            gespeicherte_saetze(&fehlt, 101),
+            vec![(5, 3)],
+            "der Stand ist beim nächsten Takt nachgeholt worden"
         );
     }
 
