@@ -193,7 +193,14 @@ A4 quer, Satzspiegel 281 × 194 mm.
 - [ ] Vereinigung zweier Stände ist idempotent und reihenfolgeunabhängig.
 - [ ] Ein Tabletwechsel mitten im Spiel überträgt die Ereignisse an das neue Gerät.
 - [ ] Vorhandene Karten aus dem alten `localStorage`-Schlüssel werden einmalig übernommen.
-- [ ] Das Ereignis-Modal verdeckt niemals „Weiterspielen" und schließt sich beim Pausenende selbst.
+- [ ] Das Ereignis-Modal ist **in der Pause bedienbar** und schließt sich beim Pausenende
+      selbst. **Abweichung von der ursprünglichen Fassung (E6, 19.08.2026):** Dort stand
+      „liegt unter dem Pausen-Overlay, damit es ‚Weiterspielen‘ nie verdeckt". Das ist mit
+      „in Pausen erfassbar" unvereinbar — unter dem Overlay (z-index 15) ist das Modal
+      vollständig verdeckt, jeder Tipp landet auf dem Overlay, und die Erfassung in der
+      Pause wäre tot. Es liegt jetzt **darüber** (z-index 18); die ursprüngliche Absicht
+      ist anders eingelöst: immer sichtbares „Abbrechen" **und** Selbstschluss in
+      `endBreak` (den es vorher gar nicht gab).
 
 **Verträglichkeit**
 - [ ] Alte Tablet-Seite gegen neuen Host: keine Ereignisse, Zettel druckt trotzdem.
