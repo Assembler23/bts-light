@@ -2103,7 +2103,12 @@ async fn tl_scoresheet(
     axum::extract::Path(ids): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     if tl_device(&ctx, &headers).is_none() {
-        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::CACHE_CONTROL, "no-store")],
+            "Kein gültiger Zugang.",
+        )
+            .into_response();
     }
     let Some(match_ids) = parse_sheet_ids(&ids) else {
         return (
@@ -2112,15 +2117,25 @@ async fn tl_scoresheet(
         )
             .into_response();
     };
+    // `no-store` wie am Relay-Gegenstück und wie bei `tl_state`: Der
+    // Zettel trägt Namen UND Sanktionsmarker im Klartext. Der eingebettete
+    // Server hört auf 0.0.0.0:8088, ist also im ganzen Turnier-WLAN
+    // erreichbar — ohne den Header könnte der Platten-Cache eines
+    // gemeinsam genutzten Tablets das Dokument über die Gültigkeit des
+    // Zugangs hinaus vorhalten.
     match crate::tablet::scoresheet::html_fuer(&ctx.tablet, &ctx.config.display, &match_ids) {
         Some(html) => (
             StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
             html,
         )
             .into_response(),
         None => (
             StatusCode::NOT_FOUND,
+            [(header::CACHE_CONTROL, "no-store")],
             "Zu diesem Spiel liegt keine Aufzeichnung vor.",
         )
             .into_response(),
@@ -4585,6 +4600,33 @@ mod tests {
 
         // Papier-Spiel ohne Erfassung: finalize legt nichts an.
         assert!(ctx.tablet.sheet_store().sheet(999).is_none());
+    }
+
+    /// Der Zettel darf nirgends zwischengelagert werden: Er trägt Namen
+    /// UND Sanktionsmarker, und der eingebettete Server ist im ganzen
+    /// Turnier-WLAN erreichbar (Security-Review E5).
+    #[tokio::test]
+    async fn scoresheet_route_setzt_no_store_und_deckelt_die_kennungen() {
+        // Der Deckel steht vor jeder Arbeit je Kennung.
+        assert_eq!(parse_sheet_ids("42"), Some(vec![42]));
+        let genau: String = (1..=relay_proto::MAX_SHEETS_PER_DOC)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(parse_sheet_ids(&genau).is_some());
+        let zu_viele: String = (1..=relay_proto::MAX_SHEETS_PER_DOC + 1)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(
+            parse_sheet_ids(&zu_viele).is_none(),
+            "41 Kennungen abweisen"
+        );
+        assert!(parse_sheet_ids("0").is_none());
+        assert!(parse_sheet_ids("-1").is_none());
+        assert!(parse_sheet_ids("42,abc").is_none());
+        assert!(parse_sheet_ids("../../etc").is_none());
+        assert!(parse_sheet_ids("").is_none());
     }
 
     /// Aufgabe vom Tablet: der EINE kombinierte SENDUPDATE trägt
