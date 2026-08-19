@@ -367,20 +367,28 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Monitor-Livestand per Push — Etappen S0 bis S3 umgesetzt** (v0.9.235–238,
-  PRs #256–#259). **S0** Messung: Zähler im Turnier-PC, 10-Sekunden-Zeile im
-  Diagnose-Log, `GET /debug/perf` (nur LAN), Lastskript
-  `scripts/last-monitor.mjs`, Render-Messung `ovRenderMessen`. Die
-  Vorher-Messung liegt vor (19.08.2026): **72,7 `/health`-Abrufe/s, 1,13 MB/s,
-  74 Übersichts-Berechnungen/s, 20,0 ms je Schreibvorgang** — Tabelle samt
-  Vorbehalten in der Spec. **S1** Antwortcache mit 250-ms-Hart-TTL und
-  ETag/304. **S2** `live-scores.json` entprellt (Sekundentakt statt
-  Schreibvorgang je Punkt). **S3** Zuweisungs-Nudge in Host und Relay —
-  schließt die beiden offenen A1-TODOs.
-  **Offen:** S4 (`seq` in den Voll-Antworten), S5 (Teil-Patch), S6 (Heartbeat +
-  4-s-Fallback), Nachmessung, S7 (schmaler Abruf). Für die Nachmessung fehlen
-  noch die vier Werte, die ein sendendes Tablet brauchen (Push-Anteil,
-  Nudge-Rate, Latenz) — sie brauchen einen Probeaufbau **ohne** Liveticker.
+- **Monitor-Livestand per Push — VOLLSTÄNDIG umgesetzt** (S0–S7, v0.9.235–242,
+  PRs #256–#264). **S0** Messung (Zähler, 10-Sekunden-Log-Zeile,
+  `GET /debug/perf` nur LAN, Lastskript `scripts/last-monitor.mjs`), **S1**
+  Antwortcache mit 250-ms-Hart-TTL und ETag/304, **S2** entprellte
+  `live-scores.json`, **S3** Zuweisungs-Nudge in Host und Relay, **S4** `seq`
+  in den Voll-Antworten, **S5** Teil-Patch statt Board-Neuaufbau, **S6**
+  Herzschlag + neue Gesundheits-Definition + 4-s-Schalter (Default aus),
+  **S7** schmaler Abruf `/health?court=<id>`.
+
+  **Nachmessung vom 19.08.2026 (v0.9.242, 20 belegte Felder, Debug-Build):**
+  Im Leerlauf **−99 % Nutzdaten** (1,13 MB/s → 0,01 MB/s, 99 % der Antworten
+  sind „nichts Neues") und **−87 % Vollberechnungen** (74,0 → 9,8 je Sekunde);
+  mit gesetztem Schalter **−93 % Abrufe** (75,4 → 5,3/s). Im Spielbetrieb mit
+  20 zählenden Tablets: **Latenz Punkt → Anzeige p50 15 ms / p95 68 ms** gegen
+  eine 300-ms-Grenze, und `persist_scores` läuft **56-mal für 222 Punkte** mit
+  6,6 ms statt bei jedem Punkt mit 20,0 ms. Die Ausbaustufe „Nutzlast im
+  Nudge" wird damit **nicht** gebaut — ihr Auslösekriterium waren mehr als
+  20 Requests/s je Übersichts-Gerät, gemessen sind 7,45/s.
+
+  **Offen:** die Pi-Zeile (`ovRenderMessen` auf einem echten Kiosk) und die
+  Cloud-Spalte der Messung; beide sind Feldtest, kein Code. Und der
+  Release-Tag — die App ist seit v0.9.226 nicht getaggt.
 - **Monitor-Livestand per Push** — ein gezählter Punkt soll nur noch kosten,
   was er wert ist. Heute weckt jeder Punkt jede Übersichts-Anzeige, die
   daraufhin den Zustand **aller** Felder holt und ihr Board komplett neu
