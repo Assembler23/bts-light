@@ -4061,10 +4061,6 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 let _ = pending.send(response);
             }
         }
-        // Punktverlauf-Antwort des Hosts → an den wartenden Abruf. Der
-        // Zettel-Antwort (ADR 0039): Leseweg und Pending-Map kommen in
-        // Etappe E5; bis dahin gibt es keinen Abruf, der darauf wartet.
-        HostFrame::ScoresheetData { .. } => {}
         HostFrame::OfficialDetail { req_id, json } => {
             if let Some(pending) = namespace.official_pending.remove(&req_id) {
                 // Größen-Deckel wie beim Verlauf: Eine überlange Antwort
@@ -4092,6 +4088,10 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 });
             }
         }
+        // Zettel-Antwort (ADR 0039), Geschwister der TimelineData-Antwort
+        // darüber: Leseweg und Pending-Map kommen in Etappe E5 der Spec
+        // schiedsrichterzettel-druck. Bis dahin wartet kein Abruf darauf.
+        HostFrame::ScoresheetData { .. } => {}
     }
     true
 }

@@ -1162,7 +1162,11 @@ impl MatchEvent {
             // nicht — sonst gäbe es Rücknahmen ins Leere und stille
             // Verweise, die der Renderer verschieden deuten könnte.
             && match self.kind {
-                EventKind::Retract => kennung(&self.retracts),
+                // Eine Rücknahme, die sich selbst zurücknimmt, ist ein
+                // Zirkel: Die Projektion in E4 müsste entscheiden, ob sie
+                // im Raster steht oder nicht, und beide Antworten wären
+                // falsch.
+                EventKind::Retract => kennung(&self.retracts) && self.retracts != self.id,
                 _ => self.retracts.is_empty(),
             }
             && self.seq >= 0
@@ -4676,6 +4680,16 @@ mod tests {
             ..beispiel_ereignis()
         };
         assert!(!ziel_kein_hex.is_valid());
+
+        // Selbstbezug: ein Zirkel, den die Projektion nicht auflösen
+        // könnte (steht das Ereignis nun im Raster oder nicht?).
+        let sich_selbst = MatchEvent {
+            id: "ff00".to_string(),
+            kind: EventKind::Retract,
+            retracts: "ff00".to_string(),
+            ..beispiel_ereignis()
+        };
+        assert!(!sich_selbst.is_valid());
 
         let gut = MatchEvent {
             id: "ff00".to_string(),

@@ -234,6 +234,21 @@ Lesepfade · E6 Tablet-Erfassung · E7 Ausgabewege · E8 Advisories, Doku, ADRs,
 Karte bleibt Protokollnotiz ohne Ergebnisweg; `SheetStore` bekommt wie `TimelineStore` nur am
 Master ein Verzeichnis; `docs/adr/README.md` wird nachgezogen (führt den Index nur bis 0013).
 
+**In E3 mitzuerledigen (Befunde aus Code- und Security-Review von E1, 19.08.2026):**
+
+- **Die Deckel brauchen Aufrufer.** `match_events_valid` (Zahl der Ereignisse) und
+  `MAX_SHEET_LEN` haben nach E1 **außerhalb der Tests keine Aufrufstelle** — in E1 korrekt, weil
+  jeder Frame verworfen wird, ab E3 aber eine Lücke. Der Ingest in `server.rs`,
+  `relay_client.rs` und `relay/src/main.rs` muss beide **tatsächlich aufrufen**; ein Deckel neben
+  dem ungeschützten Pfad ist keiner. Ein Test je Weg hält es fest.
+- **`seq` und `ts_ms` sind nur halb gedeckelt.** `seq` ist auf `>= 0` geprüft, `ts_ms` gar nicht.
+  Bewusst **keine erfundene Obergrenze im Wire-Typ**: Ein zu enger Deckel würde ein legitimes
+  spätes Ereignis mitten im Turnier verwerfen, und beide Werte sind reine Anzeige-Größen ohne
+  Arithmetik. Stattdessen: In E5 zeigt die Protokollzeile einen unplausiblen Zeitstempel als
+  „—" statt als Unsinn — mit Test.
+- `MAX_SHEETS_PER_DOC` wird in **E5** an der Leseroute durchgesetzt, **bevor** je Kennung
+  gearbeitet wird (AK „41 IDs werden abgewiesen").
+
 ## Version und Auslieferung
 
 Bump gegen den **dann aktuellen** main-Stand, gemeinsam in `src-tauri/Cargo.toml`,
