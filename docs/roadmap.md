@@ -367,6 +367,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Monitor-Livestand per Push — Etappe S0 (Messung) umgesetzt (v0.9.235).**
+  Zähler im Turnier-PC (Abrufe getrennt nach `push`/`poll` samt Bytes,
+  Bau-Dauer der Übersicht mit p95, Schreibvorgänge, Nudges), 10-Sekunden-Zeile
+  im Diagnose-Log, `GET /debug/perf` (nur LAN), Lastskript
+  `scripts/last-monitor.mjs` und die Render-Messung `ovRenderMessen`.
+  **Offen: der Messlauf selbst** — er braucht einen laufenden Turnier-PC mit
+  verbundenem BTP und belegten Feldern; die Tabelle dafür steht in der Spec.
+  Erst danach beginnt S1 (Antwortcache), so von der Spec vorgegeben.
 - **Monitor-Livestand per Push** — ein gezählter Punkt soll nur noch kosten,
   was er wert ist. Heute weckt jeder Punkt jede Übersichts-Anzeige, die
   daraufhin den Zustand **aller** Felder holt und ihr Board komplett neu

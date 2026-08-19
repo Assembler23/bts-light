@@ -1060,10 +1060,9 @@ async fn monitor_state(
     // Wie bei `/health` selbst serialisiert, um die Antwortgröße zu kennen
     // (Spec monitor-livestand-push, S0).
     let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
-    ctx.tablet.perf().note_court_state(
-        perf::Quelle::aus_query(q.src.as_deref()),
-        json.len() as u64,
-    );
+    ctx.tablet
+        .perf()
+        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
     (
         [
             (header::CACHE_CONTROL, "no-store"),

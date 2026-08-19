@@ -181,14 +181,56 @@ Pi verliert mehr als 10 Frames/min. Dann als eigener ADR, mit der Vorgabe, die N
 Sender** aus derselben Quelle abzuleiten, aus der die Voll-Route liest (im Relay also erst nach
 Stale-Verwerfen, „leerer Spiegel überschreibt nicht" und Größengrenze).
 
+## Vorher-Messung (S0)
+
+> **Messwerkzeug steht (v0.9.235), Zahlen fehlen noch.** Die Zähler, `/debug/perf`,
+> die 10-Sekunden-Zeile im Diagnose-Log, `scripts/last-monitor.mjs` und `ovRenderMessen`
+> sind gebaut und getestet. Was fehlt, ist der **Lauf an einem echten Turnier-PC mit
+> verbundenem BTP und belegten Feldern** — ohne den gibt es keine gültigen Match-IDs,
+> und der Server verwirft jeden gesendeten Stand (`handle_score`), womit weder
+> Schreibvorgang noch Nudge entstünden. Am Entwicklungsrechner ist diese Zeile
+> deshalb nicht zu füllen.
+
+So wird gemessen (Ablauf für den Messlauf):
+
+1. bts-light starten, BTP verbinden, Übertragung starten, Felder belegen lassen.
+2. `node scripts/last-monitor.mjs --base http://<turnier-pc>:8088/ --dauer 120`
+   (LAN) und einmal gegen `https://badhub.de/bts-relay/<install-id>/` (Cloud).
+3. Auf einem Pi zusätzlich `localStorage.ovRenderMessen = "1"` setzen und die
+   Konsolen-Sammelzeile mitschreiben.
+4. Die Werte unten eintragen — Client-Sicht aus der Skript-Zusammenfassung,
+   Server-Sicht aus `/debug/perf` bzw. der Log-Zeile `Perf-Anzeigen (…)`.
+
+| Kennzahl | LAN vorher | Cloud vorher | Quelle |
+|---|---|---|---|
+| `/health`-Abrufe/s gesamt | | | Skript / `health_push`+`health_poll` |
+| davon `push` / `poll` | | | `/debug/perf` |
+| `/health`-Bytes/s | | | Skript |
+| `/court/{id}/state`-Abrufe/s | | | `court_state_*` |
+| `overview_build_ns` p95 | | | `/debug/perf` |
+| `persist_calls`/s | | | `/debug/perf` |
+| Nudges/s | | | `nudges_sent` |
+| Latenz Punkt → Anzeige p50/p95 | | | Skript |
+| Pi: Renders/s, Ø, über 16 ms | | | `ovRenderMessen` |
+
+Ergibt der Lauf ein deutlich anderes Bild als die Schätzung (4–7 Punkte/s turnierweit,
+10–30 KB je `/health`-Antwort), werden die Zielwerte oben einmalig nachgezogen und die
+Änderung hier vermerkt — so in „Offene Punkte / Annahmen" festgelegt.
+
 ## Akzeptanzkriterien
 
 **Messung (S0)**
 - [ ] Die Vorher-Messung liegt als Tabelle in dieser Spec vor, getrennt nach `health_push`,
       `health_poll`, `overview_build_ns` p95, `persist_calls`/s, Bytes/s und Latenz p50/p95.
-- [ ] Ein Abruf ohne `src`-Parameter (alte Seite) wird als `poll` gezählt, nie als `push`.
-- [ ] `/debug/perf` enthält ausschließlich Zahlen — keine Namen, keine Match- oder Spielerdaten.
-- [ ] `/debug/perf` existiert nur am LAN-Server, nicht am Relay.
+      *(Tabelle steht, Zahlen brauchen den Turnier-PC — siehe oben.)*
+- [x] Ein Abruf ohne `src`-Parameter (alte Seite) wird als `poll` gezählt, nie als `push`.
+      *(`Quelle::aus_query`, Test `zaehler_ohne_src_zaehlt_als_poll`; auch `""` und
+      Unbekanntes zählen als `poll`.)*
+- [x] `/debug/perf` enthält ausschließlich Zahlen — keine Namen, keine Match- oder Spielerdaten.
+      *(Wächter `debug_perf_enthaelt_keine_personendaten` prüft die Struktur des
+      serialisierten Snapshots; mit einem eingebauten Textfeld gegengeprüft.)*
+- [x] `/debug/perf` existiert nur am LAN-Server, nicht am Relay.
+      *(Route nur in `tablet/server.rs`; an `relay/` wurde nichts geändert.)*
 
 **Antwortcache (S1)**
 - [ ] Zwei `/health`-Abrufe ohne dazwischenliegende Änderung bauen den Zustand genau einmal.

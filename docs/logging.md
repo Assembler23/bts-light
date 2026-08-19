@@ -19,6 +19,37 @@ Protokolliert werden u. a.:
 - ausgelieferte Tablet-Seiten, Tablet verbunden/getrennt, Match-Zuweisung
 - Ergebnis-Übermittlung vom Tablet und die BTP-Antwort (`SENDUPDATE`)
 - fehlgeschlagene Liveticker-Pushes
+- **Perf-Zeile der Anzeige-Strecke** (seit v0.9.235, siehe unten)
+
+### Perf-Zeile der Anzeige-Strecke
+
+Alle zehn Sekunden eine Zeile mit dem, was die Monitore und Übersichten im
+vergangenen Fenster gekostet haben (Spec
+[features/monitor-livestand-push.md](features/monitor-livestand-push.md),
+Etappe S0):
+
+```
+Perf-Anzeigen (10 s): /health 40 push + 800 poll = 84.0/s, 1.63 MB/s ·
+/court/state 12 push + 0 poll, 0.01 MB/s · overview 840 Bauten (84.0/s),
+p95 1.05 ms, max 4.19 ms · live-scores 210 Schreibvorgänge (21.0/s,
+0.04 MB/s, Ø 0.51 ms) · 210 Nudges (21.0/s)
+```
+
+Drei Dinge dazu:
+
+- **Sie steht im Sync-Takt, nicht im Server.** Der Sync-Loop läuft in
+  beiden Betriebsarten, der LAN-Server nicht — sonst fehlte die Messung
+  ausgerechnet im Cloud-Betrieb. Sie wird **vor** dem BTP-Abruf gezogen,
+  damit sie auch dann kommt, wenn BTP klemmt: Die Anzeigen laufen ja
+  weiter.
+- **Stille schreibt nichts.** Hängt keine Anzeige am PC, entfällt die
+  Zeile ganz statt lauter Nullen zu protokollieren.
+- **Nur Zahlen** — keine Namen, keine Match-IDs. Derselbe Stand steht im
+  LAN unter `GET /debug/perf` als JSON zur Verfügung; ein Wächter-Test
+  hält den Personenbezug draußen.
+
+Der Zweck ist der Rückweg: In einem echten Turnier steht kein Messgerät,
+aber das Log kommt über den Upload zurück.
 
 ## Automatischer Upload (opt-in)
 

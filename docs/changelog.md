@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.235
+
+- **Der Turnier-PC misst jetzt, was seine Anzeigen kosten.** Für die
+  Turnierleitung ändert sich **nichts** — kein Knopf, keine andere
+  Darstellung, kein neues Verhalten. Im Hintergrund zählt bts-light mit,
+  wie oft Monitore und Übersichten ihren Stand holen, wie groß die
+  Antworten sind, wie lange die Berechnung dauert und wie oft der
+  Spielstand auf die Platte geschrieben wird.
+- Alle zehn Sekunden steht eine Zeile davon im Diagnose-Log — so kommen
+  die Zahlen über den Log-Upload auch aus einem echten Turnier zurück, wo
+  niemand mit einem Messgerät danebensteht. Läuft keine Anzeige, wird auch
+  nichts geschrieben.
+- Im Heim-Netz (nicht über die Cloud) gibt es die Werte zusätzlich unter
+  `http://<turnier-pc>:8088/debug/perf`. Sie enthalten ausschließlich
+  Zahlen — keine Namen, keine Spiele.
+- Dazu ein Lastskript (`scripts/last-monitor.mjs`), das ein volles Turnier
+  mit zwanzig Tablets und zwanzig Anzeigen nachstellt, und eine
+  abschaltbare Render-Messung auf den Monitor-Seiten.
+- Erste von sieben Etappen der Spec `monitor-livestand-push`: Bevor an der
+  Anzeige-Strecke etwas umgebaut wird, soll belegt sein, was sie heute
+  kostet. Die Entlastung selbst kommt in den folgenden Etappen.
+
 ## v0.9.234
 
 - **Das Turnierlogo wird nur noch bei Änderung übertragen.** Bisher reiste

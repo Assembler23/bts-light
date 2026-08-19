@@ -266,6 +266,45 @@ billig:
   und Startzeit; das Tablet selbst bekommt beim Wiederverbinden
   weiterhin den vollen Stand (sein Rückgängig-Gedächtnis).
 
+## Messen, was die Anzeigen kosten (seit v0.9.235)
+
+Erste Etappe der Spec
+[features/monitor-livestand-push.md](features/monitor-livestand-push.md):
+Bevor an der Strecke etwas umgebaut wird, misst sie sich selbst. Drei
+Werkzeuge, alle abschaltbar und ohne Wirkung auf die Anzeige:
+
+**1. Zähler im Turnier-PC.** Gezählt werden die Zustands-Abrufe (`/health`
+und `/court/{id}/state`, jeweils **getrennt** nach nudge-getrieben und
+Fallback-Takt) samt ihrer Antwortgröße, die Bau-Dauer der Übersicht, die
+Schreibvorgänge der `live-scores.json` und die verschickten Nudges. Die
+Trennung liefert die Anzeige selbst über `&src=push|poll` am Abruf; eine
+Seite aus einem älteren Stand sendet den Parameter nicht, ihr Abruf zählt
+dann als `poll` — was er auch ist.
+
+**2. Ausgabe.** Alle zehn Sekunden eine Zeile im Diagnose-Log (kommt über
+den Log-Upload auch aus einem echten Turnier zurück, siehe
+[logging.md](logging.md)), und im LAN zusätzlich `GET /debug/perf` als
+JSON. Passiert nichts, wird auch nichts geschrieben. Die Route gibt es
+**nur im LAN** — im Internet hätte eine unauthentifizierte Lastauskunft
+nichts zu suchen. Sie trägt ausschließlich Zahlen, per Wächter-Test
+abgesichert.
+
+**3. Lastskript.** `node scripts/last-monitor.mjs --base
+http://<turnier-pc>:8088/` simuliert zwanzig zählende Tablets, zwanzig
+Feld-Übersichten und wahlweise feste Court-Monitore — mit demselben
+Coalescing und Fallback-Takt wie die echten Seiten. Es misst zusätzlich die
+Latenz vom gesendeten Punkt bis zu seinem Erscheinen in der Übersicht.
+Gegen den Relay läuft es unverändert, nur mit dessen Basis-Adresse.
+**Es braucht belegte Felder:** Ein Stand ohne passende Match-ID wird
+verworfen, dann entstünde weder Schreibvorgang noch Nudge.
+
+**4. Render-Messung auf dem Pi.** In der Browser-Konsole der Übersicht
+`localStorage.ovRenderMessen = "1"` setzen; die Seite meldet dann alle zehn
+Sekunden, wie oft und wie lange sie gezeichnet hat und wie viele Renders
+länger als ein 60-Hz-Bild (16 ms) brauchten. Mit `"2"` zusätzlich jeden
+einzelnen Render. Rein diagnostisch, über `localStorage` statt über die
+Konfiguration — wie `tlRenderMessen` in der Turnierleitungs-Sicht.
+
 ## Endpunkte
 
 Alle Routen gibt es doppelt — vom LAN-Server **und** vom Relay, damit der
@@ -288,6 +327,7 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Flaggen (TL-Seite)     | `/flags/{code}.svg`            | `/flags/{code}.svg` (ns-los)   |
 | Werbebild              | `/ads/{datei}`                 | `/{ns}/ads/{index}`            |
 | Werbe-/Leisten-Zustand | `/info/ad/state`               | `/{ns}/info/ad/state`          |
+| **Perf-Zähler** (S0)   | `/debug/perf`                  | — (bewusst nur LAN)            |
 | **Turnierlogo**        | `/info/logo`                   | `/{ns}/info/logo`              |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
