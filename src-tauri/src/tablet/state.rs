@@ -6396,10 +6396,23 @@ mod tests {
         let erst = parse_nudge(&a.try_recv().unwrap()).1;
         let zweit = parse_nudge(&a.try_recv().unwrap()).1;
         assert_eq!(zweit, erst + 1, "je Anstoß genau eins weiter");
-        // Feld 2 hat seinen eigenen Zähler — er kann nicht vom Feld 1 erben.
         let feld2 = parse_nudge(&b.try_recv().unwrap()).1;
         assert!(feld2 > 0);
-        assert_ne!(feld2, zweit, "getrennte Zählung je Feld");
+
+        // Getrennte Zählung: Ein weiterer Anstoß auf Feld 1 lässt den Wert
+        // von Feld 2 unberührt.
+        //
+        // Bewusst SO geprüft und nicht über `feld2 != zweit`: Beide Zähler
+        // starten bei der Uhrzeit, und zwei Felder können dieselbe Zahl
+        // erreichen, wenn ihre Seeds eine Millisekunde auseinanderliegen —
+        // das ist erlaubt (die Zahlen gelten je Feld, nicht global) und
+        // machte den Test sonst zufällig rot (CI-Fund 19.08.2026).
+        st.notify_monitor(1);
+        assert_eq!(
+            st.monitor_seq_of(2),
+            feld2,
+            "Feld 1 rührt die Zählung von Feld 2 nicht an"
+        );
     }
 
     #[test]

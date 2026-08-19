@@ -4095,7 +4095,19 @@ mod tests {
         assert_eq!(zweit, erst + 1, "je Anstoß genau eins weiter");
         let feld2 = nudge_of(rx2.try_recv().unwrap()).1;
         assert!(feld2 > 0);
-        assert_ne!(feld2, zweit, "getrennte Zählung je Feld");
+
+        // Getrennte Zählung: Ein weiterer Anstoß auf Feld 1 lässt den Wert
+        // von Feld 2 unberührt. Bewusst SO geprüft und nicht über
+        // `feld2 != zweit`: Beide Zähler starten bei der Uhrzeit, und zwei
+        // Felder können dieselbe Zahl erreichen, wenn ihre Seeds eine
+        // Millisekunde auseinanderliegen — erlaubt, weil die Zahlen je Feld
+        // gelten, machte den Test aber zufällig rot (CI-Fund 19.08.2026).
+        notify_monitor(&mut ns, 1);
+        assert_eq!(
+            ns.monitor_seq.get(&2).copied().unwrap_or(0),
+            feld2,
+            "Feld 1 rührt die Zählung von Feld 2 nicht an"
+        );
     }
 
     #[test]
