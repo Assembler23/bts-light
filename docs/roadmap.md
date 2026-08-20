@@ -300,8 +300,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   der automatischen Feldansage ganz, die Zähltafelbedienung wurde nur bei
   echter Zuweisung genannt. Beides ist behoben und über zwei Häkchen
   abschaltbar. ADR [0040](adr/0040-ansage-besetzung-einstellbar.md).
-  **Offen:** Feldtest; am Cloud-Ansage-Slave fehlen SR/AR weiterhin
-  strukturell (`CloudAnnounceCourt` führt keine Listen).
+  Der Cloud-Ansage-Slave zog in v0.9.248 nach (SR/AR fielen dort nur bei der
+  Umwandlung heraus, übertragen wurden sie längst).
+  **Offen:** Feldtest — insbesondere in einem Zwei-Hallen-Turnier über Cloud.
 
 - **Automatische Hallen-Vorverteilung** — die vordersten x Spiele bekommen
   automatisch eine Halle im Verhältnis der entsperrten Felder (gemischt,

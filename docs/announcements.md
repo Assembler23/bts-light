@@ -622,11 +622,20 @@ zusammen und ließ beide Listen weg, während der manuelle Aufruf und jeder
 Nachruf sie über `announceCourt` mitgaben. Dieselbe Belegung klang dadurch je
 nach Auslöser anders (Nutzer-Befund 20.08.2026, behoben in v0.9.246).
 
-**Am Cloud-Ansage-Slave gibt es sie weiterhin nicht:** Der Wire-Typ
-`CloudAnnounceCourt` (`commands.rs`) führt keine SR/AR-Listen — der Slave
-könnte sie gar nicht nennen. Dort wirkt nur `announce_scorekeeper`. Segment- und SSML-Bauer nutzen dieselbe Quelle
-(`officialSegments` in `io/announcer.ts`), damit Browser-Stimme und
-Azure-Stimme identisch sprechen.
+Segment- und SSML-Bauer nutzen dieselbe Quelle (`officialSegments` in
+`io/announcer.ts`), damit Browser-Stimme und Azure-Stimme identisch sprechen.
+
+**Die ferne Halle sagt sie seit v0.9.248 ebenfalls an.** Bis dahin fehlten sie
+dort, obwohl die Namen längst ankamen: Der Host füllt sie in `match_brief`, der
+Relay reicht den `MatchBrief` unverändert durch — nur die Umwandlung in
+`CloudAnnounceCourt` (`commands.rs`) ließ sie fallen. Wächter:
+`die_ferne_halle_bekommt_auch_die_besetzung`.
+
+> **Die beiden Schalter gelten je Gerät, nicht je Turnier.** Anders als die
+> Azure-Stimme (ADR 0003) werden sie **nicht** vom Master geerbt: Der
+> Cloud-Slave liest `announce_scorekeeper`/`announce_umpire` aus seiner
+> **eigenen** Config. Wer am Turnier-PC „Schiedsrichter mit ansagen" abwählt,
+> hört sie in der fernen Halle weiterhin, bis der Haken auch dort fällt.
 
 **Nachträgliche Zuweisungen sagen nicht von selbst an.** Wer mitten im Spiel
 einen Schiedsrichter einteilt, löst die Ansage mit dem Knopf „ansagen" aus —

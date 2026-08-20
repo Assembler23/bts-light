@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.248
+
+- **In einer fernen Halle wird der Schiedsrichter jetzt mit angesagt.** Bei
+  Turnieren, deren zweite Halle über die Cloud angebunden ist, nannte die
+  Ansage dort Spieler und Bedienung, aber nie Schiedsrichter oder
+  Aufschlagrichter — obwohl beide längst bis dorthin übertragen wurden. Die
+  Halle sagt damit jetzt dasselbe an wie der Turnier-PC.
+
 ## v0.9.247
 
 - **Werbebilder bekommen eine eigene Hintergrundfarbe.** Bisher lag die

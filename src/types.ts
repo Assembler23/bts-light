@@ -395,9 +395,15 @@ export interface CloudAnnounceCourt {
   team1_nationalities: string[];
   team2_nationalities: string[];
   match_id: number;
-  /** Zähltafelbediener (ADR 0007); nur bei scorekeeper_assigned angesagt. */
+  /** Zähltafelbediener; ob er angesagt wird, entscheidet seit ADR 0040 der
+   *  Schalter `announce.announce_scorekeeper`. */
   scorekeeper: string[];
   scorekeeper_assigned: boolean;
+  /** Schiedsrichter des laufenden Spiels — damit die ferne Halle sie
+   *  mitansagen kann. Leer ohne Schiedsrichter-Betrieb. */
+  sr: string[];
+  /** Aufschlagrichter, gleiche Herkunft. */
+  ar: string[];
 }
 
 /** Ein aufgerufenes Spiel im Cloud-Ansage-Status (Rust: commands::CloudPrepared).
