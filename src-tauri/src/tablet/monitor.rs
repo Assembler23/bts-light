@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use relay_proto::{
-    device_code, MonitorConfig, MonitorMatch, MonitorPlayer, MonitorState, MonitorTarget, SetAb,
+    device_code, AdStyleWire, MonitorConfig, MonitorMatch, MonitorPlayer, MonitorState,
+    MonitorTarget, SetAb,
 };
 
 use crate::btp::model::BtpPlayer;
@@ -156,6 +157,148 @@ pub fn write_ad_bar(
     write_atomic(path, &json)
 }
 
+/// Datei mit dem **Anzeige-Stil je Werbebild** für das Leerlauf-Vollbild:
+/// Hintergrundfarbe und ob die Feldbezeichnung mit erscheint (Spec
+/// `werbung-hintergrund-und-feld`, ADR 0041).
+///
+/// **Dritter** Store neben Labels und Leisten-Markierung, und das mit Absicht:
+/// [`read_ad_labels`] deserialisiert strikt nach `HashMap<String,String>` und
+/// schluckt Fehler mit `unwrap_or_default()`. Würde man das Format dort
+/// aufbohren, verlöre jede ältere Installation beim Auto-Update **still alle
+/// Anzeigenamen** — und beim Rollback noch einmal. Eine eigene Datei ist in
+/// beide Richtungen folgenlos: Wer sie nicht kennt, ignoriert sie.
+/// Liegt im `court-ads/`-Verzeichnis; die `.json`-Endung fällt bei
+/// [`list_ads`] durchs Bild-Filter.
+pub const AD_STYLE_FILE: &str = "court-ad-style.json";
+
+/// Vorgabe-Hintergrund des Leerlauf-Vollbilds — der Zustand vor dem Feature.
+pub const AD_BG_DEFAULT: &str = "#000000";
+
+/// Anzeige-Stil eines Werbebilds.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AdStyle {
+    /// Hintergrundfarbe `#rrggbb` (Kleinbuchstaben) hinter dem Bild.
+    #[serde(default = "bg_default")]
+    pub bg: String,
+    /// Feldbezeichnung über der Werbung zeigen?
+    #[serde(default)]
+    pub show_court: bool,
+}
+
+fn bg_default() -> String {
+    AD_BG_DEFAULT.to_string()
+}
+
+impl Default for AdStyle {
+    fn default() -> Self {
+        Self {
+            bg: bg_default(),
+            show_court: false,
+        }
+    }
+}
+
+impl AdStyle {
+    /// Ein Stil, der nichts vom Vorzustand abweicht, muss nicht gespeichert
+    /// werden — so bleibt die Datei leer, solange niemand etwas einstellt.
+    pub fn ist_vorgabe(&self) -> bool {
+        self.bg == AD_BG_DEFAULT && !self.show_court
+    }
+}
+
+/// Liest den Stil je Werbebild. Fehlende oder kaputte Datei → leere Map
+/// (kein Fehler — der Stil ist optional, ohne ihn gilt die Vorgabe).
+pub fn read_ad_style(path: &Path) -> HashMap<String, AdStyle> {
+    let Ok(j) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    parse_ad_style(&j)
+}
+
+/// Der Parse-Schritt für sich — der Monitor-Server hält den Dateiinhalt
+/// ohnehin schon in der Hand (er ist sein Cache-Schlüssel) und soll ihn nicht
+/// ein zweites Mal lesen müssen.
+pub fn parse_ad_style(roh: &str) -> HashMap<String, AdStyle> {
+    let mut map: HashMap<String, AdStyle> = serde_json::from_str(roh).unwrap_or_default();
+    // Ein von Hand verfälschter Farbwert darf nicht bis ins `style`-Attribut
+    // einer Anzeigeseite durchreisen — dort wäre er eine Einschleusstelle.
+    // Dieselbe Wächter-Haltung wie beim Hallen-Farb-Store.
+    map.retain(|_, s| crate::hall_colors::ist_hex_farbe(&s.bg));
+    map
+}
+
+/// Schreibt den Stil je Werbebild (atomar). Einträge, die nichts von der
+/// Vorgabe abweichen, fallen raus.
+pub fn write_ad_style(path: &Path, styles: &HashMap<String, AdStyle>) -> std::io::Result<()> {
+    let cleaned: HashMap<&String, &AdStyle> =
+        styles.iter().filter(|(_, s)| !s.ist_vorgabe()).collect();
+    let json = serde_json::to_string_pretty(&cleaned).unwrap_or_else(|_| "{}".to_string());
+    write_atomic(path, &json)
+}
+
+/// Schriftfarbe, die auf `bg` lesbar ist — relative Luminanz nach WCAG 2.1.
+///
+/// Bewusst **nicht** einstellbar: Es soll keinen Weg geben, die
+/// Feldbezeichnung unlesbar zu konfigurieren (ADR 0041). Die Schwelle 0,179
+/// ist der Punkt, an dem Weiß und Schwarz denselben Kontrastwert erreichen —
+/// darüber gewinnt Schwarz, darunter Weiß.
+pub fn schriftfarbe(bg: &str) -> &'static str {
+    const HELL: &str = "#ffffff";
+    const DUNKEL: &str = "#111111";
+    if !crate::hall_colors::ist_hex_farbe(bg) {
+        // Unbekannte Form → Vorgabe ist Schwarz, also helle Schrift.
+        return HELL;
+    }
+    let kanal = |i: usize| -> f64 {
+        let roh = u8::from_str_radix(&bg[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
+        // sRGB linearisieren, sonst wirkt jedes Mittelgrau zu hell.
+        if roh <= 0.040_45 {
+            roh / 12.92
+        } else {
+            ((roh + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let luminanz = 0.2126 * kanal(1) + 0.7152 * kanal(3) + 0.0722 * kanal(5);
+    if luminanz > 0.179 {
+        DUNKEL
+    } else {
+        HELL
+    }
+}
+
+/// Werbebilder samt ihrem Anzeige-Stil — zwei index-parallele Listen, die
+/// nur gemeinsam Sinn ergeben und deshalb auch gemeinsam gereicht werden.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdAnzeige {
+    /// Kennungen der Bilder (LAN: Dateiname, Cloud: Index).
+    pub ids: Vec<String>,
+    /// Stil je Bild, gleiche Reihenfolge; leer = überall Vorgabe.
+    pub stile: Vec<AdStyleWire>,
+}
+
+/// Baut die Wire-Stile **index-parallel** zu `files` (ADR 0041) und rechnet
+/// dabei die Kontrastschrift — hier und nur hier.
+///
+/// Hat kein einziges Bild einen abweichenden Stil, kommt eine leere Liste
+/// zurück: Dann muss gar nichts über den Draht, und eine Anzeige, die das
+/// Feld nicht kennt, sieht denselben leeren Fall wie vor dem Feature.
+pub fn ad_styles_fuer(files: &[String], styles: &HashMap<String, AdStyle>) -> Vec<AdStyleWire> {
+    if styles.is_empty() {
+        return Vec::new();
+    }
+    files
+        .iter()
+        .map(|f| match styles.get(f) {
+            Some(s) => AdStyleWire {
+                bg: s.bg.clone(),
+                fg: schriftfarbe(&s.bg).to_string(),
+                show_court: s.show_court,
+            },
+            None => AdStyleWire::default(),
+        })
+        .collect()
+}
+
 /// Übersetzt die persistierte [`CourtMonitorConfig`] in die Wire-Form.
 pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
     MonitorConfig {
@@ -180,7 +323,7 @@ pub fn build_monitor_state(
     court: MonitorCourt,
     config: &CourtMonitorConfig,
     call_timer: &crate::config::CallTimerConfig,
-    ads: Vec<String>,
+    ads: AdAnzeige,
 ) -> MonitorState {
     let sets: Vec<SetAb> = court.sets.iter().map(|&(a, b)| SetAb { a, b }).collect();
     let match_info = court.current_match.map(|m| MonitorMatch {
@@ -205,7 +348,8 @@ pub fn build_monitor_state(
         match_info,
         court_state: court.court_state,
         config: to_monitor_config(config),
-        ads,
+        ads: ads.ids,
+        ad_styles: ads.stile,
         command: None,
         device_code: String::new(),
         unassigned: false,
@@ -346,6 +490,7 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
         court_state: None,
         config: MonitorConfig::default(),
         ads: Vec::new(),
+        ad_styles: Vec::new(),
         command: None,
         device_code: device_code(device_id),
         unassigned: true,
@@ -464,6 +609,101 @@ mod tests {
         // Leere Menge schreibt ein leeres Array, das wieder leer liest.
         write_ad_bar(&path, &std::collections::HashSet::new()).unwrap();
         assert!(read_ad_bar(&path).is_empty());
+    }
+
+    #[test]
+    fn read_write_ad_style_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AD_STYLE_FILE);
+        // Fehlende Datei → leere Map, jedes Bild bekommt die Vorgabe.
+        assert!(read_ad_style(&path).is_empty());
+
+        let mut map = HashMap::new();
+        map.insert(
+            "ad-1.png".to_string(),
+            AdStyle {
+                bg: "#ffffff".to_string(),
+                show_court: true,
+            },
+        );
+        // Ein Eintrag, der nichts von der Vorgabe abweicht, wird nicht
+        // gespeichert — sonst wüchse die Datei mit jedem Anfassen.
+        map.insert("ad-2.jpg".to_string(), AdStyle::default());
+        write_ad_style(&path, &map).unwrap();
+
+        let gelesen = read_ad_style(&path);
+        assert_eq!(gelesen.len(), 1, "nur der abweichende Eintrag bleibt");
+        assert_eq!(gelesen["ad-1.png"].bg, "#ffffff");
+        assert!(gelesen["ad-1.png"].show_court);
+
+        // Kaputte Datei → leere Map (kein Fehler, der Stil ist optional).
+        std::fs::write(&path, "{ kaputt").unwrap();
+        assert!(read_ad_style(&path).is_empty());
+
+        // Von Hand verfälschte Farbe fliegt beim Lesen raus, statt bis in ein
+        // `style`-Attribut durchzureisen.
+        std::fs::write(
+            &path,
+            r#"{"ad-3.png":{"bg":"red; background:url(x)","show_court":true}}"#,
+        )
+        .unwrap();
+        assert!(read_ad_style(&path).is_empty(), "krumme Farbe muss raus");
+    }
+
+    #[test]
+    fn eine_farbaenderung_aendert_den_dateiinhalt() {
+        // Der Monitor-Server merkt sich den Stil am **Inhalt** der Datei, nicht
+        // an (Änderungszeit, Größe). Der Grund steht hier als Test: Ein
+        // Farbwechsel ist längenerhaltend, und Windows-Zeitstempel rücken nur
+        // im ~15,6-ms-Takt vor — zwei Wechsel in einem Tick wären am alten
+        // Schlüssel ununterscheidbar gewesen (Review 20.08.2026).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AD_STYLE_FILE);
+        let mut map = HashMap::new();
+        map.insert(
+            "ad-1.png".to_string(),
+            AdStyle {
+                bg: "#ff0000".to_string(),
+                show_court: false,
+            },
+        );
+        write_ad_style(&path, &map).unwrap();
+        let vorher = std::fs::read_to_string(&path).unwrap();
+        let laenge_vorher = vorher.len();
+
+        map.insert(
+            "ad-1.png".to_string(),
+            AdStyle {
+                bg: "#00ff00".to_string(),
+                show_court: false,
+            },
+        );
+        write_ad_style(&path, &map).unwrap();
+        let nachher = std::fs::read_to_string(&path).unwrap();
+
+        assert_eq!(
+            laenge_vorher,
+            nachher.len(),
+            "Farbwechsel ist längenerhaltend — genau deshalb taugt die Größe nicht als Schlüssel"
+        );
+        assert_ne!(vorher, nachher, "der Inhalt unterscheidet sich sehr wohl");
+        assert_eq!(parse_ad_style(&nachher)["ad-1.png"].bg, "#00ff00");
+    }
+
+    #[test]
+    fn schriftfarbe_kontrastiert_zum_grund() {
+        // Die beiden Ecken.
+        assert_eq!(schriftfarbe("#000000"), "#ffffff");
+        assert_eq!(schriftfarbe("#ffffff"), "#111111");
+        // Beidseits der Schwelle: kräftiges Rot ist dunkel genug für helle
+        // Schrift, ein Pastellgelb verlangt dunkle.
+        assert_eq!(schriftfarbe("#c81432"), "#ffffff");
+        assert_eq!(schriftfarbe("#ffe680"), "#111111");
+        // Grün wiegt in der Luminanz am schwersten — mittleres Grün ist hell.
+        assert_eq!(schriftfarbe("#00b050"), "#111111");
+        // Unbekannte Form → wie auf der schwarzen Vorgabe.
+        assert_eq!(schriftfarbe("rot"), "#ffffff");
+        assert_eq!(schriftfarbe("#FFF"), "#ffffff");
     }
 
     #[test]

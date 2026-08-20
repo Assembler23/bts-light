@@ -258,6 +258,11 @@ export interface CourtMonitorConfig {
 export interface CourtAd {
   file: string;
   label: string;
+  /** Hintergrundfarbe `#rrggbb` des Leerlauf-Vollbilds hinter diesem Bild
+   *  (Spec werbung-hintergrund-und-feld). Vorgabe `#000000`. */
+  bg: string;
+  /** true, wenn über der Werbung die Feldbezeichnung erscheinen soll. */
+  show_court: boolean;
   /** true, wenn das Bild zusätzlich klein in der oberen Leiste der
    *  Anzeigeseiten (neben dem Turnierlogo) erscheinen soll. */
   in_bar: boolean;

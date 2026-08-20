@@ -85,7 +85,10 @@ pub fn effective_hall_colors(cfg: &AppConfig, halls: &[String]) -> Vec<(String, 
 
 /// Strikte Form `#rrggbb` (lowercase — so normalisiert der einzige legale
 /// Schreibpunkt `upsert_hall_color`). Alles andere gilt als manipuliert.
-fn ist_hex_farbe(farbe: &str) -> bool {
+///
+/// Auch der Werbe-Stil-Store prüft damit (ADR 0041) — eine Farbe, die in ein
+/// `style`-Attribut wandert, soll überall dieselbe Hürde nehmen.
+pub(crate) fn ist_hex_farbe(farbe: &str) -> bool {
     farbe.len() == 7
         && farbe.starts_with('#')
         && farbe[1..]

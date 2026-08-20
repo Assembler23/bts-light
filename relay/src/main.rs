@@ -163,6 +163,11 @@ struct AdImage {
     /// soll (Sponsor-Leiste). Bestimmt, welche Indizes `/{ns}/info/ad/state`
     /// als `barAds` ausweist.
     in_bar: bool,
+    /// Anzeige-Stil im Leerlauf-Vollbild (Hintergrundfarbe, Kontrastschrift,
+    /// Feldbezeichnung — Spec `werbung-hintergrund-und-feld`). Der Relay
+    /// **rechnet hier nichts**, er reicht durch, was der Host geschickt hat:
+    /// Die Kontrastfarbe hat genau eine Quelle (ADR 0041).
+    style: relay_proto::AdStyleWire,
     /// Marke für den Browser-Cache, aus dem Bildinhalt abgeleitet. Beim
     /// Hochladen einmal berechnet — die Anzeigen bekommen damit ein
     /// unverändertes Bild mit ~200 Byte bestätigt, statt es erneut über die
@@ -1282,6 +1287,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         court_state: None,
         config: MonitorConfig::default(),
         ads: Vec::new(),
+        ad_styles: Vec::new(),
         command: None,
         device_code: String::new(),
         unassigned: false,
@@ -1351,6 +1357,10 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         config: monitor.map(|m| m.config.clone()).unwrap_or_default(),
         ads: monitor
             .map(|m| (0..m.ads.len()).map(|i| i.to_string()).collect())
+            .unwrap_or_default(),
+        // Index-parallel zu `ads` — dieselbe Reihenfolge, dieselbe Länge.
+        ad_styles: monitor
+            .map(|m| m.ads.iter().map(|a| a.style.clone()).collect())
             .unwrap_or_default(),
         command: None,
         device_code: String::new(),
@@ -1533,7 +1543,7 @@ async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> i
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let (ads, bar_ads, has_logo, interval_s) = {
+    let (ads, bar_ads, has_logo, interval_s, ad_styles) = {
         let map = broker.namespaces.lock().await;
         match map.get(&ns).and_then(|n| n.monitor.as_ref()) {
             Some(m) => {
@@ -1548,9 +1558,19 @@ async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> i
                     .filter(|(_, a)| a.in_bar)
                     .map(|(i, _)| i.to_string())
                     .collect();
-                (all, bar, m.logo.is_some(), m.config.ad_interval_s.max(1))
+                // Anzeige-Stil index-parallel zu `ads` — der Relay reicht
+                // durch, was der Host geschickt hat (ADR 0041).
+                let stile: Vec<relay_proto::AdStyleWire> =
+                    m.ads.iter().map(|a| a.style.clone()).collect();
+                (
+                    all,
+                    bar,
+                    m.logo.is_some(),
+                    m.config.ad_interval_s.max(1),
+                    stile,
+                )
             }
-            None => (Vec::new(), Vec::new(), false, 1),
+            None => (Vec::new(), Vec::new(), false, 1, Vec::new()),
         }
     };
     (
@@ -1560,6 +1580,7 @@ async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> i
             "barAds": bar_ads,
             "hasLogo": has_logo,
             "intervalS": interval_s,
+            "adStyles": ad_styles,
         })),
     )
         .into_response()
@@ -2005,6 +2026,7 @@ async fn monitor_upload(
             etag: bild_marke(&bytes),
             bytes,
             in_bar: ad.in_bar,
+            style: ad.style,
         });
     }
     // Turnierlogo (falls mitgeschickt) – MIME wie bei den Ads gewhitelistet,
@@ -2022,6 +2044,9 @@ async fn monitor_upload(
             etag: bild_marke(&bytes),
             bytes,
             in_bar: false,
+            // Das Turnierlogo ist kein Werbebild im Leerlauf-Vollbild — es
+            // hat keinen Stil und bekommt auch keinen.
+            style: relay_proto::AdStyleWire::default(),
         })
     });
     let mut map = broker.namespaces.lock().await;
@@ -5776,11 +5801,13 @@ mod tests {
                     content_type: "image/png".into(),
                     data: b64(b"bar-bild"),
                     in_bar: true,
+                    style: relay_proto::AdStyleWire::default(),
                 },
                 relay_proto::AdUpload {
                     content_type: "image/jpeg".into(),
                     data: b64(b"voll-bild"),
                     in_bar: false,
+                    style: relay_proto::AdStyleWire::default(),
                 },
             ],
             call_timer: relay_proto::CallTimerView::default(),
@@ -5873,6 +5900,7 @@ mod tests {
                         content_type: "image/png".into(),
                         data: b64(daten),
                         in_bar: false,
+                        style: relay_proto::AdStyleWire::default(),
                     }],
                     call_timer: relay_proto::CallTimerView::default(),
                     logo: None,
@@ -5938,6 +5966,7 @@ mod tests {
                 content_type: "image/png".into(),
                 data: b64(b"unveraendertes-bild"),
                 in_bar: false,
+                style: relay_proto::AdStyleWire::default(),
             }],
             call_timer: relay_proto::CallTimerView::default(),
             logo: None,

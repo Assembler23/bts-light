@@ -29,6 +29,11 @@
     transition: opacity .6s ease;
   }
   .stage img.show { opacity: 1; }
+  /* Hintergrundfarbe je Bild (Spec werbung-hintergrund-und-feld). Sie
+     wechselt so weich wie das Bild darueber, damit die Rotation nicht
+     blitzt. Eine Feldbezeichnung gibt es hier bewusst nicht: Diese Seite
+     haengt an keinem Feld. */
+  body, .stage { transition: background-color .6s ease; }
 
   /* Hinweis-Box wenn keine Bilder hinterlegt sind. */
   .empty {
@@ -81,6 +86,18 @@
   var current = 0;   // 0 = imgA sichtbar, 1 = imgB sichtbar
   var imgs = [imgA, imgB];
 
+  // Nur echte Hex-Farben in ein `style`-Attribut lassen (zweite Wand hinter
+  // der Pruefung im Host).
+  function adFarbe(wert, ersatz) {
+    return /^#[0-9a-f]{6}$/.test(String(wert || "")) ? wert : ersatz;
+  }
+
+  // Stil des gerade gezeigten Bildes anlegen — index-parallel zu `ads`.
+  function setzeStil(i) {
+    var stil = (adStyles && adStyles[i]) || {};
+    document.body.style.backgroundColor = adFarbe(stil.bg, '');
+  }
+
   function showImage(src) {
     var visible = imgs[current];
     var hidden = imgs[1 - current];
@@ -93,6 +110,10 @@
   }
 
   function showEmpty(show) {
+    // Ohne Bild gibt es auch keine Bildfarbe mehr: Der Hinweistext ist fuer
+    // den dunklen Grund der Seite gesetzt und waere auf einem stehen
+    // gebliebenen Weiss praktisch unlesbar.
+    if (show) document.body.style.backgroundColor = '';
     emptyEl.classList.toggle('show', !!show);
     if (show) {
       imgA.classList.remove('show');
@@ -110,12 +131,17 @@
   // sich selbst + Intervall-Reset). v0.9.21 Code-Review MEDIUM.
   var lastPoolSignature = '';
   var lastSingleFile = '';
+  var adStyles = [];
 
   function applyState(state) {
     var newAds = Array.isArray(state.ads) ? state.ads.slice() : [];
     var newInterval = typeof state.intervalS === 'number' && state.intervalS > 0
       ? state.intervalS : 10;
-    var signature = JSON.stringify(newAds) + '|' + newInterval;
+    adStyles = Array.isArray(state.adStyles) ? state.adStyles : [];
+    // Der Stil gehoert in die Signatur, sonst bliebe eine reine
+    // Farbaenderung liegen, bis sich die Bildliste aendert.
+    var signature = JSON.stringify(newAds) + '|' + newInterval
+      + '|' + JSON.stringify(adStyles);
     var poolChanged = signature !== lastPoolSignature;
     ads = newAds;
     intervalS = newInterval;
@@ -125,6 +151,13 @@
       var available = fileParam && ads.indexOf(fileParam) >= 0;
       // Nur dann showImage rufen, wenn sich der konkret angezeigte File
       // aendert (oder erstmals da/wegfaellt).
+      if (available) {
+        // Die Farbe IMMER neu setzen, solange das Bild verfuegbar ist: Im
+        // Einzelbild-Modus laeuft kein Rotations-Timer, der sie sonst
+        // nachzoege — eine reine Farbaenderung bliebe bis zum naechsten
+        // Neuladen der Seite unsichtbar.
+        setzeStil(ads.indexOf(fileParam));
+      }
       if (available && fileParam !== lastSingleFile) {
         showEmpty(false);
         showImage(BASE + 'ads/' + encodeURIComponent(fileParam));
@@ -152,6 +185,7 @@
     showEmpty(false);
     // Wenn idx aus dem Array gerutscht ist (Pool geschrumpft), reset.
     if (idx >= ads.length) idx = 0;
+    setzeStil(idx);
     showImage(BASE + 'ads/' + encodeURIComponent(ads[idx]));
     startRotation();
   }
@@ -161,6 +195,7 @@
     if (ads.length <= 1) return;   // nichts zu rotieren
     rotateTimer = setInterval(function () {
       idx = (idx + 1) % ads.length;
+      setzeStil(idx);
       showImage(BASE + 'ads/' + encodeURIComponent(ads[idx]));
     }, intervalS * 1000);
   }
