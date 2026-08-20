@@ -43,6 +43,10 @@ pub const ZEILE_HOEHE_MM: f32 = 7.0;
 pub const NAME_PT: f32 = 8.0;
 /// Schriftgrad des Zusatzes (Verein/Nation) darunter.
 pub const ZUSATZ_PT: f32 = 6.5;
+/// Schriftgrad der Spaltennummern über dem Raster. Kleiner als der
+/// Zellinhalt, weil dort dreistellige Ballwechsel-Nummern stehen (61–120 in
+/// der Fortsetzungsgruppe) und die Zelle nur [`ZELLE_BREITE_MM`] breit ist.
+pub const KOPF_PT: f32 = 6.5;
 /// Zeilenabstand des Dokuments (`body { font: …/1.25 }`).
 pub const ZEILENABSTAND: f32 = 1.25;
 /// Ein typografischer Punkt in Millimetern.
@@ -1057,7 +1061,6 @@ section.zettel:last-child { page-break-after: auto; }
 .kopf dd { margin: 0; }
 .vermerk { border: 1pt solid #000; padding: 1mm 2mm; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 table.gitter { border-collapse: collapse; table-layout: fixed; }
-table.gitter th { background: #eee; font-weight: 600; font-size: 6.5pt; }
 td.marker { font-weight: 700; }
 .satzkopf { font-weight: 600; font-size: 9pt; margin: 2mm 0 1mm; }
 .randmarker { font-size: 8pt; margin-top: 1mm; }
@@ -1074,17 +1077,26 @@ tr.zurueckgenommen td { text-decoration: line-through; color: #555; }
 
     // Maßabhängige Regeln aus den Blattmaß-Konstanten oben — sie bilden
     // zusammen das Breitenbudget, das `raster_passt_auf_die_seite` prüft.
+    //
+    // Das `padding-top` der Namensspalte ist kein Ziermaß: Das Raster beginnt
+    // mit einer Kopfzeile (den Spaltennummern), die Namensspalte nicht. Ohne
+    // den Versatz stünde Spieler 1 neben der Nummernzeile und jede Namenszeile
+    // eine Zeile zu hoch. Bei zwei Zeilengruppen (Ballwechsel 61–120, zweite
+    // Tabelle darunter) fluchtet die Namensspalte weiterhin nur mit der
+    // ersten — es gibt sie ja nur einmal; die Fortsetzung liest sich über die
+    // Zeilenreihenfolge, die in beiden Gruppen dieselbe ist.
     // Die Namensspalte ist bewusst **fest** (`flex: 0 0`) statt `min-width`:
     // Ein langer Doppelname darf sich nicht auf Kosten des Rasters breit
     // machen. Was dann nicht hineinpasst, wird gekürzt — sichtbar durch
     // Auslassungspunkte statt still über den Blattrand geschoben.
     out.push_str(&format!(
         r#".raster {{ display: flex; gap: {RASTER_ABSTAND_MM}mm; margin-bottom: 3mm; page-break-inside: avoid; }}
-.teamspalte {{ flex: 0 0 {NAMENSSPALTE_MM}mm; max-width: {NAMENSSPALTE_MM}mm; overflow: hidden; }}
+.teamspalte {{ flex: 0 0 {NAMENSSPALTE_MM}mm; max-width: {NAMENSSPALTE_MM}mm; overflow: hidden; padding-top: {ZEILE_HOEHE_MM}mm; }}
 .teamspalte .zeile {{ height: {ZEILE_HOEHE_MM}mm; display: flex; flex-direction: column; justify-content: center; border-bottom: .5pt solid #999; overflow: hidden; }}
 .teamspalte .name {{ font-weight: 600; font-size: {NAME_PT}pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 .teamspalte .zusatz {{ font-size: {ZUSATZ_PT}pt; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
 table.gitter td, table.gitter th {{ border: .4pt solid #666; width: {ZELLE_BREITE_MM}mm; height: {ZEILE_HOEHE_MM}mm; text-align: center; font-size: 7.5pt; padding: 0; }}
+table.gitter th {{ background: #eee; font-weight: 600; font-size: {KOPF_PT}pt; }}
 </style></head><body>
 "#
     ));

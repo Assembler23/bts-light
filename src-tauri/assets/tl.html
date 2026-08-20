@@ -536,8 +536,9 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    zwar dauerhaft, nicht nur außerhalb des Bildes. Damit würde die Zeile
    zum Bezugsrahmen für ihr `position: fixed`-Kebab-Menü UND schnitte es
    an ihrer eigenen Kante ab — exakt der Fehler, den der Feldtest am
-   17.08.2026 gemeldet hat (siehe `.kebab-menu`). Die Beendet-Zeile
-   verträgt es dagegen, sie enthält nichts fest Positioniertes. */
+   17.08.2026 gemeldet hat (siehe `.kebab-menu`). Dasselbe gilt seit
+   v0.9.246 für die Beendet-Zeile, seit auch sie ein Kebab-Menü trägt —
+   siehe `.fin-row`. */
 .row {
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   padding: 10px 12px; min-height: 56px;
@@ -7163,8 +7164,21 @@ function wireFinRow(box) {
     // Platzierung nachholen, wie bei Spielzeile und Feldkachel.
     if (det.open) platziereKebabMenue(det);
   });
+  // Jede Aktion schliesst zuerst ihr Menue: Das `.kebab-menu` ist
+  // `position: fixed` mit z-index 30, die Overlays liegen auf 70 — ein offen
+  // gebliebenes Menue haengt sonst hinter dem Overlay und schwebt nach dem
+  // Schliessen ueber fremden Zeilen, wo es Klicks schluckt. Genau dafuer
+  // macht es die Feldkachel seit 17.08.2026 ebenso.
+  const menueZu = (b) => {
+    const det = b.closest("details.kebab");
+    if (det) {
+      det.open = false;
+      openKebabFinishedId = null;
+    }
+  };
   scopeAll(box, "[data-fin-zettel]").forEach((b) =>
     b.addEventListener("click", () => {
+      menueZu(b);
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finZettel);
       if (!f) return;
       openZettel([f.match_id], siegerZuerstText(f));
@@ -7173,6 +7187,7 @@ function wireFinRow(box) {
   // Liste — die Listener überleben seit dem Keyed-Abgleich viele Renders.
   scopeAll(box, "[data-fin-graph]").forEach((b) =>
     b.addEventListener("click", () => {
+      menueZu(b);
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finGraph);
       if (!f) return;
       openTimeline(
@@ -7183,6 +7198,7 @@ function wireFinRow(box) {
     }));
   scopeAll(box, "[data-fin-fix]").forEach((b) =>
     b.addEventListener("click", () => {
+      menueZu(b);
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finFix);
       if (!f) return;
       openResultDialog({

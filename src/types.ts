@@ -773,8 +773,9 @@ export interface CourtOverview {
   /** Zähltafelbediener: zugewiesener Bediener (bei aktiver Verwaltung) oder
    *  pro-Feld-Hinweis (Verlierer des Vorspiels). Leer, wenn keiner bekannt. */
   scorekeeper: string[];
-  /** true, wenn `scorekeeper` aus einer echten Zuweisung stammt — nur dann
-   *  wird er angesagt (ADR 0007). */
+  /** true, wenn `scorekeeper` aus einer echten Zuweisung stammt (sonst ist es
+   *  der pro-Feld-Hinweis). Seit ADR 0040 **nur noch Anzeige-Information**:
+   *  Ob angesagt wird, entscheidet `announce.announce_scorekeeper`. */
   scorekeeper_assigned: boolean;
   /** Schiedsrichter des laufenden Spiels (Spec schiedsrichter-management).
    *  Leer, wenn keiner zugewiesen ist oder ohne Schiedsrichter gespielt wird. */

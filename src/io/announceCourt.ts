@@ -166,18 +166,19 @@ export function announceScorekeeper(
   announce: AnnounceConfig,
   azureTts?: AzureTtsConfig,
 ): void {
-  // Der Schalter entscheidet (ADR 0040, löst ADR 0007 ab) — vorher hing es
-  // hart an `court.scorekeeper_assigned`.
+  // KEIN Schalter-Guard hier — das ist der ausdrückliche Knopf „Bedienung
+  // nachrufen" aus der Spielübersicht bzw. TL-Web (ADR 0040: die
+  // ausdrücklichen Knöpfe bleiben unberührt). Wer ihn drückt, sieht den Namen
+  // davor und will genau diese Ansage; ihn stumm verfallen zu lassen, wäre
+  // Bedienung ohne Rückmeldung.
   //
-  // Wichtig zu wissen, wenn jemand den Schalter setzt: Ohne aktive
-  // Bediener-Verwaltung ist `court.scorekeeper` der **pro-Feld-Hinweis**,
-  // also der Verlierer des zuletzt auf diesem Feld beendeten Spiels. Ein
-  // Ansage-Gerät baut seinen Feld-Stand LOKAL auf; auf einem LAN-Ansage-
-  // Slave mit ausgeschalteter Verwaltung — für einen reinen Ansage-PC der
-  // Normalfall — räumt der Sync-Lauf die Zuweisungen, füllt den Hinweis
-  // aber weiter (Review 18.08.2026). Wer das nicht ausgerufen haben will,
-  // schaltet „Zähltafelbedienung ansagen" aus.
-  if (announce.announce_scorekeeper === false) return;
+  // Der Aufrufer entscheidet also, WEN er ruft. Zu wissen ist dabei: Ohne
+  // aktive Bediener-Verwaltung ist `court.scorekeeper` der
+  // **pro-Feld-Hinweis**, also der Verlierer des zuletzt auf diesem Feld
+  // beendeten Spiels — auf einem LAN-Ansage-Slave räumt der Sync-Lauf die
+  // Zuweisungen und füllt den Hinweis weiter (Review 18.08.2026). In der
+  // automatischen Feld-Ansage hängt genau das am Schalter
+  // `announce_scorekeeper`; hier steht der Name auf dem Knopf.
   if (names.length === 0) return;
   const lang = resolveAnnouncementLanguage(
     [...court.team1_nationalities, ...court.team2_nationalities],
