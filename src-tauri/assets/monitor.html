@@ -29,7 +29,24 @@
       align-items: center; justify-content: center; background: #000;
     }
     #ad-view.show { display: flex; }
-    #ad-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    /* Die Hintergrundfarbe wechselt mit dem Bild (Spec
+       werbung-hintergrund-und-feld). Weich, damit der Fernseher im
+       Rotationstakt nicht zwischen Weiss und Schwarz blitzt — dieselbe
+       Dauer wie die Bild-Ueberblendung. */
+    #ad-view { transition: background-color .6s ease; }
+    #ad-img { max-width: 100%; max-height: 100%; object-fit: contain; transition: opacity .6s ease; }
+    /* Zeigt das Feld seine Bezeichnung, wird das Bild so weit verkleinert,
+       dass ringsum ein Rand in der Hintergrundfarbe bleibt. Nur so steht die
+       Bezeichnung IMMER auf der reinen Farbe — ein randfuellendes 16:9-Motiv
+       auf einem 16:9-Fernseher liesse sonst keinen Platz, und der berechnete
+       Kontrast ginge gegen eine Flaeche, die niemand sieht. */
+    #ad-view.mit-feld #ad-img { max-width: 84%; max-height: 84%; }
+    #ad-court {
+      position: absolute; top: 3vmin; left: 3.5vmin;
+      font-size: 5vmin; font-weight: 800; letter-spacing: .01em;
+      display: none;
+    }
+    #ad-view.mit-feld #ad-court:not(:empty) { display: block; }
     #ad-fallback {
       display: none; flex-direction: column; align-items: center; gap: 2vh;
       text-align: center; padding: 6vmin;
@@ -319,6 +336,7 @@
 <body>
   <div id="root">
     <div id="ad-view">
+      <div id="ad-court"></div>
       <img id="ad-img" alt="" />
       <div id="ad-fallback">
         <div class="tn" id="fallback-tn">bts-light</div>
@@ -471,6 +489,7 @@
     adView: document.getElementById("ad-view"),
     adImg: document.getElementById("ad-img"),
     adFallback: document.getElementById("ad-fallback"),
+    adCourt: document.getElementById("ad-court"),
     fallbackTn: document.getElementById("fallback-tn"),
     fallbackCourt: document.getElementById("fallback-court"),
     matchView: document.getElementById("match-view"),
@@ -492,17 +511,38 @@
   };
 
   // ─── Werbe-Rotation ──────────────────────────────────────────────────
-  var adState = { urls: [], idx: 0, intervalS: 10, timer: null, key: "" };
+  var adState = { urls: [], stile: [], idx: 0, intervalS: 10, timer: null, key: "" };
+
+  // Nur echte Hex-Farben duerfen in ein `style`-Attribut — dieselbe Huerde
+  // wie bei den Hallen-Farben. Der Host prueft schon, hier steht die zweite
+  // Wand (Spec werbung-hintergrund-und-feld).
+  function adFarbe(wert, ersatz) {
+    return /^#[0-9a-f]{6}$/.test(String(wert || "")) ? wert : ersatz;
+  }
 
   // Asset-URLs werden absolut aus BASE gebaut – unabhängig von der
   // Verschachtelungstiefe der Seite (LAN vs. Cloud-Namespace).
   function adUrl(id) { return BASE + "ads/" + encodeURIComponent(id); }
 
-  function applyAds(adIds, intervalS) {
-    var key = adIds.join("|") + "@" + intervalS;
+  function applyAds(adIds, intervalS, stile) {
+    stile = Array.isArray(stile) ? stile : [];
+    // Der Stil gehoert IN den Schluessel: Sonst bliebe eine reine
+    // Farbaenderung liegen, bis sich zufaellig die Bildliste aendert — der
+    // Fruehausstieg unten sieht ja nur den Schluessel.
+    var stilKey = stile.map(function (s) {
+      s = s || {};
+      return (s.bg || "") + "/" + (s.fg || "") + "/" + (s.showCourt ? "1" : "0");
+    }).join(",");
+    var key = adIds.join("|") + "@" + intervalS + "#" + stilKey;
     if (key === adState.key) return; // unverändert – Rotation nicht stören
     adState.key = key;
     adState.urls = adIds.map(adUrl);
+    adState.stile = stile;
+    // Die Feldbezeichnung bleibt ueber die GANZE Rotation stehen, sobald sie
+    // auch nur ein Bild verlangt — und dann werden alle Bilder gleich
+    // verkleinert. Sonst spraenge die Bildgroesse im 10-Sekunden-Takt und die
+    // Bezeichnung flackerte (Spec werbung-hintergrund-und-feld).
+    adState.zeigtFeld = stile.some(function (s) { return s && s.showCourt; });
     adState.intervalS = intervalS > 0 ? intervalS : 10;
     adState.idx = 0;
     if (adState.timer) { clearInterval(adState.timer); adState.timer = null; }
@@ -523,10 +563,22 @@
       els.adImg.src = adState.urls[adState.idx];
       els.adImg.style.display = "";
       els.adFallback.classList.remove("show");
+      var stil = adState.stile[adState.idx] || {};
+      var bg = adFarbe(stil.bg, "#000000");
+      els.adView.style.backgroundColor = bg;
+      // Ohne Feldbezeichnung im Zustand gibt es auch keinen Rand: Ein leerer
+      // Rahmen um ein verkleinertes Bild waere schlechter als das volle Bild.
+      // Im Cloud ist das der Normalfall, solange dem Feld noch nie ein Spiel
+      // zugewiesen war (der Relay kennt das Label erst ab dann).
+      var label = els.adCourt.textContent || "";
+      els.adView.classList.toggle("mit-feld", adState.zeigtFeld && label !== "");
+      els.adCourt.style.color = adFarbe(stil.fg, "#ffffff");
     } else {
       els.adImg.style.display = "none";
       els.adImg.removeAttribute("src");
       els.adFallback.classList.add("show");
+      els.adView.style.backgroundColor = "";
+      els.adView.classList.remove("mit-feld");
     }
   }
 
@@ -1033,7 +1085,10 @@
       hideTimer();
       var ads = (cfg.showAds !== false && Array.isArray(state.ads))
         ? state.ads : [];
-      applyAds(ads, cfg.adIntervalS || 10);
+      // Die Feldbezeichnung fuer die Werbe-Ecke kommt aus derselben Quelle
+      // wie die des Leerlauf-Fallbacks.
+      els.adCourt.textContent = state.courtLabel || "";
+      applyAds(ads, cfg.adIntervalS || 10, state.adStyles);
     }
   }
 

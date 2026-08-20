@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.247
+
+- **Werbebilder bekommen eine eigene Hintergrundfarbe.** Bisher lag die
+  Vollbild-Werbung am freien Feld immer auf Schwarz — ein Sponsorlogo, das für
+  weißen Grund gemacht ist, stand damit im schwarzen Kasten. Die Farbe wird je
+  Bild eingestellt, mit Vorschau direkt daneben.
+- **Auf Wunsch steht die Feldbezeichnung über der Werbung.** Bisher verschwand
+  sie, sobald ein Werbebild lief — der Zuschauer sah nicht mehr, welches Feld
+  der Bildschirm zeigt. Das Bild wird dafür etwas verkleinert, damit die
+  Bezeichnung immer auf der Hintergrundfarbe steht und nie auf dem Motiv.
+- **Die Schriftfarbe wählt das Programm selbst** — hell auf dunklem Grund,
+  dunkel auf hellem. Unlesbar einstellen kann man sie also nicht.
+- Beides wirkt im Hallennetz wie in der Cloud. Ohne Einstellung sieht alles aus
+  wie bisher.
+
 ## v0.9.246
 
 - **Der Schiedsrichter wird jetzt auch bei der automatischen Feldansage genannt.**

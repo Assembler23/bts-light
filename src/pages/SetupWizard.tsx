@@ -26,6 +26,7 @@ import {
   readTournamentLogo,
   removeCourtAd,
   setCourtAdBar,
+  setCourtAdStyle,
   setCourtAdLabel,
   saveConfig,
   startSync,
@@ -204,6 +205,23 @@ function Field(props: {
       />
     </label>
   );
+}
+
+/** Schriftfarbe für die **Vorschau** der Werbe-Hintergrundfarbe.
+ *
+ *  Bewusst ein Spiegel von `tablet/monitor.rs::schriftfarbe` (relative
+ *  Luminanz nach WCAG) und keine zweite Wahrheit: Was die Anzeigen wirklich
+ *  bekommen, rechnet der Host und schickt es mit (ADR 0041). Hier geht es nur
+ *  darum, dass die Vorschau im Einrichtungsfenster nicht lügt.
+ */
+function adSchriftfarbe(bg: string): string {
+  if (!/^#[0-9a-f]{6}$/.test(bg)) return "#ffffff";
+  const kanal = (i: number) => {
+    const roh = parseInt(bg.slice(i, i + 2), 16) / 255;
+    return roh <= 0.04045 ? roh / 12.92 : Math.pow((roh + 0.055) / 1.055, 2.4);
+  };
+  const luminanz = 0.2126 * kanal(1) + 0.7152 * kanal(3) + 0.0722 * kanal(5);
+  return luminanz > 0.179 ? "#111111" : "#ffffff";
 }
 
 export function SetupWizard({
@@ -1625,8 +1643,9 @@ export function SetupWizard({
                   {ads.map((ad, i) => (
                     <li
                       key={ad.file}
-                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
+                      className="flex flex-col gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
                     >
+                     <div className="flex items-center gap-2">
                       <input
                         type="text"
                         value={ad.label}
@@ -1679,6 +1698,60 @@ export function SetupWizard({
                       >
                         <Trash2 size={15} />
                       </button>
+                     </div>
+                     {/* Anzeige im Leerlauf-Vollbild (Spec
+                         werbung-hintergrund-und-feld): Hintergrundfarbe und
+                         Feldbezeichnung je Bild, daneben eine Vorschau — der
+                         Turnierleiter soll das Ergebnis vor dem Turnier
+                         sehen, nicht erst auf dem Hallenbildschirm. */}
+                     <div className="flex flex-wrap items-center gap-3 pl-1 text-xs text-slate-500">
+                       <label className="flex items-center gap-1.5" title="Hintergrund hinter diesem Bild im Leerlauf-Vollbild">
+                         <input
+                           type="color"
+                           value={ad.bg || "#000000"}
+                           onChange={(e) => {
+                             const farbe = e.currentTarget.value.toLowerCase();
+                             setAds((prev) =>
+                               prev.map((a) =>
+                                 a.file === ad.file ? { ...a, bg: farbe } : a,
+                               ),
+                             );
+                             void setCourtAdStyle(ad.file, farbe, ad.show_court);
+                           }}
+                           className="h-6 w-8 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+                         />
+                         Hintergrund
+                       </label>
+                       <label
+                         className="flex items-center gap-1"
+                         title="Feldbezeichnung über der Werbung zeigen — das Bild wird dafür etwas verkleinert"
+                       >
+                         <input
+                           type="checkbox"
+                           checked={ad.show_court}
+                           onChange={(e) => {
+                             const on = e.currentTarget.checked;
+                             setAds((prev) =>
+                               prev.map((a) =>
+                                 a.file === ad.file ? { ...a, show_court: on } : a,
+                               ),
+                             );
+                             void setCourtAdStyle(ad.file, ad.bg || "#000000", on);
+                           }}
+                         />
+                         Feld zeigen
+                       </label>
+                       <span
+                         className="flex items-center rounded border border-slate-300 px-2 py-0.5"
+                         style={{
+                           backgroundColor: ad.bg || "#000000",
+                           color: adSchriftfarbe(ad.bg || "#000000"),
+                         }}
+                         title="So sieht die Feldbezeichnung auf dieser Farbe aus"
+                       >
+                         {ad.show_court ? "Feld 3" : "Vorschau"}
+                       </span>
+                     </div>
                     </li>
                   ))}
                 </ul>

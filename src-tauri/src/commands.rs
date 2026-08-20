@@ -163,6 +163,13 @@ fn monitor_ad_bar_path(app: &AppHandle) -> std::path::PathBuf {
     monitor_ad_dir(app).join(crate::tablet::monitor::AD_BAR_FILE)
 }
 
+/// Pfad zur Datei mit dem Anzeige-Stil je Werbebild (Hintergrundfarbe +
+/// Feldbezeichnung). Wie die Leisten-Markierung im `court-ads/`-Verzeichnis,
+/// damit der Monitor-Server sie über sein `monitor_dir` erreicht.
+fn monitor_ad_style_path(app: &AppHandle) -> std::path::PathBuf {
+    monitor_ad_dir(app).join(crate::tablet::monitor::AD_STYLE_FILE)
+}
+
 /// Pfad zur Datei mit den Monitor-Feld-Zuweisungen (Gerät → Feld).
 fn monitor_assignments_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
@@ -1210,6 +1217,11 @@ pub struct CourtAd {
     /// `true`, wenn das Bild zusätzlich klein in der oberen Leiste der
     /// Anzeigeseiten (neben dem Turnierlogo) erscheinen soll.
     pub in_bar: bool,
+    /// Hintergrundfarbe `#rrggbb` des Leerlauf-Vollbilds hinter diesem Bild
+    /// (Spec `werbung-hintergrund-und-feld`). Vorgabe: Schwarz.
+    pub bg: String,
+    /// Feldbezeichnung über der Werbung zeigen?
+    pub show_court: bool,
 }
 
 /// Server-Adresse + Felder-Übersicht für die Tablet-Seite der Oberfläche.
@@ -3701,6 +3713,13 @@ pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
     if bar.remove(&file) {
         let _ = crate::tablet::monitor::write_ad_bar(&bar_path, &bar);
     }
+    // Und den Anzeige-Stil (Hintergrundfarbe, Feldbezeichnung) — aus demselben
+    // Grund wie Label und Leisten-Markierung: keine Karteileichen.
+    let style_path = monitor_ad_style_path(&app);
+    let mut styles = crate::tablet::monitor::read_ad_style(&style_path);
+    if styles.remove(&file).is_some() {
+        let _ = crate::tablet::monitor::write_ad_style(&style_path, &styles);
+    }
     tracing::info!("Court-Monitor: Werbebild '{file}' entfernt");
     Ok(())
 }
@@ -3713,12 +3732,18 @@ pub fn list_court_ads(app: AppHandle) -> Vec<CourtAd> {
     let files = crate::tablet::monitor::list_ads(&monitor_ad_dir(&app));
     let labels = crate::tablet::monitor::read_ad_labels(&monitor_ad_labels_path(&app));
     let bar = crate::tablet::monitor::read_ad_bar(&monitor_ad_bar_path(&app));
+    let styles = crate::tablet::monitor::read_ad_style(&monitor_ad_style_path(&app));
     files
         .into_iter()
-        .map(|file| CourtAd {
-            label: labels.get(&file).cloned().unwrap_or_default(),
-            in_bar: bar.contains(&file),
-            file,
+        .map(|file| {
+            let stil = styles.get(&file).cloned().unwrap_or_default();
+            CourtAd {
+                label: labels.get(&file).cloned().unwrap_or_default(),
+                in_bar: bar.contains(&file),
+                bg: stil.bg,
+                show_court: stil.show_court,
+                file,
+            }
         })
         .collect()
 }
@@ -3848,6 +3873,38 @@ pub fn set_court_ad_bar(
     crate::tablet::monitor::write_ad_bar(&bar_path, &bar)
         .map_err(|e| format!("Leisten-Markierung speichern fehlgeschlagen: {e}"))?;
     push_bar_sponsors_to_badhub(&app, &state);
+    Ok(())
+}
+
+/// Setzt den Anzeige-Stil eines Werbebilds für das Leerlauf-Vollbild:
+/// Hintergrundfarbe und ob die Feldbezeichnung mit erscheint (Spec
+/// `werbung-hintergrund-und-feld`).
+///
+/// Anders als [`set_court_ad_bar`] löst das **keinen** badhub-Push aus: Der
+/// Stil betrifft nur die Anzeigeseiten dieser Installation, nicht das
+/// Check-In-Branding.
+#[tauri::command]
+pub fn set_court_ad_style(
+    app: AppHandle,
+    file: String,
+    bg: String,
+    show_court: bool,
+) -> Result<(), String> {
+    if !crate::tablet::monitor::is_safe_image_name(&file) {
+        return Err("Ungültiger Dateiname.".to_string());
+    }
+    // Strikt `#rrggbb` in Kleinbuchstaben — derselbe Wächter wie bei den
+    // Hallen-Farben. Der Wert landet in einem `style`-Attribut; alles andere
+    // wäre eine Einschleusstelle.
+    let bg = bg.trim().to_ascii_lowercase();
+    if !crate::hall_colors::ist_hex_farbe(&bg) {
+        return Err("Farbe muss die Form #rrggbb haben.".to_string());
+    }
+    let style_path = monitor_ad_style_path(&app);
+    let mut styles = crate::tablet::monitor::read_ad_style(&style_path);
+    styles.insert(file, crate::tablet::monitor::AdStyle { bg, show_court });
+    crate::tablet::monitor::write_ad_style(&style_path, &styles)
+        .map_err(|e| format!("Werbe-Stil speichern fehlgeschlagen: {e}"))?;
     Ok(())
 }
 

@@ -75,9 +75,9 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /pair/{code}` | Telefon-Code → Namespace auflösen (1 h TTL, Fehlversuchs-Limit) |
 | `GET /tl`, `GET /tl/api/state`, `POST /tl/api/command` | Turnierleitungs-Oberfläche — **ohne Namespace in der Adresse**, siehe unten |
 | `GET /tl-ws` | TL-Push-Anstoß (Spec `tl-web-push`, ADR 0034): sendet nur `{"rev":n}`, Zugang im **ersten Frame** |
-| `GET /{ns}/ads/{index}` | Hochgeladenes Werbebild (per **Position** in der Liste) |
+| `GET /{ns}/ads/{index}` | Hochgeladenes Werbebild (per **Position** in der Liste) — der Anzeige-Stil reist positionell mit, siehe unten |
 | `GET /{ns}/info/logo` | Hochgeladenes Turnierlogo |
-| `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`) |
+| `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`, `adStyles`) |
 | `GET /health` | Status-Schnappschuss |
 
 Die beiden Bild-Routen antworten mit einer Kennung (`ETag`) und dürfen
@@ -634,6 +634,31 @@ vor dem Setup-Assistenten (Muster `devices`); `identity_bundle` strippt den
 Profil-**Katalog** NICHT (kein Zugang/Secret, wandert bei PC-Umzug mit wie
 `hall_layouts`) — nur `TlDevice.profile_id` verschwindet implizit, weil der
 Identitäts-Export die komplette Geräteliste ohnehin leert (ADR 0012).
+
+## Anzeige-Stil der Werbebilder (seit v0.9.247)
+
+`AdUpload` trägt neben `inBar` ein optionales `style`:
+`{ bg, fg, showCourt }` — Hintergrundfarbe, dazu kontrastierende Schriftfarbe
+und ob die Feldbezeichnung über der Werbung erscheint. `MonitorState` und
+`/{ns}/info/ad/state` geben die Stile als `adStyles` **index-parallel zu
+`ads`** aus.
+
+Zwei Eigenheiten, die man kennen muss (ADR 0041):
+
+- **Positionell, nicht per Schlüssel.** `AdUpload` führt keinen Bildnamen; der
+  Relay löst Bilder über ihre Position auf. Der Stil erbt damit die bekannte
+  Index-Verschiebung: Wird ein Bild gelöscht, rücken die Folge-Indizes auf, und
+  bis zum nächsten Upload (max. 30 s Fingerabdruck-Takt plus 60 s Bild-Cache)
+  kann eine Anzeige ein Motiv mit dem Stil seines Nachbarn zeigen. Im LAN
+  entfällt das — dort ist der Dateiname der Schlüssel.
+- **`fg` rechnet der Host**, nicht der Relay und nicht die Anzeigeseite. So
+  gibt es genau eine Stelle, die den Kontrast bestimmt. Ein Upload ohne `style`
+  (ältere App) bedeutet „nichts eingestellt"; die Anzeige fällt dann auf
+  Schwarz ohne Feldbezeichnung zurück, also auf das Bild von vor dem Feature.
+
+Der Fingerabdruck in `relay_client.rs` führt Farbe und Häkchen mit
+(`ad_abdruck_zeile`) — ohne das löste eine reine Farbänderung nie einen Upload
+aus, weil sie weder Datei noch Verzeichnis anfasst.
 
 ## Sicherheit
 

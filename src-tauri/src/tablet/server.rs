@@ -108,6 +108,14 @@ pub struct ServerCtx {
     /// gelesen und geparst — das ist die Werbe-Seite im 5-Sekunden-Takt
     /// plus die Sponsor-Leiste jeder Anzeige im Minuten-Takt.
     bar_cache: std::sync::Mutex<BarCache>,
+    /// Zwischenstand des Werbe-Stils je Bild (Hintergrundfarbe,
+    /// Feldbezeichnung), gemerkt an `(Änderungszeit, Größe)` der Datei —
+    /// derselbe Schlüssel wie beim `bar_cache` und aus demselben Grund: Die
+    /// Datei wird beim Einstellen einmal geschrieben, aber von jedem
+    /// Monitor-Poll gelesen. Sich auf die Verzeichnis-Änderungszeit des
+    /// `ads_cache` zu verlassen, wäre falsch: Ein Stil-Wechsel fasst kein
+    /// Bild an.
+    style_cache: std::sync::Mutex<StyleCache>,
 }
 
 /// Das dekodierte Turnierlogo, geschlüsselt nach der Marke seines Inhalts.
@@ -116,6 +124,12 @@ type LogoCache = Option<(String, Arc<Vec<u8>>)>;
 /// Die „Leisten-Sponsor"-Markierungen, geschlüsselt nach
 /// `(Änderungszeit, Größe)` ihrer Datei.
 type BarCache = Option<((std::time::SystemTime, u64), Arc<HashSet<String>>)>;
+
+/// Der Werbe-Stil je Bilddatei, geschlüsselt nach `(Änderungszeit, Größe)`.
+type StyleCache = Option<(
+    (std::time::SystemTime, u64),
+    Arc<HashMap<String, monitor::AdStyle>>,
+)>;
 
 /// Die Live-Score-Pushes an badhub, **je Feld serialisiert und
 /// gebündelt** — und vor allem: **außerhalb** der Tablet-Verbindung.
@@ -255,6 +269,7 @@ impl ServerCtx {
             ads_cache: std::sync::Mutex::new(None),
             logo_cache: std::sync::Mutex::new(None),
             bar_cache: std::sync::Mutex::new(None),
+            style_cache: std::sync::Mutex::new(None),
             score_push: Arc::new(ScorePushQueue::default()),
         }
     }
@@ -392,6 +407,31 @@ impl ServerCtx {
         let namen = Arc::new(monitor::read_ad_bar(&pfad));
         *self.bar_cache.lock().expect("Bar-Cache nicht vergiftet") = Some((stempel, namen.clone()));
         namen
+    }
+
+    /// Der Anzeige-Stil je Werbebild — aus dem Zwischenstand, solange die
+    /// Datei unverändert ist. Fehlt sie (Normalfall), bleibt es beim leeren
+    /// Ergebnis: dann gilt für jedes Bild die Vorgabe.
+    fn ad_style(&self) -> Arc<HashMap<String, monitor::AdStyle>> {
+        let pfad = self.monitor_dir.join(monitor::AD_STYLE_FILE);
+        let stempel = std::fs::metadata(&pfad)
+            .and_then(|m| Ok((m.modified()?, m.len())))
+            .ok();
+        let Some(stempel) = stempel else {
+            return Arc::new(HashMap::new());
+        };
+        {
+            let cache = self.style_cache.lock().expect("Stil-Cache nicht vergiftet");
+            if let Some((gemerkt, stile)) = cache.as_ref() {
+                if *gemerkt == stempel {
+                    return stile.clone();
+                }
+            }
+        }
+        let stile = Arc::new(monitor::read_ad_style(&pfad));
+        *self.style_cache.lock().expect("Stil-Cache nicht vergiftet") =
+            Some((stempel, stile.clone()));
+        stile
     }
 
     /// Wie [`Self::app_config`], aber **mit** dem Lesefehler.
@@ -1295,7 +1335,10 @@ async fn monitor_state(
         court,
         &cfg.court_monitor,
         &cfg.call_timer,
-        ctx.ads(),
+        monitor::AdAnzeige {
+            stile: monitor::ad_styles_fuer(&ctx.ads(), &ctx.ad_style()),
+            ids: ctx.ads(),
+        },
     );
     // Wie bei `/health` selbst serialisiert, um die Antwortgröße zu kennen
     // (Spec monitor-livestand-push, S0).
@@ -1359,7 +1402,10 @@ async fn monitor_device_state(
                 court_data,
                 &cfg.court_monitor,
                 &cfg.call_timer,
-                ctx.ads(),
+                monitor::AdAnzeige {
+                    stile: monitor::ad_styles_fuer(&ctx.ads(), &ctx.ad_style()),
+                    ids: ctx.ads(),
+                },
             )
         }
         // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
@@ -1557,6 +1603,10 @@ async fn info_ad_state(
         "barAds": bar_ads,
         "hasLogo": !config.tournament_logo.data.is_empty(),
         "intervalS": config.court_monitor.ad_interval_s.max(1),
+        // Anzeige-Stil index-parallel zu `ads`. Die reine Werbe-Seite nutzt
+        // davon nur die Hintergrundfarbe — eine Feldbezeichnung hat sie
+        // nicht, sie hängt an keinem Feld (Spec werbung-hintergrund-und-feld).
+        "adStyles": monitor::ad_styles_fuer(&ads, &ctx.ad_style()),
     });
     ([(header::CACHE_CONTROL, "no-store")], Json(payload))
 }

@@ -246,6 +246,38 @@ pub struct AdUpload {
     /// lesbar.
     #[serde(rename = "inBar", default)]
     pub in_bar: bool,
+    /// Anzeige-Stil im Leerlauf-Vollbild (Spec `werbung-hintergrund-und-feld`,
+    /// ADR 0041). **Positionell**: Der Stil gehört zu dem Bild, an dem er
+    /// hängt, und wandert mit dessen Index. Leere Farbstrings bedeuten „nicht
+    /// gesetzt" — dann gilt die Vorgabe der Anzeigeseite (Schwarz). So bleibt
+    /// ein Upload einer älteren App ohne Sonderfall lesbar.
+    #[serde(default, skip_serializing_if = "AdStyleWire::ist_leer")]
+    pub style: AdStyleWire,
+}
+
+/// Anzeige-Stil eines Werbebilds auf dem Draht.
+///
+/// `fg` rechnet der **Host** aus `bg` (relative Luminanz, ADR 0041) — der
+/// Relay reicht nur durch. So gibt es genau eine Stelle, die den Kontrast
+/// bestimmt, und keine zweite Rechnung im Browser, die davon abweichen könnte.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdStyleWire {
+    /// Hintergrundfarbe `#rrggbb`; leer = nicht gesetzt.
+    #[serde(default)]
+    pub bg: String,
+    /// Dazu kontrastierende Schriftfarbe `#rrggbb`; leer = nicht gesetzt.
+    #[serde(default)]
+    pub fg: String,
+    /// Feldbezeichnung über der Werbung zeigen?
+    #[serde(rename = "showCourt", default)]
+    pub show_court: bool,
+}
+
+impl AdStyleWire {
+    /// Nichts gesetzt — dann muss der Stil gar nicht erst über den Draht.
+    pub fn ist_leer(&self) -> bool {
+        self.bg.is_empty() && self.fg.is_empty() && !self.show_court
+    }
 }
 
 /// Das Turnierlogo für die Sponsor-Leiste der Cloud-Anzeigeseiten – Base64,
@@ -452,6 +484,11 @@ pub struct MonitorState {
     pub config: MonitorConfig,
     /// Kennungen der Werbebilder; der Monitor lädt sie über `../../ads/<id>`.
     pub ads: Vec<String>,
+    /// Anzeige-Stil je Werbebild, **index-parallel zu `ads`** (ADR 0041).
+    /// Kürzer als `ads` oder ganz leer = für die übrigen Bilder gilt die
+    /// Vorgabe; so bleibt ein Frame eines älteren Hosts lesbar.
+    #[serde(rename = "adStyles", default, skip_serializing_if = "Vec::is_empty")]
+    pub ad_styles: Vec<AdStyleWire>,
     /// Auszuführender Fernbefehl (Neu laden / Identifizieren) – nur im
     /// Geräte-Modus gesetzt. `#[serde(default)]` hält ältere Frames lesbar.
     #[serde(rename = "command", skip_serializing_if = "Option::is_none", default)]
@@ -3271,6 +3308,7 @@ mod tests {
             court_id: 3,
             court_label: "Feld 3".into(),
             hall_color: None,
+            ad_styles: Vec::new(),
             tournament_name: "T".into(),
             match_info: None,
             court_state: None,
@@ -3315,6 +3353,7 @@ mod tests {
             court_state: None,
             config: MonitorConfig::default(),
             ads: Vec::new(),
+            ad_styles: Vec::new(),
             command: None,
             device_code: String::new(),
             unassigned: false,
@@ -3377,6 +3416,7 @@ mod tests {
             court_id: 3,
             court_label: "Feld 3".into(),
             hall_color: Some("#14b8a6".into()),
+            ad_styles: Vec::new(),
             tournament_name: "Test-Cup".into(),
             match_info: Some(MonitorMatch {
                 match_id: 14,
@@ -3434,6 +3474,7 @@ mod tests {
                 content_type: "image/png".into(),
                 data: "AAAA".into(),
                 in_bar: true,
+                style: AdStyleWire::default(),
             }],
             call_timer: CallTimerView {
                 enabled: true,
@@ -3454,6 +3495,45 @@ mod tests {
         let up: MonitorUpload = serde_json::from_str(old).unwrap();
         assert!(!up.ads[0].in_bar);
         assert!(up.logo.is_none());
+    }
+
+    #[test]
+    fn ad_style_defaults_to_black_and_off() {
+        // Upload einer älteren App: kein `style` am Bild, kein `adStyles` im
+        // Zustand. Beides muss lesbar bleiben und auf „nichts eingestellt"
+        // fallen — dann zeigt die Anzeige Schwarz ohne Feldbezeichnung, also
+        // genau das Bild von vor dem Feature (ADR 0041).
+        let old = r#"{"config":{"adIntervalS":8,"showDiscipline":true,"showRound":true,"showMatchNumber":true,"showTimer":true},"tournamentName":"T","ads":[{"contentType":"image/png","data":"AAAA"}]}"#;
+        let up: MonitorUpload = serde_json::from_str(old).unwrap();
+        assert!(up.ads[0].style.ist_leer(), "kein Stil = Vorgabe");
+        assert_eq!(up.ads[0].style.bg, "");
+        assert!(!up.ads[0].style.show_court);
+
+        // Und der Rückweg: Ein Stil, der nichts sagt, belegt keinen Platz auf
+        // dem Draht.
+        let ohne = AdUpload {
+            content_type: "image/png".into(),
+            data: "AAAA".into(),
+            in_bar: false,
+            style: AdStyleWire::default(),
+        };
+        let j = serde_json::to_string(&ohne).unwrap();
+        assert!(!j.contains("style"), "leerer Stil reist nicht mit: {j}");
+
+        // Ein gesetzter Stil überlebt den Roundtrip vollständig.
+        let mit = AdUpload {
+            content_type: "image/png".into(),
+            data: "AAAA".into(),
+            in_bar: false,
+            style: AdStyleWire {
+                bg: "#ffffff".into(),
+                fg: "#111111".into(),
+                show_court: true,
+            },
+        };
+        let zurueck: AdUpload =
+            serde_json::from_str(&serde_json::to_string(&mit).unwrap()).unwrap();
+        assert_eq!(zurueck, mit);
     }
 
     #[test]

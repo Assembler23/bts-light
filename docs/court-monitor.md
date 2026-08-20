@@ -269,6 +269,45 @@ Geräte). In der Regel 1–2 Bilder, kein Rotieren. Fehlt ein Motiv, entfernt
 `onerror` es. Spec + Phasen (Cloud, badhub-Seiten):
 [features/werbung-leisten.md](features/werbung-leisten.md).
 
+## Hintergrundfarbe und Feldbezeichnung je Werbebild (seit v0.9.247)
+
+Das **Leerlauf-Vollbild** (Werbung, solange kein Spiel auf dem Feld läuft) lag
+bisher immer auf Schwarz. Jedes Bild bekommt jetzt im Setup zwei eigene
+Einstellungen — direkt unter seinem Namen, mit Vorschau daneben:
+
+- **Hintergrund**: eine frei wählbare Farbe, die die Fläche füllt, die das
+  Bild bei `object-fit: contain` nicht abdeckt. Sponsorlogos, die für weißen
+  Grund gemacht sind, stehen damit nicht mehr im schwarzen Kasten.
+- **Feld zeigen**: die Feldbezeichnung erscheint klein in der oberen linken
+  Ecke. Dafür wird das Bild auf 84 % verkleinert, damit ringsum ein Rand in
+  der Hintergrundfarbe bleibt — so steht die Bezeichnung **immer** auf der
+  reinen Farbe und nie auf dem Motiv. Ein randfüllendes 16:9-Motiv auf einem
+  16:9-Fernseher ließe sonst keinen Platz.
+
+Die **Schriftfarbe** ist nicht einstellbar: Der Host rechnet sie aus der
+Hintergrundfarbe (relative Luminanz nach WCAG) und schickt sie mit. Es gibt
+also keinen Weg, die Feldbezeichnung unlesbar zu konfigurieren (ADR 0041).
+
+Weitere Regeln:
+
+- Trägt **mindestens ein** Bild eines Feldes den Haken, bleibt die
+  Feldbezeichnung über die ganze Rotation stehen und alle Bilder werden gleich
+  verkleinert — sonst spränge die Bildgröße im Rotationstakt.
+- Ist die Feldbezeichnung **leer** (im Cloud der Fall, solange dem Feld noch
+  nie ein Spiel zugewiesen war), entfällt sie samt Verkleinerung: volle
+  Bildfläche statt leerem Rand.
+- Der Farbwechsel zwischen zwei Bildern blendet weich über.
+- Die reine **Werbe-Anzeige** auf Info-Bildschirmen (`/info/ad`) übernimmt die
+  Farbe, aber keine Feldbezeichnung — sie hängt an keinem Feld.
+- Ohne Einstellung bleibt alles wie vorher: Schwarz, keine Bezeichnung.
+
+Ablage: `court-ads/court-ad-style.json` — die **dritte** Seiten-Datei neben
+Labels und Leisten-Markierung. Bewusst nicht in die Labels-Datei mit hinein:
+deren Deserializer ist strikt, ein Formatwechsel löschte beim Auto-Update
+still alle Anzeigenamen. Command: `set_court_ad_style` (validiert `#rrggbb`,
+löst **keinen** badhub-Push aus — anders als der „Leiste"-Haken). Spec:
+[features/werbung-hintergrund-und-feld.md](features/werbung-hintergrund-und-feld.md).
+
 ## Zwischenspeichern der Bilder (seit v0.9.225)
 
 Werbebilder und Turnierlogo waren ausdrücklich vom Zwischenspeichern

@@ -271,6 +271,7 @@ fn monitor_fingerprint(ctx: &ServerCtx) -> String {
         app.tournament_logo.mime
     ));
     let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
+    let stile = monitor::read_ad_style(&ctx.monitor_dir.join(monitor::AD_STYLE_FILE));
     for name in monitor::list_ads(&ctx.monitor_dir) {
         let (len, mtime) = std::fs::metadata(ctx.monitor_dir.join(&name))
             .map(|m| {
@@ -283,18 +284,46 @@ fn monitor_fingerprint(ctx: &ServerCtx) -> String {
                 (m.len(), mt)
             })
             .unwrap_or((0, 0));
-        // Bar-Markierung in den Abdruck: ein Umschalten „in Leiste" muss den
-        // Upload neu auslösen, sonst zeigt der Cloud-Monitor die alte Auswahl.
-        let in_bar = bar.contains(&name);
-        s.push_str(&format!("|{name}:{len}:{mtime}:{in_bar}"));
+        s.push_str(&ad_abdruck_zeile(
+            &name,
+            len,
+            mtime,
+            bar.contains(&name),
+            stile.get(&name),
+        ));
     }
     s
+}
+
+/// Die Abdruck-Zeile eines Werbebilds.
+///
+/// Zwei Dinge stehen hier, die man leicht vergisst und deren Fehlen still
+/// bleibt: die **Leisten-Markierung** (sonst zeigt die Cloud-Leiste die alte
+/// Auswahl) und der **Anzeige-Stil** (sonst bleibt der Cloud-Monitor für immer
+/// schwarz — eine reine Farbänderung fasst weder Datei noch Verzeichnis an,
+/// `maybe_upload_monitor` würde also nie auslösen, ADR 0041).
+fn ad_abdruck_zeile(
+    name: &str,
+    len: u64,
+    mtime: u64,
+    in_bar: bool,
+    stil: Option<&monitor::AdStyle>,
+) -> String {
+    // „Kein Eintrag" und „ausdrücklich die Vorgabe" sind derselbe Zustand und
+    // müssen denselben Abdruck ergeben — sonst löste ein Stil, der nichts
+    // ändert, einen Upload aus. `write_ad_style` filtert Vorgaben ohnehin
+    // heraus; die Normalisierung hier macht den Abdruck davon unabhängig.
+    let stil = stil.filter(|s| !s.ist_vorgabe());
+    let bg = stil.map(|s| s.bg.as_str()).unwrap_or("");
+    let zeigt_feld = stil.map(|s| s.show_court).unwrap_or(false);
+    format!("|{name}:{len}:{mtime}:{in_bar}:{bg}:{zeigt_feld}")
 }
 
 /// Baut den Court-Monitor-Datensatz und POSTet ihn zum Relay.
 async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String> {
     let cfg = ctx.monitor_config();
     let bar = monitor::read_ad_bar(&ctx.monitor_dir.join(monitor::AD_BAR_FILE));
+    let stile = monitor::read_ad_style(&ctx.monitor_dir.join(monitor::AD_STYLE_FILE));
     let mut ads = Vec::new();
     let mut total = 0usize;
     for name in monitor::list_ads(&ctx.monitor_dir)
@@ -312,6 +341,16 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
             content_type: monitor::image_mime(&name).to_string(),
             data: base64::engine::general_purpose::STANDARD.encode(&bytes),
             in_bar: bar.contains(&name),
+            // Die Kontrastschrift rechnet der Host, nicht der Relay und nicht
+            // die Anzeige (ADR 0041) — eine Quelle für den Kontrast.
+            style: stile
+                .get(&name)
+                .map(|s| relay_proto::AdStyleWire {
+                    bg: s.bg.clone(),
+                    fg: monitor::schriftfarbe(&s.bg).to_string(),
+                    show_court: s.show_court,
+                })
+                .unwrap_or_default(),
         });
     }
     let app = ctx.app_config();
@@ -1176,6 +1215,35 @@ mod tests {
     use crate::config::AppConfig;
     use crate::tablet::state::TabletState;
     use std::collections::HashMap;
+
+    #[test]
+    fn der_abdruck_bemerkt_eine_reine_farbaenderung() {
+        // Datei unverändert, nur die Farbe anders: Der Abdruck MUSS sich
+        // ändern, sonst lädt der Host nie neu hoch und der Cloud-Monitor
+        // bleibt schwarz (ADR 0041).
+        let ohne = ad_abdruck_zeile("ad-1.png", 100, 42, false, None);
+        let schwarz = monitor::AdStyle::default();
+        let weiss = monitor::AdStyle {
+            bg: "#ffffff".to_string(),
+            show_court: false,
+        };
+        let mit_feld = monitor::AdStyle {
+            bg: "#ffffff".to_string(),
+            show_court: true,
+        };
+        let a = ad_abdruck_zeile("ad-1.png", 100, 42, false, Some(&schwarz));
+        let b = ad_abdruck_zeile("ad-1.png", 100, 42, false, Some(&weiss));
+        let c = ad_abdruck_zeile("ad-1.png", 100, 42, false, Some(&mit_feld));
+        assert_ne!(a, b, "Farbwechsel muss den Abdruck ändern");
+        assert_ne!(b, c, "Feld-Häkchen muss den Abdruck ändern");
+        // Kein Eintrag und ausdrücklich die Vorgabe sind derselbe Zustand —
+        // beides heißt „nichts eingestellt".
+        assert_eq!(
+            ohne,
+            ad_abdruck_zeile("ad-1.png", 100, 42, false, Some(&schwarz)),
+            "Vorgabe darf keinen Upload auslösen"
+        );
+    }
 
     #[test]
     fn is_stale_grenzfaelle() {

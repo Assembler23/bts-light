@@ -287,6 +287,22 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Hintergrundfarbe und Feldbezeichnung je Werbebild (v0.9.247)** — das
+  Leerlauf-Vollbild am Court-Monitor bekommt je Bild eine eigene
+  Hintergrundfarbe; auf Wunsch steht die Feldbezeichnung darüber (Bild wird
+  dafür verkleinert, Schriftfarbe rechnet der Host).
+  Spec: [features/werbung-hintergrund-und-feld.md](features/werbung-hintergrund-und-feld.md) ·
+  ADR [0041](adr/0041-werbe-stil-je-bild.md).
+  **Offen:** Feldtest an einem Turnier (LAN **und** Cloud), insbesondere die
+  Rotation mit gemischten Häkchen.
+
+- **Ansage der Besetzung einstellbar (v0.9.246)** — Schiedsrichter fehlten in
+  der automatischen Feldansage ganz, die Zähltafelbedienung wurde nur bei
+  echter Zuweisung genannt. Beides ist behoben und über zwei Häkchen
+  abschaltbar. ADR [0040](adr/0040-ansage-besetzung-einstellbar.md).
+  **Offen:** Feldtest; am Cloud-Ansage-Slave fehlen SR/AR weiterhin
+  strukturell (`CloudAnnounceCourt` führt keine Listen).
+
 - **Automatische Hallen-Vorverteilung** — die vordersten x Spiele bekommen
   automatisch eine Halle im Verhältnis der entsperrten Felder (gemischt,
   fortlaufend nachgefüllt); Halle bindet die Feldvergabe, Auto-Spiele
