@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.245
+
+- **Der Cloud-Server rechnet die Feld-Übersicht nur noch einmal aus, statt für
+  jede Anzeige einzeln.** Zwanzig Fernseher in einer Halle fragen viermal je
+  Sekunde nach; bisher baute der Server jede dieser achtzig Antworten von
+  Grund auf neu — auch die, die am Ende nur „nichts Neues" lautete. Jetzt
+  entsteht sie einmal und gilt, bis sich wirklich etwas ändert.
+- **Spätestens nach einer Viertelsekunde** wird ohnehin neu gerechnet. Sollte
+  also je eine Änderung übersehen werden, hängt die Anzeige nicht daran fest.
+- Im Hallennetz gab es das schon seit v0.9.236; die Cloud zieht damit nach.
+  Nachtrag zur Spec `monitor-livestand-push` (Etappe S9).
+
 ## v0.9.244
 
 - **Ausgefüllte Schiedsrichterzettel lassen sich drucken.** Für jedes mit Tablet
