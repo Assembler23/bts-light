@@ -2393,6 +2393,54 @@ pub fn match_scoresheet_html(
     crate::tablet::scoresheet::html_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
 }
 
+/// Die im System eingerichteten Drucker — für die Auswahl in den
+/// Einstellungen (Spec `schiedsrichterzettel-autodruck`, ADR 0042).
+///
+/// Der leere Eintrag („Windows-Standarddrucker") steht **nicht** in dieser
+/// Liste; die Oberfläche bietet ihn als eigene Zeile an. So bleibt die
+/// Bedeutung eindeutig: leerer Name in der Konfiguration = Standarddrucker,
+/// auch wenn sich der später ändert.
+#[tauri::command]
+pub fn printer_list() -> Vec<String> {
+    crate::print::drucker_liste()
+}
+
+/// Zettel **still** an den eingestellten Drucker geben — ohne Dialog.
+///
+/// Das ist derselbe Weg, den der Autodruck später von selbst geht; hier
+/// ist er von Hand auslösbar, damit sich Drucker und Seitenbild prüfen
+/// lassen, bevor sich jemand im Turnier darauf verlässt.
+///
+/// Läuft in einer eigenen Aufgabe: Der Spooler kann Sekunden brauchen, und
+/// solange darf die Oberfläche nicht stehen.
+#[tauri::command]
+pub async fn print_scoresheet(
+    state: State<'_, AppState>,
+    match_ids: Vec<i64>,
+    vorab: Option<bool>,
+) -> Result<(), String> {
+    let (logo, drucker) = {
+        let config = state.config.lock().map_err(|_| "Konfiguration gesperrt")?;
+        (
+            crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo),
+            config.print.printer_name.clone(),
+        )
+    };
+    let modus = if vorab.unwrap_or(false) {
+        crate::tablet::scoresheet::Modus::Vorab
+    } else {
+        crate::tablet::scoresheet::Modus::Normal
+    };
+    let seiten =
+        crate::tablet::scoresheet::seiten_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
+            .ok_or_else(|| "Zu diesen Spielen gibt es kein Blatt.".to_string())?;
+    let titel = format!("Schiedsrichterzettel ({} Blatt)", seiten.len());
+    tokio::task::spawn_blocking(move || crate::print::drucke(&seiten, &titel, &drucker))
+        .await
+        .map_err(|e| format!("Druckauftrag abgebrochen: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
 /// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser
 /// spricht nie selbst mit dem Store). `None` = kein Verlauf aufgezeichnet
 /// (Papier-Ergebnis oder Spiel vor Einführung).

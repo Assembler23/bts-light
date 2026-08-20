@@ -109,6 +109,10 @@ function defaultConfig(): AppConfig {
       enabled: false,
       break_seconds: 300,
     },
+    print: {
+      auto_enabled: false,
+      printer_name: "",
+    },
     auto_assign: {
       enabled: false,
       wait_minutes: 1,

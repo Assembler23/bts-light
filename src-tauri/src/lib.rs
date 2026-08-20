@@ -5,6 +5,7 @@ pub mod commands;
 pub mod config;
 pub mod hall_colors;
 pub mod log_upload;
+pub mod print;
 pub mod sync;
 pub mod tablet;
 
@@ -141,6 +142,8 @@ pub fn run() {
             commands::finished_matches,
             commands::match_timeline,
             commands::match_scoresheet_html,
+            commands::printer_list,
+            commands::print_scoresheet,
             commands::officials_roster,
             commands::official_assign,
             commands::official_clear,

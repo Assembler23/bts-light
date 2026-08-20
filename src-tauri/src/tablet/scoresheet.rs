@@ -520,6 +520,28 @@ pub fn html_fuer(
     Some(render_html(&docs))
 }
 
+/// Dieselben Zettel als **Druckseiten** statt als HTML — die Vorlage für
+/// den stillen Druck (ADR 0042).
+///
+/// Beide Wege teilen sich [`dokumente`]; was hier herauskommt, ist
+/// dieselbe Elementliste, die der HTML-Treiber malt. Ein Auseinanderlaufen
+/// von Bildschirm und Papier ist damit ausgeschlossen.
+pub fn seiten_fuer(
+    state: &super::state::TabletState,
+    logo_uri: Option<&str>,
+    modus: Modus,
+    match_ids: &[i64],
+) -> Option<Vec<super::blatt::Seite>> {
+    if match_ids.is_empty() || match_ids.len() > relay_proto::MAX_SHEETS_PER_DOC {
+        return None;
+    }
+    let docs = dokumente(state, logo_uri, modus, match_ids);
+    if docs.is_empty() {
+        return None;
+    }
+    Some(docs.iter().flat_map(super::blatt::blatt).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

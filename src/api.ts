@@ -195,6 +195,19 @@ export const matchScoresheetHtml = (
   vorab = false,
 ): Promise<string | null> => invoke("match_scoresheet_html", { matchIds, vorab });
 
+/** Die im System eingerichteten Drucker (Spec
+ *  schiedsrichterzettel-autodruck, ADR 0042). Der leere Eintrag
+ *  „Standarddrucker" steht nicht in der Liste — er ist die Bedeutung des
+ *  leeren Namens in der Konfiguration. */
+export const printerList = (): Promise<string[]> => invoke("printer_list");
+
+/** Zettel **still** an den eingestellten Drucker geben — ohne Dialog.
+ *  Derselbe Weg, den der Autodruck geht. */
+export const printScoresheet = (
+  matchIds: number[],
+  vorab = false,
+): Promise<void> => invoke("print_scoresheet", { matchIds, vorab });
+
 export const matchTimeline = (matchId: number): Promise<MatchTimeline | null> =>
   invoke("match_timeline", { matchId });
 

@@ -123,6 +123,27 @@ vollständiges Blatt. An der Route hängt dafür `?vorab=1`.
 - **TL-Web**, Spielliste: im ⋮-Menü jeder Zeile **🖨 Zettel (leer)**. Gedruckt
   wird über das Gerät, auf dem TL-Web läuft.
 
+## Drucker einstellen
+
+Im Setup steht der Abschnitt **Schiedsrichterzettel**:
+
+- **Drucker suchen** listet die im System eingerichteten Drucker auf.
+- **Windows-Standarddrucker** ist die Vorgabe; sie bleibt richtig, auch wenn
+  sich der Standarddrucker später ändert.
+- Ein früher gewählter Drucker, den Windows gerade nicht meldet (aus,
+  abgezogen), bleibt wählbar — sonst fiele die Einstellung beim nächsten
+  Speichern still auf „Standard" zurück.
+
+Gedruckt wird **ohne Dialog** auf dem Rechner, auf dem BTS Light läuft. Das
+Papierformat stellt BTS Light selbst ein: **A4 quer**. Das ist keine Kosmetik —
+mit der Treibervorgabe kam im Test US-Letter heraus (279 mm breit), und das
+275-mm-Raster hätte rechts seine letzte Spalte verloren.
+
+**Druckprobe ohne Papier:** `cargo test --lib druck_nach_pdf -- --ignored
+--nocapture` schickt ein Blatt an „Microsoft Print to PDF" und legt
+`target/druckprobe.pdf` ab — derselbe Weg wie zum echten Drucker, nur ohne
+Baum.
+
 ## Was es *nicht* gibt
 
 - **Keinen ausgefüllten Zettel für Spiele ohne Tablet.** Ein von Hand
