@@ -86,10 +86,11 @@ nicht ausgerufen haben will, schaltet die Bedienungs-Ansage aus.
   bedienbar geworden: Ein reiner LAN-Ansage-PC ohne Bediener-Verwaltung ruft
   jetzt den pro-Feld-Hinweis aus, bis jemand den Schalter umlegt. Der Kommentar
   an `announceScorekeeper` sagt das an Ort und Stelle.
-- Am **Cloud-Ansage-Slave** wirkt nur der Bedienungs-Schalter. Der Wire-Typ
-  `CloudAnnounceCourt` (`commands.rs`) führt keine SR/AR-Listen; der Slave
-  könnte den Schiedsrichter also gar nicht nennen. Das bleibt offen und ist in
-  [docs/announcements.md](../announcements.md) als Lücke vermerkt.
+- Am **Cloud-Ansage-Slave** wirkten zunächst nur der Bedienungs-Schalter, weil
+  `CloudAnnounceCourt` (`commands.rs`) keine SR/AR-Listen führte. **Nachgezogen
+  in v0.9.248:** Die Namen reisten im `MatchBrief` ohnehin bis zum Slave (der
+  Host füllt sie, der Relay reicht sie durch) — sie fielen allein bei der
+  Umwandlung heraus. Beide Schalter wirken dort jetzt wie am Master.
 - Die Ansage kann nun Namen tragen, die BTP nie einem Spiel zugewiesen hat.
   Datenschutzlich unbedenklich: Es sind dieselben Namen, die die Anzeige am
   Feld ohnehin zeigt, und sie dienen demselben Zweck — die richtige Person ans

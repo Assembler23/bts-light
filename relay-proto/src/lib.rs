@@ -100,7 +100,9 @@ pub struct MatchBrief {
     #[serde(default)]
     pub scorekeeper: Vec<String>,
     /// `true`, wenn `scorekeeper` aus einer echten Zuweisung stammt (Verwaltung
-    /// aktiv) — nur dann sagt die ferne Halle „Tabletbedienung" mit an (ADR 0007).
+    /// aktiv), sonst ist es der pro-Feld-Hinweis. Seit ADR 0040 entscheidet
+    /// über die **Ansage** der Schalter `announce.announce_scorekeeper`, nicht
+    /// mehr die Herkunft des Namens; dieses Feld bleibt für die Anzeige.
     #[serde(rename = "scorekeeperAssigned", default)]
     pub scorekeeper_assigned: bool,
     /// Turnierweite Anzeige-Schalter: ob das Tablet Vereinsname bzw. -logo

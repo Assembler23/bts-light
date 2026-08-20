@@ -284,8 +284,9 @@ Azure-Pfad XML-escaped im SSML. Damit sagen sie Wort für Wort dasselbe.
   sodass dieselbe Belegung je nach Auslöser anders klang (Nutzer-Befund
   20.08.2026). Der Schalter `announce.announce_umpire` (Default an,
   [ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)) schaltet die Nennung
-  bei Bedarf ab. Am **Cloud-Ansage-Slave** ist sie weiterhin unmöglich:
-  `CloudAnnounceCourt` führt keine SR/AR-Listen.
+  bei Bedarf ab. Seit v0.9.248 gilt das auch für den
+  **Cloud-Ansage-Slave**: Die Namen reisten im `MatchBrief` längst bis dorthin,
+  fielen aber bei der Umwandlung in `CloudAnnounceCourt` heraus.
 - **Manueller Knopf** (`announceOfficials`, `officialsOnly`): sagt nur Feld
   und Besetzung an — eine nachträgliche Zuweisung soll nicht die ganze
   Paarung erneut aufrufen, das Spiel läuft ja schon. Der Knopf sitzt im

@@ -1224,6 +1224,49 @@ pub struct CourtAd {
     pub show_court: bool,
 }
 
+/// Ein Feld des Cloud-Ansage-Zustands in die Form für den Slave bringen.
+///
+/// Rein und ohne `State`, damit prüfbar bleibt, **was** die ferne Halle zu
+/// hören bekommt — der Weg dorthin ist lang (Host → Relay → Slave) und die
+/// Namen fallen unterwegs leicht unter den Tisch.
+fn brief_namen(v: &[relay_proto::PlayerBrief]) -> Vec<String> {
+    v.iter().map(|p| p.name.clone()).collect()
+}
+
+fn brief_nationen(v: &[relay_proto::PlayerBrief]) -> Vec<String> {
+    v.iter()
+        .map(|p| p.nationality.clone().unwrap_or_default())
+        .collect()
+}
+
+fn cloud_announce_court(c: relay_proto::AnnounceCourt) -> Option<CloudAnnounceCourt> {
+    let m = c.match_brief?;
+    let names = brief_namen;
+    let nats = brief_nationen;
+    // Anzeige-Label ist bei Mehr-Hallen "{Halle} · {Feld}" – fürs Ansagen nur
+    // den Feldteil verwenden.
+    let court = c.label.rsplit(" · ").next().unwrap_or(&c.label).to_string();
+    Some(CloudAnnounceCourt {
+        court_id: c.court_id,
+        court,
+        discipline: m.discipline.clone(),
+        class_label: m.class_label.clone(),
+        team1: names(&m.team_a),
+        team2: names(&m.team_b),
+        team1_nationalities: nats(&m.team_a),
+        team2_nationalities: nats(&m.team_b),
+        match_id: m.match_id,
+        scorekeeper: m.scorekeeper.clone(),
+        scorekeeper_assigned: m.scorekeeper_assigned,
+        // Schiedsrichter und Aufschlagrichter reisen im `MatchBrief` längst
+        // mit (der Host füllt sie in `match_brief`, der Relay reicht sie
+        // unverändert durch) — hier fielen sie bisher heraus, und deshalb
+        // konnte die ferne Halle sie nicht ansagen.
+        sr: m.sr_names.clone(),
+        ar: m.ar_names.clone(),
+    })
+}
+
 /// Server-Adresse + Felder-Übersicht für die Tablet-Seite der Oberfläche.
 #[derive(Serialize)]
 pub struct TabletInfo {
@@ -2555,6 +2598,11 @@ pub struct CloudAnnounceCourt {
     /// Herkunft des Namens; `scorekeeper_assigned` bleibt für die Anzeige.
     pub scorekeeper: Vec<String>,
     pub scorekeeper_assigned: bool,
+    /// Schiedsrichter des laufenden Spiels — damit die ferne Halle sie
+    /// mitansagen kann (Spec schiedsrichter-management Nr. 8).
+    pub sr: Vec<String>,
+    /// Aufschlagrichter, gleiche Herkunft.
+    pub ar: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -2657,34 +2705,10 @@ pub async fn cloud_announce_state(
     };
     let st = fetched.unwrap_or_default();
 
-    let names = |v: &[relay_proto::PlayerBrief]| v.iter().map(|p| p.name.clone()).collect();
-    let nats = |v: &[relay_proto::PlayerBrief]| {
-        v.iter()
-            .map(|p| p.nationality.clone().unwrap_or_default())
-            .collect()
-    };
     let courts = st
         .courts
         .into_iter()
-        .filter_map(|c| {
-            let m = c.match_brief?;
-            // Anzeige-Label ist bei Mehr-Hallen "{Halle} · {Feld}" – fürs
-            // Ansagen nur den Feldteil verwenden.
-            let court = c.label.rsplit(" · ").next().unwrap_or(&c.label).to_string();
-            Some(CloudAnnounceCourt {
-                court_id: c.court_id,
-                court,
-                discipline: m.discipline.clone(),
-                class_label: m.class_label.clone(),
-                team1: names(&m.team_a),
-                team2: names(&m.team_b),
-                team1_nationalities: nats(&m.team_a),
-                team2_nationalities: nats(&m.team_b),
-                match_id: m.match_id,
-                scorekeeper: m.scorekeeper.clone(),
-                scorekeeper_assigned: m.scorekeeper_assigned,
-            })
-        })
+        .filter_map(cloud_announce_court)
         .collect();
     let freetext = st
         .freetext
@@ -2704,10 +2728,10 @@ pub async fn cloud_announce_state(
             discipline: p.discipline,
             class_label: p.class_label,
             round_name: p.round_name,
-            team1: names(&p.team_a),
-            team2: names(&p.team_b),
-            team1_nationalities: nats(&p.team_a),
-            team2_nationalities: nats(&p.team_b),
+            team1: brief_namen(&p.team_a),
+            team2: brief_namen(&p.team_b),
+            team1_nationalities: brief_nationen(&p.team_a),
+            team2_nationalities: brief_nationen(&p.team_b),
             called_at_ms: p.called_at_ms,
         })
         .collect();
@@ -4636,6 +4660,68 @@ mod tests {
         // Leerer SSID-Wert (Übergangszustand) zählt nicht als verbunden.
         let text = "    SSID                   : \n    BSSID                  : 00:11:22:33:44:55";
         assert_eq!(parse_netsh_ssid(text), None);
+    }
+
+    #[test]
+    fn die_ferne_halle_bekommt_auch_die_besetzung() {
+        // Schiedsrichter, Aufschlagrichter und Bedienung reisen im
+        // `MatchBrief` bis zum Slave — sie fielen aber bei der Umwandlung
+        // heraus, sodass die ferne Halle sie nicht ansagen konnte
+        // (Nutzer-Befund 20.08.2026).
+        let brief = relay_proto::MatchBrief {
+            match_id: 42,
+            team_a: vec![relay_proto::PlayerBrief {
+                id: 1,
+                name: "A. Spieler".into(),
+                nationality: Some("GER".into()),
+                club: None,
+            }],
+            team_b: vec![relay_proto::PlayerBrief {
+                id: 2,
+                name: "B. Gegner".into(),
+                nationality: None,
+                club: None,
+            }],
+            discipline: "mens_singles".into(),
+            class_label: "A".into(),
+            scorekeeper: vec!["C. Bediener".into()],
+            scorekeeper_assigned: true,
+            sr_names: vec!["S. Richter".into()],
+            ar_names: vec!["A. Aufschlag".into()],
+            event_label: "Herreneinzel A Viertelfinale".into(),
+            best_of_sets: 3,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: Some(11),
+            match_number: Some(42),
+            show_club_names: false,
+            show_club_logos: false,
+            finalized: false,
+        };
+        let court = cloud_announce_court(relay_proto::AnnounceCourt {
+            court_id: 7,
+            // Mehr-Hallen-Label: Nur der Feldteil gehört in die Ansage.
+            label: "Halle Süd · Feld 3".into(),
+            match_brief: Some(brief),
+        })
+        .expect("Feld mit Spiel ergibt einen Eintrag");
+
+        assert_eq!(court.court, "Feld 3");
+        assert_eq!(court.sr, vec!["S. Richter".to_string()]);
+        assert_eq!(court.ar, vec!["A. Aufschlag".to_string()]);
+        assert_eq!(court.scorekeeper, vec!["C. Bediener".to_string()]);
+        assert_eq!(court.team1_nationalities, vec!["GER".to_string()]);
+        // Ohne Nationalität ein leerer Eintrag — die Sprachwahl zählt
+        // Einträge, keine Optionen.
+        assert_eq!(court.team2_nationalities, vec![String::new()]);
+
+        // Ein leeres Feld ergibt gar keinen Eintrag.
+        assert!(cloud_announce_court(relay_proto::AnnounceCourt {
+            court_id: 8,
+            label: "Feld 4".into(),
+            match_brief: None,
+        })
+        .is_none());
     }
 
     #[test]
