@@ -90,7 +90,10 @@ nicht ausgerufen haben will, schaltet die Bedienungs-Ansage aus.
   `CloudAnnounceCourt` (`commands.rs`) keine SR/AR-Listen führte. **Nachgezogen
   in v0.9.248:** Die Namen reisten im `MatchBrief` ohnehin bis zum Slave (der
   Host füllt sie, der Relay reicht sie durch) — sie fielen allein bei der
-  Umwandlung heraus. Beide Schalter wirken dort jetzt wie am Master.
+  Umwandlung heraus. Beide Schalter wirken dort jetzt genauso — allerdings
+  **je Installation**: Der Slave liest sie aus seiner eigenen Config, sie
+  werden nicht wie die Azure-Stimme (ADR 0003) vom Master geerbt. Ein am
+  Turnier-PC gesetzter Haken gilt also nicht automatisch in der fernen Halle.
 - Die Ansage kann nun Namen tragen, die BTP nie einem Spiel zugewiesen hat.
   Datenschutzlich unbedenklich: Es sind dieselben Namen, die die Anzeige am
   Feld ohnehin zeigt, und sie dienen demselben Zweck — die richtige Person ans

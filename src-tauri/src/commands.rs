@@ -1241,8 +1241,6 @@ fn brief_nationen(v: &[relay_proto::PlayerBrief]) -> Vec<String> {
 
 fn cloud_announce_court(c: relay_proto::AnnounceCourt) -> Option<CloudAnnounceCourt> {
     let m = c.match_brief?;
-    let names = brief_namen;
-    let nats = brief_nationen;
     // Anzeige-Label ist bei Mehr-Hallen "{Halle} · {Feld}" – fürs Ansagen nur
     // den Feldteil verwenden.
     let court = c.label.rsplit(" · ").next().unwrap_or(&c.label).to_string();
@@ -1251,10 +1249,10 @@ fn cloud_announce_court(c: relay_proto::AnnounceCourt) -> Option<CloudAnnounceCo
         court,
         discipline: m.discipline.clone(),
         class_label: m.class_label.clone(),
-        team1: names(&m.team_a),
-        team2: names(&m.team_b),
-        team1_nationalities: nats(&m.team_a),
-        team2_nationalities: nats(&m.team_b),
+        team1: brief_namen(&m.team_a),
+        team2: brief_namen(&m.team_b),
+        team1_nationalities: brief_nationen(&m.team_a),
+        team2_nationalities: brief_nationen(&m.team_b),
         match_id: m.match_id,
         scorekeeper: m.scorekeeper.clone(),
         scorekeeper_assigned: m.scorekeeper_assigned,
