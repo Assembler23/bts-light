@@ -326,6 +326,11 @@ für alle Felder gegen **590 Byte** für eines. Konsequenz: eigene Etappe, siehe
 **98 % Bestätigungen, 0,01 MB/s** — die Cloud liegt jetzt gleichauf mit dem Hallennetz. Die
 Marke kommt live an (`"ov-7773-…"`); ein bedingter Abruf antwortet mit 304 und 0 Bytes.
 
+**Gegenprobe nach S9 (20.08.2026, Relay deployt):** 76,4 Abrufe/s, **100 % Bestätigungen,
+0,00 MB/s** — und **null Anstöße** gegen 2,0/s vorher. Die zwei Anstöße je Sekunde entstanden
+ohne jede Inhaltsänderung; genau sie hätten den Zwischenspeicher der ganzen Halle verworfen.
+Die Entprellung aus dem Sicherheits-Review wirkt damit messbar, nicht nur theoretisch.
+
 **Schmaler Abruf (S7) — 20 feste Feld-Monitore:**
 
 | Weg | Abrufe/s | Bytes/s |
