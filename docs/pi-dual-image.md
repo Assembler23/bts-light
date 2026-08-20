@@ -146,6 +146,9 @@ Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + aktueller Launcher
 
 - **Image:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz>
 - **Prüfsumme:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz.sha256>
+- Beides ist auf der öffentlichen Release-Seite <https://badhub.de/download/bts-light/>
+  verlinkt (Block „Court-Monitore“, direkt unter dem Programm-Download) — für den
+  Hallenaufbau, wo dieses Repo nicht zur Hand ist.
 - ~1,0 GB komprimiert, **entpackt nur 3,85 GB** → schreibt + verifiziert schnell.
   **Wächst beim ersten Boot automatisch** auf die volle Kartengröße (PiShrink, via
   `/etc/rc.local`). Passt auf jede Karte ≥ 4 GB.

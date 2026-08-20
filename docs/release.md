@@ -39,7 +39,13 @@ des Court-Monitors hat ohnehin einen festen Namen
 `https://badhub.de/download/bts-light/` zeigt alle Versionen mit
 Download-Link, Datum und den Kompakt-Änderungen aus
 [changelog.md](changelog.md); die neueste Version steht prominent oben
-(plus der stabile Link). Das **Datum je Version** kommt aus dem
+(plus der stabile Link). Direkt darunter steht der Block
+**„Court-Monitore: Raspberry-Pi-Image für die SD-Karten“** mit Link auf
+`pi-image/bts-light-pi.img.xz`, Prüfsumme und Kurzanleitung — die Karten werden
+beim Hallenaufbau beschrieben, oft ohne Zugriff auf dieses Repo. Der Block ist
+im Generator fest verdrahtet (das Image kommt **nicht** aus dem
+Release-Workflow, sondern per rsync, siehe [pi-dual-image.md](pi-dual-image.md));
+`scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht. Das **Datum je Version** kommt aus dem
 Erstell-Datum des Git-Tags (`git for-each-ref … refs/tags` →
 `--dates`-Datei; der publish-Job checkt dafür mit `fetch-depth: 0` +
 `fetch-tags` aus). Die Seite wird bei **jedem Tag-Release
