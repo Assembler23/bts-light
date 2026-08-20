@@ -2380,7 +2380,8 @@ pub struct FinishedMatchRow {
 #[tauri::command]
 pub fn match_scoresheet_html(state: State<'_, AppState>, match_ids: Vec<i64>) -> Option<String> {
     let config = state.config.lock().ok()?.clone();
-    crate::tablet::scoresheet::html_fuer(&state.tablet, &config.display, &match_ids)
+    let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
+    crate::tablet::scoresheet::html_fuer(&state.tablet, logo.as_deref(), &match_ids)
 }
 
 /// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser

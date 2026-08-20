@@ -1,17 +1,19 @@
 # Schiedsrichterzettel drucken
 
 Spezifikation: [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md) ·
+[features/schiedsrichterzettel-autodruck.md](features/schiedsrichterzettel-autodruck.md) ·
 ADR [0037](adr/0037-zettel-ereignisse-eigener-strom.md) ·
 [0038](adr/0038-ereignisse-append-only.md) ·
-[0039](adr/0039-zettel-html-im-webview.md)
+[0039](adr/0039-zettel-html-im-webview.md) ·
+[0042](adr/0042-stiller-druck-ueber-elementliste.md) ·
+[0043](adr/0043-zettelblatt-nach-dbv-vorbild.md)
 
 Für jedes mit Tablet gezählte Spiel lässt sich ein ausgefüllter Spielzettel
 drucken: Punktverlauf, Aufschlagfolge, Karten, Verletzungen, Unterbrechungen,
 Überstimmungen und Zeiten.
 
-> **Internes Turnier-Archiv — kein amtlicher Beleg.** Der Vermerk steht auf jedem
-> Zettel. Kein Protestverfahren, keine Verbandsklärung; offizielle Turniere laufen
-> weiter über das Original-BTS ([umpire-mode.md](umpire-mode.md)).
+Offizielle Turniere laufen weiter über das Original-BTS
+([umpire-mode.md](umpire-mode.md)).
 
 ## Erfassen (am Zähltablett)
 
@@ -42,11 +44,11 @@ rote Karte ohne den Punkt, den sie erzeugt.
 Ein **Undo** („↩") nimmt nicht nur den Punkt zurück, sondern auch die Ereignisse,
 die danach erfasst wurden.
 
-> **Zurückgenommenes verschwindet nicht.** Es steht auf dem Zettel
-> **durchgestrichen** in der Protokollzeile und fehlt nur im Raster. Für einen
-> Archivbeleg ist das ehrlicher als spurloses Verschwinden — aber es heißt auch:
-> **eine versehentlich vergebene Karte bleibt sichtbar.** Wer das nicht möchte,
-> muss vor dem Bestätigen genau hinsehen.
+> **Zurückgenommenes verschwindet nicht.** Es steht auf der Anhangseite des
+> Zettels, ausdrücklich als „zurückgenommen" bezeichnet, und fehlt nur im Raster.
+> Das ist ehrlicher als spurloses Verschwinden — aber es heißt auch: **eine
+> versehentlich vergebene Karte bleibt sichtbar.** Wer das nicht möchte, muss vor
+> dem Bestätigen genau hinsehen.
 
 ### Gerätewechsel
 
@@ -69,8 +71,39 @@ Beide zeigen eine Vorschau; **Drucken** öffnet den Druckdialog. „Als PDF
 speichern" läuft über den Systemdialog des Druckers — deshalb braucht bts-light
 dafür weder eine PDF-Bibliothek noch eine zusätzliche Datei-Berechtigung.
 
-Das Blatt ist **A4 quer**. Je Satz ein Rasterblock; ab Ballwechsel 61 läuft er in
-einer zweiten Zeilengruppe weiter.
+## Das Blatt
+
+**A4 quer, nach dem Vorbild des DBV-Bogens** — der Bogen, den Schiedsrichter
+kennen (ADR [0043](adr/0043-zettelblatt-nach-dbv-vorbild.md)):
+
+- **Sechs Blöcke à 33 Spalten**, vier Zeilen je Block. Die erste Spalte trägt den
+  Startstand, die übrigen 32 die Ballwechsel. Ein Satz beginnt immer in einem
+  neuen Block und läuft, wenn er länger wird, im nächsten weiter. Reichen sechs
+  Blöcke nicht, folgt eine zweite Seite mit verkürztem Kopf.
+- **Schmale A/R-Spalte** vor dem Raster: „A" beim Aufschläger, „R" beim
+  Rückschläger zu Satzbeginn. Ohne aufgezeichnete Aufschlagfolge bleibt sie leer —
+  geraten wird nicht.
+- **Im Einzel** stehen die Spieler in Zeile 1 und 3, die anderen beiden bleiben
+  frei. Der Bogen hat immer vier Zeilen.
+- **Kopf:** links Spiel-Nr., Disziplin, Feld und Datum · Mitte die beiden
+  Mannschaftskästen mit den Marken „L" und „R" und dazwischen das Satzergebnis ·
+  rechts Schiedsrichter, Aufschlagrichter, Beginn, Ende, Dauer. Oben links steht
+  das **Turnierlogo** (sofern hinterlegt) und der Turniername — **kein
+  Verbandslogo**, das ist geschützt.
+- **Marker in der Zelle** in der gewohnten Konvention: **W** Warnung (gelb),
+  **F** Fault (rot), **R** Oberschiedsrichter gerufen, **D** Disqualifikation.
+- **Fuß:** Unterschriftszeilen „Schiedsrichter" und „Referee".
+- **Vorkommnisse** (Karten, Behandlungen, Rücknahmen) stehen auf einer eigenen
+  **Anhangseite** mit Uhrzeit, Satz, Stand und Art — der Bogen selbst hat dafür
+  keinen Platz. Ein Spiel ohne Vorkommnisse hat auch keine Anhangseite.
+
+Das Layout ist eine Elementliste in Millimetern
+(ADR [0042](adr/0042-stiller-druck-ueber-elementliste.md)); Breite und Höhe des
+Blatts sind Kompilierbedingungen, und Wächter-Tests prüfen zusätzlich am
+erzeugten Blatt, dass sich nichts überdeckt und nichts über den Rand läuft.
+
+**Musterblatt ansehen:** `cargo test --lib musterblatt -- --ignored --nocapture`
+schreibt `target/musterblatt.html`.
 
 ## Was es *nicht* gibt
 
@@ -84,8 +117,11 @@ einer zweiten Zeilengruppe weiter.
 
 ## Datenschutz
 
-Der Zettel trägt **Spielernamen** und, falls turnierweit zugeschaltet, den
-**Verein** — das ist sein Zweck. Kein Geburtsjahr, keine Lizenznummer.
+Der Zettel trägt **Spielernamen** und den **Verein**, sofern BTP ihn kennt — das
+ist sein Zweck. Der Verein steht dabei **unabhängig** vom turnierweiten Schalter
+„Vereine anzeigen" auf dem Blatt: Der Bogen hat eine vorgedruckte Vereinszeile,
+und der Verein steht ohnehin auf Aushang und Meldeliste (ADR 0043). Kein
+Geburtsjahr, keine Lizenznummer.
 
 Karten sind personenbezogene Sanktionsdaten und erscheinen **ausschließlich auf
 dem Zettel**: nie im Anzeige-Zustand der Turnierleitungs-Seite, nie im

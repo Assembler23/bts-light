@@ -629,11 +629,10 @@ async fn handle_frame(
         // Stores. Wie beim Punktverlauf ohne eigenen Task — der Join ist
         // reine Rechenarbeit, kein BTP-Zugriff.
         RelayFrame::ScoresheetRequest { req_id, match_ids } => {
-            let html = crate::tablet::scoresheet::html_fuer(
-                &ctx.tablet,
-                &ctx.display_config(),
-                &match_ids,
-            );
+            let logo =
+                crate::tablet::scoresheet::logo_data_uri(&ctx.app_config_arc().tournament_logo);
+            let html =
+                crate::tablet::scoresheet::html_fuer(&ctx.tablet, logo.as_deref(), &match_ids);
             let _ = tx.send(text(&HostFrame::ScoresheetData {
                 req_id,
                 found: html.is_some(),

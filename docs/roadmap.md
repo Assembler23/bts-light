@@ -384,6 +384,20 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Schiedsrichterzettel vorab und automatisch drucken — Spec abgestimmt
+  20.08.2026, Umsetzung offen.** Zwei Wege aufs Papier: ein **Leerzettel** für
+  Spiele der Warteliste (Kopf vorgedruckt, Raster von Hand zu führen; Knöpfe in
+  TL-Web und in der Desktop-Warteliste) und ein **stiller Autodruck** bei der
+  Feldvergabe an einen einstellbaren Drucker — nur für Spiele, denen ein
+  Schiedsrichter zugeordnet ist, höchstens ein Blatt je Spiel, auch über
+  App-Neustarts hinweg. Dazu der **Umbau des Blatts auf den DBV-Bogen**
+  (sechs Blöcke à 33 Spalten, A/R-Spalte, Satzergebniskasten; Turnierlogo statt
+  Verbandsmarke; Marker W/F/R/D; der Vermerk „kein amtlicher Beleg" entfällt).
+  Sechs Etappen E1–E6.
+  Spec: [features/schiedsrichterzettel-autodruck.md](features/schiedsrichterzettel-autodruck.md) ·
+  ADR [0042](adr/0042-stiller-druck-ueber-elementliste.md) ·
+  [0043](adr/0043-zettelblatt-nach-dbv-vorbild.md).
+
 - **Ausgefüllte Schiedsrichterzettel drucken — VOLLSTÄNDIG umgesetzt** (E1–E8,
   v0.9.244). **E1** Wire-Typen neben dem Punktverlauf, **E2** `SheetStore`
   (append-only, vereinigt statt zu ersetzen), **E3** Ingest über LAN, Cloud und

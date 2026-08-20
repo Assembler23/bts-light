@@ -3,6 +3,7 @@
 
 pub mod assets;
 pub mod assign;
+pub mod blatt;
 pub mod club_logos;
 pub mod exclusion;
 pub mod hall_assign;

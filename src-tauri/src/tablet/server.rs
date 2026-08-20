@@ -194,12 +194,6 @@ impl ScorePushQueue {
 }
 
 impl ServerCtx {
-    /// Anzeige-Schalter (Vereinsnamen usw.) — der Zettel-Renderer im
-    /// Cloud-Pfad braucht sie, das Feld selbst bleibt privat.
-    pub(crate) fn display_config(&self) -> crate::config::DisplayConfig {
-        self.config.display.clone()
-    }
-
     /// Stellt einen Live-Score zum Senden ein und kehrt **sofort** zurück.
     fn queue_score_push(&self, court_id: i64, match_id: i64, update: crate::badhub::diff::Update) {
         if !self.score_push.einstellen(court_id, match_id, update) {
@@ -2187,7 +2181,8 @@ async fn tl_scoresheet(
     // erreichbar — ohne den Header könnte der Platten-Cache eines
     // gemeinsam genutzten Tablets das Dokument über die Gültigkeit des
     // Zugangs hinaus vorhalten.
-    match crate::tablet::scoresheet::html_fuer(&ctx.tablet, &ctx.config.display, &match_ids) {
+    let logo = crate::tablet::scoresheet::logo_data_uri(&ctx.app_config_arc().tournament_logo);
+    match crate::tablet::scoresheet::html_fuer(&ctx.tablet, logo.as_deref(), &match_ids) {
         Some(html) => (
             StatusCode::OK,
             [

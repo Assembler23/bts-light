@@ -12,45 +12,13 @@
 
 use relay_proto::{EventKind, MatchEvent, MatchTimeline, Phase};
 
-/// Spalten je Zeilengruppe. Ballwechsel 61–120 kommen als zweite Gruppe
-/// darunter („Fortsetzung") — 2 × 60 deckt `MAX_RALLIES_PER_SET` (120) ab.
-pub const SPALTEN_JE_GRUPPE: usize = 60;
-
 // ── Blattmaße ────────────────────────────────────────────────────────────
 //
-// Diese fünf Werte sind Konstanten und **nicht** im CSS versteckt, weil sie
-// zusammen ein Budget bilden, das aufgehen muss: 60 Rasterzellen plus
-// Namensspalte plus Abstand dürfen die bedruckbare Breite nicht
-// überschreiten. Vorher standen sie nur im Stylesheet und ergaben in Summe
-// 297 mm bei 281 mm Platz — der Zettel lief um 16 mm über das Blatt hinaus,
-// was sich als „die Schrift ist zu groß" bemerkbar machte. `raster_passt_auf
-// _die_seite` hält das Budget jetzt fest.
-
-/// Bedruckbare Breite: A4 quer (297 mm) minus zweimal `@page`-Rand (8 mm).
-pub const SEITE_NUTZBAR_MM: f32 = 281.0;
-/// Breite einer Rasterzelle.
-pub const ZELLE_BREITE_MM: f32 = 4.0;
-/// Feste Breite der Namensspalte. Fest, damit ein langer Doppelname die
-/// Spalte nicht aufbläht und das Raster vom Blatt schiebt.
-pub const NAMENSSPALTE_MM: f32 = 34.0;
-/// Abstand zwischen Namensspalte und Raster (`.raster { gap }`).
-pub const RASTER_ABSTAND_MM: f32 = 3.0;
-/// Höhe einer Namens- wie Rasterzeile. Beide müssen gleich sein, sonst
-/// laufen Namen und Rasterzeilen auseinander.
-pub const ZEILE_HOEHE_MM: f32 = 7.0;
-
-/// Schriftgrad des Spielernamens in der Namensspalte.
-pub const NAME_PT: f32 = 8.0;
-/// Schriftgrad des Zusatzes (Verein/Nation) darunter.
-pub const ZUSATZ_PT: f32 = 6.5;
-/// Schriftgrad der Spaltennummern über dem Raster. Kleiner als der
-/// Zellinhalt, weil dort dreistellige Ballwechsel-Nummern stehen (61–120 in
-/// der Fortsetzungsgruppe) und die Zelle nur [`ZELLE_BREITE_MM`] breit ist.
-pub const KOPF_PT: f32 = 6.5;
-/// Zeilenabstand des Dokuments (`body { font: …/1.25 }`).
-pub const ZEILENABSTAND: f32 = 1.25;
-/// Ein typografischer Punkt in Millimetern.
-pub const PT_IN_MM: f32 = 0.352_777_8;
+// Sie liegen seit dem Umbau auf den DBV-Bogen (ADR 0043) in
+// [`super::blatt`] — zusammen mit den beiden Budget-Tests, die sie
+// zusammenhalten. Hier bleibt nur, was die **Projektion** braucht: wie
+// viele Ballwechsel in einen Block passen.
+pub use super::blatt::BALLWECHSEL_JE_BLOCK;
 
 /// Eine gefüllte Rasterzelle.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,11 +27,14 @@ pub struct Zelle {
     pub row: usize,
     /// Ballwechsel-Nummer im Satz, **1-basiert**.
     pub col: usize,
-    /// Zeilengruppe: 0 = Ballwechsel 1–60, 1 = 61–120.
+    /// Wievielter Block **innerhalb** des Satzes, 0-basiert. Ein Satz
+    /// beginnt in einem neuen Block und läuft nach
+    /// [`BALLWECHSEL_JE_BLOCK`] Ballwechseln im nächsten weiter.
     pub gruppe: usize,
     /// Neuer Punktstand der Seite, die gleich aufschlägt.
     pub wert: i64,
-    /// Druckbar in Schwarz-Weiß: `V` Verwarnung, `F` rote Karte,
+    /// Druckbar in Schwarz-Weiß, Zeichen des DBV-Bogens (ADR 0043):
+    /// `W` Warnung, `F` Fault (rote Karte), `R` Referee gerufen,
     /// `D` Disqualifikation.
     pub marker: Option<char>,
 }
@@ -91,6 +62,12 @@ pub struct SatzBlock {
     pub end_b: i64,
     pub zellen: Vec<Zelle>,
     pub rand_marker: Vec<RandMarker>,
+    /// Zeile des Aufschlägers zu Satzbeginn — trägt auf dem Blatt die
+    /// Marke „A" und den Startstand. `None`, wenn die Aufschlagfolge nicht
+    /// aufgezeichnet wurde.
+    pub aufschlag_row: Option<usize>,
+    /// Zeile des Rückschlägers, Marke „R".
+    pub rueckschlag_row: Option<usize>,
 }
 
 /// Eine Zeile der Protokollspalte unter dem Raster.
@@ -123,11 +100,17 @@ pub struct Grid {
     pub protokoll: Vec<ProtokollZeile>,
 }
 
-/// Zeichen für die Zelle. `None` = erscheint nur im Protokoll.
+/// Zeichen für die Zelle, in der Konvention des DBV-Bogens (ADR 0043).
+/// `None` = erscheint nur im Protokoll.
+///
+/// `W` Warnung (gelbe Karte) · `F` Fault (rote Karte) · `R` Referee
+/// gerufen · `D` Disqualifikation. Vorher standen dort die hausgemachten
+/// `V`/`F`/`D`; Schiedsrichter erkennen jetzt ihre gewohnten Zeichen.
 fn marker_fuer(art: EventKind) -> Option<char> {
     match art {
-        EventKind::CardYellow => Some('V'),
+        EventKind::CardYellow => Some('W'),
         EventKind::CardRed => Some('F'),
+        EventKind::RefereeCall => Some('R'),
         EventKind::CardBlack | EventKind::Disqualified => Some('D'),
         _ => None,
     }
@@ -247,13 +230,37 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
     for (i, satz) in timeline.sets.iter().enumerate() {
         let nr = i as i64 + 1;
         let mut punkte = [satz.start_a, satz.start_b];
-        let mut geo = wirksam
+        let start = wirksam
             .iter()
             .find(|e| e.kind == EventKind::ServeStart && e.set == nr)
-            .filter(|_| !aufschlagfolge_fehlt)
+            .filter(|_| !aufschlagfolge_fehlt);
+        // Marken „A" und „R" des Bogens: Wer eröffnet, wer nimmt an. Ohne
+        // aufgezeichnete Aufschlagfolge bleiben beide leer — geraten wird
+        // nicht.
+        let zeile_von = |team: i64, spieler: i64| {
+            (2 * team.clamp(0, 1)
+                + if volles_raster {
+                    spieler.clamp(0, 1)
+                } else {
+                    0
+                }) as usize
+        };
+        let (aufschlag_row, rueckschlag_row) = match start {
+            Some(e) => (
+                Some(zeile_von(e.team, e.player)),
+                Some(zeile_von(e.receiver_team, e.receiver_player)),
+            ),
+            None => (None, None),
+        };
+        let mut geo = start
             .map(|e| Aufschlag::neu(e, punkte, volles_raster))
             .unwrap_or_else(Aufschlag::degradiert);
 
+        // Die Zeile ist **immer** die Zeile des Blatts (0–3): `2 * team +
+        // player` im vollen Raster, `2 * team` bei fehlender
+        // Aufschlagfolge. So brauchen Raster, Namen und Marken keine
+        // zweite Umrechnung — im Einzel bleiben die Zeilen 1 und 3 leer,
+        // genau wie auf dem Papierbogen.
         let mut zellen = Vec::new();
         for (n, c) in satz.points.chars().enumerate() {
             let sieger: i64 = if c == 'A' { 0 } else { 1 };
@@ -261,13 +268,9 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
             let (team, spieler) = geo.nach_ballwechsel(sieger, punkte, volles_raster);
             let col = n + 1;
             zellen.push(Zelle {
-                row: if volles_raster {
-                    (2 * team + spieler) as usize
-                } else {
-                    team as usize
-                },
+                row: (2 * team + if volles_raster { spieler } else { 0 }) as usize,
                 col,
-                gruppe: (col - 1) / SPALTEN_JE_GRUPPE,
+                gruppe: (col - 1) / BALLWECHSEL_JE_BLOCK,
                 wert: punkte[team as usize],
                 marker: None,
             });
@@ -280,11 +283,12 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
             let Some(zeichen) = marker_fuer(e.kind) else {
                 continue;
             };
-            let row = if volles_raster {
-                (2 * e.team.clamp(0, 1) + e.player.clamp(0, 1)) as usize
-            } else {
-                e.team.clamp(0, 1) as usize
-            };
+            let row = (2 * e.team.clamp(0, 1)
+                + if volles_raster {
+                    e.player.clamp(0, 1)
+                } else {
+                    0
+                }) as usize;
             let treffer = (e.phase == Phase::Play)
                 .then(|| zellen.iter_mut().find(|z| z.col as i64 == e.after_n))
                 .flatten();
@@ -308,6 +312,8 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
             end_b: punkte[1],
             zellen,
             rand_marker,
+            aufschlag_row,
+            rueckschlag_row,
         });
     }
 
@@ -349,27 +355,26 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
 /// `SheetStore` (Ereignisse) + BTP-Snapshot (Namen) + `match_times`
 /// (Zeiten) + `court_officials` (Schiedsrichter).
 ///
-/// **Datenschutz:** Namen und optional Verein/Nation wandern in den
-/// Zettel — das ist sein Zweck. Die Lizenznummer (`BtpPlayer::member_id`)
-/// und jedes Geburtsjahr bleiben draußen; sie werden hier nicht einmal
-/// gelesen.
+/// **Datenschutz:** Namen und Verein wandern in den Zettel — das ist sein
+/// Zweck. Die Lizenznummer (`BtpPlayer::member_id`) und jedes Geburtsjahr
+/// bleiben draußen; sie werden hier nicht einmal gelesen.
 ///
 /// Matches außerhalb des aktuellen Snapshots und solche ohne jede
 /// Aufzeichnung liefern **keinen** Zettel — der Abruf endet dann ehrlich
 /// mit 404 statt mit einem leeren Blatt.
 pub fn dokumente(
     state: &super::state::TabletState,
-    display: &crate::config::DisplayConfig,
+    logo_uri: Option<&str>,
     match_ids: &[i64],
 ) -> Vec<SheetDoc> {
     let Some(snap) = state.snapshot_clone() else {
         return Vec::new();
     };
-    // Der Verein steht nur auf dem Zettel, wenn er turnierweit
-    // zugeschaltet ist — dieselbe Schranke wie auf dem Tablet-Spielzettel.
-    // Die Nation bleibt außen vor: Sie hängt an der Monitor-Anzeige, und
-    // ein zweiter Schalter für dieselbe Zeile brächte nur Verwirrung.
-    let zeige_verein = display.show_club_names;
+    // Der Verein steht **immer** auf dem Zettel, wenn BTP ihn kennt —
+    // bewusste Ausnahme vom Schalter `show_club_names` (ADR 0043): Der
+    // Bogen hat eine vorgedruckte Vereinszeile, und der Verein steht
+    // ohnehin auf Aushang und Meldeliste. Die Nation bleibt außen vor;
+    // sie hängt an der Monitor-Anzeige.
 
     match_ids
         .iter()
@@ -389,11 +394,7 @@ pub fn dokumente(
             let doppel = m.team1.len() > 1 || m.team2.len() > 1;
             let zeile = |p: &crate::btp::model::BtpPlayer| SpielerZeile {
                 name: p.name.clone(),
-                zusatz: if zeige_verein {
-                    p.club.clone().unwrap_or_default()
-                } else {
-                    String::new()
-                },
+                zusatz: p.club.clone().unwrap_or_default(),
             };
 
             let zeiten = state.match_times_store().entry(id);
@@ -469,6 +470,8 @@ pub fn dokumente(
                     crate::btp::model::MatchResult::Retired => "Aufgabe".into(),
                     crate::btp::model::MatchResult::Disqualified => "Disqualifikation".into(),
                 },
+                logo_vorhanden: logo_uri.is_some(),
+                logo_uri: logo_uri.unwrap_or_default().to_string(),
             })
         })
         .collect()
@@ -482,13 +485,13 @@ pub fn dokumente(
 /// je Kennung irgendetwas zusammengesucht wird.
 pub fn html_fuer(
     state: &super::state::TabletState,
-    display: &crate::config::DisplayConfig,
+    logo_uri: Option<&str>,
     match_ids: &[i64],
 ) -> Option<String> {
     if match_ids.is_empty() || match_ids.len() > relay_proto::MAX_SHEETS_PER_DOC {
         return None;
     }
-    let docs = dokumente(state, display, match_ids);
+    let docs = dokumente(state, logo_uri, match_ids);
     if docs.is_empty() {
         return None;
     }
@@ -562,8 +565,14 @@ mod tests {
         assert_eq!(b.zellen.len(), 5, "eine Zelle je Ballwechsel");
         // Werte: A1, A2, B1, B2, A3 — jeweils der Stand der Seite, die
         // anschließend aufschlägt.
+        //
+        // **Die Zeile ist die Zeile des Blatts** (ADR 0043): Der Bogen hat
+        // immer vier, im Einzel stehen die Spieler in Zeile 0 und 2 und
+        // die Zeilen 1 und 3 bleiben leer. Vorher zählte hier `team`
+        // (0/1) — das hätte auf dem Papier zwei Spieler untereinander
+        // gequetscht.
         let werte: Vec<(usize, i64)> = b.zellen.iter().map(|z| (z.row, z.wert)).collect();
-        assert_eq!(werte, vec![(0, 1), (0, 2), (1, 1), (1, 2), (0, 3)]);
+        assert_eq!(werte, vec![(0, 1), (0, 2), (2, 1), (2, 2), (0, 3)]);
         assert_eq!((b.end_a, b.end_b), (3, 2));
     }
 
@@ -598,12 +607,66 @@ mod tests {
         let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[], true);
         assert!(grid.aufschlagfolge_fehlt, "Hinweis muss gesetzt sein");
         assert_eq!(grid.zeilen, 2, "Degradation auf zwei Zeilen");
+        // Auch degradiert sind es die Blattzeilen 0 und 2 — je Mannschaft
+        // eine, mit einer Leerzeile darunter.
         let werte: Vec<(usize, i64)> = grid.blocks[0]
             .zellen
             .iter()
             .map(|z| (z.row, z.wert))
             .collect();
-        assert_eq!(werte, vec![(0, 1), (0, 2), (1, 1), (1, 2), (0, 3)]);
+        assert_eq!(werte, vec![(0, 1), (0, 2), (2, 1), (2, 2), (0, 3)]);
+        assert!(
+            grid.blocks[0].aufschlag_row.is_none(),
+            "ohne Aufschlagfolge wird keine Marke geraten"
+        );
+    }
+
+    /// Die Zeichen des Bogens statt der hausgemachten (ADR 0043):
+    /// W Warnung, F Fault, R Referee gerufen, D Disqualifikation.
+    #[test]
+    fn marker_folgen_der_dbv_konvention() {
+        assert_eq!(marker_fuer(EventKind::CardYellow), Some('W'));
+        assert_eq!(marker_fuer(EventKind::CardRed), Some('F'));
+        assert_eq!(marker_fuer(EventKind::RefereeCall), Some('R'));
+        assert_eq!(marker_fuer(EventKind::CardBlack), Some('D'));
+        assert_eq!(marker_fuer(EventKind::Disqualified), Some('D'));
+        // Was keine Zelle bekommt, steht nur im Protokoll.
+        assert_eq!(marker_fuer(EventKind::InjuryStart), None);
+        assert_eq!(marker_fuer(EventKind::ServeStart), None);
+    }
+
+    /// Der Bogen markiert den Satzbeginn mit „A" und „R" — die Zeilen
+    /// dafür kommen aus dem `serve_start`, nicht aus einer Vermutung.
+    #[test]
+    fn aufschlag_und_rueckschlag_marken_stehen_fest() {
+        // Doppel: A1 schlägt auf, B0 nimmt an.
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AAB")]),
+            &[aufschlag(1, 0, 1, 1, 0)],
+            true,
+        );
+        assert_eq!(grid.blocks[0].aufschlag_row, Some(zeile(0, 1)));
+        assert_eq!(grid.blocks[0].rueckschlag_row, Some(zeile(1, 0)));
+    }
+
+    /// Das Logo landet in einem `src`-Attribut. Nur bekannte Rasterformate
+    /// und sauberes Base64 kommen durch — `image/svg+xml` kann Skript
+    /// tragen und bleibt deshalb draußen.
+    #[test]
+    fn logo_nimmt_nur_saubere_bilder_an() {
+        let logo = |mime: &str, data: &str| crate::config::LogoConfig {
+            mime: mime.into(),
+            data: data.into(),
+            background_color: String::new(),
+        };
+        assert_eq!(
+            logo_data_uri(&logo("image/png", "aGVsbG8=")).as_deref(),
+            Some("data:image/png;base64,aGVsbG8=")
+        );
+        assert!(logo_data_uri(&logo("image/svg+xml", "aGVsbG8=")).is_none());
+        assert!(logo_data_uri(&logo("image/png\" onerror=x", "aGVsbG8=")).is_none());
+        assert!(logo_data_uri(&logo("image/png", "\"><script>")).is_none());
+        assert!(logo_data_uri(&logo("image/png", "")).is_none());
     }
 
     /// Eine rote Karte belegt **genau eine** Zelle: die des Ballwechsels,
@@ -657,16 +720,17 @@ mod tests {
         assert!(grid.blocks[0].zellen.iter().all(|z| z.marker.is_none()));
     }
 
-    /// Umbruch in die zweite Zeilengruppe ab Ballwechsel 61.
+    /// Ein Satz läuft nach 32 Ballwechseln im nächsten Block weiter — der
+    /// Bogen hat 33 Spalten, von denen die erste den Startstand trägt.
     #[test]
-    fn umbruch_ab_ballwechsel_61() {
+    fn umbruch_ab_ballwechsel_33() {
         let punkte: String = std::iter::repeat_n("AB", 35).collect(); // 70
         let grid = sheet_grid(&tl(vec![satz(0, 0, &punkte)]), &[], false);
         let z = &grid.blocks[0].zellen;
-        assert_eq!(z[59].col, 60);
-        assert_eq!(z[59].gruppe, 0);
-        assert_eq!(z[60].col, 61);
-        assert_eq!(z[60].gruppe, 1, "ab 61 die zweite Zeilengruppe");
+        assert_eq!(z[31].col, 32);
+        assert_eq!(z[31].gruppe, 0);
+        assert_eq!(z[32].col, 33);
+        assert_eq!(z[32].gruppe, 1, "ab 33 der zweite Block");
     }
 
     /// Ein `mid_game`-Satz beginnt beim eingetippten Zwischenstand.
@@ -762,6 +826,8 @@ mod tests {
             saetze: vec![(21, 19), (21, 15)],
             sieger: name_a.into(),
             ergebnisart: "regulär".into(),
+            logo_vorhanden: false,
+            logo_uri: String::new(),
         }
     }
 
@@ -776,39 +842,20 @@ mod tests {
         assert!(!html.contains("http://"), "externe URL");
         assert!(!html.contains("https://"), "externe URL");
         assert!(!html.contains("//cdn"), "externe Ressource");
-        assert!(html.contains("Internes Turnier-Archiv"), "Vermerk fehlt");
         assert!(html.contains("page-break-after"), "kein Seitenumbruch");
-    }
-
-    /// Das Blatt ist die harte Grenze: Raster, Namensspalte und Abstand
-    /// müssen zusammen in die bedruckbare Breite passen. Vorher ergaben
-    /// 60 × 4,2 mm plus 42 mm plus 3 mm zusammen 297 mm bei 281 mm Platz —
-    /// der Zettel lief über das Blatt hinaus und wirkte dadurch „zu groß".
-    #[test]
-    fn raster_passt_auf_die_seite() {
-        let breite =
-            SPALTEN_JE_GRUPPE as f32 * ZELLE_BREITE_MM + NAMENSSPALTE_MM + RASTER_ABSTAND_MM;
+        // Der Archiv-Vermerk ist mit dem DBV-Blatt zurückgenommen
+        // (ADR 0043) — er passt nicht auf einen Bogen, der während des
+        // Spiels geführt wird.
         assert!(
-            breite <= SEITE_NUTZBAR_MM,
-            "Zettel ist {breite} mm breit, das Blatt gibt nur {SEITE_NUTZBAR_MM} mm her"
-        );
-    }
-
-    /// Name und Zusatz stehen übereinander in einer Zeile fester Höhe.
-    /// Passen sie nicht hinein, überlaufen sie ihre Rasterzeile und die
-    /// Zuordnung Name ↔ Zeile stimmt optisch nicht mehr.
-    #[test]
-    fn namen_bleiben_in_ihrer_zeilenhoehe() {
-        let gebraucht = (NAME_PT + ZUSATZ_PT) * ZEILENABSTAND * PT_IN_MM;
-        assert!(
-            gebraucht <= ZEILE_HOEHE_MM,
-            "Name + Zusatz brauchen {gebraucht} mm, die Zeile ist nur {ZEILE_HOEHE_MM} mm hoch"
+            !html.contains("Internes Turnier-Archiv"),
+            "Archiv-Vermerk steht noch im Dokument"
         );
     }
 
     /// Ein langer Doppelname darf die Namensspalte nicht verbreitern —
-    /// sonst schiebt er das Raster vom Blatt. Deshalb feste Breite und
-    /// Kürzung statt Umbruch.
+    /// sonst schiebt er das Raster vom Blatt. Die Breite selbst prüft
+    /// `blatt::lange_namen_werden_gekuerzt`; hier geht es darum, dass der
+    /// HTML-Treiber die Kürzung auch tatsächlich anweist.
     #[test]
     fn lange_namen_sprengen_die_spalte_nicht() {
         let html = render_html(&[doc_mit(
@@ -816,16 +863,16 @@ mod tests {
             "Christoph Brandenburger / Bo Li",
         )]);
         assert!(
-            html.contains(&format!("flex: 0 0 {NAMENSSPALTE_MM}mm")),
-            "Namensspalte ist nicht auf feste Breite gelegt"
-        );
-        assert!(
             html.contains("text-overflow: ellipsis"),
             "kein Kürzen langer Namen"
         );
         assert!(
             html.contains("white-space: nowrap"),
             "Namen dürfen nicht umbrechen"
+        );
+        assert!(
+            html.contains("class=\"t k"),
+            "Namenskasten nicht als kürzbar"
         );
     }
 
@@ -856,20 +903,21 @@ mod tests {
         }
     }
 
-    /// Stapeldruck: drei Kennungen ergeben drei Abschnitte; über dem
-    /// Deckel wird nicht gedruckt, sondern abgewiesen.
+    /// Stapeldruck: drei Kennungen ergeben drei Seiten; über dem Deckel
+    /// wird nicht gedruckt, sondern abgewiesen. Jeder dieser Zettel hat
+    /// genau eine Seite — Vorkommnisse gibt es hier keine.
     #[test]
     fn stapel_erzeugt_abschnitte_und_haelt_den_deckel() {
         let drei = vec![doc_mit("A", "B"), doc_mit("C", "D"), doc_mit("E", "F")];
         let html = render_html(&drei);
-        assert_eq!(html.matches("<section class=\"zettel\"").count(), 3);
+        assert_eq!(html.matches("<section class=\"blatt").count(), 3);
 
         let zu_viele: Vec<SheetDoc> = (0..relay_proto::MAX_SHEETS_PER_DOC + 5)
             .map(|_| doc_mit("A", "B"))
             .collect();
         let html = render_html(&zu_viele);
         assert_eq!(
-            html.matches("<section class=\"zettel\"").count(),
+            html.matches("<section class=\"blatt").count(),
             relay_proto::MAX_SHEETS_PER_DOC,
             "Deckel greift auch im Renderer"
         );
@@ -903,9 +951,11 @@ mod tests {
         assert_eq!(datum(u64::MAX), "");
     }
 
-    /// Zurückgenommenes ist im Protokoll sichtbar durchgestrichen.
+    /// Zurückgenommenes verschwindet nicht spurlos (ADR 0038): Es steht im
+    /// Protokoll auf der Anhangseite, ausdrücklich als zurückgenommen
+    /// bezeichnet — und **nicht** im Raster.
     #[test]
-    fn zurueckgenommenes_ist_im_dokument_durchgestrichen() {
+    fn zurueckgenommenes_ist_im_dokument_vermerkt() {
         let karte = ev("cc", 1, 3, EventKind::CardRed, 0, 0);
         let mut ruecknahme = ev("dd", 1, 3, EventKind::Retract, 0, 0);
         ruecknahme.retracts = "cc".to_string();
@@ -913,8 +963,88 @@ mod tests {
         doc.grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[karte, ruecknahme], false);
 
         let html = render_html(&[doc]);
-        assert!(html.contains("zurueckgenommen"), "keine Streichung");
+        assert!(html.contains("zurückgenommen"), "keine Streichung");
         assert!(html.contains("Fehler (rot)"), "Art fehlt im Protokoll");
+        assert!(html.contains("Vorkommnisse"), "keine Anhangseite");
+    }
+
+    /// Werkzeug statt Prüfung: schreibt ein Musterblatt nach
+    /// `target/musterblatt.html`, damit sich das Seitenbild im Browser
+    /// begutachten und probedrucken lässt.
+    ///
+    /// `cargo test --lib musterblatt -- --ignored --nocapture`
+    #[test]
+    #[ignore = "erzeugt ein Musterblatt zum Ansehen, prüft nichts"]
+    fn musterblatt_schreiben() {
+        // Beispieldaten in der Anmutung des Blankobogens — erfundene
+        // Namen, keine echten Personen.
+        let mut karte = ev("k1", 1, 12, EventKind::CardYellow, 1, 1);
+        karte.ts_ms = 1_755_600_000_000;
+        let mut ruf = ev("k2", 2, 5, EventKind::RefereeCall, 0, 0);
+        ruf.ts_ms = 1_755_601_000_000;
+
+        let punkte_1: String = std::iter::repeat_n("AABB", 9).collect(); // 36
+        let punkte_2: String = std::iter::repeat_n("ABBA", 8).collect(); // 32
+        let doc = SheetDoc {
+            turnier: "Jux-Turnier 2026".into(),
+            disziplin: "Herrendoppel A".into(),
+            runde: "Viertelfinale".into(),
+            spielnummer: Some(111),
+            feld: "1".into(),
+            halle: "Halle Süd".into(),
+            datum: "20.08.2026".into(),
+            beginn: "13:00".into(),
+            ende: "13:44".into(),
+            dauer_min: Some(44),
+            schiedsrichter: vec!["Tom Schiedsrichter".into()],
+            service_richter: vec!["Jerry Aufschlagrichter".into()],
+            team_a: vec![
+                SpielerZeile {
+                    name: "Becker, Heinz".into(),
+                    zusatz: "SC Musterstadt".into(),
+                },
+                SpielerZeile {
+                    name: "Meier, Kurt".into(),
+                    zusatz: "SC Musterstadt".into(),
+                },
+            ],
+            team_b: vec![
+                SpielerZeile {
+                    name: "Krause, Dieter".into(),
+                    zusatz: "TV Beispielheim".into(),
+                },
+                SpielerZeile {
+                    name: "Müller, Herbert".into(),
+                    zusatz: "TV Beispielheim".into(),
+                },
+            ],
+            grid: sheet_grid(
+                &tl(vec![
+                    satz(0, 0, &punkte_1),
+                    satz(0, 0, &punkte_2),
+                    satz(0, 0, "AABBA"),
+                ]),
+                &[
+                    aufschlag(1, 0, 0, 1, 0),
+                    aufschlag(2, 1, 0, 0, 1),
+                    aufschlag(3, 0, 1, 1, 1),
+                    karte,
+                    ruf,
+                ],
+                true,
+            ),
+            saetze: vec![(21, 15), (18, 21), (21, 19)],
+            sieger: "Becker, Heinz / Meier, Kurt".into(),
+            ergebnisart: "regulär".into(),
+            logo_vorhanden: false,
+            logo_uri: String::new(),
+        };
+        let pfad = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join("musterblatt.html");
+        std::fs::write(&pfad, render_html(&[doc])).expect("Musterblatt schreiben");
+        println!("Musterblatt: {}", pfad.display());
     }
 
     /// Ein Match kann Ereignisse ohne jeden Ballwechsel haben (Karte vor
@@ -963,10 +1093,15 @@ pub struct SheetDoc {
     pub saetze: Vec<(i64, i64)>,
     pub sieger: String,
     pub ergebnisart: String,
+    /// Ist ein Turnierlogo hinterlegt? Der Kopf hält den Platz dafür frei;
+    /// ohne Logo bleibt er leer, die Kopfhöhe ändert sich nicht (ADR 0043).
+    pub logo_vorhanden: bool,
+    /// Das Logo als `data:`-URI — nur der HTML-Treiber nutzt es.
+    pub logo_uri: String,
 }
 
 /// Art im Klartext für die Protokollzeile.
-fn art_klartext(art: EventKind) -> &'static str {
+pub(crate) fn art_klartext(art: EventKind) -> &'static str {
     match art {
         EventKind::ServeStart => "Aufschlagfolge",
         EventKind::CardYellow => "Verwarnung (gelb)",
@@ -983,7 +1118,7 @@ fn art_klartext(art: EventKind) -> &'static str {
     }
 }
 
-fn phase_klartext(phase: Phase) -> &'static str {
+pub(crate) fn phase_klartext(phase: Phase) -> &'static str {
     match phase {
         Phase::Play => "",
         Phase::BreakEleven => " (Intervall)",
@@ -999,7 +1134,7 @@ fn phase_klartext(phase: Phase) -> &'static str {
 /// Ein unplausibler Wert wird zu „—" statt zu Unsinn: `ts_ms` ist auf dem
 /// Draht bewusst ungedeckelt (ein zu enger Deckel verwürfe ein legitimes
 /// spätes Ereignis mitten im Turnier), also fängt der Renderer ihn ab.
-fn uhrzeit(ts_ms: u64) -> String {
+pub(crate) fn uhrzeit(ts_ms: u64) -> String {
     zeitstempel(ts_ms, "%H:%M")
 }
 
@@ -1030,259 +1165,159 @@ fn e(s: &str) -> String {
     relay_proto::html_escape(s)
 }
 
-/// Ein vollständiges, selbstgenügsames HTML-Dokument (ADR 0039).
+/// Das hinterlegte Turnierlogo als `data:`-URI — oder `None`.
 ///
-/// **Genau ein Renderer, zwei Aufrufer, null Kopie** — das bewusste
-/// Gegenteil von `timelineSetSvg`, das dreifach existiert. Inline-CSS mit
-/// `@page`, **kein `<script>`**, keine externe URL: So bleibt das
-/// Dokument auch außerhalb des WebViews harmlos und unverändert
-/// darstellbar.
+/// **Riegel gegen Fremdeingaben:** Der MIME-Typ kommt aus der
+/// Konfiguration (Upload in den Einstellungen) und landet in einem
+/// `src`-Attribut. Erlaubt sind deshalb nur vier bekannte Rasterformate;
+/// alles andere — insbesondere `image/svg+xml`, das Skript tragen kann —
+/// wird abgewiesen, ebenso alles, was nicht dem Base64-Alphabet folgt.
+pub fn logo_data_uri(logo: &crate::config::LogoConfig) -> Option<String> {
+    const ERLAUBT: [&str; 4] = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+    let mime = logo.mime.trim();
+    if !ERLAUBT.contains(&mime) || logo.data.is_empty() {
+        return None;
+    }
+    let sauber = logo
+        .data
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=');
+    if !sauber {
+        return None;
+    }
+    Some(format!("data:{};base64,{}", mime, logo.data))
+}
+
+/// Ein vollständiges, selbstgenügsames HTML-Dokument (ADR 0039/0042).
+///
+/// **Genau ein Layout, zwei Treiber, null Kopie:** Gerechnet wird das
+/// Blatt in [`super::blatt`]; hier wird die Elementliste nur noch in
+/// absolut positioniertes HTML übersetzt. Der Druck-Treiber (GDI) fährt
+/// dieselbe Liste ab — deshalb kann das Seitenbild zwischen Bildschirm und
+/// Papier nicht auseinanderlaufen.
+///
+/// Inline-CSS mit `@page`, **kein `<script>`**, keine externe URL: So
+/// bleibt das Dokument auch außerhalb des WebViews harmlos.
 ///
 /// Jeder Fremdtext (Turnier-, Spieler-, Vereinsname aus BTP) läuft durch
-/// [`relay_proto::html_escape`]. Das ist die erste Stelle im Projekt, an
-/// der aus BTP-Fremdeingaben HTML entsteht.
+/// [`relay_proto::html_escape`].
 pub fn render_html(docs: &[SheetDoc]) -> String {
+    use super::blatt::{Ausrichtung, Element, Seite, SEITE_BREITE_MM, SEITE_HOEHE_MM};
+
     let anzahl = deckel(docs);
-    let mut out = String::with_capacity(8 * 1024);
+    let mut out = String::with_capacity(32 * 1024);
     out.push_str(
         r#"<!doctype html>
 <html lang="de"><head><meta charset="utf-8">
 <title>Schiedsrichterzettel</title>
 <style>
-@page { size: A4 landscape; margin: 8mm; }
+@page { size: A4 landscape; margin: 0; }
 * { box-sizing: border-box; }
-body { font: 10pt/1.25 "Helvetica Neue", Arial, sans-serif; color: #000; background: #fff; margin: 0; }
-section.zettel { page-break-after: always; }
-section.zettel:last-child { page-break-after: auto; }
-.kopf { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1.5pt solid #000; padding-bottom: 2mm; margin-bottom: 3mm; }
-.kopf h1 { font-size: 13pt; margin: 0 0 1mm; }
-.kopf dl { display: grid; grid-template-columns: auto auto; gap: 0 3mm; margin: 0; font-size: 9pt; }
-.kopf dt { font-weight: 600; }
-.kopf dd { margin: 0; }
-.vermerk { border: 1pt solid #000; padding: 1mm 2mm; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
-table.gitter { border-collapse: collapse; table-layout: fixed; }
-td.marker { font-weight: 700; }
-.satzkopf { font-weight: 600; font-size: 9pt; margin: 2mm 0 1mm; }
-.randmarker { font-size: 8pt; margin-top: 1mm; }
-table.protokoll { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 2mm; }
-table.protokoll th, table.protokoll td { border-bottom: .4pt solid #999; padding: .8mm 1mm; text-align: left; }
-tr.zurueckgenommen td { text-decoration: line-through; color: #555; }
-.fuss { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4mm; border-top: 1pt solid #000; padding-top: 2mm; font-size: 9pt; }
-.unterschriften { display: flex; gap: 8mm; }
-.unterschrift { width: 55mm; border-top: .5pt solid #000; padding-top: 1mm; font-size: 8pt; }
-.hinweis { font-size: 8pt; font-style: italic; margin: 1mm 0; }
-.erzeugt { font-size: 7.5pt; color: #444; }
+html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+body { font-family: "Helvetica Neue", Arial, sans-serif; }
+section.blatt { position: relative; overflow: hidden; page-break-after: always; break-after: page; }
+section.blatt.letzte { page-break-after: auto; break-after: auto; }
+.li { position: absolute; background: #000; }
+.fl { position: absolute; }
+.ra { position: absolute; border-style: solid; border-color: #000; }
+.t { position: absolute; display: flex; align-items: center; overflow: hidden; line-height: 1.05; }
+.t > span { display: block; width: 100%; overflow: hidden; white-space: nowrap; }
+.t.k > span { text-overflow: ellipsis; }
+.t.mitte > span { text-align: center; }
+.t.rechts > span { text-align: right; }
+.t.fett { font-weight: 700; }
+img.logo { position: absolute; object-fit: contain; }
+</style></head><body>
 "#,
     );
 
-    // Maßabhängige Regeln aus den Blattmaß-Konstanten oben — sie bilden
-    // zusammen das Breitenbudget, das `raster_passt_auf_die_seite` prüft.
-    //
-    // Das `padding-top` der Namensspalte ist kein Ziermaß: Das Raster beginnt
-    // mit einer Kopfzeile (den Spaltennummern), die Namensspalte nicht. Ohne
-    // den Versatz stünde Spieler 1 neben der Nummernzeile und jede Namenszeile
-    // eine Zeile zu hoch. Bei zwei Zeilengruppen (Ballwechsel 61–120, zweite
-    // Tabelle darunter) fluchtet die Namensspalte weiterhin nur mit der
-    // ersten — es gibt sie ja nur einmal; die Fortsetzung liest sich über die
-    // Zeilenreihenfolge, die in beiden Gruppen dieselbe ist.
-    // Die Namensspalte ist bewusst **fest** (`flex: 0 0`) statt `min-width`:
-    // Ein langer Doppelname darf sich nicht auf Kosten des Rasters breit
-    // machen. Was dann nicht hineinpasst, wird gekürzt — sichtbar durch
-    // Auslassungspunkte statt still über den Blattrand geschoben.
-    out.push_str(&format!(
-        r#".raster {{ display: flex; gap: {RASTER_ABSTAND_MM}mm; margin-bottom: 3mm; page-break-inside: avoid; }}
-.teamspalte {{ flex: 0 0 {NAMENSSPALTE_MM}mm; max-width: {NAMENSSPALTE_MM}mm; overflow: hidden; padding-top: {ZEILE_HOEHE_MM}mm; }}
-.teamspalte .zeile {{ height: {ZEILE_HOEHE_MM}mm; display: flex; flex-direction: column; justify-content: center; border-bottom: .5pt solid #999; overflow: hidden; }}
-.teamspalte .name {{ font-weight: 600; font-size: {NAME_PT}pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.teamspalte .zusatz {{ font-size: {ZUSATZ_PT}pt; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-table.gitter td, table.gitter th {{ border: .4pt solid #666; width: {ZELLE_BREITE_MM}mm; height: {ZEILE_HOEHE_MM}mm; text-align: center; font-size: 7.5pt; padding: 0; }}
-table.gitter th {{ background: #eee; font-weight: 600; font-size: {KOPF_PT}pt; }}
-</style></head><body>
-"#
-    ));
-
+    // Alle Seiten aller Zettel hintereinander — ein Druckauftrag.
+    let mut seiten: Vec<(&SheetDoc, Seite)> = Vec::new();
     for doc in docs.iter().take(anzahl) {
-        out.push_str("<section class=\"zettel\">\n");
-
-        // ── Kopf ──
-        out.push_str("<header class=\"kopf\"><div>");
-        out.push_str(&format!("<h1>{}</h1>", e(&doc.turnier)));
-        out.push_str("<dl>");
-        let mut kopfzeile = |k: &str, v: &str| {
-            if !v.is_empty() {
-                out.push_str(&format!("<dt>{}</dt><dd>{}</dd>", e(k), e(v)));
-            }
-        };
-        kopfzeile("Disziplin", &doc.disziplin);
-        kopfzeile("Runde", &doc.runde);
-        kopfzeile("Feld", &doc.feld);
-        kopfzeile("Halle", &doc.halle);
-        kopfzeile("Datum", &doc.datum);
-        kopfzeile("Beginn", &doc.beginn);
-        kopfzeile("Ende", &doc.ende);
-        kopfzeile("Schiedsrichter", &doc.schiedsrichter.join(", "));
-        kopfzeile("Service-Richter", &doc.service_richter.join(", "));
-        if let Some(nr) = doc.spielnummer {
-            out.push_str(&format!("<dt>Spiel-Nr.</dt><dd>{nr}</dd>"));
+        for seite in super::blatt::blatt(doc) {
+            seiten.push((doc, seite));
         }
-        if let Some(min) = doc.dauer_min {
-            out.push_str(&format!("<dt>Dauer</dt><dd>{min} min</dd>"));
-        }
-        out.push_str("</dl></div>");
-        out.push_str(
-            "<div class=\"vermerk\">Internes Turnier-Archiv — kein amtlicher Beleg</div></header>\n",
-        );
+    }
+    let letzte = seiten.len().saturating_sub(1);
 
-        if doc.grid.aufschlagfolge_fehlt {
-            out.push_str("<p class=\"hinweis\">Aufschlagfolge nicht aufgezeichnet — das Raster zeigt je Mannschaft eine Zeile.</p>\n");
-        }
-
-        // ── Raster je Satz ──
-        for block in &doc.grid.blocks {
-            out.push_str(&format!(
-                "<div class=\"satzkopf\">Satz {} — Endstand {}:{}</div>\n",
-                block.satz, block.end_a, block.end_b
-            ));
-            out.push_str("<div class=\"raster\"><div class=\"teamspalte\">");
-            let zeilen: Vec<SpielerZeile> = if doc.grid.zeilen == 4 {
-                doc.team_a
-                    .iter()
-                    .chain(doc.team_b.iter())
-                    .cloned()
-                    .collect()
-            } else {
-                // Zwei Zeilen (Einzel oder Degradation): je Mannschaft eine
-                // Zeile. Der Zusatz (Verein/Nation) darf dabei NICHT
-                // wegfallen — im Einzel wäre er sonst nie zu sehen.
-                [&doc.team_a, &doc.team_b]
-                    .into_iter()
-                    .map(|team| SpielerZeile {
-                        name: team
-                            .iter()
-                            .map(|s| s.name.clone())
-                            .collect::<Vec<_>>()
-                            .join(" / "),
-                        zusatz: team
-                            .iter()
-                            .map(|s| s.zusatz.clone())
-                            .filter(|z| !z.is_empty())
-                            .collect::<Vec<_>>()
-                            .join(" / "),
-                    })
-                    .collect()
-            };
-            for z in &zeilen {
-                out.push_str(&format!(
-                    "<div class=\"zeile\"><span class=\"name\">{}</span>",
-                    e(&z.name)
-                ));
-                if !z.zusatz.is_empty() {
-                    out.push_str(&format!("<span class=\"zusatz\">{}</span>", e(&z.zusatz)));
+    for (i, (doc, seite)) in seiten.iter().enumerate() {
+        out.push_str(&format!(
+            "<section class=\"blatt{}\" style=\"width:{SEITE_BREITE_MM}mm;height:{SEITE_HOEHE_MM}mm\">",
+            if i == letzte { " letzte" } else { "" }
+        ));
+        for el in &seite.elemente {
+            match el {
+                Element::Linie {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    staerke_mm,
+                } => {
+                    let breite = (x2 - x1).abs().max(*staerke_mm);
+                    let hoehe = (y2 - y1).abs().max(*staerke_mm);
+                    out.push_str(&format!(
+                        "<div class=\"li\" style=\"left:{:.2}mm;top:{:.2}mm;width:{breite:.2}mm;height:{hoehe:.2}mm\"></div>",
+                        x1.min(*x2),
+                        y1.min(*y2)
+                    ));
                 }
-                out.push_str("</div>");
-            }
-            out.push_str("</div><div>");
-
-            // Zeilengruppen: 1–60, dann 61–120 („Fortsetzung").
-            let gruppen = block
-                .zellen
-                .iter()
-                .map(|z| z.gruppe)
-                .max()
-                .map(|g| g + 1)
-                .unwrap_or(1);
-            for gruppe in 0..gruppen {
-                out.push_str("<table class=\"gitter\"><tr>");
-                for i in 0..SPALTEN_JE_GRUPPE {
-                    out.push_str(&format!("<th>{}</th>", gruppe * SPALTEN_JE_GRUPPE + i + 1));
-                }
-                out.push_str("</tr>");
-                for row in 0..doc.grid.zeilen {
-                    out.push_str("<tr>");
-                    for i in 0..SPALTEN_JE_GRUPPE {
-                        let col = gruppe * SPALTEN_JE_GRUPPE + i + 1;
-                        match block
-                            .zellen
-                            .iter()
-                            .find(|z| z.row == row && z.col == col && z.gruppe == gruppe)
-                        {
-                            Some(z) => match z.marker {
-                                Some(m) => out.push_str(&format!(
-                                    "<td class=\"marker\">{}<sup>{}</sup></td>",
-                                    z.wert, m
-                                )),
-                                None => out.push_str(&format!("<td>{}</td>", z.wert)),
-                            },
-                            None => out.push_str("<td></td>"),
-                        }
+                Element::Flaeche {
+                    x,
+                    y,
+                    breite,
+                    hoehe,
+                    grau,
+                } => out.push_str(&format!(
+                    "<div class=\"fl\" style=\"left:{x:.2}mm;top:{y:.2}mm;width:{breite:.2}mm;height:{hoehe:.2}mm;background:rgb({grau},{grau},{grau})\"></div>"
+                )),
+                Element::Rahmen {
+                    x,
+                    y,
+                    breite,
+                    hoehe,
+                    staerke_mm,
+                } => out.push_str(&format!(
+                    "<div class=\"ra\" style=\"left:{x:.2}mm;top:{y:.2}mm;width:{breite:.2}mm;height:{hoehe:.2}mm;border-width:{staerke_mm:.2}mm\"></div>"
+                )),
+                Element::Text(t) => {
+                    let mut klassen = String::from("t");
+                    if t.kuerzen {
+                        klassen.push_str(" k");
                     }
-                    out.push_str("</tr>");
+                    match t.ausrichtung {
+                        Ausrichtung::Mitte => klassen.push_str(" mitte"),
+                        Ausrichtung::Rechts => klassen.push_str(" rechts"),
+                        Ausrichtung::Links => {}
+                    }
+                    if t.fett {
+                        klassen.push_str(" fett");
+                    }
+                    out.push_str(&format!(
+                        "<div class=\"{klassen}\" style=\"left:{:.2}mm;top:{:.2}mm;width:{:.2}mm;height:{:.2}mm;font-size:{:.2}pt\"><span>{}</span></div>",
+                        t.x,
+                        t.y,
+                        t.breite,
+                        t.hoehe,
+                        t.groesse_pt,
+                        e(&t.text)
+                    ));
                 }
-                out.push_str("</table>");
+                Element::Logo {
+                    x,
+                    y,
+                    breite,
+                    hoehe,
+                } => {
+                    if !doc.logo_uri.is_empty() {
+                        out.push_str(&format!(
+                            "<img class=\"logo\" alt=\"\" src=\"{}\" style=\"left:{x:.2}mm;top:{y:.2}mm;width:{breite:.2}mm;height:{hoehe:.2}mm\">",
+                            e(&doc.logo_uri)
+                        ));
+                    }
+                }
             }
-            out.push_str("</div></div>");
-
-            if !block.rand_marker.is_empty() {
-                out.push_str("<div class=\"randmarker\">Ohne Ballwechsel: ");
-                let teile: Vec<String> = block
-                    .rand_marker
-                    .iter()
-                    .map(|m| format!("{} nach Ballwechsel {}", m.marker, m.nach_ballwechsel))
-                    .collect();
-                out.push_str(&e(&teile.join(" · ")));
-                out.push_str("</div>");
-            }
         }
-
-        // ── Protokoll ──
-        if !doc.grid.protokoll.is_empty() {
-            out.push_str("<table class=\"protokoll\"><tr><th>Nr.</th><th>Uhrzeit</th><th>Satz</th><th>Stand</th><th>Art</th><th>Spieler</th></tr>");
-            for z in &doc.grid.protokoll {
-                let klasse = if z.zurueckgenommen {
-                    " class=\"zurueckgenommen\""
-                } else {
-                    ""
-                };
-                let mannschaft = if z.team == 0 { "A" } else { "B" };
-                let spieler = match doc.grid.zeilen {
-                    4 => format!("{mannschaft}{}", z.player + 1),
-                    _ => mannschaft.to_string(),
-                };
-                out.push_str(&format!(
-                    "<tr{klasse}><td>{}</td><td>{}</td><td>{}</td><td>{}:{}</td><td>{}{}</td><td>{}</td></tr>",
-                    z.nr,
-                    e(&uhrzeit(z.ts_ms)),
-                    z.satz,
-                    z.score_a,
-                    z.score_b,
-                    e(art_klartext(z.art)),
-                    e(phase_klartext(z.phase)),
-                    e(&spieler),
-                ));
-            }
-            out.push_str("</table>");
-        }
-
-        // ── Fuß ──
-        out.push_str("<footer class=\"fuss\"><div>");
-        if !doc.saetze.is_empty() {
-            let staende: Vec<String> = doc.saetze.iter().map(|(a, b)| format!("{a}:{b}")).collect();
-            out.push_str(&format!("<div>Endstand: {}</div>", e(&staende.join(" · "))));
-        }
-        if !doc.sieger.is_empty() {
-            out.push_str(&format!("<div>Sieger: {}</div>", e(&doc.sieger)));
-        }
-        if !doc.ergebnisart.is_empty() {
-            out.push_str(&format!("<div>Ergebnisart: {}</div>", e(&doc.ergebnisart)));
-        }
-        out.push_str("</div><div class=\"unterschriften\">");
-        out.push_str(
-            "<div class=\"unterschrift\">Schiedsrichter (ohne rechtliche Bedeutung)</div>",
-        );
-        out.push_str(
-            "<div class=\"unterschrift\">Turnierleitung (ohne rechtliche Bedeutung)</div>",
-        );
-        out.push_str("</div></footer>\n");
         out.push_str("</section>\n");
     }
 

@@ -6,6 +6,13 @@
 > ADR: [0037](../adr/0037-zettel-ereignisse-eigener-strom.md) ·
 > [0038](../adr/0038-ereignisse-append-only.md) ·
 > [0039](../adr/0039-zettel-html-im-webview.md)
+>
+> **Nachfolge-Spec:** [schiedsrichterzettel-autodruck.md](schiedsrichterzettel-autodruck.md)
+> (abgestimmt 20.08.2026) nimmt zwei Festlegungen dieses Dokuments ausdrücklich zurück — das
+> Nicht-Ziel „kein Zettel für Spiele ohne Tablet" und den Vermerk „Internes Turnier-Archiv —
+> kein amtlicher Beleg" — und ersetzt das Raster durch den DBV-Bogen
+> ([ADR 0043](../adr/0043-zettelblatt-nach-dbv-vorbild.md)). Beim Lesen dieses Dokuments beide
+> Punkte mitdenken; wirksam werden sie mit der Umsetzung dort.
 
 ## Kontext / Problem
 
