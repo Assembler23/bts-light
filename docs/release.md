@@ -39,7 +39,13 @@ des Court-Monitors hat ohnehin einen festen Namen
 `https://badhub.de/download/bts-light/` zeigt alle Versionen mit
 Download-Link, Datum und den Kompakt-Änderungen aus
 [changelog.md](changelog.md); die neueste Version steht prominent oben
-(plus der stabile Link). Das **Datum je Version** kommt aus dem
+(plus der stabile Link). Direkt darunter steht der Block
+**„Court-Monitore: Raspberry-Pi-Image für die SD-Karten“** mit Link auf
+`pi-image/bts-light-pi.img.xz`, Prüfsumme und Kurzanleitung — die Karten werden
+beim Hallenaufbau beschrieben, oft ohne Zugriff auf dieses Repo. Der Block ist
+im Generator fest verdrahtet (das Image kommt **nicht** aus dem
+Release-Workflow, sondern per rsync, siehe [pi-dual-image.md](pi-dual-image.md));
+`scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht. Das **Datum je Version** kommt aus dem
 Erstell-Datum des Git-Tags (`git for-each-ref … refs/tags` →
 `--dates`-Datei; der publish-Job checkt dafür mit `fetch-depth: 0` +
 `fetch-tags` aus). Die Seite wird bei **jedem Tag-Release
@@ -101,6 +107,28 @@ node scripts/build-release-page.mjs --changelog docs/changelog.md \
   --out /tmp/index.html --notes-out /tmp/notes.txt \
   --notes-since 0.9.214 --notes-version 0.9.223
 ```
+
+## Nur die Seite neu veröffentlichen (ohne Release)
+
+Eine reine Änderung an der Seite — ein neuer Link, ein Textfehler, ein
+Changelog-Nachtrag — braucht **keinen** Release. Actions-Tab →
+**„Release-Seite neu veröffentlichen"** → *Run workflow*
+(`.github/workflows/release-seite.yml`, nur `workflow_dispatch`).
+
+Der Job baut `index.html` aus `docs/changelog.md` genau wie der publish-Job
+(Installer-Liste per ssh vom Server, Tag-Daten aus `git for-each-ref`) und
+lädt **ausschließlich** diese eine Datei hoch — keine Installer, kein
+`latest.json`. Er kann das Auto-Update damit auch bei einem Fehlaufruf nicht
+beschädigen. Anschliessend prüft er die Seite per `curl` gegen badhub.de.
+
+Er nutzt denselben Deploy-Zugang wie `release.yml` (`SSH_DEPLOY_KEY_V2`) und
+dieselbe `concurrency`-Gruppe, damit nie zwei Läufe gleichzeitig in das
+Verzeichnis auf badhub.de schreiben.
+
+> Warum es das gibt: Bis zum 2026-08-20 entstand die Seite nur im publish-Job
+> von `release.yml`, der an einem Versions-Tag hängt. Für den Link auf das
+> Pi-Image der Court-Monitore hätte es einen kompletten Release samt
+> signiertem Windows-Build gebraucht.
 
 ## Einen Release veröffentlichen
 

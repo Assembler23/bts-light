@@ -1,0 +1,80 @@
+name: Release-Seite neu veröffentlichen
+
+# Baut NUR die öffentliche Downloadseite badhub.de/download/bts-light/
+# (index.html) neu und lädt sie hoch — ohne Installer-Build, ohne Tag,
+# ohne latest.json.
+#
+# WARUM ES DAS GIBT: Die Seite entstand bisher ausschließlich im
+# publish-Job von release.yml, der an einem Versions-Tag hängt. Eine reine
+# Seitenänderung (etwa der Link auf das Pi-Image für die Court-Monitore)
+# brauchte damit einen kompletten Release samt signiertem Windows-Build —
+# unverhältnismäßig, und in der Praxis wartet der Fix dann eben.
+#
+# SICHERHEIT: Nutzt denselben Deploy-Zugang wie der publish-Job
+# (SSH_DEPLOY_KEY_V2). Der Job lädt bewusst NUR index.html hoch — keine
+# Installer, kein latest.json. Damit kann er das Auto-Update nicht
+# beschädigen, auch nicht bei einem Fehlaufruf.
+on:
+  workflow_dispatch:
+
+# Nicht mit einem laufenden Release kollidieren: dieselbe Gruppe wie
+# release.yml, damit nie zwei Läufe gleichzeitig in dasselbe Verzeichnis
+# auf badhub.de schreiben.
+concurrency:
+  group: bts-light-release
+  cancel-in-progress: false
+
+jobs:
+  seite:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # fetch-depth: 0 + fetch-tags: Die Seite zeigt je Version das
+      # Erstell-Datum ihres Tags — ohne die Tags bliebe die Spalte leer.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: SSH einrichten
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_DEPLOY_KEY_V2 }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      # Wie im publish-Job: Download-Knöpfe nur für Installer, die wirklich
+      # auf dem Server liegen. Hier ohne den "frisch gebauten" Zusatz — es
+      # wird ja nichts gebaut, der Serverstand ist die ganze Wahrheit.
+      - name: Seite bauen
+        run: |
+          set -euo pipefail
+          ssh bts-deploy@178.104.221.177 \
+            'ls /var/www/badhub/public/download/bts-light/ | grep "setup.exe$" || true' > exes.txt
+          git for-each-ref --format '%(refname:short) %(creatordate:short)' refs/tags > dates.txt
+          node scripts/build-release-page.mjs \
+            --changelog docs/changelog.md \
+            --files exes.txt \
+            --dates dates.txt \
+            --out index.html
+
+      # NUR index.html. Kein --delete, keine weiteren Dateien.
+      - name: Seite hochladen
+        run: |
+          set -euo pipefail
+          rsync -av index.html \
+            bts-deploy@178.104.221.177:/var/www/badhub/public/download/bts-light/
+
+      - name: Ergebnis prüfen
+        run: |
+          set -euo pipefail
+          # Die Seite muss danach erreichbar sein UND das Pi-Image nennen —
+          # ein leerer oder halber Upload faellt sonst nicht auf.
+          curl -fsS "https://badhub.de/download/bts-light/" \
+            | grep -q 'pi-image/bts-light-pi.img.xz'
+          echo "Seite ist online und verlinkt das Pi-Image."

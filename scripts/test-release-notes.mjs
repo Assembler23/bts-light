@@ -183,5 +183,26 @@ pruefe(
   "auch die harte Kappung endet mit dem Verweis auf die Release-Seite"
 );
 
+// Die Release-Seite verweist auf das Pi-Image der Court-Monitore.
+//
+// WARUM DAS ZÄHLT: Die SD-Karten werden beim Hallenaufbau beschrieben, oft von
+// Leuten ohne das Repo. Stand der Link nur in docs/pi-dual-image.md, war er
+// genau dann nicht erreichbar, wenn er gebraucht wurde. Der Block wird beim
+// Release mitgeneriert — faellt er still weg (Umbau am Seitengerüst), merkt es
+// niemand, bis wieder jemand in einer Halle danach sucht.
+const seite = readFileSync(join(tmp, "index.html"), "utf8");
+pruefe(
+  seite.includes('href="pi-image/bts-light-pi.img.xz"'),
+  "Release-Seite verlinkt das Pi-Image"
+);
+pruefe(
+  seite.includes('href="pi-image/bts-light-pi.img.xz.sha256"'),
+  "Release-Seite verlinkt die Pruefsumme des Pi-Images"
+);
+pruefe(
+  seite.includes('href="#pi-image"') && seite.includes('id="pi-image"'),
+  "Kopf-Knopf neben dem Programm-Download springt zum Pi-Image-Block"
+);
+
 console.log(fehler === 0 ? "\nOK" : `\n${fehler} fehlgeschlagen`);
 process.exit(fehler === 0 ? 0 : 1);
