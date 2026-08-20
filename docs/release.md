@@ -108,6 +108,28 @@ node scripts/build-release-page.mjs --changelog docs/changelog.md \
   --notes-since 0.9.214 --notes-version 0.9.223
 ```
 
+## Nur die Seite neu veröffentlichen (ohne Release)
+
+Eine reine Änderung an der Seite — ein neuer Link, ein Textfehler, ein
+Changelog-Nachtrag — braucht **keinen** Release. Actions-Tab →
+**„Release-Seite neu veröffentlichen"** → *Run workflow*
+(`.github/workflows/release-seite.yml`, nur `workflow_dispatch`).
+
+Der Job baut `index.html` aus `docs/changelog.md` genau wie der publish-Job
+(Installer-Liste per ssh vom Server, Tag-Daten aus `git for-each-ref`) und
+lädt **ausschließlich** diese eine Datei hoch — keine Installer, kein
+`latest.json`. Er kann das Auto-Update damit auch bei einem Fehlaufruf nicht
+beschädigen. Anschliessend prüft er die Seite per `curl` gegen badhub.de.
+
+Er nutzt denselben Deploy-Zugang wie `release.yml` (`SSH_DEPLOY_KEY_V2`) und
+dieselbe `concurrency`-Gruppe, damit nie zwei Läufe gleichzeitig in das
+Verzeichnis auf badhub.de schreiben.
+
+> Warum es das gibt: Bis zum 2026-08-20 entstand die Seite nur im publish-Job
+> von `release.yml`, der an einem Versions-Tag hängt. Für den Link auf das
+> Pi-Image der Court-Monitore hätte es einen kompletten Release samt
+> signiertem Windows-Build gebraucht.
+
 ## Einen Release veröffentlichen
 
 1. Version in **drei** Dateien identisch hochsetzen:
