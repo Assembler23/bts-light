@@ -54,6 +54,13 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
 8. **Zurücknehmen** — die Turnierleitung kann einen Aufruf jederzeit per
    `retract_preparation` manuell zurücknehmen.
 
+**Zettel zum Mitgeben:** Neben „Aufrufen" steht der Knopf **🖨 Zettel**. Er
+druckt für die **ausgewählten** Spiele je einen leeren Schiedsrichterzettel
+(Vorabzettel): Kopf und Namen vorgedruckt, Raster leer, von Hand zu führen.
+Bewusst an der Auswahl statt als „alles drucken" — wer eine ganze Runde
+braucht, hakt sie an; mehr als 40 Blatt je Auftrag nimmt der Kern ohnehin
+nicht. Details: [schiedsrichterzettel.md](schiedsrichterzettel.md).
+
 ## Auto-Feldvergabe: Reihenfolge + Spieler-Verfügbarkeit
 
 `auto_assign` (`src-tauri/src/sync.rs`) belegt freie Felder automatisch:

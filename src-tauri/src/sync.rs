@@ -633,6 +633,102 @@ impl SyncEngine {
     /// über `Finished` + `Winner` laufen, keine eigene `MatchStatus`-Variante)
     /// oder nicht mehr im Snapshot vorkommt. Kein BTP-Write, rein lokal —
     /// anders als die übrigen `reconcile_*` deshalb nicht `async`.
+    /// Welche Spiele brauchen **jetzt** ein Blatt? Entscheidung und
+    /// Anspruch in einem Zug — ohne Drucker, ohne Runtime, vollständig
+    /// prüfbar.
+    ///
+    /// Liefert `(match_id, feld)` je beanspruchtem Auftrag. „Beansprucht"
+    /// heißt: Der Vermerk im Druck-Gedächtnis steht bereits. Wer hier
+    /// etwas zurückbekommt, ist allein zuständig — auch wenn der Druck
+    /// danach scheitert.
+    fn beanspruche_druckauftraege(
+        &self,
+        config: &AppConfig,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+    ) -> Vec<(i64, String)> {
+        // `slave_mode` ist hier ein zweiter Riegel: Der Aufruf steht
+        // ohnehin hinter der Slave-Rückkehr in `run_once`. Beides
+        // zusammen macht die Zusage „nur der Master druckt" unabhängig
+        // davon, wo der Aufruf eines Tages steht.
+        if !config.print.auto_enabled || config.slave_mode {
+            return Vec::new();
+        }
+        let mut auftraege = Vec::new();
+        for m in snapshot.matches.iter() {
+            if m.status != MatchStatus::OnCourt || m.id <= 0 {
+                continue;
+            }
+            let Some(feld) = m.court.clone().filter(|c| !c.trim().is_empty()) else {
+                continue;
+            };
+            if tablet.print_log().ist_gedruckt(m.id) {
+                continue;
+            }
+            // Ein Aufschlagrichter allein genügt nicht: Der Zettel gehört
+            // dem Schiedsrichter, der ihn führt.
+            let (sr, _ar, _warn) = tablet.court_officials(Some(m), snapshot);
+            if sr.is_empty() {
+                continue;
+            }
+            // Ab hier ist es unser Auftrag — und nur unserer.
+            if tablet.print_log().merken(m.id) {
+                auftraege.push((m.id, feld));
+            }
+        }
+        auftraege
+    }
+
+    /// Zettel-Autodruck: Für jedes Spiel, das **auf einem Feld steht und
+    /// einen Schiedsrichter hat**, einmal ein Blatt drucken (Spec
+    /// `schiedsrichterzettel-autodruck`, E5).
+    ///
+    /// **Geprüft wird ein Zustand, kein Ereignis.** Der Schiedsrichter darf
+    /// nach der Feldvergabe dazukommen — Rotation oder Handzuteilung —, und
+    /// der nächste Lauf löst dann aus. Umgekehrt kann die Vergabe der
+    /// Zuteilung folgen; beide Reihenfolgen enden beim selben Blatt.
+    ///
+    /// Drei Riegel halten das im Turnier gutmütig:
+    /// - Der Vermerk im [`print_log`](crate::tablet::print_log) steht
+    ///   **vor** dem Druckversuch. Ein Feld- oder Schiedsrichterwechsel
+    ///   erzeugt deshalb kein zweites Blatt, und ein gescheiterter Druck
+    ///   wiederholt sich nicht im Sekundentakt.
+    /// - Der Vermerk ist persistent: Ein App-Neustart mitten im Turnier
+    ///   druckt nichts nach.
+    /// - Gedruckt wird in einer eigenen Aufgabe. **Der Sync-Lauf wartet
+    ///   nie auf den Drucker** — ein Spooler, der hängt, darf weder
+    ///   Liveticker noch Feldvergabe anhalten.
+    fn autodruck(&self, config: &AppConfig, snapshot: &BtpSnapshot, tablet: &TabletState) {
+        for (match_id, feld) in self.beanspruche_druckauftraege(config, snapshot, tablet) {
+            let m_id = match_id;
+            let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
+            let seiten = crate::tablet::scoresheet::seiten_fuer(
+                tablet,
+                logo.as_deref(),
+                crate::tablet::scoresheet::Modus::Vorab,
+                &[m_id],
+            );
+            let Some(seiten) = seiten else {
+                // Kein Blatt zu erzeugen — dann war es auch kein
+                // Druckversuch, und der Vermerk darf nicht stehen bleiben.
+                tablet.print_log().vergessen(m_id);
+                continue;
+            };
+            let drucker = config.print.printer_name.clone();
+            let titel = format!("Schiedsrichterzettel Feld {feld}");
+            let warnung = tablet.print_warning_slot();
+            tokio::task::spawn_blocking(move || {
+                match crate::print::drucke(&seiten, &titel, &drucker) {
+                    Ok(()) => tracing::info!("Zettel für Feld {feld} gedruckt"),
+                    Err(e) => crate::tablet::state::melde_druckwarnung(
+                        &warnung,
+                        format!("Zettel für Feld {feld}: {e}"),
+                    ),
+                }
+            });
+        }
+    }
+
     fn reconcile_auto_assign_exclusions(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
         let keep: HashSet<i64> = snapshot
             .matches
@@ -1879,6 +1975,12 @@ impl SyncEngine {
         // gebunden und um neue BTP-Officials ergänzt. Master-only: der
         // Ansage-Slave ist oben schon zurückgekehrt.
         self.track_officials(&snapshot, tablet);
+        // Zettel-Autodruck (Spec `schiedsrichterzettel-autodruck`, E5) —
+        // **unmittelbar nach der Rotation**: Erst hier steht die
+        // Besetzung des frisch belegten Felds fest. Eine Zeile früher
+        // sähe der Druck systematisch keinen Schiedsrichter und bliebe
+        // stumm.
+        self.autodruck(config, &snapshot, tablet);
         tablet.apply_tablet_scores(&mut snapshot);
         // Von Hand geschriebene Feldzuweisungen, die BTP inzwischen
         // zurückmeldet, brauchen keine Vormerkung mehr — sie sollen das Feld
@@ -3985,6 +4087,205 @@ mod tests {
         tablet.officials_store().set_enabled(true);
         tablet.officials_store().set_rotation(rot_sr, rot_ar);
         (SyncEngine::new(), tablet)
+    }
+
+    // ── Zettel-Autodruck (Spec `schiedsrichterzettel-autodruck`, E5) ──
+
+    /// Konfiguration mit eingeschaltetem Autodruck.
+    fn cfg_druck(an: bool) -> AppConfig {
+        AppConfig {
+            print: crate::config::PrintConfig {
+                auto_enabled: an,
+                printer_name: String::new(),
+            },
+            ..AppConfig::default()
+        }
+    }
+
+    /// Engine + Tablet mit Schiedsrichterbetrieb und SR-Rotation.
+    fn druck_setup() -> (SyncEngine, TabletState) {
+        officials_setup(true, false)
+    }
+
+    /// Der Regelfall: Spiel steht auf dem Feld, ein Schiedsrichter ist
+    /// zugeordnet — genau ein Auftrag, und nur einer.
+    #[test]
+    fn feld_und_schiedsrichter_ergeben_genau_einen_druckauftrag() {
+        let (mut engine, tablet) = druck_setup();
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+
+        let auftraege = engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet);
+        assert_eq!(auftraege, vec![(10, "5".to_string())]);
+        // Der zweite Lauf sieht dasselbe Feld — und schweigt.
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .is_empty());
+    }
+
+    /// **Der Fall, an dem eine Momentaufnahme scheitern würde:** Der
+    /// Schiedsrichter kommt erst nach der Feldvergabe dazu. Geprüft wird
+    /// ein Zustand, deshalb löst der nächste Lauf aus.
+    #[test]
+    fn sr_nach_der_vergabe_loest_den_druck_aus() {
+        // Rotation aus: Der Schiedsrichter kommt von Hand, nicht von selbst.
+        let (mut engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+
+        assert!(
+            engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .is_empty(),
+            "ohne Schiedsrichter kein Blatt"
+        );
+
+        // Die Turnierleitung weist jetzt von Hand zu.
+        tablet
+            .officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
+
+        assert_eq!(
+            engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet),
+            vec![(10, "5".to_string())],
+            "sobald der Schiedsrichter steht, geht das Blatt raus"
+        );
+    }
+
+    /// Ohne Schiedsrichter passiert nie etwas — auch nach beliebig vielen
+    /// Läufen nicht.
+    #[test]
+    fn ohne_sr_wird_nicht_gedruckt() {
+        let (mut engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        for _ in 0..5 {
+            assert!(engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .is_empty());
+        }
+    }
+
+    /// Ein Aufschlagrichter allein genügt nicht: Der Zettel gehört dem
+    /// Schiedsrichter, der ihn führt.
+    #[test]
+    fn ar_allein_druckt_nicht() {
+        let (mut engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        tablet
+            .officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Ar, 2);
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .is_empty());
+    }
+
+    /// Ein Feldwechsel erzeugt kein zweites Blatt — es gibt höchstens
+    /// einen Zettel je Spiel.
+    #[test]
+    fn feldwechsel_druckt_kein_zweites_blatt() {
+        let (mut engine, tablet) = druck_setup();
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        assert_eq!(
+            engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .len(),
+            1
+        );
+
+        // Dasselbe Spiel steht jetzt auf Feld 7.
+        let umgesetzt = snap_officials(vec![oncourt_named(10, 7, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(umgesetzt.clone());
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &umgesetzt, &tablet)
+            .is_empty());
+    }
+
+    /// Ausgeschaltet heißt ausgeschaltet — und ein Ansage-Slave druckt
+    /// nie, auch wenn der Schalter an ist.
+    #[test]
+    fn ausgeschaltet_und_slave_drucken_nie() {
+        let (mut engine, tablet) = druck_setup();
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(false), &snap, &tablet)
+            .is_empty());
+
+        let mut slave = cfg_druck(true);
+        slave.slave_mode = true;
+        assert!(engine
+            .beanspruche_druckauftraege(&slave, &snap, &tablet)
+            .is_empty());
+
+        // Und nichts davon hat einen Vermerk hinterlassen: Sobald der
+        // Schalter angeht, ist das Blatt fällig.
+        assert_eq!(
+            engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .len(),
+            1
+        );
+    }
+
+    /// Ein Spiel, das noch nicht auf dem Feld steht, bekommt nichts —
+    /// Auslöser ist die Feldvergabe, nicht der Aufruf.
+    #[test]
+    fn ohne_feld_kein_autodruck() {
+        let (mut engine, tablet) = druck_setup();
+        // `ready_named` ist Scheduled ohne Feld.
+        let snap = snap_officials(vec![ready_named(10, None, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .is_empty());
+    }
+
+    /// Nach einem App-Neustart mitten im Turnier darf für die laufenden
+    /// Spiele **nichts** nachgedruckt werden — sonst kämen bei zwanzig
+    /// Feldern zwanzig Blatt.
+    #[test]
+    fn neustart_druckt_nicht_nach() {
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("gedruckt.json");
+        let matches: Vec<BtpMatch> = (1..=20).map(|i| oncourt_named(i, i, "A", "B")).collect();
+        let ids: Vec<i64> = (1..=20).collect();
+        let snap = snap_officials(matches, &ids);
+
+        {
+            let (mut engine, tablet) = druck_setup();
+            tablet.set_print_log_path(pfad.clone());
+            tablet.set_snapshot(snap.clone());
+            engine.track_officials(&snap, &tablet);
+            assert_eq!(
+                engine
+                    .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                    .len(),
+                20
+            );
+        }
+
+        // Neustart: frischer Zustand, dieselbe Datei, dasselbe Turnier.
+        let (mut engine, tablet) = druck_setup();
+        tablet.set_print_log_path(pfad);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        assert!(
+            engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .is_empty(),
+            "nach dem Neustart darf kein einziges Blatt nachkommen"
+        );
     }
 
     #[test]

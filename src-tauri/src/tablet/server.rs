@@ -194,12 +194,6 @@ impl ScorePushQueue {
 }
 
 impl ServerCtx {
-    /// Anzeige-Schalter (Vereinsnamen usw.) — der Zettel-Renderer im
-    /// Cloud-Pfad braucht sie, das Feld selbst bleibt privat.
-    pub(crate) fn display_config(&self) -> crate::config::DisplayConfig {
-        self.config.display.clone()
-    }
-
     /// Stellt einen Live-Score zum Senden ein und kehrt **sofort** zurück.
     fn queue_score_push(&self, court_id: i64, match_id: i64, update: crate::badhub::diff::Update) {
         if !self.score_push.einstellen(court_id, match_id, update) {
@@ -2154,6 +2148,30 @@ async fn tl_timeline(
     }
 }
 
+/// Abfrage-Teil des Zettel-Abrufs.
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct SheetQuery {
+    /// `1`, `true` oder `ja` schalten den Vorabzettel ein. Alles andere —
+    /// auch Unsinn — bedeutet „wie bisher"; ein Tippfehler im Link darf
+    /// keinen Fehler ergeben, sondern das gewohnte Blatt.
+    #[serde(default)]
+    vorab: Option<String>,
+}
+
+impl SheetQuery {
+    pub(crate) fn modus(&self) -> crate::tablet::scoresheet::Modus {
+        let an = matches!(
+            self.vorab.as_deref().map(str::trim),
+            Some("1" | "true" | "ja")
+        );
+        if an {
+            crate::tablet::scoresheet::Modus::Vorab
+        } else {
+            crate::tablet::scoresheet::Modus::Normal
+        }
+    }
+}
+
 /// Schiedsrichterzettel als fertiges HTML (Spec
 /// `schiedsrichterzettel-druck`, ADR 0039) — on-demand, nie Teil des
 /// Zustands-Pushes: Er trägt Sanktionsdaten.
@@ -2161,10 +2179,16 @@ async fn tl_timeline(
 /// `{ids}` ist eine Komma-Liste (Stapeldruck). **Der Deckel greift vor
 /// der Arbeit:** Mehr als `MAX_SHEETS_PER_DOC` Kennungen werden
 /// abgewiesen, bevor je Kennung etwas zusammengesucht wird.
+///
+/// `?vorab=1` liefert den **Vorabzettel** für ein noch ausstehendes Spiel
+/// (Spec `schiedsrichterzettel-autodruck`). Ohne den Parameter bleibt das
+/// Verhalten unverändert — ein Spiel ohne Aufzeichnung ergibt weiterhin
+/// 404.
 async fn tl_scoresheet(
     State(ctx): State<Arc<ServerCtx>>,
     headers: axum::http::HeaderMap,
     axum::extract::Path(ids): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<SheetQuery>,
 ) -> impl IntoResponse {
     if tl_device(&ctx, &headers).is_none() {
         return (
@@ -2187,7 +2211,9 @@ async fn tl_scoresheet(
     // erreichbar — ohne den Header könnte der Platten-Cache eines
     // gemeinsam genutzten Tablets das Dokument über die Gültigkeit des
     // Zugangs hinaus vorhalten.
-    match crate::tablet::scoresheet::html_fuer(&ctx.tablet, &ctx.config.display, &match_ids) {
+    let logo = crate::tablet::scoresheet::logo_data_uri(&ctx.app_config_arc().tournament_logo);
+    match crate::tablet::scoresheet::html_fuer(&ctx.tablet, logo.as_deref(), q.modus(), &match_ids)
+    {
         Some(html) => (
             StatusCode::OK,
             [
@@ -4691,6 +4717,51 @@ mod tests {
         assert!(parse_sheet_ids("42,abc").is_none());
         assert!(parse_sheet_ids("../../etc").is_none());
         assert!(parse_sheet_ids("").is_none());
+    }
+
+    /// Der **Vorabzettel** ist ein eigener Modus, keine Verhaltensänderung
+    /// des bestehenden Abrufs: Dasselbe Spiel ohne jede Aufzeichnung
+    /// liefert normal weiterhin nichts (→ 404) und vorab ein vollständiges
+    /// Blatt (Spec `schiedsrichterzettel-autodruck`, E2).
+    #[tokio::test]
+    async fn vorabzettel_liefert_ein_blatt_wo_der_normalabruf_404_bleibt() {
+        use crate::tablet::scoresheet::{html_fuer, Modus};
+        let ctx = make_ctx(1);
+
+        assert!(
+            html_fuer(&ctx.tablet, None, Modus::Normal, &[42]).is_none(),
+            "ohne Aufzeichnung gibt es keinen Archivzettel"
+        );
+
+        let html = html_fuer(&ctx.tablet, None, Modus::Vorab, &[42])
+            .expect("der Vorabzettel muss auch ohne Aufzeichnung ein Blatt liefern");
+        assert!(html.contains("Schiedsrichter"), "Kopf fehlt");
+        assert!(html.contains("Referee"), "Unterschriftszeile fehlt");
+        // Genau eine Seite: sechs leere Blöcke, keine Anhangseite.
+        assert_eq!(html.matches("<section class=\"blatt").count(), 1);
+
+        // Ein Spiel außerhalb des Snapshots bleibt auch vorab ohne Blatt —
+        // die Kopfangaben kämen sonst aus dem Nichts.
+        assert!(html_fuer(&ctx.tablet, None, Modus::Vorab, &[999]).is_none());
+    }
+
+    /// Die Lesart des Abfrage-Teils: Nur ausdrückliche Zustimmung schaltet
+    /// den Vorabzettel ein, ein Tippfehler bedeutet „wie bisher".
+    #[test]
+    fn vorab_query_ist_streng_aber_gutmuetig() {
+        use crate::tablet::scoresheet::Modus;
+        let q = |v: Option<&str>| {
+            SheetQuery {
+                vorab: v.map(str::to_string),
+            }
+            .modus()
+        };
+        assert_eq!(q(Some("1")), Modus::Vorab);
+        assert_eq!(q(Some("true")), Modus::Vorab);
+        assert_eq!(q(Some(" ja ")), Modus::Vorab);
+        assert_eq!(q(None), Modus::Normal);
+        assert_eq!(q(Some("0")), Modus::Normal);
+        assert_eq!(q(Some("vielleicht")), Modus::Normal);
     }
 
     /// Aufgabe vom Tablet: der EINE kombinierte SENDUPDATE trägt

@@ -628,10 +628,22 @@ async fn handle_frame(
         // Zettel-Abruf eines TL-Geräts (ADR 0039): Antwort direkt aus den
         // Stores. Wie beim Punktverlauf ohne eigenen Task — der Join ist
         // reine Rechenarbeit, kein BTP-Zugriff.
-        RelayFrame::ScoresheetRequest { req_id, match_ids } => {
+        RelayFrame::ScoresheetRequest {
+            req_id,
+            match_ids,
+            vorab,
+        } => {
+            let logo =
+                crate::tablet::scoresheet::logo_data_uri(&ctx.app_config_arc().tournament_logo);
+            let modus = if vorab {
+                crate::tablet::scoresheet::Modus::Vorab
+            } else {
+                crate::tablet::scoresheet::Modus::Normal
+            };
             let html = crate::tablet::scoresheet::html_fuer(
                 &ctx.tablet,
-                &ctx.display_config(),
+                logo.as_deref(),
+                modus,
                 &match_ids,
             );
             let _ = tx.send(text(&HostFrame::ScoresheetData {

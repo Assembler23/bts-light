@@ -495,3 +495,10 @@ Service-Richter** des Spiels — aus derselben Quelle wie die Feldübersicht
 (`court_officials`). Sperrlisten und Stammverein stehen **nicht** darauf; sie
 bleiben der Pflege-Ansicht vorbehalten. Bedienung:
 [schiedsrichterzettel.md](schiedsrichterzettel.md).
+**Und er entscheidet über den Autodruck:** Ist er eingeschaltet, druckt
+bts-light den Zettel nur für Spiele, denen ein **Schiedsrichter** zugeordnet
+ist — ein Aufschlagrichter allein genügt nicht. Ist die Schiedsrichter-
+verwaltung ganz aus, kennt der Host nie einen SR, und die Automatik bleibt
+bauartbedingt stumm. Die Zuordnung darf dabei **nach** der Feldvergabe kommen
+(Rotation oder von Hand): Geprüft wird ein Zustand, nicht ein Augenblick.
+

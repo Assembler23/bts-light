@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   type LucideIcon,
   Monitor,
+  Printer,
   Server,
   Stethoscope,
   Target,
@@ -32,6 +33,7 @@ import {
   startSync,
   stopSync,
   pairingCode,
+  printerList,
   resolvePairingCode,
   tabletOverview,
   testBtp,
@@ -357,6 +359,16 @@ export function SetupWizard({
   const [skEnabled, setSkEnabled] = useState(
     initialConfig.scorekeeper?.enabled ?? false,
   );
+  // Zettel-Druck (Spec schiedsrichterzettel-autodruck): Autodruck bei der
+  // Feldvergabe und der Zieldrucker. Leerer Name = Windows-Standarddrucker.
+  const [printAuto, setPrintAuto] = useState(
+    initialConfig.print?.auto_enabled ?? false,
+  );
+  const [printerName, setPrinterName] = useState(
+    initialConfig.print?.printer_name ?? "",
+  );
+  const [printers, setPrinters] = useState<string[]>([]);
+  const [printProbe, setPrintProbe] = useState<string | null>(null);
   // Schiedsrichtermanagement: globale Schalter (Details in der Spielübersicht).
   const off = initialConfig.officials;
   const [offEnabled, setOffEnabled] = useState(off?.enabled ?? false);
@@ -536,6 +548,10 @@ export function SetupWizard({
       scorekeeper: {
         enabled: skEnabled,
         break_seconds: initialConfig.scorekeeper?.break_seconds ?? 300,
+      },
+      print: {
+        auto_enabled: printAuto,
+        printer_name: printerName.trim(),
       },
       officials: {
         enabled: offEnabled,
@@ -1384,6 +1400,91 @@ export function SetupWizard({
             </p>
           </div>
         )}
+      </section>
+
+      {/* Schiedsrichterzettel drucken (Spec schiedsrichterzettel-autodruck) */}
+      <section
+        id="section-zetteldruck"
+        className="flex flex-col gap-2 scroll-mt-4"
+      >
+        <SectionHeader icon={Printer}>Schiedsrichterzettel</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Zettel lassen sich jederzeit von Hand drucken — in der Spielübersicht
+          und im Tab „In Vorbereitung". Zusätzlich kann BTS Light den Zettel
+          selbsttätig ausdrucken, sobald ein Spiel auf ein Feld kommt.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={printAuto}
+            onChange={(e) => setPrintAuto(e.currentTarget.checked)}
+          />
+          Zettel bei der Feldvergabe automatisch drucken
+        </label>
+        {printAuto && !offEnabled && (
+          <p className="flex items-start gap-1.5 text-xs text-amber-700">
+            <Info size={14} className="mt-0.5 shrink-0" />
+            Gedruckt wird nur für Spiele, denen ein <strong>Schiedsrichter</strong>{" "}
+            zugeordnet ist. Solange „Mit Schiedsrichtern spielen" oben aus ist,
+            kennt BTS Light keinen — dann druckt die Automatik nie.
+          </p>
+        )}
+        <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+          <label className="flex flex-col gap-1 text-sm text-slate-600">
+            Drucker
+            <select
+              value={printerName}
+              onChange={(e) => setPrinterName(e.currentTarget.value)}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5
+                         text-sm text-slate-700"
+            >
+              <option value="">Windows-Standarddrucker</option>
+              {/* Ein früher eingestellter Drucker, den Windows gerade nicht
+                  meldet (aus, abgezogen), bleibt wählbar — sonst fiele die
+                  Einstellung beim nächsten Speichern still auf „Standard"
+                  zurück. */}
+              {(printers.includes(printerName) || printerName === ""
+                ? printers
+                : [printerName, ...printers]
+              ).map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setPrintProbe("läuft");
+                printerList()
+                  .then((liste) => {
+                    setPrinters(liste);
+                    setPrintProbe(
+                      liste.length > 0
+                        ? `${liste.length} Drucker gefunden.`
+                        : "Windows meldet keinen Drucker.",
+                    );
+                  })
+                  .catch(() => setPrintProbe("Druckerliste nicht lesbar."));
+              }}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm
+                         font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Drucker suchen
+            </button>
+            {printProbe && (
+              <span className="text-xs text-slate-500">{printProbe}</span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500">
+            Der Zettel wird <strong>A4 quer</strong> gedruckt — das stellt BTS
+            Light selbst ein. Gedruckt wird ohne Dialog auf dem Rechner, auf dem
+            BTS Light läuft; ein Drucker in einer anderen Halle muss dort als
+            Netzwerkdrucker eingerichtet sein.
+          </p>
+        </div>
       </section>
 
       {/* Automatische Feldvergabe */}

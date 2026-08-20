@@ -234,6 +234,16 @@ fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
         .join("queue-order.json")
 }
 
+/// Pfad des Druck-Gedächtnisses (Spec `schiedsrichterzettel-autodruck`,
+/// Muster ADR 0022). Außerhalb der config.json: Der Stand gilt nur für ein
+/// Turnier und hat im Config-Export nichts verloren.
+fn tablet_print_log_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("gedruckt.json")
+}
+
 /// Pfad der Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster
 /// ADR 0022). Bewusst **außerhalb** der config.json: der Stand gilt nur
 /// für ein Turnier.
@@ -917,6 +927,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // kommt mit dem ersten Snapshot.
     tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
     tablet.set_queue_order_path(tablet_queue_order_path(&app));
+    // Druck-Gedächtnis des Autodrucks (Spec
+    // `schiedsrichterzettel-autodruck`): ebenso Pfad jetzt, Turnier
+    // später. Ohne ihn druckte ein App-Neustart alle laufenden Spiele nach.
+    tablet.set_print_log_path(tablet_print_log_path(&app));
     // Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster ADR 0022):
     // Pfad jetzt, das Turnier kommt mit dem ersten Snapshot.
     tablet.set_match_times_path(tablet_match_times_path(&app));
@@ -2378,9 +2392,84 @@ pub struct FinishedMatchRow {
 /// Cloud-Only-Betrieb. Mehrere Kennungen ergeben einen Stapeldruck.
 /// `None` = zu keinem der Spiele liegt eine Aufzeichnung vor.
 #[tauri::command]
-pub fn match_scoresheet_html(state: State<'_, AppState>, match_ids: Vec<i64>) -> Option<String> {
+pub fn match_scoresheet_html(
+    state: State<'_, AppState>,
+    match_ids: Vec<i64>,
+    vorab: Option<bool>,
+) -> Option<String> {
     let config = state.config.lock().ok()?.clone();
-    crate::tablet::scoresheet::html_fuer(&state.tablet, &config.display, &match_ids)
+    let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
+    let modus = if vorab.unwrap_or(false) {
+        crate::tablet::scoresheet::Modus::Vorab
+    } else {
+        crate::tablet::scoresheet::Modus::Normal
+    };
+    crate::tablet::scoresheet::html_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
+}
+
+/// Die im System eingerichteten Drucker — für die Auswahl in den
+/// Einstellungen (Spec `schiedsrichterzettel-autodruck`, ADR 0042).
+///
+/// Der leere Eintrag („Windows-Standarddrucker") steht **nicht** in dieser
+/// Liste; die Oberfläche bietet ihn als eigene Zeile an. So bleibt die
+/// Bedeutung eindeutig: leerer Name in der Konfiguration = Standarddrucker,
+/// auch wenn sich der später ändert.
+#[tauri::command]
+pub fn printer_list() -> Vec<String> {
+    crate::print::drucker_liste()
+}
+
+/// Zettel **still** an den eingestellten Drucker geben — ohne Dialog.
+///
+/// Das ist derselbe Weg, den der Autodruck später von selbst geht; hier
+/// ist er von Hand auslösbar, damit sich Drucker und Seitenbild prüfen
+/// lassen, bevor sich jemand im Turnier darauf verlässt.
+///
+/// Läuft in einer eigenen Aufgabe: Der Spooler kann Sekunden brauchen, und
+/// solange darf die Oberfläche nicht stehen.
+#[tauri::command]
+pub async fn print_scoresheet(
+    state: State<'_, AppState>,
+    match_ids: Vec<i64>,
+    vorab: Option<bool>,
+) -> Result<(), String> {
+    let (logo, drucker) = {
+        let config = state.config.lock().map_err(|_| "Konfiguration gesperrt")?;
+        (
+            crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo),
+            config.print.printer_name.clone(),
+        )
+    };
+    let modus = if vorab.unwrap_or(false) {
+        crate::tablet::scoresheet::Modus::Vorab
+    } else {
+        crate::tablet::scoresheet::Modus::Normal
+    };
+    let seiten =
+        crate::tablet::scoresheet::seiten_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
+            .ok_or_else(|| "Zu diesen Spielen gibt es kein Blatt.".to_string())?;
+    let titel = format!("Schiedsrichterzettel ({} Blatt)", seiten.len());
+    tokio::task::spawn_blocking(move || crate::print::drucke(&seiten, &titel, &drucker))
+        .await
+        .map_err(|e| format!("Druckauftrag abgebrochen: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
+/// Offene Warnung des Zettel-Autodrucks (Spec
+/// `schiedsrichterzettel-autodruck`, E5) — `None` = alles in Ordnung.
+///
+/// Ein Drucker, der schweigt, darf nicht stumm scheitern: Sonst wartet die
+/// Turnierleitung auf Zettel, die nie kommen. Das Dashboard fragt im
+/// laufenden Takt mit.
+#[tauri::command]
+pub fn print_warning(state: State<'_, AppState>) -> Option<String> {
+    state.tablet.print_warning()
+}
+
+/// Warnung wegklicken.
+#[tauri::command]
+pub fn clear_print_warning(state: State<'_, AppState>) {
+    state.tablet.clear_print_warning();
 }
 
 /// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser

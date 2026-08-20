@@ -484,6 +484,14 @@ pub struct TabletState {
     /// dazwischenfunken. Er gilt bis zum nächsten Start; danach zählt wieder
     /// die Grundeinstellung aus der Konfiguration.
     auto_assign_paused: RwLock<bool>,
+    /// Letzte Warnung des Autodrucks (Spec
+    /// `schiedsrichterzettel-autodruck`, E5). Reine Anzeige fürs
+    /// Dashboard: Ein Drucker, der schweigt, darf nicht stumm scheitern —
+    /// sonst wartet die Turnierleitung auf Zettel, die nie kommen.
+    /// Bewusst ein eigener `Arc`: Der Druck läuft in einer abgesetzten
+    /// Aufgabe, die den ganzen `TabletState` nicht braucht — sie soll nur
+    /// ihr Scheitern melden können.
+    print_warning: std::sync::Arc<RwLock<Option<String>>>,
     /// Erfolgte Aufrufe je Feld:
     /// `court_id → (match_id, Stufe, bereits gerufene Parteien)`.
     ///
@@ -534,6 +542,12 @@ pub struct TabletState {
     /// und Desktop müssen denselben Stand sehen; die BTP-Reihenfolge selbst
     /// bleibt unangetastet (R2).
     queue_order: crate::tablet::queue_order::QueueOrderStore,
+    /// Druck-Gedächtnis des Autodrucks (Spec
+    /// `schiedsrichterzettel-autodruck`, E5): welche Spiele schon ein
+    /// Blatt bekommen haben — turniergebunden persistiert, nur Match-IDs.
+    /// Er hängt hier, weil der Sync-Loop ihn schreibt und die Commands
+    /// denselben Stand sehen müssen.
+    print_log: crate::tablet::print_log::PrintLogStore,
     /// Spielzeiten-Messung je Match (Spec `spielzeiten-prognose`, ADR 0027):
     /// erste Feldzuweisung, erster Punkt, Spielende — turniergebunden
     /// persistiert (`match-times.json`). Er hängt hier, weil Sync-Loop,
@@ -1172,6 +1186,10 @@ impl TabletState {
             .set_tournament(&snapshot.tournament_name);
         // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
         self.queue_order.set_tournament(&snapshot.tournament_name);
+        // Druck-Gedächtnis ebenso turniergebunden (Spec
+        // `schiedsrichterzettel-autodruck`): Match-IDs gelten nur
+        // innerhalb eines Turniers, ein Wechsel beginnt frisch.
+        self.print_log.set_tournament(&snapshot.tournament_name);
         // Spielzeiten-Messung ebenso turniergebunden (Spec
         // `spielzeiten-prognose`, Muster ADR 0022).
         self.match_times.set_tournament(&snapshot.tournament_name);
@@ -1344,6 +1362,17 @@ impl TabletState {
     /// Ablage-Datei der manuellen Spielreihenfolge setzen (beim App-Start).
     pub fn set_queue_order_path(&self, path: std::path::PathBuf) {
         self.queue_order.set_path(path);
+    }
+
+    /// Ablage-Datei des Druck-Gedächtnisses setzen (beim App-Start).
+    pub fn set_print_log_path(&self, path: std::path::PathBuf) {
+        self.print_log.set_path(path);
+    }
+
+    /// Druck-Gedächtnis des Autodrucks (Spec
+    /// `schiedsrichterzettel-autodruck`).
+    pub fn print_log(&self) -> &crate::tablet::print_log::PrintLogStore {
+        &self.print_log
     }
 
     /// Der Spielzeiten-Speicher (Spec `spielzeiten-prognose`) — geteilt von
@@ -2937,6 +2966,28 @@ impl TabletState {
     /// Der Schalter lebt **nur zur Laufzeit** (die Einstellungen bleiben
     /// unangetastet) und gilt bis zum Stoppen der Übertragung — siehe
     /// [`Self::reset_runtime_switches`].
+    /// Warnung des Autodrucks setzen (überschreibt die vorherige — die
+    /// jüngste ist die, die zählt).
+    pub fn set_print_warning(&self, text: impl Into<String>) {
+        melde_druckwarnung(&self.print_warning, text);
+    }
+
+    /// Klonbarer Griff auf den Warnungs-Slot — für die abgesetzte
+    /// Druckaufgabe.
+    pub fn print_warning_slot(&self) -> std::sync::Arc<RwLock<Option<String>>> {
+        self.print_warning.clone()
+    }
+
+    /// Letzte Warnung des Autodrucks, falls eine offen ist.
+    pub fn print_warning(&self) -> Option<String> {
+        self.print_warning.read().unwrap().clone()
+    }
+
+    /// Warnung wegklicken (aus dem Dashboard).
+    pub fn clear_print_warning(&self) {
+        *self.print_warning.write().unwrap() = None;
+    }
+
     pub fn set_auto_assign_paused(&self, paused: bool) {
         *self.auto_assign_paused.write().unwrap() = paused;
     }
@@ -4216,6 +4267,19 @@ pub struct MonitorCourt {
     /// wandert von hier in den `MonitorState`, damit die Anzeige Push und
     /// Voll-Abruf zueinander ordnen kann.
     pub seq: u64,
+}
+
+/// Eine Druckwarnung ablegen — aus dem `TabletState` oder aus der
+/// abgesetzten Druckaufgabe, die nur den Slot hält.
+///
+/// Ein vergifteter Lock kostet hier höchstens die Anzeige einer Warnung;
+/// er darf niemals den Druckpfad zum Absturz bringen.
+pub fn melde_druckwarnung(slot: &std::sync::Arc<RwLock<Option<String>>>, text: impl Into<String>) {
+    let text = text.into();
+    tracing::warn!("Zettel-Autodruck: {text}");
+    if let Ok(mut w) = slot.write() {
+        *w = Some(text);
+    }
 }
 
 #[cfg(test)]

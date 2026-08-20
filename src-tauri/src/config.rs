@@ -326,6 +326,21 @@ impl Default for PredictionConfig {
     }
 }
 
+/// Druck der Schiedsrichterzettel (Spec
+/// `docs/features/schiedsrichterzettel-autodruck.md`, ADR 0042).
+///
+/// Opt-in: Ohne ausdrückliches Einschalten druckt nichts von selbst. Der
+/// leere Druckername bedeutet **Windows-Standarddrucker** — so muss
+/// niemand etwas auswählen, der ohnehin nur einen Drucker hat.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PrintConfig {
+    /// Zettel bei der Feldvergabe selbsttätig drucken?
+    pub auto_enabled: bool,
+    /// Zieldrucker; leer = Windows-Standarddrucker.
+    pub printer_name: String,
+}
+
 /// Automatische Hallen-Vorverteilung (Spec
 /// `docs/features/hallen-vorverteilung.md`, ADR 0029/0030). Opt-in —
 /// standardmäßig aus; nur bei Mehr-Hallen-Turnieren wirksam, und niemals
@@ -612,6 +627,11 @@ pub struct AppConfig {
     /// Default ist **aus**.
     #[serde(default)]
     pub hall_prefill: HallPrefillConfig,
+    /// Druck der Schiedsrichterzettel (Spec
+    /// `schiedsrichterzettel-autodruck`). `#[serde(default)]` hält ältere
+    /// Konfigurationsdateien lesbar; Default ist **aus**.
+    #[serde(default)]
+    pub print: PrintConfig,
     /// Zähltafelbediener-Verwaltung (ADR 0007). `#[serde(default)]` hält
     /// ältere Konfigurationsdateien lesbar.
     #[serde(default)]
@@ -1608,6 +1628,10 @@ mod tests {
             hall_prefill: HallPrefillConfig {
                 enabled: true,
                 window: 12,
+            },
+            print: PrintConfig {
+                auto_enabled: true,
+                printer_name: "Drucker im Turnierbüro".to_string(),
             },
             scorekeeper: ScorekeeperConfig {
                 enabled: true,

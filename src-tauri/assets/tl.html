@@ -4322,6 +4322,12 @@ function queueRow(m, topMatchId) {
   // kein zweiter Aufbau desselben Formulars.
   zeilenAktionen.push(`<button type="button" data-queue-result="${m.match_id}"
       title="Endstand ohne Feld nachtragen">✎ Ergebnis eintragen</button>`);
+  // Vorabzettel (Spec schiedsrichterzettel-autodruck): der Bogen zum
+  // Mitgeben, bevor das Spiel läuft. Anders als beim Archivzettel der
+  // Beendet-Liste gibt es hier KEINE `has_timeline`-Schranke — dass noch
+  // nichts aufgezeichnet ist, ist ja gerade der Grund für das leere Blatt.
+  zeilenAktionen.push(`<button type="button" data-queue-zettel="${m.match_id}"
+      title="Leeren Schiedsrichterzettel drucken">🖨 Zettel (leer)</button>`);
   kebabGroups.push(`<div class="kebab-group">
       <span class="kebab-label">Spiel</span>
       <div class="kebab-actions">${zeilenAktionen.join("")}</div>
@@ -4471,6 +4477,17 @@ function wireQueue(box) {
       // Klick-Zeit-Auflösung, siehe `data-prep`.
       const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueResult);
       if (match) openQueueResultDialog(match);
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  scopeAll(box, "button[data-queue-zettel]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      // Klick-Zeit-Auflösung, siehe `data-prep`.
+      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueZettel);
+      if (!match) return;
+      const paarung = `${(match.team1 || []).join(" / ")} – ${(match.team2 || []).join(" / ")}`;
+      openZettel([match.match_id], paarung, true);
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -6864,21 +6881,30 @@ function openTimeline(matchId, label, finishedSets) {
  *
  *  Der Abruf läuft über denselben Pfad wie am eingebetteten Server
  *  (S-R3), deshalb ist dieser Code in beiden Betriebsarten identisch. */
-async function openZettel(matchIds, label) {
+async function openZettel(matchIds, label, vorab = false) {
   const titel = $("zettel-title");
   const body = $("zettel-body");
-  titel.textContent = `Schiedsrichterzettel — ${label}`;
+  titel.textContent = `Schiedsrichterzettel${vorab ? " (leer)" : ""} — ${label}`;
   body.innerHTML = `<p class="graph-note">Zettel wird erzeugt …</p>`;
   $("zettel-overlay").hidden = false;
   try {
-    const res = await fetch(`${API}/scoresheet/${matchIds.join(",")}`, {
-      headers: { Authorization: "Bearer " + token },
-      cache: "no-store",
-    });
+    // `?vorab=1` liefert das leere Blatt eines noch ausstehenden Spiels
+    // (Spec schiedsrichterzettel-autodruck). Ohne den Parameter bleibt der
+    // Abruf unverändert — ein alter Relay reicht ihn schlicht nicht weiter
+    // und antwortet wie bisher.
+    const res = await fetch(
+      `${API}/scoresheet/${matchIds.join(",")}${vorab ? "?vorab=1" : ""}`,
+      {
+        headers: { Authorization: "Bearer " + token },
+        cache: "no-store",
+      },
+    );
     if (res.status === 404) {
-      body.innerHTML =
-        `<p class="graph-note">Zu diesem Spiel liegt keine Aufzeichnung vor — ` +
-        `ein Papier-Ergebnis bekommt bewusst keinen Zettel.</p>`;
+      body.innerHTML = vorab
+        ? `<p class="graph-note">Für dieses Spiel lässt sich kein Blatt erzeugen — ` +
+          `steht es noch im aktuellen Turnierstand?</p>`
+        : `<p class="graph-note">Zu diesem Spiel liegt keine Aufzeichnung vor — ` +
+          `ein Papier-Ergebnis bekommt bewusst keinen Zettel.</p>`;
       return;
     }
     if (!res.ok) {

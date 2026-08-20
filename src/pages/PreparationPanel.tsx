@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpDown, GripVertical, Megaphone, RotateCcw, Volume2, X } from "lucide-react";
+import {
+  ArrowUpDown,
+  GripVertical,
+  Megaphone,
+  Printer,
+  RotateCcw,
+  Volume2,
+  X,
+} from "lucide-react";
+import { ScoresheetOverlay } from "../components/ScoresheetOverlay";
 import {
   callPreparation,
   hallColorsView,
@@ -52,6 +61,12 @@ export function PreparationPanel({ announce, azureTts }: Props) {
   // gesagte Stufe. Erster Nachruf = 2 („Zweiter Aufruf"), weitere = 3
   // („Dritter und letzter Aufruf"). Nur im Master-Fenster, kein Server-State.
   const [callStages, setCallStages] = useState<Map<string, 2 | 3>>(new Map());
+  /** Offener Vorabzettel (Spec `schiedsrichterzettel-autodruck`): die
+   *  ausgewählten Spiele und ihre Überschrift. `null` = zu. */
+  const [vorabZettel, setVorabZettel] = useState<{
+    matchIds: number[];
+    titel: string;
+  } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -437,6 +452,36 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                 ))}
               </select>
             )}
+            {/* Vorabzettel für die ausgewählten Spiele: der Bogen zum
+                Mitgeben, bevor gespielt wird. Bewusst an der Auswahl und
+                nicht als „alles drucken" — wer eine ganze Runde will,
+                wählt sie aus. Der Deckel (40 Blatt je Auftrag) liegt im
+                Kern; hier wird deshalb gar nicht erst mehr angeboten. */}
+            <button
+              onClick={() => {
+                const ids = candidates
+                  .filter((c) => checked.has(c.match_id))
+                  .map((c) => c.match_id)
+                  .slice(0, 40);
+                if (ids.length === 0) return;
+                setVorabZettel({
+                  matchIds: ids,
+                  titel:
+                    ids.length === 1
+                      ? (candidates.find((c) => c.match_id === ids[0])?.label ??
+                        "Spiel")
+                      : `${ids.length} Spiele`,
+                });
+              }}
+              disabled={busy || checked.size === 0}
+              title="Leere Schiedsrichterzettel für die ausgewählten Spiele drucken"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300
+                         bg-white px-3 py-1.5 text-sm font-medium text-slate-700
+                         transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Printer size={15} />
+              Zettel
+            </button>
             <button
               onClick={callSelected}
               disabled={busy || checked.size === 0}
@@ -537,6 +582,15 @@ export function PreparationPanel({ announce, azureTts }: Props) {
             ))}
           </ul>
         </div>
+      )}
+
+      {vorabZettel && (
+        <ScoresheetOverlay
+          matchIds={vorabZettel.matchIds}
+          titel={vorabZettel.titel}
+          vorab
+          onClose={() => setVorabZettel(null)}
+        />
       )}
     </section>
   );

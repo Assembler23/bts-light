@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "bts-light"
-version = "0.9.248"
+version = "0.9.249"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -449,6 +449,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "windows",
 ]
 
 [[package]]

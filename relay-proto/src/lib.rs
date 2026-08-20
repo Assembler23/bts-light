@@ -2663,6 +2663,16 @@ pub enum RelayFrame {
         req_id: u64,
         #[serde(rename = "matchIds")]
         match_ids: Vec<i64>,
+        /// **Vorabzettel**: ein Blatt auch für Spiele, zu denen es noch
+        /// keine Aufzeichnung gibt — Kopf gefüllt, Raster leer, von Hand
+        /// zu führen (Spec `schiedsrichterzettel-autodruck`).
+        ///
+        /// `#[serde(default)]` hält die Erweiterung additiv: Ein Host
+        /// älterer Version liest den Frame weiter und antwortet mit dem
+        /// gewohnten Verhalten — ohne Aufzeichnung also mit `found:
+        /// false`.
+        #[serde(default)]
+        vorab: bool,
     },
 }
 
@@ -4613,6 +4623,12 @@ mod tests {
         roundtrip(&RelayFrame::ScoresheetRequest {
             req_id: 7,
             match_ids: vec![41, 42, 43],
+            vorab: false,
+        });
+        roundtrip(&RelayFrame::ScoresheetRequest {
+            req_id: 8,
+            match_ids: vec![41],
+            vorab: true,
         });
         roundtrip(&HostFrame::ScoresheetData {
             req_id: 7,
@@ -4635,6 +4651,28 @@ mod tests {
 
         let ohne_kind: Result<MatchEvent, _> = serde_json::from_str(r#"{"id":"ab"}"#);
         assert!(ohne_kind.is_err());
+    }
+
+    /// Ein Zettel-Abruf **ohne** das neue `vorab` bleibt lesbar und
+    /// bedeutet „wie bisher" — sonst könnte ein Relay älterer Version
+    /// keinen Zettel mehr anfragen.
+    #[test]
+    fn zettel_abruf_ohne_vorab_bleibt_lesbar() {
+        let alt: RelayFrame =
+            serde_json::from_str(r#"{"type":"scoresheet_request","reqId":3,"matchIds":[7]}"#)
+                .unwrap();
+        match alt {
+            RelayFrame::ScoresheetRequest {
+                req_id,
+                match_ids,
+                vorab,
+            } => {
+                assert_eq!(req_id, 3);
+                assert_eq!(match_ids, vec![7]);
+                assert!(!vorab, "ohne Angabe gilt das gewohnte Verhalten");
+            }
+            other => panic!("falscher Frame: {other:?}"),
+        }
     }
 
     /// Eine unbekannte Art ist ein Fehler, kein Panic und keine Annahme —

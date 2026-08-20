@@ -113,6 +113,13 @@ export interface ScorekeeperConfig {
   break_seconds: number;
 }
 
+/** Druck der Schiedsrichterzettel (Rust: `config::PrintConfig`).
+ *  `printer_name` leer = Windows-Standarddrucker. */
+export interface PrintConfig {
+  auto_enabled: boolean;
+  printer_name: string;
+}
+
 /** Schiedsrichtermanagement — globale Schalter (Rust: config::OfficialsConfig).
  *  Turnier-Spezifisches (Reihenfolge, Pausen, Sperrlisten) liegt bewusst NICHT
  *  hier, sondern in einer turniergebundenen Datei (ADR 0022). */
@@ -587,6 +594,8 @@ export interface AppConfig {
   prediction: PredictionConfig;
   /** Zähltafelbediener-Verwaltung (ADR 0007). */
   scorekeeper: ScorekeeperConfig;
+  /** Druck der Schiedsrichterzettel (Spec schiedsrichterzettel-autodruck). */
+  print: PrintConfig;
   /** Einstellungen der automatischen Feldvergabe. */
   auto_assign: AutoAssignConfig;
   /** Hallen-Check-In (ADR 0009). */
