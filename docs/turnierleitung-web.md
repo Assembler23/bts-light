@@ -84,9 +84,18 @@ LAN+Cloud voraus.
   den Aufruf zurück.
 - **Das ⋮-Menü an einer Wartelisten-Zeile:** Alles, was seltener gebraucht
   wird, steckt dahinter — **Nachruf** (beide Parteien oder nur eine), der
-  **Auto-Vergabe**-Umschalter und der **Hallen-Wähler**. Sichtbar bleibt
-  an der Zeile nur, was ständig gebraucht wird; so passt eine Zeile auch
-  auf einem schmalen Tablet in eine Zeile statt in vier.
+  **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, „Ergebnis eintragen"
+  und **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile nur, was ständig
+  gebraucht wird; so passt eine Zeile auch auf einem schmalen Tablet in
+  eine Zeile statt in vier.
+- **🖨 Zettel (leer)** druckt den **Vorabzettel** des Spiels: derselbe
+  Bogen wie der Archivzettel, aber mit leerem Raster — zum Mitgeben an
+  den Schiedsrichter, der ihn von Hand führt. Kopf, Namen und Verein sind
+  vorgedruckt; Feld, Halle und Besetzung nur, soweit sie schon feststehen.
+  Anders als beim Zettel der Beendet-Liste gibt es hier **keine**
+  Aufzeichnungs-Schranke — dass noch nichts gezählt wurde, ist ja der
+  Grund für das leere Blatt. Gedruckt wird über das Gerät, auf dem TL-Web
+  läuft. Details: [schiedsrichterzettel.md](schiedsrichterzettel.md).
 - **Was steht wo:** Jedes Spiel nennt seine **Klasse** in der gewohnten
   Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
   benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es

@@ -116,6 +116,13 @@ Technisch ist das ein eigener Modus, **keine** Änderung des Archivabrufs: Ein
 Spiel ohne Aufzeichnung liefert normal weiterhin nichts (404), vorab dagegen ein
 vollständiges Blatt. An der Route hängt dafür `?vorab=1`.
 
+**Wo er zu finden ist:**
+
+- **Turnier-PC**, Tab „In Vorbereitung": Spiele anhaken, dann **🖨 Zettel**
+  neben „Aufrufen" — ein Blatt je ausgewähltem Spiel, höchstens 40 je Auftrag.
+- **TL-Web**, Spielliste: im ⋮-Menü jeder Zeile **🖨 Zettel (leer)**. Gedruckt
+  wird über das Gerät, auf dem TL-Web läuft.
+
 ## Was es *nicht* gibt
 
 - **Keinen ausgefüllten Zettel für Spiele ohne Tablet.** Ein von Hand
