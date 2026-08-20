@@ -1630,6 +1630,12 @@ async fn overview_health(
     // Bau keinen Namespace — dann darf die leere Projektion später auch nicht
     // unter einer inzwischen frischen Revision festgenagelt werden.
     let mut rev_beim_bau: Option<u64> = None;
+    // Wann der Zustand **gelesen** wurde. Genau dieser Zeitpunkt gehört später
+    // in den Eintrag — nicht der des Ablegens: Sonst gälte er
+    // `250 ms + Bauzeit + Wartezeit am zweiten Schloss` lang, und beides
+    // wächst mit derselben Last, unter der die Frist gebraucht wird
+    // (Review-Fund 20.08.2026, dieselbe Überlegung wie beim Lesen der Uhr).
+    let mut gelesen_ms = 0u64;
     let (courts, call_timer, seqs, push_fallback_slow) = {
         let mut map = broker.namespaces.lock().await;
         // **Die Uhr erst hinter dem Schloss lesen.** Davor gelesen, fehlte der
@@ -1758,6 +1764,12 @@ async fn overview_health(
                         .map(|mo| mo.config.push_fallback_slow)
                         .unwrap_or(false);
                     rev_beim_bau = Some(n.overview_rev);
+                    gelesen_ms = jetzt;
+                    // Jeder Bau zählt — auch der schmale, der durch dieselbe
+                    // Schleife geht. Hier, wo das Schloss ohnehin gehalten
+                    // wird: Ein zweites Nehmen nur für einen Zähler träfe
+                    // ausgerechnet die Feld-Monitore, für die S7 gebaut wurde.
+                    n.overview_builds = n.overview_builds.saturating_add(1);
                     (courts, ct, seqs, slow)
                 }
                 None => (
@@ -1818,16 +1830,13 @@ async fn overview_health(
             //
             // Lieber ein überflüssiger Bau als ein Eintrag, der einen
             // überholten Stand festhält.
-            {
+            if wunsch.is_none() {
                 let mut map = broker.namespaces.lock().await;
                 if let Some(n) = map.get_mut(&ns) {
-                    // Jeder Bau zählt — auch der schmale Abruf geht durch
-                    // dieselbe Schleife, nur mit vorgeschaltetem Filter.
-                    n.overview_builds = n.overview_builds.saturating_add(1);
-                    if wunsch.is_none() && rev_beim_bau == Some(n.overview_rev) {
+                    if darf_ablegen(rev_beim_bau, n.overview_rev) {
                         n.overview_cache = Some(OverviewCache {
                             rev: n.overview_rev,
-                            gebaut_ms: now_ms(),
+                            gebaut_ms: gelesen_ms,
                             courts_json: courts_json.clone(),
                             seqs_json: seqs_json.clone(),
                             ct_text: ct_text.clone(),
@@ -1864,6 +1873,29 @@ async fn overview_health(
         rumpf,
     )
         .into_response()
+}
+
+/// Darf ein frisch gebauter Stand abgelegt werden (Spec
+/// monitor-livestand-push, S9)?
+///
+/// **Nur, wenn die Revision seit dem Lesen still stand.** Zwischen Bau und
+/// Ablage ist das Schloss frei — genau dafür wurde die teure Serialisierung
+/// herausgezogen. Trifft dort ein gezählter Punkt ein, wäre der gebaute Stand
+/// schon überholt; ihn dann unter der **neuen** Revision abzulegen, hieße:
+/// Die vom Anstoß geweckten Anzeigen holen sofort und bekommen genau den
+/// Vor-Punkt-Stand — wegen der inhaltsgleichen Marke sogar als „nichts Neues".
+/// Der Punkt fehlte nicht eine Viertelsekunde, sondern bis zum nächsten
+/// Anstoß.
+///
+/// `None` heißt „beim Bau gab es den Namespace nicht" — dann darf die leere
+/// Projektion erst recht nicht unter einer inzwischen frischen Revision
+/// festgenagelt werden.
+///
+/// Eigene Funktion, weil die Entscheidung im Handler nicht prüfbar war: Der
+/// erste Wächter-Test blieb auch gegen die kaputte Fassung grün (Review-Fund
+/// 20.08.2026).
+fn darf_ablegen(rev_beim_bau: Option<u64>, jetzt_rev: u64) -> bool {
+    rev_beim_bau == Some(jetzt_rev)
 }
 
 /// Marke der Cloud-Übersicht (Spec monitor-livestand-push, S8) — Länge plus
@@ -2835,7 +2867,20 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
                 return;
             }
         }
+        // Bei echter Änderung anstoßen (Review-Fund 20.08.2026). Dieser
+        // Zustand trägt Aufschlag, Pause und Behandlung; er steht **nicht** in
+        // der `/health`-Übersicht, aber im `MonitorState` des festen
+        // Feld-Monitors. Bisher stieß er gar nicht an und erschien nur, wenn
+        // zufällig ein Score-Frame hinterherkam — nach einem Reconnect etwa.
+        // Genau diesen Zufalls-Träger nimmt die Entprellung von
+        // `forward_score` weg, also holt der Zustand seinen Anstoß jetzt
+        // selbst. Eine begonnene Pause erscheint damit sofort statt erst beim
+        // nächsten Sicherheits-Abruf, der im Push-Betrieb bewusst langsam ist.
+        let neu = namespace.court_state.get(&court_id) != Some(&state);
         namespace.court_state.insert(court_id, state);
+        if neu {
+            notify_monitor(namespace, court_id);
+        }
     }
 }
 
@@ -6656,6 +6701,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn abgelegt_wird_nur_der_stand_der_noch_gilt() {
+        // Der schwerste Fund dieser Etappe, jetzt an der Entscheidung selbst
+        // festgenagelt. Der erste Wächter-Test dazu prüfte in Wahrheit nichts:
+        // Er stieß NACH dem Abruf an und war deshalb auch gegen die kaputte
+        // Fassung grün — nachgemessen im Review vom 20.08.2026. Das Fenster
+        // zwischen Bau und Ablage lässt sich ohne Nebenläufigkeit nicht
+        // nachstellen, also wird die Regel selbst geprüft.
+        assert!(darf_ablegen(Some(4), 4), "Revision stand still → ablegen");
+        assert!(
+            !darf_ablegen(Some(4), 5),
+            "ein Anstoß im Fenster → NICHT ablegen, sonst hält der Eintrag \
+             einen Vor-Punkt-Stand unter der neuen Revision fest"
+        );
+        assert!(
+            !darf_ablegen(None, 0),
+            "beim Bau gab es den Namespace nicht → die leere Projektion darf \
+             nicht unter einer frischen Revision festgenagelt werden"
+        );
+        assert!(
+            !darf_ablegen(None, 7),
+            "dasselbe bei fortgeschrittener Revision"
+        );
+    }
+
     #[tokio::test]
     async fn ein_anstoss_zwischen_bau_und_ablage_verhindert_die_ablage() {
         // Die Invariante hinter dem schwersten Fund dieser Etappe: Der
@@ -6744,8 +6814,8 @@ mod tests {
         while host_rx.try_recv().is_ok() {
             host_frames += 1;
         }
-        assert!(
-            host_frames >= 3,
+        assert_eq!(
+            host_frames, 3,
             "alle drei Meldungen erreichen den Host, auch die unveränderte"
         );
     }
@@ -7478,6 +7548,79 @@ mod tests {
             !ns.court_scores.contains_key(&101) || ns.court_scores[&101].is_empty(),
             "hier war ohnehin kein Stand gesetzt — die Prüfung hält die Absicht fest"
         );
+    }
+
+    #[tokio::test]
+    async fn ein_geaenderter_spielzustand_nudgt_genau_einmal() {
+        // Pause, Behandlung und Aufschlag reisen im `state_sync` des Tablets.
+        // Sie stehen nicht in der Übersicht, aber im Zustand des festen
+        // Feld-Monitors — und sie stießen bisher gar nicht an: Sie erschienen
+        // nur, wenn zufällig ein Score-Frame hinterherkam. Genau diesen
+        // Zufalls-Träger nimmt die Entprellung von `forward_score` weg
+        // (Review-Fund 20.08.2026).
+        let (broker, _tablet_rx, _host) = broker_with_tablet(101).await;
+        let tx = {
+            let map = broker.namespaces.lock().await;
+            map.get("ns1").unwrap().tablets.get(&101).unwrap().clone()
+        };
+        let (mon, mut mon_rx) = mpsc::unbounded_channel();
+        assert!(subscribe_monitor(&broker, "ns1", Some(101), &mon).await);
+
+        store_court_state(&broker, "ns1", 101, "{\"pause\":true}".into(), &tx).await;
+        assert!(mon_rx.try_recv().is_ok(), "die begonnene Pause stößt an");
+
+        store_court_state(&broker, "ns1", 101, "{\"pause\":true}".into(), &tx).await;
+        assert!(
+            mon_rx.try_recv().is_err(),
+            "derselbe Zustand noch einmal: kein Anstoß"
+        );
+
+        store_court_state(&broker, "ns1", 101, "{\"pause\":false}".into(), &tx).await;
+        assert!(mon_rx.try_recv().is_ok(), "das Ende der Pause stößt an");
+    }
+
+    #[tokio::test]
+    async fn ein_korrigierter_aufruf_zeitpunkt_nudgt() {
+        // Gegenstück zu `dasselbe_match_erneut_nudgt_nicht`: Der
+        // Aufruf-Zeitpunkt steht als `on_court_since_ms` in der Übersicht und
+        // speist dort die Aufruf-Uhr. Ohne ihn im Vergleich blieb die Uhr bei
+        // einem korrigierten Stempel bis zur Hart-Frist auf dem alten Wert —
+        // und ohne diesen Test bliebe die Suite grün, wenn jemand die
+        // Vergleichszeile wieder entfernt (Review-Fund 20.08.2026).
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.court_matches.insert(101, brief(7));
+            ns.court_labels.insert(101, "Feld 1".into());
+            ns.court_hall.insert(101, String::new());
+            ns.court_on_court_since.insert(101, 1000);
+        }
+        register_host(&broker, "ns1", &host).await;
+        let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+                match_brief: brief(7),
+                // Alles gleich — nur der Aufruf-Zeitpunkt ist korrigiert.
+                on_court_since_ms: Some(2000),
+            },
+            &host,
+        )
+        .await;
+
+        let (court, _) = nudge_of(
+            anzeige
+                .try_recv()
+                .expect("Anstoß bei korrigiertem Aufruf-Zeitpunkt"),
+        );
+        assert_eq!(court, 101);
     }
 
     #[tokio::test]

@@ -167,6 +167,11 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   Räumung, Feldwechsel und den in BTP von Hand eingetragenen Satzstand ab.
   Über die Cloud tun dasselbe die Relay-Arme `MatchAssigned`/`MatchCleared`,
   jeweils erst nachdem ihr Zwischenstand steht.
+- **Pause, Behandlung und Aufschlag stoßen selbst an** (in der Cloud seit
+  v0.9.245): Dieser Zustand erschien vorher nur, wenn zufällig ein gezählter
+  Punkt hinterherkam — er hatte keinen eigenen Anstoß. Eine begonnene
+  Behandlung wird damit sofort sichtbar statt erst beim nächsten
+  Sicherheits-Abruf.
 - **Die Übersicht wird einmal gerechnet, nicht je Anzeige** (im Hallennetz
   seit v0.9.236, in der Cloud seit v0.9.245): Zwanzig Fernseher fragen viermal
   je Sekunde nach; der Zustand entsteht trotzdem nur, wenn sich wirklich etwas
