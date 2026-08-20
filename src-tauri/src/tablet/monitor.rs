@@ -212,7 +212,14 @@ pub fn read_ad_style(path: &Path) -> HashMap<String, AdStyle> {
     let Ok(j) = std::fs::read_to_string(path) else {
         return HashMap::new();
     };
-    let mut map: HashMap<String, AdStyle> = serde_json::from_str(&j).unwrap_or_default();
+    parse_ad_style(&j)
+}
+
+/// Der Parse-Schritt für sich — der Monitor-Server hält den Dateiinhalt
+/// ohnehin schon in der Hand (er ist sein Cache-Schlüssel) und soll ihn nicht
+/// ein zweites Mal lesen müssen.
+pub fn parse_ad_style(roh: &str) -> HashMap<String, AdStyle> {
+    let mut map: HashMap<String, AdStyle> = serde_json::from_str(roh).unwrap_or_default();
     // Ein von Hand verfälschter Farbwert darf nicht bis ins `style`-Attribut
     // einer Anzeigeseite durchreisen — dort wäre er eine Einschleusstelle.
     // Dieselbe Wächter-Haltung wie beim Hallen-Farb-Store.
@@ -641,6 +648,46 @@ mod tests {
         )
         .unwrap();
         assert!(read_ad_style(&path).is_empty(), "krumme Farbe muss raus");
+    }
+
+    #[test]
+    fn eine_farbaenderung_aendert_den_dateiinhalt() {
+        // Der Monitor-Server merkt sich den Stil am **Inhalt** der Datei, nicht
+        // an (Änderungszeit, Größe). Der Grund steht hier als Test: Ein
+        // Farbwechsel ist längenerhaltend, und Windows-Zeitstempel rücken nur
+        // im ~15,6-ms-Takt vor — zwei Wechsel in einem Tick wären am alten
+        // Schlüssel ununterscheidbar gewesen (Review 20.08.2026).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AD_STYLE_FILE);
+        let mut map = HashMap::new();
+        map.insert(
+            "ad-1.png".to_string(),
+            AdStyle {
+                bg: "#ff0000".to_string(),
+                show_court: false,
+            },
+        );
+        write_ad_style(&path, &map).unwrap();
+        let vorher = std::fs::read_to_string(&path).unwrap();
+        let laenge_vorher = vorher.len();
+
+        map.insert(
+            "ad-1.png".to_string(),
+            AdStyle {
+                bg: "#00ff00".to_string(),
+                show_court: false,
+            },
+        );
+        write_ad_style(&path, &map).unwrap();
+        let nachher = std::fs::read_to_string(&path).unwrap();
+
+        assert_eq!(
+            laenge_vorher,
+            nachher.len(),
+            "Farbwechsel ist längenerhaltend — genau deshalb taugt die Größe nicht als Schlüssel"
+        );
+        assert_ne!(vorher, nachher, "der Inhalt unterscheidet sich sehr wohl");
+        assert_eq!(parse_ad_style(&nachher)["ad-1.png"].bg, "#00ff00");
     }
 
     #[test]

@@ -643,6 +643,17 @@ export function SetupWizard({
     }
   }
 
+  /** Holt die Bildliste frisch von der Platte — nach einem fehlgeschlagenen
+   *  Schreibvorgang, damit die Anzeige nicht optimistisch etwas behauptet,
+   *  das nirgends gespeichert ist. */
+  async function ladeAds() {
+    try {
+      setAds(await listCourtAds());
+    } catch (e) {
+      setAdError(String(e));
+    }
+  }
+
   /** Entfernt ein hinterlegtes Werbebild. */
   async function deleteAd(file: string) {
     setAdError("");
@@ -1710,13 +1721,27 @@ export function SetupWizard({
                            type="color"
                            value={ad.bg || "#000000"}
                            onChange={(e) => {
+                             // Nur lokal mitziehen: React bildet `onChange` auf
+                             // das `input`-Ereignis ab, das WebView2 waehrend
+                             // des Ziehens im Farbdialog fortlaufend feuert.
+                             // Jeder Schreibvorgang waere ein volles
+                             // Lesen-Aendern-Schreiben der Stil-Datei.
                              const farbe = e.currentTarget.value.toLowerCase();
                              setAds((prev) =>
                                prev.map((a) =>
                                  a.file === ad.file ? { ...a, bg: farbe } : a,
                                ),
                              );
-                             void setCourtAdStyle(ad.file, farbe, ad.show_court);
+                           }}
+                           onBlur={(e) => {
+                             // Persistiert wird beim Verlassen — wie beim
+                             // Label-Feld daneben. Schlaegt es fehl, gewinnt
+                             // die Platte: Der optimistische Stand wird
+                             // zurueckgeholt, statt eine Farbe anzuzeigen,
+                             // die nirgends steht.
+                             const farbe = e.currentTarget.value.toLowerCase();
+                             void setCourtAdStyle(ad.file, farbe, ad.show_court)
+                               .catch(() => void ladeAds());
                            }}
                            className="h-6 w-8 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
                          />
@@ -1736,7 +1761,11 @@ export function SetupWizard({
                                  a.file === ad.file ? { ...a, show_court: on } : a,
                                ),
                              );
-                             void setCourtAdStyle(ad.file, ad.bg || "#000000", on);
+                             void setCourtAdStyle(
+                               ad.file,
+                               ad.bg || "#000000",
+                               on,
+                             ).catch(() => void ladeAds());
                            }}
                          />
                          Feld zeigen

@@ -110,6 +110,10 @@
   }
 
   function showEmpty(show) {
+    // Ohne Bild gibt es auch keine Bildfarbe mehr: Der Hinweistext ist fuer
+    // den dunklen Grund der Seite gesetzt und waere auf einem stehen
+    // gebliebenen Weiss praktisch unlesbar.
+    if (show) document.body.style.backgroundColor = '';
     emptyEl.classList.toggle('show', !!show);
     if (show) {
       imgA.classList.remove('show');
@@ -147,9 +151,15 @@
       var available = fileParam && ads.indexOf(fileParam) >= 0;
       // Nur dann showImage rufen, wenn sich der konkret angezeigte File
       // aendert (oder erstmals da/wegfaellt).
+      if (available) {
+        // Die Farbe IMMER neu setzen, solange das Bild verfuegbar ist: Im
+        // Einzelbild-Modus laeuft kein Rotations-Timer, der sie sonst
+        // nachzoege — eine reine Farbaenderung bliebe bis zum naechsten
+        // Neuladen der Seite unsichtbar.
+        setzeStil(ads.indexOf(fileParam));
+      }
       if (available && fileParam !== lastSingleFile) {
         showEmpty(false);
-        setzeStil(ads.indexOf(fileParam));
         showImage(BASE + 'ads/' + encodeURIComponent(fileParam));
         lastSingleFile = fileParam;
       } else if (!available && lastSingleFile !== '') {

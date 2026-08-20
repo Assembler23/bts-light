@@ -552,6 +552,20 @@
     renderAd();
   }
 
+  // Ob der Rand fuer die Feldbezeichnung freigehalten wird. Bewusst eine
+  // eigene Funktion und NICHT nur im `renderAd`: Die Bezeichnung kommt aus dem
+  // Zustand und kann SPAETER eintreffen als die Bildliste — im Cloud ist das
+  // sogar der Normalfall, denn der Relay kennt das Feld-Label erst ab der
+  // ersten Zuweisung. Haengte die Entscheidung allein am Render, bliebe sie
+  // bei genau einem Werbebild fuer immer aus: Dann laeuft kein Rotations-
+  // Timer, und `applyAds` steigt beim unveraenderten Schluessel frueh aus.
+  // Ohne Bezeichnung wird auch NICHT verkleinert — ein leerer Rand waere
+  // schlechter als das volle Bild.
+  function feldMarke() {
+    var hat = adState.zeigtFeld && (els.adCourt.textContent || "") !== "";
+    els.adView.classList.toggle("mit-feld", hat);
+  }
+
   function rotateAd() {
     if (adState.urls.length === 0) return;
     adState.idx = (adState.idx + 1) % adState.urls.length;
@@ -564,15 +578,9 @@
       els.adImg.style.display = "";
       els.adFallback.classList.remove("show");
       var stil = adState.stile[adState.idx] || {};
-      var bg = adFarbe(stil.bg, "#000000");
-      els.adView.style.backgroundColor = bg;
-      // Ohne Feldbezeichnung im Zustand gibt es auch keinen Rand: Ein leerer
-      // Rahmen um ein verkleinertes Bild waere schlechter als das volle Bild.
-      // Im Cloud ist das der Normalfall, solange dem Feld noch nie ein Spiel
-      // zugewiesen war (der Relay kennt das Label erst ab dann).
-      var label = els.adCourt.textContent || "";
-      els.adView.classList.toggle("mit-feld", adState.zeigtFeld && label !== "");
+      els.adView.style.backgroundColor = adFarbe(stil.bg, "#000000");
       els.adCourt.style.color = adFarbe(stil.fg, "#ffffff");
+      feldMarke();
     } else {
       els.adImg.style.display = "none";
       els.adImg.removeAttribute("src");
@@ -1089,6 +1097,9 @@
       // wie die des Leerlauf-Fallbacks.
       els.adCourt.textContent = state.courtLabel || "";
       applyAds(ads, cfg.adIntervalS || 10, state.adStyles);
+      // Auch dann nachziehen, wenn `applyAds` frueh ausgestiegen ist: Das
+      // Label kann sich geaendert haben, ohne dass die Bildliste es tat.
+      feldMarke();
     }
   }
 
