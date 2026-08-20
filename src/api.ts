@@ -184,9 +184,16 @@ export const finishedMatches = (): Promise<FinishedMatchRow[]> =>
 /** Punktverlauf eines Matches (null = kein Verlauf aufgezeichnet). */
 /** Schiedsrichterzettel als fertiges HTML (Spec schiedsrichterzettel-druck,
  *  ADR 0039). Mehrere Kennungen ergeben einen Stapeldruck. `null` = zu
- *  keinem der Spiele liegt eine Aufzeichnung vor. */
-export const matchScoresheetHtml = (matchIds: number[]): Promise<string | null> =>
-  invoke("match_scoresheet_html", { matchIds });
+ *  keinem der Spiele liegt eine Aufzeichnung vor.
+ *
+ *  `vorab: true` liefert den **Vorabzettel** eines noch ausstehenden
+ *  Spiels: Kopf gefüllt, Raster leer, von Hand zu führen (Spec
+ *  schiedsrichterzettel-autodruck). Nur dann gibt es auch ohne
+ *  Aufzeichnung ein Blatt. */
+export const matchScoresheetHtml = (
+  matchIds: number[],
+  vorab = false,
+): Promise<string | null> => invoke("match_scoresheet_html", { matchIds, vorab });
 
 export const matchTimeline = (matchId: number): Promise<MatchTimeline | null> =>
   invoke("match_timeline", { matchId });

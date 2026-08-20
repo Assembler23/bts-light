@@ -105,11 +105,23 @@ erzeugten Blatt, dass sich nichts überdeckt und nichts über den Rand läuft.
 **Musterblatt ansehen:** `cargo test --lib musterblatt -- --ignored --nocapture`
 schreibt `target/musterblatt.html`.
 
+## Vorabzettel (Leerzettel)
+
+Für ein Spiel, das noch aussteht, gibt es den **Vorabzettel**: derselbe Bogen mit
+gefülltem Kopf — Turnier, Disziplin, Spielnummer, Namen, Verein, dazu Feld, Halle
+und Besetzung, **sofern sie schon feststehen** — und leerem Raster. Er wird von
+Hand geführt.
+
+Technisch ist das ein eigener Modus, **keine** Änderung des Archivabrufs: Ein
+Spiel ohne Aufzeichnung liefert normal weiterhin nichts (404), vorab dagegen ein
+vollständiges Blatt. An der Route hängt dafür `?vorab=1`.
+
 ## Was es *nicht* gibt
 
-- **Keinen Zettel für Spiele ohne Tablet.** Ein von Hand eingetragenes Ergebnis
-  hat keine Datenbasis; ein halb ausgefüllter Bogen wäre irreführender als keiner.
-  Der Knopf erscheint dort gar nicht erst.
+- **Keinen ausgefüllten Zettel für Spiele ohne Tablet.** Ein von Hand
+  eingetragenes Ergebnis hat keine Datenbasis; ein halb ausgefüllter Bogen wäre
+  irreführender als keiner. Was es dafür gibt, ist der Vorabzettel oben — leer
+  und ehrlich.
 - **Kein nachträgliches Bearbeiten** eines abgeschlossenen Zettels.
 - **Keine Aufschlagfolge bei Altbestand.** Spiele, die vor dieser Version gezählt
   wurden, haben kein `serve_start`. Der Zettel fällt dann im Doppel auf zwei

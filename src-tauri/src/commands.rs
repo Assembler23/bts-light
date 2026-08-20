@@ -2378,10 +2378,19 @@ pub struct FinishedMatchRow {
 /// Cloud-Only-Betrieb. Mehrere Kennungen ergeben einen Stapeldruck.
 /// `None` = zu keinem der Spiele liegt eine Aufzeichnung vor.
 #[tauri::command]
-pub fn match_scoresheet_html(state: State<'_, AppState>, match_ids: Vec<i64>) -> Option<String> {
+pub fn match_scoresheet_html(
+    state: State<'_, AppState>,
+    match_ids: Vec<i64>,
+    vorab: Option<bool>,
+) -> Option<String> {
     let config = state.config.lock().ok()?.clone();
     let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
-    crate::tablet::scoresheet::html_fuer(&state.tablet, logo.as_deref(), &match_ids)
+    let modus = if vorab.unwrap_or(false) {
+        crate::tablet::scoresheet::Modus::Vorab
+    } else {
+        crate::tablet::scoresheet::Modus::Normal
+    };
+    crate::tablet::scoresheet::html_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
 }
 
 /// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser

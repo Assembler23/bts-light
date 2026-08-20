@@ -20,6 +20,20 @@ use relay_proto::{EventKind, MatchEvent, MatchTimeline, Phase};
 // viele Ballwechsel in einen Block passen.
 pub use super::blatt::BALLWECHSEL_JE_BLOCK;
 
+/// Wofür der Zettel gedacht ist.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Modus {
+    /// Archivausdruck eines gezählten Spiels. Ohne jede Aufzeichnung gibt
+    /// es **keinen** Zettel — der Abruf endet ehrlich mit 404 statt mit
+    /// einem leeren Blatt.
+    #[default]
+    Normal,
+    /// **Vorabzettel** für ein Spiel, das noch aussteht: Kopf gefüllt,
+    /// soweit bekannt, Raster leer. Er wird von Hand geführt, deshalb ist
+    /// die fehlende Aufzeichnung hier kein Mangel, sondern der Zweck.
+    Vorab,
+}
+
 /// Eine gefüllte Rasterzelle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Zelle {
@@ -365,6 +379,7 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
 pub fn dokumente(
     state: &super::state::TabletState,
     logo_uri: Option<&str>,
+    modus: Modus,
     match_ids: &[i64],
 ) -> Vec<SheetDoc> {
     let Some(snap) = state.snapshot_clone() else {
@@ -383,11 +398,17 @@ pub fn dokumente(
             let m = snap.matches.iter().find(|m| m.id == id)?;
             let timeline = state.timeline_store().timeline(id).unwrap_or_default();
             let sheet = state.sheet_store().sheet(id).unwrap_or_default();
-            // Ohne jede Aufzeichnung gibt es nichts zu drucken. Ein
-            // Papier-Ergebnis bekommt bewusst keinen Zettel (Nicht-Ziel
-            // der Spec) — ein halb ausgefüllter Bogen wäre irreführender
-            // als keiner.
-            if timeline.sets.iter().all(|s| s.points.is_empty()) && sheet.events.is_empty() {
+            // Ohne jede Aufzeichnung gibt es im Normalfall nichts zu
+            // drucken: Ein nachträglich eingetragenes Papier-Ergebnis
+            // ergäbe einen halb ausgefüllten Bogen, der irreführender
+            // wäre als keiner.
+            //
+            // Beim **Vorabzettel** ist genau das gewollt — er wird ja von
+            // Hand geführt. Deshalb greift der Filter dort nicht.
+            if modus == Modus::Normal
+                && timeline.sets.iter().all(|s| s.points.is_empty())
+                && sheet.events.is_empty()
+            {
                 return None;
             }
 
@@ -486,12 +507,13 @@ pub fn dokumente(
 pub fn html_fuer(
     state: &super::state::TabletState,
     logo_uri: Option<&str>,
+    modus: Modus,
     match_ids: &[i64],
 ) -> Option<String> {
     if match_ids.is_empty() || match_ids.len() > relay_proto::MAX_SHEETS_PER_DOC {
         return None;
     }
-    let docs = dokumente(state, logo_uri, match_ids);
+    let docs = dokumente(state, logo_uri, modus, match_ids);
     if docs.is_empty() {
         return None;
     }

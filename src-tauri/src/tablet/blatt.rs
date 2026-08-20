@@ -337,7 +337,13 @@ pub fn blatt(doc: &SheetDoc) -> Vec<Seite> {
     let plan = blockfolge(&doc.grid);
     let mut seiten: Vec<Seite> = Vec::new();
 
-    for (seiten_nr, teil) in plan.chunks(BLOECKE_JE_SEITE).enumerate() {
+    // **Jede Rasterseite trägt sechs Blöcke, auch leere.** So ist es auf
+    // dem Vorbild: Der Bogen ist vorgedruckt, ob drei Sätze gespielt
+    // wurden oder keiner. Genau das macht den Vorabzettel möglich, ohne
+    // ein zweites Layout zu bauen — ohne Aufzeichnung sind eben alle
+    // sechs Blöcke leer und werden von Hand geführt.
+    let seitenzahl = plan.len().div_ceil(BLOECKE_JE_SEITE).max(1);
+    for seiten_nr in 0..seitenzahl {
         let mut seite = Seite::default();
         let erste = seiten_nr == 0;
         let kopf_hoehe = if erste { KOPF_HOEHE_MM } else { KOPF_FOLGE_MM };
@@ -347,17 +353,10 @@ pub fn blatt(doc: &SheetDoc) -> Vec<Seite> {
             kopf_kurz(&mut seite, doc, seiten_nr + 1);
         }
         let raster_y = RAND_MM + kopf_hoehe;
-        for (i, bp) in teil.iter().enumerate() {
+        for i in 0..BLOECKE_JE_SEITE {
+            let bp = plan.get(seiten_nr * BLOECKE_JE_SEITE + i);
             block_zeichnen(&mut seite, doc, bp, raster_y + i as f32 * BLOCK_RASTER_MM);
         }
-        seiten.push(seite);
-    }
-
-    if seiten.is_empty() {
-        // Ein Zettel ohne jeden Satz-Block — theoretisch möglich, wenn die
-        // Aufzeichnung leer ist. Der Kopf allein ist immer noch ein Blatt.
-        let mut seite = Seite::default();
-        kopf_voll(&mut seite, doc);
         seiten.push(seite);
     }
 
@@ -603,12 +602,14 @@ fn kopf_kurz(seite: &mut Seite, doc: &SheetDoc, nr: usize) {
 }
 
 /// Einen Rasterblock zeichnen.
-fn block_zeichnen(seite: &mut Seite, doc: &SheetDoc, bp: &BlockPlan, y: f32) {
+///
+/// `bp` ist `None` für einen **vorgedruckten leeren Block** — das Gitter
+/// steht, die Zellen bleiben frei. Ein Vorabzettel besteht nur aus solchen
+/// Blöcken.
+fn block_zeichnen(seite: &mut Seite, doc: &SheetDoc, bp: Option<&BlockPlan>, y: f32) {
     let x0 = RASTER_X_MM;
     let hoehe = ZEILEN_JE_BLOCK as f32 * ZEILE_HOEHE_MM;
-    let Some(satz) = doc.grid.blocks.get(bp.satz_index) else {
-        return;
-    };
+    let satz = bp.and_then(|bp| doc.grid.blocks.get(bp.satz_index));
 
     // Team B liegt grau hinterlegt — wie im Vorbild, damit die Seiten auch
     // in Schwarz-Weiß auseinanderzuhalten sind.
@@ -660,6 +661,13 @@ fn block_zeichnen(seite: &mut Seite, doc: &SheetDoc, bp: &BlockPlan, y: f32) {
             .pt(NAME_PT),
         );
     }
+
+    // Ab hier gibt es nur noch etwas zu schreiben, wenn dieser Block auch
+    // Daten hat. Ein leerer Block ist an dieser Stelle fertig — sein
+    // Gitter steht, den Rest führt die Hand.
+    let (Some(bp), Some(satz)) = (bp, satz) else {
+        return;
+    };
 
     // Nur der erste Block eines Satzes trägt A/R-Marken und Startstände.
     if bp.lauf == 0 {

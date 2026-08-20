@@ -3808,6 +3808,25 @@ async fn tl_state_route(
 
 /// Punktverlauf eines Matches für ein Turnierleitungs-Gerät — **on-demand**
 /// durchgereicht (Spec punktverlauf-graph, AK-5): Anfrage per
+/// Abfrage-Teil des Zettel-Abrufs. Der Relay deutet den Wert nicht, er
+/// reicht ihn durch — dieselbe Lesart wie am eingebetteten Server:
+/// `1`/`true`/`ja` schalten den Vorabzettel ein, alles andere bedeutet
+/// „wie bisher".
+#[derive(serde::Deserialize, Default)]
+struct SheetQuery {
+    #[serde(default)]
+    vorab: Option<String>,
+}
+
+impl SheetQuery {
+    fn vorab(&self) -> bool {
+        matches!(
+            self.vorab.as_deref().map(str::trim),
+            Some("1" | "true" | "ja")
+        )
+    }
+}
+
 /// Schiedsrichterzettel eines oder mehrerer Spiele (ADR 0039) —
 /// **on-demand** durchgereicht wie der Punktverlauf: Anfrage per
 /// `ScoresheetRequest` an den Turnier-PC, Antwort (`ScoresheetData`)
@@ -3820,11 +3839,17 @@ async fn tl_state_route(
 ///
 /// `{ids}` ist eine Komma-Liste; der Deckel `MAX_SHEETS_PER_DOC` greift
 /// **vor** jeder weiteren Arbeit.
+///
+/// `?vorab=1` reicht der Relay als Flagge im Frame durch (Spec
+/// `schiedsrichterzettel-autodruck`) — welches Blatt daraus wird,
+/// entscheidet allein der Host.
 async fn tl_scoresheet_route(
     State(broker): State<Broker>,
     headers: axum::http::HeaderMap,
     Path(ids): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<SheetQuery>,
 ) -> axum::response::Response {
+    let vorab = q.vorab();
     let token = bearer(&headers);
     let now = now_ms();
     let Some(match_ids) = parse_sheet_ids(&ids) else {
@@ -3883,7 +3908,11 @@ async fn tl_scoresheet_route(
         namespace.next_req += 1;
         namespace.sheet_pending.insert(req_id, ack_tx);
         if host
-            .send(text(&RelayFrame::ScoresheetRequest { req_id, match_ids }))
+            .send(text(&RelayFrame::ScoresheetRequest {
+                req_id,
+                match_ids,
+                vorab,
+            }))
             .is_err()
         {
             namespace.sheet_pending.remove(&req_id);
@@ -7924,7 +7953,13 @@ mod tests {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
         let warten = tokio::spawn(async move {
-            tl_scoresheet_route(State(broker2), headers, Path("42".to_string())).await
+            tl_scoresheet_route(
+                State(broker2),
+                headers,
+                Path("42".to_string()),
+                axum::extract::Query(SheetQuery::default()),
+            )
+            .await
         });
 
         let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
@@ -7935,7 +7970,10 @@ mod tests {
             panic!("Text-Frame erwartet")
         };
         let frame: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
-        let RelayFrame::ScoresheetRequest { req_id, match_ids } = frame else {
+        let RelayFrame::ScoresheetRequest {
+            req_id, match_ids, ..
+        } = frame
+        else {
             panic!("ScoresheetRequest erwartet, war: {frame:?}")
         };
         assert_eq!(match_ids, vec![42]);
@@ -7963,8 +8001,13 @@ mod tests {
         }
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
-        let antwort =
-            tl_scoresheet_route(State(broker.clone()), headers, Path("42".to_string())).await;
+        let antwort = tl_scoresheet_route(
+            State(broker.clone()),
+            headers,
+            Path("42".to_string()),
+            axum::extract::Query(SheetQuery::default()),
+        )
+        .await;
         assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
         let body = axum::body::to_bytes(antwort.into_body(), 64 * 1024)
             .await
@@ -7990,8 +8033,13 @@ mod tests {
         // gar nicht erst behelligt.
         let mut fremd = axum::http::HeaderMap::new();
         fremd.insert(header::AUTHORIZATION, "Bearer fremd".parse().unwrap());
-        let antwort =
-            tl_scoresheet_route(State(broker.clone()), fremd, Path("42".to_string())).await;
+        let antwort = tl_scoresheet_route(
+            State(broker.clone()),
+            fremd,
+            Path("42".to_string()),
+            axum::extract::Query(SheetQuery::default()),
+        )
+        .await;
         assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert!(host_rx.try_recv().is_err(), "kein Frame beim Host");
 
@@ -8000,7 +8048,13 @@ mod tests {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
         let warten = tokio::spawn(async move {
-            tl_scoresheet_route(State(broker2), headers, Path("42".to_string())).await
+            tl_scoresheet_route(
+                State(broker2),
+                headers,
+                Path("42".to_string()),
+                axum::extract::Query(SheetQuery::default()),
+            )
+            .await
         });
         let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
             .await
@@ -8037,7 +8091,13 @@ mod tests {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, "Bearer token".parse().unwrap());
         let warten = tokio::spawn(async move {
-            tl_scoresheet_route(State(broker2), headers, Path("42".to_string())).await
+            tl_scoresheet_route(
+                State(broker2),
+                headers,
+                Path("42".to_string()),
+                axum::extract::Query(SheetQuery::default()),
+            )
+            .await
         });
         let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
             .await
