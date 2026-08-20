@@ -34,6 +34,12 @@ export function AnnounceSettings({
     a.name_overrides_enabled ?? true,
   );
   const [annShare, setAnnShare] = useState(a.share_corrections ?? false);
+  // Beide Schalter fehlen in Configs vor v0.9.246 — dann gilt „an", wie die
+  // Rust-Seite es beim Laden ebenfalls einsetzt.
+  const [annScorekeeper, setAnnScorekeeper] = useState(
+    a.announce_scorekeeper !== false,
+  );
+  const [annUmpire, setAnnUmpire] = useState(a.announce_umpire !== false);
   const [annHall, setAnnHall] = useState(a.announce_hall ?? "");
   const [azEnabled, setAzEnabled] = useState(az?.enabled ?? false);
   const [azRegion, setAzRegion] = useState(az?.region ?? "");
@@ -103,6 +109,8 @@ export function AnnounceSettings({
         name_overrides: cleanOverrides,
         name_overrides_enabled: annOverridesEnabled,
         share_corrections: annShare,
+        announce_scorekeeper: annScorekeeper,
+        announce_umpire: annUmpire,
         announce_hall: annHall.trim(),
         // Diese Form verwaltet die Blöcke nicht – aktuellen Stand bewahren
         // (sonst würde ein paralleler Block-Speichervorgang überschrieben).
@@ -301,6 +309,27 @@ export function AnnounceSettings({
           onChange={(e) => setAnnGong(e.currentTarget.checked)}
         />
         Gong vor der Ansage
+      </label>
+
+      {/* Wer außer den Spielern genannt wird. Beide Schalter wirken auf die
+          Feldansage (automatisch wie manuell, inklusive Nachruf) — die
+          eigenen Knöpfe „SR/AR ansagen" und „Bedienung nachrufen" auf der
+          Spielübersicht bleiben unberührt. */}
+      <label className="flex items-center gap-2 text-sm text-slate-600">
+        <input
+          type="checkbox"
+          checked={annScorekeeper}
+          onChange={(e) => setAnnScorekeeper(e.currentTarget.checked)}
+        />
+        Zähltafelbedienung mit ansagen
+      </label>
+      <label className="flex items-center gap-2 text-sm text-slate-600">
+        <input
+          type="checkbox"
+          checked={annUmpire}
+          onChange={(e) => setAnnUmpire(e.currentTarget.checked)}
+        />
+        Schiedsrichter mit ansagen
       </label>
 
       {/* Test */}

@@ -4,10 +4,11 @@ Wird in BTP ein Spiel auf ein Feld gezogen, spielt bts-light auf dem
 Turnier-PC eine gesprochene Ansage ab: **Gong → „Feld X" → Disziplin
 (+ Klasse) → Paarung → „Feld X"**. Deutsch oder Englisch, wählbare Stimmen,
 einstellbares Tempo. Eingeführt in v0.6.0; Klassen-Ansage
-(„Herreneinzel **A**") seit v0.9.145. Ist die Zähltafelbediener-Verwaltung
-aktiv (ADR 0007), folgt am Ende zusätzlich „**Tabletbedienung: {Name}**"
-(`scorekeeperNames` in `AnnounceMatchInput`, nur bei zugewiesenem Bediener) —
-siehe [zaehltafelbediener.md](zaehltafelbediener.md).
+(„Herreneinzel **A**") seit v0.9.145. Steht am Feld eine Bedienung, folgt am Ende zusätzlich
+„**Tabletbedienung: {Name}**" (`scorekeeperNames` in `AnnounceMatchInput`) —
+seit v0.9.246 gesteuert vom Schalter `announce_scorekeeper`
+([ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)) statt von der Herkunft
+des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
 
 ## Funktionsweise
 
@@ -320,6 +321,8 @@ dem Turnier einmal die Test-Ansage drücken.
 | `name_overrides_enabled` | Korrekturen anwenden (Basis-Wörterbuch + Nutzer)? Default `true` |
 | `announce_hall` | Mehr-Hallen: nur Spiele dieser Halle (BTP-Location-Name) ansagen; leer = alle (Default). `MatchAnnouncer` filtert neue Feldbelegungen auf `court.location`. Siehe [multi-hall.md](multi-hall.md). |
 | `saved_announcements` | Gespeicherte Ansage-Blöcke (wiederkehrende Freitext-Ansagen), Liste `string` (Default leer). |
+| `announce_scorekeeper` | Zähltafelbedienung mit ansagen? Default `true`. An = angesagt wird, **was am Feld steht** (zugewiesene Bedienung *oder* pro-Feld-Hinweis), aus = nie. Löst die feste Regel aus ADR 0007 ab ([ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)). |
+| `announce_umpire` | Schiedsrichter/Aufschlagrichter in der Feld-Ansage nennen? Default `true`. Die eigenen Knöpfe „SR/AR ansagen" und „Bedienung nachrufen" bleiben unberührt. |
 
 > **UX:** Ist `azure_tts.enabled` aktiv, blendet [`AnnounceSettings`](../src/components/AnnounceSettings.tsx) die
 > Standard-Stimmen-Auswahl (`voice_de`/`voice_en`) aus — Azure spricht die ganze Ansage, die lokale Stimme
@@ -610,7 +613,18 @@ Feld-Ansage nach der Tabletbedienung:
 - „Aufschlagrichter: {Name}." / englisch „Service judge: {Name}."
 
 Angesagt wird nur, was auch zugewiesen ist; ohne Schiedsrichter-Betrieb
-entfällt beides ersatzlos. Segment- und SSML-Bauer nutzen dieselbe Quelle
+entfällt beides ersatzlos. Der Schalter `announce_umpire` (Default an)
+schaltet die Nennung ganz ab.
+
+**Bis v0.9.245 fehlten SR/AR in der AUTOMATISCHEN Feld-Ansage**: Der
+Ansage-Detektor (`MatchAnnouncer.tsx`) baute sein `AnnounceMatchInput` selbst
+zusammen und ließ beide Listen weg, während der manuelle Aufruf und jeder
+Nachruf sie über `announceCourt` mitgaben. Dieselbe Belegung klang dadurch je
+nach Auslöser anders (Nutzer-Befund 20.08.2026, behoben in v0.9.246).
+
+**Am Cloud-Ansage-Slave gibt es sie weiterhin nicht:** Der Wire-Typ
+`CloudAnnounceCourt` (`commands.rs`) führt keine SR/AR-Listen — der Slave
+könnte sie gar nicht nennen. Dort wirkt nur `announce_scorekeeper`. Segment- und SSML-Bauer nutzen dieselbe Quelle
 (`officialSegments` in `io/announcer.ts`), damit Browser-Stimme und
 Azure-Stimme identisch sprechen.
 

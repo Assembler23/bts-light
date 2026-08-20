@@ -71,6 +71,8 @@ function defaultConfig(): AppConfig {
       announce_hall: "",
       saved_announcements: [],
       share_corrections: false,
+      announce_scorekeeper: true,
+      announce_umpire: true,
     },
     azure_tts: {
       enabled: false,

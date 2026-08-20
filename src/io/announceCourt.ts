@@ -38,16 +38,20 @@ export function announceCourt(
       // beim Vorbereitungs-Nachruf.
       teamBNames: nurEine ? [] : court.team2,
       roundName: court.round_name,
-      // Zähltafelbediener nur ansagen, wenn er zugewiesen wurde (ADR 0007) —
-      // nicht der reine pro-Feld-Hinweis.
-      scorekeeperNames: court.scorekeeper_assigned
+      // Zähltafelbedienung: Der Schalter entscheidet, nicht mehr die
+      // Herkunft des Namens (ADR 0040 löst ADR 0007 ab). Wer eine Bedienung
+      // am Feld stehen hat, will sie in der Regel auch gerufen hören —
+      // gleich ob sie beim Aufruf zugewiesen wurde oder als pro-Feld-Hinweis
+      // dort steht.
+      scorekeeperNames: announce.announce_scorekeeper !== false
         ? court.scorekeeper
         : undefined,
       // Schiedsrichter/Aufschlagrichter: nur, was wirklich zugewiesen ist —
       // der Host liefert die Listen ohnehin leer, wenn ohne Schiedsrichter
       // gespielt wird (Spec Nr. 1).
-      umpireNames: court.sr,
-      serviceJudgeNames: court.ar,
+      umpireNames: announce.announce_umpire !== false ? court.sr : undefined,
+      serviceJudgeNames:
+        announce.announce_umpire !== false ? court.ar : undefined,
       callStage,
     },
     lang,
@@ -162,18 +166,19 @@ export function announceScorekeeper(
   announce: AnnounceConfig,
   azureTts?: AzureTtsConfig,
 ): void {
-  // NUR bei echter Zuweisung ansagen (ADR 0007) — dieselbe Prüfung wie in
-  // `announceCourt` oben und im Cloud-Ansage-Slave. Ohne sie fiele
-  // `court.scorekeeper` auf den reinen **pro-Feld-Hinweis** zurück: den
-  // Verlierer des zuletzt auf diesem Feld beendeten Spiels. Der wäre nie
-  // zugewiesen worden, und die Anlage riefe ihn trotzdem aus.
+  // KEIN Schalter-Guard hier — das ist der ausdrückliche Knopf „Bedienung
+  // nachrufen" aus der Spielübersicht bzw. TL-Web (ADR 0040: die
+  // ausdrücklichen Knöpfe bleiben unberührt). Wer ihn drückt, sieht den Namen
+  // davor und will genau diese Ansage; ihn stumm verfallen zu lassen, wäre
+  // Bedienung ohne Rückmeldung.
   //
-  // Der Fall ist real, nicht theoretisch: Ein Ansage-Gerät baut seinen
-  // Feld-Stand LOKAL auf. Auf einem LAN-Ansage-Slave mit ausgeschalteter
-  // Bediener-Verwaltung — für einen reinen Ansage-PC der Normalfall —
-  // räumt der Sync-Lauf die Zuweisungen, füllt den pro-Feld-Hinweis aber
-  // weiter (Review 18.08.2026).
-  if (!court.scorekeeper_assigned) return;
+  // Der Aufrufer entscheidet also, WEN er ruft. Zu wissen ist dabei: Ohne
+  // aktive Bediener-Verwaltung ist `court.scorekeeper` der
+  // **pro-Feld-Hinweis**, also der Verlierer des zuletzt auf diesem Feld
+  // beendeten Spiels — auf einem LAN-Ansage-Slave räumt der Sync-Lauf die
+  // Zuweisungen und füllt den Hinweis weiter (Review 18.08.2026). In der
+  // automatischen Feld-Ansage hängt genau das am Schalter
+  // `announce_scorekeeper`; hier steht der Name auf dem Knopf.
   if (names.length === 0) return;
   const lang = resolveAnnouncementLanguage(
     [...court.team1_nationalities, ...court.team2_nationalities],

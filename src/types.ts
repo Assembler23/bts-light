@@ -45,6 +45,12 @@ export interface AnnounceConfig {
   saved_announcements: string[];
   /** Opt-in: eigene Aussprache-Korrekturen mit der Community-DB teilen. */
   share_corrections: boolean;
+  /** Zähltafelbedienung mit ansagen? Default an. Löst ADR 0007 ab: angesagt
+   *  wird, was am Feld steht — zugewiesen ODER pro-Feld-Hinweis. */
+  announce_scorekeeper: boolean;
+  /** Schiedsrichter/Aufschlagrichter in der Feldansage nennen? Default an.
+   *  Der eigene Knopf „SR/AR ansagen" bleibt davon unberührt. */
+  announce_umpire: boolean;
 }
 
 /** Azure Neural TTS für die Ansage (Rust: config::AzureTtsConfig). */
@@ -767,8 +773,9 @@ export interface CourtOverview {
   /** Zähltafelbediener: zugewiesener Bediener (bei aktiver Verwaltung) oder
    *  pro-Feld-Hinweis (Verlierer des Vorspiels). Leer, wenn keiner bekannt. */
   scorekeeper: string[];
-  /** true, wenn `scorekeeper` aus einer echten Zuweisung stammt — nur dann
-   *  wird er angesagt (ADR 0007). */
+  /** true, wenn `scorekeeper` aus einer echten Zuweisung stammt (sonst ist es
+   *  der pro-Feld-Hinweis). Seit ADR 0040 **nur noch Anzeige-Information**:
+   *  Ob angesagt wird, entscheidet `announce.announce_scorekeeper`. */
   scorekeeper_assigned: boolean;
   /** Schiedsrichter des laufenden Spiels (Spec schiedsrichter-management).
    *  Leer, wenn keiner zugewiesen ist oder ohne Schiedsrichter gespielt wird. */

@@ -65,13 +65,24 @@ nirgends mehr zurückzunehmen.
 
 ## Ansage (Scheibe 3, v0.9.165)
 
-Ist ein Bediener zugewiesen (`CourtOverview.scorekeeper_assigned == true`),
-hängt die Feld-Ansage am Ende „**Tabletbedienung: {Name}.**" an (EN:
-„Scoreboard operator: …"). Umgesetzt in `announcer.ts`
-(`buildAnnouncementSegments` + `buildAnnouncementSsml`, Feld
-`scorekeeperNames`); die Auslöser (`announceCourt`, `MatchAnnouncer`) geben die
-Namen **nur** weiter, wenn `scorekeeper_assigned` — der reine pro-Feld-Hinweis
-wird nicht angesagt. Gilt für Standard- und Azure-Stimme.
+Steht am Feld eine Bedienung, hängt die Feld-Ansage am Ende
+„**Tabletbedienung: {Name}.**" an (EN: „Scoreboard operator: …"). Umgesetzt in
+`announcer.ts` (`buildAnnouncementSegments` + `buildAnnouncementSsml`, Feld
+`scorekeeperNames`). Gilt für Standard- und Azure-Stimme.
+
+**Seit v0.9.246 entscheidet der Schalter `announce.announce_scorekeeper`**
+(Default an, Ansage-Einstellungen: „Zähltafelbedienung mit ansagen"), nicht
+mehr die Herkunft des Namens — [ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)
+löst die Regel aus ADR 0007 ab. Ist der Schalter an, wird angesagt, was am
+Feld steht: der zugewiesene Bediener **oder** der pro-Feld-Hinweis. Vorher gab
+es für Turniere, die nur mit dem pro-Feld-Hinweis arbeiten, überhaupt keine
+Bedienungs-Ansage — der Name stand auf dem Bildschirm und blieb stumm.
+
+`scorekeeper_assigned` bleibt für die **Anzeige** erhalten und unterscheidet
+weiterhin echte Zuweisung von Hinweis. Wer den Hinweis nicht ausgerufen haben
+will — etwa auf einem reinen LAN-Ansage-PC ohne Bediener-Verwaltung, wo der
+Sync die Zuweisungen räumt und den Hinweis weiterfüllt —, schaltet die
+Bedienungs-Ansage aus.
 
 ## Cloud-Ansage der fernen Halle (v0.9.166)
 
@@ -80,7 +91,8 @@ Halle den Bediener trotzdem ansagen kann, schickt der Master ihn je Feld über
 den Relay mit: `MatchBrief` trägt `scorekeeper` + `scorekeeper_assigned`
 (gesetzt aus `scorekeeper_display`), der Command reicht sie als `CloudPrepared`/
 `CloudAnnounceCourt` durch, und `CloudAnnounceSlave` sagt „Tabletbedienung: …"
-**nur bei `scorekeeper_assigned`** an. Reicht die Cloud (relay-deploy für
+an, sofern `announce_scorekeeper` gesetzt ist (ADR 0040; vorher: nur bei
+`scorekeeper_assigned`). Reicht die Cloud (relay-deploy für
 MatchBrief) + die App.
 
 ## Bedienung aus der Turnierleitungs-Seite (TL-Web)

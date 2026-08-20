@@ -16,6 +16,42 @@ use relay_proto::{EventKind, MatchEvent, MatchTimeline, Phase};
 /// darunter („Fortsetzung") — 2 × 60 deckt `MAX_RALLIES_PER_SET` (120) ab.
 pub const SPALTEN_JE_GRUPPE: usize = 60;
 
+// ── Blattmaße ────────────────────────────────────────────────────────────
+//
+// Diese fünf Werte sind Konstanten und **nicht** im CSS versteckt, weil sie
+// zusammen ein Budget bilden, das aufgehen muss: 60 Rasterzellen plus
+// Namensspalte plus Abstand dürfen die bedruckbare Breite nicht
+// überschreiten. Vorher standen sie nur im Stylesheet und ergaben in Summe
+// 297 mm bei 281 mm Platz — der Zettel lief um 16 mm über das Blatt hinaus,
+// was sich als „die Schrift ist zu groß" bemerkbar machte. `raster_passt_auf
+// _die_seite` hält das Budget jetzt fest.
+
+/// Bedruckbare Breite: A4 quer (297 mm) minus zweimal `@page`-Rand (8 mm).
+pub const SEITE_NUTZBAR_MM: f32 = 281.0;
+/// Breite einer Rasterzelle.
+pub const ZELLE_BREITE_MM: f32 = 4.0;
+/// Feste Breite der Namensspalte. Fest, damit ein langer Doppelname die
+/// Spalte nicht aufbläht und das Raster vom Blatt schiebt.
+pub const NAMENSSPALTE_MM: f32 = 34.0;
+/// Abstand zwischen Namensspalte und Raster (`.raster { gap }`).
+pub const RASTER_ABSTAND_MM: f32 = 3.0;
+/// Höhe einer Namens- wie Rasterzeile. Beide müssen gleich sein, sonst
+/// laufen Namen und Rasterzeilen auseinander.
+pub const ZEILE_HOEHE_MM: f32 = 7.0;
+
+/// Schriftgrad des Spielernamens in der Namensspalte.
+pub const NAME_PT: f32 = 8.0;
+/// Schriftgrad des Zusatzes (Verein/Nation) darunter.
+pub const ZUSATZ_PT: f32 = 6.5;
+/// Schriftgrad der Spaltennummern über dem Raster. Kleiner als der
+/// Zellinhalt, weil dort dreistellige Ballwechsel-Nummern stehen (61–120 in
+/// der Fortsetzungsgruppe) und die Zelle nur [`ZELLE_BREITE_MM`] breit ist.
+pub const KOPF_PT: f32 = 6.5;
+/// Zeilenabstand des Dokuments (`body { font: …/1.25 }`).
+pub const ZEILENABSTAND: f32 = 1.25;
+/// Ein typografischer Punkt in Millimetern.
+pub const PT_IN_MM: f32 = 0.352_777_8;
+
 /// Eine gefüllte Rasterzelle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Zelle {
@@ -744,6 +780,55 @@ mod tests {
         assert!(html.contains("page-break-after"), "kein Seitenumbruch");
     }
 
+    /// Das Blatt ist die harte Grenze: Raster, Namensspalte und Abstand
+    /// müssen zusammen in die bedruckbare Breite passen. Vorher ergaben
+    /// 60 × 4,2 mm plus 42 mm plus 3 mm zusammen 297 mm bei 281 mm Platz —
+    /// der Zettel lief über das Blatt hinaus und wirkte dadurch „zu groß".
+    #[test]
+    fn raster_passt_auf_die_seite() {
+        let breite =
+            SPALTEN_JE_GRUPPE as f32 * ZELLE_BREITE_MM + NAMENSSPALTE_MM + RASTER_ABSTAND_MM;
+        assert!(
+            breite <= SEITE_NUTZBAR_MM,
+            "Zettel ist {breite} mm breit, das Blatt gibt nur {SEITE_NUTZBAR_MM} mm her"
+        );
+    }
+
+    /// Name und Zusatz stehen übereinander in einer Zeile fester Höhe.
+    /// Passen sie nicht hinein, überlaufen sie ihre Rasterzeile und die
+    /// Zuordnung Name ↔ Zeile stimmt optisch nicht mehr.
+    #[test]
+    fn namen_bleiben_in_ihrer_zeilenhoehe() {
+        let gebraucht = (NAME_PT + ZUSATZ_PT) * ZEILENABSTAND * PT_IN_MM;
+        assert!(
+            gebraucht <= ZEILE_HOEHE_MM,
+            "Name + Zusatz brauchen {gebraucht} mm, die Zeile ist nur {ZEILE_HOEHE_MM} mm hoch"
+        );
+    }
+
+    /// Ein langer Doppelname darf die Namensspalte nicht verbreitern —
+    /// sonst schiebt er das Raster vom Blatt. Deshalb feste Breite und
+    /// Kürzung statt Umbruch.
+    #[test]
+    fn lange_namen_sprengen_die_spalte_nicht() {
+        let html = render_html(&[doc_mit(
+            "Maximilian Hieronymus-Wagner / Jan-Ole Petersen",
+            "Christoph Brandenburger / Bo Li",
+        )]);
+        assert!(
+            html.contains(&format!("flex: 0 0 {NAMENSSPALTE_MM}mm")),
+            "Namensspalte ist nicht auf feste Breite gelegt"
+        );
+        assert!(
+            html.contains("text-overflow: ellipsis"),
+            "kein Kürzen langer Namen"
+        );
+        assert!(
+            html.contains("white-space: nowrap"),
+            "Namen dürfen nicht umbrechen"
+        );
+    }
+
     /// Erstmals im Projekt entsteht HTML aus BTP-Fremdeingaben. Ein Name
     /// mit Markup darf nie als Markup ankommen.
     #[test]
@@ -975,14 +1060,7 @@ section.zettel:last-child { page-break-after: auto; }
 .kopf dt { font-weight: 600; }
 .kopf dd { margin: 0; }
 .vermerk { border: 1pt solid #000; padding: 1mm 2mm; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
-.raster { display: flex; gap: 3mm; margin-bottom: 3mm; page-break-inside: avoid; }
-.teamspalte { min-width: 42mm; }
-.teamspalte .zeile { height: 7mm; display: flex; flex-direction: column; justify-content: center; border-bottom: .5pt solid #999; }
-.teamspalte .name { font-weight: 600; }
-.teamspalte .zusatz { font-size: 7.5pt; color: #333; }
 table.gitter { border-collapse: collapse; table-layout: fixed; }
-table.gitter td, table.gitter th { border: .4pt solid #666; width: 4.2mm; height: 7mm; text-align: center; font-size: 8pt; padding: 0; }
-table.gitter th { background: #eee; font-weight: 600; font-size: 6.5pt; }
 td.marker { font-weight: 700; }
 .satzkopf { font-weight: 600; font-size: 9pt; margin: 2mm 0 1mm; }
 .randmarker { font-size: 8pt; margin-top: 1mm; }
@@ -994,9 +1072,34 @@ tr.zurueckgenommen td { text-decoration: line-through; color: #555; }
 .unterschrift { width: 55mm; border-top: .5pt solid #000; padding-top: 1mm; font-size: 8pt; }
 .hinweis { font-size: 8pt; font-style: italic; margin: 1mm 0; }
 .erzeugt { font-size: 7.5pt; color: #444; }
-</style></head><body>
 "#,
     );
+
+    // Maßabhängige Regeln aus den Blattmaß-Konstanten oben — sie bilden
+    // zusammen das Breitenbudget, das `raster_passt_auf_die_seite` prüft.
+    //
+    // Das `padding-top` der Namensspalte ist kein Ziermaß: Das Raster beginnt
+    // mit einer Kopfzeile (den Spaltennummern), die Namensspalte nicht. Ohne
+    // den Versatz stünde Spieler 1 neben der Nummernzeile und jede Namenszeile
+    // eine Zeile zu hoch. Bei zwei Zeilengruppen (Ballwechsel 61–120, zweite
+    // Tabelle darunter) fluchtet die Namensspalte weiterhin nur mit der
+    // ersten — es gibt sie ja nur einmal; die Fortsetzung liest sich über die
+    // Zeilenreihenfolge, die in beiden Gruppen dieselbe ist.
+    // Die Namensspalte ist bewusst **fest** (`flex: 0 0`) statt `min-width`:
+    // Ein langer Doppelname darf sich nicht auf Kosten des Rasters breit
+    // machen. Was dann nicht hineinpasst, wird gekürzt — sichtbar durch
+    // Auslassungspunkte statt still über den Blattrand geschoben.
+    out.push_str(&format!(
+        r#".raster {{ display: flex; gap: {RASTER_ABSTAND_MM}mm; margin-bottom: 3mm; page-break-inside: avoid; }}
+.teamspalte {{ flex: 0 0 {NAMENSSPALTE_MM}mm; max-width: {NAMENSSPALTE_MM}mm; overflow: hidden; padding-top: {ZEILE_HOEHE_MM}mm; }}
+.teamspalte .zeile {{ height: {ZEILE_HOEHE_MM}mm; display: flex; flex-direction: column; justify-content: center; border-bottom: .5pt solid #999; overflow: hidden; }}
+.teamspalte .name {{ font-weight: 600; font-size: {NAME_PT}pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.teamspalte .zusatz {{ font-size: {ZUSATZ_PT}pt; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+table.gitter td, table.gitter th {{ border: .4pt solid #666; width: {ZELLE_BREITE_MM}mm; height: {ZEILE_HOEHE_MM}mm; text-align: center; font-size: 7.5pt; padding: 0; }}
+table.gitter th {{ background: #eee; font-weight: 600; font-size: {KOPF_PT}pt; }}
+</style></head><body>
+"#
+    ));
 
     for doc in docs.iter().take(anzahl) {
         out.push_str("<section class=\"zettel\">\n");

@@ -1,6 +1,11 @@
 # ADR 0007 — Zähltafelbediener nach dem Vorbild des Original-BTS, in zwei Phasen
 
-Status: akzeptiert (2026-07-20)
+Status: akzeptiert (2026-07-20) — die **Ansage-Regel** daraus ist seit
+2026-08-20 abgelöst durch
+[ADR 0040](0040-ansage-besetzung-einstellbar.md): Ob die Bedienung angesagt
+wird, entscheidet jetzt ein Schalter und nicht mehr die Herkunft des Namens.
+Alles Übrige (Warteschlange, Zuweisung beim Aufruf, pro-Feld-Hinweis) gilt
+unverändert.
 
 ## Kontext
 
