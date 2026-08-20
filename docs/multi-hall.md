@@ -261,6 +261,20 @@ erreicht der LAN-Slave den BTP-Rechner nicht. Dafür der **Cloud-Ansage-Slave**:
 - **Rollout:** Relay muss **vor** dem Client deployt sein (neuer `HostFrame` +
   `/slaves`-Route).
 
+## Schiedsrichterzettel: nur der Master druckt
+
+Der Zettel-Autodruck (Spec
+[features/schiedsrichterzettel-autodruck.md](features/schiedsrichterzettel-autodruck.md))
+läuft **ausschließlich auf dem Turnier-PC**, der BTP hält und Felder vergibt.
+Ein Ansage-Slave kehrt im Sync-Lauf zurück, bevor Rotation und Feldvergabe
+laufen — er kennt die Besetzung eines frisch belegten Felds gar nicht und
+hätte nichts zu drucken. Zusätzlich prüft die Auswahl `slave_mode` selbst, so
+dass die Zusage nicht an der Position eines Aufrufs hängt.
+
+Für eine zweite Halle richtet man dort einen **Netzwerkdrucker** ein und wählt
+ihn am Master in den Einstellungen aus — die Zettel gehen dann quer durchs Netz
+in die richtige Halle.
+
 ## Master-Identität umziehen (v0.9.161, ADR 0006)
 
 Die `install_id` ist Relay-Namespace **und** Bearer-Token (R6) — ein PC-Wechsel

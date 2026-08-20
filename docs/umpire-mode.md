@@ -83,6 +83,15 @@ Alle Texte stehen gebündelt in den `ump*`-Funktionen in `tablet.html`
 ## Stand / offen
 - v1: Ansagen + Karten (Deutsch, lokal). Logik via Node-Harness verifiziert.
 - **Spielzettel-Export gibt es seit 08/2026** — siehe
-  [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md).
+  [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md)
+  und [features/schiedsrichterzettel-autodruck.md](features/schiedsrichterzettel-autodruck.md).
+- **Der Zettel folgt seit v0.9.249 dem DBV-Bogen** (ADR 0043). Damit ist auch
+  der Vermerk „Internes Turnier-Archiv — kein amtlicher Beleg" **zurückgenommen**:
+  Er passt nicht auf ein Blatt, das während des Spiels geführt wird. Der Satz
+  oben bleibt davon unberührt — offizielle Turniere laufen weiter über das
+  Original-BTS.
+- Die Karten erscheinen auf dem Blatt in der gewohnten Konvention: **W**
+  Warnung (gelb), **F** Fehler (rot), **D** Disqualifikation; dazu **R** für
+  „Oberschiedsrichter gerufen".
 - Bewusst **nicht** gebaut: Übertragung an badhub, weitere Sprachen — bei
   Bedarf später.

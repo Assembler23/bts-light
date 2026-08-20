@@ -4,6 +4,32 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.249
+
+- **Der Schiedsrichterzettel sieht jetzt aus wie der gewohnte Bogen.** Sechs
+  Blöcke à 33 Spalten, vier Zeilen je Block, A/R-Spalte, Satzergebnis im Kopf,
+  Unterschriftszeilen für Schiedsrichter und Referee. Die Zeichen in der Zelle
+  folgen der üblichen Konvention: **W** Warnung, **F** Fehler, **R**
+  Oberschiedsrichter gerufen, **D** Disqualifikation. Oben links steht das
+  Turnierlogo, kein Verbandslogo.
+- **Neu: der leere Zettel zum Mitgeben.** Für ein Spiel, das noch aussteht,
+  lässt sich das Blatt vorab drucken — Kopf, Namen und Verein sind gedruckt,
+  das Raster bleibt frei und wird von Hand geführt. Zu finden am Turnier-PC im
+  Tab „In Vorbereitung" (Spiele anhaken, dann „Zettel") und in der
+  Turnierleitungs-Seite im ⋮-Menü jeder Zeile.
+- **Neu: Zettel drucken sich auf Wunsch von selbst.** Ist der Autodruck
+  eingeschaltet, geht das Blatt an den eingestellten Drucker, sobald ein Spiel
+  auf einem Feld steht **und** ein Schiedsrichter zugeordnet ist — egal, in
+  welcher Reihenfolge beides passiert, und auch bei der automatischen
+  Feldvergabe. Gedruckt wird ohne Dialog, höchstens ein Blatt je Spiel; ein
+  Neustart der App druckt nichts nach.
+- **Der Drucker ist im Setup wählbar** (Abschnitt „Schiedsrichterzettel"),
+  Vorgabe ist der Windows-Standarddrucker. Das Papierformat stellt BTS Light
+  selbst ein: A4 quer. Antwortet der Drucker nicht, erscheint ein Hinweis in
+  der App statt eines stummen Fehlschlags.
+- Der Vermerk „Internes Turnier-Archiv — kein amtlicher Beleg" entfällt; der
+  Verein steht jetzt immer auf dem Blatt, wenn BTP ihn kennt.
+
 ## v0.9.248
 
 - **In einer fernen Halle wird der Schiedsrichter jetzt mit angesagt.** Bei

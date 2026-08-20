@@ -1,6 +1,7 @@
 # Schiedsrichterzettel vorab und automatisch drucken — Spezifikation
 
-> Status: **abgestimmt 2026-08-20** (via /idee: Brief → Grill → How-To → Review).
+> Status: **umgesetzt 2026-08-20** (E1–E6, v0.9.249; abgestimmt via /idee:
+> Brief → Grill → How-To → Review).
 > Quelle: Idee vom 20.08.2026, Vorlage `Schiedsrichterzettel.pdf` (DBV-Blankobogen, vermessen).
 > Betroffene Crates: `src-tauri`, `relay`, `src/`.
 > ADR: [0042](../adr/0042-stiller-druck-ueber-elementliste.md) ·
@@ -309,6 +310,28 @@ Sechs Etappen, jede einzeln grün und rückbaubar:
 | **E4** | `print/windows.rs` (GDI-Treiber), `printer_list`, `PrintConfig`, SetupWizard-Abschnitt mit Druckerauswahl und Hinweis auf den SR-Bereich. |
 | **E5** | Autodruck: `print_log.rs`, Hook in `run_once` **nach** `track_officials`, Warnung im Dashboard. |
 | **E6** | Doku, ADRs, Version, Changelog. |
+
+**Befunde aus der Umsetzung** (sie stehen hier, weil sie beim nächsten
+Anfassen Zeit sparen):
+
+1. **Der Kopf ist ein Puzzle, keine Rechnung.** Beim Bauen kollidierten
+   Spielangaben mit der Marke „L", die Marke „R" mit dem Satzergebnis-Kasten,
+   die Besetzungsspalte ragte 4,5 mm in den ersten Rasterblock und der
+   Erzeugungsvermerk lag auf den Unterschriftszeilen. Keine dieser vier Stellen
+   wäre in einer Breiten-/Höhenrechnung aufgefallen. Der Wächter
+   `textkaesten_ueberdecken_sich_nicht` prüft deshalb **Paare**, nicht Summen.
+2. **Der Nullpunkt eines Drucker-Gerätekontexts ist die bedruckbare Ecke**,
+   nicht die Blattecke (`PHYSICALOFFSETX/Y`). Ohne Abzug läge alles um den
+   Geräterand verschoben.
+3. **Ohne ausdrückliche Papiergröße im DEVMODE druckt Windows US-Letter**
+   (gemessen: 792 × 612 pt statt 842 × 595). Letter quer ist 279 mm breit, das
+   Raster braucht 275 mm plus Rand — die letzte Spalte wäre lautlos abgefallen.
+   Querformat **und** `DMPAPER_A4` müssen gesetzt werden.
+4. **Das Blatt trägt immer sechs Blöcke**, auch leere. Das ist nicht nur
+   formulartreu, es macht den Vorabzettel fast geschenkt: ohne Aufzeichnung
+   sind eben alle sechs leer.
+5. `assign()` im `OfficialsStore` nimmt `i64`, nicht `Option<i64>` — Lösen
+   läuft über `clear_assignment`.
 
 **Reviews:** `code-reviewer` nach jeder Etappe. `security-reviewer` bei **E2** (neuer Parameter
 an einer authentifizierten Route, die nun auch für Spiele ohne Aufzeichnung Namen ausgibt) und
