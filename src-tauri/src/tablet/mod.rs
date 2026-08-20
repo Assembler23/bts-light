@@ -13,6 +13,7 @@ pub mod monitor;
 pub mod officials;
 pub mod perf;
 pub mod predict;
+pub mod print_log;
 pub mod queue_order;
 pub mod relay_client;
 pub mod scoresheet;

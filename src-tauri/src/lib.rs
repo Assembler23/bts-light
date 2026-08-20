@@ -144,6 +144,8 @@ pub fn run() {
             commands::match_scoresheet_html,
             commands::printer_list,
             commands::print_scoresheet,
+            commands::print_warning,
+            commands::clear_print_warning,
             commands::officials_roster,
             commands::official_assign,
             commands::official_clear,

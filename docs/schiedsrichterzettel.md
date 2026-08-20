@@ -123,6 +123,43 @@ vollständiges Blatt. An der Route hängt dafür `?vorab=1`.
 - **TL-Web**, Spielliste: im ⋮-Menü jeder Zeile **🖨 Zettel (leer)**. Gedruckt
   wird über das Gerät, auf dem TL-Web läuft.
 
+## Automatisch drucken
+
+Ist im Setup **„Zettel bei der Feldvergabe automatisch drucken"** eingeschaltet,
+geht das Blatt von selbst an den eingestellten Drucker, sobald ein Spiel
+
+- **auf einem Feld steht** (gleich ob von Hand, über TL-Web oder durch die
+  automatische Feldvergabe zugewiesen) **und**
+- ihm ein **Schiedsrichter** zugeordnet ist.
+
+Geprüft wird ein **Zustand, kein Moment**: Der Schiedsrichter darf nach der
+Feldvergabe dazukommen — durch die Rotation oder von Hand —, dann löst der
+nächste Sync-Lauf aus. Umgekehrt genauso. Ein **Aufschlagrichter allein genügt
+nicht**; der Zettel gehört dem, der ihn führt.
+
+Vier Dinge, auf die Verlass ist:
+
+- **Höchstens ein Blatt je Spiel.** Ein Feldwechsel oder ein Schiedsrichter-Tausch
+  erzeugt keinen zweiten Zettel — Änderungen trägt man von Hand nach. Zwei Zettel
+  zum selben Spiel wären am Feld gefährlicher als eine Korrektur mit dem Stift.
+- **Ein App-Neustart druckt nichts nach.** Der Vermerk liegt in `gedruckt.json`
+  beim Turnier. Ohne ihn sähe der frisch gestartete Host jedes belegte Feld als
+  neu zugewiesen — bei zwanzig Feldern zwanzig Blatt.
+- **Ein Turnierwechsel beginnt frisch.** Match-IDs gelten nur innerhalb eines
+  Turniers.
+- **Nur der Turnier-PC druckt.** Ein Ansage-Slave in der zweiten Halle vergibt
+  keine Felder und druckt deshalb auch nicht; für Halle 2 richtet man dort einen
+  Netzwerkdrucker ein und wählt ihn am Master aus.
+
+**Ohne Schiedsrichterverwaltung bleibt die Automatik stumm.** Ist im Setup „Mit
+Schiedsrichtern spielen" aus, kennt bts-light nie einen SR — dann gibt es
+bauartbedingt nichts zu drucken. Der Einstellungstext sagt das an Ort und Stelle.
+
+**Wenn der Drucker schweigt**, erscheint app-weit ein gelber Hinweis („Zettel für
+Feld 3 …") und der Vorgang steht im Log. Der Druck **wiederholt sich nicht** —
+sonst liefe er im Sekundentakt gegen einen ausgeschalteten Drucker. Nach dem
+Beheben druckt man den Zettel von Hand nach.
+
 ## Drucker einstellen
 
 Im Setup steht der Abschnitt **Schiedsrichterzettel**:

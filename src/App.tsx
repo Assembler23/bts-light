@@ -13,6 +13,7 @@ import {
 import { setSharedOverrides } from "./io/announcer";
 import { AlertBanner } from "./components/AlertBanner";
 import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
+import { PrintWarningBanner } from "./components/PrintWarningBanner";
 import { SlaveConnectBanner } from "./components/SlaveConnectBanner";
 import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
@@ -353,6 +354,7 @@ function App() {
           <UpdateBanner />
           <AlertBanner />
           <AzureFallbackBanner />
+          <PrintWarningBanner />
           <div className="min-h-0 flex-1 overflow-auto">
             <SetupWizard
               initialConfig={config}
@@ -466,6 +468,7 @@ function App() {
         <UpdateBanner />
         <AlertBanner />
         <AzureFallbackBanner />
+        <PrintWarningBanner />
         {slavesLoaded && <SlaveConnectBanner slaves={slaves} />}
         <AppShell
           current={view}

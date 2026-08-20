@@ -208,6 +208,15 @@ export const printScoresheet = (
   vorab = false,
 ): Promise<void> => invoke("print_scoresheet", { matchIds, vorab });
 
+/** Offene Warnung des Zettel-Autodrucks (`null` = alles in Ordnung).
+ *  Ein Drucker, der schweigt, darf nicht stumm scheitern. */
+export const printWarning = (): Promise<string | null> =>
+  invoke("print_warning");
+
+/** Warnung wegklicken. */
+export const clearPrintWarning = (): Promise<void> =>
+  invoke("clear_print_warning");
+
 export const matchTimeline = (matchId: number): Promise<MatchTimeline | null> =>
   invoke("match_timeline", { matchId });
 
