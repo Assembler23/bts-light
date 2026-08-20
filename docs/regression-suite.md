@@ -94,8 +94,36 @@ anpassen:
   unbegrenzte Wachstum der `UnboundedSender`-Queue bei zähem Socket (der
   Harness leert die Empfänger selbst). Diese reale Netz-Robustheit deckt die
   **manuelle 36-Geräte-Messung** im echten WLAN ab. Ein volles E2E-WS-Harness
-  ist bewusst zurückgestellt. Ebenso offen: **LAN-Server-Last**
-  (`tablet/state.rs`, blockierender `std::sync::RwLock`) als Folge-Erweiterung.
+  ist bewusst zurückgestellt.
+- **LAN-Server unter Last — gemessen 20.08.2026** (die offene Frage aus der
+  Kapazitätsanalyse: hält `tablet/state.rs` mit seinem blockierenden
+  `std::sync::RwLock` einen vollen Turnieraufbau?). Gefahren mit
+  `scripts/last-monitor.mjs` gegen eine laufende Instanz, 20 belegte Felder,
+  Antwortgröße 16,3 KB, **Debug-Build**, je 60 s:
+
+  | Aufbau | Abrufe/s | Daten | Latenz Punkt → Anzeige | Fehler |
+  |---|---|---|---|---|
+  | **45 Geräte** (20 Tablets, 20 Übersichten, 5 Feld-Monitore) — das Zielbild | 167 | 1,14 MB/s | p50 **14 ms**, p95 **42 ms** | 0 |
+  | 80 Geräte | 388 | 2,44 MB/s | p50 25, p95 65 ms | 0 |
+  | 140 Geräte | 680 | 4,79 MB/s | p50 52, p95 109 ms | 0 |
+  | **220 Geräte** (fünffache Ziellast) | 1232 | 8,99 MB/s | p50 47, p95 **104 ms** | 0 |
+
+  **Der Server ist nicht der Engpass.** Bei fünffacher Ziellast braucht
+  `bts-light` **75 % eines einzelnen Kerns** (von zwanzig), das Lastskript
+  daneben 22 %. Kein einziger Abruf schlug fehl, und die Latenz steigt ab
+  140 Geräten nicht weiter — die Grenze liegt danach im Netz, nicht im
+  Turnier-PC.
+
+  Der Grund steht im Antwortcache (Spec `monitor-livestand-push`, S1): Die
+  Zahl der **Bauten** hängt kaum an der Zahl der Anzeigen — 7,5/s bei 45
+  Geräten, 11,4/s bei 140. Die Bauzeit bleibt dabei stabil (241 → 287 µs im
+  Mittel, p95 durchgehend 1,05 ms, Maximum 2,0 ms). Ohne den Cache wären es
+  bei 220 Geräten über 1200 Vollberechnungen je Sekunde gewesen.
+
+  ⚠️ Loopback auf einem Rechner, Debug-Build: Das WLAN einer echten Halle
+  ist die eigentliche Grenze und bleibt ungemessen (dafür steht die manuelle
+  36-Geräte-Messung). Die **Zählwerte** hängen nicht am Optimierungsgrad, die
+  **Zeiten** sind pessimistisch.
 - **Last der Anzeige-Strecke** (Spec
   [features/monitor-livestand-push.md](features/monitor-livestand-push.md),
   Etappe S0): **manueller Lauf**, kein CI-Schritt — Muster ADR 0019.
