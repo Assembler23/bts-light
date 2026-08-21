@@ -896,6 +896,28 @@ mod tests {
         );
     }
 
+    /// Der WebView druckt Hintergrundfarben nur, wenn das Dokument sie
+    /// ausdrücklich verlangt. Ohne diese Anweisung fehlen im Ausdruck genau
+    /// die Elemente, die als Fläche entstehen: die Innenlinien des Rasters
+    /// und die grauen Blattzeilen. Auf dem Bildschirm sieht der Zettel dabei
+    /// vollständig aus — der Fehler zeigt sich erst am Papier (gemeldet aus
+    /// dem Feldtest 21.08.2026).
+    #[test]
+    fn hintergruende_und_linien_werden_mitgedruckt() {
+        let html = render_html(&[doc_mit("A. Spieler", "B. Gegner")]);
+        assert!(
+            html.contains("-webkit-print-color-adjust: exact"),
+            "ohne die WebKit-Anweisung druckt der WebView keine Flächen"
+        );
+        // Ohne die WebKit-Zeile muss die Standard-Eigenschaft noch da sein —
+        // sonst würde die Suche nur ihr eigenes Präfix wiederfinden.
+        let ohne_praefix = html.replace("-webkit-print-color-adjust", "");
+        assert!(
+            ohne_praefix.contains("print-color-adjust: exact"),
+            "die Standard-Eigenschaft fehlt"
+        );
+    }
+
     /// Ein langer Doppelname darf die Namensspalte nicht verbreitern —
     /// sonst schiebt er das Raster vom Blatt. Die Breite selbst prüft
     /// `blatt::lange_namen_werden_gekuerzt`; hier geht es darum, dass der
@@ -1256,7 +1278,16 @@ pub fn render_html(docs: &[SheetDoc]) -> String {
 <title>Schiedsrichterzettel</title>
 <style>
 @page { size: A4 landscape; margin: 0; }
-* { box-sizing: border-box; }
+/* Ohne diese Anweisung lässt der WebView beim Drucken alle
+   Hintergrundfarben weg. Auf dem Blatt entstehen aber genau die
+   Innenlinien des Rasters und die grauen Zeilen als Fläche — der
+   Ausdruck käme mit Text und Außenrahmen, aber ohne Gitter,
+   während die Vorschau vollständig aussieht. */
+* {
+  box-sizing: border-box;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
 html, body { margin: 0; padding: 0; background: #fff; color: #000; }
 body { font-family: "Helvetica Neue", Arial, sans-serif; }
 section.blatt { position: relative; overflow: hidden; page-break-after: always; break-after: page; }

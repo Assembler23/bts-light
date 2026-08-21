@@ -35,7 +35,6 @@ import {
   freeCourt,
   hallColorsView,
   matchTimeline,
-  matchScoresheetHtml,
   noteCourtCall,
   preparationCandidates,
   removeHallColor,
@@ -49,6 +48,7 @@ import {
 } from "../api";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { HallFilter } from "../components/HallFilter";
+import { ScoresheetOverlay } from "../components/ScoresheetOverlay";
 import { TimelineChart } from "../components/TimelineChart";
 import { announceCourt } from "../io/announceCourt";
 import { gamePointKind } from "../io/gamePoint.mjs";
@@ -138,36 +138,13 @@ export function FieldOverviewPage({
     finishedSets?: [number, number][];
   } | null>(null);
   const [graphData, setGraphData] = useState<MatchTimeline | null>(null);
-  /** Offener Zettel-Druck (Spec schiedsrichterzettel-druck): die Spiele und
-   *  das fertige HTML. `null` = zu. Der Desktop holt den Zettel
-   *  ausschließlich über den Tauri-Command (S-R1) — kein `fetch` auf
-   *  127.0.0.1:8088, das bräche zusätzlich den Cloud-Only-Betrieb. */
+  /** Offener Zettel-Druck (Spec schiedsrichterzettel-druck): welche Spiele.
+   *  `null` = zu. Das Dokument holt `ScoresheetOverlay` selbst — über den
+   *  Tauri-Command (S-R1), kein `fetch` auf 127.0.0.1:8088. */
   const [zettel, setZettel] = useState<{
     titel: string;
     matchIds: number[];
   } | null>(null);
-  const [zettelHtml, setZettelHtml] = useState<string | null | "fehlt">(null);
-
-  // Verlauf laden, solange das Overlay offen ist — laufende Spiele wachsen
-  // im Poll-Takt mit; die Payload ist winzig (Command, kein Netz).
-  useEffect(() => {
-    if (!zettel) {
-      setZettelHtml(null);
-      return;
-    }
-    let alive = true;
-    setZettelHtml(null);
-    matchScoresheetHtml(zettel.matchIds)
-      .then((html) => {
-        if (alive) setZettelHtml(html ?? "fehlt");
-      })
-      .catch(() => {
-        if (alive) setZettelHtml("fehlt");
-      });
-    return () => {
-      alive = false;
-    };
-  }, [zettel]);
 
   useEffect(() => {
     if (!graph) {
@@ -1541,74 +1518,16 @@ export function FieldOverviewPage({
         </div>
       )}
 
-      {/* Zettel-Overlay (Spec schiedsrichterzettel-druck, ADR 0039): Das
-          fertige Dokument kommt als HTML vom Kern und wird in einem
-          `iframe srcdoc` gezeigt; gedruckt wird über den WebView, „als PDF
-          speichern" über den Systemdialog des Druckers. Deshalb braucht es
-          weder eine PDF-Abhängigkeit noch `dialog:allow-save`. */}
+      {/* Zettel-Overlay (Spec schiedsrichterzettel-druck, ADR 0039) — seit
+          21.08.2026 dasselbe Bauteil wie in „Spiele in Vorbereitung": Es
+          bringt den Knopf „Leeres Blatt" für Spiele ohne Aufzeichnung mit
+          und das breitere Fenster. */}
       {zettel && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="zettel-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setZettel(null);
-          }}
-        >
-          <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-              <h2 id="zettel-title" className="font-semibold text-slate-800">
-                Schiedsrichterzettel — {zettel.titel}
-              </h2>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    const rahmen =
-                      document.getElementById("zettel-frame") as HTMLIFrameElement | null;
-                    rahmen?.contentWindow?.focus();
-                    rahmen?.contentWindow?.print();
-                  }}
-                  disabled={typeof zettelHtml !== "string"}
-                  className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-40"
-                >
-                  Drucken
-                </button>
-                <button
-                  onClick={() => setZettel(null)}
-                  aria-label="Zettel schließen"
-                  className="rounded p-1 text-slate-400 hover:bg-slate-100"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-hidden bg-slate-100 p-2">
-              {zettelHtml === null && (
-                <p className="p-4 text-sm text-slate-500">Zettel wird erzeugt …</p>
-              )}
-              {zettelHtml === "fehlt" && (
-                <p className="p-4 text-sm text-slate-500">
-                  Zu diesem Spiel liegt keine Aufzeichnung vor — ein
-                  Papier-Ergebnis bekommt bewusst keinen Zettel.
-                </p>
-              )}
-              {typeof zettelHtml === "string" && zettelHtml !== "fehlt" && (
-                <iframe
-                  id="zettel-frame"
-                  title="Schiedsrichterzettel"
-                  srcDoc={zettelHtml}
-                  /* Das Dokument enthält bewusst kein Skript (ADR 0039);
-                     die Sandbox macht das durchsetzbar statt zugesagt.
-                     `allow-modals` bleibt nötig, damit `print()` den
-                     Druckdialog öffnen darf. */
-                  sandbox="allow-same-origin allow-modals"
-                  className="h-full w-full rounded border border-slate-300 bg-white"
-                />
-              )}
-            </div>
-          </div>
-        </div>
+        <ScoresheetOverlay
+          matchIds={zettel.matchIds}
+          titel={zettel.titel}
+          onClose={() => setZettel(null)}
+        />
       )}
 
       {/* Punktverlauf-Overlay (Spec punktverlauf-graph): je Satz ein
