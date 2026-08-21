@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.250
+
+- **Behoben: Der gedruckte Schiedsrichterzettel hatte kein Gitter.** Innenlinien
+  des Rasters und graue Zeilen fehlten auf dem Papier, während die Vorschau am
+  Bildschirm vollständig aussah — der WebView lässt Hintergrundfarben beim
+  Drucken weg, und genau daraus bestehen die Linien. Das Blatt verlangt sie
+  jetzt ausdrücklich. Betrifft alle Zettel-Drucke: Turnier-PC wie
+  Turnierleitungs-Seite.
+- **Das Vorschaufenster nutzt jetzt die Bildschirmbreite** und zeigt ein
+  A4-Blatt quer ohne seitliches Scrollen, sofern der Monitor es hergibt.
+- **Neu: „Leeres Blatt" aus der Vorschau heraus.** Wurde zu einem Spiel nichts
+  gezählt, sagt das Fenster das — und bietet einen Knopf, der den leeren
+  Vorabzettel nachholt. Bisher gab es das leere Blatt nur über „In Vorbereitung"
+  und das TL-Kebab.
+
 ## v0.9.249
 
 - **Der Schiedsrichterzettel sieht jetzt aus wie der gewohnte Bogen.** Sechs

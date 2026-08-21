@@ -69,7 +69,16 @@ zusätzlich **„Zettel drucken"** für den **Stapeldruck** einer ganzen Runde
 
 Beide zeigen eine Vorschau; **Drucken** öffnet den Druckdialog. „Als PDF
 speichern" läuft über den Systemdialog des Druckers — deshalb braucht bts-light
-dafür weder eine PDF-Bibliothek noch eine zusätzliche Datei-Berechtigung.
+dafür weder eine PDF-Bibliothek noch eine zusätzliche Datei-Berechtigung. Das
+Vorschaufenster nutzt die Bildschirmbreite und zeigt ein A4-Blatt quer
+(297 mm ≈ 1123 px) ohne seitliches Scrollen, sofern der Monitor es hergibt.
+
+> **Das Dokument verlangt seine Flächen ausdrücklich.** Innenlinien und graue
+> Zeilen des Rasters entstehen als Hintergrundfläche, und der WebView lässt
+> Hintergründe beim Drucken sonst weg — der Ausdruck käme mit Text und
+> Außenrahmen, aber ohne Gitter, während die Vorschau vollständig aussieht.
+> Das Blatt-CSS setzt deshalb `print-color-adjust: exact`; ein Test in
+> `tablet/scoresheet.rs` hält die Zeile fest.
 
 ## Das Blatt
 
@@ -122,6 +131,11 @@ vollständiges Blatt. An der Route hängt dafür `?vorab=1`.
   neben „Aufrufen" — ein Blatt je ausgewähltem Spiel, höchstens 40 je Auftrag.
 - **TL-Web**, Spielliste: im ⋮-Menü jeder Zeile **🖨 Zettel (leer)**. Gedruckt
   wird über das Gerät, auf dem TL-Web läuft.
+- **Aus der Vorschau heraus:** Wurde zu einem Spiel nichts gezählt, meldet das
+  Fenster „Zu diesem Spiel wurde nichts gezählt" und bietet den Knopf
+  **„Leeres Blatt"** an — ein Klick holt denselben Vorabzettel nach. Bewusst
+  ein eigener Klick statt eines stillen Rückfalls: Der Nachdruck eines per
+  Papier erfassten Spiels soll nicht wie ein gezählter Zettel aussehen.
 
 ## Automatisch drucken
 

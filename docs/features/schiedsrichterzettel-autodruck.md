@@ -189,6 +189,10 @@ für jedes Match mit Status OnCourt und gesetztem Feld:
 - [ ] Die Elementliste ist **nach Seiten gegliedert**; ein Spiel mit sieben Blöcken ergibt zwei
       Seiten, und beide Treiber (HTML-Seitenumbruch, GDI `StartPage`/`EndPage`) geben dieselbe
       Seitenzahl aus.
+- [ ] **Nachtrag 21.08.2026:** Der Ausdruck über den WebView trägt Innenlinien und graue Zeilen.
+      Beide entstehen als Hintergrundfläche, und der WebView lässt Hintergründe beim Drucken
+      sonst weg — das Dokument verlangt sie über `print-color-adjust: exact` ausdrücklich.
+      Erst am Papier sichtbar, deshalb ein eigenes Kriterium.
 
 **Leerzettel**
 - [ ] Ein Match ohne jede Aufzeichnung liefert im **Vorab-Modus** ein vollständiges Blatt mit
@@ -200,6 +204,10 @@ für jedes Match mit Status OnCourt und gesetztem Feld:
 - [ ] Ein Match außerhalb des aktuellen Turnier-Snapshots liefert auch im Vorab-Modus 404.
 - [ ] Der Deckel `MAX_SHEETS_PER_DOC` greift im Vorab-Modus unverändert vor der Arbeit.
 - [ ] LAN und Relay liefern für denselben Zustand und denselben Modus dasselbe Dokument.
+- [ ] **Nachtrag 21.08.2026:** Meldet die Vorschau „nichts gezählt", holt der Knopf **„Leeres
+      Blatt"** denselben Vorabzettel nach — ein eigener Klick, kein stiller Rückfall, damit der
+      Nachdruck eines per Papier erfassten Spiels nicht wie ein gezählter Zettel aussieht.
+      Ein Wechsel des Spiels setzt den Nachfass zurück.
 
 **Autodruck**
 - [ ] Ein Match, das auf ein Feld kommt **und** einen SR hat, erzeugt genau einen Druckauftrag.
@@ -224,6 +232,8 @@ für jedes Match mit Status OnCourt und gesetztem Feld:
 - [ ] Eine ältere App-Version liest eine Config mit `print`-Abschnitt unverändert.
 
 **Bedienung**
+- [ ] **Nachtrag 21.08.2026:** Das Vorschaufenster zeigt ein A4-Blatt quer (297 mm ≈ 1123 px)
+      ohne seitliches Scrollen, sofern der Bildschirm es hergibt, und nutzt sonst dessen Breite.
 - [ ] In TL-Web erscheint der Zettel-Eintrag im ⋮-Menü jeder Zeile der Warteliste.
 - [ ] In der Desktop-Warteliste erscheint ein Zettel-Knopf je Zeile.
 - [ ] Beide Wege öffnen das bekannte Druckbild; der TL-Web-Weg druckt über das Gerät, auf dem
@@ -239,7 +249,8 @@ für jedes Match mit Status OnCourt und gesetztem Feld:
 `weder_geburtsjahr_noch_lizenznummer_auf_dem_blatt` · `neustart_druckt_nicht_nach` ·
 `sr_nach_der_vergabe_loest_den_druck_aus` · `feldwechsel_druckt_kein_zweites_blatt` ·
 `ohne_sr_wird_nicht_gedruckt` · `ar_allein_druckt_nicht` · `slave_druckt_nie` ·
-`druckfehler_wiederholt_nicht_endlos` · `alte_config_ohne_print_abschnitt_bleibt_lesbar`.
+`druckfehler_wiederholt_nicht_endlos` · `alte_config_ohne_print_abschnitt_bleibt_lesbar` ·
+**`hintergruende_und_linien_werden_mitgedruckt`** (Nachtrag 21.08.2026).
 
 Die bestehenden Wächter-Tests der Vorgänger-Spec
 (`sanktionsdaten_erreichen_den_anzeige_zustand_nie`,
