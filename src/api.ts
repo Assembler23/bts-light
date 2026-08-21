@@ -195,6 +195,11 @@ export const matchScoresheetHtml = (
   vorab = false,
 ): Promise<string | null> => invoke("match_scoresheet_html", { matchIds, vorab });
 
+/** Aushang mit den QR-Codes zu Teilnehmerliste und Liveticker als fertiges
+ *  A4-HTML (docs/aushang.md). Wirft mit sprechendem Text, wenn die
+ *  öffentliche Live-Seite des Turniers fehlt. */
+export const aushangHtml = (): Promise<string> => invoke("aushang_html");
+
 /** Die im System eingerichteten Drucker (Spec
  *  schiedsrichterzettel-autodruck, ADR 0042). Der leere Eintrag
  *  „Standarddrucker" steht nicht in der Liste — er ist die Bedeutung des
