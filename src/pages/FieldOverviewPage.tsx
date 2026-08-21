@@ -1524,6 +1524,7 @@ export function FieldOverviewPage({
           und das breitere Fenster. */}
       {zettel && (
         <ScoresheetOverlay
+          key={zettel.matchIds.join(",")}
           matchIds={zettel.matchIds}
           titel={zettel.titel}
           onClose={() => setZettel(null)}

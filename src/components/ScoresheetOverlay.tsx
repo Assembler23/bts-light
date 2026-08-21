@@ -34,14 +34,14 @@ export function ScoresheetOverlay({
 }) {
   const [html, setHtml] = useState<string | null | "fehlt">(null);
   /** Wird gerade das leere Blatt gezeigt? Startet auf `vorab` und kann über
-   *  den Knopf in der Meldung nachträglich eingeschaltet werden. */
+   *  den Knopf in der Meldung nachträglich eingeschaltet werden.
+   *
+   *  Zurückgesetzt wird er **nicht** hier, sondern durch Neuaufbau: Die
+   *  Aufrufer geben dem Bauteil die Spiele als `key`, ein Wechsel erzeugt
+   *  also eine frische Instanz. Ein eigener Rücksetz-Effekt liefe im selben
+   *  Durchlauf wie der Abruf unten und stieße erst einen Abruf in der alten
+   *  Betriebsart an. */
   const [leer, setLeer] = useState(vorab);
-
-  // Ein Wechsel des Spiels (oder der Vorgabe) setzt den Nachfass zurück —
-  // sonst zeigte das nächste geöffnete Spiel ungefragt das leere Blatt.
-  useEffect(() => {
-    setLeer(vorab);
-  }, [matchIds.join(","), vorab]);
 
   useEffect(() => {
     let alive = true;
