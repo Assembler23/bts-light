@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.251
+## v0.9.252
 
 - **Neu: Aushang für die Halle.** Ein A4-Blatt mit zwei QR-Codes zum Ausdrucken
   und Aufhängen: links die Teilnehmerliste, über die jede Spielerin und jeder
