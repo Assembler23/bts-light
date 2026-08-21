@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.251
+
+- **Behoben: Der Zähltafelbediener wechselte mitten im laufenden Spiel.**
+  Stand beim Belegen eines Feldes niemand in der Warteschlange, blieb das Feld
+  zunächst ohne Bediener und zeigte den Hinweis auf den Verlierer des
+  Vorspiels. Sobald danach irgendwo jemand fertig wurde, hängte die App diesen
+  Wartenden nachträglich dem längst laufenden Spiel an — am Feld stand
+  plötzlich ein anderer Name, obwohl sich nichts geändert hatte. Die Vergabe
+  gehört zum Aufruf: Findet sie niemanden, bleibt dieses Spiel ohne Bediener,
+  und wer später frei wird, ist für das nächste Spiel dran.
+
 ## v0.9.250
 
 - **Behoben: Der gedruckte Schiedsrichterzettel hatte kein Gitter.** Innenlinien
