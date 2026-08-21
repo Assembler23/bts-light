@@ -23,16 +23,21 @@ const TEST_LOGO: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAABC
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mit_logo = args.iter().any(|a| a == "--mit-logo");
-    let ziel = args
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .cloned()
+    let frei: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    let ziel = frei
+        .first()
+        .map(|s| s.to_string())
         .unwrap_or_else(|| "aushang-probe.html".to_string());
+    // Bewusst lang: ein kurzer Name deckt den Umbruch im Kopf nicht auf.
+    // Ein eigener Name als zweites Argument prüft den Deckel auf zwei Zeilen.
+    let turnier = frei
+        .get(1)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "BVBB Ranglistenturnier U19 – Berlin".to_string());
 
     let daten = bts_light_lib::aushang::daten_aus(
         "https://badhub.de/live?t=bvbb",
-        // Bewusst lang: ein kurzer Name deckt den Umbruch im Kopf nicht auf.
-        "BVBB Ranglistenturnier U19 – Berlin",
+        &turnier,
         mit_logo.then(|| TEST_LOGO.to_string()),
     )
     .expect("Muster-URL ist auswertbar");

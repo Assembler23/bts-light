@@ -2430,12 +2430,28 @@ pub fn aushang_html(state: State<'_, AppState>) -> Result<String, String> {
         .snapshot_clone()
         .map(|s| s.tournament_name)
         .unwrap_or_default();
+    let eingetragen = config.badhub.live_url.trim();
     let daten =
         crate::aushang::daten_aus(&config.badhub.live_url, &turnier, logo).ok_or_else(|| {
-            "Für den Aushang fehlt die öffentliche Live-Seite des Turniers. Trage sie in den \
-             Einstellungen unter „Badhub-Liveticker“ ein, z. B. \
-             https://badhub.de/live?t=dein-kuerzel."
-                .to_string()
+            // „Leer" und „steht da, taugt aber nicht" brauchen verschiedene
+            // Hinweise: Sonst sucht die Turnierleitung nach einem Feld, das
+            // ausgefüllt vor ihr steht.
+            if eingetragen.is_empty() {
+                "Für den Aushang fehlt die Live-Seite. Trage sie in den Einstellungen unter \
+                 „1 · Liveticker-Ziel“ → „Live-Seite (URL)“ ein, z. B. \
+                 https://badhub.de/live?t=bvbb."
+                    .to_string()
+            } else {
+                format!(
+                    "Die eingetragene Live-Seite lässt sich nicht auswerten: „{}“. Erwartet wird \
+                     eine vollständige Adresse mit https:// und Verbandskürzel, z. B. \
+                     https://badhub.de/live?t=bvbb. Zu ändern in den Einstellungen unter \
+                     „1 · Liveticker-Ziel“.",
+                    // Gekürzt: Die Meldung soll ins Fenster passen, nicht die
+                    // ganze Fehleingabe spiegeln.
+                    eingetragen.chars().take(60).collect::<String>()
+                )
+            }
         })?;
     crate::aushang::render_html(&daten)
 }

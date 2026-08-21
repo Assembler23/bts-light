@@ -28,11 +28,19 @@ funktioniert trotzdem.
 
 ### Voraussetzung: die öffentliche Live-Seite
 
-Einstellungen → **Badhub-Liveticker** → *Öffentliche Live-Seite*, z. B.
+Einstellungen → **1 · Liveticker-Ziel** → *Live-Seite (URL)*, z. B.
 `https://badhub.de/live?t=bvbb`. Aus dieser einen Angabe leitet die App
-beide Adressen ab. Fehlt sie, sagt die Vorschau genau das — geraten wird
-nichts, ein falsches Kürzel führte die halbe Halle auf ein fremdes
-Turnier.
+beide Adressen ab. Das Kürzel darin ist der **Verband** (`bvbb` =
+Berlin-Brandenburg), nicht das einzelne Turnier. Fehlt die Angabe oder
+lässt sie sich nicht auswerten, sagt die Vorschau genau das — mit
+unterschiedlichem Hinweis, damit klar ist, ob nachzutragen oder zu
+korrigieren ist.
+
+Beide Adressen baut die App **neu** aus Schema, Host und Kürzel. Wer als
+Live-Seite die Teilnehmerliste oder eine Adresse mit angehängten
+Parametern (`&display=monitor`, `&halle=…`) einträgt, bekommt trotzdem
+saubere Codes: sonst zeigte der Liveticker-Code auf die Monitor-Ansicht
+oder auf dieselbe Liste wie der linke.
 
 Akzeptiert werden beide Schreibweisen, die auf badhub vorkommen:
 `…/live?t=<kürzel>` und `…/live/<kürzel>`. Schema und Host übernimmt die
@@ -68,8 +76,11 @@ Blatt tagelang in der Halle hängt, blass kopiert und geknickt wird.
    `margin-top: auto` nach unten geschoben und bleiben so auf gleicher
    Höhe. Ohne Logo bleiben rund **13 mm** Luft, mit Logo nur noch **4 mm** —
    ein Logo macht die Kopfzeile 14 mm hoch. Deshalb ist der Turniername auf
-   11,5 pt gesetzt: So bleibt er auch zweizeilig *innerhalb* der Logohöhe
-   und schiebt nichts nach unten.
+   11,5 pt gesetzt und auf **zwei Zeilen gedeckelt**: So bleibt er innerhalb
+   der Logohöhe und schiebt nichts nach unten. Ohne den Deckel schnitt ein
+   langer BTP-Name (ab rund 105 Zeichen) unten die Schluss-Zeile ab — und
+   zwar unsichtbar, weil das Blatt überstehenden Inhalt abschneidet. Lieber
+   ein gekürzter Name als ein gekürztes Blatt.
 
 ### Nach jeder Textänderung: Muster ansehen
 
@@ -78,8 +89,9 @@ der Browser:
 
 ```text
 cd src-tauri
-cargo run --example aushang_probe -- probe.html            # ohne Logo
-cargo run --example aushang_probe -- probe-logo.html --mit-logo   # enger Fall
+cargo run --example aushang_probe -- probe.html                    # ohne Logo
+cargo run --example aushang_probe -- probe-logo.html --mit-logo    # enger Fall
+cargo run --example aushang_probe -- lang.html --mit-logo "Sehr langer Turniername …"
 ```
 
 Beide Dateien im Browser öffnen und mit Strg+P als A4 hoch prüfen: Der
@@ -88,8 +100,12 @@ er hat die kleinere Reserve.
 
 ## Grenzen
 
-- **Ein Turnier je Blatt.** Mehrere parallele Turniere brauchen mehrere
-  Ausdrucke; die App kennt immer nur die eine eingetragene Live-Seite.
+- **Das Blatt zeigt auf den Verband, nicht auf ein einzelnes Turnier.**
+  Beide Codes tragen das Kürzel der eingetragenen Live-Seite. Laufen bei
+  einem Verband mehrere Turniere parallel, führen sie auf dieselbe
+  Live-Seite.
+- **Sehr lange Turniernamen werden im Kopf nach zwei Zeilen gekürzt**
+  (siehe oben). Der Aushang bleibt vollständig, der Name nicht.
 - **Keine Halle im Code.** Beide Codes zeigen auf das ganze Turnier, nicht
   auf eine einzelne Halle. Für Halleninfos gibt es die Monitor-Seiten
   (`docs/court-monitor.md`).

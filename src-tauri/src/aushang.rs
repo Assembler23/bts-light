@@ -8,8 +8,10 @@
 //!
 //! Beide Adressen leitet das Modul aus **einer** Angabe ab: der öffentlichen
 //! Live-Seite aus den Einstellungen (`BadhubConfig::live_url`, z. B.
-//! `https://badhub.de/live?t=bvbb`). Ohne sie gibt es keinen Aushang — ein
-//! geratenes Turnierkürzel führte die Halle sonst auf ein fremdes Turnier.
+//! `https://badhub.de/live?t=bvbb`). Ohne sie gibt es keinen Aushang: Das
+//! Kürzel darin ist der **Verband** (`bvbb` = Berlin-Brandenburg, siehe die
+//! Vorlagen in `src/presets.ts`), und ein geratenes führte die Halle auf die
+//! Live-Seite eines fremden Verbandes.
 //!
 //! Das Dokument ist wie der Schiedsrichterzettel **skriptfrei** (ADR 0039):
 //! Der Kern liefert fertiges HTML, das Frontend zeigt es in einem
@@ -19,8 +21,8 @@
 
 use relay_proto::html_escape;
 
-/// Längste akzeptierte Turnierkürzel-Länge. Großzügig, aber begrenzt: Das
-/// Kürzel wandert in eine URL und in den QR-Code.
+/// Längste akzeptierte Kürzel-Länge. Großzügig, aber begrenzt: Das Kürzel
+/// wandert in eine URL und in den QR-Code.
 const MAX_KUERZEL: usize = 40;
 
 /// Alles, was auf das Blatt kommt.
@@ -31,13 +33,14 @@ pub struct AushangDaten {
     /// Turnierlogo als `data:`-URI (bereits geprüft von
     /// [`crate::tablet::scoresheet::logo_data_uri`]). `None` ⇒ kein Logo.
     pub logo: Option<String>,
-    /// Öffentliche Live-Seite, genau wie eingetragen.
+    /// Liveticker, aus Basis + Kürzel neu gebaut (nicht die eingetragene
+    /// Adresse — die kann Parameter oder einen anderen Unterpfad tragen).
     pub url_ticker: String,
     /// Teilnehmerliste, aus Basis + Kürzel abgeleitet.
     pub url_teilnehmer: String,
 }
 
-/// Prüft ein Turnierkürzel: nur die Zeichen, die badhub in seinen Live-URLs
+/// Prüft ein Verbandskürzel: nur die Zeichen, die badhub in seinen Live-URLs
 /// verwendet. Alles andere wäre entweder ein Tippfehler oder ein Versuch,
 /// über die Konfiguration eine fremde Adresse in den QR-Code zu schmuggeln.
 fn ist_kuerzel(wert: &str) -> bool {
@@ -48,7 +51,7 @@ fn ist_kuerzel(wert: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Turnierkürzel aus der öffentlichen Live-Seite.
+/// Verbandskürzel aus der öffentlichen Live-Seite.
 ///
 /// Akzeptiert beide Schreibweisen, die auf badhub vorkommen:
 /// `…/live?t=<kürzel>` (die dokumentierte) und `…/live/<kürzel>[/…]`.
@@ -111,10 +114,15 @@ fn basis_aus_live_url(live_url: &str) -> Option<String> {
 pub fn daten_aus(live_url: &str, turnier: &str, logo: Option<String>) -> Option<AushangDaten> {
     let kuerzel = kuerzel_aus_live_url(live_url)?;
     let basis = basis_aus_live_url(live_url)?;
+    // **Beide** Adressen werden neu gebaut, keine wird durchgereicht. Sonst
+    // landet auf dem Blatt, was in den Einstellungen steht: die
+    // Teilnehmerliste (die dieses Modul als Live-Seite akzeptiert) stünde
+    // dann unter der Überschrift „Liveticker", und angehängte Parameter wie
+    // `&display=monitor` schickten die halbe Halle in die Monitor-Ansicht.
     Some(AushangDaten {
         turnier: turnier.trim().to_string(),
         logo,
-        url_ticker: live_url.trim().to_string(),
+        url_ticker: format!("{basis}/live?t={kuerzel}"),
         url_teilnehmer: format!("{basis}/live/{kuerzel}/teilnehmer"),
     })
 }
@@ -244,12 +252,20 @@ pub fn render_html(d: &AushangDaten) -> Result<String, String> {
   .kopf {{ display: flex; align-items: center; gap: 4mm; }}
   .kopf .logo {{ height: 14mm; width: auto; max-width: 50mm; object-fit: contain; }}
   .kopf .punkt {{ width: 3mm; height: 3mm; border-radius: 50%; background: #f59e0b; }}
-  .kopf .marke {{ font-size: 9.5pt; font-weight: 700; letter-spacing: .18em;
-                 text-transform: uppercase; color: var(--grau); }}
+  .kopf .marke {{ flex: none; white-space: nowrap; font-size: 9.5pt; font-weight: 700;
+                 letter-spacing: .18em; text-transform: uppercase; color: var(--grau); }}
   /* Klein genug, dass auch ein zweizeiliger Turniername INNERHALB der
-     Logohöhe bleibt — sonst wächst der Kopf und das Blatt läuft unten über. */
+     Logohöhe bleibt — sonst wächst der Kopf und das Blatt läuft unten über.
+     Der Deckel auf zwei Zeilen ist kein Schönheitsmaß: BTP-Turniernamen
+     werden lang („Offene Bezirksmeisterschaften der Altersklassen …“), und
+     ohne ihn schiebt der Kopf die Schluss-Zeile aus dem Blatt — unsichtbar,
+     weil `.blatt` abschneidet. Lieber ein gekürzter Name als ein
+     gekürztes Blatt. */
   .kopf .turnier {{ margin-left: auto; text-align: right; font-size: 11.5pt;
-                   font-weight: 700; line-height: 1.25; max-width: 80mm; }}
+                   font-weight: 700; line-height: 1.25; max-width: 80mm;
+                   display: -webkit-box; -webkit-line-clamp: 2;
+                   -webkit-box-orient: vertical; overflow: hidden;
+                   text-overflow: ellipsis; }}
 
   h1 {{ margin-top: 5mm; font-size: 40pt; line-height: 1.02; font-weight: 800;
        letter-spacing: -.02em; }}
@@ -387,6 +403,26 @@ mod tests {
             kuerzel_aus_live_url(&format!("https://badhub.de/live?t={}", "x".repeat(41))),
             None
         );
+    }
+
+    #[test]
+    fn beide_adressen_werden_neu_gebaut() {
+        // Die eingetragene Live-Seite ist die Teilnehmerliste: Der
+        // Liveticker-Code darf trotzdem nicht dorthin zeigen.
+        let d = daten_aus("https://badhub.de/live/bvbb/teilnehmer", "Test", None).unwrap();
+        assert_eq!(d.url_ticker, "https://badhub.de/live?t=bvbb");
+        assert_eq!(d.url_teilnehmer, "https://badhub.de/live/bvbb/teilnehmer");
+
+        // Angehängte Parameter (Monitor-Ansicht, Hallenfilter) gehören nicht
+        // auf ein Blatt für die ganze Halle.
+        let mit_extra = daten_aus(
+            "https://badhub.de/live?t=bvbb&display=monitor&halle=Halle+1",
+            "Test",
+            None,
+        )
+        .unwrap();
+        assert_eq!(mit_extra.url_ticker, "https://badhub.de/live?t=bvbb");
+        assert!(!mit_extra.url_ticker.contains("display"));
     }
 
     #[test]
