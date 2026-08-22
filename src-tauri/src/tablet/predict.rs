@@ -758,6 +758,8 @@ mod tests {
             first_assigned_ms: Some(assigned),
             first_point_ms: Some(first_point),
             finished_ms: Some(finished),
+            finished_seen_ms: Some(finished),
+            pause_ms: None,
             class_label: class.to_string(),
             discipline: disc.to_string(),
             hall: String::new(),

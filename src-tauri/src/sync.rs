@@ -91,10 +91,6 @@ pub struct SyncEngine {
     last_pushed: Option<BtpSnapshot>,
     /// Fortlaufende Request-ID für Badhub.
     rid: u64,
-    /// Match-ID → Zeitpunkt, zu dem das Match erstmals als beendet
-    /// erkannt wurde. BTP liefert keinen End-Zeitstempel, deshalb wird er
-    /// hier über die Zyklen hinweg gemerkt.
-    finished_at: HashMap<i64, u64>,
     /// Zeitpunkt des letzten tatsächlich gesendeten Pushes (echtes Update
     /// oder Heartbeat). Steuert, wann das nächste Lebenszeichen fällig ist.
     last_push_at: Option<Instant>,
@@ -119,7 +115,16 @@ pub struct SyncEngine {
     /// bestückt nur **neu** belegte Felder, und ihr Hook läuft an anderer
     /// Stelle im Zyklus als der der Zähltafelbediener. Ein gemeinsamer
     /// Merker würde beide aneinanderketten.
-    officials_oncourt_prev: HashMap<i64, i64>,
+    ///
+    /// `None` heißt „noch nichts beobachtet" und ist ausdrücklich etwas
+    /// anderes als eine leere Karte: Beim allerersten Zyklus — nach dem
+    /// Einschalten des Häkchens, nach „Übertragung stoppen/starten" (das
+    /// passiert bei JEDEM Speichern der Einstellungen) und nach einem
+    /// App-Neustart — ist der vorgefundene Stand **Ausgangslage**, kein
+    /// Belegungswechsel. Ohne diese Unterscheidung sähe jedes belegte Feld
+    /// wie frisch belegt aus, und die Rotation setzte mitten im Spiel
+    /// Schiedsrichter an laufende Partien (Feldtest 22.08.2026).
+    officials_oncourt_prev: Option<HashMap<i64, i64>>,
     /// Zuletzt nach BTP geschriebene Besetzung je Match (ADR 0021).
     /// BTP übernimmt asynchron; ohne diesen Merker schriebe jeder Zyklus
     /// denselben Wert erneut, bis der Snapshot nachzieht.
@@ -387,13 +392,12 @@ impl SyncEngine {
         Self {
             last_pushed: None,
             rid: 1,
-            finished_at: HashMap::new(),
             last_push_at: None,
             logo_gesendet: None,
             last_topology: None,
             perf_log: crate::tablet::perf::PerfLog::neu(),
             oncourt_prev: HashMap::new(),
-            officials_oncourt_prev: HashMap::new(),
+            officials_oncourt_prev: None,
             officials_written: HashMap::new(),
             court_free_since: HashMap::new(),
             pending_auto: HashMap::new(),
@@ -1294,11 +1298,35 @@ impl SyncEngine {
     /// Stempelt beendete Matches: Beim ersten Erkennen eines Siegers wird
     /// der aktuelle Zeitpunkt gemerkt und in jedes beendete Match
     /// zurückgeschrieben (stabil über alle folgenden Zyklen).
-    fn stamp_finished(&mut self, snapshot: &mut BtpSnapshot) {
-        let now = now_ms();
+    ///
+    /// Der Merker liegt im **persistenten** Zeitspeicher, nicht in der
+    /// Engine: Jedes Speichern der Einstellungen stoppt und startet die
+    /// Übertragung, und eine frische Engine hielte sonst jedes längst
+    /// beendete Spiel für soeben beendet — womit schlagartig alle Spieler
+    /// wieder in der Mindestpause stünden (Feldtest 22.08.2026). Dasselbe
+    /// galt nach jedem App-Neustart.
+    ///
+    /// Mitgestempelt wird die **beim Ende geltende** Pflichtpause. Nur so
+    /// wirkt eine später geänderte Pausenzeit ausschließlich auf Spiele, die
+    /// danach enden, statt rückwirkend auf alle.
+    fn stamp_finished(
+        &mut self,
+        snapshot: &mut BtpSnapshot,
+        tablet: &TabletState,
+        config: &AppConfig,
+        now: u64,
+    ) {
+        // Store ans Turnier binden, BEVOR gestempelt wird — aus demselben
+        // Grund wie in `reconcile_match_times`, das im Zyklus erst später
+        // kommt. Idempotent.
+        let store = tablet.match_times_store();
+        store.set_tournament(&snapshot.tournament_name);
+        let pause_ms = crate::tablet::assign::pflichtpause_ms(snapshot, config);
         for m in &mut snapshot.matches {
             if m.status == MatchStatus::Finished {
-                m.finished_at = Some(*self.finished_at.entry(m.id).or_insert(now));
+                let (ende, pause) = store.stamp_finished_seen(m.id, pause_ms, now);
+                m.finished_at = Some(ende);
+                m.pause_ms = Some(pause);
             }
         }
     }
@@ -1400,7 +1428,9 @@ impl SyncEngine {
             // Abschalten mitten im Turnier räumt alles (Spec Nr. 1) — sonst
             // bliebe ein Name in einer Anzeige hängen.
             store.clear_assignments();
-            self.officials_oncourt_prev.clear();
+            // Nicht bloß leeren, sondern vergessen: Beim Wiedereinschalten
+            // sind die dann laufenden Spiele Ausgangslage.
+            self.officials_oncourt_prev = None;
             return;
         }
         let oncourt_now: HashMap<i64, i64> = snapshot
@@ -1410,17 +1440,20 @@ impl SyncEngine {
             .filter_map(|m| m.court_id.map(|c| (c, m.id)))
             .collect();
 
+        // Erster beobachteter Zyklus? Dann ist der vorgefundene Stand die
+        // Ausgangslage: Weder rückt jemand ans Ende (wir haben kein Spiel
+        // enden sehen), noch wird bestückt (wir haben kein Feld neu belegen
+        // sehen). Siehe `officials_oncourt_prev`.
+        let ausgangslage = self.officials_oncourt_prev.is_none();
+        let prev = self.officials_oncourt_prev.take().unwrap_or_default();
+
         // Verlassene Felder: War das vorige Spiel beendet, rücken seine
         // Officials ans Ende der Reihenfolge — nach CourtID sortiert, damit
         // bei mehreren gleichzeitig verlassenen Feldern dieselbe
         // Deterministik gilt wie bei der Zuteilung unten (sonst entschiede
         // die zufällige HashMap-Iterationsreihenfolge, wer zuerst ans Ende
         // rückt).
-        let mut verlassen: Vec<(i64, i64)> = self
-            .officials_oncourt_prev
-            .iter()
-            .map(|(&c, &m)| (c, m))
-            .collect();
+        let mut verlassen: Vec<(i64, i64)> = prev.iter().map(|(&c, &m)| (c, m)).collect();
         verlassen.sort_by_key(|&(c, _)| c);
         for (court_id, prev_match_id) in verlassen {
             if oncourt_now.get(&court_id) == Some(&prev_match_id) {
@@ -1468,7 +1501,10 @@ impl SyncEngine {
         let mut courts: Vec<(i64, i64)> = oncourt_now.iter().map(|(&c, &m)| (c, m)).collect();
         courts.sort_by_key(|&(c, _)| c);
         for (court_id, match_id) in courts {
-            if self.officials_oncourt_prev.get(&court_id) == Some(&match_id) {
+            if ausgangslage {
+                continue; // erster Blick aufs Turnier ⇒ nichts nachfüllen
+            }
+            if prev.get(&court_id) == Some(&match_id) {
                 continue; // unverändert belegt ⇒ nichts nachfüllen
             }
             let Some(m) = snapshot.matches.iter().find(|m| m.id == match_id) else {
@@ -1498,7 +1534,7 @@ impl SyncEngine {
                 im_dienst.extend(nachher.ar);
             }
         }
-        self.officials_oncourt_prev = oncourt_now;
+        self.officials_oncourt_prev = Some(oncourt_now);
     }
 
     /// Bestimmt die automatischen Feldvergaben dieses Zyklus und pflegt dabei
@@ -1909,7 +1945,7 @@ impl SyncEngine {
             self.last_topology = Some(topology);
         }
 
-        self.stamp_finished(&mut snapshot);
+        self.stamp_finished(&mut snapshot, tablet, config, now_ms());
         self.track_scorekeepers(&snapshot, tablet, config.scorekeeper.enabled);
         // Aufruf-Timer: je Feld festhalten, seit wann das aktuelle Spiel dort
         // steht (1. Aufruf). Aus demselben OnCourt-Stand wie die Scorekeeper.
@@ -2496,6 +2532,7 @@ mod tests {
                 result: MatchResult::Normal,
                 status: MatchStatus::OnCourt,
                 finished_at: None,
+                pause_ms: None,
                 preparation_call_ts: None,
                 preparation_hall: None,
                 official1_id: None,
@@ -2608,6 +2645,7 @@ mod tests {
             result: MatchResult::Normal,
             status: MatchStatus::Scheduled,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,
@@ -3928,6 +3966,8 @@ mod tests {
         // BTP liefert kein Endezeitpunkt-Feld — wir stempeln beim ERSTEN
         // Poll, der das Spiel als beendet sieht, und der Stempel bleibt über
         // alle folgenden Zyklen stabil (Pausen-Logik + Ticker hängen daran).
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
         let mut engine = SyncEngine::new();
         let mut snap = snap_with(
             Vec::new(),
@@ -3935,8 +3975,9 @@ mod tests {
             Vec::new(),
         );
         snap.matches[0].finished_at = None;
-        engine.stamp_finished(&mut snap);
+        engine.stamp_finished(&mut snap, &tablet, &cfg, 1_000);
         let first = snap.matches[0].finished_at.expect("beendet → gestempelt");
+        assert_eq!(first, 1_000);
         assert!(
             snap.matches[1].finished_at.is_none(),
             "laufend/geplant bleibt ungestempelt"
@@ -3945,8 +3986,75 @@ mod tests {
         // Nächster Poll-Zyklus: frischer Snapshot, gleicher Stempel.
         let mut snap2 = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
         snap2.matches[0].finished_at = None;
-        engine.stamp_finished(&mut snap2);
+        engine.stamp_finished(&mut snap2, &tablet, &cfg, 9_000);
         assert_eq!(snap2.matches[0].finished_at, Some(first));
+    }
+
+    #[test]
+    fn der_endestempel_ueberlebt_den_neustart_der_uebertragung() {
+        // Feldtest 22.08.2026: Jedes Speichern der Einstellungen stoppt und
+        // startet die Übertragung. Lag der Stempel in der Engine, hielt die
+        // frische Engine JEDES längst beendete Spiel für soeben beendet —
+        // und alle Spieler begannen ihre Mindestpause von vorn, obwohl an
+        // der Wartezeit gar nichts geändert wurde.
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let mut snap = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
+        snap.matches[0].finished_at = None;
+        SyncEngine::new().stamp_finished(&mut snap, &tablet, &cfg, 1_000);
+        let erst = snap.matches[0].finished_at.expect("beendet → gestempelt");
+
+        // Übertragung gestoppt und neu gestartet: frische Engine, derselbe
+        // (persistente) Zeitspeicher im TabletState.
+        let mut spaeter = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
+        spaeter.matches[0].finished_at = None;
+        // Eine Viertelstunde später — mit dem alten Merker in der Engine
+        // stünde hier 900_000 und jede Pause liefe von vorn los.
+        SyncEngine::new().stamp_finished(&mut spaeter, &tablet, &cfg, 900_000);
+        assert_eq!(
+            spaeter.matches[0].finished_at,
+            Some(erst),
+            "der Neustart darf das Spielende nicht neu datieren"
+        );
+    }
+
+    #[test]
+    fn eine_geaenderte_pausenzeit_gilt_nur_fuer_neu_beendete_spiele() {
+        // Feldtest 22.08.2026: Wird die Pause umgestellt, bekamen ALLE schon
+        // beendeten Spiele die neue Länge. Die beim Spielende geltende Pause
+        // wird deshalb mitgestempelt.
+        let tablet = TabletState::default();
+        let mut engine = SyncEngine::new();
+
+        // Spiel 1 endet, während 30 Minuten Pause eingestellt sind.
+        let mut snap = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
+        snap.matches[0].finished_at = None;
+        engine.stamp_finished(&mut snap, &tablet, &cfg_auto_pause(1.0, 30.0), 1_000);
+        assert_eq!(snap.matches[0].pause_ms, Some(30 * 60_000));
+
+        // Danach stellt die Turnierleitung auf 5 Minuten um — und ein
+        // zweites Spiel endet.
+        let mut spaeter = snap_with(
+            Vec::new(),
+            vec![
+                finished_named(1, 0, "A", "B"),
+                finished_named(2, 0, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        spaeter.matches[0].finished_at = None;
+        spaeter.matches[1].finished_at = None;
+        engine.stamp_finished(&mut spaeter, &tablet, &cfg_auto_pause(1.0, 5.0), 60_000);
+        assert_eq!(
+            spaeter.matches[0].pause_ms,
+            Some(30 * 60_000),
+            "das schon beendete Spiel behält die Pause, die bei seinem Ende galt"
+        );
+        assert_eq!(
+            spaeter.matches[1].pause_ms,
+            Some(5 * 60_000),
+            "erst das neu beendete Spiel rechnet mit der neuen Pause"
+        );
     }
 
     #[test]
@@ -4082,11 +4190,19 @@ mod tests {
     }
 
     /// Engine + Tablet mit eingeschaltetem Schiedsrichter-Betrieb.
+    ///
+    /// Die Engine hat das Turnier bereits **einmal leer gesehen**: Die
+    /// Rotation bestückt nur Felder, deren Belegungswechsel sie selbst
+    /// beobachtet hat, und ihr erster Blick ist immer nur Ausgangslage
+    /// (siehe `officials_oncourt_prev`). Tests, die genau diesen ersten
+    /// Blick prüfen, bauen ihre Engine selbst.
     fn officials_setup(rot_sr: bool, rot_ar: bool) -> (SyncEngine, TabletState) {
         let tablet = TabletState::default();
         tablet.officials_store().set_enabled(true);
         tablet.officials_store().set_rotation(rot_sr, rot_ar);
-        (SyncEngine::new(), tablet)
+        let mut engine = SyncEngine::new();
+        engine.track_officials(&snap_officials(Vec::new(), &[]), &tablet);
+        (engine, tablet)
     }
 
     // ── Zettel-Autodruck (Spec `schiedsrichterzettel-autodruck`, E5) ──
@@ -4293,11 +4409,59 @@ mod tests {
         let (mut engine, tablet) = officials_setup(true, false);
         let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
         tablet.set_snapshot(snap.clone());
-
         engine.track_officials(&snap, &tablet);
         let store = tablet.officials_store();
         assert_eq!(store.assignment(10).sr, Some(1));
         assert_eq!(store.assignment(10).ar, None, "AR-Rotation ist aus");
+    }
+
+    #[test]
+    fn track_officials_laesst_beim_einschalten_laufende_spiele_in_ruhe() {
+        // Feldtest Köpi-Cup 22.08.2026: Wird die Rotation mitten im Turnier
+        // eingeschaltet, standen sofort an ALLEN laufenden Spielen
+        // Schiedsrichter. Die Rotation gehört zum Aufruf — der erste
+        // beobachtete Stand ist Ausgangslage, kein Belegungswechsel.
+        let (mut engine, tablet) = officials_setup(true, true);
+        let store = tablet.officials_store();
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+
+        // Ohne Schiedsrichter-Betrieb läuft das Spiel an — dann schaltet die
+        // Turnierleitung mitten im Turnier ein.
+        store.set_enabled(false);
+        engine.track_officials(&snap, &tablet);
+        store.set_enabled(true);
+
+        engine.track_officials(&snap, &tablet);
+        assert_eq!(
+            store.assignment(10).sr,
+            None,
+            "ein bereits laufendes Spiel bekommt beim Einschalten keinen SR"
+        );
+        assert_eq!(store.assignment(10).ar, None);
+
+        // Und es bleibt auch in den Folgezyklen unangetastet.
+        engine.track_officials(&snap, &tablet);
+        assert_eq!(store.assignment(10).sr, None);
+    }
+
+    #[test]
+    fn track_officials_bestueckt_nach_einem_neustart_nicht_nach() {
+        // Derselbe Grund wie beim Einschalten: Nach „Übertragung stoppen /
+        // starten" (jedes Speichern der Einstellungen!) und nach einem
+        // App-Neustart ist der Vorher-Stand leer — ohne diese Regel sähe
+        // jedes belegte Feld wie frisch belegt aus.
+        let (_engine, tablet) = officials_setup(true, true);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+
+        let mut neu = SyncEngine::new();
+        neu.track_officials(&snap, &tablet);
+        assert_eq!(
+            tablet.officials_store().assignment(10).sr,
+            None,
+            "eine frische Engine trifft laufende Spiele als Ausgangslage an"
+        );
     }
 
     #[test]
