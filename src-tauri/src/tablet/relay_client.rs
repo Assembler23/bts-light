@@ -508,6 +508,7 @@ async fn handle_frame(
                 req_id,
                 ok: resp.ok,
                 error: resp.error,
+                permanent: resp.permanent,
             }));
         }
         // TL-Web über die Cloud: **derselbe** Ausführungsweg wie im

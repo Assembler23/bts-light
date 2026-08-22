@@ -169,6 +169,15 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    Warten gibt den `pending`-Slot (`MAX_PENDING_PER_NS`) schneller frei. Details:
    [tablet.md](tablet.md) („Ergebnis-Übermittlung verlustsicher").
 
+   Die `ResultAck` trägt seit v0.9.254 zusätzlich **`permanent`**: Sagt der
+   Host, dass genau dieses Ergebnis dauerhaft abgelehnt ist, reicht der Relay
+   das unverändert an das Tablet durch (er urteilt nicht selbst — R5 liegt beim
+   Host). Ohne dieses Feld wirkte die Unterscheidung ausgerechnet im
+   Cloud-Betrieb nicht, weil der Relay seine Antwort aus `ok`/`error` neu baut.
+   Der Normalfall `false` bleibt von der Leitung (`skip_serializing_if`), und
+   ein Relay-Timeout bleibt weiterhin **wiederholbar** — er sagt nichts über
+   das Ergebnis aus.
+
 **Aufgerufene Spiele in die ferne Halle (Cluster C Stufe 2, v0.9.154):**
 Der Host pusht seine in Vorbereitung gerufenen Spiele als
 `HostFrame::Prepared` (nur bei Änderung, Fingerabdruck) an den Relay; der

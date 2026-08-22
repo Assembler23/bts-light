@@ -111,6 +111,29 @@ Ergebnis verliert und den Schiri nicht blockiert:
   Server `ok:true` bestätigt** — übersteht Netzausfall, Reconnect und
   Tablet-Reload. Ein **Backstop-Timeout** (~12 s, `AbortController`) bricht einen
   hängenden Einzel-Fetch ab und startet den Retry sofort.
+- **Wiederholt wird nur, was eine Wiederholung retten kann** (seit v0.9.254).
+  Bis dahin landete jede Absage im selben Topf, und das Tablet versprach auch
+  dann „wird wiederholt, bis es ankommt", wenn der Turnier-PC genau dieses
+  Ergebnis dauerhaft ablehnte — es zählte weiter, übertrug seine Punkte, konnte
+  sein Spiel aber nie abschließen, und niemand sah den Grund (Feldtest
+  22.08.2026, Felder 7 und 19). Die Trennlinie liegt bei **einer** Frage: Kann
+  derselbe Payload beim nächsten Versuch angenommen werden?
+  - **Ja** → weiter wiederholen: Netzfehler, Zeitüberschreitung, HTTP-Fehler
+    und die zustandsabhängigen Absagen („kein Match auf diesem Feld", „Feld
+    inzwischen anders belegt"). Die hängen am Turnier-PC, und der nächste
+    BTP-Poll kann sie auflösen.
+  - **Nein** → aufhören: eine unstimmige Satzliste, ein Satz, der nicht zur
+    Zählweise des Spiels passt. Der Host markiert das mit `permanent: true`
+    (relay-proto `ResultResponse`), das Tablet zeigt den Klartext-Grund und
+    gibt den Knopf wieder frei — der Bediener kann den Stand korrigieren und
+    neu senden oder die Turnierleitung holen. Der Grund überlebt einen
+    Seiten-Neustart, und das Tablet lädt sein Log sofort hoch.
+
+  **Im Zweifel wird wiederholt:** Nur das ausdrückliche `permanent` des Hosts
+  beendet den Versuch — ältere Hosts kennen das Feld nicht, deren Absagen
+  gelten unverändert als wiederholbar. Die Regel steht in
+  `src/io/resultRetry.mjs` (Test: `scripts/test-result-retry.mjs`), das Tablet
+  trägt eine Inline-Kopie.
 - **Idempotenz (kein Endlos-Retry / Doppel-Write):** Nach einem erfolgreichen
   Write räumt der Server das Feld. Ein Wiederholungs-POST für dasselbe Match mit
   **identischem** Ergebnis (`sets`, Sieger, ScoreStatus) quittiert
@@ -119,8 +142,13 @@ Ergebnis verliert und den Schiri nicht blockiert:
   ein **abweichender** Payload auf ein geräumtes/gewechseltes Feld fällt weiter
   auf Fehler; ein Retry nach Ablauf des kurzen Idempotenz-Fensters (~60 s) auch —
   eine echte spätere Korrektur wird nicht abgewürgt.
-- **Host-Retry-Queue auf Platte:** Scheitert der BTP-Write host-seitig, landet das
-  Ergebnis in der BTP-Retry-Queue (30-s-Flush). Diese Queue wird **atomar auf
+- **Host-Retry-Queue auf Platte — und eingereiht heißt angenommen** (seit
+  v0.9.254): Scheitert der BTP-Write host-seitig, landet das Ergebnis in der
+  BTP-Retry-Queue, und der Host quittiert dem Tablet mit `ok`. Vorher meldete
+  er „abgelehnt", obwohl er das Ergebnis bereits sicher verwahrte — das Tablet
+  klebte dann an etwas längst Erledigtem. Weil das Tablet daraufhin loslässt,
+  ist die Verdrängung bei voller Queue (Deckel 200) jetzt eine `error`-Zeile im
+  Log statt eines stillen Verlusts. Der Flush läuft alle 30 s. Diese Queue wird **atomar auf
   Platte** persistiert (`btp-retry.json`, turnier-gegated über den
   Turniernamen) und beim Start wieder geladen — so übersteht ein Ergebnis auch
   einen **Host-App-Neustart** (Durabilität: App-Neustart, nicht Stromausfall).
