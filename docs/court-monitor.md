@@ -76,7 +76,11 @@ alle Geräte auf, die sich gemeldet haben:
   man Gerät und TV zuordnen kann. Wirkt in **allen** Anzeigen — Einzelfeld
   (`monitor.html`), Court-Übersicht (`overview.html`) und Kombi
   (`combo.html`) (seit v0.9.93; davor nur Einzelfeld).
-- **Neu laden** — der Monitor lädt seine Seite neu (falls er hängt).
+- **Neu laden** — der Monitor lädt seine Seite neu (falls er hängt). Seit
+  v0.9.255 meldet eine Anzeige, die stillsteht, das von sich aus ins Log
+  (`stillstand`, siehe [logging.md](logging.md)) — bleibt ein Bild stehen,
+  lohnt vor dem Neuladen ein Blick dorthin: Die Zeile sagt, ob überhaupt noch
+  etwas ankam oder ob die Seite es verworfen hat.
 
 Die Zuweisungen liegen in `monitor-assignments.json` im
 App-Config-Verzeichnis und überstehen einen bts-light-Neustart.
