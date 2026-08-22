@@ -418,6 +418,15 @@ pub struct TabletState {
     /// Warteschlange gezogene Zähltafelbediener dieses Felds (ADR 0007,
     /// Scheibe 2). Wird geräumt, sobald das Feld frei ist / das Spiel wechselt.
     assigned_scorekeeper: RwLock<HashMap<i64, (i64, Vec<String>)>>,
+    /// CourtID → Match-ID, für das die Bediener-Vergabe bereits **stattgefunden
+    /// hat** — auch wenn sie leer ausging (niemand wartete).
+    ///
+    /// Ohne diesen Merker versuchte der Sync-Lauf es sekündlich erneut und
+    /// hängte einem längst laufenden Spiel nachträglich den Nächstbesten an,
+    /// sobald irgendwo jemand fertig wurde: Der am Feld angezeigte Name
+    /// sprang mitten im Spiel um (Feldtest 21.08.2026). Die Vergabe gehört
+    /// zum Aufruf — findet sie niemanden, bleibt dieses Spiel ohne Bediener.
+    scorekeeper_assign_done: RwLock<HashMap<i64, i64>>,
     /// Nachrufe an den Zähltafelbediener je Feld: `(Match-ID, Stufe)`.
     /// Die Match-ID im Wert setzt den Zähler bei einem Spielwechsel von
     /// selbst zurück — dasselbe Muster wie `call_stages`.
@@ -1898,6 +1907,15 @@ impl TabletState {
                 return; // schon zugewiesen für dieses Spiel
             }
         }
+        {
+            // Für dieses Spiel wurde schon vergeben — auch wenn niemand
+            // wartete. Ein zweiter Versuch würde den Namen am Feld mitten im
+            // laufenden Spiel austauschen.
+            let done = self.scorekeeper_assign_done.read().unwrap();
+            if done.get(&court_id) == Some(&match_id) {
+                return;
+            }
+        }
         let mut q = self.scorekeeper_queue.write().unwrap();
         // Bevorzugt „eigenes Feld", sonst der Älteste (Index 0, FIFO).
         let pos = q
@@ -1911,6 +1929,11 @@ impl TabletState {
                 .unwrap()
                 .insert(court_id, (match_id, e.names));
         }
+        // Vergeben ist vergeben — auch die leere Vergabe zählt.
+        self.scorekeeper_assign_done
+            .write()
+            .unwrap()
+            .insert(court_id, match_id);
     }
 
     /// Anzuzeigender Zähltafelbediener eines Felds für Tablet/ferne Halle:
@@ -1972,12 +1995,23 @@ impl TabletState {
             .write()
             .unwrap()
             .retain(|court_id, (match_id, _)| active.get(court_id) == Some(match_id));
+        // Der „schon vergeben"-Merker folgt derselben Regel: Räumt das Feld
+        // sein Spiel, ist die nächste Belegung ein neuer Aufruf und darf
+        // wieder aus der Warteschlange ziehen.
+        self.scorekeeper_assign_done
+            .write()
+            .unwrap()
+            .retain(|court_id, match_id| active.get(court_id) == Some(match_id));
     }
 
     /// Alle Bediener-Zuweisungen löschen. Wird gerufen, sobald die Verwaltung
     /// aus ist, damit keine veraltete Zuweisung in der Anzeige hängen bleibt.
     pub fn clear_scorekeeper_assignments(&self) {
         self.assigned_scorekeeper.write().unwrap().clear();
+        // Mit den Zuweisungen geht auch der Merker: Wird die Verwaltung
+        // wieder eingeschaltet, sollen die laufenden Felder erneut bedacht
+        // werden.
+        self.scorekeeper_assign_done.write().unwrap().clear();
     }
 
     /// Gesperrte Felder beim Start aus der Config übernehmen.
@@ -6172,6 +6206,49 @@ mod tests {
         st.enqueue_scorekeeper(2, vec!["B".into()], 9, 2_000);
         st.assign_scorekeeper_for_court(5, 44);
         assert_eq!(st.assigned_scorekeeper(5), Some(vec!["B".to_string()]));
+    }
+
+    #[test]
+    fn leere_warteschlange_beim_belegen_bleibt_leer_fuer_dieses_spiel() {
+        // Feldtest Köpi-Cup 21.08.2026: Beim zweiten Aufruf einer Paarung
+        // stand plötzlich ein anderer Tabletbediener am Feld.
+        //
+        // Ursache: War die Warteschlange beim Belegen leer, merkte sich die
+        // Vergabe nichts — der Sync-Lauf versuchte es sekündlich erneut und
+        // hängte dem längst laufenden Spiel den Nächstbesten an, sobald
+        // irgendwo jemand fertig wurde. Bis dahin zeigte das Feld den
+        // pro-Feld-Hinweis (Verlierer des Vorspiels); mit der späten Vergabe
+        // sprang der angezeigte Name um.
+        //
+        // Die Vergabe gehört zum Aufruf. Findet sie niemanden, bleibt dieses
+        // Spiel ohne Bediener — wer später frei wird, ist fürs nächste da.
+        let st = TabletState::default();
+
+        // Feld 5 wird belegt, während niemand wartet.
+        st.assign_scorekeeper_for_court(5, 42);
+        assert!(
+            st.assigned_scorekeeper(5).is_none(),
+            "leere Warteschlange ⇒ kein Bediener"
+        );
+
+        // Jetzt wird jemand frei (anderes Feld, anderes Spiel).
+        st.enqueue_scorekeeper(99, vec!["Später".into()], 7, 1_000);
+
+        // Nächster Sync-Zyklus, dasselbe Spiel auf demselben Feld.
+        st.assign_scorekeeper_for_court(5, 42);
+        assert!(
+            st.assigned_scorekeeper(5).is_none(),
+            "kein Nachrücken ins laufende Spiel — sonst wechselt der Name am Feld"
+        );
+        assert_eq!(
+            st.scorekeeper_queue().len(),
+            1,
+            "der Wartende bleibt für das nächste Spiel in der Schlange"
+        );
+
+        // Das nächste Spiel auf demselben Feld bekommt ihn dagegen sofort.
+        st.assign_scorekeeper_for_court(5, 43);
+        assert_eq!(st.assigned_scorekeeper(5), Some(vec!["Später".to_string()]));
     }
 
     #[test]

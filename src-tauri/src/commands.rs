@@ -2407,6 +2407,55 @@ pub fn match_scoresheet_html(
     crate::tablet::scoresheet::html_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
 }
 
+/// Aushang mit den beiden QR-Codes als fertiges HTML (`docs/aushang.md`).
+///
+/// Wie beim Schiedsrichterzettel baut der Kern das Dokument und das
+/// Frontend zeigt/druckt es (S-R1, ADR 0039). Turniername und Logo kommen
+/// aus dem laufenden Turnier bzw. den Einstellungen, beide Adressen aus der
+/// öffentlichen Live-Seite.
+///
+/// Der Fehlerfall ist absichtlich sprechend statt `None`: Fehlt die
+/// Live-Seite, kann die Turnierleitung das selbst nachtragen — dafür muss
+/// sie den Grund lesen können.
+#[tauri::command]
+pub fn aushang_html(state: State<'_, AppState>) -> Result<String, String> {
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| "Die Einstellungen sind gerade belegt.".to_string())?
+        .clone();
+    let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
+    let turnier = state
+        .tablet
+        .snapshot_clone()
+        .map(|s| s.tournament_name)
+        .unwrap_or_default();
+    let eingetragen = config.badhub.live_url.trim();
+    let daten =
+        crate::aushang::daten_aus(&config.badhub.live_url, &turnier, logo).ok_or_else(|| {
+            // „Leer" und „steht da, taugt aber nicht" brauchen verschiedene
+            // Hinweise: Sonst sucht die Turnierleitung nach einem Feld, das
+            // ausgefüllt vor ihr steht.
+            if eingetragen.is_empty() {
+                "Für den Aushang fehlt die Live-Seite. Trage sie in den Einstellungen unter \
+                 „1 · Liveticker-Ziel“ → „Live-Seite (URL)“ ein, z. B. \
+                 https://badhub.de/live?t=bvbb."
+                    .to_string()
+            } else {
+                format!(
+                    "Die eingetragene Live-Seite lässt sich nicht auswerten: „{}“. Erwartet wird \
+                     eine vollständige Adresse mit https:// und Verbandskürzel, z. B. \
+                     https://badhub.de/live?t=bvbb. Zu ändern in den Einstellungen unter \
+                     „1 · Liveticker-Ziel“.",
+                    // Gekürzt: Die Meldung soll ins Fenster passen, nicht die
+                    // ganze Fehleingabe spiegeln.
+                    eingetragen.chars().take(60).collect::<String>()
+                )
+            }
+        })?;
+    crate::aushang::render_html(&daten)
+}
+
 /// Die im System eingerichteten Drucker — für die Auswahl in den
 /// Einstellungen (Spec `schiedsrichterzettel-autodruck`, ADR 0042).
 ///

@@ -1,3 +1,4 @@
+pub mod aushang;
 pub mod azure_tts;
 pub mod badhub;
 pub mod btp;
@@ -142,6 +143,7 @@ pub fn run() {
             commands::finished_matches,
             commands::match_timeline,
             commands::match_scoresheet_html,
+            commands::aushang_html,
             commands::printer_list,
             commands::print_scoresheet,
             commands::print_warning,
