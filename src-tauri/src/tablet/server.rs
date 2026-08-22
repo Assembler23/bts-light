@@ -2647,6 +2647,16 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         return if settled_ok(ctx, body, now) {
             ResultResponse::ok()
         } else {
+            // Wiederholbar: Der Grund liegt am Zustand des Turnier-PCs (BTP
+            // noch nicht geladen, Feld gerade geräumt), nicht am Ergebnis.
+            // Der nächste Poll kann ihn auflösen — ein noch leerer Snapshot
+            // darf kein fertiges Ergebnis wegwerfen.
+            tracing::warn!(
+                "Ergebnis vom Tablet abgelehnt: Feld {} führt kein Match \
+                 (Tablet nennt Match {})",
+                body.court_id,
+                body.match_id
+            );
             ResultResponse::err("Kein Match auf diesem Court.")
         };
     };
@@ -2656,6 +2666,14 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         return if settled_ok(ctx, body, now) {
             ResultResponse::ok()
         } else {
+            // Ebenfalls zustandsabhängig und damit wiederholbar (siehe oben).
+            tracing::warn!(
+                "Ergebnis vom Tablet abgelehnt: Feld {} führt Match {}, das \
+                 Tablet nennt Match {}",
+                body.court_id,
+                m.id,
+                body.match_id
+            );
             ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.")
         };
     }
@@ -2664,7 +2682,17 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     let (sets, team1_won, score_status) =
         match derive_result(raw_sets, body.walkover, body.retired, false, body.winner) {
             Ok(v) => v,
-            Err(e) => return ResultResponse::err(e),
+            Err(e) => {
+                // Hängt allein am Payload ⇒ dauerhaft. Ein Tablet, das das
+                // hundertmal wiederholt, kommt nie durch; es soll den Grund
+                // zeigen, statt „wird wiederholt, bis es ankommt".
+                tracing::warn!(
+                    "Ergebnis vom Tablet abgelehnt (Feld {}, Match {}): {e}",
+                    body.court_id,
+                    m.id
+                );
+                return ResultResponse::dauerhaft(e);
+            }
         };
     // Gegen die Zählweise des Matches prüfen — auch hier, nicht nur auf dem
     // Weg der Turnierleitung. Das Tablett zählt zwar selbst korrekt, aber es
@@ -2674,7 +2702,16 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     // Aufgabe bricht den Satz mitten drin ab.
     if score_status == 0 {
         if let Err(e) = sets_fit_format(&sets, m.scoring.target_score, m.scoring.cap_score) {
-            return ResultResponse::err(e);
+            // Wie oben: reine Payload-Prüfung, also dauerhaft.
+            tracing::warn!(
+                "Ergebnis vom Tablet abgelehnt (Feld {}, Match {}): {e} \
+                 [Zählweise bis {}, Deckel {}]",
+                body.court_id,
+                m.id,
+                m.scoring.target_score,
+                m.scoring.cap_score
+            );
+            return ResultResponse::dauerhaft(e);
         }
     }
     // Spieldauer = Bruttozeit (Spec `spielzeiten-prognose`, E1): erste
@@ -2784,17 +2821,22 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             ResultResponse::ok()
         }
         Err(e) => {
-            // Nachschub-Queue (A5): Das Tablet wiederholt zwar selbst, aber
-            // wenn es aufgibt/offline geht, wäre das Ergebnis verloren. Der
-            // Sync-Loop schiebt den Write nach, sobald BTP wieder antwortet.
-            // Bezugszeitpunkt = Spielende (steuert das 5-Minuten-Fenster
-            // des Spieler-Checkouts beim Nachschub).
+            // Nachschub-Queue (A5): Der Sync-Loop schiebt den Write nach,
+            // sobald BTP wieder antwortet. Bezugszeitpunkt = Spielende
+            // (steuert das 5-Minuten-Fenster des Spieler-Checkouts beim
+            // Nachschub).
             ctx.tablet.queue_btp_retry(update.clone(), end_ms);
             tracing::warn!(
                 "BTP-Schreiben fehlgeschlagen (Match {}): {e} — in Nachschub-Queue eingereiht",
                 m.id
             );
-            ResultResponse::err(e)
+            // **Eingereiht heißt angenommen.** Die Queue liegt auf der Platte
+            // und übersteht auch einen Absturz; das Ergebnis ist damit sicherer
+            // aufgehoben als im Tablet. Meldeten wir hier „abgelehnt", bliebe
+            // das Tablet an einem Ergebnis kleben, das der Turnier-PC längst
+            // verwahrt — genau das Bild vom Feldtest 22.08.2026: Punkte liefen
+            // weiter, nur abschließen ging nicht.
+            ResultResponse::ok()
         }
     }
 }
@@ -4559,12 +4601,65 @@ mod tests {
     async fn process_result_failure_queues_btp_retry() {
         let ctx = make_ctx(1); // Port 1: Verbindung wird sofort abgewiesen
         let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
-        assert!(!resp.ok, "Write gegen toten BTP-Port schlägt fehl");
+        // Der Write ist gescheitert, das ERGEBNIS aber angenommen: Es liegt
+        // in der (persistenten) Nachschub-Queue, und der Sync-Loop reicht es
+        // nach. Dem Tablet „abgelehnt" zu melden, hieße es an etwas kleben zu
+        // lassen, das der Turnier-PC längst sicher verwahrt (Feldtest
+        // 22.08.2026: Tablets, die ein Spiel nicht abschließen konnten).
+        assert!(resp.ok, "eingereiht heißt angenommen");
+        assert!(!resp.permanent);
         let q = ctx.tablet.btp_retries();
         assert_eq!(q.len(), 1, "Fehlschlag ist eingereiht");
         assert_eq!(q[0].update.btp_match_id, 42);
         assert_eq!(q[0].update.sets, vec![(21, 10), (21, 15)]);
         assert!(q[0].enqueued_ms > 0, "Bezugszeitpunkt = Spielende gesetzt");
+    }
+
+    #[tokio::test]
+    async fn ein_unmoegliches_ergebnis_wird_dauerhaft_abgelehnt() {
+        // Feldtest 22.08.2026: Tablets zählten weiter, konnten aber nicht
+        // abschließen — und zeigten dabei „wird automatisch wiederholt, bis
+        // es ankommt". Ein Satz, der nicht zur Zählweise passt, wird aber
+        // auch beim hundertsten Versuch abgelehnt: Die Ablehnung hängt allein
+        // am Payload. Das muss das Tablet erkennen können.
+        let ctx = make_ctx(1);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (13, 8)])).await;
+        assert!(!resp.ok);
+        assert!(
+            resp.permanent,
+            "unspielbarer Satz ⇒ Wiederholen hilft nie: {:?}",
+            resp.error
+        );
+        assert!(
+            ctx.tablet.btp_retries().is_empty(),
+            "ein abgelehntes Ergebnis wird nicht eingereiht"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_fehlender_snapshot_bleibt_wiederholbar() {
+        // Gegenstück: „Kein Match auf diesem Court" hängt am Zustand des
+        // Turnier-PCs, nicht am Ergebnis — beim nächsten BTP-Poll kann es
+        // klappen. Das Tablet muss weiter wiederholen, sonst würfe ein noch
+        // nicht geladener Snapshot ein fertiges Ergebnis weg.
+        let ctx = make_ctx(1);
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: Vec::new(), // BTP noch nicht geladen
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(!resp.ok);
+        assert!(
+            !resp.permanent,
+            "zustandsabhängige Ablehnung bleibt wiederholbar"
+        );
     }
 
     /// Nach einem Ergebnis gibt `process_result` das Feld in BTP frei — seit

@@ -4,6 +4,31 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.254
+
+- **Behoben: Tablets, die zählen, aber ihr Spiel nicht abschließen können.**
+  Am Turnier standen Geräte, die ihre Punkte weiter übertrugen, das Ergebnis
+  aber nicht loswurden — auf dem Schirm stand dabei durchgehend „wird
+  automatisch wiederholt, bis es ankommt". Ein Versprechen, das nie eingelöst
+  wurde: Der Turnier-PC lehnte genau dieses Ergebnis dauerhaft ab, und keine
+  Wiederholung konnte daran etwas ändern. Das Tablet unterscheidet jetzt, ob
+  eine Wiederholung überhaupt etwas retten kann. Netzfehler und Absagen, die
+  am Turnier-PC hängen, werden weiter wiederholt wie bisher. Eine inhaltliche
+  Ablehnung — etwa ein Satz, der nicht zur Zählweise des Spiels passt — beendet
+  den Versuch, nennt den Grund im Klartext und gibt den Absende-Knopf wieder
+  frei. Im Zweifel wird wiederholt.
+- **Ein eingereihtes Ergebnis gilt als angenommen.** Scheitert das Schreiben
+  nach BTP, legt der Turnier-PC das Ergebnis in seine Nachschub-Queue und
+  reicht es später nach — es ist dort sicherer aufgehoben als im Tablet, denn
+  die Queue liegt auf der Platte. Trotzdem meldete er dem Tablet bisher
+  „abgelehnt", das daraufhin an einem längst erledigten Ergebnis klebte. Jetzt
+  quittiert er es.
+- **Abgelehnte Ergebnisse stehen im Log.** Bisher protokollierte der
+  Turnier-PC nur den Erfolg; ein Tablet, das nicht abschließen konnte,
+  hinterließ dort keine Spur. Jetzt nennt jede Ablehnung Feld, Spiel und
+  Grund. Läuft die Nachschub-Queue über (Deckel 200, nur nach sehr langem
+  BTP-Ausfall), ist auch das eine Fehlerzeile statt eines stillen Verlusts.
+
 ## v0.9.253
 
 - **Behoben: Die Schiri-Rotation setzte Schiedsrichter in laufende Spiele.**

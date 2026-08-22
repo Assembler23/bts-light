@@ -1098,6 +1098,13 @@ const STATE = {
   // Noch nicht bestätigtes Endergebnis – wird im Hintergrund wiederholt,
   // bis der Server ok:true meldet. { matchId, courtLabel, sets } | null.
   pendingResult: /** @type {null | object} */ (null),
+  // Dauerhafte Ablehnung des Turnier-PCs: Genau dieses Ergebnis wird nie
+  // angenommen (siehe `naechsterSchritt`). Trägt den anzuzeigenden Grund;
+  // null = keine. Der Sendeauftrag (`pendingResult`) wird dabei losgelassen:
+  // Er ist erschöpft — genau dieser Payload kommt nie durch. „Erneut senden"
+  // baut den Body ohnehin frisch aus dem aktuellen Stand, und das ist auch
+  // richtig so, wenn der Bediener ihn zwischenzeitlich korrigiert hat.
+  resultRejected: /** @type {null | string} */ (null),
   // Aufgabe (Retired): Match wurde abgebrochen, Sieger manuell gewählt.
   retired: /** @type {boolean} */ (false),
   // Kampflos (Walkover): Match wurde nicht ausgespielt (z. B. Nichtantritt).
@@ -1923,8 +1930,9 @@ function computeServing() {
 
 function persistState(fromRestore) {
   // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
-  // Übermittlung, das muss einen Reload überleben.
-  if (!STATE.match && !STATE.pendingResult) return;
+  // Übermittlung oder wurde abgelehnt; beides muss einen Reload überleben
+  // (die Absage ist der einzige Hinweis, dass hier noch etwas zu tun ist).
+  if (!STATE.match && !STATE.pendingResult && !STATE.resultRejected) return;
   // Monotone Stand-Revision: jede lokale Änderung zählt hoch. Reist im
   // Snapshot mit → beim Reconnect entscheidet „neuer gewinnt" (state_restore-
   // Guard), damit ein veralteter Server-Cache nie offline gezählte Punkte
@@ -1955,6 +1963,7 @@ function persistState(fromRestore) {
     intervalDoneThisGame: STATE.intervalDoneThisGame,
     submittedOk: STATE.submittedOk,
     pendingResult: STATE.pendingResult,
+    resultRejected: STATE.resultRejected,
     startedAt: STATE.startedAt,
     alertInjury: STATE.alertInjury,
     alertOfficial: STATE.alertOfficial,
@@ -2023,6 +2032,9 @@ function applyPersistedState(p) {
   }
   STATE.submittedOk = !!p.submittedOk;
   STATE.pendingResult = p.pendingResult ?? null;
+  // Eine dauerhafte Ablehnung überlebt den Neustart der Seite: Sie ist der
+  // einzige Hinweis darauf, dass hier noch etwas zu tun ist.
+  STATE.resultRejected = typeof p.resultRejected === 'string' ? p.resultRejected : null;
   STATE.startedAt = typeof p.startedAt === 'number' ? p.startedAt : null;
   STATE.alertInjury = !!p.alertInjury;
   STATE.alertOfficial = !!p.alertOfficial;
@@ -2052,8 +2064,9 @@ function restorePersistedState() {
     const raw = localStorage.getItem(PERSIST_KEY);
     if (!raw) return false;
     const p = JSON.parse(raw);
-    // Auch ohne Match wiederherstellen, wenn noch ein Ergebnis offen ist.
-    if (!p || (!p.match && !p.pendingResult)) return false;
+    // Auch ohne Match wiederherstellen, wenn noch ein Ergebnis offen oder
+    // abgelehnt ist.
+    if (!p || (!p.match && !p.pendingResult && !p.resultRejected)) return false;
     applyPersistedState(p);
     return true;
   } catch { return false; }
@@ -3067,6 +3080,7 @@ function reopen() {
   }
   STATE.submittedOk = false;
   STATE.pendingResult = null;
+  STATE.resultRejected = null;
   STATE.retired = false;
   STATE.walkover = false;
   STATE.cascadeWalkover = false;
@@ -3125,14 +3139,46 @@ function submit() {
   }
   STATE.pendingResult = body;
   STATE.submittedOk = false;
+  // Neuer Versuch, neue Lage — die alte Absage darf nicht stehen bleiben.
+  STATE.resultRejected = null;
   tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets, retired: STATE.retired, walkover: STATE.walkover, cascade: STATE.cascadeWalkover });
   persistState();
   render();
   trySubmitPending();
 }
 
-// Versucht das offene Ergebnis zu übermitteln; bei Misserfolg plant es
-// sich selbst neu, bis der Server ok:true bestätigt.
+/** Standardtext, wenn der Turnier-PC keinen Grund mitschickt.
+ *  Inline-Kopie aus `src/io/resultRetry.mjs` — dort auch die Begründung. */
+const RESULT_OHNE_GRUND = 'Der Turnier-PC hat das Ergebnis abgelehnt.';
+
+/**
+ * Wie geht es weiter, wenn ein Ergebnis nicht durchkommt?
+ *
+ * Inline-Kopie von `src/io/resultRetry.mjs` (getestet in
+ * `scripts/test-result-retry.mjs`) — die Assets durchlaufen keinen Build und
+ * können keine Module laden. Änderungen hier und dort gemeinsam.
+ *
+ * Die Trennlinie: Kann derselbe Payload beim nächsten Versuch angenommen
+ * werden? Netzfehler und zustandsabhängige Absagen ja, eine inhaltliche
+ * Ablehnung nie. Im Zweifel wird wiederholt — nur das ausdrückliche
+ * `permanent: true` des Hosts beendet den Versuch.
+ */
+function naechsterSchritt(antwort) {
+  if (!antwort || typeof antwort !== 'object') {
+    return { art: 'wiederholen', grund: '' };
+  }
+  if (antwort.ok === true) return { art: 'ok', grund: '' };
+  const grund = typeof antwort.error === 'string' && antwort.error.trim()
+    ? antwort.error.trim()
+    : RESULT_OHNE_GRUND;
+  return antwort.permanent === true
+    ? { art: 'dauerhaft', grund }
+    : { art: 'wiederholen', grund };
+}
+
+// Versucht das offene Ergebnis zu übermitteln; bei Misserfolg plant es sich
+// selbst neu — außer bei einer dauerhaften Ablehnung, die keine Wiederholung
+// überstehen könnte (siehe `naechsterSchritt`).
 async function trySubmitPending() {
   if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
   // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ein noch offenes Ergebnis wird
@@ -3153,12 +3199,32 @@ async function trySubmitPending() {
       body: JSON.stringify(pr),
       signal: ac.signal,
     });
+    // Ein HTTP-Fehler ist keine Aussage über das Ergebnis — wiederholen.
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     // Wichtig: der Relay antwortet auch bei „bts-light nicht verbunden"
     // mit HTTP 200 – die echte Aussage steht im Body-Feld ok.
-    const data = await res.json().catch(() => ({ ok: false, error: 'ungültige Antwort' }));
-    if (!data.ok) throw new Error(data.error || 'Übermittlung abgelehnt');
+    const data = await res.json().catch(() => null);
+    const schritt = naechsterSchritt(data);
+    if (schritt.art === 'dauerhaft') {
+      // Aufhören. Weitere Versuche mit demselben Payload werden genauso
+      // abgelehnt, und die bisherige Meldung („wird wiederholt, bis es
+      // ankommt") war ein Versprechen, das nie eingelöst wurde — das Feld
+      // blieb belegt, ohne dass jemand den Grund sah (Feldtest 22.08.2026).
+      // Den Sendeauftrag loslassen — sonst blockte `submitResult()` den
+      // Knopf (es lehnt ab, solange ein `pendingResult` anliegt), und
+      // „Erneut senden" täte nichts. Verloren geht nichts: Der Body wird
+      // dort aus dem aktuellen Stand neu gebaut.
+      STATE.pendingResult = null;
+      STATE.resultRejected = schritt.grund;
+      tlog('error', 'submit_rejected', { matchId: pr.matchId, grund: schritt.grund });
+      persistState();
+      render();
+      uploadTabletLog();
+      return;
+    }
+    if (schritt.art !== 'ok') throw new Error(schritt.grund || 'Übermittlung abgelehnt');
     STATE.pendingResult = null;
+    STATE.resultRejected = null;
     STATE.submittedOk = true;
     tlog('info', 'submit_ok', { matchId: pr.matchId });
     persistState();
@@ -3560,6 +3626,15 @@ function render() {
     if (STATE.submittedOk) {
       els.submitBtn.disabled = true;
       els.submitStatus.textContent = '✓ Übermittelt — die Turnierleitung kann übernehmen.';
+    } else if (STATE.resultRejected) {
+      // Dauerhaft abgelehnt: den Grund nennen und den Knopf wieder freigeben.
+      // Der Bediener kann den Stand korrigieren und neu senden oder die
+      // Turnierleitung holen — beides ist besser als ein Tablet, das
+      // stillschweigend endlos wiederholt.
+      els.submitBtn.disabled = false;
+      els.submitStatus.textContent =
+        '✗ Nicht angenommen: ' + STATE.resultRejected
+        + ' — bitte den Stand prüfen oder die Turnierleitung ansprechen.';
     } else if (STATE.pendingResult) {
       els.submitBtn.disabled = true;
       els.submitStatus.textContent = 'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.';
