@@ -69,6 +69,7 @@ fn a_match(id: i64, match_num: i64, planned_time: i64) -> BtpMatch {
         result: MatchResult::Normal,
         status: MatchStatus::Scheduled,
         finished_at: None,
+        pause_ms: None,
         preparation_call_ts: None,
         preparation_hall: None,
         scoring: ScoringFormat::default(),

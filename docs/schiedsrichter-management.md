@@ -136,6 +136,16 @@ gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
   anderes Spiel darauf kommt (Merker `officials_oncourt_prev`). Wer eine
   Zuweisung von Hand löscht, bekommt sie deshalb **nicht** im nächsten Poll
   zurück.
+- **Der erste Blick ist Ausgangslage** (seit v0.9.253): Solange die Rotation
+  noch gar keinen Stand kennt (`officials_oncourt_prev == None`), bestückt
+  sie nichts — sie merkt sich nur, was gerade läuft. Das betrifft drei
+  Fälle, die sich für sie gleich anfühlen: das **Einschalten** des Häkchens
+  mitten im Turnier, das **Stoppen/Starten der Übertragung** (passiert bei
+  jedem Speichern der Einstellungen) und den **App-Neustart**. Ohne diese
+  Regel sah jedes belegte Feld wie frisch belegt aus, und alle laufenden
+  Spiele bekamen auf einen Schlag Schiedsrichter zugeteilt (Feldtest
+  22.08.2026). Laufende Spiele bleiben unbesetzt, bis die Turnierleitung von
+  Hand zuweist; ab dem nächsten Feldwechsel läuft die Rotation normal.
 - **BTP gewinnt:** Trägt das Match `Official1ID`/`Official2ID`, gilt dieser
   Wert (`store.effective(...)`); die Rotation füllt dort nichts nach.
 - **Nach Spielende** rücken die Officials des beendeten Spiels ans Ende der

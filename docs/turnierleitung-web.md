@@ -109,6 +109,12 @@ LAN+Cloud voraus.
   in Worten will: Der Mauszeiger (bzw. langes Tippen) auf dem Namen zeigt
   „spielt gerade" bzw. „pausiert noch bis …". Ein Spiel ohne
   Hallenzuordnung erkennst du schlicht am **fehlenden Hallen-Kürzel**.
+- **Ein pausierendes Spiel lässt sich trotzdem aufs Feld legen** (seit
+  v0.9.253): Die Mindestpause ist eine Empfehlung, keine Sperre — der
+  Turnier-PC hat sie noch nie abgelehnt. Die Zeile bleibt deshalb wählbar
+  und ziehbar; vor dem Schreiben kommt eine **Rückfrage**, die sagt, wer
+  noch bis wann pausiert. Wer gerade auf einem **anderen Feld spielt**,
+  bleibt dagegen unwählbar — das lehnt der Turnier-PC ab.
 - **Jeder Name ist ein Link** auf die Spielerseite von badhub
   (`badhub.de/spieler/<Nr>/live`), erkennbar an der gepunkteten
   Unterstreichung; er öffnet in einem neuen Tab. Spieler ohne

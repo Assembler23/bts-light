@@ -3667,10 +3667,9 @@ fn effective_rest_minutes(
     snap: &crate::btp::model::BtpSnapshot,
     config: &AppConfig,
 ) -> Option<i64> {
-    if config.auto_assign.pause_minutes > 0.0 {
-        Some(config.auto_assign.pause_minutes as i64)
-    } else {
-        snap.rest_minutes.filter(|m| *m > 0)
+    match assign::pflichtpause_ms(snap, config) {
+        0 => None,
+        ms => Some((ms / 60_000) as i64),
     }
 }
 
@@ -4033,6 +4032,7 @@ mod tests {
             result: MatchResult::Normal,
             status: MatchStatus::Scheduled,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,

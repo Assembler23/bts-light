@@ -2211,7 +2211,8 @@ function targetProblem(court) {
   // muss ein Spiel bewusst in die andere Halle geholt werden (eine Halle
   // läuft voll). Ein Tipp daneben bleibt aber wahrscheinlicher als die
   // Absicht — deshalb fragt assignTo() vor dem Schreiben ausdrücklich
-  // nach, statt hier hart zu verbieten.
+  // nach, statt hier hart zu verbieten. Seit dem 22.08.2026 gilt dasselbe
+  // für die Mindestpause: Auch sie darf die Turnierleitung übergehen.
   return null;
 }
 
@@ -2505,16 +2506,31 @@ async function assignTo(court) {
   const problem = targetProblem(court);
   if (problem) { toast(problem, true); return; }
 
-  // Andere Halle: erlaubt, aber nur mit ausdrücklicher Bestätigung
-  // (Muster wie beim Feld-Freigeben mit laufendem Spielstand). Bricht die
+  // Erlaubt, aber nur mit ausdrücklicher Bestätigung (Muster wie beim
+  // Feld-Freigeben mit laufendem Spielstand): eine andere Halle und eine
+  // noch laufende Mindestpause. Beide Gründe kommen in EINE Rückfrage —
+  // zwei Dialoge hintereinander liest niemand zu Ende, und der zweite käme
+  // ausgerechnet dann, wenn der erste schon bestätigt ist. Bricht die
   // Turnierleitung ab, bleibt die Auswahl bestehen — vermutlich war nur
   // das Zielfeld daneben.
+  const bedenken = [];
+  const ruht = picked.match.blocked;
+  if (ruht && ruht.reason === "pause" && Date.now() < ruht.until_ms) {
+    const namen = ruht.players || [];
+    const bis = new Date(ruht.until_ms).toLocaleTimeString("de-DE",
+      { hour: "2-digit", minute: "2-digit" });
+    bedenken.push(`${namen.join(" und ")} ${namen.length > 1 ? "pausieren" : "pausiert"} `
+      + `noch bis ${bis}.`);
+  }
   const zielHalle = picked.match.hall;
   if (zielHalle && court.location && zielHalle !== court.location) {
+    bedenken.push(`Das Spiel gehört nach ${zielHalle}.`);
+  }
+  if (bedenken.length) {
     const paarung = `${(picked.match.team1 || []).join(" / ")} vs. ${(picked.match.team2 || []).join(" / ")}`;
-    if (!confirm(
-      `${paarung} gehört nach ${zielHalle}.\n\nWirklich auf Feld ${court.court} `
-      + `in ${court.location} legen?`)) {
+    const wohin = `Feld ${court.court}${court.location ? " in " + court.location : ""}`;
+    if (!confirm(`${paarung}\n\n${bedenken.map((b) => "• " + b).join("\n")}`
+      + `\n\nWirklich auf ${wohin} legen?`)) {
       return;
     }
   }
@@ -4168,10 +4184,14 @@ function scheduleFitCourts() {
  */
 function queueRow(m, topMatchId) {
   const parts = [];
-  // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
-  // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
-  // Ablehnung.
-  const pickable = !m.blocked;
+  // „Spielt gerade" ist ein echtes Hindernis: Der Turnier-PC lehnt eine
+  // solche Zuweisung ab (`assign::check_assign`), ein Tipp führte nur zu
+  // einer Fehlermeldung. Die Mindestpause ist dagegen eine Empfehlung, die
+  // die Turnierleitung übergehen darf — sie ist serverseitig ausdrücklich
+  // KEIN Blocker (`check_assign` prüft nur „spielt gerade"). Deshalb bleibt
+  // eine pausierende Zeile wählbar; vor dem Schreiben fragt `assignTo()`
+  // nach (Feldtest 22.08.2026).
+  const pickable = !m.blocked || m.blocked.reason === "pause";
   // Der Zieh-Griff hängt allein daran, dass das Spiel noch NICHT gerufen
   // ist: Der manuelle Präfix wirkt nur innerhalb der nicht gerufenen Spiele
   // (`assign::ready_queue`), ein Zug an einer gerufenen Zeile wäre

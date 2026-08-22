@@ -4,6 +4,34 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.253
+
+- **Behoben: Die Schiri-Rotation setzte Schiedsrichter in laufende Spiele.**
+  Wurde die Automatik mitten im Turnier eingeschaltet, bekamen sofort alle
+  gerade laufenden Partien eine Besetzung. Dieselbe Wirkung hatte jedes
+  Speichern der Einstellungen (das stoppt und startet die Übertragung) und
+  jeder App-Neustart: Die Rotation kannte danach keinen Vorher-Stand mehr und
+  hielt jedes belegte Feld für frisch belegt. Jetzt ist ihr **erster Blick**
+  immer nur Ausgangslage — bestückt wird ausschließlich ein Feld, dessen
+  Wechsel sie selbst beobachtet hat. Laufende Spiele bleiben unangetastet.
+- **Behoben: Das Speichern der Einstellungen schickte alle Spieler in die
+  Pause.** Der Zeitpunkt „Spiel beendet" lag nur im Arbeitsspeicher; nach
+  einem Neustart der Übertragung galten schlagartig alle beendeten Spiele als
+  soeben beendet, und jede Mindestpause lief von vorn los — auch wenn an der
+  Wartezeit gar nichts geändert worden war. Der Stempel liegt jetzt bei den
+  Spielzeiten auf der Platte und überlebt Neustart wie Speichern.
+- **Behoben: Eine geänderte Pausenzeit wirkte rückwirkend.** Wer die
+  Mindestpause umstellte, verlängerte oder verkürzte damit auch alle schon
+  laufenden Pausen. Die geltende Länge wird jetzt **beim Spielende
+  eingefroren**: Die neue Zeit gilt für Spiele, die danach enden; bereits
+  laufende Pausen bleiben, wie sie angekündigt waren.
+- **Neu: Ein pausierendes Spiel lässt sich trotzdem aufs Feld schieben.** Die
+  Zeile ist in der Turnierleitungs-Oberfläche wieder wählbar und ziehbar; vor
+  dem Schreiben kommt eine Rückfrage, die nennt, wer noch bis wann pausiert.
+  Trifft zugleich die andere Halle zu, stehen beide Gründe in **einer**
+  Rückfrage. Wer gerade auf einem anderen Feld spielt, bleibt unwählbar — das
+  lehnt der Turnier-PC ohnehin ab.
+
 ## v0.9.250
 
 - **Behoben: Der gedruckte Schiedsrichterzettel hatte kein Gitter.** Innenlinien

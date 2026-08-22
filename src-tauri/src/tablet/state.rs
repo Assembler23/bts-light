@@ -4329,6 +4329,7 @@ mod tests {
             result: MatchResult::Normal,
             status,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,
