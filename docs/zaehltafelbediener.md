@@ -41,7 +41,14 @@ Sobald ein Feld belegt wird, zieht der Sync-Loop einen Bediener aus der
 Warteschlange (`assign_scorekeeper_for_court`): **bevorzugt jemanden mit
 `from_court_id == court` (spielte zuletzt auf genau diesem Feld — der Verlierer
 des Vorspiels), sonst den ältesten** Wartenden. Idempotent je (Feld, Match);
-ist die Schlange leer, bleibt das Feld ohne Bediener. Wird das Feld frei oder
+ist die Schlange leer, bleibt das Feld ohne Bediener — und zwar **für dieses
+Spiel endgültig**: Die Vergabe gehört zum Aufruf und findet genau einmal je
+(Feld, Spiel) statt, auch wenn sie leer ausgeht (`scorekeeper_assign_done`).
+Ohne diesen Merker versuchte es der Sync-Lauf sekündlich erneut und hängte
+einem längst laufenden Spiel den Nächstbesten an, sobald irgendwo jemand
+fertig wurde; der am Feld angezeigte Name sprang dann mitten im Spiel um
+(Feldtest 21.08.2026). Wer später frei wird, ist für das **nächste** Spiel
+dran. Wird das Feld frei oder
 wechselt das Spiel, räumt `retain_scorekeeper_assignments` die Zuweisung.
 
 Der zugewiesene Bediener ersetzt in `CourtOverview.scorekeeper` den pro-Feld-

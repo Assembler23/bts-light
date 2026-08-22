@@ -16,6 +16,16 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   normalen Druckdialog, der auch „als PDF speichern" anbietet. Voraussetzung
   ist die öffentliche Live-Seite in den Einstellungen — fehlt sie, sagt die
   Vorschau das, statt ein Kürzel zu raten.
+## v0.9.251
+
+- **Behoben: Der Zähltafelbediener wechselte mitten im laufenden Spiel.**
+  Stand beim Belegen eines Feldes niemand in der Warteschlange, blieb das Feld
+  zunächst ohne Bediener und zeigte den Hinweis auf den Verlierer des
+  Vorspiels. Sobald danach irgendwo jemand fertig wurde, hängte die App diesen
+  Wartenden nachträglich dem längst laufenden Spiel an — am Feld stand
+  plötzlich ein anderer Name, obwohl sich nichts geändert hatte. Die Vergabe
+  gehört zum Aufruf: Findet sie niemanden, bleibt dieses Spiel ohne Bediener,
+  und wer später frei wird, ist für das nächste Spiel dran.
 
 ## v0.9.250
 
