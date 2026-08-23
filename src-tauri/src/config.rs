@@ -663,6 +663,15 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub locked_courts: Vec<i64>,
+    /// Turnier, zu dem [`Self::locked_courts`] gehört (BTP-Turniername).
+    ///
+    /// BTP vergibt CourtIDs je Turnier neu — eine Sperre vom Vortag träfe
+    /// sonst am nächsten Turnier ein beliebiges anderes Feld (ADR 0044).
+    /// Wechselt der Turniername im Snapshot, werden die Sperren verworfen.
+    /// Leer = „Turnier unbekannt" (Configs von vor v0.9.258); dann greift
+    /// die erste Sperre und schreibt den Namen mit.
+    #[serde(default)]
+    pub locked_courts_tournament: String,
     /// PIN für das Einstellungs-Menü am Zähltablett (Feldwechsel ohne QR).
     /// Reiner Bedien-Schutz gegen versehentliche Änderungen durch Helfer –
     /// KEINE Sicherheitsgrenze (der echte Kiosk-Lock liegt im Kiosk-Browser).
@@ -1659,6 +1668,7 @@ mod tests {
                 hall: "Halle A".to_string(),
             }],
             locked_courts: vec![3, 7],
+            locked_courts_tournament: "Testturnier".to_string(),
             tablet_settings_pin: "1234".to_string(),
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),

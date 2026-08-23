@@ -195,8 +195,16 @@ Manuelle Prüfliste: Zwei-Hallen-Testturnier, LAN + Cloud.
 - Rollback im Turnier: Schalter aus → „Auto-Hallen räumen" → Zustand wie
   vorher. App-Downgrade: `auto-halls.json` wird ignoriert, config bleibt
   lesbar.
-- `locked_courts` ist RAM-only: nach Neustart rechnet das Verhältnis mit
-  allen Feldern; Bestand bleibt (B2) — bewusst akzeptiert.
+- `locked_courts` überlebt den Neustart: Die Sperren stehen in der Config und
+  werden beim Start der Übertragung in den Laufzeit-Zustand geladen, das
+  Verhältnis rechnet also auch danach mit den entsperrten Feldern. (Bis
+  v0.9.257 stand hier „RAM-only" — das war schon länger falsch.) Bestand
+  bleibt (B2).
+- Seit v0.9.258 räumt das Sperren des **letzten offenen Felds einer Halle**
+  deren automatische Zuordnungen: Ohne das behielten die dorthin verteilten
+  Spiele ihre Hallenbindung und bekämen gar kein Feld mehr, obwohl nebenan
+  welche frei sind (Spec `tl-web-felder-sperren`, E11 — neue Auslösestelle zu
+  ADR 0030).
 
 ## Offene Fragen / Annahmen
 

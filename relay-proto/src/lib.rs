@@ -1784,6 +1784,22 @@ pub enum TlAction {
     /// eigene, destruktive Aktion und nie Nebeneffekt eines Set. Hand-,
     /// Regel- und Aufruf-Hallen bleiben unberührt.
     ClearAutoHalls,
+    /// Ein Feld sperren oder freigeben (Spec `tl-web-felder-sperren`).
+    ///
+    /// Ein gesperrtes Feld bekommt von der automatischen Vergabe kein Spiel
+    /// mehr; ein bereits laufendes bleibt unangetastet und zählt zu Ende.
+    /// BTP kennt die Sperre nicht (R2) — sie ist bts-light-eigen und wird
+    /// nie geschrieben.
+    ///
+    /// `locked` trägt den **Zielzustand**, nicht „umschalten": Bei zwei
+    /// Turnierleitungs-Geräten wäre ein Umschalten nicht eindeutig — wer
+    /// zuletzt tippt, bekäme womöglich das Gegenteil dessen, was auf seinem
+    /// Schirm stand.
+    LockCourt {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        locked: bool,
+    },
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
@@ -3938,6 +3954,14 @@ mod tests {
                 window: 18,
             },
             TlAction::ClearAutoHalls,
+            TlAction::LockCourt {
+                court_id: 5,
+                locked: true,
+            },
+            TlAction::LockCourt {
+                court_id: 5,
+                locked: false,
+            },
             TlAction::AnnounceCourtCall {
                 court_id: 5,
                 match_id: 4711,
@@ -4066,6 +4090,24 @@ mod tests {
             json,
             r#"{"action":"official_assign","courtId":5,"matchId":4711,"officialId":3,"role":"sr"}"#
         );
+    }
+
+    #[test]
+    fn tl_action_lock_court_wire_form() {
+        // Die Oberfläche schickt genau diese Form (Spec
+        // `tl-web-felder-sperren`); ein Tippfehler im Feldnamen wäre am Host
+        // ein stilles Verwerfen, nicht ein Fehler.
+        let json = serde_json::to_string(&TlAction::LockCourt {
+            court_id: 7,
+            locked: true,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"action":"lock_court","courtId":7,"locked":true}"#);
+        // Und zurück — beide Richtungen, beide Zustände.
+        roundtrip(&TlAction::LockCourt {
+            court_id: 7,
+            locked: false,
+        });
     }
 
     #[test]

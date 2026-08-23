@@ -4,6 +4,34 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.258
+
+- **Neu: Felder sperren von der Turnierleitungs-Oberfläche.** Fällt ein Feld
+  aus — gerissenes Netz, defekte Beleuchtung, nasser Boden —, musste die
+  Turnierleitung bisher quer durch die Halle zum Turnier-PC, um es aus der
+  automatischen Vergabe zu nehmen. Jetzt steht im ⋯-Menü jeder Feld-Kachel
+  „Feld sperren". Es ist dieselbe Sperre wie am PC, nicht eine zweite.
+
+  Läuft gerade ein Spiel darauf, sagt der Eintrag das ehrlich („Feld nach
+  diesem Spiel sperren") — die Partie zählt ungestört zu Ende. Das Freigeben
+  fragt nach, das Sperren nicht: Eine zu viel gesetzte Sperre fällt sofort
+  auf, ein versehentlich freigegebenes Feld bekommt dagegen sofort wieder ein
+  Spiel.
+
+  Wird das letzte offene Feld einer Halle gesperrt, verlieren die dorthin
+  vorverteilten Spiele ihre Hallenbindung und gehen in die andere Halle —
+  sonst warteten sie stumm auf ein Feld, das es nicht mehr gibt.
+- **Behoben: Eine gesetzte Feldsperre verschwand beim Speichern der
+  Einstellungen.** Wer ein Feld sperrte und danach am Turnier-PC irgendeine
+  Einstellung speicherte, hatte die Sperre still verloren — die Automatik legte
+  wieder Spiele darauf. Der Fehler war seit Längerem bekannt und wog bisher
+  wenig, weil nur am PC gesperrt wurde; mit der Bedienung aus der Halle wäre er
+  teuer geworden.
+- **Sperren gelten jetzt für ein Turnier.** Bisher stand eine Sperre auch am
+  nächsten Turniertag noch in der Liste — und traf dort ein beliebiges anderes
+  Feld, weil die Feldnummern aus BTP je Turnier neu vergeben werden. Beim
+  Turnierwechsel werden sie verworfen.
+
 ## v0.9.257
 
 - **Behoben: Eine Halle hinzunehmen rief die halbe Vergangenheit nach.** Stellte

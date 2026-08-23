@@ -5387,6 +5387,267 @@ mod tests {
     /// sein — vorher (getrennte Schreibpfade: `mutate_app_config` direkt
     /// auf der Platte, `mutate_config` nur im veralteten In-Memory-Stand)
     /// hätte (b) das Profil aus (a) kommentarlos wieder gelöscht.
+    /// Ein Turnier mit `n` Feldern in einer Halle — Grundlage der Sperr-Tests.
+    fn snap_mit_feldern(halle: &str, ids: &[i64]) -> crate::btp::model::BtpSnapshot {
+        let mut snap = crate::btp::model::BtpSnapshot {
+            tournament_name: "Sperrtest".into(),
+            rest_minutes: None,
+            matches: Vec::new(),
+            courts: ids.iter().map(|i| i.to_string()).collect(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        };
+        if !halle.is_empty() {
+            snap.locations.push(crate::btp::model::BtpLocation {
+                id: 1,
+                name: halle.to_string(),
+            });
+        }
+        for id in ids {
+            snap.court_infos.push(crate::btp::model::BtpCourt {
+                id: *id,
+                name: id.to_string(),
+                location_id: if halle.is_empty() { None } else { Some(1) },
+                sort_order: *id,
+            });
+        }
+        snap
+    }
+
+    fn tl_device(id: &str) -> crate::config::TlDevice {
+        crate::config::TlDevice {
+            id: id.into(),
+            token: format!("tok-{id}"),
+            label: format!("Tablet {id}"),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn sperren_wirkt_sofort_und_landet_in_der_config() {
+        // Spec `tl-web-felder-sperren` E3/E4: Die Sperre muss BEIDE Ziele
+        // erreichen — den Laufzeit-Zustand, aus dem die Vergabe liest, UND
+        // die Datei. Schriebe die Aktion nur die Config (wie `SetHallPrefill`),
+        // griffe die Sperre erst nach einem Neustart der Übertragung.
+        let (ctx, shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2, 3]));
+        let ctx = Arc::new(ctx);
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-lock-1",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 2,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(response.ok, "Sperren soll gelingen: {response:?}");
+        assert!(ctx.tablet.is_court_locked(2), "Laufzeit-Zustand (E3)");
+        assert_eq!(
+            shared.lock().unwrap().locked_courts,
+            vec![2],
+            "und die Config (E4)"
+        );
+        assert_eq!(
+            shared.lock().unwrap().locked_courts_tournament,
+            "Sperrtest",
+            "mit Turnierbezug (ADR 0044)"
+        );
+
+        // Freigeben nimmt beides wieder zurück.
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-unlock-1",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 2,
+                locked: false,
+            },
+        )
+        .await;
+        assert!(response.ok);
+        assert!(!ctx.tablet.is_court_locked(2));
+        assert!(shared.lock().unwrap().locked_courts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ein_unbekanntes_feld_wird_abgelehnt() {
+        // E6: Ohne diese Prüfung nähme der Host jede Zahl an — die Sperrliste
+        // trüge Einträge, die in keiner Oberfläche auftauchen und die deshalb
+        // niemand wieder loswird.
+        let (ctx, shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2]));
+        let ctx = Arc::new(ctx);
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-lock-999",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 999,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(!response.ok, "unbekanntes Feld muss abgelehnt werden");
+        assert!(
+            shared.lock().unwrap().locked_courts.is_empty(),
+            "und nichts verändern"
+        );
+        assert!(!ctx.tablet.is_court_locked(999));
+    }
+
+    #[tokio::test]
+    async fn dieselbe_op_id_sperrt_nur_einmal() {
+        // E8: Das Tablet wiederholt bei wackliger Leitung. Die Idempotenz
+        // liegt im gemeinsamen `remember_result`-Weg — dieser Test hält fest,
+        // dass die neue Aktion ihn wirklich benutzt.
+        let (ctx, shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2, 3]));
+        let ctx = Arc::new(ctx);
+        let aktion = relay_proto::TlAction::LockCourt {
+            court_id: 3,
+            locked: true,
+        };
+
+        let erste =
+            crate::tablet::tl::execute(&ctx, &tl_device("a"), "op-doppelt", 1, 0, aktion.clone())
+                .await;
+        assert!(erste.ok);
+        // Zwischendurch von Hand freigeben — käme die Wiederholung durch,
+        // stünde die Sperre danach wieder.
+        ctx.tablet.set_court_locked(3, false);
+
+        let zweite =
+            crate::tablet::tl::execute(&ctx, &tl_device("a"), "op-doppelt", 1, 0, aktion).await;
+        assert!(zweite.ok, "die Wiederholung wird quittiert");
+        assert!(
+            !ctx.tablet.is_court_locked(3),
+            "aber nicht noch einmal ausgeführt (E8)"
+        );
+        assert_eq!(shared.lock().unwrap().locked_courts, vec![3]);
+    }
+
+    #[tokio::test]
+    async fn eine_halle_ohne_offenes_feld_verliert_ihre_auto_zuordnungen() {
+        // E11: ADR 0030 bindet die Vergabe an die Halle. Bliebe die Zuordnung
+        // stehen, bekämen die dorthin vorverteilten Spiele gar kein Feld mehr,
+        // obwohl nebenan welche frei sind — die Halle stünde still, ohne dass
+        // jemand den Grund sähe.
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        let mut snap = snap_mit_feldern("Halle A", &[1, 2]);
+        snap.locations.push(crate::btp::model::BtpLocation {
+            id: 2,
+            name: "Halle B".into(),
+        });
+        snap.court_infos.push(crate::btp::model::BtpCourt {
+            id: 3,
+            name: "3".into(),
+            location_id: Some(2),
+            sort_order: 3,
+        });
+        snap.courts.push("3".into());
+        ctx.tablet.set_snapshot(snap);
+        // Zwei Spiele sind nach Halle A vorverteilt, eines nach Halle B.
+        ctx.tablet.auto_hall_store().insert_many(&[
+            (100, "Halle A".to_string()),
+            (101, "Halle A".to_string()),
+            (200, "Halle B".to_string()),
+        ]);
+        let ctx = Arc::new(ctx);
+
+        // Feld 1 sperren — Halle A hat noch Feld 2, also passiert nichts.
+        let r = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-l1",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 1,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(r.ok);
+        assert_eq!(
+            ctx.tablet.auto_hall_store().halls().len(),
+            3,
+            "solange die Halle ein offenes Feld hat, bleibt alles"
+        );
+
+        // Jetzt auch Feld 2 — Halle A ist zu.
+        let r = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-l2",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 2,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(r.ok);
+        let halls = ctx.tablet.auto_hall_store().halls();
+        assert_eq!(
+            halls.len(),
+            1,
+            "die Zuordnungen der geschlossenen Halle sind weg"
+        );
+        assert_eq!(
+            halls.get(&200).map(String::as_str),
+            Some("Halle B"),
+            "die der offenen Halle bleiben unangetastet"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_ein_hallen_turnier_verliert_beim_sperren_keine_zuordnungen() {
+        // Gegenprobe zum vorigen Test: Im Ein-Hallen-Fall trägt kein Feld
+        // einen Hallennamen. Ohne den `is_multi_hall`-Vorbehalt wäre die
+        // Menge der offenen Hallen leer — und es würde ALLES geräumt.
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1]));
+        ctx.tablet
+            .auto_hall_store()
+            .insert_many(&[(100, "Halle A".to_string())]);
+        let ctx = Arc::new(ctx);
+
+        let r = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-einhalle",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 1,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(r.ok);
+        assert_eq!(
+            ctx.tablet.auto_hall_store().halls().len(),
+            1,
+            "im Ein-Hallen-Turnier wird nichts geräumt"
+        );
+    }
+
     #[tokio::test]
     async fn profile_save_survives_a_later_settings_save_lost_update_regression() {
         let (ctx, shared, dir) = make_tl_ctx(vec![]);

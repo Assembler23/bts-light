@@ -581,15 +581,28 @@ mitgeändert worden:
   ehrlich sagen, dass die alte Konfiguration nicht gelesen werden konnte —
   statt ihm einen harmlos aussehenden Ersteinrichtungs-Assistenten zu
   zeigen.
-- **`locked_courts` geht beim Speichern von Einstellungen verloren.**
-  `set_court_locked` schreibt die Sperrliste host-seitig in die
-  `config.json`; der Einrichtungs-Assistent schickt beim nächsten Speichern
-  seinen beim Öffnen aufgenommenen Stand zurück (`buildConfig`:
-  `locked_courts: initialConfig.locked_courts ?? []`) und setzt sie damit
-  zurück. Ablauf: Feld in der Übersicht sperren → in den Einstellungen
-  irgendetwas speichern → Sperre weg. Für die TL-Geräteliste ist dieser
-  Pfad bereits geschlossen (`keep_host_managed_fields` in `commands.rs`);
-  `locked_courts` gehört auf demselben Weg dazu.
+- ~~**`locked_courts` geht beim Speichern von Einstellungen verloren.**~~
+  **Erledigt in v0.9.258** (Spec `tl-web-felder-sperren`):
+  `keep_host_managed_fields` schützt die Sperrliste jetzt wie die
+  TL-Geräteliste. Der Fehler wog schwerer als gedacht — mit der Bedienung aus
+  der Halle wäre der Ablauf gewesen: kaputtes Feld sperren, jemand speichert
+  am PC eine Einstellung, Sperre still weg, Automatik legt ein Spiel darauf.
+  Ein Test hält den Pfad offen (`keep_host_managed_fields_preserves_the_locked_courts`).
+
+## Wünsche vom 23.08.2026
+
+- **Felder sperren im TL-Web** — Spec freigegeben und umgesetzt (v0.9.258):
+  [docs/features/tl-web-felder-sperren.md](features/tl-web-felder-sperren.md),
+  [ADR 0044](adr/0044-sperrliste-turniergebunden.md). Schloss nebenbei den
+  `locked_courts`-Datenverlust oben.
+- **Warnung bei scheinbar fertigem Spiel** — die Turnierleitungs-Sicht soll
+  melden, wenn ein Spiel nach der Zählweise entschieden ist, das Feld aber
+  länger als eine Minute belegt bleibt (Ergebnis nicht übermittelt). Auslöser
+  und Ort sind geklärt (Marke an der Kachel + Zeile im Alarmbereich); Spec
+  steht noch aus.
+- **Feldauswahl für die Automatikvergabe** — ein Spiel soll ein Wunschfeld
+  bekommen können, auf das die Automatik wartet (Finalspiele steuern). Von
+  Hand woanders hinlegen bleibt möglich, mit Rückfrage. Spec steht noch aus.
 
 ## Wünsche vom 11.08.2026
 

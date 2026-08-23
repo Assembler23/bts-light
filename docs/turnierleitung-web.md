@@ -109,6 +109,27 @@ LAN+Cloud voraus.
   in Worten will: Der Mauszeiger (bzw. langes Tippen) auf dem Namen zeigt
   „spielt gerade" bzw. „pausiert noch bis …". Ein Spiel ohne
   Hallenzuordnung erkennst du schlicht am **fehlenden Hallen-Kürzel**.
+- **Felder sperren und freigeben** (seit v0.9.258): Im ⋯-Menü einer
+  Feld-Kachel steht **„🔒 Feld sperren"**. Ein gesperrtes Feld bekommt von der
+  automatischen Vergabe kein Spiel mehr — für ein kaputtes Netz, ein
+  reserviertes Feld oder eine Halle, die gegen Abend verkleinert wird. Es ist
+  dieselbe Sperre wie am Turnier-PC, nicht eine zweite.
+
+  Läuft gerade ein Spiel darauf, heißt der Eintrag **„Feld nach diesem Spiel
+  sperren"** — genau so verhält es sich auch: Das laufende Spiel zählt
+  ungestört zu Ende, erst danach bleibt das Feld leer. Wer es sofort räumen
+  will, nimmt das Spiel zusätzlich von Hand herunter.
+
+  **„🔓 Feld freigeben"** fragt nach, bevor es wirkt. Das ist Absicht: Sperren
+  kann man gefahrlos zurücknehmen, aber ein versehentlich freigegebenes Feld
+  bekommt sofort wieder ein Spiel — und wer die Sperre nicht selbst gesetzt
+  hat, sieht ihr nicht an, ob dort etwas kaputt ist.
+
+  Zwei Dinge noch: Solange kein Turnier geladen ist, gibt es nichts zu sperren
+  (die Felder kommen ja aus BTP). Und die Sperren gelten für **dieses**
+  Turnier — am nächsten Tag mit einem anderen Turnier sind sie weg, weil BTP
+  die Feldnummern neu vergibt und eine alte Sperre sonst ein beliebiges
+  anderes Feld träfe.
 - **Ein pausierendes Spiel lässt sich trotzdem aufs Feld legen** (seit
   v0.9.253): Die Mindestpause ist eine Empfehlung, keine Sperre — der
   Turnier-PC hat sie noch nie abgelehnt. Die Zeile bleibt deshalb wählbar

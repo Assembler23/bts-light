@@ -355,6 +355,19 @@ Kandidat: die vierachsige Spielzeiten-Statistik aus Punkt 1), misst nach
 und nimmt sie in die Kaskade auf — die verbleibende Reserve trägt keine
 zweite Erweiterung.
 
+**Feldsperre** (Spec `tl-web-felder-sperren`, seit v0.9.258): eine neue
+`TlAction`-Variante `lock_court { courtId, locked }`. Der Relay braucht dafür
+**keine** Code-Änderung — er parst Aktionen typisiert und bekommt die Variante
+über `relay-proto` mit; Relay und `tl.html` stammen ohnehin aus demselben
+Merge, der Relay ist also nie älter als die Seite.
+
+Die Schere liegt woanders: Der **Host** kommt erst mit einem Release-Tag, und
+ein älterer Host verwirft eine unbekannte `TlAction` **still**
+(`relay_client.rs`) — das Gerät bekäme nicht einmal eine Fehlermeldung.
+Deshalb trägt der `TlState` das additive Feld `can_lock_courts`, und die Seite
+zeigt den Menüeintrag nur, wenn es ankommt (Feature-Detection wie bei
+`hall_prefill`). Damit ist der Merge vom Release-Tag entkoppelt.
+
 **Hallen-Vorverteilung** (Spec `hallen-vorverteilung`): zwei neue
 `TlAction`-Varianten `set_hall_prefill { enabled, window }` und
 `clear_auto_halls` — der Relay parst Aktionen **typisiert**, ein alter
