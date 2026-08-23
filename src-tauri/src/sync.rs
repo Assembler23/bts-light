@@ -1842,14 +1842,31 @@ impl SyncEngine {
                 }
                 if require_call {
                     // Mehr-Hallen ohne aktive Halle: nur für diese Halle
-                    // gerufene Matches — ODER ein AUTO-vorverteiltes Spiel in
-                    // seiner Halle (ADR 0030): Die Vorverteilung ersetzt den
-                    // Aufruf als Vergabe-Voraussetzung; das frühe
-                    // Hallen-Signal (Monitor/badhub) tritt an seine Stelle.
-                    let auto_statt_aufruf = matches!(source, Quelle::Auto)
+                    // gerufene Matches — ODER ein Spiel, dessen Halle bereits
+                    // feststeht und das in genau dieser Halle ein Feld
+                    // bekommt (ADR 0030): Das Hallen-Signal tritt an die
+                    // Stelle des Aufrufs, denn es sagt dasselbe.
+                    //
+                    // Gilt für die **Vorverteilung** (Auto) und für die
+                    // **Hand-Zuweisung** (Manual). Die Hand war bis v0.9.260
+                    // ausgenommen, und das kehrte die Wirkung um: Eine
+                    // Hand-Zuweisung räumt die Auto-Zuordnung (richtig — die
+                    // Turnierleitung entscheidet), womit die Quelle von `Auto`
+                    // auf `Manual` wechselte und der Aufruf-Ersatz wegfiel.
+                    // Das Spiel, das eben noch verteilt wurde, war danach für
+                    // die Automatik unsichtbar (Turnier-Befund 23.08.2026).
+                    // Ausgerechnet der Eingriff, mit dem die TL steuern will,
+                    // legte das Spiel still.
+                    //
+                    // Regel und BTP-Ort bleiben bewusst **draußen**: Sie
+                    // gelten pauschal für ganze Disziplinen bzw. kommen aus
+                    // den Turnierstammdaten. Sie als Aufruf zu werten würde
+                    // die Aufruf-Pflicht für halbe Turniere auf einmal
+                    // aufheben — hier geht es um den Eingriff für EIN Spiel.
+                    let halle_statt_aufruf = matches!(source, Quelle::Auto | Quelle::Manual)
                         && !hall.is_empty()
                         && court_hall.eq_ignore_ascii_case(hall);
-                    auto_statt_aufruf
+                    halle_statt_aufruf
                         || call_for(m.id)
                             .and_then(|c| c.location_id)
                             .zip(court.location_id)
@@ -3504,6 +3521,104 @@ mod tests {
         // Nur das Feld in Halle 2 (location_id=2) bekommt das Match.
         assert_eq!(courts.len(), 1);
         assert_eq!(courts[0].court_id, 2);
+    }
+
+    /// Zwei Hallen mit je einem Feld, ein spielbereites Match — die Lage,
+    /// in der die Aufruf-Pflicht gilt (Mehr-Hallen ohne aktive Halle).
+    fn zwei_hallen_ein_match() -> BtpSnapshot {
+        snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            vec![ready_match(7, 1)],
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle 1".into(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle 2".into(),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn eine_von_hand_gesetzte_halle_ersetzt_den_aufruf() {
+        // Turnier-Befund 23.08.2026: „Wenn man eine Halle manuell angibt
+        // (vorher war schon automatisch die Halle vergeben), dann wird es bei
+        // der Automatik ignoriert."
+        //
+        // Im Mehr-Hallen-Betrieb ohne aktive Halle braucht ein Spiel einen
+        // Vorbereitungs-Aufruf für seine Halle — ODER eine Auto-Halle, die ihn
+        // nach ADR 0030 ersetzt. Die Hand-Zuweisung räumt die Auto-Zuordnung
+        // (richtig: die TL entscheidet), womit die Quelle von `Auto` auf
+        // `Manual` wechselt — und damit fiel der Aufruf-Ersatz weg.
+        //
+        // Die Folge ist besonders tückisch: Vorher lief das Spiel, nach dem
+        // Eingriff nicht mehr. Die Turnierleitung denkt, sie hilft, und legt
+        // das Spiel damit still.
+        //
+        // Eine von Hand gesetzte Halle ist das STÄRKERE Signal als eine
+        // automatisch verteilte — sie muss den Aufruf mindestens ebenso
+        // ersetzen.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = zwei_hallen_ein_match();
+        tablet.set_snapshot(snap.clone());
+        tablet.set_manual_hall(7, "Halle 2");
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(
+            courts.len(),
+            1,
+            "die von Hand gesetzte Halle muss den Aufruf ersetzen — sonst legt \
+             der Hand-Eingriff das Spiel still"
+        );
+        assert_eq!(courts[0].court_id, 2, "und zwar in Halle 2");
+    }
+
+    #[test]
+    fn eine_von_hand_gesetzte_halle_bindet_auch_weiterhin() {
+        // Gegenprobe: Der Aufruf-Ersatz darf die Bindung nicht aufweichen.
+        // Ist das Feld der gewählten Halle belegt, wartet das Spiel — es
+        // rutscht NICHT in die andere Halle (ADR 0030).
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut snap = zwei_hallen_ein_match();
+        // Halle 2 hat kein freies Feld mehr.
+        snap.matches.push({
+            let mut m = ready_match(8, 8);
+            m.status = MatchStatus::OnCourt;
+            m.court = Some("2".into());
+            m.court_id = Some(2);
+            m
+        });
+        tablet.set_snapshot(snap.clone());
+        tablet.set_manual_hall(7, "Halle 2");
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "das Spiel wartet auf seine Halle, statt in die andere zu rutschen"
+        );
+    }
+
+    #[test]
+    fn ohne_halle_und_ohne_aufruf_bleibt_es_bei_der_aufruf_pflicht() {
+        // Der Sinn der Aufruf-Pflicht bleibt: Ein Spiel ohne jede
+        // Hallenangabe wird im Mehr-Hallen-Betrieb NICHT einfach irgendwohin
+        // vergeben — sonst stünde es plötzlich in einer Halle, in der niemand
+        // damit rechnet.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = zwei_hallen_ein_match();
+        tablet.set_snapshot(snap.clone());
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "ohne Halle und ohne Aufruf: keine Vergabe"
+        );
     }
 
     // ── Zeit-Reihenfolge + Spieler-Verfügbarkeit ─────────────────────────

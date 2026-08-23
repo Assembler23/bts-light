@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.260
+
+- **Behoben: Eine von Hand gesetzte Halle legte das Spiel still.** Im
+  Mehr-Hallen-Betrieb braucht ein Spiel einen Vorbereitungs-Aufruf, damit die
+  Automatik es vergibt — oder eine Halle aus der Vorverteilung, die den Aufruf
+  ersetzt. Wies die Turnierleitung einem Spiel von Hand eine Halle zu, wurde
+  die automatische Zuordnung dabei geräumt (richtig so, die Turnierleitung
+  entscheidet) — und mit ihr fiel der Aufruf-Ersatz weg. Das Spiel, das eben
+  noch verteilt wurde, war danach für die Automatik unsichtbar.
+
+  Die Wirkung war damit das Gegenteil der Absicht: Ausgerechnet der Griff, mit
+  dem man steuern will, ließ das Spiel liegen — ohne Hinweis. Eine von Hand
+  gesetzte Halle ersetzt den Aufruf jetzt genauso wie eine vorverteilte.
+
+  Die Bindung bleibt unverändert: Ein Spiel mit Hand-Halle wartet weiterhin auf
+  ein Feld seiner Halle, statt in die andere zu rutschen.
+
 ## v0.9.259
 
 - **Neu: Die Turnierleitung erfährt es, wenn ein Ergebnis fehlt.** Ist ein
