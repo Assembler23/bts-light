@@ -109,6 +109,30 @@ LAN+Cloud voraus.
   in Worten will: Der Mauszeiger (bzw. langes Tippen) auf dem Namen zeigt
   „spielt gerade" bzw. „pausiert noch bis …". Ein Spiel ohne
   Hallenzuordnung erkennst du schlicht am **fehlenden Hallen-Kürzel**.
+- **Wunschfeld** (seit v0.9.262): Im ⋯-Menü eines Spiels lässt sich ein
+  **Feld** wählen. Die Automatik legt dieses Spiel dann nur dorthin — und hält
+  das Feld frei, sobald das Spiel dran ist. Gedacht für Endspiele, die aufs
+  Hauptfeld gehören.
+
+  **Freigehalten wird erst ab Spielbereitschaft**, nicht ab dem Setzen: Solange
+  die Spieler noch im Halbfinale stehen oder in ihrer Pflichtpause sind, darf
+  ein anderes Spiel auf das Feld. So steht das Hauptfeld nicht stundenlang
+  leer.
+
+  In der Liste steht das gewählte Feld als Marke (⌖) — sie färbt sich, wenn das
+  Feld gerade belegt ist. Damit sieht man auch, **worauf** ein wartendes Spiel
+  wartet.
+
+  Von Hand darfst du das Spiel weiterhin überall hinlegen; es kommt nur eine
+  Rückfrage. Ein Wunschfeld auf ein **gesperrtes** Feld lehnt der Turnier-PC
+  ab — die Reservierung ersetzt die Sperre für diesen Zweck. Der Wunsch
+  verschwindet von selbst, sobald das Spiel auf dem Feld steht, und gilt nur
+  für das laufende Turnier.
+
+  **Eine Einschränkung:** Für Spiele mit Wunschfeld gibt es keine
+  Startzeit-Prognose. Die Vorhersage rechnet mit Hallen, nicht mit einzelnen
+  Feldern — sie wäre systematisch zu früh und würde auch die Zeiten der
+  anderen Spiele verschieben.
 - **Warnung „Ergebnis fehlt"** (seit v0.9.259): Ist ein Spiel nach seinen
   Sätzen entschieden — die Endpunkte sind erreicht —, das Feld aber weiterhin
   belegt, meldet die Oberfläche das nach **einer Minute**: als rote Marke an

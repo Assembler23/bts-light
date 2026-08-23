@@ -598,9 +598,11 @@ mitgeändert worden:
 - **Warnung bei scheinbar fertigem Spiel** — Spec freigegeben und umgesetzt
   (v0.9.259): [docs/features/tl-warnung-fertiges-spiel.md](features/tl-warnung-fertiges-spiel.md),
   [ADR 0045](adr/0045-fertig-warnung-serverseitig-gestempelt.md).
-- **Feldauswahl für die Automatikvergabe** — ein Spiel soll ein Wunschfeld
-  bekommen können, auf das die Automatik wartet (Finalspiele steuern). Von
-  Hand woanders hinlegen bleibt möglich, mit Rückfrage. Spec steht noch aus.
+- **Feldauswahl für die Automatikvergabe** — Spec freigegeben und umgesetzt
+  (v0.9.262): [docs/features/tl-wunschfeld.md](features/tl-wunschfeld.md),
+  [ADR 0046](adr/0046-wunschfeld-reserviert-ab-spielbereitschaft.md).
+  Reserviert wird ab Spielbereitschaft — ein Endspiel, dessen Spieler noch
+  im Halbfinale stehen, hält das Hauptfeld nicht leer.
 
 ## Wünsche vom 11.08.2026
 

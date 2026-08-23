@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.262
+
+- **Neu: Wunschfeld für einzelne Spiele.** Im ⋯-Menü eines Spiels lässt sich
+  jetzt ein Feld wählen. Die Automatik legt dieses Spiel dann nur dorthin — und
+  hält das Feld frei, sobald das Spiel dran ist. Damit landet das Endspiel auf
+  dem Hauptfeld, statt auf dem, das zufällig zuerst frei wird.
+
+  **Freigehalten wird erst ab Spielbereitschaft**, nicht schon beim Setzen:
+  Solange die Spieler noch im Halbfinale stehen oder ihre Pflichtpause läuft,
+  darf ein anderes Spiel auf das Feld. So steht das Hauptfeld nicht den halben
+  Tag leer, nur weil jemand morgens vorausgeplant hat.
+
+  In der Liste zeigt eine Marke das gewählte Feld und färbt sich, wenn es
+  gerade belegt ist — man sieht also auch, worauf ein Spiel wartet. Von Hand
+  bleibt alles möglich, es kommt nur eine Rückfrage. Der Wunsch verschwindet
+  von selbst, sobald das Spiel auf dem Feld steht.
+
+  Für Spiele mit Wunschfeld gibt es keine Startzeit-Prognose: Die Vorhersage
+  rechnet mit Hallen, nicht mit einzelnen Feldern, und wäre hier systematisch
+  zu früh — sie würde auch die Zeiten aller nachfolgenden Spiele verschieben.
+
 ## v0.9.261
 
 - **Neu: Die Anzeigen kosten deutlich weniger Daten — die Anzeige bleibt

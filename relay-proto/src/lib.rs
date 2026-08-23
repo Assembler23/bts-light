@@ -1784,6 +1784,22 @@ pub enum TlAction {
     /// eigene, destruktive Aktion und nie Nebeneffekt eines Set. Hand-,
     /// Regel- und Aufruf-Hallen bleiben unberührt.
     ClearAutoHalls,
+    /// Wunschfeld eines Spiels setzen oder aufheben (Spec `tl-wunschfeld`).
+    ///
+    /// Die automatische Vergabe legt dieses Spiel dann **nur** auf dieses
+    /// Feld und hält es dafür frei, sobald das Spiel spielbereit ist. `None`
+    /// hebt den Wunsch auf.
+    ///
+    /// Wie [`Self::LockCourt`] trägt das Feld den **Zielzustand**, nicht
+    /// „umschalten": Bei zwei Turnierleitungs-Geräten wäre ein Umschalten
+    /// nicht eindeutig.
+    SetWishCourt {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        /// Gewünschtes Feld; `None` = Wunsch aufheben.
+        #[serde(rename = "courtId", default, skip_serializing_if = "Option::is_none")]
+        court_id: Option<i64>,
+    },
     /// Ein Feld sperren oder freigeben (Spec `tl-web-felder-sperren`).
     ///
     /// Ein gesperrtes Feld bekommt von der automatischen Vergabe kein Spiel
@@ -3958,6 +3974,14 @@ mod tests {
                 court_id: 5,
                 locked: true,
             },
+            TlAction::SetWishCourt {
+                match_id: 4711,
+                court_id: Some(3),
+            },
+            TlAction::SetWishCourt {
+                match_id: 4711,
+                court_id: None,
+            },
             TlAction::LockCourt {
                 court_id: 5,
                 locked: false,
@@ -4089,6 +4113,27 @@ mod tests {
         assert_eq!(
             json,
             r#"{"action":"official_assign","courtId":5,"matchId":4711,"officialId":3,"role":"sr"}"#
+        );
+    }
+
+    #[test]
+    fn tl_action_set_wish_court_wire_form() {
+        // Aufheben lässt `courtId` weg — die Seite schickt dann schlicht
+        // nichts, statt einer 0, die als Feld 0 durchgehen könnte.
+        let json = serde_json::to_string(&TlAction::SetWishCourt {
+            match_id: 4711,
+            court_id: None,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"action":"set_wish_court","matchId":4711}"#);
+        let json = serde_json::to_string(&TlAction::SetWishCourt {
+            match_id: 4711,
+            court_id: Some(3),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"action":"set_wish_court","matchId":4711,"courtId":3}"#
         );
     }
 

@@ -548,6 +548,10 @@ pub struct TabletState {
     /// demselben Grund wie `officials`: TL-Web-Actions und Tauri-Commands
     /// müssen denselben Stand sehen.
     auto_assign_exclusions: crate::tablet::exclusion::AutoAssignExclusionStore,
+    /// Wunschfelder der Automatik (Spec `tl-wunschfeld`) — turniergebunden
+    /// wie die Ausnahmeliste, aus demselben Grund geteilt zwischen TL-Web,
+    /// Sync-Lauf und Anzeige.
+    wish_courts: crate::tablet::wish_court::WishCourtStore,
     /// Manuelle Spielreihenfolge je Halle (Spec
     /// `spielliste-manuelle-reihenfolge`, ADR 0023): Match-IDs im
     /// Präfix-Block ihrer Halle, turniergebunden persistiert. Er hängt hier
@@ -1197,6 +1201,9 @@ impl TabletState {
         // ADR 0022, Spec `feldvergabe-ausnahme`).
         self.auto_assign_exclusions
             .set_tournament(&snapshot.tournament_name);
+        // Wunschfelder ebenso turniergebunden (Spec `tl-wunschfeld`):
+        // Match- UND CourtIDs gelten nur innerhalb eines Turniers.
+        self.wish_courts.set_tournament(&snapshot.tournament_name);
         // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
         self.queue_order.set_tournament(&snapshot.tournament_name);
         // Gesperrte Felder ebenso (ADR 0044). Sie liegen zwar in der Config
@@ -1295,6 +1302,24 @@ impl TabletState {
         self.auto_assign_exclusions.retain(keep);
     }
 
+    /// Der Wunschfeld-Speicher (Spec `tl-wunschfeld`) — geteilt von
+    /// TL-Web-Actions, `sync.rs` und dem TL-Zustand.
+    pub fn wish_court_store(&self) -> &crate::tablet::wish_court::WishCourtStore {
+        &self.wish_courts
+    }
+
+    /// Wunschfeld dieses Spiels (`None` = keins gesetzt). **Die** eine
+    /// Abfrage für Vergabe und Anzeige — nie der Store direkt, damit es nur
+    /// diese eine Stelle gibt.
+    pub fn wish_court(&self, match_id: i64) -> Option<i64> {
+        self.wish_courts.wish(match_id)
+    }
+
+    /// Wunschfeld setzen (`Some`) oder aufheben (`None`).
+    pub fn set_wish_court(&self, match_id: i64, court_id: Option<i64>) {
+        self.wish_courts.set_wish(match_id, court_id);
+    }
+
     /// Der Speicher der manuellen Spielreihenfolge (Spec
     /// `spielliste-manuelle-reihenfolge`) — geteilt von TL-Web-Actions,
     /// Tauri-Commands und `sync.rs`.
@@ -1374,6 +1399,11 @@ impl TabletState {
     /// Ablage-Datei der Auto-Vergabe-Ausnahmeliste setzen (beim App-Start).
     pub fn set_auto_assign_exclusions_path(&self, path: std::path::PathBuf) {
         self.auto_assign_exclusions.set_path(path);
+    }
+
+    /// Ablage-Datei der Wunschfelder setzen (beim App-Start).
+    pub fn set_wish_courts_path(&self, path: std::path::PathBuf) {
+        self.wish_courts.set_path(path);
     }
 
     /// Ablage-Datei der manuellen Spielreihenfolge setzen (beim App-Start).
