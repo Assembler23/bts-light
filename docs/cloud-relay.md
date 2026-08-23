@@ -806,6 +806,22 @@ hinter nginx.
 `relay-proto/` oder `tablet.html` auf `main`, plus `workflow_dispatch`).
 Reproduzierbar gebaut, kein Rust-Toolchain auf dem Prod-Server nötig.
 
+**Sicherung als Rückweg (seit v0.9.261).** Vor dem Umbenennen auf die neue
+Binary kopiert der Workflow die laufende unter `/opt/bts-relay/bts-relay`
+nach `/opt/bts-relay/bts-relay.rollback`. Der Rückweg bei einer nicht
+anspringenden Version:
+
+```sh
+ssh bts-deploy@178.104.221.177 \
+  'mv /opt/bts-relay/bts-relay.rollback /opt/bts-relay/bts-relay \
+   && sudo systemctl restart bts-relay \
+   && sleep 2 \
+   && curl -sf http://127.0.0.1:8090/health'
+```
+
+Das `cp` braucht kein sudo (das Verzeichnis ist der Gruppe `bts-deploy`
+schreibbar); das einzige sudo bleibt der eine Restart-Befehl.
+
 **Zwei getrennte Benutzer (seit 2026-08-12).** Vorher lief der Dienst als `badhub`
 und GitHub Actions deployte als `badhub` — ein Benutzer mit `NOPASSWD: ALL`. Damit war
 der Deploy-Schlüssel faktisch ein Root-Schlüssel für den badhub-Produktivserver, und

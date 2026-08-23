@@ -532,7 +532,30 @@ ein „Neu laden"/„Identifizieren" auslösen; mehr nicht (die Befehle sind
 ein geschlossenes Enum). Das ist dasselbe Modell wie für die Tablet- und
 Werbe-Routen und für eine zugangsfreie Plug-and-play-App akzeptiert.
 
-## Werbung (Leerlauf)
+## ETag/304 für den Status-Abruf (seit v0.9.254)
+
+Alle drei Status-Endpunkte (`/monitor/state` am Relay und LAN sowie
+`/court/{id}/state` im LAN) tragen jetzt einen **ETag** und beantworten
+`If-None-Match` mit **304 ohne Body**. Der Client (`monitor.html`) schickt die
+zuletzt gesehene Marke mit und hält den letzten Stand bei 304 — nur bei 200
+wird der Zustand übernommen und die Marke aktualisiert. `ad.html` zieht
+denselben Weg für seinen 1-s-Reassignment-Poll nach.
+
+**Was in die Marke eingeht:** der Inhalt der Antwort, aber **nicht** die
+je-nicht-inhaltlichen Felder — `serverNowMs` (je Aufruf neu) und `seq` (steigt
+je Anstoß, auch ohne Inhaltsänderung). Beide bleiben im Body; nur die Marke
+ignoriert sie. Dieselbe Begründung wie beim Übersichts-ETag (`uebersicht_marke`,
+`relay/src/main.rs` :1808-1813). Muster: `DefaultHasher::new()` mit festem Seed
+(wie `bild_marke`) → gleicher Inhalt, gleiche Marke, auch über Neustarts.
+
+**Uhr:** Da 304 keinen Body trägt, speist `monitor.html` seinen Uhr-Offset aus
+zwei Quellen — jedem vollen 200 (`serverNowMs`) und dem WS-Herzschlag
+(`{"hb":<nowMs>}`). Ein Refetch-Cap (gesund → 10 min, ungesund → 60 s) erzwingt
+regelmäßig einen vollen 200. Kanonische Fassung: `src/io/monitorClock.mjs`.
+
+Das Lebenszeichen des Geräts (`monitor_seen`) wird **vor** dem 304-Check
+aktualisiert — ein cachetreuer Monitor bleibt online.
+
 
 Läuft kein Spiel, zeigt der Monitor Werbung:
 

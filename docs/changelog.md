@@ -4,6 +4,30 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.261
+
+- **Neu: Die Anzeigen kosten deutlich weniger Daten — die Anzeige bleibt
+  dieselbe.** Bisher luden die Court-Monitore den kompletten Spielfeldzustand
+  im Sekundentakt neu; gemessen waren das zuletzt rund 29 GB je
+  Turnierwochenende über die Cloud. Jetzt fragen die Geräte mit ihrer
+  bekannten Marke (ETag): Ist der Zustand unverändert, antwortet der Relay mit
+  „unverändert" (304) und überträgt nichts. Im Turnierbetrieb ist das der
+  Normalfall — gezählt wird nur, wenn sich wirklich etwas ändert. Erwartung:
+  rund 90 % weniger Datenverkehr (gemessen wird das nach dem nächsten
+  Turnier). Im LAN funktioniert dasselbe Verfahren für die eigenen Monitore.
+- **Neu: Der Pausen-Countdown rechnet mit der Server-Uhr.** Bisher kam die
+  Restzeit aus der Geräte-Uhr; nach Wochen im Dauerbetrieb gehen die
+  Pi-Uhren oft nach, und der Countdown lief langsamer als die Realität.
+  Jetzt stammt der Offset aus dem Abruf selbst (und aus dem Herzschlag des
+  Push-Kanals) — er überlebt auch eine lange „unverändert"-Reihe, und die
+  Spieldauer in der Kopfzeile zählt aus derselben Quelle weiter.
+- **Neu: Nach einem Verbindungsbruch holt ein Monitor zuverlässig auf.**
+  Kommt der Relay nicht mehr an, pollt er trotzdem weiter — im gesunden
+  Zustand bis zu 10 Minuten, im ungesunden alle 60 Sekunden —, damit er
+  nach einer Unterbrechung sofort wieder den aktuellen Stand hat.
+- **Neu: Die Werbe-Anzeige nutzt dasselbe Verfahren.** Ihr 1-Sekunden-Abruf
+  (rund 9,9 KB/s je Gerät) wird ebenfalls auf Marke + 304 umgestellt.
+
 ## v0.9.260
 
 - **Behoben: Eine von Hand gesetzte Halle legte das Spiel still.** Im

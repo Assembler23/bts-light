@@ -156,6 +156,12 @@ jobs:
       - name: Gesundheit des Push-Kanals (JS)
         run: node scripts/test-push-health.mjs
 
+      # Server-Uhr der Anzeigen (Etappe ETag, 1c): Der Offset kommt aus dem
+      # 200-Abruf UND dem WS-Herzschlag, überlebt eine 304-Serie und bleibt
+      # monoton plausibel — sonst stünde der Pausen-Countdown still.
+      - name: Server-Uhr der Anzeigen (JS)
+        run: node scripts/test-monitor-clock.mjs
+
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.
       - name: Release-Faellig-Regel (JS)
