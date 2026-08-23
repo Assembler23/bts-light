@@ -1650,7 +1650,18 @@ impl TabletState {
                 e.update = update;
             } else {
                 if q.len() >= BTP_RETRY_CAP {
-                    q.remove(0); // ältesten opfern — Queue darf nie unbegrenzt wachsen
+                    // Ältesten opfern — die Queue darf nie unbegrenzt wachsen.
+                    // Das ist ein ECHTER Ergebnisverlust und muss laut sein:
+                    // Seit v0.9.254 quittiert der Host ein eingereihtes
+                    // Ergebnis gegenüber dem Tablet, das es daraufhin
+                    // loslässt. Verschwindet es hier still, weiß niemand
+                    // davon. Bei 200 Plätzen und 148 Ergebnissen am stärksten
+                    // Turniertag heißt diese Zeile: BTP war sehr lange weg.
+                    let verloren = q.remove(0);
+                    tracing::error!(
+                        "Nachschub-Queue voll ({BTP_RETRY_CAP}) — Ergebnis für Match {}                          geht verloren und muss von Hand in BTP nachgetragen werden",
+                        verloren.update.btp_match_id
+                    );
                 }
                 q.push(PendingBtpWrite {
                     update,

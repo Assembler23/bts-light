@@ -18,6 +18,11 @@ Protokolliert werden u. a.:
 - Start des Tablet-Servers (mit LAN-Adresse)
 - ausgelieferte Tablet-Seiten, Tablet verbunden/getrennt, Match-Zuweisung
 - Ergebnis-Übermittlung vom Tablet und die BTP-Antwort (`SENDUPDATE`)
+- **abgelehnte** Ergebnisse vom Tablet (seit v0.9.254) — mit Feld, Match und
+  Grund. Vorher wurde nur der Erfolg protokolliert; ein Tablet, das sein Spiel
+  nicht abschließen konnte, hinterließ auf dem Turnier-PC keine Spur, und die
+  Ursache ließ sich nur am Gerät selbst finden (Feldtest 22.08.2026). Der
+  Grund steht zusätzlich im Tablet-Log unter `submit_rejected`.
 - fehlgeschlagene Liveticker-Pushes
 - **Perf-Zeile der Anzeige-Strecke** (seit v0.9.235, siehe unten)
 
