@@ -1328,12 +1328,38 @@ pub struct ResultBody {
     pub cascade_walkover: bool,
 }
 
+/// Serde-Hilfe: `false` ist der Normalfall und muss nicht über die Leitung
+/// (siehe [`ResultResponse::permanent`] und [`HostFrame::ResultAck`]).
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// Antwort auf eine Ergebnis-Übermittlung.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultResponse {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub error: Option<String>,
+    /// Ist die Ablehnung **dauerhaft**? Dann wird derselbe Payload auch beim
+    /// hundertsten Versuch abgelehnt, und das Tablet soll aufhören zu
+    /// wiederholen und stattdessen den Grund zeigen.
+    ///
+    /// Die Trennlinie ist bewusst hart und liegt nicht beim Gefühl, sondern
+    /// bei der Frage: **Hängt die Ablehnung allein am gesendeten Payload?**
+    ///
+    /// - Ja (Satzliste unstimmig, Satz passt nicht zur Zählweise) ⇒
+    ///   `permanent`. Wiederholen kann das Ergebnis nie retten.
+    /// - Nein (kein Match auf dem Feld, Feld inzwischen anders belegt) ⇒
+    ///   **nicht** dauerhaft. Diese Gründe hängen am Serverzustand, und der
+    ///   ändert sich mit dem nächsten BTP-Poll — ein noch nicht geladener
+    ///   Snapshot darf kein Ergebnis wegwerfen.
+    ///
+    /// `#[serde(default)]` = `false`: Ältere Hosts kennen das Feld nicht,
+    /// deren Ablehnungen gelten wie bisher als wiederholbar. Und weil `false`
+    /// der Normalfall ist, bleibt es auch beim Senden weg — die Erfolgs-
+    /// antwort ist damit Byte für Byte dieselbe wie vorher.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub permanent: bool,
 }
 
 impl ResultResponse {
@@ -1342,14 +1368,28 @@ impl ResultResponse {
         Self {
             ok: true,
             error: None,
+            permanent: false,
         }
     }
 
-    /// Fehlerantwort mit Meldung.
+    /// Fehlerantwort mit Meldung — **wiederholbar**: Der Grund liegt am
+    /// Zustand des Turnier-PCs, nicht am Ergebnis selbst.
     pub fn err(message: impl Into<String>) -> Self {
         Self {
             ok: false,
             error: Some(message.into()),
+            permanent: false,
+        }
+    }
+
+    /// Fehlerantwort für eine **dauerhafte** Ablehnung: Genau dieser Payload
+    /// wird nie angenommen. Das Tablet stellt das Wiederholen ein und zeigt
+    /// die Meldung.
+    pub fn dauerhaft(message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            error: Some(message.into()),
+            permanent: true,
         }
     }
 }
@@ -2170,6 +2210,14 @@ pub enum HostFrame {
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
+        /// Ist die Ablehnung dauerhaft? Muss über den Cloud-Weg mitreisen —
+        /// sonst wüsste ein Tablet am Relay nie, dass Wiederholen zwecklos
+        /// ist, und der Fix wirkte ausgerechnet im Cloud-Betrieb nicht.
+        /// Siehe [`ResultResponse::permanent`]. `#[serde(default)]` hält
+        /// ältere Hosts lesbar (deren Absagen gelten als wiederholbar); der
+        /// Normalfall `false` bleibt von der Leitung.
+        #[serde(default, skip_serializing_if = "is_false")]
+        permanent: bool,
     },
     /// Vollständige Feld-Liste des Turniers – Grundlage des Feldwechsels im
     /// PIN-Menü des Tablets im Cloud-Modus. Periodisch vom Host gepusht.
@@ -2974,6 +3022,7 @@ mod tests {
             req_id: 42,
             ok: false,
             error: Some("BTP abgelehnt".into()),
+            permanent: true,
         });
         roundtrip(&RelayFrame::TabletConnected {
             court_id: 3,
@@ -3757,6 +3806,37 @@ mod tests {
         let json = serde_json::to_string(&ResultResponse::ok()).unwrap();
         assert_eq!(json, r#"{"ok":true}"#);
         roundtrip(&ResultResponse::err("Zeitüberschreitung"));
+    }
+
+    #[test]
+    fn nur_die_dauerhafte_ablehnung_traegt_permanent() {
+        // Der Normalfall bleibt von der Leitung: eine wiederholbare Absage
+        // sieht auf der Wire aus wie vor v0.9.254, und ein altes Tablet liest
+        // sie unverändert.
+        let json = serde_json::to_string(&ResultResponse::err("später nochmal")).unwrap();
+        assert!(
+            !json.contains("permanent"),
+            "wiederholbare Absage bleibt kompakt: {json}"
+        );
+        // Der Ausnahmefall dagegen muss ankommen — sonst wiederholt das
+        // Tablet ein Ergebnis, das nie angenommen wird.
+        let json =
+            serde_json::to_string(&ResultResponse::dauerhaft("Satz 13:8 passt nicht")).unwrap();
+        assert!(json.contains(r#""permanent":true"#), "{json}");
+        roundtrip(&ResultResponse::dauerhaft("Satz 13:8 passt nicht"));
+    }
+
+    #[test]
+    fn das_urteil_ueberlebt_den_weg_ueber_den_relay() {
+        // Cloud-Weg: Der Host urteilt (R5), der Relay trägt es weiter. Ginge
+        // `permanent` im ResultAck verloren, wirkte der Fix ausgerechnet dort
+        // nicht, wo die meisten Tablets hängen.
+        roundtrip(&HostFrame::ResultAck {
+            req_id: 7,
+            ok: false,
+            error: Some("Satz 13:8 ist nicht regulär zu Ende gespielt.".into()),
+            permanent: true,
+        });
     }
 
     #[test]

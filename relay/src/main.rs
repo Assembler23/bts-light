@@ -4431,9 +4431,21 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 }
             }
         }
-        HostFrame::ResultAck { req_id, ok, error } => {
+        HostFrame::ResultAck {
+            req_id,
+            ok,
+            error,
+            permanent,
+        } => {
             if let Some(pending) = namespace.pending.remove(&req_id) {
-                let _ = pending.send(ResultResponse { ok, error });
+                // Unverändert durchreichen: Der Relay urteilt nicht über
+                // Ergebnisse (R5 liegt beim Host), er trägt nur dessen Urteil
+                // weiter — samt der Frage, ob Wiederholen etwas bringt.
+                let _ = pending.send(ResultResponse {
+                    ok,
+                    error,
+                    permanent,
+                });
             }
         }
         HostFrame::Courts {
@@ -7902,6 +7914,7 @@ mod tests {
                 req_id: 5,
                 ok: true,
                 error: None,
+                permanent: false,
             },
             &host,
         )
@@ -9427,6 +9440,7 @@ mod load {
                                 req_id,
                                 ok: true,
                                 error: None,
+                                permanent: false,
                             },
                             &host_tx,
                         )

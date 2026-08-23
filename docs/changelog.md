@@ -17,6 +17,54 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   arbeitete die Ansage-Seite noch mit ihrem alten Stand und schrieb ihn beim
   nächsten Speichern zurück; die eben gewählte Halle war wieder weg. Die
   Auswahl wird jetzt überall nachgezogen.
+## v0.9.255
+
+- **Neu: Anzeigen melden es, wenn sie stillstehen.** Court-Monitore froren
+  gelegentlich auf einem alten Stand ein — die Seite lief weiter und zeigte
+  weiter ein gültiges Bild, sie übernahm nur nichts Neues mehr. Bisher
+  hinterließ genau das keine Spur: Der Log-Upload der Anzeigen hängt an
+  JS-Fehlern und am Schließen der Seite, und ein stiller Hänger ist beides
+  nicht. Übrig blieb „hängt öfters mal" ohne Anhaltspunkt.
+
+  Beide Anzeige-Seiten prüfen sich jetzt alle zehn Sekunden selbst: Kam
+  überhaupt noch eine Antwort zurück, und wurde noch ein Stand übernommen oder
+  bestätigt? Bleibt eines davon länger als eine Minute aus, schreiben sie das
+  ins Log und laden es sofort hoch — samt der Angabe, ob gar nichts mehr
+  ankommt (Netz, Gerät) oder ob die Seite die Antworten verwirft. Genau diese
+  Unterscheidung war am hängenden Monitor bisher nicht möglich. Erholt sich
+  die Anzeige, steht auch das im Log.
+
+  Eine ruhige Halle löst dabei nichts aus: Die Bestätigung „nichts Neues"
+  zählt wie ein übernommener Stand.
+
+  **Am Bild ändert sich nichts.** Der Wächter stellt fest und schweigt
+  ansonsten — er lädt die Seite nicht neu und greift nicht ein. Solange
+  ungeklärt ist, woran das Einfrieren liegt, würde eine Selbstheilung die
+  Spur verwischen, wegen der er gebaut wurde.
+## v0.9.254
+
+- **Behoben: Tablets, die zählen, aber ihr Spiel nicht abschließen können.**
+  Am Turnier standen Geräte, die ihre Punkte weiter übertrugen, das Ergebnis
+  aber nicht loswurden — auf dem Schirm stand dabei durchgehend „wird
+  automatisch wiederholt, bis es ankommt". Ein Versprechen, das nie eingelöst
+  wurde: Der Turnier-PC lehnte genau dieses Ergebnis dauerhaft ab, und keine
+  Wiederholung konnte daran etwas ändern. Das Tablet unterscheidet jetzt, ob
+  eine Wiederholung überhaupt etwas retten kann. Netzfehler und Absagen, die
+  am Turnier-PC hängen, werden weiter wiederholt wie bisher. Eine inhaltliche
+  Ablehnung — etwa ein Satz, der nicht zur Zählweise des Spiels passt — beendet
+  den Versuch, nennt den Grund im Klartext und gibt den Absende-Knopf wieder
+  frei. Im Zweifel wird wiederholt.
+- **Ein eingereihtes Ergebnis gilt als angenommen.** Scheitert das Schreiben
+  nach BTP, legt der Turnier-PC das Ergebnis in seine Nachschub-Queue und
+  reicht es später nach — es ist dort sicherer aufgehoben als im Tablet, denn
+  die Queue liegt auf der Platte. Trotzdem meldete er dem Tablet bisher
+  „abgelehnt", das daraufhin an einem längst erledigten Ergebnis klebte. Jetzt
+  quittiert er es.
+- **Abgelehnte Ergebnisse stehen im Log.** Bisher protokollierte der
+  Turnier-PC nur den Erfolg; ein Tablet, das nicht abschließen konnte,
+  hinterließ dort keine Spur. Jetzt nennt jede Ablehnung Feld, Spiel und
+  Grund. Läuft die Nachschub-Queue über (Deckel 200, nur nach sehr langem
+  BTP-Ausfall), ist auch das eine Fehlerzeile statt eines stillen Verlusts.
 
 ## v0.9.253
 

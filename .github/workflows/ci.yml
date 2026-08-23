@@ -137,6 +137,19 @@ jobs:
       - name: Teil-Patch der Übersicht (JS)
         run: node scripts/test-court-patch.mjs
 
+      # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
+      # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
+      # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter
+      # unbezeugt (Feldtest 22.08.2026).
+      - name: Stillstands-Waechter der Anzeigen (JS)
+        run: node scripts/test-standstill.mjs
+
+      # Wann wiederholt das Tablet ein Ergebnis, und wann hoert es auf?
+      # Ein Fehler hier kostet im besten Fall einen ueberfluessigen Request,
+      # im schlimmsten ein Ergebnis (Feldtest 22.08.2026).
+      - name: Ergebnis-Retry-Regel (JS)
+        run: node scripts/test-result-retry.mjs
+
       # Wann gilt der Push-Kanal einer Anzeige als gesund? Laut Spec das
       # höchste Risiko des Vorhabens: Eine falsche Regel hier friert alle
       # Anzeigen einer Halle ein.

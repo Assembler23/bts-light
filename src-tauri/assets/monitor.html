@@ -1024,9 +1024,18 @@
     // eine fremde Zählung mit und darf nicht blockiert werden.
     var feld = typeof state.courtId === "number" ? state.courtId : 0;
     if (feld && feld === knownCourtId) {
-      if (!seqAnwenden(lastSeqByCourt[feld] || 0, state.seq || 0, "fetch")) return;
+      if (!seqAnwenden(lastSeqByCourt[feld] || 0, state.seq || 0, "fetch")) {
+        // Genau hier friert die Anzeige ein, wenn `lastSeqByCourt` je zu hoch
+        // steht: Der Poll läuft weiter, aber nichts kommt mehr durch. Der
+        // Zähler ist die aussagekräftigste Zahl im Stillstands-Bericht.
+        verworfeneStaende++;
+        return;
+      }
       if (state.seq) lastSeqByCourt[feld] = state.seq;
     }
+    // Ab hier wird der Stand wirklich übernommen — der Beleg dafür, dass die
+    // Strecke bis zum Schirm durchlässig ist.
+    letzterStandMs = Date.now();
     lastState = state;
     // Feld-Identität für den Nudge-Filter nachziehen (Geräte-Monitor kennt sie
     // erst hier; bei Reassignment wechselt sie). 0 = unbelegt → ignorieren.
@@ -1133,6 +1142,12 @@
   var fetchFehler = 0;
   var langsamErlaubt = false; // aus `config.pushFallbackSlow`
   var letzterAbrufMs = 0;     // Beginn des letzten losgeschickten Abrufs
+  // ── Stillstands-Wächter (siehe `lagePruefen` unten) ──────────────────
+  var letzterAbrufOkMs = 0;   // letzter Abruf, der ohne Fehler zurückkam
+  var letzterStandMs = 0;     // letzter angewendete Stand
+  var verworfeneStaende = 0;  // wie oft der seq-Guard eine Antwort abwies
+  var seitStartMs = Date.now();
+  var gemeldeteStillstandsArt = null;
   function pushGesund(z, nowMs) {
     if (!z || !z.wsOpen) return false;
     if (z.lastFetchOk === false) return false;
@@ -1193,6 +1208,35 @@
     return quelle === "push" ? neu > gezeigt : neu >= gezeigt;
   }
 
+  /** Steht die Anzeige still, ohne es zu merken?
+   *
+   *  **Inline-Kopie von `src/io/standstill.mjs`** — dort steht die kanonische
+   *  Fassung samt Begründung und Test (`scripts/test-standstill.mjs`, eigener
+   *  CI-Schritt). Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `overview.html`. */
+  var STILLSTAND_MS = 60000;
+  function lagePruefen(zustand, nowMs) {
+    var z = zustand || {};
+    var gemeldet = z.gemeldeteArt || null;
+    var gesund = { art: null, stillMs: 0, melden: false, erholt: gemeldet !== null };
+    var start = stillZahl(z.startMs);
+    if (!start) return { art: null, stillMs: 0, melden: false, erholt: false };
+    var abruf = stillZahl(z.letzterAbrufOkMs) || start;
+    var stand = stillZahl(z.letzterStandMs) || start;
+    var ohneAbruf = nowMs - abruf;
+    var ohneStand = nowMs - stand;
+    if (ohneAbruf < 0 || ohneStand < 0) return gesund;
+    if (ohneAbruf >= STILLSTAND_MS) return stillLage("keine_abrufe", ohneAbruf, gemeldet);
+    if (ohneStand >= STILLSTAND_MS) return stillLage("verworfen", ohneStand, gemeldet);
+    return gesund;
+  }
+  function stillLage(art, stillMs, gemeldet) {
+    return { art: art, stillMs: stillMs, melden: art !== gemeldet, erholt: false };
+  }
+  function stillZahl(v) {
+    return typeof v === "number" && isFinite(v) && v > 0 ? v : 0;
+  }
+
   // Was den nächsten Abruf ausgelöst hat (Spec monitor-livestand-push, S0).
   // Fallen Nudge und Fallback-Takt zusammen, gewinnt "push": Der Abruf wäre
   // durch den Nudge ohnehin gekommen.
@@ -1225,6 +1269,7 @@
       .then(function (state) {
         if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
         lastFetchOk = true; fetchFehler = 0;
+        letzterAbrufOkMs = Date.now();
         els.offline.classList.remove("show");
         applyState(state);
         pollDone();
@@ -1273,6 +1318,53 @@
   }, 1000);
 
   poll();
+
+  // Stillstands-Wächter: Stellt fest, was bisher niemand sehen konnte — eine
+  // Anzeige, die weiterläuft und trotzdem nichts Neues mehr übernimmt. Sie
+  // wirft dabei keinen Fehler und wird nicht geschlossen, fällt also durch
+  // alle drei Auslöser des Log-Uploads (JS-Fehler, unhandledrejection,
+  // pagehide). Erst dieser Takt macht den Zustand bezeugbar.
+  //
+  // Er HEILT nichts: kein Reload, kein Zurücksetzen der Ordnungszahl. Wir
+  // wissen noch nicht, woran es liegt, und eine Selbstheilung würde genau die
+  // Spur verwischen, wegen der er gebaut wurde.
+  //
+  // 10-s-Takt gegen eine 60-s-Schwelle: fein genug, um den Beginn auf zehn
+  // Sekunden genau zu datieren, und billig genug, um nicht ins Gewicht zu
+  // fallen.
+  setInterval(function () {
+    var jetzt = Date.now();
+    var lage = lagePruefen({
+      startMs: seitStartMs,
+      letzterAbrufOkMs: letzterAbrufOkMs,
+      letzterStandMs: letzterStandMs,
+      gemeldeteArt: gemeldeteStillstandsArt,
+    }, jetzt);
+    if (lage.melden) {
+      gemeldeteStillstandsArt = lage.art;
+      // Alles, was zur Eingrenzung taugt, in EINER Zeile — wer das Log liest,
+      // hat kein zweites Gerät daneben.
+      mlog("error", "stillstand", {
+        art: lage.art,
+        stillMs: lage.stillMs,
+        verworfen: verworfeneStaende,
+        wsOpen: mwsOpen,
+        frameAltMs: lastServerFrameAt ? jetzt - lastServerFrameAt : null,
+        fetchOk: lastFetchOk,
+        fetchFehler: fetchFehler,
+        taktMs: fallbackTakt(pushHealthy(), langsamErlaubt),
+        feld: knownCourtId,
+        gezeigteSeq: (knownCourtId && lastSeqByCourt[knownCourtId]) || 0,
+        modus: MODE,
+      });
+      uploadMonitorLog();
+    } else if (lage.erholt) {
+      gemeldeteStillstandsArt = null;
+      mlog("info", "stillstand_vorbei", { verworfen: verworfeneStaende });
+      uploadMonitorLog();
+    }
+  }, 10000);
+
   // Sicherheits-Poll (Spec monitor-livestand-push, S6). 250-ms-Raster, bei
   // jedem Tick neu entschieden, wie lange die Seite ohne eigenen Abruf
   // auskommen darf: Kanal ungesund → 250 ms wie bisher; gesund und Schalter
