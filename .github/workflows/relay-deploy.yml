@@ -56,15 +56,19 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
 
-      # Erst .new hochladen, dann atomar umbenennen + Dienst neu starten –
-      # so läuft die alte Binary bis zum Restart-Moment weiter.
-      - name: Binary hochladen & Dienst neu starten
+      # Erst .new hochladen, dann die laufende Binary sichern und atomar
+      # umbenennen + Dienst neu starten – so läuft die alte Binary bis zum
+      # Restart-Moment weiter, und ein Rückweg (bts-relay.rollback) liegt
+      # bereit, falls die neue Version nicht anspringt (Rollback-Kommando:
+      # docs/cloud-relay.md, Abschnitt Deployment).
+      - name: Binary hochladen, sichern & Dienst neu starten
         run: |
           set -euo pipefail
           rsync -av target/release/bts-relay \
             bts-deploy@178.104.221.177:/opt/bts-relay/bts-relay.new
           ssh bts-deploy@178.104.221.177 \
-            'mv /opt/bts-relay/bts-relay.new /opt/bts-relay/bts-relay \
+            'cp -a /opt/bts-relay/bts-relay /opt/bts-relay/bts-relay.rollback \
+             && mv /opt/bts-relay/bts-relay.new /opt/bts-relay/bts-relay \
              && sudo systemctl restart bts-relay \
              && sleep 2 \
              && curl -sf http://127.0.0.1:8090/health'

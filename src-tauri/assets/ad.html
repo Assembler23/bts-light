@@ -253,10 +253,23 @@
     location.href = href;
   }
 
+  // Marke des letzten vollständigen Abrufs (Etappe ETag, 1d): Wenn die Seite
+  // nichts Neues meldet (304), ändert sich auch das Redirect-Ziel nicht — der
+  // 1-s-Poll spart damit ~9,9 KB je Sekunde, statt sie dauerhaft zu ziehen.
+  var lastEtag = null;
+
   function checkReassignment() {
     if (!deviceId) return;
-    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    var opt = { cache: 'no-store' };
+    if (lastEtag) opt.headers = { 'If-None-Match': lastEtag };
+    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', opt)
+      .then(function (r) {
+        if (r.status === 304) return null; // nichts Neues → keine Re-Zuweisung
+        if (!r.ok) return null;
+        var etag = r.headers.get('ETag');
+        if (etag) lastEtag = etag;
+        return r.json();
+      })
       .then(function (s) {
         if (!s) return;
         if (s.redirectTo) {

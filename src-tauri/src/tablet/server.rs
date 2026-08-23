@@ -20,7 +20,7 @@ use std::time::Duration;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse, Redirect};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
@@ -1318,7 +1318,8 @@ async fn monitor_state(
     State(ctx): State<Arc<ServerCtx>>,
     Path(court_id): Path<i64>,
     Query(q): Query<DeviceHeartbeat>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     let label = court_label_for(&ctx, court_id);
     let court = ctx.tablet.monitor_court(court_id);
     // EIN Config-Zugriff für alles (vorher zwei, jeder mit voller Kopie
@@ -1345,16 +1346,15 @@ async fn monitor_state(
         },
     );
     // Wie bei `/health` selbst serialisiert, um die Antwortgröße zu kennen
-    // (Spec monitor-livestand-push, S0).
+    // (Spec monitor-livestand-push, S0). Derselbe Body geht in die Antwort;
+    // die Marke (ohne server_now_ms/seq) entscheidet zwischen 200 und 304.
+    let etag = monitor_state_marke(&state);
     let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
-    ctx.tablet
-        .perf()
-        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
-    (
-        [
-            (header::CACHE_CONTROL, "no-store"),
-            (header::CONTENT_TYPE, "application/json"),
-        ],
+    monitor_etag_response(
+        &ctx,
+        &headers,
+        &etag,
+        perf::Quelle::aus_query(q.src.as_deref()),
         json,
     )
 }
@@ -1385,7 +1385,8 @@ struct DeviceQuery {
 async fn monitor_device_state(
     State(ctx): State<Arc<ServerCtx>>,
     Query(q): Query<DeviceQuery>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     let device = q.device;
     if device.is_empty() || device.len() > 64 {
         return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
@@ -1442,19 +1443,17 @@ async fn monitor_device_state(
     state.command = command;
     state.device_code = device_code(&device);
     // Wie `monitor_state` selbst serialisiert, um die Antwortgröße zu
-    // kennen (Spec monitor-livestand-push, S0).
+    // kennen (Spec monitor-livestand-push, S0); die Marke entscheidet
+    // zwischen 200 und 304 (Etappe ETag, 1e).
+    let etag = monitor_state_marke(&state);
     let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
-    ctx.tablet
-        .perf()
-        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
-    (
-        [
-            (header::CACHE_CONTROL, "no-store"),
-            (header::CONTENT_TYPE, "application/json"),
-        ],
+    monitor_etag_response(
+        &ctx,
+        &headers,
+        &etag,
+        perf::Quelle::aus_query(q.src.as_deref()),
         json,
     )
-        .into_response()
 }
 
 // ─────────────────────────────── Info-Monitore ────────────────────────────
@@ -2010,6 +2009,58 @@ fn marke_bekannt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
     let gesucht = schwach(etag);
     feld.split(',')
         .any(|m| m.trim() == "*" || schwach(m) == gesucht)
+}
+
+/// Marke eines Monitor-Zustands — LAN, gleiche Vertrags-Semantik wie der
+/// Cloud-Pfad (Etappe ETag, 1e): Streuwert über den INHALT ohne die
+/// je-nicht-inhaltlichen Felder `server_now_ms` (je Aufruf neu) und `seq`
+/// (Transportzähler, steigt auch folgenlos). `DefaultHasher::new()` mit
+/// festem Seed → gleicher Inhalt, gleiche Marke, auch über Neustarts.
+fn monitor_state_marke(state: &relay_proto::MonitorState) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut k = state.clone();
+    k.server_now_ms = 0;
+    k.seq = 0;
+    let json = serde_json::to_string(&k).unwrap_or_else(|_| "{}".to_string());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    json.hash(&mut hasher);
+    format!("\"mon-{}-{:x}\"", json.len(), hasher.finish())
+}
+
+/// Verpackt eine Monitor-State-Antwort: 304 bei bekannter Marke, sonst 200
+/// mit dem bereits serialisierten Body. BEIDE Zweige tragen die Marke, damit
+/// der Client sie beim nächsten Abruf mitschicken kann. Die Perf-Zählung
+/// folgt dem `/health`-Muster: Der 304-Zweig zählt **0** Bytes (es wird
+/// nichts gesendet) — genau diese Zähler sind das S0-Messinstrument für den
+/// Nutzen des ETag (Review R1).
+fn monitor_etag_response(
+    ctx: &ServerCtx,
+    headers: &axum::http::HeaderMap,
+    etag: &str,
+    quelle: perf::Quelle,
+    json: String,
+) -> Response {
+    if marke_bekannt(headers, etag) {
+        ctx.tablet.perf().note_court_state(quelle, 0);
+        return (
+            StatusCode::NOT_MODIFIED,
+            [(header::CACHE_CONTROL, "no-store"), (header::ETAG, etag)],
+        )
+            .into_response();
+    }
+    ctx.tablet
+        .perf()
+        .note_court_state(quelle, json.len() as u64);
+    (
+        StatusCode::OK,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+            (header::ETAG, etag),
+        ],
+        json,
+    )
+        .into_response()
 }
 
 // ─────────────────────────────── Ergebnis → BTP ───────────────────────────
@@ -6203,13 +6254,99 @@ mod tests {
         // Der feste Court-Monitor ist der billige Fall — gezählt wird er
         // trotzdem, sonst fehlte der Vergleich zur teuren Übersicht.
         let ctx = Arc::new(make_ctx(1));
-        let _ = monitor_state(State(ctx.clone()), Path(101), takt(Some("push"))).await;
-        let _ = monitor_state(State(ctx.clone()), Path(101), takt(None)).await;
+        let _ = monitor_state(
+            State(ctx.clone()),
+            Path(101),
+            takt(Some("push")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ = monitor_state(
+            State(ctx.clone()),
+            Path(101),
+            takt(None),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
 
         let s = ctx.tablet.perf().snapshot();
         assert_eq!(s.court_state_push, 1);
         assert_eq!(s.court_state_poll, 1);
         assert!(s.court_state_push_bytes > 0 && s.court_state_poll_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn monitor_state_etag_liefert_marke_und_304() {
+        // LAN-Parität zum Cloud-Pfad (Etappe ETag, 1e): Der feste
+        // Court-Monitor trägt eine Marke (ohne server_now_ms/seq — zwei
+        // Abrufe ohne Änderung liefern dieselbe Marke) und antwortet auf
+        // If-None-Match mit 304 ohne Body.
+        let ctx = Arc::new(make_ctx(1));
+        let r1 = monitor_state(
+            State(ctx.clone()),
+            Path(101),
+            takt(None),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(r1.status(), StatusCode::OK);
+        let etag1 = r1
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let bytes1 = axum::body::to_bytes(r1.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert!(!bytes1.is_empty(), "200 trägt den vollen Body");
+
+        // Gleicher Inhalt, neuer Aufruf (neues server_now_ms) → gleiche Marke.
+        let r2 = monitor_state(
+            State(ctx.clone()),
+            Path(101),
+            takt(None),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(r2.status(), StatusCode::OK);
+        let etag2 = r2
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let bytes2 = axum::body::to_bytes(r2.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(etag2, etag1, "server_now_ms ist aus der Marke ausgenommen");
+
+        // Mit bekannter Marke → 304, kein Body.
+        let mut hm = axum::http::HeaderMap::new();
+        hm.insert(header::IF_NONE_MATCH, etag1.parse().unwrap());
+        let r3 = monitor_state(State(ctx.clone()), Path(101), takt(None), hm).await;
+        assert_eq!(
+            r3.status(),
+            StatusCode::NOT_MODIFIED,
+            "bekannte Marke → 304"
+        );
+        let bytes3 = axum::body::to_bytes(r3.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert!(bytes3.is_empty(), "304 hat keinen Body");
+
+        // Perf-Zählung folgt dem /health-Muster (Review R1): Der 304 zählt 0
+        // Bytes — sonst überschätzte das S0-Messinstrument die Leitungslast
+        // und der ETag-Nutzen bliebe in der Messung unsichtbar.
+        let s = ctx.tablet.perf().snapshot();
+        assert_eq!(s.court_state_poll, 3, "drei Abrufe gezählt");
+        assert_eq!(
+            s.court_state_poll_bytes,
+            (bytes1.len() + bytes2.len()) as u64,
+            "nur die zwei 200 zählen ihren Body; der 304 zählt 0"
+        );
     }
 
     // ── Antwortcache für /health (Spec monitor-livestand-push, S1) ─────────
@@ -6757,8 +6894,14 @@ mod tests {
                 src: src.map(|s| s.to_string()),
             })
         };
-        let _ = monitor_device_state(State(ctx.clone()), q(Some("push"))).await;
-        let _ = monitor_device_state(State(ctx.clone()), q(None)).await;
+        let _ = monitor_device_state(
+            State(ctx.clone()),
+            q(Some("push")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ =
+            monitor_device_state(State(ctx.clone()), q(None), axum::http::HeaderMap::new()).await;
 
         let s = ctx.tablet.perf().snapshot();
         assert_eq!(s.court_state_push, 1);

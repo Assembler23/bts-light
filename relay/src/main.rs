@@ -21,7 +21,7 @@ use std::time::Duration;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
@@ -208,6 +208,57 @@ fn marke_passt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
     let gesucht = schwach(etag);
     feld.split(',')
         .any(|m| m.trim() == "*" || schwach(m) == gesucht)
+}
+
+/// Marke eines Monitor-Zustands: Streuwert über den INHALT, ohne die
+/// je-nicht-inhaltlichen Felder. `server_now_ms` ist je Aufruf neu
+/// (now_ms()) und `seq` steigt je `notify_monitor`, auch bei folgenlosen
+/// Anstößen (:2490) — nähmen wir sie in die Marke, wechselte sie bei jedem
+/// Nudge und 304 käme nie. Genau deshalb klammert der Übersichts-ETag die
+/// Ordnungszahlen aus (`uebersicht_marke`, Begründung :1808-1813). Muster
+/// wie `bild_marke`: `DefaultHasher::new()` mit festem Seed → gleicher
+/// Inhalt, gleiche Marke, auch über einen Prozess-Neustart hinweg (U-det).
+fn monitor_state_marke(state: &MonitorState) -> String {
+    use std::hash::{Hash, Hasher};
+    // Am Klon neutralisieren, nicht am Original: Body (`Json(state)`) und
+    // Marke entstehen so aus DEMSELBEN fertigen Zustand — kein
+    // Divergenz-Pfad (A4). Der einzige Unterschied zwischen beidem ist die
+    // bewusste Neutralisierung der beiden ausgeschlossenen Felder.
+    let mut k = state.clone();
+    k.server_now_ms = 0;
+    k.seq = 0;
+    let json = serde_json::to_string(&k).unwrap_or_else(|_| "{}".to_string());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    json.hash(&mut hasher);
+    format!("\"mon-{}-{:x}\"", json.len(), hasher.finish())
+}
+
+/// Antwort auf `GET /{ns}/monitor/state`: 304, wenn der Abrufer die Marke
+/// schon kennt (`If-None-Match`), sonst 200 mit dem vollen Zustand. BEIDE
+/// Zweige tragen die Marke als `ETag`-Kopf, damit der Client sie beim
+/// nächsten Abruf mitschicken kann. Das Lebenszeichen `monitor_seen`
+/// registriert der Aufrufer VOR diesem Punkt — auch im 304-Zweig bleibt das
+/// Gerät online (U-seen).
+fn monitor_state_response(headers: &axum::http::HeaderMap, state: MonitorState) -> Response {
+    let etag = monitor_state_marke(&state);
+    if marke_passt(headers, &etag) {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::CACHE_CONTROL, "no-store"),
+                (header::ETAG, etag.as_str()),
+            ],
+        )
+            .into_response();
+    }
+    (
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::ETAG, etag.as_str()),
+        ],
+        Json(state),
+    )
+        .into_response()
 }
 
 /// Cache-Frist der Werbebilder in der Cloud — **kürzer** als im LAN
@@ -939,7 +990,8 @@ async fn monitor_device_state(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
     Query(q): Query<DeviceQuery>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
@@ -948,9 +1000,11 @@ async fn monitor_device_state(
     }
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(&ns) else {
-        // Host nicht verbunden – das Gerät zeigt die Leerlauf-Seite.
+        // Host nicht verbunden – das Gerät zeigt die Leerlauf-Seite. Auch
+        // dieser Pfad durchläuft denselben ETag/304-Punkt (U10) — keine
+        // 200-Antwort umgeht den Cache-Zweig, gerade im häufigsten Störfall.
         let state = empty_monitor_state(0, String::new());
-        return ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response();
+        return monitor_state_response(&headers, state);
     };
     // Poll registrieren. Bei erreichter Obergrenze das am längsten nicht
     // gesehene Gerät verdrängen – so sperrt der Missbrauchs-Schutz keine
@@ -1008,7 +1062,7 @@ async fn monitor_device_state(
     };
     state.command = command;
     state.device_code = device_code(&q.device);
-    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+    monitor_state_response(&headers, state)
 }
 
 /// Nimmt die Geräte-Steuerdaten (Feld-Zuweisungen + Fernbefehle) vom
@@ -6087,6 +6141,7 @@ mod tests {
                     State(b),
                     Path(NS.into()),
                     axum::extract::Query(DeviceQuery { device: d }),
+                    axum::http::HeaderMap::new(),
                 )
                 .await
                 .into_response();
@@ -6121,6 +6176,225 @@ mod tests {
         let win = read_state("pi-winners").await;
         assert!(win["redirectTo"].is_null());
         assert_eq!(win["unassigned"], serde_json::json!(true));
+    }
+
+    // ── ETag/304-Pfad des Monitor-States (Etappe ETag, U5/U6/U-seq/U10/U-seen/U-det) ──
+
+    /// Broker mit Host, Court 101, Match, Monitor-Bundle und Ziel-Zuweisung für
+    /// ein Gerät auf Court 101 — Grundlage der ETag-Tests.
+    async fn broker_mit_monitor_ziel(ns: &str, device: &str) -> Broker {
+        let (broker, _host, _rx) = broker_mit_uebersicht(ns).await;
+        let mut control = relay_proto::MonitorControl::default();
+        control
+            .targets
+            .insert(device.to_string(), relay_proto::MonitorTarget::court(101));
+        let up =
+            monitor_control_upload(State(broker.clone()), Path(ns.into()), axum::Json(control))
+                .await
+                .into_response();
+        assert_eq!(up.status(), StatusCode::OK);
+        broker
+    }
+
+    /// Ruft den Monitor-State-Handler; gibt Status, ETag und Body zurück.
+    /// Leerer Body (304) liefert `Value::Null`.
+    async fn hole_monitor(
+        broker: &Broker,
+        ns: &str,
+        device: &str,
+        headers: &[(&str, &str)],
+    ) -> (StatusCode, Option<String>, serde_json::Value) {
+        let mut hm = axum::http::HeaderMap::new();
+        for (k, v) in headers {
+            let name = axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap();
+            let value = axum::http::HeaderValue::from_str(v).unwrap();
+            hm.insert(name, value);
+        }
+        let r = monitor_device_state(
+            State(broker.clone()),
+            Path(ns.into()),
+            axum::extract::Query(DeviceQuery {
+                device: device.into(),
+            }),
+            hm,
+        )
+        .await;
+        let etag = r
+            .headers()
+            .get(header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let status = r.status();
+        let bytes = axum::body::to_bytes(r.into_body(), 8192).await.unwrap();
+        let body = if bytes.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or(serde_json::Value::Null)
+        };
+        (status, etag, body)
+    }
+
+    #[tokio::test]
+    async fn monitor_etag_zwei_abrufe_ohne_aenderung_geben_gleiche_marke_und_304() {
+        // U5: Der Kern der Ersparnis. Zwei Abrufe ohne State-Änderung liefern
+        // dieselbe Marke — trotz neuem `serverNowMs` je Aufruf (ausgeschlossen)
+        // — und ein `If-None-Match` mit der bekannten Marke gibt 304.
+        const NS: &str = "c0000000-0000-0000-0000-000000000005";
+        let broker = broker_mit_monitor_ziel(NS, "pi-court").await;
+        let (s1, e1, _) = hole_monitor(&broker, NS, "pi-court", &[]).await;
+        assert_eq!(s1, StatusCode::OK);
+        let e1 = e1.expect("200-Antwort trägt ETag");
+        let (s2, e2, _) = hole_monitor(&broker, NS, "pi-court", &[]).await;
+        assert_eq!(s2, StatusCode::OK);
+        assert_eq!(
+            e2.as_deref(),
+            Some(e1.as_str()),
+            "gleicher Inhalt → gleiche Marke"
+        );
+        let (s3, e3, body) =
+            hole_monitor(&broker, NS, "pi-court", &[("If-None-Match", e1.as_str())]).await;
+        assert_eq!(s3, StatusCode::NOT_MODIFIED, "bekannte Marke → 304");
+        assert_eq!(e3.as_deref(), Some(e1.as_str()), "304 trägt dieselbe Marke");
+        assert_eq!(body, serde_json::Value::Null, "304 hat keinen Body");
+    }
+
+    #[tokio::test]
+    async fn monitor_etag_anstehender_befehl_aendert_die_marke() {
+        // U6: command steht bewusst IM Hash — ein neuer Fernbefehl muss die
+        // Marke wechseln, sonst käme er nie am Gerät an.
+        const NS: &str = "c0000000-0000-0000-0000-000000000006";
+        let broker = broker_mit_monitor_ziel(NS, "pi-court").await;
+        let (_, e1, _) = hole_monitor(&broker, NS, "pi-court", &[]).await;
+        let e1 = e1.unwrap();
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut(NS).unwrap().monitor_control.commands.insert(
+                "pi-court".into(),
+                relay_proto::MonitorCommand {
+                    id: 1,
+                    kind: relay_proto::MonitorCommandKind::Reload,
+                },
+            );
+        }
+        let (s2, e2, _) =
+            hole_monitor(&broker, NS, "pi-court", &[("If-None-Match", e1.as_str())]).await;
+        assert_eq!(
+            s2,
+            StatusCode::OK,
+            "neuer Befehl → neue Marke → 200 trotz If-None-Match"
+        );
+        assert_ne!(e2.as_deref(), Some(e1.as_str()), "Befehl ändert die Marke");
+    }
+
+    #[tokio::test]
+    async fn monitor_etag_seq_bump_ohne_inhalt_aendert_die_marke_nicht() {
+        // U-seq (C1-Guard): Die Marke kennt `seq` nicht. Ein folgenloser
+        // Nudge (notify_monitor erhöht monitor_seq, ohne dass sich Inhalt
+        // ändert — der Host spiegelt seinen Zustand periodisch, :4415) darf
+        // keinen 200 erzwingen.
+        const NS: &str = "c0000000-0000-0000-0000-000000000007";
+        let broker = broker_mit_monitor_ziel(NS, "pi-court").await;
+        let (_, e1, _) = hole_monitor(&broker, NS, "pi-court", &[]).await;
+        let e1 = e1.unwrap();
+        {
+            let mut map = broker.namespaces.lock().await;
+            notify_monitor(map.get_mut(NS).unwrap(), 101);
+        }
+        let (s2, e2, body) =
+            hole_monitor(&broker, NS, "pi-court", &[("If-None-Match", e1.as_str())]).await;
+        assert_eq!(
+            s2,
+            StatusCode::NOT_MODIFIED,
+            "seq-Bump ohne Inhaltsänderung → 304"
+        );
+        assert_eq!(e2.as_deref(), Some(e1.as_str()));
+        assert_eq!(body, serde_json::Value::Null);
+        // Die frische `seq` steht trotzdem im 200-Body (Transportzähler für
+        // die Anzeige) — nur die Marke ignoriert sie.
+        let (_, _, body_200) = hole_monitor(&broker, NS, "pi-court", &[]).await;
+        assert!(
+            body_200["seq"].as_u64().unwrap_or(0) > 0,
+            "seq ist im 200-Body sichtbar"
+        );
+    }
+
+    #[tokio::test]
+    async fn monitor_etag_ohne_host_liefert_marke_und_304() {
+        // U10: Der Host-down-Early-Return durchläuft DENSELBEN ETag/304-Punkt.
+        // Genau dort, wo kein Host verbunden ist, zählt die Ersparnis am
+        // meisten — ein zweiter, ungeschützter 200-Pfad wäre die Kern-Audit-
+        // Lücke (Risiko A1).
+        const NS: &str = "c0000000-0000-0000-0000-000000000010";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (s1, e1, body) = hole_monitor(&broker, NS, "pi-court", &[]).await;
+        assert_eq!(s1, StatusCode::OK);
+        let e1 = e1.expect("Host-down-Antwort trägt ETag");
+        assert_eq!(body["courtId"], serde_json::json!(0));
+        let (s2, e2, _) =
+            hole_monitor(&broker, NS, "pi-court", &[("If-None-Match", e1.as_str())]).await;
+        assert_eq!(
+            s2,
+            StatusCode::NOT_MODIFIED,
+            "Host-down-Pfad antwortet auf If-None-Match mit 304"
+        );
+        assert_eq!(e2.as_deref(), Some(e1.as_str()));
+    }
+
+    #[tokio::test]
+    async fn monitor_etag_304_aktualisiert_das_lebenszeichen() {
+        // U-seen: `monitor_seen.insert` läuft VOR dem 304-Check — ein
+        // cachetreuer Monitor (nur noch 304) muss im
+        // MONITOR_ONLINE_WINDOW_MS-Fenster sichtbar bleiben, sonst gilt er
+        // offline und sein Feld wird fremdvergeben.
+        const NS: &str = "c0000000-0000-0000-0000-000000000011";
+        let broker = broker_mit_monitor_ziel(NS, "pi-court").await;
+        let (_, e1, _) = hole_monitor(&broker, NS, "pi-court", &[]).await;
+        let e1 = e1.unwrap();
+        {
+            let map = broker.namespaces.lock().await;
+            assert!(
+                map.get(NS).unwrap().monitor_seen.contains_key("pi-court"),
+                "erster Abruf registriert das Gerät"
+            );
+        }
+        let (s2, _, _) =
+            hole_monitor(&broker, NS, "pi-court", &[("If-None-Match", e1.as_str())]).await;
+        assert_eq!(s2, StatusCode::NOT_MODIFIED);
+        {
+            let map = broker.namespaces.lock().await;
+            let nachher = map.get(NS).unwrap().monitor_seen["pi-court"];
+            assert!(
+                now_ms().saturating_sub(nachher) < relay_proto::MONITOR_ONLINE_WINDOW_MS,
+                "304-Zweig hält das Lebenszeichen frisch (letzter Eintrag vor {nachher}, jetzt {})",
+                now_ms()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn monitor_marke_ist_deterministisch_ueber_aufrufe() {
+        // U-det: DefaultHasher::new() hat einen FESTEN Seed (anders als die
+        // Zufalls-Streuung der HashMap-Defaults) — gleicher Inhalt ergibt also
+        // auch über einen Prozess-Neustart hinweg dieselbe Marke. Der Zustand
+        // unterscheidet sich nur in `server_now_ms` (je Aufruf neu) — und genau
+        // das Feld darf die Marke NICHT ändern.
+        let a = empty_monitor_state(0, String::new());
+        let mut b = empty_monitor_state(0, String::new());
+        b.server_now_ms = a.server_now_ms.saturating_add(1);
+        assert_eq!(
+            monitor_state_marke(&a),
+            monitor_state_marke(&b),
+            "server_now_ms ist aus der Marke ausgenommen"
+        );
+        // Echter Inhalt ändert die Marke — sonst wäre 304 die Regel statt
+        // Ausnahme und echte Änderungen gingen verloren.
+        let mut c = a.clone();
+        c.court_label = "anders".to_string();
+        assert_ne!(
+            monitor_state_marke(&a),
+            monitor_state_marke(&c),
+            "Inhalt ändert die Marke"
+        );
     }
 
     #[tokio::test]
