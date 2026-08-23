@@ -2340,6 +2340,66 @@ pub(crate) fn set_is_complete(a: i64, b: i64, target: i64, cap: i64) -> bool {
     hi >= cap || hi - lo >= 2 // am Deckel reicht 1 Punkt, sonst 2 Vorsprung
 }
 
+/// Ist dieses Spiel nach seinen Sätzen bereits **entschieden**?
+///
+/// Grundlage der Warnung „Spiel scheint fertig, aber kein Ergebnis" (Spec
+/// `tl-warnung-fertiges-spiel`). Bewusst eine reine Funktion neben
+/// [`set_is_complete`] und [`sets_fit_format`]: Dieselbe Zählweise, dieselben
+/// Randfälle — und so einzeln gegen die Formate testbar, die im Turnierbetrieb
+/// vorkommen (3×21/30, 3×15/21, 1×21, 5×11).
+///
+/// Entschieden heißt: Eine Seite hat die nötige **Satzmehrheit**
+/// (`best_of / 2 + 1`) aus regulär zu Ende gespielten Sätzen. Zwei Fallen
+/// stecken darin:
+///
+/// - **Der Geistersatz.** Das Tablet setzt den laufenden Satz beim Match-Ende
+///   auf 0:0 und schickt ihn mit (siehe `handle_score`). Ein 0:0 ist kein
+///   gespielter Satz und wird übersprungen — sonst gälte die Liste als
+///   unvollständig und die Warnung käme nie.
+/// - **Der unfertige Satz.** Steht ein angefangener Satz in der Liste (z. B.
+///   15:3, 12:15, 8:6), ist das Spiel gerade NICHT entschieden — auch wenn
+///   die ersten beiden Sätze eine Mehrheit ergäben. Genau dann läuft es ja
+///   noch. Deshalb zählt nur, wer die Mehrheit hat, **bevor** ein unfertiger
+///   Satz auftaucht.
+///
+/// Aufgabe, Kampflos und Disqualifikation sind ausdrücklich **kein** Fall
+/// dieser Funktion: Dort bricht das Spiel mitten im Satz ab, und das Ergebnis
+/// kommt über einen anderen Weg.
+pub(crate) fn spiel_ist_entschieden(
+    sets: &[(i64, i64)],
+    scoring: &crate::btp::model::ScoringFormat,
+) -> bool {
+    // Ohne aufgelöste Zählweise wird NICHT gewarnt. `set_is_complete` fällt
+    // still auf 21/30 zurück — in einem 15er-Turnier ohne Format hieße das
+    // reihenweise falsche Alarme. Lieber keine Warnung als eine, der niemand
+    // mehr glaubt.
+    if scoring.target_score <= 0 {
+        return false;
+    }
+    let noetig = (scoring.best_of / 2 + 1).max(1);
+    let (mut a, mut b) = (0i64, 0i64);
+    for &(x, y) in sets {
+        // Geistersatz / noch nicht begonnener Satz: überspringen.
+        if x == 0 && y == 0 {
+            continue;
+        }
+        // Ein angefangener Satz heißt: Es wird gespielt. Dann ist das Spiel
+        // nicht fertig — auch dann nicht, wenn die Sätze davor schon eine
+        // Mehrheit ergäben. Dieser Fall entsteht bei einer Korrektur oder
+        // einem falsch aufgelösten `best_of`, und in beiden Lagen wäre eine
+        // Warnung falsch. Ein Fehlalarm ist teuer (Muster `standstill.mjs`).
+        if !set_is_complete(x, y, scoring.target_score, scoring.cap_score) {
+            return false;
+        }
+        if x > y {
+            a += 1;
+        } else {
+            b += 1;
+        }
+    }
+    a >= noetig || b >= noetig
+}
+
 /// Prüft eine ganze Satzliste gegen die Zählweise des Matches.
 ///
 /// **Eine** Quelle für beide Wege, auf denen ein Ergebnis hereinkommt: das
@@ -4074,6 +4134,115 @@ mod tests {
         assert!(!t1);
         assert_eq!(status, 1);
         assert!(derive_result(vec![], true, false, false, None).is_err()); // ohne Sieger
+    }
+
+    #[test]
+    fn ein_entschiedenes_spiel_wird_erkannt() {
+        // Spec `tl-warnung-fertiges-spiel`: Grundlage der Warnung. Die
+        // Zählweisen-Matrix ist der Kern — ein Turnier bis 15 mit Deckel 21
+        // hat andere Endstände als 21/30, und die Warnung darf sich in
+        // keinem der Formate irren.
+        let f = |best_of, target, cap| crate::btp::model::ScoringFormat {
+            best_of,
+            target_score: target,
+            cap_score: cap,
+            interval_at: None,
+        };
+        let klassisch = f(3, 21, 30);
+
+        // Der vom Nutzer genannte Fall: 3:15, 12:15 — Team 2 hat zwei Sätze.
+        assert!(spiel_ist_entschieden(&[(3, 15), (12, 15)], &f(3, 15, 21)));
+        assert!(spiel_ist_entschieden(&[(21, 10), (21, 15)], &klassisch));
+        // Ein Satz zu wenig.
+        assert!(!spiel_ist_entschieden(&[(21, 10)], &klassisch));
+        // Satzgleichstand — der dritte fehlt.
+        assert!(!spiel_ist_entschieden(&[(21, 10), (15, 21)], &klassisch));
+        // Dritter Satz entscheidet.
+        assert!(spiel_ist_entschieden(
+            &[(21, 10), (15, 21), (21, 19)],
+            &klassisch
+        ));
+        // Am Deckel reicht ein Punkt Vorsprung.
+        assert!(spiel_ist_entschieden(&[(30, 29), (21, 10)], &klassisch));
+    }
+
+    #[test]
+    fn ein_laufendes_spiel_gilt_nicht_als_entschieden() {
+        let klassisch = crate::btp::model::ScoringFormat {
+            best_of: 3,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+        };
+        // Leere Liste, frischer Satz, mitten im Satz.
+        assert!(!spiel_ist_entschieden(&[], &klassisch));
+        assert!(!spiel_ist_entschieden(&[(0, 0)], &klassisch));
+        assert!(!spiel_ist_entschieden(&[(11, 8)], &klassisch));
+        // **Die wichtigste Zeile:** Zwei fertige Sätze für dieselbe Seite —
+        // aber ein dritter läuft. Das kann bei einer Korrektur passieren, und
+        // die Warnung dürfte hier NICHT anschlagen, weil offensichtlich
+        // weitergespielt wird.
+        assert!(!spiel_ist_entschieden(
+            &[(21, 10), (21, 15), (8, 6)],
+            &klassisch
+        ));
+        // Ein Satz über dem Deckel ist ungültig, nicht „entschieden".
+        assert!(!spiel_ist_entschieden(&[(31, 29), (21, 10)], &klassisch));
+    }
+
+    #[test]
+    fn der_geistersatz_nach_spielende_stoert_nicht() {
+        // Das Tablet setzt den laufenden Satz beim Match-Ende auf 0:0 und
+        // schickt ihn mit (siehe `handle_score`). Ohne das Überspringen wäre
+        // JEDES fertige Spiel „nicht entschieden" — und die Warnung käme nie.
+        let klassisch = crate::btp::model::ScoringFormat {
+            best_of: 3,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+        };
+        assert!(spiel_ist_entschieden(
+            &[(21, 10), (21, 15), (0, 0)],
+            &klassisch
+        ));
+        // Auch ZWISCHEN den Sätzen steht ein 0:0 — dann entscheidet nur, was
+        // wirklich gespielt wurde.
+        assert!(!spiel_ist_entschieden(&[(21, 10), (0, 0)], &klassisch));
+    }
+
+    #[test]
+    fn ungewoehnliche_zaehlweisen_rechnen_richtig() {
+        // Ein einzelner Gewinnsatz (Trostrunden, Zeitnot) und Best-of-5
+        // (11er-Format) — beide kommen in BTP vor, und `best_of / 2 + 1` muss
+        // dort ebenso stimmen wie bei 3.
+        let einsatz = crate::btp::model::ScoringFormat {
+            best_of: 1,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+        };
+        assert!(spiel_ist_entschieden(&[(21, 15)], &einsatz));
+        assert!(!spiel_ist_entschieden(&[(15, 12)], &einsatz));
+
+        let fuenf = crate::btp::model::ScoringFormat {
+            best_of: 5,
+            target_score: 11,
+            cap_score: 15,
+            interval_at: None,
+        };
+        assert!(!spiel_ist_entschieden(&[(11, 5), (11, 7)], &fuenf));
+        assert!(spiel_ist_entschieden(&[(11, 5), (11, 7), (11, 9)], &fuenf));
+
+        // best_of 0 (BTP liefert Unsinn) darf nicht „sofort entschieden"
+        // heißen — `max(1)` fängt das ab.
+        let kaputt = crate::btp::model::ScoringFormat {
+            best_of: 0,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+        };
+        assert!(!spiel_ist_entschieden(&[], &kaputt));
+        assert!(spiel_ist_entschieden(&[(21, 10)], &kaputt));
     }
 
     #[test]

@@ -663,6 +663,16 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub locked_courts: Vec<i64>,
+    /// Nach wie vielen **Sekunden** ein Spiel, das nach seinen Sätzen fertig
+    /// aussieht, dessen Feld aber belegt bleibt, in der Turnierleitungs-Sicht
+    /// gemeldet wird (Spec `tl-warnung-fertiges-spiel`). `0` = Warnung aus.
+    ///
+    /// Konfigurierbar, weil das der **einzige Rollback-Weg** einer reinen
+    /// Anzeige ist: Meldet sie im laufenden Turnier zu oft falsch, muss man
+    /// sie abstellen können, ohne eine neue Version einzuspielen.
+    /// `#[serde(default = …)]` hält ältere Konfigurationsdateien lesbar.
+    #[serde(default = "default_fertig_warnung_s")]
+    pub finished_warning_seconds: u32,
     /// Turnier, zu dem [`Self::locked_courts`] gehört (BTP-Turniername).
     ///
     /// BTP vergibt CourtIDs je Turnier neu — eine Sperre vom Vortag träfe
@@ -709,6 +719,12 @@ pub struct AppConfig {
     /// Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub reconnect_legacy_rev: bool,
+}
+
+/// Standard-Frist der „Spiel scheint fertig"-Warnung: eine Minute, wie vom
+/// Turnierleiter angefragt (Spec tl-warnung-fertiges-spiel).
+fn default_fertig_warnung_s() -> u32 {
+    60
 }
 
 /// Standard-PIN fürs Tablet-Einstellungsmenü (überschreibbar in der Config).
@@ -1668,6 +1684,7 @@ mod tests {
                 hall: "Halle A".to_string(),
             }],
             locked_courts: vec![3, 7],
+            finished_warning_seconds: 60,
             locked_courts_tournament: "Testturnier".to_string(),
             tablet_settings_pin: "1234".to_string(),
             tournament_logo: LogoConfig {

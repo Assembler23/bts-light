@@ -595,11 +595,9 @@ mitgeändert worden:
   [docs/features/tl-web-felder-sperren.md](features/tl-web-felder-sperren.md),
   [ADR 0044](adr/0044-sperrliste-turniergebunden.md). Schloss nebenbei den
   `locked_courts`-Datenverlust oben.
-- **Warnung bei scheinbar fertigem Spiel** — die Turnierleitungs-Sicht soll
-  melden, wenn ein Spiel nach der Zählweise entschieden ist, das Feld aber
-  länger als eine Minute belegt bleibt (Ergebnis nicht übermittelt). Auslöser
-  und Ort sind geklärt (Marke an der Kachel + Zeile im Alarmbereich); Spec
-  steht noch aus.
+- **Warnung bei scheinbar fertigem Spiel** — Spec freigegeben und umgesetzt
+  (v0.9.259): [docs/features/tl-warnung-fertiges-spiel.md](features/tl-warnung-fertiges-spiel.md),
+  [ADR 0045](adr/0045-fertig-warnung-serverseitig-gestempelt.md).
 - **Feldauswahl für die Automatikvergabe** — ein Spiel soll ein Wunschfeld
   bekommen können, auf das die Automatik wartet (Finalspiele steuern). Von
   Hand woanders hinlegen bleibt möglich, mit Rückfrage. Spec steht noch aus.
