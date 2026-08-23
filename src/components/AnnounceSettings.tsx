@@ -41,6 +41,17 @@ export function AnnounceSettings({
   );
   const [annUmpire, setAnnUmpire] = useState(a.announce_umpire !== false);
   const [annHall, setAnnHall] = useState(a.announce_hall ?? "");
+  // Die Ansage-Halle ist das EINZIGE Feld dieser Form, das auch anderswo
+  // gesetzt wird: vom Hallen-Wähler auf dem Dashboard und vom
+  // Slave-Geräte-Panel (dort ist es zugleich „welche Halle bedient dieses
+  // Gerät"). Ohne diesen Abgleich bliebe der lokale Stand auf dem Wert vom
+  // Mounten stehen, und das nächste Speichern hier schriebe ihn zurück — die
+  // eben woanders gewählte Halle wäre wieder abgewählt (Befund 23.08.2026).
+  // Ein noch nicht gespeicherter Wert geht dabei verloren; das ist richtig so,
+  // denn wirksam war er ohnehin nicht.
+  useEffect(() => {
+    setAnnHall(a.announce_hall ?? "");
+  }, [a.announce_hall]);
   const [azEnabled, setAzEnabled] = useState(az?.enabled ?? false);
   const [azRegion, setAzRegion] = useState(az?.region ?? "");
   const [azKey, setAzKey] = useState(az?.key ?? "");
