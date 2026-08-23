@@ -28,7 +28,6 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   ansonsten — er lädt die Seite nicht neu und greift nicht ein. Solange
   ungeklärt ist, woran das Einfrieren liegt, würde eine Selbstheilung die
   Spur verwischen, wegen der er gebaut wurde.
-
 ## v0.9.254
 
 - **Behoben: Tablets, die zählen, aber ihr Spiel nicht abschließen können.**
