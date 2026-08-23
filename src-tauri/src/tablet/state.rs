@@ -460,6 +460,10 @@ pub struct TabletState {
     /// nicht): gesperrte Felder werden nicht automatisch belegt und rot
     /// markiert. Beim Start aus der Config geseedet, bei Änderung persistiert.
     locked_courts: RwLock<HashSet<i64>>,
+    /// Turnier, zu dem [`Self::locked_courts`] gehört — Guard nach ADR 0044.
+    /// BTP vergibt CourtIDs je Turnier neu; eine Sperre vom Vortag träfe
+    /// sonst ein beliebiges anderes Feld. Leer = noch kein Turnier gesehen.
+    locked_courts_tournament: RwLock<String>,
     /// CourtID → (Match-ID, Zeitpunkt des 1. Aufrufs in Unix-ms), seit wann
     /// das aktuelle Spiel auf dem Feld steht. Grundlage des Aufruf-Timers; vom
     /// Sync-Loop je Poll abgeglichen.
@@ -1195,6 +1199,10 @@ impl TabletState {
             .set_tournament(&snapshot.tournament_name);
         // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
         self.queue_order.set_tournament(&snapshot.tournament_name);
+        // Gesperrte Felder ebenso (ADR 0044). Sie liegen zwar in der Config
+        // und nicht in einem eigenen Store, gelten aber genauso nur für EIN
+        // Turnier: CourtIDs vergibt BTP je Turnier neu.
+        self.bind_locked_courts(&snapshot.tournament_name);
         // Druck-Gedächtnis ebenso turniergebunden (Spec
         // `schiedsrichterzettel-autodruck`): Match-IDs gelten nur
         // innerhalb eines Turniers, ein Wechsel beginnt frisch.
@@ -2031,6 +2039,45 @@ impl TabletState {
     }
 
     /// Feld sperren (`true`) oder entsperren (`false`).
+    /// Bindet die Sperrliste an ein Turnier und verwirft sie beim Wechsel
+    /// (ADR 0044). Ein **leerer** Name ändert nichts — den liefert der
+    /// Snapshot, bevor BTP den Turniernamen kennt, und er darf keine
+    /// gültigen Sperren wegwerfen.
+    ///
+    /// Die Config wird hier bewusst NICHT angefasst: Sie kann kurzzeitig eine
+    /// Sperre des Vortags tragen. Sie wird beim Start in den Laufzeit-Zustand
+    /// geladen und hier beim ersten Snapshot des neuen Turniers verworfen —
+    /// und ohne Snapshot vergibt die Automatik ohnehin nichts. Der nächste
+    /// Sperr-Vorgang bereinigt auch die Datei.
+    pub fn bind_locked_courts(&self, tournament: &str) {
+        let neu = tournament.trim();
+        if neu.is_empty() {
+            return;
+        }
+        let mut gemerkt = self.locked_courts_tournament.write().unwrap();
+        if gemerkt.as_str() == neu {
+            return;
+        }
+        if !gemerkt.is_empty() {
+            let mut set = self.locked_courts.write().unwrap();
+            if !set.is_empty() {
+                tracing::info!(
+                    "Turnierwechsel ({} → {}): {} gesperrte Felder verworfen (ADR 0044)",
+                    gemerkt,
+                    neu,
+                    set.len()
+                );
+                set.clear();
+            }
+        }
+        *gemerkt = neu.to_string();
+    }
+
+    /// Turnier, an das die Sperrliste gebunden ist (leer = noch keins).
+    pub fn locked_courts_tournament(&self) -> String {
+        self.locked_courts_tournament.read().unwrap().clone()
+    }
+
     pub fn set_court_locked(&self, court_id: i64, locked: bool) {
         let mut set = self.locked_courts.write().unwrap();
         if locked {
@@ -6100,6 +6147,52 @@ mod tests {
         let mut s = snapshot(Vec::new(), Vec::new());
         s.tournament_name = name.to_string();
         s
+    }
+
+    #[test]
+    fn ein_turnierwechsel_verwirft_die_gesperrten_felder() {
+        // ADR 0044 / Spec `tl-web-felder-sperren` E10: BTP vergibt CourtIDs je
+        // Turnier neu — eine Sperre vom Vortag träfe sonst ein beliebiges
+        // anderes Feld, und niemand sucht dort die Ursache.
+        let st = TabletState::default();
+        st.set_snapshot(snap_named("Köpi-Cup Tag 1"));
+        st.set_court_locked(7, true);
+        assert!(st.is_court_locked(7));
+
+        // Derselbe Snapshot nochmal ändert nichts.
+        st.set_snapshot(snap_named("Köpi-Cup Tag 1"));
+        assert!(st.is_court_locked(7), "gleiches Turnier, gleiche Sperren");
+
+        st.set_snapshot(snap_named("Kreismeisterschaft"));
+        assert!(
+            !st.is_court_locked(7),
+            "anderes Turnier ⇒ die Sperre gilt nicht mehr"
+        );
+    }
+
+    #[test]
+    fn ein_leerer_turniername_wirft_keine_sperren_weg() {
+        // Den liefert der Snapshot, bevor BTP den Namen kennt. Würde er als
+        // Wechsel gelten, verlöre der erste Poll nach dem Start alle Sperren.
+        let st = TabletState::default();
+        st.set_snapshot(snap_named("Köpi-Cup"));
+        st.set_court_locked(3, true);
+
+        st.set_snapshot(snap_named(""));
+        assert!(st.is_court_locked(3), "leerer Name ist kein Turnierwechsel");
+        assert_eq!(st.locked_courts_tournament(), "Köpi-Cup");
+    }
+
+    #[test]
+    fn die_erste_bindung_verwirft_nichts() {
+        // Beim Start werden die Sperren aus der Config geladen, BEVOR der
+        // erste Snapshot da ist. Dieser erste Snapshot darf sie nicht
+        // wegwerfen — er sagt ja nur, um welches Turnier es geht.
+        let st = TabletState::default();
+        st.set_locked_courts([3, 7]);
+        st.set_snapshot(snap_named("Köpi-Cup"));
+        assert!(st.is_court_locked(3), "erste Bindung ist kein Wechsel");
+        assert!(st.is_court_locked(7));
     }
 
     /// Ein Official mit dieser ID (Name nur zur Unterscheidung).

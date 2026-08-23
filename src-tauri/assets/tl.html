@@ -3417,6 +3417,25 @@ function courtCard(c, cellStyle) {
     kachelAktionen.push(`<button type="button" data-zettel="${c.match_id}"
         title="Schiedsrichterzettel drucken">🖨 Zettel</button>`);
   }
+  // Feld sperren/freigeben (Spec `tl-web-felder-sperren`).
+  //
+  // Nur wenn der Turnier-PC die Aktion kennt: Der Relay wird bei jedem
+  // main-Merge deployt, die App erst mit einem Release-Tag. Dazwischen spricht
+  // diese Seite womöglich mit einem älteren Host — und der verwirft eine
+  // unbekannte Aktion STILL, ohne Fehlermeldung. Ein Knopf, der nichts tut und
+  // nichts sagt, ist schlimmer als keiner (E13).
+  if (state.can_lock_courts) {
+    if (c.locked) {
+      kachelAktionen.push(`<button type="button" data-unlock="${c.court_id}"
+          title="Feld wieder für die Vergabe freigeben">🔓 Feld freigeben</button>`);
+    } else {
+      // Läuft ein Spiel, greift die Sperre erst danach — der Text sagt das,
+      // statt etwas zu versprechen, das nicht eintritt.
+      const txt = c.match_id ? "Feld nach diesem Spiel sperren" : "Feld sperren";
+      kachelAktionen.push(`<button type="button" data-lock="${c.court_id}"
+          title="Keine automatische Vergabe mehr auf dieses Feld">🔒 ${txt}</button>`);
+    }
+  }
   const kebabOffen = openKebabCourtId === c.court_id;
   const kebab = kachelAktionen.length
     ? `<details class="kebab" data-kebab-court="${c.court_id}"${kebabOffen ? " open" : ""}>
@@ -3698,6 +3717,45 @@ function wireCourts(box) {
         `off-say-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "announce_officials", courtId },
         "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Feld sperren: ohne Rückfrage. Ein Fehlgriff richtet keinen Schaden an
+  // (das laufende Spiel zählt zu Ende) und ist mit einem zweiten Tipp
+  // zurückgenommen.
+  scopeAll(box, "button[data-lock]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.lock);
+      send(
+        `lock-${courtId}-1-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "lock_court", courtId, locked: true },
+        "Feld gesperrt — die Automatik lässt es jetzt aus.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Feld freigeben: MIT Rückfrage. Das ist die gefährliche Richtung — ein
+  // zweites Gerät sieht nur „gesperrt" ohne Grund und gäbe womöglich ein
+  // kaputtes Feld frei; die Automatik legt dann sofort ein Spiel darauf.
+  scopeAll(box, "button[data-unlock]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.unlock);
+      const feld = (state.courts || []).find((x) => x.court_id === courtId);
+      const name = feld ? feld.court : courtId;
+      if (!confirm(`Feld ${name} wieder freigeben?\n\nDie automatische Vergabe `
+        + `legt danach wieder Spiele darauf. Wenn das Feld gesperrt wurde, weil `
+        + `etwas kaputt ist, bitte erst nachsehen.`)) {
+        return;
+      }
+      send(
+        `lock-${courtId}-0-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "lock_court", courtId, locked: false },
+        "Feld freigegeben.",
       );
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());

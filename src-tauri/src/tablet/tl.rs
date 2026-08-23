@@ -1443,6 +1443,16 @@ pub(crate) async fn execute(
     // Hallen-Vorverteilung: config-ändernde Aktion wie die Profile
     // (`mutate_app_config`), aber turnierabhängig — der E2-Guard (aktive
     // Halle) braucht den Snapshot, deshalb HINTER dem Snapshot-Gate.
+    // Feldsperre: config-ändernd wie die Vorverteilung, und ebenfalls hinter
+    // dem Snapshot-Gate — die Prüfung „gibt es dieses Feld?" braucht ihn
+    // (Spec `tl-web-felder-sperren`, E6/E7).
+    if let Some(response) = execute_lock_court_action(ctx, &snap, &action) {
+        if response.ok {
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        }
+        return response;
+    }
     if let Some(response) = execute_hall_prefill_action(ctx, &config, &snap, &action) {
         if response.ok {
             ctx.tablet
@@ -1602,6 +1612,103 @@ pub(crate) async fn execute(
             TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
         }
     }
+}
+
+/// Sperrt ein Feld oder gibt es frei (Spec `tl-web-felder-sperren`).
+/// `None` heißt: keine Sperr-Aktion, an anderer Stelle weiterbehandeln.
+///
+/// Ein gesperrtes Feld bekommt von der automatischen Vergabe kein Spiel mehr;
+/// ein bereits laufendes bleibt unangetastet und zählt zu Ende. BTP kennt die
+/// Sperre nicht (R2) — deshalb steht `LockCourt` bewusst **nicht** in
+/// `touches_courts`, sonst liefe die Aktion in die Feld-Beanspruchung und in
+/// `write_courts_to_btp`.
+fn execute_lock_court_action(
+    ctx: &crate::tablet::server::ServerCtx,
+    snap: &crate::btp::model::BtpSnapshot,
+    action: &relay_proto::TlAction,
+) -> Option<relay_proto::TlResponse> {
+    use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
+    let A::LockCourt { court_id, locked } = action else {
+        return None;
+    };
+    let (court_id, locked) = (*court_id, *locked);
+
+    // E6: Nur Felder, die dieses Turnier kennt. Ohne diese Prüfung nähme der
+    // Host jede Zahl an; die Sperrliste wüchse mit Einträgen, die in keiner
+    // Oberfläche auftauchen — und die dort deshalb auch niemand wieder
+    // loswird.
+    if !snap.court_infos.iter().any(|c| c.id == court_id) {
+        return Some(TlResponse::err(
+            C::NotAllowed,
+            "Dieses Feld gibt es in diesem Turnier nicht.",
+        ));
+    }
+
+    // Zielmenge aus dem Laufzeit-Stand ableiten (er ist die Wahrheit, aus der
+    // auch die Vergabe liest).
+    let mut ziel: Vec<i64> = ctx.tablet.locked_courts();
+    if locked {
+        if !ziel.contains(&court_id) {
+            ziel.push(court_id);
+            ziel.sort_unstable();
+        }
+    } else {
+        ziel.retain(|&c| c != court_id);
+    }
+
+    // E4/E14: Erst die Datei, dann der Arbeitsspeicher. Scheitert das
+    // Schreiben, bleibt BEIDES unverändert und das Gerät bekommt einen
+    // Fehler — nie ein Zustand, der nur im RAM steht und beim nächsten Start
+    // verschwindet. Der Zyklus läuft unter dem Config-Guard (E9, „der letzte
+    // gewinnt", nie ein verlorener Schreibvorgang).
+    let tournament = snap.tournament_name.clone();
+    let geschrieben = ziel.clone();
+    if let Err(rejected) = ctx.mutate_app_config(move |cfg| {
+        cfg.locked_courts = geschrieben;
+        // Turnierbezug mitschreiben (ADR 0044) — sonst gälte die Sperre als
+        // „Turnier unbekannt" und überlebte den nächsten Wechsel.
+        cfg.locked_courts_tournament = tournament;
+        Ok(())
+    }) {
+        return Some(rejected);
+    }
+    ctx.tablet.set_court_locked(court_id, locked);
+    // Der Antwortcache der Feld-Übersicht trägt den Sperr-Zustand und
+    // verfällt nur über die Revision (Spec monitor-livestand-push, S1).
+    ctx.tablet.bump_overview_rev();
+
+    // E11: Hat eine Halle durch diese Sperre kein offenes Feld mehr, werden
+    // ihre AUTOMATISCH verteilten Zuordnungen geräumt. Ohne das behielten die
+    // dorthin vorverteilten Spiele ihre Hallenbindung (ADR 0030) und bekämen
+    // gar kein Feld mehr, obwohl nebenan welche frei sind — die Halle stünde
+    // still, ohne dass jemand den Grund sähe.
+    //
+    // Nur beim Sperren und nur im Mehr-Hallen-Turnier: Im Ein-Hallen-Fall
+    // trägt kein Feld einen Hallennamen, die Menge der „offenen" Hallen wäre
+    // leer und es würde ALLES geräumt.
+    if locked && snap.is_multi_hall() {
+        let gesperrt: std::collections::HashSet<i64> = ziel.iter().copied().collect();
+        let offen: std::collections::HashSet<String> = snap
+            .court_infos
+            .iter()
+            .filter(|c| !gesperrt.contains(&c.id))
+            .map(|c| snap.court_location_name(c.id))
+            .filter(|h| !h.trim().is_empty())
+            .collect();
+        let geraeumt = ctx
+            .tablet
+            .auto_hall_store()
+            .remove_where_hall_not_in(&offen);
+        if !geraeumt.is_empty() {
+            tracing::info!(
+                "Feld {court_id} gesperrt — {} Spiel(e) haben ihre automatische Hallen-\
+                 Zuordnung verloren, weil deren Halle kein offenes Feld mehr hat",
+                geraeumt.len()
+            );
+        }
+    }
+
+    Some(TlResponse::ok(0))
 }
 
 /// Führt die Hallen-Vorverteilungs-Aktionen aus (Spec
@@ -1980,6 +2087,10 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::ProfileDelete { profile_id } => format!("profile-delete:{profile_id}"),
         A::ProfileSelect { profile_id } => format!("profile-select:{profile_id}"),
         A::ProfileSetDefault { profile_id } => format!("profile-default:{profile_id}"),
+        // Der Zielzustand gehört in den Fingerabdruck: Sperren und Freigeben
+        // desselben Felds sind zwei verschiedene Absichten und dürfen sich
+        // nicht gegenseitig als „schon erledigt" gelten.
+        A::LockCourt { court_id, locked } => format!("lock:{court_id}:{locked}"),
     }
 }
 
@@ -2074,6 +2185,13 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         A::ProfileSetDefault { profile_id } => {
             format!("Profil {profile_id} als Standard gesetzt")
         }
+        A::LockCourt { court_id, locked } => {
+            if *locked {
+                format!("Feld {court_id} gesperrt")
+            } else {
+                format!("Feld {court_id} freigegeben")
+            }
+        }
     }
 }
 
@@ -2163,6 +2281,19 @@ pub struct TlState {
     pub tournament: String,
     /// Mehr-Hallen-Turnier? Nur dann bietet die Seite einen Hallenfilter an.
     pub multi_hall: bool,
+    /// Kennt dieser Turnier-PC das Sperren von Feldern (Spec
+    /// `tl-web-felder-sperren`, E13)?
+    ///
+    /// **Warum das nötig ist:** Der Relay bettet `assets/tl.html` ein und wird
+    /// bei jedem main-Merge deployt; die App kommt erst über einen
+    /// Release-Tag. Zwischen beidem sieht ein Gerät die neue Oberfläche, spricht
+    /// aber mit einem älteren Host — und der verwirft eine unbekannte
+    /// `TlAction` **still** (`relay_client.rs`), ohne Fehlermeldung. Die
+    /// Oberfläche zeigt den Menüeintrag deshalb nur, wenn dieses Feld ankommt.
+    ///
+    /// `#[serde(default)]` = `false`: Genau das liefert ein alter Host.
+    #[serde(default)]
+    pub can_lock_courts: bool,
     /// Alle Hallen des Turniers, alphabetisch nach Namen.
     ///
     /// Mit Kennung, nicht nur mit Namen: Ein Vorbereitungs-Aufruf braucht sie,
@@ -2818,6 +2949,10 @@ pub(crate) fn build_state_limited(
             server_now_ms: now_ms,
             tournament: String::new(),
             multi_hall: false,
+            // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
+            // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
+            // lehnt die Aktion ohnehin ab (E7).
+            can_lock_courts: true,
             halls: Vec::new(),
             auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
             hall_prefill: Some(hall_prefill_view(config, 0, false)),
@@ -3236,6 +3371,8 @@ pub(crate) fn build_state_limited(
         .collect();
 
     TlState {
+        // Dieser Host kann es — die Oberfläche darf den Eintrag zeigen.
+        can_lock_courts: true,
         rev,
         server_now_ms: now_ms,
         tournament: snap.tournament_name.clone(),
@@ -8223,6 +8360,11 @@ mod tests {
             "tournament",
             "multi_hall",
             "halls",
+            // Fähigkeitsmerkmal (Spec tl-web-felder-sperren, E13): reines
+            // Bool „dieser Turnier-PC kennt das Sperren". Sagt nichts über
+            // Personen, nur über die Programmversion — und ohne es zeigte
+            // die Seite einen Knopf, den ein älterer Host still verwirft.
+            "can_lock_courts",
             // Hallen-Farbe (Spec hallen-farben): reiner Hex-Anzeigewert je
             // Halle — kein Personenbezug. Der Beendet-Hallenname reist als
             // ohnehin erlaubtes "hall".
