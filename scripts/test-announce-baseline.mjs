@@ -117,6 +117,52 @@ console.log("\n=== Feld wird frei und neu belegt ===");
   pruefe("das naechste Spiel darauf wird angesagt", c.neue.length === 1);
 }
 
+console.log("\n=== Halle hinzunehmen holt nichts nach ===");
+{
+  // Slave-Befund 23.08.2026: Nimmt man am Ansage-Slave eine Halle hinzu,
+  // wurden schlagartig viele Ansagen aus der Vergangenheit wiederholt. Der
+  // Nutzer will genau das nicht — ab sofort ansagen reicht.
+  //
+  // Das Modul kann das schon: Die Baseline merkt sich auch Felder der
+  // gefilterten Halle (siehe Test oben). Diese Tests halten die Eigenschaft
+  // fest, auf die sich der MatchAnnouncer stuetzt, seit er die Baseline beim
+  // Hallenwechsel NICHT mehr leert.
+  let stand = { baseline: new Map(), hatBaseline: false };
+  // Nur Halle A wird angesagt; in Halle B laufen laengst Spiele.
+  const start = diffOccupiedCourts(
+    stand,
+    [feld(1, 100, "Halle A"), feld(2, 200, "Halle B"), feld(3, 300, "Halle B")],
+    "Halle A",
+  );
+  const lauf = diffOccupiedCourts(
+    start.stand,
+    [feld(1, 100, "Halle A"), feld(2, 200, "Halle B"), feld(3, 300, "Halle B")],
+    "Halle A",
+  );
+  pruefe("waehrenddessen wird nichts aus Halle B angesagt", lauf.neue.length === 0);
+
+  // Jetzt schaltet der Slave auf „alle Hallen" um — derselbe Stand, nur ohne
+  // Filter. Nichts davon darf nachgerufen werden.
+  const umschalten = diffOccupiedCourts(
+    lauf.stand,
+    [feld(1, 100, "Halle A"), feld(2, 200, "Halle B"), feld(3, 300, "Halle B")],
+    "",
+  );
+  pruefe(
+    "beim Umschalten wird kein laufendes Spiel nachgerufen",
+    umschalten.neue.length === 0,
+  );
+
+  // Ab sofort heisst: Das naechste ECHTE Spiel in der neuen Halle kommt.
+  const danach = diffOccupiedCourts(
+    umschalten.stand,
+    [feld(1, 100, "Halle A"), feld(2, 201, "Halle B"), feld(3, 300, "Halle B")],
+    "",
+  );
+  pruefe("ein neues Spiel in Halle B wird angesagt", danach.neue.length === 1);
+  pruefe("und zwar das richtige", danach.neue[0]?.match_id === 201);
+}
+
 console.log("");
 if (fehler > 0) {
   console.error(`${fehler} FEHLER`);

@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.257
+
+- **Behoben: Eine Halle hinzunehmen rief die halbe Vergangenheit nach.** Stellte
+  man am Ansage-Gerät die Halle um oder auf „alle Hallen", sagte es schlagartig
+  jedes dort laufende Spiel noch einmal an. Jetzt gilt, was man erwartet: Ab
+  dem Umschalten werden **neue** Aufrufe angesagt, laufende Spiele bleiben
+  stumm.
+- **Behoben: Die Hallen-Auswahl wählte sich gegenseitig ab.** Die Halle lässt
+  sich an drei Stellen setzen — auf dem Dashboard, in den Ansage-Einstellungen
+  und (am Cloud-Slave) im Geräte-Panel. Wurde sie an einer Stelle geändert,
+  arbeitete die Ansage-Seite noch mit ihrem alten Stand und schrieb ihn beim
+  nächsten Speichern zurück; die eben gewählte Halle war wieder weg. Die
+  Auswahl wird jetzt überall nachgezogen.
 ## v0.9.255
 
 - **Neu: Anzeigen melden es, wenn sie stillstehen.** Court-Monitore froren
