@@ -759,6 +759,7 @@ mod tests {
             first_point_ms: Some(first_point),
             finished_ms: Some(finished),
             finished_seen_ms: Some(finished),
+            decided_seen_ms: None,
             pause_ms: None,
             class_label: class.to_string(),
             discipline: disc.to_string(),

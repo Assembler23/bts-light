@@ -2886,6 +2886,30 @@ function connectionLevel() {
   return "offline";
 }
 
+/**
+ * Sieht dieses Feld nach „fertig, aber kein Ergebnis" aus — und zwar schon
+ * lange genug? (Spec `tl-warnung-fertiges-spiel`.)
+ *
+ * Der Turnier-PC schickt nur den Zeitstempel „seit wann sieht es fertig aus"
+ * und die Frist; gerechnet wird hier. Das ist Absicht: Ein fertig
+ * ausgewerteter Schalter hinge an der Uhr, und der Fingerabdruck des
+ * TL-Zustands nullt zeitabgeleitete Felder — die Warnung käme per Push nie an.
+ *
+ * `0` als Frist heißt „Warnung aus" (Rückzugsweg im laufenden Turnier).
+ */
+function fertigOhneErgebnis(c) {
+  const frist = (state && state.finished_warning_seconds) || 0;
+  if (!frist || !c || !c.decided_since_ms) return false;
+  return serverNow() - c.decided_since_ms >= frist * 1000;
+}
+
+/** Alle Felder, die gerade so aussehen — ältester Fall zuerst. */
+function fertigOhneErgebnisAlle() {
+  return ((state && state.courts) || [])
+    .filter(fertigOhneErgebnis)
+    .sort((a, b) => a.decided_since_ms - b.decided_since_ms);
+}
+
 function renderConnection() {
   const level = connectionLevel();
   const conn = $("conn");
@@ -2912,6 +2936,13 @@ function renderConnection() {
   // wenn sich am Banner gar nichts ändert — inklusive der reinen
   // 304-„unverändert"-Antwort, die sonst ohne Neupassung bliebe).
   const warSichtbar = banner.classList.contains("show");
+  // Das Störungsband trägt beides — mit klarem Vorrang: Ohne Verbindung ist
+  // jede andere Meldung wertlos, weil der gezeigte Stand alt sein kann.
+  //
+  // Bewusst hier und nicht in einem eigenen Panel: Ein Panel lässt sich per
+  // Profil ausblenden und einklappen — und dann fehlte die Meldung genau in
+  // der Lage, für die sie gedacht ist. Das Band ist immer da.
+  const fertig = level === "offline" ? [] : fertigOhneErgebnisAlle();
   if (level === "offline") {
     // Genau sein: Die Uhren laufen weiter, sie messen echte Zeit. Stehen
     // geblieben sind Felder, Spielstände und Liste. „Die Anzeige ist
@@ -2919,6 +2950,16 @@ function renderConnection() {
     // sofort unglaubwürdig.
     banner.textContent =
       "Keine Verbindung zum Turnier-PC — Felder, Spielstände und Liste stehen auf dem letzten bekannten Stand.";
+    banner.classList.add("show");
+  } else if (fertig.length) {
+    // Die Halle steht im Text, nicht im Filter: Diese Zeile ignoriert den
+    // Hallenfilter ausdrücklich — sonst verschwiege sie genau den Fall, für
+    // den sie gebaut wurde (Gerät auf die andere Halle gestellt).
+    const nenne = (c) => (c.hall ? `${c.court} (${c.hall})` : c.court);
+    const kopf = fertig.length === 1
+      ? `${nenne(fertig[0])}: Spiel sieht fertig aus, aber es kam kein Ergebnis.`
+      : `${fertig.length} Felder ohne Ergebnis: ${fertig.map(nenne).join(", ")}.`;
+    banner.textContent = `${kopf} Bitte am Feld nachsehen.`;
     banner.classList.add("show");
   } else {
     banner.classList.remove("show");
@@ -3243,6 +3284,13 @@ function courtCard(c, cellStyle) {
   if (c.locked) badges.push('<span class="badge badge-alarm">gesperrt</span>');
   if (c.injury) badges.push('<span class="badge badge-alarm">Verletzung</span>');
   if (c.official_call) badges.push('<span class="badge badge-alarm">TL gerufen</span>');
+  // „Fertig, aber kein Ergebnis" (Spec `tl-warnung-fertiges-spiel`): dieselbe
+  // Alarm-Sprache wie gesperrt/Verletzung/TL gerufen — da muss jemand hin.
+  if (fertigOhneErgebnis(c)) {
+    badges.push('<span class="badge badge-alarm" '
+      + 'title="Die Sätze ergeben einen Sieger, das Feld ist aber noch belegt. '
+      + 'Vermutlich wurde das Ergebnis nicht übermittelt.">Ergebnis fehlt</span>');
+  }
   if (c.pause) badges.push(pauseBadge(c.pause));
   if (c.match_id && !c.tablet_connected) badges.push('<span class="badge badge-warn">kein Tablet</span>');
 

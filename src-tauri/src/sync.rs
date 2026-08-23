@@ -1331,6 +1331,43 @@ impl SyncEngine {
         }
     }
 
+    /// Stempelt Spiele, die nach ihren Sätzen **entschieden** aussehen, deren
+    /// Feld aber weiterhin belegt ist (Spec `tl-warnung-fertiges-spiel`).
+    ///
+    /// Der Stempel sagt nur „seit wann sieht das so aus" — ob daraus eine
+    /// Warnung wird, entscheidet erst die Anzeige anhand der eingestellten
+    /// Frist. So bleibt der Zustand stabil (und damit
+    /// Fingerabdruck-tauglich), statt im Sekundentakt zwischen wahr und
+    /// falsch zu springen.
+    ///
+    /// **Ausgeschlossen ist der häufigste Fehlalarm:** Ein Ergebnis, das in
+    /// der BTP-Nachschub-Queue liegt, ist beim Host angekommen und wird
+    /// nachgereicht — das Feld bleibt trotzdem belegt und der Satzstand steht
+    /// weiter. Dorthin muss niemand laufen; die Ursache liegt bei BTP.
+    fn stempel_entschiedene_spiele(snapshot: &BtpSnapshot, tablet: &TabletState, now: u64) {
+        let store = tablet.match_times_store();
+        for m in &snapshot.matches {
+            if m.status != MatchStatus::OnCourt {
+                continue;
+            }
+            let Some(court_id) = m.court_id else { continue };
+            // Ergebnis liegt beim Host und wartet nur auf BTP ⇒ kein Fall
+            // für die Turnierleitung.
+            if tablet.btp_retry_pending(m.id) {
+                store.clear_decided_seen(m.id);
+                continue;
+            }
+            let sets = tablet.monitor_court(court_id).sets;
+            if crate::tablet::server::spiel_ist_entschieden(&sets, &m.scoring) {
+                store.stamp_decided_seen(m.id, now);
+            } else {
+                // Nicht (mehr) entschieden — etwa nach einer Korrektur. Beim
+                // nächsten Ende läuft die Uhr von vorn.
+                store.clear_decided_seen(m.id);
+            }
+        }
+    }
+
     /// Verfolgt den Zähltafelbediener je Feld: Verlässt das im letzten
     /// Zyklus auf einem Feld OnCourt gewesene Spiel das Feld und ist es
     /// beendet, merkt sich der TabletState den Verlierer als
@@ -1964,6 +2001,10 @@ impl SyncEngine {
         // reconcile_on_court aus demselben Snapshot, damit beide Uhren
         // dieselbe Zuweisung sehen.
         self.reconcile_match_times(tablet, &snapshot, now_ms());
+        // Warnung „Spiel scheint fertig, aber kein Ergebnis" (Spec
+        // `tl-warnung-fertiges-spiel`): einmal je Poll gegen den Live-Stand
+        // prüfen. Der Minutentakt der Warnung verträgt das mühelos.
+        Self::stempel_entschiedene_spiele(&snapshot, tablet, now_ms());
         // Automatische Feldvergabe: freie, lange genug freie, nicht gesperrte
         // Felder mit dem nächsten spielbereiten Match belegen (schreibt nach
         // BTP). Aus dem aktuellen Snapshot bestimmt – kollidiert so nicht mit
@@ -3960,6 +4001,92 @@ mod tests {
     }
 
     // ──────────────── Spielende-Stempel & Zähltafelbediener ────────────────
+
+    /// Ein laufendes Spiel auf Feld 1 mit dieser Satzliste im Live-Stand.
+    fn oncourt_mit_saetzen(id: i64, sets: Vec<(i64, i64)>) -> (BtpSnapshot, TabletState) {
+        let m = oncourt_named(id, 1, "A", "B");
+        let snap = snap_with(Vec::new(), vec![m], Vec::new());
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap.clone());
+        tablet.record_score(1, id, sets);
+        (snap, tablet)
+    }
+
+    #[test]
+    fn ein_entschiedenes_spiel_auf_belegtem_feld_wird_gestempelt() {
+        // Spec `tl-warnung-fertiges-spiel`: Grundlage der Warnung. Der Stempel
+        // sagt nur „seit wann sieht es fertig aus" — die Frist rechnet die
+        // Anzeige.
+        let (snap, tablet) = oncourt_mit_saetzen(42, vec![(21, 10), (21, 15)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 5_000);
+        assert_eq!(
+            tablet.match_times_store().decided_seen_ms(42),
+            Some(5_000),
+            "entschieden bei belegtem Feld ⇒ Stempel"
+        );
+
+        // Ein zweiter Durchgang darf ihn nicht verschieben — sonst liefe die
+        // Frist nie ab.
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 60_000);
+        assert_eq!(tablet.match_times_store().decided_seen_ms(42), Some(5_000));
+    }
+
+    #[test]
+    fn ein_laufendes_spiel_wird_nicht_gestempelt() {
+        let (snap, tablet) = oncourt_mit_saetzen(42, vec![(21, 10), (11, 9)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 5_000);
+        assert_eq!(tablet.match_times_store().decided_seen_ms(42), None);
+    }
+
+    #[test]
+    fn eine_korrektur_nimmt_den_stempel_zurueck() {
+        // Wird der Stand zurückgenommen (BTP-Korrektur, Tablet-Korrektur),
+        // ist das Spiel nicht mehr fertig — und beim nächsten Ende läuft die
+        // Frist von vorn, statt sofort zu warnen.
+        let (snap, tablet) = oncourt_mit_saetzen(42, vec![(21, 10), (21, 15)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 5_000);
+        assert!(tablet.match_times_store().decided_seen_ms(42).is_some());
+
+        tablet.record_score(1, 42, vec![(21, 10), (11, 9)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 6_000);
+        assert_eq!(tablet.match_times_store().decided_seen_ms(42), None);
+    }
+
+    #[test]
+    fn ein_ergebnis_in_der_nachschub_queue_warnt_nicht() {
+        // **Der wichtigste Negativfall** (Grill-Fund): Scheitert der
+        // BTP-Write, quittiert der Host dem Tablet trotzdem und legt das
+        // Ergebnis in die Nachschub-Queue — das Feld bleibt belegt und der
+        // entschiedene Satzstand steht weiter. Dorthin muss niemand laufen,
+        // die Ursache liegt bei BTP. Eine Warnung wäre hier schlicht falsch,
+        // und falsche Warnungen kosten den Glauben an alle anderen.
+        let (snap, tablet) = oncourt_mit_saetzen(42, vec![(21, 10), (21, 15)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 5_000);
+        assert!(tablet.match_times_store().decided_seen_ms(42).is_some());
+
+        tablet.queue_btp_retry(
+            crate::btp::proto::MatchUpdate {
+                btp_match_id: 42,
+                draw_id: 1,
+                planning_id: 1,
+                sets: vec![(21, 10), (21, 15)],
+                team1_won: true,
+                duration_mins: 30,
+                score_status: 0,
+                free_court_id: Some(1),
+                player_ids: Vec::new(),
+                end_ts_ms: Some(5_000),
+                officials: None,
+            },
+            5_000,
+        );
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 6_000);
+        assert_eq!(
+            tablet.match_times_store().decided_seen_ms(42),
+            None,
+            "Ergebnis liegt beim Host — kein Fall für die Turnierleitung"
+        );
+    }
 
     #[test]
     fn stamp_finished_stamps_once_and_keeps_timestamp() {

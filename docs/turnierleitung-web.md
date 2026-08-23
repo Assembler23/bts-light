@@ -109,6 +109,27 @@ LAN+Cloud voraus.
   in Worten will: Der Mauszeiger (bzw. langes Tippen) auf dem Namen zeigt
   „spielt gerade" bzw. „pausiert noch bis …". Ein Spiel ohne
   Hallenzuordnung erkennst du schlicht am **fehlenden Hallen-Kürzel**.
+- **Warnung „Ergebnis fehlt"** (seit v0.9.259): Ist ein Spiel nach seinen
+  Sätzen entschieden — die Endpunkte sind erreicht —, das Feld aber weiterhin
+  belegt, meldet die Oberfläche das nach **einer Minute**: als rote Marke an
+  der Feld-Kachel und als Zeile im Störungsband oben. Meist heißt das, dass
+  das Ergebnis nicht übermittelt wurde.
+
+  Die Zeile im Band nennt Feld und Halle und **ignoriert den Hallenfilter** —
+  sonst verschwiege sie genau den Fall, für den sie gedacht ist. Bei mehreren
+  Feldern steht der älteste Fall zuerst. Verliert das Gerät die Verbindung,
+  hat die Verbindungsmeldung Vorrang: Ohne Verbindung ist jede andere Aussage
+  wertlos.
+
+  **Wann sie bewusst schweigt:** in der Satzpause, während ein Satz läuft, bei
+  Aufgabe/Kampflos/Disqualifikation, auf freien Feldern — und vor allem dann,
+  wenn das Ergebnis bereits beim Turnier-PC liegt und nur auf BTP wartet.
+  Dorthin muss niemand laufen. Ist die Zählweise eines Spiels unbekannt, wird
+  ebenfalls nicht gewarnt.
+
+  **Abschalten:** In der `config.json` steht `finished_warning_seconds`
+  (Default 60). `0` schaltet die Warnung ganz ab — der Rückzugsweg, falls sie
+  im laufenden Turnier zu oft danebenliegt.
 - **Felder sperren und freigeben** (seit v0.9.258): Im ⋯-Menü einer
   Feld-Kachel steht **„🔒 Feld sperren"**. Ein gesperrtes Feld bekommt von der
   automatischen Vergabe kein Spiel mehr — für ein kaputtes Netz, ein

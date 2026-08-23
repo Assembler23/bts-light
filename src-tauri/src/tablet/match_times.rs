@@ -96,6 +96,18 @@ pub struct MatchTimeEntry {
     /// jeder Spieler begann seine Pause von vorn (Feldtest 22.08.2026).
     #[serde(default)]
     pub finished_seen_ms: Option<u64>,
+    /// Seit wann steht dieses Spiel nach seinen Sätzen als **entschieden** da,
+    /// ohne dass ein Ergebnis angekommen wäre? (Spec
+    /// `tl-warnung-fertiges-spiel`.) `None` = läuft normal.
+    ///
+    /// Bewusst hier und nicht im Arbeitsspeicher: Beim App-Start lädt der
+    /// Host die Live-Stände aus `scores.json` zurück. Ein RAM-Merker sähe den
+    /// entschiedenen Stand dann sofort wieder als „gerade zuerst gesehen" und
+    /// ließe die Uhr neu laufen — die Warnung verschwände ausgerechnet für
+    /// eine Minute nach einem Neustart, also genau dann, wenn die
+    /// Turnierleitung am dringendsten hinschaut.
+    #[serde(default)]
+    pub decided_seen_ms: Option<u64>,
     /// Die Pflichtpause (Millisekunden), die **beim Spielende** galt —
     /// zusammen mit `finished_seen_ms` eingefroren. Eine später geänderte
     /// Pausenzeit greift dadurch nur für Spiele, die danach enden; die
@@ -415,6 +427,58 @@ impl MatchTimesStore {
             self.persist();
         }
         wert
+    }
+
+    /// Stempelt „seit jetzt sieht dieses Spiel fertig aus" — genau einmal je
+    /// Episode. Liefert den geltenden Stempel zurück.
+    pub fn stamp_decided_seen(&self, match_id: i64, now: u64) -> u64 {
+        let (wert, changed) = {
+            let mut inner = self.inner.lock().unwrap();
+            let e = inner.file.entries.entry(match_id).or_default();
+            match e.decided_seen_ms {
+                Some(alt) => (alt, false),
+                None => {
+                    e.decided_seen_ms = Some(now);
+                    (now, true)
+                }
+            }
+        };
+        if changed {
+            self.bump_generation();
+            self.persist();
+        }
+        wert
+    }
+
+    /// Nimmt den Stempel zurück — das Spiel sieht nicht mehr fertig aus (der
+    /// Stand wurde korrigiert) oder das Ergebnis ist da. Beim nächsten Ende
+    /// beginnt die Uhr von vorn.
+    pub fn clear_decided_seen(&self, match_id: i64) {
+        let changed = {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.file.entries.get_mut(&match_id) {
+                Some(e) if e.decided_seen_ms.is_some() => {
+                    e.decided_seen_ms = None;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.bump_generation();
+            self.persist();
+        }
+    }
+
+    /// Seit wann sieht dieses Spiel fertig aus? `None` = tut es nicht.
+    pub fn decided_seen_ms(&self, match_id: i64) -> Option<u64> {
+        self.inner
+            .lock()
+            .unwrap()
+            .file
+            .entries
+            .get(&match_id)
+            .and_then(|e| e.decided_seen_ms)
     }
 
     /// Bruttostart eines Matches (E4), falls gestempelt.

@@ -355,6 +355,12 @@ Kandidat: die vierachsige Spielzeiten-Statistik aus Punkt 1), misst nach
 und nimmt sie in die Kaskade auf — die verbleibende Reserve trägt keine
 zweite Erweiterung.
 
+**Warnung „Ergebnis fehlt"** (Spec `tl-warnung-fertiges-spiel`, seit
+v0.9.259): rein additiv im `TlState` — `TlCourt.decided_since_ms` (Zeitstempel)
+und `finished_warning_seconds` (Frist). Keine neue Aktion, keine Relay-Änderung.
+Eine neue Seite an einem alten Host bekommt die Felder nicht und warnt
+schlicht nicht (`#[serde(default)]`).
+
 **Feldsperre** (Spec `tl-web-felder-sperren`, seit v0.9.258): eine neue
 `TlAction`-Variante `lock_court { courtId, locked }`. Der Relay braucht dafür
 **keine** Code-Änderung — er parst Aktionen typisiert und bekommt die Variante

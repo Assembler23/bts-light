@@ -2294,6 +2294,11 @@ pub struct TlState {
     /// `#[serde(default)]` = `false`: Genau das liefert ein alter Host.
     #[serde(default)]
     pub can_lock_courts: bool,
+    /// Nach wie vielen Sekunden ein „fertig aussehendes" Spiel gemeldet wird
+    /// (`0` = Warnung aus). Kommt aus der Konfiguration; die Seite rechnet
+    /// damit gegen [`TlCourt::decided_since_ms`].
+    #[serde(default)]
+    pub finished_warning_seconds: u32,
     /// Alle Hallen des Turniers, alphabetisch nach Namen.
     ///
     /// Mit Kennung, nicht nur mit Namen: Ein Vorbereitungs-Aufruf braucht sie,
@@ -2500,6 +2505,18 @@ pub struct TlCourt {
     #[serde(default)]
     pub team2_ids: Vec<String>,
     pub sets: Vec<(i64, i64)>,
+    /// Seit wann sieht dieses Spiel nach seinen Sätzen fertig aus, ohne dass
+    /// ein Ergebnis angekommen wäre (Spec `tl-warnung-fertiges-spiel`)?
+    /// `None` = alles normal.
+    ///
+    /// Bewusst ein **Zeitstempel** und kein fertig ausgewertetes „warnen ja/
+    /// nein": Ein Bool, der nach einer Minute umspringt, hinge an der Uhr —
+    /// und `state_fingerprint` nullt zeitabgeleitete Felder, damit die
+    /// Revision nicht im Sekundentakt hochzählt. Die Warnung käme per Push
+    /// nie an. Der Zeitstempel dagegen ist stabil; die Seite rechnet die
+    /// Frist selbst, sie hat ohnehin einen Sekundentakt für ihre Uhren.
+    #[serde(default)]
+    pub decided_since_ms: Option<u64>,
     pub tablet_connected: bool,
     /// Verletzung/Behandlung läuft — die Turnierleitung will das sehen.
     pub injury: bool,
@@ -2949,6 +2966,7 @@ pub(crate) fn build_state_limited(
             server_now_ms: now_ms,
             tournament: String::new(),
             multi_hall: false,
+            finished_warning_seconds: config.finished_warning_seconds,
             // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
             // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
             // lehnt die Aktion ohnehin ab (E7).
@@ -3008,7 +3026,12 @@ pub(crate) fn build_state_limited(
             let spiel = (c.match_id != 0)
                 .then(|| match_by_id.get(&c.match_id).copied())
                 .flatten();
-            court_view(c, clearing, schalter, spiel)
+            // Nur für belegte Felder nachschlagen — ein freies Feld hat
+            // keinen Spielstand, der fertig aussehen könnte.
+            let fertig_seit = (c.match_id != 0)
+                .then(|| tablet.match_times_store().decided_seen_ms(c.match_id))
+                .flatten();
+            court_view(c, clearing, schalter, spiel, fertig_seit)
         })
         .collect();
 
@@ -3373,6 +3396,7 @@ pub(crate) fn build_state_limited(
     TlState {
         // Dieser Host kann es — die Oberfläche darf den Eintrag zeigen.
         can_lock_courts: true,
+        finished_warning_seconds: config.finished_warning_seconds,
         rev,
         server_now_ms: now_ms,
         tournament: snap.tournament_name.clone(),
@@ -4047,6 +4071,9 @@ fn court_view(
     // Das Spiel auf dem Feld, nur für die Lizenznummern — `CourtOverview`
     // führt sie bewusst nicht mit. `None` bei freiem Feld.
     spiel: Option<&crate::btp::model::BtpMatch>,
+    // Seit wann sieht das Spiel fertig aus (Spec `tl-warnung-fertiges-spiel`)?
+    // Kommt aus dem persistenten Zeitspeicher, den der Sync-Lauf stempelt.
+    decided_since_ms: Option<u64>,
 ) -> TlCourt {
     // Aus dem rohen Tablet-JSON nur die bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
@@ -4062,6 +4089,7 @@ fn court_view(
     });
     TlCourt {
         clearing,
+        decided_since_ms,
         pause,
         call_stage: c.call_stage,
         court_id: c.court_id,
@@ -8360,6 +8388,13 @@ mod tests {
             "tournament",
             "multi_hall",
             "halls",
+            // Seit wann sieht ein Spiel fertig aus (Spec
+            // tl-warnung-fertiges-spiel)? Ein Zeitstempel je Feld — sagt
+            // nichts über Personen, nur über den Spielstand, der ohnehin in
+            // "sets" steht.
+            "decided_since_ms",
+            // Frist derselben Warnung in Sekunden, aus der Konfiguration.
+            "finished_warning_seconds",
             // Fähigkeitsmerkmal (Spec tl-web-felder-sperren, E13): reines
             // Bool „dieser Turnier-PC kennt das Sperren". Sagt nichts über
             // Personen, nur über die Programmversion — und ohne es zeigte

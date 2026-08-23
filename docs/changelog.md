@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.259
+
+- **Neu: Die Turnierleitung erfährt es, wenn ein Ergebnis fehlt.** Ist ein
+  Spiel nach seinen Sätzen entschieden — die Endpunkte sind erreicht —, das
+  Feld aber weiterhin belegt, meldet die Turnierleitungs-Oberfläche das nach
+  einer Minute: als rote Marke an der Feld-Kachel und als Zeile im Störungsband
+  oben. Bisher fiel so ein Fall nur auf, wenn jemand zufällig hinsah und den
+  Satzstand selbst deutete.
+
+  Die Meldung nennt Feld und Halle und zeigt sich auch dann, wenn das Gerät auf
+  eine andere Halle gefiltert ist — sonst verschwiege sie genau den Fall, für
+  den sie gedacht ist.
+
+  **Sie schweigt bewusst**, wenn das Ergebnis bereits beim Turnier-PC liegt und
+  nur auf BTP wartet: Dorthin muss niemand laufen. Ebenso in der Satzpause,
+  während ein Satz läuft, bei Aufgabe und kampflosen Wertungen und dann, wenn
+  die Zählweise eines Spiels unbekannt ist. Falsche Warnungen kosten den
+  Glauben an alle anderen.
+
+  Wer sie trotzdem loswerden will, setzt `finished_warning_seconds` in der
+  Konfiguration auf `0` — das wirkt sofort, ohne neue Version.
+
 ## v0.9.258
 
 - **Neu: Felder sperren von der Turnierleitungs-Oberfläche.** Fällt ein Feld
