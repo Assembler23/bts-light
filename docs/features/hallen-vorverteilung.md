@@ -195,6 +195,10 @@ Manuelle Prüfliste: Zwei-Hallen-Testturnier, LAN + Cloud.
 - Rollback im Turnier: Schalter aus → „Auto-Hallen räumen" → Zustand wie
   vorher. App-Downgrade: `auto-halls.json` wird ignoriert, config bleibt
   lesbar.
+- Seit v0.9.260 ersetzt auch eine **von Hand gesetzte** Halle den
+  Vorbereitungs-Aufruf, nicht nur eine automatisch verteilte (Nachtrag zu
+  ADR 0030). Vorher legte der Hand-Eingriff das Spiel still: Er räumt die
+  Auto-Zuordnung, womit der Aufruf-Ersatz wegfiel.
 - `locked_courts` überlebt den Neustart: Die Sperren stehen in der Config und
   werden beim Start der Übertragung in den Laufzeit-Zustand geladen, das
   Verhältnis rechnet also auch danach mit den entsperrten Feldern. (Bis
