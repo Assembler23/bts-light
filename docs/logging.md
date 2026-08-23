@@ -26,6 +26,43 @@ Protokolliert werden u. a.:
 - fehlgeschlagene Liveticker-Pushes
 - **Perf-Zeile der Anzeige-Strecke** (seit v0.9.235, siehe unten)
 
+### Stillstands-Wächter der Anzeigen (seit v0.9.255)
+
+Court-Monitore froren gelegentlich auf einem alten Stand ein: Die Seite lief
+weiter und rendert weiter, sie übernahm nur nichts Neues mehr. Dieses Symptom
+hinterließ **keine Spur** — der Log-Upload hängt an JS-Fehler,
+`unhandledrejection` und `pagehide`, und ein stiller Hänger fällt durch alle
+drei Raster. Am Ende stand „hängt öfters mal" ohne jede Möglichkeit, die
+Ursache einzugrenzen.
+
+`overview.html` und `monitor.html` prüfen deshalb alle 10 Sekunden zwei
+Größen: wann zuletzt ein Abruf **ohne Fehler** zurückkam und wann zuletzt ein
+Stand **angewendet oder als aktuell bestätigt** wurde (ein `304` „nichts
+Neues" zählt mit — sonst meldete eine ruhige Halle im Minutentakt
+Fehlalarme). Bleibt eines davon länger als **60 Sekunden** aus, schreibt die
+Seite eine `error`-Zeile `stillstand` und lädt ihr Log sofort hoch; erholt sie
+sich, folgt `stillstand_vorbei`. Gemeldet wird **einmal je Episode**, nicht im
+Takt.
+
+Die Zeile trennt die beiden Welten, die am hängenden Gerät nicht
+unterscheidbar waren:
+
+| `art` | Bedeutung |
+|---|---|
+| `keine_abrufe` | Es kommt gar nichts mehr zurück — Poll-Timer tot, Netz oder Server weg. |
+| `verworfen` | Die Abrufe klappen, aber nichts landet auf dem Schirm: Die Seite selbst verwirft. |
+
+Mitgeschrieben werden außerdem `stillMs`, die Zahl der abgewiesenen Stände
+bzw. Anstöße (`verworfen` / `verworfeneNudges`), der WS-Zustand, das Alter des
+letzten Server-Frames, der aktuelle Fallback-Takt und — beim Court-Monitor —
+Feld und gezeigte Ordnungszahl.
+
+**Der Wächter heilt nichts.** Kein Reload, kein Zurücksetzen der
+Ordnungszahl: Solange unklar ist, woran es liegt, würde eine Selbstheilung
+genau die Spur verwischen, wegen der er gebaut wurde. Die Regel steht in
+`src/io/standstill.mjs` (Test `scripts/test-standstill.mjs`, eigener
+CI-Schritt); beide Anzeige-Seiten tragen eine Inline-Kopie.
+
 ### Perf-Zeile der Anzeige-Strecke
 
 Alle zehn Sekunden eine Zeile mit dem, was die Monitore und Übersichten im
@@ -97,7 +134,7 @@ Internet**, minimale LTE-Daten, und der Upload läuft über **plain HTTP im LAN*
   → lokal `<log_dir>/pi-logs/mon-<id>.log` → Cloud `api/pi_log.php`. Die
   Monitor-Seiten fangen JS-Fehler + Schlüsselereignisse („keine Daten",
   Deassign, Offline-Wechsel) und laden best-effort beim Ereignis + `pagehide`
-  hoch. Nur LAN (im reinen Cloud-Modus hat der Relay keine `/pi-log`-Route →
+  hoch — **seit v0.9.255 auch bei Stillstand** (siehe unten). Nur LAN (im reinen Cloud-Modus hat der Relay keine `/pi-log`-Route →
   Post scheitert still; die Kombi-Anzeige ist ohnehin LAN-only).
 - **Pi → PC:** `POST …/pi-log?device=pi-<serial>` (an die gecachte
   bts-light-IP) → lokal `<log_dir>/pi-logs/pi-<serial>.log` → Cloud

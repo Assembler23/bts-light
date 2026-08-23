@@ -4,6 +4,30 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.255
+
+- **Neu: Anzeigen melden es, wenn sie stillstehen.** Court-Monitore froren
+  gelegentlich auf einem alten Stand ein — die Seite lief weiter und zeigte
+  weiter ein gültiges Bild, sie übernahm nur nichts Neues mehr. Bisher
+  hinterließ genau das keine Spur: Der Log-Upload der Anzeigen hängt an
+  JS-Fehlern und am Schließen der Seite, und ein stiller Hänger ist beides
+  nicht. Übrig blieb „hängt öfters mal" ohne Anhaltspunkt.
+
+  Beide Anzeige-Seiten prüfen sich jetzt alle zehn Sekunden selbst: Kam
+  überhaupt noch eine Antwort zurück, und wurde noch ein Stand übernommen oder
+  bestätigt? Bleibt eines davon länger als eine Minute aus, schreiben sie das
+  ins Log und laden es sofort hoch — samt der Angabe, ob gar nichts mehr
+  ankommt (Netz, Gerät) oder ob die Seite die Antworten verwirft. Genau diese
+  Unterscheidung war am hängenden Monitor bisher nicht möglich. Erholt sich
+  die Anzeige, steht auch das im Log.
+
+  Eine ruhige Halle löst dabei nichts aus: Die Bestätigung „nichts Neues"
+  zählt wie ein übernommener Stand.
+
+  **Am Bild ändert sich nichts.** Der Wächter stellt fest und schweigt
+  ansonsten — er lädt die Seite nicht neu und greift nicht ein. Solange
+  ungeklärt ist, woran das Einfrieren liegt, würde eine Selbstheilung die
+  Spur verwischen, wegen der er gebaut wurde.
 ## v0.9.254
 
 - **Behoben: Tablets, die zählen, aber ihr Spiel nicht abschließen können.**
