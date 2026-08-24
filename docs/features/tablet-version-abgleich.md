@@ -28,12 +28,17 @@ Service Worker, und alle Seiten sind selbstenthaltend — kein einziges
 `<script src>` oder `<link href>`. Es gibt schlicht nichts, was getrennt
 veralten könnte.
 
-Was „Browserdaten löschen" **auch** entfernt, ist der `localStorage`. Dort lag
-das hängende `pendingResult`: Vor v0.9.254 wurde ein dauerhaft abgelehntes
-Ergebnis endlos wiederholt, mit der beruhigenden Meldung „wird automatisch
-wiederholt, bis es ankommt". Ein Neustart half nicht, weil `localStorage` ihn
-übersteht. **Dieser Teil ist mit v0.9.254 erledigt** und nicht Gegenstand
-dieser Spec.
+Was „Browserdaten löschen" **auch** entfernt, ist der `localStorage` — und
+dort lag das hängende `pendingResult`: Vor v0.9.254 wurde ein dauerhaft
+abgelehntes Ergebnis endlos wiederholt, mit der beruhigenden Meldung „wird
+automatisch wiederholt, bis es ankommt". Ein Neustart half nicht, weil
+`localStorage` ihn übersteht.
+
+Das erklärt jedes berichtete Detail, **belegt** ist es aber nicht: Die
+Tablet-Logs der betroffenen Geräte gibt es nicht mehr, der genaue
+Ablehnungsgrund bleibt also unbekannt. Die Suche danach ist eingestellt.
+Unabhängig davon war die endlose Wiederholung ein echter Fehler und ist mit
+**v0.9.254 behoben** — dieser Teil ist nicht Gegenstand dieser Spec.
 
 Übrig bleibt das echte, allgemeine Problem: **Eine geladene Seite weiß nicht,
 dass sie veraltet ist.**

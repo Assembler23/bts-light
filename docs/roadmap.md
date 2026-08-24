@@ -614,8 +614,10 @@ mitgeändert worden:
   Kein ADR nötig. Wichtig für die Deutung des Feldtests: Der berichtete
   „Hänger" bis zum Leeren der Browserdaten war **nicht** der HTTP-Cache
   (`no-store` steht seit dem ersten Commit, die Seiten sind selbstenthaltend),
-  sondern das hängende `pendingResult` im `localStorage` — behoben mit
-  v0.9.254. Offen: Feldtest beider Wege.
+  sondern sehr wahrscheinlich das hängende `pendingResult` im `localStorage`
+  — behoben mit v0.9.254. Endgültig belegt ist das nicht: Die Tablet-Logs der
+  betroffenen Geräte gibt es nicht mehr, die Suche nach dem genauen
+  Ablehnungsgrund ist eingestellt (24.08.2026). Offen: Feldtest beider Wege.
 
 ## Wünsche vom 11.08.2026
 
