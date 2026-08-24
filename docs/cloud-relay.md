@@ -355,6 +355,14 @@ Kandidat: die vierachsige Spielzeiten-Statistik aus Punkt 1), misst nach
 und nimmt sie in die Kaskade auf — die verbleibende Reserve trägt keine
 zweite Erweiterung.
 
+**Wunschfeld** (Spec `tl-wunschfeld`, seit v0.9.262): eine neue
+`TlAction`-Variante `set_wish_court { matchId, courtId? }` — ohne `courtId`
+wird der Wunsch aufgehoben. Der Relay braucht keine Code-Änderung (typisiertes
+`TlAction` über `relay-proto`, gemeinsam mit `tl.html` deployt). Additiv im
+`TlState`: `TlMatch.wish_court` und das Fähigkeitsmerkmal
+`can_set_wish_court`, über das die Seite den Wähler nur zeigt, wenn der Host
+die Aktion kennt.
+
 **Warnung „Ergebnis fehlt"** (Spec `tl-warnung-fertiges-spiel`, seit
 v0.9.259): rein additiv im `TlState` — `TlCourt.decided_since_ms` (Zeitstempel)
 und `finished_warning_seconds` (Frist). Keine neue Aktion, keine Relay-Änderung.

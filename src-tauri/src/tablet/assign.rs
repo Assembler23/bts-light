@@ -267,6 +267,37 @@ pub enum HallSource {
 /// `Match.LocationID`**, die meisten ohne jede Feldzuweisung. Der Ort wird
 /// jetzt gelesen — die abgeleiteten Quellen bleiben für Turniere, die ihn
 /// nicht pflegen.
+/// Die „von Hand gesetzte" Halle eines Spiels — aus dem **Wunschfeld** oder
+/// aus der direkt gesetzten Halle.
+///
+/// Ein Wunschfeld (Spec `tl-wunschfeld`) legt die Halle mit fest: Es benennt
+/// ein konkretes Feld, und das liegt nun einmal in genau einer Halle. Damit
+/// kann der Widerspruch „Wunschfeld in Halle B, Hallenzuordnung sagt Halle A"
+/// strukturell nicht entstehen — das Spiel würde sonst auf ein Feld warten,
+/// das seine Hallenbindung ihm verbietet, und niemand sähe den Grund.
+///
+/// Der Wunsch zählt bewusst als **`Manual`** und bekommt keine eigene
+/// Kaskadenstufe: Er *ist* ein Hand-Eingriff der Turnierleitung für dieses
+/// eine Spiel — dieselbe Bedeutung, dieselbe Verbindlichkeit. Das erspart
+/// eine neue Quelle auf der Wire, deren Bedeutung ältere Anzeigen nicht
+/// kennten. Die Turnierleitung sieht das Wunschfeld ohnehin als eigene Marke.
+///
+/// Das Wunschfeld schlägt die direkt gesetzte Halle: Es ist die genauere
+/// Angabe (ein Feld statt einer Halle) und in aller Regel die jüngere.
+pub fn manual_hall_from_wish<'a>(
+    snap: &'a BtpSnapshot,
+    wish_court: Option<i64>,
+    manual_hall: Option<&'a str>,
+) -> Option<&'a str> {
+    let aus_wunsch = wish_court
+        .and_then(|c| snap.court_infos.iter().find(|ci| ci.id == c))
+        .and_then(|ci| ci.location_id)
+        .and_then(|lid| snap.locations.iter().find(|l| l.id == lid))
+        .map(|l| l.name.as_str())
+        .filter(|n| !n.trim().is_empty());
+    aus_wunsch.or(manual_hall)
+}
+
 pub fn hall_for_match(
     config: &AppConfig,
     snap: &BtpSnapshot,

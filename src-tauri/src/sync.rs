@@ -743,6 +743,39 @@ impl SyncEngine {
         tablet.retain_auto_assign_exclusions(&keep);
     }
 
+    /// Wunschfelder je Poll aufräumen (Spec `tl-wunschfeld`).
+    ///
+    /// Zwei Gründe, einen Wunsch zu verwerfen:
+    ///
+    /// - **Das Spiel ist durch** (beendet oder aus dem Stand verschwunden) —
+    ///   wie bei der Ausnahmeliste.
+    /// - **Das Spiel steht auf dem Feld.** Der Wunsch hat getan, was er
+    ///   sollte. Bliebe er stehen, zöge er das Spiel nach einer
+    ///   Ergebniskorrektur — wenn BTP es wieder auf `Scheduled` setzt —
+    ///   erneut auf ein Feld, das niemand mehr gemeint hat. Und er hielte
+    ///   dieses Feld weiter für sich reserviert.
+    /// - **Das Feld gibt es nicht mehr.** Ein Wunsch auf eine CourtID, die
+    ///   der Snapshot nicht mehr führt, ließe das Spiel für immer warten —
+    ///   und in der Liste stünde nur „wartet", ohne Grund.
+    fn reconcile_wish_courts(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
+        let keep: HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Scheduled && m.court_id.is_none())
+            .map(|m| m.id)
+            .collect();
+        tablet.wish_court_store().retain(&keep);
+
+        let felder: HashSet<i64> = snapshot.court_infos.iter().map(|c| c.id).collect();
+        let verloren = tablet.wish_court_store().retain_courts(&felder);
+        if !verloren.is_empty() {
+            tracing::info!(
+                "Wunschfeld verworfen für {verloren:?}: das Feld gibt es in diesem \
+                 Turnierstand nicht mehr"
+            );
+        }
+    }
+
     /// Spielzeiten-Messung je Poll abgleichen (Spec `spielzeiten-prognose`,
     /// E4): Alle OnCourt-Matches werden — nur wenn noch kein Stempel steht —
     /// mit ihrer ersten Feldzuweisung gestempelt; Matches, die BTP wieder als
@@ -1733,7 +1766,15 @@ impl SyncEngine {
             .iter()
             .map(|m| {
                 let call = call_for(m.id);
-                let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+                // Das Wunschfeld legt die Halle mit fest (Spec
+                // `tl-wunschfeld`) — sonst könnte die Hallenbindung dem
+                // Wunsch widersprechen und das Spiel wartete auf ein Feld,
+                // das es nie bekommen darf.
+                let manual_hall = crate::tablet::assign::manual_hall_from_wish(
+                    snapshot,
+                    tablet.wish_court(m.id),
+                    manual_halls.get(&m.id).map(String::as_str),
+                );
                 let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
                     snapshot
                         .locations
@@ -1763,6 +1804,34 @@ impl SyncEngine {
         // werdende Felder" bleibt hier, sie gilt nur innerhalb eines Laufs.
         let availability =
             crate::tablet::assign::PlayerAvailability::from_snapshot(snapshot, config);
+
+        // ── Wunschfelder reservieren (Spec `tl-wunschfeld`) ─────────────
+        //
+        // Ein Wunschfeld hält sein Feld frei, **sobald das Wunschspiel
+        // spielbereit ist** — und keine Sekunde früher. Ohne diese
+        // Reservierung wäre das Feature wirkungslos: Wird das Hauptfeld frei,
+        // während das Endspiel noch in der Pflichtpause nach dem Halbfinale
+        // steckt (die Lage, in der ein Endspiel immer ist), bekäme ein
+        // anderes Spiel das Feld — und es wäre für vierzig Minuten weg.
+        //
+        // „Spielbereit" heißt: Das Spiel könnte jetzt aufs Feld, wenn eines
+        // frei wäre — nicht ausgenommen und kein Spieler spielt oder pausiert
+        // noch. So kostet die Reservierung nur so lange Feldkapazität, wie
+        // sie wirklich gebraucht wird: Ein Endspiel, dessen Spieler noch im
+        // Halbfinale stehen, blockiert nichts.
+        let reserviert: HashMap<i64, i64> = ready
+            .iter()
+            .filter_map(|m| {
+                let court = tablet.wish_court(m.id)?;
+                if tablet.auto_assign_excluded(m.id) {
+                    return None;
+                }
+                if availability.blocked(m, now).is_some() {
+                    return None;
+                }
+                Some((court, m.id))
+            })
+            .collect();
 
         let mut courts = Vec::new();
         let mut match_courts = Vec::new();
@@ -1798,6 +1867,19 @@ impl SyncEngine {
                 // `feldvergabe-ausnahme`) — manuelles Zuweisen bleibt davon
                 // unberührt, nur die Automatik überspringt es.
                 if tablet.auto_assign_excluded(m.id) {
+                    return false;
+                }
+                // Wunschfeld (Spec `tl-wunschfeld`), zwei Richtungen:
+                //
+                // 1. Dieses Spiel will ein bestimmtes Feld ⇒ es bekommt kein
+                //    anderes. Es wartet, statt auf das nächstbeste zu gehen.
+                if tablet.wish_court(m.id).is_some_and(|w| w != court.id) {
+                    return false;
+                }
+                // 2. Dieses Feld ist für ein anderes Spiel reserviert ⇒ es
+                //    bleibt frei. Ohne diese Richtung hielte der Wunsch das
+                //    Feld nicht, und das Feature liefe ins Leere.
+                if reserviert.get(&court.id).is_some_and(|&wer| wer != m.id) {
                     return false;
                 }
                 // Verfügbarkeit: kein Spieler darf gerade spielen oder noch in
@@ -2018,6 +2100,7 @@ impl SyncEngine {
         // reconcile_on_court aus demselben Snapshot, damit beide Uhren
         // dieselbe Zuweisung sehen.
         self.reconcile_match_times(tablet, &snapshot, now_ms());
+        self.reconcile_wish_courts(tablet, &snapshot);
         // Warnung „Spiel scheint fertig, aber kein Ergebnis" (Spec
         // `tl-warnung-fertiges-spiel`): einmal je Poll gegen den Live-Stand
         // prüfen. Der Minutentakt der Warnung verträgt das mühelos.
@@ -3521,6 +3604,137 @@ mod tests {
         // Nur das Feld in Halle 2 (location_id=2) bekommt das Match.
         assert_eq!(courts.len(), 1);
         assert_eq!(courts[0].court_id, 2);
+    }
+
+    // ── Wunschfeld (Spec `tl-wunschfeld`) ────────────────────────────
+
+    /// Eine Halle, drei Felder, zwei spielbereite Spiele — mit EIGENEN
+    /// Spielern je Spiel. `ready_match` gibt allen dieselben („A"/„B"), und
+    /// dann verhindert der Doppelbelegungs-Schutz die zweite Vergabe: Der
+    /// Test misst dann nicht, was er messen soll.
+    fn eine_halle_drei_felder() -> BtpSnapshot {
+        snap_with(
+            vec![court(1, None), court(2, None), court(3, None)],
+            vec![
+                ready_named(7, None, "Müller", "Weber"),
+                ready_named(8, None, "Fischer", "Schulz"),
+            ],
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn ein_wunschspiel_bekommt_genau_sein_feld() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = eine_halle_drei_felder();
+        tablet.set_snapshot(snap.clone());
+        // Spiel 7 soll auf Feld 3 — nicht auf Feld 1, das zuerst dran wäre.
+        tablet.set_wish_court(7, Some(3));
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        let feld_von = |mid: i64| {
+            courts
+                .iter()
+                .find(|c| c.match_id == Some(mid))
+                .map(|c| c.court_id)
+        };
+        assert_eq!(feld_von(7), Some(3), "das Wunschspiel geht auf sein Feld");
+        assert_eq!(
+            feld_von(8),
+            Some(1),
+            "und das andere Spiel läuft normal weiter — der Wunsch blockiert \
+             die Schlange nicht"
+        );
+    }
+
+    #[test]
+    fn das_wunschfeld_bleibt_fuer_sein_spiel_frei() {
+        // **Der Kern des Features.** Ohne die Reservierung wäre es
+        // wirkungslos: Ein anderes Spiel nähme das Feld, und das Endspiel
+        // stünde vor einem belegten Hauptfeld.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Nur EIN Feld — und Spiel 8 will es.
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, None, "Müller", "Weber"),
+                ready_named(8, None, "Fischer", "Schulz"),
+            ],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        tablet.set_wish_court(8, Some(1));
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(
+            courts[0].match_id,
+            Some(8),
+            "das reservierte Feld geht an sein Wunschspiel, nicht an das \
+             Spiel, das in der Reihenfolge vorn steht"
+        );
+    }
+
+    #[test]
+    fn ein_noch_nicht_spielbereites_wunschspiel_blockiert_sein_feld_nicht() {
+        // Nutzer-Entscheidung 24.08.2026: Reserviert wird erst, wenn das
+        // Wunschspiel spielbereit IST. Ein Endspiel, dessen Spieler noch im
+        // Halbfinale stehen (oder in der Pflichtpause danach), hält das
+        // Hauptfeld nicht stundenlang leer — das wäre der teure Teil einer
+        // Reservierung, und er ist vermeidbar.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Spiel 8 will Feld 1, seine Spieler kommen aber gerade aus einem
+        // beendeten Spiel und sind noch in der Pflichtpause.
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, None, "Fischer", "Schulz"),
+                ready_named(8, None, "Müller", "Weber"),
+                // Ende JETZT — mit 0 läge die Pflichtpause Jahrzehnte
+                // zurück und wäre längst abgelaufen.
+                finished_named(9, now_ms(), "Müller", "Weber"),
+            ],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        tablet.set_wish_court(8, Some(1));
+
+        // 30 Minuten Pflichtpause ⇒ Spiel 8 ist nicht spielbereit.
+        let (courts, _) = engine.auto_assign(&cfg_auto_pause(0.0, 30.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(
+            courts[0].match_id,
+            Some(7),
+            "solange das Wunschspiel nicht kann, darf das Feld an ein anderes"
+        );
+    }
+
+    #[test]
+    fn ein_wunschspiel_wartet_lieber_als_auf_ein_anderes_feld_zu_gehen() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Feld 3 ist belegt — genau das Feld, das Spiel 7 will.
+        let mut belegt = ready_named(9, None, "Fischer", "Schulz");
+        belegt.status = MatchStatus::OnCourt;
+        belegt.court = Some("3".into());
+        belegt.court_id = Some(3);
+        let snap = snap_with(
+            vec![court(1, None), court(3, None)],
+            vec![ready_named(7, None, "Müller", "Weber"), belegt],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        tablet.set_wish_court(7, Some(3));
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "Feld 1 ist frei, aber das Wunschspiel wartet auf Feld 3 — genau \
+             dafür ist das Wunschfeld da"
+        );
     }
 
     /// Zwei Hallen mit je einem Feld, ein spielbereites Match — die Lage,

@@ -227,6 +227,14 @@ fn tablet_exclusions_path(app: &AppHandle) -> std::path::PathBuf {
         .join("excluded-matches.json")
 }
 
+/// Ablage der Wunschfelder — turniergebunden wie die Ausnahmeliste.
+fn tablet_wish_courts_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("wish-courts.json")
+}
+
 fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
         .app_data_dir()
@@ -935,6 +943,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
     // kommt mit dem ersten Snapshot.
     tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
+    tablet.set_wish_courts_path(tablet_wish_courts_path(&app));
     tablet.set_queue_order_path(tablet_queue_order_path(&app));
     // Druck-Gedächtnis des Autodrucks (Spec
     // `schiedsrichterzettel-autodruck`): ebenso Pfad jetzt, Turnier

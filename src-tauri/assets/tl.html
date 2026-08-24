@@ -2526,6 +2526,14 @@ async function assignTo(court) {
   if (zielHalle && court.location && zielHalle !== court.location) {
     bedenken.push(`Das Spiel gehört nach ${zielHalle}.`);
   }
+  // Wunschfeld (Spec `tl-wunschfeld`): Von Hand darf man überall hinlegen —
+  // aber wer ein Wunschfeld gesetzt hat, hat sich etwas dabei gedacht, und
+  // ein Tipp daneben ist wahrscheinlicher als die Absicht.
+  const wunsch = picked.match.wish_court;
+  if (wunsch && wunsch !== court.court_id) {
+    const wf = (state.courts || []).find((c) => c.court_id === wunsch);
+    bedenken.push(`Für dieses Spiel ist ${wf ? wf.court : wunsch} als Wunschfeld gesetzt.`);
+  }
   if (bedenken.length) {
     const paarung = `${(picked.match.team1 || []).join(" / ")} vs. ${(picked.match.team2 || []).join(" / ")}`;
     const wohin = `Feld ${court.court}${court.location ? " in " + court.location : ""}`;
@@ -4391,6 +4399,17 @@ function queueRow(m, topMatchId) {
     status.push(`<span class="badge badge-info">gerufen</span>`);
     status.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}"></span>`);
   }
+  // Wunschfeld (Spec `tl-wunschfeld`): Ohne diese Marke sähe ein wartendes
+  // Wunschspiel in der Liste aus wie jedes andere spielbereite — und niemand
+  // wüsste, worauf es wartet.
+  if (m.wish_court) {
+    const feld = (state.courts || []).find((c) => c.court_id === m.wish_court);
+    const name = feld ? feld.court : m.wish_court;
+    const belegt = feld && feld.match_id;
+    status.push(`<span class="badge ${belegt ? "badge-warn" : "badge-info"}"
+      title="Die Automatik legt dieses Spiel nur auf ${esc(String(name))}${
+        belegt ? " — das Feld ist gerade belegt" : ""}">⌖ ${esc(String(name))}</span>`);
+  }
   if (m.blocked && m.blocked.reason === "pause") {
     // Mindestpause: Eieruhr + Rest-Countdown statt Badge und Satz — WER
     // pausiert, sagen die orange gefärbten Namen links daneben. Tickt
@@ -4492,6 +4511,30 @@ function queueRow(m, topMatchId) {
         <div class="kebab-row">
           <select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
             data-hall-for="${m.match_id}" aria-label="Spielort">${optionen.join("")}</select>
+        </div>
+      </div>`);
+  }
+  // Wunschfeld (Spec `tl-wunschfeld`): Die Automatik legt dieses Spiel dann
+  // nur auf dieses Feld und hält es dafür frei, sobald das Spiel spielbereit
+  // ist. Für Endspiele, die aufs Hauptfeld gehören.
+  //
+  // Nur wenn der Turnier-PC die Aktion kennt — sonst zeigte die Seite einen
+  // Wähler, dessen Wirkung im Nichts verpufft, und die Turnierleitung glaubte,
+  // das Endspiel sei gesteuert (dieselbe Versions-Schere wie beim Sperren).
+  if (state.can_set_wish_court) {
+    // Nur Felder, die zur Halle des Spiels passen — ein Wunsch in die falsche
+    // Halle lehnt der Turnier-PC ohnehin ab. Ohne Hallenzuordnung: alle.
+    const passend = (state.courts || []).filter(
+      (c) => !m.hall || !c.hall || c.hall === m.hall);
+    const optionen = ['<option value="" title="kein Wunschfeld">–</option>']
+      .concat(passend.map((c) =>
+        `<option value="${c.court_id}"${c.court_id === m.wish_court ? " selected" : ""}>`
+        + `${esc(c.court)}${c.locked ? " (gesperrt)" : ""}</option>`));
+    kebabGroups.push(`<div class="kebab-group">
+        <span class="kebab-label">Wunschfeld (die Automatik hält es frei)</span>
+        <div class="kebab-row">
+          <select class="hallwahl${m.wish_court ? " gesetzt" : ""}"
+            data-wish-for="${m.match_id}" aria-label="Wunschfeld">${optionen.join("")}</select>
         </div>
       </div>`);
   }
@@ -4646,6 +4689,27 @@ function wireQueue(box) {
         `hall-${matchId}-${hall}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "set_hall", matchId, hall },
         hall ? `Spielort: ${hall}.` : "Spielort zurückgenommen.",
+      );
+    });
+  });
+  scopeAll(box, "select[data-wish-for]").forEach((sel) => {
+    // Wie beim Spielort-Wähler: weder auswählen noch ziehen.
+    sel.addEventListener("click", (ev) => ev.stopPropagation());
+    sel.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    sel.addEventListener("change", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(sel.dataset.wishFor);
+      const courtId = sel.value ? Number(sel.value) : null;
+      const feld = (state.courts || []).find((c) => c.court_id === courtId);
+      send(
+        `wish-${matchId}-${courtId || 0}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        courtId
+          ? { action: "set_wish_court", matchId, courtId }
+          : { action: "set_wish_court", matchId },
+        courtId
+          ? `Wunschfeld: ${feld ? feld.court : courtId}. Die Automatik hält es frei, `
+            + `sobald das Spiel dran ist.`
+          : "Wunschfeld aufgehoben.",
       );
     });
   });
