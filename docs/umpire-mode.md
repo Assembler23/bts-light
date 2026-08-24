@@ -33,9 +33,9 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 | Punkt | „{Aufschläger}:{Rückschläger}" |
 | Gleichstand | „{n} beide" |
 | Aufschlagwechsel | „Aufschlagwechsel {Stand}" |
-| 11-Pause | „{Stand} – Pause." |
+| Punktepause | „{Stand} – Pause." — die **Überschrift** der Pause nennt die Schwelle der jeweiligen Zählweise („Pause bei 11 Punkten", bei 15ern „Pause bei 8 Punkten"). |
 | Satzende | „Satz. Den {n}. Satz gewinnt {Sieger} mit {Stand}. Bitte die Seiten wechseln." |
-| Satzbeginn | „{N}. Satz. Null beide – bitte spielen." |
+| Satzbeginn | „{N}. Satz. Null beide – bitte spielen." — steht es **Satz gegen Satz** (allgemein: beide eine Partie vor dem Sieg), heißt es „**Entscheidungssatz.**" statt der Nummer. |
 | Spielende | „Spiel. Das Spiel gewinnt {Sieger}, {x} Sätze zu {y}: {Satzstände}." |
 
 Badges: **Satzball** / **Matchball**.
@@ -47,7 +47,7 @@ Button **„Karte / Verwarnung"** → Spieler wählen → Farbe:
 |---|---|---|
 | 🟨 Gelb | Verwarnung (kein Punkt) | „{Name}, Verwarnung wegen unsportlichen Verhaltens. {Stand}" |
 | 🟥 Rot | **Gegner bekommt +1** (regulärer Punkt) | „{Name}, Fehler wegen unsportlichen Verhaltens. {Stand}" |
-| ⬛ Schwarz | Disqualifikation (Anzeige/Protokoll) | „{Name}, disqualifiziert." |
+| ⬛ Schwarz | Disqualifikation (Anzeige/Protokoll) | „{Name}, disqualifiziert wegen unsportlichen Verhaltens." |
 
 Vergebene Karten erscheinen als **Chips** in der Leiste; je `matchId`
 gespeichert, bei neuem Match zurückgesetzt.
