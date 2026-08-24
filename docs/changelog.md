@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.267
+
+- **Der Beendet-Tab im Liveticker zeigt wieder den ganzen Turniertag.** Am
+  Köpi-Cup 2026 hörte die Liste der beendeten Spiele mitten am zweiten
+  Turniertag auf: 500 Einträge, dann nichts mehr — wer sein Ergebnis suchte
+  und früh gespielt hatte, fand es nicht. Die Grenze war als Schutz für
+  extrem große Turniere gedacht und lange großzügig bemessen; ein Turniertag
+  mit über 500 Spielen hat sie eingeholt. Sie liegt jetzt bei 1000.
+
+  **Die Liste „in Vorbereitung" reichte ebenfalls nicht weit genug.** Sie
+  kappte bei 15 Spielen — und zwar des gesamten Turniers, nicht je Halle oder
+  je Klasse. Wessen Spiel weiter hinten lag, tauchte dort nie auf. Auch das
+  war einmal richtig, als badhub diese Liste noch als einzige Quelle des
+  Vorbereitungs-Tabs las; inzwischen holt sich badhub den Spielplan
+  zusätzlich über einen eigenen Weg, und die Liste ist nur noch der
+  Rückfallweg. Sie reicht jetzt bis 150 Spiele.
+
+  Beides betrifft ausschließlich, wie viel bts-light an badhub meldet. Am
+  Bild in der Halle und an den Tablets ändert sich nichts, und die gemeldete
+  Datenmenge bleibt mit rund 370 KiB weit unter dem, was badhub annimmt.
+
 ## v0.9.266
 
 - **Neu: Das Tablet merkt, wenn es veraltet ist.** Ein Turnier-Tablet läuft
