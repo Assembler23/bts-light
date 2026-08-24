@@ -29,10 +29,11 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 
 | Situation | Ansage |
 |---|---|
-| Eröffnung | „Meine Damen und Herren: zu meiner Rechten {rechts}, zu meiner Linken {links}. {Aufschläger} schlägt auf {Rückschläger}. Null beide – bitte spielen." |
+| Eröffnung | „Meine Damen und Herren: zu meiner Rechten {rechts}, **und** zu meiner Linken {links}. {Aufschläger} schlägt auf {Rückschläger}. Null beide – bitte spielen." Die Reihenfolge ist fest: **immer erst rechts**, unabhängig davon, wer aufschlägt. |
 | Punkt | „{Aufschläger}:{Rückschläger}" |
 | Gleichstand | „{n} beide" |
 | Aufschlagwechsel | „Aufschlagwechsel {Stand}" |
+| Nach jeder Pause | „{Stand}, bitte spielen." — die Freigabe gehört dazu; sie gilt bis zum nächsten Ballwechsel. |
 | Punktepause | „{Stand} – Pause." — die **Überschrift** der Pause nennt die Schwelle der jeweiligen Zählweise („Pause bei 11 Punkten", bei 15ern „Pause bei 8 Punkten"). |
 | Satzende | „Satz. Den {n}. Satz gewinnt {Sieger} mit {Stand}. Bitte die Seiten wechseln." |
 | Satzbeginn | „{N}. Satz. Null beide – bitte spielen." — steht es **Satz gegen Satz** (allgemein: beide eine Partie vor dem Sieg), heißt es „**Entscheidungssatz.**" statt der Nummer. |
@@ -47,7 +48,7 @@ Button **„Karte / Verwarnung"** → Spieler wählen → Farbe:
 |---|---|---|
 | 🟨 Gelb | Verwarnung (kein Punkt) | „{Name}, Verwarnung wegen unsportlichen Verhaltens. {Stand}" |
 | 🟥 Rot | **Gegner bekommt +1** (regulärer Punkt) | „{Name}, Fehler wegen unsportlichen Verhaltens. {Stand}" |
-| ⬛ Schwarz | Disqualifikation (Anzeige/Protokoll) | „{Name}, disqualifiziert wegen unsportlichen Verhaltens." |
+| ⬛ Schwarz | Disqualifikation (Anzeige/Protokoll) | „{Name}, disqualifiziert wegen **grober Unsportlichkeit**." — bewusst ein anderer Grund als bei Gelb und Rot. |
 
 Vergebene Karten erscheinen als **Chips** in der Leiste; je `matchId`
 gespeichert, bei neuem Match zurückgesetzt.

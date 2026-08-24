@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.264
+
+- **Behoben: Die Disqualifikation nannte den falschen Grund.** Bei Gelb und Rot
+  heißt es „wegen unsportlichen Verhaltens", bei Schwarz dagegen „wegen
+  **grober Unsportlichkeit**" — v0.9.263 hatte hier den Zusatz von Gelb/Rot
+  übernommen. Richtig war daran nur, dass überhaupt ein Grund fehlte.
+- **Die Eröffnung sagt jetzt „und zu meiner Linken".** Kleines Wort, aber es
+  gehört zur Ansage. Die Reihenfolge ist übrigens fest: immer erst rechts,
+  unabhängig davon, wer aufschlägt.
+- **Nach jeder Pause kommt die Freigabe.** Bisher sprang die Ansage nach der
+  Unterbrechung auf den reinen Punktestand zurück; jetzt heißt es „{Stand},
+  bitte spielen." — bis zum nächsten Ballwechsel.
+
 ## v0.9.263
 
 - **Behoben: Die Pause hieß auch bei 15er-Zählweise „Pause bei 11 Punkten".**
