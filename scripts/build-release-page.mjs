@@ -268,6 +268,16 @@ if (notesOut && notesVersion) {
   console.error(`notes.txt für ${umfang} geschrieben (${text.length} Zeichen, ${imBereich.length} Version(en)).`);
 }
 
+// ── Pi-Image (Court-Monitore) ──────────────────────────────────
+// Die SD-Karten fuer die Court-Monitore werden vor Ort beschrieben — der
+// Link stand bisher nur in docs/pi-dual-image.md im Repo, das ein Aufbau-Team
+// in der Halle nicht hat. Er gehoert deshalb auf die oeffentliche Seite.
+// Das Image liegt NICHT im Release-Workflow, sondern wird per rsync gepflegt
+// (siehe docs/pi-dual-image.md) — die Datei ist hier bewusst fest verdrahtet
+// und nicht aus --files abgeleitet.
+const PI_IMAGE_URL = "pi-image/bts-light-pi.img.xz";
+const PI_IMAGE_SHA_URL = "pi-image/bts-light-pi.img.xz.sha256";
+
 // ── Seite rendern ─────────────────────────────────────────────────────────
 const latest = sections[0];
 const generated = new Date().toISOString().slice(0, 10);
@@ -310,8 +320,10 @@ const html = `<!DOCTYPE html>
   header .wrap, main { max-width: 860px; margin: 0 auto; }
   header h1 { margin: 0 0 .3rem; font-size: 1.7rem; }
   header p { margin: 0; opacity: .85; }
-  header .stable { display: inline-block; margin-top: 1rem; background: #2f855a; color: #fff;
-                   padding: .55rem 1.1rem; border-radius: 8px; text-decoration: none; font-weight: 600; }
+  header .stable { display: inline-block; margin-top: 1rem; margin-right: .6rem; background: #2f855a;
+                   color: #fff; padding: .55rem 1.1rem; border-radius: 8px; text-decoration: none;
+                   font-weight: 600; }
+  header .stable.ghost { background: transparent; border: 1px solid rgba(255,255,255,.55); }
   main { padding: 1.4rem 1.2rem 3rem; }
   .version { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
              padding: 1rem 1.2rem; margin-bottom: 1rem; }
@@ -329,6 +341,12 @@ const html = `<!DOCTYPE html>
   li { margin-bottom: .45rem; }
   li strong { color: #0f2740; }
   code { background: #edf2f7; padding: 0 .3rem; border-radius: 4px; font-size: .9em; }
+  .pi { background: #fff; border: 1px solid #cbd5e0; border-left: 4px solid #0f2740;
+        border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1.4rem; }
+  .pi h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
+  .pi p { margin: .4rem 0; }
+  .pi ol { margin: .5rem 0 0; padding-left: 1.2rem; }
+  .pi .sha { font-size: .8rem; color: #718096; }
   footer { text-align: center; color: #718096; font-size: .8rem; padding: 0 1rem 2rem; }
 </style>
 </head>
@@ -338,9 +356,28 @@ const html = `<!DOCTYPE html>
     <h1>BTS Light</h1>
     <p>Plug-and-play-Brücke zwischen BTP (Badminton Tournament Planner) und dem badhub.de-Liveticker – mit Tablet-Spielzettel und Court-Monitoren.</p>
     <a class="stable" href="BTS.Light-setup.exe">Aktuelle Version herunterladen (v${latest.version})</a>
+    <a class="stable ghost" href="#pi-image">Pi-Image für Court-Monitore</a>
   </div>
 </header>
 <main>
+  <section class="pi" id="pi-image">
+    <div class="vhead">
+      <h2>Court-Monitore: Raspberry-Pi-Image für die SD-Karten</h2>
+      <a class="dl" href="${PI_IMAGE_URL}">Image herunterladen</a>
+    </div>
+    <p>Ein Image für beide Systeme — der Pi findet beim Start selbst, ob BTS oder
+       BTS Light im Hallen-WLAN läuft. Rund 1&nbsp;GB gepackt, wächst beim ersten Boot
+       auf die volle Kartengröße (jede Karte ab 4&nbsp;GB).</p>
+    <ol>
+      <li>Im <strong>Raspberry Pi Imager</strong> „Eigenes Image verwenden“ wählen und die
+          <code>.img.xz</code> angeben — nicht vorher entpacken.</li>
+      <li>Ziel-Karte wählen und schreiben.</li>
+      <li><strong>Keine</strong> Imager-Anpassungen (Hostname, WLAN, SSH) setzen — WLAN und
+          Kiosk-Start sind im Image enthalten und würden überschrieben.</li>
+      <li>Karte in den Pi, einschalten — der Kiosk startet von allein.</li>
+    </ol>
+    <p class="sha">Prüfsumme: <a href="${PI_IMAGE_SHA_URL}">bts-light-pi.img.xz.sha256</a></p>
+  </section>
 ${versionHtml}
 </main>
 <footer>Automatisch erzeugt aus dem Änderungsverlauf · Stand ${generated} · badhub.de</footer>
