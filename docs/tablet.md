@@ -100,6 +100,47 @@ Protokoll; die Seite legt ihn lokal ab und bereinigt die Adresszeile.
    meldet sich per LOGIN an und schreibt das Match mit `SENDUPDATE` zurück
    nach BTP (siehe [btp_protocol.md](btp_protocol.md)).
 
+## Das Tablet merkt, wenn es veraltet ist (seit v0.9.266)
+
+Ein Turnier-Tablet läuft tagelang mit derselben geladenen Seite. Ein Update —
+etwa ein Relay-Deploy mitten im Turnier — erreicht es nur über ein Neuladen,
+und das passiert von selbst nicht.
+
+Deshalb trägt jede ausgelieferte Seite einen **Fingerabdruck** (`seiten_marke`
+über den unersetzten `TABLET_HTML`, in `relay-proto`), und das ohnehin
+laufende Lebenszeichen (`pong`) nennt den, den der Server **jetzt** hat.
+Weichen beide ab, ist die geladene Seite alt.
+
+**Bewusst ein Fingerabdruck, keine Versionsnummer:** Die Seite steckt in zwei
+Binärdateien — Turnier-PC und Relay —, und die tragen verschiedene Versionen
+(`bts-light` vs. `bts-relay`). Ein Versionsvergleich meldete im Cloud-Betrieb
+dauernd „veraltet", obwohl die Seite dieselbe ist.
+
+**Was dann passiert:**
+
+- **Kein Spiel auf dem Feld** (und kein Ergebnis in der Übermittlung): Die
+  Seite lädt sich sofort selbst neu. Das trifft die meisten Geräte zwischen
+  zwei Spielen — niemand muss etwas tun.
+- **Ein Spiel läuft:** Nur ein Hinweis oben mit dem Knopf „Jetzt laden". Mitten
+  im Zählen den Bildschirm springen zu lassen wäre der falsche Moment, auch
+  wenn der Stand gesichert ist.
+
+Neu geladen wird immer mit der Marke **in der Adresse** (`?v=…`). Für den
+Browser ist das eine andere URL, für die er keinen gespeicherten Eintrag hat —
+ein schlichtes `location.reload()` kann dagegen aus dem Zwischenspeicher
+bedient werden.
+
+**Kein Fernbefehl.** Ein „alle Tablets neu laden"-Knopf in der Turnierleitung
+wurde erwogen und verworfen: Er erreicht nur Geräte, die die neue Fassung
+bereits kennen — und genau die laden ohnehin von selbst. Ein Gerät auf altem
+Stand kennt weder den Abgleich noch den Befehl. Er hätte einen Broadcast-Kanal
+in beiden Binärdateien gebraucht und keinen Fall gelöst, den der Abgleich
+offen lässt.
+
+**Keine versionierten Dateinamen nötig:** Alle Seiten sind selbstenthaltend —
+kein einziges `<script src>` oder `<link href>`. Es gibt nichts, was getrennt
+veralten könnte.
+
 ## Ergebnis-Übermittlung verlustsicher (Hebel B, ADR 0018)
 
 Der Ergebnis-Weg ist mehrfach abgesichert, damit ein WLAN-/Cloud-Aussetzer kein
