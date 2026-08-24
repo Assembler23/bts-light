@@ -1162,6 +1162,9 @@ const STATE = {
   // einmalig die Court-Seiten (egal welches Team führt). Wir merken uns,
   // ob das in diesem Match schon erfolgt ist.
   midGameSwitchDone: /** @type {boolean} */ (false),
+  // Direkt nach einer Unterbrechung: Die Ansage lautet „{Stand}, bitte
+  // spielen." statt nur „{Stand}". Wird beim nächsten Punkt gelöscht.
+  resumeAnsage: /** @type {boolean} */ (false),
 
   // Laufende Pause/Unterbrechung: kind 'eleven'|'game' (mit Countdown) oder
   // 'injury' (Behandlung, ohne Countdown). null = keine Pause.
@@ -1727,7 +1730,15 @@ function endBreak() {
       sendAlert();
     }
   }
+  // Nach der Unterbrechung ruft der Schiedsrichter den Stand auf und gibt
+  // das Spiel frei: „11 – 8, bitte spielen." (DBV-Ablauf). Ohne diese Marke
+  // sprang die Ansage zurück auf den reinen Punktestand, und die Freigabe
+  // fehlte ganz. Gilt für die Punkte- und die Satzpause; nach einer
+  // Behandlungspause fragt der Schiedsrichter stattdessen „Sind Sie
+  // spielbereit?" und gibt danach frei — auch dafür passt der Aufruf.
+  const warPause = STATE.pause && STATE.pause.kind;
   STATE.pause = null;
+  if (warPause) STATE.resumeAnsage = true;
   // Doppel/Mixed: Steht nach einem Satz die Aufschläger-/Annehmer-Neuwahl an
   // (serveSetupTeam beim Satz-Ende gesetzt), öffnet sie JETZT — nach der
   // Satzpause. So bleibt `setup` während der Pause auf 'playing' (undo/
@@ -2393,6 +2404,8 @@ function addPointOnSide(side) {
 
   // Aufschlagseite VOR der Mutation merken (für die „Aufschlagwechsel"-Ansage).
   const prevServing = STATE.servingSide;
+  // Die Freigabe-Ansage nach einer Pause gilt nur bis zum nächsten Ball.
+  STATE.resumeAnsage = false;
 
   // Snapshot vor Mutation für Undo
   STATE.history.push(snapshot());
@@ -3812,7 +3825,10 @@ function umpOpeningSpoken() {
   const left = umpTeamNames(umpSideTeam('left'));
   const server = umpServerName();
   const recv = umpReceiverName();
-  let s = `Meine Damen und Herren: zu meiner Rechten ${right}, zu meiner Linken ${left}. `;
+  // „…, UND zu meiner Linken …" — so steht es im DBV-Ablauf. Die Reihenfolge
+  // ist fest: immer erst rechts, dann links, unabhängig davon, wer aufschlägt
+  // (recherchiert und belegt 24.08.2026).
+  let s = `Meine Damen und Herren: zu meiner Rechten ${right}, und zu meiner Linken ${left}. `;
   if (server && recv) s += `${server} schlägt auf ${recv}. `;
   else if (server) s += `${server} schlägt auf. `;
   return s + 'Null beide – bitte spielen.';
@@ -3886,6 +3902,9 @@ function umpAnnouncement() {
     // eintritt, hängt an der Zählweise; die Bedingung dafür gibt es hier
     // schon für den Seitenwechsel.
     return { say: `${umpSatzAnsage(n)} Null beide – bitte spielen.`, badge: '' };
+  }
+  if (STATE.resumeAnsage) {
+    return { say: `${umpScoreSpoken()}, bitte spielen.`, badge: '' };
   }
   const ev = STATE.lastEvent;
   if (ev && ev.type === 'card') {
@@ -4233,10 +4252,12 @@ function applyCard(color) {
     ? `${name}, Verwarnung wegen unsportlichen Verhaltens. ${stand}`
     : color === 'red'
       ? `${name}, Fehler wegen unsportlichen Verhaltens. ${stand}`
-      // Wie bei Gelb und Rot gehört der Grund dazu — die Ansage lautet
-      // vollständig „disqualifiziert wegen unsportlichen Verhaltens".
-      // Die Kurzform war schlicht unvollständig (Turnier-Befund 24.08.2026).
-      : `${name}, disqualifiziert wegen unsportlichen Verhaltens.`;
+      // Der Grund ist bei Schwarz ein ANDERER als bei Gelb und Rot:
+      // „wegen grober Unsportlichkeit", nicht „wegen unsportlichen
+      // Verhaltens" (DBV-Ablauf, SHBV-Schiedsrichter-Infothek). Die
+      // Zwischenfassung von v0.9.263 hatte den Zusatz von Gelb/Rot
+      // übernommen — richtig war nur, dass überhaupt einer fehlte.
+      : `${name}, disqualifiziert wegen grober Unsportlichkeit.`;
   STATE.cards.push({ team: teamKey, index, name, color, ts: Date.now(), score: stand });
   saveCards();
   STATE.lastEvent = { type: 'card', color, say: txt };
