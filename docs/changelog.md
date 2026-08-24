@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.263
+
+- **Behoben: Die Pause hieß auch bei 15er-Zählweise „Pause bei 11 Punkten".**
+  Die Unterbrechung kommt bei 21er-Sätzen nach 11 Punkten, bei 15ern nach 8 —
+  die Überschrift nannte aber immer 11. Sie folgt jetzt der Zählweise des
+  Spiels. Der Zeitpunkt der Pause selbst war schon immer richtig.
+- **Behoben: Der Entscheidungssatz wurde als „Dritter Satz" angesagt.** Steht
+  es Satz gegen Satz, heißt er in der Ansage „Entscheidungssatz" — so sagt es
+  das Regelwerk. Bei welcher Nummer das eintritt, hängt von der Zählweise ab.
+- **Behoben: Die Disqualifikation wurde verkürzt angesagt.** Statt nur
+  „{Name}, disqualifiziert." heißt es jetzt vollständig „{Name},
+  disqualifiziert wegen unsportlichen Verhaltens." — wie bei Verwarnung und
+  Fehler, wo der Grund schon immer dabeistand.
+
 ## v0.9.262
 
 - **Neu: Wunschfeld für einzelne Spiele.** Im ⋯-Menü eines Spiels lässt sich

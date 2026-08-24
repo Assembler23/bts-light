@@ -1787,8 +1787,12 @@ function renderBreak() {
     const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     els.breakCountdown.textContent = rest < 0 ? `+${mmss}` : mmss;
     els.breakCountdown.classList.toggle('overrun', rest < 0);
+    // Die Schwelle steht NICHT fest bei 11: Sie kommt aus der Zählweise
+    // des Spiels (21er → 11, 15er → 8). Der feste Text war bei jedem
+    // 15er-Turnier schlicht falsch (Turnier-Befund 24.08.2026).
+    const schwelle = intervalThreshold();
     els.breakTitle.textContent = (STATE.pause.kind === 'eleven'
-      ? 'Pause bei 11 Punkten'
+      ? (schwelle ? `Pause bei ${schwelle} Punkten` : 'Punktepause')
       : 'Satzpause') + (rest < 0 ? ' — überzogen' : '');
   }
   // „Spiel abbrechen" nur in der Behandlungspause anbieten.
@@ -3790,6 +3794,19 @@ function umpScoreSpoken() {
   return sv === rv ? `${sv} beide` : `${sv}:${rv}`;
 }
 
+/** Wie der beginnende Satz angesagt wird: „Zweiter Satz." — oder
+ *  „Entscheidungssatz.", wenn beide Parteien einen Satz vor dem Sieg stehen.
+ *  Dieselbe Bedingung wie beim Seitenwechsel im Entscheidungssatz. */
+function umpSatzAnsage(n) {
+  if (!STATE.match) return `${umpCap(umpOrdinal(n))} Satz.`;
+  const need = requiredSetsToWin(STATE.match.bestOfSets);
+  const links = STATE.setsCompleted.filter(s => s.left > s.right).length;
+  const rechts = STATE.setsCompleted.filter(s => s.right > s.left).length;
+  const entscheidung = STATE.match.bestOfSets > 1
+    && links === need - 1 && rechts === need - 1;
+  return entscheidung ? 'Entscheidungssatz.' : `${umpCap(umpOrdinal(n))} Satz.`;
+}
+
 function umpOpeningSpoken() {
   const right = umpTeamNames(umpSideTeam('right'));
   const left = umpTeamNames(umpSideTeam('left'));
@@ -3863,7 +3880,12 @@ function umpAnnouncement() {
   }
   if (noPoint && STATE.setsCompleted.length > 0) {
     const n = STATE.setsCompleted.length + 1;
-    return { say: `${umpCap(umpOrdinal(n))} Satz. Null beide – bitte spielen.`, badge: '' };
+    // Der entscheidende Satz heißt in der Ansage „Entscheidungssatz", nicht
+    // „Dritter Satz" — so steht es im Regelwerk, und so sagt es jeder
+    // Schiedsrichter (Turnier-Befund 24.08.2026). Bei welcher Nummer das
+    // eintritt, hängt an der Zählweise; die Bedingung dafür gibt es hier
+    // schon für den Seitenwechsel.
+    return { say: `${umpSatzAnsage(n)} Null beide – bitte spielen.`, badge: '' };
   }
   const ev = STATE.lastEvent;
   if (ev && ev.type === 'card') {
@@ -4211,7 +4233,10 @@ function applyCard(color) {
     ? `${name}, Verwarnung wegen unsportlichen Verhaltens. ${stand}`
     : color === 'red'
       ? `${name}, Fehler wegen unsportlichen Verhaltens. ${stand}`
-      : `${name}, disqualifiziert.`;
+      // Wie bei Gelb und Rot gehört der Grund dazu — die Ansage lautet
+      // vollständig „disqualifiziert wegen unsportlichen Verhaltens".
+      // Die Kurzform war schlicht unvollständig (Turnier-Befund 24.08.2026).
+      : `${name}, disqualifiziert wegen unsportlichen Verhaltens.`;
   STATE.cards.push({ team: teamKey, index, name, color, ts: Date.now(), score: stand });
   saveCards();
   STATE.lastEvent = { type: 'card', color, say: txt };
