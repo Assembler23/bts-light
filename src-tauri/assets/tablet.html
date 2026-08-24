@@ -761,6 +761,23 @@
   ↔ SEITENWECHSEL — Spieler die Hälften tauschen
 </div>
 
+<!-- Neue Fassung verfügbar (Spec `tablet-version-abgleich`). Erscheint nur,
+     solange ein Spiel läuft — sonst lädt die Seite sich selbst neu. Bewusst
+     oben und nicht als Vollbild: Das Zählen darf nie verdeckt sein. -->
+<div id="update-hinweis" style="
+  position: fixed; left: 50%; top: .5rem; transform: translateX(-50%);
+  background: #0ea5e9; color: #04263a; padding: .6rem 1rem;
+  border-radius: .8rem; font-size: .95rem; font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0,0,0,.45); z-index: 19;
+  display: none; align-items: center; gap: .75rem;
+">
+  <span>Neue Fassung verfügbar</span>
+  <button type="button" id="update-jetzt" style="
+    background:#04263a; color:#e0f2fe; border:0; border-radius:.5rem;
+    padding:.4rem .9rem; font-weight:800; font-size:.95rem; cursor:pointer
+  ">Jetzt laden</button>
+</div>
+
 <!-- Diagnose-Modal (5× Tap auf den Connection-Dot öffnet das) -->
 <div id="diag-modal" style="
   position: fixed; inset: 0; background: rgba(2,6,23,.94); z-index: 30;
@@ -1029,6 +1046,38 @@ const LOGO_BASE = BASE_PATH === ''
 // ─────────────────────────── Diagnose-Log ──────────────────────────────
 // Ring-Buffer der letzten 300 wichtigen Events: WS-Open/Close, match_assigned,
 // match_cleared, score-Update-Versuche, Submit-Versuche, Render-Fehler.
+// ── Version der geladenen Seite (Spec `tablet-version-abgleich`) ────────
+//
+// Beim Ausliefern eingebettet: der Fingerabdruck der Seite, die dieser Server
+// hat. Im Lebenszeichen (`pong`) nennt er ihn erneut — weichen beide ab, läuft
+// hier eine veraltete Fassung.
+//
+// **Warum das nötig ist:** Ein Turnier-Tablet läuft tagelang. Ein Update
+// erreicht es nur, wenn die Seite neu geladen wird — und der Browser holt sie
+// nicht von selbst. Am Feldtest half weder ein Schließen des Tabs noch ein
+// Neustart des Geräts.
+const SEITEN_MARKE = '__SEITEN_MARKE__';
+let neueFassungMarke = '';
+
+/** Lädt die Seite neu und umgeht dabei einen etwaigen Zwischenspeicher.
+ *
+ *  Die Marke wandert in die URL: Für den Browser ist das eine ANDERE Adresse,
+ *  für die er keinen gespeicherten Eintrag hat. Ein schlichtes
+ *  `location.reload()` kann dagegen aus dem Speicher bedient werden — genau
+ *  daran scheiterte das Neuladen am Turnier.
+ */
+function neuLaden(marke) {
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('v', marke || String(Date.now()));
+    tlog('info', 'reload_neue_fassung', { marke });
+    uploadTabletLog();
+    location.replace(url.toString());
+  } catch {
+    location.reload();
+  }
+}
+
 // Lebt in localStorage → überlebt Browser-Crash + ist später als .txt
 // herunterladbar (5× Tap auf den Connection-Dot oben rechts öffnet das
 // Diagnose-Modal).
@@ -1250,6 +1299,8 @@ const els = {
   matchClock: document.getElementById('match-clock'),
   injuryBtn: document.getElementById('injury-btn'),
   megaphoneBtn: document.getElementById('megaphone-btn'),
+  updateHinweis: document.getElementById('update-hinweis'),
+  updateJetzt: document.getElementById('update-jetzt'),
   megaphoneModal: document.getElementById('megaphone-modal'),
   megaphoneTitle: document.getElementById('megaphone-title'),
   megaphoneSubtitle: document.getElementById('megaphone-subtitle'),
@@ -1346,7 +1397,25 @@ function connect() {
     lastServerContact = Date.now();
     let msg;
     try { msg = JSON.parse(ev.data); } catch { tlog('warn', 'ws_msg_invalid', String(ev.data).slice(0, 200)); return; }
-    if (msg.type === 'pong') { return; } // reines Lebenszeichen
+    if (msg.type === 'pong') {
+      // Das Lebenszeichen trägt den Fingerabdruck der Seite, die der Server
+      // JETZT ausliefert. Weicht er ab, ist diese hier veraltet.
+      if (msg.marke && SEITEN_MARKE && msg.marke !== SEITEN_MARKE
+          && msg.marke !== neueFassungMarke) {
+        neueFassungMarke = msg.marke;
+        tlog('warn', 'neue_fassung_erkannt', { hier: SEITEN_MARKE, dort: msg.marke });
+        // Steht kein Spiel auf dem Feld, sofort holen — das trifft die meisten
+        // Geräte zwischen zwei Spielen, und niemand muss etwas tun. Läuft ein
+        // Spiel, wird nur der Hinweis gezeigt: Ein Neuladen mitten im Zählen
+        // wäre störend, auch wenn der Stand gesichert ist.
+        if (!STATE.match && !STATE.pendingResult) {
+          neuLaden(msg.marke);
+          return;
+        }
+        render();
+      }
+      return;
+    }
     if (msg.type === 'match_assigned') {
       const incomingFinalized = !!(msg.match && msg.match.finalized);
       tlog('info', 'match_assigned', { matchId: msg.match?.matchId, finalized: incomingFinalized });
@@ -1805,6 +1874,11 @@ function renderBreak() {
     els.breakTitle.textContent = (STATE.pause.kind === 'eleven'
       ? (schwelle ? `Pause bei ${schwelle} Punkten` : 'Punktepause')
       : 'Satzpause') + (rest < 0 ? ' — überzogen' : '');
+  }
+  // Neue Fassung verfügbar? Nur zeigen, solange ein Spiel läuft — ohne Spiel
+  // hat die Seite sich längst selbst neu geladen.
+  if (els.updateHinweis) {
+    els.updateHinweis.style.display = neueFassungMarke ? 'flex' : 'none';
   }
   // „Spiel abbrechen" nur in der Behandlungspause anbieten.
   els.breakAbort.style.display = STATE.pause.kind === 'injury' ? '' : 'none';
@@ -4400,6 +4474,9 @@ els.finishCancel.addEventListener('click', closeFinishModal);
 els.submitBtn.addEventListener('click', submit);
 els.reopenBtn.addEventListener('click', reopen);
 els.breakSkip.addEventListener('click', endBreak);
+if (els.updateJetzt) {
+  els.updateJetzt.addEventListener('click', () => neuLaden(neueFassungMarke));
+}
 // Korrektur aus der Pause: letzten Punkt zurücknehmen + Pause abbrechen.
 // undo() stellt den Snapshot vor dem auslösenden Punkt wieder her und
 // pusht den Stand an Server/TV (sendScoreUpdate steckt in undo()).
