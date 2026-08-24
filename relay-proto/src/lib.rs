@@ -1289,6 +1289,25 @@ pub enum ServerMsg {
         #[serde(default)]
         owner_device: String,
     },
+    /// Aufforderung an das Tablet, seine Seite **sofort** neu zu laden
+    /// (Spec `tablet-version-abgleich`). Kommt aus der Turnierleitung, wenn
+    /// nach einem Update alle Geräte auf denselben Stand sollen, ohne dass
+    /// jemand durch die Halle läuft.
+    ///
+    /// Anders als der stille Abgleich über [`Self::Pong`] fragt dieser Weg
+    /// **nicht**, ob gerade ein Spiel läuft: Es ist ein ausdrücklicher
+    /// Befehl. Der Spielstand überlebt das Neuladen (localStorage + Server),
+    /// verloren geht nur der Augenblick.
+    ///
+    /// `marke` füllt **der jeweilige Server** mit seiner eigenen Seite —
+    /// im LAN der Turnier-PC, in der Cloud der Relay. Beide betten
+    /// verschiedene Stände von `tablet.html` ein; die fremde Marke wäre
+    /// die falsche.
+    #[serde(rename = "reload")]
+    Reload {
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        marke: String,
+    },
     /// Antwort auf [`TabletMsg::Ping`] – bestätigt dem Tablet die lebende
     /// Verbindung.
     #[serde(rename = "pong")]
@@ -1815,6 +1834,18 @@ pub enum TlAction {
     /// eigene, destruktive Aktion und nie Nebeneffekt eines Set. Hand-,
     /// Regel- und Aufruf-Hallen bleiben unberührt.
     ClearAutoHalls,
+    /// Alle Zähltablets ihre Seite neu laden lassen (Spec
+    /// `tablet-version-abgleich`).
+    ///
+    /// Der stille Abgleich holt ein Tablet zwischen zwei Spielen von selbst
+    /// auf den neuen Stand. Dieser Befehl ist für den Fall, dass die
+    /// Turnierleitung **jetzt** alle gleichziehen lassen will — er wirkt
+    /// deshalb auch auf Tablets mit laufendem Spiel.
+    ///
+    /// Erreicht nur Geräte, deren geladene Seite den Befehl schon kennt.
+    /// Ein Gerät auf einem älteren Stand verwirft ihn still — dort hilft
+    /// nur der Abgleich (oder eine Hand am Bildschirm).
+    ReloadTablets,
     /// Wunschfeld eines Spiels setzen oder aufheben (Spec `tl-wunschfeld`).
     ///
     /// Die automatische Vergabe legt dieses Spiel dann **nur** auf dieses
@@ -2225,6 +2256,14 @@ pub enum HostFrame {
         #[serde(default)]
         hall: String,
     },
+    /// „Alle Tablets dieses Namespace laden ihre Seite neu" (Spec
+    /// `tablet-version-abgleich`). Der Relay setzt das in ein
+    /// [`ServerMsg::Reload`] an **jede** seiner Tablet-Verbindungen um.
+    ///
+    /// Ohne Nutzlast: Die Marke setzt der Relay aus **seiner** eingebetteten
+    /// Seite. Der Host kennt seine eigene, und die ist im Cloud-Betrieb nicht
+    /// die, die das Tablet geladen hat.
+    ReloadTablets,
     /// Satzstand-Spiegel des Hosts (autoritativ). Im LAN(+Cloud)-Betrieb
     /// zählen die Tablets am Relay vorbei direkt gegen den Host — ohne diesen
     /// Spiegel bleiben Cloud-Monitor und Cloud-Übersicht auf 0:0 stehen
@@ -4005,6 +4044,7 @@ mod tests {
                 court_id: 5,
                 locked: true,
             },
+            TlAction::ReloadTablets,
             TlAction::SetWishCourt {
                 match_id: 4711,
                 court_id: Some(3),
@@ -4166,6 +4206,38 @@ mod tests {
             json,
             r#"{"action":"set_wish_court","matchId":4711,"courtId":3}"#
         );
+    }
+
+    /// Die Seiten vergleichen **wörtliche** Zeichenketten: `tablet.html`
+    /// prüft `msg.type === 'reload'`, `tl.html` schickt
+    /// `action: "reload_tablets"`. Ein Serde-Roundtrip allein merkt eine
+    /// umbenannte Variante nicht — er ist mit sich selbst einig, während das
+    /// Tablet die Nachricht still verwirft. Deshalb hier auf den Text.
+    #[test]
+    fn die_namen_des_fernbefehls_stehen_fest() {
+        let json = serde_json::to_string(&ServerMsg::Reload {
+            marke: "abc123".into(),
+        })
+        .unwrap();
+        assert!(json.contains(r#""type":"reload""#), "war {json}");
+        assert!(json.contains(r#""marke":"abc123""#), "war {json}");
+
+        // Leere Marke fällt raus (`skip_serializing_if`) — die Seite setzt
+        // dann selbst einen Zeitstempel in die Adresse.
+        let leer = serde_json::to_string(&ServerMsg::Reload {
+            marke: String::new(),
+        })
+        .unwrap();
+        assert_eq!(leer, r#"{"type":"reload"}"#);
+
+        let aktion = serde_json::to_string(&TlAction::ReloadTablets).unwrap();
+        assert_eq!(aktion, r#"{"action":"reload_tablets"}"#);
+
+        // Das Host-Frame trägt bewusst keine Nutzlast: Die Marke setzt der
+        // Relay aus SEINER eingebetteten Seite.
+        let frame = serde_json::to_string(&HostFrame::ReloadTablets).unwrap();
+        let zurueck: HostFrame = serde_json::from_str(&frame).unwrap();
+        assert_eq!(zurueck, HostFrame::ReloadTablets);
     }
 
     #[test]

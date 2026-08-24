@@ -35,7 +35,7 @@ use crate::badhub::push;
 use crate::btp::model::{BtpMatch, MatchStatus};
 use crate::btp::{client, proto};
 use crate::config::{AppConfig, CourtMonitorConfig};
-use crate::tablet::assets::{self, TABLET_HTML};
+use crate::tablet::assets::{self, seiten_marke, TABLET_HTML};
 use crate::tablet::monitor;
 use crate::tablet::perf;
 use crate::tablet::state::{reconnect_decision, ReconnectDecision, TabletState};
@@ -765,7 +765,7 @@ async fn court_page(
         // Fingerabdruck der Seite, wie sie in dieser Binärdatei steckt —
         // bewusst über das UNERSETZTE `TABLET_HTML`, sonst wäre er je Feld
         // verschieden und der Abgleich sinnlos (Spec `tablet-version-abgleich`).
-        .replace("__SEITEN_MARKE__", &relay_proto::seiten_marke(TABLET_HTML));
+        .replace("__SEITEN_MARKE__", seiten_marke());
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
@@ -3419,6 +3419,11 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     let mut my_device = String::new();
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Fernbefehl-Wächter (Spec `tablet-version-abgleich`). Beim Verbinden
+    // gesetzt: Diese Seite ist gerade frisch geladen, also auf dem Stand, den
+    // der Server ausliefert — ein vorher gegebener Befehl gilt für sie nicht
+    // mehr. Je WebSocket, denn „verbunden" heißt hier „Seite frisch geladen".
+    let mut reload_wacht = crate::tablet::state::ReloadWacht::beim_verbinden(&ctx.tablet);
     // Zeitpunkt der letzten empfangenen Nachricht (jede Art, inkl. App-Ping
     // und Protokoll-Pong). Bricht der Router weg, liefert der Browser oft
     // KEIN Close – die TCP-Verbindung bleibt serverseitig minutenlang als
@@ -3608,7 +3613,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     // (Spec tablet-version-abgleich) — daran erkennt
                                     // die Seite, dass sie veraltet ist.
                                     &ServerMsg::Pong {
-                                        marke: relay_proto::seiten_marke(TABLET_HTML),
+                                        marke: seiten_marke().to_string(),
                                     },
                                 )
                                 .await;
@@ -3684,6 +3689,20 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 // schlägt das Senden fehl, ist die Verbindung tot → Schluss.
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
                     break;
+                }
+                // Fernbefehl aus der Turnierleitung? Bewusst **vor** der
+                // Zuweisung und ohne Rücksicht auf ein laufendes Spiel: Es ist
+                // ein ausdrücklicher Befehl, und der Stand überlebt das
+                // Neuladen (localStorage + Server).
+                if reload_wacht.faellig(&ctx.tablet) {
+                    tracing::info!("Feld {court:?}: Tablet lädt auf Befehl neu");
+                    send_msg(
+                        &mut socket,
+                        &ServerMsg::Reload {
+                            marke: seiten_marke().to_string(),
+                        },
+                    )
+                    .await;
                 }
                 if let (Some(c), Some(token)) = (court, my_token) {
                     if ctx.tablet.is_court_active(c, token) {

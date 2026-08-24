@@ -1017,6 +1017,15 @@ const DEVICE_ID = (() => {
     return id;
   } catch { return ''; } // ohne localStorage: wie altes Tablet (leer)
 })();
+// Lässt sich auf diesem Gerät überhaupt etwas sichern?
+//
+// Ohne `localStorage` (Kiosk mit gesperrtem Speicher, privater Modus) schlägt
+// `persistState()` still fehl UND `DEVICE_ID` bleibt leer — der Server
+// erkennt das Gerät nach einem Neuladen also nicht wieder und zeigt „Feld
+// belegt". Auf so einem Gerät überlebt ein laufendes Spiel das Neuladen
+// nicht; der Fernbefehl muss dort warten wie der stille Abgleich
+// (Review-Fund 24.08.2026).
+const SPEICHER_GEHT = DEVICE_ID !== '';
 // PIN fürs Einstellungs-Menü (Feldwechsel ohne QR). Vom Server getemplatet
 // (Live-Config, Default „0000"). Reiner Bedien-Schutz, KEINE Sicherheitsgrenze.
 // Defensiv: wird der Platzhalter mal nicht ersetzt (z. B. älterer Relay) oder
@@ -1442,6 +1451,25 @@ function connect() {
       // ihn (und damit TV + Liveticker) sofort auf den Tablet-Stand.
       sendScoreUpdate();
       persistState();
+    }
+    else if (msg.type === 'reload') {
+      // Fernbefehl aus der Turnierleitung. Anders als der stille Abgleich
+      // (oben im 'pong'-Zweig) fragt er NICHT, ob gerade ein Spiel läuft:
+      // Jemand hat ihn bewusst gegeben. Der Stand überlebt das Neuladen —
+      // er liegt in localStorage und beim Server.
+      tlog('info', 'reload_befehl');
+      // Einzige Ausnahme: Ohne nutzbaren Speicher überlebt weder der
+      // Spielstand noch die Geräte-Kennung das Neuladen. Dann gilt die
+      // Zusage „der Stand geht nicht verloren" nicht — also nur der Hinweis,
+      // und die Entscheidung fällt jemand am Gerät.
+      if ((STATE.match || STATE.pendingResult) && !SPEICHER_GEHT) {
+        tlog('warn', 'reload_befehl_vertagt', { grund: 'kein_speicher' });
+        neueFassungMarke = msg.marke || '';
+        render();
+        return;
+      }
+      neuLaden(msg.marke || '');
+      return;
     }
     else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearReidentify(); clearMatch(); }
     else if (msg.type === 'court_occupied') {

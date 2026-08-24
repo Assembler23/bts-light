@@ -603,6 +603,14 @@ mitgeändert worden:
   [ADR 0046](adr/0046-wunschfeld-reserviert-ab-spielbereitschaft.md).
   Reserviert wird ab Spielbereitschaft — ein Endspiel, dessen Spieler noch
   im Halbfinale stehen, hält das Hauptfeld nicht leer.
+- **Tablet merkt eine veraltete Fassung** — Spec umgesetzt (v0.9.266 stiller
+  Abgleich, v0.9.267 Fernbefehl „⟳ Tablets"):
+  [docs/features/tablet-version-abgleich.md](features/tablet-version-abgleich.md).
+  Kein ADR nötig. Wichtig für die Deutung des Feldtests: Der berichtete
+  „Hänger" bis zum Leeren der Browserdaten war **nicht** der HTTP-Cache
+  (`no-store` steht seit dem ersten Commit, die Seiten sind selbstenthaltend),
+  sondern das hängende `pendingResult` im `localStorage` — behoben mit
+  v0.9.254. Offen: Feldtest beider Wege.
 
 ## Wünsche vom 11.08.2026
 

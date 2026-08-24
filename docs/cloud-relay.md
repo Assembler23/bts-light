@@ -369,6 +369,38 @@ und `finished_warning_seconds` (Frist). Keine neue Aktion, keine Relay-Änderung
 Eine neue Seite an einem alten Host bekommt die Felder nicht und warnt
 schlicht nicht (`#[serde(default)]`).
 
+**Tablets neu laden** (Spec `tablet-version-abgleich`, seit v0.9.267): der
+einzige Weg in dieser Reihe, der den Relay **doch** anfassen muss — er ist
+der einzige, bei dem ein Frame vom Host an **alle** Tablets eines Namespace
+geht statt an eines.
+
+Drei Frames sind beteiligt: `TlAction::reload_tablets` (Gerät → Host, ohne
+Nutzlast), `HostFrame::ReloadTablets` (Host → Relay, ebenfalls ohne Nutzlast)
+und `ServerMsg::reload { marke }` (Server → Tablet). Der Relay setzt das
+Host-Frame in ein `reload` an **jede** seiner Tablet-Verbindungen um.
+
+**Die Marke setzt jeder Server aus seiner eigenen Seite** — deshalb reist sie
+nicht im `HostFrame` mit. Der Relay bettet seinen eigenen Stand von
+`tablet.html` ein, und die Cloud-Tablets haben die Seite von ihm geladen, nicht
+vom Turnier-PC. Käme dessen Marke an, hielte sich jede Seite unmittelbar nach
+dem Neuladen wieder für veraltet.
+
+Vom Host zum Relay geht der Befehl über einen **Zähler**, nicht über einen
+Kanal: Der `ReloadWacht` in `relay_client.rs` meldet im Sweep, wenn
+`tablet_reload_gen` gestiegen ist.
+
+Er lebt dort **über alle Sitzungen hinweg** (angelegt in `run()`, als `&mut`
+durch `serve()` gereicht) — anders als am Tablet-Socket, wo er je Verbindung
+neu gesetzt wird. Der Unterschied ist wesentlich: Am Tablet heißt „verbunden"
+= „Seite frisch geladen", ein Befehl von davor gilt zu Recht nicht mehr. Hier
+heißt es nur „der **Host** hat wieder Leitung", während die Tablets dahinter
+gerade *nicht* frisch sind. So löst ein Netzwackler nichts aus, ein Befehl
+während eines Abrisses wird aber nachgeholt.
+
+Wie bei der Feldsperre trägt der `TlState` ein additives Merkmal
+(`can_reload_tablets`), damit eine neue Seite an einem älteren Host keinen
+toten Knopf zeigt.
+
 **Feldsperre** (Spec `tl-web-felder-sperren`, seit v0.9.258): eine neue
 `TlAction`-Variante `lock_court { courtId, locked }`. Der Relay braucht dafür
 **keine** Code-Änderung — er parst Aktionen typisiert und bekommt die Variante

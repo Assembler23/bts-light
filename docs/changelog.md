@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.267
+
+- **Neu: „⟳ Tablets" in der Turnierleitung.** Der Knopf oben rechts lässt nach
+  einer Rückfrage **alle Zähltablets** ihre Seite neu laden — auch die mit
+  laufendem Spiel, deren Bildschirm dabei kurz springt. Der Spielstand geht
+  nicht verloren.
+
+  Gebraucht wird er selten: Ein Tablet holt sich einen neuen Stand seit
+  v0.9.266 zwischen zwei Spielen von selbst. Der Knopf ist für den Fall, dass
+  die Turnierleitung nicht warten will — etwa nach einem Update in der Pause.
+
+  Zwei Dinge, die im Betrieb auffallen können: Ein Tablet, dessen geladene
+  Seite älter als dieses Update ist, kennt den Befehl noch nicht und verwirft
+  ihn still. Und ein Gerät, das nichts speichern darf (Kiosk mit gesperrtem
+  Browser-Speicher), springt mitten im Spiel bewusst nicht — dort überlebte
+  der Stand das Neuladen nicht; es zeigt stattdessen den Hinweis.
+
 ## v0.9.266
 
 - **Neu: Das Tablet merkt, wenn es veraltet ist.** Ein Turnier-Tablet läuft

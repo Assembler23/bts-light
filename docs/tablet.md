@@ -102,6 +102,9 @@ Protokoll; die Seite legt ihn lokal ab und bereinigt die Adresszeile.
 
 ## Das Tablet merkt, wenn es veraltet ist (seit v0.9.266)
 
+> Spec: [`docs/features/tablet-version-abgleich.md`](features/tablet-version-abgleich.md)
+
+
 Ein Turnier-Tablet läuft tagelang mit derselben geladenen Seite. Ein Update —
 etwa ein Relay-Deploy mitten im Turnier — erreicht es nur über ein Neuladen,
 und das passiert von selbst nicht.
@@ -130,12 +133,31 @@ Browser ist das eine andere URL, für die er keinen gespeicherten Eintrag hat �
 ein schlichtes `location.reload()` kann dagegen aus dem Zwischenspeicher
 bedient werden.
 
-**Kein Fernbefehl.** Ein „alle Tablets neu laden"-Knopf in der Turnierleitung
-wurde erwogen und verworfen: Er erreicht nur Geräte, die die neue Fassung
-bereits kennen — und genau die laden ohnehin von selbst. Ein Gerät auf altem
-Stand kennt weder den Abgleich noch den Befehl. Er hätte einen Broadcast-Kanal
-in beiden Binärdateien gebraucht und keinen Fall gelöst, den der Abgleich
-offen lässt.
+**Zusätzlich der Fernbefehl** (seit v0.9.267): In der Turnierleitung liegt
+oben rechts der Knopf **„⟳ Tablets"**. Nach einer Rückfrage laden alle
+Zähltablets neu — **auch die mit laufendem Spiel**. Das ist der Unterschied
+zum stillen Abgleich: Hier hat jemand bewusst entschieden, also springt der
+Bildschirm auch mitten im Zählen. Verloren geht dabei nichts; der Stand liegt
+im `localStorage` und beim Server und ist nach einem Augenblick wieder da.
+
+Nötig ist der Knopf selten — ein Tablet holt sich einen neuen Stand zwischen
+zwei Spielen von selbst. Er ist für den Fall, dass die Turnierleitung nicht
+warten will.
+
+**Was er nicht kann:** Er erreicht nur Geräte, deren geladene Seite ihn schon
+kennt. Ein Tablet auf einem älteren Stand verwirft ihn still — dort hilft nur
+der Abgleich oder eine Hand am Bildschirm.
+
+**Eine Ausnahme macht er selbst:** Auf einem Gerät ohne nutzbaren Speicher
+(Kiosk mit gesperrtem `localStorage`, privater Modus) überlebt der Spielstand
+das Neuladen **nicht** — und der Turnier-PC erkennt das Gerät danach nicht
+wieder („Feld belegt"). Läuft dort ein Spiel oder steht ein Ergebnis in der
+Übermittlung, springt die Seite deshalb nicht, sondern zeigt nur den Hinweis.
+Die Entscheidung fällt dann jemand am Gerät.
+
+Ein Befehl, der genau in einen Verbindungsabriss zum Relay fällt, wird beim
+Wiederverbinden **nachgeholt** — ein bloßer Netzwackler löst dagegen nichts
+aus.
 
 **Keine versionierten Dateinamen nötig:** Alle Seiten sind selbstenthaltend —
 kein einziges `<script src>` oder `<link href>`. Es gibt nichts, was getrennt

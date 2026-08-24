@@ -150,6 +150,14 @@ jobs:
       - name: Ergebnis-Retry-Regel (JS)
         run: node scripts/test-result-retry.mjs
 
+      # Merkt eine geladene Tablet-Seite, dass sie veraltet ist — und laedt
+      # sie im richtigen Moment neu? Der stille Abgleich darf mitten im Spiel
+      # NICHT springen, der Fernbefehl der Turnierleitung muss es. Und der
+      # Knopf darf an einem aelteren Turnier-PC gar nicht erscheinen, sonst
+      # gilt ein still verworfener Befehl als erledigt (Feldtest 22.08.2026).
+      - name: Tablet-Versionsabgleich + Fernbefehl (JS)
+        run: node scripts/test-tablet-version.mjs
+
       # Wann gilt der Push-Kanal einer Anzeige als gesund? Laut Spec das
       # höchste Risiko des Vorhabens: Eine falsche Regel hier friert alle
       # Anzeigen einer Halle ein.
