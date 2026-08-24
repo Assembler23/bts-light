@@ -17,7 +17,12 @@ im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
   (Idempotenz + persistente Retry-Queue; [features/ergebnis-puffer.md](features/ergebnis-puffer.md),
   ADR 0018) — **✅ v0.9.198 (#206)**. **C** Last-/Soak-Test des Relay-Brokers
   (In-Process, [features/last-soak-test.md](features/last-soak-test.md), ADR 0019)
-  — **✅ (#207/#208)**; LAN-Server-Last als Folge-Erweiterung. **D**
+  — **✅ (#207/#208)**; die LAN-Server-Last ist am **20.08.2026 gemessen** und
+  war die letzte offene Frage daraus: Bei **fünffacher Ziellast** (220 Geräte,
+  1232 Abrufe/s, 9 MB/s) braucht der Turnier-PC **75 % eines einzelnen Kerns**
+  und liefert p95 104 ms, ohne einen einzigen Fehler — der Server ist nicht der
+  Engpass, das Hallen-WLAN ist es. Zahlen und Vorbehalte:
+  [regression-suite.md](regression-suite.md). **D**
   Tote-Verbindungs-Erkennung schärfen (Host-Client Read-Idle + Tablet↔Relay-
   Empfangs-Stale; [features/tote-verbindungen.md](features/tote-verbindungen.md),
   ADR 0020) — **✅ umgesetzt v0.9.199**.
