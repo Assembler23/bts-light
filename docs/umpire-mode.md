@@ -35,9 +35,9 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 | Aufschlagwechsel | „Aufschlagwechsel {Stand}" |
 | Nach jeder Pause | „{Stand}, bitte spielen." — die Freigabe gehört dazu; sie gilt bis zum nächsten Ballwechsel. |
 | Punktepause | „{Stand} – Pause." — die **Überschrift** der Pause nennt die Schwelle der jeweiligen Zählweise („Pause bei 11 Punkten", bei 15ern „Pause bei 8 Punkten"). |
-| Satzende | „Satz. Den {n}. Satz gewinnt {Sieger} mit {Stand}. Bitte die Seiten wechseln." |
+| Satzende | „Satz. Der {n}. Satz wurde gewonnen von {Sieger} mit {Stand}. Bitte die Seiten wechseln." Steht es danach **gleich**, folgt der Zwischenstand: „Einen Satz beide." (bzw. „Zwei Sätze beide.") — bei Führung sagt der Ablaufplan nichts, wir auch nicht. |
 | Satzbeginn | „{N}. Satz. Null beide – bitte spielen." — steht es **Satz gegen Satz** (allgemein: beide eine Partie vor dem Sieg), heißt es „**Entscheidungssatz.**" statt der Nummer. |
-| Spielende | „Spiel. Das Spiel gewinnt {Sieger}, {x} Sätze zu {y}: {Satzstände}." |
+| Spielende | „Spiel. Das Spiel wurde gewonnen von {Sieger} mit {Satzstände}." — Stände aus Siegersicht, **„und" vor dem letzten**. Die Satzbilanz („zwei Sätze zu eins") gehört nicht in die Ansage; die Stände sagen sie ohnehin. |
 
 Badges: **Satzball** / **Matchball**.
 

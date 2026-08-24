@@ -3772,6 +3772,14 @@ function umpOrdinal(n) {
 function umpOrdinalAkk(n) {
   return ['nullten', 'ersten', 'zweiten', 'dritten', 'vierten', 'fünften'][n] || (n + '.');
 }
+/** Nach bestimmtem Artikel: „**der erste** Satz" (schwache Beugung). */
+function umpOrdinalNom(n) {
+  return ['nullte', 'erste', 'zweite', 'dritte', 'vierte', 'fünfte'][n] || (n + '.');
+}
+/** Zahlwort für die Satzbilanz: „**einen** Satz beide", „**zwei** Sätze beide". */
+function umpAnzahlWort(n) {
+  return ['null', 'einen', 'zwei', 'drei', 'vier'][n] || String(n);
+}
 
 // Aufschläger als Anzeigename (spieler-genau im Doppel via computeServing).
 function umpServerName() {
@@ -3840,7 +3848,20 @@ function umpSetEndSpoken() {
   const winSide = last.left > last.right ? 'left' : 'right';
   const winner = umpTeamNames(umpSideTeam(winSide));
   const hi = Math.max(last.left, last.right), lo = Math.min(last.left, last.right);
-  return `Satz. Den ${umpOrdinalAkk(STATE.setsCompleted.length)} Satz gewinnt ${winner} mit ${hi}:${lo}.`;
+  // Wortlaut nach dem DBV-Ablauf: „Der erste Satz wurde gewonnen von X mit
+  // 21:12." — nicht „Den ersten Satz gewinnt X".
+  const n = STATE.setsCompleted.length;
+  let s = `Satz. Der ${umpOrdinalNom(n)} Satz wurde gewonnen von ${winner} mit ${hi}:${lo}.`;
+  // Steht es nach diesem Satz gleich, gehört der Zwischenstand dazu: „Einen
+  // Satz beide." Ohne ihn fehlt der Ansage genau die Angabe, auf die es im
+  // Saal ankommt. (Bei Führung sagt der Ablaufplan nichts — dann auch wir
+  // nicht.)
+  const links = STATE.setsCompleted.filter(x => x.left > x.right).length;
+  const rechts = STATE.setsCompleted.filter(x => x.right > x.left).length;
+  if (links > 0 && links === rechts) {
+    s += ` ${umpCap(umpAnzahlWort(links))} ${links === 1 ? 'Satz' : 'Sätze'} beide.`;
+  }
+  return s;
 }
 
 function umpMatchEndSpoken() {
@@ -3854,12 +3875,16 @@ function umpMatchEndSpoken() {
   }
   const winSide = winsLeft >= winsRight ? 'left' : 'right';
   const winner = umpTeamNames(umpSideTeam(winSide));
-  const x = Math.max(winsLeft, winsRight), y = Math.min(winsLeft, winsRight);
   // Satzstände aus Sicht des Siegers (gewonnene Sätze zuerst je Satz).
   const sets = STATE.setsCompleted
-    .map(s => winSide === 'left' ? `${s.left}:${s.right}` : `${s.right}:${s.left}`)
-    .join(', ');
-  return `Spiel. Das Spiel gewinnt ${winner}, ${x} ${x === 1 ? 'Satz' : 'Sätze'} zu ${y}: ${sets}.`;
+    .map(s => winSide === 'left' ? `${s.left}:${s.right}` : `${s.right}:${s.left}`);
+  // Wortlaut nach dem DBV-Ablauf: „Das Spiel wurde gewonnen von X mit 21:17,
+  // 15:21 und 24:22." — die Satzbilanz („zwei Sätze zu eins") gehört nicht in
+  // die Ansage, die Satzstände sagen sie ohnehin.
+  const stand = sets.length > 1
+    ? `${sets.slice(0, -1).join(', ')} und ${sets[sets.length - 1]}`
+    : sets.join('');
+  return `Spiel. Das Spiel wurde gewonnen von ${winner} mit ${stand}.`;
 }
 
 // Satzball/Matchball-Badge (Näherung: Führender 1 Punkt vom Satzgewinn entfernt).
