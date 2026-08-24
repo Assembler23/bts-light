@@ -114,7 +114,7 @@ p("Platzhalter für die Seiten-Marke vorhanden", tablet.includes("'__SEITEN_MARK
   p("A7 ohne Marke: trotzdem eine frische Adresse", /[?&]v=\d{10,}/.test(ziel), true);
 }
 
-// ══ Teil 2: Fernbefehl (v0.9.267) ═══════════════════════════════════════
+// ══ Teil 2: Fernbefehl (v0.9.268) ═══════════════════════════════════════
 
 {
   const roh = abschnitt(

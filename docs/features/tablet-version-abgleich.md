@@ -1,6 +1,6 @@
 # Das Tablet erkennt eine veraltete Fassung — Spezifikation
 
-> Status: **umgesetzt 2026-08-24** (v0.9.266 Abgleich, v0.9.267 Fernbefehl).
+> Status: **umgesetzt 2026-08-24** (v0.9.266 Abgleich, v0.9.268 Fernbefehl).
 > Quelle: Feldtest Köpi-Cup 21./22.08.2026 — Tablets „hingen", bis der
 > Browser-Cache geleert wurde. Betroffene Crates: `src-tauri`, `relay`,
 > `relay-proto`.
@@ -100,7 +100,7 @@ obwohl die Seite dieselbe ist.
 eigene Marke (der Platzhalter ist Teil des Textes) und keine passte je zur
 anderen.
 
-### Teil 2 — Fernbefehl (v0.9.267)
+### Teil 2 — Fernbefehl (v0.9.268)
 
 Die Turnierleitung hat in der Kopfzeile den Knopf **„⟳ Tablets"**. Nach einer
 Rückfrage laden **alle** Zähltablets neu — auch die mit laufendem Spiel. Das

@@ -369,7 +369,7 @@ und `finished_warning_seconds` (Frist). Keine neue Aktion, keine Relay-Änderung
 Eine neue Seite an einem alten Host bekommt die Felder nicht und warnt
 schlicht nicht (`#[serde(default)]`).
 
-**Tablets neu laden** (Spec `tablet-version-abgleich`, seit v0.9.267): der
+**Tablets neu laden** (Spec `tablet-version-abgleich`, seit v0.9.268): der
 einzige Weg in dieser Reihe, der den Relay **doch** anfassen muss — er ist
 der einzige, bei dem ein Frame vom Host an **alle** Tablets eines Namespace
 geht statt an eines.

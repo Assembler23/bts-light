@@ -604,7 +604,7 @@ mitgeändert worden:
   Reserviert wird ab Spielbereitschaft — ein Endspiel, dessen Spieler noch
   im Halbfinale stehen, hält das Hauptfeld nicht leer.
 - **Tablet merkt eine veraltete Fassung** — Spec umgesetzt (v0.9.266 stiller
-  Abgleich, v0.9.267 Fernbefehl „⟳ Tablets"):
+  Abgleich, v0.9.268 Fernbefehl „⟳ Tablets"):
   [docs/features/tablet-version-abgleich.md](features/tablet-version-abgleich.md).
   Kein ADR nötig. Wichtig für die Deutung des Feldtests: Der berichtete
   „Hänger" bis zum Leeren der Browserdaten war **nicht** der HTTP-Cache

@@ -66,9 +66,26 @@ impl<'a> LivetickerContext<'a> {
 /// Höchstzahl der beendeten Matches im `tset`. Großzügig bemessen, damit an
 /// einem Turniertag praktisch alle Spiele erscheinen; deckelt nur extrem
 /// große Turniere, damit das Payload nicht unbegrenzt wächst.
-const FINISHED_LIMIT: usize = 500;
+///
+/// Von 500 auf 1000 angehoben (23.08.2026): der Köpi-Cup 2026 stieß am
+/// zweiten Turniertag an die 500 — der Beendet-Tab auf badhub.de/live schnitt
+/// ab, statt den ganzen Tag zu zeigen. Gemessen lag der Snapshot dort bei
+/// 187 KiB, also rund 380 Byte je Eintrag; 1000 Einträge bleiben mit ~370 KiB
+/// weit unter der 5-MiB-Grenze, die badhub im Ingest zieht
+/// (`lib/live_update_lib.php`, HTTP 413).
+const FINISHED_LIMIT: usize = 1000;
 /// Höchstzahl der „in Vorbereitung"-Einträge.
-const UPCOMING_LIMIT: usize = 15;
+///
+/// Von 15 auf 150 angehoben (23.08.2026). Die 15 stammten aus der Zeit, als
+/// diese Liste die EINZIGE Quelle des Vorbereitungs-Tabs war; seit badhub
+/// zusätzlich `/api/live_plan.php` liest (dieselbe Quelle wie der Monitor),
+/// ist sie nur noch der Rückfallweg — dann aber einer, der bei 15 Spielen des
+/// GESAMTEN Turniers aufhört. 150 deckt einen Turniertag ab, ohne dass das
+/// Payload nennenswert wächst (~380 Byte je Eintrag).
+///
+/// badhub kappt den Vorbereitungs-Tab seit dem 23.08.2026 selbst bei 150
+/// (`PREP_LIMIT` in `public/assets/js/live.js`), den Hallen-Monitor bei 20.
+const UPCOMING_LIMIT: usize = 150;
 
 /// Eine `tset`-Nachricht für `live_update.php`.
 #[derive(Debug, Serialize, PartialEq)]
@@ -1550,8 +1567,10 @@ mod tests {
     #[test]
     fn build_sched_kappt_nicht() {
         // Der Grund für den ganzen zweiten Kanal: `upcoming()` kappt bei
-        // UPCOMING_LIMIT = 15 Spielen des GESAMTEN Turniers. Wessen Spiel
-        // weiter hinten liegt, taucht dort nie auf. sched darf das nicht.
+        // UPCOMING_LIMIT Spielen des GESAMTEN Turniers. Wessen Spiel weiter
+        // hinten liegt, taucht dort nie auf. sched darf das nicht — und zwar
+        // unabhängig davon, wo die Grenze gerade steht (seit 23.08.2026 bei
+        // 150 statt 15).
         let matches: Vec<BtpMatch> = (1..=20)
             .map(|i| sample_match(i, MatchStatus::Scheduled, None))
             .collect();

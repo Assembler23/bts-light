@@ -502,7 +502,7 @@ der Zettel vollständig. Er erscheint als druckfertiges Dokument im Fenster,
 Schranke wie der Punktverlauf: ohne Aufzeichnung kein Zettel. Details:
 [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md).
 
-### Alle Tablets neu laden (⟳ Tablets, seit v0.9.267)
+### Alle Tablets neu laden (⟳ Tablets, seit v0.9.268)
 
 Oben rechts, neben **Profile**, liegt der Knopf **„⟳ Tablets"**. Nach einer
 Rückfrage laden **alle Zähltablets** ihre Seite neu.

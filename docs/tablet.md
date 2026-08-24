@@ -133,7 +133,7 @@ Browser ist das eine andere URL, für die er keinen gespeicherten Eintrag hat �
 ein schlichtes `location.reload()` kann dagegen aus dem Zwischenspeicher
 bedient werden.
 
-**Zusätzlich der Fernbefehl** (seit v0.9.267): In der Turnierleitung liegt
+**Zusätzlich der Fernbefehl** (seit v0.9.268): In der Turnierleitung liegt
 oben rechts der Knopf **„⟳ Tablets"**. Nach einer Rückfrage laden alle
 Zähltablets neu — **auch die mit laufendem Spiel**. Das ist der Unterschied
 zum stillen Abgleich: Hier hat jemand bewusst entschieden, also springt der
