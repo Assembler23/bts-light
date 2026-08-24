@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.265
+
+- **Satz- und Spielende werden jetzt im offiziellen Wortlaut angesagt.** Statt
+  „Den ersten Satz gewinnt X" heißt es „**Der erste Satz wurde gewonnen von**
+  X mit 21:12.", und am Ende „**Das Spiel wurde gewonnen von** X mit 21:17,
+  15:21 **und** 24:22." — die Satzbilanz („zwei Sätze zu eins") entfällt, die
+  Stände sagen sie ohnehin.
+- **Neu: der Zwischenstand nach einem Ausgleich.** Steht es nach dem Satz
+  gleich, folgt „**Einen Satz beide.**" (bei längeren Formaten „Zwei Sätze
+  beide."). Das fehlte bisher ganz — dabei ist es im Saal genau die Angabe,
+  auf die es ankommt. Bei Führung bleibt es wie gehabt beim Satzergebnis.
+
 ## v0.9.264
 
 - **Behoben: Die Disqualifikation nannte den falschen Grund.** Bei Gelb und Rot
