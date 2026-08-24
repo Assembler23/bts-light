@@ -72,8 +72,23 @@ const MAX_UPLOAD_TOTAL: usize = 12 * 1024 * 1024;
 pub async fn run(ctx: Arc<ServerCtx>, install_id: String) {
     let url = format!("{RELAY_HOST}/{install_id}/host-ws");
     let mut backoff = 1u64;
+    // Fernbefehl-Wächter über ALLE Sitzungen hinweg (Spec
+    // `tablet-version-abgleich`, Review-Fund 24.08.2026).
+    //
+    // Anders als beim Tablet-Socket, wo er je Verbindung neu gesetzt wird:
+    // Dort heißt „verbunden" = „Seite frisch geladen", ein Befehl davor gilt
+    // zu Recht nicht mehr. Hier heißt es nur „der HOST hat wieder Leitung" —
+    // die Tablets dahinter sind dabei gerade **nicht** frisch. Je Sitzung
+    // gesetzt ginge ein Befehl, der in einen Abriss fällt (Backoff bis 30 s),
+    // still verloren, während die Turnierleitung „Die Tablets laden neu"
+    // gemeldet bekommt.
+    //
+    // Über die Sitzungen hinweg gilt beides: Ein Netzwackler ohne Befehl löst
+    // nichts aus (der Stand ist unverändert), ein Befehl während des Abrisses
+    // wird beim Wiederverbinden nachgeholt.
+    let mut reload_wacht = crate::tablet::state::ReloadWacht::beim_verbinden(&ctx.tablet);
     loop {
-        if let Err(e) = serve(&ctx, &url, &install_id, &mut backoff).await {
+        if let Err(e) = serve(&ctx, &url, &install_id, &mut backoff, &mut reload_wacht).await {
             tracing::warn!("Relay-Verbindung beendet: {e}");
         }
         tracing::info!("Relay-Reconnect in {backoff}s");
@@ -89,6 +104,7 @@ async fn serve(
     url: &str,
     install_id: &str,
     backoff: &mut u64,
+    reload_wacht: &mut crate::tablet::state::ReloadWacht,
 ) -> Result<(), String> {
     let (stream, _) = tokio_tungstenite::connect_async(url)
         .await
@@ -182,6 +198,14 @@ async fn serve(
                 }
             }
             _ = ticker.tick() => {
+                // Fernbefehl an die Cloud-Tablets weiterreichen (Spec
+                // `tablet-version-abgleich`). Der Relay setzt ihn in ein
+                // `Reload` an jede seiner Tablet-Verbindungen um — mit
+                // **seiner** Seiten-Marke, denn die Cloud-Tablets haben die
+                // Seite von ihm, nicht von hier.
+                if reload_wacht.faellig(&ctx.tablet) {
+                    let _ = tx.send(text(&HostFrame::ReloadTablets));
+                }
                 push_all_courts(ctx, &tx, &mut last_match, &mut score_fp);
                 // Score-Spiegel-Sweep NACH den Zuweisungen (gleiche FIFO-Wire
                 // → der Relay kennt die Matches, bevor der Spiegel eintrifft).
@@ -508,6 +532,7 @@ async fn handle_frame(
                 req_id,
                 ok: resp.ok,
                 error: resp.error,
+                permanent: resp.permanent,
             }));
         }
         // TL-Web über die Cloud: **derselbe** Ausführungsweg wie im
@@ -1363,6 +1388,7 @@ mod tests {
             result: MatchResult::Normal,
             status: MatchStatus::OnCourt,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,

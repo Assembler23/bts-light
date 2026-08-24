@@ -586,6 +586,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
 
       {vorabZettel && (
         <ScoresheetOverlay
+          key={vorabZettel.matchIds.join(",")}
           matchIds={vorabZettel.matchIds}
           titel={vorabZettel.titel}
           vorab

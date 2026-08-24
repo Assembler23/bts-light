@@ -663,6 +663,25 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub locked_courts: Vec<i64>,
+    /// Nach wie vielen **Sekunden** ein Spiel, das nach seinen Sätzen fertig
+    /// aussieht, dessen Feld aber belegt bleibt, in der Turnierleitungs-Sicht
+    /// gemeldet wird (Spec `tl-warnung-fertiges-spiel`). `0` = Warnung aus.
+    ///
+    /// Konfigurierbar, weil das der **einzige Rollback-Weg** einer reinen
+    /// Anzeige ist: Meldet sie im laufenden Turnier zu oft falsch, muss man
+    /// sie abstellen können, ohne eine neue Version einzuspielen.
+    /// `#[serde(default = …)]` hält ältere Konfigurationsdateien lesbar.
+    #[serde(default = "default_fertig_warnung_s")]
+    pub finished_warning_seconds: u32,
+    /// Turnier, zu dem [`Self::locked_courts`] gehört (BTP-Turniername).
+    ///
+    /// BTP vergibt CourtIDs je Turnier neu — eine Sperre vom Vortag träfe
+    /// sonst am nächsten Turnier ein beliebiges anderes Feld (ADR 0044).
+    /// Wechselt der Turniername im Snapshot, werden die Sperren verworfen.
+    /// Leer = „Turnier unbekannt" (Configs von vor v0.9.258); dann greift
+    /// die erste Sperre und schreibt den Namen mit.
+    #[serde(default)]
+    pub locked_courts_tournament: String,
     /// PIN für das Einstellungs-Menü am Zähltablett (Feldwechsel ohne QR).
     /// Reiner Bedien-Schutz gegen versehentliche Änderungen durch Helfer –
     /// KEINE Sicherheitsgrenze (der echte Kiosk-Lock liegt im Kiosk-Browser).
@@ -700,6 +719,12 @@ pub struct AppConfig {
     /// Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub reconnect_legacy_rev: bool,
+}
+
+/// Standard-Frist der „Spiel scheint fertig"-Warnung: eine Minute, wie vom
+/// Turnierleiter angefragt (Spec tl-warnung-fertiges-spiel).
+fn default_fertig_warnung_s() -> u32 {
+    60
 }
 
 /// Standard-PIN fürs Tablet-Einstellungsmenü (überschreibbar in der Config).
@@ -1659,6 +1684,8 @@ mod tests {
                 hall: "Halle A".to_string(),
             }],
             locked_courts: vec![3, 7],
+            finished_warning_seconds: 60,
+            locked_courts_tournament: "Testturnier".to_string(),
             tablet_settings_pin: "1234".to_string(),
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),

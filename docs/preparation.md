@@ -85,9 +85,28 @@ nicht. Details: [schiedsrichterzettel.md](schiedsrichterzettel.md).
 - **Spieler-Verfügbarkeit:** Ein spielbereites Match wird übersprungen, wenn ein
   Spieler gerade OnCourt ist, in diesem Zyklus schon ein Feld bekam, oder noch in
   seiner **Pause** ist. Identität via `player_key` (Lizenznr., sonst Name).
-- **Pause:** `pause_ms` aus `config.auto_assign.pause_minutes` (>0 = Override) bzw.
-  `BtpSnapshot.rest_minutes` aus **BTP-Setting 1303**; je Spieler gegen das
-  zuletzt beendete Spiel (`finished_at`) geprüft.
+  Das gilt für die **Automatik**; die Turnierleitung darf die Pause von Hand
+  übergehen (`check_assign` prüft nur „spielt gerade") — im TL-Web nach einer
+  Rückfrage, siehe [`turnierleitung-web.md`](turnierleitung-web.md).
+- **Pause:** `assign::pflichtpause_ms` — `config.auto_assign.pause_minutes`
+  (>0 = Override) bzw. `BtpSnapshot.rest_minutes` aus **BTP-Setting 1303**;
+  je Spieler gegen das zuletzt beendete Spiel (`finished_at`) geprüft.
+
+  **Beim Spielende eingefroren** (seit v0.9.253): Die geltende Länge wandert
+  zusammen mit dem Ende-Stempel in `BtpMatch::pause_ms` und in den
+  persistenten Zeitspeicher (`MatchTimeEntry::pause_ms`). Eine später
+  geänderte Pausenzeit gilt deshalb nur für Spiele, die **danach** enden —
+  vorher bekam jede Änderung rückwirkend alle schon beendeten Spiele zu
+  fassen, und sämtliche Pausen sprangen auf einmal um (Feldtest 22.08.2026).
+  Umgekehrt heißt das: Wer die Pause verkürzt oder abschaltet, lässt die
+  schon laufenden Pausen regulär auslaufen.
+
+  **Der Ende-Stempel liegt auf der Platte** (`MatchTimeEntry::finished_seen_ms`),
+  nicht mehr im Arbeitsspeicher der Sync-Engine. Er überlebt damit
+  „Übertragung stoppen/starten" (was bei **jedem** Speichern der Einstellungen
+  passiert) und den App-Neustart. Vorher galten danach schlagartig alle
+  beendeten Spiele als soeben beendet, und jeder Spieler begann seine Pause
+  von vorn — auch wenn an der Wartezeit gar nichts geändert worden war.
 - **Aktive Halle:** `config.auto_assign.active_hall` (BTP-Location-Name). Gesetzt
   und Mehr-Hallen-Turnier → `active_loc` aufgelöst; es werden nur Felder dieser
   Halle bespielt und die Aufruf-Pflicht entfällt (`require_call = multi_hall &&

@@ -6,6 +6,21 @@ use include_dir::{include_dir, Dir};
 /// `__COURT_LABEL__` wird beim Ausliefern durch den Court-Namen ersetzt.
 pub const TABLET_HTML: &str = include_str!("../../assets/tablet.html");
 
+/// Fingerabdruck der ausgelieferten Tablet-Seite (Spec
+/// `tablet-version-abgleich`) — **einmal** berechnet.
+///
+/// Sonst würden bei jedem Lebenszeichen jedes Tablets die vollen ~210 KB
+/// `tablet.html` gehasht; bei zwanzig Geräten im Sekundentakt ist das
+/// messbare Arbeit für ein Ergebnis, das sich zur Laufzeit nie ändert
+/// (Review-Fund 24.08.2026).
+///
+/// Über das **unersetzte** `TABLET_HTML`: Sonst trüge jedes Feld eine eigene
+/// Marke (der Platzhalter ist Teil des Textes) und keine passte zur anderen.
+pub fn seiten_marke() -> &'static str {
+    static MARKE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    MARKE.get_or_init(|| relay_proto::seiten_marke(TABLET_HTML))
+}
+
 /// Die Turnierleitungs-Oberfläche – wird unter `/tl` ausgeliefert.
 ///
 /// Ohne Platzhalter: Die Seite holt ihren Zugang aus dem Adress-Fragment und

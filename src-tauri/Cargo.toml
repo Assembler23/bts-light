@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.249"
+version = "0.9.268"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -54,7 +54,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # ist eine Windows-Desktop-App, und `--workspace` soll auf Linux
 # (Relay-Deploy) weiter durchlaufen.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Printing",

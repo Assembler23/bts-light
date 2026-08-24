@@ -109,6 +109,78 @@ LAN+Cloud voraus.
   in Worten will: Der Mauszeiger (bzw. langes Tippen) auf dem Namen zeigt
   „spielt gerade" bzw. „pausiert noch bis …". Ein Spiel ohne
   Hallenzuordnung erkennst du schlicht am **fehlenden Hallen-Kürzel**.
+- **Wunschfeld** (seit v0.9.262): Im ⋯-Menü eines Spiels lässt sich ein
+  **Feld** wählen. Die Automatik legt dieses Spiel dann nur dorthin — und hält
+  das Feld frei, sobald das Spiel dran ist. Gedacht für Endspiele, die aufs
+  Hauptfeld gehören.
+
+  **Freigehalten wird erst ab Spielbereitschaft**, nicht ab dem Setzen: Solange
+  die Spieler noch im Halbfinale stehen oder in ihrer Pflichtpause sind, darf
+  ein anderes Spiel auf das Feld. So steht das Hauptfeld nicht stundenlang
+  leer.
+
+  In der Liste steht das gewählte Feld als Marke (⌖) — sie färbt sich, wenn das
+  Feld gerade belegt ist. Damit sieht man auch, **worauf** ein wartendes Spiel
+  wartet.
+
+  Von Hand darfst du das Spiel weiterhin überall hinlegen; es kommt nur eine
+  Rückfrage. Ein Wunschfeld auf ein **gesperrtes** Feld lehnt der Turnier-PC
+  ab — die Reservierung ersetzt die Sperre für diesen Zweck. Der Wunsch
+  verschwindet von selbst, sobald das Spiel auf dem Feld steht, und gilt nur
+  für das laufende Turnier.
+
+  **Eine Einschränkung:** Für Spiele mit Wunschfeld gibt es keine
+  Startzeit-Prognose. Die Vorhersage rechnet mit Hallen, nicht mit einzelnen
+  Feldern — sie wäre systematisch zu früh und würde auch die Zeiten der
+  anderen Spiele verschieben.
+- **Warnung „Ergebnis fehlt"** (seit v0.9.259): Ist ein Spiel nach seinen
+  Sätzen entschieden — die Endpunkte sind erreicht —, das Feld aber weiterhin
+  belegt, meldet die Oberfläche das nach **einer Minute**: als rote Marke an
+  der Feld-Kachel und als Zeile im Störungsband oben. Meist heißt das, dass
+  das Ergebnis nicht übermittelt wurde.
+
+  Die Zeile im Band nennt Feld und Halle und **ignoriert den Hallenfilter** —
+  sonst verschwiege sie genau den Fall, für den sie gedacht ist. Bei mehreren
+  Feldern steht der älteste Fall zuerst. Verliert das Gerät die Verbindung,
+  hat die Verbindungsmeldung Vorrang: Ohne Verbindung ist jede andere Aussage
+  wertlos.
+
+  **Wann sie bewusst schweigt:** in der Satzpause, während ein Satz läuft, bei
+  Aufgabe/Kampflos/Disqualifikation, auf freien Feldern — und vor allem dann,
+  wenn das Ergebnis bereits beim Turnier-PC liegt und nur auf BTP wartet.
+  Dorthin muss niemand laufen. Ist die Zählweise eines Spiels unbekannt, wird
+  ebenfalls nicht gewarnt.
+
+  **Abschalten:** In der `config.json` steht `finished_warning_seconds`
+  (Default 60). `0` schaltet die Warnung ganz ab — der Rückzugsweg, falls sie
+  im laufenden Turnier zu oft danebenliegt.
+- **Felder sperren und freigeben** (seit v0.9.258): Im ⋯-Menü einer
+  Feld-Kachel steht **„🔒 Feld sperren"**. Ein gesperrtes Feld bekommt von der
+  automatischen Vergabe kein Spiel mehr — für ein kaputtes Netz, ein
+  reserviertes Feld oder eine Halle, die gegen Abend verkleinert wird. Es ist
+  dieselbe Sperre wie am Turnier-PC, nicht eine zweite.
+
+  Läuft gerade ein Spiel darauf, heißt der Eintrag **„Feld nach diesem Spiel
+  sperren"** — genau so verhält es sich auch: Das laufende Spiel zählt
+  ungestört zu Ende, erst danach bleibt das Feld leer. Wer es sofort räumen
+  will, nimmt das Spiel zusätzlich von Hand herunter.
+
+  **„🔓 Feld freigeben"** fragt nach, bevor es wirkt. Das ist Absicht: Sperren
+  kann man gefahrlos zurücknehmen, aber ein versehentlich freigegebenes Feld
+  bekommt sofort wieder ein Spiel — und wer die Sperre nicht selbst gesetzt
+  hat, sieht ihr nicht an, ob dort etwas kaputt ist.
+
+  Zwei Dinge noch: Solange kein Turnier geladen ist, gibt es nichts zu sperren
+  (die Felder kommen ja aus BTP). Und die Sperren gelten für **dieses**
+  Turnier — am nächsten Tag mit einem anderen Turnier sind sie weg, weil BTP
+  die Feldnummern neu vergibt und eine alte Sperre sonst ein beliebiges
+  anderes Feld träfe.
+- **Ein pausierendes Spiel lässt sich trotzdem aufs Feld legen** (seit
+  v0.9.253): Die Mindestpause ist eine Empfehlung, keine Sperre — der
+  Turnier-PC hat sie noch nie abgelehnt. Die Zeile bleibt deshalb wählbar
+  und ziehbar; vor dem Schreiben kommt eine **Rückfrage**, die sagt, wer
+  noch bis wann pausiert. Wer gerade auf einem **anderen Feld spielt**,
+  bleibt dagegen unwählbar — das lehnt der Turnier-PC ab.
 - **Jeder Name ist ein Link** auf die Spielerseite von badhub
   (`badhub.de/spieler/<Nr>/live`), erkennbar an der gepunkteten
   Unterstreichung; er öffnet in einem neuen Tab. Spieler ohne
@@ -429,6 +501,34 @@ der Zettel vollständig. Er erscheint als druckfertiges Dokument im Fenster,
 „Drucken" schickt ihn an den Drucker des Geräts. Er steht unter derselben
 Schranke wie der Punktverlauf: ohne Aufzeichnung kein Zettel. Details:
 [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md).
+
+### Alle Tablets neu laden (⟳ Tablets, seit v0.9.268)
+
+Oben rechts, neben **Profile**, liegt der Knopf **„⟳ Tablets"**. Nach einer
+Rückfrage laden **alle Zähltablets** ihre Seite neu.
+
+Gebraucht wird er selten: Ein Tablet merkt selbst, wenn seine Seite nicht mehr
+die aktuelle ist, und holt sich den neuen Stand **zwischen zwei Spielen** von
+allein. Der Knopf ist für den Fall, dass nicht darauf gewartet werden soll —
+etwa nach einem Update in der Turnierpause.
+
+**Er trifft auch Tablets mit laufendem Spiel.** Deren Bildschirm springt kurz.
+Der Spielstand geht dabei nicht verloren — er liegt auf dem Gerät und beim
+Turnier-PC und ist nach einem Augenblick wieder da. Trotzdem: besser zwischen
+zwei Runden drücken als mitten im Ballwechsel.
+
+**Nicht jedes Gerät antwortet darauf.** Ein Tablet, dessen geladene Seite noch
+aus einer Zeit vor diesem Knopf stammt, kennt den Befehl nicht und verwirft
+ihn stillschweigend. Solche Geräte holt nur der stille Abgleich ab — oder eine
+Hand am Bildschirm. Erscheint der Knopf **gar nicht**, ist der Turnier-PC
+älter als das Feature (siehe „Grenzen").
+
+Und ein Gerät, das nichts speichern darf (Kiosk mit gesperrtem Browser-Speicher,
+privater Modus), springt mitten im Spiel bewusst **nicht** — dort überlebte der
+Stand das Neuladen nicht. Es zeigt stattdessen den Hinweis, und wer davorsteht,
+entscheidet.
+
+Details: [features/tablet-version-abgleich.md](features/tablet-version-abgleich.md).
 
 ### Aufteilung Felder/Spielliste ziehen
 

@@ -16,10 +16,10 @@ import { matchScoresheetHtml } from "../api";
  * ausstehenden Spiels (Spec `schiedsrichterzettel-autodruck`). Nur dann
  * liefert der Kern auch ohne Aufzeichnung ein Dokument.
  *
- * **Hinweis:** Die Feldübersicht (`pages/FieldOverviewPage.tsx`) hat noch
- * ihr eigenes, gleich aufgebautes Overlay aus E7. Wer sie das nächste Mal
- * anfasst, sollte sie hierher umstellen — der Zettel selbst ist ohnehin
- * nur an einer Stelle gebaut, doppelt ist nur die Hülle.
+ * Wurde zu einem Spiel **nichts gezählt**, bietet die Meldung einen zweiten
+ * Knopf an: „Leeres Blatt" holt denselben Vorabzettel nach. Bewusst als
+ * eigener Klick statt als stiller Rückfall — sonst sähe der Nachdruck eines
+ * per Papier erfassten Spiels aus wie ein gezählter Zettel.
  */
 export function ScoresheetOverlay({
   matchIds,
@@ -33,11 +33,20 @@ export function ScoresheetOverlay({
   onClose: () => void;
 }) {
   const [html, setHtml] = useState<string | null | "fehlt">(null);
+  /** Wird gerade das leere Blatt gezeigt? Startet auf `vorab` und kann über
+   *  den Knopf in der Meldung nachträglich eingeschaltet werden.
+   *
+   *  Zurückgesetzt wird er **nicht** hier, sondern durch Neuaufbau: Die
+   *  Aufrufer geben dem Bauteil die Spiele als `key`, ein Wechsel erzeugt
+   *  also eine frische Instanz. Ein eigener Rücksetz-Effekt liefe im selben
+   *  Durchlauf wie der Abruf unten und stieße erst einen Abruf in der alten
+   *  Betriebsart an. */
+  const [leer, setLeer] = useState(vorab);
 
   useEffect(() => {
     let alive = true;
     setHtml(null);
-    matchScoresheetHtml(matchIds, vorab)
+    matchScoresheetHtml(matchIds, leer)
       .then((doc) => {
         if (alive) setHtml(doc ?? "fehlt");
       })
@@ -49,7 +58,7 @@ export function ScoresheetOverlay({
     };
     // Die Kennungen als Zeichenkette: Ein neues Array mit gleichem Inhalt
     // soll den Abruf nicht wiederholen.
-  }, [matchIds.join(","), vorab]);
+  }, [matchIds.join(","), leer]);
 
   useEffect(() => {
     const zu = (e: KeyboardEvent) => {
@@ -63,22 +72,27 @@ export function ScoresheetOverlay({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="vorab-zettel-title"
+      aria-labelledby="zettel-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+      {/* Breit genug für ein A4-Blatt quer (297 mm ≈ 1123 px) samt Rahmen,
+          aber nie breiter als der Bildschirm. */}
+      <div
+        className="flex h-[96vh] w-[98vw] max-w-[1400px] flex-col overflow-hidden
+                   rounded-xl bg-white shadow-xl"
+      >
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <h2 id="vorab-zettel-title" className="font-semibold text-slate-800">
-            Schiedsrichterzettel{vorab ? " (leer)" : ""} — {titel}
+          <h2 id="zettel-title" className="font-semibold text-slate-800">
+            Schiedsrichterzettel{leer ? " (leer)" : ""} — {titel}
           </h2>
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
                 const rahmen = document.getElementById(
-                  "vorab-zettel-frame",
+                  "zettel-frame",
                 ) as HTMLIFrameElement | null;
                 rahmen?.contentWindow?.focus();
                 rahmen?.contentWindow?.print();
@@ -103,15 +117,26 @@ export function ScoresheetOverlay({
             <p className="p-4 text-sm text-slate-500">Zettel wird erzeugt …</p>
           )}
           {html === "fehlt" && (
-            <p className="p-4 text-sm text-slate-500">
-              {vorab
-                ? "Für dieses Spiel lässt sich kein Blatt erzeugen — steht es noch im aktuellen Turnierstand?"
-                : "Zu diesem Spiel liegt keine Aufzeichnung vor — ein Papier-Ergebnis bekommt bewusst keinen Zettel."}
-            </p>
+            <div className="p-4 text-sm text-slate-500">
+              <p>
+                {leer
+                  ? "Für dieses Spiel lässt sich kein Blatt erzeugen — steht es noch im aktuellen Turnierstand?"
+                  : "Zu diesem Spiel wurde nichts gezählt — deshalb gibt es keinen ausgefüllten Zettel."}
+              </p>
+              {!leer && (
+                <button
+                  onClick={() => setLeer(true)}
+                  className="mt-3 rounded bg-slate-800 px-3 py-1.5 text-sm font-medium
+                             text-white hover:bg-slate-700"
+                >
+                  Leeres Blatt
+                </button>
+              )}
+            </div>
           )}
           {typeof html === "string" && html !== "fehlt" && (
             <iframe
-              id="vorab-zettel-frame"
+              id="zettel-frame"
               title="Schiedsrichterzettel"
               srcDoc={html}
               /* Das Dokument enthält bewusst kein Skript (ADR 0039); die

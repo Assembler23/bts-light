@@ -349,6 +349,64 @@ pub(crate) fn apply_state_action(
             tablet.auto_hall_store().remove(*match_id);
             Ok(TlResponse::ok(0))
         }
+        A::SetWishCourt { match_id, court_id } => {
+            if !known_match(*match_id) {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    format!("Spiel {match_id} gibt es im aktuellen Turnierstand nicht."),
+                ));
+            }
+            if let Some(court_id) = court_id {
+                let snap = tablet.snapshot_clone();
+                let Some(snap) = snap else {
+                    return Err(TlResponse::err(
+                        C::NotAllowed,
+                        "Es ist noch kein Turnier geladen.",
+                    ));
+                };
+                // Nur Felder, die dieses Turnier hat — sonst wartete das
+                // Spiel auf ein Feld, das es nicht gibt, und in der Liste
+                // stünde nur „wartet" ohne Grund.
+                let Some(feld) = snap.court_infos.iter().find(|c| c.id == *court_id) else {
+                    return Err(TlResponse::err(
+                        C::NotAllowed,
+                        "Dieses Feld gibt es in diesem Turnier nicht.",
+                    ));
+                };
+                // Ein gesperrtes Feld bekommt von der Automatik ohnehin kein
+                // Spiel — der Wunsch liefe ins Leere und das Spiel wartete
+                // stumm. Und man braucht die Sperre für diesen Zweck nicht
+                // mehr: Der Wunsch hält das Feld selbst frei.
+                if tablet.is_court_locked(*court_id) {
+                    return Err(TlResponse::err(
+                        C::NotAllowed,
+                        format!(
+                            "Feld {} ist gesperrt. Ein Wunschfeld hält das Feld ohnehin \
+                             frei — dafür braucht es die Sperre nicht.",
+                            feld.name
+                        ),
+                    ));
+                }
+                // Widerspricht das Feld der Hallen-Regel des Spiels, bekäme
+                // das Spiel dort nie ein Feld (`hall_allows_match`). Lieber
+                // jetzt ablehnen als später stumm warten lassen.
+                let feld_halle = snap.court_location_name(*court_id);
+                let Some(m) = snap.matches.iter().find(|m| m.id == *match_id) else {
+                    return Err(TlResponse::err(
+                        C::NotAllowed,
+                        format!("Spiel {match_id} gibt es im aktuellen Turnierstand nicht."),
+                    ));
+                };
+                if !config.hall_allows_match(m.discipline.as_str(), &m.draw_name, &feld_halle) {
+                    return Err(TlResponse::err(
+                        C::HallNotAllowed,
+                        "Dieses Spiel darf nach den Hallen-Regeln nicht in diese Halle.",
+                    ));
+                }
+            }
+            tablet.set_wish_court(*match_id, *court_id);
+            Ok(TlResponse::ok(0))
+        }
         A::ExcludeFromAutoAssign { match_id, excluded } => {
             // Wie bei CallPreparation: ein unbekanntes Match erschiene
             // nirgends und ließe sich auch nicht zurücknehmen.
@@ -1412,6 +1470,18 @@ pub(crate) async fn execute(
         return known;
     }
 
+    // Fernbefehl an die Tablets: braucht **kein** geladenes Turnier und
+    // ändert keine Konfiguration — nur einen Zähler, an dem die
+    // Tablet-Verbindungen hängen. Deshalb ganz vorn, noch vor den Profilen.
+    // Protokoll und Wiederholungserkennung sind oben schon gelaufen.
+    if let relay_proto::TlAction::ReloadTablets = &action {
+        ctx.tablet.request_tablet_reload();
+        let response = relay_proto::TlResponse::ok(0);
+        ctx.tablet
+            .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        return response;
+    }
+
     // Panel-Profile: eigener Weg wie Wertungen unten, weil sie `AppConfig`/
     // `config.json` ändern statt Turnier-Zustand — `apply_state_action`
     // bleibt auf reine `TabletState`-Änderungen ohne Datei-I/O beschränkt
@@ -1443,6 +1513,16 @@ pub(crate) async fn execute(
     // Hallen-Vorverteilung: config-ändernde Aktion wie die Profile
     // (`mutate_app_config`), aber turnierabhängig — der E2-Guard (aktive
     // Halle) braucht den Snapshot, deshalb HINTER dem Snapshot-Gate.
+    // Feldsperre: config-ändernd wie die Vorverteilung, und ebenfalls hinter
+    // dem Snapshot-Gate — die Prüfung „gibt es dieses Feld?" braucht ihn
+    // (Spec `tl-web-felder-sperren`, E6/E7).
+    if let Some(response) = execute_lock_court_action(ctx, &snap, &action) {
+        if response.ok {
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        }
+        return response;
+    }
     if let Some(response) = execute_hall_prefill_action(ctx, &config, &snap, &action) {
         if response.ok {
             ctx.tablet
@@ -1602,6 +1682,103 @@ pub(crate) async fn execute(
             TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
         }
     }
+}
+
+/// Sperrt ein Feld oder gibt es frei (Spec `tl-web-felder-sperren`).
+/// `None` heißt: keine Sperr-Aktion, an anderer Stelle weiterbehandeln.
+///
+/// Ein gesperrtes Feld bekommt von der automatischen Vergabe kein Spiel mehr;
+/// ein bereits laufendes bleibt unangetastet und zählt zu Ende. BTP kennt die
+/// Sperre nicht (R2) — deshalb steht `LockCourt` bewusst **nicht** in
+/// `touches_courts`, sonst liefe die Aktion in die Feld-Beanspruchung und in
+/// `write_courts_to_btp`.
+fn execute_lock_court_action(
+    ctx: &crate::tablet::server::ServerCtx,
+    snap: &crate::btp::model::BtpSnapshot,
+    action: &relay_proto::TlAction,
+) -> Option<relay_proto::TlResponse> {
+    use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
+    let A::LockCourt { court_id, locked } = action else {
+        return None;
+    };
+    let (court_id, locked) = (*court_id, *locked);
+
+    // E6: Nur Felder, die dieses Turnier kennt. Ohne diese Prüfung nähme der
+    // Host jede Zahl an; die Sperrliste wüchse mit Einträgen, die in keiner
+    // Oberfläche auftauchen — und die dort deshalb auch niemand wieder
+    // loswird.
+    if !snap.court_infos.iter().any(|c| c.id == court_id) {
+        return Some(TlResponse::err(
+            C::NotAllowed,
+            "Dieses Feld gibt es in diesem Turnier nicht.",
+        ));
+    }
+
+    // Zielmenge aus dem Laufzeit-Stand ableiten (er ist die Wahrheit, aus der
+    // auch die Vergabe liest).
+    let mut ziel: Vec<i64> = ctx.tablet.locked_courts();
+    if locked {
+        if !ziel.contains(&court_id) {
+            ziel.push(court_id);
+            ziel.sort_unstable();
+        }
+    } else {
+        ziel.retain(|&c| c != court_id);
+    }
+
+    // E4/E14: Erst die Datei, dann der Arbeitsspeicher. Scheitert das
+    // Schreiben, bleibt BEIDES unverändert und das Gerät bekommt einen
+    // Fehler — nie ein Zustand, der nur im RAM steht und beim nächsten Start
+    // verschwindet. Der Zyklus läuft unter dem Config-Guard (E9, „der letzte
+    // gewinnt", nie ein verlorener Schreibvorgang).
+    let tournament = snap.tournament_name.clone();
+    let geschrieben = ziel.clone();
+    if let Err(rejected) = ctx.mutate_app_config(move |cfg| {
+        cfg.locked_courts = geschrieben;
+        // Turnierbezug mitschreiben (ADR 0044) — sonst gälte die Sperre als
+        // „Turnier unbekannt" und überlebte den nächsten Wechsel.
+        cfg.locked_courts_tournament = tournament;
+        Ok(())
+    }) {
+        return Some(rejected);
+    }
+    ctx.tablet.set_court_locked(court_id, locked);
+    // Der Antwortcache der Feld-Übersicht trägt den Sperr-Zustand und
+    // verfällt nur über die Revision (Spec monitor-livestand-push, S1).
+    ctx.tablet.bump_overview_rev();
+
+    // E11: Hat eine Halle durch diese Sperre kein offenes Feld mehr, werden
+    // ihre AUTOMATISCH verteilten Zuordnungen geräumt. Ohne das behielten die
+    // dorthin vorverteilten Spiele ihre Hallenbindung (ADR 0030) und bekämen
+    // gar kein Feld mehr, obwohl nebenan welche frei sind — die Halle stünde
+    // still, ohne dass jemand den Grund sähe.
+    //
+    // Nur beim Sperren und nur im Mehr-Hallen-Turnier: Im Ein-Hallen-Fall
+    // trägt kein Feld einen Hallennamen, die Menge der „offenen" Hallen wäre
+    // leer und es würde ALLES geräumt.
+    if locked && snap.is_multi_hall() {
+        let gesperrt: std::collections::HashSet<i64> = ziel.iter().copied().collect();
+        let offen: std::collections::HashSet<String> = snap
+            .court_infos
+            .iter()
+            .filter(|c| !gesperrt.contains(&c.id))
+            .map(|c| snap.court_location_name(c.id))
+            .filter(|h| !h.trim().is_empty())
+            .collect();
+        let geraeumt = ctx
+            .tablet
+            .auto_hall_store()
+            .remove_where_hall_not_in(&offen);
+        if !geraeumt.is_empty() {
+            tracing::info!(
+                "Feld {court_id} gesperrt — {} Spiel(e) haben ihre automatische Hallen-\
+                 Zuordnung verloren, weil deren Halle kein offenes Feld mehr hat",
+                geraeumt.len()
+            );
+        }
+    }
+
+    Some(TlResponse::ok(0))
 }
 
 /// Führt die Hallen-Vorverteilungs-Aktionen aus (Spec
@@ -1980,6 +2157,20 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::ProfileDelete { profile_id } => format!("profile-delete:{profile_id}"),
         A::ProfileSelect { profile_id } => format!("profile-select:{profile_id}"),
         A::ProfileSetDefault { profile_id } => format!("profile-default:{profile_id}"),
+        // Der Zielzustand gehört in den Fingerabdruck: Sperren und Freigeben
+        // desselben Felds sind zwei verschiedene Absichten und dürfen sich
+        // nicht gegenseitig als „schon erledigt" gelten.
+        A::LockCourt { court_id, locked } => format!("lock:{court_id}:{locked}"),
+        // Ohne veränderlichen Teil: Der Befehl trägt keine Nutzlast. Die
+        // Idempotenz hängt an der Vorgangs-Kennung — ein zweiter, bewusster
+        // Druck bringt eine neue mit und wird deshalb ausgeführt.
+        A::ReloadTablets => "reload-tablets".to_string(),
+        // Das Ziel gehört hinein: „auf Feld 3" und „aufheben" sind zwei
+        // verschiedene Absichten und dürfen einander nicht als „schon
+        // erledigt" gelten.
+        A::SetWishCourt { match_id, court_id } => {
+            format!("wish:{match_id}:{}", court_id.unwrap_or(0))
+        }
     }
 }
 
@@ -2074,6 +2265,18 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         A::ProfileSetDefault { profile_id } => {
             format!("Profil {profile_id} als Standard gesetzt")
         }
+        A::ReloadTablets => "Alle Tablets laden neu".to_string(),
+        A::LockCourt { court_id, locked } => {
+            if *locked {
+                format!("Feld {court_id} gesperrt")
+            } else {
+                format!("Feld {court_id} freigegeben")
+            }
+        }
+        A::SetWishCourt { match_id, court_id } => match court_id {
+            Some(c) => format!("Spiel {match_id} wünscht Feld {c}"),
+            None => format!("Spiel {match_id} ohne Wunschfeld"),
+        },
     }
 }
 
@@ -2163,6 +2366,37 @@ pub struct TlState {
     pub tournament: String,
     /// Mehr-Hallen-Turnier? Nur dann bietet die Seite einen Hallenfilter an.
     pub multi_hall: bool,
+    /// Kennt dieser Turnier-PC das Sperren von Feldern (Spec
+    /// `tl-web-felder-sperren`, E13)?
+    ///
+    /// **Warum das nötig ist:** Der Relay bettet `assets/tl.html` ein und wird
+    /// bei jedem main-Merge deployt; die App kommt erst über einen
+    /// Release-Tag. Zwischen beidem sieht ein Gerät die neue Oberfläche, spricht
+    /// aber mit einem älteren Host — und der verwirft eine unbekannte
+    /// `TlAction` **still** (`relay_client.rs`), ohne Fehlermeldung. Die
+    /// Oberfläche zeigt den Menüeintrag deshalb nur, wenn dieses Feld ankommt.
+    ///
+    /// `#[serde(default)]` = `false`: Genau das liefert ein alter Host.
+    #[serde(default)]
+    pub can_lock_courts: bool,
+    /// Kennt dieser Turnier-PC das Wunschfeld (Spec `tl-wunschfeld`)?
+    /// Dieselbe Begründung wie bei [`Self::can_lock_courts`]: Ein älterer
+    /// Host verwirft die unbekannte Aktion still, und die Turnierleitung
+    /// glaubte, das Endspiel sei gesteuert.
+    #[serde(default)]
+    pub can_set_wish_court: bool,
+    /// Kennt dieser Turnier-PC den Fernbefehl „alle Tablets neu laden"
+    /// (Spec `tablet-version-abgleich`)? Gleiche Begründung wie bei
+    /// [`Self::can_lock_courts`]: Ein älterer Host verwirft die unbekannte
+    /// Aktion still — die Turnierleitung drückte auf einen toten Knopf und
+    /// hielte die Tablets für aufgefrischt.
+    #[serde(default)]
+    pub can_reload_tablets: bool,
+    /// Nach wie vielen Sekunden ein „fertig aussehendes" Spiel gemeldet wird
+    /// (`0` = Warnung aus). Kommt aus der Konfiguration; die Seite rechnet
+    /// damit gegen [`TlCourt::decided_since_ms`].
+    #[serde(default)]
+    pub finished_warning_seconds: u32,
     /// Alle Hallen des Turniers, alphabetisch nach Namen.
     ///
     /// Mit Kennung, nicht nur mit Namen: Ein Vorbereitungs-Aufruf braucht sie,
@@ -2369,6 +2603,18 @@ pub struct TlCourt {
     #[serde(default)]
     pub team2_ids: Vec<String>,
     pub sets: Vec<(i64, i64)>,
+    /// Seit wann sieht dieses Spiel nach seinen Sätzen fertig aus, ohne dass
+    /// ein Ergebnis angekommen wäre (Spec `tl-warnung-fertiges-spiel`)?
+    /// `None` = alles normal.
+    ///
+    /// Bewusst ein **Zeitstempel** und kein fertig ausgewertetes „warnen ja/
+    /// nein": Ein Bool, der nach einer Minute umspringt, hinge an der Uhr —
+    /// und `state_fingerprint` nullt zeitabgeleitete Felder, damit die
+    /// Revision nicht im Sekundentakt hochzählt. Die Warnung käme per Push
+    /// nie an. Der Zeitstempel dagegen ist stabil; die Seite rechnet die
+    /// Frist selbst, sie hat ohnehin einen Sekundentakt für ihre Uhren.
+    #[serde(default)]
+    pub decided_since_ms: Option<u64>,
     pub tablet_connected: bool,
     /// Verletzung/Behandlung läuft — die Turnierleitung will das sehen.
     pub injury: bool,
@@ -2486,6 +2732,13 @@ pub struct TlMatch {
     /// unberührt — reine Anzeige-Information für das Badge in der Liste.
     #[serde(default)]
     pub excluded_from_auto_assign: bool,
+    /// Gewünschtes Feld (CourtID) für die automatische Vergabe (Spec
+    /// `tl-wunschfeld`); `None` = keins. Die Seite löst den Feldnamen selbst
+    /// über `courts` auf und sagt damit auch, **warum** ein Spiel wartet —
+    /// sonst sähe ein wartendes Wunschspiel in der Liste aus wie jedes
+    /// andere spielbereite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wish_court: Option<i64>,
     /// Steht dieses Spiel gerade im manuellen Präfix seiner Halle (Spec
     /// `spielliste-manuelle-reihenfolge`)? Reine Anzeige-Information fürs
     /// Badge in der Liste — die tatsächliche Sortierung liegt bereits in
@@ -2818,6 +3071,13 @@ pub(crate) fn build_state_limited(
             server_now_ms: now_ms,
             tournament: String::new(),
             multi_hall: false,
+            can_set_wish_court: true,
+            finished_warning_seconds: config.finished_warning_seconds,
+            // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
+            // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
+            // lehnt die Aktion ohnehin ab (E7).
+            can_lock_courts: true,
+            can_reload_tablets: true,
             halls: Vec::new(),
             auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
             hall_prefill: Some(hall_prefill_view(config, 0, false)),
@@ -2873,7 +3133,12 @@ pub(crate) fn build_state_limited(
             let spiel = (c.match_id != 0)
                 .then(|| match_by_id.get(&c.match_id).copied())
                 .flatten();
-            court_view(c, clearing, schalter, spiel)
+            // Nur für belegte Felder nachschlagen — ein freies Feld hat
+            // keinen Spielstand, der fertig aussehen könnte.
+            let fertig_seit = (c.match_id != 0)
+                .then(|| tablet.match_times_store().decided_seen_ms(c.match_id))
+                .flatten();
+            court_view(c, clearing, schalter, spiel, fertig_seit)
         })
         .collect();
 
@@ -2915,6 +3180,11 @@ pub(crate) fn build_state_limited(
             let call = called_hall(m.id);
             let manual_hall = manual.get(&m.id).map(String::as_str);
             let called_hall_str = call.as_ref().map(|(h, _)| h.as_str());
+            // Dieselbe Auflösung wie in der Vergabe (Spec `tl-wunschfeld`):
+            // Zeigte die Liste eine andere Halle als die Automatik benutzt,
+            // verlöre die Turnierleitung das Vertrauen in beide.
+            let manual_hall =
+                assign::manual_hall_from_wish(&snap, tablet.wish_court(m.id), manual_hall);
             let (hall, hall_source, key) = assign::resolve_and_sort_key(
                 config,
                 &snap,
@@ -3030,6 +3300,16 @@ pub(crate) fn build_state_limited(
                 if tablet.auto_assign_excluded(m.id) {
                     continue;
                 }
+                // Ebenso Spiele mit Wunschfeld (Spec tl-wunschfeld): Die
+                // Simulation kennt nur Hallen, keine Felder. Sie gäbe dem
+                // Spiel die Startzeit des ERSTEN freien Felds — also
+                // systematisch zu früh — und belegte in der Rechnung ein
+                // Feld, das es real nicht nimmt; alle nachfolgenden
+                // Startzeiten verschöben sich mit. Lieber keine Prognose als
+                // eine falsche, die auch die der anderen verdirbt.
+                if tablet.wish_court(m.id).is_some() {
+                    continue;
+                }
                 let (duration_min, uncertain) =
                     stats.group_duration(&m.class_label, m.discipline.as_str(), default_mins);
                 sim_queue.push(predict::PredictMatch {
@@ -3116,6 +3396,7 @@ pub(crate) fn build_state_limited(
             }),
             blocked: availability.blocked(m, now_ms).map(TlBlocked::from),
             excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
+            wish_court: tablet.wish_court(m.id),
             manual: manually_ordered,
             predicted_start_ms: predictions.get(&m.id).map(|p| p.start_min * 60_000),
             predicted_uncertain: predictions.get(&m.id).is_some_and(|p| p.uncertain),
@@ -3236,6 +3517,11 @@ pub(crate) fn build_state_limited(
         .collect();
 
     TlState {
+        // Dieser Host kann es — die Oberfläche darf den Eintrag zeigen.
+        can_lock_courts: true,
+        can_set_wish_court: true,
+        can_reload_tablets: true,
+        finished_warning_seconds: config.finished_warning_seconds,
         rev,
         server_now_ms: now_ms,
         tournament: snap.tournament_name.clone(),
@@ -3667,10 +3953,9 @@ fn effective_rest_minutes(
     snap: &crate::btp::model::BtpSnapshot,
     config: &AppConfig,
 ) -> Option<i64> {
-    if config.auto_assign.pause_minutes > 0.0 {
-        Some(config.auto_assign.pause_minutes as i64)
-    } else {
-        snap.rest_minutes.filter(|m| *m > 0)
+    match assign::pflichtpause_ms(snap, config) {
+        0 => None,
+        ms => Some((ms / 60_000) as i64),
     }
 }
 
@@ -3911,6 +4196,9 @@ fn court_view(
     // Das Spiel auf dem Feld, nur für die Lizenznummern — `CourtOverview`
     // führt sie bewusst nicht mit. `None` bei freiem Feld.
     spiel: Option<&crate::btp::model::BtpMatch>,
+    // Seit wann sieht das Spiel fertig aus (Spec `tl-warnung-fertiges-spiel`)?
+    // Kommt aus dem persistenten Zeitspeicher, den der Sync-Lauf stempelt.
+    decided_since_ms: Option<u64>,
 ) -> TlCourt {
     // Aus dem rohen Tablet-JSON nur die bekannten Angaben übernehmen.
     // Alles andere bliebe ungeprüfter Fremdinhalt auf einer aus dem Internet
@@ -3926,6 +4214,7 @@ fn court_view(
     });
     TlCourt {
         clearing,
+        decided_since_ms,
         pause,
         call_stage: c.call_stage,
         court_id: c.court_id,
@@ -4033,6 +4322,7 @@ mod tests {
             result: MatchResult::Normal,
             status: MatchStatus::Scheduled,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,
@@ -8223,6 +8513,24 @@ mod tests {
             "tournament",
             "multi_hall",
             "halls",
+            // Seit wann sieht ein Spiel fertig aus (Spec
+            // tl-warnung-fertiges-spiel)? Ein Zeitstempel je Feld — sagt
+            // nichts über Personen, nur über den Spielstand, der ohnehin in
+            // "sets" steht.
+            "decided_since_ms",
+            // Frist derselben Warnung in Sekunden, aus der Konfiguration.
+            "finished_warning_seconds",
+            // Fähigkeitsmerkmal (Spec tl-wunschfeld): reines Bool „dieser
+            // Turnier-PC kennt das Wunschfeld".
+            "can_set_wish_court",
+            // Fähigkeitsmerkmal (Spec tl-web-felder-sperren, E13): reines
+            // Bool „dieser Turnier-PC kennt das Sperren". Sagt nichts über
+            // Personen, nur über die Programmversion — und ohne es zeigte
+            // die Seite einen Knopf, den ein älterer Host still verwirft.
+            "can_lock_courts",
+            // Fähigkeitsmerkmal (Spec tablet-version-abgleich): reines Bool
+            // „dieser Turnier-PC kennt den Fernbefehl".
+            "can_reload_tablets",
             // Hallen-Farbe (Spec hallen-farben): reiner Hex-Anzeigewert je
             // Halle — kein Personenbezug. Der Beendet-Hallenname reist als
             // ohnehin erlaubtes "hall".
@@ -8363,6 +8671,9 @@ mod tests {
             // Spec `feldvergabe-ausnahme`: reines Bool-Flag „Auto-Vergabe
             // übergeht dieses Spiel gerade" — keine Angabe zu Personen.
             "excluded_from_auto_assign",
+            // Spec `tl-wunschfeld`: eine CourtID, kein Personendatum. Die
+            // Seite braucht sie, um zu zeigen, worauf ein Spiel wartet.
+            "wish_court",
             // Spec `spielliste-manuelle-reihenfolge`: reines Bool-Flag „steht
             // im manuellen Präfix seiner Halle" — keine Angabe zu Personen.
             "manual",

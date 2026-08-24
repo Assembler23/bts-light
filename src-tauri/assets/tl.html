@@ -1388,6 +1388,13 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
          Anzeige-Klappmenü — Panel-Sichtbarkeit/-Reihenfolge/-Höhe UND die
          früheren Einzelschalter leben jetzt gebündelt im aktiven Profil,
          verwaltet im Overlay unten (`#profiles-overlay`). -->
+    <!-- Fernbefehl „alle Tablets neu laden" (Spec `tablet-version-abgleich`).
+         Selten gebraucht, deshalb unauffällig neben den Profilen und nicht
+         als eigener Bedien-Cluster — aber mit Rückfrage, denn er trifft auch
+         Tablets mit laufendem Spiel. Bleibt verborgen, solange der
+         Turnier-PC den Befehl nicht kennt (`can_reload_tablets`). -->
+    <button type="button" class="profiles-btn" id="tablets-reload" hidden
+            title="Alle Zähltablets ihre Seite neu laden lassen">⟳ Tablets</button>
     <button type="button" class="profiles-btn" id="profiles-open">Profile</button>
   </header>
   <div class="banner" id="banner"></div>
@@ -2211,7 +2218,8 @@ function targetProblem(court) {
   // muss ein Spiel bewusst in die andere Halle geholt werden (eine Halle
   // läuft voll). Ein Tipp daneben bleibt aber wahrscheinlicher als die
   // Absicht — deshalb fragt assignTo() vor dem Schreiben ausdrücklich
-  // nach, statt hier hart zu verbieten.
+  // nach, statt hier hart zu verbieten. Seit dem 22.08.2026 gilt dasselbe
+  // für die Mindestpause: Auch sie darf die Turnierleitung übergehen.
   return null;
 }
 
@@ -2505,16 +2513,39 @@ async function assignTo(court) {
   const problem = targetProblem(court);
   if (problem) { toast(problem, true); return; }
 
-  // Andere Halle: erlaubt, aber nur mit ausdrücklicher Bestätigung
-  // (Muster wie beim Feld-Freigeben mit laufendem Spielstand). Bricht die
+  // Erlaubt, aber nur mit ausdrücklicher Bestätigung (Muster wie beim
+  // Feld-Freigeben mit laufendem Spielstand): eine andere Halle und eine
+  // noch laufende Mindestpause. Beide Gründe kommen in EINE Rückfrage —
+  // zwei Dialoge hintereinander liest niemand zu Ende, und der zweite käme
+  // ausgerechnet dann, wenn der erste schon bestätigt ist. Bricht die
   // Turnierleitung ab, bleibt die Auswahl bestehen — vermutlich war nur
   // das Zielfeld daneben.
+  const bedenken = [];
+  const ruht = picked.match.blocked;
+  if (ruht && ruht.reason === "pause" && Date.now() < ruht.until_ms) {
+    const namen = ruht.players || [];
+    const bis = new Date(ruht.until_ms).toLocaleTimeString("de-DE",
+      { hour: "2-digit", minute: "2-digit" });
+    bedenken.push(`${namen.join(" und ")} ${namen.length > 1 ? "pausieren" : "pausiert"} `
+      + `noch bis ${bis}.`);
+  }
   const zielHalle = picked.match.hall;
   if (zielHalle && court.location && zielHalle !== court.location) {
+    bedenken.push(`Das Spiel gehört nach ${zielHalle}.`);
+  }
+  // Wunschfeld (Spec `tl-wunschfeld`): Von Hand darf man überall hinlegen —
+  // aber wer ein Wunschfeld gesetzt hat, hat sich etwas dabei gedacht, und
+  // ein Tipp daneben ist wahrscheinlicher als die Absicht.
+  const wunsch = picked.match.wish_court;
+  if (wunsch && wunsch !== court.court_id) {
+    const wf = (state.courts || []).find((c) => c.court_id === wunsch);
+    bedenken.push(`Für dieses Spiel ist ${wf ? wf.court : wunsch} als Wunschfeld gesetzt.`);
+  }
+  if (bedenken.length) {
     const paarung = `${(picked.match.team1 || []).join(" / ")} vs. ${(picked.match.team2 || []).join(" / ")}`;
-    if (!confirm(
-      `${paarung} gehört nach ${zielHalle}.\n\nWirklich auf Feld ${court.court} `
-      + `in ${court.location} legen?`)) {
+    const wohin = `Feld ${court.court}${court.location ? " in " + court.location : ""}`;
+    if (!confirm(`${paarung}\n\n${bedenken.map((b) => "• " + b).join("\n")}`
+      + `\n\nWirklich auf ${wohin} legen?`)) {
       return;
     }
   }
@@ -2870,6 +2901,30 @@ function connectionLevel() {
   return "offline";
 }
 
+/**
+ * Sieht dieses Feld nach „fertig, aber kein Ergebnis" aus — und zwar schon
+ * lange genug? (Spec `tl-warnung-fertiges-spiel`.)
+ *
+ * Der Turnier-PC schickt nur den Zeitstempel „seit wann sieht es fertig aus"
+ * und die Frist; gerechnet wird hier. Das ist Absicht: Ein fertig
+ * ausgewerteter Schalter hinge an der Uhr, und der Fingerabdruck des
+ * TL-Zustands nullt zeitabgeleitete Felder — die Warnung käme per Push nie an.
+ *
+ * `0` als Frist heißt „Warnung aus" (Rückzugsweg im laufenden Turnier).
+ */
+function fertigOhneErgebnis(c) {
+  const frist = (state && state.finished_warning_seconds) || 0;
+  if (!frist || !c || !c.decided_since_ms) return false;
+  return serverNow() - c.decided_since_ms >= frist * 1000;
+}
+
+/** Alle Felder, die gerade so aussehen — ältester Fall zuerst. */
+function fertigOhneErgebnisAlle() {
+  return ((state && state.courts) || [])
+    .filter(fertigOhneErgebnis)
+    .sort((a, b) => a.decided_since_ms - b.decided_since_ms);
+}
+
 function renderConnection() {
   const level = connectionLevel();
   const conn = $("conn");
@@ -2896,6 +2951,13 @@ function renderConnection() {
   // wenn sich am Banner gar nichts ändert — inklusive der reinen
   // 304-„unverändert"-Antwort, die sonst ohne Neupassung bliebe).
   const warSichtbar = banner.classList.contains("show");
+  // Das Störungsband trägt beides — mit klarem Vorrang: Ohne Verbindung ist
+  // jede andere Meldung wertlos, weil der gezeigte Stand alt sein kann.
+  //
+  // Bewusst hier und nicht in einem eigenen Panel: Ein Panel lässt sich per
+  // Profil ausblenden und einklappen — und dann fehlte die Meldung genau in
+  // der Lage, für die sie gedacht ist. Das Band ist immer da.
+  const fertig = level === "offline" ? [] : fertigOhneErgebnisAlle();
   if (level === "offline") {
     // Genau sein: Die Uhren laufen weiter, sie messen echte Zeit. Stehen
     // geblieben sind Felder, Spielstände und Liste. „Die Anzeige ist
@@ -2903,6 +2965,16 @@ function renderConnection() {
     // sofort unglaubwürdig.
     banner.textContent =
       "Keine Verbindung zum Turnier-PC — Felder, Spielstände und Liste stehen auf dem letzten bekannten Stand.";
+    banner.classList.add("show");
+  } else if (fertig.length) {
+    // Die Halle steht im Text, nicht im Filter: Diese Zeile ignoriert den
+    // Hallenfilter ausdrücklich — sonst verschwiege sie genau den Fall, für
+    // den sie gebaut wurde (Gerät auf die andere Halle gestellt).
+    const nenne = (c) => (c.hall ? `${c.court} (${c.hall})` : c.court);
+    const kopf = fertig.length === 1
+      ? `${nenne(fertig[0])}: Spiel sieht fertig aus, aber es kam kein Ergebnis.`
+      : `${fertig.length} Felder ohne Ergebnis: ${fertig.map(nenne).join(", ")}.`;
+    banner.textContent = `${kopf} Bitte am Feld nachsehen.`;
     banner.classList.add("show");
   } else {
     banner.classList.remove("show");
@@ -3227,6 +3299,13 @@ function courtCard(c, cellStyle) {
   if (c.locked) badges.push('<span class="badge badge-alarm">gesperrt</span>');
   if (c.injury) badges.push('<span class="badge badge-alarm">Verletzung</span>');
   if (c.official_call) badges.push('<span class="badge badge-alarm">TL gerufen</span>');
+  // „Fertig, aber kein Ergebnis" (Spec `tl-warnung-fertiges-spiel`): dieselbe
+  // Alarm-Sprache wie gesperrt/Verletzung/TL gerufen — da muss jemand hin.
+  if (fertigOhneErgebnis(c)) {
+    badges.push('<span class="badge badge-alarm" '
+      + 'title="Die Sätze ergeben einen Sieger, das Feld ist aber noch belegt. '
+      + 'Vermutlich wurde das Ergebnis nicht übermittelt.">Ergebnis fehlt</span>');
+  }
   if (c.pause) badges.push(pauseBadge(c.pause));
   if (c.match_id && !c.tablet_connected) badges.push('<span class="badge badge-warn">kein Tablet</span>');
 
@@ -3400,6 +3479,25 @@ function courtCard(c, cellStyle) {
     // zu drucken (Papier-Ergebnis).
     kachelAktionen.push(`<button type="button" data-zettel="${c.match_id}"
         title="Schiedsrichterzettel drucken">🖨 Zettel</button>`);
+  }
+  // Feld sperren/freigeben (Spec `tl-web-felder-sperren`).
+  //
+  // Nur wenn der Turnier-PC die Aktion kennt: Der Relay wird bei jedem
+  // main-Merge deployt, die App erst mit einem Release-Tag. Dazwischen spricht
+  // diese Seite womöglich mit einem älteren Host — und der verwirft eine
+  // unbekannte Aktion STILL, ohne Fehlermeldung. Ein Knopf, der nichts tut und
+  // nichts sagt, ist schlimmer als keiner (E13).
+  if (state.can_lock_courts) {
+    if (c.locked) {
+      kachelAktionen.push(`<button type="button" data-unlock="${c.court_id}"
+          title="Feld wieder für die Vergabe freigeben">🔓 Feld freigeben</button>`);
+    } else {
+      // Läuft ein Spiel, greift die Sperre erst danach — der Text sagt das,
+      // statt etwas zu versprechen, das nicht eintritt.
+      const txt = c.match_id ? "Feld nach diesem Spiel sperren" : "Feld sperren";
+      kachelAktionen.push(`<button type="button" data-lock="${c.court_id}"
+          title="Keine automatische Vergabe mehr auf dieses Feld">🔒 ${txt}</button>`);
+    }
   }
   const kebabOffen = openKebabCourtId === c.court_id;
   const kebab = kachelAktionen.length
@@ -3682,6 +3780,45 @@ function wireCourts(box) {
         `off-say-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "announce_officials", courtId },
         "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Feld sperren: ohne Rückfrage. Ein Fehlgriff richtet keinen Schaden an
+  // (das laufende Spiel zählt zu Ende) und ist mit einem zweiten Tipp
+  // zurückgenommen.
+  scopeAll(box, "button[data-lock]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.lock);
+      send(
+        `lock-${courtId}-1-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "lock_court", courtId, locked: true },
+        "Feld gesperrt — die Automatik lässt es jetzt aus.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Feld freigeben: MIT Rückfrage. Das ist die gefährliche Richtung — ein
+  // zweites Gerät sieht nur „gesperrt" ohne Grund und gäbe womöglich ein
+  // kaputtes Feld frei; die Automatik legt dann sofort ein Spiel darauf.
+  scopeAll(box, "button[data-unlock]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.unlock);
+      const feld = (state.courts || []).find((x) => x.court_id === courtId);
+      const name = feld ? feld.court : courtId;
+      if (!confirm(`Feld ${name} wieder freigeben?\n\nDie automatische Vergabe `
+        + `legt danach wieder Spiele darauf. Wenn das Feld gesperrt wurde, weil `
+        + `etwas kaputt ist, bitte erst nachsehen.`)) {
+        return;
+      }
+      send(
+        `lock-${courtId}-0-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        { action: "lock_court", courtId, locked: false },
+        "Feld freigegeben.",
       );
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
@@ -4168,10 +4305,14 @@ function scheduleFitCourts() {
  */
 function queueRow(m, topMatchId) {
   const parts = [];
-  // Blockierte Spiele bleiben sichtbar, sind aber nicht wählbar — sie
-  // könnten gerade nicht aufs Feld, und ein Tipp führte nur zu einer
-  // Ablehnung.
-  const pickable = !m.blocked;
+  // „Spielt gerade" ist ein echtes Hindernis: Der Turnier-PC lehnt eine
+  // solche Zuweisung ab (`assign::check_assign`), ein Tipp führte nur zu
+  // einer Fehlermeldung. Die Mindestpause ist dagegen eine Empfehlung, die
+  // die Turnierleitung übergehen darf — sie ist serverseitig ausdrücklich
+  // KEIN Blocker (`check_assign` prüft nur „spielt gerade"). Deshalb bleibt
+  // eine pausierende Zeile wählbar; vor dem Schreiben fragt `assignTo()`
+  // nach (Feldtest 22.08.2026).
+  const pickable = !m.blocked || m.blocked.reason === "pause";
   // Der Zieh-Griff hängt allein daran, dass das Spiel noch NICHT gerufen
   // ist: Der manuelle Präfix wirkt nur innerhalb der nicht gerufenen Spiele
   // (`assign::ready_queue`), ein Zug an einer gerufenen Zeile wäre
@@ -4264,6 +4405,17 @@ function queueRow(m, topMatchId) {
     // Sekundenwerte hebelten den Keyed-Abgleich der Zeilen aus.
     status.push(`<span class="badge badge-info">gerufen</span>`);
     status.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}"></span>`);
+  }
+  // Wunschfeld (Spec `tl-wunschfeld`): Ohne diese Marke sähe ein wartendes
+  // Wunschspiel in der Liste aus wie jedes andere spielbereite — und niemand
+  // wüsste, worauf es wartet.
+  if (m.wish_court) {
+    const feld = (state.courts || []).find((c) => c.court_id === m.wish_court);
+    const name = feld ? feld.court : m.wish_court;
+    const belegt = feld && feld.match_id;
+    status.push(`<span class="badge ${belegt ? "badge-warn" : "badge-info"}"
+      title="Die Automatik legt dieses Spiel nur auf ${esc(String(name))}${
+        belegt ? " — das Feld ist gerade belegt" : ""}">⌖ ${esc(String(name))}</span>`);
   }
   if (m.blocked && m.blocked.reason === "pause") {
     // Mindestpause: Eieruhr + Rest-Countdown statt Badge und Satz — WER
@@ -4366,6 +4518,30 @@ function queueRow(m, topMatchId) {
         <div class="kebab-row">
           <select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
             data-hall-for="${m.match_id}" aria-label="Spielort">${optionen.join("")}</select>
+        </div>
+      </div>`);
+  }
+  // Wunschfeld (Spec `tl-wunschfeld`): Die Automatik legt dieses Spiel dann
+  // nur auf dieses Feld und hält es dafür frei, sobald das Spiel spielbereit
+  // ist. Für Endspiele, die aufs Hauptfeld gehören.
+  //
+  // Nur wenn der Turnier-PC die Aktion kennt — sonst zeigte die Seite einen
+  // Wähler, dessen Wirkung im Nichts verpufft, und die Turnierleitung glaubte,
+  // das Endspiel sei gesteuert (dieselbe Versions-Schere wie beim Sperren).
+  if (state.can_set_wish_court) {
+    // Nur Felder, die zur Halle des Spiels passen — ein Wunsch in die falsche
+    // Halle lehnt der Turnier-PC ohnehin ab. Ohne Hallenzuordnung: alle.
+    const passend = (state.courts || []).filter(
+      (c) => !m.hall || !c.hall || c.hall === m.hall);
+    const optionen = ['<option value="" title="kein Wunschfeld">–</option>']
+      .concat(passend.map((c) =>
+        `<option value="${c.court_id}"${c.court_id === m.wish_court ? " selected" : ""}>`
+        + `${esc(c.court)}${c.locked ? " (gesperrt)" : ""}</option>`));
+    kebabGroups.push(`<div class="kebab-group">
+        <span class="kebab-label">Wunschfeld (die Automatik hält es frei)</span>
+        <div class="kebab-row">
+          <select class="hallwahl${m.wish_court ? " gesetzt" : ""}"
+            data-wish-for="${m.match_id}" aria-label="Wunschfeld">${optionen.join("")}</select>
         </div>
       </div>`);
   }
@@ -4520,6 +4696,27 @@ function wireQueue(box) {
         `hall-${matchId}-${hall}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
         { action: "set_hall", matchId, hall },
         hall ? `Spielort: ${hall}.` : "Spielort zurückgenommen.",
+      );
+    });
+  });
+  scopeAll(box, "select[data-wish-for]").forEach((sel) => {
+    // Wie beim Spielort-Wähler: weder auswählen noch ziehen.
+    sel.addEventListener("click", (ev) => ev.stopPropagation());
+    sel.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    sel.addEventListener("change", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(sel.dataset.wishFor);
+      const courtId = sel.value ? Number(sel.value) : null;
+      const feld = (state.courts || []).find((c) => c.court_id === courtId);
+      send(
+        `wish-${matchId}-${courtId || 0}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+        courtId
+          ? { action: "set_wish_court", matchId, courtId }
+          : { action: "set_wish_court", matchId },
+        courtId
+          ? `Wunschfeld: ${feld ? feld.court : courtId}. Die Automatik hält es frei, `
+            + `sobald das Spiel dran ist.`
+          : "Wunschfeld aufgehoben.",
       );
     });
   });
@@ -6775,6 +6972,7 @@ function wireProfileEditorEvents() {
   });
 }
 
+$("tablets-reload").addEventListener("click", reloadTablets);
 $("profiles-open").addEventListener("click", openProfilesOverlay);
 $("profiles-close").addEventListener("click", closeProfilesOverlay);
 $("profiles-overlay").addEventListener("click", (ev) => {
@@ -7283,6 +7481,35 @@ function renderAutoToggle() {
     : "Automatische Feldvergabe wieder laufen lassen";
 }
 
+// Fernbefehl „alle Tablets neu laden" (Spec `tablet-version-abgleich`).
+//
+// Nur zeigen, wenn der Turnier-PC ihn kennt: Der Relay wird bei jedem
+// main-Merge deployt, die App erst mit einem Release-Tag — dazwischen spricht
+// diese Seite womöglich mit einem älteren Host, der eine unbekannte Aktion
+// STILL verwirft. Die Turnierleitung hielte die Tablets für aufgefrischt.
+function renderTabletsReload() {
+  const btn = $("tablets-reload");
+  if (btn) btn.hidden = !state.can_reload_tablets;
+}
+
+async function reloadTablets() {
+  if (!confirm("Alle Zähltablets ihre Seite neu laden lassen?\n\n"
+    + "Das trifft auch Tablets mit laufendem Spiel — deren Bildschirm springt "
+    + "kurz. Der Spielstand geht dabei nicht verloren.\n\n"
+    + "Nötig ist das selten: Ein Tablet holt sich einen neuen Stand zwischen "
+    + "zwei Spielen von selbst.")) {
+    return;
+  }
+  // Zeitstempel statt Zeitfenster in der Vorgangs-Kennung: Ein zweiter,
+  // bewusster Druck ist ein zweiter Befehl und darf nicht als Doppeltipp
+  // durchfallen — etwa wenn beim ersten Mal ein Tablet offline war.
+  await send(
+    `reload-tablets-${Date.now()}`,
+    { action: "reload_tablets" },
+    "Die Tablets laden neu.",
+  );
+}
+
 async function toggleAuto() {
   const on = !(state.auto_assign && state.auto_assign.enabled);
   await send(
@@ -7379,6 +7606,7 @@ function render() {
   renderConnection();
   renderHalls();
   renderAutoToggle();
+  renderTabletsReload();
   renderActionBar();
   // Erst das Gerüst (Spalten, Sichtbarkeit/Reihenfolge/Höhe aus dem aktiven
   // Profil), DANACH die einzelnen Panel-Inhalte — die brauchen die frisch

@@ -267,6 +267,37 @@ pub enum HallSource {
 /// `Match.LocationID`**, die meisten ohne jede Feldzuweisung. Der Ort wird
 /// jetzt gelesen — die abgeleiteten Quellen bleiben für Turniere, die ihn
 /// nicht pflegen.
+/// Die „von Hand gesetzte" Halle eines Spiels — aus dem **Wunschfeld** oder
+/// aus der direkt gesetzten Halle.
+///
+/// Ein Wunschfeld (Spec `tl-wunschfeld`) legt die Halle mit fest: Es benennt
+/// ein konkretes Feld, und das liegt nun einmal in genau einer Halle. Damit
+/// kann der Widerspruch „Wunschfeld in Halle B, Hallenzuordnung sagt Halle A"
+/// strukturell nicht entstehen — das Spiel würde sonst auf ein Feld warten,
+/// das seine Hallenbindung ihm verbietet, und niemand sähe den Grund.
+///
+/// Der Wunsch zählt bewusst als **`Manual`** und bekommt keine eigene
+/// Kaskadenstufe: Er *ist* ein Hand-Eingriff der Turnierleitung für dieses
+/// eine Spiel — dieselbe Bedeutung, dieselbe Verbindlichkeit. Das erspart
+/// eine neue Quelle auf der Wire, deren Bedeutung ältere Anzeigen nicht
+/// kennten. Die Turnierleitung sieht das Wunschfeld ohnehin als eigene Marke.
+///
+/// Das Wunschfeld schlägt die direkt gesetzte Halle: Es ist die genauere
+/// Angabe (ein Feld statt einer Halle) und in aller Regel die jüngere.
+pub fn manual_hall_from_wish<'a>(
+    snap: &'a BtpSnapshot,
+    wish_court: Option<i64>,
+    manual_hall: Option<&'a str>,
+) -> Option<&'a str> {
+    let aus_wunsch = wish_court
+        .and_then(|c| snap.court_infos.iter().find(|ci| ci.id == c))
+        .and_then(|ci| ci.location_id)
+        .and_then(|lid| snap.locations.iter().find(|l| l.id == lid))
+        .map(|l| l.name.as_str())
+        .filter(|n| !n.trim().is_empty());
+    aus_wunsch.or(manual_hall)
+}
+
 pub fn hall_for_match(
     config: &AppConfig,
     snap: &BtpSnapshot,
@@ -360,10 +391,35 @@ pub struct PlayerAvailability {
     /// Das Spiel wird mitgeführt, damit ein laufendes Spiel sich beim
     /// Umhängen nicht selbst blockiert.
     busy: HashMap<String, i64>,
-    /// Letztes Spielende je Spieler.
-    last_finish: HashMap<String, u64>,
-    /// Länge der Pflichtpause; 0 = keine Pause.
-    pause_ms: u64,
+    /// Wann jeder Spieler frühestens wieder darf: das Maximum aus
+    /// `Spielende + der bei DIESEM Spielende geltenden Pflichtpause` über
+    /// alle beendeten Spiele des Spielers. Nur Einträge in der Zukunft
+    /// wären interessant — gespeichert wird trotzdem alles, die Abfrage
+    /// vergleicht ohnehin gegen `now`.
+    ///
+    /// Bewusst der fertige Zeitpunkt statt „Ende + globale Pause": Die
+    /// Pausenlänge wird beim Spielende eingefroren (`BtpMatch::pause_ms`),
+    /// damit eine geänderte Einstellung nicht rückwirkend alle schon
+    /// beendeten Spiele umdatiert.
+    free_at: HashMap<String, u64>,
+}
+
+/// Die aktuell geltende Pflichtpause in Millisekunden: Ein gesetzter Wert
+/// in der Konfiguration (>0) schlägt BTP-Setting 1303; `0` = keine Pause.
+///
+/// **Die** eine Stelle, an der diese Regel steht — die Anzeige
+/// (`tl::effective_rest_minutes`) nennt dieselbe Zahl in Minuten.
+pub fn pflichtpause_ms(snap: &BtpSnapshot, config: &AppConfig) -> u64 {
+    let mins = if config.auto_assign.pause_minutes > 0.0 {
+        config.auto_assign.pause_minutes
+    } else {
+        snap.rest_minutes.unwrap_or(0) as f64
+    };
+    if mins.is_finite() && mins > 0.0 {
+        (mins * 60_000.0) as u64
+    } else {
+        0
+    }
 }
 
 impl PlayerAvailability {
@@ -380,46 +436,30 @@ impl PlayerAvailability {
             })
             .collect();
 
-        // Pausen-Fenster: Override aus der Konfiguration (>0), sonst
-        // BTP-Setting 1303.
-        let pause_ms: u64 = {
-            let mins = if config.auto_assign.pause_minutes > 0.0 {
-                config.auto_assign.pause_minutes
-            } else {
-                snap.rest_minutes.unwrap_or(0) as f64
-            };
-            if mins.is_finite() && mins > 0.0 {
-                (mins * 60_000.0) as u64
-            } else {
-                0
-            }
-        };
+        // Die aktuell eingestellte Pause gilt nur für Spiele, die ohne
+        // eigenen Stempel dastehen (Altbestand aus einer Version vor
+        // v0.9.253) — alle anderen bringen ihre eigene mit.
+        let jetzt_gueltig = pflichtpause_ms(snap, config);
 
-        // Ohne Pause brauchen wir die Spielenden gar nicht zu sammeln.
-        let last_finish: HashMap<String, u64> = if pause_ms == 0 {
-            HashMap::new()
-        } else {
-            let mut lf: HashMap<String, u64> = HashMap::new();
-            for m in snap
-                .matches
-                .iter()
-                .filter(|m| m.status == MatchStatus::Finished)
-            {
-                if let Some(end) = m.finished_at {
-                    for p in m.team1.iter().chain(m.team2.iter()) {
-                        let e = lf.entry(player_key(p)).or_insert(0);
-                        *e = (*e).max(end);
-                    }
-                }
+        let mut free_at: HashMap<String, u64> = HashMap::new();
+        for m in snap
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Finished)
+        {
+            let Some(end) = m.finished_at else { continue };
+            let pause = m.pause_ms.unwrap_or(jetzt_gueltig);
+            if pause == 0 {
+                continue;
             }
-            lf
-        };
-
-        Self {
-            busy,
-            last_finish,
-            pause_ms,
+            let frei = end.saturating_add(pause);
+            for p in m.team1.iter().chain(m.team2.iter()) {
+                let e = free_at.entry(player_key(p)).or_insert(0);
+                *e = (*e).max(frei);
+            }
         }
+
+        Self { busy, free_at }
     }
 
     /// Steht diesem Spiel gerade jemand im Weg? `None` = spielbereit.
@@ -447,16 +487,15 @@ impl PlayerAvailability {
             });
         }
 
-        if self.pause_ms == 0 {
+        if self.free_at.is_empty() {
             return None;
         }
         let mut until = 0u64;
         let mut resting: Vec<&BtpPlayer> = Vec::new();
         for p in m.team1.iter().chain(m.team2.iter()) {
-            if let Some(&end) = self.last_finish.get(&player_key(p)) {
-                let free_at = end.saturating_add(self.pause_ms);
-                if now_ms < free_at {
-                    until = until.max(free_at);
+            if let Some(&frei) = self.free_at.get(&player_key(p)) {
+                if now_ms < frei {
+                    until = until.max(frei);
                     resting.push(p);
                 }
             }
@@ -833,6 +872,7 @@ mod tests {
             result: MatchResult::Normal,
             status: MatchStatus::Scheduled,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,
@@ -1832,6 +1872,59 @@ mod tests {
         match av2.blocked(&wanted, 60_000) {
             Some(Blocked::Pause { until_ms, .. }) => assert_eq!(until_ms, 1_800_000),
             other => panic!("erwartet: 30-Minuten-Pause aus BTP, war: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn die_beim_spielende_eingefrorene_pause_schlaegt_die_aktuelle_einstellung() {
+        // Feldtest 22.08.2026: Eine geänderte Pausenzeit verlängerte auch die
+        // schon laufenden Pausen. Trägt das Spiel seine eigene Pause, gilt
+        // sie — ganz gleich, was gerade eingestellt ist.
+        let mut done = a_match(1);
+        done.status = MatchStatus::Finished;
+        done.finished_at = Some(0);
+        done.pause_ms = Some(5 * 60_000); // beim Ende galten 5 Minuten
+        done.team1 = vec![player("Müller")];
+        let mut wanted = a_match(2);
+        wanted.team1 = vec![player("Müller")];
+
+        let mut s = snap(Vec::new(), vec![done, wanted.clone()], Vec::new());
+        s.rest_minutes = Some(30);
+        let mut cfg = AppConfig::default();
+        cfg.auto_assign.pause_minutes = 45.0; // inzwischen auf 45 gestellt
+
+        let av = PlayerAvailability::from_snapshot(&s, &cfg);
+        match av.blocked(&wanted, 60_000) {
+            Some(Blocked::Pause { until_ms, .. }) => assert_eq!(until_ms, 300_000),
+            other => panic!("erwartet: die eingefrorenen 5 Minuten, war: {other:?}"),
+        }
+        assert_eq!(
+            av.blocked(&wanted, 300_000),
+            None,
+            "nach den eingefrorenen 5 Minuten ist er frei"
+        );
+    }
+
+    #[test]
+    fn ein_spiel_ohne_eigenen_stempel_faellt_auf_die_aktuelle_einstellung_zurueck() {
+        // Altbestand aus einer Version vor v0.9.253: kein `pause_ms` am
+        // Spiel. Dann gilt weiterhin die eingestellte Pause.
+        let mut done = a_match(1);
+        done.status = MatchStatus::Finished;
+        done.finished_at = Some(0);
+        done.pause_ms = None;
+        done.team1 = vec![player("Müller")];
+        let mut wanted = a_match(2);
+        wanted.team1 = vec![player("Müller")];
+
+        let s = snap(Vec::new(), vec![done, wanted.clone()], Vec::new());
+        let mut cfg = AppConfig::default();
+        cfg.auto_assign.pause_minutes = 10.0;
+
+        let av = PlayerAvailability::from_snapshot(&s, &cfg);
+        match av.blocked(&wanted, 60_000) {
+            Some(Blocked::Pause { until_ms, .. }) => assert_eq!(until_ms, 600_000),
+            other => panic!("erwartet: 10 Minuten aus der Einstellung, war: {other:?}"),
         }
     }
 

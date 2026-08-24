@@ -81,21 +81,23 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
     prevEnabledRef.current = announce.enabled;
   }, [announce.enabled]);
 
-  // Wechselt die Ansage-Halle, die „gesehen"-Stände zurücksetzen — sonst gilt
-  // ein in der vorigen Halle still mitgeschriebener Stand als bekannt und die
-  // erste Belegung nach dem Wechsel würde nicht angesagt.
-  const prevHallRef = useRef(announce.announce_hall);
-  useEffect(() => {
-    if (prevHallRef.current !== announce.announce_hall) {
-      // Nur die gesehenen Stände leeren, die Baseline bleibt gesetzt —
-      // unverändertes Verhalten. (Damit gelten nach dem Wechsel zunächst
-      // alle belegten Felder der neuen Halle als frisch aufgerufen; das ist
-      // dieselbe Fehlerklasse wie der leere Start-Abruf, aber ein anderer
-      // Fall — hier bewusst nicht mitgeändert.)
-      standRef.current = { baseline: new Map(), hatBaseline: true };
-      prevHallRef.current = announce.announce_hall;
-    }
-  }, [announce.announce_hall]);
+  // Ein Wechsel der Ansage-Halle setzt die gesehenen Stände NICHT zurück.
+  //
+  // Bis v0.9.255 wurde hier die Baseline geleert, damit „die erste Belegung
+  // nach dem Wechsel angesagt wird". Die Folge war das Gegenteil von
+  // hilfreich: Nach dem Umschalten galt **jedes** laufende Spiel der neu
+  // hinzugekommenen Halle als frisch aufgerufen, und der Ansage-Slave rief
+  // eine ganze Turnierhälfte nach (Befund 23.08.2026). Gewünscht ist „ab
+  // sofort" — laufende Spiele bleiben stumm, neue werden gerufen.
+  //
+  // Ein eigener Reset ist dafür gar nicht nötig: `diffOccupiedCourts` führt
+  // die Baseline **vor** dem Hallenfilter und merkt sich deshalb auch Felder
+  // der gefilterten Halle — genau dafür (siehe dortigen Kommentar und
+  // `scripts/test-announce-baseline.mjs`, „Halle hinzunehmen holt nichts
+  // nach"). Nach dem Umschalten sind alle laufenden Spiele bereits bekannt.
+  //
+  // Dieselbe Regel wie bei der Schiedsrichter-Rotation seit v0.9.253: Der
+  // erste beobachtete Stand ist Ausgangslage, kein Ereignis.
 
   // Einmaliger Klick-Listener: schaltet das WebView2-Audio für die Session
   // frei (der AudioContext startet sonst erst nach einer Nutzergeste).

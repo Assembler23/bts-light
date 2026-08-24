@@ -227,6 +227,14 @@ fn tablet_exclusions_path(app: &AppHandle) -> std::path::PathBuf {
         .join("excluded-matches.json")
 }
 
+/// Ablage der Wunschfelder — turniergebunden wie die Ausnahmeliste.
+fn tablet_wish_courts_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("wish-courts.json")
+}
+
 fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
         .app_data_dir()
@@ -307,6 +315,15 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Die Hallen-Farben werden auf der Felderübersicht gepflegt (Spec
     // hallen-farben) — auch sie kennt der Assistent nicht.
     incoming.hall_colors = current.hall_colors.clone();
+    // Gesperrte Felder werden auf der Felderübersicht UND (seit v0.9.258) aus
+    // der Turnierleitungs-Oberfläche gesetzt — der Assistent schickt seinen
+    // beim Öffnen aufgenommenen Stand zurück und löschte sie damit still.
+    // Das war lange ein PC-lokaler Randfall; sobald aus der Halle gesperrt
+    // wird, ist es der teuerste Fehlerfall überhaupt: Feld sperren, jemand
+    // speichert am PC eine Einstellung, die Sperre ist weg — und die
+    // Automatik legt ein Spiel auf das kaputte Feld.
+    incoming.locked_courts = current.locked_courts.clone();
+    incoming.locked_courts_tournament = current.locked_courts_tournament.clone();
     incoming
 }
 
@@ -926,6 +943,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
     // kommt mit dem ersten Snapshot.
     tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
+    tablet.set_wish_courts_path(tablet_wish_courts_path(&app));
     tablet.set_queue_order_path(tablet_queue_order_path(&app));
     // Druck-Gedächtnis des Autodrucks (Spec
     // `schiedsrichterzettel-autodruck`): ebenso Pfad jetzt, Turnier
@@ -2023,16 +2041,27 @@ pub fn set_court_locked(
     locked: bool,
 ) -> Result<(), String> {
     state.tablet.set_court_locked(court_id, locked);
-    // Config-Wert bauen, Mutex VOR der Datei-I/O wieder freigeben (sonst
-    // blockiert ein langsamer Schreibvorgang andere config-Zugriffe).
-    let config_to_save = {
-        let mut cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
-        cfg.locked_courts = state.tablet.locked_courts();
-        cfg.clone()
-    };
-    config_to_save
-        .save_to(&config_path(&app))
-        .map_err(|e| e.to_string())?;
+    // Über den geschützten Zyklus (`mutate_config`), nicht mit einem eigenen
+    // Klon-und-später-schreiben: Seit die Sperre auch aus der
+    // Turnierleitungs-Oberfläche kommt (Spec `tl-web-felder-sperren`), gibt es
+    // mehrere Schreiber auf dieselbe Datei. Der frühere Weg gab den Mutex vor
+    // der Datei-I/O frei — genau das Lost-Update-Fenster, das
+    // `mutate_config_at` bewusst schließt.
+    let courts = state.tablet.locked_courts();
+    let tournament = state
+        .tablet
+        .snapshot_clone()
+        .map(|s| s.tournament_name)
+        .unwrap_or_default();
+    mutate_config(&app, &state, |cfg| {
+        cfg.locked_courts = courts;
+        // Turnierbezug mitschreiben (ADR 0044); ohne geladenes Turnier den
+        // bestehenden Wert stehen lassen, statt ihn zu leeren.
+        if !tournament.trim().is_empty() {
+            cfg.locked_courts_tournament = tournament;
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -2405,6 +2434,55 @@ pub fn match_scoresheet_html(
         crate::tablet::scoresheet::Modus::Normal
     };
     crate::tablet::scoresheet::html_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
+}
+
+/// Aushang mit den beiden QR-Codes als fertiges HTML (`docs/aushang.md`).
+///
+/// Wie beim Schiedsrichterzettel baut der Kern das Dokument und das
+/// Frontend zeigt/druckt es (S-R1, ADR 0039). Turniername und Logo kommen
+/// aus dem laufenden Turnier bzw. den Einstellungen, beide Adressen aus der
+/// öffentlichen Live-Seite.
+///
+/// Der Fehlerfall ist absichtlich sprechend statt `None`: Fehlt die
+/// Live-Seite, kann die Turnierleitung das selbst nachtragen — dafür muss
+/// sie den Grund lesen können.
+#[tauri::command]
+pub fn aushang_html(state: State<'_, AppState>) -> Result<String, String> {
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| "Die Einstellungen sind gerade belegt.".to_string())?
+        .clone();
+    let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
+    let turnier = state
+        .tablet
+        .snapshot_clone()
+        .map(|s| s.tournament_name)
+        .unwrap_or_default();
+    let eingetragen = config.badhub.live_url.trim();
+    let daten =
+        crate::aushang::daten_aus(&config.badhub.live_url, &turnier, logo).ok_or_else(|| {
+            // „Leer" und „steht da, taugt aber nicht" brauchen verschiedene
+            // Hinweise: Sonst sucht die Turnierleitung nach einem Feld, das
+            // ausgefüllt vor ihr steht.
+            if eingetragen.is_empty() {
+                "Für den Aushang fehlt die Live-Seite. Trage sie in den Einstellungen unter \
+                 „1 · Liveticker-Ziel“ → „Live-Seite (URL)“ ein, z. B. \
+                 https://badhub.de/live?t=bvbb."
+                    .to_string()
+            } else {
+                format!(
+                    "Die eingetragene Live-Seite lässt sich nicht auswerten: „{}“. Erwartet wird \
+                     eine vollständige Adresse mit https:// und Verbandskürzel, z. B. \
+                     https://badhub.de/live?t=bvbb. Zu ändern in den Einstellungen unter \
+                     „1 · Liveticker-Ziel“.",
+                    // Gekürzt: Die Meldung soll ins Fenster passen, nicht die
+                    // ganze Fehleingabe spiegeln.
+                    eingetragen.chars().take(60).collect::<String>()
+                )
+            }
+        })?;
+    crate::aushang::render_html(&daten)
 }
 
 /// Die im System eingerichteten Drucker — für die Auswahl in den
@@ -4611,6 +4689,45 @@ mod tests {
         );
         assert_eq!(merged.tl_web.profiles[0].id, "profil-neu");
         assert_eq!(merged.tl_web.default_profile_id, "profil-neu");
+    }
+
+    #[test]
+    fn keep_host_managed_fields_preserves_the_locked_courts() {
+        // Spec `tl-web-felder-sperren`, E5 — und zugleich ein offener Bug aus
+        // der Roadmap: Der Setup-Assistent schickt den beim Öffnen
+        // aufgenommenen Stand zurück (`SetupWizard.tsx`), und
+        // `keep_host_managed_fields` schützte die Sperrliste NICHT — anders
+        // als `tl_web.devices`, `hall_layouts`, `hall_prefill` und
+        // `hall_colors`.
+        //
+        // Bisher fiel das kaum auf, weil nur am PC gesperrt wurde. Sobald die
+        // Turnierleitung aus der Halle sperrt, wird daraus der teuerste
+        // Fehlerfall überhaupt: Feld sperren, jemand speichert am PC eine
+        // Einstellung, die Sperre ist still weg — und die Automatik legt ein
+        // Spiel auf das kaputte Feld.
+        let current = AppConfig {
+            locked_courts: vec![3, 7],
+            locked_courts_tournament: "Köpi-Cup 2026".to_string(),
+            ..Default::default()
+        };
+
+        // Der Stand aus dem Fenster kennt die Sperre nicht (sie entstand
+        // danach, am Tablet).
+        let mut from_ui = AppConfig::default();
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert", "Einstellung wird übernommen");
+        assert_eq!(
+            merged.locked_courts,
+            vec![3, 7],
+            "die inzwischen gesetzte Sperre bleibt"
+        );
+        assert_eq!(
+            merged.locked_courts_tournament, "Köpi-Cup 2026",
+            "und ihr Turnierbezug ebenso — sonst gälte sie als „unbekannt“ \
+             und überlebte den nächsten Turnierwechsel"
+        );
     }
 
     #[test]

@@ -206,6 +206,37 @@ Pi verliert mehr als 10 Frames/min. Dann als eigener ADR, mit der Vorgabe, die N
 Sender** aus derselben Quelle abzuleiten, aus der die Voll-Route liest (im Relay also erst nach
 Stale-Verwerfen, „leerer Spiegel überschreibt nicht" und Größengrenze).
 
+**S10 — ETag/304 für den Monitor-State.** *(Umgesetzt v0.9.254, 23.08.2026.)* Die größte
+verbleibende Leitungslast ist der Geräte-/Court-Monitor: `GET /{ns}/monitor/state` lieferte
+ausnahmslos 200 mit vollem ~9,9-KB-Body (no-store, kein ETag), der Client pollte im 250-ms-Takt
+ohne `If-None-Match`. Genau wie S8 für `/health` gilt auch hier: Das ETag muss über den
+**Inhalt** der Antwort gebildet werden — und die je-nicht-inhaltlichen Felder **ausschließen**:
+
+- `server_now_ms` ist je Aufruf neu (now_ms() in beiden Buildern) — mit ihm in der Marke gäbe es
+  nie eine stabile Marke.
+- `seq` steigt je `notify_monitor`, auch bei **folgenlosen** Anstößen (Host-Spiegel sendet den
+  Satzstand periodisch, auch unverändert; Relay `relay/src/main.rs` `HostFrame::ScoreUpdate`-Arm).
+  Mit `seq` in der Marke wechselte sie bei jedem Nudge und 304 käme nie. Dieselbe Begründung wie
+  beim Übersichts-ETag, der die Ordnungszahlen ausklammert (`uebersicht_marke`, :1808-1813).
+  `seq` bleibt nur Transportzähler im Body.
+
+Aufrufer des 304-Wegs (alle durch denselben gemeinsamen Antwortpunkt, es gibt keinen zweiten
+ungeschützten 200-Pfad mehr — U10 sichert den Host-down-Zweig strukturell):
+
+1. Relay `monitor_device_state` — Hauptpfad **und** Host-down-Early-Return (leerer State),
+2. LAN `monitor_state` (`/court/{id}/state`, fester Court-Monitor) — 1e-Parität,
+3. LAN `monitor_device_state` (`/monitor/state`, Geräte-Monitor) — 1e-Parität,
+4. Client `monitor.html` (`If-None-Match` + 304-Handling + Refetch-Cap),
+5. `ad.html` (1d): `If-None-Match` analog nachgezogen — der 1-s-Poll ist der zweitgrößte Posten
+   (~9,9 KB/s je Werbe-Monitor) und profitiert genauso; eine 304 heißt schlicht „kein
+   Reassignment".
+
+Uhr-Sync (1c): Da 304 keinen Body trägt, speist der Client seinen Uhr-Offset jetzt aus zwei
+Quellen — jedem vollen 200 (`serverNowMs`) **und** dem WS-Herzschlag (`{"hb":<nowMs>}`). Der
+Refetch-Cap (gesund → 10 min, ungesund → 60 s) erzwischt regelmäßig einen vollen 200, damit der
+Offset nie veraltet. Kanonische Fassung in `src/io/monitorClock.mjs` (Test
+`scripts/test-monitor-clock.mjs`), Inline-Kopie in `monitor.html` — wie beim pushHealth-Muster.
+
 ## Vorher-Messung (S0)
 
 **Erster Lauf: 19.08.2026**, v0.9.235, LAN, laufende Übertragung mit belegten Feldern

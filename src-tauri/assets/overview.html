@@ -829,6 +829,13 @@ main {
   var FALLBACK_SCHNELL_MS = 250;
   var lastServerFrameAt = 0;  // letztes Frame: Anstoß ODER Herzschlag
   var lastFetchOk = true;
+  // ── Stillstands-Wächter (siehe `lagePruefen` unten) ──────────────────
+  var letzterAbrufOkMs = 0;   // letzter Abruf, der ohne Fehler zurückkam
+  var letzterStandMs = 0;     // letzter angewendete ODER bestätigte Stand
+  var verworfeneNudges = 0;   // wie oft `seqAnwenden` einen Anstoß abwies
+  var bestaetigungen = 0;     // 304 „nichts Neues" seit dem Laden
+  var seitStartMs = Date.now();
+  var gemeldeteStillstandsArt = null;
   var langsamErlaubt = false; // aus der Konfiguration (`pushFallbackSlow`)
   function pushGesund(z, nowMs) {
     if (!z || !z.wsOpen) return false;
@@ -874,6 +881,35 @@ main {
    *  Fassung samt Test (`scripts/test-monitor-seq.mjs`, eigener CI-Schritt).
    *  Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
    *  `monitor.html`. */
+  /** Steht die Anzeige still, ohne es zu merken?
+   *
+   *  **Inline-Kopie von `src/io/standstill.mjs`** — dort steht die kanonische
+   *  Fassung samt Begründung und Test (`scripts/test-standstill.mjs`, eigener
+   *  CI-Schritt). Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `monitor.html`. */
+  var STILLSTAND_MS = 60000;
+  function lagePruefen(zustand, nowMs) {
+    var z = zustand || {};
+    var gemeldet = z.gemeldeteArt || null;
+    var gesund = { art: null, stillMs: 0, melden: false, erholt: gemeldet !== null };
+    var start = stillZahl(z.startMs);
+    if (!start) return { art: null, stillMs: 0, melden: false, erholt: false };
+    var abruf = stillZahl(z.letzterAbrufOkMs) || start;
+    var stand = stillZahl(z.letzterStandMs) || start;
+    var ohneAbruf = nowMs - abruf;
+    var ohneStand = nowMs - stand;
+    if (ohneAbruf < 0 || ohneStand < 0) return gesund;
+    if (ohneAbruf >= STILLSTAND_MS) return stillLage("keine_abrufe", ohneAbruf, gemeldet);
+    if (ohneStand >= STILLSTAND_MS) return stillLage("verworfen", ohneStand, gemeldet);
+    return gesund;
+  }
+  function stillLage(art, stillMs, gemeldet) {
+    return { art: art, stillMs: stillMs, melden: art !== gemeldet, erholt: false };
+  }
+  function stillZahl(v) {
+    return typeof v === "number" && isFinite(v) && v > 0 ? v : 0;
+  }
+
   function seqAnwenden(gezeigtSeq, seq, quelle) {
     var gezeigt = Number.isFinite(gezeigtSeq) ? gezeigtSeq : 0;
     var neu = Number.isFinite(seq) ? seq : 0;
@@ -1068,9 +1104,19 @@ main {
         if (r.status !== 304 && !r.ok) throw new Error('HTTP ' + r.status);
         errorCount = 0; backoffUntil = 0; showOffline(false);
         lastFetchOk = true;
+        letzterAbrufOkMs = Date.now();
         // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
         // nichts zu rendern — und kein Grund, „offline" zu melden.
-        if (r.status === 304) { pollDone(); return null; }
+        if (r.status === 304) {
+          // Für den Stillstands-Wächter zählt das wie ein angewendeter Stand:
+          // Der Server bestätigt gerade ausdrücklich, dass das Gezeigte
+          // stimmt (Spec monitor-livestand-push, S8). Ohne diese Zeile meldete
+          // eine ruhige Halle im Minutentakt Fehlalarme.
+          letzterStandMs = Date.now();
+          bestaetigungen++;
+          pollDone();
+          return null;
+        }
         var marke = r.headers.get('ETag');
         if (marke) { letzteMarke = marke; markeGesetztAt = Date.now(); }
         return r.json();
@@ -1105,6 +1151,10 @@ main {
           if (wert > (lastSeqByCourt[feld] || 0)) lastSeqByCourt[feld] = wert;
         });
         render(data);
+        // Erst NACH dem Rendern: Wirft `render` (defekte Antwort, kaputtes
+        // DOM), zählt der Stand nicht als angekommen — und genau das soll der
+        // Wächter dann ja melden.
+        letzterStandMs = Date.now();
         // Turniername könnten wir aus health nicht, /api/snapshot wäre besser —
         // erstmal leer lassen, kein Drama für die Funktionalität.
         pollDone();
@@ -1170,6 +1220,51 @@ main {
 
   // ── Poll-Fallback + Monitor-WS-Nudge-Client (A1, ADR 0016) ────────────
   requestPoll();
+
+  // Stillstands-Wächter: Stellt fest, was bisher niemand sehen konnte — eine
+  // Anzeige, die weiterläuft und trotzdem nichts Neues mehr übernimmt. Sie
+  // wirft dabei keinen Fehler und wird nicht geschlossen, fällt also durch
+  // alle drei Auslöser des Log-Uploads (JS-Fehler, unhandledrejection,
+  // pagehide). Erst dieser Takt macht den Zustand bezeugbar.
+  //
+  // Er HEILT nichts: kein Reload, kein Zurücksetzen der Ordnungszahl. Wir
+  // wissen noch nicht, woran es liegt, und eine Selbstheilung würde genau die
+  // Spur verwischen, wegen der er gebaut wurde.
+  //
+  // Ein 304 zählt hier als angekommener Stand — die Übersicht bekommt in
+  // einer ruhigen Halle minutenlang nichts anderes, und das ist gesund.
+  setInterval(function () {
+    var jetzt = Date.now();
+    var lage = lagePruefen({
+      startMs: seitStartMs,
+      letzterAbrufOkMs: letzterAbrufOkMs,
+      letzterStandMs: letzterStandMs,
+      gemeldeteArt: gemeldeteStillstandsArt,
+    }, jetzt);
+    if (lage.melden) {
+      gemeldeteStillstandsArt = lage.art;
+      // Alles, was zur Eingrenzung taugt, in EINER Zeile — wer das Log liest,
+      // hat kein zweites Gerät daneben.
+      mlog('error', 'stillstand', {
+        art: lage.art,
+        stillMs: lage.stillMs,
+        verworfeneNudges: verworfeneNudges,
+        bestaetigungen: bestaetigungen,
+        wsOpen: mwsOpen,
+        frameAltMs: lastServerFrameAt ? jetzt - lastServerFrameAt : null,
+        fetchOk: lastFetchOk,
+        fehler: errorCount,
+        taktMs: fallbackTakt(pushGesund(kanalZustand(), jetzt), langsamErlaubt),
+        marke: letzteMarke ? String(letzteMarke).slice(0, 24) : null,
+        markeAltMs: markeGesetztAt ? jetzt - markeGesetztAt : null,
+      });
+      uploadMonitorLog();
+    } else if (lage.erholt) {
+      gemeldeteStillstandsArt = null;
+      mlog('info', 'stillstand_vorbei', { verworfeneNudges: verworfeneNudges });
+      uploadMonitorLog();
+    }
+  }, 10000);
   // Sicherheits-Poll (Spec monitor-livestand-push, S6). Er läuft im
   // 250-ms-Raster und entscheidet bei jedem Tick neu, wie lange die Seite
   // ohne eigenen Abruf auskommen darf:
@@ -1279,7 +1374,10 @@ main {
       lastServerFrameAt = Date.now();
       if (typeof msg.court !== 'number' || typeof msg.seq !== 'number') return;
       // Veraltete/doppelte Nudges verwerfen (Spec monitor-livestand-push, S4).
-      if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, 'push')) return;
+      if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, 'push')) {
+        verworfeneNudges++;
+        return;
+      }
       lastSeqByCourt[msg.court] = msg.seq;
       // Ein gültiger Anstoß heißt: Es hat sich etwas geändert → den
       // Voll-Stand niedrig-latent holen (coalesct).

@@ -581,15 +581,36 @@ mitgeändert worden:
   ehrlich sagen, dass die alte Konfiguration nicht gelesen werden konnte —
   statt ihm einen harmlos aussehenden Ersteinrichtungs-Assistenten zu
   zeigen.
-- **`locked_courts` geht beim Speichern von Einstellungen verloren.**
-  `set_court_locked` schreibt die Sperrliste host-seitig in die
-  `config.json`; der Einrichtungs-Assistent schickt beim nächsten Speichern
-  seinen beim Öffnen aufgenommenen Stand zurück (`buildConfig`:
-  `locked_courts: initialConfig.locked_courts ?? []`) und setzt sie damit
-  zurück. Ablauf: Feld in der Übersicht sperren → in den Einstellungen
-  irgendetwas speichern → Sperre weg. Für die TL-Geräteliste ist dieser
-  Pfad bereits geschlossen (`keep_host_managed_fields` in `commands.rs`);
-  `locked_courts` gehört auf demselben Weg dazu.
+- ~~**`locked_courts` geht beim Speichern von Einstellungen verloren.**~~
+  **Erledigt in v0.9.258** (Spec `tl-web-felder-sperren`):
+  `keep_host_managed_fields` schützt die Sperrliste jetzt wie die
+  TL-Geräteliste. Der Fehler wog schwerer als gedacht — mit der Bedienung aus
+  der Halle wäre der Ablauf gewesen: kaputtes Feld sperren, jemand speichert
+  am PC eine Einstellung, Sperre still weg, Automatik legt ein Spiel darauf.
+  Ein Test hält den Pfad offen (`keep_host_managed_fields_preserves_the_locked_courts`).
+
+## Wünsche vom 23.08.2026
+
+- **Felder sperren im TL-Web** — Spec freigegeben und umgesetzt (v0.9.258):
+  [docs/features/tl-web-felder-sperren.md](features/tl-web-felder-sperren.md),
+  [ADR 0044](adr/0044-sperrliste-turniergebunden.md). Schloss nebenbei den
+  `locked_courts`-Datenverlust oben.
+- **Warnung bei scheinbar fertigem Spiel** — Spec freigegeben und umgesetzt
+  (v0.9.259): [docs/features/tl-warnung-fertiges-spiel.md](features/tl-warnung-fertiges-spiel.md),
+  [ADR 0045](adr/0045-fertig-warnung-serverseitig-gestempelt.md).
+- **Feldauswahl für die Automatikvergabe** — Spec freigegeben und umgesetzt
+  (v0.9.262): [docs/features/tl-wunschfeld.md](features/tl-wunschfeld.md),
+  [ADR 0046](adr/0046-wunschfeld-reserviert-ab-spielbereitschaft.md).
+  Reserviert wird ab Spielbereitschaft — ein Endspiel, dessen Spieler noch
+  im Halbfinale stehen, hält das Hauptfeld nicht leer.
+- **Tablet merkt eine veraltete Fassung** — Spec umgesetzt (v0.9.266 stiller
+  Abgleich, v0.9.268 Fernbefehl „⟳ Tablets"):
+  [docs/features/tablet-version-abgleich.md](features/tablet-version-abgleich.md).
+  Kein ADR nötig. Wichtig für die Deutung des Feldtests: Der berichtete
+  „Hänger" bis zum Leeren der Browserdaten war **nicht** der HTTP-Cache
+  (`no-store` steht seit dem ersten Commit, die Seiten sind selbstenthaltend),
+  sondern das hängende `pendingResult` im `localStorage` — behoben mit
+  v0.9.254. Offen: Feldtest beider Wege.
 
 ## Wünsche vom 11.08.2026
 

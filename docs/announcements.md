@@ -33,10 +33,29 @@ des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
   sonst bliebe der erste Aufruf des Tages stumm). Die Entscheidung liegt in
   [`src/io/announceBaseline.mjs`](../src/io/announceBaseline.mjs) und ist
   über `scripts/test-announce-baseline.mjs` (CI) festgehalten.
-- **Noch offen, gleiche Fehlerklasse:** Wird die Ansage-Halle im Betrieb
-  umgeschaltet, gelten die belegten Felder der neuen Halle als frisch
-  aufgerufen und werden angesagt. Unverändert gelassen, weil es ein anderer
-  Fall ist als der Start.
+- **Ein Hallenwechsel holt nichts nach** (Befund 23.08.2026, seit v0.9.257):
+  Wurde die Ansage-Halle im Betrieb umgestellt — oder auf „alle Hallen" —,
+  sagte das Gerät schlagartig **jedes dort laufende Spiel** noch einmal an.
+  Am Ansage-Slave war das eine halbe Turnierhälfte auf einmal.
+
+  Ursache war ein eigener Reset im `MatchAnnouncer`, der die Baseline beim
+  Hallenwechsel leerte, damit „die erste Belegung nach dem Wechsel angesagt
+  wird". Er ist ersatzlos entfallen — und war nie nötig: `diffOccupiedCourts`
+  führt die Baseline **vor** dem Hallenfilter und merkt sich deshalb auch
+  Felder der gefilterten Halle, ausdrücklich damit ein Umschalten nichts
+  nachholt. Nach dem Wechsel sind alle laufenden Spiele also bereits bekannt;
+  angesagt wird, was danach aufs Feld kommt.
+
+  Dieselbe Regel wie bei der Schiedsrichter-Rotation seit v0.9.253: Der erste
+  beobachtete Stand ist Ausgangslage, kein Ereignis. Festgehalten in
+  `scripts/test-announce-baseline.mjs` („Halle hinzunehmen holt nichts nach").
+- **Die Halle wird an drei Stellen gesetzt** — Dashboard, Ansage-Einstellungen
+  und (am Cloud-Slave) das Geräte-Panel, das mit `announce_hall` zugleich
+  festlegt, welche Halle das Gerät bedient. Die Ansage-Einstellungen halten
+  ihren Formular-Stand lokal; ohne Abgleich schrieben sie beim Speichern einen
+  veralteten Wert zurück und wählten die eben woanders gewählte Halle wieder
+  ab (Befund 23.08.2026, behoben in v0.9.257). Wer dort ein Feld ergänzt, das
+  **auch anderswo** geschrieben wird, braucht denselben Abgleich.
 - **Engine:** [`src/io/announcer.ts`](../src/io/announcer.ts) — portiert
   aus der Schwester-App badhub-tournament.
 

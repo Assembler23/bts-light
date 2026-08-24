@@ -761,6 +761,23 @@
   ↔ SEITENWECHSEL — Spieler die Hälften tauschen
 </div>
 
+<!-- Neue Fassung verfügbar (Spec `tablet-version-abgleich`). Erscheint nur,
+     solange ein Spiel läuft — sonst lädt die Seite sich selbst neu. Bewusst
+     oben und nicht als Vollbild: Das Zählen darf nie verdeckt sein. -->
+<div id="update-hinweis" style="
+  position: fixed; left: 50%; top: .5rem; transform: translateX(-50%);
+  background: #0ea5e9; color: #04263a; padding: .6rem 1rem;
+  border-radius: .8rem; font-size: .95rem; font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0,0,0,.45); z-index: 19;
+  display: none; align-items: center; gap: .75rem;
+">
+  <span>Neue Fassung verfügbar</span>
+  <button type="button" id="update-jetzt" style="
+    background:#04263a; color:#e0f2fe; border:0; border-radius:.5rem;
+    padding:.4rem .9rem; font-weight:800; font-size:.95rem; cursor:pointer
+  ">Jetzt laden</button>
+</div>
+
 <!-- Diagnose-Modal (5× Tap auf den Connection-Dot öffnet das) -->
 <div id="diag-modal" style="
   position: fixed; inset: 0; background: rgba(2,6,23,.94); z-index: 30;
@@ -1000,6 +1017,15 @@ const DEVICE_ID = (() => {
     return id;
   } catch { return ''; } // ohne localStorage: wie altes Tablet (leer)
 })();
+// Lässt sich auf diesem Gerät überhaupt etwas sichern?
+//
+// Ohne `localStorage` (Kiosk mit gesperrtem Speicher, privater Modus) schlägt
+// `persistState()` still fehl UND `DEVICE_ID` bleibt leer — der Server
+// erkennt das Gerät nach einem Neuladen also nicht wieder und zeigt „Feld
+// belegt". Auf so einem Gerät überlebt ein laufendes Spiel das Neuladen
+// nicht; der Fernbefehl muss dort warten wie der stille Abgleich
+// (Review-Fund 24.08.2026).
+const SPEICHER_GEHT = DEVICE_ID !== '';
 // PIN fürs Einstellungs-Menü (Feldwechsel ohne QR). Vom Server getemplatet
 // (Live-Config, Default „0000"). Reiner Bedien-Schutz, KEINE Sicherheitsgrenze.
 // Defensiv: wird der Platzhalter mal nicht ersetzt (z. B. älterer Relay) oder
@@ -1029,6 +1055,38 @@ const LOGO_BASE = BASE_PATH === ''
 // ─────────────────────────── Diagnose-Log ──────────────────────────────
 // Ring-Buffer der letzten 300 wichtigen Events: WS-Open/Close, match_assigned,
 // match_cleared, score-Update-Versuche, Submit-Versuche, Render-Fehler.
+// ── Version der geladenen Seite (Spec `tablet-version-abgleich`) ────────
+//
+// Beim Ausliefern eingebettet: der Fingerabdruck der Seite, die dieser Server
+// hat. Im Lebenszeichen (`pong`) nennt er ihn erneut — weichen beide ab, läuft
+// hier eine veraltete Fassung.
+//
+// **Warum das nötig ist:** Ein Turnier-Tablet läuft tagelang. Ein Update
+// erreicht es nur, wenn die Seite neu geladen wird — und der Browser holt sie
+// nicht von selbst. Am Feldtest half weder ein Schließen des Tabs noch ein
+// Neustart des Geräts.
+const SEITEN_MARKE = '__SEITEN_MARKE__';
+let neueFassungMarke = '';
+
+/** Lädt die Seite neu und umgeht dabei einen etwaigen Zwischenspeicher.
+ *
+ *  Die Marke wandert in die URL: Für den Browser ist das eine ANDERE Adresse,
+ *  für die er keinen gespeicherten Eintrag hat. Ein schlichtes
+ *  `location.reload()` kann dagegen aus dem Speicher bedient werden — genau
+ *  daran scheiterte das Neuladen am Turnier.
+ */
+function neuLaden(marke) {
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('v', marke || String(Date.now()));
+    tlog('info', 'reload_neue_fassung', { marke });
+    uploadTabletLog();
+    location.replace(url.toString());
+  } catch {
+    location.reload();
+  }
+}
+
 // Lebt in localStorage → überlebt Browser-Crash + ist später als .txt
 // herunterladbar (5× Tap auf den Connection-Dot oben rechts öffnet das
 // Diagnose-Modal).
@@ -1098,6 +1156,13 @@ const STATE = {
   // Noch nicht bestätigtes Endergebnis – wird im Hintergrund wiederholt,
   // bis der Server ok:true meldet. { matchId, courtLabel, sets } | null.
   pendingResult: /** @type {null | object} */ (null),
+  // Dauerhafte Ablehnung des Turnier-PCs: Genau dieses Ergebnis wird nie
+  // angenommen (siehe `naechsterSchritt`). Trägt den anzuzeigenden Grund;
+  // null = keine. Der Sendeauftrag (`pendingResult`) wird dabei losgelassen:
+  // Er ist erschöpft — genau dieser Payload kommt nie durch. „Erneut senden"
+  // baut den Body ohnehin frisch aus dem aktuellen Stand, und das ist auch
+  // richtig so, wenn der Bediener ihn zwischenzeitlich korrigiert hat.
+  resultRejected: /** @type {null | string} */ (null),
   // Aufgabe (Retired): Match wurde abgebrochen, Sieger manuell gewählt.
   retired: /** @type {boolean} */ (false),
   // Kampflos (Walkover): Match wurde nicht ausgespielt (z. B. Nichtantritt).
@@ -1155,6 +1220,9 @@ const STATE = {
   // einmalig die Court-Seiten (egal welches Team führt). Wir merken uns,
   // ob das in diesem Match schon erfolgt ist.
   midGameSwitchDone: /** @type {boolean} */ (false),
+  // Direkt nach einer Unterbrechung: Die Ansage lautet „{Stand}, bitte
+  // spielen." statt nur „{Stand}". Wird beim nächsten Punkt gelöscht.
+  resumeAnsage: /** @type {boolean} */ (false),
 
   // Laufende Pause/Unterbrechung: kind 'eleven'|'game' (mit Countdown) oder
   // 'injury' (Behandlung, ohne Countdown). null = keine Pause.
@@ -1240,6 +1308,8 @@ const els = {
   matchClock: document.getElementById('match-clock'),
   injuryBtn: document.getElementById('injury-btn'),
   megaphoneBtn: document.getElementById('megaphone-btn'),
+  updateHinweis: document.getElementById('update-hinweis'),
+  updateJetzt: document.getElementById('update-jetzt'),
   megaphoneModal: document.getElementById('megaphone-modal'),
   megaphoneTitle: document.getElementById('megaphone-title'),
   megaphoneSubtitle: document.getElementById('megaphone-subtitle'),
@@ -1336,7 +1406,25 @@ function connect() {
     lastServerContact = Date.now();
     let msg;
     try { msg = JSON.parse(ev.data); } catch { tlog('warn', 'ws_msg_invalid', String(ev.data).slice(0, 200)); return; }
-    if (msg.type === 'pong') { return; } // reines Lebenszeichen
+    if (msg.type === 'pong') {
+      // Das Lebenszeichen trägt den Fingerabdruck der Seite, die der Server
+      // JETZT ausliefert. Weicht er ab, ist diese hier veraltet.
+      if (msg.marke && SEITEN_MARKE && msg.marke !== SEITEN_MARKE
+          && msg.marke !== neueFassungMarke) {
+        neueFassungMarke = msg.marke;
+        tlog('warn', 'neue_fassung_erkannt', { hier: SEITEN_MARKE, dort: msg.marke });
+        // Steht kein Spiel auf dem Feld, sofort holen — das trifft die meisten
+        // Geräte zwischen zwei Spielen, und niemand muss etwas tun. Läuft ein
+        // Spiel, wird nur der Hinweis gezeigt: Ein Neuladen mitten im Zählen
+        // wäre störend, auch wenn der Stand gesichert ist.
+        if (!STATE.match && !STATE.pendingResult) {
+          neuLaden(msg.marke);
+          return;
+        }
+        render();
+      }
+      return;
+    }
     if (msg.type === 'match_assigned') {
       const incomingFinalized = !!(msg.match && msg.match.finalized);
       tlog('info', 'match_assigned', { matchId: msg.match?.matchId, finalized: incomingFinalized });
@@ -1363,6 +1451,25 @@ function connect() {
       // ihn (und damit TV + Liveticker) sofort auf den Tablet-Stand.
       sendScoreUpdate();
       persistState();
+    }
+    else if (msg.type === 'reload') {
+      // Fernbefehl aus der Turnierleitung. Anders als der stille Abgleich
+      // (oben im 'pong'-Zweig) fragt er NICHT, ob gerade ein Spiel läuft:
+      // Jemand hat ihn bewusst gegeben. Der Stand überlebt das Neuladen —
+      // er liegt in localStorage und beim Server.
+      tlog('info', 'reload_befehl');
+      // Einzige Ausnahme: Ohne nutzbaren Speicher überlebt weder der
+      // Spielstand noch die Geräte-Kennung das Neuladen. Dann gilt die
+      // Zusage „der Stand geht nicht verloren" nicht — also nur der Hinweis,
+      // und die Entscheidung fällt jemand am Gerät.
+      if ((STATE.match || STATE.pendingResult) && !SPEICHER_GEHT) {
+        tlog('warn', 'reload_befehl_vertagt', { grund: 'kein_speicher' });
+        neueFassungMarke = msg.marke || '';
+        render();
+        return;
+      }
+      neuLaden(msg.marke || '');
+      return;
     }
     else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearReidentify(); clearMatch(); }
     else if (msg.type === 'court_occupied') {
@@ -1720,7 +1827,15 @@ function endBreak() {
       sendAlert();
     }
   }
+  // Nach der Unterbrechung ruft der Schiedsrichter den Stand auf und gibt
+  // das Spiel frei: „11 – 8, bitte spielen." (DBV-Ablauf). Ohne diese Marke
+  // sprang die Ansage zurück auf den reinen Punktestand, und die Freigabe
+  // fehlte ganz. Gilt für die Punkte- und die Satzpause; nach einer
+  // Behandlungspause fragt der Schiedsrichter stattdessen „Sind Sie
+  // spielbereit?" und gibt danach frei — auch dafür passt der Aufruf.
+  const warPause = STATE.pause && STATE.pause.kind;
   STATE.pause = null;
+  if (warPause) STATE.resumeAnsage = true;
   // Doppel/Mixed: Steht nach einem Satz die Aufschläger-/Annehmer-Neuwahl an
   // (serveSetupTeam beim Satz-Ende gesetzt), öffnet sie JETZT — nach der
   // Satzpause. So bleibt `setup` während der Pause auf 'playing' (undo/
@@ -1780,9 +1895,18 @@ function renderBreak() {
     const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     els.breakCountdown.textContent = rest < 0 ? `+${mmss}` : mmss;
     els.breakCountdown.classList.toggle('overrun', rest < 0);
+    // Die Schwelle steht NICHT fest bei 11: Sie kommt aus der Zählweise
+    // des Spiels (21er → 11, 15er → 8). Der feste Text war bei jedem
+    // 15er-Turnier schlicht falsch (Turnier-Befund 24.08.2026).
+    const schwelle = intervalThreshold();
     els.breakTitle.textContent = (STATE.pause.kind === 'eleven'
-      ? 'Pause bei 11 Punkten'
+      ? (schwelle ? `Pause bei ${schwelle} Punkten` : 'Punktepause')
       : 'Satzpause') + (rest < 0 ? ' — überzogen' : '');
+  }
+  // Neue Fassung verfügbar? Nur zeigen, solange ein Spiel läuft — ohne Spiel
+  // hat die Seite sich längst selbst neu geladen.
+  if (els.updateHinweis) {
+    els.updateHinweis.style.display = neueFassungMarke ? 'flex' : 'none';
   }
   // „Spiel abbrechen" nur in der Behandlungspause anbieten.
   els.breakAbort.style.display = STATE.pause.kind === 'injury' ? '' : 'none';
@@ -1923,8 +2047,9 @@ function computeServing() {
 
 function persistState(fromRestore) {
   // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
-  // Übermittlung, das muss einen Reload überleben.
-  if (!STATE.match && !STATE.pendingResult) return;
+  // Übermittlung oder wurde abgelehnt; beides muss einen Reload überleben
+  // (die Absage ist der einzige Hinweis, dass hier noch etwas zu tun ist).
+  if (!STATE.match && !STATE.pendingResult && !STATE.resultRejected) return;
   // Monotone Stand-Revision: jede lokale Änderung zählt hoch. Reist im
   // Snapshot mit → beim Reconnect entscheidet „neuer gewinnt" (state_restore-
   // Guard), damit ein veralteter Server-Cache nie offline gezählte Punkte
@@ -1955,6 +2080,7 @@ function persistState(fromRestore) {
     intervalDoneThisGame: STATE.intervalDoneThisGame,
     submittedOk: STATE.submittedOk,
     pendingResult: STATE.pendingResult,
+    resultRejected: STATE.resultRejected,
     startedAt: STATE.startedAt,
     alertInjury: STATE.alertInjury,
     alertOfficial: STATE.alertOfficial,
@@ -2023,6 +2149,9 @@ function applyPersistedState(p) {
   }
   STATE.submittedOk = !!p.submittedOk;
   STATE.pendingResult = p.pendingResult ?? null;
+  // Eine dauerhafte Ablehnung überlebt den Neustart der Seite: Sie ist der
+  // einzige Hinweis darauf, dass hier noch etwas zu tun ist.
+  STATE.resultRejected = typeof p.resultRejected === 'string' ? p.resultRejected : null;
   STATE.startedAt = typeof p.startedAt === 'number' ? p.startedAt : null;
   STATE.alertInjury = !!p.alertInjury;
   STATE.alertOfficial = !!p.alertOfficial;
@@ -2052,8 +2181,9 @@ function restorePersistedState() {
     const raw = localStorage.getItem(PERSIST_KEY);
     if (!raw) return false;
     const p = JSON.parse(raw);
-    // Auch ohne Match wiederherstellen, wenn noch ein Ergebnis offen ist.
-    if (!p || (!p.match && !p.pendingResult)) return false;
+    // Auch ohne Match wiederherstellen, wenn noch ein Ergebnis offen oder
+    // abgelehnt ist.
+    if (!p || (!p.match && !p.pendingResult && !p.resultRejected)) return false;
     applyPersistedState(p);
     return true;
   } catch { return false; }
@@ -2376,6 +2506,8 @@ function addPointOnSide(side) {
 
   // Aufschlagseite VOR der Mutation merken (für die „Aufschlagwechsel"-Ansage).
   const prevServing = STATE.servingSide;
+  // Die Freigabe-Ansage nach einer Pause gilt nur bis zum nächsten Ball.
+  STATE.resumeAnsage = false;
 
   // Snapshot vor Mutation für Undo
   STATE.history.push(snapshot());
@@ -3067,6 +3199,7 @@ function reopen() {
   }
   STATE.submittedOk = false;
   STATE.pendingResult = null;
+  STATE.resultRejected = null;
   STATE.retired = false;
   STATE.walkover = false;
   STATE.cascadeWalkover = false;
@@ -3125,14 +3258,46 @@ function submit() {
   }
   STATE.pendingResult = body;
   STATE.submittedOk = false;
+  // Neuer Versuch, neue Lage — die alte Absage darf nicht stehen bleiben.
+  STATE.resultRejected = null;
   tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets, retired: STATE.retired, walkover: STATE.walkover, cascade: STATE.cascadeWalkover });
   persistState();
   render();
   trySubmitPending();
 }
 
-// Versucht das offene Ergebnis zu übermitteln; bei Misserfolg plant es
-// sich selbst neu, bis der Server ok:true bestätigt.
+/** Standardtext, wenn der Turnier-PC keinen Grund mitschickt.
+ *  Inline-Kopie aus `src/io/resultRetry.mjs` — dort auch die Begründung. */
+const RESULT_OHNE_GRUND = 'Der Turnier-PC hat das Ergebnis abgelehnt.';
+
+/**
+ * Wie geht es weiter, wenn ein Ergebnis nicht durchkommt?
+ *
+ * Inline-Kopie von `src/io/resultRetry.mjs` (getestet in
+ * `scripts/test-result-retry.mjs`) — die Assets durchlaufen keinen Build und
+ * können keine Module laden. Änderungen hier und dort gemeinsam.
+ *
+ * Die Trennlinie: Kann derselbe Payload beim nächsten Versuch angenommen
+ * werden? Netzfehler und zustandsabhängige Absagen ja, eine inhaltliche
+ * Ablehnung nie. Im Zweifel wird wiederholt — nur das ausdrückliche
+ * `permanent: true` des Hosts beendet den Versuch.
+ */
+function naechsterSchritt(antwort) {
+  if (!antwort || typeof antwort !== 'object') {
+    return { art: 'wiederholen', grund: '' };
+  }
+  if (antwort.ok === true) return { art: 'ok', grund: '' };
+  const grund = typeof antwort.error === 'string' && antwort.error.trim()
+    ? antwort.error.trim()
+    : RESULT_OHNE_GRUND;
+  return antwort.permanent === true
+    ? { art: 'dauerhaft', grund }
+    : { art: 'wiederholen', grund };
+}
+
+// Versucht das offene Ergebnis zu übermitteln; bei Misserfolg plant es sich
+// selbst neu — außer bei einer dauerhaften Ablehnung, die keine Wiederholung
+// überstehen könnte (siehe `naechsterSchritt`).
 async function trySubmitPending() {
   if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
   // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ein noch offenes Ergebnis wird
@@ -3153,12 +3318,32 @@ async function trySubmitPending() {
       body: JSON.stringify(pr),
       signal: ac.signal,
     });
+    // Ein HTTP-Fehler ist keine Aussage über das Ergebnis — wiederholen.
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     // Wichtig: der Relay antwortet auch bei „bts-light nicht verbunden"
     // mit HTTP 200 – die echte Aussage steht im Body-Feld ok.
-    const data = await res.json().catch(() => ({ ok: false, error: 'ungültige Antwort' }));
-    if (!data.ok) throw new Error(data.error || 'Übermittlung abgelehnt');
+    const data = await res.json().catch(() => null);
+    const schritt = naechsterSchritt(data);
+    if (schritt.art === 'dauerhaft') {
+      // Aufhören. Weitere Versuche mit demselben Payload werden genauso
+      // abgelehnt, und die bisherige Meldung („wird wiederholt, bis es
+      // ankommt") war ein Versprechen, das nie eingelöst wurde — das Feld
+      // blieb belegt, ohne dass jemand den Grund sah (Feldtest 22.08.2026).
+      // Den Sendeauftrag loslassen — sonst blockte `submitResult()` den
+      // Knopf (es lehnt ab, solange ein `pendingResult` anliegt), und
+      // „Erneut senden" täte nichts. Verloren geht nichts: Der Body wird
+      // dort aus dem aktuellen Stand neu gebaut.
+      STATE.pendingResult = null;
+      STATE.resultRejected = schritt.grund;
+      tlog('error', 'submit_rejected', { matchId: pr.matchId, grund: schritt.grund });
+      persistState();
+      render();
+      uploadTabletLog();
+      return;
+    }
+    if (schritt.art !== 'ok') throw new Error(schritt.grund || 'Übermittlung abgelehnt');
     STATE.pendingResult = null;
+    STATE.resultRejected = null;
     STATE.submittedOk = true;
     tlog('info', 'submit_ok', { matchId: pr.matchId });
     persistState();
@@ -3560,6 +3745,15 @@ function render() {
     if (STATE.submittedOk) {
       els.submitBtn.disabled = true;
       els.submitStatus.textContent = '✓ Übermittelt — die Turnierleitung kann übernehmen.';
+    } else if (STATE.resultRejected) {
+      // Dauerhaft abgelehnt: den Grund nennen und den Knopf wieder freigeben.
+      // Der Bediener kann den Stand korrigieren und neu senden oder die
+      // Turnierleitung holen — beides ist besser als ein Tablet, das
+      // stillschweigend endlos wiederholt.
+      els.submitBtn.disabled = false;
+      els.submitStatus.textContent =
+        '✗ Nicht angenommen: ' + STATE.resultRejected
+        + ' — bitte den Stand prüfen oder die Turnierleitung ansprechen.';
     } else if (STATE.pendingResult) {
       els.submitBtn.disabled = true;
       els.submitStatus.textContent = 'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.';
@@ -3680,6 +3874,14 @@ function umpOrdinal(n) {
 function umpOrdinalAkk(n) {
   return ['nullten', 'ersten', 'zweiten', 'dritten', 'vierten', 'fünften'][n] || (n + '.');
 }
+/** Nach bestimmtem Artikel: „**der erste** Satz" (schwache Beugung). */
+function umpOrdinalNom(n) {
+  return ['nullte', 'erste', 'zweite', 'dritte', 'vierte', 'fünfte'][n] || (n + '.');
+}
+/** Zahlwort für die Satzbilanz: „**einen** Satz beide", „**zwei** Sätze beide". */
+function umpAnzahlWort(n) {
+  return ['null', 'einen', 'zwei', 'drei', 'vier'][n] || String(n);
+}
 
 // Aufschläger als Anzeigename (spieler-genau im Doppel via computeServing).
 function umpServerName() {
@@ -3715,12 +3917,28 @@ function umpScoreSpoken() {
   return sv === rv ? `${sv} beide` : `${sv}:${rv}`;
 }
 
+/** Wie der beginnende Satz angesagt wird: „Zweiter Satz." — oder
+ *  „Entscheidungssatz.", wenn beide Parteien einen Satz vor dem Sieg stehen.
+ *  Dieselbe Bedingung wie beim Seitenwechsel im Entscheidungssatz. */
+function umpSatzAnsage(n) {
+  if (!STATE.match) return `${umpCap(umpOrdinal(n))} Satz.`;
+  const need = requiredSetsToWin(STATE.match.bestOfSets);
+  const links = STATE.setsCompleted.filter(s => s.left > s.right).length;
+  const rechts = STATE.setsCompleted.filter(s => s.right > s.left).length;
+  const entscheidung = STATE.match.bestOfSets > 1
+    && links === need - 1 && rechts === need - 1;
+  return entscheidung ? 'Entscheidungssatz.' : `${umpCap(umpOrdinal(n))} Satz.`;
+}
+
 function umpOpeningSpoken() {
   const right = umpTeamNames(umpSideTeam('right'));
   const left = umpTeamNames(umpSideTeam('left'));
   const server = umpServerName();
   const recv = umpReceiverName();
-  let s = `Meine Damen und Herren: zu meiner Rechten ${right}, zu meiner Linken ${left}. `;
+  // „…, UND zu meiner Linken …" — so steht es im DBV-Ablauf. Die Reihenfolge
+  // ist fest: immer erst rechts, dann links, unabhängig davon, wer aufschlägt
+  // (recherchiert und belegt 24.08.2026).
+  let s = `Meine Damen und Herren: zu meiner Rechten ${right}, und zu meiner Linken ${left}. `;
   if (server && recv) s += `${server} schlägt auf ${recv}. `;
   else if (server) s += `${server} schlägt auf. `;
   return s + 'Null beide – bitte spielen.';
@@ -3732,7 +3950,20 @@ function umpSetEndSpoken() {
   const winSide = last.left > last.right ? 'left' : 'right';
   const winner = umpTeamNames(umpSideTeam(winSide));
   const hi = Math.max(last.left, last.right), lo = Math.min(last.left, last.right);
-  return `Satz. Den ${umpOrdinalAkk(STATE.setsCompleted.length)} Satz gewinnt ${winner} mit ${hi}:${lo}.`;
+  // Wortlaut nach dem DBV-Ablauf: „Der erste Satz wurde gewonnen von X mit
+  // 21:12." — nicht „Den ersten Satz gewinnt X".
+  const n = STATE.setsCompleted.length;
+  let s = `Satz. Der ${umpOrdinalNom(n)} Satz wurde gewonnen von ${winner} mit ${hi}:${lo}.`;
+  // Steht es nach diesem Satz gleich, gehört der Zwischenstand dazu: „Einen
+  // Satz beide." Ohne ihn fehlt der Ansage genau die Angabe, auf die es im
+  // Saal ankommt. (Bei Führung sagt der Ablaufplan nichts — dann auch wir
+  // nicht.)
+  const links = STATE.setsCompleted.filter(x => x.left > x.right).length;
+  const rechts = STATE.setsCompleted.filter(x => x.right > x.left).length;
+  if (links > 0 && links === rechts) {
+    s += ` ${umpCap(umpAnzahlWort(links))} ${links === 1 ? 'Satz' : 'Sätze'} beide.`;
+  }
+  return s;
 }
 
 function umpMatchEndSpoken() {
@@ -3746,12 +3977,16 @@ function umpMatchEndSpoken() {
   }
   const winSide = winsLeft >= winsRight ? 'left' : 'right';
   const winner = umpTeamNames(umpSideTeam(winSide));
-  const x = Math.max(winsLeft, winsRight), y = Math.min(winsLeft, winsRight);
   // Satzstände aus Sicht des Siegers (gewonnene Sätze zuerst je Satz).
   const sets = STATE.setsCompleted
-    .map(s => winSide === 'left' ? `${s.left}:${s.right}` : `${s.right}:${s.left}`)
-    .join(', ');
-  return `Spiel. Das Spiel gewinnt ${winner}, ${x} ${x === 1 ? 'Satz' : 'Sätze'} zu ${y}: ${sets}.`;
+    .map(s => winSide === 'left' ? `${s.left}:${s.right}` : `${s.right}:${s.left}`);
+  // Wortlaut nach dem DBV-Ablauf: „Das Spiel wurde gewonnen von X mit 21:17,
+  // 15:21 und 24:22." — die Satzbilanz („zwei Sätze zu eins") gehört nicht in
+  // die Ansage, die Satzstände sagen sie ohnehin.
+  const stand = sets.length > 1
+    ? `${sets.slice(0, -1).join(', ')} und ${sets[sets.length - 1]}`
+    : sets.join('');
+  return `Spiel. Das Spiel wurde gewonnen von ${winner} mit ${stand}.`;
 }
 
 // Satzball/Matchball-Badge (Näherung: Führender 1 Punkt vom Satzgewinn entfernt).
@@ -3788,7 +4023,15 @@ function umpAnnouncement() {
   }
   if (noPoint && STATE.setsCompleted.length > 0) {
     const n = STATE.setsCompleted.length + 1;
-    return { say: `${umpCap(umpOrdinal(n))} Satz. Null beide – bitte spielen.`, badge: '' };
+    // Der entscheidende Satz heißt in der Ansage „Entscheidungssatz", nicht
+    // „Dritter Satz" — so steht es im Regelwerk, und so sagt es jeder
+    // Schiedsrichter (Turnier-Befund 24.08.2026). Bei welcher Nummer das
+    // eintritt, hängt an der Zählweise; die Bedingung dafür gibt es hier
+    // schon für den Seitenwechsel.
+    return { say: `${umpSatzAnsage(n)} Null beide – bitte spielen.`, badge: '' };
+  }
+  if (STATE.resumeAnsage) {
+    return { say: `${umpScoreSpoken()}, bitte spielen.`, badge: '' };
   }
   const ev = STATE.lastEvent;
   if (ev && ev.type === 'card') {
@@ -4136,7 +4379,12 @@ function applyCard(color) {
     ? `${name}, Verwarnung wegen unsportlichen Verhaltens. ${stand}`
     : color === 'red'
       ? `${name}, Fehler wegen unsportlichen Verhaltens. ${stand}`
-      : `${name}, disqualifiziert.`;
+      // Der Grund ist bei Schwarz ein ANDERER als bei Gelb und Rot:
+      // „wegen grober Unsportlichkeit", nicht „wegen unsportlichen
+      // Verhaltens" (DBV-Ablauf, SHBV-Schiedsrichter-Infothek). Die
+      // Zwischenfassung von v0.9.263 hatte den Zusatz von Gelb/Rot
+      // übernommen — richtig war nur, dass überhaupt einer fehlte.
+      : `${name}, disqualifiziert wegen grober Unsportlichkeit.`;
   STATE.cards.push({ team: teamKey, index, name, color, ts: Date.now(), score: stand });
   saveCards();
   STATE.lastEvent = { type: 'card', color, say: txt };
@@ -4254,6 +4502,9 @@ els.finishCancel.addEventListener('click', closeFinishModal);
 els.submitBtn.addEventListener('click', submit);
 els.reopenBtn.addEventListener('click', reopen);
 els.breakSkip.addEventListener('click', endBreak);
+if (els.updateJetzt) {
+  els.updateJetzt.addEventListener('click', () => neuLaden(neueFassungMarke));
+}
 // Korrektur aus der Pause: letzten Punkt zurücknehmen + Pause abbrechen.
 // undo() stellt den Snapshot vor dem auslösenden Punkt wieder her und
 // pusht den Stand an Server/TV (sendScoreUpdate steckt in undo()).

@@ -48,3 +48,28 @@ läuft-gerade) bleiben unangetastet.
 - Spiele können ohne Vorbereitungs-Ansage aufs Feld kommen (dokumentiert).
 - Der `multi_hall`-Guard ist zwingend: In Ein-Hallen-Turnieren wäre jeder
   gesetzte Hallenname sonst eine Vergabe-Sperre.
+
+## Nachtrag 23.08.2026 — die Hand ersetzt den Aufruf ebenfalls
+
+Die Entscheidung oben beschränkte den Aufruf-Ersatz auf **Auto**. Was dabei
+nicht bedacht war: Eine Hand-Zuweisung **räumt** die Auto-Zuordnung (E3, und
+das ist richtig — die Turnierleitung entscheidet). Damit wechselte die Quelle
+von `Auto` auf `Manual`, der Aufruf-Ersatz fiel weg, und das Spiel war für die
+Automatik unsichtbar.
+
+Die Wirkung war also **umgekehrt zur Absicht**: Ein Spiel, das die
+Vorverteilung eben noch aufs Feld gebracht hätte, lag nach dem Hand-Eingriff
+still — und zwar ohne Hinweis. Ausgerechnet der Griff, mit dem die
+Turnierleitung steuern will, legte das Spiel lahm (Turnier-Befund 23.08.2026).
+
+**Ergänzung:** Der Aufruf-Ersatz gilt für `Auto` **und `Manual`**. Eine von
+Hand gesetzte Halle ist das stärkere Signal — sie sagt dasselbe wie ein Aufruf
+für diese Halle, nur ausdrücklicher.
+
+**Regel und BTP-Ort bleiben ausgenommen.** Sie gelten pauschal für ganze
+Disziplinen bzw. stammen aus den Turnierstammdaten; sie als Aufruf zu werten
+hübe die Aufruf-Pflicht für halbe Turniere auf einmal auf. Hier geht es um den
+Eingriff für **ein** Spiel.
+
+Die Bindung selbst ändert sich nicht: Ein Spiel mit Hand-Halle wartet
+weiterhin auf ein Feld **seiner** Halle, statt in die andere zu rutschen.
