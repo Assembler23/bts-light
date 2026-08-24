@@ -1470,6 +1470,18 @@ pub(crate) async fn execute(
         return known;
     }
 
+    // Fernbefehl an die Tablets: braucht **kein** geladenes Turnier und
+    // ändert keine Konfiguration — nur einen Zähler, an dem die
+    // Tablet-Verbindungen hängen. Deshalb ganz vorn, noch vor den Profilen.
+    // Protokoll und Wiederholungserkennung sind oben schon gelaufen.
+    if let relay_proto::TlAction::ReloadTablets = &action {
+        ctx.tablet.request_tablet_reload();
+        let response = relay_proto::TlResponse::ok(0);
+        ctx.tablet
+            .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        return response;
+    }
+
     // Panel-Profile: eigener Weg wie Wertungen unten, weil sie `AppConfig`/
     // `config.json` ändern statt Turnier-Zustand — `apply_state_action`
     // bleibt auf reine `TabletState`-Änderungen ohne Datei-I/O beschränkt
@@ -2149,6 +2161,10 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         // desselben Felds sind zwei verschiedene Absichten und dürfen sich
         // nicht gegenseitig als „schon erledigt" gelten.
         A::LockCourt { court_id, locked } => format!("lock:{court_id}:{locked}"),
+        // Ohne veränderlichen Teil: Der Befehl trägt keine Nutzlast. Die
+        // Idempotenz hängt an der Vorgangs-Kennung — ein zweiter, bewusster
+        // Druck bringt eine neue mit und wird deshalb ausgeführt.
+        A::ReloadTablets => "reload-tablets".to_string(),
         // Das Ziel gehört hinein: „auf Feld 3" und „aufheben" sind zwei
         // verschiedene Absichten und dürfen einander nicht als „schon
         // erledigt" gelten.
@@ -2249,6 +2265,7 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         A::ProfileSetDefault { profile_id } => {
             format!("Profil {profile_id} als Standard gesetzt")
         }
+        A::ReloadTablets => "Alle Tablets laden neu".to_string(),
         A::LockCourt { court_id, locked } => {
             if *locked {
                 format!("Feld {court_id} gesperrt")
@@ -2368,6 +2385,13 @@ pub struct TlState {
     /// glaubte, das Endspiel sei gesteuert.
     #[serde(default)]
     pub can_set_wish_court: bool,
+    /// Kennt dieser Turnier-PC den Fernbefehl „alle Tablets neu laden"
+    /// (Spec `tablet-version-abgleich`)? Gleiche Begründung wie bei
+    /// [`Self::can_lock_courts`]: Ein älterer Host verwirft die unbekannte
+    /// Aktion still — die Turnierleitung drückte auf einen toten Knopf und
+    /// hielte die Tablets für aufgefrischt.
+    #[serde(default)]
+    pub can_reload_tablets: bool,
     /// Nach wie vielen Sekunden ein „fertig aussehendes" Spiel gemeldet wird
     /// (`0` = Warnung aus). Kommt aus der Konfiguration; die Seite rechnet
     /// damit gegen [`TlCourt::decided_since_ms`].
@@ -3053,6 +3077,7 @@ pub(crate) fn build_state_limited(
             // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
             // lehnt die Aktion ohnehin ab (E7).
             can_lock_courts: true,
+            can_reload_tablets: true,
             halls: Vec::new(),
             auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
             hall_prefill: Some(hall_prefill_view(config, 0, false)),
@@ -3495,6 +3520,7 @@ pub(crate) fn build_state_limited(
         // Dieser Host kann es — die Oberfläche darf den Eintrag zeigen.
         can_lock_courts: true,
         can_set_wish_court: true,
+        can_reload_tablets: true,
         finished_warning_seconds: config.finished_warning_seconds,
         rev,
         server_now_ms: now_ms,
@@ -8502,6 +8528,9 @@ mod tests {
             // Personen, nur über die Programmversion — und ohne es zeigte
             // die Seite einen Knopf, den ein älterer Host still verwirft.
             "can_lock_courts",
+            // Fähigkeitsmerkmal (Spec tablet-version-abgleich): reines Bool
+            // „dieser Turnier-PC kennt den Fernbefehl".
+            "can_reload_tablets",
             // Hallen-Farbe (Spec hallen-farben): reiner Hex-Anzeigewert je
             // Halle — kein Personenbezug. Der Beendet-Hallenname reist als
             // ohnehin erlaubtes "hall".

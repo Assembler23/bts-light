@@ -355,6 +355,39 @@ pub fn reconnect_decision(
     }
 }
 
+/// Beobachtet den Fernbefehl-Zähler für **einen** Beobachter — eine
+/// Tablet-Verbindung im LAN, die Relay-Sitzungsfolge in der Cloud (Spec
+/// `tablet-version-abgleich`).
+///
+/// Eigener Typ, weil beide Schleifen dieselben zwei Fehler machen könnten:
+/// bei 0 beginnen (der Beobachter führte einen Befehl nachträglich aus, den
+/// er nie hätte sehen dürfen — Neulade-Schleife) oder den Stand nach dem
+/// Melden nicht fortschreiben (er meldete ihn in jedem Takt erneut). So ist
+/// beides an einer Stelle geregelt und geprüft.
+pub struct ReloadWacht(u64);
+
+impl ReloadWacht {
+    /// Merkt den aktuellen Stand: Was davor befohlen wurde, gilt für diesen
+    /// Beobachter nicht mehr.
+    pub fn beim_verbinden(state: &TabletState) -> Self {
+        Self(state.tablet_reload_gen())
+    }
+
+    /// Ist seither ein Befehl gegeben worden? Meldet ihn **genau einmal**.
+    ///
+    /// Mehrere Befehle, während niemand hinsah, sind ein einziger
+    /// Nachholbedarf — einmal neu laden macht die Seite aktuell, zweimal
+    /// wäre nur ein zweiter Sprung auf dem Bildschirm.
+    pub fn faellig(&mut self, state: &TabletState) -> bool {
+        let jetzt = state.tablet_reload_gen();
+        if jetzt == self.0 {
+            return false;
+        }
+        self.0 = jetzt;
+        true
+    }
+}
+
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
 #[derive(Default)]
 pub struct TabletState {
@@ -721,6 +754,21 @@ pub struct TabletState {
     /// überflüssigen Neubau — ein zu seltenes zeigte einen alten Stand.
     /// Deshalb im Zweifel hochzählen, plus die Hart-TTL im Handler.
     overview_rev: AtomicU64,
+    /// Zählt die Fernbefehle „alle Tablets neu laden" (Spec
+    /// `tablet-version-abgleich`).
+    ///
+    /// **Kein Broadcast-Kanal, sondern ein Zähler:** Jede Tablet-Verbindung
+    /// sieht ohnehin im 2-Sekunden-Takt im Zustand nach (dort hängt schon die
+    /// Match-Zuweisung dran), und der Relay-Client sweept ebenso. Beide
+    /// merken sich den Stand beim Verbinden und schlagen zu, wenn er sich
+    /// erhöht hat. Das kostet keine Verdrahtung in zwei Binärdateien und
+    /// verzögert um höchstens einen Takt.
+    ///
+    /// Das Merken **beim Verbinden** ist der Kern: Ein Tablet, das sich nach
+    /// dem Befehl frisch verbindet, hat die neue Seite längst geladen — es
+    /// darf den alten Befehl nicht nachträglich ausführen und in eine
+    /// Neulade-Schleife geraten.
+    tablet_reload_gen: AtomicU64,
     /// Die zuletzt gebaute Feld-Liste als fertiges JSON (Spec
     /// monitor-livestand-push, S1). Reiner **Beschleuniger, keine
     /// Wahrheit**: Ist er kalt oder abgestanden, baut der Handler direkt,
@@ -2780,6 +2828,19 @@ impl TabletState {
     /// Meldet eine Änderung, die die Übersicht betreffen kann.
     pub fn bump_overview_rev(&self) {
         self.overview_rev.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Stand des Fernbefehl-Zählers (Spec `tablet-version-abgleich`).
+    /// Nicht direkt vergleichen — dafür ist [`ReloadWacht`] da.
+    pub fn tablet_reload_gen(&self) -> u64 {
+        self.tablet_reload_gen.load(Ordering::Relaxed)
+    }
+
+    /// „Alle Tablets laden ihre Seite neu" — der Befehl aus der
+    /// Turnierleitung. Wirkt auf alle Verbindungen, die den Zähler seither
+    /// beobachten; wer sich danach neu verbindet, ist ohnehin frisch.
+    pub fn request_tablet_reload(&self) {
+        self.tablet_reload_gen.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Legt die gebaute Feld-Liste samt ihrer Ordnungszahlen als Antwortcache
@@ -6776,6 +6837,35 @@ mod tests {
             "unter dem Deckel akzeptiert"
         );
         rx
+    }
+
+    #[test]
+    fn der_fernbefehl_erreicht_nur_wer_ihn_vorher_beobachtet_hat() {
+        let state = TabletState::default();
+        let mut bestehend = ReloadWacht::beim_verbinden(&state);
+        assert!(!bestehend.faellig(&state), "ohne Befehl passiert nichts");
+
+        state.request_tablet_reload();
+        assert!(
+            bestehend.faellig(&state),
+            "eine bestehende Verbindung bekommt den Befehl"
+        );
+        assert!(!bestehend.faellig(&state), "und zwar genau einmal");
+
+        // Der Kern des Entwurfs: Wer sich NACH dem Befehl verbindet, hat die
+        // neue Seite längst geladen. Führte er ihn nachträglich aus, liefe er
+        // beim nächsten Verbinden wieder hinein — eine Neulade-Schleife.
+        let mut frisch = ReloadWacht::beim_verbinden(&state);
+        assert!(
+            !frisch.faellig(&state),
+            "ein frisch verbundener Beobachter holt nichts nach"
+        );
+
+        // Zwei Befehle, während die Verbindung weg war, sind EIN Nachholbedarf.
+        state.request_tablet_reload();
+        state.request_tablet_reload();
+        assert!(frisch.faellig(&state), "der Nachholbedarf kommt an");
+        assert!(!frisch.faellig(&state), "aber nicht doppelt");
     }
 
     #[test]

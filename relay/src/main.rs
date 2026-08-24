@@ -39,6 +39,21 @@ use relay_proto::{
 /// Die Tablet-Spielzettel-UI – dieselbe Datei wie in der bts-light-App.
 const TABLET_HTML: &str = include_str!("../../src-tauri/assets/tablet.html");
 
+/// Fingerabdruck der ausgelieferten Tablet-Seite (Spec
+/// `tablet-version-abgleich`) — **einmal** berechnet.
+///
+/// Sonst würden bei jedem Lebenszeichen jedes Tablets die vollen ~210 KB
+/// `tablet.html` gehasht; bei zwanzig Geräten im Sekundentakt ist das
+/// messbare Arbeit für ein Ergebnis, das sich zur Laufzeit nie ändert
+/// (Review-Fund 24.08.2026).
+///
+/// Über das **unersetzte** `TABLET_HTML`: Sonst trüge jedes Feld eine eigene
+/// Marke (der Platzhalter ist Teil des Textes) und keine passte zur anderen.
+fn seiten_marke() -> &'static str {
+    static MARKE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    MARKE.get_or_init(|| relay_proto::seiten_marke(TABLET_HTML))
+}
+
 /// Die Turnierleitungs-Oberfläche – dieselbe Datei wie in der bts-light-App.
 /// Eine Quelle für LAN und Cloud: Was im Hallennetz erprobt wurde, ist
 /// unterwegs dieselbe Seite.
@@ -836,7 +851,7 @@ async fn court_page(
         .replace("__TABLET_PIN__", "")
         // Wie beim Host: über das unersetzte `TABLET_HTML` — beide Wege
         // liefern dieselbe Seite und müssen dieselbe Marke nennen.
-        .replace("__SEITEN_MARKE__", &relay_proto::seiten_marke(TABLET_HTML));
+        .replace("__SEITEN_MARKE__", seiten_marke());
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
@@ -2310,7 +2325,7 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                 // Der Relay nennt die Version, mit der ER ausgeliefert wurde —
                             // die Seite stammt aus derselben Binärdatei.
                             let _ = tx.send(text(&ServerMsg::Pong {
-                                marke: relay_proto::seiten_marke(TABLET_HTML),
+                                marke: seiten_marke().to_string(),
                             }));
                             }
                             // Zettel-Ereignisse (ADR 0037): 1:1 an den Host,
@@ -4412,6 +4427,23 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             if anzeige_wechsel {
                 notify_monitor(namespace, court_id);
             }
+        }
+        HostFrame::ReloadTablets => {
+            // Fernbefehl aus der Turnierleitung (Spec
+            // `tablet-version-abgleich`). Die Marke kommt aus **unserer**
+            // eingebetteten Seite: Die Cloud-Tablets haben sie von hier
+            // geladen, nicht vom Turnier-PC — und beide Binärdateien tragen
+            // verschiedene Stände.
+            let msg = text(&ServerMsg::Reload {
+                marke: seiten_marke().to_string(),
+            });
+            for tx in namespace.tablets.values() {
+                let _ = tx.send(msg.clone());
+            }
+            tracing::info!(
+                "Fernbefehl: {} Tablet(s) laden neu",
+                namespace.tablets.len()
+            );
         }
         HostFrame::MatchCleared {
             court_id,
@@ -7659,6 +7691,39 @@ mod tests {
             assert!(claim_tl_slot(ns, "token-0", 100_001));
             // Eine Minute später sind die stummen Plätze frei.
             assert!(claim_tl_slot(ns, "token-8", 100_000 + TL_DEVICE_TTL_MS + 1));
+        }
+    }
+
+    #[tokio::test]
+    async fn der_fernbefehl_erreicht_jedes_tablet_des_namespace() {
+        // Der Befehl gilt allen Feldern, nicht einem — anders als jedes
+        // andere Tablet-Frame, das einen Empfänger adressiert.
+        let (broker, mut rx1, host) = broker_with_tablet(101).await;
+        let mut rx2 = {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").expect("Namespace steht");
+            ns.tablets.insert(202, tx);
+            rx
+        };
+
+        handle_host_frame(&broker, "ns1", HostFrame::ReloadTablets, &host).await;
+
+        for (nr, rx) in [(101, &mut rx1), (202, &mut rx2)] {
+            let msg = rx.try_recv().unwrap_or_else(|_| {
+                panic!("Feld {nr} bekommt den Befehl");
+            });
+            let Message::Text(t) = msg else {
+                panic!("Text-Frame erwartet")
+            };
+            let parsed: ServerMsg = serde_json::from_str(t.as_str()).unwrap();
+            let ServerMsg::Reload { marke } = parsed else {
+                panic!("Reload erwartet, war {t}")
+            };
+            // Die Marke ist die UNSERE: Die Cloud-Tablets haben ihre Seite
+            // von diesem Relay geladen, nicht vom Turnier-PC. Käme dessen
+            // Marke an, hielte sich jede Seite sofort wieder für veraltet.
+            assert_eq!(marke, seiten_marke());
         }
     }
 

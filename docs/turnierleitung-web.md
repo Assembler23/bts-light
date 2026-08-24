@@ -502,6 +502,34 @@ der Zettel vollständig. Er erscheint als druckfertiges Dokument im Fenster,
 Schranke wie der Punktverlauf: ohne Aufzeichnung kein Zettel. Details:
 [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md).
 
+### Alle Tablets neu laden (⟳ Tablets, seit v0.9.268)
+
+Oben rechts, neben **Profile**, liegt der Knopf **„⟳ Tablets"**. Nach einer
+Rückfrage laden **alle Zähltablets** ihre Seite neu.
+
+Gebraucht wird er selten: Ein Tablet merkt selbst, wenn seine Seite nicht mehr
+die aktuelle ist, und holt sich den neuen Stand **zwischen zwei Spielen** von
+allein. Der Knopf ist für den Fall, dass nicht darauf gewartet werden soll —
+etwa nach einem Update in der Turnierpause.
+
+**Er trifft auch Tablets mit laufendem Spiel.** Deren Bildschirm springt kurz.
+Der Spielstand geht dabei nicht verloren — er liegt auf dem Gerät und beim
+Turnier-PC und ist nach einem Augenblick wieder da. Trotzdem: besser zwischen
+zwei Runden drücken als mitten im Ballwechsel.
+
+**Nicht jedes Gerät antwortet darauf.** Ein Tablet, dessen geladene Seite noch
+aus einer Zeit vor diesem Knopf stammt, kennt den Befehl nicht und verwirft
+ihn stillschweigend. Solche Geräte holt nur der stille Abgleich ab — oder eine
+Hand am Bildschirm. Erscheint der Knopf **gar nicht**, ist der Turnier-PC
+älter als das Feature (siehe „Grenzen").
+
+Und ein Gerät, das nichts speichern darf (Kiosk mit gesperrtem Browser-Speicher,
+privater Modus), springt mitten im Spiel bewusst **nicht** — dort überlebte der
+Stand das Neuladen nicht. Es zeigt stattdessen den Hinweis, und wer davorsteht,
+entscheidet.
+
+Details: [features/tablet-version-abgleich.md](features/tablet-version-abgleich.md).
+
 ### Aufteilung Felder/Spielliste ziehen
 
 Zwischen Feldern und Spielliste sitzt ein **Trennsteg** (kleine Pille in

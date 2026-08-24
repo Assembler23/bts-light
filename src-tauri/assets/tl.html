@@ -1388,6 +1388,13 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
          Anzeige-Klappmenü — Panel-Sichtbarkeit/-Reihenfolge/-Höhe UND die
          früheren Einzelschalter leben jetzt gebündelt im aktiven Profil,
          verwaltet im Overlay unten (`#profiles-overlay`). -->
+    <!-- Fernbefehl „alle Tablets neu laden" (Spec `tablet-version-abgleich`).
+         Selten gebraucht, deshalb unauffällig neben den Profilen und nicht
+         als eigener Bedien-Cluster — aber mit Rückfrage, denn er trifft auch
+         Tablets mit laufendem Spiel. Bleibt verborgen, solange der
+         Turnier-PC den Befehl nicht kennt (`can_reload_tablets`). -->
+    <button type="button" class="profiles-btn" id="tablets-reload" hidden
+            title="Alle Zähltablets ihre Seite neu laden lassen">⟳ Tablets</button>
     <button type="button" class="profiles-btn" id="profiles-open">Profile</button>
   </header>
   <div class="banner" id="banner"></div>
@@ -6965,6 +6972,7 @@ function wireProfileEditorEvents() {
   });
 }
 
+$("tablets-reload").addEventListener("click", reloadTablets);
 $("profiles-open").addEventListener("click", openProfilesOverlay);
 $("profiles-close").addEventListener("click", closeProfilesOverlay);
 $("profiles-overlay").addEventListener("click", (ev) => {
@@ -7473,6 +7481,35 @@ function renderAutoToggle() {
     : "Automatische Feldvergabe wieder laufen lassen";
 }
 
+// Fernbefehl „alle Tablets neu laden" (Spec `tablet-version-abgleich`).
+//
+// Nur zeigen, wenn der Turnier-PC ihn kennt: Der Relay wird bei jedem
+// main-Merge deployt, die App erst mit einem Release-Tag — dazwischen spricht
+// diese Seite womöglich mit einem älteren Host, der eine unbekannte Aktion
+// STILL verwirft. Die Turnierleitung hielte die Tablets für aufgefrischt.
+function renderTabletsReload() {
+  const btn = $("tablets-reload");
+  if (btn) btn.hidden = !state.can_reload_tablets;
+}
+
+async function reloadTablets() {
+  if (!confirm("Alle Zähltablets ihre Seite neu laden lassen?\n\n"
+    + "Das trifft auch Tablets mit laufendem Spiel — deren Bildschirm springt "
+    + "kurz. Der Spielstand geht dabei nicht verloren.\n\n"
+    + "Nötig ist das selten: Ein Tablet holt sich einen neuen Stand zwischen "
+    + "zwei Spielen von selbst.")) {
+    return;
+  }
+  // Zeitstempel statt Zeitfenster in der Vorgangs-Kennung: Ein zweiter,
+  // bewusster Druck ist ein zweiter Befehl und darf nicht als Doppeltipp
+  // durchfallen — etwa wenn beim ersten Mal ein Tablet offline war.
+  await send(
+    `reload-tablets-${Date.now()}`,
+    { action: "reload_tablets" },
+    "Die Tablets laden neu.",
+  );
+}
+
 async function toggleAuto() {
   const on = !(state.auto_assign && state.auto_assign.enabled);
   await send(
@@ -7569,6 +7606,7 @@ function render() {
   renderConnection();
   renderHalls();
   renderAutoToggle();
+  renderTabletsReload();
   renderActionBar();
   // Erst das Gerüst (Spalten, Sichtbarkeit/Reihenfolge/Höhe aus dem aktiven
   // Profil), DANACH die einzelnen Panel-Inhalte — die brauchen die frisch
