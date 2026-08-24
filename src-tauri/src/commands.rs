@@ -227,11 +227,29 @@ fn tablet_exclusions_path(app: &AppHandle) -> std::path::PathBuf {
         .join("excluded-matches.json")
 }
 
+/// Ablage der Wunschfelder — turniergebunden wie die Ausnahmeliste.
+fn tablet_wish_courts_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("wish-courts.json")
+}
+
 fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
         .app_data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("queue-order.json")
+}
+
+/// Pfad des Druck-Gedächtnisses (Spec `schiedsrichterzettel-autodruck`,
+/// Muster ADR 0022). Außerhalb der config.json: Der Stand gilt nur für ein
+/// Turnier und hat im Config-Export nichts verloren.
+fn tablet_print_log_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("gedruckt.json")
 }
 
 /// Pfad der Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster
@@ -297,6 +315,15 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Die Hallen-Farben werden auf der Felderübersicht gepflegt (Spec
     // hallen-farben) — auch sie kennt der Assistent nicht.
     incoming.hall_colors = current.hall_colors.clone();
+    // Gesperrte Felder werden auf der Felderübersicht UND (seit v0.9.258) aus
+    // der Turnierleitungs-Oberfläche gesetzt — der Assistent schickt seinen
+    // beim Öffnen aufgenommenen Stand zurück und löschte sie damit still.
+    // Das war lange ein PC-lokaler Randfall; sobald aus der Halle gesperrt
+    // wird, ist es der teuerste Fehlerfall überhaupt: Feld sperren, jemand
+    // speichert am PC eine Einstellung, die Sperre ist weg — und die
+    // Automatik legt ein Spiel auf das kaputte Feld.
+    incoming.locked_courts = current.locked_courts.clone();
+    incoming.locked_courts_tournament = current.locked_courts_tournament.clone();
     incoming
 }
 
@@ -916,7 +943,12 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
     // kommt mit dem ersten Snapshot.
     tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
+    tablet.set_wish_courts_path(tablet_wish_courts_path(&app));
     tablet.set_queue_order_path(tablet_queue_order_path(&app));
+    // Druck-Gedächtnis des Autodrucks (Spec
+    // `schiedsrichterzettel-autodruck`): ebenso Pfad jetzt, Turnier
+    // später. Ohne ihn druckte ein App-Neustart alle laufenden Spiele nach.
+    tablet.set_print_log_path(tablet_print_log_path(&app));
     // Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster ADR 0022):
     // Pfad jetzt, das Turnier kommt mit dem ersten Snapshot.
     tablet.set_match_times_path(tablet_match_times_path(&app));
@@ -1222,6 +1254,47 @@ pub struct CourtAd {
     pub bg: String,
     /// Feldbezeichnung über der Werbung zeigen?
     pub show_court: bool,
+}
+
+/// Ein Feld des Cloud-Ansage-Zustands in die Form für den Slave bringen.
+///
+/// Rein und ohne `State`, damit prüfbar bleibt, **was** die ferne Halle zu
+/// hören bekommt — der Weg dorthin ist lang (Host → Relay → Slave) und die
+/// Namen fallen unterwegs leicht unter den Tisch.
+fn brief_namen(v: &[relay_proto::PlayerBrief]) -> Vec<String> {
+    v.iter().map(|p| p.name.clone()).collect()
+}
+
+fn brief_nationen(v: &[relay_proto::PlayerBrief]) -> Vec<String> {
+    v.iter()
+        .map(|p| p.nationality.clone().unwrap_or_default())
+        .collect()
+}
+
+fn cloud_announce_court(c: relay_proto::AnnounceCourt) -> Option<CloudAnnounceCourt> {
+    let m = c.match_brief?;
+    // Anzeige-Label ist bei Mehr-Hallen "{Halle} · {Feld}" – fürs Ansagen nur
+    // den Feldteil verwenden.
+    let court = c.label.rsplit(" · ").next().unwrap_or(&c.label).to_string();
+    Some(CloudAnnounceCourt {
+        court_id: c.court_id,
+        court,
+        discipline: m.discipline.clone(),
+        class_label: m.class_label.clone(),
+        team1: brief_namen(&m.team_a),
+        team2: brief_namen(&m.team_b),
+        team1_nationalities: brief_nationen(&m.team_a),
+        team2_nationalities: brief_nationen(&m.team_b),
+        match_id: m.match_id,
+        scorekeeper: m.scorekeeper.clone(),
+        scorekeeper_assigned: m.scorekeeper_assigned,
+        // Schiedsrichter und Aufschlagrichter reisen im `MatchBrief` längst
+        // mit (der Host füllt sie in `match_brief`, der Relay reicht sie
+        // unverändert durch) — hier fielen sie bisher heraus, und deshalb
+        // konnte die ferne Halle sie nicht ansagen.
+        sr: m.sr_names.clone(),
+        ar: m.ar_names.clone(),
+    })
 }
 
 /// Server-Adresse + Felder-Übersicht für die Tablet-Seite der Oberfläche.
@@ -1968,16 +2041,27 @@ pub fn set_court_locked(
     locked: bool,
 ) -> Result<(), String> {
     state.tablet.set_court_locked(court_id, locked);
-    // Config-Wert bauen, Mutex VOR der Datei-I/O wieder freigeben (sonst
-    // blockiert ein langsamer Schreibvorgang andere config-Zugriffe).
-    let config_to_save = {
-        let mut cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
-        cfg.locked_courts = state.tablet.locked_courts();
-        cfg.clone()
-    };
-    config_to_save
-        .save_to(&config_path(&app))
-        .map_err(|e| e.to_string())?;
+    // Über den geschützten Zyklus (`mutate_config`), nicht mit einem eigenen
+    // Klon-und-später-schreiben: Seit die Sperre auch aus der
+    // Turnierleitungs-Oberfläche kommt (Spec `tl-web-felder-sperren`), gibt es
+    // mehrere Schreiber auf dieselbe Datei. Der frühere Weg gab den Mutex vor
+    // der Datei-I/O frei — genau das Lost-Update-Fenster, das
+    // `mutate_config_at` bewusst schließt.
+    let courts = state.tablet.locked_courts();
+    let tournament = state
+        .tablet
+        .snapshot_clone()
+        .map(|s| s.tournament_name)
+        .unwrap_or_default();
+    mutate_config(&app, &state, |cfg| {
+        cfg.locked_courts = courts;
+        // Turnierbezug mitschreiben (ADR 0044); ohne geladenes Turnier den
+        // bestehenden Wert stehen lassen, statt ihn zu leeren.
+        if !tournament.trim().is_empty() {
+            cfg.locked_courts_tournament = tournament;
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -2337,9 +2421,133 @@ pub struct FinishedMatchRow {
 /// Cloud-Only-Betrieb. Mehrere Kennungen ergeben einen Stapeldruck.
 /// `None` = zu keinem der Spiele liegt eine Aufzeichnung vor.
 #[tauri::command]
-pub fn match_scoresheet_html(state: State<'_, AppState>, match_ids: Vec<i64>) -> Option<String> {
+pub fn match_scoresheet_html(
+    state: State<'_, AppState>,
+    match_ids: Vec<i64>,
+    vorab: Option<bool>,
+) -> Option<String> {
     let config = state.config.lock().ok()?.clone();
-    crate::tablet::scoresheet::html_fuer(&state.tablet, &config.display, &match_ids)
+    let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
+    let modus = if vorab.unwrap_or(false) {
+        crate::tablet::scoresheet::Modus::Vorab
+    } else {
+        crate::tablet::scoresheet::Modus::Normal
+    };
+    crate::tablet::scoresheet::html_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
+}
+
+/// Aushang mit den beiden QR-Codes als fertiges HTML (`docs/aushang.md`).
+///
+/// Wie beim Schiedsrichterzettel baut der Kern das Dokument und das
+/// Frontend zeigt/druckt es (S-R1, ADR 0039). Turniername und Logo kommen
+/// aus dem laufenden Turnier bzw. den Einstellungen, beide Adressen aus der
+/// öffentlichen Live-Seite.
+///
+/// Der Fehlerfall ist absichtlich sprechend statt `None`: Fehlt die
+/// Live-Seite, kann die Turnierleitung das selbst nachtragen — dafür muss
+/// sie den Grund lesen können.
+#[tauri::command]
+pub fn aushang_html(state: State<'_, AppState>) -> Result<String, String> {
+    let config = state
+        .config
+        .lock()
+        .map_err(|_| "Die Einstellungen sind gerade belegt.".to_string())?
+        .clone();
+    let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
+    let turnier = state
+        .tablet
+        .snapshot_clone()
+        .map(|s| s.tournament_name)
+        .unwrap_or_default();
+    let eingetragen = config.badhub.live_url.trim();
+    let daten =
+        crate::aushang::daten_aus(&config.badhub.live_url, &turnier, logo).ok_or_else(|| {
+            // „Leer" und „steht da, taugt aber nicht" brauchen verschiedene
+            // Hinweise: Sonst sucht die Turnierleitung nach einem Feld, das
+            // ausgefüllt vor ihr steht.
+            if eingetragen.is_empty() {
+                "Für den Aushang fehlt die Live-Seite. Trage sie in den Einstellungen unter \
+                 „1 · Liveticker-Ziel“ → „Live-Seite (URL)“ ein, z. B. \
+                 https://badhub.de/live?t=bvbb."
+                    .to_string()
+            } else {
+                format!(
+                    "Die eingetragene Live-Seite lässt sich nicht auswerten: „{}“. Erwartet wird \
+                     eine vollständige Adresse mit https:// und Verbandskürzel, z. B. \
+                     https://badhub.de/live?t=bvbb. Zu ändern in den Einstellungen unter \
+                     „1 · Liveticker-Ziel“.",
+                    // Gekürzt: Die Meldung soll ins Fenster passen, nicht die
+                    // ganze Fehleingabe spiegeln.
+                    eingetragen.chars().take(60).collect::<String>()
+                )
+            }
+        })?;
+    crate::aushang::render_html(&daten)
+}
+
+/// Die im System eingerichteten Drucker — für die Auswahl in den
+/// Einstellungen (Spec `schiedsrichterzettel-autodruck`, ADR 0042).
+///
+/// Der leere Eintrag („Windows-Standarddrucker") steht **nicht** in dieser
+/// Liste; die Oberfläche bietet ihn als eigene Zeile an. So bleibt die
+/// Bedeutung eindeutig: leerer Name in der Konfiguration = Standarddrucker,
+/// auch wenn sich der später ändert.
+#[tauri::command]
+pub fn printer_list() -> Vec<String> {
+    crate::print::drucker_liste()
+}
+
+/// Zettel **still** an den eingestellten Drucker geben — ohne Dialog.
+///
+/// Das ist derselbe Weg, den der Autodruck später von selbst geht; hier
+/// ist er von Hand auslösbar, damit sich Drucker und Seitenbild prüfen
+/// lassen, bevor sich jemand im Turnier darauf verlässt.
+///
+/// Läuft in einer eigenen Aufgabe: Der Spooler kann Sekunden brauchen, und
+/// solange darf die Oberfläche nicht stehen.
+#[tauri::command]
+pub async fn print_scoresheet(
+    state: State<'_, AppState>,
+    match_ids: Vec<i64>,
+    vorab: Option<bool>,
+) -> Result<(), String> {
+    let (logo, drucker) = {
+        let config = state.config.lock().map_err(|_| "Konfiguration gesperrt")?;
+        (
+            crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo),
+            config.print.printer_name.clone(),
+        )
+    };
+    let modus = if vorab.unwrap_or(false) {
+        crate::tablet::scoresheet::Modus::Vorab
+    } else {
+        crate::tablet::scoresheet::Modus::Normal
+    };
+    let seiten =
+        crate::tablet::scoresheet::seiten_fuer(&state.tablet, logo.as_deref(), modus, &match_ids)
+            .ok_or_else(|| "Zu diesen Spielen gibt es kein Blatt.".to_string())?;
+    let titel = format!("Schiedsrichterzettel ({} Blatt)", seiten.len());
+    tokio::task::spawn_blocking(move || crate::print::drucke(&seiten, &titel, &drucker))
+        .await
+        .map_err(|e| format!("Druckauftrag abgebrochen: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
+/// Offene Warnung des Zettel-Autodrucks (Spec
+/// `schiedsrichterzettel-autodruck`, E5) — `None` = alles in Ordnung.
+///
+/// Ein Drucker, der schweigt, darf nicht stumm scheitern: Sonst wartet die
+/// Turnierleitung auf Zettel, die nie kommen. Das Dashboard fragt im
+/// laufenden Takt mit.
+#[tauri::command]
+pub fn print_warning(state: State<'_, AppState>) -> Option<String> {
+    state.tablet.print_warning()
+}
+
+/// Warnung wegklicken.
+#[tauri::command]
+pub fn clear_print_warning(state: State<'_, AppState>) {
+    state.tablet.clear_print_warning();
 }
 
 /// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser
@@ -2555,6 +2763,11 @@ pub struct CloudAnnounceCourt {
     /// Herkunft des Namens; `scorekeeper_assigned` bleibt für die Anzeige.
     pub scorekeeper: Vec<String>,
     pub scorekeeper_assigned: bool,
+    /// Schiedsrichter des laufenden Spiels — damit die ferne Halle sie
+    /// mitansagen kann (Spec schiedsrichter-management Nr. 8).
+    pub sr: Vec<String>,
+    /// Aufschlagrichter, gleiche Herkunft.
+    pub ar: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -2657,34 +2870,10 @@ pub async fn cloud_announce_state(
     };
     let st = fetched.unwrap_or_default();
 
-    let names = |v: &[relay_proto::PlayerBrief]| v.iter().map(|p| p.name.clone()).collect();
-    let nats = |v: &[relay_proto::PlayerBrief]| {
-        v.iter()
-            .map(|p| p.nationality.clone().unwrap_or_default())
-            .collect()
-    };
     let courts = st
         .courts
         .into_iter()
-        .filter_map(|c| {
-            let m = c.match_brief?;
-            // Anzeige-Label ist bei Mehr-Hallen "{Halle} · {Feld}" – fürs
-            // Ansagen nur den Feldteil verwenden.
-            let court = c.label.rsplit(" · ").next().unwrap_or(&c.label).to_string();
-            Some(CloudAnnounceCourt {
-                court_id: c.court_id,
-                court,
-                discipline: m.discipline.clone(),
-                class_label: m.class_label.clone(),
-                team1: names(&m.team_a),
-                team2: names(&m.team_b),
-                team1_nationalities: nats(&m.team_a),
-                team2_nationalities: nats(&m.team_b),
-                match_id: m.match_id,
-                scorekeeper: m.scorekeeper.clone(),
-                scorekeeper_assigned: m.scorekeeper_assigned,
-            })
-        })
+        .filter_map(cloud_announce_court)
         .collect();
     let freetext = st
         .freetext
@@ -2704,10 +2893,10 @@ pub async fn cloud_announce_state(
             discipline: p.discipline,
             class_label: p.class_label,
             round_name: p.round_name,
-            team1: names(&p.team_a),
-            team2: names(&p.team_b),
-            team1_nationalities: nats(&p.team_a),
-            team2_nationalities: nats(&p.team_b),
+            team1: brief_namen(&p.team_a),
+            team2: brief_namen(&p.team_b),
+            team1_nationalities: brief_nationen(&p.team_a),
+            team2_nationalities: brief_nationen(&p.team_b),
             called_at_ms: p.called_at_ms,
         })
         .collect();
@@ -4503,6 +4692,45 @@ mod tests {
     }
 
     #[test]
+    fn keep_host_managed_fields_preserves_the_locked_courts() {
+        // Spec `tl-web-felder-sperren`, E5 — und zugleich ein offener Bug aus
+        // der Roadmap: Der Setup-Assistent schickt den beim Öffnen
+        // aufgenommenen Stand zurück (`SetupWizard.tsx`), und
+        // `keep_host_managed_fields` schützte die Sperrliste NICHT — anders
+        // als `tl_web.devices`, `hall_layouts`, `hall_prefill` und
+        // `hall_colors`.
+        //
+        // Bisher fiel das kaum auf, weil nur am PC gesperrt wurde. Sobald die
+        // Turnierleitung aus der Halle sperrt, wird daraus der teuerste
+        // Fehlerfall überhaupt: Feld sperren, jemand speichert am PC eine
+        // Einstellung, die Sperre ist still weg — und die Automatik legt ein
+        // Spiel auf das kaputte Feld.
+        let current = AppConfig {
+            locked_courts: vec![3, 7],
+            locked_courts_tournament: "Köpi-Cup 2026".to_string(),
+            ..Default::default()
+        };
+
+        // Der Stand aus dem Fenster kennt die Sperre nicht (sie entstand
+        // danach, am Tablet).
+        let mut from_ui = AppConfig::default();
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert", "Einstellung wird übernommen");
+        assert_eq!(
+            merged.locked_courts,
+            vec![3, 7],
+            "die inzwischen gesetzte Sperre bleibt"
+        );
+        assert_eq!(
+            merged.locked_courts_tournament, "Köpi-Cup 2026",
+            "und ihr Turnierbezug ebenso — sonst gälte sie als „unbekannt“ \
+             und überlebte den nächsten Turnierwechsel"
+        );
+    }
+
+    #[test]
     fn keep_host_managed_fields_preserves_the_given_current_profiles() {
         // Muster `saving_settings_does_not_revert_the_paired_device_list`:
         // Die Einstellungsseite schickt IHREN (beim Öffnen aufgenommenen)
@@ -4636,6 +4864,68 @@ mod tests {
         // Leerer SSID-Wert (Übergangszustand) zählt nicht als verbunden.
         let text = "    SSID                   : \n    BSSID                  : 00:11:22:33:44:55";
         assert_eq!(parse_netsh_ssid(text), None);
+    }
+
+    #[test]
+    fn die_ferne_halle_bekommt_auch_die_besetzung() {
+        // Schiedsrichter, Aufschlagrichter und Bedienung reisen im
+        // `MatchBrief` bis zum Slave — sie fielen aber bei der Umwandlung
+        // heraus, sodass die ferne Halle sie nicht ansagen konnte
+        // (Nutzer-Befund 20.08.2026).
+        let brief = relay_proto::MatchBrief {
+            match_id: 42,
+            team_a: vec![relay_proto::PlayerBrief {
+                id: 1,
+                name: "A. Spieler".into(),
+                nationality: Some("GER".into()),
+                club: None,
+            }],
+            team_b: vec![relay_proto::PlayerBrief {
+                id: 2,
+                name: "B. Gegner".into(),
+                nationality: None,
+                club: None,
+            }],
+            discipline: "mens_singles".into(),
+            class_label: "A".into(),
+            scorekeeper: vec!["C. Bediener".into()],
+            scorekeeper_assigned: true,
+            sr_names: vec!["S. Richter".into()],
+            ar_names: vec!["A. Aufschlag".into()],
+            event_label: "Herreneinzel A Viertelfinale".into(),
+            best_of_sets: 3,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: Some(11),
+            match_number: Some(42),
+            show_club_names: false,
+            show_club_logos: false,
+            finalized: false,
+        };
+        let court = cloud_announce_court(relay_proto::AnnounceCourt {
+            court_id: 7,
+            // Mehr-Hallen-Label: Nur der Feldteil gehört in die Ansage.
+            label: "Halle Süd · Feld 3".into(),
+            match_brief: Some(brief),
+        })
+        .expect("Feld mit Spiel ergibt einen Eintrag");
+
+        assert_eq!(court.court, "Feld 3");
+        assert_eq!(court.sr, vec!["S. Richter".to_string()]);
+        assert_eq!(court.ar, vec!["A. Aufschlag".to_string()]);
+        assert_eq!(court.scorekeeper, vec!["C. Bediener".to_string()]);
+        assert_eq!(court.team1_nationalities, vec!["GER".to_string()]);
+        // Ohne Nationalität ein leerer Eintrag — die Sprachwahl zählt
+        // Einträge, keine Optionen.
+        assert_eq!(court.team2_nationalities, vec![String::new()]);
+
+        // Ein leeres Feld ergibt gar keinen Eintrag.
+        assert!(cloud_announce_court(relay_proto::AnnounceCourt {
+            court_id: 8,
+            label: "Feld 4".into(),
+            match_brief: None,
+        })
+        .is_none());
     }
 
     #[test]

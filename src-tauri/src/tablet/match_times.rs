@@ -82,6 +82,40 @@ pub struct MatchTimeEntry {
     /// solche Spiele liefern Messwerte für die Prognose-Statistik.
     #[serde(default)]
     pub regular: bool,
+    /// Zeitpunkt, zu dem das Match **im BTP-Snapshot** erstmals als beendet
+    /// auftauchte. Bewusst getrennt von `finished_ms`: Der zählt den
+    /// Host-Eingang des Ergebnisses und speist die Prognose-Statistik —
+    /// hier steht dagegen auch das Ende eines Spiels, dessen Ergebnis
+    /// jemand direkt in BTP eingetragen hat.
+    ///
+    /// Zweck: die Mindestpause der Spieler und die Endezeit der
+    /// Beendet-Liste. Vor v0.9.253 lag dieser Stempel nur im Arbeitsspeicher
+    /// der Sync-Engine — nach jedem „Übertragung stoppen/starten" (also bei
+    /// jedem Speichern der Einstellungen) und nach jedem App-Neustart galten
+    /// deshalb schlagartig **alle** beendeten Spiele als soeben beendet, und
+    /// jeder Spieler begann seine Pause von vorn (Feldtest 22.08.2026).
+    #[serde(default)]
+    pub finished_seen_ms: Option<u64>,
+    /// Seit wann steht dieses Spiel nach seinen Sätzen als **entschieden** da,
+    /// ohne dass ein Ergebnis angekommen wäre? (Spec
+    /// `tl-warnung-fertiges-spiel`.) `None` = läuft normal.
+    ///
+    /// Bewusst hier und nicht im Arbeitsspeicher: Beim App-Start lädt der
+    /// Host die Live-Stände aus `scores.json` zurück. Ein RAM-Merker sähe den
+    /// entschiedenen Stand dann sofort wieder als „gerade zuerst gesehen" und
+    /// ließe die Uhr neu laufen — die Warnung verschwände ausgerechnet für
+    /// eine Minute nach einem Neustart, also genau dann, wenn die
+    /// Turnierleitung am dringendsten hinschaut.
+    #[serde(default)]
+    pub decided_seen_ms: Option<u64>,
+    /// Die Pflichtpause (Millisekunden), die **beim Spielende** galt —
+    /// zusammen mit `finished_seen_ms` eingefroren. Eine später geänderte
+    /// Pausenzeit greift dadurch nur für Spiele, die danach enden; die
+    /// schon laufenden Pausen bleiben, wie die Turnierleitung sie beim
+    /// Aufruf angekündigt hat. `None` = Altbestand, dann gilt der aktuelle
+    /// Wert.
+    #[serde(default)]
+    pub pause_ms: Option<u64>,
     /// E4-Reset-Zähler: aufeinanderfolgende Snapshots ohne Feld. Reiner
     /// Entprell-Zustand — bewusst NICHT persistiert (`skip`), sonst würde
     /// ein App-Neustart mitten im Flackern die 3-Poll-Garantie brechen.
@@ -292,8 +326,9 @@ impl MatchTimesStore {
             let mut inner = self.inner.lock().unwrap();
             let mut cleared = false;
             for (id, e) in inner.file.entries.iter_mut() {
-                let conflict =
-                    e.finished_ms.is_some() && on_court.contains(id) && !retry_pending.contains(id);
+                let conflict = (e.finished_ms.is_some() || e.finished_seen_ms.is_some())
+                    && on_court.contains(id)
+                    && !retry_pending.contains(id);
                 if !conflict {
                     e.finished_conflict_polls = 0;
                     continue;
@@ -302,6 +337,13 @@ impl MatchTimesStore {
                 if e.finished_conflict_polls >= DEASSIGN_CONFIRM_POLLS {
                     e.finished_ms = None;
                     e.regular = false;
+                    // Der Snapshot-Stempel hängt an derselben Wahrheit und
+                    // wird mit derselben Entprellung geräumt — sonst bekäme
+                    // das neu angesetzte Spiel beim zweiten Ende den
+                    // Zeitpunkt des ersten (und damit eine Pause, die längst
+                    // abgelaufen ist).
+                    e.finished_seen_ms = None;
+                    e.pause_ms = None;
                     e.finished_conflict_polls = 0;
                     cleared = true;
                 }
@@ -361,6 +403,82 @@ impl MatchTimesStore {
             self.bump_generation();
             self.persist();
         }
+    }
+
+    /// Das im BTP-Snapshot erstmals gesehene Spielende stempeln, samt der
+    /// dabei geltenden Pflichtpause — beides nur, solange noch kein Stempel
+    /// steht. Liefert den gültigen Stempel zurück (den alten, wenn schon
+    /// einer stand), damit der Aufrufer ihn in den Snapshot schreiben kann.
+    pub fn stamp_finished_seen(&self, match_id: i64, pause_ms: u64, now: u64) -> (u64, u64) {
+        let (wert, changed) = {
+            let mut inner = self.inner.lock().unwrap();
+            let e = inner.file.entries.entry(match_id).or_default();
+            match e.finished_seen_ms {
+                Some(alt) => ((alt, e.pause_ms.unwrap_or(pause_ms)), false),
+                None => {
+                    e.finished_seen_ms = Some(now);
+                    e.pause_ms = Some(pause_ms);
+                    ((now, pause_ms), true)
+                }
+            }
+        };
+        if changed {
+            self.bump_generation();
+            self.persist();
+        }
+        wert
+    }
+
+    /// Stempelt „seit jetzt sieht dieses Spiel fertig aus" — genau einmal je
+    /// Episode. Liefert den geltenden Stempel zurück.
+    pub fn stamp_decided_seen(&self, match_id: i64, now: u64) -> u64 {
+        let (wert, changed) = {
+            let mut inner = self.inner.lock().unwrap();
+            let e = inner.file.entries.entry(match_id).or_default();
+            match e.decided_seen_ms {
+                Some(alt) => (alt, false),
+                None => {
+                    e.decided_seen_ms = Some(now);
+                    (now, true)
+                }
+            }
+        };
+        if changed {
+            self.bump_generation();
+            self.persist();
+        }
+        wert
+    }
+
+    /// Nimmt den Stempel zurück — das Spiel sieht nicht mehr fertig aus (der
+    /// Stand wurde korrigiert) oder das Ergebnis ist da. Beim nächsten Ende
+    /// beginnt die Uhr von vorn.
+    pub fn clear_decided_seen(&self, match_id: i64) {
+        let changed = {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.file.entries.get_mut(&match_id) {
+                Some(e) if e.decided_seen_ms.is_some() => {
+                    e.decided_seen_ms = None;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.bump_generation();
+            self.persist();
+        }
+    }
+
+    /// Seit wann sieht dieses Spiel fertig aus? `None` = tut es nicht.
+    pub fn decided_seen_ms(&self, match_id: i64) -> Option<u64> {
+        self.inner
+            .lock()
+            .unwrap()
+            .file
+            .entries
+            .get(&match_id)
+            .and_then(|e| e.decided_seen_ms)
     }
 
     /// Bruttostart eines Matches (E4), falls gestempelt.

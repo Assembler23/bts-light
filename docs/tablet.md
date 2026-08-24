@@ -100,6 +100,69 @@ Protokoll; die Seite legt ihn lokal ab und bereinigt die Adresszeile.
    meldet sich per LOGIN an und schreibt das Match mit `SENDUPDATE` zurück
    nach BTP (siehe [btp_protocol.md](btp_protocol.md)).
 
+## Das Tablet merkt, wenn es veraltet ist (seit v0.9.266)
+
+> Spec: [`docs/features/tablet-version-abgleich.md`](features/tablet-version-abgleich.md)
+
+
+Ein Turnier-Tablet läuft tagelang mit derselben geladenen Seite. Ein Update —
+etwa ein Relay-Deploy mitten im Turnier — erreicht es nur über ein Neuladen,
+und das passiert von selbst nicht.
+
+Deshalb trägt jede ausgelieferte Seite einen **Fingerabdruck** (`seiten_marke`
+über den unersetzten `TABLET_HTML`, in `relay-proto`), und das ohnehin
+laufende Lebenszeichen (`pong`) nennt den, den der Server **jetzt** hat.
+Weichen beide ab, ist die geladene Seite alt.
+
+**Bewusst ein Fingerabdruck, keine Versionsnummer:** Die Seite steckt in zwei
+Binärdateien — Turnier-PC und Relay —, und die tragen verschiedene Versionen
+(`bts-light` vs. `bts-relay`). Ein Versionsvergleich meldete im Cloud-Betrieb
+dauernd „veraltet", obwohl die Seite dieselbe ist.
+
+**Was dann passiert:**
+
+- **Kein Spiel auf dem Feld** (und kein Ergebnis in der Übermittlung): Die
+  Seite lädt sich sofort selbst neu. Das trifft die meisten Geräte zwischen
+  zwei Spielen — niemand muss etwas tun.
+- **Ein Spiel läuft:** Nur ein Hinweis oben mit dem Knopf „Jetzt laden". Mitten
+  im Zählen den Bildschirm springen zu lassen wäre der falsche Moment, auch
+  wenn der Stand gesichert ist.
+
+Neu geladen wird immer mit der Marke **in der Adresse** (`?v=…`). Für den
+Browser ist das eine andere URL, für die er keinen gespeicherten Eintrag hat —
+ein schlichtes `location.reload()` kann dagegen aus dem Zwischenspeicher
+bedient werden.
+
+**Zusätzlich der Fernbefehl** (seit v0.9.268): In der Turnierleitung liegt
+oben rechts der Knopf **„⟳ Tablets"**. Nach einer Rückfrage laden alle
+Zähltablets neu — **auch die mit laufendem Spiel**. Das ist der Unterschied
+zum stillen Abgleich: Hier hat jemand bewusst entschieden, also springt der
+Bildschirm auch mitten im Zählen. Verloren geht dabei nichts; der Stand liegt
+im `localStorage` und beim Server und ist nach einem Augenblick wieder da.
+
+Nötig ist der Knopf selten — ein Tablet holt sich einen neuen Stand zwischen
+zwei Spielen von selbst. Er ist für den Fall, dass die Turnierleitung nicht
+warten will.
+
+**Was er nicht kann:** Er erreicht nur Geräte, deren geladene Seite ihn schon
+kennt. Ein Tablet auf einem älteren Stand verwirft ihn still — dort hilft nur
+der Abgleich oder eine Hand am Bildschirm.
+
+**Eine Ausnahme macht er selbst:** Auf einem Gerät ohne nutzbaren Speicher
+(Kiosk mit gesperrtem `localStorage`, privater Modus) überlebt der Spielstand
+das Neuladen **nicht** — und der Turnier-PC erkennt das Gerät danach nicht
+wieder („Feld belegt"). Läuft dort ein Spiel oder steht ein Ergebnis in der
+Übermittlung, springt die Seite deshalb nicht, sondern zeigt nur den Hinweis.
+Die Entscheidung fällt dann jemand am Gerät.
+
+Ein Befehl, der genau in einen Verbindungsabriss zum Relay fällt, wird beim
+Wiederverbinden **nachgeholt** — ein bloßer Netzwackler löst dagegen nichts
+aus.
+
+**Keine versionierten Dateinamen nötig:** Alle Seiten sind selbstenthaltend —
+kein einziges `<script src>` oder `<link href>`. Es gibt nichts, was getrennt
+veralten könnte.
+
 ## Ergebnis-Übermittlung verlustsicher (Hebel B, ADR 0018)
 
 Der Ergebnis-Weg ist mehrfach abgesichert, damit ein WLAN-/Cloud-Aussetzer kein
@@ -111,6 +174,29 @@ Ergebnis verliert und den Schiri nicht blockiert:
   Server `ok:true` bestätigt** — übersteht Netzausfall, Reconnect und
   Tablet-Reload. Ein **Backstop-Timeout** (~12 s, `AbortController`) bricht einen
   hängenden Einzel-Fetch ab und startet den Retry sofort.
+- **Wiederholt wird nur, was eine Wiederholung retten kann** (seit v0.9.254).
+  Bis dahin landete jede Absage im selben Topf, und das Tablet versprach auch
+  dann „wird wiederholt, bis es ankommt", wenn der Turnier-PC genau dieses
+  Ergebnis dauerhaft ablehnte — es zählte weiter, übertrug seine Punkte, konnte
+  sein Spiel aber nie abschließen, und niemand sah den Grund (Feldtest
+  22.08.2026, Felder 7 und 19). Die Trennlinie liegt bei **einer** Frage: Kann
+  derselbe Payload beim nächsten Versuch angenommen werden?
+  - **Ja** → weiter wiederholen: Netzfehler, Zeitüberschreitung, HTTP-Fehler
+    und die zustandsabhängigen Absagen („kein Match auf diesem Feld", „Feld
+    inzwischen anders belegt"). Die hängen am Turnier-PC, und der nächste
+    BTP-Poll kann sie auflösen.
+  - **Nein** → aufhören: eine unstimmige Satzliste, ein Satz, der nicht zur
+    Zählweise des Spiels passt. Der Host markiert das mit `permanent: true`
+    (relay-proto `ResultResponse`), das Tablet zeigt den Klartext-Grund und
+    gibt den Knopf wieder frei — der Bediener kann den Stand korrigieren und
+    neu senden oder die Turnierleitung holen. Der Grund überlebt einen
+    Seiten-Neustart, und das Tablet lädt sein Log sofort hoch.
+
+  **Im Zweifel wird wiederholt:** Nur das ausdrückliche `permanent` des Hosts
+  beendet den Versuch — ältere Hosts kennen das Feld nicht, deren Absagen
+  gelten unverändert als wiederholbar. Die Regel steht in
+  `src/io/resultRetry.mjs` (Test: `scripts/test-result-retry.mjs`), das Tablet
+  trägt eine Inline-Kopie.
 - **Idempotenz (kein Endlos-Retry / Doppel-Write):** Nach einem erfolgreichen
   Write räumt der Server das Feld. Ein Wiederholungs-POST für dasselbe Match mit
   **identischem** Ergebnis (`sets`, Sieger, ScoreStatus) quittiert
@@ -119,8 +205,13 @@ Ergebnis verliert und den Schiri nicht blockiert:
   ein **abweichender** Payload auf ein geräumtes/gewechseltes Feld fällt weiter
   auf Fehler; ein Retry nach Ablauf des kurzen Idempotenz-Fensters (~60 s) auch —
   eine echte spätere Korrektur wird nicht abgewürgt.
-- **Host-Retry-Queue auf Platte:** Scheitert der BTP-Write host-seitig, landet das
-  Ergebnis in der BTP-Retry-Queue (30-s-Flush). Diese Queue wird **atomar auf
+- **Host-Retry-Queue auf Platte — und eingereiht heißt angenommen** (seit
+  v0.9.254): Scheitert der BTP-Write host-seitig, landet das Ergebnis in der
+  BTP-Retry-Queue, und der Host quittiert dem Tablet mit `ok`. Vorher meldete
+  er „abgelehnt", obwohl er das Ergebnis bereits sicher verwahrte — das Tablet
+  klebte dann an etwas längst Erledigtem. Weil das Tablet daraufhin loslässt,
+  ist die Verdrängung bei voller Queue (Deckel 200) jetzt eine `error`-Zeile im
+  Log statt eines stillen Verlusts. Der Flush läuft alle 30 s. Diese Queue wird **atomar auf
   Platte** persistiert (`btp-retry.json`, turnier-gegated über den
   Turniernamen) und beim Start wieder geladen — so übersteht ein Ergebnis auch
   einen **Host-App-Neustart** (Durabilität: App-Neustart, nicht Stromausfall).

@@ -76,7 +76,11 @@ alle Geräte auf, die sich gemeldet haben:
   man Gerät und TV zuordnen kann. Wirkt in **allen** Anzeigen — Einzelfeld
   (`monitor.html`), Court-Übersicht (`overview.html`) und Kombi
   (`combo.html`) (seit v0.9.93; davor nur Einzelfeld).
-- **Neu laden** — der Monitor lädt seine Seite neu (falls er hängt).
+- **Neu laden** — der Monitor lädt seine Seite neu (falls er hängt). Seit
+  v0.9.255 meldet eine Anzeige, die stillsteht, das von sich aus ins Log
+  (`stillstand`, siehe [logging.md](logging.md)) — bleibt ein Bild stehen,
+  lohnt vor dem Neuladen ein Blick dorthin: Die Zeile sagt, ob überhaupt noch
+  etwas ankam oder ob die Seite es verworfen hat.
 
 Die Zuweisungen liegen in `monitor-assignments.json` im
 App-Config-Verzeichnis und überstehen einen bts-light-Neustart.
@@ -528,7 +532,30 @@ ein „Neu laden"/„Identifizieren" auslösen; mehr nicht (die Befehle sind
 ein geschlossenes Enum). Das ist dasselbe Modell wie für die Tablet- und
 Werbe-Routen und für eine zugangsfreie Plug-and-play-App akzeptiert.
 
-## Werbung (Leerlauf)
+## ETag/304 für den Status-Abruf (seit v0.9.254)
+
+Alle drei Status-Endpunkte (`/monitor/state` am Relay und LAN sowie
+`/court/{id}/state` im LAN) tragen jetzt einen **ETag** und beantworten
+`If-None-Match` mit **304 ohne Body**. Der Client (`monitor.html`) schickt die
+zuletzt gesehene Marke mit und hält den letzten Stand bei 304 — nur bei 200
+wird der Zustand übernommen und die Marke aktualisiert. `ad.html` zieht
+denselben Weg für seinen 1-s-Reassignment-Poll nach.
+
+**Was in die Marke eingeht:** der Inhalt der Antwort, aber **nicht** die
+je-nicht-inhaltlichen Felder — `serverNowMs` (je Aufruf neu) und `seq` (steigt
+je Anstoß, auch ohne Inhaltsänderung). Beide bleiben im Body; nur die Marke
+ignoriert sie. Dieselbe Begründung wie beim Übersichts-ETag (`uebersicht_marke`,
+`relay/src/main.rs` :1808-1813). Muster: `DefaultHasher::new()` mit festem Seed
+(wie `bild_marke`) → gleicher Inhalt, gleiche Marke, auch über Neustarts.
+
+**Uhr:** Da 304 keinen Body trägt, speist `monitor.html` seinen Uhr-Offset aus
+zwei Quellen — jedem vollen 200 (`serverNowMs`) und dem WS-Herzschlag
+(`{"hb":<nowMs>}`). Ein Refetch-Cap (gesund → 10 min, ungesund → 60 s) erzwingt
+regelmäßig einen vollen 200. Kanonische Fassung: `src/io/monitorClock.mjs`.
+
+Das Lebenszeichen des Geräts (`monitor_seen`) wird **vor** dem 304-Check
+aktualisiert — ein cachetreuer Monitor bleibt online.
+
 
 Läuft kein Spiel, zeigt der Monitor Werbung:
 

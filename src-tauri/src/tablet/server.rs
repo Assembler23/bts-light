@@ -20,7 +20,7 @@ use std::time::Duration;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse, Redirect};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
@@ -35,7 +35,7 @@ use crate::badhub::push;
 use crate::btp::model::{BtpMatch, MatchStatus};
 use crate::btp::{client, proto};
 use crate::config::{AppConfig, CourtMonitorConfig};
-use crate::tablet::assets::{self, TABLET_HTML};
+use crate::tablet::assets::{self, seiten_marke, TABLET_HTML};
 use crate::tablet::monitor;
 use crate::tablet::perf;
 use crate::tablet::state::{reconnect_decision, ReconnectDecision, TabletState};
@@ -194,12 +194,6 @@ impl ScorePushQueue {
 }
 
 impl ServerCtx {
-    /// Anzeige-Schalter (Vereinsnamen usw.) — der Zettel-Renderer im
-    /// Cloud-Pfad braucht sie, das Feld selbst bleibt privat.
-    pub(crate) fn display_config(&self) -> crate::config::DisplayConfig {
-        self.config.display.clone()
-    }
-
     /// Stellt einen Live-Score zum Senden ein und kehrt **sofort** zurück.
     fn queue_score_push(&self, court_id: i64, match_id: i64, update: crate::badhub::diff::Update) {
         if !self.score_push.einstellen(court_id, match_id, update) {
@@ -767,7 +761,11 @@ async fn court_page(
     let body = TABLET_HTML
         .replace("__COURT_ID__", &court_id.to_string())
         .replace("__COURT_LABEL__", &html_escape(&label))
-        .replace("__TABLET_PIN__", &pin);
+        .replace("__TABLET_PIN__", &pin)
+        // Fingerabdruck der Seite, wie sie in dieser Binärdatei steckt —
+        // bewusst über das UNERSETZTE `TABLET_HTML`, sonst wäre er je Feld
+        // verschieden und der Abgleich sinnlos (Spec `tablet-version-abgleich`).
+        .replace("__SEITEN_MARKE__", seiten_marke());
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
@@ -1324,7 +1322,8 @@ async fn monitor_state(
     State(ctx): State<Arc<ServerCtx>>,
     Path(court_id): Path<i64>,
     Query(q): Query<DeviceHeartbeat>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     let label = court_label_for(&ctx, court_id);
     let court = ctx.tablet.monitor_court(court_id);
     // EIN Config-Zugriff für alles (vorher zwei, jeder mit voller Kopie
@@ -1351,16 +1350,15 @@ async fn monitor_state(
         },
     );
     // Wie bei `/health` selbst serialisiert, um die Antwortgröße zu kennen
-    // (Spec monitor-livestand-push, S0).
+    // (Spec monitor-livestand-push, S0). Derselbe Body geht in die Antwort;
+    // die Marke (ohne server_now_ms/seq) entscheidet zwischen 200 und 304.
+    let etag = monitor_state_marke(&state);
     let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
-    ctx.tablet
-        .perf()
-        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
-    (
-        [
-            (header::CACHE_CONTROL, "no-store"),
-            (header::CONTENT_TYPE, "application/json"),
-        ],
+    monitor_etag_response(
+        &ctx,
+        &headers,
+        &etag,
+        perf::Quelle::aus_query(q.src.as_deref()),
         json,
     )
 }
@@ -1391,7 +1389,8 @@ struct DeviceQuery {
 async fn monitor_device_state(
     State(ctx): State<Arc<ServerCtx>>,
     Query(q): Query<DeviceQuery>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     let device = q.device;
     if device.is_empty() || device.len() > 64 {
         return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
@@ -1448,19 +1447,17 @@ async fn monitor_device_state(
     state.command = command;
     state.device_code = device_code(&device);
     // Wie `monitor_state` selbst serialisiert, um die Antwortgröße zu
-    // kennen (Spec monitor-livestand-push, S0).
+    // kennen (Spec monitor-livestand-push, S0); die Marke entscheidet
+    // zwischen 200 und 304 (Etappe ETag, 1e).
+    let etag = monitor_state_marke(&state);
     let json = serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
-    ctx.tablet
-        .perf()
-        .note_court_state(perf::Quelle::aus_query(q.src.as_deref()), json.len() as u64);
-    (
-        [
-            (header::CACHE_CONTROL, "no-store"),
-            (header::CONTENT_TYPE, "application/json"),
-        ],
+    monitor_etag_response(
+        &ctx,
+        &headers,
+        &etag,
+        perf::Quelle::aus_query(q.src.as_deref()),
         json,
     )
-        .into_response()
 }
 
 // ─────────────────────────────── Info-Monitore ────────────────────────────
@@ -2018,6 +2015,58 @@ fn marke_bekannt(headers: &axum::http::HeaderMap, etag: &str) -> bool {
         .any(|m| m.trim() == "*" || schwach(m) == gesucht)
 }
 
+/// Marke eines Monitor-Zustands — LAN, gleiche Vertrags-Semantik wie der
+/// Cloud-Pfad (Etappe ETag, 1e): Streuwert über den INHALT ohne die
+/// je-nicht-inhaltlichen Felder `server_now_ms` (je Aufruf neu) und `seq`
+/// (Transportzähler, steigt auch folgenlos). `DefaultHasher::new()` mit
+/// festem Seed → gleicher Inhalt, gleiche Marke, auch über Neustarts.
+fn monitor_state_marke(state: &relay_proto::MonitorState) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut k = state.clone();
+    k.server_now_ms = 0;
+    k.seq = 0;
+    let json = serde_json::to_string(&k).unwrap_or_else(|_| "{}".to_string());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    json.hash(&mut hasher);
+    format!("\"mon-{}-{:x}\"", json.len(), hasher.finish())
+}
+
+/// Verpackt eine Monitor-State-Antwort: 304 bei bekannter Marke, sonst 200
+/// mit dem bereits serialisierten Body. BEIDE Zweige tragen die Marke, damit
+/// der Client sie beim nächsten Abruf mitschicken kann. Die Perf-Zählung
+/// folgt dem `/health`-Muster: Der 304-Zweig zählt **0** Bytes (es wird
+/// nichts gesendet) — genau diese Zähler sind das S0-Messinstrument für den
+/// Nutzen des ETag (Review R1).
+fn monitor_etag_response(
+    ctx: &ServerCtx,
+    headers: &axum::http::HeaderMap,
+    etag: &str,
+    quelle: perf::Quelle,
+    json: String,
+) -> Response {
+    if marke_bekannt(headers, etag) {
+        ctx.tablet.perf().note_court_state(quelle, 0);
+        return (
+            StatusCode::NOT_MODIFIED,
+            [(header::CACHE_CONTROL, "no-store"), (header::ETAG, etag)],
+        )
+            .into_response();
+    }
+    ctx.tablet
+        .perf()
+        .note_court_state(quelle, json.len() as u64);
+    (
+        StatusCode::OK,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::CONTENT_TYPE, "application/json"),
+            (header::ETAG, etag),
+        ],
+        json,
+    )
+        .into_response()
+}
+
 // ─────────────────────────────── Ergebnis → BTP ───────────────────────────
 
 /// Nimmt das Endergebnis vom Tablet entgegen und schreibt es nach BTP.
@@ -2154,6 +2203,30 @@ async fn tl_timeline(
     }
 }
 
+/// Abfrage-Teil des Zettel-Abrufs.
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct SheetQuery {
+    /// `1`, `true` oder `ja` schalten den Vorabzettel ein. Alles andere —
+    /// auch Unsinn — bedeutet „wie bisher"; ein Tippfehler im Link darf
+    /// keinen Fehler ergeben, sondern das gewohnte Blatt.
+    #[serde(default)]
+    vorab: Option<String>,
+}
+
+impl SheetQuery {
+    pub(crate) fn modus(&self) -> crate::tablet::scoresheet::Modus {
+        let an = matches!(
+            self.vorab.as_deref().map(str::trim),
+            Some("1" | "true" | "ja")
+        );
+        if an {
+            crate::tablet::scoresheet::Modus::Vorab
+        } else {
+            crate::tablet::scoresheet::Modus::Normal
+        }
+    }
+}
+
 /// Schiedsrichterzettel als fertiges HTML (Spec
 /// `schiedsrichterzettel-druck`, ADR 0039) — on-demand, nie Teil des
 /// Zustands-Pushes: Er trägt Sanktionsdaten.
@@ -2161,10 +2234,16 @@ async fn tl_timeline(
 /// `{ids}` ist eine Komma-Liste (Stapeldruck). **Der Deckel greift vor
 /// der Arbeit:** Mehr als `MAX_SHEETS_PER_DOC` Kennungen werden
 /// abgewiesen, bevor je Kennung etwas zusammengesucht wird.
+///
+/// `?vorab=1` liefert den **Vorabzettel** für ein noch ausstehendes Spiel
+/// (Spec `schiedsrichterzettel-autodruck`). Ohne den Parameter bleibt das
+/// Verhalten unverändert — ein Spiel ohne Aufzeichnung ergibt weiterhin
+/// 404.
 async fn tl_scoresheet(
     State(ctx): State<Arc<ServerCtx>>,
     headers: axum::http::HeaderMap,
     axum::extract::Path(ids): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<SheetQuery>,
 ) -> impl IntoResponse {
     if tl_device(&ctx, &headers).is_none() {
         return (
@@ -2187,7 +2266,9 @@ async fn tl_scoresheet(
     // erreichbar — ohne den Header könnte der Platten-Cache eines
     // gemeinsam genutzten Tablets das Dokument über die Gültigkeit des
     // Zugangs hinaus vorhalten.
-    match crate::tablet::scoresheet::html_fuer(&ctx.tablet, &ctx.config.display, &match_ids) {
+    let logo = crate::tablet::scoresheet::logo_data_uri(&ctx.app_config_arc().tournament_logo);
+    match crate::tablet::scoresheet::html_fuer(&ctx.tablet, logo.as_deref(), q.modus(), &match_ids)
+    {
         Some(html) => (
             StatusCode::OK,
             [
@@ -2312,6 +2393,66 @@ pub(crate) fn set_is_complete(a: i64, b: i64, target: i64, cap: i64) -> bool {
         return false; // Ziel nicht erreicht oder über dem Deckel
     }
     hi >= cap || hi - lo >= 2 // am Deckel reicht 1 Punkt, sonst 2 Vorsprung
+}
+
+/// Ist dieses Spiel nach seinen Sätzen bereits **entschieden**?
+///
+/// Grundlage der Warnung „Spiel scheint fertig, aber kein Ergebnis" (Spec
+/// `tl-warnung-fertiges-spiel`). Bewusst eine reine Funktion neben
+/// [`set_is_complete`] und [`sets_fit_format`]: Dieselbe Zählweise, dieselben
+/// Randfälle — und so einzeln gegen die Formate testbar, die im Turnierbetrieb
+/// vorkommen (3×21/30, 3×15/21, 1×21, 5×11).
+///
+/// Entschieden heißt: Eine Seite hat die nötige **Satzmehrheit**
+/// (`best_of / 2 + 1`) aus regulär zu Ende gespielten Sätzen. Zwei Fallen
+/// stecken darin:
+///
+/// - **Der Geistersatz.** Das Tablet setzt den laufenden Satz beim Match-Ende
+///   auf 0:0 und schickt ihn mit (siehe `handle_score`). Ein 0:0 ist kein
+///   gespielter Satz und wird übersprungen — sonst gälte die Liste als
+///   unvollständig und die Warnung käme nie.
+/// - **Der unfertige Satz.** Steht ein angefangener Satz in der Liste (z. B.
+///   15:3, 12:15, 8:6), ist das Spiel gerade NICHT entschieden — auch wenn
+///   die ersten beiden Sätze eine Mehrheit ergäben. Genau dann läuft es ja
+///   noch. Deshalb zählt nur, wer die Mehrheit hat, **bevor** ein unfertiger
+///   Satz auftaucht.
+///
+/// Aufgabe, Kampflos und Disqualifikation sind ausdrücklich **kein** Fall
+/// dieser Funktion: Dort bricht das Spiel mitten im Satz ab, und das Ergebnis
+/// kommt über einen anderen Weg.
+pub(crate) fn spiel_ist_entschieden(
+    sets: &[(i64, i64)],
+    scoring: &crate::btp::model::ScoringFormat,
+) -> bool {
+    // Ohne aufgelöste Zählweise wird NICHT gewarnt. `set_is_complete` fällt
+    // still auf 21/30 zurück — in einem 15er-Turnier ohne Format hieße das
+    // reihenweise falsche Alarme. Lieber keine Warnung als eine, der niemand
+    // mehr glaubt.
+    if scoring.target_score <= 0 {
+        return false;
+    }
+    let noetig = (scoring.best_of / 2 + 1).max(1);
+    let (mut a, mut b) = (0i64, 0i64);
+    for &(x, y) in sets {
+        // Geistersatz / noch nicht begonnener Satz: überspringen.
+        if x == 0 && y == 0 {
+            continue;
+        }
+        // Ein angefangener Satz heißt: Es wird gespielt. Dann ist das Spiel
+        // nicht fertig — auch dann nicht, wenn die Sätze davor schon eine
+        // Mehrheit ergäben. Dieser Fall entsteht bei einer Korrektur oder
+        // einem falsch aufgelösten `best_of`, und in beiden Lagen wäre eine
+        // Warnung falsch. Ein Fehlalarm ist teuer (Muster `standstill.mjs`).
+        if !set_is_complete(x, y, scoring.target_score, scoring.cap_score) {
+            return false;
+        }
+        if x > y {
+            a += 1;
+        } else {
+            b += 1;
+        }
+    }
+    a >= noetig || b >= noetig
 }
 
 /// Prüft eine ganze Satzliste gegen die Zählweise des Matches.
@@ -2621,6 +2762,16 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         return if settled_ok(ctx, body, now) {
             ResultResponse::ok()
         } else {
+            // Wiederholbar: Der Grund liegt am Zustand des Turnier-PCs (BTP
+            // noch nicht geladen, Feld gerade geräumt), nicht am Ergebnis.
+            // Der nächste Poll kann ihn auflösen — ein noch leerer Snapshot
+            // darf kein fertiges Ergebnis wegwerfen.
+            tracing::warn!(
+                "Ergebnis vom Tablet abgelehnt: Feld {} führt kein Match \
+                 (Tablet nennt Match {})",
+                body.court_id,
+                body.match_id
+            );
             ResultResponse::err("Kein Match auf diesem Court.")
         };
     };
@@ -2630,6 +2781,14 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         return if settled_ok(ctx, body, now) {
             ResultResponse::ok()
         } else {
+            // Ebenfalls zustandsabhängig und damit wiederholbar (siehe oben).
+            tracing::warn!(
+                "Ergebnis vom Tablet abgelehnt: Feld {} führt Match {}, das \
+                 Tablet nennt Match {}",
+                body.court_id,
+                m.id,
+                body.match_id
+            );
             ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.")
         };
     }
@@ -2638,7 +2797,17 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     let (sets, team1_won, score_status) =
         match derive_result(raw_sets, body.walkover, body.retired, false, body.winner) {
             Ok(v) => v,
-            Err(e) => return ResultResponse::err(e),
+            Err(e) => {
+                // Hängt allein am Payload ⇒ dauerhaft. Ein Tablet, das das
+                // hundertmal wiederholt, kommt nie durch; es soll den Grund
+                // zeigen, statt „wird wiederholt, bis es ankommt".
+                tracing::warn!(
+                    "Ergebnis vom Tablet abgelehnt (Feld {}, Match {}): {e}",
+                    body.court_id,
+                    m.id
+                );
+                return ResultResponse::dauerhaft(e);
+            }
         };
     // Gegen die Zählweise des Matches prüfen — auch hier, nicht nur auf dem
     // Weg der Turnierleitung. Das Tablett zählt zwar selbst korrekt, aber es
@@ -2648,7 +2817,16 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     // Aufgabe bricht den Satz mitten drin ab.
     if score_status == 0 {
         if let Err(e) = sets_fit_format(&sets, m.scoring.target_score, m.scoring.cap_score) {
-            return ResultResponse::err(e);
+            // Wie oben: reine Payload-Prüfung, also dauerhaft.
+            tracing::warn!(
+                "Ergebnis vom Tablet abgelehnt (Feld {}, Match {}): {e} \
+                 [Zählweise bis {}, Deckel {}]",
+                body.court_id,
+                m.id,
+                m.scoring.target_score,
+                m.scoring.cap_score
+            );
+            return ResultResponse::dauerhaft(e);
         }
     }
     // Spieldauer = Bruttozeit (Spec `spielzeiten-prognose`, E1): erste
@@ -2758,17 +2936,22 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             ResultResponse::ok()
         }
         Err(e) => {
-            // Nachschub-Queue (A5): Das Tablet wiederholt zwar selbst, aber
-            // wenn es aufgibt/offline geht, wäre das Ergebnis verloren. Der
-            // Sync-Loop schiebt den Write nach, sobald BTP wieder antwortet.
-            // Bezugszeitpunkt = Spielende (steuert das 5-Minuten-Fenster
-            // des Spieler-Checkouts beim Nachschub).
+            // Nachschub-Queue (A5): Der Sync-Loop schiebt den Write nach,
+            // sobald BTP wieder antwortet. Bezugszeitpunkt = Spielende
+            // (steuert das 5-Minuten-Fenster des Spieler-Checkouts beim
+            // Nachschub).
             ctx.tablet.queue_btp_retry(update.clone(), end_ms);
             tracing::warn!(
                 "BTP-Schreiben fehlgeschlagen (Match {}): {e} — in Nachschub-Queue eingereiht",
                 m.id
             );
-            ResultResponse::err(e)
+            // **Eingereiht heißt angenommen.** Die Queue liegt auf der Platte
+            // und übersteht auch einen Absturz; das Ergebnis ist damit sicherer
+            // aufgehoben als im Tablet. Meldeten wir hier „abgelehnt", bliebe
+            // das Tablet an einem Ergebnis kleben, das der Turnier-PC längst
+            // verwahrt — genau das Bild vom Feldtest 22.08.2026: Punkte liefen
+            // weiter, nur abschließen ging nicht.
+            ResultResponse::ok()
         }
     }
 }
@@ -3236,6 +3419,11 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     let mut my_device = String::new();
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Fernbefehl-Wächter (Spec `tablet-version-abgleich`). Beim Verbinden
+    // gesetzt: Diese Seite ist gerade frisch geladen, also auf dem Stand, den
+    // der Server ausliefert — ein vorher gegebener Befehl gilt für sie nicht
+    // mehr. Je WebSocket, denn „verbunden" heißt hier „Seite frisch geladen".
+    let mut reload_wacht = crate::tablet::state::ReloadWacht::beim_verbinden(&ctx.tablet);
     // Zeitpunkt der letzten empfangenen Nachricht (jede Art, inkl. App-Ping
     // und Protokoll-Pong). Bricht der Router weg, liefert der Browser oft
     // KEIN Close – die TCP-Verbindung bleibt serverseitig minutenlang als
@@ -3419,7 +3607,16 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             Ok(TabletMsg::Ping) => {
                                 // Lebenszeichen → sofort Pong zurück, damit das
                                 // Tablet eine tote Verbindung erkennen kann.
-                                send_msg(&mut socket, &ServerMsg::Pong).await;
+                                send_msg(
+                                    &mut socket,
+                                    // Die eigene Version reist im Lebenszeichen mit
+                                    // (Spec tablet-version-abgleich) — daran erkennt
+                                    // die Seite, dass sie veraltet ist.
+                                    &ServerMsg::Pong {
+                                        marke: seiten_marke().to_string(),
+                                    },
+                                )
+                                .await;
                             }
                             // Punktverlauf (ADR 0014): nur vom aktiven Halter
                             // und nur fürs aktuelle Court-Match (HM-03-Filter,
@@ -3492,6 +3689,20 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 // schlägt das Senden fehl, ist die Verbindung tot → Schluss.
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
                     break;
+                }
+                // Fernbefehl aus der Turnierleitung? Bewusst **vor** der
+                // Zuweisung und ohne Rücksicht auf ein laufendes Spiel: Es ist
+                // ein ausdrücklicher Befehl, und der Stand überlebt das
+                // Neuladen (localStorage + Server).
+                if reload_wacht.faellig(&ctx.tablet) {
+                    tracing::info!("Feld {court:?}: Tablet lädt auf Befehl neu");
+                    send_msg(
+                        &mut socket,
+                        &ServerMsg::Reload {
+                            marke: seiten_marke().to_string(),
+                        },
+                    )
+                    .await;
                 }
                 if let (Some(c), Some(token)) = (court, my_token) {
                     if ctx.tablet.is_court_active(c, token) {
@@ -3798,6 +4009,7 @@ mod tests {
             result: MatchResult::Normal,
             status: MatchStatus::OnCourt,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,
@@ -4005,6 +4217,115 @@ mod tests {
         assert!(!t1);
         assert_eq!(status, 1);
         assert!(derive_result(vec![], true, false, false, None).is_err()); // ohne Sieger
+    }
+
+    #[test]
+    fn ein_entschiedenes_spiel_wird_erkannt() {
+        // Spec `tl-warnung-fertiges-spiel`: Grundlage der Warnung. Die
+        // Zählweisen-Matrix ist der Kern — ein Turnier bis 15 mit Deckel 21
+        // hat andere Endstände als 21/30, und die Warnung darf sich in
+        // keinem der Formate irren.
+        let f = |best_of, target, cap| crate::btp::model::ScoringFormat {
+            best_of,
+            target_score: target,
+            cap_score: cap,
+            interval_at: None,
+        };
+        let klassisch = f(3, 21, 30);
+
+        // Der vom Nutzer genannte Fall: 3:15, 12:15 — Team 2 hat zwei Sätze.
+        assert!(spiel_ist_entschieden(&[(3, 15), (12, 15)], &f(3, 15, 21)));
+        assert!(spiel_ist_entschieden(&[(21, 10), (21, 15)], &klassisch));
+        // Ein Satz zu wenig.
+        assert!(!spiel_ist_entschieden(&[(21, 10)], &klassisch));
+        // Satzgleichstand — der dritte fehlt.
+        assert!(!spiel_ist_entschieden(&[(21, 10), (15, 21)], &klassisch));
+        // Dritter Satz entscheidet.
+        assert!(spiel_ist_entschieden(
+            &[(21, 10), (15, 21), (21, 19)],
+            &klassisch
+        ));
+        // Am Deckel reicht ein Punkt Vorsprung.
+        assert!(spiel_ist_entschieden(&[(30, 29), (21, 10)], &klassisch));
+    }
+
+    #[test]
+    fn ein_laufendes_spiel_gilt_nicht_als_entschieden() {
+        let klassisch = crate::btp::model::ScoringFormat {
+            best_of: 3,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+        };
+        // Leere Liste, frischer Satz, mitten im Satz.
+        assert!(!spiel_ist_entschieden(&[], &klassisch));
+        assert!(!spiel_ist_entschieden(&[(0, 0)], &klassisch));
+        assert!(!spiel_ist_entschieden(&[(11, 8)], &klassisch));
+        // **Die wichtigste Zeile:** Zwei fertige Sätze für dieselbe Seite —
+        // aber ein dritter läuft. Das kann bei einer Korrektur passieren, und
+        // die Warnung dürfte hier NICHT anschlagen, weil offensichtlich
+        // weitergespielt wird.
+        assert!(!spiel_ist_entschieden(
+            &[(21, 10), (21, 15), (8, 6)],
+            &klassisch
+        ));
+        // Ein Satz über dem Deckel ist ungültig, nicht „entschieden".
+        assert!(!spiel_ist_entschieden(&[(31, 29), (21, 10)], &klassisch));
+    }
+
+    #[test]
+    fn der_geistersatz_nach_spielende_stoert_nicht() {
+        // Das Tablet setzt den laufenden Satz beim Match-Ende auf 0:0 und
+        // schickt ihn mit (siehe `handle_score`). Ohne das Überspringen wäre
+        // JEDES fertige Spiel „nicht entschieden" — und die Warnung käme nie.
+        let klassisch = crate::btp::model::ScoringFormat {
+            best_of: 3,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+        };
+        assert!(spiel_ist_entschieden(
+            &[(21, 10), (21, 15), (0, 0)],
+            &klassisch
+        ));
+        // Auch ZWISCHEN den Sätzen steht ein 0:0 — dann entscheidet nur, was
+        // wirklich gespielt wurde.
+        assert!(!spiel_ist_entschieden(&[(21, 10), (0, 0)], &klassisch));
+    }
+
+    #[test]
+    fn ungewoehnliche_zaehlweisen_rechnen_richtig() {
+        // Ein einzelner Gewinnsatz (Trostrunden, Zeitnot) und Best-of-5
+        // (11er-Format) — beide kommen in BTP vor, und `best_of / 2 + 1` muss
+        // dort ebenso stimmen wie bei 3.
+        let einsatz = crate::btp::model::ScoringFormat {
+            best_of: 1,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+        };
+        assert!(spiel_ist_entschieden(&[(21, 15)], &einsatz));
+        assert!(!spiel_ist_entschieden(&[(15, 12)], &einsatz));
+
+        let fuenf = crate::btp::model::ScoringFormat {
+            best_of: 5,
+            target_score: 11,
+            cap_score: 15,
+            interval_at: None,
+        };
+        assert!(!spiel_ist_entschieden(&[(11, 5), (11, 7)], &fuenf));
+        assert!(spiel_ist_entschieden(&[(11, 5), (11, 7), (11, 9)], &fuenf));
+
+        // best_of 0 (BTP liefert Unsinn) darf nicht „sofort entschieden"
+        // heißen — `max(1)` fängt das ab.
+        let kaputt = crate::btp::model::ScoringFormat {
+            best_of: 0,
+            target_score: 21,
+            cap_score: 30,
+            interval_at: None,
+        };
+        assert!(!spiel_ist_entschieden(&[], &kaputt));
+        assert!(spiel_ist_entschieden(&[(21, 10)], &kaputt));
     }
 
     #[test]
@@ -4532,12 +4853,65 @@ mod tests {
     async fn process_result_failure_queues_btp_retry() {
         let ctx = make_ctx(1); // Port 1: Verbindung wird sofort abgewiesen
         let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
-        assert!(!resp.ok, "Write gegen toten BTP-Port schlägt fehl");
+        // Der Write ist gescheitert, das ERGEBNIS aber angenommen: Es liegt
+        // in der (persistenten) Nachschub-Queue, und der Sync-Loop reicht es
+        // nach. Dem Tablet „abgelehnt" zu melden, hieße es an etwas kleben zu
+        // lassen, das der Turnier-PC längst sicher verwahrt (Feldtest
+        // 22.08.2026: Tablets, die ein Spiel nicht abschließen konnten).
+        assert!(resp.ok, "eingereiht heißt angenommen");
+        assert!(!resp.permanent);
         let q = ctx.tablet.btp_retries();
         assert_eq!(q.len(), 1, "Fehlschlag ist eingereiht");
         assert_eq!(q[0].update.btp_match_id, 42);
         assert_eq!(q[0].update.sets, vec![(21, 10), (21, 15)]);
         assert!(q[0].enqueued_ms > 0, "Bezugszeitpunkt = Spielende gesetzt");
+    }
+
+    #[tokio::test]
+    async fn ein_unmoegliches_ergebnis_wird_dauerhaft_abgelehnt() {
+        // Feldtest 22.08.2026: Tablets zählten weiter, konnten aber nicht
+        // abschließen — und zeigten dabei „wird automatisch wiederholt, bis
+        // es ankommt". Ein Satz, der nicht zur Zählweise passt, wird aber
+        // auch beim hundertsten Versuch abgelehnt: Die Ablehnung hängt allein
+        // am Payload. Das muss das Tablet erkennen können.
+        let ctx = make_ctx(1);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (13, 8)])).await;
+        assert!(!resp.ok);
+        assert!(
+            resp.permanent,
+            "unspielbarer Satz ⇒ Wiederholen hilft nie: {:?}",
+            resp.error
+        );
+        assert!(
+            ctx.tablet.btp_retries().is_empty(),
+            "ein abgelehntes Ergebnis wird nicht eingereiht"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_fehlender_snapshot_bleibt_wiederholbar() {
+        // Gegenstück: „Kein Match auf diesem Court" hängt am Zustand des
+        // Turnier-PCs, nicht am Ergebnis — beim nächsten BTP-Poll kann es
+        // klappen. Das Tablet muss weiter wiederholen, sonst würfe ein noch
+        // nicht geladener Snapshot ein fertiges Ergebnis weg.
+        let ctx = make_ctx(1);
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: Vec::new(), // BTP noch nicht geladen
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(!resp.ok);
+        assert!(
+            !resp.permanent,
+            "zustandsabhängige Ablehnung bleibt wiederholbar"
+        );
     }
 
     /// Nach einem Ergebnis gibt `process_result` das Feld in BTP frei — seit
@@ -4691,6 +5065,51 @@ mod tests {
         assert!(parse_sheet_ids("42,abc").is_none());
         assert!(parse_sheet_ids("../../etc").is_none());
         assert!(parse_sheet_ids("").is_none());
+    }
+
+    /// Der **Vorabzettel** ist ein eigener Modus, keine Verhaltensänderung
+    /// des bestehenden Abrufs: Dasselbe Spiel ohne jede Aufzeichnung
+    /// liefert normal weiterhin nichts (→ 404) und vorab ein vollständiges
+    /// Blatt (Spec `schiedsrichterzettel-autodruck`, E2).
+    #[tokio::test]
+    async fn vorabzettel_liefert_ein_blatt_wo_der_normalabruf_404_bleibt() {
+        use crate::tablet::scoresheet::{html_fuer, Modus};
+        let ctx = make_ctx(1);
+
+        assert!(
+            html_fuer(&ctx.tablet, None, Modus::Normal, &[42]).is_none(),
+            "ohne Aufzeichnung gibt es keinen Archivzettel"
+        );
+
+        let html = html_fuer(&ctx.tablet, None, Modus::Vorab, &[42])
+            .expect("der Vorabzettel muss auch ohne Aufzeichnung ein Blatt liefern");
+        assert!(html.contains("Schiedsrichter"), "Kopf fehlt");
+        assert!(html.contains("Referee"), "Unterschriftszeile fehlt");
+        // Genau eine Seite: sechs leere Blöcke, keine Anhangseite.
+        assert_eq!(html.matches("<section class=\"blatt").count(), 1);
+
+        // Ein Spiel außerhalb des Snapshots bleibt auch vorab ohne Blatt —
+        // die Kopfangaben kämen sonst aus dem Nichts.
+        assert!(html_fuer(&ctx.tablet, None, Modus::Vorab, &[999]).is_none());
+    }
+
+    /// Die Lesart des Abfrage-Teils: Nur ausdrückliche Zustimmung schaltet
+    /// den Vorabzettel ein, ein Tippfehler bedeutet „wie bisher".
+    #[test]
+    fn vorab_query_ist_streng_aber_gutmuetig() {
+        use crate::tablet::scoresheet::Modus;
+        let q = |v: Option<&str>| {
+            SheetQuery {
+                vorab: v.map(str::to_string),
+            }
+            .modus()
+        };
+        assert_eq!(q(Some("1")), Modus::Vorab);
+        assert_eq!(q(Some("true")), Modus::Vorab);
+        assert_eq!(q(Some(" ja ")), Modus::Vorab);
+        assert_eq!(q(None), Modus::Normal);
+        assert_eq!(q(Some("0")), Modus::Normal);
+        assert_eq!(q(Some("vielleicht")), Modus::Normal);
     }
 
     /// Aufgabe vom Tablet: der EINE kombinierte SENDUPDATE trägt
@@ -5220,6 +5639,267 @@ mod tests {
     /// sein — vorher (getrennte Schreibpfade: `mutate_app_config` direkt
     /// auf der Platte, `mutate_config` nur im veralteten In-Memory-Stand)
     /// hätte (b) das Profil aus (a) kommentarlos wieder gelöscht.
+    /// Ein Turnier mit `n` Feldern in einer Halle — Grundlage der Sperr-Tests.
+    fn snap_mit_feldern(halle: &str, ids: &[i64]) -> crate::btp::model::BtpSnapshot {
+        let mut snap = crate::btp::model::BtpSnapshot {
+            tournament_name: "Sperrtest".into(),
+            rest_minutes: None,
+            matches: Vec::new(),
+            courts: ids.iter().map(|i| i.to_string()).collect(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        };
+        if !halle.is_empty() {
+            snap.locations.push(crate::btp::model::BtpLocation {
+                id: 1,
+                name: halle.to_string(),
+            });
+        }
+        for id in ids {
+            snap.court_infos.push(crate::btp::model::BtpCourt {
+                id: *id,
+                name: id.to_string(),
+                location_id: if halle.is_empty() { None } else { Some(1) },
+                sort_order: *id,
+            });
+        }
+        snap
+    }
+
+    fn tl_device(id: &str) -> crate::config::TlDevice {
+        crate::config::TlDevice {
+            id: id.into(),
+            token: format!("tok-{id}"),
+            label: format!("Tablet {id}"),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn sperren_wirkt_sofort_und_landet_in_der_config() {
+        // Spec `tl-web-felder-sperren` E3/E4: Die Sperre muss BEIDE Ziele
+        // erreichen — den Laufzeit-Zustand, aus dem die Vergabe liest, UND
+        // die Datei. Schriebe die Aktion nur die Config (wie `SetHallPrefill`),
+        // griffe die Sperre erst nach einem Neustart der Übertragung.
+        let (ctx, shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2, 3]));
+        let ctx = Arc::new(ctx);
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-lock-1",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 2,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(response.ok, "Sperren soll gelingen: {response:?}");
+        assert!(ctx.tablet.is_court_locked(2), "Laufzeit-Zustand (E3)");
+        assert_eq!(
+            shared.lock().unwrap().locked_courts,
+            vec![2],
+            "und die Config (E4)"
+        );
+        assert_eq!(
+            shared.lock().unwrap().locked_courts_tournament,
+            "Sperrtest",
+            "mit Turnierbezug (ADR 0044)"
+        );
+
+        // Freigeben nimmt beides wieder zurück.
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-unlock-1",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 2,
+                locked: false,
+            },
+        )
+        .await;
+        assert!(response.ok);
+        assert!(!ctx.tablet.is_court_locked(2));
+        assert!(shared.lock().unwrap().locked_courts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ein_unbekanntes_feld_wird_abgelehnt() {
+        // E6: Ohne diese Prüfung nähme der Host jede Zahl an — die Sperrliste
+        // trüge Einträge, die in keiner Oberfläche auftauchen und die deshalb
+        // niemand wieder loswird.
+        let (ctx, shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2]));
+        let ctx = Arc::new(ctx);
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-lock-999",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 999,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(!response.ok, "unbekanntes Feld muss abgelehnt werden");
+        assert!(
+            shared.lock().unwrap().locked_courts.is_empty(),
+            "und nichts verändern"
+        );
+        assert!(!ctx.tablet.is_court_locked(999));
+    }
+
+    #[tokio::test]
+    async fn dieselbe_op_id_sperrt_nur_einmal() {
+        // E8: Das Tablet wiederholt bei wackliger Leitung. Die Idempotenz
+        // liegt im gemeinsamen `remember_result`-Weg — dieser Test hält fest,
+        // dass die neue Aktion ihn wirklich benutzt.
+        let (ctx, shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2, 3]));
+        let ctx = Arc::new(ctx);
+        let aktion = relay_proto::TlAction::LockCourt {
+            court_id: 3,
+            locked: true,
+        };
+
+        let erste =
+            crate::tablet::tl::execute(&ctx, &tl_device("a"), "op-doppelt", 1, 0, aktion.clone())
+                .await;
+        assert!(erste.ok);
+        // Zwischendurch von Hand freigeben — käme die Wiederholung durch,
+        // stünde die Sperre danach wieder.
+        ctx.tablet.set_court_locked(3, false);
+
+        let zweite =
+            crate::tablet::tl::execute(&ctx, &tl_device("a"), "op-doppelt", 1, 0, aktion).await;
+        assert!(zweite.ok, "die Wiederholung wird quittiert");
+        assert!(
+            !ctx.tablet.is_court_locked(3),
+            "aber nicht noch einmal ausgeführt (E8)"
+        );
+        assert_eq!(shared.lock().unwrap().locked_courts, vec![3]);
+    }
+
+    #[tokio::test]
+    async fn eine_halle_ohne_offenes_feld_verliert_ihre_auto_zuordnungen() {
+        // E11: ADR 0030 bindet die Vergabe an die Halle. Bliebe die Zuordnung
+        // stehen, bekämen die dorthin vorverteilten Spiele gar kein Feld mehr,
+        // obwohl nebenan welche frei sind — die Halle stünde still, ohne dass
+        // jemand den Grund sähe.
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        let mut snap = snap_mit_feldern("Halle A", &[1, 2]);
+        snap.locations.push(crate::btp::model::BtpLocation {
+            id: 2,
+            name: "Halle B".into(),
+        });
+        snap.court_infos.push(crate::btp::model::BtpCourt {
+            id: 3,
+            name: "3".into(),
+            location_id: Some(2),
+            sort_order: 3,
+        });
+        snap.courts.push("3".into());
+        ctx.tablet.set_snapshot(snap);
+        // Zwei Spiele sind nach Halle A vorverteilt, eines nach Halle B.
+        ctx.tablet.auto_hall_store().insert_many(&[
+            (100, "Halle A".to_string()),
+            (101, "Halle A".to_string()),
+            (200, "Halle B".to_string()),
+        ]);
+        let ctx = Arc::new(ctx);
+
+        // Feld 1 sperren — Halle A hat noch Feld 2, also passiert nichts.
+        let r = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-l1",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 1,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(r.ok);
+        assert_eq!(
+            ctx.tablet.auto_hall_store().halls().len(),
+            3,
+            "solange die Halle ein offenes Feld hat, bleibt alles"
+        );
+
+        // Jetzt auch Feld 2 — Halle A ist zu.
+        let r = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-l2",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 2,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(r.ok);
+        let halls = ctx.tablet.auto_hall_store().halls();
+        assert_eq!(
+            halls.len(),
+            1,
+            "die Zuordnungen der geschlossenen Halle sind weg"
+        );
+        assert_eq!(
+            halls.get(&200).map(String::as_str),
+            Some("Halle B"),
+            "die der offenen Halle bleiben unangetastet"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_ein_hallen_turnier_verliert_beim_sperren_keine_zuordnungen() {
+        // Gegenprobe zum vorigen Test: Im Ein-Hallen-Fall trägt kein Feld
+        // einen Hallennamen. Ohne den `is_multi_hall`-Vorbehalt wäre die
+        // Menge der offenen Hallen leer — und es würde ALLES geräumt.
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1]));
+        ctx.tablet
+            .auto_hall_store()
+            .insert_many(&[(100, "Halle A".to_string())]);
+        let ctx = Arc::new(ctx);
+
+        let r = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-einhalle",
+            1,
+            0,
+            relay_proto::TlAction::LockCourt {
+                court_id: 1,
+                locked: true,
+            },
+        )
+        .await;
+        assert!(r.ok);
+        assert_eq!(
+            ctx.tablet.auto_hall_store().halls().len(),
+            1,
+            "im Ein-Hallen-Turnier wird nichts geräumt"
+        );
+    }
+
     #[tokio::test]
     async fn profile_save_survives_a_later_settings_save_lost_update_regression() {
         let (ctx, shared, dir) = make_tl_ctx(vec![]);
@@ -5606,13 +6286,99 @@ mod tests {
         // Der feste Court-Monitor ist der billige Fall — gezählt wird er
         // trotzdem, sonst fehlte der Vergleich zur teuren Übersicht.
         let ctx = Arc::new(make_ctx(1));
-        let _ = monitor_state(State(ctx.clone()), Path(101), takt(Some("push"))).await;
-        let _ = monitor_state(State(ctx.clone()), Path(101), takt(None)).await;
+        let _ = monitor_state(
+            State(ctx.clone()),
+            Path(101),
+            takt(Some("push")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ = monitor_state(
+            State(ctx.clone()),
+            Path(101),
+            takt(None),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
 
         let s = ctx.tablet.perf().snapshot();
         assert_eq!(s.court_state_push, 1);
         assert_eq!(s.court_state_poll, 1);
         assert!(s.court_state_push_bytes > 0 && s.court_state_poll_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn monitor_state_etag_liefert_marke_und_304() {
+        // LAN-Parität zum Cloud-Pfad (Etappe ETag, 1e): Der feste
+        // Court-Monitor trägt eine Marke (ohne server_now_ms/seq — zwei
+        // Abrufe ohne Änderung liefern dieselbe Marke) und antwortet auf
+        // If-None-Match mit 304 ohne Body.
+        let ctx = Arc::new(make_ctx(1));
+        let r1 = monitor_state(
+            State(ctx.clone()),
+            Path(101),
+            takt(None),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(r1.status(), StatusCode::OK);
+        let etag1 = r1
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let bytes1 = axum::body::to_bytes(r1.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert!(!bytes1.is_empty(), "200 trägt den vollen Body");
+
+        // Gleicher Inhalt, neuer Aufruf (neues server_now_ms) → gleiche Marke.
+        let r2 = monitor_state(
+            State(ctx.clone()),
+            Path(101),
+            takt(None),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(r2.status(), StatusCode::OK);
+        let etag2 = r2
+            .headers()
+            .get(header::ETAG)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let bytes2 = axum::body::to_bytes(r2.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(etag2, etag1, "server_now_ms ist aus der Marke ausgenommen");
+
+        // Mit bekannter Marke → 304, kein Body.
+        let mut hm = axum::http::HeaderMap::new();
+        hm.insert(header::IF_NONE_MATCH, etag1.parse().unwrap());
+        let r3 = monitor_state(State(ctx.clone()), Path(101), takt(None), hm).await;
+        assert_eq!(
+            r3.status(),
+            StatusCode::NOT_MODIFIED,
+            "bekannte Marke → 304"
+        );
+        let bytes3 = axum::body::to_bytes(r3.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert!(bytes3.is_empty(), "304 hat keinen Body");
+
+        // Perf-Zählung folgt dem /health-Muster (Review R1): Der 304 zählt 0
+        // Bytes — sonst überschätzte das S0-Messinstrument die Leitungslast
+        // und der ETag-Nutzen bliebe in der Messung unsichtbar.
+        let s = ctx.tablet.perf().snapshot();
+        assert_eq!(s.court_state_poll, 3, "drei Abrufe gezählt");
+        assert_eq!(
+            s.court_state_poll_bytes,
+            (bytes1.len() + bytes2.len()) as u64,
+            "nur die zwei 200 zählen ihren Body; der 304 zählt 0"
+        );
     }
 
     // ── Antwortcache für /health (Spec monitor-livestand-push, S1) ─────────
@@ -6160,8 +6926,14 @@ mod tests {
                 src: src.map(|s| s.to_string()),
             })
         };
-        let _ = monitor_device_state(State(ctx.clone()), q(Some("push"))).await;
-        let _ = monitor_device_state(State(ctx.clone()), q(None)).await;
+        let _ = monitor_device_state(
+            State(ctx.clone()),
+            q(Some("push")),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        let _ =
+            monitor_device_state(State(ctx.clone()), q(None), axum::http::HeaderMap::new()).await;
 
         let s = ctx.tablet.perf().snapshot();
         assert_eq!(s.court_state_push, 1);

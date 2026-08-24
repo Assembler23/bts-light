@@ -3,6 +3,7 @@
 
 pub mod assets;
 pub mod assign;
+pub mod blatt;
 pub mod club_logos;
 pub mod exclusion;
 pub mod hall_assign;
@@ -12,6 +13,7 @@ pub mod monitor;
 pub mod officials;
 pub mod perf;
 pub mod predict;
+pub mod print_log;
 pub mod queue_order;
 pub mod relay_client;
 pub mod scoresheet;
@@ -22,3 +24,4 @@ pub mod state;
 pub mod timeline;
 pub mod tl;
 pub mod winners;
+pub mod wish_court;

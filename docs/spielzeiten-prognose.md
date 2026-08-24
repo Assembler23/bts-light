@@ -47,6 +47,15 @@ verworfen.
 nach einem App-Neustart mitten im Spiel, beim Backend-Ergebnis und bei der
 TL-Web-Wertung (früher stand dort 0). Kampflose Spiele melden weiterhin 0.
 
+Seit v0.9.253 liegen zwei weitere Werte je Spiel in derselben Datei, die
+nicht in die Statistik zählen, sondern die **Mindestpause** der Spieler
+tragen: `finished_seen_ms` (wann das Spiel erstmals im BTP-Stand als beendet
+auftauchte — also auch bei einem direkt in BTP eingetragenen Ergebnis) und
+`pause_ms` (die Pausenlänge, die bei genau diesem Spielende galt). Beide
+machen die Pause unempfindlich gegen einen Neustart und gegen eine spätere
+Änderung der Einstellung; Einzelheiten in
+[`preparation.md`](preparation.md).
+
 ## Die Prognose („wann bin ich dran?")
 
 Die TL-Web-Spielliste zeigt an jedem wartenden Spiel den voraussichtlichen

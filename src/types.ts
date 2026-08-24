@@ -113,6 +113,13 @@ export interface ScorekeeperConfig {
   break_seconds: number;
 }
 
+/** Druck der Schiedsrichterzettel (Rust: `config::PrintConfig`).
+ *  `printer_name` leer = Windows-Standarddrucker. */
+export interface PrintConfig {
+  auto_enabled: boolean;
+  printer_name: string;
+}
+
 /** Schiedsrichtermanagement — globale Schalter (Rust: config::OfficialsConfig).
  *  Turnier-Spezifisches (Reihenfolge, Pausen, Sperrlisten) liegt bewusst NICHT
  *  hier, sondern in einer turniergebundenen Datei (ADR 0022). */
@@ -395,9 +402,15 @@ export interface CloudAnnounceCourt {
   team1_nationalities: string[];
   team2_nationalities: string[];
   match_id: number;
-  /** Zähltafelbediener (ADR 0007); nur bei scorekeeper_assigned angesagt. */
+  /** Zähltafelbediener; ob er angesagt wird, entscheidet seit ADR 0040 der
+   *  Schalter `announce.announce_scorekeeper`. */
   scorekeeper: string[];
   scorekeeper_assigned: boolean;
+  /** Schiedsrichter des laufenden Spiels — damit die ferne Halle sie
+   *  mitansagen kann. Leer ohne Schiedsrichter-Betrieb. */
+  sr: string[];
+  /** Aufschlagrichter, gleiche Herkunft. */
+  ar: string[];
 }
 
 /** Ein aufgerufenes Spiel im Cloud-Ansage-Status (Rust: commands::CloudPrepared).
@@ -581,6 +594,8 @@ export interface AppConfig {
   prediction: PredictionConfig;
   /** Zähltafelbediener-Verwaltung (ADR 0007). */
   scorekeeper: ScorekeeperConfig;
+  /** Druck der Schiedsrichterzettel (Spec schiedsrichterzettel-autodruck). */
+  print: PrintConfig;
   /** Einstellungen der automatischen Feldvergabe. */
   auto_assign: AutoAssignConfig;
   /** Hallen-Check-In (ADR 0009). */

@@ -355,6 +355,39 @@ pub fn reconnect_decision(
     }
 }
 
+/// Beobachtet den Fernbefehl-Zähler für **einen** Beobachter — eine
+/// Tablet-Verbindung im LAN, die Relay-Sitzungsfolge in der Cloud (Spec
+/// `tablet-version-abgleich`).
+///
+/// Eigener Typ, weil beide Schleifen dieselben zwei Fehler machen könnten:
+/// bei 0 beginnen (der Beobachter führte einen Befehl nachträglich aus, den
+/// er nie hätte sehen dürfen — Neulade-Schleife) oder den Stand nach dem
+/// Melden nicht fortschreiben (er meldete ihn in jedem Takt erneut). So ist
+/// beides an einer Stelle geregelt und geprüft.
+pub struct ReloadWacht(u64);
+
+impl ReloadWacht {
+    /// Merkt den aktuellen Stand: Was davor befohlen wurde, gilt für diesen
+    /// Beobachter nicht mehr.
+    pub fn beim_verbinden(state: &TabletState) -> Self {
+        Self(state.tablet_reload_gen())
+    }
+
+    /// Ist seither ein Befehl gegeben worden? Meldet ihn **genau einmal**.
+    ///
+    /// Mehrere Befehle, während niemand hinsah, sind ein einziger
+    /// Nachholbedarf — einmal neu laden macht die Seite aktuell, zweimal
+    /// wäre nur ein zweiter Sprung auf dem Bildschirm.
+    pub fn faellig(&mut self, state: &TabletState) -> bool {
+        let jetzt = state.tablet_reload_gen();
+        if jetzt == self.0 {
+            return false;
+        }
+        self.0 = jetzt;
+        true
+    }
+}
+
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
 #[derive(Default)]
 pub struct TabletState {
@@ -418,6 +451,15 @@ pub struct TabletState {
     /// Warteschlange gezogene Zähltafelbediener dieses Felds (ADR 0007,
     /// Scheibe 2). Wird geräumt, sobald das Feld frei ist / das Spiel wechselt.
     assigned_scorekeeper: RwLock<HashMap<i64, (i64, Vec<String>)>>,
+    /// CourtID → Match-ID, für das die Bediener-Vergabe bereits **stattgefunden
+    /// hat** — auch wenn sie leer ausging (niemand wartete).
+    ///
+    /// Ohne diesen Merker versuchte der Sync-Lauf es sekündlich erneut und
+    /// hängte einem längst laufenden Spiel nachträglich den Nächstbesten an,
+    /// sobald irgendwo jemand fertig wurde: Der am Feld angezeigte Name
+    /// sprang mitten im Spiel um (Feldtest 21.08.2026). Die Vergabe gehört
+    /// zum Aufruf — findet sie niemanden, bleibt dieses Spiel ohne Bediener.
+    scorekeeper_assign_done: RwLock<HashMap<i64, i64>>,
     /// Nachrufe an den Zähltafelbediener je Feld: `(Match-ID, Stufe)`.
     /// Die Match-ID im Wert setzt den Zähler bei einem Spielwechsel von
     /// selbst zurück — dasselbe Muster wie `call_stages`.
@@ -451,6 +493,10 @@ pub struct TabletState {
     /// nicht): gesperrte Felder werden nicht automatisch belegt und rot
     /// markiert. Beim Start aus der Config geseedet, bei Änderung persistiert.
     locked_courts: RwLock<HashSet<i64>>,
+    /// Turnier, zu dem [`Self::locked_courts`] gehört — Guard nach ADR 0044.
+    /// BTP vergibt CourtIDs je Turnier neu; eine Sperre vom Vortag träfe
+    /// sonst ein beliebiges anderes Feld. Leer = noch kein Turnier gesehen.
+    locked_courts_tournament: RwLock<String>,
     /// CourtID → (Match-ID, Zeitpunkt des 1. Aufrufs in Unix-ms), seit wann
     /// das aktuelle Spiel auf dem Feld steht. Grundlage des Aufruf-Timers; vom
     /// Sync-Loop je Poll abgeglichen.
@@ -484,6 +530,14 @@ pub struct TabletState {
     /// dazwischenfunken. Er gilt bis zum nächsten Start; danach zählt wieder
     /// die Grundeinstellung aus der Konfiguration.
     auto_assign_paused: RwLock<bool>,
+    /// Letzte Warnung des Autodrucks (Spec
+    /// `schiedsrichterzettel-autodruck`, E5). Reine Anzeige fürs
+    /// Dashboard: Ein Drucker, der schweigt, darf nicht stumm scheitern —
+    /// sonst wartet die Turnierleitung auf Zettel, die nie kommen.
+    /// Bewusst ein eigener `Arc`: Der Druck läuft in einer abgesetzten
+    /// Aufgabe, die den ganzen `TabletState` nicht braucht — sie soll nur
+    /// ihr Scheitern melden können.
+    print_warning: std::sync::Arc<RwLock<Option<String>>>,
     /// Erfolgte Aufrufe je Feld:
     /// `court_id → (match_id, Stufe, bereits gerufene Parteien)`.
     ///
@@ -527,6 +581,10 @@ pub struct TabletState {
     /// demselben Grund wie `officials`: TL-Web-Actions und Tauri-Commands
     /// müssen denselben Stand sehen.
     auto_assign_exclusions: crate::tablet::exclusion::AutoAssignExclusionStore,
+    /// Wunschfelder der Automatik (Spec `tl-wunschfeld`) — turniergebunden
+    /// wie die Ausnahmeliste, aus demselben Grund geteilt zwischen TL-Web,
+    /// Sync-Lauf und Anzeige.
+    wish_courts: crate::tablet::wish_court::WishCourtStore,
     /// Manuelle Spielreihenfolge je Halle (Spec
     /// `spielliste-manuelle-reihenfolge`, ADR 0023): Match-IDs im
     /// Präfix-Block ihrer Halle, turniergebunden persistiert. Er hängt hier
@@ -534,6 +592,12 @@ pub struct TabletState {
     /// und Desktop müssen denselben Stand sehen; die BTP-Reihenfolge selbst
     /// bleibt unangetastet (R2).
     queue_order: crate::tablet::queue_order::QueueOrderStore,
+    /// Druck-Gedächtnis des Autodrucks (Spec
+    /// `schiedsrichterzettel-autodruck`, E5): welche Spiele schon ein
+    /// Blatt bekommen haben — turniergebunden persistiert, nur Match-IDs.
+    /// Er hängt hier, weil der Sync-Loop ihn schreibt und die Commands
+    /// denselben Stand sehen müssen.
+    print_log: crate::tablet::print_log::PrintLogStore,
     /// Spielzeiten-Messung je Match (Spec `spielzeiten-prognose`, ADR 0027):
     /// erste Feldzuweisung, erster Punkt, Spielende — turniergebunden
     /// persistiert (`match-times.json`). Er hängt hier, weil Sync-Loop,
@@ -690,6 +754,21 @@ pub struct TabletState {
     /// überflüssigen Neubau — ein zu seltenes zeigte einen alten Stand.
     /// Deshalb im Zweifel hochzählen, plus die Hart-TTL im Handler.
     overview_rev: AtomicU64,
+    /// Zählt die Fernbefehle „alle Tablets neu laden" (Spec
+    /// `tablet-version-abgleich`).
+    ///
+    /// **Kein Broadcast-Kanal, sondern ein Zähler:** Jede Tablet-Verbindung
+    /// sieht ohnehin im 2-Sekunden-Takt im Zustand nach (dort hängt schon die
+    /// Match-Zuweisung dran), und der Relay-Client sweept ebenso. Beide
+    /// merken sich den Stand beim Verbinden und schlagen zu, wenn er sich
+    /// erhöht hat. Das kostet keine Verdrahtung in zwei Binärdateien und
+    /// verzögert um höchstens einen Takt.
+    ///
+    /// Das Merken **beim Verbinden** ist der Kern: Ein Tablet, das sich nach
+    /// dem Befehl frisch verbindet, hat die neue Seite längst geladen — es
+    /// darf den alten Befehl nicht nachträglich ausführen und in eine
+    /// Neulade-Schleife geraten.
+    tablet_reload_gen: AtomicU64,
     /// Die zuletzt gebaute Feld-Liste als fertiges JSON (Spec
     /// monitor-livestand-push, S1). Reiner **Beschleuniger, keine
     /// Wahrheit**: Ist er kalt oder abgestanden, baut der Handler direkt,
@@ -1170,8 +1249,19 @@ impl TabletState {
         // ADR 0022, Spec `feldvergabe-ausnahme`).
         self.auto_assign_exclusions
             .set_tournament(&snapshot.tournament_name);
+        // Wunschfelder ebenso turniergebunden (Spec `tl-wunschfeld`):
+        // Match- UND CourtIDs gelten nur innerhalb eines Turniers.
+        self.wish_courts.set_tournament(&snapshot.tournament_name);
         // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
         self.queue_order.set_tournament(&snapshot.tournament_name);
+        // Gesperrte Felder ebenso (ADR 0044). Sie liegen zwar in der Config
+        // und nicht in einem eigenen Store, gelten aber genauso nur für EIN
+        // Turnier: CourtIDs vergibt BTP je Turnier neu.
+        self.bind_locked_courts(&snapshot.tournament_name);
+        // Druck-Gedächtnis ebenso turniergebunden (Spec
+        // `schiedsrichterzettel-autodruck`): Match-IDs gelten nur
+        // innerhalb eines Turniers, ein Wechsel beginnt frisch.
+        self.print_log.set_tournament(&snapshot.tournament_name);
         // Spielzeiten-Messung ebenso turniergebunden (Spec
         // `spielzeiten-prognose`, Muster ADR 0022).
         self.match_times.set_tournament(&snapshot.tournament_name);
@@ -1260,6 +1350,24 @@ impl TabletState {
         self.auto_assign_exclusions.retain(keep);
     }
 
+    /// Der Wunschfeld-Speicher (Spec `tl-wunschfeld`) — geteilt von
+    /// TL-Web-Actions, `sync.rs` und dem TL-Zustand.
+    pub fn wish_court_store(&self) -> &crate::tablet::wish_court::WishCourtStore {
+        &self.wish_courts
+    }
+
+    /// Wunschfeld dieses Spiels (`None` = keins gesetzt). **Die** eine
+    /// Abfrage für Vergabe und Anzeige — nie der Store direkt, damit es nur
+    /// diese eine Stelle gibt.
+    pub fn wish_court(&self, match_id: i64) -> Option<i64> {
+        self.wish_courts.wish(match_id)
+    }
+
+    /// Wunschfeld setzen (`Some`) oder aufheben (`None`).
+    pub fn set_wish_court(&self, match_id: i64, court_id: Option<i64>) {
+        self.wish_courts.set_wish(match_id, court_id);
+    }
+
     /// Der Speicher der manuellen Spielreihenfolge (Spec
     /// `spielliste-manuelle-reihenfolge`) — geteilt von TL-Web-Actions,
     /// Tauri-Commands und `sync.rs`.
@@ -1341,9 +1449,25 @@ impl TabletState {
         self.auto_assign_exclusions.set_path(path);
     }
 
+    /// Ablage-Datei der Wunschfelder setzen (beim App-Start).
+    pub fn set_wish_courts_path(&self, path: std::path::PathBuf) {
+        self.wish_courts.set_path(path);
+    }
+
     /// Ablage-Datei der manuellen Spielreihenfolge setzen (beim App-Start).
     pub fn set_queue_order_path(&self, path: std::path::PathBuf) {
         self.queue_order.set_path(path);
+    }
+
+    /// Ablage-Datei des Druck-Gedächtnisses setzen (beim App-Start).
+    pub fn set_print_log_path(&self, path: std::path::PathBuf) {
+        self.print_log.set_path(path);
+    }
+
+    /// Druck-Gedächtnis des Autodrucks (Spec
+    /// `schiedsrichterzettel-autodruck`).
+    pub fn print_log(&self) -> &crate::tablet::print_log::PrintLogStore {
+        &self.print_log
     }
 
     /// Der Spielzeiten-Speicher (Spec `spielzeiten-prognose`) — geteilt von
@@ -1612,7 +1736,18 @@ impl TabletState {
                 e.update = update;
             } else {
                 if q.len() >= BTP_RETRY_CAP {
-                    q.remove(0); // ältesten opfern — Queue darf nie unbegrenzt wachsen
+                    // Ältesten opfern — die Queue darf nie unbegrenzt wachsen.
+                    // Das ist ein ECHTER Ergebnisverlust und muss laut sein:
+                    // Seit v0.9.254 quittiert der Host ein eingereihtes
+                    // Ergebnis gegenüber dem Tablet, das es daraufhin
+                    // loslässt. Verschwindet es hier still, weiß niemand
+                    // davon. Bei 200 Plätzen und 148 Ergebnissen am stärksten
+                    // Turniertag heißt diese Zeile: BTP war sehr lange weg.
+                    let verloren = q.remove(0);
+                    tracing::error!(
+                        "Nachschub-Queue voll ({BTP_RETRY_CAP}) — Ergebnis für Match {}                          geht verloren und muss von Hand in BTP nachgetragen werden",
+                        verloren.update.btp_match_id
+                    );
                 }
                 q.push(PendingBtpWrite {
                     update,
@@ -1869,6 +2004,15 @@ impl TabletState {
                 return; // schon zugewiesen für dieses Spiel
             }
         }
+        {
+            // Für dieses Spiel wurde schon vergeben — auch wenn niemand
+            // wartete. Ein zweiter Versuch würde den Namen am Feld mitten im
+            // laufenden Spiel austauschen.
+            let done = self.scorekeeper_assign_done.read().unwrap();
+            if done.get(&court_id) == Some(&match_id) {
+                return;
+            }
+        }
         let mut q = self.scorekeeper_queue.write().unwrap();
         // Bevorzugt „eigenes Feld", sonst der Älteste (Index 0, FIFO).
         let pos = q
@@ -1882,6 +2026,11 @@ impl TabletState {
                 .unwrap()
                 .insert(court_id, (match_id, e.names));
         }
+        // Vergeben ist vergeben — auch die leere Vergabe zählt.
+        self.scorekeeper_assign_done
+            .write()
+            .unwrap()
+            .insert(court_id, match_id);
     }
 
     /// Anzuzeigender Zähltafelbediener eines Felds für Tablet/ferne Halle:
@@ -1943,12 +2092,23 @@ impl TabletState {
             .write()
             .unwrap()
             .retain(|court_id, (match_id, _)| active.get(court_id) == Some(match_id));
+        // Der „schon vergeben"-Merker folgt derselben Regel: Räumt das Feld
+        // sein Spiel, ist die nächste Belegung ein neuer Aufruf und darf
+        // wieder aus der Warteschlange ziehen.
+        self.scorekeeper_assign_done
+            .write()
+            .unwrap()
+            .retain(|court_id, match_id| active.get(court_id) == Some(match_id));
     }
 
     /// Alle Bediener-Zuweisungen löschen. Wird gerufen, sobald die Verwaltung
     /// aus ist, damit keine veraltete Zuweisung in der Anzeige hängen bleibt.
     pub fn clear_scorekeeper_assignments(&self) {
         self.assigned_scorekeeper.write().unwrap().clear();
+        // Mit den Zuweisungen geht auch der Merker: Wird die Verwaltung
+        // wieder eingeschaltet, sollen die laufenden Felder erneut bedacht
+        // werden.
+        self.scorekeeper_assign_done.write().unwrap().clear();
     }
 
     /// Gesperrte Felder beim Start aus der Config übernehmen.
@@ -1957,6 +2117,45 @@ impl TabletState {
     }
 
     /// Feld sperren (`true`) oder entsperren (`false`).
+    /// Bindet die Sperrliste an ein Turnier und verwirft sie beim Wechsel
+    /// (ADR 0044). Ein **leerer** Name ändert nichts — den liefert der
+    /// Snapshot, bevor BTP den Turniernamen kennt, und er darf keine
+    /// gültigen Sperren wegwerfen.
+    ///
+    /// Die Config wird hier bewusst NICHT angefasst: Sie kann kurzzeitig eine
+    /// Sperre des Vortags tragen. Sie wird beim Start in den Laufzeit-Zustand
+    /// geladen und hier beim ersten Snapshot des neuen Turniers verworfen —
+    /// und ohne Snapshot vergibt die Automatik ohnehin nichts. Der nächste
+    /// Sperr-Vorgang bereinigt auch die Datei.
+    pub fn bind_locked_courts(&self, tournament: &str) {
+        let neu = tournament.trim();
+        if neu.is_empty() {
+            return;
+        }
+        let mut gemerkt = self.locked_courts_tournament.write().unwrap();
+        if gemerkt.as_str() == neu {
+            return;
+        }
+        if !gemerkt.is_empty() {
+            let mut set = self.locked_courts.write().unwrap();
+            if !set.is_empty() {
+                tracing::info!(
+                    "Turnierwechsel ({} → {}): {} gesperrte Felder verworfen (ADR 0044)",
+                    gemerkt,
+                    neu,
+                    set.len()
+                );
+                set.clear();
+            }
+        }
+        *gemerkt = neu.to_string();
+    }
+
+    /// Turnier, an das die Sperrliste gebunden ist (leer = noch keins).
+    pub fn locked_courts_tournament(&self) -> String {
+        self.locked_courts_tournament.read().unwrap().clone()
+    }
+
     pub fn set_court_locked(&self, court_id: i64, locked: bool) {
         let mut set = self.locked_courts.write().unwrap();
         if locked {
@@ -2631,6 +2830,19 @@ impl TabletState {
         self.overview_rev.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Stand des Fernbefehl-Zählers (Spec `tablet-version-abgleich`).
+    /// Nicht direkt vergleichen — dafür ist [`ReloadWacht`] da.
+    pub fn tablet_reload_gen(&self) -> u64 {
+        self.tablet_reload_gen.load(Ordering::Relaxed)
+    }
+
+    /// „Alle Tablets laden ihre Seite neu" — der Befehl aus der
+    /// Turnierleitung. Wirkt auf alle Verbindungen, die den Zähler seither
+    /// beobachten; wer sich danach neu verbindet, ist ohnehin frisch.
+    pub fn request_tablet_reload(&self) {
+        self.tablet_reload_gen.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Legt die gebaute Feld-Liste samt ihrer Ordnungszahlen als Antwortcache
     /// ab.
     pub fn set_overview_cache(
@@ -2937,6 +3149,28 @@ impl TabletState {
     /// Der Schalter lebt **nur zur Laufzeit** (die Einstellungen bleiben
     /// unangetastet) und gilt bis zum Stoppen der Übertragung — siehe
     /// [`Self::reset_runtime_switches`].
+    /// Warnung des Autodrucks setzen (überschreibt die vorherige — die
+    /// jüngste ist die, die zählt).
+    pub fn set_print_warning(&self, text: impl Into<String>) {
+        melde_druckwarnung(&self.print_warning, text);
+    }
+
+    /// Klonbarer Griff auf den Warnungs-Slot — für die abgesetzte
+    /// Druckaufgabe.
+    pub fn print_warning_slot(&self) -> std::sync::Arc<RwLock<Option<String>>> {
+        self.print_warning.clone()
+    }
+
+    /// Letzte Warnung des Autodrucks, falls eine offen ist.
+    pub fn print_warning(&self) -> Option<String> {
+        self.print_warning.read().unwrap().clone()
+    }
+
+    /// Warnung wegklicken (aus dem Dashboard).
+    pub fn clear_print_warning(&self) {
+        *self.print_warning.write().unwrap() = None;
+    }
+
     pub fn set_auto_assign_paused(&self, paused: bool) {
         *self.auto_assign_paused.write().unwrap() = paused;
     }
@@ -4218,6 +4452,19 @@ pub struct MonitorCourt {
     pub seq: u64,
 }
 
+/// Eine Druckwarnung ablegen — aus dem `TabletState` oder aus der
+/// abgesetzten Druckaufgabe, die nur den Slot hält.
+///
+/// Ein vergifteter Lock kostet hier höchstens die Anzeige einer Warnung;
+/// er darf niemals den Druckpfad zum Absturz bringen.
+pub fn melde_druckwarnung(slot: &std::sync::Arc<RwLock<Option<String>>>, text: impl Into<String>) {
+    let text = text.into();
+    tracing::warn!("Zettel-Autodruck: {text}");
+    if let Ok(mut w) = slot.write() {
+        *w = Some(text);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4265,6 +4512,7 @@ mod tests {
             result: MatchResult::Normal,
             status,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,
@@ -5992,6 +6240,52 @@ mod tests {
         s
     }
 
+    #[test]
+    fn ein_turnierwechsel_verwirft_die_gesperrten_felder() {
+        // ADR 0044 / Spec `tl-web-felder-sperren` E10: BTP vergibt CourtIDs je
+        // Turnier neu — eine Sperre vom Vortag träfe sonst ein beliebiges
+        // anderes Feld, und niemand sucht dort die Ursache.
+        let st = TabletState::default();
+        st.set_snapshot(snap_named("Köpi-Cup Tag 1"));
+        st.set_court_locked(7, true);
+        assert!(st.is_court_locked(7));
+
+        // Derselbe Snapshot nochmal ändert nichts.
+        st.set_snapshot(snap_named("Köpi-Cup Tag 1"));
+        assert!(st.is_court_locked(7), "gleiches Turnier, gleiche Sperren");
+
+        st.set_snapshot(snap_named("Kreismeisterschaft"));
+        assert!(
+            !st.is_court_locked(7),
+            "anderes Turnier ⇒ die Sperre gilt nicht mehr"
+        );
+    }
+
+    #[test]
+    fn ein_leerer_turniername_wirft_keine_sperren_weg() {
+        // Den liefert der Snapshot, bevor BTP den Namen kennt. Würde er als
+        // Wechsel gelten, verlöre der erste Poll nach dem Start alle Sperren.
+        let st = TabletState::default();
+        st.set_snapshot(snap_named("Köpi-Cup"));
+        st.set_court_locked(3, true);
+
+        st.set_snapshot(snap_named(""));
+        assert!(st.is_court_locked(3), "leerer Name ist kein Turnierwechsel");
+        assert_eq!(st.locked_courts_tournament(), "Köpi-Cup");
+    }
+
+    #[test]
+    fn die_erste_bindung_verwirft_nichts() {
+        // Beim Start werden die Sperren aus der Config geladen, BEVOR der
+        // erste Snapshot da ist. Dieser erste Snapshot darf sie nicht
+        // wegwerfen — er sagt ja nur, um welches Turnier es geht.
+        let st = TabletState::default();
+        st.set_locked_courts([3, 7]);
+        st.set_snapshot(snap_named("Köpi-Cup"));
+        assert!(st.is_court_locked(3), "erste Bindung ist kein Wechsel");
+        assert!(st.is_court_locked(7));
+    }
+
     /// Ein Official mit dieser ID (Name nur zur Unterscheidung).
     fn official(id: i64) -> crate::btp::model::BtpOfficial {
         crate::btp::model::BtpOfficial {
@@ -6107,6 +6401,49 @@ mod tests {
         st.enqueue_scorekeeper(2, vec!["B".into()], 9, 2_000);
         st.assign_scorekeeper_for_court(5, 44);
         assert_eq!(st.assigned_scorekeeper(5), Some(vec!["B".to_string()]));
+    }
+
+    #[test]
+    fn leere_warteschlange_beim_belegen_bleibt_leer_fuer_dieses_spiel() {
+        // Feldtest Köpi-Cup 21.08.2026: Beim zweiten Aufruf einer Paarung
+        // stand plötzlich ein anderer Tabletbediener am Feld.
+        //
+        // Ursache: War die Warteschlange beim Belegen leer, merkte sich die
+        // Vergabe nichts — der Sync-Lauf versuchte es sekündlich erneut und
+        // hängte dem längst laufenden Spiel den Nächstbesten an, sobald
+        // irgendwo jemand fertig wurde. Bis dahin zeigte das Feld den
+        // pro-Feld-Hinweis (Verlierer des Vorspiels); mit der späten Vergabe
+        // sprang der angezeigte Name um.
+        //
+        // Die Vergabe gehört zum Aufruf. Findet sie niemanden, bleibt dieses
+        // Spiel ohne Bediener — wer später frei wird, ist fürs nächste da.
+        let st = TabletState::default();
+
+        // Feld 5 wird belegt, während niemand wartet.
+        st.assign_scorekeeper_for_court(5, 42);
+        assert!(
+            st.assigned_scorekeeper(5).is_none(),
+            "leere Warteschlange ⇒ kein Bediener"
+        );
+
+        // Jetzt wird jemand frei (anderes Feld, anderes Spiel).
+        st.enqueue_scorekeeper(99, vec!["Später".into()], 7, 1_000);
+
+        // Nächster Sync-Zyklus, dasselbe Spiel auf demselben Feld.
+        st.assign_scorekeeper_for_court(5, 42);
+        assert!(
+            st.assigned_scorekeeper(5).is_none(),
+            "kein Nachrücken ins laufende Spiel — sonst wechselt der Name am Feld"
+        );
+        assert_eq!(
+            st.scorekeeper_queue().len(),
+            1,
+            "der Wartende bleibt für das nächste Spiel in der Schlange"
+        );
+
+        // Das nächste Spiel auf demselben Feld bekommt ihn dagegen sofort.
+        st.assign_scorekeeper_for_court(5, 43);
+        assert_eq!(st.assigned_scorekeeper(5), Some(vec!["Später".to_string()]));
     }
 
     #[test]
@@ -6500,6 +6837,35 @@ mod tests {
             "unter dem Deckel akzeptiert"
         );
         rx
+    }
+
+    #[test]
+    fn der_fernbefehl_erreicht_nur_wer_ihn_vorher_beobachtet_hat() {
+        let state = TabletState::default();
+        let mut bestehend = ReloadWacht::beim_verbinden(&state);
+        assert!(!bestehend.faellig(&state), "ohne Befehl passiert nichts");
+
+        state.request_tablet_reload();
+        assert!(
+            bestehend.faellig(&state),
+            "eine bestehende Verbindung bekommt den Befehl"
+        );
+        assert!(!bestehend.faellig(&state), "und zwar genau einmal");
+
+        // Der Kern des Entwurfs: Wer sich NACH dem Befehl verbindet, hat die
+        // neue Seite längst geladen. Führte er ihn nachträglich aus, liefe er
+        // beim nächsten Verbinden wieder hinein — eine Neulade-Schleife.
+        let mut frisch = ReloadWacht::beim_verbinden(&state);
+        assert!(
+            !frisch.faellig(&state),
+            "ein frisch verbundener Beobachter holt nichts nach"
+        );
+
+        // Zwei Befehle, während die Verbindung weg war, sind EIN Nachholbedarf.
+        state.request_tablet_reload();
+        state.request_tablet_reload();
+        assert!(frisch.faellig(&state), "der Nachholbedarf kommt an");
+        assert!(!frisch.faellig(&state), "aber nicht doppelt");
     }
 
     #[test]

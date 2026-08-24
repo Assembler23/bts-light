@@ -1,3 +1,4 @@
+pub mod aushang;
 pub mod azure_tts;
 pub mod badhub;
 pub mod btp;
@@ -5,6 +6,7 @@ pub mod commands;
 pub mod config;
 pub mod hall_colors;
 pub mod log_upload;
+pub mod print;
 pub mod sync;
 pub mod tablet;
 
@@ -141,6 +143,11 @@ pub fn run() {
             commands::finished_matches,
             commands::match_timeline,
             commands::match_scoresheet_html,
+            commands::aushang_html,
+            commands::printer_list,
+            commands::print_scoresheet,
+            commands::print_warning,
+            commands::clear_print_warning,
             commands::officials_roster,
             commands::official_assign,
             commands::official_clear,

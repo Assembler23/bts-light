@@ -3,6 +3,7 @@ import {
   ListOrdered,
   type LucideIcon,
   Monitor,
+  QrCode,
   Radio,
   Volume2,
 } from "lucide-react";
@@ -14,6 +15,7 @@ import {
   tabletOverview,
   tournamentStats,
 } from "../api";
+import { AushangOverlay } from "../components/AushangOverlay";
 import { SlaveDevicesPanel } from "../components/SlaveDevicesPanel";
 import type { NavView, SettingsFocus } from "../components/SideNav";
 import type {
@@ -128,6 +130,8 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
   const [monitors, setMonitors] = useState<MonitorDeviceInfo[]>([]);
   const [savingHall, setSavingHall] = useState(false);
   const [hallSaveError, setHallSaveError] = useState(false);
+  /** Aushang-Vorschau offen? (docs/aushang.md) */
+  const [aushangOffen, setAushangOffen] = useState(false);
 
   useEffect(() => {
     if (!running) {
@@ -479,6 +483,31 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
             </div>
           )}
         </section>
+      )}
+
+      {/* Aushang für die Halle. Bewusst unabhängig vom laufenden Liveticker:
+          Das Blatt wird meist **vor** dem Turnier gedruckt und aufgehängt.
+          Fehlt die öffentliche Live-Seite, sagt das die Vorschau. */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">
+          Aushang für die Halle
+        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <ActionButton
+            icon={QrCode}
+            label="Aushang drucken"
+            onClick={() => setAushangOffen(true)}
+            title="A4-Blatt mit QR-Codes zu Teilnehmerliste und Liveticker"
+          />
+          <span className="text-xs text-slate-400">
+            Ein Blatt mit beiden QR-Codes — Teilnehmerliste (Spielerprofil) und
+            Liveticker.
+          </span>
+        </div>
+      </section>
+
+      {aushangOffen && (
+        <AushangOverlay onClose={() => setAushangOffen(false)} />
       )}
     </main>
   );

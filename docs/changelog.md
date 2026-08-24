@@ -4,6 +4,371 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.268
+
+- **Neu: „⟳ Tablets" in der Turnierleitung.** Der Knopf oben rechts lässt nach
+  einer Rückfrage **alle Zähltablets** ihre Seite neu laden — auch die mit
+  laufendem Spiel, deren Bildschirm dabei kurz springt. Der Spielstand geht
+  nicht verloren.
+
+  Gebraucht wird er selten: Ein Tablet holt sich einen neuen Stand seit
+  v0.9.266 zwischen zwei Spielen von selbst. Der Knopf ist für den Fall, dass
+  die Turnierleitung nicht warten will — etwa nach einem Update in der Pause.
+
+  Zwei Dinge, die im Betrieb auffallen können: Ein Tablet, dessen geladene
+  Seite älter als dieses Update ist, kennt den Befehl noch nicht und verwirft
+  ihn still. Und ein Gerät, das nichts speichern darf (Kiosk mit gesperrtem
+  Browser-Speicher), springt mitten im Spiel bewusst nicht — dort überlebte
+  der Stand das Neuladen nicht; es zeigt stattdessen den Hinweis.
+
+## v0.9.267
+
+- **Der Beendet-Tab im Liveticker zeigt wieder den ganzen Turniertag.** Am
+  Köpi-Cup 2026 hörte die Liste der beendeten Spiele mitten am zweiten
+  Turniertag auf: 500 Einträge, dann nichts mehr — wer sein Ergebnis suchte
+  und früh gespielt hatte, fand es nicht. Die Grenze war als Schutz für
+  extrem große Turniere gedacht und lange großzügig bemessen; ein Turniertag
+  mit über 500 Spielen hat sie eingeholt. Sie liegt jetzt bei 1000.
+
+  **Die Liste „in Vorbereitung" reichte ebenfalls nicht weit genug.** Sie
+  kappte bei 15 Spielen — und zwar des gesamten Turniers, nicht je Halle oder
+  je Klasse. Wessen Spiel weiter hinten lag, tauchte dort nie auf. Auch das
+  war einmal richtig, als badhub diese Liste noch als einzige Quelle des
+  Vorbereitungs-Tabs las; inzwischen holt sich badhub den Spielplan
+  zusätzlich über einen eigenen Weg, und die Liste ist nur noch der
+  Rückfallweg. Sie reicht jetzt bis 150 Spiele.
+
+  Beides betrifft ausschließlich, wie viel bts-light an badhub meldet. Am
+  Bild in der Halle und an den Tablets ändert sich nichts, und die gemeldete
+  Datenmenge bleibt mit rund 370 KiB weit unter dem, was badhub annimmt.
+
+## v0.9.266
+
+- **Neu: Das Tablet merkt, wenn es veraltet ist.** Ein Turnier-Tablet läuft
+  tagelang mit derselben geladenen Seite; ein Update erreicht es nur über ein
+  Neuladen, und das passiert von selbst nicht. Jetzt vergleicht die Seite bei
+  jedem Lebenszeichen, ob der Turnier-PC noch dieselbe Fassung ausliefert.
+
+  **Steht kein Spiel auf dem Feld, lädt sie sich sofort selbst neu** — das
+  trifft die meisten Geräte zwischen zwei Spielen, und niemand muss etwas tun.
+  Läuft gerade ein Spiel, erscheint oben nur ein Hinweis mit dem Knopf „Jetzt
+  laden": Mitten im Zählen darf der Bildschirm nicht springen.
+
+  Neu geladen wird mit einer eigenen Adresse, die der Browser nicht aus seinem
+  Zwischenspeicher bedienen kann.
+
+## v0.9.265
+
+- **Satz- und Spielende werden jetzt im offiziellen Wortlaut angesagt.** Statt
+  „Den ersten Satz gewinnt X" heißt es „**Der erste Satz wurde gewonnen von**
+  X mit 21:12.", und am Ende „**Das Spiel wurde gewonnen von** X mit 21:17,
+  15:21 **und** 24:22." — die Satzbilanz („zwei Sätze zu eins") entfällt, die
+  Stände sagen sie ohnehin.
+- **Neu: der Zwischenstand nach einem Ausgleich.** Steht es nach dem Satz
+  gleich, folgt „**Einen Satz beide.**" (bei längeren Formaten „Zwei Sätze
+  beide."). Das fehlte bisher ganz — dabei ist es im Saal genau die Angabe,
+  auf die es ankommt. Bei Führung bleibt es wie gehabt beim Satzergebnis.
+
+## v0.9.264
+
+- **Behoben: Die Disqualifikation nannte den falschen Grund.** Bei Gelb und Rot
+  heißt es „wegen unsportlichen Verhaltens", bei Schwarz dagegen „wegen
+  **grober Unsportlichkeit**" — v0.9.263 hatte hier den Zusatz von Gelb/Rot
+  übernommen. Richtig war daran nur, dass überhaupt ein Grund fehlte.
+- **Die Eröffnung sagt jetzt „und zu meiner Linken".** Kleines Wort, aber es
+  gehört zur Ansage. Die Reihenfolge ist übrigens fest: immer erst rechts,
+  unabhängig davon, wer aufschlägt.
+- **Nach jeder Pause kommt die Freigabe.** Bisher sprang die Ansage nach der
+  Unterbrechung auf den reinen Punktestand zurück; jetzt heißt es „{Stand},
+  bitte spielen." — bis zum nächsten Ballwechsel.
+
+## v0.9.263
+
+- **Behoben: Die Pause hieß auch bei 15er-Zählweise „Pause bei 11 Punkten".**
+  Die Unterbrechung kommt bei 21er-Sätzen nach 11 Punkten, bei 15ern nach 8 —
+  die Überschrift nannte aber immer 11. Sie folgt jetzt der Zählweise des
+  Spiels. Der Zeitpunkt der Pause selbst war schon immer richtig.
+- **Behoben: Der Entscheidungssatz wurde als „Dritter Satz" angesagt.** Steht
+  es Satz gegen Satz, heißt er in der Ansage „Entscheidungssatz" — so sagt es
+  das Regelwerk. Bei welcher Nummer das eintritt, hängt von der Zählweise ab.
+- **Behoben: Die Disqualifikation wurde verkürzt angesagt.** Statt nur
+  „{Name}, disqualifiziert." heißt es jetzt vollständig „{Name},
+  disqualifiziert wegen unsportlichen Verhaltens." — wie bei Verwarnung und
+  Fehler, wo der Grund schon immer dabeistand.
+
+## v0.9.262
+
+- **Neu: Wunschfeld für einzelne Spiele.** Im ⋯-Menü eines Spiels lässt sich
+  jetzt ein Feld wählen. Die Automatik legt dieses Spiel dann nur dorthin — und
+  hält das Feld frei, sobald das Spiel dran ist. Damit landet das Endspiel auf
+  dem Hauptfeld, statt auf dem, das zufällig zuerst frei wird.
+
+  **Freigehalten wird erst ab Spielbereitschaft**, nicht schon beim Setzen:
+  Solange die Spieler noch im Halbfinale stehen oder ihre Pflichtpause läuft,
+  darf ein anderes Spiel auf das Feld. So steht das Hauptfeld nicht den halben
+  Tag leer, nur weil jemand morgens vorausgeplant hat.
+
+  In der Liste zeigt eine Marke das gewählte Feld und färbt sich, wenn es
+  gerade belegt ist — man sieht also auch, worauf ein Spiel wartet. Von Hand
+  bleibt alles möglich, es kommt nur eine Rückfrage. Der Wunsch verschwindet
+  von selbst, sobald das Spiel auf dem Feld steht.
+
+  Für Spiele mit Wunschfeld gibt es keine Startzeit-Prognose: Die Vorhersage
+  rechnet mit Hallen, nicht mit einzelnen Feldern, und wäre hier systematisch
+  zu früh — sie würde auch die Zeiten aller nachfolgenden Spiele verschieben.
+
+## v0.9.261
+
+- **Neu: Die Anzeigen kosten deutlich weniger Daten — die Anzeige bleibt
+  dieselbe.** Bisher luden die Court-Monitore den kompletten Spielfeldzustand
+  im Sekundentakt neu; gemessen waren das zuletzt rund 29 GB je
+  Turnierwochenende über die Cloud. Jetzt fragen die Geräte mit ihrer
+  bekannten Marke (ETag): Ist der Zustand unverändert, antwortet der Relay mit
+  „unverändert" (304) und überträgt nichts. Im Turnierbetrieb ist das der
+  Normalfall — gezählt wird nur, wenn sich wirklich etwas ändert. Erwartung:
+  rund 90 % weniger Datenverkehr (gemessen wird das nach dem nächsten
+  Turnier). Im LAN funktioniert dasselbe Verfahren für die eigenen Monitore.
+- **Neu: Der Pausen-Countdown rechnet mit der Server-Uhr.** Bisher kam die
+  Restzeit aus der Geräte-Uhr; nach Wochen im Dauerbetrieb gehen die
+  Pi-Uhren oft nach, und der Countdown lief langsamer als die Realität.
+  Jetzt stammt der Offset aus dem Abruf selbst (und aus dem Herzschlag des
+  Push-Kanals) — er überlebt auch eine lange „unverändert"-Reihe, und die
+  Spieldauer in der Kopfzeile zählt aus derselben Quelle weiter.
+- **Neu: Nach einem Verbindungsbruch holt ein Monitor zuverlässig auf.**
+  Kommt der Relay nicht mehr an, pollt er trotzdem weiter — im gesunden
+  Zustand bis zu 10 Minuten, im ungesunden alle 60 Sekunden —, damit er
+  nach einer Unterbrechung sofort wieder den aktuellen Stand hat.
+- **Neu: Die Werbe-Anzeige nutzt dasselbe Verfahren.** Ihr 1-Sekunden-Abruf
+  (rund 9,9 KB/s je Gerät) wird ebenfalls auf Marke + 304 umgestellt.
+
+## v0.9.260
+
+- **Behoben: Eine von Hand gesetzte Halle legte das Spiel still.** Im
+  Mehr-Hallen-Betrieb braucht ein Spiel einen Vorbereitungs-Aufruf, damit die
+  Automatik es vergibt — oder eine Halle aus der Vorverteilung, die den Aufruf
+  ersetzt. Wies die Turnierleitung einem Spiel von Hand eine Halle zu, wurde
+  die automatische Zuordnung dabei geräumt (richtig so, die Turnierleitung
+  entscheidet) — und mit ihr fiel der Aufruf-Ersatz weg. Das Spiel, das eben
+  noch verteilt wurde, war danach für die Automatik unsichtbar.
+
+  Die Wirkung war damit das Gegenteil der Absicht: Ausgerechnet der Griff, mit
+  dem man steuern will, ließ das Spiel liegen — ohne Hinweis. Eine von Hand
+  gesetzte Halle ersetzt den Aufruf jetzt genauso wie eine vorverteilte.
+
+  Die Bindung bleibt unverändert: Ein Spiel mit Hand-Halle wartet weiterhin auf
+  ein Feld seiner Halle, statt in die andere zu rutschen.
+
+## v0.9.259
+
+- **Neu: Die Turnierleitung erfährt es, wenn ein Ergebnis fehlt.** Ist ein
+  Spiel nach seinen Sätzen entschieden — die Endpunkte sind erreicht —, das
+  Feld aber weiterhin belegt, meldet die Turnierleitungs-Oberfläche das nach
+  einer Minute: als rote Marke an der Feld-Kachel und als Zeile im Störungsband
+  oben. Bisher fiel so ein Fall nur auf, wenn jemand zufällig hinsah und den
+  Satzstand selbst deutete.
+
+  Die Meldung nennt Feld und Halle und zeigt sich auch dann, wenn das Gerät auf
+  eine andere Halle gefiltert ist — sonst verschwiege sie genau den Fall, für
+  den sie gedacht ist.
+
+  **Sie schweigt bewusst**, wenn das Ergebnis bereits beim Turnier-PC liegt und
+  nur auf BTP wartet: Dorthin muss niemand laufen. Ebenso in der Satzpause,
+  während ein Satz läuft, bei Aufgabe und kampflosen Wertungen und dann, wenn
+  die Zählweise eines Spiels unbekannt ist. Falsche Warnungen kosten den
+  Glauben an alle anderen.
+
+  Wer sie trotzdem loswerden will, setzt `finished_warning_seconds` in der
+  Konfiguration auf `0` — das wirkt sofort, ohne neue Version.
+
+## v0.9.258
+
+- **Neu: Felder sperren von der Turnierleitungs-Oberfläche.** Fällt ein Feld
+  aus — gerissenes Netz, defekte Beleuchtung, nasser Boden —, musste die
+  Turnierleitung bisher quer durch die Halle zum Turnier-PC, um es aus der
+  automatischen Vergabe zu nehmen. Jetzt steht im ⋯-Menü jeder Feld-Kachel
+  „Feld sperren". Es ist dieselbe Sperre wie am PC, nicht eine zweite.
+
+  Läuft gerade ein Spiel darauf, sagt der Eintrag das ehrlich („Feld nach
+  diesem Spiel sperren") — die Partie zählt ungestört zu Ende. Das Freigeben
+  fragt nach, das Sperren nicht: Eine zu viel gesetzte Sperre fällt sofort
+  auf, ein versehentlich freigegebenes Feld bekommt dagegen sofort wieder ein
+  Spiel.
+
+  Wird das letzte offene Feld einer Halle gesperrt, verlieren die dorthin
+  vorverteilten Spiele ihre Hallenbindung und gehen in die andere Halle —
+  sonst warteten sie stumm auf ein Feld, das es nicht mehr gibt.
+- **Behoben: Eine gesetzte Feldsperre verschwand beim Speichern der
+  Einstellungen.** Wer ein Feld sperrte und danach am Turnier-PC irgendeine
+  Einstellung speicherte, hatte die Sperre still verloren — die Automatik legte
+  wieder Spiele darauf. Der Fehler war seit Längerem bekannt und wog bisher
+  wenig, weil nur am PC gesperrt wurde; mit der Bedienung aus der Halle wäre er
+  teuer geworden.
+- **Sperren gelten jetzt für ein Turnier.** Bisher stand eine Sperre auch am
+  nächsten Turniertag noch in der Liste — und traf dort ein beliebiges anderes
+  Feld, weil die Feldnummern aus BTP je Turnier neu vergeben werden. Beim
+  Turnierwechsel werden sie verworfen.
+
+## v0.9.257
+
+- **Behoben: Eine Halle hinzunehmen rief die halbe Vergangenheit nach.** Stellte
+  man am Ansage-Gerät die Halle um oder auf „alle Hallen", sagte es schlagartig
+  jedes dort laufende Spiel noch einmal an. Jetzt gilt, was man erwartet: Ab
+  dem Umschalten werden **neue** Aufrufe angesagt, laufende Spiele bleiben
+  stumm.
+- **Behoben: Die Hallen-Auswahl wählte sich gegenseitig ab.** Die Halle lässt
+  sich an drei Stellen setzen — auf dem Dashboard, in den Ansage-Einstellungen
+  und (am Cloud-Slave) im Geräte-Panel. Wurde sie an einer Stelle geändert,
+  arbeitete die Ansage-Seite noch mit ihrem alten Stand und schrieb ihn beim
+  nächsten Speichern zurück; die eben gewählte Halle war wieder weg. Die
+  Auswahl wird jetzt überall nachgezogen.
+## v0.9.255
+
+- **Neu: Anzeigen melden es, wenn sie stillstehen.** Court-Monitore froren
+  gelegentlich auf einem alten Stand ein — die Seite lief weiter und zeigte
+  weiter ein gültiges Bild, sie übernahm nur nichts Neues mehr. Bisher
+  hinterließ genau das keine Spur: Der Log-Upload der Anzeigen hängt an
+  JS-Fehlern und am Schließen der Seite, und ein stiller Hänger ist beides
+  nicht. Übrig blieb „hängt öfters mal" ohne Anhaltspunkt.
+
+  Beide Anzeige-Seiten prüfen sich jetzt alle zehn Sekunden selbst: Kam
+  überhaupt noch eine Antwort zurück, und wurde noch ein Stand übernommen oder
+  bestätigt? Bleibt eines davon länger als eine Minute aus, schreiben sie das
+  ins Log und laden es sofort hoch — samt der Angabe, ob gar nichts mehr
+  ankommt (Netz, Gerät) oder ob die Seite die Antworten verwirft. Genau diese
+  Unterscheidung war am hängenden Monitor bisher nicht möglich. Erholt sich
+  die Anzeige, steht auch das im Log.
+
+  Eine ruhige Halle löst dabei nichts aus: Die Bestätigung „nichts Neues"
+  zählt wie ein übernommener Stand.
+
+  **Am Bild ändert sich nichts.** Der Wächter stellt fest und schweigt
+  ansonsten — er lädt die Seite nicht neu und greift nicht ein. Solange
+  ungeklärt ist, woran das Einfrieren liegt, würde eine Selbstheilung die
+  Spur verwischen, wegen der er gebaut wurde.
+## v0.9.254
+
+- **Behoben: Tablets, die zählen, aber ihr Spiel nicht abschließen können.**
+  Am Turnier standen Geräte, die ihre Punkte weiter übertrugen, das Ergebnis
+  aber nicht loswurden — auf dem Schirm stand dabei durchgehend „wird
+  automatisch wiederholt, bis es ankommt". Ein Versprechen, das nie eingelöst
+  wurde: Der Turnier-PC lehnte genau dieses Ergebnis dauerhaft ab, und keine
+  Wiederholung konnte daran etwas ändern. Das Tablet unterscheidet jetzt, ob
+  eine Wiederholung überhaupt etwas retten kann. Netzfehler und Absagen, die
+  am Turnier-PC hängen, werden weiter wiederholt wie bisher. Eine inhaltliche
+  Ablehnung — etwa ein Satz, der nicht zur Zählweise des Spiels passt — beendet
+  den Versuch, nennt den Grund im Klartext und gibt den Absende-Knopf wieder
+  frei. Im Zweifel wird wiederholt.
+- **Ein eingereihtes Ergebnis gilt als angenommen.** Scheitert das Schreiben
+  nach BTP, legt der Turnier-PC das Ergebnis in seine Nachschub-Queue und
+  reicht es später nach — es ist dort sicherer aufgehoben als im Tablet, denn
+  die Queue liegt auf der Platte. Trotzdem meldete er dem Tablet bisher
+  „abgelehnt", das daraufhin an einem längst erledigten Ergebnis klebte. Jetzt
+  quittiert er es.
+- **Abgelehnte Ergebnisse stehen im Log.** Bisher protokollierte der
+  Turnier-PC nur den Erfolg; ein Tablet, das nicht abschließen konnte,
+  hinterließ dort keine Spur. Jetzt nennt jede Ablehnung Feld, Spiel und
+  Grund. Läuft die Nachschub-Queue über (Deckel 200, nur nach sehr langem
+  BTP-Ausfall), ist auch das eine Fehlerzeile statt eines stillen Verlusts.
+
+## v0.9.253
+
+- **Behoben: Die Schiri-Rotation setzte Schiedsrichter in laufende Spiele.**
+  Wurde die Automatik mitten im Turnier eingeschaltet, bekamen sofort alle
+  gerade laufenden Partien eine Besetzung. Dieselbe Wirkung hatte jedes
+  Speichern der Einstellungen (das stoppt und startet die Übertragung) und
+  jeder App-Neustart: Die Rotation kannte danach keinen Vorher-Stand mehr und
+  hielt jedes belegte Feld für frisch belegt. Jetzt ist ihr **erster Blick**
+  immer nur Ausgangslage — bestückt wird ausschließlich ein Feld, dessen
+  Wechsel sie selbst beobachtet hat. Laufende Spiele bleiben unangetastet.
+- **Behoben: Das Speichern der Einstellungen schickte alle Spieler in die
+  Pause.** Der Zeitpunkt „Spiel beendet" lag nur im Arbeitsspeicher; nach
+  einem Neustart der Übertragung galten schlagartig alle beendeten Spiele als
+  soeben beendet, und jede Mindestpause lief von vorn los — auch wenn an der
+  Wartezeit gar nichts geändert worden war. Der Stempel liegt jetzt bei den
+  Spielzeiten auf der Platte und überlebt Neustart wie Speichern.
+- **Behoben: Eine geänderte Pausenzeit wirkte rückwirkend.** Wer die
+  Mindestpause umstellte, verlängerte oder verkürzte damit auch alle schon
+  laufenden Pausen. Die geltende Länge wird jetzt **beim Spielende
+  eingefroren**: Die neue Zeit gilt für Spiele, die danach enden; bereits
+  laufende Pausen bleiben, wie sie angekündigt waren.
+- **Neu: Ein pausierendes Spiel lässt sich trotzdem aufs Feld schieben.** Die
+  Zeile ist in der Turnierleitungs-Oberfläche wieder wählbar und ziehbar; vor
+  dem Schreiben kommt eine Rückfrage, die nennt, wer noch bis wann pausiert.
+  Trifft zugleich die andere Halle zu, stehen beide Gründe in **einer**
+  Rückfrage. Wer gerade auf einem anderen Feld spielt, bleibt unwählbar — das
+  lehnt der Turnier-PC ohnehin ab.
+## v0.9.252
+
+- **Neu: Aushang für die Halle.** Ein A4-Blatt mit zwei QR-Codes zum Ausdrucken
+  und Aufhängen: links die Teilnehmerliste, über die jede Spielerin und jeder
+  Spieler auf das eigene Profil kommt — mit Halle, sobald sie feststeht, der
+  Zahl der Spiele bis zum eigenen Aufruf und der Zeitprognose fürs nächste
+  Spiel. Rechts der Liveticker für alle, die mitfiebern. Turnierlogo und
+  Turniername stehen im Kopf, beide Adressen zusätzlich im Klartext. Zu finden
+  auf dem Hauptbildschirm unter „Aushang für die Halle"; gedruckt wird über den
+  normalen Druckdialog, der auch „als PDF speichern" anbietet. Voraussetzung
+  ist die öffentliche Live-Seite in den Einstellungen — fehlt sie, sagt die
+  Vorschau das, statt ein Kürzel zu raten.
+## v0.9.251
+
+- **Behoben: Der Zähltafelbediener wechselte mitten im laufenden Spiel.**
+  Stand beim Belegen eines Feldes niemand in der Warteschlange, blieb das Feld
+  zunächst ohne Bediener und zeigte den Hinweis auf den Verlierer des
+  Vorspiels. Sobald danach irgendwo jemand fertig wurde, hängte die App diesen
+  Wartenden nachträglich dem längst laufenden Spiel an — am Feld stand
+  plötzlich ein anderer Name, obwohl sich nichts geändert hatte. Die Vergabe
+  gehört zum Aufruf: Findet sie niemanden, bleibt dieses Spiel ohne Bediener,
+  und wer später frei wird, ist für das nächste Spiel dran.
+
+## v0.9.250
+
+- **Behoben: Der gedruckte Schiedsrichterzettel hatte kein Gitter.** Innenlinien
+  des Rasters und graue Zeilen fehlten auf dem Papier, während die Vorschau am
+  Bildschirm vollständig aussah — der WebView lässt Hintergrundfarben beim
+  Drucken weg, und genau daraus bestehen die Linien. Das Blatt verlangt sie
+  jetzt ausdrücklich. Betrifft alle Zettel-Drucke: Turnier-PC wie
+  Turnierleitungs-Seite.
+- **Das Vorschaufenster nutzt jetzt die Bildschirmbreite** und zeigt ein
+  A4-Blatt quer ohne seitliches Scrollen, sofern der Monitor es hergibt.
+- **Neu: „Leeres Blatt" aus der Vorschau heraus.** Wurde zu einem Spiel nichts
+  gezählt, sagt das Fenster das — und bietet einen Knopf, der den leeren
+  Vorabzettel nachholt. Bisher gab es das leere Blatt nur über „In Vorbereitung"
+  und das TL-Kebab.
+
+## v0.9.249
+
+- **Der Schiedsrichterzettel sieht jetzt aus wie der gewohnte Bogen.** Sechs
+  Blöcke à 33 Spalten, vier Zeilen je Block, A/R-Spalte, Satzergebnis im Kopf,
+  Unterschriftszeilen für Schiedsrichter und Referee. Die Zeichen in der Zelle
+  folgen der üblichen Konvention: **W** Warnung, **F** Fehler, **R**
+  Oberschiedsrichter gerufen, **D** Disqualifikation. Oben links steht das
+  Turnierlogo, kein Verbandslogo.
+- **Neu: der leere Zettel zum Mitgeben.** Für ein Spiel, das noch aussteht,
+  lässt sich das Blatt vorab drucken — Kopf, Namen und Verein sind gedruckt,
+  das Raster bleibt frei und wird von Hand geführt. Zu finden am Turnier-PC im
+  Tab „In Vorbereitung" (Spiele anhaken, dann „Zettel") und in der
+  Turnierleitungs-Seite im ⋮-Menü jeder Zeile.
+- **Neu: Zettel drucken sich auf Wunsch von selbst.** Ist der Autodruck
+  eingeschaltet, geht das Blatt an den eingestellten Drucker, sobald ein Spiel
+  auf einem Feld steht **und** ein Schiedsrichter zugeordnet ist — egal, in
+  welcher Reihenfolge beides passiert, und auch bei der automatischen
+  Feldvergabe. Gedruckt wird ohne Dialog, höchstens ein Blatt je Spiel; ein
+  Neustart der App druckt nichts nach.
+- **Der Drucker ist im Setup wählbar** (Abschnitt „Schiedsrichterzettel"),
+  Vorgabe ist der Windows-Standarddrucker. Das Papierformat stellt BTS Light
+  selbst ein: A4 quer. Antwortet der Drucker nicht, erscheint ein Hinweis in
+  der App statt eines stummen Fehlschlags.
+- Der Vermerk „Internes Turnier-Archiv — kein amtlicher Beleg" entfällt; der
+  Verein steht jetzt immer auf dem Blatt, wenn BTP ihn kennt.
+
+## v0.9.248
+
+- **In einer fernen Halle wird der Schiedsrichter jetzt mit angesagt.** Bei
+  Turnieren, deren zweite Halle über die Cloud angebunden ist, nannte die
+  Ansage dort Spieler und Bedienung, aber nie Schiedsrichter oder
+  Aufschlagrichter — obwohl beide längst bis dorthin übertragen wurden. Die
+  Halle sagt damit jetzt dasselbe an wie der Turnier-PC.
+
 ## v0.9.247
 
 - **Werbebilder bekommen eine eigene Hintergrundfarbe.** Bisher lag die

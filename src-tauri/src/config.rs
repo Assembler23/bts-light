@@ -326,6 +326,21 @@ impl Default for PredictionConfig {
     }
 }
 
+/// Druck der Schiedsrichterzettel (Spec
+/// `docs/features/schiedsrichterzettel-autodruck.md`, ADR 0042).
+///
+/// Opt-in: Ohne ausdrückliches Einschalten druckt nichts von selbst. Der
+/// leere Druckername bedeutet **Windows-Standarddrucker** — so muss
+/// niemand etwas auswählen, der ohnehin nur einen Drucker hat.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct PrintConfig {
+    /// Zettel bei der Feldvergabe selbsttätig drucken?
+    pub auto_enabled: bool,
+    /// Zieldrucker; leer = Windows-Standarddrucker.
+    pub printer_name: String,
+}
+
 /// Automatische Hallen-Vorverteilung (Spec
 /// `docs/features/hallen-vorverteilung.md`, ADR 0029/0030). Opt-in —
 /// standardmäßig aus; nur bei Mehr-Hallen-Turnieren wirksam, und niemals
@@ -612,6 +627,11 @@ pub struct AppConfig {
     /// Default ist **aus**.
     #[serde(default)]
     pub hall_prefill: HallPrefillConfig,
+    /// Druck der Schiedsrichterzettel (Spec
+    /// `schiedsrichterzettel-autodruck`). `#[serde(default)]` hält ältere
+    /// Konfigurationsdateien lesbar; Default ist **aus**.
+    #[serde(default)]
+    pub print: PrintConfig,
     /// Zähltafelbediener-Verwaltung (ADR 0007). `#[serde(default)]` hält
     /// ältere Konfigurationsdateien lesbar.
     #[serde(default)]
@@ -643,6 +663,25 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub locked_courts: Vec<i64>,
+    /// Nach wie vielen **Sekunden** ein Spiel, das nach seinen Sätzen fertig
+    /// aussieht, dessen Feld aber belegt bleibt, in der Turnierleitungs-Sicht
+    /// gemeldet wird (Spec `tl-warnung-fertiges-spiel`). `0` = Warnung aus.
+    ///
+    /// Konfigurierbar, weil das der **einzige Rollback-Weg** einer reinen
+    /// Anzeige ist: Meldet sie im laufenden Turnier zu oft falsch, muss man
+    /// sie abstellen können, ohne eine neue Version einzuspielen.
+    /// `#[serde(default = …)]` hält ältere Konfigurationsdateien lesbar.
+    #[serde(default = "default_fertig_warnung_s")]
+    pub finished_warning_seconds: u32,
+    /// Turnier, zu dem [`Self::locked_courts`] gehört (BTP-Turniername).
+    ///
+    /// BTP vergibt CourtIDs je Turnier neu — eine Sperre vom Vortag träfe
+    /// sonst am nächsten Turnier ein beliebiges anderes Feld (ADR 0044).
+    /// Wechselt der Turniername im Snapshot, werden die Sperren verworfen.
+    /// Leer = „Turnier unbekannt" (Configs von vor v0.9.258); dann greift
+    /// die erste Sperre und schreibt den Namen mit.
+    #[serde(default)]
+    pub locked_courts_tournament: String,
     /// PIN für das Einstellungs-Menü am Zähltablett (Feldwechsel ohne QR).
     /// Reiner Bedien-Schutz gegen versehentliche Änderungen durch Helfer –
     /// KEINE Sicherheitsgrenze (der echte Kiosk-Lock liegt im Kiosk-Browser).
@@ -680,6 +719,12 @@ pub struct AppConfig {
     /// Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub reconnect_legacy_rev: bool,
+}
+
+/// Standard-Frist der „Spiel scheint fertig"-Warnung: eine Minute, wie vom
+/// Turnierleiter angefragt (Spec tl-warnung-fertiges-spiel).
+fn default_fertig_warnung_s() -> u32 {
+    60
 }
 
 /// Standard-PIN fürs Tablet-Einstellungsmenü (überschreibbar in der Config).
@@ -1609,6 +1654,10 @@ mod tests {
                 enabled: true,
                 window: 12,
             },
+            print: PrintConfig {
+                auto_enabled: true,
+                printer_name: "Drucker im Turnierbüro".to_string(),
+            },
             scorekeeper: ScorekeeperConfig {
                 enabled: true,
                 break_seconds: 300,
@@ -1635,6 +1684,8 @@ mod tests {
                 hall: "Halle A".to_string(),
             }],
             locked_courts: vec![3, 7],
+            finished_warning_seconds: 60,
+            locked_courts_tournament: "Testturnier".to_string(),
             tablet_settings_pin: "1234".to_string(),
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),

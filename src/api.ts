@@ -184,9 +184,43 @@ export const finishedMatches = (): Promise<FinishedMatchRow[]> =>
 /** Punktverlauf eines Matches (null = kein Verlauf aufgezeichnet). */
 /** Schiedsrichterzettel als fertiges HTML (Spec schiedsrichterzettel-druck,
  *  ADR 0039). Mehrere Kennungen ergeben einen Stapeldruck. `null` = zu
- *  keinem der Spiele liegt eine Aufzeichnung vor. */
-export const matchScoresheetHtml = (matchIds: number[]): Promise<string | null> =>
-  invoke("match_scoresheet_html", { matchIds });
+ *  keinem der Spiele liegt eine Aufzeichnung vor.
+ *
+ *  `vorab: true` liefert den **Vorabzettel** eines noch ausstehenden
+ *  Spiels: Kopf gefüllt, Raster leer, von Hand zu führen (Spec
+ *  schiedsrichterzettel-autodruck). Nur dann gibt es auch ohne
+ *  Aufzeichnung ein Blatt. */
+export const matchScoresheetHtml = (
+  matchIds: number[],
+  vorab = false,
+): Promise<string | null> => invoke("match_scoresheet_html", { matchIds, vorab });
+
+/** Aushang mit den QR-Codes zu Teilnehmerliste und Liveticker als fertiges
+ *  A4-HTML (docs/aushang.md). Wirft mit sprechendem Text, wenn die
+ *  öffentliche Live-Seite des Turniers fehlt. */
+export const aushangHtml = (): Promise<string> => invoke("aushang_html");
+
+/** Die im System eingerichteten Drucker (Spec
+ *  schiedsrichterzettel-autodruck, ADR 0042). Der leere Eintrag
+ *  „Standarddrucker" steht nicht in der Liste — er ist die Bedeutung des
+ *  leeren Namens in der Konfiguration. */
+export const printerList = (): Promise<string[]> => invoke("printer_list");
+
+/** Zettel **still** an den eingestellten Drucker geben — ohne Dialog.
+ *  Derselbe Weg, den der Autodruck geht. */
+export const printScoresheet = (
+  matchIds: number[],
+  vorab = false,
+): Promise<void> => invoke("print_scoresheet", { matchIds, vorab });
+
+/** Offene Warnung des Zettel-Autodrucks (`null` = alles in Ordnung).
+ *  Ein Drucker, der schweigt, darf nicht stumm scheitern. */
+export const printWarning = (): Promise<string | null> =>
+  invoke("print_warning");
+
+/** Warnung wegklicken. */
+export const clearPrintWarning = (): Promise<void> =>
+  invoke("clear_print_warning");
 
 export const matchTimeline = (matchId: number): Promise<MatchTimeline | null> =>
   invoke("match_timeline", { matchId });

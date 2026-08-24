@@ -101,12 +101,15 @@ export function CloudAnnounceSlave({
                 className: c.class_label,
                 teamANames: c.team1,
                 teamBNames: c.team2,
-                // Bedienung am Schalter (ADR 0040), nicht mehr an der
-                // Herkunft des Namens. Schiedsrichter kann der Slave nicht
-                // ansagen: `CloudAnnounceCourt` führt keine SR/AR-Listen —
-                // dafür müsste der Master sie erst über den Draht schicken.
+                // Bedienung und Schiedsrichter am Schalter (ADR 0040), nicht
+                // mehr an der Herkunft des Namens. Die Namen reisen im
+                // `MatchBrief` bis hierher — die ferne Halle sagt damit
+                // dasselbe an wie der Master.
                 scorekeeperNames:
                   cfg.announce_scorekeeper !== false ? c.scorekeeper : undefined,
+                umpireNames: cfg.announce_umpire !== false ? c.sr : undefined,
+                serviceJudgeNames:
+                  cfg.announce_umpire !== false ? c.ar : undefined,
               },
               announceLang,
               {

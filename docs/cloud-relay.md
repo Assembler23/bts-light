@@ -169,6 +169,15 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    Warten gibt den `pending`-Slot (`MAX_PENDING_PER_NS`) schneller frei. Details:
    [tablet.md](tablet.md) („Ergebnis-Übermittlung verlustsicher").
 
+   Die `ResultAck` trägt seit v0.9.254 zusätzlich **`permanent`**: Sagt der
+   Host, dass genau dieses Ergebnis dauerhaft abgelehnt ist, reicht der Relay
+   das unverändert an das Tablet durch (er urteilt nicht selbst — R5 liegt beim
+   Host). Ohne dieses Feld wirkte die Unterscheidung ausgerechnet im
+   Cloud-Betrieb nicht, weil der Relay seine Antwort aus `ok`/`error` neu baut.
+   Der Normalfall `false` bleibt von der Leitung (`skip_serializing_if`), und
+   ein Relay-Timeout bleibt weiterhin **wiederholbar** — er sagt nichts über
+   das Ergebnis aus.
+
 **Aufgerufene Spiele in die ferne Halle (Cluster C Stufe 2, v0.9.154):**
 Der Host pusht seine in Vorbereitung gerufenen Spiele als
 `HostFrame::Prepared` (nur bei Änderung, Fingerabdruck) an den Relay; der
@@ -271,7 +280,7 @@ dem Bildschirm hat, könnte sich damit jeder als Tablet ausgeben.
 | `GET /tl/api/state` | Der zuletzt gepushte Anzeige-Zustand, **unverändert** durchgereicht. Mit `ETag` aus **Host-Generation und Revision**: Ein Gerät, das denselben Stand schon hat, bekommt `304` — bei einer Seite, die alle zwei Sekunden fragt, ist das über Mobilfunk der Unterschied zwischen sparsam und lästig. Die Generation muss hinein, weil die Revision beim Neustart des Turnier-PCs wieder klein beginnt; ohne sie bekäme ein Gerät „unverändert" auf einen völlig anderen Turnierstand. Fehlt der Stand, ist die Antwort `503` und **nicht** ein leeres Turnier: Leer sähe aus wie „alle Felder frei". |
 | `POST /tl/api/command` | Kommando an den Turnier-PC, Antwort synchron über `reqId`/`TlAck` — dasselbe erprobte Muster wie die Ergebnismeldung vom Tablet, mit 20 s Zeitablauf. |
 | `GET /flags/{code}.svg` | Länderflaggen für die TL-Seite. Sie leitet die Flaggen-Basis aus ihrem eigenen Pfad ab (`/bts-relay/tl` → `/bts-relay/flags/`) — und hängt ohne Namespace in der Adresse, deshalb braucht sie diese ns-lose Route neben `/{ns}/flags/…` (Court-Monitor). Statische SVGs ohne Turnierbezug; ein Namespace hätte nichts abzusichern. |
-| `GET /tl/api/scoresheet/{ids}` | Schiedsrichterzettel als fertiges HTML, **on-demand** ([schiedsrichterzettel-druck](features/schiedsrichterzettel-druck.md), ADR 0039): Anfrage als `scoresheet_request` über die host-ws zum Turnier-PC, dessen `scoresheet_data`-Antwort zurück an den wartenden Abruf. `{ids}` ist eine Komma-Liste (Stapeldruck einer Runde), gedeckelt auf `MAX_SHEETS_PER_DOC` — der Deckel greift **vor** jeder Arbeit je Kennung. Der Relay hält **keine** Zettel vor: Sie tragen Namen **und** Sanktionsdaten. `found:false` → 404; keine Antwort (auch: älterer Host) → 503. |
+| `GET /tl/api/scoresheet/{ids}` | Schiedsrichterzettel als fertiges HTML, **on-demand** ([schiedsrichterzettel-druck](features/schiedsrichterzettel-druck.md), ADR 0039): Anfrage als `scoresheet_request` über die host-ws zum Turnier-PC, dessen `scoresheet_data`-Antwort zurück an den wartenden Abruf. `{ids}` ist eine Komma-Liste (Stapeldruck einer Runde), gedeckelt auf `MAX_SHEETS_PER_DOC` — der Deckel greift **vor** jeder Arbeit je Kennung. Der Relay hält **keine** Zettel vor: Sie tragen Namen **und** Sanktionsdaten. `found:false` → 404; keine Antwort (auch: älterer Host) → 503. **`?vorab=1`** ([schiedsrichterzettel-autodruck](features/schiedsrichterzettel-autodruck.md)) reist als Flagge `vorab` im `scoresheet_request` mit und liefert den **Vorabzettel** eines noch ausstehenden Spiels — Kopf gefüllt, Raster leer. Der Relay deutet den Wert nicht, er reicht ihn durch; welches Blatt daraus wird, entscheidet der Host. Die Flagge trägt `#[serde(default)]`, ein Host älterer Version antwortet also weiterhin nach dem gewohnten Verhalten (ohne Aufzeichnung: `found:false`). Nur `1`, `true` oder `ja` schalten um; alles andere bedeutet „wie bisher". |
 | `GET /tl/api/timeline/{match_id}` | Punktverlauf eines Spiels, **on-demand** ([punktverlauf.md](punktverlauf.md)): Anfrage als `timeline_request` über die host-ws zum Turnier-PC, dessen `timeline_data`-Antwort zurück an den wartenden Abruf — Muster TL-Kommando, der Relay hält keine Verläufe vor. `found:false` → 404 (Papier-Spiel); keine Antwort (auch: älterer Host) → 503 mit Versions-Hinweis. |
 
 Der Relay ist dabei **Briefträger, nicht Schiedsrichter**: Er kennt weder
@@ -345,6 +354,65 @@ nichts** mehr. Wer den Zustand um eine weitere Liste erweitert (nächster
 Kandidat: die vierachsige Spielzeiten-Statistik aus Punkt 1), misst nach
 und nimmt sie in die Kaskade auf — die verbleibende Reserve trägt keine
 zweite Erweiterung.
+
+**Wunschfeld** (Spec `tl-wunschfeld`, seit v0.9.262): eine neue
+`TlAction`-Variante `set_wish_court { matchId, courtId? }` — ohne `courtId`
+wird der Wunsch aufgehoben. Der Relay braucht keine Code-Änderung (typisiertes
+`TlAction` über `relay-proto`, gemeinsam mit `tl.html` deployt). Additiv im
+`TlState`: `TlMatch.wish_court` und das Fähigkeitsmerkmal
+`can_set_wish_court`, über das die Seite den Wähler nur zeigt, wenn der Host
+die Aktion kennt.
+
+**Warnung „Ergebnis fehlt"** (Spec `tl-warnung-fertiges-spiel`, seit
+v0.9.259): rein additiv im `TlState` — `TlCourt.decided_since_ms` (Zeitstempel)
+und `finished_warning_seconds` (Frist). Keine neue Aktion, keine Relay-Änderung.
+Eine neue Seite an einem alten Host bekommt die Felder nicht und warnt
+schlicht nicht (`#[serde(default)]`).
+
+**Tablets neu laden** (Spec `tablet-version-abgleich`, seit v0.9.268): der
+einzige Weg in dieser Reihe, der den Relay **doch** anfassen muss — er ist
+der einzige, bei dem ein Frame vom Host an **alle** Tablets eines Namespace
+geht statt an eines.
+
+Drei Frames sind beteiligt: `TlAction::reload_tablets` (Gerät → Host, ohne
+Nutzlast), `HostFrame::ReloadTablets` (Host → Relay, ebenfalls ohne Nutzlast)
+und `ServerMsg::reload { marke }` (Server → Tablet). Der Relay setzt das
+Host-Frame in ein `reload` an **jede** seiner Tablet-Verbindungen um.
+
+**Die Marke setzt jeder Server aus seiner eigenen Seite** — deshalb reist sie
+nicht im `HostFrame` mit. Der Relay bettet seinen eigenen Stand von
+`tablet.html` ein, und die Cloud-Tablets haben die Seite von ihm geladen, nicht
+vom Turnier-PC. Käme dessen Marke an, hielte sich jede Seite unmittelbar nach
+dem Neuladen wieder für veraltet.
+
+Vom Host zum Relay geht der Befehl über einen **Zähler**, nicht über einen
+Kanal: Der `ReloadWacht` in `relay_client.rs` meldet im Sweep, wenn
+`tablet_reload_gen` gestiegen ist.
+
+Er lebt dort **über alle Sitzungen hinweg** (angelegt in `run()`, als `&mut`
+durch `serve()` gereicht) — anders als am Tablet-Socket, wo er je Verbindung
+neu gesetzt wird. Der Unterschied ist wesentlich: Am Tablet heißt „verbunden"
+= „Seite frisch geladen", ein Befehl von davor gilt zu Recht nicht mehr. Hier
+heißt es nur „der **Host** hat wieder Leitung", während die Tablets dahinter
+gerade *nicht* frisch sind. So löst ein Netzwackler nichts aus, ein Befehl
+während eines Abrisses wird aber nachgeholt.
+
+Wie bei der Feldsperre trägt der `TlState` ein additives Merkmal
+(`can_reload_tablets`), damit eine neue Seite an einem älteren Host keinen
+toten Knopf zeigt.
+
+**Feldsperre** (Spec `tl-web-felder-sperren`, seit v0.9.258): eine neue
+`TlAction`-Variante `lock_court { courtId, locked }`. Der Relay braucht dafür
+**keine** Code-Änderung — er parst Aktionen typisiert und bekommt die Variante
+über `relay-proto` mit; Relay und `tl.html` stammen ohnehin aus demselben
+Merge, der Relay ist also nie älter als die Seite.
+
+Die Schere liegt woanders: Der **Host** kommt erst mit einem Release-Tag, und
+ein älterer Host verwirft eine unbekannte `TlAction` **still**
+(`relay_client.rs`) — das Gerät bekäme nicht einmal eine Fehlermeldung.
+Deshalb trägt der `TlState` das additive Feld `can_lock_courts`, und die Seite
+zeigt den Menüeintrag nur, wenn es ankommt (Feature-Detection wie bei
+`hall_prefill`). Damit ist der Merge vom Release-Tag entkoppelt.
 
 **Hallen-Vorverteilung** (Spec `hallen-vorverteilung`): zwei neue
 `TlAction`-Varianten `set_hall_prefill { enabled, window }` und
@@ -777,6 +845,22 @@ hinter nginx.
 (`.github/workflows/relay-deploy.yml`, Trigger: Änderungen an `relay/`,
 `relay-proto/` oder `tablet.html` auf `main`, plus `workflow_dispatch`).
 Reproduzierbar gebaut, kein Rust-Toolchain auf dem Prod-Server nötig.
+
+**Sicherung als Rückweg (seit v0.9.261).** Vor dem Umbenennen auf die neue
+Binary kopiert der Workflow die laufende unter `/opt/bts-relay/bts-relay`
+nach `/opt/bts-relay/bts-relay.rollback`. Der Rückweg bei einer nicht
+anspringenden Version:
+
+```sh
+ssh bts-deploy@178.104.221.177 \
+  'mv /opt/bts-relay/bts-relay.rollback /opt/bts-relay/bts-relay \
+   && sudo systemctl restart bts-relay \
+   && sleep 2 \
+   && curl -sf http://127.0.0.1:8090/health'
+```
+
+Das `cp` braucht kein sudo (das Verzeichnis ist der Gruppe `bts-deploy`
+schreibbar); das einzige sudo bleibt der eine Restart-Befehl.
 
 **Zwei getrennte Benutzer (seit 2026-08-12).** Vorher lief der Dienst als `badhub`
 und GitHub Actions deployte als `badhub` — ein Benutzer mit `NOPASSWD: ALL`. Damit war

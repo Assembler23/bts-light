@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.247"
+version = "0.9.268"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -46,6 +46,22 @@ mdns-sd = "0.21"
 # Lokale Uhrzeit fürs BTP-Spielende (Player.LastTimeOnCourt) — bereits
 # transitiv im Baum (Tauri-Ökosystem), daher keine neue Supply-Chain-Fläche.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# Stiller Druck des Schiedsrichterzettels (ADR 0042): GDI an einen
+# benannten Drucker, ohne Dialog. Von Microsoft gepflegt, MIT/Apache-2.0,
+# und **transitiv ohnehin im Baum** (Tauri auf Windows) — die neue
+# Supply-Chain-Fläche ist damit gleich null. Nur unter Windows: Die App
+# ist eine Windows-Desktop-App, und `--workspace` soll auf Linux
+# (Relay-Deploy) weiter durchlaufen.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Printing",
+  # StartDocW/EndDoc/StartPage/EndPage und DOCINFOW liegen im Binding
+  # unter `Storage::Xps` — trotz ihres GDI-Ursprungs in gdi32.dll.
+  "Win32_Storage_Xps",
+] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -718,8 +718,10 @@
       el.className = "call-timer";
       return;
     }
-    var now = (typeof state.serverNowMs === "number" && state.serverNowMs > 0)
-      ? state.serverNowMs : Date.now();
+    // Relative zur Server-Uhr rechnen (1c): `nowServerMs()` hält den
+    // Offset aus 200-Abruf UND Herzschlag — läuft also auch in einer
+    // 304-Serie korrekt weiter, statt einzufrieren.
+    var now = nowServerMs();
     var sec = Math.max(0, Math.floor((now - state.onCourtSinceMs) / 1000));
     var clock = Math.floor(sec / 60) + ":" + ("0" + (sec % 60)).slice(-2);
     var min = sec / 60;
@@ -733,6 +735,26 @@
     // Kein Emoji (Pi OS hat keine Emoji-Schrift) – Uhr + Klartext genügen.
     el.textContent = clock + " · " + label;
     el.className = "call-timer " + tone;
+  }
+
+  // Spieldauer in der Kopfzeile (Stoppuhr + Minuten) — als eigene Funktion,
+  // damit sie auch im 1-s-Takt neu rechnen kann (Review R2): In einer
+  // 304-Serie käme sonst bis zum nächsten vollen 200 kein frischer Wert,
+  // und die Minute stünde still.
+  function renderMatchClock(state) {
+    var cfg = state.config || {};
+    var cs = parseCourtState(state.courtState);
+    // Ohne zaehlendes Tablet bleibt das Element leer und wird per CSS
+    // ausgeblendet.
+    els.matchClock.textContent = "";
+    if (cfg.showMatchClock !== false && cs &&
+        typeof cs.startedAt === "number" && cs.startedAt > 0) {
+      // Wie beim Pausen-Countdown: relativ zur Server-Zeit rechnen (1c),
+      // damit die Pi-Uhr (oft nicht synchron) die Spieldauer nicht
+      // verfaelscht.
+      var mins = Math.max(0, Math.floor((nowServerMs() - cs.startedAt) / 60000));
+      els.matchClock.textContent = mins + " min";
+    }
   }
 
   function renderMatch(state) {
@@ -753,21 +775,7 @@
     els.courtLabel.appendChild(
       document.createTextNode(state.courtLabel || COURT_LABEL));
 
-    // Spieldauer in der Kopfzeile (Stoppuhr + Minuten), wenn aktiviert und
-    // der Tablet-Zustand einen Spielbeginn kennt. Ohne zaehlendes Tablet
-    // bleibt das Element leer und wird per CSS ausgeblendet.
-    els.matchClock.textContent = "";
-    if (cfg.showMatchClock !== false && cs &&
-        typeof cs.startedAt === "number" && cs.startedAt > 0) {
-      // Wie beim Pausen-Countdown: relativ zur Server-Zeit rechnen, damit
-      // die Pi-Uhr (oft nicht synchron) die Spieldauer nicht verfaelscht.
-      var nowClock = (typeof state.serverNowMs === "number" && state.serverNowMs > 0)
-        ? state.serverNowMs
-        : Date.now();
-      var mins = Math.max(0, Math.floor((nowClock - cs.startedAt) / 60000));
-      els.matchClock.textContent = mins + " min";
-    }
-
+    renderMatchClock(state);
     renderCallTimer(state);
 
     var discKey = m.discipline || "";
@@ -901,11 +909,9 @@
       // `endsAt` ist mit der Uhr des zaehlenden Tablets gesetzt. Der Pi
       // (TV) hat oft keine synchrone Uhr → `Date.now()` weicht ab und der
       // Countdown ist um den Drift verschoben (z.B. +1 min). Wir rechnen
-      // daher relativ zur Server-Zeit aus dem Poll (state.serverNowMs),
-      // sofern vorhanden — sonst Fallback auf die lokale Uhr.
-      var nowMs = (typeof state.serverNowMs === "number" && state.serverNowMs > 0)
-        ? state.serverNowMs
-        : Date.now();
+      // daher relativ zur Server-Zeit (1c): `nowServerMs()` läuft auch
+      // durch eine 304-Serie korrekt weiter.
+      var nowMs = nowServerMs();
       // Seit ADR 0028 endet die Pause NICHT mehr automatisch bei 0 — das
       // Tablet hält sie, bis weitergespielt wird. Statt eines eingefrorenen
       // „0:00" zählt der TV die Überziehung mit „+m:ss" hoch (wie das
@@ -1024,9 +1030,18 @@
     // eine fremde Zählung mit und darf nicht blockiert werden.
     var feld = typeof state.courtId === "number" ? state.courtId : 0;
     if (feld && feld === knownCourtId) {
-      if (!seqAnwenden(lastSeqByCourt[feld] || 0, state.seq || 0, "fetch")) return;
+      if (!seqAnwenden(lastSeqByCourt[feld] || 0, state.seq || 0, "fetch")) {
+        // Genau hier friert die Anzeige ein, wenn `lastSeqByCourt` je zu hoch
+        // steht: Der Poll läuft weiter, aber nichts kommt mehr durch. Der
+        // Zähler ist die aussagekräftigste Zahl im Stillstands-Bericht.
+        verworfeneStaende++;
+        return;
+      }
       if (state.seq) lastSeqByCourt[feld] = state.seq;
     }
+    // Ab hier wird der Stand wirklich übernommen — der Beleg dafür, dass die
+    // Strecke bis zum Schirm durchlässig ist.
+    letzterStandMs = Date.now();
     lastState = state;
     // Feld-Identität für den Nudge-Filter nachziehen (Geräte-Monitor kennt sie
     // erst hier; bei Reassignment wechselt sie). 0 = unbelegt → ignorieren.
@@ -1133,6 +1148,12 @@
   var fetchFehler = 0;
   var langsamErlaubt = false; // aus `config.pushFallbackSlow`
   var letzterAbrufMs = 0;     // Beginn des letzten losgeschickten Abrufs
+  // ── Stillstands-Wächter (siehe `lagePruefen` unten) ──────────────────
+  var letzterAbrufOkMs = 0;   // letzter Abruf, der ohne Fehler zurückkam
+  var letzterStandMs = 0;     // letzter angewendete Stand
+  var verworfeneStaende = 0;  // wie oft der seq-Guard eine Antwort abwies
+  var seitStartMs = Date.now();
+  var gemeldeteStillstandsArt = null;
   function pushGesund(z, nowMs) {
     if (!z || !z.wsOpen) return false;
     if (z.lastFetchOk === false) return false;
@@ -1158,6 +1179,41 @@
       failures: fetchFehler,
     };
   }
+
+  // ── Server-Uhr (Etappe ETag, 1c) ──────────────────────────────────────
+  // Seit dem ETag/304-Umbau liefert der Server nur noch bei einem VOLLEN
+  // 200-Abruf ein frisches `serverNowMs`; die meiste Zeit kommt 304 (kein
+  // Body). Damit Pausen-/Aufruf-Uhren trotzdem weiterlaufen, halten wir
+  // einen laufenden Offset zur lokalen Uhr: `nowServerMs() = Date.now() +
+  // offset`. Gespeist aus zwei Quellen — jedem 200-Abruf und dem
+  // WS-Herzschlag (`{"hb":<nowMs>}`) — überlebt der Offset eine 304-Serie
+  // und einen WS-Abriss (U12).
+  //
+  // **Inline-Kopie von `src/io/monitorClock.mjs`** — dort steht die
+  // kanonische Fassung samt Test (`scripts/test-monitor-clock.mjs`,
+  // eigener CI-Schritt). Änderungen hier und dort gemeinsam.
+  var clockOffset = null;
+  function clockFeed(serverNowMs) {
+    if (typeof serverNowMs !== "number" || serverNowMs <= 0) return false;
+    clockOffset = serverNowMs - Date.now();
+    return true;
+  }
+  function nowServerMs() {
+    return typeof clockOffset === "number" ? Date.now() + clockOffset : Date.now();
+  }
+
+  // ── ETag/304 (Etappe ETag, 1b) ─────────────────────────────────────────
+  // `lastEtag` ist die zuletzt gesehene Marke des SERVERS; sie wird beim
+  // nächsten Abruf als `If-None-Match` mitgeschickt. Der Refetch-Cap
+  // (keine neue Schwellen-Konstante, sondern aus `pushGesund` abgeleitet)
+  // erzwischt trotz ETag regelmäßig einen vollen 200, damit der Uhr-Offset
+  // nie veraltet: gesunder Kanal → alle 10 min, sonst → alle 60 s.
+  var lastEtag = null;
+  var letzterVollerAbrufMs = 0;
+  function refetchCap(gesund) {
+    return gesund ? 600000 : 60000;
+  }
+
   var fetching = false, refetchQueued = false;
   var coalesceTimer = null, lastFetchStart = 0;
 
@@ -1193,6 +1249,35 @@
     return quelle === "push" ? neu > gezeigt : neu >= gezeigt;
   }
 
+  /** Steht die Anzeige still, ohne es zu merken?
+   *
+   *  **Inline-Kopie von `src/io/standstill.mjs`** — dort steht die kanonische
+   *  Fassung samt Begründung und Test (`scripts/test-standstill.mjs`, eigener
+   *  CI-Schritt). Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `overview.html`. */
+  var STILLSTAND_MS = 60000;
+  function lagePruefen(zustand, nowMs) {
+    var z = zustand || {};
+    var gemeldet = z.gemeldeteArt || null;
+    var gesund = { art: null, stillMs: 0, melden: false, erholt: gemeldet !== null };
+    var start = stillZahl(z.startMs);
+    if (!start) return { art: null, stillMs: 0, melden: false, erholt: false };
+    var abruf = stillZahl(z.letzterAbrufOkMs) || start;
+    var stand = stillZahl(z.letzterStandMs) || start;
+    var ohneAbruf = nowMs - abruf;
+    var ohneStand = nowMs - stand;
+    if (ohneAbruf < 0 || ohneStand < 0) return gesund;
+    if (ohneAbruf >= STILLSTAND_MS) return stillLage("keine_abrufe", ohneAbruf, gemeldet);
+    if (ohneStand >= STILLSTAND_MS) return stillLage("verworfen", ohneStand, gemeldet);
+    return gesund;
+  }
+  function stillLage(art, stillMs, gemeldet) {
+    return { art: art, stillMs: stillMs, melden: art !== gemeldet, erholt: false };
+  }
+  function stillZahl(v) {
+    return typeof v === "number" && isFinite(v) && v > 0 ? v : 0;
+  }
+
   // Was den nächsten Abruf ausgelöst hat (Spec monitor-livestand-push, S0).
   // Fallen Nudge und Fallback-Takt zusammen, gewinnt "push": Der Abruf wäre
   // durch den Nudge ohnehin gekommen.
@@ -1203,6 +1288,19 @@
   var naechsteQuelle = "poll";
   function stateUrl(quelle) {
     return STATE_URL + (STATE_URL.indexOf("?") >= 0 ? "&" : "?") + "src=" + quelle;
+  }
+
+  // Abruf-Optionen für den STATE_URL-Fetch (Etappe ETag, 1b/1c): `cache`
+  // bleibt `no-store` (wir steuern das Caching selbst über die Marke). Mit
+  // gespeicherter Marke geht `If-None-Match` mit; der Refetch-Cap schickt
+  // ihn regelmäßig WEG, damit binnen 10 min (gesund) bzw. 60 s (ungesund)
+  // sicher ein voller 200 mit frischem `serverNowMs` kommt.
+  function abrufOptionen() {
+    var opt = { cache: "no-store" };
+    if (lastEtag && Date.now() - letzterVollerAbrufMs < refetchCap(pushGesund(kanalZustand(), Date.now()))) {
+      opt.headers = { "If-None-Match": lastEtag };
+    }
+    return opt;
   }
 
   function poll() {
@@ -1217,16 +1315,34 @@
     letzterAbrufMs = Date.now();
     var quelle = naechsteQuelle;
     naechsteQuelle = "poll";
-    fetch(stateUrl(quelle), { cache: "no-store" })
+    fetch(stateUrl(quelle), abrufOptionen())
       .then(function (r) {
+        if (r.status === 304) {
+          // Nichts Neues: letzten Stand behalten. Der Uhr-Offset wird aus dem
+          // 304 NICHT abgeleitet (kein Body) — frische Werte kommen über den
+          // Refetch-Cap und den Herzschlag (1c). Das Lebenszeichen läuft über
+          // den Abruf selbst und ist damit auch hier frisch.
+          return null;
+        }
         if (!r.ok) throw new Error("HTTP " + r.status);
+        var etag = r.headers.get("ETag");
+        if (etag) { lastEtag = etag; letzterVollerAbrufMs = Date.now(); }
         return r.json();
       })
       .then(function (state) {
+        if (state === null) {
+          if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
+          lastFetchOk = true; fetchFehler = 0;
+          els.offline.classList.remove("show");
+          pollDone();
+          return;
+        }
         if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
         lastFetchOk = true; fetchFehler = 0;
+        letzterAbrufOkMs = Date.now();
         els.offline.classList.remove("show");
         applyState(state);
+        clockFeed(state.serverNowMs);
         pollDone();
       })
       .catch(function () {
@@ -1263,16 +1379,65 @@
     return pushGesund(kanalZustand(), Date.now());
   }
 
-  // Pausen-Countdown UND Aufruf-Uhr jede Sekunde unabhängig vom Poll
-  // aktualisieren (sonst zählte die Uhr nur im 1-s-Poll-Takt hoch).
+  // Pausen-Countdown, Aufruf-Uhr UND Kopf-Spieldauer jede Sekunde unabhängig
+  // vom Poll aktualisieren (sonst zählten die Uhren nur im Poll-Takt hoch,
+  // und in einer 304-Serie stünde die Spieldauer still — Review R2).
   setInterval(function () {
     if (lastState && lastState.match) {
       renderTimer(lastState);
       renderCallTimer(lastState);
+      renderMatchClock(lastState);
     }
   }, 1000);
 
   poll();
+
+  // Stillstands-Wächter: Stellt fest, was bisher niemand sehen konnte — eine
+  // Anzeige, die weiterläuft und trotzdem nichts Neues mehr übernimmt. Sie
+  // wirft dabei keinen Fehler und wird nicht geschlossen, fällt also durch
+  // alle drei Auslöser des Log-Uploads (JS-Fehler, unhandledrejection,
+  // pagehide). Erst dieser Takt macht den Zustand bezeugbar.
+  //
+  // Er HEILT nichts: kein Reload, kein Zurücksetzen der Ordnungszahl. Wir
+  // wissen noch nicht, woran es liegt, und eine Selbstheilung würde genau die
+  // Spur verwischen, wegen der er gebaut wurde.
+  //
+  // 10-s-Takt gegen eine 60-s-Schwelle: fein genug, um den Beginn auf zehn
+  // Sekunden genau zu datieren, und billig genug, um nicht ins Gewicht zu
+  // fallen.
+  setInterval(function () {
+    var jetzt = Date.now();
+    var lage = lagePruefen({
+      startMs: seitStartMs,
+      letzterAbrufOkMs: letzterAbrufOkMs,
+      letzterStandMs: letzterStandMs,
+      gemeldeteArt: gemeldeteStillstandsArt,
+    }, jetzt);
+    if (lage.melden) {
+      gemeldeteStillstandsArt = lage.art;
+      // Alles, was zur Eingrenzung taugt, in EINER Zeile — wer das Log liest,
+      // hat kein zweites Gerät daneben.
+      mlog("error", "stillstand", {
+        art: lage.art,
+        stillMs: lage.stillMs,
+        verworfen: verworfeneStaende,
+        wsOpen: mwsOpen,
+        frameAltMs: lastServerFrameAt ? jetzt - lastServerFrameAt : null,
+        fetchOk: lastFetchOk,
+        fetchFehler: fetchFehler,
+        taktMs: fallbackTakt(pushHealthy(), langsamErlaubt),
+        feld: knownCourtId,
+        gezeigteSeq: (knownCourtId && lastSeqByCourt[knownCourtId]) || 0,
+        modus: MODE,
+      });
+      uploadMonitorLog();
+    } else if (lage.erholt) {
+      gemeldeteStillstandsArt = null;
+      mlog("info", "stillstand_vorbei", { verworfen: verworfeneStaende });
+      uploadMonitorLog();
+    }
+  }, 10000);
+
   // Sicherheits-Poll (Spec monitor-livestand-push, S6). 250-ms-Raster, bei
   // jedem Tick neu entschieden, wie lange die Seite ohne eigenen Abruf
   // auskommen darf: Kanal ungesund → 250 ms wie bisher; gesund und Schalter
@@ -1347,6 +1512,10 @@
       // Herzschlag, der gar keine Nachricht über ein Feld ist (Spec
       // monitor-livestand-push, S6).
       lastServerFrameAt = Date.now();
+      // Der Herzschlag trägt die Server-Zeit (`{"hb":<nowMs>}`) — die zweite
+      // Uhr-Quelle (Etappe ETag, 1c): Zwischen vollen 200-Abrufen bleibt der
+      // Uhr-Offset damit frisch, auch über eine lange 304-Serie.
+      if (typeof msg.hb === "number") clockFeed(msg.hb);
       if (typeof msg.court !== "number" || typeof msg.seq !== "number") return;
       // Veraltete/doppelte Nudges verwerfen (Spec monitor-livestand-push, S4).
       if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, "push")) return;

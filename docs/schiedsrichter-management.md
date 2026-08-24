@@ -136,6 +136,16 @@ gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
   anderes Spiel darauf kommt (Merker `officials_oncourt_prev`). Wer eine
   Zuweisung von Hand löscht, bekommt sie deshalb **nicht** im nächsten Poll
   zurück.
+- **Der erste Blick ist Ausgangslage** (seit v0.9.253): Solange die Rotation
+  noch gar keinen Stand kennt (`officials_oncourt_prev == None`), bestückt
+  sie nichts — sie merkt sich nur, was gerade läuft. Das betrifft drei
+  Fälle, die sich für sie gleich anfühlen: das **Einschalten** des Häkchens
+  mitten im Turnier, das **Stoppen/Starten der Übertragung** (passiert bei
+  jedem Speichern der Einstellungen) und den **App-Neustart**. Ohne diese
+  Regel sah jedes belegte Feld wie frisch belegt aus, und alle laufenden
+  Spiele bekamen auf einen Schlag Schiedsrichter zugeteilt (Feldtest
+  22.08.2026). Laufende Spiele bleiben unbesetzt, bis die Turnierleitung von
+  Hand zuweist; ab dem nächsten Feldwechsel läuft die Rotation normal.
 - **BTP gewinnt:** Trägt das Match `Official1ID`/`Official2ID`, gilt dieser
   Wert (`store.effective(...)`); die Rotation füllt dort nichts nach.
 - **Nach Spielende** rücken die Officials des beendeten Spiels ans Ende der
@@ -284,8 +294,9 @@ Azure-Pfad XML-escaped im SSML. Damit sagen sie Wort für Wort dasselbe.
   sodass dieselbe Belegung je nach Auslöser anders klang (Nutzer-Befund
   20.08.2026). Der Schalter `announce.announce_umpire` (Default an,
   [ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)) schaltet die Nennung
-  bei Bedarf ab. Am **Cloud-Ansage-Slave** ist sie weiterhin unmöglich:
-  `CloudAnnounceCourt` führt keine SR/AR-Listen.
+  bei Bedarf ab. Seit v0.9.248 gilt das auch für den
+  **Cloud-Ansage-Slave**: Die Namen reisten im `MatchBrief` längst bis dorthin,
+  fielen aber bei der Umwandlung in `CloudAnnounceCourt` heraus.
 - **Manueller Knopf** (`announceOfficials`, `officialsOnly`): sagt nur Feld
   und Besetzung an — eine nachträgliche Zuweisung soll nicht die ganze
   Paarung erneut aufrufen, das Spiel läuft ja schon. Der Knopf sitzt im
@@ -494,3 +505,10 @@ Service-Richter** des Spiels — aus derselben Quelle wie die Feldübersicht
 (`court_officials`). Sperrlisten und Stammverein stehen **nicht** darauf; sie
 bleiben der Pflege-Ansicht vorbehalten. Bedienung:
 [schiedsrichterzettel.md](schiedsrichterzettel.md).
+**Und er entscheidet über den Autodruck:** Ist er eingeschaltet, druckt
+bts-light den Zettel nur für Spiele, denen ein **Schiedsrichter** zugeordnet
+ist — ein Aufschlagrichter allein genügt nicht. Ist die Schiedsrichter-
+verwaltung ganz aus, kennt der Host nie einen SR, und die Automatik bleibt
+bauartbedingt stumm. Die Zuordnung darf dabei **nach** der Feldvergabe kommen
+(Rotation oder von Hand): Geprüft wird ein Zustand, nicht ein Augenblick.
+

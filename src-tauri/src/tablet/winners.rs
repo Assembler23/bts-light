@@ -254,6 +254,7 @@ mod tests {
                 MatchStatus::Scheduled
             },
             finished_at: winner.map(|_| 1),
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,

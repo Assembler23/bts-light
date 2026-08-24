@@ -91,10 +91,6 @@ pub struct SyncEngine {
     last_pushed: Option<BtpSnapshot>,
     /// Fortlaufende Request-ID für Badhub.
     rid: u64,
-    /// Match-ID → Zeitpunkt, zu dem das Match erstmals als beendet
-    /// erkannt wurde. BTP liefert keinen End-Zeitstempel, deshalb wird er
-    /// hier über die Zyklen hinweg gemerkt.
-    finished_at: HashMap<i64, u64>,
     /// Zeitpunkt des letzten tatsächlich gesendeten Pushes (echtes Update
     /// oder Heartbeat). Steuert, wann das nächste Lebenszeichen fällig ist.
     last_push_at: Option<Instant>,
@@ -119,7 +115,16 @@ pub struct SyncEngine {
     /// bestückt nur **neu** belegte Felder, und ihr Hook läuft an anderer
     /// Stelle im Zyklus als der der Zähltafelbediener. Ein gemeinsamer
     /// Merker würde beide aneinanderketten.
-    officials_oncourt_prev: HashMap<i64, i64>,
+    ///
+    /// `None` heißt „noch nichts beobachtet" und ist ausdrücklich etwas
+    /// anderes als eine leere Karte: Beim allerersten Zyklus — nach dem
+    /// Einschalten des Häkchens, nach „Übertragung stoppen/starten" (das
+    /// passiert bei JEDEM Speichern der Einstellungen) und nach einem
+    /// App-Neustart — ist der vorgefundene Stand **Ausgangslage**, kein
+    /// Belegungswechsel. Ohne diese Unterscheidung sähe jedes belegte Feld
+    /// wie frisch belegt aus, und die Rotation setzte mitten im Spiel
+    /// Schiedsrichter an laufende Partien (Feldtest 22.08.2026).
+    officials_oncourt_prev: Option<HashMap<i64, i64>>,
     /// Zuletzt nach BTP geschriebene Besetzung je Match (ADR 0021).
     /// BTP übernimmt asynchron; ohne diesen Merker schriebe jeder Zyklus
     /// denselben Wert erneut, bis der Snapshot nachzieht.
@@ -387,13 +392,12 @@ impl SyncEngine {
         Self {
             last_pushed: None,
             rid: 1,
-            finished_at: HashMap::new(),
             last_push_at: None,
             logo_gesendet: None,
             last_topology: None,
             perf_log: crate::tablet::perf::PerfLog::neu(),
             oncourt_prev: HashMap::new(),
-            officials_oncourt_prev: HashMap::new(),
+            officials_oncourt_prev: None,
             officials_written: HashMap::new(),
             court_free_since: HashMap::new(),
             pending_auto: HashMap::new(),
@@ -633,6 +637,102 @@ impl SyncEngine {
     /// über `Finished` + `Winner` laufen, keine eigene `MatchStatus`-Variante)
     /// oder nicht mehr im Snapshot vorkommt. Kein BTP-Write, rein lokal —
     /// anders als die übrigen `reconcile_*` deshalb nicht `async`.
+    /// Welche Spiele brauchen **jetzt** ein Blatt? Entscheidung und
+    /// Anspruch in einem Zug — ohne Drucker, ohne Runtime, vollständig
+    /// prüfbar.
+    ///
+    /// Liefert `(match_id, feld)` je beanspruchtem Auftrag. „Beansprucht"
+    /// heißt: Der Vermerk im Druck-Gedächtnis steht bereits. Wer hier
+    /// etwas zurückbekommt, ist allein zuständig — auch wenn der Druck
+    /// danach scheitert.
+    fn beanspruche_druckauftraege(
+        &self,
+        config: &AppConfig,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+    ) -> Vec<(i64, String)> {
+        // `slave_mode` ist hier ein zweiter Riegel: Der Aufruf steht
+        // ohnehin hinter der Slave-Rückkehr in `run_once`. Beides
+        // zusammen macht die Zusage „nur der Master druckt" unabhängig
+        // davon, wo der Aufruf eines Tages steht.
+        if !config.print.auto_enabled || config.slave_mode {
+            return Vec::new();
+        }
+        let mut auftraege = Vec::new();
+        for m in snapshot.matches.iter() {
+            if m.status != MatchStatus::OnCourt || m.id <= 0 {
+                continue;
+            }
+            let Some(feld) = m.court.clone().filter(|c| !c.trim().is_empty()) else {
+                continue;
+            };
+            if tablet.print_log().ist_gedruckt(m.id) {
+                continue;
+            }
+            // Ein Aufschlagrichter allein genügt nicht: Der Zettel gehört
+            // dem Schiedsrichter, der ihn führt.
+            let (sr, _ar, _warn) = tablet.court_officials(Some(m), snapshot);
+            if sr.is_empty() {
+                continue;
+            }
+            // Ab hier ist es unser Auftrag — und nur unserer.
+            if tablet.print_log().merken(m.id) {
+                auftraege.push((m.id, feld));
+            }
+        }
+        auftraege
+    }
+
+    /// Zettel-Autodruck: Für jedes Spiel, das **auf einem Feld steht und
+    /// einen Schiedsrichter hat**, einmal ein Blatt drucken (Spec
+    /// `schiedsrichterzettel-autodruck`, E5).
+    ///
+    /// **Geprüft wird ein Zustand, kein Ereignis.** Der Schiedsrichter darf
+    /// nach der Feldvergabe dazukommen — Rotation oder Handzuteilung —, und
+    /// der nächste Lauf löst dann aus. Umgekehrt kann die Vergabe der
+    /// Zuteilung folgen; beide Reihenfolgen enden beim selben Blatt.
+    ///
+    /// Drei Riegel halten das im Turnier gutmütig:
+    /// - Der Vermerk im [`print_log`](crate::tablet::print_log) steht
+    ///   **vor** dem Druckversuch. Ein Feld- oder Schiedsrichterwechsel
+    ///   erzeugt deshalb kein zweites Blatt, und ein gescheiterter Druck
+    ///   wiederholt sich nicht im Sekundentakt.
+    /// - Der Vermerk ist persistent: Ein App-Neustart mitten im Turnier
+    ///   druckt nichts nach.
+    /// - Gedruckt wird in einer eigenen Aufgabe. **Der Sync-Lauf wartet
+    ///   nie auf den Drucker** — ein Spooler, der hängt, darf weder
+    ///   Liveticker noch Feldvergabe anhalten.
+    fn autodruck(&self, config: &AppConfig, snapshot: &BtpSnapshot, tablet: &TabletState) {
+        for (match_id, feld) in self.beanspruche_druckauftraege(config, snapshot, tablet) {
+            let m_id = match_id;
+            let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
+            let seiten = crate::tablet::scoresheet::seiten_fuer(
+                tablet,
+                logo.as_deref(),
+                crate::tablet::scoresheet::Modus::Vorab,
+                &[m_id],
+            );
+            let Some(seiten) = seiten else {
+                // Kein Blatt zu erzeugen — dann war es auch kein
+                // Druckversuch, und der Vermerk darf nicht stehen bleiben.
+                tablet.print_log().vergessen(m_id);
+                continue;
+            };
+            let drucker = config.print.printer_name.clone();
+            let titel = format!("Schiedsrichterzettel Feld {feld}");
+            let warnung = tablet.print_warning_slot();
+            tokio::task::spawn_blocking(move || {
+                match crate::print::drucke(&seiten, &titel, &drucker) {
+                    Ok(()) => tracing::info!("Zettel für Feld {feld} gedruckt"),
+                    Err(e) => crate::tablet::state::melde_druckwarnung(
+                        &warnung,
+                        format!("Zettel für Feld {feld}: {e}"),
+                    ),
+                }
+            });
+        }
+    }
+
     fn reconcile_auto_assign_exclusions(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
         let keep: HashSet<i64> = snapshot
             .matches
@@ -641,6 +741,39 @@ impl SyncEngine {
             .map(|m| m.id)
             .collect();
         tablet.retain_auto_assign_exclusions(&keep);
+    }
+
+    /// Wunschfelder je Poll aufräumen (Spec `tl-wunschfeld`).
+    ///
+    /// Zwei Gründe, einen Wunsch zu verwerfen:
+    ///
+    /// - **Das Spiel ist durch** (beendet oder aus dem Stand verschwunden) —
+    ///   wie bei der Ausnahmeliste.
+    /// - **Das Spiel steht auf dem Feld.** Der Wunsch hat getan, was er
+    ///   sollte. Bliebe er stehen, zöge er das Spiel nach einer
+    ///   Ergebniskorrektur — wenn BTP es wieder auf `Scheduled` setzt —
+    ///   erneut auf ein Feld, das niemand mehr gemeint hat. Und er hielte
+    ///   dieses Feld weiter für sich reserviert.
+    /// - **Das Feld gibt es nicht mehr.** Ein Wunsch auf eine CourtID, die
+    ///   der Snapshot nicht mehr führt, ließe das Spiel für immer warten —
+    ///   und in der Liste stünde nur „wartet", ohne Grund.
+    fn reconcile_wish_courts(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
+        let keep: HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Scheduled && m.court_id.is_none())
+            .map(|m| m.id)
+            .collect();
+        tablet.wish_court_store().retain(&keep);
+
+        let felder: HashSet<i64> = snapshot.court_infos.iter().map(|c| c.id).collect();
+        let verloren = tablet.wish_court_store().retain_courts(&felder);
+        if !verloren.is_empty() {
+            tracing::info!(
+                "Wunschfeld verworfen für {verloren:?}: das Feld gibt es in diesem \
+                 Turnierstand nicht mehr"
+            );
+        }
     }
 
     /// Spielzeiten-Messung je Poll abgleichen (Spec `spielzeiten-prognose`,
@@ -1198,11 +1331,72 @@ impl SyncEngine {
     /// Stempelt beendete Matches: Beim ersten Erkennen eines Siegers wird
     /// der aktuelle Zeitpunkt gemerkt und in jedes beendete Match
     /// zurückgeschrieben (stabil über alle folgenden Zyklen).
-    fn stamp_finished(&mut self, snapshot: &mut BtpSnapshot) {
-        let now = now_ms();
+    ///
+    /// Der Merker liegt im **persistenten** Zeitspeicher, nicht in der
+    /// Engine: Jedes Speichern der Einstellungen stoppt und startet die
+    /// Übertragung, und eine frische Engine hielte sonst jedes längst
+    /// beendete Spiel für soeben beendet — womit schlagartig alle Spieler
+    /// wieder in der Mindestpause stünden (Feldtest 22.08.2026). Dasselbe
+    /// galt nach jedem App-Neustart.
+    ///
+    /// Mitgestempelt wird die **beim Ende geltende** Pflichtpause. Nur so
+    /// wirkt eine später geänderte Pausenzeit ausschließlich auf Spiele, die
+    /// danach enden, statt rückwirkend auf alle.
+    fn stamp_finished(
+        &mut self,
+        snapshot: &mut BtpSnapshot,
+        tablet: &TabletState,
+        config: &AppConfig,
+        now: u64,
+    ) {
+        // Store ans Turnier binden, BEVOR gestempelt wird — aus demselben
+        // Grund wie in `reconcile_match_times`, das im Zyklus erst später
+        // kommt. Idempotent.
+        let store = tablet.match_times_store();
+        store.set_tournament(&snapshot.tournament_name);
+        let pause_ms = crate::tablet::assign::pflichtpause_ms(snapshot, config);
         for m in &mut snapshot.matches {
             if m.status == MatchStatus::Finished {
-                m.finished_at = Some(*self.finished_at.entry(m.id).or_insert(now));
+                let (ende, pause) = store.stamp_finished_seen(m.id, pause_ms, now);
+                m.finished_at = Some(ende);
+                m.pause_ms = Some(pause);
+            }
+        }
+    }
+
+    /// Stempelt Spiele, die nach ihren Sätzen **entschieden** aussehen, deren
+    /// Feld aber weiterhin belegt ist (Spec `tl-warnung-fertiges-spiel`).
+    ///
+    /// Der Stempel sagt nur „seit wann sieht das so aus" — ob daraus eine
+    /// Warnung wird, entscheidet erst die Anzeige anhand der eingestellten
+    /// Frist. So bleibt der Zustand stabil (und damit
+    /// Fingerabdruck-tauglich), statt im Sekundentakt zwischen wahr und
+    /// falsch zu springen.
+    ///
+    /// **Ausgeschlossen ist der häufigste Fehlalarm:** Ein Ergebnis, das in
+    /// der BTP-Nachschub-Queue liegt, ist beim Host angekommen und wird
+    /// nachgereicht — das Feld bleibt trotzdem belegt und der Satzstand steht
+    /// weiter. Dorthin muss niemand laufen; die Ursache liegt bei BTP.
+    fn stempel_entschiedene_spiele(snapshot: &BtpSnapshot, tablet: &TabletState, now: u64) {
+        let store = tablet.match_times_store();
+        for m in &snapshot.matches {
+            if m.status != MatchStatus::OnCourt {
+                continue;
+            }
+            let Some(court_id) = m.court_id else { continue };
+            // Ergebnis liegt beim Host und wartet nur auf BTP ⇒ kein Fall
+            // für die Turnierleitung.
+            if tablet.btp_retry_pending(m.id) {
+                store.clear_decided_seen(m.id);
+                continue;
+            }
+            let sets = tablet.monitor_court(court_id).sets;
+            if crate::tablet::server::spiel_ist_entschieden(&sets, &m.scoring) {
+                store.stamp_decided_seen(m.id, now);
+            } else {
+                // Nicht (mehr) entschieden — etwa nach einer Korrektur. Beim
+                // nächsten Ende läuft die Uhr von vorn.
+                store.clear_decided_seen(m.id);
             }
         }
     }
@@ -1304,7 +1498,9 @@ impl SyncEngine {
             // Abschalten mitten im Turnier räumt alles (Spec Nr. 1) — sonst
             // bliebe ein Name in einer Anzeige hängen.
             store.clear_assignments();
-            self.officials_oncourt_prev.clear();
+            // Nicht bloß leeren, sondern vergessen: Beim Wiedereinschalten
+            // sind die dann laufenden Spiele Ausgangslage.
+            self.officials_oncourt_prev = None;
             return;
         }
         let oncourt_now: HashMap<i64, i64> = snapshot
@@ -1314,17 +1510,20 @@ impl SyncEngine {
             .filter_map(|m| m.court_id.map(|c| (c, m.id)))
             .collect();
 
+        // Erster beobachteter Zyklus? Dann ist der vorgefundene Stand die
+        // Ausgangslage: Weder rückt jemand ans Ende (wir haben kein Spiel
+        // enden sehen), noch wird bestückt (wir haben kein Feld neu belegen
+        // sehen). Siehe `officials_oncourt_prev`.
+        let ausgangslage = self.officials_oncourt_prev.is_none();
+        let prev = self.officials_oncourt_prev.take().unwrap_or_default();
+
         // Verlassene Felder: War das vorige Spiel beendet, rücken seine
         // Officials ans Ende der Reihenfolge — nach CourtID sortiert, damit
         // bei mehreren gleichzeitig verlassenen Feldern dieselbe
         // Deterministik gilt wie bei der Zuteilung unten (sonst entschiede
         // die zufällige HashMap-Iterationsreihenfolge, wer zuerst ans Ende
         // rückt).
-        let mut verlassen: Vec<(i64, i64)> = self
-            .officials_oncourt_prev
-            .iter()
-            .map(|(&c, &m)| (c, m))
-            .collect();
+        let mut verlassen: Vec<(i64, i64)> = prev.iter().map(|(&c, &m)| (c, m)).collect();
         verlassen.sort_by_key(|&(c, _)| c);
         for (court_id, prev_match_id) in verlassen {
             if oncourt_now.get(&court_id) == Some(&prev_match_id) {
@@ -1372,7 +1571,10 @@ impl SyncEngine {
         let mut courts: Vec<(i64, i64)> = oncourt_now.iter().map(|(&c, &m)| (c, m)).collect();
         courts.sort_by_key(|&(c, _)| c);
         for (court_id, match_id) in courts {
-            if self.officials_oncourt_prev.get(&court_id) == Some(&match_id) {
+            if ausgangslage {
+                continue; // erster Blick aufs Turnier ⇒ nichts nachfüllen
+            }
+            if prev.get(&court_id) == Some(&match_id) {
                 continue; // unverändert belegt ⇒ nichts nachfüllen
             }
             let Some(m) = snapshot.matches.iter().find(|m| m.id == match_id) else {
@@ -1402,7 +1604,7 @@ impl SyncEngine {
                 im_dienst.extend(nachher.ar);
             }
         }
-        self.officials_oncourt_prev = oncourt_now;
+        self.officials_oncourt_prev = Some(oncourt_now);
     }
 
     /// Bestimmt die automatischen Feldvergaben dieses Zyklus und pflegt dabei
@@ -1564,7 +1766,15 @@ impl SyncEngine {
             .iter()
             .map(|m| {
                 let call = call_for(m.id);
-                let manual_hall = manual_halls.get(&m.id).map(String::as_str);
+                // Das Wunschfeld legt die Halle mit fest (Spec
+                // `tl-wunschfeld`) — sonst könnte die Hallenbindung dem
+                // Wunsch widersprechen und das Spiel wartete auf ein Feld,
+                // das es nie bekommen darf.
+                let manual_hall = crate::tablet::assign::manual_hall_from_wish(
+                    snapshot,
+                    tablet.wish_court(m.id),
+                    manual_halls.get(&m.id).map(String::as_str),
+                );
                 let called_hall = call.and_then(|c| c.location_id).and_then(|lid| {
                     snapshot
                         .locations
@@ -1594,6 +1804,34 @@ impl SyncEngine {
         // werdende Felder" bleibt hier, sie gilt nur innerhalb eines Laufs.
         let availability =
             crate::tablet::assign::PlayerAvailability::from_snapshot(snapshot, config);
+
+        // ── Wunschfelder reservieren (Spec `tl-wunschfeld`) ─────────────
+        //
+        // Ein Wunschfeld hält sein Feld frei, **sobald das Wunschspiel
+        // spielbereit ist** — und keine Sekunde früher. Ohne diese
+        // Reservierung wäre das Feature wirkungslos: Wird das Hauptfeld frei,
+        // während das Endspiel noch in der Pflichtpause nach dem Halbfinale
+        // steckt (die Lage, in der ein Endspiel immer ist), bekäme ein
+        // anderes Spiel das Feld — und es wäre für vierzig Minuten weg.
+        //
+        // „Spielbereit" heißt: Das Spiel könnte jetzt aufs Feld, wenn eines
+        // frei wäre — nicht ausgenommen und kein Spieler spielt oder pausiert
+        // noch. So kostet die Reservierung nur so lange Feldkapazität, wie
+        // sie wirklich gebraucht wird: Ein Endspiel, dessen Spieler noch im
+        // Halbfinale stehen, blockiert nichts.
+        let reserviert: HashMap<i64, i64> = ready
+            .iter()
+            .filter_map(|m| {
+                let court = tablet.wish_court(m.id)?;
+                if tablet.auto_assign_excluded(m.id) {
+                    return None;
+                }
+                if availability.blocked(m, now).is_some() {
+                    return None;
+                }
+                Some((court, m.id))
+            })
+            .collect();
 
         let mut courts = Vec::new();
         let mut match_courts = Vec::new();
@@ -1629,6 +1867,19 @@ impl SyncEngine {
                 // `feldvergabe-ausnahme`) — manuelles Zuweisen bleibt davon
                 // unberührt, nur die Automatik überspringt es.
                 if tablet.auto_assign_excluded(m.id) {
+                    return false;
+                }
+                // Wunschfeld (Spec `tl-wunschfeld`), zwei Richtungen:
+                //
+                // 1. Dieses Spiel will ein bestimmtes Feld ⇒ es bekommt kein
+                //    anderes. Es wartet, statt auf das nächstbeste zu gehen.
+                if tablet.wish_court(m.id).is_some_and(|w| w != court.id) {
+                    return false;
+                }
+                // 2. Dieses Feld ist für ein anderes Spiel reserviert ⇒ es
+                //    bleibt frei. Ohne diese Richtung hielte der Wunsch das
+                //    Feld nicht, und das Feature liefe ins Leere.
+                if reserviert.get(&court.id).is_some_and(|&wer| wer != m.id) {
                     return false;
                 }
                 // Verfügbarkeit: kein Spieler darf gerade spielen oder noch in
@@ -1673,14 +1924,31 @@ impl SyncEngine {
                 }
                 if require_call {
                     // Mehr-Hallen ohne aktive Halle: nur für diese Halle
-                    // gerufene Matches — ODER ein AUTO-vorverteiltes Spiel in
-                    // seiner Halle (ADR 0030): Die Vorverteilung ersetzt den
-                    // Aufruf als Vergabe-Voraussetzung; das frühe
-                    // Hallen-Signal (Monitor/badhub) tritt an seine Stelle.
-                    let auto_statt_aufruf = matches!(source, Quelle::Auto)
+                    // gerufene Matches — ODER ein Spiel, dessen Halle bereits
+                    // feststeht und das in genau dieser Halle ein Feld
+                    // bekommt (ADR 0030): Das Hallen-Signal tritt an die
+                    // Stelle des Aufrufs, denn es sagt dasselbe.
+                    //
+                    // Gilt für die **Vorverteilung** (Auto) und für die
+                    // **Hand-Zuweisung** (Manual). Die Hand war bis v0.9.260
+                    // ausgenommen, und das kehrte die Wirkung um: Eine
+                    // Hand-Zuweisung räumt die Auto-Zuordnung (richtig — die
+                    // Turnierleitung entscheidet), womit die Quelle von `Auto`
+                    // auf `Manual` wechselte und der Aufruf-Ersatz wegfiel.
+                    // Das Spiel, das eben noch verteilt wurde, war danach für
+                    // die Automatik unsichtbar (Turnier-Befund 23.08.2026).
+                    // Ausgerechnet der Eingriff, mit dem die TL steuern will,
+                    // legte das Spiel still.
+                    //
+                    // Regel und BTP-Ort bleiben bewusst **draußen**: Sie
+                    // gelten pauschal für ganze Disziplinen bzw. kommen aus
+                    // den Turnierstammdaten. Sie als Aufruf zu werten würde
+                    // die Aufruf-Pflicht für halbe Turniere auf einmal
+                    // aufheben — hier geht es um den Eingriff für EIN Spiel.
+                    let halle_statt_aufruf = matches!(source, Quelle::Auto | Quelle::Manual)
                         && !hall.is_empty()
                         && court_hall.eq_ignore_ascii_case(hall);
-                    auto_statt_aufruf
+                    halle_statt_aufruf
                         || call_for(m.id)
                             .and_then(|c| c.location_id)
                             .zip(court.location_id)
@@ -1813,7 +2081,7 @@ impl SyncEngine {
             self.last_topology = Some(topology);
         }
 
-        self.stamp_finished(&mut snapshot);
+        self.stamp_finished(&mut snapshot, tablet, config, now_ms());
         self.track_scorekeepers(&snapshot, tablet, config.scorekeeper.enabled);
         // Aufruf-Timer: je Feld festhalten, seit wann das aktuelle Spiel dort
         // steht (1. Aufruf). Aus demselben OnCourt-Stand wie die Scorekeeper.
@@ -1832,6 +2100,11 @@ impl SyncEngine {
         // reconcile_on_court aus demselben Snapshot, damit beide Uhren
         // dieselbe Zuweisung sehen.
         self.reconcile_match_times(tablet, &snapshot, now_ms());
+        self.reconcile_wish_courts(tablet, &snapshot);
+        // Warnung „Spiel scheint fertig, aber kein Ergebnis" (Spec
+        // `tl-warnung-fertiges-spiel`): einmal je Poll gegen den Live-Stand
+        // prüfen. Der Minutentakt der Warnung verträgt das mühelos.
+        Self::stempel_entschiedene_spiele(&snapshot, tablet, now_ms());
         // Automatische Feldvergabe: freie, lange genug freie, nicht gesperrte
         // Felder mit dem nächsten spielbereiten Match belegen (schreibt nach
         // BTP). Aus dem aktuellen Snapshot bestimmt – kollidiert so nicht mit
@@ -1879,6 +2152,12 @@ impl SyncEngine {
         // gebunden und um neue BTP-Officials ergänzt. Master-only: der
         // Ansage-Slave ist oben schon zurückgekehrt.
         self.track_officials(&snapshot, tablet);
+        // Zettel-Autodruck (Spec `schiedsrichterzettel-autodruck`, E5) —
+        // **unmittelbar nach der Rotation**: Erst hier steht die
+        // Besetzung des frisch belegten Felds fest. Eine Zeile früher
+        // sähe der Druck systematisch keinen Schiedsrichter und bliebe
+        // stumm.
+        self.autodruck(config, &snapshot, tablet);
         tablet.apply_tablet_scores(&mut snapshot);
         // Von Hand geschriebene Feldzuweisungen, die BTP inzwischen
         // zurückmeldet, brauchen keine Vormerkung mehr — sie sollen das Feld
@@ -2394,6 +2673,7 @@ mod tests {
                 result: MatchResult::Normal,
                 status: MatchStatus::OnCourt,
                 finished_at: None,
+                pause_ms: None,
                 preparation_call_ts: None,
                 preparation_hall: None,
                 official1_id: None,
@@ -2506,6 +2786,7 @@ mod tests {
             result: MatchResult::Normal,
             status: MatchStatus::Scheduled,
             finished_at: None,
+            pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
             official1_id: None,
@@ -3325,6 +3606,235 @@ mod tests {
         assert_eq!(courts[0].court_id, 2);
     }
 
+    // ── Wunschfeld (Spec `tl-wunschfeld`) ────────────────────────────
+
+    /// Eine Halle, drei Felder, zwei spielbereite Spiele — mit EIGENEN
+    /// Spielern je Spiel. `ready_match` gibt allen dieselben („A"/„B"), und
+    /// dann verhindert der Doppelbelegungs-Schutz die zweite Vergabe: Der
+    /// Test misst dann nicht, was er messen soll.
+    fn eine_halle_drei_felder() -> BtpSnapshot {
+        snap_with(
+            vec![court(1, None), court(2, None), court(3, None)],
+            vec![
+                ready_named(7, None, "Müller", "Weber"),
+                ready_named(8, None, "Fischer", "Schulz"),
+            ],
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn ein_wunschspiel_bekommt_genau_sein_feld() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = eine_halle_drei_felder();
+        tablet.set_snapshot(snap.clone());
+        // Spiel 7 soll auf Feld 3 — nicht auf Feld 1, das zuerst dran wäre.
+        tablet.set_wish_court(7, Some(3));
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        let feld_von = |mid: i64| {
+            courts
+                .iter()
+                .find(|c| c.match_id == Some(mid))
+                .map(|c| c.court_id)
+        };
+        assert_eq!(feld_von(7), Some(3), "das Wunschspiel geht auf sein Feld");
+        assert_eq!(
+            feld_von(8),
+            Some(1),
+            "und das andere Spiel läuft normal weiter — der Wunsch blockiert \
+             die Schlange nicht"
+        );
+    }
+
+    #[test]
+    fn das_wunschfeld_bleibt_fuer_sein_spiel_frei() {
+        // **Der Kern des Features.** Ohne die Reservierung wäre es
+        // wirkungslos: Ein anderes Spiel nähme das Feld, und das Endspiel
+        // stünde vor einem belegten Hauptfeld.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Nur EIN Feld — und Spiel 8 will es.
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, None, "Müller", "Weber"),
+                ready_named(8, None, "Fischer", "Schulz"),
+            ],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        tablet.set_wish_court(8, Some(1));
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(
+            courts[0].match_id,
+            Some(8),
+            "das reservierte Feld geht an sein Wunschspiel, nicht an das \
+             Spiel, das in der Reihenfolge vorn steht"
+        );
+    }
+
+    #[test]
+    fn ein_noch_nicht_spielbereites_wunschspiel_blockiert_sein_feld_nicht() {
+        // Nutzer-Entscheidung 24.08.2026: Reserviert wird erst, wenn das
+        // Wunschspiel spielbereit IST. Ein Endspiel, dessen Spieler noch im
+        // Halbfinale stehen (oder in der Pflichtpause danach), hält das
+        // Hauptfeld nicht stundenlang leer — das wäre der teure Teil einer
+        // Reservierung, und er ist vermeidbar.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Spiel 8 will Feld 1, seine Spieler kommen aber gerade aus einem
+        // beendeten Spiel und sind noch in der Pflichtpause.
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, None, "Fischer", "Schulz"),
+                ready_named(8, None, "Müller", "Weber"),
+                // Ende JETZT — mit 0 läge die Pflichtpause Jahrzehnte
+                // zurück und wäre längst abgelaufen.
+                finished_named(9, now_ms(), "Müller", "Weber"),
+            ],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        tablet.set_wish_court(8, Some(1));
+
+        // 30 Minuten Pflichtpause ⇒ Spiel 8 ist nicht spielbereit.
+        let (courts, _) = engine.auto_assign(&cfg_auto_pause(0.0, 30.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(
+            courts[0].match_id,
+            Some(7),
+            "solange das Wunschspiel nicht kann, darf das Feld an ein anderes"
+        );
+    }
+
+    #[test]
+    fn ein_wunschspiel_wartet_lieber_als_auf_ein_anderes_feld_zu_gehen() {
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        // Feld 3 ist belegt — genau das Feld, das Spiel 7 will.
+        let mut belegt = ready_named(9, None, "Fischer", "Schulz");
+        belegt.status = MatchStatus::OnCourt;
+        belegt.court = Some("3".into());
+        belegt.court_id = Some(3);
+        let snap = snap_with(
+            vec![court(1, None), court(3, None)],
+            vec![ready_named(7, None, "Müller", "Weber"), belegt],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        tablet.set_wish_court(7, Some(3));
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "Feld 1 ist frei, aber das Wunschspiel wartet auf Feld 3 — genau \
+             dafür ist das Wunschfeld da"
+        );
+    }
+
+    /// Zwei Hallen mit je einem Feld, ein spielbereites Match — die Lage,
+    /// in der die Aufruf-Pflicht gilt (Mehr-Hallen ohne aktive Halle).
+    fn zwei_hallen_ein_match() -> BtpSnapshot {
+        snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            vec![ready_match(7, 1)],
+            vec![
+                BtpLocation {
+                    id: 1,
+                    name: "Halle 1".into(),
+                },
+                BtpLocation {
+                    id: 2,
+                    name: "Halle 2".into(),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn eine_von_hand_gesetzte_halle_ersetzt_den_aufruf() {
+        // Turnier-Befund 23.08.2026: „Wenn man eine Halle manuell angibt
+        // (vorher war schon automatisch die Halle vergeben), dann wird es bei
+        // der Automatik ignoriert."
+        //
+        // Im Mehr-Hallen-Betrieb ohne aktive Halle braucht ein Spiel einen
+        // Vorbereitungs-Aufruf für seine Halle — ODER eine Auto-Halle, die ihn
+        // nach ADR 0030 ersetzt. Die Hand-Zuweisung räumt die Auto-Zuordnung
+        // (richtig: die TL entscheidet), womit die Quelle von `Auto` auf
+        // `Manual` wechselt — und damit fiel der Aufruf-Ersatz weg.
+        //
+        // Die Folge ist besonders tückisch: Vorher lief das Spiel, nach dem
+        // Eingriff nicht mehr. Die Turnierleitung denkt, sie hilft, und legt
+        // das Spiel damit still.
+        //
+        // Eine von Hand gesetzte Halle ist das STÄRKERE Signal als eine
+        // automatisch verteilte — sie muss den Aufruf mindestens ebenso
+        // ersetzen.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = zwei_hallen_ein_match();
+        tablet.set_snapshot(snap.clone());
+        tablet.set_manual_hall(7, "Halle 2");
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(
+            courts.len(),
+            1,
+            "die von Hand gesetzte Halle muss den Aufruf ersetzen — sonst legt \
+             der Hand-Eingriff das Spiel still"
+        );
+        assert_eq!(courts[0].court_id, 2, "und zwar in Halle 2");
+    }
+
+    #[test]
+    fn eine_von_hand_gesetzte_halle_bindet_auch_weiterhin() {
+        // Gegenprobe: Der Aufruf-Ersatz darf die Bindung nicht aufweichen.
+        // Ist das Feld der gewählten Halle belegt, wartet das Spiel — es
+        // rutscht NICHT in die andere Halle (ADR 0030).
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut snap = zwei_hallen_ein_match();
+        // Halle 2 hat kein freies Feld mehr.
+        snap.matches.push({
+            let mut m = ready_match(8, 8);
+            m.status = MatchStatus::OnCourt;
+            m.court = Some("2".into());
+            m.court_id = Some(2);
+            m
+        });
+        tablet.set_snapshot(snap.clone());
+        tablet.set_manual_hall(7, "Halle 2");
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "das Spiel wartet auf seine Halle, statt in die andere zu rutschen"
+        );
+    }
+
+    #[test]
+    fn ohne_halle_und_ohne_aufruf_bleibt_es_bei_der_aufruf_pflicht() {
+        // Der Sinn der Aufruf-Pflicht bleibt: Ein Spiel ohne jede
+        // Hallenangabe wird im Mehr-Hallen-Betrieb NICHT einfach irgendwohin
+        // vergeben — sonst stünde es plötzlich in einer Halle, in der niemand
+        // damit rechnet.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = zwei_hallen_ein_match();
+        tablet.set_snapshot(snap.clone());
+
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "ohne Halle und ohne Aufruf: keine Vergabe"
+        );
+    }
+
     // ── Zeit-Reihenfolge + Spieler-Verfügbarkeit ─────────────────────────
     fn ready_named(id: i64, planned: Option<i64>, p1: &str, p2: &str) -> BtpMatch {
         let mut m = ready_match(id, id);
@@ -3821,11 +4331,99 @@ mod tests {
 
     // ──────────────── Spielende-Stempel & Zähltafelbediener ────────────────
 
+    /// Ein laufendes Spiel auf Feld 1 mit dieser Satzliste im Live-Stand.
+    fn oncourt_mit_saetzen(id: i64, sets: Vec<(i64, i64)>) -> (BtpSnapshot, TabletState) {
+        let m = oncourt_named(id, 1, "A", "B");
+        let snap = snap_with(Vec::new(), vec![m], Vec::new());
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap.clone());
+        tablet.record_score(1, id, sets);
+        (snap, tablet)
+    }
+
+    #[test]
+    fn ein_entschiedenes_spiel_auf_belegtem_feld_wird_gestempelt() {
+        // Spec `tl-warnung-fertiges-spiel`: Grundlage der Warnung. Der Stempel
+        // sagt nur „seit wann sieht es fertig aus" — die Frist rechnet die
+        // Anzeige.
+        let (snap, tablet) = oncourt_mit_saetzen(42, vec![(21, 10), (21, 15)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 5_000);
+        assert_eq!(
+            tablet.match_times_store().decided_seen_ms(42),
+            Some(5_000),
+            "entschieden bei belegtem Feld ⇒ Stempel"
+        );
+
+        // Ein zweiter Durchgang darf ihn nicht verschieben — sonst liefe die
+        // Frist nie ab.
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 60_000);
+        assert_eq!(tablet.match_times_store().decided_seen_ms(42), Some(5_000));
+    }
+
+    #[test]
+    fn ein_laufendes_spiel_wird_nicht_gestempelt() {
+        let (snap, tablet) = oncourt_mit_saetzen(42, vec![(21, 10), (11, 9)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 5_000);
+        assert_eq!(tablet.match_times_store().decided_seen_ms(42), None);
+    }
+
+    #[test]
+    fn eine_korrektur_nimmt_den_stempel_zurueck() {
+        // Wird der Stand zurückgenommen (BTP-Korrektur, Tablet-Korrektur),
+        // ist das Spiel nicht mehr fertig — und beim nächsten Ende läuft die
+        // Frist von vorn, statt sofort zu warnen.
+        let (snap, tablet) = oncourt_mit_saetzen(42, vec![(21, 10), (21, 15)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 5_000);
+        assert!(tablet.match_times_store().decided_seen_ms(42).is_some());
+
+        tablet.record_score(1, 42, vec![(21, 10), (11, 9)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 6_000);
+        assert_eq!(tablet.match_times_store().decided_seen_ms(42), None);
+    }
+
+    #[test]
+    fn ein_ergebnis_in_der_nachschub_queue_warnt_nicht() {
+        // **Der wichtigste Negativfall** (Grill-Fund): Scheitert der
+        // BTP-Write, quittiert der Host dem Tablet trotzdem und legt das
+        // Ergebnis in die Nachschub-Queue — das Feld bleibt belegt und der
+        // entschiedene Satzstand steht weiter. Dorthin muss niemand laufen,
+        // die Ursache liegt bei BTP. Eine Warnung wäre hier schlicht falsch,
+        // und falsche Warnungen kosten den Glauben an alle anderen.
+        let (snap, tablet) = oncourt_mit_saetzen(42, vec![(21, 10), (21, 15)]);
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 5_000);
+        assert!(tablet.match_times_store().decided_seen_ms(42).is_some());
+
+        tablet.queue_btp_retry(
+            crate::btp::proto::MatchUpdate {
+                btp_match_id: 42,
+                draw_id: 1,
+                planning_id: 1,
+                sets: vec![(21, 10), (21, 15)],
+                team1_won: true,
+                duration_mins: 30,
+                score_status: 0,
+                free_court_id: Some(1),
+                player_ids: Vec::new(),
+                end_ts_ms: Some(5_000),
+                officials: None,
+            },
+            5_000,
+        );
+        SyncEngine::stempel_entschiedene_spiele(&snap, &tablet, 6_000);
+        assert_eq!(
+            tablet.match_times_store().decided_seen_ms(42),
+            None,
+            "Ergebnis liegt beim Host — kein Fall für die Turnierleitung"
+        );
+    }
+
     #[test]
     fn stamp_finished_stamps_once_and_keeps_timestamp() {
         // BTP liefert kein Endezeitpunkt-Feld — wir stempeln beim ERSTEN
         // Poll, der das Spiel als beendet sieht, und der Stempel bleibt über
         // alle folgenden Zyklen stabil (Pausen-Logik + Ticker hängen daran).
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
         let mut engine = SyncEngine::new();
         let mut snap = snap_with(
             Vec::new(),
@@ -3833,8 +4431,9 @@ mod tests {
             Vec::new(),
         );
         snap.matches[0].finished_at = None;
-        engine.stamp_finished(&mut snap);
+        engine.stamp_finished(&mut snap, &tablet, &cfg, 1_000);
         let first = snap.matches[0].finished_at.expect("beendet → gestempelt");
+        assert_eq!(first, 1_000);
         assert!(
             snap.matches[1].finished_at.is_none(),
             "laufend/geplant bleibt ungestempelt"
@@ -3843,8 +4442,75 @@ mod tests {
         // Nächster Poll-Zyklus: frischer Snapshot, gleicher Stempel.
         let mut snap2 = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
         snap2.matches[0].finished_at = None;
-        engine.stamp_finished(&mut snap2);
+        engine.stamp_finished(&mut snap2, &tablet, &cfg, 9_000);
         assert_eq!(snap2.matches[0].finished_at, Some(first));
+    }
+
+    #[test]
+    fn der_endestempel_ueberlebt_den_neustart_der_uebertragung() {
+        // Feldtest 22.08.2026: Jedes Speichern der Einstellungen stoppt und
+        // startet die Übertragung. Lag der Stempel in der Engine, hielt die
+        // frische Engine JEDES längst beendete Spiel für soeben beendet —
+        // und alle Spieler begannen ihre Mindestpause von vorn, obwohl an
+        // der Wartezeit gar nichts geändert wurde.
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let mut snap = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
+        snap.matches[0].finished_at = None;
+        SyncEngine::new().stamp_finished(&mut snap, &tablet, &cfg, 1_000);
+        let erst = snap.matches[0].finished_at.expect("beendet → gestempelt");
+
+        // Übertragung gestoppt und neu gestartet: frische Engine, derselbe
+        // (persistente) Zeitspeicher im TabletState.
+        let mut spaeter = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
+        spaeter.matches[0].finished_at = None;
+        // Eine Viertelstunde später — mit dem alten Merker in der Engine
+        // stünde hier 900_000 und jede Pause liefe von vorn los.
+        SyncEngine::new().stamp_finished(&mut spaeter, &tablet, &cfg, 900_000);
+        assert_eq!(
+            spaeter.matches[0].finished_at,
+            Some(erst),
+            "der Neustart darf das Spielende nicht neu datieren"
+        );
+    }
+
+    #[test]
+    fn eine_geaenderte_pausenzeit_gilt_nur_fuer_neu_beendete_spiele() {
+        // Feldtest 22.08.2026: Wird die Pause umgestellt, bekamen ALLE schon
+        // beendeten Spiele die neue Länge. Die beim Spielende geltende Pause
+        // wird deshalb mitgestempelt.
+        let tablet = TabletState::default();
+        let mut engine = SyncEngine::new();
+
+        // Spiel 1 endet, während 30 Minuten Pause eingestellt sind.
+        let mut snap = snap_with(Vec::new(), vec![finished_named(1, 0, "A", "B")], Vec::new());
+        snap.matches[0].finished_at = None;
+        engine.stamp_finished(&mut snap, &tablet, &cfg_auto_pause(1.0, 30.0), 1_000);
+        assert_eq!(snap.matches[0].pause_ms, Some(30 * 60_000));
+
+        // Danach stellt die Turnierleitung auf 5 Minuten um — und ein
+        // zweites Spiel endet.
+        let mut spaeter = snap_with(
+            Vec::new(),
+            vec![
+                finished_named(1, 0, "A", "B"),
+                finished_named(2, 0, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        spaeter.matches[0].finished_at = None;
+        spaeter.matches[1].finished_at = None;
+        engine.stamp_finished(&mut spaeter, &tablet, &cfg_auto_pause(1.0, 5.0), 60_000);
+        assert_eq!(
+            spaeter.matches[0].pause_ms,
+            Some(30 * 60_000),
+            "das schon beendete Spiel behält die Pause, die bei seinem Ende galt"
+        );
+        assert_eq!(
+            spaeter.matches[1].pause_ms,
+            Some(5 * 60_000),
+            "erst das neu beendete Spiel rechnet mit der neuen Pause"
+        );
     }
 
     #[test]
@@ -3980,11 +4646,218 @@ mod tests {
     }
 
     /// Engine + Tablet mit eingeschaltetem Schiedsrichter-Betrieb.
+    ///
+    /// Die Engine hat das Turnier bereits **einmal leer gesehen**: Die
+    /// Rotation bestückt nur Felder, deren Belegungswechsel sie selbst
+    /// beobachtet hat, und ihr erster Blick ist immer nur Ausgangslage
+    /// (siehe `officials_oncourt_prev`). Tests, die genau diesen ersten
+    /// Blick prüfen, bauen ihre Engine selbst.
     fn officials_setup(rot_sr: bool, rot_ar: bool) -> (SyncEngine, TabletState) {
         let tablet = TabletState::default();
         tablet.officials_store().set_enabled(true);
         tablet.officials_store().set_rotation(rot_sr, rot_ar);
-        (SyncEngine::new(), tablet)
+        let mut engine = SyncEngine::new();
+        engine.track_officials(&snap_officials(Vec::new(), &[]), &tablet);
+        (engine, tablet)
+    }
+
+    // ── Zettel-Autodruck (Spec `schiedsrichterzettel-autodruck`, E5) ──
+
+    /// Konfiguration mit eingeschaltetem Autodruck.
+    fn cfg_druck(an: bool) -> AppConfig {
+        AppConfig {
+            print: crate::config::PrintConfig {
+                auto_enabled: an,
+                printer_name: String::new(),
+            },
+            ..AppConfig::default()
+        }
+    }
+
+    /// Engine + Tablet mit Schiedsrichterbetrieb und SR-Rotation.
+    fn druck_setup() -> (SyncEngine, TabletState) {
+        officials_setup(true, false)
+    }
+
+    /// Der Regelfall: Spiel steht auf dem Feld, ein Schiedsrichter ist
+    /// zugeordnet — genau ein Auftrag, und nur einer.
+    #[test]
+    fn feld_und_schiedsrichter_ergeben_genau_einen_druckauftrag() {
+        let (mut engine, tablet) = druck_setup();
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+
+        let auftraege = engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet);
+        assert_eq!(auftraege, vec![(10, "5".to_string())]);
+        // Der zweite Lauf sieht dasselbe Feld — und schweigt.
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .is_empty());
+    }
+
+    /// **Der Fall, an dem eine Momentaufnahme scheitern würde:** Der
+    /// Schiedsrichter kommt erst nach der Feldvergabe dazu. Geprüft wird
+    /// ein Zustand, deshalb löst der nächste Lauf aus.
+    #[test]
+    fn sr_nach_der_vergabe_loest_den_druck_aus() {
+        // Rotation aus: Der Schiedsrichter kommt von Hand, nicht von selbst.
+        let (mut engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+
+        assert!(
+            engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .is_empty(),
+            "ohne Schiedsrichter kein Blatt"
+        );
+
+        // Die Turnierleitung weist jetzt von Hand zu.
+        tablet
+            .officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
+
+        assert_eq!(
+            engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet),
+            vec![(10, "5".to_string())],
+            "sobald der Schiedsrichter steht, geht das Blatt raus"
+        );
+    }
+
+    /// Ohne Schiedsrichter passiert nie etwas — auch nach beliebig vielen
+    /// Läufen nicht.
+    #[test]
+    fn ohne_sr_wird_nicht_gedruckt() {
+        let (mut engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        for _ in 0..5 {
+            assert!(engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .is_empty());
+        }
+    }
+
+    /// Ein Aufschlagrichter allein genügt nicht: Der Zettel gehört dem
+    /// Schiedsrichter, der ihn führt.
+    #[test]
+    fn ar_allein_druckt_nicht() {
+        let (mut engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        tablet
+            .officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Ar, 2);
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .is_empty());
+    }
+
+    /// Ein Feldwechsel erzeugt kein zweites Blatt — es gibt höchstens
+    /// einen Zettel je Spiel.
+    #[test]
+    fn feldwechsel_druckt_kein_zweites_blatt() {
+        let (mut engine, tablet) = druck_setup();
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        assert_eq!(
+            engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .len(),
+            1
+        );
+
+        // Dasselbe Spiel steht jetzt auf Feld 7.
+        let umgesetzt = snap_officials(vec![oncourt_named(10, 7, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(umgesetzt.clone());
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &umgesetzt, &tablet)
+            .is_empty());
+    }
+
+    /// Ausgeschaltet heißt ausgeschaltet — und ein Ansage-Slave druckt
+    /// nie, auch wenn der Schalter an ist.
+    #[test]
+    fn ausgeschaltet_und_slave_drucken_nie() {
+        let (mut engine, tablet) = druck_setup();
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(false), &snap, &tablet)
+            .is_empty());
+
+        let mut slave = cfg_druck(true);
+        slave.slave_mode = true;
+        assert!(engine
+            .beanspruche_druckauftraege(&slave, &snap, &tablet)
+            .is_empty());
+
+        // Und nichts davon hat einen Vermerk hinterlassen: Sobald der
+        // Schalter angeht, ist das Blatt fällig.
+        assert_eq!(
+            engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .len(),
+            1
+        );
+    }
+
+    /// Ein Spiel, das noch nicht auf dem Feld steht, bekommt nichts —
+    /// Auslöser ist die Feldvergabe, nicht der Aufruf.
+    #[test]
+    fn ohne_feld_kein_autodruck() {
+        let (mut engine, tablet) = druck_setup();
+        // `ready_named` ist Scheduled ohne Feld.
+        let snap = snap_officials(vec![ready_named(10, None, "A", "B")], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .is_empty());
+    }
+
+    /// Nach einem App-Neustart mitten im Turnier darf für die laufenden
+    /// Spiele **nichts** nachgedruckt werden — sonst kämen bei zwanzig
+    /// Feldern zwanzig Blatt.
+    #[test]
+    fn neustart_druckt_nicht_nach() {
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("gedruckt.json");
+        let matches: Vec<BtpMatch> = (1..=20).map(|i| oncourt_named(i, i, "A", "B")).collect();
+        let ids: Vec<i64> = (1..=20).collect();
+        let snap = snap_officials(matches, &ids);
+
+        {
+            let (mut engine, tablet) = druck_setup();
+            tablet.set_print_log_path(pfad.clone());
+            tablet.set_snapshot(snap.clone());
+            engine.track_officials(&snap, &tablet);
+            assert_eq!(
+                engine
+                    .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                    .len(),
+                20
+            );
+        }
+
+        // Neustart: frischer Zustand, dieselbe Datei, dasselbe Turnier.
+        let (mut engine, tablet) = druck_setup();
+        tablet.set_print_log_path(pfad);
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        assert!(
+            engine
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .is_empty(),
+            "nach dem Neustart darf kein einziges Blatt nachkommen"
+        );
     }
 
     #[test]
@@ -3992,11 +4865,59 @@ mod tests {
         let (mut engine, tablet) = officials_setup(true, false);
         let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
         tablet.set_snapshot(snap.clone());
-
         engine.track_officials(&snap, &tablet);
         let store = tablet.officials_store();
         assert_eq!(store.assignment(10).sr, Some(1));
         assert_eq!(store.assignment(10).ar, None, "AR-Rotation ist aus");
+    }
+
+    #[test]
+    fn track_officials_laesst_beim_einschalten_laufende_spiele_in_ruhe() {
+        // Feldtest Köpi-Cup 22.08.2026: Wird die Rotation mitten im Turnier
+        // eingeschaltet, standen sofort an ALLEN laufenden Spielen
+        // Schiedsrichter. Die Rotation gehört zum Aufruf — der erste
+        // beobachtete Stand ist Ausgangslage, kein Belegungswechsel.
+        let (mut engine, tablet) = officials_setup(true, true);
+        let store = tablet.officials_store();
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+
+        // Ohne Schiedsrichter-Betrieb läuft das Spiel an — dann schaltet die
+        // Turnierleitung mitten im Turnier ein.
+        store.set_enabled(false);
+        engine.track_officials(&snap, &tablet);
+        store.set_enabled(true);
+
+        engine.track_officials(&snap, &tablet);
+        assert_eq!(
+            store.assignment(10).sr,
+            None,
+            "ein bereits laufendes Spiel bekommt beim Einschalten keinen SR"
+        );
+        assert_eq!(store.assignment(10).ar, None);
+
+        // Und es bleibt auch in den Folgezyklen unangetastet.
+        engine.track_officials(&snap, &tablet);
+        assert_eq!(store.assignment(10).sr, None);
+    }
+
+    #[test]
+    fn track_officials_bestueckt_nach_einem_neustart_nicht_nach() {
+        // Derselbe Grund wie beim Einschalten: Nach „Übertragung stoppen /
+        // starten" (jedes Speichern der Einstellungen!) und nach einem
+        // App-Neustart ist der Vorher-Stand leer — ohne diese Regel sähe
+        // jedes belegte Feld wie frisch belegt aus.
+        let (_engine, tablet) = officials_setup(true, true);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+
+        let mut neu = SyncEngine::new();
+        neu.track_officials(&snap, &tablet);
+        assert_eq!(
+            tablet.officials_store().assignment(10).sr,
+            None,
+            "eine frische Engine trifft laufende Spiele als Ausgangslage an"
+        );
     }
 
     #[test]

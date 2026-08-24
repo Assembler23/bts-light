@@ -100,7 +100,9 @@ pub struct MatchBrief {
     #[serde(default)]
     pub scorekeeper: Vec<String>,
     /// `true`, wenn `scorekeeper` aus einer echten Zuweisung stammt (Verwaltung
-    /// aktiv) — nur dann sagt die ferne Halle „Tabletbedienung" mit an (ADR 0007).
+    /// aktiv), sonst ist es der pro-Feld-Hinweis. Seit ADR 0040 entscheidet
+    /// über die **Ansage** der Schalter `announce.announce_scorekeeper`, nicht
+    /// mehr die Herkunft des Namens; dieses Feld bleibt für die Anzeige.
     #[serde(rename = "scorekeeperAssigned", default)]
     pub scorekeeper_assigned: bool,
     /// Turnierweite Anzeige-Schalter: ob das Tablet Vereinsname bzw. -logo
@@ -1287,10 +1289,41 @@ pub enum ServerMsg {
         #[serde(default)]
         owner_device: String,
     },
+    /// Aufforderung an das Tablet, seine Seite **sofort** neu zu laden
+    /// (Spec `tablet-version-abgleich`). Kommt aus der Turnierleitung, wenn
+    /// nach einem Update alle Geräte auf denselben Stand sollen, ohne dass
+    /// jemand durch die Halle läuft.
+    ///
+    /// Anders als der stille Abgleich über [`Self::Pong`] fragt dieser Weg
+    /// **nicht**, ob gerade ein Spiel läuft: Es ist ein ausdrücklicher
+    /// Befehl. Der Spielstand überlebt das Neuladen (localStorage + Server),
+    /// verloren geht nur der Augenblick.
+    ///
+    /// `marke` füllt **der jeweilige Server** mit seiner eigenen Seite —
+    /// im LAN der Turnier-PC, in der Cloud der Relay. Beide betten
+    /// verschiedene Stände von `tablet.html` ein; die fremde Marke wäre
+    /// die falsche.
+    #[serde(rename = "reload")]
+    Reload {
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        marke: String,
+    },
     /// Antwort auf [`TabletMsg::Ping`] – bestätigt dem Tablet die lebende
     /// Verbindung.
     #[serde(rename = "pong")]
-    Pong,
+    Pong {
+        /// Fingerabdruck der Tablet-Seite, die dieser Server **jetzt**
+        /// ausliefert ([`seiten_marke`], Spec `tablet-version-abgleich`).
+        /// Die Seite kennt ihren eigenen (beim Ausliefern eingebettet) und
+        /// erkennt daran, dass sie veraltet ist.
+        ///
+        /// Reist im Lebenszeichen, weil das ohnehin regelmäßig kommt — kein
+        /// eigener Takt, kein zusätzlicher Abruf. `#[serde(default)]`: Ein
+        /// älterer Server schickt ihn nicht, dann bleibt es beim bisherigen
+        /// Verhalten (kein Abgleich, kein Hinweis).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        marke: String,
+    },
 }
 
 /// Endergebnis-Body, den das Tablet per `POST …/result` schickt.
@@ -1326,12 +1359,57 @@ pub struct ResultBody {
     pub cascade_walkover: bool,
 }
 
+/// Serde-Hilfe: `false` ist der Normalfall und muss nicht über die Leitung
+/// (siehe [`ResultResponse::permanent`] und [`HostFrame::ResultAck`]).
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// Fingerabdruck einer ausgelieferten Seite (Spec `tablet-version-abgleich`).
+///
+/// **Warum nicht die Versionsnummer:** Die Seite steckt in zwei verschiedenen
+/// Binärdateien — im Turnier-PC und im Relay —, und die tragen verschiedene
+/// Versionen (`bts-light` vs. `bts-relay`). Ein Vergleich von Versionsnummern
+/// meldete im Cloud-Betrieb dauernd „veraltet", obwohl die Seite dieselbe ist.
+///
+/// Der Fingerabdruck beantwortet direkt die Frage, um die es geht: **Ist die
+/// Seite, die dieses Gerät geladen hat, noch die, die der Server jetzt
+/// ausliefert?** Er ändert sich genau dann, wenn sich die Seite ändert.
+///
+/// Kurz gehalten (16 Hex-Zeichen): Er reist in jedem Lebenszeichen mit.
+pub fn seiten_marke(inhalt: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    inhalt.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 /// Antwort auf eine Ergebnis-Übermittlung.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultResponse {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub error: Option<String>,
+    /// Ist die Ablehnung **dauerhaft**? Dann wird derselbe Payload auch beim
+    /// hundertsten Versuch abgelehnt, und das Tablet soll aufhören zu
+    /// wiederholen und stattdessen den Grund zeigen.
+    ///
+    /// Die Trennlinie ist bewusst hart und liegt nicht beim Gefühl, sondern
+    /// bei der Frage: **Hängt die Ablehnung allein am gesendeten Payload?**
+    ///
+    /// - Ja (Satzliste unstimmig, Satz passt nicht zur Zählweise) ⇒
+    ///   `permanent`. Wiederholen kann das Ergebnis nie retten.
+    /// - Nein (kein Match auf dem Feld, Feld inzwischen anders belegt) ⇒
+    ///   **nicht** dauerhaft. Diese Gründe hängen am Serverzustand, und der
+    ///   ändert sich mit dem nächsten BTP-Poll — ein noch nicht geladener
+    ///   Snapshot darf kein Ergebnis wegwerfen.
+    ///
+    /// `#[serde(default)]` = `false`: Ältere Hosts kennen das Feld nicht,
+    /// deren Ablehnungen gelten wie bisher als wiederholbar. Und weil `false`
+    /// der Normalfall ist, bleibt es auch beim Senden weg — die Erfolgs-
+    /// antwort ist damit Byte für Byte dieselbe wie vorher.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub permanent: bool,
 }
 
 impl ResultResponse {
@@ -1340,14 +1418,28 @@ impl ResultResponse {
         Self {
             ok: true,
             error: None,
+            permanent: false,
         }
     }
 
-    /// Fehlerantwort mit Meldung.
+    /// Fehlerantwort mit Meldung — **wiederholbar**: Der Grund liegt am
+    /// Zustand des Turnier-PCs, nicht am Ergebnis selbst.
     pub fn err(message: impl Into<String>) -> Self {
         Self {
             ok: false,
             error: Some(message.into()),
+            permanent: false,
+        }
+    }
+
+    /// Fehlerantwort für eine **dauerhafte** Ablehnung: Genau dieser Payload
+    /// wird nie angenommen. Das Tablet stellt das Wiederholen ein und zeigt
+    /// die Meldung.
+    pub fn dauerhaft(message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            error: Some(message.into()),
+            permanent: true,
         }
     }
 }
@@ -1742,6 +1834,50 @@ pub enum TlAction {
     /// eigene, destruktive Aktion und nie Nebeneffekt eines Set. Hand-,
     /// Regel- und Aufruf-Hallen bleiben unberührt.
     ClearAutoHalls,
+    /// Alle Zähltablets ihre Seite neu laden lassen (Spec
+    /// `tablet-version-abgleich`).
+    ///
+    /// Der stille Abgleich holt ein Tablet zwischen zwei Spielen von selbst
+    /// auf den neuen Stand. Dieser Befehl ist für den Fall, dass die
+    /// Turnierleitung **jetzt** alle gleichziehen lassen will — er wirkt
+    /// deshalb auch auf Tablets mit laufendem Spiel.
+    ///
+    /// Erreicht nur Geräte, deren geladene Seite den Befehl schon kennt.
+    /// Ein Gerät auf einem älteren Stand verwirft ihn still — dort hilft
+    /// nur der Abgleich (oder eine Hand am Bildschirm).
+    ReloadTablets,
+    /// Wunschfeld eines Spiels setzen oder aufheben (Spec `tl-wunschfeld`).
+    ///
+    /// Die automatische Vergabe legt dieses Spiel dann **nur** auf dieses
+    /// Feld und hält es dafür frei, sobald das Spiel spielbereit ist. `None`
+    /// hebt den Wunsch auf.
+    ///
+    /// Wie [`Self::LockCourt`] trägt das Feld den **Zielzustand**, nicht
+    /// „umschalten": Bei zwei Turnierleitungs-Geräten wäre ein Umschalten
+    /// nicht eindeutig.
+    SetWishCourt {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        /// Gewünschtes Feld; `None` = Wunsch aufheben.
+        #[serde(rename = "courtId", default, skip_serializing_if = "Option::is_none")]
+        court_id: Option<i64>,
+    },
+    /// Ein Feld sperren oder freigeben (Spec `tl-web-felder-sperren`).
+    ///
+    /// Ein gesperrtes Feld bekommt von der automatischen Vergabe kein Spiel
+    /// mehr; ein bereits laufendes bleibt unangetastet und zählt zu Ende.
+    /// BTP kennt die Sperre nicht (R2) — sie ist bts-light-eigen und wird
+    /// nie geschrieben.
+    ///
+    /// `locked` trägt den **Zielzustand**, nicht „umschalten": Bei zwei
+    /// Turnierleitungs-Geräten wäre ein Umschalten nicht eindeutig — wer
+    /// zuletzt tippt, bekäme womöglich das Gegenteil dessen, was auf seinem
+    /// Schirm stand.
+    LockCourt {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        locked: bool,
+    },
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
@@ -2120,6 +2256,14 @@ pub enum HostFrame {
         #[serde(default)]
         hall: String,
     },
+    /// „Alle Tablets dieses Namespace laden ihre Seite neu" (Spec
+    /// `tablet-version-abgleich`). Der Relay setzt das in ein
+    /// [`ServerMsg::Reload`] an **jede** seiner Tablet-Verbindungen um.
+    ///
+    /// Ohne Nutzlast: Die Marke setzt der Relay aus **seiner** eingebetteten
+    /// Seite. Der Host kennt seine eigene, und die ist im Cloud-Betrieb nicht
+    /// die, die das Tablet geladen hat.
+    ReloadTablets,
     /// Satzstand-Spiegel des Hosts (autoritativ). Im LAN(+Cloud)-Betrieb
     /// zählen die Tablets am Relay vorbei direkt gegen den Host — ohne diesen
     /// Spiegel bleiben Cloud-Monitor und Cloud-Übersicht auf 0:0 stehen
@@ -2168,6 +2312,14 @@ pub enum HostFrame {
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
+        /// Ist die Ablehnung dauerhaft? Muss über den Cloud-Weg mitreisen —
+        /// sonst wüsste ein Tablet am Relay nie, dass Wiederholen zwecklos
+        /// ist, und der Fix wirkte ausgerechnet im Cloud-Betrieb nicht.
+        /// Siehe [`ResultResponse::permanent`]. `#[serde(default)]` hält
+        /// ältere Hosts lesbar (deren Absagen gelten als wiederholbar); der
+        /// Normalfall `false` bleibt von der Leitung.
+        #[serde(default, skip_serializing_if = "is_false")]
+        permanent: bool,
     },
     /// Vollständige Feld-Liste des Turniers – Grundlage des Feldwechsels im
     /// PIN-Menü des Tablets im Cloud-Modus. Periodisch vom Host gepusht.
@@ -2661,6 +2813,16 @@ pub enum RelayFrame {
         req_id: u64,
         #[serde(rename = "matchIds")]
         match_ids: Vec<i64>,
+        /// **Vorabzettel**: ein Blatt auch für Spiele, zu denen es noch
+        /// keine Aufzeichnung gibt — Kopf gefüllt, Raster leer, von Hand
+        /// zu führen (Spec `schiedsrichterzettel-autodruck`).
+        ///
+        /// `#[serde(default)]` hält die Erweiterung additiv: Ein Host
+        /// älterer Version liest den Frame weiter und antwortet mit dem
+        /// gewohnten Verhalten — ohne Aufzeichnung also mit `found:
+        /// false`.
+        #[serde(default)]
+        vorab: bool,
     },
 }
 
@@ -2962,6 +3124,7 @@ mod tests {
             req_id: 42,
             ok: false,
             error: Some("BTP abgelehnt".into()),
+            permanent: true,
         });
         roundtrip(&RelayFrame::TabletConnected {
             court_id: 3,
@@ -3748,6 +3911,37 @@ mod tests {
     }
 
     #[test]
+    fn nur_die_dauerhafte_ablehnung_traegt_permanent() {
+        // Der Normalfall bleibt von der Leitung: eine wiederholbare Absage
+        // sieht auf der Wire aus wie vor v0.9.254, und ein altes Tablet liest
+        // sie unverändert.
+        let json = serde_json::to_string(&ResultResponse::err("später nochmal")).unwrap();
+        assert!(
+            !json.contains("permanent"),
+            "wiederholbare Absage bleibt kompakt: {json}"
+        );
+        // Der Ausnahmefall dagegen muss ankommen — sonst wiederholt das
+        // Tablet ein Ergebnis, das nie angenommen wird.
+        let json =
+            serde_json::to_string(&ResultResponse::dauerhaft("Satz 13:8 passt nicht")).unwrap();
+        assert!(json.contains(r#""permanent":true"#), "{json}");
+        roundtrip(&ResultResponse::dauerhaft("Satz 13:8 passt nicht"));
+    }
+
+    #[test]
+    fn das_urteil_ueberlebt_den_weg_ueber_den_relay() {
+        // Cloud-Weg: Der Host urteilt (R5), der Relay trägt es weiter. Ginge
+        // `permanent` im ResultAck verloren, wirkte der Fix ausgerechnet dort
+        // nicht, wo die meisten Tablets hängen.
+        roundtrip(&HostFrame::ResultAck {
+            req_id: 7,
+            ok: false,
+            error: Some("Satz 13:8 ist nicht regulär zu Ende gespielt.".into()),
+            permanent: true,
+        });
+    }
+
+    #[test]
     fn path_encode_escapes_spaces_and_keeps_safe_chars() {
         assert_eq!(path_encode("Feld 1"), "Feld%201");
         assert_eq!(path_encode("Court-3"), "Court-3");
@@ -3846,6 +4040,23 @@ mod tests {
                 window: 18,
             },
             TlAction::ClearAutoHalls,
+            TlAction::LockCourt {
+                court_id: 5,
+                locked: true,
+            },
+            TlAction::ReloadTablets,
+            TlAction::SetWishCourt {
+                match_id: 4711,
+                court_id: Some(3),
+            },
+            TlAction::SetWishCourt {
+                match_id: 4711,
+                court_id: None,
+            },
+            TlAction::LockCourt {
+                court_id: 5,
+                locked: false,
+            },
             TlAction::AnnounceCourtCall {
                 court_id: 5,
                 match_id: 4711,
@@ -3974,6 +4185,77 @@ mod tests {
             json,
             r#"{"action":"official_assign","courtId":5,"matchId":4711,"officialId":3,"role":"sr"}"#
         );
+    }
+
+    #[test]
+    fn tl_action_set_wish_court_wire_form() {
+        // Aufheben lässt `courtId` weg — die Seite schickt dann schlicht
+        // nichts, statt einer 0, die als Feld 0 durchgehen könnte.
+        let json = serde_json::to_string(&TlAction::SetWishCourt {
+            match_id: 4711,
+            court_id: None,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"action":"set_wish_court","matchId":4711}"#);
+        let json = serde_json::to_string(&TlAction::SetWishCourt {
+            match_id: 4711,
+            court_id: Some(3),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"action":"set_wish_court","matchId":4711,"courtId":3}"#
+        );
+    }
+
+    /// Die Seiten vergleichen **wörtliche** Zeichenketten: `tablet.html`
+    /// prüft `msg.type === 'reload'`, `tl.html` schickt
+    /// `action: "reload_tablets"`. Ein Serde-Roundtrip allein merkt eine
+    /// umbenannte Variante nicht — er ist mit sich selbst einig, während das
+    /// Tablet die Nachricht still verwirft. Deshalb hier auf den Text.
+    #[test]
+    fn die_namen_des_fernbefehls_stehen_fest() {
+        let json = serde_json::to_string(&ServerMsg::Reload {
+            marke: "abc123".into(),
+        })
+        .unwrap();
+        assert!(json.contains(r#""type":"reload""#), "war {json}");
+        assert!(json.contains(r#""marke":"abc123""#), "war {json}");
+
+        // Leere Marke fällt raus (`skip_serializing_if`) — die Seite setzt
+        // dann selbst einen Zeitstempel in die Adresse.
+        let leer = serde_json::to_string(&ServerMsg::Reload {
+            marke: String::new(),
+        })
+        .unwrap();
+        assert_eq!(leer, r#"{"type":"reload"}"#);
+
+        let aktion = serde_json::to_string(&TlAction::ReloadTablets).unwrap();
+        assert_eq!(aktion, r#"{"action":"reload_tablets"}"#);
+
+        // Das Host-Frame trägt bewusst keine Nutzlast: Die Marke setzt der
+        // Relay aus SEINER eingebetteten Seite.
+        let frame = serde_json::to_string(&HostFrame::ReloadTablets).unwrap();
+        let zurueck: HostFrame = serde_json::from_str(&frame).unwrap();
+        assert_eq!(zurueck, HostFrame::ReloadTablets);
+    }
+
+    #[test]
+    fn tl_action_lock_court_wire_form() {
+        // Die Oberfläche schickt genau diese Form (Spec
+        // `tl-web-felder-sperren`); ein Tippfehler im Feldnamen wäre am Host
+        // ein stilles Verwerfen, nicht ein Fehler.
+        let json = serde_json::to_string(&TlAction::LockCourt {
+            court_id: 7,
+            locked: true,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"action":"lock_court","courtId":7,"locked":true}"#);
+        // Und zurück — beide Richtungen, beide Zustände.
+        roundtrip(&TlAction::LockCourt {
+            court_id: 7,
+            locked: false,
+        });
     }
 
     #[test]
@@ -4611,6 +4893,12 @@ mod tests {
         roundtrip(&RelayFrame::ScoresheetRequest {
             req_id: 7,
             match_ids: vec![41, 42, 43],
+            vorab: false,
+        });
+        roundtrip(&RelayFrame::ScoresheetRequest {
+            req_id: 8,
+            match_ids: vec![41],
+            vorab: true,
         });
         roundtrip(&HostFrame::ScoresheetData {
             req_id: 7,
@@ -4633,6 +4921,28 @@ mod tests {
 
         let ohne_kind: Result<MatchEvent, _> = serde_json::from_str(r#"{"id":"ab"}"#);
         assert!(ohne_kind.is_err());
+    }
+
+    /// Ein Zettel-Abruf **ohne** das neue `vorab` bleibt lesbar und
+    /// bedeutet „wie bisher" — sonst könnte ein Relay älterer Version
+    /// keinen Zettel mehr anfragen.
+    #[test]
+    fn zettel_abruf_ohne_vorab_bleibt_lesbar() {
+        let alt: RelayFrame =
+            serde_json::from_str(r#"{"type":"scoresheet_request","reqId":3,"matchIds":[7]}"#)
+                .unwrap();
+        match alt {
+            RelayFrame::ScoresheetRequest {
+                req_id,
+                match_ids,
+                vorab,
+            } => {
+                assert_eq!(req_id, 3);
+                assert_eq!(match_ids, vec![7]);
+                assert!(!vorab, "ohne Angabe gilt das gewohnte Verhalten");
+            }
+            other => panic!("falscher Frame: {other:?}"),
+        }
     }
 
     /// Eine unbekannte Art ist ein Fehler, kein Panic und keine Annahme —

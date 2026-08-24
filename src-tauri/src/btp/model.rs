@@ -366,6 +366,11 @@ pub struct BtpMatch {
     /// beendet erkannt wurde. BTP liefert keinen End-Zeitstempel – dieses
     /// Feld wird von der Sync-Engine gesetzt, nicht vom Parser.
     pub finished_at: Option<u64>,
+    /// Die Pflichtpause (Millisekunden), die beim Spielende galt — zusammen
+    /// mit `finished_at` von der Sync-Engine gesetzt, nie vom Parser. Damit
+    /// wirkt eine später geänderte Pausenzeit nur auf Spiele, die danach
+    /// enden. `None` = unbekannt (Altbestand), dann gilt der aktuelle Wert.
+    pub pause_ms: Option<u64>,
     /// Zeitpunkt (Unix-Millisekunden), zu dem die Turnierleitung das Match
     /// „in Vorbereitung" gerufen hat. Transientes Feld: BTP kennt keinen
     /// Vorbereitungs-Zustand – der Parser schreibt immer `None`, gesetzt
@@ -1179,8 +1184,10 @@ fn parse_matches(
             winner,
             result: MatchResult::from_score_status(child_int(m, "ScoreStatus").unwrap_or(0)),
             status,
-            // BTP liefert keinen End-Zeitstempel; die Sync-Engine setzt das.
+            // BTP liefert keinen End-Zeitstempel; die Sync-Engine setzt das
+            // — und mit ihm die beim Ende geltende Pflichtpause.
             finished_at: None,
+            pause_ms: None,
             // Vorbereitungs-Zustand ist bts-light-eigen; setzt
             // apply_preparation_calls, nicht der Parser.
             preparation_call_ts: None,

@@ -29,14 +29,15 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 
 | Situation | Ansage |
 |---|---|
-| Eröffnung | „Meine Damen und Herren: zu meiner Rechten {rechts}, zu meiner Linken {links}. {Aufschläger} schlägt auf {Rückschläger}. Null beide – bitte spielen." |
+| Eröffnung | „Meine Damen und Herren: zu meiner Rechten {rechts}, **und** zu meiner Linken {links}. {Aufschläger} schlägt auf {Rückschläger}. Null beide – bitte spielen." Die Reihenfolge ist fest: **immer erst rechts**, unabhängig davon, wer aufschlägt. |
 | Punkt | „{Aufschläger}:{Rückschläger}" |
 | Gleichstand | „{n} beide" |
 | Aufschlagwechsel | „Aufschlagwechsel {Stand}" |
-| 11-Pause | „{Stand} – Pause." |
-| Satzende | „Satz. Den {n}. Satz gewinnt {Sieger} mit {Stand}. Bitte die Seiten wechseln." |
-| Satzbeginn | „{N}. Satz. Null beide – bitte spielen." |
-| Spielende | „Spiel. Das Spiel gewinnt {Sieger}, {x} Sätze zu {y}: {Satzstände}." |
+| Nach jeder Pause | „{Stand}, bitte spielen." — die Freigabe gehört dazu; sie gilt bis zum nächsten Ballwechsel. |
+| Punktepause | „{Stand} – Pause." — die **Überschrift** der Pause nennt die Schwelle der jeweiligen Zählweise („Pause bei 11 Punkten", bei 15ern „Pause bei 8 Punkten"). |
+| Satzende | „Satz. Der {n}. Satz wurde gewonnen von {Sieger} mit {Stand}. Bitte die Seiten wechseln." Steht es danach **gleich**, folgt der Zwischenstand: „Einen Satz beide." (bzw. „Zwei Sätze beide.") — bei Führung sagt der Ablaufplan nichts, wir auch nicht. |
+| Satzbeginn | „{N}. Satz. Null beide – bitte spielen." — steht es **Satz gegen Satz** (allgemein: beide eine Partie vor dem Sieg), heißt es „**Entscheidungssatz.**" statt der Nummer. |
+| Spielende | „Spiel. Das Spiel wurde gewonnen von {Sieger} mit {Satzstände}." — Stände aus Siegersicht, **„und" vor dem letzten**. Die Satzbilanz („zwei Sätze zu eins") gehört nicht in die Ansage; die Stände sagen sie ohnehin. |
 
 Badges: **Satzball** / **Matchball**.
 
@@ -47,7 +48,7 @@ Button **„Karte / Verwarnung"** → Spieler wählen → Farbe:
 |---|---|---|
 | 🟨 Gelb | Verwarnung (kein Punkt) | „{Name}, Verwarnung wegen unsportlichen Verhaltens. {Stand}" |
 | 🟥 Rot | **Gegner bekommt +1** (regulärer Punkt) | „{Name}, Fehler wegen unsportlichen Verhaltens. {Stand}" |
-| ⬛ Schwarz | Disqualifikation (Anzeige/Protokoll) | „{Name}, disqualifiziert." |
+| ⬛ Schwarz | Disqualifikation (Anzeige/Protokoll) | „{Name}, disqualifiziert wegen **grober Unsportlichkeit**." — bewusst ein anderer Grund als bei Gelb und Rot. |
 
 Vergebene Karten erscheinen als **Chips** in der Leiste; je `matchId`
 gespeichert, bei neuem Match zurückgesetzt.
@@ -83,6 +84,15 @@ Alle Texte stehen gebündelt in den `ump*`-Funktionen in `tablet.html`
 ## Stand / offen
 - v1: Ansagen + Karten (Deutsch, lokal). Logik via Node-Harness verifiziert.
 - **Spielzettel-Export gibt es seit 08/2026** — siehe
-  [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md).
+  [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md)
+  und [features/schiedsrichterzettel-autodruck.md](features/schiedsrichterzettel-autodruck.md).
+- **Der Zettel folgt seit v0.9.249 dem DBV-Bogen** (ADR 0043). Damit ist auch
+  der Vermerk „Internes Turnier-Archiv — kein amtlicher Beleg" **zurückgenommen**:
+  Er passt nicht auf ein Blatt, das während des Spiels geführt wird. Der Satz
+  oben bleibt davon unberührt — offizielle Turniere laufen weiter über das
+  Original-BTS.
+- Die Karten erscheinen auf dem Blatt in der gewohnten Konvention: **W**
+  Warnung (gelb), **F** Fehler (rot), **D** Disqualifikation; dazu **R** für
+  „Oberschiedsrichter gerufen".
 - Bewusst **nicht** gebaut: Übertragung an badhub, weitere Sprachen — bei
   Bedarf später.

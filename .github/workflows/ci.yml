@@ -137,11 +137,38 @@ jobs:
       - name: Teil-Patch der Übersicht (JS)
         run: node scripts/test-court-patch.mjs
 
+      # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
+      # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
+      # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter
+      # unbezeugt (Feldtest 22.08.2026).
+      - name: Stillstands-Waechter der Anzeigen (JS)
+        run: node scripts/test-standstill.mjs
+
+      # Wann wiederholt das Tablet ein Ergebnis, und wann hoert es auf?
+      # Ein Fehler hier kostet im besten Fall einen ueberfluessigen Request,
+      # im schlimmsten ein Ergebnis (Feldtest 22.08.2026).
+      - name: Ergebnis-Retry-Regel (JS)
+        run: node scripts/test-result-retry.mjs
+
+      # Merkt eine geladene Tablet-Seite, dass sie veraltet ist — und laedt
+      # sie im richtigen Moment neu? Der stille Abgleich darf mitten im Spiel
+      # NICHT springen, der Fernbefehl der Turnierleitung muss es. Und der
+      # Knopf darf an einem aelteren Turnier-PC gar nicht erscheinen, sonst
+      # gilt ein still verworfener Befehl als erledigt (Feldtest 22.08.2026).
+      - name: Tablet-Versionsabgleich + Fernbefehl (JS)
+        run: node scripts/test-tablet-version.mjs
+
       # Wann gilt der Push-Kanal einer Anzeige als gesund? Laut Spec das
       # höchste Risiko des Vorhabens: Eine falsche Regel hier friert alle
       # Anzeigen einer Halle ein.
       - name: Gesundheit des Push-Kanals (JS)
         run: node scripts/test-push-health.mjs
+
+      # Server-Uhr der Anzeigen (Etappe ETag, 1c): Der Offset kommt aus dem
+      # 200-Abruf UND dem WS-Herzschlag, überlebt eine 304-Serie und bleibt
+      # monoton plausibel — sonst stünde der Pausen-Countdown still.
+      - name: Server-Uhr der Anzeigen (JS)
+        run: node scripts/test-monitor-clock.mjs
 
       # Regel hinter dem "Release faellig?"-Check: zwei Grenzen (Uhr UND Menge),
       # weil je eine allein den echten Vorfall verschluckt haette.

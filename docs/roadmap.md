@@ -305,8 +305,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   der automatischen Feldansage ganz, die Zähltafelbedienung wurde nur bei
   echter Zuweisung genannt. Beides ist behoben und über zwei Häkchen
   abschaltbar. ADR [0040](adr/0040-ansage-besetzung-einstellbar.md).
-  **Offen:** Feldtest; am Cloud-Ansage-Slave fehlen SR/AR weiterhin
-  strukturell (`CloudAnnounceCourt` führt keine Listen).
+  Der Cloud-Ansage-Slave zog in v0.9.248 nach (SR/AR fielen dort nur bei der
+  Umwandlung heraus, übertragen wurden sie längst).
+  **Offen:** Feldtest — insbesondere in einem Zwei-Hallen-Turnier über Cloud.
 
 - **Automatische Hallen-Vorverteilung** — die vordersten x Spiele bekommen
   automatisch eine Halle im Verhältnis der entsperrten Felder (gemischt,
@@ -387,6 +388,29 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   5. **Sichtprüfung der Geräteverwaltung** im laufenden Fenster.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
+
+- **Schiedsrichterzettel vorab und automatisch drucken — VOLLSTÄNDIG
+  umgesetzt** (E1–E6, v0.9.249). Zwei Wege aufs Papier: ein **Leerzettel** für
+  Spiele der Warteliste (Kopf vorgedruckt, Raster von Hand zu führen; Knöpfe in
+  TL-Web und in der Desktop-Warteliste) und ein **stiller Autodruck** bei der
+  Feldvergabe an einen einstellbaren Drucker — nur für Spiele, denen ein
+  Schiedsrichter zugeordnet ist, höchstens ein Blatt je Spiel, auch über
+  App-Neustarts hinweg. Dazu der **Umbau des Blatts auf den DBV-Bogen**
+  (sechs Blöcke à 33 Spalten, A/R-Spalte, Satzergebniskasten; Turnierlogo statt
+  Verbandsmarke; Marker W/F/R/D; der Vermerk „kein amtlicher Beleg" entfällt).
+  **E1** Blatt als Elementliste, **E2** Vorabzettel-Modus (Wire + Routen),
+  **E3** Knöpfe in Desktop und TL-Web, **E4** stiller GDI-Druck +
+  Druckerauswahl, **E5** Autodruck mit persistentem Druck-Gedächtnis,
+  **E6** Abschluss.
+  Spec: [features/schiedsrichterzettel-autodruck.md](features/schiedsrichterzettel-autodruck.md) ·
+  ADR [0042](adr/0042-stiller-druck-ueber-elementliste.md) ·
+  [0043](adr/0043-zettelblatt-nach-dbv-vorbild.md).
+
+  **Offen und nur am Gerät prüfbar:** ein echter Papierdruck auf einem
+  Laserdrucker (bisher gegen „Microsoft Print to PDF" nachgewiesen: A4 quer,
+  Ränder stimmen) und der Turnier-Feldtest der Automatik — insbesondere, ob
+  die Zettel früh genug am Feld liegen. Relay-Deploy vor dem Tag: E2 erweitert
+  den `scoresheet_request`-Frame.
 
 - **Ausgefüllte Schiedsrichterzettel drucken — VOLLSTÄNDIG umgesetzt** (E1–E8,
   v0.9.244). **E1** Wire-Typen neben dem Punktverlauf, **E2** `SheetStore`
@@ -562,15 +586,36 @@ mitgeändert worden:
   ehrlich sagen, dass die alte Konfiguration nicht gelesen werden konnte —
   statt ihm einen harmlos aussehenden Ersteinrichtungs-Assistenten zu
   zeigen.
-- **`locked_courts` geht beim Speichern von Einstellungen verloren.**
-  `set_court_locked` schreibt die Sperrliste host-seitig in die
-  `config.json`; der Einrichtungs-Assistent schickt beim nächsten Speichern
-  seinen beim Öffnen aufgenommenen Stand zurück (`buildConfig`:
-  `locked_courts: initialConfig.locked_courts ?? []`) und setzt sie damit
-  zurück. Ablauf: Feld in der Übersicht sperren → in den Einstellungen
-  irgendetwas speichern → Sperre weg. Für die TL-Geräteliste ist dieser
-  Pfad bereits geschlossen (`keep_host_managed_fields` in `commands.rs`);
-  `locked_courts` gehört auf demselben Weg dazu.
+- ~~**`locked_courts` geht beim Speichern von Einstellungen verloren.**~~
+  **Erledigt in v0.9.258** (Spec `tl-web-felder-sperren`):
+  `keep_host_managed_fields` schützt die Sperrliste jetzt wie die
+  TL-Geräteliste. Der Fehler wog schwerer als gedacht — mit der Bedienung aus
+  der Halle wäre der Ablauf gewesen: kaputtes Feld sperren, jemand speichert
+  am PC eine Einstellung, Sperre still weg, Automatik legt ein Spiel darauf.
+  Ein Test hält den Pfad offen (`keep_host_managed_fields_preserves_the_locked_courts`).
+
+## Wünsche vom 23.08.2026
+
+- **Felder sperren im TL-Web** — Spec freigegeben und umgesetzt (v0.9.258):
+  [docs/features/tl-web-felder-sperren.md](features/tl-web-felder-sperren.md),
+  [ADR 0044](adr/0044-sperrliste-turniergebunden.md). Schloss nebenbei den
+  `locked_courts`-Datenverlust oben.
+- **Warnung bei scheinbar fertigem Spiel** — Spec freigegeben und umgesetzt
+  (v0.9.259): [docs/features/tl-warnung-fertiges-spiel.md](features/tl-warnung-fertiges-spiel.md),
+  [ADR 0045](adr/0045-fertig-warnung-serverseitig-gestempelt.md).
+- **Feldauswahl für die Automatikvergabe** — Spec freigegeben und umgesetzt
+  (v0.9.262): [docs/features/tl-wunschfeld.md](features/tl-wunschfeld.md),
+  [ADR 0046](adr/0046-wunschfeld-reserviert-ab-spielbereitschaft.md).
+  Reserviert wird ab Spielbereitschaft — ein Endspiel, dessen Spieler noch
+  im Halbfinale stehen, hält das Hauptfeld nicht leer.
+- **Tablet merkt eine veraltete Fassung** — Spec umgesetzt (v0.9.266 stiller
+  Abgleich, v0.9.268 Fernbefehl „⟳ Tablets"):
+  [docs/features/tablet-version-abgleich.md](features/tablet-version-abgleich.md).
+  Kein ADR nötig. Wichtig für die Deutung des Feldtests: Der berichtete
+  „Hänger" bis zum Leeren der Browserdaten war **nicht** der HTTP-Cache
+  (`no-store` steht seit dem ersten Commit, die Seiten sind selbstenthaltend),
+  sondern das hängende `pendingResult` im `localStorage` — behoben mit
+  v0.9.254. Offen: Feldtest beider Wege.
 
 ## Wünsche vom 11.08.2026
 
