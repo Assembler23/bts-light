@@ -12,7 +12,22 @@
    nicht sichtbar** — die Turnierleitungs-Oberfläche zeigt neue Bedienelemente
    nur, wenn der Turnier-PC sie kennt.
 2. **`install_id` notieren.** Sie ist der Schlüssel zu den hochgeladenen
-   Diagnose-Logs; ohne sie findet man hinterher nichts wieder.
+   Diagnose-Logs — auf dem Server liegt je Installation genau eine Datei, nach
+   ihr benannt. Ohne sie findet man hinterher nichts wieder.
+
+   **Wo sie steht:** Setup-Assistent → Abschnitt für die Kopplung ferner
+   Hallen, dort als **„Kopplungs-Code"** (der lange, nicht der achtstellige
+   Telefon-Code), mit Kopieren-Knopf daneben. In der Oberfläche heißt sie
+   nirgends `install_id` — es ist derselbe Wert (R6: Kennung, Relay-Namespace
+   und Log-Zuordnung sind eins). Auf einem **Slave** wird der Abschnitt nicht
+   angezeigt.
+
+   Ohne App: Feld `install_id` in
+   `%APPDATA%\de.badhub.btslight\config.json` — nur lesen, und Änderungen
+   nur bei beendeter App.
+
+   Sie gilt **pro Installation**, nicht pro Turnier: einmal notiert, gilt sie
+   für alle weiteren Turniere auf diesem Rechner.
 3. **Nicht** die `config.json` bei laufender App von Hand ändern — die
    laufende App überschreibt externe Änderungen mit ihrem Speicherstand.
 
