@@ -1292,7 +1292,19 @@ pub enum ServerMsg {
     /// Antwort auf [`TabletMsg::Ping`] – bestätigt dem Tablet die lebende
     /// Verbindung.
     #[serde(rename = "pong")]
-    Pong,
+    Pong {
+        /// Fingerabdruck der Tablet-Seite, die dieser Server **jetzt**
+        /// ausliefert ([`seiten_marke`], Spec `tablet-version-abgleich`).
+        /// Die Seite kennt ihren eigenen (beim Ausliefern eingebettet) und
+        /// erkennt daran, dass sie veraltet ist.
+        ///
+        /// Reist im Lebenszeichen, weil das ohnehin regelmäßig kommt — kein
+        /// eigener Takt, kein zusätzlicher Abruf. `#[serde(default)]`: Ein
+        /// älterer Server schickt ihn nicht, dann bleibt es beim bisherigen
+        /// Verhalten (kein Abgleich, kein Hinweis).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        marke: String,
+    },
 }
 
 /// Endergebnis-Body, den das Tablet per `POST …/result` schickt.
@@ -1332,6 +1344,25 @@ pub struct ResultBody {
 /// (siehe [`ResultResponse::permanent`] und [`HostFrame::ResultAck`]).
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// Fingerabdruck einer ausgelieferten Seite (Spec `tablet-version-abgleich`).
+///
+/// **Warum nicht die Versionsnummer:** Die Seite steckt in zwei verschiedenen
+/// Binärdateien — im Turnier-PC und im Relay —, und die tragen verschiedene
+/// Versionen (`bts-light` vs. `bts-relay`). Ein Vergleich von Versionsnummern
+/// meldete im Cloud-Betrieb dauernd „veraltet", obwohl die Seite dieselbe ist.
+///
+/// Der Fingerabdruck beantwortet direkt die Frage, um die es geht: **Ist die
+/// Seite, die dieses Gerät geladen hat, noch die, die der Server jetzt
+/// ausliefert?** Er ändert sich genau dann, wenn sich die Seite ändert.
+///
+/// Kurz gehalten (16 Hex-Zeichen): Er reist in jedem Lebenszeichen mit.
+pub fn seiten_marke(inhalt: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    inhalt.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 /// Antwort auf eine Ergebnis-Übermittlung.

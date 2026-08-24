@@ -833,7 +833,10 @@ async fn court_page(
         // Der Relay kennt den Host-PIN nicht → leer lassen; tablet.html fällt
         // dann defensiv auf „0000" zurück. Die Feldwechsel-Liste liefert
         // `/{ns}/courts` (vom Host gepusht).
-        .replace("__TABLET_PIN__", "");
+        .replace("__TABLET_PIN__", "")
+        // Wie beim Host: über das unersetzte `TABLET_HTML` — beide Wege
+        // liefern dieselbe Seite und müssen dieselbe Marke nennen.
+        .replace("__SEITEN_MARKE__", &relay_proto::seiten_marke(TABLET_HTML));
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
@@ -2304,7 +2307,11 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                             Ok(TabletMsg::Ping) => {
                                 // Lebenszeichen des Tablets über die Cloud →
                                 // sofort Pong zurück, ohne bts-light zu behelligen.
-                                let _ = tx.send(text(&ServerMsg::Pong));
+                                // Der Relay nennt die Version, mit der ER ausgeliefert wurde —
+                            // die Seite stammt aus derselben Binärdatei.
+                            let _ = tx.send(text(&ServerMsg::Pong {
+                                marke: relay_proto::seiten_marke(TABLET_HTML),
+                            }));
                             }
                             // Zettel-Ereignisse (ADR 0037): 1:1 an den Host,
                             // wie der Punktverlauf — Briefträger, nur Halter-,

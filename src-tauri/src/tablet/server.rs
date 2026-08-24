@@ -761,7 +761,11 @@ async fn court_page(
     let body = TABLET_HTML
         .replace("__COURT_ID__", &court_id.to_string())
         .replace("__COURT_LABEL__", &html_escape(&label))
-        .replace("__TABLET_PIN__", &pin);
+        .replace("__TABLET_PIN__", &pin)
+        // Fingerabdruck der Seite, wie sie in dieser Binärdatei steckt —
+        // bewusst über das UNERSETZTE `TABLET_HTML`, sonst wäre er je Feld
+        // verschieden und der Abgleich sinnlos (Spec `tablet-version-abgleich`).
+        .replace("__SEITEN_MARKE__", &relay_proto::seiten_marke(TABLET_HTML));
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
@@ -3598,7 +3602,16 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             Ok(TabletMsg::Ping) => {
                                 // Lebenszeichen → sofort Pong zurück, damit das
                                 // Tablet eine tote Verbindung erkennen kann.
-                                send_msg(&mut socket, &ServerMsg::Pong).await;
+                                send_msg(
+                                    &mut socket,
+                                    // Die eigene Version reist im Lebenszeichen mit
+                                    // (Spec tablet-version-abgleich) — daran erkennt
+                                    // die Seite, dass sie veraltet ist.
+                                    &ServerMsg::Pong {
+                                        marke: relay_proto::seiten_marke(TABLET_HTML),
+                                    },
+                                )
+                                .await;
                             }
                             // Punktverlauf (ADR 0014): nur vom aktiven Halter
                             // und nur fürs aktuelle Court-Match (HM-03-Filter,

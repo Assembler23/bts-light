@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.266
+
+- **Neu: Das Tablet merkt, wenn es veraltet ist.** Ein Turnier-Tablet läuft
+  tagelang mit derselben geladenen Seite; ein Update erreicht es nur über ein
+  Neuladen, und das passiert von selbst nicht. Jetzt vergleicht die Seite bei
+  jedem Lebenszeichen, ob der Turnier-PC noch dieselbe Fassung ausliefert.
+
+  **Steht kein Spiel auf dem Feld, lädt sie sich sofort selbst neu** — das
+  trifft die meisten Geräte zwischen zwei Spielen, und niemand muss etwas tun.
+  Läuft gerade ein Spiel, erscheint oben nur ein Hinweis mit dem Knopf „Jetzt
+  laden": Mitten im Zählen darf der Bildschirm nicht springen.
+
+  Neu geladen wird mit einer eigenen Adresse, die der Browser nicht aus seinem
+  Zwischenspeicher bedienen kann.
+
 ## v0.9.265
 
 - **Satz- und Spielende werden jetzt im offiziellen Wortlaut angesagt.** Statt
