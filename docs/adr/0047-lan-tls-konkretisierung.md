@@ -77,7 +77,7 @@ Zertifikat nicht als „noch nicht gültig" verwerfen. Die SAN-Liste umfasst
 Erzeugungszeitpunkt. Das Zertifikat wird **einmal** erzeugt und persistiert; ein
 IP-Wechsel löst **keine** Neuerzeugung aus.
 
-**3. Port-Koexistenz: 8443 zusätzlich, 8088 bleibt.**
+**3. Port-Koexistenz: 443 zusätzlich, 8088 bleibt.**
 
 Kein Zwangs-Rollout auf die Pi-Flotte, kein HTTP→HTTPS-Redirect. Die Pi-Skripte
 bleiben unverändert auf HTTP. Der Anspruch lautet ausdrücklich **nicht**
@@ -164,6 +164,17 @@ hinter IP-Cache und Subnetz-Scan.
 - **Ein Nachziehen der Laufzeit ist später schwer.** Deshalb ist sie eine
   Konstante mit Begründung, kein Konfigurationswert — eine Änderung soll eine
   bewusste Entscheidung mit ADR-Nachtrag sein.
+
+> **Nachtrag 2026-08-25:** Ursprünglich lag der TLS-Port auf **8443**. Er
+> liegt jetzt auf **443**, dem Standard-Port für https — nur so lässt sich die
+> Adresse ohne Portangabe schreiben (`https://192.168.1.50`) und am Telefon
+> diktieren. **8443 bleibt als Ausweichport:** Unter Windows darf zwar jeder
+> Prozess an 443 binden (dort gibt es keine privilegierten Ports), aber
+> `http.sys` kann ihn für IIS oder WinRM reserviert haben. Ist das der Fall,
+> weicht der Server aus und meldet den **tatsächlich** belegten Port an die
+> Oberfläche — sonst zeigten QR-Codes auf einen Port, an dem niemand lauscht.
+> Wer in der `config.json` selbst einen Port einträgt, bekommt **keinen**
+> Rückfall: Eine bewusste Wahl wird nicht übergangen.
 
 ## Ausblick: die Zertifikatswarnung loswerden
 

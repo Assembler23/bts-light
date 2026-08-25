@@ -392,7 +392,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 - **Verschlüsselte LAN-Strecke (https + wss)** — Spec:
   [features/lan-tls-verschluesselt.md](features/lan-tls-verschluesselt.md).
   Löst die nie implementierte Entscheidung [ADR 0005](adr/0005-lan-https-selbstsigniert.md)
-  ein: zusätzlicher TLS-Port 8443 mit selbstsigniertem, persistiertem Zertifikat,
+  ein: zusätzlicher TLS-Port 443 (Rückfall 8443) mit selbstsigniertem,
+  persistiertem Zertifikat,
   **8088 bleibt offen** (Bestands-Pis unberührt). Bringt den Tablets den Secure
   Context und damit die **Akku-Anzeige im LAN-Betrieb**. Zwei neue Crates
   (`rcgen`, `tokio-rustls`). Bewusst kein Pi-Rollout, kein Zwangs-Umschalten —

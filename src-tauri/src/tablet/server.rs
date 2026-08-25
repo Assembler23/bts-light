@@ -630,18 +630,67 @@ pub async fn run_tls(
     port: u16,
     cert_dir: std::path::PathBuf,
 ) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
     let (cert, key) = super::tls::laden_oder_erzeugen(&cert_dir)?;
     let cfg = super::tls::server_config(cert, key)?;
-    let listener = super::tls::TlsListener::binden(port, cfg)
-        .await
-        .map_err(|e| format!("HTTPS-Port {port} belegt oder nicht verfügbar: {e}"))?;
+
+    // Rückfall **nur** für den Standard-Port: Wer selbst einen Port
+    // eingetragen hat, hat sich etwas dabei gedacht — der wird nicht
+    // stillschweigend gegen einen anderen getauscht.
+    let (listener, aktiv) = match super::tls::TlsListener::binden(port, cfg.clone()).await {
+        Ok(l) => (l, port),
+        Err(e) if port == crate::config::TLS_PORT_STANDARD => {
+            let ersatz = crate::config::TLS_PORT_RUECKFALL;
+            tracing::warn!(
+                "HTTPS-Port {port} nicht verfügbar ({e}) – weiche auf {ersatz} aus. \
+                 Unter Windows hält oft `http.sys` (IIS/WinRM) den Port 443."
+            );
+            let l = super::tls::TlsListener::binden(ersatz, cfg)
+                .await
+                .map_err(|e| format!("auch Ausweich-Port {ersatz} nicht verfügbar: {e}"))?;
+            (l, ersatz)
+        }
+        Err(e) => {
+            return Err(format!(
+                "HTTPS-Port {port} belegt oder nicht verfügbar: {e}"
+            ))
+        }
+    };
+
+    // Den TATSÄCHLICH belegten Port melden, nicht den gewünschten. Die
+    // Feld-Übersicht baut daraus ihre Adressen und QR-Codes — nach einem
+    // Rückfall zeigten sie sonst auf einen Port, an dem niemand lauscht.
+    TLS_PORT_AKTIV.store(aktiv, Ordering::Relaxed);
+
     tracing::info!(
-        "Tablet-Server lauscht zusätzlich auf https://{}:{port}",
-        super::mdns::MDNS_HOST
+        "Tablet-Server lauscht zusätzlich auf {}",
+        https_basis(&lan_host_tls(aktiv))
     );
-    axum::serve(listener, router(ctx))
+    let ergebnis = axum::serve(listener, router(ctx))
         .await
-        .map_err(|e| format!("HTTPS-Server beendet: {e}"))
+        .map_err(|e| format!("HTTPS-Server beendet: {e}"));
+    // Beim Beenden nicht weiter behaupten, der Port sei bedient.
+    TLS_PORT_AKTIV.store(0, Ordering::Relaxed);
+    ergebnis
+}
+
+/// Tatsaechlich belegter HTTPS-Port; `0` = kein TLS aktiv.
+///
+/// Bewusst prozessweit: Es gibt genau EINEN TLS-Listener. Der gewuenschte
+/// Port aus der Config taugt hier nicht — ist 443 belegt, lauscht der Server
+/// auf 8443, und jede Adresse aus der Config zeigte auf einen toten Port.
+static TLS_PORT_AKTIV: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
+/// Welcher HTTPS-Port wird gerade bedient? `0` = keiner.
+pub fn tls_port_aktiv() -> u16 {
+    TLS_PORT_AKTIV.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Setzt `https://` vor eine Adresse. Eigene Funktion, damit Log und
+/// Oberfläche dieselbe Schreibweise verwenden.
+fn https_basis(host: &str) -> String {
+    format!("https://{host}")
 }
 
 /// Beendet den TL-Erkennungstakt, sobald der Server-Task endet — egal ob
@@ -715,9 +764,23 @@ pub fn lan_host() -> String {
 /// mDNS-Namen weiterhin als SAN — wer eine dauerhafte Einrichtung will, darf
 /// `https://bts-light.local:<port>` von Hand eintragen.
 pub fn lan_host_tls(tls_port: u16) -> String {
-    match local_ip_address::local_ip() {
-        Ok(ip) => format!("{ip}:{tls_port}"),
-        Err(_) => format!("localhost:{tls_port}"),
+    let host = match local_ip_address::local_ip() {
+        Ok(ip) => ip.to_string(),
+        Err(_) => "localhost".to_string(),
+    };
+    mit_port(&host, tls_port)
+}
+
+/// Hängt den Port an — **außer** es ist der Standard-Port für https.
+///
+/// `https://192.168.1.50` ist am Telefon diktierbar, `…:443` wäre nur
+/// Ballast: Der Browser nimmt ohnehin 443 an. Genau dafür wurde der Port
+/// überhaupt auf 443 gelegt.
+fn mit_port(host: &str, port: u16) -> String {
+    if port == crate::config::TLS_PORT_STANDARD {
+        host.to_string()
+    } else {
+        format!("{host}:{port}")
     }
 }
 
@@ -1017,15 +1080,11 @@ struct QrQuery {
     tls: Option<String>,
 }
 
-async fn qr_svg(
-    Path(court_id): Path<i64>,
-    State(ctx): State<Arc<ServerCtx>>,
-    Query(q): Query<QrQuery>,
-) -> impl IntoResponse {
+async fn qr_svg(Path(court_id): Path<i64>, Query(q): Query<QrQuery>) -> impl IntoResponse {
     let url = if q.tls.as_deref() == Some("1") {
         format!(
             "https://{}/court/{}",
-            lan_host_tls(ctx.app_config().tls.port),
+            lan_host_tls(tls_port_aktiv()),
             court_id
         )
     } else {
@@ -3996,6 +4055,32 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    // ─────────────────── Adressbildung des HTTPS-Zugangs ───────────────────
+
+    /// Beim Standard-Port darf **kein** `:443` in der Adresse stehen — genau
+    /// dafür wurde er gewählt: `https://192.168.1.50` lässt sich diktieren,
+    /// `https://192.168.1.50:443` nicht.
+    #[test]
+    fn standard_port_erscheint_nicht_in_der_adresse() {
+        assert_eq!(mit_port("192.168.1.50", 443), "192.168.1.50");
+        assert_eq!(mit_port("bts-light.local", 443), "bts-light.local");
+    }
+
+    /// Jeder andere Port muss dagegen dranstehen — sonst zeigte die Adresse
+    /// nach einem Rückfall auf 8443 ins Leere.
+    #[test]
+    fn abweichender_port_steht_in_der_adresse() {
+        assert_eq!(mit_port("192.168.1.50", 8443), "192.168.1.50:8443");
+        assert_eq!(mit_port("192.168.1.50", 9443), "192.168.1.50:9443");
+    }
+
+    /// Ohne laufenden TLS-Server meldet der Zustand `0` — die Oberfläche
+    /// bietet dann gar keine verschlüsselte Adresse an, statt eine falsche.
+    #[test]
+    fn ohne_tls_server_ist_der_gemeldete_port_null() {
+        assert_eq!(tls_port_aktiv(), 0);
+    }
 
     // ───────────────────────── Test-Helfer (BTP-Ergebnis-Pfad) ──────────────
 

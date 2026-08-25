@@ -21,6 +21,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   „Erweitert → trotzdem fortfahren", danach ist Ruhe, auch über Neustarts
   hinweg.
 
+  Die Adresse braucht **keine Portangabe** (`https://192.168.1.50`) — der
+  Server nutzt den Standard-Port 443. Ist der auf dem Turnier-PC belegt,
+  weicht er auf 8443 aus; die angezeigten Adressen und QR-Codes tragen den
+  Port dann mit.
+
   **Es ändert sich nichts von selbst.** Port 8088 bleibt unverändert offen,
   die Court-Monitore laufen weiter wie bisher, und der bisherige QR-Code
   bleibt die Vorgabe. Wer umstellen will, tut das **zwischen** Turnieren:
