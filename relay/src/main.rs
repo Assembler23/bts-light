@@ -762,6 +762,11 @@ async fn main() {
         // Court-Monitor-Nudge (A1, ADR 0016): niedrig-latente Anzeige über die
         // Cloud. `court` gesetzt → nur dieses Feld, fehlt es → alle Felder.
         .route("/{ns}/monitor-ws", get(monitor_ws))
+        // Trägerverbindung der fernen Halle (ADR 0048): EINE WebSocket, hinter
+        // der N lokale Geräte als Substrome hängen. Eigene Rolle NEBEN dem
+        // Host-Slot — sie beansprucht ihn nie, R4 („genau ein Host je
+        // Namespace") bleibt unberührt.
+        .route("/{ns}/carrier-ws", get(carrier_ws))
         .route("/{ns}/host-ws", get(host_ws))
         .route("/{ns}/result", post(result));
 
@@ -2227,18 +2232,181 @@ async fn tablet_ws(
         .into_response()
 }
 
+/// Fachlicher Zustand **einer** Tablet-Sitzung — ohne jeden Transport.
+///
+/// Herausgelöst aus [`tablet_conn`], damit dieselbe Logik zweimal getragen
+/// werden kann: von einer eigenen WebSocket (heute) und künftig von einem
+/// Substrom einer gebündelten Trägerverbindung der fernen Halle
+/// ([ADR 0048](../../docs/adr/0048-substrom-adressierung-traeger.md)).
+///
+/// **Der Sende-Kanal `tx` bleibt je Sitzung ein eigener.** Daran hängt die
+/// gesamte Halter-Buchführung des Relays: `is_holder`, `detach_tablet` und
+/// `release_host_slot` unterscheiden Geräte über `Tx::same_channel()`.
+/// Teilten sich zwei Sitzungen einen Kanal, autorisierte jede die Felder der
+/// anderen — R4 („ein aktives Tablet je Court") fiele still.
+struct TabletSitzung {
+    ns: String,
+    /// Feld-Identität dieser Sitzung: die CourtID, sobald `identify` kam.
+    court: Option<i64>,
+    /// Schiedst dieses Tablet das Feld aktiv? Passive Tablets warten auf
+    /// „Übernehmen"; ihre Score-/Alert-Frames werden nicht weitergeleitet.
+    active: bool,
+    /// Persistente Geräte-Kennung (aus identify/take_over) — leer bei
+    /// alten Tablet-Seiten. Für die Reconnect-Erkennung je Feld.
+    my_device: String,
+}
+
+/// Was der Transport nach einem Frame tun soll.
+#[derive(Debug, PartialEq, Eq)]
+enum SitzungsSchritt {
+    /// Weitermachen.
+    Weiter,
+    /// Verbindung bzw. Substrom schließen (Deckel erreicht).
+    Schliessen,
+}
+
+impl TabletSitzung {
+    fn neu(ns: String) -> Self {
+        Self {
+            ns,
+            court: None,
+            active: false,
+            my_device: String::new(),
+        }
+    }
+
+    /// Verarbeitet **einen** Fachframe (JSON-Text vom Tablet).
+    ///
+    /// Unlesbare Frames werden still verworfen — wie bisher.
+    async fn verarbeite(&mut self, broker: &Broker, roh: &str, tx: &Tx) -> SitzungsSchritt {
+        let ns = self.ns.clone();
+        match serde_json::from_str::<TabletMsg>(roh) {
+            Ok(TabletMsg::Identify {
+                court_id,
+                device_id,
+                ..
+            }) => {
+                self.my_device = device_id;
+                match attach_tablet(broker, &ns, court_id, &self.my_device, tx).await {
+                    AttachResult::Active => {
+                        tracing::info!("Tablet verbunden: Namespace '{ns}', Feld {court_id}");
+                        self.active = true;
+                        self.court = Some(court_id);
+                    }
+                    AttachResult::Occupied => {
+                        tracing::info!("Feld {court_id} belegt – Tablet wartet auf Übernahme");
+                        let _ = tx.send(text(&ServerMsg::CourtOccupied));
+                        self.court = Some(court_id);
+                    }
+                    AttachResult::Rejected => return SitzungsSchritt::Schliessen,
+                }
+            }
+            Ok(TabletMsg::TakeOver { device_id }) => {
+                if let (Some(c), false) = (self.court, self.active) {
+                    if !device_id.is_empty() {
+                        self.my_device = device_id;
+                    }
+                    take_over_court(broker, &ns, c, &self.my_device, tx).await;
+                    self.active = true;
+                    tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
+                }
+            }
+            Ok(TabletMsg::ScoreUpdate {
+                score_a,
+                score_b,
+                sets_history,
+                match_id,
+            }) => {
+                if let (Some(c), true) = (self.court, self.active) {
+                    forward_score(broker, &ns, c, score_a, score_b, sets_history, match_id, tx)
+                        .await;
+                }
+            }
+            // Punktverlauf (ADR 0014): 1:1 an den Host durchreichen —
+            // Briefträger, nur Halter-, Stale- und Größen-Prüfung, keine
+            // Deutung.
+            Ok(TabletMsg::Rally {
+                match_id,
+                set,
+                n,
+                winner,
+                score_a,
+                score_b,
+            }) => {
+                if let (Some(c), true) = (self.court, self.active) {
+                    forward_rally(
+                        broker, &ns, c, match_id, set, n, winner, score_a, score_b, tx,
+                    )
+                    .await;
+                }
+            }
+            Ok(TabletMsg::RallySync { match_id, timeline }) => {
+                if let (Some(c), true) = (self.court, self.active) {
+                    forward_rally_sync(broker, &ns, c, match_id, timeline, tx).await;
+                }
+            }
+            Ok(TabletMsg::Battery { percent, charging }) => {
+                if let (Some(c), true) = (self.court, self.active) {
+                    forward_battery(broker, &ns, c, percent, charging).await;
+                }
+            }
+            Ok(TabletMsg::Alert { injury, official }) => {
+                if let (Some(c), true) = (self.court, self.active) {
+                    forward_alert(broker, &ns, c, injury, official, tx).await;
+                }
+            }
+            Ok(TabletMsg::StateSync { state }) => {
+                if let (Some(c), true) = (self.court, self.active) {
+                    store_court_state(broker, &ns, c, state, tx).await;
+                }
+            }
+            Ok(TabletMsg::Ping) => {
+                // Lebenszeichen des Tablets über die Cloud → sofort Pong
+                // zurück, ohne bts-light zu behelligen. Der Relay nennt die
+                // Version, mit der ER ausgeliefert wurde — die Seite stammt
+                // aus derselben Binärdatei.
+                let _ = tx.send(text(&ServerMsg::Pong {
+                    marke: seiten_marke().to_string(),
+                }));
+            }
+            // Zettel-Ereignisse (ADR 0037): 1:1 an den Host, wie der
+            // Punktverlauf — Briefträger, nur Halter-, Stale- und
+            // Größen-Prüfung, keine Deutung und keine Vorhaltung.
+            Ok(TabletMsg::MatchEvent { match_id, event }) => {
+                if let (Some(c), true) = (self.court, self.active) {
+                    forward_match_event(broker, &ns, c, match_id, event, tx).await;
+                }
+            }
+            Ok(TabletMsg::MatchEventSync { match_id, events }) => {
+                if let (Some(c), true) = (self.court, self.active) {
+                    forward_match_event_sync(broker, &ns, c, match_id, events, tx).await;
+                }
+            }
+            Err(_) => {}
+        }
+        SitzungsSchritt::Weiter
+    }
+
+    /// Gibt den Court-Slot frei, wenn diese Sitzung ihn hielt.
+    ///
+    /// **Nur das aktive Tablet räumt ab** — `detach_tablet` prüft zusätzlich
+    /// über `same_channel`, dass der Eintrag wirklich dieser Sitzung gehört.
+    async fn abraeumen(&self, broker: &Broker, tx: &Tx) {
+        if let (Some(c), true) = (self.court, self.active) {
+            detach_tablet(broker, &self.ns, c, tx).await;
+            tracing::info!("Tablet getrennt: Namespace '{}', Feld {c}", self.ns);
+        }
+    }
+}
+
 /// Eine Tablet-Verbindung: meldet sich für ein Feld (per CourtID) an,
 /// leitet Score-Updates an den Host weiter, empfängt Match-Zuweisungen.
+///
+/// Diese Funktion ist der **Transport**; das Fachliche steht in
+/// [`TabletSitzung`].
 async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
-    // Feld-Identität dieser Verbindung: die CourtID, sobald `identify` kam.
-    let mut court: Option<i64> = None;
-    // Schiedst dieses Tablet das Feld aktiv? Passive Tablets warten auf
-    // „Übernehmen"; ihre Score-/Alert-Frames werden nicht weitergeleitet.
-    let mut active = false;
-    // Persistente Geräte-Kennung (aus identify/take_over) — leer bei
-    // alten Tablet-Seiten. Für die Reconnect-Erkennung je Feld.
-    let mut my_device = String::new();
+    let mut sitzung = TabletSitzung::neu(ns.clone());
     // Enger Ping-Takt + Empfangs-Stale wie bei `host_conn`: Der Relay pingt
     // aktiv, der Browser auto-pongt auf Protokoll-Ebene. Bleibt jedes
     // Lebenszeichen (Frame/Pong) länger als TABLET_STALE aus, beendet sich
@@ -2256,93 +2424,11 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                 last_incoming = tokio::time::Instant::now();
                 match msg {
                     Message::Text(t) => {
-                        match serde_json::from_str::<TabletMsg>(t.as_str()) {
-                            Ok(TabletMsg::Identify { court_id, device_id, .. }) => {
-                                my_device = device_id;
-                                match attach_tablet(&broker, &ns, court_id, &my_device, &tx).await {
-                                    AttachResult::Active => {
-                                        tracing::info!("Tablet verbunden: Namespace '{ns}', Feld {court_id}");
-                                        active = true;
-                                        court = Some(court_id);
-                                    }
-                                    AttachResult::Occupied => {
-                                        tracing::info!("Feld {court_id} belegt – Tablet wartet auf Übernahme");
-                                        let _ = tx.send(text(&ServerMsg::CourtOccupied));
-                                        court = Some(court_id);
-                                    }
-                                    AttachResult::Rejected => {
-                                        let _ = socket.send(Message::Close(None)).await;
-                                        break;
-                                    }
-                                }
-                            }
-                            Ok(TabletMsg::TakeOver { device_id }) => {
-                                if let (Some(c), false) = (court, active) {
-                                    if !device_id.is_empty() {
-                                        my_device = device_id;
-                                    }
-                                    take_over_court(&broker, &ns, c, &my_device, &tx).await;
-                                    active = true;
-                                    tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
-                                }
-                            }
-                            Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history, match_id }) => {
-                                if let (Some(c), true) = (court, active) {
-                                    forward_score(&broker, &ns, c, score_a, score_b, sets_history, match_id, &tx).await;
-                                }
-                            }
-                            // Punktverlauf (ADR 0014): 1:1 an den Host
-                            // durchreichen — Briefträger, nur Halter-,
-                            // Stale- und Größen-Prüfung, keine Deutung.
-                            Ok(TabletMsg::Rally { match_id, set, n, winner, score_a, score_b }) => {
-                                if let (Some(c), true) = (court, active) {
-                                    forward_rally(&broker, &ns, c, match_id, set, n, winner, score_a, score_b, &tx).await;
-                                }
-                            }
-                            Ok(TabletMsg::RallySync { match_id, timeline }) => {
-                                if let (Some(c), true) = (court, active) {
-                                    forward_rally_sync(&broker, &ns, c, match_id, timeline, &tx).await;
-                                }
-                            }
-                            Ok(TabletMsg::Battery { percent, charging }) => {
-                                if let (Some(c), true) = (court, active) {
-                                    forward_battery(&broker, &ns, c, percent, charging).await;
-                                }
-                            }
-                            Ok(TabletMsg::Alert { injury, official }) => {
-                                if let (Some(c), true) = (court, active) {
-                                    forward_alert(&broker, &ns, c, injury, official, &tx).await;
-                                }
-                            }
-                            Ok(TabletMsg::StateSync { state }) => {
-                                if let (Some(c), true) = (court, active) {
-                                    store_court_state(&broker, &ns, c, state, &tx).await;
-                                }
-                            }
-                            Ok(TabletMsg::Ping) => {
-                                // Lebenszeichen des Tablets über die Cloud →
-                                // sofort Pong zurück, ohne bts-light zu behelligen.
-                                // Der Relay nennt die Version, mit der ER ausgeliefert wurde —
-                            // die Seite stammt aus derselben Binärdatei.
-                            let _ = tx.send(text(&ServerMsg::Pong {
-                                marke: seiten_marke().to_string(),
-                            }));
-                            }
-                            // Zettel-Ereignisse (ADR 0037): 1:1 an den Host,
-                            // wie der Punktverlauf — Briefträger, nur Halter-,
-                            // Stale- und Größen-Prüfung, keine Deutung und
-                            // keine Vorhaltung.
-                            Ok(TabletMsg::MatchEvent { match_id, event }) => {
-                                if let (Some(c), true) = (court, active) {
-                                    forward_match_event(&broker, &ns, c, match_id, event, &tx).await;
-                                }
-                            }
-                            Ok(TabletMsg::MatchEventSync { match_id, events }) => {
-                                if let (Some(c), true) = (court, active) {
-                                    forward_match_event_sync(&broker, &ns, c, match_id, events, &tx).await;
-                                }
-                            }
-                            Err(_) => {}
+                        if sitzung.verarbeite(&broker, t.as_str(), &tx).await
+                            == SitzungsSchritt::Schliessen
+                        {
+                            let _ = socket.send(Message::Close(None)).await;
+                            break;
                         }
                     }
                     Message::Close(_) => break,
@@ -2368,11 +2454,291 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
         }
     }
 
-    // Nur das aktive Tablet räumt seinen Court-Eintrag ab.
-    if let (Some(c), true) = (court, active) {
-        detach_tablet(&broker, &ns, c, &tx).await;
-        tracing::info!("Tablet getrennt: Namespace '{ns}', Feld {c}");
+    sitzung.abraeumen(&broker, &tx).await;
+}
+
+// ──────────── Trägerverbindung der fernen Halle (ADR 0048) ────────────────
+
+/// Ein Substrom hinter der Trägerverbindung.
+struct Substrom {
+    /// **Eigener** Sende-Kanal. Der Kern der ganzen Konstruktion: Weil jeder
+    /// Substrom seinen eigenen `Tx` hat, arbeiten `is_holder`,
+    /// `detach_tablet`, `unsubscribe_monitor` und alle Deckel unverändert
+    /// weiter — `Tx::same_channel()` unterscheidet die Geräte weiterhin
+    /// korrekt, obwohl sie sich eine WebSocket teilen.
+    tx: Tx,
+    /// Fachzustand, falls es ein Tablet ist.
+    sitzung: Option<TabletSitzung>,
+    /// Abonniertes Feld, falls es eine Anzeige ist (`None` = alle Felder).
+    monitor_court: Option<i64>,
+    /// Ist dieser Substrom eine Anzeige? Dann braucht er den sichtbaren
+    /// Herzschlag, den `monitor_conn` an seinem eigenen Socket sendet.
+    ist_monitor: bool,
+    /// Letztes Lebenszeichen **dieses** Substroms.
+    ///
+    /// Rückfallebene zur Slot-Freigabe: Zuständig ist der Slave
+    /// (`streamClose`), weil er die echte Verbindung zum Gerät hält. Versagt
+    /// er, hielte ein totes Tablet seinen Court sonst so lange, wie der
+    /// Träger lebt — und ein Ersatzgerät bekäme nur `CourtOccupied`.
+    letztes_lebenszeichen: tokio::time::Instant,
+    /// Der Fan-in-Task, der die Antworten dieses Substroms auf den Träger
+    /// schaufelt.
+    pumpe: tokio::task::JoinHandle<()>,
+}
+
+async fn carrier_ws(
+    ws: WebSocketUpgrade,
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return StatusCode::NOT_FOUND.into_response();
     }
+    ws.on_upgrade(move |socket| carrier_conn(socket, broker, ns))
+        .into_response()
+}
+
+/// Die Trägerverbindung: nimmt Substrom-Frames entgegen, legt je Substrom
+/// einen eigenen Kanal an und ruft damit die **unveränderte** Sitzungslogik.
+///
+/// Bündelt zurück über einen Fan-in-Task je Substrom, der dessen Antworten in
+/// `CarrierServerMsg::Frame` verpackt auf den Träger schiebt.
+async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
+    use relay_proto::{CarrierMsg, CarrierServerMsg, StreamKind};
+
+    // Sammelkanal: alles, was auf den Träger hinausgeht.
+    let (aus_tx, mut aus_rx) = mpsc::unbounded_channel::<Message>();
+    // Meldekanal der Fan-in-Tasks: Ein Substrom, dessen Kanal geschlossen
+    // wurde, muss hier gemeldet werden. Wichtig für `namespace_aufraeumen`,
+    // das den Anzeigen ein `Close` schickt, damit sie sich neu verbinden —
+    // ohne diese Meldung bliebe der Substrom mit totem Abo bestehen.
+    let (tot_tx, mut tot_rx) = mpsc::unbounded_channel::<u32>();
+    let mut stroeme: std::collections::HashMap<u32, Substrom> = std::collections::HashMap::new();
+    let mut begruesst = false;
+
+    // Ping/Stale wie bei `host_conn` — der Träger ist eine Dauerverbindung.
+    let mut ping = tokio::time::interval(HOST_PING);
+    let mut last_incoming = tokio::time::Instant::now();
+    // Eigener, kürzerer Takt für den sichtbaren Herzschlag der Anzeigen:
+    // `overview.html`/`monitor.html` werten aus, ob binnen
+    // MONITOR_HEARTBEAT_STALE_MS ein Server-Frame kam, und schalten sonst auf
+    // den langsamen Poll zurück. Auf einem ruhigen Feld entsteht minutenlang
+    // kein Nudge — ohne diesen Takt flatterte jede Anzeige hinter dem Träger.
+    let mut herzschlag =
+        tokio::time::interval(Duration::from_millis(relay_proto::MONITOR_HEARTBEAT_MS));
+    herzschlag.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            incoming = socket.recv() => {
+                let Some(Ok(msg)) = incoming else { break };
+                last_incoming = tokio::time::Instant::now();
+                let Message::Text(roh) = msg else {
+                    if matches!(msg, Message::Close(_)) { break }
+                    continue;
+                };
+                let Ok(frame) = serde_json::from_str::<CarrierMsg>(roh.as_str()) else { continue };
+
+                match frame {
+                    CarrierMsg::Hello { proto } => {
+                        if proto != relay_proto::CARRIER_PROTO_VERSION {
+                            // Sauber ablehnen statt schweigen: Der Slave fällt
+                            // dann auf die heutigen Weiterleitungen zurück,
+                            // statt die Halle blind zu lassen.
+                            tracing::warn!("Träger (Namespace '{ns}') mit Fassung {proto} abgelehnt");
+                            let _ = socket
+                                .send(text(&CarrierServerMsg::Unsupported { proto }))
+                                .await;
+                            break;
+                        }
+                        begruesst = true;
+                        tracing::info!("Träger verbunden: Namespace '{ns}', Fassung {proto}");
+                        let _ = socket.send(text(&CarrierServerMsg::Ready { proto })).await;
+                    }
+                    // Alles Weitere erst nach der Begrüßung — aber NICHT
+                    // stillschweigend: Ein Slave, der seinen eigenen
+                    // Handschlag überholt, wartete sonst ewig auf einen
+                    // Substrom, den es nie gab. Mit dem `streamClose` kann er
+                    // es erneut versuchen.
+                    CarrierMsg::StreamOpen { stream, .. } if !begruesst => {
+                        let _ = socket.send(text(&CarrierServerMsg::StreamClose { stream })).await;
+                        continue;
+                    }
+                    _ if !begruesst => continue,
+
+                    CarrierMsg::StreamOpen { stream, kind, court } => {
+                        if stroeme.contains_key(&stream) { continue }
+                        if stroeme.len() >= relay_proto::MAX_STREAMS_PER_CARRIER {
+                            tracing::warn!("Träger (Namespace '{ns}') am Substrom-Limit – {stream} abgewiesen");
+                            let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
+                            continue;
+                        }
+                        // Eigener Kanal je Substrom (siehe `Substrom::tx`).
+                        let (sub_tx, mut sub_rx) = mpsc::unbounded_channel::<Message>();
+                        let hinaus = aus_tx.clone();
+                        let melde_tot = tot_tx.clone();
+                        let pumpe = tokio::spawn(async move {
+                            while let Some(m) = sub_rx.recv().await {
+                                match m {
+                                    Message::Text(t) => {
+                                        let verpackt = CarrierServerMsg::Frame {
+                                            stream,
+                                            payload: t.to_string(),
+                                        };
+                                        if hinaus.send(text(&verpackt)).is_err() { break }
+                                    }
+                                    // `namespace_aufraeumen` verabschiedet die
+                                    // Anzeigen mit einem `Close`, damit sie
+                                    // sich neu verbinden, sobald der Host
+                                    // zurück ist. Verschluckt man es, bliebe
+                                    // dieser Substrom mit totem Abo stehen und
+                                    // bekäme nie wieder einen Anstoß.
+                                    Message::Close(_) => {
+                                        let _ = melde_tot.send(stream);
+                                        break;
+                                    }
+                                    // Ping/Pong des Substroms endet hier — der
+                                    // Träger hat seinen eigenen Takt.
+                                    _ => {}
+                                }
+                            }
+                        });
+                        let (sitzung, monitor_court, ist_monitor) = match kind {
+                            StreamKind::Tablet => (Some(TabletSitzung::neu(ns.clone())), None, false),
+                            StreamKind::Monitor => {
+                                if !subscribe_monitor(&broker, &ns, court, &sub_tx).await {
+                                    let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
+                                    pumpe.abort();
+                                    continue;
+                                }
+                                (None, court, true)
+                            }
+                        };
+                        stroeme.insert(stream, Substrom {
+                            tx: sub_tx,
+                            sitzung,
+                            monitor_court,
+                            ist_monitor,
+                            letztes_lebenszeichen: tokio::time::Instant::now(),
+                            pumpe,
+                        });
+                    }
+
+                    CarrierMsg::Frame { stream, payload } => {
+                        if payload.len() > relay_proto::MAX_CARRIER_PAYLOAD_LEN { continue }
+                        let Some(s) = stroeme.get_mut(&stream) else { continue };
+                        s.letztes_lebenszeichen = tokio::time::Instant::now();
+                        // Anzeigen senden nichts Fachliches — wie am eigenen
+                        // Socket auch.
+                        let Some(sitzung) = s.sitzung.as_mut() else { continue };
+                        if sitzung.verarbeite(&broker, &payload, &s.tx).await
+                            == SitzungsSchritt::Schliessen
+                        {
+                            let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
+                            if let Some(s) = stroeme.remove(&stream) {
+                                schliesse_substrom(&broker, &ns, s).await;
+                            }
+                        }
+                    }
+
+                    CarrierMsg::StreamClose { stream } => {
+                        if let Some(s) = stroeme.remove(&stream) {
+                            schliesse_substrom(&broker, &ns, s).await;
+                        }
+                    }
+                }
+            }
+            outgoing = aus_rx.recv() => {
+                match outgoing {
+                    Some(m) => { if socket.send(m).await.is_err() { break } }
+                    None => break,
+                }
+            }
+            // Ein Substrom-Kanal wurde geschlossen (z. B. durch
+            // `namespace_aufraeumen`) — Abo abräumen und dem Slave sagen,
+            // dass er das Gerät neu anmelden muss.
+            tot = tot_rx.recv() => {
+                let Some(stream) = tot else { continue };
+                if let Some(s) = stroeme.remove(&stream) {
+                    schliesse_substrom(&broker, &ns, s).await;
+                    let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
+                }
+            }
+            _ = herzschlag.tick() => {
+                // Sichtbarer Herzschlag je Anzeige-Substrom, wie ihn
+                // `monitor_conn` an seinem eigenen Socket sendet. Ohne ihn
+                // hielte die Anzeige den Push-Kanal für tot und fiele auf den
+                // langsamen Poll zurück.
+                let hb = relay_proto::monitor_heartbeat_frame(now_ms());
+                for (stream, s) in stroeme.iter() {
+                    if s.ist_monitor {
+                        let verpackt = CarrierServerMsg::Frame {
+                            stream: *stream,
+                            payload: hb.clone(),
+                        };
+                        let _ = aus_tx.send(text(&verpackt));
+                    }
+                }
+            }
+            _ = ping.tick() => {
+                if is_stale(last_incoming, tokio::time::Instant::now(), HOST_STALE) {
+                    tracing::warn!(
+                        "Träger (Namespace '{ns}') seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs()
+                    );
+                    break;
+                }
+                // Rückfallebene je Substrom: Zuständig für die Slot-Freigabe
+                // ist der Slave, weil er die echte Verbindung zum Gerät hält.
+                // Versagt er, hielte ein totes Tablet seinen Court, solange
+                // der Träger lebt — ein Ersatzgerät bekäme dann nur
+                // `CourtOccupied`. Anzeigen bleiben ausgenommen: Sie senden
+                // nichts, ihr Fehlen fällt niemandem zur Last.
+                let jetzt = tokio::time::Instant::now();
+                let tote: Vec<u32> = stroeme
+                    .iter()
+                    .filter(|(_, s)| {
+                        !s.ist_monitor && is_stale(s.letztes_lebenszeichen, jetzt, TABLET_STALE)
+                    })
+                    .map(|(stream, _)| *stream)
+                    .collect();
+                for stream in tote {
+                    tracing::warn!(
+                        "Substrom {stream} (Namespace '{ns}') stumm – Court-Slot freigegeben"
+                    );
+                    if let Some(s) = stroeme.remove(&stream) {
+                        schliesse_substrom(&broker, &ns, s).await;
+                        let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
+                    }
+                }
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
+            }
+        }
+    }
+
+    // Der Träger ist weg: JEDEN Substrom abräumen. Sonst hielten tote Tablets
+    // ihre Court-Slots, bis der Namespace verfällt.
+    let anzahl = stroeme.len();
+    for (_, s) in stroeme.drain() {
+        schliesse_substrom(&broker, &ns, s).await;
+    }
+    if anzahl > 0 {
+        tracing::info!("Träger getrennt: Namespace '{ns}', {anzahl} Substrom(e) abgeräumt");
+    }
+    // Kein eigenes `namespace_aufraeumen` nötig: `detach_tablet` und
+    // `unsubscribe_monitor` rufen es bereits, und ein Träger ohne Substrome
+    // hat nie einen Namespace angelegt.
+}
+
+/// Räumt einen einzelnen Substrom ab — Court-Slot bzw. Nudge-Abo freigeben,
+/// Fan-in-Task beenden.
+async fn schliesse_substrom(broker: &Broker, ns: &str, s: Substrom) {
+    if let Some(sitzung) = s.sitzung.as_ref() {
+        sitzung.abraeumen(broker, &s.tx).await;
+    } else {
+        unsubscribe_monitor(broker, ns, s.monitor_court, &s.tx).await;
+    }
+    s.pumpe.abort();
 }
 
 // ─────────────────────── Court-Monitor-Nudge (A1) ─────────────────────────
@@ -4862,6 +5228,216 @@ mod tests {
         ns.host_last_seen = now_ms();
         drop(map);
         (broker, rx, host_tx)
+    }
+
+    // ───────────── Tablet-Sitzung ohne Transport (ADR 0048) ─────────────
+    //
+    // Erst durch das Herauslösen aus `tablet_conn` prüfbar: Vorher steckte
+    // diese Logik in einer Funktion, die eine echte WebSocket verlangte, und
+    // war deshalb von keinem einzigen Test berührt.
+
+    /// Namespace, der `valid_namespace` genügt (kanonische UUID-Form).
+    fn test_ns() -> String {
+        "00000000-0000-4000-8000-000000000001".to_string()
+    }
+
+    /// Belegt ein Feld über die Sitzung und gibt es beim Abräumen wieder frei.
+    #[tokio::test]
+    async fn sitzung_belegt_feld_und_gibt_es_beim_abraeumen_frei() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut sitzung = TabletSitzung::neu(ns.clone());
+
+        let identify =
+            r#"{"type":"identify","courtId":7,"courtLabel":"Feld 7","deviceId":"geraet-a"}"#;
+        assert_eq!(
+            sitzung.verarbeite(&broker, identify, &tx).await,
+            SitzungsSchritt::Weiter
+        );
+
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).expect("Namespace angelegt");
+            assert!(n.tablets.contains_key(&7), "Feld muss belegt sein");
+            assert_eq!(
+                n.tablet_devices.get(&7).map(String::as_str),
+                Some("geraet-a")
+            );
+        }
+
+        sitzung.abraeumen(&broker, &tx).await;
+
+        let map = broker.namespaces.lock().await;
+        assert!(
+            map.get(&ns).map(|n| n.tablets.is_empty()).unwrap_or(true),
+            "nach dem Abräumen darf kein Tablet-Eintrag bleiben"
+        );
+    }
+
+    /// Die Geräte-Kennung muss **unverfälscht** ankommen: `attach_tablet`
+    /// entscheidet über sie, ob ein Reconnect dasselbe Gerät ist (ADR 0017).
+    /// Ein Träger, der sie unterwegs ersetzte, brächte die
+    /// Reconnect-Ownership auf eine falsche Grundlage.
+    #[tokio::test]
+    async fn sitzung_reicht_die_geraete_kennung_unveraendert_durch() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut sitzung = TabletSitzung::neu(ns.clone());
+
+        let identify =
+            r#"{"type":"identify","courtId":3,"courtLabel":"Feld 3","deviceId":"tablet-XYZ-123"}"#;
+        sitzung.verarbeite(&broker, identify, &tx).await;
+
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("Namespace");
+        assert_eq!(
+            n.tablet_devices.get(&3).map(String::as_str),
+            Some("tablet-XYZ-123"),
+            "die Kennung des Endgeräts darf unterwegs nicht ersetzt werden"
+        );
+    }
+
+    /// Zwei Sitzungen mit **eigenen** Kanälen dürfen einander nicht
+    /// autorisieren. Das ist die Invariante, die der geplante Träger tragen
+    /// muss: Teilten sich Substrome einen Kanal, gälte jeder als Halter
+    /// jedes Felds — und ein Ergebnis liefe ins fremde Feld, ohne dass ein
+    /// bestehender Test rot würde.
+    #[tokio::test]
+    async fn zwei_sitzungen_autorisieren_nur_ihr_eigenes_feld() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx_a, _rx_a) = mpsc::unbounded_channel();
+        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(
+            &broker,
+            r#"{"type":"identify","courtId":1,"courtLabel":"F1","deviceId":"a"}"#,
+            &tx_a,
+        )
+        .await;
+        b.verarbeite(
+            &broker,
+            r#"{"type":"identify","courtId":2,"courtLabel":"F2","deviceId":"b"}"#,
+            &tx_b,
+        )
+        .await;
+
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("Namespace");
+        assert!(is_holder(n, 1, &tx_a), "A hält sein eigenes Feld");
+        assert!(is_holder(n, 2, &tx_b), "B hält sein eigenes Feld");
+        assert!(!is_holder(n, 2, &tx_a), "A darf Feld 2 NICHT autorisieren");
+        assert!(!is_holder(n, 1, &tx_b), "B darf Feld 1 NICHT autorisieren");
+    }
+
+    /// Ein belegtes Feld weist die zweite Sitzung ab, statt sie zu verdrängen
+    /// — sie wartet auf „Übernehmen" (R4).
+    #[tokio::test]
+    async fn belegtes_feld_laesst_die_zweite_sitzung_warten() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx_a, _rx_a) = mpsc::unbounded_channel();
+        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        let ident_a = r#"{"type":"identify","courtId":5,"courtLabel":"F5","deviceId":"a"}"#;
+        let ident_b = r#"{"type":"identify","courtId":5,"courtLabel":"F5","deviceId":"b"}"#;
+        a.verarbeite(&broker, ident_a, &tx_a).await;
+        b.verarbeite(&broker, ident_b, &tx_b).await;
+
+        assert!(a.active, "die erste Sitzung schiedst");
+        assert!(!b.active, "die zweite wartet");
+        let antwort = rx_b.recv().await.expect("CourtOccupied erwartet");
+        match antwort {
+            Message::Text(t) => assert!(
+                t.as_str().contains("court_occupied") || t.as_str().contains("courtOccupied"),
+                "unerwartete Antwort an die wartende Sitzung: {t}"
+            ),
+            anderes => panic!("unerwarteter Frame: {anderes:?}"),
+        }
+    }
+
+    /// **Die tragende Invariante des Trägers** (ADR 0048): N Substrome
+    /// hinter EINER Trägerverbindung verhalten sich wie N eigenständige
+    /// Tablets — weil jeder seinen eigenen Kanal bekommt.
+    ///
+    /// Hätte der Träger stattdessen einen gemeinsamen Kanal für alle
+    /// Substrome, wäre `is_holder` für jedes Feld wahr, und ein Ergebnis von
+    /// Gerät A liefe in das Feld von Gerät B — ohne dass ein bestehender
+    /// Test rot würde.
+    #[tokio::test]
+    async fn substrome_eines_traegers_bleiben_getrennte_halter() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+
+        // Drei Geräte einer Halle, wie sie hinter einem Träger hingen.
+        let mut kanaele = Vec::new();
+        let mut sitzungen = Vec::new();
+        for (i, feld) in [11i64, 12, 13].iter().enumerate() {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let mut s = TabletSitzung::neu(ns.clone());
+            let ident = format!(
+                r#"{{"type":"identify","courtId":{feld},"courtLabel":"F{feld}","deviceId":"geraet-{i}"}}"#
+            );
+            s.verarbeite(&broker, &ident, &tx).await;
+            sitzungen.push(s);
+            kanaele.push((tx, rx));
+        }
+
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).expect("Namespace");
+            assert_eq!(n.tablets.len(), 3, "drei Felder trotz einer Trägerleitung");
+            // Jeder Substrom hält GENAU sein Feld.
+            for (i, feld) in [11i64, 12, 13].iter().enumerate() {
+                for (j, anderes) in [11i64, 12, 13].iter().enumerate() {
+                    let erwartet = i == j;
+                    assert_eq!(
+                        is_holder(n, *anderes, &kanaele[i].0),
+                        erwartet,
+                        "Substrom {i} (Feld {feld}) und Feld {anderes}"
+                    );
+                }
+            }
+        }
+
+        // Ein einzelner Substrom geht weg — die anderen bleiben stehen.
+        sitzungen[1].abraeumen(&broker, &kanaele[1].0).await;
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).expect("Namespace");
+            assert_eq!(n.tablets.len(), 2, "nur der eine Substrom ist weg");
+            assert!(n.tablets.contains_key(&11));
+            assert!(!n.tablets.contains_key(&12));
+            assert!(n.tablets.contains_key(&13));
+        }
+
+        // Träger-Abriss: alle übrigen abräumen.
+        sitzungen[0].abraeumen(&broker, &kanaele[0].0).await;
+        sitzungen[2].abraeumen(&broker, &kanaele[2].0).await;
+        let map = broker.namespaces.lock().await;
+        assert!(
+            map.get(&ns).map(|n| n.tablets.is_empty()).unwrap_or(true),
+            "nach dem Träger-Abriss darf kein Court-Slot gehalten bleiben"
+        );
+    }
+
+    /// Unlesbare Frames werden still verworfen — wie vor dem Herauslösen.
+    #[tokio::test]
+    async fn kaputter_frame_beendet_die_sitzung_nicht() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut sitzung = TabletSitzung::neu(test_ns());
+        assert_eq!(
+            sitzung.verarbeite(&broker, "{kein json", &tx).await,
+            SitzungsSchritt::Weiter
+        );
+        assert!(sitzung.court.is_none());
     }
 
     // ───────────── Court-Monitor-Nudge (A1, ADR 0016) ─────────────

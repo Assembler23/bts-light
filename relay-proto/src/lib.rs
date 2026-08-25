@@ -2853,6 +2853,105 @@ pub fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+// ───────────────── Trägerverbindung der fernen Halle (ADR 0048) ─────────────
+//
+// Der Slave-PC der fernen Halle bündelt die WebSocket-Verbindungen seiner
+// Geräte über EINE Trägerverbindung zum Relay. Jedes lokale Gerät ist darin
+// ein **Substrom** mit eigener Kennung; der Relay legt je Substrom einen
+// eigenen Sende-Kanal an und ruft damit die unveränderte Sitzungslogik auf.
+//
+// Bewusst NICHT im Träger: HTTP-Verkehr. Über die Tablet-Strecke laufen
+// höchstens 64 KB, die 12-MB-Werbebilder und das 2-MB-Logo dagegen als
+// HTTP-Uploads. Zöge man sie mit hinein, teilten sie sich die Leitung mit den
+// Punkt-Frames — Head-of-Line-Blocking entstünde also erst dadurch.
+
+/// Höchstzahl gleichzeitiger Substrome je Träger.
+///
+/// An `MAX_TABLETS_PER_NS` (64) angelehnt: Mehr Geräte als Felder kann eine
+/// Halle ohnehin nicht sinnvoll betreiben, und der Deckel begrenzt, was ein
+/// fehlerhafter Slave im Namespace anrichten kann.
+pub const MAX_STREAMS_PER_CARRIER: usize = 64;
+
+/// Höchstlänge der Nutzlast **eines** Substrom-Frames.
+///
+/// **Mit Kopfraum über `MAX_STATE_LEN` (64 KB) im Relay.** Der größte
+/// Fachframe der Tablet-Strecke ist der Spielzustand — aber hier wird die
+/// *umhüllte* Form gemessen: `{"type":"state_sync","state":"…"}`, in der der
+/// Zustand (selbst wieder JSON) escaped steckt und dadurch spürbar wächst.
+/// Wäre der Deckel gleich groß, verwürfe der Träger stumm Zustände, die der
+/// direkte Weg annimmt — und der Relay reichte dem nächsten Tablet einen
+/// veralteten `StateRestore`.
+///
+/// Der eigentliche Schutz bleibt `MAX_STATE_LEN` in `store_court_state`; hier
+/// geht es nur darum, nichts abzuschneiden, was dort noch passt.
+pub const MAX_CARRIER_PAYLOAD_LEN: usize = 160 * 1024;
+
+/// Compile-Zeit-Zusicherung des Kopfraums über `MAX_STATE_LEN` (64 KB im
+/// Relay). Faktor 2 deckt auch einen Zustand ab, der fast vollständig aus
+/// escapten Zeichen besteht. Wer den Deckel senkt, bricht hier den Bau —
+/// nicht erst im Turnier, wo ein großer Spielstand stumm verschwände.
+const _: () = assert!(MAX_CARRIER_PAYLOAD_LEN >= 2 * 64 * 1024);
+
+/// Protokollfassung des Trägers.
+///
+/// Wird beim Verbinden ausgehandelt. Kennt der Relay sie nicht, lehnt er ab
+/// und der Slave fällt auf die heutigen Weiterleitungen zurück — sonst machte
+/// ein neuer Slave gegen einen älteren Relay die ganze Halle blind.
+pub const CARRIER_PROTO_VERSION: u16 = 1;
+
+/// Welche Art Gerät hinter einem Substrom steckt.
+///
+/// Bestimmt, welche Sitzungslogik der Relay dahinterlegt. **TL-Web fehlt
+/// bewusst** — Geräte der Turnierleitung bleiben direkt mit der Cloud
+/// verbunden, damit keine Schreib-Token durch den Träger reisen (ADR 0048).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StreamKind {
+    /// Digitaler Spielzettel — Sitzungslogik wie `/{ns}/ws`.
+    Tablet,
+    /// Court-Monitor oder Feld-Übersicht — Nudge-Abo wie `/{ns}/monitor-ws`.
+    Monitor,
+}
+
+/// Nachricht **vom Slave** über die Trägerverbindung.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum CarrierMsg {
+    /// Erster Frame: Fassung aushandeln.
+    Hello { proto: u16 },
+    /// Ein lokales Gerät hat sich verbunden.
+    StreamOpen {
+        stream: u32,
+        kind: StreamKind,
+        /// Nur für `Monitor`: gewünschtes Feld; `None` = alle Felder.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        court: Option<i64>,
+    },
+    /// Fachframe eines Substroms, 1:1 wie vom Gerät gesendet.
+    Frame { stream: u32, payload: String },
+    /// Ein lokales Gerät ist weg.
+    ///
+    /// **Der Slave ist hier in der Pflicht.** Hinter einem Träger misst der
+    /// Relay nur noch den Träger; ein totes Tablet hielte seinen Court-Slot,
+    /// solange der Slave pingt. Der Slave hält die echte Verbindung zum Gerät
+    /// und muss dessen Abriss melden.
+    StreamClose { stream: u32 },
+}
+
+/// Nachricht **vom Relay** über die Trägerverbindung.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum CarrierServerMsg {
+    /// Fassung angenommen — der Träger ist betriebsbereit.
+    Ready { proto: u16 },
+    /// Fassung abgelehnt; der Slave fällt auf Weiterleitungen zurück.
+    Unsupported { proto: u16 },
+    /// Antwort an einen Substrom, 1:1 an das Gerät weiterzureichen.
+    Frame { stream: u32, payload: String },
+    /// Der Relay schließt einen Substrom (Deckel, Abweisung, Aufräumen).
+    StreamClose { stream: u32 },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5138,5 +5237,115 @@ mod tests {
         ] {
             assert!(!art.is_sanction(), "{art:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod carrier_tests {
+    use super::*;
+
+    /// Serde-Roundtrip für jede Slave→Relay-Nachricht.
+    #[test]
+    fn carrier_msg_roundtrip() {
+        let faelle = vec![
+            CarrierMsg::Hello {
+                proto: CARRIER_PROTO_VERSION,
+            },
+            CarrierMsg::StreamOpen {
+                stream: 1,
+                kind: StreamKind::Tablet,
+                court: None,
+            },
+            CarrierMsg::StreamOpen {
+                stream: 2,
+                kind: StreamKind::Monitor,
+                court: Some(7),
+            },
+            CarrierMsg::Frame {
+                stream: 1,
+                payload: r#"{"type":"ping"}"#.to_string(),
+            },
+            CarrierMsg::StreamClose { stream: 1 },
+        ];
+        for f in faelle {
+            let json = serde_json::to_string(&f).expect("serialisieren");
+            let zurueck: CarrierMsg = serde_json::from_str(&json).expect("deserialisieren");
+            assert_eq!(f, zurueck, "Roundtrip fehlgeschlagen: {json}");
+        }
+    }
+
+    /// Serde-Roundtrip für jede Relay→Slave-Nachricht.
+    #[test]
+    fn carrier_server_msg_roundtrip() {
+        let faelle = vec![
+            CarrierServerMsg::Ready { proto: 1 },
+            CarrierServerMsg::Unsupported { proto: 99 },
+            CarrierServerMsg::Frame {
+                stream: 3,
+                payload: "{}".to_string(),
+            },
+            CarrierServerMsg::StreamClose { stream: 3 },
+        ];
+        for f in faelle {
+            let json = serde_json::to_string(&f).expect("serialisieren");
+            let zurueck: CarrierServerMsg = serde_json::from_str(&json).expect("deserialisieren");
+            assert_eq!(f, zurueck, "Roundtrip fehlgeschlagen: {json}");
+        }
+    }
+
+    /// `court` fehlt im JSON, wenn es keins gibt — der Draht bleibt schmal,
+    /// und ein Tablet-Substrom trägt kein sinnloses `"court":null`.
+    #[test]
+    fn stream_open_ohne_court_laesst_das_feld_weg() {
+        let json = serde_json::to_string(&CarrierMsg::StreamOpen {
+            stream: 1,
+            kind: StreamKind::Tablet,
+            court: None,
+        })
+        .expect("serialisieren");
+        assert!(!json.contains("court"), "unerwartetes court-Feld: {json}");
+    }
+
+    /// Eine unbekannte Fassung muss lesbar bleiben, damit der Relay sie
+    /// ablehnen KANN — ein Parse-Fehler beim Hello ließe den Slave im
+    /// Ungewissen, statt ihn sauber auf die Weiterleitungen zurückfallen zu
+    /// lassen.
+    #[test]
+    fn unbekannte_protokollfassung_bleibt_lesbar() {
+        let json = r#"{"type":"hello","proto":9999}"#;
+        match serde_json::from_str::<CarrierMsg>(json).expect("muss lesbar sein") {
+            CarrierMsg::Hello { proto } => assert_eq!(proto, 9999),
+            anderes => panic!("falsche Variante: {anderes:?}"),
+        }
+    }
+
+    /// Der Substrom-Deckel bleibt an die Zahl der Tablets je Namespace
+    /// gekoppelt; ein größerer Träger-Deckel wäre wirkungslos, ein kleinerer
+    /// eine stille Begrenzung.
+    #[test]
+    fn substrom_deckel_passt_zum_tablet_deckel() {
+        assert_eq!(
+            MAX_STREAMS_PER_CARRIER, 64,
+            "an MAX_TABLETS_PER_NS im Relay angelehnt"
+        );
+        // Den Kopfraum über `MAX_STATE_LEN` sichert eine Compile-Zeit-
+        // Zusicherung an der Konstante selbst — ein Laufzeit-`assert!` über
+        // zwei Konstanten prüfte nichts.
+        //
+        // Hier stattdessen der Fall, der im Feld auftritt: Ein Zustand an der
+        // Relay-Grenze wächst durch Rahmen und Escaping, muss aber weiterhin
+        // durch den Träger passen.
+        let zustand = "x".repeat(64 * 1024);
+        let umhuellt = serde_json::to_string(&serde_json::json!({
+            "type": "state_sync",
+            "state": zustand,
+        }))
+        .expect("serialisieren");
+        assert!(
+            umhuellt.len() <= MAX_CARRIER_PAYLOAD_LEN,
+            "ein Zustand an der MAX_STATE_LEN-Grenze passt umhuellt nicht mehr durch den Traeger \
+             ({} > {MAX_CARRIER_PAYLOAD_LEN})",
+            umhuellt.len()
+        );
     }
 }
