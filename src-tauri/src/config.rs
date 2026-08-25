@@ -370,6 +370,25 @@ impl Default for TlsConfig {
     }
 }
 
+/// Transport-Bündelung der fernen Halle (Spec
+/// `docs/features/ferne-halle-transport-buendelung.md`, ADR 0048).
+///
+/// **Opt-in, Vorgabe aus.** Anders als beim verschlüsselten Zugang ist hier
+/// echtes Turnierrisiko im Spiel: Eingeschaltet wird der Slave-PC zum
+/// alleinigen Weg der ganzen Halle — fällt er aus, sind alle Geräte
+/// gleichzeitig weg, während sie heute einzeln an der Cloud hängen.
+///
+/// Und die Umstellung ist ein **Herkunftswechsel**: Ein Tablet bewahrt sein
+/// noch nicht bestätigtes Ergebnis unter der Adresse auf, unter der es
+/// erfasst wurde. Deshalb gehört das Umschalten **zwischen** zwei Turniere,
+/// nie in ein laufendes.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SlaveMuxConfig {
+    /// Geräte der fernen Halle über den Slave bündeln?
+    pub enabled: bool,
+}
+
 /// Automatische Hallen-Vorverteilung (Spec
 /// `docs/features/hallen-vorverteilung.md`, ADR 0029/0030). Opt-in —
 /// standardmäßig aus; nur bei Mehr-Hallen-Turnieren wirksam, und niemals
@@ -631,6 +650,11 @@ pub struct AppConfig {
     /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub master_namespace: String,
+    /// Transport-Bündelung der fernen Halle (ADR 0048). Wirkt nur zusammen
+    /// mit `slave_mode` und gesetztem `master_namespace`.
+    /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub slave_mux: SlaveMuxConfig,
     /// Einstellungen der gesprochenen Feld-Ansagen. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -1632,6 +1656,7 @@ mod tests {
             tls: TlsConfig::default(),
             slave_mode: false,
             master_namespace: String::new(),
+            slave_mux: SlaveMuxConfig::default(),
             announce: AnnounceConfig {
                 enabled: true,
                 language_mode: AnnounceLanguageMode::En,

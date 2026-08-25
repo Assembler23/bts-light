@@ -96,6 +96,8 @@ pub struct AppState {
     /// Laufende mDNS-Bekanntgabe (`bts-light.local`) – LAN-Modus ODER
     /// Slave-Monitor-Brücke.
     pub mdns: Mutex<Option<mdns_sd::ServiceDaemon>>,
+    /// Handle des Träger-Tasks der fernen Halle (ADR 0048), falls aktiv.
+    pub slave_carrier: Mutex<Option<JoinHandle<()>>>,
     /// Handle der Slave-Monitor-Brücke (`:8088` → Cloud-Monitor des Masters,
     /// nur im `slave_mode`), falls aktiv.
     pub slave_bridge: Mutex<Option<JoinHandle<()>>>,
@@ -324,6 +326,10 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // TLS abgeschaltet oder den Port verlegt hat, hätte es beim nächsten
     // Speichern einer beliebigen Einstellung stumm zurückgesetzt bekommen.
     incoming.tls = current.tls.clone();
+    // Dasselbe für die Transport-Bündelung (ADR 0048): eingeschaltet und
+    // beim nächsten Speichern stumm aus — die ferne Halle fiele mitten im
+    // Turnier auf die Direkt-Cloud-Adressen zurück.
+    incoming.slave_mux = current.slave_mux.clone();
     // Gesperrte Felder werden auf der Felderübersicht UND (seit v0.9.258) aus
     // der Turnierleitungs-Oberfläche gesetzt — der Assistent schickt seinen
     // beim Öffnen aufgenommenen Stand zurück und löschte sie damit still.
@@ -923,6 +929,8 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let tls_port = config.tls.port;
     // Ansage-Slave: kein Tablet-Server/mDNS/Relay (nur BTP lesen + ansagen) –
     // sonst Kollision mit dem Master (doppeltes bts-light.local, Liveticker).
+    // Transport-Buendelung der fernen Halle (ADR 0048) — Opt-in.
+    let slave_mux_enabled = config.slave_mux.enabled;
     let slave_mode = config.slave_mode;
 
     let tablet = state.tablet.clone();
@@ -1170,8 +1178,23 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         if bridge_slot.is_none() {
             let ns = master_namespace.clone();
             let hall = announce_hall.clone();
+            // Träger nur bei ausdrücklichem Opt-in (ADR 0048). Ohne ihn
+            // bleibt die Brücke der reine Weiterleiter wie bisher — und
+            // selbst mit ihm weicht jede Route auf die Weiterleitung aus,
+            // solange er nicht bereit ist.
+            let traeger = if slave_mux_enabled {
+                let (griff, schleife) = crate::tablet::carrier::starten(ns.clone());
+                *state
+                    .slave_carrier
+                    .lock()
+                    .expect("Träger-Mutex nicht vergiftet") =
+                    Some(tauri::async_runtime::spawn(schleife));
+                Some(griff)
+            } else {
+                None
+            };
             *bridge_slot = Some(tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::tablet::slave_bridge::run(ns, hall).await {
+                if let Err(e) = crate::tablet::slave_bridge::run(ns, hall, traeger).await {
                     tracing::error!("Slave-Brücke beendet: {e}");
                 }
             }));
@@ -1263,6 +1286,14 @@ pub fn stop_sync(state: State<'_, AppState>) {
         .log_task
         .lock()
         .expect("Log-Task-Mutex nicht vergiftet")
+        .take()
+    {
+        handle.abort();
+    }
+    if let Some(handle) = state
+        .slave_carrier
+        .lock()
+        .expect("Träger-Mutex nicht vergiftet")
         .take()
     {
         handle.abort();
@@ -4785,6 +4816,31 @@ mod tests {
             "abgeschaltetes TLS darf nicht stumm wieder angehen"
         );
         assert_eq!(merged.tls.port, 9443, "und der verlegte Port bleibt liegen");
+    }
+
+    #[test]
+    fn keep_host_managed_fields_preserves_the_slave_mux() {
+        // ADR 0048: `slave_mux` wird von Hand in der `config.json` geschaltet,
+        // der Setup-Assistent kennt das Feld nicht. Ohne Schutz schickte er
+        // den serde-Default (aus) zurück — wer die Bündelung eingeschaltet
+        // hat, bekäme sie beim nächsten Speichern einer beliebigen Einstellung
+        // stumm abgeschaltet, und die ferne Halle fiele mitten im Turnier auf
+        // die Direkt-Cloud-Adressen zurück. Genau der Herkunftswechsel, der
+        // unbestätigte Ergebnisse kostet.
+        let current = AppConfig {
+            slave_mux: crate::config::SlaveMuxConfig { enabled: true },
+            ..Default::default()
+        };
+
+        let mut from_ui = AppConfig::default();
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert", "Einstellung wird übernommen");
+        assert!(
+            merged.slave_mux.enabled,
+            "eingeschaltete Bündelung darf nicht stumm ausgehen"
+        );
     }
 
     #[test]
