@@ -754,6 +754,22 @@ dadurch in **jedem** Turnier-WLAN – ein Master-Image braucht keine
 Anpassung. Ist der PC-Port gesperrt, die Cloud-Adresse
 (`https://badhub.de/bts-relay/<install_id>/monitor`) verwenden.
 
+**Die Monitore bleiben auf HTTP.** Seit dem verschlüsselten LAN-Zugang
+([ADR 0047](adr/0047-lan-tls-konkretisierung.md)) bietet der Server dieselben
+Seiten zusätzlich über `https://bts-light.local:8443` an — für die Pis ist das
+aber **nicht** vorgesehen und auch nicht nötig:
+
+- Port 8088 bleibt unverändert offen; der Subnetz-Scan der Pis findet den
+  Server genau wie bisher. An den Kiosk-Skripten ändert sich nichts.
+- Ein Kiosk-Browser könnte die Zertifikatswarnung ohne Tastatur gar nicht
+  bestätigen — und `--ignore-certificate-errors` lädt die Seite zwar, stellt
+  aber **keinen** Secure Context her. Der einzige Gewinn wäre die
+  Verschlüsselung selbst, nicht die Akkuanzeige.
+- Die Pis haben **keine Echtzeituhr**. Bootet einer ohne Internet und ohne
+  NTP, steht seine Uhr falsch — ein Zertifikat mit „gültig ab heute" würde er
+  dann **still** verwerfen. Genau deshalb ist das Zertifikat weit vordatiert;
+  aber der einfachere Weg bleibt, die Monitore bei HTTP zu belassen.
+
 ## Info-Monitor (Hallen-Display)
 
 Neben dem feld-bezogenen Court-Monitor (ein TV pro Feld) liefert bts-light

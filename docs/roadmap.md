@@ -389,6 +389,30 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Verschlüsselte LAN-Strecke (https + wss)** — Spec:
+  [features/lan-tls-verschluesselt.md](features/lan-tls-verschluesselt.md).
+  Löst die nie implementierte Entscheidung [ADR 0005](adr/0005-lan-https-selbstsigniert.md)
+  ein: zusätzlicher TLS-Port 8443 mit selbstsigniertem, persistiertem Zertifikat,
+  **8088 bleibt offen** (Bestands-Pis unberührt). Bringt den Tablets den Secure
+  Context und damit die **Akku-Anzeige im LAN-Betrieb**. Zwei neue Crates
+  (`rcgen`, `tokio-rustls`). Bewusst kein Pi-Rollout, kein Zwangs-Umschalten —
+  ein Origin-Wechsel im laufenden Turnier würde unbestätigte Ergebnisse aus dem
+  `localStorage` verlieren. Voraussetzung für die
+  **Transport-Bündelung in der fernen Halle** (siehe nächster Punkt).
+
+- **Transport-Bündelung in der fernen Halle (Multiplexer)** — Spec:
+  [features/ferne-halle-transport-buendelung.md](features/ferne-halle-transport-buendelung.md).
+  Der Slave-PC wird vom 302-Weiterleiter zum lokalen Terminator: Tablets,
+  Court-Monitore und Übersichtsanzeigen sprechen nur noch mit ihm, ihr
+  **WebSocket**-Verkehr läuft gebündelt über **eine** Trägerverbindung zum Relay
+  (HTTP bleibt außen vor — sonst drohte Head-of-Line-Blocking durch die 12-MB-
+  Werbebilder). Holt die in [ADR 0002](adr/0002-ferne-halle-direkt-cloud-geraete.md)
+  aufgeschobene **Transport-Hälfte** von „Weg B" nach, **ohne** Offline-Pufferung.
+  Bewusst dumm: kein Zustandsspiegel, kein schreibender Rückkanal, TL-Web bleibt
+  Direkt-Cloud. Kern: eigener `mpsc`-Kanal je Substrom, damit die acht
+  `same_channel`-Stellen und mit ihnen R4, ADR 0017 und ADR 0020 unverändert
+  gültig bleiben. Config-Default **aus** (Opt-in). Setzt die TLS-Spec voraus.
+
 - **Schiedsrichterzettel vorab und automatisch drucken — VOLLSTÄNDIG
   umgesetzt** (E1–E6, v0.9.249). Zwei Wege aufs Papier: ein **Leerzettel** für
   Spiele der Warteliste (Kopf vorgedruckt, Raster von Hand zu führen; Knöpfe in

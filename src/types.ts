@@ -842,6 +842,13 @@ export interface ScorekeeperEntry {
 export interface TabletInfo {
   /** LAN-Adresse des Tablet-Servers; leer, wenn der LAN-Pfad inaktiv ist. */
   server_host: string;
+  /**
+   * Verschlüsselte LAN-Adresse (`<ip>:8443`, ADR 0047); leer, wenn LAN oder
+   * TLS aus ist. Bewusst die IP und nicht `bts-light.local` — Chrome unter
+   * Android löst `.local` vielerorts nicht auf, und das sind genau die
+   * Geräte, für die der verschlüsselte Weg gebaut wurde.
+   */
+  server_host_tls?: string;
   /** "lan", "cloud" oder "lan+cloud". */
   mode: ConnectionMode;
   /** Öffentliche Relay-Basis-URL; leer, wenn der Cloud-Pfad inaktiv ist. */

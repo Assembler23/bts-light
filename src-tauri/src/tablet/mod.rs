@@ -23,5 +23,6 @@ pub mod slave_bridge;
 pub mod state;
 pub mod timeline;
 pub mod tl;
+pub mod tls;
 pub mod winners;
 pub mod wish_court;

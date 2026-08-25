@@ -104,6 +104,15 @@ Anzeige. Dafür gibt es ein fertiges Skript.
    Die funktioniert in **jedem** Turnier-WLAN (der Turnier-PC meldet
    sich unter diesem festen Namen), ganz ohne IP-Adresse.
 
+   > **Bewusst `http`, nicht `https`.** Der Turnier-PC bietet seit
+   > [ADR 0047](adr/0047-lan-tls-konkretisierung.md) auch einen
+   > verschlüsselten Zugang auf Port 8443 an — für die Pis ist der aber weder
+   > vorgesehen noch nötig. Sie haben keine Echtzeituhr und würden ein
+   > Zertifikat bei falsch gestellter Uhr **still** verwerfen; und die
+   > Zertifikatswarnung ließe sich im Kiosk-Betrieb ohne Tastatur nicht
+   > bestätigen. Port 8088 bleibt deshalb dauerhaft offen. Details:
+   > [court-monitor.md](court-monitor.md).
+
 Das Skript installiert die nötigen Kleinigkeiten, schaltet die
 Bildschirm-Abschaltung aus und richtet den automatischen Start ein.
 

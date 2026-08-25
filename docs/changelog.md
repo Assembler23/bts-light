@@ -4,6 +4,38 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.269
+
+- **Neu: verschlüsselter Zugang im Hallennetz (https + wss).** Der
+  Tablet-Server bietet seine Seiten zusätzlich über Port **8443**
+  verschlüsselt an. Auf der Seite „Felder" trägt jedes Feld dafür einen
+  zweiten QR-Code mit der Marke **LAN 🔒**.
+
+  Der spürbare Gewinn für die Turnierleitung: Über diesen Weg meldet ein
+  Tablet seinen **Akkustand**. Bisher blieb die Anzeige im LAN-Betrieb leer,
+  weil der Browser die Akku-Auskunft nur auf verschlüsselten Seiten
+  herausgibt. Nebenbei reisen Spielernamen und Lizenznummern nicht mehr im
+  Klartext durchs Hallennetz.
+
+  Beim ersten Öffnen zeigt der Browser eine Zertifikatswarnung — einmal
+  „Erweitert → trotzdem fortfahren", danach ist Ruhe, auch über Neustarts
+  hinweg.
+
+  **Es ändert sich nichts von selbst.** Port 8088 bleibt unverändert offen,
+  die Court-Monitore laufen weiter wie bisher, und der bisherige QR-Code
+  bleibt die Vorgabe. Wer umstellen will, tut das **zwischen** Turnieren:
+  Für den Browser ist die neue Adresse eine andere Herkunft, und ein Tablet
+  bewahrt ein noch nicht bestätigtes Ergebnis dort auf.
+
+  Zwei bewusste Grenzen: Court-Monitor-Pis bekommen zwar Verschlüsselung,
+  aber keinen Akkustand — ihr Kiosk-Browser umgeht die Warnung, statt sie zu
+  bestätigen. Und beim interaktiven Setup erscheinen jetzt **zwei**
+  Firewall-Abfragen statt einer.
+
+  Details: [tablet.md](tablet.md), Spec
+  [features/lan-tls-verschluesselt.md](features/lan-tls-verschluesselt.md),
+  [ADR 0047](adr/0047-lan-tls-konkretisierung.md).
+
 ## v0.9.268
 
 - **Neu: „⟳ Tablets" in der Turnierleitung.** Der Knopf oben rechts lässt nach
