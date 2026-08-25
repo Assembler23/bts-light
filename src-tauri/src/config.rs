@@ -229,8 +229,14 @@ pub struct CourtMonitorConfig {
     /// für weitere Layouts.
     pub layout: String,
     /// Kombi-Anzeige: Felder NEBENEINANDER (Hochformat je Feld) statt
-    /// übereinander. Sinnvoll, wenn ein TV zwischen zwei Feldern steht.
-    /// Hängt `&dir=v` an die Kombi-URL.
+    /// übereinander — **der alte globale Schalter**.
+    ///
+    /// Seit [ADR 0049](../../docs/adr/0049-kombi-ausrichtung-eigene-geraete-datei.md)
+    /// wird die Ausrichtung **je Gerät** gewählt (`monitor-combo-dir.json`).
+    /// Dieses Feld hat kein Bedienelement mehr und wird nicht mehr
+    /// geschrieben; es bleibt eine Version lang **lesbar**, weil es die Quelle
+    /// der einmaligen Migration beim Start ist. Entfernung erst danach — und
+    /// dann auch der Spread in `SetupWizard.tsx`, der es am Leben hält.
     pub combo_vertical: bool,
     /// Darf eine Anzeige mit gesundem Push-Kanal ihren Sicherheits-Poll auf
     /// vier Sekunden verlangsamen (Spec monitor-livestand-push, S6)?
@@ -2409,5 +2415,46 @@ mod hall_color_tests {
             !cfg.remove_hall_color("Halle 1"),
             "zweites Entfernen: false"
         );
+    }
+}
+
+/// Der alte globale Kombi-Schalter (ADR 0049) — er bleibt eine Version lang
+/// lesbar, weil die einmalige Migration ihn braucht.
+#[cfg(test)]
+mod combo_dir_tests {
+    use super::*;
+
+    #[test]
+    fn court_monitor_ohne_combo_vertical_ist_false() {
+        // AK9: Eine Neuinstallation fällt auf „übereinander" — ohne Fehler.
+        let cm: CourtMonitorConfig = serde_json::from_str("{}").unwrap();
+        assert!(!cm.combo_vertical);
+    }
+
+    #[test]
+    fn gespeicherte_config_ohne_das_feld_bleibt_lesbar() {
+        // AK9 am echten Dokument: Der Assistent schreibt das Feld seit
+        // ADR 0049 nicht mehr — eine so gespeicherte Datei muss laden, und
+        // zwar auf den Standard, nicht in einen Fehler.
+        let mut doc: serde_json::Value = serde_json::to_value(AppConfig::default()).unwrap();
+        doc["court_monitor"]
+            .as_object_mut()
+            .expect("court_monitor ist ein Objekt")
+            .remove("combo_vertical")
+            .expect("die Vorgabe schreibt es noch");
+
+        let cfg: AppConfig = serde_json::from_value(doc).unwrap();
+        assert!(!cfg.court_monitor.combo_vertical);
+    }
+
+    #[test]
+    fn ein_alter_gesetzter_wert_bleibt_lesbar() {
+        // Das ist die Migrationsquelle: Wer heute global „nebeneinander"
+        // fährt, muss beim Update noch gelesen werden können.
+        let mut doc: serde_json::Value = serde_json::to_value(AppConfig::default()).unwrap();
+        doc["court_monitor"]["combo_vertical"] = serde_json::Value::Bool(true);
+
+        let cfg: AppConfig = serde_json::from_value(doc).unwrap();
+        assert!(cfg.court_monitor.combo_vertical);
     }
 }

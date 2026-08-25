@@ -20,6 +20,7 @@ import {
   forgetMonitorDevice,
   listCourtAds,
   monitorCommand,
+  monitorComboDirs,
   monitorDevices,
   openExternal,
   setMonitorHall,
@@ -28,6 +29,7 @@ import {
 import { HallFilter } from "../components/HallFilter";
 import type {
   AppConfig,
+  ComboDirView,
   CourtAd,
   CourtOverview,
   MonitorDeviceInfo,
@@ -202,6 +204,11 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
   const [hallFilter, setHallFilter] = useState<string | null>(null);
   // Offline-Geräte ausblenden (nur aus der Ansicht – Zuweisungen bleiben).
   const [hideOffline, setHideOffline] = useState(false);
+  // Kombi-Ausrichtung je Gerät + zuletzt gewählte als Vorbelegung (ADR 0049).
+  const [comboDirs, setComboDirs] = useState<ComboDirView>({
+    devices: {},
+    last: false,
+  });
 
   useEffect(() => {
     let active = true;
@@ -219,6 +226,11 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
       listCourtAds()
         .then((a) => {
           if (active) setAds(a);
+        })
+        .catch(() => {});
+      monitorComboDirs()
+        .then((c) => {
+          if (active) setComboDirs(c);
         })
         .catch(() => {});
     };
@@ -284,6 +296,7 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
   async function refresh() {
     try {
       setDevices(await monitorDevices());
+      setComboDirs(await monitorComboDirs());
     } catch {
       /* ignorieren – nächster Poll versucht es erneut */
     }
@@ -298,9 +311,13 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
     }
   }
 
-  async function assign(deviceId: string, target: MonitorTarget | null) {
+  async function assign(
+    deviceId: string,
+    target: MonitorTarget | null,
+    comboVertical?: boolean,
+  ) {
     try {
-      await assignMonitor(deviceId, target);
+      await assignMonitor(deviceId, target, comboVertical);
       await refresh();
     } catch {
       /* ignorieren */
@@ -496,7 +513,11 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
                     courts={courts}
                     ads={ads}
                     allHalls={allHalls}
-                    onAssign={(target) => void assign(d.id, target)}
+                    comboVertical={comboDirs.devices[d.id]}
+                    comboLast={comboDirs.last}
+                    onAssign={(target, comboVertical) =>
+                      void assign(d.id, target, comboVertical)
+                    }
                     onSetHall={(hall) => void setHall(d.id, hall)}
                     onIdentify={() => void monitorCommand(d.id, "identify")}
                     onReload={() => void monitorCommand(d.id, "reload")}
@@ -531,7 +552,11 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
                     courts={courts}
                     ads={ads}
                     allHalls={allHalls}
-                    onAssign={(target) => void assign(d.id, target)}
+                    comboVertical={comboDirs.devices[d.id]}
+                    comboLast={comboDirs.last}
+                    onAssign={(target, comboVertical) =>
+                      void assign(d.id, target, comboVertical)
+                    }
                     onSetHall={(hall) => void setHall(d.id, hall)}
                     onIdentify={() => void monitorCommand(d.id, "identify")}
                     onReload={() => void monitorCommand(d.id, "reload")}
@@ -571,6 +596,8 @@ function DeviceRow({
   courts,
   ads,
   allHalls,
+  comboVertical,
+  comboLast,
   onAssign,
   onSetHall,
   onIdentify,
@@ -582,7 +609,12 @@ function DeviceRow({
   ads: CourtAd[];
   /** Alle Hallen des Turniers – für das Hallen-Dropdown (ab 2 Hallen). */
   allHalls: string[];
-  onAssign: (target: MonitorTarget | null) => void;
+  /** Kombi-Ausrichtung dieses Geräts (true = Felder nebeneinander).
+   *  `undefined` = für dieses Gerät wurde noch nie eine gewählt. */
+  comboVertical: boolean | undefined;
+  /** Zuletzt gewählte Ausrichtung — Vorbelegung für ein neues Kombi-Gerät. */
+  comboLast: boolean;
+  onAssign: (target: MonitorTarget | null, comboVertical?: boolean) => void;
   /** Explizite Halle setzen (Name) oder aufheben (null). */
   onSetHall: (hall: string | null) => void;
   onIdentify: () => void;
@@ -826,10 +858,11 @@ function DeviceRow({
         <ComboDialog
           fields={fieldOptions}
           initial={comboCourtIds ?? []}
+          initialVertical={comboVertical ?? comboLast}
           onCancel={() => setComboOpen(false)}
-          onConfirm={(ids) => {
+          onConfirm={(ids, vertical) => {
             setComboOpen(false);
-            onAssign({ kind: "court_combo", court_ids: ids });
+            onAssign({ kind: "court_combo", court_ids: ids }, vertical);
           }}
         />
       )}
@@ -846,17 +879,23 @@ function DeviceRow({
 function ComboDialog({
   fields,
   initial,
+  initialVertical,
   onCancel,
   onConfirm,
 }: {
   fields: { id: number; label: string; location: string }[];
   initial: number[];
+  /** Vorbelegung der Ausrichtung: bei einem bestehenden Kombi-Gerät dessen
+   *  eigene, sonst die zuletzt gewählte (ADR 0049). */
+  initialVertical: boolean;
   onCancel: () => void;
-  onConfirm: (ids: number[]) => void;
+  onConfirm: (ids: number[], vertical: boolean) => void;
 }) {
   const MAX = 3;
   // Auswahl als geordnete Liste (Reihenfolge = Band-Reihenfolge).
   const [selected, setSelected] = useState<number[]>(initial);
+  // Felder nebeneinander (Hochformat je Feld) statt übereinander?
+  const [vertical, setVertical] = useState<boolean>(initialVertical);
 
   function toggle(id: number) {
     setSelected((prev) => {
@@ -879,8 +918,8 @@ function ComboDialog({
           Kombi-Anzeige — Felder wählen
         </h3>
         <p className="mt-1 text-sm text-slate-500">
-          Wähle 2–3 Felder. Sie werden als Bänder untereinander auf einem
-          Bildschirm angezeigt (Reihenfolge = Auswahl-Reihenfolge).
+          Wähle 2–3 Felder und wie sie auf dem Bildschirm stehen sollen
+          (Reihenfolge = Auswahl-Reihenfolge).
         </p>
 
         <div className="mt-3 flex max-h-72 flex-col gap-1 overflow-y-auto">
@@ -919,6 +958,47 @@ function ComboDialog({
           })}
         </div>
 
+        <fieldset className="mt-4">
+          <legend className="text-sm font-medium text-slate-700">
+            Ausrichtung
+          </legend>
+          <div className="mt-1.5 flex flex-col gap-1">
+            {[
+              {
+                wert: false,
+                text: "Felder übereinander",
+                hilfe: "Ein breites Band je Feld — für einen TV über oder neben den Feldern.",
+              },
+              {
+                wert: true,
+                text: "Felder nebeneinander",
+                hilfe: "Ein hohes Band je Feld — für einen TV zwischen den Feldern.",
+              },
+            ].map((o) => (
+              <label
+                key={String(o.wert)}
+                className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-sm ${
+                  vertical === o.wert
+                    ? "border-slate-400 bg-slate-50"
+                    : "border-slate-200"
+                }`}
+              >
+                <input
+                  type="radio"
+                  className="mt-0.5"
+                  name="kombi-ausrichtung"
+                  checked={vertical === o.wert}
+                  onChange={() => setVertical(o.wert)}
+                />
+                <span className="flex-1">
+                  <span className="text-slate-700">{o.text}</span>
+                  <span className="block text-xs text-slate-400">{o.hilfe}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
         <div className="mt-4 flex items-center justify-between">
           <span className="text-xs text-slate-400">
             {selected.length} / {MAX} gewählt
@@ -932,7 +1012,7 @@ function ComboDialog({
               Abbrechen
             </button>
             <button
-              onClick={() => onConfirm(selected)}
+              onClick={() => onConfirm(selected, vertical)}
               disabled={selected.length < 2}
               className="rounded-lg bg-slate-800 px-3.5 py-1.5 text-sm font-medium
                          text-white transition-colors hover:bg-slate-900

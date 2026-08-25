@@ -248,8 +248,13 @@ export interface CourtMonitorConfig {
   show_ads: boolean;
   /** Anzeige-Layout des Monitors (`split` = „A — Geteilt"). */
   layout: string;
-  /** Kombi-Anzeige: Felder nebeneinander (Hochformat) statt übereinander. */
-  combo_vertical: boolean;
+  /**
+   * @deprecated Seit ADR 0049 wird die Kombi-Ausrichtung **je Gerät** gewählt
+   * (`monitor-combo-dir.json`, Command `monitor_combo_dirs`). Dieses Feld ist
+   * nur noch die Quelle der einmaligen Migration und verschwindet in einer
+   * späteren Version. Nicht mehr schreiben, kein Bedienelement.
+   */
+  combo_vertical?: boolean;
   /**
    * Darf eine Anzeige mit gesundem Push-Kanal ihren Sicherheits-Abruf auf
    * vier Sekunden verlangsamen? Standard aus; bewusst nur über die
@@ -285,6 +290,14 @@ export type MonitorTarget =
   | { kind: "ad_rotation" }
   | { kind: "ad_single"; file: string }
   | { kind: "court_combo"; court_ids: number[] };
+
+/** Kombi-Ausrichtung je Monitor-Gerät (Rust: tablet::monitor::ComboDirStore).
+ *  `devices[deviceId] === true` heißt „Felder nebeneinander"; `last` ist die
+ *  zuletzt gewählte Ausrichtung als Vorbelegung für ein neues Kombi-Gerät. */
+export interface ComboDirView {
+  devices: Record<string, boolean>;
+  last: boolean;
+}
 
 /** Ein platzierter Spieler im Podium (Rust: tablet::winners::WinnerPlayer). */
 export interface WinnerPlayer {

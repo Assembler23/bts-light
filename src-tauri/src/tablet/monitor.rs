@@ -475,6 +475,96 @@ pub fn write_halls(path: &Path, map: &HashMap<String, String>) -> std::io::Resul
     write_atomic(path, &json)
 }
 
+/// Dateiname der Kombi-Ausrichtung je Monitor-Gerät. Getrennt von den
+/// Feld-Zuweisungen und von der Hallen-Zuordnung — die Begründung steht in
+/// [ADR 0049](../../../docs/adr/0049-kombi-ausrichtung-eigene-geraete-datei.md):
+/// am `MonitorTarget` hängend reiste die Ausrichtung über die Wire-Ebene zum
+/// Relay, obwohl die Kombi-Anzeige reiner LAN-Betrieb ist, und ginge beim
+/// Wechsel auf ein Einzelfeld verloren.
+pub const MONITOR_COMBO_DIR_FILE: &str = "monitor-combo-dir.json";
+
+/// Ausrichtung der Kombi-Anzeige je Gerät. `true` = Felder **nebeneinander**
+/// (Hochformat je Feld), `false` = **übereinander**.
+///
+/// `last` merkt sich die zuletzt gewählte Ausrichtung als Vorschlagswert für
+/// neu angelegte Kombi-Zuweisungen. Er wohnt hier und nicht in der Config,
+/// weil jedes Config-Feld dem Rückschreiben des Setup-Assistenten unterliegt.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ComboDirStore {
+    /// Geräte-ID → nebeneinander?
+    #[serde(default)]
+    pub devices: HashMap<String, bool>,
+    /// Zuletzt gewählte Ausrichtung (Vorschlag für das nächste Gerät).
+    #[serde(default)]
+    pub last: bool,
+}
+
+impl ComboDirStore {
+    /// Ausrichtung eines **bekannten** Geräts; unbekannt = übereinander.
+    pub fn vertikal_fuer(&self, device_id: &str) -> bool {
+        self.devices.get(device_id).copied().unwrap_or(false)
+    }
+
+    /// Ausrichtung für die Antwort an eine Kombi-Seite. `None`, wenn die Seite
+    /// sich nicht als Gerät zu erkennen gibt (hand-getippte Kiosk-URL ohne
+    /// `?device=`) — dann behält ihr URL-Startwert `?dir=v` das letzte Wort.
+    pub fn ausrichtung_fuer(&self, device_id: Option<&str>) -> Option<bool> {
+        device_id.map(|id| self.vertikal_fuer(id))
+    }
+
+    /// Setzt die Ausrichtung eines Geräts. `None` heißt **unverändert**, nicht
+    /// „übereinander" — der Dropdown-Schlüssel des Bedienpanels trägt die
+    /// Ausrichtung nicht, ein erneutes Auswählen derselben Kombi-Option darf
+    /// sie also nicht still zurücksetzen.
+    pub fn apply_combo_dir(&mut self, device_id: &str, vertical: Option<bool>) {
+        let Some(v) = vertical else { return };
+        self.devices.insert(device_id.to_string(), v);
+        self.last = v;
+    }
+}
+
+/// Liest die Kombi-Ausrichtungen. Fehlt/klemmt die Datei: Standardwerte.
+pub fn read_combo_dirs(path: &Path) -> ComboDirStore {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Übernimmt den alten **globalen** Schalter `CourtMonitorConfig.combo_vertical`
+/// einmalig in die Geräte-Datei und legt sie an. Gibt `true` zurück, wenn dabei
+/// tatsächlich migriert wurde.
+///
+/// Merker ist die **Existenz** der Datei, nicht ein Config-Feld: Damit kann die
+/// Migration sich nicht wiederholen und eine später von Hand geänderte
+/// Ausrichtung überschreiben. Die Datei entsteht auch dann, wenn es (noch) kein
+/// Kombi-Gerät gibt — sonst liefe die Migration bei jedem Start erneut.
+pub fn migrate_combo_dirs(
+    store_path: &Path,
+    assignments: &HashMap<String, MonitorTarget>,
+    global_vertical: bool,
+) -> bool {
+    if store_path.exists() {
+        return false;
+    }
+    let mut store = ComboDirStore {
+        last: global_vertical,
+        ..Default::default()
+    };
+    for (device_id, target) in assignments {
+        if matches!(target, MonitorTarget::CourtCombo { .. }) {
+            store.devices.insert(device_id.clone(), global_vertical);
+        }
+    }
+    write_combo_dirs(store_path, &store).is_ok()
+}
+
+/// Schreibt die Kombi-Ausrichtungen.
+pub fn write_combo_dirs(path: &Path, store: &ComboDirStore) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(store).unwrap_or_else(|_| "{}".to_string());
+    write_atomic(path, &json)
+}
+
 /// Anzeige-Zustand für ein noch keinem Feld zugewiesenes Gerät – der
 /// Monitor zeigt damit die Kopplungs-Seite mit seinem Code.
 pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
@@ -861,5 +951,203 @@ mod tests {
         // court_id() ist None fuer Kombi → wird im Cloud-Filter (nur
         // Court-Targets) korrekt ausgeschlossen, LAN-only wie Info/Ad.
         assert_eq!(MonitorTarget::court_combo(vec![1, 2]).court_id(), None);
+    }
+
+    // ── Kombi-Ausrichtung je Gerät (Spec kombi-ausrichtung-je-monitor, ADR 0049) ──
+
+    #[test]
+    fn read_combo_dirs_missing_file_is_empty_then_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_COMBO_DIR_FILE);
+
+        // Fehlt die Datei, ist der Store leer und die Vorbelegung „übereinander".
+        let leer = read_combo_dirs(&path);
+        assert!(leer.devices.is_empty());
+        assert!(!leer.last);
+
+        let mut store = ComboDirStore::default();
+        store.apply_combo_dir("geraet-a", Some(true));
+        store.apply_combo_dir("geraet-b", Some(false));
+        write_combo_dirs(&path, &store).unwrap();
+
+        assert_eq!(read_combo_dirs(&path), store);
+    }
+
+    #[test]
+    fn read_combo_dirs_corrupt_file_is_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_COMBO_DIR_FILE);
+        std::fs::write(&path, "{ kaputt").unwrap();
+        assert_eq!(read_combo_dirs(&path), ComboDirStore::default());
+    }
+
+    #[test]
+    fn unbekanntes_geraet_ist_uebereinander() {
+        // AK9: eine frische Installation kennt kein Gerät und zeigt den
+        // Standard — ohne dass irgendwo ein Wert gesetzt sein müsste.
+        let store = ComboDirStore::default();
+        assert!(!store.vertikal_fuer("nie-gesehen"));
+        assert_eq!(store.ausrichtung_fuer(Some("nie-gesehen")), Some(false));
+    }
+
+    #[test]
+    fn ausrichtung_fuer_ohne_geraet_ist_none() {
+        // AK7: Eine hand-getippte /combo-URL ohne ?device= ist dem Host
+        // unbekannt. Ein pauschales `false` kippte sie auf „übereinander" und
+        // machte ihren Startwert ?dir=v wirkungslos — also gar nichts sagen.
+        let mut store = ComboDirStore::default();
+        store.apply_combo_dir("geraet-a", Some(true));
+        assert_eq!(store.ausrichtung_fuer(None), None);
+    }
+
+    #[test]
+    fn apply_combo_dir_none_laesst_den_wert_stehen() {
+        // AK4: Kombi → Einzelfeld → Kombi. `assign_monitor` reicht bei einem
+        // Court-Target `None` durch; das darf die Ausrichtung NICHT löschen.
+        let mut store = ComboDirStore::default();
+        store.apply_combo_dir("geraet-a", Some(true));
+        store.apply_combo_dir("geraet-a", None);
+        assert!(store.vertikal_fuer("geraet-a"), "None heißt unverändert");
+    }
+
+    #[test]
+    fn apply_combo_dir_some_setzt_auch_zuletzt() {
+        // AK11: der Vorschlagswert folgt der jeweils letzten echten Wahl.
+        let mut store = ComboDirStore::default();
+        store.apply_combo_dir("geraet-a", Some(true));
+        assert!(store.last);
+        store.apply_combo_dir("geraet-b", Some(false));
+        assert!(!store.last);
+        // `None` ist keine Wahl und rührt den Vorschlag nicht an.
+        store.apply_combo_dir("geraet-c", None);
+        assert!(!store.last);
+    }
+
+    #[test]
+    fn apply_combo_dir_beruehrt_nur_das_genannte_geraet() {
+        // AK1: zwei Kombi-TVs stehen unterschiedlich; das Umstellen des einen
+        // lässt den anderen in Ruhe.
+        let mut store = ComboDirStore::default();
+        store.apply_combo_dir("geraet-a", Some(true));
+        store.apply_combo_dir("geraet-b", Some(false));
+        store.apply_combo_dir("geraet-a", Some(false));
+        assert!(!store.vertikal_fuer("geraet-a"));
+        assert!(!store.vertikal_fuer("geraet-b"));
+        store.apply_combo_dir("geraet-b", Some(true));
+        assert!(!store.vertikal_fuer("geraet-a"));
+        assert!(store.vertikal_fuer("geraet-b"));
+    }
+
+    #[test]
+    fn eine_ausrichtungs_aenderung_aendert_den_dateiinhalt() {
+        // Wie bei den Werbe-Stilen: Der Server merkt sich den Store am
+        // **Inhalt** der Datei, nicht an (Änderungszeit, Größe). Zwei Geräte
+        // gegenläufig umzustellen ist längenerhaltend, und Windows-Zeitstempel
+        // rücken nur im ~15,6-ms-Takt vor — am alten Schlüssel wäre der
+        // Wechsel ununterscheidbar und die alte Ausrichtung bliebe stehen.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_COMBO_DIR_FILE);
+        let mut store = ComboDirStore::default();
+        store.apply_combo_dir("geraet-a", Some(true));
+        store.apply_combo_dir("geraet-b", Some(false));
+        write_combo_dirs(&path, &store).unwrap();
+        let vorher = std::fs::read_to_string(&path).unwrap();
+
+        // Gegenläufig: a wird false, b wird true. `last` bleibt dabei gleich,
+        // damit wirklich nur die längenerhaltende Änderung übrig bleibt.
+        store.apply_combo_dir("geraet-a", Some(false));
+        store.apply_combo_dir("geraet-b", Some(true));
+        store.last = false;
+        write_combo_dirs(&path, &store).unwrap();
+        let nachher = std::fs::read_to_string(&path).unwrap();
+
+        assert_eq!(
+            vorher.len(),
+            nachher.len(),
+            "gegenläufiges Umstellen ist längenerhaltend — die Größe taugt nicht als Schlüssel"
+        );
+        assert_ne!(vorher, nachher, "der Inhalt unterscheidet sich sehr wohl");
+    }
+
+    /// Zwei Kombi-Geräte, ein Einzelfeld-Gerät, ein Info-Gerät.
+    fn migrations_zuweisungen() -> HashMap<String, MonitorTarget> {
+        HashMap::from([
+            (
+                "kombi-1".to_string(),
+                MonitorTarget::court_combo(vec![1, 2]),
+            ),
+            (
+                "kombi-2".to_string(),
+                MonitorTarget::court_combo(vec![3, 4, 5]),
+            ),
+            ("einzel".to_string(), MonitorTarget::Court { court_id: 7 }),
+            ("info".to_string(), MonitorTarget::InfoPreparation),
+        ])
+    }
+
+    #[test]
+    fn migration_uebernimmt_den_globalen_wert_auf_alle_kombi_geraete() {
+        // AK8: Wer heute global „nebeneinander" fährt, sieht nach dem Update
+        // dasselbe Bild wie vorher.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_COMBO_DIR_FILE);
+
+        assert!(migrate_combo_dirs(&path, &migrations_zuweisungen(), true));
+
+        let store = read_combo_dirs(&path);
+        assert!(store.vertikal_fuer("kombi-1"));
+        assert!(store.vertikal_fuer("kombi-2"));
+        assert!(store.last, "auch der Vorschlag für das nächste Gerät");
+    }
+
+    #[test]
+    fn migration_ruehrt_nicht_kombi_geraete_nicht_an() {
+        // Einzelfeld- und Info-Geräte haben keine Kombi-Ausrichtung; ein
+        // Eintrag für sie wäre Datenmüll, der bei einer späteren
+        // Kombi-Zuweisung überraschend wieder auftauchte.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_COMBO_DIR_FILE);
+
+        migrate_combo_dirs(&path, &migrations_zuweisungen(), true);
+
+        let store = read_combo_dirs(&path);
+        assert!(!store.devices.contains_key("einzel"));
+        assert!(!store.devices.contains_key("info"));
+        assert_eq!(store.devices.len(), 2);
+    }
+
+    #[test]
+    fn migration_laeuft_nur_einmal_und_ueberschreibt_nichts() {
+        // AK8, zweiter Start: Der Turnierleiter hat ein Gerät nach dem Update
+        // von Hand auf „übereinander" gestellt. Ein Neustart darf ihm das
+        // nicht wieder wegnehmen.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_COMBO_DIR_FILE);
+        let zuweisungen = migrations_zuweisungen();
+
+        assert!(migrate_combo_dirs(&path, &zuweisungen, true));
+
+        let mut store = read_combo_dirs(&path);
+        store.apply_combo_dir("kombi-1", Some(false));
+        write_combo_dirs(&path, &store).unwrap();
+
+        assert!(
+            !migrate_combo_dirs(&path, &zuweisungen, true),
+            "die Datei ist da — es gibt nichts mehr zu migrieren"
+        );
+        assert!(!read_combo_dirs(&path).vertikal_fuer("kombi-1"));
+    }
+
+    #[test]
+    fn migration_legt_die_datei_auch_ohne_kombi_geraet_an() {
+        // Sonst fehlte der Merker und die Migration liefe bei jedem Start
+        // erneut — und griffe genau dann, wenn später das erste Kombi-Gerät
+        // eingerichtet ist.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_COMBO_DIR_FILE);
+
+        assert!(migrate_combo_dirs(&path, &HashMap::new(), true));
+        assert!(path.exists(), "der Merker muss entstehen");
+        assert!(!migrate_combo_dirs(&path, &HashMap::new(), true));
     }
 }

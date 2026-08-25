@@ -701,12 +701,6 @@ Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tau
   Bild).
 - **Wechsel-Intervall** — 3–30 s.
 - **Layout** — Anzeige-Layout des Monitors (aktuell „A — Geteilt").
-- **Kombi-Anzeige: Felder nebeneinander** (`combo_vertical`, seit v0.9.97) —
-  zeigt bei der Kombi-Anzeige zwei Felder **nebeneinander** (Hochformat je Feld:
-  Team 1 oben, Spielstand als Satz-Paare mittig, Team 2 unten) statt
-  über­einander. Sinnvoll, wenn ein TV zwischen zwei Feldern steht. Der Server
-  hängt dann `&dir=v` an die Kombi-URL (`/combo?courts=…&dir=v`). Globaler
-  Schalter (gilt für alle Kombi-Anzeigen).
 - **Anzeige-Optionen** — Disziplin / Runde / Spielnummer / Spieldauer /
   Pausen-Timer je einzeln ein-/ausblenden. Eine Live-Vorschau im Setup
   zeigt die Wirkung jeder Option sofort.
@@ -716,11 +710,50 @@ Seite **„Court-Monitore"** (Dashboard → Court-Monitore).
 
 ## Kombi-Anzeige (`combo.html`)
 
-Mehrere Felder auf einem TV (bis zu 3), als Bänder über- oder (mit
-`combo_vertical`) nebeneinander. Datenquelle ist `/combo/state` —
+Mehrere Felder auf einem TV (bis zu 3), als Bänder über- oder nebeneinander —
+**je Gerät wählbar** (siehe unten). Datenquelle ist `/combo/state` —
 derselbe `overview()`-Stand wie die Einzelanzeige. **Nur LAN:** der Relay
 transportiert nur Einzelfeld-Zuweisungen, Kombi-Monitore laufen daher über
 den Turnier-PC.
+
+### Ausrichtung je Gerät (seit v0.9.270)
+
+Bis v0.9.269 galt **ein** globaler Schalter für alle Kombi-Anzeigen. Das passte
+nicht zur Halle: Ein TV über dem Mittelgang zwischen zwei Feldern will sie
+nebeneinander, ein TV an der Stirnseite über drei Feldern übereinander.
+
+Die Ausrichtung wird deshalb dort gewählt, wo ohnehin die Felder gewählt werden
+— **Dashboard → Court-Monitore**, beim Gerät „Kombi-Anzeige → Felder wählen…":
+
+- **Felder übereinander** — ein breites Band je Feld. Für einen TV über oder
+  neben den Feldern.
+- **Felder nebeneinander** — ein hohes Band je Feld (Team 1 oben, Spielstand
+  als Satz-Paare mittig, Team 2 unten). Für einen TV zwischen den Feldern.
+
+Ein neu eingerichtetes Kombi-Gerät wird mit der **zuletzt gewählten**
+Ausrichtung vorbelegt — in einer Halle mit gleich montierten TVs stellt man also
+nur beim ersten um. Drei Felder nebeneinander sind erlaubt; ob das aus der
+letzten Reihe noch lesbar ist, entscheidet die Halle.
+
+Der TV übernimmt die Änderung **binnen etwa einer Sekunde und ohne die Seite neu
+zu laden** — der Satzstand bleibt durchgehend sichtbar, auch mitten im Spiel.
+Die Ausrichtung reist dafür im laufenden `/combo/state`-Poll mit.
+
+Gespeichert wird sie je Gerät in `monitor-combo-dir.json` neben der
+Zuweisungsdatei ([ADR 0049](adr/0049-kombi-ausrichtung-eigene-geraete-datei.md));
+sie bleibt deshalb erhalten, wenn ein Gerät zwischenzeitlich ein Einzelfeld
+zugewiesen bekommt.
+
+**Beim Update von einer älteren Version** wird der alte globale Schalter
+einmalig auf alle vorhandenen Kombi-Geräte übernommen — am Bild ändert sich
+nichts. Wird später eine ältere Version installiert, kennt sie die Datei nicht
+und alle Kombi-TVs folgen wieder dem globalen Schalter; die Feld-Zuweisungen
+bleiben dabei erhalten.
+
+**Grenze:** `?dir=v` in einer **von Hand gebauten** Kiosk-Adresse wirkt weiterhin
+— aber nur als Startwert. Eine solche Seite ohne `?device=` ist dem Turnier-PC
+unbekannt und folgt Änderungen im Dialog nicht. Für gekoppelte Geräte (der
+Normalfall über den Kopplungs-Code) gilt immer die Wahl aus dem Dialog.
 
 - **Satz-Sieger deutlich hinterlegt** (seit v0.9.105): Der gewonnene Satz
   steht nicht nur weiß/grau, sondern als **grüner Block** (`.set.won` /

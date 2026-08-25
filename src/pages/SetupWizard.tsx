@@ -397,9 +397,6 @@ export function SetupWizard({
   const [cmMatchClock, setCmMatchClock] = useState(cm.show_match_clock);
   const [cmAds, setCmAds] = useState(cm.show_ads);
   const [cmLayout, setCmLayout] = useState(cm.layout || "split");
-  const [cmComboVertical, setCmComboVertical] = useState(
-    cm.combo_vertical ?? false,
-  );
   // Turnierweite Vereins-Anzeige (TL-Web + Tablet). Zentral, nicht je Gerät.
   const disp = initialConfig.display ?? {
     show_club_names: false,
@@ -512,7 +509,11 @@ export function SetupWizard({
         // Erst der gespeicherte Stand, dann die Felder des Assistenten:
         // `push_fallback_slow` hat bewusst kein Bedienelement (nur
         // `config.json`) und wäre beim Speichern sonst stillschweigend auf
-        // „aus" zurückgefallen. Der Spread hält auch künftige solche Felder.
+        // „aus" zurückgefallen. Ebenso `combo_vertical` — es ist seit ADR 0049
+        // nur noch die Quelle der einmaligen Migration und darf hier NICHT
+        // ausgeschrieben werden, sonst kippte es für Installationen, die noch
+        // nicht aktualisiert haben, auf „aus". Der Spread hält auch künftige
+        // solche Felder.
         ...initialConfig.court_monitor,
         enabled: cmEnabled,
         ad_interval_s: cmInterval,
@@ -523,7 +524,6 @@ export function SetupWizard({
         show_match_clock: cmMatchClock,
         show_ads: cmAds,
         layout: cmLayout,
-        combo_vertical: cmComboVertical,
       },
       // Schwellen robust auflösen: ungültige/leere Eingabe → Standard; und der
       // 3. Aufruf muss nach dem 2. liegen (sonst übersprünge die Anzeige den
@@ -1929,15 +1929,6 @@ export function SetupWizard({
                 >
                   <option value="split">A — Geteilt (oben/unten)</option>
                 </select>
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={cmComboVertical}
-                  onChange={(e) => setCmComboVertical(e.currentTarget.checked)}
-                />
-                Kombi-Anzeige: Felder <strong>nebeneinander</strong> (Hochformat
-                je Feld – für einen TV zwischen zwei Feldern)
               </label>
               {/* Live-Vorschau: aktualisiert sich mit jeder Checkbox. */}
               <MonitorPreview

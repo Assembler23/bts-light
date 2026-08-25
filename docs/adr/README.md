@@ -54,3 +54,9 @@ hier eintragen.
 | [0041](0041-werbe-stil-je-bild.md) | Werbe-Hintergrund und Feldbezeichnung: Stil je Bild statt global | accepted |
 | [0042](0042-stiller-druck-ueber-elementliste.md) | Stiller Druck über eine Elementliste, nicht über den WebView | accepted |
 | [0043](0043-zettelblatt-nach-dbv-vorbild.md) | Das Zettelblatt folgt dem DBV-Bogen, nicht dem eigenen Raster | accepted |
+| [0044](0044-sperrliste-turniergebunden.md) | Die Sperrliste gilt für ein Turnier | accepted |
+| [0045](0045-fertig-warnung-serverseitig-gestempelt.md) | „Fertig, aber kein Ergebnis": Host stempelt, Seite rechnet | accepted |
+| [0046](0046-wunschfeld-reserviert-ab-spielbereitschaft.md) | Das Wunschfeld reserviert ab Spielbereitschaft | accepted |
+| [0047](0047-lan-tls-konkretisierung.md) | LAN-TLS: Crate-Wahl, Zertifikatsstrategie und Port-Koexistenz | accepted |
+| [0048](0048-substrom-adressierung-traeger.md) | Ferne Halle: Träger-Verbindung, Substrom-Adressierung und lokale Terminierung | accepted |
+| [0049](0049-kombi-ausrichtung-eigene-geraete-datei.md) | Kombi-Ausrichtung je Gerät: eigene Geräte-Datei statt Target-Feld | accepted |

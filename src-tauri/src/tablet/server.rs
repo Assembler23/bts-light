@@ -115,6 +115,12 @@ pub struct ServerCtx {
     /// des `ads_cache` zu verlassen, wäre falsch: Ein Stil-Wechsel fasst kein
     /// Bild an.
     style_cache: std::sync::Mutex<StyleCache>,
+    /// Zwischenstand der Kombi-Ausrichtung je Gerät, ebenfalls am **Inhalt**
+    /// der Datei gemerkt (ADR 0049). Aus demselben Grund wie beim Werbe-Stil:
+    /// Zwei Geräte gegenläufig umzustellen ist längenerhaltend und wäre an
+    /// `(Änderungszeit, Größe)` nicht zu erkennen — der Zwischenstand
+    /// lieferte die alte Ausrichtung dann unbegrenzt weiter.
+    combo_dir_cache: std::sync::Mutex<ComboDirCache>,
 }
 
 /// Das dekodierte Turnierlogo, geschlüsselt nach der Marke seines Inhalts.
@@ -127,6 +133,10 @@ type BarCache = Option<((std::time::SystemTime, u64), Arc<HashSet<String>>)>;
 /// Der Werbe-Stil je Bilddatei, geschlüsselt nach dem **Dateiinhalt** — siehe
 /// [`ServerCtx::ad_style`], warum hier nicht `(Änderungszeit, Größe)` reicht.
 type StyleCache = Option<(String, Arc<HashMap<String, monitor::AdStyle>>)>;
+
+/// Die Kombi-Ausrichtung je Gerät, geschlüsselt nach dem **Dateiinhalt** —
+/// siehe [`ServerCtx::combo_dirs`].
+type ComboDirCache = Option<(String, Arc<monitor::ComboDirStore>)>;
 
 /// Die Live-Score-Pushes an badhub, **je Feld serialisiert und
 /// gebündelt** — und vor allem: **außerhalb** der Tablet-Verbindung.
@@ -261,6 +271,7 @@ impl ServerCtx {
             logo_cache: std::sync::Mutex::new(None),
             bar_cache: std::sync::Mutex::new(None),
             style_cache: std::sync::Mutex::new(None),
+            combo_dir_cache: std::sync::Mutex::new(None),
             score_push: Arc::new(ScorePushQueue::default()),
         }
     }
@@ -429,6 +440,37 @@ impl ServerCtx {
         let stile = Arc::new(monitor::parse_ad_style(&roh));
         *self.style_cache.lock().expect("Stil-Cache nicht vergiftet") = Some((roh, stile.clone()));
         stile
+    }
+
+    /// Die Kombi-Ausrichtung je Gerät (ADR 0049), gemerkt am **Inhalt** der
+    /// Datei — aus demselben Grund wie bei [`Self::ad_style`]: Zwei Geräte
+    /// gegenläufig umzustellen ist längenerhaltend, und Windows-Zeitstempel
+    /// rücken nur im ~15,6-ms-Takt vor. Gelesen wird die Datei von jedem
+    /// Kombi-Poll (Sekundentakt je Gerät), geschrieben nur beim Einstellen.
+    fn combo_dirs(&self) -> Arc<monitor::ComboDirStore> {
+        let pfad = self
+            .assignments_path
+            .with_file_name(monitor::MONITOR_COMBO_DIR_FILE);
+        let Ok(roh) = std::fs::read_to_string(&pfad) else {
+            return Arc::new(monitor::ComboDirStore::default());
+        };
+        {
+            let cache = self
+                .combo_dir_cache
+                .lock()
+                .expect("Kombi-Cache nicht vergiftet");
+            if let Some((gemerkt, store)) = cache.as_ref() {
+                if *gemerkt == roh {
+                    return store.clone();
+                }
+            }
+        }
+        let store = Arc::new(serde_json::from_str(&roh).unwrap_or_default());
+        *self
+            .combo_dir_cache
+            .lock()
+            .expect("Kombi-Cache nicht vergiftet") = Some((roh, Arc::clone(&store)));
+        store
     }
 
     /// Wie [`Self::app_config`], aber **mit** dem Lesefehler.
@@ -1566,17 +1608,13 @@ async fn monitor_device_state(
         Some(ref target) if target.redirect_path().is_some() => {
             let mut s = monitor::unassigned_monitor_state(&device);
             s.unassigned = false;
-            let mut path = target.redirect_path();
-            // Kombi nebeneinander (Hochformat je Feld): globaler Schalter aus
-            // den Court-Monitor-Einstellungen hängt `&dir=v` an die Kombi-URL.
-            if matches!(target, relay_proto::MonitorTarget::CourtCombo { .. })
-                && ctx.app_config_arc().court_monitor.combo_vertical
-            {
-                if let Some(p) = path.as_mut() {
-                    p.push_str("&dir=v");
-                }
-            }
-            s.redirect_to = path;
+            // Die Kombi-Ausrichtung hängt **nicht** mehr an der URL (ADR 0049):
+            // sie reist im `/combo/state`-Poll mit und schaltet dort nur eine
+            // CSS-Klasse um. In der Redirect-URL erzwänge sie bei jedem
+            // Wechsel einen vollen Seitenaufbau — und der Vergleich in
+            // `combo.html` ist positionsabhängig, hinter `device` stehend
+            // löste sie eine Endlos-Umleitung aus.
+            s.redirect_to = target.redirect_path();
             s
         }
         // Sollte unerreichbar sein (redirect_path() ist Some für alle
@@ -1891,9 +1929,20 @@ async fn combo_state(
         .iter()
         .filter_map(|id| overview.iter().find(|c| c.court_id == *id))
         .collect();
+    // Ausrichtung je Gerät (ADR 0049). Bewusst `null`, wenn die Seite sich
+    // nicht als Gerät zu erkennen gibt: Eine hand-getippte Kiosk-URL ohne
+    // `?device=` ist dem Host unbekannt, und ein pauschales `false` kippte
+    // ihren Startwert `?dir=v` auf „übereinander".
+    let vertical = ctx
+        .combo_dirs()
+        .ausrichtung_fuer(q.device.as_deref().filter(|d| !d.is_empty()));
     // serverNowMs reicht combo.html die Server-Zeit für den Pausen-Countdown
     // durch (Pi hat evtl. keine synchrone Uhr; endsAt steht in Server-Zeit).
-    let payload = serde_json::json!({ "courts": courts, "serverNowMs": monitor::now_ms() });
+    let payload = serde_json::json!({
+        "courts": courts,
+        "serverNowMs": monitor::now_ms(),
+        "vertical": vertical,
+    });
     ([(header::CACHE_CONTROL, "no-store")], Json(payload))
 }
 

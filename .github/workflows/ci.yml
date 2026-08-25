@@ -137,6 +137,12 @@ jobs:
       - name: Teil-Patch der Übersicht (JS)
         run: node scripts/test-court-patch.mjs
 
+      # Adressvergleich und Ausrichtung der Kombi-Anzeige. Zu streng: der TV
+      # navigiert im Sekundentakt neu; zu großzügig: eine Umzuweisung kommt
+      # nie an oder eine hand-getippte Kiosk-URL verliert ihren Startwert.
+      - name: "Kombi-Anzeige: Adresse und Ausrichtung (JS)"
+        run: node scripts/test-combo-ansicht.mjs
+
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
       # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter

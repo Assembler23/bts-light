@@ -13,6 +13,7 @@ import type {
   FreetextItem,
   HallColorsView,
   HallLayoutConfig,
+  ComboDirView,
   MonitorDeviceInfo,
   MonitorTarget,
   NameOverride,
@@ -451,11 +452,22 @@ export const monitorDevices = (): Promise<MonitorDeviceInfo[]> =>
   invoke("monitor_devices");
 
 /** Weist ein Monitor-Gerät einem Target zu — entweder einem Feld oder
- *  einer Hallen-weiten Info-Anzeige. `null` = Zuweisung aufheben. */
+ *  einer Hallen-weiten Info-Anzeige. `null` = Zuweisung aufheben.
+ *
+ *  `comboVertical` setzt zugleich die Kombi-Ausrichtung des Geräts
+ *  (`true` = Felder nebeneinander). Weggelassen heißt **unverändert** — nur
+ *  so überlebt sie ein erneutes Auswählen derselben Kombi-Option und einen
+ *  zwischenzeitlichen Wechsel auf ein Einzelfeld (ADR 0049). */
 export const assignMonitor = (
   deviceId: string,
   target: MonitorTarget | null,
-): Promise<void> => invoke("assign_monitor", { deviceId, target });
+  comboVertical?: boolean,
+): Promise<void> =>
+  invoke("assign_monitor", { deviceId, target, comboVertical: comboVertical ?? null });
+
+/** Kombi-Ausrichtung je Gerät plus die zuletzt gewählte als Vorbelegung. */
+export const monitorComboDirs = (): Promise<ComboDirView> =>
+  invoke("monitor_combo_dirs");
 
 /** Legt für ein Monitor-Gerät explizit eine Halle fest (Hallenname) oder hebt
  *  sie auf (`null`). Für Geräte ohne Feld (Info/Werbung/Kombi/unzugewiesen). */

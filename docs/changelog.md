@@ -4,6 +4,34 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.270
+
+- **Kombi-Anzeige: Ausrichtung jetzt je Bildschirm.** Ob die Felder einer
+  Kombi-Anzeige über- oder nebeneinander stehen, wird nicht mehr einmal für
+  alle festgelegt, sondern beim jeweiligen Gerät — dort, wo ohnehin die Felder
+  gewählt werden (**Court-Monitore → Kombi-Anzeige → Felder wählen…**).
+
+  Das war vorher ein Kompromiss: Wer einen TV über dem Mittelgang zwischen zwei
+  Feldern hängen hat und einen zweiten an der Stirnseite über drei Feldern,
+  musste sich für eine Aufstellung entscheiden — der andere Bildschirm stand
+  dann falsch herum.
+
+  Ein neues Kombi-Gerät übernimmt die zuletzt gewählte Ausrichtung als
+  Vorschlag; in einer Halle mit gleich montierten TVs stellt man also nur beim
+  ersten um. Die Änderung erscheint auf dem Bildschirm binnen etwa einer
+  Sekunde, **ohne dass die Seite neu lädt** — der Satzstand bleibt sichtbar,
+  auch mitten im Spiel.
+
+  **Für bestehende Turniere ändert sich nichts:** Der bisherige globale
+  Schalter wird beim ersten Start einmalig auf alle vorhandenen Kombi-Geräte
+  übernommen. Er verschwindet dafür aus den Einstellungen.
+
+- **Behoben: hochkant montierte Kombi-Anzeigen luden endlos neu.** Eine
+  Kombi-Adresse mit gedrehter Anzeige (`?rotate=90`) hielt sich selbst für
+  falsch zugewiesen und baute die Seite jede Sekunde neu auf. Der Fehler steckte
+  seit jeher nur in der Kombi-Anzeige — die übrigen Anzeigeseiten kannten die
+  Ausnahme bereits.
+
 ## v0.9.269
 
 - **Neu: verschlüsselter Zugang im Hallennetz (https + wss).** Der
