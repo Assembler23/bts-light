@@ -395,6 +395,11 @@ pub fn save_config(
     config
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
+    // Wurde auf das Testsystem (oder zurück) umgestellt, müssen Cloud-Relay
+    // und Diagnose-Logs mitziehen – sie haben keinen Config-Zugriff und
+    // lesen den Prozess-Schalter. Greift beim nächsten Stoppen/Starten der
+    // Übertragung, wie jeder Wechsel der Verbindungsart.
+    crate::badhub_host::set_aus_push_url(&config.badhub.url);
     // Haben sich die Logo-BILDDATEN geändert, sie einmalig an den badhub-Check-In
     // schieben (Phase 3 der Sponsor-Leiste) — statt sie alle 60 s im Liveticker-
     // `tset` mitzusenden. Nur `.data` vergleichen: `mime`/`background_color`
@@ -1435,7 +1440,8 @@ pub struct TabletInfo {
     pub server_host_tls: String,
     /// Verbindungsart: `"lan"`, `"cloud"` oder `"lan+cloud"`.
     pub mode: String,
-    /// Öffentliche Relay-Basis-URL (`https://badhub.de/bts-relay/<install_id>`)
+    /// Öffentliche Relay-Basis-URL (`https://<badhub-host>/bts-relay/<install_id>`;
+    /// der Host folgt dem gewählten System, siehe `crate::badhub_host`)
     /// – gesetzt, sobald der Cloud-Pfad aktiv ist (`Cloud` oder
     /// `LanAndCloud`), sonst leer.
     pub relay_base: String,
@@ -1475,7 +1481,11 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
         String::new()
     };
     let relay_base = if cloud_enabled {
-        format!("https://badhub.de/bts-relay/{}", config.install_id)
+        format!(
+            "{}/{}",
+            crate::badhub_host::relay_https(),
+            config.install_id
+        )
     } else {
         String::new()
     };
@@ -1581,7 +1591,11 @@ pub async fn internet_status() -> InternetStatus {
         .timeout(Duration::from_secs(5))
         .build()
     {
-        Ok(c) => c.head("https://badhub.de/").send().await.is_ok(),
+        Ok(c) => c
+            .head(format!("{}/", crate::badhub_host::basis()))
+            .send()
+            .await
+            .is_ok(),
         Err(_) => false,
     };
     InternetStatus { online }
@@ -3378,7 +3392,7 @@ fn tl_entrances(cfg: &AppConfig, token: &str) -> Result<Vec<TlEntrance>, String>
     if cfg.connection_mode.cloud_enabled() {
         wege.push((
             "Über das Internet",
-            format!("https://badhub.de/bts-relay/tl#t={token}"),
+            format!("{}/tl#t={token}", crate::badhub_host::relay_https()),
         ));
     }
     wege.into_iter()
@@ -3410,7 +3424,8 @@ fn qr_code_svg(text: &str) -> Result<String, String> {
 /// Cloud-Slave ist (`slave_mode` + `master_namespace`).
 #[derive(Serialize)]
 pub struct SlaveDeviceInfo {
-    /// Relay-Basis des Master-Namespace (`https://badhub.de/bts-relay/<master_ns>`).
+    /// Relay-Basis des Master-Namespace
+    /// (`https://<badhub-host>/bts-relay/<master_ns>`).
     pub relay_base: String,
     /// Alle im Turnier erkannten Hallennamen (aus der Relay-Feldliste) —
     /// Optionen für die Hallen-Auswahl auf dem Slave. Der Cloud-Slave hat kein
@@ -3450,7 +3465,7 @@ pub async fn slave_devices(state: State<'_, AppState>) -> Result<SlaveDeviceInfo
         .into_iter()
         .filter(|c| hall.is_empty() || c.hall.is_empty() || c.hall == hall)
         .collect();
-    let relay_base = format!("https://badhub.de/bts-relay/{ns}");
+    let relay_base = format!("{}/{ns}", crate::badhub_host::relay_https());
     Ok(SlaveDeviceInfo {
         relay_base,
         all_halls,

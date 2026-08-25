@@ -131,7 +131,9 @@ pub async fn push_sched(
 pub fn checkin_branding_url(live_url: &str) -> String {
     match live_url.rfind('/') {
         Some(i) => format!("{}/checkin-branding", &live_url[..i]),
-        None => "https://badhub.de/api/checkin-branding".to_string(),
+        // Entartete URL: auf das System zurückfallen, gegen das die
+        // Installation gerade läuft — nicht blind auf das Produktivsystem.
+        None => crate::badhub_host::api_url("checkin-branding"),
     }
 }
 
@@ -241,7 +243,9 @@ mod tests {
             checkin_branding_url("http://localhost:8080/api/live_update.php"),
             "http://localhost:8080/api/checkin-branding"
         );
-        // Entartete URL ohne „/" → sicherer Default.
+        // Entartete URL ohne „/" → sicherer Default auf dem System, gegen
+        // das die Installation läuft. Im Test steht der Prozess-Schalter auf
+        // Produktiv (kein Testturnier geladen).
         assert_eq!(
             checkin_branding_url("live_update.php"),
             "https://badhub.de/api/checkin-branding"

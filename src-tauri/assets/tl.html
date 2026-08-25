@@ -1535,9 +1535,11 @@ const FLAGGEN_BASIS = location.pathname.replace(/\/tl\/?$/, "") + "/flags/";
 // auf den öffentlichen badhub-Resolver (`/api/v1/club-logo`, exakter Name).
 // Fehlt ein Logo, greift in beiden Fällen der `onerror`-Rückfall (nur Name).
 const TL_PRAEFIX = location.pathname.replace(/\/tl\/?$/, "");
+// Der Cloud-Zweig nimmt den Host, von dem diese Seite kommt — im
+// Testbetrieb also test.badhub.de statt des Produktivsystems.
 const LOGO_BASIS = TL_PRAEFIX === ""
   ? "/info/club-logo?name="
-  : "https://badhub.de/api/v1/club-logo?name=";
+  : location.origin + "/api/v1/club-logo?name=";
 
 const $ = (id) => document.getElementById(id);
 

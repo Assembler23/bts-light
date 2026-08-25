@@ -41,7 +41,12 @@ import {
 } from "../api";
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
-import { PRESETS, findPreset } from "../presets";
+import {
+  badhubUrlFuer,
+  badhubZielFuer,
+  istTestsystem,
+} from "../io/badhubZiel.mjs";
+import { PRESETS, findPreset, findPresetFor } from "../presets";
 import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
 import type {
   AppConfig,
@@ -235,15 +240,17 @@ export function SetupWizard({
   const isSettings = mode === "settings";
   // Vorauswahl des Verbands aus der gespeicherten Config ableiten – damit die
   // Einstellungen-Seite das tatsächlich aktive Ziel zeigt (nicht stur BVBB).
-  const initialPreset = PRESETS.find(
-    (p) =>
-      (initialConfig.badhub.live_url &&
-        p.badhub.live_url === initialConfig.badhub.live_url) ||
-      (initialConfig.badhub.password &&
-        p.badhub.password === initialConfig.badhub.password),
-  );
+  // Systemunabhängig: ein Testturnier behält seine Verbandszuordnung.
+  const initialPreset = findPresetFor(initialConfig.badhub);
   const [presetId, setPresetId] = useState(
     initialPreset?.id ?? (initialConfig.badhub.password ? MANUAL : "bvbb"),
+  );
+  // Produktiv- oder Testsystem? Kein eigenes Config-Feld, sondern aus der
+  // gespeicherten Push-URL abgeleitet – zwei Wahrheiten (Flag + URL) driften
+  // auseinander, und die stille Variante schriebe Testdaten in den echten
+  // Liveticker.
+  const [testSystem, setTestSystem] = useState(
+    istTestsystem(initialConfig.badhub.url),
   );
   const [host, setHost] = useState(initialConfig.btp.host);
   const [port, setPort] = useState(String(initialConfig.btp.port));
@@ -471,6 +478,35 @@ export function SetupWizard({
 
   const isManual = presetId === MANUAL;
 
+  // Im manuellen Modus ist das URL-Feld die Wahrheit: Wer dort von Hand
+  // `test.badhub.de` einträgt, soll den Schalter umspringen sehen – und nicht
+  // beim Speichern still auf Produktiv zurückgebogen werden.
+  const testAktiv = isManual ? istTestsystem(badhubUrl) : testSystem;
+
+  /** Ziel wählen. Übernimmt dabei den sichtbaren Testsystem-Zustand – sonst
+   *  spränge der Schalter beim Wechsel von „manuell" auf einen Verband
+   *  zurück auf Produktiv, obwohl der Nutzer nichts daran angefasst hat. */
+  function waehleZiel(id: string) {
+    setTestSystem(testAktiv);
+    setPresetId(id);
+  }
+
+  /** Umschalten zwischen Produktiv- und Testsystem. Biegt die manuell
+   *  eingetragenen Adressen gleich mit um, damit Feld und Schalter nie
+   *  widersprechen. */
+  function toggleTestSystem() {
+    const next = !testAktiv;
+    setTestSystem(next);
+    setBadhubUrl((u) => badhubUrlFuer(u, next));
+    setBadhubLiveUrl((u) => badhubUrlFuer(u, next));
+    // Beim Wechsel auf Test das Verbands-Token vorbelegen – ob das
+    // Testsystem dasselbe akzeptiert, zeigt erst der erste Push.
+    const preset = findPreset(presetId);
+    if (next && preset && !badhubPassword.trim()) {
+      setBadhubPassword(preset.badhub.password);
+    }
+  }
+
   // Die beiden Modus-Schalter zurück auf einen connection_mode abbilden.
   const connectionMode: ConnectionMode =
     lanEnabled && cloudEnabled ? "lan+cloud" : cloudEnabled ? "cloud" : "lan";
@@ -479,12 +515,25 @@ export function SetupWizard({
     const preset = findPreset(presetId);
     const badhub =
       isManual || !preset
-        ? {
+        ? // Manuell: die eingetragenen Adressen gelten unverändert – der
+          // Schalter hat sie beim Umlegen bereits mitgezogen.
+          {
             url: badhubUrl.trim(),
             password: badhubPassword.trim(),
             live_url: badhubLiveUrl.trim(),
           }
-        : preset.badhub;
+        : // Preset: die hinterlegten Produktiv-Adressen auf das gewählte
+          // System umbiegen. Nur im Testbetrieb darf ein abweichendes Token
+          // gesetzt werden – produktiv bleibt es immer das Verbands-Token.
+          badhubZielFuer(
+            {
+              ...preset.badhub,
+              password: testSystem
+                ? badhubPassword.trim() || preset.badhub.password
+                : preset.badhub.password,
+            },
+            testSystem,
+          );
     return {
       btp: {
         host: host.trim(),
@@ -929,27 +978,72 @@ export function SetupWizard({
       {/* Schritt 1: Verband / Ziel */}
       <section className="flex flex-col gap-2">
         <SectionHeader icon={Target}>1 · Liveticker-Ziel</SectionHeader>
-        {PRESETS.map((preset) => (
-          <div key={preset.id} className="flex items-stretch gap-2">
-            <div className="min-w-0 flex-1">
-              <ChoiceCard
-                icon={Target}
-                title={preset.label}
-                description={preset.badhub.live_url}
-                active={presetId === preset.id}
-                onClick={() => setPresetId(preset.id)}
-              />
+        {PRESETS.map((preset) => {
+          // Die Kacheln zeigen die Adresse des gewählten Systems, damit beim
+          // Testbetrieb sichtbar ist, wohin wirklich gesendet wird.
+          const liveUrl = badhubUrlFuer(preset.badhub.live_url, testAktiv);
+          return (
+            <div key={preset.id} className="flex items-stretch gap-2">
+              <div className="min-w-0 flex-1">
+                <ChoiceCard
+                  icon={Target}
+                  title={preset.label}
+                  description={liveUrl}
+                  active={presetId === preset.id}
+                  onClick={() => waehleZiel(preset.id)}
+                />
+              </div>
+              <CopyBadgeButton liveUrl={liveUrl} />
             </div>
-            <CopyBadgeButton liveUrl={preset.badhub.live_url} />
-          </div>
-        ))}
+          );
+        })}
         <ChoiceCard
           icon={KeyRound}
           title="Anderes Turnier (manuell)"
           description="Badhub-URL und Passwort selbst eintragen"
           active={isManual}
-          onClick={() => setPresetId(MANUAL)}
+          onClick={() => waehleZiel(MANUAL)}
         />
+
+        {/* Testsystem: eigenes badhub mit eigener Datenbank. Bewusst hier
+            unter dem Ziel und nicht in einer Entwickler-Ecke – wer damit ein
+            Turnier fährt, muss es bei jedem Blick auf die Einstellungen
+            sehen. */}
+        <ToggleCard
+          icon={Stethoscope}
+          title="Testsystem (test.badhub.de)"
+          description="Probelauf ohne Folgen: Liveticker, Check-In, Cloud-Verbindung der Tablets und Diagnose-Logs gehen auf das Testsystem. Die Produktiv-Datenbank bleibt unberührt."
+          active={testAktiv}
+          onToggle={toggleTestSystem}
+        />
+        {testAktiv && (
+          <div
+            className="flex gap-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3.5
+                       text-sm text-amber-900"
+          >
+            <Info
+              size={18}
+              strokeWidth={2}
+              className="mt-0.5 shrink-0 text-amber-600"
+            />
+            <p>
+              Diese Installation sendet an <strong>test.badhub.de</strong>. Auf
+              der öffentlichen Live-Seite erscheint <strong>nichts</strong>.
+              Braucht das Testsystem ein eigenes Liveticker-Passwort, trage es
+              unten ein – sonst meldet der Liveticker „Badhub lehnte die
+              Anmeldung ab". Zum Zurückschalten den Schalter wieder ausmachen;
+              die Tablet-Cloud-Verbindung folgt beim nächsten Stoppen/Starten.
+            </p>
+          </div>
+        )}
+        {testAktiv && !isManual && (
+          <Field
+            label="Liveticker-Passwort des Testsystems"
+            value={badhubPassword}
+            onChange={setBadhubPassword}
+            type="password"
+          />
+        )}
       </section>
 
       {/* Turnierlogo (badhub-Liveticker) */}

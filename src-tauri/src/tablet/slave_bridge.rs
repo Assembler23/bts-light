@@ -38,8 +38,11 @@ use super::assets;
 use super::carrier::{AnGeraet, Traeger};
 use super::server::TABLET_PORT;
 
-/// HTTPS-Basis des Cloud-Relays (identisch zum Relay-Client).
-const RELAY_HTTP: &str = "https://badhub.de/bts-relay";
+/// HTTPS-Basis des Cloud-Relays (identisch zum Relay-Client) –
+/// Produktiv- oder Testsystem, siehe [`crate::badhub_host`].
+fn relay_http() -> String {
+    crate::badhub_host::relay_https()
+}
 
 /// Laufzeit-Konfiguration der Brücke: Master-Namespace (Ziel aller
 /// Weiterleitungen), eigene Halle (Filter der Feld-Auswahlseite) und —
@@ -73,7 +76,7 @@ impl BridgeConfig {
 
     /// Basis-URL des eigenen Namespace am Relay.
     fn relay_basis(&self) -> String {
-        format!("{RELAY_HTTP}/{}", self.master_namespace)
+        format!("{}/{}", relay_http(), self.master_namespace)
     }
 }
 
@@ -81,7 +84,7 @@ impl BridgeConfig {
 /// Query-String (inkl. `device=…`) wird 1:1 angehängt, damit der Master-Relay
 /// das Gerät seinem Feld zuordnen kann. Reine Funktion → testbar.
 fn monitor_redirect_url(master_ns: &str, raw_query: Option<&str>) -> String {
-    let base = format!("{RELAY_HTTP}/{master_ns}/monitor");
+    let base = format!("{}/{master_ns}/monitor", relay_http());
     match raw_query {
         Some(q) if !q.is_empty() => format!("{base}?{q}"),
         _ => base,
@@ -91,7 +94,7 @@ fn monitor_redirect_url(master_ns: &str, raw_query: Option<&str>) -> String {
 /// Weiterleitungs-Ziel für die Cloud-Tablet-Seite eines Felds. `id` ist eine
 /// CourtID (i64) – rein numerisch, daher keine URL-Injektion möglich.
 fn court_redirect_url(master_ns: &str, court_id: i64) -> String {
-    format!("{RELAY_HTTP}/{master_ns}/court/{court_id}")
+    format!("{}/{master_ns}/court/{court_id}", relay_http())
 }
 
 /// Rendert die Feld-Auswahlseite: je Feld der eigenen Halle ein großer Knopf.
@@ -581,7 +584,7 @@ async fn lesend(
 
 /// Holt ein Vereinslogo bei badhub — siehe [`lesend`].
 async fn club_logo(cfg: &BridgeConfig, query: Option<&str>) -> Response {
-    let mut url = "https://badhub.de/api/v1/club-logo".to_string();
+    let mut url = crate::badhub_host::api_url("v1/club-logo");
     if let Some(q) = query.filter(|q| !q.is_empty()) {
         url.push('?');
         url.push_str(q);

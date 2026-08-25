@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.271
+
+- **Neu: Testsystem-Schalter.** Unter **Einstellungen → 1 · Liveticker-Ziel**
+  lässt sich die ganze Installation auf **test.badhub.de** umstellen — für
+  Probeturniere, Schulungen und Feldtests, ohne dass etwas im öffentlichen
+  Liveticker erscheint. Mit umgestellt werden Liveticker-Push, Hallen-Check-In,
+  die Cloud-Verbindung der Tablets und die Diagnose-Logs.
+
+  Solange der Schalter an ist, steht in der Kopfzeile jeder Seite
+  **„… · TESTSYSTEM"** — damit ein vergessener Probelauf nicht als echtes
+  Turnier startet. Braucht das Testsystem ein eigenes Liveticker-Passwort,
+  gibt es dafür direkt darunter ein Feld. Die Umstellung der Tablet-Cloud
+  greift, wie jeder Wechsel der Verbindungsart, beim nächsten Stoppen und
+  Starten der Übertragung.
+
+  Wer eine **eigene** badhub-Instanz betreibt, ist nicht betroffen: Der
+  Schalter rührt nur Adressen auf `badhub.de` an.
+
 ## v0.9.270
 
 - **Kombi-Anzeige: Ausrichtung jetzt je Bildschirm.** Ob die Felder einer

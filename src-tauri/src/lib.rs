@@ -1,6 +1,7 @@
 pub mod aushang;
 pub mod azure_tts;
 pub mod badhub;
+pub mod badhub_host;
 pub mod btp;
 pub mod commands;
 pub mod config;
