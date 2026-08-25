@@ -466,3 +466,41 @@ deshalb **keinen Zettel-Bestand und kein Verzeichnis** — die Tablets der ferne
 Halle hängen direkt am Master-Relay, ihre Ereignisse landen im Master. Gedruckt
 wird am Master oder über die Turnierleitungs-Seite. Dasselbe gilt seit jeher für
 den Punktverlauf.
+
+## Transport-Bündelung: der Slave trägt die Geräte (ADR 0048)
+
+Seit dem Träger-Modus kann der Slave-PC die Geräte seiner Halle **selbst
+tragen**, statt sie an die Cloud weiterzuleiten. Spec:
+[features/ferne-halle-transport-buendelung.md](features/ferne-halle-transport-buendelung.md),
+Entscheidung: [ADR 0048](adr/0048-substrom-adressierung-traeger.md).
+
+**Opt-in, Vorgabe aus** (`slave_mux.enabled` in der `config.json`). Ohne
+Einschalten verhält sich alles exakt wie bisher — Weiterleitung auf den
+Master-Relay, „Weg A" aus [ADR 0002](adr/0002-ferne-halle-direkt-cloud-geraete.md).
+
+**Eingeschaltet** liefert der Slave die Seiten selbst aus, terminiert die
+WebSockets lokal und bündelt deren Fachverkehr über **eine** Verbindung zum
+Relay. In der Halle taucht dann keine badhub-Adresse mehr auf.
+
+**Was das kostet — bitte vor dem Einschalten lesen:**
+
+- **Der Slave wird zum alleinigen Weg der Halle.** Heute hängt jedes Gerät
+  einzeln an der Cloud; ein Slave-Ausfall kostet nur die Ansage. Danach nimmt
+  sein Ausfall der Halle alle Geräte gleichzeitig. Notnagel bleiben die
+  weiterhin gültigen Direkt-Cloud-Adressen — mit dem Vorbehalt im nächsten
+  Punkt.
+- **Umstellen nur zwischen Turnieren.** Die lokale Adresse ist für den Browser
+  eine **andere Herkunft** als die Cloud-Adresse, und ein Tablet bewahrt sein
+  noch nicht bestätigtes Ergebnis unter der Adresse auf, unter der es erfasst
+  wurde. Wer mitten im Spiel umschaltet, verliert es.
+- **Die Steuerung bleibt beim Master.** Der Slave trägt nur; Feldvergabe und
+  Aufrufe laufen unverändert über die Turnierleitung (TL-Web), deren Geräte
+  bewusst **nicht** durch den Träger gehen.
+- **Keine Offline-Fähigkeit.** Fällt das Internet aus, steht die Halle wie
+  zuvor. Die lokale Ergebnis-Pufferung ist die zweite Hälfte von „Weg B" und
+  bleibt aufgeschoben.
+
+**Wer wofür geradesteht:** Stirbt ein einzelnes Gerät, meldet es der Slave —
+er hält die echte Verbindung dorthin. Versagt er dabei, räumt der Relay den
+Substrom nach 15 s selbst ab, damit ein Ersatzgerät das Feld bekommt. Bricht
+der Träger weg, räumt der Relay alle seine Substrome.
