@@ -22,6 +22,14 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Wer eine **eigene** badhub-Instanz betreibt, ist nicht betroffen: Der
   Schalter rührt nur Adressen auf `badhub.de` an.
 
+- **Klarere Meldung, wenn ein Server die Anfrage gar nicht durchlässt.**
+  Verlangt ein vorgelagerter Webserver eine HTTP-Anmeldung, bevor bts-light
+  überhaupt antworten darf, hieß es bisher „Badhub lehnte die Anmeldung ab –
+  Passwort prüfen" — und man suchte am völlig richtigen Liveticker-Passwort.
+  Jetzt benennt die Meldung die Ursache. Betrifft in der Praxis nur das
+  Testsystem: `test.badhub.de` liegt hinter einer solchen Wand, die für einen
+  Testbetrieb erst geöffnet werden muss.
+
 ## v0.9.270
 
 - **Kombi-Anzeige: Ausrichtung jetzt je Bildschirm.** Ob die Felder einer

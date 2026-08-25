@@ -17,8 +17,50 @@ pub enum PushError {
     Request(#[from] reqwest::Error),
     #[error("Badhub lehnte die Anmeldung ab – Passwort prüfen")]
     Unauthorized,
+    #[error(
+        "Der Server lässt die Anfrage gar nicht durch: Er verlangt eine \n         HTTP-Anmeldung (Basic Auth), bevor bts-light überhaupt antworten \n         darf. Das Liveticker-Passwort ist NICHT die Ursache. Bei \n         test.badhub.de liegt eine solche Wand vor der ganzen Seite – die \n         Maschinen-Endpunkte müssen dort erst freigegeben werden."
+    )]
+    BasicAuthWall,
     #[error("Badhub antwortete mit HTTP-Status {0}")]
     Status(u16),
+}
+
+/// Wertet eine abgelehnte Antwort aus – und trennt dabei zwei Dinge, die
+/// sich sonst zum Verwechseln ähnlich sehen.
+///
+/// Ein 401 mit `WWW-Authenticate: Basic` kommt **nicht** von badhub, sondern
+/// von einem vorgelagerten Webserver, der eine HTTP-Anmeldung verlangt – der
+/// Bearer-Token wurde nie geprüft. Genau so steht `test.badhub.de` hinter
+/// einer htpasswd-Wand (gemessen 26.08.2026: 401 + `Basic realm="…Staging"`,
+/// auch mit korrektem Bearer-Header). Ohne diese Unterscheidung meldete
+/// bts-light „Passwort prüfen", und man sucht stundenlang am richtigen
+/// Token. Auflösen lässt sich das **nur serverseitig**: HTTP hat genau einen
+/// `Authorization`-Header, und den beansprucht der Bearer-Token.
+fn abgelehnt(response: &reqwest::Response) -> PushError {
+    let status = response.status().as_u16();
+    // Bewusst über die Bytes und nicht über `to_str()`: Der echte Header
+    // lautet `Basic realm="test.badhub.de — Staging"` — mit einem Gedankenstrich
+    // außerhalb von ASCII. `to_str()` liefert dafür `Err`, und die Erkennung
+    // finge ausgerechnet am Ernstfall ins Leere.
+    let wand = response
+        .headers()
+        .get(reqwest::header::WWW_AUTHENTICATE)
+        .map(|v| {
+            let anfang: Vec<u8> = v
+                .as_bytes()
+                .iter()
+                .copied()
+                .skip_while(|b| b.is_ascii_whitespace())
+                .take(5)
+                .collect();
+            anfang.eq_ignore_ascii_case(b"basic")
+        })
+        .unwrap_or(false);
+    match status {
+        401 if wand => PushError::BasicAuthWall,
+        401 | 403 => PushError::Unauthorized,
+        other => PushError::Status(other),
+    }
 }
 
 /// Baut einen wiederverwendbaren HTTP-Client mit angemessenem Timeout.
@@ -55,8 +97,7 @@ pub async fn push_update(
 
     match response.status().as_u16() {
         200 => Ok(()),
-        401 | 403 => Err(PushError::Unauthorized),
-        other => Err(PushError::Status(other)),
+        _ => Err(abgelehnt(&response)),
     }
 }
 
@@ -88,8 +129,7 @@ pub async fn push_checkin_roster(
 
     match response.status().as_u16() {
         200 => Ok(()),
-        401 | 403 => Err(PushError::Unauthorized),
-        other => Err(PushError::Status(other)),
+        _ => Err(abgelehnt(&response)),
     }
 }
 
@@ -115,8 +155,7 @@ pub async fn push_sched(
 
     match response.status().as_u16() {
         200 => Ok(()),
-        401 | 403 => Err(PushError::Unauthorized),
-        other => Err(PushError::Status(other)),
+        _ => Err(abgelehnt(&response)),
     }
 }
 
@@ -162,8 +201,7 @@ pub async fn push_checkin_branding(
 
     match response.status().as_u16() {
         200 => Ok(()),
-        401 | 403 => Err(PushError::Unauthorized),
-        other => Err(PushError::Status(other)),
+        _ => Err(abgelehnt(&response)),
     }
 }
 
@@ -193,6 +231,26 @@ mod tests {
         format!("http://{addr}/api/live_update.php")
     }
 
+    /// Wie `spawn_http_mock`, nur mit einer zusätzlichen Kopfzeile — für die
+    /// Basic-Auth-Wand, die sich allein am `WWW-Authenticate` erkennen lässt.
+    async fn spawn_http_mock_mit_kopfzeile(
+        status_line: &'static str,
+        kopfzeile: &'static str,
+    ) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\n{kopfzeile}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            sock.write_all(response.as_bytes()).await.unwrap();
+        });
+        format!("http://{addr}/api/live_update.php")
+    }
+
     fn sample_update() -> Update {
         Update::Single(TupdateMessage {
             kind: "tupdate_match",
@@ -216,6 +274,61 @@ mod tests {
         let url = spawn_http_mock("401 Unauthorized").await;
         let result = push_update(&build_client(), &url, "falsch", &sample_update()).await;
         assert!(matches!(result, Err(PushError::Unauthorized)));
+    }
+
+    #[tokio::test]
+    async fn eine_basic_auth_wand_ist_kein_falsches_passwort() {
+        // `test.badhub.de` liegt komplett hinter htpasswd — auch die
+        // Maschinen-Endpunkte. nginx antwortet mit 401, BEVOR PHP den
+        // Bearer-Token überhaupt sieht (gemessen 26.08.2026, auch mit
+        // korrektem Token). Ohne diese Unterscheidung meldet bts-light
+        // „Passwort prüfen", und man sucht stundenlang am richtigen Token.
+        //
+        // Der Realm trägt bewusst den echten Gedankenstrich: `to_str()` gibt
+        // für solche Kopfzeilen `Err`, eine Erkennung darüber finge ins Leere.
+        let url = spawn_http_mock_mit_kopfzeile(
+            "401 Unauthorized",
+            "WWW-Authenticate: Basic realm=\"test.badhub.de — Staging\"",
+        )
+        .await;
+        let err = push_update(&build_client(), &url, "pw", &sample_update())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, PushError::BasicAuthWall),
+            "als Passwortfehler durchgegangen: {err:?}"
+        );
+        // Die Meldung muss die Ursache benennen, sonst hilft die Trennung nicht.
+        let text = err.to_string();
+        assert!(text.contains("Basic Auth"), "unklare Meldung: {text}");
+        assert!(
+            text.contains("NICHT die Ursache"),
+            "unklare Meldung: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ein_401_ohne_wand_bleibt_ein_passwortfehler() {
+        // Gegenprobe: Ohne `WWW-Authenticate: Basic` ist der 401 die Antwort
+        // von badhub selbst — dann stimmt das Liveticker-Passwort wirklich nicht.
+        let url = spawn_http_mock_mit_kopfzeile("401 Unauthorized", "X-Egal: 1").await;
+        let err = push_update(&build_client(), &url, "pw", &sample_update())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PushError::Unauthorized), "war: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn ein_bearer_realm_ist_keine_wand() {
+        // `WWW-Authenticate: Bearer …` schickt badhub selbst — kein
+        // vorgelagerter Webserver. Die Prüfung darf nur auf „Basic" anspringen.
+        let url =
+            spawn_http_mock_mit_kopfzeile("401 Unauthorized", "WWW-Authenticate: Bearer realm=x")
+                .await;
+        let err = push_update(&build_client(), &url, "pw", &sample_update())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PushError::Unauthorized), "war: {err:?}");
     }
 
     #[tokio::test]

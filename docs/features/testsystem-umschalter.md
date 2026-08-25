@@ -35,7 +35,8 @@ ADR 0048): Er wählt denselben Host, sonst wird er nie bereit und jedes lokale
 Gerät fällt auf einen Relay zurück, auf dem kein Host sitzt.
 
 **Voraussetzung für den Cloud-Modus:** Auf dem Testsystem muss ein
-`bts-relay` hinter nginx unter `/bts-relay/` laufen — und zwar mit
+`bts-relay` hinter nginx unter `/bts-relay/` laufen — freigegeben von der
+Basic-Auth-Wand (siehe unten) und mit
 `PUBLIC_BASE=https://test.badhub.de/bts-relay`. Ohne die Variable baut der
 Relay seine QR-Codes mit dem Produktiv-Default, und ein Tablet landet in einem
 Namespace ohne Host. Fehlt der Test-Relay ganz, gehört der Testlauf auf LAN.
@@ -43,6 +44,66 @@ Namespace ohne Host. Fehlt der Test-Relay ganz, gehört der Testlauf auf LAN.
 Fremde Hosts bleiben **immer** unangetastet: Wer eine eigene badhub-Instanz
 betreibt, bekommt seine Adresse nicht umgeschrieben (Test in
 `badhub_host::tests::fremde_hosts_bleiben_unangetastet`).
+
+## Die Basic-Auth-Wand von test.badhub.de (Stand 26.08.2026)
+
+**Der Umschalter allein genügt nicht.** `test.badhub.de` liegt komplett hinter
+einer nginx-htpasswd-Wand (`/etc/nginx/htpasswd_test_badhub`, badhub-Repo
+`docs/ops/deployment.md`) — und zwar **auch vor den Maschinen-Endpunkten**.
+Gemessen am 26.08.2026:
+
+```
+GET  https://test.badhub.de/                     → 401  WWW-Authenticate: Basic realm="test.badhub.de — Staging"
+HEAD https://test.badhub.de/api/live_update.php  → 401  WWW-Authenticate: Basic
+POST https://test.badhub.de/api/live_update.php  → 401  WWW-Authenticate: Basic   (mit korrektem Bearer-Token!)
+GET  https://test.badhub.de/bts-relay/health     → 401  (Produktiv: 200 {"ok":true,…})
+```
+
+### Warum bts-light das nicht selbst lösen kann
+
+HTTP kennt genau **einen** `Authorization`-Header, und den beansprucht der
+Bearer-Token des Livetickers. Schickt bts-light stattdessen Basic-Credentials
+für nginx, kommt die Anfrage zwar durch die Wand — aber PHP findet keinen
+Bearer und lehnt selbst mit 401 ab. Ein Client-seitiger Zugang zum Testsystem
+ist damit **nicht baubar**; die Freigabe muss serverseitig passieren.
+
+### Was freizugeben ist
+
+Für einen vollständigen Testbetrieb brauchen diese Pfade `auth_basic off;` im
+vHost von `test.badhub.de`. Alle tragen eigene Bearer-Auth plus Rate-Limit, die
+Wand schützt dort nichts, was nicht schon geschützt wäre:
+
+| Pfad | Wofür |
+|---|---|
+| `/api/live_update.php` | Liveticker-Push **und** Check-In-Meldeliste |
+| `/api/checkin-branding` | Logo- und Sponsoren-Push |
+| `/checkin/<uuid>/tl/*` | Check-In-Panel der Turnierleitung |
+| `/api/v1/pronunciations`, `/api/v1/club-logo` | Aussprache, Vereinslogos (öffentliche GETs) |
+| `/api/bts_log.php`, `/api/tablet_log.php`, `/api/pi_log.php` | Diagnose-Logs |
+| `/bts-relay/` | Cloud-Relay (falls dort überhaupt einer läuft) |
+
+### Was bts-light stattdessen tut
+
+Ein 401 **mit** `WWW-Authenticate: Basic` ist kein falsches Liveticker-Passwort,
+sondern eine Wand davor. `badhub::push::abgelehnt` trennt beide Fälle und meldet
+den zweiten als [`PushError::BasicAuthWall`] mit eigenem Text. Ohne diese
+Unterscheidung meldete bts-light „Badhub lehnte die Anmeldung ab – Passwort
+prüfen" — und man sucht stundenlang am völlig richtigen Token.
+
+Die Erkennung liest die **Bytes** des Headers, nicht `to_str()`: Der echte
+Realm enthält einen Gedankenstrich außerhalb von ASCII, für den `to_str()`
+`Err` liefert — die Prüfung finge sonst ausgerechnet am Ernstfall ins Leere.
+
+### Das Token ist dasselbe wie auf Produktiv
+
+Die Verbands-Tokens liegen als bcrypt-Hash in der DB-Tabelle
+`liveticker_tournaments` (badhub `lib/live_update_lib.php`, `liveUpdateAuth`);
+der `.env`-Wert `BTS_TICKER_PASSWORD` greift nur noch für Legacy-Zeilen. Der
+Sync `ops/badhub-prod-to-test.sh` spiegelt täglich 05:00 UTC die komplette
+Prod-DB nach `badhub_test` und nimmt nur `admin_users` und `widget_api_keys`
+aus. **Das Testsystem hat also dieselben Verbands-Tokens** — das Feld
+„Liveticker-Passwort des Testsystems" bleibt für den Fall, dass dort einmal
+eine eigene Zeile angelegt wird.
 
 ## Der Prozess-Schalter
 
