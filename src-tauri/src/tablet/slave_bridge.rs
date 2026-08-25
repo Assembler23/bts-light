@@ -126,12 +126,28 @@ font-size:1.3rem;font-weight:700;border:2px solid #334155}}\
     )
 }
 
-/// `/health` — bestätigt dem Pi-Subnetz-Scan einen erreichbaren Server.
-async fn health() -> impl IntoResponse {
+/// `/health` — im Träger-Betrieb der **echte** Zustand vom Relay, sonst die
+/// knappe Bestätigung für den Pi-Subnetz-Scan.
+///
+/// Warum nicht immer der Stummel: Zwei Dinge hängen an dieser Antwort.
+/// `tablet.html` holt darüber `serverNowMs` und richtet seine Uhr danach —
+/// ohne das laufen die Pausen-Enden, die in Server-Zeit zur Turnierleitung
+/// reisen, gegen die ungeprüfte Tablet-Uhr (genau die Regression, die der
+/// Kommentar an `tablet.html:1783` als früheren Review-Fund festhält). Und
+/// `overview.html` bezieht von hier seine ganze Feld-Übersicht — der Stummel
+/// ließe sie leer.
+///
+/// Der Subnetz-Scan der Pis ist zufrieden, solange überhaupt `200` kommt;
+/// die durchgereichte Antwort erfüllt das ebenso.
+async fn health(State(cfg): State<Arc<BridgeConfig>>, RawQuery(query): RawQuery) -> Response {
+    if cfg.traegt().is_some() {
+        return durchreichen(&cfg, "/health", query.as_deref(), None).await;
+    }
     (
         [(header::CACHE_CONTROL, "no-store")],
         Json(serde_json::json!({ "ok": true, "bridge": "slave" })),
     )
+        .into_response()
 }
 
 /// `/monitor[?device=…]` — lokale Anzeige im Träger-Betrieb, sonst 303.
@@ -158,10 +174,18 @@ async fn court_display(State(cfg): State<Arc<BridgeConfig>>, Path(id): Path<i64>
     if cfg.traegt().is_none() {
         return Redirect::to(&format!("{}/court/{id}/display", cfg.relay_basis())).into_response();
     }
+    // Label wie am LAN-Server mitgeben — sonst steht bis zum ersten
+    // Zustands-Abruf nichts im Kopf der Anzeige.
+    let label = super::relay_client::fetch_courts(&cfg.master_namespace)
+        .await
+        .into_iter()
+        .find(|c| c.id == id)
+        .map(|c| c.label)
+        .unwrap_or_default();
     let body = assets::MONITOR_HTML
         .replace("__MODE__", "fixed")
         .replace("__BASE__", "/")
-        .replace("__COURT_LABEL__", "");
+        .replace("__COURT_LABEL__", &html_escape(&label));
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
@@ -233,6 +257,21 @@ async fn monitor_ws(
         .into_response()
 }
 
+/// Beantwortet einen Versions-Ping des Tablets mit der Marke **dieser**
+/// Binärdatei — sonst `None`, der Frame reist dann normal weiter.
+///
+/// Siehe die Begründung an der Aufrufstelle: Der Slave hat die Seite
+/// ausgeliefert, also muss auch der Pong von ihm kommen.
+fn pong_auf_ping(roh: &str) -> Option<String> {
+    match serde_json::from_str::<relay_proto::TabletMsg>(roh) {
+        Ok(relay_proto::TabletMsg::Ping) => serde_json::to_string(&relay_proto::ServerMsg::Pong {
+            marke: assets::seiten_marke().to_string(),
+        })
+        .ok(),
+        _ => None,
+    }
+}
+
 /// Bedient **eine** lokale WebSocket als Substrom des Trägers.
 ///
 /// Der Slave ist hier für die Liveness zuständig: Bleibt das Gerät länger als
@@ -263,7 +302,23 @@ async fn substrom_bedienen(
                 let Some(Ok(msg)) = eingang else { break };
                 letztes = tokio::time::Instant::now();
                 match msg {
-                    Message::Text(t) => traeger.frame(stream, t.to_string()),
+                    Message::Text(t) => {
+                        // Den Versions-Ping beantwortet der Slave SELBST.
+                        //
+                        // Er hat die Seite ausgeliefert, also ist seine Marke
+                        // die richtige. Reicht man den Ping durch, antwortet
+                        // der Relay mit SEINER — und weil Relay (bei jedem
+                        // main-Merge) und App (bei Tags) aus verschiedenen
+                        // Ständen stammen, weichen die beiden fast immer ab.
+                        // Folge wäre ein Reload-Ringelspiel mitten im
+                        // Turnier: Das Tablet lädt neu, bekommt dieselbe
+                        // Seite mit derselben Marke, lädt wieder neu.
+                        if let Some(pong) = pong_auf_ping(&t) {
+                            if socket.send(Message::Text(pong.into())).await.is_err() { break }
+                        } else {
+                            traeger.frame(stream, t.to_string());
+                        }
+                    }
                     Message::Close(_) => break,
                     _ => {}
                 }
@@ -289,6 +344,31 @@ async fn substrom_bedienen(
     traeger.schliesse(stream);
 }
 
+/// Darf dieser Pfad an den Relay weitergereicht werden?
+///
+/// **Sicherheitsgrenze, kein Schönheitsfilter.** Die Ziel-URL entsteht durch
+/// Anhängen an `…/bts-relay/<eigener-namespace>`, und `Url::parse` rechnet
+/// `..`-Schritte anschließend heraus. Ein Gerät im Hallennetz könnte damit aus
+/// dem eigenen Namespace ausbrechen und über die Brücke **fremde Turniere**
+/// lesen — die Brücke wäre ein offener GET-Proxy auf beliebige
+/// badhub.de-Pfade. Der Weg muss deshalb hier enden, bevor die URL gebaut
+/// wird.
+///
+/// Geprüft wird auf rohe **und** prozentkodierte Aufstiege; axum normalisiert
+/// den Pfad nicht.
+fn pfad_ist_harmlos(pfad: &str) -> bool {
+    if !pfad.starts_with('/') {
+        return false;
+    }
+    let klein = pfad.to_ascii_lowercase();
+    // `%2e` ist der kodierte Punkt, `%2f` der kodierte Schrägstrich — beide
+    // dienen hier nur dazu, einen Aufstieg zu verschleiern.
+    if klein.contains("%2e") || klein.contains("%2f") || klein.contains('\\') {
+        return false;
+    }
+    !pfad.split('/').any(|teil| teil == ".." || teil == ".")
+}
+
 /// Reicht einen lesenden HTTP-Abruf an den Relay durch.
 ///
 /// **Bewusst NICHT durch den Träger.** Über die Tablet-Strecke laufen
@@ -296,13 +376,32 @@ async fn substrom_bedienen(
 /// HTTP-Abrufe. Zöge man sie in den Träger, teilten sie sich die Leitung mit
 /// den Punkt-Frames (ADR 0048). Für das Gerät bleibt die Adresse trotzdem
 /// lokal — es merkt nichts davon.
-async fn durchreichen(cfg: &BridgeConfig, pfad: &str, query: Option<&str>) -> Response {
+async fn durchreichen(
+    cfg: &BridgeConfig,
+    pfad: &str,
+    query: Option<&str>,
+    if_none_match: Option<&str>,
+) -> Response {
+    if !pfad_ist_harmlos(pfad) {
+        tracing::warn!("Durchreichen abgelehnt (Pfad verlässt den Namespace): {pfad}");
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     let mut url = format!("{}{pfad}", cfg.relay_basis());
     if let Some(q) = query.filter(|q| !q.is_empty()) {
         url.push('?');
         url.push_str(q);
     }
-    match cfg.http.get(&url).send().await {
+    let mut anfrage = cfg.http.get(&url);
+    // ETag durchreichen — in **beide** Richtungen. Anzeigen und Tablets
+    // bauen ihr ganzes Abruf-Budget darauf: Sie schicken `If-None-Match` und
+    // erwarten ein `304` ohne Rumpf (Spec monitor-livestand-push, S1).
+    // Verschluckt die Brücke den Kopf, holt jede Anzeige der fernen Halle bei
+    // jedem Takt den vollen Rumpf — die Ersparnis wäre ausgerechnet für die
+    // Halle abgeschaltet, für die dieser Umbau gebaut ist.
+    if let Some(marke) = if_none_match {
+        anfrage = anfrage.header(reqwest::header::IF_NONE_MATCH, marke);
+    }
+    match anfrage.send().await {
         Ok(antwort) => {
             let status =
                 StatusCode::from_u16(antwort.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -312,8 +411,37 @@ async fn durchreichen(cfg: &BridgeConfig, pfad: &str, query: Option<&str>) -> Re
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("application/octet-stream")
                 .to_string();
+            let etag = antwort
+                .headers()
+                .get(reqwest::header::ETAG)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+            let cache = antwort
+                .headers()
+                .get(reqwest::header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+            // Bei `304` gibt es keinen Rumpf — und es darf auch keiner
+            // erfunden werden, sonst hielte die Anzeige ihn für neue Daten.
+            if status == StatusCode::NOT_MODIFIED {
+                let mut antwort = Response::new(axum::body::Body::empty());
+                *antwort.status_mut() = status;
+                if let Some(e) = etag.and_then(|e| e.parse().ok()) {
+                    antwort.headers_mut().insert(header::ETAG, e);
+                }
+                return antwort;
+            }
             match antwort.bytes().await {
-                Ok(rumpf) => (status, [(header::CONTENT_TYPE, typ)], rumpf).into_response(),
+                Ok(rumpf) => {
+                    let mut fertig = (status, [(header::CONTENT_TYPE, typ)], rumpf).into_response();
+                    if let Some(e) = etag.and_then(|e| e.parse().ok()) {
+                        fertig.headers_mut().insert(header::ETAG, e);
+                    }
+                    if let Some(c) = cache.and_then(|c| c.parse().ok()) {
+                        fertig.headers_mut().insert(header::CACHE_CONTROL, c);
+                    }
+                    fertig
+                }
                 Err(e) => {
                     tracing::warn!("Durchreichen von {url}: {e}");
                     StatusCode::BAD_GATEWAY.into_response()
@@ -333,10 +461,15 @@ async fn lesend(
     State(cfg): State<Arc<BridgeConfig>>,
     uri: axum::http::Uri,
     RawQuery(query): RawQuery,
+    kopf: axum::http::HeaderMap,
 ) -> Response {
     if cfg.traegt().is_none() {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
+    let marke = kopf
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
     // Sonderfall Vereinslogo: `tablet.html` fragt es bei leerem Präfix unter
     // `/info/club-logo` an — eine Route, die nur der LAN-Server hat, der
     // Relay aber **nicht**. Durchgereicht ergäbe das eine 404 und das Logo
@@ -345,7 +478,7 @@ async fn lesend(
     if uri.path() == "/info/club-logo" {
         return club_logo(&cfg, query.as_deref()).await;
     }
-    durchreichen(&cfg, uri.path(), query.as_deref()).await
+    durchreichen(&cfg, uri.path(), query.as_deref(), marke.as_deref()).await
 }
 
 /// Holt ein Vereinslogo bei badhub — siehe [`lesend`].
@@ -408,6 +541,32 @@ async fn result(State(cfg): State<Arc<BridgeConfig>>, rumpf: String) -> Response
     }
 }
 
+/// `/tablet-log` und `/pi-log` — Diagnose-Zeilen der lokal ausgelieferten
+/// Seiten.
+///
+/// Sie landen im Log **dieses** Rechners und reisen von dort über den
+/// gewohnten Weg (`log_upload.rs`) weiter, wenn der Betreiber das eingestellt
+/// hat. Bewusst nicht an den Relay durchgereicht: Dort gibt es keine
+/// Gegenstelle dafür, und die Zeilen gehören ohnehin zu **diesem** Gerätepark.
+///
+/// **Keine Frame-Nutzlast ins Log** — durch die Brücke reisen Spielernamen
+/// und Lizenznummern; das Diagnose-Log wird hochgeladen.
+async fn log_annehmen(
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    rumpf: String,
+) -> impl IntoResponse {
+    let wer = q
+        .get("court")
+        .or_else(|| q.get("device"))
+        .map(String::as_str)
+        .unwrap_or("unbekannt");
+    // Auf ein vernünftiges Maß kürzen: Die Seiten schicken bis zu ~800
+    // Zeilen am Stück.
+    let kurz: String = rumpf.chars().take(16 * 1024).collect();
+    tracing::info!("Diagnose-Log der fernen Halle ({wer}):\n{kurz}");
+    StatusCode::NO_CONTENT
+}
+
 /// Startet die Slave-Brücke auf `0.0.0.0:8088`.
 ///
 /// `master_namespace` muss vorab validiert sein (siehe
@@ -442,6 +601,11 @@ pub async fn run(
         .route("/info/{*rest}", get(lesend))
         .route("/ads/{*rest}", get(lesend))
         .route("/flags/{*rest}", get(lesend))
+        // Diagnose-Uploads der lokal ausgelieferten Seiten. Ohne diese
+        // Routen liefen sie ins 404 — ausgerechnet in der fernen Halle, wo
+        // man bei einer Störung am wenigsten danebenstehen kann.
+        .route("/tablet-log", post(log_annehmen))
+        .route("/pi-log", post(log_annehmen))
         .with_state(cfg);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", TABLET_PORT)).await?;
     tracing::info!(
@@ -533,6 +697,54 @@ mod tests {
             !html.contains("badhub.de"),
             "im Träger-Betrieb darf keine Cloud-Adresse auftauchen: {html}"
         );
+    }
+
+    /// Der Versions-Ping muss **lokal** beantwortet werden.
+    ///
+    /// Reicht man ihn durch, antwortet der Relay mit SEINER Marke — und weil
+    /// Relay und App aus verschiedenen Ständen stammen, weichen sie fast
+    /// immer ab. Das Tablet lädt dann neu, bekommt dieselbe Seite mit
+    /// derselben Marke und lädt wieder neu: ein Reload-Ringelspiel mitten im
+    /// Turnier (Review-Fund 25.08.2026).
+    #[test]
+    fn versions_ping_wird_lokal_mit_eigener_marke_beantwortet() {
+        let pong = pong_auf_ping(r#"{"type":"ping"}"#).expect("Ping muss lokal beantwortet werden");
+        assert!(
+            pong.contains(assets::seiten_marke()),
+            "der Pong muss die Marke DIESER Binärdatei tragen: {pong}"
+        );
+    }
+
+    /// Alles andere reist unverändert weiter — der Slave deutet keine
+    /// Fachframes, er trägt sie nur.
+    #[test]
+    fn andere_frames_werden_nicht_abgefangen() {
+        assert!(pong_auf_ping(r#"{"type":"score_update","scoreA":1,"scoreB":0}"#).is_none());
+        assert!(pong_auf_ping(r#"{"type":"identify","courtId":1}"#).is_none());
+        assert!(pong_auf_ping("kein json").is_none());
+    }
+
+    /// Sicherheitsgrenze des Durchreichers: Ein Pfad, der aus dem eigenen
+    /// Namespace aufsteigt, darf nie zu einer URL werden — sonst wäre die
+    /// Brücke ein offener Zugang zu **fremden Turnieren**.
+    #[test]
+    fn pfad_wachter_weist_aufstiege_ab() {
+        assert!(pfad_ist_harmlos("/info/overview"));
+        assert!(pfad_ist_harmlos("/ads/werbung-1.png"));
+        assert!(pfad_ist_harmlos("/court/42/state"));
+
+        assert!(!pfad_ist_harmlos(
+            "/info/../../fremder-namespace/court/1/state"
+        ));
+        assert!(!pfad_ist_harmlos("/info/%2e%2e/%2e%2e/fremd"));
+        assert!(
+            !pfad_ist_harmlos("/info/%2E%2E/fremd"),
+            "Groß-/Kleinschreibung"
+        );
+        assert!(!pfad_ist_harmlos("/info/%2f%2f/fremd"));
+        assert!(!pfad_ist_harmlos("/info/./heimlich"));
+        assert!(!pfad_ist_harmlos("info/ohne-schraegstrich"));
+        assert!(!pfad_ist_harmlos("/info/..\\windows"));
     }
 
     /// Der Slave stempelt die Seite mit **seiner** Marke. Käme sie vom Relay,

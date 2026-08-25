@@ -736,15 +736,17 @@ Vorbereitet für die **Transport-Bündelung** der fernen Halle
 die WebSockets seiner Geräte über **eine** Verbindung; jedes Gerät ist darin
 ein **Substrom**.
 
-> **Stand: Die Relay-Seite steht, die Slave-Seite noch nicht.** Solange kein
-> bts-light die Route ruft, ändert sich im Betrieb nichts.
+> **Stand: beide Seiten stehen.** Der Slave nutzt die Route nur bei
+> ausdrücklichem Opt-in (`slave_mux.enabled`, Vorgabe **aus**) — ohne das
+> ändert sich im Betrieb nichts.
 
 **Wire-Form** (`relay-proto`): Der Slave sendet `CarrierMsg` —
 `hello` (Fassung aushandeln), `streamOpen` (Gerät verbunden; `kind` ist
 `tablet` oder `monitor`, bei Anzeigen optional mit `court`), `frame`
 (Fachframe 1:1 wie vom Gerät) und `streamClose`. Der Relay antwortet mit
 `CarrierServerMsg` — `ready`, `unsupported`, `frame`, `streamClose`.
-Deckel: `MAX_STREAMS_PER_CARRIER` = 64, `MAX_CARRIER_PAYLOAD_LEN` = 64 KB.
+Deckel: `MAX_STREAMS_PER_CARRIER` = 64, `MAX_CARRIER_PAYLOAD_LEN` = 160 KB (mit
+Kopfraum ueber `MAX_STATE_LEN`, weil hier die UMHUELLTE Form gemessen wird).
 
 **Der Kern: ein eigener Sende-Kanal je Substrom.** Der Relay unterscheidet
 Geräte über `Tx::same_channel()` — daran hängen `is_holder` (und damit R4,

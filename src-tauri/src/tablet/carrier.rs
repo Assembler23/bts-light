@@ -180,37 +180,58 @@ async fn lauf(
     let url = format!("{RELAY_WS}/{namespace}/carrier-ws");
     let mut backoff = 1u64;
     loop {
-        match sitzung(&traeger, &url, &mut hinaus_rx).await {
-            Ok(()) => tracing::info!("Träger beendet – neuer Versuch"),
-            Err(e) => tracing::warn!("Träger-Verbindung: {e}"),
-        }
+        let ergebnis = sitzung(&traeger, &url, &mut hinaus_rx, &mut backoff).await;
         // Die Geräte hängen an dieser Verbindung; ohne Abbruch warteten sie
         // auf Antworten, die nie kommen.
         traeger.bereit.store(false, Ordering::Relaxed);
         traeger.alle_abbrechen();
+
+        match ergebnis {
+            Ok(()) => tracing::info!("Träger beendet – neuer Versuch"),
+            // Ein Relay, der unsere Fassung nicht kennt, wird sie auch beim
+            // hundertsten Versuch nicht kennen. Aufgeben ist hier das
+            // Richtige: Die Brücke fällt Route für Route auf die
+            // Weiterleitung zurück, und die Halle arbeitet über die Cloud
+            // weiter. Endloses Wiederholen hielte sie stattdessen in einem
+            // Zustand, in dem `/ws` dauerhaft 503 liefert.
+            Err(TraegerEnde::FassungAbgelehnt) => {
+                tracing::warn!("Träger aufgegeben – Geräte laufen direkt über die Cloud");
+                return;
+            }
+            Err(TraegerEnde::Abbruch(e)) => tracing::warn!("Träger-Verbindung: {e}"),
+        }
         tokio::time::sleep(Duration::from_secs(backoff)).await;
         backoff = (backoff * 2).min(30);
     }
+}
+
+/// Warum eine Träger-Sitzung endete.
+enum TraegerEnde {
+    /// Der Relay kennt unsere Protokollfassung nicht — nicht wiederholen.
+    FassungAbgelehnt,
+    /// Alles andere: Netz weg, Relay neu gestartet, Lesefehler.
+    Abbruch(String),
 }
 
 async fn sitzung(
     traeger: &Arc<Traeger>,
     url: &str,
     hinaus_rx: &mut mpsc::UnboundedReceiver<CarrierMsg>,
-) -> Result<(), String> {
+    backoff: &mut u64,
+) -> Result<(), TraegerEnde> {
     let (stream, _) = tokio_tungstenite::connect_async(url)
         .await
-        .map_err(|e| format!("Verbindung zu {url}: {e}"))?;
+        .map_err(|e| TraegerEnde::Abbruch(format!("Verbindung zu {url}: {e}")))?;
     let (mut sink, mut read) = stream.split();
 
     // Fassung aushandeln, bevor irgendein Gerät angenommen wird.
     let hallo = serde_json::to_string(&CarrierMsg::Hello {
         proto: CARRIER_PROTO_VERSION,
     })
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| TraegerEnde::Abbruch(e.to_string()))?;
     sink.send(WsMessage::Text(hallo.into()))
         .await
-        .map_err(|e| format!("Begrüßung: {e}"))?;
+        .map_err(|e| TraegerEnde::Abbruch(format!("Begruessung: {e}")))?;
 
     let mut letztes = tokio::time::Instant::now();
     let mut leerlauf = tokio::time::interval(TRAEGER_READ_IDLE / 3);
@@ -220,7 +241,7 @@ async fn sitzung(
         tokio::select! {
             eingang = read.next() => {
                 let Some(nachricht) = eingang else { return Ok(()) };
-                let nachricht = nachricht.map_err(|e| format!("Lesen: {e}"))?;
+                let nachricht = nachricht.map_err(|e| TraegerEnde::Abbruch(format!("Lesen: {e}")))?;
                 letztes = tokio::time::Instant::now();
                 match nachricht {
                     WsMessage::Text(t) => {
@@ -229,6 +250,11 @@ async fn sitzung(
                             CarrierServerMsg::Ready { proto } => {
                                 tracing::info!("Träger bereit (Fassung {proto})");
                                 traeger.bereit.store(true, Ordering::Relaxed);
+                                // Verbindung steht: Wartezeit zuruecksetzen,
+                                // sonst bliebe sie nach ein paar Aussetzern
+                                // dauerhaft bei 30 s — und jeder spaetere
+                                // Abriss liesse die Halle so lange dunkel.
+                                *backoff = 1;
                             }
                             CarrierServerMsg::Unsupported { proto } => {
                                 // Der Relay ist älter als wir. Nicht endlos
@@ -238,7 +264,7 @@ async fn sitzung(
                                 tracing::warn!(
                                     "Relay kennt Träger-Fassung {proto} nicht – Geräte laufen direkt über die Cloud"
                                 );
-                                return Err("Fassung abgelehnt".into());
+                                return Err(TraegerEnde::FassungAbgelehnt);
                             }
                             CarrierServerMsg::Frame { stream, payload } => {
                                 traeger.zustellen(stream, AnGeraet::Frame(payload));
@@ -256,17 +282,17 @@ async fn sitzung(
             }
             ausgang = hinaus_rx.recv() => {
                 let Some(msg) = ausgang else { return Ok(()) };
-                let roh = serde_json::to_string(&msg).map_err(|e| e.to_string())?;
+                let roh = serde_json::to_string(&msg).map_err(|e| TraegerEnde::Abbruch(e.to_string()))?;
                 sink.send(WsMessage::Text(roh.into()))
                     .await
-                    .map_err(|e| format!("Senden: {e}"))?;
+                    .map_err(|e| TraegerEnde::Abbruch(format!("Senden: {e}")))?;
             }
             _ = leerlauf.tick() => {
                 if letztes.elapsed() >= TRAEGER_READ_IDLE {
-                    return Err(format!(
-                        "seit {}s nichts vom Relay gehört",
+                    return Err(TraegerEnde::Abbruch(format!(
+                        "seit {}s nichts vom Relay gehoert",
                         letztes.elapsed().as_secs()
-                    ));
+                    )));
                 }
             }
         }
