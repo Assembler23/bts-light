@@ -272,6 +272,14 @@ fn pong_auf_ping(roh: &str) -> Option<String> {
     }
 }
 
+/// Ist das ein `Pong` des Relays? Der wird verworfen — siehe Aufrufstelle.
+fn ist_pong(roh: &str) -> bool {
+    matches!(
+        serde_json::from_str::<relay_proto::ServerMsg>(roh),
+        Ok(relay_proto::ServerMsg::Pong { .. })
+    )
+}
+
 /// Bedient **eine** lokale WebSocket als Substrom des Trägers.
 ///
 /// Der Slave ist hier für die Liveness zuständig: Bleibt das Gerät länger als
@@ -303,21 +311,24 @@ async fn substrom_bedienen(
                 letztes = tokio::time::Instant::now();
                 match msg {
                     Message::Text(t) => {
-                        // Den Versions-Ping beantwortet der Slave SELBST.
-                        //
-                        // Er hat die Seite ausgeliefert, also ist seine Marke
-                        // die richtige. Reicht man den Ping durch, antwortet
-                        // der Relay mit SEINER — und weil Relay (bei jedem
-                        // main-Merge) und App (bei Tags) aus verschiedenen
-                        // Ständen stammen, weichen die beiden fast immer ab.
-                        // Folge wäre ein Reload-Ringelspiel mitten im
-                        // Turnier: Das Tablet lädt neu, bekommt dieselbe
-                        // Seite mit derselben Marke, lädt wieder neu.
+                        // Den Versions-Ping beantwortet der Slave SELBST —
+                        // er hat die Seite ausgeliefert, also ist seine Marke
+                        // die richtige. Antwortete der Relay, käme SEINE, und
+                        // weil Relay (bei jedem main-Merge) und App (bei
+                        // Tags) aus verschiedenen Ständen stammen, wichen die
+                        // beiden fast immer ab: Das Tablet lädt neu, bekommt
+                        // dieselbe Seite mit derselben Marke, lädt wieder neu.
                         if let Some(pong) = pong_auf_ping(&t) {
                             if socket.send(Message::Text(pong.into())).await.is_err() { break }
-                        } else {
-                            traeger.frame(stream, t.to_string());
                         }
+                        // ABER: trotzdem durchreichen. Der Ping ist das
+                        // EINZIGE, was ein Tablet ohne Punkteingabe
+                        // regelmäßig sendet; am Relay stempelt er das
+                        // Lebenszeichen des Substroms. Verschluckt man ihn,
+                        // räumt die dortige Rückfallebene den Substrom nach
+                        // 15 s ab — jedes ruhige Tablet verlöre im Minutentakt
+                        // seinen Court-Slot (Review-Fund 25.08.2026).
+                        traeger.frame(stream, t.to_string());
                     }
                     Message::Close(_) => break,
                     _ => {}
@@ -326,6 +337,11 @@ async fn substrom_bedienen(
             antwort = vom_relay.recv() => {
                 match antwort {
                     Some(AnGeraet::Frame(p)) => {
+                        // Der Relay beantwortet den durchgereichten Ping mit
+                        // SEINER Marke. Das Gerät hat unsere längst — seine
+                        // wäre die falsche und löste den Reload aus, den wir
+                        // gerade verhindern. Also schlucken.
+                        if ist_pong(&p) { continue }
                         if socket.send(Message::Text(p.into())).await.is_err() { break }
                     }
                     Some(AnGeraet::Schluss) | None => break,
@@ -713,6 +729,23 @@ mod tests {
             pong.contains(assets::seiten_marke()),
             "der Pong muss die Marke DIESER Binärdatei tragen: {pong}"
         );
+    }
+
+    /// Der Pong des Relays muss erkannt werden, damit er verworfen werden
+    /// kann. Ließe man ihn durch, trüge er die Marke des **Relays** ans
+    /// Gerät — und löste genau den Reload aus, den die lokale Antwort
+    /// verhindern soll.
+    #[test]
+    fn pong_des_relays_wird_erkannt() {
+        let relay_pong = serde_json::to_string(&relay_proto::ServerMsg::Pong {
+            marke: "fremde-marke".into(),
+        })
+        .expect("serialisieren");
+        assert!(ist_pong(&relay_pong));
+        // Alles andere muss durchkommen — sonst verschluckt die Brücke
+        // Match-Zuweisungen.
+        assert!(!ist_pong(r#"{"type":"court_occupied"}"#));
+        assert!(!ist_pong("kein json"));
     }
 
     /// Alles andere reist unverändert weiter — der Slave deutet keine
