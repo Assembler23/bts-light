@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   Megaphone,
   QrCode,
+  ShieldCheck,
   Tablet,
   Wifi,
 } from "lucide-react";
@@ -34,7 +35,7 @@ interface Props {
  *  Court-URL und QR-URL. Im Doppelmodus hat ein Feld zwei davon. */
 interface CourtAddress {
   /** Verbindungsweg – steuert Badge und Icon. */
-  kind: "lan" | "cloud";
+  kind: "lan" | "lan-tls" | "cloud";
   /** Adresse, die am Spielfeld im Browser geöffnet wird. */
   courtUrl: string;
   /** URL des QR-Code-Bilds. */
@@ -80,6 +81,7 @@ export function TabletPanel({ announce, azureTts }: Props) {
   }, []);
 
   const host = info?.server_host ?? "";
+  const hostTls = info?.server_host_tls ?? "";
   const relayBase = info?.relay_base ?? "";
   // LAN und Cloud sind unabhängig schaltbar – im Doppelmodus beide aktiv.
   // Fallback bei noch nicht geladenem `info`: LAN, wie bisher.
@@ -98,6 +100,18 @@ export function TabletPanel({ announce, azureTts }: Props) {
         courtUrl: `http://${host}/court/${courtId}`,
         qrUrl: `http://${host}/qr/${courtId}`,
       });
+      // Verschlüsselter Weg ZUSÄTZLICH, nicht statt (ADR 0047). Der
+      // Klartext-Weg bleibt die Vorgabe: Ein Wechsel der Adresse ist ein
+      // Origin-Wechsel, und das Tablet hält sein noch nicht bestätigtes
+      // Ergebnis im localStorage der alten Origin. Umstellen daher nur
+      // zwischen Turnieren.
+      if (hostTls) {
+        list.push({
+          kind: "lan-tls",
+          courtUrl: `https://${hostTls}/court/${courtId}`,
+          qrUrl: `http://${host}/qr/${courtId}?tls=1`,
+        });
+      }
     }
     if (cloudEnabled) {
       list.push({
@@ -108,9 +122,15 @@ export function TabletPanel({ announce, azureTts }: Props) {
     }
     return list;
   };
-  // Im Doppelmodus zwei QR-Codes je Feld – dann eine Spalte, damit beide
-  // nebeneinander Platz haben. Einzelmodus: zweispalt wie bisher.
-  const bothModes = lanEnabled && cloudEnabled;
+  // Mehrere Adressen je Feld – dann eine Spalte, damit sie nebeneinander
+  // Platz haben. Genau eine Adresse: zweispaltig wie bisher.
+  //
+  // Zählt die tatsächlichen Adressen statt „LAN und Cloud", seit der
+  // verschlüsselte Weg (ADR 0047) dazukam: Auch LAN allein liefert damit
+  // zwei QR-Codes je Feld, und die sehen einander zum Verwechseln ähnlich.
+  const mehrereAdressen = courts.some(
+    (c) => courtAddresses(c.court_id).length > 1,
+  );
 
   // Hallenweise Gruppierung: je Halle eine Gruppe mit Überschrift. Felder
   // ohne Halle – Ein-Hallen-Turnier oder (im Mehr-Hallen-Fall) nicht
@@ -252,7 +272,7 @@ export function TabletPanel({ announce, azureTts }: Props) {
               <p className="text-xs text-slate-500">
                 Am Spielfeld die Adresse im Browser öffnen oder den QR-Code
                 scannen (auf den QR tippen zeigt ihn groß).{" "}
-                {bothModes
+                {mehrereAdressen
                   ? "Je Feld stehen LAN- und Cloud-Adresse bereit – die passende für die jeweilige Halle wählen."
                   : cloudOnly
                     ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
@@ -263,7 +283,7 @@ export function TabletPanel({ announce, azureTts }: Props) {
                   <HallHeading name={g.location} />
                   <div
                     className={`grid grid-cols-1 gap-2 ${
-                      bothModes ? "" : "sm:grid-cols-2"
+                      mehrereAdressen ? "" : "sm:grid-cols-2"
                     }`}
                   >
                     {g.courts.map((c) => (
@@ -296,7 +316,7 @@ export function TabletPanel({ announce, azureTts }: Props) {
             />
             <div className="mt-3 flex items-center gap-2 text-lg font-semibold">
               {zoom.court.court}
-              {bothModes && <AddressBadge kind={zoom.address.kind} />}
+              {mehrereAdressen && <AddressBadge kind={zoom.address.kind} />}
             </div>
             <div className="mt-1 max-w-[20rem] break-all text-sm text-slate-500">
               {zoom.address.courtUrl}
@@ -395,20 +415,36 @@ function QrCard({
   );
 }
 
-/** Kleines „LAN"-/„Cloud"-Badge zur Kennzeichnung eines Verbindungswegs. */
-function AddressBadge({ kind }: { kind: "lan" | "cloud" }) {
-  const cloud = kind === "cloud";
+/** Kleines Badge zur Kennzeichnung eines Verbindungswegs. */
+function AddressBadge({ kind }: { kind: "lan" | "lan-tls" | "cloud" }) {
+  const stil =
+    kind === "cloud"
+      ? "bg-sky-100 text-sky-700"
+      : kind === "lan-tls"
+        ? "bg-emerald-100 text-emerald-700"
+        : "bg-slate-200 text-slate-600";
   return (
     <span
       className={`mb-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5
-                  text-[10px] font-medium ${
-                    cloud
-                      ? "bg-sky-100 text-sky-700"
-                      : "bg-slate-200 text-slate-600"
-                  }`}
+                  text-[10px] font-medium ${stil}`}
+      // Der Zusatznutzen ist erklärungsbedürftig: Nur über den
+      // verschlüsselten Weg meldet ein Tablet seinen Akkustand (Secure
+      // Context), und dafür ist einmalig die Zertifikatswarnung zu
+      // bestätigen.
+      title={
+        kind === "lan-tls"
+          ? "Verschlüsselt — einmalig die Zertifikatswarnung bestätigen; danach zeigt das Tablet seinen Akkustand"
+          : undefined
+      }
     >
-      {cloud ? <Cloud size={11} /> : <Wifi size={11} />}
-      {cloud ? "Cloud" : "LAN"}
+      {kind === "cloud" ? (
+        <Cloud size={11} />
+      ) : kind === "lan-tls" ? (
+        <ShieldCheck size={11} />
+      ) : (
+        <Wifi size={11} />
+      )}
+      {kind === "cloud" ? "Cloud" : kind === "lan-tls" ? "LAN 🔒" : "LAN"}
     </span>
   );
 }

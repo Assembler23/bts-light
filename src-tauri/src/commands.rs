@@ -82,6 +82,9 @@ pub struct AppState {
     pub tablet: Arc<TabletState>,
     /// Handle des laufenden Tablet-Servers (LAN-Modus), falls aktiv.
     pub tablet_server: Mutex<Option<JoinHandle<()>>>,
+    /// Handle des zusätzlichen HTTPS-Servers (ADR 0047), falls aktiv.
+    /// Getrennt vom Klartext-Server: Scheitert TLS, läuft jener weiter.
+    pub tablet_server_tls: Mutex<Option<JoinHandle<()>>>,
     /// Handle des laufenden Relay-Clients (Cloud-Modus), falls aktiv.
     pub relay_task: Mutex<Option<JoinHandle<()>>>,
     /// Handle des Diagnose-Log-Uploads, falls aktiv.
@@ -315,6 +318,12 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Die Hallen-Farben werden auf der Felderübersicht gepflegt (Spec
     // hallen-farben) — auch sie kennt der Assistent nicht.
     incoming.hall_colors = current.hall_colors.clone();
+    // Der verschlüsselte Zugang (ADR 0047) wird von Hand in der
+    // `config.json` geschaltet; der Assistent kennt das Feld nicht und
+    // schickte den serde-Default (`enabled: true`, Port 8443) zurück. Wer
+    // TLS abgeschaltet oder den Port verlegt hat, hätte es beim nächsten
+    // Speichern einer beliebigen Einstellung stumm zurückgesetzt bekommen.
+    incoming.tls = current.tls.clone();
     // Gesperrte Felder werden auf der Felderübersicht UND (seit v0.9.258) aus
     // der Turnierleitungs-Oberfläche gesetzt — der Assistent schickt seinen
     // beim Öffnen aufgenommenen Stand zurück und löschte sie damit still.
@@ -908,6 +917,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Halle des Slaves — filtert die Feld-Auswahlseite der Brücke.
     let announce_hall = config.announce.announce_hall.clone();
     let mode = config.connection_mode;
+    // Zusätzlicher HTTPS-Port (ADR 0047) — vor dem Verschieben der Config
+    // festhalten, wie `mode` und `slave_mode` auch.
+    let tls_enabled = config.tls.enabled;
+    let tls_port = config.tls.port;
     // Ansage-Slave: kein Tablet-Server/mDNS/Relay (nur BTP lesen + ansagen) –
     // sonst Kollision mit dem Master (doppeltes bts-light.local, Liveticker).
     let slave_mode = config.slave_mode;
@@ -1087,6 +1100,39 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             }));
         }
         drop(server_slot);
+        // Zusätzlicher HTTPS-Port (ADR 0047). Bewusst ein eigener Task:
+        // Der Klartext-Port 8088 bleibt offen, und ein Scheitern hier —
+        // Port belegt, Zertifikat unlesbar — darf den Turnierbetrieb nicht
+        // anrühren. Deshalb nur protokollieren, nicht hochreichen.
+        // Gleicher Port wie der Klartext-Server? Dann NICHT starten. Sonst
+        // gewönne das Rennen ums Binden zufällig einer der beiden — und
+        // gewönne der TLS-Server, wäre der Port weg, auf dem die
+        // Court-Monitor-Pis ihren Subnetz-Scan fahren (`:8088/health`). Im
+        // Log stünde nur „Tablet-Server beendet".
+        if tls_enabled && tls_port == crate::tablet::server::TABLET_PORT {
+            tracing::warn!(
+                "HTTPS-Port {tls_port} ist zugleich der Klartext-Port – \
+                 verschlüsselter Zugang bleibt aus. Bitte `tls.port` ändern."
+            );
+        } else if tls_enabled {
+            let mut tls_slot = state
+                .tablet_server_tls
+                .lock()
+                .expect("TLS-Server-Mutex nicht vergiftet");
+            if tls_slot.is_none() {
+                let ctx = ctx.clone();
+                let port = tls_port;
+                let cert_dir = config_path(&app)
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_default();
+                *tls_slot = Some(tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::tablet::server::run_tls(ctx, port, cert_dir).await {
+                        tracing::error!("HTTPS-Server nicht gestartet ({e}) – HTTP läuft weiter");
+                    }
+                }));
+            }
+        }
         // mDNS-Bekanntgabe (`bts-light.local`) – damit Tablets und
         // Monitore den PC ohne feste IP finden. Fehler ist unkritisch.
         let mut mdns_slot = state.mdns.lock().expect("mDNS-Mutex nicht vergiftet");
@@ -1198,6 +1244,14 @@ pub fn stop_sync(state: State<'_, AppState>) {
         handle.abort();
     }
     if let Some(handle) = state
+        .tablet_server_tls
+        .lock()
+        .expect("TLS-Server-Mutex nicht vergiftet")
+        .take()
+    {
+        handle.abort();
+    }
+    if let Some(handle) = state
         .relay_task
         .lock()
         .expect("Relay-Task-Mutex nicht vergiftet")
@@ -1303,6 +1357,14 @@ pub struct TabletInfo {
     /// LAN-Adresse `<ip>:<port>` des Tablet-Servers – gesetzt, sobald der
     /// LAN-Pfad aktiv ist (`Lan` oder `LanAndCloud`), sonst leer.
     pub server_host: String,
+    /// Verschlüsselte LAN-Adresse `<ip>:<tls-port>` (ADR 0047) – gesetzt,
+    /// sobald LAN **und** TLS aktiv sind, sonst leer.
+    ///
+    /// Bewusst die **IP** und nicht der mDNS-Name: Chrome unter Android löst
+    /// `.local` vielerorts nicht auf — und das sind genau die Geräte, für die
+    /// der verschlüsselte Weg gebaut wurde (nur sie melden ihren Akkustand).
+    #[serde(default)]
+    pub server_host_tls: String,
     /// Verbindungsart: `"lan"`, `"cloud"` oder `"lan+cloud"`.
     pub mode: String,
     /// Öffentliche Relay-Basis-URL (`https://badhub.de/bts-relay/<install_id>`)
@@ -1335,6 +1397,11 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
     } else {
         String::new()
     };
+    let server_host_tls = if lan_enabled && config.tls.enabled {
+        crate::tablet::server::lan_host_tls(config.tls.port)
+    } else {
+        String::new()
+    };
     let relay_base = if cloud_enabled {
         format!("https://badhub.de/bts-relay/{}", config.install_id)
     } else {
@@ -1351,6 +1418,7 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
     crate::hall_colors::paint(&mut courts, &config, &state.tablet.hall_names());
     TabletInfo {
         server_host,
+        server_host_tls,
         mode,
         relay_base,
         lan_enabled,
@@ -4689,6 +4757,34 @@ mod tests {
         );
         assert_eq!(merged.tl_web.profiles[0].id, "profil-neu");
         assert_eq!(merged.tl_web.default_profile_id, "profil-neu");
+    }
+
+    #[test]
+    fn keep_host_managed_fields_preserves_the_tls_settings() {
+        // ADR 0047: `tls` wird von Hand in der `config.json` geschaltet, der
+        // Setup-Assistent kennt das Feld nicht. Ohne Schutz schickte er den
+        // serde-Default zurück (`enabled: true`, Port 8443) — wer TLS
+        // abgeschaltet oder den Port verlegt hat, bekäme das beim nächsten
+        // Speichern einer beliebigen Einstellung stumm zurückgesetzt.
+        // Dieselbe Falle wie zuvor bei `hall_prefill` und `hall_colors`.
+        let current = AppConfig {
+            tls: crate::config::TlsConfig {
+                enabled: false,
+                port: 9443,
+            },
+            ..Default::default()
+        };
+
+        let mut from_ui = AppConfig::default();
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert", "Einstellung wird übernommen");
+        assert!(
+            !merged.tls.enabled,
+            "abgeschaltetes TLS darf nicht stumm wieder angehen"
+        );
+        assert_eq!(merged.tls.port, 9443, "und der verlegte Port bleibt liegen");
     }
 
     #[test]

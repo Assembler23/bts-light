@@ -515,11 +515,14 @@ impl ServerCtx {
     }
 }
 
-/// Startet den Server auf `0.0.0.0:8088` und bedient ihn, bis der Task
-/// abgebrochen wird.
-pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
-    let ctx_fuer_takt = ctx.clone();
-    let app = Router::new()
+/// Baut den Router mit allen Routen — ohne Listener, ohne Takt.
+///
+/// Eigene Funktion, damit ein **zweiter** Listener (TLS auf 8443, ADR 0047)
+/// dieselben Routen bedienen kann, ohne `run` zu duplizieren. Der
+/// TL-Erkennungstakt gehört bewusst NICHT hierher: Er läuft genau einmal
+/// (siehe `run`) — zwei Takte schrieben beide `notify_tl`.
+pub fn router(ctx: Arc<ServerCtx>) -> Router {
+    Router::new()
         // TV-Launcher: kurze Root-Adresse landet auf einem Auswahl-Menü
         // (Fernbedienung statt langer ?halle=-URLs). Kurz-Pfade leiten direkt.
         .route("/", get(tv_page))
@@ -583,7 +586,14 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
         // gesetzt → nur dieses Feld (Court-Monitor), fehlt es → alle Felder
         // (Feld-Übersicht). Siehe `monitor_ws_upgrade`.
         .route("/monitor-ws", get(monitor_ws_upgrade))
-        .with_state(ctx);
+        .with_state(ctx)
+}
+
+/// Startet den Server auf `0.0.0.0:8088` und bedient ihn, bis der Task
+/// abgebrochen wird.
+pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
+    let ctx_fuer_takt = ctx.clone();
+    let app = router(ctx);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", TABLET_PORT)).await?;
     tracing::info!("Tablet-Server lauscht auf http://{}", lan_host());
@@ -601,6 +611,37 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
     // (Review-Fund 18.08.2026). `Drop` läuft auch beim Abbruch.
     let _takt = TaktWaechter(tokio::spawn(tl_push_takt(ctx_fuer_takt)));
     axum::serve(listener, app).await
+}
+
+/// Startet den **zusätzlichen** HTTPS-Server (ADR 0047) und bedient ihn, bis
+/// der Task abgebrochen wird.
+///
+/// Bewusst getrennt von [`run`]:
+/// * Der **TL-Erkennungstakt läuft hier nicht.** Er gehört genau einmal in den
+///   Prozess (siehe [`run`]) — zwei Takte schrieben beide `notify_tl`.
+/// * Der Klartext-Port bleibt unberührt. Scheitert dieser Server (Port belegt,
+///   Zertifikat unlesbar), läuft der HTTP-Server weiter; der Aufrufer
+///   protokolliert nur.
+///
+/// `cert_dir` ist das Verzeichnis, in dem Zertifikat und Schlüssel liegen bzw.
+/// beim ersten Start erzeugt werden.
+pub async fn run_tls(
+    ctx: Arc<ServerCtx>,
+    port: u16,
+    cert_dir: std::path::PathBuf,
+) -> Result<(), String> {
+    let (cert, key) = super::tls::laden_oder_erzeugen(&cert_dir)?;
+    let cfg = super::tls::server_config(cert, key)?;
+    let listener = super::tls::TlsListener::binden(port, cfg)
+        .await
+        .map_err(|e| format!("HTTPS-Port {port} belegt oder nicht verfügbar: {e}"))?;
+    tracing::info!(
+        "Tablet-Server lauscht zusätzlich auf https://{}:{port}",
+        super::mdns::MDNS_HOST
+    );
+    axum::serve(listener, router(ctx))
+        .await
+        .map_err(|e| format!("HTTPS-Server beendet: {e}"))
 }
 
 /// Beendet den TL-Erkennungstakt, sobald der Server-Task endet — egal ob
@@ -658,6 +699,25 @@ pub fn lan_host() -> String {
     match local_ip_address::local_ip() {
         Ok(ip) => format!("{ip}:{TABLET_PORT}"),
         Err(_) => format!("localhost:{TABLET_PORT}"),
+    }
+}
+
+/// Verschlüsselte LAN-Adresse `<ip>:<tls-port>` (ADR 0047).
+///
+/// Bewusst die **IP**, nicht der mDNS-Name: Chrome unter Android — die
+/// Geräteklasse, für die der verschlüsselte Weg überhaupt gebaut wurde, weil
+/// nur sie den Akkustand meldet — löst `.local`-Namen vielerorts **nicht**
+/// auf. Ein QR-Code auf `bts-light.local` liefe dort ins Leere und das
+/// Feature wäre unerreichbar (Review-Fund 25.08.2026).
+///
+/// Preis: Wechselt die DHCP-Adresse des Turnier-PCs, ist die einmal
+/// bestätigte Zertifikatsausnahme erneut fällig. Das Zertifikat trägt den
+/// mDNS-Namen weiterhin als SAN — wer eine dauerhafte Einrichtung will, darf
+/// `https://bts-light.local:<port>` von Hand eintragen.
+pub fn lan_host_tls(tls_port: u16) -> String {
+    match local_ip_address::local_ip() {
+        Ok(ip) => format!("{ip}:{tls_port}"),
+        Err(_) => format!("localhost:{tls_port}"),
     }
 }
 
@@ -949,8 +1009,28 @@ fn court_label_for(ctx: &ServerCtx, court_id: i64) -> String {
 }
 
 /// QR-Code (SVG), der auf die Tablet-URL des Felds (per CourtID) zeigt.
-async fn qr_svg(Path(court_id): Path<i64>) -> impl IntoResponse {
-    let url = format!("http://{}/court/{}", lan_host(), court_id);
+/// Abfrage der QR-Route: `?tls=1` liefert den Code für den verschlüsselten
+/// Weg (ADR 0047) statt für den Klartext-Weg.
+#[derive(serde::Deserialize, Default)]
+struct QrQuery {
+    #[serde(default)]
+    tls: Option<String>,
+}
+
+async fn qr_svg(
+    Path(court_id): Path<i64>,
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<QrQuery>,
+) -> impl IntoResponse {
+    let url = if q.tls.as_deref() == Some("1") {
+        format!(
+            "https://{}/court/{}",
+            lan_host_tls(ctx.app_config().tls.port),
+            court_id
+        )
+    } else {
+        format!("http://{}/court/{}", lan_host(), court_id)
+    };
     match qrcode::QrCode::new(url.as_bytes()) {
         Ok(code) => {
             let svg = code

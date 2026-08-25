@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.268"
+version = "0.9.269"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -33,6 +33,12 @@ reqwest = { version = "0.13.3", default-features = false, features = ["rustls", 
 axum = { version = "0.8.9", features = ["ws"] }
 relay-proto = { path = "../relay-proto" }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+# TLS für den LAN-Tablet-Server (ADR 0047). Beide aus dem rustls-Umfeld.
+# `ring` statt `aws-lc-rs` als Krypto-Backend: keine C-Toolchain nötig, und
+# der Provider wird im Code EXPLIZIT gewählt (`builder_with_provider`) — im
+# Baum liegen beide Provider, ein Prozess-Default existiert daher nicht.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 futures-util = "0.3"
 local-ip-address = "0.6.13"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
