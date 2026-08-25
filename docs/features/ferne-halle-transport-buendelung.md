@@ -1,12 +1,13 @@
 # Transport-Bündelung in der fernen Halle (Multiplexer) — Spezifikation
 
-> Status: **Entwurf** (via /idee: Brief → Grill → How-To → Review), 2026-08-25.
+> Status: **abgestimmt 2026-08-25** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Betreiber-Beobachtung 2026-08-24 — „ein Tablet in der Slave-Halle ist
 > sofort auf das badhub-relay umgestiegen, obwohl wir eigentlich eine LAN-Adresse
 > angegeben haben".
 > Betroffene Crates: `src-tauri`, `relay`, `relay-proto`.
-> ADR: `docs/adr/0048-substrom-adressierung-traeger.md` (zu erstellen) —
-> schreibt [ADR 0002](../adr/0002-ferne-halle-direkt-cloud-geraete.md) fort.
+> ADR: [0048 — Träger-Verbindung, Substrom-Adressierung und lokale
+> Terminierung](../adr/0048-substrom-adressierung-traeger.md); schreibt
+> [ADR 0002](../adr/0002-ferne-halle-direkt-cloud-geraete.md) fort.
 > **Vorbedingung:** [`lan-tls-verschluesselt.md`](lan-tls-verschluesselt.md) (freigegeben).
 
 ## Kontext / Problem
@@ -299,7 +300,7 @@ Slave-Seite gemergt sein; der Relay deployt automatisch bei jedem main-Merge.
    Gerät; Weiterleitungen bleiben als Rückfall.
 5. **Config + Verdrahtung** — `SlaveMuxConfig`, Default `false`.
 6. **Tests** auf dem ADR-0019-Harness.
-7. **Doku, ADR 0048, Reviews.**
+7. **Doku und Reviews** (ADR 0048 liegt bereits vor).
 
 **Reviews:** `security-reviewer` (der Slave trägt fremde Geräteverbindungen, neue
 Relay-Rolle), `code-reviewer` (Pflicht nach jeder Änderung).

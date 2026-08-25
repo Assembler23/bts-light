@@ -83,6 +83,16 @@ Fern-Halle-Verbindung in der Praxis als zu wackelig erweisen, kann Weg B als
 spätere Ausbaustufe additiv daraufgesetzt werden (die Direkt-Cloud-Geräte
 bleiben dann als Fallback bestehen).
 
+> **Nachtrag 2026-08-25:** Die **Transport-Hälfte** von Weg B ist entschieden
+> und in [ADR 0048](0048-substrom-adressierung-traeger.md) festgelegt: Der
+> Slave trägt die Geräte der fernen Halle über eine gebündelte
+> Trägerverbindung. Auslöser war nicht die hier erwartete wackelige
+> Verbindung, sondern der Wunsch nach **lokalen Adressen** in der Halle — die
+> Weiterleitung auf `badhub.de` fiel im Betrieb auf. Die **zweite** Hälfte von
+> Weg B, die lokale Ergebnis-Pufferung, bleibt weiterhin aufgeschoben; sie war
+> hier die eigentliche Begründung und ist es nach wie vor nicht geworden. Die
+> Direkt-Cloud-Geräte bleiben wie vorgesehen als Rückfall bestehen.
+
 ## Konsequenzen
 
 **Positiv**

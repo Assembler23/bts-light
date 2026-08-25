@@ -412,6 +412,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Direkt-Cloud. Kern: eigener `mpsc`-Kanal je Substrom, damit die acht
   `same_channel`-Stellen und mit ihnen R4, ADR 0017 und ADR 0020 unverändert
   gültig bleiben. Config-Default **aus** (Opt-in). Setzt die TLS-Spec voraus.
+  Spec **freigegeben 25.08.2026**, Entscheidung in
+  [ADR 0048](adr/0048-substrom-adressierung-traeger.md); Umsetzung noch nicht
+  begonnen. Reihenfolge: Relay-Etappen zuerst — sie sind rückwärtskompatibel
+  und für sich wirkungslos, und der Relay deployt bei jedem main-Merge.
 
 - **Schiedsrichterzettel vorab und automatisch drucken — VOLLSTÄNDIG
   umgesetzt** (E1–E6, v0.9.249). Zwei Wege aufs Papier: ein **Leerzettel** für
