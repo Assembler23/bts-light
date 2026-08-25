@@ -765,11 +765,30 @@ als HTTP-Uploads — zöge man sie mit hinein, teilten sie sich die Leitung mit
 den Punkt-Frames. Ebenso außen vor bleiben **TL-Web-Geräte**, damit keine
 Schreib-Token durch den Träger reisen.
 
-**Liveness liegt beim Slave.** Hinter einem Träger misst der Relay nur noch
-den Träger (Ping/Stale wie beim Host). Stirbt ein einzelnes Gerät, muss der
-Slave `streamClose` senden — er hält die echte Verbindung dorthin und sieht
-den Abriss sofort, schneller als die 15 s `TABLET_STALE`. Bricht der Träger
+**Liveness: der Slave zuerst, der Relay als Rückfallebene.** Stirbt ein
+einzelnes Gerät, meldet es der Slave mit `streamClose` — er hält die echte
+Verbindung dorthin und sieht den Abriss schneller als die 15 s
+`TABLET_STALE`. Versagt er, greift der Relay: Ein Tablet-Substrom, der länger
+als `TABLET_STALE` kein Frame geschickt hat, wird abgeräumt und sein
+Court-Slot freigegeben. Ohne diese Rückfallebene hielte ein totes Tablet
+seinen Court, solange der Träger lebt — und ein **Ersatzgerät** am selben Feld
+bekäme nur `CourtOccupied` und müsste von Hand übernehmen. Bricht der Träger
 selbst weg, räumt der Relay **alle** seine Substrome ab.
+
+**Anzeigen bekommen ihren Herzschlag.** `overview.html` und `monitor.html`
+werten aus, ob binnen `MONITOR_HEARTBEAT_STALE_MS` (25 s) ein Server-Frame
+kam, und schalten sonst auf den langsamen Poll zurück. Auf einem ruhigen Feld
+entsteht minutenlang kein Nudge — deshalb sendet der Träger denselben
+sichtbaren Herzschlag je Anzeige-Substrom, den `monitor_conn` an seinem
+eigenen Socket schickt. Anzeige-Substrome sind umgekehrt von der
+Stale-Räumung ausgenommen: Sie senden nichts, ihr Schweigen ist der
+Normalfall.
+
+**Ein geschlossener Substrom-Kanal wird gemeldet.** `namespace_aufraeumen`
+verabschiedet die Anzeigen mit einem `Close`, damit sie sich neu verbinden,
+sobald der Host zurück ist. Der Träger reicht das als `streamClose` an den
+Slave weiter, statt es zu verschlucken — sonst bliebe der Substrom mit totem
+Abo stehen und bekäme nie wieder einen Anstoß.
 
 **Fassungs-Aushandlung.** Passt `hello.proto` nicht, antwortet der Relay
 `unsupported` und schließt. Der Slave fällt dann auf die heutigen

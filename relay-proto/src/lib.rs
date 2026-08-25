@@ -2874,9 +2874,23 @@ pub const MAX_STREAMS_PER_CARRIER: usize = 64;
 
 /// Höchstlänge der Nutzlast **eines** Substrom-Frames.
 ///
-/// Deckungsgleich mit `MAX_STATE_LEN` im Relay: Der größte Fachframe der
-/// Tablet-Strecke ist der Spielzustand.
-pub const MAX_CARRIER_PAYLOAD_LEN: usize = 64 * 1024;
+/// **Mit Kopfraum über `MAX_STATE_LEN` (64 KB) im Relay.** Der größte
+/// Fachframe der Tablet-Strecke ist der Spielzustand — aber hier wird die
+/// *umhüllte* Form gemessen: `{"type":"state_sync","state":"…"}`, in der der
+/// Zustand (selbst wieder JSON) escaped steckt und dadurch spürbar wächst.
+/// Wäre der Deckel gleich groß, verwürfe der Träger stumm Zustände, die der
+/// direkte Weg annimmt — und der Relay reichte dem nächsten Tablet einen
+/// veralteten `StateRestore`.
+///
+/// Der eigentliche Schutz bleibt `MAX_STATE_LEN` in `store_court_state`; hier
+/// geht es nur darum, nichts abzuschneiden, was dort noch passt.
+pub const MAX_CARRIER_PAYLOAD_LEN: usize = 160 * 1024;
+
+/// Compile-Zeit-Zusicherung des Kopfraums über `MAX_STATE_LEN` (64 KB im
+/// Relay). Faktor 2 deckt auch einen Zustand ab, der fast vollständig aus
+/// escapten Zeichen besteht. Wer den Deckel senkt, bricht hier den Bau —
+/// nicht erst im Turnier, wo ein großer Spielstand stumm verschwände.
+const _: () = assert!(MAX_CARRIER_PAYLOAD_LEN >= 2 * 64 * 1024);
 
 /// Protokollfassung des Trägers.
 ///
@@ -5314,9 +5328,24 @@ mod carrier_tests {
             MAX_STREAMS_PER_CARRIER, 64,
             "an MAX_TABLETS_PER_NS im Relay angelehnt"
         );
-        // `MAX_STATE_LEN` lebt im Relay (nicht hier) und ist derselbe Wert:
-        // Der größte Fachframe der Tablet-Strecke ist der Spielzustand. Wer
-        // eine der beiden Zahlen ändert, muss die andere mitziehen.
-        assert_eq!(MAX_CARRIER_PAYLOAD_LEN, 64 * 1024);
+        // Den Kopfraum über `MAX_STATE_LEN` sichert eine Compile-Zeit-
+        // Zusicherung an der Konstante selbst — ein Laufzeit-`assert!` über
+        // zwei Konstanten prüfte nichts.
+        //
+        // Hier stattdessen der Fall, der im Feld auftritt: Ein Zustand an der
+        // Relay-Grenze wächst durch Rahmen und Escaping, muss aber weiterhin
+        // durch den Träger passen.
+        let zustand = "x".repeat(64 * 1024);
+        let umhuellt = serde_json::to_string(&serde_json::json!({
+            "type": "state_sync",
+            "state": zustand,
+        }))
+        .expect("serialisieren");
+        assert!(
+            umhuellt.len() <= MAX_CARRIER_PAYLOAD_LEN,
+            "ein Zustand an der MAX_STATE_LEN-Grenze passt umhuellt nicht mehr durch den Traeger \
+             ({} > {MAX_CARRIER_PAYLOAD_LEN})",
+            umhuellt.len()
+        );
     }
 }

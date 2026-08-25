@@ -2471,6 +2471,16 @@ struct Substrom {
     sitzung: Option<TabletSitzung>,
     /// Abonniertes Feld, falls es eine Anzeige ist (`None` = alle Felder).
     monitor_court: Option<i64>,
+    /// Ist dieser Substrom eine Anzeige? Dann braucht er den sichtbaren
+    /// Herzschlag, den `monitor_conn` an seinem eigenen Socket sendet.
+    ist_monitor: bool,
+    /// Letztes Lebenszeichen **dieses** Substroms.
+    ///
+    /// Rückfallebene zur Slot-Freigabe: Zuständig ist der Slave
+    /// (`streamClose`), weil er die echte Verbindung zum Gerät hält. Versagt
+    /// er, hielte ein totes Tablet seinen Court sonst so lange, wie der
+    /// Träger lebt — und ein Ersatzgerät bekäme nur `CourtOccupied`.
+    letztes_lebenszeichen: tokio::time::Instant,
     /// Der Fan-in-Task, der die Antworten dieses Substroms auf den Träger
     /// schaufelt.
     pumpe: tokio::task::JoinHandle<()>,
@@ -2498,12 +2508,25 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
 
     // Sammelkanal: alles, was auf den Träger hinausgeht.
     let (aus_tx, mut aus_rx) = mpsc::unbounded_channel::<Message>();
+    // Meldekanal der Fan-in-Tasks: Ein Substrom, dessen Kanal geschlossen
+    // wurde, muss hier gemeldet werden. Wichtig für `namespace_aufraeumen`,
+    // das den Anzeigen ein `Close` schickt, damit sie sich neu verbinden —
+    // ohne diese Meldung bliebe der Substrom mit totem Abo bestehen.
+    let (tot_tx, mut tot_rx) = mpsc::unbounded_channel::<u32>();
     let mut stroeme: std::collections::HashMap<u32, Substrom> = std::collections::HashMap::new();
     let mut begruesst = false;
 
     // Ping/Stale wie bei `host_conn` — der Träger ist eine Dauerverbindung.
     let mut ping = tokio::time::interval(HOST_PING);
     let mut last_incoming = tokio::time::Instant::now();
+    // Eigener, kürzerer Takt für den sichtbaren Herzschlag der Anzeigen:
+    // `overview.html`/`monitor.html` werten aus, ob binnen
+    // MONITOR_HEARTBEAT_STALE_MS ein Server-Frame kam, und schalten sonst auf
+    // den langsamen Poll zurück. Auf einem ruhigen Feld entsteht minutenlang
+    // kein Nudge — ohne diesen Takt flatterte jede Anzeige hinter dem Träger.
+    let mut herzschlag =
+        tokio::time::interval(Duration::from_millis(relay_proto::MONITOR_HEARTBEAT_MS));
+    herzschlag.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -2532,7 +2555,15 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                         tracing::info!("Träger verbunden: Namespace '{ns}', Fassung {proto}");
                         let _ = socket.send(text(&CarrierServerMsg::Ready { proto })).await;
                     }
-                    // Alles Weitere erst nach der Begrüßung.
+                    // Alles Weitere erst nach der Begrüßung — aber NICHT
+                    // stillschweigend: Ein Slave, der seinen eigenen
+                    // Handschlag überholt, wartete sonst ewig auf einen
+                    // Substrom, den es nie gab. Mit dem `streamClose` kann er
+                    // es erneut versuchen.
+                    CarrierMsg::StreamOpen { stream, .. } if !begruesst => {
+                        let _ = socket.send(text(&CarrierServerMsg::StreamClose { stream })).await;
+                        continue;
+                    }
                     _ if !begruesst => continue,
 
                     CarrierMsg::StreamOpen { stream, kind, court } => {
@@ -2545,37 +2576,58 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                         // Eigener Kanal je Substrom (siehe `Substrom::tx`).
                         let (sub_tx, mut sub_rx) = mpsc::unbounded_channel::<Message>();
                         let hinaus = aus_tx.clone();
+                        let melde_tot = tot_tx.clone();
                         let pumpe = tokio::spawn(async move {
                             while let Some(m) = sub_rx.recv().await {
-                                // Nur Fachframes reisen weiter; Ping/Pong des
-                                // Substroms endet hier, der Träger hat seinen
-                                // eigenen Takt.
-                                if let Message::Text(t) = m {
-                                    let verpackt = CarrierServerMsg::Frame {
-                                        stream,
-                                        payload: t.to_string(),
-                                    };
-                                    if hinaus.send(text(&verpackt)).is_err() { break }
+                                match m {
+                                    Message::Text(t) => {
+                                        let verpackt = CarrierServerMsg::Frame {
+                                            stream,
+                                            payload: t.to_string(),
+                                        };
+                                        if hinaus.send(text(&verpackt)).is_err() { break }
+                                    }
+                                    // `namespace_aufraeumen` verabschiedet die
+                                    // Anzeigen mit einem `Close`, damit sie
+                                    // sich neu verbinden, sobald der Host
+                                    // zurück ist. Verschluckt man es, bliebe
+                                    // dieser Substrom mit totem Abo stehen und
+                                    // bekäme nie wieder einen Anstoß.
+                                    Message::Close(_) => {
+                                        let _ = melde_tot.send(stream);
+                                        break;
+                                    }
+                                    // Ping/Pong des Substroms endet hier — der
+                                    // Träger hat seinen eigenen Takt.
+                                    _ => {}
                                 }
                             }
                         });
-                        let (sitzung, monitor_court) = match kind {
-                            StreamKind::Tablet => (Some(TabletSitzung::neu(ns.clone())), None),
+                        let (sitzung, monitor_court, ist_monitor) = match kind {
+                            StreamKind::Tablet => (Some(TabletSitzung::neu(ns.clone())), None, false),
                             StreamKind::Monitor => {
                                 if !subscribe_monitor(&broker, &ns, court, &sub_tx).await {
                                     let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
                                     pumpe.abort();
                                     continue;
                                 }
-                                (None, court)
+                                (None, court, true)
                             }
                         };
-                        stroeme.insert(stream, Substrom { tx: sub_tx, sitzung, monitor_court, pumpe });
+                        stroeme.insert(stream, Substrom {
+                            tx: sub_tx,
+                            sitzung,
+                            monitor_court,
+                            ist_monitor,
+                            letztes_lebenszeichen: tokio::time::Instant::now(),
+                            pumpe,
+                        });
                     }
 
                     CarrierMsg::Frame { stream, payload } => {
                         if payload.len() > relay_proto::MAX_CARRIER_PAYLOAD_LEN { continue }
                         let Some(s) = stroeme.get_mut(&stream) else { continue };
+                        s.letztes_lebenszeichen = tokio::time::Instant::now();
                         // Anzeigen senden nichts Fachliches — wie am eigenen
                         // Socket auch.
                         let Some(sitzung) = s.sitzung.as_mut() else { continue };
@@ -2602,6 +2654,32 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                     None => break,
                 }
             }
+            // Ein Substrom-Kanal wurde geschlossen (z. B. durch
+            // `namespace_aufraeumen`) — Abo abräumen und dem Slave sagen,
+            // dass er das Gerät neu anmelden muss.
+            tot = tot_rx.recv() => {
+                let Some(stream) = tot else { continue };
+                if let Some(s) = stroeme.remove(&stream) {
+                    schliesse_substrom(&broker, &ns, s).await;
+                    let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
+                }
+            }
+            _ = herzschlag.tick() => {
+                // Sichtbarer Herzschlag je Anzeige-Substrom, wie ihn
+                // `monitor_conn` an seinem eigenen Socket sendet. Ohne ihn
+                // hielte die Anzeige den Push-Kanal für tot und fiele auf den
+                // langsamen Poll zurück.
+                let hb = relay_proto::monitor_heartbeat_frame(now_ms());
+                for (stream, s) in stroeme.iter() {
+                    if s.ist_monitor {
+                        let verpackt = CarrierServerMsg::Frame {
+                            stream: *stream,
+                            payload: hb.clone(),
+                        };
+                        let _ = aus_tx.send(text(&verpackt));
+                    }
+                }
+            }
             _ = ping.tick() => {
                 if is_stale(last_incoming, tokio::time::Instant::now(), HOST_STALE) {
                     tracing::warn!(
@@ -2609,6 +2687,29 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                         last_incoming.elapsed().as_secs()
                     );
                     break;
+                }
+                // Rückfallebene je Substrom: Zuständig für die Slot-Freigabe
+                // ist der Slave, weil er die echte Verbindung zum Gerät hält.
+                // Versagt er, hielte ein totes Tablet seinen Court, solange
+                // der Träger lebt — ein Ersatzgerät bekäme dann nur
+                // `CourtOccupied`. Anzeigen bleiben ausgenommen: Sie senden
+                // nichts, ihr Fehlen fällt niemandem zur Last.
+                let jetzt = tokio::time::Instant::now();
+                let tote: Vec<u32> = stroeme
+                    .iter()
+                    .filter(|(_, s)| {
+                        !s.ist_monitor && is_stale(s.letztes_lebenszeichen, jetzt, TABLET_STALE)
+                    })
+                    .map(|(stream, _)| *stream)
+                    .collect();
+                for stream in tote {
+                    tracing::warn!(
+                        "Substrom {stream} (Namespace '{ns}') stumm – Court-Slot freigegeben"
+                    );
+                    if let Some(s) = stroeme.remove(&stream) {
+                        schliesse_substrom(&broker, &ns, s).await;
+                        let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
+                    }
                 }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
             }
