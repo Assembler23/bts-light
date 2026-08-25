@@ -193,6 +193,7 @@ pub fn run() {
             commands::read_tournament_logo,
             commands::monitor_devices,
             commands::assign_monitor,
+            commands::monitor_combo_dirs,
             commands::set_monitor_hall,
             commands::monitor_command,
             commands::forget_monitor_device,
@@ -201,6 +202,9 @@ pub fn run() {
         .setup(|app| {
             init_logging(app.handle());
             tracing::info!("bts-light v{} gestartet", env!("CARGO_PKG_VERSION"));
+            // Vor dem ersten Command: der alte globale Kombi-Schalter zieht
+            // einmalig in die Geräte-Datei um (ADR 0049).
+            commands::migrate_combo_dir_einmalig(app.handle());
             setup_tray(app.handle())?;
             Ok(())
         })

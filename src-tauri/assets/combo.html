@@ -217,6 +217,34 @@ body.vertical .vset.current { color: #fbbf24; }
 (function () {
   'use strict';
 
+  // ── Inline-Kopie von src/io/comboAnsicht.mjs ────────────────────────────
+  // Kanonische Fassung: src/io/comboAnsicht.mjs (dort steht die Begruendung,
+  // getestet in scripts/test-combo-ansicht.mjs). Die Assets durchlaufen keinen
+  // Build und koennen keine Module laden — Aenderungen hier und dort gemeinsam.
+  var IGNORIERTE_PARAMS = ['device', 'rotate', 'dir'];
+
+  /** Zeigt die Seite schon das, worauf `redirectTo` verweist? */
+  function urlPasst(hierHref, zielPfad, origin) {
+    try {
+      var hier = new URL(hierHref);
+      var dort = new URL(zielPfad, origin);
+      for (var i = 0; i < IGNORIERTE_PARAMS.length; i++) {
+        hier.searchParams.delete(IGNORIERTE_PARAMS[i]);
+        dort.searchParams.delete(IGNORIERTE_PARAMS[i]);
+      }
+      return hier.pathname === dort.pathname &&
+             hier.searchParams.toString() === dort.searchParams.toString();
+    } catch (e) { return false; }
+  }
+
+  /** Ausrichtung fuer diesen Render-Durchlauf: Server schlaegt Startwert —
+   *  aber nur, wenn er sich aeussert. */
+  function ausrichtungVertikal(state, startVertikal) {
+    if (state && typeof state.vertical === 'boolean') return state.vertical;
+    return !!startVertikal;
+  }
+  // ── Ende Inline-Kopie ───────────────────────────────────────────────────
+
   var params = new URLSearchParams(location.search);
 
   // Pivot-Rotation per URL-Parameter.
@@ -230,7 +258,11 @@ body.vertical .vset.current { color: #fbbf24; }
   var deviceId = (params.get('device') || '').trim();
 
   // ?dir=v → Felder NEBENEINANDER (Hochformat je Feld) statt übereinander.
-  if (/^(v|vertical)$/i.test(params.get('dir') || '')) {
+  // Seit ADR 0049 nur noch der STARTWERT: Sobald der Host im /combo/state
+  // eine Ausrichtung nennt (er kennt das Gerät über ?device=), gewinnt die.
+  // Eine hand-getippte Kiosk-URL ohne ?device= bleibt bei diesem Wert.
+  var START_VERTIKAL = /^(v|vertical)$/i.test(params.get('dir') || '');
+  if (START_VERTIKAL) {
     document.body.classList.add('vertical');
   }
 
@@ -463,6 +495,10 @@ body.vertical .vset.current { color: #fbbf24; }
     // Monotonuhr zum Empfangszeitpunkt (Drift-Kompensation zwischen Polls).
     SERVER_NOW = (data && typeof data.serverNowMs === 'number') ? data.serverNowMs : 0;
     SERVER_NOW_WALL = performance.now();
+    // Ausrichtung je Gerät (ADR 0049). Muss VOR dem Leer-Rückfall und vor der
+    // Band-Schleife stehen: renderBand entscheidet die DOM-Form beim Bauen,
+    // eine spätere Umschaltung ruehrte bestehende Baender nicht mehr an.
+    document.body.classList.toggle('vertical', ausrichtungVertikal(data, START_VERTIKAL));
     var courts = (data && Array.isArray(data.courts)) ? data.courts : [];
     if (courts.length === 0) {
       // „keine Daten" diagnostisch festhalten — aber nur beim ÜBERGANG (nicht
@@ -524,13 +560,7 @@ body.vertical .vset.current { color: #fbbf24; }
 
   // ── Reassignment-Check (1 s, wie die anderen Info-Seiten, v0.9.26) ──
   function currentUrlMatches(redirectTo) {
-    try {
-      var here = new URL(location.href);
-      here.searchParams.delete('device');
-      var there = new URL(redirectTo, location.origin);
-      return here.pathname === there.pathname &&
-             here.searchParams.toString() === there.searchParams.toString();
-    } catch (e) { return false; }
+    return urlPasst(location.href, redirectTo, location.origin);
   }
   function navigateWithRotate(href) {
     var hereRotate = new URLSearchParams(location.search).get('rotate');

@@ -191,6 +191,43 @@ fn monitor_halls_path(app: &AppHandle) -> std::path::PathBuf {
         .join(crate::tablet::monitor::MONITOR_HALLS_FILE)
 }
 
+/// Pfad der Kombi-Ausrichtung je Monitor-Gerät (Spec
+/// `kombi-ausrichtung-je-monitor`, ADR 0049).
+fn monitor_combo_dir_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_config_dir()
+        .expect("App-Config-Verzeichnis ist verfügbar")
+        .join(crate::tablet::monitor::MONITOR_COMBO_DIR_FILE)
+}
+
+/// Holt den alten **globalen** Schalter `combo_vertical` einmalig in die
+/// Geräte-Datei (ADR 0049). Läuft beim Start, bevor das Fenster steht — die
+/// Datei ist danach der Merker, ein zweiter Start ändert nichts mehr.
+pub fn migrate_combo_dir_einmalig(app: &AppHandle) {
+    let config = match AppConfig::load_from(&config_path(app)) {
+        Ok(c) => c,
+        // Ohne lesbare Config gibt es nichts zu übernehmen. Die Datei jetzt
+        // anzulegen wäre falsch: Sie würde den Merker setzen, bevor der alte
+        // Wert je gelesen wurde.
+        Err(e) => {
+            tracing::warn!("Kombi-Ausrichtung: Config nicht lesbar ({e}) – Migration verschoben");
+            return;
+        }
+    };
+    let assignments = crate::tablet::monitor::read_assignments(&monitor_assignments_path(app));
+    let vertical = config.court_monitor.combo_vertical;
+    if crate::tablet::monitor::migrate_combo_dirs(
+        &monitor_combo_dir_path(app),
+        &assignments,
+        vertical,
+    ) {
+        tracing::info!(
+            global_vertical = vertical,
+            "Kombi-Ausrichtung je Gerät übernommen (einmalige Migration, ADR 0049)"
+        );
+    }
+}
+
 /// Pfad zur Datei mit dem laufenden Live-Satzstand je Feld. Übersteht einen
 /// App-Neustart, damit der TV nach einem Absturz/Neustart nicht auf BTPs
 /// 0:0 zurückfällt, bis das Tablet wieder verbunden ist.
@@ -4226,6 +4263,18 @@ pub fn set_court_ad_label(app: AppHandle, file: String, label: String) -> Result
 
 // ───────────────────────────── Court-Monitor-Geräte ───────────────────────
 
+/// Die Kombi-Ausrichtung je Gerät für die Verwaltungsseite (ADR 0049):
+/// `devices` trägt die gesetzten Ausrichtungen, `last` die zuletzt gewählte
+/// als Vorbelegung für ein neues Kombi-Gerät.
+///
+/// Bewusst ein eigener Command und **kein** Feld an `MonitorDeviceInfo`: Das
+/// ist ein Relay-Typ, die Kombi-Anzeige aber reiner LAN-Betrieb — und `last`
+/// hätte an einem Pro-Gerät-Struct ohnehin keinen Platz.
+#[tauri::command]
+pub fn monitor_combo_dirs(app: AppHandle) -> crate::tablet::monitor::ComboDirStore {
+    crate::tablet::monitor::read_combo_dirs(&monitor_combo_dir_path(&app))
+}
+
 /// Liefert die Court-Monitor-Geräte für die Verwaltungsseite. Im LAN-Modus
 /// lokal aus Zuweisungen + Live-Pollzeiten gebaut, im Cloud-Modus die vom
 /// Relay gemeldete Liste, im Doppelmodus beide vereint.
@@ -4306,9 +4355,24 @@ pub fn assign_monitor(
     app: AppHandle,
     device_id: String,
     target: Option<relay_proto::MonitorTarget>,
+    combo_vertical: Option<bool>,
 ) -> Result<(), String> {
     if device_id.is_empty() || device_id.len() > 64 {
         return Err("Ungültige Geräte-ID.".to_string());
+    }
+    // Erst die Ausrichtung, dann die Zuweisung (ADR 0049). Zwei Dateien sind
+    // nie gemeinsam atomar — in der anderen Reihenfolge stünde der TV schon
+    // auf /combo, während der Store noch die alte Ausrichtung meldete.
+    //
+    // `None` heißt **unverändert**, nicht „übereinander": Der Dropdown-
+    // Schlüssel des Panels trägt die Ausrichtung nicht, ein erneutes Auswählen
+    // derselben Kombi-Option darf sie also nicht still zurücksetzen — und ein
+    // Wechsel auf ein Einzelfeld soll sie aufheben, nicht löschen.
+    if combo_vertical.is_some() {
+        let dir_path = monitor_combo_dir_path(&app);
+        let mut store = crate::tablet::monitor::read_combo_dirs(&dir_path);
+        store.apply_combo_dir(&device_id, combo_vertical);
+        crate::tablet::monitor::write_combo_dirs(&dir_path, &store).map_err(|e| e.to_string())?;
     }
     let path = monitor_assignments_path(&app);
     let mut map = crate::tablet::monitor::read_assignments(&path);
@@ -4355,6 +4419,13 @@ pub fn forget_monitor_device(
     let mut halls = crate::tablet::monitor::read_halls(&halls_path);
     if halls.remove(&device_id).is_some() {
         crate::tablet::monitor::write_halls(&halls_path, &halls).map_err(|e| e.to_string())?;
+    }
+    // Und die Kombi-Ausrichtung (ADR 0049) — aus demselben Grund: sonst
+    // taucht sie bei einer wiederverwendeten Geräte-ID überraschend wieder auf.
+    let dir_path = monitor_combo_dir_path(&app);
+    let mut dirs = crate::tablet::monitor::read_combo_dirs(&dir_path);
+    if dirs.devices.remove(&device_id).is_some() {
+        crate::tablet::monitor::write_combo_dirs(&dir_path, &dirs).map_err(|e| e.to_string())?;
     }
     tracing::info!("Court-Monitor: Gerät '{device_id}' aus der Liste entfernt");
     Ok(())

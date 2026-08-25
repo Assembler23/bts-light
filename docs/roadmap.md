@@ -292,6 +292,19 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Kombi-Ausrichtung je Monitor (v0.9.270)** — ob die Felder einer
+  Kombi-Anzeige über- oder nebeneinander stehen, wird **je TV** im bestehenden
+  Kombi-Dialog gewählt statt global im Setup; der globale Schalter
+  `combo_vertical` ist verschwunden (einmalige Migration beim Start). Die
+  Ausrichtung wohnt in einer eigenen Geräte-Datei — `relay-proto` und Relay
+  bleiben unberührt — und reist im laufenden `/combo/state`-Poll mit, schaltet
+  also **ohne Seitenaufbau** um. Nimmt den `rotate`-Fehler in `combo.html` mit
+  (hochkant montierte Kombi-TVs navigierten im Sekundentakt neu).
+  Spec: [features/kombi-ausrichtung-je-monitor.md](features/kombi-ausrichtung-je-monitor.md) ·
+  ADR [0049](adr/0049-kombi-ausrichtung-eigene-geraete-datei.md).
+  **Offen:** Feldtest der nicht automatisierbaren Kriterien — drei Felder
+  nebeneinander (Lesbarkeit), Gerät offline beim Umstellen, Downgrade.
+
 - **Hintergrundfarbe und Feldbezeichnung je Werbebild (v0.9.247)** — das
   Leerlauf-Vollbild am Court-Monitor bekommt je Bild eine eigene
   Hintergrundfarbe; auf Wunsch steht die Feldbezeichnung darüber (Bild wird

@@ -91,7 +91,6 @@ function defaultConfig(): AppConfig {
       show_match_clock: true,
       show_ads: true,
       layout: "split",
-      combo_vertical: false,
       push_fallback_slow: false,
     },
     call_timer: {
