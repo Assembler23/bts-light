@@ -45,10 +45,13 @@ Dieses Dokument beschreibt den LAN-Modus. Im Cloud-Modus sind Daten- und
 BTP-Schreibweg identisch – nur die Strecke Tablet ↔ bts-light läuft über
 den Relay statt direkt.
 
-## Verschlüsselter LAN-Zugang (Port 8443)
+## Verschlüsselter LAN-Zugang (Port 443)
 
 Zusätzlich zum Klartext-Port **8088** bietet der Server denselben Inhalt über
-**https** auf Port **8443** an; die WebSockets laufen dann über **wss**.
+**https** auf Port **443** an; die WebSockets laufen dann über **wss**.
+443 ist der Standard-Port für https — die Adresse braucht deshalb **keine**
+Portangabe und lässt sich am Telefon diktieren. Ist er belegt, weicht der
+Server auf **8443** aus und die Adressen tragen den Port dann mit.
 Spec: [features/lan-tls-verschluesselt.md](features/lan-tls-verschluesselt.md),
 Entscheidung: [ADR 0047](adr/0047-lan-tls-konkretisierung.md).
 
@@ -75,28 +78,28 @@ erzeugt und bleibt liegen, die Ausnahme übersteht Neustarts von App und Tablet.
   mit `--ignore-certificate-errors`; das lädt die Seite, stellt aber **keinen**
   Secure Context her. Der Akku-Nutzen gilt nur für handbediente Tablets, an
   denen jemand die Ausnahme wirklich bestätigt.
-- **Kein Umschalten im laufenden Turnier.** `https://…:8443` ist für den
+- **Kein Umschalten im laufenden Turnier.** `https://…` ist für den
   Browser eine **andere Herkunft** als `http://…:8088`; ein Tablet bewahrt sein
   noch nicht bestätigtes Ergebnis dort auf. Wechselt man die Adresse mitten im
   Spiel, ist dieses Ergebnis für das Tablet unsichtbar. Umstellen daher nur
   **zwischen** Turnieren.
 
 **Die Adresse ist die IP, nicht der Name.** Der QR-Code zeigt auf
-`https://<ip>:8443/…`. Das ist bewusst so: Chrome unter Android – also genau
+`https://<ip>/…`. Das ist bewusst so: Chrome unter Android – also genau
 die Geräteklasse, für die der verschlüsselte Weg gebaut wurde, weil nur sie den
 Akkustand meldet – löst `.local`-Namen vielerorts **nicht** auf; ein QR-Code auf
 `bts-light.local` liefe dort ins Leere.
 
 Der Preis: Bekommt der Turnier-PC eine neue IP-Adresse (DHCP), ist die
 Zertifikatswarnung einmal erneut zu bestätigen. Wer das vermeiden will, trägt
-`https://bts-light.local:8443/court/<nr>` von Hand ein – der Name steht
+`https://bts-light.local/court/<nr>` von Hand ein – der Name steht
 ebenfalls im Zertifikat und bleibt stabil. Für ein Wochenendturnier lohnt das
 selten; die Adresse des Laptops wechselt innerhalb einer DHCP-Laufzeit nicht.
 
 **Wenn etwas klemmt.** Scheitert der verschlüsselte Port (z. B. weil er belegt
 ist), läuft der Klartext-Server unbeeinträchtigt weiter; im Log steht der Grund.
 Abschalten lässt sich der Zusatzport über `tls.enabled` in der `config.json`.
-Die Windows-Firewall-Regel für 8443 legt der Installer beim interaktiven Setup
+Die Windows-Firewall-Regel für 443 und 8443 legt der Installer beim interaktiven Setup
 an – dabei erscheinen jetzt **zwei** UAC-Abfragen (je eine Regel pro Port).
 
 ## Endpunkte des Tablet-Servers

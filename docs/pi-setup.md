@@ -106,7 +106,7 @@ Anzeige. Dafür gibt es ein fertiges Skript.
 
    > **Bewusst `http`, nicht `https`.** Der Turnier-PC bietet seit
    > [ADR 0047](adr/0047-lan-tls-konkretisierung.md) auch einen
-   > verschlüsselten Zugang auf Port 8443 an — für die Pis ist der aber weder
+   > verschlüsselten Zugang auf Port 443 an — für die Pis ist der aber weder
    > vorgesehen noch nötig. Sie haben keine Echtzeituhr und würden ein
    > Zertifikat bei falsch gestellter Uhr **still** verwerfen; und die
    > Zertifikatswarnung ließe sich im Kiosk-Betrieb ohne Tastatur nicht

@@ -358,14 +358,30 @@ pub struct TlsConfig {
     /// Zusätzlichen HTTPS-Port anbieten?
     pub enabled: bool,
     /// Port für HTTPS; 8088 bleibt davon unberührt.
+    ///
+    /// **Vorgabe 443** — der Standard-Port für https. Nur so lässt sich die
+    /// Adresse ohne Portangabe schreiben und am Telefon diktieren. Ist er
+    /// belegt, weicht der Server auf [`TLS_PORT_RUECKFALL`] aus (siehe
+    /// `server::run_tls`); wer hier **selbst** einen Port einträgt, bekommt
+    /// keinen Rückfall — eine bewusste Wahl wird nicht übergangen.
     pub port: u16,
 }
+
+/// Standard-Port für https. Ohne Portangabe in der Adresse.
+pub const TLS_PORT_STANDARD: u16 = 443;
+
+/// Ausweichport, wenn 443 belegt ist.
+///
+/// Unter Windows darf zwar jeder Prozess an 443 binden (keine privilegierten
+/// Ports), aber `http.sys` kann ihn für IIS, WinRM & Co. reserviert haben.
+/// Dann ist der Turnierbetrieb wichtiger als die schöne Adresse.
+pub const TLS_PORT_RUECKFALL: u16 = 8443;
 
 impl Default for TlsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            port: 8443,
+            port: TLS_PORT_STANDARD,
         }
     }
 }
@@ -2062,7 +2078,10 @@ mod tests {
             geladen.tls.enabled,
             "TLS ist additiv und daher standardmaessig an"
         );
-        assert_eq!(geladen.tls.port, 8443);
+        // Gegen die Konstante, nicht gegen die Zahl: Der Vorgabe-Port hat
+        // sich schon einmal geändert (8443 → 443), und dieser Test soll die
+        // Abwärtskompatibilität prüfen, nicht die Portwahl.
+        assert_eq!(geladen.tls.port, TLS_PORT_STANDARD);
     }
 
     /// Der Klartext-Port darf sich durch TLS nicht verschieben — die
@@ -2074,6 +2093,23 @@ mod tests {
             tls.port,
             crate::tablet::server::TABLET_PORT,
             "TLS muss NEBEN 8088 laufen, nicht darauf"
+        );
+        assert_ne!(
+            TLS_PORT_RUECKFALL,
+            crate::tablet::server::TABLET_PORT,
+            "auch der Ausweichport darf 8088 nicht wegnehmen"
+        );
+    }
+
+    /// Die Vorgabe ist der Standard-Port — nur so lässt sich die Adresse
+    /// ohne Portangabe schreiben, und genau dafür wurde sie gewählt.
+    #[test]
+    fn tls_vorgabe_ist_der_standard_port() {
+        assert_eq!(TlsConfig::default().port, 443);
+        assert_eq!(TLS_PORT_STANDARD, 443);
+        assert_ne!(
+            TLS_PORT_STANDARD, TLS_PORT_RUECKFALL,
+            "der Ausweichport muss ein anderer sein"
         );
     }
 

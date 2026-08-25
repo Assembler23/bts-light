@@ -1428,8 +1428,12 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
     } else {
         String::new()
     };
-    let server_host_tls = if lan_enabled && config.tls.enabled {
-        crate::tablet::server::lan_host_tls(config.tls.port)
+    // Den TATSÄCHLICH belegten Port nehmen, nicht den gewünschten: Ist 443
+    // besetzt, lauscht der Server auf 8443, und ein QR-Code aus der Config
+    // zeigte auf einen toten Port. `0` heißt „TLS läuft (noch) nicht".
+    let tls_port_aktiv = crate::tablet::server::tls_port_aktiv();
+    let server_host_tls = if lan_enabled && config.tls.enabled && tls_port_aktiv != 0 {
+        crate::tablet::server::lan_host_tls(tls_port_aktiv)
     } else {
         String::new()
     };

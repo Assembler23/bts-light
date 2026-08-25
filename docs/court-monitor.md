@@ -756,7 +756,7 @@ Anpassung. Ist der PC-Port gesperrt, die Cloud-Adresse
 
 **Die Monitore bleiben auf HTTP.** Seit dem verschlüsselten LAN-Zugang
 ([ADR 0047](adr/0047-lan-tls-konkretisierung.md)) bietet der Server dieselben
-Seiten zusätzlich über `https://bts-light.local:8443` an — für die Pis ist das
+Seiten zusätzlich über `https://bts-light.local` an — für die Pis ist das
 aber **nicht** vorgesehen und auch nicht nötig:
 
 - Port 8088 bleibt unverändert offen; der Subnetz-Scan der Pis findet den
