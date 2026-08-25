@@ -165,4 +165,49 @@ hinter IP-Cache und Subnetz-Scan.
   Konstante mit Begründung, kein Konfigurationswert — eine Änderung soll eine
   bewusste Entscheidung mit ADR-Nachtrag sein.
 
+## Ausblick: die Zertifikatswarnung loswerden
+
+Festgehalten am 25.08.2026, damit die Optionen bei der von
+[ADR 0005](0005-lan-https-selbstsigniert.md) vorgesehenen Neubewertung
+(„falls die Warnung im Verleih-Betrieb zum Support-Problem wird") nicht neu
+durchdacht werden müssen. **Noch nichts davon ist entschieden** — Auslöser
+wäre ein Feldtest, der die Warnung als echtes Ärgernis zeigt.
+
+Ein Browser vertraut nur, was auf einen Anker in seinem Trust Store
+zurückführt. Es gibt daher genau zwei Richtungen: einen Anker aufs Gerät
+bringen, oder ein Zertifikat von einem Anker besorgen, der schon drauf ist.
+
+**A — Eigene CA einmalig auf die Geräte.** Eine kleine lokale CA, deren
+Zertifikat auf jedem Tablet installiert wird; die Server-Zertifikate stammen
+daraus. Für die **Verleih-Tablets des Projekts** realistisch: einmal je Gerät,
+danach jahrelang Ruhe. Zwei Haken: Android verlangt dafür einen eingerichteten
+Sperrbildschirm und zeigt anschließend dauerhaft „Das Netzwerk wird
+möglicherweise überwacht"; und für **mitgebrachte Fremdgeräte** ist der Weg
+praktisch tot — dort installiert niemand eine CA. Entspricht Option C aus
+ADR 0005, aber auf die eigenen Geräte begrenzt statt auf alle.
+
+**B — Öffentlich vertrauenswürdiges Zertifikat auf private IPs.** Das
+Plex-Muster: eine Domain (z. B. `lan.badhub.de`), deren DNS **private**
+Adressen auflöst (`192-168-1-50.lan.badhub.de` → `192.168.1.50`), dazu ein
+Wildcard-Zertifikat per DNS-Challenge. Ergebnis wäre ein grünes Schloss ohne
+jeden Eingriff am Gerät.
+
+Der Preis ist hoch, und ein Punkt davon ist vermutlich ein K.o.: **Es braucht
+funktionierendes DNS, also Internet in der Halle.** Genau die Offline-
+Fähigkeit, die den LAN-Modus ausmacht, wäre dahin — fällt der Uplink aus,
+lösen die Tablets den Namen nicht mehr auf und erreichen den Server gar nicht
+mehr. Dazu käme eine Serverkomponente auf badhub.de (Zertifikatsverteilung,
+DNS-Registrierung je Installation) und ein privater Schlüssel für eine echte
+Domain in jeder ausgelieferten App. Nur erwägenswert, wenn verlässliches
+Internet in den Hallen ohnehin vorausgesetzt wird.
+
+**C — Nichts tun.** Der Klartext-Port bleibt offen; wer die Warnung nicht
+will, nutzt `http://…:8088` und verzichtet auf die Akkuanzeige. Das ist heute
+die Vorgabe im QR-Code und bleibt der Rückfall für jedes Fremdgerät.
+
+**Neigung, falls es so weit kommt:** A für die eigenen Verleih-Tablets, C für
+alles andere. Einmaliger Aufwand an Geräten, die uns gehören, kein Serverbau,
+keine neue Internet-Abhängigkeit. Fremdgeräte sind ohnehin selten die, deren
+Akkustand die Turnierleitung braucht.
+
 Spec: [`docs/features/lan-tls-verschluesselt.md`](../features/lan-tls-verschluesselt.md).
