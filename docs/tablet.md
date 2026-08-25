@@ -45,6 +45,60 @@ Dieses Dokument beschreibt den LAN-Modus. Im Cloud-Modus sind Daten- und
 BTP-Schreibweg identisch – nur die Strecke Tablet ↔ bts-light läuft über
 den Relay statt direkt.
 
+## Verschlüsselter LAN-Zugang (Port 8443)
+
+Zusätzlich zum Klartext-Port **8088** bietet der Server denselben Inhalt über
+**https** auf Port **8443** an; die WebSockets laufen dann über **wss**.
+Spec: [features/lan-tls-verschluesselt.md](features/lan-tls-verschluesselt.md),
+Entscheidung: [ADR 0047](adr/0047-lan-tls-konkretisierung.md).
+
+**Was man davon hat.** Der Verkehr im Hallennetz ist verschlüsselt – dort
+reisen Spielernamen und Lizenznummern. Und nur über den verschlüsselten Weg
+meldet ein Tablet seinen **Akkustand** an die Turnierleitung: Die Battery-API
+des Browsers liefert ausschließlich im *Secure Context*, den erst https
+herstellt.
+
+**Was man dafür tut.** Auf der Seite „Felder" zeigt jedes Feld einen zweiten
+QR-Code mit der Marke **LAN 🔒**. Beim ersten Öffnen zeigt der Browser eine
+Zertifikatswarnung – das Zertifikat ist selbstsigniert, es gibt in einem
+Hallennetz keine Stelle, die es beglaubigen könnte. Einmal „Erweitert →
+trotzdem fortfahren", danach ist Ruhe: Das Zertifikat wird beim ersten Start
+erzeugt und bleibt liegen, die Ausnahme übersteht Neustarts von App und Tablet.
+
+**Was bewusst NICHT passiert:**
+
+- **8088 bleibt offen.** Nichts wird umgestellt oder abgeschaltet – die
+  Court-Monitor-Pis suchen den Server per Subnetz-Scan auf `:8088/health` und
+  finden ihn unverändert. Der Anspruch lautet deshalb ehrlich *verschlüsselt,
+  wo das Gerät es kann*, nicht „durchgängig verschlüsselt".
+- **Kiosk-Geräte bekommen keinen Akkustand.** Court-Monitore starten Chromium
+  mit `--ignore-certificate-errors`; das lädt die Seite, stellt aber **keinen**
+  Secure Context her. Der Akku-Nutzen gilt nur für handbediente Tablets, an
+  denen jemand die Ausnahme wirklich bestätigt.
+- **Kein Umschalten im laufenden Turnier.** `https://…:8443` ist für den
+  Browser eine **andere Herkunft** als `http://…:8088`; ein Tablet bewahrt sein
+  noch nicht bestätigtes Ergebnis dort auf. Wechselt man die Adresse mitten im
+  Spiel, ist dieses Ergebnis für das Tablet unsichtbar. Umstellen daher nur
+  **zwischen** Turnieren.
+
+**Die Adresse ist die IP, nicht der Name.** Der QR-Code zeigt auf
+`https://<ip>:8443/…`. Das ist bewusst so: Chrome unter Android – also genau
+die Geräteklasse, für die der verschlüsselte Weg gebaut wurde, weil nur sie den
+Akkustand meldet – löst `.local`-Namen vielerorts **nicht** auf; ein QR-Code auf
+`bts-light.local` liefe dort ins Leere.
+
+Der Preis: Bekommt der Turnier-PC eine neue IP-Adresse (DHCP), ist die
+Zertifikatswarnung einmal erneut zu bestätigen. Wer das vermeiden will, trägt
+`https://bts-light.local:8443/court/<nr>` von Hand ein – der Name steht
+ebenfalls im Zertifikat und bleibt stabil. Für ein Wochenendturnier lohnt das
+selten; die Adresse des Laptops wechselt innerhalb einer DHCP-Laufzeit nicht.
+
+**Wenn etwas klemmt.** Scheitert der verschlüsselte Port (z. B. weil er belegt
+ist), läuft der Klartext-Server unbeeinträchtigt weiter; im Log steht der Grund.
+Abschalten lässt sich der Zusatzport über `tls.enabled` in der `config.json`.
+Die Windows-Firewall-Regel für 8443 legt der Installer beim interaktiven Setup
+an – dabei erscheinen jetzt **zwei** UAC-Abfragen (je eine Regel pro Port).
+
 ## Endpunkte des Tablet-Servers
 
 | Route | Zweck |

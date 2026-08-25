@@ -341,6 +341,35 @@ pub struct PrintConfig {
     pub printer_name: String,
 }
 
+/// Verschlüsselte LAN-Strecke (Spec `docs/features/lan-tls-verschluesselt.md`,
+/// ADR 0047, löst ADR 0005 ein).
+///
+/// **Additiv:** Der Klartext-Port 8088 bleibt unverändert offen, damit die
+/// Court-Monitor-Pis (Subnetz-Scan auf `:8088/health`) und jede getippte
+/// Adresse weiterlaufen. Deshalb ist `enabled` standardmäßig **an** — es geht
+/// nichts kaputt, und nur so bekommen die Tablets ohne Zutun den Secure
+/// Context, den die Akkuanzeige braucht.
+///
+/// Schlägt der TLS-Start fehl (Port belegt, Zertifikat unlesbar), läuft der
+/// HTTP-Server unbeeinträchtigt weiter — der Turnierbetrieb hängt nie daran.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct TlsConfig {
+    /// Zusätzlichen HTTPS-Port anbieten?
+    pub enabled: bool,
+    /// Port für HTTPS; 8088 bleibt davon unberührt.
+    pub port: u16,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: 8443,
+        }
+    }
+}
+
 /// Automatische Hallen-Vorverteilung (Spec
 /// `docs/features/hallen-vorverteilung.md`, ADR 0029/0030). Opt-in —
 /// standardmäßig aus; nur bei Mehr-Hallen-Turnieren wirksam, und niemals
@@ -584,6 +613,10 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub connection_mode: ConnectionMode,
+    /// Verschlüsselte LAN-Strecke (ADR 0047). `#[serde(default)]` hält
+    /// ältere Konfigurationsdateien ohne dieses Feld lesbar.
+    #[serde(default)]
+    pub tls: TlsConfig,
     /// Ansage-Slave-Modus (Mehr-Hallen): diese Instanz liest nur BTP und sagt
     /// ihre Halle (`announce.announce_hall`) an — KEIN Liveticker-Push, KEINE
     /// Auto-Feldvergabe, KEIN Tablet-Server/mDNS/Relay. Für einen zweiten
@@ -1596,6 +1629,7 @@ mod tests {
             upload_logs: true,
             install_id: "inst-abc123".to_string(),
             connection_mode: ConnectionMode::Cloud,
+            tls: TlsConfig::default(),
             slave_mode: false,
             master_namespace: String::new(),
             announce: AnnounceConfig {
@@ -1978,6 +2012,44 @@ mod tests {
         assert!(!is_tournament_uuid(
             "https://www.turnier.de/tournament/0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
         ));
+    }
+
+    /// Jede bestehende Installation bekommt die neue Fassung per Auto-Update,
+    /// ihre `config.json` kennt den `tls`-Abschnitt aber nicht. Sie muss
+    /// unverändert lesbar bleiben und die Vorgaben erben.
+    #[test]
+    fn config_ohne_tls_abschnitt_bleibt_lesbar() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        // Eine Konfiguration wie vor ADR 0047 nachstellen: alles Heutige,
+        // aber der `tls`-Schluessel fehlt. Ueber den Umweg ueber `Value`
+        // statt eines handgeschriebenen JSON, damit der Test nicht bricht,
+        // sobald irgendwo ein Pflichtfeld dazukommt.
+        let mut wert = serde_json::to_value(AppConfig::default()).unwrap();
+        wert.as_object_mut()
+            .expect("Config ist ein JSON-Objekt")
+            .remove("tls")
+            .expect("Default muss den tls-Abschnitt enthalten");
+        std::fs::write(&path, serde_json::to_string_pretty(&wert).unwrap()).unwrap();
+
+        let geladen = AppConfig::load_from(&path).expect("alte config.json muss lesbar bleiben");
+        assert!(
+            geladen.tls.enabled,
+            "TLS ist additiv und daher standardmaessig an"
+        );
+        assert_eq!(geladen.tls.port, 8443);
+    }
+
+    /// Der Klartext-Port darf sich durch TLS nicht verschieben — die
+    /// Bestands-Pis suchen per Subnetz-Scan genau dort.
+    #[test]
+    fn tls_port_kollidiert_nicht_mit_dem_klartext_port() {
+        let tls = TlsConfig::default();
+        assert_ne!(
+            tls.port,
+            crate::tablet::server::TABLET_PORT,
+            "TLS muss NEBEN 8088 laufen, nicht darauf"
+        );
     }
 
     #[test]
