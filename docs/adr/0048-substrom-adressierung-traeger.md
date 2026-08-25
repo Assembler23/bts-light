@@ -134,6 +134,14 @@ dadurch erreicht, dass der Slave die HTTP-Anfragen **selbst** beantwortet.
   Halle alle Geräte gleichzeitig. Notnagel bleiben die weiterhin gültigen
   Direkt-Cloud-Adressen — mit dem ausdrücklichen Hinweis, dass ein
   unbestätigtes Ergebnis dabei neu zu erfassen ist.
+
+  **Nachtrag 2026-08-25:** Bei einem Aussetzer wird **gewartet**, nicht
+  automatisch umgeleitet (Betreiber-Entscheidung). Eine Umleitung wechselte
+  die Herkunft, und daran hängt beim Tablet das unbestätigte Ergebnis, beim
+  Court-Monitor die Geräte-Kennung und damit seine Feld-Zuweisung. Ein
+  Aussetzer dauert typischerweise Sekunden; dafür ist der Tausch schlecht.
+  Die Warteseite lädt sich selbst neu und verschwindet von allein. Der Weg in
+  die Cloud bleibt offen, aber nur von Hand — als bewusste Entscheidung.
 - **Beidseitiger Neubau.** Der Relay kennt heute kein Multiplex-Konstrukt:
   keine Stream-IDs, keine Per-Strom-Lebensdauern. Dazu kommt ein Refactoring,
   das Sitzungs- von Transportlogik trennt (`tablet_conn`, `monitor_conn`).

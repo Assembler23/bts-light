@@ -489,6 +489,15 @@ Relay. In der Halle taucht dann keine badhub-Adresse mehr auf.
   sein Ausfall der Halle alle Geräte gleichzeitig. Notnagel bleiben die
   weiterhin gültigen Direkt-Cloud-Adressen — mit dem Vorbehalt im nächsten
   Punkt.
+- **Bei einem kurzen Aussetzer wird gewartet, nicht umgeleitet.** Steht die
+  Trägerverbindung gerade nicht, zeigen Tablets und Anzeigen eine
+  Warteseite, die sich alle drei Sekunden selbst neu lädt und von allein
+  verschwindet, sobald es weitergeht. Das ist Absicht: Eine automatische
+  Umleitung in die Cloud wechselte die Herkunft — ein Tablet verlöre damit
+  sein noch nicht bestätigtes Ergebnis, und ein Court-Monitor bekäme eine
+  neue Geräte-Kennung und damit **seine Feld-Zuweisung**. Wer bei einem
+  längeren Ausfall doch in die Cloud will, tippt die Direkt-Adresse von
+  Hand — dann ist es eine bewusste Entscheidung.
 - **Umstellen nur zwischen Turnieren.** Die lokale Adresse ist für den Browser
   eine **andere Herkunft** als die Cloud-Adresse, und ein Tablet bewahrt sein
   noch nicht bestätigtes Ergebnis unter der Adresse auf, unter der es erfasst

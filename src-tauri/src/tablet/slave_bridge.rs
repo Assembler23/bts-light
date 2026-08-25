@@ -61,6 +61,16 @@ impl BridgeConfig {
         self.traeger.as_ref().filter(|t| t.bereit())
     }
 
+    /// Ist der Träger-Betrieb **eingeschaltet** — unabhängig davon, ob die
+    /// Verbindung gerade steht?
+    ///
+    /// Der Unterschied entscheidet, was bei einem Aussetzer passiert:
+    /// Eingeschaltet, aber nicht bereit → **warten** (die Herkunft bleibt).
+    /// Gar nicht eingeschaltet → weiterleiten wie eh und je.
+    fn traeger_betrieb(&self) -> bool {
+        self.traeger.is_some()
+    }
+
     /// Basis-URL des eigenen Namespace am Relay.
     fn relay_basis(&self) -> String {
         format!("{RELAY_HTTP}/{}", self.master_namespace)
@@ -126,6 +136,50 @@ font-size:1.3rem;font-weight:700;border:2px solid #334155}}\
     )
 }
 
+/// Seite für „der Träger steht gerade nicht".
+///
+/// **Warum warten statt weiterleiten.** Eine Weiterleitung in die Cloud
+/// wechselt die Herkunft, und daran hängt mehr, als es aussieht:
+///
+/// * Ein **Tablet** bewahrt sein noch nicht bestätigtes Ergebnis unter der
+///   Adresse auf, unter der es erfasst wurde. Nach einem Wechsel ist es für
+///   das Gerät unsichtbar.
+/// * Ein **Court-Monitor** erzeugt seine Geräte-Kennung ebenfalls dort. Nach
+///   einem Wechsel hat er eine neue — und damit seine Feld-Zuweisung
+///   verloren. Jemand müsste ihn in der Turnierleitung neu zuweisen.
+///
+/// Ein Träger-Aussetzer dauert typischerweise Sekunden (Backoff 1 s, dann
+/// ansteigend). Dafür die Herkunft zu wechseln, wäre ein schlechter Tausch:
+/// Die Seite lädt sich selbst neu und verschwindet von allein, sobald es
+/// weitergeht. Bewusst ohne Knopf — es gibt nichts zu entscheiden, und ein
+/// „Weiter"-Knopf lüde nur dazu ein, die Herkunft doch zu wechseln.
+fn warteseite_html(was: &str) -> String {
+    format!(
+        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+<meta http-equiv=\"refresh\" content=\"3\">\
+<title>Verbindung wird aufgebaut</title><style>\
+html,body{{margin:0;height:100%;background:#0b1120;color:#f8fafc;\
+font-family:system-ui,sans-serif;display:flex;align-items:center;\
+justify-content:center;text-align:center}}\
+.box{{padding:2rem;max-width:32rem}}\
+h1{{font-size:1.6rem;margin:0 0 .8rem}}\
+p{{color:#cbd5e1;line-height:1.5;margin:.4rem 0}}\
+.klein{{color:#94a3b8;font-size:.85rem;margin-top:1.2rem}}\
+.punkt{{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;\
+background:#38bdf8;margin-right:.4rem;animation:blink 1.2s infinite}}\
+@keyframes blink{{50%{{opacity:.25}}}}\
+</style></head><body><div class=\"box\">\
+<h1><span class=\"punkt\"></span>Verbindung wird aufgebaut</h1>\
+<p>Die Halle verbindet sich gerade mit der Turnierleitung. {was}</p>\
+<p>Diese Seite meldet sich von selbst, sobald es weitergeht — \
+bitte nichts anfassen.</p>\
+<p class=\"klein\">Dauert es länger als ein paar Minuten: Läuft der \
+Turnier-PC in der Haupthalle, und hat dieser Rechner Internet?</p>\
+</div></body></html>"
+    )
+}
+
 /// `/health` — im Träger-Betrieb der **echte** Zustand vom Relay, sonst die
 /// knappe Bestätigung für den Pi-Subnetz-Scan.
 ///
@@ -162,6 +216,17 @@ async fn monitor(State(cfg): State<Arc<BridgeConfig>>, RawQuery(query): RawQuery
             .replace("__COURT_LABEL__", "");
         return ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response();
     }
+    if cfg.traeger_betrieb() {
+        // Für Anzeigen wiegt der Herkunftswechsel sogar schwerer als beim
+        // Tablet: Der Court-Monitor erzeugt seine Geräte-Kennung im Speicher
+        // der Seite. Nach einem Wechsel hätte er eine neue — und damit seine
+        // Feld-Zuweisung verloren.
+        return (
+            [(header::CACHE_CONTROL, "no-store")],
+            Html(warteseite_html("Die Anzeige kommt gleich zurück.")),
+        )
+            .into_response();
+    }
     Redirect::to(&monitor_redirect_url(
         &cfg.master_namespace,
         query.as_deref(),
@@ -172,6 +237,13 @@ async fn monitor(State(cfg): State<Arc<BridgeConfig>>, RawQuery(query): RawQuery
 /// `/court/{id}/display` — feste Court-Anzeige (nur im Träger-Betrieb).
 async fn court_display(State(cfg): State<Arc<BridgeConfig>>, Path(id): Path<i64>) -> Response {
     if cfg.traegt().is_none() {
+        if cfg.traeger_betrieb() {
+            return (
+                [(header::CACHE_CONTROL, "no-store")],
+                Html(warteseite_html("Die Anzeige kommt gleich zurück.")),
+            )
+                .into_response();
+        }
         return Redirect::to(&format!("{}/court/{id}/display", cfg.relay_basis())).into_response();
     }
     // Label wie am LAN-Server mitgeben — sonst steht bis zum ersten
@@ -192,6 +264,16 @@ async fn court_display(State(cfg): State<Arc<BridgeConfig>>, Path(id): Path<i64>
 /// `/court/{id}` — Tablet-Seite lokal im Träger-Betrieb, sonst 303.
 async fn court(State(cfg): State<Arc<BridgeConfig>>, Path(id): Path<i64>) -> Response {
     if cfg.traegt().is_none() {
+        // Träger-Betrieb an, aber gerade keine Verbindung: warten statt
+        // umleiten. Ein Herkunftswechsel kostete das noch nicht bestätigte
+        // Ergebnis dieses Tablets (siehe `warteseite_html`).
+        if cfg.traeger_betrieb() {
+            return (
+                [(header::CACHE_CONTROL, "no-store")],
+                Html(warteseite_html("Das Spielfeld ist gleich wieder da.")),
+            )
+                .into_response();
+        }
         return Redirect::to(&court_redirect_url(&cfg.master_namespace, id)).into_response();
     }
     // Label kennt der Slave aus der Relay-Feldliste; fehlt es, bleibt die
@@ -712,6 +794,31 @@ mod tests {
         assert!(
             !html.contains("badhub.de"),
             "im Träger-Betrieb darf keine Cloud-Adresse auftauchen: {html}"
+        );
+    }
+
+    /// Die Warteseite darf **niemals** in die Cloud verlinken — sie
+    /// existiert ja gerade, um den Herkunftswechsel zu vermeiden. Ein Link
+    /// dorthin (oder ein „Weiter"-Knopf) machte sie sinnlos.
+    #[test]
+    fn warteseite_verlinkt_nicht_in_die_cloud() {
+        let html = warteseite_html("Das Spielfeld ist gleich wieder da.");
+        assert!(
+            !html.contains("badhub.de"),
+            "die Warteseite darf keine Cloud-Adresse enthalten: {html}"
+        );
+        assert!(!html.contains("<a "), "kein Link, es gibt nichts zu wählen");
+    }
+
+    /// Sie muss sich selbst wieder wegräumen — sonst stünde das Tablet auch
+    /// dann noch auf der Warteseite, wenn längst alles läuft, und jemand
+    /// müsste durch die Halle laufen und jedes Gerät anfassen.
+    #[test]
+    fn warteseite_laedt_sich_selbst_neu() {
+        let html = warteseite_html("test");
+        assert!(
+            html.contains("http-equiv=\"refresh\""),
+            "ohne Selbst-Neuladen bliebe die Seite stehen: {html}"
         );
     }
 
