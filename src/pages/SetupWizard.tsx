@@ -45,6 +45,7 @@ import {
   badhubUrlFuer,
   badhubZielFuer,
   istTestsystem,
+  istUmschaltbar,
 } from "../io/badhubZiel.mjs";
 import { PRESETS, findPreset, findPresetFor } from "../presets";
 import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
@@ -482,6 +483,9 @@ export function SetupWizard({
   // `test.badhub.de` einträgt, soll den Schalter umspringen sehen – und nicht
   // beim Speichern still auf Produktiv zurückgebogen werden.
   const testAktiv = isManual ? istTestsystem(badhubUrl) : testSystem;
+  // Eine eigene badhub-Instanz lässt sich nicht umschalten – dann darf der
+  // Schalter auch nicht erscheinen und wirkungslos zurückspringen.
+  const umschaltbar = !isManual || istUmschaltbar(badhubUrl);
 
   /** Ziel wählen. Übernimmt dabei den sichtbaren Testsystem-Zustand – sonst
    *  spränge der Schalter beim Wechsel von „manuell" auf einen Verband
@@ -489,12 +493,19 @@ export function SetupWizard({
   function waehleZiel(id: string) {
     setTestSystem(testAktiv);
     setPresetId(id);
+    // Das Testsystem-Passwortfeld gehört zum gewählten Verband: beim
+    // Wechsel das Token des NEUEN Verbands vorschlagen. Sonst spräche ein
+    // HBV-Testlauf mit dem BVBB-Token, und das einzige Anzeichen wäre
+    // „Badhub lehnte die Anmeldung ab" beim ersten Push (Review 25.08.2026).
+    const gewaehlt = findPreset(id);
+    if (gewaehlt) setBadhubPassword(gewaehlt.badhub.password);
   }
 
   /** Umschalten zwischen Produktiv- und Testsystem. Biegt die manuell
    *  eingetragenen Adressen gleich mit um, damit Feld und Schalter nie
    *  widersprechen. */
   function toggleTestSystem() {
+    if (!umschaltbar) return;
     const next = !testAktiv;
     setTestSystem(next);
     setBadhubUrl((u) => badhubUrlFuer(u, next));
@@ -1009,13 +1020,20 @@ export function SetupWizard({
             unter dem Ziel und nicht in einer Entwickler-Ecke – wer damit ein
             Turnier fährt, muss es bei jedem Blick auf die Einstellungen
             sehen. */}
-        <ToggleCard
-          icon={Stethoscope}
-          title="Testsystem (test.badhub.de)"
-          description="Probelauf ohne Folgen: Liveticker, Check-In, Cloud-Verbindung der Tablets und Diagnose-Logs gehen auf das Testsystem. Die Produktiv-Datenbank bleibt unberührt."
-          active={testAktiv}
-          onToggle={toggleTestSystem}
-        />
+        {umschaltbar ? (
+          <ToggleCard
+            icon={Stethoscope}
+            title="Testsystem (test.badhub.de)"
+            description="Probelauf ohne Folgen: Liveticker, Check-In, Cloud-Verbindung der Tablets und Diagnose-Logs gehen auf das Testsystem. Die Produktiv-Datenbank bleibt unberührt."
+            active={testAktiv}
+            onToggle={toggleTestSystem}
+          />
+        ) : (
+          <p className="text-xs text-slate-500">
+            Der Testsystem-Schalter gilt nur für Adressen auf badhub.de – eine
+            eigene Liveticker-Instanz bleibt unverändert.
+          </p>
+        )}
         {testAktiv && (
           <div
             className="flex gap-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3.5

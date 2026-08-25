@@ -6,6 +6,9 @@ export declare const BADHUB_HOST_TEST: string;
 /** Der badhub-Host für das gewählte System. */
 export declare function badhubHostFuer(test: boolean): string;
 
+/** Lässt sich diese Adresse umschalten? Nur badhub.de/test.badhub.de. */
+export declare function istUmschaltbar(url: string | undefined): boolean;
+
 /** Zeigt diese URL auf das Testsystem? Fremde Hosts gelten als Produktiv. */
 export declare function istTestsystem(url: string | undefined): boolean;
 

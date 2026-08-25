@@ -27,6 +27,17 @@ export function badhubHostFuer(test) {
   return test ? BADHUB_HOST_TEST : BADHUB_HOST_LIVE;
 }
 
+/** Lässt sich diese Adresse überhaupt umschalten? Nur `badhub.de` und
+ *  `test.badhub.de` — eine eigene badhub-Instanz bleibt, wo sie ist. Die
+ *  Oberfläche fragt das, um den Schalter nicht wirkungslos anzubieten. */
+export function istUmschaltbar(url) {
+  try {
+    return istBadhubHost(new URL(String(url).trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Zeigt diese URL auf das Testsystem? Fremde Hosts gelten als Produktiv —
  *  eine eigene badhub-Instanz ist kein Testlauf. */
 export function istTestsystem(url) {

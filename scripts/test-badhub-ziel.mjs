@@ -12,6 +12,7 @@ import {
   badhubUrlFuer,
   badhubZielFuer,
   istTestsystem,
+  istUmschaltbar,
 } from "../src/io/badhubZiel.mjs";
 
 let failures = 0;
@@ -75,6 +76,16 @@ ok("www ist nicht Test", istTestsystem("https://www.badhub.de/live?t=x"), false)
 ok("fremder test-Host zählt nicht", istTestsystem("https://test.example.org/api/live_update.php"), false);
 ok("Unsinn ist kein Test", istTestsystem("unsinn"), false);
 ok("undefined ist kein Test", istTestsystem(undefined), false);
+
+// ── Was der Schalter überhaupt anfassen darf ──
+// Ohne diese Frage bietet die Oberfläche einen Schalter an, der bei einer
+// eigenen badhub-Instanz wirkungslos zurückspringt (Review 25.08.2026).
+ok("badhub.de ist umschaltbar", istUmschaltbar("https://badhub.de/api/live_update.php"), true);
+ok("test.badhub.de ist umschaltbar", istUmschaltbar(PUSH_TEST), true);
+ok("www ist umschaltbar", istUmschaltbar("https://www.badhub.de/live?t=x"), true);
+ok("eigene Instanz nicht", istUmschaltbar("https://liveticker.example.org/api/live_update.php"), false);
+ok("IP nicht", istUmschaltbar("http://192.168.1.50/api/live_update.php"), false);
+ok("Unsinn nicht", istUmschaltbar("kein-url"), false);
 
 ok("Host produktiv", badhubHostFuer(false), "badhub.de");
 ok("Host Test", badhubHostFuer(true), BADHUB_HOST_TEST);

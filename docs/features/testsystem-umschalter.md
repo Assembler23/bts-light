@@ -30,9 +30,15 @@ automatisch mit umgestellt.
 | Diagnose-Logs (`bts_log.php`, `tablet_log.php`, `pi_log.php`) | Prozess-Schalter → `badhub_host::api_url` |
 | Vereinslogos an Tablet/TL-Web im Cloud-Modus | `location.origin` der ausgelieferten Seite |
 
+Zum Relay gehört auch der **Träger** der fernen Halle (`tablet/carrier.rs`,
+ADR 0048): Er wählt denselben Host, sonst wird er nie bereit und jedes lokale
+Gerät fällt auf einen Relay zurück, auf dem kein Host sitzt.
+
 **Voraussetzung für den Cloud-Modus:** Auf dem Testsystem muss ein
-`bts-relay` hinter nginx unter `/bts-relay/` laufen. Fehlt er, finden die
-Tablets im Cloud-Modus kein Ziel — dann für den Testlauf auf LAN stellen.
+`bts-relay` hinter nginx unter `/bts-relay/` laufen — und zwar mit
+`PUBLIC_BASE=https://test.badhub.de/bts-relay`. Ohne die Variable baut der
+Relay seine QR-Codes mit dem Produktiv-Default, und ein Tablet landet in einem
+Namespace ohne Host. Fehlt der Test-Relay ganz, gehört der Testlauf auf LAN.
 
 Fremde Hosts bleiben **immer** unangetastet: Wer eine eigene badhub-Instanz
 betreibt, bekommt seine Adresse nicht umgeschrieben (Test in
@@ -41,16 +47,23 @@ betreibt, bekommt seine Adresse nicht umgeschrieben (Test in
 ## Der Prozess-Schalter
 
 Cloud-Relay und Log-Upload haben keinen Config-Zugriff. Für sie hält
-`src-tauri/src/badhub_host.rs` einen `AtomicBool`, der an **genau zwei**
+`src-tauri/src/badhub_host.rs` einen `AtomicBool`, der an **genau drei**
 Stellen aus derselben Push-URL nachgezogen wird:
 
 - `AppConfig::load_from` — jedes Laden der Konfiguration (App-Start, auch eine
   von Hand geänderte Datei),
-- `commands::save_config` — jedes Speichern der Einstellungen.
+- `commands::save_config` — jedes Speichern der Einstellungen,
+- `commands::import_identity` — das Identitäts-Bündel (ADR 0006) bringt eine
+  eigene Push-URL mit; ohne diese Stelle liefe der Liveticker auf dem einen
+  und die Tablets liefen auf dem anderen System, bis die App neu startet.
 
 Mehr Setzer darf es nicht geben, sonst ist die Ableitung wieder eine zweite
-Wahrheit. Wie jeder Wechsel der Verbindungsart greift die Umstellung des
-Relays erst beim nächsten **Stoppen/Starten** der Übertragung (R3).
+Wahrheit. Umgekehrt darf **kein Test** ihn setzen: Die Unit-Tests der
+Bibliothek teilen sich einen Prozess, und ein Fixture auf `test.badhub.de`
+kippte die festen Erwartungen in `badhub::push` und `tablet::slave_bridge`.
+
+Wie jeder Wechsel der Verbindungsart greift die Umstellung des Relays erst
+beim nächsten **Stoppen/Starten** der Übertragung (R3).
 
 ## Bedienung
 
@@ -77,7 +90,7 @@ mehr zurück.
   `tenantShortLabel` (Marke „TESTSYSTEM")
 - `src/pages/SetupWizard.tsx` — Schalter, Warnhinweis, Testpasswort
 - `src/components/AppShell.tsx` — Einfärbung der Kopfzeile
-- `src-tauri/src/tablet/relay_client.rs`, `slave_bridge.rs`,
+- `src-tauri/src/tablet/relay_client.rs`, `slave_bridge.rs`, `carrier.rs`,
   `log_upload.rs`, `tablet/server.rs`, `commands.rs` — vormals hart
   verdrahtete Adressen
 - `src-tauri/assets/tablet.html`, `tl.html` — Vereinslogo-Basis über

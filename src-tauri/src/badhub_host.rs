@@ -16,6 +16,15 @@
 //!
 //! Fremde Hosts bleiben immer unangetastet: Wer eine eigene badhub-Instanz
 //! betreibt, bekommt seine Adresse nicht umgeschrieben.
+//!
+//! **Für Tests:** Der Prozess-Schalter ist prozessweit, alle Unit-Tests der
+//! Bibliothek teilen sich einen Binary und laufen nebenläufig. Wer eine
+//! Konfiguration mit `test.badhub.de` als Fixture lädt oder
+//! [`set_aus_push_url`] direkt aufruft, kippt ihn für die übrigen Tests mit —
+//! und lässt die festen Erwartungen in `badhub::push` und
+//! `tablet::slave_bridge` je nach Verschachtelung fallen. Reine Umschalt-
+//! Logik deshalb immer über [`url_fuer`]/[`host_fuer`] prüfen, nie über den
+//! Schalter.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

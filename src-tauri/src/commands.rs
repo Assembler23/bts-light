@@ -553,6 +553,12 @@ pub fn import_identity(
     imported
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
+    // Das Bündel bringt seine eigene Push-URL mit – stammt es von einem
+    // Test-PC (oder geht es auf einen), müssen Relay und Diagnose-Logs
+    // sofort mitziehen. Ohne diese Zeile gälte bis zum nächsten App-Start
+    // genau der Zwiespalt, den `badhub_host` verhindern soll: Liveticker auf
+    // dem einen, Tablets und QR-Codes auf dem anderen System.
+    crate::badhub_host::set_aus_push_url(&imported.badhub.url);
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = imported.clone();
     // Der Hinweis gilt für Tablets, Monitore und ferne Hallen — die hängen
     // an der install_id. Turnierleitungs-Geräte hängen dagegen an eigenen
