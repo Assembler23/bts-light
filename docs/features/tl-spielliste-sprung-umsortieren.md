@@ -1,6 +1,6 @@
 # Spiele umsortieren ohne langes Ziehen (TL-Web) — Spezifikation
 
-> Status: **Entwurf** (via /idee: Brief → Grill → How-To → Review), 2026-08-26.
+> Status: **abgestimmt 2026-08-26** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Feldtest-Rückmeldung vom 26.08.2026. Betroffene Crates: ausschließlich
 > `src-tauri/assets/tl.html` und `src/io/` — **kein** Rust, **kein** Wire-Vertrag.
 > ADR: [docs/adr/0050-verschiebe-modus-globales-einfuegeziel.md](adr/0050-verschiebe-modus-globales-einfuegeziel.md)

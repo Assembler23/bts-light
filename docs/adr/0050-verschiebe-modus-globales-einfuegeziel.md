@@ -1,6 +1,6 @@
 # 0050 — Das Einfügeziel im Verschiebe-Modus bleibt global, nicht filterbewusst
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-08-26
 
 Gehört zu [docs/features/tl-spielliste-sprung-umsortieren.md](../features/tl-spielliste-sprung-umsortieren.md).
