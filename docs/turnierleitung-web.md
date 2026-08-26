@@ -82,12 +82,15 @@ LAN+Cloud voraus.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.
+- **Was an einer Wartelisten-Zeile sichtbar ist:** rechts drei Knöpfe —
+  das **Megafon** (in Vorbereitung rufen), **↑** (an den Anfang der
+  Spielliste schieben) und das **⋮-Menü**. Links der Zieh-Griff ⠿.
 - **Das ⋮-Menü an einer Wartelisten-Zeile:** Alles, was seltener gebraucht
   wird, steckt dahinter — **Nachruf** (beide Parteien oder nur eine), der
-  **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, „Ergebnis eintragen"
-  und **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile nur, was ständig
-  gebraucht wird; so passt eine Zeile auch auf einem schmalen Tablet in
-  eine Zeile statt in vier.
+  **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, das **Wunschfeld**,
+  „Ergebnis eintragen" und **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile
+  nur, was ständig gebraucht wird; so passt eine Zeile auch auf einem
+  schmalen Tablet in eine Zeile statt in vier.
 - **🖨 Zettel (leer)** druckt den **Vorabzettel** des Spiels: derselbe
   Bogen wie der Archivzettel, aber mit leerem Raster — zum Mitgeben an
   den Schiedsrichter, der ihn von Hand führt. Kopf, Namen und Verein sind
@@ -299,11 +302,26 @@ endet mit dem Stoppen der Übertragung.
 
 ### Spiele in der Warteliste umsortieren
 
+**Der schnellste Weg — „ganz nach vorn":** der Knopf **↑** rechts an der
+Zeile. Ein Tipp, und das Spiel steht an der Spitze der umsortierbaren Liste.
+Kein Ziehen, kein Scrollen, egal wie lang die Liste ist. Der Knopf fehlt an
+einem Spiel, das schon vorn steht oder bereits gerufen ist — dort täte er
+nichts.
+
+> Diesen Befehl gab es schon länger, aber nur versteckt im ⋮-Menü; seit
+> v0.9.272 steht er sichtbar an der Zeile.
+
 Am **Griff** (⠿) links an einer Wartelisten-Zeile lässt sich das Spiel nach
 oben oder unten ziehen — auf dem Tablet wie mit der Maus. Ab dem ersten Zug
 gilt für dieses Spiel deine Reihenfolge statt der von BTP; die Zeile bekommt
 dafür die Marke „manuell einsortiert". Der Knopf im Kopf des Panels
 „Spiele" nimmt die Handsortierung des ganzen Turniers wieder zurück.
+
+**Hin und wieder zurück geht jetzt auch.** Ein Spiel vor ein anderes zu
+setzen, es dann woandershin zu schieben und kurz darauf wieder an die erste
+Stelle — das wirkte bisher beim dritten Mal nicht, wenn alles innerhalb von
+zwanzig Sekunden passierte. Der Turnier-PC hielt den Zug für ein Versehen und
+bestätigte ihn, ohne etwas zu tun. Jetzt zählt jeder Zug.
 
 **Über lange Listen ziehen** (seit v0.9.272): Zieh die Zeile an den oberen
 oder unteren Rand der Liste und **bleib dort stehen** — die Liste scrollt

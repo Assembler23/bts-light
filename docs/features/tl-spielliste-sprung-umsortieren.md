@@ -128,15 +128,15 @@ Kein Halten, kein Konflikt zwischen Ziehen und Scrollen. Der häufigste Fall
 
 **Sichtbarkeit des vorhandenen Befehls**
 
-- [ ] An jeder umsortierbaren Wartelisten-Zeile steht ein sichtbarer Knopf, der
+- [x] An jeder umsortierbaren Wartelisten-Zeile steht ein sichtbarer Knopf, der
       das Spiel an den Anfang der umsortierbaren Liste setzt — ohne das ⋮-Menü
       zu öffnen.
-- [ ] Der Knopf fehlt an einer Zeile, die bereits an der Spitze steht, und an
+- [x] Der Knopf fehlt an einer Zeile, die bereits an der Spitze steht, und an
       einer gerufenen Zeile (`prep_call`) — dieselbe Bedingung wie heute
       (`kannHoch`).
-- [ ] Die Wartelisten-Zeile trägt nach dem Umbau **höchstens fünf** direkte
+- [x] Die Wartelisten-Zeile trägt nach dem Umbau **höchstens fünf** direkte
       Flex-Kinder; die Budget-Rechnung im CSS-Kommentar ist neu geschrieben.
-- [ ] Die ⋮-Menü-Aufzählung in `docs/turnierleitung-web.md` ist vollständig.
+- [x] Die ⋮-Menü-Aufzählung in `docs/turnierleitung-web.md` ist vollständig.
 
 **Verschiebe-Modus — Betreten und Verlassen**
 
@@ -185,7 +185,7 @@ Kein Halten, kein Konflikt zwischen Ziehen und Scrollen. Der häufigste Fall
       Verbindung zum Turnier-PC — nichts wurde gesendet."
 - [ ] Bei **401** („Gerät nicht mehr freigegeben") und **429** („zu viele
       TL-Geräte") erscheint die bestehende Meldung.
-- [ ] Wird dasselbe Spiel innerhalb von 20 Sekunden zweimal vor dasselbe Ziel
+- [x] Wird dasselbe Spiel innerhalb von 20 Sekunden zweimal vor dasselbe Ziel
       gesetzt (dazwischen woandershin), wirkt **auch der zweite Zug** — die
       Wiederholungserkennung des Vorgangsfensters greift hier nicht mehr.
 - [ ] Bei aktivem Hallenfilter bedeutet eine Marke weiterhin „vor diese Zeile in
@@ -278,7 +278,8 @@ gebaut wird — eine Entscheidung des Nutzers, nicht der Spec.
 
 ## Umsetzungs-Hinweise
 
-*Erst nach Freigabe relevant. Ergebnis der How-To-Phase.*
+*Freigegeben 26.08.2026. **Schritte 4 und 5 sind umgesetzt** (siehe die
+abgehakten Akzeptanzkriterien); Schritte 1–3 und 6–10 stehen aus.*
 
 **Zwei Entwurfsentscheidungen tragen den Rest:**
 

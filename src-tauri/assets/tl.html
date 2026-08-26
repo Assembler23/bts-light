@@ -550,11 +550,18 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Die Spielnummer bleibt bewusst ein eigenes Element davor (feste Breite,
    damit die Nummern untereinander fluchten).
 
-   Die 6-Elemente-Grenze der Zeile (Spec tl-web-panelsystem) NEU GERECHNET
-   nach dem Umbau auf eine einzige Spielliste (ADR 0026). Ungünstigster Fall:
+   Die 6-Elemente-Grenze der Zeile (Spec tl-web-panelsystem) NEU GERECHNET,
+   zuletzt am 26.08.2026 beim Sichtbarmachen des ↑-Knopfes (Spec
+   tl-spielliste-sprung-umsortieren, Schritt 5). Ungünstigster Fall:
      1 Zieh-Griff · 2 Spielnummer · 3 Name+Meta (`.who-block`) ·
-     4 Statusblock (`.row-status`) · 5 Vorbereitungs-Ruf · 6 Kebab
-   — genau sechs.
+     4 Statusblock (`.row-status`) · 5 Knopfblock (`.row-actions`)
+   — fünf, also eines UNTER der Grenze, obwohl ein Knopf dazugekommen ist.
+
+   Der Gewinn kam nicht vom Weglassen, sondern vom Bündeln: Vorbereitungs-Ruf,
+   ↑ und Kebab waren drei eigene Kinder und sind jetzt eines. Dieselbe
+   Bewegung wie beim Statusblock weiter unten. Wer künftig etwas ergänzt,
+   hängt es in einen der beiden Blöcke — Marken in `.row-status`, Knöpfe in
+   `.row-actions` — und muss diese Rechnung dann nicht anfassen.
 
    Die frühere Rechnung trug über den gegenseitigen Ausschluss von Griff und
    Status („Griff nur im Abschnitt Spielbereit, Status nur in den drei
@@ -630,17 +637,26 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    (siehe dort) — seltener gebraucht, und ihr eigenes Symbol war im
    entschlackten Zeilenbild ohnehin leicht mit dem Vorbereitungs-Knopf zu
    verwechseln. */
-.row .prep {
+/* Alle Knöpfe der Zeile in EINEM Flex-Kind — siehe die Budget-Rechnung bei
+   `.who-block`. `flex: none`, damit der Block nicht schrumpft und die
+   Trefferflächen erhalten bleiben; er darf als Ganzes umbrechen. */
+.row .row-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+
+/* Megafon und ↑ teilen sich Form und Trefferfläche: gleich große Sinnbilder
+   nebeneinander, damit sie als ein Paar lesbar sind. */
+.row .prep, .row .hoch {
   display: grid; place-items: center;
   width: var(--touch-min); height: var(--touch-min); padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
-.row .prep:hover { border-color: var(--accent); color: var(--accent); }
+.row .prep:hover, .row .hoch:hover { border-color: var(--accent); color: var(--accent); }
+.row .hoch { font-size: 1.05rem; line-height: 1; }
 .row .prep[aria-pressed="true"] {
   border-color: var(--accent); background: #eff6ff; color: var(--accent);
 }
-.row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+.row[aria-selected="true"] .prep,
+.row[aria-selected="true"] .hoch { border-color: #475569; background: #1e293b; color: #e2e8f0; }
 
 /* ── Kebab-Menü: Sekundäres einer Zeile ODER einer Feldkachel ──────────
    Spec tl-web-panelsystem, Schritt 11: eine Zeile zeigt ohne geöffnetes
@@ -2192,6 +2208,34 @@ function renderActionBar() {
 const OP_WINDOW_MS = 20000;
 function opIdFor(matchId, courtId) {
   return `assign-${matchId}-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`;
+}
+
+/**
+ * Laufende Nummer für Umsortier-Vorgänge — bewusst KEIN Zeitfenster
+ * (Spec `docs/features/tl-spielliste-sprung-umsortieren.md`, Schritt 4).
+ *
+ * Alle anderen Vorgänge tragen das 20-Sekunden-Fenster in der Kennung, damit
+ * ein Doppeltipp nicht zweimal wirkt. Beim Umsortieren richtet dieselbe
+ * Erkennung Schaden an: „Spiel vor B setzen → doch woandershin → doch wieder
+ * vor B" ergibt innerhalb desselben Fensters zweimal dieselbe Kennung. Der
+ * Turnier-PC hält den dritten Zug für eine Wiederholung, antwortet mit „ok"
+ * und tut **nichts** — die Reihenfolge bleibt falsch, ohne Fehlermeldung.
+ *
+ * Schützen muss die Erkennung hier auch nichts: `queue_reorder` ist
+ * idempotent — zweimal „M vor B" ergibt denselben Zustand. Ein doppelt
+ * gesendeter Zug kostet also höchstens einen überflüssigen Request.
+ */
+let queueOpSeq = 0;
+
+/** Der einzige Weg, eine neue Reihenfolge an den Turnier-PC zu schicken —
+ *  geteilt von Zug, Pfeiltasten und dem ↑-Knopf, damit alle Bedienarten
+ *  dieselbe Wirkung und dieselbe Kennungs-Regel haben. */
+function sendeQueueReorder(matchId, ziel, okText) {
+  send(
+    `queue-reorder-${matchId}-${ziel ?? "end"}-${++queueOpSeq}`,
+    { action: "queue_reorder", matchId, beforeMatchId: ziel },
+    okText,
+  );
 }
 
 function toast(text, bad) {
@@ -4448,26 +4492,46 @@ function queueRow(m, topMatchId) {
   // reicht — gedrückt heißt „ist gerufen". Beschriftung bleibt für
   // Vorlesehilfen und als Tooltip erhalten, damit niemand raten muss.
   const prepTitel = m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen";
-  parts.push(`<button type="button" class="prep" data-prep="${m.match_id}"
+  // Alle Knöpfe der Zeile stecken in EINEM Flex-Kind (`.row-actions`) —
+  // dieselbe Bündelung, die `.row-status` für die Marken schon macht. Sonst
+  // spränge der ↑-Knopf unten das Sechs-Elemente-Budget (Rechnung im
+  // CSS-Kommentar bei `.who-block`).
+  const aktionen = [];
+  aktionen.push(`<button type="button" class="prep" data-prep="${m.match_id}"
     aria-pressed="${m.prep_call ? "true" : "false"}"
     title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
 
-  // ── Kebab-Menü: Sekundäres (Spec Schritt 11) ─────────────────────────
-  const kebabGroups = [];
   // „Nach oben schieben" (ADR 0026): der tastatur- und touchfreundliche Weg
   // für den häufigsten Zug, ohne über eine womöglich hundert Zeilen lange
   // Liste ziehen zu müssen. Kein neuer Wire-Vertrag nötig — es ist ein
   // gewöhnliches `queue_reorder` vor die erste umsortierbare Zeile.
-  // Steht das Spiel schon dort (oder ist es gerufen und damit gar nicht
-  // Teil der Reihenfolge), erscheint der Eintrag gar nicht erst: Ein
-  // sichtbarer Menüpunkt, der nichts tut, ist schlimmer als keiner —
-  // niemand weiß, ob die Aktion misslang oder überflüssig war.
+  //
+  // Steht SICHTBAR an der Zeile statt im ⋮-Menü (Spec
+  // `tl-spielliste-sprung-umsortieren`, Schritt 5). Er lag zwei Jahre im
+  // Menü und wurde nie gefunden — die Menü-Aufzählung in
+  // `docs/turnierleitung-web.md` nannte ihn nicht einmal, und die
+  // Feldtest-Beschwerde „Umsortieren ist hakelig" kam von jemandem, der ihn
+  // nicht kannte. Ein Bedien-Weg, den niemand findet, ist fachlich dasselbe
+  // wie ein fehlender.
+  //
+  // Als Sinnbild wie das Megafon daneben: Ausgeschrieben fräße der Knopf in
+  // einer Liste mit 120 Zeilen zu viel Breite. Beschriftung bleibt als
+  // Tooltip und für Vorlesehilfen.
+  //
+  // Steht das Spiel schon vorn (oder ist es gerufen und damit gar nicht Teil
+  // der Reihenfolge), erscheint der Knopf gar nicht erst: ein sichtbarer
+  // Knopf, der nichts tut, ist schlimmer als keiner — niemand weiß, ob die
+  // Aktion misslang oder überflüssig war.
   const kannHoch = sortierbar && topMatchId != null && topMatchId !== m.match_id;
-  const zeilenAktionen = [];
   if (kannHoch) {
-    zeilenAktionen.push(`<button type="button" data-queue-top="${m.match_id}"
-        title="An den Anfang der Spielliste schieben">↑ Nach oben schieben</button>`);
+    aktionen.push(`<button type="button" class="hoch" data-queue-top="${m.match_id}"
+      title="An den Anfang der Spielliste schieben"
+      aria-label="An den Anfang der Spielliste schieben">↑</button>`);
   }
+
+  // ── Kebab-Menü: Sekundäres (Spec Schritt 11) ─────────────────────────
+  const kebabGroups = [];
+  const zeilenAktionen = [];
   // „Ergebnis eintragen" für ein Spiel, das nie auf einem Feld stand
   // (Zettel, mündliche Ansage). Öffnet exakt denselben Dialog wie das
   // Aktionsband oben — gemeinsamer Weg über `openQueueResultDialog()`,
@@ -4563,10 +4627,11 @@ function queueRow(m, topMatchId) {
       </div>`);
   }
   const kebabOffen = openKebabMatchId === m.match_id;
-  parts.push(`<details class="kebab" data-kebab="${m.match_id}"${kebabOffen ? " open" : ""}>
+  aktionen.push(`<details class="kebab" data-kebab="${m.match_id}"${kebabOffen ? " open" : ""}>
       <summary aria-label="Weitere Aktionen" title="Weitere Aktionen">⋮</summary>
       <div class="kebab-menu">${kebabGroups.join("")}</div>
     </details>`);
+  parts.push(`<span class="row-actions">${aktionen.join("")}</span>`);
 
   const selected = picked && picked.match.match_id === m.match_id;
   return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
@@ -4639,11 +4704,7 @@ function wireQueue(box) {
       const matchId = Number(btn.dataset.queueTop);
       const before = queueTopMatchId();
       if (before == null || before === matchId) return;
-      send(
-        `queue-reorder-${matchId}-${before}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-        { action: "queue_reorder", matchId, beforeMatchId: before },
-        "Nach oben geschoben.",
-      );
+      sendeQueueReorder(matchId, before, "Nach oben geschoben.");
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -6129,11 +6190,7 @@ function queueReorder(id, beforeId) {
   const matchId = Number(id);
   const ziel = queueReorderTarget(beforeId);
   if (ziel === matchId) { renderQueue(); return; }
-  send(
-    `queue-reorder-${matchId}-${ziel ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-    { action: "queue_reorder", matchId, beforeMatchId: ziel },
-    "Reihenfolge ge\u00e4ndert.",
-  );
+  sendeQueueReorder(matchId, ziel, "Reihenfolge geändert.");
 }
 
 function renderQueue() {

@@ -55,6 +55,25 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Verschieben über Spaltengrenzen ausdrücklich vorgesehen ist. Betraf die
   Anordnung der Panels auf der Turnierleitungsseite, nicht die Spielliste.
 
+- **„Nach ganz vorn" ist jetzt ein Knopf an der Zeile.** Das **↑** rechts an
+  einem wartenden Spiel setzt es mit einem Tipp an die Spitze der Liste — kein
+  Ziehen, kein Scrollen, egal wie lang die Liste ist.
+
+  Den Befehl gab es schon, aber nur im ⋮-Menü, und dort stand er in keiner
+  Anleitung. Die Rückmeldung „Umsortieren ist hakelig" kam von jemandem, der
+  ihn deshalb nicht kannte — der häufigste Handgriff war die ganze Zeit einen
+  Tipp entfernt und nicht auffindbar.
+
+  Die Zeile bleibt dabei genauso kompakt: Megafon, ↑ und ⋮ stehen jetzt als
+  Dreiergruppe zusammen, statt einzeln um Platz zu konkurrieren.
+
+- **Behoben: ein Spiel hin und wieder zurück zu schieben, wirkte beim zweiten
+  Mal nicht.** Wer ein Spiel vor ein anderes setzte, es dann woandershin schob
+  und kurz darauf wieder an dieselbe Stelle, sah eine Bestätigung — aber die
+  Reihenfolge blieb, wie sie war. Der Turnier-PC hielt den Zug für einen
+  Doppelklick, wenn alles innerhalb von zwanzig Sekunden passierte. Jetzt
+  zählt jeder Zug für sich.
+
 ## v0.9.270
 
 - **Kombi-Anzeige: Ausrichtung jetzt je Bildschirm.** Ob die Felder einer
