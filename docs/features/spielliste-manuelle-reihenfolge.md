@@ -120,7 +120,42 @@ Schiedsrichter-Rotation.
     läuft höchstens **einmal je Bild** statt bei jedem der zwei bis vier
     Zeigerereignisse pro Bild, und nur, wenn sich Zeiger oder Scrollstand
     seither überhaupt bewegt haben. Bei sechzig Zeilen spart das den
-    Großteil der `getBoundingClientRect`-Messungen.)
+    Großteil der `getBoundingClientRect`-Messungen.
+
+    **Nachlese aus dem Code-Review, gleicher Tag** — die Umstellung auf den
+    Bildtakt hatte vier Folgen, die erst der Review sichtbar gemacht hat:
+
+    - **Ein Druck ohne Bewegung war nicht mehr folgenlos.** Weil Tempo und
+      Einsortierung nur noch an der Zeigerposition hängen, genügte ein Tipp
+      auf den Griff der obersten sichtbaren Zeile: Der Zeiger liegt dort
+      schon in der Scroll-Zone. Am echten Code gemessen — 300 ms Halten ohne
+      jede Bewegung ergaben **101 px Scroll, drei Plätze Versatz und ein
+      gesendetes `queue_reorder`**. Vor der Umstellung war ein
+      bewegungsloser Druck garantiert wirkungslos, weil ohne `pointermove`
+      gar nichts geschah. Behoben durch `ueberSchwelle`/`ZUG_SCHWELLE_PX`
+      (6 px) in `src/io/dragScroll.mjs`: Bis zur Schwelle tut der Bildtakt
+      nichts.
+    - **Seitlich parken scrollte weiter.** Die X-Grenze galt nur fürs
+      Einsortieren; das Scrollen lief auch dann mit bis zu 900 px/s, wenn
+      der Zeiger weit neben der Liste stand. Beim Zurückkommen landete die
+      Zeile dutzende Positionen entfernt. Jetzt gilt `imXBereich()` für
+      **beides** — seitlich draußen ruht der Zug.
+    - **Der dokumentierte Abbruch gab es nicht.** `docs/turnierleitung-web.md`
+      versprach „Loslassen bricht dann folgenlos ab", `teardown` schickte
+      aber die zuletzt erreichte Position. Jetzt verwirft ein Loslassen
+      außerhalb der X-Toleranz den Zug (`teardown(ev, !imXBereich())`).
+    - **Ein Zug ohne Ende lief endlos weiter.** Kamen weder `pointerup` noch
+      `pointercancel` an, blieb `reorderDragPending` stehen — neu ist, dass
+      zusätzlich eine rAF-Schleife das Panel bis zum Anschlag scrollte.
+      Sicherheitsnetz: `lostpointercapture` und `blur` verwerfen den Zug,
+      `beendet` schützt vor Mehrfach-Abbau.
+
+    Mitgenommen, **vorbestehend** und nicht von dieser Änderung verursacht:
+    Der X-Wächter galt auch für Züge mit mehreren erlaubten Containern und
+    kappte damit das dokumentierte „Panel in eine andere Spalte ziehen" —
+    `scrollBox` ist dort die Ausgangsspalte, eine Spalte weiter liegt
+    hunderte Pixel jenseits ihres Randes. `imXBereich()` greift jetzt nur
+    noch, wenn es genau einen Container gibt.)
 - **Architekturregeln (CLAUDE.md R1–R6):**
   - R1: Frontend löst ausschließlich über die neuen Tauri-Commands/
     `TlAction`-Varianten aus, kein direkter Store-Zugriff.

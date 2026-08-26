@@ -33,6 +33,28 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   lässt sich anfokussieren und mit den Pfeiltasten ↑/↓ bedienen — das gab es
   schon vorher.
 
+- **Ein Tipp auf den Zieh-Griff bleibt folgenlos.** Erst ab ein paar Pixeln
+  Bewegung wird aus dem Berühren ein Zug. Ohne diese Schwelle hätte das neue
+  Auto-Scrollen einen unangenehmen Nebeneffekt gehabt: Wer den Griff der
+  obersten sichtbaren Zeile nur berührt und kurz hält, hat den Finger schon im
+  Randbereich — die Liste wäre gescrollt und die Reihenfolge hätte sich
+  geändert, ohne dass sich der Finger bewegt.
+
+- **Einen begonnenen Zug abbrechen.** Weit seitlich aus der Liste fahren und
+  dort loslassen: Die Zeile springt zurück, es wird nichts geschickt. Solange
+  man seitlich draußen ist, ruht der Zug ganz — bisher scrollte die Liste dabei
+  weiter, und die Zeile landete beim Zurückkommen irgendwo.
+
+- **Behoben: ein abgebrochener Zug konnte die Liste bis zum Anschlag
+  durchscrollen.** Kam das Ende einer Ziehgeste nie an — weil das Fenster den
+  Fokus verlor oder das Gerät dazwischenfunkte —, lief das Auto-Scrollen weiter.
+  Jetzt wird der Zug in dem Fall verworfen.
+
+- **Behoben: ein Panel ließ sich nicht mehr in eine weiter entfernte Spalte
+  ziehen.** Der Zug blieb an der Grenze der Ausgangsspalte hängen, obwohl das
+  Verschieben über Spaltengrenzen ausdrücklich vorgesehen ist. Betraf die
+  Anordnung der Panels auf der Turnierleitungsseite, nicht die Spielliste.
+
 ## v0.9.270
 
 - **Kombi-Anzeige: Ausrichtung jetzt je Bildschirm.** Ob die Felder einer

@@ -6,7 +6,8 @@
 // Dann steht die Liste beim Ziehen still und die Geste ist wieder so hakelig
 // wie vor der Änderung. Der zweitteuerste ist ein Tempo ungleich 0 in der
 // Mitte — dann wandert die Liste, während man in Ruhe einsortieren will.
-import { ziehScrollTempo, scrollSchritt, SCROLL_ZONE_PX, MAX_SCROLL_PX_S }
+import { ziehScrollTempo, scrollSchritt, ueberSchwelle,
+  SCROLL_ZONE_PX, MAX_SCROLL_PX_S, ZUG_SCHWELLE_PX }
   from "../src/io/dragScroll.mjs";
 
 let failures = 0;
@@ -81,6 +82,27 @@ ok("verschluckter Takt wird gedeckelt", scrollSchritt(900, 3000), scrollSchritt(
 ok("negative Zeit scrollt nicht", scrollSchritt(900, -5), 0);
 ok("Tempo 0 scrollt nicht", scrollSchritt(0, 16), 0);
 ok("NaN-Tempo scrollt nicht", scrollSchritt(NaN, 16), 0);
+
+// ── Tipp oder Zug? ────────────────────────────────────────────────────────
+// Der Wächter gegen einen Fehler, der im Feldtest teuer wäre: Seit das
+// Scrollen aus der ZEIGERPOSITION kommt, würde ein bloßes Gedrückthalten am
+// Griff der obersten Zeile die Liste scrollen und die Reihenfolge ändern —
+// gemessen 101 px und drei Plätze nach 300 ms, ohne dass der Finger sich
+// bewegt hat. Deshalb passiert bis zur Schwelle GAR NICHTS.
+ok("kein Zug ohne jede Bewegung", ueberSchwelle(100, 100, 100, 100), false);
+ok("knapp unter der Schwelle ist noch kein Zug",
+  ueberSchwelle(100, 100, 100 + ZUG_SCHWELLE_PX - 1, 100), false);
+ok("genau auf der Schwelle ist ein Zug",
+  ueberSchwelle(100, 100, 100 + ZUG_SCHWELLE_PX, 100), true);
+ok("senkrecht zählt genauso",
+  ueberSchwelle(100, 100, 100, 100 + ZUG_SCHWELLE_PX), true);
+ok("Richtung egal (nach oben/links)",
+  ueberSchwelle(100, 100, 100, 100 - ZUG_SCHWELLE_PX), true);
+pruefe("schräg unter der Schwelle bleibt Tipp",
+  ueberSchwelle(100, 100, 103, 103) === false);
+// Im Zweifel KEIN Zug: Unfug darf niemals eine Reihenfolge verschieben.
+ok("NaN ist kein Zug", ueberSchwelle(NaN, 100, 200, 200), false);
+ok("undefined ist kein Zug", ueberSchwelle(undefined, undefined, 200, 200), false);
 
 if (failures) {
   console.error(`\n${failures} Fehler.`);

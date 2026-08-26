@@ -315,9 +315,15 @@ einfach „noch weiter". Auch sehr lange Wartelisten laden dabei nach; du
 kommst also bis ans echte Ende, nicht nur bis dahin, wo die Liste beim
 Anfassen aufhörte.
 
-Weit **seitlich** aus dem Panel zu fahren lässt die Reihenfolge dagegen
-unangetastet — sonst würde ein Zug hinüber zu den Feldkacheln versehentlich
-umsortieren. Loslassen bricht dann folgenlos ab.
+**Abbrechen:** Weit **seitlich** aus dem Panel fahren und dort loslassen —
+die Zeile springt an ihren Platz zurück, und es wird nichts an den Turnier-PC
+geschickt. Solange du seitlich draußen bist, ruht der Zug: Die Liste scrollt
+nicht weiter, und die Reihenfolge ändert sich nicht. Das ist zugleich der
+Schutz davor, dass ein Zug hinüber zu den Feldkacheln versehentlich umsortiert.
+
+**Ein Tipp auf den Griff bleibt ein Tipp.** Erst ab ein paar Pixeln Bewegung
+wird daraus ein Zug — den Griff nur zu berühren oder gedrückt zu halten ändert
+nichts, auch nicht am Rand der Liste.
 
 **Ohne Ziehen:** Den Griff antippen bzw. mit Tab anfokussieren und mit ↑/↓
 verschieben. Ein Schritt je Tastendruck.

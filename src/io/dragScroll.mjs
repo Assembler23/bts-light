@@ -22,6 +22,42 @@
  *  und dort gemeinsam.
  */
 
+/**
+ * Mindestbewegung, ab der aus einem Druck ein Zug wird — in Pixeln.
+ *
+ * **Warum es das braucht.** Seit das Auto-Scrollen im Bildtakt aus der
+ * Zeigerposition läuft, ist ein bloßes Gedrückthalten nicht mehr folgenlos:
+ * Wer den Griff der obersten sichtbaren Zeile antippt, hat den Zeiger schon
+ * mitten in der oberen Scroll-Zone. Gemessen am echten Code: 300 ms Halten
+ * ohne jede Bewegung scrollten 101 px, verschoben die Zeile um drei Plätze
+ * und schickten die neue Reihenfolge an den Turnier-PC. Vor der
+ * Bildtakt-Umstellung war ein bewegungsloser Druck garantiert wirkungslos,
+ * weil ohne `pointermove` gar nichts passierte.
+ *
+ * Der Wert ist knapp gewählt: groß genug gegen Zittern und den Wackler beim
+ * Absetzen des Fingers, klein genug, dass ein gewollter Zug sofort anspricht.
+ */
+export const ZUG_SCHWELLE_PX = 6;
+
+/**
+ * Hat sich der Zeiger seit dem Aufsetzen weit genug bewegt, dass es ein Zug
+ * ist und kein Tipp?
+ *
+ * Maximumnorm statt Luftlinie: eine reine Auf-ab-Bewegung ist der Normalfall
+ * beim Umsortieren, und die Wurzel spart man sich.
+ *
+ * @param {number} x0 Zeigerposition beim Aufsetzen.
+ * @param {number} y0 Zeigerposition beim Aufsetzen.
+ * @param {number} x Aktuelle Zeigerposition.
+ * @param {number} y Aktuelle Zeigerposition.
+ * @param {number} [schwelle] Mindestbewegung.
+ * @returns {boolean} Bei unbrauchbaren Eingaben `false` — im Zweifel KEIN Zug.
+ */
+export function ueberSchwelle(x0, y0, x, y, schwelle = ZUG_SCHWELLE_PX) {
+  if (![x0, y0, x, y, schwelle].every(Number.isFinite)) return false;
+  return Math.abs(x - x0) >= schwelle || Math.abs(y - y0) >= schwelle;
+}
+
 /** Breite der Scroll-Zone an jedem Rand, in Pixeln. */
 export const SCROLL_ZONE_PX = 60;
 

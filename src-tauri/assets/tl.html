@@ -5132,6 +5132,18 @@ let reorderDragPending = false;
 const SCROLL_ZONE_PX = 60;
 const MAX_SCROLL_PX_S = 900;
 
+// Mindestbewegung, ab der aus einem Druck ein Zug wird. Ohne sie ist ein
+// bloßes Gedrückthalten am Griff nicht mehr folgenlos: Wer die oberste
+// sichtbare Zeile antippt, hat den Zeiger schon in der Scroll-Zone —
+// gemessen 101 px Scroll und drei Plätze Versatz nach 300 ms, ohne dass sich
+// der Finger bewegt hat, samt Senden an den Turnier-PC.
+const ZUG_SCHWELLE_PX = 6;
+
+function ueberSchwelle(x0, y0, x, y, schwelle = ZUG_SCHWELLE_PX) {
+  if (![x0, y0, x, y, schwelle].every(Number.isFinite)) return false;
+  return Math.abs(x - x0) >= schwelle || Math.abs(y - y0) >= schwelle;
+}
+
 function ziehScrollTempo(y, oben, unten, margin = SCROLL_ZONE_PX, maxTempo = MAX_SCROLL_PX_S) {
   if (![y, oben, unten, margin, maxTempo].every(Number.isFinite)) return 0;
   const hoehe = unten - oben;
@@ -5288,14 +5300,36 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
   }
 
   /**
-   * Waagerechte Toleranz fürs Einsortieren. Senkrecht gibt es bewusst KEINE
-   * Grenze mehr: Wer unter das Panel fährt, meint „ans Ende" — früher fror
-   * die Zeile in dem Moment ein, weil derselbe Wächter auch das Scrollen
-   * abschaltete (Feldtest-Beschwerde „hakelig"). Seitlich bleibt die Grenze,
-   * damit ein Zug zu den Feldkacheln die Reihenfolge nicht ändert (ADR 0027:
-   * Umsortier-Griff nur im eigenen Panel aktiv).
+   * Waagerechte Toleranz. Senkrecht gibt es bewusst KEINE Grenze: Wer unter
+   * das Panel fährt, meint „ans Ende" — früher fror die Zeile in dem Moment
+   * ein, weil derselbe Wächter auch das Scrollen abschaltete
+   * (Feldtest-Beschwerde „hakelig"). Seitlich bleibt die Grenze, damit ein Zug
+   * zu den Feldkacheln die Reihenfolge nicht ändert (ADR 0027: Umsortier-Griff
+   * nur im eigenen Panel aktiv).
+   *
+   * Sie gilt für Einsortieren UND Scrollen gemeinsam (Review-Fund 26.08.2026):
+   * Ein Zug, der seitlich geparkt wird, darf nicht weiterscrollen — sonst
+   * rauscht die Liste unter dem Zeiger durch und die Zeile landet beim
+   * Zurückkommen irgendwo. Seitlich draußen heißt: der Zug ruht.
    */
   const X_TOLERANZ_PX = 120;
+
+  /**
+   * Zeigt der Zeiger waagerecht noch auf den Zug-Bereich?
+   *
+   * Bei MEHREREN erlaubten Containern (Panel-Reorder über Spaltengrenzen,
+   * `geschwister`) gibt es keine Grenze: `scrollBox` ist dort die
+   * Ausgangsspalte, und eine Spalte weiter zu ziehen liegt hunderte Pixel
+   * jenseits ihres Randes — genau das ist aber die dokumentierte Geste
+   * („Panel in eine andere Spalte ziehen"). `zielListe()` wählt in dem Fall
+   * ohnehin den richtigen Container. Die Grenze gilt also nur dort, wo es
+   * wirklich nur einen gibt: Spielliste, Schiedsrichter, Profil-Editor.
+   */
+  function imXBereich() {
+    if (listen().length > 1) return true;
+    const r = scrollBox.getBoundingClientRect();
+    return zeigerX >= r.left - X_TOLERANZ_PX && zeigerX <= r.right + X_TOLERANZ_PX;
+  }
 
   // Der Zug arbeitet im Bildtakt, nicht im Ereignis-Takt: `move()` merkt sich
   // nur, wo der Zeiger ist, `takt()` scrollt und sortiert ein. Das löst
@@ -5303,23 +5337,29 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
   // Einsortieren läuft höchstens einmal je Bild statt bei jedem der zwei bis
   // vier Zeigerereignisse pro Bild, und ein Zeiger, der sich nicht bewegt,
   // kostet gar nichts.
+  const startX = down.clientX;
+  const startY = down.clientY;
   let zeigerX = down.clientX;
   let zeigerY = down.clientY;
   let rafId = 0;
   let letzterTakt = 0;
   let scrollRest = 0;
   let letzteLage = "";
+  /** Erst ab der Bewegungsschwelle tut der Bildtakt überhaupt etwas. */
+  let losgezogen = false;
+  /** Gegen Mehrfach-Abbau: `releasePointerCapture` löst selbst
+   *  `lostpointercapture` aus, und der räumt wiederum ab. */
+  let beendet = false;
 
   function move(ev) {
     if (ev.pointerId !== pointerId) return;
     zeigerX = ev.clientX;
     zeigerY = ev.clientY;
+    if (!losgezogen && ueberSchwelle(startX, startY, zeigerX, zeigerY)) losgezogen = true;
   }
 
   /** Zeile an die Stelle hängen, auf die der Zeiger gerade zeigt. */
   function einsortieren() {
-    const r = scrollBox.getBoundingClientRect();
-    if (zeigerX < r.left - X_TOLERANZ_PX || zeigerX > r.right + X_TOLERANZ_PX) return;
     const ziel = zielListe(zeigerX, zeigerY);
     const siblings = items(ziel).filter((el) => el !== li);
     let target = null;
@@ -5340,6 +5380,13 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
     rafId = requestAnimationFrame(takt);
     const dt = letzterTakt ? zeit - letzterTakt : 0;
     letzterTakt = zeit;
+
+    // Ein Druck ohne Bewegung ist ein Tipp, kein Zug — und muss folgenlos
+    // bleiben (Review-Fund 26.08.2026).
+    if (!losgezogen) return;
+    // Seitlich geparkt: weder scrollen noch einsortieren. Der Zug ruht, bis
+    // der Zeiger zurückkommt — oder er wird beim Loslassen verworfen.
+    if (!imXBereich()) { scrollRest = 0; return; }
 
     const r = scrollBox.getBoundingClientRect();
     const tempo = ziehScrollTempo(zeigerY, r.top, r.bottom);
@@ -5366,11 +5413,15 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
   }
 
   function teardown(ev, cancelled) {
+    if (beendet) return;
+    beendet = true;
     reorderDragPending = false;
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", cancel);
+    li.removeEventListener("lostpointercapture", verloren);
+    window.removeEventListener("blur", verloren);
     if (isTouch) window.removeEventListener("touchmove", blockScroll, { passive: false });
     document.body.classList.remove("dragging");
     li.classList.remove("dragging-item");
@@ -5401,11 +5452,28 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
     renderActionBar();
     renderQueue();
   }
-  const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
+  // Seitlich draußen loslassen VERWIRFT den Zug — die Zeile springt zurück,
+  // es wird nichts gesendet. Das ist der einzige Abbruchweg einer begonnenen
+  // Geste, und `docs/turnierleitung-web.md` verspricht ihn ausdrücklich;
+  // vorher wurde trotzdem die zuletzt erreichte Position geschickt
+  // (Review-Fund 26.08.2026).
+  const up = (ev) => {
+    if (ev.pointerId !== pointerId) return;
+    teardown(ev, !imXBereich());
+  };
   const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };
+  /** Sicherheitsnetz: Kommt weder `pointerup` noch `pointercancel` an (Fenster
+   *  verliert den Fokus, System greift ein, Zeigerfang geht verloren), bliebe
+   *  sonst `reorderDragPending` stehen — und seit der Bildtakt-Umstellung
+   *  liefe zusätzlich eine rAF-Schleife weiter, die das Panel bis zum Anschlag
+   *  scrollt. Verwerfen ist hier immer richtig: Ein Zug, dessen Ende niemand
+   *  gesehen hat, darf keine Reihenfolge schreiben. */
+  const verloren = () => teardown(null, true);
   window.addEventListener("pointermove", move, { passive: false });
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", cancel);
+  li.addEventListener("lostpointercapture", verloren);
+  window.addEventListener("blur", verloren);
   rafId = requestAnimationFrame(takt);
 }
 
@@ -6035,6 +6103,17 @@ function queueNachladenWaehrendZug() {
   }
   // Frisch gebaute Zeilen tragen leere Zeitfelder („gerufen seit", Eieruhr).
   scheduleTickClocks();
+  // Zähler und Fuß mitziehen: Sonst stünde während eines langen Zugs
+  // weiterhin „Noch N weitere Spiele" mit dem alten N — ausgerechnet an der
+  // Stelle, auf die man beim Ziehen ans Listenende schaut.
+  setPanelCount("queue", liste.length);
+  const fuss = $("queue-foot");
+  if (fuss) {
+    const rest = liste.length - queueShown;
+    setzeHtmlWennNeu(fuss, rest > 0
+      ? `<p class="note">Noch ${rest} weitere${rest === 1 ? "s" : ""} Spiel${rest === 1 ? "" : "e"} — beim Scrollen laden sie nach.</p>`
+      : "");
+  }
   // Neu aufsetzen: Ein Beobachter meldet nur den WECHSEL nach „sichtbar" —
   // dieselbe Begründung wie bei `beobachteQueueEnde` selbst.
   beobachteQueueEnde(liste.length);
