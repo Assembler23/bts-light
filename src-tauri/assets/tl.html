@@ -1136,7 +1136,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
    Tablet springt zusätzlich die Lupe auf. Während eines laufenden Zugs gilt
    es für die ganze Seite — der Zeiger wandert ja über alles. */
-.row.pick, .card, .action-bar, .halls, h2, .prep, .kebab-menu {
+.row.pick, .card, .action-bar, .halls, h2, .prep, .hoch, .kebab-menu {
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
@@ -1145,6 +1145,7 @@ body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; 
    zurücknehmen — Schreib-Aktionen ebenso wie Lese-Abrufe (der
    Punktverlauf wird per HTTP geladen und schlüge offline fehl). */
 body.offline .prep,
+body.offline .hoch,
 body.offline .kebab-menu button,
 body.offline .wo .actions button,
 body.offline .sk #sk-list button,
@@ -2227,12 +2228,31 @@ function opIdFor(matchId, courtId) {
  */
 let queueOpSeq = 0;
 
+/**
+ * Zufälliger Anteil je Seitenaufruf. Der Zähler allein reicht NICHT: Er
+ * beginnt nach jedem Neuladen wieder bei eins, und jedes TL-Gerät zählt für
+ * sich. Der Turnier-PC merkt sich Vorgänge aber **60 Sekunden** lang in einer
+ * Ablage, die **nur** nach der Kennung schlägt (`recent_ops` in `state.rs`) —
+ * ein Geräte-Merkmal steckt nicht darin. Auch der Fingerabdruck rettet
+ * nichts: Für `QueueReorder` ist er `queue-order:{match}:{ziel}`, also genau
+ * die beiden Werte, die ohnehin schon in der Kennung stehen; bei einer
+ * Kollision passt er immer.
+ *
+ * Ohne diesen Anteil hieße das: Spiel 42 vor Spiel 17 setzen, Seite neu
+ * laden, innerhalb einer Minute denselben Zug als ersten dieser Seite —
+ * `queue-reorder-42-17-1` ist schon bekannt, der Turnier-PC antwortet „ok"
+ * und tut nichts. Dasselbe bei zwei TL-Tablets nebeneinander. Genau der
+ * Fehler, den der Zähler beseitigen sollte, nur über einen anderen Weg
+ * (Review-Fund 26.08.2026).
+ */
+const opSitzung = Math.random().toString(36).slice(2, 8);
+
 /** Der einzige Weg, eine neue Reihenfolge an den Turnier-PC zu schicken —
  *  geteilt von Zug, Pfeiltasten und dem ↑-Knopf, damit alle Bedienarten
  *  dieselbe Wirkung und dieselbe Kennungs-Regel haben. */
 function sendeQueueReorder(matchId, ziel, okText) {
   send(
-    `queue-reorder-${matchId}-${ziel ?? "end"}-${++queueOpSeq}`,
+    `queue-reorder-${matchId}-${ziel ?? "end"}-${opSitzung}-${++queueOpSeq}`,
     { action: "queue_reorder", matchId, beforeMatchId: ziel },
     okText,
   );
@@ -4329,23 +4349,27 @@ function scheduleFitCourts() {
 
 /**
  * Eine Zeile der einen Spielliste (ADR 0026). Sie zeigt ohne geöffnetes
- * Kontextmenü höchstens SECHS sichtbare Elemente (Spec tl-web-panelsystem;
+ * Kontextmenü höchstens FÜNF direkte Elemente (Spec tl-web-panelsystem;
  * die Rechnung steht ausführlich im CSS bei `.row .who-block`):
  *
- * PRIMÄR (immer sichtbar): Zieh-Griff (jede noch nicht gerufene Zeile),
- * Spielnummer, Name+Meta (EIN Block, `.who-block`), der Statusblock (EIN
- * Wrapper `.row-status` mit Hallen-Kürzel, Pausen-Eieruhr und den
- * beiden Abzeichen), der Vorbereitungs-Ruf-Knopf (vermutlich die häufigste
- * Einzelaktion an einer Zeile) und das Kebab-Menü selbst.
+ * 1. Zieh-Griff — jede noch nicht gerufene Zeile.
+ * 2. Spielnummer.
+ * 3. Name+Meta, EIN Block (`.who-block`).
+ * 4. Statusblock, EIN Wrapper (`.row-status`): Hallen-Kürzel, Pausen-Eieruhr
+ *    und die Abzeichen.
+ * 5. Knopfblock, EIN Wrapper (`.row-actions`): Vorbereitungs-Ruf (die
+ *    häufigste Einzelaktion an einer Zeile), „↑ nach oben" (nur wo es etwas
+ *    bewirkt, siehe `kannHoch`) und das Kebab-Menü.
  *
- * HINTER DEM KEBAB (⋮, seltener gebraucht): „nach oben schieben" und
- * „Ergebnis eintragen", die Auto-Vergabe-Ausnahme (Umschalter, nicht die
+ * HINTER DEM KEBAB (⋮, seltener gebraucht): „Ergebnis eintragen", der
+ * Vorabzettel, die Auto-Vergabe-Ausnahme (Umschalter, nicht die
  * Anzeige-Badge — die bleibt primär sichtbar), alle drei Nachruf-Knöpfe
- * (braucht man nur, wenn jemand nicht kommt) und der Spielort-Wähler (nur
- * im Mehr-Hallen-Turnier ohne Disziplin-Regel überhaupt vorhanden).
+ * (braucht man nur, wenn jemand nicht kommt), der Spielort-Wähler und das
+ * Wunschfeld (beide nur im Mehr-Hallen- bzw. entsprechend eingerichteten
+ * Turnier vorhanden).
  *
  * `topMatchId` ist die Kennung der ersten UMSORTIERBAREN Zeile der gerade
- * gezeigten Liste — Ziel des Menüpunkts „nach oben schieben".
+ * gezeigten Liste — Ziel des ↑-Knopfes.
  */
 function queueRow(m, topMatchId) {
   const parts = [];
@@ -4807,10 +4831,18 @@ function wireQueue(box) {
     };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
-      // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
-      // Link (badhub-Seite öffnen) — ohne diese Ausnahme finge die Zeile
-      // sie ab und wählte stattdessen das Spiel (Review-Fund 17.08.2026).
-      if (ev.target instanceof Element && ev.target.closest("a.sp-name")) return;
+      // Enter/Leertaste auf einem fokussierten Bedienelement IN der Zeile
+      // gehören diesem Element, nicht der Zeile: dem Spieler-Link (badhub-
+      // Seite öffnen, Review-Fund 17.08.2026), dem ↑-Knopf, dem
+      // Vorbereitungs-Ruf, dem ⋮-Menü und den Wählern darin.
+      //
+      // Ohne die Ausnahme unterdrückt `preventDefault()` den Klick, den der
+      // Browser sonst aus Enter auf einem Knopf erzeugt — der Knopf löst nie
+      // aus, und stattdessen wird das Spiel zum Zuweisen ausgewählt. Beim
+      // ↑-Knopf wiegt das besonders: Er ist laut Doku der Hauptweg für
+      // „ganz nach vorn" (Review-Fund 26.08.2026).
+      if (ev.target instanceof Element
+        && ev.target.closest("button, summary, select, a")) return;
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
     });
     enableDrag(el, match, null);

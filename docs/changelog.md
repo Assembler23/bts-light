@@ -67,6 +67,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Die Zeile bleibt dabei genauso kompakt: Megafon, ↑ und ⋮ stehen jetzt als
   Dreiergruppe zusammen, statt einzeln um Platz zu konkurrieren.
 
+- **Behoben: Knöpfe an einer Wartelisten-Zeile reagierten nicht auf die
+  Eingabetaste.** Wer sich mit Tab zum Megafon, zum ↑ oder zum ⋮-Menü
+  bewegte und Enter drückte, wählte stattdessen das Spiel zum Zuweisen aus —
+  der Knopf löste nie aus. Betraf alle drei; mit dem neuen ↑ fiel es auf.
+
 - **Behoben: ein Spiel hin und wieder zurück zu schieben, wirkte beim zweiten
   Mal nicht.** Wer ein Spiel vor ein anderes setzte, es dann woandershin schob
   und kurz darauf wieder an dieselbe Stelle, sah eine Bestätigung — aber die

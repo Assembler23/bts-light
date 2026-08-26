@@ -344,7 +344,8 @@ wird daraus ein Zug — den Griff nur zu berühren oder gedrückt zu halten änd
 nichts, auch nicht am Rand der Liste.
 
 **Ohne Ziehen:** Den Griff antippen bzw. mit Tab anfokussieren und mit ↑/↓
-verschieben. Ein Schritt je Tastendruck.
+verschieben. Ein Schritt je Tastendruck. Auch der **↑-Knopf** und die übrigen
+Knöpfe der Zeile lassen sich mit Tab ansteuern und mit Enter auslösen.
 
 ### Ein Spiel von der automatischen Feldvergabe ausnehmen
 
