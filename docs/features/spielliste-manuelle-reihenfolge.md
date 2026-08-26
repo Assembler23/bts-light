@@ -88,6 +88,39 @@ Schiedsrichter-Rotation.
     verdrahtet seither je Zeile über den Keyed-Abgleich — Verhalten
     unverändert, aber keine doppelten Drag-Listener mehr bei jedem
     Neuzeichnen.)
+
+    (Nachtrag 26.08.2026, v0.9.272 — Feldtest-Rückmeldung „das Verschieben
+    zusammen mit dem Scrollen ist hakelig", bei Turnieren mit fünfzig bis
+    sechzig wartenden Spielen. Drei Ursachen, alle in `assets/tl.html`:
+
+    1. **Auto-Scroll hing an den Move-Ereignissen** (feste Pixelzahl je
+       `pointermove`). Ein still gehaltener Zeiger am Rand erzeugt keine
+       Ereignisse — das Scrollen blieb stehen, man musste wackeln. Jetzt
+       läuft während des Zugs ein `requestAnimationFrame`-Takt, der Tempo
+       und Einsortierung aus der **Zeigerposition** ableitet. Die Formel
+       (quadratische Rampe über eine 60-px-Zone bis 900 px/s, Zeitschritt
+       gedeckelt) liegt kanonisch in `src/io/dragScroll.mjs` mit Tests in
+       `scripts/test-drag-scroll.mjs`; `tl.html` trägt die übliche
+       Inline-Kopie.
+    2. **Der `mouseInPanel`-Wächter schaltete auch das Scrollen ab.** Wer
+       unter die Liste fuhr, sah die Zeile einfrieren. Die senkrechte
+       Grenze ist entfallen (unter die Liste zu fahren heißt „ans Ende"),
+       die waagerechte bleibt mit 120 px Toleranz — ADR 0027 („Umsortier-
+       Griff nur im eigenen Panel aktiv") gilt unverändert.
+    3. **Nachladen war während des Zugs gesperrt.** `renderQueue()` steigt
+       bei `reorderDragPending` aus, sonst risse der Keyed-Abgleich die
+       gezogene Zeile an ihre Modellposition zurück. Der Beobachter am
+       Listenende ruft in diesem Fall jetzt `queueNachladenWaehrendZug()`,
+       das die nächste Seite nur **anhängt** — nie umsortiert, nie ersetzt.
+       Damit endet die Liste beim Ziehen nicht mehr beim Stand des letzten
+       Renders, und „ans Ende" (`queueReorderTarget`) meint wieder das
+       echte Ende.
+
+    Nebenwirkung von 1., die den Ruckler selbst betrifft: Das Einsortieren
+    läuft höchstens **einmal je Bild** statt bei jedem der zwei bis vier
+    Zeigerereignisse pro Bild, und nur, wenn sich Zeiger oder Scrollstand
+    seither überhaupt bewegt haben. Bei sechzig Zeilen spart das den
+    Großteil der `getBoundingClientRect`-Messungen.)
 - **Architekturregeln (CLAUDE.md R1–R6):**
   - R1: Frontend löst ausschließlich über die neuen Tauri-Commands/
     `TlAction`-Varianten aus, kein direkter Store-Zugriff.

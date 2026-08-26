@@ -4,6 +4,35 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.272
+
+- **Spiele umsortieren geht endlich flüssig (Turnierleitungsseite).** Das
+  Ziehen einer Zeile in der Warteliste war mit dem Scrollen der Liste kaum zu
+  vereinbaren — bei fünfzig oder sechzig Spielen wurde daraus eine Geduldsprobe.
+  Drei Dinge sind jetzt anders:
+
+  **Halten statt wackeln.** Wer die Zeile an den unteren oder oberen Rand der
+  Liste zieht und dort **stehen bleibt**, scrollt weiter. Bisher rührte sich die
+  Liste nur, solange der Finger bzw. die Maus sich bewegte — man musste am Rand
+  hin- und herwackeln, damit es weiterging. Das Tempo richtet sich danach, wie
+  nah am Rand man ist: knapp innerhalb kriecht es (zum genauen Einsortieren),
+  ganz am Rand überstreicht es die ganze Liste in gut zwei Sekunden.
+
+  **Über den Rand hinaus ist erlaubt.** Fährt man unter die Liste hinaus, fror
+  die Zeile bisher ein und nichts passierte mehr. Jetzt heißt das schlicht
+  „weiter nach unten". Seitlich weit hinaus zu fahren lässt die Reihenfolge
+  weiterhin unangetastet — ein Zug zu den Feldkacheln soll nicht versehentlich
+  umsortieren.
+
+  **Die Liste endet nicht mehr mitten im Zug.** Sehr lange Wartelisten laden in
+  Schritten nach. Während eines Zugs war das gesperrt, die Liste hörte deshalb
+  dort auf, wo sie beim Anfassen stand — bei sechzig Spielen waren die letzten
+  zwanzig unerreichbar. Jetzt lädt sie auch beim Ziehen nach.
+
+  Auf Tablets wie mit der Maus. Wer lieber ohne Ziehen arbeitet: Der Griff (⠿)
+  lässt sich anfokussieren und mit den Pfeiltasten ↑/↓ bedienen — das gab es
+  schon vorher.
+
 ## v0.9.270
 
 - **Kombi-Anzeige: Ausrichtung jetzt je Bildschirm.** Ob die Felder einer

@@ -297,6 +297,31 @@ Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
 
+### Spiele in der Warteliste umsortieren
+
+Am **Griff** (⠿) links an einer Wartelisten-Zeile lässt sich das Spiel nach
+oben oder unten ziehen — auf dem Tablet wie mit der Maus. Ab dem ersten Zug
+gilt für dieses Spiel deine Reihenfolge statt der von BTP; die Zeile bekommt
+dafür die Marke „manuell einsortiert". Der Knopf im Kopf des Panels
+„Spiele" nimmt die Handsortierung des ganzen Turniers wieder zurück.
+
+**Über lange Listen ziehen** (seit v0.9.272): Zieh die Zeile an den oberen
+oder unteren Rand der Liste und **bleib dort stehen** — die Liste scrollt
+weiter, solange du hältst. Wie schnell, hängt davon ab, wie weit du zum Rand
+gehst: knapp in den Randbereich hinein kriecht sie (damit du genau treffen
+kannst), ganz am Rand läufst du in gut zwei Sekunden durch die ganze Liste.
+Über den Rand **hinaus** zu fahren ist ausdrücklich erlaubt und heißt
+einfach „noch weiter". Auch sehr lange Wartelisten laden dabei nach; du
+kommst also bis ans echte Ende, nicht nur bis dahin, wo die Liste beim
+Anfassen aufhörte.
+
+Weit **seitlich** aus dem Panel zu fahren lässt die Reihenfolge dagegen
+unangetastet — sonst würde ein Zug hinüber zu den Feldkacheln versehentlich
+umsortieren. Loslassen bricht dann folgenlos ab.
+
+**Ohne Ziehen:** Den Griff antippen bzw. mit Tab anfokussieren und mit ↑/↓
+verschieben. Ein Schritt je Tastendruck.
+
 ### Ein Spiel von der automatischen Feldvergabe ausnehmen
 
 Im **⋮-Menü** jeder Wartelisten-Zeile steht ein Pause-Umschalter

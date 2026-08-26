@@ -143,6 +143,13 @@ jobs:
       - name: "Kombi-Anzeige: Adresse und Ausrichtung (JS)"
         run: node scripts/test-combo-ansicht.mjs
 
+      # Auto-Scroll-Tempo beim Umsortieren der Spielliste. Tempo 0, wo
+      # gescrollt werden muesste, macht die Ziehgeste wieder so hakelig wie
+      # vor v0.9.272; Tempo ungleich 0 in der Mitte laesst die Liste wandern,
+      # waehrend man in Ruhe einsortieren will.
+      - name: Auto-Scroll beim Umsortieren (JS)
+        run: node scripts/test-drag-scroll.mjs
+
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
       # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter

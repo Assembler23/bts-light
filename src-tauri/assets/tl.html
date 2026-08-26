@@ -5120,6 +5120,39 @@ function startTouchDrag(el, match, fromCourtId, down) {
 // Klick auf einen dieser Knöpfe.
 let reorderDragPending = false;
 
+// ── Auto-Scroll-Tempo (Inline-Kopie von `src/io/dragScroll.mjs`) ──────────
+// Kanonische Fassung samt Begründung und Tests dort (`scripts/test-drag-
+// scroll.mjs`); die Assets durchlaufen keinen Build und können keine Module
+// laden — Änderungen hier und dort gemeinsam.
+//
+// Kurz: Das Tempo hängt an der ZEIGERPOSITION, nicht an den Move-Ereignissen.
+// Die frühere Fassung addierte feste Pixel je `pointermove` — wer den Zeiger
+// am Rand still hielt (genau das, was man beim Warten aufs Scrollen tut),
+// erzeugte keine Ereignisse mehr, und die Liste blieb stehen.
+const SCROLL_ZONE_PX = 60;
+const MAX_SCROLL_PX_S = 900;
+
+function ziehScrollTempo(y, oben, unten, margin = SCROLL_ZONE_PX, maxTempo = MAX_SCROLL_PX_S) {
+  if (![y, oben, unten, margin, maxTempo].every(Number.isFinite)) return 0;
+  const hoehe = unten - oben;
+  if (hoehe <= 0 || margin <= 0 || maxTempo <= 0) return 0;
+  const zone = Math.min(margin, hoehe / 2);
+  const abstandOben = y - oben;
+  const abstandUnten = unten - y;
+  if (abstandOben < abstandUnten) {
+    const naehe = Math.min(1, Math.max(0, (zone - abstandOben) / zone));
+    return -maxTempo * naehe * naehe;
+  }
+  const naehe = Math.min(1, Math.max(0, (zone - abstandUnten) / zone));
+  return maxTempo * naehe * naehe;
+}
+
+function scrollSchritt(tempo, dtMs, maxDtMs = 50) {
+  if (!Number.isFinite(tempo) || !Number.isFinite(dtMs)) return 0;
+  const dt = Math.min(Math.max(dtMs, 0), maxDtMs);
+  return (tempo * dt) / 1000;
+}
+
 /**
  * `list`: Container, dessen direkte Kind-Elemente mit `[data-id]` die
  * sortierbaren Zeilen sind (jede braucht innen einen Griff, standardmäßig
@@ -5236,63 +5269,105 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
    *  sonst der nächstgelegene — der Finger darf über den Rand einer Spalte
    *  hinausragen (kurze Spalte, Rand des Fensters), ohne dass das Panel
    *  zurückspringt. Bei nur einem Container fällt beides zusammen. */
-  function zielListe(ev) {
+  function zielListe(x, y) {
     const alle = listen();
     if (alle.length === 1) return alle[0];
     for (const l of alle) {
       const r = l.getBoundingClientRect();
-      if (ev.clientX >= r.left && ev.clientX <= r.right
-        && ev.clientY >= r.top && ev.clientY <= r.bottom) return l;
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return l;
     }
     let beste = li.parentElement, kleinste = Infinity;
     for (const l of alle) {
       const r = l.getBoundingClientRect();
-      const dx = Math.max(r.left - ev.clientX, 0, ev.clientX - r.right);
-      const dy = Math.max(r.top - ev.clientY, 0, ev.clientY - r.bottom);
+      const dx = Math.max(r.left - x, 0, x - r.right);
+      const dy = Math.max(r.top - y, 0, y - r.bottom);
       const d = dx + dy;
       if (d < kleinste) { kleinste = d; beste = l; }
     }
     return beste;
   }
 
+  /**
+   * Waagerechte Toleranz fürs Einsortieren. Senkrecht gibt es bewusst KEINE
+   * Grenze mehr: Wer unter das Panel fährt, meint „ans Ende" — früher fror
+   * die Zeile in dem Moment ein, weil derselbe Wächter auch das Scrollen
+   * abschaltete (Feldtest-Beschwerde „hakelig"). Seitlich bleibt die Grenze,
+   * damit ein Zug zu den Feldkacheln die Reihenfolge nicht ändert (ADR 0027:
+   * Umsortier-Griff nur im eigenen Panel aktiv).
+   */
+  const X_TOLERANZ_PX = 120;
+
+  // Der Zug arbeitet im Bildtakt, nicht im Ereignis-Takt: `move()` merkt sich
+  // nur, wo der Zeiger ist, `takt()` scrollt und sortiert ein. Das löst
+  // gleich drei Dinge — der still gehaltene Zeiger scrollt weiter, das
+  // Einsortieren läuft höchstens einmal je Bild statt bei jedem der zwei bis
+  // vier Zeigerereignisse pro Bild, und ein Zeiger, der sich nicht bewegt,
+  // kostet gar nichts.
+  let zeigerX = down.clientX;
+  let zeigerY = down.clientY;
+  let rafId = 0;
+  let letzterTakt = 0;
+  let scrollRest = 0;
+  let letzteLage = "";
+
   function move(ev) {
     if (ev.pointerId !== pointerId) return;
-    // Umsortierung nur, wenn die Maus im sichtbaren Bereich des scrollbaren
-    // Panels bleibt (`scrollBox`, nicht der ungeklippte Zieh-Container) —
-    // sonst könnte ein Zug zu den Feldkacheln unbeabsichtigt die Reihenfolge
-    // ändern (ADR 0027: Umsortier-Griff nur im eigenen Panel aktiv).
+    zeigerX = ev.clientX;
+    zeigerY = ev.clientY;
+  }
+
+  /** Zeile an die Stelle hängen, auf die der Zeiger gerade zeigt. */
+  function einsortieren() {
     const r = scrollBox.getBoundingClientRect();
-    const mouseInPanel = ev.clientX >= r.left && ev.clientX <= r.right
-      && ev.clientY >= r.top && ev.clientY <= r.bottom;
-    if (!mouseInPanel) return;
-
-    // Auto-Scroll während des Drag-Vorgangs: Wenn die Maus am oberen oder
-    // unteren Rand des sichtbaren Panels ist, wird `scrollBox` (das
-    // tatsächlich scrollende Element, siehe `findScrollAncestor`)
-    // automatisch gescrollt, damit Zeilen außerhalb des sichtbaren Bereichs
-    // erreicht werden können.
-    const SCROLL_MARGIN = 40; // px vom oberen/unteren Rand
-    const SCROLL_SPEED = 8; // px pro move-Event
-    if (ev.clientY < r.top + SCROLL_MARGIN) {
-      scrollBox.scrollTop = Math.max(0, scrollBox.scrollTop - SCROLL_SPEED);
-    } else if (ev.clientY > r.bottom - SCROLL_MARGIN) {
-      const maxScroll = scrollBox.scrollHeight - scrollBox.clientHeight;
-      scrollBox.scrollTop = Math.min(maxScroll, scrollBox.scrollTop + SCROLL_SPEED);
-    }
-
-    const ziel = zielListe(ev);
+    if (zeigerX < r.left - X_TOLERANZ_PX || zeigerX > r.right + X_TOLERANZ_PX) return;
+    const ziel = zielListe(zeigerX, zeigerY);
     const siblings = items(ziel).filter((el) => el !== li);
     let target = null;
     for (const el of siblings) {
-      const r = el.getBoundingClientRect();
-      if (ev.clientY < r.top + r.height / 2) { target = el; break; }
+      const rr = el.getBoundingClientRect();
+      if (zeigerY < rr.top + rr.height / 2) { target = el; break; }
     }
-    if (target) ziel.insertBefore(li, target);
-    else ziel.appendChild(li);
+    // Nur anfassen, wenn die Zeile wirklich woanders hin muss: Ein
+    // `insertBefore` auf den Platz, an dem sie schon steht, wirft trotzdem
+    // das Layout um — bei sechzig Zeilen in jedem Bild.
+    if (li.parentElement !== ziel || li.nextElementSibling !== target) {
+      if (target) ziel.insertBefore(li, target);
+      else ziel.appendChild(li);
+    }
+  }
+
+  function takt(zeit) {
+    rafId = requestAnimationFrame(takt);
+    const dt = letzterTakt ? zeit - letzterTakt : 0;
+    letzterTakt = zeit;
+
+    const r = scrollBox.getBoundingClientRect();
+    const tempo = ziehScrollTempo(zeigerY, r.top, r.bottom);
+    if (tempo) {
+      // Bruchteile aufsammeln statt wegwerfen — bei langsamem Tempo wären
+      // 0,4 px je Bild sonst dauerhaft null und es scrollte gar nicht.
+      const wunsch = scrollSchritt(tempo, dt) + scrollRest;
+      const ganz = Math.trunc(wunsch);
+      scrollRest = wunsch - ganz;
+      if (ganz) {
+        const maxScroll = scrollBox.scrollHeight - scrollBox.clientHeight;
+        scrollBox.scrollTop = Math.min(maxScroll, Math.max(0, scrollBox.scrollTop + ganz));
+      }
+    } else {
+      scrollRest = 0;
+    }
+
+    // Hat sich seit dem letzten Bild überhaupt etwas bewegt? Sonst wären die
+    // Maße aller Geschwister umsonst gelesen.
+    const lage = `${Math.round(zeigerX)}:${Math.round(zeigerY)}:${Math.round(scrollBox.scrollTop)}`;
+    if (lage === letzteLage) return;
+    letzteLage = lage;
+    einsortieren();
   }
 
   function teardown(ev, cancelled) {
     reorderDragPending = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", cancel);
@@ -5331,6 +5406,7 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
   window.addEventListener("pointermove", move, { passive: false });
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", cancel);
+  rafId = requestAnimationFrame(takt);
 }
 
 // ── Panel-System (Spec tl-web-panelsystem) ─────────────────────────────
@@ -5908,10 +5984,77 @@ function beobachteQueueEnde(gesamt) {
   queueObserver = new IntersectionObserver((eintraege) => {
     if (!eintraege.some((e) => e.isIntersecting)) return;
     if (queueShown >= visibleQueue().length) return;
+    // Während eines Umsortier-Zugs ist `renderQueue()` gesperrt (der
+    // Keyed-Abgleich risse die gezogene Zeile an ihre Modellposition
+    // zurück). Ohne diesen Zweig endete die Liste beim Ziehen genau dort,
+    // wo der letzte Render aufgehört hat — bei fünfzig bis sechzig Spielen
+    // wären die letzten zwanzig unerreichbar (Feldtest-Beschwerde).
+    if (reorderDragPending) { queueNachladenWaehrendZug(); return; }
     queueShown += QUEUE_PAGE;
     renderQueue();
   }, { root: wurzel, rootMargin: "300px" });
   queueObserver.observe(sentinel);
+}
+
+/**
+ * Hängt die nächste Seite der Warteliste ANS ENDE an — der Nachlade-Pfad
+ * für einen laufenden Umsortier-Zug.
+ *
+ * Bewusst kein `reconcileKeyed`: Der gleicht die DOM-Reihenfolge an die
+ * Modell-Reihenfolge an und schöbe die gerade gezogene Zeile dorthin
+ * zurück, wo sie herkam. Hier wird deshalb nur angehängt, nie umsortiert
+ * und nie ersetzt. Nach dem Loslassen macht `renderQueue()` ohnehin den
+ * vollen Abgleich; damit der die frisch angehängten Zeilen nicht unnötig
+ * neu baut, tragen sie denselben `reconKey` und Stand-Eintrag wie sonst.
+ */
+function queueNachladenWaehrendZug() {
+  const box = $("queue-list");
+  if (!box) return;
+  const liste = visibleQueue();
+  const von = queueShown;
+  const bis = Math.min(liste.length, von + QUEUE_PAGE);
+  if (bis <= von) return;
+  queueShown = bis;
+  const top = queueTopMatchId();
+  let stand = keyedHtmlStand.get(box);
+  if (!stand) { stand = new Map(); keyedHtmlStand.set(box, stand); }
+  const vorhanden = new Set(Array.from(box.children).map((el) => el.dataset.reconKey));
+  const tmp = document.createElement("template");
+  for (const m of liste.slice(von, bis)) {
+    const key = String(m.match_id);
+    if (vorhanden.has(key)) continue;
+    const html = queueRow(m, top);
+    tmp.innerHTML = html;
+    const row = tmp.content.firstElementChild;
+    if (!row) continue;
+    row.dataset.reconKey = key;
+    box.appendChild(row);
+    stand.set(key, html);
+    wireQueue(row);
+    wireReorderGriff(box, row, queueReorder);
+  }
+  // Frisch gebaute Zeilen tragen leere Zeitfelder („gerufen seit", Eieruhr).
+  scheduleTickClocks();
+  // Neu aufsetzen: Ein Beobachter meldet nur den WECHSEL nach „sichtbar" —
+  // dieselbe Begründung wie bei `beobachteQueueEnde` selbst.
+  beobachteQueueEnde(liste.length);
+}
+
+/**
+ * Was beim Loslassen einer umsortierten Zeile passiert.
+ *
+ * Lebt außerhalb von `renderQueue()`, weil ihn zwei Stellen verdrahten:
+ * der Keyed-Abgleich beim normalen Zeichnen und der Anhänge-Pfad oben.
+ */
+function queueReorder(id, beforeId) {
+  const matchId = Number(id);
+  const ziel = queueReorderTarget(beforeId);
+  if (ziel === matchId) { renderQueue(); return; }
+  send(
+    `queue-reorder-${matchId}-${ziel ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "queue_reorder", matchId, beforeMatchId: ziel },
+    "Reihenfolge ge\u00e4ndert.",
+  );
 }
 
 function renderQueue() {
@@ -5952,16 +6095,6 @@ function renderQueue() {
   // Griff je Zeile verdrahtet (`wireReorderGriff`), nur für neue/ersetzte
   // Zeilen — `enableReorderDrag` über alle Kinder hängte bestehenden
   // Zeilen bei jedem Render doppelte Listener an.
-  const reorder = (id, beforeId) => {
-    const matchId = Number(id);
-    const ziel = queueReorderTarget(beforeId);
-    if (ziel === matchId) { renderQueue(); return; }
-    send(
-      `queue-reorder-${matchId}-${ziel ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-      { action: "queue_reorder", matchId, beforeMatchId: ziel },
-      "Reihenfolge geändert.",
-    );
-  };
   if (!fenster.length) {
     setzeHtmlWennNeu(box, `<p class="note">Kein angesetztes Spiel${hallFilter ? " in dieser Halle" : ""}.</p>`);
   } else {
@@ -5970,7 +6103,7 @@ function renderQueue() {
     // wird genau die ersetzt und neu verdrahtet.
     reconcileKeyed(box, fenster, (m) => m.match_id, (m) => queueRow(m, top), (row) => {
       wireQueue(row);
-      wireReorderGriff(box, row, reorder);
+      wireReorderGriff(box, row, queueReorder);
     });
   }
 
