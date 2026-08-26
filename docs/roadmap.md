@@ -407,7 +407,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   [ADR 0050](adr/0050-verschiebe-modus-globales-einfuegeziel.md).
   Aus der Feldtest-Rückmeldung vom 26.08.2026 („das Verschieben zusammen mit dem
   Scrollen ist hakelig", Wartelisten von 50–60 Spielen). **Spur A** — die
-  Zieh-Geste selbst geschmeidig machen — ist bereits umgesetzt (v0.9.272, siehe
+  Zieh-Geste selbst geschmeidig machen — ist bereits umgesetzt (v0.9.271, siehe
   Nachtrag in [features/spielliste-manuelle-reihenfolge.md](features/spielliste-manuelle-reihenfolge.md)).
   Diese Spec ist **Spur B**: ein Verschiebe-Modus, der die gehaltene Geste
   auflöst — Spiel über das ⋮-Menü merken, **normal** scrollen, Zielzeile

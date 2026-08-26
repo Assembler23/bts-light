@@ -23,7 +23,7 @@ Zwei getrennte Ursachen stecken darin:
 
 **Spur A — die Zieh-Geste selbst.** Das Auto-Scrollen hing an den
 Zeiger-Ereignissen, der Zeiger fror am Panelrand ein, und die Liste lud während
-eines Zugs nicht nach. **Erledigt in v0.9.272**, siehe
+eines Zugs nicht nach. **Erledigt in v0.9.271**, siehe
 [spielliste-manuelle-reihenfolge.md](spielliste-manuelle-reihenfolge.md)
 (Nachtrag 26.08.2026).
 

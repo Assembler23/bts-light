@@ -309,7 +309,7 @@ einem Spiel, das schon vorn steht oder bereits gerufen ist — dort täte er
 nichts.
 
 > Diesen Befehl gab es schon länger, aber nur versteckt im ⋮-Menü; seit
-> v0.9.272 steht er sichtbar an der Zeile.
+> v0.9.271 steht er sichtbar an der Zeile.
 
 Am **Griff** (⠿) links an einer Wartelisten-Zeile lässt sich das Spiel nach
 oben oder unten ziehen — auf dem Tablet wie mit der Maus. Ab dem ersten Zug
@@ -323,7 +323,7 @@ Stelle — das wirkte bisher beim dritten Mal nicht, wenn alles innerhalb von
 zwanzig Sekunden passierte. Der Turnier-PC hielt den Zug für ein Versehen und
 bestätigte ihn, ohne etwas zu tun. Jetzt zählt jeder Zug.
 
-**Über lange Listen ziehen** (seit v0.9.272): Zieh die Zeile an den oberen
+**Über lange Listen ziehen** (seit v0.9.271): Zieh die Zeile an den oberen
 oder unteren Rand der Liste und **bleib dort stehen** — die Liste scrollt
 weiter, solange du hältst. Wie schnell, hängt davon ab, wie weit du zum Rand
 gehst: knapp in den Randbereich hinein kriecht sie (damit du genau treffen

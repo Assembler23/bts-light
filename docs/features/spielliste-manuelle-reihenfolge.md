@@ -89,7 +89,7 @@ Schiedsrichter-Rotation.
     unverändert, aber keine doppelten Drag-Listener mehr bei jedem
     Neuzeichnen.)
 
-    (Nachtrag 26.08.2026, v0.9.272 — Feldtest-Rückmeldung „das Verschieben
+    (Nachtrag 26.08.2026, v0.9.271 — Feldtest-Rückmeldung „das Verschieben
     zusammen mit dem Scrollen ist hakelig", bei Turnieren mit fünfzig bis
     sechzig wartenden Spielen. Drei Ursachen, alle in `assets/tl.html`:
 

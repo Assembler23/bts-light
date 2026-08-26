@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.272
+## v0.9.271
 
 - **Spiele umsortieren geht endlich flüssig (Turnierleitungsseite).** Das
   Ziehen einer Zeile in der Warteliste war mit dem Scrollen der Liste kaum zu
