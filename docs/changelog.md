@@ -22,6 +22,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Wer eine **eigene** badhub-Instanz betreibt, ist nicht betroffen: Der
   Schalter rührt nur Adressen auf `badhub.de` an.
 
+  Auf dem Testsystem sind die dafür nötigen Endpunkte seit dem 26.08.2026
+  freigeschaltet. Die **Cloud-Verbindung der Tablets** funktioniert dort
+  allerdings nicht — auf `test.badhub.de` läuft kein Relay; für einen Testlauf
+  die Tablets auf **LAN** stellen.
+
 - **Klarere Meldung, wenn ein Server die Anfrage gar nicht durchlässt.**
   Verlangt ein vorgelagerter Webserver eine HTTP-Anmeldung, bevor bts-light
   überhaupt antworten darf, hieß es bisher „Badhub lehnte die Anmeldung ab –

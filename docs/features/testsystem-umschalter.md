@@ -67,11 +67,43 @@ für nginx, kommt die Anfrage zwar durch die Wand — aber PHP findet keinen
 Bearer und lehnt selbst mit 401 ab. Ein Client-seitiger Zugang zum Testsystem
 ist damit **nicht baubar**; die Freigabe muss serverseitig passieren.
 
-### Was freizugeben ist
+### Freigegeben am 26.08.2026 — so umgesetzt
 
-Für einen vollständigen Testbetrieb brauchen diese Pfade `auth_basic off;` im
-vHost von `test.badhub.de`. Alle tragen eigene Bearer-Auth plus Rate-Limit, die
-Wand schützt dort nichts, was nicht schon geschützt wäre:
+Auf dem Server erledigt. Zwei Teile, bewusst getrennt:
+
+1. **`/etc/nginx/conf.d/bts-test-freigabe.conf`** (neu) enthält den
+   `map`-Block, der `$test_realm` je nach Pfad auf den Staging-Realm oder auf
+   `off` setzt.
+2. Im vHost wurde aus `auth_basic "test.badhub.de — Staging";` genau
+   `auth_basic $test_realm;`.
+
+**Warum der `map` in `conf.d` liegt:** `/etc/nginx/sites-enabled/test.badhub.de`
+ist **kein Symlink**, sondern eine aus `badhub.de` *abgeleitete* Datei („nicht
+von Hand gepflegt", siehe ihren Dateikopf). Eine Änderung dort überlebt das
+nächste Ableiten nicht — `conf.d` wird von `nginx.conf` **vor** `sites-enabled`
+eingebunden und bleibt unberührt. Die eine unvermeidbare Zeile im vHost ist im
+Dateikopf unter Punkt 3 der Ableitungs-Änderungen vermerkt.
+
+**Falle beim Nachmachen:** `sites-available/test.badhub.de` (5 KB) und
+`sites-enabled/test.badhub.de` (42 KB) sind zwei völlig verschiedene Dateien.
+Ein Patch in `sites-available` ist wirkungslos, und `nginx -t` merkt davon
+nichts — die Kontrolle ist `nginx -T | grep …` auf der *aktiven* Konfiguration.
+
+Verifiziert nach dem Reload:
+
+```
+GET  /api/live_update.php   → 405   (PHP antwortet, will POST)
+GET  /api/v1/pronunciations → 200
+POST /api/live_update.php   → 400 "Malformed JSON"   mit Verbands-Token  ← Auth durch
+POST /api/live_update.php   → 401                    mit falschem Token
+GET  /  ·  /live  ·  /checkin/…  → weiterhin 401 Basic
+```
+
+### Was freigegeben ist
+
+Nur Maschinen-Endpunkte mit eigener Bearer-Auth plus Rate-Limit — die Wand
+schützt dort nichts, was nicht schon geschützt wäre. Alle HTML-Seiten bleiben
+dahinter, denn die Test-DB ist eine tägliche Kopie der Produktivdaten:
 
 | Pfad | Wofür |
 |---|---|
@@ -80,7 +112,7 @@ Wand schützt dort nichts, was nicht schon geschützt wäre:
 | `/checkin/<uuid>/tl/*` | Check-In-Panel der Turnierleitung |
 | `/api/v1/pronunciations`, `/api/v1/club-logo` | Aussprache, Vereinslogos (öffentliche GETs) |
 | `/api/bts_log.php`, `/api/tablet_log.php`, `/api/pi_log.php` | Diagnose-Logs |
-| `/bts-relay/` | Cloud-Relay (falls dort überhaupt einer läuft) |
+| ~~`/bts-relay/`~~ | **Nicht freigegeben** — auf `test.badhub.de` gibt es gar keinen Relay-Block; der Cloud-Modus fällt im Testbetrieb aus, Tablets gehören dort auf LAN |
 
 ### Was bts-light stattdessen tut
 
