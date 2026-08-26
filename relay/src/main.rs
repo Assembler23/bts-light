@@ -2424,9 +2424,13 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                 last_incoming = tokio::time::Instant::now();
                 match msg {
                     Message::Text(t) => {
-                        if sitzung.verarbeite(&broker, t.as_str(), &tx).await
-                            == SitzungsSchritt::Schliessen
-                        {
+                        // Ergebnis erst binden, dann pruefen: Clippy schlaegt
+                        // sonst vor, die Bedingung als match-Guard zu fuehren
+                        // (collapsible_match) — ein Guard mit `.await` und
+                        // Seiteneffekt waere hier deutlich schwerer zu lesen
+                        // als eine Zeile mehr.
+                        let schritt = sitzung.verarbeite(&broker, t.as_str(), &tx).await;
+                        if schritt == SitzungsSchritt::Schliessen {
                             let _ = socket.send(Message::Close(None)).await;
                             break;
                         }
