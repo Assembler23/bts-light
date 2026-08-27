@@ -550,11 +550,18 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Die Spielnummer bleibt bewusst ein eigenes Element davor (feste Breite,
    damit die Nummern untereinander fluchten).
 
-   Die 6-Elemente-Grenze der Zeile (Spec tl-web-panelsystem) NEU GERECHNET
-   nach dem Umbau auf eine einzige Spielliste (ADR 0026). Ungünstigster Fall:
+   Die 6-Elemente-Grenze der Zeile (Spec tl-web-panelsystem) NEU GERECHNET,
+   zuletzt am 26.08.2026 beim Sichtbarmachen des ↑-Knopfes (Spec
+   tl-spielliste-sprung-umsortieren, Schritt 5). Ungünstigster Fall:
      1 Zieh-Griff · 2 Spielnummer · 3 Name+Meta (`.who-block`) ·
-     4 Statusblock (`.row-status`) · 5 Vorbereitungs-Ruf · 6 Kebab
-   — genau sechs.
+     4 Statusblock (`.row-status`) · 5 Knopfblock (`.row-actions`)
+   — fünf, also eines UNTER der Grenze, obwohl ein Knopf dazugekommen ist.
+
+   Der Gewinn kam nicht vom Weglassen, sondern vom Bündeln: Vorbereitungs-Ruf,
+   ↑ und Kebab waren drei eigene Kinder und sind jetzt eines. Dieselbe
+   Bewegung wie beim Statusblock weiter unten. Wer künftig etwas ergänzt,
+   hängt es in einen der beiden Blöcke — Marken in `.row-status`, Knöpfe in
+   `.row-actions` — und muss diese Rechnung dann nicht anfassen.
 
    Die frühere Rechnung trug über den gegenseitigen Ausschluss von Griff und
    Status („Griff nur im Abschnitt Spielbereit, Status nur in den drei
@@ -630,17 +637,26 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    (siehe dort) — seltener gebraucht, und ihr eigenes Symbol war im
    entschlackten Zeilenbild ohnehin leicht mit dem Vorbereitungs-Knopf zu
    verwechseln. */
-.row .prep {
+/* Alle Knöpfe der Zeile in EINEM Flex-Kind — siehe die Budget-Rechnung bei
+   `.who-block`. `flex: none`, damit der Block nicht schrumpft und die
+   Trefferflächen erhalten bleiben; er darf als Ganzes umbrechen. */
+.row .row-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+
+/* Megafon und ↑ teilen sich Form und Trefferfläche: gleich große Sinnbilder
+   nebeneinander, damit sie als ein Paar lesbar sind. */
+.row .prep, .row .hoch {
   display: grid; place-items: center;
   width: var(--touch-min); height: var(--touch-min); padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
-.row .prep:hover { border-color: var(--accent); color: var(--accent); }
+.row .prep:hover, .row .hoch:hover { border-color: var(--accent); color: var(--accent); }
+.row .hoch { font-size: 1.05rem; line-height: 1; }
 .row .prep[aria-pressed="true"] {
   border-color: var(--accent); background: #eff6ff; color: var(--accent);
 }
-.row[aria-selected="true"] .prep { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+.row[aria-selected="true"] .prep,
+.row[aria-selected="true"] .hoch { border-color: #475569; background: #1e293b; color: #e2e8f0; }
 
 /* ── Kebab-Menü: Sekundäres einer Zeile ODER einer Feldkachel ──────────
    Spec tl-web-panelsystem, Schritt 11: eine Zeile zeigt ohne geöffnetes
@@ -1120,7 +1136,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
    Tablet springt zusätzlich die Lupe auf. Während eines laufenden Zugs gilt
    es für die ganze Seite — der Zeiger wandert ja über alles. */
-.row.pick, .card, .action-bar, .halls, h2, .prep, .kebab-menu {
+.row.pick, .card, .action-bar, .halls, h2, .prep, .hoch, .kebab-menu {
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
@@ -1129,6 +1145,7 @@ body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; 
    zurücknehmen — Schreib-Aktionen ebenso wie Lese-Abrufe (der
    Punktverlauf wird per HTTP geladen und schlüge offline fehl). */
 body.offline .prep,
+body.offline .hoch,
 body.offline .kebab-menu button,
 body.offline .wo .actions button,
 body.offline .sk #sk-list button,
@@ -2194,6 +2211,53 @@ function renderActionBar() {
 const OP_WINDOW_MS = 20000;
 function opIdFor(matchId, courtId) {
   return `assign-${matchId}-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`;
+}
+
+/**
+ * Laufende Nummer für Umsortier-Vorgänge — bewusst KEIN Zeitfenster
+ * (Spec `docs/features/tl-spielliste-sprung-umsortieren.md`, Schritt 4).
+ *
+ * Alle anderen Vorgänge tragen das 20-Sekunden-Fenster in der Kennung, damit
+ * ein Doppeltipp nicht zweimal wirkt. Beim Umsortieren richtet dieselbe
+ * Erkennung Schaden an: „Spiel vor B setzen → doch woandershin → doch wieder
+ * vor B" ergibt innerhalb desselben Fensters zweimal dieselbe Kennung. Der
+ * Turnier-PC hält den dritten Zug für eine Wiederholung, antwortet mit „ok"
+ * und tut **nichts** — die Reihenfolge bleibt falsch, ohne Fehlermeldung.
+ *
+ * Schützen muss die Erkennung hier auch nichts: `queue_reorder` ist
+ * idempotent — zweimal „M vor B" ergibt denselben Zustand. Ein doppelt
+ * gesendeter Zug kostet also höchstens einen überflüssigen Request.
+ */
+let queueOpSeq = 0;
+
+/**
+ * Zufälliger Anteil je Seitenaufruf. Der Zähler allein reicht NICHT: Er
+ * beginnt nach jedem Neuladen wieder bei eins, und jedes TL-Gerät zählt für
+ * sich. Der Turnier-PC merkt sich Vorgänge aber **60 Sekunden** lang in einer
+ * Ablage, die **nur** nach der Kennung schlägt (`recent_ops` in `state.rs`) —
+ * ein Geräte-Merkmal steckt nicht darin. Auch der Fingerabdruck rettet
+ * nichts: Für `QueueReorder` ist er `queue-order:{match}:{ziel}`, also genau
+ * die beiden Werte, die ohnehin schon in der Kennung stehen; bei einer
+ * Kollision passt er immer.
+ *
+ * Ohne diesen Anteil hieße das: Spiel 42 vor Spiel 17 setzen, Seite neu
+ * laden, innerhalb einer Minute denselben Zug als ersten dieser Seite —
+ * `queue-reorder-42-17-1` ist schon bekannt, der Turnier-PC antwortet „ok"
+ * und tut nichts. Dasselbe bei zwei TL-Tablets nebeneinander. Genau der
+ * Fehler, den der Zähler beseitigen sollte, nur über einen anderen Weg
+ * (Review-Fund 26.08.2026).
+ */
+const opSitzung = Math.random().toString(36).slice(2, 8);
+
+/** Der einzige Weg, eine neue Reihenfolge an den Turnier-PC zu schicken —
+ *  geteilt von Zug, Pfeiltasten und dem ↑-Knopf, damit alle Bedienarten
+ *  dieselbe Wirkung und dieselbe Kennungs-Regel haben. */
+function sendeQueueReorder(matchId, ziel, okText) {
+  send(
+    `queue-reorder-${matchId}-${ziel ?? "end"}-${opSitzung}-${++queueOpSeq}`,
+    { action: "queue_reorder", matchId, beforeMatchId: ziel },
+    okText,
+  );
 }
 
 function toast(text, bad) {
@@ -4287,23 +4351,27 @@ function scheduleFitCourts() {
 
 /**
  * Eine Zeile der einen Spielliste (ADR 0026). Sie zeigt ohne geöffnetes
- * Kontextmenü höchstens SECHS sichtbare Elemente (Spec tl-web-panelsystem;
+ * Kontextmenü höchstens FÜNF direkte Elemente (Spec tl-web-panelsystem;
  * die Rechnung steht ausführlich im CSS bei `.row .who-block`):
  *
- * PRIMÄR (immer sichtbar): Zieh-Griff (jede noch nicht gerufene Zeile),
- * Spielnummer, Name+Meta (EIN Block, `.who-block`), der Statusblock (EIN
- * Wrapper `.row-status` mit Hallen-Kürzel, Pausen-Eieruhr und den
- * beiden Abzeichen), der Vorbereitungs-Ruf-Knopf (vermutlich die häufigste
- * Einzelaktion an einer Zeile) und das Kebab-Menü selbst.
+ * 1. Zieh-Griff — jede noch nicht gerufene Zeile.
+ * 2. Spielnummer.
+ * 3. Name+Meta, EIN Block (`.who-block`).
+ * 4. Statusblock, EIN Wrapper (`.row-status`): Hallen-Kürzel, Pausen-Eieruhr
+ *    und die Abzeichen.
+ * 5. Knopfblock, EIN Wrapper (`.row-actions`): Vorbereitungs-Ruf (die
+ *    häufigste Einzelaktion an einer Zeile), „↑ nach oben" (nur wo es etwas
+ *    bewirkt, siehe `kannHoch`) und das Kebab-Menü.
  *
- * HINTER DEM KEBAB (⋮, seltener gebraucht): „nach oben schieben" und
- * „Ergebnis eintragen", die Auto-Vergabe-Ausnahme (Umschalter, nicht die
+ * HINTER DEM KEBAB (⋮, seltener gebraucht): „Ergebnis eintragen", der
+ * Vorabzettel, die Auto-Vergabe-Ausnahme (Umschalter, nicht die
  * Anzeige-Badge — die bleibt primär sichtbar), alle drei Nachruf-Knöpfe
- * (braucht man nur, wenn jemand nicht kommt) und der Spielort-Wähler (nur
- * im Mehr-Hallen-Turnier ohne Disziplin-Regel überhaupt vorhanden).
+ * (braucht man nur, wenn jemand nicht kommt), der Spielort-Wähler und das
+ * Wunschfeld (beide nur im Mehr-Hallen- bzw. entsprechend eingerichteten
+ * Turnier vorhanden).
  *
  * `topMatchId` ist die Kennung der ersten UMSORTIERBAREN Zeile der gerade
- * gezeigten Liste — Ziel des Menüpunkts „nach oben schieben".
+ * gezeigten Liste — Ziel des ↑-Knopfes.
  */
 function queueRow(m, topMatchId) {
   const parts = [];
@@ -4450,26 +4518,46 @@ function queueRow(m, topMatchId) {
   // reicht — gedrückt heißt „ist gerufen". Beschriftung bleibt für
   // Vorlesehilfen und als Tooltip erhalten, damit niemand raten muss.
   const prepTitel = m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen";
-  parts.push(`<button type="button" class="prep" data-prep="${m.match_id}"
+  // Alle Knöpfe der Zeile stecken in EINEM Flex-Kind (`.row-actions`) —
+  // dieselbe Bündelung, die `.row-status` für die Marken schon macht. Sonst
+  // spränge der ↑-Knopf unten das Sechs-Elemente-Budget (Rechnung im
+  // CSS-Kommentar bei `.who-block`).
+  const aktionen = [];
+  aktionen.push(`<button type="button" class="prep" data-prep="${m.match_id}"
     aria-pressed="${m.prep_call ? "true" : "false"}"
     title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
 
-  // ── Kebab-Menü: Sekundäres (Spec Schritt 11) ─────────────────────────
-  const kebabGroups = [];
   // „Nach oben schieben" (ADR 0026): der tastatur- und touchfreundliche Weg
   // für den häufigsten Zug, ohne über eine womöglich hundert Zeilen lange
   // Liste ziehen zu müssen. Kein neuer Wire-Vertrag nötig — es ist ein
   // gewöhnliches `queue_reorder` vor die erste umsortierbare Zeile.
-  // Steht das Spiel schon dort (oder ist es gerufen und damit gar nicht
-  // Teil der Reihenfolge), erscheint der Eintrag gar nicht erst: Ein
-  // sichtbarer Menüpunkt, der nichts tut, ist schlimmer als keiner —
-  // niemand weiß, ob die Aktion misslang oder überflüssig war.
+  //
+  // Steht SICHTBAR an der Zeile statt im ⋮-Menü (Spec
+  // `tl-spielliste-sprung-umsortieren`, Schritt 5). Er lag zwei Jahre im
+  // Menü und wurde nie gefunden — die Menü-Aufzählung in
+  // `docs/turnierleitung-web.md` nannte ihn nicht einmal, und die
+  // Feldtest-Beschwerde „Umsortieren ist hakelig" kam von jemandem, der ihn
+  // nicht kannte. Ein Bedien-Weg, den niemand findet, ist fachlich dasselbe
+  // wie ein fehlender.
+  //
+  // Als Sinnbild wie das Megafon daneben: Ausgeschrieben fräße der Knopf in
+  // einer Liste mit 120 Zeilen zu viel Breite. Beschriftung bleibt als
+  // Tooltip und für Vorlesehilfen.
+  //
+  // Steht das Spiel schon vorn (oder ist es gerufen und damit gar nicht Teil
+  // der Reihenfolge), erscheint der Knopf gar nicht erst: ein sichtbarer
+  // Knopf, der nichts tut, ist schlimmer als keiner — niemand weiß, ob die
+  // Aktion misslang oder überflüssig war.
   const kannHoch = sortierbar && topMatchId != null && topMatchId !== m.match_id;
-  const zeilenAktionen = [];
   if (kannHoch) {
-    zeilenAktionen.push(`<button type="button" data-queue-top="${m.match_id}"
-        title="An den Anfang der Spielliste schieben">↑ Nach oben schieben</button>`);
+    aktionen.push(`<button type="button" class="hoch" data-queue-top="${m.match_id}"
+      title="An den Anfang der Spielliste schieben"
+      aria-label="An den Anfang der Spielliste schieben">↑</button>`);
   }
+
+  // ── Kebab-Menü: Sekundäres (Spec Schritt 11) ─────────────────────────
+  const kebabGroups = [];
+  const zeilenAktionen = [];
   // „Ergebnis eintragen" für ein Spiel, das nie auf einem Feld stand
   // (Zettel, mündliche Ansage). Öffnet exakt denselben Dialog wie das
   // Aktionsband oben — gemeinsamer Weg über `openQueueResultDialog()`,
@@ -4565,10 +4653,11 @@ function queueRow(m, topMatchId) {
       </div>`);
   }
   const kebabOffen = openKebabMatchId === m.match_id;
-  parts.push(`<details class="kebab" data-kebab="${m.match_id}"${kebabOffen ? " open" : ""}>
+  aktionen.push(`<details class="kebab" data-kebab="${m.match_id}"${kebabOffen ? " open" : ""}>
       <summary aria-label="Weitere Aktionen" title="Weitere Aktionen">⋮</summary>
       <div class="kebab-menu">${kebabGroups.join("")}</div>
     </details>`);
+  parts.push(`<span class="row-actions">${aktionen.join("")}</span>`);
 
   const selected = picked && picked.match.match_id === m.match_id;
   return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
@@ -4641,11 +4730,7 @@ function wireQueue(box) {
       const matchId = Number(btn.dataset.queueTop);
       const before = queueTopMatchId();
       if (before == null || before === matchId) return;
-      send(
-        `queue-reorder-${matchId}-${before}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-        { action: "queue_reorder", matchId, beforeMatchId: before },
-        "Nach oben geschoben.",
-      );
+      sendeQueueReorder(matchId, before, "Nach oben geschoben.");
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -4748,10 +4833,18 @@ function wireQueue(box) {
     };
     el.addEventListener("click", go);
     el.addEventListener("keydown", (ev) => {
-      // Enter/Leertaste auf einem fokussierten Spieler-Link gehören dem
-      // Link (badhub-Seite öffnen) — ohne diese Ausnahme finge die Zeile
-      // sie ab und wählte stattdessen das Spiel (Review-Fund 17.08.2026).
-      if (ev.target instanceof Element && ev.target.closest("a.sp-name")) return;
+      // Enter/Leertaste auf einem fokussierten Bedienelement IN der Zeile
+      // gehören diesem Element, nicht der Zeile: dem Spieler-Link (badhub-
+      // Seite öffnen, Review-Fund 17.08.2026), dem ↑-Knopf, dem
+      // Vorbereitungs-Ruf, dem ⋮-Menü und den Wählern darin.
+      //
+      // Ohne die Ausnahme unterdrückt `preventDefault()` den Klick, den der
+      // Browser sonst aus Enter auf einem Knopf erzeugt — der Knopf löst nie
+      // aus, und stattdessen wird das Spiel zum Zuweisen ausgewählt. Beim
+      // ↑-Knopf wiegt das besonders: Er ist laut Doku der Hauptweg für
+      // „ganz nach vorn" (Review-Fund 26.08.2026).
+      if (ev.target instanceof Element
+        && ev.target.closest("button, summary, select, a")) return;
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); go(); }
     });
     enableDrag(el, match, null);
@@ -5122,6 +5215,51 @@ function startTouchDrag(el, match, fromCourtId, down) {
 // Klick auf einen dieser Knöpfe.
 let reorderDragPending = false;
 
+// ── Auto-Scroll-Tempo (Inline-Kopie von `src/io/dragScroll.mjs`) ──────────
+// Kanonische Fassung samt Begründung und Tests dort (`scripts/test-drag-
+// scroll.mjs`); die Assets durchlaufen keinen Build und können keine Module
+// laden — Änderungen hier und dort gemeinsam.
+//
+// Kurz: Das Tempo hängt an der ZEIGERPOSITION, nicht an den Move-Ereignissen.
+// Die frühere Fassung addierte feste Pixel je `pointermove` — wer den Zeiger
+// am Rand still hielt (genau das, was man beim Warten aufs Scrollen tut),
+// erzeugte keine Ereignisse mehr, und die Liste blieb stehen.
+const SCROLL_ZONE_PX = 60;
+const MAX_SCROLL_PX_S = 900;
+
+// Mindestbewegung, ab der aus einem Druck ein Zug wird. Ohne sie ist ein
+// bloßes Gedrückthalten am Griff nicht mehr folgenlos: Wer die oberste
+// sichtbare Zeile antippt, hat den Zeiger schon in der Scroll-Zone —
+// gemessen 101 px Scroll und drei Plätze Versatz nach 300 ms, ohne dass sich
+// der Finger bewegt hat, samt Senden an den Turnier-PC.
+const ZUG_SCHWELLE_PX = 6;
+
+function ueberSchwelle(x0, y0, x, y, schwelle = ZUG_SCHWELLE_PX) {
+  if (![x0, y0, x, y, schwelle].every(Number.isFinite)) return false;
+  return Math.abs(x - x0) >= schwelle || Math.abs(y - y0) >= schwelle;
+}
+
+function ziehScrollTempo(y, oben, unten, margin = SCROLL_ZONE_PX, maxTempo = MAX_SCROLL_PX_S) {
+  if (![y, oben, unten, margin, maxTempo].every(Number.isFinite)) return 0;
+  const hoehe = unten - oben;
+  if (hoehe <= 0 || margin <= 0 || maxTempo <= 0) return 0;
+  const zone = Math.min(margin, hoehe / 2);
+  const abstandOben = y - oben;
+  const abstandUnten = unten - y;
+  if (abstandOben < abstandUnten) {
+    const naehe = Math.min(1, Math.max(0, (zone - abstandOben) / zone));
+    return -maxTempo * naehe * naehe;
+  }
+  const naehe = Math.min(1, Math.max(0, (zone - abstandUnten) / zone));
+  return maxTempo * naehe * naehe;
+}
+
+function scrollSchritt(tempo, dtMs, maxDtMs = 50) {
+  if (!Number.isFinite(tempo) || !Number.isFinite(dtMs)) return 0;
+  const dt = Math.min(Math.max(dtMs, 0), maxDtMs);
+  return (tempo * dt) / 1000;
+}
+
 /**
  * `list`: Container, dessen direkte Kind-Elemente mit `[data-id]` die
  * sortierbaren Zeilen sind (jede braucht innen einen Griff, standardmäßig
@@ -5238,66 +5376,147 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
    *  sonst der nächstgelegene — der Finger darf über den Rand einer Spalte
    *  hinausragen (kurze Spalte, Rand des Fensters), ohne dass das Panel
    *  zurückspringt. Bei nur einem Container fällt beides zusammen. */
-  function zielListe(ev) {
+  function zielListe(x, y) {
     const alle = listen();
     if (alle.length === 1) return alle[0];
     for (const l of alle) {
       const r = l.getBoundingClientRect();
-      if (ev.clientX >= r.left && ev.clientX <= r.right
-        && ev.clientY >= r.top && ev.clientY <= r.bottom) return l;
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return l;
     }
     let beste = li.parentElement, kleinste = Infinity;
     for (const l of alle) {
       const r = l.getBoundingClientRect();
-      const dx = Math.max(r.left - ev.clientX, 0, ev.clientX - r.right);
-      const dy = Math.max(r.top - ev.clientY, 0, ev.clientY - r.bottom);
+      const dx = Math.max(r.left - x, 0, x - r.right);
+      const dy = Math.max(r.top - y, 0, y - r.bottom);
       const d = dx + dy;
       if (d < kleinste) { kleinste = d; beste = l; }
     }
     return beste;
   }
 
+  /**
+   * Waagerechte Toleranz. Senkrecht gibt es bewusst KEINE Grenze: Wer unter
+   * das Panel fährt, meint „ans Ende" — früher fror die Zeile in dem Moment
+   * ein, weil derselbe Wächter auch das Scrollen abschaltete
+   * (Feldtest-Beschwerde „hakelig"). Seitlich bleibt die Grenze, damit ein Zug
+   * zu den Feldkacheln die Reihenfolge nicht ändert (ADR 0027: Umsortier-Griff
+   * nur im eigenen Panel aktiv).
+   *
+   * Sie gilt für Einsortieren UND Scrollen gemeinsam (Review-Fund 26.08.2026):
+   * Ein Zug, der seitlich geparkt wird, darf nicht weiterscrollen — sonst
+   * rauscht die Liste unter dem Zeiger durch und die Zeile landet beim
+   * Zurückkommen irgendwo. Seitlich draußen heißt: der Zug ruht.
+   */
+  const X_TOLERANZ_PX = 120;
+
+  /**
+   * Zeigt der Zeiger waagerecht noch auf den Zug-Bereich?
+   *
+   * Bei MEHREREN erlaubten Containern (Panel-Reorder über Spaltengrenzen,
+   * `geschwister`) gibt es keine Grenze: `scrollBox` ist dort die
+   * Ausgangsspalte, und eine Spalte weiter zu ziehen liegt hunderte Pixel
+   * jenseits ihres Randes — genau das ist aber die dokumentierte Geste
+   * („Panel in eine andere Spalte ziehen"). `zielListe()` wählt in dem Fall
+   * ohnehin den richtigen Container. Die Grenze gilt also nur dort, wo es
+   * wirklich nur einen gibt: Spielliste, Schiedsrichter, Profil-Editor.
+   */
+  function imXBereich() {
+    if (listen().length > 1) return true;
+    const r = scrollBox.getBoundingClientRect();
+    return zeigerX >= r.left - X_TOLERANZ_PX && zeigerX <= r.right + X_TOLERANZ_PX;
+  }
+
+  // Der Zug arbeitet im Bildtakt, nicht im Ereignis-Takt: `move()` merkt sich
+  // nur, wo der Zeiger ist, `takt()` scrollt und sortiert ein. Das löst
+  // gleich drei Dinge — der still gehaltene Zeiger scrollt weiter, das
+  // Einsortieren läuft höchstens einmal je Bild statt bei jedem der zwei bis
+  // vier Zeigerereignisse pro Bild, und ein Zeiger, der sich nicht bewegt,
+  // kostet gar nichts.
+  const startX = down.clientX;
+  const startY = down.clientY;
+  let zeigerX = down.clientX;
+  let zeigerY = down.clientY;
+  let rafId = 0;
+  let letzterTakt = 0;
+  let scrollRest = 0;
+  let letzteLage = "";
+  /** Erst ab der Bewegungsschwelle tut der Bildtakt überhaupt etwas. */
+  let losgezogen = false;
+  /** Gegen Mehrfach-Abbau: `releasePointerCapture` löst selbst
+   *  `lostpointercapture` aus, und der räumt wiederum ab. */
+  let beendet = false;
+
   function move(ev) {
     if (ev.pointerId !== pointerId) return;
-    // Umsortierung nur, wenn die Maus im sichtbaren Bereich des scrollbaren
-    // Panels bleibt (`scrollBox`, nicht der ungeklippte Zieh-Container) —
-    // sonst könnte ein Zug zu den Feldkacheln unbeabsichtigt die Reihenfolge
-    // ändern (ADR 0027: Umsortier-Griff nur im eigenen Panel aktiv).
-    const r = scrollBox.getBoundingClientRect();
-    const mouseInPanel = ev.clientX >= r.left && ev.clientX <= r.right
-      && ev.clientY >= r.top && ev.clientY <= r.bottom;
-    if (!mouseInPanel) return;
+    zeigerX = ev.clientX;
+    zeigerY = ev.clientY;
+    if (!losgezogen && ueberSchwelle(startX, startY, zeigerX, zeigerY)) losgezogen = true;
+  }
 
-    // Auto-Scroll während des Drag-Vorgangs: Wenn die Maus am oberen oder
-    // unteren Rand des sichtbaren Panels ist, wird `scrollBox` (das
-    // tatsächlich scrollende Element, siehe `findScrollAncestor`)
-    // automatisch gescrollt, damit Zeilen außerhalb des sichtbaren Bereichs
-    // erreicht werden können.
-    const SCROLL_MARGIN = 40; // px vom oberen/unteren Rand
-    const SCROLL_SPEED = 8; // px pro move-Event
-    if (ev.clientY < r.top + SCROLL_MARGIN) {
-      scrollBox.scrollTop = Math.max(0, scrollBox.scrollTop - SCROLL_SPEED);
-    } else if (ev.clientY > r.bottom - SCROLL_MARGIN) {
-      const maxScroll = scrollBox.scrollHeight - scrollBox.clientHeight;
-      scrollBox.scrollTop = Math.min(maxScroll, scrollBox.scrollTop + SCROLL_SPEED);
-    }
-
-    const ziel = zielListe(ev);
+  /** Zeile an die Stelle hängen, auf die der Zeiger gerade zeigt. */
+  function einsortieren() {
+    const ziel = zielListe(zeigerX, zeigerY);
     const siblings = items(ziel).filter((el) => el !== li);
     let target = null;
     for (const el of siblings) {
-      const r = el.getBoundingClientRect();
-      if (ev.clientY < r.top + r.height / 2) { target = el; break; }
+      const rr = el.getBoundingClientRect();
+      if (zeigerY < rr.top + rr.height / 2) { target = el; break; }
     }
-    if (target) ziel.insertBefore(li, target);
-    else ziel.appendChild(li);
+    // Nur anfassen, wenn die Zeile wirklich woanders hin muss: Ein
+    // `insertBefore` auf den Platz, an dem sie schon steht, wirft trotzdem
+    // das Layout um — bei sechzig Zeilen in jedem Bild.
+    if (li.parentElement !== ziel || li.nextElementSibling !== target) {
+      if (target) ziel.insertBefore(li, target);
+      else ziel.appendChild(li);
+    }
+  }
+
+  function takt(zeit) {
+    rafId = requestAnimationFrame(takt);
+    const dt = letzterTakt ? zeit - letzterTakt : 0;
+    letzterTakt = zeit;
+
+    // Ein Druck ohne Bewegung ist ein Tipp, kein Zug — und muss folgenlos
+    // bleiben (Review-Fund 26.08.2026).
+    if (!losgezogen) return;
+    // Seitlich geparkt: weder scrollen noch einsortieren. Der Zug ruht, bis
+    // der Zeiger zurückkommt — oder er wird beim Loslassen verworfen.
+    if (!imXBereich()) { scrollRest = 0; return; }
+
+    const r = scrollBox.getBoundingClientRect();
+    const tempo = ziehScrollTempo(zeigerY, r.top, r.bottom);
+    if (tempo) {
+      // Bruchteile aufsammeln statt wegwerfen — bei langsamem Tempo wären
+      // 0,4 px je Bild sonst dauerhaft null und es scrollte gar nicht.
+      const wunsch = scrollSchritt(tempo, dt) + scrollRest;
+      const ganz = Math.trunc(wunsch);
+      scrollRest = wunsch - ganz;
+      if (ganz) {
+        const maxScroll = scrollBox.scrollHeight - scrollBox.clientHeight;
+        scrollBox.scrollTop = Math.min(maxScroll, Math.max(0, scrollBox.scrollTop + ganz));
+      }
+    } else {
+      scrollRest = 0;
+    }
+
+    // Hat sich seit dem letzten Bild überhaupt etwas bewegt? Sonst wären die
+    // Maße aller Geschwister umsonst gelesen.
+    const lage = `${Math.round(zeigerX)}:${Math.round(zeigerY)}:${Math.round(scrollBox.scrollTop)}`;
+    if (lage === letzteLage) return;
+    letzteLage = lage;
+    einsortieren();
   }
 
   function teardown(ev, cancelled) {
+    if (beendet) return;
+    beendet = true;
     reorderDragPending = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", cancel);
+    li.removeEventListener("lostpointercapture", verloren);
+    window.removeEventListener("blur", verloren);
     if (isTouch) window.removeEventListener("touchmove", blockScroll, { passive: false });
     document.body.classList.remove("dragging");
     li.classList.remove("dragging-item");
@@ -5328,11 +5547,29 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
     renderActionBar();
     renderQueue();
   }
-  const up = (ev) => { if (ev.pointerId === pointerId) teardown(ev, false); };
+  // Seitlich draußen loslassen VERWIRFT den Zug — die Zeile springt zurück,
+  // es wird nichts gesendet. Das ist der einzige Abbruchweg einer begonnenen
+  // Geste, und `docs/turnierleitung-web.md` verspricht ihn ausdrücklich;
+  // vorher wurde trotzdem die zuletzt erreichte Position geschickt
+  // (Review-Fund 26.08.2026).
+  const up = (ev) => {
+    if (ev.pointerId !== pointerId) return;
+    teardown(ev, !imXBereich());
+  };
   const cancel = (ev) => { if (ev.pointerId === pointerId) teardown(ev, true); };
+  /** Sicherheitsnetz: Kommt weder `pointerup` noch `pointercancel` an (Fenster
+   *  verliert den Fokus, System greift ein, Zeigerfang geht verloren), bliebe
+   *  sonst `reorderDragPending` stehen — und seit der Bildtakt-Umstellung
+   *  liefe zusätzlich eine rAF-Schleife weiter, die das Panel bis zum Anschlag
+   *  scrollt. Verwerfen ist hier immer richtig: Ein Zug, dessen Ende niemand
+   *  gesehen hat, darf keine Reihenfolge schreiben. */
+  const verloren = () => teardown(null, true);
   window.addEventListener("pointermove", move, { passive: false });
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", cancel);
+  li.addEventListener("lostpointercapture", verloren);
+  window.addEventListener("blur", verloren);
+  rafId = requestAnimationFrame(takt);
 }
 
 // ── Panel-System (Spec tl-web-panelsystem) ─────────────────────────────
@@ -5910,10 +6147,84 @@ function beobachteQueueEnde(gesamt) {
   queueObserver = new IntersectionObserver((eintraege) => {
     if (!eintraege.some((e) => e.isIntersecting)) return;
     if (queueShown >= visibleQueue().length) return;
+    // Während eines Umsortier-Zugs ist `renderQueue()` gesperrt (der
+    // Keyed-Abgleich risse die gezogene Zeile an ihre Modellposition
+    // zurück). Ohne diesen Zweig endete die Liste beim Ziehen genau dort,
+    // wo der letzte Render aufgehört hat — bei fünfzig bis sechzig Spielen
+    // wären die letzten zwanzig unerreichbar (Feldtest-Beschwerde).
+    if (reorderDragPending) { queueNachladenWaehrendZug(); return; }
     queueShown += QUEUE_PAGE;
     renderQueue();
   }, { root: wurzel, rootMargin: "300px" });
   queueObserver.observe(sentinel);
+}
+
+/**
+ * Hängt die nächste Seite der Warteliste ANS ENDE an — der Nachlade-Pfad
+ * für einen laufenden Umsortier-Zug.
+ *
+ * Bewusst kein `reconcileKeyed`: Der gleicht die DOM-Reihenfolge an die
+ * Modell-Reihenfolge an und schöbe die gerade gezogene Zeile dorthin
+ * zurück, wo sie herkam. Hier wird deshalb nur angehängt, nie umsortiert
+ * und nie ersetzt. Nach dem Loslassen macht `renderQueue()` ohnehin den
+ * vollen Abgleich; damit der die frisch angehängten Zeilen nicht unnötig
+ * neu baut, tragen sie denselben `reconKey` und Stand-Eintrag wie sonst.
+ */
+function queueNachladenWaehrendZug() {
+  const box = $("queue-list");
+  if (!box) return;
+  const liste = visibleQueue();
+  const von = queueShown;
+  const bis = Math.min(liste.length, von + QUEUE_PAGE);
+  if (bis <= von) return;
+  queueShown = bis;
+  const top = queueTopMatchId();
+  let stand = keyedHtmlStand.get(box);
+  if (!stand) { stand = new Map(); keyedHtmlStand.set(box, stand); }
+  const vorhanden = new Set(Array.from(box.children).map((el) => el.dataset.reconKey));
+  const tmp = document.createElement("template");
+  for (const m of liste.slice(von, bis)) {
+    const key = String(m.match_id);
+    if (vorhanden.has(key)) continue;
+    const html = queueRow(m, top);
+    tmp.innerHTML = html;
+    const row = tmp.content.firstElementChild;
+    if (!row) continue;
+    row.dataset.reconKey = key;
+    box.appendChild(row);
+    stand.set(key, html);
+    wireQueue(row);
+    wireReorderGriff(box, row, queueReorder);
+  }
+  // Frisch gebaute Zeilen tragen leere Zeitfelder („gerufen seit", Eieruhr).
+  scheduleTickClocks();
+  // Zähler und Fuß mitziehen: Sonst stünde während eines langen Zugs
+  // weiterhin „Noch N weitere Spiele" mit dem alten N — ausgerechnet an der
+  // Stelle, auf die man beim Ziehen ans Listenende schaut.
+  setPanelCount("queue", liste.length);
+  const fuss = $("queue-foot");
+  if (fuss) {
+    const rest = liste.length - queueShown;
+    setzeHtmlWennNeu(fuss, rest > 0
+      ? `<p class="note">Noch ${rest} weitere${rest === 1 ? "s" : ""} Spiel${rest === 1 ? "" : "e"} — beim Scrollen laden sie nach.</p>`
+      : "");
+  }
+  // Neu aufsetzen: Ein Beobachter meldet nur den WECHSEL nach „sichtbar" —
+  // dieselbe Begründung wie bei `beobachteQueueEnde` selbst.
+  beobachteQueueEnde(liste.length);
+}
+
+/**
+ * Was beim Loslassen einer umsortierten Zeile passiert.
+ *
+ * Lebt außerhalb von `renderQueue()`, weil ihn zwei Stellen verdrahten:
+ * der Keyed-Abgleich beim normalen Zeichnen und der Anhänge-Pfad oben.
+ */
+function queueReorder(id, beforeId) {
+  const matchId = Number(id);
+  const ziel = queueReorderTarget(beforeId);
+  if (ziel === matchId) { renderQueue(); return; }
+  sendeQueueReorder(matchId, ziel, "Reihenfolge geändert.");
 }
 
 function renderQueue() {
@@ -5954,16 +6265,6 @@ function renderQueue() {
   // Griff je Zeile verdrahtet (`wireReorderGriff`), nur für neue/ersetzte
   // Zeilen — `enableReorderDrag` über alle Kinder hängte bestehenden
   // Zeilen bei jedem Render doppelte Listener an.
-  const reorder = (id, beforeId) => {
-    const matchId = Number(id);
-    const ziel = queueReorderTarget(beforeId);
-    if (ziel === matchId) { renderQueue(); return; }
-    send(
-      `queue-reorder-${matchId}-${ziel ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-      { action: "queue_reorder", matchId, beforeMatchId: ziel },
-      "Reihenfolge geändert.",
-    );
-  };
   if (!fenster.length) {
     setzeHtmlWennNeu(box, `<p class="note">Kein angesetztes Spiel${hallFilter ? " in dieser Halle" : ""}.</p>`);
   } else {
@@ -5972,7 +6273,7 @@ function renderQueue() {
     // wird genau die ersetzt und neu verdrahtet.
     reconcileKeyed(box, fenster, (m) => m.match_id, (m) => queueRow(m, top), (row) => {
       wireQueue(row);
-      wireReorderGriff(box, row, reorder);
+      wireReorderGriff(box, row, queueReorder);
     });
   }
 

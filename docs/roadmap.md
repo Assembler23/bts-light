@@ -402,6 +402,23 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Spiele umsortieren ohne langes Ziehen (TL-Web)** — Spec:
+  [features/tl-spielliste-sprung-umsortieren.md](features/tl-spielliste-sprung-umsortieren.md),
+  [ADR 0050](adr/0050-verschiebe-modus-globales-einfuegeziel.md).
+  Aus der Feldtest-Rückmeldung vom 26.08.2026 („das Verschieben zusammen mit dem
+  Scrollen ist hakelig", Wartelisten von 50–60 Spielen). **Spur A** — die
+  Zieh-Geste selbst geschmeidig machen — ist bereits umgesetzt (v0.9.271, siehe
+  Nachtrag in [features/spielliste-manuelle-reihenfolge.md](features/spielliste-manuelle-reihenfolge.md)).
+  Diese Spec ist **Spur B**: ein Verschiebe-Modus, der die gehaltene Geste
+  auflöst — Spiel über das ⋮-Menü merken, **normal** scrollen, Zielzeile
+  antippen. Dazu wird der seit ADR 0026 vorhandene, aber undokumentierte Befehl
+  „↑ Nach oben schieben" als sichtbarer Knopf an die Zeile geholt; der Grill
+  hatte ergeben, dass Fall 1 zum Teil ein **Auffindbarkeitsproblem** war.
+  Bewusst ohne Serveränderung: kein Tauri-Command, kein `TlAction`, keine
+  Config-Felder — reines `assets/tl.html` + `src/io/queueGap.mjs`. Offen ist,
+  ob der Feldtest von Spur A abgewartet wird; möglicherweise nimmt das
+  geschmeidige Ziehen den Schmerz allein.
+
 - **Verschlüsselte LAN-Strecke (https + wss)** — Spec:
   [features/lan-tls-verschluesselt.md](features/lan-tls-verschluesselt.md).
   Löst die nie implementierte Entscheidung [ADR 0005](adr/0005-lan-https-selbstsigniert.md)

@@ -82,12 +82,15 @@ LAN+Cloud voraus.
 - **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
   Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
   den Aufruf zurück.
+- **Was an einer Wartelisten-Zeile sichtbar ist:** rechts drei Knöpfe —
+  das **Megafon** (in Vorbereitung rufen), **↑** (an den Anfang der
+  Spielliste schieben) und das **⋮-Menü**. Links der Zieh-Griff ⠿.
 - **Das ⋮-Menü an einer Wartelisten-Zeile:** Alles, was seltener gebraucht
   wird, steckt dahinter — **Nachruf** (beide Parteien oder nur eine), der
-  **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, „Ergebnis eintragen"
-  und **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile nur, was ständig
-  gebraucht wird; so passt eine Zeile auch auf einem schmalen Tablet in
-  eine Zeile statt in vier.
+  **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, das **Wunschfeld**,
+  „Ergebnis eintragen" und **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile
+  nur, was ständig gebraucht wird; so passt eine Zeile auch auf einem
+  schmalen Tablet in eine Zeile statt in vier.
 - **🖨 Zettel (leer)** druckt den **Vorabzettel** des Spiels: derselbe
   Bogen wie der Archivzettel, aber mit leerem Raster — zum Mitgeben an
   den Schiedsrichter, der ihn von Hand führt. Kopf, Namen und Verein sind
@@ -296,6 +299,53 @@ Legt eine Disziplin/Klasse→Halle-Regel den Ort schon fest, erscheint kein
 Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
+
+### Spiele in der Warteliste umsortieren
+
+**Der schnellste Weg — „ganz nach vorn":** der Knopf **↑** rechts an der
+Zeile. Ein Tipp, und das Spiel steht an der Spitze der umsortierbaren Liste.
+Kein Ziehen, kein Scrollen, egal wie lang die Liste ist. Der Knopf fehlt an
+einem Spiel, das schon vorn steht oder bereits gerufen ist — dort täte er
+nichts.
+
+> Diesen Befehl gab es schon länger, aber nur versteckt im ⋮-Menü; seit
+> v0.9.271 steht er sichtbar an der Zeile.
+
+Am **Griff** (⠿) links an einer Wartelisten-Zeile lässt sich das Spiel nach
+oben oder unten ziehen — auf dem Tablet wie mit der Maus. Ab dem ersten Zug
+gilt für dieses Spiel deine Reihenfolge statt der von BTP; die Zeile bekommt
+dafür die Marke „manuell einsortiert". Der Knopf im Kopf des Panels
+„Spiele" nimmt die Handsortierung des ganzen Turniers wieder zurück.
+
+**Hin und wieder zurück geht jetzt auch.** Ein Spiel vor ein anderes zu
+setzen, es dann woandershin zu schieben und kurz darauf wieder an die erste
+Stelle — das wirkte bisher beim dritten Mal nicht, wenn alles innerhalb von
+zwanzig Sekunden passierte. Der Turnier-PC hielt den Zug für ein Versehen und
+bestätigte ihn, ohne etwas zu tun. Jetzt zählt jeder Zug.
+
+**Über lange Listen ziehen** (seit v0.9.271): Zieh die Zeile an den oberen
+oder unteren Rand der Liste und **bleib dort stehen** — die Liste scrollt
+weiter, solange du hältst. Wie schnell, hängt davon ab, wie weit du zum Rand
+gehst: knapp in den Randbereich hinein kriecht sie (damit du genau treffen
+kannst), ganz am Rand läufst du in gut zwei Sekunden durch die ganze Liste.
+Über den Rand **hinaus** zu fahren ist ausdrücklich erlaubt und heißt
+einfach „noch weiter". Auch sehr lange Wartelisten laden dabei nach; du
+kommst also bis ans echte Ende, nicht nur bis dahin, wo die Liste beim
+Anfassen aufhörte.
+
+**Abbrechen:** Weit **seitlich** aus dem Panel fahren und dort loslassen —
+die Zeile springt an ihren Platz zurück, und es wird nichts an den Turnier-PC
+geschickt. Solange du seitlich draußen bist, ruht der Zug: Die Liste scrollt
+nicht weiter, und die Reihenfolge ändert sich nicht. Das ist zugleich der
+Schutz davor, dass ein Zug hinüber zu den Feldkacheln versehentlich umsortiert.
+
+**Ein Tipp auf den Griff bleibt ein Tipp.** Erst ab ein paar Pixeln Bewegung
+wird daraus ein Zug — den Griff nur zu berühren oder gedrückt zu halten ändert
+nichts, auch nicht am Rand der Liste.
+
+**Ohne Ziehen:** Den Griff antippen bzw. mit Tab anfokussieren und mit ↑/↓
+verschieben. Ein Schritt je Tastendruck. Auch der **↑-Knopf** und die übrigen
+Knöpfe der Zeile lassen sich mit Tab ansteuern und mit Enter auslösen.
 
 ### Ein Spiel von der automatischen Feldvergabe ausnehmen
 

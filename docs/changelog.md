@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.271
+## v0.9.272
 
 - **Neu: Testsystem-Schalter.** Unter **Einstellungen → 1 · Liveticker-Ziel**
   lässt sich die ganze Installation auf **test.badhub.de** umstellen — für
@@ -34,6 +34,81 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Jetzt benennt die Meldung die Ursache. Betrifft in der Praxis nur das
   Testsystem: `test.badhub.de` liegt hinter einer solchen Wand, die für einen
   Testbetrieb erst geöffnet werden muss.
+
+## v0.9.271
+
+- **Spiele umsortieren geht endlich flüssig (Turnierleitungsseite).** Das
+  Ziehen einer Zeile in der Warteliste war mit dem Scrollen der Liste kaum zu
+  vereinbaren — bei fünfzig oder sechzig Spielen wurde daraus eine Geduldsprobe.
+  Drei Dinge sind jetzt anders:
+
+  **Halten statt wackeln.** Wer die Zeile an den unteren oder oberen Rand der
+  Liste zieht und dort **stehen bleibt**, scrollt weiter. Bisher rührte sich die
+  Liste nur, solange der Finger bzw. die Maus sich bewegte — man musste am Rand
+  hin- und herwackeln, damit es weiterging. Das Tempo richtet sich danach, wie
+  nah am Rand man ist: knapp innerhalb kriecht es (zum genauen Einsortieren),
+  ganz am Rand überstreicht es die ganze Liste in gut zwei Sekunden.
+
+  **Über den Rand hinaus ist erlaubt.** Fährt man unter die Liste hinaus, fror
+  die Zeile bisher ein und nichts passierte mehr. Jetzt heißt das schlicht
+  „weiter nach unten". Seitlich weit hinaus zu fahren lässt die Reihenfolge
+  weiterhin unangetastet — ein Zug zu den Feldkacheln soll nicht versehentlich
+  umsortieren.
+
+  **Die Liste endet nicht mehr mitten im Zug.** Sehr lange Wartelisten laden in
+  Schritten nach. Während eines Zugs war das gesperrt, die Liste hörte deshalb
+  dort auf, wo sie beim Anfassen stand — bei sechzig Spielen waren die letzten
+  zwanzig unerreichbar. Jetzt lädt sie auch beim Ziehen nach.
+
+  Auf Tablets wie mit der Maus. Wer lieber ohne Ziehen arbeitet: Der Griff (⠿)
+  lässt sich anfokussieren und mit den Pfeiltasten ↑/↓ bedienen — das gab es
+  schon vorher.
+
+- **Ein Tipp auf den Zieh-Griff bleibt folgenlos.** Erst ab ein paar Pixeln
+  Bewegung wird aus dem Berühren ein Zug. Ohne diese Schwelle hätte das neue
+  Auto-Scrollen einen unangenehmen Nebeneffekt gehabt: Wer den Griff der
+  obersten sichtbaren Zeile nur berührt und kurz hält, hat den Finger schon im
+  Randbereich — die Liste wäre gescrollt und die Reihenfolge hätte sich
+  geändert, ohne dass sich der Finger bewegt.
+
+- **Einen begonnenen Zug abbrechen.** Weit seitlich aus der Liste fahren und
+  dort loslassen: Die Zeile springt zurück, es wird nichts geschickt. Solange
+  man seitlich draußen ist, ruht der Zug ganz — bisher scrollte die Liste dabei
+  weiter, und die Zeile landete beim Zurückkommen irgendwo.
+
+- **Behoben: ein abgebrochener Zug konnte die Liste bis zum Anschlag
+  durchscrollen.** Kam das Ende einer Ziehgeste nie an — weil das Fenster den
+  Fokus verlor oder das Gerät dazwischenfunkte —, lief das Auto-Scrollen weiter.
+  Jetzt wird der Zug in dem Fall verworfen.
+
+- **Behoben: ein Panel ließ sich nicht mehr in eine weiter entfernte Spalte
+  ziehen.** Der Zug blieb an der Grenze der Ausgangsspalte hängen, obwohl das
+  Verschieben über Spaltengrenzen ausdrücklich vorgesehen ist. Betraf die
+  Anordnung der Panels auf der Turnierleitungsseite, nicht die Spielliste.
+
+- **„Nach ganz vorn" ist jetzt ein Knopf an der Zeile.** Das **↑** rechts an
+  einem wartenden Spiel setzt es mit einem Tipp an die Spitze der Liste — kein
+  Ziehen, kein Scrollen, egal wie lang die Liste ist.
+
+  Den Befehl gab es schon, aber nur im ⋮-Menü, und dort stand er in keiner
+  Anleitung. Die Rückmeldung „Umsortieren ist hakelig" kam von jemandem, der
+  ihn deshalb nicht kannte — der häufigste Handgriff war die ganze Zeit einen
+  Tipp entfernt und nicht auffindbar.
+
+  Die Zeile bleibt dabei genauso kompakt: Megafon, ↑ und ⋮ stehen jetzt als
+  Dreiergruppe zusammen, statt einzeln um Platz zu konkurrieren.
+
+- **Behoben: Knöpfe an einer Wartelisten-Zeile reagierten nicht auf die
+  Eingabetaste.** Wer sich mit Tab zum Megafon, zum ↑ oder zum ⋮-Menü
+  bewegte und Enter drückte, wählte stattdessen das Spiel zum Zuweisen aus —
+  der Knopf löste nie aus. Betraf alle drei; mit dem neuen ↑ fiel es auf.
+
+- **Behoben: ein Spiel hin und wieder zurück zu schieben, wirkte beim zweiten
+  Mal nicht.** Wer ein Spiel vor ein anderes setzte, es dann woandershin schob
+  und kurz darauf wieder an dieselbe Stelle, sah eine Bestätigung — aber die
+  Reihenfolge blieb, wie sie war. Der Turnier-PC hielt den Zug für einen
+  Doppelklick, wenn alles innerhalb von zwanzig Sekunden passierte. Jetzt
+  zählt jeder Zug für sich.
 
 ## v0.9.270
 
