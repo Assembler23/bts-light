@@ -1037,7 +1037,7 @@ async fn tablet_log(
     let http = ctx.http.clone();
     tokio::spawn(async move {
         let _ = http
-            .post("https://badhub.de/api/tablet_log.php")
+            .post(crate::badhub_host::api_url("tablet_log.php"))
             .bearer_auth(TABLET_LOG_TOKEN)
             .header("X-Device-Id", device_id)
             .header(header::CONTENT_TYPE, "text/plain")
@@ -1093,7 +1093,7 @@ async fn pi_log(
     let http = ctx.http.clone();
     tokio::spawn(async move {
         let _ = http
-            .post("https://badhub.de/api/pi_log.php")
+            .post(crate::badhub_host::api_url("pi_log.php"))
             .bearer_auth(TABLET_LOG_TOKEN)
             .header("X-Device-Id", id)
             .header(header::CONTENT_TYPE, "text/plain")

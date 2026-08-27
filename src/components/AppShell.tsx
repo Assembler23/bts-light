@@ -3,6 +3,7 @@
 // gerendert – ohne Zurück-Button, denn die Navigation ist immer sichtbar.
 import { type ReactNode } from "react";
 import { Globe, Play, Square, Wifi, WifiOff } from "lucide-react";
+import { istTestsystem } from "../io/badhubZiel.mjs";
 import { tenantShortLabel } from "../presets";
 import type {
   AppConfig,
@@ -150,7 +151,13 @@ export function AppShell({
           <div className="text-sm font-semibold leading-tight text-slate-800">
             BTS Light
           </div>
-          <div className="truncate text-xs text-slate-500">
+          <div
+            className={`truncate text-xs ${
+              istTestsystem(config.badhub.url)
+                ? "font-semibold text-amber-700"
+                : "text-slate-500"
+            }`}
+          >
             {tenantShortLabel(config.badhub)}
           </div>
         </div>

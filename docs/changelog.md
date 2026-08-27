@@ -4,6 +4,37 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.272
+
+- **Neu: Testsystem-Schalter.** Unter **Einstellungen → 1 · Liveticker-Ziel**
+  lässt sich die ganze Installation auf **test.badhub.de** umstellen — für
+  Probeturniere, Schulungen und Feldtests, ohne dass etwas im öffentlichen
+  Liveticker erscheint. Mit umgestellt werden Liveticker-Push, Hallen-Check-In,
+  die Cloud-Verbindung der Tablets und die Diagnose-Logs.
+
+  Solange der Schalter an ist, steht in der Kopfzeile jeder Seite
+  **„… · TESTSYSTEM"** — damit ein vergessener Probelauf nicht als echtes
+  Turnier startet. Braucht das Testsystem ein eigenes Liveticker-Passwort,
+  gibt es dafür direkt darunter ein Feld. Die Umstellung der Tablet-Cloud
+  greift, wie jeder Wechsel der Verbindungsart, beim nächsten Stoppen und
+  Starten der Übertragung.
+
+  Wer eine **eigene** badhub-Instanz betreibt, ist nicht betroffen: Der
+  Schalter rührt nur Adressen auf `badhub.de` an.
+
+  Auf dem Testsystem sind die dafür nötigen Endpunkte seit dem 26.08.2026
+  freigeschaltet. Die **Cloud-Verbindung der Tablets** funktioniert dort
+  allerdings nicht — auf `test.badhub.de` läuft kein Relay; für einen Testlauf
+  die Tablets auf **LAN** stellen.
+
+- **Klarere Meldung, wenn ein Server die Anfrage gar nicht durchlässt.**
+  Verlangt ein vorgelagerter Webserver eine HTTP-Anmeldung, bevor bts-light
+  überhaupt antworten darf, hieß es bisher „Badhub lehnte die Anmeldung ab –
+  Passwort prüfen" — und man suchte am völlig richtigen Liveticker-Passwort.
+  Jetzt benennt die Meldung die Ursache. Betrifft in der Praxis nur das
+  Testsystem: `test.badhub.de` liegt hinter einer solchen Wand, die für einen
+  Testbetrieb erst geöffnet werden muss.
+
 ## v0.9.271
 
 - **Spiele umsortieren geht endlich flüssig (Turnierleitungsseite).** Das

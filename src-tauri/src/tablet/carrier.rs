@@ -22,8 +22,14 @@ use relay_proto::{CarrierMsg, CarrierServerMsg, StreamKind, CARRIER_PROTO_VERSIO
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-/// HTTPS/WSS-Basis des Cloud-Relays (identisch zum Relay-Client).
-const RELAY_WS: &str = "wss://badhub.de/bts-relay";
+/// HTTPS/WSS-Basis des Cloud-Relays (identisch zum Relay-Client) –
+/// Produktiv- oder Testsystem, siehe [`crate::badhub_host`]. Die ferne
+/// Halle muss denselben Relay wählen wie der Master; sonst wird der Träger
+/// nie bereit und jedes Gerät fällt auf einen Relay zurück, auf dem kein
+/// Host sitzt.
+fn relay_ws() -> String {
+    crate::badhub_host::relay_wss()
+}
 
 /// Nach dieser Stille ohne jedes Lebenszeichen gilt der Träger als tot.
 /// Gegenstück zu `HOST_STALE` im Relay; der Relay pingt, wir werten aus.
@@ -177,7 +183,7 @@ async fn lauf(
     namespace: String,
     mut hinaus_rx: mpsc::UnboundedReceiver<CarrierMsg>,
 ) {
-    let url = format!("{RELAY_WS}/{namespace}/carrier-ws");
+    let url = format!("{}/{namespace}/carrier-ws", relay_ws());
     let mut backoff = 1u64;
     loop {
         let ergebnis = sitzung(&traeger, &url, &mut hinaus_rx, &mut backoff).await;

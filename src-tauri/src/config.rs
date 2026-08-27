@@ -1262,6 +1262,11 @@ impl AppConfig {
                         "{dropped} Turnierleitungs-Gerät(e) ohne Zugang aus der Konfiguration verworfen"
                     );
                 }
+                // Produktiv- oder Testsystem? Die Push-URL ist die einzige
+                // Wahrheit; Cloud-Relay und Diagnose-Logs haben keinen
+                // Config-Zugriff und lesen den daraus gesetzten
+                // Prozess-Schalter (siehe `crate::badhub_host`).
+                crate::badhub_host::set_aus_push_url(&cfg.badhub.url);
                 Ok(cfg)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AppConfig::default()),

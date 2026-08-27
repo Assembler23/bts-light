@@ -21,6 +21,17 @@ Der BTP-Schreibweg bleibt lokal auf dem PC: Ein vom Tablet übermitteltes
 Ergebnis reicht der Relay an bts-light durch, das es per `SENDUPDATE` nach
 BTP schreibt – exakt wie im LAN-Modus.
 
+> **Testsystem.** Steht die Installation auf `test.badhub.de`
+> ([testsystem-umschalter](features/testsystem-umschalter.md)), lauten alle
+> Relay-Adressen dieser Seite entsprechend `test.badhub.de/bts-relay/…`. Das
+> setzt zweierlei voraus: dass dort ein `bts-relay` hinter nginx läuft, **und**
+> dass er mit `PUBLIC_BASE=https://test.badhub.de/bts-relay` gestartet wird.
+> Ohne die Variable baut der Relay seine QR-Codes weiter mit dem
+> Produktiv-Default (`relay/src/main.rs`, `qr_svg`) – ein Tablet scannt dann
+> den Code am Testsystem und landet in einem Produktiv-Namespace, auf dem kein
+> Host sitzt: Es wartet endlos. Fehlt der Test-Relay ganz, gehört der Testlauf
+> auf LAN.
+
 ## Umschalten
 
 Die Verbindungsart steht im Setup-Wizard unter **„Tablet-Verbindung"**:

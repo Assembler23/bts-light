@@ -1048,9 +1048,12 @@ const BASE_PATH = location.pathname.replace(/\/court\/[^/]*\/?$/, '');
 // Pfad nicht, deshalb direkt der öffentliche badhub-Resolver ("/api/v1/club-
 // logo", exakter Name). Fehlt ein Logo, greift in beiden Fällen der onerror-
 // Rückfall (nur Name). BASE_PATH ist im LAN leer, im Cloud "/bts-relay/<id>".
+// Der Cloud-Zweig nimmt den Host, von dem diese Seite kommt (location.origin):
+// im Testbetrieb also test.badhub.de — sonst holte ein Testturnier seine
+// Logos beim Produktivsystem.
 const LOGO_BASE = BASE_PATH === ''
   ? '/info/club-logo?name='
-  : 'https://badhub.de/api/v1/club-logo?name=';
+  : location.origin + '/api/v1/club-logo?name=';
 
 // ─────────────────────────── Diagnose-Log ──────────────────────────────
 // Ring-Buffer der letzten 300 wichtigen Events: WS-Open/Close, match_assigned,

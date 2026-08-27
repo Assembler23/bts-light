@@ -194,6 +194,13 @@ jobs:
       - name: Update-Notes ueber die Release-Strecke (JS)
         run: node scripts/test-release-notes.mjs
 
+      # Umschalter Produktiv/Test (test.badhub.de). Greift er zu weit, verliert
+      # ein Betreiber mit eigener badhub-Instanz beim ersten Klick seine
+      # Adresse; greift er zu kurz, laeuft ein Testturnier stumm in die
+      # Produktiv-Datenbank und faellt erst oeffentlich im Liveticker auf.
+      - name: Umschalter Produktiv-Test (JS)
+        run: node scripts/test-badhub-ziel.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

@@ -29,10 +29,17 @@ use crate::tablet::server::{handle_score, match_brief, process_result, ServerCtx
 use crate::tablet::state::{MonitorNudge, MonitorNudgeTx, TabletState};
 
 /// Öffentliche Relay-Basis – der Host-Pfad hängt die `install_id` an.
-const RELAY_HOST: &str = "wss://badhub.de/bts-relay";
+/// Produktiv- oder Testsystem, abgeleitet aus der Push-URL der
+/// Konfiguration (siehe [`crate::badhub_host`]) – ein Testturnier soll
+/// nicht über den Produktiv-Relay laufen.
+fn relay_host() -> String {
+    crate::badhub_host::relay_wss()
+}
 
 /// HTTPS-Basis des Relays – für den Court-Monitor-Werbe-Upload.
-const RELAY_HTTP: &str = "https://badhub.de/bts-relay";
+fn relay_http() -> String {
+    crate::badhub_host::relay_https()
+}
 
 /// Abstand der Match-Push-Ticks (Court → Tablet-Zuweisung).
 const TICK: Duration = Duration::from_secs(2);
@@ -70,7 +77,7 @@ const MAX_UPLOAD_TOTAL: usize = 12 * 1024 * 1024;
 /// Verbindet bts-light dauerhaft zum Cloud-Relay – mit Reconnect-Backoff
 /// (1 s → 30 s). Läuft, bis der Task abgebrochen wird (`stop_sync`).
 pub async fn run(ctx: Arc<ServerCtx>, install_id: String) {
-    let url = format!("{RELAY_HOST}/{install_id}/host-ws");
+    let url = format!("{}/{install_id}/host-ws", relay_host());
     let mut backoff = 1u64;
     // Fernbefehl-Wächter über ALLE Sitzungen hinweg (Spec
     // `tablet-version-abgleich`, Review-Fund 24.08.2026).
@@ -404,7 +411,7 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
         },
         logo,
     };
-    let url = format!("{RELAY_HTTP}/{install_id}/monitor");
+    let url = format!("{}/{install_id}/monitor", relay_http());
     let resp = ctx
         .http
         .post(&url)
@@ -438,7 +445,7 @@ async fn sync_monitor_control(ctx: &ServerCtx, install_id: &str, last_fp: &mut S
     };
     let fp = serde_json::to_string(&control).unwrap_or_default();
     if fp != *last_fp {
-        let url = format!("{RELAY_HTTP}/{install_id}/monitor/control");
+        let url = format!("{}/{install_id}/monitor/control", relay_http());
         match ctx.http.post(&url).json(&control).send().await {
             Ok(r) if r.status().is_success() => *last_fp = fp,
             Ok(r) => tracing::warn!("Monitor-Steuerung: HTTP {}", r.status()),
@@ -446,7 +453,7 @@ async fn sync_monitor_control(ctx: &ServerCtx, install_id: &str, last_fp: &mut S
         }
     }
     // Geräteliste vom Relay holen und im geteilten Zustand ablegen.
-    let url = format!("{RELAY_HTTP}/{install_id}/monitor-devices");
+    let url = format!("{}/{install_id}/monitor-devices", relay_http());
     if let Ok(resp) = ctx.http.get(&url).send().await {
         if let Ok(devices) = resp.json::<Vec<MonitorDeviceInfo>>().await {
             ctx.tablet.set_relay_monitor_devices(devices);
@@ -817,7 +824,7 @@ pub async fn fetch_announce_state(
         return None;
     }
     let mut url =
-        reqwest::Url::parse(&format!("{RELAY_HTTP}/{namespace}/info/announce/state")).ok()?;
+        reqwest::Url::parse(&format!("{}/{namespace}/info/announce/state", relay_http())).ok()?;
     url.query_pairs_mut()
         .append_pair("hall", hall)
         .append_pair("since", &since.to_string());
@@ -846,7 +853,7 @@ pub async fn fetch_slaves(namespace: &str) -> Vec<relay_proto::SlaveInfo> {
     {
         return Vec::new();
     }
-    let url = format!("{RELAY_HTTP}/{namespace}/slaves");
+    let url = format!("{}/{namespace}/slaves", relay_http());
     let fetch = async {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(8))
@@ -868,7 +875,7 @@ pub async fn request_pairing_code(namespace: &str) -> Result<relay_proto::Pairin
     if !valid_relay_namespace(namespace) {
         return Err("Ungültiger Kopplungs-Code (install_id)".to_string());
     }
-    let url = format!("{RELAY_HTTP}/{namespace}/pairing-code");
+    let url = format!("{}/{namespace}/pairing-code", relay_http());
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
@@ -900,7 +907,7 @@ pub async fn resolve_pairing_code(code: &str) -> Result<String, String> {
     if code.len() != 8 || !code.bytes().all(|b| b.is_ascii_digit()) {
         return Err("Der Telefon-Code hat genau 8 Ziffern".to_string());
     }
-    let url = format!("{RELAY_HTTP}/pair/{code}");
+    let url = format!("{}/pair/{code}", relay_http());
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
@@ -948,7 +955,7 @@ pub async fn fetch_courts(namespace: &str) -> Vec<CourtBrief> {
     if !valid_relay_namespace(namespace) {
         return Vec::new();
     }
-    let url = format!("{RELAY_HTTP}/{namespace}/courts");
+    let url = format!("{}/{namespace}/courts", relay_http());
     let fetch = async {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(8))

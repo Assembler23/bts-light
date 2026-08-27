@@ -7,8 +7,12 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Endpunkt, der die Logs entgegennimmt (`public/api/bts_log.php`).
-const UPLOAD_URL: &str = "https://badhub.de/api/bts_log.php";
+/// Endpunkt, der die Logs entgegennimmt (`public/api/bts_log.php`) –
+/// auf dem System, gegen das die Installation gerade läuft. Ein
+/// Testturnier soll seine Logs nicht in die Produktiv-Ablage schreiben.
+fn upload_url() -> String {
+    crate::badhub_host::api_url("bts_log.php")
+}
 /// Fester Bearer-Token, verbandsweit geteilt (wie das Liveticker-Token).
 const UPLOAD_TOKEN: &str = "d896d5c45f1dfe72d324be2da0dcc8031e447809f9a3c1ce";
 /// Abstand zwischen zwei Uploads.
@@ -41,7 +45,7 @@ async fn upload_once(client: &reqwest::Client, log_dir: &Path, install_id: &str)
         return;
     };
     let result = client
-        .post(UPLOAD_URL)
+        .post(upload_url())
         .bearer_auth(UPLOAD_TOKEN)
         .header("X-Install-Id", install_id)
         .header("Content-Type", "text/plain")
