@@ -3,6 +3,15 @@
 Lebende Liste der offenen Arbeiten an bts-light. Erledigte Versionen stehen
 im [changelog.md](changelog.md); hier steht, was **noch** ansteht.
 
+> Dies ist die allgemeine Repo-Roadmap für bts-light. Wie zurückgestellte Themen
+> klassifiziert, auf Dubletten geprüft und geroutet werden, steht in
+> `~/.claude/AGENTS.md` → *Roadmap & Backlog (FUTURE ROADMAP RULE)*.
+> Cross-Repo-Code-Struktur gehört nach `badhub/docs/arch/code-structure-roadmap.md`,
+> Agentic-/Harness-Themen nach
+> `~/ai-harness/prepared/agentic-health-check-2026-08-27.md`.
+> Cross-Repo-Punkte werden **genau einmal** geführt — im Repo mit der führenden
+> Umsetzung; abhängige Repos nur als `DEPENDS_ON`/`AFFECTS`.
+
 > Stand: 2026-07-17, nach dem ersten Zwei-Hallen-Praxisturnier (v0.9.144).
 > Die Prio-1-Punkte und Turnier-Wünsche stammen direkt aus diesem Einsatz.
 
@@ -886,43 +895,36 @@ verliehen):
   die React-Seite (u. a. `announcer.ts` — Court-Phrase, Ansage-Segmente,
   Auto-Sprach-Regel) hat kein Test-Setup. badhub-tournament nutzt Vitest
   inkl. `announcer.test.ts` — das ließe sich übernehmen.
-- **Alte Liveticker-Test-Turniere.** `lehiero`, `christian-zum-test` und
-  die Legacy-Zeile `default` stehen in `liveticker_tournaments` noch auf
-  `is_active = 1` und machen `/live` ohne `?t=` mehrdeutig. Im
-  Liveticker-Admin auf inaktiv setzen.
-- **`docs/ops/deployment.md` teils veraltet** (badhub-Repo): Der Abschnitt
-  „Deploy: Produktion" beschreibt noch das KAS-`deploy_prod.sh`, obwohl
-  Prod längst über `deploy_hetzner.sh` auf Hetzner läuft.
-- **Das Turnierlogo reist in jedem vollen `tset` mit** (`sync.rs`,
-  Base64, bis 2,7 MB). Ein voller `tset` geht mindestens jede Minute als
-  Lebenszeichen raus und zusätzlich immer dann, wenn der Diff bei
-  mehreren geänderten Matches zum Vollstand degeneriert — bei vielen
-  Feldern also alle paar Sekunden. Weglassen ging bisher nicht: Ein
-  `tset` ersetzt bei badhub den kompletten Snapshot-Datensatz
-  (`liveticker_state.snapshot_json`), ein fehlendes Feld löschte das Logo
-  also, und der Liveticker blendete es beim nächsten 5-s-Poll aus —
-  ebenso die Check-In-Seite, wenn dort kein eigenes Branding-Logo
-  hinterlegt ist (Recherche 18.08.2026).
-  **Umstellung in drei Schritten, Reihenfolge zwingend:**
-  1. ✅ **v0.9.226:** bts-light schickt die Logo-Felder auch leer mit
-     (`""` statt weglassen) — sonst wäre ein Logo nach Schritt 2 nicht
-     mehr löschbar. Gegen das heutige badhub verhaltensgleich, deshalb
-     gefahrlos vorab.
-  2. **badhub-PR #473** (offen): `liveticker_logo_uebernehmen()` gibt den
-     Feldern den Vertrag „weglassen = unverändert, `""` = löschen" — den,
-     den `checkin_branding_apply()` schon hat. **Braucht einen Deploy.**
-  3. ⚠️ **v0.9.227 gebaut, DARF ERST NACH SCHRITT 2 AUSGELIEFERT WERDEN:**
-     bts-light schickt das Logo nur noch bei Änderung (`Option`-Felder,
-     Marke aus Turnier + Bildinhalt, Auffrischung alle 10 Min, Stempel
-     erst nach geglücktem Push). Ohne den badhub-Deploy würde ein
-     weggelassenes Logo dort als „kein Logo" gelten.
-  Zu beachten: Im badhub-Repo liegt (lokal, ungepusht) der Umbau
-  `feat/turnierlogo-zentralisierung` — Logo als inhaltsadressierte Datei,
-  im Snapshot nur noch `tournament_logo_url`. Er löst diesen Punkt
-  **nicht** von allein (ein `tset` ohne Logo lässt die URL schlicht aus
-  dem Snapshot fallen) und kollidiert an derselben Codezeile mit #473;
-  beim Auflösen muss die Übernahme **oben** stehen, sonst holt sie den
-  Base64-Blob zurück.
+- **MOVED → badhub.** Zwei Punkte dieser Liste waren badhub-Arbeit und
+  werden dort primär geführt (Owner-Regel: ein Punkt, ein Repo) —
+  `badhub/docs/roadmap.md`, Abschnitt *Backlog*:
+  *Alte Liveticker-Test-Turniere deaktivieren* (`lehiero`,
+  `christian-zum-test` und die Legacy-Zeile `default` stehen in
+  `liveticker_tournaments` noch auf `is_active = 1` und machen `/live`
+  ohne `?t=` mehrdeutig) und *`docs/ops/deployment.md` ist veraltet*
+  (beschreibt noch das KAS-`deploy_prod.sh` statt `deploy_hetzner.sh`).
+  Hier bewusst kein zweiter aktiver Task.
+- **Das Turnierlogo reiste in jedem vollen `tset` mit** (`sync.rs`,
+  Base64, bis 2,7 MB) — **erledigt, Stand 2026-08-28.** Ein voller `tset`
+  ging mindestens jede Minute als Lebenszeichen raus und zusätzlich immer
+  dann, wenn der Diff bei mehreren geänderten Matches zum Vollstand
+  degenerierte. Weglassen ging nicht, solange ein `tset` bei badhub den
+  kompletten Snapshot-Datensatz ersetzte: ein fehlendes Feld löschte das
+  Logo (Recherche 18.08.2026). Die dreistufige Umstellung ist komplett
+  durch — nachgemessen, nicht angenommen:
+  1. ✅ **v0.9.226** — Logo-Felder werden auch leer mitgeschickt
+     (`""` statt weglassen), damit ein Logo nach Schritt 2 löschbar bleibt.
+  2. ✅ **badhub-PR #473**, gemergt am 2026-08-18:
+     `liveticker_logo_uebernehmen()` gibt den Feldern den Vertrag
+     „weglassen = unverändert, `""` = löschen" — liegt in
+     `lib/live_update_lib.php` auf badhub-`main`.
+  3. ✅ **v0.9.227** — das Logo geht nur noch bei Änderung raus
+     (`Option`-Felder, Marke aus Turnier + Bildinhalt, Auffrischung alle
+     10 Min, Stempel erst nach geglücktem Push); in `sync.rs` als
+     `logo_in_tset_legen()` / `logo_gesendet`. Ausgeliefert — der Stand
+     ist inzwischen v0.9.272.
+  Der lokale badhub-Umbau `feat/turnierlogo-zentralisierung`, der an
+  derselben Codezeile kollidierte, existiert nicht mehr. Kein Restpunkt.
 
 ## Schiedsrichtermanagement — umgesetzt (v0.9.201)
 
