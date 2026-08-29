@@ -11,6 +11,15 @@
 //! fest: alle drei müssen bei aktivem manuellen Präfix exakt dieselbe
 //! Match-Reihenfolge liefern.
 //!
+//! **Ausnahme seit Spec `tl-offene-paarungen` (ADR 0053):** Spiele mit noch
+//! offener Paarung zeigt **nur** TL-Web, und zwar in einer eigenen Liste
+//! (`TlState::open_queue`). Desktop-Vorbereitung und Liveticker filtern sie
+//! weiterhin weg — sie sollen niemandem eine Begegnung ankündigen, die noch
+//! keine ist. Die Zusage dieses Tests lautet deshalb genauer: Die relative
+//! Reihenfolge der **spielbereiten** Spiele ist überall dieselbe. Offene
+//! Spiele gehören nicht zum Vergleich; dass sie die Reihenfolge der anderen
+//! nicht verschieben, prüft `offene_spiele_im_praefix_aendern_die_reihenfolge_der_echten_spiele_nicht`.
+//!
 //! Nicht Teil dieses Tests: `sync::auto_assign` (privat, eigener Test
 //! `auto_assign_prefers_a_manually_advanced_match_over_the_earlier_schedule`
 //! in `sync.rs` deckt denselben gemeinsamen Helfer bereits ab) und
@@ -92,6 +101,79 @@ fn snapshot_with_locations(matches: Vec<BtpMatch>, locations: Vec<BtpLocation>) 
         entries: Vec::new(),
         officials: Vec::new(),
     }
+}
+
+#[test]
+fn offene_spiele_im_praefix_aendern_die_reihenfolge_der_echten_spiele_nicht() {
+    // ADR 0053: Offene Spiele nehmen an der globalen manuellen Reihenfolge
+    // teil, erscheinen aber nur in TL-Web. Der Präfix darf deshalb ein
+    // offenes Spiel enthalten, ohne dass Desktop und Liveticker davon etwas
+    // merken — sonst zeigte eine der drei Ansichten eine andere
+    // „nächste Begegnung", genau die Falle aus dem Modulkommentar.
+    let mut offen = a_match(99, 99, 202_608_071_330);
+    offen.team1 = Vec::new();
+    offen.team2 = Vec::new();
+    let matches = vec![
+        a_match(1, 1, 202_608_071_200),
+        offen,
+        a_match(2, 2, 202_608_071_300),
+        a_match(3, 3, 202_608_071_400),
+    ];
+    let snap = snapshot(matches);
+    let config = AppConfig::default();
+
+    let tablet = TabletState::default();
+    tablet.set_snapshot(snap.clone());
+    // Das offene Spiel ganz nach vorn ziehen — der Präfix trägt es damit.
+    tablet.queue_order_store().reorder(&[1, 2, 99, 3], 99, Some(1));
+
+    let zustand = tl::build_state(&tablet, &config, 0, 1);
+    assert_eq!(
+        zustand
+            .open_queue
+            .iter()
+            .map(|m| m.match_id)
+            .collect::<Vec<_>>(),
+        vec![99],
+        "TL-Web führt das offene Spiel in seiner eigenen Liste"
+    );
+    let tl_ids: Vec<i64> = zustand.queue.iter().map(|m| m.match_id).collect();
+    assert_eq!(
+        tl_ids,
+        vec![1, 2, 3],
+        "die Arbeitsliste bleibt in der Reihenfolge der Ansetzung"
+    );
+
+    let desktop_ids: Vec<i64> = preparation_candidates_for(&tablet, &config)
+        .candidates
+        .iter()
+        .map(|c| c.match_id)
+        .collect();
+    assert_eq!(
+        desktop_ids, tl_ids,
+        "der Desktop zeigt dieselben spielbereiten Spiele in derselben Folge"
+    );
+
+    let ctx = LivetickerContext::new(
+        &config,
+        tablet.manual_halls(),
+        tablet.auto_hall_store().halls(),
+        tablet.queue_order_store(),
+    );
+    let live_ids: Vec<i64> = build_tset(&snap, 1, &ctx)
+        .event
+        .upcoming_matches
+        .iter()
+        .map(|m| {
+            m.id.strip_prefix("btp_")
+                .and_then(|s| s.parse::<i64>().ok())
+                .expect("Match-ID im erwarteten Format")
+        })
+        .collect();
+    assert_eq!(
+        live_ids, tl_ids,
+        "der Liveticker kündigt keine Begegnung an, die noch keine ist"
+    );
 }
 
 #[test]
