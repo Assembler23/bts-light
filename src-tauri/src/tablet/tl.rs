@@ -2506,6 +2506,17 @@ pub struct TlState {
     /// hallenübergreifenden Sortierung aus ADR 0026 aufgegeben worden.)
     #[serde(default)]
     pub queue_truncated: usize,
+    /// Spiele, deren Paarung noch nicht feststeht (Spec
+    /// `tl-offene-paarungen`), in derselben Abfolge wie [`Self::queue`] —
+    /// die Seite mischt sie über `queue_index` ein.
+    ///
+    /// `#[serde(default)]` = leer: Genau das liefert ein alter Host, und
+    /// dann zeigt die Seite schlicht keine offenen Spiele.
+    #[serde(default)]
+    pub open_queue: Vec<TlOpenMatch>,
+    /// Wie viele offene Spiele die Kappung weggelassen hat.
+    #[serde(default)]
+    pub open_queue_truncated: usize,
     /// Verwaltet dieser Turnier-PC Zähltafelbediener? Nur dann zeigt die
     /// Seite den Warteschlangen-Abschnitt.
     pub scorekeeper_managed: bool,
@@ -2825,6 +2836,59 @@ pub struct TlMatch {
     pub predicted_uncertain: bool,
 }
 
+/// Ein Spiel, dessen Paarung noch nicht (vollständig) feststeht — Spec
+/// `tl-offene-paarungen`.
+///
+/// Bewusst **schlanker** als [`TlMatch`]: Ein offenes Spiel kann nicht aufs
+/// Feld, nicht gerufen werden und bekommt keine Prognose, also trägt es weder
+/// `blocked` noch `prep_call` noch `predicted_start_ms`. Ebenso fehlen
+/// **Lizenznummern** — die Nummer ist das Link-Ziel der badhub-Seite eines
+/// feststehenden Teilnehmers, ein Kandidat bekommt sie nicht (Datenschutz).
+///
+/// Die Liste reist getrennt von [`TlState::queue`], damit sie im
+/// 64-KiB-Fenster der Cloud keine echten Wartespiele verdrängt (ADR 0051).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlOpenMatch {
+    pub match_id: i64,
+    pub match_num: Option<i64>,
+    pub planned_time: Option<i64>,
+    pub draw_name: String,
+    pub round_name: String,
+    pub class_label: String,
+    /// Siehe [`TlCourt::discipline`].
+    pub discipline: String,
+    /// Die Namen einer bereits feststehenden Seite; leer, wenn der Platz
+    /// offen ist. Ein Spiel kann halb offen sein — dann steht hier eine
+    /// Seite und im Label die andere.
+    pub team1: Vec<String>,
+    pub team2: Vec<String>,
+    /// Beschriftung des offenen Platzes 1 — Kandidaten des Vorspiels,
+    /// „aus Spiel 42" oder „noch offen" ([`offener_platz_text`], ADR 0052).
+    /// Leer, wenn die Seite besetzt ist.
+    pub open_slot1_label: String,
+    pub open_slot2_label: String,
+    /// In welche Halle das Spiel gehört, und woher wir das wissen.
+    pub hall: String,
+    pub hall_source: HallSource,
+    /// Wie viele Spiele der **echten** Warteliste vor diesem Eintrag stehen.
+    ///
+    /// Damit mischt die Seite die beiden Listen zusammen, ohne selbst zu
+    /// sortieren — die Reihenfolge bleibt serverseitig verbindlich, so wie
+    /// bei [`TlState::queue`] zugesagt.
+    pub queue_index: u32,
+    /// Steht dieses Spiel im manuellen Präfix (ADR 0053)?
+    #[serde(default)]
+    pub manual: bool,
+    /// Von der automatischen Feldvergabe ausgenommen? Die Angabe greift
+    /// erst, wenn die Paarung feststeht — setzen darf man sie schon.
+    #[serde(default)]
+    pub excluded_from_auto_assign: bool,
+    /// Gewünschtes Feld; wie [`Self::excluded_from_auto_assign`] eine
+    /// Vorab-Angabe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wish_court: Option<i64>,
+}
+
 /// Eine Halle des Turniers.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TlHall {
@@ -2973,6 +3037,16 @@ impl From<Blocked> for TlBlocked {
 /// Dringlichkeit sortiert, die vorderen sind die, um die es geht — was
 /// wegfällt, meldet `queue_truncated` ehrlich.
 pub(crate) const QUEUE_LIMIT: usize = 120;
+
+/// Wie viele Spiele mit noch offener Paarung höchstens ausgeliefert werden
+/// (Spec `tl-offene-paarungen`, ADR 0051).
+///
+/// Eigener Deckel neben [`QUEUE_LIMIT`], damit offene Spiele die echte
+/// Arbeitsliste nicht verdrängen können. Was wegfällt, meldet
+/// `open_queue_truncated`. Über die Cloud kommt zusätzlich die adaptive
+/// Füllung in [`state_for_relay`] hinzu — dort ist der Platz knapper als im
+/// Hallennetz.
+pub(crate) const OPEN_QUEUE_LIMIT: usize = 120;
 
 /// Höchstzahl beendeter Spiele im Zustand. Die Seite ist ein
 /// Arbeits-Werkzeug, kein Archiv — wer mehr braucht, schaut in BTP.
@@ -3156,6 +3230,8 @@ pub(crate) fn build_state_limited(
             queue: Vec::new(),
             walkovers: Vec::new(),
             queue_truncated: 0,
+            open_queue: Vec::new(),
+            open_queue_truncated: 0,
             scorekeeper_managed: config.scorekeeper.enabled,
             scorekeepers: Vec::new(),
             finished: Vec::new(),
@@ -3232,19 +3308,15 @@ pub(crate) fn build_state_limited(
 
     let availability = PlayerAvailability::from_snapshot(&snap, config);
 
-    // Spielbereite Spiele — dieselbe Bedingung wie bei der automatischen
-    // Vergabe: geplant und mit feststehender Paarung. Spiele, deren Gegner
-    // noch aus einem Vorspiel kommt, könnte niemand sinnvoll vergeben.
+    // Alle geplanten Spiele — auch die, deren Paarung noch aus einem Vorspiel
+    // kommt (Spec `tl-offene-paarungen`). Sie werden gleich unten von den
+    // spielbereiten getrennt: Vergeben kann man sie nicht, anzeigen schon.
     // Erst nur die Ordnungsschlüssel sammeln — die teuren Zeichenketten
     // entstehen später und nur für die Spiele, die auch ausgeliefert werden.
     let mut ordered: Vec<OrderedMatch> = snap
         .matches
         .iter()
-        .filter(|m| {
-            m.status == crate::btp::model::MatchStatus::Scheduled
-                && !m.team1.is_empty()
-                && !m.team2.is_empty()
-        })
+        .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
         .map(|m| {
             let call = called_hall(m.id);
             let manual_hall = manual.get(&m.id).map(String::as_str);
@@ -3268,6 +3340,26 @@ pub(crate) fn build_state_limited(
         })
         .collect();
     ordered.sort_by_key(|(key, _, _, _)| *key);
+
+    // Offene Paarungen aus der Arbeitsliste heraustrennen (ADR 0051). Sie
+    // reisen in einer eigenen, eigens gedeckelten Liste, damit sie im
+    // 64-KiB-Fenster der Cloud kein echtes Wartespiel verdrängen. Der
+    // mitgezählte Index hält fest, an welcher Stelle der GEMEINSAMEN
+    // Reihenfolge sie stehen — danach mischt die Seite sie wieder ein.
+    //
+    // Alles unterhalb dieser Zeile rechnet weiter nur mit den spielbereiten
+    // Spielen: Feldvergabe, Prognose und Blockade-Marken ergeben für ein
+    // Spiel ohne Teilnehmer keinen Sinn.
+    let mut offene: Vec<(usize, OrderedMatch)> = Vec::new();
+    let mut spielbereit: Vec<OrderedMatch> = Vec::new();
+    for eintrag in ordered {
+        if eintrag.1.team1.is_empty() || eintrag.1.team2.is_empty() {
+            offene.push((spielbereit.len(), eintrag));
+        } else {
+            spielbereit.push(eintrag);
+        }
+    }
+    let ordered = spielbereit;
 
     // Startzeit-Prognose (Spec `spielzeiten-prognose`, E5–E8): Statistik
     // aus dem Zeiten-Store + deterministische Simulation der Warteliste —
@@ -3472,6 +3564,42 @@ pub(crate) fn build_state_limited(
         });
     }
 
+    // Die offenen Spiele — schlank, ohne Vergabe-, Aufruf- und
+    // Prognose-Felder (Spec `tl-offene-paarungen`).
+    let open_queue_truncated = offene.len().saturating_sub(OPEN_QUEUE_LIMIT);
+    let mut open_queue: Vec<TlOpenMatch> = Vec::new();
+    for (queue_index, (_, m, hall, hall_source)) in offene.into_iter().take(OPEN_QUEUE_LIMIT) {
+        open_queue.push(TlOpenMatch {
+            match_id: m.id,
+            match_num: m.match_num,
+            planned_time: m.planned_time,
+            draw_name: m.draw_name.clone(),
+            round_name: m.round_name.clone(),
+            class_label: m.class_label.clone(),
+            discipline: m.discipline.as_str().to_string(),
+            team1: m.team1.iter().map(|p| p.name.clone()).collect(),
+            team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+            // Nur der offene Platz bekommt ein Label; eine feststehende Seite
+            // steht mit ihren echten Namen da.
+            open_slot1_label: if m.team1.is_empty() {
+                offener_platz_text(&snap, m, 1)
+            } else {
+                String::new()
+            },
+            open_slot2_label: if m.team2.is_empty() {
+                offener_platz_text(&snap, m, 2)
+            } else {
+                String::new()
+            },
+            hall,
+            hall_source,
+            queue_index: u32::try_from(queue_index).unwrap_or(u32::MAX),
+            manual: tablet.queue_order_store().rank(m.id).is_some(),
+            excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
+            wish_court: tablet.wish_court(m.id),
+        });
+    }
+
     let mut halls: Vec<TlHall> = snap
         .locations
         .iter()
@@ -3642,6 +3770,8 @@ pub(crate) fn build_state_limited(
             })
             .collect(),
         queue_truncated,
+        open_queue,
+        open_queue_truncated,
         officials_managed,
         officials,
         scorekeeper_managed,
@@ -4598,6 +4728,181 @@ mod tests {
         let text = offener_platz_text(&s, &folge, 1);
         assert_eq!(text, "aus Spiel 42");
         assert!(!text.contains("Tief"), "keine Enkel-Kandidaten: {text}");
+    }
+
+    /// Ein wartendes Spiel mit vollstaendiger Paarung, angesetzt zur
+    /// angegebenen Zeit.
+    fn wartendes(id: i64, zeit: i64) -> BtpMatch {
+        let mut m = a_match(id);
+        m.planned_time = Some(zeit);
+        m
+    }
+
+    /// Ein Spiel mit zwei offenen Plaetzen, angesetzt zur angegebenen Zeit.
+    fn offenes(id: i64, zeit: i64) -> BtpMatch {
+        let mut m = folgespiel(id, None, None);
+        m.planned_time = Some(zeit);
+        m
+    }
+
+    #[test]
+    fn ein_zustand_ohne_turnier_traegt_eine_leere_liste_offener_spiele() {
+        let tablet = TabletState::default();
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 3);
+        assert!(s.open_queue.is_empty());
+        assert_eq!(s.open_queue_truncated, 0);
+    }
+
+    #[test]
+    fn ein_alter_zustand_ohne_die_neuen_felder_bleibt_lesbar() {
+        // Der Relay bettet tl.html ein und wird bei jedem Merge deployt, die
+        // App kommt erst ueber einen Release-Tag: Eine neue Seite trifft
+        // regelmaessig einen alten Host. Fehlendes Feld muss "keine offenen
+        // Spiele" heissen, nicht "Fehler".
+        let s = state_with(
+            snap(Vec::new(), vec![wartendes(1, 202_608_301_200)], Vec::new()),
+            &AppConfig::default(),
+        );
+        let mut wert = serde_json::to_value(&s).expect("serialisierbar");
+        let obj = wert.as_object_mut().expect("Objekt");
+        obj.remove("open_queue");
+        obj.remove("open_queue_truncated");
+
+        let alt: TlState = serde_json::from_value(wert).expect("ohne die neuen Felder lesbar");
+        assert!(alt.open_queue.is_empty());
+        assert_eq!(alt.open_queue_truncated, 0);
+    }
+
+    #[test]
+    fn die_spielliste_fuehrt_offene_paarungen_in_einer_zweiten_liste() {
+        let s = state_with(
+            snap(
+                Vec::new(),
+                vec![wartendes(1, 202_608_301_200), offenes(2, 202_608_301_300)],
+                Vec::new(),
+            ),
+            &AppConfig::default(),
+        );
+
+        assert_eq!(
+            s.queue.iter().map(|m| m.match_id).collect::<Vec<_>>(),
+            vec![1],
+            "die Arbeitsliste bleibt, was sie war"
+        );
+        assert_eq!(
+            s.open_queue.iter().map(|m| m.match_id).collect::<Vec<_>>(),
+            vec![2]
+        );
+    }
+
+    #[test]
+    fn ein_halb_offenes_spiel_behaelt_die_bekannten_namen() {
+        // Steht eine Seite fest, muss sie mit Namen dastehen - sonst
+        // verschenkt die Anzeige die halbe Information.
+        let mut halb = offenes(2, 202_608_301_300);
+        halb.team1 = vec![player("Müller")];
+        let s = state_with(
+            snap(Vec::new(), vec![halb], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let eintrag = &s.open_queue[0];
+        assert_eq!(eintrag.team1, vec!["Müller".to_string()]);
+        assert!(eintrag.open_slot1_label.is_empty(), "besetzte Seite ohne Label");
+        assert_eq!(eintrag.open_slot2_label, "noch offen");
+    }
+
+    #[test]
+    fn ein_offenes_spiel_kennt_seinen_platz_zwischen_den_echten_spielen() {
+        // Die Seite mischt nach dieser Zahl ein und sortiert NICHT selbst -
+        // die Reihenfolge bleibt serverseitig verbindlich.
+        let s = state_with(
+            snap(
+                Vec::new(),
+                vec![
+                    wartendes(1, 202_608_301_200),
+                    offenes(2, 202_608_301_300),
+                    wartendes(3, 202_608_301_400),
+                    offenes(4, 202_608_301_500),
+                ],
+                Vec::new(),
+            ),
+            &AppConfig::default(),
+        );
+
+        assert_eq!(
+            s.open_queue
+                .iter()
+                .map(|m| (m.match_id, m.queue_index))
+                .collect::<Vec<_>>(),
+            vec![(2, 1), (4, 2)],
+            "Spiel 2 steht hinter einem, Spiel 4 hinter zwei echten Spielen"
+        );
+    }
+
+    #[test]
+    fn offene_spiele_verdraengen_kein_einziges_echtes_wartespiel() {
+        // Das Erfolgskriterium der Spec: Nach dem Update darf kein Geraet
+        // WENIGER echte Spiele sehen als vorher.
+        let mut mit_offenen = Vec::new();
+        let mut nur_echte = Vec::new();
+        for i in 0..QUEUE_LIMIT as i64 {
+            let m = wartendes(i + 1, 202_608_301_200 + i);
+            nur_echte.push(m.clone());
+            mit_offenen.push(m);
+        }
+        for i in 0..50i64 {
+            mit_offenen.push(offenes(10_000 + i, 202_608_301_100));
+        }
+
+        let ohne = state_with(snap(Vec::new(), nur_echte, Vec::new()), &AppConfig::default());
+        let mit = state_with(
+            snap(Vec::new(), mit_offenen, Vec::new()),
+            &AppConfig::default(),
+        );
+
+        assert_eq!(mit.queue.len(), ohne.queue.len());
+        assert_eq!(mit.queue_truncated, ohne.queue_truncated);
+        assert_eq!(
+            mit.queue.iter().map(|m| m.match_id).collect::<Vec<_>>(),
+            ohne.queue.iter().map(|m| m.match_id).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn die_offene_liste_hat_ihren_eigenen_deckel_und_meldet_die_kappung() {
+        let mut matches = Vec::new();
+        for i in 0..(OPEN_QUEUE_LIMIT as i64 + 5) {
+            matches.push(offenes(i + 1, 202_608_301_200 + i));
+        }
+        let s = state_with(snap(Vec::new(), matches, Vec::new()), &AppConfig::default());
+
+        assert_eq!(s.open_queue.len(), OPEN_QUEUE_LIMIT);
+        assert_eq!(s.open_queue_truncated, 5);
+    }
+
+    #[test]
+    fn ein_offenes_spiel_traegt_weder_lizenznummer_noch_blocked_marke() {
+        // Datenschutz (G6): Die Lizenznummer ist das Link-Ziel der
+        // badhub-Spielerseite eines FESTSTEHENDEN Teilnehmers - ein
+        // Kandidat bekommt sie nicht.
+        let mut halb = offenes(2, 202_608_301_300);
+        halb.team1 = vec![licensed_player("Müller", "08-017991")];
+        let s = state_with(
+            snap(Vec::new(), vec![halb], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let roh = serde_json::to_string(&s.open_queue).expect("serialisierbar");
+        assert!(
+            !roh.contains("08-017991"),
+            "keine Lizenznummer an offenen Spielen: {roh}"
+        );
+        assert!(!roh.contains("blocked"), "kein blocked-Feld: {roh}");
+        assert!(
+            !roh.contains("predicted"),
+            "keine Prognose an offenen Spielen: {roh}"
+        );
     }
 
     #[test]
@@ -8801,6 +9106,27 @@ mod tests {
             "courts",
             "queue",
             "queue_truncated",
+            // Spiele mit noch offener Paarung (Spec `tl-offene-paarungen`).
+            // Die Liste trägt dieselben Angaben wie die Warteliste, nur
+            // schlanker — und ausdrücklich OHNE Lizenznummern: Die Nummer
+            // ist das Link-Ziel der badhub-Seite eines feststehenden
+            // Teilnehmers, ein Kandidat bekommt sie nicht. Der
+            // `_ids`-Pfad-Wächter weiter unten hält das strukturell fest.
+            "open_queue",
+            "open_queue_truncated",
+            // Beschriftung eines offenen Platzes: entweder die Namen der
+            // Kandidaten aus dem Vorspiel — dieselben Spielernamen, die
+            // ohnehin in der Warteliste stehen — oder „aus Spiel 42" bzw.
+            // „noch offen". Bewusst spezifisch benannt statt „candidates":
+            // Dieser Name ist hier schon für die Walkover-Vorschläge
+            // vergeben, und ein doppelt belegter Feldname macht die
+            // Whitelist stumpf.
+            "open_slot1_label",
+            "open_slot2_label",
+            // Position eines offenen Spiels in der gemeinsamen Reihenfolge —
+            // eine reine Zahl, damit die Seite mischen kann, ohne selbst zu
+            // sortieren.
+            "queue_index",
             // Walkover-Vorschläge: Mannschaftsnamen, die auch sonst überall
             // in der Ansicht stehen, plus Runde und Gegner. Die
             // Turnierleitung muss sehen, was sie da kampflos wertet.
@@ -9054,9 +9380,21 @@ mod tests {
         finished.finished_at = Some(500_000);
         finished.team1 = vec![player("Winter")];
         finished.team2 = vec![player("Sommer")];
+        // Ein Spiel mit noch offener Paarung samt seinem Vorspiel: Sonst
+        // bliebe `open_queue` leer und der Wächter sähe die
+        // `TlOpenMatch`-Felder nie — dieselbe Falle wie bei `finished`,
+        // `layouts` und `checkin_times` oben.
+        let mut vorspiel = a_match(4);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![player("Kandidat")];
+        vorspiel.team2 = vec![player("Gegenkandidat")];
+        let mut offen = a_match(5);
+        offen.from1 = Some(1001);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
         let mut schnappschuss = snap(
             vec![a_court(1, None)],
-            vec![running, a_match(2), finished],
+            vec![running, a_match(2), finished, vorspiel, offen],
             Vec::new(),
         );
         schnappschuss.officials = vec![crate::btp::model::BtpOfficial {
@@ -9167,6 +9505,11 @@ mod tests {
             !s.scorekeepers.is_empty(),
             "Fixture-Fehler: das Fixture muss einen Zähltafelbediener enthalten, \
              sonst prüft dieser Test die `TlScorekeeper`-Felder gar nicht"
+        );
+        assert!(
+            !s.open_queue.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein Spiel mit offener Paarung \
+             enthalten, sonst prüft dieser Test die `TlOpenMatch`-Felder gar nicht"
         );
         assert!(
             !s.profiles.is_empty(),
@@ -9547,6 +9890,19 @@ mod tests {
         finished.finished_at = Some(500_000);
         finished.team1 = vec![licensed_player("Winter", "08-003333")];
         finished.team2 = vec![licensed_player("Sommer", "08-004444")];
+        // Ein Spiel mit offener Paarung, dessen Vorspiel LIZENZIERTE Spieler
+        // hat (Spec `tl-offene-paarungen`): Ihre Namen dürfen als Kandidaten
+        // mitreisen, ihre Lizenznummern nicht. Ohne diesen Eintrag bliebe
+        // `open_queue` leer, und der `_ids`-Pfad-Wächter unten könnte gar
+        // nicht belegen, dass die offene Liste keine Nummern trägt.
+        let mut vorspiel = a_match(4);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![licensed_player("Kandidat", "08-007070")];
+        vorspiel.team2 = vec![licensed_player("Gegenkandidat", "08-008080")];
+        let mut offen = a_match(5);
+        offen.from1 = Some(1001);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
 
         // Wie im Allowlist-Wächter: Warteschlange der Zähltafelbediener nicht
         // leer lassen, sonst prüft dieser Test auch deren Felder nie.
@@ -9555,7 +9911,7 @@ mod tests {
         let tablet = TabletState::default();
         let mut schnappschuss = snap(
             vec![a_court(1, None)],
-            vec![running, waiting, finished],
+            vec![running, waiting, finished, vorspiel, offen],
             Vec::new(),
         );
         schnappschuss.officials = vec![crate::btp::model::BtpOfficial {
@@ -9773,6 +10129,26 @@ mod tests {
             erlaubt.len(),
             "Fixture-Fehler: es müssen alle drei Stellen belegt sein, gefunden: {fundorte:?}"
         );
+        // Die offene Liste ist bewusst NICHT unter den erlaubten Stellen:
+        // Der Zähler oben schlägt an, sobald jemand ihr `team1_ids`
+        // nachrüstet. Damit das etwas beweist, muss sie belegt sein — und
+        // der Kandidatenname muss ankommen, sonst wäre die Anzeige nutzlos.
+        let offener = s
+            .open_queue
+            .first()
+            .expect("Fixture-Fehler: die offene Liste muss belegt sein");
+        assert!(
+            offener.open_slot1_label.contains("Kandidat"),
+            "der Kandidatenname aus dem Vorspiel gehört in die Anzeige, war: {}",
+            offener.open_slot1_label
+        );
+        let offene_liste = serde_json::to_string(&s.open_queue).unwrap();
+        for nummer in ["08-007070", "08-008080"] {
+            assert!(
+                !offene_liste.contains(nummer),
+                "ein Kandidat darf keine Lizenznummer mitbringen: {offene_liste}"
+            );
+        }
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.
         assert!(json.contains("müller"));
