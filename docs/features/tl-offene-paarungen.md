@@ -318,14 +318,19 @@ Feststehen der Paarung in echte Namen umschlägt.
 
 ## Offene Fragen / Annahmen
 
-- **OF1 Freilose.** Ob BTP ein echtes Freilos als eigene `IsMatch=true`-Zeile
-  schickt (die dann dauerhaft unauflösbar in der Liste stünde) oder den Sieger
-  schon beim Anlegen des Draws in den Folge-Slot einträgt, ist am
-  Repo-Bestand **nicht entscheidbar** — die Fixtures stammen aus einem
-  5-Spieler-Testturnier ohne Setzliste. Ein Freilos-Kennzeichen existiert im
-  Protokoll nicht. **Vor der Umsetzung an einem Mitschnitt mit ungerader
-  Feldgröße nachmessen.** Fällt die Antwort ungünstig aus, ist ein Filter
-  gegen dauerhaft unauflösbare Zeilen nachzuziehen.
+- **OF1 Freilose — beantwortet am 30.08.2026 (Schritt 0).** Gemessen am
+  2-Hallen-Mitschnitt (Test `der_mitschnitt_sagt_wie_viele_spiele_mit_offenem_platz_btp_liefert`):
+  36 Paarungen, davon **22 mit offenem Platz** — und **kein einziges** Spiel,
+  das BTP mit offenem Platz bereits als entschieden oder auf dem Feld führt.
+  Es entstehen also **keine Freilos-Dauerzeilen**; der zusätzliche Ausschluss
+  in Schritt 3 entfällt.
+  **Nebenbefund mit Folgen für die Erwartung:** Von 42 offenen Plätzen haben
+  nur **8** ein auffindbares Vorspiel im selben Draw, **34** nicht (Setzplatz
+  oder Speisung über Draw-Grenzen). In diesem Mini-Turnier — fünf Spieler,
+  neun Auslosungen, KO aus Gruppen gespeist — wird also meist „noch offen"
+  stehen und selten ein Kandidatenname. Der Anteil auflösbarer Plätze wächst
+  mit der Größe der KO-Bäume; an einem echten Turnier ist er nachzumessen,
+  bevor jemand aus der seltenen Kandidatenanzeige einen Fehler ableitet.
 - **OF2 Deckelwert — beantwortet: adaptiv statt fest.** Ein schlanker Eintrag
   wiegt ~230–320 B (gegen 530–890 B je vollem Wartelisten-Eintrag). Ein fester
   Wert trägt aber nicht: Im Worst-Case-Fixture liegt der Zustand nach Opferung

@@ -525,6 +525,50 @@ In einem KO-Draw bekommt eine beendete Paarung selbst eine `EntryID` (den
 Sieger) zugewiesen und wirkt damit als Feeder-Slot für die nächste Runde –
 derselbe `(DrawID, PlanningID)`-Lookup deckt das mit ab.
 
+### Rückwärts: das Vorspiel eines offenen Platzes finden
+
+Für die Anzeige noch offener Paarungen (Spec
+[features/tl-offene-paarungen.md](features/tl-offene-paarungen.md)) wird die
+Kette **andersherum** gelesen: Zu einem offenen Platz sucht man das Spiel,
+dessen Ausgang ihn füllen wird.
+
+```
+Match.From1 (Slot-PlanningID) → Spiel o mit o.planning_id == From1
+                                 UND o.draw_id == Match.DrawID
+```
+
+Die Draw-Bindung ist auch hier zwingend — ohne sie trifft man Spiele fremder
+Auslosungen. `correction_blocker` in `tablet/tl.rs` nutzt dieselbe Kante in
+Gegenrichtung (Nachfolger statt Vorgänger).
+
+**Welche Seite den Platz füllt, sagt BTP nicht.** In einem normalen KO-Baum ist
+es der Sieger, bei Platzierungsspielen („3/4") der Verlierer. Deshalb wird der
+Rückfalltext neutral als „aus Spiel *Nr*" formuliert, nie als „Sieger aus".
+
+**Nicht jeder offene Platz hat ein Vorspiel.** Setzplätze, Freilose und
+Speisungen über Draw-Grenzen (`StageEntries`, etwa Gruppen-Qualifikanten für
+einen KO-Draw) laufen ins Leere — dort bleibt nur „noch offen".
+
+**Messung am Mitschnitt** (`tests/fixtures/btp-tournament-2halls.bin`,
+Test `der_mitschnitt_sagt_wie_viele_spiele_mit_offenem_platz_btp_liefert`,
+30.08.2026):
+
+| | |
+|---|---|
+| Paarungen mit `IsMatch=true` | 36 |
+| davon mit mindestens einem offenen Platz | 22 |
+| offene Plätze mit auffindbarem Vorspiel | 8 |
+| offene Plätze **ohne** Vorspiel | 34 |
+| Plätze mit gesetzter `EntryID`, aber unauflösbaren Namen | 0 |
+| offene Plätze an bereits entschiedenen Spielen | **0** |
+
+Die letzte Zeile ist die wichtige: Es gibt **keine** Spiele, die BTP mit
+offenem Platz als beendet führt — also keine Freilos-Zeilen, die sich nie
+füllen. Die Übermacht der Plätze ohne Vorspiel (34 zu 8) ist dagegen ein
+Artefakt dieses Mini-Turniers: Fünf Spieler, neun Auslosungen, KO-Draws, die
+aus Gruppen gespeist werden. In einem Turnier mit echten KO-Bäumen wächst der
+Anteil auflösbarer Plätze mit jeder Runde.
+
 ## Schreiben: SENDUPDATE
 
 `SENDUPDATE` schreibt ein Match-Ergebnis zurück nach BTP – die Grundlage
