@@ -1211,6 +1211,75 @@ pub(crate) fn correction_blocker(
     Some(CorrectionBlocker::Untested)
 }
 
+/// Wie ein noch offener Platz eines Spiels beschriftet wird — Spec
+/// `tl-offene-paarungen`, ADR 0052.
+///
+/// `seite` ist 1 oder 2 und meint die Mannschaft, deren Platz offen ist. Die
+/// Funktion wird **nur** für tatsächlich offene Plätze aufgerufen; für einen
+/// besetzten Platz stehen die echten Namen im Match.
+///
+/// Dreistufige Kaskade:
+/// 1. die Teilnehmer des direkten Vorspiels („Müller oder Schmidt"),
+/// 2. `aus Spiel 42`, wenn das Vorspiel selbst noch offen ist,
+/// 3. `noch offen`, wenn es kein auffindbares Vorspiel gibt.
+///
+/// Die Kante liegt in `from1`/`from2` und zeigt auf eine **Slot-PlanningID**,
+/// nicht auf ein Spiel: Das Vorspiel ist das Match mit ebendieser
+/// `planning_id` **im selben Draw** — ohne die Draw-Bindung träfe man Spiele
+/// fremder Auslosungen (docs/btp_protocol.md). Gegenrichtung derselben Kante:
+/// [`correction_blocker`].
+///
+/// Bewusst **nie** „Sieger aus": Bei Platzierungsspielen speist der Verlierer
+/// den Platz, und welche Seite es ist, sagt BTP nicht.
+///
+/// Genau **eine** Ebene tief — sonst stünden in einer frühen Runde acht Namen
+/// in einer Zeile, und die Aussage wäre wertlos.
+pub(crate) fn offener_platz_text(
+    snap: &crate::btp::model::BtpSnapshot,
+    m: &crate::btp::model::BtpMatch,
+    seite: u8,
+) -> String {
+    let from = if seite == 1 { m.from1 } else { m.from2 };
+    let Some(slot) = from else {
+        return OFFEN.to_string();
+    };
+    // Die Kante zeigt auf eine Slot-PlanningID. Ein Vorspiel gibt es nur,
+    // wenn ein Match im SELBEN Draw genau diese Position belegt; sonst
+    // speist ein Setzplatz, ein Freilos oder eine andere Auslosung.
+    let Some(vorspiel) = snap
+        .matches
+        .iter()
+        .find(|o| o.draw_id == m.draw_id && o.planning_id == slot && o.id != m.id)
+    else {
+        return OFFEN.to_string();
+    };
+    if !vorspiel.team1.is_empty() && !vorspiel.team2.is_empty() {
+        return format!(
+            "{} oder {}",
+            mannschaft_text(&vorspiel.team1),
+            mannschaft_text(&vorspiel.team2)
+        );
+    }
+    // Das Vorspiel ist selbst noch offen — hier endet die Auflösung bewusst.
+    match vorspiel.match_num {
+        Some(nr) => format!("aus Spiel {nr}"),
+        None => OFFEN.to_string(),
+    }
+}
+
+/// Beschriftung eines Platzes, über den nichts bekannt ist.
+const OFFEN: &str = "noch offen";
+
+/// Die Spieler einer Mannschaft als ein Name — beim Doppel mit Schrägstrich
+/// verbunden, damit das Paar als Einheit lesbar bleibt.
+fn mannschaft_text(spieler: &[crate::btp::model::BtpPlayer]) -> String {
+    spieler
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Übersetzt eine Ergebnis-Aktion in die BTP-Schreibvorgänge.
 ///
 /// Rein und ohne Netz. Die eigentliche Prüfung (Satz-Vollständigkeit,
@@ -4358,6 +4427,177 @@ mod tests {
         let tablet = TabletState::default();
         tablet.set_snapshot(snapshot);
         build_state(&tablet, config, 1_000_000, 7)
+    }
+
+    /// Ein Spiel, dessen Platz aus einem Vorspiel gespeist wird: `from1`
+    /// zeigt auf die PlanningID des Vorspiels im selben Draw.
+    fn folgespiel(id: i64, feeder1: Option<i64>, feeder2: Option<i64>) -> BtpMatch {
+        BtpMatch {
+            from1: feeder1,
+            from2: feeder2,
+            team1: Vec::new(),
+            team2: Vec::new(),
+            round_name: "HF".to_string(),
+            ..a_match(id)
+        }
+    }
+
+    #[test]
+    fn ein_offener_platz_nennt_die_kandidaten_des_vorspiels() {
+        // Der eigentliche Nutzen: Die Turnierleitung sieht, WER gleich
+        // gebraucht wird, bevor die Paarung feststeht.
+        let mut vorspiel = a_match(42);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![player("Müller")];
+        vorspiel.team2 = vec![player("Schmidt")];
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "Müller oder Schmidt");
+    }
+
+    #[test]
+    fn kandidaten_werden_mit_oder_getrennt_das_doppel_mit_schraegstrich() {
+        // Der Schrägstrich gehört dem Doppelpaar — sonst wäre nicht
+        // erkennbar, ob vier Namen zwei Paare oder vier Kandidaten sind.
+        let mut vorspiel = a_match(42);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![player("Müller"), player("Meier")];
+        vorspiel.team2 = vec![player("Schmidt"), player("Klein")];
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(
+            offener_platz_text(&s, &folge, 1),
+            "Müller/Meier oder Schmidt/Klein"
+        );
+    }
+
+    #[test]
+    fn ein_noch_offenes_vorspiel_faellt_auf_aus_spiel_nummer_zurueck() {
+        // Zwei Runden vor Schluss steht noch niemand fest — dann hilft
+        // wenigstens die Spielnummer, nach der die Turnierleitung sucht.
+        let mut vorspiel = folgespiel(42, None, None);
+        vorspiel.planning_id = 1001;
+        vorspiel.match_num = Some(42);
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "aus Spiel 42");
+    }
+
+    #[test]
+    fn die_beschriftung_sagt_nie_sieger_denn_auch_der_verlierer_speist() {
+        // Bei Platzierungsspielen („3/4") füllt der VERLIERER den Platz.
+        // Welche Seite es ist, sagt BTP nicht — also behaupten wir es nicht.
+        let mut vorspiel = folgespiel(42, None, None);
+        vorspiel.planning_id = 1001;
+        vorspiel.match_num = Some(42);
+        let mut folge = folgespiel(80, Some(1001), None);
+        folge.round_name = "3/4".to_string();
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        let text = offener_platz_text(&s, &folge, 1);
+        assert!(
+            !text.contains("Sieger") && !text.contains("Verlierer"),
+            "die Herkunft wird neutral benannt, war aber: {text}"
+        );
+    }
+
+    #[test]
+    fn ein_vorspiel_ohne_spielnummer_heisst_noch_offen() {
+        // Ohne Nummer trägt „aus Spiel" keine Information mehr.
+        let mut vorspiel = folgespiel(42, None, None);
+        vorspiel.planning_id = 1001;
+        vorspiel.match_num = None;
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ohne_auffindbares_vorspiel_heisst_der_platz_noch_offen() {
+        // Setzplatz, Freilos oder Speisung über Draw-Grenzen: `from1` zeigt
+        // auf einen Slot, zu dem es kein Spiel gibt. Am Mitschnitt ist das
+        // der HÄUFIGSTE Fall (34 von 42 offenen Plätzen).
+        let folge = folgespiel(80, Some(9999), None);
+        let s = snap(Vec::new(), vec![folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ein_platz_ohne_from_kante_heisst_noch_offen() {
+        let folge = folgespiel(80, None, None);
+        let s = snap(Vec::new(), vec![folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ein_slot_mit_gleicher_planning_id_aus_einem_fremden_draw_zaehlt_nicht() {
+        // PlanningIDs sind nur je Draw eindeutig. Ohne Draw-Bindung löste die
+        // Anzeige zu wildfremden Spielern auf — derselbe Fehler, der einmal
+        // 95 % aller Teilnehmer eines 116-Draw-Turniers verdreht hat.
+        let mut fremd = a_match(42);
+        fremd.draw_id = 7;
+        fremd.planning_id = 1001;
+        fremd.team1 = vec![player("Fremd")];
+        fremd.team2 = vec![player("Falsch")];
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![fremd, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ein_halb_aufgeloester_platz_wird_neutral_beschriftet() {
+        // Die Mannschaft steht (EntryID gesetzt), nur die Namen sind nicht
+        // auflösbar. `from1` zeigt dann auf einen Teilnehmer-Slot, nicht auf
+        // ein Spiel — es gibt nichts zu nennen.
+        let mut folge = folgespiel(80, Some(1000), None);
+        folge.entry1_id = 7;
+        let s = snap(Vec::new(), vec![folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn die_zweite_seite_liest_ihre_eigene_kante() {
+        let mut vorspiel = a_match(43);
+        vorspiel.planning_id = 1002;
+        vorspiel.team1 = vec![player("Weber")];
+        vorspiel.team2 = vec![player("Fischer")];
+        let folge = folgespiel(80, None, Some(1002));
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 2), "Weber oder Fischer");
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn die_aufloesung_geht_genau_eine_ebene_tief_und_rekursiert_nie() {
+        // Das Vorspiel ist selbst offen, SEIN Vorspiel hätte Namen. Die
+        // dürfen nicht durchschlagen: In der Runde davor stünden vier, eine
+        // weitere davor acht Namen in einer Zeile.
+        let mut grossvater = a_match(10);
+        grossvater.planning_id = 1000;
+        grossvater.team1 = vec![player("Tief")];
+        grossvater.team2 = vec![player("Tiefer")];
+        let mut vater = folgespiel(42, Some(1000), None);
+        vater.planning_id = 1001;
+        vater.match_num = Some(42);
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(
+            Vec::new(),
+            vec![grossvater, vater, folge.clone()],
+            Vec::new(),
+        );
+
+        let text = offener_platz_text(&s, &folge, 1);
+        assert_eq!(text, "aus Spiel 42");
+        assert!(!text.contains("Tief"), "keine Enkel-Kandidaten: {text}");
     }
 
     #[test]
