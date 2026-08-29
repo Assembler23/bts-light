@@ -196,12 +196,14 @@ pub fn ready_queue(
     let mut ordered: Vec<(ManualOrderSortKey, i64)> = snap
         .matches
         .iter()
-        .filter(|m| {
-            m.status == MatchStatus::Scheduled
-                && !m.team1.is_empty()
-                && !m.team2.is_empty()
-                && !called_match_ids.contains(&m.id)
-        })
+        // Auch Spiele mit noch offener Paarung gehören hierher (Spec
+        // `tl-offene-paarungen`, ADR 0053): Diese Liste ist das Ziel jeder
+        // Umsortierung, und was die Turnierleitung sieht, muss sie auch
+        // greifen können. Stünde ein offenes Spiel nicht darin, verwürfe
+        // `QueueOrderStore::reorder` den Zug still — und die Seite meldete
+        // trotzdem Erfolg. Aufs Feld kommen sie deshalb nicht: Das verhindert
+        // `check_assign` (MatchNotPlayable) und die Vergabe selbst.
+        .filter(|m| m.status == MatchStatus::Scheduled && !called_match_ids.contains(&m.id))
         .map(|m| {
             let manual = manual_halls.get(&m.id).map(String::as_str);
             let auto = auto_halls.get(&m.id).map(String::as_str);
@@ -1725,6 +1727,104 @@ mod tests {
         order.reorder(&liste, 2, Some(1));
         let liste2 = ready_queue(&config, &s, &manual, &HashMap::new(), &called, &order);
         assert_eq!(liste2, vec![2, 1], "Präfix wirkt in der effektiven Liste");
+    }
+
+    #[test]
+    fn ready_queue_nimmt_offene_spiele_auf() {
+        // ADR 0053: Offene Spiele nehmen an der globalen manuellen
+        // Reihenfolge teil — sonst wäre jeder Zug an ihnen ein stiller
+        // No-Op mit grüner Erfolgsmeldung.
+        use crate::tablet::queue_order::QueueOrderStore;
+        use std::collections::HashSet;
+
+        let mut echt = a_match(1);
+        echt.planned_time = Some(202_608_301_200);
+        let mut offen = a_match(2);
+        offen.planned_time = Some(202_608_301_300);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
+
+        let s = snap(Vec::new(), vec![echt, offen], Vec::new());
+        let liste = ready_queue(
+            &AppConfig::default(),
+            &s,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashSet::new(),
+            &QueueOrderStore::default(),
+        );
+        assert_eq!(liste, vec![1, 2]);
+    }
+
+    #[test]
+    fn ein_gerufenes_spiel_bleibt_auch_neben_offenen_spielen_aussen_vor() {
+        use crate::tablet::queue_order::QueueOrderStore;
+        use std::collections::HashSet;
+
+        let mut gerufen = a_match(1);
+        gerufen.planned_time = Some(202_608_301_100);
+        let mut offen = a_match(2);
+        offen.planned_time = Some(202_608_301_300);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
+
+        let s = snap(Vec::new(), vec![gerufen, offen], Vec::new());
+        let called: HashSet<i64> = [1].into_iter().collect();
+        let liste = ready_queue(
+            &AppConfig::default(),
+            &s,
+            &HashMap::new(),
+            &HashMap::new(),
+            &called,
+            &QueueOrderStore::default(),
+        );
+        assert_eq!(liste, vec![2], "das gerufene Spiel bleibt draußen");
+    }
+
+    #[test]
+    fn die_reihenfolge_der_echten_spiele_aendert_sich_durch_offene_nicht() {
+        // Die Zusage aus ADR 0053: Offene Spiele reihen sich EIN, sie
+        // sortieren nichts um.
+        use crate::tablet::queue_order::QueueOrderStore;
+        use std::collections::HashSet;
+
+        let mut e1 = a_match(1);
+        e1.planned_time = Some(202_608_301_200);
+        let mut e2 = a_match(3);
+        e2.planned_time = Some(202_608_301_400);
+        let mut offen = a_match(2);
+        offen.planned_time = Some(202_608_301_300);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
+
+        let cfg = AppConfig::default();
+        let order = QueueOrderStore::default();
+        let leer = HashSet::new();
+
+        let ohne = ready_queue(
+            &cfg,
+            &snap(Vec::new(), vec![e1.clone(), e2.clone()], Vec::new()),
+            &HashMap::new(),
+            &HashMap::new(),
+            &leer,
+            &order,
+        );
+        let mit = ready_queue(
+            &cfg,
+            &snap(Vec::new(), vec![e1, offen, e2], Vec::new()),
+            &HashMap::new(),
+            &HashMap::new(),
+            &leer,
+            &order,
+        );
+
+        assert_eq!(ohne, vec![1, 3]);
+        assert_eq!(mit, vec![1, 2, 3]);
+        assert_eq!(
+            mit.iter().filter(|id| **id != 2).copied().collect::<Vec<_>>(),
+            ohne,
+            "ohne die offenen bleibt exakt die alte Abfolge übrig"
+        );
     }
 
     #[test]
