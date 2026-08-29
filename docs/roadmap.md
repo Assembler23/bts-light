@@ -402,6 +402,23 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Offene Paarungen in der TL-Spielliste** — Spec:
+  [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md),
+  ADR [0051](adr/0051-offene-spiele-eigene-gedeckelte-liste.md) /
+  [0052](adr/0052-beschriftung-offener-plaetze.md) /
+  [0053](adr/0053-offene-spiele-in-der-manuellen-reihenfolge.md).
+  Aus der Nutzer-Idee vom 29.08.2026: Spiele, deren Teilnehmer noch nicht
+  feststehen, fehlen in der TL-Liste komplett, obwohl BTP sie führt — am
+  2-Hallen-Mitschnitt tragen 22 von 36 Spielzeilen mindestens einen offenen
+  Platz. Künftig erscheinen sie eingereiht, mit den Kandidaten aus dem Vorspiel
+  beschriftet („Müller oder Schmidt" → „aus Spiel 42" → „noch offen"), per
+  Geräteschalter ausblendbar (Standard: an). Sie nehmen an der manuellen
+  Reihenfolge teil, aber **nicht** an Feldvergabe, Vorbereitungs-Aufruf und
+  Startzeit-Prognose. Umsetzung in 14 Schritten, Ziel v0.9.273.
+  **Vorbedingung:** Messung, ob BTP Freilose als eigene Spielzeile liefert
+  (Schritt 0) — an den vorhandenen Fixtures nicht entscheidbar.
+  Reihenfolge: **vor** Spur B des Verschiebe-Modus umsetzen.
+
 - **Spiele umsortieren ohne langes Ziehen (TL-Web)** — Spec:
   [features/tl-spielliste-sprung-umsortieren.md](features/tl-spielliste-sprung-umsortieren.md),
   [ADR 0050](adr/0050-verschiebe-modus-globales-einfuegeziel.md).
