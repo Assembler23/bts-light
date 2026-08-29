@@ -1383,6 +1383,31 @@ impl TabletState {
     /// Die Reihenfolge gilt turnierweit, nicht je Halle (ADR 0026).
     /// Liefert `false`, wenn das Match nicht (mehr) im aktuellen Snapshot
     /// steht.
+    /// Wie weit die Turnierleitungs-Seite die Liste zeigen konnte.
+    ///
+    /// Wartende und offene Spiele haben getrennte Deckel
+    /// ([`tl::QUEUE_LIMIT`] und [`tl::OPEN_QUEUE_LIMIT`]), also werden sie
+    /// auch getrennt gezählt. Zurück kommt die Länge bis **hinter den
+    /// letzten sichtbaren Eintrag**.
+    fn sichtbare_laenge_intern(effective: &[i64], offene: &HashSet<i64>) -> usize {
+        let mut wartend = 0usize;
+        let mut offen = 0usize;
+        let mut bis = 0usize;
+        for (i, id) in effective.iter().enumerate() {
+            let sichtbar = if offene.contains(id) {
+                offen += 1;
+                offen <= crate::tablet::tl::OPEN_QUEUE_LIMIT
+            } else {
+                wartend += 1;
+                wartend <= crate::tablet::tl::QUEUE_LIMIT
+            };
+            if sichtbar {
+                bis = i + 1;
+            }
+        }
+        bis
+    }
+
     pub fn queue_reorder(
         &self,
         config: &crate::config::AppConfig,
@@ -1410,16 +1435,30 @@ impl TabletState {
             &called,
             &self.queue_order,
         );
-        // TL-Web zeigt nur die ersten `QUEUE_LIMIT` Spiele
-        // (`tl::build_state_limited`) — der neue Präfix darf serverseitig nie
-        // mehr Spiele umfassen, als die ziehende Oberfläche überhaupt zeigen
-        // konnte. Sonst zöge ein Zug ans (dort unsichtbare) Ende der vollen
-        // Liste Spiele in den Präfix, die auf TL-Web niemand gesehen hat
-        // (Code-Review-Fund 14.08.2026). Das gezogene und das Zielspiel
-        // selbst bleiben immer erreichbar — auch wenn sie (nur vom
-        // unbegrenzten Desktop-Weg aus möglich) jenseits der Grenze liegen.
+        // TL-Web zeigt nur die ersten `QUEUE_LIMIT` wartenden **und** die
+        // ersten `OPEN_QUEUE_LIMIT` offenen Spiele (`tl::build_state_limited`)
+        // — der neue Präfix darf serverseitig nie mehr Spiele umfassen, als
+        // die ziehende Oberfläche überhaupt zeigen konnte. Sonst zöge ein Zug
+        // ans (dort unsichtbare) Ende der vollen Liste Spiele in den Präfix,
+        // die auf TL-Web niemand gesehen hat (Code-Review-Fund 14.08.2026).
+        //
+        // Seit die Liste auch offene Paarungen führt (Spec
+        // `tl-offene-paarungen`, ADR 0053), reicht eine einzelne Zahl dafür
+        // nicht mehr: Beide Sorten haben ihren eigenen Deckel, also werden
+        // sie auch getrennt gezählt. Ohne offene Spiele fällt die Rechnung
+        // exakt auf `QUEUE_LIMIT` zurück — der Bestandstest daneben belegt es.
+        //
+        // Das gezogene und das Zielspiel selbst bleiben immer erreichbar —
+        // auch wenn sie (nur vom unbegrenzten Desktop-Weg aus möglich)
+        // jenseits der Grenze liegen.
+        let offene: HashSet<i64> = snap
+            .matches
+            .iter()
+            .filter(|m| m.team1.is_empty() || m.team2.is_empty())
+            .map(|m| m.id)
+            .collect();
         let visible = [
-            Some(crate::tablet::tl::QUEUE_LIMIT),
+            Some(Self::sichtbare_laenge_intern(&effective, &offene)),
             effective
                 .iter()
                 .position(|id| *id == match_id)
@@ -6563,6 +6602,62 @@ mod tests {
         assert_eq!(st.queue_order_store().rank(125), None);
         // Das gezogene Match selbst landet weiterhin im Präfix.
         assert!(st.queue_order_store().rank(119).is_some());
+    }
+
+    #[test]
+    fn ein_offenes_spiel_laesst_sich_umsortieren() {
+        // ADR 0053: Was die Turnierleitung sieht, muss sie auch greifen
+        // können — sonst meldet die Seite Erfolg und nichts geschieht.
+        let mut offen = match_on(2, None, MatchStatus::Scheduled);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, None, MatchStatus::Scheduled), offen],
+            Vec::new(),
+        ));
+
+        assert!(st.queue_reorder(&crate::config::AppConfig::default(), 2, Some(1)));
+        assert_eq!(
+            st.queue_order_store().rank(2),
+            Some(0),
+            "das offene Spiel steht jetzt vorn"
+        );
+    }
+
+    #[test]
+    fn der_sichtbare_praefix_zaehlt_echte_und_offene_spiele_getrennt() {
+        // Mit 120 wartenden Spielen ist der Wartelisten-Deckel erreicht; die
+        // offenen dahinter zeigt TL-Web trotzdem (eigener Deckel). Ein Zug
+        // ans Ende muss deshalb WIRKLICH ans Ende gehen — mit einer einzigen
+        // Zahl als Grenze bliebe das gezogene Spiel vor den offenen hängen,
+        // obwohl die Turnierleitung sie sehr wohl vor sich hat.
+        let mut matches: Vec<BtpMatch> = (1..=crate::tablet::tl::QUEUE_LIMIT as i64)
+            .map(|id| match_on(id, None, MatchStatus::Scheduled))
+            .collect();
+        for id in 900..=904 {
+            let mut offen = match_on(id, None, MatchStatus::Scheduled);
+            offen.team1 = Vec::new();
+            offen.team2 = Vec::new();
+            matches.push(offen);
+        }
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(matches, Vec::new()));
+
+        assert!(st.queue_reorder(&crate::config::AppConfig::default(), 1, None));
+
+        let rang_gezogen = st
+            .queue_order_store()
+            .rank(1)
+            .expect("das gezogene Spiel steht im Präfix");
+        let rang_letztes_offenes = st
+            .queue_order_store()
+            .rank(904)
+            .expect("das letzte offene Spiel war sichtbar und gehört in den Präfix");
+        assert!(
+            rang_gezogen > rang_letztes_offenes,
+            "ans Ende gezogen heißt hinter das letzte sichtbare Spiel, war {rang_gezogen} vs. {rang_letztes_offenes}"
+        );
     }
 
     #[test]
