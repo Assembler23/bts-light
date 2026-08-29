@@ -852,9 +852,21 @@ pub(crate) fn state_for_relay(
     // beim Zuschneiden mitwachsen, sonst zählte sie nur die Kappung des
     // LAN-Limits (120) und verschwiege die des Relay-Limits.
     let voll = state.queue.len() + state.queue_truncated;
+    // Die offenen Spiele werden ZULETZT aufgefüllt und damit ZUERST geopfert
+    // (Spec `tl-offene-paarungen`, ADR 0051). Sie kommen deshalb hier heraus:
+    // Die Leiter darunter entscheidet unverändert über die Arbeitsliste, und
+    // erst danach kommt zurück, was noch ins Fenster passt.
+    //
+    // Ein fester Zahlenwert ginge hier fehl. Im dokumentierten Worst Case
+    // (26 belegte Felder, 30 Ergebnisse) liegt der Zustand schon ohne sie bei
+    // gut 55 KiB — dort passt keine feste Zahl —, während ein mittleres
+    // Turnier mühelos hundert offene Einträge trüge.
+    let offene = std::mem::take(&mut state.open_queue);
+    let offene_gesamt = offene.len() + state.open_queue_truncated;
+    state.open_queue_truncated = offene_gesamt;
     let json = serde_json::to_string(&state).unwrap_or_default();
     if json.len() <= relay_proto::MAX_TL_STATE_LEN && state.queue.len() <= STUFEN[0] {
-        return (json, rev);
+        return offene_auffuellen(state, offene, offene_gesamt, rev, json);
     }
     for limit in STUFEN {
         if state.queue.len() > limit {
@@ -863,7 +875,7 @@ pub(crate) fn state_for_relay(
         }
         let json = serde_json::to_string(&state).unwrap_or_default();
         if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-            return (json, rev);
+            return offene_auffuellen(state, offene, offene_gesamt, rev, json);
         }
     }
     // Vorletzte Rettung: das additive Anfangszeiten-Panel opfern —
@@ -874,7 +886,7 @@ pub(crate) fn state_for_relay(
     state.checkin_times = None;
     let json = serde_json::to_string(&state).unwrap_or_default();
     if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-        return (json, rev);
+        return offene_auffuellen(state, offene, offene_gesamt, rev, json);
     }
     // Vorletzte Stufe: die Spielzeiten-Auswertung. Sie trägt seit der
     // Achsen-Erweiterung (Spec `tl-sicht-feinschliff`, Punkt 1) VIER
@@ -886,7 +898,7 @@ pub(crate) fn state_for_relay(
     state.time_stats = None;
     let json = serde_json::to_string(&state).unwrap_or_default();
     if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-        return (json, rev);
+        return offene_auffuellen(state, offene, offene_gesamt, rev, json);
     }
     // Letzte Rettung vor der Aufgabe: die Ergebnisliste stutzen. Ebenfalls
     // reine Rückschau — die Felder dagegen sind das Bedienelement der Seite
@@ -902,14 +914,14 @@ pub(crate) fn state_for_relay(
             state.finished.truncate(limit);
             let json = serde_json::to_string(&state).unwrap_or_default();
             if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-                return (json, rev);
+                return offene_auffuellen(state, offene, offene_gesamt, rev, json);
             }
         }
     }
     let letzte_rev = rev;
     let letzte = serde_json::to_string(&state).unwrap_or_default();
     if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
-        return (letzte, letzte_rev);
+        return offene_auffuellen(state, offene, offene_gesamt, letzte_rev, letzte);
     }
     // Selbst die kürzeste Stufe passt nicht — dann liegt es nicht an der
     // Warteliste. Lieber den zu großen Stand schicken und den Relay
@@ -922,6 +934,41 @@ pub(crate) fn state_for_relay(
         relay_proto::MAX_TL_STATE_LEN
     );
     (letzte, letzte_rev)
+}
+
+/// Legt so viele offene Spiele in den fertig zugeschnittenen Zustand zurück,
+/// wie das Relay-Fenster noch hergibt (Spec `tl-offene-paarungen`, ADR 0051).
+///
+/// `ohne_offene` ist der bereits serialisierte Zustand ohne sie — passt keine
+/// einzige Zeile mehr dazu, geht genau der hinaus, und es kostet keine
+/// zusätzliche Serialisierung. Ein Turnier ohne offene Spiele merkt von
+/// dieser Stufe deshalb gar nichts.
+fn offene_auffuellen(
+    mut state: TlState,
+    offene: Vec<TlOpenMatch>,
+    gesamt: usize,
+    rev: u64,
+    ohne_offene: String,
+) -> (String, u64) {
+    if offene.is_empty() {
+        return (ohne_offene, rev);
+    }
+    // Dieselbe Staffelung wie bei der Warteliste: wenige, vorhersagbare
+    // Größen sind im Betrieb leichter zu erklären als eine Zahl, die bei
+    // jedem Abruf anders ausfällt.
+    const OFFEN_STUFEN: [usize; 4] = [40, 20, 10, 5];
+    for stufe in OFFEN_STUFEN {
+        let nehmen = stufe.min(offene.len());
+        state.open_queue = offene[..nehmen].to_vec();
+        state.open_queue_truncated = gesamt.saturating_sub(nehmen);
+        let json = serde_json::to_string(&state).unwrap_or_default();
+        if json.len() <= relay_proto::MAX_TL_STATE_LEN {
+            return (json, rev);
+        }
+    }
+    // Nicht einmal fünf passen: Dann geht der Stand ohne offene Spiele
+    // hinaus. Die Arbeitsliste ist wichtiger als die Vorschau.
+    (ohne_offene, rev)
 }
 
 /// Fingerabdruck des Zustands **ohne** Uhrzeit.
@@ -6828,6 +6875,109 @@ mod tests {
         assert_eq!(relay_rev, relay_rev2, "ohne Änderung keine neue Revision");
         let lan2 = build_state_with_rev(&tablet, &cfg, 1_120_000);
         assert_eq!(lan.rev, lan2.rev);
+    }
+
+    /// Ein Turnier mit `echte` spielbereiten und `offen` offenen Spielen,
+    /// alle mit Lizenznummern — so wiegt das Fixture so viel wie ein echter
+    /// Zustand.
+    fn turnier_mit_offenen(echte: i64, offen: i64) -> TabletState {
+        let tablet = TabletState::default();
+        let mut matches = Vec::new();
+        for i in 0..echte {
+            let mut m = a_match(100 + i);
+            m.planned_time = Some(202_608_301_200 + i);
+            m.team1 = vec![licensed_player("Langername Eins", "08-001234")];
+            m.team2 = vec![licensed_player("Langername Zwei", "08-005678")];
+            matches.push(m);
+        }
+        for i in 0..offen {
+            let mut m = folgespiel(5_000 + i, None, None);
+            m.planned_time = Some(202_608_301_100 + i);
+            matches.push(m);
+        }
+        tablet.set_snapshot(snap(vec![a_court(3, None)], matches, Vec::new()));
+        tablet
+    }
+
+    #[test]
+    fn die_warteliste_wird_durch_offene_spiele_keine_stufe_kuerzer() {
+        // Das Erfolgskriterium der Spec, als Beweis: Derselbe Stand einmal
+        // mit und einmal ohne offene Spiele muss über die Cloud dieselbe
+        // Arbeitsliste liefern. Sonst sähe ein Cloud-Gerät nach dem Update
+        // WENIGER echte Spiele als vorher.
+        let cfg = AppConfig::default();
+        let (ohne, _) = state_for_relay(&turnier_mit_offenen(200, 0), &cfg, 1_000_000);
+        let (mit, _) = state_for_relay(&turnier_mit_offenen(200, 150), &cfg, 1_000_000);
+        let ohne: serde_json::Value = serde_json::from_str(&ohne).unwrap();
+        let mit: serde_json::Value = serde_json::from_str(&mit).unwrap();
+
+        assert_eq!(
+            mit["queue"].as_array().unwrap().len(),
+            ohne["queue"].as_array().unwrap().len(),
+            "offene Spiele dürfen die Arbeitsliste keine Stufe kosten"
+        );
+        assert_eq!(mit["queue_truncated"], ohne["queue_truncated"]);
+    }
+
+    #[test]
+    fn der_cloud_zustand_opfert_die_offenen_spiele_vor_der_warteliste() {
+        // Offene Spiele sind ein Anzeige-Extra: Wird der Platz knapp,
+        // verschwinden sie ZUERST — und melden das ehrlich.
+        let cfg = AppConfig::default();
+        let (json, _) = state_for_relay(&turnier_mit_offenen(200, 150), &cfg, 1_000_000);
+        let state: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        let gezeigt = state["open_queue"].as_array().unwrap().len();
+        let gekappt = state["open_queue_truncated"].as_u64().unwrap() as usize;
+        assert_eq!(
+            gezeigt + gekappt,
+            150,
+            "gezeigt + gemeldet muss die volle offene Liste ergeben"
+        );
+        assert!(
+            gezeigt < 150,
+            "bei 200 echten Spielen kann nicht auch noch alles Offene passen"
+        );
+    }
+
+    #[test]
+    fn ein_grosses_turnier_bleibt_auch_mit_offenen_spielen_unter_der_relay_grenze() {
+        // Reißt die Grenze, verwirft der Relay das ganze Frame samt
+        // Vorgänger — die Cloud-Turnierleitung sähe GAR NICHTS mehr.
+        let cfg = AppConfig::default();
+        let (json, _) = state_for_relay(&turnier_mit_offenen(400, 400), &cfg, 1_000_000);
+        assert!(
+            json.len() <= relay_proto::MAX_TL_STATE_LEN,
+            "Zustand zu groß: {} von {}",
+            json.len(),
+            relay_proto::MAX_TL_STATE_LEN
+        );
+    }
+
+    #[test]
+    fn die_revision_bleibt_an_der_vollen_fassung_haengen_auch_mit_offener_liste() {
+        // Rev-Churn-Wächter: Die Revision entsteht aus dem VOLLEN Zustand.
+        // Käme sie aus der zugeschnittenen Fassung, kippte der geteilte
+        // Zähler bei jedem Takt hin und her und jede Seite lüde im
+        // Sekundentakt neu.
+        let tablet = turnier_mit_offenen(200, 150);
+        let cfg = AppConfig::default();
+        let lan = build_state_with_rev(&tablet, &cfg, 1_000_000);
+        let (_json, relay_rev) = state_for_relay(&tablet, &cfg, 1_000_000);
+        assert_eq!(lan.rev, relay_rev);
+
+        let (_json2, relay_rev2) = state_for_relay(&tablet, &cfg, 1_060_000);
+        assert_eq!(relay_rev, relay_rev2, "ohne Änderung keine neue Revision");
+    }
+
+    #[test]
+    fn ein_turnier_ohne_offene_spiele_wird_genauso_zugeschnitten_wie_bisher() {
+        // Gegenprobe: Die zusätzliche Stufe darf am Bestand nichts ändern.
+        let cfg = AppConfig::default();
+        let (json, _) = state_for_relay(&turnier_mit_offenen(200, 0), &cfg, 1_000_000);
+        let state: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(state["open_queue"].as_array().unwrap().is_empty());
+        assert_eq!(state["open_queue_truncated"].as_u64().unwrap(), 0);
     }
 
     #[test]

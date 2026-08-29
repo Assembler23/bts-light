@@ -331,13 +331,16 @@ Feststehen der Paarung in echte Namen umschlägt.
   stehen und selten ein Kandidatenname. Der Anteil auflösbarer Plätze wächst
   mit der Größe der KO-Bäume; an einem echten Turnier ist er nachzumessen,
   bevor jemand aus der seltenen Kandidatenanzeige einen Fehler ableitet.
-- **OF2 Deckelwert — beantwortet: adaptiv statt fest.** Ein schlanker Eintrag
-  wiegt ~230–320 B (gegen 530–890 B je vollem Wartelisten-Eintrag). Ein fester
-  Wert trägt aber nicht: Im Worst-Case-Fixture liegt der Zustand nach Opferung
-  von `time_stats` bereits bei 55 286 B, während ein mittleres Turnier mühelos
-  100 offene Einträge trüge. Deshalb der Host-Deckel `OPEN_QUEUE_LIMIT` plus
-  adaptive Auffüllung über die Cloud (ADR 0051). Offen bleibt nur der konkrete
-  Wert von `OPEN_QUEUE_LIMIT`, gemessen im Umsetzungsschritt 5.
+- **OF2 Deckelwert — beantwortet am 30.08.2026 (Schritt 5).** Am Host gilt
+  `OPEN_QUEUE_LIMIT = 120`, dieselbe Grenze wie für die Warteliste. Über die
+  Cloud entscheidet **keine feste Zahl**, sondern die Reihenfolge: Die
+  bestehende Leiter schneidet zuerst unverändert die Arbeitsliste zu, danach
+  füllt `offene_auffuellen` die offene Liste über `[40, 20, 10, 5]` so weit
+  auf, wie das 64-KiB-Fenster hergibt — und lässt sie ganz weg, wenn nicht
+  einmal fünf passen. Ein fester Wert wäre falsch: Im dokumentierten Worst
+  Case liegt der Zustand schon ohne offene Spiele bei gut 55 KiB, während ein
+  mittleres Turnier mühelos hundert Einträge trüge. Ein Turnier ohne offene
+  Spiele kostet die neue Stufe **keine** zusätzliche Serialisierung.
 - **OF3 Stiller No-Op — entschärft, nicht beseitigt.** `QueueReorder` antwortet
   heute auch dann `ok: true`, wenn `queue_order.rs:161` den Zug still verwirft.
   Nach G3 steht jedes angezeigte offene Spiel in `ready_queue`, und der
