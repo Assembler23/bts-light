@@ -1073,6 +1073,17 @@ pub struct TlDisplaySettings {
     /// und auch bei laufendem Spiel (Feldtest 17.08.2026). Default aus:
     /// Dann endet der Knopf wie bisher nach dem dritten Aufruf.
     pub unlimited_court_calls: bool,
+    /// Spiele mit noch offener Paarung **ausblenden** (Spec
+    /// `tl-offene-paarungen`).
+    ///
+    /// **Bewusst invertiert benannt.** `TlDisplaySettings` ist
+    /// `#[serde(default)]` mit reinen `bool`s — ein Feld, das in einer
+    /// bestehenden `config.json` fehlt, kommt als `false` zurück. Hieße das
+    /// Feld `show_open_matches`, stünde jedes Bestandsprofil nach dem
+    /// Auto-Update auf „aus", und niemand sähe die neue Anzeige, bis er den
+    /// Schalter findet. So herum gilt für alle Profile — alte wie neue — der
+    /// gewollte Standard „anzeigen".
+    pub hide_open_matches: bool,
     pub list_position: TlListPosition,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
     /// Gehört ins Profil und nicht ins Gerät: Sie beschreibt, WAS gezeigt
@@ -1485,6 +1496,7 @@ mod tests {
                 show_round: true,
                 show_group: false,
                 show_court_remaining: true,
+                hide_open_matches: false,
                 unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
                 time_stats_axis: Default::default(),

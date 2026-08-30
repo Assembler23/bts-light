@@ -3941,6 +3941,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             show_round: p.display.show_round,
             show_group: p.display.show_group,
             show_court_remaining: p.display.show_court_remaining,
+            hide_open_matches: p.display.hide_open_matches,
             unlimited_court_calls: p.display.unlimited_court_calls,
             list_position: match p.display.list_position {
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
@@ -3992,6 +3993,7 @@ fn display_settings_from_wire(
         show_round: d.show_round,
         show_group: d.show_group,
         show_court_remaining: d.show_court_remaining,
+        hide_open_matches: d.hide_open_matches,
         unlimited_court_calls: d.unlimited_court_calls,
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
@@ -4818,6 +4820,45 @@ mod tests {
         let mut m = folgespiel(id, None, None);
         m.planned_time = Some(zeit);
         m
+    }
+
+    #[test]
+    fn der_schalter_offene_spiele_ausblenden_reist_in_beide_richtungen() {
+        // Der Schalter wirkt clientseitig — aber er muss den Weg zum Gerät
+        // und zurück überstehen, sonst stünde das Häkchen beim nächsten
+        // Laden wieder anders.
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "p1".into(),
+            name: "Wandmonitor".into(),
+            display: crate::config::TlDisplaySettings {
+                hide_open_matches: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let sicht = profiles_view(&cfg);
+        let wire = sicht.iter().find(|p| p.id == "p1").expect("das Profil");
+        assert!(
+            wire.display.hide_open_matches,
+            "der Schalter muss zum Gerät reisen"
+        );
+
+        let zurueck = display_settings_from_wire(&wire.display);
+        assert!(
+            zurueck.hide_open_matches,
+            "und aus dem Gerät zurück in die Konfiguration"
+        );
+    }
+
+    #[test]
+    fn eine_bestandskonfiguration_ohne_das_feld_zeigt_offene_spiele() {
+        // G7: Nach dem Auto-Update steht jedes bestehende Profil auf
+        // „anzeigen" — ohne dass jemand etwas tun muss.
+        let alt = r#"{"show_numbers":true,"show_nations":false,"list_position":"bottom"}"#;
+        let d: crate::config::TlDisplaySettings = serde_json::from_str(alt).expect("lesbar");
+        assert!(!d.hide_open_matches);
     }
 
     #[test]
@@ -9619,6 +9660,10 @@ mod tests {
             // Profil-Schalter „Aufrufe unbegrenzt" (Feldtest 17.08.2026) —
             // ebenfalls ein Anzeige-Häkchen, kein Personenbezug.
             "unlimitedCourtCalls",
+            // Profil-Schalter „offene Paarungen ausblenden" (Spec
+            // `tl-offene-paarungen`) — ebenfalls nur ein Häkchen. Invertiert
+            // benannt, damit ein Profil ohne das Feld auf „anzeigen" steht.
+            "hideOpenMatches",
             "listPosition",
             // Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`)
             // — reine Anzeige-Präferenz wie die Häkchen daneben, ein Wort
@@ -9740,6 +9785,7 @@ mod tests {
                 show_group: true,
                 show_court_remaining: true,
                 unlimited_court_calls: true,
+                hide_open_matches: false,
                 list_position: crate::config::TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
             },
