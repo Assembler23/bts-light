@@ -577,6 +577,15 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row .who { font-weight: 600; }
 .row .draw { font-size: .85rem; color: var(--ink-soft); }
 .row.blocked { background: #f8fafc; }
+/* Spiele mit noch offener Paarung (Spec `tl-offene-paarungen`): eine
+   Vorschau auf den Turnierverlauf, kein Arbeitsvorrat. Deshalb bewusst
+   zurückgenommen — nicht ausgegraut (dann wirkte die Zeile kaputt), aber
+   ruhiger als die Zeilen, an denen die Turnierleitung wirklich arbeitet.
+   Die eigentliche Aussage trägt die Marke „noch offen"; die Farbe ist nur
+   die Beiläufigkeit dazu. */
+.row.offen { background: #fcfcfd; }
+.row.offen .who { color: #64748b; }
+.paar .offen-seite { font-style: italic; }
 /* Der Statusblock: EIN Flex-Kind, beliebig viele Marken darin (siehe die
    Rechnung oben). Umbrechend, damit vier Marken auf einem Telefon die Zeile
    nicht sprengen. */
@@ -1772,6 +1781,9 @@ function builtInProfile() {
       showDiscipline: true, showRound: true, showGroup: true,
       showCourtRemaining: false,
       unlimitedCourtCalls: false,
+      // Offene Paarungen anzeigen (Spec `tl-offene-paarungen`): Das Feld
+      // heißt invertiert, `false` ist also der Standard „anzeigen".
+      hideOpenMatches: false,
       // Abgelöst durch `columns`/`column` (Plan tl-liste-vereinfachen F),
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
@@ -1975,6 +1987,19 @@ function zeigeRundeAktiv() { return !!activeDisplay().showRound; }
 function zeigeGruppeAktiv() { return !!activeDisplay().showGroup; }
 function zeigeRestzeitAktiv() { return !!activeDisplay().showCourtRemaining; }
 function aufrufeUnbegrenzt() { return !!activeDisplay().unlimitedCourtCalls; }
+/** Zeigt dieses Gerät Spiele, deren Paarung noch nicht feststeht (Spec
+ *  `tl-offene-paarungen`)? **Invertiert** gespeichert: Ein Profil ohne das
+ *  Feld — also jedes, das vor dieser Version angelegt wurde — steht damit
+ *  auf „anzeigen", dem gewollten Standard. */
+function zeigeOffeneSpiele() { return !activeDisplay().hideOpenMatches; }
+/** Kennt dieser Turnier-PC offene Paarungen überhaupt?
+ *
+ *  Der Relay bettet diese Seite ein und wird bei jedem Merge deployt, die App
+ *  kommt erst über einen Release-Tag — eine neue Seite trifft also regelmäßig
+ *  einen älteren Host. Der schickt kein `open_queue`, und dann darf auch kein
+ *  Häkchen dafür im Profil-Editor stehen: ein Schalter ohne Wirkung ist
+ *  schlimmer als keiner (dieselbe Regel wie bei `can_set_wish_court`). */
+function hostKenntOffeneSpiele() { return !!state && Array.isArray(state.open_queue); }
 /** Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`). Ein
  *  unbekannter Wert fällt auf die ursprüngliche Ansicht zurück — ein Profil
  *  aus einer NEUEREN App-Version darf diese Seite nicht ratlos machen. */
@@ -4373,8 +4398,31 @@ function scheduleFitCourts() {
  * `topMatchId` ist die Kennung der ersten UMSORTIERBAREN Zeile der gerade
  * gezeigten Liste — Ziel des ↑-Knopfes.
  */
+/** Ein Spiel aus der Anzeige-Liste holen — Arbeitsliste ODER offene
+ *  Paarungen.
+ *
+ *  Die Zeilen-Handler lösen die Kennung erst im Moment des Klicks auf
+ *  (sonst schaltete ein veraltetes Objekt in die falsche Richtung). Seit
+ *  offene Spiele mit in der Liste stehen, reicht `state.queue` dafür nicht
+ *  mehr: Ein Klick auf die Auto-Vergabe-Ausnahme eines offenen Spiels fände
+ *  dort nichts und verpuffte still (Code-Review 30.08.2026). Der Hallenfilter
+ *  darf hier NICHT mitwirken — angeklickt wurde eine sichtbare Zeile, und
+ *  gesucht ist ihr Datensatz, nicht ihre Sichtbarkeit.
+ */
+function findeSpiel(id) {
+  const gesucht = String(id);
+  const treffer = (liste) => (liste || []).find((m) => String(m.match_id) === gesucht);
+  return treffer(state && state.queue) || treffer(state && state.open_queue);
+}
+
 function queueRow(m, topMatchId) {
   const parts = [];
+  // Spiele ohne feststehende Paarung (Spec `tl-offene-paarungen`) sind eine
+  // Vorschau, kein Arbeitsvorrat: Sie lassen sich nicht auf ein Feld legen
+  // und nicht rufen — es gibt niemanden anzusagen. Sortieren und
+  // vorbereitende Angaben (Halle, Wunschfeld, Vergabe-Ausnahme) gehen sehr
+  // wohl, deshalb bleiben Griff, ↑ und Kebab.
+  const offen = istOffen(m);
   // „Spielt gerade" ist ein echtes Hindernis: Der Turnier-PC lehnt eine
   // solche Zuweisung ab (`assign::check_assign`), ein Tipp führte nur zu
   // einer Fehlermeldung. Die Mindestpause ist dagegen eine Empfehlung, die
@@ -4382,7 +4430,7 @@ function queueRow(m, topMatchId) {
   // KEIN Blocker (`check_assign` prüft nur „spielt gerade"). Deshalb bleibt
   // eine pausierende Zeile wählbar; vor dem Schreiben fragt `assignTo()`
   // nach (Feldtest 22.08.2026).
-  const pickable = !m.blocked || m.blocked.reason === "pause";
+  const pickable = !offen && (!m.blocked || m.blocked.reason === "pause");
   // Der Zieh-Griff hängt allein daran, dass das Spiel noch NICHT gerufen
   // ist: Der manuelle Präfix wirkt nur innerhalb der nicht gerufenen Spiele
   // (`assign::ready_queue`), ein Zug an einer gerufenen Zeile wäre
@@ -4432,9 +4480,20 @@ function queueRow(m, topMatchId) {
   };
   // Name + Meta als EIN Flex-Kind (vorher zwei) — zählt in der
   // 6-Elemente-Grenze nur einmal.
+  // Bei offener Paarung tragen die Seiten Text statt Personen: Kandidaten
+  // aus dem Vorspiel, die Herkunft („aus Spiel 42") oder „noch offen". Kein
+  // `pairOf` — es gibt weder Nation noch Verein noch einen Spieler-Link, und
+  // eine feststehende Seite zeigt trotzdem ihre echten Namen.
+  const paarHtml = offen
+    ? `<span class="paar">
+        <span class="seite"><span class="spieler offen-seite">${esc(seitenText(m, 1))}</span></span>
+        <span class="vs">vs.</span>
+        <span class="seite"><span class="spieler offen-seite">${esc(seitenText(m, 2))}</span></span>
+      </span>`
+    : pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club,
+        { ids1: m.team1_ids, ids2: m.team2_ids, lage });
   parts.push(`<span class="who-block">
-      <span class="who">${pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club,
-        { ids1: m.team1_ids, ids2: m.team2_ids, lage })}</span>
+      <span class="who">${paarHtml}</span>
       <span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>
     </span>`);
   // ── Statusblock: EIN Flex-Kind, beliebig viele Marken darin ──────────
@@ -4507,6 +4566,13 @@ function queueRow(m, topMatchId) {
   if (m.manual) {
     status.push(`<span class="badge badge-info" title="Manuell in die Spielreihenfolge einsortiert">↕️</span>`);
   }
+  // Ohne eigene Marke sähe ein offenes Spiel aus wie ein spielbereites: Der
+  // Host schickt für es kein `blocked` (es blockiert ja niemand), und die
+  // Zeile wäre damit unauffällig die harmloseste der ganzen Liste.
+  if (offen) {
+    status.push(`<span class="badge badge-info offen-marke"
+      title="Die Paarung steht noch nicht fest — dieses Spiel lässt sich weder rufen noch einem Feld zuweisen">⋯ noch offen</span>`);
+  }
   if (status.length) parts.push(`<span class="row-status">${status.join("")}</span>`);
   // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
   // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
@@ -4523,9 +4589,13 @@ function queueRow(m, topMatchId) {
   // spränge der ↑-Knopf unten das Sechs-Elemente-Budget (Rechnung im
   // CSS-Kommentar bei `.who-block`).
   const aktionen = [];
-  aktionen.push(`<button type="button" class="prep" data-prep="${m.match_id}"
-    aria-pressed="${m.prep_call ? "true" : "false"}"
-    title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
+  // Kein Aufruf ohne Paarung: Der Turnier-PC lehnt ihn ausdrücklich ab, und
+  // ein Knopf, der immer nur eine Fehlermeldung bringt, ist kein Bedien-Weg.
+  if (!offen) {
+    aktionen.push(`<button type="button" class="prep" data-prep="${m.match_id}"
+      aria-pressed="${m.prep_call ? "true" : "false"}"
+      title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
+  }
 
   // „Nach oben schieben" (ADR 0026): der tastatur- und touchfreundliche Weg
   // für den häufigsten Zug, ohne über eine womöglich hundert Zeilen lange
@@ -4562,18 +4632,26 @@ function queueRow(m, topMatchId) {
   // (Zettel, mündliche Ansage). Öffnet exakt denselben Dialog wie das
   // Aktionsband oben — gemeinsamer Weg über `openQueueResultDialog()`,
   // kein zweiter Aufbau desselben Formulars.
-  zeilenAktionen.push(`<button type="button" data-queue-result="${m.match_id}"
+  // Beides setzt eine Paarung voraus: Ein Ergebnis ohne Teilnehmer gibt es
+  // nicht, und ein Vorabzettel trüge zwei leere Namensfelder.
+  if (!offen) {
+    zeilenAktionen.push(`<button type="button" data-queue-result="${m.match_id}"
       title="Endstand ohne Feld nachtragen">✎ Ergebnis eintragen</button>`);
+  }
   // Vorabzettel (Spec schiedsrichterzettel-autodruck): der Bogen zum
   // Mitgeben, bevor das Spiel läuft. Anders als beim Archivzettel der
   // Beendet-Liste gibt es hier KEINE `has_timeline`-Schranke — dass noch
   // nichts aufgezeichnet ist, ist ja gerade der Grund für das leere Blatt.
-  zeilenAktionen.push(`<button type="button" data-queue-zettel="${m.match_id}"
+  if (!offen) {
+    zeilenAktionen.push(`<button type="button" data-queue-zettel="${m.match_id}"
       title="Leeren Schiedsrichterzettel drucken">🖨 Zettel (leer)</button>`);
-  kebabGroups.push(`<div class="kebab-group">
-      <span class="kebab-label">Spiel</span>
-      <div class="kebab-actions">${zeilenAktionen.join("")}</div>
-    </div>`);
+  }
+  if (zeilenAktionen.length) {
+    kebabGroups.push(`<div class="kebab-group">
+        <span class="kebab-label">Spiel</span>
+        <div class="kebab-actions">${zeilenAktionen.join("")}</div>
+      </div>`);
+  }
   // Auto-Vergabe-Ausnahme: seltener gebraucht als der Vorbereitungs-Ruf,
   // deshalb hier statt als zweiter Icon-Knopf auf der Zeile.
   const exclTitel = m.excluded_from_auto_assign
@@ -4660,7 +4738,7 @@ function queueRow(m, topMatchId) {
   parts.push(`<span class="row-actions">${aktionen.join("")}</span>`);
 
   const selected = picked && picked.match.match_id === m.match_id;
-  return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}"
+  return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}${offen ? " offen" : ""}"
                data-match="${m.match_id}" data-id="${m.match_id}"
                ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
             ${parts.join("")}</div>`;
@@ -4695,7 +4773,7 @@ function wireQueue(box) {
       // Zur KLICK-Zeit aus `state` auflösen, nicht beim Verdrahten
       // einfangen: Seit dem Keyed-Abgleich überleben Listener viele
       // Renders, ein eingefangenes Objekt wäre irgendwann veraltet.
-      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.prep);
+      const match = findeSpiel(btn.dataset.prep);
       if (match) togglePrepCall(match);
     });
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
@@ -4738,7 +4816,7 @@ function wireQueue(box) {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       // Klick-Zeit-Auflösung, siehe `data-prep`.
-      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueResult);
+      const match = findeSpiel(btn.dataset.queueResult);
       if (match) openQueueResultDialog(match);
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
@@ -4747,7 +4825,7 @@ function wireQueue(box) {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       // Klick-Zeit-Auflösung, siehe `data-prep`.
-      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueZettel);
+      const match = findeSpiel(btn.dataset.queueZettel);
       if (!match) return;
       const paarung = `${(match.team1 || []).join(" / ")} – ${(match.team2 || []).join(" / ")}`;
       openZettel([match.match_id], paarung, true);
@@ -4759,7 +4837,7 @@ function wireQueue(box) {
       ev.stopPropagation();
       // Klick-Zeit-Auflösung, siehe `data-prep` — sonst schaltete ein
       // veraltetes Objekt die Ausnahme in die falsche Richtung.
-      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
+      const match = findeSpiel(btn.dataset.autoExcl);
       if (!match) return;
       const matchId = match.match_id;
       const excluded = !match.excluded_from_auto_assign;
@@ -6101,9 +6179,58 @@ function renderPanels() {
  * blockiert am Ende den Zeitplan (Verhalten des früheren Panels „Ohne
  * Hallenzuordnung", jetzt als Zeilen-Status in derselben Liste).
  */
+// ── Inline-Kopie von src/io/offeneSpiele.mjs ─────────────────────────
+// Die Assets durchlaufen keinen Build und können keine Module laden; die
+// kanonische Fassung samt Tests liegt unter `src/io/offeneSpiele.mjs`
+// (`scripts/test-offene-spiele.mjs`). Änderungen hier und dort gemeinsam.
+const OFFEN_TEXT = "noch offen";
+function mischeOffene(queue, openQueue) {
+  const echte = Array.isArray(queue) ? queue : [];
+  const offene = Array.isArray(openQueue) ? openQueue : [];
+  if (offene.length === 0) return echte;
+  const gemischt = [];
+  let n = 0;
+  for (const eintrag of offene) {
+    const roh = Number(eintrag && eintrag.queue_index);
+    const ziel = Math.max(0, Math.min(echte.length, Number.isFinite(roh) ? roh : 0));
+    while (n < ziel) gemischt.push(echte[n++]);
+    gemischt.push({ ...eintrag, offen: true });
+  }
+  while (n < echte.length) gemischt.push(echte[n++]);
+  return gemischt;
+}
+function istOffen(eintrag) {
+  return !!(eintrag && eintrag.offen);
+}
+function seitenText(eintrag, seite) {
+  if (!eintrag) return OFFEN_TEXT;
+  const namen = seite === 2 ? eintrag.team2 : eintrag.team1;
+  if (Array.isArray(namen) && namen.length > 0) return namen.join(" / ");
+  const label = seite === 2 ? eintrag.open_slot2_label : eintrag.open_slot1_label;
+  return label && String(label).trim() ? String(label) : OFFEN_TEXT;
+}
+
+/** Die vollständige Anzeige-Reihenfolge — offene Paarungen IMMER
+ *  eingemischt, unabhängig vom Anzeige-Schalter.
+ *
+ *  Grundlage jeder Zug-Berechnung: Der Turnier-PC kennt nur diese eine
+ *  Reihenfolge. Der Hallenfilter wirkt trotzdem, denn er beschreibt, welchen
+ *  Teil des Turniers dieses Gerät überhaupt bearbeitet. */
+function reorderQueue() {
+  if (!state) return [];
+  return mischeOffene(state.queue, state.open_queue)
+    .filter((m) => !hallFilter || m.hall === hallFilter || !m.hall);
+}
+
 function visibleQueue() {
   if (!state) return [];
-  return state.queue.filter((m) => !hallFilter || m.hall === hallFilter || !m.hall);
+  // Erst mischen, DANN filtern: `queue_index` ist eine Position in der
+  // Gesamtliste, keine Match-Kennung — nach einem Hallenfilter zuerst wäre
+  // sie nicht mehr zu gebrauchen.
+  const gesamt = zeigeOffeneSpiele()
+    ? mischeOffene(state.queue, state.open_queue)
+    : state.queue;
+  return gesamt.filter((m) => !hallFilter || m.hall === hallFilter || !m.hall);
 }
 
 /** Kennung der ersten UMSORTIERBAREN Zeile der gerade gezeigten Liste — das
@@ -6235,9 +6362,12 @@ function renderQueue() {
   // Vorschau für den zugeklappten Zustand: das nächste Spiel. VOR dem
   // Ausstieg unten — der Kopf ist auch dann da, wenn es keinen Inhalt gibt.
   const naechstes = liste[0];
+  // Über `seitenText`, nicht über die Namen direkt: Steht vorn ein Spiel mit
+  // offener Paarung, sind beide Namenslisten leer — die Vorschau zeigte sonst
+  // „Nr. 80 ·  vs. " mit zwei Lücken (Code-Review 30.08.2026).
   setPanelPreview("queue", naechstes
     ? `${naechstes.match_num != null ? `Nr. ${naechstes.match_num} · ` : ""}`
-      + `${(naechstes.team1 || []).join(" / ")} vs. ${(naechstes.team2 || []).join(" / ")}`
+      + `${seitenText(naechstes, 1)} vs. ${seitenText(naechstes, 2)}`
     : "keine Spiele");
 
   const box = $("queue-list");
@@ -6285,12 +6415,19 @@ function renderQueue() {
   if (fuss) {
     const rest = liste.length - fenster.length;
     const gekappt = gekuerzteSpiele();
+    const offenGekappt = gekuerzteOffeneSpiele();
     setzeHtmlWennNeu(fuss,
       (rest > 0
         ? `<p class="note">Noch ${rest} weitere${rest === 1 ? "s" : ""} Spiel${rest === 1 ? "" : "e"} — beim Scrollen laden sie nach.</p>`
         : "")
       + (gekappt !== 0
         ? `<p class="note warn">Der Turnier-PC hat die Liste gekürzt${gekappt > 0 ? ` (${gekappt} Spiele fehlen am Ende)` : ""} — im Hallennetz steht die volle Liste.</p>`
+        : "")
+      // Getrennt gemeldet, weil es etwas anderes bedeutet: Nicht die
+      // Arbeitsliste fehlt, sondern die Vorschau auf kommende Paarungen.
+      // Über die Cloud ist das der Normalfall — sie wird zuerst geopfert.
+      + (offenGekappt > 0
+        ? `<p class="note">${offenGekappt} weitere Spiele mit noch offener Paarung sind nicht mit übertragen — im Hallennetz stehen sie vollständig.</p>`
         : ""));
   }
   beobachteQueueEnde(liste.length);
@@ -6302,7 +6439,12 @@ function renderQueue() {
   // Reset-Knopf (im Kopf des Spiele-Panels) nur zeigen, solange irgendein
   // Spiel manuell einsortiert ist — sonst gäbe es nichts zurückzusetzen.
   const resetBtn = $("queue-reset");
-  if (resetBtn) resetBtn.hidden = !state.queue.some((m) => m.manual);
+  if (resetBtn) {
+    // Auch ein offenes Spiel kann manuell einsortiert sein (ADR 0053) —
+    // sonst verschwände der Reset-Knopf, obwohl es etwas zurückzusetzen gibt.
+    const irgendwoManuell = (liste) => (liste || []).some((m) => m.manual);
+    resetBtn.hidden = !irgendwoManuell(state.queue) && !irgendwoManuell(state.open_queue);
+  }
 }
 
 /**
@@ -6324,7 +6466,13 @@ function renderQueue() {
  *    Zeile.
  */
 function queueReorderTarget(beforeId) {
-  const liste = visibleQueue();
+  // Bewusst NICHT `visibleQueue()`: Der Turnier-PC baut den Präfix immer über
+  // die vollständige Liste (`assign::ready_queue`), offene Spiele
+  // eingeschlossen. Wer sie am eigenen Gerät ausgeblendet hat, sähe „ans
+  // Ende" sonst als `null` und fröre damit genau die Spiele ein, die er nicht
+  // sehen wollte — samt ↕️-Marken auf allen anderen Geräten
+  // (Code-Review 30.08.2026).
+  const liste = reorderQueue();
   if (beforeId === null || beforeId === undefined) {
     if (queueShown >= liste.length) return null; // alles geladen: echtes Ende
     const naechstes = liste.slice(queueShown).find((m) => !m.prep_call);
@@ -6351,6 +6499,17 @@ function queueReorderTarget(beforeId) {
  * wurde. Die Stückzahl kennt sie in dem Fall nicht; `-1` steht für
  * „gekürzt, Umfang unbekannt".
  */
+/** Wie viele offene Paarungen der Turnier-PC weggelassen hat.
+ *
+ *  Über die Cloud ist das der Normalfall, nicht die Ausnahme: `open_queue`
+ *  wird zuletzt aufgefüllt und zuerst geopfert. Ohne diese Meldung sähe die
+ *  Turnierleitung fünf von hundertfünfzig kommenden Paarungen und hielte das
+ *  für alles (Code-Review 30.08.2026). */
+function gekuerzteOffeneSpiele() {
+  if (!state || !zeigeOffeneSpiele()) return 0;
+  return typeof state.open_queue_truncated === "number" ? state.open_queue_truncated : 0;
+}
+
 function gekuerzteSpiele() {
   if (!state) return 0;
   if (typeof state.queue_truncated === "number") return state.queue_truncated;
@@ -7111,6 +7270,12 @@ function uebernehmeEditorFelder() {
     showGroup: $("prof-show-group").checked,
     showCourtRemaining: $("prof-show-court-remaining").checked,
     unlimitedCourtCalls: $("prof-unlimited-calls").checked,
+    // Das Häkchen fragt positiv („zeigen"), gespeichert wird invertiert.
+    // Fehlt es (älterer Turnier-PC, siehe `hostKenntOffeneSpiele`), bleibt
+    // der gespeicherte Wert stehen, statt still auf die Vorgabe zu fallen.
+    hideOpenMatches: $("prof-show-open")
+      ? !$("prof-show-open").checked
+      : !!kopie.display.hideOpenMatches,
     // Achse des Panels „Spielzeiten": Auswahlfeld statt Häkchen — es sind
     // vier Werte, kein An/Aus. Ein unbekannter Wert (Profil aus einer
     // neueren Version) fiele beim Lesen ohnehin auf „group" zurück.
@@ -7180,6 +7345,7 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
+      ${hostKenntOffeneSpiele() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-open" ${d.hideOpenMatches ? "" : "checked"} /> Spiele mit noch offener Paarung zeigen (z. B. Halbfinale vor der Vorrunde)</label>` : ""}
       <label class="checkbox-row" style="gap:8px">
         <span>Spielzeiten gruppieren nach</span>
         <select id="prof-time-axis">${ZEITEN_ACHSEN

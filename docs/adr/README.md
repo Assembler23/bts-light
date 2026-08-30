@@ -60,3 +60,7 @@ hier eintragen.
 | [0047](0047-lan-tls-konkretisierung.md) | LAN-TLS: Crate-Wahl, Zertifikatsstrategie und Port-Koexistenz | accepted |
 | [0048](0048-substrom-adressierung-traeger.md) | Ferne Halle: Träger-Verbindung, Substrom-Adressierung und lokale Terminierung | accepted |
 | [0049](0049-kombi-ausrichtung-eigene-geraete-datei.md) | Kombi-Ausrichtung je Gerät: eigene Geräte-Datei statt Target-Feld | accepted |
+| [0050](0050-verschiebe-modus-globales-einfuegeziel.md) | Das Einfügeziel im Verschiebe-Modus bleibt global, nicht filterbewusst | accepted |
+| [0051](0051-offene-spiele-eigene-gedeckelte-liste.md) | Offene Spiele reisen als eigene, zuerst gekappte Liste | accepted |
+| [0052](0052-beschriftung-offener-plaetze.md) | Offene Plätze: Kandidaten aus einer Ebene, neutraler Rückfall | accepted |
+| [0053](0053-offene-spiele-in-der-manuellen-reihenfolge.md) | Offene Spiele nehmen an der manuellen Spielreihenfolge teil | accepted |

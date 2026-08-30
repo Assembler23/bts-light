@@ -300,6 +300,21 @@ pub(crate) fn apply_state_action(
                     format!("Spiel {unknown} gibt es im aktuellen Turnierstand nicht."),
                 ));
             }
+            // Spiele ohne feststehende Paarung lassen sich nicht rufen (Spec
+            // `tl-offene-paarungen`, Nicht-Ziel G2): Es gibt niemanden
+            // anzusagen. Ausdrücklich ablehnen statt durchlaufen zu lassen —
+            // sonst nähme der Aufruf den Weg bis in den Zustand und
+            // verschwände erst beim nächsten BTP-Schnappschuss wieder
+            // (`apply_preparation_calls`), ohne dass jemand erführe, warum.
+            if let Some(offen) = match_ids.iter().find(|id| ist_offene_paarung(tablet, **id)) {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    format!(
+                        "Spiel {offen} hat noch keine feststehende Paarung — \
+                         es gibt niemanden aufzurufen."
+                    ),
+                ));
+            }
             for match_id in match_ids {
                 tablet.add_preparation_call(crate::tablet::state::PreparationCall {
                     match_id: *match_id,
@@ -852,9 +867,21 @@ pub(crate) fn state_for_relay(
     // beim Zuschneiden mitwachsen, sonst zählte sie nur die Kappung des
     // LAN-Limits (120) und verschwiege die des Relay-Limits.
     let voll = state.queue.len() + state.queue_truncated;
+    // Die offenen Spiele werden ZULETZT aufgefüllt und damit ZUERST geopfert
+    // (Spec `tl-offene-paarungen`, ADR 0051). Sie kommen deshalb hier heraus:
+    // Die Leiter darunter entscheidet unverändert über die Arbeitsliste, und
+    // erst danach kommt zurück, was noch ins Fenster passt.
+    //
+    // Ein fester Zahlenwert ginge hier fehl. Im dokumentierten Worst Case
+    // (26 belegte Felder, 30 Ergebnisse) liegt der Zustand schon ohne sie bei
+    // gut 55 KiB — dort passt keine feste Zahl —, während ein mittleres
+    // Turnier mühelos hundert offene Einträge trüge.
+    let offene = std::mem::take(&mut state.open_queue);
+    let offene_gesamt = offene.len() + state.open_queue_truncated;
+    state.open_queue_truncated = offene_gesamt;
     let json = serde_json::to_string(&state).unwrap_or_default();
     if json.len() <= relay_proto::MAX_TL_STATE_LEN && state.queue.len() <= STUFEN[0] {
-        return (json, rev);
+        return offene_auffuellen(state, offene, offene_gesamt, rev, json);
     }
     for limit in STUFEN {
         if state.queue.len() > limit {
@@ -863,7 +890,7 @@ pub(crate) fn state_for_relay(
         }
         let json = serde_json::to_string(&state).unwrap_or_default();
         if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-            return (json, rev);
+            return offene_auffuellen(state, offene, offene_gesamt, rev, json);
         }
     }
     // Vorletzte Rettung: das additive Anfangszeiten-Panel opfern —
@@ -874,7 +901,7 @@ pub(crate) fn state_for_relay(
     state.checkin_times = None;
     let json = serde_json::to_string(&state).unwrap_or_default();
     if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-        return (json, rev);
+        return offene_auffuellen(state, offene, offene_gesamt, rev, json);
     }
     // Vorletzte Stufe: die Spielzeiten-Auswertung. Sie trägt seit der
     // Achsen-Erweiterung (Spec `tl-sicht-feinschliff`, Punkt 1) VIER
@@ -886,7 +913,7 @@ pub(crate) fn state_for_relay(
     state.time_stats = None;
     let json = serde_json::to_string(&state).unwrap_or_default();
     if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-        return (json, rev);
+        return offene_auffuellen(state, offene, offene_gesamt, rev, json);
     }
     // Letzte Rettung vor der Aufgabe: die Ergebnisliste stutzen. Ebenfalls
     // reine Rückschau — die Felder dagegen sind das Bedienelement der Seite
@@ -902,14 +929,14 @@ pub(crate) fn state_for_relay(
             state.finished.truncate(limit);
             let json = serde_json::to_string(&state).unwrap_or_default();
             if json.len() <= relay_proto::MAX_TL_STATE_LEN {
-                return (json, rev);
+                return offene_auffuellen(state, offene, offene_gesamt, rev, json);
             }
         }
     }
     let letzte_rev = rev;
     let letzte = serde_json::to_string(&state).unwrap_or_default();
     if letzte.len() <= relay_proto::MAX_TL_STATE_LEN {
-        return (letzte, letzte_rev);
+        return offene_auffuellen(state, offene, offene_gesamt, letzte_rev, letzte);
     }
     // Selbst die kürzeste Stufe passt nicht — dann liegt es nicht an der
     // Warteliste. Lieber den zu großen Stand schicken und den Relay
@@ -922,6 +949,50 @@ pub(crate) fn state_for_relay(
         relay_proto::MAX_TL_STATE_LEN
     );
     (letzte, letzte_rev)
+}
+
+/// Legt so viele offene Spiele in den fertig zugeschnittenen Zustand zurück,
+/// wie das Relay-Fenster noch hergibt (Spec `tl-offene-paarungen`, ADR 0051).
+///
+/// `ohne_offene` ist der bereits serialisierte Zustand ohne sie — passt keine
+/// einzige Zeile mehr dazu, geht genau der hinaus, und es kostet keine
+/// zusätzliche Serialisierung. Ein Turnier ohne offene Spiele merkt von
+/// dieser Stufe deshalb gar nichts.
+fn offene_auffuellen(
+    mut state: TlState,
+    offene: Vec<TlOpenMatch>,
+    gesamt: usize,
+    rev: u64,
+    ohne_offene: String,
+) -> (String, u64) {
+    if offene.is_empty() {
+        return (ohne_offene, rev);
+    }
+    // Dieselbe Staffelung wie bei der Warteliste: wenige, vorhersagbare
+    // Größen sind im Betrieb leichter zu erklären als eine Zahl, die bei
+    // jedem Abruf anders ausfällt.
+    const OFFEN_STUFEN: [usize; 4] = [40, 20, 10, 5];
+    let mut zuletzt = usize::MAX;
+    for stufe in OFFEN_STUFEN {
+        let nehmen = stufe.min(offene.len());
+        // Bei wenigen offenen Spielen liefern mehrere Stufen dieselbe Zahl —
+        // dann wäre jeder weitere Versuch dieselbe Serialisierung desselben
+        // Zustands, auf dem 2-Sekunden-Takt der Cloud (Code-Review
+        // 30.08.2026).
+        if nehmen >= zuletzt {
+            break;
+        }
+        zuletzt = nehmen;
+        state.open_queue = offene[..nehmen].to_vec();
+        state.open_queue_truncated = gesamt.saturating_sub(nehmen);
+        let json = serde_json::to_string(&state).unwrap_or_default();
+        if json.len() <= relay_proto::MAX_TL_STATE_LEN {
+            return (json, rev);
+        }
+    }
+    // Nicht einmal fünf passen: Dann geht der Stand ohne offene Spiele
+    // hinaus. Die Arbeitsliste ist wichtiger als die Vorschau.
+    (ohne_offene, rev)
 }
 
 /// Fingerabdruck des Zustands **ohne** Uhrzeit.
@@ -1209,6 +1280,96 @@ pub(crate) fn correction_blocker(
         return Some(CorrectionBlocker::Running);
     }
     Some(CorrectionBlocker::Untested)
+}
+
+/// Steht die Paarung dieses Spiels noch nicht (vollständig) fest?
+///
+/// Dieselbe Bedingung, nach der [`build_state_limited`] die offene Liste
+/// füllt — an einer Stelle, damit Anzeige und Ablehnung nicht auseinander
+/// laufen können.
+fn ist_offene_paarung(tablet: &TabletState, match_id: i64) -> bool {
+    tablet.snapshot_clone().is_some_and(|s| {
+        s.matches
+            .iter()
+            .any(|m| m.id == match_id && (m.team1.is_empty() || m.team2.is_empty()))
+    })
+}
+
+/// Wie ein noch offener Platz eines Spiels beschriftet wird — Spec
+/// `tl-offene-paarungen`, ADR 0052.
+///
+/// `seite` ist 1 oder 2 und meint die Mannschaft, deren Platz offen ist. Die
+/// Funktion wird **nur** für tatsächlich offene Plätze aufgerufen; für einen
+/// besetzten Platz stehen die echten Namen im Match.
+///
+/// Dreistufige Kaskade:
+/// 1. die Teilnehmer des direkten Vorspiels („Müller oder Schmidt"),
+/// 2. `aus Spiel 42`, wenn das Vorspiel selbst noch offen ist,
+/// 3. `noch offen`, wenn es kein auffindbares Vorspiel gibt.
+///
+/// Die Kante liegt in `from1`/`from2` und zeigt auf eine **Slot-PlanningID**,
+/// nicht auf ein Spiel: Das Vorspiel ist das Match mit ebendieser
+/// `planning_id` **im selben Draw** — ohne die Draw-Bindung träfe man Spiele
+/// fremder Auslosungen (docs/btp_protocol.md). Gegenrichtung derselben Kante:
+/// [`correction_blocker`].
+///
+/// Bewusst **nie** „Sieger aus": Bei Platzierungsspielen speist der Verlierer
+/// den Platz, und welche Seite es ist, sagt BTP nicht.
+///
+/// Genau **eine** Ebene tief — sonst stünden in einer frühen Runde acht Namen
+/// in einer Zeile, und die Aussage wäre wertlos.
+pub(crate) fn offener_platz_text(
+    snap: &crate::btp::model::BtpSnapshot,
+    m: &crate::btp::model::BtpMatch,
+    seite: u8,
+) -> String {
+    // Steht die Mannschaft schon fest (EntryID gesetzt) und nur ihre Namen
+    // sind nicht auflösbar, wäre jede Kandidatenliste eine falsche Aussage:
+    // Der Platz ist vergeben, es kommt niemand anderes mehr. Dann lieber
+    // nichts behaupten (Code-Review 30.08.2026).
+    let entry_id = if seite == 1 { m.entry1_id } else { m.entry2_id };
+    if entry_id != 0 {
+        return OFFEN.to_string();
+    }
+    let from = if seite == 1 { m.from1 } else { m.from2 };
+    let Some(slot) = from else {
+        return OFFEN.to_string();
+    };
+    // Die Kante zeigt auf eine Slot-PlanningID. Ein Vorspiel gibt es nur,
+    // wenn ein Match im SELBEN Draw genau diese Position belegt; sonst
+    // speist ein Setzplatz, ein Freilos oder eine andere Auslosung.
+    let Some(vorspiel) = snap
+        .matches
+        .iter()
+        .find(|o| o.draw_id == m.draw_id && o.planning_id == slot && o.id != m.id)
+    else {
+        return OFFEN.to_string();
+    };
+    if !vorspiel.team1.is_empty() && !vorspiel.team2.is_empty() {
+        return format!(
+            "{} oder {}",
+            mannschaft_text(&vorspiel.team1),
+            mannschaft_text(&vorspiel.team2)
+        );
+    }
+    // Das Vorspiel ist selbst noch offen — hier endet die Auflösung bewusst.
+    match vorspiel.match_num {
+        Some(nr) => format!("aus Spiel {nr}"),
+        None => OFFEN.to_string(),
+    }
+}
+
+/// Beschriftung eines Platzes, über den nichts bekannt ist.
+const OFFEN: &str = "noch offen";
+
+/// Die Spieler einer Mannschaft als ein Name — beim Doppel mit Schrägstrich
+/// verbunden, damit das Paar als Einheit lesbar bleibt.
+fn mannschaft_text(spieler: &[crate::btp::model::BtpPlayer]) -> String {
+    spieler
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Übersetzt eine Ergebnis-Aktion in die BTP-Schreibvorgänge.
@@ -2437,6 +2598,17 @@ pub struct TlState {
     /// hallenübergreifenden Sortierung aus ADR 0026 aufgegeben worden.)
     #[serde(default)]
     pub queue_truncated: usize,
+    /// Spiele, deren Paarung noch nicht feststeht (Spec
+    /// `tl-offene-paarungen`), in derselben Abfolge wie [`Self::queue`] —
+    /// die Seite mischt sie über `queue_index` ein.
+    ///
+    /// `#[serde(default)]` = leer: Genau das liefert ein alter Host, und
+    /// dann zeigt die Seite schlicht keine offenen Spiele.
+    #[serde(default)]
+    pub open_queue: Vec<TlOpenMatch>,
+    /// Wie viele offene Spiele die Kappung weggelassen hat.
+    #[serde(default)]
+    pub open_queue_truncated: usize,
     /// Verwaltet dieser Turnier-PC Zähltafelbediener? Nur dann zeigt die
     /// Seite den Warteschlangen-Abschnitt.
     pub scorekeeper_managed: bool,
@@ -2756,6 +2928,59 @@ pub struct TlMatch {
     pub predicted_uncertain: bool,
 }
 
+/// Ein Spiel, dessen Paarung noch nicht (vollständig) feststeht — Spec
+/// `tl-offene-paarungen`.
+///
+/// Bewusst **schlanker** als [`TlMatch`]: Ein offenes Spiel kann nicht aufs
+/// Feld, nicht gerufen werden und bekommt keine Prognose, also trägt es weder
+/// `blocked` noch `prep_call` noch `predicted_start_ms`. Ebenso fehlen
+/// **Lizenznummern** — die Nummer ist das Link-Ziel der badhub-Seite eines
+/// feststehenden Teilnehmers, ein Kandidat bekommt sie nicht (Datenschutz).
+///
+/// Die Liste reist getrennt von [`TlState::queue`], damit sie im
+/// 64-KiB-Fenster der Cloud keine echten Wartespiele verdrängt (ADR 0051).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TlOpenMatch {
+    pub match_id: i64,
+    pub match_num: Option<i64>,
+    pub planned_time: Option<i64>,
+    pub draw_name: String,
+    pub round_name: String,
+    pub class_label: String,
+    /// Siehe [`TlCourt::discipline`].
+    pub discipline: String,
+    /// Die Namen einer bereits feststehenden Seite; leer, wenn der Platz
+    /// offen ist. Ein Spiel kann halb offen sein — dann steht hier eine
+    /// Seite und im Label die andere.
+    pub team1: Vec<String>,
+    pub team2: Vec<String>,
+    /// Beschriftung des offenen Platzes 1 — Kandidaten des Vorspiels,
+    /// „aus Spiel 42" oder „noch offen" ([`offener_platz_text`], ADR 0052).
+    /// Leer, wenn die Seite besetzt ist.
+    pub open_slot1_label: String,
+    pub open_slot2_label: String,
+    /// In welche Halle das Spiel gehört, und woher wir das wissen.
+    pub hall: String,
+    pub hall_source: HallSource,
+    /// Wie viele Spiele der **echten** Warteliste vor diesem Eintrag stehen.
+    ///
+    /// Damit mischt die Seite die beiden Listen zusammen, ohne selbst zu
+    /// sortieren — die Reihenfolge bleibt serverseitig verbindlich, so wie
+    /// bei [`TlState::queue`] zugesagt.
+    pub queue_index: u32,
+    /// Steht dieses Spiel im manuellen Präfix (ADR 0053)?
+    #[serde(default)]
+    pub manual: bool,
+    /// Von der automatischen Feldvergabe ausgenommen? Die Angabe greift
+    /// erst, wenn die Paarung feststeht — setzen darf man sie schon.
+    #[serde(default)]
+    pub excluded_from_auto_assign: bool,
+    /// Gewünschtes Feld; wie [`Self::excluded_from_auto_assign`] eine
+    /// Vorab-Angabe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wish_court: Option<i64>,
+}
+
 /// Eine Halle des Turniers.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TlHall {
@@ -2904,6 +3129,16 @@ impl From<Blocked> for TlBlocked {
 /// Dringlichkeit sortiert, die vorderen sind die, um die es geht — was
 /// wegfällt, meldet `queue_truncated` ehrlich.
 pub(crate) const QUEUE_LIMIT: usize = 120;
+
+/// Wie viele Spiele mit noch offener Paarung höchstens ausgeliefert werden
+/// (Spec `tl-offene-paarungen`, ADR 0051).
+///
+/// Eigener Deckel neben [`QUEUE_LIMIT`], damit offene Spiele die echte
+/// Arbeitsliste nicht verdrängen können. Was wegfällt, meldet
+/// `open_queue_truncated`. Über die Cloud kommt zusätzlich die adaptive
+/// Füllung in [`state_for_relay`] hinzu — dort ist der Platz knapper als im
+/// Hallennetz.
+pub(crate) const OPEN_QUEUE_LIMIT: usize = 120;
 
 /// Höchstzahl beendeter Spiele im Zustand. Die Seite ist ein
 /// Arbeits-Werkzeug, kein Archiv — wer mehr braucht, schaut in BTP.
@@ -3087,6 +3322,8 @@ pub(crate) fn build_state_limited(
             queue: Vec::new(),
             walkovers: Vec::new(),
             queue_truncated: 0,
+            open_queue: Vec::new(),
+            open_queue_truncated: 0,
             scorekeeper_managed: config.scorekeeper.enabled,
             scorekeepers: Vec::new(),
             finished: Vec::new(),
@@ -3163,19 +3400,15 @@ pub(crate) fn build_state_limited(
 
     let availability = PlayerAvailability::from_snapshot(&snap, config);
 
-    // Spielbereite Spiele — dieselbe Bedingung wie bei der automatischen
-    // Vergabe: geplant und mit feststehender Paarung. Spiele, deren Gegner
-    // noch aus einem Vorspiel kommt, könnte niemand sinnvoll vergeben.
+    // Alle geplanten Spiele — auch die, deren Paarung noch aus einem Vorspiel
+    // kommt (Spec `tl-offene-paarungen`). Sie werden gleich unten von den
+    // spielbereiten getrennt: Vergeben kann man sie nicht, anzeigen schon.
     // Erst nur die Ordnungsschlüssel sammeln — die teuren Zeichenketten
     // entstehen später und nur für die Spiele, die auch ausgeliefert werden.
     let mut ordered: Vec<OrderedMatch> = snap
         .matches
         .iter()
-        .filter(|m| {
-            m.status == crate::btp::model::MatchStatus::Scheduled
-                && !m.team1.is_empty()
-                && !m.team2.is_empty()
-        })
+        .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
         .map(|m| {
             let call = called_hall(m.id);
             let manual_hall = manual.get(&m.id).map(String::as_str);
@@ -3199,6 +3432,26 @@ pub(crate) fn build_state_limited(
         })
         .collect();
     ordered.sort_by_key(|(key, _, _, _)| *key);
+
+    // Offene Paarungen aus der Arbeitsliste heraustrennen (ADR 0051). Sie
+    // reisen in einer eigenen, eigens gedeckelten Liste, damit sie im
+    // 64-KiB-Fenster der Cloud kein echtes Wartespiel verdrängen. Der
+    // mitgezählte Index hält fest, an welcher Stelle der GEMEINSAMEN
+    // Reihenfolge sie stehen — danach mischt die Seite sie wieder ein.
+    //
+    // Alles unterhalb dieser Zeile rechnet weiter nur mit den spielbereiten
+    // Spielen: Feldvergabe, Prognose und Blockade-Marken ergeben für ein
+    // Spiel ohne Teilnehmer keinen Sinn.
+    let mut offene: Vec<(usize, OrderedMatch)> = Vec::new();
+    let mut spielbereit: Vec<OrderedMatch> = Vec::new();
+    for eintrag in ordered {
+        if eintrag.1.team1.is_empty() || eintrag.1.team2.is_empty() {
+            offene.push((spielbereit.len(), eintrag));
+        } else {
+            spielbereit.push(eintrag);
+        }
+    }
+    let ordered = spielbereit;
 
     // Startzeit-Prognose (Spec `spielzeiten-prognose`, E5–E8): Statistik
     // aus dem Zeiten-Store + deterministische Simulation der Warteliste —
@@ -3403,6 +3656,42 @@ pub(crate) fn build_state_limited(
         });
     }
 
+    // Die offenen Spiele — schlank, ohne Vergabe-, Aufruf- und
+    // Prognose-Felder (Spec `tl-offene-paarungen`).
+    let open_queue_truncated = offene.len().saturating_sub(OPEN_QUEUE_LIMIT);
+    let mut open_queue: Vec<TlOpenMatch> = Vec::new();
+    for (queue_index, (_, m, hall, hall_source)) in offene.into_iter().take(OPEN_QUEUE_LIMIT) {
+        open_queue.push(TlOpenMatch {
+            match_id: m.id,
+            match_num: m.match_num,
+            planned_time: m.planned_time,
+            draw_name: m.draw_name.clone(),
+            round_name: m.round_name.clone(),
+            class_label: m.class_label.clone(),
+            discipline: m.discipline.as_str().to_string(),
+            team1: m.team1.iter().map(|p| p.name.clone()).collect(),
+            team2: m.team2.iter().map(|p| p.name.clone()).collect(),
+            // Nur der offene Platz bekommt ein Label; eine feststehende Seite
+            // steht mit ihren echten Namen da.
+            open_slot1_label: if m.team1.is_empty() {
+                offener_platz_text(&snap, m, 1)
+            } else {
+                String::new()
+            },
+            open_slot2_label: if m.team2.is_empty() {
+                offener_platz_text(&snap, m, 2)
+            } else {
+                String::new()
+            },
+            hall,
+            hall_source,
+            queue_index: u32::try_from(queue_index).unwrap_or(u32::MAX),
+            manual: tablet.queue_order_store().rank(m.id).is_some(),
+            excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
+            wish_court: tablet.wish_court(m.id),
+        });
+    }
+
     let mut halls: Vec<TlHall> = snap
         .locations
         .iter()
@@ -3573,6 +3862,8 @@ pub(crate) fn build_state_limited(
             })
             .collect(),
         queue_truncated,
+        open_queue,
+        open_queue_truncated,
         officials_managed,
         officials,
         scorekeeper_managed,
@@ -3667,6 +3958,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             show_round: p.display.show_round,
             show_group: p.display.show_group,
             show_court_remaining: p.display.show_court_remaining,
+            hide_open_matches: p.display.hide_open_matches,
             unlimited_court_calls: p.display.unlimited_court_calls,
             list_position: match p.display.list_position {
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
@@ -3718,6 +4010,7 @@ fn display_settings_from_wire(
         show_round: d.show_round,
         show_group: d.show_group,
         show_court_remaining: d.show_court_remaining,
+        hide_open_matches: d.hide_open_matches,
         unlimited_court_calls: d.unlimited_court_calls,
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
@@ -4358,6 +4651,502 @@ mod tests {
         let tablet = TabletState::default();
         tablet.set_snapshot(snapshot);
         build_state(&tablet, config, 1_000_000, 7)
+    }
+
+    /// Ein Spiel, dessen Platz aus einem Vorspiel gespeist wird: `from1`
+    /// zeigt auf die PlanningID des Vorspiels im selben Draw.
+    fn folgespiel(id: i64, feeder1: Option<i64>, feeder2: Option<i64>) -> BtpMatch {
+        BtpMatch {
+            from1: feeder1,
+            from2: feeder2,
+            team1: Vec::new(),
+            team2: Vec::new(),
+            round_name: "HF".to_string(),
+            ..a_match(id)
+        }
+    }
+
+    #[test]
+    fn ein_offener_platz_nennt_die_kandidaten_des_vorspiels() {
+        // Der eigentliche Nutzen: Die Turnierleitung sieht, WER gleich
+        // gebraucht wird, bevor die Paarung feststeht.
+        let mut vorspiel = a_match(42);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![player("Müller")];
+        vorspiel.team2 = vec![player("Schmidt")];
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "Müller oder Schmidt");
+    }
+
+    #[test]
+    fn kandidaten_werden_mit_oder_getrennt_das_doppel_mit_schraegstrich() {
+        // Der Schrägstrich gehört dem Doppelpaar — sonst wäre nicht
+        // erkennbar, ob vier Namen zwei Paare oder vier Kandidaten sind.
+        let mut vorspiel = a_match(42);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![player("Müller"), player("Meier")];
+        vorspiel.team2 = vec![player("Schmidt"), player("Klein")];
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(
+            offener_platz_text(&s, &folge, 1),
+            "Müller/Meier oder Schmidt/Klein"
+        );
+    }
+
+    #[test]
+    fn ein_noch_offenes_vorspiel_faellt_auf_aus_spiel_nummer_zurueck() {
+        // Zwei Runden vor Schluss steht noch niemand fest — dann hilft
+        // wenigstens die Spielnummer, nach der die Turnierleitung sucht.
+        let mut vorspiel = folgespiel(42, None, None);
+        vorspiel.planning_id = 1001;
+        vorspiel.match_num = Some(42);
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "aus Spiel 42");
+    }
+
+    #[test]
+    fn die_beschriftung_sagt_nie_sieger_denn_auch_der_verlierer_speist() {
+        // Bei Platzierungsspielen („3/4") füllt der VERLIERER den Platz.
+        // Welche Seite es ist, sagt BTP nicht — also behaupten wir es nicht.
+        let mut vorspiel = folgespiel(42, None, None);
+        vorspiel.planning_id = 1001;
+        vorspiel.match_num = Some(42);
+        let mut folge = folgespiel(80, Some(1001), None);
+        folge.round_name = "3/4".to_string();
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        let text = offener_platz_text(&s, &folge, 1);
+        assert!(
+            !text.contains("Sieger") && !text.contains("Verlierer"),
+            "die Herkunft wird neutral benannt, war aber: {text}"
+        );
+    }
+
+    #[test]
+    fn ein_vorspiel_ohne_spielnummer_heisst_noch_offen() {
+        // Ohne Nummer trägt „aus Spiel" keine Information mehr.
+        let mut vorspiel = folgespiel(42, None, None);
+        vorspiel.planning_id = 1001;
+        vorspiel.match_num = None;
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ohne_auffindbares_vorspiel_heisst_der_platz_noch_offen() {
+        // Setzplatz, Freilos oder Speisung über Draw-Grenzen: `from1` zeigt
+        // auf einen Slot, zu dem es kein Spiel gibt. Am Mitschnitt ist das
+        // der HÄUFIGSTE Fall (34 von 42 offenen Plätzen).
+        let folge = folgespiel(80, Some(9999), None);
+        let s = snap(Vec::new(), vec![folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ein_platz_ohne_from_kante_heisst_noch_offen() {
+        let folge = folgespiel(80, None, None);
+        let s = snap(Vec::new(), vec![folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ein_slot_mit_gleicher_planning_id_aus_einem_fremden_draw_zaehlt_nicht() {
+        // PlanningIDs sind nur je Draw eindeutig. Ohne Draw-Bindung löste die
+        // Anzeige zu wildfremden Spielern auf — derselbe Fehler, der einmal
+        // 95 % aller Teilnehmer eines 116-Draw-Turniers verdreht hat.
+        let mut fremd = a_match(42);
+        fremd.draw_id = 7;
+        fremd.planning_id = 1001;
+        fremd.team1 = vec![player("Fremd")];
+        fremd.team2 = vec![player("Falsch")];
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(Vec::new(), vec![fremd, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ein_feststehender_teilnehmer_ohne_namen_nennt_keine_kandidaten() {
+        // Code-Review 30.08.2026: Die EntryID sagt, dass der Platz vergeben
+        // ist — auch wenn der Parser die Namen nicht auflösen konnte. Das
+        // Vorspiel daneben ist dann bedeutungslos, seine Teilnehmer zu
+        // nennen wäre schlicht falsch.
+        let mut vorspiel = a_match(42);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![player("Müller")];
+        vorspiel.team2 = vec![player("Schmidt")];
+        let mut folge = folgespiel(80, Some(1001), None);
+        folge.entry1_id = 7; // Mannschaft steht, Namen fehlen
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(
+            offener_platz_text(&s, &folge, 1),
+            "noch offen",
+            "ein vergebener Platz nennt keine Kandidaten mehr"
+        );
+    }
+
+    #[test]
+    fn ein_halb_aufgeloester_platz_wird_neutral_beschriftet() {
+        // Die Mannschaft steht (EntryID gesetzt), nur die Namen sind nicht
+        // auflösbar. `from1` zeigt dann auf einen Teilnehmer-Slot, nicht auf
+        // ein Spiel — es gibt nichts zu nennen.
+        let mut folge = folgespiel(80, Some(1000), None);
+        folge.entry1_id = 7;
+        let s = snap(Vec::new(), vec![folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn die_zweite_seite_liest_ihre_eigene_kante() {
+        let mut vorspiel = a_match(43);
+        vorspiel.planning_id = 1002;
+        vorspiel.team1 = vec![player("Weber")];
+        vorspiel.team2 = vec![player("Fischer")];
+        let folge = folgespiel(80, None, Some(1002));
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(offener_platz_text(&s, &folge, 2), "Weber oder Fischer");
+        assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn die_aufloesung_geht_genau_eine_ebene_tief_und_rekursiert_nie() {
+        // Das Vorspiel ist selbst offen, SEIN Vorspiel hätte Namen. Die
+        // dürfen nicht durchschlagen: In der Runde davor stünden vier, eine
+        // weitere davor acht Namen in einer Zeile.
+        let mut grossvater = a_match(10);
+        grossvater.planning_id = 1000;
+        grossvater.team1 = vec![player("Tief")];
+        grossvater.team2 = vec![player("Tiefer")];
+        let mut vater = folgespiel(42, Some(1000), None);
+        vater.planning_id = 1001;
+        vater.match_num = Some(42);
+        let folge = folgespiel(80, Some(1001), None);
+        let s = snap(
+            Vec::new(),
+            vec![grossvater, vater, folge.clone()],
+            Vec::new(),
+        );
+
+        let text = offener_platz_text(&s, &folge, 1);
+        assert_eq!(text, "aus Spiel 42");
+        assert!(!text.contains("Tief"), "keine Enkel-Kandidaten: {text}");
+    }
+
+    /// Ein wartendes Spiel mit vollstaendiger Paarung, angesetzt zur
+    /// angegebenen Zeit.
+    fn wartendes(id: i64, zeit: i64) -> BtpMatch {
+        let mut m = a_match(id);
+        m.planned_time = Some(zeit);
+        m
+    }
+
+    /// Ein Spiel mit zwei offenen Plaetzen, angesetzt zur angegebenen Zeit.
+    fn offenes(id: i64, zeit: i64) -> BtpMatch {
+        let mut m = folgespiel(id, None, None);
+        m.planned_time = Some(zeit);
+        m
+    }
+
+    #[test]
+    fn der_schalter_offene_spiele_ausblenden_reist_in_beide_richtungen() {
+        // Der Schalter wirkt clientseitig — aber er muss den Weg zum Gerät
+        // und zurück überstehen, sonst stünde das Häkchen beim nächsten
+        // Laden wieder anders.
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "p1".into(),
+            name: "Wandmonitor".into(),
+            display: crate::config::TlDisplaySettings {
+                hide_open_matches: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let sicht = profiles_view(&cfg);
+        let wire = sicht.iter().find(|p| p.id == "p1").expect("das Profil");
+        assert!(
+            wire.display.hide_open_matches,
+            "der Schalter muss zum Gerät reisen"
+        );
+
+        let zurueck = display_settings_from_wire(&wire.display);
+        assert!(
+            zurueck.hide_open_matches,
+            "und aus dem Gerät zurück in die Konfiguration"
+        );
+    }
+
+    #[test]
+    fn eine_bestandskonfiguration_ohne_das_feld_zeigt_offene_spiele() {
+        // G7: Nach dem Auto-Update steht jedes bestehende Profil auf
+        // „anzeigen" — ohne dass jemand etwas tun muss.
+        let alt = r#"{"show_numbers":true,"show_nations":false,"list_position":"bottom"}"#;
+        let d: crate::config::TlDisplaySettings = serde_json::from_str(alt).expect("lesbar");
+        assert!(!d.hide_open_matches);
+    }
+
+    #[test]
+    fn ein_zustand_ohne_turnier_traegt_eine_leere_liste_offener_spiele() {
+        let tablet = TabletState::default();
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 3);
+        assert!(s.open_queue.is_empty());
+        assert_eq!(s.open_queue_truncated, 0);
+    }
+
+    #[test]
+    fn ein_alter_zustand_ohne_die_neuen_felder_bleibt_lesbar() {
+        // Der Relay bettet tl.html ein und wird bei jedem Merge deployt, die
+        // App kommt erst ueber einen Release-Tag: Eine neue Seite trifft
+        // regelmaessig einen alten Host. Fehlendes Feld muss "keine offenen
+        // Spiele" heissen, nicht "Fehler".
+        let s = state_with(
+            snap(Vec::new(), vec![wartendes(1, 202_608_301_200)], Vec::new()),
+            &AppConfig::default(),
+        );
+        let mut wert = serde_json::to_value(&s).expect("serialisierbar");
+        let obj = wert.as_object_mut().expect("Objekt");
+        obj.remove("open_queue");
+        obj.remove("open_queue_truncated");
+
+        let alt: TlState = serde_json::from_value(wert).expect("ohne die neuen Felder lesbar");
+        assert!(alt.open_queue.is_empty());
+        assert_eq!(alt.open_queue_truncated, 0);
+    }
+
+    #[test]
+    fn die_spielliste_fuehrt_offene_paarungen_in_einer_zweiten_liste() {
+        let s = state_with(
+            snap(
+                Vec::new(),
+                vec![wartendes(1, 202_608_301_200), offenes(2, 202_608_301_300)],
+                Vec::new(),
+            ),
+            &AppConfig::default(),
+        );
+
+        assert_eq!(
+            s.queue.iter().map(|m| m.match_id).collect::<Vec<_>>(),
+            vec![1],
+            "die Arbeitsliste bleibt, was sie war"
+        );
+        assert_eq!(
+            s.open_queue.iter().map(|m| m.match_id).collect::<Vec<_>>(),
+            vec![2]
+        );
+    }
+
+    #[test]
+    fn ein_halb_offenes_spiel_behaelt_die_bekannten_namen() {
+        // Steht eine Seite fest, muss sie mit Namen dastehen - sonst
+        // verschenkt die Anzeige die halbe Information.
+        let mut halb = offenes(2, 202_608_301_300);
+        halb.team1 = vec![player("Müller")];
+        let s = state_with(
+            snap(Vec::new(), vec![halb], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let eintrag = &s.open_queue[0];
+        assert_eq!(eintrag.team1, vec!["Müller".to_string()]);
+        assert!(
+            eintrag.open_slot1_label.is_empty(),
+            "besetzte Seite ohne Label"
+        );
+        assert_eq!(eintrag.open_slot2_label, "noch offen");
+    }
+
+    #[test]
+    fn ein_offenes_spiel_kennt_seinen_platz_zwischen_den_echten_spielen() {
+        // Die Seite mischt nach dieser Zahl ein und sortiert NICHT selbst -
+        // die Reihenfolge bleibt serverseitig verbindlich.
+        let s = state_with(
+            snap(
+                Vec::new(),
+                vec![
+                    wartendes(1, 202_608_301_200),
+                    offenes(2, 202_608_301_300),
+                    wartendes(3, 202_608_301_400),
+                    offenes(4, 202_608_301_500),
+                ],
+                Vec::new(),
+            ),
+            &AppConfig::default(),
+        );
+
+        assert_eq!(
+            s.open_queue
+                .iter()
+                .map(|m| (m.match_id, m.queue_index))
+                .collect::<Vec<_>>(),
+            vec![(2, 1), (4, 2)],
+            "Spiel 2 steht hinter einem, Spiel 4 hinter zwei echten Spielen"
+        );
+    }
+
+    #[test]
+    fn offene_spiele_verdraengen_kein_einziges_echtes_wartespiel() {
+        // Das Erfolgskriterium der Spec: Nach dem Update darf kein Geraet
+        // WENIGER echte Spiele sehen als vorher.
+        let mut mit_offenen = Vec::new();
+        let mut nur_echte = Vec::new();
+        for i in 0..QUEUE_LIMIT as i64 {
+            let m = wartendes(i + 1, 202_608_301_200 + i);
+            nur_echte.push(m.clone());
+            mit_offenen.push(m);
+        }
+        for i in 0..50i64 {
+            mit_offenen.push(offenes(10_000 + i, 202_608_301_100));
+        }
+
+        let ohne = state_with(
+            snap(Vec::new(), nur_echte, Vec::new()),
+            &AppConfig::default(),
+        );
+        let mit = state_with(
+            snap(Vec::new(), mit_offenen, Vec::new()),
+            &AppConfig::default(),
+        );
+
+        assert_eq!(mit.queue.len(), ohne.queue.len());
+        assert_eq!(mit.queue_truncated, ohne.queue_truncated);
+        assert_eq!(
+            mit.queue.iter().map(|m| m.match_id).collect::<Vec<_>>(),
+            ohne.queue.iter().map(|m| m.match_id).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn die_offene_liste_hat_ihren_eigenen_deckel_und_meldet_die_kappung() {
+        let mut matches = Vec::new();
+        for i in 0..(OPEN_QUEUE_LIMIT as i64 + 5) {
+            matches.push(offenes(i + 1, 202_608_301_200 + i));
+        }
+        let s = state_with(snap(Vec::new(), matches, Vec::new()), &AppConfig::default());
+
+        assert_eq!(s.open_queue.len(), OPEN_QUEUE_LIMIT);
+        assert_eq!(s.open_queue_truncated, 5);
+    }
+
+    #[test]
+    fn ein_offenes_spiel_traegt_weder_lizenznummer_noch_blocked_marke() {
+        // Datenschutz (G6): Die Lizenznummer ist das Link-Ziel der
+        // badhub-Spielerseite eines FESTSTEHENDEN Teilnehmers - ein
+        // Kandidat bekommt sie nicht.
+        let mut halb = offenes(2, 202_608_301_300);
+        halb.team1 = vec![licensed_player("Müller", "08-017991")];
+        let s = state_with(
+            snap(Vec::new(), vec![halb], Vec::new()),
+            &AppConfig::default(),
+        );
+
+        let roh = serde_json::to_string(&s.open_queue).expect("serialisierbar");
+        assert!(
+            !roh.contains("08-017991"),
+            "keine Lizenznummer an offenen Spielen: {roh}"
+        );
+        assert!(!roh.contains("blocked"), "kein blocked-Feld: {roh}");
+        assert!(
+            !roh.contains("predicted"),
+            "keine Prognose an offenen Spielen: {roh}"
+        );
+    }
+
+    #[test]
+    fn ein_vorbereitungs_aufruf_fuer_ein_offenes_spiel_wird_abgelehnt() {
+        // Nicht-Ziel G2: Ohne feststehende Paarung gibt es niemanden
+        // anzusagen. Der Aufruf käme sonst bis in den Zustand und
+        // verschwände erst beim nächsten Schnappschuss wieder — die
+        // Turnierleitung hielte das Spiel für gerufen.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![a_match(1), offenes(2, 202_608_301_300)],
+            Vec::new(),
+        ));
+
+        let antwort = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            1_000,
+            &relay_proto::TlAction::CallPreparation {
+                match_ids: vec![2],
+                location_id: None,
+            },
+        );
+        assert!(antwort.is_err(), "der Aufruf muss abgelehnt werden");
+        assert!(
+            tablet.preparation_calls().is_empty(),
+            "und nichts hinterlassen haben"
+        );
+
+        // Gegenprobe: Das spielbereite Spiel lässt sich weiterhin rufen.
+        assert!(apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            1_000,
+            &relay_proto::TlAction::CallPreparation {
+                match_ids: vec![1],
+                location_id: None,
+            },
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn halle_und_wunschfeld_gehen_auch_fuer_ein_offenes_spiel() {
+        // A6: Vorbereitende Angaben sind erlaubt — sie greifen erst, wenn die
+        // Paarung feststeht. Bestandsverhalten, hier festgenagelt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![offenes(2, 202_608_301_300)],
+            vec![crate::btp::model::BtpLocation {
+                id: 1,
+                name: "Halle 1".to_string(),
+            }],
+        ));
+        let cfg = AppConfig::default();
+
+        assert!(apply_state_action(
+            &tablet,
+            &cfg,
+            1_000,
+            &relay_proto::TlAction::SetHall {
+                match_id: 2,
+                hall: "Halle 1".to_string(),
+            },
+        )
+        .is_ok());
+        assert_eq!(
+            tablet.manual_halls().get(&2).map(String::as_str),
+            Some("Halle 1")
+        );
+
+        assert!(apply_state_action(
+            &tablet,
+            &cfg,
+            1_000,
+            &relay_proto::TlAction::ExcludeFromAutoAssign {
+                match_id: 2,
+                excluded: true,
+            },
+        )
+        .is_ok());
+        assert!(tablet.auto_assign_excluded(2));
     }
 
     #[test]
@@ -6283,6 +7072,109 @@ mod tests {
         assert_eq!(relay_rev, relay_rev2, "ohne Änderung keine neue Revision");
         let lan2 = build_state_with_rev(&tablet, &cfg, 1_120_000);
         assert_eq!(lan.rev, lan2.rev);
+    }
+
+    /// Ein Turnier mit `echte` spielbereiten und `offen` offenen Spielen,
+    /// alle mit Lizenznummern — so wiegt das Fixture so viel wie ein echter
+    /// Zustand.
+    fn turnier_mit_offenen(echte: i64, offen: i64) -> TabletState {
+        let tablet = TabletState::default();
+        let mut matches = Vec::new();
+        for i in 0..echte {
+            let mut m = a_match(100 + i);
+            m.planned_time = Some(202_608_301_200 + i);
+            m.team1 = vec![licensed_player("Langername Eins", "08-001234")];
+            m.team2 = vec![licensed_player("Langername Zwei", "08-005678")];
+            matches.push(m);
+        }
+        for i in 0..offen {
+            let mut m = folgespiel(5_000 + i, None, None);
+            m.planned_time = Some(202_608_301_100 + i);
+            matches.push(m);
+        }
+        tablet.set_snapshot(snap(vec![a_court(3, None)], matches, Vec::new()));
+        tablet
+    }
+
+    #[test]
+    fn die_warteliste_wird_durch_offene_spiele_keine_stufe_kuerzer() {
+        // Das Erfolgskriterium der Spec, als Beweis: Derselbe Stand einmal
+        // mit und einmal ohne offene Spiele muss über die Cloud dieselbe
+        // Arbeitsliste liefern. Sonst sähe ein Cloud-Gerät nach dem Update
+        // WENIGER echte Spiele als vorher.
+        let cfg = AppConfig::default();
+        let (ohne, _) = state_for_relay(&turnier_mit_offenen(200, 0), &cfg, 1_000_000);
+        let (mit, _) = state_for_relay(&turnier_mit_offenen(200, 150), &cfg, 1_000_000);
+        let ohne: serde_json::Value = serde_json::from_str(&ohne).unwrap();
+        let mit: serde_json::Value = serde_json::from_str(&mit).unwrap();
+
+        assert_eq!(
+            mit["queue"].as_array().unwrap().len(),
+            ohne["queue"].as_array().unwrap().len(),
+            "offene Spiele dürfen die Arbeitsliste keine Stufe kosten"
+        );
+        assert_eq!(mit["queue_truncated"], ohne["queue_truncated"]);
+    }
+
+    #[test]
+    fn der_cloud_zustand_opfert_die_offenen_spiele_vor_der_warteliste() {
+        // Offene Spiele sind ein Anzeige-Extra: Wird der Platz knapp,
+        // verschwinden sie ZUERST — und melden das ehrlich.
+        let cfg = AppConfig::default();
+        let (json, _) = state_for_relay(&turnier_mit_offenen(200, 150), &cfg, 1_000_000);
+        let state: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        let gezeigt = state["open_queue"].as_array().unwrap().len();
+        let gekappt = state["open_queue_truncated"].as_u64().unwrap() as usize;
+        assert_eq!(
+            gezeigt + gekappt,
+            150,
+            "gezeigt + gemeldet muss die volle offene Liste ergeben"
+        );
+        assert!(
+            gezeigt < 150,
+            "bei 200 echten Spielen kann nicht auch noch alles Offene passen"
+        );
+    }
+
+    #[test]
+    fn ein_grosses_turnier_bleibt_auch_mit_offenen_spielen_unter_der_relay_grenze() {
+        // Reißt die Grenze, verwirft der Relay das ganze Frame samt
+        // Vorgänger — die Cloud-Turnierleitung sähe GAR NICHTS mehr.
+        let cfg = AppConfig::default();
+        let (json, _) = state_for_relay(&turnier_mit_offenen(400, 400), &cfg, 1_000_000);
+        assert!(
+            json.len() <= relay_proto::MAX_TL_STATE_LEN,
+            "Zustand zu groß: {} von {}",
+            json.len(),
+            relay_proto::MAX_TL_STATE_LEN
+        );
+    }
+
+    #[test]
+    fn die_revision_bleibt_an_der_vollen_fassung_haengen_auch_mit_offener_liste() {
+        // Rev-Churn-Wächter: Die Revision entsteht aus dem VOLLEN Zustand.
+        // Käme sie aus der zugeschnittenen Fassung, kippte der geteilte
+        // Zähler bei jedem Takt hin und her und jede Seite lüde im
+        // Sekundentakt neu.
+        let tablet = turnier_mit_offenen(200, 150);
+        let cfg = AppConfig::default();
+        let lan = build_state_with_rev(&tablet, &cfg, 1_000_000);
+        let (_json, relay_rev) = state_for_relay(&tablet, &cfg, 1_000_000);
+        assert_eq!(lan.rev, relay_rev);
+
+        let (_json2, relay_rev2) = state_for_relay(&tablet, &cfg, 1_060_000);
+        assert_eq!(relay_rev, relay_rev2, "ohne Änderung keine neue Revision");
+    }
+
+    #[test]
+    fn ein_turnier_ohne_offene_spiele_wird_genauso_zugeschnitten_wie_bisher() {
+        // Gegenprobe: Die zusätzliche Stufe darf am Bestand nichts ändern.
+        let cfg = AppConfig::default();
+        let (json, _) = state_for_relay(&turnier_mit_offenen(200, 0), &cfg, 1_000_000);
+        let state: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(state["open_queue"].as_array().unwrap().is_empty());
+        assert_eq!(state["open_queue_truncated"].as_u64().unwrap(), 0);
     }
 
     #[test]
@@ -8561,6 +9453,27 @@ mod tests {
             "courts",
             "queue",
             "queue_truncated",
+            // Spiele mit noch offener Paarung (Spec `tl-offene-paarungen`).
+            // Die Liste trägt dieselben Angaben wie die Warteliste, nur
+            // schlanker — und ausdrücklich OHNE Lizenznummern: Die Nummer
+            // ist das Link-Ziel der badhub-Seite eines feststehenden
+            // Teilnehmers, ein Kandidat bekommt sie nicht. Der
+            // `_ids`-Pfad-Wächter weiter unten hält das strukturell fest.
+            "open_queue",
+            "open_queue_truncated",
+            // Beschriftung eines offenen Platzes: entweder die Namen der
+            // Kandidaten aus dem Vorspiel — dieselben Spielernamen, die
+            // ohnehin in der Warteliste stehen — oder „aus Spiel 42" bzw.
+            // „noch offen". Bewusst spezifisch benannt statt „candidates":
+            // Dieser Name ist hier schon für die Walkover-Vorschläge
+            // vergeben, und ein doppelt belegter Feldname macht die
+            // Whitelist stumpf.
+            "open_slot1_label",
+            "open_slot2_label",
+            // Position eines offenen Spiels in der gemeinsamen Reihenfolge —
+            // eine reine Zahl, damit die Seite mischen kann, ohne selbst zu
+            // sortieren.
+            "queue_index",
             // Walkover-Vorschläge: Mannschaftsnamen, die auch sonst überall
             // in der Ansicht stehen, plus Runde und Gegner. Die
             // Turnierleitung muss sehen, was sie da kampflos wertet.
@@ -8791,6 +9704,10 @@ mod tests {
             // Profil-Schalter „Aufrufe unbegrenzt" (Feldtest 17.08.2026) —
             // ebenfalls ein Anzeige-Häkchen, kein Personenbezug.
             "unlimitedCourtCalls",
+            // Profil-Schalter „offene Paarungen ausblenden" (Spec
+            // `tl-offene-paarungen`) — ebenfalls nur ein Häkchen. Invertiert
+            // benannt, damit ein Profil ohne das Feld auf „anzeigen" steht.
+            "hideOpenMatches",
             "listPosition",
             // Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`)
             // — reine Anzeige-Präferenz wie die Häkchen daneben, ein Wort
@@ -8814,9 +9731,21 @@ mod tests {
         finished.finished_at = Some(500_000);
         finished.team1 = vec![player("Winter")];
         finished.team2 = vec![player("Sommer")];
+        // Ein Spiel mit noch offener Paarung samt seinem Vorspiel: Sonst
+        // bliebe `open_queue` leer und der Wächter sähe die
+        // `TlOpenMatch`-Felder nie — dieselbe Falle wie bei `finished`,
+        // `layouts` und `checkin_times` oben.
+        let mut vorspiel = a_match(4);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![player("Kandidat")];
+        vorspiel.team2 = vec![player("Gegenkandidat")];
+        let mut offen = a_match(5);
+        offen.from1 = Some(1001);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
         let mut schnappschuss = snap(
             vec![a_court(1, None)],
-            vec![running, a_match(2), finished],
+            vec![running, a_match(2), finished, vorspiel, offen],
             Vec::new(),
         );
         schnappschuss.officials = vec![crate::btp::model::BtpOfficial {
@@ -8900,6 +9829,7 @@ mod tests {
                 show_group: true,
                 show_court_remaining: true,
                 unlimited_court_calls: true,
+                hide_open_matches: false,
                 list_position: crate::config::TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
             },
@@ -8927,6 +9857,11 @@ mod tests {
             !s.scorekeepers.is_empty(),
             "Fixture-Fehler: das Fixture muss einen Zähltafelbediener enthalten, \
              sonst prüft dieser Test die `TlScorekeeper`-Felder gar nicht"
+        );
+        assert!(
+            !s.open_queue.is_empty(),
+            "Fixture-Fehler: das Fixture muss ein Spiel mit offener Paarung \
+             enthalten, sonst prüft dieser Test die `TlOpenMatch`-Felder gar nicht"
         );
         assert!(
             !s.profiles.is_empty(),
@@ -9307,6 +10242,19 @@ mod tests {
         finished.finished_at = Some(500_000);
         finished.team1 = vec![licensed_player("Winter", "08-003333")];
         finished.team2 = vec![licensed_player("Sommer", "08-004444")];
+        // Ein Spiel mit offener Paarung, dessen Vorspiel LIZENZIERTE Spieler
+        // hat (Spec `tl-offene-paarungen`): Ihre Namen dürfen als Kandidaten
+        // mitreisen, ihre Lizenznummern nicht. Ohne diesen Eintrag bliebe
+        // `open_queue` leer, und der `_ids`-Pfad-Wächter unten könnte gar
+        // nicht belegen, dass die offene Liste keine Nummern trägt.
+        let mut vorspiel = a_match(4);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![licensed_player("Kandidat", "08-007070")];
+        vorspiel.team2 = vec![licensed_player("Gegenkandidat", "08-008080")];
+        let mut offen = a_match(5);
+        offen.from1 = Some(1001);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
 
         // Wie im Allowlist-Wächter: Warteschlange der Zähltafelbediener nicht
         // leer lassen, sonst prüft dieser Test auch deren Felder nie.
@@ -9315,7 +10263,7 @@ mod tests {
         let tablet = TabletState::default();
         let mut schnappschuss = snap(
             vec![a_court(1, None)],
-            vec![running, waiting, finished],
+            vec![running, waiting, finished, vorspiel, offen],
             Vec::new(),
         );
         schnappschuss.officials = vec![crate::btp::model::BtpOfficial {
@@ -9533,6 +10481,26 @@ mod tests {
             erlaubt.len(),
             "Fixture-Fehler: es müssen alle drei Stellen belegt sein, gefunden: {fundorte:?}"
         );
+        // Die offene Liste ist bewusst NICHT unter den erlaubten Stellen:
+        // Der Zähler oben schlägt an, sobald jemand ihr `team1_ids`
+        // nachrüstet. Damit das etwas beweist, muss sie belegt sein — und
+        // der Kandidatenname muss ankommen, sonst wäre die Anzeige nutzlos.
+        let offener = s
+            .open_queue
+            .first()
+            .expect("Fixture-Fehler: die offene Liste muss belegt sein");
+        assert!(
+            offener.open_slot1_label.contains("Kandidat"),
+            "der Kandidatenname aus dem Vorspiel gehört in die Anzeige, war: {}",
+            offener.open_slot1_label
+        );
+        let offene_liste = serde_json::to_string(&s.open_queue).unwrap();
+        for nummer in ["08-007070", "08-008080"] {
+            assert!(
+                !offene_liste.contains(nummer),
+                "ein Kandidat darf keine Lizenznummer mitbringen: {offene_liste}"
+            );
+        }
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.
         assert!(json.contains("müller"));

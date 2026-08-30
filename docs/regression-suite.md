@@ -57,6 +57,17 @@ anpassen:
 4. Echte BTP-Auffälligkeiten als Capture-Fixture in
    `src-tauri/tests/fixtures/` einfrieren (Parser-Regressionen).
 
+## Von Hand zu prüfen (was kein Test abdeckt)
+
+- **Offene Paarungen in der TL-Spielliste** (Spec
+  [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md)): Mit
+  einem Turnier, dessen Vorrunde noch läuft, die TL-Seite öffnen und prüfen:
+  Stehen die kommenden KO-Spiele mit der Marke „⋯ noch offen" in der Liste?
+  Zeigen sie Kandidaten bzw. „aus Spiel 42"? Fehlt an ihnen das Megafon?
+  Lässt sich eine solche Zeile ziehen — und steht sie nach dem nächsten
+  Sync-Takt (2 s) noch an der neuen Stelle? Nimmt das Häkchen im
+  Profile-Dialog sie wieder aus der Liste?
+
 ## Bekannte Lücken (bewusst, mit Plan)
 
 - **Snapshot-Übernahme in `sync.rs::run_once`**: heute bedingungslos

@@ -364,3 +364,51 @@ Version gemeinsam bumpen in `src-tauri/Cargo.toml` +
 Kein `security-reviewer` nötig (kein neuer User-Input/Auth/Datei-URL-
 Handling über die bestehenden, bereits geprüften Tauri-Command-/
 `TlAction`-Muster hinaus).
+
+
+## Nachtrag 30.08.2026 — offene Paarungen nehmen teil (ADR 0053)
+
+Mit der Spec [`tl-offene-paarungen`](tl-offene-paarungen.md) stehen auch
+Spiele ohne feststehende Paarung in der Liste, und sie nehmen **voll** an der
+globalen manuellen Reihenfolge teil. Zwei Stellen mussten dafür geöffnet
+werden, und sie gehören zusammen:
+
+- `assign::ready_queue` — die Ziel-Liste jeder `QueueReorder`. Stünde ein
+  angezeigtes Spiel nicht darin, verwürfe `QueueOrderStore::reorder` den Zug
+  **still** (`queue_order.rs`, „unbekanntes Ziel ⇒ lieber nichts tun"),
+  während die Oberfläche „Reihenfolge geändert" meldet.
+- `sync::reconcile_queue_order` — der Aufräumer. Ohne die Öffnung würfe er
+  den frisch gesetzten Rang im nächsten Sync-Takt wieder weg, also Sekunden
+  später; das Umsortieren nähme sich vor den Augen der Turnierleitung selbst
+  zurück.
+
+Der Lebenszyklus bleibt sonst unverändert: Wer aufs Feld geht oder beendet
+wird, fällt aus dem Präfix. Eine manuell gesetzte Position überlebt damit den
+Übergang von „offen" zu „Paarung steht".
+
+**Folge für den Präfix:** Er kann jetzt offene Spiele enthalten und wird
+dadurch länger — ein Zug weit nach unten friert entsprechend mehr Zeilen ein
+(ADR 0050). Bewusst getragen; der globale Reset-Knopf im Kopf des Panels
+bleibt der Ausweg.
+
+**Folge für den Sichtbarkeits-Deckel:** `TabletState::queue_reorder` deckelte
+den neuen Präfix pauschal auf `QUEUE_LIMIT`. Da wartende und offene Spiele
+getrennte Deckel haben, zählt die Rechnung sie jetzt getrennt
+(`sichtbare_laenge_intern`) — und schneidet beim **ersten unsichtbaren**
+Eintrag, nicht hinter dem letzten sichtbaren.
+
+Der Unterschied ist der ganze Zweck (Code-Review 30.08.2026): Offene Spiele
+sind spätere Runden und sortieren ans Ende, eines von ihnen ist wegen des
+eigenen Deckels fast immer sichtbar. Zählte man bis dorthin, läge die halbe
+unsichtbare Warteliste dazwischen mit im Präfix, und ein einziges „ans Ende
+ziehen" schriebe Ränge für Spiele, die niemand gesehen hat — genau der Fehler,
+gegen den der Deckel am 14.08.2026 eingeführt wurde. Ohne offene Spiele fällt
+die Rechnung exakt auf 120 zurück; die beiden Tests
+`queue_reorder_never_backfills_matches_beyond_what_tl_web_could_show` und
+`ein_sichtbares_offenes_spiel_zieht_keine_unsichtbaren_wartenden_mit` halten
+beide Seiten fest.
+
+**Folge für das Zug-Ziel im Browser:** `queueReorderTarget` rechnet bewusst auf
+der **immer** gemischten Liste (`reorderQueue`), nicht auf der angezeigten.
+Der Turnier-PC kennt nur eine Reihenfolge; wer offene Spiele am eigenen Gerät
+ausgeblendet hat, fröre sie sonst mit „ans Ende" unbemerkt in den Präfix ein.

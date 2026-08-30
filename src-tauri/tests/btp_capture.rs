@@ -365,3 +365,103 @@ fn a_tournament_may_carry_no_planned_venue_at_all() {
         }
     }
 }
+
+/// Bilanz der offenen Plaetze eines Mitschnitts — Messung zur Spec
+/// `tl-offene-paarungen` (Schritt 0).
+struct OffeneBilanz {
+    /// Alle Paarungen mit IsMatch=true, die der Parser liefert.
+    gesamt: usize,
+    /// Davon mit mindestens einem offenen Platz.
+    offen: usize,
+    /// Offene Plaetze, deren Vorspiel im selben Draw auffindbar ist
+    /// (Kandidaten-Beschriftung moeglich).
+    plaetze_mit_feeder: usize,
+    /// Offene Plaetze ohne auffindbares Vorspiel — Setzplatz, Freilos oder
+    /// Speisung ueber Draw-Grenzen. Diese Zeilen blieben dauerhaft
+    /// unaufloesbar und heissen deshalb neutral "noch offen".
+    plaetze_ohne_feeder: usize,
+    /// Plaetze, deren Mannschaft feststeht (EntryID gesetzt), deren Namen der
+    /// Parser aber nicht aufloesen konnte.
+    halb_aufgeloest: usize,
+    /// Spiele mit offenem Platz, die BTP trotzdem schon als entschieden oder
+    /// auf dem Feld fuehrt. Das waeren die gefuerchteten Freilos-Dauerzeilen:
+    /// Sie fuellen sich nie und stuenden fuer immer in der Liste.
+    offen_aber_entschieden: usize,
+}
+
+fn offene_bilanz(bytes: &[u8]) -> OffeneBilanz {
+    let nodes = proto::decode_response(bytes).expect("dekodierbar");
+    let snapshot = model::parse_snapshot(&nodes).expect("Snapshot");
+    let mut bilanz = OffeneBilanz {
+        gesamt: snapshot.matches.len(),
+        offen: 0,
+        plaetze_mit_feeder: 0,
+        plaetze_ohne_feeder: 0,
+        halb_aufgeloest: 0,
+        offen_aber_entschieden: 0,
+    };
+    for m in &snapshot.matches {
+        let seiten = [
+            (m.team1.is_empty(), m.entry1_id, m.from1),
+            (m.team2.is_empty(), m.entry2_id, m.from2),
+        ];
+        if seiten.iter().any(|(leer, _, _)| *leer) {
+            bilanz.offen += 1;
+            if m.status != MatchStatus::Scheduled {
+                bilanz.offen_aber_entschieden += 1;
+            }
+        }
+        for (leer, entry_id, from) in seiten {
+            if !leer {
+                continue;
+            }
+            if entry_id != 0 {
+                bilanz.halb_aufgeloest += 1;
+                continue;
+            }
+            // Der Feeder ist das Spiel, dessen PlanningID auf den Slot zeigt —
+            // die Draw-Bindung ist zwingend, PlanningIDs kollidieren zwischen
+            // Draws.
+            let feeder = from.and_then(|slot| {
+                snapshot
+                    .matches
+                    .iter()
+                    .find(|o| o.draw_id == m.draw_id && o.planning_id == slot && o.id != m.id)
+            });
+            if feeder.is_some() {
+                bilanz.plaetze_mit_feeder += 1;
+            } else {
+                bilanz.plaetze_ohne_feeder += 1;
+            }
+        }
+    }
+    bilanz
+}
+
+/// Wie viele Spiele mit offenem Platz liefert BTP — und ist ihre Herkunft
+/// aufloesbar? Vorbedingung der Spec `tl-offene-paarungen`: Gaebe es viele
+/// Plaetze ohne auffindbares Vorspiel, stuenden dauerhaft unaufloesbare
+/// Zeilen in der Turnierleitungs-Liste.
+///
+/// Die Zahlen sind festgeschrieben, damit ein Parser-Umbau sie nicht still
+/// verschiebt.
+#[test]
+fn der_mitschnitt_sagt_wie_viele_spiele_mit_offenem_platz_btp_liefert() {
+    let klein = offene_bilanz(TOURNAMENT);
+    let zwei = offene_bilanz(TOURNAMENT_2HALLS);
+    let ablesen = |b: &OffeneBilanz| {
+        (
+            b.gesamt,
+            b.offen,
+            b.plaetze_mit_feeder,
+            b.plaetze_ohne_feeder,
+            b.halb_aufgeloest,
+            b.offen_aber_entschieden,
+        )
+    };
+    assert_eq!(
+        (ablesen(&klein), ablesen(&zwei)),
+        ((10, 0, 0, 0, 0, 0), (36, 22, 8, 34, 0, 0)),
+        "je Mitschnitt: gesamt/offen/mit-feeder/ohne-feeder/halb/offen-aber-entschieden"
+    );
+}

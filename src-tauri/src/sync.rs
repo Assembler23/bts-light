@@ -1092,11 +1092,16 @@ impl SyncEngine {
     }
 
     fn reconcile_queue_order(&self, tablet: &TabletState, snapshot: &BtpSnapshot) {
+        // Auch Spiele mit noch offener Paarung bleiben im Präfix (Spec
+        // `tl-offene-paarungen`, ADR 0053). Ohne das würfe dieser Aufräumer
+        // im nächsten Takt — also Sekunden später — jeden gerade gesetzten
+        // Rang wieder weg, und das Umsortieren nähme sich vor den Augen der
+        // Turnierleitung selbst zurück. Der Lebenszyklus bleibt sonst
+        // unverändert: Wer aufs Feld geht oder beendet wird, fällt heraus.
         let keep: HashSet<i64> = snapshot
             .matches
             .iter()
             .filter(|m| m.status == MatchStatus::Scheduled)
-            .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
             .map(|m| m.id)
             .collect();
         tablet.queue_order_store().retain(&keep);
@@ -3017,6 +3022,57 @@ mod tests {
         let snap = snap_with(Vec::new(), Vec::new(), Vec::new());
         engine.reconcile_queue_order(&tablet, &snap);
         assert_eq!(tablet.queue_order_store().rank(8), None);
+    }
+
+    #[test]
+    fn reconcile_queue_order_behaelt_ein_offenes_spiel_im_praefix() {
+        // ADR 0053: Ein umsortiertes offenes Spiel muss den nächsten
+        // Sync-Takt überleben.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.queue_order_store().reorder(&[7, 8], 8, Some(7));
+        assert_eq!(tablet.queue_order_store().rank(8), Some(0));
+
+        let mut offen = ready_named(8, None, "C", "D");
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
+        let snap = snap_with(
+            Vec::new(),
+            vec![ready_named(7, None, "A", "B"), offen],
+            Vec::new(),
+        );
+        engine.reconcile_queue_order(&tablet, &snap);
+
+        assert_eq!(
+            tablet.queue_order_store().rank(8),
+            Some(0),
+            "das offene Spiel behält seinen Rang"
+        );
+    }
+
+    #[test]
+    fn reconcile_queue_order_wirft_ein_vergebenes_spiel_weiterhin_heraus() {
+        // Gegenprobe zur Öffnung: Der Lebenszyklus bleibt, wie er war.
+        let engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        tablet.queue_order_store().reorder(&[7, 8], 7, Some(8));
+        assert_eq!(tablet.queue_order_store().rank(7), Some(0));
+
+        let snap = snap_with(
+            Vec::new(),
+            vec![
+                oncourt_named(7, 1, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        engine.reconcile_queue_order(&tablet, &snap);
+
+        assert_eq!(
+            tablet.queue_order_store().rank(7),
+            None,
+            "wer auf dem Feld steht, gehört nicht mehr in die Warteliste"
+        );
     }
 
     fn zwei_hallen() -> Vec<crate::btp::model::BtpLocation> {

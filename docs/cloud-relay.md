@@ -661,6 +661,14 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   irgendein Profil die Option führt (`tablet/tl.rs`
   `unlimited_court_calls`) — ohne sie hält er den alten 3er-Deckel
   selbst, das Client-Gating ist nicht die einzige Sicherung. Seit
+  30.08.2026 trägt `TlDisplaySettingsWire` zusätzlich `hideOpenMatches`
+  (Spec `tl-offene-paarungen`) — **invertiert benannt**, damit ein Profil
+  aus einem älteren Browser-Stand, das das Feld nicht kennt, auf „offene
+  Paarungen anzeigen" steht. Ein neuer Wire-Frame war dafür nicht nötig:
+  Die offenen Spiele selbst reisen als `open_queue` im opaken
+  `TlState`-JSON (Serde-Default, alte Gegenstellen ignorieren die Liste,
+  und eine neue Seite an einem alten Host zeigt schlicht keine offenen
+  Spiele). Seit
   v0.9.218 trägt der opake `TlState` außerdem optional `checkin_times`
   samt `checkin_stale`-Marke (Panel „Anfangszeiten": heutiger
   Check-In-Zeitplan je Klasse mit Zählern, ohne Personendaten;

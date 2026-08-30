@@ -1649,6 +1649,12 @@ pub struct TlDisplaySettingsWire {
     /// bei drei Aufrufen, das bisherige Verhalten.
     #[serde(rename = "unlimitedCourtCalls", default)]
     pub unlimited_court_calls: bool,
+    /// Spiele mit noch offener Paarung ausblenden (Spec
+    /// `tl-offene-paarungen`). **Invertiert**, damit ein fehlendes Feld
+    /// „anzeigen" bedeutet — genau das liefert ein Profil aus einem älteren
+    /// Browser-Stand, und genau das ist der gewollte Standard.
+    #[serde(rename = "hideOpenMatches", default)]
+    pub hide_open_matches: bool,
     #[serde(rename = "listPosition")]
     pub list_position: TlListPositionWire,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
@@ -4526,6 +4532,7 @@ mod tests {
                 show_round: true,
                 show_group: false,
                 show_court_remaining: true,
+                hide_open_matches: false,
                 unlimited_court_calls: false,
                 list_position: TlListPositionWire::Bottom,
                 time_stats_axis: TlTimeStatsAxisWire::Group,
@@ -4534,6 +4541,30 @@ mod tests {
             column_widths: vec![2.0, 1.0, 1.5],
             updated_at_ms: 1_700_000_000_000,
         });
+    }
+
+    #[test]
+    fn ein_profil_ohne_hide_open_matches_zeigt_offene_spiele() {
+        // Spec `tl-offene-paarungen`, G7: Der Schalter ist invertiert, damit
+        // ein Profil aus einem älteren Browser-Stand — das das Feld gar
+        // nicht kennt — auf „offene Spiele anzeigen" steht.
+        let ohne = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,
+            "showClubLogos":false,"showDiscipline":true,"showRound":true,
+            "showGroup":true,"listPosition":"bottom"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(ohne).expect("lesbar");
+        assert!(
+            !alt.hide_open_matches,
+            "ohne das Feld werden offene Spiele angezeigt"
+        );
+
+        let mit = TlDisplaySettingsWire {
+            hide_open_matches: true,
+            ..alt
+        };
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""hideOpenMatches":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert!(zurueck.hide_open_matches);
     }
 
     /// Etappe D (`spielzeiten-prognose`): `showCourtRemaining` reist im
