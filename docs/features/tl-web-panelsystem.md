@@ -425,6 +425,19 @@ Entscheidung: [ADR 0026](../adr/0026-spielliste-eine-globale-reihenfolge-eine-li
   `TlDisplaySettings.unlimited_court_calls` — zählt der Host über 3
   hinaus; die Zusage „alle Geräte, eine Zahl" gilt unverändert, siehe
   `docs/announcements.md`.)
+  (Nachtrag 30.08.2026: Dazu kam die Anzeige-Option **„Spiele mit noch
+  offener Paarung zeigen"** — Spec
+  [`tl-offene-paarungen`](tl-offene-paarungen.md). Gespeichert wird sie
+  **invertiert** als `TlDisplaySettings.hide_open_matches` /
+  `hideOpenMatches`: Beide Typen sind `#[serde(default)]` mit reinen `bool`s,
+  ein fehlendes Feld kommt also als `false` zurück. Hieße es
+  `show_open_matches`, stünde jedes Profil, das es vor diesem Update schon
+  gab, nach dem Auto-Update auf „aus" — und niemand sähe die neue Anzeige,
+  bis er den Schalter fände. So herum gilt für alle Profile der gewollte
+  Standard „anzeigen". Das Häkchen im Editor fragt trotzdem positiv; die
+  Umkehrung passiert beim Übernehmen. Es erscheint nur, wenn der Turnier-PC
+  überhaupt eine `open_queue` schickt — sonst stünde an einem älteren Host
+  ein wirkungsloses Häkchen.)
 - **F — Mehrspalten-Layout**, siehe Akzeptanzkriterien oben und ADR 0025
   (Nachtrag dort). `TlPanelProfile.columns`/`column_widths`,
   `TlPanelSetting.column` — reisen auf demselben Weg wie der übrige

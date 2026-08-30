@@ -112,6 +112,7 @@ Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 | **Zuweisungs-Nudge** (`tablet/state.rs` `monitor_belegung`/`nudge_belegungs_wechsel` + Projektion in `set_snapshot`, `relay/` Nudge in den Armen `MatchAssigned`/`MatchCleared`) | `docs/features/monitor-livestand-push.md` (Spec, Etappe S3) · `docs/court-monitor.md` (WS-Nudge, beide Betriebsarten) |
 | **Entprellter Live-Stand** (`tablet/state.rs` `scores_dirty`/`scores_fingerprint`/`mark_scores_dirty`/`flush_scores` + synchroner Flush in `clear_court`/Feldwechsel, Sekundentakt im Sync-Loop `commands.rs`, Flush in `stop_sync` und `lib.rs` `beenden`) | `docs/features/monitor-livestand-push.md` (Spec, Etappe S2) · `docs/tablet.md` (Wahrheit beim Tablet) |
 | **Antwortcache der Übersicht** (`tablet/state.rs` `OverviewCache`/`overview_rev`/`bump_overview_rev` + Meldung in `notify_monitor`/`set_snapshot`, `tablet/server.rs` `uebersicht_json`/`OVERVIEW_CACHE_TTL_MS` + ETag/304 in `health`, `commands.rs` Meldung in `mutate_config`/`save_config`, Uhr-Versatz + Uhr-Takt in `assets/overview.html`) | `docs/features/monitor-livestand-push.md` (Spec, Etappe S1) · `docs/court-monitor.md` (Bedienung) |
+| **Offene Paarungen in der TL-Liste** (`tablet/tl.rs` `offener_platz_text`/`TlOpenMatch`/`open_queue`+`open_queue_truncated`/`OPEN_QUEUE_LIMIT`/`offene_auffuellen`/`ist_offene_paarung`, Partition in `build_state_limited`, `assign.rs` `ready_queue` (Filter offen), `sync.rs` `reconcile_queue_order`, `state.rs` `sichtbare_laenge_intern`, `config.rs`+`relay-proto` `hide_open_matches`/`hideOpenMatches`, `src/io/offeneSpiele.mjs` + `scripts/test-offene-spiele.mjs` + Inline-Kopie in `assets/tl.html`) | `docs/features/tl-offene-paarungen.md` (Spec) · `docs/turnierleitung-web.md` (Bedienung) · `docs/btp_protocol.md` (Feeder-Auflösung) · ADR 0051/0052/0053 |
 | **TL-Web-Push** (`tablet/state.rs` `tl_subs`/`subscribe_tl`/`notify_tl`/`TlStateCache`, `tablet/server.rs` `tl_push_takt`/`tl_ws_socket` + Cache-Zweig in `tl_state`, `relay/` `tl_subs`/`notify_tl`/`tl_ws_conn`, Push-Teil von `assets/tl.html` (`verbindePush`/`setzePollTakt`)) | `docs/features/tl-web-push.md` (Spec) · `docs/turnierleitung-web.md` (Bedienung) · `docs/cloud-relay.md` (Wire-Ebene) · ADR 0034 |
 | Sprachansagen (`io/announcer.ts`, `components/MatchAnnouncer.tsx`, `Discipline`, Ansage-Knopf in `PreparationPanel`) | `docs/announcements.md` |
 | Court-Monitor (`tablet/monitor.rs`, `tablet/mdns.rs`, `assets/monitor.html`, `assets/overview.html`, `assets/preparation.html`, `assets/combo.html`, `assets/flags/`, Court-/Monitor-/`/info/*`-Routen in `server.rs` + `relay/`, `pages/CourtMonitorPanel.tsx`, `monitor_*`-Commands) | `docs/court-monitor.md` |
@@ -176,6 +177,16 @@ Der Wächter-Test in `tablet/tl.rs`
 (`the_state_never_carries_personal_data_beyond_its_purpose`) prüft die drei
 Stellen positiv und hält Geburtsjahr, Check-In-Spielernamen sowie
 Sperrlisten und Stammverein der Schiedsrichter weiterhin draußen.
+
+**Kandidatennamen** (seit 30.08.2026, Spec `tl-offene-paarungen`): Bei einem
+Spiel mit noch offener Paarung nennt die Turnierleitungs-Liste die möglichen
+Teilnehmer aus dem Vorspiel — Personen also, die dieses Spiel womöglich nie
+bestreiten. Bewusst freigegeben: Es sind dieselben Namen, die ohnehin in der
+Warteliste stehen, sie dienen demselben Zweck (die richtige Paarung ans Feld
+holen) und stehen hinter dem Gerätezugang. **Ohne Lizenznummer, ohne Verein,
+ohne Nation** — der `_ids`-Pfad-Wächter im selben Test hält die offene Liste
+strukturell frei davon. Da der Anzeige-Schalter clientseitig wirkt, reisen die
+Labels unabhängig davon mit; das ist Teil der Abwägung.
 
 ---
 

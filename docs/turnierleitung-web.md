@@ -300,6 +300,45 @@ Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
 
+### Spiele, deren Paarung noch nicht feststeht (seit v0.9.273)
+
+In der Spielliste stehen auch Spiele, bei denen noch gar nicht klar ist, wer
+gegeneinander antritt — ein Halbfinale, dessen Vorrunde noch läuft. Sie
+erscheinen an ihrer regulären Stelle der Reihenfolge, ruhiger gefärbt als die
+übrigen Zeilen und mit der Marke **⋯ noch offen**.
+
+Was in der Zeile steht, hängt davon ab, wie viel BTP hergibt:
+
+| Anzeige | Bedeutung |
+|---|---|
+| `Müller oder Schmidt` | Die beiden möglichen Teilnehmer aus dem direkten Vorspiel. |
+| `aus Spiel 42` | Das Vorspiel ist bekannt, seine Teilnehmer aber selbst noch nicht. Bewusst **nicht** „Sieger aus 42": Bei Platzierungsspielen füllt der Verlierer den Platz, und welche Seite es ist, sagt BTP nicht. |
+| `noch offen` | Es gibt kein auffindbares Vorspiel — ein Setzplatz, ein Freilos oder ein Qualifikant aus einer Gruppe. |
+
+Steht **eine** Seite schon fest, zeigt sie ihre echten Namen und nur die
+andere einen dieser Texte.
+
+**Was an so einer Zeile geht:** umsortieren (Griff, ↑-Knopf), Spielort setzen,
+Wunschfeld, Auto-Vergabe-Ausnahme. Eine manuell gesetzte Position bleibt
+erhalten, wenn die Paarung später feststeht — das Spiel springt nicht zurück.
+
+**Was nicht geht:** in die Vorbereitung rufen, einem Feld zuweisen, Ergebnis
+eintragen, Vorabzettel drucken. Es gibt schlicht niemanden aufzurufen oder
+aufzuschreiben; die Knöpfe fehlen deshalb ganz, statt eine Fehlermeldung zu
+bringen. Die automatische Feldvergabe überspringt diese Spiele ebenfalls, und
+sie bekommen **keine** Startzeit-Prognose — sonst verschöben sie die Prognose
+aller anderen.
+
+**Ausblenden:** Wer lieber die kurze Arbeitsliste sieht, nimmt im
+**Profile**-Knopf das Häkchen „Spiele mit noch offener Paarung zeigen"
+heraus. Der Schalter gilt für das Profil, also je Gerät — standardmäßig ist
+er **an**, auch an Geräten, die es schon vor diesem Update gab.
+
+> **Große Turniere über die Cloud:** Reicht der Platz im Zustand nicht für
+> alles, lässt der Turnier-PC zuerst die offenen Spiele weg und erst danach
+> etwas anderes. Die Arbeitsliste wird durch dieses Feature also nie kürzer.
+> Im Hallennetz (LAN) tritt das praktisch nicht auf.
+
 ### Spiele in der Warteliste umsortieren
 
 **Der schnellste Weg — „ganz nach vorn":** der Knopf **↑** rechts an der

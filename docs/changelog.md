@@ -4,6 +4,36 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.273
+
+- **Neu: Spiele mit noch offener Paarung in der Turnierleitungs-Liste.**
+  Bisher zeigte die TL-Seite nur Spiele, deren Teilnehmer feststanden — ein
+  Viertelfinale, dessen Vorrunde noch lief, fehlte darin komplett, obwohl BTP
+  es längst führt. Das war beim Planen des Tages verwirrend: In BTP steht es,
+  in der App nicht.
+
+  Diese Spiele erscheinen jetzt an ihrer regulären Stelle der Reihenfolge,
+  ruhiger gefärbt und mit der Marke **⋯ noch offen**. Wo BTP es hergibt,
+  stehen die möglichen Teilnehmer da („Müller oder Schmidt"); sonst die
+  Herkunft („aus Spiel 42") oder schlicht „noch offen". Steht eine Seite schon
+  fest, zeigt sie ihre echten Namen.
+
+  **Umsortieren geht** — auch die manuell gesetzte Position bleibt erhalten,
+  wenn die Paarung später feststeht. **Rufen, zuweisen, Ergebnis eintragen und
+  Zettel drucken gehen nicht:** Es gibt niemanden anzusagen oder
+  aufzuschreiben, also fehlen diese Knöpfe ganz. Die automatische Feldvergabe
+  überspringt solche Spiele wie bisher, und sie bekommen keine
+  Startzeit-Prognose — sonst verschöben sie die aller anderen.
+
+  Wer die kurze Arbeitsliste bevorzugt, nimmt im **Profile**-Dialog das
+  Häkchen „Spiele mit noch offener Paarung zeigen" heraus. Der Schalter gilt
+  je Gerät und steht überall auf **an**, auch an Geräten, die es vor diesem
+  Update schon gab.
+
+  Über die Cloud gilt: Reicht der Platz nicht für alles, lässt der Turnier-PC
+  zuerst die offenen Spiele weg. Die Arbeitsliste wird durch dieses Feature
+  also nie kürzer als vorher.
+
 ## v0.9.272
 
 - **Neu: Testsystem-Schalter.** Unter **Einstellungen → 1 · Liveticker-Ziel**

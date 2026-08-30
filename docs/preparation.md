@@ -302,3 +302,12 @@ abgelöst).
 Der **Nachruf** an die Bedienung setzt deshalb am Feld-Aufruf an, wo sie
 feststeht: [zaehltafelbediener.md](zaehltafelbediener.md).
 
+
+
+## Spiele ohne feststehende Paarung
+
+Sie erscheinen hier bewusst **nicht** — weder in der Vorbereitungsliste noch
+auf dem Vorbereitungs-Monitor, und rufen lässt sich ein solches Spiel auch
+nicht (der Turnier-PC lehnt den Aufruf ausdrücklich ab). Es gibt schlicht
+niemanden anzusagen. Sichtbar sind sie nur in der Turnierleitungs-Oberfläche,
+siehe [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md).

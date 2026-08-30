@@ -125,7 +125,9 @@ fn offene_spiele_im_praefix_aendern_die_reihenfolge_der_echten_spiele_nicht() {
     let tablet = TabletState::default();
     tablet.set_snapshot(snap.clone());
     // Das offene Spiel ganz nach vorn ziehen — der Präfix trägt es damit.
-    tablet.queue_order_store().reorder(&[1, 2, 99, 3], 99, Some(1));
+    tablet
+        .queue_order_store()
+        .reorder(&[1, 2, 99, 3], 99, Some(1));
 
     let zustand = tl::build_state(&tablet, &config, 0, 1);
     assert_eq!(

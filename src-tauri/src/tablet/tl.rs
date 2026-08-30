@@ -4924,7 +4924,10 @@ mod tests {
 
         let eintrag = &s.open_queue[0];
         assert_eq!(eintrag.team1, vec!["Müller".to_string()]);
-        assert!(eintrag.open_slot1_label.is_empty(), "besetzte Seite ohne Label");
+        assert!(
+            eintrag.open_slot1_label.is_empty(),
+            "besetzte Seite ohne Label"
+        );
         assert_eq!(eintrag.open_slot2_label, "noch offen");
     }
 
@@ -4971,7 +4974,10 @@ mod tests {
             mit_offenen.push(offenes(10_000 + i, 202_608_301_100));
         }
 
-        let ohne = state_with(snap(Vec::new(), nur_echte, Vec::new()), &AppConfig::default());
+        let ohne = state_with(
+            snap(Vec::new(), nur_echte, Vec::new()),
+            &AppConfig::default(),
+        );
         let mit = state_with(
             snap(Vec::new(), mit_offenen, Vec::new()),
             &AppConfig::default(),

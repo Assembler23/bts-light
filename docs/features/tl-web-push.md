@@ -208,3 +208,22 @@ nicht verbunden".
 | Nudge-Sturm bei Punkteregen | Poll je Nudge | ETag macht Überholtes zum 304; Client bündelt Nudges über ein laufendes `poll()` (kein paralleler zweiter Abruf) |
 | Cache liefert veraltet nach Config-Änderung | Anzeige hinkt ≤ 1 s | Erkennungstask liest Config je Tick (wie der Relay-TICK heute) |
 | WS-Zuhörer-Leck | Speicher | Deckel 16 + Heartbeat-Abräumung, Muster `monitor_conn`/`subscribe_monitor` |
+
+
+## Nachtrag 30.08.2026 — offene Paarungen im Größenbudget
+
+Der Zustand trägt seit der Spec [`tl-offene-paarungen`](tl-offene-paarungen.md)
+eine zweite Liste (`open_queue`). Sie ist im Cloud-Fenster **der letzte
+Zusatz und der erste Opferkandidat**: `state_for_relay` legt sie vor der
+bestehenden Kappungsleiter beiseite, lässt diese unverändert über die
+Arbeitsliste entscheiden und füllt erst danach auf, was noch unter
+`MAX_TL_STATE_LEN` passt (`offene_auffuellen`, Stufen `[40, 20, 10, 5]`).
+
+Damit kostet das Feature die Arbeitsliste **keine** Kappungsstufe — der Test
+`die_warteliste_wird_durch_offene_spiele_keine_stufe_kuerzer` vergleicht
+denselben Stand einmal mit und einmal ohne offene Spiele. Ein Turnier ohne
+offene Spiele zahlt auch keine zusätzliche Serialisierung: `offene_auffuellen`
+gibt den bereits gebauten Zustand unverändert zurück.
+
+Die Revision entsteht weiterhin aus der **vollen** Fassung
+(`die_revision_bleibt_an_der_vollen_fassung_haengen_auch_mit_offener_liste`).

@@ -1840,7 +1840,10 @@ mod tests {
         assert_eq!(ohne, vec![1, 3]);
         assert_eq!(mit, vec![1, 2, 3]);
         assert_eq!(
-            mit.iter().filter(|id| **id != 2).copied().collect::<Vec<_>>(),
+            mit.iter()
+                .filter(|id| **id != 2)
+                .copied()
+                .collect::<Vec<_>>(),
             ohne,
             "ohne die offenen bleibt exakt die alte Abfolge übrig"
         );
