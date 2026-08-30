@@ -337,6 +337,8 @@ er **an**, auch an Geräten, die es schon vor diesem Update gab.
 > **Große Turniere über die Cloud:** Reicht der Platz im Zustand nicht für
 > alles, lässt der Turnier-PC zuerst die offenen Spiele weg und erst danach
 > etwas anderes. Die Arbeitsliste wird durch dieses Feature also nie kürzer.
+> Wie viele Vorschau-Zeilen dabei fehlen, steht unter der Liste („… weitere
+> Spiele mit noch offener Paarung sind nicht mit übertragen").
 > Im Hallennetz (LAN) tritt das praktisch nicht auf.
 
 ### Spiele in der Warteliste umsortieren
