@@ -300,6 +300,21 @@ pub(crate) fn apply_state_action(
                     format!("Spiel {unknown} gibt es im aktuellen Turnierstand nicht."),
                 ));
             }
+            // Spiele ohne feststehende Paarung lassen sich nicht rufen (Spec
+            // `tl-offene-paarungen`, Nicht-Ziel G2): Es gibt niemanden
+            // anzusagen. Ausdrücklich ablehnen statt durchlaufen zu lassen —
+            // sonst nähme der Aufruf den Weg bis in den Zustand und
+            // verschwände erst beim nächsten BTP-Schnappschuss wieder
+            // (`apply_preparation_calls`), ohne dass jemand erführe, warum.
+            if let Some(offen) = match_ids.iter().find(|id| ist_offene_paarung(tablet, **id)) {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    format!(
+                        "Spiel {offen} hat noch keine feststehende Paarung — \
+                         es gibt niemanden aufzurufen."
+                    ),
+                ));
+            }
             for match_id in match_ids {
                 tablet.add_preparation_call(crate::tablet::state::PreparationCall {
                     match_id: *match_id,
@@ -1256,6 +1271,19 @@ pub(crate) fn correction_blocker(
         return Some(CorrectionBlocker::Running);
     }
     Some(CorrectionBlocker::Untested)
+}
+
+/// Steht die Paarung dieses Spiels noch nicht (vollständig) fest?
+///
+/// Dieselbe Bedingung, nach der [`build_state_limited`] die offene Liste
+/// füllt — an einer Stelle, damit Anzeige und Ablehnung nicht auseinander
+/// laufen können.
+fn ist_offene_paarung(tablet: &TabletState, match_id: i64) -> bool {
+    tablet.snapshot_clone().is_some_and(|s| {
+        s.matches
+            .iter()
+            .any(|m| m.id == match_id && (m.team1.is_empty() || m.team2.is_empty()))
+    })
 }
 
 /// Wie ein noch offener Platz eines Spiels beschriftet wird — Spec
@@ -4950,6 +4978,90 @@ mod tests {
             !roh.contains("predicted"),
             "keine Prognose an offenen Spielen: {roh}"
         );
+    }
+
+    #[test]
+    fn ein_vorbereitungs_aufruf_fuer_ein_offenes_spiel_wird_abgelehnt() {
+        // Nicht-Ziel G2: Ohne feststehende Paarung gibt es niemanden
+        // anzusagen. Der Aufruf käme sonst bis in den Zustand und
+        // verschwände erst beim nächsten Schnappschuss wieder — die
+        // Turnierleitung hielte das Spiel für gerufen.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![a_match(1), offenes(2, 202_608_301_300)],
+            Vec::new(),
+        ));
+
+        let antwort = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            1_000,
+            &relay_proto::TlAction::CallPreparation {
+                match_ids: vec![2],
+                location_id: None,
+            },
+        );
+        assert!(antwort.is_err(), "der Aufruf muss abgelehnt werden");
+        assert!(
+            tablet.preparation_calls().is_empty(),
+            "und nichts hinterlassen haben"
+        );
+
+        // Gegenprobe: Das spielbereite Spiel lässt sich weiterhin rufen.
+        assert!(apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            1_000,
+            &relay_proto::TlAction::CallPreparation {
+                match_ids: vec![1],
+                location_id: None,
+            },
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn halle_und_wunschfeld_gehen_auch_fuer_ein_offenes_spiel() {
+        // A6: Vorbereitende Angaben sind erlaubt — sie greifen erst, wenn die
+        // Paarung feststeht. Bestandsverhalten, hier festgenagelt.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![offenes(2, 202_608_301_300)],
+            vec![crate::btp::model::BtpLocation {
+                id: 1,
+                name: "Halle 1".to_string(),
+            }],
+        ));
+        let cfg = AppConfig::default();
+
+        assert!(apply_state_action(
+            &tablet,
+            &cfg,
+            1_000,
+            &relay_proto::TlAction::SetHall {
+                match_id: 2,
+                hall: "Halle 1".to_string(),
+            },
+        )
+        .is_ok());
+        assert_eq!(
+            tablet.manual_halls().get(&2).map(String::as_str),
+            Some("Halle 1")
+        );
+
+        assert!(apply_state_action(
+            &tablet,
+            &cfg,
+            1_000,
+            &relay_proto::TlAction::ExcludeFromAutoAssign {
+                match_id: 2,
+                excluded: true,
+            },
+        )
+        .is_ok());
+        assert!(tablet.auto_assign_excluded(2));
     }
 
     #[test]

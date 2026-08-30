@@ -1730,6 +1730,25 @@ mod tests {
     }
 
     #[test]
+    fn check_assign_lehnt_ein_offenes_spiel_weiterhin_ab() {
+        // Nicht-Ziel A3 der Spec `tl-offene-paarungen`: Anzeigen ja,
+        // vergeben nein. Bestandsverhalten — hier festgenagelt, damit es
+        // niemand beim Öffnen der Liste versehentlich mit aufmacht.
+        let mut offen = a_match(1);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
+        let s = snap(vec![a_court(1, None)], vec![offen], Vec::new());
+
+        assert!(
+            matches!(
+                check(&s, &AppConfig::default(), 1, 1, CourtExpectation::Any),
+                Err(AssignError::MatchNotPlayable)
+            ),
+            "ein Spiel ohne Teilnehmer darf nie auf ein Feld"
+        );
+    }
+
+    #[test]
     fn ready_queue_nimmt_offene_spiele_auf() {
         // ADR 0053: Offene Spiele nehmen an der globalen manuellen
         // Reihenfolge teil — sonst wäre jeder Zug an ihnen ein stiller
