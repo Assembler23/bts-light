@@ -972,8 +972,17 @@ fn offene_auffuellen(
     // Größen sind im Betrieb leichter zu erklären als eine Zahl, die bei
     // jedem Abruf anders ausfällt.
     const OFFEN_STUFEN: [usize; 4] = [40, 20, 10, 5];
+    let mut zuletzt = usize::MAX;
     for stufe in OFFEN_STUFEN {
         let nehmen = stufe.min(offene.len());
+        // Bei wenigen offenen Spielen liefern mehrere Stufen dieselbe Zahl —
+        // dann wäre jeder weitere Versuch dieselbe Serialisierung desselben
+        // Zustands, auf dem 2-Sekunden-Takt der Cloud (Code-Review
+        // 30.08.2026).
+        if nehmen >= zuletzt {
+            break;
+        }
+        zuletzt = nehmen;
         state.open_queue = offene[..nehmen].to_vec();
         state.open_queue_truncated = gesamt.saturating_sub(nehmen);
         let json = serde_json::to_string(&state).unwrap_or_default();
@@ -1314,6 +1323,14 @@ pub(crate) fn offener_platz_text(
     m: &crate::btp::model::BtpMatch,
     seite: u8,
 ) -> String {
+    // Steht die Mannschaft schon fest (EntryID gesetzt) und nur ihre Namen
+    // sind nicht auflösbar, wäre jede Kandidatenliste eine falsche Aussage:
+    // Der Platz ist vergeben, es kommt niemand anderes mehr. Dann lieber
+    // nichts behaupten (Code-Review 30.08.2026).
+    let entry_id = if seite == 1 { m.entry1_id } else { m.entry2_id };
+    if entry_id != 0 {
+        return OFFEN.to_string();
+    }
     let from = if seite == 1 { m.from1 } else { m.from2 };
     let Some(slot) = from else {
         return OFFEN.to_string();
@@ -4756,6 +4773,27 @@ mod tests {
         let s = snap(Vec::new(), vec![fremd, folge.clone()], Vec::new());
 
         assert_eq!(offener_platz_text(&s, &folge, 1), "noch offen");
+    }
+
+    #[test]
+    fn ein_feststehender_teilnehmer_ohne_namen_nennt_keine_kandidaten() {
+        // Code-Review 30.08.2026: Die EntryID sagt, dass der Platz vergeben
+        // ist — auch wenn der Parser die Namen nicht auflösen konnte. Das
+        // Vorspiel daneben ist dann bedeutungslos, seine Teilnehmer zu
+        // nennen wäre schlicht falsch.
+        let mut vorspiel = a_match(42);
+        vorspiel.planning_id = 1001;
+        vorspiel.team1 = vec![player("Müller")];
+        vorspiel.team2 = vec![player("Schmidt")];
+        let mut folge = folgespiel(80, Some(1001), None);
+        folge.entry1_id = 7; // Mannschaft steht, Namen fehlen
+        let s = snap(Vec::new(), vec![vorspiel, folge.clone()], Vec::new());
+
+        assert_eq!(
+            offener_platz_text(&s, &folge, 1),
+            "noch offen",
+            "ein vergebener Platz nennt keine Kandidaten mehr"
+        );
     }
 
     #[test]

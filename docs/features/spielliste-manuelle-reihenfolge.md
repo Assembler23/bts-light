@@ -394,8 +394,21 @@ bleibt der Ausweg.
 **Folge für den Sichtbarkeits-Deckel:** `TabletState::queue_reorder` deckelte
 den neuen Präfix pauschal auf `QUEUE_LIMIT`. Da wartende und offene Spiele
 getrennte Deckel haben, zählt die Rechnung sie jetzt getrennt
-(`sichtbare_laenge_intern`) und schneidet hinter dem letzten Eintrag, den
-TL-Web wirklich zeigen konnte. Ohne offene Spiele fällt sie exakt auf 120
-zurück — der Bestandstest
-`queue_reorder_never_backfills_matches_beyond_what_tl_web_could_show` ist der
-Beweis dafür.
+(`sichtbare_laenge_intern`) — und schneidet beim **ersten unsichtbaren**
+Eintrag, nicht hinter dem letzten sichtbaren.
+
+Der Unterschied ist der ganze Zweck (Code-Review 30.08.2026): Offene Spiele
+sind spätere Runden und sortieren ans Ende, eines von ihnen ist wegen des
+eigenen Deckels fast immer sichtbar. Zählte man bis dorthin, läge die halbe
+unsichtbare Warteliste dazwischen mit im Präfix, und ein einziges „ans Ende
+ziehen" schriebe Ränge für Spiele, die niemand gesehen hat — genau der Fehler,
+gegen den der Deckel am 14.08.2026 eingeführt wurde. Ohne offene Spiele fällt
+die Rechnung exakt auf 120 zurück; die beiden Tests
+`queue_reorder_never_backfills_matches_beyond_what_tl_web_could_show` und
+`ein_sichtbares_offenes_spiel_zieht_keine_unsichtbaren_wartenden_mit` halten
+beide Seiten fest.
+
+**Folge für das Zug-Ziel im Browser:** `queueReorderTarget` rechnet bewusst auf
+der **immer** gemischten Liste (`reorderQueue`), nicht auf der angezeigten.
+Der Turnier-PC kennt nur eine Reihenfolge; wer offene Spiele am eigenen Gerät
+ausgeblendet hat, fröre sie sonst mit „ans Ende" unbemerkt in den Präfix ein.

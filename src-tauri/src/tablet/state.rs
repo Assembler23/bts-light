@@ -1383,16 +1383,23 @@ impl TabletState {
     /// Die Reihenfolge gilt turnierweit, nicht je Halle (ADR 0026).
     /// Liefert `false`, wenn das Match nicht (mehr) im aktuellen Snapshot
     /// steht.
-    /// Wie weit die Turnierleitungs-Seite die Liste zeigen konnte.
+    /// Wie weit die Turnierleitungs-Seite die Liste **lückenlos** zeigen
+    /// konnte.
     ///
     /// Wartende und offene Spiele haben getrennte Deckel
     /// ([`tl::QUEUE_LIMIT`] und [`tl::OPEN_QUEUE_LIMIT`]), also werden sie
-    /// auch getrennt gezählt. Zurück kommt die Länge bis **hinter den
-    /// letzten sichtbaren Eintrag**.
+    /// getrennt gezählt. Zurück kommt die Position des **ersten
+    /// unsichtbaren** Eintrags — nicht die hinter dem letzten sichtbaren.
+    ///
+    /// Der Unterschied ist der ganze Zweck der Funktion. Offene Spiele sind
+    /// spätere Runden und sortieren deshalb ans Ende; eines von ihnen ist
+    /// fast immer sichtbar (eigener Deckel). Zählte man bis dorthin, läge
+    /// die halbe unsichtbare Warteliste dazwischen mit im Präfix — genau
+    /// der Fehler, gegen den der Deckel am 14.08.2026 eingeführt wurde.
+    /// Ohne offene Spiele fällt die Rechnung auf `QUEUE_LIMIT` zurück.
     fn sichtbare_laenge_intern(effective: &[i64], offene: &HashSet<i64>) -> usize {
         let mut wartend = 0usize;
         let mut offen = 0usize;
-        let mut bis = 0usize;
         for (i, id) in effective.iter().enumerate() {
             let sichtbar = if offene.contains(id) {
                 offen += 1;
@@ -1401,11 +1408,13 @@ impl TabletState {
                 wartend += 1;
                 wartend <= crate::tablet::tl::QUEUE_LIMIT
             };
-            if sichtbar {
-                bis = i + 1;
+            // Beim ersten Eintrag, den die Seite nicht mehr zeigen konnte,
+            // ist Schluss: Alles dahinter hat niemand gesehen.
+            if !sichtbar {
+                return i;
             }
         }
-        bis
+        effective.len()
     }
 
     pub fn queue_reorder(
@@ -1445,8 +1454,10 @@ impl TabletState {
         // Seit die Liste auch offene Paarungen führt (Spec
         // `tl-offene-paarungen`, ADR 0053), reicht eine einzelne Zahl dafür
         // nicht mehr: Beide Sorten haben ihren eigenen Deckel, also werden
-        // sie auch getrennt gezählt. Ohne offene Spiele fällt die Rechnung
-        // exakt auf `QUEUE_LIMIT` zurück — der Bestandstest daneben belegt es.
+        // sie getrennt gezählt — und der Präfix endet beim ERSTEN
+        // unsichtbaren Eintrag, siehe `sichtbare_laenge_intern`. Ohne offene
+        // Spiele fällt die Rechnung exakt auf `QUEUE_LIMIT` zurück — der
+        // Bestandstest daneben belegt es.
         //
         // Das gezogene und das Zielspiel selbst bleiben immer erreichbar —
         // auch wenn sie (nur vom unbegrenzten Desktop-Weg aus möglich)
@@ -6602,6 +6613,39 @@ mod tests {
         assert_eq!(st.queue_order_store().rank(125), None);
         // Das gezogene Match selbst landet weiterhin im Präfix.
         assert!(st.queue_order_store().rank(119).is_some());
+    }
+
+    #[test]
+    fn ein_sichtbares_offenes_spiel_zieht_keine_unsichtbaren_wartenden_mit() {
+        // Code-Review 30.08.2026: Offene Spiele sind spätere Runden und
+        // sortieren ans Ende — eines ist wegen des eigenen Deckels fast
+        // immer sichtbar. Zählte der Präfix bis dorthin, läge die gesamte
+        // unsichtbare Warteliste dazwischen mit drin, und ein einziges
+        // „ans Ende ziehen" schriebe Ränge für Spiele, die auf TL-Web
+        // niemand gesehen hat. Genau dagegen gibt es den Deckel.
+        let mut matches: Vec<BtpMatch> = (1..=(crate::tablet::tl::QUEUE_LIMIT as i64 + 10))
+            .map(|id| match_on(id, None, MatchStatus::Scheduled))
+            .collect();
+        let mut offen = match_on(900, None, MatchStatus::Scheduled);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
+        matches.push(offen);
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(matches, Vec::new()));
+
+        assert!(st.queue_reorder(&crate::config::AppConfig::default(), 1, None));
+
+        assert_eq!(
+            st.queue_order_store().rank(125),
+            None,
+            "Match 125 lag jenseits der sichtbaren 120 — es darf nicht in den Präfix"
+        );
+        assert_eq!(
+            st.queue_order_store().rank(900),
+            None,
+            "auch das offene Spiel dahinter bleibt draußen, es war nicht lückenlos erreichbar"
+        );
+        assert!(st.queue_order_store().rank(1).is_some());
     }
 
     #[test]

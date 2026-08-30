@@ -4398,6 +4398,23 @@ function scheduleFitCourts() {
  * `topMatchId` ist die Kennung der ersten UMSORTIERBAREN Zeile der gerade
  * gezeigten Liste — Ziel des ↑-Knopfes.
  */
+/** Ein Spiel aus der Anzeige-Liste holen — Arbeitsliste ODER offene
+ *  Paarungen.
+ *
+ *  Die Zeilen-Handler lösen die Kennung erst im Moment des Klicks auf
+ *  (sonst schaltete ein veraltetes Objekt in die falsche Richtung). Seit
+ *  offene Spiele mit in der Liste stehen, reicht `state.queue` dafür nicht
+ *  mehr: Ein Klick auf die Auto-Vergabe-Ausnahme eines offenen Spiels fände
+ *  dort nichts und verpuffte still (Code-Review 30.08.2026). Der Hallenfilter
+ *  darf hier NICHT mitwirken — angeklickt wurde eine sichtbare Zeile, und
+ *  gesucht ist ihr Datensatz, nicht ihre Sichtbarkeit.
+ */
+function findeSpiel(id) {
+  const gesucht = String(id);
+  const treffer = (liste) => (liste || []).find((m) => String(m.match_id) === gesucht);
+  return treffer(state && state.queue) || treffer(state && state.open_queue);
+}
+
 function queueRow(m, topMatchId) {
   const parts = [];
   // Spiele ohne feststehende Paarung (Spec `tl-offene-paarungen`) sind eine
@@ -4756,7 +4773,7 @@ function wireQueue(box) {
       // Zur KLICK-Zeit aus `state` auflösen, nicht beim Verdrahten
       // einfangen: Seit dem Keyed-Abgleich überleben Listener viele
       // Renders, ein eingefangenes Objekt wäre irgendwann veraltet.
-      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.prep);
+      const match = findeSpiel(btn.dataset.prep);
       if (match) togglePrepCall(match);
     });
     // Auch der Zeigegesten-Start darf hier nicht zum Ziehen führen.
@@ -4799,7 +4816,7 @@ function wireQueue(box) {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       // Klick-Zeit-Auflösung, siehe `data-prep`.
-      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueResult);
+      const match = findeSpiel(btn.dataset.queueResult);
       if (match) openQueueResultDialog(match);
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
@@ -4808,7 +4825,7 @@ function wireQueue(box) {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       // Klick-Zeit-Auflösung, siehe `data-prep`.
-      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.queueZettel);
+      const match = findeSpiel(btn.dataset.queueZettel);
       if (!match) return;
       const paarung = `${(match.team1 || []).join(" / ")} – ${(match.team2 || []).join(" / ")}`;
       openZettel([match.match_id], paarung, true);
@@ -4820,7 +4837,7 @@ function wireQueue(box) {
       ev.stopPropagation();
       // Klick-Zeit-Auflösung, siehe `data-prep` — sonst schaltete ein
       // veraltetes Objekt die Ausnahme in die falsche Richtung.
-      const match = state.queue.find((m) => String(m.match_id) === btn.dataset.autoExcl);
+      const match = findeSpiel(btn.dataset.autoExcl);
       if (!match) return;
       const matchId = match.match_id;
       const excluded = !match.excluded_from_auto_assign;
@@ -6193,6 +6210,18 @@ function seitenText(eintrag, seite) {
   return label && String(label).trim() ? String(label) : OFFEN_TEXT;
 }
 
+/** Die vollständige Anzeige-Reihenfolge — offene Paarungen IMMER
+ *  eingemischt, unabhängig vom Anzeige-Schalter.
+ *
+ *  Grundlage jeder Zug-Berechnung: Der Turnier-PC kennt nur diese eine
+ *  Reihenfolge. Der Hallenfilter wirkt trotzdem, denn er beschreibt, welchen
+ *  Teil des Turniers dieses Gerät überhaupt bearbeitet. */
+function reorderQueue() {
+  if (!state) return [];
+  return mischeOffene(state.queue, state.open_queue)
+    .filter((m) => !hallFilter || m.hall === hallFilter || !m.hall);
+}
+
 function visibleQueue() {
   if (!state) return [];
   // Erst mischen, DANN filtern: `queue_index` ist eine Position in der
@@ -6333,9 +6362,12 @@ function renderQueue() {
   // Vorschau für den zugeklappten Zustand: das nächste Spiel. VOR dem
   // Ausstieg unten — der Kopf ist auch dann da, wenn es keinen Inhalt gibt.
   const naechstes = liste[0];
+  // Über `seitenText`, nicht über die Namen direkt: Steht vorn ein Spiel mit
+  // offener Paarung, sind beide Namenslisten leer — die Vorschau zeigte sonst
+  // „Nr. 80 ·  vs. " mit zwei Lücken (Code-Review 30.08.2026).
   setPanelPreview("queue", naechstes
     ? `${naechstes.match_num != null ? `Nr. ${naechstes.match_num} · ` : ""}`
-      + `${(naechstes.team1 || []).join(" / ")} vs. ${(naechstes.team2 || []).join(" / ")}`
+      + `${seitenText(naechstes, 1)} vs. ${seitenText(naechstes, 2)}`
     : "keine Spiele");
 
   const box = $("queue-list");
@@ -6383,12 +6415,19 @@ function renderQueue() {
   if (fuss) {
     const rest = liste.length - fenster.length;
     const gekappt = gekuerzteSpiele();
+    const offenGekappt = gekuerzteOffeneSpiele();
     setzeHtmlWennNeu(fuss,
       (rest > 0
         ? `<p class="note">Noch ${rest} weitere${rest === 1 ? "s" : ""} Spiel${rest === 1 ? "" : "e"} — beim Scrollen laden sie nach.</p>`
         : "")
       + (gekappt !== 0
         ? `<p class="note warn">Der Turnier-PC hat die Liste gekürzt${gekappt > 0 ? ` (${gekappt} Spiele fehlen am Ende)` : ""} — im Hallennetz steht die volle Liste.</p>`
+        : "")
+      // Getrennt gemeldet, weil es etwas anderes bedeutet: Nicht die
+      // Arbeitsliste fehlt, sondern die Vorschau auf kommende Paarungen.
+      // Über die Cloud ist das der Normalfall — sie wird zuerst geopfert.
+      + (offenGekappt > 0
+        ? `<p class="note">${offenGekappt} weitere Spiele mit noch offener Paarung sind nicht mit übertragen — im Hallennetz stehen sie vollständig.</p>`
         : ""));
   }
   beobachteQueueEnde(liste.length);
@@ -6427,7 +6466,13 @@ function renderQueue() {
  *    Zeile.
  */
 function queueReorderTarget(beforeId) {
-  const liste = visibleQueue();
+  // Bewusst NICHT `visibleQueue()`: Der Turnier-PC baut den Präfix immer über
+  // die vollständige Liste (`assign::ready_queue`), offene Spiele
+  // eingeschlossen. Wer sie am eigenen Gerät ausgeblendet hat, sähe „ans
+  // Ende" sonst als `null` und fröre damit genau die Spiele ein, die er nicht
+  // sehen wollte — samt ↕️-Marken auf allen anderen Geräten
+  // (Code-Review 30.08.2026).
+  const liste = reorderQueue();
   if (beforeId === null || beforeId === undefined) {
     if (queueShown >= liste.length) return null; // alles geladen: echtes Ende
     const naechstes = liste.slice(queueShown).find((m) => !m.prep_call);
@@ -6454,6 +6499,17 @@ function queueReorderTarget(beforeId) {
  * wurde. Die Stückzahl kennt sie in dem Fall nicht; `-1` steht für
  * „gekürzt, Umfang unbekannt".
  */
+/** Wie viele offene Paarungen der Turnier-PC weggelassen hat.
+ *
+ *  Über die Cloud ist das der Normalfall, nicht die Ausnahme: `open_queue`
+ *  wird zuletzt aufgefüllt und zuerst geopfert. Ohne diese Meldung sähe die
+ *  Turnierleitung fünf von hundertfünfzig kommenden Paarungen und hielte das
+ *  für alles (Code-Review 30.08.2026). */
+function gekuerzteOffeneSpiele() {
+  if (!state || !zeigeOffeneSpiele()) return 0;
+  return typeof state.open_queue_truncated === "number" ? state.open_queue_truncated : 0;
+}
+
 function gekuerzteSpiele() {
   if (!state) return 0;
   if (typeof state.queue_truncated === "number") return state.queue_truncated;
