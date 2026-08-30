@@ -147,6 +147,7 @@ How-To → Spec+Review. Ergebnis ist eine freigegebene Spezifikation unter
 der Spec wird kein Produktivcode geschrieben.
 
 Konzept und Funktionsweise: [docs/spec-pipeline-konzept.md](docs/spec-pipeline-konzept.md).
+Neue freigegebene Features in [docs/roadmap.md](docs/roadmap.md) verzeichnen.
 
 ## Subagents
 
