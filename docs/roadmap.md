@@ -309,7 +309,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   und das Verbands-Preset teilt ein Passwort — zwei parallele Installationen
   überschrieben sich alle 60 s gegenseitig. badhub legt seither beim ersten
   Push mit neuer turnier.de-GUID automatisch ein **Kind-Turnier** unter dem
-  Verbandszugang an (`bvbb-<8 Hex>`); alle Lesepfade bleiben je Schlüssel.
+  Verbandszugang an (`bvbb-<8 Hex>`); das gilt aber nur für Lesepfade, die den
+  Kindschlüssel schon kennen — Konsumenten, die nur den Verbandsschlüssel
+  kennen (Check-In-Zuordnung, Badge, Live-Seite, Branding-Push), lösen das
+  Kind an je einer Stelle auf (Nachtrag ADR 0054, Final-Review fand fünf
+  solche Stellen).
   In bts-light ist die GUID jetzt Pflichtfeld (aus dem Check-In- in den
   Turnier-Abschnitt „1 · Liveticker-Ziel" gezogen), reist in allen
   Push-Nachrichten mit (`tset`, `sched`, `tupdate_match`, `centry_list`,

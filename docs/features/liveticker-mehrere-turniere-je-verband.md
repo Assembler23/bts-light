@@ -206,6 +206,11 @@ Kindschlüssel mit 400 ab. Zählung „aktive Turniere" nimmt Kinder mit.
 - **Links:** Dashboard-Live-Link und Aushang-QR = `live_url` + `&g=<GUID>`
   (bzw. `?g=` wenn `live_url` noch keinen Query-String hat). Die bestehende
   `&display=`-Ergänzung des Dashboards bleibt und wird hinter `g` angehängt.
+  *(Nachtrag 05.09.2026, Fix-Welle nach dem Final-Review: dieselbe Regel gilt
+  für die Online-Monitor-Links der Court-Monitore-Seite
+  (`onlineOverviewUrl`/`onlineHallUrl` in `pages/CourtMonitorPanel.tsx`,
+  Helfer `src/io/liveLink.mjs`) — diese zweite Stelle, die ebenfalls die
+  Verbands-`live_url` verwendet, war in der Spec nicht genannt.)*
 - **Aushang:** Kürzel-Ableitung (`kuerzel_aus_live_url`) unverändert; das
   Blatt zeigt weiterhin das Verbandskürzel, der Code führt zum Turnier.
 

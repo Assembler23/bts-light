@@ -875,7 +875,9 @@ Beide Seiten verstehen zwei URL-Parameter:
 > unter „Court-Übersicht (Hallen-Display)" die fertigen Links automatisch — den
 > öffentlichen Online-Liveticker, die lokale Gesamt-Übersicht und (ab 2 Hallen)
 > je Halle einen `?halle=`-Link zum Kopieren auf den Hallen-TV. „Öffnen" zeigt
-> die Vorschau am PC.
+> die Vorschau am PC. Die Online-Links tragen zusätzlich `&g=<Turnier-GUID>`
+> (ADR 0054), damit sie bei mehreren parallelen Turnieren desselben Verbands
+> auf das richtige Kind-Turnier zeigen, nicht auf den Verbandsstand.
 >
 > **Pi direkt einer Halle zuweisen:** Im Zuweisungs-Dropdown eines Geräts
 > stehen ab 2 Hallen unter „Informationen" automatisch „Court-Übersicht – alle
