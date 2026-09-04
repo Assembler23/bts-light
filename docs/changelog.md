@@ -16,7 +16,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Dafür ist die **Turnier-Kennung von turnier.de jetzt ein Pflichtfeld** im
   Setup unter „1 · Liveticker-Ziel" (die Adresse des Turniers einfügen genügt).
   Wer sie schon für den Hallen-Check-In eingetragen hatte, muss nichts tun —
-  der Wert wird übernommen. Ohne Kennung startet die Übertragung nicht.
+  der Wert wird übernommen. Ohne Kennung startet die Übertragung nicht —
+  fehlt sie nach dem Update, öffnet die App beim Start den Assistenten.
 
 - **Aushang und Liveticker-Link zeigen direkt aufs eigene Turnier**
   (`…&g=<Kennung>`), statt auf die Verbandsseite mit Auswahl.

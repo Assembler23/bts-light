@@ -311,7 +311,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Push mit neuer turnier.de-GUID automatisch ein **Kind-Turnier** unter dem
   Verbandszugang an (`bvbb-<8 Hex>`); das gilt aber nur für Lesepfade, die den
   Kindschlüssel schon kennen — Konsumenten, die nur den Verbandsschlüssel
-  kennen (Check-In-Zuordnung, Badge, Live-Seite, Branding-Push), lösen das
+  kennen (Check-In-Zuordnung, Badge, Live-Seite, Branding-Push,
+  Check-In-Admin-Rechte), lösen das
   Kind an je einer Stelle auf (Nachtrag ADR 0054, Final-Review fand fünf
   solche Stellen).
   In bts-light ist die GUID jetzt Pflichtfeld (aus dem Check-In- in den

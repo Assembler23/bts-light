@@ -19,7 +19,7 @@ function ok(name, got, want) {
 const GUID = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
 
 ok(
-  "hängt ohne bestehende Query mit ? an",
+  "hängt an eine Adresse mit Query per & an",
   linkMitGuid("https://badhub.de/live?t=bvbb", GUID),
   `https://badhub.de/live?t=bvbb&g=${GUID}`,
 );
