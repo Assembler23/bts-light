@@ -194,14 +194,18 @@
   };
 
   // ── Ziel bestimmen: Adresse, sonst zuletzt gemerkt ───────────────────────
+  // M3: Rückfall je Parameter statt insgesamt — `uebersicht`/`vorbereitung`
+  // schreiben kein `court` in die Adresse (sie brauchen keins), darum stand
+  // sonst nach Reload mit `?layout=uebersicht` das gemerkte Feld nicht mehr
+  // zur Verfügung, sobald wieder auf ein Feld-Layout gewechselt wird.
   var params = new URLSearchParams(location.search);
-  var ziel = zielAusQuery(params.get("layout"), params.get("court"));
-  if (!params.has("layout") && !params.has("court")) {
-    try {
-      var z = JSON.parse(localStorage.getItem(ZULETZT_KEY) || "null");
-      if (z) ziel = zielAusQuery(z.layout, z.court == null ? null : String(z.court));
-    } catch (e) { /* kein Speicher → Standard */ }
-  }
+  var gemerkt = null;
+  try { gemerkt = JSON.parse(localStorage.getItem(ZULETZT_KEY) || "null"); } catch (e) { /* kein Speicher → Standard */ }
+  if (!gemerkt || typeof gemerkt !== "object") gemerkt = {};
+  var ziel = zielAusQuery(
+    params.has("layout") ? params.get("layout") : gemerkt.layout,
+    params.has("court") ? params.get("court") : (gemerkt.court == null ? null : String(gemerkt.court))
+  );
   var spiegel = false;
   try { spiegel = localStorage.getItem(SPIEGEL_KEY) === "1"; } catch (e) {}
   var feldNamen = {};   // CourtID → Label, aus `courts`
@@ -213,7 +217,13 @@
   // schützen, die Seite zeigt ja nichts).
   function zeige() {
     var pfad = zielPfad(ziel, spiegel);
-    if (!pfad) { els.rahmen.removeAttribute("src"); oeffneMenue(true); return; }
+    // M2: `removeAttribute("src")` blankt das iframe NICHT — das alte
+    // Dokument bleibt sichtbar stehen. `about:blank` leert es wirklich.
+    if (!pfad) {
+      if (els.rahmen.getAttribute("src") !== "about:blank") els.rahmen.src = "about:blank";
+      oeffneMenue(true);
+      return;
+    }
     var src = BASE + pfad;
     if (els.rahmen.getAttribute("src") !== src) els.rahmen.src = src;
     document.title = LAYOUT_LABEL[ziel.layout] + (feldbezogen(ziel.layout) ? " – " + feldName(ziel.court) : "") + " – bts-light";
@@ -336,7 +346,14 @@
       .catch(zumZaehlen);
   });
   els.warnungWeiter.addEventListener("click", zumZaehlen);
-  els.warnungAbbruch.addEventListener("click", function () { els.warnung.classList.remove("visible"); });
+  // M4: „Abbrechen" fiel bisher aufs nackte iframe zurück (nur die Warnung
+  // schloss). Zurück ins Hauptmenü — ohne erneute PIN, die wurde gerade für
+  // „Zum Zählen wechseln" eingegeben.
+  els.warnungAbbruch.addEventListener("click", function () {
+    els.warnung.classList.remove("visible");
+    els.menue.classList.add("visible");
+    zeigeHauptmenue();
+  });
   els.neuladen.addEventListener("click", function () { location.reload(); });
   els.vollbild.addEventListener("click", function () {
     if (document.fullscreenElement) { if (document.exitFullscreen) document.exitFullscreen(); }
@@ -344,7 +361,12 @@
     schliesseMenue();
   });
   els.schliessen.addEventListener("click", schliesseMenue);
-  els.zahnrad.addEventListener("click", function () { oeffneMenue(false); });
+  // I1: In der feldlosen Lage (kein gültiges Ziel, `oeffneMenue(true)` beim
+  // Start, „Schließen" ausgeblendet) hätte ein Zahnrad-Tipp die PIN-freie
+  // Feldwahl durch das PIN-Pad ersetzt; „✕" schließt dann alles → schwarzer
+  // Bildschirm ohne Ausweg außer PIN. Ohne gültiges Ziel bleibt das Zahnrad
+  // darum PIN-frei bei der Feldwahl.
+  els.zahnrad.addEventListener("click", function () { oeffneMenue(!zielPfad(ziel, spiegel)); });
   els.pinPad.addEventListener("click", function (e) {
     var btn = e.target.closest("button[data-k]");
     if (btn) pinKey(btn.dataset.k);

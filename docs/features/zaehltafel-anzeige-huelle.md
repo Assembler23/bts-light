@@ -261,8 +261,8 @@ Zuweisung:
 - **JS**: `scripts/test-tafel-seiten.mjs` (laufend, Seitenwechsel, spiegel, ohne `teamOnSide`,
   ohne `courtState`, `serving` null, `finished` mit Geistersatz, `retired`, kein Spiel);
   `scripts/test-anzeige-ziel.mjs` (vier Layouts, Unbekanntes, `court` ungültig, Einschleusungen).
-  Beide Skripte in den vorhandenen Testlauf einhängen (`package.json`-Skript wie die
-  `test-*.mjs`-Geschwister).
+  Beide Skripte hängen ausschließlich in `.github/workflows/ci.yml` (es gibt keine
+  `package.json`-Testskripte, anders als der ursprüngliche Plan hier annahm).
 - **Manuell (Feldtest)**: iPad + Android-Tablet in LAN-http, LAN-TLS und Cloud; Pi-TV per
   Zuweisung; Szenario „Tablet B über Overlay zur Tafel, Tablet A zählt weiter"; Hochformat.
 - `cargo test --workspace` grün, `cargo clippy --workspace --all-targets -- -D warnings` sauber,

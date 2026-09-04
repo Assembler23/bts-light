@@ -94,6 +94,12 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`, `adStyles`) |
 | `GET /health` | Status-Schnappschuss |
 
+Die Anzeige-Hülle bettet die Anzeige-Seiten in ein iframe derselben Herkunft
+ein. Der nginx vor `/bts-relay/` darf deshalb kein `X-Frame-Options: DENY`
+bzw. `Content-Security-Policy: frame-ancestors 'none'` setzen — sonst bleibt
+der Rahmen auf den Tablets still leer; `SAMEORIGIN` ist unkritisch. Prüfen
+mit `curl -I https://badhub.de/bts-relay/<ns>/court/1/tafel`.
+
 **Deploy-Reihenfolge:** Ein Relay, das `court_tafel` nicht kennt, lehnt den
 **gesamten** Zuweisungs-Upload des Hosts mit 422 ab. Dabei frieren **alle**
 Zuweisungen und Fernbefehle des Turniers ein — nicht nur die Tafel —, solange
