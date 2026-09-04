@@ -64,3 +64,5 @@ hier eintragen.
 | [0051](0051-offene-spiele-eigene-gedeckelte-liste.md) | Offene Spiele reisen als eigene, zuerst gekappte Liste | accepted |
 | [0052](0052-beschriftung-offener-plaetze.md) | Offene Plätze: Kandidaten aus einer Ebene, neutraler Rückfall | accepted |
 | [0053](0053-offene-spiele-in-der-manuellen-reihenfolge.md) | Offene Spiele nehmen an der manuellen Spielreihenfolge teil | accepted |
+| [0054](0054-liveticker-kind-turnier-je-guid.md) | Liveticker: Kind-Turnier je turnier.de-GUID statt zusammengesetztem Schlüssel | accepted |
+| [0055](0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md) | Zähltafel: Anzeige-Hülle als iframe-Container, Tafel als eigenes Zuweisungsziel (gegen 0049 abgegrenzt) | accepted |

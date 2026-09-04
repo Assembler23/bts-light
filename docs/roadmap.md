@@ -301,6 +301,20 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Zähltafel fürs Tablet + Anzeige-Hülle** — Spec:
+  [features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
+  ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md).
+  Aus der Idee vom 04.09.2026: ein zweites Tablet am Feld zeigt nur den
+  Spielstand — zwei große Punktzahlen, Satzstand klein, Aufschlag-Punkt —
+  ohne das zählende Tablet zu stören. Reines Tafel-Layout `tafel.html`
+  (`/court/{id}/tafel`, auch als Court-Monitor-Zuweisung „Zähltafel – Feld X")
+  plus Tablet-Hülle `anzeige.html` mit Zahnrad/PIN, Layout-Wahl (Tafel,
+  Feld-Monitor, Übersicht, Vorbereitung), Spiegeln, Feldwechsel, Wake-Lock.
+  Einstiege im Zahnrad-Menü und im Belegt-Overlay des Zähl-Tablets. Zwei PRs
+  (Tafel + Ziel, dann Hülle). Feldtest auf iPad ist Abnahmekriterium (iframe).
+  PR 1 (Tafel + Zuweisungsziel) umgesetzt in v0.9.274, PR 2 (Hülle) offen.
+  Offen außerdem: Tafel-Route in der Slave-Monitor-Brücke (`slave_bridge.rs`).
+
 - **Kombi-Ausrichtung je Monitor (v0.9.270)** — ob die Felder einer
   Kombi-Anzeige über- oder nebeneinander stehen, wird **je TV** im bestehenden
   Kombi-Dialog gewählt statt global im Setup; der globale Schalter
@@ -411,6 +425,23 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Mehrere Liveticker je Verband** — Spec:
+  [features/liveticker-mehrere-turniere-je-verband.md](features/liveticker-mehrere-turniere-je-verband.md),
+  ADR [0054](adr/0054-liveticker-kind-turnier-je-guid.md).
+  Aus der Nutzer-Frage vom 04.09.2026 (zwei BVBB-Turniere am selben
+  Wochenende): badhub hält genau **einen** Stand je Zugangsschlüssel, und
+  das Verbands-Preset teilt ein Passwort — zwei parallele Installationen
+  überschreiben sich alle 60 s gegenseitig. Künftig legt badhub beim ersten
+  Push mit neuer turnier.de-GUID automatisch ein **Kind-Turnier** unter dem
+  Verbandszugang an (`bvbb-<8 Hex>`); alle Lesepfade bleiben je Schlüssel.
+  In bts-light wird die GUID Pflichtfeld (zieht aus dem Check-In- in den
+  Turnier-Abschnitt), reist in allen Push-Nachrichten mit, Aushang und
+  Dashboard verlinken mit `&g=<GUID>` direkt aufs Turnier. **Hauptteil in
+  badhub** (Migration 208, Schreibpfad, Lesepfad, Admin); Reihenfolge: erst
+  badhub deployen, dann bts-light. Offen gelassen: eigener Check-In-PIN je
+  Kind. **Bis dahin:** für ein zweites paralleles Turnier im badhub-Admin
+  einen eigenen Zugang anlegen und in bts-light als „Eigenes Turnier"
+  eintragen.
 - **Offene Paarungen in der TL-Spielliste** — Spec:
   [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md),
   ADR [0051](adr/0051-offene-spiele-eigene-gedeckelte-liste.md) /

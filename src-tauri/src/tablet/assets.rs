@@ -33,6 +33,11 @@ pub const TL_HTML: &str = include_str!("../../assets/tl.html");
 /// Ausliefern durch den Court-Namen ersetzt.
 pub const MONITOR_HTML: &str = include_str!("../../assets/monitor.html");
 
+/// Zähltafel (Spec zaehltafel-anzeige-huelle): nur Punktzahlen, Satzstand,
+/// Aufschlag — wird unter `/court/{id}/tafel` ausgeliefert. Dieselben
+/// Platzhalter wie `monitor.html` (`__MODE__`, `__BASE__`, `__COURT_LABEL__`).
+pub const TAFEL_HTML: &str = include_str!("../../assets/tafel.html");
+
 /// TV-Launcher (`/` und `/tv`): Vollbild-Menü zum Auswählen einer Anzeige per
 /// Fernbedienung (Pfeiltasten + OK) — man muss nur einmal die kurze Adresse
 /// tippen, statt lange `?halle=`-URLs. Holt die Hallen aus `/health`.

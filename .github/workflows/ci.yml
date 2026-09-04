@@ -157,6 +157,12 @@ jobs:
       - name: Offene Paarungen mischen und beschriften (JS)
         run: node scripts/test-offene-spiele.mjs
 
+      # Was links und rechts auf der Zähltafel steht. Falsche Seite oder ein
+      # gezählter Geistersatz zeigt Spielern und Zuschauern am Feld einen
+      # falschen Stand — und niemand merkt es, weil keine Namen dabeistehen.
+      - name: Zähltafel-Seiten (JS)
+        run: node scripts/test-tafel-seiten.mjs
+
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
       # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter

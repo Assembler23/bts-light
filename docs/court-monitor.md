@@ -54,6 +54,34 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
 Die Anzeige-Seite ist `src-tauri/assets/monitor.html` — eine
 eigenständige HTML/CSS/JS-Datei, read-only Geschwister von `tablet.html`.
 
+## Layout „Zähltafel" (`tafel.html`, seit v0.9.274)
+
+Reine Punkte-Anzeige ohne Namen — für ein Tablet am Netz oder einen TV,
+der nur den Stand zeigen soll (Spec
+[features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
+ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)).
+
+- **Adresse:** `…/court/<CourtID>/tafel` (LAN und Cloud). Fester Modus wie
+  `…/display`; mit `?device=` als zugewiesenes Gerät.
+- **Inhalt:** zwei große Punktzahlen des laufenden Satzes, klein darüber die
+  gewonnenen Sätze, ein Aufschlag-Punkt unter der aufschlagenden Seite. Links
+  steht, wer vom Schiedsrichterstuhl aus links spielt (Seitenwechsel wird
+  mitvollzogen); `?spiegel=1` tauscht die Seiten (nur fester Modus). Ohne
+  Seiteninformation (vor der Seitenwahl, oder kein zählendes Tablet) steht
+  Mannschaft 1 links, ohne Aufschlag-Punkt.
+- **Spielende:** der letzte gespielte Satz bleibt groß stehen und zählt im
+  Satzstand; bei Aufgabe zählt der unvollständige Satz nicht. Ohne Spiel:
+  Feldbezeichnung groß.
+- **Verbindung:** identisch mit `monitor.html` (Poll, WS-Nudge, ETag/304,
+  `seq`, Stillstands-Wächter, Fernbefehle).
+- **Zuweisung:** im Panel „Court-Monitore" die Option „Zähltafel – Feld X".
+  Der Host liefert dem Gerät den vollen Feld-Stand **plus** `redirectTo`
+  auf die Tafel-Seite: `/monitor` springt hin, die Tafel bleibt (Pfad
+  passt) und liest den Stand aus derselben Antwort. Wird die Zuweisung
+  auf „Feld-Monitor" oder „keine" geändert, geht die Tafel nach drei Polls
+  ohne Umleitung zurück auf `/monitor`. **Downgrade:** eine ältere Version
+  kennt `court_tafel` nicht und verwirft die Zuweisung still (ADR 0055).
+
 ## Geräte-Modus & TV-Verwaltung
 
 Monitore sind **generische Geräte**: Jeder Raspberry Pi öffnet *dieselbe*
@@ -70,8 +98,9 @@ Im Tool führt die Seite **„Court-Monitore"** (Dashboard → Court-Monitore)
 alle Geräte auf, die sich gemeldet haben:
 
 - **Online-Status** je Gerät (grün, wenn der letzte Poll < 6 s her ist).
-- **Feld-Zuweisung** per Dropdown — jederzeit umstellbar; der Monitor
-  übernimmt das neue Feld beim nächsten Poll (~1 s im LAN, ≤ 3 s Cloud).
+- **Feld-Zuweisung** per Dropdown (Feld-Monitor, Zähltafel, Info-Anzeigen,
+  Werbung, Kombi) — jederzeit umstellbar; der Monitor übernimmt das neue
+  Feld beim nächsten Poll (~1 s im LAN, ≤ 3 s Cloud).
 - **Identifizieren** — der Monitor blendet Code + Feld groß ein, damit
   man Gerät und TV zuordnen kann. Wirkt in **allen** Anzeigen — Einzelfeld
   (`monitor.html`), Court-Übersicht (`overview.html`) und Kombi
