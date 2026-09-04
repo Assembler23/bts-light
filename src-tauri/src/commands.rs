@@ -4150,9 +4150,13 @@ fn spawn_branding_push(
 /// konfiguriertes Badhub-Passwort passiert nichts. Sendet **nur** das
 /// `sponsors`-Feld — das Logo bleibt badhub-seitig unberührt.
 fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
-    let (live_url, password) = {
+    let (live_url, password, tournament_uuid) = {
         let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
-        (cfg.badhub.url.clone(), cfg.badhub.password.clone())
+        (
+            cfg.badhub.url.clone(),
+            cfg.badhub.password.clone(),
+            cfg.tournament_uuid_kanonisch(),
+        )
     };
     // Kein Liveticker konfiguriert → kein Turnier, an das wir senden könnten.
     if password.is_empty() {
@@ -4165,6 +4169,7 @@ fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
         crate::badhub::payload::CheckinBrandingMessage {
             sponsors: Some(sponsors),
             logo: None,
+            tournament_uuid,
         },
         "Leisten-Sponsoren",
     );
@@ -4176,12 +4181,13 @@ fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
 /// String = badhub löscht das Logo); die Sponsoren bleiben unberührt. Ohne
 /// Badhub-Passwort ein No-op.
 fn push_logo_to_badhub(state: &State<'_, AppState>) {
-    let (live_url, password, logo) = {
+    let (live_url, password, logo, tournament_uuid) = {
         let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
         (
             cfg.badhub.url.clone(),
             cfg.badhub.password.clone(),
             cfg.tournament_logo.data.clone(),
+            cfg.tournament_uuid_kanonisch(),
         )
     };
     if password.is_empty() {
@@ -4193,6 +4199,7 @@ fn push_logo_to_badhub(state: &State<'_, AppState>) {
         crate::badhub::payload::CheckinBrandingMessage {
             sponsors: None,
             logo: Some(logo),
+            tournament_uuid,
         },
         "Turnierlogo",
     );

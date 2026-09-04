@@ -4152,7 +4152,11 @@ pub(crate) async fn handle_score(
 
     let mut live = m;
     live.sets = sets;
-    let update = Update::Single(build_tupdate(&live, ctx.next_rid()));
+    let update = Update::Single(build_tupdate(
+        &live,
+        ctx.next_rid(),
+        ctx.config.tournament_uuid_kanonisch(),
+    ));
     // Einstellen statt warten: Der Push läuft hinter der Verbindung, je
     // Feld serialisiert und gebündelt (siehe `ScorePushQueue`). Vorher
     // hing hier die Tablet-WebSocket bis zu 15 s an einem lahmen badhub —
@@ -4788,7 +4792,7 @@ mod tests {
         // eine Anfragen-Lawine übersetzt.
         let q = ScorePushQueue::default();
         let update = |n: i64| {
-            crate::badhub::diff::Update::Single(build_tupdate(&match_on_court(), n as u64))
+            crate::badhub::diff::Update::Single(build_tupdate(&match_on_court(), n as u64, None))
         };
 
         assert!(
