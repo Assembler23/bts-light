@@ -265,6 +265,12 @@ export function SetupWizard({
   const [badhubLiveUrl, setBadhubLiveUrl] = useState(
     initialConfig.badhub.live_url,
   );
+  // Turnier-GUID von turnier.de (Pflicht, ADR 0054). Vor diesem Feature lebte
+  // sie nur im Check-In-Block; der Rust-Lader hat sie bereits nach oben
+  // gespiegelt, hier gilt das Wurzelfeld mit Rückfall auf den alten Platz.
+  const [tournamentGuid, setTournamentGuid] = useState(
+    initialConfig.tournament_uuid || initialConfig.checkin?.tournament_uuid || "",
+  );
   // Turnierlogo (badhub-Liveticker). BTP liefert keins → Upload.
   const [logoData, setLogoData] = useState(
     initialConfig.tournament_logo?.data ?? "",
@@ -391,7 +397,6 @@ export function SetupWizard({
   // Hallen-Check-In (ADR 0009): Spieler bestätigen ihre Anwesenheit selbst.
   const ci = initialConfig.checkin;
   const [ciEnabled, setCiEnabled] = useState(ci?.enabled ?? false);
-  const [ciUuid, setCiUuid] = useState(ci?.tournament_uuid ?? "");
   const [ciMissingMax, setCiMissingMax] = useState(
     String(ci?.missing_names_max ?? 8),
   );
@@ -554,6 +559,7 @@ export function SetupWizard({
       badhub,
       upload_logs: uploadLogs,
       install_id: initialConfig.install_id,
+      tournament_uuid: extractTournamentGuid(tournamentGuid),
       connection_mode: connectionMode,
       slave_mode: slaveMode,
       master_namespace: masterNamespace.trim(),
@@ -637,8 +643,8 @@ export function SetupWizard({
       checkin: {
         // Ohne gültige Turnier-Kennung bleibt der Check-In aus — sonst stünde
         // er als „aktiv" im Dashboard, ohne dass badhub je etwas erhielte.
-        enabled: ciEnabled && isTournamentGuid(ciUuid),
-        tournament_uuid: extractTournamentGuid(ciUuid),
+        enabled: ciEnabled && isTournamentGuid(tournamentGuid),
+        tournament_uuid: extractTournamentGuid(tournamentGuid),
         // Negative/leere Eingabe abfangen; 0 ist erlaubt (nie Namen nennen).
         missing_names_max:
           Number(ciMissingMax) >= 0 ? Number(ciMissingMax) : 8,
@@ -744,6 +750,9 @@ export function SetupWizard({
   const canSave =
     host.trim() !== "" &&
     (!isManual || (badhubUrl.trim() !== "" && badhubPassword.trim() !== "")) &&
+    // Ohne Turnier-GUID kann badhub das Turnier nicht von einem parallelen
+    // desselben Verbands unterscheiden (ADR 0054). Ein Ansage-Slave pusht nie.
+    (slaveMode || isTournamentGuid(tournamentGuid)) &&
     // Mindestens ein Tablet-Verbindungsweg muss aktiv sein.
     (lanEnabled || cloudEnabled);
 
@@ -1008,6 +1017,46 @@ export function SetupWizard({
             </div>
           );
         })}
+
+        <label className="mt-1 flex flex-col gap-1 text-sm text-slate-600">
+          <span>
+            Turnier bei turnier.de <span className="text-rose-600">*</span>
+          </span>
+          <input
+            className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+            placeholder="turnier.de-Adresse einfügen oder Turnier-GUID"
+            value={tournamentGuid}
+            onChange={(e) => {
+              // Aus einer eingefügten Adresse die GUID herausziehen — kopiert
+              // wird fast immer die ganze URL aus dem Browser. Nur dann
+              // ersetzen: sonst würde jedes Tippen mitten in einer schon
+              // gültigen Kennung den Feldinhalt neu setzen.
+              const raw = e.currentTarget.value;
+              const looksLikeUrl = /[/:]/.test(raw);
+              const found = looksLikeUrl ? extractTournamentGuid(raw) : "";
+              setTournamentGuid(found || raw);
+            }}
+          />
+          <span className="text-xs text-slate-500">
+            Öffne dein Turnier auf turnier.de und füge die Adresse hier ein —
+            die Kennung wird automatisch herausgelesen. badhub hält damit dein
+            Turnier von anderen des Verbands auseinander, die am selben Tag
+            laufen; Aushang und Liveticker-Link zeigen direkt auf dein Turnier.
+          </span>
+          {tournamentGuid.trim() !== "" && !isTournamentGuid(tournamentGuid) && (
+            <span className="text-xs font-medium text-amber-600">
+              Das sieht noch nicht nach einer Turnier-Kennung aus. Erwartet
+              wird die Adresse deines Turniers bei turnier.de.
+            </span>
+          )}
+          {tournamentGuid.trim() === "" && !slaveMode && (
+            <span className="text-xs font-medium text-amber-600">
+              Pflichtfeld — ohne Kennung lässt sich die Übertragung nicht
+              starten.
+            </span>
+          )}
+        </label>
+
         <ChoiceCard
           icon={KeyRound}
           title="Anderes Turnier (manuell)"
@@ -1391,36 +1440,9 @@ export function SetupWizard({
 
         {ciEnabled && (
           <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            <label className="flex flex-col gap-1 text-sm text-slate-600">
-              <span>Turnier bei turnier.de</span>
-              <input
-                className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
-                placeholder="turnier.de-Adresse einfügen oder Turnier-GUID"
-                value={ciUuid}
-                onChange={(e) => {
-                  // Aus einer eingefügten Adresse die GUID herausziehen —
-                  // kopiert wird fast immer die ganze URL aus dem Browser.
-                  // Nur dann ersetzen: sonst würde jedes Tippen mitten in
-                  // einer schon gültigen Kennung den Feldinhalt neu setzen
-                  // und den Cursor ans Ende springen lassen.
-                  const raw = e.currentTarget.value;
-                  const looksLikeUrl = /[/:]/.test(raw);
-                  const found = looksLikeUrl ? extractTournamentGuid(raw) : "";
-                  setCiUuid(found || raw);
-                }}
-              />
-              <span className="text-xs text-slate-500">
-                Öffne dein Turnier auf turnier.de und füge die Adresse hier ein
-                — die Kennung wird automatisch herausgelesen. Sie verbindet den
-                Check-In mit deinem Turnier.
-              </span>
-              {ciUuid.trim() !== "" && !isTournamentGuid(ciUuid) && (
-                <span className="text-xs font-medium text-amber-600">
-                  Das sieht noch nicht nach einer Turnier-Kennung aus. Erwartet
-                  wird die Adresse deines Turniers bei turnier.de.
-                </span>
-              )}
-            </label>
+            <p className="text-xs text-slate-500">
+              Die Turnier-Kennung kommt aus Abschnitt „1 · Liveticker-Ziel".
+            </p>
 
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               <span>Namen in der „Es fehlen noch"-Ansage</span>
