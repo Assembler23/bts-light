@@ -27,16 +27,23 @@
     .saetze { font-size: 9vmin; font-weight: 800; letter-spacing: .08em;
       color: #fbbf24; line-height: 1; }
     .saetze .trenner { margin: 0 .25em; opacity: .6; }
+    /* Gap/Padding bewusst knapp (2vw/1vw statt 3vw/2vw): Bei zwei
+       zweistelligen Ziffern (font-weight 900, ~1,16 em Breite je Zeichen)
+       läuft `min(40vw, 60vmin)` sonst im Hochformat fast bis an die
+       Kachelkante — kaum Reserve. Schmalere Ränder geben jeder Kachel
+       48vw statt 46,5vw. */
     .punkte { display: flex; flex-direction: row; align-items: stretch;
-      justify-content: center; gap: 3vw; width: 100vw; padding: 0 2vw;
+      justify-content: center; gap: 2vw; width: 100vw; padding: 0 1vw;
       box-sizing: border-box; }
     .seite { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
       align-items: center; gap: 2vmin; }
-    /* Klapp-Tafel-Optik: dunkle Kachel mit Mittelfuge. */
+    /* Klapp-Tafel-Optik: dunkle Kachel mit Mittelfuge. `overflow: hidden`
+       als zweite Sicherung gegen die Ziffernbreite — schneidet im
+       Zweifel lieber sichtbar ab, als die Kachel zu sprengen. */
     .kachel { position: relative; width: 100%; border-radius: 3vmin;
       background: #111827; box-shadow: inset 0 0 0 .4vmin #1f2937,
       0 1.5vmin 4vmin rgba(0,0,0,.5); display: flex; align-items: center;
-      justify-content: center; padding: 2vmin 0; }
+      justify-content: center; padding: 2vmin 0; overflow: hidden; }
     .kachel::after { content: ""; position: absolute; left: 0; right: 0;
       top: 50%; height: .4vmin; background: rgba(0,0,0,.55); }
     .zahl { font-size: min(40vw, 60vmin); font-weight: 900; line-height: 1;
@@ -186,8 +193,9 @@
 
   // Seiten spiegeln (Tafel steht dem Schiedsrichter gegenüber). Kommt von
   // der Anzeige-Hülle als ?spiegel=1. Im Gerätemodus bewusst ignoriert: Die
-  // Zuweisung kennt keine Spiegelung, und ein Query-Rest in der Geräte-URL
-  // gäbe beim Umleitungsvergleich eine Endlosschleife (Befund ADR 0049).
+  // Zuweisung kennt keine Spiegelung, und ein Gerät soll nur zeigen, was der
+  // Turnierleiter zugewiesen hat — ein Query-Rest in der Geräte-URL ergäbe
+  // sonst eine stille, nirgends verwaltete Einstellung (Befund ADR 0049).
   var SPIEGEL = MODE !== "device"
     && new URLSearchParams(location.search).get("spiegel") === "1";
 
