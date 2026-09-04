@@ -79,6 +79,8 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 |---|---|
 | `GET /{ns}/court/{label}` | Tablet-Spielzettel-UI (dieselbe `tablet.html` wie die App) |
 | `GET /{ns}/court/{id}/tafel` | Zähltafel (dieselbe `tafel.html` wie die App); Zuweisung `court_tafel` liefert im Geräte-State Feld-Stand + `redirectTo` |
+| `GET /{ns}/anzeige` | Anzeige-Hülle fürs Tablet (dieselbe `anzeige.html`), PIN leer → `0000` |
+| `GET /{ns}/courts` | Feldliste fürs Feldwechsel-Menü (vom Host gepusht); seit v0.9.275 mit `occupied` (Belegt-Warnung der Anzeige-Hülle) |
 | `GET /{ns}/qr/{label}` | QR-Code (SVG) auf die öffentliche Court-URL |
 | `GET /{ns}/ws` | Tablet-WebSocket |
 | `GET /{ns}/host-ws` | bts-light-Host-WebSocket (ausgehend) |

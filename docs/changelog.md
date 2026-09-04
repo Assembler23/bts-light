@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.275
+
+- **Neu: Anzeige-Hülle fürs Tablet.** Unter `…/anzeige` zeigt ein Tablet
+  eine der Anzeige-Seiten — Zähltafel, Feld-Monitor, Hallen-Übersicht oder
+  „In Vorbereitung" — mit Zahnrad und PIN, Feldwechsel, Seiten spiegeln,
+  Weg zurück zum Zählen (mit Warnung, wenn das Feld schon gezählt wird),
+  Vollbild und Wake-Lock. Einstiege im Zahnrad-Menü des Zähl-Tablets und im
+  Belegt-Overlay („Nur Spielstand anzeigen"). Die Cloud-Feldliste nennt jetzt,
+  ob ein Feld gezählt wird. Spec `docs/features/zaehltafel-anzeige-huelle.md`.
+
 ## v0.9.274
 
 - **Neu: Zähltafel-Layout.** Unter `…/court/<Feld>/tafel` zeigt eine Seite

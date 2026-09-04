@@ -312,8 +312,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Feld-Monitor, Übersicht, Vorbereitung), Spiegeln, Feldwechsel, Wake-Lock.
   Einstiege im Zahnrad-Menü und im Belegt-Overlay des Zähl-Tablets. Zwei PRs
   (Tafel + Ziel, dann Hülle). Feldtest auf iPad ist Abnahmekriterium (iframe).
-  PR 1 (Tafel + Zuweisungsziel) umgesetzt in v0.9.274, PR 2 (Hülle) offen.
-  Offen außerdem: Tafel-Route in der Slave-Monitor-Brücke (`slave_bridge.rs`).
+  PR 1 (Tafel + Zuweisungsziel) umgesetzt in v0.9.274, PR 2 (Hülle +
+  Einstiege) umgesetzt in v0.9.275. Offen: Feldtest (iPad-iframe!) und die
+  Slave-Brücke (Tafel-Route in `slave_bridge.rs`).
 
 - **Kombi-Ausrichtung je Monitor (v0.9.270)** — ob die Felder einer
   Kombi-Anzeige über- oder nebeneinander stehen, wird **je TV** im bestehenden

@@ -1,6 +1,6 @@
 # Zähltafel fürs Tablet + Anzeige-Hülle — Spezifikation
 
-> Status: **freigegeben 2026-09-04 · PR 1 (Tafel + Zuweisungsziel) umgesetzt 2026-09-04**
+> Status: **freigegeben 2026-09-04 · PR 1 umgesetzt 2026-09-04 · PR 2 (Hülle + Einstiege) umgesetzt 2026-09-04**
 > (via Brief → Grill → How-To → Review).
 > Quelle: Idee vom 04.09.2026. Betroffene Crates: `src-tauri/` (Assets, Server, Monitor-Zuweisung),
 > `relay/` (Routen, Umleitung), `relay-proto/` (`MonitorTarget`), `src/` (Court-Monitor-Panel,
@@ -153,8 +153,8 @@ Erfolgskriterien beim nächsten Turnier:
   Pfadbau ausschließlich über die Allowlist in `anzeigeZiel.mjs`:
   `tafel → court/{id}/tafel`, `feld → court/{id}/display`, `uebersicht → info/overview`,
   `vorbereitung → info/preparation`. Unbekanntes `layout` → `tafel`; `court` muss eine ganze
-  Zahl sein, sonst öffnet das Menü mit der Feldwahl. Freier Text aus der Adresse landet nie im
-  iframe-`src` (security-reviewer bei der Umsetzung).
+  Zahl sein, sonst öffnet das Menü mit der Feldwahl (ohne PIN — es wird noch nichts angezeigt).
+  Freier Text aus der Adresse landet nie im iframe-`src` (security-reviewer bei der Umsetzung).
 - **iframe** `position: fixed; inset: 0`, `src = BASE + pfad` (+ `?spiegel=1` bei `tafel`, wenn
   gemerkt). Die eingebetteten Seiten laufen ohne `?device` und leiten daher nie um.
 - **Zahnrad** klein, halbtransparent in einer Ecke; Tipp → PIN-Pad (Kopie aus `tablet.html`,
@@ -164,7 +164,8 @@ Erfolgskriterien beim nächsten Turnier:
   3. Seiten spiegeln (nur bei `tafel`; gemerkt je Gerät in `localStorage`).
   4. Zum Zählen wechseln → vorher `/courts` abfragen; ist das Feld `occupied`, erscheint ein
      Warnhinweis mit Bestätigung („Auf diesem Feld zählt bereits ein Gerät …"), sonst direkt
-     `court/{id}`.
+     `court/{id}`. Die Relay-Feldliste liefert `occupied` seit v0.9.275; fehlt das Feld
+     (älterer Relay), gibt es keine Warnung.
   5. Neu laden.
   6. Vollbild ein/aus.
   7. Schließen.
@@ -270,7 +271,8 @@ Zuweisung:
 ## Risiken & Rollback
 
 - **iOS Safari und iframes**: Safari kann iframes an den Inhalt statt an den Rahmen anpassen.
-  Alle eingebetteten Seiten sind auf Bildschirmgröße gebaut, das sollte tragen; der iPad-Feldtest
+  Alle eingebetteten Seiten sind auf Bildschirmgröße gebaut, das sollte tragen
+  (Wrapper mit `width:1px; min-width:100%` als Gegenmittel eingebaut); der iPad-Feldtest
   ist Abnahmekriterium. Rückfall, falls es scheitert: `anzeige.html` navigiert statt einzubetten
   (dann ohne Wake-Lock und ohne Zahnrad auf den Fremd-Layouts) — für die Zähltafel selbst wäre
   ein eigenes Menü direkt in `tafel.html` der Ausweg.

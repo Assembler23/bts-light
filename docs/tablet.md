@@ -115,6 +115,8 @@ an – dabei erscheinen jetzt **zwei** UAC-Abfragen (je eine Regel pro Port).
 | `GET /tl` | Turnierleitungs-Oberfläche (Seite) |
 | `GET /tl/api/state` | Anzeige-Zustand der Turnierleitungs-Oberfläche |
 | `POST /tl/api/command` | Aktion eines Turnierleitungs-Geräts |
+| `GET /anzeige` | Anzeige-Hülle fürs Tablet (`?layout=tafel|feld|uebersicht|vorbereitung&court=<CourtID>`) |
+| `GET /courts` | Feldliste mit `occupied` (Feldwechsel, Belegt-Warnung) |
 
 Die `/tl/`-Routen gehören zur [Turnierleitungs-Oberfläche](features/turnierleitung-web.md).
 Die **Schnittstellen-Routen** verlangen einen Zugang im `Authorization`-Kopf
@@ -511,6 +513,11 @@ Tablet ausfällt. Das übernehmende Gerät setzt das **laufende Spiel mit
 aktuellem Stand** fort (das aktive Tablet spiegelt seinen Stand dafür
 laufend an den Server). Nach der Übernahme ist das alte Gerät gesperrt.
 
+Seit v0.9.275 bietet das Belegt-Overlay zusätzlich „Nur Spielstand
+anzeigen" — die
+[Anzeige-Hülle](#anzeige-hülle-anzeige-seit-v09275) mit der Zähltafel
+dieses Feldes.
+
 ### Reconnect ist keine Übernahme (seit v0.9.147)
 
 Jedes Tablet trägt eine **persistente Geräte-Kennung** (`deviceId`,
@@ -567,6 +574,38 @@ die weitergezählten Punkte (Turnier-Befund 18.07.2026). Ein frisches Gerät
 (Reload ohne Stand, Ersatz-Tablet, echte Übernahme) übernimmt den
 Server-Stand unverändert. Dieser Pfad greift, wenn `ownership_active=false`
 (Legacy-Schalter an oder alte App/altes Relay).
+
+## Anzeige-Hülle (`/anzeige`, seit v0.9.275)
+
+Ein zweites Tablet am Feld zeigt nur den Spielstand — als **Zähltafel**
+(Spec [features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
+ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)). Die
+Hülle `anzeige.html` bettet eine der Anzeige-Seiten in einem seitenfüllenden
+Rahmen ein und liefert die Tablet-Bedienung dazu.
+
+- **Einstiege:** im Zahnrad-Menü des Zähl-Tablets „Anzeige (nur Spielstand)"
+  (hinter der PIN) und im Belegt-Overlay eines schon gezählten Feldes „Nur
+  Spielstand anzeigen" (ohne PIN — die Anzeige-Seiten sind ohnehin frei
+  erreichbar, das Zählen bleibt durch das Overlay geschützt). Beide öffnen
+  `…/anzeige?layout=tafel&court=<Feld>`.
+- **Layouts:** Zähltafel, Feld-Monitor, Hallen-Übersicht, In Vorbereitung.
+  Was geladen wird, entscheidet eine feste Liste; freier Text aus der Adresse
+  erreicht den Rahmen nie. Ein unbekanntes Layout wird zur Zähltafel, ein
+  unbrauchbares Feld öffnet die Feldwahl (ohne PIN — es wird noch nichts
+  angezeigt).
+- **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`):
+  Anzeige wählen · Feld wechseln · Seiten spiegeln (nur Zähltafel, gemerkt je
+  Gerät) · Zum Zählen wechseln · Neu laden · Vollbild · Schließen.
+- **Zum Zählen wechseln** fragt vorher die Feldliste: Ist das Feld belegt,
+  kommt eine Warnung mit Bestätigung — die Zähl-Seite würde bei einem
+  abgetauchten Tablet sonst still übernehmen (ADR 0017). Ein älterer Relay
+  ohne `occupied` in der Liste → keine Warnung.
+- **Wake-Lock** hält das Display wach — nur im verschlüsselten Zugang (Cloud,
+  LAN-TLS); über `http://…:8088` fehlt die Browser-API, dort gilt die
+  Geräteeinstellung „Bildschirm an lassen" (siehe Voraussetzungen).
+- Layout und Feld stehen in der Adresse und werden je Gerät gemerkt; ein
+  Neuladen bringt dieselbe Anzeige. Die Hülle öffnet nie den Tablet-Kanal und
+  belegt keinen Zähl-Platz.
 
 ## Einrichtung im Turnier
 
