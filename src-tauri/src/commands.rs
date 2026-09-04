@@ -1718,19 +1718,18 @@ pub fn open_live_view(
     state: State<'_, AppState>,
     display: Option<String>,
 ) -> Result<(), String> {
-    let live_url = state
-        .config
-        .lock()
-        .expect("Config-Mutex nicht vergiftet")
-        .badhub
-        .live_url
-        .clone();
+    let (live_url, guid) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (cfg.badhub.live_url.clone(), cfg.tournament_uuid_kanonisch())
+    };
     if live_url.is_empty() {
         return Err("Für dieses Turnier ist keine Live-Seite hinterlegt.".to_string());
     }
+    // Erst die GUID (Direktlink aufs Turnier, ADR 0054), dann die Ansicht.
+    let mit_guid = crate::aushang::link_mit_guid(&live_url, guid.as_deref());
     let url = match display {
-        Some(view) => format!("{live_url}&display={view}"),
-        None => live_url,
+        Some(view) => format!("{mit_guid}&display={view}"),
+        None => mit_guid,
     };
     app.opener()
         .open_url(url, None::<String>)
@@ -2638,8 +2637,9 @@ pub fn aushang_html(state: State<'_, AppState>) -> Result<String, String> {
         .map(|s| s.tournament_name)
         .unwrap_or_default();
     let eingetragen = config.badhub.live_url.trim();
-    let daten =
-        crate::aushang::daten_aus(&config.badhub.live_url, &turnier, logo).ok_or_else(|| {
+    let guid = config.tournament_uuid_kanonisch();
+    let daten = crate::aushang::daten_aus(&config.badhub.live_url, &turnier, logo, guid.as_deref())
+        .ok_or_else(|| {
             // „Leer" und „steht da, taugt aber nicht" brauchen verschiedene
             // Hinweise: Sonst sucht die Turnierleitung nach einem Feld, das
             // ausgefüllt vor ihr steht.

@@ -39,6 +39,7 @@ fn main() {
         "https://badhub.de/live?t=bvbb",
         &turnier,
         mit_logo.then(|| TEST_LOGO.to_string()),
+        None,
     )
     .expect("Muster-URL ist auswertbar");
     let html = bts_light_lib::aushang::render_html(&daten).expect("Blatt lässt sich bauen");
