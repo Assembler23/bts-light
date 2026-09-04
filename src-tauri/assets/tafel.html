@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zähltafel – bts-light</title>
+  <!--
+    Zähltafel (Spec docs/features/zaehltafel-anzeige-huelle.md): reine Anzeige
+    wie monitor.html, aber nur Punktzahlen, Satzstand und Aufschlag — kein Name.
+    Für ein Tablet am Netz (über die Anzeige-Hülle) oder einen TV per Zuweisung
+    „Zähltafel – Feld X". Verbindungsblock (Poll, WS-Nudge, ETag, seq, Stillstand,
+    Fernbefehle) ist 1:1 der von monitor.html — Änderungen dort auch hier.
+  -->
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b1020; color: #f1f5f9;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden; -webkit-user-select: none; user-select: none; }
+    #root { position: relative; width: 100vw; height: 100vh; }
+    /* Tafel-Ansicht: Satzstand oben klein, darunter zwei Kacheln mit den
+       Punkten. Alles in vmin/vw, damit Quer- und Hochformat ohne Anpassung
+       passen. Ziffernhöhe ≥ 35 vmin (Spec), im Querformat durch die Breite
+       begrenzt: zwei zweistellige Zahlen nebeneinander. */
+    #tafel-view { display: none; position: absolute; inset: 0;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 3vmin; }
+    #tafel-view.show { display: flex; }
+    .saetze { font-size: 9vmin; font-weight: 800; letter-spacing: .08em;
+      color: #fbbf24; line-height: 1; }
+    .saetze .trenner { margin: 0 .25em; opacity: .6; }
+    /* Gap/Padding bewusst knapp (2vw/1vw statt 3vw/2vw): Bei zwei
+       zweistelligen Ziffern (font-weight 900, ~1,16 em Breite je Zeichen)
+       läuft `min(40vw, 60vmin)` sonst im Hochformat fast bis an die
+       Kachelkante — kaum Reserve. Schmalere Ränder geben jeder Kachel
+       48vw statt 46,5vw. */
+    .punkte { display: flex; flex-direction: row; align-items: stretch;
+      justify-content: center; gap: 2vw; width: 100vw; padding: 0 1vw;
+      box-sizing: border-box; }
+    .seite { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+      align-items: center; gap: 2vmin; }
+    /* Klapp-Tafel-Optik: dunkle Kachel mit Mittelfuge. `overflow: hidden`
+       als zweite Sicherung gegen die Ziffernbreite — schneidet im
+       Zweifel lieber sichtbar ab, als die Kachel zu sprengen. */
+    .kachel { position: relative; width: 100%; border-radius: 3vmin;
+      background: #111827; box-shadow: inset 0 0 0 .4vmin #1f2937,
+      0 1.5vmin 4vmin rgba(0,0,0,.5); display: flex; align-items: center;
+      justify-content: center; padding: 2vmin 0; overflow: hidden; }
+    .kachel::after { content: ""; position: absolute; left: 0; right: 0;
+      top: 50%; height: .4vmin; background: rgba(0,0,0,.55); }
+    .zahl { font-size: min(40vw, 60vmin); font-weight: 900; line-height: 1;
+      font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    .aufschlag { width: 4vmin; height: 4vmin; border-radius: 50%;
+      background: transparent; }
+    .seite.serve .aufschlag { background: #fbbf24;
+      box-shadow: 0 0 2.5vmin rgba(251,191,36,.8); }
+    .feld { position: absolute; top: 2vmin; left: 3vmin; font-size: 4vmin;
+      font-weight: 700; opacity: .55; }
+    /* Leerlauf: kein Spiel → Feldbezeichnung groß. */
+    #leer-view { display: none; position: absolute; inset: 0;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 2vh; text-align: center; }
+    #leer-view.show { display: flex; }
+    #leer-view .court { font-size: 22vmin; font-weight: 800; line-height: 1; }
+    #leer-view .sub { font-size: 3.4vmin; opacity: .45; letter-spacing: .04em; }
+
+    #offline {
+      position: absolute; left: 1.5vw; bottom: 1.5vh;
+      font-size: 2.2vmin; color: #ef4444; opacity: 0; transition: opacity .3s;
+    }
+    #offline.show { opacity: .8; }
+
+    /* ─── Default-Seite: Badhub-Logo (Gerät noch keinem Target zugewiesen) ─
+       Klar/aufgeraeumt: nur das Logo zentriert, gross. Subtiler
+       Atem-Glow im Hintergrund, damit der TV nicht statisch wirkt.
+       Den Device-Code blendet das "Identifizieren"-Overlay ein. */
+    #pairing-view {
+      position: absolute; inset: 0; display: none;
+      flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; gap: 3vmin;
+      background: radial-gradient(ellipse at center, #1a2238 0%, #0b1120 70%);
+    }
+    #pairing-view.show { display: flex; }
+    /* Logo wie im bts-light-App-Header: dunkles Rounded-Square mit
+       Federball-Emoji. Genau dieselbe Optik wie in Dashboard.tsx. */
+    #pairing-view .logo {
+      width: 22vmin; height: 22vmin;
+      display: flex; align-items: center; justify-content: center;
+      background: #1e293b; border-radius: 4vmin;
+      font-size: 15vmin; line-height: 1;
+      /* Emoji-Schriften erzwingen (Pi OS Lite nutzt sonst eine Mono-Fallback). */
+      font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
+      box-shadow: 0 .8vmin 4vmin rgba(0, 0, 0, .35), inset 0 0 0 .3vmin #334155;
+      animation: badhub-breathe 4s ease-in-out infinite;
+    }
+    @keyframes badhub-breathe {
+      0%, 100% { transform: scale(1);    box-shadow: 0 .8vmin 4vmin rgba(0, 0, 0, .35), inset 0 0 0 .3vmin #334155; }
+      50%      { transform: scale(1.03); box-shadow: 0 1.2vmin 6vmin rgba(251, 191, 36, .15), inset 0 0 0 .3vmin #475569; }
+    }
+    /* Wordmark (gross) + Untertitel (klein) unter dem Logo. */
+    /* badhub.de = Held der Leerlauf-Anzeige (Werbung): fast über die ganze
+       TV-Breite, gut lesbar. Größe an der VIEWPORT-BREITE (vw), damit es
+       quer wirklich breit wird. "BTS light" deutlich kleiner darunter. */
+    #pairing-view .wordmark {
+      font-size: 15vw; letter-spacing: .005em; line-height: 1;
+      color: #f1f5f9; font-weight: 800;
+      text-shadow: 0 .4vmin 2vmin rgba(0, 0, 0, .4);
+    }
+    #pairing-view .subtitle {
+      font-size: 4.5vw; letter-spacing: .25em; text-transform: uppercase;
+      color: #94a3b8; font-weight: 600; margin-top: 1vmin;
+    }
+
+    /* ─── Identifizieren-Overlay (Fernbefehl) ────────────────────────── */
+    #identify-overlay {
+      position: absolute; inset: 0; display: none; z-index: 10;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 2vh; background: #fbbf24; color: #1a1206;
+      animation: identify-flash 1s ease-in-out infinite;
+    }
+    #identify-overlay.show { display: flex; }
+    @keyframes identify-flash { 0%, 100% { opacity: 1; } 50% { opacity: .65; } }
+    #identify-overlay .i-code {
+      font-size: 26vmin; font-weight: 900; line-height: 1; letter-spacing: .08em;
+    }
+    #identify-overlay .i-court { font-size: 7vmin; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="tafel-view">
+      <div class="feld" id="tafel-feld"></div>
+      <div class="saetze"><span id="saetze-links">0</span><span class="trenner">:</span><span id="saetze-rechts">0</span></div>
+      <div class="punkte">
+        <div class="seite" id="seite-links">
+          <div class="kachel"><span class="zahl" id="punkte-links">0</span></div>
+          <span class="aufschlag" aria-hidden="true"></span>
+        </div>
+        <div class="seite" id="seite-rechts">
+          <div class="kachel"><span class="zahl" id="punkte-rechts">0</span></div>
+          <span class="aufschlag" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="leer-view">
+      <div class="court" id="leer-court">__COURT_LABEL__</div>
+      <div class="sub">Kein Spiel auf diesem Feld</div>
+    </div>
+
+    <div id="pairing-view">
+      <div class="logo" aria-label="Federball">
+        <!-- Inline-SVG-Federball statt 🏸-Emoji: rendert auch ohne Emoji-Schrift
+             (Raspberry Pi OS hat standardmäßig keine) – auf Pi, Handy, Windows gleich. -->
+        <svg viewBox="0 0 100 100" width="62%" height="62%" aria-hidden="true">
+          <g fill="none" stroke="#e2e8f0" stroke-width="4"
+             stroke-linecap="round" stroke-linejoin="round">
+            <path d="M50 67 L22 30" />
+            <path d="M50 67 L36 24" />
+            <path d="M50 67 L50 20" />
+            <path d="M50 67 L64 24" />
+            <path d="M50 67 L78 30" />
+            <path d="M22 30 Q50 14 78 30" />
+          </g>
+          <path d="M41 65 Q50 92 59 65 Z" fill="#fbbf24"
+                stroke="#fbbf24" stroke-width="3" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <div class="wordmark">badhub.de</div>
+      <div class="subtitle">BTS light</div>
+    </div>
+
+    <div id="identify-overlay">
+      <div class="i-code" id="identify-code">····</div>
+      <div class="i-court" id="identify-court"></div>
+    </div>
+
+    <div id="offline">Verbindung unterbrochen</div>
+  </div>
+
+  <script>
+  "use strict";
+  // Betriebsmodus + Basis-Pfad – vom Server eingesetzt. `device` = Gerät,
+  // das sein Feld erst über die Zuweisung im Tool bekommt; `fixed` = fest
+  // auf ein Feld verdrahtet. BASE ist der URL-Präfix (z. B. "/" oder
+  // "/<namespace>/") für die State-Abfrage und den Monitor-Kanal.
+  var MODE = "__MODE__";
+  var BASE = "__BASE__";
+  // Feldname – wird vom ersten /state-Poll gesetzt. Bewusst NICHT als
+  // Platzhalter in dieses JS-Literal gebacken (nur in den HTML-Span oben,
+  // dort HTML-escaped), damit kein Court-Name den String-Literal-Kontext
+  // aufbrechen kann.
+  var COURT_LABEL = "";
+
+  // Seiten spiegeln (Tafel steht dem Schiedsrichter gegenüber). Kommt von
+  // der Anzeige-Hülle als ?spiegel=1. Im Gerätemodus bewusst ignoriert: Die
+  // Zuweisung kennt keine Spiegelung, und ein Gerät soll nur zeigen, was der
+  // Turnierleiter zugewiesen hat — ein Query-Rest in der Geräte-URL ergäbe
+  // sonst eine stille, nirgends verwaltete Einstellung (Befund ADR 0049).
+  var SPIEGEL = MODE !== "device"
+    && new URLSearchParams(location.search).get("spiegel") === "1";
+
+  // Geräte-ID (nur Geräte-Modus). Bevorzugt aus dem URL-Parameter
+  // `?device=` – der Pi-Kiosk setzt dort seine Hardware-Seriennummer ein,
+  // damit eine geklonte SD-Karte trotzdem je Pi eindeutig bleibt. Fehlt
+  // der Parameter (z. B. Aufruf direkt im Browser), eine zufällige,
+  // dauerhafte ID in localStorage.
+  function resolveDeviceId() {
+    try {
+      var fromUrl = new URLSearchParams(window.location.search).get("device");
+      if (fromUrl) return fromUrl;
+    } catch (e) {}
+    var k = "bts-monitor-device-id";
+    var id = "";
+    try { id = localStorage.getItem(k) || ""; } catch (e) {}
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : (Date.now().toString(16) + Math.random().toString(16).slice(2));
+      try { localStorage.setItem(k, id); } catch (e) {}
+    }
+    return id;
+  }
+  var DEVICE_ID = MODE === "device" ? resolveDeviceId() : "";
+
+  // ── Diagnose-Mini-Logger ──────────────────────────────────────────────
+  // Wie combo/overview: JS-Fehler (z. B. HDMI-/Render-Crash) + Offline-Wechsel
+  // best-effort an /pi-log (lokal + Cloud, Datei mon-<device>.log). Nur LAN;
+  // im Cloud-Modus scheitert der Post still.
+  var MLOG = [], MLOG_MAX = 200;
+  function mlog(level, event, detail) {
+    var e = { t: Date.now(), level: level, event: event };
+    if (detail !== undefined) e.d = detail;
+    MLOG.push(e); while (MLOG.length > MLOG_MAX) MLOG.shift();
+    try { console.log("[" + new Date(e.t).toISOString() + "] " + level + " " + event, detail || ""); } catch (x) {}
+  }
+  function mlogDevice() {
+    var id = (DEVICE_ID || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 56);
+    return "mon-" + (id || "unbekannt");
+  }
+  function uploadMonitorLog() {
+    try {
+      var body = "Monitor monitor · device=" + mlogDevice() + "\nUA: " + navigator.userAgent
+        + "\nGeneriert: " + new Date().toISOString() + "\n\n"
+        + MLOG.map(function (e) {
+            return "[" + new Date(e.t).toISOString() + "] " + e.level + " " + e.event
+              + (e.d !== undefined ? " " + JSON.stringify(e.d) : "");
+          }).join("\n") + "\n";
+      fetch("/pi-log?device=" + encodeURIComponent(mlogDevice()), {
+        method: "POST", headers: { "Content-Type": "text/plain" }, body: body, keepalive: true,
+      }).catch(function () {});
+    } catch (x) {}
+  }
+  window.addEventListener("error", function (ev) {
+    try { mlog("error", "js_error", { msg: String((ev && ev.message) || ev), src: (ev && ev.filename) || "", line: (ev && ev.lineno) || 0 }); uploadMonitorLog(); } catch (x) {}
+  });
+  window.addEventListener("unhandledrejection", function (ev) {
+    try { var r = ev && ev.reason; mlog("error", "unhandled_rejection", { msg: r != null ? (r.message || String(r)) : "unknown" }); uploadMonitorLog(); } catch (x) {}
+  });
+  window.addEventListener("pagehide", uploadMonitorLog);
+  mlog("info", "tafel_boot", { mode: MODE });
+
+  // Adresse der State-Abfrage: Geräte-Modus fragt mit der Geräte-ID,
+  // der feste Modus leitet sie aus dem eigenen Pfad ab (…/tafel → …/state).
+  var STATE_URL = MODE === "device"
+    ? BASE + "monitor/state?device=" + encodeURIComponent(DEVICE_ID)
+    : window.location.pathname.replace(/\/tafel\/?$/, "/state");
+
+  var els = {
+    root: document.getElementById("root"),
+    tafelView: document.getElementById("tafel-view"),
+    tafelFeld: document.getElementById("tafel-feld"),
+    saetzeL: document.getElementById("saetze-links"),
+    saetzeR: document.getElementById("saetze-rechts"),
+    seiteL: document.getElementById("seite-links"),
+    seiteR: document.getElementById("seite-rechts"),
+    punkteL: document.getElementById("punkte-links"),
+    punkteR: document.getElementById("punkte-rechts"),
+    leerView: document.getElementById("leer-view"),
+    leerCourt: document.getElementById("leer-court"),
+    pairingView: document.getElementById("pairing-view"),
+    identifyOverlay: document.getElementById("identify-overlay"),
+    identifyCode: document.getElementById("identify-code"),
+    identifyCourt: document.getElementById("identify-court"),
+    offline: document.getElementById("offline"),
+  };
+
+  // ─── Helfer ──────────────────────────────────────────────────────────
+  // Parst den vom Tablet gespiegelten courtState (JSON-String) zu einem
+  // Objekt – oder null, wenn keiner vorliegt oder er beschädigt ist.
+  function parseCourtState(json) {
+    if (!json) return null;
+    try { return JSON.parse(json); } catch (e) { return null; }
+  }
+
+  // ─── Seitenlogik der Zähltafel ──────────────────────────────────────
+  // Inline-Kopie von src/io/tafelSeiten.mjs — Änderungen dort und hier
+  // gemeinsam.
+  /** Seitenlogik der Zähltafel (Spec `docs/features/zaehltafel-anzeige-huelle.md`).
+   *
+   *  Aus `match.sets` (Team-Koordinaten a/b wie vom Host) und dem vom Tablet
+   *  gespiegelten `courtState` wird, was links und rechts auf der Tafel steht:
+   *  Punkte des laufenden Satzes, gewonnene Sätze, Aufschlag-Punkt.
+   *
+   *  Regeln (aus dem Grill, 04.09.2026):
+   *  - Seiten aus `courtState.teamOnSide` (`a: "left"|"right"`). Fehlt es (vor
+   *    der Seitenwahl, oder gar kein zählendes Tablet), steht **Team 1 links**.
+   *  - Aufschlag aus `serving.team`; sonst Rückfall auf `servingSide` +
+   *    `teamOnSide` (wie monitor.html). **`teamOnSide` ist in beiden Zweigen
+   *    Pflicht** — ohne es nie ein Punkt, auch wenn `serving.team` gesetzt
+   *    ist: anders als `servingInfo` in monitor.html ordnet die Tafel den
+   *    Punkt einer SEITE zu und müsste ohne Seiteninfo raten. Nach der
+   *    Entscheidung nie ein Punkt.
+   *  - `finished`: ein nachgestellter 0:0-Geistersatz fällt weg, der letzte
+   *    gespielte Satz steht groß **und** zählt im Satzstand.
+   *  - `retired`: der unvollständige letzte Satz steht groß, zählt aber nicht.
+   *  - `spiegel` tauscht links/rechts **nach** der Seitenbestimmung — wirkt
+   *    also auch ohne `teamOnSide` (Tafel steht dem Schiedsrichter gegenüber).
+   */
+  function zahl(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+
+  /**
+   * @param {Array<{a:number,b:number}>|undefined} sets Sätze in Team-Koordinaten.
+   * @param {object|null|undefined} courtState Geparster Tablet-Zustand oder null.
+   * @param {boolean|undefined} spiegel Links/rechts tauschen.
+   * @returns {{links:{punkte:number,saetze:number,aufschlag:boolean},
+   *            rechts:{punkte:number,saetze:number,aufschlag:boolean},
+   *            entschieden:boolean}}
+   */
+  function tafelSeiten(sets, courtState, spiegel) {
+    const cs = courtState && typeof courtState === "object" ? courtState : null;
+    const finished = !!(cs && cs.finished);
+    const retired = !!(cs && cs.retired);
+    const roh = Array.isArray(sets)
+      ? sets.map((s) => ({ a: zahl(s && s.a), b: zahl(s && s.b) }))
+      : [];
+
+    // Geistersatz nur bei regulärem Spielende streichen — im laufenden Spiel
+    // ist 0:0 der echte Beginn eines Satzes. Bei Aufgabe (`retired`) ist der
+    // letzte Eintrag — auch ein 0:0 in der Satzpause — der unvollständige
+    // Satz, der groß steht und nicht zählt; der bleibt also stehen.
+    const gespielt = roh.slice();
+    if (finished && !retired) {
+      while (gespielt.length > 1) {
+        const l = gespielt[gespielt.length - 1];
+        if (l.a === 0 && l.b === 0) gespielt.pop();
+        else break;
+      }
+    }
+    const gross = gespielt.length > 0 ? gespielt[gespielt.length - 1] : { a: 0, b: 0 };
+
+    // Satzstand: fertige Sätze zählen. Laufend → alle außer dem letzten;
+    // entschieden → alle; Aufgabe → alle außer dem unvollständigen letzten.
+    const zaehlbar = finished && !retired ? gespielt : gespielt.slice(0, -1);
+    let sA = 0, sB = 0;
+    for (const s of zaehlbar) {
+      if (s.a > s.b) sA++;
+      else if (s.b > s.a) sB++;
+    }
+
+    // Aufschlag (nur im laufenden Spiel): "a"|"b"|null.
+    let aufschlag = null;
+    if (!finished && cs) {
+      if (cs.serving && (cs.serving.team === "a" || cs.serving.team === "b") && cs.teamOnSide) {
+        aufschlag = cs.serving.team;
+      } else if (cs.servingSide && cs.teamOnSide && cs.teamOnSide.a) {
+        aufschlag = cs.teamOnSide.a === cs.servingSide ? "a" : "b";
+      }
+    }
+
+    const teamA = { punkte: gross.a, saetze: sA, aufschlag: aufschlag === "a" };
+    const teamB = { punkte: gross.b, saetze: sB, aufschlag: aufschlag === "b" };
+
+    // Seiten: Team 1 links, außer das Tablet sagt, dass A rechts steht.
+    const aRechts = !!(cs && cs.teamOnSide && cs.teamOnSide.a === "right");
+    let links = aRechts ? teamB : teamA;
+    let rechts = aRechts ? teamA : teamB;
+    if (spiegel) { const t = links; links = rechts; rechts = t; }
+
+    return { links, rechts, entschieden: finished };
+  }
+
+  // ─── Tafel-Ansicht ───────────────────────────────────────────────────
+  function renderTafel(state) {
+    var m = state.match;
+    var cs = parseCourtState(state.courtState);
+    var t = tafelSeiten(m && m.sets, cs, SPIEGEL);
+    els.punkteL.textContent = String(t.links.punkte);
+    els.punkteR.textContent = String(t.rechts.punkte);
+    els.saetzeL.textContent = String(t.links.saetze);
+    els.saetzeR.textContent = String(t.rechts.saetze);
+    els.seiteL.classList.toggle("serve", t.links.aufschlag);
+    els.seiteR.classList.toggle("serve", t.rechts.aufschlag);
+    els.tafelFeld.textContent = feldText(state);
+  }
+
+  // Feldbezeichnung; im Relay ohne verbundenen Host ist das Label leer →
+  // CourtID aus Pfad/State, damit die Leerlauf-Seite nie leer bleibt.
+  function feldText(state) {
+    var id = (typeof state.courtId === "number" && state.courtId) ? state.courtId : fixedCourtId;
+    return state.courtLabel || COURT_LABEL || (id ? "Feld " + id : "");
+  }
+
+  // ─── Fernbefehle (Geräte-Modus) ──────────────────────────────────────
+  var lastCmdId = 0;
+  try { lastCmdId = parseInt(localStorage.getItem("bts-monitor-cmd-id") || "0", 10) || 0; }
+  catch (e) {}
+  var cmdBaselineSet = false;
+  var identifyTimer = null;
+
+  function saveCmdId() {
+    try { localStorage.setItem("bts-monitor-cmd-id", String(lastCmdId)); } catch (e) {}
+  }
+
+  // Führt einen Fernbefehl genau einmal aus. Der erste Poll setzt nur die
+  // Basis – ein beim Laden bereits offener Befehl wird nicht nachgeholt
+  // (auch nach einem „Neu laden" kein Endlos-Reload).
+  function handleCommand(cmd) {
+    var id = (cmd && typeof cmd.id === "number") ? cmd.id : 0;
+    if (!cmdBaselineSet) {
+      cmdBaselineSet = true;
+      if (id > lastCmdId) { lastCmdId = id; saveCmdId(); }
+      return;
+    }
+    if (!cmd || id <= lastCmdId) return;
+    lastCmdId = id;
+    saveCmdId();
+    if (cmd.kind === "reload") {
+      location.reload();
+    } else if (cmd.kind === "identify") {
+      showIdentify();
+    }
+  }
+
+  // Blendet Code + Feld groß ein, damit man Gerät und TV zuordnen kann.
+  function showIdentify() {
+    // Fallback (noch kein Server-State): die LETZTEN vier alphanumerischen
+    // Zeichen der ID – konsistent mit device_code() im Server. (Pi-Serials
+    // teilen sich das Präfix, die ersten vier wären für alle Pis "PI00".)
+    els.identifyCode.textContent =
+      (lastState && lastState.deviceCode) ||
+      DEVICE_ID.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase();
+    els.identifyCourt.textContent = feldText(lastState || {});
+    els.identifyOverlay.classList.add("show");
+    if (identifyTimer) clearTimeout(identifyTimer);
+    identifyTimer = setTimeout(function () {
+      els.identifyOverlay.classList.remove("show");
+    }, 10000);
+  }
+
+  // ─── Poll-Schleife ───────────────────────────────────────────────────
+  var lastState = null;
+
+  // Default-Anzeige fuer unzugewiesene Pis: Badhub-Logo Vollbild.
+  // Den Device-Code blendet das Identifizieren-Overlay on-demand ein.
+  function showPairing(_state) {
+    els.pairingView.classList.add("show");
+    els.tafelView.classList.remove("show");
+    els.leerView.classList.remove("show");
+  }
+
+  var noRedirectPolls = 0;
+  var DEASSIGN_AFTER = 3;
+
+  function applyState(state) {
+    // Überholte Antwort verwerfen (Spec monitor-livestand-push, S4): Zwei
+    // Abrufe können sich überholen — der langsamere trägt dann den älteren
+    // Stand und würde die Anzeige zurückwerfen. Ein Voll-Abruf mit
+    // GLEICHER Ordnungszahl gilt dagegen: Er darf denselben Stand
+    // berichtigen, etwa wenn BTP einen Satzstand von Hand zurücknimmt.
+    //
+    // Nur für das eigene Feld — ein Wechsel des Felds (Reassignment) bringt
+    // eine fremde Zählung mit und darf nicht blockiert werden.
+    var feld = typeof state.courtId === "number" ? state.courtId : 0;
+    if (feld && feld === knownCourtId) {
+      if (!seqAnwenden(lastSeqByCourt[feld] || 0, state.seq || 0, "fetch")) {
+        // Genau hier friert die Anzeige ein, wenn `lastSeqByCourt` je zu hoch
+        // steht: Der Poll läuft weiter, aber nichts kommt mehr durch. Der
+        // Zähler ist die aussagekräftigste Zahl im Stillstands-Bericht.
+        verworfeneStaende++;
+        return;
+      }
+      if (state.seq) lastSeqByCourt[feld] = state.seq;
+    }
+    // Ab hier wird der Stand wirklich übernommen — der Beleg dafür, dass die
+    // Strecke bis zum Schirm durchlässig ist.
+    letzterStandMs = Date.now();
+    lastState = state;
+    // Feld-Identität für den Nudge-Filter nachziehen (Geräte-Monitor kennt sie
+    // erst hier; bei Reassignment wechselt sie). 0 = unbelegt → ignorieren.
+    if (typeof state.courtId === "number" && state.courtId) knownCourtId = state.courtId;
+    if (state.courtLabel) {
+      COURT_LABEL = state.courtLabel;
+      document.title = "Zähltafel – " + state.courtLabel;
+    }
+    var cfg = state.config || {};
+
+    // Darf der Sicherheits-Poll langsamer laufen (Spec
+    // monitor-livestand-push, S6)? Fehlt das Feld (älterer Server), bleibt
+    // es beim schnellen Takt — der Schalter kann nur entlasten.
+    langsamErlaubt = !!cfg.pushFallbackSlow;
+
+    // Info-Monitor-Zuweisung: bts-light schickt redirectTo, wir wechseln
+    // sofort auf die zugehoerige Info-HTML. Geraete-Code als Query
+    // weiterreichen, damit die Info-Seite die Identitaet kennt.
+    //
+    // Vor handleCommand pruefen (Code-Review v0.9.19 HIGH): ein anstehender
+    // reload-/identify-Command darf nicht auf einer Seite zuenden, die im
+    // gleichen Tick wegnavigiert — sonst zerstoert der reload den Wechsel.
+    if (state.redirectTo && typeof state.redirectTo === "string") {
+      // BASE-relativ auflösen: im LAN ist BASE "/", im Cloud
+      // "/bts-relay/{ns}/". Der Server liefert `redirectTo` als absoluten
+      // Info-Pfad ("/info/preparation") — den hängen wir hinter BASE, damit die
+      // Umleitung im Cloud unter dem Namespace-Präfix landet (sonst 404).
+      var dest = BASE + state.redirectTo.replace(/^\//, "");
+      if (location.pathname !== dest) {
+        var sep = dest.indexOf("?") >= 0 ? "&" : "?";
+        location.href = dest + sep + "device=" + encodeURIComponent(DEVICE_ID);
+        return;
+      }
+    }
+
+    // Gerätemodus ohne Umleitungsziel: Das Gerät ist nicht mehr der Tafel
+    // zugewiesen (Feld-Monitor oder gar nichts) → zurück zur Geräte-Seite,
+    // die Kopplung und Feld-Monitor selbst kann. Entprellt wie overview.html,
+    // damit ein transientes Leer-Lesen der Zuweisung nicht wegnavigiert.
+    if (MODE === "device" && !state.redirectTo) {
+      if (++noRedirectPolls >= DEASSIGN_AFTER) {
+        mlog("info", "deassign_to_monitor", { polls: noRedirectPolls });
+        uploadMonitorLog();
+        location.href = BASE + "monitor?device=" + encodeURIComponent(DEVICE_ID);
+      }
+      return;
+    }
+    noRedirectPolls = 0;
+
+    if (MODE === "device") handleCommand(state.command);
+
+    if (state.unassigned) {
+      showPairing(state);
+      return;
+    }
+    els.pairingView.classList.remove("show");
+
+    if (state.match) {
+      els.tafelView.classList.add("show");
+      els.leerView.classList.remove("show");
+      renderTafel(state);
+    } else {
+      els.leerView.classList.add("show");
+      els.tafelView.classList.remove("show");
+      els.leerCourt.textContent = feldText(state);
+    }
+  }
+
+  // ── Push/Poll-Ordnung (A1, ADR 0016) ─────────────────────────────────
+  // Der Voll-Stand kommt IMMER über denselben `fetch(STATE_URL)` – egal ob
+  // ein Nudge ihn auslöst oder der Fallback-Poll. Eine Datenquelle, ein
+  // Renderpfad → kein Flackern/Rückwärtsspringen. Der Push (Monitor-WS) löst
+  // den Fetch niedrig-latent aus; der 250-ms-Poll ist nur noch der Stille-/
+  // Ausfall-Fallback und pausiert, solange frische Nudges fürs eigene Feld
+  // kommen.
+  var COALESCE_MS = 60;       // Nudge-Bursts bündeln: höchstens ~1 Fetch/60 ms
+  var mwsOpen = false;
+  var mwsOffenSeitMs = 0;     // seit wann die aktuelle Leitung steht (S6)        // Monitor-WS gerade offen?
+
+  // ── Gesundheit des Push-Kanals (Spec monitor-livestand-push, S6) ────────
+  //
+  // Die alte Regel verwechselte „der Kanal lebt" mit „es passiert gerade
+  // etwas": Ein Feld ohne Ballwechsel sah aus wie ein toter Kanal, und ein
+  // halbtoter Socket meldet umgekehrt minutenlang OPEN, ohne dass je etwas
+  // ankommt. Jetzt zählt JEDES Frame vom Server, auch der Herzschlag.
+  //
+  // **Inline-Kopie von `src/io/pushHealth.mjs`** — dort steht die kanonische
+  // Fassung samt Test (`scripts/test-push-health.mjs`, eigener CI-Schritt).
+  // Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+  // `overview.html`.
+  var HERZSCHLAG_STILL_MS = 25000;
+  var FALLBACK_LANGSAM_MS = 4000;
+  var FALLBACK_SCHNELL_MS = 250;
+  var lastServerFrameAt = 0;  // letztes Frame: Anstoß ODER Herzschlag
+  var lastFetchOk = true;
+  var fetchFehler = 0;
+  var langsamErlaubt = false; // aus `config.pushFallbackSlow`
+  var letzterAbrufMs = 0;     // Beginn des letzten losgeschickten Abrufs
+  // ── Stillstands-Wächter (siehe `lagePruefen` unten) ──────────────────
+  var letzterAbrufOkMs = 0;   // letzter Abruf, der ohne Fehler zurückkam
+  var letzterStandMs = 0;     // letzter angewendete Stand
+  var verworfeneStaende = 0;  // wie oft der seq-Guard eine Antwort abwies
+  var seitStartMs = Date.now();
+  var gemeldeteStillstandsArt = null;
+  function pushGesund(z, nowMs) {
+    if (!z || !z.wsOpen) return false;
+    if (z.lastFetchOk === false) return false;
+    if ((z.failures || 0) > 0) return false;
+    var letztes = z.lastServerFrameMs || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes < HERZSCHLAG_STILL_MS;
+  }
+  function fallbackTakt(gesund, erlaubt) {
+    return gesund && erlaubt ? FALLBACK_LANGSAM_MS : FALLBACK_SCHNELL_MS;
+  }
+  function kanalIstTot(wsOffen, letztesFrame, nowMs) {
+    if (!wsOffen) return false;
+    var letztes = letztesFrame || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes >= HERZSCHLAG_STILL_MS;
+  }
+  function kanalZustand() {
+    return {
+      wsOpen: mwsOpen,
+      lastServerFrameMs: lastServerFrameAt,
+      lastFetchOk: lastFetchOk,
+      failures: fetchFehler,
+    };
+  }
+
+  // ── Server-Uhr (Etappe ETag, 1c) ──────────────────────────────────────
+  // Seit dem ETag/304-Umbau liefert der Server nur noch bei einem VOLLEN
+  // 200-Abruf ein frisches `serverNowMs`; die meiste Zeit kommt 304 (kein
+  // Body). Damit Pausen-/Aufruf-Uhren trotzdem weiterlaufen, halten wir
+  // einen laufenden Offset zur lokalen Uhr: `nowServerMs() = Date.now() +
+  // offset`. Gespeist aus zwei Quellen — jedem 200-Abruf und dem
+  // WS-Herzschlag (`{"hb":<nowMs>}`) — überlebt der Offset eine 304-Serie
+  // und einen WS-Abriss (U12).
+  //
+  // **Inline-Kopie von `src/io/monitorClock.mjs`** — dort steht die
+  // kanonische Fassung samt Test (`scripts/test-monitor-clock.mjs`,
+  // eigener CI-Schritt). Änderungen hier und dort gemeinsam.
+  var clockOffset = null;
+  function clockFeed(serverNowMs) {
+    if (typeof serverNowMs !== "number" || serverNowMs <= 0) return false;
+    clockOffset = serverNowMs - Date.now();
+    return true;
+  }
+  function nowServerMs() {
+    return typeof clockOffset === "number" ? Date.now() + clockOffset : Date.now();
+  }
+
+  // ── ETag/304 (Etappe ETag, 1b) ─────────────────────────────────────────
+  // `lastEtag` ist die zuletzt gesehene Marke des SERVERS; sie wird beim
+  // nächsten Abruf als `If-None-Match` mitgeschickt. Der Refetch-Cap
+  // (keine neue Schwellen-Konstante, sondern aus `pushGesund` abgeleitet)
+  // erzwischt trotz ETag regelmäßig einen vollen 200, damit der Uhr-Offset
+  // nie veraltet: gesunder Kanal → alle 10 min, sonst → alle 60 s.
+  var lastEtag = null;
+  var letzterVollerAbrufMs = 0;
+  function refetchCap(gesund) {
+    return gesund ? 600000 : 60000;
+  }
+
+  var fetching = false, refetchQueued = false;
+  var coalesceTimer = null, lastFetchStart = 0;
+
+  // Feld-Identität für WS-Abo/Filter. Fester Monitor: aus dem Pfad
+  // (/court/{id}/display) – sofort bekannt. Geräte-Monitor: erst nach dem
+  // ersten /state-Poll (state.courtId), kann per Reassignment wechseln.
+  function courtIdFromPath() {
+    var m = location.pathname.match(/\/court\/(\d+)(?:\/|$)/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+  var fixedCourtId = MODE !== "device" ? courtIdFromPath() : null;
+  var knownCourtId = fixedCourtId;   // wird in applyState nachgezogen
+  var lastSeqByCourt = {};           // zuletzt gezeigte Ordnungszahl je Feld
+
+  /** Soll ein eintreffender Stand angewendet werden? (Spec
+   *  monitor-livestand-push, S4)
+   *
+   *  Push nur bei echt neuerer Ordnungszahl; ein Voll-Abruf darf gleichziehen
+   *  — er trägt denselben Stand, den der Nudge angekündigt hat, und darf ihn
+   *  auch dann noch berichtigen (BTP-Rückfall). `0` heißt „keine Ordnung
+   *  bekannt" (älterer Server) und blockiert nie: Eine eingefrorene Anzeige
+   *  wäre der schlimmere Fehler.
+   *
+   *  **Inline-Kopie von `src/io/monitorSeq.mjs`** — dort steht die kanonische
+   *  Fassung samt Test (`scripts/test-monitor-seq.mjs`, eigener CI-Schritt).
+   *  Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `overview.html`. */
+  function seqAnwenden(gezeigtSeq, seq, quelle) {
+    var gezeigt = Number.isFinite(gezeigtSeq) ? gezeigtSeq : 0;
+    var neu = Number.isFinite(seq) ? seq : 0;
+    if (neu <= 0) return true;
+    if (gezeigt <= 0) return true;
+    return quelle === "push" ? neu > gezeigt : neu >= gezeigt;
+  }
+
+  /** Steht die Anzeige still, ohne es zu merken?
+   *
+   *  **Inline-Kopie von `src/io/standstill.mjs`** — dort steht die kanonische
+   *  Fassung samt Begründung und Test (`scripts/test-standstill.mjs`, eigener
+   *  CI-Schritt). Änderungen hier und dort gemeinsam; dieselbe Kopie liegt in
+   *  `overview.html`. */
+  var STILLSTAND_MS = 60000;
+  function lagePruefen(zustand, nowMs) {
+    var z = zustand || {};
+    var gemeldet = z.gemeldeteArt || null;
+    var gesund = { art: null, stillMs: 0, melden: false, erholt: gemeldet !== null };
+    var start = stillZahl(z.startMs);
+    if (!start) return { art: null, stillMs: 0, melden: false, erholt: false };
+    var abruf = stillZahl(z.letzterAbrufOkMs) || start;
+    var stand = stillZahl(z.letzterStandMs) || start;
+    var ohneAbruf = nowMs - abruf;
+    var ohneStand = nowMs - stand;
+    if (ohneAbruf < 0 || ohneStand < 0) return gesund;
+    if (ohneAbruf >= STILLSTAND_MS) return stillLage("keine_abrufe", ohneAbruf, gemeldet);
+    if (ohneStand >= STILLSTAND_MS) return stillLage("verworfen", ohneStand, gemeldet);
+    return gesund;
+  }
+  function stillLage(art, stillMs, gemeldet) {
+    return { art: art, stillMs: stillMs, melden: art !== gemeldet, erholt: false };
+  }
+  function stillZahl(v) {
+    return typeof v === "number" && isFinite(v) && v > 0 ? v : 0;
+  }
+
+  // Was den nächsten Abruf ausgelöst hat (Spec monitor-livestand-push, S0).
+  // Fallen Nudge und Fallback-Takt zusammen, gewinnt "push": Der Abruf wäre
+  // durch den Nudge ohnehin gekommen.
+  //
+  // Zurückgesetzt wird beim **Start** des Fetchs, nicht an seinem Ende —
+  // sonst ginge ausgerechnet der vom Nudge angeforderte Nachschlag als
+  // "poll" hinaus (Review-Fund 19.08.2026, gleiche Stelle in overview.html).
+  var naechsteQuelle = "poll";
+  function stateUrl(quelle) {
+    return STATE_URL + (STATE_URL.indexOf("?") >= 0 ? "&" : "?") + "src=" + quelle;
+  }
+
+  // Abruf-Optionen für den STATE_URL-Fetch (Etappe ETag, 1b/1c): `cache`
+  // bleibt `no-store` (wir steuern das Caching selbst über die Marke). Mit
+  // gespeicherter Marke geht `If-None-Match` mit; der Refetch-Cap schickt
+  // ihn regelmäßig WEG, damit binnen 10 min (gesund) bzw. 60 s (ungesund)
+  // sicher ein voller 200 mit frischem `serverNowMs` kommt.
+  function abrufOptionen() {
+    var opt = { cache: "no-store" };
+    if (lastEtag && Date.now() - letzterVollerAbrufMs < refetchCap(pushGesund(kanalZustand(), Date.now()))) {
+      opt.headers = { "If-None-Match": lastEtag };
+    }
+    return opt;
+  }
+
+  function poll() {
+    // In-Flight-Schutz: Nudge und Fallback teilen sich denselben Fetch. Läuft
+    // schon einer, merken wir EINEN Nachschlag, damit am Ende sicher der
+    // neueste Stand geholt wird (kein verpasstes Update).
+    if (fetching) { refetchQueued = true; return; }
+    fetching = true;
+    // Beginn des tatsächlich losgeschickten Abrufs — daran misst der
+    // Sicherheits-Poll seinen Abstand (S6), damit ein angestoßener Abruf ihn
+    // mitzählt und in einer regen Halle kein zusätzlicher anfällt.
+    letzterAbrufMs = Date.now();
+    var quelle = naechsteQuelle;
+    naechsteQuelle = "poll";
+    fetch(stateUrl(quelle), abrufOptionen())
+      .then(function (r) {
+        if (r.status === 304) {
+          // Nichts Neues: letzten Stand behalten. Der Uhr-Offset wird aus dem
+          // 304 NICHT abgeleitet (kein Body) — frische Werte kommen über den
+          // Refetch-Cap und den Herzschlag (1c). Das Lebenszeichen läuft über
+          // den Abruf selbst und ist damit auch hier frisch.
+          return null;
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        var etag = r.headers.get("ETag");
+        if (etag) { lastEtag = etag; letzterVollerAbrufMs = Date.now(); }
+        return r.json();
+      })
+      .then(function (state) {
+        if (state === null) {
+          if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
+          lastFetchOk = true; fetchFehler = 0;
+          els.offline.classList.remove("show");
+          pollDone();
+          return;
+        }
+        if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
+        lastFetchOk = true; fetchFehler = 0;
+        letzterAbrufOkMs = Date.now();
+        els.offline.classList.remove("show");
+        applyState(state);
+        clockFeed(state.serverNowMs);
+        pollDone();
+      })
+      .catch(function () {
+        // Aussetzer tolerieren: letzten Stand halten, nur Hinweis zeigen.
+        // Ein EINZIGER Fehlversuch macht den Kanal ungesund und schaltet
+        // sofort auf den schnellen Takt zurück (S6).
+        lastFetchOk = false; fetchFehler++;
+        if (!wasOffline) { wasOffline = true; mlog("warn", "offline"); uploadMonitorLog(); }
+        els.offline.classList.add("show");
+        pollDone();
+      });
+  }
+  function pollDone() {
+    fetching = false;
+    if (refetchQueued) { refetchQueued = false; requestFetch(); }
+  }
+  var wasOffline = false; // Offline-Wechsel nur einmal loggen (nicht je Poll)
+
+  // Fetch coalescen: höchstens ~1 Fetch je COALESCE_MS, egal wie viele Nudges
+  // einschlagen. Nudge und In-Flight-Nachschlag laufen hierüber.
+  function requestFetch() {
+    var now = Date.now();
+    var wait = COALESCE_MS - (now - lastFetchStart);
+    if (wait <= 0) { lastFetchStart = now; poll(); }
+    else if (!coalesceTimer) {
+      coalesceTimer = setTimeout(function () {
+        coalesceTimer = null; lastFetchStart = Date.now(); poll();
+      }, wait);
+    }
+  }
+  // Solange der Kanal gesund ist, pausiert der Sicherheits-Poll bzw. läuft
+  // langsam. Siehe `pushGesund` oben.
+  function pushHealthy() {
+    return pushGesund(kanalZustand(), Date.now());
+  }
+
+  poll();
+
+  // Stillstands-Wächter: Stellt fest, was bisher niemand sehen konnte — eine
+  // Anzeige, die weiterläuft und trotzdem nichts Neues mehr übernimmt. Sie
+  // wirft dabei keinen Fehler und wird nicht geschlossen, fällt also durch
+  // alle drei Auslöser des Log-Uploads (JS-Fehler, unhandledrejection,
+  // pagehide). Erst dieser Takt macht den Zustand bezeugbar.
+  //
+  // Er HEILT nichts: kein Reload, kein Zurücksetzen der Ordnungszahl. Wir
+  // wissen noch nicht, woran es liegt, und eine Selbstheilung würde genau die
+  // Spur verwischen, wegen der er gebaut wurde.
+  //
+  // 10-s-Takt gegen eine 60-s-Schwelle: fein genug, um den Beginn auf zehn
+  // Sekunden genau zu datieren, und billig genug, um nicht ins Gewicht zu
+  // fallen.
+  setInterval(function () {
+    var jetzt = Date.now();
+    var lage = lagePruefen({
+      startMs: seitStartMs,
+      letzterAbrufOkMs: letzterAbrufOkMs,
+      letzterStandMs: letzterStandMs,
+      gemeldeteArt: gemeldeteStillstandsArt,
+    }, jetzt);
+    if (lage.melden) {
+      gemeldeteStillstandsArt = lage.art;
+      // Alles, was zur Eingrenzung taugt, in EINER Zeile — wer das Log liest,
+      // hat kein zweites Gerät daneben.
+      mlog("error", "stillstand", {
+        art: lage.art,
+        stillMs: lage.stillMs,
+        verworfen: verworfeneStaende,
+        wsOpen: mwsOpen,
+        frameAltMs: lastServerFrameAt ? jetzt - lastServerFrameAt : null,
+        fetchOk: lastFetchOk,
+        fetchFehler: fetchFehler,
+        taktMs: fallbackTakt(pushHealthy(), langsamErlaubt),
+        feld: knownCourtId,
+        gezeigteSeq: (knownCourtId && lastSeqByCourt[knownCourtId]) || 0,
+        modus: MODE,
+      });
+      uploadMonitorLog();
+    } else if (lage.erholt) {
+      gemeldeteStillstandsArt = null;
+      mlog("info", "stillstand_vorbei", { verworfen: verworfeneStaende });
+      uploadMonitorLog();
+    }
+  }, 10000);
+
+  // Sicherheits-Poll (Spec monitor-livestand-push, S6). 250-ms-Raster, bei
+  // jedem Tick neu entschieden, wie lange die Seite ohne eigenen Abruf
+  // auskommen darf: Kanal ungesund → 250 ms wie bisher; gesund und Schalter
+  // gesetzt → 4 s; gesund ohne Schalter → weiterhin 250 ms.
+  //
+  // **Er hört nie ganz auf.** An diesem einen Abruf hängt hier alles: das
+  // Lebenszeichen des Geräts (`record_monitor_poll`, 20-s-Fenster), die
+  // Fernbefehle, `redirectTo` und die Geräte→Feld-Zuweisung. Nichts davon
+  // wird angestoßen. Setzte die Seite bei gesundem Kanal aus, erschiene ein
+  // Gerät nach 20 s offline, erführe eine Umzuweisung nie und käme in einer
+  // ruhigen Halle nicht einmal von der Kopplungs-Seite herunter
+  // (Review-Fund 19.08.2026).
+  //
+  // Bleibt der Herzschlag länger als 25 s aus, gilt der Kanal als tot und
+  // die Verbindung wird aktiv getrennt, damit der Reconnect greift.
+  setInterval(function () {
+    var jetzt = Date.now();
+    // `|| mwsOffenSeitMs`: Eine Leitung, die seit dem Verbinden NIE etwas
+    // geliefert hat (WLAN-Roam direkt nach dem Handschlag), stünde sonst für
+    // immer auf 0 — und 0 heißt „hat sich noch nicht bewährt", also
+    // niemals tot. Sie bliebe dauerhaft im schnellen Takt hängen
+    // (Review-Fund 19.08.2026).
+    if (kanalIstTot(mwsOpen, lastServerFrameAt || mwsOffenSeitMs, jetzt)) {
+      mlog("warn", "mws_stale_close", { stillMs: jetzt - (lastServerFrameAt || mwsOffenSeitMs) });
+      mwsTrennen();
+    }
+    var takt = fallbackTakt(pushGesund(kanalZustand(), jetzt), langsamErlaubt);
+    if (jetzt - letzterAbrufMs >= takt) poll();
+  }, FALLBACK_SCHNELL_MS);
+
+  // ── Monitor-WS-Nudge-Client (A1, ADR 0016) ────────────────────────────
+  // Der Server schickt nur „Feld X geändert, seq N" (keine Score-Daten); wir
+  // lösen daraufhin den bestehenden STATE_URL-Fetch aus. WS-URL wie beim
+  // Tablet aus BASE + location.protocol (ws/wss laufen durch den Proxy):
+  //   LAN   ws://host/monitor-ws
+  //   Cloud wss://badhub.de/bts-relay/{ns}/monitor-ws
+  // Fester Monitor abonniert nur sein Feld (?court=), der Geräte-Monitor
+  // alle Felder und filtert clientseitig (Feld kann per Reassignment wechseln
+  // und ist anfangs unbekannt).
+  function monitorWsUrl() {
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    var q = (MODE !== "device" && fixedCourtId != null)
+      ? "?court=" + fixedCourtId : "";
+    return proto + location.host + BASE + "monitor-ws" + q;
+  }
+  var mws = null;
+  var mwsBackoff = 1000, MWS_BACKOFF_MAX = 15000, mwsNextAt = 0;
+  function mwsConnect() {
+    if (mws && mws.readyState !== WebSocket.CLOSED) return; // verbindet/verbunden
+    try { mws = new WebSocket(monitorWsUrl()); }
+    catch (e) { mwsSchedule(); return; }
+    mws.onopen = function () {
+      mwsOpen = true; mwsBackoff = 1000;
+      // Nach Server-/Relay-Neustart springt die seq wieder auf 0. Der alte
+      // lastSeq-Höchstwert würde dann JEDEN neuen Nudge als „veraltet"
+      // verwerfen, bis der Server den alten Wert überholt → Anzeige hängt.
+      // Darum je frischer Verbindung zurücksetzen (innerhalb einer Verbindung
+      // ist der Guard dank TCP-Ordnung ohnehin redundant).
+      lastSeqByCourt = {};
+      // Die frische Verbindung hat sich noch nicht bewährt: 0 heißt „noch
+      // kein Frame" — nicht gesund, aber auch nicht tot. Bliebe der alte,
+      // über 25 s alte Zeitpunkt stehen, erklärte der nächste Tick den eben
+      // verbundenen Socket sofort wieder für tot (Review-Fund 19.08.2026).
+      lastServerFrameAt = 0;
+      mwsOffenSeitMs = Date.now();
+      mlog("info", "mws_open");
+    };
+    mws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      // **Jedes** Frame vom Server beweist, dass der Kanal lebt — auch der
+      // Herzschlag, der gar keine Nachricht über ein Feld ist (Spec
+      // monitor-livestand-push, S6).
+      lastServerFrameAt = Date.now();
+      // Der Herzschlag trägt die Server-Zeit (`{"hb":<nowMs>}`) — die zweite
+      // Uhr-Quelle (Etappe ETag, 1c): Zwischen vollen 200-Abrufen bleibt der
+      // Uhr-Offset damit frisch, auch über eine lange 304-Serie.
+      if (typeof msg.hb === "number") clockFeed(msg.hb);
+      if (typeof msg.court !== "number" || typeof msg.seq !== "number") return;
+      // Veraltete/doppelte Nudges verwerfen (Spec monitor-livestand-push, S4).
+      if (!seqAnwenden(lastSeqByCourt[msg.court] || 0, msg.seq, "push")) return;
+      lastSeqByCourt[msg.court] = msg.seq;
+      // Fetch, wenn es unser Feld ist ODER das Feld noch unbekannt ist —
+      // solange es unbekannt ist, muss der Poll für die Zuweisung
+      // weiterlaufen. Die Gesundheit des Kanals hängt seit S6 nicht mehr an
+      // diesem Anstoß, sondern am Herzschlag (oben gesetzt).
+      if (knownCourtId == null || msg.court === knownCourtId) {
+        naechsteQuelle = "push";
+        requestFetch();
+      }
+    };
+    mws.onclose = function () { mwsOpen = false; mwsSchedule(); };
+    mws.onerror = function () { /* onclose folgt und plant den Reconnect */ };
+  }
+  // Aktives Trennen bei totem Kanal (S6). `close()` allein genügt nicht: Ein
+  // schwarzlochender Socket hängt danach bis zum Handshake-Timeout des
+  // Browsers in CLOSING, und der Wächter unten verbindet nur bei CLOSED neu.
+  // Deshalb Ereignisse abhängen, Referenz freigeben und den Reconnect selbst
+  // planen — sonst meldete das späte `onclose` des alten Sockets
+  // `mwsOpen = false` für den längst neuen.
+  function mwsTrennen() {
+    var alt = mws;
+    mws = null;
+    mwsOpen = false;
+    if (alt) {
+      alt.onopen = null; alt.onmessage = null; alt.onclose = null; alt.onerror = null;
+      try { alt.close(); } catch (e) { /* egal, die Referenz ist weg */ }
+    }
+    lastServerFrameAt = 0;
+    mwsOffenSeitMs = 0;
+    mwsSchedule();
+  }
+  function mwsSchedule() {
+    // Exponentielles Backoff – schont im Cloud-Modus den Relay, wenn noch kein
+    // Host verbunden ist (Namespace existiert dann nicht → sofortiger Close).
+    // Der Poll-Fallback überbrückt die Zeit bis zum Host.
+    mwsNextAt = Date.now() + mwsBackoff;
+    mwsBackoff = Math.min(MWS_BACKOFF_MAX, mwsBackoff * 2);
+  }
+  // Watchdog: einziger Reconnect-Treiber (Muster aus tablet.html). Verbindet
+  // neu, sobald der Socket fehlt/geschlossen ist und das Backoff-Fenster
+  // abgelaufen ist. Stille allein ist am Monitor weiterhin normal (ein Nudge
+  // kommt nur bei Score-Änderung) — seit S6 unterscheidet aber der Herzschlag
+  // Stille von einem toten Kanal, und dann trennt `mwsTrennen()` im
+  // Sicherheits-Poll oben aktiv; es setzt `mws` auf null, sodass hier sofort
+  // der `!mws`-Zweig greift.
+  setInterval(function () {
+    if ((!mws || mws.readyState === WebSocket.CLOSED) && Date.now() >= mwsNextAt) {
+      mwsConnect();
+    }
+  }, 2000);
+  mwsConnect();
+  </script>
+</body>
+</html>

@@ -284,6 +284,7 @@ export interface CourtAd {
  *  Werbung (Rust: relay_proto::MonitorTarget). */
 export type MonitorTarget =
   | { kind: "court"; court_id: number }
+  | { kind: "court_tafel"; court_id: number }
   | { kind: "info_overview"; hall?: string | null }
   | { kind: "info_preparation" }
   | { kind: "info_winners"; rank?: number | null }

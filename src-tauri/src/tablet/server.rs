@@ -578,6 +578,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/felder", get(lobby_page))
         .route("/court/{id}/display", get(monitor_page))
         .route("/court/{id}/state", get(monitor_state))
+        .route("/court/{id}/tafel", get(tafel_page))
         .route("/monitor", get(monitor_device_page))
         .route("/monitor/state", get(monitor_device_state))
         .route("/qr/{id}", get(qr_svg))
@@ -1497,6 +1498,41 @@ async fn monitor_device_page() -> impl IntoResponse {
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
+/// Rendert `tafel.html` mit den Platzhaltern (wie [`render_monitor_html`]).
+fn render_tafel_html(mode: &str, base: &str, court_label: &str) -> String {
+    assets::TAFEL_HTML
+        .replace("__MODE__", mode)
+        .replace("__BASE__", base)
+        .replace("__COURT_LABEL__", &html_escape(court_label))
+}
+
+/// Liefert die Zähltafel für ein Feld (`/court/{id}/tafel`, per CourtID).
+/// Fester Modus; mit `?device=` läuft dieselbe Seite als zugewiesenes
+/// Gerät (die Seite selbst erkennt das nicht am Modus, sondern der
+/// Geräte-State leitet sie hierher — siehe `monitor_device_state`).
+async fn tafel_page(
+    State(ctx): State<Arc<ServerCtx>>,
+    Path(court_id): Path<i64>,
+    Query(q): Query<TafelQuery>,
+) -> impl IntoResponse {
+    let label = court_label_for(&ctx, court_id);
+    let mode = if q.device.as_deref().is_some_and(|d| !d.is_empty()) {
+        "device"
+    } else {
+        "fixed"
+    };
+    tracing::info!("Zähltafel ausgeliefert für Feld {court_id} ('{label}', {mode})");
+    let body = render_tafel_html(mode, "/", &label);
+    ([(header::CACHE_CONTROL, "no-store")], Html(body))
+}
+
+/// Query der Tafel-Seite: `device` schaltet in den Gerätemodus.
+#[derive(serde::Deserialize, Default)]
+struct TafelQuery {
+    #[serde(default)]
+    device: Option<String>,
+}
+
 /// Anzeige-Zustand eines fest verdrahteten Feldes (per CourtID), im
 /// Sekundentakt gepollt.
 async fn monitor_state(
@@ -1578,14 +1614,22 @@ async fn monitor_device_state(
     }
     let command = ctx.tablet.record_monitor_poll(&device);
     let assignment = ctx.monitor_assignments().get(&device).cloned();
+    // Zähltafel (ADR 0055): voller Feld-Stand wie beim Feld-Monitor PLUS
+    // Umleitung. `/monitor` springt damit auf die Tafel; die Tafel selbst
+    // vergleicht den Pfad, bleibt und liest den Stand aus derselben Antwort.
+    let ist_tafel = matches!(
+        assignment,
+        Some(relay_proto::MonitorTarget::CourtTafel { .. })
+    );
     let mut state = match assignment {
-        Some(relay_proto::MonitorTarget::Court { court_id }) => {
+        Some(relay_proto::MonitorTarget::Court { court_id })
+        | Some(relay_proto::MonitorTarget::CourtTafel { court_id }) => {
             let label = court_label_for(&ctx, court_id);
             let court_data = ctx.tablet.monitor_court(court_id);
             // Wie in `monitor_state`: eine Config ohne Kopie, Werbebilder
             // aus dem Zwischenstand.
             let cfg = ctx.app_config_arc();
-            monitor::build_monitor_state(
+            let mut s = monitor::build_monitor_state(
                 court_id,
                 label,
                 hall_color_for(&ctx, &cfg, court_id),
@@ -1600,11 +1644,18 @@ async fn monitor_device_state(
                         ids,
                     }
                 },
-            )
+            );
+            if ist_tafel {
+                s.redirect_to = Some(format!("/court/{court_id}/tafel"));
+            }
+            s
         }
         // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
         // Anzeige-HTML umleiten. Wir liefern einen minimalen MonitorState
-        // mit `redirect_to`; die monitor.html springt darauf.
+        // mit `redirect_to`; die monitor.html springt darauf. `CourtTafel`
+        // liefert formal ebenfalls ein `redirect_path()` (ADR 0055), landet
+        // hier aber nie — der Match-Arm oben fängt sie zuerst ab, bewusst:
+        // Die Tafel braucht den vollen Feld-Stand, nicht nur die Umleitung.
         Some(ref target) if target.redirect_path().is_some() => {
             let mut s = monitor::unassigned_monitor_state(&device);
             s.unassigned = false;
@@ -7153,6 +7204,55 @@ mod tests {
         assert_eq!(s.court_state_push, 1);
         assert_eq!(s.court_state_poll, 1);
         assert!(s.court_state_push_bytes > 0 && s.court_state_poll_bytes > 0);
+    }
+
+    #[test]
+    fn tafel_seite_ersetzt_alle_platzhalter() {
+        // Spec zaehltafel-anzeige-huelle: dieselben Platzhalter wie monitor.html.
+        let html = render_tafel_html("fixed", "/", "Feld <3>");
+        assert!(html.contains(r#"var MODE = "fixed";"#));
+        assert!(html.contains(r#"var BASE = "/";"#));
+        assert!(html.contains("Feld &lt;3&gt;"), "Label HTML-escaped");
+        assert!(
+            !html.contains("__MODE__")
+                && !html.contains("__BASE__")
+                && !html.contains("__COURT_LABEL__")
+        );
+    }
+
+    #[tokio::test]
+    async fn tafel_zuweisung_liefert_feldstand_und_umleitung() {
+        // ADR 0055: Ein Gerät mit Zuweisung „Zähltafel – Feld 101" bekommt den
+        // VOLLEN Feld-Stand (die Tafel liest ihn über monitor/state?device=)
+        // plus redirectTo, damit /monitor auf die Tafel springt und die
+        // Tafel selbst (Pfad passt) bleibt.
+        let mut ctx = make_ctx(1);
+        let dir = tempfile::tempdir().unwrap();
+        ctx.assignments_path = dir.path().join("assign.json");
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "pi-t".to_string(),
+            relay_proto::MonitorTarget::court_tafel(101),
+        );
+        monitor::write_assignments(&ctx.assignments_path, &map).unwrap();
+        let ctx = Arc::new(ctx);
+        let r = monitor_device_state(
+            State(ctx),
+            Query(DeviceQuery {
+                device: "pi-t".to_string(),
+                src: None,
+            }),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        assert_eq!(r.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["courtId"], serde_json::json!(101));
+        assert_eq!(v["redirectTo"], serde_json::json!("/court/101/tafel"));
+        assert_eq!(v["unassigned"], serde_json::json!(false));
+        assert!(v["match"].is_object(), "Feld-Stand reist mit");
     }
 
     #[tokio::test]
