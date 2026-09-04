@@ -195,9 +195,7 @@ Azure-/Web-Speech-Stimme, ohne Audio-Übertragung.
 - **UI:** Schalter „Ansage-Slave-Modus" oben im SetupWizard.
 - **Architektur:** genau **ein Master** (mit BTP-Steuerung: Vergabe + Push);
   beliebig viele Slaves (read-only). Voraussetzung: der Slave erreicht den
-  BTP-Rechner im selben Netz (LAN/WLAN). Die Zähltafel (`/court/{id}/tafel`)
-  läuft über denselben `router()` — die ferne Halle liefert sie nur mit
-  derselben App-Version wie der Master.
+  BTP-Rechner im selben Netz (LAN/WLAN).
 - **Mischbetrieb der Versionsstände** (seit v0.9.230): Im
   Auto-Update-Fenster steht ein Master mit neuerem Stand neben einem Slave
   mit älterem. Erteilt der Master eine Ansageart, die der Slave nicht
@@ -350,6 +348,12 @@ Master-Cloud-Monitor zeigen, betreibt der Cloud-Slave eine **Monitor-Brücke**
   Netze) — nur dann gibt es keinen `bts-light.local`-Konflikt mit dem
   Master. Bei einer gebrückten Topologie (Site-to-Site-VPN, gemeinsames
   L2) wäre das eine bekannte Grenze.
+
+Die **Zähltafel** (`/court/{id}/tafel`, Spec
+[features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md)) ist in der
+Brücke **nicht** enthalten. Eine Tafel in der fernen Halle nutzt die Cloud-Adresse des
+Masters (`…/bts-relay/<ns>/court/<id>/tafel`); die Brücke um die Tafel-Route zu erweitern
+ist ein eigener, noch offener Punkt.
 
 Gestartet in `commands.rs::start_sync` nur bei gültigem `master_namespace`,
 beendet in `stop_sync`. **Tablets bleiben Direkt-Cloud** (Weg A) — die Brücke

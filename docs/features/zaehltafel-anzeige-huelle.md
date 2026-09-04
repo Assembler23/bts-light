@@ -295,8 +295,8 @@ Zuweisung:
 - `docs/court-monitor.md` — Tafel-Layout, Betriebsarten, Zuweisungsziel „Zähltafel".
 - `docs/tablet.md` — Menüeintrag, Overlay-Knopf, Anzeige-Hülle (Bedienung, PIN, Wake-Lock-Grenze).
 - `docs/cloud-relay.md` — neue Routen, `court_tafel` auf der Wire-Ebene, Deploy-Reihenfolge.
-- `docs/multi-hall.md` — ein Satz: ferne Halle (Slave) liefert die Tafel nur mit gleicher
-  App-Version.
+- `docs/multi-hall.md` — ein Absatz: die Slave-Monitor-Brücke liefert die Tafel nicht;
+  ferne Halle nutzt die Cloud-Adresse des Masters.
 - `docs/changelog.md`, `docs/roadmap.md`, diese Spec, ADR 0055.
 - `CLAUDE.md`-Tabelle: neue Zeile „Zähltafel + Anzeige-Hülle" mit den Code-Pfaden oben.
 

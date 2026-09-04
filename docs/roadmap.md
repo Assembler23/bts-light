@@ -313,6 +313,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Einstiege im Zahnrad-Menü und im Belegt-Overlay des Zähl-Tablets. Zwei PRs
   (Tafel + Ziel, dann Hülle). Feldtest auf iPad ist Abnahmekriterium (iframe).
   PR 1 (Tafel + Zuweisungsziel) umgesetzt in v0.9.274, PR 2 (Hülle) offen.
+  Offen außerdem: Tafel-Route in der Slave-Monitor-Brücke (`slave_bridge.rs`).
 
 - **Kombi-Ausrichtung je Monitor (v0.9.270)** — ob die Felder einer
   Kombi-Anzeige über- oder nebeneinander stehen, wird **je TV** im bestehenden
