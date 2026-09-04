@@ -1,6 +1,7 @@
 # Zähltafel fürs Tablet + Anzeige-Hülle — Spezifikation
 
-> Status: **freigegeben 2026-09-04** (via Brief → Grill → How-To → Review).
+> Status: **freigegeben 2026-09-04 · PR 1 (Tafel + Zuweisungsziel) umgesetzt 2026-09-04**
+> (via Brief → Grill → How-To → Review).
 > Quelle: Idee vom 04.09.2026. Betroffene Crates: `src-tauri/` (Assets, Server, Monitor-Zuweisung),
 > `relay/` (Routen, Umleitung), `relay-proto/` (`MonitorTarget`), `src/` (Court-Monitor-Panel,
 > `io/`-Module).
@@ -110,11 +111,12 @@ Erfolgskriterien beim nächsten Turnier:
 ### Tafel-Layout (`tafel.html`)
 
 - **Betriebsarten** wie `monitor.html`: `fixed` (Aufruf über die Hülle oder direkt) und `device`
-  (`?device=…`, nach Umleitung durch die Zuweisung). Im Gerätemodus übernimmt die Tafel den
-  Block `checkReassignment` aus `overview.html` **unverändert**: Poll `monitor/state?device=…&src=check`
-  im **1-Sekunden-Takt** (Heartbeat für den Online-Status, Online-Fenster 20 s), Vergleich
-  `currentUrlMatches`, Entprellung der Abmeldung, `handleCommand` für „Identifizieren"
-  (Code + Feld groß einblenden) und „Neu laden".
+  (`?device=…`, nach Umleitung durch die Zuweisung). Im Gerätemodus liest die Tafel — wie
+  `monitor.html` im Gerätemodus — `monitor/state?device=…` im Sekundentakt (Heartbeat,
+  Online-Fenster 20 s, Fernbefehle „Identifizieren"/„Neu laden"). Der Host liefert für
+  `CourtTafel` den **vollen Feld-Stand plus `redirectTo = /court/{id}/tafel`**; die Tafel
+  vergleicht den Pfad, bleibt und rendert aus derselben Antwort. Fehlt `redirectTo` (Zuweisung
+  geändert), geht sie nach drei Polls (Entprellung wie `overview.html`) zurück auf `/monitor`.
 - **Datenweg** wie `monitor.html`: `…/court/{id}/state` als einzige Datenquelle, WS-Nudge über
   `monitor-ws?court={id}`, `kanalIstTot`-Erkennung, Fallback-Poll, `seq`-Guard gegen
   Rückwärtssprünge, ETag/304. Dieser Verbindungsblock wird **unverändert** übernommen.

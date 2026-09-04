@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.274
+
+- **Neu: Zähltafel-Layout.** Unter `…/court/<Feld>/tafel` zeigt eine Seite
+  nur den Spielstand — zwei große Punktzahlen, der Satzstand klein darüber,
+  ein Aufschlag-Punkt — ohne Namen, wie eine klassische Zähltafel. Gedacht für
+  ein Tablet am Netz; als Court-Monitor-Zuweisung „Zähltafel – Feld X" läuft
+  sie auch auf den TVs. Seiten folgen dem Zähl-Tablet, `?spiegel=1` dreht sie.
+  Spec `docs/features/zaehltafel-anzeige-huelle.md`, ADR 0055. Die Tablet-Hülle
+  mit Zahnrad-Menü folgt in einer eigenen Version.
+
 ## v0.9.273
 
 - **Neu: Spiele mit noch offener Paarung in der Turnierleitungs-Liste.**

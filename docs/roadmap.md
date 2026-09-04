@@ -301,6 +301,19 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Zähltafel fürs Tablet + Anzeige-Hülle** — Spec:
+  [features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
+  ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md).
+  Aus der Idee vom 04.09.2026: ein zweites Tablet am Feld zeigt nur den
+  Spielstand — zwei große Punktzahlen, Satzstand klein, Aufschlag-Punkt —
+  ohne das zählende Tablet zu stören. Reines Tafel-Layout `tafel.html`
+  (`/court/{id}/tafel`, auch als Court-Monitor-Zuweisung „Zähltafel – Feld X")
+  plus Tablet-Hülle `anzeige.html` mit Zahnrad/PIN, Layout-Wahl (Tafel,
+  Feld-Monitor, Übersicht, Vorbereitung), Spiegeln, Feldwechsel, Wake-Lock.
+  Einstiege im Zahnrad-Menü und im Belegt-Overlay des Zähl-Tablets. Zwei PRs
+  (Tafel + Ziel, dann Hülle). Feldtest auf iPad ist Abnahmekriterium (iframe).
+  PR 1 (Tafel + Zuweisungsziel) umgesetzt in v0.9.274, PR 2 (Hülle) offen.
+
 - **Kombi-Ausrichtung je Monitor (v0.9.270)** — ob die Felder einer
   Kombi-Anzeige über- oder nebeneinander stehen, wird **je TV** im bestehenden
   Kombi-Dialog gewählt statt global im Setup; der globale Schalter
@@ -410,18 +423,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   5. **Sichtprüfung der Geräteverwaltung** im laufenden Fenster.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
-
-- **Zähltafel fürs Tablet + Anzeige-Hülle** — Spec:
-  [features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
-  ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md).
-  Aus der Idee vom 04.09.2026: ein zweites Tablet am Feld zeigt nur den
-  Spielstand — zwei große Punktzahlen, Satzstand klein, Aufschlag-Punkt —
-  ohne das zählende Tablet zu stören. Reines Tafel-Layout `tafel.html`
-  (`/court/{id}/tafel`, auch als Court-Monitor-Zuweisung „Zähltafel – Feld X")
-  plus Tablet-Hülle `anzeige.html` mit Zahnrad/PIN, Layout-Wahl (Tafel,
-  Feld-Monitor, Übersicht, Vorbereitung), Spiegeln, Feldwechsel, Wake-Lock.
-  Einstiege im Zahnrad-Menü und im Belegt-Overlay des Zähl-Tablets. Zwei PRs
-  (Tafel + Ziel, dann Hülle). Feldtest auf iPad ist Abnahmekriterium (iframe).
 
 - **Offene Paarungen in der TL-Spielliste** — Spec:
   [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md),

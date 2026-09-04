@@ -195,7 +195,9 @@ Azure-/Web-Speech-Stimme, ohne Audio-Übertragung.
 - **UI:** Schalter „Ansage-Slave-Modus" oben im SetupWizard.
 - **Architektur:** genau **ein Master** (mit BTP-Steuerung: Vergabe + Push);
   beliebig viele Slaves (read-only). Voraussetzung: der Slave erreicht den
-  BTP-Rechner im selben Netz (LAN/WLAN).
+  BTP-Rechner im selben Netz (LAN/WLAN). Die Zähltafel (`/court/{id}/tafel`)
+  läuft über denselben `router()` — die ferne Halle liefert sie nur mit
+  derselben App-Version wie der Master.
 - **Mischbetrieb der Versionsstände** (seit v0.9.230): Im
   Auto-Update-Fenster steht ein Master mit neuerem Stand neben einem Slave
   mit älterem. Erteilt der Master eine Ansageart, die der Slave nicht
