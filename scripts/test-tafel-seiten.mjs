@@ -61,6 +61,9 @@ ok("finished ohne Geistersatz: letzter Satz zählt trotzdem",
 ok("retired: letzter Satz 11:9 groß, Satzstand nur aus fertigen Sätzen",
   tafelSeiten([{ a: 21, b: 18 }, { a: 11, b: 9 }], { finished: true, retired: true, retiredWinner: "a" }, false),
   { links: seite(11, 1, false), rechts: seite(9, 0, false), entschieden: true });
+ok("retired in der Satzpause: 0:0 groß, fertiger Satz zählt (1:0)",
+  tafelSeiten([{ a: 21, b: 18 }, { a: 0, b: 0 }], { finished: true, retired: true, retiredWinner: "a" }, false),
+  { links: seite(0, 1, false), rechts: seite(0, 0, false), entschieden: true });
 
 // ── Unfug schadet nicht ───────────────────────────────────────────────────
 ok("leere Satzliste: 0:0, Satzstand 0:0",

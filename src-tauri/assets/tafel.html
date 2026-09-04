@@ -305,7 +305,10 @@
    *  - Seiten aus `courtState.teamOnSide` (`a: "left"|"right"`). Fehlt es (vor
    *    der Seitenwahl, oder gar kein zählendes Tablet), steht **Team 1 links**.
    *  - Aufschlag aus `serving.team`; sonst Rückfall auf `servingSide` +
-   *    `teamOnSide` (wie monitor.html). Ohne beides: kein Punkt. Nach der
+   *    `teamOnSide` (wie monitor.html). **`teamOnSide` ist in beiden Zweigen
+   *    Pflicht** — ohne es nie ein Punkt, auch wenn `serving.team` gesetzt
+   *    ist: anders als `servingInfo` in monitor.html ordnet die Tafel den
+   *    Punkt einer SEITE zu und müsste ohne Seiteninfo raten. Nach der
    *    Entscheidung nie ein Punkt.
    *  - `finished`: ein nachgestellter 0:0-Geistersatz fällt weg, der letzte
    *    gespielte Satz steht groß **und** zählt im Satzstand.
@@ -334,10 +337,12 @@
       ? sets.map((s) => ({ a: zahl(s && s.a), b: zahl(s && s.b) }))
       : [];
 
-    // Geistersatz nur im entschiedenen Spiel streichen — im laufenden ist
-    // 0:0 der echte Beginn eines Satzes.
+    // Geistersatz nur bei regulärem Spielende streichen — im laufenden Spiel
+    // ist 0:0 der echte Beginn eines Satzes. Bei Aufgabe (`retired`) ist der
+    // letzte Eintrag — auch ein 0:0 in der Satzpause — der unvollständige
+    // Satz, der groß steht und nicht zählt; der bleibt also stehen.
     const gespielt = roh.slice();
-    if (finished) {
+    if (finished && !retired) {
       while (gespielt.length > 1) {
         const l = gespielt[gespielt.length - 1];
         if (l.a === 0 && l.b === 0) gespielt.pop();

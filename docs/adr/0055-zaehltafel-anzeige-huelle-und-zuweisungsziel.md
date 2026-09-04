@@ -63,10 +63,12 @@ Attribut von `Court` zu pressen hätte den Feld-Monitor mit einem zweiten Zustan
 - Zwei neue Assets, zwei neue Routen in LAN und Relay; keine Config-Felder.
 - Nach einem **Downgrade** stehen Tafel-TVs auf der Kopplungsseite und müssen neu zugewiesen
   werden; alle anderen Zuweisungen bleiben.
-- Ein **altes Relay** lehnt den gesamten Zuweisungs-Upload mit unbekanntem `kind` ab (422). Die
-  Regel „Relay-Deploy beim Merge, App-Tag danach" deckt das; ein Relay-Rollback nicht.
-- Weil `court_id()` das Feld liefert, zeigt ein altes Relay einem Tafel-Gerät notfalls den
-  Feld-Monitor mit Namen statt der Tafel — degradiert, nicht kaputt.
+- Ein **altes Relay** lehnt den gesamten Zuweisungs-Upload mit unbekanntem `kind` ab (422): Der
+  Host lädt `assignments` und `targets` in einem Body hoch (`relay_client.rs`), also sieht das
+  alte Relay die CourtID-Karte der Tafel nie und behält den zuletzt akzeptierten Stand — **für
+  alle Geräte**. Neue Zuweisungen und Fernbefehle des ganzen Turniers frieren ein, solange
+  irgendein Gerät auf `court_tafel` steht, nicht nur die Tafel selbst. Die Regel „Relay-Deploy
+  beim Merge, App-Tag danach" deckt das; ein Relay-Rollback nicht.
 - Der iframe-Weg hängt an Safari: Der iPad-Feldtest ist Abnahmekriterium; Rückfall ist ein Menü
   direkt in `tafel.html`.
 - Das Belegt-Overlay bleibt der einzige Übernahme-Weg; Hülle und Tafel öffnen nie `/ws`.

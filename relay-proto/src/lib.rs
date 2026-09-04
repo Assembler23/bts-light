@@ -399,10 +399,10 @@ impl MonitorTarget {
     }
 
     /// CourtID, falls dieses Target an EINEM Feld hängt (Feld-Monitor oder
-    /// Zähltafel); sonst `None`. Für die Zähltafel bewusst gesetzt: So zeigt
-    /// die Geräteliste Feld + Halle, und ein altes Relay (kennt nur
-    /// `assignments` mit CourtIDs) zeigt dem Gerät den Feld-Monitor statt
-    /// der Kopplungsseite (ADR 0055).
+    /// Zähltafel); sonst `None`. Für die Zähltafel bewusst gesetzt: So zeigen
+    /// Geräteliste und Panel Feld + Halle wie bei einem Feld-Gerät (ADR 0055).
+    /// Ein altes Relay bekommt diesen Fall nie zu sehen — es lehnt den
+    /// gesamten Zuweisungs-Upload mit unbekanntem `kind` schon vorher ab.
     pub fn court_id(&self) -> Option<i64> {
         match self {
             Self::Court { court_id } | Self::CourtTafel { court_id } => Some(*court_id),
@@ -5309,7 +5309,10 @@ mod tests {
         let t = MonitorTarget::court_tafel(7);
         assert_eq!(t.redirect_path().as_deref(), Some("/court/7/tafel"));
         // Das Feld reist mit: Panel zeigt Feldname/Halle wie bei einem
-        // Feld-Monitor; ein altes Relay degradiert zur Feld-Anzeige (ADR 0055).
+        // Feld-Monitor. Ein altes Relay lehnt den gesamten Zuweisungs-Upload
+        // mit unbekanntem `kind` ab (422) — keine Degradierung je Gerät,
+        // sondern eingefrorene Zuweisungen/Fernbefehle fürs ganze Turnier
+        // (ADR 0055).
         assert_eq!(t.court_id(), Some(7));
         assert_eq!(t.kind_str(), "court_tafel");
     }

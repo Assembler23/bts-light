@@ -96,8 +96,9 @@ Erfolgskriterien beim nächsten Turnier:
   verwirft `read_assignments` unbekannte Varianten still** (Befund ADR 0049): Nach einem Downgrade
   stehen Tafel-TVs auf der Kopplungsseite und müssen neu zugewiesen werden. Bewusst akzeptiert,
   siehe ADR 0055. Ein **altes Relay** lehnt den gesamten Zuweisungs-Upload mit unbekanntem `kind`
-  ab (422); die Regel „Relay-Deploy beim Merge, App-Tag danach" deckt das, ein Relay-Rollback
-  nicht. `identifier` und Updater-Pfad bleiben unangetastet.
+  ab (422); weil Host `assignments` und `targets` in einem Body hochlädt, frieren dabei **alle**
+  Zuweisungen und Fernbefehle des Turniers ein, nicht nur die Tafel. Die Regel „Relay-Deploy beim
+  Merge, App-Tag danach" deckt das, ein Relay-Rollback nicht. `identifier` und Updater-Pfad bleiben unangetastet.
 - **Datenschutz:** Die Tafel zeigt keine Namen. Die Feldwahl der Hülle nutzt `/courts`, das wie
   heute die Paarung des laufenden Spiels enthält; die eingebetteten Layouts sind bestehende freie
   Anzeige-Routen. **Keine neue Exposition**, aber auch keine Verringerung. Kein Geburtsjahr.
@@ -137,9 +138,10 @@ Erfolgskriterien beim nächsten Turnier:
   - **Kein Spiel** (`match` fehlt): `leer = true`, die Tafel zeigt groß die Feldbezeichnung
     (`courtLabel`; im Relay ohne verbundenen Host ist das Label leer → Fallback CourtID aus dem
     Pfad).
-- **Spiegeln** kommt als Query `?spiegel=1` von der Hülle. Im Gerätemodus wird `spiegel`
-  ignoriert und beim URL-Vergleich in `currentUrlMatches` zusätzlich gestrichen (sonst
-  Redirect-Schleife, Befund ADR 0049).
+- **Spiegeln** kommt als Query `?spiegel=1` von der Hülle. Im Gerätemodus wirkt `spiegel` nicht
+  und löst keine Redirect-Schleife aus: `tafel.html` vergleicht beim Umleitungs-Check nur
+  `location.pathname !== dest` — die Query fällt bei diesem Vergleich ohnehin weg, ein
+  gesondertes Streichen von `spiegel` ist nicht nötig (Befund ADR 0049).
 - **Verbindung weg** (Host/Relay nicht erreichbar): Offline-Marke wie `monitor.html`, letzter
   Stand bleibt sichtbar.
 - **Layout:** Quer- und Hochformat, Ziffern nebeneinander, Ziffernhöhe ≥ 35 vmin; alles in
@@ -185,8 +187,9 @@ Erfolgskriterien beim nächsten Turnier:
   `{"kind":"court_tafel","court_id":3}`.
 - `redirect_path()` → `Some("/court/3/tafel")`; `court_id()` → `Some(3)`, damit
   `build_device_list` Feldname und Halle liefert und das Panel das Gerät wie ein Feld-Gerät
-  einsortiert. Folge am **alten** Relay: es kennt nur die Feld-ID und zeigt dem Gerät den
-  Feld-Monitor mit Namen — akzeptiert, weil das Relay beim Merge vor dem App-Tag deployt.
+  einsortiert. Ein **altes** Relay bekommt die CourtID der Tafel nie zu sehen: Es lehnt den
+  gesamten Zuweisungs-Upload (`assignments` + `targets` in einem Body) mit unbekanntem `kind`
+  ab (422) — akzeptiert, weil das Relay beim Merge vor dem App-Tag deployt.
 - LAN: die Umleitung greift generisch (`server.rs` behandelt nur `Court` gesondert). Relay: die
   explizite Allowlist der Umleitung wird um `CourtTafel` erweitert.
 - Panel: Optionsgruppe „Zähltafel" mit einer Option je Feld, Schlüssel `tafel:<id>`.

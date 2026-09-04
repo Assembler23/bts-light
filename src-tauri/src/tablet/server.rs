@@ -1652,7 +1652,10 @@ async fn monitor_device_state(
         }
         // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
         // Anzeige-HTML umleiten. Wir liefern einen minimalen MonitorState
-        // mit `redirect_to`; die monitor.html springt darauf.
+        // mit `redirect_to`; die monitor.html springt darauf. `CourtTafel`
+        // liefert formal ebenfalls ein `redirect_path()` (ADR 0055), landet
+        // hier aber nie — der Match-Arm oben fängt sie zuerst ab, bewusst:
+        // Die Tafel braucht den vollen Feld-Stand, nicht nur die Umleitung.
         Some(ref target) if target.redirect_path().is_some() => {
             let mut s = monitor::unassigned_monitor_state(&device);
             s.unassigned = false;
