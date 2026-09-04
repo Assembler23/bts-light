@@ -107,7 +107,7 @@ BTP-Abmeldung).
 
 | | Schlüssel | Warum |
 |---|---|---|
-| Turnier | **turnier.de-Turnier-GUID** (36 Zeichen) | Stabil, vorab bekannt, in badhub bereits als `tournaments.tournament_uuid` geführt. Steht **nicht** im BTP-Snapshot und wird einmalig eingetragen. |
+| Turnier | **turnier.de-Turnier-GUID** (36 Zeichen) | Stabil, vorab bekannt, in badhub bereits als `tournaments.tournament_uuid` geführt. Steht **nicht** im BTP-Snapshot und wird einmalig eingetragen. Seit ADR 0054 ein **Pflichtfeld** der ganzen App (`AppConfig.tournament_uuid`, Setup-Abschnitt „1 · Liveticker-Ziel"); der Check-In-Block spiegelt es (`checkin.tournament_uuid`), damit die Leser hier unverändert bleiben. |
 | Authentifizierung | Liveticker-Passwort (Bearer) | Der bestehende, erprobte Kanal — kein zweiter Auth-Weg. |
 | Spieler | BTP-`PlayerID` | Innerhalb des Turniers stabil und **immer** vorhanden. |
 | Spieler (optional) | `MemberID` (Lizenznummer) | Brücke zu badhubs `players.dbv_licence_nr` fürs Anonymisierungs-Gate. **Nie Pflicht** — ein Turnier ohne gepflegte Lizenznummern funktioniert vollständig. |
@@ -146,15 +146,16 @@ zusätzlich klein auf den badhub-Check-In-/Zeitplan-Seiten. Beim Umschalten des
 | Feld | Wert |
 |---|---|
 | Endpunkt | `POST /api/checkin-branding` (abgeleitet aus `config.badhub.url`, letztes Pfadsegment ersetzt) |
-| Auth | Liveticker-Passwort als Bearer — **derselbe** Kanal, keine GUID im Body |
-| Body | `{"sponsors": ["<roh-Base64>", …], "logo": "<roh-Base64>"}` — beide Felder optional |
+| Auth | Liveticker-Passwort als Bearer — **derselbe** Kanal, Body trägt seit ADR 0054 zusätzlich `tournament_uuid`; badhub nutzt sie über den Kindschlüssel |
+| Body | `{"sponsors": ["<roh-Base64>", …], "logo": "<roh-Base64>", "tournament_uuid": "<GUID>"}` — Sponsoren/Logo optional, GUID weggelassen ohne gültige Kennung |
 | Nachrichtentyp | `CheckinBrandingMessage` ([`badhub/payload.rs`](../src-tauri/src/badhub/payload.rs)) |
 
-Die Turnier-Zuordnung passiert **allein über das Bearer-Passwort** (badhub:
-`liveUpdateAuth` → `tournament_key` → Check-In-UUID) — anders als `centry_list`
-trägt der Body keine GUID. **Additiv und feuer-und-vergiss**: ohne
-konfiguriertes badhub-Passwort passiert nichts; HTTP 404/400 bedeutet „badhub
-kennt den Endpunkt noch nicht" (ältere Version) und wird — wie beim
+Die Turnier-Zuordnung passiert **primär über das Bearer-Passwort** (badhub:
+`liveUpdateAuth` → `tournament_key` → Check-In-UUID); die mitgesendete GUID
+löst seit ADR 0054 zusätzlich das richtige Kind-Turnier auf, wenn mehrere
+Turniere denselben Verbandszugang teilen. **Additiv und feuer-und-vergiss**:
+ohne konfiguriertes badhub-Passwort passiert nichts; HTTP 404/400 bedeutet
+„badhub kennt den Endpunkt noch nicht" (ältere Version) und wird — wie beim
 Roster-Push — nur geloggt, nicht als Fehler gezeigt. Datenschutzlich
 unkritisch: übertragen werden nur die vom Operator selbst hochgeladenen
 Werbebilder und das Turnierlogo, keine Personendaten.
@@ -169,15 +170,24 @@ im Liveticker-`tset`. badhub legt es als `checkin_{uuid}.{ext}` ab und bevorzugt
 diese Datei vor dem tset-Snapshot; die tatsächliche Entfernung aus dem `tset`
 folgt in einem separaten Schritt nach dem badhub-Deploy.
 
+### GUID in allen Push-Nachrichten (seit ADR 0054)
+
+Die turnier.de-Turnier-GUID reist kanonisch (`AppConfig.tournament_uuid`) in
+jeder Nachricht an badhub mit: `tset.event.tournament_uuid`,
+`sched.event.tournament_uuid`, `tupdate_match.tournament_uuid`,
+`centry_list.tournament_uuid`, `checkin-branding.tournament_uuid`. Sie wird
+weggelassen, wenn keine gültige GUID konfiguriert ist — dann verhält sich
+badhub wie vor ADR 0054 (ein Stand je Verbandszugang).
+
 ## Einrichtung durch die Turnierleitung
 
 Im Einrichtungs-Assistenten, Abschnitt **Hallen-Check-In**:
 
 1. Häkchen setzen.
-2. Das Turnier bei turnier.de öffnen und **die Adresse aus dem Browser
-   einfügen** — die Kennung wird automatisch herausgelesen
-   ([`tournamentGuid.ts`](../src/tournamentGuid.ts)). Die GUID direkt geht
-   auch.
+2. Die Turnier-Kennung steht bereits im Abschnitt „1 · Liveticker-Ziel" (dort
+   einmalig die turnier.de-Adresse einfügen,
+   [`tournamentGuid.ts`](../src/tournamentGuid.ts) liest die Kennung heraus)
+   — im Check-In-Abschnitt selbst ist nichts mehr einzutragen.
 3. Optional: bis zu wie vielen fehlenden Spielern die Ansage Namen nennt
    (Standard 8, darüber nur die Anzahl).
 

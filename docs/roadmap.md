@@ -301,6 +301,25 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Mehrere Liveticker je Verband (v0.9.276)** — Spec:
+  [features/liveticker-mehrere-turniere-je-verband.md](features/liveticker-mehrere-turniere-je-verband.md),
+  ADR [0054](adr/0054-liveticker-kind-turnier-je-guid.md).
+  Aus der Nutzer-Frage vom 04.09.2026 (zwei BVBB-Turniere am selben
+  Wochenende): badhub hielt bisher genau **einen** Stand je Zugangsschlüssel,
+  und das Verbands-Preset teilt ein Passwort — zwei parallele Installationen
+  überschrieben sich alle 60 s gegenseitig. badhub legt seither beim ersten
+  Push mit neuer turnier.de-GUID automatisch ein **Kind-Turnier** unter dem
+  Verbandszugang an (`bvbb-<8 Hex>`); alle Lesepfade bleiben je Schlüssel.
+  In bts-light ist die GUID jetzt Pflichtfeld (aus dem Check-In- in den
+  Turnier-Abschnitt „1 · Liveticker-Ziel" gezogen), reist in allen
+  Push-Nachrichten mit (`tset`, `sched`, `tupdate_match`, `centry_list`,
+  `checkin-branding`), Aushang und Dashboard verlinken mit `&g=<GUID>` direkt
+  aufs Turnier. **bts-light-Seite umgesetzt (v0.9.276); badhub-Seite: bereits
+  gemergt und deployt (Migration 208, badhub-PR #621).** Offen gelassen:
+  eigener Check-In-PIN je Kind. Feldtest am nächsten Doppel-Wochenende offen
+  (zwei Installationen mit Preset „BVBB" und zwei GUIDs gegen das deployte
+  badhub).
+
 - **Zähltafel fürs Tablet + Anzeige-Hülle** — Spec:
   [features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
   ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md).
@@ -430,23 +449,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Mehrere Liveticker je Verband** — Spec:
-  [features/liveticker-mehrere-turniere-je-verband.md](features/liveticker-mehrere-turniere-je-verband.md),
-  ADR [0054](adr/0054-liveticker-kind-turnier-je-guid.md).
-  Aus der Nutzer-Frage vom 04.09.2026 (zwei BVBB-Turniere am selben
-  Wochenende): badhub hält genau **einen** Stand je Zugangsschlüssel, und
-  das Verbands-Preset teilt ein Passwort — zwei parallele Installationen
-  überschreiben sich alle 60 s gegenseitig. Künftig legt badhub beim ersten
-  Push mit neuer turnier.de-GUID automatisch ein **Kind-Turnier** unter dem
-  Verbandszugang an (`bvbb-<8 Hex>`); alle Lesepfade bleiben je Schlüssel.
-  In bts-light wird die GUID Pflichtfeld (zieht aus dem Check-In- in den
-  Turnier-Abschnitt), reist in allen Push-Nachrichten mit, Aushang und
-  Dashboard verlinken mit `&g=<GUID>` direkt aufs Turnier. **Hauptteil in
-  badhub** (Migration 208, Schreibpfad, Lesepfad, Admin); Reihenfolge: erst
-  badhub deployen, dann bts-light. Offen gelassen: eigener Check-In-PIN je
-  Kind. **Bis dahin:** für ein zweites paralleles Turnier im badhub-Admin
-  einen eigenen Zugang anlegen und in bts-light als „Eigenes Turnier"
-  eintragen.
 - **Offene Paarungen in der TL-Spielliste** — Spec:
   [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md),
   ADR [0051](adr/0051-offene-spiele-eigene-gedeckelte-liste.md) /
