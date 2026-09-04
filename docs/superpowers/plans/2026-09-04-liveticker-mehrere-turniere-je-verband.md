@@ -756,7 +756,7 @@ git commit -m "feat(setup): Turnier-GUID als Pflichtfeld im Liveticker-Ziel, aus
   älteres badhub verhält sich die App wie bisher.
 ```
 
-- [ ] **Step 4: `docs/roadmap.md`** — den Eintrag „Mehrere Liveticker je Verband" aus „Spezifiziert" nach „Umgesetzt, aber noch nicht abgenommen" verschieben, mit Zusatz: „bts-light-Seite umgesetzt (v0.9.274); badhub-Seite: PR im badhub-Repo (Migration 198) — Feldtest am nächsten Doppel-Wochenende offen."
+- [ ] **Step 4: `docs/roadmap.md`** — den Eintrag „Mehrere Liveticker je Verband" aus „Spezifiziert" nach „Umgesetzt, aber noch nicht abgenommen" verschieben, mit Zusatz: „bts-light-Seite umgesetzt (v0.9.274); badhub-Seite: PR im badhub-Repo (Migration 208) — Feldtest am nächsten Doppel-Wochenende offen."
 
 - [ ] **Step 5: Version** — `0.9.274` in `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json`. Danach `cargo build` einmal, damit `Cargo.lock` nachzieht, und `git add src-tauri/Cargo.lock`.
 
@@ -776,7 +776,7 @@ git add docs/aushang.md docs/spieler-check-in.md docs/changelog.md docs/roadmap.
 git commit -m "docs: Turnier-GUID Pflicht, Direktlinks, Changelog v0.9.274"
 ```
 
-PR gegen `main`: „Mehrere Liveticker je Verband — Turnier-GUID Pflicht, in jeder Nachricht, Direktlinks (ADR 0054)". Im Body: Abhängigkeit auf den badhub-Deploy (Migration 198) nennen; Tag erst nach dem badhub-Deploy (Admin, siehe Memory „Release-Tags nur durch Admin").
+PR gegen `main`: „Mehrere Liveticker je Verband — Turnier-GUID Pflicht, in jeder Nachricht, Direktlinks (ADR 0054)". Im Body: Abhängigkeit auf den badhub-Deploy (Migration 208) nennen; Tag erst nach dem badhub-Deploy (Admin, siehe Memory „Release-Tags nur durch Admin").
 
 ---
 
