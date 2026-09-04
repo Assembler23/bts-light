@@ -24,11 +24,15 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden;
     -webkit-user-select: none; user-select: none; }
   /* Das eingebettete Layout füllt den Bildschirm; die Hülle selbst zeigt
-     nichts außer dem Zahnrad. */
-  #rahmen { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); }
-  /* Dezentes Zahnrad: halbtransparent in der Ecke, nur beim Tippen deutlich. */
-  #zahnrad { position: fixed; top: .6rem; right: .6rem; width: 2.6rem; height: 2.6rem;
-    border-radius: 50%; border: 0; background: rgba(15, 23, 42, .35); color: #fff;
+     nichts außer dem Zahnrad. Safari dimensioniert iframes nach ihrem Inhalt
+     statt nach dem Elternrahmen — width:1px + min-width:100% (ebenso Höhe)
+     ist das etablierte Gegenmittel; der äußere Wrapper hält die feste Größe. */
+  #huelle { position: fixed; inset: 0; overflow: hidden; }
+  #rahmen { display: block; border: 0; width: 1px; min-width: 100%; height: 1px; min-height: 100%; background: var(--bg); }
+  /* Dezentes Zahnrad: halbtransparent in der Ecke, nur beim Tippen deutlich.
+     Safe-Area-Abstand für Notch/Kamera-Ausschnitt; Trefferfläche 2.75rem. */
+  #zahnrad { position: fixed; top: max(.6rem, env(safe-area-inset-top)); right: max(.6rem, env(safe-area-inset-right));
+    width: 2.75rem; height: 2.75rem; border-radius: 50%; border: 0; background: rgba(15, 23, 42, .35); color: #fff;
     font-size: 1.3rem; line-height: 1; opacity: .45; z-index: 5; cursor: pointer;
     touch-action: manipulation; }
   #zahnrad:active { opacity: 1; }
@@ -62,7 +66,9 @@
 </style>
 </head>
 <body>
-  <iframe id="rahmen" title="Anzeige" allow="fullscreen"></iframe>
+  <div id="huelle">
+    <iframe id="rahmen" title="Anzeige" allow="fullscreen"></iframe>
+  </div>
   <button type="button" id="zahnrad" title="Einstellungen (PIN)" aria-label="Einstellungen">⚙</button>
 
   <div class="modal" id="menue">
@@ -134,7 +140,9 @@
 
   // ── Inline-Kopie von src/io/anzeigeZiel.mjs — Änderungen dort und hier gemeinsam ──
   var LAYOUTS = ["tafel", "feld", "uebersicht", "vorbereitung"];
-  function feldbezogen(layout) { return layout === "tafel" || layout === "feld"; }
+  function feldbezogen(layout) {
+    return layout === "tafel" || layout === "feld";
+  }
   function zielAusQuery(layoutRoh, courtRoh) {
     const l = typeof layoutRoh === "string" ? layoutRoh : "";
     const layout = LAYOUTS.includes(l) ? l : "tafel";
@@ -221,12 +229,18 @@
     els.pinDisplay.textContent = "•".repeat(pinEntry.length) + "–".repeat(Math.max(0, total - pinEntry.length));
   }
   // `nurFeldwahl`: Start ohne gültiges Feld → direkt die Feldliste, PIN-frei.
+  // Bleibt `/courts` dabei aus (leer oder Fehler), braucht es einen
+  // bedienbaren Ausweg aus dieser Sackgasse: „Neu laden" bleibt sichtbar,
+  // nur die PIN-pflichtigen Aktionen werden einzeln ausgeblendet.
   function oeffneMenue(nurFeldwahl) {
     pinEntry = ""; renderPin();
     els.pinView.hidden = !!nurFeldwahl;
     els.mainView.hidden = !nurFeldwahl;
     els.layoutTitel.hidden = !!nurFeldwahl; els.layoutListe.hidden = !!nurFeldwahl;
-    els.aktionen.hidden = !!nurFeldwahl;
+    els.spiegeln.hidden = !!nurFeldwahl;
+    els.zaehlen.hidden = !!nurFeldwahl;
+    els.vollbild.hidden = !!nurFeldwahl;
+    els.schliessen.hidden = !!nurFeldwahl;
     els.feldTitel.hidden = false; els.feldListe.hidden = false;
     if (nurFeldwahl) { els.stand.textContent = "Bitte ein Feld wählen"; ladeFelder(); }
     els.menue.classList.add("visible");
@@ -239,6 +253,8 @@
     els.feldTitel.hidden = !feld; els.feldListe.hidden = !feld;
     els.spiegeln.hidden = ziel.layout !== "tafel";
     els.zaehlen.hidden = !feld;
+    els.vollbild.hidden = false;
+    els.schliessen.hidden = false;
     els.stand.textContent = LAYOUT_LABEL[ziel.layout] + (feld && ziel.court ? " · " + feldName(ziel.court) : "");
     els.spiegeln.textContent = "Seiten spiegeln: " + (spiegel ? "an" : "aus");
     renderLayouts();
@@ -289,7 +305,14 @@
           els.feldListe.appendChild(b);
         });
       })
-      .catch(function () { els.feldListe.textContent = "Feldliste nicht erreichbar."; });
+      .catch(function () {
+        els.feldListe.textContent = "Feldliste nicht erreichbar.";
+        var erneut = document.createElement("div");
+        erneut.className = "opt";
+        erneut.textContent = "Erneut versuchen";
+        erneut.addEventListener("click", function () { ladeFelder(); });
+        els.feldListe.appendChild(erneut);
+      });
   }
 
   // ── Aktionen ─────────────────────────────────────────────────────────────
@@ -332,11 +355,21 @@
   // ersten Berührung anfordern (Browser verlangen eine Geste) und nach jedem
   // Sichtbarwerden erneut (der Lock fällt beim Tab-Wechsel weg).
   var wakeLock = null;
+  // `anfordernLaeuft`: verhindert parallele `request()`-Aufrufe, solange
+  // eines noch offen ist (z. B. mehrere Berührungen kurz hintereinander).
+  var anfordernLaeuft = false;
   function wachhalten() {
-    if (!("wakeLock" in navigator) || wakeLock) return;
+    if (!("wakeLock" in navigator) || wakeLock || anfordernLaeuft) return;
+    anfordernLaeuft = true;
     navigator.wakeLock.request("screen")
-      .then(function (l) { wakeLock = l; l.addEventListener("release", function () { wakeLock = null; }); })
-      .catch(function () {});
+      .then(function (l) {
+        wakeLock = l;
+        // Nur den eigenen Lock nullen — ein zwischenzeitlich neu erteilter
+        // Lock (nach erneutem `wachhalten()`) darf nicht überschrieben werden.
+        l.addEventListener("release", function () { if (wakeLock === l) wakeLock = null; });
+      })
+      .catch(function () {})
+      .finally(function () { anfordernLaeuft = false; });
   }
   document.addEventListener("pointerdown", wachhalten);
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") wachhalten(); });
