@@ -423,7 +423,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   In bts-light wird die GUID Pflichtfeld (zieht aus dem Check-In- in den
   Turnier-Abschnitt), reist in allen Push-Nachrichten mit, Aushang und
   Dashboard verlinken mit `&g=<GUID>` direkt aufs Turnier. **Hauptteil in
-  badhub** (Migration 198, Schreibpfad, Lesepfad, Admin); Reihenfolge: erst
+  badhub** (Migration 208, Schreibpfad, Lesepfad, Admin); Reihenfolge: erst
   badhub deployen, dann bts-light. Offen gelassen: eigener Check-In-PIN je
   Kind. **Bis dahin:** für ein zweites paralleles Turnier im badhub-Admin
   einen eigenen Zugang anlegen und in bts-light als „Eigenes Turnier"

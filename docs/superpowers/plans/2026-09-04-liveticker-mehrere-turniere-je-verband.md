@@ -752,7 +752,7 @@ git commit -m "feat(setup): Turnier-GUID als Pflichtfeld im Liveticker-Ziel, aus
 - **Aushang und Liveticker-Link zeigen direkt aufs eigene Turnier**
   (`…&g=<Kennung>`), statt auf die Verbandsseite mit Auswahl.
 
-- Voraussetzung badhub-seitig: Migration 198 (Kind-Turniere). Gegen ein
+- Voraussetzung badhub-seitig: Migration 208 (Kind-Turniere). Gegen ein
   älteres badhub verhält sich die App wie bisher.
 ```
 

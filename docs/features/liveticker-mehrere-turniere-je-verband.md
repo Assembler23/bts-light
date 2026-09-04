@@ -82,7 +82,7 @@ direkt auf das eigene Turnier.
 
 | Baustein | Änderung |
 |---|---|
-| `db/migrations/198_liveticker_kind_turniere.sql` | `liveticker_tournaments`: `parent_key VARCHAR(64) NULL`, `tournament_uuid CHAR(36) NULL`, `UNIQUE KEY uq_parent_uuid (parent_key, tournament_uuid)`, Index auf `parent_key`. |
+| `db/migrations/208_liveticker_kind_turniere.sql` | `liveticker_tournaments`: `parent_key VARCHAR(64) NULL`, `tournament_uuid CHAR(36) NULL`, `UNIQUE KEY uq_parent_uuid (parent_key, tournament_uuid)`, Index auf `parent_key`. |
 | `lib/live_update_lib.php` | Neu `liveUpdateKindAufloesen(PDO, string $elternKey, array $msg): string` — liefert den Kindschlüssel (legt das Kind bei Bedarf an) oder den Elternschlüssel, wenn keine wohlgeformte GUID in der Nachricht steht. Neu `liveUpdateKinderAufraeumen(PDO, string $elternKey)`. |
 | `app/Http/Controllers/Api/LiveUpdateController.php` | Ruft nach `liveUpdateAuth()` die Auflösung auf und übergibt den Kindschlüssel an `liveUpdatePersist()`. |
 | `app/Http/Controllers/Api/LivetickerController.php` | `liveQjson`: `?t=` mit frischen Kindern → eines: dessen Stand; mehrere: `multiple_active`. Neuer Parameter `?g=<GUID>` → Kind direkt. `liveTournaments`: optional `?parent=<key>` filtert auf Kinder eines Verbands; Antwortzeile bekommt `parent_key` und `tournament_uuid`. |
