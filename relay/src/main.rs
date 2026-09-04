@@ -61,6 +61,9 @@ const TL_HTML: &str = include_str!("../../src-tauri/assets/tl.html");
 
 /// Die Court-Monitor-Anzeige – dieselbe Datei wie in der bts-light-App.
 const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
+/// Die Zähltafel – dieselbe Datei wie in der bts-light-App (Spec
+/// zaehltafel-anzeige-huelle). Platzhalter wie `monitor.html`.
+const TAFEL_HTML: &str = include_str!("../../src-tauri/assets/tafel.html");
 
 /// Der „In Vorbereitung"-Info-Monitor – dieselbe Datei wie im LAN. Leitet
 /// seinen Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/…` ohne
@@ -736,6 +739,7 @@ async fn main() {
         .route("/{ns}/courts", get(courts_list))
         .route("/{ns}/court/{id}/display", get(monitor_page))
         .route("/{ns}/court/{id}/state", get(monitor_state))
+        .route("/{ns}/court/{id}/tafel", get(tafel_page))
         .route("/{ns}/monitor", get(monitor_device_page))
         .route("/{ns}/monitor/state", get(monitor_device_state))
         .route("/{ns}/monitor/control", post(monitor_control_upload))
@@ -983,6 +987,46 @@ async fn monitor_device_page(
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
+/// Rendert `tafel.html` mit den Platzhaltern (wie [`render_monitor_html`]).
+fn render_tafel_html(mode: &str, base: &str, court_label: &str) -> String {
+    TAFEL_HTML
+        .replace("__MODE__", mode)
+        .replace("__BASE__", base)
+        .replace("__COURT_LABEL__", &html_escape(court_label))
+}
+
+/// Query der Tafel-Seite: `device` schaltet in den Gerätemodus.
+#[derive(serde::Deserialize, Default)]
+struct TafelQuery {
+    #[serde(default)]
+    device: Option<String>,
+}
+
+/// Liefert die Zähltafel (`/{ns}/court/{id}/tafel`). Ohne Host ist das
+/// Label leer — die Seite fällt dann auf „Feld <CourtID>" zurück.
+async fn tafel_page(
+    State(broker): State<Broker>,
+    Path((ns, court_id)): Path<(String, i64)>,
+    axum::extract::Query(q): axum::extract::Query<TafelQuery>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let label = {
+        let map = broker.namespaces.lock().await;
+        map.get(&ns)
+            .and_then(|n| n.court_labels.get(&court_id).cloned())
+            .unwrap_or_default()
+    };
+    let mode = if q.device.as_deref().is_some_and(|d| !d.is_empty()) {
+        "device"
+    } else {
+        "fixed"
+    };
+    let body = render_tafel_html(mode, &monitor_base(&broker.public_base, &ns), &label);
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
 /// Anzeige-Zustand eines fest verdrahteten Feldes (per CourtID), im
 /// Sekundentakt gepollt.
 async fn monitor_state(
@@ -1060,17 +1104,26 @@ async fn monitor_device_state(
                 .get(&q.device)
                 .map(|&id| relay_proto::MonitorTarget::court(id))
         });
+    let ist_tafel = matches!(target, Some(relay_proto::MonitorTarget::CourtTafel { .. }));
     let mut state = match target {
-        Some(relay_proto::MonitorTarget::Court { court_id }) => {
-            build_monitor_state(namespace, court_id)
+        Some(relay_proto::MonitorTarget::Court { court_id })
+        | Some(relay_proto::MonitorTarget::CourtTafel { court_id }) => {
+            let mut s = build_monitor_state(namespace, court_id);
+            // Zähltafel (ADR 0055): Feld-Stand + Umleitung auf die Tafel-Seite,
+            // die der Relay seit dieser Version ausliefert.
+            if ist_tafel {
+                s.redirect_to = Some(format!("/court/{court_id}/tafel"));
+            }
+            s
         }
         // Nur auf Ziele umleiten, die der Relay auch WIRKLICH ausliefert —
-        // Court-Übersicht, „In Vorbereitung" und „Werbung" (Rotation). Würden
-        // wir pauschal `redirect_path()` nehmen, landete ein Sieger-/Kombi-
-        // Monitor (oder Werbe-Einzelbild, das dateinamenbasiert ist und der
-        // Relay per Index nicht auflöst) im Cloud auf einer 404-Seite ohne JS
-        // und damit ohne Selbstheilung (schlimmer als die Kopplungs-Seite, die
-        // weiterpollt).
+        // Court-Übersicht, „In Vorbereitung" und „Werbung" (Rotation). Die
+        // Zähltafel wird ebenfalls serviert — sie läuft aber über den
+        // Court-Arm, weil sie den Feld-Stand braucht. Würden wir pauschal
+        // `redirect_path()` nehmen, landete ein Sieger-/Kombi-Monitor (oder
+        // Werbe-Einzelbild, das dateinamenbasiert ist und der Relay per Index
+        // nicht auflöst) im Cloud auf einer 404-Seite ohne JS und damit ohne
+        // Selbstheilung (schlimmer als die Kopplungs-Seite, die weiterpollt).
         Some(
             t @ (relay_proto::MonitorTarget::InfoPreparation
             | relay_proto::MonitorTarget::AdRotation
@@ -5177,6 +5230,18 @@ mod tests {
         assert_eq!(monitor_base("https://relay.example.com", "ns1"), "/ns1/");
     }
 
+    #[test]
+    fn tafel_html_traegt_den_relay_praefix() {
+        let html = render_tafel_html(
+            "device",
+            &monitor_base("https://badhub.de/bts-relay", "ns1"),
+            "",
+        );
+        assert!(html.contains(r#"var BASE = "/bts-relay/ns1/";"#));
+        assert!(html.contains(r#"var MODE = "device";"#));
+        assert!(!html.contains("__COURT_LABEL__"));
+    }
+
     fn brief(id: i64) -> MatchBrief {
         MatchBrief {
             match_id: id,
@@ -6740,6 +6805,11 @@ mod tests {
             "pi-winners".to_string(),
             relay_proto::MonitorTarget::InfoWinners { rank: None },
         );
+        // Zähltafel (ADR 0055): voller Feld-Stand + Umleitung auf die Tafel.
+        targets.insert(
+            "pi-tafel".to_string(),
+            relay_proto::MonitorTarget::court_tafel(5),
+        );
         let control = relay_proto::MonitorControl {
             assignments: std::collections::HashMap::new(),
             targets,
@@ -6795,6 +6865,11 @@ mod tests {
         let win = read_state("pi-winners").await;
         assert!(win["redirectTo"].is_null());
         assert_eq!(win["unassigned"], serde_json::json!(true));
+
+        let tafel = read_state("pi-tafel").await;
+        assert_eq!(tafel["redirectTo"], serde_json::json!("/court/5/tafel"));
+        assert_eq!(tafel["courtId"], serde_json::json!(5));
+        assert_eq!(tafel["unassigned"], serde_json::json!(false));
     }
 
     // ── ETag/304-Pfad des Monitor-States (Etappe ETag, U5/U6/U-seq/U10/U-seen/U-det) ──
