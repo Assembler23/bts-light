@@ -20,6 +20,11 @@
 /// die Kopfhöhe aus, ohne eine Bilddatei ins Repo zu legen.
 const TEST_LOGO: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAAD0lEQVR4AWMUjSv9z4AEABpNAemNSDkeAAAAAElFTkSuQmCC";
 
+/// Beispiel-GUID für das Muster (ADR 0054): Seit die Turnier-GUID Pflicht ist,
+/// trägt JEDE Liveticker-Adresse ein `&g=<GUID>` — das Muster ohne GUID zeigte
+/// den zu kurzen, harmlosen Fall statt des echten (längere URL, dichterer QR).
+const TEST_GUID: &str = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mit_logo = args.iter().any(|a| a == "--mit-logo");
@@ -39,7 +44,7 @@ fn main() {
         "https://badhub.de/live?t=bvbb",
         &turnier,
         mit_logo.then(|| TEST_LOGO.to_string()),
-        None,
+        Some(TEST_GUID),
     )
     .expect("Muster-URL ist auswertbar");
     let html = bts_light_lib::aushang::render_html(&daten).expect("Blatt lässt sich bauen");

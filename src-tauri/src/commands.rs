@@ -520,6 +520,12 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
         imported.tl_web.profiles = current.tl_web.profiles.clone();
         imported.tl_web.default_profile_id = current.tl_web.default_profile_id.clone();
     }
+    // Turnier-GUID auf Wurzel- und Check-In-Feld angleichen (ADR 0054): Ein
+    // Bündel aus einer Version vor der Spiegelung, oder eines, das nur über
+    // `checkin.tournament_uuid` gesetzt wurde, würde sonst ohne
+    // `load_from`-Umweg (der Import schreibt sofort in Speicher + Datei)
+    // dauerhaft mit auseinanderlaufenden Feldern enden.
+    imported.spiegele_turnier_guid();
     imported
 }
 
@@ -1734,7 +1740,7 @@ pub fn open_live_view(
         let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
         (cfg.badhub.live_url.clone(), cfg.tournament_uuid_kanonisch())
     };
-    if live_url.is_empty() {
+    if live_url.trim().is_empty() {
         return Err("Für dieses Turnier ist keine Live-Seite hinterlegt.".to_string());
     }
     // Erst die GUID (Direktlink aufs Turnier, ADR 0054), dann die Ansicht.
@@ -4766,6 +4772,24 @@ mod tests {
         assert_eq!(merged.btp.password.as_deref(), Some("aktuell-btp"));
         assert_eq!(merged.badhub.password, "aktuell-badhub");
         assert_eq!(merged.azure_tts.key, "aktuell-azure");
+    }
+
+    #[test]
+    fn apply_imported_identity_mirrors_tournament_guid_to_root() {
+        // I2: Ein Bündel, dessen Turnier-GUID nur im alten Check-In-Feld
+        // steht (z. B. exportiert vor ADR 0054, oder von Hand editiert),
+        // muss nach dem Import auch am Wurzelfeld ankommen — sonst prüft
+        // `pruefe_startbedingungen` (liest nur die Wurzel) fälschlich als
+        // fehlend, obwohl die GUID im Bündel steht.
+        let current = cfg_id("inst-alt", None, "", "");
+        let mut imported = cfg_id("inst-neu", None, "", "");
+        imported.checkin.tournament_uuid = "0ea5fd86-a64f-4445-a8de-bae3dbf762ba".to_string();
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(
+            merged.tournament_uuid.to_uppercase(),
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        assert_eq!(merged.tournament_uuid, merged.checkin.tournament_uuid);
     }
 
     #[test]

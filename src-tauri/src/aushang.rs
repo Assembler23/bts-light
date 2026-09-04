@@ -519,6 +519,21 @@ mod tests {
     }
 
     #[test]
+    fn blatt_zeigt_ticker_link_mit_guid_escaped() {
+        // M10: `link_mit_guid` hängt ein rohes `&g=<GUID>` an — das Blatt
+        // escaped die sichtbare Adresse (`html_escape`), also muss dort
+        // `&amp;g=<GUID>` stehen, nicht das rohe `&`. Ohne diesen Test deckte
+        // keiner der bestehenden Fälle den GUID-Pflichtfall überhaupt ab.
+        let g = Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA");
+        let d = daten_aus("https://badhub.de/live?t=bvbb", "BVBB Open", None, g).unwrap();
+        let html = render_html(&d).unwrap();
+        assert!(
+            html.contains("badhub.de/live?t=bvbb&amp;g=0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"),
+            "Ticker-Adresse mit GUID fehlt oder ist falsch escaped: {html}"
+        );
+    }
+
+    #[test]
     fn turniername_und_logo_landen_escaped_im_kopf() {
         let d = daten_aus(
             "https://badhub.de/live?t=bvbb",
