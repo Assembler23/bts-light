@@ -57,6 +57,14 @@ aufgeräumt, kein Cron.
 
 - Zwei Installationen mit unverändertem Preset laufen parallel; kein
   Admin-Eingriff vor dem Wochenende.
+- **Nachtrag 04.09.2026:** „Alle Lesepfade bleiben je Schlüssel“ gilt nur für
+  Abfragen, die den Kindschlüssel schon kennen. Konsumenten mit
+  **Verbandsschlüssel** (Check-In-Zuordnung `CHECKIN_UUID_FUER_KEY_SQL`, Badge,
+  Live-Seite, Branding-Push, Check-In-Admin-Rechte) müssen das Kind an je
+  einer Stelle auflösen — das Final-Review der badhub-Umsetzung fand fünf
+  solche Stellen. Besonders kritisch: ausgelieferte bts-light-Clients senden
+  die GUID in `centry_list` bereits, die Check-In-Zuordnung wandert also
+  sofort zum Kind, während `tset` alter Clients beim Eltern bleibt.
 - Die GUID wird in bts-light Pflicht — auch für Turniere, die nicht auf
   turnier.de liegen (dort genügt jede wohlgeformte GUID; badhub prüft die
   Herkunft nicht).

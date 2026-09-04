@@ -52,7 +52,12 @@ direkt auf das eigene Turnier.
   Turnier. Der QR-Code des Aushangs führt ohne Zwischenschritt zum eigenen Turnier.
 - Ein Push **ohne** GUID (alter Client) verhält sich exakt wie heute.
 - Kein Admin-Eingriff nötig; die Admin-Liste zeigt die Kinder unter ihrem Verband.
-- Kein Lesepfad in badhub muss die GUID neu durchreichen.
+- Die Lesepfade, die **je Schlüssel** arbeiten, bleiben unverändert. Konsumenten,
+  die nur den **Verbandsschlüssel** kennen (Check-In-Zuordnung, Badge, die
+  Live-Seite selbst), lösen das Kind an genau einer Stelle auf
+  (`liveticker_lesepfad_kind()` bzw. kindbewusste `CHECKIN_UUID_FUER_KEY_SQL`).
+  *(Nachtrag 04.09.2026 nach dem Final-Review der badhub-Umsetzung: die
+  ursprüngliche Fassung „kein Lesepfad muss die GUID durchreichen“ war falsch.)*
 
 ## Nicht-Ziele
 
@@ -81,9 +86,12 @@ direkt auf das eigene Turnier.
 | `lib/live_update_lib.php` | Neu `liveUpdateKindAufloesen(PDO, string $elternKey, array $msg): string` — liefert den Kindschlüssel (legt das Kind bei Bedarf an) oder den Elternschlüssel, wenn keine wohlgeformte GUID in der Nachricht steht. Neu `liveUpdateKinderAufraeumen(PDO, string $elternKey)`. |
 | `app/Http/Controllers/Api/LiveUpdateController.php` | Ruft nach `liveUpdateAuth()` die Auflösung auf und übergibt den Kindschlüssel an `liveUpdatePersist()`. |
 | `app/Http/Controllers/Api/LivetickerController.php` | `liveQjson`: `?t=` mit frischen Kindern → eines: dessen Stand; mehrere: `multiple_active`. Neuer Parameter `?g=<GUID>` → Kind direkt. `liveTournaments`: optional `?parent=<key>` filtert auf Kinder eines Verbands; Antwortzeile bekommt `parent_key` und `tournament_uuid`. |
-| `public/assets/js/live.js` | `showPicker()` übergibt bei gesetztem `?t=` den Schlüssel als `parent`; `renderPicker()` verlinkt Kinder mit `?t=<kindschlüssel>`. `g` aus der URL wird an `live_qjson.php` durchgereicht. |
+| `public/assets/js/live.js` | `showPicker()` übergibt bei gesetztem `?t=` den Schlüssel als `parent`; `renderPicker()` verlinkt Kinder mit `?t=<kindschlüssel>`. `g` aus der URL wird an `live_qjson.php` durchgereicht. **Wirkschlüssel:** liefert `live_qjson.php` einen anderen `tournament_key` als in der Adresse (stille Auflösung auf ein Kind), nutzen Spielplan, Teilnehmer-Link und Gast-Auflösung diesen Key; die Adresszeile bleibt. |
 | `app/Http/Controllers/Admin/LivetickerController.php` + View | Kinder eingerückt unter dem Verband (GUID, Name, letzter Push). Aktionen am Kind: Name pinnen, löschen. Passwort/Aktiv/Gültigkeit nur am Elternzugang. |
-| `lib/checkin_tournament_lookup.php` | unverändert — arbeitet je Schlüssel; mit Kindschlüssel eindeutig. |
+| `lib/checkin_tournament_lookup.php` | `CHECKIN_UUID_FUER_KEY_SQL` wird **kindbewusst**: `tournament_key = ? OR tournament_key IN (SELECT … WHERE parent_key = ?)`. Nötig, weil ausgelieferte bts-light-Clients die GUID in `centry_list` **schon** senden — die Check-In-Zuordnung wandert zum Kind, `tset` alter Clients bleibt beim Eltern; Ticker-Absprunglink, Sponsor-Leiste, Teilnehmerlisten und Gast-Auflösung lösen über den Eltern-Key auf. |
+| `Api/LivetickerController::liveBadge` | löst Kinder über `liveticker_lesepfad_kind()` auf (`eins`/`direkt` → dieser Key, `mehrere` → live). |
+| `Api/CheckinBrandingController.php` | liest `tournament_uuid` aus dem Body und nutzt den Kindschlüssel (`liveticker_kind_key`), wenn das Kind existiert — legt **keine** Kinder an. |
+| `Admin/CheckinController.php` | `visibleTournaments`/`mayManage`: Besitzer eines Kinds ist der Besitzer des Elternzugangs (`COALESCE` über `parent_key`). |
 | `checkin_pin_authorize()` | Kind hat keinen `tl_pin_hash` → Rückfall auf den des `parent_key` (ein `COALESCE` über einen Self-Join). |
 
 ### bts-light
@@ -169,8 +177,10 @@ Blick auf den Elterndatensatz.
 - Live-Seite: bei `multiple_active` ruft `showPicker()` die Liste mit
   `parent=<t>` ab, wenn `?t=` gesetzt ist; die Auswahl verlinkt
   `?t=<kindschlüssel>`. Ohne `?t=`: wie heute.
-- Spielerseiten, Teilnehmerlisten (`/live/{key}/teilnehmer`), Badge,
-  Check-In-Bezug der Sponsor-Leiste: unverändert, weil je Schlüssel.
+- Spielerseiten und Teilnehmerlisten (`/live/{key}/teilnehmer`) arbeiten je
+  Schlüssel; über den **Verbandsschlüssel** aufgerufen finden sie das
+  laufende Kind über die kindbewusste Check-In-Zuordnung. Badge und
+  Sponsor-Leiste lösen das Kind selbst auf (siehe Komponententabelle).
 
 ### Admin-Liste
 
