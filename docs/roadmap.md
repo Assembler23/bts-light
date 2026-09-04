@@ -934,12 +934,16 @@ verliehen):
 
 ## Bekannte Einschränkungen / technische Schuld
 
-- **Kein Framing-Schutz für die Zähl-Seite** `/court/{id}` (weder
-  `X-Frame-Options` noch `frame-ancestors`): Clickjacking auf die
-  Punkte-Knöpfe wäre möglich; die Ergebnis-Abgabe bleibt durch
-  `process_result` (R5) validiert. Ein globales `frame-ancestors 'self'`
-  wäre mit der Anzeige-Hülle (#328, same-origin-iframe) verträglich —
-  eigener PR.
+- **Kein Framing-Schutz für die Zähl-Seite** `/court/{id}` **im LAN**
+  (Port 8088/8443 setzen weder `X-Frame-Options` noch `frame-ancestors`):
+  Clickjacking auf die Punkte-Knöpfe wäre möglich; die Ergebnis-Abgabe
+  bleibt durch `process_result` (R5) validiert. **In der Cloud besteht die
+  Lücke nicht:** Der nginx vor `/bts-relay/` sendet `X-Frame-Options:
+  SAMEORIGIN` und eine CSP mit `default-src 'self'` (geprüft 04.09.2026 per
+  `curl -I` auf `…/court/1/tafel`, `…/anzeige`, `/bts-relay/health`) — das
+  erlaubt genau die Anzeige-Hülle (#328, same-origin-iframe) und sperrt
+  fremde Seiten aus. Für den LAN-Server wäre ein `frame-ancestors 'self'`
+  im `router()` das Gegenstück — eigener PR.
 - **Liga-Matches** (`PlayerMatches` in BTP) sind nicht abgedeckt — bts-light
   verarbeitet nur Einzel-/Doppel-Draws.
 - **Spielsystem fest Best-of-3 bis 21.** BTP liefert das Spielformat im
