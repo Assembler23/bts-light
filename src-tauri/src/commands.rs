@@ -334,6 +334,11 @@ pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConf
 /// Bewusst **nur** die Geräteliste, nicht der Schalter: Wird die Oberfläche
 /// abgeschaltet, sollen die Zugänge auch wirklich verschwinden. Rein &
 /// testbar.
+///
+/// Stellt am Ende außerdem die Turnier-GUID-Spiegelung her
+/// (`AppConfig::spiegele_turnier_guid`, ADR 0054) — dieser Aufruf ist der
+/// **einzige** Schreibpfad neben `load_from`, der den Gleichlauf von
+/// Wurzelfeld und `checkin.tournament_uuid` erzwingt.
 fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> AppConfig {
     if incoming.tl_web.enabled {
         incoming.tl_web.devices = current.tl_web.devices.clone();
@@ -376,6 +381,13 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Automatik legt ein Spiel auf das kaputte Feld.
     incoming.locked_courts = current.locked_courts.clone();
     incoming.locked_courts_tournament = current.locked_courts_tournament.clone();
+    // Turnier-GUID spiegeln (ADR 0054): Liveticker-Push (tset/sched/tupdate)
+    // liest das kanonische Wurzelfeld, Check-In-Meldeliste/Anfangszeiten lesen
+    // weiterhin `checkin.tournament_uuid`. `load_from` stellt den Gleichlauf
+    // nur beim Programmstart her — ohne diesen Aufruf hinge die Invariante
+    // „Wurzel == Check-In" nach dem ersten Speichern allein am Frontend, das
+    // (noch) in beide Felder denselben kanonischen Wert schreibt.
+    incoming.spiegele_turnier_guid();
     incoming
 }
 
@@ -5000,6 +5012,46 @@ mod tests {
             merged.locked_courts_tournament, "Köpi-Cup 2026",
             "und ihr Turnierbezug ebenso — sonst gälte sie als „unbekannt“ \
              und überlebte den nächsten Turnierwechsel"
+        );
+    }
+
+    #[test]
+    fn keep_host_managed_fields_spiegelt_die_turnier_guid_beim_speichern() {
+        // Review-Fund (Fix-Runde 1, ADR 0054): `load_from` stellt den
+        // Gleichlauf von Wurzelfeld und `checkin.tournament_uuid` nur beim
+        // Programmstart her. `save_config` ruft `keep_host_managed_fields`
+        // vor jedem Schreiben — genau hier muss die Spiegelung ebenfalls
+        // greifen, sonst hinge die Invariante nach dem ersten Speichern
+        // allein am Frontend.
+        //
+        // Fall 1: Wurzel klein/mit Klammern, Check-In leer → Wurzel gewinnt
+        // und wird kanonisiert, der Check-In-Block übernimmt sie gespiegelt.
+        let von_ui = AppConfig {
+            tournament_uuid: "{0ea5fd86-a64f-4445-a8de-bae3dbf762ba}".to_string(),
+            ..AppConfig::default()
+        };
+        let ergebnis = keep_host_managed_fields(von_ui, &AppConfig::default());
+        assert_eq!(
+            ergebnis.tournament_uuid,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        assert_eq!(
+            ergebnis.checkin.tournament_uuid,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+
+        // Fall 2: Wurzel leer, Check-In gültig gesetzt → die Migration aus
+        // `load_from` greift auch hier, die Wurzel wird nachgefüllt.
+        let mut von_ui2 = AppConfig::default();
+        von_ui2.checkin.tournament_uuid = "11111111-2222-3333-4444-555555555555".to_string();
+        let ergebnis2 = keep_host_managed_fields(von_ui2, &AppConfig::default());
+        assert_eq!(
+            ergebnis2.tournament_uuid,
+            "11111111-2222-3333-4444-555555555555"
+        );
+        assert_eq!(
+            ergebnis2.checkin.tournament_uuid,
+            "11111111-2222-3333-4444-555555555555"
         );
     }
 
