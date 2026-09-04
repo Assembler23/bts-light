@@ -321,6 +321,7 @@ pub struct MonitorUpload {
 ///
 /// JSON-Form (`#[serde(tag = "kind")]`):
 /// - `{"kind":"court","court_id":5}`
+/// - `{"kind":"court_tafel","court_id":3}`
 /// - `{"kind":"info_overview"}`
 /// - `{"kind":"info_preparation"}`
 /// - `{"kind":"ad_rotation"}`
@@ -366,6 +367,14 @@ pub enum MonitorTarget {
         #[serde(rename = "court_ids")]
         court_ids: Vec<i64>,
     },
+    /// Zähltafel für ein bestimmtes Feld (`/court/{id}/tafel`, Spec
+    /// zaehltafel-anzeige-huelle): nur Punktzahlen, Satzstand, Aufschlag —
+    /// kein Name. Eigene Variante statt Attribut an `Court` (ADR 0055);
+    /// Downgrade verwirft sie still (`read_assignments`), bewusst akzeptiert.
+    CourtTafel {
+        #[serde(rename = "court_id")]
+        court_id: i64,
+    },
 }
 
 impl MonitorTarget {
@@ -384,10 +393,19 @@ impl MonitorTarget {
         Self::CourtCombo { court_ids }
     }
 
-    /// CourtID, falls dieses Target ein Feld ist; sonst `None`.
+    /// Zähltafel-Konstruktor zur Bequemlichkeit.
+    pub fn court_tafel(court_id: i64) -> Self {
+        Self::CourtTafel { court_id }
+    }
+
+    /// CourtID, falls dieses Target an EINEM Feld hängt (Feld-Monitor oder
+    /// Zähltafel); sonst `None`. Für die Zähltafel bewusst gesetzt: So zeigt
+    /// die Geräteliste Feld + Halle, und ein altes Relay (kennt nur
+    /// `assignments` mit CourtIDs) zeigt dem Gerät den Feld-Monitor statt
+    /// der Kopplungsseite (ADR 0055).
     pub fn court_id(&self) -> Option<i64> {
         match self {
-            Self::Court { court_id } => Some(*court_id),
+            Self::Court { court_id } | Self::CourtTafel { court_id } => Some(*court_id),
             _ => None,
         }
     }
@@ -415,6 +433,7 @@ impl MonitorTarget {
                 // dank `is_safe_image_name`).
                 Some(format!("/info/ad?mode=single&file={}", url_encode(file)))
             }
+            Self::CourtTafel { court_id } => Some(format!("/court/{court_id}/tafel")),
             Self::CourtCombo { court_ids } => {
                 // CourtIDs als kommaseparierte Query (?courts=1,2,3).
                 let csv = court_ids
@@ -436,6 +455,7 @@ impl MonitorTarget {
             Self::InfoWinners { .. } => "info_winners",
             Self::AdRotation => "ad_rotation",
             Self::AdSingle { .. } => "ad_single",
+            Self::CourtTafel { .. } => "court_tafel",
             Self::CourtCombo { .. } => "court_combo",
         }
     }
@@ -5268,6 +5288,30 @@ mod tests {
         ] {
             assert!(!art.is_sanction(), "{art:?}");
         }
+    }
+
+    // ── Zähltafel-Ziel (Spec zaehltafel-anzeige-huelle, ADR 0055) ──────────
+
+    #[test]
+    fn court_tafel_serde_roundtrip_und_tag() {
+        let t = MonitorTarget::court_tafel(3);
+        let json = serde_json::to_string(&t).unwrap();
+        assert_eq!(json, r#"{"kind":"court_tafel","court_id":3}"#);
+        let back: MonitorTarget = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, t);
+        // Alte Formen bleiben lesbar (keine Änderung am Tag-Schema).
+        let alt: MonitorTarget = serde_json::from_str(r#"{"kind":"court","court_id":5}"#).unwrap();
+        assert_eq!(alt, MonitorTarget::court(5));
+    }
+
+    #[test]
+    fn court_tafel_leitet_auf_die_tafel_und_kennt_sein_feld() {
+        let t = MonitorTarget::court_tafel(7);
+        assert_eq!(t.redirect_path().as_deref(), Some("/court/7/tafel"));
+        // Das Feld reist mit: Panel zeigt Feldname/Halle wie bei einem
+        // Feld-Monitor; ein altes Relay degradiert zur Feld-Anzeige (ADR 0055).
+        assert_eq!(t.court_id(), Some(7));
+        assert_eq!(t.kind_str(), "court_tafel");
     }
 }
 
