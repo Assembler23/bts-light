@@ -78,6 +78,7 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | Route | Zweck |
 |---|---|
 | `GET /{ns}/court/{label}` | Tablet-Spielzettel-UI (dieselbe `tablet.html` wie die App) |
+| `GET /{ns}/court/{id}/tafel` | Zähltafel (dieselbe `tafel.html` wie die App); Zuweisung `court_tafel` liefert im Geräte-State Feld-Stand + `redirectTo` |
 | `GET /{ns}/qr/{label}` | QR-Code (SVG) auf die öffentliche Court-URL |
 | `GET /{ns}/ws` | Tablet-WebSocket |
 | `GET /{ns}/host-ws` | bts-light-Host-WebSocket (ausgehend) |
@@ -90,6 +91,15 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /{ns}/info/logo` | Hochgeladenes Turnierlogo |
 | `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`, `adStyles`) |
 | `GET /health` | Status-Schnappschuss |
+
+**Deploy-Reihenfolge:** Ein Relay, das `court_tafel` nicht kennt, lehnt den
+**gesamten** Zuweisungs-Upload des Hosts mit 422 ab. Dabei frieren **alle**
+Zuweisungen und Fernbefehle des Turniers ein — nicht nur die Tafel —, solange
+irgendein Gerät auf `court_tafel` steht: Der Host lädt `assignments` und
+`targets` in einem Body hoch, das alte Relay verwirft ihn komplett und behält
+den zuletzt akzeptierten Stand für alle Geräte. Der Relay wird beim Merge
+deployt, der App-Tag folgt danach — ein Relay-Rollback nach einem
+App-Release bricht die Monitor-Steuerung.
 
 Die beiden Bild-Routen antworten mit einer Kennung (`ETag`) und dürfen
 zwischengespeichert werden — Werbebilder **eine** Minute, das Turnierlogo

@@ -41,6 +41,7 @@ import type {
 // <option value="…"> muss ein String sein. Schlüssel:
 //   ""                       → keine Zuweisung
 //   "court:<id>"             → MonitorTarget::Court { court_id }
+//   "tafel:<id>"             → MonitorTarget::CourtTafel { court_id }
 //   "info_overview"          → MonitorTarget::InfoOverview (alle Hallen)
 //   "info_overview:<halle>"  → InfoOverview, fest auf eine Halle
 //   "info_preparation"       → MonitorTarget::InfoPreparation
@@ -54,6 +55,7 @@ import type {
 function targetToValue(t: MonitorTarget | null): string {
   if (!t) return "";
   if (t.kind === "court") return `court:${t.court_id}`;
+  if (t.kind === "court_tafel") return `tafel:${t.court_id}`;
   if (t.kind === "info_overview" && t.hall) return `info_overview:${t.hall}`;
   if (t.kind === "info_winners" && t.rank) return `info_winners:${t.rank}`;
   if (t.kind === "ad_single") return `ad_single:${t.file}`;
@@ -78,6 +80,10 @@ function valueToTarget(v: string): MonitorTarget | null {
   if (v.startsWith("court:")) {
     const id = Number(v.slice("court:".length));
     if (Number.isFinite(id)) return { kind: "court", court_id: id };
+  }
+  if (v.startsWith("tafel:")) {
+    const id = Number(v.slice("tafel:".length));
+    if (Number.isFinite(id)) return { kind: "court_tafel", court_id: id };
   }
   if (v.startsWith("ad_single:")) {
     const file = v.slice("ad_single:".length);
@@ -114,7 +120,7 @@ interface GroupedDevices {
 /** Typ-Rang fürs Sortieren: Feld < Kombi < Info/Werbung < unzugewiesen. */
 function targetRank(t: MonitorTarget | null): number {
   if (!t) return 3;
-  if (t.kind === "court") return 0;
+  if (t.kind === "court" || t.kind === "court_tafel") return 0;
   if (t.kind === "court_combo") return 1;
   return 2; // info_overview / info_preparation / ad_*
 }
@@ -726,6 +732,16 @@ function DeviceRow({
             </option>
           ))
         )}
+        {/* Zähltafel (Spec zaehltafel-anzeige-huelle): nur Punktzahlen, kein
+            Name — für ein Tablet am Netz oder einen TV, der die Tafel
+            zeigen soll. Eine Option je Feld, gleiche Feldliste wie oben. */}
+        <optgroup label="Zähltafel">
+          {fieldOptions.map((o) => (
+            <option key={`tafel:${o.id}`} value={`tafel:${o.id}`}>
+              Zähltafel – {o.label}
+            </option>
+          ))}
+        </optgroup>
         {/* Info-Monitore: Hallen-weite Read-Only-Anzeigen ohne Feld-Bezug.
             Bei ≥2 Hallen automatisch je Halle eine Court-Übersicht-Option,
             damit man einen Pi fest an eine Halle binden kann. */}

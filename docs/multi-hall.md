@@ -349,6 +349,12 @@ Master-Cloud-Monitor zeigen, betreibt der Cloud-Slave eine **Monitor-Brücke**
   Master. Bei einer gebrückten Topologie (Site-to-Site-VPN, gemeinsames
   L2) wäre das eine bekannte Grenze.
 
+Die **Zähltafel** (`/court/{id}/tafel`, Spec
+[features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md)) ist in der
+Brücke **nicht** enthalten. Eine Tafel in der fernen Halle nutzt die Cloud-Adresse des
+Masters (`…/bts-relay/<ns>/court/<id>/tafel`); die Brücke um die Tafel-Route zu erweitern
+ist ein eigener, noch offener Punkt.
+
 Gestartet in `commands.rs::start_sync` nur bei gültigem `master_namespace`,
 beendet in `stop_sync`. **Tablets bleiben Direkt-Cloud** (Weg A) — die Brücke
 ist nur für Monitore, weil Tablet-Ergebnisse ins Master-BTP müssen.
