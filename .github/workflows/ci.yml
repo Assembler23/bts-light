@@ -163,6 +163,12 @@ jobs:
       - name: Zähltafel-Seiten (JS)
         run: node scripts/test-tafel-seiten.mjs
 
+      # Was die Anzeige-Hülle ins iframe lädt. Rutscht hier freier Text aus der
+      # Adresse durch, lädt ein Tablet in der Halle, was immer in der Adresse
+      # stand; fällt ein gültiges Feld heraus, zeigt die Hülle nur die Feldwahl.
+      - name: Anzeige-Hülle Ziel-Allowlist (JS)
+        run: node scripts/test-anzeige-ziel.mjs
+
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
       # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter

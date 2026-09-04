@@ -576,6 +576,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/court/{id}", get(court_page))
         .route("/courts", get(courts_list))
         .route("/felder", get(lobby_page))
+        .route("/anzeige", get(anzeige_page))
         .route("/court/{id}/display", get(monitor_page))
         .route("/court/{id}/state", get(monitor_state))
         .route("/court/{id}/tafel", get(tafel_page))
@@ -899,6 +900,19 @@ async fn index(State(ctx): State<Arc<ServerCtx>>) -> Html<String> {
     ))
 }
 
+/// Bedien-PIN fürs Einstellungs-Menü von Tablet und Anzeige-Hülle: nur
+/// ASCII-Ziffern, höchstens acht, leer → „0000". Ziffern sind in einem
+/// JS-String-Literal unkritisch, daher kein Escape (html_escape wäre für den
+/// JS-Kontext der falsche Escaper).
+fn bedien_pin(raw: &str) -> String {
+    let pin: String = raw.chars().filter(|c| c.is_ascii_digit()).take(8).collect();
+    if pin.is_empty() {
+        "0000".to_string()
+    } else {
+        pin
+    }
+}
+
 /// Liefert die Tablet-UI für ein Feld (per CourtID; kein Caching – immer
 /// frisch). Der Platzhalter `__COURT_ID__` trägt die Identität,
 /// `__COURT_LABEL__` den Feldnamen für die Anzeige.
@@ -907,22 +921,8 @@ async fn court_page(
     Path(court_id): Path<i64>,
 ) -> impl IntoResponse {
     let label = court_label_for(&ctx, court_id);
-    // PIN fürs Einstellungs-Menü (Feldwechsel) – Live-Config. NUR Ziffern
-    // (Bedien-PIN; leer → Default „0000"). Ziffern sind in einem JS-String-
-    // Literal unkritisch → kein Escape nötig (Code-Review-Hinweis: html_escape
-    // wäre für einen JS-Kontext der falsche Escaper).
-    let pin: String = ctx
-        .app_config()
-        .tablet_settings_pin
-        .chars()
-        .filter(|c| c.is_ascii_digit())
-        .take(8)
-        .collect();
-    let pin = if pin.is_empty() {
-        "0000".to_string()
-    } else {
-        pin
-    };
+    // PIN fürs Einstellungs-Menü (Feldwechsel) – Live-Config.
+    let pin = bedien_pin(&ctx.app_config().tablet_settings_pin);
     tracing::info!("Tablet-Seite ausgeliefert für Feld {court_id} ('{label}')");
     let body = TABLET_HTML
         .replace("__COURT_ID__", &court_id.to_string())
@@ -998,6 +998,22 @@ async fn lobby_page() -> impl IntoResponse {
         [(header::CACHE_CONTROL, "no-store")],
         Html(assets::LOBBY_HTML),
     )
+}
+
+/// Rendert `anzeige.html`. `base` endet mit `/` (LAN `/`).
+fn render_anzeige_html(base: &str, pin: &str) -> String {
+    assets::ANZEIGE_HTML
+        .replace("__BASE__", base)
+        .replace("__TABLET_PIN__", pin)
+}
+
+/// Anzeige-Hülle fürs Tablet (`/anzeige`). Ziel und Feld stehen in der
+/// Query und werden ausschließlich clientseitig über die Allowlist gelesen —
+/// der Server templatet nur Basis-Pfad und Bedien-PIN.
+async fn anzeige_page(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    let pin = bedien_pin(&ctx.app_config().tablet_settings_pin);
+    let body = render_anzeige_html("/", &pin);
+    ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
 /// Fester (verbandsweiter) Token zum Weiterleiten der Tablet-Logs an badhub –
@@ -7218,6 +7234,23 @@ mod tests {
                 && !html.contains("__BASE__")
                 && !html.contains("__COURT_LABEL__")
         );
+    }
+
+    #[test]
+    fn bedien_pin_filtert_ziffern_und_faellt_auf_0000_zurueck() {
+        assert_eq!(bedien_pin("12ab34"), "1234");
+        assert_eq!(bedien_pin(""), "0000");
+        assert_eq!(bedien_pin("abc"), "0000");
+        assert_eq!(bedien_pin("1234567890"), "12345678", "max acht Ziffern");
+    }
+
+    #[test]
+    fn anzeige_seite_ersetzt_alle_platzhalter() {
+        // Spec zaehltafel-anzeige-huelle: dieselben Platzhalter wie Tablet/Monitor.
+        let html = render_anzeige_html("/", "4711");
+        assert!(html.contains(r#"var BASE = "/";"#));
+        assert!(html.contains(r#"var p = "4711";"#));
+        assert!(!html.contains("__BASE__") && !html.contains("__TABLET_PIN__"));
     }
 
     #[tokio::test]

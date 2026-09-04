@@ -79,6 +79,10 @@ const AD_HTML: &str = include_str!("../../src-tauri/assets/ad.html");
 /// `<BASE>health`; läuft also unter `/{ns}/info/overview` gegen `/{ns}/health`.
 const OVERVIEW_HTML: &str = include_str!("../../src-tauri/assets/overview.html");
 
+/// Die Anzeige-Hülle fürs Tablet – dieselbe Datei wie in der bts-light-App
+/// (Spec zaehltafel-anzeige-huelle). Platzhalter wie Tablet/Monitor.
+const ANZEIGE_HTML: &str = include_str!("../../src-tauri/assets/anzeige.html");
+
 /// Gebündelte SVG-Länderflaggen (IOC-Code → `<code>.svg`), ausgeliefert
 /// unter `/{ns}/flags/{file}`.
 static FLAGS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../src-tauri/assets/flags");
@@ -737,6 +741,7 @@ async fn main() {
         .route("/health", get(health))
         .route("/{ns}/court/{id}", get(court_page))
         .route("/{ns}/courts", get(courts_list))
+        .route("/{ns}/anzeige", get(anzeige_page))
         .route("/{ns}/court/{id}/display", get(monitor_page))
         .route("/{ns}/court/{id}/state", get(monitor_state))
         .route("/{ns}/court/{id}/tafel", get(tafel_page))
@@ -870,14 +875,23 @@ async fn courts_list(State(broker): State<Broker>, Path(ns): Path<String>) -> im
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let courts = {
+    // Liste **innerhalb** des Locks bauen, damit `tablets` mitgelesen wird —
+    // ein Klon von `n.courts` allein kennt die Belegung nicht.
+    let items: Vec<serde_json::Value> = {
         let map = broker.namespaces.lock().await;
-        map.get(&ns).map(|n| n.courts.clone()).unwrap_or_default()
+        map.get(&ns)
+            .map(|n| {
+                n.courts
+                    .iter()
+                    // `occupied` = ein Tablet hält den Feld-Slot (Spec
+                    // zaehltafel-anzeige-huelle: Belegt-Warnung der Hülle).
+                    .map(|c| {
+                        serde_json::json!({ "id": c.id, "label": c.label, "hall": c.hall, "occupied": n.tablets.contains_key(&c.id) })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     };
-    let items: Vec<serde_json::Value> = courts
-        .into_iter()
-        .map(|c| serde_json::json!({ "id": c.id, "label": c.label, "hall": c.hall }))
-        .collect();
     (
         [(header::CACHE_CONTROL, "no-store")],
         Json(serde_json::Value::Array(items)),
@@ -1024,6 +1038,23 @@ async fn tafel_page(
         "fixed"
     };
     let body = render_tafel_html(mode, &monitor_base(&broker.public_base, &ns), &label);
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
+/// Rendert `anzeige.html`. Der Relay kennt die Bedien-PIN des Hosts nicht →
+/// leer, die Seite fällt auf „0000" zurück (wie beim Tablet).
+fn render_anzeige_html(base: &str) -> String {
+    ANZEIGE_HTML
+        .replace("__BASE__", base)
+        .replace("__TABLET_PIN__", "")
+}
+
+/// Anzeige-Hülle fürs Tablet (`/{ns}/anzeige`).
+async fn anzeige_page(State(broker): State<Broker>, Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let body = render_anzeige_html(&monitor_base(&broker.public_base, &ns));
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
@@ -5240,6 +5271,56 @@ mod tests {
         assert!(html.contains(r#"var BASE = "/bts-relay/ns1/";"#));
         assert!(html.contains(r#"var MODE = "device";"#));
         assert!(!html.contains("__COURT_LABEL__"));
+    }
+
+    #[test]
+    fn anzeige_html_traegt_relay_praefix_und_leere_pin() {
+        let html = render_anzeige_html(&monitor_base("https://badhub.de/bts-relay", "ns1"));
+        assert!(html.contains(r#"var BASE = "/bts-relay/ns1/";"#));
+        assert!(
+            html.contains(r#"var p = "";"#),
+            "Relay kennt die PIN nicht → Client fällt auf 0000"
+        );
+        assert!(!html.contains("__BASE__") && !html.contains("__TABLET_PIN__"));
+    }
+
+    #[tokio::test]
+    async fn feldliste_nennt_belegte_felder() {
+        // Spec zaehltafel-anzeige-huelle: „Zum Zählen wechseln" warnt vor einem
+        // belegten Feld — auch im Cloud-Pfad braucht die Liste dafür `occupied`.
+        const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = mpsc::unbounded_channel();
+        register_host(&broker, NS, &host).await;
+        let (tab, _trx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(NS).unwrap();
+            n.courts = vec![
+                relay_proto::CourtBrief {
+                    id: 7,
+                    label: "Feld 7".into(),
+                    hall: String::new(),
+                    hall_color: None,
+                },
+                relay_proto::CourtBrief {
+                    id: 8,
+                    label: "Feld 8".into(),
+                    hall: String::new(),
+                    hall_color: None,
+                },
+            ];
+            n.tablets.insert(7, tab);
+        }
+        let r = courts_list(State(broker.clone()), Path(NS.into()))
+            .await
+            .into_response();
+        assert_eq!(r.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(r.into_body(), 8192).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v[0]["id"], serde_json::json!(7));
+        assert_eq!(v[0]["occupied"], serde_json::json!(true));
+        assert_eq!(v[1]["occupied"], serde_json::json!(false));
     }
 
     fn brief(id: i64) -> MatchBrief {

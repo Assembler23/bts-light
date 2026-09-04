@@ -517,6 +517,11 @@
       z-index: 25;
     }
     .lock-overlay.visible { display: flex; }
+    /* Basis-Knopfmaße (padding/radius/font-size) kommen von der globalen
+       `button`-Regel — hier nur die Farben für den ruhigen Knopf. */
+    .lock-overlay button.neutral {
+      background: var(--surface-2); color: var(--text); border: 2px solid var(--line);
+    }
     .lock-icon { font-size: 3rem; }
     .lock-title { font-size: 1.5rem; font-weight: 800; }
     .lock-text { font-size: 1rem; color: #cbd5e1; max-width: 24rem; line-height: 1.45; }
@@ -897,6 +902,10 @@
     <div class="subtitle">Aktuelles Feld: <b>__COURT_LABEL__</b></div>
     <div class="settings-section">Feld wechseln</div>
     <div class="options" id="settings-court-list"></div>
+    <div class="settings-section">Anzeige</div>
+    <!-- Öffnet die Anzeige-Hülle mit der Zähltafel dieses Felds — für ein
+         zweites Tablet am Netz (Spec zaehltafel-anzeige-huelle). -->
+    <div class="opt settings-wide" id="settings-anzeige">Anzeige (nur Spielstand)</div>
     <div class="settings-section">Schiedsrichter</div>
     <div class="opt settings-wide" id="settings-umpire">Schiri-Modus: aus</div>
     <div class="opt settings-wide" id="settings-fullscreen">Vollbild ein/aus</div>
@@ -950,6 +959,9 @@
     sicher bist — z. B. wenn das andere Tablet ausgefallen ist. Danach kann
     das andere Gerät nicht mehr zählen.
   </div>
+  <!-- Ohne PIN: Die Anzeige-Seiten sind ohnehin frei erreichbar; das Zählen
+       bleibt durch dieses Overlay geschützt. Erst zeigen, dann übernehmen. -->
+  <button class="neutral" id="anzeige-btn">Nur Spielstand anzeigen</button>
   <button class="danger" id="takeover-btn">Court übernehmen</button>
 </div>
 
@@ -1326,6 +1338,7 @@ const els = {
   settingsPinDisplay: document.getElementById('settings-pin-display'),
   settingsPinPad: document.getElementById('settings-pin-pad'),
   settingsCourtList: document.getElementById('settings-court-list'),
+  settingsAnzeige: document.getElementById('settings-anzeige'),
   settingsFullscreen: document.getElementById('settings-fullscreen'),
   settingsClose: document.getElementById('settings-close'),
   settingsUmpire: document.getElementById('settings-umpire'),
@@ -1348,6 +1361,7 @@ const els = {
   cardRed: document.getElementById('card-red'),
   cardBlack: document.getElementById('card-black'),
   occupiedOverlay: document.getElementById('occupied-overlay'),
+  anzeigeBtn: document.getElementById('anzeige-btn'),
   takeoverBtn: document.getElementById('takeover-btn'),
   lockedOverlay: document.getElementById('locked-overlay'),
   breakAbort: document.getElementById('break-abort'),
@@ -3857,6 +3871,12 @@ function toggleFullscreen() {
   }
 }
 
+// Zur Anzeige-Hülle mit der Zähltafel dieses Felds (Spec zaehltafel-anzeige-huelle).
+function zurAnzeige() {
+  tlog('info', 'zur_anzeige');
+  location.href = BASE_PATH + '/anzeige?layout=tafel&court=' + encodeURIComponent(String(COURT_ID));
+}
+
 // ─────────────────────────── Schiri-Modus (Ansagen) ───────────────────
 // Erzeugt aus dem aktuellen Spielstand die immer sichtbare Ansage zum
 // Vorlesen (Deutsch/DBV). Aufschlägerstand zuerst; Gleichstand „N beide";
@@ -4445,6 +4465,8 @@ els.settingsUmpire.addEventListener('click', toggleUmpireMode);
 els.settingsBtn.addEventListener('click', openSettings);
 els.settingsClose.addEventListener('click', closeSettings);
 els.settingsFullscreen.addEventListener('click', toggleFullscreen);
+els.settingsAnzeige.addEventListener('click', zurAnzeige);
+els.anzeigeBtn.addEventListener('click', zurAnzeige);
 els.settingsPinPad.addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-k]');
   if (btn) pinKey(btn.dataset.k);
