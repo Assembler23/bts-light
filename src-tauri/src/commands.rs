@@ -930,6 +930,33 @@ fn effective_azure(
         .map(|a| (a.region.clone(), a.key.clone()))
 }
 
+/// Was vor dem Start der Übertragung stimmen muss. Reine Funktion, damit die
+/// Regeln testbar sind — `start_sync` selbst hängt an Tauri.
+///
+/// Ein Ansage-Slave pusht nie nach badhub und braucht nichts davon. Sonst:
+/// Badhub-Passwort, im Cloud-Modus die Installations-ID, und seit ADR 0054
+/// die turnier.de-GUID — ohne sie könnte badhub das Turnier nicht von einem
+/// parallel laufenden desselben Verbands unterscheiden.
+pub(crate) fn pruefe_startbedingungen(config: &crate::config::AppConfig) -> Result<(), String> {
+    if config.slave_mode {
+        return Ok(());
+    }
+    if config.badhub.password.is_empty() {
+        return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
+    }
+    if config.connection_mode.cloud_enabled() && config.install_id.is_empty() {
+        return Err("Für den Cloud-Modus fehlt die Installations-ID.".to_string());
+    }
+    if config.tournament_uuid_kanonisch().is_none() {
+        return Err(
+            "Die Turnier-Kennung von turnier.de fehlt — im Setup unter „1 · Liveticker-Ziel“ \
+             die Adresse deines Turniers einfügen."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// Startet die Hintergrund-Polling-Schleife (BTP → Badhub, alle 5 s).
 #[tauri::command]
 pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
@@ -943,16 +970,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
-    // Badhub-Zugang nur im Normalbetrieb nötig — ein Ansage-Slave pusht nie
-    // nach badhub und braucht weder Passwort noch (Cloud-)Installations-ID.
-    if !config.slave_mode {
-        if config.badhub.password.is_empty() {
-            return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
-        }
-        if config.connection_mode.cloud_enabled() && config.install_id.is_empty() {
-            return Err("Für den Cloud-Modus fehlt die Installations-ID.".to_string());
-        }
-    }
+    pruefe_startbedingungen(&config)?;
 
     // Die von Hand gesetzten Spielorte liegen neben der Konfiguration und
     // überleben so einen Neustart des Turnier-PCs. Ohne das wäre die Arbeit
@@ -5222,5 +5240,62 @@ mod tests {
         let empty: std::collections::HashSet<String> = std::collections::HashSet::new();
         crate::tablet::monitor::write_ad_bar(&bar_path, &empty).unwrap();
         assert!(collect_bar_sponsors_b64(ad_dir, &bar_path).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod startbedingungen_tests {
+    use super::pruefe_startbedingungen;
+    use crate::config::{AppConfig, ConnectionMode};
+
+    fn basis() -> AppConfig {
+        let mut cfg = AppConfig::default();
+        cfg.badhub.password = "pw".to_string();
+        cfg.install_id = "inst".to_string();
+        cfg.connection_mode = ConnectionMode::Lan;
+        cfg.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        cfg
+    }
+
+    #[test]
+    fn vollstaendige_config_darf_starten() {
+        assert_eq!(pruefe_startbedingungen(&basis()), Ok(()));
+    }
+
+    #[test]
+    fn ohne_guid_kein_start() {
+        let mut cfg = basis();
+        cfg.tournament_uuid = String::new();
+        let err = pruefe_startbedingungen(&cfg).unwrap_err();
+        assert!(err.contains("Turnier-Kennung"), "{err}");
+        assert!(err.contains("1 · Liveticker-Ziel"), "{err}");
+    }
+
+    #[test]
+    fn kaputte_guid_kein_start() {
+        let mut cfg = basis();
+        cfg.tournament_uuid = "0EA5FD86-A64F".to_string();
+        assert!(pruefe_startbedingungen(&cfg).is_err());
+    }
+
+    #[test]
+    fn slave_braucht_keine_guid_und_kein_passwort() {
+        let cfg = AppConfig {
+            slave_mode: true,
+            ..AppConfig::default()
+        };
+        assert_eq!(pruefe_startbedingungen(&cfg), Ok(()));
+    }
+
+    #[test]
+    fn passwort_fehlt_wird_vor_der_guid_gemeldet() {
+        // Reihenfolge wie bisher: erst der Badhub-Zugang, dann alles Weitere —
+        // wer kein Passwort hat, soll nicht zuerst nach der GUID suchen.
+        let mut cfg = basis();
+        cfg.badhub.password = String::new();
+        cfg.tournament_uuid = String::new();
+        assert!(pruefe_startbedingungen(&cfg)
+            .unwrap_err()
+            .contains("Badhub-Passwort"));
     }
 }
