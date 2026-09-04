@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Anzeige – bts-light</title>
+<!--
+  Anzeige-Hülle für Tablets (Spec docs/features/zaehltafel-anzeige-huelle.md):
+  zeigt eine der Anzeige-Seiten (Zähltafel, Feld-Monitor, Hallen-Übersicht,
+  In Vorbereitung) in einem seitenfüllenden iframe derselben Herkunft und
+  liefert, was ein Tablet braucht und ein TV nicht: Zahnrad mit PIN,
+  Layout-Wahl, Feldwechsel, Seiten spiegeln, Weg zurück zum Zählen (mit
+  Belegt-Warnung), Neu laden, Vollbild, Wake-Lock. Sie öffnet nie /ws und
+  schreibt nie zurück. Der Pfad im iframe kommt ausschließlich aus der
+  Allowlist in anzeigeZiel (Inline-Kopie unten) — nie aus freiem Text.
+-->
+<style>
+  :root {
+    --bg: #0b1020; --surface: #111c33; --surface-2: #1e293b; --text: #f1f5f9;
+    --muted: #94a3b8; --line: #334155; --primary: #15803d; --danger: #b91c1c;
+    --scrim: rgba(2, 6, 23, .94);
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden;
+    -webkit-user-select: none; user-select: none; }
+  /* Das eingebettete Layout füllt den Bildschirm; die Hülle selbst zeigt
+     nichts außer dem Zahnrad. */
+  #rahmen { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); }
+  /* Dezentes Zahnrad: halbtransparent in der Ecke, nur beim Tippen deutlich. */
+  #zahnrad { position: fixed; top: .6rem; right: .6rem; width: 2.6rem; height: 2.6rem;
+    border-radius: 50%; border: 0; background: rgba(15, 23, 42, .35); color: #fff;
+    font-size: 1.3rem; line-height: 1; opacity: .45; z-index: 5; cursor: pointer;
+    touch-action: manipulation; }
+  #zahnrad:active { opacity: 1; }
+  /* Modal wie am Zähl-Tablet: Scrim, Karte in der Mitte, Optionen als Kacheln. */
+  .modal { position: fixed; inset: 0; background: var(--scrim); display: none;
+    align-items: center; justify-content: center; flex-direction: column; gap: 1.25rem;
+    padding: 2rem; text-align: center; z-index: 10; overflow-y: auto; }
+  .modal.visible { display: flex; }
+  .settings-view { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; width: 100%; }
+  .settings-view[hidden] { display: none; }
+  .title { font-size: 1.6rem; font-weight: 800; }
+  .subtitle { font-size: 1rem; color: #e2e8f0; margin-top: -.8rem; }
+  .settings-section { font-size: 1.05rem; font-weight: 700; color: #e2e8f0; }
+  .options { display: flex; flex-wrap: wrap; gap: .75rem; justify-content: center; max-width: 60rem; width: 100%; }
+  .opt { flex: 0 0 auto; min-width: 16rem; padding: 1.1rem 1rem; background: var(--surface);
+    border: 2px solid var(--line); border-radius: .75rem; font-size: 1.15rem; font-weight: 700;
+    color: var(--text); cursor: pointer; touch-action: manipulation; }
+  .opt:active { background: var(--surface-2); }
+  .opt.aktiv { border-color: var(--primary); }
+  .opt.danger { border-color: var(--danger); }
+  .opt[hidden], [hidden] { display: none !important; }
+  .pin-display { font-size: 2rem; letter-spacing: .6rem; min-height: 2.4rem; font-weight: 700; }
+  .pin-pad { display: grid; grid-template-columns: repeat(3, 5rem); gap: .75rem; }
+  .pin-pad button { width: 5rem; height: 4rem; font-size: 1.5rem; font-weight: 700;
+    background: var(--surface); border: 2px solid var(--line); border-radius: .75rem;
+    color: var(--text); cursor: pointer; touch-action: manipulation; }
+  .pin-pad button:active { background: var(--surface-2); }
+  .pin-pad button.pin-aux { font-size: 1.2rem; color: var(--muted); }
+  .hinweis { font-size: .95rem; color: #cbd5e1; max-width: 28rem; line-height: 1.45; }
+  #warnung .title { color: #fbbf24; }
+</style>
+</head>
+<body>
+  <iframe id="rahmen" title="Anzeige" allow="fullscreen"></iframe>
+  <button type="button" id="zahnrad" title="Einstellungen (PIN)" aria-label="Einstellungen">⚙</button>
+
+  <div class="modal" id="menue">
+    <!-- 1) PIN-Eingabe — dieselbe PIN wie am Zähl-Tablet. -->
+    <div class="settings-view" id="pin-view">
+      <div class="title">Anzeige</div>
+      <div class="subtitle">PIN eingeben</div>
+      <div class="pin-display" id="pin-display"></div>
+      <div class="pin-pad" id="pin-pad">
+        <button type="button" data-k="1">1</button>
+        <button type="button" data-k="2">2</button>
+        <button type="button" data-k="3">3</button>
+        <button type="button" data-k="4">4</button>
+        <button type="button" data-k="5">5</button>
+        <button type="button" data-k="6">6</button>
+        <button type="button" data-k="7">7</button>
+        <button type="button" data-k="8">8</button>
+        <button type="button" data-k="9">9</button>
+        <button type="button" data-k="del" class="pin-aux">⌫</button>
+        <button type="button" data-k="0">0</button>
+        <button type="button" data-k="cancel" class="pin-aux">✕</button>
+      </div>
+    </div>
+    <!-- 2) Menü (nach korrekter PIN, oder direkt als Feldwahl, wenn noch kein Feld gewählt ist). -->
+    <div class="settings-view" id="main-view" hidden>
+      <div class="title">Anzeige</div>
+      <div class="subtitle" id="stand"></div>
+      <div class="settings-section" id="layout-titel">Anzeige wählen</div>
+      <div class="options" id="layout-liste"></div>
+      <div class="settings-section" id="feld-titel">Feld wechseln</div>
+      <div class="options" id="feld-liste"></div>
+      <div class="options" id="aktionen">
+        <div class="opt" id="spiegeln">Seiten spiegeln: aus</div>
+        <div class="opt" id="zaehlen">Zum Zählen wechseln</div>
+        <div class="opt" id="neuladen">Neu laden</div>
+        <div class="opt" id="vollbild">Vollbild ein/aus</div>
+        <div class="opt" id="schliessen">Schließen</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Belegt-Warnung vor „Zum Zählen wechseln": Die Zähl-Seite würde bei totem
+       Slot-Halter still übernehmen (ADR 0017) — hier wird gefragt. -->
+  <div class="modal" id="warnung">
+    <div class="title">Feld wird bereits gezählt</div>
+    <div class="hinweis">Auf diesem Feld zählt bereits ein Gerät. Wechselst du trotzdem zum Zählen,
+      siehst du dort die Übernahme-Abfrage — übernimm nur, wenn das andere Tablet ausgefallen ist.</div>
+    <div class="options">
+      <div class="opt danger" id="warnung-weiter">Trotzdem zum Zählen</div>
+      <div class="opt" id="warnung-abbruch">Abbrechen</div>
+    </div>
+  </div>
+
+<script>
+  "use strict";
+  // Basis-Pfad mit Schrägstrich am Ende — vom Server eingesetzt ("/" im LAN,
+  // "/bts-relay/<ns>/" im Cloud). Alle Ziele hängen relativ daran.
+  var BASE = "__BASE__";
+  // PIN wie am Zähl-Tablet: reiner Bedien-Schutz, keine Sicherheitsgrenze.
+  // Defensiv gestückelt, damit der Server den Vergleichswert nicht mitersetzt;
+  // unersetzter oder leerer Platzhalter (Relay) → „0000".
+  var SETTINGS_PIN = (function () {
+    var p = "__TABLET_PIN__";
+    return (!p || p === "__TABLET" + "_PIN__") ? "0000" : p;
+  })();
+  var LAYOUT_LABEL = { tafel: "Zähltafel", feld: "Feld-Monitor", uebersicht: "Hallen-Übersicht", vorbereitung: "In Vorbereitung" };
+  var SPIEGEL_KEY = "badhub.anzeige.spiegel";
+  var ZULETZT_KEY = "badhub.anzeige.zuletzt";
+
+  // ── Inline-Kopie von src/io/anzeigeZiel.mjs — Änderungen dort und hier gemeinsam ──
+  var LAYOUTS = ["tafel", "feld", "uebersicht", "vorbereitung"];
+  function feldbezogen(layout) { return layout === "tafel" || layout === "feld"; }
+  function zielAusQuery(layoutRoh, courtRoh) {
+    const l = typeof layoutRoh === "string" ? layoutRoh : "";
+    const layout = LAYOUTS.includes(l) ? l : "tafel";
+    const c = courtRoh == null ? "" : String(courtRoh);
+    // Nur 1–10 Ziffern ohne führende Null: keine Vorzeichen, Brüche,
+    // Exponenten, Pfadteile oder Leerzeichen.
+    const court = /^[1-9][0-9]{0,9}$/.test(c) ? Number(c) : null;
+    return { layout, court };
+  }
+  function zielPfad(ziel, spiegel) {
+    const court = ziel && Number.isInteger(ziel.court) && ziel.court > 0 ? ziel.court : null;
+    switch (ziel && ziel.layout) {
+      case "tafel":
+        return court ? `court/${court}/tafel${spiegel ? "?spiegel=1" : ""}` : null;
+      case "feld":
+        return court ? `court/${court}/display` : null;
+      case "uebersicht":
+        return "info/overview";
+      case "vorbereitung":
+        return "info/preparation";
+      default:
+        return null;
+    }
+  }
+  // ── Ende Inline-Kopie ──
+
+  var els = {
+    rahmen: document.getElementById("rahmen"),
+    zahnrad: document.getElementById("zahnrad"),
+    menue: document.getElementById("menue"),
+    pinView: document.getElementById("pin-view"),
+    mainView: document.getElementById("main-view"),
+    pinDisplay: document.getElementById("pin-display"),
+    pinPad: document.getElementById("pin-pad"),
+    stand: document.getElementById("stand"),
+    layoutTitel: document.getElementById("layout-titel"),
+    layoutListe: document.getElementById("layout-liste"),
+    feldTitel: document.getElementById("feld-titel"),
+    feldListe: document.getElementById("feld-liste"),
+    aktionen: document.getElementById("aktionen"),
+    spiegeln: document.getElementById("spiegeln"),
+    zaehlen: document.getElementById("zaehlen"),
+    neuladen: document.getElementById("neuladen"),
+    vollbild: document.getElementById("vollbild"),
+    schliessen: document.getElementById("schliessen"),
+    warnung: document.getElementById("warnung"),
+    warnungWeiter: document.getElementById("warnung-weiter"),
+    warnungAbbruch: document.getElementById("warnung-abbruch"),
+  };
+
+  // ── Ziel bestimmen: Adresse, sonst zuletzt gemerkt ───────────────────────
+  var params = new URLSearchParams(location.search);
+  var ziel = zielAusQuery(params.get("layout"), params.get("court"));
+  if (!params.has("layout") && !params.has("court")) {
+    try {
+      var z = JSON.parse(localStorage.getItem(ZULETZT_KEY) || "null");
+      if (z) ziel = zielAusQuery(z.layout, z.court == null ? null : String(z.court));
+    } catch (e) { /* kein Speicher → Standard */ }
+  }
+  var spiegel = false;
+  try { spiegel = localStorage.getItem(SPIEGEL_KEY) === "1"; } catch (e) {}
+  var feldNamen = {};   // CourtID → Label, aus `courts`
+
+  function feldName(id) { return feldNamen[id] || ("Feld " + id); }
+
+  // Zeigt das Ziel im iframe, hält Adresse und Speicher nach. Ohne Feld bei
+  // einem Feld-Layout: Feldwahl öffnen (ohne PIN — es gibt noch nichts zu
+  // schützen, die Seite zeigt ja nichts).
+  function zeige() {
+    var pfad = zielPfad(ziel, spiegel);
+    if (!pfad) { els.rahmen.removeAttribute("src"); oeffneMenue(true); return; }
+    var src = BASE + pfad;
+    if (els.rahmen.getAttribute("src") !== src) els.rahmen.src = src;
+    document.title = LAYOUT_LABEL[ziel.layout] + (feldbezogen(ziel.layout) ? " – " + feldName(ziel.court) : "") + " – bts-light";
+    var q = "?layout=" + ziel.layout + (feldbezogen(ziel.layout) && ziel.court ? "&court=" + ziel.court : "");
+    try { history.replaceState(null, "", location.pathname + q); } catch (e) {}
+    try { localStorage.setItem(ZULETZT_KEY, JSON.stringify({ layout: ziel.layout, court: ziel.court })); } catch (e) {}
+  }
+
+  // ── Menü mit PIN ─────────────────────────────────────────────────────────
+  var pinEntry = "";
+  function renderPin() {
+    var total = Math.max(SETTINGS_PIN.length, 4);
+    els.pinDisplay.textContent = "•".repeat(pinEntry.length) + "–".repeat(Math.max(0, total - pinEntry.length));
+  }
+  // `nurFeldwahl`: Start ohne gültiges Feld → direkt die Feldliste, PIN-frei.
+  function oeffneMenue(nurFeldwahl) {
+    pinEntry = ""; renderPin();
+    els.pinView.hidden = !!nurFeldwahl;
+    els.mainView.hidden = !nurFeldwahl;
+    els.layoutTitel.hidden = !!nurFeldwahl; els.layoutListe.hidden = !!nurFeldwahl;
+    els.aktionen.hidden = !!nurFeldwahl;
+    els.feldTitel.hidden = false; els.feldListe.hidden = false;
+    if (nurFeldwahl) { els.stand.textContent = "Bitte ein Feld wählen"; ladeFelder(); }
+    els.menue.classList.add("visible");
+  }
+  function schliesseMenue() { els.menue.classList.remove("visible"); pinEntry = ""; }
+  function zeigeHauptmenue() {
+    els.pinView.hidden = true; els.mainView.hidden = false;
+    els.layoutTitel.hidden = false; els.layoutListe.hidden = false; els.aktionen.hidden = false;
+    var feld = feldbezogen(ziel.layout);
+    els.feldTitel.hidden = !feld; els.feldListe.hidden = !feld;
+    els.spiegeln.hidden = ziel.layout !== "tafel";
+    els.zaehlen.hidden = !feld;
+    els.stand.textContent = LAYOUT_LABEL[ziel.layout] + (feld && ziel.court ? " · " + feldName(ziel.court) : "");
+    els.spiegeln.textContent = "Seiten spiegeln: " + (spiegel ? "an" : "aus");
+    renderLayouts();
+    if (feld) ladeFelder();
+  }
+  function pinKey(k) {
+    if (k === "cancel") { schliesseMenue(); return; }
+    if (k === "del") { pinEntry = pinEntry.slice(0, -1); renderPin(); return; }
+    if (pinEntry.length >= Math.max(SETTINGS_PIN.length, 8)) return;
+    pinEntry += k; renderPin();
+    if (pinEntry.length >= SETTINGS_PIN.length) {
+      if (pinEntry === SETTINGS_PIN) { zeigeHauptmenue(); }
+      else { els.pinDisplay.textContent = "PIN falsch"; pinEntry = ""; setTimeout(renderPin, 800); }
+    }
+  }
+  function renderLayouts() {
+    els.layoutListe.textContent = "";
+    LAYOUTS.forEach(function (l) {
+      var b = document.createElement("div");
+      b.className = "opt" + (l === ziel.layout ? " aktiv" : "");
+      b.textContent = LAYOUT_LABEL[l];
+      b.addEventListener("click", function () {
+        ziel = { layout: l, court: ziel.court };
+        schliesseMenue(); zeige();
+      });
+      els.layoutListe.appendChild(b);
+    });
+  }
+  function ladeFelder() {
+    els.feldListe.textContent = "Lade Felder…";
+    fetch(BASE + "courts", { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (list) {
+        els.feldListe.textContent = "";
+        if (!Array.isArray(list) || list.length === 0) { els.feldListe.textContent = "Keine Felder gefunden."; return; }
+        list.forEach(function (c) {
+          var id = Number(c.id);
+          if (!Number.isInteger(id) || id <= 0) return;
+          feldNamen[id] = c.label || ("Feld " + id);
+          var b = document.createElement("div");
+          var aktuell = id === ziel.court;
+          b.className = "opt" + (aktuell ? " aktiv" : "");
+          b.textContent = feldNamen[id] + (aktuell ? " (aktuell)" : "") + (c.occupied === true ? " · wird gezählt" : "");
+          b.addEventListener("click", function () {
+            ziel = { layout: feldbezogen(ziel.layout) ? ziel.layout : "tafel", court: id };
+            schliesseMenue(); zeige();
+          });
+          els.feldListe.appendChild(b);
+        });
+      })
+      .catch(function () { els.feldListe.textContent = "Feldliste nicht erreichbar."; });
+  }
+
+  // ── Aktionen ─────────────────────────────────────────────────────────────
+  els.spiegeln.addEventListener("click", function () {
+    spiegel = !spiegel;
+    try { localStorage.setItem(SPIEGEL_KEY, spiegel ? "1" : "0"); } catch (e) {}
+    schliesseMenue(); zeige();
+  });
+  // Zum Zählen: erst fragen, ob das Feld belegt ist. `occupied` fehlt bei
+  // einem älteren Relay → unbekannt → ohne Warnung (wie bisher am Tablet).
+  function zumZaehlen() { location.href = BASE + "court/" + encodeURIComponent(String(ziel.court)); }
+  els.zaehlen.addEventListener("click", function () {
+    if (!ziel.court) return;
+    fetch(BASE + "courts", { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (list) {
+        var c = Array.isArray(list) ? list.find(function (x) { return Number(x.id) === ziel.court; }) : null;
+        if (c && c.occupied === true) { schliesseMenue(); els.warnung.classList.add("visible"); }
+        else zumZaehlen();
+      })
+      .catch(zumZaehlen);
+  });
+  els.warnungWeiter.addEventListener("click", zumZaehlen);
+  els.warnungAbbruch.addEventListener("click", function () { els.warnung.classList.remove("visible"); });
+  els.neuladen.addEventListener("click", function () { location.reload(); });
+  els.vollbild.addEventListener("click", function () {
+    if (document.fullscreenElement) { if (document.exitFullscreen) document.exitFullscreen(); }
+    else if (document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen().catch(function () {}); }
+    schliesseMenue();
+  });
+  els.schliessen.addEventListener("click", schliesseMenue);
+  els.zahnrad.addEventListener("click", function () { oeffneMenue(false); });
+  els.pinPad.addEventListener("click", function (e) {
+    var btn = e.target.closest("button[data-k]");
+    if (btn) pinKey(btn.dataset.k);
+  });
+
+  // ── Wake-Lock: nur im Secure Context vorhanden (Cloud https, LAN-TLS). Im
+  // LAN über http fehlt die API — dann greift die Geräteeinstellung. Nach der
+  // ersten Berührung anfordern (Browser verlangen eine Geste) und nach jedem
+  // Sichtbarwerden erneut (der Lock fällt beim Tab-Wechsel weg).
+  var wakeLock = null;
+  function wachhalten() {
+    if (!("wakeLock" in navigator) || wakeLock) return;
+    navigator.wakeLock.request("screen")
+      .then(function (l) { wakeLock = l; l.addEventListener("release", function () { wakeLock = null; }); })
+      .catch(function () {});
+  }
+  document.addEventListener("pointerdown", wachhalten);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") wachhalten(); });
+  wachhalten();
+
+  document.addEventListener("dblclick", function (e) { e.preventDefault(); });
+  zeige();
+</script>
+</body>
+</html>
