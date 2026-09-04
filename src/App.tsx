@@ -57,6 +57,7 @@ function defaultConfig(): AppConfig {
     },
     upload_logs: false,
     install_id: "",
+    tournament_uuid: "",
     connection_mode: "lan",
     slave_mode: false,
     master_namespace: "",
