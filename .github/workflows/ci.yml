@@ -220,6 +220,11 @@ jobs:
       - name: Umschalter Produktiv-Test (JS)
         run: node scripts/test-badhub-ziel.mjs
 
+      # &g=<GUID> an den Online-Monitor-Links (ADR 0054). Fehlt der Anhang,
+      # zeigt der Link auf den Verbandsstand statt aufs richtige Kind-Turnier.
+      - name: Turnier-GUID an Live-Links (JS)
+        run: node scripts/test-live-link.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

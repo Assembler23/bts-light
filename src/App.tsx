@@ -11,6 +11,7 @@ import {
   wifiStatus,
 } from "./api";
 import { setSharedOverrides } from "./io/announcer";
+import { isTournamentGuid } from "./tournamentGuid";
 import { AlertBanner } from "./components/AlertBanner";
 import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
 import { PrintWarningBanner } from "./components/PrintWarningBanner";
@@ -164,6 +165,10 @@ function App() {
   // SlaveConnectBanner, damit dessen Baseline nicht der leere Anfangszustand ist.
   const [slavesLoaded, setSlavesLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Fehlertext des letzten Start-/Stopp-Versuchs (z. B. „Turnier-GUID fehlt“) —
+  // ohne diesen State verpufft ein Fehler von `start_sync` (C1): der Button
+  // hört einfach auf zu laden, ohne dass die Turnierleitung erfährt, warum.
+  const [runError, setRunError] = useState("");
 
   useEffect(() => {
     loadConfig()
@@ -175,9 +180,13 @@ function App() {
           void saveConfig(c);
         }
         setConfig(c);
-        // Ist bereits ein Badhub-Passwort hinterlegt, gilt die App als
-        // eingerichtet und zeigt direkt das Dashboard.
-        setView(c.badhub.password ? "dashboard" : "wizard");
+        // Ist bereits ein Badhub-Passwort hinterlegt UND (im Master-Betrieb)
+        // eine gültige Turnier-GUID gesetzt, gilt die App als eingerichtet
+        // und zeigt direkt das Dashboard. Ohne die GUID würde „Starten“ erst
+        // beim Klick scheitern (ADR 0054, C1) — der Assistent führt stattdessen
+        // sofort zum fehlenden Feld. Ein Ansage-Slave braucht keine GUID.
+        const brauchtGuid = !c.slave_mode && !isTournamentGuid(c.tournament_uuid);
+        setView(c.badhub.password && !brauchtGuid ? "dashboard" : "wizard");
       })
       .catch(() => setView("wizard"));
   }, []);
@@ -317,6 +326,7 @@ function App() {
   async function toggleRun() {
     if (!status) return;
     setBusy(true);
+    setRunError("");
     try {
       if (status.running) {
         await stopSync();
@@ -324,6 +334,10 @@ function App() {
         await startSync();
       }
       setStatus(await getStatus());
+    } catch (e) {
+      // start_sync scheitert u. a. ohne Turnier-GUID (`pruefe_startbedingungen`,
+      // ADR 0054) — ohne diesen Fang blieb der Fehler unsichtbar (C1).
+      setRunError(String(e));
     } finally {
       setBusy(false);
     }
@@ -469,6 +483,11 @@ function App() {
         <AlertBanner />
         <AzureFallbackBanner />
         <PrintWarningBanner />
+        {runError && (
+          <div className="bg-rose-600 px-4 py-2 text-sm font-medium text-white">
+            Übertragung nicht gestartet: {runError}
+          </div>
+        )}
         {slavesLoaded && <SlaveConnectBanner slaves={slaves} />}
         <AppShell
           current={view}
