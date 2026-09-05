@@ -278,6 +278,14 @@ if (notesOut && notesVersion) {
 const PI_IMAGE_URL = "pi-image/bts-light-pi.img.xz";
 const PI_IMAGE_SHA_URL = "pi-image/bts-light-pi.img.xz.sha256";
 
+// ── Handbuch ──────────────────────────────────────────────
+// Die Anleitung liegt als eigene statische Seite im Unterordner handbuch/
+// (scripts/build-handbuch.mjs, eigener Workflow). Sie wird NICHT bei jedem
+// Tag neu gebaut, sondern bei jeder Doku-Aenderung auf main — deshalb steht
+// hier nur der Link, nicht der Inhalt. Diese Seite ist aus Sicht des
+// Handbuchs ein Kapitel ("Downloads & Versionshinweise") und verlinkt
+// umgekehrt zurueck.
+
 // ── Seite rendern ─────────────────────────────────────────────────────────
 const latest = sections[0];
 const generated = new Date().toISOString().slice(0, 10);
@@ -357,6 +365,7 @@ const html = `<!DOCTYPE html>
     <p>Plug-and-play-Brücke zwischen BTP (Badminton Tournament Planner) und dem badhub.de-Liveticker – mit Tablet-Spielzettel und Court-Monitoren.</p>
     <a class="stable" href="BTS.Light-setup.exe">Aktuelle Version herunterladen (v${latest.version})</a>
     <a class="stable ghost" href="#pi-image">Pi-Image für Court-Monitore</a>
+    <a class="stable ghost" href="handbuch/">Handbuch</a>
   </div>
 </header>
 <main>
