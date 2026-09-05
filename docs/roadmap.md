@@ -691,6 +691,35 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Changelog-Auszug zusätzlich in `latest.json → notes` (Update-Fenster
   zeigt „Was ist neu"). Plan 18 in
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+- **Handbuch Stufe 2 — die fehlenden Kapitel.** *Status: zurückgestellt ·
+  Priorität: mittel · Trigger: Wunsch vom 05.09.2026, nach Freigabe von
+  Stufe 1 (PR #333).* Stufe 1 veröffentlicht die vorhandene Doku unter
+  `badhub.de/download/bts-light/handbuch/`. Gewünscht ist darüber hinaus ein
+  Handbuch, in dem **nachlesbar** ist:
+  - was die **Tablets** können — alle Funktionen des Spielzettels, nicht nur
+    der Zähl-Ablauf;
+  - **was welche Einstellung in der Software bewirkt** — eine Referenz über
+    alle Abschnitte der Einstellungen (heute 17 in `SetupWizard.tsx`, für die
+    es keinerlei Doku gibt);
+  - wie der **Master-/Slave-Betrieb** funktioniert — heute verteilt über
+    [multi-hall.md](multi-hall.md) und [cloud-relay.md](cloud-relay.md), in
+    Architektursprache statt als Erklärung;
+  - was die **Oberflächen** jeweils können (Turnierleitungs-Sicht,
+    Court-Monitor, Info-Monitor, Siegerehrung, Aushang).
+
+  Dazu weiterhin offen: Installation/Erste Schritte, Setup-Wizard, Wartung.
+  **Der Aufwand liegt im Schreiben, nicht in der Technik** — die Strecke
+  Markdown → Website → Deploy steht. Neue Kapitel entstehen als normale
+  `docs/*.md` und werden in [handbuch.json](handbuch.json) eingetragen; es
+  bleibt bei einem Doku-Ort. Entscheidungen und Grenzen:
+  [features/handbuch-website.md](features/handbuch-website.md).
+- **Handbuch: Screenshots.** *Status: zurückgestellt · Priorität: niedrig ·
+  Trigger: erst wenn die Textfassung von Stufe 2 steht.* Für Vollabdeckung
+  rund 45–60 Aufnahmen. Die Web-Oberflächen (Tablet, TL-Web, Monitor, Aushang,
+  Werbung) sind reine HTML-Seiten des eingebetteten Servers und damit gegen
+  einen Mock-Stand automatisierbar; nur die Tauri-Fenster bleiben Handarbeit.
+  Bewusst nachgelagert: Screenshots veralten mit jedem UI-Umbau, und der
+  Pflegeaufwand ist der eigentliche Dauerposten des Handbuchs.
 - **Feld-Raster per Drag & Drop anordnen.** Das Feld-Raster
   (Spaltenzahl + Start-Ecke + Schlange, [features/feld-raster.md](features/feld-raster.md))
   deckt rechteckige Hallen ab; für unregelmäßige Hallen wäre eine frei
@@ -937,9 +966,11 @@ verliehen):
   pro Pi steuerbar (ohne `bts-monitor-url.txt` editieren zu müssen).
   Implementation: zusätzliches Feld `rotation: Option<u16>` in der
   Geräte-Zuweisung; bts-monitor.sh hängt `?rotate=…` an die URL an.
-- **Online-Anleitung veröffentlichen.** [pi-setup.md](pi-setup.md) als
-  echte Webseite (badhub.de) bereitstellen und **in bts-light verlinken**
-  (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
+- **Online-Anleitung veröffentlichen — Veröffentlichung erledigt, Verlinkung
+  offen.** [pi-setup.md](pi-setup.md) steht seit dem Handbuch (PR #333) als
+  echte Webseite unter `badhub.de/download/bts-light/handbuch/pi-einrichten.html`.
+  **Offen bleibt:** aus bts-light heraus darauf verlinken (Knopf
+  „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
 - **2-Felder-pro-TV-Modus.** Zwei benachbarte Felder auf einem großen TV
   (`…/display?courts=3,4`).
 
