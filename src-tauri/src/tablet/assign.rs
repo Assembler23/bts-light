@@ -851,6 +851,7 @@ mod tests {
     fn a_match(id: i64) -> BtpMatch {
         BtpMatch {
             display_order: None,
+            highlight: 0,
             from1: None,
             from2: None,
             id,

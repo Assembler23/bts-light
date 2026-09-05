@@ -1732,6 +1732,12 @@ pub struct TlPanelProfileWire {
 /// ohne dass eine versehentliche Endlos-Anlage den Zustand sprengen kann.
 pub const MAX_TL_PROFILES: usize = 32;
 
+/// Höchster Wert von BTPs Zeilenfarbe `Match.Highlight` (Spec
+/// `tl-zeilenfarbe`): `0` = keine, `1`–`6` = die sechs Farben des Menüs
+/// „Hervorheben" — mehr bietet BTP nicht (gemessen 05.09.2026). Host und
+/// Seite prüfen gegen denselben Deckel; ein Wert darüber gilt als „keine".
+pub const MAX_HIGHLIGHT: u8 = 6;
+
 /// Die Aktionen, die ein Turnierleitungs-Gerät auslösen darf — ein **bewusst
 /// geschlossener** Satz (ADR 0011). Was hier nicht steht, ist nicht
 /// darstellbar; der Relay leitet nur weiter, entschieden und validiert wird
@@ -1887,6 +1893,19 @@ pub enum TlAction {
         /// Gewünschtes Feld; `None` = Wunsch aufheben.
         #[serde(rename = "courtId", default, skip_serializing_if = "Option::is_none")]
         court_id: Option<i64>,
+    },
+    /// Zeilenfarbe eines Spiels setzen (Spec `tl-zeilenfarbe`, ADR 0056):
+    /// BTPs „Hervorheben" — `0` = keine, `1`–`6` = die sechs Menüfarben
+    /// ([`MAX_HIGHLIGHT`]). Der Turnier-PC schreibt den Wert nach BTP
+    /// (`Match.Highlight`); BTP bleibt die Wahrheit, die Seite zeigt beim
+    /// nächsten Stand, was BTP daraus gemacht hat.
+    ///
+    /// Trägt den **Zielwert**, nicht „nächste Farbe": Bei zwei
+    /// Turnierleitungs-Geräten wäre ein Weiterschalten nicht eindeutig.
+    SetHighlight {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        highlight: u8,
     },
     /// Ein Feld sperren oder freigeben (Spec `tl-web-felder-sperren`).
     ///
@@ -4331,6 +4350,32 @@ mod tests {
             json,
             r#"{"action":"set_wish_court","matchId":4711,"courtId":3}"#
         );
+    }
+
+    /// Zeilenfarbe (Spec `tl-zeilenfarbe`): `tl.html` baut das JSON von
+    /// Hand — die Feldnamen sind Vertrag.
+    #[test]
+    fn tl_action_set_highlight_wire_form() {
+        let json = serde_json::to_string(&TlAction::SetHighlight {
+            match_id: 4711,
+            highlight: 3,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"action":"set_highlight","matchId":4711,"highlight":3}"#
+        );
+        let back: TlAction =
+            serde_json::from_str(r#"{"action":"set_highlight","matchId":4711,"highlight":0}"#)
+                .unwrap();
+        assert_eq!(
+            back,
+            TlAction::SetHighlight {
+                match_id: 4711,
+                highlight: 0
+            }
+        );
+        assert_eq!(MAX_HIGHLIGHT, 6);
     }
 
     /// Die Seiten vergleichen **wörtliche** Zeichenketten: `tablet.html`

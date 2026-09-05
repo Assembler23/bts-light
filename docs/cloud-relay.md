@@ -392,6 +392,14 @@ wird der Wunsch aufgehoben. Der Relay braucht keine Code-Änderung (typisiertes
 `can_set_wish_court`, über das die Seite den Wähler nur zeigt, wenn der Host
 die Aktion kennt.
 
+**Zeilenfarbe** (Spec `tl-zeilenfarbe`, seit v0.9.277): eine neue
+`TlAction`-Variante `set_highlight { matchId, highlight }` mit `highlight`
+0–6 (`MAX_HIGHLIGHT`; BTPs „Hervorheben"). Der Relay trägt sie nur durch
+(neues `relay-proto`, Deploy beim Merge). Additiv im `TlState`:
+`highlight` an `TlMatch`, `TlOpenMatch` und `TlCourt` (bei 0 weggelassen)
+sowie das Fähigkeitsmerkmal `can_set_highlight` — Muster wie beim
+Wunschfeld.
+
 **Warnung „Ergebnis fehlt"** (Spec `tl-warnung-fertiges-spiel`, seit
 v0.9.259): rein additiv im `TlState` — `TlCourt.decided_since_ms` (Zeitstempel)
 und `finished_warning_seconds` (Frist). Keine neue Aktion, keine Relay-Änderung.

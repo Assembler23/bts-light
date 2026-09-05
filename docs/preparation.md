@@ -19,6 +19,13 @@ Abgleich läuft im Sync-Loop (`reconcile_highlights`, nur der Diff) — siehe
 Ansage, `display=next`) funktioniert unabhängig davon weiter, auch wenn der
 BTP-Write mal fehlschlägt.
 
+**Seit v0.9.277** teilt sich der Aufruf das Feld mit der **Zeilenfarbe**
+(Spec [`features/tl-zeilenfarbe.md`](features/tl-zeilenfarbe.md)): Der
+Aufruf setzt in BTP Gelb (Wert 1) und nimmt es beim Ruf aufs Feld zurück.
+Trägt das Spiel schon eine von Hand gesetzte Farbe, lässt der Aufruf sie in
+Ruhe; wird ein gerufenes Spiel umgefärbt, bleibt die neue Farbe auch nach
+dem Aufruf stehen ([ADR 0056](adr/0056-zeilenfarbe-btp-fuehrt-aufrufmarke-weicht.md)).
+
 Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
 (badhub-Seite); Hallen-Ansage mit v0.9.16.
 

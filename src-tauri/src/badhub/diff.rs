@@ -136,6 +136,7 @@ mod tests {
     fn match_on_court(id: i64, court: &str, sets: Vec<(i64, i64)>) -> BtpMatch {
         BtpMatch {
             display_order: None,
+            highlight: 0,
             from1: None,
             from2: None,
             id,
