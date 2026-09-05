@@ -225,6 +225,12 @@ jobs:
       - name: Turnier-GUID an Live-Links (JS)
         run: node scripts/test-live-link.mjs
 
+      # Aufruf-Uhr in der Tablet-Kopfzeile. Springt sie zu frueh auf
+      # "Letzter Aufruf", rennt der Bediener grundlos zur Turnierleitung;
+      # laeuft sie nach dem ersten Punkt weiter, stehen zwei Uhren nebeneinander.
+      - name: Aufruf-Uhr am Tablet (JS)
+        run: node scripts/test-aufruf-uhr.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

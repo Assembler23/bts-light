@@ -171,9 +171,9 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   Fix: `score_status` (Aufgabe/Walkover) aus dem BTP-Snapshot in die
   `recent_finished`-Einträge des Payloads übernehmen (bts-light) und im
   Ticker als Badge „Aufgabe"/„kampflos" anzeigen (badhub `live.js`).
-- *Nice-to-have:* **Zeit seit Aufruf** auf den TVs **und** in bts-light
-  anzeigen (die Aufruf-Uhr existiert am Cloud-Monitor bereits als
-  Datenquelle: `on_court_since`/Aufruf-Zeitstempel).
+- ✅ **Zeit seit Aufruf** auf den TVs (v0.9.54/156), in bts-light und
+  seit v0.9.278 auch am **Tablet** (Kopfzeile, ab der Zuweisung bis zur
+  bestätigten Aufstellung; [tablet.md](tablet.md)).
 - *Nice-to-have:* **Pausenuhr als Overlay.** Die Pausenuhr auf den TVs ist
   gut — der Spielstand soll dabei aber sichtbar bleiben (Overlay statt
   Vollbild-Wechsel).
@@ -203,7 +203,7 @@ Ergänzungen, einer ist neu (Plan 20):
 |---|---|---|
 | Tablet-Schrift größer (Lesebrille) | **D** | ✅ geplant — Plan 3 (Schritt 3 hebt Größen inkl. Spielstand) |
 | Spiel aus dem Backend beenden/finalisieren (vergessen/Abbruch) | **D** | ✅ geplant — Plan 12 a2 (`enter_result` aus der Turnierleitung) |
-| Laufende Zeit nach Aufruf auf TV/Backend/**Tablet** | **C** | ⚠️ Plan 4 deckt TV + Backend — **Tablet-Anzeige ergänzt** |
+| Laufende Zeit nach Aufruf auf TV/Backend/**Tablet** | **C** | ✅ Plan 4 (TV + Backend) · Tablet-Kopfzeile seit v0.9.278 |
 | Multifeld-/Felderübersicht: Pausenzeiten **und** Zeit nach Aufruf | **C/E** | ⚠️ Plan 4 (Zeit) + Plan 5 (Pause) — **auf overview.html/Felderübersicht ausgeweitet** |
 | Feldnummer am Tablet sichtbar, auch bei Erst-Zuweisung | **D** | 🆕 **neu — Plan 20** |
 
