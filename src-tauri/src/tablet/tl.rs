@@ -1704,6 +1704,21 @@ pub(crate) async fn execute(
         return response;
     }
 
+    // Zeilenfarbe: ebenfalls ein BTP-Write ohne Feldbezug (Spec
+    // `tl-zeilenfarbe`), aber ohne Nachschub-Queue — siehe dort.
+    if let Some(response) = execute_highlight_action(ctx, &snap, &config, &action).await {
+        if response.ok {
+            tracing::info!(
+                "TL-Web [{}]: {} ausgeführt",
+                device.id,
+                action_label(&action)
+            );
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        }
+        return response;
+    }
+
     // Aktionen ohne Feldbezug ändern nur den Zustand am Turnier-PC: kein
     // Schreibvorgang nach BTP, also auch keine Reservierung und kein
     // Fehlschlag von dort.
@@ -2332,6 +2347,12 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::SetWishCourt { match_id, court_id } => {
             format!("wish:{match_id}:{}", court_id.unwrap_or(0))
         }
+        // Der Zielwert gehört hinein: „Orange" und „keine" sind zwei
+        // Absichten (Spec `tl-zeilenfarbe`).
+        A::SetHighlight {
+            match_id,
+            highlight,
+        } => format!("hl:{match_id}:{highlight}"),
     }
 }
 
@@ -2438,6 +2459,87 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             Some(c) => format!("Spiel {match_id} wünscht Feld {c}"),
             None => format!("Spiel {match_id} ohne Wunschfeld"),
         },
+        A::SetHighlight {
+            match_id,
+            highlight,
+        } => format!("Spiel {match_id} Zeilenfarbe {highlight}"),
+    }
+}
+
+/// Prüft eine Farbwahl (Spec `tl-zeilenfarbe`) und baut den BTP-Eintrag:
+/// Wert im Bereich 0–[`relay_proto::MAX_HIGHLIGHT`], Spiel im aktuellen
+/// Stand bekannt. Rein — der Write selbst liegt in
+/// [`execute_highlight_action`].
+fn highlight_entry_fuer(
+    snap: &crate::btp::model::BtpSnapshot,
+    match_id: i64,
+    highlight: u8,
+) -> Result<crate::btp::proto::HighlightEntry, relay_proto::TlResponse> {
+    use relay_proto::{TlErrorCode as C, TlResponse};
+    if highlight > relay_proto::MAX_HIGHLIGHT {
+        return Err(TlResponse::err(
+            C::NotAllowed,
+            format!(
+                "Farbe {highlight} gibt es nicht — BTP kennt 0 bis {}.",
+                relay_proto::MAX_HIGHLIGHT
+            ),
+        ));
+    }
+    let Some(m) = snap.matches.iter().find(|m| m.id == match_id) else {
+        return Err(TlResponse::err(
+            C::NotAllowed,
+            format!("Spiel {match_id} gibt es im aktuellen Turnierstand nicht."),
+        ));
+    };
+    Ok(crate::btp::proto::HighlightEntry {
+        match_id: m.id,
+        draw_id: m.draw_id,
+        planning_id: m.planning_id,
+        highlight,
+    })
+}
+
+/// Zeilenfarbe nach BTP schreiben (Spec `tl-zeilenfarbe`, ADR 0056).
+/// `None`, wenn die Aktion keine Farbwahl ist.
+///
+/// Eigener Weg wie die Wertungen: Es geht ein `SENDUPDATE` nach BTP, aber
+/// ohne Feldbezug (keine Reservierung) und **ohne** Nachschub-Queue — eine
+/// Farbe, die BTP gerade nicht annimmt, tippt man in zehn Sekunden noch
+/// einmal; ein stiller Nachtrag Minuten später würde eine inzwischen im
+/// Planer gewählte Farbe überschreiben.
+async fn execute_highlight_action(
+    ctx: &crate::tablet::server::ServerCtx,
+    snap: &crate::btp::model::BtpSnapshot,
+    config: &AppConfig,
+    action: &relay_proto::TlAction,
+) -> Option<relay_proto::TlResponse> {
+    use relay_proto::{TlAction as A, TlErrorCode as C, TlResponse};
+    let A::SetHighlight {
+        match_id,
+        highlight,
+    } = action
+    else {
+        return None;
+    };
+    let entry = match highlight_entry_fuer(snap, *match_id, *highlight) {
+        Ok(entry) => entry,
+        Err(response) => return Some(response),
+    };
+    match crate::tablet::server::write_highlight_to_btp(config, &[entry]).await {
+        Ok(()) => {
+            // Erst nach dem Erfolg merken: Ein Echo für einen Write, den BTP
+            // nie gesehen hat, zeigte der Turnierleitung eine Farbe, die es
+            // nicht gibt.
+            ctx.tablet.remember_highlight(*match_id, *highlight);
+            Some(TlResponse::ok(0))
+        }
+        Err(e) => {
+            tracing::warn!("TL-Web: Zeilenfarbe für Spiel {match_id} nicht geschrieben: {e}");
+            Some(TlResponse::err(
+                C::BtpError,
+                format!("BTP hat die Farbe nicht übernommen: {e}"),
+            ))
+        }
     }
 }
 
@@ -2546,6 +2648,12 @@ pub struct TlState {
     /// glaubte, das Endspiel sei gesteuert.
     #[serde(default)]
     pub can_set_wish_court: bool,
+    /// Kennt dieser Turnier-PC die Zeilenfarbe (Spec `tl-zeilenfarbe`)?
+    /// Dieselbe Begründung wie bei [`Self::can_lock_courts`]: Ein älterer
+    /// Host verwirft die unbekannte Aktion still — die Turnierleitung
+    /// tippte auf Orange und hielte das Spiel für markiert.
+    #[serde(default)]
+    pub can_set_highlight: bool,
     /// Kennt dieser Turnier-PC den Fernbefehl „alle Tablets neu laden"
     /// (Spec `tablet-version-abgleich`)? Gleiche Begründung wie bei
     /// [`Self::can_lock_courts`]: Ein älterer Host verwirft die unbekannte
@@ -2737,6 +2845,11 @@ pub struct TlCourt {
     pub court: String,
     /// Hallenname; leer bei Ein-Hallen-Turnieren.
     pub location: String,
+    /// Zeilenfarbe des laufenden Spiels aus BTP (Spec `tl-zeilenfarbe`),
+    /// `0`–`6`; `0` bleibt auf dem Draht weg. Die Kachel zeigt sie als
+    /// Marke — ihr Vollton gehört schon der Halle und dem Zustand.
+    #[serde(default, skip_serializing_if = "highlight_leer")]
+    pub highlight: u8,
     /// 0 = kein Spiel auf dem Feld.
     pub match_id: i64,
     pub match_name: String,
@@ -2911,6 +3024,12 @@ pub struct TlMatch {
     /// andere spielbereite.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wish_court: Option<i64>,
+    /// Zeilenfarbe aus BTPs „Hervorheben" (Spec `tl-zeilenfarbe`), `0`–`6`;
+    /// `0` bleibt auf dem Draht weg (kein Rev-Churn für die vielen Zeilen
+    /// ohne Farbe). Die Seite malt den Zeilenhintergrund in demselben Ton
+    /// wie der BTP-Planer.
+    #[serde(default, skip_serializing_if = "highlight_leer")]
+    pub highlight: u8,
     /// Steht dieses Spiel gerade im manuellen Präfix seiner Halle (Spec
     /// `spielliste-manuelle-reihenfolge`)? Reine Anzeige-Information fürs
     /// Badge in der Liste — die tatsächliche Sortierung liegt bereits in
@@ -2979,6 +3098,15 @@ pub struct TlOpenMatch {
     /// Vorab-Angabe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wish_court: Option<i64>,
+    /// Zeilenfarbe aus BTP, siehe [`TlMatch::highlight`] — auch eine offene
+    /// Paarung kann im Planer markiert sein.
+    #[serde(default, skip_serializing_if = "highlight_leer")]
+    pub highlight: u8,
+}
+
+/// Serde-Hilfe: `0` (keine Farbe) bleibt auf dem Draht weg.
+fn highlight_leer(h: &u8) -> bool {
+    *h == 0
 }
 
 /// Eine Halle des Turniers.
@@ -3307,6 +3435,7 @@ pub(crate) fn build_state_limited(
             tournament: String::new(),
             multi_hall: false,
             can_set_wish_court: true,
+            can_set_highlight: true,
             finished_warning_seconds: config.finished_warning_seconds,
             // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
             // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
@@ -3650,6 +3779,7 @@ pub(crate) fn build_state_limited(
             blocked: availability.blocked(m, now_ms).map(TlBlocked::from),
             excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
             wish_court: tablet.wish_court(m.id),
+            highlight: m.highlight,
             manual: manually_ordered,
             predicted_start_ms: predictions.get(&m.id).map(|p| p.start_min * 60_000),
             predicted_uncertain: predictions.get(&m.id).is_some_and(|p| p.uncertain),
@@ -3689,6 +3819,7 @@ pub(crate) fn build_state_limited(
             manual: tablet.queue_order_store().rank(m.id).is_some(),
             excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
             wish_court: tablet.wish_court(m.id),
+            highlight: m.highlight,
         });
     }
 
@@ -3809,6 +3940,7 @@ pub(crate) fn build_state_limited(
         // Dieser Host kann es — die Oberfläche darf den Eintrag zeigen.
         can_lock_courts: true,
         can_set_wish_court: true,
+        can_set_highlight: true,
         can_reload_tablets: true,
         finished_warning_seconds: config.finished_warning_seconds,
         rev,
@@ -4513,6 +4645,7 @@ fn court_view(
         court_id: c.court_id,
         court: c.court,
         location: c.location,
+        highlight: spiel.map(|m| m.highlight).unwrap_or(0),
         match_id: c.match_id,
         match_name: c.match_name,
         round_name: c.round_name,
@@ -4595,6 +4728,7 @@ mod tests {
             draw_id: 1,
             planning_id: id,
             display_order: None,
+            highlight: 0,
             from1: None,
             from2: None,
             draw_name: "HE A".to_string(),
@@ -7796,6 +7930,42 @@ mod tests {
         assert!(config.tl_web.default_profile_id.is_empty());
     }
 
+    /// Spec `tl-zeilenfarbe`: Die Farbwahl lehnt Werte über BTPs Menü und
+    /// unbekannte Spiele ab; ein gültiger Wunsch trägt die BTP-Identität
+    /// des Spiels. Vorgangskennung: „Orange" und „keine" sind zwei Absichten.
+    #[test]
+    fn highlight_choice_is_validated_before_any_btp_write() {
+        let mut m = a_match(7);
+        m.draw_id = 3;
+        m.planning_id = 1007;
+        let s = snap(Vec::new(), vec![m], Vec::new());
+
+        let e = highlight_entry_fuer(&s, 7, 3).expect("gültige Farbe");
+        assert_eq!(
+            (e.match_id, e.draw_id, e.planning_id, e.highlight),
+            (7, 3, 1007, 3)
+        );
+        assert_eq!(highlight_entry_fuer(&s, 7, 0).unwrap().highlight, 0);
+        assert_eq!(highlight_entry_fuer(&s, 7, 6).unwrap().highlight, 6);
+
+        let zu_gross = highlight_entry_fuer(&s, 7, 7).expect_err("7 kennt BTP nicht");
+        assert!(!zu_gross.ok);
+        assert_eq!(zu_gross.code, Some(relay_proto::TlErrorCode::NotAllowed));
+        let unbekannt = highlight_entry_fuer(&s, 99, 1).expect_err("Spiel fehlt");
+        assert_eq!(unbekannt.code, Some(relay_proto::TlErrorCode::NotAllowed));
+
+        let orange = relay_proto::TlAction::SetHighlight {
+            match_id: 7,
+            highlight: 3,
+        };
+        let keine = relay_proto::TlAction::SetHighlight {
+            match_id: 7,
+            highlight: 0,
+        };
+        assert_ne!(action_fingerprint(&orange), action_fingerprint(&keine));
+        assert!(!touches_courts(&orange));
+    }
+
     #[test]
     fn touches_courts_false_for_profile_actions() {
         for action in [
@@ -9415,6 +9585,13 @@ mod tests {
             // Fähigkeitsmerkmal (Spec tl-wunschfeld): reines Bool „dieser
             // Turnier-PC kennt das Wunschfeld".
             "can_set_wish_court",
+            // Fähigkeitsmerkmal (Spec tl-zeilenfarbe): reines Bool „dieser
+            // Turnier-PC kennt die Zeilenfarbe".
+            "can_set_highlight",
+            // Spec tl-zeilenfarbe: BTPs Zeilenfarbe 1–6 — eine Notiz der
+            // Turnierleitung AM SPIEL, ohne Bedeutung über Personen; die
+            // Bedeutung der Farbe vereinbart das Team, sie steht nirgends.
+            "highlight",
             // Fähigkeitsmerkmal (Spec tl-web-felder-sperren, E13): reines
             // Bool „dieser Turnier-PC kennt das Sperren". Sagt nichts über
             // Personen, nur über die Programmversion — und ohne es zeigte

@@ -661,19 +661,57 @@ Update {
 > der Request unverändert zum Bestand. Details:
 > [schiedsrichter-management.md](schiedsrichter-management.md#ergebnis-write-löschte-die-besetzung-live-befund-14082026-fortsetzung).
 
-### Vorbereitungs-Aufruf-Highlight (P1)
+### `Match.Highlight` — Zeilenfarbe und Vorbereitungs-Aufruf (P1)
 
-`highlight_request` (proto.rs) schreibt ausschließlich `Match.Highlight`
-(1 = aufgerufen, 0 = nicht mehr), Match-Knoten NUR mit Identität
+**Was das Feld ist (gemessen 05.09.2026, `tests/btp_highlight_probe.rs`):**
+BTPs Kontextmenü „Hervorheben" — sechs Farben plus „keine". Der Wert ist ein
+**Index**, kein Farbwert; jedes `Match` trägt das Feld (Archiv-Mitschnitte:
+überall `0`). Zuordnung per Pixelmessung am Planer:
+
+| Wert | Farbe | Hex |
+|---|---|---|
+| 0 | keine | – |
+| 1 | Gelb | `#FFD838` |
+| 2 | Pink | `#FF79AB` |
+| 3 | Orange | `#FBAD4B` |
+| 4 | Blau | `#1DACE6` |
+| 5 | Grün | `#5CE1B8` |
+| 6 | Lila | `#C56BFF` |
+
+bts-light liest den Wert (`BtpMatch::highlight`, Werte außerhalb 0–6 gelten
+als 0) und zeigt ihn in der Turnierleitungs-Sicht (Spec
+[`features/tl-zeilenfarbe.md`](features/tl-zeilenfarbe.md)).
+
+**Schreiben:** `highlight_request` (proto.rs) schreibt ausschließlich
+`Match.Highlight` mit einem Wert 0–6, Match-Knoten NUR mit Identität
 (`ID`/`DrawID`/`PlanningID`) — **kein** `Status` (dieselbe Check-in-Falle wie
-oben) und keine Ergebnisfelder. Der Sync-Loop (`sync.rs`,
-`reconcile_highlights`) gleicht die Menge gerufener, noch ruf-barer Spiele
-gegen den zuletzt geschriebenen Stand ab und schreibt **nur den Diff** — also
-gar nichts, solange sich nichts ändert. So sieht die Turnierleitung „in
-Vorbereitung"-Aufrufe direkt im BTP-Planer (Vorbild Original-BTS); beim Ruf
-aufs Feld / Rücknahme / Spielende fällt das Match aus der gewünschten Menge
-und bekommt `Highlight:0`. Wie BTP das Highlight darstellt, ist einmalig am
-echten BTP gegenzuprüfen.
+oben) und keine Ergebnisfelder. Gemessen: BTP antwortet `Result=1`, der Wert
+hält beim Nachlesen (Setzen, Löschen, Zurücksetzen), der Planer **zeichnet
+die Farbe sofort** und behält sie über eigene Bedienschritte hinweg; keine
+Nebenwirkung am Check-in-`Status`. Zwei Schreiber nutzen den Request:
+
+- **Zeilenfarbe der Turnierleitungs-Seite** (`TlAction::SetHighlight`,
+  `tl.rs::execute_highlight_action`): ein Write je Tipp, ohne
+  Nachschub-Queue (ein Nachtrag Minuten später überschriebe eine inzwischen
+  im Planer gewählte Farbe). Nach Erfolg legt ein 20-s-Echo
+  (`TabletState::remember_highlight`) den Wert über die nächsten Snapshots,
+  bis BTP ihn selbst liefert.
+- **Vorbereitungs-Aufruf (P1)**: der Sync-Loop (`sync.rs`,
+  `reconcile_highlights`) gleicht die Menge gerufener, noch ruf-barer Spiele
+  gegen den zuletzt geschriebenen Stand ab und schreibt **nur den Diff** —
+  `1` (Gelb) beim Aufruf, `0` beim Ruf aufs Feld / Rücknahme / Spielende.
+  So sieht die Turnierleitung „in Vorbereitung"-Aufrufe direkt im
+  BTP-Planer (Vorbild Original-BTS). **Die Handfarbe hat Vorrang
+  (ADR 0056):** `1` geht nur an Spiele, die `0` tragen und nicht über die
+  Web-Sicht angefasst wurden; gelöscht wird nur, wenn BTP noch `1` liefert.
+  Eine andere Farbe an einem gerufenen Spiel bleibt stehen. Gelb an einem
+  gerufenen Spiel gilt immer als Aufrufmarke (auch nach Sync-Neustart).
+
+Ein Einzelfall bleibt unerklärt: Ein Spiel, das bts-light kurz zuvor
+automatisch aufs Feld gelegt hatte, stand beim Lesen auf `1`, wurde im
+Planer weiß gezeichnet und lag eine halbe Stunde später ohne Write von
+bts-light auf `0`. Deshalb gilt nirgends die Annahme, eine Farbe halte
+ewig — BTP ist die Wahrheit (R2).
 
 **Voraussetzungen / Caveats:**
 

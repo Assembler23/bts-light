@@ -577,6 +577,44 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 .row .who { font-weight: 600; }
 .row .draw { font-size: .85rem; color: var(--ink-soft); }
 .row.blocked { background: #f8fafc; }
+/* Zeilenfarbe aus BTPs „Hervorheben" (Spec `tl-zeilenfarbe`): dieselben
+   sechs Töne wie im Planer (Pixelmessung 05.09.2026), damit „das Orange" in
+   beiden Programmen dasselbe Spiel ist. Die Farbe gewinnt gegen den
+   Blockiert-Grauton (steht deshalb dahinter) — eine markierte Zeile ist
+   markiert, auch wenn sie gerade wartet. Der Text bleibt dunkel: Alle
+   sechs Töne sind hell genug (auch in BTP steht Schwarz darauf). */
+.hl-1 { --hl: #FFD838; }
+.hl-2 { --hl: #FF79AB; }
+.hl-3 { --hl: #FBAD4B; }
+.hl-4 { --hl: #1DACE6; }
+.hl-5 { --hl: #5CE1B8; }
+.hl-6 { --hl: #C56BFF; }
+.row.hl-1, .row.hl-2, .row.hl-3, .row.hl-4, .row.hl-5, .row.hl-6 {
+  background: var(--hl); border-color: color-mix(in srgb, var(--hl) 70%, #000 30%);
+}
+.row.hl-1 .draw, .row.hl-2 .draw, .row.hl-3 .draw,
+.row.hl-4 .draw, .row.hl-5 .draw, .row.hl-6 .draw { color: #1f2937; }
+/* In der Feldkachel nur eine Marke: Ihr Vollton gehört der Halle und dem
+   Zustand (Sperre, Räumung, Warnung). */
+.hl-chip {
+  display: inline-block; width: .85rem; height: .85rem; border-radius: 50%;
+  background: var(--hl); border: 1px solid rgba(0,0,0,.25); vertical-align: middle;
+  margin-left: 6px; flex: none;
+}
+/* Der Wähler im ⋮-Menü: „keine" als Textfeld, dann sechs Farbfelder. Das
+   gewählte trägt einen dunklen Rahmen — sonst wüsste man nach dem Öffnen
+   nicht, was gerade gilt. */
+.hl-pick { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.hl-pick button {
+  width: 2rem; height: 2rem; border-radius: 6px; cursor: pointer;
+  border: 2px solid var(--line); background: var(--hl, var(--card));
+  padding: 0; font: inherit; font-size: .75rem; color: var(--ink);
+}
+/* „keine" erbt `--hl` sonst von der (gefärbten) Zeile, in der das Menü
+   steckt — dann sähe der Löschknopf aus wie die gewählte Farbe. */
+.hl-pick button.hl-0 { --hl: initial; background: var(--card); width: auto; padding: 0 8px; }
+.hl-pick button[aria-checked="true"] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--card) inset; }
+.hl-pick button:hover { border-color: var(--accent); }
 /* Spiele mit noch offener Paarung (Spec `tl-offene-paarungen`): eine
    Vorschau auf den Turnierverlauf, kein Arbeitsvorrat. Deshalb bewusst
    zurückgenommen — nicht ausgegraut (dann wirkte die Zeile kaputt), aber
@@ -2234,6 +2272,31 @@ function renderActionBar() {
  * auch so.
  */
 const OP_WINDOW_MS = 20000;
+
+/** Die Zeilenfarben aus BTPs Menü „Hervorheben" (Spec `tl-zeilenfarbe`),
+ *  Index = Wert von `Match.Highlight`. Reihenfolge und Töne wie im Planer
+ *  (Pixelmessung 05.09.2026); die Töne selbst stehen im CSS (`.hl-N`),
+ *  hier nur die Namen für Tooltip und Vorlesehilfe. Mehr als sechs Farben
+ *  bietet BTP nicht — der Turnier-PC lehnt Werte darüber ab. */
+const HL_FARBEN = [
+  { name: "keine Farbe" },
+  { name: "Gelb" },
+  { name: "Pink" },
+  { name: "Orange" },
+  { name: "Blau" },
+  { name: "Grün" },
+  { name: "Lila" },
+];
+/** CSS-Klasse für eine Zeilenfarbe; leer bei 0 oder unbekanntem Wert. */
+function hlKlasse(h) {
+  return h >= 1 && h < HL_FARBEN.length ? ` hl-${h}` : "";
+}
+/** Farbmarke für die Feldkachel (nur ein Punkt — der Vollton der Kachel
+ *  gehört der Halle und dem Zustand); leer ohne Farbe. */
+function hlMarke(h) {
+  const k = hlKlasse(h || 0);
+  return k ? `<span class="hl-chip${k}" title="${HL_FARBEN[h].name}" aria-label="Zeilenfarbe ${HL_FARBEN[h].name}"></span>` : "";
+}
 function opIdFor(matchId, courtId) {
   return `assign-${matchId}-${courtId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`;
 }
@@ -3605,7 +3668,7 @@ function courtCard(c, cellStyle) {
 
   return `<article class="${classes.join(" ")}" tabindex="0" data-court="${c.court_id}"
                    ${cellStyle ? `style="${cellStyle}"` : ""} ${picked ? 'role="button"' : ""}>
-    <div class="card-top"><span class="court-name">${esc(c.court)}</span>${gerufen}${badges.join("")}${griff}${kebab}</div>
+    <div class="card-top"><span class="court-name">${esc(c.court)}${hlMarke(c.highlight)}</span>${gerufen}${badges.join("")}${griff}${kebab}</div>
     ${body}${bediener}${schiris}
     <div class="card-foot">${foot}</div>
   </article>`;
@@ -4713,6 +4776,24 @@ function queueRow(m, topMatchId) {
         </div>
       </div>`);
   }
+  // Zeilenfarbe (Spec `tl-zeilenfarbe`): BTPs „Hervorheben" — „keine" plus
+  // die sechs Menüfarben, in derselben Reihenfolge und denselben Tönen wie
+  // im Planer. Ein Tipp schreibt nach BTP; BTP bleibt die Wahrheit.
+  //
+  // Nur wenn der Turnier-PC die Aktion kennt — sonst tippte die
+  // Turnierleitung auf Orange, der alte Host verwürfe es still, und das
+  // Spiel gälte als markiert (dieselbe Versions-Schere wie beim Wunschfeld).
+  if (state.can_set_highlight) {
+    kebabGroups.push(`<div class="kebab-group">
+        <span class="kebab-label">Hervorheben (wie in BTP)</span>
+        <div class="hl-pick" role="radiogroup" aria-label="Zeilenfarbe">
+          ${HL_FARBEN.map((f, i) => `<button type="button" class="hl-${i}"
+              data-hl-for="${m.match_id}" data-hl="${i}" role="radio"
+              aria-checked="${(m.highlight || 0) === i ? "true" : "false"}"
+              title="${f.name}" aria-label="${f.name}">${i === 0 ? "keine" : ""}</button>`).join("")}
+        </div>
+      </div>`);
+  }
   // Nachruf, wenn jemand nicht erscheint — seltener gebraucht als der
   // Erst-Ruf, deshalb hier statt auf der Zeile. Getrennt nach Partei, weil
   // in der Regel nur eine fehlt.
@@ -4738,7 +4819,7 @@ function queueRow(m, topMatchId) {
   parts.push(`<span class="row-actions">${aktionen.join("")}</span>`);
 
   const selected = picked && picked.match.match_id === m.match_id;
-  return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}${offen ? " offen" : ""}"
+  return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}${offen ? " offen" : ""}${hlKlasse(m.highlight || 0)}"
                data-match="${m.match_id}" data-id="${m.match_id}"
                ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
             ${parts.join("")}</div>`;
@@ -4882,6 +4963,28 @@ function wireQueue(box) {
           ? `Wunschfeld: ${feld ? feld.court : courtId}. Die Automatik hält es frei, `
             + `sobald das Spiel dran ist.`
           : "Wunschfeld aufgehoben.",
+      );
+    });
+  });
+  scopeAll(box, "button[data-hl-for]").forEach((btn) => {
+    // Wie bei den Wählern: weder die Zeile auswählen noch einen Zug starten.
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(btn.dataset.hlFor);
+      const highlight = Number(btn.dataset.hl);
+      if (btn.getAttribute("aria-checked") === "true") return; // gilt schon
+      // Kein optimistisches Umschalten im Menü: Schlägt der Write fehl,
+      // stünde sonst eine Farbe als gewählt da, die BTP nie bekam — und der
+      // Schutz oben verschluckte den nächsten Tipp darauf. Die Bestätigung
+      // kommt binnen einer Sekunde über das Echo des Turnier-PCs.
+      //
+      // Je Tipp eine frische Kennung (wie beim Aufruf): Orange → keine →
+      // Orange binnen 20 s ist dreimal gewollt, nicht einmal wiederholt.
+      send(
+        `hl-${matchId}-${highlight}-${Date.now()}`,
+        { action: "set_highlight", matchId, highlight },
+        highlight ? `Hervorgehoben: ${HL_FARBEN[highlight].name}.` : "Hervorhebung entfernt.",
       );
     });
   });

@@ -340,16 +340,42 @@ fn officials_entries(
 
 /// Gewünschter Highlight-Stand (P1): Match-IDs, die gerufen sind UND im
 /// Snapshot noch ruf-bar (Scheduled, beide Mannschaften stehen). Aufs Feld
-/// gerufene/beendete Spiele fallen so automatisch heraus → Highlight:0. Rein.
+/// gerufene/beendete Spiele fallen so automatisch heraus → Highlight:0.
+///
+/// **Die Handfarbe hat Vorrang (ADR 0056).** Ein gerufenes Spiel gehört zur
+/// gewünschten Menge, wenn eines gilt:
+///
+/// - Es trägt **keine** Farbe und die Turnierleitung hat es auch nicht
+///   über die Web-Sicht angefasst (`by_hand`) — der Normalfall.
+/// - Es trägt **Gelb** (`HIGHLIGHT_PREP_CALL`). Gelb an einem gerufenen
+///   Spiel gilt immer als Aufrufmarke — auch nach einem Neustart des Syncs,
+///   der den Merkbestand `written` leert. Sonst bliebe eigenes Gelb nach
+///   jedem „Speichern" der Einstellungen für immer stehen. Hand-Gelb an
+///   einem gerufenen Spiel wird damit bewusst mitgelöscht (ADR 0056).
+/// - Wir haben es selbst markiert (`written`) — es bleibt gewünscht, auch
+///   wenn die Turnierleitung es inzwischen umgefärbt oder auf „keine"
+///   gestellt hat: So schreibt der Abgleich nicht bei jedem Zyklus erneut
+///   Gelb über eine bewusste Entscheidung.
+///
+/// Jede andere Farbe bleibt stehen; ein von Hand auf „keine" gestelltes
+/// Spiel bleibt „keine". Rein.
 fn highlight_desired(
     calls: &[crate::tablet::state::PreparationCall],
+    written: &HashSet<i64>,
+    by_hand: &HashSet<i64>,
     snapshot: &BtpSnapshot,
 ) -> HashSet<i64> {
+    use crate::btp::proto::HIGHLIGHT_PREP_CALL;
     calls
         .iter()
         .filter_map(|c| snapshot.matches.iter().find(|m| m.id == c.match_id))
         .filter(|m| {
             m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
+        })
+        .filter(|m| {
+            (m.highlight == 0 && !by_hand.contains(&m.id))
+                || m.highlight == HIGHLIGHT_PREP_CALL
+                || written.contains(&m.id)
         })
         .map(|m| m.id)
         .collect()
@@ -357,12 +383,19 @@ fn highlight_desired(
 
 /// Diff `desired` gegen `written` → nur die geänderten Matches als
 /// `HighlightEntry` (Identität aus dem Snapshot). Matches, die nicht mehr im
-/// Snapshot stehen, werden ausgelassen (kein Knoten baubar). Rein & testbar.
+/// Snapshot stehen, werden ausgelassen (kein Knoten baubar).
+///
+/// Ein Aufruf-Ende löscht nur, wenn BTP noch **unser Gelb** liefert
+/// (ADR 0056): Steht dort inzwischen eine andere Farbe, hat jemand das
+/// gerufene Spiel bewusst umgefärbt — die bleibt. Das Spiel fällt trotzdem
+/// aus dem Merkbestand (der Aufrufer setzt `written = desired`). Rein &
+/// testbar.
 fn highlight_entries(
     desired: &HashSet<i64>,
     written: &HashSet<i64>,
     snapshot: &BtpSnapshot,
 ) -> Vec<crate::btp::proto::HighlightEntry> {
+    use crate::btp::proto::HIGHLIGHT_PREP_CALL;
     snapshot
         .matches
         .iter()
@@ -371,11 +404,20 @@ fn highlight_entries(
             if want == written.contains(&m.id) {
                 return None;
             }
+            if !want && m.highlight != HIGHLIGHT_PREP_CALL {
+                // Handfarbe (oder schon „keine") — nicht anfassen.
+                return None;
+            }
+            if want && m.highlight == HIGHLIGHT_PREP_CALL {
+                // Steht schon auf Gelb (z. B. nach einem Sync-Neustart) —
+                // nur in den Merkbestand aufnehmen, kein Write.
+                return None;
+            }
             Some(crate::btp::proto::HighlightEntry {
                 match_id: m.id,
                 draw_id: m.draw_id,
                 planning_id: m.planning_id,
-                on: want,
+                highlight: if want { HIGHLIGHT_PREP_CALL } else { 0 },
             })
         })
         .collect()
@@ -550,8 +592,14 @@ impl SyncEngine {
         tablet: &TabletState,
         snapshot: &BtpSnapshot,
     ) {
-        // Gewünschter Stand: gerufene Matches, die im Snapshot noch ruf-bar sind.
-        let desired = highlight_desired(&tablet.preparation_calls(), snapshot);
+        // Gewünschter Stand: gerufene Matches, die im Snapshot noch ruf-bar
+        // sind — und keine Handfarbe tragen (ADR 0056).
+        let desired = highlight_desired(
+            &tablet.preparation_calls(),
+            &self.highlight_written,
+            &tablet.highlight_by_hand(),
+            snapshot,
+        );
         if desired == self.highlight_written {
             return; // nichts zu tun – kein BTP-Write
         }
@@ -559,8 +607,8 @@ impl SyncEngine {
         let entries = highlight_entries(&desired, &self.highlight_written, snapshot);
         if entries.is_empty() {
             // Alle Diffs betrafen Matches, die nicht mehr im Snapshot stehen
-            // (z. B. gelöscht) — Stand trotzdem übernehmen, um erneute Versuche
-            // zu vermeiden.
+            // (z. B. gelöscht) oder eine Handfarbe tragen, die bleiben soll —
+            // Stand trotzdem übernehmen, um erneute Versuche zu vermeiden.
             self.highlight_written = desired;
             return;
         }
@@ -2144,6 +2192,12 @@ impl SyncEngine {
                 }
             }
         }
+        // Zeilenfarben-Echo (Spec `tl-zeilenfarbe`) EINMAL über diesen
+        // Stand legen, bevor er an alle Leser geht: die Anzeige über
+        // `set_snapshot` und gleich darauf der P1-Abgleich mit `&snapshot`.
+        // Beide müssen denselben Wert sehen — sonst schriebe der Abgleich
+        // Gelb über eine Farbe, die die Turnierleitung gerade gesetzt hat.
+        tablet.apply_highlight_echo(&mut snapshot);
         // Rohen BTP-Stand dem Tablet-Server geben, dann die Sätze
         // tablet-getriebener Courts überschreiben.
         tablet.set_snapshot(snapshot.clone());
@@ -2639,6 +2693,7 @@ mod tests {
             officials: Vec::new(),
             matches: vec![BtpMatch {
                 display_order: None,
+                highlight: 0,
                 from1: None,
                 from2: None,
                 id: 1,
@@ -2768,6 +2823,7 @@ mod tests {
     fn ready_match(id: i64, num: i64) -> BtpMatch {
         BtpMatch {
             display_order: None,
+            highlight: 0,
             from1: None,
             from2: None,
             id,
@@ -2878,26 +2934,131 @@ mod tests {
                 called_at_ms: 0,
             }, // nicht im Snapshot → raus
         ];
-        assert_eq!(highlight_desired(&calls, &snap), HashSet::from([7]));
+        assert_eq!(
+            highlight_desired(&calls, &HashSet::new(), &HashSet::new(), &snap),
+            HashSet::from([7])
+        );
+    }
+
+    /// ADR 0056: Ein gerufenes Spiel mit **Handfarbe** bekommt kein Gelb —
+    /// es sei denn, wir haben es selbst markiert (dann bleibt es gewünscht,
+    /// auch wenn die Turnierleitung inzwischen umgefärbt oder auf „keine"
+    /// gestellt hat — sonst schriebe jeder Zyklus erneut Gelb darüber).
+    #[test]
+    fn highlight_desired_leaves_hand_coloured_matches_alone() {
+        let mut orange = ready_match(7, 1);
+        orange.highlight = 3;
+        let mut umgefaerbt = ready_match(8, 2);
+        umgefaerbt.highlight = 2;
+        let keine = ready_match(9, 3); // von uns markiert, TL stellte „keine"
+        let snap = snap_with(Vec::new(), vec![orange, umgefaerbt, keine], Vec::new());
+        let call = |id| PreparationCall {
+            match_id: id,
+            location_id: None,
+            called_at_ms: 0,
+        };
+        let calls = vec![call(7), call(8), call(9)];
+        let written = HashSet::from([8, 9]);
+        assert_eq!(
+            highlight_desired(&calls, &written, &HashSet::new(), &snap),
+            HashSet::from([8, 9]),
+            "7 trägt Orange von Hand → nicht gewünscht; 8/9 sind unsere"
+        );
+    }
+
+    /// ADR 0056, Review-Fund: Ein von Hand auf „keine" gestelltes gerufenes
+    /// Spiel (Hand-Marke, Farbe 0, nicht von uns markiert) bleibt „keine" —
+    /// sonst würde es im nächsten Zyklus wieder gelb, und die Turnierleitung
+    /// könnte die Farbe nie loswerden.
+    #[test]
+    fn highlight_desired_respects_a_hand_set_none() {
+        let snap = snap_with(
+            Vec::new(),
+            vec![ready_match(7, 1), ready_match(8, 2)],
+            Vec::new(),
+        );
+        let call = |id| PreparationCall {
+            match_id: id,
+            location_id: None,
+            called_at_ms: 0,
+        };
+        let calls = vec![call(7), call(8)];
+        let by_hand = HashSet::from([7]);
+        assert_eq!(
+            highlight_desired(&calls, &HashSet::new(), &by_hand, &snap),
+            HashSet::from([8]),
+            "7 wurde von Hand auf keine Farbe gestellt → kein Gelb; 8 normal"
+        );
+    }
+
+    /// ADR 0056, Review-Fund: Nach einem Neustart des Syncs ist `written`
+    /// leer. Gelb an einem gerufenen Spiel gilt trotzdem als Aufrufmarke —
+    /// sonst bliebe eigenes Gelb nach jedem „Speichern" der Einstellungen
+    /// für immer stehen. Hand-Gelb wird damit bewusst mitgelöscht.
+    #[test]
+    fn highlight_desired_treats_yellow_on_called_matches_as_ours() {
+        let mut gelb = ready_match(7, 1);
+        gelb.highlight = crate::btp::proto::HIGHLIGHT_PREP_CALL;
+        let snap = snap_with(Vec::new(), vec![gelb], Vec::new());
+        let calls = vec![PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        }];
+        let desired = highlight_desired(&calls, &HashSet::new(), &HashSet::new(), &snap);
+        assert_eq!(desired, HashSet::from([7]));
+        // Kein Write nötig (steht schon auf Gelb) — nur der Merkbestand
+        // nimmt es auf …
+        let entries = highlight_entries(&desired, &HashSet::new(), &snap);
+        assert!(entries.is_empty(), "schon gelb → kein Write: {entries:?}");
+        // … und am Aufruf-Ende wird es gelöscht, weil es als unseres gilt.
+        let entries = highlight_entries(&HashSet::new(), &desired, &snap);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|e| (e.match_id, e.highlight))
+                .collect::<Vec<_>>(),
+            vec![(7, 0)]
+        );
     }
 
     #[test]
     fn highlight_entries_only_the_diff() {
+        let mut neun = ready_match(9, 3);
+        neun.highlight = crate::btp::proto::HIGHLIGHT_PREP_CALL; // unser Gelb
         let snap = snap_with(
             Vec::new(),
-            vec![ready_match(7, 1), ready_match(8, 2), ready_match(9, 3)],
+            vec![ready_match(7, 1), ready_match(8, 2), neun],
             Vec::new(),
         );
-        // 7 neu gerufen (→ on), 9 nicht mehr gerufen (→ off), 8 unverändert.
+        // 7 neu gerufen (→ 1), 9 nicht mehr gerufen (→ 0), 8 unverändert.
         let desired = HashSet::from([7, 8]);
         let written = HashSet::from([8, 9]);
         let entries = highlight_entries(&desired, &written, &snap);
-        let mut got: Vec<(i64, bool)> = entries.iter().map(|e| (e.match_id, e.on)).collect();
+        let mut got: Vec<(i64, u8)> = entries.iter().map(|e| (e.match_id, e.highlight)).collect();
         got.sort();
-        assert_eq!(got, vec![(7, true), (9, false)]);
+        assert_eq!(got, vec![(7, 1), (9, 0)]);
         // Identität (Draw/Planning) aus dem Snapshot mitgegeben.
         let e7 = entries.iter().find(|e| e.match_id == 7).unwrap();
         assert_eq!((e7.draw_id, e7.planning_id), (1, 1007));
+    }
+
+    /// ADR 0056: Am Aufruf-Ende wird nur **unser Gelb** gelöscht. Eine
+    /// andere Farbe (jemand hat das gerufene Spiel umgefärbt) bleibt stehen,
+    /// und ein schon leeres Spiel braucht keinen Write.
+    #[test]
+    fn highlight_entries_do_not_clear_hand_colours_at_call_end() {
+        let mut lila = ready_match(9, 3);
+        lila.highlight = 6;
+        let leer = ready_match(10, 4);
+        let snap = snap_with(Vec::new(), vec![lila, leer], Vec::new());
+        let desired = HashSet::new();
+        let written = HashSet::from([9, 10]);
+        let entries = highlight_entries(&desired, &written, &snap);
+        assert!(
+            entries.is_empty(),
+            "Lila bleibt, leer bleibt leer: {entries:?}"
+        );
     }
 
     #[test]

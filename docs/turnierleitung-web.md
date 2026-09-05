@@ -88,9 +88,28 @@ LAN+Cloud voraus.
 - **Das ⋮-Menü an einer Wartelisten-Zeile:** Alles, was seltener gebraucht
   wird, steckt dahinter — **Nachruf** (beide Parteien oder nur eine), der
   **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, das **Wunschfeld**,
-  „Ergebnis eintragen" und **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile
-  nur, was ständig gebraucht wird; so passt eine Zeile auch auf einem
-  schmalen Tablet in eine Zeile statt in vier.
+  **Hervorheben** (Zeilenfarbe wie in BTP), „Ergebnis eintragen" und
+  **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile nur, was ständig
+  gebraucht wird; so passt eine Zeile auch auf einem schmalen Tablet in eine
+  Zeile statt in vier.
+- **Hervorheben** (seit v0.9.277, Spec
+  [`features/tl-zeilenfarbe.md`](features/tl-zeilenfarbe.md)): Im ⋮-Menü
+  einer Zeile stehen **„keine" und sechs Farbfelder** — Gelb, Pink, Orange,
+  Blau, Grün, Lila, in derselben Reihenfolge und denselben Tönen wie BTPs
+  Kontextmenü „Hervorheben". Ein Tipp schreibt die Farbe **nach BTP**; die
+  Zeile ist sofort eingefärbt, und im BTP-Planer erscheint dieselbe Farbe.
+  Umgekehrt zeigt die Liste jede Farbe, die jemand im Planer setzt (auch an
+  offenen Paarungen). Läuft das Spiel, trägt die **Feldkachel** neben dem
+  Feldnamen einen Farbpunkt statt eines Volltons. Was eine Farbe bedeutet,
+  vereinbart das Team — bts-light und BTP geben ihr keine Bedeutung.
+  **Zusammenspiel mit dem Vorbereitungs-Aufruf:** Der Aufruf färbt ein
+  Spiel in BTP gelb und nimmt das Gelb beim Ruf aufs Feld wieder zurück.
+  Ein Spiel, das schon eine Handfarbe trägt, lässt der Aufruf in Ruhe; und
+  färbt jemand ein gerufenes Spiel um, bleibt die neue Farbe auch nach dem
+  Aufruf stehen (ADR 0056). Nur Hand-**Gelb** an einem gerufenen Spiel kann
+  der Aufruf nicht von seinem eigenen Gelb unterscheiden — es verschwindet
+  mit dem Ruf aufs Feld. Fehlt die Gruppe im Menü, ist der Turnier-PC noch
+  auf einer älteren Version.
 - **🖨 Zettel (leer)** druckt den **Vorabzettel** des Spiels: derselbe
   Bogen wie der Archivzettel, aber mit leerem Raster — zum Mitgeben an
   den Schiedsrichter, der ihn von Hand führt. Kopf, Namen und Verein sind

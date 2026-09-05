@@ -145,7 +145,11 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   über den Hallen-Wähler der Turnierleitungs-Seite (siehe Punkt „Nächste
   Spiele pro Halle" oben); (b) P1 erweitern — BTP-`Highlight` nicht nur
   schreiben, sondern auch **lesen**, damit in BTP gemachte Aufrufe bei
-  uns als „gerufen" erscheinen; (c) beim Umsetzen prüfen, wie das
+  uns als „gerufen" erscheinen — **Lesen seit v0.9.277 vorhanden**
+  (Spec `features/tl-zeilenfarbe.md`: `Highlight` ist BTPs Zeilenfarbe
+  0–6, Gelb = 1 = unsere Aufrufmarke); ein in BTP gelb markiertes Spiel als
+  „gerufen" zu deuten bleibt offen, weil Gelb dort auch eine Handfarbe sein
+  kann (ADR 0056); (c) beim Umsetzen prüfen, wie das
   Original-BTS seine „upcoming"-Ticker-Anzeige speist
   (ticker_manager/highlight) — ggf. weitere Mechanik übernehmen.
 - ~~**Matchball-Einfärbung in der Felderübersicht** (Tilo-Idee, nur

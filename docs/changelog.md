@@ -4,6 +4,25 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.277
+
+- **Neu: Zeilenfarbe wie in BTP — auch aus der Turnierleitungs-Sicht.** Die
+  Spielliste zeigt die Farben aus BTPs Menü „Hervorheben" als
+  Zeilenhintergrund (Gelb, Pink, Orange, Blau, Grün, Lila, exakt die Töne
+  des Planers), laufende Spiele tragen einen Farbpunkt in der Feldkachel.
+  Im ⋮-Menü einer Zeile steht die Gruppe **„Hervorheben"**: ein Tipp
+  schreibt die Farbe nach BTP, wo sie sofort erscheint. Gemessen am echten
+  BTP: `Match.Highlight` ist ein Index 0–6, BTP nimmt jeden Wert per
+  `SENDUPDATE` an. Spec `docs/features/tl-zeilenfarbe.md`, ADR 0056.
+- **Geändert: Der Vorbereitungs-Aufruf überschreibt keine Handfarbe mehr.**
+  Er nutzte dasselbe BTP-Feld (Gelb beim Aufruf, Löschen beim Ruf aufs
+  Feld) und hätte eine im Planer gesetzte Farbe still überschrieben und
+  gelöscht. Jetzt weicht die Aufrufmarke: Gelb geht nur an Spiele ohne
+  Farbe, gelöscht wird nur das eigene Gelb.
+- Messwerkzeug `tests/btp_highlight_probe.rs` (ignoriert, braucht ein
+  laufendes BTP): Farbverteilung lesen, Schreibprobe mit Rückstellung, eine
+  Farbe zur Sichtprüfung setzen.
+
 ## v0.9.276
 
 - **Neu: Zwei Turniere desselben Verbands am selben Tag stören sich nicht mehr
