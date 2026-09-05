@@ -315,6 +315,63 @@ Aufstellung:
 - **Zweisprachig:** Titel und Hinweise des Assistenten erscheinen
   Deutsch **und** Englisch (internationale Spieler:innen). Das gilt auch
   für das Megafon-Popup.
+- **Kopfzeile bleibt sichtbar (seit v0.9.278):** Der Assistent deckt nur
+  noch den Bereich unter der Kopfzeile ab. Feldname, Aufruf-Uhr,
+  Sponsor-Leiste, Verbindungspunkt und das **Zahnrad** (Einstellungen,
+  Feldwechsel) bleiben während der Seitenwahl sichtbar und antippbar —
+  vorher lag der Scrim über allem, und ein Feldwechsel war erst nach
+  der Aufstellung möglich. Technisch: `#setup-modal` beginnt bei
+  `--kopf-hoehe`, die ein `ResizeObserver` aus der Kopfzeile misst; die
+  anderen Overlays (Pause, Karten, Einstellungen) decken weiterhin alles.
+
+### Aufruf-Uhr in der Kopfzeile (seit v0.9.278)
+
+Dieselbe Uhr „Zeit seit Aufruf" wie am Court-Monitor
+([court-monitor.md](court-monitor.md), Plan 4), damit der Bediener am
+Feld ohne Blick zum TV sieht, wie lange die Spieler schon gerufen sind:
+`M:SS · 1. Aufruf`, ab den eingestellten Schwellen gelb **„2. Aufruf"**
+und rot pulsierend **„Letzter Aufruf"**.
+
+- **Ab der Zuweisung**, also schon während der Seitenwahl. Sobald das
+  Tablet **im Spiel** ist, weicht sie der vorhandenen **Spieldauer** —
+  zwei Uhren nebeneinander wären mehr Verwirrung als Nutzen. „Im Spiel"
+  heißt: die Aufstellung ist bestätigt (ab da läuft die Spieldauer), oder
+  es stehen Punkte (Mid-Game-Einstieg), oder das Spiel ist beendet
+  (Walkover/Aufgabe). Auch **serverseitig bekannte Punkte** zählen: Ein
+  Ersatz-Tablet ohne lokalen Stand sieht am `sets`-Feld der Antwort, dass
+  längst gespielt wird, und zeigt nicht „Letzter Aufruf" in ein laufendes
+  Spiel hinein. Die Multifeld-Übersicht am TV blendet ihren Chip erst mit
+  dem ersten Punkt aus, die Einzelanzeige lässt die Uhr weiterlaufen —
+  in der kurzen Spanne zwischen Aufstellung und erstem Punkt können Tablet
+  und TV also verschieden aussehen.
+- **Gleicher Schalter wie die Displays:** Sie hängt an
+  **Einstellungen → Aufruf-Timer → aktivieren** (standardmäßig aus) und
+  nutzt dessen Schwellen. Timer aus → keine Uhr am Tablet, wie am TV.
+- **Datenquelle:** der bestehende 30-s-Abruf von `/health` für den
+  Uhr-Abgleich, jetzt mit `court=<CourtID>` (schmaler Abruf, Spec
+  monitor-livestand-push S7). Die Antwort trägt `match_id`, `sets` und
+  `on_court_since_ms` des eigenen Felds sowie `callTimer`; gerechnet wird
+  gegen die **Server-Zeit**. Bei `match_assigned` fragt das Tablet sofort
+  nach, statt bis zu 30 s zu warten. LAN und Cloud identisch, kein neuer
+  Wire-Typ; im Cloud-Modus kommt die neue Tablet-Seite mit dem
+  automatischen Relay-Deploy beim Merge.
+- **Wächter gegen falsche Stempel:** Nur die jüngste Antwort schreibt
+  (30-s-Takt und Sofort-Abruf können sich überholen); eine Antwort, deren
+  `match_id` nicht zum gehaltenen Spiel passt (Feldwechsel im Flug,
+  Cache-Stand von vor der Zuweisung), setzt den Stempel auf leer; kennt
+  der Server das Feld noch gar nicht (Relay direkt nach dem Neustart),
+  bleibt der letzte Stand stehen. In beiden Fällen fragt das Tablet nach
+  3 s nach, höchstens fünfmal je Zuweisung.
+- Stufenlogik in `src/io/aufrufUhr.mjs` (Test `scripts/test-aufruf-uhr.mjs`),
+  Inline-Kopie in `tablet.html`. Auf schmalen Geräten (≤ 640 px) zeigt
+  die Marke nur die Zeit, die Farbe trägt die Stufe — damit das Zahnrad
+  rechts erreichbar bleibt.
+- **Bekannte Grenzen (vorbestehend, gelten für die TV-Uhr genauso):** Im
+  Cloud-Modus rechnet die Uhr Relay-Zeit gegen einen Host-Stempel, eine
+  falsch gehende Turnier-PC-Uhr geht 1:1 in die Anzeige ein
+  (Roadmap „Cloud-Aufruf-Uhr driftet"). Nach einem Neustart des
+  Turnier-PCs beginnt der Stempel bei null, weil `on_court_since` nur im
+  RAM liegt.
 
 ## Am Tablet: Pausen, Court-Grafik, Akkustand
 

@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.278
+
+- **Neu: Aufruf-Uhr am Zähl-Tablet.** Die Kopfzeile zeigt dieselbe Uhr
+  „Zeit seit Aufruf" wie der Court-Monitor: `M:SS · 1. Aufruf`, ab den
+  Schwellen gelb „2. Aufruf" und rot „Letzter Aufruf" — schon während der
+  Seitenwahl. Sobald die Aufstellung bestätigt ist (oder Punkte stehen),
+  weicht sie der Spieldauer. Hängt wie die Displays an **Einstellungen →
+  Aufruf-Timer** (standardmäßig aus). Gerechnet gegen die Server-Zeit; LAN
+  und Cloud gleich, kein neuer Wire-Typ (Cloud-Tablets bekommen die Seite
+  mit dem automatischen Relay-Deploy).
+- **Geändert: Kopfzeile bleibt während der Seitenwahl sichtbar.** Der
+  Aufstellungs-Assistent deckt nur noch den Bereich darunter ab — Feldname,
+  Aufruf-Uhr und Zahnrad (Einstellungen, Feldwechsel) sind antippbar, bevor
+  eine Seite gewählt wurde.
+
 ## v0.9.277
 
 - **Neu: Zeilenfarbe wie in BTP — auch aus der Turnierleitungs-Sicht.** Die
