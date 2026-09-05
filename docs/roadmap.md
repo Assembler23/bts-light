@@ -887,6 +887,24 @@ verliehen):
   bäckt `http://bts-light.local:8088/monitor` als Kiosk-Adresse ein, eine
   DHCP-Reservierung am Verleih-Router ist nicht notwendig (kann als
   Worst-Case-Rückfall jederzeit nachgezogen werden).
+- **Server-Suche über badhub als weiterer Rückfall** (Idee 04.09.2026).
+  Heute findet das Master-Image (`pi/shared-startbrowser.sh`) den
+  Turnier-PC in dieser Reihenfolge: gemerkte IP → Subnetz-Scan des
+  eigenen /24 auf `:8088/health` (1–9 s) → mDNS mit Timeout. Idee: bts-light
+  hinterlegt beim Liveticker-Push seine **lokale IP** bei badhub; der Pi
+  fragt dort einmalig nach, welche lokalen IPs gerade aktiv sind.
+  Zuordnung ohne Kennung/Token über die **öffentliche Absender-IP**:
+  badhub merkt sich das Paar (öffentliche IP, lokale IP) und antwortet
+  nur mit Einträgen derselben öffentlichen IP → fremde Netze sehen
+  nichts. Nutzen liegt **nicht** im Tempo (der Scan ist schon schnell),
+  sondern im Fall, den der Scan nie abdeckt: PC und Pi in
+  **verschiedenen Subnetzen** (zwei Router, Gast-WLAN). Einordnung als
+  Rückfall hinter Cache und Scan, vor mDNS. Offene Punkte: Pis ohne
+  Internet (Verleih-Router ohne Uplink) bleiben auf Scan/mDNS angewiesen;
+  Carrier-Grade-NAT bei Mobilfunk-Hotspots macht die Zuordnung unscharf;
+  HTTPS am Pi ohne Echtzeituhr scheitert bis zum NTP-Abgleich still →
+  Wiederholung nach Zeitabgleich nötig. Betroffen: badhub-Endpoint,
+  Push-Payload, beide Pi-Launcher. Vor der Umsetzung `/idee`.
 - **Master-Image erstellen + hosten.** Den „Golden Master"-Pi einmal auf
   echter Hardware bauen, die Karte als `bts-monitor.img.xz` sichern und in
   den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).
