@@ -65,7 +65,11 @@ pub fn diff(
 
     match changed.as_slice() {
         [] => Update::None,
-        [m] => Update::Single(build_tupdate(m, rid)),
+        [m] => Update::Single(build_tupdate(
+            m,
+            rid,
+            ctx.config.tournament_uuid_kanonisch(),
+        )),
         // Mehrere gleichzeitige Änderungen → der Einfachheit halber voll.
         _ => Update::Full(build_tset(current, rid, ctx)),
     }

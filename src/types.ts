@@ -586,6 +586,10 @@ export interface AppConfig {
   upload_logs: boolean;
   /** Zufällige, dauerhafte Installations-ID (Frontend erzeugt sie). */
   install_id: string;
+  /** turnier.de-Turnier-GUID (kanonisch, Pflicht für den Liveticker-Push;
+   *  Rust: AppConfig.tournament_uuid, ADR 0054). Wird in `checkin.tournament_uuid`
+   *  gespiegelt — beide aus EINEM Eingabefeld. */
+  tournament_uuid: string;
   /** Verbindungsart für die Tablets: LAN (lokal) oder Cloud (über badhub.de). */
   connection_mode: ConnectionMode;
   /** Ansage-Slave-Modus (Mehr-Hallen): nur BTP lesen + eigene Halle ansagen,

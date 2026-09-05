@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.276
+
+- **Neu: Zwei Turniere desselben Verbands am selben Tag stören sich nicht mehr
+  im Liveticker.** Bisher schrieben zwei Installationen mit dem Preset „BVBB"
+  abwechselnd denselben Live-Stand — auf badhub flackerte mal das eine, mal das
+  andere Turnier. badhub führt jetzt jedes Turnier unter seiner turnier.de-
+  Kennung getrennt (ADR 0054); bts-light schickt die Kennung in jeder
+  Nachricht mit.
+
+  Dafür ist die **Turnier-Kennung von turnier.de jetzt ein Pflichtfeld** im
+  Setup unter „1 · Liveticker-Ziel" (die Adresse des Turniers einfügen genügt).
+  Wer sie schon für den Hallen-Check-In eingetragen hatte, muss nichts tun —
+  der Wert wird übernommen. Ohne Kennung startet die Übertragung nicht —
+  fehlt sie nach dem Update, öffnet die App beim Start den Assistenten.
+
+- **Aushang und Liveticker-Link zeigen direkt aufs eigene Turnier**
+  (`…&g=<Kennung>`), statt auf die Verbandsseite mit Auswahl.
+
+- Voraussetzung badhub-seitig: Migration 208 (Kind-Turniere). Gegen ein
+  älteres badhub verhält sich die App wie bisher.
+
 ## v0.9.275
 
 - **Neu: Anzeige-Hülle fürs Tablet.** Unter `…/anzeige` zeigt ein Tablet

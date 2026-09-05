@@ -109,9 +109,29 @@ fn basis_aus_live_url(live_url: &str) -> Option<String> {
     host_ok.then(|| format!("{schema}{host}"))
 }
 
+/// Hängt die Turnier-GUID als `g=` an eine Live-Adresse (ADR 0054): Der
+/// Verbandsschlüssel `t` führt bei mehreren laufenden Turnieren auf eine
+/// Auswahl, `g` direkt auf dieses Turnier. Ohne GUID bleibt die Adresse,
+/// wie sie ist — badhub zeigt dann wie früher den Verbandsschlüssel.
+pub fn link_mit_guid(url: &str, guid: Option<&str>) -> String {
+    let url = url.trim();
+    match guid {
+        Some(g) if !url.is_empty() => {
+            let trenner = if url.contains('?') { '&' } else { '?' };
+            format!("{url}{trenner}g={g}")
+        }
+        _ => url.to_string(),
+    }
+}
+
 /// Stellt die Daten für das Blatt zusammen. `None`, wenn die öffentliche
 /// Live-Seite fehlt oder nicht auswertbar ist.
-pub fn daten_aus(live_url: &str, turnier: &str, logo: Option<String>) -> Option<AushangDaten> {
+pub fn daten_aus(
+    live_url: &str,
+    turnier: &str,
+    logo: Option<String>,
+    guid: Option<&str>,
+) -> Option<AushangDaten> {
     let kuerzel = kuerzel_aus_live_url(live_url)?;
     let basis = basis_aus_live_url(live_url)?;
     // **Beide** Adressen werden neu gebaut, keine wird durchgereicht. Sonst
@@ -122,7 +142,7 @@ pub fn daten_aus(live_url: &str, turnier: &str, logo: Option<String>) -> Option<
     Some(AushangDaten {
         turnier: turnier.trim().to_string(),
         logo,
-        url_ticker: format!("{basis}/live?t={kuerzel}"),
+        url_ticker: link_mit_guid(&format!("{basis}/live?t={kuerzel}"), guid),
         url_teilnehmer: format!("{basis}/live/{kuerzel}/teilnehmer"),
     })
 }
@@ -406,10 +426,51 @@ mod tests {
     }
 
     #[test]
+    fn link_mit_guid_haengt_g_korrekt_an() {
+        let g = Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA");
+        assert_eq!(
+            link_mit_guid("https://badhub.de/live?t=bvbb", g),
+            "https://badhub.de/live?t=bvbb&g=0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        assert_eq!(
+            link_mit_guid("https://badhub.de/live", g),
+            "https://badhub.de/live?g=0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        assert_eq!(
+            link_mit_guid("https://badhub.de/live?t=bvbb", None),
+            "https://badhub.de/live?t=bvbb"
+        );
+        // Leere Adresse bleibt leer — der Aufrufer meldet „keine Live-Seite".
+        assert_eq!(link_mit_guid("", g), "");
+    }
+
+    #[test]
+    fn aushang_ticker_zeigt_direkt_aufs_turnier() {
+        let g = Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA");
+        let d = daten_aus(
+            "https://badhub.de/live?t=bvbb&display=monitor",
+            "Test",
+            None,
+            g,
+        )
+        .unwrap();
+        assert_eq!(
+            d.url_ticker,
+            "https://badhub.de/live?t=bvbb&g=0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        // Die Teilnehmerliste hängt am Verbandsschlüssel — badhub löst dort
+        // über das zuletzt bepushte Turnier auf; unverändert.
+        assert_eq!(d.url_teilnehmer, "https://badhub.de/live/bvbb/teilnehmer");
+        // Ohne GUID wie bisher.
+        let ohne = daten_aus("https://badhub.de/live?t=bvbb", "Test", None, None).unwrap();
+        assert_eq!(ohne.url_ticker, "https://badhub.de/live?t=bvbb");
+    }
+
+    #[test]
     fn beide_adressen_werden_neu_gebaut() {
         // Die eingetragene Live-Seite ist die Teilnehmerliste: Der
         // Liveticker-Code darf trotzdem nicht dorthin zeigen.
-        let d = daten_aus("https://badhub.de/live/bvbb/teilnehmer", "Test", None).unwrap();
+        let d = daten_aus("https://badhub.de/live/bvbb/teilnehmer", "Test", None, None).unwrap();
         assert_eq!(d.url_ticker, "https://badhub.de/live?t=bvbb");
         assert_eq!(d.url_teilnehmer, "https://badhub.de/live/bvbb/teilnehmer");
 
@@ -419,6 +480,7 @@ mod tests {
             "https://badhub.de/live?t=bvbb&display=monitor&halle=Halle+1",
             "Test",
             None,
+            None,
         )
         .unwrap();
         assert_eq!(mit_extra.url_ticker, "https://badhub.de/live?t=bvbb");
@@ -427,24 +489,24 @@ mod tests {
 
     #[test]
     fn teilnehmerliste_bleibt_auf_derselben_installation() {
-        let d = daten_aus("https://badhub.de/live?t=bvbb", "Test", None).unwrap();
+        let d = daten_aus("https://badhub.de/live?t=bvbb", "Test", None, None).unwrap();
         assert_eq!(d.url_ticker, "https://badhub.de/live?t=bvbb");
         assert_eq!(d.url_teilnehmer, "https://badhub.de/live/bvbb/teilnehmer");
 
-        let lokal = daten_aus("http://localhost:8080/live?t=cup", "Test", None).unwrap();
+        let lokal = daten_aus("http://localhost:8080/live?t=cup", "Test", None, None).unwrap();
         assert_eq!(
             lokal.url_teilnehmer,
             "http://localhost:8080/live/cup/teilnehmer"
         );
 
         // Ohne Schema lässt sich keine Basis bilden → kein Blatt.
-        assert!(daten_aus("badhub.de/live?t=bvbb", "Test", None).is_none());
-        assert!(daten_aus("", "Test", None).is_none());
+        assert!(daten_aus("badhub.de/live?t=bvbb", "Test", None, None).is_none());
+        assert!(daten_aus("", "Test", None, None).is_none());
     }
 
     #[test]
     fn blatt_traegt_beide_adressen_und_zwei_qr_codes() {
-        let d = daten_aus("https://badhub.de/live?t=bvbb", "BVBB Open", None).unwrap();
+        let d = daten_aus("https://badhub.de/live?t=bvbb", "BVBB Open", None, None).unwrap();
         let html = render_html(&d).unwrap();
         assert_eq!(html.matches("<svg").count(), 2, "je Karte ein QR-Code");
         assert!(html.contains("badhub.de/live/bvbb/teilnehmer"));
@@ -457,11 +519,27 @@ mod tests {
     }
 
     #[test]
+    fn blatt_zeigt_ticker_link_mit_guid_escaped() {
+        // M10: `link_mit_guid` hängt ein rohes `&g=<GUID>` an — das Blatt
+        // escaped die sichtbare Adresse (`html_escape`), also muss dort
+        // `&amp;g=<GUID>` stehen, nicht das rohe `&`. Ohne diesen Test deckte
+        // keiner der bestehenden Fälle den GUID-Pflichtfall überhaupt ab.
+        let g = Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA");
+        let d = daten_aus("https://badhub.de/live?t=bvbb", "BVBB Open", None, g).unwrap();
+        let html = render_html(&d).unwrap();
+        assert!(
+            html.contains("badhub.de/live?t=bvbb&amp;g=0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"),
+            "Ticker-Adresse mit GUID fehlt oder ist falsch escaped: {html}"
+        );
+    }
+
+    #[test]
     fn turniername_und_logo_landen_escaped_im_kopf() {
         let d = daten_aus(
             "https://badhub.de/live?t=bvbb",
             "<script>alert(1)</script>",
             Some("data:image/png;base64,aGVsbG8=".to_string()),
+            None,
         )
         .unwrap();
         let html = render_html(&d).unwrap();
@@ -472,7 +550,7 @@ mod tests {
 
     #[test]
     fn ohne_turniername_und_logo_bleibt_der_kopf_schlicht() {
-        let d = daten_aus("https://badhub.de/live?t=bvbb", "   ", None).unwrap();
+        let d = daten_aus("https://badhub.de/live?t=bvbb", "   ", None, None).unwrap();
         let html = render_html(&d).unwrap();
         assert!(!html.contains("class=\"turnier\""));
         assert!(!html.contains("<img"));

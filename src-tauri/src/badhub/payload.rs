@@ -99,6 +99,12 @@ pub struct TsetMessage {
 #[derive(Debug, Serialize, PartialEq)]
 pub struct TsetEvent {
     pub tournament_name: String,
+    /// turnier.de-GUID des Turniers (kanonisch). badhub ordnet den Push
+    /// damit dem Kind-Turnier unter dem Verbandszugang zu (ADR 0054).
+    /// Fehlt bei alter Konfiguration ohne GUID — dann landet der Push wie
+    /// früher beim Verbandsschlüssel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_uuid: Option<String>,
     pub courts: Vec<TsetCourt>,
     /// Aktuell auf einem Court laufende Matches.
     pub matches: Vec<TsetMatch>,
@@ -363,6 +369,12 @@ pub struct SchedMessage {
 #[derive(Debug, Serialize, PartialEq)]
 pub struct SchedEvent {
     pub tournament_name: String,
+    /// turnier.de-GUID des Turniers (kanonisch). badhub ordnet den Push
+    /// damit dem Kind-Turnier unter dem Verbandszugang zu (ADR 0054).
+    /// Fehlt bei alter Konfiguration ohne GUID — dann landet der Push wie
+    /// früher beim Verbandsschlüssel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_uuid: Option<String>,
     /// ALLE Spiele mit Teilnehmern — keine Kappung. Das ist der Zweck des Kanals.
     pub matches: Vec<SchedMatch>,
 }
@@ -532,6 +544,7 @@ pub fn build_sched(
         rid,
         event: SchedEvent {
             tournament_name: snapshot.tournament_name.clone(),
+            tournament_uuid: ctx.config.tournament_uuid_kanonisch(),
             matches,
         },
     }
@@ -590,6 +603,7 @@ pub fn build_tset(snapshot: &BtpSnapshot, rid: u64, ctx: &LivetickerContext) -> 
         kind: "tset",
         event: TsetEvent {
             tournament_name: snapshot.tournament_name.clone(),
+            tournament_uuid: ctx.config.tournament_uuid_kanonisch(),
             courts,
             matches: on_court.iter().map(|m| to_tset_match(m)).collect(),
             recent_finished_matches: recent_finished(snapshot),
@@ -614,6 +628,12 @@ pub struct TupdateMessage {
     #[serde(rename = "match")]
     pub match_update: TupdateMatch,
     pub rid: u64,
+    /// turnier.de-GUID des Turniers (kanonisch). badhub ordnet den Push
+    /// damit dem Kind-Turnier unter dem Verbandszugang zu (ADR 0054).
+    /// Fehlt bei alter Konfiguration ohne GUID — dann landet der Push wie
+    /// früher beim Verbandsschlüssel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_uuid: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -624,7 +644,10 @@ pub struct TupdateMatch {
 }
 
 /// Baut eine `tupdate_match`-Nachricht für ein Match mit geändertem Score.
-pub fn build_tupdate(m: &BtpMatch, rid: u64) -> TupdateMessage {
+/// `tournament_uuid` ist die kanonische Turnier-GUID aus der Config
+/// (`AppConfig::tournament_uuid_kanonisch`) — jedes Punkt-Update trägt sie,
+/// weil badhub jede Nachricht einzeln dem Kind-Turnier zuordnet.
+pub fn build_tupdate(m: &BtpMatch, rid: u64, tournament_uuid: Option<String>) -> TupdateMessage {
     TupdateMessage {
         kind: "tupdate_match",
         match_update: TupdateMatch {
@@ -632,6 +655,7 @@ pub fn build_tupdate(m: &BtpMatch, rid: u64) -> TupdateMessage {
             s: m.sets.iter().map(|&(a, b)| [a, b]).collect(),
         },
         rid,
+        tournament_uuid,
     }
 }
 
@@ -661,10 +685,11 @@ pub struct CheckinRosterMessage {
 
 /// Branding (Sponsoren + Turnierlogo) für den badhub-Check-In (Phase 3 der
 /// Sponsor-Leiste). `sponsors` sind roh-Base64-Rasterbilder (jpg/png/gif,
-/// max. 4); `logo` ist das roh-Base64-Turnierlogo (png/jpg/webp). **Keine GUID
-/// im Body**: anders als die Meldeliste adressiert dieser Endpunkt das Turnier
-/// allein über das Bearer-Liveticker-Passwort (badhub löst `tournament_key` →
-/// Check-In-UUID auf).
+/// max. 4); `logo` ist das roh-Base64-Turnierlogo (png/jpg/webp). Adressiert
+/// wird primär über das Bearer-Liveticker-Passwort (badhub löst
+/// `tournament_key` → Check-In-UUID auf); seit ADR 0054 trägt die Nachricht
+/// zusätzlich die turnier.de-GUID, damit badhub bei mehreren parallelen
+/// Turnieren desselben Verbands das richtige Kind-Turnier trifft.
 ///
 /// **Feld-unabhängig:** Ein `None`-Feld wird nicht gesendet → badhub lässt es
 /// unberührt; `Some(…)` ersetzt es (leerer String / leere Liste = löschen). So
@@ -677,6 +702,12 @@ pub struct CheckinBrandingMessage {
     pub sponsors: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logo: Option<String>,
+    /// turnier.de-GUID des Turniers (kanonisch). badhub ordnet den Push
+    /// damit dem Kind-Turnier unter dem Verbandszugang zu (ADR 0054).
+    /// Fehlt bei alter Konfiguration ohne GUID — dann landet der Push wie
+    /// früher beim Verbandsschlüssel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tournament_uuid: Option<String>,
 }
 
 /// Eine Spielklasse in der Meldeliste.
@@ -871,6 +902,101 @@ mod tests {
         assert_eq!(tset.event.courts.len(), 1);
         assert_eq!(tset.event.courts[0].num, "Feld 9");
         assert_eq!(tset.event.courts[0].match_id, "btp_1");
+    }
+
+    fn config_mit_guid() -> AppConfig {
+        AppConfig {
+            tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
+            ..AppConfig::default()
+        }
+    }
+
+    fn leerer_snapshot() -> BtpSnapshot {
+        BtpSnapshot {
+            tournament_name: "Test-Turnier".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+            matches: vec![sample_match(1, MatchStatus::OnCourt, Some("Feld 9"))],
+        }
+    }
+
+    #[test]
+    fn tset_und_sched_tragen_die_turnier_guid_im_event_block() {
+        let cfg = config_mit_guid();
+        let snapshot = leerer_snapshot();
+        let tset = build_tset(&snapshot, 1, &LivetickerContext::bare(&cfg));
+        let json = serde_json::to_string(&tset).unwrap();
+        assert!(json.contains(r#""tournament_uuid":"0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA""#));
+        assert_eq!(
+            tset.event.tournament_uuid.as_deref(),
+            Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA")
+        );
+
+        let sched = build_sched(
+            &snapshot,
+            &LivetickerContext::bare(&cfg),
+            &HashMap::new(),
+            2,
+        );
+        assert_eq!(
+            sched.event.tournament_uuid.as_deref(),
+            Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA")
+        );
+    }
+
+    #[test]
+    fn ohne_guid_fehlt_das_feld_im_wire() {
+        // Kein leeres Feld senden: badhub behandelt „fehlt" und „ungültig"
+        // gleich (Elternschlüssel), aber ein leerer String im Log verwirrt.
+        let tset = build_tset(
+            &leerer_snapshot(),
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        );
+        let json = serde_json::to_string(&tset).unwrap();
+        assert!(!json.contains("tournament_uuid"));
+
+        let up = build_tupdate(
+            &sample_match(1, MatchStatus::OnCourt, Some("Feld 9")),
+            3,
+            None,
+        );
+        assert!(!serde_json::to_string(&up)
+            .unwrap()
+            .contains("tournament_uuid"));
+    }
+
+    #[test]
+    fn tupdate_traegt_die_guid_auf_oberster_ebene() {
+        let up = build_tupdate(
+            &sample_match(1, MatchStatus::OnCourt, Some("Feld 9")),
+            3,
+            Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string()),
+        );
+        let json = serde_json::to_string(&up).unwrap();
+        assert!(json.contains(r#""type":"tupdate_match""#));
+        assert!(json.contains(r#""tournament_uuid":"0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA""#));
+        // Auf oberster Ebene, nicht im match-Block.
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v.get("tournament_uuid").is_some());
+        assert!(v["match"].get("tournament_uuid").is_none());
+    }
+
+    #[test]
+    fn branding_nachricht_traegt_die_guid() {
+        let msg = CheckinBrandingMessage {
+            sponsors: None,
+            logo: Some(String::new()),
+            tournament_uuid: Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string()),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""tournament_uuid":"0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA""#));
+        assert!(!json.contains("sponsors"));
     }
 
     /// Zwei-Hallen-Fixture: Feld „1" (CourtID 101) in „Halle B", ein

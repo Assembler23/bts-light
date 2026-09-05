@@ -100,10 +100,10 @@ er hat die kleinere Reserve.
 
 ## Grenzen
 
-- **Das Blatt zeigt auf den Verband, nicht auf ein einzelnes Turnier.**
-  Beide Codes tragen das Kürzel der eingetragenen Live-Seite. Laufen bei
-  einem Verband mehrere Turniere parallel, führen sie auf dieselbe
-  Live-Seite.
+- **Der Liveticker-Code zeigt direkt auf dieses Turnier** (`?t=<verband>&g=<GUID>`,
+  seit ADR 0054): Laufen bei einem Verband mehrere Turniere parallel, landet
+  die Halle trotzdem beim richtigen. Der Teilnehmerlisten-Code hängt weiter am
+  Verbandskürzel — badhub zeigt dort das zuletzt bepushte Turnier des Verbands.
 - **Sehr lange Turniernamen werden im Kopf nach zwei Zeilen gekürzt**
   (siehe oben). Der Aushang bleibt vollständig, der Name nicht.
 - **Keine Halle im Code.** Beide Codes zeigen auf das ganze Turnier, nicht
