@@ -50,6 +50,8 @@
           "titel": "Kampflose Wertung nach Aufgabe" },
         { "datei": "docs/spielzeiten-prognose.md", "slug": "spielzeiten",
           "titel": "Spielzeiten & Startzeit-Prognose" },
+        { "datei": "docs/master-slave.md", "slug": "master-und-slave",
+          "titel": "Master und Slave — wer steuert das Turnier" },
         { "datei": "docs/multi-hall.md", "slug": "mehr-hallen",
           "titel": "Mehr-Hallen-Turniere",
           "aus": ["Beteiligte Dateien (Querverweis)", "Offene Punkte",
