@@ -62,11 +62,4 @@
             android:textSize="13sp"
             android:visibility="gone" />
     </LinearLayout>
-
-    <!-- Unsichtbare Ecke: 2 s Fingerdruck öffnet das Hüllen-Menü. -->
-    <View
-        android:id="@+id/ecke"
-        android:layout_width="72dp"
-        android:layout_height="72dp"
-        android:layout_gravity="top|start" />
 </FrameLayout>

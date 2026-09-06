@@ -11,6 +11,7 @@ class AdressFilterTest {
     fun nur_der_gefundene_host_auf_8088_ist_erlaubt() {
         assertTrue(f.erlaubt("http://192.168.16.100:8088/felder"))
         assertTrue(f.erlaubt("http://192.168.16.100:8088/court/H1F3?x=1"))
+        assertTrue(f.erlaubt("http://192.168.16.100:8088"))
         assertTrue(f.erlaubt("about:blank"))
     }
 
@@ -27,5 +28,18 @@ class AdressFilterTest {
         assertFalse(f.erlaubt("javascript:alert(1)"))
         assertFalse(f.erlaubt(null))
         assertFalse(f.erlaubt("kein url"))
+    }
+
+    @Test
+    fun schema_grossschreibung_und_userinfo_werden_verworfen() {
+        // java.net.URI lässt das Schema in der Groß-/Kleinschreibung des
+        // Eingabestrings — kein `equalsIgnoreCase` in `erlaubt`, deshalb
+        // absichtlich fail-closed statt eine RFC-3986-konforme
+        // Normalisierung nachzubauen.
+        assertFalse(f.erlaubt("HTTP://192.168.16.100:8088/felder"))
+        // Userinfo hat in unseren Adressen nichts verloren; `URI.host` liest
+        // trotz `user@` weiterhin den echten Host — ohne den expliziten
+        // Userinfo-Check wäre das hier fälschlich erlaubt.
+        assertFalse(f.erlaubt("http://user@192.168.16.100:8088/felder"))
     }
 }

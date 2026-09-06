@@ -135,7 +135,12 @@ jobs:
   # sind (Windows-Runner haben kein rsync).
   publish:
     needs: [build, android]
-    if: startsWith(github.ref, 'refs/tags/')
+    # publish darf vom android-Job NIE blockiert werden, egal wie GitHub
+    # continue-on-error in `needs` wertet — nur `build` muss grün sein.
+    # `always()` verhindert, dass ein (durch continue-on-error) fehlgeschlagener
+    # oder übersprungener android-Job den Job insgesamt abbricht, bevor die
+    # eigentliche Bedingung überhaupt geprüft wird.
+    if: always() && needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -241,11 +246,15 @@ jobs:
           set -euo pipefail
           SETUP=$(cd rel && ls *_*-setup.exe | head -1)
           cp "rel/${SETUP}" "rel/BTS.Light-setup.exe"
-          APK=$(cd rel && ls bts-light-tablet-*.apk 2>/dev/null | head -1 || true)
-          if [ -n "${APK}" ]; then cp "rel/${APK}" "rel/bts-light-tablet.apk"; fi
+          # Fester Name nur für die SIGNIERTE APK — eine Debug-APK (ohne Keystore-
+          # Secret gebaut) wäre debuggable und würde später keine signierte
+          # Aktualisierung annehmen; sie bleibt nur unter ihrem -debug-Namen erreichbar.
+          SIGNIERT=$(cd rel && ls bts-light-tablet-*.apk 2>/dev/null | grep -v -- '-debug\.apk$' | head -1 || true)
+          if [ -n "${SIGNIERT}" ]; then cp "rel/${SIGNIERT}" "rel/bts-light-tablet.apk"; fi
+          APKS=$(ls rel/*.apk 2>/dev/null || true)
           rsync -av \
             rel/latest.json \
             rel/index.html \
             rel/*-setup.exe \
-            $( [ -n "${APK}" ] && echo rel/*.apk ) \
+            ${APKS} \
             bts-deploy@178.104.221.177:/var/www/badhub/public/download/bts-light/

@@ -147,10 +147,12 @@ Sperre nur weich."
 
 ## Fehlersuche
 
-Bleibt die Wartekarte dauerhaft stehen, zunächst den WLAN-Namen und die
-eigene IP-Adresse auf der Karte prüfen — fehlt die eigene IP, ist das
-Tablet gar nicht im Netz. Auf der Turnier-PC-Seite lohnt sich der Blick, ob
-die Übertragung läuft und ob die Windows-Firewall den Zugriff erlaubt.
+Bleibt die Wartekarte dauerhaft stehen, zunächst die eigene IP-Adresse auf
+der Karte prüfen (einen WLAN-Namen zeigt die Karte bewusst nicht, siehe
+unten) — fehlt die eigene IP, ist das Tablet gar nicht im Netz und das
+WLAN muss in den Android-Einstellungen geprüft werden. Auf der
+Turnier-PC-Seite lohnt sich der Blick, ob die Übertragung läuft und ob die
+Windows-Firewall den Zugriff erlaubt.
 
 Das Geräte-Log jedes Tablets liegt beim Turnier-PC unter
 `pi-logs/fire-<ANDROID_ID>.log` (über „Logs öffnen" einsehbar) und in der
@@ -163,5 +165,24 @@ aus; er hilft bei der Frage, ob die Amazon-WebView-Version für
 
 Die Such- und Zustandslogik der App (Sonde, Scanner, Adressfilter,
 PIN-Regeln, Zustandsmaschine) liegt in reinen Kotlin-Klassen ohne
-Android-Abhängigkeit und ist mit 33 JVM-Unit-Tests abgedeckt; Activity,
+Android-Abhängigkeit und ist mit 35 JVM-Unit-Tests abgedeckt; Activity,
 Receiver und WebView sind nur dünne, ungetestete Adapter darüber.
+
+## Was die App bewusst nicht kann / Restrisiken
+
+- **LAN-Vertrauen:** Jedes Gerät im Hallen-WLAN, das auf `:8088/health` mit
+  einer JSON-artigen Antwort reagiert, wird für diese Sitzung der Server
+  des Tablets — akzeptiert, weil das Hallen-Netz physisch kontrolliert ist
+  (Zutritt zur Halle statt Netzwerk-Zugangskontrolle).
+- **Klartext-HTTP durchgehend:** Seite, Sonde und Log-Upload sprechen alle
+  unverschlüsseltes HTTP — LAN-only, genau wie der Tablet-Server selbst.
+- **PIN ist Bedienschutz, keine Sicherheitsgrenze:** Sie wird im Klartext
+  gespeichert und sperrt nach Fehlversuchen nicht — sie soll nur
+  versehentliches Verlassen des Kiosks verhindern, keinen Angreifer
+  aufhalten.
+
+Der feste Download-Name `bts-light-tablet.apk` zeigt außerdem **nur** auf
+eine signiert gebaute APK; eine Debug-APK (ohne Keystore-Secret gebaut)
+bleibt ausschließlich unter ihrem `-debug`-Namen erreichbar, damit kein
+Tablet versehentlich eine nicht-signierte Version installiert, die später
+kein signiertes Update mehr annimmt.

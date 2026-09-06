@@ -20,7 +20,7 @@ class ServerSucheTest {
 
     @Test
     fun scan_findet_neue_ip_wenn_gemerkte_tot_ist() = runTest {
-        val s = ServerSuche(sonde("192.168.16.7"), Scanner(sonde("192.168.16.7"))) { null }
+        val s = ServerSuche(sonde("192.168.16.7"), Scanner(sonde("192.168.16.7"))) { error("mDNS darf nach einem Scan-Treffer nicht laufen") }
         val e = s.ausfuehren(gemerkteIp = "192.168.16.100", eigeneIp = "192.168.16.42")
         assertEquals(Suchergebnis.Treffer("192.168.16.7", Quelle.SCAN), e)
     }

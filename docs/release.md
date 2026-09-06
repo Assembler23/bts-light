@@ -49,9 +49,12 @@ Ebenso fest ist der Link für die **Tablet-Kiosk-App**:
 
     https://badhub.de/download/bts-light/bts-light-tablet.apk
 
-Der `publish`-Job legt ihn als Kopie der jeweils gebauten Tablet-APK ab —
-signiert, sobald die beiden Android-Keystore-Secrets hinterlegt sind, sonst
-als Debug-APK (siehe „Benötigte GitHub-Secrets" unten und
+Der `publish`-Job legt diesen festen Namen **nur** für eine SIGNIERTE APK an
+(sobald die beiden Android-Keystore-Secrets hinterlegt sind). Eine
+Debug-APK (Secrets fehlen) ist debuggable und würde später kein signiertes
+Update mehr annehmen — sie bleibt deshalb ausschließlich unter ihrem
+versionierten `-debug.apk`-Namen erreichbar, nie unter dem festen Link
+(siehe „Benötigte GitHub-Secrets" unten und
 [tablet-android-app.md](tablet-android-app.md)).
 
 ## Handbuch (`/download/bts-light/handbuch/`)
@@ -303,6 +306,12 @@ Fehlt `ANDROID_KEYSTORE_B64`, baut der `android`-Job im Release-Workflow
 statt einer signierten nur eine unsignierte Debug-APK — der Job ist
 `continue-on-error`, ein Fehlschlag dort blockiert also nie den
 Windows-Installer oder `latest.json`.
+
+Die `versionCode`-Formel steht **zweimal** im Repo — `app/build.gradle.kts`
+(`versionCodeAus`) und `kern/Version.kt` (`versionCode`, für den JVM-Test)
+— ein CI-Job vergleicht sie nicht gegeneinander. Läuft eine der beiden
+Stellen der anderen davon, entsteht ein falscher `versionCode`, den nichts
+automatisch entdeckt: beim Ändern der Formel **immer beide** anfassen.
 
 Das **Updater-Schlüsselpaar** wurde einmalig mit
 `npx tauri signer generate` erzeugt. Der Public Key steht in

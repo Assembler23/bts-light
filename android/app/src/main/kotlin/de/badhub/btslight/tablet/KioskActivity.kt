@@ -5,6 +5,7 @@ import android.net.nsd.NsdManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.InputType
 import android.view.MotionEvent
@@ -88,7 +89,6 @@ class KioskActivity : AppCompatActivity() {
         wartekarteHinweis.setText(R.string.kein_besitzer)
 
         webEinrichten()
-        eckeEinrichten()
 
         val sonde = AndroidSonde()
         // Eine gebundene Referenz auf `MdnsSuche::finde` (Default-Parameter)
@@ -209,6 +209,10 @@ class KioskActivity : AppCompatActivity() {
             domStorageEnabled = true            // localStorage: Spielstand, Geräte-ID der Seite
             mediaPlaybackRequiresUserGesture = false // Gong ohne Fingertipp
             cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+            // Die Seite kommt immer von http:// vom Tablet-Server — Datei- und
+            // Content-Provider-Zugriff braucht sie nie (kleinere Angriffsfläche).
+            allowFileAccess = false
+            allowContentAccess = false
         }
         web.addJavascriptInterface(FullyBruecke(this), "fully")
         web.webViewClient = object : WebViewClient() {
@@ -228,16 +232,40 @@ class KioskActivity : AppCompatActivity() {
 
     // ---- Hüllen-Menü ----------------------------------------------------------
 
-    private fun eckeEinrichten() {
-        val ecke = findViewById<View>(R.id.ecke)
-        val oeffnen = Runnable { pinAbfragen { menuZeigen() } }
-        ecke.setOnTouchListener { _, ev ->
-            when (ev.actionMasked) {
-                MotionEvent.ACTION_DOWN -> handler.postDelayed(oeffnen, 2000)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> handler.removeCallbacks(oeffnen)
+    /**
+     * Hüllen-Geste: 2 s Fingerdruck links oben. Wird beim Verteilen der
+     * Ereignisse beobachtet und NICHT verschluckt — die Zählseite hat in
+     * derselben Ecke ihren „Letzten Punkt zurück"-Knopf. Feuert der Timer,
+     * bekommt die Seite ein ACTION_CANCEL, damit ihr Knopf nicht zusätzlich
+     * auslöst. Rutscht der Finger aus der Ecke, ist die Geste vorbei.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val ecke = (72 * resources.displayMetrics.density)
+        val inEcke = ev.x < ecke && ev.y < ecke
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> if (inEcke) {
+                eckeGedrueckt = true
+                handler.postDelayed(eckeAusloeser, 2000)
             }
-            true
+            MotionEvent.ACTION_MOVE -> if (eckeGedrueckt && !inEcke) eckeAbbrechen()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> eckeAbbrechen()
         }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private var eckeGedrueckt = false
+    private val eckeAusloeser = Runnable {
+        eckeGedrueckt = false
+        val jetzt = SystemClock.uptimeMillis()
+        val cancel = MotionEvent.obtain(jetzt, jetzt, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        web.dispatchTouchEvent(cancel)
+        cancel.recycle()
+        pinAbfragen { menuZeigen() }
+    }
+
+    private fun eckeAbbrechen() {
+        eckeGedrueckt = false
+        handler.removeCallbacks(eckeAusloeser)
     }
 
     private fun menuZeigen() {
@@ -253,7 +281,7 @@ class KioskActivity : AppCompatActivity() {
                 0 -> verarbeite(Ereignis.Handgriff)
                 1 -> adresseAbfragen()
                 2 -> pinFestlegen(erstStart = false) { }
-                3 -> { log.schreibe("Kiosk verlassen"); Kiosk.verlassen(this) }
+                3 -> { log.schreibe("Kiosk verlassen"); Kiosk.verlassen(this, log::schreibe) }
             }
         }.setNegativeButton(R.string.abbrechen, null).show()
     }

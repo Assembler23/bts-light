@@ -107,9 +107,13 @@ Lobby neu.
 
 | Zustand | Anzeige |
 |---|---|
-| Suchen | Wartekarte: „Suche Turnier-PC im WLAN …", WLAN-Name, zuletzt gemerkte IP, Versuchszähler, Knopf **„Erneut suchen"** (ohne PIN), klein: „nicht als Gerätebesitzer eingerichtet", falls zutreffend |
+| Suchen | Wartekarte: „Suche Turnier-PC im WLAN …", eigene IP, zuletzt gemerkte IP, Versuchszähler, Knopf **„Erneut suchen"** (ohne PIN), klein: „nicht als Gerätebesitzer eingerichtet", falls zutreffend |
 | Verbunden | WebView mit `http://<ip>:8088/felder`, danach navigiert der Helfer selbst (Feld, Zahnrad-Menü) |
 | Verloren | wie Suchen, nach der Fehltoleranz |
+
+Kein WLAN-Name (SSID) auf der Wartekarte — bewusst weggelassen: Ab
+Android 9 ist die SSID nur mit erteilter Standortfreigabe und
+eingeschalteter Ortung lesbar, für ein Kiosk-Gerät unangemessen.
 
 ### Hüllen-Menü
 
@@ -145,6 +149,16 @@ Ausstieg über die Android-Geste. Die Wartekarte weist darauf hin.
 
 „Kiosk verlassen" beendet Lock-Task und die App → normales Android. Ein
 Antippen des App-Symbols sperrt wieder.
+
+### Restrisiken
+
+- **LAN-Vertrauen:** Jedes Gerät im Hallen-WLAN, das auf `:8088/health` mit
+  einer JSON-artigen Antwort reagiert, wird für diese Sitzung der Server
+  des Tablets — akzeptiert, weil das Hallen-Netz physisch kontrolliert ist.
+- **Klartext-HTTP durchgehend** (Seite, Sonde, Log) — LAN-only, wie der
+  Tablet-Server selbst.
+- **PIN ist Bedienschutz, keine Sicherheitsgrenze** — Klartext gespeichert,
+  keine Sperre nach Fehlversuchen.
 
 ### JS-Brücke: `fully`-kompatibel
 

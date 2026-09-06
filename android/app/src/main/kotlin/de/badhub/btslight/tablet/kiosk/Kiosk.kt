@@ -58,13 +58,18 @@ object Kiosk {
             .onFailure { log("Kiosk: Lock-Task fehlgeschlagen: ${it.message}") }
     }
 
-    fun verlassen(a: Activity) {
+    fun verlassen(a: Activity, log: (String) -> Unit) {
         // Sonst würde Home unsere App als bevorzugte Home-Activity sofort wieder
         // starten; `einrichten` setzt die Vorgabe beim nächsten Start neu.
-        if (istBesitzer(a)) {
+        val besitzer = istBesitzer(a)
+        var homeVorgabeGeraeumt = false
+        if (besitzer) {
             dpm(a).clearPackagePersistentPreferredActivities(admin(a), a.packageName)
+            homeVorgabeGeraeumt = true
         }
+        log("Kiosk: verlassen (Besitzer=$besitzer, Home-Vorgabe geräumt=$homeVorgabeGeraeumt)")
         runCatching { a.stopLockTask() }
+            .onFailure { log("Kiosk: stopLockTask fehlgeschlagen: ${it.message}") }
         a.finishAffinity()
     }
 }

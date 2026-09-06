@@ -101,6 +101,16 @@ class HuelleTest {
     }
 
     @Test
+    fun ladefehler_waehrend_der_suche_bewirkt_nichts() {
+        // about:blank beim Wechsel auf die Wartekarte löst im Hauptrahmen ein
+        // ERR_ABORTED aus — das darf keine zusätzliche Suchrunde anstoßen,
+        // die Suche läuft während `Zustand.Suchen` ohnehin schon.
+        val h = Huelle().apply { verarbeite(Ereignis.Start) }
+        assertTrue(h.verarbeite(Ereignis.Ladefehler).isEmpty())
+        assertEquals(Zustand.Suchen(1), h.zustand)
+    }
+
+    @Test
     fun verspaeteter_treffer_nach_wlan_verlust_wird_verworfen() {
         // Ein Suchlauf lief noch, als das WLAN wegging: sein Ergebnis darf
         // die Wartekarte nicht verdrängen — WlanDa startet ohnehin neu.
