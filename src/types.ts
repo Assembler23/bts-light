@@ -582,7 +582,9 @@ export type AnnounceJob = {
 export interface AppConfig {
   btp: BtpConfig;
   badhub: BadhubConfig;
-  /** Opt-in: Diagnose-Logs automatisch an badhub.de hochladen. */
+  /** Diagnose-Logs automatisch an badhub.de hochladen. Bei einer
+   *  Neuinstallation **an** (Rust: `AppConfig::neu_installation`); im
+   *  Assistenten abwählbar (Opt-out). */
   upload_logs: boolean;
   /** Zufällige, dauerhafte Installations-ID (Frontend erzeugt sie). */
   install_id: string;

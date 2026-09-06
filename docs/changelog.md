@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.279
+
+- **Geändert: Diagnose-Logs sind bei einer Neuinstallation standardmäßig
+  an.** Der Schalter **Einstellungen → Diagnose → „Diagnose-Logs senden"**
+  war bisher ein Opt-in — dadurch erreichte uns ausgerechnet von den
+  Turnieren, bei denen etwas schiefging, meist nichts. Der Assistent zeigt
+  das Häkchen beim ersten Start jetzt gesetzt; **abwählen bleibt jederzeit
+  möglich** und die Entscheidung steht dauerhaft in der `config.json`. Wer
+  den Schalter bewusst abgewählt hat, bleibt abgewählt; ein Update einer
+  bestehenden Installation schaltet nichts stillschweigend ein — das gilt
+  nur für Neuinstallationen. Inhalt und Umfang der Logs ändern sich nicht
+  (technische Daten, keine Spielernamen).
+
 ## v0.9.278
 
 - **Neu: Aufruf-Uhr am Zähl-Tablet.** Die Kopfzeile zeigt dieselbe Uhr
