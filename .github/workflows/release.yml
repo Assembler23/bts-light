@@ -86,10 +86,14 @@ jobs:
   # Tablet-APK. Mit Keystore-Secret signiert (Release), sonst Debug-APK —
   # dann müssen Tablets beim späteren Umstieg auf die signierte Variante
   # einmal deinstalliert werden (andere Signatur).
+  # continue-on-error: ein APK-Fehlschlag darf den Windows-Installer und
+  # latest.json nie blockieren (Auto-Update der Desktop-App bleibt
+  # unberührt); publish kommt ohne APK aus.
   android:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       contents: write
     steps:
