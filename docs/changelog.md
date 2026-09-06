@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.283
+
+- **Neu: Zähltafel für den Platz hinter dem Feld.** Die Punkte stehen jetzt
+  auch **übereinander** (oben die ferne Seite, unten die nahe, Satzstand je
+  Seite neben der Kachel). Ohne Einstellung folgt die Tafel der Drehung des
+  Tablets: Hochformat → übereinander, Querformat → nebeneinander, live ohne
+  Neuladen. Im Zahnrad-Menü der Anzeige-Hülle lässt sich das unter
+  „Anordnung" fest übersteuern (gemerkt je Gerät); „Seiten spiegeln" wirkt in
+  beiden Anordnungen. Adresse: `…/court/<Feld>/tafel?anordnung=uebereinander`.
+  Spec `docs/features/zaehltafel-anzeige-huelle.md` (Erweiterung 06.09.2026).
+- **Neu: Zähl-Tablet hinter dem Feld.** Dieselbe Anordnung am Zähl-Tablet:
+  im Hochformat (oder fest gewählt) liegen die Plus-Knöpfe **oben (Hinten)
+  und unten (Vorne)**, der Court steht hochkant mit dem Netz waagerecht, der
+  Satzstand oben/unten; Seitenwahl und Kartenwahl sagen „vorne/hinten". Im
+  Zahnrad-Menü unter „Anordnung" (automatisch · nebeneinander ·
+  übereinander), gemerkt je Gerät. Die Zähllogik bleibt links/rechts; das
+  Drehen mitten im Spiel dreht nur die Darstellung.
+
 ## v0.9.282
 
 - **Tablet-Kiosk-App für Android / Fire-Tablets.** Eigene App findet den

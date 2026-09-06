@@ -39,13 +39,21 @@ export function zielAusQuery(layoutRoh, courtRoh) {
 /**
  * @param {{layout:string, court:number|null}} ziel
  * @param {boolean} spiegel Nur die Zähltafel kennt `?spiegel=1`.
+ * @param {unknown} [anordnung] Nur die Zähltafel: `nebeneinander` |
+ *   `uebereinander` als Hand-Übersteuerung; `auto` oder Unbekanntes schreibt
+ *   nichts in die Adresse (die Tafel folgt dann der Geräte-Ausrichtung).
  * @returns {string|null}
  */
-export function zielPfad(ziel, spiegel) {
+export function zielPfad(ziel, spiegel, anordnung) {
   const court = ziel && Number.isInteger(ziel.court) && ziel.court > 0 ? ziel.court : null;
   switch (ziel && ziel.layout) {
-    case "tafel":
-      return court ? `court/${court}/tafel${spiegel ? "?spiegel=1" : ""}` : null;
+    case "tafel": {
+      if (!court) return null;
+      const q = [];
+      if (spiegel) q.push("spiegel=1");
+      if (anordnung === "nebeneinander" || anordnung === "uebereinander") q.push("anordnung=" + anordnung);
+      return `court/${court}/tafel${q.length ? "?" + q.join("&") : ""}`;
+    }
     case "feld":
       return court ? `court/${court}/display` : null;
     case "uebersicht":

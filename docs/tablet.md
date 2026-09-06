@@ -374,6 +374,41 @@ und rot pulsierend **„Letzter Aufruf"**.
   Bruttostart aus `match-times.json` — die Uhr läuft nach einem Update
   weiter statt bei null zu beginnen (Spec `update-im-turnierbetrieb`).
 
+## Zählen hinter dem Feld: Anordnung vorn/hinten (seit v0.9.283)
+
+Der Bediener sitzt oft nicht seitlich am Netz, sondern **hinter dem Feld** an
+der Grundlinie. Von dort sind die Teams nicht links/rechts, sondern
+**vorn/hinten** — deshalb kennt die Zählansicht zwei Anordnungen (Spec
+[features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
+Erweiterung 06.09.2026):
+
+- **Nebeneinander** (bisher): Plus-Knöpfe links und rechts, Court quer mit
+  dem Netz senkrecht.
+- **Übereinander**: der Plus-Knopf für die **ferne Seite oben**, für die
+  **nahe Seite unten** („Hinten"/„Vorne" statt „Rechts"/„Links"); der Court
+  steht hochkant mit dem Netz waagerecht, der Satzstand zeigt oben die ferne,
+  unten die nahe Seite. Die Seitenwahl fragt „Welches Team steht vorne
+  (unten)?", die Spielerwahl bei Karten sagt „vorne/hinten". Der Federball
+  sitzt weiterhin im Innenwinkel des Aufschlagfelds — die Zellen sind so
+  gedreht, dass die rechte Hand jedes Spielers stimmt (oben: rechtes
+  Aufschlagfeld links, unten: rechtes Aufschlagfeld rechts).
+- **Wahl** im Zahnrad-Menü (hinter der PIN), Eintrag „Anordnung" reihum:
+  **automatisch** (Standard: Hochformat → übereinander, Querformat →
+  nebeneinander; Drehen des Tablets schaltet live um, mitten im Spiel, ohne
+  Neuladen) · **nebeneinander (links–rechts)** · **übereinander
+  (vorn–hinten)**. Die Wahl gilt je Gerät (`localStorage`), nicht je Feld —
+  sie beschreibt, wo das Tablet steht.
+- **Nichts an der Zähllogik ändert sich:** intern bleibt alles links/rechts
+  (Seitenwechsel, Aufschlagfolge, Ergebnis, Spiegel zum Host); „vorne" ist
+  die Seite „links". Ein Wechsel der Anordnung mitten im Spiel dreht nur die
+  Darstellung — wer unten stand, steht danach links.
+- **Waagerecht bleiben** die Satz-Historie unter dem Satzstand (`1: 21:18`),
+  der Endstand-Dialog („Ergebnis eintragen": Eingabepaar und Untertitel)
+  und die Zusammenfassung beim Beenden: dort steht links die Seite „vorne",
+  rechts die Seite „hinten". Die Schiri-Ansage „zu meiner Rechten/Linken"
+  ist DBV-Wortlaut aus Sicht des Schiedsrichterstuhls (siehe
+  [umpire-mode.md](umpire-mode.md)) und dreht nicht mit.
+
 ## Am Tablet: Pausen, Court-Grafik, Akkustand
 
 - **Offizielle Pausen** (BWF): Bei 11 Punkten im Satz blendet das Tablet
@@ -653,7 +688,14 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
   angezeigt).
 - **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`):
   Anzeige wählen · Feld wechseln · Seiten spiegeln (nur Zähltafel, gemerkt je
-  Gerät) · Zum Zählen wechseln · Neu laden · Vollbild · Schließen.
+  Gerät) · Anordnung (nur Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln ·
+  Neu laden · Vollbild · Schließen.
+- **Anordnung** (seit v0.9.283): Wer **hinter dem Feld** sitzt, sieht die
+  Teams vorn/hinten statt links/rechts. „Automatisch" stellt das Tablet im
+  Hochformat auf Punkte **übereinander** (oben fern, unten nah) und im
+  Querformat auf nebeneinander — Drehen genügt. „Nebeneinander (links–rechts)"
+  und „Übereinander (vorn–hinten)" erzwingen eine Anordnung unabhängig von der
+  Drehung. „Seiten spiegeln" dreht in beiden Anordnungen.
 - **Zum Zählen wechseln** fragt vorher die Feldliste: Ist das Feld belegt,
   kommt eine Warnung mit Bestätigung — die Zähl-Seite würde bei einem
   abgetauchten Tablet sonst still übernehmen (ADR 0017). Ein älterer Relay
