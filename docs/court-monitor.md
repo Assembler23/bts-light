@@ -69,6 +69,13 @@ ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)).
   mitvollzogen); `?spiegel=1` tauscht die Seiten (nur fester Modus). Ohne
   Seiteninformation (vor der Seitenwahl, oder kein zählendes Tablet) steht
   Mannschaft 1 links, ohne Aufschlag-Punkt.
+- **Anordnung (seit v0.9.283):** Für den Platz **hinter dem Feld** stehen die
+  Punkte **übereinander** — oben die ferne Seite (= „rechts"), unten die nahe;
+  der Satzstand steht dann je Seite gelb neben der Kachel. Ohne Angabe folgt
+  die Tafel der Ausrichtung des Geräts (Hochformat → übereinander, Querformat
+  → nebeneinander, Drehen schaltet live um); `?anordnung=nebeneinander` bzw.
+  `?anordnung=uebereinander` übersteuert (nur fester Modus, im Gerätemodus
+  gilt immer die Automatik). `?spiegel=1` dreht auch oben/unten.
 - **Spielende:** der letzte gespielte Satz bleibt groß stehen und zählt im
   Satzstand; bei Aufgabe zählt der unvollständige Satz nicht. Ohne Spiel:
   Feldbezeichnung groß.

@@ -8,6 +8,12 @@ Kein Code aus phihag/bts wurde übernommen – siehe [NOTICE.md](../NOTICE.md).
 
 ## Transport
 
+> **Vorbedingung in BTP:** Der TCP-Dienst läuft nur, wenn in BTP unter
+> **Extras → Tournament Planner Network…** das Häkchen „Enabled" gesetzt
+> ist. Sonst verweigert der Port die Verbindung (`os error 10061`);
+> `btp::client::ClientError::Connect` hängt in diesem Fall die Anleitung an
+> den Fehlertext (`TP_NETWORK_HINWEIS`).
+
 - **TCP**, Port **9901** (BTP, Einzelturniere) bzw. **9911** (BLP, Liga/Team).
 - BTP läuft als Server, der Client verbindet sich.
 - **Jeder Request ist eine eigene, kurzlebige TCP-Verbindung.** Der Server

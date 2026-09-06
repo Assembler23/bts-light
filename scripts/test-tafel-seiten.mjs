@@ -1,7 +1,7 @@
 // Testet die Seitenlogik der Zähltafel (src/io/tafelSeiten.mjs, Spec
 // zaehltafel-anzeige-huelle) — das echte Modul, dessen Inline-Kopie
 // tafel.html trägt.
-import { tafelSeiten } from "../src/io/tafelSeiten.mjs";
+import { tafelSeiten, ANORDNUNGEN, anordnungAusQuery, effektiveAnordnung } from "../src/io/tafelSeiten.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -75,6 +75,16 @@ ok("kein Array: wie leer",
 ok("Punkte als String/NaN werden 0",
   tafelSeiten([{ a: "x", b: null }], null, false),
   { links: seite(0, 0, false), rechts: seite(0, 0, false), entschieden: false });
+
+// ── Anordnung: hinter dem Feld sitzt man vor/hinter, nicht links/rechts ──
+ok("drei Anordnungen", ANORDNUNGEN, ["auto", "nebeneinander", "uebereinander"]);
+ok("anordnungAusQuery: bekannt bleibt", [anordnungAusQuery("nebeneinander"), anordnungAusQuery("uebereinander")], ["nebeneinander", "uebereinander"]);
+ok("anordnungAusQuery: fehlt/leer/Unfug → auto", [anordnungAusQuery(null), anordnungAusQuery(""), anordnungAusQuery("Uebereinander"), anordnungAusQuery("x")], ["auto", "auto", "auto", "auto"]);
+ok("auto im Hochformat → übereinander", effektiveAnordnung("auto", true), "uebereinander");
+ok("auto im Querformat → nebeneinander", effektiveAnordnung("auto", false), "nebeneinander");
+ok("manuell nebeneinander schlägt Hochformat", effektiveAnordnung("nebeneinander", true), "nebeneinander");
+ok("manuell übereinander schlägt Querformat", effektiveAnordnung("uebereinander", false), "uebereinander");
+ok("Unfug wirkt wie auto", effektiveAnordnung("x", true), "uebereinander");
 
 if (failures > 0) { console.error(`${failures} Fehler`); process.exit(1); }
 console.log("alle Tafel-Seiten-Tests grün");

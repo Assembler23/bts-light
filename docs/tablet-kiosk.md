@@ -33,7 +33,12 @@ Reiner Bedien-Schutz gegen versehentliche Änderungen – **keine Sicherheitsgre
 
 ---
 
-## 2) Kiosk-Sperre mit Fully Kiosk Browser
+## 2) Kiosk-Sperre: eigene App (empfohlen) oder Fully Kiosk
+
+Für das Verleih-Set ist die eigene Kiosk-App (seit September 2026) der
+empfohlene Weg — sie findet den Turnier-PC selbst, braucht keine Start-URL
+und keine PLUS-Lizenz: [tablet-android-app.md](tablet-android-app.md). Fully
+Kiosk bleibt für fremde Geräte und iPads die Alternative.
 
 [Fully Kiosk Browser](https://www.fully-kiosk.com/) lädt unsere Seite im Vollbild.
 Läuft auch auf **Amazon Fire-Tablets** (Installation über den Amazon Appstore

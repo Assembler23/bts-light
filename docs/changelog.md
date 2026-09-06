@@ -4,6 +4,56 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.283
+
+- **Neu: Zähltafel für den Platz hinter dem Feld.** Die Punkte stehen jetzt
+  auch **übereinander** (oben die ferne Seite, unten die nahe, Satzstand je
+  Seite neben der Kachel). Ohne Einstellung folgt die Tafel der Drehung des
+  Tablets: Hochformat → übereinander, Querformat → nebeneinander, live ohne
+  Neuladen. Im Zahnrad-Menü der Anzeige-Hülle lässt sich das unter
+  „Anordnung" fest übersteuern (gemerkt je Gerät); „Seiten spiegeln" wirkt in
+  beiden Anordnungen. Adresse: `…/court/<Feld>/tafel?anordnung=uebereinander`.
+  Spec `docs/features/zaehltafel-anzeige-huelle.md` (Erweiterung 06.09.2026).
+- **Neu: Zähl-Tablet hinter dem Feld.** Dieselbe Anordnung am Zähl-Tablet:
+  im Hochformat (oder fest gewählt) liegen die Plus-Knöpfe **oben (Hinten)
+  und unten (Vorne)**, der Court steht hochkant mit dem Netz waagerecht, der
+  Satzstand oben/unten; Seitenwahl und Kartenwahl sagen „vorne/hinten". Im
+  Zahnrad-Menü unter „Anordnung" (automatisch · nebeneinander ·
+  übereinander), gemerkt je Gerät. Die Zähllogik bleibt links/rechts; das
+  Drehen mitten im Spiel dreht nur die Darstellung.
+
+## v0.9.282
+
+- **Tablet-Kiosk-App für Android / Fire-Tablets.** Eigene App findet den
+  Turnier-PC selbst (gemerkte IP → Subnetz-Scan → mDNS), zeigt die
+  Felder-Lobby im Vollbild, sperrt als Gerätebesitzer, meldet den Akku und
+  schickt ihr Log an `/pi-log`. APK:
+  `badhub.de/download/bts-light/bts-light-tablet.apk`. Spec
+  `docs/features/tablet-android-kiosk-app.md`, ADR 0058.
+
+## v0.9.281
+
+- **Hilfe, wenn BTP die Verbindung verweigert.** Meldet BTP „Verbindung
+  verweigert" (meist beim ersten Start auf einem neuen Turnier-PC), nennt
+  der Fehlertext jetzt direkt die Ursache und den Weg: In BTP unter
+  **Extras → Tournament Planner Network…** das Häkchen „Enabled" setzen.
+  Derselbe Hinweis steht im Assistenten unter der BTP-Verbindung und im
+  Handbuch („Was ist BTS Light?").
+
+## v0.9.280
+
+- **Behoben: Umsortieren per Ziehen in der TL-Web-Spielliste.** Seit
+  v0.9.271 sprang die Zeile nach dem ersten Umhängen zurück, und nichts wurde
+  gesendet (der Browser gab den Zeigerfang des umgehängten Elements frei, das
+  Sicherheitsnetz hielt das für einen Abbruch). Maus und Touch nachgemessen.
+- **Behoben: „An den Anfang" zweimal hintereinander** warf das zuerst
+  geschobene Spiel wieder nach unten; jetzt rückt es auf Platz zwei — der
+  manuell sortierte Block bleibt bei jedem Zug vollständig.
+- **Neu: Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile** (Profil-
+  Häkchen, Standard aus): ⤒ Anfang, ↑ eine hoch, ↓ eine runter, ⤓ Ende — für
+  Geräte, auf denen Ziehen nicht praktikabel ist.
+- **Neu: „↩ Vom Feld nehmen" im ⋯-Menü einer belegten Feld-Kachel** (TL-Web),
+  ohne die Kachel vorher auswählen zu müssen.
 ## v0.9.279
 
 - **Neu: Update ohne Bedien-Lücke im Turnierbetrieb.** Das Update wird im
