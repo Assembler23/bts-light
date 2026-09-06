@@ -809,6 +809,27 @@ mitgeändert worden:
   am PC eine Einstellung, Sperre still weg, Automatik legt ein Spiel darauf.
   Ein Test hält den Pfad offen (`keep_host_managed_fields_preserves_the_locked_courts`).
 
+## Wünsche vom 06.09.2026
+
+- **Pause der Feld-Automatik überlebt Neustart und Update nicht.** Wird die
+  automatische Feldvergabe in der Turnierleitungs-Sicht (TL-Web) pausiert
+  und bts-light danach neu gestartet oder aktualisiert, läuft die Automatik
+  wieder — der Pause-Zustand lebt nur im Speicher. Seit „Update im
+  Turnierbetrieb" (v0.9.279, Wiederanlauf per Marker) fällt das stärker
+  auf, weil die Übertragung nach dem Update von selbst wieder anläuft.
+  Lösung: Pause-Flag turniergebunden persistieren (Muster
+  `locked_courts_tournament`, ADR 0044) und beim Wiederanlauf lesen.
+- **Kebab-Menü (⋮) im TL-Web schließt nach einer Aktion nicht.** Wird ein
+  Eintrag gewählt oder ein Knopf gedrückt, bleibt das Menü offen und muss
+  von Hand geschlossen werden; in der Regel kann es direkt zugehen. Vor der
+  Umsetzung klären, ob mehrstufige Einträge (Farbwahl, Feldwähler Wunschfeld)
+  bewusst offen bleiben sollen.
+- **Warteliste: „In Vorbereitung rufen" und „An den Anfang der Spielliste
+  schieben" ins Kebab-Menü.** Weniger Knöpfe je Zeile, ruhigere Liste am
+  Tablet. Zusammen mit dem Punkt darüber umsetzen, sonst kostet jede der
+  beiden Aktionen künftig einen Tipp mehr. Vorher prüfen, welche der
+  Verschiebe-Knöpfe aus v0.9.280 gemeint sind.
+
 ## Wünsche vom 23.08.2026
 
 - **Felder sperren im TL-Web** — Spec freigegeben und umgesetzt (v0.9.258):
