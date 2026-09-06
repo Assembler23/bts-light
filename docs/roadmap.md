@@ -716,9 +716,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     06.09.2026**: [einstellungen.md](einstellungen.md), alle Abschnitte der
     Einstellungsseite plus Wartung, mit Standardwerten,
     Sichtbarkeitsbedingungen und der Frage, ab wann eine Änderung wirkt;
-  - wie der **Master-/Slave-Betrieb** funktioniert — heute verteilt über
-    [multi-hall.md](multi-hall.md) und [cloud-relay.md](cloud-relay.md), in
-    Architektursprache statt als Erklärung;
+  - ~~wie der **Master-/Slave-Betrieb** funktioniert~~ — **erledigt
+    06.09.2026**: [master-slave.md](master-slave.md), aus Sicht der
+    Turnierleitung statt der Architektur, mit den vier häufigsten
+    Missverständnissen;
   - was die **Oberflächen** jeweils können (Turnierleitungs-Sicht,
     Court-Monitor, Info-Monitor, Siegerehrung, Aushang).
 
