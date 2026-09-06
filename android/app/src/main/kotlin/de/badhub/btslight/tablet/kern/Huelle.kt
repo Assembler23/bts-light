@@ -60,14 +60,19 @@ class Huelle(private val fehltoleranz: Int = 3, private val rundeMs: Long = 10_0
         }
         is Ereignis.Gefunden -> {
             val vorher = zustand
-            fehlschlaege = 0
-            val gleich = vorher is Zustand.Verbunden && vorher.ip == e.ip
-            zustand = Zustand.Verbunden(e.ip)
-            if (gleich && !neuLaden) {
+            // Verspäteter Treffer nach WLAN-Verlust: WlanDa löst ohnehin eine neue Suche aus.
+            if (vorher is Zustand.Wartend) {
                 emptyList()
             } else {
-                neuLaden = false
-                listOf(Wirkung.Merke(e.ip), Wirkung.LadeLobby(e.ip))
+                fehlschlaege = 0
+                val gleich = vorher is Zustand.Verbunden && vorher.ip == e.ip
+                zustand = Zustand.Verbunden(e.ip)
+                if (gleich && !neuLaden) {
+                    emptyList()
+                } else {
+                    neuLaden = false
+                    listOf(Wirkung.Merke(e.ip), Wirkung.LadeLobby(e.ip))
+                }
             }
         }
         Ereignis.NichtsGefunden -> when (val z = zustand) {

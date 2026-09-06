@@ -99,4 +99,13 @@ class HuelleTest {
         assertEquals(listOf(Wirkung.Merke("10.1.1.1"), Wirkung.LadeLobby("10.1.1.1")), h.verarbeite(Ereignis.HandAdresse("10.1.1.1")))
         assertEquals(Zustand.Verbunden("10.1.1.1"), h.zustand)
     }
+
+    @Test
+    fun verspaeteter_treffer_nach_wlan_verlust_wird_verworfen() {
+        // Ein Suchlauf lief noch, als das WLAN wegging: sein Ergebnis darf
+        // die Wartekarte nicht verdrängen — WlanDa startet ohnehin neu.
+        val h = Huelle().apply { verarbeite(Ereignis.Start); verarbeite(Ereignis.WlanWeg) }
+        assertTrue(h.verarbeite(Ereignis.Gefunden(ip)).isEmpty())
+        assertEquals(Zustand.Wartend, h.zustand)
+    }
 }
