@@ -9,6 +9,18 @@ ihn an `badhub.de`, wo er als öffentlicher Liveticker erscheint. Zielgruppe sin
 Turnierleiter ohne technischen Hintergrund: installieren, BTP verbinden,
 Badhub-Passwort eintragen – fertig.
 
+## Voraussetzung in BTP: Tournament Planner Network
+
+BTP nimmt Verbindungen von BTS Light erst an, wenn in BTP **Extras →
+Tournament Planner Network…** geöffnet und dort das Häkchen **„Enabled"**
+gesetzt ist. Ist im selben Fenster ein Passwort eingetragen, gehört dasselbe
+in BTS Light in das Feld „BTP-Passwort" (Einstellungen → BTP-Verbindung).
+
+Fehlt das Häkchen, meldet BTS Light **„Verbindung zu 127.0.0.1:9901
+fehlgeschlagen … Zielcomputer verweigerte die Verbindung"** — der Status im
+Dashboard und der Verbindungstest im Assistenten nennen dann direkt diese
+Einstellung. Die Einstellung bleibt in BTP gespeichert.
+
 ## Status
 
 **App funktionsfähig.** Funktionskern und Oberfläche stehen:
