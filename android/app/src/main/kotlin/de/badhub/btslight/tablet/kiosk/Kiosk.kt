@@ -59,6 +59,11 @@ object Kiosk {
     }
 
     fun verlassen(a: Activity) {
+        // Sonst würde Home unsere App als bevorzugte Home-Activity sofort wieder
+        // starten; `einrichten` setzt die Vorgabe beim nächsten Start neu.
+        if (istBesitzer(a)) {
+            dpm(a).clearPackagePersistentPreferredActivities(admin(a), a.packageName)
+        }
         runCatching { a.stopLockTask() }
         a.finishAffinity()
     }

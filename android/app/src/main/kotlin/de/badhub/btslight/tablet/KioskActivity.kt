@@ -16,6 +16,7 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -37,10 +38,12 @@ import de.badhub.btslight.tablet.netz.NetzBeobachter
 import de.badhub.btslight.tablet.suche.Scanner
 import de.badhub.btslight.tablet.suche.ServerSuche
 import de.badhub.btslight.tablet.suche.Suchergebnis
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Die Hülle: WebView + Wartekarte. Alle Entscheidungen trifft `Huelle`
@@ -98,7 +101,7 @@ class KioskActivity : AppCompatActivity() {
             verarbeite(if (da) Ereignis.WlanDa else Ereignis.WlanWeg)
         }
 
-        if (einstellungen.pin == null) pinFestlegen { verarbeite(Ereignis.Start) } else verarbeite(Ereignis.Start)
+        if (einstellungen.pin == null) pinFestlegen(erstStart = true) { verarbeite(Ereignis.Start) } else verarbeite(Ereignis.Start)
     }
 
     override fun onStart() {
@@ -113,9 +116,12 @@ class KioskActivity : AppCompatActivity() {
 
     // ---- Zustandsmaschine -------------------------------------------------
 
-    private fun verarbeite(e: Ereignis) = runOnUiThread {
-        for (w in huelle.verarbeite(e)) fuehreAus(w)
-        wartekarteAktualisieren()
+    /** Immer asynchron auf dem UI-Thread — nie inline, sonst sieht der Such-Wächter sich selbst. */
+    private fun verarbeite(e: Ereignis) {
+        handler.post {
+            for (w in huelle.verarbeite(e)) fuehreAus(w)
+            wartekarteAktualisieren()
+        }
     }
 
     private fun fuehreAus(w: Wirkung) {
@@ -131,18 +137,36 @@ class KioskActivity : AppCompatActivity() {
             Wirkung.Wartekarte -> {
                 uploadTakt?.cancel()
                 wartekarte.visibility = View.VISIBLE
+                // Die versteckte Seite darf keinen Gong spielen und keine Tipps bekommen.
+                web.loadUrl("about:blank")
             }
             is Wirkung.Merke -> einstellungen.gemerkteIp = w.ip
         }
     }
 
-    /** Ein Suchlauf zur Zeit; ein zweiter Auslöser während des Laufs verpufft. */
+    /** Läuft gerade wirklich eine Suche (nicht nur die Wartezeit davor)? */
+    private var sucheAktiv = false
+
+    /**
+     * Ein echter Suchlauf zur Zeit. Ein sofortiger Anstoß (Ladefehler, Handgriff)
+     * bricht eine noch schlafende Runde ab, statt zu verpuffen — sonst wirkt
+     * „Erneut suchen" bis zu 10 s lang tot.
+     */
     private fun starteSuche(verzoegerungMs: Long) {
-        if (suchlauf?.isActive == true) return
+        if (sucheAktiv) { log.schreibe("Suche: Anstoß verworfen, Lauf aktiv"); return }
+        if (verzoegerungMs == 0L) suchlauf?.cancel()
+        else if (suchlauf?.isActive == true) return
         suchlauf = lifecycleScope.launch {
             delay(verzoegerungMs)
+            sucheAktiv = true
             val t0 = System.currentTimeMillis()
-            val erg = suche.ausfuehren(einstellungen.gemerkteIp, NetzBeobachter.eigeneIpv4(this@KioskActivity))
+            val erg = try {
+                withContext(Dispatchers.Default) {
+                    suche.ausfuehren(einstellungen.gemerkteIp, NetzBeobachter.eigeneIpv4(this@KioskActivity))
+                }
+            } finally {
+                sucheAktiv = false
+            }
             log.schreibe("Suche: $erg (${System.currentTimeMillis() - t0} ms)")
             when (erg) {
                 is Suchergebnis.Treffer -> verarbeite(Ereignis.Gefunden(erg.ip))
@@ -228,7 +252,7 @@ class KioskActivity : AppCompatActivity() {
             when (i) {
                 0 -> verarbeite(Ereignis.Handgriff)
                 1 -> adresseAbfragen()
-                2 -> pinFestlegen { }
+                2 -> pinFestlegen(erstStart = false) { }
                 3 -> { log.schreibe("Kiosk verlassen"); Kiosk.verlassen(this) }
             }
         }.setNegativeButton(R.string.abbrechen, null).show()
@@ -244,20 +268,36 @@ class KioskActivity : AppCompatActivity() {
             .setNegativeButton(R.string.abbrechen, null).show()
     }
 
-    private fun pinFestlegen(danach: () -> Unit) {
+    /**
+     * Beim allerersten Start ist eine PIN Pflicht (kein Abbrechen, ungültige
+     * Eingabe fragt erneut). Beim späteren „PIN ändern" bleibt die alte PIN
+     * gültig — abbrechbar, ungültige Eingabe zeigt nur einen Hinweis.
+     */
+    private fun pinFestlegen(erstStart: Boolean, danach: () -> Unit) {
         val feld = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
-        AlertDialog.Builder(this).setTitle(R.string.pin_festlegen).setView(feld).setCancelable(false)
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.pin_festlegen).setView(feld).setCancelable(!erstStart)
             .setPositiveButton(R.string.ok) { _, _ ->
                 val pin = feld.text.toString()
-                if (PinRegel.gueltig(pin)) { einstellungen.pin = pin; danach() } else pinFestlegen(danach)
-            }.show()
+                when {
+                    PinRegel.gueltig(pin) -> { einstellungen.pin = pin; danach() }
+                    erstStart -> pinFestlegen(erstStart, danach)
+                    else -> Toast.makeText(this, R.string.pin_ungueltig, Toast.LENGTH_SHORT).show()
+                }
+            }
+        if (!erstStart) dialog.setNegativeButton(R.string.abbrechen, null)
+        dialog.show()
     }
 
     private fun pinAbfragen(danach: () -> Unit) {
         val feld = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
         AlertDialog.Builder(this).setTitle(R.string.pin_eingeben).setView(feld)
             .setPositiveButton(R.string.ok) { _, _ ->
-                if (feld.text.toString() == einstellungen.pin) danach() else log.schreibe("PIN falsch")
+                if (feld.text.toString() == einstellungen.pin) {
+                    danach()
+                } else {
+                    log.schreibe("PIN falsch")
+                    Toast.makeText(this, R.string.pin_falsch, Toast.LENGTH_SHORT).show()
+                }
             }
             .setNegativeButton(R.string.abbrechen, null).show()
     }

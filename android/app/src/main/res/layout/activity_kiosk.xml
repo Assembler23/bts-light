@@ -9,11 +9,14 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Fängt Tipps ab, sonst landen sie auf der verdeckten Lobby. -->
     <LinearLayout
         android:id="@+id/wartekarte"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="#111827"
+        android:clickable="true"
+        android:focusable="true"
         android:gravity="center"
         android:orientation="vertical"
         android:padding="32dp">

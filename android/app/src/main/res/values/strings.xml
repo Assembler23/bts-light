@@ -8,6 +8,7 @@
     <string name="pin_festlegen">Kiosk-PIN festlegen (4–8 Ziffern)</string>
     <string name="pin_eingeben">Kiosk-PIN</string>
     <string name="pin_falsch">PIN falsch</string>
+    <string name="pin_ungueltig">PIN muss 4–8 Ziffern haben</string>
     <string name="menu_titel">bts-light Tablet</string>
     <string name="menu_neu_suchen">Turnier-PC neu suchen</string>
     <string name="menu_adresse">Adresse von Hand eingeben</string>
