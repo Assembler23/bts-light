@@ -26,7 +26,7 @@ zeigen.
 | **Spielübersicht** | Das Arbeitspferd der Feldvergabe: oben die spielbereiten Spiele, darunter die Felder mit Ampel — grün frei, gelb belegt, **rot gesperrt**. Spiele zuweisen, Felder freigeben und sperren. | nie |
 | **Tablets** | Drei Reiter: **Übersicht** (welches Tablet hängt an welchem Feld, mit Akkustand), **In Vorbereitung** (gerufene Spiele), **QR-Codes** zum Einrichten der Geräte. | nie |
 | **Turnierleitung** | Hier entstehen die Zugänge für die Turnierleitungs-Oberfläche: Gerät koppeln, QR-Code zeigen, Zugang wieder entziehen. | nie — hier schaltet man sie schließlich ein |
-| **Check-In** | Wer ist da, wer fehlt. Von Hand einchecken, Anfangszeiten pflegen, Fehlende ausrufen lassen, Check-In-Seite und QR-Aushang öffnen. | Check-In aus **oder** Turnier-Kennung fehlt |
+| **Check-In** | Wer ist da, wer fehlt — je Klasse. Von Hand einchecken oder zurücksetzen, Fehlende ausrufen lassen, Check-In-Seite und QR-Aushang öffnen. | Check-In aus **oder** Turnier-Kennung fehlt |
 | **Schiedsrichter** | Einsatzplanung: Reihenfolge, Pausen, Sperrlisten, feldweise Schalter. Die Stammliste kommt aus BTP. | „Mit Schiedsrichtern spielen" aus |
 | **Ansagen** | Feld von Hand ansagen, Freitext sprechen, gespeicherte Ansagen, Verlauf mit „Erneut abspielen" — und alle Detail-Einstellungen zu Stimme und Tempo. | Ansagen aus |
 | **Monitore** | Die Geräteverwaltung für Fernseher und Pis: **welches Gerät zeigt was**. Siehe unten. | Court-Monitor aus |
@@ -34,9 +34,13 @@ zeigen.
 | **Einstellungen** | Derselbe Bildschirm wie der Einrichtungs-Assistent. Siehe [Einstellungen](einstellungen.md). | nie |
 | **Wartung** | Update prüfen, Logs öffnen, Version ablesen, Identität umziehen. | nie |
 
-Über allem liegt eine **Kopfzeile** mit dem Start-/Stopp-Knopf und drei
-Statusanzeigen: Verbindung zu BTP, Internet beziehungsweise Cloud, und — falls
-vorhanden — die ferne Halle.
+Über allem liegt eine **Kopfzeile** mit dem Start-/Stopp-Knopf und vier
+Statusanzeigen:
+
+- **Liveticker** — läuft die Übertragung gerade, oder ist sie gestoppt?
+- **Hallennetz** — hängt der PC im WLAN der Halle?
+- **Internet** beziehungsweise Cloud-Verbindung
+- **Ferne Halle** — nur, wenn eine gekoppelt ist
 
 ## Die Geräte in der Halle
 
@@ -54,8 +58,14 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 
 > **Steht das Tablet hinter dem Feld?** Zähltafel und Spielzettel können die
 > Punkte **übereinander** statt nebeneinander anordnen — vorn und hinten statt
-> links und rechts. Das richtet sich von allein nach der Geräteausrichtung und
-> lässt sich im Zahnrad-Menü fest einstellen.
+> links und rechts. Von allein richtet sich das nach der Geräteausrichtung:
+> Hochformat ergibt übereinander.
+>
+> Fest einstellen lässt es sich an zwei Stellen: beim **Spielzettel** im
+> Zahnrad-Menü, bei der **Zähltafel** in der Anzeige-Hülle (dort erscheint die
+> Auswahl, sobald als Ziel „Zähltafel" gewählt ist). Ein fest zugewiesener
+> Fernseher richtet sich **immer** nach seiner Ausrichtung — dort gibt es keine
+> feste Einstellung.
 
 ### Zum Anzeigen
 
@@ -63,9 +73,9 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 |---|---|---|
 | **Court-Monitor** `/court/<Feld>/display` | TV am Spielfeld | Namen, Sätze, Punkte, Aufschlag, Aufruf-Uhr. Läuft kein Spiel: Werbung oder Leerlaufbild. |
 | **Kombi-Anzeige** `/combo` | ein TV für zwei bis drei Felder | Mehrere Felder als Bänder auf einem Bildschirm. |
-| **Hallen-Übersicht** `/info/overview` | großer TV oder Beamer | Alle Felder mit laufendem Spiel, bei mehreren Hallen gruppiert. |
+| **Hallen-Übersicht** `/info/overview` | großer TV oder Beamer | **Alle** Felder — auch die freien. Bei mehreren Hallen zeigt der Bildschirm eine Halle nach der anderen im Vollbild, statt alle zusammenzuquetschen. Ein Zusatz in der Adresse bindet ihn fest an eine Halle. |
 | **In Vorbereitung** `/info/preparation` | TV am Meeting Point | Die als Nächstes anstehenden Spiele, gerufene zuerst. |
-| **Siegerehrung** `/info/winners` | TV am Podest | Das Podium der gewählten Disziplin. Mit einem Zusatz in der Adresse zeigt ein Bildschirm auch **nur einen Platz** — gedacht für drei Monitore vor den drei Podeststufen. |
+| **Siegerehrung** `/info/winners` | TV am Podest | Das Podium der gewählten Disziplin. Ein Bildschirm kann auch **nur einen Platz** zeigen — gedacht für je einen Monitor vor jeder Podeststufe. **Achtung beim dritten Platz:** Im Badminton gibt es **zwei** Dritte, und der Platz-3-Bildschirm zeigt beide untereinander — im Doppel also bis zu vier Namen. |
 | **Werbung** `/info/ad` | Werbe-TV | Sponsorenbilder, rotierend oder als Einzelbild. |
 
 ### Zum Steuern
@@ -77,8 +87,9 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 ## Wie ein Gerät zu seiner Anzeige kommt
 
 Ein frisch aufgestellter Fernseher zeigt **nicht** sofort ein Feld, sondern
-einen **Kopplungscode**. Den ordnest du in der App unter **Monitore** einem
-Ziel zu:
+nur das **Logo** — er wartet auf seine Zuweisung. Er meldet sich dabei von
+selbst in der App: unter **Monitore** taucht er in der Liste auf und bekommt
+dort sein Ziel:
 
 - ein **Feld** (Court-Monitor),
 - eine **Zähltafel** für ein Feld,
@@ -89,10 +100,14 @@ Ziel zu:
 Erst danach schaltet das Gerät selbständig auf die richtige Seite um. Du musst
 an ihm nichts eintippen — das ist der ganze Sinn der Zuweisung.
 
+**Welches Gerät ist welches?** Bei mehreren gleich aussehenden Fernsehern hilft
+die Funktion **Identifizieren**: Der angeklickte Bildschirm blendet daraufhin
+seinen Gerätecode ein, sodass du ihn in der Liste sicher zuordnen kannst.
+
 ## Die öffentlichen Seiten auf badhub.de
 
 Diese Seiten gehören nicht zu BTS Light, sondern zu badhub — BTS Light füttert
-sie nur. Alle vier erreicht man ohne Zugangsdaten.
+sie nur. Alle erreicht man ohne Zugangsdaten.
 
 | Seite | Wer schaut drauf |
 |---|---|
@@ -103,10 +118,20 @@ sie nur. Alle vier erreicht man ohne Zugangsdaten.
 | **Teilnehmerliste → eigene Spielerseite** | Ein Spieler sieht, in welcher Halle er spielt, wie viele Spiele noch vor ihm liegen und wann er etwa dran ist. |
 
 Am schnellsten kommst du an diese Adressen über den **Aushang**: Ein A4-Blatt
-mit zwei QR-Codes, gedruckt über **Status → Aushang drucken**. Siehe
-[Aushang für die Halle](aushang.md).
+mit zwei QR-Codes — Teilnehmerliste und Liveticker —, gedruckt über
+**Status → Aushang drucken**. Siehe [Aushang für die Halle](aushang.md).
 
-Aus der App heraus öffnest du sie über **Status → Anzeigen im Browser öffnen**.
+Aus der App heraus:
+
+| Seite | Wo der Knopf sitzt |
+|---|---|
+| Liveticker, Hallen-Monitor, Nächste Spiele | **Status → Anzeigen im Browser öffnen** |
+| Check-In-Seite | **Check-In → Check-In-Seite öffnen** |
+| Teilnehmerliste | kein Knopf — sie steht als QR auf dem Aushang |
+
+> Der Block „Anzeigen im Browser öffnen" erscheint nur, wenn eine öffentliche
+> Live-Adresse eingetragen ist, und die drei Knöpfe sind grau, solange der
+> Liveticker nicht läuft.
 
 ## Bildschirme, die man leicht übersieht
 
