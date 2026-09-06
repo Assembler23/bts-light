@@ -733,6 +733,32 @@ export interface LogoConfig {
   background_color: string;
 }
 
+/** Stand des Update-Ablaufs (Rust: update::UpdateInfo, Spec
+ *  `update-im-turnierbetrieb`). Das Paket wird nach dem Prüfen sofort
+ *  geladen; `ready` heißt: Einbau auf Knopfdruck oder beim Beenden. */
+export interface UpdateInfo {
+  phase:
+    | "idle"
+    | "checking"
+    | "downloading"
+    | "ready"
+    | "installing"
+    | "current"
+    | "error";
+  /** Angebotene Version (ab `downloading`). */
+  version: string | null;
+  /** „Was ist neu" aus dem Manifest. */
+  notes: string | null;
+  /** Fehlertext (nur `error`). */
+  message: string | null;
+  /** Felder, auf denen gerade ein Spiel steht. */
+  occupied_courts: number;
+  /** Läuft die Übertragung? */
+  sync_running: boolean;
+  /** Einbau beim Beenden vorgemerkt? */
+  install_on_exit: boolean;
+}
+
 export interface SyncStatus {
   running: boolean;
   /** "idle" | "ok" | "warn" | "btp_error" | "push_error" */

@@ -2147,6 +2147,10 @@ impl SyncEngine {
             .filter(|m| m.status == MatchStatus::OnCourt)
             .filter_map(|m| m.court_id.map(|c| (c, m.id)))
             .collect();
+        // Der Store `match_times` ist hier schon ans Turnier gebunden
+        // (`stamp_finished` weiter oben ruft `set_tournament`) — nur so
+        // greift beim ersten Lauf nach einem Neustart der Seed der
+        // Aufruf-Uhr aus `match-times.json` (Spec `update-im-turnierbetrieb`).
         tablet.reconcile_on_court(&oncourt_now, now_ms());
         // Spielzeiten-Messung (Spec `spielzeiten-prognose`, E4): der
         // persistente Erst-Stempel je Match — bewusst NACH

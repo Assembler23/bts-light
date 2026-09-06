@@ -674,6 +674,20 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Geplant
 
+- **Update ohne jede Lücke (Stufe 3): Prozess-Übergabe oder Dienst +
+  Oberfläche.** Seit v0.9.279 (Spec
+  [features/update-im-turnierbetrieb.md](features/update-im-turnierbetrieb.md),
+  ADR 0057) ist die Update-Lücke eine Sache von ~20 s: Paket vorgeladen,
+  Übertragung läuft danach von selbst wieder an, Feldstempel überleben,
+  „Beim Beenden einbauen" als Alternative. Was bleibt, ist der Prozess-
+  Neustart selbst: LAN-Server (8088/8443), Relay-WebSocket, BTP-Verbindung
+  und Monitor-Sockets sind für Sekunden weg. Echte Nullzeit hieße, diese
+  Verbindungen an einen neuen Prozess zu übergeben (Socket-Handover unter
+  Windows) oder den Kern als Dienst vom Fenster zu trennen (die Oberfläche
+  startet neu, der Dienst nicht — und der Dienst selbst bräuchte dann
+  wieder einen Übergabe-Mechanismus). Beides ein großer Umbau; Nutzen
+  gegenüber Stufe 1+2 erst messen (Feldtest: wie oft wird überhaupt
+  mitten im Turnier aktualisiert?), dann entscheiden.
 - **Code-Signing des Windows-Installers.** Aktuell unsigniert → Windows
   zeigt beim ersten Start eine SmartScreen-Warnung. Optionen: Azure Trusted
   Signing vs. klassisches OV/EV-Zertifikat — Kostenentscheidung offen. Das

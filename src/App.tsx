@@ -8,6 +8,7 @@ import {
   saveConfig,
   startSync,
   stopSync,
+  takeUpdateResume,
   wifiStatus,
 } from "./api";
 import { setSharedOverrides } from "./io/announcer";
@@ -186,10 +187,33 @@ function App() {
         // beim Klick scheitern (ADR 0054, C1) — der Assistent führt stattdessen
         // sofort zum fehlenden Feld. Ein Ansage-Slave braucht keine GUID.
         const brauchtGuid = !c.slave_mode && !isTournamentGuid(c.tournament_uuid);
-        setView(c.badhub.password && !brauchtGuid ? "dashboard" : "wizard");
+        const eingerichtet = Boolean(c.badhub.password) && !brauchtGuid;
+        setView(eingerichtet ? "dashboard" : "wizard");
+        // Wiederanlauf nach einem Update (Spec `update-im-turnierbetrieb`):
+        // lief die Übertragung, als der Installer die App beendete, startet
+        // sie hier von selbst — derselbe Weg wie der Knopf, mit derselben
+        // Fehleranzeige. Nur bei eingerichteter App; sonst führt der
+        // Assistent ohnehin erst zum fehlenden Feld.
+        void wiederAnlaufen(eingerichtet);
       })
       .catch(() => setView("wizard"));
   }, []);
+
+  /** Marker immer abholen (sonst bliebe er liegen), starten nur bei
+   *  eingerichteter App. */
+  async function wiederAnlaufen(eingerichtet: boolean) {
+    try {
+      const wieder = await takeUpdateResume();
+      if (!wieder || !eingerichtet) return;
+      setBusy(true);
+      await startSync();
+      setStatus(await getStatus());
+    } catch (e) {
+      setRunError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Geteiltes Aussprache-Wörterbuch laden: einmal beim Start (nach dem
   // Config-Load, damit die Badhub-URL steht) und danach alle 30 Min, solange
