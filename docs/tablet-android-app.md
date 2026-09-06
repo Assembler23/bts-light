@@ -69,11 +69,14 @@ Das Geräte-Log der App landet wie bei den Pi-Monitoren beim Turnier-PC
 Solange kein Turnier-PC gefunden ist, zeigt die App eine Wartekarte statt
 der Webseite — die WebView selbst lädt dabei bewusst `about:blank`, damit
 eine im Hintergrund unsichtbar weiterlaufende Lobby-Seite keinen Gong
-abspielt und keine Fingertipps entgegennimmt. Fehlt das WLAN ganz, steht
-dort nur „Kein WLAN"; ist ein Netz da und die Suche läuft, zeigt die Karte
-„Suche Turnier-PC im WLAN …" mit Versuchszähler, der eigenen IP-Adresse und
-der zuletzt bekannten Turnier-PC-Adresse, dazu den Knopf „Erneut suchen"
-(ohne PIN nutzbar).
+abspielt und keine Fingertipps entgegennimmt. Bricht das WLAN während des
+Betriebs weg, steht dort „Kein WLAN", bis das Netz zurück ist. Startet das
+Tablet dagegen ganz ohne Netz (z. B. beim ersten Einschalten in der Halle),
+bleibt es bei „Suche Turnier-PC im WLAN …" mit eigener IP „–" und sucht alle
+10 Sekunden weiter — dann zuerst das WLAN am Tablet prüfen. Ist ein Netz da
+und die Suche läuft, zeigt die Karte „Suche Turnier-PC im WLAN …" mit
+Versuchszähler, der eigenen IP-Adresse und der zuletzt bekannten
+Turnier-PC-Adresse, dazu den Knopf „Erneut suchen" (ohne PIN nutzbar).
 
 Das **Hüllen-Menü** öffnet sich, wenn man zwei Sekunden lang den Finger in
 die linke obere Ecke des Bildschirms hält, gefolgt von der Kiosk-PIN. Es
