@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## Unveröffentlicht
+
+- **Tablet-Kiosk-App für Android / Fire-Tablets.** Eigene App findet den
+  Turnier-PC selbst (gemerkte IP → Subnetz-Scan → mDNS), zeigt die
+  Felder-Lobby im Vollbild, sperrt als Gerätebesitzer, meldet den Akku und
+  schickt ihr Log an `/pi-log`. APK:
+  `badhub.de/download/bts-light/bts-light-tablet.apk`. Spec
+  `docs/features/tablet-android-kiosk-app.md`, ADR 0058.
+
 ## v0.9.281
 
 - **Hilfe, wenn BTP die Verbindung verweigert.** Meldet BTP „Verbindung
