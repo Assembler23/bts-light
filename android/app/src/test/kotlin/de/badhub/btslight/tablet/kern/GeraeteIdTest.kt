@@ -12,5 +12,7 @@ class GeraeteIdTest {
         assertEquals("fire-abc", GeraeteId.aus("a b/c"))
         assertEquals("fire-unbekannt", GeraeteId.aus(null))
         assertEquals("fire-unbekannt", GeraeteId.aus("///"))
+        // Nur ASCII-Buchstaben, keine Unicode-Zeichen
+        assertEquals("fire-abc", GeraeteId.aus("Äaбbc"))
     }
 }

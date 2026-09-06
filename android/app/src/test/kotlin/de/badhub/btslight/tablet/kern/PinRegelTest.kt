@@ -14,5 +14,8 @@ class PinRegelTest {
         assertFalse(PinRegel.gueltig("12a4"))
         assertFalse(PinRegel.gueltig(""))
         assertFalse(PinRegel.gueltig(null))
+        // Nur Tastatur-Ziffern, keine Unicode-Ziffern
+        assertFalse(PinRegel.gueltig("٠١٢٣"))
+        assertFalse(PinRegel.gueltig("１２３４"))
     }
 }
