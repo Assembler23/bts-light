@@ -8,9 +8,20 @@ Release veröffentlicht wird und wie das Auto-Update funktioniert.
 - Beim App-Start und über den Dashboard-Button „Nach Update prüfen" fragt
   die App das Manifest `https://badhub.de/download/bts-light/latest.json`
   ab.
-- Ist dort eine höhere Version eingetragen, erscheint oben ein Banner.
-  Klick auf „Herunterladen & neu starten" lädt das signierte Update,
-  installiert es und startet die App neu.
+- Ist dort eine höhere Version eingetragen, lädt die App das signierte
+  Paket **sofort im Hintergrund** und zeigt oben ein Banner, sobald es
+  bereitliegt — mit der Zahl der gerade belegten Felder. Zwei Wege
+  (Spec [features/update-im-turnierbetrieb.md](features/update-im-turnierbetrieb.md),
+  ADR 0057):
+  - **„Jetzt neu starten"**: Live-Stand sichern, Installer starten, App
+    kommt als neue Version zurück. Lief die Übertragung, **startet sie von
+    selbst wieder** (Wiederanlauf-Marker `update-resume.json`, 15 min
+    gültig); die Aufruf-Uhr belegter Felder läuft weiter. Die Lücke beträgt
+    etwa 20 s — Tablets zählen offline weiter, Monitore und TL-Web kommen
+    über ihre Reconnect-Wächter zurück.
+  - **„Beim Beenden einbauen"**: Vormerkung; beim Schließen der App läuft
+    der Installer **stumm** (`/S /UPDATE`, ohne Neustart der App). Die neue
+    Version steht beim nächsten Start bereit.
 - Jedes Update-Artefakt ist mit einem eigenen Tauri-Signaturschlüssel
   signiert (getrennt vom Windows-Code-Signing). Die App akzeptiert nur
   Artefakte, die zum eingebauten Public Key in `tauri.conf.json` passen.
@@ -33,6 +44,62 @@ Der **Updater** nutzt weiterhin ausschließlich die versionierte URL aus
 `latest.json` — der stabile Link ist rein für Menschen. Das SD-Karten-Image
 des Court-Monitors hat ohnehin einen festen Namen
 (`bts-light-pi.img.xz`, siehe [pi-master-image.md](pi-master-image.md)).
+
+## Handbuch (`/download/bts-light/handbuch/`)
+
+Die öffentliche Anleitung unter
+`https://badhub.de/download/bts-light/handbuch/index.html` wird aus den
+Markdown-Dateien dieses Repos erzeugt — es gibt **keine** zweite Textfassung,
+die auseinanderlaufen könnte. Die Release-Seite ist aus Sicht des Handbuchs
+ein Kapitel („Downloads & Versionshinweise"); beide verlinken sich gegenseitig.
+
+**Was veröffentlicht wird, steht in [`handbuch.json`](handbuch.json)** — eine
+Whitelist. Nur eingetragene Dateien gehen online; ADRs, Specs, Roadmaps und die
+Server-Einrichtung des Relays bleiben draußen. Halb-interne Dateien (Bedienung
+UND Architektur in einem Dokument) müssen nicht zerschnitten werden:
+
+- `"aus": ["Endpunkte", …]` im Manifest entfernt genannte Abschnitte samt
+  Unterabschnitten bis zur nächsten gleichrangigen Überschrift.
+- `<!-- handbuch:aus -->` … `<!-- handbuch:an -->` im Markdown selbst deckt
+  Stellen mitten in einem Abschnitt ab.
+
+Ein `aus`-Titel, den es nicht (mehr) gibt, lässt den Bau **fehlschlagen**.
+Ohne diese Härte würde eine umbenannte Überschrift einen internen Abschnitt
+still wieder öffentlich machen — und die Seite sähe dabei völlig in Ordnung aus.
+Ebenso meldet `scripts/test-handbuch.mjs` jede `docs/*.md`, die weder im
+Manifest noch unter `"intern"` steht: eine neue Anleitung bleibt so nicht
+unbemerkt liegen.
+
+**Veröffentlicht wird bei jedem Push auf `main`**, der `docs/`, `README.md`
+oder den Generator anfasst (`.github/workflows/handbuch.yml`), zusätzlich per
+`workflow_dispatch` — **nicht** beim Tag-Release. Doku ändert sich häufiger als
+die Versionsnummer; wäre es an den Tag gekoppelt, bliebe eine Korrektur bis zum
+nächsten Release unsichtbar. Der Workflow prüft erst
+(`node scripts/test-handbuch.mjs`), baut dann und lädt nach
+`…/download/bts-light/handbuch/` — mit `--delete`, damit ein aus dem Manifest
+entferntes Kapitel auch vom Server verschwindet. Das `--delete` gilt
+**ausschließlich** diesem Unterordner; im Elternverzeichnis liegen Installer und
+`latest.json` (siehe die Warnung in `badhub/docs/ops/deployment.md`).
+
+**`index.html` gehört in die Adresse.** Der nginx-vHost löst diese
+Verzeichnis-URL nicht auf einen Index auf: gemessen am 06.09.2026 direkt nach
+dem ersten Deploy liefert `…/handbuch/` eine **403**, `…/handbuch/index.html`
+dagegen 200. Für das Elternverzeichnis `/download/bts-light/` gibt es
+offenbar eine eigene Regel, für neue Unterordner nicht. Die kürzere Adresse
+braucht eine nginx-Änderung mit eigener Freigabe (in `roadmap.md` vermerkt) —
+bis dahin verlinkt die Release-Seite den vollen Pfad, und
+`scripts/test-release-notes.mjs` hält das fest.
+
+Lokal ansehen:
+
+```bash
+node scripts/build-handbuch.mjs --out dist/handbuch
+open dist/handbuch/index.html
+```
+
+Der Generator nutzt `marked` (reine devDependency, keine transitiven Pakete,
+Audit 05.09.2026). Sie läuft nur in Node/CI und wird **nicht** in die
+ausgelieferte App gebündelt.
 
 ## Release-Seite (Downloads + Änderungen je Version)
 

@@ -115,6 +115,8 @@ an – dabei erscheinen jetzt **zwei** UAC-Abfragen (je eine Regel pro Port).
 | `GET /tl` | Turnierleitungs-Oberfläche (Seite) |
 | `GET /tl/api/state` | Anzeige-Zustand der Turnierleitungs-Oberfläche |
 | `POST /tl/api/command` | Aktion eines Turnierleitungs-Geräts |
+| `GET /anzeige` | Anzeige-Hülle fürs Tablet (`?layout=tafel|feld|uebersicht|vorbereitung&court=<CourtID>`) |
+| `GET /courts` | Feldliste mit `occupied` (Feldwechsel, Belegt-Warnung) |
 
 Die `/tl/`-Routen gehören zur [Turnierleitungs-Oberfläche](features/turnierleitung-web.md).
 Die **Schnittstellen-Routen** verlangen einen Zugang im `Authorization`-Kopf
@@ -313,6 +315,64 @@ Aufstellung:
 - **Zweisprachig:** Titel und Hinweise des Assistenten erscheinen
   Deutsch **und** Englisch (internationale Spieler:innen). Das gilt auch
   für das Megafon-Popup.
+- **Kopfzeile bleibt sichtbar (seit v0.9.278):** Der Assistent deckt nur
+  noch den Bereich unter der Kopfzeile ab. Feldname, Aufruf-Uhr,
+  Sponsor-Leiste, Verbindungspunkt und das **Zahnrad** (Einstellungen,
+  Feldwechsel) bleiben während der Seitenwahl sichtbar und antippbar —
+  vorher lag der Scrim über allem, und ein Feldwechsel war erst nach
+  der Aufstellung möglich. Technisch: `#setup-modal` beginnt bei
+  `--kopf-hoehe`, die ein `ResizeObserver` aus der Kopfzeile misst; die
+  anderen Overlays (Pause, Karten, Einstellungen) decken weiterhin alles.
+
+### Aufruf-Uhr in der Kopfzeile (seit v0.9.278)
+
+Dieselbe Uhr „Zeit seit Aufruf" wie am Court-Monitor
+([court-monitor.md](court-monitor.md), Plan 4), damit der Bediener am
+Feld ohne Blick zum TV sieht, wie lange die Spieler schon gerufen sind:
+`M:SS · 1. Aufruf`, ab den eingestellten Schwellen gelb **„2. Aufruf"**
+und rot pulsierend **„Letzter Aufruf"**.
+
+- **Ab der Zuweisung**, also schon während der Seitenwahl. Sobald das
+  Tablet **im Spiel** ist, weicht sie der vorhandenen **Spieldauer** —
+  zwei Uhren nebeneinander wären mehr Verwirrung als Nutzen. „Im Spiel"
+  heißt: die Aufstellung ist bestätigt (ab da läuft die Spieldauer), oder
+  es stehen Punkte (Mid-Game-Einstieg), oder das Spiel ist beendet
+  (Walkover/Aufgabe). Auch **serverseitig bekannte Punkte** zählen: Ein
+  Ersatz-Tablet ohne lokalen Stand sieht am `sets`-Feld der Antwort, dass
+  längst gespielt wird, und zeigt nicht „Letzter Aufruf" in ein laufendes
+  Spiel hinein. Die Multifeld-Übersicht am TV blendet ihren Chip erst mit
+  dem ersten Punkt aus, die Einzelanzeige lässt die Uhr weiterlaufen —
+  in der kurzen Spanne zwischen Aufstellung und erstem Punkt können Tablet
+  und TV also verschieden aussehen.
+- **Gleicher Schalter wie die Displays:** Sie hängt an
+  **Einstellungen → Aufruf-Timer → aktivieren** (standardmäßig aus) und
+  nutzt dessen Schwellen. Timer aus → keine Uhr am Tablet, wie am TV.
+- **Datenquelle:** der bestehende 30-s-Abruf von `/health` für den
+  Uhr-Abgleich, jetzt mit `court=<CourtID>` (schmaler Abruf, Spec
+  monitor-livestand-push S7). Die Antwort trägt `match_id`, `sets` und
+  `on_court_since_ms` des eigenen Felds sowie `callTimer`; gerechnet wird
+  gegen die **Server-Zeit**. Bei `match_assigned` fragt das Tablet sofort
+  nach, statt bis zu 30 s zu warten. LAN und Cloud identisch, kein neuer
+  Wire-Typ; im Cloud-Modus kommt die neue Tablet-Seite mit dem
+  automatischen Relay-Deploy beim Merge.
+- **Wächter gegen falsche Stempel:** Nur die jüngste Antwort schreibt
+  (30-s-Takt und Sofort-Abruf können sich überholen); eine Antwort, deren
+  `match_id` nicht zum gehaltenen Spiel passt (Feldwechsel im Flug,
+  Cache-Stand von vor der Zuweisung), setzt den Stempel auf leer; kennt
+  der Server das Feld noch gar nicht (Relay direkt nach dem Neustart),
+  bleibt der letzte Stand stehen. In beiden Fällen fragt das Tablet nach
+  3 s nach, höchstens fünfmal je Zuweisung.
+- Stufenlogik in `src/io/aufrufUhr.mjs` (Test `scripts/test-aufruf-uhr.mjs`),
+  Inline-Kopie in `tablet.html`. Auf schmalen Geräten (≤ 640 px) zeigt
+  die Marke nur die Zeit, die Farbe trägt die Stufe — damit das Zahnrad
+  rechts erreichbar bleibt.
+- **Bekannte Grenzen (vorbestehend, gelten für die TV-Uhr genauso):** Im
+  Cloud-Modus rechnet die Uhr Relay-Zeit gegen einen Host-Stempel, eine
+  falsch gehende Turnier-PC-Uhr geht 1:1 in die Anzeige ein
+  (Roadmap „Cloud-Aufruf-Uhr driftet"). Seit v0.9.279 übernimmt der erste
+  Abgleich nach einem Neustart des Turnier-PCs den persistierten
+  Bruttostart aus `match-times.json` — die Uhr läuft nach einem Update
+  weiter statt bei null zu beginnen (Spec `update-im-turnierbetrieb`).
 
 ## Am Tablet: Pausen, Court-Grafik, Akkustand
 
@@ -511,6 +571,11 @@ Tablet ausfällt. Das übernehmende Gerät setzt das **laufende Spiel mit
 aktuellem Stand** fort (das aktive Tablet spiegelt seinen Stand dafür
 laufend an den Server). Nach der Übernahme ist das alte Gerät gesperrt.
 
+Seit v0.9.275 bietet das Belegt-Overlay zusätzlich „Nur Spielstand
+anzeigen" — die
+[Anzeige-Hülle](#anzeige-hülle-anzeige-seit-v09275) mit der Zähltafel
+dieses Feldes.
+
 ### Reconnect ist keine Übernahme (seit v0.9.147)
 
 Jedes Tablet trägt eine **persistente Geräte-Kennung** (`deviceId`,
@@ -567,6 +632,38 @@ die weitergezählten Punkte (Turnier-Befund 18.07.2026). Ein frisches Gerät
 (Reload ohne Stand, Ersatz-Tablet, echte Übernahme) übernimmt den
 Server-Stand unverändert. Dieser Pfad greift, wenn `ownership_active=false`
 (Legacy-Schalter an oder alte App/altes Relay).
+
+## Anzeige-Hülle (`/anzeige`, seit v0.9.275)
+
+Ein zweites Tablet am Feld zeigt nur den Spielstand — als **Zähltafel**
+(Spec [features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
+ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)). Die
+Hülle `anzeige.html` bettet eine der Anzeige-Seiten in einem seitenfüllenden
+Rahmen ein und liefert die Tablet-Bedienung dazu.
+
+- **Einstiege:** im Zahnrad-Menü des Zähl-Tablets „Anzeige (nur Spielstand)"
+  (hinter der PIN) und im Belegt-Overlay eines schon gezählten Feldes „Nur
+  Spielstand anzeigen" (ohne PIN — die Anzeige-Seiten sind ohnehin frei
+  erreichbar, das Zählen bleibt durch das Overlay geschützt). Beide öffnen
+  `…/anzeige?layout=tafel&court=<Feld>`.
+- **Layouts:** Zähltafel, Feld-Monitor, Hallen-Übersicht, In Vorbereitung.
+  Was geladen wird, entscheidet eine feste Liste; freier Text aus der Adresse
+  erreicht den Rahmen nie. Ein unbekanntes Layout wird zur Zähltafel, ein
+  unbrauchbares Feld öffnet die Feldwahl (ohne PIN — es wird noch nichts
+  angezeigt).
+- **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`):
+  Anzeige wählen · Feld wechseln · Seiten spiegeln (nur Zähltafel, gemerkt je
+  Gerät) · Zum Zählen wechseln · Neu laden · Vollbild · Schließen.
+- **Zum Zählen wechseln** fragt vorher die Feldliste: Ist das Feld belegt,
+  kommt eine Warnung mit Bestätigung — die Zähl-Seite würde bei einem
+  abgetauchten Tablet sonst still übernehmen (ADR 0017). Ein älterer Relay
+  ohne `occupied` in der Liste → keine Warnung.
+- **Wake-Lock** hält das Display wach — nur im verschlüsselten Zugang (Cloud,
+  LAN-TLS); über `http://…:8088` fehlt die Browser-API, dort gilt die
+  Geräteeinstellung „Bildschirm an lassen" (siehe Voraussetzungen).
+- Layout und Feld stehen in der Adresse und werden je Gerät gemerkt; ein
+  Neuladen bringt dieselbe Anzeige. Die Hülle öffnet nie den Tablet-Kanal und
+  belegt keinen Zähl-Platz.
 
 ## Einrichtung im Turnier
 

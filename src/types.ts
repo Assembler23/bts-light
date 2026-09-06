@@ -586,6 +586,10 @@ export interface AppConfig {
   upload_logs: boolean;
   /** Zufällige, dauerhafte Installations-ID (Frontend erzeugt sie). */
   install_id: string;
+  /** turnier.de-Turnier-GUID (kanonisch, Pflicht für den Liveticker-Push;
+   *  Rust: AppConfig.tournament_uuid, ADR 0054). Wird in `checkin.tournament_uuid`
+   *  gespiegelt — beide aus EINEM Eingabefeld. */
+  tournament_uuid: string;
   /** Verbindungsart für die Tablets: LAN (lokal) oder Cloud (über badhub.de). */
   connection_mode: ConnectionMode;
   /** Ansage-Slave-Modus (Mehr-Hallen): nur BTP lesen + eigene Halle ansagen,
@@ -727,6 +731,32 @@ export interface LogoConfig {
   mime: string;
   /** CSS-Hintergrundfarbe hinter dem Logo (leer = badhub-Standard). */
   background_color: string;
+}
+
+/** Stand des Update-Ablaufs (Rust: update::UpdateInfo, Spec
+ *  `update-im-turnierbetrieb`). Das Paket wird nach dem Prüfen sofort
+ *  geladen; `ready` heißt: Einbau auf Knopfdruck oder beim Beenden. */
+export interface UpdateInfo {
+  phase:
+    | "idle"
+    | "checking"
+    | "downloading"
+    | "ready"
+    | "installing"
+    | "current"
+    | "error";
+  /** Angebotene Version (ab `downloading`). */
+  version: string | null;
+  /** „Was ist neu" aus dem Manifest. */
+  notes: string | null;
+  /** Fehlertext (nur `error`). */
+  message: string | null;
+  /** Felder, auf denen gerade ein Spiel steht. */
+  occupied_courts: number;
+  /** Läuft die Übertragung? */
+  sync_running: boolean;
+  /** Einbau beim Beenden vorgemerkt? */
+  install_on_exit: boolean;
 }
 
 export interface SyncStatus {

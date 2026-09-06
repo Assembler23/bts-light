@@ -73,6 +73,11 @@ pub const COMBO_HTML: &str = include_str!("../../assets/combo.html");
 /// Felder mit Live-Belegung (Poll `/courts`), Tippen führt auf `/court/{id}`.
 pub const LOBBY_HTML: &str = include_str!("../../assets/lobby.html");
 
+/// Anzeige-Hülle fürs Tablet (`/anzeige`, Spec zaehltafel-anzeige-huelle):
+/// iframe-Container mit Zahnrad/PIN für die Anzeige-Seiten. Platzhalter
+/// `__BASE__` (mit Schrägstrich am Ende) und `__TABLET_PIN__` wie beim Tablet.
+pub const ANZEIGE_HTML: &str = include_str!("../../assets/anzeige.html");
+
 /// Gebündelte SVG-Länderflaggen, je Datei nach IOC-3-Buchstaben-Code
 /// (`GER.svg`, `POL.svg`, …) – ausgeliefert unter `/flags/{file}`.
 /// Herkunft/Lizenz siehe `NOTICE.md`.

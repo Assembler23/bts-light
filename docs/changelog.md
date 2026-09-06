@@ -4,6 +4,105 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.281
+
+- **Hilfe, wenn BTP die Verbindung verweigert.** Meldet BTP „Verbindung
+  verweigert" (meist beim ersten Start auf einem neuen Turnier-PC), nennt
+  der Fehlertext jetzt direkt die Ursache und den Weg: In BTP unter
+  **Extras → Tournament Planner Network…** das Häkchen „Enabled" setzen.
+  Derselbe Hinweis steht im Assistenten unter der BTP-Verbindung und im
+  Handbuch („Was ist BTS Light?").
+
+## v0.9.280
+
+- **Behoben: Umsortieren per Ziehen in der TL-Web-Spielliste.** Seit
+  v0.9.271 sprang die Zeile nach dem ersten Umhängen zurück, und nichts wurde
+  gesendet (der Browser gab den Zeigerfang des umgehängten Elements frei, das
+  Sicherheitsnetz hielt das für einen Abbruch). Maus und Touch nachgemessen.
+- **Behoben: „An den Anfang" zweimal hintereinander** warf das zuerst
+  geschobene Spiel wieder nach unten; jetzt rückt es auf Platz zwei — der
+  manuell sortierte Block bleibt bei jedem Zug vollständig.
+- **Neu: Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile** (Profil-
+  Häkchen, Standard aus): ⤒ Anfang, ↑ eine hoch, ↓ eine runter, ⤓ Ende — für
+  Geräte, auf denen Ziehen nicht praktikabel ist.
+- **Neu: „↩ Vom Feld nehmen" im ⋯-Menü einer belegten Feld-Kachel** (TL-Web),
+  ohne die Kachel vorher auswählen zu müssen.
+## v0.9.279
+
+- **Neu: Update ohne Bedien-Lücke im Turnierbetrieb.** Das Update wird im
+  Hintergrund vorgeladen; das Banner zeigt, wie viele Felder belegt sind,
+  und bietet zwei Wege: **„Jetzt neu starten"** (etwa 20 s Lücke, die
+  Übertragung läuft danach **von selbst** wieder an, die Aufruf-Uhr belegter
+  Felder läuft weiter) oder **„Beim Beenden einbauen"** (stiller Installer
+  beim Schließen, keine App danach). Bisher blieb die Übertragung nach dem
+  Neustart stehen, bis jemand „Starten" drückte, und die Aufruf-Uhr begann
+  bei null. Spec `docs/features/update-im-turnierbetrieb.md`, ADR 0057.
+
+## v0.9.278
+
+- **Neu: Aufruf-Uhr am Zähl-Tablet.** Die Kopfzeile zeigt dieselbe Uhr
+  „Zeit seit Aufruf" wie der Court-Monitor: `M:SS · 1. Aufruf`, ab den
+  Schwellen gelb „2. Aufruf" und rot „Letzter Aufruf" — schon während der
+  Seitenwahl. Sobald die Aufstellung bestätigt ist (oder Punkte stehen),
+  weicht sie der Spieldauer. Hängt wie die Displays an **Einstellungen →
+  Aufruf-Timer** (standardmäßig aus). Gerechnet gegen die Server-Zeit; LAN
+  und Cloud gleich, kein neuer Wire-Typ (Cloud-Tablets bekommen die Seite
+  mit dem automatischen Relay-Deploy).
+- **Geändert: Kopfzeile bleibt während der Seitenwahl sichtbar.** Der
+  Aufstellungs-Assistent deckt nur noch den Bereich darunter ab — Feldname,
+  Aufruf-Uhr und Zahnrad (Einstellungen, Feldwechsel) sind antippbar, bevor
+  eine Seite gewählt wurde.
+
+## v0.9.277
+
+- **Neu: Zeilenfarbe wie in BTP — auch aus der Turnierleitungs-Sicht.** Die
+  Spielliste zeigt die Farben aus BTPs Menü „Hervorheben" als
+  Zeilenhintergrund (Gelb, Pink, Orange, Blau, Grün, Lila, exakt die Töne
+  des Planers), laufende Spiele tragen einen Farbpunkt in der Feldkachel.
+  Im ⋮-Menü einer Zeile steht die Gruppe **„Hervorheben"**: ein Tipp
+  schreibt die Farbe nach BTP, wo sie sofort erscheint. Gemessen am echten
+  BTP: `Match.Highlight` ist ein Index 0–6, BTP nimmt jeden Wert per
+  `SENDUPDATE` an. Spec `docs/features/tl-zeilenfarbe.md`, ADR 0056.
+- **Geändert: Der Vorbereitungs-Aufruf überschreibt keine Handfarbe mehr.**
+  Er nutzte dasselbe BTP-Feld (Gelb beim Aufruf, Löschen beim Ruf aufs
+  Feld) und hätte eine im Planer gesetzte Farbe still überschrieben und
+  gelöscht. Jetzt weicht die Aufrufmarke: Gelb geht nur an Spiele ohne
+  Farbe, gelöscht wird nur das eigene Gelb.
+- Messwerkzeug `tests/btp_highlight_probe.rs` (ignoriert, braucht ein
+  laufendes BTP): Farbverteilung lesen, Schreibprobe mit Rückstellung, eine
+  Farbe zur Sichtprüfung setzen.
+
+## v0.9.276
+
+- **Neu: Zwei Turniere desselben Verbands am selben Tag stören sich nicht mehr
+  im Liveticker.** Bisher schrieben zwei Installationen mit dem Preset „BVBB"
+  abwechselnd denselben Live-Stand — auf badhub flackerte mal das eine, mal das
+  andere Turnier. badhub führt jetzt jedes Turnier unter seiner turnier.de-
+  Kennung getrennt (ADR 0054); bts-light schickt die Kennung in jeder
+  Nachricht mit.
+
+  Dafür ist die **Turnier-Kennung von turnier.de jetzt ein Pflichtfeld** im
+  Setup unter „1 · Liveticker-Ziel" (die Adresse des Turniers einfügen genügt).
+  Wer sie schon für den Hallen-Check-In eingetragen hatte, muss nichts tun —
+  der Wert wird übernommen. Ohne Kennung startet die Übertragung nicht —
+  fehlt sie nach dem Update, öffnet die App beim Start den Assistenten.
+
+- **Aushang und Liveticker-Link zeigen direkt aufs eigene Turnier**
+  (`…&g=<Kennung>`), statt auf die Verbandsseite mit Auswahl.
+
+- Voraussetzung badhub-seitig: Migration 208 (Kind-Turniere). Gegen ein
+  älteres badhub verhält sich die App wie bisher.
+
+## v0.9.275
+
+- **Neu: Anzeige-Hülle fürs Tablet.** Unter `…/anzeige` zeigt ein Tablet
+  eine der Anzeige-Seiten — Zähltafel, Feld-Monitor, Hallen-Übersicht oder
+  „In Vorbereitung" — mit Zahnrad und PIN, Feldwechsel, Seiten spiegeln,
+  Weg zurück zum Zählen (mit Warnung, wenn das Feld schon gezählt wird),
+  Vollbild und Wake-Lock. Einstiege im Zahnrad-Menü des Zähl-Tablets und im
+  Belegt-Overlay („Nur Spielstand anzeigen"). Die Cloud-Feldliste nennt jetzt,
+  ob ein Feld gezählt wird. Spec `docs/features/zaehltafel-anzeige-huelle.md`.
+
 ## v0.9.274
 
 - **Neu: Zähltafel-Layout.** Unter `…/court/<Feld>/tafel` zeigt eine Seite

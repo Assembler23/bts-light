@@ -163,6 +163,12 @@ jobs:
       - name: Zähltafel-Seiten (JS)
         run: node scripts/test-tafel-seiten.mjs
 
+      # Was die Anzeige-Hülle ins iframe lädt. Rutscht hier freier Text aus der
+      # Adresse durch, lädt ein Tablet in der Halle, was immer in der Adresse
+      # stand; fällt ein gültiges Feld heraus, zeigt die Hülle nur die Feldwahl.
+      - name: Anzeige-Hülle Ziel-Allowlist (JS)
+        run: node scripts/test-anzeige-ziel.mjs
+
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
       # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter
@@ -207,12 +213,31 @@ jobs:
       - name: Update-Notes ueber die Release-Strecke (JS)
         run: node scripts/test-release-notes.mjs
 
+      # Was aus docs/ oeffentlich auf badhub.de landet. Zwei stille Fehler
+      # verhindert der Test: ein interner Abschnitt wird wieder oeffentlich,
+      # weil jemand seine Ueberschrift umbenannt hat und der Ausschluss ins
+      # Leere greift -- und eine neue Anleitung bleibt unveroeffentlicht
+      # liegen, weil niemand sie ins Manifest eingetragen hat.
+      - name: Handbuch-Manifest und -Bau (JS)
+        run: node scripts/test-handbuch.mjs
+
       # Umschalter Produktiv/Test (test.badhub.de). Greift er zu weit, verliert
       # ein Betreiber mit eigener badhub-Instanz beim ersten Klick seine
       # Adresse; greift er zu kurz, laeuft ein Testturnier stumm in die
       # Produktiv-Datenbank und faellt erst oeffentlich im Liveticker auf.
       - name: Umschalter Produktiv-Test (JS)
         run: node scripts/test-badhub-ziel.mjs
+
+      # &g=<GUID> an den Online-Monitor-Links (ADR 0054). Fehlt der Anhang,
+      # zeigt der Link auf den Verbandsstand statt aufs richtige Kind-Turnier.
+      - name: Turnier-GUID an Live-Links (JS)
+        run: node scripts/test-live-link.mjs
+
+      # Aufruf-Uhr in der Tablet-Kopfzeile. Springt sie zu frueh auf
+      # "Letzter Aufruf", rennt der Bediener grundlos zur Turnierleitung;
+      # laeuft sie nach dem ersten Punkt weiter, stehen zwei Uhren nebeneinander.
+      - name: Aufruf-Uhr am Tablet (JS)
+        run: node scripts/test-aufruf-uhr.mjs
 
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check

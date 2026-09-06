@@ -259,6 +259,7 @@ mod tests {
                 s: vec![[5, 3]],
             },
             rid: 1,
+            tournament_uuid: None,
         })
     }
 
@@ -371,6 +372,7 @@ mod tests {
         let msg = CheckinBrandingMessage {
             sponsors: Some(vec!["QUJD".to_string()]),
             logo: None,
+            tournament_uuid: None,
         };
         let result = push_checkin_branding(&build_client(), &url, "pw", &msg).await;
         assert!(result.is_ok(), "erwartet Ok, war {result:?}");
@@ -383,6 +385,7 @@ mod tests {
         let msg = CheckinBrandingMessage {
             sponsors: Some(vec![]),
             logo: None,
+            tournament_uuid: None,
         };
         let result = push_checkin_branding(&build_client(), &url, "pw", &msg).await;
         assert!(matches!(result, Err(PushError::Status(404))));
@@ -395,6 +398,7 @@ mod tests {
         let sponsors_only = CheckinBrandingMessage {
             sponsors: Some(vec!["QUJD".to_string()]),
             logo: None,
+            tournament_uuid: None,
         };
         let j = serde_json::to_string(&sponsors_only).unwrap();
         assert!(j.contains("sponsors"), "sponsors da: {j}");
@@ -403,6 +407,7 @@ mod tests {
         let logo_only = CheckinBrandingMessage {
             sponsors: None,
             logo: Some("QUJD".to_string()),
+            tournament_uuid: None,
         };
         let j = serde_json::to_string(&logo_only).unwrap();
         assert!(j.contains("logo"), "logo da: {j}");
@@ -412,6 +417,7 @@ mod tests {
         let clear = CheckinBrandingMessage {
             sponsors: None,
             logo: Some(String::new()),
+            tournament_uuid: None,
         };
         assert_eq!(serde_json::to_string(&clear).unwrap(), r#"{"logo":""}"#);
     }
