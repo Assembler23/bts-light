@@ -37,7 +37,7 @@ des Court-Monitors hat ohnehin einen festen Namen
 ## Handbuch (`/download/bts-light/handbuch/`)
 
 Die öffentliche Anleitung unter
-`https://badhub.de/download/bts-light/handbuch/` wird aus den
+`https://badhub.de/download/bts-light/handbuch/index.html` wird aus den
 Markdown-Dateien dieses Repos erzeugt — es gibt **keine** zweite Textfassung,
 die auseinanderlaufen könnte. Die Release-Seite ist aus Sicht des Handbuchs
 ein Kapitel („Downloads & Versionshinweise"); beide verlinken sich gegenseitig.
@@ -69,6 +69,15 @@ nächsten Release unsichtbar. Der Workflow prüft erst
 entferntes Kapitel auch vom Server verschwindet. Das `--delete` gilt
 **ausschließlich** diesem Unterordner; im Elternverzeichnis liegen Installer und
 `latest.json` (siehe die Warnung in `badhub/docs/ops/deployment.md`).
+
+**`index.html` gehört in die Adresse.** Der nginx-vHost löst diese
+Verzeichnis-URL nicht auf einen Index auf: gemessen am 06.09.2026 direkt nach
+dem ersten Deploy liefert `…/handbuch/` eine **403**, `…/handbuch/index.html`
+dagegen 200. Für das Elternverzeichnis `/download/bts-light/` gibt es
+offenbar eine eigene Regel, für neue Unterordner nicht. Die kürzere Adresse
+braucht eine nginx-Änderung mit eigener Freigabe (in `roadmap.md` vermerkt) —
+bis dahin verlinkt die Release-Seite den vollen Pfad, und
+`scripts/test-release-notes.mjs` hält das fest.
 
 Lokal ansehen:
 
