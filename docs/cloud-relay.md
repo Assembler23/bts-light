@@ -701,7 +701,12 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   `#[serde(default)]`, alte Gegenstellen ignorieren es). Die
   Relay-Kürzungsleiter (`state_for_relay`) kennt die Liste: Reichen alle
   Warteliste-Stufen nicht, wird zuletzt das Anfangszeiten-Panel geopfert,
-  bevor der Zustand die Relay-Grenze reißen dürfte.
+  bevor der Zustand die Relay-Grenze reißen dürfte. Seit v0.9.280 trägt
+  `TlDisplaySettingsWire` zusätzlich `showMoveButtons` (vier
+  Verschiebe-Knöpfe an jeder Wartelisten-Zeile) — wieder
+  `#[serde(default)]`; fehlt es, bleibt der Schalter aus. Ein neuer Host
+  serialisiert es in jedem Profil, daran erkennt die Seite, ob sie das
+  Häkchen anbieten darf.
 - **Individuelle Geräte-Zuordnung** → reitet auf dem bestehenden
   `HostFrame::TlAuth`-Spiegel: `TlAuthDevice.profile_id` (neu, siehe unten).
   Der Relay hält eine zweite Parallel-Map neben `tl_tokens` (Zugang →

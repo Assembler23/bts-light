@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.280
+
+- **Behoben: Umsortieren per Ziehen in der TL-Web-Spielliste.** Seit
+  v0.9.271 sprang die Zeile nach dem ersten Umhängen zurück, und nichts wurde
+  gesendet (der Browser gab den Zeigerfang des umgehängten Elements frei, das
+  Sicherheitsnetz hielt das für einen Abbruch). Maus und Touch nachgemessen.
+- **Behoben: „An den Anfang" zweimal hintereinander** warf das zuerst
+  geschobene Spiel wieder nach unten; jetzt rückt es auf Platz zwei — der
+  manuell sortierte Block bleibt bei jedem Zug vollständig.
+- **Neu: Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile** (Profil-
+  Häkchen, Standard aus): ⤒ Anfang, ↑ eine hoch, ↓ eine runter, ⤓ Ende — für
+  Geräte, auf denen Ziehen nicht praktikabel ist.
+- **Neu: „↩ Vom Feld nehmen" im ⋯-Menü einer belegten Feld-Kachel** (TL-Web),
+  ohne die Kachel vorher auswählen zu müssen.
+
 ## v0.9.278
 
 - **Neu: Aufruf-Uhr am Zähl-Tablet.** Die Kopfzeile zeigt dieselbe Uhr

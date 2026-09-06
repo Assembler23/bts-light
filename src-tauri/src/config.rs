@@ -1114,6 +1114,11 @@ pub struct TlDisplaySettings {
     /// Schalter findet. So herum gilt für alle Profile — alte wie neue — der
     /// gewollte Standard „anzeigen".
     pub hide_open_matches: bool,
+    /// Vier Verschiebe-Knöpfe (⤒ ↑ ↓ ⤓) an JEDER umsortierbaren Zeile der
+    /// Warteliste statt nur „↑ an den Anfang" (Wunsch 06.09.2026: Ziehen ist
+    /// auf manchen Geräten nicht praktikabel). Default aus — die Zeile wird
+    /// damit spürbar breiter; wer es braucht, schaltet es im Profil ein.
+    pub show_move_buttons: bool,
     pub list_position: TlListPosition,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
     /// Gehört ins Profil und nicht ins Gerät: Sie beschreibt, WAS gezeigt
@@ -1551,6 +1556,7 @@ mod tests {
                 show_group: false,
                 show_court_remaining: true,
                 hide_open_matches: false,
+                show_move_buttons: false,
                 unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
                 time_stats_axis: Default::default(),

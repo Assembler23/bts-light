@@ -412,3 +412,53 @@ beide Seiten fest.
 der **immer** gemischten Liste (`reorderQueue`), nicht auf der angezeigten.
 Der Turnier-PC kennt nur eine Reihenfolge; wer offene Spiele am eigenen Gerät
 ausgeblendet hat, fröre sie sonst mit „ans Ende" unbemerkt in den Präfix ein.
+
+## Nachtrag 06.09.2026 (v0.9.280)
+
+Drei Befunde aus dem Betrieb, alle in einem Zug behoben:
+
+1. **Ziehen war tot (seit v0.9.271).** `startReorderDrag` hing sein
+   Sicherheitsnetz an `lostpointercapture`. Der Browser gibt den Zeigerfang
+   aber frei, sobald `einsortieren()` die gefangene Zeile per `insertBefore`
+   umhängt — Chrome sofort, WebKit ebenso. Damit brach jeder echte Zug nach
+   der ersten Umsortierung ab, die Zeile sprang zurück, nichts wurde
+   gesendet. Reproduziert im Browser (Playwright gegen einen Mock-Host:
+   `dragging-item` verschwand nach dem ersten Umhängen, kein
+   `queue_reorder`). Fix: `fangVerloren` holt den Fang zurück, solange der
+   Zeiger aktiv ist; erst ein gescheitertes `setPointerCapture` gilt als
+   echter Verlust. Maus- und Touch-Pfad danach nachgemessen.
+2. **Zweimal „an den Anfang" verdrängte das erste Spiel.**
+   `QueueOrderStore::reorder` schnitt den neuen Präfix beim neuen Platz des
+   gezogenen Matches ab — alles, was vorher schon im Präfix stand und jetzt
+   dahinter lag, fiel heraus und auf seinen BTP-Platz zurück. Der Präfix
+   reicht jetzt mindestens bis zum letzten Mitglied des bisherigen Blocks
+   (Tests `zweimal_an_den_anfang_stapelt_statt_zu_verdraengen`,
+   `zug_in_die_mitte_des_blocks_behaelt_den_rest_des_blocks`).
+3. **Vier Verschiebe-Knöpfe als Profil-Schalter** (`showMoveButtons`,
+   Config/Wire/Rückweg wie `hideOpenMatches`): ⤒ ↑ ↓ ⤓ an jeder
+   umsortierbaren Zeile, nicht anwendbare ausgegraut. Alles läuft über
+   dasselbe `queue_reorder`; „eine nach unten" ist „vor das übernächste"
+   (an der letzten geladenen Zeile: `queueReorderTarget(null)`, also vor das
+   erste ungeladene), „ans Ende" sendet `beforeMatchId: null` — das echte
+   Ende; der Turnier-PC nimmt alles bis dahin Sichtbare in den Präfix. Kein
+   neuer Wire-Vertrag. Das Häkchen erscheint nur, wenn der Turnier-PC das
+   Feld kennt (`hostKenntVerschiebeKnoepfe`), sonst spränge es nach dem
+   Speichern still wieder ab.
+   Ehrlich benannt: „Übernächstes" zählt in der **Sichtliste** (Hallenfilter,
+   ausgeblendete offene Spiele) — dazwischen liegende unsichtbare Spiele
+   wandern mit in den Präfix, genau wie beim Zug.
+4. **`queueReorderTarget(null)` rechnete mit dem falschen Index** (vorbestehend,
+   Review 06.09.2026): `queueShown` zählt sichtbare Zeilen, wurde aber auf die
+   Gesamtliste mit offenen Spielen angewandt. Jetzt Abbildung über Elemente
+   (erstes ungeladenes sichtbares Spiel bzw. hinter dem letzten sichtbaren).
+
+**Grenze des Präfix-Fix:** Der Block bleibt bei jedem Zug für alle **nicht
+gerufenen** Spiele vollständig. Ein gerade gerufenes Präfix-Mitglied nimmt an
+`ready_queue` nicht teil und fällt beim nächsten Zug aus dem Präfix — nach
+dem Aufruf ist die Reihenfolge ohnehin nicht mehr seine Sache.
+
+**Bekannte Doppelgeste am Griff (vorbestehend, unverändert):** Auf Touch
+startet ein Griff-Tipp neben dem Umsortier-Zug auch den Zuweisungs-Drag
+(`enableDrag` → `startTouchDrag`, Geist folgt dem Finger). Beide laufen zu
+Ende; wer die Zeile auf eine Feldkachel zieht, weist zu **und** sortiert um.
+Im Feldtest beobachten, ob das stört.
