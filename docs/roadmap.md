@@ -674,6 +674,20 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Geplant
 
+- **Update ohne jede Lücke (Stufe 3): Prozess-Übergabe oder Dienst +
+  Oberfläche.** Seit v0.9.279 (Spec
+  [features/update-im-turnierbetrieb.md](features/update-im-turnierbetrieb.md),
+  ADR 0057) ist die Update-Lücke eine Sache von ~20 s: Paket vorgeladen,
+  Übertragung läuft danach von selbst wieder an, Feldstempel überleben,
+  „Beim Beenden einbauen" als Alternative. Was bleibt, ist der Prozess-
+  Neustart selbst: LAN-Server (8088/8443), Relay-WebSocket, BTP-Verbindung
+  und Monitor-Sockets sind für Sekunden weg. Echte Nullzeit hieße, diese
+  Verbindungen an einen neuen Prozess zu übergeben (Socket-Handover unter
+  Windows) oder den Kern als Dienst vom Fenster zu trennen (die Oberfläche
+  startet neu, der Dienst nicht — und der Dienst selbst bräuchte dann
+  wieder einen Übergabe-Mechanismus). Beides ein großer Umbau; Nutzen
+  gegenüber Stufe 1+2 erst messen (Feldtest: wie oft wird überhaupt
+  mitten im Turnier aktualisiert?), dann entscheiden.
 - **Code-Signing des Windows-Installers.** Aktuell unsigniert → Windows
   zeigt beim ersten Start eine SmartScreen-Warnung. Optionen: Azure Trusted
   Signing vs. klassisches OV/EV-Zertifikat — Kostenentscheidung offen. Das
@@ -698,12 +712,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Handbuch, in dem **nachlesbar** ist:
   - was die **Tablets** können — alle Funktionen des Spielzettels, nicht nur
     der Zähl-Ablauf;
-  - **was welche Einstellung in der Software bewirkt** — eine Referenz über
-    alle Abschnitte der Einstellungen (heute 17 in `SetupWizard.tsx`, für die
-    es keinerlei Doku gibt);
-  - wie der **Master-/Slave-Betrieb** funktioniert — heute verteilt über
-    [multi-hall.md](multi-hall.md) und [cloud-relay.md](cloud-relay.md), in
-    Architektursprache statt als Erklärung;
+  - ~~**was welche Einstellung in der Software bewirkt**~~ — **erledigt
+    06.09.2026**: [einstellungen.md](einstellungen.md), alle Abschnitte der
+    Einstellungsseite plus Wartung, mit Standardwerten,
+    Sichtbarkeitsbedingungen und der Frage, ab wann eine Änderung wirkt;
+  - ~~wie der **Master-/Slave-Betrieb** funktioniert~~ — **erledigt
+    06.09.2026**: [master-slave.md](master-slave.md), aus Sicht der
+    Turnierleitung statt der Architektur, mit den vier häufigsten
+    Missverständnissen;
   - was die **Oberflächen** jeweils können (Turnierleitungs-Sicht,
     Court-Monitor, Info-Monitor, Siegerehrung, Aushang).
 

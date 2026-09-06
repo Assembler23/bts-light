@@ -556,6 +556,9 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
      1 Zieh-Griff · 2 Spielnummer · 3 Name+Meta (`.who-block`) ·
      4 Statusblock (`.row-status`) · 5 Knopfblock (`.row-actions`)
    — fünf, also eines UNTER der Grenze, obwohl ein Knopf dazugekommen ist.
+   Der Profil-Schalter „Verschiebe-Knöpfe" (v0.9.280) ersetzt den ↑ durch
+   vier Knöpfe INNERHALB des Knopfblocks — die Kinderzahl bleibt fünf, die
+   Zeile wird nur breiter; deshalb ist er standardmäßig aus.
 
    Der Gewinn kam nicht vom Weglassen, sondern vom Bündeln: Vorbereitungs-Ruf,
    ↑ und Kebab waren drei eigene Kinder und sind jetzt eines. Dieselbe
@@ -699,6 +702,12 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .row .prep:hover, .row .hoch:hover { border-color: var(--accent); color: var(--accent); }
 .row .hoch { font-size: 1.05rem; line-height: 1; }
+/* Die vier Verschiebe-Knöpfe (Profil-Schalter): enger gesetzt als Megafon
+   und ↑, damit sie als EINE Reihe lesbar sind; ausgegraut heißt „hier
+   nicht möglich" (am Anfang bzw. am geladenen Ende). */
+.row .mv-block { display: flex; align-items: center; gap: 3px; }
+.row .hoch[disabled] { opacity: .35; cursor: default; }
+.row .hoch[disabled]:hover { border-color: var(--line); color: var(--ink-soft); }
 .row .prep[aria-pressed="true"] {
   border-color: var(--accent); background: #eff6ff; color: var(--accent);
 }
@@ -1822,6 +1831,9 @@ function builtInProfile() {
       // Offene Paarungen anzeigen (Spec `tl-offene-paarungen`): Das Feld
       // heißt invertiert, `false` ist also der Standard „anzeigen".
       hideOpenMatches: false,
+      // Vier Verschiebe-Knöpfe an jeder Zeile (Wunsch 06.09.2026): aus,
+      // weil die Zeile damit deutlich breiter wird.
+      showMoveButtons: false,
       // Abgelöst durch `columns`/`column` (Plan tl-liste-vereinfachen F),
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
@@ -2030,6 +2042,10 @@ function aufrufeUnbegrenzt() { return !!activeDisplay().unlimitedCourtCalls; }
  *  Feld — also jedes, das vor dieser Version angelegt wurde — steht damit
  *  auf „anzeigen", dem gewollten Standard. */
 function zeigeOffeneSpiele() { return !activeDisplay().hideOpenMatches; }
+/** Vier Verschiebe-Knöpfe (⤒ ↑ ↓ ⤓) an jeder umsortierbaren Zeile statt nur
+ *  „↑ an den Anfang" — für Geräte, auf denen Ziehen nicht praktikabel ist
+ *  (Wunsch 06.09.2026). Profil-Schalter, Standard aus. */
+function zeigeVerschiebeKnoepfe() { return !!activeDisplay().showMoveButtons; }
 /** Kennt dieser Turnier-PC offene Paarungen überhaupt?
  *
  *  Der Relay bettet diese Seite ein und wird bei jedem Merge deployt, die App
@@ -2038,6 +2054,17 @@ function zeigeOffeneSpiele() { return !activeDisplay().hideOpenMatches; }
  *  Häkchen dafür im Profil-Editor stehen: ein Schalter ohne Wirkung ist
  *  schlimmer als keiner (dieselbe Regel wie bei `can_set_wish_court`). */
 function hostKenntOffeneSpiele() { return !!state && Array.isArray(state.open_queue); }
+/** Kennt der Turnier-PC den Profil-Schalter `showMoveButtons`? Ein neuer
+ *  Host serialisiert das Feld in JEDEM Profil (kein `skip_serializing_if`);
+ *  ein alter verwirft es beim Speichern still, und das Häkchen spränge nach
+ *  dem Speichern wieder ab (Review 06.09.2026, E13-Prinzip wie bei
+ *  `hostKenntOffeneSpiele`). Ohne Host-Profile ist es unentscheidbar — dann
+ *  anzeigen, das erste Speichern legt ohnehin ein Profil an. */
+function hostKenntVerschiebeKnoepfe() {
+  const profile = (state && state.profiles) || [];
+  if (!profile.length) return true;
+  return profile.some((p) => p.display && "showMoveButtons" in p.display);
+}
 /** Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`). Ein
  *  unbekannter Wert fällt auf die ursprüngliche Ansicht zurück — ein Profil
  *  aus einer NEUEREN App-Version darf diese Seite nicht ratlos machen. */
@@ -3634,6 +3661,14 @@ function courtCard(c, cellStyle) {
     kachelAktionen.push(`<button type="button" data-zettel="${c.match_id}"
         title="Schiedsrichterzettel drucken">🖨 Zettel</button>`);
   }
+  // „Vom Feld nehmen" (Wunsch 06.09.2026): bisher nur über das Band nach
+  // dem Antippen der Kachel erreichbar — hier als zweiter Weg im Menü, der
+  // keinen Auswahl-Zustand braucht. Derselbe `freeCourt` wie im Band,
+  // samt Rückfrage bei laufendem Spielstand.
+  if (c.match_id) {
+    kachelAktionen.push(`<button type="button" data-free="${c.court_id}"
+        title="Das Spiel zurück in die Warteliste, das Feld wird frei">↩ Vom Feld nehmen</button>`);
+  }
   // Feld sperren/freigeben (Spec `tl-web-felder-sperren`).
   //
   // Nur wenn der Turnier-PC die Aktion kennt: Der Relay wird bei jedem
@@ -3935,6 +3970,23 @@ function wireCourts(box) {
         { action: "announce_officials", courtId },
         "Ansage ausgelöst.",
       );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // „Vom Feld nehmen" aus dem Kachel-Menü: das Feld aus dem AKTUELLEN Stand
+  // holen, nicht aus dem Zeichen-Zeitpunkt — steht dort inzwischen nichts
+  // mehr, sagt der Hinweis das, statt ins Leere zu senden.
+  scopeAll(box, "button[data-free]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.free);
+      const feld = (state.courts || []).find((x) => x.court_id === courtId);
+      if (!feld || !feld.match_id) {
+        toast("Auf diesem Feld steht kein Spiel mehr.", true);
+        return;
+      }
+      freeCourt(feld);
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -4682,7 +4734,13 @@ function queueRow(m, topMatchId) {
   // Knopf, der nichts tut, ist schlimmer als keiner — niemand weiß, ob die
   // Aktion misslang oder überflüssig war.
   const kannHoch = sortierbar && topMatchId != null && topMatchId !== m.match_id;
-  if (kannHoch) {
+  // Mit eingeschaltetem Profil-Schalter ersetzen vier Knöpfe den einen ↑
+  // (Wunsch 06.09.2026). Nicht anwendbare Knöpfe sind ausgegraut statt
+  // weggelassen: Vier Knöpfe, die je nach Zeile springen, wären ein
+  // Zielraten — die Reihe steht immer gleich.
+  if (zeigeVerschiebeKnoepfe()) {
+    if (sortierbar) aktionen.push(verschiebeKnoepfeHtml(m.match_id));
+  } else if (kannHoch) {
     aktionen.push(`<button type="button" class="hoch" data-queue-top="${m.match_id}"
       title="An den Anfang der Spielliste schieben"
       aria-label="An den Anfang der Spielliste schieben">↑</button>`);
@@ -4890,6 +4948,16 @@ function wireQueue(box) {
       const before = queueTopMatchId();
       if (before == null || before === matchId) return;
       sendeQueueReorder(matchId, before, "Nach oben geschoben.");
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  // Die vier Verschiebe-Knöpfe: Ziel wird beim Tipp aus der AKTUELLEN
+  // sichtbaren Reihe bestimmt, nicht beim Zeichnen — zwischen beidem kann
+  // ein Push die Liste verändert haben.
+  scopeAll(box, "button[data-queue-move]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      verschiebeSpiel(Number(btn.dataset.matchId), btn.dataset.queueMove);
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -5696,7 +5764,7 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     window.removeEventListener("pointercancel", cancel);
-    li.removeEventListener("lostpointercapture", verloren);
+    li.removeEventListener("lostpointercapture", fangVerloren);
     window.removeEventListener("blur", verloren);
     if (isTouch) window.removeEventListener("touchmove", blockScroll, { passive: false });
     document.body.classList.remove("dragging");
@@ -5745,10 +5813,31 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
    *  scrollt. Verwerfen ist hier immer richtig: Ein Zug, dessen Ende niemand
    *  gesehen hat, darf keine Reihenfolge schreiben. */
   const verloren = () => teardown(null, true);
+  /** Fangverlust ist hier meist SELBST verursacht: `einsortieren()` hängt
+   *  die gefangene Zeile per `insertBefore` um, und Chrome gibt den Fang
+   *  eines umgehängten Elements sofort frei (WebKit ebenso). Bis v0.9.278
+   *  galt das als Abbruch — jeder echte Zug flog damit nach der ersten
+   *  Umsortierung zurück an seinen Platz, und nichts wurde gesendet
+   *  (Fehlermeldung 06.09.2026 „Drag&Drop geht gar nicht mehr"; mit der
+   *  Reproduktion im Browser sichtbar: `dragging-item` weg, kein
+   *  `queue_reorder`). Deshalb: Fang zurückholen, solange der Zeiger noch
+   *  aktiv ist. Erst wenn das scheitert (Finger weg, System hat die Geste
+   *  übernommen), ist der Verlust echt — dann verwerfen wie zuvor. */
+  const fangVerloren = () => {
+    if (beendet) return;
+    // Bei einer Maus ohne gedrückte Taste ist `setPointerCapture` laut Spec
+    // ein stilles No-Op — deshalb zusätzlich nachsehen, ob der Fang (auch
+    // als noch schwebender) wirklich wieder da ist.
+    try {
+      li.setPointerCapture(pointerId);
+      if (li.hasPointerCapture(pointerId)) return;
+    } catch { /* Zeiger nicht mehr aktiv */ }
+    teardown(null, true);
+  };
   window.addEventListener("pointermove", move, { passive: false });
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", cancel);
-  li.addEventListener("lostpointercapture", verloren);
+  li.addEventListener("lostpointercapture", fangVerloren);
   window.addEventListener("blur", verloren);
   rafId = requestAnimationFrame(takt);
 }
@@ -6345,6 +6434,66 @@ function queueTopMatchId() {
   return erste ? erste.match_id : null;
 }
 
+/** Die umsortierbaren Spiele in Anzeige-Reihenfolge (ohne gerufene — die
+ *  nehmen an der Reihenfolge nicht teil, siehe `sortierbar` in `queueRow`).
+ *  Einmal je Zeichnen berechnet (`queueSortierbar`), nicht je Zeile. */
+let queueSortierbar = { ids: [], komplett: true };
+function merkeSortierbareReihe(liste) {
+  queueSortierbar = {
+    ids: liste.filter((m) => !m.prep_call).map((m) => m.match_id),
+    komplett: queueShown >= liste.length,
+  };
+}
+
+/** Die vier Verschiebe-Knöpfe einer Zeile (Profil-Schalter). Am Anfang
+ *  sind ⤒/↑ ausgegraut, am geladenen Ende ↓/⤓ — solange die Liste noch
+ *  nachlädt, gibt es unten immer ein Weiter. */
+function verschiebeKnoepfeHtml(matchId) {
+  const { ids, komplett } = queueSortierbar;
+  const i = ids.indexOf(matchId);
+  const erste = i <= 0;
+  const letzte = komplett && i >= ids.length - 1;
+  const k = (art, sym, titel, aus) => `<button type="button" class="hoch mv"
+      data-queue-move="${art}" data-match-id="${matchId}"
+      title="${titel}" aria-label="${titel}"${aus ? " disabled" : ""}>${sym}</button>`;
+  return `<span class="mv-block">${k("top", "⤒", "An den Anfang der Spielliste schieben", erste)}${k("up", "↑", "Eine Position nach oben", erste)}${k("down", "↓", "Eine Position nach unten", letzte)}${k("end", "⤓", "Ans Ende der Spielliste schieben", letzte)}</span>`;
+}
+
+/** Ein Tipp auf einen der vier Knöpfe — derselbe `queue_reorder` wie ein
+ *  Zug, das Ziel aus der frischen Reihe. „Eine nach unten" heißt „vor das
+ *  übernächste"; gibt es das nicht, ans (ggf. noch nicht geladene) Ende. */
+function verschiebeSpiel(matchId, art) {
+  merkeSortierbareReihe(visibleQueue());
+  const { ids, komplett } = queueSortierbar;
+  const i = ids.indexOf(matchId);
+  if (i < 0) return;
+  let ziel;
+  let text;
+  if (art === "top") {
+    if (i === 0) return;
+    ziel = ids[0];
+    text = "Nach oben geschoben.";
+  } else if (art === "up") {
+    if (i === 0) return;
+    ziel = ids[i - 1];
+    text = "Eine Position nach oben.";
+  } else if (art === "down") {
+    if (komplett && i >= ids.length - 1) return;
+    ziel = i + 2 < ids.length ? ids[i + 2] : queueReorderTarget(null);
+    text = "Eine Position nach unten.";
+  } else {
+    if (komplett && i >= ids.length - 1) return;
+    // Bewusst `null` statt `queueReorderTarget(null)`: Der Knopf heißt „ans
+    // Ende" und meint das echte Ende — auch wenn die Liste erst zum Teil
+    // geladen ist. Der Turnier-PC nimmt dafür alles bis dahin Sichtbare in
+    // den manuell sortierten Block (Präfix-Mechanik, `queue_order.rs`).
+    ziel = null;
+    text = "Ans Ende geschoben.";
+  }
+  if (ziel === matchId) return;
+  sendeQueueReorder(matchId, ziel, text);
+}
+
 // ── Nachladen beim Scrollen (ADR 0026) ────────────────────────────────
 // Die Liste zeigt ALLE angesetzten Spiele — nichts wird weggelassen, nichts
 // gekürzt. Gegen die Länge (mehrere hundert Zeilen sind in großen Turnieren
@@ -6409,6 +6558,7 @@ function queueNachladenWaehrendZug() {
   if (bis <= von) return;
   queueShown = bis;
   const top = queueTopMatchId();
+  merkeSortierbareReihe(liste);
   let stand = keyedHtmlStand.get(box);
   if (!stand) { stand = new Map(); keyedHtmlStand.set(box, stand); }
   const vorhanden = new Set(Array.from(box.children).map((el) => el.dataset.reconKey));
@@ -6493,6 +6643,7 @@ function renderQueue() {
   queueShown = Math.max(QUEUE_PAGE, Math.min(queueShown, Math.max(liste.length, QUEUE_PAGE)));
   const fenster = liste.slice(0, queueShown);
   const top = queueTopMatchId();
+  merkeSortierbareReihe(liste);
   // EIN Zieh-Container für die ganze Liste (ADR 0026) — die Reihenfolge
   // ist global, also auch die Ziehfläche. Seit dem Keyed-Abgleich wird der
   // Griff je Zeile verdrahtet (`wireReorderGriff`), nur für neue/ersetzte
@@ -6577,9 +6728,19 @@ function queueReorderTarget(beforeId) {
   // (Code-Review 30.08.2026).
   const liste = reorderQueue();
   if (beforeId === null || beforeId === undefined) {
-    if (queueShown >= liste.length) return null; // alles geladen: echtes Ende
-    const naechstes = liste.slice(queueShown).find((m) => !m.prep_call);
-    return naechstes ? naechstes.match_id : null;
+    // `queueShown` zählt SICHTBARE Zeilen — auf die Gesamtliste (mit
+    // ausgeblendeten offenen Spielen) angewandt, zeigte der Index irgendwohin
+    // (Review 06.09.2026). Deshalb über Elemente abbilden: erstes noch nicht
+    // geladenes sichtbares Spiel, sonst HINTER dem letzten sichtbaren.
+    const sichtbar = visibleQueue();
+    if (!sichtbar.length) return null;
+    const komplett = queueShown >= sichtbar.length;
+    const anker = komplett ? sichtbar[sichtbar.length - 1] : sichtbar[queueShown];
+    let pos = liste.findIndex((m) => m.match_id === anker.match_id);
+    if (pos < 0) return null;
+    if (komplett) pos += 1;
+    const naechstes = liste.slice(pos).find((m) => !m.prep_call);
+    return naechstes ? naechstes.match_id : null; // null = echtes Ende
   }
   const ziel = Number(beforeId);
   const zielMatch = liste.find((m) => m.match_id === ziel);
@@ -7379,6 +7540,10 @@ function uebernehmeEditorFelder() {
     hideOpenMatches: $("prof-show-open")
       ? !$("prof-show-open").checked
       : !!kopie.display.hideOpenMatches,
+    // Fehlt das Häkchen (älterer Turnier-PC), bleibt der gespeicherte Wert.
+    showMoveButtons: $("prof-show-move")
+      ? $("prof-show-move").checked
+      : !!kopie.display.showMoveButtons,
     // Achse des Panels „Spielzeiten": Auswahlfeld statt Häkchen — es sind
     // vier Werte, kein An/Aus. Ein unbekannter Wert (Profil aus einer
     // neueren Version) fiele beim Lesen ohnehin auf „group" zurück.
@@ -7449,6 +7614,7 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
       ${hostKenntOffeneSpiele() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-open" ${d.hideOpenMatches ? "" : "checked"} /> Spiele mit noch offener Paarung zeigen (z. B. Halbfinale vor der Vorrunde)</label>` : ""}
+      ${hostKenntVerschiebeKnoepfe() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-move" ${d.showMoveButtons ? "checked" : ""} /> Verschiebe-Knöpfe an jeder Zeile der Spielliste (⤒ ↑ ↓ ⤓ statt nur ↑)</label>` : ""}
       <label class="checkbox-row" style="gap:8px">
         <span>Spielzeiten gruppieren nach</span>
         <select id="prof-time-axis">${ZEITEN_ACHSEN

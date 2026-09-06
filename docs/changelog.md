@@ -13,6 +13,31 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Derselbe Hinweis steht im Assistenten unter der BTP-Verbindung und im
   Handbuch („Was ist BTS Light?").
 
+## v0.9.280
+
+- **Behoben: Umsortieren per Ziehen in der TL-Web-Spielliste.** Seit
+  v0.9.271 sprang die Zeile nach dem ersten Umhängen zurück, und nichts wurde
+  gesendet (der Browser gab den Zeigerfang des umgehängten Elements frei, das
+  Sicherheitsnetz hielt das für einen Abbruch). Maus und Touch nachgemessen.
+- **Behoben: „An den Anfang" zweimal hintereinander** warf das zuerst
+  geschobene Spiel wieder nach unten; jetzt rückt es auf Platz zwei — der
+  manuell sortierte Block bleibt bei jedem Zug vollständig.
+- **Neu: Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile** (Profil-
+  Häkchen, Standard aus): ⤒ Anfang, ↑ eine hoch, ↓ eine runter, ⤓ Ende — für
+  Geräte, auf denen Ziehen nicht praktikabel ist.
+- **Neu: „↩ Vom Feld nehmen" im ⋯-Menü einer belegten Feld-Kachel** (TL-Web),
+  ohne die Kachel vorher auswählen zu müssen.
+## v0.9.279
+
+- **Neu: Update ohne Bedien-Lücke im Turnierbetrieb.** Das Update wird im
+  Hintergrund vorgeladen; das Banner zeigt, wie viele Felder belegt sind,
+  und bietet zwei Wege: **„Jetzt neu starten"** (etwa 20 s Lücke, die
+  Übertragung läuft danach **von selbst** wieder an, die Aufruf-Uhr belegter
+  Felder läuft weiter) oder **„Beim Beenden einbauen"** (stiller Installer
+  beim Schließen, keine App danach). Bisher blieb die Übertragung nach dem
+  Neustart stehen, bis jemand „Starten" drückte, und die Aufruf-Uhr begann
+  bei null. Spec `docs/features/update-im-turnierbetrieb.md`, ADR 0057.
+
 ## v0.9.278
 
 - **Neu: Aufruf-Uhr am Zähl-Tablet.** Die Kopfzeile zeigt dieselbe Uhr

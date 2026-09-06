@@ -1675,6 +1675,11 @@ pub struct TlDisplaySettingsWire {
     /// Browser-Stand, und genau das ist der gewollte Standard.
     #[serde(rename = "hideOpenMatches", default)]
     pub hide_open_matches: bool,
+    /// Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile (Wunsch
+    /// 06.09.2026). `#[serde(default)]` wie die Häkchen darüber: fehlt das
+    /// Feld (älterer Browser-Stand), bleibt es aus — das bisherige Bild.
+    #[serde(rename = "showMoveButtons", default)]
+    pub show_move_buttons: bool,
     #[serde(rename = "listPosition")]
     pub list_position: TlListPositionWire,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
@@ -4598,6 +4603,7 @@ mod tests {
                 show_group: false,
                 show_court_remaining: true,
                 hide_open_matches: false,
+                show_move_buttons: false,
                 unlimited_court_calls: false,
                 list_position: TlListPositionWire::Bottom,
                 time_stats_axis: TlTimeStatsAxisWire::Group,

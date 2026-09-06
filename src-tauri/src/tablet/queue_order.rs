@@ -163,11 +163,21 @@ impl QueueOrderStore {
             None => liste.len(),
         };
         liste.insert(ziel, match_id);
-        let neuer_praefix: Vec<i64> = liste.into_iter().take(ziel + 1).collect();
-        {
-            let mut inner = self.inner.lock().unwrap();
-            inner.file.queue = neuer_praefix;
-        }
+        // Der neue Präfix reicht bis zum neuen Platz des gezogenen Matches —
+        // mindestens aber bis zum letzten Mitglied des BISHERIGEN Präfix.
+        // Sonst würfe ein Zug an den Anfang alles hinaus, was vorher schon
+        // von Hand sortiert war: Zweimal „an den Anfang" (Spiel A, dann
+        // Spiel B) ließ A wieder auf seinen BTP-Platz zurückfallen, statt es
+        // an zweiter Stelle zu halten (Fehlermeldung 06.09.2026).
+        let mut inner = self.inner.lock().unwrap();
+        let ende = inner
+            .file
+            .queue
+            .iter()
+            .filter_map(|id| liste.iter().position(|x| x == id))
+            .fold(ziel, usize::max);
+        inner.file.queue = liste.into_iter().take(ende + 1).collect();
+        drop(inner);
         self.persist();
     }
 
@@ -289,6 +299,35 @@ mod tests {
         assert_eq!(store.rank(4), Some(0));
         assert_eq!(store.rank(1), Some(1));
         assert_eq!(store.rank(2), None);
+    }
+
+    /// Zweimal „an den Anfang" stapelt: Das zuvor nach vorn geholte Spiel
+    /// rückt auf Platz zwei, statt aus dem Präfix zu fallen (Fehlermeldung
+    /// 06.09.2026).
+    #[test]
+    fn zweimal_an_den_anfang_stapelt_statt_zu_verdraengen() {
+        let store = QueueOrderStore::default();
+        store.reorder(&[1, 2, 3, 4, 5], 3, Some(1)); // -> [3]
+                                                     // Effektiv jetzt 3,1,2,4,5 — Spiel 5 vor das erste (3) holen.
+        store.reorder(&[3, 1, 2, 4, 5], 5, Some(3));
+        assert_eq!(store.rank(5), Some(0));
+        assert_eq!(store.rank(3), Some(1), "bleibt von Hand sortiert");
+        assert_eq!(store.rank(1), None);
+    }
+
+    /// Ein Zug mitten in den bestehenden Block lässt dessen hinteren Teil
+    /// stehen — dieselbe Regel, nur nicht am Listenanfang.
+    #[test]
+    fn zug_in_die_mitte_des_blocks_behaelt_den_rest_des_blocks() {
+        let store = QueueOrderStore::default();
+        store.reorder(&[1, 2, 3, 4, 5], 4, Some(1)); // -> [4]
+        store.reorder(&[4, 1, 2, 3, 5], 3, Some(1)); // -> [4, 3]
+                                                     // Effektiv 4,3,1,2,5 — Spiel 5 vor 3 ziehen: 3 bleibt im Block.
+        store.reorder(&[4, 3, 1, 2, 5], 5, Some(3));
+        assert_eq!(store.rank(4), Some(0));
+        assert_eq!(store.rank(5), Some(1));
+        assert_eq!(store.rank(3), Some(2));
+        assert_eq!(store.rank(1), None);
     }
 
     #[test]

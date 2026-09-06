@@ -4091,6 +4091,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             show_group: p.display.show_group,
             show_court_remaining: p.display.show_court_remaining,
             hide_open_matches: p.display.hide_open_matches,
+            show_move_buttons: p.display.show_move_buttons,
             unlimited_court_calls: p.display.unlimited_court_calls,
             list_position: match p.display.list_position {
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
@@ -4143,6 +4144,7 @@ fn display_settings_from_wire(
         show_group: d.show_group,
         show_court_remaining: d.show_court_remaining,
         hide_open_matches: d.hide_open_matches,
+        show_move_buttons: d.show_move_buttons,
         unlimited_court_calls: d.unlimited_court_calls,
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
@@ -4992,6 +4994,35 @@ mod tests {
         let mut m = folgespiel(id, None, None);
         m.planned_time = Some(zeit);
         m
+    }
+
+    /// Der Schalter „Verschiebe-Knöpfe" reist wie die anderen Häkchen in
+    /// beide Richtungen und fehlt in keinem der drei Zwillinge (Config,
+    /// Wire, Rückweg).
+    #[test]
+    fn der_schalter_verschiebe_knoepfe_reist_in_beide_richtungen() {
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "p1".into(),
+            name: "Tisch".into(),
+            display: crate::config::TlDisplaySettings {
+                show_move_buttons: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let sicht = profiles_view(&cfg);
+        let wire = sicht.iter().find(|p| p.id == "p1").expect("das Profil");
+        assert!(wire.display.show_move_buttons);
+        let json = serde_json::to_string(&wire.display).unwrap();
+        assert!(json.contains(r#""showMoveButtons":true"#), "{json}");
+        let zurueck = display_settings_from_wire(&wire.display);
+        assert!(zurueck.show_move_buttons);
+        // Ein Profil aus einem älteren Browser-Stand kennt das Feld nicht.
+        let d: relay_proto::TlDisplaySettingsWire =
+            serde_json::from_str(r#"{"showNumbers":true,"showNations":false,"showClubNames":false,"showClubLogos":false,"showDiscipline":true,"showRound":true,"showGroup":true,"listPosition":"right"}"#)
+                .unwrap();
+        assert!(!d.show_move_buttons);
     }
 
     #[test]
@@ -9885,6 +9916,9 @@ mod tests {
             // `tl-offene-paarungen`) — ebenfalls nur ein Häkchen. Invertiert
             // benannt, damit ein Profil ohne das Feld auf „anzeigen" steht.
             "hideOpenMatches",
+            // Profil-Schalter „Verschiebe-Knöpfe an jeder Zeile" (Wunsch
+            // 06.09.2026) — ein Anzeige-Häkchen, kein Personenbezug.
+            "showMoveButtons",
             "listPosition",
             // Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`)
             // — reine Anzeige-Präferenz wie die Häkchen daneben, ein Wort
@@ -10007,6 +10041,7 @@ mod tests {
                 show_court_remaining: true,
                 unlimited_court_calls: true,
                 hide_open_matches: false,
+                show_move_buttons: false,
                 list_position: crate::config::TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
             },
