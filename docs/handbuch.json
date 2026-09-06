@@ -1,0 +1,147 @@
+{
+  "titel": "BTS Light — Handbuch",
+  "untertitel": "Anleitung für Turnierleitung, Schiedsrichter, Zähltafelbediener und Hallenaufbau.",
+
+  "_hinweis": [
+    "WHITELIST, nicht Blacklist: Nur was hier steht, wird auf badhub.de veröffentlicht.",
+    "Eine neue Datei unter docs/ geht damit NIE versehentlich online — sie muss hier",
+    "eingetragen werden. scripts/test-handbuch.mjs meldet jede docs/*.md, die weder",
+    "hier noch unter 'intern' steht, damit neue Anleitungen nicht still liegen bleiben.",
+    "",
+    "'aus' entfernt einzelne Abschnitte einer sonst veröffentlichten Seite: der",
+    "genannte Überschriftentext samt Inhalt bis zur nächsten gleichrangigen Überschrift.",
+    "Damit müssen halb-interne Dateien (Bedienung + Architektur in einem) nicht",
+    "zerschnitten werden. Die Titel werden geprüft — wer eine Überschrift umbenennt,",
+    "bekommt einen roten Test statt eines still wieder sichtbaren Kapitels.",
+    "",
+    "Für Stellen mitten in einem Abschnitt gibt es zusätzlich die Marker",
+    "<!-- handbuch:aus --> … <!-- handbuch:an --> direkt im Markdown."
+  ],
+
+  "gruppen": [
+    {
+      "name": "Einstieg",
+      "seiten": [
+        { "datei": "README.md", "slug": "ueberblick", "titel": "Was ist BTS Light?",
+          "aus": ["Stack", "Entwicklung", "Projektstruktur", "Arbeitsweise"] }
+      ]
+    },
+    {
+      "name": "Turnierleitung",
+      "seiten": [
+        { "datei": "docs/einstellungen.md", "slug": "einstellungen",
+          "titel": "Einstellungen — was jede Option bewirkt" },
+        { "datei": "docs/turnierleitung-web.md", "slug": "turnierleitung",
+          "titel": "Turnierleitungs-Oberfläche im Browser",
+          "aus": ["Render-Sparsamkeit (seit 17.08.2026, erweitert 18.08.2026)",
+                  "Aktualisierung: Push statt Dauerfragen (seit 18.08.2026)"] },
+        { "datei": "docs/preparation.md", "slug": "vorbereitung",
+          "titel": "Spiele in Vorbereitung aufrufen" },
+        { "datei": "docs/announcements.md", "slug": "ansagen",
+          "titel": "Sprachansagen für Feld-Aufrufe" },
+        { "datei": "docs/zaehltafelbediener.md", "slug": "zaehltafelbediener",
+          "titel": "Zähltafelbediener einteilen" },
+        { "datei": "docs/schiedsrichter-management.md", "slug": "schiedsrichter",
+          "titel": "Schiedsrichter verwalten",
+          "aus": ["Gelesene BTP-Daten (Schritt 2)", "Roster-Speicher (Schritt 4)",
+                  "Warum die CI die Asset-Syntax prüft",
+                  "Offen: Verfügbarkeit je Tag (Messfrage, 13.08.2026)"] },
+        { "datei": "docs/walkover.md", "slug": "walkover",
+          "titel": "Kampflose Wertung nach Aufgabe" },
+        { "datei": "docs/spielzeiten-prognose.md", "slug": "spielzeiten",
+          "titel": "Spielzeiten & Startzeit-Prognose" },
+        { "datei": "docs/multi-hall.md", "slug": "mehr-hallen",
+          "titel": "Mehr-Hallen-Turniere",
+          "aus": ["Beteiligte Dateien (Querverweis)", "Offene Punkte",
+                  "Transport-Bündelung: der Slave trägt die Geräte (ADR 0048)"] }
+      ]
+    },
+    {
+      "name": "Am Feld",
+      "seiten": [
+        { "datei": "docs/tablet.md", "slug": "tablet",
+          "titel": "Digitaler Tablet-Spielzettel",
+          "aus": ["Architektur", "Endpunkte des Tablet-Servers", "Datenfluss",
+                  "Ergebnis-Übermittlung verlustsicher (Hebel B, ADR 0018)",
+                  "Bekannte Vereinfachungen", "Zettel-Ereignisse"] },
+        { "datei": "docs/umpire-mode.md", "slug": "schiri-modus",
+          "titel": "Schiri-Modus am Zähltablett" },
+        { "datei": "docs/tablet-kiosk.md", "slug": "tablet-kiosk",
+          "titel": "Einstellungs-PIN & Kiosk-Sperre" },
+        { "datei": "docs/schiedsrichterzettel.md", "slug": "schiedsrichterzettel",
+          "titel": "Schiedsrichterzettel drucken" },
+        { "datei": "docs/punktverlauf.md", "slug": "punktverlauf",
+          "titel": "Punktverlauf-Graph",
+          "aus": ["Wie die Daten fließen", "Im Code", "Tests",
+                  "Zwei Projektionen, eine Erfassung"] }
+      ]
+    },
+    {
+      "name": "Anzeigen in der Halle",
+      "seiten": [
+        { "datei": "docs/court-monitor.md", "slug": "court-monitor",
+          "titel": "Court-Monitor — TV-Anzeige am Spielfeld",
+          "aus": ["Datenfluss", "Niedrig-latente Anzeige (WS-Nudge)",
+                  "Zwischenspeichern der Bilder (seit v0.9.225)",
+                  "Last am Turnier-PC (seit v0.9.223)",
+                  "Antwortcache der Übersicht (seit v0.9.236)",
+                  "Feld-Übersicht: nur noch die Ziffern neu (seit v0.9.240)",
+                  "Messen, was die Anzeigen kosten (seit v0.9.235)",
+                  "Endpunkte", "ETag/304 für den Status-Abruf (seit v0.9.254)",
+                  "Nicht umgesetzt"] },
+        { "datei": "docs/pi-setup.md", "slug": "pi-einrichten",
+          "titel": "Court-Monitor am Raspberry Pi einrichten" },
+        { "datei": "docs/pi-master-image.md", "slug": "verleih-set",
+          "titel": "Verleih-Set vorbereiten: Router & Master-Image" }
+      ]
+    },
+    {
+      "name": "Für Spieler und Zuschauer",
+      "seiten": [
+        { "datei": "docs/aushang.md", "slug": "aushang", "titel": "Aushang für die Halle",
+          "aus": ["Wie es gebaut ist"] },
+        { "datei": "docs/spieler-check-in.md", "slug": "check-in", "titel": "Hallen-Check-In",
+          "aus": ["Stand der Umsetzung", "Tests"] }
+      ]
+    },
+    {
+      "name": "Wenn etwas nicht geht",
+      "seiten": [
+        { "datei": "docs/cloud-relay.md", "slug": "cloud-relay",
+          "titel": "Cloud-Verbindung — Tablets durch jede Firewall",
+          "aus": ["Architektur", "Anzeige-Stil der Werbebilder (seit v0.9.247)",
+                  "Trägerverbindung der fernen Halle (`/{ns}/carrier-ws`)",
+                  "Last-/Soak-Test des Brokers (Cluster-Hebel C, ADR 0019)",
+                  "Deployment"] },
+        { "datei": "docs/logging.md", "slug": "diagnose-logs", "titel": "Diagnose-Logs",
+          "aus": ["Relay-Log (Cloud-Seite)"] }
+      ]
+    },
+    {
+      "name": "Downloads",
+      "seiten": [
+        { "extern": "../", "titel": "Programm herunterladen & Versionshinweise",
+          "beschreibung": "Aktuelle Version, Pi-Image für die Court-Monitore und der vollständige Änderungsverlauf." }
+      ]
+    }
+  ],
+
+  "intern": [
+    "docs/adr/",
+    "docs/features/",
+    "docs/superpowers/",
+    "docs/changelog.md",
+    "docs/roadmap.md",
+    "docs/roadmap-plaene-2026-07.md",
+    "docs/release.md",
+    "docs/regression-suite.md",
+    "docs/spec-pipeline-konzept.md",
+    "docs/btp_protocol.md",
+    "docs/btp-write-vergleich-letilo.md",
+    "docs/turnier-log-review-2026-07.md",
+    "docs/feldtest-2026-08.md",
+    "docs/tts-azure-concept.md",
+    "docs/pi-dual-image.md",
+    "docs/court-monitor.md.orig"
+  ]
+}
