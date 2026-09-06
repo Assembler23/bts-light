@@ -685,7 +685,8 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
   funktional folgenlos (der Reconnect heilt sich seit v0.9.147 selbst),
   aber jede Doze-Phase macht die Anzeige träge und flutet das Log.
   Ein programmatischer Wake Lock braucht HTTPS (Secure Context) und
-  kommt mit ADR 0005 (LAN-HTTPS).
+  kommt mit ADR 0005 (LAN-HTTPS). Mit der Kiosk-App entfällt das — sie hält
+  den Bildschirm selbst wach.
 - **Windows-Firewall**: beim ersten Start fragt Windows, ob der Zugriff
   erlaubt werden soll – „Zugriff zulassen" (private Netze). Ohne Freigabe
   erreichen die Tablets bts-light nicht. Auf gesperrten Turnier-PCs ohne

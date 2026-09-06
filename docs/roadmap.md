@@ -305,6 +305,28 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Tablet-Kiosk-App für Android / Fire-Tablets — umgesetzt, Feldtest
+  offen.** Spec: [features/tablet-android-kiosk-app.md](features/tablet-android-kiosk-app.md),
+  ADR [0058](adr/0058-eigene-kiosk-app-statt-fully-kiosk.md). Aus dem
+  Nutzer-Wunsch vom 06.09.2026: Eine eigene, dünne Kotlin-App in `android/`
+  findet den Turnier-PC wie die Pi-Monitore selbst (gemerkte IP →
+  Subnetz-Scan → mDNS), zeigt die Felder-Lobby im Vollbild und sperrt das
+  Tablet als Gerätebesitzer — ohne Fully-PLUS-Lizenz und ohne Adresse je
+  Tablet. Bedienung: [tablet-android-app.md](tablet-android-app.md). Nur
+  echte Hardware klärt noch:
+  1. **Device Owner auf Fire OS:** `dpm set-device-owner` mit frischem
+     Tablet ohne Amazon-Konto. Wird es verweigert → weiche Sperre
+     dokumentieren, Alternative prüfen.
+  2. **Amazon-WebView-Stand:** reicht die Chromium-Version für
+     `tablet.html` (Module, `fetch`, Pointer-Events)? Ggf.
+     Mindestversion in die Doku.
+  3. **Lock-Task auf Fire OS:** Statusleiste wirklich weg? Fire-Launcher
+     unterdrückt? Sperrbildschirm aus?
+  4. **Boot-Zeit** bis zur Lobby, mit und ohne gemerkte IP.
+  5. **Scan-Dauer** im Hallen-WLAN (254 Adressen, Blöcke von 30).
+  6. **Akku-Badge** in der Übersicht sichtbar.
+  7. Ein Turniertag parallel zu einem Fully-Tablet.
+
 - **Mehrere Liveticker je Verband (v0.9.276)** — Spec:
   [features/liveticker-mehrere-turniere-je-verband.md](features/liveticker-mehrere-turniere-je-verband.md),
   ADR [0054](adr/0054-liveticker-kind-turnier-je-guid.md).
@@ -750,6 +772,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   ziehbare Anordnung je Feld komfortabler. Bewusst verschoben beim
   Erstwurf — Persistenz je Feld statt je Halle, eigene Speicher-UI,
   Zusammenspiel mit wechselnden Feldzahlen.
+- **Anstoß der Suche aus `tablet.html` über die JS-Brücke
+  (Tablet-Kiosk-App).** Bekommt der Turnier-PC mitten im Turnier eine neue
+  IP-Adresse, sieht die Tablet-Kiosk-App das nicht von selbst — die Suche
+  läuft bewusst nur bei App-Start, WLAN-Wechsel, Ladefehler oder Handgriff,
+  nie als Hintergrund-Takt. Ein Anstoß direkt aus der geladenen Seite über
+  die `fully`-JS-Brücke, sobald sie „Verbindung verloren" erkennt, wäre die
+  saubere Lösung, bräuchte aber eine Änderung an `tablet.html` — bewusst aus
+  der ersten Fassung ausgeklammert.
 
 ## Datenverlust-Pfade in der Konfiguration (Befunde 07.08.2026)
 
