@@ -49,3 +49,11 @@ docs/features/_intake/
 .playwright-mcp/
 /tl-*.png
 /*.output
+
+# Android-Kiosk-App: Build-Ausgaben, lokale SDK-Pfade, Keystores
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/*.keystore
+android/*.jks
