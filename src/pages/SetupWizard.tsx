@@ -1189,6 +1189,17 @@ export function SetupWizard({
           onChange={setBtpPassword}
           type="password"
         />
+        {/* Die häufigste Stolperfalle beim ersten Start (Feldtest 06.09.2026):
+            BTP nimmt erst Verbindungen an, wenn Tournament Planner Network
+            eingeschaltet ist. Der Fehlertext sagt es dann auch — aber hier
+            steht es, BEVOR jemand rätselt. */}
+        <p className="text-xs text-slate-500">
+          Voraussetzung in BTP: Menü <strong>Extras → Tournament Planner
+          Network…</strong> öffnen und das Häkchen <strong>„Enabled"</strong>{" "}
+          setzen. Steht dort ein Passwort, gehört dasselbe in das Feld
+          „BTP-Passwort". Ohne diese Einstellung meldet der Test „Verbindung
+          verweigert".
+        </p>
         <button
           onClick={runTest}
           disabled={test.kind === "testing" || host.trim() === ""}

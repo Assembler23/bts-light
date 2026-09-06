@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.281
+
+- **Hilfe, wenn BTP die Verbindung verweigert.** Meldet BTP „Verbindung
+  verweigert" (meist beim ersten Start auf einem neuen Turnier-PC), nennt
+  der Fehlertext jetzt direkt die Ursache und den Weg: In BTP unter
+  **Extras → Tournament Planner Network…** das Häkchen „Enabled" setzen.
+  Derselbe Hinweis steht im Assistenten unter der BTP-Verbindung und im
+  Handbuch („Was ist BTS Light?").
+
 ## v0.9.278
 
 - **Neu: Aufruf-Uhr am Zähl-Tablet.** Die Kopfzeile zeigt dieselbe Uhr
