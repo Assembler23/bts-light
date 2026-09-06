@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">bts-light Tablet</string>
+    <string name="suche_titel">Suche Turnier-PC im WLAN …</string>
+    <string name="warte_titel">Kein WLAN</string>
+    <string name="erneut_suchen">Erneut suchen</string>
+    <string name="kein_besitzer">Nicht als Gerätebesitzer eingerichtet – Sperre nur weich.</string>
+    <string name="pin_festlegen">Kiosk-PIN festlegen (4–8 Ziffern)</string>
+    <string name="pin_eingeben">Kiosk-PIN</string>
+    <string name="pin_falsch">PIN falsch</string>
+    <string name="menu_titel">bts-light Tablet</string>
+    <string name="menu_neu_suchen">Turnier-PC neu suchen</string>
+    <string name="menu_adresse">Adresse von Hand eingeben</string>
+    <string name="menu_pin">PIN ändern</string>
+    <string name="menu_verlassen">Kiosk verlassen</string>
+    <string name="adresse_titel">IP-Adresse des Turnier-PCs</string>
+    <string name="ok">OK</string>
+    <string name="abbrechen">Abbrechen</string>
 </resources>
