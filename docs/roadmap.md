@@ -458,6 +458,17 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Tablet-Kiosk-App für Android / Fire-Tablets** — Spec:
+  [features/tablet-android-kiosk-app.md](features/tablet-android-kiosk-app.md),
+  ADR [0058](adr/0058-eigene-kiosk-app-statt-fully-kiosk.md).
+  Aus dem Nutzer-Wunsch vom 06.09.2026: Die Zähl-Tablets sollen wie die
+  Pi-Monitore beim Einschalten den Turnier-PC im WLAN selbst finden
+  (gemerkte IP → Subnetz-Scan → mDNS), die Felder-Lobby im Vollbild zeigen
+  und als Gerätebesitzer hart gesperrt sein — ohne Fully-PLUS-Lizenz und ohne
+  Adresse je Tablet. Eigene dünne Kotlin-App in `android/`, APK zum Sideload
+  aus dem Release-Workflow. Suche nur bei Bedarf, kein Hintergrund-Takt.
+  Feldtest-Risiko: Device Owner und WebView-Stand auf Fire OS.
+
 - **Offene Paarungen in der TL-Spielliste** — Spec:
   [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md),
   ADR [0051](adr/0051-offene-spiele-eigene-gedeckelte-liste.md) /
