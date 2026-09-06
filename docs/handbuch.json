@@ -70,6 +70,8 @@
           "titel": "Schiri-Modus am Zähltablett" },
         { "datei": "docs/tablet-kiosk.md", "slug": "tablet-kiosk",
           "titel": "Einstellungs-PIN & Kiosk-Sperre" },
+        { "datei": "docs/tablet-android-app.md", "slug": "tablet-android-app",
+          "titel": "Zähl-Tablet als Kiosk-App (Android)" },
         { "datei": "docs/schiedsrichterzettel.md", "slug": "schiedsrichterzettel",
           "titel": "Schiedsrichterzettel drucken" },
         { "datei": "docs/punktverlauf.md", "slug": "punktverlauf",

@@ -1,6 +1,6 @@
 # Tablet-Kiosk-App für Android / Fire-Tablets — Spezifikation
 
-> Status: **freigegeben 2026-09-06**, Umsetzung offen.
+> Status: **umgesetzt 2026-09-06**, Feldtest offen.
 > Quelle: Nutzer-Wunsch vom 06.09.2026 („Beim Anmachen des Tablets soll er die
 > korrekte IP raussuchen, die Anwendung im Vollbildmodus starten und die
 > Feldauswahl bekommen"). Betroffen: neuer Ordner `android/`, CI/Release,

@@ -140,6 +140,11 @@ Internet**, minimale LTE-Daten, und der Upload läuft über **plain HTTP im LAN*
   bts-light-IP) → lokal `<log_dir>/pi-logs/pi-<serial>.log` → Cloud
   `api/pi_log.php`. Geräte-ID = **Pi-Seriennummer** (global eindeutig → ein
   Cloud-Log je physischem Pi). Frequenz: beim Boot + alle ~5 min.
+- **Fire-Tablets mit der Kiosk-App → PC:** `POST …/pi-log?device=fire-<ANDROID_ID>`
+  → lokal `<log_dir>/pi-logs/fire-<ANDROID_ID>.log` → Cloud `api/pi_log.php`,
+  liegen also neben den `pi-…`-Dateien der Court-Monitore. Frequenz: einmal
+  nach jeder erfolgreichen Suche, danach alle 5 min, solange eine Seite
+  geladen ist (siehe [tablet-android-app.md](tablet-android-app.md)).
 - Alles ist über **„Logs öffnen"** am PC sofort einsehbar (auch offline);
   die Cloud-Kopie liegt unter `storage/{tablet,pi}-logs/` auf badhub.de.
 
