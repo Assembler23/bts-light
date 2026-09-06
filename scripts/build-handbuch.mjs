@@ -23,7 +23,7 @@
 // Charakter der ausgelieferten Software bleibt unberührt.
 
 import { marked } from "marked";
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 
 function arg(name, fallback = null) {
@@ -191,6 +191,19 @@ function linksUmschreiben(html, quelle) {
       : join(dirname(quelle), pfad).replace(/\\/g, "/");
     const ziel = veroeffentlicht.get(roh);
     if (ziel) return `<a href="${ziel.slug}.html${ankerTeil ? "#" + ankerTeil : ""}"${rest}>${text}</a>`;
+
+    // Zwei sehr verschiedene Faelle, die vorher gleich behandelt wurden:
+    //
+    //  a) Die Datei GIBT es, sie ist nur nicht veroeffentlicht (ADR, Spec).
+    //     Dann ist das Entwerten richtig und gewollt.
+    //  b) Die Datei gibt es GAR NICHT — ein Vertipper im Dateinamen. Vorher
+    //     verschwand der Link dabei stillschweigend, und im Handbuch stand
+    //     Text, der aussieht wie ein Verweis ins Nichts. Genau so ist am
+    //     06.09.2026 ein Link auf "schiri-modus.md" durchgerutscht (die Datei
+    //     heisst umpire-mode.md) — gefunden hat ihn ein Mensch, nicht der Test.
+    if (roh.endsWith(".md") && !existsSync(join(basis, roh))) {
+      probleme.push(`${quelle}: Link auf "${pfad}" — diese Datei gibt es nicht (Tippfehler?).`);
+    }
     return text;
   });
 }

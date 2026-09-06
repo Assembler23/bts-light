@@ -202,23 +202,49 @@ pruefe(!a4.includes("GEHEIMNIS-VIER"), "Setext: der ausgeschlossene Abschnitt fe
 pruefe(a4.includes("BLEIBT-STEHEN"), "Setext-H1 beendet den Ausschluss (kein stiller Textverlust)");
 pruefe(a4.includes("BLEIBT-AUCH"), "Setext-H2 beendet den Ausschluss ebenfalls");
 
-// Ein Link, der per ../ aus dem Repo ausbricht, darf niemals als Verweis
-// ueberleben — er wird zu reinem Text entwertet (fail-closed).
+// Zwei Faelle, die vorher gleich aussahen und es nicht sind:
+//
+//  a) Die Zieldatei GIBT es, ist nur nicht veroeffentlicht (ADR, Spec) —
+//     der Link wird still zu Text. Richtig so.
+//  b) Die Zieldatei gibt es GAR NICHT — ein Vertipper. Der muss den Bau
+//     abbrechen. Vorher verschwand er lautlos, und im Handbuch stand ein
+//     Verweis ins Nichts (Befund 06.09.2026: "schiri-modus.md" statt
+//     "umpire-mode.md" war so durchgerutscht).
+mkdirSync(join(fixtureDir, "docs", "adr"), { recursive: true });
+writeFileSync(join(fixtureDir, "docs", "adr", "0001-quality-gate.md"), "# ADR 1\n\nIntern.\n");
 writeFileSync(
   join(fixtureDir, "docs", "a.md"),
   `# T
 
 ## X
 
-[Ausbruch](../../../../etc/passwd.md) und [Intern](adr/0001-quality-gate.md).
+[Intern](adr/0001-quality-gate.md) ist vorhanden, aber nicht veröffentlicht.
 `
 );
 const ziel5 = join(tmp, "out5");
 baue([], ziel5);
 const a5 = readFileSync(join(ziel5, "a.html"), "utf8");
-pruefe(!/<a [^>]*href="[^"]*passwd/.test(a5), "Pfad-Ausbruch per ../ wird zu Text entwertet, nicht verlinkt");
-pruefe(a5.includes("Ausbruch"), "der Linktext bleibt dabei lesbar erhalten");
-pruefe(!/<a [^>]*href="[^"]*0001-quality-gate/.test(a5), "Link auf eine nicht veröffentlichte Datei wird entwertet");
+pruefe(
+  !/<a [^>]*href="[^"]*0001-quality-gate/.test(a5),
+  "Link auf eine vorhandene, aber nicht veröffentlichte Datei wird entwertet"
+);
+pruefe(a5.includes("Intern"), "der Linktext bleibt dabei lesbar erhalten");
+
+writeFileSync(
+  join(fixtureDir, "docs", "a.md"),
+  `# T\n\n## X\n\n[Vertipper](gibt-es-nicht.md) und [Ausbruch](../../../../etc/passwd.md).\n`
+);
+let brach3 = false;
+let meldung3 = "";
+try {
+  baue([], join(tmp, "out6"));
+} catch (e) {
+  brach3 = true;
+  meldung3 = String(e.stderr || "");
+}
+pruefe(brach3, "ein Link auf eine nicht existierende Datei lässt den Bau fehlschlagen");
+pruefe(/gibt-es-nicht\.md/.test(meldung3), "die Meldung nennt die falsche Datei beim Namen");
+pruefe(/passwd/.test(meldung3), "auch ein Pfad-Ausbruch per ../ wird gemeldet, nicht still entwertet");
 
 // ── 4. Das echte Handbuch bauen und die Ausgabe prüfen ────────────────────
 console.log("\nEchter Lauf");
