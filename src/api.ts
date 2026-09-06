@@ -10,6 +10,7 @@ import type {
   DrawInfo,
   FinishedMatchRow,
   MatchTimeline,
+  UpdateInfo,
   FreetextItem,
   HallColorsView,
   HallLayoutConfig,
@@ -59,13 +60,28 @@ export const startSync = (): Promise<void> => invoke("start_sync");
 
 export const stopSync = (): Promise<void> => invoke("stop_sync");
 
-/** Sichert den aufgelaufenen Live-Stand sofort auf die Platte.
- *
- *  Nötig vor jedem Beenden, das nicht über `stopSync` oder das Schließen des
- *  Fensters läuft — heute der Neustart nach einem Auto-Update. Seit der
- *  Entprellung (Spec `monitor-livestand-push`, S2) schreibt nicht mehr jeder
- *  gezählte Punkt selbst. */
-export const flushLiveScores = (): Promise<void> => invoke("flush_live_scores");
+// ── Update im Turnierbetrieb (Spec `update-im-turnierbetrieb`) ──
+// Der ganze Ablauf lebt im Rust-Kern (R1); das Frontend stößt an und liest.
+
+/** Auf ein Update prüfen und es sofort im Hintergrund laden. Kehrt sofort
+ *  zurück — der Fortschritt kommt über `updateInfo`. */
+export const updateCheck = (): Promise<void> => invoke("update_check");
+
+export const updateInfo = (): Promise<UpdateInfo> => invoke("update_info");
+
+/** Geladenes Update jetzt einbauen: sichert den Live-Stand, merkt sich, ob
+ *  die Übertragung lief (Wiederanlauf), und startet den Installer — die App
+ *  endet darin und kommt als neue Version zurück. */
+export const updateInstallNow = (): Promise<void> => invoke("update_install_now");
+
+/** Einbau beim Beenden vormerken bzw. die Vormerkung lösen. */
+export const updateSetInstallOnExit = (an: boolean): Promise<void> =>
+  invoke("update_set_install_on_exit", { an });
+
+/** Wiederanlauf-Marker abholen (einmalig beim Start): `true` = die
+ *  Übertragung lief vor dem Update und soll jetzt von selbst starten. */
+export const takeUpdateResume = (): Promise<boolean> =>
+  invoke("take_update_resume");
 
 export const getStatus = (): Promise<SyncStatus> => invoke("get_status");
 

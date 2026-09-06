@@ -101,6 +101,12 @@ pub struct AppState {
     /// Handle der Slave-Monitor-Brücke (`:8088` → Cloud-Monitor des Masters,
     /// nur im `slave_mode`), falls aktiv.
     pub slave_bridge: Mutex<Option<JoinHandle<()>>>,
+    /// Phasen des Update-Ablaufs + geladenes Paket (Spec
+    /// `update-im-turnierbetrieb`, ADR 0057).
+    pub update: crate::update::UpdateManager,
+    /// Das vom Updater-Plugin geprüfte Update — nur damit lässt sich das
+    /// Paket über den Plugin-Weg (Installer mit Neustart) einbauen.
+    pub update_handle: Mutex<Option<tauri_plugin_updater::Update>>,
 }
 
 fn now_ms() -> u64 {
@@ -1329,6 +1335,226 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
 #[tauri::command]
 pub fn flush_live_scores(state: State<'_, AppState>) {
     state.tablet.flush_scores();
+}
+
+// ─────────────────────── Update im Turnierbetrieb ───────────────────────
+//
+// Spec `docs/features/update-im-turnierbetrieb.md`, ADR 0057. Der Ablauf
+// lebt im Rust-Kern statt im WebView (R1): Prüfen, Laden, Einbauen und der
+// Wiederanlauf-Marker greifen auf denselben Zustand zu wie der Schließpfad
+// in `lib.rs`. Die Tauri-freie Logik steht in `update.rs`.
+
+/// Pfad des Wiederanlauf-Markers im App-Datenverzeichnis.
+fn update_resume_pfad(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join(crate::update::RESUME_FILE)
+}
+
+/// Felder, auf denen gerade ein Spiel steht — die Entscheidungsgrundlage im
+/// Update-Banner („jetzt" oder „beim Beenden").
+fn belegte_felder(state: &AppState) -> usize {
+    state
+        .tablet
+        .overview()
+        .iter()
+        .filter(|c| c.match_id != 0)
+        .count()
+}
+
+/// Prüft auf ein Update und lädt es sofort im Hintergrund. Kehrt sofort
+/// zurück; das Frontend liest den Fortschritt über [`update_info`]. Ein
+/// zweiter Aufruf während Prüfen/Laden/Einbauen ist ein No-op; liegt
+/// dieselbe Version schon bereit, wird sie nicht erneut geladen.
+#[tauri::command]
+pub fn update_check(app: AppHandle, state: State<'_, AppState>) {
+    use crate::update::Phase;
+    // Prüfen + Umschalten atomar (Review 06.09.2026): Auto-Check beim Start
+    // und Klick auf der Wartungsseite laufen sonst beide los und laden zweimal.
+    let Some(bereit) = state.update.begin_check() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        use tauri_plugin_updater::UpdaterExt;
+        let st = app.state::<AppState>();
+        let geprueft = match app.updater() {
+            Ok(u) => u.check().await.map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        let update = match geprueft {
+            Ok(Some(u)) => u,
+            Ok(None) => {
+                if bereit.is_some() {
+                    // Das Manifest bietet die Version nicht mehr an
+                    // (zurückgezogen): Paket und Vormerkung räumen, statt
+                    // ein Update einzubauen, das es offiziell nicht gibt.
+                    tracing::info!("Bereitliegendes Update wurde vom Manifest zurückgezogen");
+                    st.update.paket_verwerfen();
+                    *st.update_handle
+                        .lock()
+                        .expect("Update-Mutex nicht vergiftet") = None;
+                }
+                st.update.set_phase(Phase::Current);
+                return;
+            }
+            Err(e) => {
+                tracing::info!("Update-Prüfung fehlgeschlagen: {e}");
+                // Offline ist in der Halle der Normalfall — ein schon
+                // geladenes Paket bleibt bereit, samt Vormerkung.
+                st.update.set_phase(match bereit {
+                    Some((version, notes)) => Phase::Ready { version, notes },
+                    None => Phase::Error(e),
+                });
+                return;
+            }
+        };
+        if bereit.as_ref().map(|(v, _)| v.as_str()) == Some(update.version.as_str()) {
+            // Paket liegt schon da — nur die Phase zurückdrehen.
+            st.update.set_phase(Phase::Ready {
+                version: update.version.clone(),
+                notes: update.body.clone(),
+            });
+            return;
+        }
+        st.update.set_phase(Phase::Downloading {
+            version: update.version.clone(),
+            notes: update.body.clone(),
+        });
+        tracing::info!("Update v{} gefunden, lade im Hintergrund", update.version);
+        match update.download(|_, _| {}, || {}).await {
+            Ok(bytes) => {
+                tracing::info!(
+                    "Update v{} geladen ({} KB), wartet auf den Einbau",
+                    update.version,
+                    bytes.len() / 1024
+                );
+                *st.update_handle
+                    .lock()
+                    .expect("Update-Mutex nicht vergiftet") = Some(update.clone());
+                st.update
+                    .paket_bereit(update.version.clone(), update.body.clone(), bytes);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Update v{} konnte nicht geladen werden: {e}",
+                    update.version
+                );
+                st.update.set_phase(Phase::Error(e.to_string()));
+            }
+        }
+    });
+}
+
+/// Aktueller Stand des Update-Ablaufs fürs Banner.
+#[tauri::command]
+pub fn update_info(state: State<'_, AppState>) -> crate::update::UpdateInfo {
+    let running = state.status.lock().map(|s| s.running).unwrap_or(false);
+    state.update.info(belegte_felder(&state), running)
+}
+
+/// Baut das geladene Update jetzt ein: Live-Stand sichern, Wiederanlauf-
+/// Marker schreiben, Installer über das Plugin starten (der Prozess endet
+/// darin; der Installer startet die neue Version). Scheitert der Start,
+/// verschwindet der Marker wieder.
+#[tauri::command]
+pub async fn update_install_now(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use crate::update::{Phase, ResumeMarker};
+    let notes = match state.update.phase() {
+        Phase::Ready { notes, .. } => notes,
+        _ => None,
+    };
+    let paket = state.update.paket().ok_or("Kein Update geladen.")?;
+    let handle = state
+        .update_handle
+        .lock()
+        .expect("Update-Mutex nicht vergiftet")
+        .clone()
+        .ok_or("Kein Update geladen.")?;
+    state.update.set_phase(Phase::Installing {
+        version: paket.version.clone(),
+    });
+    state.tablet.flush_scores();
+    let running = state.status.lock().map(|s| s.running).unwrap_or(false);
+    let marker_pfad = update_resume_pfad(&app);
+    let marker = ResumeMarker {
+        running,
+        written_ms: now_ms(),
+        from_version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    if let Err(e) = crate::update::write_resume(&marker_pfad, &marker) {
+        // Nicht fatal: dann muss die Turnierleitung eben selbst starten.
+        tracing::warn!("Wiederanlauf-Marker nicht geschrieben: {e}");
+    }
+    tracing::info!(
+        "Update auf v{} wird eingebaut (Übertragung lief: {running})",
+        paket.version
+    );
+    // Gelingt der Start, kehrt `install` nie zurück (`std::process::exit`).
+    // Beachte: Das Plugin ignoriert den Rückgabewert von `ShellExecuteW` —
+    // blockt ein Virenscanner den Installer, ist die App trotzdem weg; der
+    // Marker bleibt frisch, und der nächste Handstart setzt die Übertragung
+    // fort (Spec, „Offen").
+    if let Err(e) = handle.install(&paket.bytes) {
+        crate::update::remove_resume(&marker_pfad);
+        // Das Paket ist weiterhin gültig — zurück auf „bereit", nicht in
+        // einen Fehlerzustand, der einen zweiten 10-MB-Download erzwänge.
+        // Den Fehlertext zeigt das Frontend aus der abgelehnten Antwort.
+        state.update.set_phase(Phase::Ready {
+            version: paket.version.clone(),
+            notes,
+        });
+        return Err(format!("Update konnte nicht gestartet werden: {e}"));
+    }
+    Ok(())
+}
+
+/// Einbau beim Beenden vormerken (oder die Vormerkung lösen). Nur mit
+/// bereitliegendem Paket.
+#[tauri::command]
+pub fn update_set_install_on_exit(state: State<'_, AppState>, an: bool) -> Result<(), String> {
+    if state.update.set_install_on_exit(an) {
+        Ok(())
+    } else {
+        Err("Kein Update geladen.".to_string())
+    }
+}
+
+/// Liest und löscht den Wiederanlauf-Marker. `true` = die Übertragung lief
+/// vor dem Update und soll jetzt von selbst wieder anlaufen. Das Frontend
+/// ruft das einmal nach dem Laden der Konfiguration und startet dann über
+/// `start_sync` — derselbe Weg wie der Knopf, mit derselben Fehleranzeige.
+#[tauri::command]
+pub fn take_update_resume(app: AppHandle) -> bool {
+    let wieder = crate::update::take_resume(&update_resume_pfad(&app), now_ms());
+    if wieder {
+        tracing::info!("Wiederanlauf nach Update: Übertragung wird automatisch gestartet");
+    }
+    wieder
+}
+
+/// Schließpfad: Ist der Einbau beim Beenden vorgemerkt, legt das den
+/// Installer ab und startet ihn stumm (ohne Neustart der App). Fehler
+/// werden nur geloggt — das Beenden darf daran nicht scheitern.
+///
+/// Die Bytes stammen aus `Update::download()` des Plugins und sind dort
+/// bereits gegen den eingebauten Public Key signaturgeprüft (siehe
+/// `update::installer_ablegen`) — der stille Pfad umgeht die Prüfung nicht.
+pub fn update_beim_beenden(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(paket) = state.update.paket_fuer_beenden() else {
+        return;
+    };
+    let dir = std::env::temp_dir();
+    match crate::update::installer_ablegen(&dir, &paket.version, &paket.bytes)
+        .and_then(|pfad| crate::update::installer_stumm_starten(&pfad))
+    {
+        Ok(()) => tracing::info!(
+            "Update v{} wird beim Beenden still eingebaut",
+            paket.version
+        ),
+        Err(e) => tracing::warn!("Stiller Einbau von v{} gescheitert: {e}", paket.version),
+    }
 }
 
 /// Stoppt die Hintergrund-Polling-Schleife und den Tablet-Server.

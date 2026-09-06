@@ -369,9 +369,10 @@ und rot pulsierend **„Letzter Aufruf"**.
 - **Bekannte Grenzen (vorbestehend, gelten für die TV-Uhr genauso):** Im
   Cloud-Modus rechnet die Uhr Relay-Zeit gegen einen Host-Stempel, eine
   falsch gehende Turnier-PC-Uhr geht 1:1 in die Anzeige ein
-  (Roadmap „Cloud-Aufruf-Uhr driftet"). Nach einem Neustart des
-  Turnier-PCs beginnt der Stempel bei null, weil `on_court_since` nur im
-  RAM liegt.
+  (Roadmap „Cloud-Aufruf-Uhr driftet"). Seit v0.9.279 übernimmt der erste
+  Abgleich nach einem Neustart des Turnier-PCs den persistierten
+  Bruttostart aus `match-times.json` — die Uhr läuft nach einem Update
+  weiter statt bei null zu beginnen (Spec `update-im-turnierbetrieb`).
 
 ## Am Tablet: Pausen, Court-Grafik, Akkustand
 

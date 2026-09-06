@@ -10,6 +10,7 @@ pub mod log_upload;
 pub mod print;
 pub mod sync;
 pub mod tablet;
+pub mod update;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -112,6 +113,11 @@ pub fn run() {
             commands::start_sync,
             commands::stop_sync,
             commands::flush_live_scores,
+            commands::update_check,
+            commands::update_info,
+            commands::update_install_now,
+            commands::update_set_install_on_exit,
+            commands::take_update_resume,
             commands::get_status,
             commands::wifi_status,
             commands::internet_status,
@@ -259,7 +265,12 @@ pub fn run() {
 /// sondern ein Sekundentakt. Ohne diesen letzten Schreibvorgang gingen beim
 /// Beenden bis zu einer Sekunde Spielstand verloren — und anders als bei
 /// einem Absturz gibt es hier keinen Grund, das hinzunehmen.
+///
+/// Ist ein Update „beim Beenden" vorgemerkt, startet hier zusätzlich der
+/// stille Installer (Spec `update-im-turnierbetrieb`) — nach dem Flush,
+/// damit auch der letzte Stand die Installation überlebt.
 fn beenden(app: &tauri::AppHandle) {
     app.state::<commands::AppState>().tablet.flush_scores();
+    commands::update_beim_beenden(app);
     app.exit(0);
 }

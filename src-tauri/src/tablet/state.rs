@@ -508,6 +508,13 @@ pub struct TabletState {
     /// das aktuelle Spiel auf dem Feld steht. Grundlage des Aufruf-Timers; vom
     /// Sync-Loop je Poll abgeglichen.
     on_court_since: RwLock<HashMap<i64, (i64, u64)>>,
+    /// Hat der erste Abgleich nach dem Prozessstart schon stattgefunden?
+    /// Nur dieser erste Lauf darf die Feldstempel aus dem persistierten
+    /// Bruttostart (`match-times.json`) übernehmen — sonst begänne die
+    /// Aufruf-Uhr nach jedem Update bei null (Spec
+    /// `update-im-turnierbetrieb`). Danach gilt wieder: ein Spiel, das neu
+    /// aufs Feld kommt, wird mit „jetzt" gestempelt.
+    on_court_seeded: AtomicBool,
     /// Aktuell für die Siegerehrung gewählte Disziplin (Draw-ID), die der
     /// Sieger-Monitor zeigt. `None` = nichts gewählt (Begrüßungsbild). Vom
     /// Operator in bts-light gesetzt; NICHT rotierend — die Ehrung wird
@@ -2338,13 +2345,40 @@ impl TabletState {
     /// oder gewechseltes Spiel wird mit `now` gestempelt; verlässt ein Spiel
     /// das Feld, fällt sein Eintrag weg. Idempotent – mehrfacher Aufruf mit
     /// gleichem Stand ändert die Zeitstempel nicht.
+    ///
+    /// **Erster Lauf nach dem Prozessstart:** Spiele, die schon auf dem Feld
+    /// stehen, bekommen den persistierten Bruttostart aus `match-times.json`
+    /// statt „jetzt" — so läuft die Aufruf-Uhr nach einem Update oder
+    /// Neustart weiter, statt bei null zu beginnen. Fehlt der Stempel
+    /// (Spiel wurde vor dem Start der App in BTP aufgerufen), bleibt es bei
+    /// „jetzt".
     pub fn reconcile_on_court(&self, oncourt: &HashMap<i64, i64>, now: u64) {
+        // Der Seed zählt erst, wenn der Store ans Turnier gebunden ist
+        // (Review 06.09.2026): Vorher ist er leer — etwa solange eine
+        // unlesbare `match-times.json` noch Ladeversuche bekommt — und der
+        // einmalige erste Lauf wäre folgenlos verbraucht. Ungebunden bleibt
+        // das Flag stehen, der Seed wartet auf den nächsten Poll.
+        let store_gebunden = !self.match_times.tournament().is_empty();
+        let erster_lauf = store_gebunden && !self.on_court_seeded.swap(true, Ordering::SeqCst);
+        // Stempel VOR dem Schreib-Lock holen — der Store hat sein eigenes
+        // Lock, und verschachtelte Locks sind hier unnötig.
+        let seed = |mid: i64| {
+            if erster_lauf {
+                self.match_times.first_assigned_ms(mid)
+            } else {
+                None
+            }
+        };
+        let neu: Vec<(i64, i64, u64)> = oncourt
+            .iter()
+            .map(|(&court_id, &mid)| (court_id, mid, seed(mid).unwrap_or(now)))
+            .collect();
         let mut map = self.on_court_since.write().unwrap();
         // Felder vergessen, auf denen jetzt kein bzw. ein anderes Spiel steht.
         map.retain(|court_id, (mid, _)| oncourt.get(court_id) == Some(mid));
         // Neu hinzugekommene Spiele stempeln (gewechselte sind oben rausgeflogen).
-        for (&court_id, &mid) in oncourt {
-            map.entry(court_id).or_insert((mid, now));
+        for (court_id, mid, ts) in neu {
+            map.entry(court_id).or_insert((mid, ts));
         }
         // Die Aufrufe gehören zur Standzeit: Verlässt ein Spiel das Feld,
         // müssen auch seine Aufrufe vergessen werden. Sonst zeigte dasselbe
@@ -6077,6 +6111,59 @@ mod tests {
         // Feld wird frei: Eintrag verschwindet.
         st.reconcile_on_court(&HashMap::new(), 9000);
         assert_eq!(st.on_court_since_ms(1, 200), None);
+    }
+
+    /// Nach einem Neustart (Update) übernimmt der ERSTE Abgleich den
+    /// persistierten Bruttostart, damit die Aufruf-Uhr weiterläuft; spätere
+    /// Abgleiche stempeln wie gehabt mit „jetzt" (Spec
+    /// `update-im-turnierbetrieb`).
+    #[test]
+    fn on_court_since_uebernimmt_beim_ersten_lauf_den_persistierten_start() {
+        let st = TabletState::default();
+        st.match_times_store().set_tournament("Testturnier");
+        // „Vor dem Neustart": Match 100 seit t=1000 auf dem Feld, Stempel
+        // liegt im Store (der die Datei überlebt hätte).
+        st.match_times_store()
+            .reconcile(&[(100, "HE", "mens_singles", "")], &HashSet::new(), 1000);
+
+        // Erster Abgleich der neuen App-Instanz bei t=60000: alter Stempel.
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(1000));
+
+        // Match 200 hat ebenfalls einen alten Stempel, kommt aber erst im
+        // ZWEITEN Lauf aufs Feld (Feldwechsel im laufenden Betrieb): „jetzt".
+        st.match_times_store()
+            .reconcile(&[(200, "HE", "mens_singles", "")], &HashSet::new(), 2000);
+        st.reconcile_on_court(&HashMap::from([(1, 100), (2, 200)]), 70_000);
+        assert_eq!(st.on_court_since_ms(2, 200), Some(70_000));
+        assert_eq!(st.on_court_since_ms(1, 100), Some(1000), "bleibt");
+    }
+
+    /// Ohne persistierten Stempel bleibt auch der erste Lauf bei „jetzt".
+    #[test]
+    fn on_court_since_erster_lauf_ohne_store_stempel_nimmt_jetzt() {
+        let st = TabletState::default();
+        st.match_times_store().set_tournament("Testturnier");
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000));
+    }
+
+    /// Solange der Store nicht ans Turnier gebunden ist, wird der erste Lauf
+    /// NICHT verbraucht — der Seed greift, sobald die Bindung da ist.
+    #[test]
+    fn on_court_since_seed_wartet_auf_die_store_bindung() {
+        let st = TabletState::default();
+        // Ungebunden: Feld 1 wird mit „jetzt" gestempelt, Flag bleibt frei.
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000));
+
+        st.match_times_store().set_tournament("Testturnier");
+        st.match_times_store()
+            .reconcile(&[(200, "HE", "mens_singles", "")], &HashSet::new(), 1000);
+        // Erster GEBUNDENER Lauf: Match 200 bekommt seinen alten Stempel.
+        st.reconcile_on_court(&HashMap::from([(1, 100), (2, 200)]), 61_000);
+        assert_eq!(st.on_court_since_ms(2, 200), Some(1000));
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000), "bleibt");
     }
 
     /// Reconnect-Erkennung (Turnier-Feedback 18.07.2026): Das Feld merkt

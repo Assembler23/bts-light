@@ -8,9 +8,20 @@ Release veröffentlicht wird und wie das Auto-Update funktioniert.
 - Beim App-Start und über den Dashboard-Button „Nach Update prüfen" fragt
   die App das Manifest `https://badhub.de/download/bts-light/latest.json`
   ab.
-- Ist dort eine höhere Version eingetragen, erscheint oben ein Banner.
-  Klick auf „Herunterladen & neu starten" lädt das signierte Update,
-  installiert es und startet die App neu.
+- Ist dort eine höhere Version eingetragen, lädt die App das signierte
+  Paket **sofort im Hintergrund** und zeigt oben ein Banner, sobald es
+  bereitliegt — mit der Zahl der gerade belegten Felder. Zwei Wege
+  (Spec [features/update-im-turnierbetrieb.md](features/update-im-turnierbetrieb.md),
+  ADR 0057):
+  - **„Jetzt neu starten"**: Live-Stand sichern, Installer starten, App
+    kommt als neue Version zurück. Lief die Übertragung, **startet sie von
+    selbst wieder** (Wiederanlauf-Marker `update-resume.json`, 15 min
+    gültig); die Aufruf-Uhr belegter Felder läuft weiter. Die Lücke beträgt
+    etwa 20 s — Tablets zählen offline weiter, Monitore und TL-Web kommen
+    über ihre Reconnect-Wächter zurück.
+  - **„Beim Beenden einbauen"**: Vormerkung; beim Schließen der App läuft
+    der Installer **stumm** (`/S /UPDATE`, ohne Neustart der App). Die neue
+    Version steht beim nächsten Start bereit.
 - Jedes Update-Artefakt ist mit einem eigenen Tauri-Signaturschlüssel
   signiert (getrennt vom Windows-Code-Signing). Die App akzeptiert nur
   Artefakte, die zum eingebauten Public Key in `tauri.conf.json` passen.
