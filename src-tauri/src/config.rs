@@ -658,8 +658,19 @@ impl Default for AzureTtsConfig {
 pub struct AppConfig {
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
-    /// Opt-in: Diagnose-Logs automatisch an badhub.de hochladen, damit
-    /// Fehler über alle Installationen hinweg auswertbar sind.
+    /// Diagnose-Logs automatisch an badhub.de hochladen, damit Fehler über
+    /// alle Installationen hinweg auswertbar sind.
+    ///
+    /// Bei einer **Neuinstallation** steht der Schalter auf **an** (siehe
+    /// [`AppConfig::neu_installation`]) — sonst erreicht uns von genau den
+    /// Turnieren, bei denen etwas schiefgeht, typischerweise nichts. Der
+    /// Assistent zeigt das Häkchen gesetzt; die Turnierleitung kann es dort
+    /// jederzeit bewusst abwählen (Opt-out).
+    ///
+    /// `#[serde(default)]` (= `false`) gilt nur für Konfigurationsdateien
+    /// **ohne** dieses Feld. Das sind bestehende Installationen aus der Zeit
+    /// vor dem Schalter — die werden bewusst **nicht** stillschweigend
+    /// eingeschaltet, denn ein Update ist keine Neuinstallation.
     #[serde(default)]
     pub upload_logs: bool,
     /// Zufällige, dauerhafte Installations-ID (vom Frontend erzeugt) –
@@ -1302,8 +1313,22 @@ impl AppConfig {
         }
     }
 
-    /// Lädt die Konfiguration aus einer JSON-Datei. Fehlt die Datei, wird
-    /// die Default-Konfiguration zurückgegeben (erster Start).
+    /// Startwerte einer frischen Installation — das, was der Assistent beim
+    /// allerersten Start anzeigt.
+    ///
+    /// Unterscheidet sich bewusst von [`Default::default`]: `default()` ist
+    /// der neutrale Nullwert (und in Tests die Basis für `..Default::default()`),
+    /// `neu_installation()` ist die **Auslieferungs-Einstellung**. Heute
+    /// betrifft das nur [`Self::upload_logs`].
+    pub fn neu_installation() -> Self {
+        Self {
+            upload_logs: true,
+            ..Self::default()
+        }
+    }
+
+    /// Lädt die Konfiguration aus einer JSON-Datei. Fehlt die Datei, werden
+    /// die Startwerte einer Neuinstallation zurückgegeben (erster Start).
     pub fn load_from(path: &std::path::Path) -> Result<AppConfig, ConfigError> {
         match std::fs::read_to_string(path) {
             Ok(json) => {
@@ -1334,7 +1359,9 @@ impl AppConfig {
                 crate::badhub_host::set_aus_push_url(&cfg.badhub.url);
                 Ok(cfg)
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AppConfig::default()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Ok(AppConfig::neu_installation())
+            }
             Err(e) => Err(ConfigError::Read(e)),
         }
     }
@@ -1366,7 +1393,48 @@ mod tests {
     fn missing_file_yields_default_config() {
         let path = std::env::temp_dir().join("bts-light-does-not-exist-xyz.json");
         let _ = std::fs::remove_file(&path);
-        assert_eq!(AppConfig::load_from(&path).unwrap(), AppConfig::default());
+        assert_eq!(
+            AppConfig::load_from(&path).unwrap(),
+            AppConfig::neu_installation()
+        );
+    }
+
+    /// Neuinstallation (keine Config-Datei) sendet Diagnose-Logs — sonst
+    /// erreicht uns von genau den Turnieren, bei denen etwas schiefgeht,
+    /// typischerweise nichts. Abwählbar bleibt es im Assistenten.
+    #[test]
+    fn neuinstallation_sendet_diagnose_logs() {
+        let path = std::env::temp_dir().join("bts-light-neuinstallation-xyz.json");
+        let _ = std::fs::remove_file(&path);
+        assert!(AppConfig::load_from(&path).unwrap().upload_logs);
+        assert!(AppConfig::neu_installation().upload_logs);
+    }
+
+    /// Gegenprobe: Wer den Schalter bewusst abgewählt hat, bleibt abgewählt.
+    /// Eine Config-Datei ist eine getroffene Entscheidung — der Startwert der
+    /// Neuinstallation darf sie nicht überschreiben.
+    #[test]
+    fn abgewaehlter_log_upload_bleibt_aus() {
+        let dir = std::env::temp_dir().join("bts-light-optout-xyz");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("config.json");
+        let mut cfg = AppConfig::neu_installation();
+        cfg.upload_logs = false;
+        cfg.save_to(&path).unwrap();
+        assert!(!AppConfig::load_from(&path).unwrap().upload_logs);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Ein Update ist keine Neuinstallation: Eine Datei aus der Zeit VOR dem
+    /// Schalter (Feld fehlt) wird nicht stillschweigend eingeschaltet.
+    #[test]
+    fn alte_config_ohne_feld_bleibt_aus() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"https://badhub.de/api/live_update.php","password":"","live_url":""}}"#,
+        )
+        .unwrap();
+        assert!(!cfg.upload_logs);
     }
 
     #[test]

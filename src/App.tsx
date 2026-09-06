@@ -56,7 +56,10 @@ function defaultConfig(): AppConfig {
       password: "",
       live_url: "",
     },
-    upload_logs: false,
+    // Neuinstallation: Diagnose-Logs sind AN (Opt-out im Assistenten) —
+    // spiegelt AppConfig::neu_installation() in Rust. Greift nur, solange
+    // load_config() noch nicht geantwortet hat; die Wahrheit kommt von dort.
+    upload_logs: true,
     install_id: "",
     tournament_uuid: "",
     connection_mode: "lan",

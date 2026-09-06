@@ -2135,6 +2135,7 @@ export function SetupWizard({
           <span>
             Diagnose-Logs automatisch an badhub senden – hilft, Fehler zu finden
             und zu beheben. Enthält nur technische Daten (keine Spielernamen).
+            Standardmäßig an; hier jederzeit abwählbar.
           </span>
         </label>
       </section>
