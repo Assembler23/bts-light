@@ -732,8 +732,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Stufe 1 (PR #333).* Stufe 1 veröffentlicht die vorhandene Doku unter
   `badhub.de/download/bts-light/handbuch/`. Gewünscht ist darüber hinaus ein
   Handbuch, in dem **nachlesbar** ist:
-  - was die **Tablets** können — alle Funktionen des Spielzettels, nicht nur
-    der Zähl-Ablauf;
+  - ~~was die **Tablets** können~~ — **erledigt 06.09.2026**:
+    [tablet-bedienen.md](tablet-bedienen.md), aus Sicht der Person am Feld;
   - ~~**was welche Einstellung in der Software bewirkt**~~ — **erledigt
     06.09.2026**: [einstellungen.md](einstellungen.md), alle Abschnitte der
     Einstellungsseite plus Wartung, mit Standardwerten,
@@ -743,9 +743,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     Turnierleitung statt der Architektur, mit den vier häufigsten
     Missverständnissen;
   - was die **Oberflächen** jeweils können (Turnierleitungs-Sicht,
-    Court-Monitor, Info-Monitor, Siegerehrung, Aushang).
+    Court-Monitor, Info-Monitor, Siegerehrung, Aushang) — **offen**, der
+    letzte Punkt der Stufe 2.
 
-  Dazu weiterhin offen: Installation/Erste Schritte, Setup-Wizard, Wartung.
+  Dazu **erledigt 06.09.2026**: [erste-schritte.md](erste-schritte.md)
+  (Installation, Voraussetzung in BTP, erster Start, Beenden vs. Minimieren,
+  Updates im Turnierbetrieb) und die Wartungsseite als Teil von
+  [einstellungen.md](einstellungen.md). Offen bleibt ein Überblick über die
+  Oberflächen (welcher Bildschirm zeigt was).
   **Der Aufwand liegt im Schreiben, nicht in der Technik** — die Strecke
   Markdown → Website → Deploy steht. Neue Kapitel entstehen als normale
   `docs/*.md` und werden in [handbuch.json](handbuch.json) eingetragen; es
