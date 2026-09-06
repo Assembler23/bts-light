@@ -68,10 +68,15 @@ wird nicht in die App gebündelt.
 **URL vorerst unter `/download/bts-light/handbuch/`.** Der Deploy-Benutzer
 `bts-deploy` hat Schreibrecht auf genau zwei Verzeichnisse; ein Ordner direkt
 unter `badhub.de/bts-light/` wäre eine Rechte- und nginx-Änderung am Server
-mit eigener Freigabe gewesen. Nachgemessen am 05.09.2026: der vHost löst
-Verzeichnis-URLs auf `index.html` auf (`/download/bts-light/` → 200), die
-Adresse funktioniert also ohne ausgeschriebenen Dateinamen. Eine schönere URL
-kann später ein nginx-`alias` ohne Dateiumzug nachreichen.
+mit eigener Freigabe gewesen. **Korrektur zur ersten Annahme:** Am 05.09.2026 hatte ich aus
+`/download/bts-light/` → 200 geschlossen, der vHost löse Verzeichnis-URLs
+generell auf `index.html` auf. Das war ein Fehlschluss aus einem Einzelwert.
+Die Messung nach dem ersten echten Deploy (06.09.2026) zeigt:
+`…/handbuch/` → **403**, `…/handbuch/index.html` → 200. Für das
+Elternverzeichnis gibt es eine eigene Regel, für neue Unterordner nicht.
+Deshalb wird `index.html` ausgeschrieben verlinkt. Die kürzere Adresse — und
+später eine echte `/bts-light/`-URL — braucht eine nginx-Änderung mit eigener
+Freigabe.
 
 ## Was der Test hält (`scripts/test-handbuch.mjs`)
 

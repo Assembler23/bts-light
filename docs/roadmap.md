@@ -713,6 +713,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   `docs/*.md` und werden in [handbuch.json](handbuch.json) eingetragen; es
   bleibt bei einem Doku-Ort. Entscheidungen und Grenzen:
   [features/handbuch-website.md](features/handbuch-website.md).
+- **Handbuch: kürzere Adresse (nginx).** *Status: zurückgestellt · Priorität:
+  niedrig · Trigger: Messung nach dem ersten Deploy, 06.09.2026.* Heute muss
+  `…/download/bts-light/handbuch/index.html` ausgeschrieben verlinkt werden —
+  die Verzeichnis-URL liefert 403 (`index`-Direktive greift für den neuen
+  Unterordner nicht). Eine nginx-Änderung (`index index.php index.html;` für
+  diesen Pfad, oder ein `alias` von `/bts-light/`) macht daraus eine
+  vorzeigbare Adresse. **Server-Änderung mit eigener Freigabe** — über
+  `/server-change`, nicht nebenbei.
 - **Handbuch: Screenshots.** *Status: zurückgestellt · Priorität: niedrig ·
   Trigger: erst wenn die Textfassung von Stufe 2 steht.* Für Vollabdeckung
   rund 45–60 Aufnahmen. Die Web-Oberflächen (Tablet, TL-Web, Monitor, Aushang,
