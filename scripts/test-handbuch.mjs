@@ -230,6 +230,23 @@ pruefe(
 );
 pruefe(a5.includes("Intern"), "der Linktext bleibt dabei lesbar erhalten");
 
+// Ein Link auf ein Verzeichnis gehoert dem Web, nicht dem Repo: "../" zeigt
+// vom Handbuch aus auf die Download-Seite. Wird er entwertet, fuehrt der
+// wichtigste Weiterweg der Installationsseite ins Nichts — und weil er nicht
+// auf .md endet, meldete das vorher niemand (Befund 06.09.2026).
+writeFileSync(
+  join(fixtureDir, "docs", "a.md"),
+  `# T\n\n## X\n\n[Downloads](../) und [Quellcode](../src/io/announcer.ts).\n`
+);
+const ziel7 = join(tmp, "out7");
+baue([], ziel7);
+const a7 = readFileSync(join(ziel7, "a.html"), "utf8");
+pruefe(/<a href="\.\.\/"/.test(a7), "ein Link auf ein Verzeichnis (../) bleibt ein Link");
+pruefe(
+  !/<a [^>]*href="[^"]*announcer\.ts/.test(a7),
+  "ein Quellcode-Link wird weiterhin entwertet (auf badhub.de liegt kein Quellcode)"
+);
+
 writeFileSync(
   join(fixtureDir, "docs", "a.md"),
   `# T\n\n## X\n\n[Vertipper](gibt-es-nicht.md) und [Ausbruch](../../../../etc/passwd.md).\n`

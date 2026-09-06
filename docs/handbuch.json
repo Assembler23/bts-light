@@ -19,8 +19,13 @@
   "aufgaben": [
     {
       "frage": "Zum ersten Mal einrichten",
-      "wo": "BTP verbinden, Turnier wählen, Tablets anbinden",
-      "ziel": "einstellungen.html"
+      "wo": "Von der Installation bis zum laufenden Liveticker",
+      "ziel": "erste-schritte.html"
+    },
+    {
+      "frage": "BTP verbindet sich nicht",
+      "wo": "Tournament Planner Network einschalten",
+      "ziel": "erste-schritte.html#schritt-1-das-netzwerk-in-btp-einschalten"
     },
     {
       "frage": "Ein Tablet mit einem Feld verbinden",
@@ -83,6 +88,7 @@
       "name": "Turnierleitung",
       "beschreibung": "Du richtest ein, vergibst Felder und hältst den Betrieb am Laufen.",
       "seiten": [
+        "erste-schritte",
         "einstellungen",
         "turnierleitung",
         "vorbereitung",
@@ -135,6 +141,11 @@
             "Projektstruktur",
             "Arbeitsweise"
           ]
+        },
+        {
+          "datei": "docs/erste-schritte.md",
+          "slug": "erste-schritte",
+          "titel": "Installation und erste Schritte"
         }
       ]
     },

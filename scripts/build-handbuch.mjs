@@ -203,7 +203,19 @@ function linksUmschreiben(html, quelle) {
     //     heisst umpire-mode.md) — gefunden hat ihn ein Mensch, nicht der Test.
     if (roh.endsWith(".md") && !existsSync(join(basis, roh))) {
       probleme.push(`${quelle}: Link auf "${pfad}" — diese Datei gibt es nicht (Tippfehler?).`);
+      return text;
     }
+
+    // Ein Link auf ein VERZEICHNIS ist nie ein Quellcode-Verweis, sondern ein
+    // Link fuers Web — "../" zeigt vom Handbuch aus auf die Download-Seite.
+    // Der wurde vorher stillschweigend entwertet, und ausgerechnet der
+    // wichtigste Weiterweg der Installationsseite fuehrte ins Nichts (Befund
+    // 06.09.2026). Er wird deshalb unveraendert durchgereicht.
+    //
+    // Quellcode-Links (../src-tauri/…, ../src/…) bleiben entwertet: Auf
+    // badhub.de liegt kein Quellcode, sie liefen dort auf 404.
+    if (pfad.endsWith("/") || /^\.\.?$/.test(pfad)) return all;
+
     return text;
   });
 }
