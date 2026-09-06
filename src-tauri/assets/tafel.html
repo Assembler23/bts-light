@@ -48,10 +48,40 @@
       top: 50%; height: .4vmin; background: rgba(0,0,0,.55); }
     .zahl { font-size: min(40vw, 60vmin); font-weight: 900; line-height: 1;
       font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    /* Rand je Seite: Aufschlag-Punkt (nebeneinander: unter der Kachel) und
+       der Satzstand der Seite (nur übereinander sichtbar, s. u.). */
+    .rand { display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 2vmin; }
+    .saetze-seite { display: none; font-size: 9vmin; font-weight: 800;
+      color: #fbbf24; line-height: 1; }
     .aufschlag { width: 4vmin; height: 4vmin; border-radius: 50%;
       background: transparent; }
     .seite.serve .aufschlag { background: #fbbf24;
       box-shadow: 0 0 2.5vmin rgba(251,191,36,.8); }
+    /* Übereinander (Bediener sitzt HINTER dem Feld, Spec-Erweiterung vom
+       06.09.2026): oben die ferne Seite (= „rechts"), unten die nahe
+       (= „links"); die Reihenfolge dreht nur die CSS-`order`, die Seiten-
+       logik bleibt dieselbe. Der gemeinsame Satzstand oben entfällt, weil
+       „1 : 0" von links nach rechts nichts mehr über oben/unten sagt —
+       stattdessen steht der Satzstand je Seite im Rand neben der Kachel.
+       Ziffernhöhe: „88" ist bei font-weight 900 ~1,16 em breit (beide
+       Ziffern zusammen, gemessen) und muss in die Kachel (85vw) passen →
+       70vw; die Höhe deckelt bei 40vh je Kachel (halbe Höhe minus Rand,
+       line-height 1). Im Hochformat eines 10-Zoll-Tablets sind das
+       ~64 vmin — deutlich über dem Spec-Minimum von 35 vmin. */
+    #tafel-view.uebereinander { padding: 8vmin 0 2vh; box-sizing: border-box; }
+    #tafel-view.uebereinander > .saetze { display: none; }
+    #tafel-view.uebereinander .punkte { flex: 1 1 0; min-height: 0;
+      flex-direction: column; gap: 2vh; padding: 0 2vw; }
+    #tafel-view.uebereinander .seite { flex: 1 1 0; min-height: 0;
+      flex-direction: row; width: 100%; gap: 1vw; }
+    #tafel-view.uebereinander #seite-rechts { order: 0; }
+    #tafel-view.uebereinander #seite-links { order: 1; }
+    #tafel-view.uebereinander .kachel { flex: 1 1 0; min-width: 0;
+      height: 100%; padding: 0; }
+    #tafel-view.uebereinander .zahl { font-size: min(70vw, 40vh); }
+    #tafel-view.uebereinander .rand { flex: 0 0 10vw; }
+    #tafel-view.uebereinander .saetze-seite { display: block; }
     .feld { position: absolute; top: 2vmin; left: 3vmin; font-size: 4vmin;
       font-weight: 700; opacity: .55; }
     /* Leerlauf: kein Spiel → Feldbezeichnung groß. */
@@ -133,11 +163,11 @@
       <div class="punkte">
         <div class="seite" id="seite-links">
           <div class="kachel"><span class="zahl" id="punkte-links">0</span></div>
-          <span class="aufschlag" aria-hidden="true"></span>
+          <div class="rand"><span class="saetze-seite" id="saetze-seite-links">0</span><span class="aufschlag" aria-hidden="true"></span></div>
         </div>
         <div class="seite" id="seite-rechts">
           <div class="kachel"><span class="zahl" id="punkte-rechts">0</span></div>
-          <span class="aufschlag" aria-hidden="true"></span>
+          <div class="rand"><span class="saetze-seite" id="saetze-seite-rechts">0</span><span class="aufschlag" aria-hidden="true"></span></div>
         </div>
       </div>
     </div>
@@ -271,6 +301,8 @@
     tafelFeld: document.getElementById("tafel-feld"),
     saetzeL: document.getElementById("saetze-links"),
     saetzeR: document.getElementById("saetze-rechts"),
+    saetzeSeiteL: document.getElementById("saetze-seite-links"),
+    saetzeSeiteR: document.getElementById("saetze-seite-rechts"),
     seiteL: document.getElementById("seite-links"),
     seiteR: document.getElementById("seite-rechts"),
     punkteL: document.getElementById("punkte-links"),
@@ -315,6 +347,12 @@
    *  - `retired`: der unvollständige letzte Satz steht groß, zählt aber nicht.
    *  - `spiegel` tauscht links/rechts **nach** der Seitenbestimmung — wirkt
    *    also auch ohne `teamOnSide` (Tafel steht dem Schiedsrichter gegenüber).
+   *  - **Anordnung** (06.09.2026): Wer hinter dem Feld sitzt, sieht die Teams
+   *    nicht links/rechts, sondern vorn/hinten. Dann stehen die Punkte
+   *    übereinander: `links` → **unten** (nah), `rechts` → **oben** (fern);
+   *    `spiegel` dreht auch das. `auto` folgt der Ausrichtung des Geräts
+   *    (Hochformat → übereinander), `nebeneinander`/`uebereinander` sind die
+   *    Hand-Übersteuerung aus der Anzeige-Hülle (`?anordnung=`).
    */
   function zahl(v) {
     const n = Number(v);
@@ -382,6 +420,37 @@
     return { links, rechts, entschieden: finished };
   }
 
+  /** Erlaubte Werte für `?anordnung=` — alles andere gilt als `auto`. */
+  const ANORDNUNGEN = ["auto", "nebeneinander", "uebereinander"];
+
+  /** @param {unknown} roh Wert aus der Adresse (oder gemerkt). */
+  function anordnungAusQuery(roh) {
+    return typeof roh === "string" && ANORDNUNGEN.includes(roh) && roh !== "auto" ? roh : "auto";
+  }
+
+  /**
+   * Welche Anordnung die Tafel wirklich zeichnet.
+   * @param {unknown} anordnung `auto` | `nebeneinander` | `uebereinander`.
+   * @param {boolean} hochformat Gerät steht hoch (Breite < Höhe).
+   * @returns {"nebeneinander"|"uebereinander"}
+   */
+  function effektiveAnordnung(anordnung, hochformat) {
+    const a = anordnungAusQuery(anordnung);
+    if (a !== "auto") return a;
+    return hochformat ? "uebereinander" : "nebeneinander";
+  }
+  // ── Ende Inline-Kopie ──
+
+  // Anordnung der Punkte (Bediener hinter dem Feld → übereinander). Aus der
+  // Hülle als ?anordnung=nebeneinander|uebereinander; ohne Angabe `auto`
+  // (folgt der Geräte-Ausrichtung). Im Gerätemodus wie `spiegel` ignoriert —
+  // dort gilt nur `auto`, ein hochkant montierter TV bekommt so trotzdem
+  // die passende Anordnung. Steht hinter der Inline-Kopie, weil
+  // `ANORDNUNGEN` dort eine `const` ist (keine Hoisting-Zone davor).
+  var ANORDNUNG = MODE !== "device"
+    ? anordnungAusQuery(new URLSearchParams(location.search).get("anordnung"))
+    : "auto";
+
   // ─── Tafel-Ansicht ───────────────────────────────────────────────────
   function renderTafel(state) {
     var m = state.match;
@@ -391,10 +460,29 @@
     els.punkteR.textContent = String(t.rechts.punkte);
     els.saetzeL.textContent = String(t.links.saetze);
     els.saetzeR.textContent = String(t.rechts.saetze);
+    els.saetzeSeiteL.textContent = String(t.links.saetze);
+    els.saetzeSeiteR.textContent = String(t.rechts.saetze);
     els.seiteL.classList.toggle("serve", t.links.aufschlag);
     els.seiteR.classList.toggle("serve", t.rechts.aufschlag);
     els.tafelFeld.textContent = feldText(state);
   }
+
+  // Anordnung anwenden: `auto` hört auf die Ausrichtung des Geräts (Drehen
+  // des Tablets), eine Hand-Übersteuerung aus der Hülle bleibt fest. Die
+  // Media-Query ist die Wahrheit; `resize` fängt Browser ohne `change`-Event.
+  var hochformatMq = window.matchMedia ? window.matchMedia("(orientation: portrait)") : null;
+  function hochformat() {
+    return hochformatMq ? hochformatMq.matches : window.innerHeight > window.innerWidth;
+  }
+  function anordnungAnwenden() {
+    els.tafelView.classList.toggle("uebereinander", effektiveAnordnung(ANORDNUNG, hochformat()) === "uebereinander");
+  }
+  if (hochformatMq) {
+    if (hochformatMq.addEventListener) hochformatMq.addEventListener("change", anordnungAnwenden);
+    else if (hochformatMq.addListener) hochformatMq.addListener(anordnungAnwenden);
+  }
+  window.addEventListener("resize", anordnungAnwenden);
+  anordnungAnwenden();
 
   // Feldbezeichnung; im Relay ohne verbundenen Host ist das Label leer →
   // CourtID aus Pfad/State, damit die Leerlauf-Seite nie leer bleibt.

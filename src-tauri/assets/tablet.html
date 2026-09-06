@@ -600,6 +600,66 @@
     .rally-body svg { width: 100%; height: auto; display: block; }
     .rally-note { font-size: .75rem; color: var(--muted); margin-top: .5rem; }
 
+    /* ─── Anordnung „übereinander" (Bediener sitzt HINTER dem Feld) ─────
+       Spec-Erweiterung zaehltafel-anzeige-huelle vom 06.09.2026. Die Seite
+       „rechts" wird OBEN (fern), „links" UNTEN (nah): Plus-Knöpfe als
+       Zeilen oben/unten, der Court hochkant mit dem Netz waagerecht, die
+       vier Zellen per `order` so gedreht, dass die rechte Hand jedes
+       Spielers wieder stimmt (rechter Service-Court = leftBottom unten
+       rechts, rightTop oben links). Die Zähllogik bleibt in links/rechts;
+       nur Darstellung und Wortwahl („vorne/hinten") ändern sich.
+       Spezifität `.play.uebereinander` schlägt die Hochformat-Regel unten. */
+    .play.uebereinander {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr 3fr 1fr;
+    }
+    .play.uebereinander .plus-right { order: 0; }
+    .play.uebereinander .center { order: 1; }
+    .play.uebereinander .plus-left { order: 2; }
+    .play.uebereinander .plus-btn { flex-direction: row; gap: 1rem; padding: .25rem 1rem; }
+    .play.uebereinander .plus-btn .plus { font-size: 3.5rem; }
+    .play.uebereinander .plus-btn .label { margin-top: 0; font-size: 1rem; }
+    /* Satzstand: oben (fern) über unten (nah), Doppelpunkt entfällt. */
+    .play.uebereinander .current-score { flex-direction: column; gap: 0; align-items: center;
+      font-size: clamp(1.6rem, 6vmin, 3rem); line-height: 1.05; }
+    .play.uebereinander .current-score .right-score { order: 0; }
+    .play.uebereinander .current-score .colon { display: none; }
+    .play.uebereinander .current-score .left-score { order: 1; }
+    /* Court hochkant: 61 × 134, größtmöglich in beide Achsen. */
+    .play.uebereinander .court {
+      width: min(100cqw, calc(100cqh * 61 / 134));
+      aspect-ratio: 61 / 134;
+    }
+    .play.uebereinander .court-lines { display: none; }
+    .play.uebereinander .court-lines-hoch { display: block; }
+    .play.uebereinander #cell-rightTop    { order: 0; }
+    .play.uebereinander #cell-rightBottom { order: 1; }
+    .play.uebereinander #cell-leftTop     { order: 2; }
+    .play.uebereinander #cell-leftBottom  { order: 3; }
+    /* Federball im Innenwinkel (Netz + Mittellinie) der gedrehten Zellen,
+       Korken zum diagonal gegenüberliegenden Aufschlagfeld: rightTop (oben
+       links) → leftBottom (unten rechts) = Südost usw. */
+    .play.uebereinander .court #cell-rightTop.server::after    { top: auto; left: auto; bottom: .35rem; right: .35rem; transform: rotate(45deg); }
+    .play.uebereinander .court #cell-rightBottom.server::after { top: auto; right: auto; bottom: .35rem; left: .35rem; transform: rotate(135deg); }
+    .play.uebereinander .court #cell-leftTop.server::after     { bottom: auto; left: auto; top: .35rem; right: .35rem; transform: rotate(-45deg); }
+    .play.uebereinander .court #cell-leftBottom.server::after  { bottom: auto; right: auto; top: .35rem; left: .35rem; transform: rotate(-135deg); }
+    .play.uebereinander .court .team-label-left { top: auto; bottom: .25rem; }
+    /* Die Zellen sind hochkant schmal: Namen an vmin statt vw deckeln. */
+    .play.uebereinander .court .cell .player-name { font-size: clamp(.8rem, 2.2vmin, 1.6rem); }
+    .court-lines-hoch { display: none; }
+    /* Übereinander im QUERFORMAT (Hand-Übersteuerung): Satzstand und Court
+       untereinander ließen dem hochkanten Court nur einen Streifen. Darum
+       stehen Satzstand (und ggf. Schiri-Leiste) links neben dem Court, der
+       so die ganze Höhe der Mittelzeile bekommt. */
+    @media (orientation: landscape) {
+      .play.uebereinander .center { flex-direction: row; align-items: stretch; justify-content: center; gap: 1rem; }
+      .play.uebereinander .score-board { align-self: center; }
+      .play.uebereinander .umpire-bar { align-self: center; max-width: 30vw; }
+      /* Rest der Breite an den Court-Container (container-type: size braucht
+         eine Breite, sonst rechnet cqw mit 0). */
+      .play.uebereinander .court-wrapper { flex: 1 1 0; min-width: 0; }
+    }
+
     @media (orientation: portrait) {
       /* Hochformat: Buttons sehr schmal — vmin = Breite, deshalb Satzstand
          und Leerlauf-Feldnummer hier zusätzlich deckeln, damit sie die
@@ -670,7 +730,7 @@
     <div id="play-view" class="play" style="display:none">
       <div class="plus-btn plus-left" id="plus-left">
         <div class="plus">+1</div>
-        <div class="label">Links</div>
+        <div class="label" id="plus-left-label">Links</div>
       </div>
 
       <div class="center">
@@ -725,6 +785,19 @@
               <!-- Netz -->
               <line class="net"  x1="67"    y1="0"    x2="67"   y2="61" />
             </svg>
+            <!-- Dieselben Linien hochkant (Netz waagerecht) für die Anordnung
+                 „übereinander"; nur eine der beiden Zeichnungen ist sichtbar. -->
+            <svg class="court-lines court-lines-hoch" viewBox="0 0 61 134" preserveAspectRatio="none">
+              <line class="line" x1="0"  y1="7.6"   x2="61" y2="7.6" />
+              <line class="line" x1="0"  y1="126.4" x2="61" y2="126.4" />
+              <line class="line" x1="0"  y1="47.2"  x2="61" y2="47.2" />
+              <line class="line" x1="0"  y1="86.8"  x2="61" y2="86.8" />
+              <line class="line" x1="4.6"  y1="0" x2="4.6"  y2="134" />
+              <line class="line" x1="56.4" y1="0" x2="56.4" y2="134" />
+              <line class="line" x1="30.5" y1="0"    x2="30.5" y2="47.2" />
+              <line class="line" x1="30.5" y1="86.8" x2="30.5" y2="134" />
+              <line class="net"  x1="0" y1="67" x2="61" y2="67" />
+            </svg>
             <div class="team-label-left" id="team-label-left"></div>
             <div class="team-label-right" id="team-label-right"></div>
             <!-- 4 Service-Courts: leftTop, rightTop, leftBottom, rightBottom -->
@@ -738,7 +811,7 @@
 
       <div class="plus-btn plus-right" id="plus-right">
         <div class="plus">+1</div>
-        <div class="label">Rechts</div>
+        <div class="label" id="plus-right-label">Rechts</div>
       </div>
     </div>
   </div>
@@ -942,6 +1015,9 @@
     <!-- Öffnet die Anzeige-Hülle mit der Zähltafel dieses Felds — für ein
          zweites Tablet am Netz (Spec zaehltafel-anzeige-huelle). -->
     <div class="opt settings-wide" id="settings-anzeige">Anzeige (nur Spielstand)</div>
+    <!-- Anordnung der Zählansicht: nebeneinander (seitlich am Netz) oder
+         übereinander (hinter dem Feld); automatisch = nach Ausrichtung. -->
+    <div class="opt settings-wide" id="settings-anordnung">Anordnung: automatisch</div>
     <div class="settings-section">Schiedsrichter</div>
     <div class="opt settings-wide" id="settings-umpire">Schiri-Modus: aus</div>
     <div class="opt settings-wide" id="settings-fullscreen">Vollbild ein/aus</div>
@@ -1302,6 +1378,41 @@ const STATE = {
 // Schiri-Modus ist eine Tablet-Operator-Einstellung – pro Feld lokal gespeichert.
 const UMPIRE_KEY = `badhub.tablet.umpire.${COURT_ID}`;
 try { STATE.umpireMode = localStorage.getItem(UMPIRE_KEY) === '1'; } catch { /* ignore */ }
+
+// ── Anordnung der Zählansicht (Spec-Erweiterung 06.09.2026) ─────────────
+// Wer hinter dem Feld sitzt, sieht die Teams vorn/hinten statt links/rechts.
+// `auto` folgt der Geräte-Ausrichtung (Hochformat → übereinander), die beiden
+// anderen Werte übersteuern von Hand. Geräteeinstellung (nicht je Feld): Sie
+// beschreibt, wo das Tablet steht, nicht das Spiel.
+// Inline-Kopie von `anordnungAusQuery`/`effektiveAnordnung` aus
+// `src/io/tafelSeiten.mjs` (getestet in scripts/test-tafel-seiten.mjs) —
+// Änderungen dort und hier gemeinsam.
+const ANORDNUNGEN = ["auto", "nebeneinander", "uebereinander"];
+function anordnungAusQuery(roh) {
+  return typeof roh === "string" && ANORDNUNGEN.includes(roh) && roh !== "auto" ? roh : "auto";
+}
+function effektiveAnordnung(anordnung, hochformat) {
+  const a = anordnungAusQuery(anordnung);
+  if (a !== "auto") return a;
+  return hochformat ? "uebereinander" : "nebeneinander";
+}
+const ANORDNUNG_KEY = 'badhub.tablet.anordnung';
+const ANORDNUNG_LABEL = { auto: 'automatisch', nebeneinander: 'nebeneinander (links–rechts)', uebereinander: 'übereinander (vorn–hinten)' };
+let anordnungWahl = 'auto';
+try { anordnungWahl = anordnungAusQuery(localStorage.getItem(ANORDNUNG_KEY)); } catch { /* ignore */ }
+const hochformatMq = window.matchMedia ? window.matchMedia('(orientation: portrait)') : null;
+function hochformat() {
+  return hochformatMq ? hochformatMq.matches : window.innerHeight > window.innerWidth;
+}
+/** Zeichnet die Zählansicht gerade übereinander (vorn/hinten)? */
+function uebereinander() {
+  return effektiveAnordnung(anordnungWahl, hochformat()) === 'uebereinander';
+}
+/** Wortwahl für eine Seite: links/rechts bzw. vorne/hinten (unten/oben). */
+function seiteWort(side) {
+  if (uebereinander()) return side === 'left' ? 'vorne' : 'hinten';
+  return side === 'left' ? 'links' : 'rechts';
+}
 // Karten/Verwarnungen werden NUR lokal protokolliert (pro Feld, an die matchId
 // gebunden → bei neuem Match leer). Kein Versand an Server/badhub.
 const CARDS_KEY = `badhub.tablet.cards.${COURT_ID}`;
@@ -1388,6 +1499,9 @@ const els = {
   settingsFullscreen: document.getElementById('settings-fullscreen'),
   settingsClose: document.getElementById('settings-close'),
   settingsUmpire: document.getElementById('settings-umpire'),
+  settingsAnordnung: document.getElementById('settings-anordnung'),
+  plusLeftLabel: document.getElementById('plus-left-label'),
+  plusRightLabel: document.getElementById('plus-right-label'),
   umpireBar: document.getElementById('umpire-bar'),
   umpireBadge: document.getElementById('umpire-badge'),
   umpireSay: document.getElementById('umpire-say'),
@@ -3620,10 +3734,17 @@ function renderSetupModal() {
   renderScorekeeperHint(STATE.setup === 'choose-side');
   renderOfficialsHint(STATE.setup === 'choose-side');
   if (STATE.setup === 'choose-side') {
-    setSetupText(
-      'Welches Team steht links?', 'Which team is on the left?',
-      'Tippe das Team an, das auf der linken Court-Hälfte spielt.',
-      'Tap the team playing on the left half of the court.');
+    if (uebereinander()) {
+      setSetupText(
+        'Welches Team steht vorne (unten)?', 'Which team is on the near side?',
+        'Tippe das Team an, das auf der Court-Hälfte vor dir spielt.',
+        'Tap the team playing on the half of the court nearest to you.');
+    } else {
+      setSetupText(
+        'Welches Team steht links?', 'Which team is on the left?',
+        'Tippe das Team an, das auf der linken Court-Hälfte spielt.',
+        'Tap the team playing on the left half of the court.');
+    }
     const teamAName = STATE.match.teamA.map(p => p.name).join(' / ');
     const teamBName = STATE.match.teamB.map(p => p.name).join(' / ');
     els.setupOptions.innerHTML =
@@ -3851,6 +3972,7 @@ function setPlayerClub(cell, p) {
 }
 
 function render() {
+  anordnungAnwenden();
   // Setup-Modal hat Priorität
   renderSetupModal();
   renderBreak();
@@ -4524,7 +4646,7 @@ function openCardPlayerView() {
   if (!STATE.match) return;
   els.cardPlayerList.textContent = '';
   const sideLabel = (teamKey) =>
-    !STATE.teamOnSide ? '' : (STATE.teamOnSide[teamKey] === 'left' ? 'links' : 'rechts');
+    !STATE.teamOnSide ? '' : seiteWort(STATE.teamOnSide[teamKey]);
   ['a', 'b'].forEach(teamKey => {
     const arr = teamKey === 'a' ? STATE.match.teamA : STATE.match.teamB;
     arr.forEach((p, index) => {
@@ -4653,6 +4775,36 @@ els.cardRed.addEventListener('click', () => {
   applyCard('red');
 });
 els.cardBlack.addEventListener('click', () => applyCard('black'));
+
+// Anordnung auf die Zählansicht anwenden: Klasse am Spielbereich, Beschrif-
+// tung der Plus-Knöpfe, Menütext. Läuft bei jedem render() (billig) und beim
+// Drehen des Geräts — dann auch der Seitenwahl-Text, falls er gerade offen ist.
+function anordnungAnwenden() {
+  const ueber = uebereinander();
+  els.playView.classList.toggle('uebereinander', ueber);
+  els.plusLeftLabel.textContent = ueber ? 'Vorne' : 'Links';
+  els.plusRightLabel.textContent = ueber ? 'Hinten' : 'Rechts';
+  els.settingsAnordnung.textContent = 'Anordnung: ' + ANORDNUNG_LABEL[anordnungWahl];
+}
+// render() ruft anordnungAnwenden() selbst; `resize` fängt Browser ohne
+// `change`-Ereignis und ist sonst harmlos doppelt (idempotent).
+function beiDrehung() { render(); }
+if (hochformatMq) {
+  if (hochformatMq.addEventListener) hochformatMq.addEventListener('change', beiDrehung);
+  else if (hochformatMq.addListener) hochformatMq.addListener(beiDrehung);
+}
+window.addEventListener('resize', beiDrehung);
+anordnungAnwenden();
+
+// Anordnung reihum: automatisch → nebeneinander → übereinander → …
+function naechsteAnordnung() {
+  anordnungWahl = ANORDNUNGEN[(ANORDNUNGEN.indexOf(anordnungWahl) + 1) % ANORDNUNGEN.length];
+  try { localStorage.setItem(ANORDNUNG_KEY, anordnungWahl); } catch { /* ignore */ }
+  tlog('info', 'anordnung', { wahl: anordnungWahl });
+  closeSettings();
+  render();
+}
+els.settingsAnordnung.addEventListener('click', naechsteAnordnung);
 
 function toggleUmpireMode() {
   STATE.umpireMode = !STATE.umpireMode;

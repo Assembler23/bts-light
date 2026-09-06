@@ -286,6 +286,107 @@ Zuweisung:
 - **Wake-Lock im LAN-http** fehlt technisch; ohne Geräteeinstellung geht das Display aus.
 - Rollback: ältere Version installierbar, keine Config-Migration nötig.
 
+## Erweiterung 06.09.2026 — Anordnung für den Platz hinter dem Feld
+
+**Problem:** Der Bediener der Zähltafel sitzt oft nicht am Schiedsrichterstuhl
+(seitlich am Netz), sondern **hinter dem Feld** an der Grundlinie. Von dort
+sind die Teams nicht links/rechts, sondern **vorn/hinten** — zwei Kacheln
+nebeneinander sagen ihm nichts.
+
+**Lösung:** Die Tafel kennt zwei Anordnungen der Punkte:
+
+- `nebeneinander` (bisher): links/rechts vom Schiedsrichterstuhl aus,
+  gemeinsamer Satzstand `1 : 0` klein darüber.
+- `uebereinander` (neu): **oben die ferne Seite (= „rechts"), unten die nahe
+  (= „links")**. Der gemeinsame Satzstand entfällt, weil ein `1 : 0` von
+  links nach rechts nichts mehr über oben/unten aussagt; stattdessen steht der
+  Satzstand je Seite gelb im Rand neben der Kachel, darunter der
+  Aufschlag-Punkt. „Seiten spiegeln" dreht auch oben/unten — wer am anderen
+  Ende sitzt, spiegelt.
+
+**Wahl der Anordnung** (`?anordnung=`, nur fester Modus wie `?spiegel=`):
+
+- `auto` (Standard, kein Query-Wert): folgt der Ausrichtung des Geräts —
+  **Hochformat → übereinander, Querformat → nebeneinander**. Drehen des
+  Tablets schaltet live um (`matchMedia("(orientation: portrait)")` +
+  `resize`), ohne Neuladen.
+- `nebeneinander` / `uebereinander`: Hand-Übersteuerung aus der
+  Anzeige-Hülle. Menüpunkt „Anordnung: automatisch / nebeneinander
+  (links–rechts) / übereinander (vorn–hinten)" reihum, nur beim Layout
+  Zähltafel, gemerkt je Gerät (`localStorage`, `badhub.anzeige.anordnung`)
+  wie die Spiegelung. Die Allowlist in `anzeigeZiel.zielPfad` lässt nur die
+  beiden Werte in die Adresse; `auto` und Unfug schreiben nichts.
+- Gerätemodus (TV per Zuweisung): Query wird wie `spiegel` ignoriert, es gilt
+  `auto` — ein hochkant montierter TV bekommt so trotzdem die passende Anordnung.
+
+**Reine Funktionen** in `src/io/tafelSeiten.mjs` (Inline-Kopie in `tafel.html`):
+`ANORDNUNGEN`, `anordnungAusQuery(roh)` → `auto` bei allem Unbekannten,
+`effektiveAnordnung(anordnung, hochformat)` → `nebeneinander|uebereinander`.
+`zielPfad(ziel, spiegel, anordnung)` in `anzeigeZiel.mjs` baut
+`court/{id}/tafel?spiegel=1&anordnung=uebereinander`.
+
+**Layout übereinander:** Kacheln je halbe Höhe, Ziffern `min(70vw, 40vh)` —
+„88" ist bei `font-weight 900` ~1,16 em breit (beide Ziffern zusammen,
+gemessen) und muss in die Kachel (85 vw neben dem 10-vw-Rand) passen; die
+Höhe deckelt bei 40 vh je Kachel. Im Hochformat eines 10-Zoll-Tablets sind
+das ~64 vmin, deutlich über dem Spec-Minimum von 35 vmin (Review-Befund S1:
+die erste Fassung mit `min(37vw, 38vh)` hatte die Breite je Zeichen statt je
+Zahl gerechnet und die Ziffern halb so groß gezeichnet wie möglich). Die Reihenfolge oben/unten dreht nur die CSS-`order` der beiden
+Seiten-Container; `tafelSeiten` bleibt unverändert.
+
+**Akzeptanz:**
+- [x] Hochformat ohne Query: Punkte übereinander, Team „rechts" oben, Satzstand
+      je Seite im Rand, Aufschlag-Punkt an der richtigen Kachel.
+- [x] Drehen des Tablets schaltet ohne Neuladen um (Hoch → übereinander,
+      Quer → nebeneinander).
+- [x] `?anordnung=nebeneinander` im Hochformat und `?anordnung=uebereinander`
+      im Querformat übersteuern; `?spiegel=1` dreht auch oben/unten.
+- [x] Querformat ohne Query sieht aus wie vor der Erweiterung.
+- [x] Hülle: Menüpunkt reihum, nur bei Zähltafel, überlebt Neuladen; Unfug in
+      `localStorage` fällt auf `auto` zurück.
+- [ ] Feldtest: 8- und 10-Zoll-Tablet im Hochformat hinter dem Feld.
+
+### Dasselbe am Zähl-Tablet (`tablet.html`)
+
+Der Wunsch gilt „nicht nur der Zähltafel, auch der Tabletsteuerung generell"
+(06.09.2026). Die Zählansicht bekommt dieselbe Anordnung, mit derselben
+Inline-Kopie von `anordnungAusQuery`/`effektiveAnordnung` und derselben
+Reihung im Zahnrad-Menü („Anordnung: automatisch / nebeneinander / übereinander",
+hinter der PIN, `localStorage` `badhub.tablet.anordnung`, je Gerät).
+
+- **Darstellung übereinander** (`.play.uebereinander`): Grid mit drei Zeilen
+  statt drei Spalten; `plus-right` oben (fern, „Hinten"), `plus-left` unten
+  (nah, „Vorne"); Court hochkant (61 × 134) mit eigener Linienzeichnung
+  (`.court-lines-hoch`, Netz waagerecht); Zellen per `order` gedreht:
+  `rightTop` oben links, `rightBottom` oben rechts, `leftTop` unten links,
+  `leftBottom` unten rechts — so bleibt das rechte Aufschlagfeld jedes
+  Spielers auf seiner rechten Hand (oben schaut man nach unten, unten nach
+  oben). Federball-Positionen/-Drehungen je Zelle passend. Satzstand als
+  Spalte: `right-score` über `left-score`, Doppelpunkt aus. Team-Label der
+  linken Seite wandert nach unten.
+- **Wortwahl:** `seiteWort(side)` liefert `vorne/hinten` statt `links/rechts`
+  (Seitenwahl-Titel und -Hinweis DE/EN, Spielerwahl bei Karten).
+  `anordnungAnwenden()` setzt Klasse, Plus-Beschriftungen und Menütext; läuft
+  als erste Zeile in jedem `render()`; `orientation`-Wechsel (`matchMedia`
+  `change`, Rückfall `resize`) rufen `render()`, damit auch ein offener
+  Seitenwahl-Dialog den Text wechselt. Satz-Historie, Endstand-Dialog und
+  Beenden-Zusammenfassung bleiben waagerecht links:rechts (= vorne:hinten);
+  die Schiri-Ansage bleibt DBV-Wortlaut aus Stuhl-Sicht (Review-Befund,
+  bewusst).
+- **Unverändert:** Zähllogik, `teamOnSide`, `servingSide`, Ergebnis, der
+  gespiegelte `courtState` — alles bleibt links/rechts. Die Zähltafel und der
+  Court-Monitor zeigen „links" weiterhin links; nur das Tablet des Bedieners
+  dreht seine Sicht.
+- **Akzeptanz:**
+  - [x] Hochformat ohne Wahl: Knöpfe oben/unten, Court hochkant, Aufschläger-
+        Zelle und Federball an der richtigen Stelle (Browser-Test mit
+        injiziertem Doppel: Aufschlag rechts bei 7 → `rightBottom` oben
+        rechts, Annehmer `leftTop` unten links).
+  - [x] Querformat ohne Wahl: Ansicht wie vor der Erweiterung.
+  - [x] Menü reihum, Wahl überlebt Neuladen; Seitenwahl-Text wechselt.
+  - [ ] Feldtest: Zählen im Hochformat hinter dem Feld über ein ganzes Spiel
+        inkl. Seitenwechsel und Satzpause.
+
 ## Offene Fragen / Annahmen
 
 - Annahme: Die Klapp-Tafel-Optik ist reines CSS (Ziffern auf dunklen Kacheln); es wird keine

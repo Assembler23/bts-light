@@ -50,5 +50,13 @@ ok("feld ohne Feld → null", zielPfad({ layout: "feld", court: null }, false), 
 ok("unbekanntes Layout → null", zielPfad({ layout: "x", court: 3 }, false), null);
 ok("kein Pfad beginnt mit /", LAYOUTS.every((l) => !String(zielPfad({ layout: l, court: 3 }, false)).startsWith("/")), true);
 
+// ── Anordnung (nur Zähltafel): Allowlist, `auto` schreibt nichts ─────────
+ok("tafel mit Anordnung übereinander", zielPfad({ layout: "tafel", court: 3 }, false, "uebereinander"), "court/3/tafel?anordnung=uebereinander");
+ok("tafel mit Anordnung nebeneinander", zielPfad({ layout: "tafel", court: 3 }, false, "nebeneinander"), "court/3/tafel?anordnung=nebeneinander");
+ok("tafel: auto lässt die Adresse frei", zielPfad({ layout: "tafel", court: 3 }, false, "auto"), "court/3/tafel");
+ok("tafel: Spiegel und Anordnung zusammen", zielPfad({ layout: "tafel", court: 3 }, true, "uebereinander"), "court/3/tafel?spiegel=1&anordnung=uebereinander");
+ok("tafel: Unfug in der Anordnung erreicht die Adresse nie", zielPfad({ layout: "tafel", court: 3 }, false, "x&y=1"), "court/3/tafel");
+ok("feld ignoriert Anordnung", zielPfad({ layout: "feld", court: 3 }, false, "uebereinander"), "court/3/display");
+
 if (failures > 0) { console.error(`${failures} Fehler`); process.exit(1); }
 console.log("alle Anzeige-Ziel-Tests grün");

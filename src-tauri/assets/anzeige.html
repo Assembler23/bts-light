@@ -9,7 +9,8 @@
   zeigt eine der Anzeige-Seiten (Zähltafel, Feld-Monitor, Hallen-Übersicht,
   In Vorbereitung) in einem seitenfüllenden iframe derselben Herkunft und
   liefert, was ein Tablet braucht und ein TV nicht: Zahnrad mit PIN,
-  Layout-Wahl, Feldwechsel, Seiten spiegeln, Weg zurück zum Zählen (mit
+  Layout-Wahl, Feldwechsel, Seiten spiegeln, Anordnung der Punkte (neben-
+  oder übereinander, für den Platz hinter dem Feld), Weg zurück zum Zählen (mit
   Belegt-Warnung), Neu laden, Vollbild, Wake-Lock. Sie öffnet nie /ws und
   schreibt nie zurück. Der Pfad im iframe kommt ausschließlich aus der
   Allowlist in anzeigeZiel (Inline-Kopie unten) — nie aus freiem Text.
@@ -102,6 +103,7 @@
       <div class="options" id="feld-liste"></div>
       <div class="options" id="aktionen">
         <div class="opt" id="spiegeln">Seiten spiegeln: aus</div>
+        <div class="opt" id="anordnung">Anordnung: automatisch</div>
         <div class="opt" id="zaehlen">Zum Zählen wechseln</div>
         <div class="opt" id="neuladen">Neu laden</div>
         <div class="opt" id="vollbild">Vollbild ein/aus</div>
@@ -136,6 +138,12 @@
   })();
   var LAYOUT_LABEL = { tafel: "Zähltafel", feld: "Feld-Monitor", uebersicht: "Hallen-Übersicht", vorbereitung: "In Vorbereitung" };
   var SPIEGEL_KEY = "badhub.anzeige.spiegel";
+  // Anordnung der Zähltafel: `auto` folgt der Geräte-Ausrichtung (Hochformat
+  // → übereinander, für den Platz hinter dem Feld), die beiden anderen Werte
+  // übersteuern von Hand. Gemerkt je Gerät wie die Spiegelung.
+  var ANORDNUNG_KEY = "badhub.anzeige.anordnung";
+  var ANORDNUNG_FOLGE = ["auto", "nebeneinander", "uebereinander"];
+  var ANORDNUNG_LABEL = { auto: "automatisch", nebeneinander: "nebeneinander (links–rechts)", uebereinander: "übereinander (vorn–hinten)" };
   var ZULETZT_KEY = "badhub.anzeige.zuletzt";
 
   // ── Inline-Kopie von src/io/anzeigeZiel.mjs — Änderungen dort und hier gemeinsam ──
@@ -152,11 +160,16 @@
     const court = /^[1-9][0-9]{0,9}$/.test(c) ? Number(c) : null;
     return { layout, court };
   }
-  function zielPfad(ziel, spiegel) {
+  function zielPfad(ziel, spiegel, anordnung) {
     const court = ziel && Number.isInteger(ziel.court) && ziel.court > 0 ? ziel.court : null;
     switch (ziel && ziel.layout) {
-      case "tafel":
-        return court ? `court/${court}/tafel${spiegel ? "?spiegel=1" : ""}` : null;
+      case "tafel": {
+        if (!court) return null;
+        const q = [];
+        if (spiegel) q.push("spiegel=1");
+        if (anordnung === "nebeneinander" || anordnung === "uebereinander") q.push("anordnung=" + anordnung);
+        return `court/${court}/tafel${q.length ? "?" + q.join("&") : ""}`;
+      }
       case "feld":
         return court ? `court/${court}/display` : null;
       case "uebersicht":
@@ -184,6 +197,7 @@
     feldListe: document.getElementById("feld-liste"),
     aktionen: document.getElementById("aktionen"),
     spiegeln: document.getElementById("spiegeln"),
+    anordnung: document.getElementById("anordnung"),
     zaehlen: document.getElementById("zaehlen"),
     neuladen: document.getElementById("neuladen"),
     vollbild: document.getElementById("vollbild"),
@@ -208,6 +222,11 @@
   );
   var spiegel = false;
   try { spiegel = localStorage.getItem(SPIEGEL_KEY) === "1"; } catch (e) {}
+  var anordnung = "auto";
+  try {
+    var a = localStorage.getItem(ANORDNUNG_KEY);
+    if (a === "nebeneinander" || a === "uebereinander") anordnung = a;
+  } catch (e) {}
   var feldNamen = {};   // CourtID → Label, aus `courts`
 
   function feldName(id) { return feldNamen[id] || ("Feld " + id); }
@@ -216,7 +235,7 @@
   // einem Feld-Layout: Feldwahl öffnen (ohne PIN — es gibt noch nichts zu
   // schützen, die Seite zeigt ja nichts).
   function zeige() {
-    var pfad = zielPfad(ziel, spiegel);
+    var pfad = zielPfad(ziel, spiegel, anordnung);
     // M2: `removeAttribute("src")` blankt das iframe NICHT — das alte
     // Dokument bleibt sichtbar stehen. `about:blank` leert es wirklich.
     if (!pfad) {
@@ -248,6 +267,7 @@
     els.mainView.hidden = !nurFeldwahl;
     els.layoutTitel.hidden = !!nurFeldwahl; els.layoutListe.hidden = !!nurFeldwahl;
     els.spiegeln.hidden = !!nurFeldwahl;
+    els.anordnung.hidden = !!nurFeldwahl;
     els.zaehlen.hidden = !!nurFeldwahl;
     els.vollbild.hidden = !!nurFeldwahl;
     els.schliessen.hidden = !!nurFeldwahl;
@@ -262,11 +282,13 @@
     var feld = feldbezogen(ziel.layout);
     els.feldTitel.hidden = !feld; els.feldListe.hidden = !feld;
     els.spiegeln.hidden = ziel.layout !== "tafel";
+    els.anordnung.hidden = ziel.layout !== "tafel";
     els.zaehlen.hidden = !feld;
     els.vollbild.hidden = false;
     els.schliessen.hidden = false;
     els.stand.textContent = LAYOUT_LABEL[ziel.layout] + (feld && ziel.court ? " · " + feldName(ziel.court) : "");
     els.spiegeln.textContent = "Seiten spiegeln: " + (spiegel ? "an" : "aus");
+    els.anordnung.textContent = "Anordnung: " + ANORDNUNG_LABEL[anordnung];
     renderLayouts();
     if (feld) ladeFelder();
   }
@@ -331,6 +353,12 @@
     try { localStorage.setItem(SPIEGEL_KEY, spiegel ? "1" : "0"); } catch (e) {}
     schliesseMenue(); zeige();
   });
+  // Anordnung reihum: automatisch → nebeneinander → übereinander → …
+  els.anordnung.addEventListener("click", function () {
+    anordnung = ANORDNUNG_FOLGE[(ANORDNUNG_FOLGE.indexOf(anordnung) + 1) % ANORDNUNG_FOLGE.length];
+    try { localStorage.setItem(ANORDNUNG_KEY, anordnung); } catch (e) {}
+    schliesseMenue(); zeige();
+  });
   // Zum Zählen: erst fragen, ob das Feld belegt ist. `occupied` fehlt bei
   // einem älteren Relay → unbekannt → ohne Warnung (wie bisher am Tablet).
   function zumZaehlen() { location.href = BASE + "court/" + encodeURIComponent(String(ziel.court)); }
@@ -366,7 +394,7 @@
   // Feldwahl durch das PIN-Pad ersetzt; „✕" schließt dann alles → schwarzer
   // Bildschirm ohne Ausweg außer PIN. Ohne gültiges Ziel bleibt das Zahnrad
   // darum PIN-frei bei der Feldwahl.
-  els.zahnrad.addEventListener("click", function () { oeffneMenue(!zielPfad(ziel, spiegel)); });
+  els.zahnrad.addEventListener("click", function () { oeffneMenue(!zielPfad(ziel, spiegel, anordnung)); });
   els.pinPad.addEventListener("click", function (e) {
     var btn = e.target.closest("button[data-k]");
     if (btn) pinKey(btn.dataset.k);
