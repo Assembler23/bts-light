@@ -83,11 +83,54 @@ jobs:
             target/release/bundle/nsis/*-setup.exe
             target/release/bundle/nsis/*-setup.exe.sig
 
+  # Tablet-APK. Mit Keystore-Secret signiert (Release), sonst Debug-APK —
+  # dann müssen Tablets beim späteren Umstieg auf die signierte Variante
+  # einmal deinstalliert werden (andere Signatur).
+  android:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: APK bauen
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          VERSION=$(jq -r .version ../package.json)
+          if [ -n "${KEYSTORE_B64}" ]; then
+            echo "${KEYSTORE_B64}" | base64 -d > release.keystore
+            export ANDROID_KEYSTORE_PATH="$PWD/release.keystore"
+            ./gradlew --no-daemon :app:assembleRelease
+            cp app/build/outputs/apk/release/app-release.apk "bts-light-tablet-${VERSION}.apk"
+          else
+            echo "::warning::ANDROID_KEYSTORE_B64 fehlt — Debug-APK statt signierter Release-APK"
+            ./gradlew --no-daemon :app:assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk "bts-light-tablet-${VERSION}-debug.apk"
+          fi
+          ls -la bts-light-tablet-*.apk
+      - name: APK ans GitHub-Release hängen
+        working-directory: android
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" bts-light-tablet-*.apk --clobber --repo "${GITHUB_REPOSITORY}"
+
   # Lädt die Release-Assets, baut latest.json und schiebt alles nach
   # badhub.de. Läuft auf Linux, weil rsync/ssh dort problemlos verfügbar
   # sind (Windows-Runner haben kein rsync).
   publish:
-    needs: build
+    needs: [build, android]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -194,8 +237,11 @@ jobs:
           set -euo pipefail
           SETUP=$(cd rel && ls *_*-setup.exe | head -1)
           cp "rel/${SETUP}" "rel/BTS.Light-setup.exe"
+          APK=$(cd rel && ls bts-light-tablet-*.apk 2>/dev/null | head -1 || true)
+          if [ -n "${APK}" ]; then cp "rel/${APK}" "rel/bts-light-tablet.apk"; fi
           rsync -av \
             rel/latest.json \
             rel/index.html \
             rel/*-setup.exe \
+            $( [ -n "${APK}" ] && echo rel/*.apk ) \
             bts-deploy@178.104.221.177:/var/www/badhub/public/download/bts-light/
