@@ -29,6 +29,8 @@
     {
       "name": "Turnierleitung",
       "seiten": [
+        { "datei": "docs/einstellungen.md", "slug": "einstellungen",
+          "titel": "Einstellungen — was jede Option bewirkt" },
         { "datei": "docs/turnierleitung-web.md", "slug": "turnierleitung",
           "titel": "Turnierleitungs-Oberfläche im Browser",
           "aus": ["Render-Sparsamkeit (seit 17.08.2026, erweitert 18.08.2026)",

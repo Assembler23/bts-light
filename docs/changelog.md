@@ -18,6 +18,16 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Geräte, auf denen Ziehen nicht praktikabel ist.
 - **Neu: „↩ Vom Feld nehmen" im ⋯-Menü einer belegten Feld-Kachel** (TL-Web),
   ohne die Kachel vorher auswählen zu müssen.
+## v0.9.279
+
+- **Neu: Update ohne Bedien-Lücke im Turnierbetrieb.** Das Update wird im
+  Hintergrund vorgeladen; das Banner zeigt, wie viele Felder belegt sind,
+  und bietet zwei Wege: **„Jetzt neu starten"** (etwa 20 s Lücke, die
+  Übertragung läuft danach **von selbst** wieder an, die Aufruf-Uhr belegter
+  Felder läuft weiter) oder **„Beim Beenden einbauen"** (stiller Installer
+  beim Schließen, keine App danach). Bisher blieb die Übertragung nach dem
+  Neustart stehen, bis jemand „Starten" drückte, und die Aufruf-Uhr begann
+  bei null. Spec `docs/features/update-im-turnierbetrieb.md`, ADR 0057.
 
 ## v0.9.278
 
