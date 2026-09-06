@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## Unveröffentlicht
+## v0.9.282
 
 - **Tablet-Kiosk-App für Android / Fire-Tablets.** Eigene App findet den
   Turnier-PC selbst (gemerkte IP → Subnetz-Scan → mDNS), zeigt die
