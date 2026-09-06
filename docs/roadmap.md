@@ -698,9 +698,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Handbuch, in dem **nachlesbar** ist:
   - was die **Tablets** können — alle Funktionen des Spielzettels, nicht nur
     der Zähl-Ablauf;
-  - **was welche Einstellung in der Software bewirkt** — eine Referenz über
-    alle Abschnitte der Einstellungen (heute 17 in `SetupWizard.tsx`, für die
-    es keinerlei Doku gibt);
+  - ~~**was welche Einstellung in der Software bewirkt**~~ — **erledigt
+    06.09.2026**: [einstellungen.md](einstellungen.md), alle Abschnitte der
+    Einstellungsseite plus Wartung, mit Standardwerten,
+    Sichtbarkeitsbedingungen und der Frage, ab wann eine Änderung wirkt;
   - wie der **Master-/Slave-Betrieb** funktioniert — heute verteilt über
     [multi-hall.md](multi-hall.md) und [cloud-relay.md](cloud-relay.md), in
     Architektursprache statt als Erklärung;
