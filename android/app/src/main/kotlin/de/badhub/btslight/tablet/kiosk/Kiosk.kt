@@ -1,0 +1,65 @@
+package de.badhub.btslight.tablet.kiosk
+
+import android.app.Activity
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.provider.Settings
+import android.view.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+
+/**
+ * Harte Sperre als Gerätebesitzer (einmalig per ADB gesetzt); ohne
+ * Besitzer weiche Anheft-Sperre — Android fragt dann einmal nach.
+ */
+object Kiosk {
+    private fun dpm(ctx: Context) = ctx.getSystemService(DevicePolicyManager::class.java)
+    private fun admin(ctx: Context) = ComponentName(ctx, KioskAdminReceiver::class.java)
+
+    fun istBesitzer(ctx: Context): Boolean = dpm(ctx).isDeviceOwnerApp(ctx.packageName)
+
+    /** Einmalige Gerätebesitzer-Einstellungen; idempotent, bei jedem Start. */
+    fun einrichten(a: Activity, log: (String) -> Unit) {
+        if (!istBesitzer(a)) {
+            log("Kiosk: kein Gerätebesitzer — weiche Sperre")
+            return
+        }
+        val d = dpm(a)
+        val ad = admin(a)
+        d.setLockTaskPackages(ad, arrayOf(a.packageName))
+        d.setLockTaskFeatures(ad, DevicePolicyManager.LOCK_TASK_FEATURE_NONE)
+        d.setKeyguardDisabled(ad, true)
+        d.setStatusBarDisabled(ad, true)
+        // 7 = AC | USB | Wireless: Bildschirm bleibt am Ladegerät immer an.
+        d.setGlobalSetting(ad, Settings.Global.STAY_ON_WHILE_PLUGGED_IN, "7")
+        // Die App wird Home-Launcher → Autostart nach jedem Boot.
+        val home = IntentFilter(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            addCategory(Intent.CATEGORY_DEFAULT)
+        }
+        d.addPersistentPreferredActivity(ad, home, ComponentName(a, a.javaClass))
+        log("Kiosk: Gerätebesitzer eingerichtet")
+    }
+
+    /** Vollbild + Wachhalten + Lock-Task. */
+    fun sperren(a: Activity, log: (String) -> Unit) {
+        a.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        WindowCompat.setDecorFitsSystemWindows(a.window, false)
+        WindowInsetsControllerCompat(a.window, a.window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        runCatching { a.startLockTask() }
+            .onSuccess { log("Kiosk: Lock-Task aktiv (Besitzer=${istBesitzer(a)})") }
+            .onFailure { log("Kiosk: Lock-Task fehlgeschlagen: ${it.message}") }
+    }
+
+    fun verlassen(a: Activity) {
+        runCatching { a.stopLockTask() }
+        a.finishAffinity()
+    }
+}
