@@ -213,6 +213,14 @@ jobs:
       - name: Update-Notes ueber die Release-Strecke (JS)
         run: node scripts/test-release-notes.mjs
 
+      # Was aus docs/ oeffentlich auf badhub.de landet. Zwei stille Fehler
+      # verhindert der Test: ein interner Abschnitt wird wieder oeffentlich,
+      # weil jemand seine Ueberschrift umbenannt hat und der Ausschluss ins
+      # Leere greift -- und eine neue Anleitung bleibt unveroeffentlicht
+      # liegen, weil niemand sie ins Manifest eingetragen hat.
+      - name: Handbuch-Manifest und -Bau (JS)
+        run: node scripts/test-handbuch.mjs
+
       # Umschalter Produktiv/Test (test.badhub.de). Greift er zu weit, verliert
       # ein Betreiber mit eigener badhub-Instanz beim ersten Klick seine
       # Adresse; greift er zu kurz, laeuft ein Testturnier stumm in die

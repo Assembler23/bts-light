@@ -34,6 +34,53 @@ Der **Updater** nutzt weiterhin ausschließlich die versionierte URL aus
 des Court-Monitors hat ohnehin einen festen Namen
 (`bts-light-pi.img.xz`, siehe [pi-master-image.md](pi-master-image.md)).
 
+## Handbuch (`/download/bts-light/handbuch/`)
+
+Die öffentliche Anleitung unter
+`https://badhub.de/download/bts-light/handbuch/` wird aus den
+Markdown-Dateien dieses Repos erzeugt — es gibt **keine** zweite Textfassung,
+die auseinanderlaufen könnte. Die Release-Seite ist aus Sicht des Handbuchs
+ein Kapitel („Downloads & Versionshinweise"); beide verlinken sich gegenseitig.
+
+**Was veröffentlicht wird, steht in [`handbuch.json`](handbuch.json)** — eine
+Whitelist. Nur eingetragene Dateien gehen online; ADRs, Specs, Roadmaps und die
+Server-Einrichtung des Relays bleiben draußen. Halb-interne Dateien (Bedienung
+UND Architektur in einem Dokument) müssen nicht zerschnitten werden:
+
+- `"aus": ["Endpunkte", …]` im Manifest entfernt genannte Abschnitte samt
+  Unterabschnitten bis zur nächsten gleichrangigen Überschrift.
+- `<!-- handbuch:aus -->` … `<!-- handbuch:an -->` im Markdown selbst deckt
+  Stellen mitten in einem Abschnitt ab.
+
+Ein `aus`-Titel, den es nicht (mehr) gibt, lässt den Bau **fehlschlagen**.
+Ohne diese Härte würde eine umbenannte Überschrift einen internen Abschnitt
+still wieder öffentlich machen — und die Seite sähe dabei völlig in Ordnung aus.
+Ebenso meldet `scripts/test-handbuch.mjs` jede `docs/*.md`, die weder im
+Manifest noch unter `"intern"` steht: eine neue Anleitung bleibt so nicht
+unbemerkt liegen.
+
+**Veröffentlicht wird bei jedem Push auf `main`**, der `docs/`, `README.md`
+oder den Generator anfasst (`.github/workflows/handbuch.yml`), zusätzlich per
+`workflow_dispatch` — **nicht** beim Tag-Release. Doku ändert sich häufiger als
+die Versionsnummer; wäre es an den Tag gekoppelt, bliebe eine Korrektur bis zum
+nächsten Release unsichtbar. Der Workflow prüft erst
+(`node scripts/test-handbuch.mjs`), baut dann und lädt nach
+`…/download/bts-light/handbuch/` — mit `--delete`, damit ein aus dem Manifest
+entferntes Kapitel auch vom Server verschwindet. Das `--delete` gilt
+**ausschließlich** diesem Unterordner; im Elternverzeichnis liegen Installer und
+`latest.json` (siehe die Warnung in `badhub/docs/ops/deployment.md`).
+
+Lokal ansehen:
+
+```bash
+node scripts/build-handbuch.mjs --out dist/handbuch
+open dist/handbuch/index.html
+```
+
+Der Generator nutzt `marked` (reine devDependency, keine transitiven Pakete,
+Audit 05.09.2026). Sie läuft nur in Node/CI und wird **nicht** in die
+ausgelieferte App gebündelt.
+
 ## Release-Seite (Downloads + Änderungen je Version)
 
 `https://badhub.de/download/bts-light/` zeigt alle Versionen mit

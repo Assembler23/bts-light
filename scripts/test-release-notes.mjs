@@ -204,5 +204,10 @@ pruefe(
   "Kopf-Knopf neben dem Programm-Download springt zum Pi-Image-Block"
 );
 
+// Der Weg zum Handbuch fuehrt ueber die Release-Seite. Faellt der Link beim
+// naechsten Umbau des Seitengeruests still weg, findet die Anleitung niemand
+// mehr — die Seite selbst saehe dabei voellig in Ordnung aus.
+pruefe(seite.includes('href="handbuch/"'), "Release-Seite verlinkt das Handbuch");
+
 console.log(fehler === 0 ? "\nOK" : `\n${fehler} fehlgeschlagen`);
 process.exit(fehler === 0 ? 0 : 1);

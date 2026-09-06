@@ -1,0 +1,76 @@
+# Baut das oeffentliche Handbuch und laedt es nach
+# badhub.de/download/bts-light/handbuch/.
+#
+# WARUM EIN EIGENER WORKFLOW (und nicht der publish-Job aus release.yml):
+# Der laeuft nur bei `refs/tags/*`. Eine korrigierte Anleitung waere dann bis
+# zum naechsten Release unsichtbar, und umgekehrt wuerde jeder Release die
+# Doku neu hochladen, auch wenn sich nichts geaendert hat. Doku aendert sich
+# in diesem Repo deutlich haeufiger als die Versionsnummer.
+name: Handbuch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'scripts/build-handbuch.mjs'
+      - '.github/workflows/handbuch.yml'
+  workflow_dispatch:
+
+# Zwei Doku-Pushes kurz hintereinander: nur der letzte Stand muss hochgeladen
+# werden. Ein abgebrochener Upload hinterlaesst nichts Halbes, weil rsync erst
+# am Ende umschaltet.
+concurrency:
+  group: handbuch
+  cancel-in-progress: true
+
+jobs:
+  bauen:
+    # Linux, nicht windows-latest: rsync/ssh sind hier vorhanden, und
+    # Windows-Minuten zaehlen bei GitHub doppelt (siehe ci.yml).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Abhaengigkeiten
+        run: npm ci
+
+      # Erst pruefen, dann bauen: Der Test faengt ein umbenanntes
+      # "aus"-Kapitel ab, BEVOR sein Inhalt oeffentlich auf badhub.de steht.
+      # Ein Rueckzieher waere danach zwar moeglich, aber die Seite war dann
+      # schon draussen.
+      - name: Handbuch pruefen
+        run: node scripts/test-handbuch.mjs
+
+      - name: Handbuch bauen
+        run: node scripts/build-handbuch.mjs --out dist/handbuch
+
+      - name: SSH einrichten
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_DEPLOY_KEY_V2 }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      # --delete gilt AUSSCHLIESSLICH dem Unterordner handbuch/ (beachte den
+      # abschliessenden Schraegstrich an Quelle und Ziel) — damit ein aus dem
+      # Manifest entferntes Kapitel auch vom Server verschwindet.
+      #
+      # NIEMALS auf das Elternverzeichnis anwenden: dort liegen Installer und
+      # latest.json. Genau das hat am 2026-05-21 das Auto-Update abgeschaltet
+      # (badhub/docs/ops/deployment.md, Abschnitt "public/download/").
+      - name: Nach badhub.de hochladen
+        run: |
+          set -euo pipefail
+          test -f dist/handbuch/index.html
+          rsync -av --delete \
+            dist/handbuch/ \
+            bts-deploy@178.104.221.177:/var/www/badhub/public/download/bts-light/handbuch/
