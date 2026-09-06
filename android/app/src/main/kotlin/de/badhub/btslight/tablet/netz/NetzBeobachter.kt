@@ -5,7 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import java.net.Inet4Address
 
-/** Meldet WLAN da/weg über den Standard-Netz-Callback — Auslöser für die Suche. */
+/** Meldet Netz da/weg über den Standard-Netz-Callback (jede Transportart) — Auslöser für die Suche. Auf den Fire-Tablets ist das praktisch immer das WLAN. */
 class NetzBeobachter(ctx: Context, private val aufNetz: (da: Boolean) -> Unit) {
     private val cm = ctx.getSystemService(ConnectivityManager::class.java)
     private val callback = object : ConnectivityManager.NetworkCallback() {
