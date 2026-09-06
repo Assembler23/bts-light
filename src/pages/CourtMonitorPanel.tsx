@@ -27,6 +27,8 @@ import {
   tabletOverview,
 } from "../api";
 import { HallFilter } from "../components/HallFilter";
+import { linkMitGuid } from "../io/liveLink.mjs";
+import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
 import type {
   AppConfig,
   ComboDirView,
@@ -282,8 +284,15 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
   // unterstützt denselben ?halle=-Filter wie die lokale Übersicht → je Halle
   // ein eigener Online-Link. Pro-Halle lokal = bts-light-Übersicht je Halle.
   const liveUrl = (config.badhub.live_url || "").trim();
-  const onlineOverviewUrl = liveUrl
-    ? liveUrl + (liveUrl.includes("?") ? "&" : "?") + "display=monitor"
+  // Turnier-GUID VOR display=/halle= anhängen (ADR 0054, I3) — sonst zeigt
+  // der Online-Link bei zwei parallelen Turnieren desselben Verbands auf den
+  // falschen Stand, weil badhub sonst nur den Verbands-Schlüssel kennt.
+  const guid = isTournamentGuid(config.tournament_uuid)
+    ? extractTournamentGuid(config.tournament_uuid)
+    : "";
+  const liveUrlMitGuid = linkMitGuid(liveUrl, guid);
+  const onlineOverviewUrl = liveUrlMitGuid
+    ? liveUrlMitGuid + (liveUrlMitGuid.includes("?") ? "&" : "?") + "display=monitor"
     : "";
   const onlineHallUrl = (hall: string) =>
     `${onlineOverviewUrl}&halle=${encodeURIComponent(hall)}`;

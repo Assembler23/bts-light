@@ -101,6 +101,12 @@ pub struct AppState {
     /// Handle der Slave-Monitor-Brücke (`:8088` → Cloud-Monitor des Masters,
     /// nur im `slave_mode`), falls aktiv.
     pub slave_bridge: Mutex<Option<JoinHandle<()>>>,
+    /// Phasen des Update-Ablaufs + geladenes Paket (Spec
+    /// `update-im-turnierbetrieb`, ADR 0057).
+    pub update: crate::update::UpdateManager,
+    /// Das vom Updater-Plugin geprüfte Update — nur damit lässt sich das
+    /// Paket über den Plugin-Weg (Installer mit Neustart) einbauen.
+    pub update_handle: Mutex<Option<tauri_plugin_updater::Update>>,
 }
 
 fn now_ms() -> u64 {
@@ -334,6 +340,11 @@ pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConf
 /// Bewusst **nur** die Geräteliste, nicht der Schalter: Wird die Oberfläche
 /// abgeschaltet, sollen die Zugänge auch wirklich verschwinden. Rein &
 /// testbar.
+///
+/// Stellt am Ende außerdem die Turnier-GUID-Spiegelung her
+/// (`AppConfig::spiegele_turnier_guid`, ADR 0054) — dieser Aufruf ist der
+/// **einzige** Schreibpfad neben `load_from`, der den Gleichlauf von
+/// Wurzelfeld und `checkin.tournament_uuid` erzwingt.
 fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> AppConfig {
     if incoming.tl_web.enabled {
         incoming.tl_web.devices = current.tl_web.devices.clone();
@@ -376,6 +387,13 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Automatik legt ein Spiel auf das kaputte Feld.
     incoming.locked_courts = current.locked_courts.clone();
     incoming.locked_courts_tournament = current.locked_courts_tournament.clone();
+    // Turnier-GUID spiegeln (ADR 0054): Liveticker-Push (tset/sched/tupdate)
+    // liest das kanonische Wurzelfeld, Check-In-Meldeliste/Anfangszeiten lesen
+    // weiterhin `checkin.tournament_uuid`. `load_from` stellt den Gleichlauf
+    // nur beim Programmstart her — ohne diesen Aufruf hinge die Invariante
+    // „Wurzel == Check-In" nach dem ersten Speichern allein am Frontend, das
+    // (noch) in beide Felder denselben kanonischen Wert schreibt.
+    incoming.spiegele_turnier_guid();
     incoming
 }
 
@@ -508,6 +526,12 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
         imported.tl_web.profiles = current.tl_web.profiles.clone();
         imported.tl_web.default_profile_id = current.tl_web.default_profile_id.clone();
     }
+    // Turnier-GUID auf Wurzel- und Check-In-Feld angleichen (ADR 0054): Ein
+    // Bündel aus einer Version vor der Spiegelung, oder eines, das nur über
+    // `checkin.tournament_uuid` gesetzt wurde, würde sonst ohne
+    // `load_from`-Umweg (der Import schreibt sofort in Speicher + Datei)
+    // dauerhaft mit auseinanderlaufenden Feldern enden.
+    imported.spiegele_turnier_guid();
     imported
 }
 
@@ -930,6 +954,33 @@ fn effective_azure(
         .map(|a| (a.region.clone(), a.key.clone()))
 }
 
+/// Was vor dem Start der Übertragung stimmen muss. Reine Funktion, damit die
+/// Regeln testbar sind — `start_sync` selbst hängt an Tauri.
+///
+/// Ein Ansage-Slave pusht nie nach badhub und braucht nichts davon. Sonst:
+/// Badhub-Passwort, im Cloud-Modus die Installations-ID, und seit ADR 0054
+/// die turnier.de-GUID — ohne sie könnte badhub das Turnier nicht von einem
+/// parallel laufenden desselben Verbands unterscheiden.
+pub(crate) fn pruefe_startbedingungen(config: &crate::config::AppConfig) -> Result<(), String> {
+    if config.slave_mode {
+        return Ok(());
+    }
+    if config.badhub.password.is_empty() {
+        return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
+    }
+    if config.connection_mode.cloud_enabled() && config.install_id.is_empty() {
+        return Err("Für den Cloud-Modus fehlt die Installations-ID.".to_string());
+    }
+    if config.tournament_uuid_kanonisch().is_none() {
+        return Err(
+            "Die Turnier-Kennung von turnier.de fehlt — im Setup unter „1 · Liveticker-Ziel“ \
+             die Adresse deines Turniers einfügen."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// Startet die Hintergrund-Polling-Schleife (BTP → Badhub, alle 5 s).
 #[tauri::command]
 pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
@@ -943,16 +994,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         .lock()
         .expect("Config-Mutex nicht vergiftet")
         .clone();
-    // Badhub-Zugang nur im Normalbetrieb nötig — ein Ansage-Slave pusht nie
-    // nach badhub und braucht weder Passwort noch (Cloud-)Installations-ID.
-    if !config.slave_mode {
-        if config.badhub.password.is_empty() {
-            return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
-        }
-        if config.connection_mode.cloud_enabled() && config.install_id.is_empty() {
-            return Err("Für den Cloud-Modus fehlt die Installations-ID.".to_string());
-        }
-    }
+    pruefe_startbedingungen(&config)?;
 
     // Die von Hand gesetzten Spielorte liegen neben der Konfiguration und
     // überleben so einen Neustart des Turnier-PCs. Ohne das wäre die Arbeit
@@ -1293,6 +1335,226 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
 #[tauri::command]
 pub fn flush_live_scores(state: State<'_, AppState>) {
     state.tablet.flush_scores();
+}
+
+// ─────────────────────── Update im Turnierbetrieb ───────────────────────
+//
+// Spec `docs/features/update-im-turnierbetrieb.md`, ADR 0057. Der Ablauf
+// lebt im Rust-Kern statt im WebView (R1): Prüfen, Laden, Einbauen und der
+// Wiederanlauf-Marker greifen auf denselben Zustand zu wie der Schließpfad
+// in `lib.rs`. Die Tauri-freie Logik steht in `update.rs`.
+
+/// Pfad des Wiederanlauf-Markers im App-Datenverzeichnis.
+fn update_resume_pfad(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join(crate::update::RESUME_FILE)
+}
+
+/// Felder, auf denen gerade ein Spiel steht — die Entscheidungsgrundlage im
+/// Update-Banner („jetzt" oder „beim Beenden").
+fn belegte_felder(state: &AppState) -> usize {
+    state
+        .tablet
+        .overview()
+        .iter()
+        .filter(|c| c.match_id != 0)
+        .count()
+}
+
+/// Prüft auf ein Update und lädt es sofort im Hintergrund. Kehrt sofort
+/// zurück; das Frontend liest den Fortschritt über [`update_info`]. Ein
+/// zweiter Aufruf während Prüfen/Laden/Einbauen ist ein No-op; liegt
+/// dieselbe Version schon bereit, wird sie nicht erneut geladen.
+#[tauri::command]
+pub fn update_check(app: AppHandle, state: State<'_, AppState>) {
+    use crate::update::Phase;
+    // Prüfen + Umschalten atomar (Review 06.09.2026): Auto-Check beim Start
+    // und Klick auf der Wartungsseite laufen sonst beide los und laden zweimal.
+    let Some(bereit) = state.update.begin_check() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        use tauri_plugin_updater::UpdaterExt;
+        let st = app.state::<AppState>();
+        let geprueft = match app.updater() {
+            Ok(u) => u.check().await.map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        let update = match geprueft {
+            Ok(Some(u)) => u,
+            Ok(None) => {
+                if bereit.is_some() {
+                    // Das Manifest bietet die Version nicht mehr an
+                    // (zurückgezogen): Paket und Vormerkung räumen, statt
+                    // ein Update einzubauen, das es offiziell nicht gibt.
+                    tracing::info!("Bereitliegendes Update wurde vom Manifest zurückgezogen");
+                    st.update.paket_verwerfen();
+                    *st.update_handle
+                        .lock()
+                        .expect("Update-Mutex nicht vergiftet") = None;
+                }
+                st.update.set_phase(Phase::Current);
+                return;
+            }
+            Err(e) => {
+                tracing::info!("Update-Prüfung fehlgeschlagen: {e}");
+                // Offline ist in der Halle der Normalfall — ein schon
+                // geladenes Paket bleibt bereit, samt Vormerkung.
+                st.update.set_phase(match bereit {
+                    Some((version, notes)) => Phase::Ready { version, notes },
+                    None => Phase::Error(e),
+                });
+                return;
+            }
+        };
+        if bereit.as_ref().map(|(v, _)| v.as_str()) == Some(update.version.as_str()) {
+            // Paket liegt schon da — nur die Phase zurückdrehen.
+            st.update.set_phase(Phase::Ready {
+                version: update.version.clone(),
+                notes: update.body.clone(),
+            });
+            return;
+        }
+        st.update.set_phase(Phase::Downloading {
+            version: update.version.clone(),
+            notes: update.body.clone(),
+        });
+        tracing::info!("Update v{} gefunden, lade im Hintergrund", update.version);
+        match update.download(|_, _| {}, || {}).await {
+            Ok(bytes) => {
+                tracing::info!(
+                    "Update v{} geladen ({} KB), wartet auf den Einbau",
+                    update.version,
+                    bytes.len() / 1024
+                );
+                *st.update_handle
+                    .lock()
+                    .expect("Update-Mutex nicht vergiftet") = Some(update.clone());
+                st.update
+                    .paket_bereit(update.version.clone(), update.body.clone(), bytes);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Update v{} konnte nicht geladen werden: {e}",
+                    update.version
+                );
+                st.update.set_phase(Phase::Error(e.to_string()));
+            }
+        }
+    });
+}
+
+/// Aktueller Stand des Update-Ablaufs fürs Banner.
+#[tauri::command]
+pub fn update_info(state: State<'_, AppState>) -> crate::update::UpdateInfo {
+    let running = state.status.lock().map(|s| s.running).unwrap_or(false);
+    state.update.info(belegte_felder(&state), running)
+}
+
+/// Baut das geladene Update jetzt ein: Live-Stand sichern, Wiederanlauf-
+/// Marker schreiben, Installer über das Plugin starten (der Prozess endet
+/// darin; der Installer startet die neue Version). Scheitert der Start,
+/// verschwindet der Marker wieder.
+#[tauri::command]
+pub async fn update_install_now(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use crate::update::{Phase, ResumeMarker};
+    let notes = match state.update.phase() {
+        Phase::Ready { notes, .. } => notes,
+        _ => None,
+    };
+    let paket = state.update.paket().ok_or("Kein Update geladen.")?;
+    let handle = state
+        .update_handle
+        .lock()
+        .expect("Update-Mutex nicht vergiftet")
+        .clone()
+        .ok_or("Kein Update geladen.")?;
+    state.update.set_phase(Phase::Installing {
+        version: paket.version.clone(),
+    });
+    state.tablet.flush_scores();
+    let running = state.status.lock().map(|s| s.running).unwrap_or(false);
+    let marker_pfad = update_resume_pfad(&app);
+    let marker = ResumeMarker {
+        running,
+        written_ms: now_ms(),
+        from_version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    if let Err(e) = crate::update::write_resume(&marker_pfad, &marker) {
+        // Nicht fatal: dann muss die Turnierleitung eben selbst starten.
+        tracing::warn!("Wiederanlauf-Marker nicht geschrieben: {e}");
+    }
+    tracing::info!(
+        "Update auf v{} wird eingebaut (Übertragung lief: {running})",
+        paket.version
+    );
+    // Gelingt der Start, kehrt `install` nie zurück (`std::process::exit`).
+    // Beachte: Das Plugin ignoriert den Rückgabewert von `ShellExecuteW` —
+    // blockt ein Virenscanner den Installer, ist die App trotzdem weg; der
+    // Marker bleibt frisch, und der nächste Handstart setzt die Übertragung
+    // fort (Spec, „Offen").
+    if let Err(e) = handle.install(&paket.bytes) {
+        crate::update::remove_resume(&marker_pfad);
+        // Das Paket ist weiterhin gültig — zurück auf „bereit", nicht in
+        // einen Fehlerzustand, der einen zweiten 10-MB-Download erzwänge.
+        // Den Fehlertext zeigt das Frontend aus der abgelehnten Antwort.
+        state.update.set_phase(Phase::Ready {
+            version: paket.version.clone(),
+            notes,
+        });
+        return Err(format!("Update konnte nicht gestartet werden: {e}"));
+    }
+    Ok(())
+}
+
+/// Einbau beim Beenden vormerken (oder die Vormerkung lösen). Nur mit
+/// bereitliegendem Paket.
+#[tauri::command]
+pub fn update_set_install_on_exit(state: State<'_, AppState>, an: bool) -> Result<(), String> {
+    if state.update.set_install_on_exit(an) {
+        Ok(())
+    } else {
+        Err("Kein Update geladen.".to_string())
+    }
+}
+
+/// Liest und löscht den Wiederanlauf-Marker. `true` = die Übertragung lief
+/// vor dem Update und soll jetzt von selbst wieder anlaufen. Das Frontend
+/// ruft das einmal nach dem Laden der Konfiguration und startet dann über
+/// `start_sync` — derselbe Weg wie der Knopf, mit derselben Fehleranzeige.
+#[tauri::command]
+pub fn take_update_resume(app: AppHandle) -> bool {
+    let wieder = crate::update::take_resume(&update_resume_pfad(&app), now_ms());
+    if wieder {
+        tracing::info!("Wiederanlauf nach Update: Übertragung wird automatisch gestartet");
+    }
+    wieder
+}
+
+/// Schließpfad: Ist der Einbau beim Beenden vorgemerkt, legt das den
+/// Installer ab und startet ihn stumm (ohne Neustart der App). Fehler
+/// werden nur geloggt — das Beenden darf daran nicht scheitern.
+///
+/// Die Bytes stammen aus `Update::download()` des Plugins und sind dort
+/// bereits gegen den eingebauten Public Key signaturgeprüft (siehe
+/// `update::installer_ablegen`) — der stille Pfad umgeht die Prüfung nicht.
+pub fn update_beim_beenden(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(paket) = state.update.paket_fuer_beenden() else {
+        return;
+    };
+    let dir = std::env::temp_dir();
+    match crate::update::installer_ablegen(&dir, &paket.version, &paket.bytes)
+        .and_then(|pfad| crate::update::installer_stumm_starten(&pfad))
+    {
+        Ok(()) => tracing::info!(
+            "Update v{} wird beim Beenden still eingebaut",
+            paket.version
+        ),
+        Err(e) => tracing::warn!("Stiller Einbau von v{} gescheitert: {e}", paket.version),
+    }
 }
 
 /// Stoppt die Hintergrund-Polling-Schleife und den Tablet-Server.
@@ -1700,19 +1962,18 @@ pub fn open_live_view(
     state: State<'_, AppState>,
     display: Option<String>,
 ) -> Result<(), String> {
-    let live_url = state
-        .config
-        .lock()
-        .expect("Config-Mutex nicht vergiftet")
-        .badhub
-        .live_url
-        .clone();
-    if live_url.is_empty() {
+    let (live_url, guid) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (cfg.badhub.live_url.clone(), cfg.tournament_uuid_kanonisch())
+    };
+    if live_url.trim().is_empty() {
         return Err("Für dieses Turnier ist keine Live-Seite hinterlegt.".to_string());
     }
+    // Erst die GUID (Direktlink aufs Turnier, ADR 0054), dann die Ansicht.
+    let mit_guid = crate::aushang::link_mit_guid(&live_url, guid.as_deref());
     let url = match display {
-        Some(view) => format!("{live_url}&display={view}"),
-        None => live_url,
+        Some(view) => format!("{mit_guid}&display={view}"),
+        None => mit_guid,
     };
     app.opener()
         .open_url(url, None::<String>)
@@ -2620,8 +2881,9 @@ pub fn aushang_html(state: State<'_, AppState>) -> Result<String, String> {
         .map(|s| s.tournament_name)
         .unwrap_or_default();
     let eingetragen = config.badhub.live_url.trim();
-    let daten =
-        crate::aushang::daten_aus(&config.badhub.live_url, &turnier, logo).ok_or_else(|| {
+    let guid = config.tournament_uuid_kanonisch();
+    let daten = crate::aushang::daten_aus(&config.badhub.live_url, &turnier, logo, guid.as_deref())
+        .ok_or_else(|| {
             // „Leer" und „steht da, taugt aber nicht" brauchen verschiedene
             // Hinweise: Sonst sucht die Turnierleitung nach einem Feld, das
             // ausgefüllt vor ihr steht.
@@ -4150,9 +4412,13 @@ fn spawn_branding_push(
 /// konfiguriertes Badhub-Passwort passiert nichts. Sendet **nur** das
 /// `sponsors`-Feld — das Logo bleibt badhub-seitig unberührt.
 fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
-    let (live_url, password) = {
+    let (live_url, password, tournament_uuid) = {
         let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
-        (cfg.badhub.url.clone(), cfg.badhub.password.clone())
+        (
+            cfg.badhub.url.clone(),
+            cfg.badhub.password.clone(),
+            cfg.tournament_uuid_kanonisch(),
+        )
     };
     // Kein Liveticker konfiguriert → kein Turnier, an das wir senden könnten.
     if password.is_empty() {
@@ -4165,6 +4431,7 @@ fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
         crate::badhub::payload::CheckinBrandingMessage {
             sponsors: Some(sponsors),
             logo: None,
+            tournament_uuid,
         },
         "Leisten-Sponsoren",
     );
@@ -4176,12 +4443,13 @@ fn push_bar_sponsors_to_badhub(app: &AppHandle, state: &State<'_, AppState>) {
 /// String = badhub löscht das Logo); die Sponsoren bleiben unberührt. Ohne
 /// Badhub-Passwort ein No-op.
 fn push_logo_to_badhub(state: &State<'_, AppState>) {
-    let (live_url, password, logo) = {
+    let (live_url, password, logo, tournament_uuid) = {
         let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
         (
             cfg.badhub.url.clone(),
             cfg.badhub.password.clone(),
             cfg.tournament_logo.data.clone(),
+            cfg.tournament_uuid_kanonisch(),
         )
     };
     if password.is_empty() {
@@ -4193,6 +4461,7 @@ fn push_logo_to_badhub(state: &State<'_, AppState>) {
         crate::badhub::payload::CheckinBrandingMessage {
             sponsors: None,
             logo: Some(logo),
+            tournament_uuid,
         },
         "Turnierlogo",
     );
@@ -4732,6 +5001,24 @@ mod tests {
     }
 
     #[test]
+    fn apply_imported_identity_mirrors_tournament_guid_to_root() {
+        // I2: Ein Bündel, dessen Turnier-GUID nur im alten Check-In-Feld
+        // steht (z. B. exportiert vor ADR 0054, oder von Hand editiert),
+        // muss nach dem Import auch am Wurzelfeld ankommen — sonst prüft
+        // `pruefe_startbedingungen` (liest nur die Wurzel) fälschlich als
+        // fehlend, obwohl die GUID im Bündel steht.
+        let current = cfg_id("inst-alt", None, "", "");
+        let mut imported = cfg_id("inst-neu", None, "", "");
+        imported.checkin.tournament_uuid = "0ea5fd86-a64f-4445-a8de-bae3dbf762ba".to_string();
+        let merged = apply_imported_identity(imported, &current);
+        assert_eq!(
+            merged.tournament_uuid.to_uppercase(),
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        assert_eq!(merged.tournament_uuid, merged.checkin.tournament_uuid);
+    }
+
+    #[test]
     fn apply_imported_identity_keeps_hall_layouts_when_bundle_has_none() {
         // Bündel aus einer Version vor Task 9/11 (oder eins ohne Raster
         // eingerichtet) trägt ein leeres `hall_layouts` — das darf die am
@@ -4979,6 +5266,46 @@ mod tests {
     }
 
     #[test]
+    fn keep_host_managed_fields_spiegelt_die_turnier_guid_beim_speichern() {
+        // Review-Fund (Fix-Runde 1, ADR 0054): `load_from` stellt den
+        // Gleichlauf von Wurzelfeld und `checkin.tournament_uuid` nur beim
+        // Programmstart her. `save_config` ruft `keep_host_managed_fields`
+        // vor jedem Schreiben — genau hier muss die Spiegelung ebenfalls
+        // greifen, sonst hinge die Invariante nach dem ersten Speichern
+        // allein am Frontend.
+        //
+        // Fall 1: Wurzel klein/mit Klammern, Check-In leer → Wurzel gewinnt
+        // und wird kanonisiert, der Check-In-Block übernimmt sie gespiegelt.
+        let von_ui = AppConfig {
+            tournament_uuid: "{0ea5fd86-a64f-4445-a8de-bae3dbf762ba}".to_string(),
+            ..AppConfig::default()
+        };
+        let ergebnis = keep_host_managed_fields(von_ui, &AppConfig::default());
+        assert_eq!(
+            ergebnis.tournament_uuid,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        assert_eq!(
+            ergebnis.checkin.tournament_uuid,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+
+        // Fall 2: Wurzel leer, Check-In gültig gesetzt → die Migration aus
+        // `load_from` greift auch hier, die Wurzel wird nachgefüllt.
+        let mut von_ui2 = AppConfig::default();
+        von_ui2.checkin.tournament_uuid = "11111111-2222-3333-4444-555555555555".to_string();
+        let ergebnis2 = keep_host_managed_fields(von_ui2, &AppConfig::default());
+        assert_eq!(
+            ergebnis2.tournament_uuid,
+            "11111111-2222-3333-4444-555555555555"
+        );
+        assert_eq!(
+            ergebnis2.checkin.tournament_uuid,
+            "11111111-2222-3333-4444-555555555555"
+        );
+    }
+
+    #[test]
     fn keep_host_managed_fields_preserves_the_given_current_profiles() {
         // Muster `saving_settings_does_not_revert_the_paired_device_list`:
         // Die Einstellungsseite schickt IHREN (beim Öffnen aufgenommenen)
@@ -5215,5 +5542,62 @@ mod tests {
         let empty: std::collections::HashSet<String> = std::collections::HashSet::new();
         crate::tablet::monitor::write_ad_bar(&bar_path, &empty).unwrap();
         assert!(collect_bar_sponsors_b64(ad_dir, &bar_path).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod startbedingungen_tests {
+    use super::pruefe_startbedingungen;
+    use crate::config::{AppConfig, ConnectionMode};
+
+    fn basis() -> AppConfig {
+        let mut cfg = AppConfig::default();
+        cfg.badhub.password = "pw".to_string();
+        cfg.install_id = "inst".to_string();
+        cfg.connection_mode = ConnectionMode::Lan;
+        cfg.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        cfg
+    }
+
+    #[test]
+    fn vollstaendige_config_darf_starten() {
+        assert_eq!(pruefe_startbedingungen(&basis()), Ok(()));
+    }
+
+    #[test]
+    fn ohne_guid_kein_start() {
+        let mut cfg = basis();
+        cfg.tournament_uuid = String::new();
+        let err = pruefe_startbedingungen(&cfg).unwrap_err();
+        assert!(err.contains("Turnier-Kennung"), "{err}");
+        assert!(err.contains("1 · Liveticker-Ziel"), "{err}");
+    }
+
+    #[test]
+    fn kaputte_guid_kein_start() {
+        let mut cfg = basis();
+        cfg.tournament_uuid = "0EA5FD86-A64F".to_string();
+        assert!(pruefe_startbedingungen(&cfg).is_err());
+    }
+
+    #[test]
+    fn slave_braucht_keine_guid_und_kein_passwort() {
+        let cfg = AppConfig {
+            slave_mode: true,
+            ..AppConfig::default()
+        };
+        assert_eq!(pruefe_startbedingungen(&cfg), Ok(()));
+    }
+
+    #[test]
+    fn passwort_fehlt_wird_vor_der_guid_gemeldet() {
+        // Reihenfolge wie bisher: erst der Badhub-Zugang, dann alles Weitere —
+        // wer kein Passwort hat, soll nicht zuerst nach der GUID suchen.
+        let mut cfg = basis();
+        cfg.badhub.password = String::new();
+        cfg.tournament_uuid = String::new();
+        assert!(pruefe_startbedingungen(&cfg)
+            .unwrap_err()
+            .contains("Badhub-Passwort"));
     }
 }

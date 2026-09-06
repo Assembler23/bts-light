@@ -145,7 +145,11 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   über den Hallen-Wähler der Turnierleitungs-Seite (siehe Punkt „Nächste
   Spiele pro Halle" oben); (b) P1 erweitern — BTP-`Highlight` nicht nur
   schreiben, sondern auch **lesen**, damit in BTP gemachte Aufrufe bei
-  uns als „gerufen" erscheinen; (c) beim Umsetzen prüfen, wie das
+  uns als „gerufen" erscheinen — **Lesen seit v0.9.277 vorhanden**
+  (Spec `features/tl-zeilenfarbe.md`: `Highlight` ist BTPs Zeilenfarbe
+  0–6, Gelb = 1 = unsere Aufrufmarke); ein in BTP gelb markiertes Spiel als
+  „gerufen" zu deuten bleibt offen, weil Gelb dort auch eine Handfarbe sein
+  kann (ADR 0056); (c) beim Umsetzen prüfen, wie das
   Original-BTS seine „upcoming"-Ticker-Anzeige speist
   (ticker_manager/highlight) — ggf. weitere Mechanik übernehmen.
 - ~~**Matchball-Einfärbung in der Felderübersicht** (Tilo-Idee, nur
@@ -167,9 +171,9 @@ Aus dem laufenden Betrieb notiert (Turnierleitung + Beobachtungen).
   Fix: `score_status` (Aufgabe/Walkover) aus dem BTP-Snapshot in die
   `recent_finished`-Einträge des Payloads übernehmen (bts-light) und im
   Ticker als Badge „Aufgabe"/„kampflos" anzeigen (badhub `live.js`).
-- *Nice-to-have:* **Zeit seit Aufruf** auf den TVs **und** in bts-light
-  anzeigen (die Aufruf-Uhr existiert am Cloud-Monitor bereits als
-  Datenquelle: `on_court_since`/Aufruf-Zeitstempel).
+- ✅ **Zeit seit Aufruf** auf den TVs (v0.9.54/156), in bts-light und
+  seit v0.9.278 auch am **Tablet** (Kopfzeile, ab der Zuweisung bis zur
+  bestätigten Aufstellung; [tablet.md](tablet.md)).
 - *Nice-to-have:* **Pausenuhr als Overlay.** Die Pausenuhr auf den TVs ist
   gut — der Spielstand soll dabei aber sichtbar bleiben (Overlay statt
   Vollbild-Wechsel).
@@ -199,7 +203,7 @@ Ergänzungen, einer ist neu (Plan 20):
 |---|---|---|
 | Tablet-Schrift größer (Lesebrille) | **D** | ✅ geplant — Plan 3 (Schritt 3 hebt Größen inkl. Spielstand) |
 | Spiel aus dem Backend beenden/finalisieren (vergessen/Abbruch) | **D** | ✅ geplant — Plan 12 a2 (`enter_result` aus der Turnierleitung) |
-| Laufende Zeit nach Aufruf auf TV/Backend/**Tablet** | **C** | ⚠️ Plan 4 deckt TV + Backend — **Tablet-Anzeige ergänzt** |
+| Laufende Zeit nach Aufruf auf TV/Backend/**Tablet** | **C** | ✅ Plan 4 (TV + Backend) · Tablet-Kopfzeile seit v0.9.278 |
 | Multifeld-/Felderübersicht: Pausenzeiten **und** Zeit nach Aufruf | **C/E** | ⚠️ Plan 4 (Zeit) + Plan 5 (Pause) — **auf overview.html/Felderübersicht ausgeweitet** |
 | Feldnummer am Tablet sichtbar, auch bei Erst-Zuweisung | **D** | 🆕 **neu — Plan 20** |
 
@@ -300,6 +304,30 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   `productName` kann separat und mit Bedacht wechseln.
 
 ## Umgesetzt, aber noch nicht abgenommen
+
+- **Mehrere Liveticker je Verband (v0.9.276)** — Spec:
+  [features/liveticker-mehrere-turniere-je-verband.md](features/liveticker-mehrere-turniere-je-verband.md),
+  ADR [0054](adr/0054-liveticker-kind-turnier-je-guid.md).
+  Aus der Nutzer-Frage vom 04.09.2026 (zwei BVBB-Turniere am selben
+  Wochenende): badhub hielt bisher genau **einen** Stand je Zugangsschlüssel,
+  und das Verbands-Preset teilt ein Passwort — zwei parallele Installationen
+  überschrieben sich alle 60 s gegenseitig. badhub legt seither beim ersten
+  Push mit neuer turnier.de-GUID automatisch ein **Kind-Turnier** unter dem
+  Verbandszugang an (`bvbb-<8 Hex>`); das gilt aber nur für Lesepfade, die den
+  Kindschlüssel schon kennen — Konsumenten, die nur den Verbandsschlüssel
+  kennen (Check-In-Zuordnung, Badge, Live-Seite, Branding-Push,
+  Check-In-Admin-Rechte), lösen das
+  Kind an je einer Stelle auf (Nachtrag ADR 0054, Final-Review fand fünf
+  solche Stellen).
+  In bts-light ist die GUID jetzt Pflichtfeld (aus dem Check-In- in den
+  Turnier-Abschnitt „1 · Liveticker-Ziel" gezogen), reist in allen
+  Push-Nachrichten mit (`tset`, `sched`, `tupdate_match`, `centry_list`,
+  `checkin-branding`), Aushang und Dashboard verlinken mit `&g=<GUID>` direkt
+  aufs Turnier. **bts-light-Seite umgesetzt (v0.9.276); badhub-Seite: bereits
+  gemergt und deployt (Migration 208, badhub-PR #621).** Offen gelassen:
+  eigener Check-In-PIN je Kind. Feldtest am nächsten Doppel-Wochenende offen
+  (zwei Installationen mit Preset „BVBB" und zwei GUIDs gegen das deployte
+  badhub).
 
 - **Zähltafel fürs Tablet + Anzeige-Hülle** — Spec:
   [features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
@@ -430,23 +458,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Mehrere Liveticker je Verband** — Spec:
-  [features/liveticker-mehrere-turniere-je-verband.md](features/liveticker-mehrere-turniere-je-verband.md),
-  ADR [0054](adr/0054-liveticker-kind-turnier-je-guid.md).
-  Aus der Nutzer-Frage vom 04.09.2026 (zwei BVBB-Turniere am selben
-  Wochenende): badhub hält genau **einen** Stand je Zugangsschlüssel, und
-  das Verbands-Preset teilt ein Passwort — zwei parallele Installationen
-  überschreiben sich alle 60 s gegenseitig. Künftig legt badhub beim ersten
-  Push mit neuer turnier.de-GUID automatisch ein **Kind-Turnier** unter dem
-  Verbandszugang an (`bvbb-<8 Hex>`); alle Lesepfade bleiben je Schlüssel.
-  In bts-light wird die GUID Pflichtfeld (zieht aus dem Check-In- in den
-  Turnier-Abschnitt), reist in allen Push-Nachrichten mit, Aushang und
-  Dashboard verlinken mit `&g=<GUID>` direkt aufs Turnier. **Hauptteil in
-  badhub** (Migration 208, Schreibpfad, Lesepfad, Admin); Reihenfolge: erst
-  badhub deployen, dann bts-light. Offen gelassen: eigener Check-In-PIN je
-  Kind. **Bis dahin:** für ein zweites paralleles Turnier im badhub-Admin
-  einen eigenen Zugang anlegen und in bts-light als „Eigenes Turnier"
-  eintragen.
 - **Offene Paarungen in der TL-Spielliste** — Spec:
   [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md),
   ADR [0051](adr/0051-offene-spiele-eigene-gedeckelte-liste.md) /
@@ -663,6 +674,20 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Geplant
 
+- **Update ohne jede Lücke (Stufe 3): Prozess-Übergabe oder Dienst +
+  Oberfläche.** Seit v0.9.279 (Spec
+  [features/update-im-turnierbetrieb.md](features/update-im-turnierbetrieb.md),
+  ADR 0057) ist die Update-Lücke eine Sache von ~20 s: Paket vorgeladen,
+  Übertragung läuft danach von selbst wieder an, Feldstempel überleben,
+  „Beim Beenden einbauen" als Alternative. Was bleibt, ist der Prozess-
+  Neustart selbst: LAN-Server (8088/8443), Relay-WebSocket, BTP-Verbindung
+  und Monitor-Sockets sind für Sekunden weg. Echte Nullzeit hieße, diese
+  Verbindungen an einen neuen Prozess zu übergeben (Socket-Handover unter
+  Windows) oder den Kern als Dienst vom Fenster zu trennen (die Oberfläche
+  startet neu, der Dienst nicht — und der Dienst selbst bräuchte dann
+  wieder einen Übergabe-Mechanismus). Beides ein großer Umbau; Nutzen
+  gegenüber Stufe 1+2 erst messen (Feldtest: wie oft wird überhaupt
+  mitten im Turnier aktualisiert?), dann entscheiden.
 - **Code-Signing des Windows-Installers.** Aktuell unsigniert → Windows
   zeigt beim ersten Start eine SmartScreen-Warnung. Optionen: Azure Trusted
   Signing vs. klassisches OV/EV-Zertifikat — Kostenentscheidung offen. Das
@@ -680,6 +705,45 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Changelog-Auszug zusätzlich in `latest.json → notes` (Update-Fenster
   zeigt „Was ist neu"). Plan 18 in
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
+- **Handbuch Stufe 2 — die fehlenden Kapitel.** *Status: zurückgestellt ·
+  Priorität: mittel · Trigger: Wunsch vom 05.09.2026, nach Freigabe von
+  Stufe 1 (PR #333).* Stufe 1 veröffentlicht die vorhandene Doku unter
+  `badhub.de/download/bts-light/handbuch/`. Gewünscht ist darüber hinaus ein
+  Handbuch, in dem **nachlesbar** ist:
+  - was die **Tablets** können — alle Funktionen des Spielzettels, nicht nur
+    der Zähl-Ablauf;
+  - ~~**was welche Einstellung in der Software bewirkt**~~ — **erledigt
+    06.09.2026**: [einstellungen.md](einstellungen.md), alle Abschnitte der
+    Einstellungsseite plus Wartung, mit Standardwerten,
+    Sichtbarkeitsbedingungen und der Frage, ab wann eine Änderung wirkt;
+  - ~~wie der **Master-/Slave-Betrieb** funktioniert~~ — **erledigt
+    06.09.2026**: [master-slave.md](master-slave.md), aus Sicht der
+    Turnierleitung statt der Architektur, mit den vier häufigsten
+    Missverständnissen;
+  - was die **Oberflächen** jeweils können (Turnierleitungs-Sicht,
+    Court-Monitor, Info-Monitor, Siegerehrung, Aushang).
+
+  Dazu weiterhin offen: Installation/Erste Schritte, Setup-Wizard, Wartung.
+  **Der Aufwand liegt im Schreiben, nicht in der Technik** — die Strecke
+  Markdown → Website → Deploy steht. Neue Kapitel entstehen als normale
+  `docs/*.md` und werden in [handbuch.json](handbuch.json) eingetragen; es
+  bleibt bei einem Doku-Ort. Entscheidungen und Grenzen:
+  [features/handbuch-website.md](features/handbuch-website.md).
+- **Handbuch: kürzere Adresse (nginx).** *Status: zurückgestellt · Priorität:
+  niedrig · Trigger: Messung nach dem ersten Deploy, 06.09.2026.* Heute muss
+  `…/download/bts-light/handbuch/index.html` ausgeschrieben verlinkt werden —
+  die Verzeichnis-URL liefert 403 (`index`-Direktive greift für den neuen
+  Unterordner nicht). Eine nginx-Änderung (`index index.php index.html;` für
+  diesen Pfad, oder ein `alias` von `/bts-light/`) macht daraus eine
+  vorzeigbare Adresse. **Server-Änderung mit eigener Freigabe** — über
+  `/server-change`, nicht nebenbei.
+- **Handbuch: Screenshots.** *Status: zurückgestellt · Priorität: niedrig ·
+  Trigger: erst wenn die Textfassung von Stufe 2 steht.* Für Vollabdeckung
+  rund 45–60 Aufnahmen. Die Web-Oberflächen (Tablet, TL-Web, Monitor, Aushang,
+  Werbung) sind reine HTML-Seiten des eingebetteten Servers und damit gegen
+  einen Mock-Stand automatisierbar; nur die Tauri-Fenster bleiben Handarbeit.
+  Bewusst nachgelagert: Screenshots veralten mit jedem UI-Umbau, und der
+  Pflegeaufwand ist der eigentliche Dauerposten des Handbuchs.
 - **Feld-Raster per Drag & Drop anordnen.** Das Feld-Raster
   (Spaltenzahl + Start-Ecke + Schlange, [features/feld-raster.md](features/feld-raster.md))
   deckt rechteckige Hallen ab; für unregelmäßige Hallen wäre eine frei
@@ -926,9 +990,11 @@ verliehen):
   pro Pi steuerbar (ohne `bts-monitor-url.txt` editieren zu müssen).
   Implementation: zusätzliches Feld `rotation: Option<u16>` in der
   Geräte-Zuweisung; bts-monitor.sh hängt `?rotate=…` an die URL an.
-- **Online-Anleitung veröffentlichen.** [pi-setup.md](pi-setup.md) als
-  echte Webseite (badhub.de) bereitstellen und **in bts-light verlinken**
-  (Knopf „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
+- **Online-Anleitung veröffentlichen — Veröffentlichung erledigt, Verlinkung
+  offen.** [pi-setup.md](pi-setup.md) steht seit dem Handbuch (PR #333) als
+  echte Webseite unter `badhub.de/download/bts-light/handbuch/pi-einrichten.html`.
+  **Offen bleibt:** aus bts-light heraus darauf verlinken (Knopf
+  „Einrichtungs-Anleitung" auf der Court-Monitore-Seite).
 - **2-Felder-pro-TV-Modus.** Zwei benachbarte Felder auf einem großen TV
   (`…/display?courts=3,4`).
 

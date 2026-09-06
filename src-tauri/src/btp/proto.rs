@@ -294,23 +294,29 @@ pub struct MatchCourt {
     pub officials: Option<(i64, i64)>,
 }
 
-/// Ein Match, dessen `Highlight`-Flag in BTP gesetzt/gelöscht werden soll
-/// (P1: „in Vorbereitung"-Aufruf in BTP sichtbar machen, wie im Original-BTS).
+/// Ein Match, dessen Zeilenfarbe `Match.Highlight` in BTP gesetzt werden
+/// soll. Zwei Schreiber teilen sich das Feld (ADR 0056): der
+/// Vorbereitungs-Aufruf (P1, `1` = Gelb beim Aufruf, `0` beim Ende) und die
+/// Farbwahl der Turnierleitungs-Seite (Spec `tl-zeilenfarbe`, `0`–`6`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HighlightEntry {
     pub match_id: i64,
     pub draw_id: i64,
     pub planning_id: i64,
-    /// `true` = Highlight:1 (aufgerufen), `false` = Highlight:0 (Aufruf weg).
-    pub on: bool,
+    /// `0` = keine Farbe, `1`–`6` = die Menüfarben (`relay_proto::MAX_HIGHLIGHT`).
+    pub highlight: u8,
 }
 
-/// Fertige Wire-Bytes für einen `SENDUPDATE`, der **ausschließlich** das
-/// `Match.Highlight`-Flag setzt/löscht (P1). Der Match-Knoten trägt NUR die
-/// Identität (`ID`/`DrawID`/`PlanningID`) + `Highlight` — bewusst **kein**
-/// `Status` (Check-in-Bitfeld, v0.9.103-Falle) und keine Ergebnisfelder, damit
-/// der Aufruf-Marker nichts anderes am Match verändert (gleiche Vorsicht wie
-/// `court_assign_request`).
+/// Wert der Aufrufmarke (P1): Gelb.
+pub const HIGHLIGHT_PREP_CALL: u8 = 1;
+
+/// Fertige Wire-Bytes für einen `SENDUPDATE`, der **ausschließlich**
+/// `Match.Highlight` setzt. Der Match-Knoten trägt NUR die Identität
+/// (`ID`/`DrawID`/`PlanningID`) + `Highlight` — bewusst **kein** `Status`
+/// (Check-in-Bitfeld, v0.9.103-Falle) und keine Ergebnisfelder, damit die
+/// Farbe nichts anderes am Match verändert (gleiche Vorsicht wie
+/// `court_assign_request`). BTP nimmt jeden Wert 0–6 an und zeichnet ihn
+/// sofort (gemessen 05.09.2026, `tests/btp_highlight_probe.rs`).
 pub fn highlight_request(
     entries: &[HighlightEntry],
     session_key: &str,
@@ -325,7 +331,7 @@ pub fn highlight_request(
                     Node::integer("ID", h.match_id),
                     Node::integer("DrawID", h.draw_id),
                     Node::integer("PlanningID", h.planning_id),
-                    Node::integer("Highlight", if h.on { 1 } else { 0 }),
+                    Node::integer("Highlight", i64::from(h.highlight)),
                 ],
             )
         })
@@ -933,7 +939,7 @@ mod tests {
                 match_id: 42,
                 draw_id: 7,
                 planning_id: 1001,
-                on: true,
+                highlight: HIGHLIGHT_PREP_CALL,
             }],
             "S-9",
             None,
@@ -963,13 +969,32 @@ mod tests {
                 match_id: 1,
                 draw_id: 2,
                 planning_id: 3,
-                on: false,
+                highlight: 0,
             }],
             "S",
             None,
         );
         let m = match_node(&req);
         assert_eq!(child_int(&m, "Highlight"), Some(0));
+    }
+
+    /// Zeilenfarbe (Spec `tl-zeilenfarbe`): derselbe Request trägt jeden
+    /// Menüwert — BTP nimmt 0–6 an (gemessen 05.09.2026).
+    #[test]
+    fn highlight_request_carries_any_menu_colour() {
+        let req = highlight_request(
+            &[HighlightEntry {
+                match_id: 958,
+                draw_id: 2,
+                planning_id: 3,
+                highlight: 6,
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&req);
+        assert_eq!(child_int(&m, "Highlight"), Some(6));
+        assert!(xml::find(&m, "Status").is_none(), "kein Status-Bitfeld");
     }
 
     /// Regression: Ein freigegebenes Feld muss als `Court` OHNE `MatchID`

@@ -24,6 +24,13 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Wie lange das Echo einer nach BTP geschriebenen Zeilenfarbe den
+/// BTP-Stand überlagert (Spec `tl-zeilenfarbe`): mehrere Abruf-Takte, damit
+/// ein Abruf, der vor dem Write begann, die Farbe nicht kurz wegflackern
+/// lässt — und kurz genug, dass eine von BTP verworfene Farbe zügig ehrlich
+/// verschwindet.
+pub const HIGHLIGHT_ECHO_MS: u64 = 20_000;
+
 /// Obergrenze verfolgter Monitor-Geräte (Missbrauchs-Schutz). Bei
 /// Überschreitung wird das am längsten nicht gesehene Gerät verdrängt.
 const MAX_MONITOR_DEVICES: usize = 128;
@@ -501,6 +508,13 @@ pub struct TabletState {
     /// das aktuelle Spiel auf dem Feld steht. Grundlage des Aufruf-Timers; vom
     /// Sync-Loop je Poll abgeglichen.
     on_court_since: RwLock<HashMap<i64, (i64, u64)>>,
+    /// Hat der erste Abgleich nach dem Prozessstart schon stattgefunden?
+    /// Nur dieser erste Lauf darf die Feldstempel aus dem persistierten
+    /// Bruttostart (`match-times.json`) übernehmen — sonst begänne die
+    /// Aufruf-Uhr nach jedem Update bei null (Spec
+    /// `update-im-turnierbetrieb`). Danach gilt wieder: ein Spiel, das neu
+    /// aufs Feld kommt, wird mit „jetzt" gestempelt.
+    on_court_seeded: AtomicBool,
     /// Aktuell für die Siegerehrung gewählte Disziplin (Draw-ID), die der
     /// Sieger-Monitor zeigt. `None` = nichts gewählt (Begrüßungsbild). Vom
     /// Operator in bts-light gesetzt; NICHT rotierend — die Ehrung wird
@@ -585,6 +599,19 @@ pub struct TabletState {
     /// wie die Ausnahmeliste, aus demselben Grund geteilt zwischen TL-Web,
     /// Sync-Lauf und Anzeige.
     wish_courts: crate::tablet::wish_court::WishCourtStore,
+    /// Echo der zuletzt nach BTP geschriebenen Zeilenfarben (Spec
+    /// `tl-zeilenfarbe`, ADR 0056): Match-ID → (Farbe, Schreibzeitpunkt).
+    /// **Kein** Speicher der Wahrheit — BTP ist sie (R2). Das Echo überlagert
+    /// nur die nächsten Snapshots, bis BTP denselben Wert liefert oder
+    /// [`HIGHLIGHT_ECHO_MS`] verstrichen sind: So sieht die Turnierleitung
+    /// ihre Farbe sofort statt erst mit dem nächsten Abruf, und eine von
+    /// BTP verworfene Farbe ist nach der Frist ehrlich wieder weg.
+    highlight_echo: RwLock<HashMap<i64, (u8, u64)>>,
+    /// Spiele, deren Zeilenfarbe die Turnierleitung über die Web-Sicht
+    /// gesetzt hat (auch „keine"). Der Vorbereitungs-Abgleich färbt sie
+    /// nicht mehr gelb (ADR 0056). Nur im Speicher: Ein Neustart der App
+    /// vergisst die Marken, BTP hat die Farbe ohnehin.
+    highlight_by_hand: RwLock<std::collections::HashSet<i64>>,
     /// Manuelle Spielreihenfolge je Halle (Spec
     /// `spielliste-manuelle-reihenfolge`, ADR 0023): Match-IDs im
     /// Präfix-Block ihrer Halle, turniergebunden persistiert. Er hängt hier
@@ -1232,6 +1259,10 @@ impl From<PersistedBtpEntry> for PendingBtpWrite {
 impl TabletState {
     /// Den neuesten BTP-Snapshot ablegen (vom Sync-Loop aufgerufen).
     pub fn set_snapshot(&self, snapshot: BtpSnapshot) {
+        // Das Zeilenfarben-Echo (Spec `tl-zeilenfarbe`) legt `run_once`
+        // EINMAL über den Stand, bevor er hierher und an den P1-Abgleich
+        // geht — nicht hier, sonst sähe der Abgleich einen anderen Stand
+        // als die Anzeige.
         // Punktverlauf folgt dem Turnier des Snapshots (öffnet/lädt bei
         // Wechsel die zugehörige Datei) — ein leerer Name ändert nichts.
         self.timeline.set_tournament(&snapshot.tournament_name);
@@ -1366,6 +1397,88 @@ impl TabletState {
     /// Wunschfeld setzen (`Some`) oder aufheben (`None`).
     pub fn set_wish_court(&self, match_id: i64, court_id: Option<i64>) {
         self.wish_courts.set_wish(match_id, court_id);
+    }
+
+    /// Eine soeben erfolgreich nach BTP geschriebene Zeilenfarbe merken
+    /// (Spec `tl-zeilenfarbe`) und **sofort** in den liegenden Stand
+    /// eintragen — die Turnierleitung sieht ihre Farbe im nächsten
+    /// Anzeigetakt, nicht erst nach dem nächsten BTP-Abruf. Die folgenden
+    /// Snapshots überlagert [`Self::apply_highlight_echo`], bis BTP den Wert
+    /// selbst liefert oder [`HIGHLIGHT_ECHO_MS`] um sind.
+    ///
+    /// Der Zeitstempel entsteht **hier**, nach dem geglückten Write — nicht
+    /// beim Eingang der Aktion: Login und Update nach BTP können Sekunden
+    /// dauern, und die Frist soll ab dem Moment laufen, ab dem BTP den Wert
+    /// hat.
+    ///
+    /// Zugleich gilt das Spiel als **von Hand gefärbt** (auch bei „keine"):
+    /// Der Vorbereitungs-Abgleich setzt an ein solches Spiel kein Gelb mehr
+    /// (ADR 0056) — sonst würde ein bewusst auf „keine" gestelltes gerufenes
+    /// Spiel im nächsten Zyklus wieder gelb.
+    pub fn remember_highlight(&self, match_id: i64, highlight: u8) {
+        let now = now_ms();
+        self.highlight_echo
+            .write()
+            .unwrap()
+            .insert(match_id, (highlight, now));
+        self.highlight_by_hand.write().unwrap().insert(match_id);
+        if let Some(snap) = self.snapshot.write().unwrap().as_mut() {
+            if let Some(m) = snap.matches.iter_mut().find(|m| m.id == match_id) {
+                m.highlight = highlight;
+            }
+        }
+    }
+
+    /// Hat die Turnierleitung dieses Spiel über die Web-Sicht gefärbt (oder
+    /// bewusst auf „keine" gestellt)? Für den Vorbereitungs-Abgleich
+    /// (`sync.rs::highlight_desired`): kein Gelb über eine Handentscheidung.
+    pub fn highlight_by_hand(&self) -> std::collections::HashSet<i64> {
+        self.highlight_by_hand.read().unwrap().clone()
+    }
+
+    /// Legt das Farb-Echo über einen frischen BTP-Stand — **genau einmal je
+    /// Abruf**, in `sync.rs::run_once`, bevor der Stand an alle Leser geht
+    /// (Anzeige über `set_snapshot`, P1-Abgleich). Ein Eintrag erlischt,
+    /// sobald BTP denselben Wert liefert (dann ist er überflüssig) oder
+    /// seine Frist abgelaufen ist (dann gilt, was BTP sagt — auch wenn das
+    /// „verworfen" heißt, R2). Dazwischen gewinnt das Echo: Der Abruf könnte
+    /// noch vor unserem Write begonnen haben.
+    ///
+    /// Räumt zugleich die Hand-Marken: Ein Spiel, das nicht mehr angesetzt
+    /// ist oder fehlt, braucht keine mehr (bei Spielende nimmt der Abgleich
+    /// ohnehin nichts mehr vor).
+    pub fn apply_highlight_echo(&self, snapshot: &mut BtpSnapshot) {
+        self.apply_highlight_echo_at(snapshot, now_ms());
+    }
+
+    fn apply_highlight_echo_at(&self, snapshot: &mut BtpSnapshot, now_ms: u64) {
+        self.highlight_by_hand.write().unwrap().retain(|id| {
+            snapshot
+                .matches
+                .iter()
+                .any(|m| m.id == *id && m.status == MatchStatus::Scheduled)
+        });
+        let mut echo = self.highlight_echo.write().unwrap();
+        if echo.is_empty() {
+            return;
+        }
+        echo.retain(|match_id, (highlight, written_ms)| {
+            // Abgelaufen ist auch, was in der Zukunft liegt: Springt die Uhr
+            // zurück, darf das Echo nicht bis zum Aufholen weiterleben
+            // (dasselbe Muster wie bei den Reservierungen).
+            let frisch = *written_ms <= now_ms && now_ms - *written_ms <= HIGHLIGHT_ECHO_MS;
+            if !frisch {
+                return false;
+            }
+            let Some(m) = snapshot.matches.iter_mut().find(|m| m.id == *match_id) else {
+                return false;
+            };
+            if m.highlight == *highlight {
+                return false;
+            }
+            m.highlight = *highlight;
+            true
+        });
     }
 
     /// Der Speicher der manuellen Spielreihenfolge (Spec
@@ -2232,13 +2345,40 @@ impl TabletState {
     /// oder gewechseltes Spiel wird mit `now` gestempelt; verlässt ein Spiel
     /// das Feld, fällt sein Eintrag weg. Idempotent – mehrfacher Aufruf mit
     /// gleichem Stand ändert die Zeitstempel nicht.
+    ///
+    /// **Erster Lauf nach dem Prozessstart:** Spiele, die schon auf dem Feld
+    /// stehen, bekommen den persistierten Bruttostart aus `match-times.json`
+    /// statt „jetzt" — so läuft die Aufruf-Uhr nach einem Update oder
+    /// Neustart weiter, statt bei null zu beginnen. Fehlt der Stempel
+    /// (Spiel wurde vor dem Start der App in BTP aufgerufen), bleibt es bei
+    /// „jetzt".
     pub fn reconcile_on_court(&self, oncourt: &HashMap<i64, i64>, now: u64) {
+        // Der Seed zählt erst, wenn der Store ans Turnier gebunden ist
+        // (Review 06.09.2026): Vorher ist er leer — etwa solange eine
+        // unlesbare `match-times.json` noch Ladeversuche bekommt — und der
+        // einmalige erste Lauf wäre folgenlos verbraucht. Ungebunden bleibt
+        // das Flag stehen, der Seed wartet auf den nächsten Poll.
+        let store_gebunden = !self.match_times.tournament().is_empty();
+        let erster_lauf = store_gebunden && !self.on_court_seeded.swap(true, Ordering::SeqCst);
+        // Stempel VOR dem Schreib-Lock holen — der Store hat sein eigenes
+        // Lock, und verschachtelte Locks sind hier unnötig.
+        let seed = |mid: i64| {
+            if erster_lauf {
+                self.match_times.first_assigned_ms(mid)
+            } else {
+                None
+            }
+        };
+        let neu: Vec<(i64, i64, u64)> = oncourt
+            .iter()
+            .map(|(&court_id, &mid)| (court_id, mid, seed(mid).unwrap_or(now)))
+            .collect();
         let mut map = self.on_court_since.write().unwrap();
         // Felder vergessen, auf denen jetzt kein bzw. ein anderes Spiel steht.
         map.retain(|court_id, (mid, _)| oncourt.get(court_id) == Some(mid));
         // Neu hinzugekommene Spiele stempeln (gewechselte sind oben rausgeflogen).
-        for (&court_id, &mid) in oncourt {
-            map.entry(court_id).or_insert((mid, now));
+        for (court_id, mid, ts) in neu {
+            map.entry(court_id).or_insert((mid, ts));
         }
         // Die Aufrufe gehören zur Standzeit: Verlässt ein Spiel das Feld,
         // müssen auch seine Aufrufe vergessen werden. Sonst zeigte dasselbe
@@ -4537,6 +4677,7 @@ mod tests {
     fn match_on(id: i64, court: Option<i64>, status: MatchStatus) -> BtpMatch {
         BtpMatch {
             display_order: None,
+            highlight: 0,
             from1: None,
             from2: None,
             id,
@@ -5972,6 +6113,59 @@ mod tests {
         assert_eq!(st.on_court_since_ms(1, 200), None);
     }
 
+    /// Nach einem Neustart (Update) übernimmt der ERSTE Abgleich den
+    /// persistierten Bruttostart, damit die Aufruf-Uhr weiterläuft; spätere
+    /// Abgleiche stempeln wie gehabt mit „jetzt" (Spec
+    /// `update-im-turnierbetrieb`).
+    #[test]
+    fn on_court_since_uebernimmt_beim_ersten_lauf_den_persistierten_start() {
+        let st = TabletState::default();
+        st.match_times_store().set_tournament("Testturnier");
+        // „Vor dem Neustart": Match 100 seit t=1000 auf dem Feld, Stempel
+        // liegt im Store (der die Datei überlebt hätte).
+        st.match_times_store()
+            .reconcile(&[(100, "HE", "mens_singles", "")], &HashSet::new(), 1000);
+
+        // Erster Abgleich der neuen App-Instanz bei t=60000: alter Stempel.
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(1000));
+
+        // Match 200 hat ebenfalls einen alten Stempel, kommt aber erst im
+        // ZWEITEN Lauf aufs Feld (Feldwechsel im laufenden Betrieb): „jetzt".
+        st.match_times_store()
+            .reconcile(&[(200, "HE", "mens_singles", "")], &HashSet::new(), 2000);
+        st.reconcile_on_court(&HashMap::from([(1, 100), (2, 200)]), 70_000);
+        assert_eq!(st.on_court_since_ms(2, 200), Some(70_000));
+        assert_eq!(st.on_court_since_ms(1, 100), Some(1000), "bleibt");
+    }
+
+    /// Ohne persistierten Stempel bleibt auch der erste Lauf bei „jetzt".
+    #[test]
+    fn on_court_since_erster_lauf_ohne_store_stempel_nimmt_jetzt() {
+        let st = TabletState::default();
+        st.match_times_store().set_tournament("Testturnier");
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000));
+    }
+
+    /// Solange der Store nicht ans Turnier gebunden ist, wird der erste Lauf
+    /// NICHT verbraucht — der Seed greift, sobald die Bindung da ist.
+    #[test]
+    fn on_court_since_seed_wartet_auf_die_store_bindung() {
+        let st = TabletState::default();
+        // Ungebunden: Feld 1 wird mit „jetzt" gestempelt, Flag bleibt frei.
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000));
+
+        st.match_times_store().set_tournament("Testturnier");
+        st.match_times_store()
+            .reconcile(&[(200, "HE", "mens_singles", "")], &HashSet::new(), 1000);
+        // Erster GEBUNDENER Lauf: Match 200 bekommt seinen alten Stempel.
+        st.reconcile_on_court(&HashMap::from([(1, 100), (2, 200)]), 61_000);
+        assert_eq!(st.on_court_since_ms(2, 200), Some(1000));
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000), "bleibt");
+    }
+
     /// Reconnect-Erkennung (Turnier-Feedback 18.07.2026): Das Feld merkt
     /// sich die Geräte-Kennung des Halters — nur DASSELBE Gerät gilt beim
     /// Wiederverbinden als Halter, fremde und leere Kennungen nicht.
@@ -6288,6 +6482,62 @@ mod tests {
         let mut s = snapshot(Vec::new(), Vec::new());
         s.tournament_name = name.to_string();
         s
+    }
+
+    /// Spec `tl-zeilenfarbe`: Das Echo einer geschriebenen Farbe ist sofort
+    /// im liegenden Stand, überlagert einen Abruf mit altem Wert, erlischt
+    /// bei Gleichstand — und nach der Frist gilt wieder, was BTP sagt.
+    /// Der Abruf-Weg ist wie in `run_once`: erst `apply_highlight_echo`,
+    /// dann `set_snapshot`.
+    #[test]
+    fn zeilenfarben_echo_ueberlagert_alte_abrufe_und_erlischt() {
+        let st = TabletState::default();
+        let mut snap = snap_named("Cup");
+        snap.matches.push(match_on(7, None, MatchStatus::Scheduled));
+        st.set_snapshot(snap.clone());
+        let abruf = |st: &TabletState, s: &BtpSnapshot| {
+            let mut frisch = s.clone();
+            st.apply_highlight_echo(&mut frisch);
+            st.set_snapshot(frisch);
+        };
+
+        // Write nach BTP gelang → sofort sichtbar, ohne neuen Abruf, und das
+        // Spiel gilt als von Hand gefärbt.
+        st.remember_highlight(7, 3);
+        assert_eq!(st.snapshot_clone().unwrap().matches[0].highlight, 3);
+        assert!(st.highlight_by_hand().contains(&7));
+
+        // Ein Abruf, der noch den alten Wert (0) bringt, wird überlagert …
+        abruf(&st, &snap);
+        assert_eq!(st.snapshot_clone().unwrap().matches[0].highlight, 3);
+
+        // … sobald BTP die Farbe selbst liefert, erlischt das Echo …
+        snap.matches[0].highlight = 3;
+        abruf(&st, &snap);
+        assert!(st.highlight_echo.read().unwrap().is_empty());
+
+        // … und danach gilt wieder allein BTP (jemand färbt im Planer um).
+        snap.matches[0].highlight = 5;
+        abruf(&st, &snap);
+        assert_eq!(st.snapshot_clone().unwrap().matches[0].highlight, 5);
+
+        // Nach der Frist gewinnt BTP auch gegen ein noch offenes Echo …
+        snap.matches[0].highlight = 0;
+        st.highlight_echo.write().unwrap().insert(7, (2, 5_000));
+        st.apply_highlight_echo_at(&mut snap, 5_000 + HIGHLIGHT_ECHO_MS + 1);
+        assert_eq!(snap.matches[0].highlight, 0, "Frist um → BTP-Wert");
+        assert!(st.highlight_echo.read().unwrap().is_empty());
+
+        // … und eine rückwärts gesprungene Uhr hält das Echo nicht am Leben.
+        st.highlight_echo.write().unwrap().insert(7, (2, 900_000));
+        st.apply_highlight_echo_at(&mut snap, 100_000);
+        assert_eq!(snap.matches[0].highlight, 0, "Zukunft = abgelaufen");
+        assert!(st.highlight_echo.read().unwrap().is_empty());
+
+        // Die Hand-Marke fällt, sobald das Spiel nicht mehr angesetzt ist.
+        snap.matches[0].status = MatchStatus::OnCourt;
+        abruf(&st, &snap);
+        assert!(!st.highlight_by_hand().contains(&7));
     }
 
     #[test]

@@ -65,7 +65,11 @@ pub fn diff(
 
     match changed.as_slice() {
         [] => Update::None,
-        [m] => Update::Single(build_tupdate(m, rid)),
+        [m] => Update::Single(build_tupdate(
+            m,
+            rid,
+            ctx.config.tournament_uuid_kanonisch(),
+        )),
         // Mehrere gleichzeitige Änderungen → der Einfachheit halber voll.
         _ => Update::Full(build_tset(current, rid, ctx)),
     }
@@ -132,6 +136,7 @@ mod tests {
     fn match_on_court(id: i64, court: &str, sets: Vec<(i64, i64)>) -> BtpMatch {
         BtpMatch {
             display_order: None,
+            highlight: 0,
             from1: None,
             from2: None,
             id,

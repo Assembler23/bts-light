@@ -204,5 +204,15 @@ pruefe(
   "Kopf-Knopf neben dem Programm-Download springt zum Pi-Image-Block"
 );
 
+// Der Weg zum Handbuch fuehrt ueber die Release-Seite. Faellt der Link beim
+// naechsten Umbau des Seitengeruests still weg, findet die Anleitung niemand
+// mehr — die Seite selbst saehe dabei voellig in Ordnung aus.
+// index.html ausgeschrieben: die Verzeichnis-URL liefert 403 (gemessen
+// 06.09.2026). Ein verkuerzter Link waere ein toter Knopf auf der Startseite.
+pruefe(
+  seite.includes('href="handbuch/index.html"'),
+  "Release-Seite verlinkt das Handbuch mit ausgeschriebenem index.html"
+);
+
 console.log(fehler === 0 ? "\nOK" : `\n${fehler} fehlgeschlagen`);
 process.exit(fehler === 0 ? 0 : 1);

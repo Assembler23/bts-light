@@ -1,7 +1,7 @@
 {
   "name": "bts-light",
   "private": true,
-  "version": "0.9.275",
+  "version": "0.9.281",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,6 +26,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.1",
+    "marked": "^18.0.11",
     "typescript": "~7.0.2",
     "vite": "^8.2.2"
   }

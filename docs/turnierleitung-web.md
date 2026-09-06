@@ -88,9 +88,28 @@ LAN+Cloud voraus.
 - **Das ⋮-Menü an einer Wartelisten-Zeile:** Alles, was seltener gebraucht
   wird, steckt dahinter — **Nachruf** (beide Parteien oder nur eine), der
   **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, das **Wunschfeld**,
-  „Ergebnis eintragen" und **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile
-  nur, was ständig gebraucht wird; so passt eine Zeile auch auf einem
-  schmalen Tablet in eine Zeile statt in vier.
+  **Hervorheben** (Zeilenfarbe wie in BTP), „Ergebnis eintragen" und
+  **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile nur, was ständig
+  gebraucht wird; so passt eine Zeile auch auf einem schmalen Tablet in eine
+  Zeile statt in vier.
+- **Hervorheben** (seit v0.9.277, Spec
+  [`features/tl-zeilenfarbe.md`](features/tl-zeilenfarbe.md)): Im ⋮-Menü
+  einer Zeile stehen **„keine" und sechs Farbfelder** — Gelb, Pink, Orange,
+  Blau, Grün, Lila, in derselben Reihenfolge und denselben Tönen wie BTPs
+  Kontextmenü „Hervorheben". Ein Tipp schreibt die Farbe **nach BTP**; die
+  Zeile ist sofort eingefärbt, und im BTP-Planer erscheint dieselbe Farbe.
+  Umgekehrt zeigt die Liste jede Farbe, die jemand im Planer setzt (auch an
+  offenen Paarungen). Läuft das Spiel, trägt die **Feldkachel** neben dem
+  Feldnamen einen Farbpunkt statt eines Volltons. Was eine Farbe bedeutet,
+  vereinbart das Team — bts-light und BTP geben ihr keine Bedeutung.
+  **Zusammenspiel mit dem Vorbereitungs-Aufruf:** Der Aufruf färbt ein
+  Spiel in BTP gelb und nimmt das Gelb beim Ruf aufs Feld wieder zurück.
+  Ein Spiel, das schon eine Handfarbe trägt, lässt der Aufruf in Ruhe; und
+  färbt jemand ein gerufenes Spiel um, bleibt die neue Farbe auch nach dem
+  Aufruf stehen (ADR 0056). Nur Hand-**Gelb** an einem gerufenen Spiel kann
+  der Aufruf nicht von seinem eigenen Gelb unterscheiden — es verschwindet
+  mit dem Ruf aufs Feld. Fehlt die Gruppe im Menü, ist der Turnier-PC noch
+  auf einer älteren Version.
 - **🖨 Zettel (leer)** druckt den **Vorabzettel** des Spiels: derselbe
   Bogen wie der Archivzettel, aber mit leerem Raster — zum Mitgeben an
   den Schiedsrichter, der ihn von Hand führt. Kopf, Namen und Verein sind
@@ -157,6 +176,10 @@ LAN+Cloud voraus.
   **Abschalten:** In der `config.json` steht `finished_warning_seconds`
   (Default 60). `0` schaltet die Warnung ganz ab — der Rückzugsweg, falls sie
   im laufenden Turnier zu oft danebenliegt.
+- **Vom Feld nehmen im ⋯-Menü** (seit v0.9.280): Ein belegtes Feld bietet in
+  seinem ⋯-Menü **„↩ Vom Feld nehmen"** — derselbe Befehl wie im Band nach dem
+  Antippen der Kachel, nur ohne vorherige Auswahl. Läuft dort schon ein
+  Spielstand, fragt die Seite nach, weil er verloren geht.
 - **Felder sperren und freigeben** (seit v0.9.258): Im ⋯-Menü einer
   Feld-Kachel steht **„🔒 Feld sperren"**. Ein gesperrtes Feld bekommt von der
   automatischen Vergabe kein Spiel mehr — für ein kaputtes Netz, ein
@@ -387,6 +410,32 @@ nichts, auch nicht am Rand der Liste.
 **Ohne Ziehen:** Den Griff antippen bzw. mit Tab anfokussieren und mit ↑/↓
 verschieben. Ein Schritt je Tastendruck. Auch der **↑-Knopf** und die übrigen
 Knöpfe der Zeile lassen sich mit Tab ansteuern und mit Enter auslösen.
+
+**Vier Verschiebe-Knöpfe statt Ziehen** (seit v0.9.280, Profil-Schalter):
+Wo Ziehen nicht praktikabel ist (kleiner Bildschirm, ungenauer Stift,
+Handschuhe), schaltet das Häkchen **„Verschiebe-Knöpfe an jeder Zeile"** im
+Profil-Editor an jeder umsortierbaren Zeile vier Knöpfe frei: **⤒** an den
+Anfang, **↑** eine Position nach oben, **↓** eine nach unten, **⤓** ans Ende.
+Sie ersetzen den einzelnen ↑-Knopf und stehen immer in derselben Reihe; was
+gerade nicht geht, ist ausgegraut statt versteckt: ⤒/↑ an der ersten Zeile,
+↓/⤓ an der letzten — Letzteres nur, wenn die ganze Liste geladen ist. „Ans
+Ende" heißt das echte Ende der Liste, auch wenn sie noch nicht bis dorthin
+geladen ist; alles bis dahin Sichtbare gilt danach als von Hand sortiert.
+„Eine nach unten" an der letzten geladenen Zeile schiebt vor das nächste
+noch nicht geladene Spiel. Standard ist **aus** — die Zeile wird damit
+spürbar breiter.
+
+**Behoben in v0.9.280:**
+
+- Das **Ziehen** am Griff endete seit v0.9.271 fast immer damit, dass die
+  Zeile an ihren Platz zurücksprang und nichts gesendet wurde. Ursache: Der
+  Browser gibt den Zeigerfang eines Elements frei, sobald es beim
+  Einsortieren im DOM umgehängt wird, und das Sicherheitsnetz gegen
+  verlorene Gesten hielt das für einen Abbruch. Jetzt holt sich der Zug den
+  Fang zurück; nur wenn das nicht mehr geht, gilt die Geste als verworfen.
+- **Zweimal „an den Anfang"** (erst Spiel A, dann Spiel B) warf A wieder auf
+  seinen BTP-Platz zurück, statt es an zweiter Stelle zu halten. Der manuell
+  sortierte Block bleibt jetzt bei jedem Zug vollständig erhalten.
 
 ### Ein Spiel von der automatischen Feldvergabe ausnehmen
 

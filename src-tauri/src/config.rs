@@ -530,6 +530,23 @@ pub fn is_tournament_uuid(value: &str) -> bool {
         .all(|(g, len)| g.len() == len && g.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
+/// Kanonische Form einer Turnier-GUID: getrimmt, ohne BTPs `{…}`,
+/// Großschreibung. `None`, wenn [`is_tournament_uuid`] sie ablehnt. Muss zur
+/// Normalisierung in badhub (`liveticker_guid_normalisieren`) passen — beide
+/// Seiten leiten daraus denselben Kindschlüssel ab.
+pub fn kanonische_guid(value: &str) -> Option<String> {
+    if !is_tournament_uuid(value) {
+        return None;
+    }
+    Some(
+        value
+            .trim()
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .to_ascii_uppercase(),
+    )
+}
+
 /// Einstellungen der automatischen Feldvergabe. Ist sie aktiv, weist bts-light
 /// ein spielbereites Match automatisch einem freien, nicht gesperrten Feld zu,
 /// sobald dieses lange genug frei ist – schreibt das wie die manuelle Vergabe
@@ -650,6 +667,19 @@ pub struct AppConfig {
     /// Namespace im Cloud-Relay.
     #[serde(default)]
     pub install_id: String,
+    /// turnier.de-Turnier-GUID (kanonisch: `8-4-4-4-12`, Großschreibung).
+    /// **Pflicht** für den Liveticker-Push: badhub führt jedes Turnier eines
+    /// Verbandszugangs als eigenes Kind-Turnier unter dieser GUID (ADR 0054),
+    /// sonst überschrieben sich zwei parallele Turniere gegenseitig.
+    ///
+    /// Ursprünglich lebte der Wert nur im Check-In-Block. Der Lader übernimmt
+    /// ihn von dort einmalig und **spiegelt** dieses Feld danach immer nach
+    /// `checkin.tournament_uuid` zurück — so bleiben die Check-In-Leser
+    /// unverändert, und eine ältere Version nach einem Rückrollen findet ihre
+    /// GUID an der gewohnten Stelle. `#[serde(default)]` hält ältere
+    /// Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub tournament_uuid: String,
     /// Verbindungsart für die Tablets (LAN oder Cloud). `#[serde(default)]`
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -1084,6 +1114,11 @@ pub struct TlDisplaySettings {
     /// Schalter findet. So herum gilt für alle Profile — alte wie neue — der
     /// gewollte Standard „anzeigen".
     pub hide_open_matches: bool,
+    /// Vier Verschiebe-Knöpfe (⤒ ↑ ↓ ⤓) an JEDER umsortierbaren Zeile der
+    /// Warteliste statt nur „↑ an den Anfang" (Wunsch 06.09.2026: Ziehen ist
+    /// auf manchen Geräten nicht praktikabel). Default aus — die Zeile wird
+    /// damit spürbar breiter; wer es braucht, schaltet es im Profil ein.
+    pub show_move_buttons: bool,
     pub list_position: TlListPosition,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
     /// Gehört ins Profil und nicht ins Gerät: Sie beschreibt, WAS gezeigt
@@ -1252,6 +1287,26 @@ pub enum ConfigError {
 }
 
 impl AppConfig {
+    /// Die Turnier-GUID in kanonischer Form — oder `None`, wenn keine
+    /// gültige eingetragen ist. Einzige Quelle für Push und Links.
+    pub fn tournament_uuid_kanonisch(&self) -> Option<String> {
+        kanonische_guid(&self.tournament_uuid)
+    }
+
+    /// Migration + Spiegel der Turnier-GUID (siehe Feld-Kommentar). Wird
+    /// beim Laden gerufen; idempotent.
+    pub fn spiegele_turnier_guid(&mut self) {
+        if kanonische_guid(&self.tournament_uuid).is_none() {
+            if let Some(alt) = kanonische_guid(&self.checkin.tournament_uuid) {
+                self.tournament_uuid = alt;
+            }
+        }
+        if let Some(k) = kanonische_guid(&self.tournament_uuid) {
+            self.tournament_uuid = k.clone();
+            self.checkin.tournament_uuid = k;
+        }
+    }
+
     /// Lädt die Konfiguration aus einer JSON-Datei. Fehlt die Datei, wird
     /// die Default-Konfiguration zurückgegeben (erster Start).
     pub fn load_from(path: &std::path::Path) -> Result<AppConfig, ConfigError> {
@@ -1273,6 +1328,10 @@ impl AppConfig {
                         "{dropped} Turnierleitungs-Gerät(e) ohne Zugang aus der Konfiguration verworfen"
                     );
                 }
+                // Turnier-GUID: altes Check-In-Feld übernehmen, Wurzelfeld
+                // spiegeln (ADR 0054). Vor dem Push-URL-Schalter, damit ein
+                // Fehler hier nicht den Testsystem-Schalter überspringt.
+                cfg.spiegele_turnier_guid();
                 // Produktiv- oder Testsystem? Die Push-URL ist die einzige
                 // Wahrheit; Cloud-Relay und Diagnose-Logs haben keinen
                 // Config-Zugriff und lesen den daraus gesetzten
@@ -1497,6 +1556,7 @@ mod tests {
                 show_group: false,
                 show_court_remaining: true,
                 hide_open_matches: false,
+                show_move_buttons: false,
                 unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
@@ -1691,6 +1751,7 @@ mod tests {
             },
             upload_logs: true,
             install_id: "inst-abc123".to_string(),
+            tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
             connection_mode: ConnectionMode::Cloud,
             tls: TlsConfig::default(),
             slave_mode: false,
@@ -1935,6 +1996,91 @@ mod tests {
         assert!(loaded.checkin.tournament_uuid.is_empty());
         assert_eq!(loaded.checkin.missing_names_max, 8);
         assert!(!loaded.checkin.is_ready());
+    }
+
+    #[test]
+    fn turnier_guid_wird_aus_dem_checkin_block_uebernommen() {
+        // Konfiguration einer Version vor diesem Feature: die GUID steht nur
+        // im Check-In-Block. Sie muss beim Laden ins Wurzelfeld wandern —
+        // sonst stünde eine Installation nach dem Auto-Update ohne GUID da
+        // und dürfte nicht mehr starten.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "checkin":{"enabled":true,"tournament_uuid":"{0ea5fd86-a64f-4445-a8de-bae3dbf762ba}","missing_names_max":8}}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(
+            loaded.tournament_uuid,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        // Spiegel: der Check-In-Block trägt danach dieselbe kanonische Form.
+        assert_eq!(
+            loaded.checkin.tournament_uuid,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
+        assert!(loaded.checkin.is_ready());
+    }
+
+    #[test]
+    fn wurzelfeld_gewinnt_und_spiegelt_in_den_checkin_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "tournament_uuid":"11111111-2222-3333-4444-555555555555",
+                "checkin":{"enabled":false,"tournament_uuid":"0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA","missing_names_max":8}}"#,
+        )
+        .unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(
+            loaded.tournament_uuid,
+            "11111111-2222-3333-4444-555555555555"
+        );
+        assert_eq!(
+            loaded.checkin.tournament_uuid,
+            "11111111-2222-3333-4444-555555555555"
+        );
+    }
+
+    #[test]
+    fn ohne_guid_bleibt_alles_leer_und_kanonisch_ist_none() {
+        let cfg = AppConfig::default();
+        assert!(cfg.tournament_uuid.is_empty());
+        assert_eq!(cfg.tournament_uuid_kanonisch(), None);
+
+        let kaputt = AppConfig {
+            tournament_uuid: "nicht-gueltig".to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(kaputt.tournament_uuid_kanonisch(), None);
+
+        let ok = AppConfig {
+            tournament_uuid: "  {0ea5fd86-a64f-4445-a8de-bae3dbf762ba} ".to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            ok.tournament_uuid_kanonisch().as_deref(),
+            Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA")
+        );
+    }
+
+    #[test]
+    fn roundtrip_behaelt_das_wurzelfeld() {
+        let cfg = AppConfig {
+            tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
+            ..AppConfig::default()
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(json.contains(r#""tournament_uuid":"0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA""#));
+        let back: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tournament_uuid, cfg.tournament_uuid);
     }
 
     #[test]

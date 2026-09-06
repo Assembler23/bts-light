@@ -295,6 +295,13 @@ pub struct BtpMatch {
     /// `None`, wenn das Turnier sie nicht pflegt — dann bleibt es bei der
     /// Spielnummer.
     pub display_order: Option<i64>,
+    /// Zeilenfarbe aus BTPs Menü „Hervorheben" (`Match.Highlight`, Spec
+    /// `tl-zeilenfarbe`): `0` = keine, `1`–`6` = Gelb, Pink, Orange, Blau,
+    /// Grün, Lila (gemessen 05.09.2026). Werte darüber gelten als `0` —
+    /// eine unbekannte Farbe falsch zu zeigen wäre schlimmer als keine.
+    /// Dasselbe Feld trägt auch die Aufrufmarke des Vorbereitungs-Aufrufs
+    /// (P1, `sync.rs::reconcile_highlights`, ADR 0056).
+    pub highlight: u8,
     /// Die beiden Planungspositionen, aus denen die Teilnehmer kommen
     /// (`Match.From1`/`From2`) — die **Kante im Turnierbaum**, roh und
     /// ungedeutet. In einem KO-Draw zeigt sie auf die vorangehenden Spiele
@@ -1156,6 +1163,7 @@ fn parse_matches(
             // 0 heißt „nicht gepflegt" — als fehlend behandeln, sonst
             // sortierte sich ein ungepflegtes Turnier nach lauter Nullen.
             display_order: child_int(m, "DisplayOrder").filter(|d| *d > 0),
+            highlight: highlight_from(child_int(m, "Highlight")),
             draw_name: draw_id
                 .and_then(|id| draws.get(&id).cloned())
                 .unwrap_or_default(),
@@ -1267,6 +1275,16 @@ fn parse_planned_time(m: &Node) -> Option<i64> {
 
 fn child_int(node: &Node, id: &str) -> Option<i64> {
     xml::find(node.children(), id)?.value()?.as_int()
+}
+
+/// `Match.Highlight` → Zeilenfarbe 0–6 (Spec `tl-zeilenfarbe`). Fehlend,
+/// negativ oder über [`relay_proto::MAX_HIGHLIGHT`] → `0`: Eine Farbe, die
+/// BTPs Menü nicht kennt, hat auch bei uns keinen Ton.
+fn highlight_from(raw: Option<i64>) -> u8 {
+    match raw {
+        Some(v) if (1..=i64::from(relay_proto::MAX_HIGHLIGHT)).contains(&v) => v as u8,
+        _ => 0,
+    }
 }
 
 fn child_str<'a>(node: &'a Node, id: &str) -> Option<&'a str> {
@@ -2538,6 +2556,36 @@ mod tests {
         // Die Auflösungsstelle: OfficialID → Official.
         assert_eq!(snap.official(2).map(|o| o.name.as_str()), Some("Kaiser"));
         assert_eq!(snap.official(99), None);
+    }
+
+    /// Zeilenfarbe (Spec `tl-zeilenfarbe`): `Highlight` 1–6 kommt durch,
+    /// alles andere (fehlend, 0, 7, negativ) ist „keine".
+    #[test]
+    fn parse_reads_highlight_and_clamps_unknown_values_to_none() {
+        let spiel = |id: i64, extra: Vec<Node>| {
+            let mut kinder = vec![Node::integer("ID", id), Node::boolean("IsMatch", true)];
+            kinder.extend(extra);
+            Node::group("Match", kinder)
+        };
+        let tree = tournament_with(vec![Node::group(
+            "Matches",
+            vec![
+                spiel(1, vec![Node::integer("Highlight", 3)]),
+                spiel(2, vec![Node::integer("Highlight", 6)]),
+                spiel(3, vec![Node::integer("Highlight", 7)]),
+                spiel(4, vec![Node::integer("Highlight", -1)]),
+                spiel(5, vec![Node::integer("Highlight", 0)]),
+                spiel(6, Vec::new()),
+            ],
+        )]);
+        let snap = parse_snapshot(&tree).expect("Snapshot");
+        let farbe = |id: i64| snap.matches.iter().find(|m| m.id == id).unwrap().highlight;
+        assert_eq!(farbe(1), 3);
+        assert_eq!(farbe(2), 6);
+        assert_eq!(farbe(3), 0, "7 kennt BTPs Menü nicht");
+        assert_eq!(farbe(4), 0);
+        assert_eq!(farbe(5), 0);
+        assert_eq!(farbe(6), 0, "fehlendes Feld = keine Farbe");
     }
 
     #[test]

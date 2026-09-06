@@ -91,6 +91,29 @@
       font-size: 1.1rem; font-weight: 700; color: var(--muted);
       min-width: 3rem; text-align: right;
     }
+    /* Aufruf-Uhr „Zeit seit Aufruf" (wie am Court-Monitor): läuft ab dem
+       1. Feld-Aufruf und weicht der Spieldauer, sobald die Aufstellung
+       bestätigt ist. Leer = ausgeblendet (Timer in den Einstellungen aus,
+       kein Stempel, Tablet im Spiel). Feste Breite: Die Kopfzeile bricht
+       nicht um, und das Zahnrad rechts muss erreichbar bleiben — deshalb
+       fällt auf schmalen Geräten der Text weg (unten), nicht die Zeit. */
+    .call-timer {
+      flex: 0 0 auto;
+      font-variant-numeric: tabular-nums;
+      font-size: 1rem; font-weight: 800; letter-spacing: .02em;
+      padding: .3rem .8rem; border-radius: 999px; white-space: nowrap;
+    }
+    .call-timer:empty { display: none; }
+    /* Auf schmalen Geräten (Handy) nur die Zeit, ohne „· 2. Aufruf" — die
+       Farbe trägt die Stufe. Sonst schöbe die Marke das Zahnrad aus dem Bild. */
+    @media (max-width: 640px) { .call-timer .lbl { display: none; } }
+    .call-timer.ok   { background: #d1fae5; color: #065f46; }
+    .call-timer.warn { background: #fef3c7; color: #92400e; }
+    .call-timer.due  {
+      background: #fee2e2; color: #991b1b;
+      animation: callpulse 1s ease-in-out infinite;
+    }
+    @keyframes callpulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
     /* Feldnummer in der Kopfzeile: kräftig, damit auch im Spiel klar ist,
        welches Tablet welches Feld bedient (Tilo 20.07.). */
     .court-label {
@@ -334,6 +357,18 @@
     /* Modal-Inhalt liegt auf einer hellen Karte (der Scrim dunkelt nur den
        Hintergrund ab). Titel/Optionen erben --text. */
     .modal.visible { display: flex; color: var(--text); }
+    /* Das Setup-Modal (Seitenwahl, Aufschläger, Annehmer) beginnt erst
+       UNTER der Kopfzeile: Feldname, Aufruf-Uhr und Zahnrad bleiben während
+       der Seitenwahl sichtbar und antippbar (Wunsch 05.09.2026). Die Höhe
+       der Kopfzeile misst ein ResizeObserver (`--kopf-hoehe`); der
+       Rückfallwert entspricht Kopfzeilen-Knopf + Innenabstand. Alle anderen
+       Modals decken die Kopfzeile weiterhin ab. Weil darunter weniger Platz
+       ist, darf der Inhalt scrollen, statt oben und unten abgeschnitten zu
+       werden (`safe center`: bei Überlauf am Anfang ausrichten). */
+    #setup-modal {
+      top: var(--kopf-hoehe, 3.6rem);
+      overflow-y: auto; justify-content: safe center;
+    }
 /* Das Ereignis-Modal liegt ÜBER dem Pausen-Overlay (z 15).
    Die Spec sah zunächst „darunter" vor, damit es „Weiterspielen" nie
    verdeckt — das war aber unvereinbar damit, dass Ereignisse GERADE in
@@ -592,6 +627,7 @@
       <div class="court-label">__COURT_LABEL__</div>
       <div class="event-label" id="event-label">— kein Match —</div>
     </div>
+    <div class="call-timer" id="call-timer"></div>
     <div class="match-clock" id="match-clock"></div>
     <div class="sponsor-bar" id="sponsor-bar"></div>
     <button
@@ -1246,6 +1282,15 @@ const STATE = {
   intervalDoneThisGame: /** @type {boolean} */ (false),
   // Matchstart (ms) für die Spieldauer-Anzeige.
   startedAt: /** @type {number|null} */ (null),
+  // Aufruf-Uhr in der Kopfzeile: Zeitpunkt des 1. Feld-Aufrufs (Server-
+  // Zeit, aus `/health` `on_court_since_ms`) und die Timer-Schwellen aus der
+  // App-Einstellung (`callTimer`). Beides kommt vom Server, nie vom Tablet —
+  // der Aufruf ist ein Vorgang der Turnierleitung.
+  aufrufSeitMs: /** @type {number|null} */ (null),
+  // Meldet der Server für dieses Feld schon Punkte? Fängt den Ersatz-Tablet
+  // ohne lokalen Stand ab, der sonst mitten im Spiel „Letzter Aufruf" zeigte.
+  aufrufGespielt: /** @type {boolean} */ (false),
+  callTimer: /** @type {null | {enabled?:boolean, secondCallMinutes?:number, thirdCallMinutes?:number}} */ (null),
   // Meldungen an die Turnierleitung.
   alertInjury: /** @type {boolean} */ (false),
   alertOfficial: /** @type {boolean} */ (false),
@@ -1321,6 +1366,7 @@ const els = {
   breakSkip: document.getElementById('break-skip'),
   breakCorrect: document.getElementById('break-correct'),
   matchClock: document.getElementById('match-clock'),
+  callTimer: document.getElementById('call-timer'),
   injuryBtn: document.getElementById('injury-btn'),
   megaphoneBtn: document.getElementById('megaphone-btn'),
   updateHinweis: document.getElementById('update-hinweis'),
@@ -1449,6 +1495,12 @@ function connect() {
       clearReidentify();
       STATE.occupied = false;
       loadMatch(msg.match);
+      // Aufruf-Stempel sofort holen, statt bis zu 30 s auf den nächsten
+      // Uhr-Abgleich zu warten — die Aufruf-Uhr soll mit der Seitenwahl
+      // da sein, nicht erst mittendrin. Bis zu fünf Nachfragen im 3-s-
+      // Abstand, falls der Server das neue Spiel noch nicht meldet.
+      healthNachfragenRest = 5;
+      syncServerClock();
       // A2 / ADR 0017, Regel b (Finalisiert-Gate): Der MatchBrief trägt die
       // BTP-Wahrheit. Ist das Match finalisiert, tritt das Tablet zurück und
       // pusht nichts mehr (unten in sendScoreUpdate/persistState/submit
@@ -1792,7 +1844,24 @@ let breakTimer = null;
 // Tablet zeigen beide denselben Wert. Offset wird per /health gemessen.
 let serverClockOffset = 0;
 function serverNow() { return Date.now() + serverClockOffset; }
+// Laufende Nummer der Abrufe: Der 30-s-Takt und der Sofort-Abruf nach
+// `match_assigned` können sich überholen — nur die JÜNGSTE Antwort darf
+// schreiben, sonst holt eine verspätete Antwort den Aufruf-Stempel des
+// Vorgängerspiels zurück (Review-Fund 05.09.2026).
+let healthLauf = 0;
+// Nachfrage in 3 s, wenn der Server das Feld noch nicht kennt (Relay direkt
+// nach dem Neustart) oder noch das alte Spiel meldet (Cache-Stand vor der
+// Zuweisung). Begrenzt je Zuweisung, damit ein dauerhaft abweichender
+// Server nicht alle 3 s einen Abruf bekommt — danach gilt der 30-s-Takt.
+let healthNachfrage = null;
+let healthNachfragenRest = 0;
+function healthNachfragen() {
+  if (healthNachfrage || healthNachfragenRest <= 0) return;
+  healthNachfragenRest -= 1;
+  healthNachfrage = setTimeout(() => { healthNachfrage = null; syncServerClock(); }, 3000);
+}
 function syncServerClock() {
+  const lauf = ++healthLauf;
   // `src=check`: Dies ist keine Anzeige-Aktualisierung, sondern die
   // Uhr-Synchronisation. Ohne die Kennzeichnung landeten bei zwanzig
   // Tablets rund 0,7 Abrufe je Sekunde samt vollem Rumpf in der
@@ -1802,17 +1871,140 @@ function syncServerClock() {
   // Relay unter `/bts-relay/<id>/health` — der Uhr-Abgleich fand dort also
   // gar nicht statt, und die Pausen-Enden (die in Server-Zeit reisen) liefen
   // gegen die ungeprüfte Tablet-Uhr (Review-Fund 19.08.2026).
-  fetch(BASE_PATH + '/health?src=check', { cache: 'no-store' })
+  // `court=<id>`: der schmale Abruf (Spec monitor-livestand-push, S7) —
+  // dieselbe Antwort liefert den Aufruf-Stempel des eigenen Felds und die
+  // Timer-Schwellen für die Aufruf-Uhr in der Kopfzeile, ohne die Liste
+  // aller Felder mitzuschleppen. LAN wie Cloud kennen den Filter.
+  fetch(BASE_PATH + '/health?src=check&court=' + encodeURIComponent(String(COURT_ID)), { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (d) {
-      if (d && typeof d.serverNowMs === 'number' && d.serverNowMs > 0) {
+      // Eine jüngere Anfrage ist unterwegs oder schon angekommen → diese
+      // Antwort ist überholt und darf nichts mehr schreiben.
+      if (lauf !== healthLauf || !d) return;
+      if (typeof d.serverNowMs === 'number' && d.serverNowMs > 0) {
         serverClockOffset = d.serverNowMs - Date.now();
       }
+      const feld = feldAusHealth(d, COURT_ID);
+      if (!feld.gefunden) {
+        // Der Server kennt das Feld (noch) nicht — etwa das Relay direkt
+        // nach dem Neustart, bevor der Host Feldliste und Aufruf-Timer
+        // hochgeladen hat. Das ist „weiß nicht", nicht „kein Spiel":
+        // letzten Stand behalten (auch die Schwellen — ein Relay ohne
+        // Host-Stand meldet den Timer als AUS) und gleich nachfragen.
+        healthNachfragen();
+        return;
+      }
+      STATE.callTimer = feld.callTimer;
+      if (STATE.match && feld.matchId !== STATE.match.matchId) {
+        // Die Antwort gehört zu einem anderen Spiel als dem, das dieses
+        // Tablet gerade hält (Feldwechsel im Flug, oder der Cache-Stand
+        // von vor der Zuweisung). Dessen Stempel gilt hier nicht.
+        STATE.aufrufSeitMs = null;
+        STATE.aufrufGespielt = false;
+        renderAufrufUhr();
+        healthNachfragen();
+        return;
+      }
+      STATE.aufrufSeitMs = feld.onCourtSinceMs;
+      STATE.aufrufGespielt = feld.gespielt;
+      renderAufrufUhr();
     })
     .catch(function () { /* offline -> Offset bleibt, Fallback Date.now() */ });
 }
 syncServerClock();
 setInterval(syncServerClock, 30000);
+
+// ── Aufruf-Uhr „Zeit seit Aufruf" in der Kopfzeile ────────────────────
+// Inline-Kopie von `src/io/aufrufUhr.mjs` (kanonische Fassung + Test
+// `scripts/test-aufruf-uhr.mjs`) — Änderungen hier und dort gemeinsam.
+// Dieselbe Uhr wie am Court-Monitor, damit der Bediener während der
+// Seitenwahl ohne Blick zum TV sieht, wie lange die Spieler gerufen sind.
+function aufrufUhr(jetztMs, onCourtSinceMs, callTimer, gestartet) {
+  if (!callTimer || !callTimer.enabled) return null;
+  if (typeof onCourtSinceMs !== 'number' || !(onCourtSinceMs > 0)) return null;
+  if (gestartet) return null;
+  const sec = Math.max(0, Math.floor((jetztMs - onCourtSinceMs) / 1000));
+  const uhr = Math.floor(sec / 60) + ':' + ('0' + (sec % 60)).slice(-2);
+  const min = sec / 60;
+  const zweite = callTimer.secondCallMinutes;
+  const dritte = callTimer.thirdCallMinutes;
+  let label = '1. Aufruf';
+  let stufe = 'ok';
+  if (typeof dritte === 'number' && dritte > 0 && min >= dritte) {
+    label = 'Letzter Aufruf';
+    stufe = 'due';
+  } else if (typeof zweite === 'number' && zweite > 0 && min >= zweite) {
+    label = '2. Aufruf';
+    stufe = 'warn';
+  }
+  return { uhr, label, stufe };
+}
+function punkteGespielt(sets) {
+  if (!Array.isArray(sets)) return false;
+  return sets.some((s) => {
+    if (Array.isArray(s)) return (s[0] > 0) || (s[1] > 0);
+    return !!s && ((s.a > 0) || (s.b > 0));
+  });
+}
+function feldAusHealth(antwort, courtId) {
+  const leer = { gefunden: false, matchId: 0, onCourtSinceMs: null, gespielt: false, callTimer: null };
+  if (!antwort || typeof antwort !== 'object') return leer;
+  const callTimer = (antwort.callTimer && typeof antwort.callTimer === 'object')
+    ? antwort.callTimer : null;
+  const courts = Array.isArray(antwort.courts) ? antwort.courts : [];
+  const feld = courts.find((c) => c && c.court_id === courtId);
+  if (!feld) return { ...leer, callTimer };
+  const stempel = typeof feld.on_court_since_ms === 'number' ? feld.on_court_since_ms : null;
+  const matchId = typeof feld.match_id === 'number' ? feld.match_id : 0;
+  return { gefunden: true, matchId, onCourtSinceMs: stempel, gespielt: punkteGespielt(feld.sets), callTimer };
+}
+// Ist das Tablet schon im Spiel? Dann weicht die Aufruf-Uhr der
+// Spieldauer. `startedAt` steht ab der bestätigten Aufstellung (dann
+// läuft die Spieldauer), `finished` fängt Walkover/Aufgabe ohne Punkte ab,
+// der Satzstand den Mid-Game-Einstieg — und `aufrufGespielt` den
+// Ersatz-Tablet ohne lokalen Stand, dem der Server längst Punkte meldet.
+function spielLaeuft() {
+  if (STATE.startedAt || STATE.finished || STATE.aufrufGespielt) return true;
+  if (STATE.setsCompleted.length > 0) return true;
+  return STATE.currentSet.left > 0 || STATE.currentSet.right > 0;
+}
+let aufrufUhrGezeigt = '';
+function renderAufrufUhr() {
+  const el = els.callTimer;
+  if (!el) return;
+  const u = STATE.match
+    ? aufrufUhr(serverNow(), STATE.aufrufSeitMs, STATE.callTimer, spielLaeuft())
+    : null;
+  // Nur bei Änderung ins DOM schreiben — die Funktion läuft im Sekundentakt.
+  const schluessel = u ? u.uhr + '|' + u.label + '|' + u.stufe : '';
+  if (schluessel === aufrufUhrGezeigt) return;
+  aufrufUhrGezeigt = schluessel;
+  if (!u) { el.textContent = ''; el.className = 'call-timer'; return; }
+  // Zwei Spans: Auf schmalen Geräten blendet CSS den Text aus, die Zeit
+  // bleibt — sonst schöbe die Marke das Zahnrad aus dem Bild.
+  el.textContent = '';
+  const zeit = document.createElement('span');
+  zeit.className = 'zeit';
+  zeit.textContent = u.uhr;
+  const lbl = document.createElement('span');
+  lbl.className = 'lbl';
+  lbl.textContent = ' · ' + u.label;
+  el.appendChild(zeit);
+  el.appendChild(lbl);
+  el.className = 'call-timer ' + u.stufe;
+}
+// Höhe der Kopfzeile als CSS-Variable, damit das Setup-Modal darunter
+// beginnt (Feldname, Aufruf-Uhr und Zahnrad bleiben sichtbar). Ohne
+// ResizeObserver (sehr alte WebViews) greift der CSS-Rückfallwert.
+(function beobachteKopfzeile() {
+  const kopf = document.querySelector('header');
+  if (!kopf || typeof ResizeObserver !== 'function') return;
+  const setze = () => {
+    document.documentElement.style.setProperty('--kopf-hoehe', kopf.offsetHeight + 'px');
+  };
+  new ResizeObserver(setze).observe(kopf);
+  setze();
+})();
 
 // `skipCommit`: Ruft der Aufrufer gleich selbst persistState()+render()
 // (bzw. commitScoreView), lassen wir das hier weg – sonst rendert/persistiert
@@ -2235,6 +2427,10 @@ function loadMatch(match) {
   STATE.pause = null;
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   STATE.startedAt = null;
+  // Aufruf-Uhr: Stempel des Vorgängerspiels nicht bis zum nächsten
+  // `/health`-Abruf stehen lassen; `match_assigned` holt ihn sofort neu.
+  STATE.aufrufSeitMs = null;
+  STATE.aufrufGespielt = false;
   STATE.alertInjury = false;
   STATE.alertOfficial = false;
   STATE.retired = false;
@@ -2278,6 +2474,10 @@ function clearMatch() {
   STATE.pause = null;
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   STATE.startedAt = null;
+  // Aufruf-Uhr: Der Stempel gehört zum Spiel, das gerade vom Feld geht.
+  // Die Timer-Schwellen bleiben — sie sind Einstellung, nicht Spielstand.
+  STATE.aufrufSeitMs = null;
+  STATE.aufrufGespielt = false;
   STATE.alertInjury = false;
   STATE.alertOfficial = false;
   STATE.retired = false;
@@ -3655,6 +3855,7 @@ function render() {
   renderSetupModal();
   renderBreak();
   renderClock();
+  renderAufrufUhr();
   renderUmpireBar();
   renderRallyButton();
 
@@ -4558,6 +4759,7 @@ els.takeoverBtn.addEventListener('click', () => {
 });
 // Spieldauer-Uhr im Sekundentakt aktualisieren.
 setInterval(renderClock, 1000);
+setInterval(renderAufrufUhr, 1000);
 
 document.addEventListener('dblclick', (e) => e.preventDefault());
 document.body.addEventListener('touchmove', (e) => {

@@ -278,6 +278,22 @@ if (notesOut && notesVersion) {
 const PI_IMAGE_URL = "pi-image/bts-light-pi.img.xz";
 const PI_IMAGE_SHA_URL = "pi-image/bts-light-pi.img.xz.sha256";
 
+// ── Handbuch ──────────────────────────────────────────────
+// Die Anleitung liegt als eigene statische Seite im Unterordner handbuch/
+// (scripts/build-handbuch.mjs, eigener Workflow). Sie wird NICHT bei jedem
+// Tag neu gebaut, sondern bei jeder Doku-Aenderung auf main — deshalb steht
+// hier nur der Link, nicht der Inhalt. Diese Seite ist aus Sicht des
+// Handbuchs ein Kapitel ("Downloads & Versionshinweise") und verlinkt
+// umgekehrt zurueck.
+//
+// index.html AUSGESCHRIEBEN, nicht "handbuch/": Der nginx-vHost loest diese
+// Verzeichnis-URL nicht auf einen Index auf — gemessen am 06.09.2026 direkt
+// nach dem ersten Deploy: /download/bts-light/handbuch/ -> 403, waehrend
+// /download/bts-light/handbuch/index.html -> 200 liefert. Fuer das
+// Elternverzeichnis gibt es offenbar eine eigene Regel, fuer neue
+// Unterordner nicht. Die kuerzere Adresse braucht eine nginx-Aenderung
+// (eigene Freigabe, siehe roadmap.md) — bis dahin gilt der volle Pfad.
+
 // ── Seite rendern ─────────────────────────────────────────────────────────
 const latest = sections[0];
 const generated = new Date().toISOString().slice(0, 10);
@@ -357,6 +373,7 @@ const html = `<!DOCTYPE html>
     <p>Plug-and-play-Brücke zwischen BTP (Badminton Tournament Planner) und dem badhub.de-Liveticker – mit Tablet-Spielzettel und Court-Monitoren.</p>
     <a class="stable" href="BTS.Light-setup.exe">Aktuelle Version herunterladen (v${latest.version})</a>
     <a class="stable ghost" href="#pi-image">Pi-Image für Court-Monitore</a>
+    <a class="stable ghost" href="handbuch/index.html">Handbuch</a>
   </div>
 </header>
 <main>
