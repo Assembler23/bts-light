@@ -20,6 +20,15 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   erneute PIN, auch über Feldwechsel und „Neu laden" hinweg (gemerkt je
   Gerät). Die Frist läuft ab der Eingabe und verlängert sich nicht von
   selbst. Regel `src/io/pinFreigabe.mjs` mit eigenem Test.
+- **Tablet-App (Android): kein Anheften auf Fire OS ohne Gerätebesitzer.**
+  Fire OS schaltete beim „Bildschirm anheften" seinen Toddler Mode ein und
+  schluckte danach jeden Touch — die App war unbedienbar, auch die
+  Ecken-Geste kam nie an (Feldtest auf zwei Fire HD 10). Ohne Gerätebesitzer
+  heftet die App auf Amazon-Geräten jetzt nicht mehr an (Vollbild und
+  Bildschirm-an bleiben), die Wartekarte sagt es. Andere Android-Geräte und
+  der Gerätebesitzer-Modus sind unverändert. Doku ergänzt: Warum der
+  Werksreset nötig ist (Kindersicherung als Profile Owner) und Autostart
+  ohne Besitzer.
 
 ## v0.9.283
 

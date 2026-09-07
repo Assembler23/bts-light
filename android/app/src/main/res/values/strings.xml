@@ -5,6 +5,7 @@
     <string name="warte_titel">Kein WLAN</string>
     <string name="erneut_suchen">Erneut suchen</string>
     <string name="kein_besitzer">Nicht als Gerätebesitzer eingerichtet – Sperre nur weich.</string>
+    <string name="kein_besitzer_ohne_sperre">Nicht als Gerätebesitzer eingerichtet – ohne Sperre (Anheften nicht möglich).</string>
     <string name="pin_festlegen">Kiosk-PIN festlegen (4–8 Ziffern)</string>
     <string name="pin_eingeben">Kiosk-PIN</string>
     <string name="pin_falsch">PIN falsch</string>

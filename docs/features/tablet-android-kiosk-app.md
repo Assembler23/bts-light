@@ -147,6 +147,24 @@ Beim Start als Gerätebesitzer:
 fällt die App auf „Bildschirm anheften" zurück: Android fragt einmal nach,
 Ausstieg über die Android-Geste. Die Wartekarte weist darauf hin.
 
+**Nachlese 08.09.2026 (v0.9.284) — kein Anheften auf Fire OS ohne
+Besitzer:** Feldtest auf zwei Fire HD 10: Nach `startLockTask()` ohne
+Gerätebesitzer schaltet Fire OS seinen „Toddler Mode" ein
+(`com.amazon.toddlermode.ToddlerModeService` in `system_server`) und legt
+`ToddlerModeTransparentWindow` als Vollbild-Fenster über die App;
+`dumpsys input` zeigt es als einziges Touch-Ziel, die App bekommt keinen
+Touch mehr — auch die Ecken-Geste nie. Darum entscheidet
+`kern/SperrRegel.anheften(besitzer, hersteller)` (Unit-Test): Besitzer →
+immer; ohne Besitzer nur, wenn der Hersteller nicht „Amazon" ist. Auf
+Fire-Tablets ohne Besitzer bleibt Vollbild + Bildschirm-an ohne Sperre, die
+Wartekarte sagt herstellerneutral „ohne Sperre (Anheften nicht möglich)" —
+denselben Text zeigt sie, wenn `startLockTask()` anderswo wirft (der Boolean
+aus `sperren` unterscheidet die Ursache bewusst nicht). Ausweg an einem
+bereits angehefteten Tablet: `adb shell am task lock stop`. Außerdem
+gemessen: Der Gerätebesitzer scheitert auf Fire OS am **Profile Owner**
+`com.amazon.parentalcontrols` (geschütztes Paket), nicht nur am Konto —
+darum ist der Werksreset Pflicht (siehe `docs/tablet-android-app.md`).
+
 „Kiosk verlassen" beendet Lock-Task und die App → normales Android. Ein
 Antippen des App-Symbols sperrt wieder.
 

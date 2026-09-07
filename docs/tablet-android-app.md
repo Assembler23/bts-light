@@ -139,11 +139,41 @@ Gerätebesitzer eingerichtet werden — siehe auch
 ## Ohne Gerätebesitzer
 
 Wurde der ADB-Schritt übersprungen oder von Fire OS verweigert, läuft die
-App mit der schwächeren Sperre „Bildschirm anheften": Android fragt beim
-Start der App einmal nach, der Ausstieg geht über die normale
-Android-Geste statt über die Kiosk-PIN. Die Wartekarte zeigt in diesem Fall
-zusätzlich den kleinen Hinweis „Nicht als Gerätebesitzer eingerichtet –
-Sperre nur weich."
+App **ohne harte Sperre**. Was dann passiert, hängt vom Gerät ab:
+
+- **Fire-Tablets (Hersteller „Amazon"):** Die App heftet den Bildschirm
+  **bewusst nicht** an. Fire OS schaltet beim Anheften ohne Gerätebesitzer
+  seinen „Toddler Mode" ein und legt ein unsichtbares Vollbild-Fenster über
+  die App, das **jeden Touch schluckt** — die App wäre unbedienbar, auch die
+  Ecken-Geste käme nie an (Feldtest 08.09.2026 auf zwei Fire HD 10, im
+  Logcat „User is currently in toddler mode, touch outside pinned app is
+  prohibited"). Es bleiben Vollbild, Bildschirm-an und die Server-Suche;
+  Home führt aus der App heraus, Zurück bleibt wie im Kiosk ohne Wirkung.
+  Die Wartekarte zeigt „Nicht als Gerätebesitzer eingerichtet – ohne Sperre
+  (Anheften nicht möglich)." Regel: `kern/SperrRegel.kt` (Unit-Test
+  `SperrRegelTest`); derselbe Hinweis erscheint auch, wenn das Anheften auf
+  einem anderen Gerät scheitert.
+- **Andere Android-Geräte:** die schwächere Sperre „Bildschirm anheften".
+  Android fragt beim Start der App einmal nach, der Ausstieg geht über die
+  normale Android-Geste statt über die Kiosk-PIN. Die Wartekarte zeigt
+  „Nicht als Gerätebesitzer eingerichtet – Sperre nur weich."
+
+**Autostart ohne Gerätebesitzer:** Der Home-Launcher-Autostart gehört zum
+Gerätebesitzer-Schritt. Ohne ihn bleibt nur der Rückfall-Empfänger für
+`BOOT_COMPLETED`, den Android ab Version 10 beim Starten von Activities aus
+dem Hintergrund ausbremst — auf die App nach dem Einschalten ist also kein
+Verlass. Wer trotzdem Autostart braucht, kann die App mit dem Werkzeug
+„Custom Launcher" von Fire Toolbox als Startbildschirm setzen; dann öffnet
+Fire OS sie nach jedem Boot wie einen Launcher.
+
+**Warum der Werksreset nötig ist:** Der Gerätebesitzer scheitert auf
+Fire-Tablets nicht nur an einem angemeldeten Amazon-Konto, sondern vor allem
+daran, dass Amazons Kindersicherung (`com.amazon.parentalcontrols`) ab Werk
+als **Profile Owner** von Nutzer 0 eingetragen ist. Das Paket ist geschützt
+(kein `pm uninstall`, kein `pm disable-user`), und Abmelden in den
+Einstellungen lässt zudem zwei Amazon-Konten (Kontakte, Whispersync) stehen.
+`dpm set-device-owner` antwortet dann „the user already has a profile
+owner" — nur der Reset mit übersprungener Anmeldung räumt das weg.
 
 ## Fehlersuche
 

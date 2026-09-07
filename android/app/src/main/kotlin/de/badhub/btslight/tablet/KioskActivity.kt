@@ -84,9 +84,12 @@ class KioskActivity : AppCompatActivity() {
 
         log.schreibe("Start $geraeteId, Version ${BuildConfig.VERSION_NAME}")
         Kiosk.einrichten(this, log::schreibe)
-        Kiosk.sperren(this, log::schreibe)
+        val angeheftet = Kiosk.sperren(this, log::schreibe)
         wartekarteHinweis.visibility = if (Kiosk.istBesitzer(this)) View.GONE else View.VISIBLE
-        wartekarteHinweis.setText(R.string.kein_besitzer)
+        // Ohne Anheften (Fire OS ohne Besitzer, oder startLockTask scheitert)
+        // ehrlich sagen, dass gar keine Sperre wirkt — nicht „nur weich". Der
+        // Text bleibt herstellerneutral; das Warum steht im Log und der Doku.
+        wartekarteHinweis.setText(if (angeheftet) R.string.kein_besitzer else R.string.kein_besitzer_ohne_sperre)
 
         webEinrichten()
 
