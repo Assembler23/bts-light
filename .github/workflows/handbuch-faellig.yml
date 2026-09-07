@@ -1,0 +1,47 @@
+# Meldet, wenn eine Aenderung die Endnutzer-Sicht anfasst, das Handbuch aber
+# nicht mitgewachsen ist.
+#
+# Dieser Workflow BLOCKIERT NICHTS. Er ist kein Required-Check und setzt
+# keinen roten Status; er haengt eine sichtbare Anmerkung an den Lauf. Ein
+# Refactor ohne Nutzerwirkung soll nicht an einer Doku-Formalie haengenbleiben
+# — und wer eine Umgehung braucht, gewoehnt sie sich an.
+#
+# Die scharfe Pruefung ist scripts/test-handbuch-fakten.mjs in ci.yml: Sie
+# verankert die Zeichenketten, an denen einzelne Aussagen haengen
+# (Knopfbeschriftungen, Routen, Ports, Standardwerte), und wird rot, wenn eine
+# davon nicht mehr stimmt.
+#
+# Anlass: Beim Schreiben der Handbuch-Kapitel (05./06.09.2026) fand die
+# Gegenpruefung in JEDEM Kapitel echte Sachfehler — ueber dreissig insgesamt,
+# darunter ein falscher Standardwert und ein falscher Port. Ein Handbuch
+# meldet sich nicht, wenn es luegt.
+#
+# @see scripts/check-handbuch-aktuell.mjs   (Regel)
+# @see scripts/test-handbuch-aktuell.mjs    (Regel-Tests, laufen in ci.yml)
+# @see scripts/test-handbuch-fakten.mjs     (die scharfe Pruefung)
+name: Handbuch prüfen?
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pruefen:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — der Vergleich braucht den gemeinsamen Vorfahren mit
+      # dem Zielzweig, nicht nur den letzten Commit.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Geänderte Dateien gegen das Handbuch halten
+        run: |
+          node scripts/check-handbuch-aktuell.mjs \
+            --git "origin/${{ github.base_ref }}"

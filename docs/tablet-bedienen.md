@@ -24,6 +24,9 @@ bis die Turnierleitung ein Spiel auf das Feld legt.
 schon. Das ist eine Schutzmaßnahme — pro Feld zählt genau ein Tablet. Zum
 Gerätetausch gibt es **Court übernehmen**; wer nur zuschauen will, wählt
 **Nur Spielstand anzeigen**.
+<!-- pruef: "Court übernehmen" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Nur Spielstand anzeigen" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Dieses Feld wird bereits geschiedst" in src-tauri/assets/tablet.html -->
 
 ## Ein Spiel aufsetzen
 
@@ -136,6 +139,7 @@ Nach dem letzten Punkt zeigt das Tablet das Spielende.
 > **Das Ergebnis geht nicht von allein weg.** Du musst
 > **„Ergebnis übermitteln"** tippen. Erst danach wandert es zur Turnierleitung
 > und in den Tournament Planner.
+<!-- pruef: "Ergebnis übermitteln" in src-tauri/assets/tablet.html -->
 
 Danach siehst du eines von drei Dingen:
 
@@ -152,6 +156,8 @@ angenommen", das niemand liest, ist ein verlorenes Ergebnis.
 
 In der Fußzeile sitzt **„Match beenden …"**. Er öffnet einen Dialog mit **drei**
 Wegen — die Wahl hat unterschiedliche Folgen:
+<!-- pruef: "Match beenden" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Kampflos" in src-tauri/assets/tablet.html -->
 
 | Wahl | Wirkung |
 |---|---|

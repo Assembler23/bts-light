@@ -126,6 +126,11 @@ function setextZuAtx(md) {
 function schneiden(md, ausTitel, quelle) {
   md = setextZuAtx(md);
 
+  // Die Anker der Faktenpruefung (<!-- pruef: … -->) und gewoehnliche
+  // Kommentare gehoeren dem Repo, nicht der Website. Sie stuenden sonst im
+  // Quelltext der Seite und im Suchindex.
+  md = md.replace(/<!--(?!\s*handbuch:(aus|an)\s*-->)[\s\S]*?-->/g, "");
+
   // 1) Marker-Bereiche
   let offen = 0;
   const behalten = [];
