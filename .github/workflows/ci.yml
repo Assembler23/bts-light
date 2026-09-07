@@ -221,6 +221,20 @@ jobs:
       - name: Handbuch-Manifest und -Bau (JS)
         run: node scripts/test-handbuch.mjs
 
+      # Die Regel hinter dem "Handbuch pruefen?"-Hinweis: Ein Waechter, der zu
+      # oft anschlaegt, wird ueberlesen; einer, der zu selten anschlaegt, ist
+      # wirkungslos. Beide Grenzen sind im Test festgehalten.
+      - name: Handbuch-Waechter-Regel (JS)
+        run: node scripts/test-handbuch-aktuell.mjs
+
+      # Die nachpruefbaren Behauptungen des Handbuchs gegen den Code. Beim
+      # Schreiben der Kapitel (05./06.09.2026) fand die Gegenpruefung in jedem
+      # Kapitel echte Sachfehler — darunter ein falscher Standardwert und ein
+      # falscher Port fuer Liga-Turniere. Ein Handbuch meldet sich nicht, wenn
+      # es luegt; dieser Test tut es.
+      - name: Handbuch-Fakten gegen den Code (JS)
+        run: node scripts/test-handbuch-fakten.mjs
+
       # Umschalter Produktiv/Test (test.badhub.de). Greift er zu weit, verliert
       # ein Betreiber mit eigener badhub-Instanz beim ersten Klick seine
       # Adresse; greift er zu kurz, laeuft ein Testturnier stumm in die
