@@ -377,6 +377,26 @@ hinter der PIN, `localStorage` `badhub.tablet.anordnung`, je Gerät).
   gespiegelte `courtState` — alles bleibt links/rechts. Die Zähltafel und der
   Court-Monitor zeigen „links" weiterhin links; nur das Tablet des Bedieners
   dreht seine Sicht.
+- **Platzaufteilung (Nachlese 08.09.2026, v0.9.284):** Feldtest-Befund am
+  Fire HD 10: Court hochkant nur 225 × 500 px, die beiden Plus-Zeilen je
+  17 % der Höhe, zwei Drittel der Breite leer. Darum: Plus-Knöpfe als feste
+  Maße statt Bruchteile (`--plus-leiste: 5.5rem` übereinander,
+  `--plus-spalte: min(9rem, 20vw)` nebeneinander, beide Ausrichtungen);
+  im Hochformat ab 480 px Breite (Handys behalten den Stapel, weil dort
+  die Mittelzeile niedriger als Satzstand + Schiri-Leiste wäre) wird
+  `.center` ein Grid `minmax(0,1fr) auto` mit Zeilen
+  `1fr auto auto 1fr` — Court links über alle Zeilen, Satzstand (Spalte,
+  Rückgängig über den Ziffern) und Schiri-Leiste rechts senkrecht zentriert,
+  je max. 38 vw. Namen in den Zellen skalieren mit `3.2vmin` statt `2.2vmin`.
+  Das Querformat mit Hand-Wahl „übereinander" behält die bestehende
+  Reihung (Satzstand links). Gemessen im Browser (800 × 1280): Court
+  413 × 908, Knopf 784 × 88; quer (1280 × 800): Court 960 × 437, Knopf
+  144 × 647.
+- **PIN-Freigabe (Nachlese 08.09.2026, v0.9.284):** Die Annahme „Menü
+  komplett hinter der PIN" gilt mit Einschränkung: Nach richtiger Eingabe
+  öffnet das Zahnrad an Hülle und Zählseite fünf Minuten lang ohne PIN
+  (gemeinsamer `localStorage`-Schlüssel `badhub.tablet.pinFreigabeBis`,
+  Regel `src/io/pinFreigabe.mjs`). Details in `docs/tablet-kiosk.md`.
 - **Akzeptanz:**
   - [x] Hochformat ohne Wahl: Knöpfe oben/unten, Court hochkant, Aufschläger-
         Zelle und Federball an der richtigen Stelle (Browser-Test mit

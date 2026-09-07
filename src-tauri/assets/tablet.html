@@ -144,9 +144,16 @@
 
     /* ─── Hauptbereich: Score + Court + Plus-Buttons ──────────────────── */
     .main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    /* Die Plus-Knöpfe sind seit 08.09.2026 bewusst schmal (Tilo: „Knöpfe
+       viel kleiner, Feld viel größer"): eine feste Spalten-Breite bzw.
+       Leisten-Höhe statt eines Fünftels des Bildschirms. Ein Tippziel von
+       9 rem × voller Höhe (quer) bzw. voller Breite × 5,5 rem (hochkant)
+       trifft man auch ohne Hinsehen; alles Übrige geht ans Spielfeld. */
     .play {
+      --plus-spalte: min(9rem, 20vw);
+      --plus-leiste: 5.5rem;
       flex: 1; display: grid;
-      grid-template-columns: 1fr 3fr 1fr;
+      grid-template-columns: var(--plus-spalte) minmax(0, 1fr) var(--plus-spalte);
       gap: .5rem; padding: .5rem; min-height: 0;
     }
     .plus-btn {
@@ -466,7 +473,9 @@
       background: #f59e0b; color: #1a1206;
     }
     .umpire-badge[hidden] { display: none; }
-    .umpire-say { font-size: 1.6rem; font-weight: 800; line-height: 1.25; color: var(--text); }
+    /* overflow-wrap: in der schmalen Seitenspalte (übereinander) dürfen lange
+       Einzelwörter/Doppelnamen nicht über den Rand ragen. */
+    .umpire-say { font-size: 1.6rem; font-weight: 800; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
     .umpire-cards { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; margin-top: .4rem; }
     .umpire-cards:empty { display: none; }
     .umpire-cards .card-chip {
@@ -611,7 +620,7 @@
        Spezifität `.play.uebereinander` schlägt die Hochformat-Regel unten. */
     .play.uebereinander {
       grid-template-columns: 1fr;
-      grid-template-rows: 1fr 3fr 1fr;
+      grid-template-rows: var(--plus-leiste) minmax(0, 1fr) var(--plus-leiste);
     }
     .play.uebereinander .plus-right { order: 0; }
     .play.uebereinander .center { order: 1; }
@@ -661,14 +670,43 @@
     }
 
     @media (orientation: portrait) {
-      /* Hochformat: Buttons sehr schmal — vmin = Breite, deshalb Satzstand
-         und Leerlauf-Feldnummer hier zusätzlich deckeln, damit sie die
-         schmale Anzeige nicht sprengen. */
-      .play { grid-template-columns: 1fr 2fr 1fr; }
+      /* Hochformat: vmin = Breite, deshalb Plus-Ziffer, Satzstand und
+         Leerlauf-Feldnummer hier zusätzlich deckeln, damit sie die schmale
+         Anzeige nicht sprengen. */
       .plus-btn .plus { font-size: 3rem; }
       .plus-btn .label { font-size: .7rem; }
       .current-score { font-size: clamp(1.8rem, 9vw, 3.2rem); }
       .empty .idle-court { font-size: clamp(3rem, 34vw, 11rem); }
+    }
+    /* Übereinander im HOCHFORMAT (Regelfall am Fire-Tablet hinter dem
+       Feld): Der hochkante Court ist höhenbegrenzt, links und rechts von
+       ihm blieb zwei Drittel der Breite leer, während der Satzstand oben
+       Höhe wegnahm. Darum steht der Satzstand jetzt RECHTS neben dem
+       Court (Rückgängig-Knopf über den Ziffern), darunter ggf. die
+       Schiri-Leiste; der Court bekommt die ganze Höhe der Mittelzeile.
+       Ab 480 px Breite (Tablets): Auf Handys ist die Mittelzeile niedriger
+       als Satzstand + Schiri-Leiste — die `auto`-Zeilen liefen über den
+       unteren Knopf hinaus (Review-Befund). Dort bleibt der Stapel. */
+    @media (orientation: portrait) and (min-width: 480px) {
+      .play.uebereinander .center {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        /* Leerzeilen oben/unten zentrieren Satzstand + Schiri-Leiste
+           senkrecht neben dem Court. */
+        grid-template-rows: 1fr auto auto 1fr;
+        column-gap: .6rem; row-gap: .5rem;
+      }
+      .play.uebereinander .court-wrapper { grid-column: 1; grid-row: 1 / 5; align-self: stretch; }
+      .play.uebereinander .score-board {
+        grid-column: 2; grid-row: 2;
+        flex-direction: column; gap: .5rem;
+        max-width: 38vw; padding: .5rem;
+      }
+      /* margin-top 0: der Zeilenabstand kommt schon aus row-gap. */
+      .play.uebereinander .umpire-bar { grid-column: 2; grid-row: 3; max-width: 38vw; margin-top: 0; }
+      /* Der Court ist jetzt etwa doppelt so breit wie vorher: Namen dürfen
+         mit der Breite wachsen statt am kleineren Maß (vmin) zu hängen. */
+      .play.uebereinander .court .cell .player-name { font-size: clamp(.8rem, 3.2vmin, 1.6rem); }
     }
   </style>
 </head>
@@ -4116,6 +4154,31 @@ function render() {
 // (kein Internet, Android-Buttons aus) liegt im Kiosk-Browser, separater PIN.
 let settingsPinEntry = '';
 
+// Fünf-Minuten-Freigabe: Nach richtiger PIN öffnet das Zahnrad fünf Minuten
+// lang ohne erneute Eingabe — auch über Feldwechsel/Neuladen hinweg (Wert im
+// localStorage). Inline-Kopie von `src/io/pinFreigabe.mjs`
+// (Test `scripts/test-pin-freigabe.mjs`); Änderungen hier und dort gemeinsam.
+const PIN_FREIGABE_KEY = 'badhub.tablet.pinFreigabeBis';
+const FREIGABE_MS = 5 * 60 * 1000;
+function neueFreigabe(jetztMs) { return jetztMs + FREIGABE_MS; }
+function freigabeGueltig(bisMs, jetztMs) {
+  if (typeof bisMs !== 'number' || !Number.isFinite(bisMs) || bisMs <= 0) return false;
+  if (bisMs <= jetztMs) return false;
+  return bisMs - jetztMs <= FREIGABE_MS;
+}
+function freigabeLesen(roh) {
+  if (typeof roh !== 'string' || !/^\d{1,16}$/.test(roh)) return null;
+  const n = Number(roh);
+  return n > 0 ? n : null;
+}
+function pinFreigabeAktiv() {
+  try { return freigabeGueltig(freigabeLesen(localStorage.getItem(PIN_FREIGABE_KEY)), Date.now()); }
+  catch { return false; }
+}
+function pinFreigabeMerken() {
+  try { localStorage.setItem(PIN_FREIGABE_KEY, String(neueFreigabe(Date.now()))); } catch { /* kein Speicher → nur diesmal */ }
+}
+
 function renderPinDisplay() {
   const len = settingsPinEntry.length;
   const total = Math.max(SETTINGS_PIN.length, len, 4);
@@ -4129,6 +4192,7 @@ function openSettings() {
   els.settingsPinView.hidden = false;
   els.settingsMainView.hidden = true;
   els.settingsModal.classList.add('visible');
+  if (pinFreigabeAktiv()) showSettingsMain();
 }
 
 function closeSettings() {
@@ -4150,6 +4214,7 @@ function pinKey(k) {
   renderPinDisplay();
   if (settingsPinEntry.length >= SETTINGS_PIN.length) {
     if (settingsPinEntry === SETTINGS_PIN) {
+      pinFreigabeMerken();
       showSettingsMain();
     } else {
       els.settingsPinDisplay.textContent = 'PIN falsch';
