@@ -253,6 +253,29 @@
 
   // ── Menü mit PIN ─────────────────────────────────────────────────────────
   var pinEntry = "";
+  // Fünf-Minuten-Freigabe wie am Zähl-Tablet (gleicher Schlüssel, damit ein
+  // Wechsel „Zum Zählen" ↔ Hülle die Freigabe mitnimmt). Inline-Kopie von
+  // `src/io/pinFreigabe.mjs` (Test `scripts/test-pin-freigabe.mjs`).
+  var PIN_FREIGABE_KEY = "badhub.tablet.pinFreigabeBis";
+  var FREIGABE_MS = 5 * 60 * 1000;
+  function neueFreigabe(jetztMs) { return jetztMs + FREIGABE_MS; }
+  function freigabeGueltig(bisMs, jetztMs) {
+    if (typeof bisMs !== "number" || !Number.isFinite(bisMs) || bisMs <= 0) return false;
+    if (bisMs <= jetztMs) return false;
+    return bisMs - jetztMs <= FREIGABE_MS;
+  }
+  function freigabeLesen(roh) {
+    if (typeof roh !== "string" || !/^\d{1,16}$/.test(roh)) return null;
+    var n = Number(roh);
+    return n > 0 ? n : null;
+  }
+  function pinFreigabeAktiv() {
+    try { return freigabeGueltig(freigabeLesen(localStorage.getItem(PIN_FREIGABE_KEY)), Date.now()); }
+    catch (e) { return false; }
+  }
+  function pinFreigabeMerken() {
+    try { localStorage.setItem(PIN_FREIGABE_KEY, String(neueFreigabe(Date.now()))); } catch (e) {}
+  }
   function renderPin() {
     var total = Math.max(SETTINGS_PIN.length, 4);
     els.pinDisplay.textContent = "•".repeat(pinEntry.length) + "–".repeat(Math.max(0, total - pinEntry.length));
@@ -274,6 +297,7 @@
     els.feldTitel.hidden = false; els.feldListe.hidden = false;
     if (nurFeldwahl) { els.stand.textContent = "Bitte ein Feld wählen"; ladeFelder(); }
     els.menue.classList.add("visible");
+    if (!nurFeldwahl && pinFreigabeAktiv()) zeigeHauptmenue();
   }
   function schliesseMenue() { els.menue.classList.remove("visible"); pinEntry = ""; }
   function zeigeHauptmenue() {
@@ -298,7 +322,7 @@
     if (pinEntry.length >= Math.max(SETTINGS_PIN.length, 8)) return;
     pinEntry += k; renderPin();
     if (pinEntry.length >= SETTINGS_PIN.length) {
-      if (pinEntry === SETTINGS_PIN) { zeigeHauptmenue(); }
+      if (pinEntry === SETTINGS_PIN) { pinFreigabeMerken(); zeigeHauptmenue(); }
       else { els.pinDisplay.textContent = "PIN falsch"; pinEntry = ""; setTimeout(renderPin, 800); }
     }
   }

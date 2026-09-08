@@ -4,6 +4,32 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.284
+
+- **Zähl-Tablet: größeres Feld, kleinere Knöpfe.** Die +1-Knöpfe sind jetzt
+  feste schmale Leisten statt eines Fünftels des Bildschirms: in der
+  Anordnung **übereinander** volle Breite und ~5,5 rem hoch, **nebeneinander**
+  volle Höhe und ~9 rem breit. Im Hochformat hinter dem Feld (ab 480 px
+  Breite) steht der Satzstand mit Rückgängig-Knopf und Schiri-Ansage rechts
+  neben dem Court, der damit die ganze Höhe bekommt (Fire HD 10: rund
+  410 × 900 statt 225 × 500 Pixel). Im Querformat nebeneinander wächst das
+  Feld um gut zwei Drittel. Nur Darstellung, keine Änderung an Zähllogik
+  oder Bedienung.
+- **Zahnrad-PIN fünf Minuten lang gemerkt.** Nach einer richtigen Eingabe
+  öffnet das Zahnrad an Zählseite und Anzeige-Hülle fünf Minuten lang ohne
+  erneute PIN, auch über Feldwechsel und „Neu laden" hinweg (gemerkt je
+  Gerät). Die Frist läuft ab der Eingabe und verlängert sich nicht von
+  selbst. Regel `src/io/pinFreigabe.mjs` mit eigenem Test.
+- **Tablet-App (Android): kein Anheften auf Fire OS ohne Gerätebesitzer.**
+  Fire OS schaltete beim „Bildschirm anheften" seinen Toddler Mode ein und
+  schluckte danach jeden Touch — die App war unbedienbar, auch die
+  Ecken-Geste kam nie an (Feldtest auf zwei Fire HD 10). Ohne Gerätebesitzer
+  heftet die App auf Amazon-Geräten jetzt nicht mehr an (Vollbild und
+  Bildschirm-an bleiben), die Wartekarte sagt es. Andere Android-Geräte und
+  der Gerätebesitzer-Modus sind unverändert. Doku ergänzt: Warum der
+  Werksreset nötig ist (Kindersicherung als Profile Owner) und Autostart
+  ohne Besitzer.
+
 ## v0.9.283
 
 - **Neu: Zähltafel für den Platz hinter dem Feld.** Die Punkte stehen jetzt

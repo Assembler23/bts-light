@@ -124,6 +124,10 @@ jobs:
       # identisch, Stufenwort ab dem zweiten Mal, ohne Adressat gar nichts.
       - name: Bediener-Nachruf (JS)
         run: node scripts/test-scorekeeper-call-text.mjs
+      # Fünf-Minuten-Freigabe der Zahnrad-PIN: Ablauf, Uhr-Sprünge, Lesen aus
+      # dem Speicher — alles, was hier durchrutscht, umgeht die PIN.
+      - name: PIN-Freigabe (JS)
+        run: node scripts/test-pin-freigabe.mjs
 
       # Ordnung zwischen Push und Voll-Abruf auf den Anzeige-Seiten: Push nur
       # bei echt neuerer Sequenz, ein Voll-Abruf darf gleichziehen (der

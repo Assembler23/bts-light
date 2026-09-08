@@ -31,6 +31,16 @@ Im Tablet-Header gibt es ein **Zahnrad ⚙**. Tippen → **PIN-Eingabe** → Men
 (Default **`0000`**). Nur Ziffern, max. 8. Greift ohne Neustart (Live-Config).
 Reiner Bedien-Schutz gegen versehentliche Änderungen – **keine Sicherheitsgrenze**.
 
+**Fünf-Minuten-Freigabe (seit v0.9.284):** Nach einer richtigen Eingabe
+öffnet das Zahnrad **fünf Minuten lang ohne PIN** — auch nach Feldwechsel
+oder „Neu laden", denn der Ablauf-Zeitpunkt liegt im `localStorage` des
+Geräts (`badhub.tablet.pinFreigabeBis`). Die Frist läuft ab der Eingabe und
+verlängert sich durch weitere Bedienung nicht. Zählseite und Anzeige-Hülle
+teilen sich die Freigabe (gleicher Schlüssel), ein Wechsel „Zum Zählen" ↔
+Hülle fragt also nicht erneut. Regel in `src/io/pinFreigabe.mjs` (Test
+`scripts/test-pin-freigabe.mjs`), Inline-Kopien in `tablet.html` und
+`anzeige.html`. Die Kiosk-PIN der Android-App ist davon unberührt.
+
 ---
 
 ## 2) Kiosk-Sperre: eigene App (empfohlen) oder Fully Kiosk

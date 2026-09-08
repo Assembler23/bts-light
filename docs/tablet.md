@@ -392,6 +392,17 @@ Erweiterung 06.09.2026):
   sitzt weiterhin im Innenwinkel des Aufschlagfelds — die Zellen sind so
   gedreht, dass die rechte Hand jedes Spielers stimmt (oben: rechtes
   Aufschlagfeld links, unten: rechtes Aufschlagfeld rechts).
+- **Platzaufteilung (seit v0.9.284):** Die Plus-Knöpfe sind bewusst
+  flache Leisten über die ganze Breite (etwa 5,5 rem hoch) statt eines
+  Fünftels der Höhe; der Court bekommt die ganze Höhe der Mittelzeile, und
+  der Satzstand (mit Rückgängig-Knopf und ggf. Schiri-Ansage) steht **rechts
+  neben dem Court**, senkrecht mittig (ab 480 px Bildschirmbreite; auf
+  Handys bleibt der Satzstand über dem Court). Am Fire HD 10 wächst der
+  Court so von
+  225 × 500 auf rund 410 × 900 Pixel. Dieselbe Idee gilt im Querformat
+  (nebeneinander): Die Plus-Spalten sind dort etwa 9 rem breit statt eines
+  Fünftels der Breite, der Court wird gut zwei Drittel größer. Die Knöpfe
+  bleiben in beiden Fällen ein Tippziel über die volle Breite bzw. Höhe.
 - **Wahl** im Zahnrad-Menü (hinter der PIN), Eintrag „Anordnung" reihum:
   **automatisch** (Standard: Hochformat → übereinander, Querformat →
   nebeneinander; Drehen des Tablets schaltet live um, mitten im Spiel, ohne
@@ -686,10 +697,12 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
   erreicht den Rahmen nie. Ein unbekanntes Layout wird zur Zähltafel, ein
   unbrauchbares Feld öffnet die Feldwahl (ohne PIN — es wird noch nichts
   angezeigt).
-- **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`):
-  Anzeige wählen · Feld wechseln · Seiten spiegeln (nur Zähltafel, gemerkt je
-  Gerät) · Anordnung (nur Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln ·
-  Neu laden · Vollbild · Schließen.
+- **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`;
+  nach richtiger Eingabe fünf Minuten lang ohne PIN, siehe
+  [tablet-kiosk.md](tablet-kiosk.md)): Anzeige wählen · Feld wechseln ·
+  Seiten spiegeln (nur Zähltafel, gemerkt je Gerät) · Anordnung (nur
+  Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln · Neu laden · Vollbild ·
+  Schließen.
 - **Anordnung** (seit v0.9.283): Wer **hinter dem Feld** sitzt, sieht die
   Teams vorn/hinten statt links/rechts. „Automatisch" stellt das Tablet im
   Hochformat auf Punkte **übereinander** (oben fern, unten nah) und im
