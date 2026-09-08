@@ -21,20 +21,27 @@ import de.badhub.btslight.tablet.kern.FixierDialog
  */
 class BestaetigungsDienst : AccessibilityService() {
     private var zuletztGetipptMs = 0L
+    private var zuletztFensterMs = 0L
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (!FixierDialog.istSystemUi(event.packageName)) return
-        // Entprellen: Der Dialog feuert mehrere Ereignisse, ein Tipp reicht.
         val jetzt = SystemClock.elapsedRealtime()
+        // Der Dienst läuft im App-Prozess auf dem UI-Thread; SystemUI feuert
+        // Inhaltsänderungen ständig (Uhr, Benachrichtigungen). Durchsucht wird
+        // nur nach einem Fensterwechsel und kurz danach (Review-Befund).
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) zuletztFensterMs = jetzt
+        else if (jetzt - zuletztFensterMs > 3_000) return
+        // Entprellen: Der Dialog feuert mehrere Ereignisse, ein Tipp reicht.
         if (jetzt - zuletztGetipptMs < 1_500) return
         for (fenster in windows) {
-            if (!FixierDialog.istSystemUi(fenster.root?.packageName)) continue
             val wurzel = fenster.root ?: continue
+            if (!FixierDialog.istSystemUi(wurzel.packageName)) continue
             val texte = ArrayList<CharSequence?>()
             val knoepfe = ArrayList<AccessibilityNodeInfo>()
             sammle(wurzel, texte, knoepfe)
-            if (!FixierDialog.istFixierDialog(texte)) continue
-            val knopf = knoepfe.firstOrNull() ?: continue
+            if (!FixierDialog.istFixierDialog(texte) && knoepfe.none { FixierDialog.istBestaetigungsId(it.viewIdResourceName) }) continue
+            // View-Kennung zuerst (sprachunabhängig), Text als Rückfall.
+            val knopf = knoepfe.firstOrNull { FixierDialog.istBestaetigungsId(it.viewIdResourceName) } ?: knoepfe.firstOrNull() ?: continue
             val ziel = klickbar(knopf) ?: continue
             if (ziel.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                 zuletztGetipptMs = jetzt
@@ -44,13 +51,11 @@ class BestaetigungsDienst : AccessibilityService() {
         }
     }
 
-    /** Alle Texte des Fensters einsammeln, Bestätigungsknöpfe merken. */
+    /** Alle Texte des Fensters einsammeln, Bestätigungsknöpfe (per Kennung oder Text) merken. */
     private fun sammle(knoten: AccessibilityNodeInfo, texte: MutableList<CharSequence?>, knoepfe: MutableList<AccessibilityNodeInfo>) {
         val t = knoten.text ?: knoten.contentDescription
-        if (t != null) {
-            texte.add(t)
-            if (FixierDialog.istBestaetigung(t)) knoepfe.add(knoten)
-        }
+        if (t != null) texte.add(t)
+        if (FixierDialog.istBestaetigungsId(knoten.viewIdResourceName) || (t != null && FixierDialog.istBestaetigung(t))) knoepfe.add(knoten)
         for (i in 0 until knoten.childCount) {
             val kind = knoten.getChild(i) ?: continue
             sammle(kind, texte, knoepfe)

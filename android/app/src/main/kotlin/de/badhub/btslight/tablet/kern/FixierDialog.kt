@@ -19,8 +19,11 @@ object FixierDialog {
     /** Wortstücke, die den Fixier-Dialog kennzeichnen (DE/EN). */
     private val KENNZEICHEN = listOf("fixiert", "angeheftet", "pinned", "bildschirm fixieren", "screen pinning")
 
-    /** Beschriftungen des Bestätigungsknopfs (DE/EN), kleingeschrieben. */
-    private val BESTAETIGEN = listOf("verstanden", "got it", "ok")
+    /** AOSP-Kennung des Bestätigungsknopfs — sprachunabhängig, erstes Kriterium. */
+    const val KNOPF_ID = "com.android.systemui:id/screen_pinning_ok_button"
+
+    /** Beschriftungen des Bestätigungsknopfs (DE/EN), kleingeschrieben — Rückfall, falls Amazon die ID umbenennt. */
+    private val BESTAETIGEN = listOf("verstanden", "got it")
 
     /** Beschriftungen, die NIE angetippt werden dürfen. */
     private val TABU = listOf("nein danke", "no thanks", "touch", "deaktivieren", "disable")
@@ -40,4 +43,7 @@ object FixierDialog {
         val n = norm(text)
         return n in BESTAETIGEN && TABU.none { it in n }
     }
+
+    /** Ist das die View-Kennung des Bestätigungsknopfs? */
+    fun istBestaetigungsId(id: CharSequence?): Boolean = id?.toString() == KNOPF_ID
 }

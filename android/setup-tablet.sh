@@ -231,8 +231,7 @@ adb shell device_config put activity_manager default_background_activity_starts_
 # selbst. Bestehende Dienste bleiben erhalten.
 echo "Fixieren: Bestätigungsdienst einschalten"
 dienst="$PAKET/.kiosk.BestaetigungsDienst"
-alt=$(adb shell settings get secure enabled_accessibility_services 2>/dev/null | tr -d '
-' || true)
+alt=$(adb shell settings get secure enabled_accessibility_services 2>/dev/null | tr -d '\r' || true)
 case "$alt" in
   ""|null) neu="$dienst" ;;
   *"$dienst"*) neu="$alt" ;;
