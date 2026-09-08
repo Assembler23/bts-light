@@ -167,6 +167,12 @@ jobs:
       - name: Zähltafel-Seiten (JS)
         run: node scripts/test-tafel-seiten.mjs
 
+      # Die Amazon-Paketliste der Tablet-Einrichtung steht dreimal im Repo
+      # (Kotlin-Quelle + zwei Skript-Kopien). Driftet eine Kopie, wird auf
+      # dem Tablet etwas anderes stillgelegt als dokumentiert.
+      - name: Entschlackungs-Liste (JS)
+        run: node scripts/test-entschlackung-liste.mjs
+
       # Was die Anzeige-Hülle ins iframe lädt. Rutscht hier freier Text aus der
       # Adresse durch, lädt ein Tablet in der Halle, was immer in der Adresse
       # stand; fällt ein gültiges Feld heraus, zeigt die Hülle nur die Feldwahl.

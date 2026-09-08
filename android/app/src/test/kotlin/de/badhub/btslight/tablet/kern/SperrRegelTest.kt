@@ -7,26 +7,30 @@ import org.junit.Test
 class SperrRegelTest {
     @Test
     fun besitzer_heftet_immer_an() {
-        assertTrue(SperrRegel.anheften(besitzer = true, hersteller = "Amazon"))
-        assertTrue(SperrRegel.anheften(besitzer = true, hersteller = "samsung"))
-        assertTrue(SperrRegel.anheften(besitzer = true, hersteller = null))
+        assertTrue(SperrRegel.anheften(besitzer = true, hersteller = "Amazon", touchGesperrt = true))
+        assertTrue(SperrRegel.anheften(besitzer = true, hersteller = "samsung", touchGesperrt = false))
+        assertTrue(SperrRegel.anheften(besitzer = true, hersteller = null, touchGesperrt = true))
     }
 
     @Test
-    fun ohne_besitzer_kein_anheften_auf_fire_os() {
-        // Fire OS legt beim Anheften seinen „Toddler Mode" über die App und
-        // schluckt jeden Touch (Feldtest 08.09.2026, zwei Fire HD 10).
-        assertFalse(SperrRegel.anheften(besitzer = false, hersteller = "Amazon"))
-        assertFalse(SperrRegel.anheften(besitzer = false, hersteller = "amazon"))
-        assertFalse(SperrRegel.anheften(besitzer = false, hersteller = " AMAZON "))
+    fun fire_os_heftet_an_solange_touch_nicht_gesperrt() {
+        // Feldtest 08.09.2026: Auf einem sauberen Fire-Tablet heftet die App
+        // an und der Touch geht. Nur die Kindersicherung „Touch-Funktion
+        // deaktivieren" (secure toddler_mode_default_value=1) legt beim
+        // Anheften den Toddler Mode darüber, der jeden Touch schluckt.
+        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = "Amazon", touchGesperrt = false))
+        assertFalse(SperrRegel.anheften(besitzer = false, hersteller = "Amazon", touchGesperrt = true))
+        assertFalse(SperrRegel.anheften(besitzer = false, hersteller = " AMAZON ", touchGesperrt = true))
     }
 
     @Test
-    fun ohne_besitzer_anheften_auf_anderem_android() {
-        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = "samsung"))
-        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = "Google"))
-        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = ""))
-        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = null))
+    fun anderes_android_heftet_ohne_besitzer_immer_an() {
+        // Der Toddler-Schalter ist Fire-OS-eigen; anderswo hat der Wert keine
+        // Bedeutung und darf das Anheften nicht verhindern.
+        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = "samsung", touchGesperrt = true))
+        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = "Google", touchGesperrt = false))
+        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = "", touchGesperrt = true))
+        assertTrue(SperrRegel.anheften(besitzer = false, hersteller = null, touchGesperrt = true))
     }
 
     @Test

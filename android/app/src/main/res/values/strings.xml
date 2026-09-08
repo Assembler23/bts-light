@@ -6,6 +6,8 @@
     <string name="erneut_suchen">Erneut suchen</string>
     <string name="kein_besitzer">Nicht als Gerätebesitzer eingerichtet – Sperre nur weich.</string>
     <string name="kein_besitzer_ohne_sperre">Nicht als Gerätebesitzer eingerichtet – ohne Sperre (Anheften nicht möglich).</string>
+    <string name="bestaetigung_beschreibung">Bestätigt den Dialog „App ist auf dem Bildschirm fixiert“ selbst, damit das Zähl-Tablet nach dem Einschalten ohne Fingertipp fixiert ist.</string>
+    <string name="kein_besitzer_touch_gesperrt">Nicht fixiert: In der Kindersicherung „App fixieren → Touch-Funktion deaktivieren“ ausschalten, sonst reagiert die App fixiert nicht auf Berührung.</string>
     <string name="pin_festlegen">Kiosk-PIN festlegen (4–8 Ziffern)</string>
     <string name="pin_eingeben">Kiosk-PIN</string>
     <string name="pin_falsch">PIN falsch</string>

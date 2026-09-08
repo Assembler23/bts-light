@@ -159,11 +159,86 @@ immer; ohne Besitzer nur, wenn der Hersteller nicht „Amazon" ist. Auf
 Fire-Tablets ohne Besitzer bleibt Vollbild + Bildschirm-an ohne Sperre, die
 Wartekarte sagt herstellerneutral „ohne Sperre (Anheften nicht möglich)" —
 denselben Text zeigt sie, wenn `startLockTask()` anderswo wirft (der Boolean
-aus `sperren` unterscheidet die Ursache bewusst nicht). Ausweg an einem
+aus `sperren` unterschied die Ursache bewusst nicht; seit v0.9.285 ein
+Enum, siehe unten). Ausweg an einem
 bereits angehefteten Tablet: `adb shell am task lock stop`. Außerdem
 gemessen: Der Gerätebesitzer scheitert auf Fire OS am **Profile Owner**
-`com.amazon.parentalcontrols` (geschütztes Paket), nicht nur am Konto —
-darum ist der Werksreset Pflicht (siehe `docs/tablet-android-app.md`).
+`com.amazon.parentalcontrols` (geschütztes Paket), nicht nur am Konto.
+**Korrektur nach dem Reset-Test am selben Tag:** Der Profile Owner ist
+auch direkt nach einem Werksreset mit übersprungener Anmeldung wieder
+gesetzt (Fire OS 8.0, Tablet GN434J…), dazu drei `amazon.account`-Konten
+ohne Login. Der Gerätebesitzer-Weg dieser Spec ist auf Fire OS 8 damit
+**nicht gangbar**; Autostart und harte Sperre brauchen einen anderen
+Mechanismus (offen, Roadmap: Accessibility-„Home-Hijack" wie
+LauncherHijack/Fully). Die Spec bleibt für Android-Geräte anderer
+Hersteller gültig.
+
+**Korrektur v0.9.285 — Toddler Mode eingegrenzt:** Drei Durchläufe am
+zurückgesetzten Tablet: (1) Kindersicherung aus → `startLockTask()` heftet
+still an, kein Toddler-Fenster, Touch geht. (2) Kindersicherung an, „App
+fixieren" an, „Touch-Funktion deaktivieren" an (secure
+`toddler_mode_default_value=1`) → SystemUI-Dialog `ScreenPinningConfirmation`
+bei jedem Anheften, nach Bestätigung zwei `ToddlerMode*`-Fenster, Touch tot.
+(3) wie (2), aber Touch-Schalter aus (Wert 0) → Dialog, danach angeheftet
+**mit** Touch. Die pauschale Regel „auf Amazon nie anheften" (v0.9.284) war
+zu breit: `SperrRegel.anheften(besitzer, hersteller, touchGesperrt)` heftet
+auf Amazon jetzt an, solange der Schalter nicht 1 ist; `Kiosk.sperren`
+liefert `Sperre.{Angeheftet, TouchGesperrt, Fehlgeschlagen}` mit je eigenem
+Wartekarten-Hinweis. Das Skript setzt `toddler_mode_default_value 0`,
+`stay_on_while_plugged_in 7` und `locksettings set-disabled true` und
+bricht bei fehlgeschlagenem `set-device-owner` nicht mehr ab (auf Fire OS 8
+immer).
+
+**Nachlese 08.09.2026 (v0.9.285) — Autostart, Entschlackung Stufe 2, Akku:**
+Autostart ohne Besitzer über `device_config put activity_manager
+default_background_activity_starts_enabled true` (gerätweit; hebt „Abort
+background activity starts" für den `BootReceiver` auf; SYSTEM_ALERT_WINDOW
+und `settings put global background_activity_starts_enabled 1` wirkten auf
+Fire OS nicht; überlebt Neustarts). **Korrektur:** Ein stilles Fixieren ohne
+Besitzer gibt es nicht — AOSP zeigt bei jedem `startLockTask()` einer nicht
+freigegebenen App den SystemUI-Dialog `ScreenPinningRequest` („App ist auf
+dem Bildschirm fixiert", Nein danke / Verstanden, bei Amazon plus Kästchen
+„Touch-Funktion deaktivieren"); die vermeintlich stillen Fälle waren Tipps
+des Nutzers bzw. `am task lock` (System-Aufrufer). Lösung:
+Bedienungshilfe-Dienst `kiosk/BestaetigungsDienst` (Manifest `<service>`
+mit `BIND_ACCESSIBILITY_SERVICE`, Konfiguration `res/xml/bestaetigung.xml`:
+nur `com.android.systemui`, `flagRetrieveInteractiveWindows`), Regel
+`kern/FixierDialog` (Kennzeichen „fixiert/pinned" UND Bestätigungsknopf;
+Tabu „Nein danke"/„Touch"/„deaktivieren"; Unit-Test), Einschalten per
+`settings put secure enabled_accessibility_services …` im Skript (bestehende
+Dienste bleiben). Feldtest: nach Neustart fixiert ohne Tipp, Touch bei der
+App. `Kiosk.nachheften` prüft nach 3/10/30/60/120 s und bei Fokus-Erhalt
+nach (max. fünf Versuche je Episode, Mindestabstand 2 s, Zähler zurück bei
+erkannter Fixierung; `onDestroy` räumt die Takte). Energiesparmodus über
+`low_power_trigger_level 100` + `automatic_power_save_mode 0`, Nachtmodus
+per `battery_saver_constants` aus und `FORCE_DARK_OFF` in der WebView.
+Entschlackung nach Fire-Tools-Liste (114 Pakete, `Entschlackung.ALEXA/
+INHALTE/HINTERGRUND/UPDATES`), je Paket `pm disable-user` **und** `pm
+suspend` (Letzteres greift auch bei protected); TABU zusätzlich
+`com.amazon.redstone` (Fire-Tastatur). Messung: 81 installiert, 57
+deaktiviert, 81 angehalten, 0 verweigert (kompletter Skriptlauf), Prozesse
+26 → 17, App/WLAN/Lobby in Ordnung;
+`adep`/`storagemanager` kommen von selbst zurück, OTA/`kso` laufen
+angehalten weiter als Prozess. Akku: Fensterhelligkeit 30 % in der App
+(`Kiosk.HELLIGKEIT`), Energiesparmodus + sticky per Skript.
+
+**Nachlese 08.09.2026 (v0.9.285) — Entschlacken (Stufe 1, überholt durch
+Stufe 2 unten: Fire-Tools-Liste, `disable-user` + `suspend`, `tcomm` nicht
+mehr tabu):** Amazon-Apps (Alexa,
+Video, Music, Kindle, Audible, Photos, Wetter, Shopping, Kids, Hilfe,
+Freevee, Silk Kids, Sonderangebote) und der OTA-Dienst werden bei der
+Einrichtung stillgelegt. Zwei Wege, weil Fire OS 8 `pm uninstall -k
+--user 0` durchgehend verweigert (DELETE_FAILED_INTERNAL_ERROR, gemessen
+an der Wetter-App) und einige Pakete auch gegen `pm disable-user` als
+„protected" schützt (OTA, `kindle.kso`): Das Skript deaktiviert per
+`disable-user`, was geht; der Gerätebesitzer versteckt in
+`Kiosk.einrichten` per `setApplicationHidden` dieselbe Liste
+(`kern/Entschlackung.ALLE`, Quelle; Skripte tragen Kopien). Wächter-Test
+`EntschlackungTest`: Tabu-Pakete (eigene App, Silk, Appstore, WebView,
+Launcher, Kindersicherung, `dcp`/`imp`/`tcomm`, Einstellungen) dürfen nie
+auf der Liste stehen. Ob `setApplicationHidden` die „protected" Pakete auf
+Fire OS wirklich versteckt, zeigt erst der Lauf auf einem zurückgesetzten
+Tablet — das Log meldet je Paket „verweigert".
 
 „Kiosk verlassen" beendet Lock-Task und die App → normales Android. Ein
 Antippen des App-Symbols sperrt wieder.

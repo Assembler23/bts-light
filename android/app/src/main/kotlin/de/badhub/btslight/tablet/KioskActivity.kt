@@ -2,6 +2,7 @@ package de.badhub.btslight.tablet
 
 import android.annotation.SuppressLint
 import android.net.nsd.NsdManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -11,6 +12,7 @@ import android.text.InputType
 import android.view.MotionEvent
 import android.view.View
 import android.webkit.WebResourceError
+import android.webkit.WebSettings
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -84,12 +86,15 @@ class KioskActivity : AppCompatActivity() {
 
         log.schreibe("Start $geraeteId, Version ${BuildConfig.VERSION_NAME}")
         Kiosk.einrichten(this, log::schreibe)
-        val angeheftet = Kiosk.sperren(this, log::schreibe)
+        sperre = Kiosk.sperren(this, log::schreibe)
         wartekarteHinweis.visibility = if (Kiosk.istBesitzer(this)) View.GONE else View.VISIBLE
-        // Ohne Anheften (Fire OS ohne Besitzer, oder startLockTask scheitert)
-        // ehrlich sagen, dass gar keine Sperre wirkt — nicht „nur weich". Der
-        // Text bleibt herstellerneutral; das Warum steht im Log und der Doku.
-        wartekarteHinweis.setText(if (angeheftet) R.string.kein_besitzer else R.string.kein_besitzer_ohne_sperre)
+        sperrHinweisAnzeigen()
+        // Anheften wirkt über SystemUI asynchron und bleibt aus, solange Fire OS
+        // (Kindersicherung „App fixieren") auf den Tipp im Dialog wartet —
+        // darum feste Nachprüfungen statt Vertrauen in den ersten Aufruf.
+        if (sperre == Kiosk.Sperre.Angeheftet) {
+            for (ms in NACHHEFT_TAKTE_MS) handler.postDelayed({ nachheftenFallsNoetig() }, ms)
+        }
 
         webEinrichten()
 
@@ -105,6 +110,72 @@ class KioskActivity : AppCompatActivity() {
         }
 
         if (einstellungen.pin == null) pinFestlegen(erstStart = true) { verarbeite(Ereignis.Start) } else verarbeite(Ereignis.Start)
+    }
+
+    private var sperre = Kiosk.Sperre.Fehlgeschlagen
+    private var nachheftVersuche = 0
+    private var letzterNachheftMs = 0L
+
+    private companion object {
+        /** Feste Nachprüfungen nach dem Start; der Fixier-Dialog braucht seine Zeit. */
+        val NACHHEFT_TAKTE_MS = longArrayOf(3_000, 10_000, 30_000, 60_000, 120_000)
+        const val NACHHEFT_MAX = 5
+        /** Fokus-Wechsel und Takt fallen oft zusammen — nicht zwei Dialoge binnen 100 ms. */
+        const val NACHHEFT_MINDESTABSTAND_MS = 2_000L
+    }
+
+    override fun onDestroy() {
+        // Kein Nachheften auf einer beendeten Activity (Review-Befund: nach
+        // „Kiosk verlassen" könnte ein später Takt sonst wieder anheften).
+        handler.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
+
+    /** Ohne Anheften ehrlich sagen, dass keine Sperre wirkt — bei gesperrtem Touch den Schalter nennen. */
+    private fun sperrHinweisAnzeigen() {
+        wartekarteHinweis.setText(when (sperre) {
+            Kiosk.Sperre.Angeheftet -> R.string.kein_besitzer
+            Kiosk.Sperre.TouchGesperrt -> R.string.kein_besitzer_touch_gesperrt
+            Kiosk.Sperre.Fehlgeschlagen -> R.string.kein_besitzer_ohne_sperre
+        })
+    }
+
+    /**
+     * Fokus zurück (nach Boot, nach dem Fixier-Dialog, nach einem System-
+     * Dialog): Sollte angeheftet sein, ist es aber nicht → nachheften (siehe
+     * [nachheftenFallsNoetig]).
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Kurz warten: direkt im Fokus-Wechsel ist das Fenster noch nicht immer
+        // „sichtbar" genug für startLockTask.
+        if (hasFocus) handler.postDelayed({ nachheftenFallsNoetig() }, 600)
+    }
+
+    /**
+     * Sollte angeheftet sein, ist es aber nicht → bis zu [NACHHEFT_MAX]-mal je
+     * Episode nachheften; danach sagt die Wartekarte „ohne Sperre". Sobald die
+     * App wieder angeheftet ist, beginnt die Zählung von vorn (Episode zu Ende)
+     * und der Hinweis geht zurück auf „Sperre nur weich" — ein Bediener, der
+     * den Dialog erst spät bestätigt, wird nicht dauerhaft falsch beschriftet.
+     */
+    private fun nachheftenFallsNoetig() {
+        if (isFinishing || isDestroyed || Kiosk.istBesitzer(this)) return
+        if (Kiosk.istAngeheftet(this)) {
+            nachheftVersuche = 0
+            if (sperre == Kiosk.Sperre.Fehlgeschlagen) { sperre = Kiosk.Sperre.Angeheftet; sperrHinweisAnzeigen() }
+            return
+        }
+        if (sperre == Kiosk.Sperre.TouchGesperrt) return
+        val jetzt = SystemClock.elapsedRealtime()
+        if (jetzt - letzterNachheftMs < NACHHEFT_MINDESTABSTAND_MS) return
+        if (nachheftVersuche >= NACHHEFT_MAX) {
+            if (sperre != Kiosk.Sperre.Fehlgeschlagen) { sperre = Kiosk.Sperre.Fehlgeschlagen; sperrHinweisAnzeigen() }
+            return
+        }
+        nachheftVersuche++
+        letzterNachheftMs = jetzt
+        Kiosk.nachheften(this, log::schreibe)
     }
 
     override fun onStart() {
@@ -208,6 +279,10 @@ class KioskActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun webEinrichten() {
         web.settings.apply {
+        // Der Energiesparmodus schaltet ab Android 10 den Nachtmodus mit ein;
+        // die WebView dürfte tablet.html dann algorithmisch umfärben (Review-
+        // Befund). Die Seite bringt ihr eigenes dunkles Design mit — aus.
+        if (Build.VERSION.SDK_INT >= 29) web.settings.forceDark = WebSettings.FORCE_DARK_OFF
             javaScriptEnabled = true
             domStorageEnabled = true            // localStorage: Spielstand, Geräte-ID der Seite
             mediaPlaybackRequiresUserGesture = false // Gong ohne Fingertipp
