@@ -63,6 +63,17 @@ genau die Spur verwischen, wegen der er gebaut wurde. Die Regel steht in
 `src/io/standstill.mjs` (Test `scripts/test-standstill.mjs`, eigener
 CI-Schritt); beide Anzeige-Seiten tragen eine Inline-Kopie.
 
+Eine Ursache für `keine_abrufe` ist seit v0.9.287 beseitigt: Der Stand-Abruf
+hatte keinen Timeout, und ein einzelner im WLAN-Roaming verlorener Abruf
+blockierte alle folgenden (Turnier 05./06.09.2026, siehe
+[court-monitor.md](court-monitor.md), „Frist für den Stand-Abruf"). Seither
+endet er als Fehler, wenn die Kopfzeilen nicht binnen 5 s da sind oder der
+Rumpf danach länger als 15 s braucht — im schlimmsten Fall also nach 20 s;
+im Monitor-Log erscheint dann `offline` mit anschließendem `online` statt
+eines minutenlangen `stillstand`. Ein `stillstand` mit `art=keine_abrufe`
+und `fetchOk=true` bei einer Seite ab v0.9.287 wäre daher ein **neuer**
+Befund.
+
 ### Perf-Zeile der Anzeige-Strecke
 
 Alle zehn Sekunden eine Zeile mit dem, was die Monitore und Übersichten im

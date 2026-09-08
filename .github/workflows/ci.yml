@@ -206,6 +206,14 @@ jobs:
       - name: Gesundheit des Push-Kanals (JS)
         run: node scripts/test-push-health.mjs
 
+      # Frist des Stand-Abrufs: Ein Abruf ohne Timeout hatte keinen
+      # Erholungspfad — ging die Antwort im WLAN-Roaming verloren, fror die
+      # Anzeige ohne Blende ein, bis die TCP-Sendewiederholung nach Minuten
+      # griff (Turnier 05./06.09.2026). Die Frist muss Kopfzeilen UND Rumpf
+      # abdecken und einen rechtzeitigen Abruf in nichts veraendern.
+      - name: Frist des Stand-Abrufs der Anzeigen (JS)
+        run: node scripts/test-abruf-frist.mjs
+
       # Server-Uhr der Anzeigen (Etappe ETag, 1c): Der Offset kommt aus dem
       # 200-Abruf UND dem WS-Herzschlag, überlebt eine 304-Serie und bleibt
       # monoton plausibel — sonst stünde der Pausen-Countdown still.

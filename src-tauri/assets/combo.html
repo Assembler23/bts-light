@@ -542,9 +542,42 @@ body.vertical .vset.current { color: #fbbf24; }
     if (deviceId) u += '&device=' + encodeURIComponent(deviceId);
     return u;
   }
+  // Frist des Stand-Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s. Ein Abruf,
+  // der weder scheitert noch antwortet, blockierte sonst alle folgenden
+  // (Turnier 05./06.09.2026). **Inline-Kopie von `src/io/abrufFrist.mjs`**
+  // — dort die kanonische Fassung mit Begründung und Test
+  // (`scripts/test-abruf-frist.mjs`, eigener CI-Schritt); hier ohne
+  // `fetchFn`-Parameter. Änderungen hier und dort gemeinsam.
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error('Abruf-Frist überschritten (' + was + ')'));
+      };
+      timer = setTimeout(function () { abbrechen('Kopfzeilen ' + KOPF_FRIST_MS + ' ms'); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error('Antwort nach Ablauf der Frist verworfen');
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen('Rumpf ' + RUMPF_FRIST_MS + ' ms'); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
   function tick() {
-    fetch(stateUrl(), { cache: 'no-store' })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    abrufMitFrist(stateUrl(), { cache: 'no-store' }, function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (data) {
         errorCount = 0; showOffline(false);
         render(data);
@@ -575,11 +608,17 @@ body.vertical .vset.current { color: #fbbf24; }
   // transientes Leer-Lesen der Zuweisung (zusätzlich zum atomaren Schreiben).
   var noRedirectPolls = 0;
   var DEASSIGN_AFTER = 3;
+  // In-Flight-Schutz auch hier: Ohne ihn parkte der Sekundentakt während
+  // eines Hängers jede Sekunde einen weiteren Abruf auf einer toten
+  // Leitung (Review-Fund 08.09.2026).
+  var checkLaeuft = false;
   function checkReassignment() {
     if (!deviceId) return;
-    fetch('/monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    if (checkLaeuft) return;
+    checkLaeuft = true;
+    abrufMitFrist('/monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' }, function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
+        checkLaeuft = false;
         if (!s) return;
         if (s.deviceCode) lastDeviceCode = s.deviceCode;
         // Reihenfolge wie monitor.html: navigieren wir weg, wird KEIN Befehl
@@ -607,7 +646,7 @@ body.vertical .vset.current { color: #fbbf24; }
         // für die Kombi-Anzeige verloren (der bisherige Bug).
         handleCommand(s.command);
       })
-      .catch(function () {});
+      .catch(function () { checkLaeuft = false; });
   }
   setInterval(checkReassignment, 1000);
 

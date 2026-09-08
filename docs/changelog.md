@@ -4,6 +4,30 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.287
+
+- **Court-Monitore: Frist für den Stand-Abruf (Kopfzeilen 5 s, Rumpf
+  15 s).** Beim Turnier am 05./06.09.2026 (LAN, sechs Pi-Monitore hinter
+  Router + Access-Point) froren die Anzeigen phasenweise ohne Offline-Blende
+  ein, während Tablets und TL-Web am selben Turnier-PC sauber liefen.
+  Ursache: Der Stand-Abruf der Anzeige-Seiten hatte keinen Timeout. Ging
+  eine Antwort im WLAN-Roaming verloren, blieb der Abruf offen, der
+  In-Flight-Schutz (bzw. die Abruf-Kette bei Kombi/Sieger/Vorbereitung/
+  Feldwahl) ließ keinen weiteren zu, und bei Feld-Monitor und Zähltafel kam
+  selbst der Fernbefehl „Neu laden" nicht mehr an — bis die
+  TCP-Sendewiederholung nach Minuten griff. Jetzt endet jeder Stand-Abruf
+  als Fehler, wenn die Kopfzeilen nicht binnen 5 s da sind oder der Rumpf
+  danach länger als 15 s braucht, und nimmt den bekannten Weg: Blende,
+  schneller Takt, nächster Abruf auf frischer Verbindung. Dazu drei
+  Folgeregeln aus dem Review: ETag-Marke erst nach dem Rumpf übernehmen,
+  Übersicht erst nach dem Rumpf entwarnen, Zuweisungs-Check mit
+  In-Flight-Schutz und Frist. Betrifft `monitor`, `overview`, `tafel`,
+  `combo`, `winners`, `preparation`, `ad` (Werbe-Seite), `lobby` (Feldwahl der Tablets) und den
+  Stand-Abruf der Turnierleitungs-Oberfläche `tl` — dort hielt derselbe
+  Hänger `pollLaeuft` fest, während die Kopfzeile „aktuell" meldete. Regel in
+  `src/io/abrufFrist.mjs` mit eigenem CI-Schritt. Im Cloud-Modus greift die
+  Änderung erst mit dem Relay-Redeploy.
+
 ## v0.9.286
 
 - **Release-Seite bietet die Tablet-APK an.** Auf

@@ -190,6 +190,33 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   `src/io/pushHealth.mjs` mit eigenem CI-Schritt; beide Anzeige-Seiten tragen
   eine Inline-Kopie. **Kein Regress** — fällt der Push aus, verhält sich die
   Anzeige wie zuvor, nur mit schnellerem Poll.
+- **Frist für den Stand-Abruf: Kopfzeilen 5 s, Rumpf 15 s** (seit v0.9.287,
+  Turnier 05./06.09.2026): Der Abruf hatte keinen Timeout. Ging eine Antwort
+  im WLAN-Roaming zwischen Router und Access-Point verloren, blieb der Abruf
+  offen — bei `monitor`, `overview` und `tafel` hielt der In-Flight-Schutz
+  jeden weiteren Poll zurück, bei `combo`, `winners`, `preparation` und der
+  Feldwahl `lobby` hängt der nächste Abruf am Ende des vorigen. Die Anzeige
+  fror **ohne Blende** ein, obwohl Tablets und TL-Web am selben Turnier-PC
+  sauber liefen; der WebSocket verband nach 25 s zwar neu, sein Anstoß lief
+  aber in denselben blockierten Abruf — und bei Feld-Monitor und Zähltafel
+  reist auch der Fernbefehl „Neu laden" über genau diesen Abruf (Übersicht
+  und Kombi bekommen ihn über den getrennten Zuweisungs-Check). Erst die
+  TCP-Sendewiederholung des Geräts löste den Knoten — nach Minuten. Seit
+  v0.9.287 endet ein Abruf als Fehler, wenn die Kopfzeilen nicht binnen 5 s
+  da sind oder der Rumpf danach länger als 15 s braucht, und nimmt damit den
+  bekannten Weg: Blende, Kanal ungesund, 250-ms-Takt, nächster Abruf auf
+  frischer Verbindung. Zwei Budgets, weil die Übersicht unkomprimiert rund
+  16 KB wiegt und eine ferne Halle am LTE-Hotspot langsam, aber lebendig sein
+  darf; zusammen bleiben sie unter der 25-s-Schwelle des Herzschlags. Drei
+  Folgeregeln gehören dazu: Die **ETag-Marke** wird erst nach dem Rumpf
+  übernommen (sonst fragte der nächste Abruf mit der Marke eines nie gezeigten
+  Standes und bekäme ein 304), die Übersicht **entwarnt** erst nach dem Rumpf
+  (sonst käme bei wiederholtem Kopfzeilen-ja/Rumpf-nein nie die Blende), und
+  der sekündliche **Zuweisungs-Check** hat denselben In-Flight-Schutz samt
+  Frist (sonst parkte er während eines Hängers jede Sekunde einen weiteren
+  Abruf auf der toten Leitung). Die Regel steht als `src/io/abrufFrist.mjs`
+  mit eigenem CI-Schritt; die acht Anzeige-Seiten (einschließlich der Werbe-Seite `ad`) und `tl.html` tragen eine
+  Inline-Kopie.
 - **Schalter `push_fallback_slow`** (`config.json`, Abschnitt `court_monitor`;
   **Standard aus**): Erst er erlaubt den 4-s-Takt. Ohne ihn pollt eine frisch
   aktualisierte Installation exakt wie vorher — die Entlastung ist der
