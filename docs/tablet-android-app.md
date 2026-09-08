@@ -53,10 +53,14 @@ Das Geräte-Log der App landet wie bei den Pi-Monitoren beim Turnier-PC
    (`-Wlan <SSID> -WlanPasswort <Passwort>` bzw. `WLAN_SSID=… WLAN_PASSWORT=…`
    vor dem Bash-Aufruf, WPA2); ohne diese Angabe vorher von Hand verbinden.
 3. Tablet per USB an den Einrichtungs-PC anschließen. `adb` muss dort
-   installiert sein (Android Platform Tools). Die APK von
-   <https://badhub.de/download/bts-light/bts-light-tablet.apk> laden.
+   installiert sein (Android Platform Tools; die Fassung aus Fire Toolbox
+   tut es auch). Die APK von der Release-Seite
+   <https://badhub.de/download/bts-light/> laden (Abschnitt „Zähl-Tablets“;
+   der feste Name `bts-light-tablet.apk` gilt erst für die signierte
+   Fassung, bis dahin die versionierte `-debug.apk`).
 4. Im Repo-Ordner `android/`: `.\setup-tablet.ps1 -Apk bts-light-tablet.apk
-   -Wlan Hallen-WLAN -WlanPasswort geheim` unter Windows bzw.
+   -Wlan Hallen-WLAN -WlanPasswort geheim` (bzw. mit dem Namen der geladenen
+   `-debug.apk`) unter Windows bzw.
    `WLAN_SSID=Hallen-WLAN WLAN_PASSWORT=geheim ./setup-tablet.sh
    bts-light-tablet.apk` unter Linux/macOS ausführen. Das Skript verbindet
    zuerst das WLAN (falls angegeben; per `cmd wifi connect-network`, wartet

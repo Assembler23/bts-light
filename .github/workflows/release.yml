@@ -183,6 +183,10 @@ jobs:
           ssh bts-deploy@178.104.221.177 \
             'ls /var/www/badhub/public/download/bts-light/ | grep "setup.exe$" || true' > exes.txt
           (cd rel && ls *-setup.exe) >> exes.txt
+          # Tablet-APKs genauso: was auf dem Server liegt plus die frisch gebaute.
+          ssh bts-deploy@178.104.221.177 \
+            'ls /var/www/badhub/public/download/bts-light/ | grep "^bts-light-tablet-.*\.apk$" || true' > apks.txt
+          (cd rel && ls bts-light-tablet-*.apk 2>/dev/null || true) >> apks.txt
           # Release-Daten je Version aus den Tags (Version → Erstell-Datum).
           git for-each-ref --format '%(refname:short) %(creatordate:short)' refs/tags > dates.txt
           # Zuletzt veroeffentlichter Tag VOR diesem: Damit umfassen die
@@ -202,6 +206,7 @@ jobs:
           node scripts/build-release-page.mjs \
             --changelog docs/changelog.md \
             --files exes.txt \
+            --apks apks.txt \
             --dates dates.txt \
             --out rel/index.html \
             --notes-out notes.txt \

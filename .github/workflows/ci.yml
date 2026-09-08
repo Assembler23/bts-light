@@ -222,6 +222,10 @@ jobs:
       # bei neun gebuendelten Versionen fehlten acht.
       - name: Update-Notes ueber die Release-Strecke (JS)
         run: node scripts/test-release-notes.mjs
+      # Die Release-Seite bietet die Tablet-APK an — aber nur Dateien, die auf
+      # dem Server liegen, und den festen Namen nur fuer eine signierte APK.
+      - name: Release-Seite mit Tablet-APK (JS)
+        run: node scripts/test-release-page-apk.mjs
 
       # Was aus docs/ oeffentlich auf badhub.de landet. Zwei stille Fehler
       # verhindert der Test: ein interner Abschnitt wird wieder oeffentlich,
