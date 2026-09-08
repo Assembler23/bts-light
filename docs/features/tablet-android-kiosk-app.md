@@ -159,7 +159,8 @@ immer; ohne Besitzer nur, wenn der Hersteller nicht „Amazon" ist. Auf
 Fire-Tablets ohne Besitzer bleibt Vollbild + Bildschirm-an ohne Sperre, die
 Wartekarte sagt herstellerneutral „ohne Sperre (Anheften nicht möglich)" —
 denselben Text zeigt sie, wenn `startLockTask()` anderswo wirft (der Boolean
-aus `sperren` unterscheidet die Ursache bewusst nicht). Ausweg an einem
+aus `sperren` unterschied die Ursache bewusst nicht; seit v0.9.285 ein
+Enum, siehe unten). Ausweg an einem
 bereits angehefteten Tablet: `adb shell am task lock stop`. Außerdem
 gemessen: Der Gerätebesitzer scheitert auf Fire OS am **Profile Owner**
 `com.amazon.parentalcontrols` (geschütztes Paket), nicht nur am Konto.
@@ -171,6 +172,22 @@ ohne Login. Der Gerätebesitzer-Weg dieser Spec ist auf Fire OS 8 damit
 Mechanismus (offen, Roadmap: Accessibility-„Home-Hijack" wie
 LauncherHijack/Fully). Die Spec bleibt für Android-Geräte anderer
 Hersteller gültig.
+
+**Korrektur v0.9.285 — Toddler Mode eingegrenzt:** Drei Durchläufe am
+zurückgesetzten Tablet: (1) Kindersicherung aus → `startLockTask()` heftet
+still an, kein Toddler-Fenster, Touch geht. (2) Kindersicherung an, „App
+fixieren" an, „Touch-Funktion deaktivieren" an (secure
+`toddler_mode_default_value=1`) → SystemUI-Dialog `ScreenPinningConfirmation`
+bei jedem Anheften, nach Bestätigung zwei `ToddlerMode*`-Fenster, Touch tot.
+(3) wie (2), aber Touch-Schalter aus (Wert 0) → Dialog, danach angeheftet
+**mit** Touch. Die pauschale Regel „auf Amazon nie anheften" (v0.9.284) war
+zu breit: `SperrRegel.anheften(besitzer, hersteller, touchGesperrt)` heftet
+auf Amazon jetzt an, solange der Schalter nicht 1 ist; `Kiosk.sperren`
+liefert `Sperre.{Angeheftet, TouchGesperrt, Fehlgeschlagen}` mit je eigenem
+Wartekarten-Hinweis. Das Skript setzt `toddler_mode_default_value 0`,
+`stay_on_while_plugged_in 7` und `locksettings set-disabled true` und
+bricht bei fehlgeschlagenem `set-device-owner` nicht mehr ab (auf Fire OS 8
+immer). Offen bleibt der Autostart nach Boot (Roadmap).
 
 **Nachlese 08.09.2026 (v0.9.285) — Entschlacken:** Amazon-Apps (Alexa,
 Video, Music, Kindle, Audible, Photos, Wetter, Shopping, Kids, Hilfe,

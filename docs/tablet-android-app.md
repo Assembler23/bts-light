@@ -60,9 +60,11 @@ Das Geräte-Log der App landet wie bei den Pi-Monitoren beim Turnier-PC
    bis zu 30 s auf eine IP-Adresse und läuft bei Misserfolg mit Warnung
    weiter), prüft dann, dass auf dem Tablet **kein Konto** eingerichtet ist,
    installiert die APK, setzt die App als Gerätebesitzer, **entschlackt**
-   das Tablet (siehe unten) und startet die App. Schlägt `adb install` oder `dpm set-device-owner` fehl, bricht die
-   PowerShell-Fassung mit einer Fehlermeldung samt Exit-Code ab (die
-   Bash-Fassung ebenso, über `set -e`) — es geht also nie unbemerkt schief.
+   das Tablet (siehe unten) und startet die App. Schlägt `adb install` fehl,
+   bricht das Skript mit Fehlermeldung ab; gefundene Konten und ein
+   gescheiterter `dpm set-device-owner` sind nur Warnungen, weil beides auf
+   Fire OS 8 immer eintritt (interne Amazon-Konten, Kindersicherung als
+   Profile Owner) — die Einrichtung läuft dann ohne Gerätebesitzer weiter.
    Vorher lohnt sich **einmal ein Fire-OS-Update von Hand** (Einstellungen →
    Geräteoptionen → Systemupdates), denn danach schaltet die Einrichtung
    Amazons Update-Dienst ab.
@@ -184,18 +186,27 @@ Gerätebesitzer eingerichtet werden — siehe auch
 Wurde der ADB-Schritt übersprungen oder von Fire OS verweigert, läuft die
 App **ohne harte Sperre**. Was dann passiert, hängt vom Gerät ab:
 
-- **Fire-Tablets (Hersteller „Amazon"):** Die App heftet den Bildschirm
-  **bewusst nicht** an. Fire OS schaltet beim Anheften ohne Gerätebesitzer
-  seinen „Toddler Mode" ein und legt ein unsichtbares Vollbild-Fenster über
-  die App, das **jeden Touch schluckt** — die App wäre unbedienbar, auch die
-  Ecken-Geste käme nie an (Feldtest 08.09.2026 auf zwei Fire HD 10, im
-  Logcat „User is currently in toddler mode, touch outside pinned app is
-  prohibited"). Es bleiben Vollbild, Bildschirm-an und die Server-Suche;
-  Home führt aus der App heraus, Zurück bleibt wie im Kiosk ohne Wirkung.
-  Die Wartekarte zeigt „Nicht als Gerätebesitzer eingerichtet – ohne Sperre
-  (Anheften nicht möglich)." Regel: `kern/SperrRegel.kt` (Unit-Test
-  `SperrRegelTest`); derselbe Hinweis erscheint auch, wenn das Anheften auf
-  einem anderen Gerät scheitert.
+- **Fire-Tablets (Hersteller „Amazon"):** Die App heftet den Bildschirm an
+  wie auf jedem Android — **außer** die Kindersicherung hat „App fixieren →
+  Touch-Funktion deaktivieren" eingeschaltet. Dann legt Fire OS beim
+  Fixieren seinen „Toddler Mode" über die App, ein unsichtbares
+  Vollbild-Fenster, das **jeden Touch schluckt** — die App wäre unbedienbar,
+  auch die Ecken-Geste käme nie an (Feldtest 08.09.2026 auf zwei Fire HD 10,
+  in drei Durchläufen eingegrenzt: ohne Kindersicherung fixiert die App
+  still und Touch geht; mit „App fixieren" fragt Fire OS bei jedem Start
+  einmal nach; erst „Touch-Funktion deaktivieren" bringt das Toddler-
+  Fenster). Der Schalter ist das Secure-Setting `toddler_mode_default_value`;
+  das Einrichtungsskript setzt ihn auf 0, die App liest ihn beim Start und
+  fixiert bei 1 **nicht** — die Wartekarte sagt dann „Nicht fixiert: In der
+  Kindersicherung „App fixieren → Touch-Funktion deaktivieren" ausschalten".
+  Achtung: Die Kindersicherungs-Oberfläche schreibt den Wert bei jedem
+  Umschalten neu — wer dort „Touch-Funktion deaktivieren" wieder einschaltet,
+  überstimmt das Skript (beobachtet 08.09.2026). Ist „App fixieren" an,
+  fragt Fire OS außerdem bei jedem App-Start einmal „App fixieren?" nach.
+  Empfehlung: kein Amazon-Konto, Kindersicherung aus. Regel:
+  `kern/SperrRegel.kt` (Unit-Test `SperrRegelTest`). Scheitert das Fixieren
+  aus anderem Grund, steht „ohne Sperre (Anheften nicht möglich)" auf der
+  Karte; Home führt dann aus der App heraus, Zurück bleibt ohne Wirkung.
 - **Andere Android-Geräte:** die schwächere Sperre „Bildschirm anheften".
   Android fragt beim Start der App einmal nach, der Ausstieg geht über die
   normale Android-Geste statt über die Kiosk-PIN. Die Wartekarte zeigt
@@ -221,10 +232,12 @@ Typ `amazon.account` ohne jede Anmeldung. `dpm set-device-owner` antwortet
 `pm disable-user`). **Ein Werksreset bringt auf Fire OS 8 also nichts**; die
 Schritte 1 und 4 oben (Reset, Gerätebesitzer) gelten nur für Android-Geräte
 anderer Hersteller. Auf Fire-Tablets bleibt die Einrichtung ohne Besitzer:
-APK installieren, Amazon-Apps stilllegen, Bildschirm-an und Sperrbildschirm
-per adb setzen, App starten — genau das tut das Skript bis auf den
-Gerätebesitzer-Schritt, den es dort mit Fehler abbricht (siehe
-[roadmap.md](roadmap.md): Kiosk-Verhalten ohne Gerätebesitzer).
+APK installieren, Amazon-Apps stilllegen, Bildschirm-an, Sperrbildschirm
+und den Toddler-Schalter per adb setzen, App starten — genau das tut das
+Skript; den fehlgeschlagenen Gerätebesitzer-Schritt meldet es nur als
+Warnung und läuft weiter. Was dann fehlt, ist allein der Autostart nach dem
+Einschalten (siehe [roadmap.md](roadmap.md): Kiosk-Verhalten ohne
+Gerätebesitzer).
 
 ## Fehlersuche
 

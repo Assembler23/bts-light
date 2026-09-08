@@ -83,11 +83,12 @@ if ($geraete -ne 1) { Write-Error "Genau ein Tablet per USB anschließen (gefund
 
 if ($Wlan) { Write-Host "WLAN einrichten: $Wlan"; WlanEinrichten $Wlan $WlanPasswort }
 
-# Device Owner geht nur ohne eingerichtete Konten.
+# Device Owner geht nur ohne eingerichtete Konten. Nur Warnung: Fire OS 8 hat
+# auch ohne Anmeldung drei interne Konten (Typ `amazon.account`), und der
+# Besitzer-Schritt ist unten ohnehin nicht mehr fatal.
 $konten = adb shell dumpsys account | Select-String "Account \{"
 if ($konten) {
-  Write-Error "Auf dem Tablet ist noch ein Konto eingerichtet (Amazon?). Tablet zurücksetzen, Anmeldung überspringen, erneut starten."
-  exit 1
+  Write-Warning "Konten auf dem Tablet gefunden ($($konten.Count)) – der Gerätebesitzer-Schritt wird damit scheitern (auf Fire OS 8 normal). Bei einem angemeldeten Amazon-Konto: abmelden."
 }
 
 Write-Host "APK installieren: $Apk"
@@ -96,8 +97,25 @@ adb install -r $Apk
 if ($LASTEXITCODE -ne 0) { Write-Error "adb install fehlgeschlagen (Exit $LASTEXITCODE)."; exit 1 }
 
 Write-Host "Gerätebesitzer setzen"
-adb shell dpm set-device-owner "$Paket/.kiosk.KioskAdminReceiver"
-if ($LASTEXITCODE -ne 0) { Write-Error "Gerätebesitzer konnte nicht gesetzt werden (Exit $LASTEXITCODE). Meist: noch ein Konto auf dem Tablet, oder schon ein anderer Gerätebesitzer."; exit 1 }
+# Lokal "Continue": die IllegalStateException von dpm kommt über stderr und
+# würde bei umgeleitetem Host-stderr (Datei, ISE) unter "Stop" das Skript
+# beenden — genau den Schritt, der hier toleriert werden soll.
+& { $ErrorActionPreference = "Continue"; adb shell dpm set-device-owner "$Paket/.kiosk.KioskAdminReceiver" 2>&1 | Out-String | Write-Host }
+if ($LASTEXITCODE -ne 0) {
+  # Auf Fire OS 8 scheitert das IMMER (Kindersicherung ist Profile Owner, auch
+  # nach Werksreset) — dann läuft die Einrichtung ohne Besitzer weiter; die
+  # Sperre bleibt das weiche Anheften.
+  Write-Warning "Gerätebesitzer konnte nicht gesetzt werden (Exit $LASTEXITCODE). Auf Fire OS 8 normal (Kindersicherung ist Profile Owner); sonst: noch ein Konto, oder schon ein anderer Besitzer. Weiter ohne Besitzer."
+}
+
+# Ohne Besitzer erledigt die App das nicht selbst: Bildschirm am Ladekabel
+# an, Sperrbildschirm (mit Werbung) aus, und der Fire-OS-Schalter
+# „Touch-Funktion deaktivieren" der Kindersicherung aus — sonst schluckt der
+# Toddler Mode beim Anheften jeden Touch (Feldtest 08.09.2026).
+Write-Host "Bildschirm: Wachhalten am Ladekabel, Sperrbildschirm aus, Touch beim Fixieren erlauben"
+adb shell settings put global stay_on_while_plugged_in 7
+adb shell locksettings set-disabled true
+adb shell settings put secure toddler_mode_default_value 0
 
 if ($OhneEntschlacken) { Write-Host "Amazon-Apps bleiben (-OhneEntschlacken)." }
 else { Write-Host "Amazon-Apps entfernen (Alexa, Video, Kindle, OTA …)"; Entschlacken }

@@ -19,6 +19,14 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   auf Wunsch gleich das Hallen-WLAN (`-Wlan`/`-WlanPasswort` bzw.
   `WLAN_SSID`/`WLAN_PASSWORT`). Doku: vorher einmal von Hand Fire OS
   aktualisieren; warum es kein Abbild für viele Tablets gibt.
+- **Tablet-App (Android): Fixieren auf Fire OS wieder an, Toddler Mode
+  eingegrenzt.** Der Touch-Ausfall beim Fixieren (v0.9.284) kommt allein vom
+  Kindersicherungs-Schalter „App fixieren → Touch-Funktion deaktivieren".
+  Die App fixiert auf Fire-Tablets jetzt wieder (Home/Zuletzt gesperrt) und
+  verweigert es nur, wenn dieser Schalter an ist — mit klarem Hinweis auf
+  der Wartekarte. Das Einrichtungsskript schaltet den Schalter aus, hält den
+  Bildschirm am Ladekabel wach, schaltet den Sperrbildschirm ab und läuft
+  bei fehlgeschlagenem Gerätebesitzer-Schritt weiter.
 - **Befund: Auf Fire OS 8 ist der Gerätebesitzer nicht erreichbar, auch
   nicht nach Werksreset.** Amazons Kindersicherung ist nach dem ersten
   Start sofort wieder Profile Owner. Die Doku rät auf Fire-Tablets nicht

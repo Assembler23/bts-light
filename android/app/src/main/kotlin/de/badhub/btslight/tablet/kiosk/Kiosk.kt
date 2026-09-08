@@ -18,8 +18,9 @@ import de.badhub.btslight.tablet.kern.SperrRegel
 
 /**
  * Harte Sperre als Gerätebesitzer (einmalig per ADB gesetzt); ohne
- * Besitzer weiche Anheft-Sperre — Android fragt dann einmal nach — außer
- * auf Fire OS, wo gar nicht angeheftet wird (siehe `SperrRegel`).
+ * Besitzer weiche Anheft-Sperre — Android fragt dann ggf. einmal nach.
+ * Auf Fire OS entfällt das Anheften nur, wenn die Kindersicherung den
+ * Touch angehefteter Apps sperrt (siehe `SperrRegel`).
  */
 object Kiosk {
     private fun dpm(ctx: Context) = ctx.getSystemService(DevicePolicyManager::class.java)
@@ -83,12 +84,16 @@ object Kiosk {
         log("Entschlacken: $versteckt versteckt, $verweigert verweigert, $fehlt nicht vorhanden")
     }
 
+    /** Ergebnis von [sperren] — die Wartekarte formuliert je Fall einen anderen Hinweis. */
+    enum class Sperre { Angeheftet, TouchGesperrt, Fehlgeschlagen }
+
     /**
-     * Vollbild + Wachhalten + Lock-Task. Liefert `true`, wenn angeheftet
-     * wurde. Ohne Gerätebesitzer auf Fire OS wird bewusst NICHT angeheftet
-     * (`SperrRegel`): Amazons „Toddler Mode" würde sonst jeden Touch schlucken.
+     * Vollbild + Wachhalten + Lock-Task. Ohne Gerätebesitzer auf Fire OS wird
+     * NICHT angeheftet, wenn die Kindersicherung „Touch-Funktion deaktivieren"
+     * an hat (`SperrRegel`): Amazons „Toddler Mode" würde sonst jeden Touch
+     * schlucken. Der Schalter ist ein Secure-Setting, ohne Berechtigung lesbar.
      */
-    fun sperren(a: Activity, log: (String) -> Unit): Boolean {
+    fun sperren(a: Activity, log: (String) -> Unit): Sperre {
         a.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(a.window, false)
         WindowInsetsControllerCompat(a.window, a.window.decorView).apply {
@@ -96,14 +101,17 @@ object Kiosk {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         val besitzer = istBesitzer(a)
-        if (!SperrRegel.anheften(besitzer, Build.MANUFACTURER)) {
-            log("Kiosk: kein Anheften ohne Besitzer auf ${Build.MANUFACTURER} (Toddler Mode)")
-            return false
+        val touchGesperrt = runCatching {
+            Settings.Secure.getInt(a.contentResolver, SperrRegel.TODDLER_TOUCH_SCHALTER, 0) == 1
+        }.getOrDefault(false)
+        if (!SperrRegel.anheften(besitzer, Build.MANUFACTURER, touchGesperrt)) {
+            log("Kiosk: kein Anheften — Kindersicherung 'Touch-Funktion deaktivieren' ist an (${SperrRegel.TODDLER_TOUCH_SCHALTER}=1)")
+            return Sperre.TouchGesperrt
         }
         return runCatching { a.startLockTask() }
-            .onSuccess { log("Kiosk: Lock-Task aktiv (Besitzer=$besitzer)") }
+            .onSuccess { log("Kiosk: Lock-Task aktiv (Besitzer=$besitzer, Hersteller=${Build.MANUFACTURER})") }
             .onFailure { log("Kiosk: Lock-Task fehlgeschlagen: ${it.message}") }
-            .isSuccess
+            .fold({ Sperre.Angeheftet }, { Sperre.Fehlgeschlagen })
     }
 
     fun verlassen(a: Activity, log: (String) -> Unit) {

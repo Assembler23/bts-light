@@ -82,11 +82,12 @@ if [ -n "$WLAN_SSID" ]; then echo "WLAN einrichten: $WLAN_SSID"; wlan_einrichten
 # Device Owner geht nur ohne eingerichtete Konten. `grep -q` bricht bei einem
 # Treffer die Pipe früh ab und schickt `adb` unter `set -o pipefail` in
 # SIGPIPE — mit einer Variable zwischenspeichern statt direkt zu pipen.
+# Nur Warnung: Fire OS 8 hat auch ohne Anmeldung drei interne Konten (Typ
+# `amazon.account`), und der Besitzer-Schritt unten ist nicht mehr fatal.
 konten=$(adb shell dumpsys account 2>/dev/null || true)
 case "$konten" in
   *'Account {'*)
-    echo "Auf dem Tablet ist noch ein Konto eingerichtet (Amazon?). Zurücksetzen, Anmeldung überspringen, erneut starten." >&2
-    exit 1
+    echo "Konten auf dem Tablet gefunden – der Gerätebesitzer-Schritt wird damit scheitern (auf Fire OS 8 normal). Bei einem angemeldeten Amazon-Konto: abmelden." >&2
     ;;
 esac
 
@@ -97,10 +98,20 @@ if ! adb install -r "$APK"; then
 fi
 
 echo "Gerätebesitzer setzen"
+# Auf Fire OS 8 scheitert das IMMER (Kindersicherung ist Profile Owner, auch
+# nach Werksreset) — dann läuft die Einrichtung ohne Besitzer weiter.
 if ! adb shell dpm set-device-owner "$PAKET/.kiosk.KioskAdminReceiver"; then
-  echo "Gerätebesitzer konnte nicht gesetzt werden. Meist: noch ein Konto auf dem Tablet, oder schon ein anderer Gerätebesitzer." >&2
-  exit 1
+  echo "Gerätebesitzer konnte nicht gesetzt werden. Auf Fire OS 8 normal (Kindersicherung ist Profile Owner); sonst: noch ein Konto, oder schon ein anderer Besitzer. Weiter ohne Besitzer." >&2
 fi
+
+# Ohne Besitzer erledigt die App das nicht selbst: Bildschirm am Ladekabel
+# an, Sperrbildschirm (mit Werbung) aus, und der Fire-OS-Schalter
+# „Touch-Funktion deaktivieren" der Kindersicherung aus — sonst schluckt der
+# Toddler Mode beim Anheften jeden Touch (Feldtest 08.09.2026).
+echo "Bildschirm: Wachhalten am Ladekabel, Sperrbildschirm aus, Touch beim Fixieren erlauben"
+adb shell settings put global stay_on_while_plugged_in 7 || true
+adb shell locksettings set-disabled true || true
+adb shell settings put secure toddler_mode_default_value 0 || true
 if [ "$ENTSCHLACKEN" = "behalten" ]; then echo "Amazon-Apps bleiben (behalten)."
 else echo "Amazon-Apps entfernen (Alexa, Video, Kindle, OTA …)"; entschlacken; fi
 echo "WebView-Stand:"
