@@ -600,6 +600,16 @@ sich bei gleicher Match-ID nicht ändern *sollten*.
 - [x] Ein **einziger** fehlgeschlagener Abruf schaltet sofort auf 250 ms.
       *(`lastFetchOk`/`failures` in `pushGesund`; beide Assets setzen beides im Erfolgs- und
       im Fehlerzweig ihres Abrufs.)*
+- [x] **Nachtrag v0.9.287:** Ein Abruf, der weder scheitert noch antwortet, zählte bis dahin
+      als „läuft noch" — und der In-Flight-Schutz ließ keinen zweiten zu. Ein im
+      WLAN-Roaming verlorener Abruf fror die Anzeige damit ohne Blende ein, bis die
+      TCP-Sendewiederholung nach Minuten griff (Turnier 05./06.09.2026, sechs Pi-Monitore
+      im LAN; Tablets und TL-Web unauffällig). Seither endet jeder Stand-Abruf als Fehler,
+      wenn die Kopfzeilen nicht binnen 5 s da sind oder der Rumpf danach länger als 15 s
+      braucht, und läuft in genau diesen Fehlerpfad. Drei Folgeregeln: ETag-Marke und
+      Entwarnung erst nach dem Rumpf, Zuweisungs-Check mit In-Flight-Schutz und Frist.
+      *(`src/io/abrufFrist.mjs`, `scripts/test-abruf-frist.mjs`; Inline-Kopie in den acht
+      Anzeige-Seiten und in `tl.html`.)*
 - [x] Der Server sendet den Heartbeat mindestens alle 10 s; das Frame enthält **kein**
       `court`-Feld, damit alte Seiten es folgenlos verwerfen.
       *(`monitor_heartbeat_frame`, Host `monitor_socket` und Relay `monitor_conn`;
