@@ -1,6 +1,7 @@
 package de.badhub.btslight.tablet.kiosk
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
@@ -8,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.view.WindowCompat
@@ -61,7 +63,7 @@ object Kiosk {
     /**
      * Amazon-Apps verstecken (`Entschlackung.ALLE`): Alexa & Co. kosten Akku,
      * der OTA-Dienst startet mitten im Turnier neu. Das Einrichtungsskript
-     * schafft per `pm disable-user` nur die ungeschützten; ob der
+     * deaktiviert und hält an (`pm disable-user` + `pm suspend`); ob der
      * Gerätebesitzer die „protected" Pakete (OTA, Sonderangebote) verstecken
      * darf, entscheidet Fire OS — AOSP prüft dieselbe Schutzliste auch beim
      * Verstecken, das Log sagt es je Paket. Idempotent bei jedem Start; ein
@@ -87,14 +89,23 @@ object Kiosk {
     /** Ergebnis von [sperren] — die Wartekarte formuliert je Fall einen anderen Hinweis. */
     enum class Sperre { Angeheftet, TouchGesperrt, Fehlgeschlagen }
 
+    /** Fensterhelligkeit im Kiosk (0..1). 30 %: gut lesbar am Feld, schont den Akku. */
+    const val HELLIGKEIT = 0.3f
+
     /**
      * Vollbild + Wachhalten + Lock-Task. Ohne Gerätebesitzer auf Fire OS wird
      * NICHT angeheftet, wenn die Kindersicherung „Touch-Funktion deaktivieren"
      * an hat (`SperrRegel`): Amazons „Toddler Mode" würde sonst jeden Touch
      * schlucken. Der Schalter ist ein Secure-Setting, ohne Berechtigung lesbar.
+     * Ohne Besitzer zeigt Android bei jedem Anheften den Fixier-Dialog; den
+     * bestätigt `BestaetigungsDienst`.
      */
     fun sperren(a: Activity, log: (String) -> Unit): Sperre {
         a.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Helligkeit fürs eigene Fenster — braucht keine Berechtigung und wirkt,
+        // solange die App vorn ist (im Kiosk: immer). Die Systemhelligkeit bleibt
+        // unangetastet, die Energiesparmodus-Einstellung setzt das Skript.
+        a.window.attributes = a.window.attributes.apply { screenBrightness = HELLIGKEIT }
         WindowCompat.setDecorFitsSystemWindows(a.window, false)
         WindowInsetsControllerCompat(a.window, a.window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
@@ -112,6 +123,29 @@ object Kiosk {
             .onSuccess { log("Kiosk: Lock-Task aktiv (Besitzer=$besitzer, Hersteller=${Build.MANUFACTURER})") }
             .onFailure { log("Kiosk: Lock-Task fehlgeschlagen: ${it.message}") }
             .fold({ Sperre.Angeheftet }, { Sperre.Fehlgeschlagen })
+    }
+
+    /** Ist die eigene Task gerade angeheftet (Lock-Task oder Anheften)? */
+    fun istAngeheftet(a: Activity): Boolean =
+        a.getSystemService(ActivityManager::class.java).lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
+
+    /**
+     * Nachheften: `startLockTask()` wirkt über SystemUI asynchron; mit
+     * Kindersicherung „App fixieren" wartet Fire OS auf den Tipp im Dialog,
+     * ein abgelehnter Dialog lässt die App unangeheftet zurück (Feldtest
+     * 08.09.2026). Nach dem Start und beim Fokus-Erhalt darum prüfen und
+     * noch einmal anheften. Liefert `true`, wenn JETZT angeheftet ist.
+     */
+    fun nachheften(a: Activity, log: (String) -> Unit): Boolean {
+        if (istAngeheftet(a)) return true
+        runCatching { a.startLockTask() }
+            .onFailure { log("Kiosk: Nachheften fehlgeschlagen: ${it.message}") }
+        // Das Anheften läuft über SystemUI asynchron — der Zustand direkt nach
+        // dem Aufruf sagt nur, ob es SOFORT griff; die nächste Nachprüfung
+        // sieht das Ergebnis.
+        val jetzt = istAngeheftet(a)
+        log("Kiosk: Nachheften (${SystemClock.elapsedRealtime() / 1000} s nach Boot) → sofort angeheftet=$jetzt")
+        return jetzt
     }
 
     fun verlassen(a: Activity, log: (String) -> Unit) {

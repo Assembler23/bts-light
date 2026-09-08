@@ -302,15 +302,17 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Amazons Kindersicherung ist auch direkt nach einem Werksreset Profile
   Owner, `dpm set-device-owner` scheitert immer. „Bildschirm anheften" ohne
   Besitzer funktioniert seit v0.9.285 wieder (Home/Zuletzt gesperrt), sofern
-  die Kindersicherung „Touch-Funktion deaktivieren" aus hat. Damit fehlt auf
-  Fire-Tablets noch der Autostart nach dem Einschalten. Kandidat: ein
-  Accessibility-Dienst in der App nach dem Muster LauncherHijack/Fully, der
-  beim Erscheinen des Fire-Launchers (Boot, Home-Taste) die KioskActivity
-  wieder nach vorn holt; per adb einschaltbar
-  (`settings put secure enabled_accessibility_services …`), also ohne
-  Gerätebesitzer. Offen: Verhalten bei „Kiosk verlassen", Whitelist
-  (Einstellungen, WLAN-Dialog), Fire-OS-Verträglichkeit. Braucht eine Spec
-  (`/idee`); Fire-Toolbox „Custom Launcher" als Vergleich prüfen.
+  die Kindersicherung „Touch-Funktion deaktivieren" aus hat. **Autostart
+  seit v0.9.285 gelöst** über `device_config put activity_manager
+  default_background_activity_starts_enabled true` im Skript (Feldtest:
+  Fokus nach jedem Neustart auf der App). Den Fixier-Dialog, den Android
+  ohne Besitzer bei jedem Anheften zeigt, bestätigt seit v0.9.285 der
+  Bedienungshilfe-Dienst `BestaetigungsDienst` (per adb eingeschaltet).
+  Was auf Fire OS bleibt: Home und Zuletzt sind nur durch das Anheften
+  gesperrt (Ausstieg über die Android-Geste), und nach „Kiosk verlassen"
+  holt nichts die App zurück — falls das je stört, könnte derselbe Dienst
+  nach dem Muster LauncherHijack die App beim Erscheinen des Launchers
+  zurückholen. Kein akuter Bedarf.
 - **Repo-Umbenennung** → Anzeigename „badhub BTP controller", GitHub-Repo
   `badhub-btp-controller`. Wichtig: Tauri-`identifier` `de.badhub.btslight`
   und der Updater-Pfad `download/bts-light/` bleiben **stabil**, sonst

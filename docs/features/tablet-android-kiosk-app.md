@@ -187,9 +187,44 @@ liefert `Sperre.{Angeheftet, TouchGesperrt, Fehlgeschlagen}` mit je eigenem
 Wartekarten-Hinweis. Das Skript setzt `toddler_mode_default_value 0`,
 `stay_on_while_plugged_in 7` und `locksettings set-disabled true` und
 bricht bei fehlgeschlagenem `set-device-owner` nicht mehr ab (auf Fire OS 8
-immer). Offen bleibt der Autostart nach Boot (Roadmap).
+immer).
 
-**Nachlese 08.09.2026 (v0.9.285) — Entschlacken:** Amazon-Apps (Alexa,
+**Nachlese 08.09.2026 (v0.9.285) — Autostart, Entschlackung Stufe 2, Akku:**
+Autostart ohne Besitzer über `device_config put activity_manager
+default_background_activity_starts_enabled true` (gerätweit; hebt „Abort
+background activity starts" für den `BootReceiver` auf; SYSTEM_ALERT_WINDOW
+und `settings put global background_activity_starts_enabled 1` wirkten auf
+Fire OS nicht; überlebt Neustarts). **Korrektur:** Ein stilles Fixieren ohne
+Besitzer gibt es nicht — AOSP zeigt bei jedem `startLockTask()` einer nicht
+freigegebenen App den SystemUI-Dialog `ScreenPinningRequest` („App ist auf
+dem Bildschirm fixiert", Nein danke / Verstanden, bei Amazon plus Kästchen
+„Touch-Funktion deaktivieren"); die vermeintlich stillen Fälle waren Tipps
+des Nutzers bzw. `am task lock` (System-Aufrufer). Lösung:
+Bedienungshilfe-Dienst `kiosk/BestaetigungsDienst` (Manifest `<service>`
+mit `BIND_ACCESSIBILITY_SERVICE`, Konfiguration `res/xml/bestaetigung.xml`:
+nur `com.android.systemui`, `flagRetrieveInteractiveWindows`), Regel
+`kern/FixierDialog` (Kennzeichen „fixiert/pinned" UND Bestätigungsknopf;
+Tabu „Nein danke"/„Touch"/„deaktivieren"; Unit-Test), Einschalten per
+`settings put secure enabled_accessibility_services …` im Skript (bestehende
+Dienste bleiben). Feldtest: nach Neustart fixiert ohne Tipp, Touch bei der
+App. `Kiosk.nachheften` prüft nach 3/10/30/60/120 s und bei Fokus-Erhalt
+nach (max. fünf Versuche je Episode, Mindestabstand 2 s, Zähler zurück bei
+erkannter Fixierung; `onDestroy` räumt die Takte). Energiesparmodus über
+`low_power_trigger_level 100` + `automatic_power_save_mode 0`, Nachtmodus
+per `battery_saver_constants` aus und `FORCE_DARK_OFF` in der WebView.
+Entschlackung nach Fire-Tools-Liste (114 Pakete, `Entschlackung.ALEXA/
+INHALTE/HINTERGRUND/UPDATES`), je Paket `pm disable-user` **und** `pm
+suspend` (Letzteres greift auch bei protected); TABU zusätzlich
+`com.amazon.redstone` (Fire-Tastatur). Messung: 81 installiert, 57
+deaktiviert, 81 angehalten, 0 verweigert (kompletter Skriptlauf), Prozesse
+26 → 17, App/WLAN/Lobby in Ordnung;
+`adep`/`storagemanager` kommen von selbst zurück, OTA/`kso` laufen
+angehalten weiter als Prozess. Akku: Fensterhelligkeit 30 % in der App
+(`Kiosk.HELLIGKEIT`), Energiesparmodus + sticky per Skript.
+
+**Nachlese 08.09.2026 (v0.9.285) — Entschlacken (Stufe 1, überholt durch
+Stufe 2 unten: Fire-Tools-Liste, `disable-user` + `suspend`, `tcomm` nicht
+mehr tabu):** Amazon-Apps (Alexa,
 Video, Music, Kindle, Audible, Photos, Wetter, Shopping, Kids, Hilfe,
 Freevee, Silk Kids, Sonderangebote) und der OTA-Dienst werden bei der
 Einrichtung stillgelegt. Zwei Wege, weil Fire OS 8 `pm uninstall -k

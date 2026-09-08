@@ -8,10 +8,12 @@ import org.junit.Test
 class EntschlackungTest {
     @Test
     fun liste_ist_gefuellt_und_ohne_doppelte() {
-        assertTrue(Entschlackung.ALLE.size >= 10)
+        assertTrue(Entschlackung.ALLE.size >= 100)
         assertEquals(Entschlackung.ALLE.size, Entschlackung.ALLE.toSet().size)
-        assertTrue(Entschlackung.ALLE.containsAll(Entschlackung.AKKUFRESSER))
-        assertTrue(Entschlackung.ALLE.containsAll(Entschlackung.UPDATES))
+        assertEquals(
+            Entschlackung.ALEXA.size + Entschlackung.INHALTE.size + Entschlackung.HINTERGRUND.size + Entschlackung.UPDATES.size,
+            Entschlackung.ALLE.size,
+        )
     }
 
     @Test

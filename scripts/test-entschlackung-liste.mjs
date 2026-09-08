@@ -13,7 +13,7 @@ const lies = (p) => readFileSync(join(wurzel, p), "utf8");
 // Kotlin: alle "…"-Literale innerhalb der beiden Listen, in Reihenfolge.
 function ausKotlin(src) {
   const listen = [];
-  for (const name of ["AKKUFRESSER", "UPDATES"]) {
+  for (const name of ["ALEXA", "INHALTE", "HINTERGRUND", "UPDATES"]) {
     const m = src.match(new RegExp(`val ${name}[^=]*=\\s*listOf\\(([\\s\\S]*?)\\n\\s*\\)`));
     if (!m) throw new Error(`Kotlin: Liste ${name} nicht gefunden`);
     listen.push(...[...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]));

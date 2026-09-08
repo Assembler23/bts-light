@@ -7,18 +7,33 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 ## v0.9.285
 
 - **Tablet-App (Android): Einrichtung entschlackt das Fire-Tablet.**
-  `setup-tablet.ps1`/`.sh` deaktivieren nach dem Gerätebesitzer-Schritt
-  Alexa, Prime Video, Music, Kindle, Audible, Photos, Wetter, Shopping,
-  Kids, Hilfe, Freevee, Silk Kids und Sonderangebote sowie Amazons
-  OTA-Update-Dienst (kein Fire-OS-Update mitten im Turnier). Was Fire OS
-  als „protected" verweigert, versucht die App beim Start als
-  Gerätebesitzer zu verstecken (das Geräte-Log sagt je Paket, ob es gelang);
-  Liste in `kern/Entschlackung.kt` mit Wächter-Test, Drift-Test
+  `setup-tablet.ps1`/`.sh` legen nach dem Gerätebesitzer-Schritt 114 Pakete
+  nach der Fire-Tools-Debloat-Liste still (Alexa, Video, Musik, Bücher,
+  Fotos, Shopping, Kids, Karten, Metriken, Werbe-IDs, Sync, Push,
+  Fernwartung, OTA-Update-Dienst) — je Paket deaktivieren **und** anhalten,
+  Letzteres greift auch bei Amazons geschützten Paketen. Feldtest: 81
+  installiert, 57 deaktiviert, 81 angehalten, Amazon-Prozesse 26 → 17.
+  Bewusst ausgenommen: WebView, Silk, Appstore, Launcher, Kindersicherung,
+  Middleware und die Fire-Tastatur. Als Gerätebesitzer versteckt die App
+  dieselbe Liste; Quelle `kern/Entschlackung.kt` mit Wächter-Test, Drift-Test
   `scripts/test-entschlackung-liste.mjs` für die Skript-Kopien.
-  Schalter `-OhneEntschlacken` / `behalten`. Außerdem verbindet das Skript
-  auf Wunsch gleich das Hallen-WLAN (`-Wlan`/`-WlanPasswort` bzw.
-  `WLAN_SSID`/`WLAN_PASSWORT`). Doku: vorher einmal von Hand Fire OS
-  aktualisieren; warum es kein Abbild für viele Tablets gibt.
+- **Tablet-App (Android): Autostart nach dem Einschalten ohne
+  Gerätebesitzer.** Das Skript erlaubt Hintergrund-Aktivitätsstarts per
+  `device_config`, damit der Boot-Empfänger die App starten darf (Feldtest:
+  Fokus nach jedem Neustart auf der App, überlebt Neustarts). Den Dialog
+  „App ist auf dem Bildschirm fixiert", den Android ohne Gerätebesitzer bei
+  jedem Fixieren zeigt, bestätigt der neue Bedienungshilfe-Dienst „Fixieren
+  bestätigen" selbst (nur SystemUI-Fenster, nur der Knopf „Verstanden", nie
+  Amazons Touch-Kästchen); das Skript schaltet ihn per adb ein. Die App
+  prüft nach dem Start mehrfach, ob sie fixiert ist, und heftet sonst nach.
+- **Tablet-App (Android): Akku.** Die App dimmt ihr Fenster auf 30 %; das
+  Skript schaltet den Energiesparmodus über die Automatik-Schwelle ein
+  (greift, sobald das Kabel ab ist) und hält den Nachtmodus draußen.
+- **Tablet-Einrichtung: Hallen-WLAN per Skript, Schalter zum Behalten.**
+  `-Wlan`/`-WlanPasswort` bzw. `WLAN_SSID`/`WLAN_PASSWORT` verbinden das WLAN
+  vor der Einrichtung; `-OhneEntschlacken` / `behalten` lässt die
+  Amazon-Apps stehen. Doku: vorher einmal von Hand Fire OS aktualisieren;
+  warum es kein Abbild für viele Tablets gibt.
 - **Tablet-App (Android): Fixieren auf Fire OS wieder an, Toddler Mode
   eingegrenzt.** Der Touch-Ausfall beim Fixieren (v0.9.284) kommt allein vom
   Kindersicherungs-Schalter „App fixieren → Touch-Funktion deaktivieren".
