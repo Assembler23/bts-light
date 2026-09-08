@@ -44,20 +44,63 @@ Das Geräte-Log der App landet wie bei den Pi-Monitoren beim Turnier-PC
 1. Tablet auf Werkseinstellungen zurücksetzen. Beim Einrichten die
    Amazon-Anmeldung **überspringen** — mit einem angemeldeten Konto
    verweigert Android den Gerätebesitzer-Schritt.
-2. Hallen-WLAN verbinden. Entwickleroptionen freischalten (Einstellungen →
-   Geräteoptionen → Seriennummer 7× tippen) und darin **ADB-Debugging**
-   einschalten.
+2. Entwickleroptionen freischalten (Einstellungen → Geräteoptionen →
+   Seriennummer 7× tippen) und darin **ADB-Debugging** einschalten. Das
+   Hallen-WLAN kann das Skript in Schritt 4 selbst verbinden
+   (`-Wlan <SSID> -WlanPasswort <Passwort>` bzw. `WLAN_SSID=… WLAN_PASSWORT=…`
+   vor dem Bash-Aufruf, WPA2); ohne diese Angabe vorher von Hand verbinden.
 3. Tablet per USB an den Einrichtungs-PC anschließen. `adb` muss dort
    installiert sein (Android Platform Tools). Die APK von
    <https://badhub.de/download/bts-light/bts-light-tablet.apk> laden.
-4. Im Repo-Ordner `android/`: `.\setup-tablet.ps1 -Apk bts-light-tablet.apk`
-   unter Windows bzw. `./setup-tablet.sh bts-light-tablet.apk` unter Linux/
-   macOS ausführen. Das Skript prüft zuerst, dass auf dem Tablet **kein
-   Konto** eingerichtet ist, installiert dann die APK, setzt die App als
-   Gerätebesitzer und startet sie. Schlägt `adb install` oder
-   `dpm set-device-owner` fehl, bricht die PowerShell-Fassung mit einer
-   Fehlermeldung samt Exit-Code ab (die Bash-Fassung ebenso, über `set -e`)
-   — es geht also nie unbemerkt schief.
+4. Im Repo-Ordner `android/`: `.\setup-tablet.ps1 -Apk bts-light-tablet.apk
+   -Wlan Hallen-WLAN -WlanPasswort geheim` unter Windows bzw.
+   `WLAN_SSID=Hallen-WLAN WLAN_PASSWORT=geheim ./setup-tablet.sh
+   bts-light-tablet.apk` unter Linux/macOS ausführen. Das Skript verbindet
+   zuerst das WLAN (falls angegeben; per `cmd wifi connect-network`, wartet
+   bis zu 30 s auf eine IP-Adresse und läuft bei Misserfolg mit Warnung
+   weiter), prüft dann, dass auf dem Tablet **kein Konto** eingerichtet ist,
+   installiert die APK, setzt die App als Gerätebesitzer, **entschlackt**
+   das Tablet (siehe unten) und startet die App. Schlägt `adb install` oder `dpm set-device-owner` fehl, bricht die
+   PowerShell-Fassung mit einer Fehlermeldung samt Exit-Code ab (die
+   Bash-Fassung ebenso, über `set -e`) — es geht also nie unbemerkt schief.
+   Vorher lohnt sich **einmal ein Fire-OS-Update von Hand** (Einstellungen →
+   Geräteoptionen → Systemupdates), denn danach schaltet die Einrichtung
+   Amazons Update-Dienst ab.
+
+**Entschlacken (seit v0.9.285):** Alexa, Prime Video, Amazon Music, Kindle,
+Audible, Photos, Wetter, Shopping, Amazon Kids, Hilfe, Freevee, Silk Kids
+und die Sonderangebote kosten auf einem Zähl-Tablet nur Akku und
+Hintergrund; der OTA-Dienst würde mitten im Turnier ein Fire-OS-Update
+einspielen und neu starten. Das Skript deaktiviert diese Pakete für den
+Benutzer (`pm disable-user --user 0`; ein echtes `pm uninstall` verweigert
+Fire OS 8 sogar für die Wetter-App) und meldet je Paket „deaktiviert" oder
+„verweigert". Verweigert werden die Pakete, die Fire OS als „protected"
+führt (OTA-Dienst, Sonderangebote). **Die App versucht zusätzlich beim
+Start als Gerätebesitzer, dieselbe Liste zu verstecken**
+(`setApplicationHidden`, Liste aus `kern/Entschlackung.kt`); das
+Geräte-Log zeigt „Entschlacken: n versteckt, m verweigert, k nicht
+vorhanden". Ob Fire OS dem Gerätebesitzer die geschützten Pakete
+freigibt, ist offen — Android prüft beim Verstecken dieselbe Schutzliste
+wie beim Deaktivieren. Steht der OTA-Dienst im Log als „verweigert", bleibt
+Amazons Update-Dienst aktiv; dann hilft nur, Updates in den Einstellungen
+zu meiden. Silk, Appstore, WebView, Launcher, Kindersicherung und die
+Konto-/Gerätedienste bleiben bewusst unangetastet. Wer die Amazon-Apps
+behalten will: `-OhneEntschlacken` (PowerShell) bzw. `behalten` als zweites
+Argument (Bash). **Zurück holen** (beides nötig, weil die App auch die
+vom Skript deaktivierten Pakete versteckt):
+
+```
+adb shell pm unhide --user 0 <paket>
+adb shell pm enable --user 0 <paket>
+```
+
+**Warum kein Abbild für 20 Tablets:** Fire-Tablets haben einen gesperrten
+Bootloader; ohne Root gibt es kein Voll-Abbild, und `adb backup` überträgt
+weder den Gerätebesitzer noch Systemeinstellungen. Der Aufwand je Tablet
+bleibt deshalb: Reset und Anmeldung überspringen (etwa 3 Minuten von Hand),
+dann das Skript (unter einer Minute). Mit einem USB-Hub lassen sich mehrere
+Tablets nacheinander abarbeiten; das Skript verlangt je Lauf genau ein
+angeschlossenes Gerät.
 5. Am Tablet die **Kiosk-PIN** (4–8 Ziffern) vergeben; das fragt die App
    beim allerersten Start automatisch ab, ein Abbrechen ist an dieser
    Stelle nicht möglich. Fertig — ab jetzt startet das Tablet nach jedem

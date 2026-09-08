@@ -6,12 +6,14 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import de.badhub.btslight.tablet.kern.Entschlackung
 import de.badhub.btslight.tablet.kern.SperrRegel
 
 /**
@@ -47,6 +49,38 @@ object Kiosk {
         }
         d.addPersistentPreferredActivity(ad, home, ComponentName(a, a.javaClass))
         log("Kiosk: Gerätebesitzer eingerichtet")
+        // Im Hintergrund: Beim ersten Lauf schreibt jedes Verstecken synchron
+        // die Paket-Einstellungen und schickt Broadcasts — zusammen bis ~1 s,
+        // das soll den Aufbau der Wartekarte nicht verzögern. DPM-Aufrufe sind
+        // thread-sicher, `LogPuffer.schreibe` ist synchronized.
+        val pm = a.packageManager
+        Thread({ entschlacken(pm, d, ad, log) }, "entschlacken").start()
+    }
+
+    /**
+     * Amazon-Apps verstecken (`Entschlackung.ALLE`): Alexa & Co. kosten Akku,
+     * der OTA-Dienst startet mitten im Turnier neu. Das Einrichtungsskript
+     * schafft per `pm disable-user` nur die ungeschützten; ob der
+     * Gerätebesitzer die „protected" Pakete (OTA, Sonderangebote) verstecken
+     * darf, entscheidet Fire OS — AOSP prüft dieselbe Schutzliste auch beim
+     * Verstecken, das Log sagt es je Paket. Idempotent bei jedem Start; ein
+     * verweigertes Paket bricht nichts ab. Braucht `QUERY_ALL_PACKAGES`,
+     * sonst sieht die App ab Android 11 die fremden Pakete gar nicht und
+     * zählt alle als „nicht vorhanden".
+     */
+    private fun entschlacken(pm: PackageManager, d: DevicePolicyManager, ad: ComponentName, log: (String) -> Unit) {
+        var versteckt = 0; var verweigert = 0; var fehlt = 0
+        for (p in Entschlackung.ALLE) {
+            // MATCH_UNINSTALLED_PACKAGES: ein schon verstecktes Paket gilt sonst
+            // als nicht vorhanden — und `isApplicationHidden` sagt für ein
+            // fehlendes Paket „versteckt", deshalb zuerst die Existenz prüfen.
+            val da = runCatching { pm.getPackageInfo(p, PackageManager.MATCH_UNINSTALLED_PACKAGES) }.isSuccess
+            if (!da) { fehlt++; continue }
+            if (runCatching { d.isApplicationHidden(ad, p) }.getOrDefault(false)) { versteckt++; continue }
+            val ok = runCatching { d.setApplicationHidden(ad, p, true) }.getOrDefault(false)
+            if (ok) versteckt++ else { verweigert++; log("Entschlacken: verweigert $p") }
+        }
+        log("Entschlacken: $versteckt versteckt, $verweigert verweigert, $fehlt nicht vorhanden")
     }
 
     /**

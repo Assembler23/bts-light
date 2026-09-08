@@ -165,6 +165,22 @@ gemessen: Der Gerätebesitzer scheitert auf Fire OS am **Profile Owner**
 `com.amazon.parentalcontrols` (geschütztes Paket), nicht nur am Konto —
 darum ist der Werksreset Pflicht (siehe `docs/tablet-android-app.md`).
 
+**Nachlese 08.09.2026 (v0.9.285) — Entschlacken:** Amazon-Apps (Alexa,
+Video, Music, Kindle, Audible, Photos, Wetter, Shopping, Kids, Hilfe,
+Freevee, Silk Kids, Sonderangebote) und der OTA-Dienst werden bei der
+Einrichtung stillgelegt. Zwei Wege, weil Fire OS 8 `pm uninstall -k
+--user 0` durchgehend verweigert (DELETE_FAILED_INTERNAL_ERROR, gemessen
+an der Wetter-App) und einige Pakete auch gegen `pm disable-user` als
+„protected" schützt (OTA, `kindle.kso`): Das Skript deaktiviert per
+`disable-user`, was geht; der Gerätebesitzer versteckt in
+`Kiosk.einrichten` per `setApplicationHidden` dieselbe Liste
+(`kern/Entschlackung.ALLE`, Quelle; Skripte tragen Kopien). Wächter-Test
+`EntschlackungTest`: Tabu-Pakete (eigene App, Silk, Appstore, WebView,
+Launcher, Kindersicherung, `dcp`/`imp`/`tcomm`, Einstellungen) dürfen nie
+auf der Liste stehen. Ob `setApplicationHidden` die „protected" Pakete auf
+Fire OS wirklich versteckt, zeigt erst der Lauf auf einem zurückgesetzten
+Tablet — das Log meldet je Paket „verweigert".
+
 „Kiosk verlassen" beendet Lock-Task und die App → normales Android. Ein
 Antippen des App-Symbols sperrt wieder.
 

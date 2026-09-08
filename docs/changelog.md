@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.285
+
+- **Tablet-App (Android): Einrichtung entschlackt das Fire-Tablet.**
+  `setup-tablet.ps1`/`.sh` deaktivieren nach dem Gerätebesitzer-Schritt
+  Alexa, Prime Video, Music, Kindle, Audible, Photos, Wetter, Shopping,
+  Kids, Hilfe, Freevee, Silk Kids und Sonderangebote sowie Amazons
+  OTA-Update-Dienst (kein Fire-OS-Update mitten im Turnier). Was Fire OS
+  als „protected" verweigert, versucht die App beim Start als
+  Gerätebesitzer zu verstecken (das Geräte-Log sagt je Paket, ob es gelang);
+  Liste in `kern/Entschlackung.kt` mit Wächter-Test, Drift-Test
+  `scripts/test-entschlackung-liste.mjs` für die Skript-Kopien.
+  Schalter `-OhneEntschlacken` / `behalten`. Außerdem verbindet das Skript
+  auf Wunsch gleich das Hallen-WLAN (`-Wlan`/`-WlanPasswort` bzw.
+  `WLAN_SSID`/`WLAN_PASSWORT`). Doku: vorher einmal von Hand Fire OS
+  aktualisieren; warum es kein Abbild für viele Tablets gibt.
+
 ## v0.9.284
 
 - **Zähl-Tablet: größeres Feld, kleinere Knöpfe.** Die +1-Knöpfe sind jetzt
