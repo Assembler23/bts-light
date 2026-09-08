@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.286
+
+- **Release-Seite bietet die Tablet-APK an.** Auf
+  `badhub.de/download/bts-light/` gibt es den Abschnitt „Zähl-Tablets:
+  Android-App für Fire-Tablets“ mit der neuesten APK und je Version einen
+  Knopf „Tablet-APK“ — nur für Dateien, die wirklich auf dem Server liegen.
+  Der feste Name `bts-light-tablet.apk` erscheint erst mit einer signierten
+  APK; bis dahin die versionierte Debug-Fassung mit Hinweis.
+
 ## v0.9.285
 
 - **Tablet-App (Android): Einrichtung entschlackt das Fire-Tablet.**

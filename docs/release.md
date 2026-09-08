@@ -55,7 +55,9 @@ Debug-APK (Secrets fehlen) ist debuggable und würde später kein signiertes
 Update mehr annehmen — sie bleibt deshalb ausschließlich unter ihrem
 versionierten `-debug.apk`-Namen erreichbar, nie unter dem festen Link
 (siehe „Benötigte GitHub-Secrets" unten und
-[tablet-android-app.md](tablet-android-app.md)).
+[tablet-android-app.md](tablet-android-app.md)). Auf der Release-Seite
+steht trotzdem eine APK zum Download: die neueste **signierte**, sonst die
+neueste Debug-APK unter ihrem versionierten Namen und mit Hinweis.
 
 ## Handbuch (`/download/bts-light/handbuch/`)
 
@@ -124,7 +126,17 @@ Download-Link, Datum und den Kompakt-Änderungen aus
 beim Hallenaufbau beschrieben, oft ohne Zugriff auf dieses Repo. Der Block ist
 im Generator fest verdrahtet (das Image kommt **nicht** aus dem
 Release-Workflow, sondern per rsync, siehe [pi-dual-image.md](pi-dual-image.md));
-`scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht. Das **Datum je Version** kommt aus dem
+`scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht.
+Darunter der Block **„Zähl-Tablets: Android-App für Fire-Tablets“** mit der
+neuesten Tablet-APK: Der publish-Job holt per ssh die APK-Dateien, die auf
+dem Server liegen (`--apks`), plus die frisch gebaute; der Kopf-Knopf nimmt
+die neueste **signierte** APK (fester Name `bts-light-tablet.apk`), und nur
+wenn es keine signierte gibt, die neueste versionierte `-debug.apk` mit dem
+Hinweis auf die Debug-Signatur — signiert vor Version, damit der feste Name
+nie unter einem Debug-Etikett steht. Zusätzlich hat jede Version, für die eine APK auf dem
+Server liegt, neben dem Installer-Knopf einen Knopf „Tablet-APK“ (signiert
+vor Debug). `scripts/test-release-page-apk.mjs` prüft beide Fälle und dass
+ohne `--apks` nichts versprochen wird. Das **Datum je Version** kommt aus dem
 Erstell-Datum des Git-Tags (`git for-each-ref … refs/tags` →
 `--dates`-Datei; der publish-Job checkt dafür mit `fetch-depth: 0` +
 `fetch-tags` aus). Die Seite wird bei **jedem Tag-Release

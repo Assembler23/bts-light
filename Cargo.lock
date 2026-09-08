@@ -467,7 +467,7 @@ dependencies = [
 
 [[package]]
 name = "bts-light"
-version = "0.9.285"
+version = "0.9.286"
 dependencies = [
  "axum",
  "base64 0.23.1",
