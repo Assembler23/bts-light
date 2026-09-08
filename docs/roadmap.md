@@ -743,9 +743,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Changelog-Auszug zusätzlich in `latest.json → notes` (Update-Fenster
   zeigt „Was ist neu"). Plan 18 in
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
-- **Handbuch Stufe 2 — die fehlenden Kapitel.** *Status: zurückgestellt ·
-  Priorität: mittel · Trigger: Wunsch vom 05.09.2026, nach Freigabe von
-  Stufe 1 (PR #333).* Stufe 1 veröffentlicht die vorhandene Doku unter
+- **Handbuch Stufe 2 — die fehlenden Kapitel.** *Status: **abgeschlossen
+  06.09.2026** · Trigger: Wunsch vom 05.09.2026, nach Freigabe von Stufe 1
+  (PR #333).* Alle vier Themen sind geschrieben und veröffentlicht; dazu kamen
+  Suche, Stichwortverzeichnis und ein aufgabenorientierter Einstieg.
+  Ursprünglicher Wortlaut zur Nachvollziehbarkeit:* Stufe 1 veröffentlicht die vorhandene Doku unter
   `badhub.de/download/bts-light/handbuch/`. Gewünscht ist darüber hinaus ein
   Handbuch, in dem **nachlesbar** ist:
   - ~~was die **Tablets** können~~ — **erledigt 06.09.2026**:
@@ -758,9 +760,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     06.09.2026**: [master-slave.md](master-slave.md), aus Sicht der
     Turnierleitung statt der Architektur, mit den vier häufigsten
     Missverständnissen;
-  - was die **Oberflächen** jeweils können (Turnierleitungs-Sicht,
-    Court-Monitor, Info-Monitor, Siegerehrung, Aushang) — **offen**, der
-    letzte Punkt der Stufe 2.
+  - ~~was die **Oberflächen** jeweils können~~ — **erledigt 06.09.2026**:
+    [oberflaechen.md](oberflaechen.md), Überblick über App-Menü,
+    Hallen-Geräte und öffentliche Seiten.
 
   Dazu **erledigt 06.09.2026**: [erste-schritte.md](erste-schritte.md)
   (Installation, Voraussetzung in BTP, erster Start, Beenden vs. Minimieren,

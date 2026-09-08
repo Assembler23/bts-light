@@ -81,6 +81,11 @@
       "frage": "Etwas geht nicht",
       "wo": "Verbindung prüfen, Logs finden, Hilfe holen",
       "ziel": "diagnose-logs.html"
+    },
+    {
+      "frage": "Wo finde ich welchen Bildschirm?",
+      "wo": "Überblick über App, Hallen-Geräte und Online-Seiten",
+      "ziel": "oberflaechen.html"
     }
   ],
   "rollen": [
@@ -112,6 +117,7 @@
       "name": "Hallenaufbau",
       "beschreibung": "Du stellst Anzeigen und Tablets auf, bevor es losgeht.",
       "seiten": [
+        "oberflaechen",
         "pi-einrichten",
         "court-monitor",
         "verleih-set",
@@ -146,6 +152,11 @@
           "datei": "docs/erste-schritte.md",
           "slug": "erste-schritte",
           "titel": "Installation und erste Schritte"
+        },
+        {
+          "datei": "docs/oberflaechen.md",
+          "slug": "oberflaechen",
+          "titel": "Welcher Bildschirm zeigt was"
         }
       ]
     },
