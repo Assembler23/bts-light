@@ -250,8 +250,9 @@ Fire-OS-Eigenheit — ein stilles Fixieren gibt es ohne Besitzer nicht; nur
 nach dem Einschalten niemand tippen muss, bringt die App den
 Bedienungshilfe-Dienst **„Fixieren bestätigen"** (`kiosk/BestaetigungsDienst`)
 mit: Er sieht nur SystemUI-Fenster, erkennt den Dialog über die reine Regel
-`kern/FixierDialog` (Unit-Test: Kennwort „fixiert/pinned" plus Knopf
-„Verstanden/Got it/OK", nie „Nein danke", nie das Kästchen) und tippt den
+`kern/FixierDialog` (Unit-Test: zuerst die AOSP-Knopfkennung
+`screen_pinning_ok_button`, sonst Kennwort „fixiert/pinned" plus Knopf
+„Verstanden/Got it", nie „Nein danke", nie das Kästchen) und tippt den
 Bestätigungsknopf. Amazons Kästchen „Touch-Funktion … deaktivieren" bleibt
 unangetastet — angehakt schaltet es den Toddler Mode ein. Das Skript
 schaltet den Dienst per adb ein (`enabled_accessibility_services`,
@@ -275,7 +276,7 @@ Fire OS setzt den direkten Schalter beim Boot am Kabel zurück, die Schwelle
 bleibt und greift, sobald das Kabel ab ist (simuliert geprüft 08.09.2026);
 dazu „sticky" und der Prozent-Modus. Der Sparmodus würde den Nachtmodus
 mitschalten — das Skript sperrt das (`battery_saver_constants`), und die
-WebView färbt die Zählseite nicht algorithmisch um (`FORCE_DARK_OFF`).
+WebView färbt die Zählseite ab targetSdk 33 ohnehin nicht algorithmisch um.
 
 **Fire OS 8: Gerätebesitzer nicht möglich, auch nicht nach Werksreset.**
 Der Gerätebesitzer scheitert auf Fire-Tablets nicht am Amazon-Konto, sondern

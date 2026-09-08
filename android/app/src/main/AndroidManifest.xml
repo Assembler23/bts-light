@@ -54,6 +54,7 @@
              adb im Einrichtungsskript; sieht nur SystemUI-Fenster. -->
         <service
             android:name=".kiosk.BestaetigungsDienst"
+            android:label="@string/bestaetigung_name"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>

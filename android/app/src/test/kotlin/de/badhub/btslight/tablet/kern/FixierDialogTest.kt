@@ -32,13 +32,21 @@ class FixierDialogTest {
     fun bestaetigungsknopf() {
         assertTrue(FixierDialog.istBestaetigung("VERSTANDEN"))
         assertTrue(FixierDialog.istBestaetigung(" Got it "))
-        assertTrue(FixierDialog.istBestaetigung("OK"))
+        // „OK" bewusst nicht: zu breit für ein beliebiges SystemUI-Fenster (Review-Befund).
+        assertFalse(FixierDialog.istBestaetigung("OK"))
         assertFalse(FixierDialog.istBestaetigung("NEIN DANKE"))
         assertFalse(FixierDialog.istBestaetigung("No thanks"))
         // Amazons Kästchen darf nie angetippt werden — es schaltet den Toddler Mode ein.
         assertFalse(FixierDialog.istBestaetigung("Touch-Funktion für die fixierte App deaktivieren"))
         assertFalse(FixierDialog.istBestaetigung(null))
         assertFalse(FixierDialog.istBestaetigung(""))
+    }
+
+    @Test
+    fun view_kennung_des_knopfs() {
+        assertTrue(FixierDialog.istBestaetigungsId("com.android.systemui:id/screen_pinning_ok_button"))
+        assertFalse(FixierDialog.istBestaetigungsId("com.android.systemui:id/screen_pinning_cancel_button"))
+        assertFalse(FixierDialog.istBestaetigungsId(null))
     }
 
     @Test

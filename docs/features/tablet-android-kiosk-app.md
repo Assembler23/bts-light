@@ -211,7 +211,10 @@ App. `Kiosk.nachheften` prüft nach 3/10/30/60/120 s und bei Fokus-Erhalt
 nach (max. fünf Versuche je Episode, Mindestabstand 2 s, Zähler zurück bei
 erkannter Fixierung; `onDestroy` räumt die Takte). Energiesparmodus über
 `low_power_trigger_level 100` + `automatic_power_save_mode 0`, Nachtmodus
-per `battery_saver_constants` aus und `FORCE_DARK_OFF` in der WebView.
+per `battery_saver_constants` aus (die WebView färbt ab targetSdk 33 ohnehin
+nicht mehr algorithmisch um). Dienst erkennt den Knopf zuerst an der
+AOSP-View-Kennung `screen_pinning_ok_button`, Text „Verstanden/Got it" als
+Rückfall; „OK" bewusst nicht.
 Entschlackung nach Fire-Tools-Liste (114 Pakete, `Entschlackung.ALEXA/
 INHALTE/HINTERGRUND/UPDATES`), je Paket `pm disable-user` **und** `pm
 suspend` (Letzteres greift auch bei protected); TABU zusätzlich
@@ -223,7 +226,7 @@ angehalten weiter als Prozess. Akku: Fensterhelligkeit 30 % in der App
 (`Kiosk.HELLIGKEIT`), Energiesparmodus + sticky per Skript.
 
 **Nachlese 08.09.2026 (v0.9.285) — Entschlacken (Stufe 1, überholt durch
-Stufe 2 unten: Fire-Tools-Liste, `disable-user` + `suspend`, `tcomm` nicht
+Stufe 2 oben: Fire-Tools-Liste, `disable-user` + `suspend`, `tcomm` nicht
 mehr tabu):** Amazon-Apps (Alexa,
 Video, Music, Kindle, Audible, Photos, Wetter, Shopping, Kids, Hilfe,
 Freevee, Silk Kids, Sonderangebote) und der OTA-Dienst werden bei der

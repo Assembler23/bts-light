@@ -2,7 +2,6 @@ package de.badhub.btslight.tablet
 
 import android.annotation.SuppressLint
 import android.net.nsd.NsdManager
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -12,7 +11,6 @@ import android.text.InputType
 import android.view.MotionEvent
 import android.view.View
 import android.webkit.WebResourceError
-import android.webkit.WebSettings
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -93,6 +91,9 @@ class KioskActivity : AppCompatActivity() {
         // (Kindersicherung „App fixieren") auf den Tipp im Dialog wartet —
         // darum feste Nachprüfungen statt Vertrauen in den ersten Aufruf.
         if (sperre == Kiosk.Sperre.Angeheftet) {
+            // Der Start-Aufruf zählt als Versuch: sonst ersetzt der 600-ms-Fokus-Takt
+            // den gerade gezeigten Fixier-Dialog durch einen zweiten.
+            letzterNachheftMs = SystemClock.elapsedRealtime()
             for (ms in NACHHEFT_TAKTE_MS) handler.postDelayed({ nachheftenFallsNoetig() }, ms)
         }
 
@@ -279,10 +280,9 @@ class KioskActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun webEinrichten() {
         web.settings.apply {
-        // Der Energiesparmodus schaltet ab Android 10 den Nachtmodus mit ein;
-        // die WebView dürfte tablet.html dann algorithmisch umfärben (Review-
-        // Befund). Die Seite bringt ihr eigenes dunkles Design mit — aus.
-        if (Build.VERSION.SDK_INT >= 29) web.settings.forceDark = WebSettings.FORCE_DARK_OFF
+        // Nachtmodus (Energiesparmodus schaltet ihn mit): Ab targetSdk 33 färbt
+        // die WebView Seiten nicht mehr algorithmisch um (Review-Befund) —
+        // tablet.html bringt ohnehin ihr eigenes dunkles Design mit. Nichts zu tun.
             javaScriptEnabled = true
             domStorageEnabled = true            // localStorage: Spielstand, Geräte-ID der Seite
             mediaPlaybackRequiresUserGesture = false // Gong ohne Fingertipp

@@ -3,7 +3,7 @@
      und braucht deren Inhalt, um den Fixier-Dialog zu erkennen. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/bestaetigung_beschreibung"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeWindowsChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:packageNames="com.android.systemui"
     android:canRetrieveWindowContent="true"
