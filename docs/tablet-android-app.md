@@ -209,14 +209,22 @@ Verlass. Wer trotzdem Autostart braucht, kann die App mit dem Werkzeug
 „Custom Launcher" von Fire Toolbox als Startbildschirm setzen; dann öffnet
 Fire OS sie nach jedem Boot wie einen Launcher.
 
-**Warum der Werksreset nötig ist:** Der Gerätebesitzer scheitert auf
-Fire-Tablets nicht nur an einem angemeldeten Amazon-Konto, sondern vor allem
-daran, dass Amazons Kindersicherung (`com.amazon.parentalcontrols`) ab Werk
-als **Profile Owner** von Nutzer 0 eingetragen ist. Das Paket ist geschützt
-(kein `pm uninstall`, kein `pm disable-user`), und Abmelden in den
-Einstellungen lässt zudem zwei Amazon-Konten (Kontakte, Whispersync) stehen.
-`dpm set-device-owner` antwortet dann „the user already has a profile
-owner" — nur der Reset mit übersprungener Anmeldung räumt das weg.
+**Fire OS 8: Gerätebesitzer nicht möglich, auch nicht nach Werksreset.**
+Der Gerätebesitzer scheitert auf Fire-Tablets nicht am Amazon-Konto, sondern
+daran, dass Amazons Kindersicherung (`com.amazon.parentalcontrols`) beim
+ersten Start als **Profile Owner** von Nutzer 0 eingetragen wird — geprüft
+am 08.09.2026 direkt nach einem Werksreset mit übersprungener Anmeldung:
+Der Profile Owner ist sofort wieder da, dazu drei systeminterne Konten vom
+Typ `amazon.account` ohne jede Anmeldung. `dpm set-device-owner` antwortet
+„the user already has a profile owner", `dpm remove-active-admin` verweigert
+(„non-test admin"), das Paket ist geschützt (kein `pm uninstall`, kein
+`pm disable-user`). **Ein Werksreset bringt auf Fire OS 8 also nichts**; die
+Schritte 1 und 4 oben (Reset, Gerätebesitzer) gelten nur für Android-Geräte
+anderer Hersteller. Auf Fire-Tablets bleibt die Einrichtung ohne Besitzer:
+APK installieren, Amazon-Apps stilllegen, Bildschirm-an und Sperrbildschirm
+per adb setzen, App starten — genau das tut das Skript bis auf den
+Gerätebesitzer-Schritt, den es dort mit Fehler abbricht (siehe
+[roadmap.md](roadmap.md): Kiosk-Verhalten ohne Gerätebesitzer).
 
 ## Fehlersuche
 

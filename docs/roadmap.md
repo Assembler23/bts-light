@@ -297,6 +297,20 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Als Nächstes
 
+- **Tablet-Kiosk-App: Kiosk-Verhalten ohne Gerätebesitzer (Fire OS 8).**
+  Befund 08.09.2026: Auf Fire OS 8 ist der Gerätebesitzer nie erreichbar —
+  Amazons Kindersicherung ist auch direkt nach einem Werksreset Profile
+  Owner, `dpm set-device-owner` scheitert immer; „Bildschirm anheften" ohne
+  Besitzer schaltet den Toddler Mode ein, der alle Touches schluckt (seit
+  v0.9.284 deshalb abgeschaltet). Damit fehlen auf Fire-Tablets Autostart
+  nach dem Einschalten und der Schutz gegen Home/Zuletzt. Kandidat: ein
+  Accessibility-Dienst in der App nach dem Muster LauncherHijack/Fully, der
+  beim Erscheinen des Fire-Launchers (Boot, Home-Taste) die KioskActivity
+  wieder nach vorn holt; per adb einschaltbar
+  (`settings put secure enabled_accessibility_services …`), also ohne
+  Gerätebesitzer. Offen: Verhalten bei „Kiosk verlassen", Whitelist
+  (Einstellungen, WLAN-Dialog), Fire-OS-Verträglichkeit. Braucht eine Spec
+  (`/idee`); Fire-Toolbox „Custom Launcher" als Vergleich prüfen.
 - **Repo-Umbenennung** → Anzeigename „badhub BTP controller", GitHub-Repo
   `badhub-btp-controller`. Wichtig: Tauri-`identifier` `de.badhub.btslight`
   und der Updater-Pfad `download/bts-light/` bleiben **stabil**, sonst

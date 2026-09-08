@@ -162,8 +162,15 @@ denselben Text zeigt sie, wenn `startLockTask()` anderswo wirft (der Boolean
 aus `sperren` unterscheidet die Ursache bewusst nicht). Ausweg an einem
 bereits angehefteten Tablet: `adb shell am task lock stop`. Außerdem
 gemessen: Der Gerätebesitzer scheitert auf Fire OS am **Profile Owner**
-`com.amazon.parentalcontrols` (geschütztes Paket), nicht nur am Konto —
-darum ist der Werksreset Pflicht (siehe `docs/tablet-android-app.md`).
+`com.amazon.parentalcontrols` (geschütztes Paket), nicht nur am Konto.
+**Korrektur nach dem Reset-Test am selben Tag:** Der Profile Owner ist
+auch direkt nach einem Werksreset mit übersprungener Anmeldung wieder
+gesetzt (Fire OS 8.0, Tablet GN434J…), dazu drei `amazon.account`-Konten
+ohne Login. Der Gerätebesitzer-Weg dieser Spec ist auf Fire OS 8 damit
+**nicht gangbar**; Autostart und harte Sperre brauchen einen anderen
+Mechanismus (offen, Roadmap: Accessibility-„Home-Hijack" wie
+LauncherHijack/Fully). Die Spec bleibt für Android-Geräte anderer
+Hersteller gültig.
 
 **Nachlese 08.09.2026 (v0.9.285) — Entschlacken:** Amazon-Apps (Alexa,
 Video, Music, Kindle, Audible, Photos, Wetter, Shopping, Kids, Hilfe,

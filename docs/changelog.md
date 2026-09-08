@@ -19,6 +19,12 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   auf Wunsch gleich das Hallen-WLAN (`-Wlan`/`-WlanPasswort` bzw.
   `WLAN_SSID`/`WLAN_PASSWORT`). Doku: vorher einmal von Hand Fire OS
   aktualisieren; warum es kein Abbild für viele Tablets gibt.
+- **Befund: Auf Fire OS 8 ist der Gerätebesitzer nicht erreichbar, auch
+  nicht nach Werksreset.** Amazons Kindersicherung ist nach dem ersten
+  Start sofort wieder Profile Owner. Die Doku rät auf Fire-Tablets nicht
+  mehr zum Reset; die Einrichtung läuft dort ohne Besitzer (App, Apps
+  stilllegen, Bildschirm-an, Sperrbildschirm aus). Autostart und harte
+  Sperre auf Fire OS stehen als offener Punkt in der Roadmap.
 
 ## v0.9.284
 
