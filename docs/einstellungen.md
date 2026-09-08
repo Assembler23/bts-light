@@ -349,16 +349,8 @@ alle zehn Minuten die aktuelle Logdatei übertragen. Sie enthält nur technische
 Daten, **keine Spielernamen**. Das hilft, einen Fehler nach dem Turnier
 nachzuvollziehen.
 
-Der Startwert hängt davon ab, woher deine Einrichtung kommt:
-
-| Ausgangslage | Schalter |
-|---|---|
-| **Neuinstallation ab v0.9.279** | **an** — der Assistent zeigt das Häkchen gesetzt |
-| Neuinstallation mit einer älteren Version | **aus** |
-| Bestehende Installation, die vor v0.9.279 eingerichtet wurde | **bleibt aus** — ein Update schaltet nichts stillschweigend ein |
-| Du hast den Schalter selbst umgelegt | **deine Entscheidung gilt**, in beide Richtungen |
-
-**Abwählen ist jederzeit möglich** und bleibt dauerhaft bestehen. Details:
+**Voreingestellt ist er aus.** Ein Update ändert daran nichts: Was du einmal
+eingestellt hast, bleibt bestehen — in beide Richtungen. Details:
 [Diagnose-Logs](logging.md).
 
 ## Wartung

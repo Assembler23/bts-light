@@ -202,23 +202,66 @@ pruefe(!a4.includes("GEHEIMNIS-VIER"), "Setext: der ausgeschlossene Abschnitt fe
 pruefe(a4.includes("BLEIBT-STEHEN"), "Setext-H1 beendet den Ausschluss (kein stiller Textverlust)");
 pruefe(a4.includes("BLEIBT-AUCH"), "Setext-H2 beendet den Ausschluss ebenfalls");
 
-// Ein Link, der per ../ aus dem Repo ausbricht, darf niemals als Verweis
-// ueberleben — er wird zu reinem Text entwertet (fail-closed).
+// Zwei Faelle, die vorher gleich aussahen und es nicht sind:
+//
+//  a) Die Zieldatei GIBT es, ist nur nicht veroeffentlicht (ADR, Spec) —
+//     der Link wird still zu Text. Richtig so.
+//  b) Die Zieldatei gibt es GAR NICHT — ein Vertipper. Der muss den Bau
+//     abbrechen. Vorher verschwand er lautlos, und im Handbuch stand ein
+//     Verweis ins Nichts (Befund 06.09.2026: "schiri-modus.md" statt
+//     "umpire-mode.md" war so durchgerutscht).
+mkdirSync(join(fixtureDir, "docs", "adr"), { recursive: true });
+writeFileSync(join(fixtureDir, "docs", "adr", "0001-quality-gate.md"), "# ADR 1\n\nIntern.\n");
 writeFileSync(
   join(fixtureDir, "docs", "a.md"),
   `# T
 
 ## X
 
-[Ausbruch](../../../../etc/passwd.md) und [Intern](adr/0001-quality-gate.md).
+[Intern](adr/0001-quality-gate.md) ist vorhanden, aber nicht veröffentlicht.
 `
 );
 const ziel5 = join(tmp, "out5");
 baue([], ziel5);
 const a5 = readFileSync(join(ziel5, "a.html"), "utf8");
-pruefe(!/<a [^>]*href="[^"]*passwd/.test(a5), "Pfad-Ausbruch per ../ wird zu Text entwertet, nicht verlinkt");
-pruefe(a5.includes("Ausbruch"), "der Linktext bleibt dabei lesbar erhalten");
-pruefe(!/<a [^>]*href="[^"]*0001-quality-gate/.test(a5), "Link auf eine nicht veröffentlichte Datei wird entwertet");
+pruefe(
+  !/<a [^>]*href="[^"]*0001-quality-gate/.test(a5),
+  "Link auf eine vorhandene, aber nicht veröffentlichte Datei wird entwertet"
+);
+pruefe(a5.includes("Intern"), "der Linktext bleibt dabei lesbar erhalten");
+
+// Ein Link auf ein Verzeichnis gehoert dem Web, nicht dem Repo: "../" zeigt
+// vom Handbuch aus auf die Download-Seite. Wird er entwertet, fuehrt der
+// wichtigste Weiterweg der Installationsseite ins Nichts — und weil er nicht
+// auf .md endet, meldete das vorher niemand (Befund 06.09.2026).
+writeFileSync(
+  join(fixtureDir, "docs", "a.md"),
+  `# T\n\n## X\n\n[Downloads](../) und [Quellcode](../src/io/announcer.ts).\n`
+);
+const ziel7 = join(tmp, "out7");
+baue([], ziel7);
+const a7 = readFileSync(join(ziel7, "a.html"), "utf8");
+pruefe(/<a href="\.\.\/"/.test(a7), "ein Link auf ein Verzeichnis (../) bleibt ein Link");
+pruefe(
+  !/<a [^>]*href="[^"]*announcer\.ts/.test(a7),
+  "ein Quellcode-Link wird weiterhin entwertet (auf badhub.de liegt kein Quellcode)"
+);
+
+writeFileSync(
+  join(fixtureDir, "docs", "a.md"),
+  `# T\n\n## X\n\n[Vertipper](gibt-es-nicht.md) und [Ausbruch](../../../../etc/passwd.md).\n`
+);
+let brach3 = false;
+let meldung3 = "";
+try {
+  baue([], join(tmp, "out6"));
+} catch (e) {
+  brach3 = true;
+  meldung3 = String(e.stderr || "");
+}
+pruefe(brach3, "ein Link auf eine nicht existierende Datei lässt den Bau fehlschlagen");
+pruefe(/gibt-es-nicht\.md/.test(meldung3), "die Meldung nennt die falsche Datei beim Namen");
+pruefe(/passwd/.test(meldung3), "auch ein Pfad-Ausbruch per ../ wird gemeldet, nicht still entwertet");
 
 // ── 4. Das echte Handbuch bauen und die Ausgabe prüfen ────────────────────
 console.log("\nEchter Lauf");
@@ -237,7 +280,13 @@ pruefe(lief, "das echte Handbuch baut ohne Fehler");
 
 if (lief) {
   const dateien = readdirSync(echt).filter((f) => f.endsWith(".html"));
-  pruefe(dateien.length === inhalt.length + 1, `${inhalt.length} Kapitel + Startseite erzeugt (${dateien.length})`);
+  // Kapitel + Startseite + Suche + Register.
+  pruefe(
+    dateien.length === inhalt.length + 3,
+    `${inhalt.length} Kapitel plus Startseite, Suche und Register erzeugt (${dateien.length})`
+  );
+  pruefe(dateien.includes("suche.html"), "Suchseite erzeugt");
+  pruefe(dateien.includes("register.html"), "Stichwortverzeichnis erzeugt");
 
   // Anker je Seite einsammeln, dann alle Querverweise dagegen prüfen. Ein
   // Verweis auf "#feldvergabe" in einer Datei, in der dieser Abschnitt
@@ -279,8 +328,109 @@ if (lief) {
   for (const [f, t] of html) for (const v of verboten) if (t.includes(v)) leaks.push(`${f}: ${v}`);
   pruefe(leaks.length === 0, leaks.length === 0 ? "keine Server-/Deploy-Details in der Ausgabe" : `gefunden: ${leaks.join(", ")}`);
 
+  // Ohne Suche findet in einem Handbuch dieser Groesse niemand etwas. Die
+  // Zusicherungen halten fest, dass sie da ist, alle Kapitel abdeckt und von
+  // jeder Seite aus erreichbar bleibt.
+  const suche = html.get("suche.html") || "";
+  const idx = suche.match(/const IDX = (\[[\s\S]*?\]);/);
+  pruefe(!!idx, "Suchseite trägt ihren Index inline");
+  if (idx) {
+    let eintraege = [];
+    try {
+      eintraege = JSON.parse(idx[1]);
+    } catch {
+      /* unten als Fehler sichtbar */
+    }
+    pruefe(eintraege.length > 100, `Suchindex hat Substanz (${eintraege.length} Abschnitte)`);
+    const abgedeckt = new Set(eintraege.map((e) => e.p));
+    const fehlend = inhalt.filter((s) => !abgedeckt.has(s.slug)).map((s) => s.slug);
+    pruefe(
+      fehlend.length === 0,
+      fehlend.length === 0 ? "jedes Kapitel ist in der Suche vertreten" : `nicht durchsuchbar: ${fehlend.join(", ")}`
+    );
+    // Jeder Treffer muss auch anspringbar sein.
+    const kaputt = eintraege.filter(
+      (e) => !html.has(`${e.p}.html`) || (e.a && !anker.get(`${e.p}.html`).has(e.a))
+    );
+    pruefe(kaputt.length === 0, `jeder Suchtreffer springt an eine echte Stelle (${kaputt.length} kaputt)`);
+  }
+  // Das eingebettete Suchskript durchlaeuft keinen Build. Ein Syntaxfehler
+  // darin laesst die Suchseite im Betrieb leer, ohne dass irgendetwas meldet
+  // — genau der Fehler, wegen dem es scripts/check-asset-syntax.mjs gibt
+  // (Vorfall 13.08.2026). Hier wird er beim Bauen gefunden.
+  const skript = suche.match(/<script>([\s\S]*?)<\/script>/);
+  let skriptOk = false;
+  try {
+    new (Function.prototype.bind.call(Function, null, skript ? skript[1] : "syntax(("))();
+    skriptOk = true;
+  } catch (e) {
+    console.log(`     ${e.message}`);
+  }
+  pruefe(skriptOk, "das Suchskript ist syntaktisch gültig");
+
+  // Und es muss auch etwas finden. Gueltige Syntax sagt noch nicht, dass die
+  // Suche Treffer liefert — eine kaputte Bewertung faende schlicht nie etwas,
+  // und die Seite saehe dabei voellig in Ordnung aus.
+  if (skriptOk && skript) {
+    const feld = { value: "", addEventListener() {}, focus() {} };
+    const ergebnisse = { innerHTML: "" };
+    const shim = {
+      document: { getElementById: (id) => (id === "suchfeld" ? feld : ergebnisse) },
+      location: { search: "?q=tablet" },
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+      URLSearchParams,
+    };
+    let lief = true;
+    try {
+      Function(
+        "document", "location", "setTimeout", "clearTimeout", "URLSearchParams",
+        skript[1]
+      )(shim.document, shim.location, shim.setTimeout, shim.clearTimeout, URLSearchParams);
+    } catch (e) {
+      lief = false;
+      console.log(`     ${e.message}`);
+    }
+    pruefe(lief, "das Suchskript läuft durch");
+    pruefe(/Treffer/.test(ergebnisse.innerHTML), "die Suche nach „tablet\" liefert Treffer");
+    pruefe(
+      /href='[a-z-]+\.html(#[^']*)?'/.test(ergebnisse.innerHTML),
+      "jeder Treffer trägt einen anspringbaren Link"
+    );
+    pruefe(/<mark>/i.test(ergebnisse.innerHTML), "der Suchbegriff wird im Auszug hervorgehoben");
+
+    // Gegenprobe: Unsinn darf NICHT treffen, sonst ist die Bewertung kaputt.
+    const leer = { innerHTML: "" };
+    Function(
+      "document", "location", "setTimeout", "clearTimeout", "URLSearchParams",
+      skript[1]
+    )(
+      { getElementById: (id) => (id === "suchfeld" ? { value: "", addEventListener() {}, focus() {} } : leer) },
+      { search: "?q=zzzqqqxyz" }, () => 0, () => {}, URLSearchParams
+    );
+    pruefe(/Keine Treffer/.test(leer.innerHTML), "ein Unsinns-Suchwort liefert ehrlich keine Treffer");
+  }
+
+  pruefe(
+    [...html.values()].every((t) => t.includes('action="suche.html"')),
+    "jede Seite trägt das Suchfeld im Kopf"
+  );
+  pruefe(
+    (html.get("register.html") || "").includes("buchstabe-"),
+    "das Stichwortverzeichnis ist nach Buchstaben gegliedert"
+  );
+
+  // Aufgabenorientierter Einstieg: Wer ins Handbuch schaut, hat ein Problem
+  // und nicht die Musse, aus Kapiteltiteln zu erraten, wo die Antwort steht.
+  const start = html.get("index.html") || "";
+  for (const a of manifest.aufgaben || []) {
+    const [datei, ank] = a.ziel.split("#");
+    const ok = html.has(datei) && (!ank || anker.get(datei).has(decodeURIComponent(ank)));
+    pruefe(ok, `Aufgabe „${a.frage}" führt an eine echte Stelle`);
+  }
+  pruefe(start.includes("Ich möchte"), "Startseite beginnt mit den Aufgaben, nicht mit der Kapitelliste");
+
   // Die Seite muss zurück zum Download führen — sie ersetzt ihn nicht.
-  const start = html.get("index.html");
   pruefe(start.includes('href="../"'), "Startseite verlinkt zurück auf die Download-Seite");
   pruefe(
     [...html.values()].every((t) => t.includes('href="../"')),
