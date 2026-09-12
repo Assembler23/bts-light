@@ -94,7 +94,9 @@ kennen (ADR [0043](adr/0043-zettelblatt-nach-dbv-vorbild.md)):
   geraten wird nicht.
 - **Im Einzel** stehen die Spieler in Zeile 1 und 3, die anderen beiden bleiben
   frei. Der Bogen hat immer vier Zeilen.
-- **Kopf:** links Spiel-Nr., Disziplin, Feld und Datum · Mitte die beiden
+- **Kopf:** links Spiel-Nr., Disziplin (Draw-Name plus Klassen-Kürzel,
+  z. B. „Gruppe 3 A"; trägt der Draw die Klasse schon — „HE A", „HD-A" —
+  bleibt es dabei), Feld und Datum · Mitte die beiden
   Mannschaftskästen mit den Marken „L" und „R" und dazwischen das Satzergebnis ·
   rechts Schiedsrichter, Aufschlagrichter, Beginn, Ende, Dauer. Oben links steht
   das **Turnierlogo** (sofern hinterlegt) und der Turniername — **kein

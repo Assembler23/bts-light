@@ -937,6 +937,9 @@ fn draw_map(t: &[Node]) -> HashMap<i64, String> {
 /// Kürzel (≤ 4 Zeichen, z. B. „A", „B2", „U15"). Alles andere — insbesondere
 /// Gruppen-/Auslosungsnamen wie „Gruppe 3" oder „Hauptrunde" — ergibt Leer:
 /// Die Ansage nennt nach Nutzer-Vorgabe NUR Disziplin + Klasse, nie Gruppen.
+///
+/// Getrennt wird an Leerzeichen **und** Bindestrichen: Die BBB-Ranglisten
+/// nennen ihre Events „HD-A", „MX-C" — Disziplin und Klasse in einem Wort.
 fn class_from(name: &str) -> String {
     const DISCIPLINE_TOKENS: &[&str] = &[
         "herreneinzel",
@@ -955,7 +958,8 @@ fn class_from(name: &str) -> String {
         "mx",
     ];
     let rest: Vec<&str> = name
-        .split_whitespace()
+        .split(|c: char| c.is_whitespace() || c == '-')
+        .filter(|tok| !tok.is_empty())
         .filter(|tok| !DISCIPLINE_TOKENS.contains(&tok.to_lowercase().as_str()))
         .collect();
     match rest.as_slice() {
@@ -1343,6 +1347,21 @@ mod tests {
         // Ohne Event-Klasse greift der Draw-Name (K.-o.-Phase „HE A").
         assert_eq!(class_label("Herreneinzel", "HE A"), "A");
         assert_eq!(class_label("", "HE B"), "B");
+    }
+
+    #[test]
+    fn class_label_reads_hyphenated_event_names() {
+        // BBB-Ranglisten 09/2026: Events und K.-o.-Draws heißen „HD-A",
+        // „DD-B", „MX-C" — Disziplin und Klasse mit Bindestrich in EINEM
+        // Wort. Ohne Bindestrich-Trennung blieb die Klasse leer, die
+        // Turnierleitung zeigte nur „HD".
+        assert_eq!(class_label("HD-A", "Gruppe A"), "A");
+        assert_eq!(class_label("DD-B", "DD-B"), "B");
+        assert_eq!(class_label("MX-E", ""), "E");
+        assert_eq!(class_label("", "HE-C"), "C");
+        assert_eq!(class_label("Herrendoppel-U15", ""), "U15");
+        // Weiterhin kein Kürzel, wenn nach der Trennung mehr als ein Rest bleibt.
+        assert_eq!(class_label("U15 HE-A", ""), "");
     }
 
     #[test]

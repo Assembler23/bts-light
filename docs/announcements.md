@@ -78,7 +78,9 @@ Direkt hinter der Disziplin wird das **Klassen-Kürzel** angesagt
 („Herreneinzel **A**"). Es kommt aus `model::class_label`: bevorzugt aus dem
 **Event-Namen** (trägt die Klasse auch in der Gruppenphase, wo Draws nur
 „Gruppe 1…n" heißen), sonst aus dem **Draw-Namen** („HE A" in der
-K.-o.-Phase). Bekannte Disziplin-Wörter werden entfernt; übrig bleiben darf
+K.-o.-Phase). Getrennt wird an Leerzeichen **und Bindestrichen** (seit
+v0.9.288: die BBB-Ranglisten nennen ihre Events „HD-A", „MX-C"), dann
+werden bekannte Disziplin-Wörter entfernt; übrig bleiben darf
 nur EIN kurzes Kürzel (≤ 4 Zeichen, z. B. „A", „B2", „U15") — **Gruppen-
 oder Auslosungsnamen („Gruppe 3", „Hauptrunde") werden nie angesagt**
 (Nutzer-Vorgabe vom Turnier 17.07.2026). Ohne erkennbares Kürzel bleibt die

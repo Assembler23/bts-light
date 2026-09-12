@@ -376,6 +376,26 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
 /// Matches außerhalb des aktuellen Snapshots und solche ohne jede
 /// Aufzeichnung liefern **keinen** Zettel — der Abruf endet dann ehrlich
 /// mit 404 statt mit einem leeren Blatt.
+/// Konkurrenz-Zeile im Zettelkopf: Draw-Name plus Klassen-Kürzel — aber
+/// nur, wenn der Draw-Name das Kürzel nicht ohnehin schon trägt. In der
+/// K.-o.-Phase heißt der Draw selbst „HE A" oder „HD-A"; ein zweites „A"
+/// dahinter („HD-A A") sähe nach Tippfehler aus. Gruppen-Draws („Gruppe 3")
+/// bekommen das Kürzel dagegen, sonst wüsste niemand, welche Klasse spielt.
+fn konkurrenz_zeile(draw_name: &str, class_label: &str) -> String {
+    if class_label.is_empty() {
+        return draw_name.to_string();
+    }
+    let traegt_schon = draw_name == class_label
+        || draw_name
+            .strip_suffix(class_label)
+            .is_some_and(|rest| rest.ends_with([' ', '-']));
+    if traegt_schon {
+        draw_name.to_string()
+    } else {
+        format!("{draw_name} {class_label}")
+    }
+}
+
 pub fn dokumente(
     state: &super::state::TabletState,
     logo_uri: Option<&str>,
@@ -445,11 +465,7 @@ pub fn dokumente(
 
             Some(SheetDoc {
                 turnier: snap.tournament_name.clone(),
-                disziplin: if m.class_label.is_empty() {
-                    m.draw_name.clone()
-                } else {
-                    format!("{} {}", m.draw_name, m.class_label)
-                },
+                disziplin: konkurrenz_zeile(&m.draw_name, &m.class_label),
                 runde: m.round_name.clone(),
                 spielnummer: m.match_num,
                 feld: m.court.clone().unwrap_or_default(),
@@ -544,6 +560,21 @@ pub fn seiten_fuer(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn konkurrenz_zeile_haengt_das_kuerzel_nur_einmal_an() {
+        use super::konkurrenz_zeile;
+        // Gruppenphase: Draw ohne Klasse → Kürzel anhängen.
+        assert_eq!(konkurrenz_zeile("Gruppe 3", "A"), "Gruppe 3 A");
+        // K.-o.-Phase: Draw trägt die Klasse schon (mit Leerzeichen oder
+        // Bindestrich, BBB-Rangliste 09/2026) → kein „HD-A A".
+        assert_eq!(konkurrenz_zeile("HE A", "A"), "HE A");
+        assert_eq!(konkurrenz_zeile("HD-A", "A"), "HD-A");
+        assert_eq!(konkurrenz_zeile("A", "A"), "A");
+        // „Gruppe 1A" endet zwar auf „A", aber nicht als eigenes Wort.
+        assert_eq!(konkurrenz_zeile("Gruppe 1A", "A"), "Gruppe 1A A");
+        assert_eq!(konkurrenz_zeile("Hauptrunde", ""), "Hauptrunde");
+    }
+
     use super::*;
     use relay_proto::TimelineSet;
 
