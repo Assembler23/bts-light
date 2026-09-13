@@ -147,6 +147,7 @@
   var akkuEl = document.getElementById('akku');
   akkuBeobachten(window, function (a) {
     var text = akkuText(a.percent, a.charging);
+    if (akkuEl.textContent === text) return; // Takt ohne Änderung → kein DOM-Schreiben
     var stufe = akkuStufe(a.percent);
     akkuEl.hidden = !text;
     akkuEl.textContent = text;

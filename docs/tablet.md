@@ -495,8 +495,9 @@ Reihenfolge): die Brücke der [Kiosk-App](tablet-android-app.md)
 http) — sonst die Web-Battery-API des Browsers (nur Android/Chrome im
 Secure Context, also Cloud oder LAN-TLS). Die Brücke wird **einmal je
 Minute** abgefragt, die Web-API liefert Ereignisse; die Anzeige hat keine
-Animation und rendert nur bei einem neuen Wert — sie kostet selbst keinen
-messbaren Akku. Kanonische Logik in `src/io/akku.mjs` (Test
+Animation und schreibt nur bei geändertem Text ins DOM — sie kostet selbst
+keinen messbaren Akku. Liefert die Brücke beim Start nichts, steht einmalig
+`battery_fully_failed` im Geräte-Log. Kanonische Logik in `src/io/akku.mjs` (Test
 `scripts/test-akku.mjs`), Inline-Kopien in den drei Seiten; `tablet.html`
 speist aus **einer** Quelle sowohl die Kopfzeile als auch den
 `battery`-Frame an den Host.

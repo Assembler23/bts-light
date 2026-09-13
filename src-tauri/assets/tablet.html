@@ -1964,8 +1964,11 @@ function sendBatteryMsg(percent, charging) {
   }
 }
 // Kopfzeile: Text + Stufe als Klasse; ohne Wert bleibt das Feld versteckt.
+// Nur bei geändertem Text ins DOM schreiben — der 60-s-Takt der Brücke
+// liefert meist denselben Wert, und ein Textknoten-Tausch kostet Layout.
 function renderAkku(a) {
   const text = a ? akkuText(a.percent, a.charging) : '';
+  if (els.akku.textContent === text && els.akku.hidden === !text) return;
   els.akku.hidden = !text;
   els.akku.textContent = text;
   const stufe = a ? akkuStufe(a.percent) : null;
@@ -1986,6 +1989,10 @@ function setupBattery() {
     sendBatteryMsg(a.percent, a.charging);
   });
   if (!quelle) return; // keine Quelle (iPad, LAN-http ohne Kiosk-App) → stumm
+  // Brücke da, aber der erste (synchrone) Durchlauf hat nichts geliefert →
+  // einmalig ins Geräte-Log, damit „kein Akku trotz Kiosk-App" am Turnier
+  // aus dem Log erkennbar bleibt (`akkuAusFully` schluckt die Ausnahme).
+  if (hasFully && !letzterAkku) tlog('warn', 'battery_fully_failed');
   sendBattery = () => { if (letzterAkku) sendBatteryMsg(letzterAkku.percent, letzterAkku.charging); };
 }
 
