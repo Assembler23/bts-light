@@ -76,6 +76,16 @@ ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)).
   → nebeneinander, Drehen schaltet live um); `?anordnung=nebeneinander` bzw.
   `?anordnung=uebereinander` übersteuert (nur fester Modus, im Gerätemodus
   gilt immer die Automatik). `?spiegel=1` dreht auch oben/unten.
+- **Ansicht per Tipp (seit v0.9.289):** Läuft die Tafel in der
+  [Anzeige-Hülle](tablet.md#anzeige-hülle-anzeige-seit-v09275), schaltet ein
+  Tipp auf die Zahlen die Ansicht reihum — **ohne PIN**: automatisch →
+  links/rechts → rechts/links → oben/unten → unten/oben → automatisch. Das ist
+  Spiegelung und Anordnung in **einem** Zyklus; das Etikett nennt zuerst, wo
+  die linke Tablet-Seite steht („unten/oben" = übereinander, ungespiegelt).
+  Die Tafel selbst schaltet nichts: Sie schickt nur eine `postMessage` an
+  die Hülle derselben Herkunft, die das iframe mit den neuen Parametern neu
+  lädt. Ohne Hülle (Tafel direkt geöffnet) und im Gerätemodus passiert beim
+  Tipp nichts.
 - **Spielende:** der letzte gespielte Satz bleibt groß stehen und zählt im
   Satzstand; bei Aufgabe zählt der unvollständige Satz nicht. Ohne Spiel:
   Feldbezeichnung groß.

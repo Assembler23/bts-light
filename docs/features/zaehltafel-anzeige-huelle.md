@@ -407,6 +407,63 @@ hinter der PIN, `localStorage` `badhub.tablet.anordnung`, je Gerät).
   - [ ] Feldtest: Zählen im Hochformat hinter dem Feld über ein ganzes Spiel
         inkl. Seitenwechsel und Satzpause.
 
+## Erweiterung 13.09.2026 — Ansicht per Tipp auf die Zahlen
+
+**Problem:** Spiegelung und Anordnung waren zwei Menü-Einträge hinter der
+PIN. Wer die Tafel am Feld aufstellt, will in Sekunden sehen, ob die Teams
+richtig herum stehen — Zahnrad, PIN, zwei Einträge sind dafür zu lang.
+
+**Lösung:** Beides ist für den Bediener eine Frage („Wo steht welches Team
+auf meinem Bildschirm?"), also **ein** Zyklus mit fünf Stufen, reihum per
+Tipp auf die Zahlen der Tafel — **ohne PIN** — und über einen einzigen
+Menü-Eintrag „Ansicht: …":
+
+| Ansicht | `spiegel` | `anordnung` |
+|---|---|---|
+| automatisch | aus | `auto` |
+| links/rechts | aus | `nebeneinander` |
+| rechts/links | an | `nebeneinander` |
+| oben/unten | an | `uebereinander` |
+| unten/oben | aus | `uebereinander` (= bisheriges Übereinander, links nah/unten) |
+
+Das Etikett nennt zuerst, wo die **linke Tablet-Seite** steht. „auto +
+gespiegelt" entfällt bewusst: Wer spiegelt, weiß, wie er sitzt — dann soll
+das Drehen des Geräts nichts mehr umwerfen.
+
+**Ablauf:** `tafel.html` hängt einen `click` an `.punkte` (nur im festen
+Modus und nur, wenn ein Elternfenster existiert) und schickt
+`postMessage({typ:"bts-anzeige:naechste-ansicht"}, location.origin)`. Die
+Hülle nimmt nur Nachrichten an, deren `origin` die eigene ist **und** deren
+`source` das eigene iframe ist; sie schaltet weiter, merkt
+`badhub.anzeige.ansicht`, lädt das iframe mit den neuen Parametern (wie
+bisher beim Menü) und blendet 1,5 s ein Etikett „Ansicht: …" ein
+(`pointer-events: none`, der nächste Tipp trifft sofort wieder die Tafel).
+Ohne Hülle (Tafel direkt im Browser) und im Gerätemodus (TV) tut der Tipp
+nichts — dort gab es auch bisher weder Spiegel noch Hand-Anordnung.
+
+**Migration:** Die Alt-Schlüssel `badhub.anzeige.spiegel` und
+`badhub.anzeige.anordnung` werden beim ersten Start einmalig in die Ansicht
+übersetzt (`ansichtAusParametern`) und gelöscht.
+
+**Kanonische Fassung** in `src/io/anzeigeZiel.mjs` (+ Inline-Kopie in
+`anzeige.html`, Test `scripts/test-anzeige-ziel.mjs`): `ANSICHTEN`,
+`ANSICHT_LABEL`, `ansichtAusWert`, `ansichtParameter`,
+`ansichtAusParametern`, `naechsteAnsicht`. `zielPfad` bleibt unverändert und
+bekommt die Parameter der Ansicht.
+
+**Bewusst hingenommen:** Zuschauer können die Ansicht verstellen — harmlos
+und mit einem weiteren Tipp behoben. Ohne laufendes Spiel (Leer-Ansicht)
+sind keine Zahlen da; dann bleibt der Menü-Eintrag.
+
+**Akzeptanz (Browsertest gegen Mock 13.09.2026):**
+- [x] Fünf Tipps durchlaufen alle Stufen und landen wieder bei „automatisch".
+- [x] iframe-Adresse trägt je Stufe die richtigen Parameter.
+- [x] Etikett erscheint nach dem Tipp und verschwindet von selbst.
+- [x] Menü-Eintrag zeigt die aktuelle Stufe und schaltet dieselbe Folge.
+- [x] Alt-Schlüssel (`spiegel=1`, `anordnung=uebereinander`) → „oben/unten",
+      Alt-Schlüssel danach gelöscht.
+- [ ] Feldtest am Tablet.
+
 ## Offene Fragen / Annahmen
 
 - Annahme: Die Klapp-Tafel-Optik ist reines CSS (Ziffern auf dunklen Kacheln); es wird keine

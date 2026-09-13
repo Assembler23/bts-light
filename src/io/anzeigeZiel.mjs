@@ -64,3 +64,68 @@ export function zielPfad(ziel, spiegel, anordnung) {
       return null;
   }
 }
+
+// ── Ansicht der Zähltafel ────────────────────────────────────────────────
+// Spiegelung und Anordnung sind für den Bediener EINE Frage: „Wo steht
+// welches Team auf meinem Bildschirm?" Deshalb bündelt die Hülle beides zu
+// einer Ansicht, die reihum geschaltet wird — per Tipp auf die Zahlen der
+// Tafel (ohne PIN, das ist der Sinn) wie über den Menü-Eintrag. Das Etikett
+// nennt zuerst, wo die **linke Tablet-Seite** steht, dann die rechte;
+// `unten-oben` ist damit das ungespiegelte Übereinander (links = nah/unten).
+// „auto + gespiegelt" gibt es bewusst nicht: Wer spiegelt, weiß, wie er
+// sitzt — dann soll das Drehen des Geräts nichts mehr umwerfen.
+
+export const ANSICHTEN = ["auto", "links-rechts", "rechts-links", "oben-unten", "unten-oben"];
+
+export const ANSICHT_LABEL = {
+  auto: "automatisch",
+  "links-rechts": "links/rechts",
+  "rechts-links": "rechts/links",
+  "oben-unten": "oben/unten",
+  "unten-oben": "unten/oben",
+};
+
+/** Ansicht → Parameter der Tafel-Adresse (`?spiegel=1`, `?anordnung=`). */
+const ANSICHT_PARAMETER = {
+  auto: { spiegel: false, anordnung: "auto" },
+  "links-rechts": { spiegel: false, anordnung: "nebeneinander" },
+  "rechts-links": { spiegel: true, anordnung: "nebeneinander" },
+  "oben-unten": { spiegel: true, anordnung: "uebereinander" },
+  "unten-oben": { spiegel: false, anordnung: "uebereinander" },
+};
+
+/** @param {unknown} roh Gemerkter Wert — alles Unbekannte gilt als `auto`. */
+export function ansichtAusWert(roh) {
+  return typeof roh === "string" && ANSICHTEN.includes(roh) ? roh : "auto";
+}
+
+/**
+ * @param {unknown} ansicht
+ * @returns {{spiegel:boolean, anordnung:"auto"|"nebeneinander"|"uebereinander"}}
+ */
+export function ansichtParameter(ansicht) {
+  const p = ANSICHT_PARAMETER[ansichtAusWert(ansicht)];
+  return { spiegel: p.spiegel, anordnung: p.anordnung };
+}
+
+/**
+ * Umkehrung von {@link ansichtParameter} — für die einmalige Übernahme der
+ * bis v0.9.288 getrennt gemerkten Schlüssel (Spiegel-Häkchen + Anordnung).
+ * `auto + gespiegelt` fällt auf `auto` zurück (Kombination entfällt).
+ * @param {unknown} spiegel `true` oder `"1"` gilt als gespiegelt.
+ * @param {unknown} anordnung
+ */
+export function ansichtAusParametern(spiegel, anordnung) {
+  const sp = spiegel === true || spiegel === "1";
+  for (const a of ANSICHTEN) {
+    const p = ANSICHT_PARAMETER[a];
+    if (p.anordnung === anordnung && p.spiegel === sp) return a;
+  }
+  return "auto";
+}
+
+/** Reihum; Unbekanntes zählt als `auto` und landet bei der ersten Hand-Ansicht. */
+export function naechsteAnsicht(ansicht) {
+  const i = ANSICHTEN.indexOf(ansichtAusWert(ansicht));
+  return ANSICHTEN[(i + 1) % ANSICHTEN.length];
+}
