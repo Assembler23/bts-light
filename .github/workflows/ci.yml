@@ -179,6 +179,12 @@ jobs:
       - name: Anzeige-Hülle Ziel-Allowlist (JS)
         run: node scripts/test-anzeige-ziel.mjs
 
+      # Akkustand am Tablet: Quellen-Reihenfolge (Kiosk-Brücke vor Web-API),
+      # Schwellen, „kein Wert" darf nie als 0 % erscheinen — ein Tablet, das
+      # fälschlich „kritisch" meldet, wird im Turnier unnötig getauscht.
+      - name: Akkustand am Tablet (JS)
+        run: node scripts/test-akku.mjs
+
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
       # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter

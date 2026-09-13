@@ -122,6 +122,12 @@
     }
     .event-label { color: var(--muted); font-size: 1rem; font-weight: 600; }
     .conn { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--muted); }
+    /* Akkustand in der Kopfzeile (Spec-Erweiterung 13.09.2026): schlicht,
+       ohne Animation — die Anzeige darf selbst nicht am Akku zehren. Unter
+       20 % orange, unter 10 % rot (Schwellen aus src/io/akku.mjs). */
+    .akku { font-size: .8rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .akku.niedrig { color: #b45309; font-weight: 800; }
+    .akku.kritisch { color: #dc2626; font-weight: 800; }
     .dot { width: .7rem; height: .7rem; border-radius: 50%; background: #94a3b8; }
     .dot.ok { background: #16a34a; }
     .dot.bad { background: #dc2626; }
@@ -751,6 +757,7 @@
       aria-label="Einstellungen"
       title="Einstellungen (PIN)"
     >⚙</button>
+    <span class="akku" id="akku" hidden title="Akkustand des Tablets"></span>
     <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
   </header>
 
@@ -1459,6 +1466,7 @@ let cardsMatchId = null;
 const els = {
   eventLabel: document.getElementById('event-label'),
   connDot: document.getElementById('conn-dot'),
+  akku: document.getElementById('akku'),
   connText: document.getElementById('conn-text'),
   emptyView: document.getElementById('empty-view'),
   playView: document.getElementById('play-view'),
@@ -1868,10 +1876,83 @@ function sendScoreUpdate() {
 }
 
 // ─────────────────────────────── Akkustand ────────────────────────────
-// Zwei Quellen: 1) Fully-Kiosk-JS-Interface (funktioniert über HTTP, der
-// eigentliche Weg auf den Fire-Tablets), 2) Web Battery Status API als
-// Fallback (nur Android/Chrome + secure context/HTTPS; über HTTP-LAN meist
-// nicht vorhanden — darum braucht es Fully).
+// Zwei Quellen (Reihenfolge in `akkuBeobachten`): 1) Brücke der Kiosk-App
+// (`window.fully`, funktioniert über http — der eigentliche Weg auf den
+// Fire-Tablets), 2) Web Battery Status API (nur Android/Chrome im Secure
+// Context). Jeder Stand geht an ZWEI Stellen: in die eigene Kopfzeile (seit
+// 13.09.2026 — im Kiosk fehlt die Android-Statusleiste) und als
+// `battery`-Frame an den Host (TabletPanel). Eine Quelle, ein Takt.
+//
+// ── Inline-Kopie von src/io/akku.mjs (Test scripts/test-akku.mjs) —
+//    Änderungen dort und hier gemeinsam ──
+const AKKU_NIEDRIG = 20;
+const AKKU_KRITISCH = 10;
+const AKKU_TAKT_MS = 60000;
+function prozent(v) {
+  // `Number(null)` wäre 0 — „kein Wert" darf aber nicht „leer" heißen.
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+function akkuStufe(percent) {
+  const p = prozent(percent);
+  if (p === null) return null;
+  if (p < AKKU_KRITISCH) return "kritisch";
+  if (p < AKKU_NIEDRIG) return "niedrig";
+  return "ok";
+}
+function akkuText(percent, charging) {
+  const p = prozent(percent);
+  if (p === null) return "";
+  return (charging ? "⚡ " : "🔋 ") + p + " %";
+}
+function akkuAusFully(fully) {
+  if (!fully || typeof fully.getBatteryLevel !== "function") return null;
+  let lvl;
+  try { lvl = Number(fully.getBatteryLevel()); } catch (e) { return null; }
+  if (!Number.isFinite(lvl) || lvl < 0) return null;
+  let charging = false;
+  if (typeof fully.isPlugged === "function") {
+    try { charging = !!fully.isPlugged(); } catch (e) { charging = false; }
+  }
+  return { percent: prozent(lvl), charging };
+}
+function akkuAusWebBattery(bat) {
+  if (!bat) return null;
+  const p = prozent(Number(bat.level) * 100);
+  if (p === null) return null;
+  return { percent: p, charging: !!bat.charging };
+}
+function akkuBeobachten(win, melde) {
+  const fully = win.fully;
+  if (fully && typeof fully.getBatteryLevel === "function") {
+    const lies = () => { const a = akkuAusFully(fully); if (a) melde(a); };
+    lies();
+    const t = win.setInterval(lies, AKKU_TAKT_MS);
+    return () => win.clearInterval(t);
+  }
+  const nav = win.navigator;
+  if (nav && typeof nav.getBattery === "function") {
+    let aktiv = true;
+    let bat = null;
+    const lies = () => { if (!aktiv) return; const a = akkuAusWebBattery(bat); if (a) melde(a); };
+    let p;
+    try { p = nav.getBattery(); } catch (e) { return null; }
+    Promise.resolve(p).then((b) => {
+      bat = b;
+      b.addEventListener("levelchange", lies);
+      b.addEventListener("chargingchange", lies);
+      lies();
+    }).catch(() => { /* nicht verfügbar – Anzeige bleibt stumm */ });
+    return () => { aktiv = false; };
+  }
+  return null;
+}
+// ── Ende Inline-Kopie ──
+
+// Letzter Stand — wird beim (Re-)Connect erneut an den Host gemeldet.
+let letzterAkku = null;
 let sendBattery = null;
 function sendBatteryMsg(percent, charging) {
   if (ws && ws.readyState === WebSocket.OPEN && Number.isFinite(percent)) {
@@ -1882,6 +1963,15 @@ function sendBatteryMsg(percent, charging) {
     }));
   }
 }
+// Kopfzeile: Text + Stufe als Klasse; ohne Wert bleibt das Feld versteckt.
+function renderAkku(a) {
+  const text = a ? akkuText(a.percent, a.charging) : '';
+  els.akku.hidden = !text;
+  els.akku.textContent = text;
+  const stufe = a ? akkuStufe(a.percent) : null;
+  els.akku.classList.toggle('niedrig', stufe === 'niedrig');
+  els.akku.classList.toggle('kritisch', stufe === 'kritisch');
+}
 function setupBattery() {
   const hasFully = typeof window.fully !== 'undefined'
     && typeof window.fully.getBatteryLevel === 'function';
@@ -1890,32 +1980,13 @@ function setupBattery() {
     hasGetBattery: !!navigator.getBattery,
     secureContext: window.isSecureContext === true,
   });
-
-  // 1) Fully Kiosk: nativer Bridge, klappt auch über HTTP. Voraussetzung am
-  //    Tablet: Fully → „JavaScript Interface aktivieren".
-  if (hasFully) {
-    sendBattery = () => {
-      try {
-        const lvl = Number(window.fully.getBatteryLevel());
-        let charging = false;
-        try { charging = !!window.fully.isPlugged(); } catch (e) { /* optional */ }
-        if (Number.isFinite(lvl) && lvl >= 0) sendBatteryMsg(lvl, charging);
-      } catch (e) { tlog('warn', 'battery_fully_failed', String(e)); }
-    };
-    sendBattery();
-    setInterval(sendBattery, 60000); // alle 60 s
-    return;
-  }
-
-  // 2) Fallback: Web Battery Status API.
-  if (!navigator.getBattery) return;
-  navigator.getBattery().then((bat) => {
-    sendBattery = () => sendBatteryMsg(bat.level * 100, bat.charging);
-    bat.addEventListener('levelchange', sendBattery);
-    bat.addEventListener('chargingchange', sendBattery);
-    sendBattery();
-    setInterval(sendBattery, 120000);
-  }).catch(() => { /* nicht verfügbar – Feature bleibt stumm */ });
+  const quelle = akkuBeobachten(window, (a) => {
+    letzterAkku = a;
+    renderAkku(a);
+    sendBatteryMsg(a.percent, a.charging);
+  });
+  if (!quelle) return; // keine Quelle (iPad, LAN-http ohne Kiosk-App) → stumm
+  sendBattery = () => { if (letzterAkku) sendBatteryMsg(letzterAkku.percent, letzterAkku.charging); };
 }
 
 // ─────────────────────────────── BWF-Regel-Logik ──────────────────────

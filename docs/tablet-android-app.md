@@ -36,6 +36,10 @@ bleibt an, auch ohne Ladekabel-Wake-Lock des Browsers. Der Akku wird wie
 bei Fully Kiosk über ein eingeblendetes `fully`-Objekt gemeldet
 (`getBatteryLevel()`, `isPlugged()`) — der Akku-Badge in der
 bts-light-Übersicht funktioniert damit ohne jede Änderung an `tablet.html`.
+Seit v0.9.290 liest dieselbe Brücke auch die **Akku-Anzeige am Tablet
+selbst** (Kopfzeile beim Zählen, Feldwahl, Anzeige-Hülle; siehe
+[tablet.md](tablet.md#akkustand-am-tablet-seit-v09290)) — im Kiosk gibt es
+ja keine Statusleiste mehr.
 Das Geräte-Log der App landet wie bei den Pi-Monitoren beim Turnier-PC
 (`pi-logs/fire-<ANDROID_ID>.log`) und von dort in der Cloud.
 
