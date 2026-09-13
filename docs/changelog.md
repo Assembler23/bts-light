@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.288
+
+- **Turnierleitung nennt die Klasse wieder — auch bei „HD-A"-Namen.** Bei
+  der BBB-Rangliste am 12.09.2026 stand in der Turnierleitungs-Oberfläche
+  nur „HD" statt „HD-A": BTP führt dort Events und K.-o.-Draws als „HD-A",
+  „DD-B", „MX-C" — Disziplin und Klasse mit Bindestrich in einem Wort. Die
+  Klassen-Erkennung (`model::class_label`) trennte nur an Leerzeichen und
+  fand darin kein Kürzel. Jetzt trennt sie auch am Bindestrich; betrifft
+  gleichermaßen die Sprachansage („Herrendoppel A"), die Spielzeiten-
+  Auswertung nach Konkurrenz und die Klassen-Kürzel im badhub-Push. Der
+  Schiedsrichterzettel hängt das Kürzel im Kopf nur noch an, wenn der
+  Draw-Name es nicht schon trägt — sonst stünde dort „HD-A A" (und schon
+  bisher „HE A A").
+
 ## v0.9.287
 
 - **Court-Monitore: Frist für den Stand-Abruf (Kopfzeilen 5 s, Rumpf
