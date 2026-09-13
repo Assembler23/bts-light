@@ -12,8 +12,10 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   unten/oben. Das fasst „Seiten spiegeln" und „Anordnung" zu **einem**
   Zyklus zusammen; ein kurzes Etikett nennt die neue Ansicht. Im Zahnrad-
   Menü ersetzt der Eintrag „Ansicht: …" die beiden bisherigen Einträge.
-  Bestehende Geräteeinstellungen werden einmalig übernommen („automatisch +
-  gespiegelt" entfällt und wird „automatisch"). Cloud-Anzeigen bekommen es
+  Bestehende Geräteeinstellungen werden einmalig übernommen; ein
+  gespiegeltes Gerät mit Automatik-Anordnung wird über seine Ausrichtung
+  auf „rechts/links" bzw. „oben/unten" gesetzt und bleibt so richtig herum
+  („automatisch + gespiegelt" gibt es nicht mehr). Cloud-Anzeigen bekommen es
   mit dem Relay-Redeploy, LAN mit dem Update.
 
 ## v0.9.288

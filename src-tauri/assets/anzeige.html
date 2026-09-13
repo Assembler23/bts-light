@@ -217,11 +217,13 @@
     const p = ANSICHT_PARAMETER[ansichtAusWert(ansicht)];
     return { spiegel: p.spiegel, anordnung: p.anordnung };
   }
-  function ansichtAusParametern(spiegel, anordnung) {
+  function ansichtAusParametern(spiegel, anordnung, hochformat) {
     const sp = spiegel === true || spiegel === "1";
+    const an = anordnung == null ? "auto" : anordnung;
+    if (an === "auto") return sp ? (hochformat ? "oben-unten" : "rechts-links") : "auto";
     for (const a of ANSICHTEN) {
       const p = ANSICHT_PARAMETER[a];
-      if (p.anordnung === anordnung && p.spiegel === sp) return a;
+      if (p.anordnung === an && p.spiegel === sp) return a;
     }
     return "auto";
   }
@@ -271,14 +273,17 @@
   );
   // Ansicht: neuer Schlüssel; fehlt er, einmalig aus den Alt-Schlüsseln
   // (Spiegel-Häkchen + Anordnung) übernehmen, damit ein eingerichtetes
-  // Tablet nach dem Update genauso aussieht wie davor.
+  // Tablet nach dem Update so aussieht wie davor. Ein gespiegeltes Tablet
+  // mit Automatik-Anordnung (der Regelfall) wird dabei über die jetzige
+  // Ausrichtung auf eine feste gespiegelte Ansicht gesetzt.
   var ansicht = "auto";
   try {
     var gemerkteAnsicht = localStorage.getItem(ANSICHT_KEY);
     if (gemerkteAnsicht != null) {
       ansicht = ansichtAusWert(gemerkteAnsicht);
     } else {
-      ansicht = ansichtAusParametern(localStorage.getItem(SPIEGEL_KEY_ALT), localStorage.getItem(ANORDNUNG_KEY_ALT) || "auto");
+      var hochformat = window.matchMedia ? window.matchMedia("(orientation: portrait)").matches : window.innerHeight > window.innerWidth;
+      ansicht = ansichtAusParametern(localStorage.getItem(SPIEGEL_KEY_ALT), localStorage.getItem(ANORDNUNG_KEY_ALT), hochformat);
       localStorage.setItem(ANSICHT_KEY, ansicht);
       localStorage.removeItem(SPIEGEL_KEY_ALT);
       localStorage.removeItem(ANORDNUNG_KEY_ALT);
@@ -433,10 +438,18 @@
   // ── Aktionen ─────────────────────────────────────────────────────────────
   // Ansicht reihum: automatisch → links/rechts → rechts/links → oben/unten
   // → unten/oben → … Merken, iframe mit den neuen Parametern neu laden.
+  // Sperrfenster: Nach dem Schalten lädt das iframe neu; ein zweiter Tipp
+  // in dieser Zeit (Doppeltipp) soll nicht gleich zwei Stufen weiterspringen.
+  var ANSICHT_SPERRE_MS = 500;
+  var zuletztGeschaltetMs = 0;
   function ansichtWeiter() {
+    var jetzt = Date.now();
+    if (jetzt - zuletztGeschaltetMs < ANSICHT_SPERRE_MS) return;
+    zuletztGeschaltetMs = jetzt;
     ansicht = naechsteAnsicht(ansicht);
     try { localStorage.setItem(ANSICHT_KEY, ansicht); } catch (e) {}
     zeige();
+    zeigeAnsichtEtikett();
   }
   var etikettTimer = null;
   function zeigeAnsichtEtikett() {
@@ -446,6 +459,7 @@
     etikettTimer = setTimeout(function () { els.ansichtEtikett.classList.remove("sichtbar"); }, 1500);
   }
   els.ansicht.addEventListener("click", function () { schliesseMenue(); ansichtWeiter(); });
+
   // Tipp auf die Zahlen der Tafel (ohne PIN — schnelles Umschalten ist der
   // Zweck). Nur Nachrichten aus dem EIGENEN iframe derselben Herkunft
   // zählen; alles andere (fremde Fenster, andere Typen) wird ignoriert.
@@ -454,7 +468,6 @@
     if (!e.data || e.data.typ !== NACHRICHT_NAECHSTE_ANSICHT) return;
     if (ziel.layout !== "tafel") return;
     ansichtWeiter();
-    zeigeAnsichtEtikett();
   });
   // Zum Zählen: erst fragen, ob das Feld belegt ist. `occupied` fehlt bei
   // einem älteren Relay → unbekannt → ohne Warnung (wie bisher am Tablet).

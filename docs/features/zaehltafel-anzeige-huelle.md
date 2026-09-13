@@ -161,7 +161,8 @@ Erfolgskriterien beim nächsten Turnier:
   `__TABLET_PIN__`, Cloud immer `0000` wie beim Tablet) → Menü:
   1. Anzeige wählen: Zähltafel · Feld-Monitor · Hallen-Übersicht · In Vorbereitung.
   2. Feld wechseln (Liste aus `/courts`; nur bei `tafel`/`feld` sichtbar).
-  3. Seiten spiegeln (nur bei `tafel`; gemerkt je Gerät in `localStorage`).
+  3. Seiten spiegeln (nur bei `tafel`; gemerkt je Gerät in `localStorage`) — seit v0.9.289
+     zusammen mit der Anordnung **ein** Eintrag „Ansicht: …" (s. Erweiterung 13.09.2026).
   4. Zum Zählen wechseln → vorher `/courts` abfragen; ist das Feld `occupied`, erscheint ein
      Warnhinweis mit Bestätigung („Auf diesem Feld zählt bereits ein Gerät …"), sonst direkt
      `court/{id}`. Die Relay-Feldliste liefert `occupied` seit v0.9.275; fehlt das Feld
@@ -225,8 +226,9 @@ Anzeige-Hülle:
       → Zähltafel; `court=abc` → Menü mit Feldwahl. Kein anderer Pfad ist über die Adresse
       erreichbar (Testfälle mit `../`, absoluten URLs, `javascript:`).
 - [ ] Zahnrad → falsche PIN öffnet nichts; richtige PIN öffnet das Menü mit den sieben Punkten,
-      „Feld wechseln" und „Seiten spiegeln" nur bei Feld-Layouts.
-- [ ] „Seiten spiegeln" wirkt sofort und überlebt Neuladen und App-Neustart (Gerät).
+      „Feld wechseln" und „Seiten spiegeln" nur bei Feld-Layouts (seit v0.9.289: „Ansicht").
+- [ ] „Seiten spiegeln" wirkt sofort und überlebt Neuladen und App-Neustart (Gerät)
+      (seit v0.9.289 als Stufe der „Ansicht").
 - [ ] „Zum Zählen wechseln" auf einem belegten Feld zeigt eine Warnung; erst die Bestätigung
       öffnet `court/{id}`. Auf einem freien Feld öffnet es direkt.
 - [ ] Hülle und Tafel öffnen nie `/ws`; das zählende Tablet bleibt Slot-Halter (Server-Log ohne
@@ -314,7 +316,9 @@ nebeneinander sagen ihm nichts.
   Anzeige-Hülle. Menüpunkt „Anordnung: automatisch / nebeneinander
   (links–rechts) / übereinander (vorn–hinten)" reihum, nur beim Layout
   Zähltafel, gemerkt je Gerät (`localStorage`, `badhub.anzeige.anordnung`)
-  wie die Spiegelung. Die Allowlist in `anzeigeZiel.zielPfad` lässt nur die
+  wie die Spiegelung — bis v0.9.288; seit v0.9.289 stecken beide im
+  Schlüssel `badhub.anzeige.ansicht` (s. Erweiterung 13.09.2026).
+  Die Allowlist in `anzeigeZiel.zielPfad` lässt nur die
   beiden Werte in die Adresse; `auto` und Unfug schreiben nichts.
 - Gerätemodus (TV per Zuweisung): Query wird wie `spiegel` ignoriert, es gilt
   `auto` — ein hochkant montierter TV bekommt so trotzdem die passende Anordnung.
@@ -443,7 +447,12 @@ nichts — dort gab es auch bisher weder Spiegel noch Hand-Anordnung.
 
 **Migration:** Die Alt-Schlüssel `badhub.anzeige.spiegel` und
 `badhub.anzeige.anordnung` werden beim ersten Start einmalig in die Ansicht
-übersetzt (`ansichtAusParametern`) und gelöscht.
+übersetzt (`ansichtAusParametern`) und gelöscht. Der Regelfall eines
+gespiegelten Tablets ist „Häkchen an, Anordnung nie angefasst" (= `auto`) —
+diese Kombination gibt es nicht mehr, der Spiegel bleibt aber erhalten: Die
+Hülle zurrt ihn über die jetzige Ausrichtung fest (Hochformat →
+„oben/unten", sonst „rechts/links"). Ein solches Tablet folgt danach also
+nicht mehr der Drehung, steht aber weiter richtig herum.
 
 **Kanonische Fassung** in `src/io/anzeigeZiel.mjs` (+ Inline-Kopie in
 `anzeige.html`, Test `scripts/test-anzeige-ziel.mjs`): `ANSICHTEN`,
@@ -452,7 +461,9 @@ nichts — dort gab es auch bisher weder Spiegel noch Hand-Anordnung.
 bekommt die Parameter der Ansicht.
 
 **Bewusst hingenommen:** Zuschauer können die Ansicht verstellen — harmlos
-und mit einem weiteren Tipp behoben. Ohne laufendes Spiel (Leer-Ansicht)
+und mit einem weiteren Tipp behoben. Zwei Tipps innerhalb von 500 ms zählen
+als einer (Sperrfenster in der Hülle; `.punkte` trägt
+`touch-action: manipulation` gegen den Doppeltipp-Zoom auf iPadOS). Ohne laufendes Spiel (Leer-Ansicht)
 sind keine Zahlen da; dann bleibt der Menü-Eintrag.
 
 **Akzeptanz (Browsertest gegen Mock 13.09.2026):**
@@ -462,6 +473,9 @@ sind keine Zahlen da; dann bleibt der Menü-Eintrag.
 - [x] Menü-Eintrag zeigt die aktuelle Stufe und schaltet dieselbe Folge.
 - [x] Alt-Schlüssel (`spiegel=1`, `anordnung=uebereinander`) → „oben/unten",
       Alt-Schlüssel danach gelöscht.
+- [x] Alt-Schlüssel nur `spiegel=1` (Querformat) → „rechts/links" — der
+      Spiegel überlebt das Update.
+- [x] Zwei Tipps innerhalb 500 ms schalten nur eine Stufe.
 - [ ] Feldtest am Tablet.
 
 ## Offene Fragen / Annahmen

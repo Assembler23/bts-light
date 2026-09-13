@@ -712,8 +712,10 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
   **hinter dem Feld**. Schnellster Weg: **Tipp auf die Zahlen** der Tafel
   schaltet eine Stufe weiter, ohne PIN, und blendet kurz die neue Ansicht
   ein — der Menü-Eintrag „Ansicht: …" macht dasselbe. „Automatisch +
-  gespiegelt" gibt es bewusst nicht mehr; ein so eingerichtetes Gerät steht
-  nach dem Update auf „automatisch".
+  gespiegelt" gibt es bewusst nicht mehr; ein so eingerichtetes Gerät wird
+  beim Update über seine Ausrichtung auf „rechts/links" (quer) bzw.
+  „oben/unten" (hoch) gesetzt — es steht also weiter richtig herum, folgt
+  aber nicht mehr der Drehung.
 - **Zum Zählen wechseln** fragt vorher die Feldliste: Ist das Feld belegt,
   kommt eine Warnung mit Bestätigung — die Zähl-Seite würde bei einem
   abgetauchten Tablet sonst still übernehmen (ADR 0017). Ein älterer Relay

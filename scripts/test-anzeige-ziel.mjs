@@ -90,12 +90,20 @@ ok("nach Unfug kommt links/rechts", naechsteAnsicht("x"), "links-rechts");
 
 // Migration der alten Schlüssel (Spiegel-Häkchen + Anordnung) — einmalig.
 ok("alt: aus + auto → auto", ansichtAusParametern(false, "auto"), "auto");
-ok("alt: an + auto → auto (Kombination entfällt)", ansichtAusParametern(true, "auto"), "auto");
+// „an + auto" war der Regelfall eines gespiegelten Tablets (Spiegel-Häkchen,
+// Anordnung nie angefasst). Die Kombination entfällt — der Spiegel bleibt
+// aber erhalten und wird über die Ausrichtung des Geräts festgezurrt.
+ok("alt: an + auto im Querformat → rechts/links", ansichtAusParametern(true, "auto", false), "rechts-links");
+ok("alt: an + auto im Hochformat → oben/unten", ansichtAusParametern(true, "auto", true), "oben-unten");
+ok("alt: an + auto ohne Ausrichtung → rechts/links (Querformat ist der Normalfall)", ansichtAusParametern(true, "auto"), "rechts-links");
+ok("alt: an + \"1\"-String zählt als an", ansichtAusParametern("1", "auto", false), "rechts-links");
+ok("alt: an + fehlende Anordnung wie auto", ansichtAusParametern(true, null, true), "oben-unten");
+ok("alt: aus + fehlende Anordnung → auto", ansichtAusParametern(false, null), "auto");
 ok("alt: aus + nebeneinander → links/rechts", ansichtAusParametern(false, "nebeneinander"), "links-rechts");
 ok("alt: an + nebeneinander → rechts/links", ansichtAusParametern(true, "nebeneinander"), "rechts-links");
 ok("alt: aus + übereinander → unten/oben", ansichtAusParametern(false, "uebereinander"), "unten-oben");
 ok("alt: an + übereinander → oben/unten", ansichtAusParametern(true, "uebereinander"), "oben-unten");
-ok("alt: Unfug → auto", ansichtAusParametern(true, "x"), "auto");
+ok("alt: Unfug in der Anordnung → auto, auch gespiegelt", ansichtAusParametern(true, "x"), "auto");
 ok("Hin und zurück ist eindeutig", ANSICHTEN.every((a) => { const p = ansichtParameter(a); return ansichtAusParametern(p.spiegel, p.anordnung) === a; }), true);
 
 // Der Pfadbau versteht die Parameter jeder Ansicht.

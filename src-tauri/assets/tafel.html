@@ -32,7 +32,9 @@
        läuft `min(40vw, 60vmin)` sonst im Hochformat fast bis an die
        Kachelkante — kaum Reserve. Schmalere Ränder geben jeder Kachel
        48vw statt 46,5vw. */
-    .punkte { display: flex; flex-direction: row; align-items: stretch;
+    /* touch-action: In der Anzeige-Hülle schaltet ein Tipp die Ansicht —
+       ohne `manipulation` würde iPadOS beim zweiten schnellen Tipp zoomen. */
+    .punkte { touch-action: manipulation; display: flex; flex-direction: row; align-items: stretch;
       justify-content: center; gap: 2vw; width: 100vw; padding: 0 1vw;
       box-sizing: border-box; }
     .seite { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
@@ -490,16 +492,22 @@
   // Tipp auf die Zahlen → nächste Ansicht (Spiegelung + Anordnung reihum).
   // Die Tafel selbst kennt nur ihre Adresse; geschaltet wird in der
   // Anzeige-Hülle, die das iframe mit den neuen Parametern neu lädt. Darum
-  // nur eine Nachricht an das Elternfenster derselben Herkunft — und nur,
-  // wenn es eines gibt (in der Hülle) und die Tafel nicht im Gerätemodus
-  // läuft (dort gibt es weder Spiegel noch Hand-Anordnung, s. o.).
+  // nur eine Nachricht an das Elternfenster — und nur, wenn es eines
+  // DERSELBEN Herkunft gibt (die Hülle; eine fremde Seite, die die Tafel
+  // einbettet, bekommt weder Zeiger noch Nachricht) und die Tafel nicht im
+  // Gerätemodus läuft (dort gibt es weder Spiegel noch Hand-Anordnung, s. o.).
   var NACHRICHT_NAECHSTE_ANSICHT = "bts-anzeige:naechste-ansicht";
+  function inEigenerHuelle() {
+    if (window.parent === window) return false;
+    // Der Zugriff auf `location` eines fremden Fensters wirft → nicht unsere.
+    try { return window.parent.location.origin === location.origin; }
+    catch (e) { return false; }
+  }
   var elPunkte = document.querySelector("#tafel-view .punkte");
-  if (elPunkte && MODE !== "device" && window.parent !== window) {
+  if (elPunkte && MODE !== "device" && inEigenerHuelle()) {
     elPunkte.style.cursor = "pointer";
     elPunkte.addEventListener("click", function () {
-      try { window.parent.postMessage({ typ: NACHRICHT_NAECHSTE_ANSICHT }, location.origin); }
-      catch (e) { /* fremde Herkunft o. Ä. → kein Umschalten, kein Absturz */ }
+      window.parent.postMessage({ typ: NACHRICHT_NAECHSTE_ANSICHT }, location.origin);
     });
   }
 

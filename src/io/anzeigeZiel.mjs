@@ -111,15 +111,21 @@ export function ansichtParameter(ansicht) {
 /**
  * Umkehrung von {@link ansichtParameter} — für die einmalige Übernahme der
  * bis v0.9.288 getrennt gemerkten Schlüssel (Spiegel-Häkchen + Anordnung).
- * `auto + gespiegelt` fällt auf `auto` zurück (Kombination entfällt).
+ * `auto + gespiegelt` war der Regelfall eines gespiegelten Tablets (das
+ * Häkchen gesetzt, die Anordnung nie angefasst). Die Kombination entfällt,
+ * der Spiegel bleibt aber: Er wird über die Ausrichtung des Geräts zur
+ * festen Ansicht (Hochformat → `oben-unten`, sonst `rechts-links`).
  * @param {unknown} spiegel `true` oder `"1"` gilt als gespiegelt.
- * @param {unknown} anordnung
+ * @param {unknown} anordnung Fehlend gilt als `auto`.
+ * @param {boolean} [hochformat] Gerät steht hoch (Standard: nein).
  */
-export function ansichtAusParametern(spiegel, anordnung) {
+export function ansichtAusParametern(spiegel, anordnung, hochformat) {
   const sp = spiegel === true || spiegel === "1";
+  const an = anordnung == null ? "auto" : anordnung;
+  if (an === "auto") return sp ? (hochformat ? "oben-unten" : "rechts-links") : "auto";
   for (const a of ANSICHTEN) {
     const p = ANSICHT_PARAMETER[a];
-    if (p.anordnung === anordnung && p.spiegel === sp) return a;
+    if (p.anordnung === an && p.spiegel === sp) return a;
   }
   return "auto";
 }
