@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.289
+## v0.9.292
 
 - **Zähltafel am Tablet: Ansicht per Tipp auf die Zahlen.** In der
   Anzeige-Hülle schaltet ein Tipp auf die Punktzahlen die Ansicht reihum —
@@ -17,6 +17,35 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   auf „rechts/links" bzw. „oben/unten" gesetzt und bleibt so richtig herum
   („automatisch + gespiegelt" gibt es nicht mehr). Cloud-Anzeigen bekommen es
   mit dem Relay-Redeploy, LAN mit dem Update.
+
+## v0.9.291
+
+- **Court-Monitore: kein falscher `stillstand` mehr in Spielpausen.** Beim
+  Turnier am 12./13.09.2026 meldete jeder Pi-Monitor ~50-mal am Tag
+  `stillstand keine_abrufe` — im exakten 10-Minuten-Raster, mit gesundem
+  Push-Kanal, geglücktem Abruf und frischem Herzschlag. Kein Hänger, sondern
+  Buchführung: `monitor.html` zählte ein `304` „nichts Neues" weder als
+  Abruf noch als bestätigten Stand (die Feld-Übersicht tat das schon seit
+  v0.9.255), und einen vollen `200` erzwingt der Refetch-Cap bei gesundem
+  Kanal nur alle 10 Minuten. Jede Meldung löste einen Log-Upload aus, und
+  ein echter Stillstand wäre im Rauschen unsichtbar geblieben. Der
+  Court-Monitor verbucht das `304` jetzt wie die Übersicht; der Wächter-Test
+  prüft die Buchführung beider Seiten im Quelltext.
+- **PC-Log: Hauptfeld-Filter der Check-In-Liste meldet sich nur noch bei
+  Änderung.** Die Zeile „Meldungen ausserhalb des Hauptfelds … gefiltert"
+  stand mit jedem BTP-Abruf alle 5 s im Log — am 12.09.2026 waren das
+  10 000 von 17 000 Zeilen. Jetzt erscheint sie, wenn sich die Zahl ändert
+  (mit dem alten Wert), auch beim Rückgang auf 0.
+- **Tablet: Korrektur nach festem Ergebnis gesperrt.** Auf Feld 11 war am
+  12.09.2026 das Ergebnis gesendet und in BTP fest; trotzdem ließ sich
+  „Korrektur — Match wieder öffnen" drücken, und danach schluckte das
+  Finalisiert-Gate 23-mal „Ergebnis übermitteln" — ohne ein Wort auf dem
+  Schirm. Jetzt sperrt die Beendet-Ansicht bei festem Ergebnis beide Knöpfe
+  und sagt „Ergebnis steht in BTP fest — Korrektur nur über die
+  Turnierleitung"; `reopen()` hält das Gate zusätzlich selbst. Trifft das
+  Finalisiert-Frame ein, während das eigene Ergebnis noch im Retry ist,
+  lässt das Tablet den Sendeauftrag los (BTP hat das Ergebnis) — vorher
+  blieb er stehen und blockte beim nächsten Spiel still den Sende-Knopf.
 
 ## v0.9.288
 

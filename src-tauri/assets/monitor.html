@@ -1035,6 +1035,7 @@
         // steht: Der Poll läuft weiter, aber nichts kommt mehr durch. Der
         // Zähler ist die aussagekräftigste Zahl im Stillstands-Bericht.
         verworfeneStaende++;
+        letzterStandVerworfen = true;
         return;
       }
       if (state.seq) lastSeqByCourt[feld] = state.seq;
@@ -1042,6 +1043,7 @@
     // Ab hier wird der Stand wirklich übernommen — der Beleg dafür, dass die
     // Strecke bis zum Schirm durchlässig ist.
     letzterStandMs = Date.now();
+    letzterStandVerworfen = false;
     lastState = state;
     // Feld-Identität für den Nudge-Filter nachziehen (Geräte-Monitor kennt sie
     // erst hier; bei Reassignment wechselt sie). 0 = unbelegt → ignorieren.
@@ -1150,8 +1152,15 @@
   var letzterAbrufMs = 0;     // Beginn des letzten losgeschickten Abrufs
   // ── Stillstands-Wächter (siehe `lagePruefen` unten) ──────────────────
   var letzterAbrufOkMs = 0;   // letzter Abruf, der ohne Fehler zurückkam
-  var letzterStandMs = 0;     // letzter angewendete Stand
+  var letzterStandMs = 0;     // letzter angewendete ODER bestätigte Stand
   var verworfeneStaende = 0;  // wie oft der seq-Guard eine Antwort abwies
+  var bestaetigungen = 0;     // 304 „nichts Neues" seit dem Laden
+  // Wurde der letzte volle Stand vom seq-Guard verworfen? Dann trägt
+  // `lastEtag` die Marke eines nie gezeigten Standes, und ein folgendes 304
+  // bestätigt NICHT das Gezeigte — es darf `letzterStandMs` nicht stempeln,
+  // sonst wäre `verworfen` am Court-Monitor nie mehr feststellbar
+  // (Review-Fund 15.09.2026).
+  var letzterStandVerworfen = false;
   var seitStartMs = Date.now();
   var gemeldeteStillstandsArt = null;
   function pushGesund(z, nowMs) {
@@ -1373,17 +1382,24 @@
         // Stand bis zur nächsten Änderung.
         var state = paket === null ? null : paket.state;
         if (paket && paket.etag) { lastEtag = paket.etag; letzterVollerAbrufMs = Date.now(); }
+        abrufGeglueckt();
         if (state === null) {
-          if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
-          lastFetchOk = true; fetchFehler = 0;
-          els.offline.classList.remove("show");
+          // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
+          // nichts zu rendern. Für den Stillstands-Wächter zählt das wie ein
+          // angewendeter Stand: Der Server bestätigt gerade ausdrücklich,
+          // dass das Gezeigte stimmt (Spec monitor-livestand-push, S8).
+          // Ohne diese Zeile meldete jeder Court-Monitor in jeder Spielpause
+          // `keine_abrufe` — bei gesundem Push-Kanal kommt ein voller 200
+          // nur alle 10 min (Refetch-Cap), und 60 s danach schlug der
+          // Wächter an (Turnier 12./13.09.2026: ~50 Fehlalarme je Gerät
+          // und Tag, jeder mit Log-Upload). Ausnahme: Wurde der letzte volle
+          // Stand verworfen, bestätigt das 304 einen nie gezeigten Stand —
+          // dann bleibt der Stempel aus, damit `verworfen` auffliegt.
+          if (!letzterStandVerworfen) letzterStandMs = Date.now();
+          bestaetigungen++;
           pollDone();
           return;
         }
-        if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
-        lastFetchOk = true; fetchFehler = 0;
-        letzterAbrufOkMs = Date.now();
-        els.offline.classList.remove("show");
         applyState(state);
         clockFeed(state.serverNowMs);
         pollDone();
@@ -1403,6 +1419,17 @@
     if (refetchQueued) { refetchQueued = false; requestFetch(); }
   }
   var wasOffline = false; // Offline-Wechsel nur einmal loggen (nicht je Poll)
+
+  // Ein Abruf ist geglückt — Kopfzeilen UND Rumpf. Ein Ort für beide Zweige
+  // (304 und voller Stand), damit die Entwarnung nirgends vor dem Rumpf steht
+  // und der Stillstands-Wächter beide als Lebenszeichen zählt. Gleiche
+  // Funktion wie in `overview.html`.
+  function abrufGeglueckt() {
+    if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
+    lastFetchOk = true; fetchFehler = 0;
+    letzterAbrufOkMs = Date.now();
+    els.offline.classList.remove("show");
+  }
 
   // Fetch coalescen: höchstens ~1 Fetch je COALESCE_MS, egal wie viele Nudges
   // einschlagen. Nudge und In-Flight-Nachschlag laufen hierüber.
@@ -1466,6 +1493,7 @@
         art: lage.art,
         stillMs: lage.stillMs,
         verworfen: verworfeneStaende,
+        bestaetigungen: bestaetigungen,
         wsOpen: mwsOpen,
         frameAltMs: lastServerFrameAt ? jetzt - lastServerFrameAt : null,
         fetchOk: lastFetchOk,

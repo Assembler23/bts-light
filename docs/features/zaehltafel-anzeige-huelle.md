@@ -161,7 +161,7 @@ Erfolgskriterien beim nächsten Turnier:
   `__TABLET_PIN__`, Cloud immer `0000` wie beim Tablet) → Menü:
   1. Anzeige wählen: Zähltafel · Feld-Monitor · Hallen-Übersicht · In Vorbereitung.
   2. Feld wechseln (Liste aus `/courts`; nur bei `tafel`/`feld` sichtbar).
-  3. Seiten spiegeln (nur bei `tafel`; gemerkt je Gerät in `localStorage`) — seit v0.9.289
+  3. Seiten spiegeln (nur bei `tafel`; gemerkt je Gerät in `localStorage`) — seit v0.9.292
      zusammen mit der Anordnung **ein** Eintrag „Ansicht: …" (s. Erweiterung 13.09.2026).
   4. Zum Zählen wechseln → vorher `/courts` abfragen; ist das Feld `occupied`, erscheint ein
      Warnhinweis mit Bestätigung („Auf diesem Feld zählt bereits ein Gerät …"), sonst direkt
@@ -226,9 +226,9 @@ Anzeige-Hülle:
       → Zähltafel; `court=abc` → Menü mit Feldwahl. Kein anderer Pfad ist über die Adresse
       erreichbar (Testfälle mit `../`, absoluten URLs, `javascript:`).
 - [ ] Zahnrad → falsche PIN öffnet nichts; richtige PIN öffnet das Menü mit den sieben Punkten,
-      „Feld wechseln" und „Seiten spiegeln" nur bei Feld-Layouts (seit v0.9.289: „Ansicht").
+      „Feld wechseln" und „Seiten spiegeln" nur bei Feld-Layouts (seit v0.9.292: „Ansicht").
 - [ ] „Seiten spiegeln" wirkt sofort und überlebt Neuladen und App-Neustart (Gerät)
-      (seit v0.9.289 als Stufe der „Ansicht").
+      (seit v0.9.292 als Stufe der „Ansicht").
 - [ ] „Zum Zählen wechseln" auf einem belegten Feld zeigt eine Warnung; erst die Bestätigung
       öffnet `court/{id}`. Auf einem freien Feld öffnet es direkt.
 - [ ] Hülle und Tafel öffnen nie `/ws`; das zählende Tablet bleibt Slot-Halter (Server-Log ohne
@@ -316,7 +316,7 @@ nebeneinander sagen ihm nichts.
   Anzeige-Hülle. Menüpunkt „Anordnung: automatisch / nebeneinander
   (links–rechts) / übereinander (vorn–hinten)" reihum, nur beim Layout
   Zähltafel, gemerkt je Gerät (`localStorage`, `badhub.anzeige.anordnung`)
-  wie die Spiegelung — bis v0.9.288; seit v0.9.289 stecken beide im
+  wie die Spiegelung — bis v0.9.291; seit v0.9.292 stecken beide im
   Schlüssel `badhub.anzeige.ansicht` (s. Erweiterung 13.09.2026).
   Die Allowlist in `anzeigeZiel.zielPfad` lässt nur die
   beiden Werte in die Adresse; `auto` und Unfug schreiben nichts.

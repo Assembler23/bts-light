@@ -70,9 +70,27 @@ blockierte alle folgenden (Turnier 05./06.09.2026, siehe
 endet er als Fehler, wenn die Kopfzeilen nicht binnen 5 s da sind oder der
 Rumpf danach länger als 15 s braucht — im schlimmsten Fall also nach 20 s;
 im Monitor-Log erscheint dann `offline` mit anschließendem `online` statt
-eines minutenlangen `stillstand`. Ein `stillstand` mit `art=keine_abrufe`
-und `fetchOk=true` bei einer Seite ab v0.9.287 wäre daher ein **neuer**
-Befund.
+eines minutenlangen `stillstand`.
+
+**Fehlalarm bis v0.9.288 (Court-Monitor):** `monitor.html` zählte ein `304`
+weder als Abruf noch als bestätigten Stand — nur ein voller `200`. Bei
+gesundem Push-Kanal erzwingt der Refetch-Cap einen solchen aber nur alle
+10 Minuten; 60 s danach meldete jeder Court-Monitor `keine_abrufe` mit
+`fetchOk=true`, `wsOpen=true` und frischem Herzschlag (`frameAltMs` ≈ 10 s),
+neun Minuten später `stillstand_vorbei`, eine Minute darauf wieder
+`stillstand` — exakt im 10-Minuten-Raster, in jeder Spielpause. Beim Turnier
+am 12./13.09.2026 waren das ~50 Meldungen je Gerät und Tag, jede mit
+Log-Upload, und ein echter `keine_abrufe` wäre darin untergegangen. Seit
+v0.9.291 verbucht auch der Court-Monitor das `304` wie die Feld-Übersicht
+(`abrufGeglueckt()` + `letzterStandMs`); `scripts/test-standstill.mjs` prüft
+das im Quelltext beider Seiten. Eine Ausnahme bleibt: Hat der `seq`-Guard den
+letzten vollen Stand verworfen, trägt die Marke einen nie gezeigten Stand —
+dann stempelt das 304 den Stand **nicht**, damit `verworfen` weiterhin
+auffliegt. Die Zeile trägt seither wie bei der Übersicht die Zahl der
+`bestaetigungen`. Ein `stillstand` mit
+`art=keine_abrufe` und `fetchOk=true` ab v0.9.291 ist damit wieder ein
+**echter** Befund — vorher ist er mit hoher Wahrscheinlichkeit dieser
+Fehlalarm.
 
 ### Perf-Zeile der Anzeige-Strecke
 

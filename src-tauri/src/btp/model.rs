@@ -7,6 +7,7 @@
 //! `IsMatch = true`. Siehe `docs/btp_protocol.md`.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Serialize;
 
@@ -756,6 +757,34 @@ fn non_main_stage_entries(t: &[Node]) -> HashSet<i64> {
     raus
 }
 
+/// Zuletzt protokollierte Zahl gefilterter Meldungen — die Zeile erscheint
+/// nur, wenn sich die Zahl aendert (auch zurueck auf 0, denn dass der Filter
+/// nicht mehr greift, ist genauso eine Nachricht wie dass er greift).
+static HAUPTFELD_FILTER_GEMELDET: AtomicUsize = AtomicUsize::new(0);
+
+/// Meldet die Zahl der aus der Check-In-Liste gefilterten Meldungen, wenn sie
+/// sich seit der letzten Meldung geaendert hat.
+fn melde_hauptfeld_filter(gefiltert: usize) {
+    melde_hauptfeld_filter_mit(&HAUPTFELD_FILTER_GEMELDET, gefiltert);
+}
+
+/// Die Regel dahinter mit austauschbarem Merker, damit der Test nicht am
+/// prozessweiten Zaehler haengt (Tests laufen parallel). Liefert `true`, wenn
+/// eine Zeile geschrieben wurde.
+fn melde_hauptfeld_filter_mit(merker: &AtomicUsize, gefiltert: usize) -> bool {
+    let vorher = merker.swap(gefiltert, Ordering::Relaxed);
+    if vorher == gefiltert {
+        return false;
+    }
+    tracing::info!(
+        anzahl = gefiltert,
+        vorher,
+        "Meldungen ausserhalb des Hauptfelds aus der Check-In-Liste gefiltert \
+         (Qualifikation/Reserve/Ausschliessen)"
+    );
+    true
+}
+
 /// Meldeliste des Turniers (BTP `Entries`) mit aufgelösten Spielern, nach
 /// EntryID sortiert.
 ///
@@ -773,22 +802,19 @@ fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>) -> Vec<BtpEntry> {
         return Vec::new();
     };
     let nicht_hauptfeld = non_main_stage_entries(t);
-    // Einmal gesammelt protokollieren, warum Gemeldete auf der Check-In-Seite
-    // fehlen — sonst faellt es niemandem auf (dieselbe Lehre wie beim
-    // Anonymisierungs-Filter auf der badhub-Seite).
+    // Gesammelt protokollieren, warum Gemeldete auf der Check-In-Seite fehlen
+    // — sonst faellt es niemandem auf (dieselbe Lehre wie beim
+    // Anonymisierungs-Filter auf der badhub-Seite). Aber nur, wenn sich die
+    // Zahl aendert: Der Parser laeuft mit jedem BTP-Abruf, also alle 5 s, und
+    // dieselbe Zeile fuellte sonst mehr als die Haelfte des Tageslogs
+    // (Turnier 12./13.09.2026: 10 000 von 17 000 Zeilen).
     let gefiltert = entries
         .children()
         .iter()
         .filter_map(|e| child_int(e, "ID"))
         .filter(|id| nicht_hauptfeld.contains(id))
         .count();
-    if gefiltert > 0 {
-        tracing::info!(
-            anzahl = gefiltert,
-            "Meldungen ausserhalb des Hauptfelds aus der Check-In-Liste gefiltert \
-             (Qualifikation/Reserve/Ausschliessen)"
-        );
-    }
+    melde_hauptfeld_filter(gefiltert);
     let mut list: Vec<BtpEntry> = entries
         .children()
         .iter()
@@ -1334,6 +1360,36 @@ mod tests {
     #[test]
     fn missing_tournament_is_an_error() {
         assert!(matches!(parse_snapshot(&[]), Err(ModelError::NoTournament)));
+    }
+
+    /// Die Filter-Zeile erscheint nur bei einer Aenderung der Zahl — der
+    /// Parser laeuft alle 5 s, und dieselbe Zeile fuellte sonst mehr als die
+    /// Haelfte des Tageslogs (Turnier 12./13.09.2026).
+    #[test]
+    fn hauptfeld_filter_meldet_nur_bei_aenderung() {
+        let merker = AtomicUsize::new(0);
+        assert!(
+            !melde_hauptfeld_filter_mit(&merker, 0),
+            "nichts gefiltert, nie gemeldet"
+        );
+        assert!(
+            melde_hauptfeld_filter_mit(&merker, 21),
+            "erstes Greifen wird gemeldet"
+        );
+        assert!(
+            !melde_hauptfeld_filter_mit(&merker, 21),
+            "gleiche Zahl bleibt still"
+        );
+        assert!(!melde_hauptfeld_filter_mit(&merker, 21));
+        assert!(
+            melde_hauptfeld_filter_mit(&merker, 24),
+            "Aenderung wird gemeldet"
+        );
+        assert!(
+            melde_hauptfeld_filter_mit(&merker, 0),
+            "Rueckgang auf 0 wird gemeldet"
+        );
+        assert!(!melde_hauptfeld_filter_mit(&merker, 0));
     }
 
     #[test]

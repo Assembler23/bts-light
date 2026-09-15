@@ -76,7 +76,7 @@ ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)).
   → nebeneinander, Drehen schaltet live um); `?anordnung=nebeneinander` bzw.
   `?anordnung=uebereinander` übersteuert (nur fester Modus, im Gerätemodus
   gilt immer die Automatik). `?spiegel=1` dreht auch oben/unten.
-- **Ansicht per Tipp (seit v0.9.289):** Läuft die Tafel in der
+- **Ansicht per Tipp (seit v0.9.292):** Läuft die Tafel in der
   [Anzeige-Hülle](tablet.md#anzeige-hülle-anzeige-seit-v09275), schaltet ein
   Tipp auf die Zahlen die Ansicht reihum — **ohne PIN**: automatisch →
   links/rechts → rechts/links → oben/unten → unten/oben → automatisch. Das ist
@@ -126,7 +126,10 @@ alle Geräte auf, die sich gemeldet haben:
   v0.9.255 meldet eine Anzeige, die stillsteht, das von sich aus ins Log
   (`stillstand`, siehe [logging.md](logging.md)) — bleibt ein Bild stehen,
   lohnt vor dem Neuladen ein Blick dorthin: Die Zeile sagt, ob überhaupt noch
-  etwas ankam oder ob die Seite es verworfen hat.
+  etwas ankam oder ob die Seite es verworfen hat. (Bis v0.9.288 meldete der
+  Einzelfeld-Monitor in jeder Spielpause fälschlich `keine_abrufe`, weil ein
+  `304` „nichts Neues" nicht als Lebenszeichen zählte — Details in
+  logging.md.)
 
 Die Zuweisungen liegen in `monitor-assignments.json` im
 App-Config-Verzeichnis und überstehen einen bts-light-Neustart.
