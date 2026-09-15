@@ -464,14 +464,14 @@ Erweiterung 06.09.2026):
   Felder-Übersicht in bts-light – so sieht die Turnierleitung, wenn ein
   Tablet getauscht werden sollte. iPads/Safari geben den Akkustand aus
   Datenschutzgründen nicht her; dort bleibt die Anzeige leer. Seit
-  v0.9.290 zeigt das Tablet den Stand **auch selbst** — siehe
+  v0.9.293 zeigt das Tablet den Stand **auch selbst** — siehe
   [Akkustand am Tablet](#akkustand-am-tablet-seit-v09290).
 - **Kein Ton am Tablet (bewusst):** Das Tablet gibt **weder Gong noch
   Sprachansage** aus – es ist ein reiner Spielzettel am Feld. Gong und
   Ansage laufen ausschließlich auf den Ansage-Rechnern (Turnierleitung +
   ferne-Halle-Slave, `src/io/announcer.ts`), nie in `tablet.html`.
 
-## Akkustand am Tablet (seit v0.9.290)
+## Akkustand am Tablet (seit v0.9.293)
 
 Im Kiosk fehlt die Android-Statusleiste — den Akkustand eines Tablets
 sah man bisher nur am Turnier-PC. Jetzt zeigt jede Tablet-Seite ihn selbst,
@@ -694,6 +694,34 @@ mehr und sendet kein Ergebnis, überbügelt das Hand-Ergebnis also nicht. Der
 Server verwirft zusätzlich einen Score für ein bereits finalisiertes Match
 (ergänzt `process_result`, R5).
 
+Dasselbe Flag kommt auch nach dem **eigenen** Ergebnis zurück, sobald BTP es
+angenommen hat. Seit v0.9.291 sperrt die Beendet-Ansicht dann **beide**
+Knöpfe — „Ergebnis übermitteln" und „Korrektur — Match wieder öffnen" — und
+sagt „✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung."
+Vorher blieb die Korrektur offen, und das Gate schluckte jeden weiteren
+Sendeversuch ohne ein Wort (Turnier 12./13.09.2026, Feld 11: 23-mal
+`submit_suppressed_finalized` in 90 s). Die Regel dazu ist
+`abschlussLage` (`src/io/abschlussAnsicht.mjs`, Test
+`scripts/test-abschluss-ansicht.mjs`, Inline-Kopie in `tablet.html`);
+`reopen()` hält zusätzlich das Gate, falls das Frame zwischen Render und Tipp
+eintraf (`reopen_suppressed_finalized` im Tablet-Log). Eine Korrektur eines
+festen Ergebnisses geht nur noch in BTP bzw. über die Turnierleitung.
+
+Kommt das Finalisiert-Frame, während das **eigene Ergebnis noch unterwegs**
+ist (`/result` offen oder im 5-s-Retry — Cloud-Timeout ~8 s gegen 5-s-
+Sync-Takt, also realistisch), gilt der Sendeauftrag als erledigt: BTP hat ein
+Ergebnis, unseres (die Antwort ging verloren) oder ein von Hand eingetragenes,
+und der Turnier-PC nähme den Payload ohnehin nicht mehr an (R5). Das Tablet
+lässt `pendingResult` dann los (`pending_result_released_finalized`, Regel
+`sendeauftragErledigt`, nur für **dasselbe** Match). Vorher blieb der Auftrag
+stehen und blockte beim nächsten Spiel still den Sende-Knopf („wird
+übermittelt … bis es ankommt"); nach einem Reload wäre er sogar nachgesendet
+und am falschen Spiel abgewiesen worden. Eine `/result`-Antwort, die erst
+nach dem Loslassen (oder nach einem neuen Auftrag) eintrifft, wird verworfen
+(`submit_reply_stale`) — sie darf weder `submittedOk` aufs falsche Spiel
+setzen noch eine alte Absage zeigen noch einen Retry für einen erledigten
+Auftrag planen.
+
 **Rollback im Turnier:** Die Config `reconnect_legacy_rev` (Default aus =
 Ownership aktiv) schaltet zur Laufzeit auf das alte `rev`-Verhalten zurück
 (unten). Der Server signalisiert das dem Tablet über `ownership_active=false`;
@@ -733,15 +761,22 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
 - **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`;
   nach richtiger Eingabe fünf Minuten lang ohne PIN, siehe
   [tablet-kiosk.md](tablet-kiosk.md)): Anzeige wählen · Feld wechseln ·
-  Seiten spiegeln (nur Zähltafel, gemerkt je Gerät) · Anordnung (nur
-  Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln · Neu laden · Vollbild ·
-  Schließen.
-- **Anordnung** (seit v0.9.283): Wer **hinter dem Feld** sitzt, sieht die
-  Teams vorn/hinten statt links/rechts. „Automatisch" stellt das Tablet im
-  Hochformat auf Punkte **übereinander** (oben fern, unten nah) und im
-  Querformat auf nebeneinander — Drehen genügt. „Nebeneinander (links–rechts)"
-  und „Übereinander (vorn–hinten)" erzwingen eine Anordnung unabhängig von der
-  Drehung. „Seiten spiegeln" dreht in beiden Anordnungen.
+  Ansicht (nur Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln · Neu
+  laden · Vollbild · Schließen.
+- **Ansicht** (seit v0.9.292; davor getrennt „Seiten spiegeln" + „Anordnung",
+  v0.9.283): Wo welches Team auf dem Bildschirm steht, ist **ein** Zyklus
+  mit fünf Stufen — **automatisch** (folgt der Drehung: Hochformat →
+  übereinander, Querformat → nebeneinander) · **links/rechts** ·
+  **rechts/links** (gespiegelt) · **oben/unten** · **unten/oben**. Das
+  Etikett nennt zuerst, wo die linke Tablet-Seite steht; „unten/oben" ist
+  das ungespiegelte Übereinander (unten nah, oben fern) für den Platz
+  **hinter dem Feld**. Schnellster Weg: **Tipp auf die Zahlen** der Tafel
+  schaltet eine Stufe weiter, ohne PIN, und blendet kurz die neue Ansicht
+  ein — der Menü-Eintrag „Ansicht: …" macht dasselbe. „Automatisch +
+  gespiegelt" gibt es bewusst nicht mehr; ein so eingerichtetes Gerät wird
+  beim Update über seine Ausrichtung auf „rechts/links" (quer) bzw.
+  „oben/unten" (hoch) gesetzt — es steht also weiter richtig herum, folgt
+  aber nicht mehr der Drehung.
 - **Zum Zählen wechseln** fragt vorher die Feldliste: Ist das Feld belegt,
   kommt eine Warnung mit Bestätigung — die Zähl-Seite würde bei einem
   abgetauchten Tablet sonst still übernehmen (ADR 0017). Ein älterer Relay

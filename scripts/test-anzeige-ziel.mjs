@@ -2,7 +2,10 @@
 // (src/io/anzeigeZiel.mjs, Spec zaehltafel-anzeige-huelle) — das echte Modul,
 // dessen Inline-Kopie anzeige.html trägt. Hier entscheidet sich, was ins
 // iframe-src darf: alles, was hier durchrutscht, lädt die Hülle.
-import { LAYOUTS, feldbezogen, zielAusQuery, zielPfad } from "../src/io/anzeigeZiel.mjs";
+import {
+  LAYOUTS, feldbezogen, zielAusQuery, zielPfad,
+  ANSICHTEN, ANSICHT_LABEL, ansichtAusWert, ansichtParameter, ansichtAusParametern, naechsteAnsicht,
+} from "../src/io/anzeigeZiel.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -57,6 +60,55 @@ ok("tafel: auto lässt die Adresse frei", zielPfad({ layout: "tafel", court: 3 }
 ok("tafel: Spiegel und Anordnung zusammen", zielPfad({ layout: "tafel", court: 3 }, true, "uebereinander"), "court/3/tafel?spiegel=1&anordnung=uebereinander");
 ok("tafel: Unfug in der Anordnung erreicht die Adresse nie", zielPfad({ layout: "tafel", court: 3 }, false, "x&y=1"), "court/3/tafel");
 ok("feld ignoriert Anordnung", zielPfad({ layout: "feld", court: 3 }, false, "uebereinander"), "court/3/display");
+
+// ── Ansicht der Zähltafel: ein Zyklus für Spiegel + Anordnung ────────────
+// Ein Tipp auf die Zahlen schaltet reihum; Menü und Tipp teilen sich diese
+// Folge. „auto + gespiegelt" gibt es bewusst nicht mehr.
+ok("fünf Ansichten in Reihenfolge", ANSICHTEN, ["auto", "links-rechts", "rechts-links", "oben-unten", "unten-oben"]);
+ok("jede Ansicht hat ein Etikett", ANSICHTEN.every((a) => typeof ANSICHT_LABEL[a] === "string" && ANSICHT_LABEL[a].length > 0), true);
+ok("Etikett links/rechts", ANSICHT_LABEL["links-rechts"], "links/rechts");
+ok("Etikett automatisch", ANSICHT_LABEL.auto, "automatisch");
+
+ok("auto → Automatik, ungespiegelt", ansichtParameter("auto"), { spiegel: false, anordnung: "auto" });
+ok("links/rechts → nebeneinander, ungespiegelt", ansichtParameter("links-rechts"), { spiegel: false, anordnung: "nebeneinander" });
+ok("rechts/links → nebeneinander, gespiegelt", ansichtParameter("rechts-links"), { spiegel: true, anordnung: "nebeneinander" });
+ok("oben/unten → übereinander, gespiegelt", ansichtParameter("oben-unten"), { spiegel: true, anordnung: "uebereinander" });
+ok("unten/oben → übereinander, ungespiegelt (heutiges Verhalten)", ansichtParameter("unten-oben"), { spiegel: false, anordnung: "uebereinander" });
+ok("Unfug → wie auto", ansichtParameter("x"), { spiegel: false, anordnung: "auto" });
+
+ok("Wert gültig bleibt", ansichtAusWert("oben-unten"), "oben-unten");
+ok("Wert unbekannt → auto", ansichtAusWert("kopfueber"), "auto");
+ok("Wert fehlt → auto", ansichtAusWert(null), "auto");
+ok("Wert kein String → auto", ansichtAusWert(3), "auto");
+
+// Reihum, am Ende wieder von vorn; Unbekanntes startet bei der ersten
+// Hand-Ansicht (als käme es von „auto").
+ok("nach auto kommt links/rechts", naechsteAnsicht("auto"), "links-rechts");
+ok("nach unten/oben kommt auto", naechsteAnsicht("unten-oben"), "auto");
+ok("Zyklus schließt sich nach fünf Schritten", (() => { let a = "auto"; for (let i = 0; i < 5; i++) a = naechsteAnsicht(a); return a; })(), "auto");
+ok("nach Unfug kommt links/rechts", naechsteAnsicht("x"), "links-rechts");
+
+// Migration der alten Schlüssel (Spiegel-Häkchen + Anordnung) — einmalig.
+ok("alt: aus + auto → auto", ansichtAusParametern(false, "auto"), "auto");
+// „an + auto" war der Regelfall eines gespiegelten Tablets (Spiegel-Häkchen,
+// Anordnung nie angefasst). Die Kombination entfällt — der Spiegel bleibt
+// aber erhalten und wird über die Ausrichtung des Geräts festgezurrt.
+ok("alt: an + auto im Querformat → rechts/links", ansichtAusParametern(true, "auto", false), "rechts-links");
+ok("alt: an + auto im Hochformat → oben/unten", ansichtAusParametern(true, "auto", true), "oben-unten");
+ok("alt: an + auto ohne Ausrichtung → rechts/links (Querformat ist der Normalfall)", ansichtAusParametern(true, "auto"), "rechts-links");
+ok("alt: an + \"1\"-String zählt als an", ansichtAusParametern("1", "auto", false), "rechts-links");
+ok("alt: an + fehlende Anordnung wie auto", ansichtAusParametern(true, null, true), "oben-unten");
+ok("alt: aus + fehlende Anordnung → auto", ansichtAusParametern(false, null), "auto");
+ok("alt: aus + nebeneinander → links/rechts", ansichtAusParametern(false, "nebeneinander"), "links-rechts");
+ok("alt: an + nebeneinander → rechts/links", ansichtAusParametern(true, "nebeneinander"), "rechts-links");
+ok("alt: aus + übereinander → unten/oben", ansichtAusParametern(false, "uebereinander"), "unten-oben");
+ok("alt: an + übereinander → oben/unten", ansichtAusParametern(true, "uebereinander"), "oben-unten");
+ok("alt: Unfug in der Anordnung → auto, auch gespiegelt", ansichtAusParametern(true, "x"), "auto");
+ok("Hin und zurück ist eindeutig", ANSICHTEN.every((a) => { const p = ansichtParameter(a); return ansichtAusParametern(p.spiegel, p.anordnung) === a; }), true);
+
+// Der Pfadbau versteht die Parameter jeder Ansicht.
+ok("Pfad für oben/unten", (() => { const p = ansichtParameter("oben-unten"); return zielPfad({ layout: "tafel", court: 3 }, p.spiegel, p.anordnung); })(), "court/3/tafel?spiegel=1&anordnung=uebereinander");
+ok("Pfad für auto", (() => { const p = ansichtParameter("auto"); return zielPfad({ layout: "tafel", court: 3 }, p.spiegel, p.anordnung); })(), "court/3/tafel");
 
 if (failures > 0) { console.error(`${failures} Fehler`); process.exit(1); }
 console.log("alle Anzeige-Ziel-Tests grün");

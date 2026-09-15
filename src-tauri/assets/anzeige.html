@@ -9,9 +9,10 @@
   zeigt eine der Anzeige-Seiten (Zähltafel, Feld-Monitor, Hallen-Übersicht,
   In Vorbereitung) in einem seitenfüllenden iframe derselben Herkunft und
   liefert, was ein Tablet braucht und ein TV nicht: Zahnrad mit PIN,
-  Layout-Wahl, Feldwechsel, Seiten spiegeln, Anordnung der Punkte (neben-
-  oder übereinander, für den Platz hinter dem Feld), Weg zurück zum Zählen (mit
-  Belegt-Warnung), Neu laden, Vollbild, Wake-Lock. Sie öffnet nie /ws und
+  Layout-Wahl, Feldwechsel, Ansicht der Zähltafel (Spiegelung + Anordnung
+  neben-/übereinander als EIN Zyklus — auch per Tipp auf die Zahlen, ohne
+  PIN), Weg zurück zum Zählen (mit Belegt-Warnung), Neu laden, Vollbild,
+  Wake-Lock. Sie öffnet nie /ws und
   schreibt nie zurück. Der Pfad im iframe kommt ausschließlich aus der
   Allowlist in anzeigeZiel (Inline-Kopie unten) — nie aus freiem Text.
 -->
@@ -45,6 +46,15 @@
     white-space: nowrap; font-variant-numeric: tabular-nums; z-index: 5; pointer-events: none; }
   #akku.niedrig { color: #fbbf24; opacity: .85; }
   #akku.kritisch { color: #f87171; opacity: 1; }
+  /* Kurzes Etikett nach einem Tipp auf die Zahlen: nennt die neue Ansicht,
+     damit man weiß, wo im Zyklus man steht. Blendet sich von selbst aus;
+     `pointer-events: none`, damit der nächste Tipp sofort wieder die Tafel
+     trifft. */
+  #ansicht-etikett { position: fixed; left: 50%; bottom: max(1.5rem, env(safe-area-inset-bottom));
+    transform: translateX(-50%); padding: .7rem 1.4rem; border-radius: 999px;
+    background: rgba(15, 23, 42, .85); color: #fff; font-size: 1.25rem; font-weight: 700;
+    white-space: nowrap; z-index: 6; pointer-events: none; opacity: 0; transition: opacity .25s; }
+  #ansicht-etikett.sichtbar { opacity: 1; }
   /* Modal wie am Zähl-Tablet: Scrim, Karte in der Mitte, Optionen als Kacheln. */
   .modal { position: fixed; inset: 0; background: var(--scrim); display: none;
     align-items: center; justify-content: center; flex-direction: column; gap: 1.25rem;
@@ -80,6 +90,7 @@
   </div>
   <button type="button" id="zahnrad" title="Einstellungen (PIN)" aria-label="Einstellungen">⚙</button>
   <span id="akku" hidden title="Akkustand des Tablets"></span>
+  <div id="ansicht-etikett" aria-live="polite"></div>
 
   <div class="modal" id="menue">
     <!-- 1) PIN-Eingabe — dieselbe PIN wie am Zähl-Tablet. -->
@@ -111,8 +122,10 @@
       <div class="settings-section" id="feld-titel">Feld wechseln</div>
       <div class="options" id="feld-liste"></div>
       <div class="options" id="aktionen">
-        <div class="opt" id="spiegeln">Seiten spiegeln: aus</div>
-        <div class="opt" id="anordnung">Anordnung: automatisch</div>
+        <!-- Ein Eintrag für Spiegelung + Anordnung (derselbe Zyklus wie der
+             Tipp auf die Zahlen der Tafel), damit Menü und Tipp nie
+             auseinanderlaufen. -->
+        <div class="opt" id="ansicht">Ansicht: automatisch</div>
         <div class="opt" id="zaehlen">Zum Zählen wechseln</div>
         <div class="opt" id="neuladen">Neu laden</div>
         <div class="opt" id="vollbild">Vollbild ein/aus</div>
@@ -146,14 +159,16 @@
     return (!p || p === "__TABLET" + "_PIN__") ? "0000" : p;
   })();
   var LAYOUT_LABEL = { tafel: "Zähltafel", feld: "Feld-Monitor", uebersicht: "Hallen-Übersicht", vorbereitung: "In Vorbereitung" };
-  var SPIEGEL_KEY = "badhub.anzeige.spiegel";
-  // Anordnung der Zähltafel: `auto` folgt der Geräte-Ausrichtung (Hochformat
-  // → übereinander, für den Platz hinter dem Feld), die beiden anderen Werte
-  // übersteuern von Hand. Gemerkt je Gerät wie die Spiegelung.
-  var ANORDNUNG_KEY = "badhub.anzeige.anordnung";
-  var ANORDNUNG_FOLGE = ["auto", "nebeneinander", "uebereinander"];
-  var ANORDNUNG_LABEL = { auto: "automatisch", nebeneinander: "nebeneinander (links–rechts)", uebereinander: "übereinander (vorn–hinten)" };
+  // Ansicht der Zähltafel (Spiegelung + Anordnung als ein Wert), gemerkt je
+  // Gerät. Die beiden Alt-Schlüssel (bis v0.9.288 getrennt) werden beim
+  // Start einmalig übernommen und dann gelöscht.
+  var ANSICHT_KEY = "badhub.anzeige.ansicht";
+  var SPIEGEL_KEY_ALT = "badhub.anzeige.spiegel";
+  var ANORDNUNG_KEY_ALT = "badhub.anzeige.anordnung";
   var ZULETZT_KEY = "badhub.anzeige.zuletzt";
+  // Nachricht der Tafel im iframe: Tipp auf die Zahlen → nächste Ansicht.
+  // Fester Typ-Name, den tafel.html genauso schreibt.
+  var NACHRICHT_NAECHSTE_ANSICHT = "bts-anzeige:naechste-ansicht";
 
   // ── Inline-Kopie von src/io/anzeigeZiel.mjs — Änderungen dort und hier gemeinsam ──
   var LAYOUTS = ["tafel", "feld", "uebersicht", "vorbereitung"];
@@ -188,6 +203,42 @@
       default:
         return null;
     }
+  }
+  var ANSICHTEN = ["auto", "links-rechts", "rechts-links", "oben-unten", "unten-oben"];
+  var ANSICHT_LABEL = {
+    auto: "automatisch",
+    "links-rechts": "links/rechts",
+    "rechts-links": "rechts/links",
+    "oben-unten": "oben/unten",
+    "unten-oben": "unten/oben",
+  };
+  var ANSICHT_PARAMETER = {
+    auto: { spiegel: false, anordnung: "auto" },
+    "links-rechts": { spiegel: false, anordnung: "nebeneinander" },
+    "rechts-links": { spiegel: true, anordnung: "nebeneinander" },
+    "oben-unten": { spiegel: true, anordnung: "uebereinander" },
+    "unten-oben": { spiegel: false, anordnung: "uebereinander" },
+  };
+  function ansichtAusWert(roh) {
+    return typeof roh === "string" && ANSICHTEN.includes(roh) ? roh : "auto";
+  }
+  function ansichtParameter(ansicht) {
+    const p = ANSICHT_PARAMETER[ansichtAusWert(ansicht)];
+    return { spiegel: p.spiegel, anordnung: p.anordnung };
+  }
+  function ansichtAusParametern(spiegel, anordnung, hochformat) {
+    const sp = spiegel === true || spiegel === "1";
+    const an = anordnung == null ? "auto" : anordnung;
+    if (an === "auto") return sp ? (hochformat ? "oben-unten" : "rechts-links") : "auto";
+    for (const a of ANSICHTEN) {
+      const p = ANSICHT_PARAMETER[a];
+      if (p.anordnung === an && p.spiegel === sp) return a;
+    }
+    return "auto";
+  }
+  function naechsteAnsicht(ansicht) {
+    const i = ANSICHTEN.indexOf(ansichtAusWert(ansicht));
+    return ANSICHTEN[(i + 1) % ANSICHTEN.length];
   }
   // ── Ende Inline-Kopie ──
 
@@ -272,8 +323,8 @@
     feldTitel: document.getElementById("feld-titel"),
     feldListe: document.getElementById("feld-liste"),
     aktionen: document.getElementById("aktionen"),
-    spiegeln: document.getElementById("spiegeln"),
-    anordnung: document.getElementById("anordnung"),
+    ansicht: document.getElementById("ansicht"),
+    ansichtEtikett: document.getElementById("ansicht-etikett"),
     zaehlen: document.getElementById("zaehlen"),
     neuladen: document.getElementById("neuladen"),
     vollbild: document.getElementById("vollbild"),
@@ -296,12 +347,23 @@
     params.has("layout") ? params.get("layout") : gemerkt.layout,
     params.has("court") ? params.get("court") : (gemerkt.court == null ? null : String(gemerkt.court))
   );
-  var spiegel = false;
-  try { spiegel = localStorage.getItem(SPIEGEL_KEY) === "1"; } catch (e) {}
-  var anordnung = "auto";
+  // Ansicht: neuer Schlüssel; fehlt er, einmalig aus den Alt-Schlüsseln
+  // (Spiegel-Häkchen + Anordnung) übernehmen, damit ein eingerichtetes
+  // Tablet nach dem Update so aussieht wie davor. Ein gespiegeltes Tablet
+  // mit Automatik-Anordnung (der Regelfall) wird dabei über die jetzige
+  // Ausrichtung auf eine feste gespiegelte Ansicht gesetzt.
+  var ansicht = "auto";
   try {
-    var a = localStorage.getItem(ANORDNUNG_KEY);
-    if (a === "nebeneinander" || a === "uebereinander") anordnung = a;
+    var gemerkteAnsicht = localStorage.getItem(ANSICHT_KEY);
+    if (gemerkteAnsicht != null) {
+      ansicht = ansichtAusWert(gemerkteAnsicht);
+    } else {
+      var hochformat = window.matchMedia ? window.matchMedia("(orientation: portrait)").matches : window.innerHeight > window.innerWidth;
+      ansicht = ansichtAusParametern(localStorage.getItem(SPIEGEL_KEY_ALT), localStorage.getItem(ANORDNUNG_KEY_ALT), hochformat);
+      localStorage.setItem(ANSICHT_KEY, ansicht);
+      localStorage.removeItem(SPIEGEL_KEY_ALT);
+      localStorage.removeItem(ANORDNUNG_KEY_ALT);
+    }
   } catch (e) {}
   var feldNamen = {};   // CourtID → Label, aus `courts`
 
@@ -310,8 +372,13 @@
   // Zeigt das Ziel im iframe, hält Adresse und Speicher nach. Ohne Feld bei
   // einem Feld-Layout: Feldwahl öffnen (ohne PIN — es gibt noch nichts zu
   // schützen, die Seite zeigt ja nichts).
+  // Pfad des aktuellen Ziels mit den Parametern der gewählten Ansicht.
+  function aktuellerPfad() {
+    var p = ansichtParameter(ansicht);
+    return zielPfad(ziel, p.spiegel, p.anordnung);
+  }
   function zeige() {
-    var pfad = zielPfad(ziel, spiegel, anordnung);
+    var pfad = aktuellerPfad();
     // M2: `removeAttribute("src")` blankt das iframe NICHT — das alte
     // Dokument bleibt sichtbar stehen. `about:blank` leert es wirklich.
     if (!pfad) {
@@ -365,8 +432,7 @@
     els.pinView.hidden = !!nurFeldwahl;
     els.mainView.hidden = !nurFeldwahl;
     els.layoutTitel.hidden = !!nurFeldwahl; els.layoutListe.hidden = !!nurFeldwahl;
-    els.spiegeln.hidden = !!nurFeldwahl;
-    els.anordnung.hidden = !!nurFeldwahl;
+    els.ansicht.hidden = !!nurFeldwahl;
     els.zaehlen.hidden = !!nurFeldwahl;
     els.vollbild.hidden = !!nurFeldwahl;
     els.schliessen.hidden = !!nurFeldwahl;
@@ -381,14 +447,12 @@
     els.layoutTitel.hidden = false; els.layoutListe.hidden = false; els.aktionen.hidden = false;
     var feld = feldbezogen(ziel.layout);
     els.feldTitel.hidden = !feld; els.feldListe.hidden = !feld;
-    els.spiegeln.hidden = ziel.layout !== "tafel";
-    els.anordnung.hidden = ziel.layout !== "tafel";
+    els.ansicht.hidden = ziel.layout !== "tafel";
     els.zaehlen.hidden = !feld;
     els.vollbild.hidden = false;
     els.schliessen.hidden = false;
     els.stand.textContent = LAYOUT_LABEL[ziel.layout] + (feld && ziel.court ? " · " + feldName(ziel.court) : "");
-    els.spiegeln.textContent = "Seiten spiegeln: " + (spiegel ? "an" : "aus");
-    els.anordnung.textContent = "Anordnung: " + ANORDNUNG_LABEL[anordnung];
+    els.ansicht.textContent = "Ansicht: " + ANSICHT_LABEL[ansicht];
     renderLayouts();
     if (feld) ladeFelder();
   }
@@ -448,16 +512,38 @@
   }
 
   // ── Aktionen ─────────────────────────────────────────────────────────────
-  els.spiegeln.addEventListener("click", function () {
-    spiegel = !spiegel;
-    try { localStorage.setItem(SPIEGEL_KEY, spiegel ? "1" : "0"); } catch (e) {}
-    schliesseMenue(); zeige();
-  });
-  // Anordnung reihum: automatisch → nebeneinander → übereinander → …
-  els.anordnung.addEventListener("click", function () {
-    anordnung = ANORDNUNG_FOLGE[(ANORDNUNG_FOLGE.indexOf(anordnung) + 1) % ANORDNUNG_FOLGE.length];
-    try { localStorage.setItem(ANORDNUNG_KEY, anordnung); } catch (e) {}
-    schliesseMenue(); zeige();
+  // Ansicht reihum: automatisch → links/rechts → rechts/links → oben/unten
+  // → unten/oben → … Merken, iframe mit den neuen Parametern neu laden.
+  // Sperrfenster: Nach dem Schalten lädt das iframe neu; ein zweiter Tipp
+  // in dieser Zeit (Doppeltipp) soll nicht gleich zwei Stufen weiterspringen.
+  var ANSICHT_SPERRE_MS = 500;
+  var zuletztGeschaltetMs = 0;
+  function ansichtWeiter() {
+    var jetzt = Date.now();
+    if (jetzt - zuletztGeschaltetMs < ANSICHT_SPERRE_MS) return;
+    zuletztGeschaltetMs = jetzt;
+    ansicht = naechsteAnsicht(ansicht);
+    try { localStorage.setItem(ANSICHT_KEY, ansicht); } catch (e) {}
+    zeige();
+    zeigeAnsichtEtikett();
+  }
+  var etikettTimer = null;
+  function zeigeAnsichtEtikett() {
+    els.ansichtEtikett.textContent = "Ansicht: " + ANSICHT_LABEL[ansicht];
+    els.ansichtEtikett.classList.add("sichtbar");
+    if (etikettTimer) clearTimeout(etikettTimer);
+    etikettTimer = setTimeout(function () { els.ansichtEtikett.classList.remove("sichtbar"); }, 1500);
+  }
+  els.ansicht.addEventListener("click", function () { schliesseMenue(); ansichtWeiter(); });
+
+  // Tipp auf die Zahlen der Tafel (ohne PIN — schnelles Umschalten ist der
+  // Zweck). Nur Nachrichten aus dem EIGENEN iframe derselben Herkunft
+  // zählen; alles andere (fremde Fenster, andere Typen) wird ignoriert.
+  window.addEventListener("message", function (e) {
+    if (e.origin !== location.origin || e.source !== els.rahmen.contentWindow) return;
+    if (!e.data || e.data.typ !== NACHRICHT_NAECHSTE_ANSICHT) return;
+    if (ziel.layout !== "tafel") return;
+    ansichtWeiter();
   });
   // Zum Zählen: erst fragen, ob das Feld belegt ist. `occupied` fehlt bei
   // einem älteren Relay → unbekannt → ohne Warnung (wie bisher am Tablet).
@@ -494,7 +580,7 @@
   // Feldwahl durch das PIN-Pad ersetzt; „✕" schließt dann alles → schwarzer
   // Bildschirm ohne Ausweg außer PIN. Ohne gültiges Ziel bleibt das Zahnrad
   // darum PIN-frei bei der Feldwahl.
-  els.zahnrad.addEventListener("click", function () { oeffneMenue(!zielPfad(ziel, spiegel, anordnung)); });
+  els.zahnrad.addEventListener("click", function () { oeffneMenue(!aktuellerPfad()); });
   els.pinPad.addEventListener("click", function (e) {
     var btn = e.target.closest("button[data-k]");
     if (btn) pinKey(btn.dataset.k);

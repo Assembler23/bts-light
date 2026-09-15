@@ -103,6 +103,14 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+        with:
+          # Nur `platform-tools`: Die Action installiert standardmäßig auch
+          # das alte SDK-Paket `tools`, das Google aus dem Repository
+          # entfernt hat — seit 15.09.2026 brach der Job damit vor dem
+          # ersten Gradle-Aufruf ab („Failed to find package 'tools'").
+          # Build-Tools und Plattform lädt AGP selbst nach (Lizenzen nimmt
+          # die Action an).
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
       - name: APK bauen
         working-directory: android

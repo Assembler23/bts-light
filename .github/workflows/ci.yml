@@ -198,6 +198,12 @@ jobs:
       - name: Ergebnis-Retry-Regel (JS)
         run: node scripts/test-result-retry.mjs
 
+      # Was sperrt die Beendet-Ansicht, und was sagt sie? Ein in BTP festes
+      # Ergebnis muss Senden UND Korrektur zumachen — sonst drueckt jemand
+      # 23-mal einen Knopf, der still nichts tut (Feld 11, 12.09.2026).
+      - name: Beendet-Ansicht des Tablets (JS)
+        run: node scripts/test-abschluss-ansicht.mjs
+
       # Merkt eine geladene Tablet-Seite, dass sie veraltet ist — und laedt
       # sie im richtigen Moment neu? Der stille Abgleich darf mitten im Spiel
       # NICHT springen, der Fernbefehl der Turnierleitung muss es. Und der
@@ -288,6 +294,14 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+        with:
+          # Nur `platform-tools`: Die Action installiert standardmäßig auch
+          # das alte SDK-Paket `tools`, das Google aus dem Repository
+          # entfernt hat — seit 15.09.2026 brach der Job damit vor dem
+          # ersten Gradle-Aufruf ab („Failed to find package 'tools'").
+          # Build-Tools und Plattform lädt AGP selbst nach (Lizenzen nimmt
+          # die Action an).
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
       - name: Tests + Debug-APK
         working-directory: android

@@ -9,6 +9,9 @@
 // Ein Fehlalarm hier ist teuer: Er schickt Log-Uploads von zwanzig Geräten
 // los und lässt eine gesunde Halle krank aussehen. Deshalb prüfen die Tests
 // vor allem die Fälle, in denen NICHTS gemeldet werden darf.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   lagePruefen,
   STILLSTAND_MS,
@@ -145,6 +148,45 @@ ok(
   art(gesund({ letzterStandMs: JETZT + 5_000 })),
   null,
 );
+
+// ── Die Aufrufer: zählt ein 304 in BEIDEN Anzeige-Seiten als Lebenszeichen? ──
+//
+// Die Regel oben ist nur so gut wie ihre Fütterung. `monitor.html` setzte im
+// 304-Zweig („nichts Neues") weder `letzterAbrufOkMs` noch `letzterStandMs`;
+// bei gesundem Push-Kanal kommt ein voller 200 nur alle 10 min (Refetch-Cap),
+// und 60 s danach meldete jeder Court-Monitor `keine_abrufe` — obwohl der
+// Server im Sekundentakt bestätigte (Turnier 12./13.09.2026: ~50 Fehlalarme
+// je Gerät und Tag, jeder mit Log-Upload). Der Modultest konnte das nicht
+// sehen. Deshalb hier ein Blick in den Quelltext der Inline-Kopien: Der
+// 304-Zweig muss BEIDE Stempel setzen — den Abruf über `abrufGeglueckt()`
+// vor der Verzweigung, den Stand im Zweig selbst.
+const hier = dirname(fileURLToPath(import.meta.url));
+const seiten = [
+  // Seite → Muster, an dem der 304-Zweig beginnt.
+  ["monitor.html", "if (state === null) {"],
+  ["overview.html", "if (paket.status === 304) {"],
+];
+for (const [datei, beginn] of seiten) {
+  const quelle = readFileSync(join(hier, "..", "src-tauri", "assets", datei), "utf8");
+  const start = quelle.indexOf(beginn);
+  ok(`${datei}: 304-Zweig gefunden`, start >= 0, true);
+  if (start < 0) continue;
+  const ende = quelle.indexOf("return;", start);
+  const zweig = quelle.slice(start, ende);
+  // Davor: die letzten Zeilen vor dem Zweig, in denen der Abruf verbucht wird.
+  const davor = quelle.slice(Math.max(0, start - 400), start);
+  ok(`${datei}: 304 zählt als geglückter Abruf`, davor.includes("abrufGeglueckt();"), true);
+  ok(`${datei}: 304 zählt als bestätigter Stand`, zweig.includes("letzterStandMs = Date.now();"), true);
+  ok(`${datei}: 304 wird gezählt`, zweig.includes("bestaetigungen++;"), true);
+  // Und `abrufGeglueckt` muss den Abruf auch wirklich stempeln — sonst wäre
+  // der Aufruf davor nur Dekoration (Review-Fund 15.09.2026).
+  const fnStart = quelle.indexOf("function abrufGeglueckt() {");
+  ok(`${datei}: abrufGeglueckt gefunden`, fnStart >= 0, true);
+  if (fnStart < 0) continue;
+  const fnEnde = quelle.indexOf("\n  }", fnStart);
+  const rumpf = quelle.slice(fnStart, fnEnde);
+  ok(`${datei}: abrufGeglueckt stempelt den Abruf`, rumpf.includes("letzterAbrufOkMs = Date.now();"), true);
+}
 
 if (failures) {
   console.error(`\n${failures} Test(s) fehlgeschlagen.`);
