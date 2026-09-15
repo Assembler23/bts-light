@@ -213,9 +213,42 @@
       ? BASE + 'info/ad/state?device=' + encodeURIComponent(deviceId)
       : BASE + 'info/ad/state';
   }
+  // Frist des Stand-Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s. Ein Abruf,
+  // der weder scheitert noch antwortet, blockierte sonst alle folgenden
+  // (Turnier 05./06.09.2026). **Inline-Kopie von `src/io/abrufFrist.mjs`**
+  // — dort die kanonische Fassung mit Begründung und Test
+  // (`scripts/test-abruf-frist.mjs`, eigener CI-Schritt); hier ohne
+  // `fetchFn`-Parameter. Änderungen hier und dort gemeinsam.
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error('Abruf-Frist überschritten (' + was + ')'));
+      };
+      timer = setTimeout(function () { abbrechen('Kopfzeilen ' + KOPF_FRIST_MS + ' ms'); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error('Antwort nach Ablauf der Frist verworfen');
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen('Rumpf ' + RUMPF_FRIST_MS + ' ms'); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
   function poll() {
-    fetch(adStateUrl(), { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    abrufMitFrist(adStateUrl(), { cache: 'no-store' }, function (r) { return r.ok ? r.json() : null; })
       .then(function (s) { if (s) applyState(s); })
       .catch(function () {});
   }
@@ -258,20 +291,28 @@
   // 1-s-Poll spart damit ~9,9 KB je Sekunde, statt sie dauerhaft zu ziehen.
   var lastEtag = null;
 
+  // In-Flight-Schutz auch hier: Ohne ihn parkte der Sekundentakt während
+  // eines Hängers jede Sekunde einen weiteren Abruf auf einer toten
+  // Leitung (Review-Fund 08.09.2026).
+  var checkLaeuft = false;
   function checkReassignment() {
     if (!deviceId) return;
+    if (checkLaeuft) return;
+    checkLaeuft = true;
     var opt = { cache: 'no-store' };
     if (lastEtag) opt.headers = { 'If-None-Match': lastEtag };
-    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', opt)
-      .then(function (r) {
+    abrufMitFrist(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', opt, function (r) {
         if (r.status === 304) return null; // nichts Neues → keine Re-Zuweisung
         if (!r.ok) return null;
+        // Marke erst in der äußeren Kette, NACH dem Rumpf (siehe overview).
         var etag = r.headers.get('ETag');
-        if (etag) lastEtag = etag;
-        return r.json();
+        return r.json().then(function (s) { return { s: s, etag: etag }; });
       })
-      .then(function (s) {
-        if (!s) return;
+      .then(function (paket) {
+        checkLaeuft = false;
+        if (!paket) return;
+        if (paket.etag) lastEtag = paket.etag;
+        var s = paket.s;
         if (s.redirectTo) {
           // Ziel zuerst BASE-relativ auflösen und DAMIT vergleichen — sonst
           // stünde im Cloud `here.pathname` (…/bts-relay/{ns}/info/ad) nie
@@ -286,7 +327,7 @@
           navigateWithRotate(BASE + 'monitor?device=' + encodeURIComponent(deviceId));
         }
       })
-      .catch(function () {});
+      .catch(function () { checkLaeuft = false; });
   }
   // Reassignment im LAN sofort: jede Sekunde gegen /monitor/state pruefen,
   // gleich schnell wie monitor.html. Ein winziger GET, im LAN unkritisch

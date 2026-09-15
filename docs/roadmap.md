@@ -297,6 +297,22 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Als Nächstes
 
+- **Tablet-Kiosk-App: Kiosk-Verhalten ohne Gerätebesitzer (Fire OS 8).**
+  Befund 08.09.2026: Auf Fire OS 8 ist der Gerätebesitzer nie erreichbar —
+  Amazons Kindersicherung ist auch direkt nach einem Werksreset Profile
+  Owner, `dpm set-device-owner` scheitert immer. „Bildschirm anheften" ohne
+  Besitzer funktioniert seit v0.9.285 wieder (Home/Zuletzt gesperrt), sofern
+  die Kindersicherung „Touch-Funktion deaktivieren" aus hat. **Autostart
+  seit v0.9.285 gelöst** über `device_config put activity_manager
+  default_background_activity_starts_enabled true` im Skript (Feldtest:
+  Fokus nach jedem Neustart auf der App). Den Fixier-Dialog, den Android
+  ohne Besitzer bei jedem Anheften zeigt, bestätigt seit v0.9.285 der
+  Bedienungshilfe-Dienst `BestaetigungsDienst` (per adb eingeschaltet).
+  Was auf Fire OS bleibt: Home und Zuletzt sind nur durch das Anheften
+  gesperrt (Ausstieg über die Android-Geste), und nach „Kiosk verlassen"
+  holt nichts die App zurück — falls das je stört, könnte derselbe Dienst
+  nach dem Muster LauncherHijack die App beim Erscheinen des Launchers
+  zurückholen. Kein akuter Bedarf.
 - **Repo-Umbenennung** → Anzeigename „badhub BTP controller", GitHub-Repo
   `badhub-btp-controller`. Wichtig: Tauri-`identifier` `de.badhub.btslight`
   und der Updater-Pfad `download/bts-light/` bleiben **stabil**, sonst
@@ -304,6 +320,28 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   `productName` kann separat und mit Bedacht wechseln.
 
 ## Umgesetzt, aber noch nicht abgenommen
+
+- **Tablet-Kiosk-App für Android / Fire-Tablets — umgesetzt, Feldtest
+  offen.** Spec: [features/tablet-android-kiosk-app.md](features/tablet-android-kiosk-app.md),
+  ADR [0058](adr/0058-eigene-kiosk-app-statt-fully-kiosk.md). Aus dem
+  Nutzer-Wunsch vom 06.09.2026: Eine eigene, dünne Kotlin-App in `android/`
+  findet den Turnier-PC wie die Pi-Monitore selbst (gemerkte IP →
+  Subnetz-Scan → mDNS), zeigt die Felder-Lobby im Vollbild und sperrt das
+  Tablet als Gerätebesitzer — ohne Fully-PLUS-Lizenz und ohne Adresse je
+  Tablet. Bedienung: [tablet-android-app.md](tablet-android-app.md). Nur
+  echte Hardware klärt noch:
+  1. **Device Owner auf Fire OS:** `dpm set-device-owner` mit frischem
+     Tablet ohne Amazon-Konto. Wird es verweigert → weiche Sperre
+     dokumentieren, Alternative prüfen.
+  2. **Amazon-WebView-Stand:** reicht die Chromium-Version für
+     `tablet.html` (Module, `fetch`, Pointer-Events)? Ggf.
+     Mindestversion in die Doku.
+  3. **Lock-Task auf Fire OS:** Statusleiste wirklich weg? Fire-Launcher
+     unterdrückt? Sperrbildschirm aus?
+  4. **Boot-Zeit** bis zur Lobby, mit und ohne gemerkte IP.
+  5. **Scan-Dauer** im Hallen-WLAN (254 Adressen, Blöcke von 30).
+  6. **Akku-Badge** in der Übersicht sichtbar.
+  7. Ein Turniertag parallel zu einem Fully-Tablet.
 
 - **Mehrere Liveticker je Verband (v0.9.276)** — Spec:
   [features/liveticker-mehrere-turniere-je-verband.md](features/liveticker-mehrere-turniere-je-verband.md),
@@ -674,6 +712,37 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Geplant
 
+- **Linux-Variante (Entwickeln zuerst, Betreiben später).** Der Kern ist
+  plattformneutral, BTP dagegen ein Windows-Programm — ein bts-light auf
+  Linux spricht immer ein BTP auf einem anderen Rechner an (`btp.host` ist
+  frei konfigurierbar, das geht heute schon). Vier Stufen:
+  - **Stufe 0 — Linux als Test-Plattform (umgesetzt 15.09.2026):** CI-Job
+    `linux` (`ubuntu-22.04`, Tauri-System-Pakete) mit Clippy `-D warnings`
+    und `cargo test --workspace`. Hält den `not(windows)`-Zweig grün
+    (GDI-Druck → `NichtUnterstuetzt`, SSID → `iwgetid`), der seit v0.9.249
+    nie gebaut worden war. Der Windows-Job bleibt die Release-Referenz.
+  - **Stufe 1 — Linux-Paket im Release:** zweiter Build-Job `build-linux`
+    in `release.yml` (`.AppImage` + `.sig`, `.deb`), Eintrag
+    `linux-x86_64` in `latest.json`, Download-Zeile auf der Release-Seite.
+    Kein Firewall-Hook (nur NSIS); bei `ufw` müssen 8088/8443 von Hand auf
+    — Doku.
+  - **Stufe 2 — Auto-Update auf Linux:** Der Einbau ist selbst gebaut
+    (`update.rs`: Installer laden, `/S /UPDATE` starten). Auf Linux gibt es
+    keinen Installer; der Tauri-Updater tauscht beim AppImage die Datei.
+    Braucht einen `cfg`-Zweig und eine Entscheidung, ob „Beim Beenden
+    einbauen" (ADR 0057) für AppImage nachgebaut oder ausgeblendet wird.
+    `.deb` bekäme kein Auto-Update (Paketmanager).
+  - **Stufe 3 — Zettel-Autodruck über CUPS:** zweiter Ausgabeschritt
+    Elementliste (`blatt.rs`) → PDF → `lp -d <Drucker>`, Druckerliste über
+    `lpstat -a`; deckt später auch macOS ab. Bis dahin geht auf Linux nur
+    der Browser-Druck (Vorabzettel, TL-Web), und der Setup-Abschnitt sollte
+    das sagen statt eine leere Druckerliste zu zeigen.
+  - Bleibt: Messwerkzeuge (`tests/*_probe.rs`) und neue BTP-Mitschnitte
+    brauchen Windows. Stufen 1–3 vor dem Code durch `/idee` (Spec
+    `docs/features/linux.md`); macOS ist dieselbe Arbeit plus
+    Apple-Signierung (Developer-Konto) — ohne die widerspricht es dem
+    Plug-and-play-Anspruch.
+
 - **Update ohne jede Lücke (Stufe 3): Prozess-Übergabe oder Dienst +
   Oberfläche.** Seit v0.9.279 (Spec
   [features/update-im-turnierbetrieb.md](features/update-im-turnierbetrieb.md),
@@ -710,8 +779,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Stufe 1 (PR #333).* Stufe 1 veröffentlicht die vorhandene Doku unter
   `badhub.de/download/bts-light/handbuch/`. Gewünscht ist darüber hinaus ein
   Handbuch, in dem **nachlesbar** ist:
-  - was die **Tablets** können — alle Funktionen des Spielzettels, nicht nur
-    der Zähl-Ablauf;
+  - ~~was die **Tablets** können~~ — **erledigt 06.09.2026**:
+    [tablet-bedienen.md](tablet-bedienen.md), aus Sicht der Person am Feld;
   - ~~**was welche Einstellung in der Software bewirkt**~~ — **erledigt
     06.09.2026**: [einstellungen.md](einstellungen.md), alle Abschnitte der
     Einstellungsseite plus Wartung, mit Standardwerten,
@@ -721,9 +790,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     Turnierleitung statt der Architektur, mit den vier häufigsten
     Missverständnissen;
   - was die **Oberflächen** jeweils können (Turnierleitungs-Sicht,
-    Court-Monitor, Info-Monitor, Siegerehrung, Aushang).
+    Court-Monitor, Info-Monitor, Siegerehrung, Aushang) — **offen**, der
+    letzte Punkt der Stufe 2.
 
-  Dazu weiterhin offen: Installation/Erste Schritte, Setup-Wizard, Wartung.
+  Dazu **erledigt 06.09.2026**: [erste-schritte.md](erste-schritte.md)
+  (Installation, Voraussetzung in BTP, erster Start, Beenden vs. Minimieren,
+  Updates im Turnierbetrieb) und die Wartungsseite als Teil von
+  [einstellungen.md](einstellungen.md). Offen bleibt ein Überblick über die
+  Oberflächen (welcher Bildschirm zeigt was).
   **Der Aufwand liegt im Schreiben, nicht in der Technik** — die Strecke
   Markdown → Website → Deploy steht. Neue Kapitel entstehen als normale
   `docs/*.md` und werden in [handbuch.json](handbuch.json) eingetragen; es
@@ -750,6 +824,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   ziehbare Anordnung je Feld komfortabler. Bewusst verschoben beim
   Erstwurf — Persistenz je Feld statt je Halle, eigene Speicher-UI,
   Zusammenspiel mit wechselnden Feldzahlen.
+- **Anstoß der Suche aus `tablet.html` über die JS-Brücke
+  (Tablet-Kiosk-App).** Bekommt der Turnier-PC mitten im Turnier eine neue
+  IP-Adresse, sieht die Tablet-Kiosk-App das nicht von selbst — die Suche
+  läuft bewusst nur bei App-Start, WLAN-Wechsel, Ladefehler oder Handgriff,
+  nie als Hintergrund-Takt. Ein Anstoß direkt aus der geladenen Seite über
+  die `fully`-JS-Brücke, sobald sie „Verbindung verloren" erkennt, wäre die
+  saubere Lösung, bräuchte aber eine Änderung an `tablet.html` — bewusst aus
+  der ersten Fassung ausgeklammert.
 
 ## Datenverlust-Pfade in der Konfiguration (Befunde 07.08.2026)
 
@@ -778,6 +860,27 @@ mitgeändert worden:
   der Halle wäre der Ablauf gewesen: kaputtes Feld sperren, jemand speichert
   am PC eine Einstellung, Sperre still weg, Automatik legt ein Spiel darauf.
   Ein Test hält den Pfad offen (`keep_host_managed_fields_preserves_the_locked_courts`).
+
+## Wünsche vom 06.09.2026
+
+- **Pause der Feld-Automatik überlebt Neustart und Update nicht.** Wird die
+  automatische Feldvergabe in der Turnierleitungs-Sicht (TL-Web) pausiert
+  und bts-light danach neu gestartet oder aktualisiert, läuft die Automatik
+  wieder — der Pause-Zustand lebt nur im Speicher. Seit „Update im
+  Turnierbetrieb" (v0.9.279, Wiederanlauf per Marker) fällt das stärker
+  auf, weil die Übertragung nach dem Update von selbst wieder anläuft.
+  Lösung: Pause-Flag turniergebunden persistieren (Muster
+  `locked_courts_tournament`, ADR 0044) und beim Wiederanlauf lesen.
+- **Kebab-Menü (⋮) im TL-Web schließt nach einer Aktion nicht.** Wird ein
+  Eintrag gewählt oder ein Knopf gedrückt, bleibt das Menü offen und muss
+  von Hand geschlossen werden; in der Regel kann es direkt zugehen. Vor der
+  Umsetzung klären, ob mehrstufige Einträge (Farbwahl, Feldwähler Wunschfeld)
+  bewusst offen bleiben sollen.
+- **Warteliste: „In Vorbereitung rufen" und „An den Anfang der Spielliste
+  schieben" ins Kebab-Menü.** Weniger Knöpfe je Zeile, ruhigere Liste am
+  Tablet. Zusammen mit dem Punkt darüber umsetzen, sonst kostet jede der
+  beiden Aktionen künftig einen Tipp mehr. Vorher prüfen, welche der
+  Verschiebe-Knöpfe aus v0.9.280 gemeint sind.
 
 ## Wünsche vom 23.08.2026
 
@@ -940,6 +1043,24 @@ verliehen):
   bäckt `http://bts-light.local:8088/monitor` als Kiosk-Adresse ein, eine
   DHCP-Reservierung am Verleih-Router ist nicht notwendig (kann als
   Worst-Case-Rückfall jederzeit nachgezogen werden).
+- **Server-Suche über badhub als weiterer Rückfall** (Idee 04.09.2026).
+  Heute findet das Master-Image (`pi/shared-startbrowser.sh`) den
+  Turnier-PC in dieser Reihenfolge: gemerkte IP → Subnetz-Scan des
+  eigenen /24 auf `:8088/health` (1–9 s) → mDNS mit Timeout. Idee: bts-light
+  hinterlegt beim Liveticker-Push seine **lokale IP** bei badhub; der Pi
+  fragt dort einmalig nach, welche lokalen IPs gerade aktiv sind.
+  Zuordnung ohne Kennung/Token über die **öffentliche Absender-IP**:
+  badhub merkt sich das Paar (öffentliche IP, lokale IP) und antwortet
+  nur mit Einträgen derselben öffentlichen IP → fremde Netze sehen
+  nichts. Nutzen liegt **nicht** im Tempo (der Scan ist schon schnell),
+  sondern im Fall, den der Scan nie abdeckt: PC und Pi in
+  **verschiedenen Subnetzen** (zwei Router, Gast-WLAN). Einordnung als
+  Rückfall hinter Cache und Scan, vor mDNS. Offene Punkte: Pis ohne
+  Internet (Verleih-Router ohne Uplink) bleiben auf Scan/mDNS angewiesen;
+  Carrier-Grade-NAT bei Mobilfunk-Hotspots macht die Zuordnung unscharf;
+  HTTPS am Pi ohne Echtzeituhr scheitert bis zum NTP-Abgleich still →
+  Wiederholung nach Zeitabgleich nötig. Betroffen: badhub-Endpoint,
+  Push-Payload, beide Pi-Launcher. Vor der Umsetzung `/idee`.
 - **Master-Image erstellen + hosten.** Den „Golden Master"-Pi einmal auf
   echter Hardware bauen, die Karte als `bts-monitor.img.xz` sichern und in
   den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).

@@ -18,6 +18,12 @@
  *  - `retired`: der unvollständige letzte Satz steht groß, zählt aber nicht.
  *  - `spiegel` tauscht links/rechts **nach** der Seitenbestimmung — wirkt
  *    also auch ohne `teamOnSide` (Tafel steht dem Schiedsrichter gegenüber).
+ *  - **Anordnung** (06.09.2026): Wer hinter dem Feld sitzt, sieht die Teams
+ *    nicht links/rechts, sondern vorn/hinten. Dann stehen die Punkte
+ *    übereinander: `links` → **unten** (nah), `rechts` → **oben** (fern);
+ *    `spiegel` dreht auch das. `auto` folgt der Ausrichtung des Geräts
+ *    (Hochformat → übereinander), `nebeneinander`/`uebereinander` sind die
+ *    Hand-Übersteuerung aus der Anzeige-Hülle (`?anordnung=`).
  *
  *  Kanonische Fassung. `tafel.html` trägt eine Inline-Kopie (die Assets
  *  durchlaufen keinen Build) — Änderungen hier und dort gemeinsam.
@@ -87,4 +93,24 @@ export function tafelSeiten(sets, courtState, spiegel) {
   if (spiegel) { const t = links; links = rechts; rechts = t; }
 
   return { links, rechts, entschieden: finished };
+}
+
+/** Erlaubte Werte für `?anordnung=` — alles andere gilt als `auto`. */
+export const ANORDNUNGEN = ["auto", "nebeneinander", "uebereinander"];
+
+/** @param {unknown} roh Wert aus der Adresse (oder gemerkt). */
+export function anordnungAusQuery(roh) {
+  return typeof roh === "string" && ANORDNUNGEN.includes(roh) && roh !== "auto" ? roh : "auto";
+}
+
+/**
+ * Welche Anordnung die Tafel wirklich zeichnet.
+ * @param {unknown} anordnung `auto` | `nebeneinander` | `uebereinander`.
+ * @param {boolean} hochformat Gerät steht hoch (Breite < Höhe).
+ * @returns {"nebeneinander"|"uebereinander"}
+ */
+export function effektiveAnordnung(anordnung, hochformat) {
+  const a = anordnungAusQuery(anordnung);
+  if (a !== "auto") return a;
+  return hochformat ? "uebereinander" : "nebeneinander";
 }

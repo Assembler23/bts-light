@@ -4,6 +4,206 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.293
+
+- **Akkustand am Tablet sichtbar.** Im Kiosk fehlt die Android-Statusleiste
+  — ob ein Tablet ans Ladegerät muss, sah man nur am Turnier-PC. Jetzt
+  steht der Stand klein auf dem Tablet selbst: in der Kopfzeile beim
+  Zählen (auch beim Warten auf die Zuweisung und in der Seiten-/
+  Aufschlagwahl), in der Feldwahl und in der Anzeige-Hülle neben dem
+  Zahnrad. `🔋 73 %`, am Netz `⚡`; unter 20 % orange, unter 10 % rot. Quelle
+  ist die Brücke der Kiosk-App (sonst die Web-Battery-API), abgefragt einmal
+  je Minute — die Anzeige kostet selbst keinen Akku. Ohne Quelle (iPad)
+  bleibt sie weg.
+
+## v0.9.292
+
+- **Zähltafel am Tablet: Ansicht per Tipp auf die Zahlen.** In der
+  Anzeige-Hülle schaltet ein Tipp auf die Punktzahlen die Ansicht reihum —
+  ohne PIN: automatisch → links/rechts → rechts/links → oben/unten →
+  unten/oben. Das fasst „Seiten spiegeln" und „Anordnung" zu **einem**
+  Zyklus zusammen; ein kurzes Etikett nennt die neue Ansicht. Im Zahnrad-
+  Menü ersetzt der Eintrag „Ansicht: …" die beiden bisherigen Einträge.
+  Bestehende Geräteeinstellungen werden einmalig übernommen; ein
+  gespiegeltes Gerät mit Automatik-Anordnung wird über seine Ausrichtung
+  auf „rechts/links" bzw. „oben/unten" gesetzt und bleibt so richtig herum
+  („automatisch + gespiegelt" gibt es nicht mehr). Cloud-Anzeigen bekommen es
+  mit dem Relay-Redeploy, LAN mit dem Update.
+
+## v0.9.291
+
+- **Court-Monitore: kein falscher `stillstand` mehr in Spielpausen.** Beim
+  Turnier am 12./13.09.2026 meldete jeder Pi-Monitor ~50-mal am Tag
+  `stillstand keine_abrufe` — im exakten 10-Minuten-Raster, mit gesundem
+  Push-Kanal, geglücktem Abruf und frischem Herzschlag. Kein Hänger, sondern
+  Buchführung: `monitor.html` zählte ein `304` „nichts Neues" weder als
+  Abruf noch als bestätigten Stand (die Feld-Übersicht tat das schon seit
+  v0.9.255), und einen vollen `200` erzwingt der Refetch-Cap bei gesundem
+  Kanal nur alle 10 Minuten. Jede Meldung löste einen Log-Upload aus, und
+  ein echter Stillstand wäre im Rauschen unsichtbar geblieben. Der
+  Court-Monitor verbucht das `304` jetzt wie die Übersicht; der Wächter-Test
+  prüft die Buchführung beider Seiten im Quelltext.
+- **PC-Log: Hauptfeld-Filter der Check-In-Liste meldet sich nur noch bei
+  Änderung.** Die Zeile „Meldungen ausserhalb des Hauptfelds … gefiltert"
+  stand mit jedem BTP-Abruf alle 5 s im Log — am 12.09.2026 waren das
+  10 000 von 17 000 Zeilen. Jetzt erscheint sie, wenn sich die Zahl ändert
+  (mit dem alten Wert), auch beim Rückgang auf 0.
+- **Tablet: Korrektur nach festem Ergebnis gesperrt.** Auf Feld 11 war am
+  12.09.2026 das Ergebnis gesendet und in BTP fest; trotzdem ließ sich
+  „Korrektur — Match wieder öffnen" drücken, und danach schluckte das
+  Finalisiert-Gate 23-mal „Ergebnis übermitteln" — ohne ein Wort auf dem
+  Schirm. Jetzt sperrt die Beendet-Ansicht bei festem Ergebnis beide Knöpfe
+  und sagt „Ergebnis steht in BTP fest — Korrektur nur über die
+  Turnierleitung"; `reopen()` hält das Gate zusätzlich selbst. Trifft das
+  Finalisiert-Frame ein, während das eigene Ergebnis noch im Retry ist,
+  lässt das Tablet den Sendeauftrag los (BTP hat das Ergebnis) — vorher
+  blieb er stehen und blockte beim nächsten Spiel still den Sende-Knopf.
+
+## v0.9.288
+
+- **Turnierleitung nennt die Klasse wieder — auch bei „HD-A"-Namen.** Bei
+  der BBB-Rangliste am 12.09.2026 stand in der Turnierleitungs-Oberfläche
+  nur „HD" statt „HD-A": BTP führt dort Events und K.-o.-Draws als „HD-A",
+  „DD-B", „MX-C" — Disziplin und Klasse mit Bindestrich in einem Wort. Die
+  Klassen-Erkennung (`model::class_label`) trennte nur an Leerzeichen und
+  fand darin kein Kürzel. Jetzt trennt sie auch am Bindestrich; betrifft
+  gleichermaßen die Sprachansage („Herrendoppel A"), die Spielzeiten-
+  Auswertung nach Konkurrenz und die Klassen-Kürzel im badhub-Push. Der
+  Schiedsrichterzettel hängt das Kürzel im Kopf nur noch an, wenn der
+  Draw-Name es nicht schon trägt — sonst stünde dort „HD-A A" (und schon
+  bisher „HE A A").
+
+## v0.9.287
+
+- **Court-Monitore: Frist für den Stand-Abruf (Kopfzeilen 5 s, Rumpf
+  15 s).** Beim Turnier am 05./06.09.2026 (LAN, sechs Pi-Monitore hinter
+  Router + Access-Point) froren die Anzeigen phasenweise ohne Offline-Blende
+  ein, während Tablets und TL-Web am selben Turnier-PC sauber liefen.
+  Ursache: Der Stand-Abruf der Anzeige-Seiten hatte keinen Timeout. Ging
+  eine Antwort im WLAN-Roaming verloren, blieb der Abruf offen, der
+  In-Flight-Schutz (bzw. die Abruf-Kette bei Kombi/Sieger/Vorbereitung/
+  Feldwahl) ließ keinen weiteren zu, und bei Feld-Monitor und Zähltafel kam
+  selbst der Fernbefehl „Neu laden" nicht mehr an — bis die
+  TCP-Sendewiederholung nach Minuten griff. Jetzt endet jeder Stand-Abruf
+  als Fehler, wenn die Kopfzeilen nicht binnen 5 s da sind oder der Rumpf
+  danach länger als 15 s braucht, und nimmt den bekannten Weg: Blende,
+  schneller Takt, nächster Abruf auf frischer Verbindung. Dazu drei
+  Folgeregeln aus dem Review: ETag-Marke erst nach dem Rumpf übernehmen,
+  Übersicht erst nach dem Rumpf entwarnen, Zuweisungs-Check mit
+  In-Flight-Schutz und Frist. Betrifft `monitor`, `overview`, `tafel`,
+  `combo`, `winners`, `preparation`, `ad` (Werbe-Seite), `lobby` (Feldwahl der Tablets) und den
+  Stand-Abruf der Turnierleitungs-Oberfläche `tl` — dort hielt derselbe
+  Hänger `pollLaeuft` fest, während die Kopfzeile „aktuell" meldete. Regel in
+  `src/io/abrufFrist.mjs` mit eigenem CI-Schritt. Im Cloud-Modus greift die
+  Änderung erst mit dem Relay-Redeploy.
+
+## v0.9.286
+
+- **Release-Seite bietet die Tablet-APK an.** Auf
+  `badhub.de/download/bts-light/` gibt es den Abschnitt „Zähl-Tablets:
+  Android-App für Fire-Tablets“ mit der neuesten APK und je Version einen
+  Knopf „Tablet-APK“ — nur für Dateien, die wirklich auf dem Server liegen.
+  Der feste Name `bts-light-tablet.apk` erscheint erst mit einer signierten
+  APK; bis dahin die versionierte Debug-Fassung mit Hinweis.
+
+## v0.9.285
+
+- **Tablet-App (Android): Einrichtung entschlackt das Fire-Tablet.**
+  `setup-tablet.ps1`/`.sh` legen nach dem Gerätebesitzer-Schritt 114 Pakete
+  nach der Fire-Tools-Debloat-Liste still (Alexa, Video, Musik, Bücher,
+  Fotos, Shopping, Kids, Karten, Metriken, Werbe-IDs, Sync, Push,
+  Fernwartung, OTA-Update-Dienst) — je Paket deaktivieren **und** anhalten,
+  Letzteres greift auch bei Amazons geschützten Paketen. Feldtest: 81
+  installiert, 57 deaktiviert, 81 angehalten, Amazon-Prozesse 26 → 17.
+  Bewusst ausgenommen: WebView, Silk, Appstore, Launcher, Kindersicherung,
+  Middleware und die Fire-Tastatur. Als Gerätebesitzer versteckt die App
+  dieselbe Liste; Quelle `kern/Entschlackung.kt` mit Wächter-Test, Drift-Test
+  `scripts/test-entschlackung-liste.mjs` für die Skript-Kopien.
+- **Tablet-App (Android): Autostart nach dem Einschalten ohne
+  Gerätebesitzer.** Das Skript erlaubt Hintergrund-Aktivitätsstarts per
+  `device_config`, damit der Boot-Empfänger die App starten darf (Feldtest:
+  Fokus nach jedem Neustart auf der App, überlebt Neustarts). Den Dialog
+  „App ist auf dem Bildschirm fixiert", den Android ohne Gerätebesitzer bei
+  jedem Fixieren zeigt, bestätigt der neue Bedienungshilfe-Dienst „Fixieren
+  bestätigen" selbst (nur SystemUI-Fenster, nur der Knopf „Verstanden", nie
+  Amazons Touch-Kästchen); das Skript schaltet ihn per adb ein. Die App
+  prüft nach dem Start mehrfach, ob sie fixiert ist, und heftet sonst nach.
+- **Tablet-App (Android): Akku.** Die App dimmt ihr Fenster auf 30 %; das
+  Skript schaltet den Energiesparmodus über die Automatik-Schwelle ein
+  (greift, sobald das Kabel ab ist) und hält den Nachtmodus draußen.
+- **Tablet-Einrichtung: Hallen-WLAN per Skript, Schalter zum Behalten.**
+  `-Wlan`/`-WlanPasswort` bzw. `WLAN_SSID`/`WLAN_PASSWORT` verbinden das WLAN
+  vor der Einrichtung; `-OhneEntschlacken` / `behalten` lässt die
+  Amazon-Apps stehen. Doku: vorher einmal von Hand Fire OS aktualisieren;
+  warum es kein Abbild für viele Tablets gibt.
+- **Tablet-App (Android): Fixieren auf Fire OS wieder an, Toddler Mode
+  eingegrenzt.** Der Touch-Ausfall beim Fixieren (v0.9.284) kommt allein vom
+  Kindersicherungs-Schalter „App fixieren → Touch-Funktion deaktivieren".
+  Die App fixiert auf Fire-Tablets jetzt wieder (Home/Zuletzt gesperrt) und
+  verweigert es nur, wenn dieser Schalter an ist — mit klarem Hinweis auf
+  der Wartekarte. Das Einrichtungsskript schaltet den Schalter aus, hält den
+  Bildschirm am Ladekabel wach, schaltet den Sperrbildschirm ab und läuft
+  bei fehlgeschlagenem Gerätebesitzer-Schritt weiter.
+- **Befund: Auf Fire OS 8 ist der Gerätebesitzer nicht erreichbar, auch
+  nicht nach Werksreset.** Amazons Kindersicherung ist nach dem ersten
+  Start sofort wieder Profile Owner. Die Doku rät auf Fire-Tablets nicht
+  mehr zum Reset; die Einrichtung läuft dort ohne Besitzer (App, Apps
+  stilllegen, Bildschirm-an, Sperrbildschirm aus). Autostart und harte
+  Sperre auf Fire OS stehen als offener Punkt in der Roadmap.
+
+## v0.9.284
+
+- **Zähl-Tablet: größeres Feld, kleinere Knöpfe.** Die +1-Knöpfe sind jetzt
+  feste schmale Leisten statt eines Fünftels des Bildschirms: in der
+  Anordnung **übereinander** volle Breite und ~5,5 rem hoch, **nebeneinander**
+  volle Höhe und ~9 rem breit. Im Hochformat hinter dem Feld (ab 480 px
+  Breite) steht der Satzstand mit Rückgängig-Knopf und Schiri-Ansage rechts
+  neben dem Court, der damit die ganze Höhe bekommt (Fire HD 10: rund
+  410 × 900 statt 225 × 500 Pixel). Im Querformat nebeneinander wächst das
+  Feld um gut zwei Drittel. Nur Darstellung, keine Änderung an Zähllogik
+  oder Bedienung.
+- **Zahnrad-PIN fünf Minuten lang gemerkt.** Nach einer richtigen Eingabe
+  öffnet das Zahnrad an Zählseite und Anzeige-Hülle fünf Minuten lang ohne
+  erneute PIN, auch über Feldwechsel und „Neu laden" hinweg (gemerkt je
+  Gerät). Die Frist läuft ab der Eingabe und verlängert sich nicht von
+  selbst. Regel `src/io/pinFreigabe.mjs` mit eigenem Test.
+- **Tablet-App (Android): kein Anheften auf Fire OS ohne Gerätebesitzer.**
+  Fire OS schaltete beim „Bildschirm anheften" seinen Toddler Mode ein und
+  schluckte danach jeden Touch — die App war unbedienbar, auch die
+  Ecken-Geste kam nie an (Feldtest auf zwei Fire HD 10). Ohne Gerätebesitzer
+  heftet die App auf Amazon-Geräten jetzt nicht mehr an (Vollbild und
+  Bildschirm-an bleiben), die Wartekarte sagt es. Andere Android-Geräte und
+  der Gerätebesitzer-Modus sind unverändert. Doku ergänzt: Warum der
+  Werksreset nötig ist (Kindersicherung als Profile Owner) und Autostart
+  ohne Besitzer.
+
+## v0.9.283
+
+- **Neu: Zähltafel für den Platz hinter dem Feld.** Die Punkte stehen jetzt
+  auch **übereinander** (oben die ferne Seite, unten die nahe, Satzstand je
+  Seite neben der Kachel). Ohne Einstellung folgt die Tafel der Drehung des
+  Tablets: Hochformat → übereinander, Querformat → nebeneinander, live ohne
+  Neuladen. Im Zahnrad-Menü der Anzeige-Hülle lässt sich das unter
+  „Anordnung" fest übersteuern (gemerkt je Gerät); „Seiten spiegeln" wirkt in
+  beiden Anordnungen. Adresse: `…/court/<Feld>/tafel?anordnung=uebereinander`.
+  Spec `docs/features/zaehltafel-anzeige-huelle.md` (Erweiterung 06.09.2026).
+- **Neu: Zähl-Tablet hinter dem Feld.** Dieselbe Anordnung am Zähl-Tablet:
+  im Hochformat (oder fest gewählt) liegen die Plus-Knöpfe **oben (Hinten)
+  und unten (Vorne)**, der Court steht hochkant mit dem Netz waagerecht, der
+  Satzstand oben/unten; Seitenwahl und Kartenwahl sagen „vorne/hinten". Im
+  Zahnrad-Menü unter „Anordnung" (automatisch · nebeneinander ·
+  übereinander), gemerkt je Gerät. Die Zähllogik bleibt links/rechts; das
+  Drehen mitten im Spiel dreht nur die Darstellung.
+
+## v0.9.282
+
+- **Tablet-Kiosk-App für Android / Fire-Tablets.** Eigene App findet den
+  Turnier-PC selbst (gemerkte IP → Subnetz-Scan → mDNS), zeigt die
+  Felder-Lobby im Vollbild, sperrt als Gerätebesitzer, meldet den Akku und
+  schickt ihr Log an `/pi-log`. APK:
+  `badhub.de/download/bts-light/bts-light-tablet.apk`. Spec
+  `docs/features/tablet-android-kiosk-app.md`, ADR 0058.
+
 ## v0.9.281
 
 - **Hilfe, wenn BTP die Verbindung verweigert.** Meldet BTP „Verbindung

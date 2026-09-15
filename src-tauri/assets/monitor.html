@@ -1035,6 +1035,7 @@
         // steht: Der Poll läuft weiter, aber nichts kommt mehr durch. Der
         // Zähler ist die aussagekräftigste Zahl im Stillstands-Bericht.
         verworfeneStaende++;
+        letzterStandVerworfen = true;
         return;
       }
       if (state.seq) lastSeqByCourt[feld] = state.seq;
@@ -1042,6 +1043,7 @@
     // Ab hier wird der Stand wirklich übernommen — der Beleg dafür, dass die
     // Strecke bis zum Schirm durchlässig ist.
     letzterStandMs = Date.now();
+    letzterStandVerworfen = false;
     lastState = state;
     // Feld-Identität für den Nudge-Filter nachziehen (Geräte-Monitor kennt sie
     // erst hier; bei Reassignment wechselt sie). 0 = unbelegt → ignorieren.
@@ -1150,8 +1152,15 @@
   var letzterAbrufMs = 0;     // Beginn des letzten losgeschickten Abrufs
   // ── Stillstands-Wächter (siehe `lagePruefen` unten) ──────────────────
   var letzterAbrufOkMs = 0;   // letzter Abruf, der ohne Fehler zurückkam
-  var letzterStandMs = 0;     // letzter angewendete Stand
+  var letzterStandMs = 0;     // letzter angewendete ODER bestätigte Stand
   var verworfeneStaende = 0;  // wie oft der seq-Guard eine Antwort abwies
+  var bestaetigungen = 0;     // 304 „nichts Neues" seit dem Laden
+  // Wurde der letzte volle Stand vom seq-Guard verworfen? Dann trägt
+  // `lastEtag` die Marke eines nie gezeigten Standes, und ein folgendes 304
+  // bestätigt NICHT das Gezeigte — es darf `letzterStandMs` nicht stempeln,
+  // sonst wäre `verworfen` am Court-Monitor nie mehr feststellbar
+  // (Review-Fund 15.09.2026).
+  var letzterStandVerworfen = false;
   var seitStartMs = Date.now();
   var gemeldeteStillstandsArt = null;
   function pushGesund(z, nowMs) {
@@ -1303,6 +1312,40 @@
     return opt;
   }
 
+  // Frist des Stand-Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s. Ein Abruf,
+  // der weder scheitert noch antwortet, blockierte sonst alle folgenden
+  // (Turnier 05./06.09.2026). **Inline-Kopie von `src/io/abrufFrist.mjs`**
+  // — dort die kanonische Fassung mit Begründung und Test
+  // (`scripts/test-abruf-frist.mjs`, eigener CI-Schritt); hier ohne
+  // `fetchFn`-Parameter. Änderungen hier und dort gemeinsam.
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error("Abruf-Frist überschritten (" + was + ")"));
+      };
+      timer = setTimeout(function () { abbrechen("Kopfzeilen " + KOPF_FRIST_MS + " ms"); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error("Antwort nach Ablauf der Frist verworfen");
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen("Rumpf " + RUMPF_FRIST_MS + " ms"); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
   function poll() {
     // In-Flight-Schutz: Nudge und Fallback teilen sich denselben Fetch. Läuft
     // schon einer, merken wir EINEN Nachschlag, damit am Ende sicher der
@@ -1315,8 +1358,7 @@
     letzterAbrufMs = Date.now();
     var quelle = naechsteQuelle;
     naechsteQuelle = "poll";
-    fetch(stateUrl(quelle), abrufOptionen())
-      .then(function (r) {
+    abrufMitFrist(stateUrl(quelle), abrufOptionen(), function (r) {
         if (r.status === 304) {
           // Nichts Neues: letzten Stand behalten. Der Uhr-Offset wird aus dem
           // 304 NICHT abgeleitet (kein Body) — frische Werte kommen über den
@@ -1325,22 +1367,39 @@
           return null;
         }
         if (!r.ok) throw new Error("HTTP " + r.status);
+        // Der Leser bleibt frei von Nebenwirkungen und reicht Stand und Marke
+        // nur durch. Die Buchführung steht in der äußeren Kette — und die
+        // läuft nur, wenn die Frist gehalten hat. Ein Rumpf, der erst nach
+        // der Frist eintrifft, darf nichts mehr bewirken (Review-Fund
+        // 08.09.2026).
         var etag = r.headers.get("ETag");
-        if (etag) { lastEtag = etag; letzterVollerAbrufMs = Date.now(); }
-        return r.json();
+        return r.json().then(function (state) { return { state: state, etag: etag }; });
       })
-      .then(function (state) {
+      .then(function (paket) {
+        // Marke erst hier, NACH dem Rumpf: Bricht die Frist den Rumpf ab,
+        // fragte der nächste Abruf sonst mit der Marke eines nie gezeigten
+        // Standes — bekäme ein 304, räumte die Blende ab und zeigte den alten
+        // Stand bis zur nächsten Änderung.
+        var state = paket === null ? null : paket.state;
+        if (paket && paket.etag) { lastEtag = paket.etag; letzterVollerAbrufMs = Date.now(); }
+        abrufGeglueckt();
         if (state === null) {
-          if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
-          lastFetchOk = true; fetchFehler = 0;
-          els.offline.classList.remove("show");
+          // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
+          // nichts zu rendern. Für den Stillstands-Wächter zählt das wie ein
+          // angewendeter Stand: Der Server bestätigt gerade ausdrücklich,
+          // dass das Gezeigte stimmt (Spec monitor-livestand-push, S8).
+          // Ohne diese Zeile meldete jeder Court-Monitor in jeder Spielpause
+          // `keine_abrufe` — bei gesundem Push-Kanal kommt ein voller 200
+          // nur alle 10 min (Refetch-Cap), und 60 s danach schlug der
+          // Wächter an (Turnier 12./13.09.2026: ~50 Fehlalarme je Gerät
+          // und Tag, jeder mit Log-Upload). Ausnahme: Wurde der letzte volle
+          // Stand verworfen, bestätigt das 304 einen nie gezeigten Stand —
+          // dann bleibt der Stempel aus, damit `verworfen` auffliegt.
+          if (!letzterStandVerworfen) letzterStandMs = Date.now();
+          bestaetigungen++;
           pollDone();
           return;
         }
-        if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
-        lastFetchOk = true; fetchFehler = 0;
-        letzterAbrufOkMs = Date.now();
-        els.offline.classList.remove("show");
         applyState(state);
         clockFeed(state.serverNowMs);
         pollDone();
@@ -1360,6 +1419,17 @@
     if (refetchQueued) { refetchQueued = false; requestFetch(); }
   }
   var wasOffline = false; // Offline-Wechsel nur einmal loggen (nicht je Poll)
+
+  // Ein Abruf ist geglückt — Kopfzeilen UND Rumpf. Ein Ort für beide Zweige
+  // (304 und voller Stand), damit die Entwarnung nirgends vor dem Rumpf steht
+  // und der Stillstands-Wächter beide als Lebenszeichen zählt. Gleiche
+  // Funktion wie in `overview.html`.
+  function abrufGeglueckt() {
+    if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
+    lastFetchOk = true; fetchFehler = 0;
+    letzterAbrufOkMs = Date.now();
+    els.offline.classList.remove("show");
+  }
 
   // Fetch coalescen: höchstens ~1 Fetch je COALESCE_MS, egal wie viele Nudges
   // einschlagen. Nudge und In-Flight-Nachschlag laufen hierüber.
@@ -1398,9 +1468,11 @@
   // alle drei Auslöser des Log-Uploads (JS-Fehler, unhandledrejection,
   // pagehide). Erst dieser Takt macht den Zustand bezeugbar.
   //
-  // Er HEILT nichts: kein Reload, kein Zurücksetzen der Ordnungszahl. Wir
-  // wissen noch nicht, woran es liegt, und eine Selbstheilung würde genau die
-  // Spur verwischen, wegen der er gebaut wurde.
+  // Er HEILT nichts: kein Reload, kein Zurücksetzen der Ordnungszahl. Eine
+  // Ursache ist seit v0.9.287 bekannt und behoben — der Stand-Abruf ohne
+  // Frist (`abrufMitFrist`), der nach einem WLAN-Roaming alle folgenden
+  // blockierte. Ein `keine_abrufe` mit `fetchOk=true` wäre seither ein NEUER
+  // Befund; für den bleibt der Wächter stumm heilend, damit die Spur steht.
   //
   // 10-s-Takt gegen eine 60-s-Schwelle: fein genug, um den Beginn auf zehn
   // Sekunden genau zu datieren, und billig genug, um nicht ins Gewicht zu
@@ -1421,6 +1493,7 @@
         art: lage.art,
         stillMs: lage.stillMs,
         verworfen: verworfeneStaende,
+        bestaetigungen: bestaetigungen,
         wsOpen: mwsOpen,
         frameAltMs: lastServerFrameAt ? jetzt - lastServerFrameAt : null,
         fetchOk: lastFetchOk,

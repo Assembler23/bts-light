@@ -23,7 +23,7 @@
 // Charakter der ausgelieferten Software bleibt unberührt.
 
 import { marked } from "marked";
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 
 function arg(name, fallback = null) {
@@ -191,6 +191,31 @@ function linksUmschreiben(html, quelle) {
       : join(dirname(quelle), pfad).replace(/\\/g, "/");
     const ziel = veroeffentlicht.get(roh);
     if (ziel) return `<a href="${ziel.slug}.html${ankerTeil ? "#" + ankerTeil : ""}"${rest}>${text}</a>`;
+
+    // Zwei sehr verschiedene Faelle, die vorher gleich behandelt wurden:
+    //
+    //  a) Die Datei GIBT es, sie ist nur nicht veroeffentlicht (ADR, Spec).
+    //     Dann ist das Entwerten richtig und gewollt.
+    //  b) Die Datei gibt es GAR NICHT — ein Vertipper im Dateinamen. Vorher
+    //     verschwand der Link dabei stillschweigend, und im Handbuch stand
+    //     Text, der aussieht wie ein Verweis ins Nichts. Genau so ist am
+    //     06.09.2026 ein Link auf "schiri-modus.md" durchgerutscht (die Datei
+    //     heisst umpire-mode.md) — gefunden hat ihn ein Mensch, nicht der Test.
+    if (roh.endsWith(".md") && !existsSync(join(basis, roh))) {
+      probleme.push(`${quelle}: Link auf "${pfad}" — diese Datei gibt es nicht (Tippfehler?).`);
+      return text;
+    }
+
+    // Ein Link auf ein VERZEICHNIS ist nie ein Quellcode-Verweis, sondern ein
+    // Link fuers Web — "../" zeigt vom Handbuch aus auf die Download-Seite.
+    // Der wurde vorher stillschweigend entwertet, und ausgerechnet der
+    // wichtigste Weiterweg der Installationsseite fuehrte ins Nichts (Befund
+    // 06.09.2026). Er wird deshalb unveraendert durchgereicht.
+    //
+    // Quellcode-Links (../src-tauri/…, ../src/…) bleiben entwertet: Auf
+    // badhub.de liegt kein Quellcode, sie liefen dort auf 404.
+    if (pfad.endsWith("/") || /^\.\.?$/.test(pfad)) return all;
+
     return text;
   });
 }
@@ -227,7 +252,25 @@ function seiteBauen(s) {
   // in ihrem eigenen Kasten. Auf dem Handy sonst unlesbar.
   html = html.replace(/<table>/g, '<div class="tabelle"><table>').replace(/<\/table>/g, "</table></div>");
 
-  return { html, toc };
+  // Suchindex: je Abschnitt ein Eintrag. Ohne Suche findet in einem Handbuch
+  // dieser Groesse niemand etwas — die Kapitelnavigation hilft nur, wer schon
+  // weiss, in welchem Kapitel er nachsehen muss.
+  const abschnitte = [];
+  const stuecke = html.split(/(?=<h[2-4] id=")/);
+  for (const stueck of stuecke) {
+    const kopf = stueck.match(/^<(h[2-4]) id="([^"]+)">([\s\S]*?)<\/\1>/);
+    const text = nurText(stueck.replace(/^<h[2-4][\s\S]*?<\/h[2-4]>/, ""))
+      .replace(/\s+/g, " ")
+      .trim();
+    abschnitte.push({
+      a: kopf ? kopf[2] : "",
+      h: kopf ? nurText(kopf[3].replace(/<a class="ankerlink"[\s\S]*$/, "")) : s.titel,
+      e: kopf ? kopf[1] : "h1",
+      x: text.slice(0, 600),
+    });
+  }
+
+  return { html, toc, abschnitte };
 }
 
 // ── Seitengerüst ──────────────────────────────────────────────────────────
@@ -291,8 +334,41 @@ const CSS = `
   .gruppe h2 { margin: 0 0 .4rem; font-size: 1.05rem; border: 0; padding: 0; }
   .gruppe ul { margin: 0; padding-left: 1.1rem; }
   .gruppe li { margin: .25rem 0; }
+  .suchform { display: flex; gap: .4rem; flex: 1 1 260px; max-width: 380px; }
+  .suchform input { flex: 1 1 auto; min-width: 0; padding: .45rem .7rem; border-radius: 8px;
+                    border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.12);
+                    color: #fff; font-size: .9rem; }
+  .suchform input::placeholder { color: rgba(255,255,255,.65); }
+  .suchform button { padding: .45rem .9rem; border-radius: 8px; border: 0; cursor: pointer;
+                     background: rgba(255,255,255,.9); color: #0f2740; font-weight: 600; }
+  .aufgaben { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr));
+              gap: .7rem; margin: 1rem 0 2rem; }
+  .aufgabe { display: block; border: 1px solid #e2e8f0; border-radius: 10px; padding: .7rem .9rem;
+             text-decoration: none; color: #1a202c; background: #fff; }
+  .aufgabe:hover { border-color: #2f855a; box-shadow: 0 1px 6px rgba(47,133,90,.15); }
+  .aufgabe strong { display: block; color: #0f2740; margin-bottom: .15rem; }
+  .aufgabe span { color: #4a5568; font-size: .85rem; }
+  .rolle { border-left: 4px solid #2f855a; padding: .1rem 0 .1rem 1rem; margin: 0 0 1.2rem; }
+  .rolle h3 { margin: 0 0 .2rem; font-size: 1rem; color: #0f2740; }
+  .rolle p { margin: 0 0 .3rem; color: #4a5568; font-size: .9rem; }
+  .treffer { border: 1px solid #e2e8f0; border-radius: 10px; padding: .7rem 1rem; margin-bottom: .7rem;
+             background: #fff; }
+  .treffer a { font-weight: 600; text-decoration: none; }
+  .treffer .wo { display: block; color: #718096; font-size: .78rem; margin-bottom: .25rem; }
+  .treffer p { margin: .3rem 0 0; color: #2d3748; font-size: .9rem; }
+  .treffer mark { background: #fefcbf; }
+  #suchfeld { width: 100%; padding: .6rem .8rem; font-size: 1rem; border: 1px solid #cbd5e0;
+              border-radius: 8px; }
+  .registerblock { margin-bottom: 1.2rem; }
+  .registerblock h2 { margin: .8rem 0 .3rem; }
+  .registerblock ul { margin: 0; padding-left: 1.1rem; columns: 2; column-gap: 1.6rem; }
+  .registerblock li { break-inside: avoid; margin: .1rem 0; }
+  .buchstaben { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: 1.2rem; }
+  .buchstaben a { display: inline-block; padding: .15rem .5rem; border: 1px solid #e2e8f0;
+                  border-radius: 6px; text-decoration: none; font-weight: 600; }
   footer { text-align: center; color: #718096; font-size: .8rem; padding: 0 1rem 2.5rem; }
   @media (max-width: 860px) {
+    .suchform { max-width: none; order: 3; }
     .layout { flex-direction: column; padding-top: 1rem; }
     nav.kapitel { position: static; flex: 1 1 auto; width: 100%; background: #fff;
                   border: 1px solid #e2e8f0; border-radius: 10px; padding: .9rem 1rem; }
@@ -332,12 +408,20 @@ function rahmen({ slug, titel, inhaltHtml }) {
   <div class="wrap">
     <a class="marke" href="index.html">${esc(manifest.titel)}
       <span class="sub">${esc(manifest.untertitel)}</span></a>
+    <form class="suchform" action="suche.html" method="get" role="search">
+      <input type="search" name="q" placeholder="Im Handbuch suchen …"
+             aria-label="Im Handbuch suchen" value="">
+      <button type="submit">Suchen</button>
+    </form>
     <a class="dl" href="../">Programm herunterladen</a>
   </div>
 </header>
 <div class="layout">
   <nav class="kapitel">
 ${navHtml(slug)}
+    <h2>Nachschlagen</h2>
+      <a href="suche.html"${slug === "suche" ? ' class="hier"' : ""}>Suche</a>
+      <a href="register.html"${slug === "register" ? ' class="hier"' : ""}>Stichwortverzeichnis</a>
   </nav>
   <main>
 ${inhaltHtml}
@@ -350,7 +434,43 @@ ${inhaltHtml}
 }
 
 // ── Startseite ────────────────────────────────────────────────────────────
+//
+// Aufgaben zuerst, Kapitelliste danach. Wer ins Handbuch schaut, hat ein
+// Problem und keine Lust, aus 24 Kapiteltiteln zu erraten, in welchem die
+// Antwort steht. Die Kapitelliste bleibt darunter — sie ist die Landkarte,
+// nicht der Einstieg.
 function startseite() {
+  const aufgaben = (manifest.aufgaben || [])
+    .map(
+      (a) =>
+        `    <a class="aufgabe" href="${esc(a.ziel)}"><strong>${esc(a.frage)}</strong>` +
+        `<span>${esc(a.wo)}</span></a>`
+    )
+    .join("\n");
+  const aufgabenHtml = aufgaben
+    ? `<h2>Ich möchte …</h2>\n  <div class="aufgaben">\n${aufgaben}\n  </div>`
+    : "";
+
+  const rollen = (manifest.rollen || [])
+    .map((r) => {
+      const links = r.seiten
+        .map((slug) => {
+          const s = inhalt.find((x) => x.slug === slug);
+          // Laut statt still: Ein Tippfehler im Slug wuerde den Link sonst
+          // einfach weglassen — die Rolle sieht dann nur etwas kuerzer aus.
+          if (!s) {
+            probleme.push(`Rolle "${r.name}": Seite "${slug}" gibt es nicht.`);
+            return null;
+          }
+          return `<a href="${s.slug}.html">${esc(s.titel)}</a>`;
+        })
+        .filter(Boolean)
+        .join(" · ");
+      return `  <div class="rolle">\n    <h3>${esc(r.name)}</h3>\n    <p>${esc(r.beschreibung)}</p>\n    <p>${links}</p>\n  </div>`;
+    })
+    .join("\n");
+  const rollenHtml = rollen ? `<h2>Wer bist du gerade?</h2>\n${rollen}` : "";
+
   const gruppen = manifest.gruppen
     .map((g) => {
       const li = g.seiten
@@ -366,15 +486,160 @@ function startseite() {
   return rahmen({
     slug: "index",
     titel: "Übersicht",
-    inhaltHtml: `<h1>${esc(manifest.titel)}</h1>\n<p>${esc(manifest.untertitel)}</p>\n${gruppen}`,
+    inhaltHtml:
+      `<h1>${esc(manifest.titel)}</h1>\n<p>${esc(manifest.untertitel)}</p>\n` +
+      `<p>Nicht gefunden, was du suchst? <a href="suche.html">Durchsuche das Handbuch</a> ` +
+      `oder sieh ins <a href="register.html">Stichwortverzeichnis</a>.</p>\n` +
+      `${aufgabenHtml}\n${rollenHtml}\n<h2>Alle Kapitel</h2>\n${gruppen}`,
+  });
+}
+
+// ── Suchseite ─────────────────────────────────────────────────────────────
+// Der Index liegt NUR hier inline, nicht auf jeder Kapitelseite — sonst
+// traegt jede Seite ein paar hundert Kilobyte mit sich herum, die fast nie
+// gebraucht werden. Die Suchfelder der Kapitel schicken per GET hierher.
+function suchseite(index) {
+  const daten = JSON.stringify(index).replace(/</g, "\\u003c");
+  const js = `
+const IDX = ${daten};
+const feld = document.getElementById("suchfeld");
+const ziel = document.getElementById("ergebnisse");
+function norm(s){return s.toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g,"");}
+function auszug(text, worte){
+  const n = norm(text);
+  let pos = -1;
+  for (const w of worte){ const i = n.indexOf(w); if (i >= 0 && (pos < 0 || i < pos)) pos = i; }
+  const von = pos < 0 ? 0 : Math.max(0, pos - 70);
+  let roh = text.slice(von, von + 240);
+  if (von > 0) roh = "… " + roh;
+  if (von + 240 < text.length) roh += " …";
+  const esc = roh.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  // Treffer hervorheben, ohne die HTML-Maskierung zu zerstoeren.
+  let aus = esc;
+  for (const w of worte){
+    if (!w) continue;
+    const re = new RegExp("(" + w.replace(/[.*+?^\${}()|[\\]\\\\]/g, "\\\\$&") + ")", "gi");
+    aus = aus.replace(re, "<mark>$1</mark>");
+  }
+  return aus;
+}
+function suche(q){
+  const worte = norm(q).split(/\\s+/).filter(Boolean);
+  if (!worte.length){ ziel.innerHTML = "<p>Gib oben einen Suchbegriff ein.</p>"; return; }
+  const treffer = [];
+  for (const e of IDX){
+    const h = norm(e.h), x = norm(e.x), tt = norm(e.t);
+    let punkte = 0, alle = true;
+    for (const w of worte){
+      let p = 0;
+      if (h.includes(w)) p += 10;
+      if (tt.includes(w)) p += 4;
+      if (x.includes(w)) p += 2;
+      if (p === 0) alle = false;
+      punkte += p;
+    }
+    if (alle && punkte > 0) treffer.push({ e, punkte });
+  }
+  treffer.sort((a,b) => b.punkte - a.punkte);
+  if (!treffer.length){
+    ziel.innerHTML = "<p>Keine Treffer für <strong>" +
+      q.replace(/&/g,"&amp;").replace(/</g,"&lt;") +
+      "</strong>. Versuch ein einzelnes Wort oder sieh ins " +
+      "<a href='register.html'>Stichwortverzeichnis</a>.</p>";
+    return;
+  }
+  const zeilen = treffer.slice(0, 60).map(function(t){
+    const e = t.e;
+    const href = e.p + ".html" + (e.a ? "#" + e.a : "");
+    return "<div class='treffer'><span class='wo'>" + e.t + "</span>" +
+      "<a href='" + href + "'>" + e.h + "</a><p>" + auszug(e.x, worte) + "</p></div>";
+  });
+  ziel.innerHTML = "<p>" + treffer.length + " Treffer</p>" + zeilen.join("");
+}
+const q0 = new URLSearchParams(location.search).get("q") || "";
+feld.value = q0;
+suche(q0);
+let timer;
+feld.addEventListener("input", function(){
+  clearTimeout(timer);
+  timer = setTimeout(function(){ suche(feld.value); }, 120);
+});
+feld.focus();
+`;
+  return rahmen({
+    slug: "suche",
+    titel: "Suche",
+    inhaltHtml:
+      `<h1>Suche</h1>\n` +
+      `<p>Durchsucht alle Kapitel des Handbuchs — Überschriften und Fließtext.</p>\n` +
+      `<input id="suchfeld" type="search" placeholder="Suchbegriff …" autocomplete="off">\n` +
+      `<div id="ergebnisse" style="margin-top:1.2rem"></div>\n` +
+      `<script>${js}</script>`,
+  });
+}
+
+// ── Stichwortverzeichnis ──────────────────────────────────────────────────
+// Alle Abschnittsüberschriften alphabetisch. Das klassische Register eines
+// Handbuchs: Wer den Fachbegriff kennt, aber nicht das Kapitel, kommt hier
+// in einem Schritt ans Ziel.
+function registerseite(index) {
+  const eintraege = index
+    .filter((e) => e.a && e.h)
+    .map((e) => ({ wort: e.h.trim(), href: `${e.p}.html#${e.a}`, kapitel: e.t }))
+    .sort((a, b) => a.wort.localeCompare(b.wort, "de"));
+
+  const nachBuchstabe = new Map();
+  for (const e of eintraege) {
+    const roh = e.wort[0].toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const b = /[A-Z]/.test(roh) ? roh : "#";
+    if (!nachBuchstabe.has(b)) nachBuchstabe.set(b, []);
+    nachBuchstabe.get(b).push(e);
+  }
+  const buchstaben = [...nachBuchstabe.keys()].sort((a, b) =>
+    a === "#" ? 1 : b === "#" ? -1 : a.localeCompare(b)
+  );
+
+  const sprung = buchstaben
+    .map((b) => `<a href="#buchstabe-${b === "#" ? "sonstige" : b}">${b}</a>`)
+    .join("");
+  const bloecke = buchstaben
+    .map((b) => {
+      const id = `buchstabe-${b === "#" ? "sonstige" : b}`;
+      const li = nachBuchstabe
+        .get(b)
+        .map(
+          (e) =>
+            `      <li><a href="${esc(e.href)}">${esc(e.wort)}</a> ` +
+            `<span style="color:#718096;font-size:.82rem">— ${esc(e.kapitel)}</span></li>`
+        )
+        .join("\n");
+      return `  <div class="registerblock">\n    <h2 id="${id}">${b}</h2>\n    <ul>\n${li}\n    </ul>\n  </div>`;
+    })
+    .join("\n");
+
+  return rahmen({
+    slug: "register",
+    titel: "Stichwortverzeichnis",
+    inhaltHtml:
+      `<h1>Stichwortverzeichnis</h1>\n` +
+      `<p>Alle Abschnitte des Handbuchs, alphabetisch — ${eintraege.length} Einträge. ` +
+      `Freitext findest du über die <a href="suche.html">Suche</a>.</p>\n` +
+      `<div class="buchstaben">${sprung}</div>\n${bloecke}`,
   });
 }
 
 // ── Bauen ─────────────────────────────────────────────────────────────────
 const gebaut = [];
+const suchIndex = [];
 for (let i = 0; i < inhalt.length; i++) {
   const s = inhalt[i];
-  const { html, toc } = seiteBauen(s);
+  const { html, toc, abschnitte } = seiteBauen(s);
+  for (const a of abschnitte) {
+    // Abschnitte ohne Inhalt (reine Zwischenüberschrift) tragen nichts zur
+    // Suche bei, blähen den Index aber auf.
+    if (a.x.length < 20 && a.h === s.titel) continue;
+    suchIndex.push({ p: s.slug, t: s.titel, h: a.h, a: a.a, x: a.x });
+  }
   const tocHtml =
     toc.length >= 3
       ? `<div class="toc"><strong>Auf dieser Seite</strong><ul>` +
@@ -397,7 +662,11 @@ for (let i = 0; i < inhalt.length; i++) {
     }),
   });
 }
+// Startseite VOR der Problem-Pruefung bauen: Sie prueft die Rollen-Slugs, und
+// gemeldete Probleme sollen den Lauf noch abbrechen koennen.
 gebaut.push({ name: "index.html", text: startseite() });
+gebaut.push({ name: "suche.html", text: suchseite(suchIndex) });
+gebaut.push({ name: "register.html", text: registerseite(suchIndex) });
 
 // ── Ergebnis ──────────────────────────────────────────────────────────────
 if (probleme.length) {
@@ -410,4 +679,7 @@ if (probleme.length) {
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 for (const d of gebaut) writeFileSync(join(outDir, d.name), d.text);
-console.error(`${outDir}: ${gebaut.length} Seiten geschrieben (${inhalt.length} Kapitel + Startseite).`);
+console.error(
+  `${outDir}: ${gebaut.length} Seiten geschrieben (${inhalt.length} Kapitel, ` +
+  `Startseite, Suche über ${suchIndex.length} Abschnitte, Register).`
+);

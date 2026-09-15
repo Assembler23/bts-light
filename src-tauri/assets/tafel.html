@@ -32,7 +32,9 @@
        läuft `min(40vw, 60vmin)` sonst im Hochformat fast bis an die
        Kachelkante — kaum Reserve. Schmalere Ränder geben jeder Kachel
        48vw statt 46,5vw. */
-    .punkte { display: flex; flex-direction: row; align-items: stretch;
+    /* touch-action: In der Anzeige-Hülle schaltet ein Tipp die Ansicht —
+       ohne `manipulation` würde iPadOS beim zweiten schnellen Tipp zoomen. */
+    .punkte { touch-action: manipulation; display: flex; flex-direction: row; align-items: stretch;
       justify-content: center; gap: 2vw; width: 100vw; padding: 0 1vw;
       box-sizing: border-box; }
     .seite { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
@@ -48,10 +50,40 @@
       top: 50%; height: .4vmin; background: rgba(0,0,0,.55); }
     .zahl { font-size: min(40vw, 60vmin); font-weight: 900; line-height: 1;
       font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    /* Rand je Seite: Aufschlag-Punkt (nebeneinander: unter der Kachel) und
+       der Satzstand der Seite (nur übereinander sichtbar, s. u.). */
+    .rand { display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 2vmin; }
+    .saetze-seite { display: none; font-size: 9vmin; font-weight: 800;
+      color: #fbbf24; line-height: 1; }
     .aufschlag { width: 4vmin; height: 4vmin; border-radius: 50%;
       background: transparent; }
     .seite.serve .aufschlag { background: #fbbf24;
       box-shadow: 0 0 2.5vmin rgba(251,191,36,.8); }
+    /* Übereinander (Bediener sitzt HINTER dem Feld, Spec-Erweiterung vom
+       06.09.2026): oben die ferne Seite (= „rechts"), unten die nahe
+       (= „links"); die Reihenfolge dreht nur die CSS-`order`, die Seiten-
+       logik bleibt dieselbe. Der gemeinsame Satzstand oben entfällt, weil
+       „1 : 0" von links nach rechts nichts mehr über oben/unten sagt —
+       stattdessen steht der Satzstand je Seite im Rand neben der Kachel.
+       Ziffernhöhe: „88" ist bei font-weight 900 ~1,16 em breit (beide
+       Ziffern zusammen, gemessen) und muss in die Kachel (85vw) passen →
+       70vw; die Höhe deckelt bei 40vh je Kachel (halbe Höhe minus Rand,
+       line-height 1). Im Hochformat eines 10-Zoll-Tablets sind das
+       ~64 vmin — deutlich über dem Spec-Minimum von 35 vmin. */
+    #tafel-view.uebereinander { padding: 8vmin 0 2vh; box-sizing: border-box; }
+    #tafel-view.uebereinander > .saetze { display: none; }
+    #tafel-view.uebereinander .punkte { flex: 1 1 0; min-height: 0;
+      flex-direction: column; gap: 2vh; padding: 0 2vw; }
+    #tafel-view.uebereinander .seite { flex: 1 1 0; min-height: 0;
+      flex-direction: row; width: 100%; gap: 1vw; }
+    #tafel-view.uebereinander #seite-rechts { order: 0; }
+    #tafel-view.uebereinander #seite-links { order: 1; }
+    #tafel-view.uebereinander .kachel { flex: 1 1 0; min-width: 0;
+      height: 100%; padding: 0; }
+    #tafel-view.uebereinander .zahl { font-size: min(70vw, 40vh); }
+    #tafel-view.uebereinander .rand { flex: 0 0 10vw; }
+    #tafel-view.uebereinander .saetze-seite { display: block; }
     .feld { position: absolute; top: 2vmin; left: 3vmin; font-size: 4vmin;
       font-weight: 700; opacity: .55; }
     /* Leerlauf: kein Spiel → Feldbezeichnung groß. */
@@ -133,11 +165,11 @@
       <div class="punkte">
         <div class="seite" id="seite-links">
           <div class="kachel"><span class="zahl" id="punkte-links">0</span></div>
-          <span class="aufschlag" aria-hidden="true"></span>
+          <div class="rand"><span class="saetze-seite" id="saetze-seite-links">0</span><span class="aufschlag" aria-hidden="true"></span></div>
         </div>
         <div class="seite" id="seite-rechts">
           <div class="kachel"><span class="zahl" id="punkte-rechts">0</span></div>
-          <span class="aufschlag" aria-hidden="true"></span>
+          <div class="rand"><span class="saetze-seite" id="saetze-seite-rechts">0</span><span class="aufschlag" aria-hidden="true"></span></div>
         </div>
       </div>
     </div>
@@ -271,6 +303,8 @@
     tafelFeld: document.getElementById("tafel-feld"),
     saetzeL: document.getElementById("saetze-links"),
     saetzeR: document.getElementById("saetze-rechts"),
+    saetzeSeiteL: document.getElementById("saetze-seite-links"),
+    saetzeSeiteR: document.getElementById("saetze-seite-rechts"),
     seiteL: document.getElementById("seite-links"),
     seiteR: document.getElementById("seite-rechts"),
     punkteL: document.getElementById("punkte-links"),
@@ -315,6 +349,15 @@
    *  - `retired`: der unvollständige letzte Satz steht groß, zählt aber nicht.
    *  - `spiegel` tauscht links/rechts **nach** der Seitenbestimmung — wirkt
    *    also auch ohne `teamOnSide` (Tafel steht dem Schiedsrichter gegenüber).
+   *  - **Anordnung** (06.09.2026): Wer hinter dem Feld sitzt, sieht die Teams
+   *    nicht links/rechts, sondern vorn/hinten. Dann stehen die Punkte
+   *    übereinander: `links` → **unten** (nah), `rechts` → **oben** (fern);
+   *    `spiegel` dreht auch das. `auto` folgt der Ausrichtung des Geräts
+   *    (Hochformat → übereinander), `nebeneinander`/`uebereinander` sind die
+   *    Hand-Übersteuerung aus der Anzeige-Hülle (`?anordnung=`).
+   *  - **Ansicht per Tipp** (13.09.2026): In der Hülle schaltet ein Tipp auf
+   *    die Zahlen Spiegel + Anordnung reihum — die Tafel meldet das nur per
+   *    `postMessage`, die Hülle lädt sie mit neuen Parametern (s. u.).
    */
   function zahl(v) {
     const n = Number(v);
@@ -382,6 +425,37 @@
     return { links, rechts, entschieden: finished };
   }
 
+  /** Erlaubte Werte für `?anordnung=` — alles andere gilt als `auto`. */
+  const ANORDNUNGEN = ["auto", "nebeneinander", "uebereinander"];
+
+  /** @param {unknown} roh Wert aus der Adresse (oder gemerkt). */
+  function anordnungAusQuery(roh) {
+    return typeof roh === "string" && ANORDNUNGEN.includes(roh) && roh !== "auto" ? roh : "auto";
+  }
+
+  /**
+   * Welche Anordnung die Tafel wirklich zeichnet.
+   * @param {unknown} anordnung `auto` | `nebeneinander` | `uebereinander`.
+   * @param {boolean} hochformat Gerät steht hoch (Breite < Höhe).
+   * @returns {"nebeneinander"|"uebereinander"}
+   */
+  function effektiveAnordnung(anordnung, hochformat) {
+    const a = anordnungAusQuery(anordnung);
+    if (a !== "auto") return a;
+    return hochformat ? "uebereinander" : "nebeneinander";
+  }
+  // ── Ende Inline-Kopie ──
+
+  // Anordnung der Punkte (Bediener hinter dem Feld → übereinander). Aus der
+  // Hülle als ?anordnung=nebeneinander|uebereinander; ohne Angabe `auto`
+  // (folgt der Geräte-Ausrichtung). Im Gerätemodus wie `spiegel` ignoriert —
+  // dort gilt nur `auto`, ein hochkant montierter TV bekommt so trotzdem
+  // die passende Anordnung. Steht hinter der Inline-Kopie, weil
+  // `ANORDNUNGEN` dort eine `const` ist (keine Hoisting-Zone davor).
+  var ANORDNUNG = MODE !== "device"
+    ? anordnungAusQuery(new URLSearchParams(location.search).get("anordnung"))
+    : "auto";
+
   // ─── Tafel-Ansicht ───────────────────────────────────────────────────
   function renderTafel(state) {
     var m = state.match;
@@ -391,9 +465,50 @@
     els.punkteR.textContent = String(t.rechts.punkte);
     els.saetzeL.textContent = String(t.links.saetze);
     els.saetzeR.textContent = String(t.rechts.saetze);
+    els.saetzeSeiteL.textContent = String(t.links.saetze);
+    els.saetzeSeiteR.textContent = String(t.rechts.saetze);
     els.seiteL.classList.toggle("serve", t.links.aufschlag);
     els.seiteR.classList.toggle("serve", t.rechts.aufschlag);
     els.tafelFeld.textContent = feldText(state);
+  }
+
+  // Anordnung anwenden: `auto` hört auf die Ausrichtung des Geräts (Drehen
+  // des Tablets), eine Hand-Übersteuerung aus der Hülle bleibt fest. Die
+  // Media-Query ist die Wahrheit; `resize` fängt Browser ohne `change`-Event.
+  var hochformatMq = window.matchMedia ? window.matchMedia("(orientation: portrait)") : null;
+  function hochformat() {
+    return hochformatMq ? hochformatMq.matches : window.innerHeight > window.innerWidth;
+  }
+  function anordnungAnwenden() {
+    els.tafelView.classList.toggle("uebereinander", effektiveAnordnung(ANORDNUNG, hochformat()) === "uebereinander");
+  }
+  if (hochformatMq) {
+    if (hochformatMq.addEventListener) hochformatMq.addEventListener("change", anordnungAnwenden);
+    else if (hochformatMq.addListener) hochformatMq.addListener(anordnungAnwenden);
+  }
+  window.addEventListener("resize", anordnungAnwenden);
+  anordnungAnwenden();
+
+  // Tipp auf die Zahlen → nächste Ansicht (Spiegelung + Anordnung reihum).
+  // Die Tafel selbst kennt nur ihre Adresse; geschaltet wird in der
+  // Anzeige-Hülle, die das iframe mit den neuen Parametern neu lädt. Darum
+  // nur eine Nachricht an das Elternfenster — und nur, wenn es eines
+  // DERSELBEN Herkunft gibt (die Hülle; eine fremde Seite, die die Tafel
+  // einbettet, bekommt weder Zeiger noch Nachricht) und die Tafel nicht im
+  // Gerätemodus läuft (dort gibt es weder Spiegel noch Hand-Anordnung, s. o.).
+  var NACHRICHT_NAECHSTE_ANSICHT = "bts-anzeige:naechste-ansicht";
+  function inEigenerHuelle() {
+    if (window.parent === window) return false;
+    // Der Zugriff auf `location` eines fremden Fensters wirft → nicht unsere.
+    try { return window.parent.location.origin === location.origin; }
+    catch (e) { return false; }
+  }
+  var elPunkte = document.querySelector("#tafel-view .punkte");
+  if (elPunkte && MODE !== "device" && inEigenerHuelle()) {
+    elPunkte.style.cursor = "pointer";
+    elPunkte.addEventListener("click", function () {
+      window.parent.postMessage({ typ: NACHRICHT_NAECHSTE_ANSICHT }, location.origin);
+    });
   }
 
   // Feldbezeichnung; im Relay ohne verbundenen Host ist das Label leer →
@@ -740,6 +855,40 @@
     return opt;
   }
 
+  // Frist des Stand-Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s. Ein Abruf,
+  // der weder scheitert noch antwortet, blockierte sonst alle folgenden
+  // (Turnier 05./06.09.2026). **Inline-Kopie von `src/io/abrufFrist.mjs`**
+  // — dort die kanonische Fassung mit Begründung und Test
+  // (`scripts/test-abruf-frist.mjs`, eigener CI-Schritt); hier ohne
+  // `fetchFn`-Parameter. Änderungen hier und dort gemeinsam.
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error("Abruf-Frist überschritten (" + was + ")"));
+      };
+      timer = setTimeout(function () { abbrechen("Kopfzeilen " + KOPF_FRIST_MS + " ms"); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error("Antwort nach Ablauf der Frist verworfen");
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen("Rumpf " + RUMPF_FRIST_MS + " ms"); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
   function poll() {
     // In-Flight-Schutz: Nudge und Fallback teilen sich denselben Fetch. Läuft
     // schon einer, merken wir EINEN Nachschlag, damit am Ende sicher der
@@ -752,8 +901,7 @@
     letzterAbrufMs = Date.now();
     var quelle = naechsteQuelle;
     naechsteQuelle = "poll";
-    fetch(stateUrl(quelle), abrufOptionen())
-      .then(function (r) {
+    abrufMitFrist(stateUrl(quelle), abrufOptionen(), function (r) {
         if (r.status === 304) {
           // Nichts Neues: letzten Stand behalten. Der Uhr-Offset wird aus dem
           // 304 NICHT abgeleitet (kein Body) — frische Werte kommen über den
@@ -762,11 +910,21 @@
           return null;
         }
         if (!r.ok) throw new Error("HTTP " + r.status);
+        // Der Leser bleibt frei von Nebenwirkungen und reicht Stand und Marke
+        // nur durch. Die Buchführung steht in der äußeren Kette — und die
+        // läuft nur, wenn die Frist gehalten hat. Ein Rumpf, der erst nach
+        // der Frist eintrifft, darf nichts mehr bewirken (Review-Fund
+        // 08.09.2026).
         var etag = r.headers.get("ETag");
-        if (etag) { lastEtag = etag; letzterVollerAbrufMs = Date.now(); }
-        return r.json();
+        return r.json().then(function (state) { return { state: state, etag: etag }; });
       })
-      .then(function (state) {
+      .then(function (paket) {
+        // Marke erst hier, NACH dem Rumpf: Bricht die Frist den Rumpf ab,
+        // fragte der nächste Abruf sonst mit der Marke eines nie gezeigten
+        // Standes — bekäme ein 304, räumte die Blende ab und zeigte den alten
+        // Stand bis zur nächsten Änderung.
+        var state = paket === null ? null : paket.state;
+        if (paket && paket.etag) { lastEtag = paket.etag; letzterVollerAbrufMs = Date.now(); }
         if (state === null) {
           if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
           lastFetchOk = true; fetchFehler = 0;

@@ -45,6 +45,20 @@ Der **Updater** nutzt weiterhin ausschließlich die versionierte URL aus
 des Court-Monitors hat ohnehin einen festen Namen
 (`bts-light-pi.img.xz`, siehe [pi-master-image.md](pi-master-image.md)).
 
+Ebenso fest ist der Link für die **Tablet-Kiosk-App**:
+
+    https://badhub.de/download/bts-light/bts-light-tablet.apk
+
+Der `publish`-Job legt diesen festen Namen **nur** für eine SIGNIERTE APK an
+(sobald die beiden Android-Keystore-Secrets hinterlegt sind). Eine
+Debug-APK (Secrets fehlen) ist debuggable und würde später kein signiertes
+Update mehr annehmen — sie bleibt deshalb ausschließlich unter ihrem
+versionierten `-debug.apk`-Namen erreichbar, nie unter dem festen Link
+(siehe „Benötigte GitHub-Secrets" unten und
+[tablet-android-app.md](tablet-android-app.md)). Auf der Release-Seite
+steht trotzdem eine APK zum Download: die neueste **signierte**, sonst die
+neueste Debug-APK unter ihrem versionierten Namen und mit Hinweis.
+
 ## Handbuch (`/download/bts-light/handbuch/`)
 
 Die öffentliche Anleitung unter
@@ -112,7 +126,17 @@ Download-Link, Datum und den Kompakt-Änderungen aus
 beim Hallenaufbau beschrieben, oft ohne Zugriff auf dieses Repo. Der Block ist
 im Generator fest verdrahtet (das Image kommt **nicht** aus dem
 Release-Workflow, sondern per rsync, siehe [pi-dual-image.md](pi-dual-image.md));
-`scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht. Das **Datum je Version** kommt aus dem
+`scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht.
+Darunter der Block **„Zähl-Tablets: Android-App für Fire-Tablets“** mit der
+neuesten Tablet-APK: Der publish-Job holt per ssh die APK-Dateien, die auf
+dem Server liegen (`--apks`), plus die frisch gebaute; der Kopf-Knopf nimmt
+die neueste **signierte** APK (fester Name `bts-light-tablet.apk`), und nur
+wenn es keine signierte gibt, die neueste versionierte `-debug.apk` mit dem
+Hinweis auf die Debug-Signatur — signiert vor Version, damit der feste Name
+nie unter einem Debug-Etikett steht. Zusätzlich hat jede Version, für die eine APK auf dem
+Server liegt, neben dem Installer-Knopf einen Knopf „Tablet-APK“ (signiert
+vor Debug). `scripts/test-release-page-apk.mjs` prüft beide Fälle und dass
+ohne `--apks` nichts versprochen wird. Das **Datum je Version** kommt aus dem
 Erstell-Datum des Git-Tags (`git for-each-ref … refs/tags` →
 `--dates`-Datei; der publish-Job checkt dafür mit `fetch-depth: 0` +
 `fetch-tags` aus). Die Seite wird bei **jedem Tag-Release
@@ -222,6 +246,19 @@ Button) innerhalb weniger Sekunden.
 `workflow_dispatch` (Actions-Tab → „Run workflow") baut nur zum Test und
 veröffentlicht **nicht**.
 
+### CI vor dem Release (`ci.yml`)
+
+Drei Jobs je Push/PR: **`build`** auf `windows-latest` (Zielplattform —
+Frontend, Asset-Syntax, JS-Regeltests, `cargo fmt`/Clippy/Tests),
+**`android`** (Kiosk-App: JVM-Tests + Debug-APK) und seit 15.09.2026
+**`linux`** auf `ubuntu-22.04`: Clippy mit `-D warnings` und
+`cargo test --workspace` mit den Tauri-System-Paketen (WebKitGTK 4.1, GTK 3,
+AppIndicator, librsvg). Der Linux-Job baut kein Paket; er hält den
+`not(windows)`-Zweig des Rust-Kerns grün (GDI-Druck → `NichtUnterstuetzt`,
+SSID → `iwgetid`), damit sich auf Linux entwickeln lässt (Roadmap
+„Linux-Variante", Stufe 0). Release-Referenz bleibt der Windows-Job;
+Windows-Minuten zählen bei GitHub doppelt, Ubuntu-Minuten einfach.
+
 ## Wenn das Taggen vergessen wird
 
 Der Versionssprung passiert inzwischen **innerhalb** der Feature-Commits
@@ -276,6 +313,39 @@ Zustellung. Wer das Repo zwei Tage nicht öffnet, sieht auch das rote Kreuz nich
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Passwort dieses Schlüssels |
 | `SSH_DEPLOY_KEY` | SSH-Key für den Upload nach badhub.de |
 | `SSH_KNOWN_HOSTS` | Host-Fingerprint des badhub.de-Servers |
+| `ANDROID_KEYSTORE_B64` | Base64 des Signatur-Keystores der Tablet-Kiosk-App, Alias `bts-light-tablet` |
+| `ANDROID_KEYSTORE_PASS` | Passwort dieses Keystores |
+
+Der **Android-Keystore** wird wie der Updater-Schlüssel **nie gewechselt** —
+Sideload-Updates auf ein bereits eingerichtetes Tablet verlangen dieselbe
+Signatur, siehe [tablet-android-app.md](tablet-android-app.md#update-der-app).
+Erzeugt wird er einmalig mit
+
+    keytool -genkeypair -v -keystore bts-light-tablet.keystore -alias bts-light-tablet -keyalg RSA -keysize 2048 -validity 10000
+
+und für das Secret Base64-kodiert:
+
+    base64 -w0 bts-light-tablet.keystore
+
+Fehlt `ANDROID_KEYSTORE_B64`, baut der `android`-Job im Release-Workflow
+statt einer signierten nur eine unsignierte Debug-APK — der Job ist
+`continue-on-error`, ein Fehlschlag dort blockiert also nie den
+Windows-Installer oder `latest.json`.
+
+Das SDK richtet in beiden Workflows `android-actions/setup-android` ein —
+**mit `packages: platform-tools`**. Ohne die Angabe installiert die Action
+(auch in v4) zusätzlich das alte SDK-Paket `tools`, das Google aus dem
+Repository entfernt hat; seit 15.09.2026 brach der Job damit vor dem ersten
+Gradle-Aufruf ab („Failed to find package 'tools'"), in der CI auf main wie
+in jedem PR. Build-Tools und Plattform braucht die Action nicht zu
+installieren: AGP lädt sie beim Bau selbst nach, die Lizenzen nimmt die
+Action an.
+
+Die `versionCode`-Formel steht **zweimal** im Repo — `app/build.gradle.kts`
+(`versionCodeAus`) und `kern/Version.kt` (`versionCode`, für den JVM-Test)
+— ein CI-Job vergleicht sie nicht gegeneinander. Läuft eine der beiden
+Stellen der anderen davon, entsteht ein falscher `versionCode`, den nichts
+automatisch entdeckt: beim Ändern der Formel **immer beide** anfassen.
 
 Das **Updater-Schlüsselpaar** wurde einmalig mit
 `npx tauri signer generate` erzeugt. Der Public Key steht in

@@ -2806,6 +2806,43 @@ function setHall(hall) {
  *  sich zu EINEM Abruf bündeln statt sich gegenseitig zu überholen. Ein
  *  Anstoß während eines laufenden Abrufs setzt deshalb nur eine Marke,
  *  die am Ende genau einen Nachschlag auslöst. */
+// (Der Wettlauf-Rückfall ohne AbortController ist hier unerreichbar — die
+// Seite setzt ohnehin einen neueren Browser voraus; die Kopie bleibt bewusst
+// byte-gleich mit den Anzeige-Seiten, damit der Drift-Test greift.)
+// Frist des Stand-Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s. Ein Abruf,
+// der weder scheitert noch antwortet, blockierte sonst alle folgenden
+// (Turnier 05./06.09.2026). **Inline-Kopie von `src/io/abrufFrist.mjs`**
+// — dort die kanonische Fassung mit Begründung und Test
+// (`scripts/test-abruf-frist.mjs`, eigener CI-Schritt); hier ohne
+// `fetchFn`-Parameter. Änderungen hier und dort gemeinsam.
+var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+function abrufMitFrist(url, opt, lesen) {
+  var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+  var o = Object.assign({}, opt);
+  if (ctrl) o.signal = ctrl.signal;
+  var timer = null, abgelaufen = false, abbrechen = null;
+  var abbruch = new Promise(function (_, reject) {
+    abbrechen = function (was) {
+      abgelaufen = true;
+      if (ctrl) ctrl.abort();
+      reject(new Error("Abruf-Frist überschritten (" + was + ")"));
+    };
+    timer = setTimeout(function () { abbrechen("Kopfzeilen " + KOPF_FRIST_MS + " ms"); }, KOPF_FRIST_MS);
+  });
+  var abruf = fetch(url, o).then(function (r) {
+    // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+    // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+    if (abgelaufen) throw new Error("Antwort nach Ablauf der Frist verworfen");
+    clearTimeout(timer);
+    timer = setTimeout(function () { abbrechen("Rumpf " + RUMPF_FRIST_MS + " ms"); }, RUMPF_FRIST_MS);
+    return lesen ? lesen(r) : r;
+  });
+  return Promise.race([abruf, abbruch]).then(
+    function (wert) { clearTimeout(timer); return wert; },
+    function (fehler) { clearTimeout(timer); throw fehler; }
+  );
+}
+
 let pollLaeuft = null;
 let pollNachfolge = null;
 function poll() {
@@ -2844,7 +2881,13 @@ async function pollEinmal() {
     // beantwortet das nicht und schickt einfach den vollen Stand.
     const kopf = { Authorization: "Bearer " + token };
     if (etag) kopf["If-None-Match"] = etag;
-    const res = await fetch(API + "/state", { headers: kopf, cache: "no-store" });
+    // Kopfzeilen und Rumpf in einem Zug hinter der Frist: Ein Abruf, der
+    // weder scheitert noch antwortet, hielte sonst `pollLaeuft` für immer —
+    // und die Kopfzeile meldete dabei „aktuell", weil `failures` nur im
+    // Fehlerzweig zählt (Review-Fund 08.09.2026, derselbe Hänger wie bei
+    // den Monitoren). Der Rumpf wird nur bei 2xx gelesen; 304 hat keinen.
+    const { res, rumpf } = await abrufMitFrist(API + "/state", { headers: kopf, cache: "no-store" },
+      async (r) => ({ res: r, rumpf: r.ok ? await r.json() : null }));
     if (res.status === 304) {
       // Unverändert: Die Verbindung ist gesund, es gibt nur nichts Neues.
       // Die Uhr trotzdem nachziehen: In einer ruhigen Phase ist **jede**
@@ -2901,7 +2944,7 @@ async function pollEinmal() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     etag = res.headers.get("etag") || "";
     readActiveProfileHeader(res);
-    state = await res.json();
+    state = rumpf;
     // Die Serverzeit bevorzugt aus dem Kopf der Antwort: Über den Relay ist
     // der Stand zwischengespeichert, sein `server_now_ms` also der Zeitpunkt
     // des letzten Pushs. Nach einer ruhigen Viertelstunde gingen alle Uhren

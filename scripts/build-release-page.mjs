@@ -6,6 +6,7 @@
 //   node scripts/build-release-page.mjs \
 //     --changelog docs/changelog.md \
 //     --files vorhandene-exes.txt \      (eine Datei je Zeile; optional)
+//     --apks vorhandene-apks.txt \       (Tablet-APKs auf dem Server; optional)
 //     --out index.html \
 //     --notes-out notes.txt --notes-version 0.9.147   (optional)
 //     --notes-since 0.9.140                           (optional)
@@ -17,6 +18,11 @@
 //
 // --files: nur Versionen, deren Installer wirklich auf dem Server liegt,
 // bekommen einen Download-Knopf (alte/TEST-Versionen fehlen teils).
+// --apks: Tablet-APKs, die auf dem Server liegen (`bts-light-tablet-<v>.apk`
+// signiert, `bts-light-tablet-<v>-debug.apk` ohne Keystore). Die Seite
+// bekommt einen eigenen Abschnitt „Zähl-Tablets" mit der neuesten APK und je
+// Version einen APK-Knopf; der feste Name `bts-light-tablet.apk` wird nur
+// angeboten, wenn eine signierte APK vorhanden ist (docs/release.md).
 // --notes-out: schreibt die Stichpunkte als Klartext — der Workflow hängt
 // sie an latest.json (`notes`), damit das Update-Fenster in der App
 // „Was ist neu" zeigt.
@@ -40,6 +46,7 @@ function arg(name, fallback = null) {
 
 const changelogPath = arg("changelog", "docs/changelog.md");
 const filesPath = arg("files");
+const apksPath = arg("apks");
 const outPath = arg("out", "index.html");
 const notesOut = arg("notes-out");
 const notesVersion = arg("notes-version");
@@ -129,6 +136,35 @@ function setupName(version) {
 }
 function hasInstaller(version) {
   return available ? available.has(setupName(version)) : true;
+}
+
+// ── Vorhandene Tablet-APKs (optional) ─────────────────────────────────────
+// Ohne --apks gibt es keinen APK-Abschnitt und keine APK-Knöpfe — die Seite
+// verspricht nie eine Datei, die nicht auf dem Server liegt.
+const apks = apksPath
+  ? readFileSync(apksPath, "utf8").split("\n").map((l) => l.trim()).filter(Boolean)
+  : [];
+/** „bts-light-tablet-<v>.apk" oder „…-<v>-debug.apk" → { version, debug } */
+function apkInfo(name) {
+  const m = /^bts-light-tablet-(\d+\.\d+\.\d+)(-debug)?\.apk$/.exec(name);
+  return m ? { name, version: m[1], debug: Boolean(m[2]) } : null;
+}
+const apkList = apks.map(apkInfo).filter(Boolean);
+/** APK zu einer Version: signiert vor Debug. */
+function apkFor(version) {
+  const treffer = apkList.filter((a) => a.version === version);
+  return treffer.find((a) => !a.debug) || treffer[0] || null;
+}
+/**
+ * Die APK für den Kopf-Knopf: SIGNIERT vor Version, dann höchste Version.
+ * Signiert zuerst, damit der feste Name `bts-light-tablet.apk` (zeigt auf die
+ * neueste signierte Datei) nie unter einem Debug-Etikett verlinkt wird und
+ * niemand auf eine Debug-Fassung geschickt wird, die später keine signierte
+ * mehr annimmt (Review-Befund: Mischfall ältere signierte + neuere Debug).
+ */
+function neuesteApk(liste) {
+  return [...liste]
+    .sort((a, b) => Number(a.debug) - Number(b.debug) || cmpVersion(b.version, a.version))[0] || null;
 }
 
 // ── notes.txt für latest.json (Klartext) ──────────────────────────────────
@@ -294,6 +330,32 @@ const PI_IMAGE_SHA_URL = "pi-image/bts-light-pi.img.xz.sha256";
 // Unterordner nicht. Die kuerzere Adresse braucht eine nginx-Aenderung
 // (eigene Freigabe, siehe roadmap.md) — bis dahin gilt der volle Pfad.
 
+// ── Zähl-Tablets: Android-App ─────────────────────────────────────────────
+// Die Kiosk-App für die Fire-Tablets (docs/tablet-android-app.md). Der feste
+// Name `bts-light-tablet.apk` zeigt nur auf eine SIGNIERTE APK; solange nur
+// Debug-APKs gebaut werden (Keystore-Secrets fehlen), verlinkt die Seite die
+// neueste versionierte Debug-Datei und sagt das dazu — ein Wechsel zwischen
+// beiden Signaturen braucht eine Deinstallation.
+const apkNeu = neuesteApk(apkList);
+const apkSectionHtml = apkNeu
+  ? `
+  <section class="pi apk" id="tablet-apk">
+    <div class="vhead">
+      <h2>Zähl-Tablets: Android-App für Fire-Tablets</h2>
+      <a class="dl" href="${apkNeu.debug ? apkNeu.name : "bts-light-tablet.apk"}">APK herunterladen (v${apkNeu.version}${apkNeu.debug ? ", Debug" : ""})</a>
+    </div>
+    <p>Die App findet den Turnier-PC im Hallen-WLAN von selbst, zeigt die Felder-Lobby
+       im Vollbild, fixiert sich auf dem Bildschirm und startet nach dem Einschalten
+       von allein. Einrichtung je Tablet mit dem Skript <code>setup-tablet.ps1</code>
+       aus dem Repo (ADB-Debugging an, USB dran, ein Aufruf) — Einzelheiten im
+       <a href="handbuch/index.html">Handbuch</a>.</p>
+    ${apkNeu.debug
+      ? `<p class="sha">Diese APK trägt eine Debug-Signatur. Ein Tablet, auf dem sie installiert ist,
+       nimmt später eine signierte Fassung erst nach Deinstallation der App an.</p>`
+      : ""}
+  </section>`
+  : "";
+
 // ── Seite rendern ─────────────────────────────────────────────────────────
 const latest = sections[0];
 const generated = new Date().toISOString().slice(0, 10);
@@ -306,13 +368,17 @@ const versionHtml = sections
     const dl = hasInstaller(sec.version)
       ? `<a class="dl${i === 0 ? " primary" : ""}" href="${setupName(sec.version)}">Download</a>`
       : `<span class="nodl">kein Installer verfügbar</span>`;
+    const apk = apkFor(sec.version);
+    const apkHtml = apk
+      ? ` <a class="dl apk" href="${apk.name}" title="${apk.debug ? "Debug-Signatur" : "signiert"}">Tablet-APK${apk.debug ? " (Debug)" : ""}</a>`
+      : "";
     const date = dateOf(sec.version);
     const dateHtml = date ? ` <span class="vdate">${date}</span>` : "";
     return `
     <section class="version${i === 0 ? " latest" : ""}" id="v${sec.version}">
       <div class="vhead">
         <h2>Version ${sec.version}${dateHtml}${i === 0 ? ' <span class="badge">aktuell</span>' : ""}</h2>
-        ${dl}
+        <span class="dls">${dl}${apkHtml}</span>
       </div>
       <ul>
 ${items}
@@ -352,6 +418,8 @@ const html = `<!DOCTYPE html>
   a.dl { background: #edf2f7; color: #1a202c; border: 1px solid #cbd5e0; padding: .35rem .9rem;
          border-radius: 7px; text-decoration: none; font-weight: 600; white-space: nowrap; }
   a.dl.primary { background: #2f855a; border-color: #2f855a; color: #fff; }
+  a.dl.apk { background: #ebf4ff; border-color: #90cdf4; }
+  .dls { display: inline-flex; gap: .4rem; flex-wrap: wrap; }
   .nodl { color: #a0aec0; font-size: .85rem; }
   ul { margin: .7rem 0 0; padding-left: 1.2rem; }
   li { margin-bottom: .45rem; }
@@ -372,7 +440,7 @@ const html = `<!DOCTYPE html>
     <h1>BTS Light</h1>
     <p>Plug-and-play-Brücke zwischen BTP (Badminton Tournament Planner) und dem badhub.de-Liveticker – mit Tablet-Spielzettel und Court-Monitoren.</p>
     <a class="stable" href="BTS.Light-setup.exe">Aktuelle Version herunterladen (v${latest.version})</a>
-    <a class="stable ghost" href="#pi-image">Pi-Image für Court-Monitore</a>
+    <a class="stable ghost" href="#pi-image">Pi-Image für Court-Monitore</a>${apkNeu ? '\n    <a class="stable ghost" href="#tablet-apk">Tablet-App (APK)</a>' : ""}
     <a class="stable ghost" href="handbuch/index.html">Handbuch</a>
   </div>
 </header>
@@ -394,7 +462,7 @@ const html = `<!DOCTYPE html>
       <li>Karte in den Pi, einschalten — der Kiosk startet von allein.</li>
     </ol>
     <p class="sha">Prüfsumme: <a href="${PI_IMAGE_SHA_URL}">bts-light-pi.img.xz.sha256</a></p>
-  </section>
+  </section>${apkSectionHtml}
 ${versionHtml}
 </main>
 <footer>Automatisch erzeugt aus dem Änderungsverlauf · Stand ${generated} · badhub.de</footer>

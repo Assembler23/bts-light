@@ -67,3 +67,4 @@ hier eintragen.
 | [0054](0054-liveticker-kind-turnier-je-guid.md) | Liveticker: Kind-Turnier je turnier.de-GUID statt zusammengesetztem Schlüssel | accepted |
 | [0055](0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md) | Zähltafel: Anzeige-Hülle als iframe-Container, Tafel als eigenes Zuweisungsziel (gegen 0049 abgegrenzt) | accepted |
 | [0057](0057-update-ablauf-im-rust-kern.md) | Update-Ablauf im Rust-Kern, Wiederanlauf per Marker, stiller Installer beim Beenden | accepted |
+| [0058](0058-eigene-kiosk-app-statt-fully-kiosk.md) | Eigene Android-Kiosk-App statt Fully Kiosk, Suche nach dem Pi-Muster | accepted |

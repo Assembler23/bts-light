@@ -69,6 +69,23 @@ ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)).
   mitvollzogen); `?spiegel=1` tauscht die Seiten (nur fester Modus). Ohne
   Seiteninformation (vor der Seitenwahl, oder kein zählendes Tablet) steht
   Mannschaft 1 links, ohne Aufschlag-Punkt.
+- **Anordnung (seit v0.9.283):** Für den Platz **hinter dem Feld** stehen die
+  Punkte **übereinander** — oben die ferne Seite (= „rechts"), unten die nahe;
+  der Satzstand steht dann je Seite gelb neben der Kachel. Ohne Angabe folgt
+  die Tafel der Ausrichtung des Geräts (Hochformat → übereinander, Querformat
+  → nebeneinander, Drehen schaltet live um); `?anordnung=nebeneinander` bzw.
+  `?anordnung=uebereinander` übersteuert (nur fester Modus, im Gerätemodus
+  gilt immer die Automatik). `?spiegel=1` dreht auch oben/unten.
+- **Ansicht per Tipp (seit v0.9.292):** Läuft die Tafel in der
+  [Anzeige-Hülle](tablet.md#anzeige-hülle-anzeige-seit-v09275), schaltet ein
+  Tipp auf die Zahlen die Ansicht reihum — **ohne PIN**: automatisch →
+  links/rechts → rechts/links → oben/unten → unten/oben → automatisch. Das ist
+  Spiegelung und Anordnung in **einem** Zyklus; das Etikett nennt zuerst, wo
+  die linke Tablet-Seite steht („unten/oben" = übereinander, ungespiegelt).
+  Die Tafel selbst schaltet nichts: Sie schickt nur eine `postMessage` an
+  die Hülle derselben Herkunft, die das iframe mit den neuen Parametern neu
+  lädt. Ohne Hülle (Tafel direkt geöffnet) und im Gerätemodus passiert beim
+  Tipp nichts.
 - **Spielende:** der letzte gespielte Satz bleibt groß stehen und zählt im
   Satzstand; bei Aufgabe zählt der unvollständige Satz nicht. Ohne Spiel:
   Feldbezeichnung groß.
@@ -109,7 +126,10 @@ alle Geräte auf, die sich gemeldet haben:
   v0.9.255 meldet eine Anzeige, die stillsteht, das von sich aus ins Log
   (`stillstand`, siehe [logging.md](logging.md)) — bleibt ein Bild stehen,
   lohnt vor dem Neuladen ein Blick dorthin: Die Zeile sagt, ob überhaupt noch
-  etwas ankam oder ob die Seite es verworfen hat.
+  etwas ankam oder ob die Seite es verworfen hat. (Bis v0.9.288 meldete der
+  Einzelfeld-Monitor in jeder Spielpause fälschlich `keine_abrufe`, weil ein
+  `304` „nichts Neues" nicht als Lebenszeichen zählte — Details in
+  logging.md.)
 
 Die Zuweisungen liegen in `monitor-assignments.json` im
 App-Config-Verzeichnis und überstehen einen bts-light-Neustart.
@@ -183,6 +203,33 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   `src/io/pushHealth.mjs` mit eigenem CI-Schritt; beide Anzeige-Seiten tragen
   eine Inline-Kopie. **Kein Regress** — fällt der Push aus, verhält sich die
   Anzeige wie zuvor, nur mit schnellerem Poll.
+- **Frist für den Stand-Abruf: Kopfzeilen 5 s, Rumpf 15 s** (seit v0.9.287,
+  Turnier 05./06.09.2026): Der Abruf hatte keinen Timeout. Ging eine Antwort
+  im WLAN-Roaming zwischen Router und Access-Point verloren, blieb der Abruf
+  offen — bei `monitor`, `overview` und `tafel` hielt der In-Flight-Schutz
+  jeden weiteren Poll zurück, bei `combo`, `winners`, `preparation` und der
+  Feldwahl `lobby` hängt der nächste Abruf am Ende des vorigen. Die Anzeige
+  fror **ohne Blende** ein, obwohl Tablets und TL-Web am selben Turnier-PC
+  sauber liefen; der WebSocket verband nach 25 s zwar neu, sein Anstoß lief
+  aber in denselben blockierten Abruf — und bei Feld-Monitor und Zähltafel
+  reist auch der Fernbefehl „Neu laden" über genau diesen Abruf (Übersicht
+  und Kombi bekommen ihn über den getrennten Zuweisungs-Check). Erst die
+  TCP-Sendewiederholung des Geräts löste den Knoten — nach Minuten. Seit
+  v0.9.287 endet ein Abruf als Fehler, wenn die Kopfzeilen nicht binnen 5 s
+  da sind oder der Rumpf danach länger als 15 s braucht, und nimmt damit den
+  bekannten Weg: Blende, Kanal ungesund, 250-ms-Takt, nächster Abruf auf
+  frischer Verbindung. Zwei Budgets, weil die Übersicht unkomprimiert rund
+  16 KB wiegt und eine ferne Halle am LTE-Hotspot langsam, aber lebendig sein
+  darf; zusammen bleiben sie unter der 25-s-Schwelle des Herzschlags. Drei
+  Folgeregeln gehören dazu: Die **ETag-Marke** wird erst nach dem Rumpf
+  übernommen (sonst fragte der nächste Abruf mit der Marke eines nie gezeigten
+  Standes und bekäme ein 304), die Übersicht **entwarnt** erst nach dem Rumpf
+  (sonst käme bei wiederholtem Kopfzeilen-ja/Rumpf-nein nie die Blende), und
+  der sekündliche **Zuweisungs-Check** hat denselben In-Flight-Schutz samt
+  Frist (sonst parkte er während eines Hängers jede Sekunde einen weiteren
+  Abruf auf der toten Leitung). Die Regel steht als `src/io/abrufFrist.mjs`
+  mit eigenem CI-Schritt; die acht Anzeige-Seiten (einschließlich der Werbe-Seite `ad`) und `tl.html` tragen eine
+  Inline-Kopie.
 - **Schalter `push_fallback_slow`** (`config.json`, Abschnitt `court_monitor`;
   **Standard aus**): Erst er erlaubt den 4-s-Takt. Ohne ihn pollt eine frisch
   aktualisierte Installation exakt wie vorher — die Entlastung ist der

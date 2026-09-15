@@ -374,6 +374,52 @@ und rot pulsierend **„Letzter Aufruf"**.
   Bruttostart aus `match-times.json` — die Uhr läuft nach einem Update
   weiter statt bei null zu beginnen (Spec `update-im-turnierbetrieb`).
 
+## Zählen hinter dem Feld: Anordnung vorn/hinten (seit v0.9.283)
+
+Der Bediener sitzt oft nicht seitlich am Netz, sondern **hinter dem Feld** an
+der Grundlinie. Von dort sind die Teams nicht links/rechts, sondern
+**vorn/hinten** — deshalb kennt die Zählansicht zwei Anordnungen (Spec
+[features/zaehltafel-anzeige-huelle.md](features/zaehltafel-anzeige-huelle.md),
+Erweiterung 06.09.2026):
+
+- **Nebeneinander** (bisher): Plus-Knöpfe links und rechts, Court quer mit
+  dem Netz senkrecht.
+- **Übereinander**: der Plus-Knopf für die **ferne Seite oben**, für die
+  **nahe Seite unten** („Hinten"/„Vorne" statt „Rechts"/„Links"); der Court
+  steht hochkant mit dem Netz waagerecht, der Satzstand zeigt oben die ferne,
+  unten die nahe Seite. Die Seitenwahl fragt „Welches Team steht vorne
+  (unten)?", die Spielerwahl bei Karten sagt „vorne/hinten". Der Federball
+  sitzt weiterhin im Innenwinkel des Aufschlagfelds — die Zellen sind so
+  gedreht, dass die rechte Hand jedes Spielers stimmt (oben: rechtes
+  Aufschlagfeld links, unten: rechtes Aufschlagfeld rechts).
+- **Platzaufteilung (seit v0.9.284):** Die Plus-Knöpfe sind bewusst
+  flache Leisten über die ganze Breite (etwa 5,5 rem hoch) statt eines
+  Fünftels der Höhe; der Court bekommt die ganze Höhe der Mittelzeile, und
+  der Satzstand (mit Rückgängig-Knopf und ggf. Schiri-Ansage) steht **rechts
+  neben dem Court**, senkrecht mittig (ab 480 px Bildschirmbreite; auf
+  Handys bleibt der Satzstand über dem Court). Am Fire HD 10 wächst der
+  Court so von
+  225 × 500 auf rund 410 × 900 Pixel. Dieselbe Idee gilt im Querformat
+  (nebeneinander): Die Plus-Spalten sind dort etwa 9 rem breit statt eines
+  Fünftels der Breite, der Court wird gut zwei Drittel größer. Die Knöpfe
+  bleiben in beiden Fällen ein Tippziel über die volle Breite bzw. Höhe.
+- **Wahl** im Zahnrad-Menü (hinter der PIN), Eintrag „Anordnung" reihum:
+  **automatisch** (Standard: Hochformat → übereinander, Querformat →
+  nebeneinander; Drehen des Tablets schaltet live um, mitten im Spiel, ohne
+  Neuladen) · **nebeneinander (links–rechts)** · **übereinander
+  (vorn–hinten)**. Die Wahl gilt je Gerät (`localStorage`), nicht je Feld —
+  sie beschreibt, wo das Tablet steht.
+- **Nichts an der Zähllogik ändert sich:** intern bleibt alles links/rechts
+  (Seitenwechsel, Aufschlagfolge, Ergebnis, Spiegel zum Host); „vorne" ist
+  die Seite „links". Ein Wechsel der Anordnung mitten im Spiel dreht nur die
+  Darstellung — wer unten stand, steht danach links.
+- **Waagerecht bleiben** die Satz-Historie unter dem Satzstand (`1: 21:18`),
+  der Endstand-Dialog („Ergebnis eintragen": Eingabepaar und Untertitel)
+  und die Zusammenfassung beim Beenden: dort steht links die Seite „vorne",
+  rechts die Seite „hinten". Die Schiri-Ansage „zu meiner Rechten/Linken"
+  ist DBV-Wortlaut aus Sicht des Schiedsrichterstuhls (siehe
+  [umpire-mode.md](umpire-mode.md)) und dreht nicht mit.
+
 ## Am Tablet: Pausen, Court-Grafik, Akkustand
 
 - **Offizielle Pausen** (BWF): Bei 11 Punkten im Satz blendet das Tablet
@@ -414,14 +460,47 @@ und rot pulsierend **„Letzter Aufruf"**.
   Undo/Reconnect/Übernahme ein kompletter `rally_sync`). Der „📈
   Verlauf"-Knopf am Score-Board zeigt je Satz ein Liniendiagramm — aus
   den lokalen Daten, funktioniert also auch offline.
-- **Akkustand**: Android-Tablets (Chrome) melden ihren Akkustand an die
+- **Akkustand**: Android-Tablets melden ihren Akkustand an die
   Felder-Übersicht in bts-light – so sieht die Turnierleitung, wenn ein
   Tablet getauscht werden sollte. iPads/Safari geben den Akkustand aus
-  Datenschutzgründen nicht her; dort bleibt die Anzeige leer.
+  Datenschutzgründen nicht her; dort bleibt die Anzeige leer. Seit
+  v0.9.293 zeigt das Tablet den Stand **auch selbst** — siehe
+  [Akkustand am Tablet](#akkustand-am-tablet-seit-v09293).
 - **Kein Ton am Tablet (bewusst):** Das Tablet gibt **weder Gong noch
   Sprachansage** aus – es ist ein reiner Spielzettel am Feld. Gong und
   Ansage laufen ausschließlich auf den Ansage-Rechnern (Turnierleitung +
   ferne-Halle-Slave, `src/io/announcer.ts`), nie in `tablet.html`.
+
+## Akkustand am Tablet (seit v0.9.293)
+
+Im Kiosk fehlt die Android-Statusleiste — den Akkustand eines Tablets
+sah man bisher nur am Turnier-PC. Jetzt zeigt jede Tablet-Seite ihn selbst,
+klein und ohne Bedienung:
+
+- **Zählen (`/court/<id>`):** in der Kopfzeile links vom Verbindungs-Punkt
+  — sichtbar beim Warten auf die Zuweisung, während der Seiten-/Aufschlag-
+  wahl (das Setup beginnt unter der Kopfzeile), beim Zählen und im
+  Ergebnis.
+- **Feldwahl (`/felder`):** rechts in der Kopfleiste.
+- **Anzeige-Hülle (`/anzeige`):** links neben dem Zahnrad, so dezent wie
+  dieses.
+
+Darstellung `🔋 73 %`, am Netz `⚡ 73 %`. Unter **20 %** orange, unter
+**10 %** rot — nur Farbe, kein Hinweisfenster, nichts blockiert. Ohne Quelle
+(iPad; LAN-http ohne Kiosk-App) bleibt das Feld unsichtbar statt „–".
+
+**Quellen** (dieselben wie für die Meldung an den Turnier-PC, in dieser
+Reihenfolge): die Brücke der [Kiosk-App](tablet-android-app.md)
+(`window.fully.getBatteryLevel()`/`isPlugged()`, funktioniert auch über
+http) — sonst die Web-Battery-API des Browsers (nur Android/Chrome im
+Secure Context, also Cloud oder LAN-TLS). Die Brücke wird **einmal je
+Minute** abgefragt, die Web-API liefert Ereignisse; die Anzeige hat keine
+Animation und schreibt nur bei geändertem Text ins DOM — sie kostet selbst
+keinen messbaren Akku. Liefert die Brücke beim Start nichts, steht einmalig
+`battery_fully_failed` im Geräte-Log. Kanonische Logik in `src/io/akku.mjs` (Test
+`scripts/test-akku.mjs`), Inline-Kopien in den drei Seiten; `tablet.html`
+speist aus **einer** Quelle sowohl die Kopfzeile als auch den
+`battery`-Frame an den Host.
 
 ## Meldungen an die Turnierleitung
 
@@ -615,6 +694,34 @@ mehr und sendet kein Ergebnis, überbügelt das Hand-Ergebnis also nicht. Der
 Server verwirft zusätzlich einen Score für ein bereits finalisiertes Match
 (ergänzt `process_result`, R5).
 
+Dasselbe Flag kommt auch nach dem **eigenen** Ergebnis zurück, sobald BTP es
+angenommen hat. Seit v0.9.291 sperrt die Beendet-Ansicht dann **beide**
+Knöpfe — „Ergebnis übermitteln" und „Korrektur — Match wieder öffnen" — und
+sagt „✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung."
+Vorher blieb die Korrektur offen, und das Gate schluckte jeden weiteren
+Sendeversuch ohne ein Wort (Turnier 12./13.09.2026, Feld 11: 23-mal
+`submit_suppressed_finalized` in 90 s). Die Regel dazu ist
+`abschlussLage` (`src/io/abschlussAnsicht.mjs`, Test
+`scripts/test-abschluss-ansicht.mjs`, Inline-Kopie in `tablet.html`);
+`reopen()` hält zusätzlich das Gate, falls das Frame zwischen Render und Tipp
+eintraf (`reopen_suppressed_finalized` im Tablet-Log). Eine Korrektur eines
+festen Ergebnisses geht nur noch in BTP bzw. über die Turnierleitung.
+
+Kommt das Finalisiert-Frame, während das **eigene Ergebnis noch unterwegs**
+ist (`/result` offen oder im 5-s-Retry — Cloud-Timeout ~8 s gegen 5-s-
+Sync-Takt, also realistisch), gilt der Sendeauftrag als erledigt: BTP hat ein
+Ergebnis, unseres (die Antwort ging verloren) oder ein von Hand eingetragenes,
+und der Turnier-PC nähme den Payload ohnehin nicht mehr an (R5). Das Tablet
+lässt `pendingResult` dann los (`pending_result_released_finalized`, Regel
+`sendeauftragErledigt`, nur für **dasselbe** Match). Vorher blieb der Auftrag
+stehen und blockte beim nächsten Spiel still den Sende-Knopf („wird
+übermittelt … bis es ankommt"); nach einem Reload wäre er sogar nachgesendet
+und am falschen Spiel abgewiesen worden. Eine `/result`-Antwort, die erst
+nach dem Loslassen (oder nach einem neuen Auftrag) eintrifft, wird verworfen
+(`submit_reply_stale`) — sie darf weder `submittedOk` aufs falsche Spiel
+setzen noch eine alte Absage zeigen noch einen Retry für einen erledigten
+Auftrag planen.
+
 **Rollback im Turnier:** Die Config `reconnect_legacy_rev` (Default aus =
 Ownership aktiv) schaltet zur Laufzeit auf das alte `rev`-Verhalten zurück
 (unten). Der Server signalisiert das dem Tablet über `ownership_active=false`;
@@ -651,9 +758,25 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
   erreicht den Rahmen nie. Ein unbekanntes Layout wird zur Zähltafel, ein
   unbrauchbares Feld öffnet die Feldwahl (ohne PIN — es wird noch nichts
   angezeigt).
-- **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`):
-  Anzeige wählen · Feld wechseln · Seiten spiegeln (nur Zähltafel, gemerkt je
-  Gerät) · Zum Zählen wechseln · Neu laden · Vollbild · Schließen.
+- **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`;
+  nach richtiger Eingabe fünf Minuten lang ohne PIN, siehe
+  [tablet-kiosk.md](tablet-kiosk.md)): Anzeige wählen · Feld wechseln ·
+  Ansicht (nur Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln · Neu
+  laden · Vollbild · Schließen.
+- **Ansicht** (seit v0.9.292; davor getrennt „Seiten spiegeln" + „Anordnung",
+  v0.9.283): Wo welches Team auf dem Bildschirm steht, ist **ein** Zyklus
+  mit fünf Stufen — **automatisch** (folgt der Drehung: Hochformat →
+  übereinander, Querformat → nebeneinander) · **links/rechts** ·
+  **rechts/links** (gespiegelt) · **oben/unten** · **unten/oben**. Das
+  Etikett nennt zuerst, wo die linke Tablet-Seite steht; „unten/oben" ist
+  das ungespiegelte Übereinander (unten nah, oben fern) für den Platz
+  **hinter dem Feld**. Schnellster Weg: **Tipp auf die Zahlen** der Tafel
+  schaltet eine Stufe weiter, ohne PIN, und blendet kurz die neue Ansicht
+  ein — der Menü-Eintrag „Ansicht: …" macht dasselbe. „Automatisch +
+  gespiegelt" gibt es bewusst nicht mehr; ein so eingerichtetes Gerät wird
+  beim Update über seine Ausrichtung auf „rechts/links" (quer) bzw.
+  „oben/unten" (hoch) gesetzt — es steht also weiter richtig herum, folgt
+  aber nicht mehr der Drehung.
 - **Zum Zählen wechseln** fragt vorher die Feldliste: Ist das Feld belegt,
   kommt eine Warnung mit Bestätigung — die Zähl-Seite würde bei einem
   abgetauchten Tablet sonst still übernehmen (ADR 0017). Ein älterer Relay
@@ -685,7 +808,8 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
   funktional folgenlos (der Reconnect heilt sich seit v0.9.147 selbst),
   aber jede Doze-Phase macht die Anzeige träge und flutet das Log.
   Ein programmatischer Wake Lock braucht HTTPS (Secure Context) und
-  kommt mit ADR 0005 (LAN-HTTPS).
+  kommt mit ADR 0005 (LAN-HTTPS). Mit der Kiosk-App entfällt das — sie hält
+  den Bildschirm selbst wach.
 - **Windows-Firewall**: beim ersten Start fragt Windows, ob der Zugriff
   erlaubt werden soll – „Zugriff zulassen" (private Netze). Ohne Freigabe
   erreichen die Tablets bts-light nicht. Auf gesperrten Turnier-PCs ohne

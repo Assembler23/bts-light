@@ -124,6 +124,10 @@ jobs:
       # identisch, Stufenwort ab dem zweiten Mal, ohne Adressat gar nichts.
       - name: Bediener-Nachruf (JS)
         run: node scripts/test-scorekeeper-call-text.mjs
+      # Fünf-Minuten-Freigabe der Zahnrad-PIN: Ablauf, Uhr-Sprünge, Lesen aus
+      # dem Speicher — alles, was hier durchrutscht, umgeht die PIN.
+      - name: PIN-Freigabe (JS)
+        run: node scripts/test-pin-freigabe.mjs
 
       # Ordnung zwischen Push und Voll-Abruf auf den Anzeige-Seiten: Push nur
       # bei echt neuerer Sequenz, ein Voll-Abruf darf gleichziehen (der
@@ -163,11 +167,23 @@ jobs:
       - name: Zähltafel-Seiten (JS)
         run: node scripts/test-tafel-seiten.mjs
 
+      # Die Amazon-Paketliste der Tablet-Einrichtung steht dreimal im Repo
+      # (Kotlin-Quelle + zwei Skript-Kopien). Driftet eine Kopie, wird auf
+      # dem Tablet etwas anderes stillgelegt als dokumentiert.
+      - name: Entschlackungs-Liste (JS)
+        run: node scripts/test-entschlackung-liste.mjs
+
       # Was die Anzeige-Hülle ins iframe lädt. Rutscht hier freier Text aus der
       # Adresse durch, lädt ein Tablet in der Halle, was immer in der Adresse
       # stand; fällt ein gültiges Feld heraus, zeigt die Hülle nur die Feldwahl.
       - name: Anzeige-Hülle Ziel-Allowlist (JS)
         run: node scripts/test-anzeige-ziel.mjs
+
+      # Akkustand am Tablet: Quellen-Reihenfolge (Kiosk-Brücke vor Web-API),
+      # Schwellen, „kein Wert" darf nie als 0 % erscheinen — ein Tablet, das
+      # fälschlich „kritisch" meldet, wird im Turnier unnötig getauscht.
+      - name: Akkustand am Tablet (JS)
+        run: node scripts/test-akku.mjs
 
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
@@ -182,6 +198,12 @@ jobs:
       - name: Ergebnis-Retry-Regel (JS)
         run: node scripts/test-result-retry.mjs
 
+      # Was sperrt die Beendet-Ansicht, und was sagt sie? Ein in BTP festes
+      # Ergebnis muss Senden UND Korrektur zumachen — sonst drueckt jemand
+      # 23-mal einen Knopf, der still nichts tut (Feld 11, 12.09.2026).
+      - name: Beendet-Ansicht des Tablets (JS)
+        run: node scripts/test-abschluss-ansicht.mjs
+
       # Merkt eine geladene Tablet-Seite, dass sie veraltet ist — und laedt
       # sie im richtigen Moment neu? Der stille Abgleich darf mitten im Spiel
       # NICHT springen, der Fernbefehl der Turnierleitung muss es. Und der
@@ -195,6 +217,14 @@ jobs:
       # Anzeigen einer Halle ein.
       - name: Gesundheit des Push-Kanals (JS)
         run: node scripts/test-push-health.mjs
+
+      # Frist des Stand-Abrufs: Ein Abruf ohne Timeout hatte keinen
+      # Erholungspfad — ging die Antwort im WLAN-Roaming verloren, fror die
+      # Anzeige ohne Blende ein, bis die TCP-Sendewiederholung nach Minuten
+      # griff (Turnier 05./06.09.2026). Die Frist muss Kopfzeilen UND Rumpf
+      # abdecken und einen rechtzeitigen Abruf in nichts veraendern.
+      - name: Frist des Stand-Abrufs der Anzeigen (JS)
+        run: node scripts/test-abruf-frist.mjs
 
       # Server-Uhr der Anzeigen (Etappe ETag, 1c): Der Offset kommt aus dem
       # 200-Abruf UND dem WS-Herzschlag, überlebt eine 304-Serie und bleibt
@@ -212,6 +242,10 @@ jobs:
       # bei neun gebuendelten Versionen fehlten acht.
       - name: Update-Notes ueber die Release-Strecke (JS)
         run: node scripts/test-release-notes.mjs
+      # Die Release-Seite bietet die Tablet-APK an — aber nur Dateien, die auf
+      # dem Server liegen, und den festen Namen nur fuer eine signierte APK.
+      - name: Release-Seite mit Tablet-APK (JS)
+        run: node scripts/test-release-page-apk.mjs
 
       # Was aus docs/ oeffentlich auf badhub.de landet. Zwei stille Fehler
       # verhindert der Test: ein interner Abschnitt wird wieder oeffentlich,
@@ -248,3 +282,76 @@ jobs:
 
       - name: Rust tests
         run: cargo test --workspace
+
+  # Linux als Entwicklungs- und Test-Plattform (Roadmap "Linux-Variante",
+  # Stufe 0). Der Rust-Kern hat fuer alles Windows-Gebundene einen
+  # `not(windows)`-Zweig (GDI-Druck -> NichtUnterstuetzt, SSID -> iwgetid) --
+  # den hat seit dem GDI-Druck (v0.9.249) nie jemand kompiliert. Dieser Job
+  # haelt ihn gruen: Clippy mit -D warnings und die komplette Test-Suite,
+  # damit sich auf Linux entwickeln laesst, ohne dass erst der Windows-Lauf
+  # einen Fehler meldet. Kein Bundle, kein Release-Artefakt -- das bleibt
+  # bis zur Stufe 1 der Roadmap Windows-Sache.
+  #
+  # Frontend-Build ist trotzdem noetig: `tauri::generate_context!` liest das
+  # dist/-Verzeichnis beim Kompilieren. Ubuntu-Minuten zaehlen bei GitHub
+  # einfach (Windows doppelt), der Rust-Cache haelt den Lauf kurz.
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      # Tauri 2 auf Linux: WebKitGTK 4.1, GTK 3, AppIndicator, librsvg.
+      - name: Tauri-System-Pakete
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev             librsvg2-dev libssl-dev libxdo-dev patchelf
+
+      - name: Frontend bauen (fuer generate_context)
+        run: |
+          npm ci
+          npm run build
+
+      - name: Rust clippy (Linux)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust tests (Linux)
+        run: cargo test --workspace
+
+  # Android-Kiosk-App: Unit-Tests auf der JVM + Debug-APK als Bau-Probe.
+  # Kein Emulator; Android-Verhalten steht auf der Feldtest-Liste der Spec.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          # Nur `platform-tools`: Die Action installiert standardmäßig auch
+          # das alte SDK-Paket `tools`, das Google aus dem Repository
+          # entfernt hat — seit 15.09.2026 brach der Job damit vor dem
+          # ersten Gradle-Aufruf ab („Failed to find package 'tools'").
+          # Build-Tools und Plattform lädt AGP selbst nach (Lizenzen nimmt
+          # die Action an).
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Tests + Debug-APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug

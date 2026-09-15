@@ -20,7 +20,8 @@ geprüfte Zähl-Logik ein.
 > erst beim Drucken aus dem BTP-Snapshot.
 
 ## Aktivieren
-Tablet → **⚙ (Header) → PIN** (Standard `0000`, einstellbar) → **„Schiri-Modus: an"**.
+Tablet → **⚙ (Header) → PIN** (Standard `0000`, einstellbar; innerhalb der
+Fünf-Minuten-Freigabe nach einer Eingabe entfällt sie) → **„Schiri-Modus: an"**.
 Opt-in pro Tablet, lokal gespeichert (`localStorage`). Es erscheint eine **immer
 sichtbare Ansage-Leiste**.
 

@@ -847,6 +847,15 @@ Verhalten zurück — alle zwei Sekunden fragen. Es gibt nichts
 einzustellen und nichts zu bemerken; auch die Verbindungsanzeige oben
 rechts bedeutet unverändert dasselbe.
 
+Seit v0.9.287 hat der Stand-Abruf eine **Frist** (Kopfzeilen 5 s, Rumpf
+15 s): Ein Abruf, der weder scheitert noch antwortet — etwa weil das Handy
+zwischen zwei Access-Points gewechselt hat —, hielt vorher die Seite fest,
+und die Verbindungsanzeige meldete dabei weiter „aktuell", weil nur ein
+**gescheiterter** Abruf zählt. Jetzt endet er als Fehler, die Anzeige zeigt
+das Alter der Daten, und der nächste Abruf läuft auf frischer Verbindung.
+Dieselbe Regel wie bei den Court-Monitoren
+([court-monitor.md](court-monitor.md), „Frist für den Stand-Abruf").
+
 Technisch: `/tl-ws` trägt nur die Revisionsnummer, nie Turnierdaten
 (Spec [features/tl-web-push.md](features/tl-web-push.md), ADR 0034).
 Nebeneffekt am Turnier-PC: Er rechnet den Zustand jetzt **einmal

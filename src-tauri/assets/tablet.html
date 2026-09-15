@@ -122,6 +122,12 @@
     }
     .event-label { color: var(--muted); font-size: 1rem; font-weight: 600; }
     .conn { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--muted); }
+    /* Akkustand in der Kopfzeile (Spec-Erweiterung 13.09.2026): schlicht,
+       ohne Animation — die Anzeige darf selbst nicht am Akku zehren. Unter
+       20 % orange, unter 10 % rot (Schwellen aus src/io/akku.mjs). */
+    .akku { font-size: .8rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .akku.niedrig { color: #b45309; font-weight: 800; }
+    .akku.kritisch { color: #dc2626; font-weight: 800; }
     .dot { width: .7rem; height: .7rem; border-radius: 50%; background: #94a3b8; }
     .dot.ok { background: #16a34a; }
     .dot.bad { background: #dc2626; }
@@ -144,9 +150,16 @@
 
     /* ─── Hauptbereich: Score + Court + Plus-Buttons ──────────────────── */
     .main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    /* Die Plus-Knöpfe sind seit 08.09.2026 bewusst schmal (Tilo: „Knöpfe
+       viel kleiner, Feld viel größer"): eine feste Spalten-Breite bzw.
+       Leisten-Höhe statt eines Fünftels des Bildschirms. Ein Tippziel von
+       9 rem × voller Höhe (quer) bzw. voller Breite × 5,5 rem (hochkant)
+       trifft man auch ohne Hinsehen; alles Übrige geht ans Spielfeld. */
     .play {
+      --plus-spalte: min(9rem, 20vw);
+      --plus-leiste: 5.5rem;
       flex: 1; display: grid;
-      grid-template-columns: 1fr 3fr 1fr;
+      grid-template-columns: var(--plus-spalte) minmax(0, 1fr) var(--plus-spalte);
       gap: .5rem; padding: .5rem; min-height: 0;
     }
     .plus-btn {
@@ -338,6 +351,9 @@
     button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
     button.primary:disabled { background: #a7d3b5; color: #f0fdf4; border-color: #a7d3b5; }
     button.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+    /* Gesperrte Korrektur (Ergebnis in BTP fest): blass statt halb-rot, damit
+       der Knopf nicht mehr nach „drück mich" aussieht. */
+    button.danger:disabled { background: #e8b4b4; color: #fff5f5; border-color: #e8b4b4; }
     /* „Match beenden": ab 0:0 verfügbar, aber bewusst dezent (gedämpft, klein,
        nicht raumgreifend) – die Punktzählung bleibt die Haupthandlung. */
     button.subtle {
@@ -466,7 +482,9 @@
       background: #f59e0b; color: #1a1206;
     }
     .umpire-badge[hidden] { display: none; }
-    .umpire-say { font-size: 1.6rem; font-weight: 800; line-height: 1.25; color: var(--text); }
+    /* overflow-wrap: in der schmalen Seitenspalte (übereinander) dürfen lange
+       Einzelwörter/Doppelnamen nicht über den Rand ragen. */
+    .umpire-say { font-size: 1.6rem; font-weight: 800; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
     .umpire-cards { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; margin-top: .4rem; }
     .umpire-cards:empty { display: none; }
     .umpire-cards .card-chip {
@@ -600,15 +618,104 @@
     .rally-body svg { width: 100%; height: auto; display: block; }
     .rally-note { font-size: .75rem; color: var(--muted); margin-top: .5rem; }
 
+    /* ─── Anordnung „übereinander" (Bediener sitzt HINTER dem Feld) ─────
+       Spec-Erweiterung zaehltafel-anzeige-huelle vom 06.09.2026. Die Seite
+       „rechts" wird OBEN (fern), „links" UNTEN (nah): Plus-Knöpfe als
+       Zeilen oben/unten, der Court hochkant mit dem Netz waagerecht, die
+       vier Zellen per `order` so gedreht, dass die rechte Hand jedes
+       Spielers wieder stimmt (rechter Service-Court = leftBottom unten
+       rechts, rightTop oben links). Die Zähllogik bleibt in links/rechts;
+       nur Darstellung und Wortwahl („vorne/hinten") ändern sich.
+       Spezifität `.play.uebereinander` schlägt die Hochformat-Regel unten. */
+    .play.uebereinander {
+      grid-template-columns: 1fr;
+      grid-template-rows: var(--plus-leiste) minmax(0, 1fr) var(--plus-leiste);
+    }
+    .play.uebereinander .plus-right { order: 0; }
+    .play.uebereinander .center { order: 1; }
+    .play.uebereinander .plus-left { order: 2; }
+    .play.uebereinander .plus-btn { flex-direction: row; gap: 1rem; padding: .25rem 1rem; }
+    .play.uebereinander .plus-btn .plus { font-size: 3.5rem; }
+    .play.uebereinander .plus-btn .label { margin-top: 0; font-size: 1rem; }
+    /* Satzstand: oben (fern) über unten (nah), Doppelpunkt entfällt. */
+    .play.uebereinander .current-score { flex-direction: column; gap: 0; align-items: center;
+      font-size: clamp(1.6rem, 6vmin, 3rem); line-height: 1.05; }
+    .play.uebereinander .current-score .right-score { order: 0; }
+    .play.uebereinander .current-score .colon { display: none; }
+    .play.uebereinander .current-score .left-score { order: 1; }
+    /* Court hochkant: 61 × 134, größtmöglich in beide Achsen. */
+    .play.uebereinander .court {
+      width: min(100cqw, calc(100cqh * 61 / 134));
+      aspect-ratio: 61 / 134;
+    }
+    .play.uebereinander .court-lines { display: none; }
+    .play.uebereinander .court-lines-hoch { display: block; }
+    .play.uebereinander #cell-rightTop    { order: 0; }
+    .play.uebereinander #cell-rightBottom { order: 1; }
+    .play.uebereinander #cell-leftTop     { order: 2; }
+    .play.uebereinander #cell-leftBottom  { order: 3; }
+    /* Federball im Innenwinkel (Netz + Mittellinie) der gedrehten Zellen,
+       Korken zum diagonal gegenüberliegenden Aufschlagfeld: rightTop (oben
+       links) → leftBottom (unten rechts) = Südost usw. */
+    .play.uebereinander .court #cell-rightTop.server::after    { top: auto; left: auto; bottom: .35rem; right: .35rem; transform: rotate(45deg); }
+    .play.uebereinander .court #cell-rightBottom.server::after { top: auto; right: auto; bottom: .35rem; left: .35rem; transform: rotate(135deg); }
+    .play.uebereinander .court #cell-leftTop.server::after     { bottom: auto; left: auto; top: .35rem; right: .35rem; transform: rotate(-45deg); }
+    .play.uebereinander .court #cell-leftBottom.server::after  { bottom: auto; right: auto; top: .35rem; left: .35rem; transform: rotate(-135deg); }
+    .play.uebereinander .court .team-label-left { top: auto; bottom: .25rem; }
+    /* Die Zellen sind hochkant schmal: Namen an vmin statt vw deckeln. */
+    .play.uebereinander .court .cell .player-name { font-size: clamp(.8rem, 2.2vmin, 1.6rem); }
+    .court-lines-hoch { display: none; }
+    /* Übereinander im QUERFORMAT (Hand-Übersteuerung): Satzstand und Court
+       untereinander ließen dem hochkanten Court nur einen Streifen. Darum
+       stehen Satzstand (und ggf. Schiri-Leiste) links neben dem Court, der
+       so die ganze Höhe der Mittelzeile bekommt. */
+    @media (orientation: landscape) {
+      .play.uebereinander .center { flex-direction: row; align-items: stretch; justify-content: center; gap: 1rem; }
+      .play.uebereinander .score-board { align-self: center; }
+      .play.uebereinander .umpire-bar { align-self: center; max-width: 30vw; }
+      /* Rest der Breite an den Court-Container (container-type: size braucht
+         eine Breite, sonst rechnet cqw mit 0). */
+      .play.uebereinander .court-wrapper { flex: 1 1 0; min-width: 0; }
+    }
+
     @media (orientation: portrait) {
-      /* Hochformat: Buttons sehr schmal — vmin = Breite, deshalb Satzstand
-         und Leerlauf-Feldnummer hier zusätzlich deckeln, damit sie die
-         schmale Anzeige nicht sprengen. */
-      .play { grid-template-columns: 1fr 2fr 1fr; }
+      /* Hochformat: vmin = Breite, deshalb Plus-Ziffer, Satzstand und
+         Leerlauf-Feldnummer hier zusätzlich deckeln, damit sie die schmale
+         Anzeige nicht sprengen. */
       .plus-btn .plus { font-size: 3rem; }
       .plus-btn .label { font-size: .7rem; }
       .current-score { font-size: clamp(1.8rem, 9vw, 3.2rem); }
       .empty .idle-court { font-size: clamp(3rem, 34vw, 11rem); }
+    }
+    /* Übereinander im HOCHFORMAT (Regelfall am Fire-Tablet hinter dem
+       Feld): Der hochkante Court ist höhenbegrenzt, links und rechts von
+       ihm blieb zwei Drittel der Breite leer, während der Satzstand oben
+       Höhe wegnahm. Darum steht der Satzstand jetzt RECHTS neben dem
+       Court (Rückgängig-Knopf über den Ziffern), darunter ggf. die
+       Schiri-Leiste; der Court bekommt die ganze Höhe der Mittelzeile.
+       Ab 480 px Breite (Tablets): Auf Handys ist die Mittelzeile niedriger
+       als Satzstand + Schiri-Leiste — die `auto`-Zeilen liefen über den
+       unteren Knopf hinaus (Review-Befund). Dort bleibt der Stapel. */
+    @media (orientation: portrait) and (min-width: 480px) {
+      .play.uebereinander .center {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        /* Leerzeilen oben/unten zentrieren Satzstand + Schiri-Leiste
+           senkrecht neben dem Court. */
+        grid-template-rows: 1fr auto auto 1fr;
+        column-gap: .6rem; row-gap: .5rem;
+      }
+      .play.uebereinander .court-wrapper { grid-column: 1; grid-row: 1 / 5; align-self: stretch; }
+      .play.uebereinander .score-board {
+        grid-column: 2; grid-row: 2;
+        flex-direction: column; gap: .5rem;
+        max-width: 38vw; padding: .5rem;
+      }
+      /* margin-top 0: der Zeilenabstand kommt schon aus row-gap. */
+      .play.uebereinander .umpire-bar { grid-column: 2; grid-row: 3; max-width: 38vw; margin-top: 0; }
+      /* Der Court ist jetzt etwa doppelt so breit wie vorher: Namen dürfen
+         mit der Breite wachsen statt am kleineren Maß (vmin) zu hängen. */
+      .play.uebereinander .court .cell .player-name { font-size: clamp(.8rem, 3.2vmin, 1.6rem); }
     }
   </style>
 </head>
@@ -653,6 +760,7 @@
       aria-label="Einstellungen"
       title="Einstellungen (PIN)"
     >⚙</button>
+    <span class="akku" id="akku" hidden title="Akkustand des Tablets"></span>
     <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
   </header>
 
@@ -670,7 +778,7 @@
     <div id="play-view" class="play" style="display:none">
       <div class="plus-btn plus-left" id="plus-left">
         <div class="plus">+1</div>
-        <div class="label">Links</div>
+        <div class="label" id="plus-left-label">Links</div>
       </div>
 
       <div class="center">
@@ -725,6 +833,19 @@
               <!-- Netz -->
               <line class="net"  x1="67"    y1="0"    x2="67"   y2="61" />
             </svg>
+            <!-- Dieselben Linien hochkant (Netz waagerecht) für die Anordnung
+                 „übereinander"; nur eine der beiden Zeichnungen ist sichtbar. -->
+            <svg class="court-lines court-lines-hoch" viewBox="0 0 61 134" preserveAspectRatio="none">
+              <line class="line" x1="0"  y1="7.6"   x2="61" y2="7.6" />
+              <line class="line" x1="0"  y1="126.4" x2="61" y2="126.4" />
+              <line class="line" x1="0"  y1="47.2"  x2="61" y2="47.2" />
+              <line class="line" x1="0"  y1="86.8"  x2="61" y2="86.8" />
+              <line class="line" x1="4.6"  y1="0" x2="4.6"  y2="134" />
+              <line class="line" x1="56.4" y1="0" x2="56.4" y2="134" />
+              <line class="line" x1="30.5" y1="0"    x2="30.5" y2="47.2" />
+              <line class="line" x1="30.5" y1="86.8" x2="30.5" y2="134" />
+              <line class="net"  x1="0" y1="67" x2="61" y2="67" />
+            </svg>
             <div class="team-label-left" id="team-label-left"></div>
             <div class="team-label-right" id="team-label-right"></div>
             <!-- 4 Service-Courts: leftTop, rightTop, leftBottom, rightBottom -->
@@ -738,7 +859,7 @@
 
       <div class="plus-btn plus-right" id="plus-right">
         <div class="plus">+1</div>
-        <div class="label">Rechts</div>
+        <div class="label" id="plus-right-label">Rechts</div>
       </div>
     </div>
   </div>
@@ -942,6 +1063,9 @@
     <!-- Öffnet die Anzeige-Hülle mit der Zähltafel dieses Felds — für ein
          zweites Tablet am Netz (Spec zaehltafel-anzeige-huelle). -->
     <div class="opt settings-wide" id="settings-anzeige">Anzeige (nur Spielstand)</div>
+    <!-- Anordnung der Zählansicht: nebeneinander (seitlich am Netz) oder
+         übereinander (hinter dem Feld); automatisch = nach Ausrichtung. -->
+    <div class="opt settings-wide" id="settings-anordnung">Anordnung: automatisch</div>
     <div class="settings-section">Schiedsrichter</div>
     <div class="opt settings-wide" id="settings-umpire">Schiri-Modus: aus</div>
     <div class="opt settings-wide" id="settings-fullscreen">Vollbild ein/aus</div>
@@ -1302,6 +1426,41 @@ const STATE = {
 // Schiri-Modus ist eine Tablet-Operator-Einstellung – pro Feld lokal gespeichert.
 const UMPIRE_KEY = `badhub.tablet.umpire.${COURT_ID}`;
 try { STATE.umpireMode = localStorage.getItem(UMPIRE_KEY) === '1'; } catch { /* ignore */ }
+
+// ── Anordnung der Zählansicht (Spec-Erweiterung 06.09.2026) ─────────────
+// Wer hinter dem Feld sitzt, sieht die Teams vorn/hinten statt links/rechts.
+// `auto` folgt der Geräte-Ausrichtung (Hochformat → übereinander), die beiden
+// anderen Werte übersteuern von Hand. Geräteeinstellung (nicht je Feld): Sie
+// beschreibt, wo das Tablet steht, nicht das Spiel.
+// Inline-Kopie von `anordnungAusQuery`/`effektiveAnordnung` aus
+// `src/io/tafelSeiten.mjs` (getestet in scripts/test-tafel-seiten.mjs) —
+// Änderungen dort und hier gemeinsam.
+const ANORDNUNGEN = ["auto", "nebeneinander", "uebereinander"];
+function anordnungAusQuery(roh) {
+  return typeof roh === "string" && ANORDNUNGEN.includes(roh) && roh !== "auto" ? roh : "auto";
+}
+function effektiveAnordnung(anordnung, hochformat) {
+  const a = anordnungAusQuery(anordnung);
+  if (a !== "auto") return a;
+  return hochformat ? "uebereinander" : "nebeneinander";
+}
+const ANORDNUNG_KEY = 'badhub.tablet.anordnung';
+const ANORDNUNG_LABEL = { auto: 'automatisch', nebeneinander: 'nebeneinander (links–rechts)', uebereinander: 'übereinander (vorn–hinten)' };
+let anordnungWahl = 'auto';
+try { anordnungWahl = anordnungAusQuery(localStorage.getItem(ANORDNUNG_KEY)); } catch { /* ignore */ }
+const hochformatMq = window.matchMedia ? window.matchMedia('(orientation: portrait)') : null;
+function hochformat() {
+  return hochformatMq ? hochformatMq.matches : window.innerHeight > window.innerWidth;
+}
+/** Zeichnet die Zählansicht gerade übereinander (vorn/hinten)? */
+function uebereinander() {
+  return effektiveAnordnung(anordnungWahl, hochformat()) === 'uebereinander';
+}
+/** Wortwahl für eine Seite: links/rechts bzw. vorne/hinten (unten/oben). */
+function seiteWort(side) {
+  if (uebereinander()) return side === 'left' ? 'vorne' : 'hinten';
+  return side === 'left' ? 'links' : 'rechts';
+}
 // Karten/Verwarnungen werden NUR lokal protokolliert (pro Feld, an die matchId
 // gebunden → bei neuem Match leer). Kein Versand an Server/badhub.
 const CARDS_KEY = `badhub.tablet.cards.${COURT_ID}`;
@@ -1310,6 +1469,7 @@ let cardsMatchId = null;
 const els = {
   eventLabel: document.getElementById('event-label'),
   connDot: document.getElementById('conn-dot'),
+  akku: document.getElementById('akku'),
   connText: document.getElementById('conn-text'),
   emptyView: document.getElementById('empty-view'),
   playView: document.getElementById('play-view'),
@@ -1388,6 +1548,9 @@ const els = {
   settingsFullscreen: document.getElementById('settings-fullscreen'),
   settingsClose: document.getElementById('settings-close'),
   settingsUmpire: document.getElementById('settings-umpire'),
+  settingsAnordnung: document.getElementById('settings-anordnung'),
+  plusLeftLabel: document.getElementById('plus-left-label'),
+  plusRightLabel: document.getElementById('plus-right-label'),
   umpireBar: document.getElementById('umpire-bar'),
   umpireBadge: document.getElementById('umpire-badge'),
   umpireSay: document.getElementById('umpire-say'),
@@ -1511,6 +1674,10 @@ function connect() {
       STATE.finalized = incomingFinalized;
       if (STATE.finalized) {
         tlog('info', 'match_finalized_stand_down', { matchId: msg.match?.matchId });
+        // Ein noch offener Auftrag für dieses Match ist damit erledigt —
+        // BTP hat ein Ergebnis, egal ob unseres oder ein von Hand
+        // eingetragenes. Stehen bliebe er sonst bis zum nächsten Match.
+        sendeauftragBeiFinalisierungLoslassen();
         render();
         return;
       }
@@ -1716,10 +1883,83 @@ function sendScoreUpdate() {
 }
 
 // ─────────────────────────────── Akkustand ────────────────────────────
-// Zwei Quellen: 1) Fully-Kiosk-JS-Interface (funktioniert über HTTP, der
-// eigentliche Weg auf den Fire-Tablets), 2) Web Battery Status API als
-// Fallback (nur Android/Chrome + secure context/HTTPS; über HTTP-LAN meist
-// nicht vorhanden — darum braucht es Fully).
+// Zwei Quellen (Reihenfolge in `akkuBeobachten`): 1) Brücke der Kiosk-App
+// (`window.fully`, funktioniert über http — der eigentliche Weg auf den
+// Fire-Tablets), 2) Web Battery Status API (nur Android/Chrome im Secure
+// Context). Jeder Stand geht an ZWEI Stellen: in die eigene Kopfzeile (seit
+// 13.09.2026 — im Kiosk fehlt die Android-Statusleiste) und als
+// `battery`-Frame an den Host (TabletPanel). Eine Quelle, ein Takt.
+//
+// ── Inline-Kopie von src/io/akku.mjs (Test scripts/test-akku.mjs) —
+//    Änderungen dort und hier gemeinsam ──
+const AKKU_NIEDRIG = 20;
+const AKKU_KRITISCH = 10;
+const AKKU_TAKT_MS = 60000;
+function prozent(v) {
+  // `Number(null)` wäre 0 — „kein Wert" darf aber nicht „leer" heißen.
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+function akkuStufe(percent) {
+  const p = prozent(percent);
+  if (p === null) return null;
+  if (p < AKKU_KRITISCH) return "kritisch";
+  if (p < AKKU_NIEDRIG) return "niedrig";
+  return "ok";
+}
+function akkuText(percent, charging) {
+  const p = prozent(percent);
+  if (p === null) return "";
+  return (charging ? "⚡ " : "🔋 ") + p + " %";
+}
+function akkuAusFully(fully) {
+  if (!fully || typeof fully.getBatteryLevel !== "function") return null;
+  let lvl;
+  try { lvl = Number(fully.getBatteryLevel()); } catch (e) { return null; }
+  if (!Number.isFinite(lvl) || lvl < 0) return null;
+  let charging = false;
+  if (typeof fully.isPlugged === "function") {
+    try { charging = !!fully.isPlugged(); } catch (e) { charging = false; }
+  }
+  return { percent: prozent(lvl), charging };
+}
+function akkuAusWebBattery(bat) {
+  if (!bat) return null;
+  const p = prozent(Number(bat.level) * 100);
+  if (p === null) return null;
+  return { percent: p, charging: !!bat.charging };
+}
+function akkuBeobachten(win, melde) {
+  const fully = win.fully;
+  if (fully && typeof fully.getBatteryLevel === "function") {
+    const lies = () => { const a = akkuAusFully(fully); if (a) melde(a); };
+    lies();
+    const t = win.setInterval(lies, AKKU_TAKT_MS);
+    return () => win.clearInterval(t);
+  }
+  const nav = win.navigator;
+  if (nav && typeof nav.getBattery === "function") {
+    let aktiv = true;
+    let bat = null;
+    const lies = () => { if (!aktiv) return; const a = akkuAusWebBattery(bat); if (a) melde(a); };
+    let p;
+    try { p = nav.getBattery(); } catch (e) { return null; }
+    Promise.resolve(p).then((b) => {
+      bat = b;
+      b.addEventListener("levelchange", lies);
+      b.addEventListener("chargingchange", lies);
+      lies();
+    }).catch(() => { /* nicht verfügbar – Anzeige bleibt stumm */ });
+    return () => { aktiv = false; };
+  }
+  return null;
+}
+// ── Ende Inline-Kopie ──
+
+// Letzter Stand — wird beim (Re-)Connect erneut an den Host gemeldet.
+let letzterAkku = null;
 let sendBattery = null;
 function sendBatteryMsg(percent, charging) {
   if (ws && ws.readyState === WebSocket.OPEN && Number.isFinite(percent)) {
@@ -1730,6 +1970,18 @@ function sendBatteryMsg(percent, charging) {
     }));
   }
 }
+// Kopfzeile: Text + Stufe als Klasse; ohne Wert bleibt das Feld versteckt.
+// Nur bei geändertem Text ins DOM schreiben — der 60-s-Takt der Brücke
+// liefert meist denselben Wert, und ein Textknoten-Tausch kostet Layout.
+function renderAkku(a) {
+  const text = a ? akkuText(a.percent, a.charging) : '';
+  if (els.akku.textContent === text && els.akku.hidden === !text) return;
+  els.akku.hidden = !text;
+  els.akku.textContent = text;
+  const stufe = a ? akkuStufe(a.percent) : null;
+  els.akku.classList.toggle('niedrig', stufe === 'niedrig');
+  els.akku.classList.toggle('kritisch', stufe === 'kritisch');
+}
 function setupBattery() {
   const hasFully = typeof window.fully !== 'undefined'
     && typeof window.fully.getBatteryLevel === 'function';
@@ -1738,32 +1990,17 @@ function setupBattery() {
     hasGetBattery: !!navigator.getBattery,
     secureContext: window.isSecureContext === true,
   });
-
-  // 1) Fully Kiosk: nativer Bridge, klappt auch über HTTP. Voraussetzung am
-  //    Tablet: Fully → „JavaScript Interface aktivieren".
-  if (hasFully) {
-    sendBattery = () => {
-      try {
-        const lvl = Number(window.fully.getBatteryLevel());
-        let charging = false;
-        try { charging = !!window.fully.isPlugged(); } catch (e) { /* optional */ }
-        if (Number.isFinite(lvl) && lvl >= 0) sendBatteryMsg(lvl, charging);
-      } catch (e) { tlog('warn', 'battery_fully_failed', String(e)); }
-    };
-    sendBattery();
-    setInterval(sendBattery, 60000); // alle 60 s
-    return;
-  }
-
-  // 2) Fallback: Web Battery Status API.
-  if (!navigator.getBattery) return;
-  navigator.getBattery().then((bat) => {
-    sendBattery = () => sendBatteryMsg(bat.level * 100, bat.charging);
-    bat.addEventListener('levelchange', sendBattery);
-    bat.addEventListener('chargingchange', sendBattery);
-    sendBattery();
-    setInterval(sendBattery, 120000);
-  }).catch(() => { /* nicht verfügbar – Feature bleibt stumm */ });
+  const quelle = akkuBeobachten(window, (a) => {
+    letzterAkku = a;
+    renderAkku(a);
+    sendBatteryMsg(a.percent, a.charging);
+  });
+  if (!quelle) return; // keine Quelle (iPad, LAN-http ohne Kiosk-App) → stumm
+  // Brücke da, aber der erste (synchrone) Durchlauf hat nichts geliefert →
+  // einmalig ins Geräte-Log, damit „kein Akku trotz Kiosk-App" am Turnier
+  // aus dem Log erkennbar bleibt (`akkuAusFully` schluckt die Ausnahme).
+  if (hasFully && !letzterAkku) tlog('warn', 'battery_fully_failed');
+  sendBattery = () => { if (letzterAkku) sendBatteryMsg(letzterAkku.percent, letzterAkku.charging); };
 }
 
 // ─────────────────────────────── BWF-Regel-Logik ──────────────────────
@@ -3409,6 +3646,15 @@ function finishAs(status, cascade) {
 }
 
 function reopen() {
+  // Fest in BTP: Nichts wieder öffnen — der Host nähme das neue Ergebnis
+  // ohnehin nicht an (ADR 0017, Regel b). Der Knopf ist in der Beendet-
+  // Ansicht gesperrt; hier nur noch der Fall, dass das Finalisiert-Frame
+  // zwischen Render und Tipp eintraf.
+  if (STATE.finalized) {
+    tlog('info', 'reopen_suppressed_finalized', { matchId: STATE.match?.matchId });
+    render();
+    return;
+  }
   if (STATE.history.length > 0) {
     restoreSnapshot(STATE.history.pop());
   } else {
@@ -3488,6 +3734,82 @@ function submit() {
 const RESULT_OHNE_GRUND = 'Der Turnier-PC hat das Ergebnis abgelehnt.';
 
 /**
+ * Sperren und Statuszeile der Beendet-Ansicht.
+ *
+ * Inline-Kopie von `src/io/abschlussAnsicht.mjs` (getestet in
+ * `scripts/test-abschluss-ansicht.mjs`) — die Assets durchlaufen keinen Build
+ * und können keine Module laden. Änderungen hier und dort gemeinsam.
+ *
+ * Ein in BTP festes Ergebnis sperrt Senden UND Korrektur und nennt den
+ * einzigen Weg, der noch geht: die Turnierleitung. Alle anderen Lagen bleiben
+ * wie bisher.
+ */
+/**
+ * Ist ein offener Sendeauftrag erledigt, weil BTP das Match festgemacht hat?
+ * Inline-Kopie von `sendeauftragErledigt` aus `src/io/abschlussAnsicht.mjs`
+ * (dort die Begründung, Test in `scripts/test-abschluss-ansicht.mjs`).
+ * Nur für DASSELBE Match — über ein anderes sagt das Frame nichts.
+ */
+function sendeauftragErledigt(pendingResult, matchId, finalized) {
+  return !!(finalized && pendingResult && matchId != null
+    && pendingResult.matchId === matchId);
+}
+
+/**
+ * Lässt einen offenen Sendeauftrag los, den BTP überholt hat: Das Match ist
+ * fest, der Turnier-PC nähme den Payload nicht mehr an (R5). Ohne diesen
+ * Schritt blieb der Auftrag stehen, blockte beim nächsten Match still den
+ * Sende-Knopf und wurde nach einem Reload nachgesendet — am falschen Spiel
+ * (Review-Fund 15.09.2026). Liefert true, wenn etwas losgelassen wurde.
+ */
+function sendeauftragBeiFinalisierungLoslassen() {
+  const pr = STATE.pendingResult;
+  if (!sendeauftragErledigt(pr, STATE.match?.matchId, STATE.finalized)) return false;
+  if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
+  STATE.pendingResult = null;
+  tlog('info', 'pending_result_released_finalized', { matchId: pr.matchId });
+  persistState();
+  return true;
+}
+
+function abschlussLage(z) {
+  const s = z || {};
+  if (s.finalized) {
+    return {
+      sendenGesperrt: true, korrekturGesperrt: true,
+      status: '✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung.',
+    };
+  }
+  if (s.submittedOk) {
+    return {
+      sendenGesperrt: true, korrekturGesperrt: false,
+      status: '✓ Übermittelt — die Turnierleitung kann übernehmen.',
+    };
+  }
+  if (s.resultRejected) {
+    // Dauerhaft abgelehnt: den Grund nennen und den Knopf wieder freigeben.
+    // Der Bediener kann den Stand korrigieren und neu senden oder die
+    // Turnierleitung holen — beides ist besser als ein Tablet, das
+    // stillschweigend endlos wiederholt.
+    return {
+      sendenGesperrt: false, korrekturGesperrt: false,
+      status: '✗ Nicht angenommen: ' + s.resultRejected
+        + ' — bitte den Stand prüfen oder die Turnierleitung ansprechen.',
+    };
+  }
+  if (s.pendingResult) {
+    return {
+      sendenGesperrt: true, korrekturGesperrt: false,
+      status: 'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.',
+    };
+  }
+  return {
+    sendenGesperrt: !!s.needWinner, korrekturGesperrt: false,
+    status: s.needWinner ? 'Bitte zuerst den Sieger wählen.' : '',
+  };
+}
+
+/**
  * Wie geht es weiter, wenn ein Ergebnis nicht durchkommt?
  *
  * Inline-Kopie von `src/io/resultRetry.mjs` (getestet in
@@ -3520,7 +3842,13 @@ async function trySubmitPending() {
   // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ein noch offenes Ergebnis wird
   // NICHT (weiter) übermittelt, sobald das Match in BTP finalisiert ist — das
   // per Hand eingegebene Ergebnis bleibt unangetastet.
-  if (STATE.finalized) { tlog('info', 'submit_retry_suppressed_finalized'); return; }
+  if (STATE.finalized) {
+    tlog('info', 'submit_retry_suppressed_finalized');
+    // Der Auftrag zu diesem Match ist erledigt (siehe Frame-Handler); hier
+    // nur das Netz, falls der Retry nach dem Frame noch einmal feuert.
+    if (sendeauftragBeiFinalisierungLoslassen()) render();
+    return;
+  }
   const pr = STATE.pendingResult;
   if (!pr) return;
   // Backstop-Timeout (Hebel B): bricht der Fetch nicht von selbst ab (tote
@@ -3540,6 +3868,12 @@ async function trySubmitPending() {
     // Wichtig: der Relay antwortet auch bei „bts-light nicht verbunden"
     // mit HTTP 200 – die echte Aussage steht im Body-Feld ok.
     const data = await res.json().catch(() => null);
+    // Gehört die Antwort noch zu diesem Auftrag? Während des Wartens kann
+    // das Finalisiert-Frame ihn losgelassen oder ein neues Match einen
+    // anderen gesetzt haben. Eine späte Antwort dürfte dann weder
+    // `submittedOk` aufs falsche Spiel setzen noch eine alte Absage zeigen
+    // (Review-Fund 15.09.2026).
+    if (STATE.pendingResult !== pr) { tlog('info', 'submit_reply_stale', { matchId: pr.matchId }); return; }
     const schritt = naechsterSchritt(data);
     if (schritt.art === 'dauerhaft') {
       // Aufhören. Weitere Versuche mit demselben Payload werden genauso
@@ -3566,6 +3900,9 @@ async function trySubmitPending() {
     persistState();
     render();
   } catch (err) {
+    // Losgelassener oder ersetzter Auftrag: nichts neu planen — der neue
+    // Auftrag hat seinen eigenen Lauf, der alte ist erledigt.
+    if (STATE.pendingResult !== pr) { tlog('info', 'submit_reply_stale', { matchId: pr.matchId }); return; }
     tlog('warn', 'submit_retry', { matchId: pr.matchId, error: String(err) });
     render();
     resultRetryTimer = setTimeout(trySubmitPending, RESULT_RETRY_MS);
@@ -3620,10 +3957,17 @@ function renderSetupModal() {
   renderScorekeeperHint(STATE.setup === 'choose-side');
   renderOfficialsHint(STATE.setup === 'choose-side');
   if (STATE.setup === 'choose-side') {
-    setSetupText(
-      'Welches Team steht links?', 'Which team is on the left?',
-      'Tippe das Team an, das auf der linken Court-Hälfte spielt.',
-      'Tap the team playing on the left half of the court.');
+    if (uebereinander()) {
+      setSetupText(
+        'Welches Team steht vorne (unten)?', 'Which team is on the near side?',
+        'Tippe das Team an, das auf der Court-Hälfte vor dir spielt.',
+        'Tap the team playing on the half of the court nearest to you.');
+    } else {
+      setSetupText(
+        'Welches Team steht links?', 'Which team is on the left?',
+        'Tippe das Team an, das auf der linken Court-Hälfte spielt.',
+        'Tap the team playing on the left half of the court.');
+    }
     const teamAName = STATE.match.teamA.map(p => p.name).join(' / ');
     const teamBName = STATE.match.teamB.map(p => p.name).join(' / ');
     els.setupOptions.innerHTML =
@@ -3851,6 +4195,7 @@ function setPlayerClub(cell, p) {
 }
 
 function render() {
+  anordnungAnwenden();
   // Setup-Modal hat Priorität
   renderSetupModal();
   renderBreak();
@@ -3959,26 +4304,20 @@ function render() {
       els.finishedUmpire.hidden = true;
     }
     els.finishedOverlay.classList.add('visible');
-    const needWinner = (STATE.retired || STATE.walkover) && !STATE.retiredWinner;
-    if (STATE.submittedOk) {
-      els.submitBtn.disabled = true;
-      els.submitStatus.textContent = '✓ Übermittelt — die Turnierleitung kann übernehmen.';
-    } else if (STATE.resultRejected) {
-      // Dauerhaft abgelehnt: den Grund nennen und den Knopf wieder freigeben.
-      // Der Bediener kann den Stand korrigieren und neu senden oder die
-      // Turnierleitung holen — beides ist besser als ein Tablet, das
-      // stillschweigend endlos wiederholt.
-      els.submitBtn.disabled = false;
-      els.submitStatus.textContent =
-        '✗ Nicht angenommen: ' + STATE.resultRejected
-        + ' — bitte den Stand prüfen oder die Turnierleitung ansprechen.';
-    } else if (STATE.pendingResult) {
-      els.submitBtn.disabled = true;
-      els.submitStatus.textContent = 'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.';
-    } else {
-      els.submitBtn.disabled = needWinner;
-      els.submitStatus.textContent = needWinner ? 'Bitte zuerst den Sieger wählen.' : '';
-    }
+    // Sperren und Statuszeile aus EINER Regel (`abschlussLage`): Ist das
+    // Ergebnis in BTP fest, sind Senden UND Korrektur zu — vorher blieb die
+    // Korrektur offen, und das Finalisiert-Gate schluckte danach jeden
+    // Sendeversuch still (Feld 11, 12.09.2026: 23-mal).
+    const lage = abschlussLage({
+      finalized: STATE.finalized,
+      submittedOk: STATE.submittedOk,
+      resultRejected: STATE.resultRejected,
+      pendingResult: !!STATE.pendingResult,
+      needWinner: (STATE.retired || STATE.walkover) && !STATE.retiredWinner,
+    });
+    els.submitBtn.disabled = lage.sendenGesperrt;
+    els.reopenBtn.disabled = lage.korrekturGesperrt;
+    els.submitStatus.textContent = lage.status;
   } else {
     els.finishedOverlay.classList.remove('visible');
     els.retirePick.style.display = 'none';
@@ -3994,6 +4333,31 @@ function render() {
 // (kein Internet, Android-Buttons aus) liegt im Kiosk-Browser, separater PIN.
 let settingsPinEntry = '';
 
+// Fünf-Minuten-Freigabe: Nach richtiger PIN öffnet das Zahnrad fünf Minuten
+// lang ohne erneute Eingabe — auch über Feldwechsel/Neuladen hinweg (Wert im
+// localStorage). Inline-Kopie von `src/io/pinFreigabe.mjs`
+// (Test `scripts/test-pin-freigabe.mjs`); Änderungen hier und dort gemeinsam.
+const PIN_FREIGABE_KEY = 'badhub.tablet.pinFreigabeBis';
+const FREIGABE_MS = 5 * 60 * 1000;
+function neueFreigabe(jetztMs) { return jetztMs + FREIGABE_MS; }
+function freigabeGueltig(bisMs, jetztMs) {
+  if (typeof bisMs !== 'number' || !Number.isFinite(bisMs) || bisMs <= 0) return false;
+  if (bisMs <= jetztMs) return false;
+  return bisMs - jetztMs <= FREIGABE_MS;
+}
+function freigabeLesen(roh) {
+  if (typeof roh !== 'string' || !/^\d{1,16}$/.test(roh)) return null;
+  const n = Number(roh);
+  return n > 0 ? n : null;
+}
+function pinFreigabeAktiv() {
+  try { return freigabeGueltig(freigabeLesen(localStorage.getItem(PIN_FREIGABE_KEY)), Date.now()); }
+  catch { return false; }
+}
+function pinFreigabeMerken() {
+  try { localStorage.setItem(PIN_FREIGABE_KEY, String(neueFreigabe(Date.now()))); } catch { /* kein Speicher → nur diesmal */ }
+}
+
 function renderPinDisplay() {
   const len = settingsPinEntry.length;
   const total = Math.max(SETTINGS_PIN.length, len, 4);
@@ -4007,6 +4371,7 @@ function openSettings() {
   els.settingsPinView.hidden = false;
   els.settingsMainView.hidden = true;
   els.settingsModal.classList.add('visible');
+  if (pinFreigabeAktiv()) showSettingsMain();
 }
 
 function closeSettings() {
@@ -4028,6 +4393,7 @@ function pinKey(k) {
   renderPinDisplay();
   if (settingsPinEntry.length >= SETTINGS_PIN.length) {
     if (settingsPinEntry === SETTINGS_PIN) {
+      pinFreigabeMerken();
       showSettingsMain();
     } else {
       els.settingsPinDisplay.textContent = 'PIN falsch';
@@ -4524,7 +4890,7 @@ function openCardPlayerView() {
   if (!STATE.match) return;
   els.cardPlayerList.textContent = '';
   const sideLabel = (teamKey) =>
-    !STATE.teamOnSide ? '' : (STATE.teamOnSide[teamKey] === 'left' ? 'links' : 'rechts');
+    !STATE.teamOnSide ? '' : seiteWort(STATE.teamOnSide[teamKey]);
   ['a', 'b'].forEach(teamKey => {
     const arr = teamKey === 'a' ? STATE.match.teamA : STATE.match.teamB;
     arr.forEach((p, index) => {
@@ -4653,6 +5019,36 @@ els.cardRed.addEventListener('click', () => {
   applyCard('red');
 });
 els.cardBlack.addEventListener('click', () => applyCard('black'));
+
+// Anordnung auf die Zählansicht anwenden: Klasse am Spielbereich, Beschrif-
+// tung der Plus-Knöpfe, Menütext. Läuft bei jedem render() (billig) und beim
+// Drehen des Geräts — dann auch der Seitenwahl-Text, falls er gerade offen ist.
+function anordnungAnwenden() {
+  const ueber = uebereinander();
+  els.playView.classList.toggle('uebereinander', ueber);
+  els.plusLeftLabel.textContent = ueber ? 'Vorne' : 'Links';
+  els.plusRightLabel.textContent = ueber ? 'Hinten' : 'Rechts';
+  els.settingsAnordnung.textContent = 'Anordnung: ' + ANORDNUNG_LABEL[anordnungWahl];
+}
+// render() ruft anordnungAnwenden() selbst; `resize` fängt Browser ohne
+// `change`-Ereignis und ist sonst harmlos doppelt (idempotent).
+function beiDrehung() { render(); }
+if (hochformatMq) {
+  if (hochformatMq.addEventListener) hochformatMq.addEventListener('change', beiDrehung);
+  else if (hochformatMq.addListener) hochformatMq.addListener(beiDrehung);
+}
+window.addEventListener('resize', beiDrehung);
+anordnungAnwenden();
+
+// Anordnung reihum: automatisch → nebeneinander → übereinander → …
+function naechsteAnordnung() {
+  anordnungWahl = ANORDNUNGEN[(ANORDNUNGEN.indexOf(anordnungWahl) + 1) % ANORDNUNGEN.length];
+  try { localStorage.setItem(ANORDNUNG_KEY, anordnungWahl); } catch { /* ignore */ }
+  tlog('info', 'anordnung', { wahl: anordnungWahl });
+  closeSettings();
+  render();
+}
+els.settingsAnordnung.addEventListener('click', naechsteAnordnung);
 
 function toggleUmpireMode() {
   STATE.umpireMode = !STATE.umpireMode;
