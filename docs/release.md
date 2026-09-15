@@ -319,6 +319,15 @@ statt einer signierten nur eine unsignierte Debug-APK — der Job ist
 `continue-on-error`, ein Fehlschlag dort blockiert also nie den
 Windows-Installer oder `latest.json`.
 
+Das SDK richtet in beiden Workflows `android-actions/setup-android` ein —
+**mit `packages: platform-tools`**. Ohne die Angabe installiert die Action
+(auch in v4) zusätzlich das alte SDK-Paket `tools`, das Google aus dem
+Repository entfernt hat; seit 15.09.2026 brach der Job damit vor dem ersten
+Gradle-Aufruf ab („Failed to find package 'tools'"), in der CI auf main wie
+in jedem PR. Build-Tools und Plattform braucht die Action nicht zu
+installieren: AGP lädt sie beim Bau selbst nach, die Lizenzen nimmt die
+Action an.
+
 Die `versionCode`-Formel steht **zweimal** im Repo — `app/build.gradle.kts`
 (`versionCodeAus`) und `kern/Version.kt` (`versionCode`, für den JVM-Test)
 — ein CI-Job vergleicht sie nicht gegeneinander. Läuft eine der beiden
