@@ -67,7 +67,10 @@ einchecken, reine Quali-Teilnehmer erst, wenn sie sich qualifiziert haben.
 Gefiltert wird in `entry_list()` über `non_main_stage_entries()`
 ([`btp/model.rs`](../src-tauri/src/btp/model.rs)); die Anzahl gefilterter
 Meldungen wird geloggt (sonst fiele nie auf, warum jemand auf der Seite
-fehlt).
+fehlt) — seit v0.9.291 nur noch, wenn sich die Zahl **ändert** (auch zurück
+auf 0). Vorher stand die Zeile mit jedem BTP-Abruf alle 5 s im Log und
+machte mehr als die Hälfte des Tageslogs aus (12./13.09.2026: 10 000 von
+17 000 Zeilen).
 
 **Filterschlüssel ist der numerische `StageType`** (1 = Hauptfeld,
 2 = Qualifikation, 8 = Playoff, 9998 = Reserve, 9999 = Ausschließen —
