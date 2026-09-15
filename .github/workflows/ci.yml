@@ -283,6 +283,53 @@ jobs:
       - name: Rust tests
         run: cargo test --workspace
 
+  # Linux als Entwicklungs- und Test-Plattform (Roadmap "Linux-Variante",
+  # Stufe 0). Der Rust-Kern hat fuer alles Windows-Gebundene einen
+  # `not(windows)`-Zweig (GDI-Druck -> NichtUnterstuetzt, SSID -> iwgetid) --
+  # den hat seit dem GDI-Druck (v0.9.249) nie jemand kompiliert. Dieser Job
+  # haelt ihn gruen: Clippy mit -D warnings und die komplette Test-Suite,
+  # damit sich auf Linux entwickeln laesst, ohne dass erst der Windows-Lauf
+  # einen Fehler meldet. Kein Bundle, kein Release-Artefakt -- das bleibt
+  # bis zur Stufe 1 der Roadmap Windows-Sache.
+  #
+  # Frontend-Build ist trotzdem noetig: `tauri::generate_context!` liest das
+  # dist/-Verzeichnis beim Kompilieren. Ubuntu-Minuten zaehlen bei GitHub
+  # einfach (Windows doppelt), der Rust-Cache haelt den Lauf kurz.
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      # Tauri 2 auf Linux: WebKitGTK 4.1, GTK 3, AppIndicator, librsvg.
+      - name: Tauri-System-Pakete
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev             librsvg2-dev libssl-dev libxdo-dev patchelf
+
+      - name: Frontend bauen (fuer generate_context)
+        run: |
+          npm ci
+          npm run build
+
+      - name: Rust clippy (Linux)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust tests (Linux)
+        run: cargo test --workspace
+
   # Android-Kiosk-App: Unit-Tests auf der JVM + Debug-APK als Bau-Probe.
   # Kein Emulator; Android-Verhalten steht auf der Feldtest-Liste der Spec.
   android:

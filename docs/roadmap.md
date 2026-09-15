@@ -712,6 +712,37 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Geplant
 
+- **Linux-Variante (Entwickeln zuerst, Betreiben später).** Der Kern ist
+  plattformneutral, BTP dagegen ein Windows-Programm — ein bts-light auf
+  Linux spricht immer ein BTP auf einem anderen Rechner an (`btp.host` ist
+  frei konfigurierbar, das geht heute schon). Vier Stufen:
+  - **Stufe 0 — Linux als Test-Plattform (umgesetzt 15.09.2026):** CI-Job
+    `linux` (`ubuntu-22.04`, Tauri-System-Pakete) mit Clippy `-D warnings`
+    und `cargo test --workspace`. Hält den `not(windows)`-Zweig grün
+    (GDI-Druck → `NichtUnterstuetzt`, SSID → `iwgetid`), der seit v0.9.249
+    nie gebaut worden war. Der Windows-Job bleibt die Release-Referenz.
+  - **Stufe 1 — Linux-Paket im Release:** zweiter Build-Job `build-linux`
+    in `release.yml` (`.AppImage` + `.sig`, `.deb`), Eintrag
+    `linux-x86_64` in `latest.json`, Download-Zeile auf der Release-Seite.
+    Kein Firewall-Hook (nur NSIS); bei `ufw` müssen 8088/8443 von Hand auf
+    — Doku.
+  - **Stufe 2 — Auto-Update auf Linux:** Der Einbau ist selbst gebaut
+    (`update.rs`: Installer laden, `/S /UPDATE` starten). Auf Linux gibt es
+    keinen Installer; der Tauri-Updater tauscht beim AppImage die Datei.
+    Braucht einen `cfg`-Zweig und eine Entscheidung, ob „Beim Beenden
+    einbauen" (ADR 0057) für AppImage nachgebaut oder ausgeblendet wird.
+    `.deb` bekäme kein Auto-Update (Paketmanager).
+  - **Stufe 3 — Zettel-Autodruck über CUPS:** zweiter Ausgabeschritt
+    Elementliste (`blatt.rs`) → PDF → `lp -d <Drucker>`, Druckerliste über
+    `lpstat -a`; deckt später auch macOS ab. Bis dahin geht auf Linux nur
+    der Browser-Druck (Vorabzettel, TL-Web), und der Setup-Abschnitt sollte
+    das sagen statt eine leere Druckerliste zu zeigen.
+  - Bleibt: Messwerkzeuge (`tests/*_probe.rs`) und neue BTP-Mitschnitte
+    brauchen Windows. Stufen 1–3 vor dem Code durch `/idee` (Spec
+    `docs/features/linux.md`); macOS ist dieselbe Arbeit plus
+    Apple-Signierung (Developer-Konto) — ohne die widerspricht es dem
+    Plug-and-play-Anspruch.
+
 - **Update ohne jede Lücke (Stufe 3): Prozess-Übergabe oder Dienst +
   Oberfläche.** Seit v0.9.279 (Spec
   [features/update-im-turnierbetrieb.md](features/update-im-turnierbetrieb.md),

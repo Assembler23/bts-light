@@ -246,6 +246,19 @@ Button) innerhalb weniger Sekunden.
 `workflow_dispatch` (Actions-Tab → „Run workflow") baut nur zum Test und
 veröffentlicht **nicht**.
 
+### CI vor dem Release (`ci.yml`)
+
+Drei Jobs je Push/PR: **`build`** auf `windows-latest` (Zielplattform —
+Frontend, Asset-Syntax, JS-Regeltests, `cargo fmt`/Clippy/Tests),
+**`android`** (Kiosk-App: JVM-Tests + Debug-APK) und seit 15.09.2026
+**`linux`** auf `ubuntu-22.04`: Clippy mit `-D warnings` und
+`cargo test --workspace` mit den Tauri-System-Paketen (WebKitGTK 4.1, GTK 3,
+AppIndicator, librsvg). Der Linux-Job baut kein Paket; er hält den
+`not(windows)`-Zweig des Rust-Kerns grün (GDI-Druck → `NichtUnterstuetzt`,
+SSID → `iwgetid`), damit sich auf Linux entwickeln lässt (Roadmap
+„Linux-Variante", Stufe 0). Release-Referenz bleibt der Windows-Job;
+Windows-Minuten zählen bei GitHub doppelt, Ubuntu-Minuten einfach.
+
 ## Wenn das Taggen vergessen wird
 
 Der Versionssprung passiert inzwischen **innerhalb** der Feature-Commits
