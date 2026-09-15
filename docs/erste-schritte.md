@@ -21,6 +21,9 @@ nimmt von sich aus keine Verbindungen an.
 
 Im Tournament Planner: **Extras → Tournament Planner Network…** öffnen und das
 Häkchen bei **„Enabled"** setzen.
+<!-- Der Hinweis steht seit v0.9.281 auch im Fehlertext der App. Faellt er
+     dort weg, ist dieser Schritt die einzige Quelle. -->
+<!-- pruef: "Tournament Planner Network" in src-tauri/src/btp/client.rs -->
 
 Steht in demselben Fenster ein **Passwort**, merk es dir — es gehört später in
 BTS Light in das Feld „BTP-Passwort".
@@ -60,6 +63,11 @@ Tablets und Anzeigen den PC im Hallen-WLAN erreichen können.
 |---|---|
 | BTS Light (Tablets) | TCP 8088 |
 | BTS Light (Tablets, verschlüsselt) | TCP 443 und 8443 |
+<!-- Die Regelnamen und Ports stehen woertlich im Installer-Hook. Aendert
+     sie jemand, zeigt die Fehlersuche unten auf die falschen Ports. -->
+<!-- pruef: "name=\"BTS Light (Tablets)\"" in src-tauri/installer/firewall-hooks.nsh -->
+<!-- pruef: "localport=8088" in src-tauri/installer/firewall-hooks.nsh -->
+<!-- pruef: "localport=443,8443" in src-tauri/installer/firewall-hooks.nsh -->
 
 > **Bestätige beide.** Lehnst du ab, läuft die Installation zwar durch — aber
 > **beim ersten Start in der Halle** kommt dann die gewöhnliche
@@ -82,7 +90,8 @@ stehen.
 ## Schritt 3 — Der erste Start
 
 Beim ersten Start öffnet sich **„BTS Light einrichten"** — derselbe Bildschirm,
-den du später als **Einstellungen** wiederfindest. Drei Dinge trägst du jetzt
+den du später als **Einstellungen** wiederfindest.
+<!-- pruef: "BTS Light einrichten" in src/pages/SetupWizard.tsx --> Drei Dinge trägst du jetzt
 ein, alles andere kannst du zunächst überspringen:
 
 1. **Liveticker-Ziel** — deinen Verband anklicken.
@@ -100,6 +109,7 @@ ein, alles andere kannst du zunächst überspringen:
 > Einzelturniere (BTP) gilt `9901` — das ist die Voreinstellung. Für Liga
 > (BLP) ist es **`9911`**. Mit dem falschen Port bekommst du genau den
 > Verbindungsfehler aus Schritt 1, obwohl dort alles richtig eingestellt ist.
+<!-- pruef: /9911/ in docs/btp_protocol.md -->
 
 Der Speichern-Knopf verlangt außerdem, dass **mindestens ein Verbindungsweg
 für die Tablets** aktiv ist — voreingestellt ist LAN, das passt also meistens
@@ -110,6 +120,7 @@ weitere Option bewirkt, steht ebenfalls dort.
 ## Schritt 4 — Verbindung prüfen
 
 Drück im Abschnitt „BTP-Verbindung" auf **Verbindung testen**.
+<!-- pruef: "Verbindung testen" in src/pages/SetupWizard.tsx -->
 
 - **Erfolg:** Es erscheint der **Name deines Turniers**. Damit ist bewiesen,
   dass die Verbindung steht und du am richtigen Turnier hängst.
@@ -120,7 +131,8 @@ Der Test **speichert nichts** — er prüft nur.
 
 ## Schritt 5 — Starten
 
-Unten auf **„Speichern & Liveticker starten"**. Der Knopf bleibt gesperrt,
+Unten auf **„Speichern & Liveticker starten"**.
+<!-- pruef: "Speichern & Liveticker starten" in src/pages/SetupWizard.tsx --> Der Knopf bleibt gesperrt,
 solange etwas Wichtiges fehlt; siehe
 [Einstellungen](einstellungen.md#zwei-dinge-vorweg).
 

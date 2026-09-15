@@ -76,6 +76,44 @@ hochgeladenen Diagnose-Logs.
 
 Feature/Bugfix → zuständige `docs/**/*.md` im selben Commit pflegen.
 
+### Das öffentliche Handbuch mitziehen
+
+Ein Teil von `docs/` steht öffentlich auf
+`badhub.de/download/bts-light/handbuch/` (Whitelist: `docs/handbuch.json`).
+**Ändert sich etwas, das ein Turnierleiter oder Schiedsrichter merkt**, gehört
+das betroffene Kapitel in denselben PR:
+
+| Was du anfasst | Kapitel |
+|---|---|
+| `config.rs` (**Standardwerte!**), `SetupWizard.tsx` | `docs/einstellungen.md` · `docs/erste-schritte.md` |
+| `assets/tablet.html` | `docs/tablet-bedienen.md` · `docs/tablet.md` |
+| `assets/{monitor,combo,overview,winners,ad,tafel,anzeige,lobby,tv}.html` | `docs/court-monitor.md` · `docs/oberflaechen.md` |
+| `SideNav.tsx`, `src/pages/*`, Routen in `tablet/server.rs` | `docs/oberflaechen.md` |
+| `installer/*`, `update.rs` | `docs/erste-schritte.md` |
+
+Welches Kapitel es konkret ist, sagt der Lauf **„Handbuch prüfen?"** am PR
+(`scripts/check-handbuch-aktuell.mjs`). Er **blockiert nichts** — ein Refactor
+ohne Nutzerwirkung soll nicht an einer Formalie hängenbleiben.
+
+**Nachprüfbares verankern.** Steht im Handbuch eine Beschriftung, Route, ein
+Port oder ein Standardwert, gehört direkt darunter eine Anmerkung:
+
+```markdown
+Der Knopf heißt **Court übernehmen**.
+<!-- pruef: "Court übernehmen" in src-tauri/assets/tablet.html -->
+```
+
+`scripts/test-handbuch-fakten.mjs` (in der CI, **wird rot**) prüft diese Anker
+gegen den Code und nennt bei einer Abweichung die Handbuch-Zeile samt Satz.
+Ohne Anker veraltet die Aussage still.
+
+> **Warum die Strenge:** Beim Erstellen der Kapitel (05./06.09.2026) fand die
+> Gegenprüfung in **jedem** Kapitel echte Sachfehler — über dreißig, darunter
+> „das Ergebnis geht von allein an die Turnierleitung" (es muss übermittelt
+> werden und kann abgelehnt werden), „Cloud ist voreingestellt an" (nur LAN
+> wird ausgeliefert) und ein falscher Port für Liga-Turniere. Alle sahen beim
+> Schreiben plausibel aus. Ein Handbuch meldet sich nicht, wenn es lügt.
+
 | Code-Pfad | Doku-Datei |
 |---|---|
 | `src-tauri/src/btp/*` | `docs/btp_protocol.md` |
