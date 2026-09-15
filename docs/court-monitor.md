@@ -116,7 +116,10 @@ alle Geräte auf, die sich gemeldet haben:
   v0.9.255 meldet eine Anzeige, die stillsteht, das von sich aus ins Log
   (`stillstand`, siehe [logging.md](logging.md)) — bleibt ein Bild stehen,
   lohnt vor dem Neuladen ein Blick dorthin: Die Zeile sagt, ob überhaupt noch
-  etwas ankam oder ob die Seite es verworfen hat.
+  etwas ankam oder ob die Seite es verworfen hat. (Bis v0.9.288 meldete der
+  Einzelfeld-Monitor in jeder Spielpause fälschlich `keine_abrufe`, weil ein
+  `304` „nichts Neues" nicht als Lebenszeichen zählte — Details in
+  logging.md.)
 
 Die Zuweisungen liegen in `monitor-assignments.json` im
 App-Config-Verzeichnis und überstehen einen bts-light-Neustart.

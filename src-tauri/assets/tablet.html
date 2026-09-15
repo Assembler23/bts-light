@@ -345,6 +345,9 @@
     button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
     button.primary:disabled { background: #a7d3b5; color: #f0fdf4; border-color: #a7d3b5; }
     button.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+    /* Gesperrte Korrektur (Ergebnis in BTP fest): blass statt halb-rot, damit
+       der Knopf nicht mehr nach „drück mich" aussieht. */
+    button.danger:disabled { background: #e8b4b4; color: #fff5f5; border-color: #e8b4b4; }
     /* „Match beenden": ab 0:0 verfügbar, aber bewusst dezent (gedämpft, klein,
        nicht raumgreifend) – die Punktzählung bleibt die Haupthandlung. */
     button.subtle {
@@ -1663,6 +1666,10 @@ function connect() {
       STATE.finalized = incomingFinalized;
       if (STATE.finalized) {
         tlog('info', 'match_finalized_stand_down', { matchId: msg.match?.matchId });
+        // Ein noch offener Auftrag für dieses Match ist damit erledigt —
+        // BTP hat ein Ergebnis, egal ob unseres oder ein von Hand
+        // eingetragenes. Stehen bliebe er sonst bis zum nächsten Match.
+        sendeauftragBeiFinalisierungLoslassen();
         render();
         return;
       }
@@ -3561,6 +3568,15 @@ function finishAs(status, cascade) {
 }
 
 function reopen() {
+  // Fest in BTP: Nichts wieder öffnen — der Host nähme das neue Ergebnis
+  // ohnehin nicht an (ADR 0017, Regel b). Der Knopf ist in der Beendet-
+  // Ansicht gesperrt; hier nur noch der Fall, dass das Finalisiert-Frame
+  // zwischen Render und Tipp eintraf.
+  if (STATE.finalized) {
+    tlog('info', 'reopen_suppressed_finalized', { matchId: STATE.match?.matchId });
+    render();
+    return;
+  }
   if (STATE.history.length > 0) {
     restoreSnapshot(STATE.history.pop());
   } else {
@@ -3640,6 +3656,82 @@ function submit() {
 const RESULT_OHNE_GRUND = 'Der Turnier-PC hat das Ergebnis abgelehnt.';
 
 /**
+ * Sperren und Statuszeile der Beendet-Ansicht.
+ *
+ * Inline-Kopie von `src/io/abschlussAnsicht.mjs` (getestet in
+ * `scripts/test-abschluss-ansicht.mjs`) — die Assets durchlaufen keinen Build
+ * und können keine Module laden. Änderungen hier und dort gemeinsam.
+ *
+ * Ein in BTP festes Ergebnis sperrt Senden UND Korrektur und nennt den
+ * einzigen Weg, der noch geht: die Turnierleitung. Alle anderen Lagen bleiben
+ * wie bisher.
+ */
+/**
+ * Ist ein offener Sendeauftrag erledigt, weil BTP das Match festgemacht hat?
+ * Inline-Kopie von `sendeauftragErledigt` aus `src/io/abschlussAnsicht.mjs`
+ * (dort die Begründung, Test in `scripts/test-abschluss-ansicht.mjs`).
+ * Nur für DASSELBE Match — über ein anderes sagt das Frame nichts.
+ */
+function sendeauftragErledigt(pendingResult, matchId, finalized) {
+  return !!(finalized && pendingResult && matchId != null
+    && pendingResult.matchId === matchId);
+}
+
+/**
+ * Lässt einen offenen Sendeauftrag los, den BTP überholt hat: Das Match ist
+ * fest, der Turnier-PC nähme den Payload nicht mehr an (R5). Ohne diesen
+ * Schritt blieb der Auftrag stehen, blockte beim nächsten Match still den
+ * Sende-Knopf und wurde nach einem Reload nachgesendet — am falschen Spiel
+ * (Review-Fund 15.09.2026). Liefert true, wenn etwas losgelassen wurde.
+ */
+function sendeauftragBeiFinalisierungLoslassen() {
+  const pr = STATE.pendingResult;
+  if (!sendeauftragErledigt(pr, STATE.match?.matchId, STATE.finalized)) return false;
+  if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
+  STATE.pendingResult = null;
+  tlog('info', 'pending_result_released_finalized', { matchId: pr.matchId });
+  persistState();
+  return true;
+}
+
+function abschlussLage(z) {
+  const s = z || {};
+  if (s.finalized) {
+    return {
+      sendenGesperrt: true, korrekturGesperrt: true,
+      status: '✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung.',
+    };
+  }
+  if (s.submittedOk) {
+    return {
+      sendenGesperrt: true, korrekturGesperrt: false,
+      status: '✓ Übermittelt — die Turnierleitung kann übernehmen.',
+    };
+  }
+  if (s.resultRejected) {
+    // Dauerhaft abgelehnt: den Grund nennen und den Knopf wieder freigeben.
+    // Der Bediener kann den Stand korrigieren und neu senden oder die
+    // Turnierleitung holen — beides ist besser als ein Tablet, das
+    // stillschweigend endlos wiederholt.
+    return {
+      sendenGesperrt: false, korrekturGesperrt: false,
+      status: '✗ Nicht angenommen: ' + s.resultRejected
+        + ' — bitte den Stand prüfen oder die Turnierleitung ansprechen.',
+    };
+  }
+  if (s.pendingResult) {
+    return {
+      sendenGesperrt: true, korrekturGesperrt: false,
+      status: 'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.',
+    };
+  }
+  return {
+    sendenGesperrt: !!s.needWinner, korrekturGesperrt: false,
+    status: s.needWinner ? 'Bitte zuerst den Sieger wählen.' : '',
+  };
+}
+
+/**
  * Wie geht es weiter, wenn ein Ergebnis nicht durchkommt?
  *
  * Inline-Kopie von `src/io/resultRetry.mjs` (getestet in
@@ -3672,7 +3764,13 @@ async function trySubmitPending() {
   // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ein noch offenes Ergebnis wird
   // NICHT (weiter) übermittelt, sobald das Match in BTP finalisiert ist — das
   // per Hand eingegebene Ergebnis bleibt unangetastet.
-  if (STATE.finalized) { tlog('info', 'submit_retry_suppressed_finalized'); return; }
+  if (STATE.finalized) {
+    tlog('info', 'submit_retry_suppressed_finalized');
+    // Der Auftrag zu diesem Match ist erledigt (siehe Frame-Handler); hier
+    // nur das Netz, falls der Retry nach dem Frame noch einmal feuert.
+    if (sendeauftragBeiFinalisierungLoslassen()) render();
+    return;
+  }
   const pr = STATE.pendingResult;
   if (!pr) return;
   // Backstop-Timeout (Hebel B): bricht der Fetch nicht von selbst ab (tote
@@ -3692,6 +3790,12 @@ async function trySubmitPending() {
     // Wichtig: der Relay antwortet auch bei „bts-light nicht verbunden"
     // mit HTTP 200 – die echte Aussage steht im Body-Feld ok.
     const data = await res.json().catch(() => null);
+    // Gehört die Antwort noch zu diesem Auftrag? Während des Wartens kann
+    // das Finalisiert-Frame ihn losgelassen oder ein neues Match einen
+    // anderen gesetzt haben. Eine späte Antwort dürfte dann weder
+    // `submittedOk` aufs falsche Spiel setzen noch eine alte Absage zeigen
+    // (Review-Fund 15.09.2026).
+    if (STATE.pendingResult !== pr) { tlog('info', 'submit_reply_stale', { matchId: pr.matchId }); return; }
     const schritt = naechsterSchritt(data);
     if (schritt.art === 'dauerhaft') {
       // Aufhören. Weitere Versuche mit demselben Payload werden genauso
@@ -3718,6 +3822,9 @@ async function trySubmitPending() {
     persistState();
     render();
   } catch (err) {
+    // Losgelassener oder ersetzter Auftrag: nichts neu planen — der neue
+    // Auftrag hat seinen eigenen Lauf, der alte ist erledigt.
+    if (STATE.pendingResult !== pr) { tlog('info', 'submit_reply_stale', { matchId: pr.matchId }); return; }
     tlog('warn', 'submit_retry', { matchId: pr.matchId, error: String(err) });
     render();
     resultRetryTimer = setTimeout(trySubmitPending, RESULT_RETRY_MS);
@@ -4119,26 +4226,20 @@ function render() {
       els.finishedUmpire.hidden = true;
     }
     els.finishedOverlay.classList.add('visible');
-    const needWinner = (STATE.retired || STATE.walkover) && !STATE.retiredWinner;
-    if (STATE.submittedOk) {
-      els.submitBtn.disabled = true;
-      els.submitStatus.textContent = '✓ Übermittelt — die Turnierleitung kann übernehmen.';
-    } else if (STATE.resultRejected) {
-      // Dauerhaft abgelehnt: den Grund nennen und den Knopf wieder freigeben.
-      // Der Bediener kann den Stand korrigieren und neu senden oder die
-      // Turnierleitung holen — beides ist besser als ein Tablet, das
-      // stillschweigend endlos wiederholt.
-      els.submitBtn.disabled = false;
-      els.submitStatus.textContent =
-        '✗ Nicht angenommen: ' + STATE.resultRejected
-        + ' — bitte den Stand prüfen oder die Turnierleitung ansprechen.';
-    } else if (STATE.pendingResult) {
-      els.submitBtn.disabled = true;
-      els.submitStatus.textContent = 'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.';
-    } else {
-      els.submitBtn.disabled = needWinner;
-      els.submitStatus.textContent = needWinner ? 'Bitte zuerst den Sieger wählen.' : '';
-    }
+    // Sperren und Statuszeile aus EINER Regel (`abschlussLage`): Ist das
+    // Ergebnis in BTP fest, sind Senden UND Korrektur zu — vorher blieb die
+    // Korrektur offen, und das Finalisiert-Gate schluckte danach jeden
+    // Sendeversuch still (Feld 11, 12.09.2026: 23-mal).
+    const lage = abschlussLage({
+      finalized: STATE.finalized,
+      submittedOk: STATE.submittedOk,
+      resultRejected: STATE.resultRejected,
+      pendingResult: !!STATE.pendingResult,
+      needWinner: (STATE.retired || STATE.walkover) && !STATE.retiredWinner,
+    });
+    els.submitBtn.disabled = lage.sendenGesperrt;
+    els.reopenBtn.disabled = lage.korrekturGesperrt;
+    els.submitStatus.textContent = lage.status;
   } else {
     els.finishedOverlay.classList.remove('visible');
     els.retirePick.style.display = 'none';
