@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.292
+
+- **Zähltafel am Tablet: Ansicht per Tipp auf die Zahlen.** In der
+  Anzeige-Hülle schaltet ein Tipp auf die Punktzahlen die Ansicht reihum —
+  ohne PIN: automatisch → links/rechts → rechts/links → oben/unten →
+  unten/oben. Das fasst „Seiten spiegeln" und „Anordnung" zu **einem**
+  Zyklus zusammen; ein kurzes Etikett nennt die neue Ansicht. Im Zahnrad-
+  Menü ersetzt der Eintrag „Ansicht: …" die beiden bisherigen Einträge.
+  Bestehende Geräteeinstellungen werden einmalig übernommen; ein
+  gespiegeltes Gerät mit Automatik-Anordnung wird über seine Ausrichtung
+  auf „rechts/links" bzw. „oben/unten" gesetzt und bleibt so richtig herum
+  („automatisch + gespiegelt" gibt es nicht mehr). Cloud-Anzeigen bekommen es
+  mit dem Relay-Redeploy, LAN mit dem Update.
+
 ## v0.9.291
 
 - **Court-Monitore: kein falscher `stillstand` mehr in Spielpausen.** Beim

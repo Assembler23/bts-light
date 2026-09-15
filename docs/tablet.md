@@ -728,15 +728,22 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
 - **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`;
   nach richtiger Eingabe fünf Minuten lang ohne PIN, siehe
   [tablet-kiosk.md](tablet-kiosk.md)): Anzeige wählen · Feld wechseln ·
-  Seiten spiegeln (nur Zähltafel, gemerkt je Gerät) · Anordnung (nur
-  Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln · Neu laden · Vollbild ·
-  Schließen.
-- **Anordnung** (seit v0.9.283): Wer **hinter dem Feld** sitzt, sieht die
-  Teams vorn/hinten statt links/rechts. „Automatisch" stellt das Tablet im
-  Hochformat auf Punkte **übereinander** (oben fern, unten nah) und im
-  Querformat auf nebeneinander — Drehen genügt. „Nebeneinander (links–rechts)"
-  und „Übereinander (vorn–hinten)" erzwingen eine Anordnung unabhängig von der
-  Drehung. „Seiten spiegeln" dreht in beiden Anordnungen.
+  Ansicht (nur Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln · Neu
+  laden · Vollbild · Schließen.
+- **Ansicht** (seit v0.9.292; davor getrennt „Seiten spiegeln" + „Anordnung",
+  v0.9.283): Wo welches Team auf dem Bildschirm steht, ist **ein** Zyklus
+  mit fünf Stufen — **automatisch** (folgt der Drehung: Hochformat →
+  übereinander, Querformat → nebeneinander) · **links/rechts** ·
+  **rechts/links** (gespiegelt) · **oben/unten** · **unten/oben**. Das
+  Etikett nennt zuerst, wo die linke Tablet-Seite steht; „unten/oben" ist
+  das ungespiegelte Übereinander (unten nah, oben fern) für den Platz
+  **hinter dem Feld**. Schnellster Weg: **Tipp auf die Zahlen** der Tafel
+  schaltet eine Stufe weiter, ohne PIN, und blendet kurz die neue Ansicht
+  ein — der Menü-Eintrag „Ansicht: …" macht dasselbe. „Automatisch +
+  gespiegelt" gibt es bewusst nicht mehr; ein so eingerichtetes Gerät wird
+  beim Update über seine Ausrichtung auf „rechts/links" (quer) bzw.
+  „oben/unten" (hoch) gesetzt — es steht also weiter richtig herum, folgt
+  aber nicht mehr der Drehung.
 - **Zum Zählen wechseln** fragt vorher die Feldliste: Ist das Feld belegt,
   kommt eine Warnung mit Bestätigung — die Zähl-Seite würde bei einem
   abgetauchten Tablet sonst still übernehmen (ADR 0017). Ein älterer Relay
