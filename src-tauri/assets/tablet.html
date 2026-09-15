@@ -3790,6 +3790,12 @@ async function trySubmitPending() {
     // Wichtig: der Relay antwortet auch bei „bts-light nicht verbunden"
     // mit HTTP 200 – die echte Aussage steht im Body-Feld ok.
     const data = await res.json().catch(() => null);
+    // Gehört die Antwort noch zu diesem Auftrag? Während des Wartens kann
+    // das Finalisiert-Frame ihn losgelassen oder ein neues Match einen
+    // anderen gesetzt haben. Eine späte Antwort dürfte dann weder
+    // `submittedOk` aufs falsche Spiel setzen noch eine alte Absage zeigen
+    // (Review-Fund 15.09.2026).
+    if (STATE.pendingResult !== pr) { tlog('info', 'submit_reply_stale', { matchId: pr.matchId }); return; }
     const schritt = naechsterSchritt(data);
     if (schritt.art === 'dauerhaft') {
       // Aufhören. Weitere Versuche mit demselben Payload werden genauso
@@ -3816,6 +3822,9 @@ async function trySubmitPending() {
     persistState();
     render();
   } catch (err) {
+    // Losgelassener oder ersetzter Auftrag: nichts neu planen — der neue
+    // Auftrag hat seinen eigenen Lauf, der alte ist erledigt.
+    if (STATE.pendingResult !== pr) { tlog('info', 'submit_reply_stale', { matchId: pr.matchId }); return; }
     tlog('warn', 'submit_retry', { matchId: pr.matchId, error: String(err) });
     render();
     resultRetryTimer = setTimeout(trySubmitPending, RESULT_RETRY_MS);

@@ -683,7 +683,11 @@ lässt `pendingResult` dann los (`pending_result_released_finalized`, Regel
 `sendeauftragErledigt`, nur für **dasselbe** Match). Vorher blieb der Auftrag
 stehen und blockte beim nächsten Spiel still den Sende-Knopf („wird
 übermittelt … bis es ankommt"); nach einem Reload wäre er sogar nachgesendet
-und am falschen Spiel abgewiesen worden.
+und am falschen Spiel abgewiesen worden. Eine `/result`-Antwort, die erst
+nach dem Loslassen (oder nach einem neuen Auftrag) eintrifft, wird verworfen
+(`submit_reply_stale`) — sie darf weder `submittedOk` aufs falsche Spiel
+setzen noch eine alte Absage zeigen noch einen Retry für einen erledigten
+Auftrag planen.
 
 **Rollback im Turnier:** Die Config `reconnect_legacy_rev` (Default aus =
 Ownership aktiv) schaltet zur Laufzeit auf das alte `rev`-Verhalten zurück
