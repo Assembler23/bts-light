@@ -465,7 +465,7 @@ Erweiterung 06.09.2026):
   Tablet getauscht werden sollte. iPads/Safari geben den Akkustand aus
   Datenschutzgründen nicht her; dort bleibt die Anzeige leer. Seit
   v0.9.293 zeigt das Tablet den Stand **auch selbst** — siehe
-  [Akkustand am Tablet](#akkustand-am-tablet-seit-v09290).
+  [Akkustand am Tablet](#akkustand-am-tablet-seit-v09293).
 - **Kein Ton am Tablet (bewusst):** Das Tablet gibt **weder Gong noch
   Sprachansage** aus – es ist ein reiner Spielzettel am Feld. Gong und
   Ansage laufen ausschließlich auf den Ansage-Rechnern (Turnierleitung +
