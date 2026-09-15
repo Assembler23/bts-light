@@ -38,6 +38,14 @@
     font-size: 1.3rem; line-height: 1; opacity: .45; z-index: 5; cursor: pointer;
     touch-action: manipulation; }
   #zahnrad:active { opacity: 1; }
+  /* Akkustand (Spec-Erweiterung 13.09.2026) links neben dem Zahnrad, so
+     dezent wie dieses; ohne Animation. Unter 20 % orange, unter 10 % rot. */
+  #akku { position: fixed; top: max(.6rem, env(safe-area-inset-top)); right: calc(max(.6rem, env(safe-area-inset-right)) + 3.25rem);
+    height: 2.75rem; display: flex; align-items: center; padding: 0 .7rem; border-radius: 999px;
+    background: rgba(15, 23, 42, .35); color: #fff; font-size: .85rem; font-weight: 700; opacity: .45;
+    white-space: nowrap; font-variant-numeric: tabular-nums; z-index: 5; pointer-events: none; }
+  #akku.niedrig { color: #fbbf24; opacity: .85; }
+  #akku.kritisch { color: #f87171; opacity: 1; }
   /* Kurzes Etikett nach einem Tipp auf die Zahlen: nennt die neue Ansicht,
      damit man weiß, wo im Zyklus man steht. Blendet sich von selbst aus;
      `pointer-events: none`, damit der nächste Tipp sofort wieder die Tafel
@@ -81,6 +89,7 @@
     <iframe id="rahmen" title="Anzeige" allow="fullscreen"></iframe>
   </div>
   <button type="button" id="zahnrad" title="Einstellungen (PIN)" aria-label="Einstellungen">⚙</button>
+  <span id="akku" hidden title="Akkustand des Tablets"></span>
   <div id="ansicht-etikett" aria-live="polite"></div>
 
   <div class="modal" id="menue">
@@ -230,6 +239,73 @@
   function naechsteAnsicht(ansicht) {
     const i = ANSICHTEN.indexOf(ansichtAusWert(ansicht));
     return ANSICHTEN[(i + 1) % ANSICHTEN.length];
+  }
+  // ── Ende Inline-Kopie ──
+
+  // ── Akkustand: Inline-Kopie von src/io/akku.mjs (Test scripts/test-akku.mjs)
+  //    — Änderungen dort und hier gemeinsam ──
+  var AKKU_NIEDRIG = 20;
+  var AKKU_KRITISCH = 10;
+  var AKKU_TAKT_MS = 60000;
+  function prozent(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(100, Math.round(n)));
+  }
+  function akkuStufe(percent) {
+    const p = prozent(percent);
+    if (p === null) return null;
+    if (p < AKKU_KRITISCH) return "kritisch";
+    if (p < AKKU_NIEDRIG) return "niedrig";
+    return "ok";
+  }
+  function akkuText(percent, charging) {
+    const p = prozent(percent);
+    if (p === null) return "";
+    return (charging ? "⚡ " : "🔋 ") + p + " %";
+  }
+  function akkuAusFully(fully) {
+    if (!fully || typeof fully.getBatteryLevel !== "function") return null;
+    let lvl;
+    try { lvl = Number(fully.getBatteryLevel()); } catch (e) { return null; }
+    if (!Number.isFinite(lvl) || lvl < 0) return null;
+    let charging = false;
+    if (typeof fully.isPlugged === "function") {
+      try { charging = !!fully.isPlugged(); } catch (e) { charging = false; }
+    }
+    return { percent: prozent(lvl), charging };
+  }
+  function akkuAusWebBattery(bat) {
+    if (!bat) return null;
+    const p = prozent(Number(bat.level) * 100);
+    if (p === null) return null;
+    return { percent: p, charging: !!bat.charging };
+  }
+  function akkuBeobachten(win, melde) {
+    const fully = win.fully;
+    if (fully && typeof fully.getBatteryLevel === "function") {
+      const lies = () => { const a = akkuAusFully(fully); if (a) melde(a); };
+      lies();
+      const t = win.setInterval(lies, AKKU_TAKT_MS);
+      return () => win.clearInterval(t);
+    }
+    const nav = win.navigator;
+    if (nav && typeof nav.getBattery === "function") {
+      let aktiv = true;
+      let bat = null;
+      const lies = () => { if (!aktiv) return; const a = akkuAusWebBattery(bat); if (a) melde(a); };
+      let p;
+      try { p = nav.getBattery(); } catch (e) { return null; }
+      Promise.resolve(p).then((b) => {
+        bat = b;
+        b.addEventListener("levelchange", lies);
+        b.addEventListener("chargingchange", lies);
+        lies();
+      }).catch(() => { /* nicht verfügbar – Anzeige bleibt stumm */ });
+      return () => { aktiv = false; };
+    }
+    return null;
   }
   // ── Ende Inline-Kopie ──
 
@@ -536,6 +612,18 @@
   wachhalten();
 
   document.addEventListener("dblclick", function (e) { e.preventDefault(); });
+
+  // Akkustand neben dem Zahnrad — im Kiosk fehlt die Android-Statusleiste.
+  var akkuEl = document.getElementById("akku");
+  akkuBeobachten(window, function (a) {
+    var text = akkuText(a.percent, a.charging);
+    if (akkuEl.textContent === text) return; // Takt ohne Änderung → kein DOM-Schreiben
+    var stufe = akkuStufe(a.percent);
+    akkuEl.hidden = !text;
+    akkuEl.textContent = text;
+    akkuEl.classList.toggle("niedrig", stufe === "niedrig");
+    akkuEl.classList.toggle("kritisch", stufe === "kritisch");
+  });
   zeige();
 </script>
 </body>

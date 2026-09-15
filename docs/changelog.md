@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.293
+
+- **Akkustand am Tablet sichtbar.** Im Kiosk fehlt die Android-Statusleiste
+  — ob ein Tablet ans Ladegerät muss, sah man nur am Turnier-PC. Jetzt
+  steht der Stand klein auf dem Tablet selbst: in der Kopfzeile beim
+  Zählen (auch beim Warten auf die Zuweisung und in der Seiten-/
+  Aufschlagwahl), in der Feldwahl und in der Anzeige-Hülle neben dem
+  Zahnrad. `🔋 73 %`, am Netz `⚡`; unter 20 % orange, unter 10 % rot. Quelle
+  ist die Brücke der Kiosk-App (sonst die Web-Battery-API), abgefragt einmal
+  je Minute — die Anzeige kostet selbst keinen Akku. Ohne Quelle (iPad)
+  bleibt sie weg.
+
 ## v0.9.292
 
 - **Zähltafel am Tablet: Ansicht per Tipp auf die Zahlen.** In der

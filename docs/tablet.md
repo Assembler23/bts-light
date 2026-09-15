@@ -460,14 +460,47 @@ Erweiterung 06.09.2026):
   Undo/Reconnect/Übernahme ein kompletter `rally_sync`). Der „📈
   Verlauf"-Knopf am Score-Board zeigt je Satz ein Liniendiagramm — aus
   den lokalen Daten, funktioniert also auch offline.
-- **Akkustand**: Android-Tablets (Chrome) melden ihren Akkustand an die
+- **Akkustand**: Android-Tablets melden ihren Akkustand an die
   Felder-Übersicht in bts-light – so sieht die Turnierleitung, wenn ein
   Tablet getauscht werden sollte. iPads/Safari geben den Akkustand aus
-  Datenschutzgründen nicht her; dort bleibt die Anzeige leer.
+  Datenschutzgründen nicht her; dort bleibt die Anzeige leer. Seit
+  v0.9.293 zeigt das Tablet den Stand **auch selbst** — siehe
+  [Akkustand am Tablet](#akkustand-am-tablet-seit-v09293).
 - **Kein Ton am Tablet (bewusst):** Das Tablet gibt **weder Gong noch
   Sprachansage** aus – es ist ein reiner Spielzettel am Feld. Gong und
   Ansage laufen ausschließlich auf den Ansage-Rechnern (Turnierleitung +
   ferne-Halle-Slave, `src/io/announcer.ts`), nie in `tablet.html`.
+
+## Akkustand am Tablet (seit v0.9.293)
+
+Im Kiosk fehlt die Android-Statusleiste — den Akkustand eines Tablets
+sah man bisher nur am Turnier-PC. Jetzt zeigt jede Tablet-Seite ihn selbst,
+klein und ohne Bedienung:
+
+- **Zählen (`/court/<id>`):** in der Kopfzeile links vom Verbindungs-Punkt
+  — sichtbar beim Warten auf die Zuweisung, während der Seiten-/Aufschlag-
+  wahl (das Setup beginnt unter der Kopfzeile), beim Zählen und im
+  Ergebnis.
+- **Feldwahl (`/felder`):** rechts in der Kopfleiste.
+- **Anzeige-Hülle (`/anzeige`):** links neben dem Zahnrad, so dezent wie
+  dieses.
+
+Darstellung `🔋 73 %`, am Netz `⚡ 73 %`. Unter **20 %** orange, unter
+**10 %** rot — nur Farbe, kein Hinweisfenster, nichts blockiert. Ohne Quelle
+(iPad; LAN-http ohne Kiosk-App) bleibt das Feld unsichtbar statt „–".
+
+**Quellen** (dieselben wie für die Meldung an den Turnier-PC, in dieser
+Reihenfolge): die Brücke der [Kiosk-App](tablet-android-app.md)
+(`window.fully.getBatteryLevel()`/`isPlugged()`, funktioniert auch über
+http) — sonst die Web-Battery-API des Browsers (nur Android/Chrome im
+Secure Context, also Cloud oder LAN-TLS). Die Brücke wird **einmal je
+Minute** abgefragt, die Web-API liefert Ereignisse; die Anzeige hat keine
+Animation und schreibt nur bei geändertem Text ins DOM — sie kostet selbst
+keinen messbaren Akku. Liefert die Brücke beim Start nichts, steht einmalig
+`battery_fully_failed` im Geräte-Log. Kanonische Logik in `src/io/akku.mjs` (Test
+`scripts/test-akku.mjs`), Inline-Kopien in den drei Seiten; `tablet.html`
+speist aus **einer** Quelle sowohl die Kopfzeile als auch den
+`battery`-Frame an den Host.
 
 ## Meldungen an die Turnierleitung
 
