@@ -67,6 +67,27 @@ anpassen:
   Lässt sich eine solche Zeile ziehen — und steht sie nach dem nächsten
   Sync-Takt (2 s) noch an der neuen Stelle? Nimmt das Häkchen im
   Profile-Dialog sie wieder aus der Liste?
+- **Beendet-Ansicht des Tablets bei festem Ergebnis** (v0.9.291): Die Regel
+  `abschlussLage` ist getestet (`scripts/test-abschluss-ansicht.mjs`), aber
+  nur der Browser sieht die **Inline-Kopie** und `reopenBtn.disabled` im DOM.
+  Reproduzierbar ohne Turnier-PC: in `src-tauri/assets/` einen statischen
+  Server starten (`python -m http.server 8765`), `tablet.html?court=4`
+  öffnen (WS-Fehler in der Konsole sind erwartet), dann in der Konsole den
+  Modultext holen und mit Haken importieren —
+  `tablet.html` ist `type="module"`, seine Funktionen sind nicht global:
+  ```js
+  const html = await (await fetch('/tablet.html')).text();
+  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+  await import(URL.createObjectURL(new Blob(
+    [src + '\nwindow.__T = { STATE, render, reopen, els };'], { type: 'text/javascript' })));
+  const { STATE, render, reopen, els } = window.__T;
+  ```
+  Dann `STATE.match`/`teamOnSide`/`setsCompleted` füllen, `finished = true`,
+  `submittedOk = true`, `render()` → Korrektur offen, „✓ Übermittelt";
+  `finalized = true`, `render()` → **beide** Knöpfe zu, blassroter
+  Korrektur-Knopf, „✓ Ergebnis steht in BTP fest …"; `reopen()` → Zustand
+  unverändert, Konsole `reopen_suppressed_finalized`; `finalized = false`,
+  `render()`, `reopen()` → `finished` und `submittedOk` wieder false.
 
 ## Bekannte Lücken (bewusst, mit Plan)
 

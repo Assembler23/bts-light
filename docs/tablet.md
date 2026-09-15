@@ -661,6 +661,19 @@ mehr und sendet kein Ergebnis, überbügelt das Hand-Ergebnis also nicht. Der
 Server verwirft zusätzlich einen Score für ein bereits finalisiertes Match
 (ergänzt `process_result`, R5).
 
+Dasselbe Flag kommt auch nach dem **eigenen** Ergebnis zurück, sobald BTP es
+angenommen hat. Seit v0.9.291 sperrt die Beendet-Ansicht dann **beide**
+Knöpfe — „Ergebnis übermitteln" und „Korrektur — Match wieder öffnen" — und
+sagt „✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung."
+Vorher blieb die Korrektur offen, und das Gate schluckte jeden weiteren
+Sendeversuch ohne ein Wort (Turnier 12./13.09.2026, Feld 11: 23-mal
+`submit_suppressed_finalized` in 90 s). Die Regel dazu ist
+`abschlussLage` (`src/io/abschlussAnsicht.mjs`, Test
+`scripts/test-abschluss-ansicht.mjs`, Inline-Kopie in `tablet.html`);
+`reopen()` hält zusätzlich das Gate, falls das Frame zwischen Render und Tipp
+eintraf (`reopen_suppressed_finalized` im Tablet-Log). Eine Korrektur eines
+festen Ergebnisses geht nur noch in BTP bzw. über die Turnierleitung.
+
 **Rollback im Turnier:** Die Config `reconnect_legacy_rev` (Default aus =
 Ownership aktiv) schaltet zur Laufzeit auf das alte `rev`-Verhalten zurück
 (unten). Der Server signalisiert das dem Tablet über `ownership_active=false`;

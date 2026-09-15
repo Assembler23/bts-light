@@ -22,6 +22,13 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   stand mit jedem BTP-Abruf alle 5 s im Log — am 12.09.2026 waren das
   10 000 von 17 000 Zeilen. Jetzt erscheint sie, wenn sich die Zahl ändert
   (mit dem alten Wert), auch beim Rückgang auf 0.
+- **Tablet: Korrektur nach festem Ergebnis gesperrt.** Auf Feld 11 war am
+  12.09.2026 das Ergebnis gesendet und in BTP fest; trotzdem ließ sich
+  „Korrektur — Match wieder öffnen" drücken, und danach schluckte das
+  Finalisiert-Gate 23-mal „Ergebnis übermitteln" — ohne ein Wort auf dem
+  Schirm. Jetzt sperrt die Beendet-Ansicht bei festem Ergebnis beide Knöpfe
+  und sagt „Ergebnis steht in BTP fest — Korrektur nur über die
+  Turnierleitung"; `reopen()` hält das Gate zusätzlich selbst.
 
 ## v0.9.288
 
