@@ -88,6 +88,15 @@ anpassen:
   Korrektur-Knopf, „✓ Ergebnis steht in BTP fest …"; `reopen()` → Zustand
   unverändert, Konsole `reopen_suppressed_finalized`; `finalized = false`,
   `render()`, `reopen()` → `finished` und `submittedOk` wieder false.
+  Für den offenen Sendeauftrag zusätzlich `ws` und `trySubmitPending` in die
+  Haken nehmen (`get ws() { return ws; }`), `STATE.pendingResult =
+  { matchId, sets }` setzen und das Frame über den echten Handler schicken:
+  `ws.onmessage({ data: JSON.stringify({ type: 'match_assigned', match:
+  { matchId, teamA, teamB, finalized: true } }) })` → `pendingResult` null,
+  Konsole `pending_result_released_finalized`; mit fremder `matchId` bleibt
+  er; `await trySubmitPending()` bei `finalized` räumt ebenfalls; ein
+  folgendes Frame mit neuer `matchId` und `submit()` setzt wieder einen
+  Auftrag.
 
 ## Bekannte Lücken (bewusst, mit Plan)
 

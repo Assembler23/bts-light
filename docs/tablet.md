@@ -674,6 +674,17 @@ Sendeversuch ohne ein Wort (Turnier 12./13.09.2026, Feld 11: 23-mal
 eintraf (`reopen_suppressed_finalized` im Tablet-Log). Eine Korrektur eines
 festen Ergebnisses geht nur noch in BTP bzw. über die Turnierleitung.
 
+Kommt das Finalisiert-Frame, während das **eigene Ergebnis noch unterwegs**
+ist (`/result` offen oder im 5-s-Retry — Cloud-Timeout ~8 s gegen 5-s-
+Sync-Takt, also realistisch), gilt der Sendeauftrag als erledigt: BTP hat ein
+Ergebnis, unseres (die Antwort ging verloren) oder ein von Hand eingetragenes,
+und der Turnier-PC nähme den Payload ohnehin nicht mehr an (R5). Das Tablet
+lässt `pendingResult` dann los (`pending_result_released_finalized`, Regel
+`sendeauftragErledigt`, nur für **dasselbe** Match). Vorher blieb der Auftrag
+stehen und blockte beim nächsten Spiel still den Sende-Knopf („wird
+übermittelt … bis es ankommt"); nach einem Reload wäre er sogar nachgesendet
+und am falschen Spiel abgewiesen worden.
+
 **Rollback im Turnier:** Die Config `reconnect_legacy_rev` (Default aus =
 Ownership aktiv) schaltet zur Laufzeit auf das alte `rev`-Verhalten zurück
 (unten). Der Server signalisiert das dem Tablet über `ownership_active=false`;

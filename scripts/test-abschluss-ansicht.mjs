@@ -9,7 +9,7 @@
 // dem Schirm. Was hier geprüft wird: Ein festes Ergebnis sperrt BEIDE Knöpfe
 // und sagt, wohin man sich wenden muss; alle anderen Lagen bleiben, wie sie
 // waren.
-import { abschlussLage } from "../src/io/abschlussAnsicht.mjs";
+import { abschlussLage, sendeauftragErledigt } from "../src/io/abschlussAnsicht.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -84,6 +84,20 @@ ok(
 
 // ── Unsinnige Eingaben ───────────────────────────────────────────────────
 ok("kein Zustand = bereit", abschlussLage(null), { sendenGesperrt: false, korrekturGesperrt: false, status: "" });
+
+// ── Offener Sendeauftrag, wenn BTP das Match festmacht ───────────────────
+//
+// Review-Fund 15.09.2026: Trifft das Finalisiert-Frame ein, während `/result`
+// noch unterwegs oder im Retry ist, kehrte der Retry am Gate zurück, ohne den
+// Auftrag loszulassen — und beim NÄCHSTEN Match blockte er still den
+// Sende-Knopf („wird übermittelt … bis es ankommt", für ein Spiel, das längst
+// in BTP steht).
+const auftrag = { matchId: 1418, sets: [] };
+ok("fest in BTP für dasselbe Match: Auftrag ist erledigt", sendeauftragErledigt(auftrag, 1418, true), true);
+ok("nicht fest: Auftrag bleibt", sendeauftragErledigt(auftrag, 1418, false), false);
+ok("fest, aber anderes Match: Auftrag bleibt", sendeauftragErledigt(auftrag, 1419, true), false);
+ok("kein Auftrag: nichts zu erledigen", sendeauftragErledigt(null, 1418, true), false);
+ok("Match unbekannt: Auftrag bleibt", sendeauftragErledigt(auftrag, null, true), false);
 
 if (failures) {
   console.error(`\n${failures} Test(s) fehlgeschlagen.`);

@@ -22,6 +22,29 @@
  *  Änderungen hier und dort gemeinsam.
  */
 
+/**
+ * Ist ein offener Sendeauftrag erledigt, weil BTP das Match festgemacht hat?
+ *
+ * Trifft das Finalisiert-Frame ein, während `/result` noch unterwegs oder im
+ * Retry ist, hat BTP ein Ergebnis — das eigene (die Antwort ging verloren)
+ * oder ein von Hand eingetragenes. In beiden Fällen nähme der Turnier-PC den
+ * Payload nicht mehr an (R5). Der Auftrag darf dann nicht stehen bleiben:
+ * Er blockte sonst beim nächsten Match still den Sende-Knopf und würde nach
+ * einem Reload sogar nachgesendet — und am falschen Spiel abgewiesen
+ * (Review-Fund 15.09.2026).
+ *
+ * Nur für DASSELBE Match: Ein Auftrag für ein anderes Spiel bleibt, denn
+ * über den sagt das Frame nichts.
+ *
+ * @param {{matchId?: number}|null} pendingResult Offener Auftrag oder null.
+ * @param {number|null|undefined} matchId Match, das der Host gerade festmacht.
+ * @param {boolean} finalized Ist es in BTP fest?
+ */
+export function sendeauftragErledigt(pendingResult, matchId, finalized) {
+  return !!(finalized && pendingResult && matchId != null
+    && pendingResult.matchId === matchId);
+}
+
 /** Text, wenn das Ergebnis in BTP fest ist. */
 export const FEST_IN_BTP =
   "✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung.";

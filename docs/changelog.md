@@ -28,7 +28,10 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Finalisiert-Gate 23-mal „Ergebnis übermitteln" — ohne ein Wort auf dem
   Schirm. Jetzt sperrt die Beendet-Ansicht bei festem Ergebnis beide Knöpfe
   und sagt „Ergebnis steht in BTP fest — Korrektur nur über die
-  Turnierleitung"; `reopen()` hält das Gate zusätzlich selbst.
+  Turnierleitung"; `reopen()` hält das Gate zusätzlich selbst. Trifft das
+  Finalisiert-Frame ein, während das eigene Ergebnis noch im Retry ist,
+  lässt das Tablet den Sendeauftrag los (BTP hat das Ergebnis) — vorher
+  blieb er stehen und blockte beim nächsten Spiel still den Sende-Knopf.
 
 ## v0.9.288
 

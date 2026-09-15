@@ -1666,6 +1666,10 @@ function connect() {
       STATE.finalized = incomingFinalized;
       if (STATE.finalized) {
         tlog('info', 'match_finalized_stand_down', { matchId: msg.match?.matchId });
+        // Ein noch offener Auftrag für dieses Match ist damit erledigt —
+        // BTP hat ein Ergebnis, egal ob unseres oder ein von Hand
+        // eingetragenes. Stehen bliebe er sonst bis zum nächsten Match.
+        sendeauftragBeiFinalisierungLoslassen();
         render();
         return;
       }
@@ -3662,6 +3666,34 @@ const RESULT_OHNE_GRUND = 'Der Turnier-PC hat das Ergebnis abgelehnt.';
  * einzigen Weg, der noch geht: die Turnierleitung. Alle anderen Lagen bleiben
  * wie bisher.
  */
+/**
+ * Ist ein offener Sendeauftrag erledigt, weil BTP das Match festgemacht hat?
+ * Inline-Kopie von `sendeauftragErledigt` aus `src/io/abschlussAnsicht.mjs`
+ * (dort die Begründung, Test in `scripts/test-abschluss-ansicht.mjs`).
+ * Nur für DASSELBE Match — über ein anderes sagt das Frame nichts.
+ */
+function sendeauftragErledigt(pendingResult, matchId, finalized) {
+  return !!(finalized && pendingResult && matchId != null
+    && pendingResult.matchId === matchId);
+}
+
+/**
+ * Lässt einen offenen Sendeauftrag los, den BTP überholt hat: Das Match ist
+ * fest, der Turnier-PC nähme den Payload nicht mehr an (R5). Ohne diesen
+ * Schritt blieb der Auftrag stehen, blockte beim nächsten Match still den
+ * Sende-Knopf und wurde nach einem Reload nachgesendet — am falschen Spiel
+ * (Review-Fund 15.09.2026). Liefert true, wenn etwas losgelassen wurde.
+ */
+function sendeauftragBeiFinalisierungLoslassen() {
+  const pr = STATE.pendingResult;
+  if (!sendeauftragErledigt(pr, STATE.match?.matchId, STATE.finalized)) return false;
+  if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
+  STATE.pendingResult = null;
+  tlog('info', 'pending_result_released_finalized', { matchId: pr.matchId });
+  persistState();
+  return true;
+}
+
 function abschlussLage(z) {
   const s = z || {};
   if (s.finalized) {
@@ -3732,7 +3764,13 @@ async function trySubmitPending() {
   // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ein noch offenes Ergebnis wird
   // NICHT (weiter) übermittelt, sobald das Match in BTP finalisiert ist — das
   // per Hand eingegebene Ergebnis bleibt unangetastet.
-  if (STATE.finalized) { tlog('info', 'submit_retry_suppressed_finalized'); return; }
+  if (STATE.finalized) {
+    tlog('info', 'submit_retry_suppressed_finalized');
+    // Der Auftrag zu diesem Match ist erledigt (siehe Frame-Handler); hier
+    // nur das Netz, falls der Retry nach dem Frame noch einmal feuert.
+    if (sendeauftragBeiFinalisierungLoslassen()) render();
+    return;
+  }
   const pr = STATE.pendingResult;
   if (!pr) return;
   // Backstop-Timeout (Hebel B): bricht der Fetch nicht von selbst ab (tote
