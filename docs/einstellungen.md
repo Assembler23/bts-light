@@ -63,7 +63,13 @@ Knopf zum Kopieren.
 
 ## 1 · Liveticker-Ziel
 
-**Verband wählen.** Sechs Kacheln (BVBB, BVRP, HBV, BBV, BWBV, NBV). Die Wahl
+**Verband wählen.** Zehn Kacheln: BVBB, BVRP, HBV, BBV (Bayern), BWBV, NBV,
+BVS (Sachsen), BVR (Rheinland), SBV (Saarland) und **DBV** für Turniere des
+Deutschen Badminton-Verbands. Die Wahl
+<!-- pruef: "\"dbv\"" in src/presets.ts -->
+<!-- pruef: "\"bvs\"" in src/presets.ts -->
+<!-- pruef: "\"bvr\"" in src/presets.ts -->
+<!-- pruef: "\"sbv\"" in src/presets.ts -->
 setzt Adresse und Zugangspasswort des Livetickers automatisch — du musst nichts
 eintippen. Voreingestellt ist BVBB, sofern sich aus einer vorhandenen
 Einrichtung nichts anderes ergibt.
