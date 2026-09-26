@@ -24,6 +24,9 @@ bis die Turnierleitung ein Spiel auf das Feld legt.
 schon. Das ist eine Schutzmaßnahme — pro Feld zählt genau ein Tablet. Zum
 Gerätetausch gibt es **Court übernehmen**; wer nur zuschauen will, wählt
 **Nur Spielstand anzeigen**.
+<!-- pruef: "Court übernehmen" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Nur Spielstand anzeigen" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Dieses Feld wird bereits geschiedst" in src-tauri/assets/tablet.html -->
 
 ## Ein Spiel aufsetzen
 
@@ -114,8 +117,22 @@ aus Versehen antippen soll. Es ist durch eine **PIN** geschützt (voreingestellt
 
 - **Feld wechseln**, ohne einen QR-Code zu scannen,
 - **Anzeige (nur Spielstand)** — macht das Gerät zur reinen Zähltafel,
+- **Ansicht: …** — Seiten und Anordnung in einem Zug (seit v0.9.292): der
+  Zyklus läuft automatisch → links/rechts → rechts/links → oben/unten →
+  unten/oben. In der Anzeige-Hülle genügt dafür ein **Tipp auf die
+  Punktzahlen**, ohne PIN; ein kurzes Etikett nennt die neue Ansicht.
+<!-- pruef: "Ansicht:" in src-tauri/assets/tablet.html -->
 - **Schiri-Modus ein- und ausschalten**,
 - **Vollbild**.
+
+> **Die PIN wird fünf Minuten gemerkt** (seit v0.9.284). Nach einer richtigen
+> Eingabe öffnet das Zahnrad fünf Minuten lang ohne erneute Eingabe — auch über
+> einen Feldwechsel und „Neu laden" hinweg. Die Frist läuft ab der Eingabe und
+> verlängert sich **nicht** von selbst. Praktisch, wenn du mehrere Felder
+> hintereinander einrichtest.
+<!-- Fuenf Minuten: FREIGABE_MS in der Regel. Aendert sich die Frist,
+     steht hier eine falsche Zahl. -->
+<!-- pruef: /FREIGABE_MS = 5 \* 60 \* 1000/ in src/io/pinFreigabe.mjs -->
 
 ## Karten und Verwarnungen
 
@@ -136,6 +153,7 @@ Nach dem letzten Punkt zeigt das Tablet das Spielende.
 > **Das Ergebnis geht nicht von allein weg.** Du musst
 > **„Ergebnis übermitteln"** tippen. Erst danach wandert es zur Turnierleitung
 > und in den Tournament Planner.
+<!-- pruef: "Ergebnis übermitteln" in src-tauri/assets/tablet.html -->
 
 Danach siehst du eines von drei Dingen:
 
@@ -148,10 +166,20 @@ Danach siehst du eines von drei Dingen:
 Bleib am Feld, bis eines der beiden Endergebnisse dasteht. Ein „✗ Nicht
 angenommen", das niemand liest, ist ein verlorenes Ergebnis.
 
+> **Steht das Ergebnis in BTP fest, ist am Tablet Schluss** (seit v0.9.291).
+> Die Beendet-Ansicht sperrt dann „Korrektur — Match wieder öffnen" **und** den
+> Sende-Knopf und sagt: *„Ergebnis steht in BTP fest — Korrektur nur über die
+> Turnierleitung."* Vorher ließ sich die Korrektur drücken, und das erneute
+> Übermitteln wurde danach stillschweigend verworfen — am 12.09.2026 auf Feld 11
+> 23-mal, ohne ein Wort auf dem Schirm.
+<!-- pruef: "Ergebnis steht in BTP fest" in src-tauri/assets/tablet.html -->
+
 ### Vorzeitig — der Knopf „Match beenden …"
 
 In der Fußzeile sitzt **„Match beenden …"**. Er öffnet einen Dialog mit **drei**
 Wegen — die Wahl hat unterschiedliche Folgen:
+<!-- pruef: "Match beenden" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Kampflos" in src-tauri/assets/tablet.html -->
 
 | Wahl | Wirkung |
 |---|---|
@@ -197,15 +225,31 @@ Dialog und ohne Tippen. Den Übernahme-Dialog sieht nur ein **fremdes** Gerät.
 
 ## Akkustand
 
-Wenn das Tablet seinen Akkustand meldet, sieht die Turnierleitung, wann ein
-Gerät getauscht werden sollte. Dafür müssen aber Bedingungen erfüllt sein — die
-Anzeige bleibt oft leer, und das ist **kein Fehler**:
+**Der Akkustand steht auf dem Tablet selbst** (seit v0.9.293) — klein in der
+Kopfzeile beim Zählen, in der Feldwahl und in der Anzeige-Hülle neben dem
+Zahnrad. Im Kiosk-Betrieb fehlt die Android-Statusleiste; vorher sah man den
+Stand nur am Turnier-PC.
 
-- **iPads geben den Akkustand grundsätzlich nicht heraus.**
-- **Android-Tablets nur unter Bedingungen:** über eine gewöhnliche
-  unverschlüsselte Verbindung im Hallen-WLAN melden auch sie nichts. Es braucht
-  entweder eine verschlüsselte Verbindung oder den Kiosk-Browser Fully, der den
-  Wert selbst bereitstellt — siehe
+| Anzeige | Bedeutung |
+|---|---|
+| `🔋 73 %` | Ladestand |
+| `⚡` | hängt am Netz |
+| **orange** | unter 20 % |
+| **rot** | unter 10 % |
+<!-- pruef: "🔋" in src-tauri/assets/tablet.html -->
+
+Die Turnierleitung sieht denselben Wert in ihrer Feldübersicht. Abgefragt wird
+er einmal je Minute — die Anzeige kostet also selbst keinen Akku.
+
+Dass sie **fehlt**, ist kein Fehler: Es braucht eine Quelle für den Wert.
+
+- **iPads geben den Akkustand grundsätzlich nicht heraus** — dort bleibt die
+  Anzeige immer weg.
+- **Android-Tablets brauchen eine Quelle:** am zuverlässigsten die Kiosk-App
+  beziehungsweise der Kiosk-Browser, die den Wert selbst bereitstellen. Ohne sie
+  greift nur die Browser-Schnittstelle, und die liefert über eine gewöhnliche
+  unverschlüsselte Verbindung im Hallen-WLAN nichts. Siehe
+  [Zähl-Tablet als Kiosk-App (Android)](tablet-android-app.md) und
   [Einstellungs-PIN & Kiosk-Sperre](tablet-kiosk.md).
 
 ## Was das Tablet nicht kann

@@ -50,6 +50,11 @@ jobs:
       - name: Handbuch pruefen
         run: node scripts/test-handbuch.mjs
 
+      # Auch vor dem Deploy: Lieber gar nicht veroeffentlichen als eine
+      # Aussage, die nicht mehr stimmt.
+      - name: Handbuch-Fakten gegen den Code
+        run: node scripts/test-handbuch-fakten.mjs
+
       - name: Handbuch bauen
         run: node scripts/build-handbuch.mjs --out dist/handbuch
 

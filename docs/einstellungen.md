@@ -120,6 +120,7 @@ reine Farbänderung nicht.
 |---|---|---|
 | **BTP-Adresse** | `127.0.0.1` | Der Rechner, auf dem der Tournament Planner läuft. `127.0.0.1` heißt „derselbe PC". |
 | **Port** | `9901` | Der Netzwerk-Port des TP-Netzwerkdienstes. Leer oder unsinnig ⇒ es gilt wieder 9901. |
+<!-- pruef: /port: 9901,/ in src-tauri/src/config.rs -->
 | **BTP-Passwort (falls gesetzt)** | leer | Nur nötig, wenn im Tournament Planner eines vergeben wurde. |
 
 **Verbindung testen** prüft sofort und zeigt bei Erfolg den Turniernamen an —
@@ -146,9 +147,14 @@ gesperrt.
 - **Über badhub.de – Cloud** *(voreingestellt aus)*: PC und Tablets verbinden
   sich nur nach außen. Funktioniert auch hinter gesperrten Firmen-Firewalls,
   setzt aber Internet voraus. Näheres: [Cloud-Verbindung](cloud-relay.md).
+<!-- Ausgeliefert wird ConnectionMode::Lan. Stuende hier Cloud oder
+     LanCloud als #[default], waere der Satz oben falsch — genau dieser
+     Fehler stand am 06.09.2026 im Entwurf. -->
+<!-- pruef: /#\[default\]\s*\n\s*Lan,/ in src-tauri/src/config.rs -->
 
 **Tablet-Einstellungs-PIN** — **voreingestellt `0000`**, nur Ziffern, höchstens
-acht. Schützt das Zahnrad-Menü am Zähltablett davor, dass jemand aus Versehen
+acht.
+<!-- pruef: "\"0000\".to_string()" in src-tauri/src/config.rs --> Schützt das Zahnrad-Menü am Zähltablett davor, dass jemand aus Versehen
 das Feld wechselt. Ein leeres Feld setzt die PIN auf `0000` zurück. Das ist ein
 Bedien-Schutz, **keine Gerätesperre** — die macht der Kiosk-Browser, siehe
 [Einstellungs-PIN & Kiosk-Sperre](tablet-kiosk.md).
