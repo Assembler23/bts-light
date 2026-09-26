@@ -61,11 +61,13 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 > links und rechts. Von allein richtet sich das nach der Geräteausrichtung:
 > Hochformat ergibt übereinander.
 >
-> Fest einstellen lässt es sich an zwei Stellen: beim **Spielzettel** im
-> Zahnrad-Menü, bei der **Zähltafel** in der Anzeige-Hülle (dort erscheint die
-> Auswahl, sobald als Ziel „Zähltafel" gewählt ist). Ein fest zugewiesener
-> Fernseher richtet sich **immer** nach seiner Ausrichtung — dort gibt es keine
-> feste Einstellung.
+> Fest einstellen lässt sich die **Ansicht** (Seiten und Anordnung in einem
+> Zug, seit v0.9.292): in der Anzeige-Hülle genügt ein **Tipp auf die
+> Punktzahlen**, ohne PIN — der Zyklus läuft automatisch → links/rechts →
+> rechts/links → oben/unten → unten/oben. Beim Spielzettel sitzt derselbe
+> Eintrag „Ansicht: …" im Zahnrad-Menü. Ein fest zugewiesener Fernseher
+> richtet sich **immer** nach seiner Ausrichtung — dort gibt es keine feste
+> Einstellung.
 
 ### Zum Anzeigen
 
