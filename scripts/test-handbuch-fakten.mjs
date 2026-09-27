@@ -62,6 +62,20 @@ console.log("\nNachprüfbare Behauptungen des Handbuchs");
 
 for (const s of seiten) {
   const md = readFileSync(s.datei, "utf8");
+
+  // Ein Anker, den das Muster nicht lesen kann, darf NICHT still verschwinden
+  // — sonst glaubt man eine Stelle verankert, die nie geprueft wird. Genau so
+  // sind am 27.09.2026 vier Anker mit inneren Anfuehrungszeichen lautlos
+  // unter den Tisch gefallen.
+  for (const roh of md.matchAll(/<!--\s*pruef[^>]*-->/g)) {
+    MUSTER.lastIndex = 0;
+    if (!MUSTER.test(roh[0])) {
+      geprueft++;
+      const zeile = md.slice(0, roh.index).split("\n").length;
+      pruefe(false, `${s.datei}:${zeile} — Anker unlesbar: ${roh[0].slice(0, 70)}…` +
+        `\n     Erwartet: <!-- pruef: "wörtlich" in <pfad> --> oder /regex/ — ohne innere Anführungszeichen.`);
+    }
+  }
   const zeilen = md.split("\n");
 
   // Welche Zeilen liegen in einem HTML-Kommentar? Ueber einem Anker steht oft

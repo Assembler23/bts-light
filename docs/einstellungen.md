@@ -63,7 +63,13 @@ Knopf zum Kopieren.
 
 ## 1 · Liveticker-Ziel
 
-**Verband wählen.** Sechs Kacheln (BVBB, BVRP, HBV, BBV, BWBV, NBV). Die Wahl
+**Verband wählen.** Zehn Kacheln: BVBB, BVRP, HBV, BBV (Bayern), BWBV, NBV,
+BVS (Sachsen), BVR (Rheinland), SBV (Saarland) und **DBV** für Turniere des
+Deutschen Badminton-Verbands. Die Wahl
+<!-- pruef: /id: "dbv"/ in src/presets.ts -->
+<!-- pruef: /id: "bvs"/ in src/presets.ts -->
+<!-- pruef: /id: "bvr"/ in src/presets.ts -->
+<!-- pruef: /id: "sbv"/ in src/presets.ts -->
 setzt Adresse und Zugangspasswort des Livetickers automatisch — du musst nichts
 eintippen. Voreingestellt ist BVBB, sofern sich aus einer vorhandenen
 Einrichtung nichts anderes ergibt.
@@ -154,7 +160,7 @@ gesperrt.
 
 **Tablet-Einstellungs-PIN** — **voreingestellt `0000`**, nur Ziffern, höchstens
 acht.
-<!-- pruef: "\"0000\".to_string()" in src-tauri/src/config.rs --> Schützt das Zahnrad-Menü am Zähltablett davor, dass jemand aus Versehen
+<!-- pruef: /"0000"\.to_string\(\)/ in src-tauri/src/config.rs --> Schützt das Zahnrad-Menü am Zähltablett davor, dass jemand aus Versehen
 das Feld wechselt. Ein leeres Feld setzt die PIN auf `0000` zurück. Das ist ein
 Bedien-Schutz, **keine Gerätesperre** — die macht der Kiosk-Browser, siehe
 [Einstellungs-PIN & Kiosk-Sperre](tablet-kiosk.md).

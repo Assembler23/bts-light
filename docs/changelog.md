@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.295
+
+- **Vier weitere Liveticker-Ziele: Sachsen, Rheinland, Saarland — und der
+  DBV.** In den Einstellungen stehen jetzt zehn Verbands-Kacheln statt sechs;
+  damit lassen sich auch Turniere des Deutschen Badminton-Verbands direkt
+  auswählen, ohne Zugangsdaten von Hand einzutragen. Die zugehörigen
+  Liveticker-Mandanten sind auf badhub.de angelegt
+  (`scripts/provision_liveticker_tenants.php`, Runde 2).
+
 ## v0.9.293
 
 - **Akkustand am Tablet sichtbar.** Im Kiosk fehlt die Android-Statusleiste

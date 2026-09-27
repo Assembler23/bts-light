@@ -74,6 +74,42 @@ export const PRESETS: Preset[] = [
       live_url: "https://badhub.de/live?t=nbv",
     },
   },
+  {
+    id: "bvs",
+    label: "BVS – Badminton-Verband Sachsen",
+    badhub: {
+      url: PUSH_URL,
+      password: "580ceee0cfb2c10918aacf9e",
+      live_url: "https://badhub.de/live?t=bvs",
+    },
+  },
+  {
+    id: "bvr",
+    label: "BVR – Badminton-Verband Rheinland",
+    badhub: {
+      url: PUSH_URL,
+      password: "78b2169fd74852c3b022acff",
+      live_url: "https://badhub.de/live?t=bvr",
+    },
+  },
+  {
+    id: "sbv",
+    label: "SBV – Saarländischer Badminton-Verband",
+    badhub: {
+      url: PUSH_URL,
+      password: "1c4a724bf39c308ea465e38c",
+      live_url: "https://badhub.de/live?t=sbv",
+    },
+  },
+  {
+    id: "dbv",
+    label: "DBV – Deutscher Badminton-Verband",
+    badhub: {
+      url: PUSH_URL,
+      password: "f1c4bff0f821690d68cd419a",
+      live_url: "https://badhub.de/live?t=dbv",
+    },
+  },
 ];
 
 export function findPreset(id: string): Preset | undefined {

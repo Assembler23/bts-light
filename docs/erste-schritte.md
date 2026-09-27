@@ -65,7 +65,7 @@ Tablets und Anzeigen den PC im Hallen-WLAN erreichen können.
 | BTS Light (Tablets, verschlüsselt) | TCP 443 und 8443 |
 <!-- Die Regelnamen und Ports stehen woertlich im Installer-Hook. Aendert
      sie jemand, zeigt die Fehlersuche unten auf die falschen Ports. -->
-<!-- pruef: "name=\"BTS Light (Tablets)\"" in src-tauri/installer/firewall-hooks.nsh -->
+<!-- pruef: /name="BTS Light \(Tablets\)"/ in src-tauri/installer/firewall-hooks.nsh -->
 <!-- pruef: "localport=8088" in src-tauri/installer/firewall-hooks.nsh -->
 <!-- pruef: "localport=443,8443" in src-tauri/installer/firewall-hooks.nsh -->
 
