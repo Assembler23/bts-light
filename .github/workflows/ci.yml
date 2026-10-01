@@ -354,7 +354,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           # Nur `platform-tools`: Die Action installiert standardmäßig auch
           # das alte SDK-Paket `tools`, das Google aus dem Repository
