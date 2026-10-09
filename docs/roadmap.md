@@ -1080,6 +1080,14 @@ verliehen):
   „kernel image not found"). Empfehlung für Verleih-Set-Hardware:
   Pi Zero 2 W (klein, günstig, ausreichend für den Kiosk) oder Pi 4
   (deutlich kraftvoller).
+- **Gemeinsames Pi-Image startet nicht auf dem Pi 3 B+ Rev. 1.4** (09.10.2026,
+  Status: **Abhilfe bereit, Hardware-Test offen**, Priorität hoch — der
+  Zero 2 W ist nicht mehr lieferbar). Die Start-Firmware im Image ist vom
+  25.11.2020, Rev. 1.4 braucht eine ab September 2021.
+  `pi/update-boot-firmware.sh` tauscht nur die Firmware auf der Boot-Partition.
+  **Auslöser für den nächsten Schritt:** eine gepatchte Karte startet im
+  3 B+ **und** im Zero 2 W → Image neu packen und auf badhub.de ersetzen.
+  Details: [pi-dual-image.md](pi-dual-image.md).
 - **Info-Monitor: Routen + HTML ausgeliefert** (v0.9.17, 2026-05-25), **UI-
   Zuweisung offen.** Der Tablet-Server liefert jetzt zwei Hallen-Displays
   unter dedizierten URLs: `/info/overview` (Court-Übersicht, Hallen ×
