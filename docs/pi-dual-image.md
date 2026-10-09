@@ -260,6 +260,19 @@ Unter Windows von Hand: die 17 Dateien aus
 (`bootcode.bin`, alle `start*.elf`, alle `fixup*.dat`) auf das Laufwerk `boot`
 kopieren und die vorhandenen ersetzen.
 
+### Fertiges Test-Image mit neuer Firmware (zweite Version)
+
+Für neue Karten ohne Umweg über das Skript — das bisherige Image plus genau
+dieser Firmware-Tausch, sonst unverändert (gebaut am 09.10.2026):
+
+- **Image:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-v2.img.xz>
+- **Prüfsumme:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-v2.img.xz.sha256>
+
+Schreiben wie das bisherige Image (Raspberry Pi Imager, „Eigenes Image
+verwenden“, keine Anpassungen). Die alte Firmware liegt als `firmware-alt/` mit
+auf der Boot-Partition. **Noch nicht auf Hardware bestätigt** — deshalb steht es
+neben dem bisherigen Image und ist auf der Download-Seite nicht verlinkt.
+
 ### Offen, bevor das veröffentlichte Image ersetzt wird
 
 1. **3 B+ Rev. 1.4:** eine Karte patchen, starten — kommt der Kiosk?
@@ -269,9 +282,9 @@ kopieren und die vorhandenen ersetzen.
    die neue genauso zurückfällt, zeigt nur der Test. Startet der Zero 2 W mit
    der neuen Firmware nicht mehr, braucht das Image zusätzlich die beiden
    `bcm2710-rpi-zero-2*.dtb` aus demselben Firmware-Stand.
-3. Erst wenn **beide** Modelle starten: Image neu packen (Boot-Partition des
-   Images einhängen, Skript darauf ausführen, `xz`, neue Prüfsumme) und per
-   rsync ersetzen. Bis dahin bleibt das veröffentlichte Image unverändert.
+3. Erst wenn **beide** Modelle starten: `bts-light-pi-v2.img.xz` zum
+   Standard machen (als `bts-light-pi.img.xz` ablegen, Prüfsumme dazu). Bis
+   dahin bleibt das verlinkte Image unverändert.
 
 Das selbst eingerichtete Image nach [pi-setup.md](pi-setup.md) (aktuelles
 Raspberry Pi OS + `setup-monitor.sh`) ist **nicht** betroffen — es bringt
