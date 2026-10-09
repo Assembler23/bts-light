@@ -40,7 +40,7 @@ jobs:
     name: release faellig
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Volle Historie UND Tags: der Check vergleicht main gegen den letzten
           # Tag und liest den Versionssprung aus der Cargo.toml-Historie. Mit
