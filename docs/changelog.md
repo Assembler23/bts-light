@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.296
+
+- **Jugendturniere: Altersklasse und Jungen-/Mädchen-Disziplin.** Bei
+  Events wie „JE U15", „MD U17" oder „U11 offenes Doppel" ging die
+  Altersklasse verloren: Die Turnierleitung zeigte nur „HE", Monitor und
+  Ansage sagten „Herreneinzel", und die Spielzeit-Prognose warf U11 bis U19
+  in einen Topf. Jetzt wird „U15" erkannt, und die Disziplin heißt
+  `JE-U15` in der Turnierleitung, „Jungeneinzel U15" in der Ansage und
+  „Jungeneinzel" auf dem Court-Monitor (Mädchen entsprechend, Mixed als
+  `MX-U15`). Nebenbei erkennt bts-light jetzt auch zweiteilige Namen wie
+  „Herren A" oder „Damen O35" — dort erscheint die Klasse neu in Ansage,
+  Spielzeiten-Gruppen und Hallen-Regeln.
+
 ## v0.9.295
 
 - **Vier weitere Liveticker-Ziele: Sachsen, Rheinland, Saarland — und der

@@ -30,7 +30,9 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
 ```
 
 - **Kopfzeile:** Feldnummer + Disziplin (Herren-/Dameneinzel, Herren-/
-  Damendoppel, Mixed).
+  Damendoppel, Mixed). Bei einer Jugend-Altersklasse („U15") steht
+  stattdessen Jungen-/Mädcheneinzel bzw. Jungen-/Mädchendoppel.
+  <!-- pruef: "Mädcheneinzel" in src-tauri/assets/monitor.html -->
 - **Je Mannschaft (Bildschirmhälfte):** Landesflagge + Spielername(n) groß
   links; der **laufende Satzstand** ganz rechts am größten; abgeschlossene
   Sätze als kleinere Spalte daneben.

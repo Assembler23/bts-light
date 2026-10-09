@@ -1480,6 +1480,7 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         .map(|mb| MonitorMatch {
             match_id: mb.match_id,
             discipline: mb.discipline.clone(),
+            class_label: mb.class_label.clone(),
             event_label: mb.event_label.clone(),
             match_number: mb.match_number,
             team1: mb.team_a.iter().map(monitor_player).collect(),

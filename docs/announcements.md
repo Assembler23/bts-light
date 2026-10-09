@@ -84,7 +84,20 @@ werden bekannte Disziplin-Wörter entfernt; übrig bleiben darf
 nur EIN kurzes Kürzel (≤ 4 Zeichen, z. B. „A", „B2", „U15") — **Gruppen-
 oder Auslosungsnamen („Gruppe 3", „Hauptrunde") werden nie angesagt**
 (Nutzer-Vorgabe vom Turnier 17.07.2026). Ohne erkennbares Kürzel bleibt die
-Ansage wie bisher („Herreneinzel"). Durchgereicht wird das Kürzel als
+Ansage wie bisher („Herreneinzel").
+
+**Jugendklassen** (seit v0.9.296): Jugendturniere nennen ihre Events
+„JE U15", „MD U17" oder „U11 offenes Doppel". Die Kürzel JE/JD/ME/MD,
+die ausgeschriebenen Jungen-/Mädchen-Wörter und „offenes" zählen deshalb
+ebenfalls als Disziplin-Wörter — sonst bliebe neben „U15" ein zweiter Rest
+übrig und die Klasse fiele weg. Weil BTP nur Herren/Damen/Mixed kennt,
+benennt `src/io/disziplinName.mjs` die Disziplin bei einer Klasse „U" + Zahl
+als **Jungeneinzel/Mädcheneinzel/Jungendoppel/Mädchendoppel** („Boys'/Girls'
+Singles/Doubles" auf Englisch). Dieselbe Tabelle steht wortgleich in
+`tl.html` (Kürzel JE/ME/JD/MD/MX) und `monitor.html` (der Monitor bekommt das
+Kürzel dafür als `MonitorMatch.classLabel`); `scripts/test-disziplin-name.mjs`
+hält die Kopien gleich. Die Stimmenwahl je Disziplin bleibt am
+snake_case-Schlüssel — Jungeneinzel nutzt die Stimme für `mens_singles`. Durchgereicht wird das Kürzel als
 `class_label` (CourtOverview, `MatchBrief.classLabel` für den Cloud-Slave,
 `PreparationCandidate`) und als `className` in den Announcer-Eingaben.
 

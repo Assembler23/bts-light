@@ -966,13 +966,29 @@ fn draw_map(t: &[Node]) -> HashMap<i64, String> {
 ///
 /// Getrennt wird an Leerzeichen **und** Bindestrichen: Die BBB-Ranglisten
 /// nennen ihre Events „HD-A", „MX-C" — Disziplin und Klasse in einem Wort.
+///
+/// Jugendturniere heißen „JE U15", „MD U17" oder „U11 offenes Doppel" —
+/// deshalb stehen auch die Jungen-/Mädchen-Kürzel und „offenes" in der
+/// Liste, sonst bliebe neben der Altersklasse ein zweiter Rest übrig.
 fn class_from(name: &str) -> String {
     const DISCIPLINE_TOKENS: &[&str] = &[
         "herreneinzel",
         "dameneinzel",
         "herrendoppel",
         "damendoppel",
+        "jungeneinzel",
+        "jungendoppel",
+        "mädcheneinzel",
+        "mädchendoppel",
+        "maedcheneinzel",
+        "maedchendoppel",
+        "herren",
+        "damen",
+        "jungen",
+        "mädchen",
+        "maedchen",
         "gemischtes",
+        "offenes",
         "mixed",
         "einzel",
         "doppel",
@@ -982,6 +998,10 @@ fn class_from(name: &str) -> String {
         "dd",
         "gd",
         "mx",
+        "je",
+        "jd",
+        "me",
+        "md",
     ];
     let rest: Vec<&str> = name
         .split(|c: char| c.is_whitespace() || c == '-')
@@ -1418,6 +1438,32 @@ mod tests {
         assert_eq!(class_label("Herrendoppel-U15", ""), "U15");
         // Weiterhin kein Kürzel, wenn nach der Trennung mehr als ein Rest bleibt.
         assert_eq!(class_label("U15 HE-A", ""), "");
+    }
+
+    #[test]
+    fn class_label_reads_youth_event_names() {
+        // DBV-Jugendturnier 10/2026: Events heißen „JE U15", „MD U17",
+        // „U11 offenes Doppel". JE/JD/ME/MD standen nicht in der Liste,
+        // also blieben zwei Reste übrig und die Altersklasse ging verloren.
+        for (event, klasse) in [
+            ("JE U11", "U11"),
+            ("JD U13", "U13"),
+            ("ME U15", "U15"),
+            ("MD U17", "U17"),
+            ("MX U19", "U19"),
+            ("U11 offenes Doppel", "U11"),
+            ("Jungeneinzel U15", "U15"),
+            ("Mädchendoppel U13", "U13"),
+            ("Maedcheneinzel U13", "U13"),
+            ("Jungen Doppel U17", "U17"),
+            ("JE-U15", "U15"),
+        ] {
+            assert_eq!(class_label(event, "Gruppe 2"), klasse, "{event}");
+        }
+        // Ohne Event greift der Draw-Name.
+        assert_eq!(class_label("", "ME U19"), "U19");
+        // Nur die Disziplin, keine Klasse.
+        assert_eq!(class_label("JE", "JE"), "");
     }
 
     #[test]
