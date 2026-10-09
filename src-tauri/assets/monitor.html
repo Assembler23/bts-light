@@ -476,13 +476,22 @@
     ? BASE + "monitor/state?device=" + encodeURIComponent(DEVICE_ID)
     : window.location.pathname.replace(/\/display\/?$/, "/state");
 
-  var DISCIPLINE_DE = {
-    mens_singles: "Herreneinzel",
-    womens_singles: "Dameneinzel",
-    mens_doubles: "Herrendoppel",
-    womens_doubles: "Damendoppel",
-    mixed: "Mixed"
-  };
+  // Jugendklassen („U15") heißen Jungen-/Mädchen-Disziplin — BTP kennt nur
+  // Herren/Damen. Inline-Kopie von `src/io/disziplinName.mjs` (wortgleich,
+  // `scripts/test-disziplin-name.mjs`).
+  function disziplinName(key, klasse) {
+    var jugend = /^U\d{1,2}$/i.test(String(klasse || "").trim());
+    var t = {
+      mens_singles: ["HE", "Herreneinzel", "Men's Singles", "JE", "Jungeneinzel", "Boys' Singles"],
+      womens_singles: ["DE", "Dameneinzel", "Women's Singles", "ME", "Mädcheneinzel", "Girls' Singles"],
+      mens_doubles: ["HD", "Herrendoppel", "Men's Doubles", "JD", "Jungendoppel", "Boys' Doubles"],
+      womens_doubles: ["DD", "Damendoppel", "Women's Doubles", "MD", "Mädchendoppel", "Girls' Doubles"],
+      mixed: ["GD", "Mixed", "Mixed", "MX", "Mixed", "Mixed"]
+    }[key];
+    if (!t) return { kurz: "", de: "", en: "" };
+    var o = jugend ? 3 : 0;
+    return { kurz: t[o], de: t[o + 1], en: t[o + 2] };
+  }
 
   var els = {
     root: document.getElementById("root"),
@@ -780,7 +789,7 @@
 
     var discKey = m.discipline || "";
     els.discipline.textContent =
-      cfg.showDiscipline !== false ? (DISCIPLINE_DE[discKey] || "") : "";
+      cfg.showDiscipline !== false ? disziplinName(discKey, m.classLabel).de : "";
 
     // Satzstand aufteilen. Steht das Match fest (das Tablet meldet
     // `finished`), gibt es keinen laufenden Satz mehr: alle gespielten

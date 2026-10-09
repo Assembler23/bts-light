@@ -110,6 +110,11 @@ jobs:
       - name: Stimme je Disziplin (JS)
         run: node scripts/test-discipline-voice.mjs
 
+      # Jugendklassen („U15") heißen Jungen-/Mädchen-Disziplin; die
+      # Inline-Kopien in tl.html und monitor.html müssen wortgleich bleiben.
+      - name: Disziplin-Namen Jugend (JS)
+        run: node scripts/test-disziplin-name.mjs
+
       # Doppel-Gruppierung der Check-In-Liste: gleiche entry_id (genau zwei
       # Träger) wird eine Zeile; entry_id 0 (altes badhub) klumpt nie.
       - name: Check-In-Doppel (JS)
