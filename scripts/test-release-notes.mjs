@@ -199,6 +199,14 @@ pruefe(
   seite.includes('href="pi-image/bts-light-pi.img.xz.sha256"'),
   "Release-Seite verlinkt die Pruefsumme des Pi-Images"
 );
+// Das Test-Image fuer den Pi 3 B+ steht bewusst als ZWEITER Link daneben und
+// muss als unbestaetigt erkennbar sein — sonst haelt es jemand fuer den Standard.
+pruefe(
+  seite.includes('href="pi-image/bts-light-pi-v2.img.xz"') &&
+    seite.includes('href="pi-image/bts-light-pi-v2.img.xz.sha256"') &&
+    seite.includes("noch nicht auf Geräten bestätigt"),
+  "Release-Seite verlinkt das Test-Image fuer den Pi 3 B+ samt Pruefsumme und Vorbehalt"
+);
 pruefe(
   seite.includes('href="#pi-image"') && seite.includes('id="pi-image"'),
   "Kopf-Knopf neben dem Programm-Download springt zum Pi-Image-Block"

@@ -313,6 +313,12 @@ if (notesOut && notesVersion) {
 // und nicht aus --files abgeleitet.
 const PI_IMAGE_URL = "pi-image/bts-light-pi.img.xz";
 const PI_IMAGE_SHA_URL = "pi-image/bts-light-pi.img.xz.sha256";
+// Zweite Fassung mit neuerer Start-Firmware fuer den Pi 3 B+ Rev. 1.4
+// (docs/pi-dual-image.md). Steht NEBEN dem bisherigen Image, solange sie auf
+// Hardware nicht bestaetigt ist — danach wird sie zum Standard und dieser
+// zweite Link entfaellt wieder.
+const PI_IMAGE_V2_URL = "pi-image/bts-light-pi-v2.img.xz";
+const PI_IMAGE_V2_SHA_URL = "pi-image/bts-light-pi-v2.img.xz.sha256";
 
 // ── Handbuch ──────────────────────────────────────────────
 // Die Anleitung liegt als eigene statische Seite im Unterordner handbuch/
@@ -462,6 +468,11 @@ const html = `<!DOCTYPE html>
       <li>Karte in den Pi, einschalten — der Kiosk startet von allein.</li>
     </ol>
     <p class="sha">Prüfsumme: <a href="${PI_IMAGE_SHA_URL}">bts-light-pi.img.xz.sha256</a></p>
+    <p><strong>Raspberry Pi 3&nbsp;B+:</strong> Neu gekaufte Geräte starten mit dem Image oben
+       nicht. Dafür gibt es ein <a href="${PI_IMAGE_V2_URL}">Test-Image mit neuerer
+       Start-Firmware</a> — sonst gleich, aber <strong>noch nicht auf Geräten bestätigt</strong>.
+       Für den Pi Zero 2&nbsp;W weiter das Image oben verwenden.</p>
+    <p class="sha">Prüfsumme Test-Image: <a href="${PI_IMAGE_V2_SHA_URL}">bts-light-pi-v2.img.xz.sha256</a></p>
   </section>${apkSectionHtml}
 ${versionHtml}
 </main>

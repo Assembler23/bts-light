@@ -271,7 +271,8 @@ dieser Firmware-Tausch, sonst unverändert (gebaut am 09.10.2026):
 Schreiben wie das bisherige Image (Raspberry Pi Imager, „Eigenes Image
 verwenden“, keine Anpassungen). Die alte Firmware liegt als `firmware-alt/` mit
 auf der Boot-Partition. **Noch nicht auf Hardware bestätigt** — deshalb steht es
-neben dem bisherigen Image und ist auf der Download-Seite nicht verlinkt.
+neben dem bisherigen Image; die Download-Seite nennt es als zweiten Link mit
+diesem Vorbehalt (`PI_IMAGE_V2_URL` in `scripts/build-release-page.mjs`).
 
 ### Offen, bevor das veröffentlichte Image ersetzt wird
 
@@ -283,8 +284,9 @@ neben dem bisherigen Image und ist auf der Download-Seite nicht verlinkt.
    der neuen Firmware nicht mehr, braucht das Image zusätzlich die beiden
    `bcm2710-rpi-zero-2*.dtb` aus demselben Firmware-Stand.
 3. Erst wenn **beide** Modelle starten: `bts-light-pi-v2.img.xz` zum
-   Standard machen (als `bts-light-pi.img.xz` ablegen, Prüfsumme dazu). Bis
-   dahin bleibt das verlinkte Image unverändert.
+   Standard machen (als `bts-light-pi.img.xz` ablegen, Prüfsumme dazu) und den
+   zweiten Link auf der Download-Seite wieder entfernen. Bis dahin bleibt das
+   Hauptimage unverändert.
 
 Das selbst eingerichtete Image nach [pi-setup.md](pi-setup.md) (aktuelles
 Raspberry Pi OS + `setup-monitor.sh`) ist **nicht** betroffen — es bringt
