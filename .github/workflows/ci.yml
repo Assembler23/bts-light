@@ -368,7 +368,7 @@ jobs:
           # Build-Tools und Plattform lädt AGP selbst nach (Lizenzen nimmt
           # die Action an).
           packages: platform-tools
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Tests + Debug-APK
         working-directory: android
         run: |

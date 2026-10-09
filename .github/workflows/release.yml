@@ -111,7 +111,7 @@ jobs:
           # Build-Tools und Plattform lädt AGP selbst nach (Lizenzen nimmt
           # die Action an).
           packages: platform-tools
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: APK bauen
         working-directory: android
         env:
