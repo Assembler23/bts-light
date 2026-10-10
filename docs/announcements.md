@@ -69,8 +69,15 @@ dem BTP-**Event**, nicht aus dem Draw-Namen. Auflösungskette im Parser
 - `GameTypeID`: 1 = Einzel, 2 = Doppel.
 - `GenderID`: 1 = Herren, 2 = Damen, 3 = Mixed.
 
-Lässt sich das Event nicht auflösen, ist die Disziplin `Unknown` und wird
-in der Ansage weggelassen.
+Ergibt `GenderID` keinen dieser Werte (seit v0.9.297), liest der Parser
+die Disziplin aus dem Event-Namen, sonst aus dem Draw-Namen: Kürzel
+HE/DE/HD/DD/MX/GD und JE/ME/JD/MD, ausgeschriebene Formen („Jungeneinzel")
+und zweiteilige („Jungen Doppel"). Anlass: Ein DBV-Jugendturnier
+(10/2026, „JE U15") lieferte einen anderen `GenderID`-Wert, die Ansage
+ließ Disziplin und Klasse komplett weg. Bekannte BTP-Werte haben weiter
+Vorrang. Nennt auch der Name kein Geschlecht („U11 offenes Doppel") oder
+lässt sich das Event nicht auflösen, ist die Disziplin `Unknown` und wird
+in der Ansage weggelassen — samt Klasse.
 
 ### Klasse (seit v0.9.145)
 
