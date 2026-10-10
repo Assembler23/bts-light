@@ -1081,12 +1081,13 @@ verliehen):
   Pi Zero 2 W (klein, günstig, ausreichend für den Kiosk) oder Pi 4
   (deutlich kraftvoller).
 - **Gemeinsames Pi-Image startet nicht auf dem Pi 3 B+ Rev. 1.4** (09.10.2026,
-  Status: **Abhilfe bereit, Hardware-Test offen**, Priorität hoch — der
+  Status: **auf dem 3 B+ bestätigt (10.10.2026), Zero-2-W-Gegenprobe offen**,
+  Priorität hoch — der
   Zero 2 W ist nicht mehr lieferbar). Die Start-Firmware im Image ist vom
   25.11.2020, Rev. 1.4 braucht eine ab September 2021.
   `pi/update-boot-firmware.sh` tauscht nur die Firmware auf der Boot-Partition.
-  **Auslöser für den nächsten Schritt:** eine gepatchte Karte startet im
-  3 B+ **und** im Zero 2 W → Image neu packen und auf badhub.de ersetzen.
+  **Auslöser für den nächsten Schritt:** dieselbe Karte startet auch im
+  Zero 2 W → `bts-light-pi-v2.img.xz` auf badhub.de zum Standard machen.
   Details: [pi-dual-image.md](pi-dual-image.md).
 - **Info-Monitor: Routen + HTML ausgeliefert** (v0.9.17, 2026-05-25), **UI-
   Zuweisung offen.** Der Tablet-Server liefert jetzt zwei Hallen-Displays

@@ -123,8 +123,8 @@ Download-Link, Datum und den Kompakt-Änderungen aus
 (plus der stabile Link). Direkt darunter steht der Block
 **„Court-Monitore: Raspberry-Pi-Image für die SD-Karten“** mit Link auf
 `pi-image/bts-light-pi.img.xz`, Prüfsumme und Kurzanleitung (seit 09.10.2026
-zusätzlich das noch unbestätigte Test-Image `bts-light-pi-v2.img.xz` für den
-Pi 3 B+) — die Karten werden
+zusätzlich das Test-Image `bts-light-pi-v2.img.xz` für den Pi 3 B+, dort
+bestätigt, im Zero 2 W noch ungeprüft) — die Karten werden
 beim Hallenaufbau beschrieben, oft ohne Zugriff auf dieses Repo. Der Block ist
 im Generator fest verdrahtet (das Image kommt **nicht** aus dem
 Release-Workflow, sondern per rsync, siehe [pi-dual-image.md](pi-dual-image.md));

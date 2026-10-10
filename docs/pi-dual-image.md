@@ -198,8 +198,9 @@ Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + aktueller Launcher
 
 ## Raspberry Pi 3 B+ startet nicht — Firmware im Image zu alt
 
-**Stand 09.10.2026: Ursache per Image-Analyse belegt, Abhilfe am Image
-nachgestellt — auf echter Hardware noch NICHT gegengeprüft.**
+**Stand 10.10.2026: Ursache per Image-Analyse belegt. Das Image mit getauschter
+Firmware ist auf einem Pi 3 B+ hochgefahren (Rückmeldung Tilo, 10.10.2026) —
+die Gegenprobe im Pi Zero 2 W steht noch aus.**
 
 **Symptom:** Eine mit dem Image beschriebene Karte startet im Pi Zero 2 W, im
 neu gekauften Pi 3 Model B+ aber nicht — kein Bild, kein Fehlertext.
@@ -230,7 +231,8 @@ Spannungsregler-Baustein und braucht laut Raspberry-Pi-Forum
 [Forum 351185](https://forums.raspberrypi.com/viewtopic.php?t=351185)). Die
 Firmware im Image ist zehn Monate älter — der Pi bleibt hängen, bevor der
 Kernel überhaupt geladen wird. Dass die neu gekauften Geräte Rev. 1.4 sind, ist
-naheliegend, aber nicht abgelesen — der Test unten klärt es in zwei Minuten.
+naheliegend, aber nicht abgelesen. Dass der Firmware-Tausch den Start behebt,
+ist seit dem 10.10.2026 am Gerät bestätigt.
 
 Dass der Zero 2 W (erschienen Oktober 2021) mit derselben alten Firmware
 läuft, ist im Image-Log belegt (`Machine model: Raspberry Pi Zero 2 Rev 1.0`
@@ -270,13 +272,16 @@ dieser Firmware-Tausch, sonst unverändert (gebaut am 09.10.2026):
 
 Schreiben wie das bisherige Image (Raspberry Pi Imager, „Eigenes Image
 verwenden“, keine Anpassungen). Die alte Firmware liegt als `firmware-alt/` mit
-auf der Boot-Partition. **Noch nicht auf Hardware bestätigt** — deshalb steht es
-neben dem bisherigen Image; die Download-Seite nennt es als zweiten Link mit
-diesem Vorbehalt (`PI_IMAGE_V2_URL` in `scripts/build-release-page.mjs`).
+auf der Boot-Partition. **Auf einem Pi 3 B+ bestätigt (10.10.2026), im Pi
+Zero 2 W noch nicht geprüft** — deshalb steht es neben dem bisherigen Image; die
+Download-Seite nennt es als zweiten Link mit diesem Vorbehalt
+(`PI_IMAGE_V2_URL` in `scripts/build-release-page.mjs`).
 
 ### Offen, bevor das veröffentlichte Image ersetzt wird
 
-1. **3 B+ Rev. 1.4:** eine Karte patchen, starten — kommt der Kiosk?
+1. ~~**3 B+ Rev. 1.4:** eine Karte patchen, starten — kommt der Kiosk?~~
+   ✅ 10.10.2026: `bts-light-pi-v2.img.xz` fährt auf einem Pi 3 B+ hoch (Tilo).
+   Die Platinen-Revision wurde dabei nicht abgelesen.
 2. **Zero 2 W gegenprüfen (Pflicht).** Die neue Firmware kennt den Zero 2 W
    und sucht eine eigene Gerätebeschreibung (`bcm2710-rpi-zero-2-w.dtb`), die
    das Image nicht hat; die alte Firmware nahm stillschweigend eine andere. Ob
