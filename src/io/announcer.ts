@@ -14,6 +14,7 @@ import { reportAzureFallback } from "../state/azureStatus";
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
+import { disziplinName } from "./disziplinName.mjs";
 import { startPlaySegments } from "./startPlayText.mjs";
 import { scorekeeperCallSegments } from "./scorekeeperCallText.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
@@ -418,26 +419,10 @@ function resolveCourtPhrase(label: string, lang: AnnounceLang): string {
   return trimmed;
 }
 
-function disciplineWord(d: Discipline, lang: AnnounceLang): string {
-  const words: Record<AnnounceLang, Record<Discipline, string>> = {
-    de: {
-      mens_singles: "Herreneinzel",
-      womens_singles: "Dameneinzel",
-      mens_doubles: "Herrendoppel",
-      womens_doubles: "Damendoppel",
-      mixed: "Mixed",
-      unknown: "",
-    },
-    en: {
-      mens_singles: "Men's Singles",
-      womens_singles: "Women's Singles",
-      mens_doubles: "Men's Doubles",
-      womens_doubles: "Women's Doubles",
-      mixed: "Mixed",
-      unknown: "",
-    },
-  };
-  return words[lang][d] ?? "";
+// Jugendklassen („U15") heißen Jungen-/Mädchen-Disziplin — die Tabelle
+// teilt sich die Ansage mit TL-Web und Monitor (disziplinName.mjs).
+function disciplineWord(d: Discipline, className: string | undefined, lang: AnnounceLang): string {
+  return disziplinName(d, className)[lang] ?? "";
 }
 
 // Disziplin + Klassen-Kürzel („Herreneinzel A") — die Klasse kommt direkt
@@ -450,7 +435,7 @@ export function disciplineWithClass(
   className: string | undefined,
   lang: AnnounceLang,
 ): string {
-  const disc = disciplineWord(d, lang);
+  const disc = disciplineWord(d, className, lang);
   const cls = (className || "").trim();
   return disc && cls ? `${disc} ${cls}` : disc;
 }

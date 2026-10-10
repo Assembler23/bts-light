@@ -122,6 +122,10 @@ LAN+Cloud voraus.
   Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
   benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es
   geht. Fehlt eine der beiden Hälften, steht die andere für sich.
+  Jugendklassen heißen wie auf dem Aushang `JE-U15`, `ME-U11`, `JD-U17`,
+  `MD-U13`, `MX-U19` — BTP kennt nur Herren und Damen, die Jugend erkennt
+  bts-light an der Altersklasse „U" + Zahl.
+  <!-- pruef: "Jungeneinzel" in src-tauri/assets/tl.html -->
 - **Bereitschaft als Farbe statt Text** (seit 17.08.2026): Die früheren
   Hinweistexte („nicht bereit", „X spielt gerade", „pausiert noch bis …",
   „ohne Halle") machten die Liste unübersichtlich und sind weg. Stattdessen:

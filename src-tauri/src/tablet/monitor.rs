@@ -329,6 +329,7 @@ pub fn build_monitor_state(
     let match_info = court.current_match.map(|m| MonitorMatch {
         match_id: m.id,
         discipline: m.discipline.as_str().to_string(),
+        class_label: m.class_label.clone(),
         event_label: format!("{} {}", m.draw_name, m.round_name)
             .trim()
             .to_string(),

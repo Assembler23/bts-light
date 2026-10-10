@@ -489,6 +489,13 @@ Die **Disziplin** eines Matches ergibt sich aus dem Event seines Draws:
 `Match.DrawID → Draw.EventID → Event{GameTypeID, GenderID}`. Der Draw-Name
 allein (z. B. „Gruppe A") trägt sie nicht.
 
+**Rückfall auf den Namen** (seit v0.9.297, `Discipline::resolve`): Liefert
+das Event eine `GenderID` außerhalb 1–3 — so bei einem DBV-Jugendturnier
+10/2026 („JE U15", „MD U17"; der genaue Wert ist ungemessen) —, wird die
+Disziplin aus Event- und dann Draw-Namen gelesen (JE → Herreneinzel-Schlüssel
+`mens_singles` usw.; die Jugend-Benennung macht `src/io/disziplinName.mjs` an
+der Klasse „U"+Zahl fest).
+
 ## Score
 
 Satz-Ergebnisse hängen am Match unter `Sets`:

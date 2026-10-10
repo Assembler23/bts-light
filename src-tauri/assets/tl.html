@@ -1681,14 +1681,23 @@ function callStage(court, timer) {
 // Turniere benennen ihre Auslosungen frei („Gruppe 6"); ohne dieses Kürzel
 // ist am Bildschirm nicht zu sehen, ob ein Einzel oder ein Doppel aufs Feld
 // soll.
-const DISZIPLIN = {
-  mens_singles: "HE",
-  womens_singles: "DE",
-  mens_doubles: "HD",
-  womens_doubles: "DD",
-  mixed: "GD",
-};
-const disziplin = (key) => DISZIPLIN[key] || "";
+// Jugendklassen („U15") heißen JE/ME/JD/MD statt HE/DE/HD/DD — BTP kennt
+// nur Herren/Damen. Inline-Kopie von `src/io/disziplinName.mjs`
+// (wortgleich, `scripts/test-disziplin-name.mjs`).
+function disziplinName(key, klasse) {
+  var jugend = /^U\d{1,2}$/i.test(String(klasse || "").trim());
+  var t = {
+    mens_singles: ["HE", "Herreneinzel", "Men's Singles", "JE", "Jungeneinzel", "Boys' Singles"],
+    womens_singles: ["DE", "Dameneinzel", "Women's Singles", "ME", "Mädcheneinzel", "Girls' Singles"],
+    mens_doubles: ["HD", "Herrendoppel", "Men's Doubles", "JD", "Jungendoppel", "Boys' Doubles"],
+    womens_doubles: ["DD", "Damendoppel", "Women's Doubles", "MD", "Mädchendoppel", "Girls' Doubles"],
+    mixed: ["GD", "Mixed", "Mixed", "MX", "Mixed", "Mixed"]
+  }[key];
+  if (!t) return { kurz: "", de: "", en: "" };
+  var o = jugend ? 3 : 0;
+  return { kurz: t[o], de: t[o + 1], en: t[o + 2] };
+}
+const disziplin = (key, klasse) => disziplinName(key, klasse).kurz;
 
 /**
  * Die Klassenbezeichnung, wie sie im Turnier gesprochen wird: „HE-C",
@@ -1698,7 +1707,7 @@ const disziplin = (key) => DISZIPLIN[key] || "";
  * andere für sich stehen.
  */
 function klasse(discipline, classLabel) {
-  const d = disziplin(discipline);
+  const d = disziplin(discipline, classLabel);
   const k = (classLabel || "").trim();
   if (d && k) return `${d}-${k}`;
   return d || k;

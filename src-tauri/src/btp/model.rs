@@ -83,6 +83,62 @@ impl Discipline {
         }
     }
 
+    /// Rückfall, wenn BTP keine bekannte `GenderID` liefert: die Disziplin
+    /// aus dem Event-/Draw-Namen lesen. Ein DBV-Jugendturnier (10/2026,
+    /// „JE U15", „MD U17") trug Werte jenseits von 1–3 — die Disziplin war
+    /// „unbekannt", die Ansage ließ Disziplin und Klasse ganz weg.
+    /// Erkannt werden die Kürzel (HE … MD, MX/GD) und die ausgeschriebenen
+    /// Formen, auch zweiteilig („Jungen Einzel"). „U11 offenes Doppel" nennt
+    /// kein Geschlecht und bleibt `Unknown`.
+    fn from_name(name: &str) -> Discipline {
+        let mut maennlich = false;
+        let mut weiblich = false;
+        let mut einzel = false;
+        let mut doppel = false;
+        for tok in name
+            .split(|c: char| c.is_whitespace() || c == '-')
+            .map(str::to_lowercase)
+        {
+            match tok.as_str() {
+                "he" | "je" | "herreneinzel" | "jungeneinzel" => return Discipline::MensSingles,
+                "de" | "me" | "dameneinzel" | "mädcheneinzel" | "maedcheneinzel" => {
+                    return Discipline::WomensSingles
+                }
+                "hd" | "jd" | "herrendoppel" | "jungendoppel" => return Discipline::MensDoubles,
+                "dd" | "md" | "damendoppel" | "mädchendoppel" | "maedchendoppel" => {
+                    return Discipline::WomensDoubles
+                }
+                "mx" | "gd" | "mixed" | "gemischtes" => return Discipline::Mixed,
+                "herren" | "jungen" => maennlich = true,
+                "damen" | "mädchen" | "maedchen" => weiblich = true,
+                "einzel" => einzel = true,
+                "doppel" => doppel = true,
+                _ => {}
+            }
+        }
+        match (maennlich, weiblich, einzel, doppel) {
+            (true, false, true, false) => Discipline::MensSingles,
+            (false, true, true, false) => Discipline::WomensSingles,
+            (true, false, false, true) => Discipline::MensDoubles,
+            (false, true, false, true) => Discipline::WomensDoubles,
+            _ => Discipline::Unknown,
+        }
+    }
+
+    /// BTP-Felder zuerst; nur wenn sie nichts Bekanntes ergeben, die Namen
+    /// (Event vor Draw) — siehe [`Discipline::from_name`].
+    fn resolve(game_type_id: i64, gender_id: i64, names: &[&str]) -> Discipline {
+        let aus_btp = Discipline::from_event(game_type_id, gender_id);
+        if aus_btp != Discipline::Unknown {
+            return aus_btp;
+        }
+        names
+            .iter()
+            .map(|n| Discipline::from_name(n))
+            .find(|d| *d != Discipline::Unknown)
+            .unwrap_or(Discipline::Unknown)
+    }
+
     /// snake_case-Schlüssel der Disziplin – identisch zur serde-Form, für
     /// die Wire-Typen ([`relay_proto::MatchBrief`]). Der Court-Monitor und
     /// die Sprachansage lokalisieren ihn selbst.
@@ -596,12 +652,14 @@ fn event_list(t: &[Node]) -> Vec<BtpEvent> {
         .iter()
         .filter_map(|e| {
             let id = child_int(e, "ID")?;
+            let name = child_str(e, "Name").unwrap_or_default();
             Some(BtpEvent {
                 id,
-                name: child_str(e, "Name").unwrap_or_default().to_string(),
-                discipline: Discipline::from_event(
+                name: name.to_string(),
+                discipline: Discipline::resolve(
                     child_int(e, "GameTypeID").unwrap_or_default(),
                     child_int(e, "GenderID").unwrap_or_default(),
+                    &[name],
                 ),
             })
         })
@@ -966,13 +1024,29 @@ fn draw_map(t: &[Node]) -> HashMap<i64, String> {
 ///
 /// Getrennt wird an Leerzeichen **und** Bindestrichen: Die BBB-Ranglisten
 /// nennen ihre Events „HD-A", „MX-C" — Disziplin und Klasse in einem Wort.
+///
+/// Jugendturniere heißen „JE U15", „MD U17" oder „U11 offenes Doppel" —
+/// deshalb stehen auch die Jungen-/Mädchen-Kürzel und „offenes" in der
+/// Liste, sonst bliebe neben der Altersklasse ein zweiter Rest übrig.
 fn class_from(name: &str) -> String {
     const DISCIPLINE_TOKENS: &[&str] = &[
         "herreneinzel",
         "dameneinzel",
         "herrendoppel",
         "damendoppel",
+        "jungeneinzel",
+        "jungendoppel",
+        "mädcheneinzel",
+        "mädchendoppel",
+        "maedcheneinzel",
+        "maedchendoppel",
+        "herren",
+        "damen",
+        "jungen",
+        "mädchen",
+        "maedchen",
         "gemischtes",
+        "offenes",
         "mixed",
         "einzel",
         "doppel",
@@ -982,6 +1056,10 @@ fn class_from(name: &str) -> String {
         "dd",
         "gd",
         "mx",
+        "je",
+        "jd",
+        "me",
+        "md",
     ];
     let rest: Vec<&str> = name
         .split(|c: char| c.is_whitespace() || c == '-')
@@ -1029,16 +1107,19 @@ fn draw_class_map(t: &[Node]) -> HashMap<i64, String> {
 }
 
 /// DrawID → Disziplin. BTP führt die Disziplin am Event (`GameTypeID` +
-/// `GenderID`); jeder Draw verweist per `EventID` auf sein Event.
+/// `GenderID`); jeder Draw verweist per `EventID` auf sein Event. Ergeben
+/// die Felder nichts Bekanntes, entscheiden Event- und Draw-Name
+/// ([`Discipline::resolve`]).
 fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
-    // EventID → Disziplin.
-    let mut events: HashMap<i64, Discipline> = HashMap::new();
+    // EventID → (GameTypeID, GenderID, Name).
+    let mut events: HashMap<i64, (i64, i64, String)> = HashMap::new();
     if let Some(group) = xml::find(t, "Events") {
         for e in group.children() {
             if let Some(id) = child_int(e, "ID") {
                 let game = child_int(e, "GameTypeID").unwrap_or(0);
                 let gender = child_int(e, "GenderID").unwrap_or(0);
-                events.insert(id, Discipline::from_event(game, gender));
+                let name = child_str(e, "Name").unwrap_or_default().to_string();
+                events.insert(id, (game, gender, name));
             }
         }
     }
@@ -1047,13 +1128,14 @@ fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
     if let Some(group) = xml::find(t, "Draws") {
         for d in group.children() {
             if let (Some(draw_id), Some(event_id)) = (child_int(d, "ID"), child_int(d, "EventID")) {
-                map.insert(
-                    draw_id,
-                    events
-                        .get(&event_id)
-                        .copied()
-                        .unwrap_or(Discipline::Unknown),
-                );
+                let draw_name = child_str(d, "Name").unwrap_or_default();
+                let disziplin = match events.get(&event_id) {
+                    Some((game, gender, name)) => {
+                        Discipline::resolve(*game, *gender, &[name, draw_name])
+                    }
+                    None => Discipline::Unknown,
+                };
+                map.insert(draw_id, disziplin);
             }
         }
     }
@@ -1418,6 +1500,71 @@ mod tests {
         assert_eq!(class_label("Herrendoppel-U15", ""), "U15");
         // Weiterhin kein Kürzel, wenn nach der Trennung mehr als ein Rest bleibt.
         assert_eq!(class_label("U15 HE-A", ""), "");
+    }
+
+    #[test]
+    fn class_label_reads_youth_event_names() {
+        // DBV-Jugendturnier 10/2026: Events heißen „JE U15", „MD U17",
+        // „U11 offenes Doppel". JE/JD/ME/MD standen nicht in der Liste,
+        // also blieben zwei Reste übrig und die Altersklasse ging verloren.
+        for (event, klasse) in [
+            ("JE U11", "U11"),
+            ("JD U13", "U13"),
+            ("ME U15", "U15"),
+            ("MD U17", "U17"),
+            ("MX U19", "U19"),
+            ("U11 offenes Doppel", "U11"),
+            ("Jungeneinzel U15", "U15"),
+            ("Mädchendoppel U13", "U13"),
+            ("Maedcheneinzel U13", "U13"),
+            ("Jungen Doppel U17", "U17"),
+            ("JE-U15", "U15"),
+        ] {
+            assert_eq!(class_label(event, "Gruppe 2"), klasse, "{event}");
+        }
+        // Ohne Event greift der Draw-Name.
+        assert_eq!(class_label("", "ME U19"), "U19");
+        // Nur die Disziplin, keine Klasse.
+        assert_eq!(class_label("JE", "JE"), "");
+    }
+
+    #[test]
+    fn discipline_falls_back_to_youth_event_names() {
+        // DBV-Jugendturnier 10/2026: GenderID jenseits von 1–3 → ohne
+        // Rückfall „unbekannt", die Ansage ließ die Disziplin ganz weg.
+        for (name, erwartet) in [
+            ("JE U15", Discipline::MensSingles),
+            ("ME U11", Discipline::WomensSingles),
+            ("JD U17", Discipline::MensDoubles),
+            ("MD U13", Discipline::WomensDoubles),
+            ("MX U19", Discipline::Mixed),
+            ("JE-U15", Discipline::MensSingles),
+            ("Jungeneinzel U15", Discipline::MensSingles),
+            ("Mädchendoppel U13", Discipline::WomensDoubles),
+            ("Jungen Doppel U17", Discipline::MensDoubles),
+            ("Damen Einzel O35", Discipline::WomensSingles),
+            ("HD-A", Discipline::MensDoubles),
+            // Kein Geschlecht im Namen → bleibt unbekannt.
+            ("U11 offenes Doppel", Discipline::Unknown),
+            ("Gruppe 3", Discipline::Unknown),
+        ] {
+            assert_eq!(Discipline::resolve(2, 4, &[name]), erwartet, "{name}");
+        }
+    }
+
+    #[test]
+    fn discipline_prefers_btp_fields_over_the_name() {
+        // Bekannte BTP-Werte haben Vorrang — auch gegen einen irreführenden Namen.
+        assert_eq!(
+            Discipline::resolve(1, 2, &["JE U15"]),
+            Discipline::WomensSingles
+        );
+        // Event-Name vor Draw-Name; leerer Event-Name → Draw-Name.
+        assert_eq!(
+            Discipline::resolve(0, 0, &["", "MD U17 Gruppe 1"]),
+            Discipline::WomensDoubles
+        );
+        assert_eq!(Discipline::resolve(0, 0, &[]), Discipline::Unknown);
     }
 
     #[test]

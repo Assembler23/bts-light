@@ -164,6 +164,11 @@ pub struct MonitorMatch {
     pub match_id: i64,
     /// Disziplin als snake_case-Schlüssel; der Monitor lokalisiert selbst.
     pub discipline: String,
+    /// Klassen-Kürzel („A", „U15", …; leer = keins). Der Monitor braucht es,
+    /// um Jugendklassen („U15") als Jungen-/Mädchen-Disziplin zu benennen.
+    /// `#[serde(default)]` hält ältere Hosts/Relays ohne das Feld lesbar.
+    #[serde(rename = "classLabel", default)]
+    pub class_label: String,
     /// Auslosung + Runde, z. B. "HE G1" – für die Fußzeile.
     #[serde(rename = "eventLabel")]
     pub event_label: String,
@@ -3733,6 +3738,7 @@ mod tests {
             match_info: Some(MonitorMatch {
                 match_id: 14,
                 discipline: "mens_singles".into(),
+                class_label: String::new(),
                 event_label: "HE G2".into(),
                 match_number: Some(14),
                 team1: vec![MonitorPlayer {
@@ -5366,6 +5372,32 @@ mod tests {
         // (ADR 0055).
         assert_eq!(t.court_id(), Some(7));
         assert_eq!(t.kind_str(), "court_tafel");
+    }
+
+    #[test]
+    fn monitor_match_carries_class_label_and_reads_old_frames() {
+        // Neu: Klassen-Kürzel für die Jugend-Benennung am Monitor.
+        let m = MonitorMatch {
+            match_id: 3,
+            discipline: "womens_singles".into(),
+            class_label: "U15".into(),
+            event_label: "ME U15 Gruppe 1".into(),
+            match_number: None,
+            team1: vec![],
+            team2: vec![],
+            sets: vec![],
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(json.contains(r#""classLabel":"U15""#), "{json}");
+        assert_eq!(serde_json::from_str::<MonitorMatch>(&json).unwrap(), m);
+        // Ältere Gegenstelle ohne das Feld → leer statt Fehler.
+        let alt = r#"{"matchId":3,"discipline":"mens_singles","eventLabel":"HE","team1":[],"team2":[],"sets":[]}"#;
+        assert_eq!(
+            serde_json::from_str::<MonitorMatch>(alt)
+                .unwrap()
+                .class_label,
+            ""
+        );
     }
 }
 
