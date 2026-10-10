@@ -75,6 +75,9 @@ jobs:
           set -euo pipefail
           # Die Seite muss danach erreichbar sein UND das Pi-Image nennen —
           # ein leerer oder halber Upload faellt sonst nicht auf.
-          curl -fsS "https://badhub.de/download/bts-light/" \
-            | grep -q 'pi-image/bts-light-pi.img.xz'
+          # Erst vollstaendig laden, dann suchen: `curl | grep -q` scheitert
+          # unter pipefail, weil grep nach dem ersten Treffer die Leitung
+          # schliesst und curl mit Fehler 23 endet — obwohl die Seite stimmt.
+          curl -fsS -o seite.html "https://badhub.de/download/bts-light/"
+          grep -q 'pi-image/bts-light-pi.img.xz' seite.html
           echo "Seite ist online und verlinkt das Pi-Image."

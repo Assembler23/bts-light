@@ -128,7 +128,10 @@ bestätigt, im Zero 2 W noch ungeprüft) — die Karten werden
 beim Hallenaufbau beschrieben, oft ohne Zugriff auf dieses Repo. Der Block ist
 im Generator fest verdrahtet (das Image kommt **nicht** aus dem
 Release-Workflow, sondern per rsync, siehe [pi-dual-image.md](pi-dual-image.md));
-`scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht.
+`scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht. Der
+Workflow `release-seite` prüft nach dem Hochladen zusätzlich die Live-Seite; er
+lädt sie dafür erst vollständig und sucht dann (ein `curl | grep -q` meldete
+unter `pipefail` fälschlich einen Fehler, erster Lauf am 10.10.2026).
 Darunter der Block **„Zähl-Tablets: Android-App für Fire-Tablets“** mit der
 neuesten Tablet-APK: Der publish-Job holt per ssh die APK-Dateien, die auf
 dem Server liegen (`--apks`), plus die frisch gebaute; der Kopf-Knopf nimmt
