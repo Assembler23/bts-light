@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.297
+
+- **Jugendturniere: Disziplin wird wieder angesagt.** Bei einem
+  DBV-Jugendturnier („JE U15", „MD U17") kennzeichnet BTP Jungen und
+  Mädchen anders als Herren und Damen. bts-light hielt die Disziplin
+  deshalb für unbekannt, und die Ansage ließ Disziplin und Altersklasse
+  ganz weg; in der Turnierleitung stand nur „U15". Jetzt liest bts-light
+  die Disziplin in diesem Fall aus dem Namen der Konkurrenz — angesagt
+  wird „Jungeneinzel U15", die Turnierleitung zeigt `JE-U15`. Ausnahme:
+  „U11 offenes Doppel" nennt kein Geschlecht und bleibt ohne Disziplin.
+
 ## v0.9.296
 
 - **Jugendturniere: Altersklasse und Jungen-/Mädchen-Disziplin.** Bei
