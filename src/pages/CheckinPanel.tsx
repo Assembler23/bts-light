@@ -535,6 +535,16 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
                         {spielerZelle(k, p, zeile.length > 1)}
                       </Fragment>
                     ))}
+                    {/* Setzplatz einmal je Meldung, hinter dem Paar
+                        (Spec setzplaetze-anzeigen). */}
+                    {zeile[0]?.seed && (
+                      <span
+                        className="whitespace-nowrap font-semibold text-slate-500"
+                        title="Setzplatz im Hauptfeld"
+                      >
+                        [{zeile[0].seed}]
+                      </span>
+                    )}
                   </li>
                 ))}
                 {k.players.length === 0 && (

@@ -2116,6 +2116,9 @@ async fn info_preparation_state(
                 "label": format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
                 "team1": m.team1.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 "team2": m.team2.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                // Setzplatz (ADR 0059); null = ungesetzt.
+                "team1_seed": m.team1_seed,
+                "team2_seed": m.team2_seed,
                 "match_num": m.match_num,
                 "planned_time": m.planned_time,
                 "draw_id": m.draw_id,
@@ -3464,6 +3467,8 @@ pub(crate) fn match_brief(
         finalized,
         sr_names: officials.0,
         ar_names: officials.1,
+        seed_a: m.team1_seed.clone(),
+        seed_b: m.team2_seed.clone(),
     }
 }
 
@@ -4301,6 +4306,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -4344,6 +4351,29 @@ mod tests {
         let mut m = match_on_court();
         m.scoring = scoring;
         make_ctx_with(port, m)
+    }
+
+    /// Spec setzplaetze-anzeigen: Die LAN-Vorbereitungsliste trägt den
+    /// Setzplatz unter `team1_seed`/`team2_seed` (ungesetzt = null).
+    #[tokio::test]
+    async fn vorbereitungsliste_traegt_die_setzung() {
+        let mut m = match_on_court();
+        m.status = MatchStatus::Scheduled;
+        m.court = None;
+        m.court_id = None;
+        m.team2_seed = Some("1".into());
+        let ctx = Arc::new(make_ctx_with(1, m));
+        let resp = info_preparation_state(State(ctx), Query(DeviceHeartbeat::default()))
+            .await
+            .into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let c = &v["candidates"][0];
+        assert_eq!(c["match_id"], serde_json::json!(42), "Fixture: {v}");
+        assert!(c["team1_seed"].is_null());
+        assert_eq!(c["team2_seed"], serde_json::json!("1"));
     }
 
     fn make_ctx(port: u16) -> ServerCtx {

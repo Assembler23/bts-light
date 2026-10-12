@@ -1490,6 +1490,8 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
                 .get(&court_id)
                 .cloned()
                 .unwrap_or_default(),
+            team1_seed: mb.seed_a.clone(),
+            team2_seed: mb.seed_b.clone(),
         });
     MonitorState {
         court_id,
@@ -1924,6 +1926,10 @@ async fn overview_health(
                             "team2": m.map(|m| names(&m.team_b)).unwrap_or_default(),
                             "team1_nationalities": m.map(|m| nats(&m.team_a)).unwrap_or_default(),
                             "team2_nationalities": m.map(|m| nats(&m.team_b)).unwrap_or_default(),
+                            // Setzplatz (ADR 0059): gleicher Schlüssel wie
+                            // CourtOverview im LAN; null = ungesetzt.
+                            "team1_seed": m.and_then(|m| m.seed_a.clone()),
+                            "team2_seed": m.and_then(|m| m.seed_b.clone()),
                             "sets": sets,
                             "on_court_since_ms": n.court_on_court_since.get(&c.id).copied(),
                             // Aufschlag/Verletzung/TL-Ruf hält der Relay nicht → im
@@ -2140,6 +2146,8 @@ async fn preparation_state(
                             "label": label,
                             "team1": pm.team_a.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                             "team2": pm.team_b.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                            "team1_seed": pm.seed_a,
+                            "team2_seed": pm.seed_b,
                             "call": { "hall": pm.hall, "called_at_ms": pm.called_at_ms },
                             // Hallen-Farbe (Spec hallen-farben): gleicher
                             // Schlüssel wie die LAN-Antwort.
@@ -5354,6 +5362,8 @@ mod tests {
             finalized: false,
             sr_names: Vec::new(),
             ar_names: Vec::new(),
+            seed_a: None,
+            seed_b: None,
         }
     }
 
@@ -7199,7 +7209,14 @@ mod tests {
                     hall_color: None,
                 },
             ];
-            ns.court_matches.insert(101, brief(7));
+            // Setzplatz nur an Seite A (Spec setzplaetze-anzeigen).
+            ns.court_matches.insert(
+                101,
+                MatchBrief {
+                    seed_a: Some("3/4".into()),
+                    ..brief(7)
+                },
+            );
             ns.court_scores.insert(101, vec![SetAb { a: 21, b: 15 }]);
             ns.court_on_court_since.insert(101, 1000);
             // Ordnungszahl des Felds (Spec monitor-livestand-push, S4) — die
@@ -7254,6 +7271,18 @@ mod tests {
         assert_eq!(c0["team1"], serde_json::json!(["Anna"]));
         // Länderflaggen: Nationalitäten parallel zu den Namen (aus PlayerBrief).
         assert_eq!(c0["team1_nationalities"], serde_json::json!(["GER"]));
+        // Setzplatz unter demselben Schlüssel wie die LAN-Antwort; die
+        // ungesetzte Seite ist null (die Anzeige zeigt dann keine Marke).
+        assert_eq!(c0["team1_seed"], serde_json::json!("3/4"));
+        assert!(c0["team2_seed"].is_null());
+        // Und im Monitor-Zustand des Court-Monitors.
+        {
+            let map = broker.namespaces.lock().await;
+            let state = build_monitor_state(map.get(NS).unwrap(), 101);
+            let mi = state.match_info.expect("Match am Feld");
+            assert_eq!(mi.team1_seed.as_deref(), Some("3/4"));
+            assert_eq!(mi.team2_seed, None);
+        }
         assert_eq!(c0["sets"][0]["a"], serde_json::json!(21));
         assert_eq!(c0["on_court_since_ms"], serde_json::json!(1000));
         // Die Ordnungszahl steht NEBEN der Feld-Liste, nicht darin (Spec
@@ -9982,6 +10011,8 @@ mod tests {
             }],
             match_number: Some(101),
             called_at_ms: 1_700_000_000_000,
+            seed_a: None,
+            seed_b: None,
         }
     }
 
@@ -10049,6 +10080,8 @@ mod tests {
         // wie von einem alten Host ohne — beide müssen sauber durchreisen.
         let mut p42 = prepared(42, "Halle 1");
         p42.hall_color = Some("#0ea5e9".into());
+        // Setzplatz (Spec setzplaetze-anzeigen) nur an Seite A.
+        p42.seed_a = Some("3/4".into());
         handle_host_frame(
             &broker,
             NS,
@@ -10075,6 +10108,10 @@ mod tests {
         // Hallen-Farbe: gesetzt reist durch, fehlend bleibt null (alter Host).
         assert_eq!(cands[0]["hall_color"], serde_json::json!("#0ea5e9"));
         assert!(cands[1]["hall_color"].is_null());
+        // Setzplatz unter demselben Schlüssel wie die LAN-Antwort.
+        assert_eq!(cands[0]["team1_seed"], serde_json::json!("3/4"));
+        assert!(cands[0]["team2_seed"].is_null());
+        assert!(cands[1]["team1_seed"].is_null());
 
         // Unbekannter Namespace → 404 (die Seite zeigt dann „keine Verbindung").
         let miss = preparation_state(State(broker.clone()), Path("nope".into()))

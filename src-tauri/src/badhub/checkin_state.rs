@@ -81,6 +81,27 @@ pub struct CheckinPlayer {
     pub locked: bool,
     #[serde(default)]
     pub checked_in_at: Option<String>,
+    /// Setzplatz der Meldung im Hauptfeld („1", „3/4"; Spec
+    /// setzplaetze-anzeigen). Kommt **nicht** von badhub, sondern wird in
+    /// bts-light aus dem BTP-Stand ergänzt ([`setzungen_eintragen`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
+}
+
+/// Ergänzt die Setzplätze aus dem BTP-Stand (R2: BTP ist die Wahrheit) über
+/// die Meldungs-ID. `entry_id == 0` (älteres badhub ohne das Feld) oder eine
+/// unbekannte Meldung bleiben ohne Marke — nie geraten.
+pub fn setzungen_eintragen(view: &mut CheckinView, entries: &[crate::btp::model::BtpEntry]) {
+    let setzung: std::collections::HashMap<i64, &str> = entries
+        .iter()
+        .filter_map(|e| Some((e.id, e.seed.as_deref()?)))
+        .collect();
+    for spieler in view.classes.iter_mut().flat_map(|k| k.players.iter_mut()) {
+        spieler.seed = (spieler.entry_id != 0)
+            .then(|| setzung.get(&spieler.entry_id))
+            .flatten()
+            .map(|s| s.to_string());
+    }
 }
 
 fn state_open() -> String {
@@ -568,6 +589,7 @@ mod tests {
             source: None,
             locked: false,
             checked_in_at: None,
+            seed: None,
         };
         let klasse = CheckinClass {
             event_id: 1,
@@ -590,6 +612,70 @@ mod tests {
         );
         assert_eq!(ablage[0].gemeldet, 15, "der Abgemeldete zählt nicht mehr");
         assert_eq!(ablage[0].eingecheckt, 15, "eingecheckt bleibt unberührt");
+    }
+
+    /// Spec setzplaetze-anzeigen: Die Setzung kommt über die Meldungs-ID aus
+    /// dem BTP-Stand; beide Partner eines Doppels tragen sie, `entry_id` 0
+    /// (altes badhub) und unbekannte Meldungen bleiben ohne.
+    #[test]
+    fn setzungen_werden_ueber_die_meldung_eingetragen() {
+        use crate::btp::model::BtpEntry;
+        let spieler = |player_id: i64, entry_id: i64| CheckinPlayer {
+            player_id,
+            entry_id,
+            first: "Max".into(),
+            last: "Muster".into(),
+            club: None,
+            nationality: None,
+            state: "open".into(),
+            source: None,
+            locked: false,
+            checked_in_at: None,
+            // Ein veralteter Wert muss überschrieben werden.
+            seed: Some("99".into()),
+        };
+        let mut view = CheckinView::unavailable(Availability::Ready, "");
+        view.classes.push(CheckinClass {
+            event_id: 1,
+            name: "HD-A".into(),
+            discipline: "HD".into(),
+            starts_at: None,
+            closes_at: None,
+            opens_at: None,
+            state: "open".into(),
+            is_live: false,
+            gemeldet: 4,
+            eingecheckt: 0,
+            players: vec![
+                spieler(1, 10),
+                spieler(2, 10),
+                spieler(3, 0),
+                spieler(4, 77),
+            ],
+        });
+        let entries = vec![
+            BtpEntry {
+                id: 10,
+                event_id: 1,
+                players: Vec::new(),
+                seed: Some("3/4".into()),
+            },
+            BtpEntry {
+                id: 11,
+                event_id: 1,
+                players: Vec::new(),
+                seed: None,
+            },
+        ];
+        setzungen_eintragen(&mut view, &entries);
+        let seeds: Vec<Option<&str>> = view.classes[0]
+            .players
+            .iter()
+            .map(|p| p.seed.as_deref())
+            .collect();
+        assert_eq!(seeds, vec![Some("3/4"), Some("3/4"), None, None]);
+        let json = serde_json::to_string(&view.classes[0].players[2]).unwrap();
+        assert!(!json.contains("seed"), "ungesetzt fehlt das Feld: {json}");
     }
 
     #[test]
@@ -806,6 +892,7 @@ mod tests {
                 source: None,
                 locked: false,
                 checked_in_at: None,
+                seed: None,
             })
             .collect();
         CheckinClass {
@@ -982,6 +1069,7 @@ mod tests {
             source: None,
             locked: false,
             checked_in_at: None,
+            seed: None,
         };
         assert_eq!(p.display_name(), "Anna Alt");
         p.first = String::new();

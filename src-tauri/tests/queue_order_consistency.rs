@@ -83,6 +83,8 @@ fn a_match(id: i64, match_num: i64, planned_time: i64) -> BtpMatch {
         preparation_call_ts: None,
         preparation_hall: None,
         scoring: ScoringFormat::default(),
+        team1_seed: None,
+        team2_seed: None,
     }
 }
 

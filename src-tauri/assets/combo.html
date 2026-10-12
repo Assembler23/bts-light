@@ -107,8 +107,12 @@ body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width:
 }
 .row__name .pname .flag.hidden { display: none; }
 .row__name .pname .pname-text {
-  overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
+/* Setzplatz [1]/[3/4] hinter dem letzten Spieler (Spec setzplaetze-anzeigen):
+   wird nie gekürzt — bei langen Namen weicht zuerst der Name (dafür das
+   min-width:0 am Namen). */
+.pname .seed { flex: 0 0 auto; white-space: nowrap; color: #94a3b8; font-weight: 600; }
 .row.winner .row__name .pname { color: #34d399; }
 .row__sets {
   flex: 0 0 auto; display: flex; align-items: center; gap: 1.6vw;
@@ -174,7 +178,11 @@ body.vertical .band__head { justify-content: center; }
 body.vertical .vnames {
   display: flex; flex-direction: column; align-items: center; gap: .5vh;
 }
+/* Flex wie im waagerechten Modus: Erst so wirken `gap` und das Kürzen NUR
+   des Namens — als Block kürzte die Ellipsis die ganze Zeile samt
+   Setzplatz-Marke (Sichtprüfung setzplaetze-anzeigen, 12.10.2026). */
 body.vertical .vnames .pname {
+  display: flex; align-items: center;
   justify-content: center; font-size: 5.6vh; font-weight: 700; color: #e2e8f0;
   line-height: 1.15; max-width: 100%; gap: 1.4vw;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -188,7 +196,10 @@ body.vertical .vnames .pname .flag.hidden { display: none; }
    Namen/Zahlen sonst kaum sichtbar). Erscheint beim aufschlagenden Spieler,
    sobald das Tablet die Aufschlag-Info meldet. */
 body.vertical .vnames .serve-dot { width: 3vh; height: 3vh; }
-body.vertical .vnames .pname .pname-text { overflow: hidden; text-overflow: ellipsis; }
+/* Verborgen ganz weg statt nur unsichtbar: Die Zeilen sind zentriert, ein
+   Platzhalter schöbe jeden Namen aus der Mitte. */
+body.vertical .vnames .serve-dot.hidden { display: none; }
+body.vertical .vnames .pname .pname-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Spielstand: je Team eine Zeile mit den Satzzahlen (groß), Team 1 oben,
    Team 2 darunter — zwischen den Namen. Mehrere Sätze = mehrere Zahlen
    nebeneinander je Zeile. */
@@ -402,7 +413,7 @@ body.vertical .vset.current { color: #fbbf24; }
     // Vertikaler Modus (?dir=v): Team 1 oben, Spielstand (Satz-Paare) mittig,
     // Team 2 unten — je Feld ein Hochformat-Scoreboard, Felder nebeneinander.
     if (document.body.classList.contains('vertical')) {
-      var vname = function (names, nats, isServing, servePlayerIdx) {
+      var vname = function (names, nats, seed, isServing, servePlayerIdx) {
         var box = h('div', 'vnames');
         var list = (names && names.length) ? names : ['—'];
         list.forEach(function (n, i) {
@@ -411,6 +422,7 @@ body.vertical .vset.current { color: #fbbf24; }
           line.appendChild(h('span', 'serve-dot' + (dotHere ? '' : ' hidden')));
           line.appendChild(flagEl(nats && nats[i]));
           line.appendChild(h('span', 'pname-text', n));
+          if (seed && i === list.length - 1) line.appendChild(h('span', 'seed', '[' + seed + ']'));
           box.appendChild(line);
         });
         return box;
@@ -430,14 +442,14 @@ body.vertical .vset.current { color: #fbbf24; }
         return row;
       };
       var spv = (typeof c.serving_player === 'number') ? c.serving_player : null;
-      band.appendChild(vname(c.team1, c.team1_nationalities, c.serving_team === 1, spv));
+      band.appendChild(vname(c.team1, c.team1_nationalities, c.team1_seed, c.serving_team === 1, spv));
       band.appendChild(vsetRow(0, 1)); // Team 1 Punkte (oben)
       band.appendChild(vsetRow(1, 0)); // Team 2 Punkte (darunter)
-      band.appendChild(vname(c.team2, c.team2_nationalities, c.serving_team === 2, spv));
+      band.appendChild(vname(c.team2, c.team2_nationalities, c.team2_seed, c.serving_team === 2, spv));
       return band;
     }
 
-    function teamRow(names, nats, selfIdx, otherIdx, isServing, servePlayerIdx) {
+    function teamRow(names, nats, seed, selfIdx, otherIdx, isServing, servePlayerIdx) {
       var row = h('div', 'row');
       // Namen: im Doppel jeder Spieler in einer eigenen Zeile untereinander,
       // jeweils mit Flagge + Aufschlag-Punkt beim konkret aufschlagenden
@@ -452,6 +464,8 @@ body.vertical .vset.current { color: #fbbf24; }
         line.appendChild(h('span', 'serve-dot' + (dotHere ? '' : ' hidden')));
         line.appendChild(flagEl(nats && nats[i]));
         line.appendChild(h('span', 'pname-text', n));
+        // Setzplatz einmal je Seite, hinter dem letzten Spieler.
+        if (seed && i === list.length - 1) line.appendChild(h('span', 'seed', '[' + seed + ']'));
         nameBox.appendChild(line);
       });
       row.appendChild(nameBox);
@@ -469,8 +483,8 @@ body.vertical .vset.current { color: #fbbf24; }
     }
 
     var sp = (typeof c.serving_player === 'number') ? c.serving_player : null;
-    band.appendChild(teamRow(c.team1, c.team1_nationalities, 0, 1, c.serving_team === 1, sp));
-    band.appendChild(teamRow(c.team2, c.team2_nationalities, 1, 0, c.serving_team === 2, sp));
+    band.appendChild(teamRow(c.team1, c.team1_nationalities, c.team1_seed, 0, 1, c.serving_team === 1, sp));
+    band.appendChild(teamRow(c.team2, c.team2_nationalities, c.team2_seed, 1, 0, c.serving_team === 2, sp));
     return band;
   }
 

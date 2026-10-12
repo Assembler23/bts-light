@@ -2887,6 +2887,13 @@ pub struct TlCourt {
     pub team1_ids: Vec<String>,
     #[serde(default)]
     pub team2_ids: Vec<String>,
+    /// Setzplatz je Seite als Text („1", „3/4"; ADR 0059) — öffentlich
+    /// (Auslosungsbogen), deshalb ohne Datenschutz-Schalter; ausblenden kann
+    /// das Profil (`hide_seeds`, wirkt im Browser). `None` = ungesetzt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team1_seed: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team2_seed: Option<String>,
     pub sets: Vec<(i64, i64)>,
     /// Seit wann sieht dieses Spiel nach seinen Sätzen fertig aus, ohne dass
     /// ein Ergebnis angekommen wäre (Spec `tl-warnung-fertiges-spiel`)?
@@ -3005,6 +3012,13 @@ pub struct TlMatch {
     pub team1_ids: Vec<String>,
     #[serde(default)]
     pub team2_ids: Vec<String>,
+    /// Setzplatz je Seite, Regel wie [`TlCourt::team1_seed`]. Offene
+    /// Paarungen ([`TlOpenMatch`]) tragen bewusst keinen — ihre Kandidaten
+    /// spielen das Spiel womöglich nie.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team1_seed: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team2_seed: Option<String>,
     /// In welche Halle das Spiel gehört, und woher wir das wissen.
     pub hall: String,
     pub hall_source: HallSource,
@@ -3769,6 +3783,8 @@ pub(crate) fn build_state_limited(
                 .collect(),
             team1_ids: license_ids(&m.team1),
             team2_ids: license_ids(&m.team2),
+            team1_seed: m.team1_seed.clone(),
+            team2_seed: m.team2_seed.clone(),
             hall,
             hall_source,
             prep_call: call.map(|(hall, called_at_ms)| TlPrepCall {
@@ -4091,6 +4107,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             show_group: p.display.show_group,
             show_court_remaining: p.display.show_court_remaining,
             hide_open_matches: p.display.hide_open_matches,
+            hide_seeds: p.display.hide_seeds,
             show_move_buttons: p.display.show_move_buttons,
             unlimited_court_calls: p.display.unlimited_court_calls,
             list_position: match p.display.list_position {
@@ -4144,6 +4161,7 @@ fn display_settings_from_wire(
         show_group: d.show_group,
         show_court_remaining: d.show_court_remaining,
         hide_open_matches: d.hide_open_matches,
+        hide_seeds: d.hide_seeds,
         show_move_buttons: d.show_move_buttons,
         unlimited_court_calls: d.unlimited_court_calls,
         list_position: match d.list_position {
@@ -4661,6 +4679,8 @@ fn court_view(
         team2_club: c.team2_clubs,
         team1_ids: spiel.map(|m| license_ids(&m.team1)).unwrap_or_default(),
         team2_ids: spiel.map(|m| license_ids(&m.team2)).unwrap_or_default(),
+        team1_seed: c.team1_seed,
+        team2_seed: c.team2_seed,
         sets: c.sets,
         tablet_connected: c.tablet_connected,
         injury: c.injury,
@@ -4757,6 +4777,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -5053,6 +5075,31 @@ mod tests {
             zurueck.hide_open_matches,
             "und aus dem Gerät zurück in die Konfiguration"
         );
+    }
+
+    #[test]
+    fn der_schalter_setzplaetze_ausblenden_reist_in_beide_richtungen() {
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "p1".into(),
+            name: "Wandmonitor".into(),
+            display: crate::config::TlDisplaySettings {
+                hide_seeds: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let sicht = profiles_view(&cfg);
+        let wire = sicht.iter().find(|p| p.id == "p1").expect("das Profil");
+        assert!(
+            wire.display.hide_seeds,
+            "der Schalter muss zum Gerät reisen"
+        );
+        assert!(display_settings_from_wire(&wire.display).hide_seeds);
+        // Bestandskonfiguration ohne das Feld → Setzplätze sichtbar.
+        let alt: crate::config::TlDisplaySettings =
+            serde_json::from_str(r#"{"show_numbers":true}"#).expect("lesbar");
+        assert!(!alt.hide_seeds);
     }
 
     #[test]
@@ -6800,6 +6847,10 @@ mod tests {
             ];
             m.draw_name = if id % 2 == 0 { "HE A" } else { "HE B" }.to_string();
             m.round_name = "Achtelfinale der Trostrunde".to_string();
+            // Jede Seite gesetzt, mit der längsten üblichen Spanne (Spec
+            // setzplaetze-anzeigen): Auch die Setzplätze müssen ins Budget.
+            m.team1_seed = Some("9/16".to_string());
+            m.team2_seed = Some("17/32".to_string());
             matches.push(m);
         }
         // 40 belegte Felder und 30 Ergebnisse — ein großes Zwei-Hallen-
@@ -6818,6 +6869,8 @@ mod tests {
                 player("Sebastian Aurelius Wittgenstein-Berleburg"),
             ];
             m.round_name = "Achtelfinale der Trostrunde".to_string();
+            m.team1_seed = Some("9/16".to_string());
+            m.team2_seed = Some("17/32".to_string());
             m.status = MatchStatus::OnCourt;
             m.court_id = Some(court_id);
             m.court = Some(format!("Feld {court_id}"));
@@ -9732,6 +9785,12 @@ mod tests {
             // führen, nicht hier.
             "team1_ids",
             "team2_ids",
+            // Setzplatz („1", „3/4"; Spec setzplaetze-anzeigen): steht
+            // öffentlich auf dem Auslosungsbogen und sagt über die Person
+            // nichts, was über den Namen hinausgeht. Nur an Warteliste und
+            // Feld — der Datenschutz-Wächter prüft die Stellen strukturell.
+            "team1_seed",
+            "team2_seed",
             "sets",
             "tablet_connected",
             "injury",
@@ -9916,6 +9975,9 @@ mod tests {
             // `tl-offene-paarungen`) — ebenfalls nur ein Häkchen. Invertiert
             // benannt, damit ein Profil ohne das Feld auf „anzeigen" steht.
             "hideOpenMatches",
+            // Profil-Schalter „Setzplätze zeigen" (Spec
+            // setzplaetze-anzeigen), invertiert wie `hideOpenMatches`.
+            "hideSeeds",
             // Profil-Schalter „Verschiebe-Knöpfe an jeder Zeile" (Wunsch
             // 06.09.2026) — ein Anzeige-Häkchen, kein Personenbezug.
             "showMoveButtons",
@@ -9932,6 +9994,8 @@ mod tests {
         running.status = MatchStatus::OnCourt;
         running.court_id = Some(1);
         running.team1 = vec![licensed_player("Müller", "08-001234")];
+        // Gesetzt, damit die Setzplatz-Felder serialisiert und geprüft werden.
+        running.team1_seed = Some("1".into());
         // Ein beendetes Spiel gehört in dieses Fixture: Sonst serialisiert
         // `finished` als leeres Array, und der Wächter unten sähe nie eines
         // der 13 `TlFinished`-Felder — ein künftiges Feld dort könnte am
@@ -10044,6 +10108,7 @@ mod tests {
                 show_move_buttons: false,
                 list_position: crate::config::TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
+                hide_seeds: false,
             },
             updated_at_ms: 1_000,
             ..Default::default()
@@ -10441,9 +10506,14 @@ mod tests {
         // dass der zuschaltbare Vereinsname tatsächlich transportiert wird.
         running.team1[0].club = Some("SC Musterstadt".to_string());
         running.team2 = vec![licensed_player("Gegner", "08-005678")];
+        // Setzplätze an allen Spielarten (Spec setzplaetze-anzeigen): Sie
+        // dürfen nur an Warteliste und Feld ankommen — nie an beendeten
+        // Spielen und nie an den Kandidaten einer offenen Paarung.
+        running.team1_seed = Some("1".into());
         let mut waiting = a_match(2);
         waiting.team1 = vec![licensed_player("Weber", "08-009999")];
         waiting.team2 = vec![licensed_player("Fischer", "08-004321")];
+        waiting.team2_seed = Some("3/4".into());
         // Ein beendetes Spiel gehört auch hier ins Fixture — sonst prüft der
         // Test die Personendaten in `TlFinished` (Team-Namen, Satzstände)
         // nie, obwohl genau die über eine aus dem Internet erreichbare Seite
@@ -10454,6 +10524,7 @@ mod tests {
         finished.finished_at = Some(500_000);
         finished.team1 = vec![licensed_player("Winter", "08-003333")];
         finished.team2 = vec![licensed_player("Sommer", "08-004444")];
+        finished.team1_seed = Some("2".into());
         // Ein Spiel mit offener Paarung, dessen Vorspiel LIZENZIERTE Spieler
         // hat (Spec `tl-offene-paarungen`): Ihre Namen dürfen als Kandidaten
         // mitreisen, ihre Lizenznummern nicht. Ohne diesen Eintrag bliebe
@@ -10463,6 +10534,7 @@ mod tests {
         vorspiel.planning_id = 1001;
         vorspiel.team1 = vec![licensed_player("Kandidat", "08-007070")];
         vorspiel.team2 = vec![licensed_player("Gegenkandidat", "08-008080")];
+        vorspiel.team1_seed = Some("5/8".into());
         let mut offen = a_match(5);
         offen.from1 = Some(1001);
         offen.team1 = Vec::new();
@@ -10558,6 +10630,7 @@ mod tests {
                     source: None,
                     locked: false,
                     checked_in_at: None,
+                    seed: None,
                 }],
             },
         ])));
@@ -10713,6 +10786,44 @@ mod tests {
                 "ein Kandidat darf keine Lizenznummer mitbringen: {offene_liste}"
             );
         }
+        // Setzplätze nur an Warteliste und Feld (Spec setzplaetze-anzeigen):
+        // strukturbezogen wie die Lizenznummern, damit sie nicht unbemerkt an
+        // beendete Spiele oder an Kandidaten offener Paarungen wandern.
+        fn suche_seed(wert: &serde_json::Value, pfad: &str, orte: &mut Vec<String>) {
+            match wert {
+                serde_json::Value::Object(map) => {
+                    for (schluessel, unterwert) in map {
+                        if schluessel.ends_with("_seed") {
+                            orte.push(format!("{pfad}.{schluessel}"));
+                        }
+                        suche_seed(unterwert, &format!("{pfad}.{schluessel}"), orte);
+                    }
+                }
+                serde_json::Value::Array(werte) => {
+                    for unterwert in werte {
+                        suche_seed(unterwert, &format!("{pfad}[]"), orte);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut seed_orte: Vec<String> = Vec::new();
+        suche_seed(&baum, "", &mut seed_orte);
+        seed_orte.sort();
+        seed_orte.dedup();
+        assert_eq!(
+            seed_orte,
+            vec![
+                ".courts[].team1_seed".to_string(),
+                ".queue[].team1_seed".to_string(),
+                ".queue[].team2_seed".to_string(),
+            ],
+            "Setzplätze nur an Warteliste und Feld"
+        );
+        assert!(
+            !offene_liste.contains("5/8"),
+            "ein Kandidat darf keine Setzung mitbringen: {offene_liste}"
+        );
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.
         assert!(json.contains("müller"));

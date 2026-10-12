@@ -220,6 +220,14 @@ Seitenleisten-Punkt **Check-In**
 dort Zustand, Zeiten und die Zählung „x von y da"; aufgeklappt die Namen mit
 ihrem Zustand.
 
+**Setzplatz** (seit v0.9.298): Hinter einer gesetzten Meldung steht ihr
+Setzplatz im Hauptfeld, z. B. `[1]` oder `[3/4]` — so fällt sofort auf, wenn
+ein Gesetzter noch fehlt. Die Setzung kommt **nicht** von badhub: Der Command
+`checkin_state` ergänzt sie nach dem Abruf aus dem BTP-Stand
+(`checkin_state::setzungen_eintragen`, Verknüpfung über die Meldungs-ID).
+Liefert badhub keine Meldungs-ID (ältere Version), bleibt die Marke weg. Das
+TL-Web-Panel „Anfangszeiten" zeigt keine Setzung, weil es keine Namen zeigt.
+
 **TL-Web-Panel „Anfangszeiten"** (seit 17.08.2026): Der heutige Zeitplan
 aus demselben `GET …/tl/stand` steht auch der Turnierleitungs-Seite zur
 Verfügung — je Klasse Anfangszeit, Anmeldeschluss (ohne eigenen gilt die

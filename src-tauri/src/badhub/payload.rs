@@ -873,6 +873,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -1575,6 +1577,7 @@ mod tests {
                     id: 10,
                     event_id: 1,
                     players: vec![roster_player(1, "Anna", "Beispiel")],
+                    seed: None,
                 },
                 BtpEntry {
                     id: 11,
@@ -1583,6 +1586,7 @@ mod tests {
                         roster_player(1, "Anna", "Beispiel"),
                         roster_player(2, "Bea", "Muster"),
                     ],
+                    seed: None,
                 },
             ],
             officials: Vec::new(),

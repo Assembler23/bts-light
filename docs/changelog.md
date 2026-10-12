@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.298
+
+- **Setzplätze aus BTP.** Gesetzte Spieler und Paare tragen jetzt ihren
+  Setzplatz hinter dem Namen, z. B. `[1]` oder `[3/4]`: auf Court-Monitor,
+  Feld-Übersicht, Kombi-Anzeige, Vorbereitungs-Liste und Siegerehrung, in der
+  Turnierleitungs-Oberfläche (Spielliste und Feldkacheln; im Profil mit
+  „Setzplätze zeigen" abschaltbar) und auf der Check-In-Seite der App. Ändert
+  die Turnierleitung eine Setzung in BTP, ziehen die Anzeigen nach — auch an
+  einem Feld, auf dem das Spiel schon läuft. Liveticker und badhub-Check-In
+  folgen in einem späteren Update.
+- **Kombi-Anzeige hochkant: Aufschlag-Punkt sichtbar.** In der senkrechten
+  Kombi-Ansicht war der Punkt beim aufschlagenden Spieler nie zu sehen, und
+  lange Namen wurden samt allem dahinter abgeschnitten. Jetzt steht der Punkt
+  wie in der waagerechten Ansicht da, und gekürzt wird nur der Name.
+
 ## v0.9.297
 
 - **Jugendturniere: Disziplin wird wieder angesagt.** Bei einem

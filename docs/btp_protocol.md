@@ -538,6 +538,24 @@ In einem KO-Draw bekommt eine beendete Paarung selbst eine `EntryID` (den
 Sieger) zugewiesen und wirkt damit als Feeder-Slot für die nächste Runde –
 derselbe `(DrawID, PlanningID)`-Lookup deckt das mit ab.
 
+### Setzplatz einer Spielseite (seit v0.9.298)
+
+Die Setzung steht an `StageEntry.Seed1`/`Seed2` (Messung 12.10.2026,
+`tests/btp_seed_probe.rs`) — **je Stage**, nicht je Meldung. `btp/model.rs`
+löst sie einmal je Snapshot auf (`SeedIndex`, ADR 0059):
+
+1. Ein offener Platz (`entry_id == 0`) hat keine Setzung.
+2. Sonst gilt die Setzung der Meldung an der Stage des Draws
+   (`Draw.StageID`) des Spiels.
+3. Fehlt sie dort, gilt die Setzung der Meldung an der Stage mit
+   `StageType 1` (Hauptfeld) — z. B. ein Playoff-Eintrag ohne eigene Setzung.
+
+Die Meldung selbst (`BtpEntry.seed`, Check-In) trägt nur die
+Hauptfeld-Setzung. Formatiert wird an genau einer Stelle,
+`model::seed_text`: Werte ≤ 0 gelten als fehlend, nur `Seed2` zeigt diesen
+Wert, gleiche Werte zeigen eine Zahl, eine Spanne steht aufsteigend als
+„3/4". Die Abnehmer setzen nur noch die Klammern.
+
 ### Rückwärts: das Vorspiel eines offenen Platzes finden
 
 Für die Anzeige noch offener Paarungen (Spec

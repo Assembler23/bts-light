@@ -650,6 +650,26 @@ Der Broadcast-`TlState` trägt dagegen nur: `officials_managed`, die Liste
 **Reihenfolge beim Ausrollen:** Ein alter Relay lehnt unbekannte Aktionen ab
 — erst Relay deployen, dann den Client veröffentlichen.
 
+### Setzplätze (seit v0.9.298, Spec [setzplaetze-anzeigen](features/setzplaetze-anzeigen.md), ADR [0059](adr/0059-setzplatz-als-text-aus-dem-parser.md))
+
+Die Setzung reist als **fertiger Text** ohne Klammern („1", „3/4") und nur,
+wenn sie gesetzt ist (`skip_serializing_if`); ältere Gegenstellen lesen ein
+fehlendes Feld als „ungesetzt":
+
+- `MatchBrief.seedA`/`seedB` und `PreparedMatch.seedA`/`seedB` (Host → Relay)
+- `MonitorMatch.team1Seed`/`team2Seed` (Court-Monitor)
+- in der Cloud-Übersicht (`overview_health`) und der Vorbereitungsliste
+  **ausdrücklich** als `team1_seed`/`team2_seed` — gleicher Schlüssel wie die
+  LAN-`/health`; der Relay baut diese JSONs von Hand, ein neues Feld kommt
+  dort nur an, wenn es eingetragen wird.
+- im TL-Zustand an `TlMatch`/`TlCourt` (`team1_seed`/`team2_seed`), dazu der
+  Profil-Schalter `hideSeeds` (invertiert, fehlt = anzeigen).
+
+**Neusetzung an einem belegten Feld:** Die Setzung ist Teil des
+Push-Schlüssels `CourtPushKey` in `relay_client.rs`. Ändert sie sich, geht
+`MatchAssigned` mit derselben Match-ID erneut an den Relay — wie bei einem
+Wechsel der Schiedsrichter-Besetzung.
+
 ### Panel-Profile (Spec [tl-web-panelsystem](features/tl-web-panelsystem.md), ADR [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md)/[0025](adr/0025-tl-panel-profile-transport-persistenz.md))
 
 Benannte Profile bündeln Panel-Sichtbarkeit/-Reihenfolge/-Höhe und die

@@ -362,6 +362,11 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 /* Der Name selbst — als eigenes Element, damit Bereitschafts-Farbe und
    badhub-Link am NAMEN hängen, nicht an Flagge/Wappen daneben. */
 .paar .sp-name { min-width: 0; overflow-wrap: break-word; }
+/* Setzplatz [1]/[3/4] hinter dem letzten Spieler einer Seite (Spec
+   setzplaetze-anzeigen) — gedämpft und nie umbrochen. Rechts gespiegelt wie
+   die ganze Zeile: Dort steht er vor dem Namen, also ebenfalls an der
+   Mittelachse beim „vs.", die Nation außen. */
+.paar .seed { flex: 0 0 auto; white-space: nowrap; color: var(--ink-faint); font-size: .85em; }
 /* Bereitschaftslage als Hintergrundfarbe statt Hinweistext (17.08.2026):
    Rot = steht gerade auf einem Feld, Orange = noch in der Mindestpause.
    Farbtöpfe der Badge-Familie (`.badge-alarm`/`.badge-warn`), damit kein
@@ -1840,6 +1845,9 @@ function builtInProfile() {
       // Offene Paarungen anzeigen (Spec `tl-offene-paarungen`): Das Feld
       // heißt invertiert, `false` ist also der Standard „anzeigen".
       hideOpenMatches: false,
+      // Setzplätze zeigen (Spec `setzplaetze-anzeigen`), invertiert wie
+      // `hideOpenMatches`: `false` ist der Standard „anzeigen".
+      hideSeeds: false,
       // Vier Verschiebe-Knöpfe an jeder Zeile (Wunsch 06.09.2026): aus,
       // weil die Zeile damit deutlich breiter wird.
       showMoveButtons: false,
@@ -2051,6 +2059,9 @@ function aufrufeUnbegrenzt() { return !!activeDisplay().unlimitedCourtCalls; }
  *  Feld — also jedes, das vor dieser Version angelegt wurde — steht damit
  *  auf „anzeigen", dem gewollten Standard. */
 function zeigeOffeneSpiele() { return !activeDisplay().hideOpenMatches; }
+/** Zeigt dieses Gerät Setzplätze (Spec `setzplaetze-anzeigen`)? Invertiert
+ *  gespeichert wie `hideOpenMatches` — ein Profil ohne das Feld zeigt sie. */
+function zeigeSetzplaetze() { return !activeDisplay().hideSeeds; }
 /** Vier Verschiebe-Knöpfe (⤒ ↑ ↓ ⤓) an jeder umsortierbaren Zeile statt nur
  *  „↑ an den Anfang" — für Geräte, auf denen Ziehen nicht praktikabel ist
  *  (Wunsch 06.09.2026). Profil-Schalter, Standard aus. */
@@ -2073,6 +2084,14 @@ function hostKenntVerschiebeKnoepfe() {
   const profile = (state && state.profiles) || [];
   if (!profile.length) return true;
   return profile.some((p) => p.display && "showMoveButtons" in p.display);
+}
+/** Kennt der Turnier-PC den Profil-Schalter `hideSeeds`? Gleiche Regel wie
+ *  `hostKenntVerschiebeKnoepfe`: Ein neuer Host serialisiert das Feld in
+ *  jedem Profil; ein alter verwürfe das Häkchen still beim Speichern. */
+function hostKenntSetzplaetze() {
+  const profile = (state && state.profiles) || [];
+  if (!profile.length) return true;
+  return profile.some((p) => p.display && "hideSeeds" in p.display);
 }
 /** Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`). Ein
  *  unbekannter Wert fällt auf die ursprüngliche Ansicht zurück — ein Profil
@@ -3268,8 +3287,11 @@ function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
   const zeigeVereinsnamen = zeigeVereinsnamenAktiv();
   const zeigeVereinslogos = zeigeVereinslogosAktiv();
   const nationenAn = zeigeNationen();
-  const seite = (namen, nationen, vereine, nummern) => {
+  const setzungAn = zeigeSetzplaetze();
+  const seite = (namen, nationen, vereine, nummern, setzung) => {
     const liste = (namen || []).length ? namen : ["?"];
+    // Setzplatz einmal je Seite, hinter dem letzten Spieler.
+    const seedHtml = setzungAn && setzung ? `<span class="seed">[${esc(setzung)}]</span>` : "";
     return liste.map((n, i) => {
       const land = nationenAn ? (nationen || [])[i] : "";
       const verein = (vereine || [])[i] || "";
@@ -3290,7 +3312,7 @@ function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
       const klassen = `sp-name${lage ? " " + lage.cls : ""}`;
       const titel = lage ? ` title="${esc(lage.titel)}"` : "";
       const nameHtml = spielerNameHtml(n, nummer, klassen, titel);
-      const haupt = `<span class="spieler-haupt">${nationBadge(land)}${inlineLogo}${nameHtml}</span>`;
+      const haupt = `<span class="spieler-haupt">${nationBadge(land)}${inlineLogo}${nameHtml}${i === liste.length - 1 ? seedHtml : ""}</span>`;
       // Vereinsname → eigene Zeile unter dem Namen (Logo davor, falls an).
       const unter = willName
         ? `<span class="verein-unter" title="${esc(verein)}">${willLogo ? vereinsLogo(verein) : ""}<span class="verein-name">${esc(verein)}</span></span>`
@@ -3299,9 +3321,9 @@ function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
     }).join("");
   };
   return `<span class="paar">
-    <span class="seite">${seite(t1, nat1, club1, extra && extra.ids1)}</span>
+    <span class="seite">${seite(t1, nat1, club1, extra && extra.ids1, extra && extra.seed1)}</span>
     <span class="vs">vs.</span>
-    <span class="seite">${seite(t2, nat2, club2, extra && extra.ids2)}</span>
+    <span class="seite">${seite(t2, nat2, club2, extra && extra.ids2, extra && extra.seed2)}</span>
   </span>`;
 }
 
@@ -3562,7 +3584,7 @@ function courtCard(c, cellStyle) {
   } else if (c.match_id) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
     body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat, c.team1_club, c.team2_club,
-      { ids1: c.team1_ids, ids2: c.team2_ids })}</div>
+      { ids1: c.team1_ids, ids2: c.team2_ids, seed1: c.team1_seed, seed2: c.team2_seed })}</div>
             <div class="meta">${esc([klasse(c.discipline, c.class_label), c.round_name].filter(Boolean).join(" · "))}</div>`;
     // Beschriftung nur noch, wenn sie etwas sagt, das man sonst nicht sieht.
     // „auf dem Feld seit" und „im Spiel seit" stehen inzwischen als Farbe an
@@ -4658,7 +4680,7 @@ function queueRow(m, topMatchId) {
         <span class="seite"><span class="spieler offen-seite">${esc(seitenText(m, 2))}</span></span>
       </span>`
     : pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club,
-        { ids1: m.team1_ids, ids2: m.team2_ids, lage });
+        { ids1: m.team1_ids, ids2: m.team2_ids, seed1: m.team1_seed, seed2: m.team2_seed, lage });
   parts.push(`<span class="who-block">
       <span class="who">${paarHtml}</span>
       <span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>
@@ -7592,6 +7614,11 @@ function uebernehmeEditorFelder() {
     hideOpenMatches: $("prof-show-open")
       ? !$("prof-show-open").checked
       : !!kopie.display.hideOpenMatches,
+    // Positiv gefragt, invertiert gespeichert; fehlt das Häkchen (älterer
+    // Turnier-PC), bleibt der gespeicherte Wert.
+    hideSeeds: $("prof-show-seeds")
+      ? !$("prof-show-seeds").checked
+      : !!kopie.display.hideSeeds,
     // Fehlt das Häkchen (älterer Turnier-PC), bleibt der gespeicherte Wert.
     showMoveButtons: $("prof-show-move")
       ? $("prof-show-move").checked
@@ -7666,6 +7693,7 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
       ${hostKenntOffeneSpiele() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-open" ${d.hideOpenMatches ? "" : "checked"} /> Spiele mit noch offener Paarung zeigen (z. B. Halbfinale vor der Vorrunde)</label>` : ""}
+      ${hostKenntSetzplaetze() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-seeds" ${d.hideSeeds ? "" : "checked"} /> Setzplätze zeigen ([1], [3/4])</label>` : ""}
       ${hostKenntVerschiebeKnoepfe() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-move" ${d.showMoveButtons ? "checked" : ""} /> Verschiebe-Knöpfe an jeder Zeile der Spielliste (⤒ ↑ ↓ ⤓ statt nur ↑)</label>` : ""}
       <label class="checkbox-row" style="gap:8px">
         <span>Spielzeiten gruppieren nach</span>

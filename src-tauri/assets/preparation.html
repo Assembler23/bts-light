@@ -193,8 +193,11 @@ main {
     var main = h('div', 'row__main');
     main.appendChild(h('div', 'row__discipline', c.label || ''));
     var players = h('div', 'row__players');
-    var t1 = (c.team1 && c.team1.length) ? c.team1.join(' / ') : '—';
-    var t2 = (c.team2 && c.team2.length) ? c.team2.join(' / ') : '—';
+    // Setzplatz hinter dem Paar (Spec setzplaetze-anzeigen); fehlt bei
+    // ungesetzten Seiten und bei alten Hosts.
+    var mitSetzung = function (t, seed) { return seed ? t + ' [' + seed + ']' : t; };
+    var t1 = mitSetzung((c.team1 && c.team1.length) ? c.team1.join(' / ') : '—', c.team1_seed);
+    var t2 = mitSetzung((c.team2 && c.team2.length) ? c.team2.join(' / ') : '—', c.team2_seed);
     players.appendChild(document.createTextNode(t1));
     var vs = h('span', 'row__vs', 'gegen'); players.appendChild(vs);
     players.appendChild(document.createTextNode(t2));
