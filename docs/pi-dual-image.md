@@ -196,6 +196,107 @@ Das **fertig vorbereitete Shared-Image** (Tilos Image-Kopie + aktueller Launcher
 > Komplett-Neubau (neues Pi-OS/Base): kleine Variante aus dem großen Image via
 > PiShrink (`docker run --privileged … pishrink -Z -a gross.img bts-light-pi.img`).
 
+## Raspberry Pi 3 B+ startet nicht — Firmware im Image zu alt
+
+**Stand 10.10.2026: Ursache per Image-Analyse belegt. Das Image mit getauschter
+Firmware ist auf einem Pi 3 B+ hochgefahren (Rückmeldung Tilo, 10.10.2026) —
+die Gegenprobe im Pi Zero 2 W steht noch aus.**
+
+**Symptom:** Eine mit dem Image beschriebene Karte startet im Pi Zero 2 W, im
+neu gekauften Pi 3 Model B+ aber nicht — kein Bild, kein Fehlertext.
+
+**Es ist keine andere Architektur.** Zero 2 W und 3 B+ haben praktisch
+denselben Prozessor (vier Cortex-A53-Kerne) und starten denselben Kernel
+(`kernel7.img`). Der Unterschied liegt eine Stufe davor, in der Start-Firmware.
+
+**Was im Image steckt** (`bts-light-pi.img.xz`, Prüfsumme `06d3a9bf…`,
+ausgelesen am 09.10.2026):
+
+| Baustein | Stand im Image |
+|---|---|
+| Betriebssystem | Raspberry Pi OS **02.12.2020** (Buster), `issue.txt` |
+| Start-Firmware (`bootcode.bin`, `start*.elf`, `fixup*.dat`) | **25.11.2020** |
+| Kernel | 5.4.79 (`/lib/modules`, passt zur Boot-Partition) |
+| Gerätebeschreibung 3 B+ (`bcm2710-rpi-3-b-plus.dtb`) | vorhanden |
+| WLAN-Firmware 3 B+ (`brcmfmac43455-sdio.*`) | vorhanden |
+| WLAN-Sperre (`/var/lib/systemd/rfkill`) | für alle Modelle aufgehoben |
+| `cmdline.txt`/`fstab` ↔ Disk-Kennung `01ee8805` | stimmen überein |
+
+Für einen 3 B+ der **alten** Platinen-Revision 1.3 fehlt also nichts. Der
+3 B+ wird in neuerer Fertigung aber als **Revision 1.4** gebaut (Revisionscode
+`a020d4`; die Vorgängerin trägt `a020d3`). Sie hat einen anderen
+Spannungsregler-Baustein und braucht laut Raspberry-Pi-Forum
+**Firmware ab September 2021**
+([Forum 361383](https://forums.raspberrypi.com/viewtopic.php?t=361383),
+[Forum 351185](https://forums.raspberrypi.com/viewtopic.php?t=351185)). Die
+Firmware im Image ist zehn Monate älter — der Pi bleibt hängen, bevor der
+Kernel überhaupt geladen wird. Dass die neu gekauften Geräte Rev. 1.4 sind, ist
+naheliegend, aber nicht abgelesen. Dass der Firmware-Tausch den Start behebt,
+ist seit dem 10.10.2026 am Gerät bestätigt.
+
+Dass der Zero 2 W (erschienen Oktober 2021) mit derselben alten Firmware
+läuft, ist im Image-Log belegt (`Machine model: Raspberry Pi Zero 2 Rev 1.0`
+unter Firmware `2020-11-25`) — obwohl das Image keine eigene
+Gerätebeschreibung für ihn mitbringt.
+
+### Abhilfe: nur die Start-Firmware tauschen
+
+[`pi/update-boot-firmware.sh`](../pi/update-boot-firmware.sh) ersetzt auf der
+Boot-Partition ausschließlich `bootcode.bin`, `start*.elf` und `fixup*.dat`
+durch den Buster-Stand `1.20220308_buster` (Firmware vom 01.12.2021). Kernel,
+`*.dtb`, `config.txt` und das Root-Dateisystem bleiben unangetastet. Das Skript
+prüft die Prüfsummen, **bevor** es die Karte anfasst, und sichert die alte
+Firmware nach `firmware-alt/`.
+
+**Bereits beschriebene Karten** müssen nicht neu geschrieben werden — die
+Boot-Partition ist FAT und erscheint am Rechner als Laufwerk `boot`:
+
+```
+bash pi/update-boot-firmware.sh /Volumes/boot          # Mac
+bash pi/update-boot-firmware.sh /media/$USER/boot      # Linux
+bash pi/update-boot-firmware.sh --zurueck /Volumes/boot   # Rückweg
+```
+
+Unter Windows von Hand: die 17 Dateien aus
+<https://github.com/raspberrypi/firmware/tree/1.20220308_buster/boot>
+(`bootcode.bin`, alle `start*.elf`, alle `fixup*.dat`) auf das Laufwerk `boot`
+kopieren und die vorhandenen ersetzen.
+
+### Fertiges Test-Image mit neuer Firmware (zweite Version)
+
+Für neue Karten ohne Umweg über das Skript — das bisherige Image plus genau
+dieser Firmware-Tausch, sonst unverändert (gebaut am 09.10.2026):
+
+- **Image:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-v2.img.xz>
+- **Prüfsumme:** <https://badhub.de/download/bts-light/pi-image/bts-light-pi-v2.img.xz.sha256>
+
+Schreiben wie das bisherige Image (Raspberry Pi Imager, „Eigenes Image
+verwenden“, keine Anpassungen). Die alte Firmware liegt als `firmware-alt/` mit
+auf der Boot-Partition. **Auf einem Pi 3 B+ bestätigt (10.10.2026), im Pi
+Zero 2 W noch nicht geprüft** — deshalb steht es neben dem bisherigen Image; die
+Download-Seite nennt es als zweiten Link mit diesem Vorbehalt
+(`PI_IMAGE_V2_URL` in `scripts/build-release-page.mjs`).
+
+### Offen, bevor das veröffentlichte Image ersetzt wird
+
+1. ~~**3 B+ Rev. 1.4:** eine Karte patchen, starten — kommt der Kiosk?~~
+   ✅ 10.10.2026: `bts-light-pi-v2.img.xz` fährt auf einem Pi 3 B+ hoch (Tilo).
+   Die Platinen-Revision wurde dabei nicht abgelesen.
+2. **Zero 2 W gegenprüfen (Pflicht).** Die neue Firmware kennt den Zero 2 W
+   und sucht eine eigene Gerätebeschreibung (`bcm2710-rpi-zero-2-w.dtb`), die
+   das Image nicht hat; die alte Firmware nahm stillschweigend eine andere. Ob
+   die neue genauso zurückfällt, zeigt nur der Test. Startet der Zero 2 W mit
+   der neuen Firmware nicht mehr, braucht das Image zusätzlich die beiden
+   `bcm2710-rpi-zero-2*.dtb` aus demselben Firmware-Stand.
+3. Erst wenn **beide** Modelle starten: `bts-light-pi-v2.img.xz` zum
+   Standard machen (als `bts-light-pi.img.xz` ablegen, Prüfsumme dazu) und den
+   zweiten Link auf der Download-Seite wieder entfernen. Bis dahin bleibt das
+   Hauptimage unverändert.
+
+Das selbst eingerichtete Image nach [pi-setup.md](pi-setup.md) (aktuelles
+Raspberry Pi OS + `setup-monitor.sh`) ist **nicht** betroffen — es bringt
+aktuelle Firmware mit.
+
 ## Test (mit echter Hardware)
 
 1. **Fertiges Image (Download oder lokal) mit Pi Imager auf eine neue Karte schreiben**

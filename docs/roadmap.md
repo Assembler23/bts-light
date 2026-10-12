@@ -496,6 +496,16 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Setzplätze anzeigen** — Spec:
+  [features/setzplaetze-anzeigen.md](features/setzplaetze-anzeigen.md),
+  [ADR 0059](adr/0059-setzplatz-als-text-aus-dem-parser.md).
+  Aus der Nutzerfrage vom 12.10.2026. BTP liefert die Setzung an
+  `StageEntry.Seed1/Seed2` (Messung `btp_seed_probe.rs`).
+  - **Anzeige:** `[1]`, `[3/4]` auf Monitoren (ohne Schalter), im TL-Web
+    (Profil-Schalter, Standard an) und im Desktop-Check-In.
+  - **Etappen:** PR 1 bts-light, PR 2 Payload an den badhub-Liveticker und
+    den Check-In, PR 3 Anzeige in badhub (`AFFECTS` badhub).
+
 - **Offene Paarungen in der TL-Spielliste** — Spec:
   [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md),
   ADR [0051](adr/0051-offene-spiele-eigene-gedeckelte-liste.md) /
@@ -1080,6 +1090,15 @@ verliehen):
   „kernel image not found"). Empfehlung für Verleih-Set-Hardware:
   Pi Zero 2 W (klein, günstig, ausreichend für den Kiosk) oder Pi 4
   (deutlich kraftvoller).
+- **Gemeinsames Pi-Image startet nicht auf dem Pi 3 B+ Rev. 1.4** (09.10.2026,
+  Status: **auf dem 3 B+ bestätigt (10.10.2026), Zero-2-W-Gegenprobe offen**,
+  Priorität hoch — der
+  Zero 2 W ist nicht mehr lieferbar). Die Start-Firmware im Image ist vom
+  25.11.2020, Rev. 1.4 braucht eine ab September 2021.
+  `pi/update-boot-firmware.sh` tauscht nur die Firmware auf der Boot-Partition.
+  **Auslöser für den nächsten Schritt:** dieselbe Karte startet auch im
+  Zero 2 W → `bts-light-pi-v2.img.xz` auf badhub.de zum Standard machen.
+  Details: [pi-dual-image.md](pi-dual-image.md).
 - **Info-Monitor: Routen + HTML ausgeliefert** (v0.9.17, 2026-05-25), **UI-
   Zuweisung offen.** Der Tablet-Server liefert jetzt zwei Hallen-Displays
   unter dedizierten URLs: `/info/overview` (Court-Übersicht, Hallen ×
