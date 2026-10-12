@@ -1114,6 +1114,10 @@ pub struct TlDisplaySettings {
     /// Schalter findet. So herum gilt für alle Profile — alte wie neue — der
     /// gewollte Standard „anzeigen".
     pub hide_open_matches: bool,
+    /// Setzplätze (`[1]`, `[3/4]`) **ausblenden** (Spec
+    /// `setzplaetze-anzeigen`). Invertiert aus demselben Grund wie
+    /// `hide_open_matches`: Bestandsprofile ohne das Feld zeigen sie.
+    pub hide_seeds: bool,
     /// Vier Verschiebe-Knöpfe (⤒ ↑ ↓ ⤓) an JEDER umsortierbaren Zeile der
     /// Warteliste statt nur „↑ an den Anfang" (Wunsch 06.09.2026: Ziehen ist
     /// auf manchen Geräten nicht praktikabel). Default aus — die Zeile wird
@@ -1560,6 +1564,7 @@ mod tests {
                 unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
+                hide_seeds: false,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],

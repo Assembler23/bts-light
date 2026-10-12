@@ -209,6 +209,10 @@ pub struct BtpEntry {
     /// sich nicht auflösen lassen, werden verworfen (sonst stünden namenlose
     /// Einträge auf der öffentlichen Check-In-Seite).
     pub players: Vec<BtpPlayer>,
+    /// Setzplatz im **Hauptfeld** (Stage-Typ 1) als fertiger Text („1",
+    /// „3/4") — für den Check-In, der nur das Hauptfeld kennt (ADR 0059).
+    /// `None` = ungesetzt.
+    pub seed: Option<String>,
 }
 
 /// Ein Standort/eine Halle des Turniers (BTP `Location`).
@@ -397,6 +401,12 @@ pub struct BtpMatch {
     pub entry1_id: i64,
     /// EntryID von Team 2 (0, falls der Platz noch offen ist).
     pub entry2_id: i64,
+    /// Setzplatz von Team 1 als fertiger Text („1", „3/4") — die Setzung
+    /// an der Stage dieses Draws, sonst die Hauptfeld-Setzung derselben
+    /// Meldung (ADR 0059). `None` = ungesetzt oder Platz noch offen.
+    pub team1_seed: Option<String>,
+    /// Setzplatz von Team 2, Regel wie `team1_seed`.
+    pub team2_seed: Option<String>,
     /// Court-Name, falls dem Match ein Court zugewiesen ist. Achtung: bei
     /// Mehr-Hallen-Turnieren nicht eindeutig – für Identität `court_id`.
     pub court: Option<String>,
@@ -557,6 +567,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
     let disciplines = draw_discipline_map(t);
     let classes = draw_class_map(t);
     let scoring = scoring_by_draw(t);
+    let seeds = SeedIndex::aus(t);
 
     // Court-Namen nach CourtID sortiert – das ergibt die BTP-Anlegereihenfolge.
     let mut court_pairs: Vec<(&i64, &String)> = courts.iter().collect();
@@ -577,12 +588,13 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
             &disciplines,
             &classes,
             &scoring,
+            &seeds,
         ),
         courts: court_names,
         locations: location_list(t),
         court_infos: court_list(t),
         events: event_list(t),
-        entries: entry_list(t, &players),
+        entries: entry_list(t, &players, &seeds),
         officials: official_list(t),
     })
 }
@@ -672,9 +684,96 @@ fn event_list(t: &[Node]) -> Vec<BtpEvent> {
 /// (`tests/fixtures/btp-tournament*.bin`): 1 = Hauptfeld, 2 = Qualifikation,
 /// 8 = Playoff, 9998 = Reserve, 9999 = Ausschließen. Der **Typ** ist stabil —
 /// der Stage-**Name** ist frei benennbar und taugt nicht zum Filtern.
+const STAGE_HAUPTFELD: i64 = 1;
 const STAGE_QUALIFIKATION: i64 = 2;
 const STAGE_RESERVE: i64 = 9998;
 const STAGE_AUSSCHLIESSEN: i64 = 9999;
+
+/// Setzplatz als Anzeigetext aus BTPs `StageEntry.Seed1`/`Seed2` — die
+/// **einzige** Formatierungsstelle (ADR 0059); alle Abnehmer setzen nur noch
+/// die Klammern. `Seed1` ist der Platz bzw. die Untergrenze, `Seed2` die
+/// Obergrenze eines geteilten Platzes (gemessen 12.10.2026).
+///
+/// Werte ≤ 0 gelten als fehlend. Bewusst großzügig (Spec-Entscheidung): Ein
+/// Eintrag mit nur `Seed2` zeigt diesen Wert, eine verkehrt herum gelieferte
+/// Spanne wird aufsteigend gezeigt.
+pub fn seed_text(seed1: Option<i64>, seed2: Option<i64>) -> Option<String> {
+    let lo = seed1.filter(|&v| v > 0);
+    let hi = seed2.filter(|&v| v > 0);
+    match (lo, hi) {
+        (Some(a), Some(b)) if a == b => Some(a.to_string()),
+        (Some(a), Some(b)) => Some(format!("{}/{}", a.min(b), a.max(b))),
+        (Some(a), None) | (None, Some(a)) => Some(a.to_string()),
+        (None, None) => None,
+    }
+}
+
+/// Setzplätze des Turniers, einmal je Snapshot aus `StageEntries` gelesen.
+///
+/// BTP führt die Setzung **je Stage**: Eine Meldung, die aus der Gruppe ins
+/// Playoff kommt, trägt sie an beiden `StageEntry`-Einträgen. Ein Spiel zeigt
+/// deshalb die Setzung der Stage seines Draws und fällt nur ohne eine solche
+/// auf die Hauptfeld-Setzung zurück (Spec `setzplaetze-anzeigen`).
+#[derive(Debug, Default)]
+struct SeedIndex {
+    /// (EntryID, StageID) → Text.
+    by_stage: HashMap<(i64, i64), String>,
+    /// EntryID → Text an der Stage mit Typ Hauptfeld.
+    main: HashMap<i64, String>,
+    /// DrawID → StageID.
+    draw_stage: HashMap<i64, i64>,
+}
+
+impl SeedIndex {
+    fn aus(t: &[Node]) -> Self {
+        let mut stage_type: HashMap<i64, i64> = HashMap::new();
+        if let Some(group) = xml::find(t, "Stages") {
+            for s in group.children() {
+                if let (Some(id), Some(ty)) = (child_int(s, "ID"), child_int(s, "StageType")) {
+                    stage_type.insert(id, ty);
+                }
+            }
+        }
+        let mut index = SeedIndex::default();
+        if let Some(group) = xml::find(t, "Draws") {
+            for d in group.children() {
+                if let (Some(id), Some(stage)) = (child_int(d, "ID"), child_int(d, "StageID")) {
+                    index.draw_stage.insert(id, stage);
+                }
+            }
+        }
+        if let Some(group) = xml::find(t, "StageEntries") {
+            for se in group.children() {
+                let (Some(entry), Some(stage)) =
+                    (child_int(se, "EntryID"), child_int(se, "StageID"))
+                else {
+                    continue;
+                };
+                let Some(text) = seed_text(child_int(se, "Seed1"), child_int(se, "Seed2")) else {
+                    continue;
+                };
+                if stage_type.get(&stage) == Some(&STAGE_HAUPTFELD) {
+                    index.main.insert(entry, text.clone());
+                }
+                index.by_stage.insert((entry, stage), text);
+            }
+        }
+        index
+    }
+
+    /// Setzung einer Spielseite: erst die Stage des Draws, dann das
+    /// Hauptfeld. Ein offener Platz (`entry_id == 0`) ist nie gesetzt.
+    fn fuer(&self, draw_id: i64, entry_id: i64) -> Option<String> {
+        if entry_id == 0 {
+            return None;
+        }
+        self.draw_stage
+            .get(&draw_id)
+            .and_then(|stage| self.by_stage.get(&(entry_id, *stage)))
+            .or_else(|| self.main.get(&entry_id))
+            .cloned()
+    }
+}
 
 /// EntryIDs, die NICHT aufs Hauptfeld gehören (Filter der Check-In-Liste).
 ///
@@ -855,7 +954,7 @@ fn melde_hauptfeld_filter_mit(merker: &AtomicUsize, gefiltert: usize) -> bool {
 /// verworfen werden Meldungen, die laut Stage-Zuordnung nicht aufs Hauptfeld
 /// gehören ([`non_main_stage_entries`]) — Reservisten, Ausgeschlossene und
 /// reine Quali-Platzierungen haben auf der Check-In-Liste nichts verloren.
-fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>) -> Vec<BtpEntry> {
+fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>, seeds: &SeedIndex) -> Vec<BtpEntry> {
     let Some(entries) = xml::find(t, "Entries") else {
         return Vec::new();
     };
@@ -911,6 +1010,7 @@ fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>) -> Vec<BtpEntry> {
                 id,
                 event_id,
                 players: resolved,
+                seed: seeds.main.get(&id).cloned(),
             })
         })
         .collect();
@@ -1224,6 +1324,7 @@ fn parse_matches(
     disciplines: &HashMap<i64, Discipline>,
     classes: &HashMap<i64, String>,
     scoring: &HashMap<i64, ScoringFormat>,
+    seeds: &SeedIndex,
 ) -> Vec<BtpMatch> {
     let mut out = Vec::new();
     let Some(matches) = xml::find(t, "Matches") else {
@@ -1290,6 +1391,8 @@ fn parse_matches(
             planned_time: parse_planned_time(m),
             team1,
             team2,
+            team1_seed: seeds.fuer(draw_id.unwrap_or_default(), entry1_id),
+            team2_seed: seeds.fuer(draw_id.unwrap_or_default(), entry2_id),
             entry1_id,
             entry2_id,
             court,
@@ -2866,5 +2969,216 @@ mod tests {
         )];
         let snap = parse_snapshot(&tree).unwrap();
         assert_eq!(snap.rest_minutes, Some(20));
+    }
+
+    // --- Setzplätze (Spec setzplaetze-anzeigen, ADR 0059) ----------------
+
+    #[test]
+    fn seed_text_formatiert_alle_randfaelle() {
+        assert_eq!(seed_text(Some(1), None).as_deref(), Some("1"));
+        assert_eq!(seed_text(Some(3), Some(4)).as_deref(), Some("3/4"));
+        assert_eq!(seed_text(Some(5), Some(8)).as_deref(), Some("5/8"));
+        // Verkehrt herum geliefert → aufsteigend gezeigt.
+        assert_eq!(seed_text(Some(4), Some(3)).as_deref(), Some("3/4"));
+        assert_eq!(seed_text(Some(3), Some(3)).as_deref(), Some("3"));
+        // Ausreißer aus der Messung: nur Seed2 → großzügig angezeigt.
+        assert_eq!(seed_text(None, Some(6)).as_deref(), Some("6"));
+        assert_eq!(seed_text(None, None), None);
+        assert_eq!(seed_text(Some(0), None), None);
+        assert_eq!(seed_text(Some(0), Some(0)), None);
+        assert_eq!(seed_text(Some(-1), Some(2)).as_deref(), Some("2"));
+    }
+
+    /// Turnier mit Hauptfeld (Stage 1, Draw 10), Qualifikation (Stage 2,
+    /// Draw 20) und Playoff (Stage 5, Draw 30), vier Einzel-Meldungen.
+    /// `setzungen`: (EntryID, StageID, Seed1, Seed2). Spiel 1 (Hauptfeld)
+    /// und Spiel 3 (Playoff) sind 101 gegen 102, Spiel 2 (Quali) 104 gegen
+    /// 103, Spiel 4 (Playoff) hat einen offenen zweiten Platz.
+    fn turnier_mit_setzungen(setzungen: Vec<(i64, i64, Option<i64>, Option<i64>)>) -> Vec<Node> {
+        let stage = |id: i64, typ: i64| {
+            Node::group(
+                "Stage",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", 1),
+                    Node::integer("StageType", typ),
+                ],
+            )
+        };
+        let draw = |id: i64, stage: i64| {
+            Node::group(
+                "Draw",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", 1),
+                    Node::integer("StageID", stage),
+                ],
+            )
+        };
+        let spieler = |id: i64, name: &str| {
+            Node::group(
+                "Player",
+                vec![Node::integer("ID", id), Node::string("Lastname", name)],
+            )
+        };
+        let entry = |id: i64, player: i64| {
+            Node::group(
+                "Entry",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", 1),
+                    Node::integer("Player1ID", player),
+                ],
+            )
+        };
+        let slot = |draw: i64, planning: i64, entry: i64| {
+            Node::group(
+                "Match",
+                vec![
+                    Node::integer("DrawID", draw),
+                    Node::integer("PlanningID", planning),
+                    Node::integer("EntryID", entry),
+                ],
+            )
+        };
+        let spiel = |id: i64, draw: i64, from1: i64, from2: i64| {
+            Node::group(
+                "Match",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("DrawID", draw),
+                    Node::Item {
+                        id: "IsMatch".to_string(),
+                        value: Value::Bool(true),
+                    },
+                    Node::integer("From1", from1),
+                    Node::integer("From2", from2),
+                ],
+            )
+        };
+        let stage_entries: Vec<Node> = setzungen
+            .iter()
+            .enumerate()
+            .map(|(i, (entry, stage, s1, s2))| {
+                let mut felder = vec![
+                    Node::integer("ID", 900 + i as i64),
+                    Node::integer("EntryID", *entry),
+                    Node::integer("StageID", *stage),
+                    Node::integer("Status", 0),
+                ];
+                if let Some(v) = s1 {
+                    felder.push(Node::integer("Seed1", *v));
+                }
+                if let Some(v) = s2 {
+                    felder.push(Node::integer("Seed2", *v));
+                }
+                Node::group("StageEntry", felder)
+            })
+            .collect();
+        tournament_with(vec![
+            Node::group("Stages", vec![stage(1, 1), stage(2, 2), stage(5, 8)]),
+            Node::group("Draws", vec![draw(10, 1), draw(20, 2), draw(30, 5)]),
+            Node::group(
+                "Players",
+                vec![
+                    spieler(1, "Anna"),
+                    spieler(2, "Bernd"),
+                    spieler(3, "Carla"),
+                    spieler(4, "Dora"),
+                ],
+            ),
+            Node::group(
+                "Entries",
+                vec![entry(101, 1), entry(102, 2), entry(103, 3), entry(104, 4)],
+            ),
+            Node::group("StageEntries", stage_entries),
+            Node::group(
+                "Matches",
+                vec![
+                    slot(10, 1, 101),
+                    slot(10, 2, 102),
+                    spiel(1, 10, 1, 2),
+                    slot(20, 1, 104),
+                    slot(20, 2, 103),
+                    spiel(2, 20, 1, 2),
+                    slot(30, 1, 101),
+                    slot(30, 2, 102),
+                    spiel(3, 30, 1, 2),
+                    // Offener zweiter Platz: From2 zeigt auf keinen Slot.
+                    spiel(4, 30, 1, 77),
+                ],
+            ),
+        ])
+    }
+
+    fn spiel_mit_id(snap: &BtpSnapshot, id: i64) -> &BtpMatch {
+        snap.matches.iter().find(|m| m.id == id).expect("Spiel")
+    }
+
+    #[test]
+    fn setzung_kommt_aus_der_stage_des_spiels() {
+        // 101 ist im Hauptfeld [1], im Playoff aber [2] gesetzt; das
+        // Playoff-Spiel zeigt die Playoff-, das Gruppenspiel die
+        // Hauptfeld-Setzung.
+        let tree = turnier_mit_setzungen(vec![
+            (101, 1, Some(1), None),
+            (101, 5, Some(2), None),
+            (102, 1, Some(3), Some(4)),
+        ]);
+        let snap = parse_snapshot(&tree).unwrap();
+        let gruppe = spiel_mit_id(&snap, 1);
+        assert_eq!(gruppe.team1_seed.as_deref(), Some("1"));
+        assert_eq!(gruppe.team2_seed.as_deref(), Some("3/4"));
+        let playoff = spiel_mit_id(&snap, 3);
+        assert_eq!(playoff.team1_seed.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn playoff_ohne_setzung_faellt_auf_das_hauptfeld_zurueck() {
+        // 102 hat einen Playoff-Eintrag OHNE Setzung, aber eine im Hauptfeld.
+        let tree = turnier_mit_setzungen(vec![
+            (101, 1, Some(1), None),
+            (102, 1, Some(3), Some(4)),
+            (102, 5, None, None),
+        ]);
+        let snap = parse_snapshot(&tree).unwrap();
+        let playoff = spiel_mit_id(&snap, 3);
+        assert_eq!(playoff.team1_seed.as_deref(), Some("1"));
+        assert_eq!(playoff.team2_seed.as_deref(), Some("3/4"));
+    }
+
+    #[test]
+    fn offener_platz_und_ungesetzte_meldung_haben_keine_setzung() {
+        let tree = turnier_mit_setzungen(vec![(101, 1, Some(1), None)]);
+        let snap = parse_snapshot(&tree).unwrap();
+        let offen = spiel_mit_id(&snap, 4);
+        assert_eq!(offen.entry2_id, 0);
+        assert_eq!(offen.team1_seed.as_deref(), Some("1"));
+        assert_eq!(offen.team2_seed, None);
+        // 102 trägt nirgends eine Setzung.
+        assert_eq!(spiel_mit_id(&snap, 1).team2_seed, None);
+    }
+
+    #[test]
+    fn meldung_traegt_nur_die_hauptfeld_setzung() {
+        // 103 ist nur in der Qualifikation gesetzt → keine Marke im
+        // Check-In; 101 trägt die Hauptfeld-, nicht die Playoff-Setzung.
+        let tree = turnier_mit_setzungen(vec![
+            (101, 1, Some(1), None),
+            (101, 5, Some(2), None),
+            (103, 2, Some(1), None),
+        ]);
+        let snap = parse_snapshot(&tree).unwrap();
+        let seed_of = |id: i64| {
+            snap.entries
+                .iter()
+                .find(|e| e.id == id)
+                .and_then(|e| e.seed.clone())
+        };
+        assert_eq!(seed_of(101).as_deref(), Some("1"));
+        assert_eq!(seed_of(102), None);
+        // 103 ist Quali-only platziert und fliegt deshalb ganz aus der
+        // Meldeliste; das Quali-Spiel selbst zeigt seine Stage-Setzung.
+        assert_eq!(spiel_mit_id(&snap, 2).team2_seed.as_deref(), Some("1"));
     }
 }

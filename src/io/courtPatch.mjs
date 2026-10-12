@@ -102,6 +102,11 @@ export function istPatchbar(vorher, nachher, brettGleich, callTimer) {
   if (!listeGleich(vorher.team1_nationalities, nachher.team1_nationalities)) return false;
   if (!listeGleich(vorher.team2_nationalities, nachher.team2_nationalities)) return false;
 
+  // Setzplatz (Spec setzplaetze-anzeigen): Eine Neusetzung in BTP ändert die
+  // Match-ID nicht — ohne diesen Vergleich bliebe die alte Marke stehen.
+  if ((vorher.team1_seed || "") !== (nachher.team1_seed || "")) return false;
+  if ((vorher.team2_seed || "") !== (nachher.team2_seed || "")) return false;
+
   return true;
 }
 

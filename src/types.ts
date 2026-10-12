@@ -193,6 +193,9 @@ export interface CheckinPlayer {
   /** Von der Turnierleitung zurückgesetzt: Selbst-Check-In gesperrt. */
   locked: boolean;
   checked_in_at: string | null;
+  /** Setzplatz der Meldung im Hauptfeld („1", „3/4"), aus dem BTP-Stand
+   *  ergänzt (Spec setzplaetze-anzeigen). Fehlt bei ungesetzten Meldungen. */
+  seed?: string | null;
 }
 
 /** Eine Spielklasse mit Check-In-Fenster und Meldungen. */

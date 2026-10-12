@@ -356,6 +356,14 @@ bringen. Die automatische Feldvergabe überspringt diese Spiele ebenfalls, und
 sie bekommen **keine** Startzeit-Prognose — sonst verschöben sie die Prognose
 aller anderen.
 
+**Setzplätze** (seit v0.9.298): Gesetzte Paarungen tragen in der Spielliste
+und auf der Feldkachel ihren Setzplatz hinter dem Namen, z. B. `[1]` oder
+`[3/4]`. Das hilft bei der Frage, welches Spiel aufs Hauptfeld gehört. Im
+**Profile**-Knopf lässt sich das mit dem Häkchen „Setzplätze zeigen"
+ausschalten; standardmäßig ist es **an**, auch in bestehenden Profilen.
+Spiele mit noch offener Paarung und beendete Spiele zeigen keine Setzung.
+<!-- pruef: "Setzplätze zeigen" in src-tauri/assets/tl.html -->
+
 **Ausblenden:** Wer lieber die kurze Arbeitsliste sieht, nimmt im
 **Profile**-Knopf das Häkchen „Spiele mit noch offener Paarung zeigen"
 heraus. Der Schalter gilt für das Profil, also je Gerät — standardmäßig ist

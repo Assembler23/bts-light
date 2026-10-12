@@ -881,6 +881,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 

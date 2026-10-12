@@ -60,6 +60,12 @@ pub struct MatchBrief {
     pub team_a: Vec<PlayerBrief>,
     #[serde(rename = "teamB")]
     pub team_b: Vec<PlayerBrief>,
+    /// Setzplatz der Seite A bzw. B als Text („1", „3/4"; ohne Klammern,
+    /// ADR 0059). `None` = ungesetzt; ältere Absender lassen das Feld weg.
+    #[serde(rename = "seedA", default, skip_serializing_if = "Option::is_none")]
+    pub seed_a: Option<String>,
+    #[serde(rename = "seedB", default, skip_serializing_if = "Option::is_none")]
+    pub seed_b: Option<String>,
     #[serde(rename = "eventLabel")]
     pub event_label: String,
     #[serde(rename = "bestOfSets")]
@@ -176,6 +182,12 @@ pub struct MonitorMatch {
     pub match_number: Option<i64>,
     pub team1: Vec<MonitorPlayer>,
     pub team2: Vec<MonitorPlayer>,
+    /// Setzplatz von Team 1 bzw. 2 als Text („1", „3/4"; ohne Klammern,
+    /// ADR 0059). `None` = ungesetzt; ältere Absender lassen das Feld weg.
+    #[serde(rename = "team1Seed", default, skip_serializing_if = "Option::is_none")]
+    pub team1_seed: Option<String>,
+    #[serde(rename = "team2Seed", default, skip_serializing_if = "Option::is_none")]
+    pub team2_seed: Option<String>,
     /// Satzstand in Team-Koordinaten (abgeschlossene Sätze + laufender Satz).
     pub sets: Vec<SetAb>,
 }
@@ -1680,6 +1692,10 @@ pub struct TlDisplaySettingsWire {
     /// Browser-Stand, und genau das ist der gewollte Standard.
     #[serde(rename = "hideOpenMatches", default)]
     pub hide_open_matches: bool,
+    /// Setzplätze ausblenden (Spec `setzplaetze-anzeigen`). Invertiert wie
+    /// `hideOpenMatches`: fehlt das Feld, werden sie angezeigt.
+    #[serde(rename = "hideSeeds", default)]
+    pub hide_seeds: bool,
     /// Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile (Wunsch
     /// 06.09.2026). `#[serde(default)]` wie die Häkchen darüber: fehlt das
     /// Feld (älterer Browser-Stand), bleibt es aus — das bisherige Bild.
@@ -2615,6 +2631,12 @@ pub struct PreparedMatch {
     pub team_a: Vec<PlayerBrief>,
     #[serde(rename = "teamB", default)]
     pub team_b: Vec<PlayerBrief>,
+    /// Setzplatz der Seite A bzw. B als Text („1", „3/4"; ohne Klammern,
+    /// ADR 0059). `None` = ungesetzt; ältere Absender lassen das Feld weg.
+    #[serde(rename = "seedA", default, skip_serializing_if = "Option::is_none")]
+    pub seed_a: Option<String>,
+    #[serde(rename = "seedB", default, skip_serializing_if = "Option::is_none")]
+    pub seed_b: Option<String>,
     /// Spielnummer (BTP `MatchNr`), falls vergeben – für die Übersicht.
     #[serde(
         rename = "matchNumber",
@@ -3206,6 +3228,8 @@ mod tests {
                 finalized: false,
                 sr_names: vec!["Sabine Schiedsmann".into()],
                 ar_names: Vec::new(),
+                seed_a: None,
+                seed_b: None,
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -3249,6 +3273,8 @@ mod tests {
             finalized: true,
             sr_names: vec!["Sabine Schiedsmann".into()],
             ar_names: vec!["Alex Aufschlag".into()],
+            seed_a: None,
+            seed_b: None,
         };
         let json = serde_json::to_string(&brief).unwrap();
         assert!(json.contains(r#""finalized":true"#));
@@ -3265,6 +3291,42 @@ mod tests {
         assert!(!parsed.finalized, "fehlendes Feld → finalized=false");
         assert!(parsed.sr_names.is_empty());
         assert!(parsed.ar_names.is_empty());
+        assert_eq!(parsed.seed_a, None, "fehlende Setzung → None");
+        assert_eq!(parsed.seed_b, None);
+        // Ungesetzt reist nichts mit (Frame bleibt so klein wie vorher).
+        assert!(!json.contains("seedA") && !json.contains("seedB"));
+    }
+
+    /// Setzplatz (Spec setzplaetze-anzeigen, ADR 0059): reist als Text in
+    /// camelCase, nur wenn gesetzt, und übersteht den Roundtrip — an
+    /// MatchBrief, PreparedMatch und MonitorMatch gleich.
+    #[test]
+    fn setzplatz_reist_als_text_nur_wenn_gesetzt() {
+        let brief: MatchBrief = serde_json::from_str(
+            r#"{"matchId":7,"teamA":[],"teamB":[],"eventLabel":"HE","bestOfSets":3,"targetScore":21,"seedA":"3/4"}"#,
+        )
+        .unwrap();
+        assert_eq!(brief.seed_a.as_deref(), Some("3/4"));
+        assert_eq!(brief.seed_b, None);
+        let json = serde_json::to_string(&brief).unwrap();
+        assert!(json.contains(r#""seedA":"3/4""#) && !json.contains("seedB"));
+        roundtrip(&brief);
+
+        let pm: PreparedMatch =
+            serde_json::from_str(r#"{"matchId":1,"calledAtMs":0,"seedB":"1"}"#).unwrap();
+        assert_eq!(pm.seed_b.as_deref(), Some("1"));
+        assert_eq!(pm.seed_a, None);
+        roundtrip(&pm);
+
+        let mm: MonitorMatch = serde_json::from_str(
+            r#"{"matchId":1,"discipline":"","eventLabel":"","team1":[],"team2":[],"sets":[],"team1Seed":"5/8"}"#,
+        )
+        .unwrap();
+        assert_eq!(mm.team1_seed.as_deref(), Some("5/8"));
+        assert_eq!(mm.team2_seed, None);
+        let json = serde_json::to_string(&mm).unwrap();
+        assert!(json.contains(r#""team1Seed":"5/8""#) && !json.contains("team2Seed"));
+        roundtrip(&mm);
     }
 
     #[test]
@@ -3386,6 +3448,8 @@ mod tests {
                 }],
                 match_number: Some(101),
                 called_at_ms: 1_700_000_000_000,
+                seed_a: None,
+                seed_b: None,
             }],
         });
 
@@ -3754,6 +3818,8 @@ mod tests {
                     nationality: None,
                 }],
                 sets: vec![SetAb { a: 21, b: 18 }, SetAb { a: 11, b: 7 }],
+                team1_seed: None,
+                team2_seed: None,
             }),
             court_state: Some(r#"{"servingSide":"left"}"#.into()),
             config: MonitorConfig::default(),
@@ -4613,6 +4679,7 @@ mod tests {
                 unlimited_court_calls: false,
                 list_position: TlListPositionWire::Bottom,
                 time_stats_axis: TlTimeStatsAxisWire::Group,
+                hide_seeds: false,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],
@@ -4642,6 +4709,24 @@ mod tests {
         assert!(json.contains(r#""hideOpenMatches":true"#), "{json}");
         let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
         assert!(zurueck.hide_open_matches);
+    }
+
+    #[test]
+    fn ein_profil_ohne_hide_seeds_zeigt_setzplaetze() {
+        // Spec `setzplaetze-anzeigen`: invertiert wie `hideOpenMatches`.
+        let ohne = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,
+            "showClubLogos":false,"showDiscipline":true,"showRound":true,
+            "showGroup":true,"listPosition":"bottom"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(ohne).expect("lesbar");
+        assert!(!alt.hide_seeds, "ohne das Feld werden Setzplätze angezeigt");
+        let mit = TlDisplaySettingsWire {
+            hide_seeds: true,
+            ..alt
+        };
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""hideSeeds":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert!(zurueck.hide_seeds);
     }
 
     /// Etappe D (`spielzeiten-prognose`): `showCourtRemaining` reist im
@@ -5386,6 +5471,8 @@ mod tests {
             team1: vec![],
             team2: vec![],
             sets: vec![],
+            team1_seed: None,
+            team2_seed: None,
         };
         let json = serde_json::to_string(&m).unwrap();
         assert!(json.contains(r#""classLabel":"U15""#), "{json}");

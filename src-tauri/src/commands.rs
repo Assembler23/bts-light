@@ -772,6 +772,10 @@ pub async fn checkin_state(
     };
 
     let mut view = fetch_state(&checkin_client(), &base, &password, &uuid).await;
+    // Setzplätze aus dem BTP-Stand ergänzen (Spec setzplaetze-anzeigen).
+    if let Some(snap) = state.tablet.snapshot_clone() {
+        crate::badhub::checkin_state::setzungen_eintragen(&mut view, &snap.entries);
+    }
     // Links zur öffentlichen Seite und zum QR-Aushang: aus der Config
     // gebaut, sobald der Check-In eingerichtet ist — auch bei „offline",
     // denn die Adresse selbst gilt unabhängig von der Erreichbarkeit.
@@ -5476,6 +5480,8 @@ mod tests {
             show_club_names: false,
             show_club_logos: false,
             finalized: false,
+            seed_a: None,
+            seed_b: None,
         };
         let court = cloud_announce_court(relay_proto::AnnounceCourt {
             court_id: 7,

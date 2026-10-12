@@ -741,6 +741,20 @@ Distanz gut lesbar, der Vorname geht nicht verloren, und das Bild ist für
 alle Spieler:innen einheitlich. Ein einteiliger Name steht ohne Vornamen-
 Zeile; ein sehr langer Einzelteil wird mit „…" abgeschnitten.
 
+## Setzplatz (seit v0.9.298)
+
+Ist eine Seite in BTP gesetzt, steht ihr Setzplatz in eckigen Klammern
+hinter dem letzten Spieler: `[1]`, `[3/4]`, `[5/8]` — auf dem Court-Monitor,
+in der Feld-Übersicht, der Kombi-Anzeige (waagerecht und senkrecht), der
+Vorbereitungs-Liste und der Siegerehrung. Ungesetzte Seiten tragen keine
+Marke. Einen Schalter dafür gibt es bewusst nicht.
+<!-- pruef: "seed" in src-tauri/assets/monitor.html -->
+
+Die Marke wird nie gekürzt; bei langen Doppel-Namen weicht zuerst der Name
+(„…"). Die Siegerehrung gibt es nur im LAN — in der Cloud entfällt dort auch
+die Marke. Ändert die Turnierleitung eine Setzung in BTP, während das Spiel
+schon auf dem Feld liegt, zeigt die Anzeige sie mit dem nächsten Abruf.
+
 ## Layout
 
 Das Anzeige-Layout ist im Setup wählbar. Aktuell gibt es **„A — Geteilt"**

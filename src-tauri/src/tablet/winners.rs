@@ -35,6 +35,10 @@ pub struct Placement {
     pub players: Vec<WinnerPlayer>,
     /// Platz kampflos entschieden (Walkover).
     pub walkover: bool,
+    /// Setzplatz des Teams als Text („1", „3/4"; ADR 0059), aus dem Spiel,
+    /// das die Platzierung entschied. Fehlt bei ungesetzten Teams.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
 }
 
 /// Podium einer ausgespielten Disziplin.
@@ -109,7 +113,30 @@ fn loser_team(m: &BtpMatch) -> &[crate::btp::model::BtpPlayer] {
     }
 }
 
-fn placement(rank: u8, team: &[crate::btp::model::BtpPlayer], walkover: bool) -> Placement {
+/// Setzplatz des Gewinner- bzw. Verlierer-Teams, Seitenwahl wie
+/// `winner_team`/`loser_team`.
+fn winner_seed(m: &BtpMatch) -> Option<String> {
+    if m.winner == Some(1) {
+        m.team1_seed.clone()
+    } else {
+        m.team2_seed.clone()
+    }
+}
+
+fn loser_seed(m: &BtpMatch) -> Option<String> {
+    if m.winner == Some(1) {
+        m.team2_seed.clone()
+    } else {
+        m.team1_seed.clone()
+    }
+}
+
+fn placement(
+    rank: u8,
+    team: &[crate::btp::model::BtpPlayer],
+    seed: Option<String>,
+    walkover: bool,
+) -> Placement {
     Placement {
         rank,
         players: team
@@ -122,6 +149,7 @@ fn placement(rank: u8, team: &[crate::btp::model::BtpPlayer], walkover: bool) ->
             })
             .collect(),
         walkover,
+        seed,
     }
 }
 
@@ -148,11 +176,12 @@ pub fn discipline_results(snapshot: &BtpSnapshot) -> Vec<DisciplineResult> {
         let mut podium = vec![placement(
             1,
             winner_team(fm),
+            winner_seed(fm),
             fm.result == MatchResult::Walkover,
         )];
         // Platz 2 = Finalverlierer (sofern bekannt).
         if !loser_team(fm).is_empty() {
-            podium.push(placement(2, loser_team(fm), false));
+            podium.push(placement(2, loser_team(fm), loser_seed(fm), false));
         }
 
         // Platz 3: Bronze-Match → ein 3.; sonst beide HF-Verlierer.
@@ -165,6 +194,7 @@ pub fn discipline_results(snapshot: &BtpSnapshot) -> Vec<DisciplineResult> {
                 podium.push(placement(
                     3,
                     winner_team(bm),
+                    winner_seed(bm),
                     bm.result == MatchResult::Walkover,
                 ));
             }
@@ -175,7 +205,7 @@ pub fn discipline_results(snapshot: &BtpSnapshot) -> Vec<DisciplineResult> {
                 .filter(|m| is_semifinal(&m.round_name) && decided(m))
             {
                 if !loser_team(sm).is_empty() {
-                    podium.push(placement(3, loser_team(sm), false));
+                    podium.push(placement(3, loser_team(sm), loser_seed(sm), false));
                 }
             }
         }
@@ -261,6 +291,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -299,6 +331,26 @@ mod tests {
             Some("VfL Lichtenrade")
         );
         assert_eq!(res[0].podium[1].players[0].name, "Bernd");
+    }
+
+    /// Spec setzplaetze-anzeigen: Jede Platzierung trägt den Setzplatz des
+    /// Teams aus dem entscheidenden Spiel; ungesetzt fehlt er im JSON.
+    #[test]
+    fn platzierung_traegt_die_setzung_des_teams() {
+        let mut fin = m(
+            1,
+            "Finale",
+            Some(2),
+            vec![p("Anne", None)],
+            vec![p("Bernd", None)],
+        );
+        fin.team2_seed = Some("1".into());
+        let res = discipline_results(&snap(vec![fin]));
+        assert_eq!(res[0].podium[0].players[0].name, "Bernd");
+        assert_eq!(res[0].podium[0].seed.as_deref(), Some("1"));
+        assert_eq!(res[0].podium[1].seed, None);
+        let json = serde_json::to_string(&res[0].podium[1]).unwrap();
+        assert!(!json.contains("seed"), "{json}");
     }
 
     #[test]

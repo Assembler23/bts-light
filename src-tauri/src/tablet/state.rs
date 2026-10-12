@@ -159,6 +159,12 @@ pub struct CourtOverview {
     /// keinen führt) – zuschaltbares Anzeige-Feld in TL-Web/Tablet.
     pub team1_clubs: Vec<String>,
     pub team2_clubs: Vec<String>,
+    /// Setzplatz von Team 1 als Text („1", „3/4"), aus dem BTP-Match
+    /// (ADR 0059). Ohne Schalter: Monitore zeigen ihn immer, wenn gesetzt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team1_seed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team2_seed: Option<String>,
     /// Aktueller Satzstand – vom Tablet, falls aktiv, sonst aus BTP.
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
@@ -4372,6 +4378,8 @@ impl TabletState {
                     team2_nationalities: m.map(|mm| nationalities(&mm.team2)).unwrap_or_default(),
                     team1_clubs: m.map(|mm| clubs(&mm.team1)).unwrap_or_default(),
                     team2_clubs: m.map(|mm| clubs(&mm.team2)).unwrap_or_default(),
+                    team1_seed: m.and_then(|mm| mm.team1_seed.clone()),
+                    team2_seed: m.and_then(|mm| mm.team2_seed.clone()),
                     sets,
                     tablet_connected,
                     // Aufruf-Stufe aus der gemeinsamen Zählung: Beide
@@ -4709,6 +4717,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -4841,6 +4851,23 @@ mod tests {
         let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!(c2.match_name, "");
         assert!(!c2.tablet_connected);
+    }
+
+    /// Spec setzplaetze-anzeigen: Der Setzplatz reist vom BTP-Match in die
+    /// Übersicht (`/health`); eine ungesetzte Seite fehlt im JSON.
+    #[test]
+    fn overview_traegt_die_setzung() {
+        let st = TabletState::default();
+        let mut m = match_on(1, Some(101), MatchStatus::OnCourt);
+        m.team1_seed = Some("3/4".into());
+        st.set_snapshot(snapshot(vec![m], vec![(101, "Court 1")]));
+        let ov = st.overview();
+        let c1 = ov.iter().find(|o| o.court_id == 101).unwrap();
+        assert_eq!(c1.team1_seed.as_deref(), Some("3/4"));
+        assert_eq!(c1.team2_seed, None);
+        let json = serde_json::to_string(c1).unwrap();
+        assert!(json.contains("\"team1_seed\":\"3/4\""), "{json}");
+        assert!(!json.contains("team2_seed"), "{json}");
     }
 
     #[test]

@@ -881,6 +881,7 @@ mod tests {
             id: players.first().map(|p| p.id).unwrap_or(0),
             event_id: 1,
             players,
+            seed: None,
         }
     }
 
