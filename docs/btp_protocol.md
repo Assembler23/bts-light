@@ -173,13 +173,30 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
   `StageType`: **1 = Hauptfeld, 2 = Qualifikation, 8 = Playoff, 9998 =
   Reserve, 9999 = Ausschließen** (am Mitschnitt + laufendem Turnier
   gemessen). Der Typ ist stabil; der Stage-**Name** ist frei benennbar.
-- `StageEntries` → `StageEntry{ID, EntryID, StageID, Status, Seed1?}` – die
+- `StageEntries` → `StageEntry{ID, EntryID, StageID, Status, Seed1?, Seed2?}` – die
   **maßgebliche Zuordnung Meldung → Stage** (Struktur-Probe 12.08.2026,
   `tests/checkin_roster_probe.rs`). Ein Turnier mit 424 Meldungen hat 424
   `StageEntry`-Einträge; darüber steht, ob eine Meldung im Hauptfeld,
   in Reserve oder in Ausschließen liegt. **`Entry.StageID` bleibt in
   echten Daten leer** — der Hauptfeld-Filter der Check-In-Liste liest
   deshalb primär `StageEntries` ([spieler-check-in.md](spieler-check-in.md)).
+  **Setzplätze** stehen ebenfalls hier (Probe 12.10.2026,
+  `tests/btp_seed_probe.rs`, lokales Test-BTP, 13 Konkurrenzen):
+  - `Seed1` = Setzplatz bzw. untere Grenze, `Seed2` = obere Grenze eines
+    geteilten Platzes. Beides `Int`. Beispiele: `Seed1=1` → „1“,
+    `Seed1=3 Seed2=4` → „3/4“, `Seed1=5 Seed2=8` → „5/8“.
+  - Ungesetzte Meldungen haben **gar kein** Seed-Feld (nicht `0`).
+  - Die Setzung hängt **je Stage**, nicht je Meldung: Eine gesetzte
+    Meldung, die aus der Gruppe ins Playoff kommt, trägt sie an beiden
+    `StageEntry`-Einträgen (Hauptfeld **und** Playoff). Im Messturnier
+    waren die Werte an beiden stets gleich; dass BTP sie je Stage
+    unterschiedlich setzen *kann*, ist nicht ausgeschlossen.
+  - Ausreißer: Ein Eintrag hatte nur `Seed2=6` ohne `Seed1`. Ein Parser
+    muss den Fall verkraften, ohne ihn zu erfinden.
+  - Am `Event` gibt es zusätzlich `SeparateSeeding` (Bool, im Messturnier
+    überall `false`). Was der Schalter bewirkt, ist nicht gemessen.
+
+  bts-light liest die Setzplätze **noch nicht** aus.
 - `Courts` → `Court`
 - `Locations` → `Location` – Standorte/Hallen, von `Court.LocationID` referenziert
 - `Officials` → `Official` (Schiedsrichter)
