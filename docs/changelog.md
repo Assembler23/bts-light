@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.299
+
+- **Setzplätze an badhub.** Liveticker und Check-In-Meldeliste bekommen den
+  Setzplatz jetzt mit (`p0_seed`/`p1_seed` am Spiel, `seed` an der Meldung).
+  Sichtbar wird er auf badhub.de erst, wenn dort die passende Anzeige
+  ausgerollt ist; bis dahin ändert sich am Liveticker nichts. Nach dem Update
+  sendet bts-light die Meldeliste einmal neu.
+
 ## v0.9.298
 
 - **Setzplätze aus BTP.** Gesetzte Spieler und Paare tragen jetzt ihren

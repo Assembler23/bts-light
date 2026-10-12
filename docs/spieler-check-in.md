@@ -123,7 +123,10 @@ Begründung und verworfene Alternativen stehen in
 Nachrichtentyp **`centry_list`** an denselben Endpunkt wie der Liveticker
 ([`badhub/payload.rs`](../src-tauri/src/badhub/payload.rs)):
 Turnier-GUID, Turniername, Klassen (EventID, Name, Disziplin) und Meldungen
-(EntryID, EventID, Spieler).
+(EntryID, EventID, Spieler, seit v0.9.299 optional `seed` — der Setzplatz im
+Hauptfeld als Text, „1" bzw. „3/4", fehlt bei ungesetzten Meldungen; Spec
+`setzplaetze-anzeigen`). Eine Neusetzung
+in BTP ändert die Nachricht und wird deshalb von selbst neu gesendet.
 
 **Gesendet wird nur bei echter Änderung** — Nachmeldung, Abmeldung,
 korrigierter Name, umbenannte Klasse, nachgepflegte Lizenznummer,
