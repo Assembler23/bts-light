@@ -1,6 +1,6 @@
 # Setzplätze anzeigen — Spezifikation
 
-> Status: **Entwurf 12.10.2026** (via /idee: Brief → Grill → How-To → Review).
+> Status: **Freigegeben 12.10.2026** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Nutzerfrage vom 12.10.2026 („Bekommen wir die Setzplätze von BTP?“).
 > Betroffene Crates: `src-tauri` (Kern + Assets), `relay-proto`, `relay`,
 > Frontend (`CheckinPanel`). Folge-PRs: badhub-Payload (bts-light) und

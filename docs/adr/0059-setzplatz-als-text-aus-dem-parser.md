@@ -1,6 +1,6 @@
 # 0059 — Setzplatz als fertiger Text, aufgelöst im Parser
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-10-12
 
 ## Kontext
