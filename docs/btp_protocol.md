@@ -937,3 +937,32 @@ Fix:** Die eigenständige Form schreibt die `CourtID` jetzt immer mit — dann
 ist die Reihenfolge zweier Requests zum selben Match folgenlos, egal wie
 knapp oder weit sie zeitlich auseinanderliegen. Details:
 [schiedsrichter-management.md](schiedsrichter-management.md#courtid-immer-mitschreiben-live-befund-14082026).
+
+### Match-ID und Turnier-GUID gegen die TP-Datei (gemessen 26.10.2026)
+
+Grundlage der Spec `tp-datei-upload` (TP-Datei während des Turniertags an badhub).
+Messwerkzeug: `tests/btp_tp_match_probe.rs` gegen ein lokales BTP mit geöffneter
+`.TP`-Datei; die Datei parallel mit `access-parser` gelesen (Jet 4, 76 Tabellen,
+3,6 MB, Turnier mit 959 Spielen und 13 Konkurrenzen).
+
+- **`Match.ID` im Protokoll = `PlayerMatch.id` in der Datei.** Beide liefern 959
+  Spiele im ID-Bereich 1–1874. Stichprobe ID 5: `DrawID`/`draw` 1,
+  `PlanningID`/`planning` 2001, `From1`/`van1` 2000, `From2`/`van2` 1000,
+  `Round`/`roundnr` 3, `MatchNr`/`matchnr` 6, `Duration`/`duration` 39,
+  `CourtID`/`court` 11, `PlannedTime`/`plandate` identisch. Ein Join
+  Liveticker ↔ TP-Datei ↔ `tournament_matches.match_id` braucht keine Abbildung.
+- **Die Turnier-GUID reist nicht im Snapshot** (kein GUID-artiger String im
+  ganzen Baum). In der Datei steht sie in `Settings` unter `LinkCode`
+  (`99F55FAB-…`, gleich der GUID aus turnier.de bzw. `tournament_uuid`).
+  Daneben `WebID` = turnier.de-Kurz-ID (`529398`, badhub `external_id`) und
+  `UniCode`/`SiteCode` (Tournament-Software-interne Kennungen).
+- **Offene Datei lesbar:** BTP hält die `.TP` mit einer `.ldb`-Sperrdatei;
+  exklusives Öffnen scheitert, lesendes Öffnen mit Freigabe (`FileShare::ReadWrite`)
+  und `CopyFile` gelingen. Zwei Kopien im Abstand von 2 s hatten denselben
+  SHA-256; Kopf `Standard Jet DB`.
+- **BTP-Prozess:** heißt `btp.exe`, Fenstertitel
+  `Badminton Turnier Planer - <Dateiname ohne .TP>`. Eine Automatik zum Finden
+  der Datei hätte damit einen Anhaltspunkt (nicht umgesetzt).
+- `stage`/`stageentry` waren in diesem Turnier **leer** (0 Zeilen), obwohl
+  Version `202601`. Setzplätze stünden dann in `Entry.seed1/seed2` — relevant für
+  den badhub-Extraktor, nicht für bts-light.
