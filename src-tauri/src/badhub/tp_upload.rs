@@ -109,31 +109,44 @@ pub enum LeseFehler {
     NichtLesbar { basisname: String },
 }
 
-/// Basisname eines Pfads für Meldungen (nie der ganze Pfad, nie Inhalt).
+/// Basisname eines Pfads für Meldungen (nie der ganze Pfad, nie Inhalt). Ohne
+/// Namen (`C:\`, `/`) derselbe Ersatztext, den der Server für leer verwendet.
 pub fn basisname(pfad: &Path) -> String {
     pfad.file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| pfad.display().to_string())
+        .unwrap_or_else(|| "(ohne Namen)".to_string())
 }
 
-/// Datei vollständig lesen, mit Deckel und Kopfprüfung auf den Bytes.
+/// Datei vollständig lesen — mit hartem Deckel **beim** Lesen (`take`), nicht
+/// nur aus den Metadaten davor: zwischen Prüfung und Lesen kann die Datei
+/// gewachsen oder gegen etwas anderes getauscht worden sein (TOCTOU). Mehr als
+/// 32 MB + 1 landen so nie im Speicher; `is_file` wird am geöffneten Handle
+/// erneut geprüft (Gerät, FIFO, Verzeichnis hinter einem Symlink).
 async fn lesen(pfad: &Path) -> Result<Vec<u8>, LeseFehler> {
     let eigner = pfad.to_path_buf();
-    let bytes = tokio::task::spawn_blocking(move || std::fs::read(&eigner))
-        .await
-        .map_err(|_| LeseFehler::NichtLesbar {
-            basisname: basisname(pfad),
-        })?
-        .map_err(|_| LeseFehler::NichtLesbar {
-            basisname: basisname(pfad),
-        })?;
-    if bytes.len() as u64 > TP_MAX_BYTES {
+    let nicht_lesbar = || LeseFehler::NichtLesbar {
+        basisname: basisname(pfad),
+    };
+    let gelesen = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
+        use std::io::Read;
+        let f = std::fs::File::open(&eigner)?;
+        if !f.metadata()?.is_file() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "keine Datei"));
+        }
+        let mut v = Vec::new();
+        f.take(TP_MAX_BYTES + 1).read_to_end(&mut v)?;
+        Ok(v)
+    })
+    .await
+    .map_err(|_| nicht_lesbar())?
+    .map_err(|_| nicht_lesbar())?;
+    if gelesen.len() as u64 > TP_MAX_BYTES {
         return Err(LeseFehler::ZuGross);
     }
-    if !bytes.starts_with(JET_KOPF) {
+    if !gelesen.starts_with(JET_KOPF) {
         return Err(LeseFehler::KeineTpDatei);
     }
-    Ok(bytes)
+    Ok(gelesen)
 }
 
 /// Zweimal lesen mit `abstand`, Bytes vergleichen; weichen sie ab, einmal
@@ -178,14 +191,21 @@ where
 /// dem Testsystem-Umschalter; eine entartete URL fällt auf das System zurück,
 /// gegen das die Installation gerade läuft (wie `push::checkin_branding_url`).
 pub fn tp_upload_url(badhub_url: &str) -> String {
-    match badhub_url.trim().rfind('/') {
-        Some(i) => format!("{}/tp-upload", &badhub_url.trim()[..i]),
+    // Nur hinter `://` suchen: `https://badhub.de` ohne Pfad hätte sonst den
+    // Schrägstrich des Schemas getroffen und `https:/tp-upload` gebaut.
+    let s = badhub_url.trim().trim_end_matches('/');
+    let start = s.find("://").map(|i| i + 3).unwrap_or(0);
+    match s[start..].rfind('/') {
+        Some(i) => format!("{}/tp-upload", &s[..start + i]),
         None => crate::badhub_host::api_url("tp-upload"),
     }
 }
 
-/// `GET <tp_upload_url>/status?uuid=<GUID>` — die GUID ist kanonisch (nur Hex und `-`).
+/// `GET <tp_upload_url>/status?uuid=<GUID>` — die GUID ist kanonisch (nur Hex
+/// und `-`, einziger Lieferant ist `tournament_uuid_kanonisch`), deshalb ohne
+/// Query-Kodierung; die Sonde hält das fest.
 pub fn status_url(tp_upload_url: &str, guid: &str) -> String {
+    debug_assert_eq!(crate::config::kanonische_guid(guid).as_deref(), Some(guid));
     format!("{tp_upload_url}/status?uuid={guid}")
 }
 
@@ -241,26 +261,43 @@ pub struct StatusAntwort {
 }
 
 /// JSON-Körper der Antworten (`status`, dazu je Fall `job`/`received_at`/`result`/`message`).
+/// badhub liefert bei jedem Fehler `status = "error"` — daran erkennen wir, ob
+/// ein 403/409 fachlich vom Controller kommt oder von einem Proxy/WAF davor.
 #[derive(Debug, Deserialize, Default)]
+#[serde(default)]
 struct AntwortKoerper {
-    #[serde(default)]
     status: String,
-    #[serde(default)]
     job: Option<String>,
-    #[serde(default)]
     received_at: Option<String>,
-    #[serde(default)]
     result: Option<String>,
-    #[serde(default)]
     message: Option<String>,
 }
 
-/// Eigener Client mit 60 s — der Liveticker-Push nimmt 15 s, zu knapp für 32 MB.
+/// Mehr Antwortkörper als das lesen wir nie (JSON von badhub ist wenige hundert Bytes).
+const MAX_ANTWORT_BYTES: usize = 64 * 1024;
+
+/// Eigener Client mit 60 s — der Liveticker-Push nimmt 15 s, zu knapp für
+/// 32 MB. Keine Redirects: der Endpunkt leitet nie um, und ein 30x soll nicht
+/// die PII-Datei an einen anderen Host weitertragen.
 pub fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(UPLOAD_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("HTTP-Client-Erzeugung kann nicht fehlschlagen")
+}
+
+/// Antwortkörper gedeckelt lesen; mehr als `MAX_ANTWORT_BYTES` wird verworfen.
+async fn koerper_begrenzt(mut antwort: reqwest::Response) -> Vec<u8> {
+    let mut out = Vec::new();
+    while let Ok(Some(chunk)) = antwort.chunk().await {
+        if out.len() + chunk.len() > MAX_ANTWORT_BYTES {
+            out.clear();
+            break;
+        }
+        out.extend_from_slice(&chunk);
+    }
+    out
 }
 
 /// Alles, was [`sende`] außer den Bytes braucht.
@@ -278,7 +315,14 @@ pub struct UploadZiel<'a> {
 /// gzip + POST; gibt die abgebildete Antwort zurück. Loggt nichts — das macht
 /// der Aufrufer mit Dateiname, Größen, Dauer und Statuscode.
 pub async fn sende(client: &reqwest::Client, ziel: &UploadZiel<'_>, bytes: &[u8]) -> UploadAntwort {
-    let body = crate::btp::wire::gzip_compress(bytes);
+    debug_assert_eq!(crate::config::kanonische_guid(ziel.guid).as_deref(), Some(ziel.guid));
+    // Kompression von bis zu 32 MB dauert eine halbe Sekunde — nicht auf dem
+    // Tokio-Worker, sonst stocken Liveticker-Push und Relay solange.
+    let roh = bytes.to_vec();
+    let body = match tokio::task::spawn_blocking(move || crate::btp::wire::gzip_compress(&roh)).await {
+        Ok(b) => b,
+        Err(_) => return UploadAntwort::NichtErreichbar,
+    };
     let antwort = client
         .post(ziel.tp_upload_url)
         .bearer_auth(ziel.password)
@@ -319,12 +363,9 @@ async fn abbilden(antwort: reqwest::Response, kuerzel: &str) -> UploadAntwort {
         .get(reqwest::header::RETRY_AFTER)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.trim().parse::<u32>().ok());
-    let koerper: AntwortKoerper = antwort
-        .bytes()
-        .await
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
+    let koerper: AntwortKoerper =
+        serde_json::from_slice(&koerper_begrenzt(antwort).await).unwrap_or_default();
+    let von_badhub = koerper.status == "error";
 
     match code {
         202 => UploadAntwort::Angenommen {
@@ -337,12 +378,14 @@ async fn abbilden(antwort: reqwest::Response, kuerzel: &str) -> UploadAntwort {
             result: koerper.result.unwrap_or_default(),
             message: koerper.message.unwrap_or_default(),
         },
-        409 => UploadAntwort::BereitsEndgueltig,
+        // 403/409 nur als Fachantwort, wenn der Körper von badhub stammt — ein
+        // 403 der WAF davor schickte den Nutzer sonst zur Liveticker-Adresse.
+        409 if von_badhub => UploadAntwort::BereitsEndgueltig,
+        403 if von_badhub => UploadAntwort::VerbandFalsch {
+            kuerzel: kuerzel.to_string(),
+        },
         429 => UploadAntwort::ZuSchnell {
             retry_after_s: retry_after.unwrap_or(60),
-        },
-        403 => UploadAntwort::VerbandFalsch {
-            kuerzel: kuerzel.to_string(),
         },
         401 if basic_wand => UploadAntwort::NochNichtVerfuegbar,
         401 => UploadAntwort::Unauthorized,
@@ -373,8 +416,7 @@ pub async fn status_abfragen(
     if antwort.status().as_u16() != 200 {
         return None;
     }
-    let bytes = antwort.bytes().await.ok()?;
-    serde_json::from_slice(&bytes).ok()
+    serde_json::from_slice(&koerper_begrenzt(antwort).await).ok()
 }
 
 /// Dashboard-Text je Antwort (Spec-Tabelle „Antwort → Status“, AK 8).
@@ -495,7 +537,7 @@ mod tests {
 
     #[test]
     fn tp_file_check_zu_gross() {
-        // Sparse-Datei: Länge setzen, ohne 32 MB zu schreiben.
+        // Länge setzen statt 32 MB schreiben (auf NTFS trotzdem belegt → am Ende löschen).
         let p = tmp("riesig.tp");
         let f = std::fs::File::create(&p).unwrap();
         f.set_len(TP_MAX_BYTES + 1).unwrap();
@@ -506,6 +548,26 @@ mod tests {
                 groesse: TP_MAX_BYTES + 1
             }
         );
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn lesen_deckelt_hart_beim_lesen_nicht_nur_vorab() {
+        // Datei mit Jet-Kopf, die beim Lesen groesser ist als der Deckel: `lesen`
+        // laedt hoechstens 32 MB + 1 und meldet ZuGross (TOCTOU-Schutz).
+        let p = tmp("waechst.tp");
+        let mut inhalt = jet(&[]);
+        inhalt.resize((TP_MAX_BYTES + 2) as usize, 0);
+        std::fs::write(&p, &inhalt).unwrap();
+        assert_eq!(lesen(&p).await, Err(LeseFehler::ZuGross));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn basisname_ohne_namen_ersatztext() {
+        assert_eq!(basisname(Path::new("/")), "(ohne Namen)");
+        assert_eq!(basisname(Path::new("..")), "(ohne Namen)");
+        assert_eq!(basisname(Path::new("x/y.tp")), "y.tp");
     }
 
     #[test]
@@ -591,12 +653,17 @@ mod tests {
             "https://badhub.de/api/tp-upload/status?uuid=0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
         );
         assert!(tp_upload_url("kaputt").ends_with("/api/tp-upload"));
+        // Ohne Pfad: nicht den Schrägstrich des Schemas treffen, sondern den Rückfall nehmen.
+        assert!(tp_upload_url("https://badhub.de").ends_with("/api/tp-upload"));
+        assert!(!tp_upload_url("https://badhub.de").starts_with("https:/tp"));
+        assert!(tp_upload_url("https://badhub.de/").ends_with("/api/tp-upload"));
     }
 
     #[test]
     fn x_file_name_basisname_percent_kodiert() {
+        // Plattformneutral gebaut: ein Backslash ist unter Linux kein Trenner (CI).
         assert_eq!(
-            x_file_name(Path::new(r"C:\Turniere\Köpi-Cup 2026.TP")),
+            x_file_name(&Path::new("Turniere").join("Köpi-Cup 2026.TP")),
             "K%C3%B6pi-Cup%202026.TP"
         );
         assert_eq!(x_file_name(Path::new("/srv/tp/einfach_1.tp")), "einfach_1.tp");
@@ -712,8 +779,15 @@ mod tests {
              UploadAntwort::ZuSchnell { retry_after_s: 60 }),
             ("403 Forbidden", "", r#"{"status":"error","message":"Verband"}"#,
              UploadAntwort::VerbandFalsch { kuerzel: "bvbb".into() }),
+            // 403/409 ohne badhub-JSON (WAF, Proxy) sind KEINE Fachantworten.
+            ("403 Forbidden", "", "<html>cloudflare</html>", UploadAntwort::Status { code: 403 }),
+            ("409 Conflict", "", "", UploadAntwort::Status { code: 409 }),
             ("401 Unauthorized", "", r#"{"status":"error","message":"Incorrect password"}"#,
              UploadAntwort::Unauthorized),
+            ("401 Unauthorized", "WWW-Authenticate: Bearer realm=\"badhub\"", "",
+             UploadAntwort::Unauthorized),
+            ("200 OK", "", r#"{"status":"ok"}"#, UploadAntwort::Status { code: 200 }),
+            ("302 Found", "Location: https://anderswo.example/", "", UploadAntwort::Status { code: 302 }),
             ("401 Unauthorized", "WWW-Authenticate: Basic realm=\"Staging\"", "",
              UploadAntwort::NochNichtVerfuegbar),
             ("404 Not Found", "", "<html>nope</html>", UploadAntwort::NochNichtVerfuegbar),
@@ -735,11 +809,8 @@ mod tests {
 
     #[tokio::test]
     async fn sende_ohne_server_nicht_erreichbar() {
-        // Port reservieren und sofort schließen → Verbindung wird abgelehnt.
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/api/tp-upload", l.local_addr().unwrap());
-        drop(l);
-        let a = sende(&build_client(), &ziel(&url), &jet(b"x")).await;
+        // Port 1 hört auf Loopback nie → Verbindung wird sofort abgewiesen.
+        let a = sende(&build_client(), &ziel("http://127.0.0.1:1/api/tp-upload"), &jet(b"x")).await;
         assert_eq!(a, UploadAntwort::NichtErreichbar);
     }
 
