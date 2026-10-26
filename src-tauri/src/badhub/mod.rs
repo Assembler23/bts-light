@@ -5,3 +5,4 @@ pub mod checkin_state;
 pub mod diff;
 pub mod payload;
 pub mod push;
+pub mod tp_upload;

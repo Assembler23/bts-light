@@ -505,10 +505,12 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   gzip-komprimiert an `POST /api/tp-upload`; badhub baut daraus ein
   vorläufiges Turnier (`tournaments.source='tp_live'`) und mischt beim
   Rendern die Liveticker-Stände in Spielliste, Baum und Tabellen.
-  - **Stufe 1:** nur Knopfdruck im Dashboard, Schreib-Gate um die vier
-    BTP-Write-Funktionen, Spool + Worker in badhub, 60-s-Cache.
-  - **Stufe 2 (später):** seltener Takt bei geänderter Datei.
-  - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1.
+  - **Stufe 1 — ✅ umgesetzt:** badhub B1–B4 auf Prod (26.10.2026,
+    badhub-PRs #1045/#1046/#1055/#1057), bts-light L1 in **v0.9.300**
+    (Dateiwahl im Setup, Schreib-Gate, Knopf im Dashboard, Handbuch
+    [tp-datei-upload.md](tp-datei-upload.md)).
+  - **Stufe 2 (offen):** seltener Takt bei geänderter Datei (L2).
+  - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1 — eingehalten.
   - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf,
     Lizenzfrage aus badhub-ADR 0047.
 

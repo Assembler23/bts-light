@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.299"
+version = "0.9.300"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -71,4 +71,6 @@ windows = { version = "0.62", features = [
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# Pausierte Zeit fuer die Gate-Tests (btp/write_gate.rs): start_paused/advance
+tokio = { version = "1.52.3", features = ["test-util"] }
 

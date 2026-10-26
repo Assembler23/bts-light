@@ -969,3 +969,25 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
   **leer** — ein Artefakt der bekannten Null-Bitmap-Schwäche des Parsers; der
   badhub-Extraktor mit seiner Reparatur (`tabelle_lesen`) liest aus derselben
   Datei 79 gesetzte Meldungen. Lehre: rohe Tabellen nur über den Extraktor lesen.
+
+## Schreib-Gate für den TP-Upload (ADR 0060)
+
+Seit v0.9.300 gibt es eine weitere Stelle, an der ein BTP-Write **warten**
+kann: Der TP-Datei-Upload (Spec [features/tp-datei-upload.md](features/tp-datei-upload.md))
+kopiert die offene Datei und hält dafür die vier Write-Funktionen in
+`tablet/server.rs` (`write_result_to_btp`, `write_courts_to_btp`,
+`write_officials_to_btp`, `write_highlight_to_btp`) kurz zurück. Mechanik in
+`btp/write_gate.rs`: ein prozessweites `tokio::sync::RwLock` — jeder Write
+hält die Lesesperre (Writes blockieren sich nicht), die Kopie nimmt die
+Schreibsperre, wartet höchstens 20 s auf laufende Writes (sonst „BTP ist
+gerade beschäftigt“), lässt 3 s Ruhe für den Jet-Nachlauf und liest dann
+zweimal mit 2 s Abstand (Byte-Vergleich, eine Wiederholung). Erst nach dem
+Lesen wird die Sperre freigegeben, dann gesendet.
+
+Folge für die Writes: Ein Write, der während der Kopie eintrifft, wartet die
+Kopie ab (typisch 5 s, mit Wiederholung bis etwa 9 s); einer, der eintrifft,
+während die Kopie noch auf einen langen Write wartet, wartet Rest-Wartephase
+plus Kopie. Nichts wird verworfen; der Nachschub (`flush_btp_retries`) läuft
+ohnehin verzögert. Die Konstanten `RUHE`, `MAX_WARTEZEIT`, `LESEABSTAND` sind
+Startwerte bis zur Nachlauf-Messung (Datei nach bestätigtem `SENDUPDATE`
+sekündlich hashen, bis Ruhe — siehe Spec, „Offene Fragen“).
