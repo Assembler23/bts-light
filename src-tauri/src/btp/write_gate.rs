@@ -26,13 +26,16 @@
 //! Die Konstanten sind Startwerte bis zur Nachlauf-Messung (Spec, „Offene
 //! Fragen“: Datei nach bestätigtem `SENDUPDATE` sekündlich hashen, bis Ruhe).
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Ruhe nach dem letzten Write, bevor gelesen wird (Jet-Nachlauf, ungemessen).
+/// Immer voll gewartet, nicht „Rest seit dem letzten Write“: Die Schreibsperre
+/// kommt erst, wenn der letzte Reader gefallen ist — der Nachlauf beginnt also
+/// spätestens jetzt, und ein Zeitstempel brächte nur Uhrsprünge ins Spiel.
 pub const RUHE: Duration = Duration::from_secs(3);
 /// Längstens so lange wartet die Kopie auf laufende Writes, dann „beschäftigt“.
 pub const MAX_WARTEZEIT: Duration = Duration::from_secs(20);
@@ -46,15 +49,14 @@ pub enum GateFehler {
     Beschaeftigt,
 }
 
-/// Gate aus Sperre, Zeitstempel des letzten Write-Endes und Zähler der
-/// gehaltenen Lesesperren (Testsonde).
+/// Gate aus Sperre und Zähler der gehaltenen Lesesperren (Testsonde; `Relaxed`
+/// reicht, der Zähler ordnet nichts gegen die Sperre).
 pub struct WriteGate {
     lock: RwLock<()>,
-    last_end_ms: AtomicU64,
     laufende_writes: AtomicUsize,
 }
 
-/// Lesesperre eines laufenden BTP-Writes. Beim Drop wird das Ende gestempelt.
+/// Lesesperre eines laufenden BTP-Writes; beim Drop ist der Write vorbei.
 pub struct SchreibGuard<'a> {
     gate: &'a WriteGate,
     _guard: RwLockReadGuard<'a, ()>,
@@ -62,8 +64,7 @@ pub struct SchreibGuard<'a> {
 
 impl Drop for SchreibGuard<'_> {
     fn drop(&mut self) {
-        self.gate.laufende_writes.fetch_sub(1, Ordering::SeqCst);
-        self.gate.last_end_ms.store(jetzt_ms(), Ordering::SeqCst);
+        self.gate.laufende_writes.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -82,7 +83,6 @@ impl WriteGate {
     pub fn new() -> Self {
         Self {
             lock: RwLock::new(()),
-            last_end_ms: AtomicU64::new(0),
             laufende_writes: AtomicUsize::new(0),
         }
     }
@@ -92,7 +92,7 @@ impl WriteGate {
     /// oder wartet.
     pub async fn schreiben(&self) -> SchreibGuard<'_> {
         let guard = self.lock.read().await;
-        self.laufende_writes.fetch_add(1, Ordering::SeqCst);
+        self.laufende_writes.fetch_add(1, Ordering::Relaxed);
         SchreibGuard {
             gate: self,
             _guard: guard,
@@ -118,21 +118,9 @@ impl WriteGate {
     }
 
     /// Testsonde: Zahl der gerade gehaltenen Lesesperren.
-    pub fn in_flight(&self) -> usize {
-        self.laufende_writes.load(Ordering::SeqCst)
+    pub(crate) fn in_flight(&self) -> usize {
+        self.laufende_writes.load(Ordering::Relaxed)
     }
-
-    /// Unix-ms des letzten Write-Endes, 0 = noch keiner.
-    pub fn last_end_ms(&self) -> u64 {
-        self.last_end_ms.load(Ordering::SeqCst)
-    }
-}
-
-fn jetzt_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -177,17 +165,37 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn write_in_ruhezeit_startet_erst_nach_kopie_und_geht_nicht_verloren() {
         let gate = Arc::new(WriteGate::new());
-        let kopie = gate
-            .fuer_kopie(Duration::from_secs(3), Duration::from_secs(20))
-            .await
-            .unwrap();
-        // Ein Write kommt, während die Kopie liest: er muss warten …
-        let genommen = write_der_haelt(gate.clone(), Duration::from_millis(100));
-        advance(Duration::from_secs(5)).await;
+        // Die Kopie läuft in einem eigenen Task: Schreibsperre sofort, dann 3 s
+        // Ruhe, dann „lesen“, bis der Test sie per Kanal freigibt.
+        let g = gate.clone();
+        let bereit = Arc::new(AtomicBool::new(false));
+        let b = bereit.clone();
+        let (freigeben, warten) = tokio::sync::oneshot::channel::<()>();
+        let kopie = tokio::spawn(async move {
+            let guard = g
+                .fuer_kopie(Duration::from_secs(3), Duration::from_secs(20))
+                .await
+                .unwrap();
+            b.store(true, Ordering::SeqCst);
+            let _ = warten.await;
+            drop(guard);
+        });
+        advance(Duration::from_secs(1)).await;
         tokio::task::yield_now().await;
-        assert!(!genommen.load(Ordering::SeqCst), "Write darf nicht vor der Kopie laufen");
+        // Ein Write kommt MITTEN in der Ruhezeit: er muss warten …
+        let genommen = write_der_haelt(gate.clone(), Duration::from_millis(100));
+        advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert!(!bereit.load(Ordering::SeqCst), "Ruhezeit läuft noch");
+        assert!(!genommen.load(Ordering::SeqCst), "Write darf nicht in der Ruhezeit laufen");
+        // … auch nicht, während die Kopie danach liest …
+        advance(Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+        assert!(bereit.load(Ordering::SeqCst), "Kopie hat den Guard");
+        assert!(!genommen.load(Ordering::SeqCst), "Write darf nicht während der Kopie laufen");
         // … und läuft, sobald die Kopie fertig ist — nichts verworfen.
-        drop(kopie);
+        freigeben.send(()).unwrap();
+        kopie.await.unwrap();
         tokio::task::yield_now().await;
         assert!(genommen.load(Ordering::SeqCst));
     }
@@ -212,15 +220,13 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn zeitstempel_nach_drop_und_in_flight_zaehlt() {
+    async fn in_flight_zaehlt_und_writes_blockieren_sich_nicht() {
         let gate = WriteGate::new();
-        assert_eq!(gate.last_end_ms(), 0);
         let a = gate.schreiben().await;
         let b = gate.schreiben().await; // Writes blockieren sich nicht
         assert_eq!(gate.in_flight(), 2);
         drop(a);
         assert_eq!(gate.in_flight(), 1);
-        assert!(gate.last_end_ms() > 0, "Drop stempelt das Write-Ende");
         drop(b);
         assert_eq!(gate.in_flight(), 0);
     }

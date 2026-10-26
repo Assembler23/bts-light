@@ -4983,13 +4983,39 @@ mod tests {
         assert!(e.regular, "regulär ausgespielt → Messwert");
     }
 
-    /// ADR 0060 (TP-Upload): Die Write-Funktionen halten die Lesesperre des
+    /// ADR 0060 (TP-Upload): Jede der vier Write-Funktionen nimmt die
+    /// Lesesperre des Schreib-Gates — nach dem Frühausgang für leere Listen,
+    /// vor dem ersten BTP-Kontakt. Textprüfung, weil nur `write_result_to_btp`
+    /// unten auch dynamisch geprüft wird.
+    #[test]
+    fn alle_vier_write_funktionen_nehmen_das_schreib_gate() {
+        let quelle = include_str!("server.rs");
+        for name in [
+            "write_result_to_btp",
+            "write_courts_to_btp",
+            "write_officials_to_btp",
+            "write_highlight_to_btp",
+        ] {
+            let start = quelle
+                .find(&format!("pub(crate) async fn {name}("))
+                .unwrap_or_else(|| panic!("{name} nicht gefunden"));
+            let koerper = &quelle[start..];
+            let gate = koerper.find("write_gate::GATE.schreiben().await").unwrap_or(usize::MAX);
+            let btp = koerper.find("client::send_request").unwrap_or(usize::MAX);
+            assert!(gate < btp, "{name}: Gate-Zeile fehlt oder steht nach dem ersten BTP-Kontakt");
+        }
+    }
+
+    /// ADR 0060 (TP-Upload): `write_result_to_btp` hält die Lesesperre des
     /// Schreib-Gates — solange die Kopie den Guard hält, erreicht kein
     /// SENDUPDATE den Mock; danach läuft der Write regulär durch, nichts geht
     /// verloren. Nutzt das prozessweite `GATE` (die Write-Funktionen kennen nur
-    /// `&AppConfig`); die 300 ms Haltezeit bremsen parallele Tests höchstens kurz.
+    /// `&AppConfig`): Parallel laufende Tests werden in den 300 ms höchstens
+    /// kurz gebremst; `Beschaeftigt` käme nur, wenn ein fremder Test-Write
+    /// länger als 10 s die Lesesperre hielte — dann die Frist heben, nicht den
+    /// Test streichen.
     #[tokio::test]
-    async fn write_funktionen_halten_das_schreib_gate() {
+    async fn write_result_haelt_das_schreib_gate() {
         let (port, recorded) = spawn_mock_btp().await;
         let ctx = make_ctx(port);
         let gate = &crate::btp::write_gate::GATE;
