@@ -38,7 +38,8 @@ export type SettingsFocus =
   | "ansagen"
   | "court-monitor"
   | "check-in"
-  | "schiedsrichter";
+  | "schiedsrichter"
+  | "tp-datei";
 
 interface NavItem {
   view: NavView;

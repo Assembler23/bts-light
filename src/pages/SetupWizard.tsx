@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Check,
   Cloud,
+  Database,
   Gavel,
   Image,
   Info,
@@ -38,6 +39,7 @@ import {
   tabletOverview,
   testBtp,
   tournamentDraws,
+  tpFileCheck,
 } from "../api";
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
@@ -55,6 +57,7 @@ import type {
   CourtAd,
   DisciplineHallRule,
   DrawInfo,
+  TpFileInfo,
 } from "../types";
 
 interface Props {
@@ -65,7 +68,7 @@ interface Props {
   mode?: "wizard" | "settings";
   /** Abschnitt, zu dem beim Öffnen gescrollt wird (Sprung aus einem
    *  ausgegrauten Menüpunkt der Seitenleiste). */
-  focus?: "ansagen" | "court-monitor" | "check-in" | "schiedsrichter";
+  focus?: "ansagen" | "court-monitor" | "check-in" | "schiedsrichter" | "tp-datei";
 }
 
 type TestState =
@@ -296,6 +299,49 @@ export function SetupWizard({
   );
   // Ansage-Slave-Modus: nur BTP lesen + eigene Halle ansagen.
   const [slaveMode, setSlaveMode] = useState(initialConfig.slave_mode ?? false);
+  // TP-Datei an badhub (Spec tp-datei-upload): Pfad + GUID zum Zeitpunkt der
+  // Wahl. Die Bindung entsteht beim Wählen; eine spätere GUID-Änderung lässt
+  // den Pfad stehen und zeigt „Datei neu wählen" (nichts wird still gelöscht).
+  const [tpPath, setTpPath] = useState(initialConfig.tp_upload?.path ?? "");
+  const [tpGuid, setTpGuid] = useState(initialConfig.tp_upload?.tournament_uuid ?? "");
+  const [tpInfo, setTpInfo] = useState<TpFileInfo | null>(null);
+  const [tpError, setTpError] = useState("");
+  useEffect(() => {
+    if (!tpPath) return;
+    tpFileCheck(tpPath).then(setTpInfo).catch(() => {});
+    // Nur beim Laden: Nach einer Wahl kommt das Urteil direkt aus pickTpDatei.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  async function pickTpDatei() {
+    setTpError("");
+    try {
+      const sel = await open({
+        multiple: false,
+        // Linux-Dialoge filtern groß/klein getrennt; BTP schreibt `.TP`.
+        filters: [{ name: "Turnierdatei (BTP)", extensions: ["tp", "TP"] }],
+      });
+      if (!sel) return;
+      const path = Array.isArray(sel) ? sel[0] : sel;
+      const info = await tpFileCheck(path);
+      setTpInfo(info);
+      if (info.art !== "erkannt") {
+        // Nicht speichern (AK 1): der bisherige Pfad bleibt, der Fehler steht daneben.
+        setTpError(
+          info.art === "zu_gross"
+            ? "Die Datei ist größer als 32 MB — zu groß für den Upload."
+            : info.art === "nicht_gefunden"
+              ? "Datei nicht gefunden oder nicht lesbar."
+              : "Das ist keine TP-Datei (Turnierdatenbank von BTP).",
+        );
+        return;
+      }
+      setTpPath(path);
+      setTpGuid(extractTournamentGuid(tournamentGuid));
+    } catch (e) {
+      setTpError(String(e));
+    }
+  }
+  const tpGuidPasst = tpGuid !== "" && extractTournamentGuid(tournamentGuid) === tpGuid;
   // Cloud-Ansage-Slave: Kopplungs-Code des Masters (leer = LAN-Slave, liest BTP).
   const [masterNamespace, setMasterNamespace] = useState(
     initialConfig.master_namespace ?? "",
@@ -562,6 +608,8 @@ export function SetupWizard({
       tournament_uuid: extractTournamentGuid(tournamentGuid),
       connection_mode: connectionMode,
       slave_mode: slaveMode,
+      // Unverändert durchreichen: die Bindung an die GUID entsteht nur in pickTpDatei.
+      tp_upload: { path: tpPath, tournament_uuid: tpGuid },
       master_namespace: masterNamespace.trim(),
       // Hier wird nur der Modul-Schalter gepflegt; alle Detail-Einstellungen
       // (Stimmen, Azure, Halle …) leben auf der Ansagen-Seite und bleiben hier
@@ -1219,6 +1267,70 @@ export function SetupWizard({
           </p>
         )}
       </section>
+
+      {/* TP-Datei an badhub (Spec tp-datei-upload, L1): die offene Turnierdatenbank,
+          gebunden an die Turnier-GUID zum Zeitpunkt der Wahl. Gesendet wird im
+          Dashboard; im Slave-Modus gibt es den Abschnitt nicht (nur der Master lädt hoch). */}
+      {!slaveMode && (
+        <section id="section-tp-datei" className="flex flex-col gap-2 scroll-mt-4">
+          <SectionHeader icon={Database}>TP-Datei (Turnierdatenbank)</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Die offene Turnierdatei von BTP (<code>.tp</code>) lässt sich im Dashboard an
+            badhub senden — dort entsteht noch am Turniertag ein vorläufiger Stand mit
+            Auslosungen, Gruppen, KO-Bäumen und Spielliste.{" "}
+            <strong>Alles aus der Datei wird sichtbar</strong>, Auslosungen also erst
+            senden, wenn sie veröffentlicht werden dürfen.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void pickTpDatei()}
+              className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                         text-slate-700 transition-colors hover:bg-slate-200"
+            >
+              {tpPath ? "Datei neu wählen" : "TP-Datei wählen"}
+            </button>
+            {tpPath && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTpPath("");
+                  setTpGuid("");
+                  setTpInfo(null);
+                  setTpError("");
+                }}
+                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm
+                           text-slate-500 transition-colors hover:bg-slate-100"
+              >
+                <Trash2 size={14} /> Entfernen
+              </button>
+            )}
+          </div>
+          {tpPath && (
+            <p className="break-all font-mono text-xs text-slate-600">{tpPath}</p>
+          )}
+          {tpPath && tpInfo?.art === "erkannt" && (
+            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+              <Check size={16} /> {tpInfo.anzeige}
+            </p>
+          )}
+          {tpError && (
+            <p className="flex items-start gap-1.5 text-sm text-rose-700">
+              <X size={16} className="mt-0.5 shrink-0" /> {tpError}
+            </p>
+          )}
+          {tpPath && !tpGuidPasst && (
+            <p className="text-sm text-amber-700">
+              Datei neu wählen — die Turnier-GUID hat sich seit der Dateiwahl geändert.
+            </p>
+          )}
+          {!["127.0.0.1", "localhost"].includes(host.trim().toLowerCase()) && (
+            <p className="text-xs text-slate-500">
+              Die Datei liegt auf dem BTP-Rechner — Upload nur von dort empfohlen.
+            </p>
+          )}
+        </section>
+      )}
 
       {/* Schritt 3: Badhub (nur manuell) */}
       {isManual && (

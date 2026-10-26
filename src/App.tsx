@@ -112,6 +112,7 @@ function defaultConfig(): AppConfig {
       enabled: false,
       break_seconds: 300,
     },
+    tp_upload: { path: "", tournament_uuid: "" },
     print: {
       auto_enabled: false,
       printer_name: "",

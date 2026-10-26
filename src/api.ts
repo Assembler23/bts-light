@@ -33,6 +33,8 @@ import type {
   TlPairing,
   TlWebInfo,
   TournamentStats,
+  TpFileInfo,
+  TpUploadStatus,
   WalkoverProposal,
   WalkoverResult,
   WifiStatus,
@@ -577,3 +579,17 @@ export const officialsSetCourtSwitches = (
   operator: boolean,
 ): Promise<void> =>
   invoke("officials_set_court_switches", { courtId, sr, ar, operator });
+
+// ── TP-Datei an badhub (Spec tp-datei-upload, L1) ───────────────────────────
+
+/** Urteil über einen im Dialog gewählten Pfad (Rust: badhub::tp_upload::tp_file_check). */
+export const tpFileCheck = (path: string): Promise<TpFileInfo> =>
+  invoke("tp_file_check", { path });
+
+/** Knopf „TP-Datei an badhub senden": prüft die Vorbedingungen synchron (Fehler
+ *  = Text), startet sonst den Upload im Rust-Kern und liefert sofort „läuft". */
+export const tpUploadNow = (): Promise<TpUploadStatus> => invoke("tp_upload_now");
+
+/** Aktueller Stand des Uploads; das Dashboard pollt alle 5 s, solange `laeuft`. */
+export const tpUploadStatus = (): Promise<TpUploadStatus> =>
+  invoke("tp_upload_status");

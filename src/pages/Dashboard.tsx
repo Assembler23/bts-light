@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  CloudUpload,
   ListOrdered,
   type LucideIcon,
   Monitor,
@@ -14,7 +15,10 @@ import {
   saveConfig,
   tabletOverview,
   tournamentStats,
+  tpUploadNow,
+  tpUploadStatus,
 } from "../api";
+import { extractTournamentGuid } from "../tournamentGuid";
 import { AushangOverlay } from "../components/AushangOverlay";
 import { SlaveDevicesPanel } from "../components/SlaveDevicesPanel";
 import type { NavView, SettingsFocus } from "../components/SideNav";
@@ -24,6 +28,7 @@ import type {
   MonitorDeviceInfo,
   SyncStatus,
   TournamentStats,
+  TpUploadStatus,
 } from "../types";
 
 interface Props {
@@ -132,6 +137,38 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
   const [hallSaveError, setHallSaveError] = useState(false);
   /** Aushang-Vorschau offen? (docs/aushang.md) */
   const [aushangOffen, setAushangOffen] = useState(false);
+
+  // TP-Datei an badhub (Spec tp-datei-upload, L1). Der Knopf ist nur frei, wenn
+  // ein Pfad gewählt ist UND die beim Wählen gebundene GUID zur aktuellen passt
+  // (Rust: tp_datei_fuer_turnier). Alle Netzzugriffe laufen im Rust-Kern; hier
+  // wird nur der Stand gepollt, solange der Upload läuft.
+  const tpPfad = config.tp_upload?.path ?? "";
+  const tpBereit =
+    tpPfad !== "" &&
+    extractTournamentGuid(config.tp_upload?.tournament_uuid ?? "") !== "" &&
+    extractTournamentGuid(config.tp_upload?.tournament_uuid ?? "") ===
+      extractTournamentGuid(config.tournament_uuid);
+  const [tpStatus, setTpStatus] = useState<TpUploadStatus | null>(null);
+  const [tpFehler, setTpFehler] = useState("");
+  useEffect(() => {
+    tpUploadStatus().then(setTpStatus).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!tpStatus?.laeuft) return;
+    const id = window.setInterval(() => {
+      tpUploadStatus().then(setTpStatus).catch(() => {});
+    }, 5_000);
+    return () => window.clearInterval(id);
+  }, [tpStatus?.laeuft]);
+  async function tpSenden() {
+    setTpFehler("");
+    try {
+      setTpStatus(await tpUploadNow());
+    } catch (e) {
+      // Verletzte Vorbedingung: synchroner Fehlertext, kein Status (Spec).
+      setTpFehler(String(e));
+    }
+  }
 
   useEffect(() => {
     if (!running) {
@@ -482,6 +519,51 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
               </div>
             </div>
           )}
+        </section>
+      )}
+
+      {/* Turnierdaten an badhub (Spec tp-datei-upload, L1): Knopf statt
+          Automatik, unabhängig davon, ob der Liveticker läuft. Im Slave-Modus
+          nicht — nur der Master lädt hoch. */}
+      {!config.slave_mode && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Turnierdaten an badhub
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton
+              icon={CloudUpload}
+              label="TP-Datei an badhub senden"
+              onClick={() => void tpSenden()}
+              disabled={!tpBereit || tpStatus?.laeuft === true}
+              title={
+                tpBereit
+                  ? "Die offene Turnierdatei jetzt an badhub senden"
+                  : "Erst im Setup eine TP-Datei wählen"
+              }
+            />
+            {!tpBereit && (
+              <button
+                type="button"
+                onClick={() => onNavigate?.("settings", "tp-datei")}
+                className="text-xs text-blue-700 underline-offset-2 hover:underline"
+              >
+                {tpPfad ? "Datei neu wählen" : "Im Setup eine TP-Datei wählen"}
+              </button>
+            )}
+            {tpStatus?.laeuft ? (
+              <span className="text-xs text-slate-500">läuft …</span>
+            ) : tpFehler ? (
+              <span className="text-xs text-rose-700">{tpFehler}</span>
+            ) : tpStatus?.ergebnis ? (
+              <span className="text-xs text-slate-600">{tpStatus.ergebnis}</span>
+            ) : null}
+          </div>
+          <p className="text-xs text-slate-400">
+            Alles aus der Datei wird auf badhub sichtbar — auch noch nicht
+            veröffentlichte Auslosungen. Ergebnisse aus dem Liveticker bleiben
+            dabei erhalten.
+          </p>
         </section>
       )}
 

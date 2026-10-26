@@ -120,6 +120,31 @@ export interface PrintConfig {
   printer_name: string;
 }
 
+/** TP-Datei an badhub (Rust: `config::TpUploadConfig`, Spec tp-datei-upload).
+ *  `path` = offene Turnierdatei von BTP, `tournament_uuid` = Turnier-GUID zum
+ *  Zeitpunkt der Dateiwahl (Bindung; weicht sie von `AppConfig.tournament_uuid`
+ *  ab, heißt es „Datei neu wählen"). */
+export interface TpUploadConfig {
+  path: string;
+  tournament_uuid: string;
+}
+
+/** Urteil über einen gewählten Pfad (Rust: `badhub::tp_upload::TpFileInfo`). */
+export type TpFileInfo =
+  | { art: "erkannt"; groesse: number; anzeige: string }
+  | { art: "keine_tp_datei" }
+  | { art: "zu_gross"; groesse: number }
+  | { art: "nicht_gefunden" };
+
+/** Stand des letzten Uploads (Rust: `commands::TpUploadStatus`). `ergebnis` ist
+ *  der fertige Dashboard-Text; `laeuft` sperrt den Knopf. */
+export interface TpUploadStatus {
+  laeuft: boolean;
+  zeitpunkt_ms: number | null;
+  groesse: number | null;
+  ergebnis: string | null;
+}
+
 /** Schiedsrichtermanagement — globale Schalter (Rust: config::OfficialsConfig).
  *  Turnier-Spezifisches (Reihenfolge, Pausen, Sperrlisten) liegt bewusst NICHT
  *  hier, sondern in einer turniergebundenen Datei (ADR 0022). */
@@ -617,6 +642,8 @@ export interface AppConfig {
   scorekeeper: ScorekeeperConfig;
   /** Druck der Schiedsrichterzettel (Spec schiedsrichterzettel-autodruck). */
   print: PrintConfig;
+  /** TP-Datei an badhub (Spec tp-datei-upload). */
+  tp_upload: TpUploadConfig;
   /** Einstellungen der automatischen Feldvergabe. */
   auto_assign: AutoAssignConfig;
   /** Hallen-Check-In (ADR 0009). */
