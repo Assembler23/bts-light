@@ -3264,6 +3264,9 @@ pub(crate) async fn write_result_to_btp(
     config: &AppConfig,
     update: &proto::MatchUpdate,
 ) -> Result<(), String> {
+    // Schreib-Gate (ADR 0060): solange der TP-Upload die Datei liest, wartet
+    // dieser Write — und umgekehrt wartet der Upload auf uns. Guard bis zum Ende.
+    let _schreibt = crate::btp::write_gate::GATE.schreiben().await;
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -3317,6 +3320,7 @@ pub(crate) async fn write_courts_to_btp(
     if courts.is_empty() && match_courts.is_empty() {
         return Ok(());
     }
+    let _schreibt = crate::btp::write_gate::GATE.schreiben().await; // ADR 0060
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -3356,6 +3360,7 @@ pub(crate) async fn write_officials_to_btp(
     if entries.is_empty() {
         return Ok(());
     }
+    let _schreibt = crate::btp::write_gate::GATE.schreiben().await; // ADR 0060
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -3392,6 +3397,7 @@ pub(crate) async fn write_highlight_to_btp(
     if entries.is_empty() {
         return Ok(());
     }
+    let _schreibt = crate::btp::write_gate::GATE.schreiben().await; // ADR 0060
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -4975,6 +4981,34 @@ mod tests {
         let e = ctx.tablet.match_times_store().entry(42).unwrap();
         assert!(e.finished_ms.is_some());
         assert!(e.regular, "regulär ausgespielt → Messwert");
+    }
+
+    /// ADR 0060 (TP-Upload): Die Write-Funktionen halten die Lesesperre des
+    /// Schreib-Gates — solange die Kopie den Guard hält, erreicht kein
+    /// SENDUPDATE den Mock; danach läuft der Write regulär durch, nichts geht
+    /// verloren. Nutzt das prozessweite `GATE` (die Write-Funktionen kennen nur
+    /// `&AppConfig`); die 300 ms Haltezeit bremsen parallele Tests höchstens kurz.
+    #[tokio::test]
+    async fn write_funktionen_halten_das_schreib_gate() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let gate = &crate::btp::write_gate::GATE;
+        let kopie = gate
+            .fuer_kopie(std::time::Duration::ZERO, std::time::Duration::from_secs(10))
+            .await
+            .expect("kein Write hält das Gate");
+        let cfg = ctx.config.clone();
+        let write = tokio::spawn(async move {
+            write_result_to_btp(&cfg, &merker_update(vec![(21, 10), (21, 15)], true, 0)).await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "Write darf nicht laufen, solange die Kopie den Guard hält"
+        );
+        drop(kopie);
+        write.await.unwrap().expect("Write läuft nach der Kopie durch");
+        assert_eq!(recorded.lock().unwrap().len(), 1, "genau ein SENDUPDATE, nichts verloren");
     }
 
     /// Spec `spielzeiten-prognose` (E3): Eine Ergebniskorrektur überschreibt

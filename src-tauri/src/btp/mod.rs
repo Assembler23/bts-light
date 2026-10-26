@@ -6,4 +6,5 @@ pub mod client;
 pub mod model;
 pub mod proto;
 pub mod wire;
+pub mod write_gate;
 pub mod xml;
