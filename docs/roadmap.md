@@ -496,6 +496,22 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **TP-Datei während des Turniertags an badhub** — Spec:
+  [features/tp-datei-upload.md](features/tp-datei-upload.md),
+  [ADR 0060](adr/0060-upload-sperrt-btp-writes-schreib-gate.md).
+  Aus der Idee vom 26.10.2026. bts-light kopiert die **offene** TP-Datei
+  (Messung `btp_tp_match_probe.rs`, PR #390: lesbar trotz `.ldb`,
+  `Match.ID` = `PlayerMatch.id`, GUID in `Settings.LinkCode`) und sendet sie
+  gzip-komprimiert an `POST /api/tp-upload`; badhub baut daraus ein
+  vorläufiges Turnier (`tournaments.source='tp_live'`) und mischt beim
+  Rendern die Liveticker-Stände in Spielliste, Baum und Tabellen.
+  - **Stufe 1:** nur Knopfdruck im Dashboard, Schreib-Gate um die vier
+    BTP-Write-Funktionen, Spool + Worker in badhub, 60-s-Cache.
+  - **Stufe 2 (später):** seltener Takt bei geänderter Datei.
+  - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1.
+  - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf,
+    Lizenzfrage aus badhub-ADR 0047.
+
 - **Setzplätze anzeigen** — Spec:
   [features/setzplaetze-anzeigen.md](features/setzplaetze-anzeigen.md),
   [ADR 0059](adr/0059-setzplatz-als-text-aus-dem-parser.md).

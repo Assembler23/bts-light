@@ -69,3 +69,4 @@ hier eintragen.
 | [0057](0057-update-ablauf-im-rust-kern.md) | Update-Ablauf im Rust-Kern, Wiederanlauf per Marker, stiller Installer beim Beenden | accepted |
 | [0058](0058-eigene-kiosk-app-statt-fully-kiosk.md) | Eigene Android-Kiosk-App statt Fully Kiosk, Suche nach dem Pi-Muster | accepted |
 | [0059](0059-setzplatz-als-text-aus-dem-parser.md) | Setzplatz als fertiger Text, aufgelöst im Parser | accepted |
+| [0060](0060-upload-sperrt-btp-writes-schreib-gate.md) | TP-Upload sperrt BTP-Writes kurz (Schreib-Gate auf RwLock) | accepted |
