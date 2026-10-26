@@ -312,17 +312,34 @@ pub struct UploadZiel<'a> {
     pub file_name: &'a str,
 }
 
+/// Ergebnis von [`sende`]: die Antwort plus die Zahlen für die Log-Zeile des Aufrufers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendeErgebnis {
+    pub antwort: UploadAntwort,
+    /// Größe des gesendeten gzip-Körpers.
+    pub gzip_bytes: usize,
+    /// HTTP-Status, `None` bei Netzwerkfehler.
+    pub http_status: Option<u16>,
+}
+
 /// gzip + POST; gibt die abgebildete Antwort zurück. Loggt nichts — das macht
 /// der Aufrufer mit Dateiname, Größen, Dauer und Statuscode.
-pub async fn sende(client: &reqwest::Client, ziel: &UploadZiel<'_>, bytes: &[u8]) -> UploadAntwort {
+pub async fn sende(client: &reqwest::Client, ziel: &UploadZiel<'_>, bytes: &[u8]) -> SendeErgebnis {
     debug_assert_eq!(crate::config::kanonische_guid(ziel.guid).as_deref(), Some(ziel.guid));
     // Kompression von bis zu 32 MB dauert eine halbe Sekunde — nicht auf dem
     // Tokio-Worker, sonst stocken Liveticker-Push und Relay solange.
     let roh = bytes.to_vec();
     let body = match tokio::task::spawn_blocking(move || crate::btp::wire::gzip_compress(&roh)).await {
         Ok(b) => b,
-        Err(_) => return UploadAntwort::NichtErreichbar,
+        Err(_) => {
+            return SendeErgebnis {
+                antwort: UploadAntwort::NichtErreichbar,
+                gzip_bytes: 0,
+                http_status: None,
+            }
+        }
     };
+    let gzip_bytes = body.len();
     let antwort = client
         .post(ziel.tp_upload_url)
         .bearer_auth(ziel.password)
@@ -336,9 +353,20 @@ pub async fn sende(client: &reqwest::Client, ziel: &UploadZiel<'_>, bytes: &[u8]
         .await;
     let antwort = match antwort {
         Ok(a) => a,
-        Err(_) => return UploadAntwort::NichtErreichbar,
+        Err(_) => {
+            return SendeErgebnis {
+                antwort: UploadAntwort::NichtErreichbar,
+                gzip_bytes,
+                http_status: None,
+            }
+        }
     };
-    abbilden(antwort, ziel.kuerzel).await
+    let http_status = Some(antwort.status().as_u16());
+    SendeErgebnis {
+        antwort: abbilden(antwort, ziel.kuerzel).await,
+        gzip_bytes,
+        http_status,
+    }
 }
 
 /// Statuszeile + Kopfzeilen + JSON → [`UploadAntwort`].
@@ -734,7 +762,7 @@ mod tests {
     async fn sende_body_gzip_und_header_vollstaendig() {
         let (url, rec) = mock("202 Accepted", "", r#"{"status":"accepted","job":"abc123def456"}"#).await;
         let bytes = jet(&[1u8; 5000]);
-        let a = sende(&build_client(), &ziel(&url), &bytes).await;
+        let a = sende(&build_client(), &ziel(&url), &bytes).await.antwort;
         assert_eq!(
             a,
             UploadAntwort::Angenommen {
@@ -802,7 +830,7 @@ mod tests {
         ];
         for (status, kopf, body, erwartet) in faelle {
             let (url, _) = mock(status, kopf, body).await;
-            let a = sende(&build_client(), &ziel(&url), &jet(b"x")).await;
+            let a = sende(&build_client(), &ziel(&url), &jet(b"x")).await.antwort;
             assert_eq!(a, erwartet, "{status} / {kopf}");
         }
     }
@@ -810,7 +838,7 @@ mod tests {
     #[tokio::test]
     async fn sende_ohne_server_nicht_erreichbar() {
         // Port 1 hört auf Loopback nie → Verbindung wird sofort abgewiesen.
-        let a = sende(&build_client(), &ziel("http://127.0.0.1:1/api/tp-upload"), &jet(b"x")).await;
+        let a = sende(&build_client(), &ziel("http://127.0.0.1:1/api/tp-upload"), &jet(b"x")).await.antwort;
         assert_eq!(a, UploadAntwort::NichtErreichbar);
     }
 
