@@ -940,13 +940,15 @@ knapp oder weit sie zeitlich auseinanderliegen. Details:
 
 ### Match-ID und Turnier-GUID gegen die TP-Datei (gemessen 26.10.2026)
 
-Grundlage der Spec `tp-datei-upload` (TP-Datei während des Turniertags an badhub).
-Messwerkzeug: `tests/btp_tp_match_probe.rs` gegen ein lokales BTP mit geöffneter
-`.TP`-Datei; die Datei parallel mit `access-parser` gelesen (Jet 4, 76 Tabellen,
-3,6 MB, Turnier mit 959 Spielen und 13 Konkurrenzen).
+Grundlage der Spec `tp-datei-upload` (TP-Datei während des Turniertags an badhub,
+Spec in Arbeit, Phase 1). Messwerkzeug für die **Protokollseite**:
+`tests/btp_tp_match_probe.rs` gegen ein lokales BTP mit geöffneter `.TP`-Datei.
+Die **Dateiseite** wurde ad hoc mit `access-parser` 0.0.6 (Python) gelesen, kein
+Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
 
 - **`Match.ID` im Protokoll = `PlayerMatch.id` in der Datei.** Beide liefern 959
-  Spiele im ID-Bereich 1–1874. Stichprobe ID 5: `DrawID`/`draw` 1,
+  Match-Zeilen (inkl. Slots und Spiegel-Einträge; `IsMatch=true` bei 361) im
+  ID-Bereich 1–1874. Stichprobe ID 5: `DrawID`/`draw` 1,
   `PlanningID`/`planning` 2001, `From1`/`van1` 2000, `From2`/`van2` 1000,
   `Round`/`roundnr` 3, `MatchNr`/`matchnr` 6, `Duration`/`duration` 39,
   `CourtID`/`court` 11, `PlannedTime`/`plandate` identisch. Ein Join
