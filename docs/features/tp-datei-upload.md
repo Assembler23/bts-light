@@ -3,6 +3,11 @@
 > Status: **Freigegeben 26.10.2026** (via Spec-Pipeline: Brief →
 > Grill → How-To → Review; die Skills fehlten im Checkout, die Phasen liefen
 > von Hand nach [spec-pipeline-konzept.md](../spec-pipeline-konzept.md)).
+> **Umsetzung:** badhub B1–B4 auf Prod (26.10.2026, PRs #1045, #1046, #1055,
+> #1057); bts-light **L1 umgesetzt in v0.9.300** (Knopfdruck, Schreib-Gate,
+> Handbuch [tp-datei-upload.md](../tp-datei-upload.md)); L2 (Automatik) offen.
+> Vor dem ersten Einsatz bei einem echten Turnier bleiben die Messungen A2 und
+> Jet-Nachlauf (unten, „Offene Fragen“) Pflicht.
 > Quelle: Idee vom 26.10.2026 („bts-light läuft meist auf dem BTP-Rechner —
 > die TP-Datei kann schon am Turniertag nach badhub").
 > Betroffene Repos: **bts-light** (`src-tauri`, Frontend, Handbuch) und

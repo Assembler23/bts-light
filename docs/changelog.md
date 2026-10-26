@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.300
+
+- **Turnierdatei an badhub senden.** In den Einstellungen lässt sich die
+  Turnierdatei wählen, mit der BTP gerade arbeitet (Abschnitt „TP-Datei
+  (Turnierdatenbank)"); im Status-Fenster schickt der Knopf **TP-Datei an
+  badhub senden** sie an badhub.de. Dort entsteht noch am Turniertag ein
+  vorläufiger Stand mit Auslosungen, Gruppentabellen, KO-Bäumen und
+  Spielliste, ergänzt um die Ergebnisse aus dem Liveticker. **Alles aus der
+  Datei wird sichtbar** — Auslosungen also erst senden, wenn sie veröffentlicht
+  werden dürfen. Während des Sendens wartet bts-light einige Sekunden mit
+  eigenen Schreibzugriffen auf BTP; Ergebnisse von den Tablets gehen dabei
+  nicht verloren. Im Ansage-Slave-Modus gibt es den Knopf nicht. Anleitung:
+  [Turnierdatei an badhub senden](tp-datei-upload.md).
+
 ## v0.9.299
 
 - **Setzplätze an badhub.** Liveticker und Check-In-Meldeliste bekommen den

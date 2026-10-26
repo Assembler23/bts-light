@@ -236,5 +236,7 @@ Schalte unter [Diagnose-Logs](logging.md) den Versand ein oder öffne über
 ## Weiterlesen
 
 - [Einstellungen — was jede Option bewirkt](einstellungen.md)
+- [Turnierdatei an badhub senden](tp-datei-upload.md) — Auslosungen und
+  Spielliste schon am Turniertag auf badhub.de
 - [Master und Slave](master-slave.md) — wenn in mehreren Hallen gespielt wird
 - [Was ist BTS Light?](../README.md)

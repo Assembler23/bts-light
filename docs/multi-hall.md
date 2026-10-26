@@ -275,6 +275,17 @@ Für eine zweite Halle richtet man dort einen **Netzwerkdrucker** ein und wählt
 ihn am Master in den Einstellungen aus — die Zettel gehen dann quer durchs Netz
 in die richtige Halle.
 
+## Turnierdatei an badhub: nur der Master lädt hoch
+
+Der Upload der TP-Datei (Spec
+[features/tp-datei-upload.md](features/tp-datei-upload.md), Handbuch
+[Turnierdatei an badhub senden](tp-datei-upload.md)) gehört auf den Turnier-PC,
+der BTP hält: Nur dort liegt die offene Datei, und nur dort greift das
+Schreib-Gate (ADR 0060), das die eigenen BTP-Writes während der Kopie
+zurückhält. Ein Ansage-Slave zeigt weder den Setup-Abschnitt noch den Knopf,
+und `pruefe_upload_bedingungen` lehnt im `slave_mode` ab — unabhängig von der
+Oberfläche.
+
 ## Master-Identität umziehen (v0.9.161, ADR 0006)
 
 Die `install_id` ist Relay-Namespace **und** Bearer-Token (R6) — ein PC-Wechsel

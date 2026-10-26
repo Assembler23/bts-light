@@ -73,3 +73,16 @@ kommentiert im Modul und werden nach der Nachlauf-Messung angepasst.
 - Ein Upload während eines sehr langen Writes (bis ~30 s im Extremfall)
   scheitert nach 20 s mit „BTP ist gerade beschäftigt" statt den Write zu
   verdrängen. Bewusst: der Write geht vor.
+
+## Nachtrag 2026-10-26 (PR L1, v0.9.300)
+
+Umgesetzt wie beschrieben in `btp/write_gate.rs` (`WriteGate`, `GATE`,
+`schreiben()`, `fuer_kopie()`), Guard-Zeile in den vier `write_*_to_btp`
+nach den Frühausgängen für leere Listen. Abweichung: Der im Entwurf genannte
+Zeitstempel des letzten Write-Endes (`AtomicU64`) entfällt — die Ruhe wird
+immer voll gewartet, weil die Schreibsperre erst kommt, wenn der letzte
+Reader gefallen ist; der Nachlauf beginnt also spätestens dann, und ein
+Zeitstempel brächte nur Uhrsprünge ins Spiel. Konstanten unverändert
+(`RUHE` 3 s, `MAX_WARTEZEIT` 20 s, `LESEABSTAND` 2 s) bis zur
+Nachlauf-Messung. Tests mit pausierter Tokio-Zeit und ein Textwächter über
+die vier Write-Funktionen in `tablet/server.rs`.

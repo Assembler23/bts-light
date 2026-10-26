@@ -22,7 +22,7 @@ zeigen.
 
 | Menüpunkt | Wofür | Ausgegraut, wenn |
 |---|---|---|
-| **Status** | Die Startseite: Läuft die Übertragung? Wie weit ist das Turnier? Sind alle Felder mit Geräten versorgt? Von hier aus lassen sich die Anzeigen im Browser öffnen und der Aushang drucken. | nie |
+| **Status** | Die Startseite: Läuft die Übertragung? Wie weit ist das Turnier? Sind alle Felder mit Geräten versorgt? Von hier aus lassen sich die Anzeigen im Browser öffnen, der Aushang drucken und die [Turnierdatei an badhub senden](tp-datei-upload.md). | nie |
 | **Spielübersicht** | Das Arbeitspferd der Feldvergabe: oben die spielbereiten Spiele, darunter die Felder mit Ampel — grün frei, gelb belegt, **rot gesperrt**. Spiele zuweisen, Felder freigeben und sperren. | nie |
 | **Tablets** | Drei Reiter: **Übersicht** (welches Tablet hängt an welchem Feld, mit Akkustand), **In Vorbereitung** (gerufene Spiele), **QR-Codes** zum Einrichten der Geräte. | nie |
 | **Turnierleitung** | Hier entstehen die Zugänge für die Turnierleitungs-Oberfläche: Gerät koppeln, QR-Code zeigen, Zugang wieder entziehen. | nie — hier schaltet man sie schließlich ein |

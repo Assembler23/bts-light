@@ -133,6 +133,23 @@ reine Farbänderung nicht.
 das ist die schnellste Kontrolle, ob du beim richtigen Turnier bist. Der Test
 **speichert nichts**; zum Übernehmen musst du unten trotzdem speichern.
 
+## TP-Datei (Turnierdatenbank)
+
+*Nicht im Ansage-Slave-Modus — nur der Master lädt hoch.*
+<!-- pruef: "TP-Datei (Turnierdatenbank)" in src/pages/SetupWizard.tsx -->
+
+| Feld | Voreinstellung | Bedeutung |
+|---|---|---|
+| **TP-Datei wählen** | keine | Die Turnierdatei, mit der BTP gerade arbeitet (`.TP`). Sie lässt sich im Status-Fenster an badhub senden — für einen vorläufigen Turnierstand noch am Turniertag, siehe [Turnierdatei an badhub senden](tp-datei-upload.md). Beim Wählen prüft die App Dateityp und Größe (höchstens 32 MB) und zeigt „Turnierdatei erkannt, 3,6 MB". Gespeichert wird nur, was die Prüfung besteht. |
+<!-- pruef: /TP_MAX_BYTES: u64 = 32 \* 1024 \* 1024/ in src-tauri/src/badhub/tp_upload.rs -->
+| **Entfernen** | — | Löscht die Auswahl wieder. |
+
+Die Datei ist an die **Turnier-Kennung** aus „1 · Liveticker-Ziel" gebunden,
+die beim Wählen eingetragen war. Ändert sich die Kennung, bleibt der Pfad
+stehen, und es heißt **„Datei neu wählen"**, bis du die Datei erneut gewählt
+hast. Läuft bts-light nicht auf dem BTP-Rechner, steht hier ein Hinweis
+(Upload nur vom BTP-Rechner empfohlen).
+
 ## 3 · Badhub-Zugang
 
 *Nur sichtbar, wenn oben „Anderes Turnier (manuell)" gewählt ist.*

@@ -78,6 +78,11 @@
       "ziel": "aushang.html"
     },
     {
+      "frage": "Auslosung und Spielliste schon am Turniertag auf badhub zeigen",
+      "wo": "Turnierdatei an badhub senden",
+      "ziel": "tp-datei-upload.html"
+    },
+    {
       "frage": "Etwas geht nicht",
       "wo": "Verbindung prüfen, Logs finden, Hilfe holen",
       "ziel": "diagnose-logs.html"
@@ -129,6 +134,7 @@
       "beschreibung": "Was in der Halle aushängt und online zu sehen ist.",
       "seiten": [
         "aushang",
+        "tp-datei-upload",
         "check-in"
       ]
     }
@@ -331,6 +337,11 @@
           "aus": [
             "Wie es gebaut ist"
           ]
+        },
+        {
+          "datei": "docs/tp-datei-upload.md",
+          "slug": "tp-datei-upload",
+          "titel": "Turnierdatei an badhub senden"
         },
         {
           "datei": "docs/spieler-check-in.md",
