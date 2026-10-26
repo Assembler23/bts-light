@@ -23,7 +23,7 @@ pub enum WireError {
 }
 
 /// Komprimiert Daten mit gzip (Standard-Wrapper, Magic `1f 8b`).
-fn gzip_compress(data: &[u8]) -> Vec<u8> {
+pub(crate) fn gzip_compress(data: &[u8]) -> Vec<u8> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder
         .write_all(data)
