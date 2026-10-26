@@ -5000,9 +5000,14 @@ mod tests {
                 .find(&format!("pub(crate) async fn {name}("))
                 .unwrap_or_else(|| panic!("{name} nicht gefunden"));
             let koerper = &quelle[start..];
-            let gate = koerper.find("write_gate::GATE.schreiben().await").unwrap_or(usize::MAX);
+            let gate = koerper
+                .find("write_gate::GATE.schreiben().await")
+                .unwrap_or(usize::MAX);
             let btp = koerper.find("client::send_request").unwrap_or(usize::MAX);
-            assert!(gate < btp, "{name}: Gate-Zeile fehlt oder steht nach dem ersten BTP-Kontakt");
+            assert!(
+                gate < btp,
+                "{name}: Gate-Zeile fehlt oder steht nach dem ersten BTP-Kontakt"
+            );
         }
     }
 
@@ -5020,7 +5025,10 @@ mod tests {
         let ctx = make_ctx(port);
         let gate = &crate::btp::write_gate::GATE;
         let kopie = gate
-            .fuer_kopie(std::time::Duration::ZERO, std::time::Duration::from_secs(10))
+            .fuer_kopie(
+                std::time::Duration::ZERO,
+                std::time::Duration::from_secs(10),
+            )
             .await
             .expect("kein Write hält das Gate");
         let cfg = ctx.config.clone();
@@ -5033,8 +5041,15 @@ mod tests {
             "Write darf nicht laufen, solange die Kopie den Guard hält"
         );
         drop(kopie);
-        write.await.unwrap().expect("Write läuft nach der Kopie durch");
-        assert_eq!(recorded.lock().unwrap().len(), 1, "genau ein SENDUPDATE, nichts verloren");
+        write
+            .await
+            .unwrap()
+            .expect("Write läuft nach der Kopie durch");
+        assert_eq!(
+            recorded.lock().unwrap().len(),
+            1,
+            "genau ein SENDUPDATE, nichts verloren"
+        );
     }
 
     /// Spec `spielzeiten-prognose` (E3): Eine Ergebniskorrektur überschreibt

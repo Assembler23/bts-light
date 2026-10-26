@@ -1049,7 +1049,8 @@ impl UploadTakt {
     };
 }
 
-pub(crate) const TEXT_BTP_BESCHAEFTIGT: &str = "BTP ist gerade beschäftigt, bitte gleich noch einmal";
+pub(crate) const TEXT_BTP_BESCHAEFTIGT: &str =
+    "BTP ist gerade beschäftigt, bitte gleich noch einmal";
 
 /// Was vor einem Upload stimmen muss. Reine Funktion wie `pruefe_startbedingungen`;
 /// jede Verletzung hat ihren eigenen Text mit Verweis auf den Setup-Abschnitt.
@@ -1059,10 +1060,14 @@ pub(crate) fn pruefe_upload_bedingungen(config: &AppConfig) -> Result<UploadVorg
     if config.slave_mode {
         // Setup und Dashboard blenden Abschnitt und Knopf im Slave-Modus aus (AK 3);
         // der Text erreicht nur einen direkten Command-Aufruf.
-        return Err("Nur der Master lädt die TP-Datei hoch — diese Instanz läuft als Slave.".to_string());
+        return Err(
+            "Nur der Master lädt die TP-Datei hoch — diese Instanz läuft als Slave.".to_string(),
+        );
     }
     if config.badhub.password.is_empty() {
-        return Err("Es ist kein Badhub-Passwort konfiguriert (Setup, „3 · Badhub-Zugang“).".to_string());
+        return Err(
+            "Es ist kein Badhub-Passwort konfiguriert (Setup, „3 · Badhub-Zugang“).".to_string(),
+        );
     }
     let guid = config.tournament_uuid_kanonisch().ok_or_else(|| {
         "Die Turnier-Kennung von turnier.de fehlt — im Setup unter „1 · Liveticker-Ziel“ \
@@ -1080,11 +1085,12 @@ pub(crate) fn pruefe_upload_bedingungen(config: &AppConfig) -> Result<UploadVorg
             ));
         }
     };
-    let kuerzel = crate::aushang::kuerzel_aus_live_url(&config.badhub.live_url).ok_or_else(|| {
-        "Die Liveticker-Adresse enthält kein Verbandskürzel — „1 · Liveticker-Ziel“ prüfen \
+    let kuerzel =
+        crate::aushang::kuerzel_aus_live_url(&config.badhub.live_url).ok_or_else(|| {
+            "Die Liveticker-Adresse enthält kein Verbandskürzel — „1 · Liveticker-Ziel“ prüfen \
          (z. B. https://badhub.de/live?t=bvbb)."
-            .to_string()
-    })?;
+                .to_string()
+        })?;
     Ok(UploadVorgaben {
         pfad,
         guid,
@@ -1098,12 +1104,16 @@ pub(crate) fn pruefe_upload_bedingungen(config: &AppConfig) -> Result<UploadVorg
 /// weder den 5-s-Poll des Dashboards noch den nächsten Klick in einen
 /// Command-Panic laufen lassen — der Wert ist auch dann brauchbar.
 fn tp_status_lock(status: &Mutex<TpUploadStatus>) -> std::sync::MutexGuard<'_, TpUploadStatus> {
-    status.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    status
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Merker auf „läuft“ setzen — oder den aktuellen Stand zurückgeben, wenn
 /// schon ein Upload läuft (zweiter Klick ist ein No-op).
-pub(crate) fn upload_starten(status: &Mutex<TpUploadStatus>) -> Result<TpUploadStatus, TpUploadStatus> {
+pub(crate) fn upload_starten(
+    status: &Mutex<TpUploadStatus>,
+) -> Result<TpUploadStatus, TpUploadStatus> {
     let mut s = tp_status_lock(status);
     if s.laeuft {
         return Err(s.clone());
@@ -1134,7 +1144,9 @@ fn lese_fehler_text(e: &crate::badhub::tp_upload::LeseFehler) -> String {
     use crate::badhub::tp_upload::LeseFehler;
     match e {
         LeseFehler::Unruhig => "Datei ändert sich gerade, bitte gleich noch einmal".to_string(),
-        LeseFehler::KeineTpDatei => "Die gewählte Datei ist keine TP-Datei — im Setup neu wählen".to_string(),
+        LeseFehler::KeineTpDatei => {
+            "Die gewählte Datei ist keine TP-Datei — im Setup neu wählen".to_string()
+        }
         LeseFehler::ZuGross => "TP-Datei ist größer als 32 MB — Upload nicht möglich".to_string(),
         LeseFehler::NichtLesbar { basisname } => {
             format!("TP-Datei nicht gefunden: {basisname} — im Setup neu wählen")
@@ -1216,7 +1228,11 @@ pub(crate) async fn fuehre_upload_aus(
 /// die Frist `status_max` verstrichen ist — dann „dauert noch“, der Knopf wird
 /// wieder frei. Der erste Poll kommt erst nach einem Abstand: der Worker läuft
 /// per Timer, sofort gibt es praktisch nie ein `result`.
-async fn status_pollen(client: &reqwest::Client, vorgaben: &UploadVorgaben, takt: UploadTakt) -> String {
+async fn status_pollen(
+    client: &reqwest::Client,
+    vorgaben: &UploadVorgaben,
+    takt: UploadTakt,
+) -> String {
     use crate::badhub::tp_upload as tpu;
     let url = tpu::status_url(&vorgaben.tp_upload_url, &vorgaben.guid);
     let frist = std::time::Instant::now() + takt.status_max;
@@ -5952,20 +5968,29 @@ mod tp_upload_tests {
 
         let mut cfg = basis(&pfad);
         cfg.slave_mode = true;
-        assert!(pruefe_upload_bedingungen(&cfg).unwrap_err().contains("Master"));
+        assert!(pruefe_upload_bedingungen(&cfg)
+            .unwrap_err()
+            .contains("Master"));
 
         let mut cfg = basis(&pfad);
         cfg.badhub.password.clear();
-        assert!(pruefe_upload_bedingungen(&cfg).unwrap_err().contains("3 · Badhub-Zugang"));
+        assert!(pruefe_upload_bedingungen(&cfg)
+            .unwrap_err()
+            .contains("3 · Badhub-Zugang"));
 
         let mut cfg = basis(&pfad);
         cfg.tournament_uuid.clear();
-        assert!(pruefe_upload_bedingungen(&cfg).unwrap_err().contains("1 · Liveticker-Ziel"));
+        assert!(pruefe_upload_bedingungen(&cfg)
+            .unwrap_err()
+            .contains("1 · Liveticker-Ziel"));
 
         let mut cfg = basis(&pfad);
         cfg.tp_upload.path.clear();
         let e = pruefe_upload_bedingungen(&cfg).unwrap_err();
-        assert!(e.contains("Keine TP-Datei gewählt") && e.contains("TP-Datei (Turnierdatenbank)"), "{e}");
+        assert!(
+            e.contains("Keine TP-Datei gewählt") && e.contains("TP-Datei (Turnierdatenbank)"),
+            "{e}"
+        );
 
         let mut cfg = basis(&pfad);
         cfg.tp_upload.tournament_uuid = "9AA7FE89-0000-4000-8000-000000000001".to_string();
@@ -5975,7 +6000,10 @@ mod tp_upload_tests {
         let mut cfg = basis(&pfad);
         cfg.badhub.live_url = "https://badhub.de/".to_string();
         let e = pruefe_upload_bedingungen(&cfg).unwrap_err();
-        assert!(e.contains("Verbandskürzel") && e.contains("1 · Liveticker-Ziel"), "{e}");
+        assert!(
+            e.contains("Verbandskürzel") && e.contains("1 · Liveticker-Ziel"),
+            "{e}"
+        );
     }
 
     #[test]
@@ -5997,7 +6025,9 @@ mod tp_upload_tests {
         let z = zaehler.clone();
         tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { break };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
                 let mut buf = Vec::new();
                 let mut chunk = [0u8; 8192];
                 loop {
@@ -6056,7 +6086,10 @@ mod tp_upload_tests {
 
     #[tokio::test]
     async fn upload_task_202_dann_status_ok_schreibt_text_und_setzt_laeuft_zurueck() {
-        let (url, zaehler) = mock(r#"{"received_at":"x","processed_at":"y","result":"ok","matches":7,"message":null}"#).await;
+        let (url, zaehler) = mock(
+            r#"{"received_at":"x","processed_at":"y","result":"ok","matches":7,"message":null}"#,
+        )
+        .await;
         let status = Arc::new(Mutex::new(TpUploadStatus::default()));
         upload_starten(&status).unwrap();
         let gate = WriteGate::new();
@@ -6073,7 +6106,11 @@ mod tp_upload_tests {
         assert_eq!(s.ergebnis.as_deref(), Some("übernommen, 7 Spiele"));
         assert_eq!(s.groesse, Some(JET_KOPF.len() as u64 + 4096));
         assert!(s.zeitpunkt_ms.unwrap() > 0);
-        assert_eq!(zaehler.load(Ordering::SeqCst), 2, "ein POST, ein Status-GET");
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            2,
+            "ein POST, ein Status-GET"
+        );
     }
 
     #[tokio::test]
@@ -6119,10 +6156,15 @@ mod tp_upload_tests {
             takt,
         )
         .await;
-        assert_eq!(status.lock().unwrap().ergebnis.as_deref(), Some(TEXT_BTP_BESCHAEFTIGT));
+        assert_eq!(
+            status.lock().unwrap().ergebnis.as_deref(),
+            Some(TEXT_BTP_BESCHAEFTIGT)
+        );
 
         let status = Arc::new(Mutex::new(TpUploadStatus::default()));
-        let weg = std::env::temp_dir().join("bts-light-gibt-es-nicht").join("weg.tp");
+        let weg = std::env::temp_dir()
+            .join("bts-light-gibt-es-nicht")
+            .join("weg.tp");
         fuehre_upload_aus(
             vorgaben(weg, "http://127.0.0.1:1/api/tp-upload"),
             status.clone(),

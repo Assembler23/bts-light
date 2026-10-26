@@ -45,10 +45,15 @@ pub const STATUS_MAX: Duration = Duration::from_secs(120);
 #[serde(tag = "art", rename_all = "snake_case")]
 pub enum TpFileInfo {
     /// `anzeige` ist der fertige Text neben dem Pfad: „Turnierdatei erkannt, 3,6 MB“.
-    Erkannt { groesse: u64, anzeige: String },
+    Erkannt {
+        groesse: u64,
+        anzeige: String,
+    },
     /// Falsche Endung, kein Jet-Kopf, Verzeichnis oder leere Datei.
     KeineTpDatei,
-    ZuGross { groesse: u64 },
+    ZuGross {
+        groesse: u64,
+    },
     /// Pfad existiert nicht oder ist nicht lesbar (Laufwerk/UNC getrennt).
     NichtGefunden,
 }
@@ -106,7 +111,9 @@ pub enum LeseFehler {
     KeineTpDatei,
     ZuGross,
     /// Verschoben, gelöscht, Laufwerk getrennt. `basisname` nur für die Meldung.
-    NichtLesbar { basisname: String },
+    NichtLesbar {
+        basisname: String,
+    },
 }
 
 /// Basisname eines Pfads für Meldungen (nie der ganze Pfad, nie Inhalt). Ohne
@@ -131,7 +138,10 @@ async fn lesen(pfad: &Path) -> Result<Vec<u8>, LeseFehler> {
         use std::io::Read;
         let f = std::fs::File::open(&eigner)?;
         if !f.metadata()?.is_file() {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "keine Datei"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "keine Datei",
+            ));
         }
         let mut v = Vec::new();
         f.take(TP_MAX_BYTES + 1).read_to_end(&mut v)?;
@@ -217,7 +227,9 @@ pub fn x_file_name(pfad: &Path) -> String {
     let mut out = String::with_capacity(name.len() * 3);
     for b in name.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -325,20 +337,24 @@ pub struct SendeErgebnis {
 /// gzip + POST; gibt die abgebildete Antwort zurück. Loggt nichts — das macht
 /// der Aufrufer mit Dateiname, Größen, Dauer und Statuscode.
 pub async fn sende(client: &reqwest::Client, ziel: &UploadZiel<'_>, bytes: &[u8]) -> SendeErgebnis {
-    debug_assert_eq!(crate::config::kanonische_guid(ziel.guid).as_deref(), Some(ziel.guid));
+    debug_assert_eq!(
+        crate::config::kanonische_guid(ziel.guid).as_deref(),
+        Some(ziel.guid)
+    );
     // Kompression von bis zu 32 MB dauert eine halbe Sekunde — nicht auf dem
     // Tokio-Worker, sonst stocken Liveticker-Push und Relay solange.
     let roh = bytes.to_vec();
-    let body = match tokio::task::spawn_blocking(move || crate::btp::wire::gzip_compress(&roh)).await {
-        Ok(b) => b,
-        Err(_) => {
-            return SendeErgebnis {
-                antwort: UploadAntwort::NichtErreichbar,
-                gzip_bytes: 0,
-                http_status: None,
+    let body =
+        match tokio::task::spawn_blocking(move || crate::btp::wire::gzip_compress(&roh)).await {
+            Ok(b) => b,
+            Err(_) => {
+                return SendeErgebnis {
+                    antwort: UploadAntwort::NichtErreichbar,
+                    gzip_bytes: 0,
+                    http_status: None,
+                }
             }
-        }
-    };
+        };
     let gzip_bytes = body.len();
     let antwort = client
         .post(ziel.tp_upload_url)
@@ -511,10 +527,7 @@ pub const TEXT_VERARBEITUNG_DAUERT: &str =
 /// Rechners; unlesbar → der Rohwert, damit nie etwas verschwindet.
 pub fn uhrzeit_lokal(iso: &str) -> String {
     match chrono::DateTime::parse_from_rfc3339(iso.trim()) {
-        Ok(t) => t
-            .with_timezone(&chrono::Local)
-            .format("%H:%M")
-            .to_string(),
+        Ok(t) => t.with_timezone(&chrono::Local).format("%H:%M").to_string(),
         Err(_) => iso.trim().to_string(),
     }
 }
@@ -569,7 +582,10 @@ mod tests {
         let dir = tmp("ordner.tp");
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(tp_file_check(&dir), TpFileInfo::KeineTpDatei, "Verzeichnis");
-        assert_eq!(tp_file_check(&tmp("gibt-es-nicht.tp")), TpFileInfo::NichtGefunden);
+        assert_eq!(
+            tp_file_check(&tmp("gibt-es-nicht.tp")),
+            TpFileInfo::NichtGefunden
+        );
     }
 
     #[test]
@@ -616,10 +632,16 @@ mod tests {
 
     // ── lese_stabil ────────────────────────────────────────────────────────
     /// Lesungen aus einer festen Folge — deterministisch, ohne Dateisystem-Rennen.
-    fn folge(lesungen: Vec<Result<Vec<u8>, LeseFehler>>) -> impl FnMut() -> std::future::Ready<Result<Vec<u8>, LeseFehler>> {
+    fn folge(
+        lesungen: Vec<Result<Vec<u8>, LeseFehler>>,
+    ) -> impl FnMut() -> std::future::Ready<Result<Vec<u8>, LeseFehler>> {
         let rest = Arc::new(Mutex::new(lesungen.into_iter()));
         move || {
-            let n = rest.lock().unwrap().next().expect("mehr Lesungen als vorgesehen");
+            let n = rest
+                .lock()
+                .unwrap()
+                .next()
+                .expect("mehr Lesungen als vorgesehen");
             std::future::ready(n)
         }
     }
@@ -634,8 +656,16 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn lese_stabil_einmal_anders_dann_ruhe_ok() {
         let (a, b) = (jet(b"a"), jet(b"b"));
-        let r = lese_stabil_mit(LESEABSTAND, folge(vec![Ok(a), Ok(b.clone()), Ok(b.clone())])).await;
-        assert_eq!(r, Ok(b), "die Wiederholung vergleicht gegen die ZWEITE Lesung");
+        let r = lese_stabil_mit(
+            LESEABSTAND,
+            folge(vec![Ok(a), Ok(b.clone()), Ok(b.clone())]),
+        )
+        .await;
+        assert_eq!(
+            r,
+            Ok(b),
+            "die Wiederholung vergleicht gegen die ZWEITE Lesung"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -671,7 +701,10 @@ mod tests {
         );
         let kopf = tmp("kopf2.tp");
         std::fs::write(&kopf, b"kein jet, aber lang genug fuer den kopf").unwrap();
-        assert_eq!(lese_stabil(&kopf, Duration::from_millis(1)).await, Err(LeseFehler::KeineTpDatei));
+        assert_eq!(
+            lese_stabil(&kopf, Duration::from_millis(1)).await,
+            Err(LeseFehler::KeineTpDatei)
+        );
     }
 
     // ── URLs und Header ────────────────────────────────────────────────────
@@ -686,7 +719,10 @@ mod tests {
             "https://test.badhub.de/api/tp-upload"
         );
         assert_eq!(
-            status_url("https://badhub.de/api/tp-upload", "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"),
+            status_url(
+                "https://badhub.de/api/tp-upload",
+                "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+            ),
             "https://badhub.de/api/tp-upload/status?uuid=0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
         );
         assert!(tp_upload_url("kaputt").ends_with("/api/tp-upload"));
@@ -703,7 +739,10 @@ mod tests {
             x_file_name(&Path::new("Turniere").join("Köpi-Cup 2026.TP")),
             "K%C3%B6pi-Cup%202026.TP"
         );
-        assert_eq!(x_file_name(Path::new("/srv/tp/einfach_1.tp")), "einfach_1.tp");
+        assert_eq!(
+            x_file_name(Path::new("/srv/tp/einfach_1.tp")),
+            "einfach_1.tp"
+        );
         assert_eq!(x_file_name(Path::new("a&b=c.tp")), "a%26b%3Dc.tp");
     }
 
@@ -769,7 +808,12 @@ mod tests {
 
     #[tokio::test]
     async fn sende_body_gzip_und_header_vollstaendig() {
-        let (url, rec) = mock("202 Accepted", "", r#"{"status":"accepted","job":"abc123def456"}"#).await;
+        let (url, rec) = mock(
+            "202 Accepted",
+            "",
+            r#"{"status":"accepted","job":"abc123def456"}"#,
+        )
+        .await;
         let bytes = jet(&[1u8; 5000]);
         let a = sende(&build_client(), &ziel(&url), &bytes).await.antwort;
         assert_eq!(
@@ -804,45 +848,143 @@ mod tests {
     #[tokio::test]
     async fn sende_mapping_aller_statuscodes() {
         let faelle: Vec<(&str, &str, &str, UploadAntwort)> = vec![
-            ("200 OK", "", r#"{"status":"unchanged","received_at":"2026-10-26T08:00:00Z"}"#,
-             UploadAntwort::Unveraendert { received_at: "2026-10-26T08:00:00Z".into() }),
-            ("200 OK", "", r#"{"status":"rejected","result":"guid_mismatch","message":"GUID passt nicht"}"#,
-             UploadAntwort::Abgelehnt { result: "guid_mismatch".into(), message: "GUID passt nicht".into() }),
+            (
+                "200 OK",
+                "",
+                r#"{"status":"unchanged","received_at":"2026-10-26T08:00:00Z"}"#,
+                UploadAntwort::Unveraendert {
+                    received_at: "2026-10-26T08:00:00Z".into(),
+                },
+            ),
+            (
+                "200 OK",
+                "",
+                r#"{"status":"rejected","result":"guid_mismatch","message":"GUID passt nicht"}"#,
+                UploadAntwort::Abgelehnt {
+                    result: "guid_mismatch".into(),
+                    message: "GUID passt nicht".into(),
+                },
+            ),
             // Fremddaten: Steuerzeichen fliegen raus (Log-Injection), Rest bleibt.
-            ("200 OK", "", "{\"status\":\"rejected\",\"result\":\"x\",\"message\":\"a\\nb\\u0007c\"}",
-             UploadAntwort::Abgelehnt { result: "x".into(), message: "abc".into() }),
-            ("409 Conflict", "", r#"{"status":"error","message":"Turnier bereits endgültig importiert"}"#,
-             UploadAntwort::BereitsEndgueltig),
-            ("429 Too Many Requests", "Retry-After: 37", r#"{"status":"error","message":"zu schnell"}"#,
-             UploadAntwort::ZuSchnell { retry_after_s: 37 }),
-            ("429 Too Many Requests", "", r#"{"status":"error"}"#,
-             UploadAntwort::ZuSchnell { retry_after_s: 60 }),
-            ("403 Forbidden", "", r#"{"status":"error","message":"Verband"}"#,
-             UploadAntwort::VerbandFalsch { kuerzel: "bvbb".into() }),
+            (
+                "200 OK",
+                "",
+                "{\"status\":\"rejected\",\"result\":\"x\",\"message\":\"a\\nb\\u0007c\"}",
+                UploadAntwort::Abgelehnt {
+                    result: "x".into(),
+                    message: "abc".into(),
+                },
+            ),
+            (
+                "409 Conflict",
+                "",
+                r#"{"status":"error","message":"Turnier bereits endgültig importiert"}"#,
+                UploadAntwort::BereitsEndgueltig,
+            ),
+            (
+                "429 Too Many Requests",
+                "Retry-After: 37",
+                r#"{"status":"error","message":"zu schnell"}"#,
+                UploadAntwort::ZuSchnell { retry_after_s: 37 },
+            ),
+            (
+                "429 Too Many Requests",
+                "",
+                r#"{"status":"error"}"#,
+                UploadAntwort::ZuSchnell { retry_after_s: 60 },
+            ),
+            (
+                "403 Forbidden",
+                "",
+                r#"{"status":"error","message":"Verband"}"#,
+                UploadAntwort::VerbandFalsch {
+                    kuerzel: "bvbb".into(),
+                },
+            ),
             // 403/409 ohne badhub-JSON (WAF, Proxy) sind KEINE Fachantworten.
-            ("403 Forbidden", "", "<html>cloudflare</html>", UploadAntwort::Status { code: 403 }),
+            (
+                "403 Forbidden",
+                "",
+                "<html>cloudflare</html>",
+                UploadAntwort::Status { code: 403 },
+            ),
             ("409 Conflict", "", "", UploadAntwort::Status { code: 409 }),
-            ("401 Unauthorized", "", r#"{"status":"error","message":"Incorrect password"}"#,
-             UploadAntwort::Unauthorized),
-            ("401 Unauthorized", "WWW-Authenticate: Bearer realm=\"badhub\"", "",
-             UploadAntwort::Unauthorized),
-            ("200 OK", "", r#"{"status":"ok"}"#, UploadAntwort::Status { code: 200 }),
-            ("302 Found", "Location: https://anderswo.example/", "", UploadAntwort::Status { code: 302 }),
-            ("401 Unauthorized", "WWW-Authenticate: Basic realm=\"Staging\"", "",
-             UploadAntwort::NochNichtVerfuegbar),
-            ("404 Not Found", "", "<html>nope</html>", UploadAntwort::NochNichtVerfuegbar),
-            ("400 Bad Request", "", r#"{"status":"error","message":"X-Tournament-Uuid fehlt"}"#,
-             UploadAntwort::NochNichtVerfuegbar),
-            ("413 Payload Too Large", "", r#"{"status":"error","message":"Datei zu groß"}"#,
-             UploadAntwort::Serverfehler { message: "Datei zu groß".into() }),
-            ("415 Unsupported Media Type", "", r#"{"status":"error","message":"keine TP-Datei"}"#,
-             UploadAntwort::Serverfehler { message: "keine TP-Datei".into() }),
-            ("500 Internal Server Error", "", "", UploadAntwort::Status { code: 500 }),
-            ("503 Service Unavailable", "Retry-After: 5", "", UploadAntwort::Status { code: 503 }),
+            (
+                "401 Unauthorized",
+                "",
+                r#"{"status":"error","message":"Incorrect password"}"#,
+                UploadAntwort::Unauthorized,
+            ),
+            (
+                "401 Unauthorized",
+                "WWW-Authenticate: Bearer realm=\"badhub\"",
+                "",
+                UploadAntwort::Unauthorized,
+            ),
+            (
+                "200 OK",
+                "",
+                r#"{"status":"ok"}"#,
+                UploadAntwort::Status { code: 200 },
+            ),
+            (
+                "302 Found",
+                "Location: https://anderswo.example/",
+                "",
+                UploadAntwort::Status { code: 302 },
+            ),
+            (
+                "401 Unauthorized",
+                "WWW-Authenticate: Basic realm=\"Staging\"",
+                "",
+                UploadAntwort::NochNichtVerfuegbar,
+            ),
+            (
+                "404 Not Found",
+                "",
+                "<html>nope</html>",
+                UploadAntwort::NochNichtVerfuegbar,
+            ),
+            (
+                "400 Bad Request",
+                "",
+                r#"{"status":"error","message":"X-Tournament-Uuid fehlt"}"#,
+                UploadAntwort::NochNichtVerfuegbar,
+            ),
+            (
+                "413 Payload Too Large",
+                "",
+                r#"{"status":"error","message":"Datei zu groß"}"#,
+                UploadAntwort::Serverfehler {
+                    message: "Datei zu groß".into(),
+                },
+            ),
+            (
+                "415 Unsupported Media Type",
+                "",
+                r#"{"status":"error","message":"keine TP-Datei"}"#,
+                UploadAntwort::Serverfehler {
+                    message: "keine TP-Datei".into(),
+                },
+            ),
+            (
+                "500 Internal Server Error",
+                "",
+                "",
+                UploadAntwort::Status { code: 500 },
+            ),
+            (
+                "503 Service Unavailable",
+                "Retry-After: 5",
+                "",
+                UploadAntwort::Status { code: 503 },
+            ),
         ];
         for (status, kopf, body, erwartet) in faelle {
             let (url, _) = mock(status, kopf, body).await;
-            let a = sende(&build_client(), &ziel(&url), &jet(b"x")).await.antwort;
+            let a = sende(&build_client(), &ziel(&url), &jet(b"x"))
+                .await
+                .antwort;
             assert_eq!(a, erwartet, "{status} / {kopf}");
         }
     }
@@ -850,13 +992,24 @@ mod tests {
     #[tokio::test]
     async fn sende_ohne_server_nicht_erreichbar() {
         // Port 1 hört auf Loopback nie → Verbindung wird sofort abgewiesen.
-        let a = sende(&build_client(), &ziel("http://127.0.0.1:1/api/tp-upload"), &jet(b"x")).await.antwort;
+        let a = sende(
+            &build_client(),
+            &ziel("http://127.0.0.1:1/api/tp-upload"),
+            &jet(b"x"),
+        )
+        .await
+        .antwort;
         assert_eq!(a, UploadAntwort::NichtErreichbar);
     }
 
     #[tokio::test]
     async fn status_abfragen_liest_result_und_none_bei_404() {
-        let (url, _) = mock("200 OK", "", r#"{"received_at":"x","processed_at":"y","result":"ok","matches":6,"message":null}"#).await;
+        let (url, _) = mock(
+            "200 OK",
+            "",
+            r#"{"received_at":"x","processed_at":"y","result":"ok","matches":6,"message":null}"#,
+        )
+        .await;
         let s = status_abfragen(&build_client(), &url, "pw").await;
         assert_eq!(
             s,
@@ -866,54 +1019,110 @@ mod tests {
                 message: None
             })
         );
-        let (url, _) = mock("404 Not Found", "", r#"{"status":"error","message":"kein Upload"}"#).await;
+        let (url, _) = mock(
+            "404 Not Found",
+            "",
+            r#"{"status":"error","message":"kein Upload"}"#,
+        )
+        .await;
         assert_eq!(status_abfragen(&build_client(), &url, "pw").await, None);
     }
 
     // ── Texte ──────────────────────────────────────────────────────────────
     #[test]
     fn antwort_texte_nach_spec_tabelle() {
-        assert_eq!(antwort_text(&UploadAntwort::Angenommen { job: "j".into() }), "angenommen, wird verarbeitet");
-        assert_eq!(antwort_text(&UploadAntwort::BereitsEndgueltig), "Turnier bereits endgültig importiert");
+        assert_eq!(
+            antwort_text(&UploadAntwort::Angenommen { job: "j".into() }),
+            "angenommen, wird verarbeitet"
+        );
+        assert_eq!(
+            antwort_text(&UploadAntwort::BereitsEndgueltig),
+            "Turnier bereits endgültig importiert"
+        );
         assert_eq!(
             antwort_text(&UploadAntwort::ZuSchnell { retry_after_s: 30 }),
             "zu schnell hintereinander, in 30 s wieder möglich"
         );
-        let v = antwort_text(&UploadAntwort::VerbandFalsch { kuerzel: "bvbb".into() });
-        assert!(v.contains("‹bvbb›") && v.contains("1 · Liveticker-Ziel") && !v.contains("Passwort"), "{v}");
-        assert_eq!(antwort_text(&UploadAntwort::NochNichtVerfuegbar), "badhub kennt den Upload noch nicht");
-        assert_eq!(antwort_text(&UploadAntwort::Status { code: 500 }), "badhub antwortete mit HTTP-Status 500");
-        assert_eq!(antwort_text(&UploadAntwort::NichtErreichbar), "badhub nicht erreichbar");
+        let v = antwort_text(&UploadAntwort::VerbandFalsch {
+            kuerzel: "bvbb".into(),
+        });
+        assert!(
+            v.contains("‹bvbb›") && v.contains("1 · Liveticker-Ziel") && !v.contains("Passwort"),
+            "{v}"
+        );
+        assert_eq!(
+            antwort_text(&UploadAntwort::NochNichtVerfuegbar),
+            "badhub kennt den Upload noch nicht"
+        );
+        assert_eq!(
+            antwort_text(&UploadAntwort::Status { code: 500 }),
+            "badhub antwortete mit HTTP-Status 500"
+        );
+        assert_eq!(
+            antwort_text(&UploadAntwort::NichtErreichbar),
+            "badhub nicht erreichbar"
+        );
         assert!(antwort_text(&UploadAntwort::Unauthorized).contains("Passwort"));
         assert_eq!(
-            antwort_text(&UploadAntwort::Abgelehnt { result: "implausible".into(), message: "zu wenige Spiele".into() }),
+            antwort_text(&UploadAntwort::Abgelehnt {
+                result: "implausible".into(),
+                message: "zu wenige Spiele".into()
+            }),
             "zu wenige Spiele"
         );
         assert_eq!(
-            antwort_text(&UploadAntwort::Abgelehnt { result: "implausible".into(), message: String::new() }),
+            antwort_text(&UploadAntwort::Abgelehnt {
+                result: "implausible".into(),
+                message: String::new()
+            }),
             "abgelehnt (implausible)"
         );
-        let u = antwort_text(&UploadAntwort::Unveraendert { received_at: "2026-10-26T08:05:00Z".into() });
-        assert!(u.starts_with("unverändert seit ") && u.len() == "unverändert seit 10:05".len(), "{u}");
-        assert_eq!(uhrzeit_lokal("kaputt"), "kaputt", "Rohwert, nichts verschwindet");
+        let u = antwort_text(&UploadAntwort::Unveraendert {
+            received_at: "2026-10-26T08:05:00Z".into(),
+        });
+        assert!(
+            u.starts_with("unverändert seit ") && u.len() == "unverändert seit 10:05".len(),
+            "{u}"
+        );
+        assert_eq!(
+            uhrzeit_lokal("kaputt"),
+            "kaputt",
+            "Rohwert, nichts verschwindet"
+        );
     }
 
     #[test]
     fn ergebnis_text_ok_und_meldung() {
         assert_eq!(
-            ergebnis_text(&StatusAntwort { result: Some("ok".into()), matches: Some(7), message: None }),
+            ergebnis_text(&StatusAntwort {
+                result: Some("ok".into()),
+                matches: Some(7),
+                message: None
+            }),
             "übernommen, 7 Spiele"
         );
         assert_eq!(
-            ergebnis_text(&StatusAntwort { result: Some("ok".into()), matches: Some(1), message: None }),
+            ergebnis_text(&StatusAntwort {
+                result: Some("ok".into()),
+                matches: Some(1),
+                message: None
+            }),
             "übernommen, 1 Spiel"
         );
         assert_eq!(
-            ergebnis_text(&StatusAntwort { result: Some("guid_mismatch".into()), matches: None, message: Some("GUID …".into()) }),
+            ergebnis_text(&StatusAntwort {
+                result: Some("guid_mismatch".into()),
+                matches: None,
+                message: Some("GUID …".into())
+            }),
             "GUID …"
         );
         assert_eq!(
-            ergebnis_text(&StatusAntwort { result: Some("parse_error".into()), matches: None, message: None }),
+            ergebnis_text(&StatusAntwort {
+                result: Some("parse_error".into()),
+                matches: None,
+                message: None
+            }),
             "abgelehnt (parse_error)"
         );
         assert_eq!(ergebnis_text(&StatusAntwort::default()), "");

@@ -188,12 +188,18 @@ mod tests {
         advance(Duration::from_secs(1)).await;
         tokio::task::yield_now().await;
         assert!(!bereit.load(Ordering::SeqCst), "Ruhezeit läuft noch");
-        assert!(!genommen.load(Ordering::SeqCst), "Write darf nicht in der Ruhezeit laufen");
+        assert!(
+            !genommen.load(Ordering::SeqCst),
+            "Write darf nicht in der Ruhezeit laufen"
+        );
         // … auch nicht, während die Kopie danach liest …
         advance(Duration::from_secs(2)).await;
         tokio::task::yield_now().await;
         assert!(bereit.load(Ordering::SeqCst), "Kopie hat den Guard");
-        assert!(!genommen.load(Ordering::SeqCst), "Write darf nicht während der Kopie laufen");
+        assert!(
+            !genommen.load(Ordering::SeqCst),
+            "Write darf nicht während der Kopie laufen"
+        );
         // … und läuft, sobald die Kopie fertig ist — nichts verworfen.
         freigeben.send(()).unwrap();
         kopie.await.unwrap();

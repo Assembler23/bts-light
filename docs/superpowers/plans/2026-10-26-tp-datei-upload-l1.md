@@ -57,7 +57,7 @@ impl AppConfig {
 ```
 `save_config` schreibt den Block unverändert durch (nichts zu tun, serde). Kein Default-Wert außer leer.
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 ```rust
 #[test] fn tp_upload_config_roundtrip_und_alte_config_ohne_block() { /* json ohne "tp_upload" lädt mit leerem Block; Roundtrip erhält path+uuid */ }
 #[test] fn tp_datei_nur_bei_gleicher_guid() {
@@ -65,9 +65,9 @@ impl AppConfig {
     // GUID geändert → None; path leer → None; tournament_uuid leer → None
 }
 ```
-- [ ] **Step 2: `cargo test -p bts-light config::` rot** (Feld fehlt).
-- [ ] **Step 3: Implementieren** (Vergleich über `is_tournament_uuid`/kanonische Form, dieselbe Normalisierung wie `tournament_uuid_kanonisch`).
-- [ ] **Step 4: grün. Step 5: Commit** `feat(config): Block tp_upload — TP-Datei an die Turnier-GUID gebunden (L1)`.
+- [x] **Step 2: `cargo test -p bts-light config::` rot** (Feld fehlt).
+- [x] **Step 3: Implementieren** (Vergleich über `is_tournament_uuid`/kanonische Form, dieselbe Normalisierung wie `tournament_uuid_kanonisch`).
+- [x] **Step 4: grün. Step 5: Commit** `feat(config): Block tp_upload — TP-Datei an die Turnier-GUID gebunden (L1)`.
 
 ---
 
@@ -98,7 +98,7 @@ impl WriteGate {
 }
 ```
 
-- [ ] **Step 1: Failing Tests** (`start_paused`, Zeit per `tokio::time::advance`):
+- [x] **Step 1: Failing Tests** (`start_paused`, Zeit per `tokio::time::advance`):
 ```rust
 kopie_wartet_auf_laufenden_write          // Write hält 10 s → fuer_kopie liefert erst nach 10 s + ruhe
 write_in_ruhezeit_startet_erst_nach_kopie // schreiben() während gehaltenem KopieGuard blockiert; nach Drop läuft er, nichts verloren
@@ -106,9 +106,9 @@ max_wartezeit_ueberschritten_beschaeftigt // Write hält 25 s → Err(Beschaefti
 zeitstempel_nach_drop                     // last_end_ms ändert sich beim Drop des SchreibGuard
 in_flight_zaehlt                          // 2 gehaltene Guards → 2, nach Drop 0
 ```
-- [ ] **Step 2: rot.** **Step 3: Implementieren** (RwLock schreiber-bevorzugt, Begründung aus dem ADR in den Modulkopf; `tokio::time::timeout` um `write()`).
-- [ ] **Step 4: Sperre in die vier Write-Funktionen**, Test `write_funktionen_halten_die_sperre`: Mock-BTP, der die Antwort 2 s verzögert; während des Writes `GATE.in_flight() == 1` (eigene Instanz nicht möglich → prozessweites `GATE`, Test serialisiert wie der Testsystem-Schalter).
-- [ ] **Step 5: `cargo test` grün**, Code-Review. **Step 6: Commit** `feat(btp): Schreib-Gate für den TP-Upload — Writes halten Lesesperre, Kopie bekommt garantierte Lücke (ADR 0060)`.
+- [x] **Step 2: rot.** **Step 3: Implementieren** (RwLock schreiber-bevorzugt, Begründung aus dem ADR in den Modulkopf; `tokio::time::timeout` um `write()`).
+- [x] **Step 4: Sperre in die vier Write-Funktionen**, Test `write_funktionen_halten_die_sperre`: Mock-BTP, der die Antwort 2 s verzögert; während des Writes `GATE.in_flight() == 1` (eigene Instanz nicht möglich → prozessweites `GATE`, Test serialisiert wie der Testsystem-Schalter).
+- [x] **Step 5: `cargo test` grün**, Code-Review. **Step 6: Commit** `feat(btp): Schreib-Gate für den TP-Upload — Writes halten Lesesperre, Kopie bekommt garantierte Lücke (ADR 0060)`.
 
 ---
 
@@ -153,7 +153,7 @@ pub fn antwort_text(a: &UploadAntwort) -> String;         // Dashboard-Texte exa
 ```
 Mapping `sende`: 202 → `Angenommen`; 200 mit `status=unchanged` → `Unveraendert`; 200 `rejected` → `Abgelehnt`; 409 → `BereitsEndgueltig`; 429 → `ZuSchnell` (Header `Retry-After`, Standard 60); 403 → `VerbandFalsch`; 401 ohne Basic-Auth-`WWW-Authenticate` → `Unauthorized`; 401 mit `Basic`, 400, 404 → `NochNichtVerfuegbar`; 413/415 → `Serverfehler{message}`; sonst `Status(n)`; reqwest-Fehler → `NichtErreichbar`.
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 ```rust
 tp_file_check_erkannt_klein_und_gross_geschrieben   // "x.tp" und "x.TP" mit Jet-Kopf → Erkannt, anzeige "Turnierdatei erkannt, 0,0 MB"
 tp_file_check_falscher_kopf_zu_gross_fehlt_leer_verzeichnis // KeineTpDatei / ZuGross (metadata len > 32 MB per set_len auf Sparse-Datei) / NichtGefunden / 0 Byte → KeineTpDatei / Verzeichnis → KeineTpDatei
@@ -167,8 +167,8 @@ sende_body_beginnt_mit_gzip_und_header_vollstaendig // Mock zeichnet Request auf
 sende_mapping_aller_statuscodes                    // 202/200 unchanged/200 rejected/409/429+Retry-After/403/401/401 Basic/404/400/413/500 → je Variante
 antwort_text_tabelle                               // Texte aus der Spec, z. B. ZuSchnell{30} → "zu schnell hintereinander, in 30 s wieder möglich"; VerbandFalsch{"bvbb"} enthält „1 · Liveticker-Ziel"
 ```
-- [ ] **Step 2: rot.** **Step 3: Implementieren.** `lese_stabil` liest mit `tokio::fs::read` (Freigabe: Windows `share_mode` Standard von `std::fs::File::open` erlaubt Lesen bei gehaltener BTP-Datei; falls BTP exklusiv sperrt, zeigt der Feldtest es — dann `NichtLesbar`).
-- [ ] **Step 4: grün.** **Step 5: Code-Review + Security-Review** (Pfad nur aus dem Dialog, kein Inhalt im Log, Größendeckel vor dem vollständigen Lesen, Passwort nie im Fehlertext). **Step 6: Commit** `feat(badhub): tp_upload — TP-Datei prüfen, stabil lesen, gzip an /api/tp-upload senden, Antworten abbilden (L1)`.
+- [x] **Step 2: rot.** **Step 3: Implementieren.** `lese_stabil` liest mit `tokio::fs::read` (Freigabe: Windows `share_mode` Standard von `std::fs::File::open` erlaubt Lesen bei gehaltener BTP-Datei; falls BTP exklusiv sperrt, zeigt der Feldtest es — dann `NichtLesbar`).
+- [x] **Step 4: grün.** **Step 5: Code-Review + Security-Review** (Pfad nur aus dem Dialog, kein Inhalt im Log, Größendeckel vor dem vollständigen Lesen, Passwort nie im Fehlertext). **Step 6: Commit** `feat(badhub): tp_upload — TP-Datei prüfen, stabil lesen, gzip an /api/tp-upload senden, Antworten abbilden (L1)`.
 
 ---
 
@@ -193,7 +193,7 @@ pub(crate) struct UploadVorgaben { pub pfad: PathBuf, pub guid: String, pub kuer
 Reihenfolge der Verletzungen in `pruefe_upload_bedingungen`: (1) `slave_mode` → „Nur der Master lädt die TP-Datei hoch“; (2) `badhub.password` leer → Verweis „3 · Badhub-Zugang“; (3) `tournament_uuid_kanonisch()` None → Verweis „1 · Liveticker-Ziel“; (4) `tp_datei_fuer_turnier()` None, Pfad gesetzt → „Datei neu wählen — die Turnier-GUID hat sich geändert (Setup, Abschnitt „TP-Datei (Turnierdatenbank)“)“; Pfad leer → „Keine TP-Datei gewählt (Setup …)“; (5) `kuerzel_aus_live_url(&badhub.live_url)` None → „Liveticker-Adresse ohne Verbandskürzel — „1 · Liveticker-Ziel“ prüfen“.
 Upload-Task (`tokio::spawn`): `GATE.fuer_kopie(RUHE, MAX_WARTEZEIT)` → Err → Text „BTP ist gerade beschäftigt, bitte gleich noch einmal“; `lese_stabil` unter dem Guard, Guard droppen; `tp_file_check`-Regeln auf die Bytes (Kopf, Größe); `sende`; bei `Angenommen` Poll `status_abfragen` alle 5 s bis `result` vorliegt oder 120 s (`ok` → „übernommen, N Spiele“, sonst `message` des Servers; Timeout → „angenommen, Verarbeitung dauert noch — Stand beim nächsten Klick“); `Unveraendert` → „unverändert seit hh:mm“ aus `received_at` (UTC → lokale Zeit); am Ende `laeuft = false`, `zeitpunkt_ms`, `groesse`, Log-Zeile (`tracing::info!` mit Basisname, Rohgröße, gzip-Größe, Dauer, Status). Zweiter Klick bei `laeuft` → aktueller Status zurück, kein zweiter Task.
 
-- [ ] **Step 1: Failing Tests**
+- [x] **Step 1: Failing Tests**
 ```rust
 pruefe_upload_bedingungen_alle_sechs_verletzungen // je Verletzung Err mit dem Verweis-Text; vollständige Config → Ok mit pfad/guid/kuerzel/url
 tp_upload_status_default_nicht_laufend
@@ -202,7 +202,7 @@ upload_task_202_ohne_result_endet_nach_2_minuten  // Status-Mock result null, Ze
 zweiter_klick_waehrend_laeuft_ist_noop            // Merker laeuft=true → tp_upload_now liefert Status, startet nichts (Zähler am Mock bleibt 1)
 ```
 (Der Task wird für Tests als freie Funktion `fuehre_upload_aus(vorgaben, status: Arc<Mutex<TpUploadStatus>>, gate: &WriteGate, client)` gebaut; der Command ruft sie mit `GATE` und `AppState`.)
-- [ ] **Step 2: rot. Step 3: Implementieren.** `lib.rs`: Commands registrieren. **Step 4: grün**, Code-Review. **Step 5: Commit** `feat(commands): tp_upload_now/tp_upload_status/tp_file_check — Vorbedingungen, Upload-Task mit Schreib-Gate, Status-Merker (L1)`.
+- [x] **Step 2: rot. Step 3: Implementieren.** `lib.rs`: Commands registrieren. **Step 4: grün**, Code-Review. **Step 5: Commit** `feat(commands): tp_upload_now/tp_upload_status/tp_file_check — Vorbedingungen, Upload-Task mit Schreib-Gate, Status-Merker (L1)`.
 
 ---
 
@@ -214,9 +214,9 @@ zweiter_klick_waehrend_laeuft_ist_noop            // Merker laeuft=true → tp_u
 - Modify: `src/pages/Dashboard.tsx`: Abschnitt **„Turnierdaten an badhub“** vor „Aushang für die Halle“ (~Z. 488): Knopf **„TP-Datei an badhub senden“**, Statuszeile (`ergebnis`, bei `laeuft` „läuft …“), Hinweistext „Alles aus der Datei wird auf badhub sichtbar — auch noch nicht veröffentlichte Auslosungen.“; ohne Pfad oder GUID-Abweichung Knopf `disabled` + Link ins Setup („Datei neu wählen“ bzw. „Im Setup eine TP-Datei wählen“); Poll `tpUploadStatus` alle 5 s nur solange `laeuft` (Muster `PrintWarningBanner.tsx` `useEffect` + `setInterval`); im Slave-Modus nicht gerendert
 - Test: `npm run build` (tsc) grün; manuelle Prüfung AK 1–5
 
-- [ ] **Step 1: Typen und API-Wrapper** (Feldnamen exakt wie die Rust-Serialisierung: `art`-Tag, `laeuft`, `zeitpunkt_ms`, `groesse`, `ergebnis`).
-- [ ] **Step 2: Setup-Abschnitt**, **Step 3: Dashboard-Abschnitt**, **Step 4: `npm run build`** grün, `cargo tauri dev` Sichtprüfung (Knopf aus ohne Pfad; „Datei neu wählen“ nach GUID-Änderung; Slave-Modus blendet aus).
-- [ ] **Step 5: Code-Review. Step 6: Commit** `feat(ui): TP-Datei im Setup wählen, Knopf „TP-Datei an badhub senden“ im Dashboard (L1)`.
+- [x] **Step 1: Typen und API-Wrapper** (Feldnamen exakt wie die Rust-Serialisierung: `art`-Tag, `laeuft`, `zeitpunkt_ms`, `groesse`, `ergebnis`).
+- [x] **Step 2: Setup-Abschnitt**, **Step 3: Dashboard-Abschnitt**, **Step 4: `npm run build`** grün, `cargo tauri dev` Sichtprüfung (Knopf aus ohne Pfad; „Datei neu wählen“ nach GUID-Änderung; Slave-Modus blendet aus).
+- [x] **Step 5: Code-Review. Step 6: Commit** `feat(ui): TP-Datei im Setup wählen, Knopf „TP-Datei an badhub senden“ im Dashboard (L1)`.
 
 ---
 
@@ -227,10 +227,10 @@ zweiter_klick_waehrend_laeuft_ist_noop            // Merker laeuft=true → tp_u
 - Modify: `docs/einstellungen.md` (Zeile `tp_upload.path`/`tournament_uuid`, Standard leer), `docs/erste-schritte.md` (Schritt „TP-Datei wählen“ optional), `docs/oberflaechen.md` (Dashboard-Abschnitt, Setup-Abschnitt), `docs/multi-hall.md` („Nur der Master lädt hoch“), `docs/btp_protocol.md` (Absatz „Schreib-Gate“: neue Wartestelle für BTP-Writes, Konstanten), `docs/features/testsystem-umschalter.md` (Upload-URL folgt `badhub.url`), `docs/features/tp-datei-upload.md` (Status-Zeile: „bts-light L1 umgesetzt v0.9.x, L2 offen“; Offene Fragen „Messung A2“ und „Jet-Nachlauf“ als Pflicht vor dem Feldtest stehen lassen), `docs/adr/0060-…md` (Nachtrag „Umgesetzt in PR L1, Konstanten unverändert bis zur Messung“), `docs/roadmap.md` (Eintrag „Spezifiziert“ → „Umgesetzt (L1), L2 offen“), `docs/changelog.md` (neuer Block `## v0.9.300` oder höher: „**TP-Datei an badhub.** Im Setup lässt sich die offene Turnierdatei wählen, im Dashboard sendet ein Knopf sie an badhub; dort entsteht noch am Turniertag ein vorläufiger Stand mit Auslosungen, Gruppen, KO-Bäumen und Spielliste. Alles aus der Datei wird sichtbar — Auslosungen also erst senden, wenn sie veröffentlicht werden dürfen. Während des Sendens wartet bts-light kurz mit eigenen BTP-Schreibzugriffen.“), `CLAUDE.md` (Doku-Tabellenzeile aus der Spec, Abschnitt „Betroffene Doku-Dateien“, wörtlich übernehmen)
 - Version: `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json` gemeinsam (Nummer erst kurz vor dem Merge gegen `origin/main` prüfen)
 
-- [ ] **Step 1: Handbuch + Anker schreiben; `node scripts/test-handbuch-fakten.mjs` grün; `node scripts/test-handbuch.mjs` (Whitelist) grün.**
-- [ ] **Step 2: übrige Doku, Changelog, Roadmap, CLAUDE.md.**
-- [ ] **Step 3: `cargo test`, `npm run build`, Version bumpen. Commit** `docs(tp-upload): Handbuch „TP-Datei an badhub“, Anker, Changelog, Roadmap, Version (L1)`.
-- [ ] **Step 4: Push, PR** (Body: Was, Entscheidungen, Tests, Feldtest-Voraussetzungen: Messung A2 und Jet-Nachlauf laut Spec vor dem ersten Einsatz bei einem echten Turnier; der Testzugang `lehiero` ist in badhub auf `bvbb` gemappt, Probelauf gegen Prod mit der Messdatei möglich).
+- [x] **Step 1: Handbuch + Anker schreiben; `node scripts/test-handbuch-fakten.mjs` grün; `node scripts/test-handbuch.mjs` (Whitelist) grün.**
+- [x] **Step 2: übrige Doku, Changelog, Roadmap, CLAUDE.md.**
+- [x] **Step 3: `cargo test`, `npm run build`, Version bumpen. Commit** `docs(tp-upload): Handbuch „TP-Datei an badhub“, Anker, Changelog, Roadmap, Version (L1)`.
+- [x] **Step 4: Push, PR** (Body: Was, Entscheidungen, Tests, Feldtest-Voraussetzungen: Messung A2 und Jet-Nachlauf laut Spec vor dem ersten Einsatz bei einem echten Turnier; der Testzugang `lehiero` ist in badhub auf `bvbb` gemappt, Probelauf gegen Prod mit der Messdatei möglich).
 
 ## Self-Review (durchgeführt)
 
