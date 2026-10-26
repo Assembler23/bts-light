@@ -142,17 +142,28 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
   // ein Pfad gewählt ist UND die beim Wählen gebundene GUID zur aktuellen passt
   // (Rust: tp_datei_fuer_turnier). Alle Netzzugriffe laufen im Rust-Kern; hier
   // wird nur der Stand gepollt, solange der Upload läuft.
-  const tpPfad = config.tp_upload?.path ?? "";
-  const tpBereit =
-    tpPfad !== "" &&
-    extractTournamentGuid(config.tp_upload?.tournament_uuid ?? "") !== "" &&
-    extractTournamentGuid(config.tp_upload?.tournament_uuid ?? "") ===
-      extractTournamentGuid(config.tournament_uuid);
+  const tpPfad = config.tp_upload.path;
+  const tpGuidGebunden = extractTournamentGuid(config.tp_upload.tournament_uuid);
+  const tpGuidAktuell = extractTournamentGuid(config.tournament_uuid);
+  // Drei Hindernisse, je mit eigenem Hinweis: kein Pfad / keine Kennung / Kennung weicht ab.
+  const tpHindernis =
+    tpPfad === ""
+      ? "Im Setup eine TP-Datei wählen"
+      : tpGuidAktuell === ""
+        ? "Turnier-Kennung fehlt — im Setup unter „1 · Liveticker-Ziel“ eintragen"
+        : tpGuidGebunden !== tpGuidAktuell
+          ? "Datei neu wählen — die Turnier-Kennung hat sich geändert"
+          : null;
+  const tpBereit = tpHindernis === null;
   const [tpStatus, setTpStatus] = useState<TpUploadStatus | null>(null);
   const [tpFehler, setTpFehler] = useState("");
   useEffect(() => {
     tpUploadStatus().then(setTpStatus).catch(() => {});
   }, []);
+  useEffect(() => {
+    // Ursache im Setup behoben → alter Fehlertext weg.
+    if (tpBereit) setTpFehler("");
+  }, [tpBereit]);
   useEffect(() => {
     if (!tpStatus?.laeuft) return;
     const id = window.setInterval(() => {
@@ -536,19 +547,15 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
               label="TP-Datei an badhub senden"
               onClick={() => void tpSenden()}
               disabled={!tpBereit || tpStatus?.laeuft === true}
-              title={
-                tpBereit
-                  ? "Die offene Turnierdatei jetzt an badhub senden"
-                  : "Erst im Setup eine TP-Datei wählen"
-              }
+              title={tpHindernis ?? "Die offene Turnierdatei jetzt an badhub senden"}
             />
-            {!tpBereit && (
+            {tpHindernis && (
               <button
                 type="button"
                 onClick={() => onNavigate?.("settings", "tp-datei")}
                 className="text-xs text-blue-700 underline-offset-2 hover:underline"
               >
-                {tpPfad ? "Datei neu wählen" : "Im Setup eine TP-Datei wählen"}
+                {tpHindernis}
               </button>
             )}
             {tpStatus?.laeuft ? (

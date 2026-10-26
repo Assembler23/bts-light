@@ -302,9 +302,11 @@ export function SetupWizard({
   // TP-Datei an badhub (Spec tp-datei-upload): Pfad + GUID zum Zeitpunkt der
   // Wahl. Die Bindung entsteht beim Wählen; eine spätere GUID-Änderung lässt
   // den Pfad stehen und zeigt „Datei neu wählen" (nichts wird still gelöscht).
-  const [tpPath, setTpPath] = useState(initialConfig.tp_upload?.path ?? "");
-  const [tpGuid, setTpGuid] = useState(initialConfig.tp_upload?.tournament_uuid ?? "");
+  const [tpPath, setTpPath] = useState(initialConfig.tp_upload.path);
+  const [tpGuid, setTpGuid] = useState(initialConfig.tp_upload.tournament_uuid);
+  /** Urteil über die GESPEICHERTE Datei (beim Laden geprüft; nach einer Wahl das der neuen). */
   const [tpInfo, setTpInfo] = useState<TpFileInfo | null>(null);
+  /** Fehler der LETZTEN Wahl — bezieht sich auf die abgelehnte Datei, nicht auf den Pfad oben. */
   const [tpError, setTpError] = useState("");
   useEffect(() => {
     if (!tpPath) return;
@@ -312,6 +314,22 @@ export function SetupWizard({
     // Nur beim Laden: Nach einer Wahl kommt das Urteil direkt aus pickTpDatei.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Die Bindung an die GUID entsteht beim Wählen — ohne eingetragene GUID gäbe
+  // es nichts zu binden, deshalb ist der Wähl-Knopf dann aus (statt einer
+  // irreführenden „GUID hat sich geändert"-Meldung direkt nach der Wahl).
+  const tpGuidJetzt = extractTournamentGuid(tournamentGuid);
+  function tpInfoText(info: TpFileInfo): string | null {
+    switch (info.art) {
+      case "erkannt":
+        return null;
+      case "zu_gross":
+        return "Die Datei ist größer als 32 MB — zu groß für den Upload.";
+      case "nicht_gefunden":
+        return "Datei nicht gefunden oder nicht lesbar — im Setup neu wählen.";
+      default:
+        return "Das ist keine TP-Datei (Turnierdatenbank von BTP).";
+    }
+  }
   async function pickTpDatei() {
     setTpError("");
     try {
@@ -323,25 +341,22 @@ export function SetupWizard({
       if (!sel) return;
       const path = Array.isArray(sel) ? sel[0] : sel;
       const info = await tpFileCheck(path);
-      setTpInfo(info);
-      if (info.art !== "erkannt") {
-        // Nicht speichern (AK 1): der bisherige Pfad bleibt, der Fehler steht daneben.
-        setTpError(
-          info.art === "zu_gross"
-            ? "Die Datei ist größer als 32 MB — zu groß für den Upload."
-            : info.art === "nicht_gefunden"
-              ? "Datei nicht gefunden oder nicht lesbar."
-              : "Das ist keine TP-Datei (Turnierdatenbank von BTP).",
-        );
+      const grund = tpInfoText(info);
+      if (grund !== null) {
+        // Nicht speichern (AK 1): der bisherige Pfad samt Urteil bleibt, der
+        // Fehler nennt die abgelehnte Datei.
+        const name = path.split(/[\\/]/).pop() || path;
+        setTpError(`„${name}“: ${grund}`);
         return;
       }
+      setTpInfo(info);
       setTpPath(path);
-      setTpGuid(extractTournamentGuid(tournamentGuid));
+      setTpGuid(tpGuidJetzt);
     } catch (e) {
       setTpError(String(e));
     }
   }
-  const tpGuidPasst = tpGuid !== "" && extractTournamentGuid(tournamentGuid) === tpGuid;
+  const tpGuidPasst = tpGuid !== "" && tpGuidJetzt === tpGuid;
   // Cloud-Ansage-Slave: Kopplungs-Code des Masters (leer = LAN-Slave, liest BTP).
   const [masterNamespace, setMasterNamespace] = useState(
     initialConfig.master_namespace ?? "",
@@ -1285,8 +1300,14 @@ export function SetupWizard({
             <button
               type="button"
               onClick={() => void pickTpDatei()}
+              disabled={tpGuidJetzt === ""}
+              title={
+                tpGuidJetzt === ""
+                  ? "Erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen"
+                  : undefined
+              }
               className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                         text-slate-700 transition-colors hover:bg-slate-200"
+                         text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
             >
               {tpPath ? "Datei neu wählen" : "TP-Datei wählen"}
             </button>
@@ -1309,10 +1330,19 @@ export function SetupWizard({
           {tpPath && (
             <p className="break-all font-mono text-xs text-slate-600">{tpPath}</p>
           )}
+          {tpGuidJetzt === "" && (
+            <p className="text-xs text-slate-500">
+              Erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen, dann die
+              Datei wählen — sie wird an diese Turnier-Kennung gebunden.
+            </p>
+          )}
           {tpPath && tpInfo?.art === "erkannt" && (
             <p className="flex items-center gap-1.5 text-sm text-emerald-700">
               <Check size={16} /> {tpInfo.anzeige}
             </p>
+          )}
+          {tpPath && tpInfo && tpInfo.art !== "erkannt" && (
+            <p className="text-sm text-amber-700">{tpInfoText(tpInfo)}</p>
           )}
           {tpError && (
             <p className="flex items-start gap-1.5 text-sm text-rose-700">
@@ -1321,7 +1351,9 @@ export function SetupWizard({
           )}
           {tpPath && !tpGuidPasst && (
             <p className="text-sm text-amber-700">
-              Datei neu wählen — die Turnier-GUID hat sich seit der Dateiwahl geändert.
+              {tpGuid === ""
+                ? "Datei neu wählen — beim Wählen war noch keine Turnier-Kennung eingetragen."
+                : "Datei neu wählen — die Turnier-GUID hat sich seit der Dateiwahl geändert."}
             </p>
           )}
           {!["127.0.0.1", "localhost"].includes(host.trim().toLowerCase()) && (

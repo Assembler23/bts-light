@@ -404,7 +404,7 @@ async fn abbilden(antwort: reqwest::Response, kuerzel: &str) -> UploadAntwort {
         },
         200 if koerper.status == "rejected" => UploadAntwort::Abgelehnt {
             result: koerper.result.unwrap_or_default(),
-            message: koerper.message.unwrap_or_default(),
+            message: meldung_bereinigt(&koerper.message.unwrap_or_default()),
         },
         // 403/409 nur als Fachantwort, wenn der Körper von badhub stammt — ein
         // 403 der WAF davor schickte den Nutzer sonst zur Liveticker-Adresse.
@@ -421,11 +421,19 @@ async fn abbilden(antwort: reqwest::Response, kuerzel: &str) -> UploadAntwort {
         413 | 415 => UploadAntwort::Serverfehler {
             message: koerper
                 .message
+                .map(|m| meldung_bereinigt(&m))
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| format!("badhub antwortete mit HTTP-Status {code}")),
         },
         other => UploadAntwort::Status { code: other },
     }
+}
+
+/// Server-Meldungen sind Fremddaten, die ins Dashboard **und** in die Log-Zeile
+/// gehen: Steuerzeichen raus (keine Log-Injection per Zeilenumbruch), auf 200
+/// Zeichen gekürzt.
+pub fn meldung_bereinigt(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).take(200).collect()
 }
 
 /// `GET …/status` nach einem 202. `None` bei Netzfehler, 404 oder unlesbarem
@@ -487,7 +495,8 @@ pub fn ergebnis_text(status: &StatusAntwort) -> String {
         },
         Some(code) => status
             .message
-            .clone()
+            .as_deref()
+            .map(meldung_bereinigt)
             .filter(|m| !m.is_empty())
             .unwrap_or_else(|| format!("abgelehnt ({code})")),
         None => String::new(),
@@ -799,6 +808,9 @@ mod tests {
              UploadAntwort::Unveraendert { received_at: "2026-10-26T08:00:00Z".into() }),
             ("200 OK", "", r#"{"status":"rejected","result":"guid_mismatch","message":"GUID passt nicht"}"#,
              UploadAntwort::Abgelehnt { result: "guid_mismatch".into(), message: "GUID passt nicht".into() }),
+            // Fremddaten: Steuerzeichen fliegen raus (Log-Injection), Rest bleibt.
+            ("200 OK", "", "{\"status\":\"rejected\",\"result\":\"x\",\"message\":\"a\\nb\\u0007c\"}",
+             UploadAntwort::Abgelehnt { result: "x".into(), message: "abc".into() }),
             ("409 Conflict", "", r#"{"status":"error","message":"Turnier bereits endgültig importiert"}"#,
              UploadAntwort::BereitsEndgueltig),
             ("429 Too Many Requests", "Retry-After: 37", r#"{"status":"error","message":"zu schnell"}"#,

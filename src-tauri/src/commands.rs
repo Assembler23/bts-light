@@ -1057,6 +1057,8 @@ pub(crate) const TEXT_BTP_BESCHAEFTIGT: &str = "BTP ist gerade beschäftigt, bit
 pub(crate) fn pruefe_upload_bedingungen(config: &AppConfig) -> Result<UploadVorgaben, String> {
     const SETUP_TP: &str = "Setup, Abschnitt „TP-Datei (Turnierdatenbank)“";
     if config.slave_mode {
+        // Setup und Dashboard blenden Abschnitt und Knopf im Slave-Modus aus (AK 3);
+        // der Text erreicht nur einen direkten Command-Aufruf.
         return Err("Nur der Master lädt die TP-Datei hoch — diese Instanz läuft als Slave.".to_string());
     }
     if config.badhub.password.is_empty() {
@@ -1092,16 +1094,40 @@ pub(crate) fn pruefe_upload_bedingungen(config: &AppConfig) -> Result<UploadVorg
     })
 }
 
+/// Merker ohne Invarianten: ein vergifteter Mutex (Panic im Upload-Task) darf
+/// weder den 5-s-Poll des Dashboards noch den nächsten Klick in einen
+/// Command-Panic laufen lassen — der Wert ist auch dann brauchbar.
+fn tp_status_lock(status: &Mutex<TpUploadStatus>) -> std::sync::MutexGuard<'_, TpUploadStatus> {
+    status.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Merker auf „läuft“ setzen — oder den aktuellen Stand zurückgeben, wenn
 /// schon ein Upload läuft (zweiter Klick ist ein No-op).
 pub(crate) fn upload_starten(status: &Mutex<TpUploadStatus>) -> Result<TpUploadStatus, TpUploadStatus> {
-    let mut s = status.lock().expect("TP-Upload-Mutex nicht vergiftet");
+    let mut s = tp_status_lock(status);
     if s.laeuft {
         return Err(s.clone());
     }
     s.laeuft = true;
     s.ergebnis = None;
     Ok(s.clone())
+}
+
+/// Sicherheitsnetz: Bricht der Upload-Task ab (Panic, Runtime-Ende), bevor er
+/// den Merker regulär schreibt, gibt der Drop den Knopf wieder frei — sonst
+/// bliebe `laeuft` bis zum App-Neustart stehen. Der reguläre Pfad schreibt
+/// vorher `laeuft = false`, dann greift der Guard nicht mehr.
+struct LaeuftZurueck(Arc<Mutex<TpUploadStatus>>);
+
+impl Drop for LaeuftZurueck {
+    fn drop(&mut self) {
+        let mut s = tp_status_lock(&self.0);
+        if s.laeuft {
+            s.laeuft = false;
+            s.ergebnis
+                .get_or_insert_with(|| "Upload abgebrochen (interner Fehler)".to_string());
+        }
+    }
 }
 
 fn lese_fehler_text(e: &crate::badhub::tp_upload::LeseFehler) -> String {
@@ -1117,9 +1143,11 @@ fn lese_fehler_text(e: &crate::badhub::tp_upload::LeseFehler) -> String {
 }
 
 /// Der eigentliche Upload, als freie Funktion ohne Tauri: Gate → stabil lesen
-/// (Guard danach sofort weg, erst dann senden) → Antwort → bei 202 den Status
-/// pollen → Merker schreiben → eine Log-Zeile (Name, Größen, Dauer, Code; nie
-/// Inhalt, nie Header-Werte). Läuft im Rust-Task von `tp_upload_now`.
+/// (Guard danach sofort weg, erst dann senden) → Antwort → bei 202 steht
+/// „angenommen, wird verarbeitet“ im Merker (AK 4), dann wird der Status
+/// gepollt → Merker schreiben → eine Log-Zeile (Name, Größen, Dauer, Code;
+/// nie Inhalt, nie Header-Werte; die Server-Meldung ist bereinigt). Läuft im
+/// Rust-Task von `tp_upload_now`.
 pub(crate) async fn fuehre_upload_aus(
     vorgaben: UploadVorgaben,
     status: Arc<Mutex<TpUploadStatus>>,
@@ -1128,6 +1156,7 @@ pub(crate) async fn fuehre_upload_aus(
     takt: UploadTakt,
 ) {
     use crate::badhub::tp_upload as tpu;
+    let _sicherheitsnetz = LaeuftZurueck(status.clone());
     let start = std::time::Instant::now();
     let name = tpu::basisname(&vorgaben.pfad);
     let mut groesse: Option<u64> = None;
@@ -1161,6 +1190,9 @@ pub(crate) async fn fuehre_upload_aus(
                     );
                     match &gesendet.antwort {
                         tpu::UploadAntwort::Angenommen { .. } => {
+                            // Zwischenstand sichtbar machen, solange gepollt wird (AK 4).
+                            tp_status_lock(&status).ergebnis =
+                                Some(tpu::antwort_text(&gesendet.antwort));
                             status_pollen(client, &vorgaben, takt).await
                         }
                         andere => tpu::antwort_text(andere),
@@ -1171,41 +1203,42 @@ pub(crate) async fn fuehre_upload_aus(
     };
 
     let dauer_ms = start.elapsed().as_millis();
-    tracing::info!(
-        "TP-Upload „{name}“: roh {} B{log_zusatz}, {dauer_ms} ms → {text}",
-        groesse.unwrap_or(0)
-    );
-    let mut s = status.lock().expect("TP-Upload-Mutex nicht vergiftet");
+    let roh = groesse.map(|g| format!(", roh {g} B")).unwrap_or_default();
+    tracing::info!("TP-Upload „{name}“{roh}{log_zusatz}, {dauer_ms} ms → {text}");
+    let mut s = tp_status_lock(&status);
     s.laeuft = false;
-    s.zeitpunkt_ms = Some(now_ms_commands());
+    s.zeitpunkt_ms = Some(now_ms());
     s.groesse = groesse;
     s.ergebnis = Some(text);
 }
 
 /// Nach 202: alle `status_abstand` den Status holen, bis `result` da ist oder
-/// `status_max` verstrichen — dann „dauert noch“, der Knopf wird wieder frei.
+/// die Frist `status_max` verstrichen ist — dann „dauert noch“, der Knopf wird
+/// wieder frei. Der erste Poll kommt erst nach einem Abstand: der Worker läuft
+/// per Timer, sofort gibt es praktisch nie ein `result`.
 async fn status_pollen(client: &reqwest::Client, vorgaben: &UploadVorgaben, takt: UploadTakt) -> String {
     use crate::badhub::tp_upload as tpu;
     let url = tpu::status_url(&vorgaben.tp_upload_url, &vorgaben.guid);
     let frist = std::time::Instant::now() + takt.status_max;
     loop {
-        tokio::time::sleep(takt.status_abstand).await;
-        if let Some(s) = tpu::status_abfragen(client, &url, &vorgaben.password).await {
+        let rest = frist.saturating_duration_since(std::time::Instant::now());
+        if rest.is_zero() {
+            return tpu::TEXT_VERARBEITUNG_DAUERT.to_string();
+        }
+        tokio::time::sleep(takt.status_abstand.min(rest)).await;
+        let rest = frist.saturating_duration_since(std::time::Instant::now());
+        // Der Poll selbst darf die Frist nicht um den Client-Timeout überziehen.
+        let antwort = tokio::time::timeout(
+            rest.max(Duration::from_millis(50)),
+            tpu::status_abfragen(client, &url, &vorgaben.password),
+        )
+        .await;
+        if let Ok(Some(s)) = antwort {
             if s.result.is_some() {
                 return tpu::ergebnis_text(&s);
             }
         }
-        if std::time::Instant::now() >= frist {
-            return tpu::TEXT_VERARBEITUNG_DAUERT.to_string();
-        }
     }
-}
-
-fn now_ms_commands() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 /// Urteil über einen im Dialog gewählten Pfad (Setup-Abschnitt „TP-Datei“).
@@ -1248,11 +1281,7 @@ pub fn tp_upload_now(state: State<'_, AppState>) -> Result<TpUploadStatus, Strin
 /// Aktueller Stand des Uploads (Dashboard pollt alle 5 s, solange `laeuft`).
 #[tauri::command]
 pub fn tp_upload_status(state: State<'_, AppState>) -> TpUploadStatus {
-    state
-        .tp_upload
-        .lock()
-        .expect("TP-Upload-Mutex nicht vergiftet")
-        .clone()
+    tp_status_lock(&state.tp_upload).clone()
 }
 
 /// Startet die Hintergrund-Polling-Schleife (BTP → Badhub, alle 5 s).

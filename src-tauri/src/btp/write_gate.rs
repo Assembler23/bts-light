@@ -118,6 +118,7 @@ impl WriteGate {
     }
 
     /// Testsonde: Zahl der gerade gehaltenen Lesesperren.
+    #[cfg(test)]
     pub(crate) fn in_flight(&self) -> usize {
         self.laufende_writes.load(Ordering::Relaxed)
     }
