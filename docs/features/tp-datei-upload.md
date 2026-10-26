@@ -575,10 +575,10 @@ und `score_status` und brauchen keine Änderung. Die Anonymisierung
 - **Basic-Auth-Ausnahme** für `/api/tp-upload` auf `test.badhub.de`: Kollege.
 - **UNC-Pfad** (Datei auf einem Netzlaufwerk): SMB-Konsistenz ungeprüft, nur
   Hinweis im Handbuch, kein Verbot.
-- **Setzplätze ohne `stageentry`:** In der Messdatei waren `stage`/`stageentry`
-  leer und `Entry.seed1` überall 0, vermutlich ohne Setzung. Falls ein
-  Turnier mit Setzung dieselbe Leere zeigt, braucht der badhub-Extraktor den
-  `Entry`-Rückfall auch für neue Dateien — unabhängig von dieser Spec.
+- ~~Setzplätze ohne `stageentry`~~ **erledigt 26.10.2026:** Die „leeren"
+  Tabellen waren ein Artefakt der ungereparierten `parse_table()` (Null-Bitmap,
+  badhub-README des Extraktors); mit dem Extraktor-Leser liefert dieselbe Datei
+  79 gesetzte Meldungen. Kein Handlungsbedarf.
 
 ## Betroffene Doku-Dateien
 

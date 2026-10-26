@@ -965,6 +965,7 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
 - **BTP-Prozess:** heißt `btp.exe`, Fenstertitel
   `Badminton Turnier Planer - <Dateiname ohne .TP>`. Eine Automatik zum Finden
   der Datei hätte damit einen Anhaltspunkt (nicht umgesetzt).
-- `stage`/`stageentry` waren in diesem Turnier **leer** (0 Zeilen), obwohl
-  Version `202601`. Setzplätze stünden dann in `Entry.seed1/seed2` — relevant für
-  den badhub-Extraktor, nicht für bts-light.
+- `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst
+  **leer** — ein Artefakt der bekannten Null-Bitmap-Schwäche des Parsers; der
+  badhub-Extraktor mit seiner Reparatur (`tabelle_lesen`) liest aus derselben
+  Datei 79 gesetzte Meldungen. Lehre: rohe Tabellen nur über den Extraktor lesen.
