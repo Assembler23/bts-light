@@ -347,6 +347,23 @@ pub struct PrintConfig {
     pub printer_name: String,
 }
 
+/// TP-Datei an badhub (Spec `docs/features/tp-datei-upload.md`, ADR 0060).
+///
+/// Die offene Turnierdatenbank von BTP, im Setup per Dateiwähler gewählt. Der
+/// Pfad ist an die Turnier-GUID gebunden, die **beim Wählen** eingetragen war:
+/// Ändert der Turnierleiter die GUID später, bleibt der Pfad sichtbar, aber
+/// [`AppConfig::tp_datei_fuer_turnier`] liefert `None`, bis die Datei neu
+/// gewählt wird — eine fremde Datei darf nie unter einer anderen GUID landen.
+/// Es wird nichts still gelöscht.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct TpUploadConfig {
+    /// Pfad, wie ihn der Dialog geliefert hat; leer = keine Datei gewählt.
+    pub path: String,
+    /// Turnier-GUID zum Zeitpunkt der Dateiwahl (kanonisch gespeichert).
+    pub tournament_uuid: String,
+}
+
 /// Verschlüsselte LAN-Strecke (Spec `docs/features/lan-tls-verschluesselt.md`,
 /// ADR 0047, löst ADR 0005 ein).
 ///
@@ -767,6 +784,11 @@ pub struct AppConfig {
     /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub tournament_logo: LogoConfig,
+    /// TP-Datei an badhub (Pfad + gebundene GUID). `#[serde(default)]` hält
+    /// ältere Konfigurationsdateien lesbar; eine ältere App-Version verwirft
+    /// den Block beim nächsten Speichern (hinnehmbar, Spec).
+    #[serde(default)]
+    pub tp_upload: TpUploadConfig,
     /// Vom Operator gesperrte Felder (CourtIDs) – werden nicht automatisch
     /// belegt. bts-light-seitig, persistiert über Neustarts. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar.
@@ -1297,6 +1319,21 @@ impl AppConfig {
         kanonische_guid(&self.tournament_uuid)
     }
 
+    /// Pfad der TP-Datei für das **aktuelle** Turnier — nur, wenn die beim
+    /// Wählen gebundene GUID zur heutigen kanonischen GUID passt. Beide Seiten
+    /// werden normalisiert verglichen (`{…}`, Groß/Klein), damit eine andere
+    /// Schreibweise nicht grundlos „Datei neu wählen" auslöst. Leerer Pfad,
+    /// fehlende oder abweichende GUID → `None`.
+    pub fn tp_datei_fuer_turnier(&self) -> Option<std::path::PathBuf> {
+        let pfad = self.tp_upload.path.trim();
+        if pfad.is_empty() {
+            return None;
+        }
+        let aktuell = self.tournament_uuid_kanonisch()?;
+        let gebunden = kanonische_guid(&self.tp_upload.tournament_uuid)?;
+        (aktuell == gebunden).then(|| std::path::PathBuf::from(pfad))
+    }
+
     /// Migration + Spiegel der Turnier-GUID (siehe Feld-Kommentar). Wird
     /// beim Laden gerufen; idempotent.
     pub fn spiegele_turnier_guid(&mut self) {
@@ -1370,6 +1407,50 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── TP-Datei an badhub (Spec tp-datei-upload, L1) ──────────────────
+    #[test]
+    fn tp_upload_config_roundtrip_und_alte_config_ohne_block() {
+        // Alte config.json ohne `tp_upload` lädt mit leerem Block …
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config lädt");
+        assert_eq!(cfg.tp_upload, TpUploadConfig::default());
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+        // … und Pfad + GUID überleben den Roundtrip unverändert.
+        let mut cfg = cfg;
+        cfg.tp_upload.path = r"C:\Turniere\Köpi-Cup 2026.TP".to_string();
+        cfg.tp_upload.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(wieder.tp_upload, cfg.tp_upload);
+    }
+
+    #[test]
+    fn tp_datei_nur_bei_gleicher_guid() {
+        let mut cfg = AppConfig::default();
+        cfg.tp_upload.path = r"D:\tp\turnier.tp".to_string();
+        // Gebunden in BTP-Schreibweise (geschweift, klein), aktuell kanonisch → passt.
+        cfg.tp_upload.tournament_uuid = "{0ea5fd86-a64f-4445-a8de-bae3dbf762ba}".to_string();
+        cfg.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        assert_eq!(
+            cfg.tp_datei_fuer_turnier(),
+            Some(std::path::PathBuf::from(r"D:\tp\turnier.tp"))
+        );
+        // GUID geändert → None („Datei neu wählen"), Pfad bleibt stehen.
+        cfg.tournament_uuid = "9AA7FE89-0000-4000-8000-000000000001".to_string();
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+        assert!(!cfg.tp_upload.path.is_empty());
+        // Keine aktuelle GUID → None.
+        cfg.tournament_uuid.clear();
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+        // Pfad leer → None, auch bei passender GUID.
+        cfg.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        cfg.tp_upload.path = "   ".to_string();
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+    }
 
     #[test]
     fn missing_file_yields_default_config() {
@@ -1851,6 +1932,10 @@ mod tests {
             finished_warning_seconds: 60,
             locked_courts_tournament: "Testturnier".to_string(),
             tablet_settings_pin: "1234".to_string(),
+            tp_upload: TpUploadConfig {
+                path: r"C:\Turniere\test.tp".to_string(),
+                tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
+            },
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),
                 mime: "image/png".to_string(),
