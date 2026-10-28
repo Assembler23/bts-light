@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.304
+
+- **Tablet-Adresse anklickbar.** Im Tablet-Spielzettel ist die Adresse je
+  Feld (neben dem QR-Code und in der QR-Vergrößerung) jetzt ein Link: Ein
+  Klick öffnet den Spielzettel im Standardbrowser des Turnier-PCs. Der
+  Öffner lässt dafür zusätzlich zu `https` und `localhost` die Adresse des
+  eigenen LAN-Servers zu — und sonst nichts.
+
 ## v0.9.303
 
 - **Rückfrage statt Ablehnung bei abweichender Kennung.** Gehört die gewählte
