@@ -50,7 +50,11 @@ import {
   istUmschaltbar,
 } from "../io/badhubZiel.mjs";
 import { PRESETS, findPreset, findPresetFor } from "../presets";
-import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
+import {
+  extractTournamentGuid,
+  isTournamentGuid,
+  shortTournamentGuid,
+} from "../tournamentGuid";
 import type {
   AppConfig,
   ConnectionMode,
@@ -326,8 +330,12 @@ export function SetupWizard({
   // selbst (`Settings.LinkCode`): Ist oben noch keine eingetragen, wird sie von
   // dort übernommen; steht oben eine andere, wird die Datei abgelehnt.
   const tpGuidJetzt = extractTournamentGuid(tournamentGuid);
-  /** `99F55FAB-E301-…` → „99F55FAB…“ (wie die Meldungen des Rust-Kerns und des Servers). */
-  const guidKurz = (g: string) => `${g.slice(0, 8)}…`;
+  /** Feld wirklich leer — nur dann wird die Kennung aus der Datei übernommen.
+   *  Steht dort eine halbe Adresse oder ein Tippfehler, wird nichts überschrieben. */
+  const tpFeldLeer = tournamentGuid.trim() === "";
+  /** Gebundene Kennung kanonisch — eine von Hand editierte config.json darf
+   *  keinen falschen „gehört zu einem anderen Turnier“-Hinweis auslösen. */
+  const tpGuidKanon = extractTournamentGuid(tpGuid);
   function tpInfoText(info: TpFileInfo): string | null {
     switch (info.art) {
       case "erkannt":
@@ -367,9 +375,17 @@ export function SetupWizard({
       const dateiGuid = info.art === "erkannt" ? (info.guid ?? "") : "";
       let bindung = tpGuidJetzt;
       if (bindung === "") {
-        if (dateiGuid === "") {
+        if (!tpFeldLeer) {
+          // Etwas steht im Feld, ist aber keine Kennung — nicht still ersetzen.
           setTpError(
-            `„${name}“ nennt keine Turnier-Kennung — erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen, dann die Datei wählen.`,
+            "Die Eingabe unter „1 · Liveticker-Ziel“ ist keine Turnier-Kennung — Feld leeren oder die turnier.de-Adresse einfügen, dann die Datei wählen.",
+          );
+          return;
+        }
+        if (dateiGuid === "") {
+          // Leer, mehrdeutig oder ohne Anker — die Datei allein reicht nicht.
+          setTpError(
+            `„${name}“ nennt keine eindeutige Turnier-Kennung — erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen, dann die Datei wählen.`,
           );
           return;
         }
@@ -378,7 +394,7 @@ export function SetupWizard({
         setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${dateiGuid}`);
       } else if (dateiGuid !== "" && dateiGuid !== bindung) {
         setTpError(
-          `„${name}“ gehört zu Turnier ${guidKurz(dateiGuid)}, oben ist ${guidKurz(bindung)} eingetragen — Kennung prüfen oder andere Datei wählen.`,
+          `„${name}“ gehört zu Turnier ${shortTournamentGuid(dateiGuid)}, oben ist ${shortTournamentGuid(bindung)} eingetragen — Kennung prüfen oder andere Datei wählen.`,
         );
         return;
       }
@@ -1367,7 +1383,7 @@ export function SetupWizard({
           {tpPath && (
             <p className="break-all font-mono text-xs text-slate-600">{tpPath}</p>
           )}
-          {tpGuidJetzt === "" && (
+          {tpFeldLeer && (
             <p className="text-xs text-slate-500">
               Unter „1 · Liveticker-Ziel“ ist noch keine Turnier-Kennung eingetragen —
               beim Wählen übernimmt bts-light die Kennung aus der Datei.
@@ -1376,17 +1392,20 @@ export function SetupWizard({
           {tpPath && tpInfo?.art === "erkannt" && (
             <p className="flex items-center gap-1.5 text-sm text-emerald-700">
               <Check size={16} /> {tpInfo.anzeige}
-              {tpInfo.guid !== null && tpInfo.guid === tpGuid && " · Turnier-Kennung passt"}
+              {tpInfo.guid !== null &&
+                tpInfo.guid === tpGuidKanon &&
+                " · Turnier-Kennung passt"}
             </p>
           )}
           {tpPath &&
             tpInfo?.art === "erkannt" &&
             tpInfo.guid !== null &&
-            tpGuid !== "" &&
-            tpInfo.guid !== tpGuid && (
+            tpGuidKanon !== "" &&
+            tpInfo.guid !== tpGuidKanon && (
               <p className="text-sm text-amber-700">
-                Die Datei gehört zu Turnier {guidKurz(tpInfo.guid)}, gebunden ist{" "}
-                {guidKurz(tpGuid)} — Datei neu wählen.
+                Die Datei gehört zu Turnier {shortTournamentGuid(tpInfo.guid)}, gebunden
+                ist {shortTournamentGuid(tpGuidKanon)} — Kennung unter „1 ·
+                Liveticker-Ziel“ prüfen oder andere Datei wählen.
               </p>
             )}
           {tpHinweis && (

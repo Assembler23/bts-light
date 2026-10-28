@@ -24,3 +24,9 @@ export function extractTournamentGuid(value: string): string {
   const match = value.match(GUID_RE);
   return match ? match[0].toUpperCase() : "";
 }
+
+/** `99F55FAB-E301-…` → „99F55FAB…“ — so kürzen auch der Rust-Kern
+ *  (`badhub::tp_guid::kurz`) und die badhub-Meldungen beide Kennungen. */
+export function shortTournamentGuid(guid: string): string {
+  return `${guid.slice(0, 8)}…`;
+}

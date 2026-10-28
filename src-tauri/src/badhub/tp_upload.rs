@@ -94,12 +94,16 @@ pub fn tp_file_check(pfad: &Path) -> TpFileInfo {
         Ok(v)
     });
     match gelesen {
+        // Zwischen Metadaten und Lesen gewachsen: die echte Größe nennen,
+        // nicht den Deckel.
         Ok(bytes) if bytes.len() as u64 > TP_MAX_BYTES => TpFileInfo::ZuGross {
-            groesse: bytes.len() as u64,
+            groesse: std::fs::metadata(pfad)
+                .map(|m| m.len())
+                .unwrap_or(bytes.len() as u64),
         },
         Ok(bytes) if bytes.starts_with(JET_KOPF) => TpFileInfo::Erkannt {
-            groesse,
-            anzeige: format!("Turnierdatei erkannt, {}", mb_anzeige(groesse)),
+            groesse: bytes.len() as u64,
+            anzeige: format!("Turnierdatei erkannt, {}", mb_anzeige(bytes.len() as u64)),
             guid: match crate::badhub::tp_guid::guid_aus_bytes(&bytes) {
                 crate::badhub::tp_guid::GuidBefund::Gefunden(g) => Some(g),
                 _ => None,

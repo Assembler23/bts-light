@@ -1177,27 +1177,13 @@ fn lese_fehler_text(e: &crate::badhub::tp_upload::LeseFehler) -> String {
     }
 }
 
-/// Turnier-Kennung aus der Datei, falls sie von der eingestellten abweicht.
-/// Leer, mehrdeutig oder ohne Anker → `None`: dann entscheidet der Server.
-fn fremde_guid(bytes: &[u8], eingestellt: &str) -> Option<String> {
-    match crate::badhub::tp_guid::guid_aus_bytes(bytes) {
-        crate::badhub::tp_guid::GuidBefund::Gefunden(datei) if datei != eingestellt => Some(datei),
-        _ => None,
-    }
-}
-
-/// `99F55FAB-E301-…` → „99F55FAB…“, wie die Server-Meldung beide Kennungen kürzt.
-fn guid_kurz(guid: &str) -> String {
-    let kopf: String = guid.chars().take(8).collect();
-    format!("{kopf}…")
-}
-
 /// Knopf-Text, wenn die Datei zu einem anderen Turnier gehört (Handbuch-Anker).
 fn guid_fremd_text(name: &str, datei: &str, eingestellt: &str) -> String {
+    use crate::badhub::tp_guid::kurz;
     format!(
-        "„{name}“ gehört zu Turnier {}, eingestellt ist {} — Kennung unter „1 · Liveticker-Ziel“ prüfen oder Datei neu wählen",
-        guid_kurz(datei),
-        guid_kurz(eingestellt)
+        "„{name}“ gehört zu Turnier {}, eingestellt ist {} — Kennung unter „1 · Liveticker-Ziel“ prüfen oder andere Datei wählen",
+        kurz(datei),
+        kurz(eingestellt)
     )
 }
 
@@ -1238,7 +1224,7 @@ pub(crate) async fn fuehre_upload_aus(
             let fremd = gelesen
                 .as_ref()
                 .ok()
-                .and_then(|b| fremde_guid(b, &vorgaben.guid));
+                .and_then(|b| crate::badhub::tp_guid::fremde_guid(b, &vorgaben.guid));
             match (gelesen, fremd) {
                 (Err(e), _) => (lese_fehler_text(&e), UploadAusgang::Lesefehler(e)),
                 (Ok(bytes), Some(datei)) => {

@@ -12,18 +12,38 @@
 //! gäbe es ohnehin nur mit Lizenzfrage.
 
 /// Befund der Suche. `Mehrdeutig` entsteht, wenn eine alte Fassung der
-/// Settings-Zeile noch im freien Seitenplatz liegt (Jet löscht nicht) und eine
-/// andere GUID trägt — dann rät die App nicht.
+/// Settings-Zeile noch im freien Seitenplatz liegt (Jet löscht nicht) und
+/// anderes trägt — eine andere GUID oder gar keine. Welche Zeile die aktuelle
+/// ist, verrät die Datei nicht; dann rät die App nicht. In den 30 gemessenen
+/// Dateien kam der Anker je genau einmal vor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuidBefund {
     /// Kanonische GUID (Großschreibung), wie [`crate::config::kanonische_guid`].
     Gefunden(String),
     /// `LinkCode` vorhanden, aber ohne Wert — Turnier nicht mit turnier.de verknüpft.
     Leer,
-    /// Mehrere verschiedene GUIDs hinter `LinkCode`, sortiert.
+    /// Mehrere Anker mit unterschiedlichem Inhalt: die gefundenen GUIDs,
+    /// sortiert (ein Eintrag, wenn daneben ein leerer Anker lag).
     Mehrdeutig(Vec<String>),
     /// Kein `LinkCode` in der Datei.
     KeinAnker,
+}
+
+/// Turnier-Kennung aus der Datei, falls sie eindeutig ist **und** von der
+/// eingestellten abweicht. Leer, mehrdeutig oder ohne Anker → `None`: dann
+/// entscheidet der Server (`guid_mismatch`).
+pub fn fremde_guid(bytes: &[u8], eingestellt: &str) -> Option<String> {
+    match guid_aus_bytes(bytes) {
+        GuidBefund::Gefunden(datei) if datei != eingestellt => Some(datei),
+        _ => None,
+    }
+}
+
+/// `99F55FAB-E301-…` → „99F55FAB…“, wie die Server-Meldung beide Kennungen
+/// kürzt (und `guidKurz` im Setup-Wizard).
+pub fn kurz(guid: &str) -> String {
+    let kopf: String = guid.chars().take(8).collect();
+    format!("{kopf}…")
 }
 
 /// Komprimierter Jet-Unicode (so in allen gemessenen Dateien).
@@ -38,36 +58,41 @@ const GUID_ZEICHEN: usize = 36;
 /// Ende hinaus; GUID-förmige Strings ohne Anker (Spieler-GUIDs, Jet-Interna)
 /// zählen nicht. Kosten: ein Durchlauf über die Bytes, Millisekunden.
 pub fn guid_aus_bytes(bytes: &[u8]) -> GuidBefund {
-    let mut anker = false;
+    let mut anker = 0usize;
     let mut gefunden: Vec<String> = Vec::new();
     for pos in fundstellen(bytes, ANKER_KOMPRIMIERT) {
-        anker = true;
+        anker += 1;
         let wert = bytes[pos + ANKER_KOMPRIMIERT.len()..]
             .get(..GUID_ZEICHEN)
             .and_then(|s| std::str::from_utf8(s).ok())
             .and_then(crate::config::kanonische_guid);
         gefunden.extend(wert);
     }
-    for pos in fundstellen(bytes, ANKER_UTF16) {
-        anker = true;
-        let wert = bytes[pos + ANKER_UTF16.len()..]
-            .get(..GUID_ZEICHEN * 2)
-            .map(|s| {
-                s.chunks_exact(2)
-                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                    .collect::<Vec<u16>>()
-            })
-            .and_then(|einheiten| String::from_utf16(&einheiten).ok())
-            .and_then(|text| crate::config::kanonische_guid(&text));
-        gefunden.extend(wert);
+    // Die UCS-2-Form nur suchen, wenn die komprimierte fehlt — spart den
+    // zweiten Durchlauf über die Datei im Regelfall.
+    if anker == 0 {
+        for pos in fundstellen(bytes, ANKER_UTF16) {
+            anker += 1;
+            let wert = bytes[pos + ANKER_UTF16.len()..]
+                .get(..GUID_ZEICHEN * 2)
+                .map(|s| {
+                    s.chunks_exact(2)
+                        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                        .collect::<Vec<u16>>()
+                })
+                .and_then(|einheiten| String::from_utf16(&einheiten).ok())
+                .and_then(|text| crate::config::kanonische_guid(&text));
+            gefunden.extend(wert);
+        }
     }
+    let leere_anker = anker - gefunden.len();
     gefunden.sort();
     gefunden.dedup();
-    match (anker, gefunden.len()) {
-        (false, _) => GuidBefund::KeinAnker,
-        (true, 0) => GuidBefund::Leer,
-        (true, 1) => GuidBefund::Gefunden(gefunden.remove(0)),
-        (true, _) => GuidBefund::Mehrdeutig(gefunden),
+    match (anker, gefunden.len(), leere_anker) {
+        (0, _, _) => GuidBefund::KeinAnker,
+        (_, 0, _) => GuidBefund::Leer,
+        (_, 1, 0) => GuidBefund::Gefunden(gefunden.remove(0)),
+        _ => GuidBefund::Mehrdeutig(gefunden),
     }
 }
 
@@ -164,9 +189,54 @@ mod tests {
     }
 
     #[test]
-    fn leere_altfassung_neben_gefuellter_zeile_stoert_nicht() {
+    fn leerer_anker_neben_gefuellter_zeile_ist_mehrdeutig() {
+        // Welche Zeile die aktuelle ist, sagt die Datei nicht: Eine entlinkte
+        // Datei mit alter GUID im freien Seitenplatz sähe genauso aus wie
+        // eine frisch verknüpfte mit leerer Altfassung. Also nicht raten —
+        // in beiden Reihenfolgen.
         let b = datei(&[b"\xff\xfeLinkCode\xff\xfeSiteCode", &zeile(GUID)]);
+        assert_eq!(
+            guid_aus_bytes(&b),
+            GuidBefund::Mehrdeutig(vec![GUID_GROSS.into()])
+        );
+        let b = datei(&[&zeile(GUID), b"\xff\xfeLinkCode\xff\xfeSiteCode"]);
+        assert_eq!(
+            guid_aus_bytes(&b),
+            GuidBefund::Mehrdeutig(vec![GUID_GROSS.into()])
+        );
+    }
+
+    #[test]
+    fn ucs2_form_zaehlt_nur_ohne_komprimierten_anker() {
+        // Gibt es den komprimierten Anker, ist die zweite Suche überflüssig
+        // (und ein UCS-2-Treffer mit anderer GUID wäre kein echter Datensatz).
+        let mut z = Vec::new();
+        for c in "LinkCode".encode_utf16().chain(ANDERE.encode_utf16()) {
+            z.extend_from_slice(&c.to_le_bytes());
+        }
+        let b = datei(&[&zeile(GUID), &z]);
         assert_eq!(guid_aus_bytes(&b), GuidBefund::Gefunden(GUID_GROSS.into()));
+    }
+
+    #[test]
+    fn fremde_guid_nur_bei_eindeutig_abweichender_kennung() {
+        assert_eq!(
+            fremde_guid(&datei(&[&zeile(GUID)]), ANDERE),
+            Some(GUID_GROSS.to_string())
+        );
+        assert_eq!(fremde_guid(&datei(&[&zeile(GUID)]), GUID_GROSS), None);
+        // Unklar oder ohne Anker → der Server entscheidet.
+        assert_eq!(fremde_guid(&datei(&[]), ANDERE), None);
+        assert_eq!(
+            fremde_guid(&datei(&[&zeile(GUID), &zeile(ANDERE)]), ANDERE),
+            None
+        );
+    }
+
+    #[test]
+    fn kurz_nimmt_acht_zeichen_und_ellipse() {
+        assert_eq!(kurz(GUID_GROSS), "49D86707…");
+        assert_eq!(kurz("ABC"), "ABC…");
     }
 
     #[test]
