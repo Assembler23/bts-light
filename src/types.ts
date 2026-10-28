@@ -272,6 +272,10 @@ export interface CheckinView {
   public_url: string;
   /** Druckbarer QR-Aushang (`…/aushang`) zum selben Turnier. */
   poster_url: string;
+  /** Kiosk-Ansicht für das Check-In-Gerät in der Halle (`…/halle`). */
+  hall_url: string;
+  /** Zeitplan mit allen Anfangszeiten (`…/zeitplan`). */
+  schedule_url: string;
 }
 
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */

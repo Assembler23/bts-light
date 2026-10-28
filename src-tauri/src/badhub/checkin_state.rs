@@ -274,6 +274,12 @@ pub struct CheckinView {
     /// Druckbarer QR-Aushang (`…/aushang`) zum selben Turnier.
     #[serde(default)]
     pub poster_url: String,
+    /// Kiosk-Ansicht für das Check-In-Gerät in der Halle (`…/halle`).
+    #[serde(default)]
+    pub hall_url: String,
+    /// Zeitplan mit allen Anfangszeiten (`…/zeitplan`).
+    #[serde(default)]
+    pub schedule_url: String,
 }
 
 impl CheckinView {
@@ -286,6 +292,8 @@ impl CheckinView {
             message: message.into(),
             public_url: String::new(),
             poster_url: String::new(),
+            hall_url: String::new(),
+            schedule_url: String::new(),
         }
     }
 }
@@ -424,6 +432,16 @@ pub fn poster_url(base: &str, uuid: &str) -> String {
     format!("{}/aushang", public_url(base, uuid))
 }
 
+/// Kiosk-Ansicht für das Check-In-Gerät in der Halle.
+pub fn hall_url(base: &str, uuid: &str) -> String {
+    format!("{}/halle", public_url(base, uuid))
+}
+
+/// Zeitplan-Seite mit den Anfangszeiten aller Klassen.
+pub fn schedule_url(base: &str, uuid: &str) -> String {
+    format!("{}/zeitplan", public_url(base, uuid))
+}
+
 /// Den vollständigen Check-In-Stand abrufen (AK-C1, C5).
 ///
 /// **Liefert nie `Err`.** Warum, steht im Modulkopf.
@@ -500,6 +518,8 @@ pub async fn fetch_state(
         // bekannt, was badhub geantwortet hat.
         public_url: String::new(),
         poster_url: String::new(),
+        hall_url: String::new(),
+        schedule_url: String::new(),
     }
 }
 
@@ -783,6 +803,14 @@ mod tests {
         assert_eq!(
             poster_url("https://badhub.de", UUID),
             format!("https://badhub.de/checkin/{UUID}/aushang")
+        );
+        assert_eq!(
+            hall_url("https://badhub.de/", UUID),
+            format!("https://badhub.de/checkin/{UUID}/halle")
+        );
+        assert_eq!(
+            schedule_url("https://test.badhub.de", UUID),
+            format!("https://test.badhub.de/checkin/{UUID}/zeitplan")
         );
     }
 

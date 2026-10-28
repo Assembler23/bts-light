@@ -794,6 +794,8 @@ pub async fn checkin_state(
     // denn die Adresse selbst gilt unabhängig von der Erreichbarkeit.
     view.public_url = crate::badhub::checkin_state::public_url(&base, &uuid);
     view.poster_url = crate::badhub::checkin_state::poster_url(&base, &uuid);
+    view.hall_url = crate::badhub::checkin_state::hall_url(&base, &uuid);
+    view.schedule_url = crate::badhub::checkin_state::schedule_url(&base, &uuid);
     Ok(view)
 }
 
