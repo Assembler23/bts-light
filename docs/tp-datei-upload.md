@@ -64,12 +64,16 @@ die Turnierdatei ein, und bts-light liest sie beim Wählen mit:
 - Passt die Kennung, steht neben dem Urteil **„Turnier-Kennung passt“**.
   <!-- pruef: "Turnier-Kennung passt" in src/pages/SetupWizard.tsx -->
 - Gehört die Datei zu einem **anderen** Turnier als die eingetragene Kennung,
-  wird sie abgelehnt („… gehört zu Turnier …“) und nichts gespeichert. Prüfe
-  dann die Kennung oben — oder du hast die Datei vom Vorjahr erwischt. Eine
-  andere Kennung übernimmt bts-light bewusst nicht von selbst: Sie steuert
-  auch den Liveticker, und der würde sonst still auf ein fremdes Turnier
-  zeigen.
+  fragt bts-light nach („… gehört zu Turnier …, oben ist … eingetragen.
+  Kennung aus der Datei übernehmen?“). **Kennung übernehmen** ersetzt die
+  Kennung oben durch die aus der Datei und speichert die Datei; **Abbrechen**
+  speichert nichts. Vor dem Klick kurz prüfen: Ist das die richtige Datei —
+  oder die vom Vorjahr? Die Kennung steuert auch Liveticker, Check-In und
+  Aushang; deshalb übernimmt bts-light sie nie still, sondern nur nach
+  deiner Bestätigung. Dieselbe Rückfrage kommt, wenn oben etwas steht, das
+  keine Kennung ist (etwa eine halbe Adresse).
   <!-- pruef: "gehört zu Turnier" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: "Kennung übernehmen" in src/pages/SetupWizard.tsx -->
 
 Eine Datei ohne Kennung (Turnier nicht mit turnier.de verknüpft) lässt sich
 nur wählen, wenn oben eine Kennung eingetragen ist; ob sie passt, prüft dann
