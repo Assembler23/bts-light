@@ -482,6 +482,7 @@ dependencies = [
  "rcgen",
  "relay-proto",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "tauri",
