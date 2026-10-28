@@ -76,8 +76,8 @@ pub fn guid_aus_bytes(bytes: &[u8]) -> GuidBefund {
             let wert = bytes[pos + ANKER_UTF16.len()..]
                 .get(..GUID_ZEICHEN * 2)
                 .map(|s| {
-                    s.chunks_exact(2)
-                        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                    (0..s.len() / 2)
+                        .map(|i| u16::from_le_bytes([s[2 * i], s[2 * i + 1]]))
                         .collect::<Vec<u16>>()
                 })
                 .and_then(|einheiten| String::from_utf16(&einheiten).ok())
