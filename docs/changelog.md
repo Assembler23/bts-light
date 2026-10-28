@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.303
+
+- **Rückfrage statt Ablehnung bei abweichender Kennung.** Gehört die gewählte
+  TP-Datei zu einem anderen Turnier als die unter „1 · Liveticker-Ziel"
+  eingetragene Kennung (oder steht dort etwas, das keine Kennung ist), fragt
+  das Setup jetzt: **Kennung übernehmen** ersetzt die Kennung durch die aus der
+  Datei und speichert die Datei, **Abbrechen** speichert nichts. Der Hinweis
+  sagt dazu, dass die Kennung auch Liveticker, Check-In und Aushang steuert.
+
 ## v0.9.302
 
 - **Turnier-Kennung aus der Turnierdatei.** Beim Wählen der TP-Datei liest

@@ -3,8 +3,9 @@
 //! Drei reine Bausteine, die der Tauri-Command `tp_upload_now` (commands.rs)
 //! unter dem Schreib-Gate (ADR 0060) zusammensetzt:
 //!
-//! 1. [`tp_file_check`] — Endung, Jet-Kopf, Größe; liest nur 19 Bytes und die
-//!    Metadaten. Dasselbe Urteil zeigt das Setup neben dem gewählten Pfad.
+//! 1. [`tp_file_vorpruefung`] — Endung, Jet-Kopf, Größe; liest nur 19 Bytes
+//!    und die Metadaten. [`tp_file_check`] setzt darauf die volle Lesung für
+//!    die Turnier-GUID (`tp_guid`) — nur im Setup, nie unter dem Gate.
 //! 2. [`lese_stabil`] — zweimal lesen mit Abstand, Bytes vergleichen, bei
 //!    Abweichung einmal wiederholen. BTP hält die Datei offen; Eingaben des
 //!    Turnierleiters sieht niemand, dagegen steht nur dieser Vergleich (und die
@@ -63,10 +64,9 @@ pub enum TpFileInfo {
 }
 
 /// Endung `.tp` (Groß/Klein egal), Datei vorhanden und lesbar, Jet-Kopf, ≤ 32 MB.
-/// Liest die Datei einmal ganz (ohne Schreib-Gate, Millisekunden), um die
-/// Turnier-GUID herauszusuchen — die Bytes bleiben nicht im Speicher und
-/// landen nicht im Log.
-pub fn tp_file_check(pfad: &Path) -> TpFileInfo {
+/// Liest nur die ersten 19 Bytes und die Metadaten — billig genug für den
+/// Lauf unter dem Schreib-Gate in [`lese_stabil`]. `guid` bleibt hier `None`.
+pub fn tp_file_vorpruefung(pfad: &Path) -> TpFileInfo {
     let endung_ok = pfad
         .extension()
         .map(|e| e.to_string_lossy().eq_ignore_ascii_case("tp"))
@@ -85,16 +85,40 @@ pub fn tp_file_check(pfad: &Path) -> TpFileInfo {
     if groesse > TP_MAX_BYTES {
         return TpFileInfo::ZuGross { groesse };
     }
+    let mut kopf = [0u8; JET_KOPF.len()];
+    let gelesen = std::fs::File::open(pfad).and_then(|mut f| {
+        use std::io::Read;
+        f.read_exact(&mut kopf)
+    });
+    match gelesen {
+        Ok(()) if &kopf == JET_KOPF => TpFileInfo::Erkannt {
+            groesse,
+            anzeige: format!("Turnierdatei erkannt, {}", mb_anzeige(groesse)),
+            guid: None,
+        },
+        Ok(()) => TpFileInfo::KeineTpDatei,
+        // Zu kurz für den Kopf (leere Datei) → keine TP-Datei; sonst nicht lesbar.
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => TpFileInfo::KeineTpDatei,
+        Err(_) => TpFileInfo::NichtGefunden,
+    }
+}
+
+/// Urteil fürs Setup: [`tp_file_vorpruefung`] plus **eine** volle Lesung
+/// (Deckel beim Lesen, TOCTOU) für die Turnier-GUID aus `Settings.LinkCode`.
+/// Die Bytes bleiben nicht im Speicher und landen nicht im Log. Nicht unter
+/// dem Schreib-Gate aufrufen — dafür ist die Vorprüfung da.
+pub fn tp_file_check(pfad: &Path) -> TpFileInfo {
+    let TpFileInfo::Erkannt { groesse, .. } = tp_file_vorpruefung(pfad) else {
+        return tp_file_vorpruefung(pfad);
+    };
     let gelesen = std::fs::File::open(pfad).and_then(|f| {
         use std::io::Read;
         let mut v = Vec::with_capacity(groesse as usize);
-        // Deckel beim Lesen (TOCTOU): zwischen Metadaten und Lesen kann die
-        // Datei gewachsen sein.
         f.take(TP_MAX_BYTES + 1).read_to_end(&mut v)?;
         Ok(v)
     });
     match gelesen {
-        // Zwischen Metadaten und Lesen gewachsen: die echte Größe nennen,
+        // Zwischen Vorprüfung und Lesen gewachsen: die echte Größe nennen,
         // nicht den Deckel.
         Ok(bytes) if bytes.len() as u64 > TP_MAX_BYTES => TpFileInfo::ZuGross {
             groesse: std::fs::metadata(pfad)
@@ -109,7 +133,7 @@ pub fn tp_file_check(pfad: &Path) -> TpFileInfo {
                 _ => None,
             },
         },
-        // Kein Jet-Kopf oder zu kurz dafür (leere Datei) → keine TP-Datei.
+        // Inzwischen getauscht oder geleert → keine TP-Datei.
         Ok(_) => TpFileInfo::KeineTpDatei,
         Err(_) => TpFileInfo::NichtGefunden,
     }
@@ -195,7 +219,9 @@ pub(crate) async fn lesen(pfad: &Path) -> Result<Vec<u8>, LeseFehler> {
 /// das `NichtLesbar` — nie die erste Lesung als Ergebnis, denn genau die könnte
 /// ein halb geschriebener Stand sein.
 pub async fn lese_stabil(pfad: &Path, abstand: Duration) -> Result<Vec<u8>, LeseFehler> {
-    match tp_file_check(pfad) {
+    // Nur Kopf und Metadaten — das läuft unter dem Schreib-Gate, die volle
+    // Lesung kommt gleich ohnehin (zweimal).
+    match tp_file_vorpruefung(pfad) {
         TpFileInfo::Erkannt { .. } => {}
         TpFileInfo::KeineTpDatei => return Err(LeseFehler::KeineTpDatei),
         TpFileInfo::ZuGross { .. } => return Err(LeseFehler::ZuGross),
@@ -607,6 +633,26 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn vorpruefung_liest_nur_den_kopf_und_keine_guid() {
+        // Die Vorprüfung vor dem stabilen Lesen (unter dem Schreib-Gate!) darf
+        // die Datei nicht ganz lesen — dasselbe Urteil, aber ohne GUID.
+        let p = tmp("vorpruefung.tp");
+        let mut nutzlast = vec![0u8; 50];
+        nutzlast.extend_from_slice(b"\xff\xfeLinkCode\xff\xfe99F55FAB-E301-41A2-A165-1D162CB84FC1");
+        std::fs::write(&p, jet(&nutzlast)).unwrap();
+        match tp_file_vorpruefung(&p) {
+            TpFileInfo::Erkannt { guid, groesse, .. } => {
+                assert_eq!(guid, None);
+                assert_eq!(groesse, (JET_KOPF.len() + nutzlast.len()) as u64);
+            }
+            andere => panic!("{andere:?}"),
+        }
+        let kurz = tmp("kurz.tp");
+        std::fs::write(&kurz, b"\x00\x01\x00\x00Standard").unwrap();
+        assert_eq!(tp_file_vorpruefung(&kurz), TpFileInfo::KeineTpDatei);
     }
 
     #[test]

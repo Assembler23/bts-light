@@ -320,6 +320,17 @@ export function SetupWizard({
   const [tpError, setTpError] = useState("");
   /** Hinweis der letzten Wahl, z. B. „Turnier-Kennung aus der Datei übernommen“. */
   const [tpHinweis, setTpHinweis] = useState("");
+  /** Offene Rückfrage: Die Datei nennt eine andere Kennung als das Feld oben
+   *  (oder dort steht etwas, das keine Kennung ist). Erst nach „Kennung
+   *  übernehmen“ wird die Datei gespeichert und die Kennung oben ersetzt. */
+  const [tpFrage, setTpFrage] = useState<{
+    path: string;
+    name: string;
+    info: TpFileInfo;
+    dateiGuid: string;
+    /** Kanonische Kennung aus dem Feld oben; "" = Text ohne Kennung. */
+    eingetragen: string;
+  } | null>(null);
   useEffect(() => {
     if (!tpPath) return;
     tpFileCheck(tpPath).then(setTpInfo).catch(() => {});
@@ -348,9 +359,22 @@ export function SetupWizard({
         return "Das ist keine TP-Datei (Turnierdatenbank von BTP).";
     }
   }
+  /** Antwort „Kennung übernehmen“ auf die Rückfrage: Datei speichern und die
+   *  Kennung oben durch die aus der Datei ersetzen — ausdrücklich, nie still. */
+  function uebernehmeKennungAusDatei() {
+    if (!tpFrage) return;
+    const { path, info, dateiGuid } = tpFrage;
+    setTpFrage(null);
+    setTournamentGuid(dateiGuid);
+    setTpInfo(info);
+    setTpPath(path);
+    setTpGuid(dateiGuid);
+    setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${dateiGuid}`);
+  }
   async function pickTpDatei() {
     setTpError("");
     setTpHinweis("");
+    setTpFrage(null);
     try {
       const sel = await open({
         multiple: false,
@@ -375,13 +399,6 @@ export function SetupWizard({
       const dateiGuid = info.art === "erkannt" ? (info.guid ?? "") : "";
       let bindung = tpGuidJetzt;
       if (bindung === "") {
-        if (!tpFeldLeer) {
-          // Etwas steht im Feld, ist aber keine Kennung — nicht still ersetzen.
-          setTpError(
-            "Die Eingabe unter „1 · Liveticker-Ziel“ ist keine Turnier-Kennung — Feld leeren oder die turnier.de-Adresse einfügen, dann die Datei wählen.",
-          );
-          return;
-        }
         if (dateiGuid === "") {
           // Leer, mehrdeutig oder ohne Anker — die Datei allein reicht nicht.
           setTpError(
@@ -389,13 +406,20 @@ export function SetupWizard({
           );
           return;
         }
+        if (!tpFeldLeer) {
+          // Etwas steht im Feld, ist aber keine Kennung — nicht still
+          // ersetzen, sondern fragen.
+          setTpFrage({ path, name, info, dateiGuid, eingetragen: "" });
+          return;
+        }
         bindung = dateiGuid;
         setTournamentGuid(dateiGuid);
         setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${dateiGuid}`);
       } else if (dateiGuid !== "" && dateiGuid !== bindung) {
-        setTpError(
-          `„${name}“ gehört zu Turnier ${shortTournamentGuid(dateiGuid)}, oben ist ${shortTournamentGuid(bindung)} eingetragen — Kennung prüfen oder andere Datei wählen.`,
-        );
+        // Konflikt: Die Datei gehört zu einem anderen Turnier als die
+        // eingetragene Kennung. Nachfragen statt ablehnen — die Kennung
+        // steuert auch den Liveticker, deshalb ausdrücklich bestätigen lassen.
+        setTpFrage({ path, name, info, dateiGuid, eingetragen: bindung });
         return;
       }
       setTpInfo(info);
@@ -1369,6 +1393,7 @@ export function SetupWizard({
                   setTpInfo(null);
                   setTpError("");
                   setTpHinweis("");
+                  setTpFrage(null);
                   // Ohne Datei keine Automatik — sonst hielte sie beim nächsten
                   // Schritt mit „Keine TP-Datei gewählt“ an (Spec AK 17a).
                   setTpAuto(false);
@@ -1392,8 +1417,13 @@ export function SetupWizard({
           {tpPath && tpInfo?.art === "erkannt" && (
             <p className="flex items-center gap-1.5 text-sm text-emerald-700">
               <Check size={16} /> {tpInfo.anzeige}
+              {/* Nur, wenn die Kennung oben noch die gebundene ist — sonst
+                  stünde „passt“ neben „Datei neu wählen“. Nach einer
+                  Übernahme sagt es schon der Hinweis darunter. */}
               {tpInfo.guid !== null &&
                 tpInfo.guid === tpGuidKanon &&
+                tpGuidPasst &&
+                !tpHinweis &&
                 " · Turnier-Kennung passt"}
             </p>
           )}
@@ -1412,6 +1442,35 @@ export function SetupWizard({
             <p className="flex items-center gap-1.5 text-sm text-emerald-700">
               <Check size={16} /> {tpHinweis}
             </p>
+          )}
+          {tpFrage && (
+            <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p>
+                {tpFrage.eingetragen !== ""
+                  ? `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}, oben ist ${shortTournamentGuid(tpFrage.eingetragen)} eingetragen.`
+                  : `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}; die Eingabe unter „1 · Liveticker-Ziel“ ist keine Turnier-Kennung.`}{" "}
+                Kennung aus der Datei übernehmen? Damit zeigen auch Liveticker, Check-In
+                und Aushang auf dieses Turnier.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={uebernehmeKennungAusDatei}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white
+                             transition-colors hover:bg-amber-700"
+                >
+                  Kennung übernehmen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTpFrage(null)}
+                  className="rounded-lg px-3 py-1.5 text-sm text-slate-600 transition-colors
+                             hover:bg-slate-100"
+                >
+                  Abbrechen — Datei nicht speichern
+                </button>
+              </div>
+            </div>
           )}
           {tpPath && tpInfo && tpInfo.art !== "erkannt" && (
             <p className="text-sm text-amber-700">{tpInfoText(tpInfo)}</p>
