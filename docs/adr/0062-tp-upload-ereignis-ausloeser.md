@@ -26,14 +26,24 @@ Paarung bleibt also „Sieger HF1“, bis eine neue Datei kommt.
    Entry2)` (`badhub/tp_ereignis.rs`) und vergleicht ihn mit dem vorigen.
    Neue oder entfernte Match-IDs oder eine geänderte Paarung sind ein
    Ereignis. Ergebnisse, Feld, Aufruf, Schiedsrichter und Farben **nicht** —
-   die bringt der Liveticker. Der erste Abruf nach dem Start (auch nach dem
-   Sync-Neustart beim Speichern) ist Ausgangslage, kein Ereignis.
+   die bringt der Liveticker. **Kein** Ereignis sind außerdem: der erste
+   Abruf nach dem Start (auch nach dem Sync-Neustart beim Speichern), ein
+   leerer Stand nach gefülltem (BTP-Neustart — der alte Kern bleibt, das
+   Wiederauffüllen zählt nicht) und ein Stand ohne gemeinsame Match-ID
+   (anderes Turnier geöffnet; das fängt der GUID-Abgleich).
 2. **Vorziehen, nicht senden.** Ein Ereignis zieht nur den nächsten Termin
-   des Takts vor (`TaktZustand::ereignis`) — auf `jetzt + 30 s`
-   Entprellung, nie unter `letzter Upload + Mindestabstand`, nie hinter den
-   bestehenden Termin. Der Takt-Schritt selbst bleibt unverändert:
-   Schnell-Hash, nur bei geänderter Datei Gate und Upload, dieselbe
-   Anhalte-Regel. Weitere Ereignisse im Fenster verschieben nichts.
+   des Takts vor (`TaktZustand::ereignis`). Der Takt-Schritt selbst bleibt
+   unverändert: Schnell-Hash, nur bei geänderter Datei Gate und Upload,
+   dieselbe Anhalte-Regel. Im Einzelnen:
+   - **Entprellung:** 30 s nach dem **letzten** Ereignis, gedeckelt auf
+     2 min nach dem ersten und den ursprünglichen Termin.
+   - **Untergrenzen:** `letzter Upload + Mindestabstand` (Takt und Knopf)
+     und jede Bremse aus 429/503 `Retry-After`, Pause oder Nachversuch.
+   - **Nicht verlieren:** Kommt ein Ereignis, während der Schritt fällig
+     ist oder läuft, wird es nach dem Schritt angewendet.
+   - **Einmal nachprüfen:** Ist die Datei bei der vorgezogenen Prüfung noch
+     unverändert (BTP schreibt die Datei nach dem Protokoll), folgt genau
+     ein weiterer Blick nach 90 s, dann der Takt.
 3. **Abschaltbar und drosselbar.** `TpUploadConfig.ereignis_enabled`
    (Standard an, wirkt nur mit eingeschalteter Automatik) und
    `ereignis_minuten` (Mindestabstand, Standard 5, geklemmt auf ≥ 5). Beide

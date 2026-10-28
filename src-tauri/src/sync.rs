@@ -2119,12 +2119,12 @@ impl SyncEngine {
         // zieht der Sync-Loop vor, der den Takt-Zustand kennt.
         {
             let neu = crate::badhub::tp_ereignis::kern(&snapshot);
-            if let Some(alt) = &self.tp_kern {
-                if let Some(grund) = crate::badhub::tp_ereignis::vergleiche(alt, &neu) {
-                    self.tp_ereignis = Some(grund);
-                }
+            let (gemerkt, ereignis) =
+                crate::badhub::tp_ereignis::fortschreiben(self.tp_kern.take(), neu);
+            self.tp_kern = Some(gemerkt);
+            if ereignis.is_some() {
+                self.tp_ereignis = ereignis;
             }
-            self.tp_kern = Some(neu);
         }
 
         // Turnier-Topologie ins Diagnose-Log – nur bei Änderung, damit es

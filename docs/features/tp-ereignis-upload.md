@@ -34,8 +34,8 @@ Fernsteuerung der Drossel (badhub bremst über `Retry-After`, ADR 0061).
 | Frage | Entscheidung |
 |---|---|
 | E1 Was löst aus | Kern je Spiel `(draw_id, entry1_id, entry2_id)`; neue/entfernte Match-IDs oder geänderter Kern. Gründe für den Text: „neue Spiele“ > „Spielplan geändert“ > „Paarung“. |
-| E2 Wo erkannt | `SyncEngine::run_once` direkt nach dem Leer-Snapshot-Guard; erster Abruf = Ausgangslage. Der Sync-Loop holt das Ereignis ab (`tp_ereignis_nehmen`) und ruft `TaktZustand::ereignis`. |
-| E3 Wie gewirkt | Termin = max(jetzt + 30 s, letzter Upload + Mindestabstand); nur wenn früher als der bestehende; nicht bei Halt oder Takt aus. Knopf-Uploads zählen als „letzter Upload“. |
+| E2 Wo erkannt | `SyncEngine::run_once` direkt nach dem Leer-Snapshot-Guard über `tp_ereignis::fortschreiben`: erster Abruf, leerer Stand nach gefülltem und Turnierwechsel (keine gemeinsame ID) sind kein Ereignis. Der Sync-Loop holt das Ereignis ab (`tp_ereignis_nehmen`) und ruft `TaktZustand::ereignis`. |
+| E3 Wie gewirkt | Echte Entprellung: 30 s nach dem letzten Ereignis, höchstens 2 min nach dem ersten (`MAX_ENTPRELLUNG`), nie später als der ursprüngliche Termin. Untergrenzen: letzter Upload (Takt oder Knopf) + Mindestabstand und `sperre_bis_ms` (Retry-After, Pause, Nachversuch, Knopf läuft). Ereignis während fälligem/laufendem Schritt → `ereignis_offen`, nach dem Schritt angewendet. Datei bei der vorgezogenen Prüfung noch gleich → einmal nach 90 s nachprüfen. Nicht bei Halt oder Takt aus; Halt, Wiederanlauf, Knopf, Aus/An löschen den Grund. |
 | E4 Schalter | `ereignis_enabled` (Standard an), `ereignis_minuten` (Standard 5, Klemmung ≥ 5 über `ereignis_abstand()`); aus der geteilten Config je Abruf. |
 | E5 Status | `TaktZustand.ereignis_grund` reist ans Dashboard („Paarung erkannt — Prüfung 14:32“), fällt nach dem Schritt weg. Eine Log-Zeile je vorgezogenem Termin. |
 

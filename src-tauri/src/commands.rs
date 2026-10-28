@@ -1812,10 +1812,12 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             // aus der GETEILTEN Config (nicht der Wertkopie `sync_config`):
             // Abschalten im Setup wirkt so ab dem nächsten Abruf.
             let app_state = app_handle.state::<AppState>();
+            // Vergifteter Mutex: weiterlesen statt den ganzen Sync-Loop
+            // (Liveticker-Push) für einen optionalen Auslöser abzureißen.
             let abstand = app_state
                 .config
                 .lock()
-                .expect("Config-Mutex nicht vergiftet")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .tp_upload
                 .ereignis_abstand();
             let ereignis = engine.tp_ereignis_nehmen();

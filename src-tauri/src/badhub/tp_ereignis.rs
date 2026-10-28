@@ -46,6 +46,30 @@ pub fn kern(snapshot: &BtpSnapshot) -> Kern {
         .collect()
 }
 
+/// Fortschreiben über zwei Abrufe: liefert den zu merkenden Kern und ein
+/// etwaiges Ereignis. Drei Fälle sind **kein** Ereignis:
+/// - der erste Abruf (`alt = None`) — Ausgangslage, auch nach dem
+///   Sync-Neustart beim Speichern;
+/// - ein leerer Stand, wenn vorher Spiele da waren (BTP-Neustart, Turnier
+///   neu geladen) — der alte Kern bleibt, damit das Wiederauffüllen nicht
+///   als „neue Spiele“ zählt;
+/// - ein Stand ohne gemeinsame Match-ID mit dem alten (anderes Turnier in
+///   BTP geöffnet) — die Datei gehört dann zu einem anderen Turnier, das
+///   fängt der GUID-Abgleich vor dem Senden.
+pub fn fortschreiben(alt: Option<Kern>, neu: Kern) -> (Kern, Option<&'static str>) {
+    let Some(alt) = alt else {
+        return (neu, None);
+    };
+    if neu.is_empty() && !alt.is_empty() {
+        return (alt, None);
+    }
+    if !alt.is_empty() && !neu.keys().any(|id| alt.contains_key(id)) {
+        return (neu, None);
+    }
+    let ereignis = vergleiche(&alt, &neu);
+    (neu, ereignis)
+}
+
 /// Grund für einen vorgezogenen Upload — oder `None`, wenn nichts dabei ist,
 /// was nur die Datei nach badhub bringt. Vorrang: neue Spiele (Auslosung)
 /// vor entfernten vor geänderter Paarung — für den Text, nicht fürs Senden.
@@ -112,14 +136,125 @@ mod tests {
         assert_eq!(vergleiche(&alt, &neu), Some("neue Spiele"));
     }
 
+    fn spiel(id: i64, entry1: i64, entry2: i64) -> crate::btp::model::BtpMatch {
+        use crate::btp::model::{BtpMatch, Discipline, MatchResult, MatchStatus};
+        BtpMatch {
+            display_order: None,
+            highlight: 0,
+            from1: None,
+            from2: None,
+            id,
+            draw_id: 1,
+            planning_id: 1000 + id,
+            draw_name: "HE".to_string(),
+            discipline: Discipline::MensSingles,
+            class_label: String::new(),
+            round_name: "R1".to_string(),
+            match_num: Some(id),
+            planned_time: None,
+            team1: Vec::new(),
+            team2: Vec::new(),
+            entry1_id: entry1,
+            entry2_id: entry2,
+            court: None,
+            court_id: None,
+            location_id: None,
+            sets: Vec::new(),
+            winner: None,
+            result: MatchResult::Normal,
+            status: MatchStatus::Scheduled,
+            finished_at: None,
+            pause_ms: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
+            official1_id: None,
+            official2_id: None,
+            scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
+        }
+    }
+
+    fn snap(matches: Vec<crate::btp::model::BtpMatch>) -> BtpSnapshot {
+        BtpSnapshot {
+            tournament_name: "T".to_string(),
+            rest_minutes: None,
+            matches,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        }
+    }
+
     #[test]
-    fn kern_projiziert_nur_auslosung_und_paarung() {
-        // Ergebnis, Feld, Status zählen nicht: Die Turnierseite holt sie
-        // aus dem Liveticker. Hier nur die Struktur des Typs — den Snapshot
-        // baut der Parser, die Projektion ist eine Zeile je Feld.
-        let k1 = k(10, 11);
-        let mut k2 = k1.clone();
-        k2.draw_id = 2;
-        assert_ne!(k1, k2);
+    fn ergebnis_feld_aufruf_und_farbe_loesen_nichts_aus() {
+        use crate::btp::model::MatchStatus;
+        let vorher = snap(vec![spiel(1, 10, 11)]);
+        let mut m = spiel(1, 10, 11);
+        m.sets = vec![(21, 15), (21, 17)];
+        m.winner = Some(1);
+        m.status = MatchStatus::Finished;
+        m.court = Some("3".into());
+        m.court_id = Some(3);
+        m.highlight = 2;
+        m.preparation_call_ts = Some(123);
+        m.official1_id = Some(7);
+        let nachher = snap(vec![m]);
+        assert_eq!(vergleiche(&kern(&vorher), &kern(&nachher)), None);
+    }
+
+    #[test]
+    fn kern_aus_snapshot_erkennt_paarung_und_neue_spiele() {
+        let vorher = snap(vec![spiel(1, 10, 0)]);
+        let gefuellt = snap(vec![spiel(1, 10, 11)]);
+        assert_eq!(
+            vergleiche(&kern(&vorher), &kern(&gefuellt)),
+            Some("Paarung")
+        );
+        let ausgelost = snap(vec![spiel(1, 10, 11), spiel(2, 0, 0)]);
+        assert_eq!(
+            vergleiche(&kern(&gefuellt), &kern(&ausgelost)),
+            Some("neue Spiele")
+        );
+    }
+
+    #[test]
+    fn fortschreiben_erster_stand_ist_ausgangslage() {
+        let (k1, e) = fortschreiben(None, kern_aus(&[(1, k(10, 11))]));
+        assert_eq!(e, None);
+        assert_eq!(k1.len(), 1);
+    }
+
+    #[test]
+    fn fortschreiben_leerer_stand_wird_ignoriert_und_ruft_nichts_aus() {
+        // BTP liefert kurz nichts (Neustart): kein „Spielplan geändert“,
+        // und beim Wiederauffüllen kein „neue Spiele“ — der alte Kern bleibt.
+        let alt = kern_aus(&[(1, k(10, 11))]);
+        let (gemerkt, e) = fortschreiben(Some(alt.clone()), Kern::new());
+        assert_eq!(e, None);
+        assert_eq!(gemerkt, alt);
+        let (_, e) = fortschreiben(Some(gemerkt), alt.clone());
+        assert_eq!(e, None);
+    }
+
+    #[test]
+    fn fortschreiben_erste_auslosung_auf_leerem_turnier_loest_aus() {
+        let (leer, _) = fortschreiben(None, Kern::new());
+        let (_, e) = fortschreiben(Some(leer), kern_aus(&[(1, k(0, 0))]));
+        assert_eq!(e, Some("neue Spiele"));
+    }
+
+    #[test]
+    fn fortschreiben_turnierwechsel_ohne_gemeinsame_spiele_ist_ausgangslage() {
+        // Anderes Turnier in BTP geöffnet: alle IDs neu — kein Ereignis; die
+        // Datei passt dann ohnehin nicht mehr (GUID-Abgleich vor dem Senden).
+        let alt = kern_aus(&[(1, k(10, 11)), (2, k(12, 13))]);
+        let neu = kern_aus(&[(500, k(1, 2)), (501, k(3, 4))]);
+        let (gemerkt, e) = fortschreiben(Some(alt), neu.clone());
+        assert_eq!(e, None);
+        assert_eq!(gemerkt, neu);
     }
 }

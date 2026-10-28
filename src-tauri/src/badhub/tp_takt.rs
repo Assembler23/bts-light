@@ -29,10 +29,13 @@ use crate::config::AppConfig;
 /// Bewegung, Netz, 5xx) — kurz genug für heiße Phasen, lang genug, dass BTP
 /// mit seiner Eingabe fertig wird.
 pub const NACHVERSUCH: Duration = Duration::from_secs(90);
-/// Ereignis-Auslöser (ADR 0062): Abstand vom erkannten Ereignis zum Upload —
-/// eine Serie von BTP-Eingaben (Auslosung mehrerer Konkurrenzen) soll einen
-/// Upload auslösen, nicht fünf.
+/// Ereignis-Auslöser (ADR 0062): Ruhe nach dem **letzten** Ereignis bis zur
+/// Prüfung — eine Serie von BTP-Eingaben (Auslosung mehrerer Konkurrenzen)
+/// soll einen Upload auslösen, nicht fünf.
 pub const ENTPRELLUNG: Duration = Duration::from_secs(30);
+/// Deckel der Entprellung: spätestens so lange nach dem **ersten** Ereignis
+/// wird geprüft, auch wenn BTP weiter Eingaben meldet.
+pub const MAX_ENTPRELLUNG: Duration = Duration::from_secs(120);
 /// So viele Nachversuche in Folge, dann wieder der reguläre Takt.
 pub const MAX_NACHVERSUCHE: u8 = 2;
 /// „Nicht lesbar“ in Folge, bis es ein Halt wird (Virenscanner, Netzlaufwerk).
@@ -238,6 +241,22 @@ pub struct TaktZustand {
     /// Grund, warum der nächste Termin vorgezogen wurde („neue Spiele“,
     /// „Paarung“); `None` = regulärer Takt. Reist ans Dashboard.
     pub ereignis_grund: Option<String>,
+    /// Frühester Termin, den der Server oder ein Nachversuch verlangt hat
+    /// (429/503 `Retry-After`, Pause, 90-s-Nachversuch, Knopf läuft). Ein
+    /// Ereignis unterbietet ihn nie — die Bremse beim Server bleibt.
+    #[serde(skip)]
+    pub sperre_bis_ms: Option<u64>,
+    /// Offenes Entprell-Fenster: erstes Ereignis und spätester Termin.
+    #[serde(skip)]
+    pub ereignis_fenster: Option<(u64, u64)>,
+    /// Nach einem Ereignis war die Datei noch unverändert und wurde einmal
+    /// nach 90 s nachgeprüft — beim zweiten Mal gilt wieder der Takt.
+    #[serde(skip)]
+    pub ereignis_nachgeprueft: bool,
+    /// Ereignis, das während eines fälligen/laufenden Schritts kam: wird
+    /// nach dem Schritt angewendet statt zu verfallen (Grund, Mindestabstand).
+    #[serde(skip)]
+    pub ereignis_offen: Option<(String, Duration)>,
 }
 
 /// Wie der Schritt den neuen Termin gewählt hat — für den Text.
@@ -267,12 +286,31 @@ impl TaktZustand {
     /// Schalter aus oder Slave-Modus: kein Termin; Halt bleibt gespeichert.
     pub fn ausschalten(&mut self) {
         self.naechster_ms = None;
+        self.ereignis_vergessen();
     }
 
     /// Schalter an (ohne Neustart): wie Start.
     pub fn einschalten(&mut self, jetzt_ms: u64) {
         self.naechster_ms = None;
+        self.ereignis_vergessen();
         self.starten(jetzt_ms);
+    }
+
+    /// Jede Spur eines Ereignisses weg — der Termin ist dann wieder Takt,
+    /// Halt oder Wiederanlauf, und die Dashboard-Zeile sagt nichts anderes.
+    fn ereignis_vergessen(&mut self) {
+        self.ereignis_grund = None;
+        self.ereignis_fenster = None;
+        self.ereignis_nachgeprueft = false;
+        self.ereignis_offen = None;
+    }
+
+    /// Nach einem Schritt: ein währenddessen gekommenes Ereignis anwenden.
+    fn offenes_ereignis_anwenden(&mut self, jetzt_ms: u64) {
+        if let Some((grund, abstand)) = self.ereignis_offen.take() {
+            self.ereignis_fenster = None;
+            self.ereignis(jetzt_ms, &grund, abstand);
+        }
     }
 
     /// Minutenwert geändert: einen fernen Termin auf höchstens +60 s vorziehen.
@@ -289,20 +327,35 @@ impl TaktZustand {
         self.nachversuche = 0;
         self.nicht_lesbar = 0;
         self.nachholen = false;
+        self.sperre_bis_ms = None;
+        self.ereignis_vergessen();
         self.naechster_ms = Some(jetzt_ms + Self::ms(STARTVERZUG));
     }
 
-    /// Schnell-Hash gleich dem Merker: nur Stempel und Termin.
+    /// Schnell-Hash gleich dem Merker: nur Stempel und Termin. Kam die
+    /// Prüfung durch ein Ereignis und die Datei ist noch unverändert (BTP
+    /// meldet die Auslosung im Protokoll, schreibt sie aber erst danach in
+    /// die Datei), wird **einmal** nach 90 s nachgeprüft, dann gilt der Takt.
     pub fn unveraendert(&mut self, jetzt_ms: u64, takt: Duration) {
         self.geprueft_ms = Some(jetzt_ms);
         self.nicht_lesbar = 0;
-        self.ereignis_grund = None;
-        self.naechster_ms = Some(jetzt_ms + Self::ms(takt));
+        self.sperre_bis_ms = None;
+        self.ereignis_fenster = None;
+        if self.ereignis_grund.is_some() && !self.ereignis_nachgeprueft {
+            self.ereignis_nachgeprueft = true;
+            self.naechster_ms = Some(jetzt_ms + Self::ms(NACHVERSUCH));
+        } else {
+            self.ereignis_grund = None;
+            self.ereignis_nachgeprueft = false;
+            self.naechster_ms = Some(jetzt_ms + Self::ms(takt));
+        }
+        self.offenes_ereignis_anwenden(jetzt_ms);
     }
 
     /// Knopf-Upload läuft gerade: später noch einmal, ohne Zähler.
     pub fn knopf_laeuft(&mut self, jetzt_ms: u64) {
         self.naechster_ms = Some(jetzt_ms + Self::ms(NACHVERSUCH));
+        self.sperre_bis_ms = self.naechster_ms;
     }
 
     /// Ein Knopf-Upload hat den Server erreicht: hebt den Halt auf und merkt
@@ -315,6 +368,8 @@ impl TaktZustand {
         self.nachversuche = 0;
         self.nicht_lesbar = 0;
         self.nachholen = nachholen;
+        self.sperre_bis_ms = None;
+        self.ereignis_vergessen();
         self.merker = Some(SendeMerker {
             pfad: pfad.to_path_buf(),
             guid: guid.to_string(),
@@ -325,6 +380,7 @@ impl TaktZustand {
     /// Halt aus Vorbedingung oder nachgeholtem Status (ohne Upload).
     pub fn halt(&mut self, text: String, jetzt_ms: u64, takt: Duration) {
         self.angehalten = Some(text);
+        self.ereignis_vergessen();
         self.naechster_ms = Some(jetzt_ms + Self::ms(takt));
     }
 
@@ -340,7 +396,30 @@ impl TaktZustand {
     ) -> Terminart {
         self.geprueft_ms = Some(jetzt_ms);
         // Der Schritt ist gelaufen — ein vorgezogener Termin ist verbraucht.
+        // Ein währenddessen gekommenes Ereignis (`ereignis_offen`) bleibt.
         self.ereignis_grund = None;
+        self.ereignis_fenster = None;
+        self.ereignis_nachgeprueft = false;
+        let art = self.anwenden_termin(e, jetzt_ms, takt, pfad, guid);
+        // Nicht-reguläre Termine sind eine Bremse, die kein Ereignis unterbietet.
+        self.sperre_bis_ms = match art {
+            Terminart::Nachversuch | Terminart::Pause => self.naechster_ms,
+            Terminart::Regulaer | Terminart::Halt => None,
+        };
+        if art != Terminart::Halt {
+            self.offenes_ereignis_anwenden(jetzt_ms);
+        }
+        art
+    }
+
+    fn anwenden_termin(
+        &mut self,
+        e: Einordnung,
+        jetzt_ms: u64,
+        takt: Duration,
+        pfad: &Path,
+        guid: &str,
+    ) -> Terminart {
         match e {
             Einordnung::Gesendet { sha, nachholen } => {
                 self.merker = Some(SendeMerker {
@@ -394,12 +473,19 @@ impl TaktZustand {
         }
     }
 
-    /// Ereignis aus dem Sync-Lauf (ADR 0062): zieht den nächsten Termin auf
-    /// `jetzt + ENTPRELLUNG` vor, aber nie unter `letzter Upload +
-    /// min_abstand` (die Drossel aus `TpUploadConfig::ereignis_abstand`) und
-    /// nie **hinter** den bestehenden Termin. Takt aus oder angehalten →
-    /// wirkungslos. Liefert `true`, wenn sich der Termin bewegt hat (für die
-    /// Log-Zeile).
+    /// Ereignis aus dem Sync-Lauf (ADR 0062). Regeln:
+    /// - Takt aus oder angehalten → wirkungslos.
+    /// - Termin fällig oder Schritt läuft → als offen merken, nach dem
+    ///   Schritt anwenden (sonst ginge eine Auslosung bis zum Takt verloren).
+    /// - Untergrenze: `letzter Upload + min_abstand` (Drossel aus
+    ///   `TpUploadConfig::ereignis_abstand`) und eine Bremse des Servers
+    ///   oder Nachversuchs (`sperre_bis_ms`).
+    /// - Erstes Ereignis: Termin auf `jetzt + ENTPRELLUNG`, nur wenn das
+    ///   früher ist als der bestehende. Weitere im Fenster schieben auf
+    ///   `jetzt + ENTPRELLUNG`, gedeckelt durch `erstes + MAX_ENTPRELLUNG`
+    ///   und den ursprünglichen Termin (echte Entprellung).
+    ///
+    /// Liefert `true`, wenn sich der Termin bewegt hat (für die Log-Zeile).
     pub fn ereignis(&mut self, jetzt_ms: u64, grund: &str, min_abstand: Duration) -> bool {
         let Some(bisher) = self.naechster_ms else {
             return false;
@@ -407,16 +493,32 @@ impl TaktZustand {
         if self.angehalten.is_some() {
             return false;
         }
-        let fruehestens = self
-            .letzter_upload_ms
-            .map_or(0, |t| t + Self::ms(min_abstand));
-        let termin = (jetzt_ms + Self::ms(ENTPRELLUNG)).max(fruehestens);
-        if termin >= bisher {
+        if bisher <= jetzt_ms {
+            self.ereignis_offen = Some((grund.to_string(), min_abstand));
             return false;
         }
-        self.naechster_ms = Some(termin);
+        let untergrenze = self
+            .letzter_upload_ms
+            .map_or(0, |t| t + Self::ms(min_abstand))
+            .max(self.sperre_bis_ms.unwrap_or(0));
+        let ziel = jetzt_ms + Self::ms(ENTPRELLUNG);
+        let termin = match self.ereignis_fenster {
+            Some((_, spaetestens)) => ziel.min(spaetestens).max(untergrenze),
+            None => {
+                let termin = ziel.max(untergrenze);
+                if termin >= bisher {
+                    return false;
+                }
+                let spaetestens = bisher.min(jetzt_ms + Self::ms(MAX_ENTPRELLUNG));
+                self.ereignis_fenster = Some((jetzt_ms, spaetestens));
+                self.ereignis_nachgeprueft = false;
+                termin
+            }
+        };
         self.ereignis_grund = Some(grund.to_string());
-        true
+        let bewegt = termin != bisher;
+        self.naechster_ms = Some(termin);
+        bewegt
     }
 
     /// Ist der Termin fällig?
@@ -544,12 +646,122 @@ mod tests {
             Some(20_000 + ENTPRELLUNG.as_millis() as u64)
         );
         assert_eq!(z.ereignis_grund.as_deref(), Some("neue Spiele"));
-        // Zweites Ereignis im Fenster: Termin bleibt (kein Hinausschieben).
-        assert!(!z.ereignis(25_000, "Ergebnis", ABSTAND));
+        // Zweites Ereignis im Fenster: echte Entprellung — der Termin rückt
+        // auf 30 s nach dem letzten Ereignis.
+        assert!(z.ereignis(25_000, "Paarung", ABSTAND));
+        assert_eq!(z.naechster_ms, Some(55_000));
+    }
+
+    #[test]
+    fn entprellung_ist_nach_oben_gedeckelt() {
+        // Eine Auslosung über Minuten darf den Upload nicht ewig verschieben:
+        // spätestens MAX_ENTPRELLUNG nach dem ersten Ereignis.
+        let takt = Duration::from_secs(15 * 60);
+        let mut z = TaktZustand::default();
+        z.starten(0);
+        z.unveraendert(10_000, takt);
+        assert!(z.ereignis(20_000, "neue Spiele", ABSTAND));
+        assert!(z.ereignis(40_000, "neue Spiele", ABSTAND));
+        assert_eq!(z.naechster_ms, Some(70_000));
+        // Alle 20 s eine weitere Konkurrenz — jedes Mal vor dem Termin.
+        for t in [60_000, 80_000, 100_000, 120_000, 135_000] {
+            z.ereignis(t, "neue Spiele", ABSTAND);
+        }
         assert_eq!(
             z.naechster_ms,
-            Some(20_000 + ENTPRELLUNG.as_millis() as u64)
+            Some(20_000 + MAX_ENTPRELLUNG.as_millis() as u64)
         );
+    }
+
+    #[test]
+    fn ereignis_unterbietet_keine_server_bremse() {
+        // 429 mit Retry-After 300 s: ein Ereignis darf nicht früher senden.
+        let takt = Duration::from_secs(15 * 60);
+        let mut z = TaktZustand::default();
+        z.starten(0);
+        z.anwenden(
+            Einordnung::Nachversuch {
+                retry_after: Some(Duration::from_secs(300)),
+            },
+            100_000,
+            takt,
+            Path::new("x.tp"),
+            "G",
+        );
+        assert_eq!(z.naechster_ms, Some(400_000));
+        assert!(!z.ereignis(110_000, "Paarung", ABSTAND));
+        assert_eq!(z.naechster_ms, Some(400_000));
+        // Pause „badhub kennt den Upload noch nicht“ ebenso.
+        let mut p = TaktZustand::default();
+        p.starten(0);
+        p.anwenden(Einordnung::Pause, 100_000, takt, Path::new("x.tp"), "G");
+        assert!(!p.ereignis(110_000, "neue Spiele", ABSTAND));
+    }
+
+    #[test]
+    fn ereignis_waehrend_laufendem_schritt_wird_danach_nachgeholt() {
+        // Termin fällig (Schritt läuft): das Ereignis darf nicht verfallen —
+        // nach dem Upload der alten Bytes kommt die Prüfung nach Mindestabstand.
+        let takt = Duration::from_secs(15 * 60);
+        let mut z = TaktZustand::default();
+        z.starten(0); // 60 s
+        assert!(!z.ereignis(70_000, "neue Spiele", ABSTAND));
+        z.anwenden(
+            Einordnung::Gesendet {
+                sha: sha(1),
+                nachholen: false,
+            },
+            200_000,
+            takt,
+            Path::new("x.tp"),
+            "G",
+        );
+        assert_eq!(z.naechster_ms, Some(200_000 + 300_000));
+        assert_eq!(z.ereignis_grund.as_deref(), Some("neue Spiele"));
+    }
+
+    #[test]
+    fn unveraenderte_datei_nach_ereignis_wird_einmal_nachgeprueft() {
+        // BTP hat die Auslosung im Protokoll schon gemeldet, aber noch nicht
+        // in die Datei geschrieben: ein zweiter Blick nach 90 s, dann Takt.
+        let takt = Duration::from_secs(15 * 60);
+        let mut z = TaktZustand::default();
+        z.starten(0);
+        z.unveraendert(10_000, takt);
+        assert!(z.ereignis(20_000, "neue Spiele", ABSTAND));
+        z.unveraendert(50_000, takt);
+        assert_eq!(
+            z.naechster_ms,
+            Some(50_000 + NACHVERSUCH.as_millis() as u64)
+        );
+        assert!(z.ereignis_grund.is_some());
+        z.unveraendert(140_000, takt);
+        assert_eq!(z.naechster_ms, Some(140_000 + 15 * 60 * 1000));
+        assert_eq!(z.ereignis_grund, None);
+    }
+
+    #[test]
+    fn grund_verschwindet_bei_halt_wiederanlauf_knopf_und_ausschalten() {
+        let takt = Duration::from_secs(15 * 60);
+        let vorgezogen = || {
+            let mut z = TaktZustand::default();
+            z.starten(0);
+            z.unveraendert(10_000, takt);
+            assert!(z.ereignis(20_000, "Paarung", ABSTAND));
+            z
+        };
+        let mut a = vorgezogen();
+        a.halt("K".into(), 21_000, takt);
+        assert_eq!(a.ereignis_grund, None);
+        let mut b = vorgezogen();
+        b.wiederanlauf(21_000);
+        assert_eq!(b.ereignis_grund, None);
+        let mut c = vorgezogen();
+        c.knopf_gesendet(Path::new("x.tp"), "G", sha(1), false);
+        assert_eq!(c.ereignis_grund, None);
+        let mut d = vorgezogen();
+        d.ausschalten();
+        assert_eq!(d.ereignis_grund, None);
     }
 
     #[test]
