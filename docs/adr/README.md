@@ -70,3 +70,4 @@ hier eintragen.
 | [0058](0058-eigene-kiosk-app-statt-fully-kiosk.md) | Eigene Android-Kiosk-App statt Fully Kiosk, Suche nach dem Pi-Muster | accepted |
 | [0059](0059-setzplatz-als-text-aus-dem-parser.md) | Setzplatz als fertiger Text, aufgelöst im Parser | accepted |
 | [0060](0060-upload-sperrt-btp-writes-schreib-gate.md) | TP-Upload sperrt BTP-Writes kurz (Schreib-Gate auf RwLock) | accepted |
+| [0061](0061-takt-upload-lebenszyklus-schnellhash-anhalteregel.md) | Takt-Upload: Lebenszyklus am Liveticker, Schnell-Hash ohne Gate, Anhalte-Regel | accepted |

@@ -5,7 +5,9 @@
 > von Hand nach [spec-pipeline-konzept.md](../spec-pipeline-konzept.md)).
 > **Umsetzung:** badhub B1–B4 auf Prod (26.10.2026, PRs #1045, #1046, #1055,
 > #1057); bts-light **L1 umgesetzt in v0.9.300** (Knopfdruck, Schreib-Gate,
-> Handbuch [tp-datei-upload.md](../tp-datei-upload.md)); L2 (Automatik) offen.
+> Handbuch [tp-datei-upload.md](../tp-datei-upload.md)); L2 (Automatik) hat
+> eine eigene Spec: [tp-takt-upload.md](tp-takt-upload.md) (freigegeben
+> 28.10.2026, ADR 0061).
 > Vor dem ersten Einsatz bei einem echten Turnier bleiben die Messungen A2 und
 > Jet-Nachlauf (unten, „Offene Fragen“) Pflicht.
 > Quelle: Idee vom 26.10.2026 („bts-light läuft meist auf dem BTP-Rechner —
@@ -87,9 +89,9 @@ Erfolgskriterien:
 
 ## Nicht-Ziele
 
-- **Kein Takt in Stufe 1.** Nur Knopfdruck. Stufe 2 (optionaler Takt,
-  Größenordnung 15 Minuten, nur bei geänderter Datei) ist ein eigener PR nach
-  dem Feldtest und hier nur vorgemerkt.
+- **Kein Takt in Stufe 1.** Nur Knopfdruck. Stufe 2 (optionaler Takt, nur
+  bei geänderter Datei, nur solange der Liveticker läuft) ist seit 28.10.2026
+  eigens spezifiziert: [tp-takt-upload.md](tp-takt-upload.md).
 - **Kein Ersatz des Exporters.** Der Endstand mit Platzierungen kommt weiterhin
   aus dem nächtlichen Export. Der Upload liefert Vorläufiges.
 - **Keine Platzierungen, keine Medaillen, keine Statistik** aus dem Upload.
@@ -639,10 +641,11 @@ Deploy durch den Kollegen; Migration 246 vor B3.
    nach jeder Code-Änderung; **security-reviewer** für `tp_file_check`/
    `lese_stabil` (Pfad aus dem Dialog, Größendeckel, kein Inhalt im Log) und
    für den Log-Satz.
-6. **bts-light PR L2 (später):** `TpUploadConfig.auto_minutes: Option<u16>`
-   (Standard aus), eigener Task neben dem Check-In-Lese-Takt, nur bei
-   geänderter Datei (`mtime` + Größe, dann Byte-Vergleich), dieselbe Gate- und
-   Sende-Funktion.
+6. **bts-light PR L2:** eigene Spec [tp-takt-upload.md](tp-takt-upload.md)
+   (28.10.2026). Abweichend von der ersten Skizze hier: `auto_enabled` +
+   `auto_minutes` (Minimum 5, Standard 15) statt `Option<u16>`, Änderungs-
+   erkennung per ungegatetem SHA-256 statt `mtime` + Größe, Takt nur solange
+   der Liveticker läuft, Anhalte-Regel mit Wiederanlauf (ADR 0061).
 
 **Security-Review in badhub** zwingend für `TpUploadController` (untrusted
 Body, `gzdecode`-Deckel, Header-Parsing, Pfad nur aus normalisierter GUID,
