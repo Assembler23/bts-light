@@ -1417,8 +1417,13 @@ export function SetupWizard({
           {tpPath && tpInfo?.art === "erkannt" && (
             <p className="flex items-center gap-1.5 text-sm text-emerald-700">
               <Check size={16} /> {tpInfo.anzeige}
+              {/* Nur, wenn die Kennung oben noch die gebundene ist — sonst
+                  stünde „passt“ neben „Datei neu wählen“. Nach einer
+                  Übernahme sagt es schon der Hinweis darunter. */}
               {tpInfo.guid !== null &&
                 tpInfo.guid === tpGuidKanon &&
+                tpGuidPasst &&
+                !tpHinweis &&
                 " · Turnier-Kennung passt"}
             </p>
           )}
