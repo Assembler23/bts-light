@@ -1778,7 +1778,63 @@ mod tests {
             "JE U15", "MD U17", "MX U19"
         ])));
         assert!(!englisches_schema(&turnier(&["HE A", "HD A", "GD A"])));
+        // MIX ist auch deutsch gebräuchlich — es schaltet das Schema nicht um.
+        assert!(!englisches_schema(&turnier(&["MIX A", "MD U17"])));
         assert!(!englisches_schema(&[]));
+
+        // Manche Turniere tragen die Disziplin nur am Draw.
+        let nur_draws = vec![Node::group(
+            "Draws",
+            vec![Node::group(
+                "Draw",
+                vec![Node::integer("ID", 1), Node::string("Name", "XD A")],
+            )],
+        )];
+        assert!(englisches_schema(&nur_draws));
+    }
+
+    #[test]
+    fn md_im_englischen_turnier_kommt_als_herrendoppel_an() {
+        // Ende zu Ende über draw_discipline_map: unbekannte GenderID, das
+        // Schema kommt aus einem ANDEREN Event desselben Turniers.
+        let event = |id: i64, name: &str| {
+            Node::group(
+                "Event",
+                vec![
+                    Node::integer("ID", id),
+                    Node::string("Name", name),
+                    Node::integer("GameTypeID", 2),
+                    Node::integer("GenderID", 9),
+                ],
+            )
+        };
+        let draw = |id: i64, event_id: i64| {
+            Node::group(
+                "Draw",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", event_id),
+                    Node::string("Name", "Gruppe 1"),
+                ],
+            )
+        };
+        let t = vec![
+            Node::group("Events", vec![event(1, "MS A"), event(2, "MD A")]),
+            Node::group("Draws", vec![draw(10, 1), draw(20, 2)]),
+        ];
+        let map = draw_discipline_map(&t);
+        assert_eq!(map.get(&10), Some(&Discipline::MensSingles));
+        assert_eq!(map.get(&20), Some(&Discipline::MensDoubles));
+
+        // Dasselbe ohne englisches Kürzel: MD bleibt Mädchendoppel.
+        let t = vec![
+            Node::group("Events", vec![event(1, "JE U15"), event(2, "MD U15")]),
+            Node::group("Draws", vec![draw(10, 1), draw(20, 2)]),
+        ];
+        assert_eq!(
+            draw_discipline_map(&t).get(&20),
+            Some(&Discipline::WomensDoubles)
+        );
     }
 
     #[test]

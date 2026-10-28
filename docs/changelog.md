@@ -8,7 +8,7 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
 - **Englische Disziplin-Kürzel.** Events wie „MS A", „WD-B" oder „XD C"
   verlieren ihre Klasse nicht mehr, und ohne verwertbare BTP-Angabe wird die
-  Disziplin auch aus MS/WS/WD/XD/MIX gelesen (GD bleibt Mixed). **MD** heißt
+  Disziplin auch aus MS/WS/WD/XD/MIX gelesen. GD bleibt Gemischtes Doppel. **MD** heißt
   Herrendoppel, wenn das Turnier englische Kürzel benutzt, sonst wie bisher
   Mädchendoppel.
 

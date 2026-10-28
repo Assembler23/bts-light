@@ -97,8 +97,11 @@ oder Auslosungsnamen („Gruppe 3", „Hauptrunde") werden nie angesagt**
 (Nutzer-Vorgabe vom Turnier 17.07.2026). Ohne erkennbares Kürzel bleibt die
 Ansage wie bisher („Herreneinzel").
 
-**Englische Kürzel** (seit v0.9.307): MS/WS/MD/WD/XD/MIX zählen ebenfalls
-als Disziplin-Wörter — aus „MS A" ging sonst die Klasse „A" verloren.
+**Englische Kürzel** (seit v0.9.307): MS/WS/WD/XD/MIX zählen ebenfalls
+als Disziplin-Wörter (MD war es schon) — aus „MS A" ging sonst die Klasse
+„A" verloren. **GD** bleibt Mixed (Gemischtes Doppel), auch in einem
+englisch benannten Turnier; das englische Jugend-Schema (BS/GS/BD/GD =
+Girls' Doubles) wird nicht unterstützt.
 
 **Jugendklassen** (seit v0.9.296): Jugendturniere nennen ihre Events
 „JE U15", „MD U17" oder „U11 offenes Doppel". Die Kürzel JE/JD/ME/MD,
