@@ -71,8 +71,12 @@ dem BTP-**Event**, nicht aus dem Draw-Namen. Auflösungskette im Parser
 
 Ergibt `GenderID` keinen dieser Werte (seit v0.9.297), liest der Parser
 die Disziplin aus dem Event-Namen, sonst aus dem Draw-Namen: Kürzel
-HE/DE/HD/DD/MX/GD und JE/ME/JD/MD, ausgeschriebene Formen („Jungeneinzel")
-und zweiteilige („Jungen Doppel"). Anlass: Ein DBV-Jugendturnier
+HE/DE/HD/DD/MX/GD und JE/ME/JD/MD, seit v0.9.307 auch die englischen
+MS/WS/WD/XD/MIX, ausgeschriebene Formen („Jungeneinzel") und zweiteilige
+(„Jungen Doppel"). **MD** ist doppeldeutig: Benutzt das Turnier irgendwo
+MS, WS, WD oder XD (Event- oder Draw-Name), heißt MD „Men's Doubles"
+(Herrendoppel), sonst wie im deutschen Jugend-Schema Mädchendoppel
+(`englisches_schema` in `btp/model.rs`). Anlass: Ein DBV-Jugendturnier
 (10/2026, „JE U15") lieferte einen anderen `GenderID`-Wert, die Ansage
 ließ Disziplin und Klasse komplett weg. Bekannte BTP-Werte haben weiter
 Vorrang. Nennt auch der Name kein Geschlecht („U11 offenes Doppel") oder
@@ -92,6 +96,9 @@ nur EIN kurzes Kürzel (≤ 4 Zeichen, z. B. „A", „B2", „U15") — **Grupp
 oder Auslosungsnamen („Gruppe 3", „Hauptrunde") werden nie angesagt**
 (Nutzer-Vorgabe vom Turnier 17.07.2026). Ohne erkennbares Kürzel bleibt die
 Ansage wie bisher („Herreneinzel").
+
+**Englische Kürzel** (seit v0.9.307): MS/WS/MD/WD/XD/MIX zählen ebenfalls
+als Disziplin-Wörter — aus „MS A" ging sonst die Klasse „A" verloren.
 
 **Jugendklassen** (seit v0.9.296): Jugendturniere nennen ihre Events
 „JE U15", „MD U17" oder „U11 offenes Doppel". Die Kürzel JE/JD/ME/MD,

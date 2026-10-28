@@ -90,7 +90,13 @@ impl Discipline {
     /// Erkannt werden die Kürzel (HE … MD, MX/GD) und die ausgeschriebenen
     /// Formen, auch zweiteilig („Jungen Einzel"). „U11 offenes Doppel" nennt
     /// kein Geschlecht und bleibt `Unknown`.
-    fn from_name(name: &str) -> Discipline {
+    ///
+    /// Dazu die englischen Kürzel MS/WS/WD/XD/MIX. **„MD" ist doppeldeutig:**
+    /// im deutschen Jugend-Schema „Mädchendoppel", im englischen „Men's
+    /// Doubles". Das entscheidet nicht der einzelne Name, sondern das ganze
+    /// Turnier — `englisch` sagt, ob seine Events das englische Schema benutzen
+    /// ([`englisches_schema`]).
+    fn from_name(name: &str, englisch: bool) -> Discipline {
         let mut maennlich = false;
         let mut weiblich = false;
         let mut einzel = false;
@@ -100,15 +106,18 @@ impl Discipline {
             .map(str::to_lowercase)
         {
             match tok.as_str() {
-                "he" | "je" | "herreneinzel" | "jungeneinzel" => return Discipline::MensSingles,
-                "de" | "me" | "dameneinzel" | "mädcheneinzel" | "maedcheneinzel" => {
+                "md" if englisch => return Discipline::MensDoubles,
+                "he" | "je" | "ms" | "herreneinzel" | "jungeneinzel" => {
+                    return Discipline::MensSingles
+                }
+                "de" | "me" | "ws" | "dameneinzel" | "mädcheneinzel" | "maedcheneinzel" => {
                     return Discipline::WomensSingles
                 }
                 "hd" | "jd" | "herrendoppel" | "jungendoppel" => return Discipline::MensDoubles,
-                "dd" | "md" | "damendoppel" | "mädchendoppel" | "maedchendoppel" => {
+                "dd" | "md" | "wd" | "damendoppel" | "mädchendoppel" | "maedchendoppel" => {
                     return Discipline::WomensDoubles
                 }
-                "mx" | "gd" | "mixed" | "gemischtes" => return Discipline::Mixed,
+                "mx" | "gd" | "xd" | "mix" | "mixed" | "gemischtes" => return Discipline::Mixed,
                 "herren" | "jungen" => maennlich = true,
                 "damen" | "mädchen" | "maedchen" => weiblich = true,
                 "einzel" => einzel = true,
@@ -127,14 +136,14 @@ impl Discipline {
 
     /// BTP-Felder zuerst; nur wenn sie nichts Bekanntes ergeben, die Namen
     /// (Event vor Draw) — siehe [`Discipline::from_name`].
-    fn resolve(game_type_id: i64, gender_id: i64, names: &[&str]) -> Discipline {
+    fn resolve(game_type_id: i64, gender_id: i64, names: &[&str], englisch: bool) -> Discipline {
         let aus_btp = Discipline::from_event(game_type_id, gender_id);
         if aus_btp != Discipline::Unknown {
             return aus_btp;
         }
         names
             .iter()
-            .map(|n| Discipline::from_name(n))
+            .map(|n| Discipline::from_name(n, englisch))
             .find(|d| *d != Discipline::Unknown)
             .unwrap_or(Discipline::Unknown)
     }
@@ -659,6 +668,7 @@ fn event_list(t: &[Node]) -> Vec<BtpEvent> {
     let Some(events) = xml::find(t, "Events") else {
         return Vec::new();
     };
+    let englisch = englisches_schema(t);
     let mut list: Vec<BtpEvent> = events
         .children()
         .iter()
@@ -672,6 +682,7 @@ fn event_list(t: &[Node]) -> Vec<BtpEvent> {
                     child_int(e, "GameTypeID").unwrap_or_default(),
                     child_int(e, "GenderID").unwrap_or_default(),
                     &[name],
+                    englisch,
                 ),
             })
         })
@@ -1128,6 +1139,8 @@ fn draw_map(t: &[Node]) -> HashMap<i64, String> {
 /// Jugendturniere heißen „JE U15", „MD U17" oder „U11 offenes Doppel" —
 /// deshalb stehen auch die Jungen-/Mädchen-Kürzel und „offenes" in der
 /// Liste, sonst bliebe neben der Altersklasse ein zweiter Rest übrig.
+/// Ebenso die englischen Kürzel (MS, WS, WD, XD, MIX): „MS A" ergäbe sonst
+/// zwei Reste und keine Klasse.
 fn class_from(name: &str) -> String {
     const DISCIPLINE_TOKENS: &[&str] = &[
         "herreneinzel",
@@ -1160,6 +1173,11 @@ fn class_from(name: &str) -> String {
         "jd",
         "me",
         "md",
+        "ms",
+        "ws",
+        "wd",
+        "xd",
+        "mix",
     ];
     let rest: Vec<&str> = name
         .split(|c: char| c.is_whitespace() || c == '-')
@@ -1172,6 +1190,23 @@ fn class_from(name: &str) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// Benutzt das Turnier das englische Kürzel-Schema (MS, WS, WD, XD)?
+///
+/// Nur dafür da, „MD" aufzulösen: Ein Turnier mit MS/WS/WD/XD meint mit MD
+/// „Men's Doubles", ein deutsches Jugendturnier (JE/ME/JD/MD) „Mädchendoppel".
+/// Deutsche Erwachsenenturniere heißen HD, nie MD — ohne englisches Kürzel
+/// bleibt es deshalb beim Mädchendoppel. Geprüft werden Event- **und**
+/// Draw-Namen, weil manche Turniere die Disziplin nur am Draw tragen.
+fn englisches_schema(t: &[Node]) -> bool {
+    const ENGLISCH: &[&str] = &["ms", "ws", "wd", "xd"];
+    ["Events", "Draws"].iter().any(|gruppe| {
+        id_name_map(t, gruppe).values().any(|name| {
+            name.split(|c: char| c.is_whitespace() || c == '-')
+                .any(|tok| ENGLISCH.contains(&tok.to_lowercase().as_str()))
+        })
+    })
 }
 
 /// Klassen-Kürzel eines Draws: bevorzugt aus dem Event-Namen (trägt die
@@ -1211,6 +1246,7 @@ fn draw_class_map(t: &[Node]) -> HashMap<i64, String> {
 /// die Felder nichts Bekanntes, entscheiden Event- und Draw-Name
 /// ([`Discipline::resolve`]).
 fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
+    let englisch = englisches_schema(t);
     // EventID → (GameTypeID, GenderID, Name).
     let mut events: HashMap<i64, (i64, i64, String)> = HashMap::new();
     if let Some(group) = xml::find(t, "Events") {
@@ -1231,7 +1267,7 @@ fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
                 let draw_name = child_str(d, "Name").unwrap_or_default();
                 let disziplin = match events.get(&event_id) {
                     Some((game, gender, name)) => {
-                        Discipline::resolve(*game, *gender, &[name, draw_name])
+                        Discipline::resolve(*game, *gender, &[name, draw_name], englisch)
                     }
                     None => Discipline::Unknown,
                 };
@@ -1651,7 +1687,11 @@ mod tests {
             ("U11 offenes Doppel", Discipline::Unknown),
             ("Gruppe 3", Discipline::Unknown),
         ] {
-            assert_eq!(Discipline::resolve(2, 4, &[name]), erwartet, "{name}");
+            assert_eq!(
+                Discipline::resolve(2, 4, &[name], false),
+                erwartet,
+                "{name}"
+            );
         }
     }
 
@@ -1659,15 +1699,101 @@ mod tests {
     fn discipline_prefers_btp_fields_over_the_name() {
         // Bekannte BTP-Werte haben Vorrang — auch gegen einen irreführenden Namen.
         assert_eq!(
-            Discipline::resolve(1, 2, &["JE U15"]),
+            Discipline::resolve(1, 2, &["JE U15"], false),
             Discipline::WomensSingles
         );
         // Event-Name vor Draw-Name; leerer Event-Name → Draw-Name.
         assert_eq!(
-            Discipline::resolve(0, 0, &["", "MD U17 Gruppe 1"]),
+            Discipline::resolve(0, 0, &["", "MD U17 Gruppe 1"], false),
             Discipline::WomensDoubles
         );
-        assert_eq!(Discipline::resolve(0, 0, &[]), Discipline::Unknown);
+        assert_eq!(Discipline::resolve(0, 0, &[], false), Discipline::Unknown);
+    }
+
+    #[test]
+    fn discipline_reads_english_codes() {
+        // Englisch benannte Turniere: MS/WS/MD/WD/XD, dazu MIX. Ohne
+        // bekannte GenderID entscheidet der Name.
+        for (name, erwartet) in [
+            ("MS A", Discipline::MensSingles),
+            ("WS", Discipline::WomensSingles),
+            ("MD-B", Discipline::MensDoubles),
+            ("WD C", Discipline::WomensDoubles),
+            ("XD A", Discipline::Mixed),
+            ("MIX", Discipline::Mixed),
+            ("GD B", Discipline::Mixed),
+        ] {
+            assert_eq!(Discipline::resolve(0, 0, &[name], true), erwartet, "{name}");
+        }
+        // XD/MIX/MS/WS/WD sind eindeutig — auch ohne englisches Schema.
+        assert_eq!(Discipline::resolve(0, 0, &["XD"], false), Discipline::Mixed);
+        assert_eq!(
+            Discipline::resolve(0, 0, &["MIX U15"], false),
+            Discipline::Mixed
+        );
+        assert_eq!(
+            Discipline::resolve(0, 0, &["MS"], false),
+            Discipline::MensSingles
+        );
+    }
+
+    #[test]
+    fn md_haengt_am_schema_des_turniers() {
+        // Deutsches Jugendturnier: MD = Mädchendoppel; englisches: Men's Doubles.
+        assert_eq!(
+            Discipline::resolve(0, 0, &["MD U17"], false),
+            Discipline::WomensDoubles
+        );
+        assert_eq!(
+            Discipline::resolve(0, 0, &["MD A"], true),
+            Discipline::MensDoubles
+        );
+        // Bekannte BTP-Felder schlagen das Schema.
+        assert_eq!(
+            Discipline::resolve(2, 2, &["MD"], true),
+            Discipline::WomensDoubles
+        );
+    }
+
+    #[test]
+    fn englisches_schema_erkennt_das_turnier() {
+        let turnier = |namen: &[&str]| {
+            vec![Node::group(
+                "Events",
+                namen
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| {
+                        Node::group(
+                            "Event",
+                            vec![Node::integer("ID", i as i64 + 1), Node::string("Name", *n)],
+                        )
+                    })
+                    .collect(),
+            )]
+        };
+        assert!(englisches_schema(&turnier(&["MS A", "MD A", "XD A"])));
+        assert!(englisches_schema(&turnier(&["WD-B"])));
+        assert!(!englisches_schema(&turnier(&[
+            "JE U15", "MD U17", "MX U19"
+        ])));
+        assert!(!englisches_schema(&turnier(&["HE A", "HD A", "GD A"])));
+        assert!(!englisches_schema(&[]));
+    }
+
+    #[test]
+    fn class_label_reads_english_event_names() {
+        for (event, klasse) in [
+            ("MS A", "A"),
+            ("WS-B", "B"),
+            ("MD C", "C"),
+            ("WD A", "A"),
+            ("XD-D", "D"),
+            ("MIX E", "E"),
+            ("GD U15", "U15"),
+        ] {
+            assert_eq!(class_label(event, "Gruppe 1"), klasse, "{event}");
+        }
     }
 
     #[test]

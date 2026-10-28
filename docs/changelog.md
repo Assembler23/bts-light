@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.307
+
+- **Englische Disziplin-Kürzel.** Events wie „MS A", „WD-B" oder „XD C"
+  verlieren ihre Klasse nicht mehr, und ohne verwertbare BTP-Angabe wird die
+  Disziplin auch aus MS/WS/WD/XD/MIX gelesen (GD bleibt Mixed). **MD** heißt
+  Herrendoppel, wenn das Turnier englische Kürzel benutzt, sonst wie bisher
+  Mädchendoppel.
+
 ## v0.9.305
 
 - **Turnierdatei sofort bei neuen Spielen senden.** Mit eingeschalteter

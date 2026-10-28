@@ -511,7 +511,9 @@ das Event eine `GenderID` außerhalb 1–3 — so bei einem DBV-Jugendturnier
 10/2026 („JE U15", „MD U17"; der genaue Wert ist ungemessen) —, wird die
 Disziplin aus Event- und dann Draw-Namen gelesen (JE → Herreneinzel-Schlüssel
 `mens_singles` usw.; die Jugend-Benennung macht `src/io/disziplinName.mjs` an
-der Klasse „U"+Zahl fest).
+der Klasse „U"+Zahl fest). Seit v0.9.307 auch englisch: MS, WS, WD, XD, MIX;
+**MD** gilt als Herrendoppel, wenn das Turnier irgendwo MS/WS/WD/XD benutzt
+(`englisches_schema`), sonst als Mädchendoppel.
 
 ## Score
 
