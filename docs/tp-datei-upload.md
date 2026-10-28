@@ -54,6 +54,27 @@ neu wählen“**, bis du die Datei erneut gewählt hast. So landet nie die Datei
 des einen Turniers unter der Kennung eines anderen.
 <!-- pruef: "Datei neu wählen" in src/pages/SetupWizard.tsx -->
 
+**Die Kennung steht auch in der Datei.** BTP trägt die turnier.de-Kennung in
+die Turnierdatei ein, und bts-light liest sie beim Wählen mit:
+
+- Ist unter „1 · Liveticker-Ziel“ noch keine Kennung eingetragen, übernimmt
+  bts-light sie aus der Datei und sagt **„Turnier-Kennung aus der Datei
+  übernommen“** — du musst sie nicht von turnier.de abtippen.
+  <!-- pruef: "Turnier-Kennung aus der Datei übernommen" in src/pages/SetupWizard.tsx -->
+- Passt die Kennung, steht neben dem Urteil **„Turnier-Kennung passt“**.
+  <!-- pruef: "Turnier-Kennung passt" in src/pages/SetupWizard.tsx -->
+- Gehört die Datei zu einem **anderen** Turnier als die eingetragene Kennung,
+  wird sie abgelehnt („… gehört zu Turnier …“) und nichts gespeichert. Prüfe
+  dann die Kennung oben — oder du hast die Datei vom Vorjahr erwischt. Eine
+  andere Kennung übernimmt bts-light bewusst nicht von selbst: Sie steuert
+  auch den Liveticker, und der würde sonst still auf ein fremdes Turnier
+  zeigen.
+  <!-- pruef: "gehört zu Turnier" in src/pages/SetupWizard.tsx -->
+
+Eine Datei ohne Kennung (Turnier nicht mit turnier.de verknüpft) lässt sich
+nur wählen, wenn oben eine Kennung eingetragen ist; ob sie passt, prüft dann
+badhub beim Senden.
+
 Läuft bts-light **nicht auf dem BTP-Rechner**, steht im Abschnitt ein Hinweis:
 Die Datei liegt dort, wo BTP läuft; der Upload von einem anderen Rechner
 (Netzlaufwerk) ist möglich, aber nicht empfohlen — Netzlaufwerke liefern eine
@@ -85,6 +106,7 @@ Nach dem Klick zeigt die Zeile neben dem Knopf den Stand:
 | **BTP ist gerade beschäftigt, bitte gleich noch einmal** | BTP schrieb länger als 20 Sekunden in die Datei (z. B. viele Eingaben auf einmal). Kurz warten, erneut klicken. |
 | **Datei ändert sich gerade, bitte gleich noch einmal** | Zwischen den beiden Lesevorgängen hat sich die Datei verändert. Erneut klicken. |
 | **TP-Datei nicht gefunden: Köpi-Cup 2026.TP — im Setup neu wählen** | Datei verschoben, umbenannt oder Laufwerk getrennt. |
+| **„Köpi-Cup 2026.TP“ gehört zu Turnier 99F55FAB…, eingestellt ist 0EA5FD86…** | Die Datei nennt eine andere Turnier-Kennung als das Setup — BTP hat inzwischen eine andere Datei geöffnet, oder die Kennung oben ist falsch. Nichts wurde gesendet. |
 | **Turnier bereits endgültig importiert** | Der Endimport ist schon gelaufen; die Datei lässt sich für dieses Turnier nicht mehr senden. |
 | **zu schnell hintereinander, in 37 s wieder möglich** | badhub nimmt je Turnier höchstens eine neue Datei pro Minute an. |
 | **Verbandskürzel ‹…› passt nicht zum badhub-Zugang** | Die Liveticker-Adresse in „1 · Liveticker-Ziel“ gehört zu einem anderen Verband als dein badhub-Passwort. Adresse prüfen — nicht das Passwort. |
@@ -96,6 +118,7 @@ Nach dem Klick zeigt die Zeile neben dem Knopf den Stand:
 <!-- pruef: "Turnier bereits endgültig importiert" in src-tauri/src/badhub/tp_upload.rs -->
 <!-- pruef: "Datei ändert sich gerade, bitte gleich noch einmal" in src-tauri/src/commands.rs -->
 <!-- pruef: "unverändert seit " in src-tauri/src/badhub/tp_upload.rs -->
+<!-- pruef: "gehört zu Turnier" in src-tauri/src/commands.rs -->
 
 Ein zweiter Klick, während „läuft …“ steht, tut nichts. Der Stand der Zeile
 geht beim Neustart von bts-light verloren — badhub kennt ihn weiter.
@@ -161,8 +184,9 @@ Bei Fehlern, die ein neuer Versuch nicht heilt, **hält die Automatik an** und
 die Zeile wird gelb: **„Automatik angehalten: …“** mit dem Grund aus der
 Tabelle oben — etwa „Turnier bereits endgültig importiert“, ein falsches
 Verbandskürzel oder Passwort, eine verschobene Datei (nach drei Fehlversuchen),
-oder die Kennung hat sich geändert („Datei neu wählen“). Daneben steht der
-Sprung ins Setup.
+eine Datei, die zu einem anderen Turnier gehört (BTP hat eine andere Datei
+geöffnet), oder die Kennung hat sich geändert („Datei neu wählen“). Daneben
+steht der Sprung ins Setup.
 <!-- pruef: "Automatik angehalten" in src/pages/Dashboard.tsx -->
 
 Die Automatik läuft wieder an, sobald du im Setup die Ursache behebst und

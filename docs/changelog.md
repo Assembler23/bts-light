@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.302
+
+- **Turnier-Kennung aus der Turnierdatei.** Beim Wählen der TP-Datei liest
+  bts-light die turnier.de-Kennung mit, die BTP in die Datei schreibt. Ist
+  unter „1 · Liveticker-Ziel" noch keine eingetragen, wird sie übernommen —
+  Abtippen von turnier.de entfällt. Gehört die Datei zu einem anderen Turnier
+  als die eingetragene Kennung, wird sie abgelehnt (etwa die Datei vom
+  Vorjahr), und auch vor jedem Senden — per Knopf wie per Automatik — prüft
+  bts-light die Kennung in der Datei: Hat BTP inzwischen eine andere
+  Turnierdatei geöffnet, geht nichts übers Netz, die Automatik hält mit
+  Grund an. Anleitung: [Einrichten](tp-datei-upload.md#einrichten-die-datei-wählen).
+
 ## v0.9.301
 
 - **Turnierdatei automatisch senden.** In den Einstellungen, Abschnitt

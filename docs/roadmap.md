@@ -515,6 +515,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     [features/tp-takt-upload.md](features/tp-takt-upload.md),
     [ADR 0061](adr/0061-takt-upload-lebenszyklus-schnellhash-anhalteregel.md).
     Standard aus.
+  - **Turnier-Kennung aus der Datei — ✅ umgesetzt in v0.9.302:** GUID per
+    Byte-Muster `LinkCode` aus der TP-Datei (kein Jet-Parser); Übernahme im
+    Setup, Ablehnung fremder Dateien vor dem Senden (Ergänzung in der
+    Takt-Spec). Offen: Datei über den BTP-Prozess selbst finden.
   - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1 — eingehalten.
   - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf,
     Lizenzfrage aus badhub-ADR 0047.

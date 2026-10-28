@@ -314,16 +314,20 @@ export function SetupWizard({
   const [tpInfo, setTpInfo] = useState<TpFileInfo | null>(null);
   /** Fehler der LETZTEN Wahl — bezieht sich auf die abgelehnte Datei, nicht auf den Pfad oben. */
   const [tpError, setTpError] = useState("");
+  /** Hinweis der letzten Wahl, z. B. „Turnier-Kennung aus der Datei übernommen“. */
+  const [tpHinweis, setTpHinweis] = useState("");
   useEffect(() => {
     if (!tpPath) return;
     tpFileCheck(tpPath).then(setTpInfo).catch(() => {});
     // Nur beim Laden: Nach einer Wahl kommt das Urteil direkt aus pickTpDatei.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Die Bindung an die GUID entsteht beim Wählen — ohne eingetragene GUID gäbe
-  // es nichts zu binden, deshalb ist der Wähl-Knopf dann aus (statt einer
-  // irreführenden „GUID hat sich geändert"-Meldung direkt nach der Wahl).
+  // Die Bindung an die GUID entsteht beim Wählen. Die Datei nennt ihre Kennung
+  // selbst (`Settings.LinkCode`): Ist oben noch keine eingetragen, wird sie von
+  // dort übernommen; steht oben eine andere, wird die Datei abgelehnt.
   const tpGuidJetzt = extractTournamentGuid(tournamentGuid);
+  /** `99F55FAB-E301-…` → „99F55FAB…“ (wie die Meldungen des Rust-Kerns und des Servers). */
+  const guidKurz = (g: string) => `${g.slice(0, 8)}…`;
   function tpInfoText(info: TpFileInfo): string | null {
     switch (info.art) {
       case "erkannt":
@@ -338,6 +342,7 @@ export function SetupWizard({
   }
   async function pickTpDatei() {
     setTpError("");
+    setTpHinweis("");
     try {
       const sel = await open({
         multiple: false,
@@ -346,18 +351,40 @@ export function SetupWizard({
       });
       if (!sel) return;
       const path = Array.isArray(sel) ? sel[0] : sel;
+      const name = path.split(/[\\/]/).pop() || path;
       const info = await tpFileCheck(path);
       const grund = tpInfoText(info);
       if (grund !== null) {
         // Nicht speichern (AK 1): der bisherige Pfad samt Urteil bleibt, der
         // Fehler nennt die abgelehnte Datei.
-        const name = path.split(/[\\/]/).pop() || path;
         setTpError(`„${name}“: ${grund}`);
+        return;
+      }
+      // Kennung aus der Datei: fehlt oben eine, wird sie übernommen. Eine
+      // ANDERE Kennung oben ist ein Fehler, keine Übernahme — sonst lenkte
+      // die Datei vom Vorjahr still den ganzen Liveticker auf ein fremdes
+      // Turnier um. Ohne Kennung in der Datei entscheidet weiter der Server.
+      const dateiGuid = info.art === "erkannt" ? (info.guid ?? "") : "";
+      let bindung = tpGuidJetzt;
+      if (bindung === "") {
+        if (dateiGuid === "") {
+          setTpError(
+            `„${name}“ nennt keine Turnier-Kennung — erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen, dann die Datei wählen.`,
+          );
+          return;
+        }
+        bindung = dateiGuid;
+        setTournamentGuid(dateiGuid);
+        setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${dateiGuid}`);
+      } else if (dateiGuid !== "" && dateiGuid !== bindung) {
+        setTpError(
+          `„${name}“ gehört zu Turnier ${guidKurz(dateiGuid)}, oben ist ${guidKurz(bindung)} eingetragen — Kennung prüfen oder andere Datei wählen.`,
+        );
         return;
       }
       setTpInfo(info);
       setTpPath(path);
-      setTpGuid(tpGuidJetzt);
+      setTpGuid(bindung);
     } catch (e) {
       setTpError(String(e));
     }
@@ -1312,14 +1339,8 @@ export function SetupWizard({
             <button
               type="button"
               onClick={() => void pickTpDatei()}
-              disabled={tpGuidJetzt === ""}
-              title={
-                tpGuidJetzt === ""
-                  ? "Erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen"
-                  : undefined
-              }
               className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                         text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+                         text-slate-700 transition-colors hover:bg-slate-200"
             >
               {tpPath ? "Datei neu wählen" : "TP-Datei wählen"}
             </button>
@@ -1331,6 +1352,7 @@ export function SetupWizard({
                   setTpGuid("");
                   setTpInfo(null);
                   setTpError("");
+                  setTpHinweis("");
                   // Ohne Datei keine Automatik — sonst hielte sie beim nächsten
                   // Schritt mit „Keine TP-Datei gewählt“ an (Spec AK 17a).
                   setTpAuto(false);
@@ -1347,13 +1369,29 @@ export function SetupWizard({
           )}
           {tpGuidJetzt === "" && (
             <p className="text-xs text-slate-500">
-              Erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen, dann die
-              Datei wählen — sie wird an diese Turnier-Kennung gebunden.
+              Unter „1 · Liveticker-Ziel“ ist noch keine Turnier-Kennung eingetragen —
+              beim Wählen übernimmt bts-light die Kennung aus der Datei.
             </p>
           )}
           {tpPath && tpInfo?.art === "erkannt" && (
             <p className="flex items-center gap-1.5 text-sm text-emerald-700">
               <Check size={16} /> {tpInfo.anzeige}
+              {tpInfo.guid !== null && tpInfo.guid === tpGuid && " · Turnier-Kennung passt"}
+            </p>
+          )}
+          {tpPath &&
+            tpInfo?.art === "erkannt" &&
+            tpInfo.guid !== null &&
+            tpGuid !== "" &&
+            tpInfo.guid !== tpGuid && (
+              <p className="text-sm text-amber-700">
+                Die Datei gehört zu Turnier {guidKurz(tpInfo.guid)}, gebunden ist{" "}
+                {guidKurz(tpGuid)} — Datei neu wählen.
+              </p>
+            )}
+          {tpHinweis && (
+            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+              <Check size={16} /> {tpHinweis}
             </p>
           )}
           {tpPath && tpInfo && tpInfo.art !== "erkannt" && (

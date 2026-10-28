@@ -958,6 +958,15 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
   (`99F55FAB-…`, gleich der GUID aus turnier.de bzw. `tournament_uuid`).
   Daneben `WebID` = turnier.de-Kurz-ID (`529398`, badhub `external_id`) und
   `UniCode`/`SiteCode` (Tournament-Software-interne Kennungen).
+- **Die GUID lässt sich ohne Jet-Parser lesen** (gemessen 28.10.2026 an 30
+  TP-Dateien aus BBB-Ranglisten und BBEM): `Settings` ist eine
+  name/value-Tabelle, Jet legt die Werte als komprimierten Unicode ab, im
+  Dateibild steht `FF FE LinkCode FF FE <GUID>` — in **jeder** Datei genau
+  einmal, die unkomprimierte UCS-2-Form nie. GUID-förmige Strings **ohne**
+  diesen Anker gibt es bis zu 1.491 je Datei (Spieler, Jet-Interna). Seit
+  v0.9.302 liest `badhub/tp_guid.rs` so die Kennung beim Wählen der Datei und
+  vor jedem Upload (3,6 MB in 30 ms, Debug-Build). Sonde:
+  `BTS_TP_DATEI=<Pfad> cargo test guid_aus_echter_datei -- --ignored --nocapture`.
 - **Offene Datei lesbar:** BTP hält die `.TP` mit einer `.ldb`-Sperrdatei;
   exklusives Öffnen scheitert, lesendes Öffnen mit Freigabe (`FileShare::ReadWrite`)
   und `CopyFile` gelingen. Zwei Kopien im Abstand von 2 s hatten denselben

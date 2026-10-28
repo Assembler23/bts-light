@@ -1177,6 +1177,30 @@ fn lese_fehler_text(e: &crate::badhub::tp_upload::LeseFehler) -> String {
     }
 }
 
+/// Turnier-Kennung aus der Datei, falls sie von der eingestellten abweicht.
+/// Leer, mehrdeutig oder ohne Anker → `None`: dann entscheidet der Server.
+fn fremde_guid(bytes: &[u8], eingestellt: &str) -> Option<String> {
+    match crate::badhub::tp_guid::guid_aus_bytes(bytes) {
+        crate::badhub::tp_guid::GuidBefund::Gefunden(datei) if datei != eingestellt => Some(datei),
+        _ => None,
+    }
+}
+
+/// `99F55FAB-E301-…` → „99F55FAB…“, wie die Server-Meldung beide Kennungen kürzt.
+fn guid_kurz(guid: &str) -> String {
+    let kopf: String = guid.chars().take(8).collect();
+    format!("{kopf}…")
+}
+
+/// Knopf-Text, wenn die Datei zu einem anderen Turnier gehört (Handbuch-Anker).
+fn guid_fremd_text(name: &str, datei: &str, eingestellt: &str) -> String {
+    format!(
+        "„{name}“ gehört zu Turnier {}, eingestellt ist {} — Kennung unter „1 · Liveticker-Ziel“ prüfen oder Datei neu wählen",
+        guid_kurz(datei),
+        guid_kurz(eingestellt)
+    )
+}
+
 /// Der eigentliche Upload, als freie Funktion ohne Tauri: Gate → stabil lesen
 /// (Guard danach sofort weg, erst dann senden) → Antwort → bei 202 steht
 /// „angenommen, wird verarbeitet“ im Merker (AK 4), dann wird der Status
@@ -1210,9 +1234,21 @@ pub(crate) async fn fuehre_upload_aus(
         Ok(guard) => {
             let gelesen = tpu::lese_stabil(&vorgaben.pfad, takt.leseabstand).await;
             drop(guard); // Writes dürfen weiter, bevor das Netz dran ist
-            match gelesen {
-                Err(e) => (lese_fehler_text(&e), UploadAusgang::Lesefehler(e)),
-                Ok(bytes) => {
+                         // Gehört die Datei zu einem anderen Turnier, geht nichts übers Netz.
+            let fremd = gelesen
+                .as_ref()
+                .ok()
+                .and_then(|b| fremde_guid(b, &vorgaben.guid));
+            match (gelesen, fremd) {
+                (Err(e), _) => (lese_fehler_text(&e), UploadAusgang::Lesefehler(e)),
+                (Ok(bytes), Some(datei)) => {
+                    groesse = Some(bytes.len() as u64);
+                    (
+                        guid_fremd_text(&name, &datei, &vorgaben.guid),
+                        UploadAusgang::GuidFremd { datei },
+                    )
+                }
+                (Ok(bytes), None) => {
                     groesse = Some(bytes.len() as u64);
                     let sha = tpu::sha256(&bytes);
                     let file_name = tpu::x_file_name(&vorgaben.pfad);
@@ -1561,9 +1597,13 @@ pub(crate) async fn tp_takt_schleife(
 }
 
 /// Urteil über einen im Dialog gewählten Pfad (Setup-Abschnitt „TP-Datei“).
+/// Liest die Datei ganz (Turnier-GUID), deshalb abseits des UI-Threads.
 #[tauri::command]
-pub fn tp_file_check(path: String) -> crate::badhub::tp_upload::TpFileInfo {
-    crate::badhub::tp_upload::tp_file_check(std::path::Path::new(path.trim()))
+pub async fn tp_file_check(path: String) -> crate::badhub::tp_upload::TpFileInfo {
+    let pfad = std::path::PathBuf::from(path.trim());
+    tokio::task::spawn_blocking(move || crate::badhub::tp_upload::tp_file_check(&pfad))
+        .await
+        .unwrap_or(crate::badhub::tp_upload::TpFileInfo::NichtGefunden)
 }
 
 /// Knopf „TP-Datei an badhub senden“: Vorbedingungen synchron (Verletzung →
@@ -6452,6 +6492,80 @@ mod tp_upload_tests {
             2,
             "ein POST, ein Status-GET"
         );
+    }
+
+    /// TP-Datei mit `Settings.LinkCode` im Dateibild (komprimierter Jet-Unicode).
+    fn tp_datei_mit_guid(name: &str, guid: &str) -> std::path::PathBuf {
+        let p = tp_datei(name);
+        let mut inhalt = std::fs::read(&p).unwrap();
+        inhalt.extend_from_slice(b"\xff\xfeLinkCode\xff\xfe");
+        inhalt.extend_from_slice(guid.as_bytes());
+        inhalt.extend_from_slice(&[7u8; 64]);
+        std::fs::write(&p, inhalt).unwrap();
+        p
+    }
+
+    #[tokio::test]
+    async fn upload_task_fremde_guid_in_der_datei_sendet_nicht() {
+        let (url, zaehler) = mock(
+            r#"{"received_at":"x","processed_at":"y","result":"ok","matches":7,"message":null}"#,
+        )
+        .await;
+        let pfad = tp_datei_mit_guid("fremd.tp", "99f55fab-e301-41a2-a165-1d162cb84fc1");
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        upload_starten(&status).unwrap();
+        let gate = WriteGate::new();
+        let (ausgang, text) = fuehre_upload_aus(
+            vorgaben(pfad, &url),
+            status.clone(),
+            &gate,
+            &crate::badhub::tp_upload::build_client(),
+            takt_schnell(),
+            Quelle::Knopf,
+        )
+        .await;
+        assert_eq!(
+            ausgang,
+            UploadAusgang::GuidFremd {
+                datei: "99F55FAB-E301-41A2-A165-1D162CB84FC1".to_string()
+            }
+        );
+        // Beide Kennungen gekürzt und der Dateiname — wie die Server-Meldung.
+        assert!(
+            text.contains("fremd.tp") && text.contains("99F55FAB") && text.contains("0EA5FD86"),
+            "{text}"
+        );
+        assert!(!text.contains("E301-41A2"), "gekürzt: {text}");
+        assert_eq!(zaehler.load(Ordering::SeqCst), 0, "kein Netzzugriff");
+        let s = status.lock().unwrap().clone();
+        assert!(!s.laeuft);
+        assert_eq!(s.ergebnis.as_deref(), Some(text.as_str()));
+    }
+
+    #[tokio::test]
+    async fn upload_task_passende_guid_in_der_datei_sendet() {
+        let (url, zaehler) = mock(
+            r#"{"received_at":"x","processed_at":"y","result":"ok","matches":7,"message":null}"#,
+        )
+        .await;
+        let pfad = tp_datei_mit_guid("passt.tp", "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA");
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        upload_starten(&status).unwrap();
+        let gate = WriteGate::new();
+        fuehre_upload_aus(
+            vorgaben(pfad, &url),
+            status.clone(),
+            &gate,
+            &crate::badhub::tp_upload::build_client(),
+            takt_schnell(),
+            Quelle::Knopf,
+        )
+        .await;
+        assert_eq!(
+            status.lock().unwrap().ergebnis.as_deref(),
+            Some("übernommen, 7 Spiele")
+        );
+        assert_eq!(zaehler.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

@@ -69,6 +69,11 @@ pub enum UploadAusgang {
     Beschaeftigt,
     /// Lesen unter dem Gate scheiterte.
     Lesefehler(LeseFehler),
+    /// Die Datei nennt in `Settings.LinkCode` eine andere Turnier-Kennung als
+    /// das Setup (`datei` = kanonische GUID aus der Datei). Nicht gesendet —
+    /// der Server würde mit `guid_mismatch` ablehnen; so sieht der Nutzer es
+    /// ohne Netzzugriff, auch wenn BTP am Turniertag eine andere Datei öffnet.
+    GuidFremd { datei: String },
     /// Jede Antwort außer 202.
     Antwort {
         antwort: UploadAntwort,
@@ -124,6 +129,7 @@ pub fn einordnen(ausgang: &UploadAusgang, knopf_text: &str) -> Einordnung {
             Einordnung::NichtLesbar(knopf_text.to_string())
         }
         UploadAusgang::Lesefehler(LeseFehler::KeineTpDatei | LeseFehler::ZuGross) => halt(),
+        UploadAusgang::GuidFremd { .. } => halt(),
         UploadAusgang::DauertNoch { sha } => Einordnung::Gesendet {
             sha: *sha,
             nachholen: true,
@@ -456,6 +462,18 @@ mod tests {
             },
             sha: sha(2),
         }
+    }
+
+    #[test]
+    fn fremde_guid_in_der_datei_ist_ein_halt() {
+        // Die Datei nennt eine andere Turnier-Kennung als das Setup — ein
+        // neuer Upload derselben Datei hilft nicht, der Server würde sie
+        // ohnehin mit guid_mismatch ablehnen.
+        let a = UploadAusgang::GuidFremd {
+            datei: "99F55FAB-E301-41A2-A165-1D162CB84FC1".into(),
+        };
+        assert_eq!(einordnen(&a, "K"), Einordnung::Halt("K".into()));
+        assert_eq!(grund_kurz(&a), "");
     }
 
     #[test]
