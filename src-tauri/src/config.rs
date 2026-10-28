@@ -373,7 +373,23 @@ pub struct TpUploadConfig {
     /// Wahrheit ist [`TpUploadConfig::takt`], die unter
     /// [`TP_TAKT_MIN_MINUTEN`] klemmt.
     pub auto_minutes: u16,
+    /// Ereignis-Auslöser (ADR 0062): Prüfung vorziehen, sobald BTP neue
+    /// Spiele oder eine gefüllte Paarung meldet. Wirkt nur mit `auto_enabled`.
+    /// Standard **an**; abschaltbar, falls Netz oder badhub zu viel abbekommen
+    /// — dann bleibt der reine Takt.
+    pub ereignis_enabled: bool,
+    /// Drossel: Mindestabstand in Minuten zwischen dem letzten Upload und
+    /// einem durch ein Ereignis vorgezogenen. Wahrheit ist
+    /// [`TpUploadConfig::ereignis_abstand`] (klemmt unter
+    /// [`TP_EREIGNIS_MIN_MINUTEN`]).
+    pub ereignis_minuten: u16,
 }
+
+/// Voreinstellung des Ereignis-Mindestabstands (Handbuch-Anker).
+pub const TP_EREIGNIS_STANDARD_MINUTEN: u16 = 5;
+/// Untergrenze der Drossel — dieselbe wie beim Takt: nie öfter als alle 5 min
+/// Schreib-Gate und Upload, weit über dem 60-s-Cooldown des Servers.
+pub const TP_EREIGNIS_MIN_MINUTEN: u16 = 5;
 
 /// Voreinstellung des Takts (Handbuch-Anker).
 pub const TP_TAKT_STANDARD_MINUTEN: u16 = 15;
@@ -388,11 +404,24 @@ impl Default for TpUploadConfig {
             tournament_uuid: String::new(),
             auto_enabled: false,
             auto_minutes: TP_TAKT_STANDARD_MINUTEN,
+            ereignis_enabled: true,
+            ereignis_minuten: TP_EREIGNIS_STANDARD_MINUTEN,
         }
     }
 }
 
 impl TpUploadConfig {
+    /// Wirksamer Mindestabstand des Ereignis-Auslösers: `None`, wenn die
+    /// Automatik oder der Auslöser aus ist, sonst mindestens
+    /// [`TP_EREIGNIS_MIN_MINUTEN`].
+    pub fn ereignis_abstand(&self) -> Option<std::time::Duration> {
+        (self.auto_enabled && self.ereignis_enabled).then(|| {
+            std::time::Duration::from_secs(
+                60 * u64::from(self.ereignis_minuten.max(TP_EREIGNIS_MIN_MINUTEN)),
+            )
+        })
+    }
+
     /// Wirksamer Takt: `None` wenn aus, sonst mindestens [`TP_TAKT_MIN_MINUTEN`].
     pub fn takt(&self) -> Option<std::time::Duration> {
         self.auto_enabled.then(|| {
@@ -1476,6 +1505,49 @@ mod tests {
         assert_eq!(wieder, t);
     }
 
+    // ── Ereignis-Auslöser (Spec tp-ereignis-upload, ADR 0062) ─────────
+    #[test]
+    fn tp_ereignis_schalter_und_drossel() {
+        // Alte config.json ohne die Felder: Ereignis an, 5 min Mindestabstand —
+        // wirkt aber erst mit eingeschalteter Automatik.
+        let alt: TpUploadConfig =
+            serde_json::from_str(r#"{"path":"C:\\t.tp","tournament_uuid":"X"}"#).unwrap();
+        assert!(alt.ereignis_enabled);
+        assert_eq!(alt.ereignis_minuten, TP_EREIGNIS_STANDARD_MINUTEN);
+        assert_eq!(
+            alt.ereignis_abstand(),
+            None,
+            "Automatik aus → kein Ereignis"
+        );
+
+        let mut t = TpUploadConfig {
+            auto_enabled: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            t.ereignis_abstand(),
+            Some(std::time::Duration::from_secs(60 * 5))
+        );
+        // Drosseln: größerer Abstand wirkt, kleinerer wird auf 5 geklemmt.
+        t.ereignis_minuten = 20;
+        assert_eq!(
+            t.ereignis_abstand(),
+            Some(std::time::Duration::from_secs(60 * 20))
+        );
+        t.ereignis_minuten = 1;
+        assert_eq!(
+            t.ereignis_abstand(),
+            Some(std::time::Duration::from_secs(60 * 5))
+        );
+        // Abschalten: nur der Ereignis-Auslöser, der Takt läuft weiter.
+        t.ereignis_enabled = false;
+        assert_eq!(t.ereignis_abstand(), None);
+        assert!(t.takt().is_some());
+        let wieder: TpUploadConfig =
+            serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
+        assert_eq!(wieder, t);
+    }
+
     // ── TP-Datei an badhub (Spec tp-datei-upload, L1) ──────────────────
     #[test]
     fn tp_upload_config_roundtrip_und_alte_config_ohne_block() {
@@ -2005,6 +2077,8 @@ mod tests {
                 tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
                 auto_enabled: true,
                 auto_minutes: 10,
+                ereignis_enabled: false,
+                ereignis_minuten: 12,
             },
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),

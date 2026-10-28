@@ -509,6 +509,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     badhub-PRs #1045/#1046/#1055/#1057), bts-light L1 in **v0.9.300**
     (Dateiwahl im Setup, Schreib-Gate, Knopf im Dashboard, Handbuch
     [tp-datei-upload.md](tp-datei-upload.md)).
+  - **Stufe 2b Ereignis-Auslöser — ✅ umgesetzt in v0.9.305:** Auslosung
+    oder gefüllte Paarung zieht die Takt-Prüfung auf ~30 s vor, abschalt-
+    und drosselbar; Spec [features/tp-ereignis-upload.md](features/tp-ereignis-upload.md),
+    [ADR 0062](adr/0062-tp-upload-ereignis-ausloeser.md).
   - **Stufe 2 — ✅ umgesetzt in v0.9.301:** Automatik, die nur solange der
     Liveticker läuft und nur bei geänderter Datei sendet (ungegateter
     SHA-256, Halt mit Wiederanlauf, Nachversuch 90 s × 2); Spec

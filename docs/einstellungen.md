@@ -148,6 +148,10 @@ das ist die schnellste Kontrolle, ob du beim richtigen Turnier bist. Der Test
 | **alle … Minuten** | 15 | Takt der Prüfung; weniger als 5 Minuten nimmt die App nicht an (wird angehoben). Eine unveränderte Datei kostet nichts — weder BTP noch badhub. |
 <!-- pruef: /TP_TAKT_STANDARD_MINUTEN: u16 = 15/ in src-tauri/src/config.rs -->
 <!-- pruef: /TP_TAKT_MIN_MINUTEN: u16 = 5/ in src-tauri/src/config.rs -->
+| **Bei neuen Spielen und Paarungen sofort prüfen** | an | Zieht die Prüfung auf etwa 30 Sekunden vor, sobald BTP neue Spiele (Auslosung) oder eine gefüllte Paarung meldet. Ergebnisse lösen nichts aus. Abschalten, falls Netz oder badhub zu viel abbekommen — dann bleibt der Takt. Siehe [Automatisch senden](tp-datei-upload.md#automatisch-senden). |
+<!-- pruef: "Bei neuen Spielen und Paarungen sofort prüfen" in src/pages/SetupWizard.tsx -->
+| **höchstens alle … Minuten** | 5 | Drossel: so oft darf ein solches Ereignis höchstens einen Upload auslösen; weniger als 5 wird angehoben. |
+<!-- pruef: /TP_EREIGNIS_STANDARD_MINUTEN: u16 = 5/ in src-tauri/src/config.rs -->
 
 Die Datei ist an die **Turnier-Kennung** aus „1 · Liveticker-Ziel" gebunden,
 die beim Wählen eingetragen war. Ändert sich die Kennung, bleibt der Pfad

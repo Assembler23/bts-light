@@ -29,6 +29,10 @@ use crate::config::AppConfig;
 /// Bewegung, Netz, 5xx) — kurz genug für heiße Phasen, lang genug, dass BTP
 /// mit seiner Eingabe fertig wird.
 pub const NACHVERSUCH: Duration = Duration::from_secs(90);
+/// Ereignis-Auslöser (ADR 0062): Abstand vom erkannten Ereignis zum Upload —
+/// eine Serie von BTP-Eingaben (Auslosung mehrerer Konkurrenzen) soll einen
+/// Upload auslösen, nicht fünf.
+pub const ENTPRELLUNG: Duration = Duration::from_secs(30);
 /// So viele Nachversuche in Folge, dann wieder der reguläre Takt.
 pub const MAX_NACHVERSUCHE: u8 = 2;
 /// „Nicht lesbar“ in Folge, bis es ein Halt wird (Virenscanner, Netzlaufwerk).
@@ -227,6 +231,13 @@ pub struct TaktZustand {
     /// Beim nächsten Schritt einmal den Status nachholen (nach „dauert noch“).
     #[serde(skip)]
     pub nachholen: bool,
+    /// Ende des letzten Uploads, der den Server erreicht hat (Takt oder
+    /// Knopf) — Bezugspunkt für den Mindestabstand der Ereignisse.
+    #[serde(skip)]
+    pub letzter_upload_ms: Option<u64>,
+    /// Grund, warum der nächste Termin vorgezogen wurde („neue Spiele“,
+    /// „Paarung“); `None` = regulärer Takt. Reist ans Dashboard.
+    pub ereignis_grund: Option<String>,
 }
 
 /// Wie der Schritt den neuen Termin gewählt hat — für den Text.
@@ -285,6 +296,7 @@ impl TaktZustand {
     pub fn unveraendert(&mut self, jetzt_ms: u64, takt: Duration) {
         self.geprueft_ms = Some(jetzt_ms);
         self.nicht_lesbar = 0;
+        self.ereignis_grund = None;
         self.naechster_ms = Some(jetzt_ms + Self::ms(takt));
     }
 
@@ -327,6 +339,8 @@ impl TaktZustand {
         guid: &str,
     ) -> Terminart {
         self.geprueft_ms = Some(jetzt_ms);
+        // Der Schritt ist gelaufen — ein vorgezogener Termin ist verbraucht.
+        self.ereignis_grund = None;
         match e {
             Einordnung::Gesendet { sha, nachholen } => {
                 self.merker = Some(SendeMerker {
@@ -337,6 +351,7 @@ impl TaktZustand {
                 self.nachversuche = 0;
                 self.nicht_lesbar = 0;
                 self.nachholen = nachholen;
+                self.letzter_upload_ms = Some(jetzt_ms);
                 self.naechster_ms = Some(jetzt_ms + Self::ms(takt));
                 Terminart::Regulaer
             }
@@ -377,6 +392,31 @@ impl TaktZustand {
                 }
             }
         }
+    }
+
+    /// Ereignis aus dem Sync-Lauf (ADR 0062): zieht den nächsten Termin auf
+    /// `jetzt + ENTPRELLUNG` vor, aber nie unter `letzter Upload +
+    /// min_abstand` (die Drossel aus `TpUploadConfig::ereignis_abstand`) und
+    /// nie **hinter** den bestehenden Termin. Takt aus oder angehalten →
+    /// wirkungslos. Liefert `true`, wenn sich der Termin bewegt hat (für die
+    /// Log-Zeile).
+    pub fn ereignis(&mut self, jetzt_ms: u64, grund: &str, min_abstand: Duration) -> bool {
+        let Some(bisher) = self.naechster_ms else {
+            return false;
+        };
+        if self.angehalten.is_some() {
+            return false;
+        }
+        let fruehestens = self
+            .letzter_upload_ms
+            .map_or(0, |t| t + Self::ms(min_abstand));
+        let termin = (jetzt_ms + Self::ms(ENTPRELLUNG)).max(fruehestens);
+        if termin >= bisher {
+            return false;
+        }
+        self.naechster_ms = Some(termin);
+        self.ereignis_grund = Some(grund.to_string());
+        true
     }
 
     /// Ist der Termin fällig?
@@ -462,6 +502,98 @@ mod tests {
             },
             sha: sha(2),
         }
+    }
+
+    /// Standard-Mindestabstand der Ereignisse (5 min, `TP_EREIGNIS_STANDARD_MINUTEN`).
+    const ABSTAND: Duration = Duration::from_secs(5 * 60);
+
+    #[test]
+    fn ereignis_gedrosselt_wartet_den_groesseren_abstand_ab() {
+        // Drossel 20 min: 1 min nach einem Upload geht der Termin auf
+        // Upload + 20 min — sofern der reguläre Takt nicht ohnehin früher kommt.
+        let takt = Duration::from_secs(60 * 60);
+        let mut z = TaktZustand::default();
+        z.starten(0);
+        z.anwenden(
+            Einordnung::Gesendet {
+                sha: sha(1),
+                nachholen: false,
+            },
+            100_000,
+            takt,
+            Path::new("x.tp"),
+            "G",
+        );
+        let drossel = Duration::from_secs(20 * 60);
+        assert!(z.ereignis(160_000, "neue Spiele", drossel));
+        assert_eq!(z.naechster_ms, Some(100_000 + 20 * 60 * 1000));
+    }
+
+    #[test]
+    fn ereignis_zieht_den_termin_auf_die_entprellung_vor() {
+        let takt = Duration::from_secs(15 * 60);
+        let mut z = TaktZustand::default();
+        // Takt aus → kein Termin, Ereignis wirkungslos.
+        assert!(!z.ereignis(1_000, "neue Spiele", ABSTAND));
+        assert_eq!(z.naechster_ms, None);
+        z.starten(0); // +60 s
+        z.unveraendert(10_000, takt); // nächster = 10 s + 15 min
+        assert!(z.ereignis(20_000, "neue Spiele", ABSTAND));
+        assert_eq!(
+            z.naechster_ms,
+            Some(20_000 + ENTPRELLUNG.as_millis() as u64)
+        );
+        assert_eq!(z.ereignis_grund.as_deref(), Some("neue Spiele"));
+        // Zweites Ereignis im Fenster: Termin bleibt (kein Hinausschieben).
+        assert!(!z.ereignis(25_000, "Ergebnis", ABSTAND));
+        assert_eq!(
+            z.naechster_ms,
+            Some(20_000 + ENTPRELLUNG.as_millis() as u64)
+        );
+    }
+
+    #[test]
+    fn ereignis_haelt_mindestabstand_zum_letzten_upload() {
+        let takt = Duration::from_secs(15 * 60);
+        let mut z = TaktZustand::default();
+        z.starten(0);
+        let p = Path::new("x.tp");
+        z.anwenden(
+            Einordnung::Gesendet {
+                sha: sha(1),
+                nachholen: false,
+            },
+            100_000,
+            takt,
+            p,
+            "G",
+        );
+        // 10 s nach dem Upload: frühestens 100 s + 5 min, nicht +30 s.
+        assert!(z.ereignis(110_000, "Ergebnis", ABSTAND));
+        assert_eq!(z.naechster_ms, Some(100_000 + ABSTAND.as_millis() as u64));
+        // Ein regulärer Termin, der näher liegt, wird nie nach hinten gezogen.
+        let mut nah = TaktZustand::default();
+        nah.starten(0);
+        nah.naechster_ms = Some(5_000);
+        assert!(!nah.ereignis(1_000, "Ergebnis", ABSTAND));
+        assert_eq!(nah.naechster_ms, Some(5_000));
+    }
+
+    #[test]
+    fn ereignis_bei_halt_wirkungslos_und_knopf_zaehlt_als_upload() {
+        let takt = Duration::from_secs(15 * 60);
+        let mut z = TaktZustand::default();
+        z.starten(0);
+        z.halt("K".into(), 1_000, takt);
+        assert!(!z.ereignis(2_000, "neue Spiele", ABSTAND));
+        let mut k = TaktZustand::default();
+        k.starten(0);
+        // Regulärer Termin weit weg (letzte Prüfung bei 40 s, Takt 15 min).
+        k.unveraendert(40_000, takt);
+        k.knopf_gesendet(Path::new("x.tp"), "G", sha(1), false);
+        k.letzter_upload_ms = Some(50_000);
+        assert!(k.ereignis(51_000, "neue Spiele", ABSTAND));
+        assert_eq!(k.naechster_ms, Some(50_000 + ABSTAND.as_millis() as u64));
     }
 
     #[test]

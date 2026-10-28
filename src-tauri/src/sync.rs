@@ -103,6 +103,14 @@ pub struct SyncEngine {
     /// Zuletzt geloggte Turnier-Topologie (Hallen, Felder, Matches) –
     /// das Diagnose-Log nennt sie nur bei Änderung, nicht jeden Zyklus.
     last_topology: Option<(usize, usize, usize)>,
+    /// Kern des letzten Snapshots für den Ereignis-Auslöser des TP-Uploads
+    /// (ADR 0062). `None` = noch kein Stand: Der erste Abruf nach dem Start
+    /// (auch nach dem Sync-Neustart beim Speichern) ist Ausgangslage, kein
+    /// Ereignis.
+    tp_kern: Option<crate::badhub::tp_ereignis::Kern>,
+    /// Im letzten Zyklus erkanntes Ereignis, bis der Sync-Loop es abholt
+    /// ([`SyncEngine::tp_ereignis_nehmen`]).
+    tp_ereignis: Option<&'static str>,
     /// Drossel der Perf-Zeile der Anzeige-Strecke (Spec
     /// monitor-livestand-push, S0). Sitzt hier, weil der Sync-Loop in
     /// **beiden** Betriebsarten läuft — der LAN-Server tut das nicht.
@@ -437,6 +445,8 @@ impl SyncEngine {
             last_push_at: None,
             logo_gesendet: None,
             last_topology: None,
+            tp_kern: None,
+            tp_ereignis: None,
             perf_log: crate::tablet::perf::PerfLog::neu(),
             oncourt_prev: HashMap::new(),
             officials_oncourt_prev: None,
@@ -453,6 +463,12 @@ impl SyncEngine {
             sched_takt: SchedTakt::neu(),
             sched_unsupported_since: None,
         }
+    }
+
+    /// Holt das im letzten Zyklus erkannte Ereignis ab (einmalig) — der
+    /// Sync-Loop reicht es an den Takt-Zustand weiter (ADR 0062).
+    pub fn tp_ereignis_nehmen(&mut self) -> Option<&'static str> {
+        self.tp_ereignis.take()
     }
 
     /// Entscheidet, ob in diesem Zyklus eine Meldeliste zu senden ist, und
@@ -2096,6 +2112,19 @@ impl SyncEngine {
                 EMPTY_CONFIRM_POLLS
             );
             return SyncOutcome::SnapshotDiscarded;
+        }
+
+        // Ereignis-Auslöser des TP-Uploads (ADR 0062): Auslosung oder
+        // gefüllte Paarung seit dem letzten Abruf? Nur merken — den Termin
+        // zieht der Sync-Loop vor, der den Takt-Zustand kennt.
+        {
+            let neu = crate::badhub::tp_ereignis::kern(&snapshot);
+            if let Some(alt) = &self.tp_kern {
+                if let Some(grund) = crate::badhub::tp_ereignis::vergleiche(alt, &neu) {
+                    self.tp_ereignis = Some(grund);
+                }
+            }
+            self.tp_kern = Some(neu);
         }
 
         // Turnier-Topologie ins Diagnose-Log – nur bei Änderung, damit es

@@ -117,6 +117,8 @@ function defaultConfig(): AppConfig {
       tournament_uuid: "",
       auto_enabled: false,
       auto_minutes: 15,
+      ereignis_enabled: true,
+      ereignis_minuten: 5,
     },
     print: {
       auto_enabled: false,
