@@ -391,3 +391,39 @@ Roadmap, Changelog, Version 0.9.301. code-reviewer nach jedem Schritt;
 **security-reviewer** für die ungegatete Lesung und den Takt-Schritt (Deckel,
 kein Inhalt im Log, nie häufiger als 5 min bzw. `Retry-After`, Halt-Texte sind
 bereinigte Server-Meldungen).
+
+## Ergänzung 28.10.2026: Turnier-Kennung aus der Datei (v0.9.302)
+
+**Anlass.** Die Automatik sendet, was unter dem gespeicherten Pfad liegt. Öffnet
+die Turnierleitung in BTP am Turniertag eine andere Datei (zweiter Tag,
+Vorjahr, Sicherung), merkte das bisher erst der Server (`guid_mismatch`,
+ein Upload von 0,4 MB umsonst). Außerdem tippte der Turnierleiter die
+Turnier-GUID ab, obwohl BTP sie in die Datei schreibt.
+
+**Befund** (Messung 28.10.2026, 30 TP-Dateien, `btp_protocol.md`): Die
+`Settings`-Tabelle ist name/value, Jet legt die Werte als komprimierten
+Unicode ab — `FF FE LinkCode FF FE <GUID>` steht genau einmal je Datei. Ein
+Jet-Parser ist dafür nicht nötig (und hätte die Lizenzfrage aus ADR 0047).
+
+**Entscheidungen.**
+
+| Frage | Entscheidung |
+|---|---|
+| G1 Lesen | `badhub/tp_guid.rs` `guid_aus_bytes(&[u8]) -> GuidBefund` (`Gefunden` kanonisch / `Leer` / `Mehrdeutig` / `KeinAnker`), komprimierte Jet-Textform, UCS-2 nur als Rückfall ohne komprimierten Treffer (3,6 MB in 30 ms Debug). **Mehrere Anker mit unterschiedlichem Inhalt** (zwei GUIDs, oder GUID neben leerem Anker) → `Mehrdeutig`: Welche Zeile die aktuelle ist, sagt die Datei nicht — eine entlinkte Datei mit alter GUID im freien Seitenplatz sähe aus wie eine frisch verknüpfte mit leerer Altfassung. Nur die GUID — kein weiteres Feld aus der Datei. `fremde_guid`/`kurz` liegen im selben Modul. |
+| G2 Dateiwahl | `tp_file_check` liest die Datei ganz (Command jetzt `async` + `spawn_blocking`) und liefert `guid: Option<String>` (`None` für Leer/Mehrdeutig/KeinAnker). Wizard: Feld „Turnier bei turnier.de“ **leer** → Übernahme aus der Datei (Hinweis „Turnier-Kennung aus der Datei übernommen“), Wähl-Knopf nicht mehr gesperrt; Feld mit Text, der keine Kennung ist → Datei abgelehnt („Feld leeren oder Adresse einfügen“), nichts wird überschrieben; Kennung oben **anders** → Datei abgelehnt, nichts gespeichert („gehört zu Turnier …“). Keine stille Übernahme einer anderen Kennung: Sie steuert auch den Liveticker (ADR 0054). Datei ohne eindeutige Kennung → nur mit eingetragener Kennung wählbar, Server prüft. Vergleiche im Wizard kanonisch (`extractTournamentGuid`). |
+| G3 Vor dem Senden | In `fuehre_upload_aus` nach dem stabilen Lesen: `Gefunden(g)` mit `g ≠ vorgaben.guid` → `UploadAusgang::GuidFremd { datei }`, kein Netzzugriff, Knopf-Text „„<Datei>“ gehört zu Turnier <8 Zeichen>…, eingestellt ist <8 Zeichen>… — Kennung unter „1 · Liveticker-Ziel“ prüfen oder andere Datei wählen“ (derselbe Rat im Setup-Hinweis). `einordnen` → **Halt** (wie `guid_mismatch`). Die Schnell-Lesung des Takts prüft **nicht** — sie ist ungegated, ein Halt aus einer halb geschriebenen Seite wäre zu teuer; der Gate-Lauf danach fängt es. |
+| G4 Wiederanlauf | Unverändert: Speichern mit neuer Datei/Kennung oder ein gelungener Knopf-Upload. |
+
+**Akzeptanzkriterien.** (19) `guid_aus_bytes`: komprimiert und UCS-2 gefunden
+und kanonisiert; ohne Anker `KeinAnker` trotz fremder GUIDs; Anker ohne Wert
+`Leer`; Anker am Dateiende ohne Panik; zwei gleiche Anker eindeutig; zwei
+verschiedene `Mehrdeutig` sortiert. (20) `tp_file_check` liefert die GUID
+aus einer Datei mit Anker, sonst `None`. (21) `fuehre_upload_aus` mit fremder
+GUID: `GuidFremd`, 0 Requests, Text nennt Dateiname und beide Kennungen
+gekürzt; mit passender GUID wird gesendet. (22) `einordnen(GuidFremd)` =
+Halt. (23) Handbuch-Anker „Turnier-Kennung aus der Datei übernommen“,
+„Turnier-Kennung passt“, „gehört zu Turnier“ (Wizard und `commands.rs`).
+Sonde: `BTS_TP_DATEI=<Pfad> cargo test guid_aus_echter_datei -- --ignored`.
+
+**Nicht-Ziel.** Automatisches Finden der Datei über den BTP-Prozess bleibt
+Roadmap; `WebID` wird nicht gelesen.

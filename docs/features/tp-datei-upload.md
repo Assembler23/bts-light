@@ -180,6 +180,13 @@ Client, SHA-256 nur am Server).
   lesbar, Kopf `\x00\x01\x00\x00Standard Jet DB`, Größe ≤ 32 MB. Das
   Ergebnis steht neben dem Pfad („Turnierdatei erkannt, 3,6 MB", „keine
   TP-Datei", „zu groß").
+- **Seit v0.9.302** liest `tp_file_check` die Datei ganz und liefert die
+  Turnier-GUID aus `Settings.LinkCode` mit (`TpFileInfo::Erkannt.guid`,
+  Byte-Muster in `badhub/tp_guid.rs`, Messung in `btp_protocol.md`). Ohne
+  Kennung im Setup wird sie übernommen; eine **andere** Kennung lehnt die
+  Datei ab — keine stille Umlenkung des Livetickers. Vor jedem Upload
+  derselbe Abgleich (`UploadAusgang::GuidFremd`, kein Netzzugriff, Halt der
+  Automatik). Details: Takt-Spec, „Ergänzung 28.10.2026".
 - Die Bindung an die GUID entsteht **beim Wählen der Datei**: Der Wizard
   übernimmt die zu diesem Zeitpunkt eingetragene Turnier-GUID in
   `tp_upload.tournament_uuid`; `save_config` schreibt den Block unverändert

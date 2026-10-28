@@ -135,7 +135,9 @@ export interface TpUploadConfig {
 
 /** Urteil über einen gewählten Pfad (Rust: `badhub::tp_upload::TpFileInfo`). */
 export type TpFileInfo =
-  | { art: "erkannt"; groesse: number; anzeige: string }
+  /** `guid` = Turnier-Kennung aus der Datei (`Settings.LinkCode`), kanonisch;
+   *  null, wenn die Datei keine, eine leere oder mehrere nennt. */
+  | { art: "erkannt"; groesse: number; anzeige: string; guid: string | null }
   | { art: "keine_tp_datei" }
   | { art: "zu_gross"; groesse: number }
   | { art: "nicht_gefunden" };

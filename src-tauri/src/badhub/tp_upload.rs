@@ -45,9 +45,13 @@ pub const STATUS_MAX: Duration = Duration::from_secs(120);
 #[serde(tag = "art", rename_all = "snake_case")]
 pub enum TpFileInfo {
     /// `anzeige` ist der fertige Text neben dem Pfad: „Turnierdatei erkannt, 3,6 MB“.
+    /// `guid` ist die Turnier-GUID aus der Datei (`Settings.LinkCode`,
+    /// [`crate::badhub::tp_guid`]), kanonisch; `None`, wenn die Datei keine,
+    /// eine leere oder mehrere verschiedene nennt — dann tippt sie der Nutzer.
     Erkannt {
         groesse: u64,
         anzeige: String,
+        guid: Option<String>,
     },
     /// Falsche Endung, kein Jet-Kopf, Verzeichnis oder leere Datei.
     KeineTpDatei,
@@ -59,8 +63,9 @@ pub enum TpFileInfo {
 }
 
 /// Endung `.tp` (Groß/Klein egal), Datei vorhanden und lesbar, Jet-Kopf, ≤ 32 MB.
-/// Liest nur die ersten 19 Bytes — die volle Lesung passiert erst im Upload
-/// unter dem Schreib-Gate.
+/// Liest die Datei einmal ganz (ohne Schreib-Gate, Millisekunden), um die
+/// Turnier-GUID herauszusuchen — die Bytes bleiben nicht im Speicher und
+/// landen nicht im Log.
 pub fn tp_file_check(pfad: &Path) -> TpFileInfo {
     let endung_ok = pfad
         .extension()
@@ -80,19 +85,32 @@ pub fn tp_file_check(pfad: &Path) -> TpFileInfo {
     if groesse > TP_MAX_BYTES {
         return TpFileInfo::ZuGross { groesse };
     }
-    let mut kopf = [0u8; JET_KOPF.len()];
-    let gelesen = std::fs::File::open(pfad).and_then(|mut f| {
+    let gelesen = std::fs::File::open(pfad).and_then(|f| {
         use std::io::Read;
-        f.read_exact(&mut kopf)
+        let mut v = Vec::with_capacity(groesse as usize);
+        // Deckel beim Lesen (TOCTOU): zwischen Metadaten und Lesen kann die
+        // Datei gewachsen sein.
+        f.take(TP_MAX_BYTES + 1).read_to_end(&mut v)?;
+        Ok(v)
     });
     match gelesen {
-        Ok(()) if &kopf == JET_KOPF => TpFileInfo::Erkannt {
-            groesse,
-            anzeige: format!("Turnierdatei erkannt, {}", mb_anzeige(groesse)),
+        // Zwischen Metadaten und Lesen gewachsen: die echte Größe nennen,
+        // nicht den Deckel.
+        Ok(bytes) if bytes.len() as u64 > TP_MAX_BYTES => TpFileInfo::ZuGross {
+            groesse: std::fs::metadata(pfad)
+                .map(|m| m.len())
+                .unwrap_or(bytes.len() as u64),
         },
-        Ok(()) => TpFileInfo::KeineTpDatei,
-        // Zu kurz für den Kopf (leere Datei) → keine TP-Datei; sonst nicht lesbar.
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => TpFileInfo::KeineTpDatei,
+        Ok(bytes) if bytes.starts_with(JET_KOPF) => TpFileInfo::Erkannt {
+            groesse: bytes.len() as u64,
+            anzeige: format!("Turnierdatei erkannt, {}", mb_anzeige(bytes.len() as u64)),
+            guid: match crate::badhub::tp_guid::guid_aus_bytes(&bytes) {
+                crate::badhub::tp_guid::GuidBefund::Gefunden(g) => Some(g),
+                _ => None,
+            },
+        },
+        // Kein Jet-Kopf oder zu kurz dafür (leere Datei) → keine TP-Datei.
+        Ok(_) => TpFileInfo::KeineTpDatei,
         Err(_) => TpFileInfo::NichtGefunden,
     }
 }
@@ -583,10 +601,31 @@ mod tests {
                 tp_file_check(&p),
                 TpFileInfo::Erkannt {
                     groesse: 119,
-                    anzeige: "Turnierdatei erkannt, 0,0 MB".to_string()
+                    anzeige: "Turnierdatei erkannt, 0,0 MB".to_string(),
+                    guid: None,
                 },
                 "{name}"
             );
+        }
+    }
+
+    #[test]
+    fn tp_file_check_liest_die_turnier_guid_aus_der_datei() {
+        let p = tmp("mit-guid.tp");
+        let mut nutzlast = vec![0u8; 200];
+        nutzlast.extend_from_slice(
+            b"\xff\xfeLinkCode\xff\xfe99f55fab-e301-41a2-a165-1d162cb84fc16\x00",
+        );
+        nutzlast.extend_from_slice(&[0u8; 100]);
+        std::fs::write(&p, jet(&nutzlast)).unwrap();
+        match tp_file_check(&p) {
+            TpFileInfo::Erkannt { guid, .. } => {
+                assert_eq!(
+                    guid.as_deref(),
+                    Some("99F55FAB-E301-41A2-A165-1D162CB84FC1")
+                )
+            }
+            andere => panic!("{andere:?}"),
         }
     }
 
