@@ -509,7 +509,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     badhub-PRs #1045/#1046/#1055/#1057), bts-light L1 in **v0.9.300**
     (Dateiwahl im Setup, Schreib-Gate, Knopf im Dashboard, Handbuch
     [tp-datei-upload.md](tp-datei-upload.md)).
-  - **Stufe 2 (offen):** seltener Takt bei geänderter Datei (L2).
+  - **Stufe 2 — spezifiziert 28.10.2026:** Takt bei geänderter Datei, nur
+    solange der Liveticker läuft; Spec
+    [features/tp-takt-upload.md](features/tp-takt-upload.md),
+    [ADR 0061](adr/0061-takt-upload-lebenszyklus-schnellhash-anhalteregel.md).
+    Umsetzung PR L2 in Arbeit.
   - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1 — eingehalten.
   - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf,
     Lizenzfrage aus badhub-ADR 0047.
