@@ -302,11 +302,27 @@ Check-In gerade benutzbar ist:
 | `ready` | badhub hat geantwortet | den Stand |
 | `offline` | keine Verbindung | „Der Check-In braucht Internet" — plus den Hinweis, dass das Turnier unverändert weiterläuft |
 | `unsupported` | badhub kennt den Kanal noch nicht (404/400) oder der Check-In ist nicht eingerichtet | denselben ruhigen Hinweis |
-| `rejected` | Passwort oder Kennung passen nicht (401/403) | die Aufforderung, beides zu prüfen |
+| `rejected` | Passwort oder Kennung passen nicht (401/403), oder Sperre nach Fehlversuchen (429) | **getrennt nach Ursache:** bei 401 „badhub kennt dieses Liveticker-Passwort nicht", bei 403 „Diese Turnier-Kennung gehört in badhub zu einem anderen Zugang" (das Passwort ist dann gültig) |
 
 `rejected` ist der einzige Fall, den die Turnierleitung selbst beheben kann —
 deshalb ist er als einziger von „offline" unterschieden. Ein 5xx wird wie
 offline behandelt: der nächste Abruf versucht es erneut.
+
+**429** läuft ebenfalls als `rejected`, mit eigenem Satz: badhub sperrt einen
+Anschluss (je IP) nach fünf Fehlversuchen innerhalb von 15 Minuten, nach
+fünfzig innerhalb von 24 Stunden für einen Tag. Die Meldung nennt die Dauer
+aus `Retry-After` als „spätestens" — das Fenster gleitet, die Sperre endet oft
+früher. Nicht `offline`, weil die Zähler mit dem **Liveticker-Push** geteilt
+sind: Die Sperre legt auch ihn still, der Offline-Zusatz „das Turnier läuft
+unverändert weiter" wäre falsch. Der Schreibweg zeigt bei 401/403/429 dieselben
+Sätze wie der Lesepfad, nicht badhubs knappen Text.
+
+**Woher die 403 kommt:** Eine Turnier-Kennung ist an den Zugang gebunden, der
+**zuletzt** eine Meldeliste für sie gesendet hat
+(`checkin_tournaments.tournament_key`, badhub überschreibt die Bindung bei
+jedem Push). Hat danach ein anderer Zugang dieselbe Kennung gesendet — eine
+zweite Installation, ein früherer Test —, bekommt der erste 403, auch mit
+gültigem Passwort. Sein nächster Meldelisten-Push holt die Kennung zurück.
 
 ### Eingreifen und Zeiten pflegen
 
