@@ -2659,12 +2659,15 @@ pub fn open_external(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<(), String> {
-    let lan_host = {
-        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
-        cfg.connection_mode
-            .lan_enabled()
-            .then(crate::tablet::server::lan_host)
-    };
+    // Nur den Schalter unter dem Lock lesen — `lan_host()` fragt die
+    // Netzwerkschnittstellen ab und gehört nicht unter den Config-Mutex.
+    let lan_an = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .connection_mode
+        .lan_enabled();
+    let lan_host = lan_an.then(crate::tablet::server::lan_host);
     if !open_url_erlaubt(&url, lan_host.as_deref()) {
         return Err("Nur https- oder lokale bts-light-Links sind erlaubt.".to_string());
     }
@@ -2674,9 +2677,11 @@ pub fn open_external(
 }
 
 /// Regel des Öffners, frei von Tauri: saubere `https://`, `http://` auf
-/// Loopback/mDNS-Name, oder `http://` auf genau den eigenen LAN-Server
-/// (`lan_host` = `<ip>:<port>`; Host-Vergleich endet am `/`, damit
-/// `192.168.1.50:8088.evil.de` nicht durchrutscht).
+/// Loopback/mDNS-Name **mit reinem Port**, oder `http://` auf genau den
+/// eigenen LAN-Server (`lan_host` = `<ip>:<port>`). Der Host ist alles bis
+/// zum ersten `/`; verglichen wird auf Gleichheit, nie auf Präfix — sonst
+/// schickten `localhost:8088@evil.example` oder `…:8088.evil.de` den Browser
+/// auf einen fremden Host.
 fn open_url_erlaubt(url: &str, lan_host: Option<&str>) -> bool {
     if url.contains(|c: char| c.is_control() || c == ' ') {
         return false;
@@ -2688,9 +2693,11 @@ fn open_url_erlaubt(url: &str, lan_host: Option<&str>) -> bool {
         return false;
     };
     let host = rest.split('/').next().unwrap_or("");
-    let loopback = host.starts_with("localhost:")
-        || host.starts_with("127.0.0.1:")
-        || host.starts_with("bts-light.local:");
+    let loopback = host.rsplit_once(':').is_some_and(|(name, port)| {
+        matches!(name, "localhost" | "127.0.0.1" | "bts-light.local")
+            && !port.is_empty()
+            && port.bytes().all(|b| b.is_ascii_digit())
+    });
     loopback || lan_host.is_some_and(|lan| !lan.is_empty() && host == lan)
 }
 
@@ -2729,6 +2736,28 @@ mod open_url_tests {
         assert!(!open_url_erlaubt("http://192.168.1.51:8088/court/3", lan));
         // Ohne LAN-Server (Cloud-Modus) bleibt http auf fremde Hosts zu.
         assert!(!open_url_erlaubt("http://192.168.1.50:8088/court/3", None));
+    }
+
+    #[test]
+    fn loopback_nur_mit_reinem_port_keine_userinfo_oder_suffix_tricks() {
+        // `host` ist alles bis zum ersten `/` — Benutzerinfo (`@`) oder ein
+        // angehängter Domain-Rest dürfen den Browser nicht auf einen fremden
+        // Host schicken.
+        assert!(!open_url_erlaubt(
+            "http://localhost:8088@evil.example/x",
+            None
+        ));
+        assert!(!open_url_erlaubt("http://127.0.0.1:8088.evil.de/", None));
+        assert!(!open_url_erlaubt("http://bts-light.local:8088:x/", None));
+        assert!(!open_url_erlaubt("http://localhost/", None));
+        assert!(!open_url_erlaubt("http://localhost:/", None));
+        assert!(open_url_erlaubt("http://localhost:8088", None));
+        // Dasselbe für den LAN-Host: Gleichheit, keine Präfixe.
+        let lan = Some("192.168.1.50:8088");
+        assert!(!open_url_erlaubt(
+            "http://192.168.1.50:8088@evil.example/",
+            lan
+        ));
     }
 }
 
