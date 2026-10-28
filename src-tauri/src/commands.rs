@@ -1348,9 +1348,10 @@ pub(crate) fn knopf_nachlauf(
     if let crate::badhub::tp_takt::Einordnung::Gesendet { sha, nachholen } =
         crate::badhub::tp_takt::einordnen(ausgang, "")
     {
-        tp_status_lock(status)
-            .takt
-            .knopf_gesendet(pfad, guid, sha, nachholen);
+        let mut s = tp_status_lock(status);
+        s.takt.knopf_gesendet(pfad, guid, sha, nachholen);
+        // Auch der Knopf zählt für den Mindestabstand der Ereignisse (ADR 0062).
+        s.takt.letzter_upload_ms = Some(now_ms());
     }
 }
 
@@ -1806,6 +1807,32 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
                 });
             }
             let outcome = engine.run_once(&sync_config, &http, &sync_tablet).await;
+            // Ereignis-Auslöser des TP-Uploads (ADR 0062): Auslosung oder
+            // Paarung erkannt → Takt-Termin vorziehen. Schalter und Drossel
+            // aus der GETEILTEN Config (nicht der Wertkopie `sync_config`):
+            // Abschalten im Setup wirkt so ab dem nächsten Abruf.
+            let app_state = app_handle.state::<AppState>();
+            // Vergifteter Mutex: weiterlesen statt den ganzen Sync-Loop
+            // (Liveticker-Push) für einen optionalen Auslöser abzureißen.
+            let abstand = app_state
+                .config
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .tp_upload
+                .ereignis_abstand();
+            let ereignis = engine.tp_ereignis_nehmen();
+            if let (Some(grund), Some(abstand)) = (ereignis, abstand) {
+                let jetzt = now_ms();
+                let mut tp = tp_status_lock(&app_state.tp_upload);
+                if tp.takt.ereignis(jetzt, grund, abstand) {
+                    tracing::info!(
+                        "TP-Takt: {grund} erkannt — Prüfung vorgezogen auf {}",
+                        crate::badhub::tp_takt::uhrzeit_aus_ms(
+                            tp.takt.naechster_ms.unwrap_or(jetzt)
+                        )
+                    );
+                }
+            }
             let mut status = status_from(&outcome);
             status.running = true;
             *app_handle

@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.305
+
+- **Turnierdatei sofort bei neuen Spielen senden.** Mit eingeschalteter
+  Automatik wartet bts-light nicht mehr auf den nächsten Takt, wenn in BTP
+  ausgelost wird oder sich nach einem Ergebnis die nächste Paarung füllt:
+  Die Prüfung kommt nach etwa einer halben Minute. Ergebnisse allein lösen
+  nichts aus, die zeigt badhub aus dem Liveticker. Im Setup lässt sich das
+  mit **Bei neuen Spielen und Paarungen sofort prüfen** abschalten und mit
+  **höchstens alle … Minuten** drosseln (Voreinstellung 5). Anleitung:
+  [Automatisch senden](tp-datei-upload.md#automatisch-senden).
+
 ## v0.9.304
 
 - **Tablet-Adresse anklickbar.** Im Tablet-Spielzettel ist die Adresse je

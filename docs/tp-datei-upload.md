@@ -181,6 +181,26 @@ hintereinander, dann wieder im normalen Takt; bei „badhub bittet um Geduld“
 nach der Zeit, die badhub nennt. Die Zeile nennt den Grund und den nächsten
 Versuch. Kennt dein badhub den Upload noch nicht, wartet die Automatik eine
 halbe Stunde.
+
+**Sofort bei neuen Spielen.** Mit dem Häkchen **Bei neuen Spielen und
+Paarungen sofort prüfen** (voreingestellt an) wartet die Automatik nicht auf
+den nächsten Takt, wenn in BTP eine Auslosung neue Spiele anlegt oder sich
+nach einem Ergebnis die nächste Paarung füllt: Die Prüfung kommt dann nach
+etwa einer halben Minute, die Zeile sagt etwa „Paarung erkannt — Prüfung
+14:32“. Ergebnisse allein lösen das **nicht** aus — die zeigt badhub ohnehin
+aus dem Liveticker.
+<!-- pruef: "Bei neuen Spielen und Paarungen sofort prüfen" in src/pages/SetupWizard.tsx -->
+
+**Drosseln oder abschalten.** Darunter steht **höchstens alle … Minuten**
+(Voreinstellung 5, weniger nimmt die App nicht an): So oft darf ein solches
+Ereignis höchstens einen Upload auslösen. Merkst du, dass das Hallennetz
+oder badhub zu viel abbekommt, setze den Wert hoch oder nimm das Häkchen
+heraus — beides wirkt nach dem Speichern sofort, die Automatik läuft dann
+nur noch im Takt. badhub selbst kann ebenfalls bremsen: Antwortet es mit
+„bitte später“, wartet die Automatik die genannte Zeit ab.
+<!-- pruef: "höchstens alle" in src/pages/SetupWizard.tsx -->
+<!-- pruef: /TP_EREIGNIS_STANDARD_MINUTEN: u16 = 5/ in src-tauri/src/config.rs -->
+<!-- pruef: /TP_EREIGNIS_MIN_MINUTEN: u16 = 5/ in src-tauri/src/config.rs -->
 <!-- pruef: "badhub bittet um Geduld" in src-tauri/src/badhub/tp_upload.rs -->
 <!-- pruef: "nächster Versuch" in src-tauri/src/badhub/tp_takt.rs -->
 

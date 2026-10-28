@@ -148,7 +148,13 @@ export function tpAutomatikZeile(
     return { text: "Automatik startet mit dem Liveticker", warnung: false };
   }
   const teile = [`Automatik: alle ${minuten} min`];
-  if (s?.naechster_ms) teile.push(`nächste Prüfung ${uhrzeit(s.naechster_ms)}`);
+  if (s?.naechster_ms) {
+    teile.push(
+      s.ereignis_grund
+        ? `${s.ereignis_grund} erkannt — Prüfung ${uhrzeit(s.naechster_ms)}`
+        : `nächste Prüfung ${uhrzeit(s.naechster_ms)}`,
+    );
+  }
   if (s?.zeitpunkt_ms && s.ergebnis) {
     const wer = s.quelle === "knopf" ? "von Hand" : "automatisch";
     teile.push(`zuletzt ${uhrzeit(s.zeitpunkt_ms)} (${wer}): ${s.ergebnis}`);

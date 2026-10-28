@@ -131,6 +131,10 @@ export interface TpUploadConfig {
   auto_enabled: boolean;
   /** Takt in Minuten; Rust klemmt unter 5 (`TP_TAKT_MIN_MINUTEN`), Standard 15. */
   auto_minutes: number;
+  /** Ereignis-Auslöser (ADR 0062): bei neuen Spielen/Paarungen vorziehen. Standard an. */
+  ereignis_enabled: boolean;
+  /** Drossel: Mindestabstand in Minuten; Rust klemmt unter 5, Standard 5. */
+  ereignis_minuten: number;
 }
 
 /** Urteil über einen gewählten Pfad (Rust: `badhub::tp_upload::TpFileInfo`). */
@@ -156,6 +160,8 @@ export interface TpUploadStatus {
   naechster_ms: number | null;
   geprueft_ms: number | null;
   angehalten: string | null;
+  /** Warum der nächste Termin vorgezogen ist („neue Spiele“, „Paarung“); null = Takt. */
+  ereignis_grund: string | null;
 }
 
 /** Schiedsrichtermanagement — globale Schalter (Rust: config::OfficialsConfig).

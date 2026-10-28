@@ -314,6 +314,13 @@ export function SetupWizard({
   const [tpMinutes, setTpMinutes] = useState(
     String(initialConfig.tp_upload.auto_minutes ?? 15),
   );
+  // Ereignis-Auslöser (ADR 0062): Schalter + Drossel (Mindestabstand).
+  const [tpEreignis, setTpEreignis] = useState(
+    initialConfig.tp_upload.ereignis_enabled ?? true,
+  );
+  const [tpEreignisMinuten, setTpEreignisMinuten] = useState(
+    String(initialConfig.tp_upload.ereignis_minuten ?? 5),
+  );
   /** Urteil über die GESPEICHERTE Datei (beim Laden geprüft; nach einer Wahl das der neuen). */
   const [tpInfo, setTpInfo] = useState<TpFileInfo | null>(null);
   /** Fehler der LETZTEN Wahl — bezieht sich auf die abgelehnte Datei, nicht auf den Pfad oben. */
@@ -703,6 +710,11 @@ export function SetupWizard({
         auto_enabled: tpAuto,
         // 1–1440: Rust klemmt unter 5; oberhalb von u16 schlüge sonst das ganze Speichern fehl.
         auto_minutes: Math.min(1440, Math.max(1, Math.round(Number(tpMinutes) || 15))),
+        ereignis_enabled: tpEreignis,
+        ereignis_minuten: Math.min(
+          1440,
+          Math.max(1, Math.round(Number(tpEreignisMinuten) || 5)),
+        ),
       },
       master_namespace: masterNamespace.trim(),
       // Hier wird nur der Modul-Schalter gepflegt; alle Detail-Einstellungen
@@ -1517,6 +1529,36 @@ export function SetupWizard({
                   />
                   Minuten
                   {tpMinutes.trim() !== "" && Number(tpMinutes) < 5 && (
+                    <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
+                  )}
+                </label>
+              )}
+              {/* Ereignis-Auslöser (ADR 0062): abschalt- und drosselbar, falls
+                  Netz oder badhub zu viel abbekommen — dann bleibt der Takt. */}
+              {tpAuto && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={tpEreignis}
+                    onChange={(e) => setTpEreignis(e.currentTarget.checked)}
+                  />
+                  Bei neuen Spielen und Paarungen sofort prüfen
+                </label>
+              )}
+              {tpAuto && tpEreignis && (
+                <label className="flex items-center gap-2 pl-6 text-sm text-slate-600">
+                  höchstens alle
+                  <input
+                    type="number"
+                    min={5}
+                    max={1440}
+                    step={1}
+                    value={tpEreignisMinuten}
+                    onChange={(e) => setTpEreignisMinuten(e.currentTarget.value)}
+                    className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                  />
+                  Minuten
+                  {tpEreignisMinuten.trim() !== "" && Number(tpEreignisMinuten) < 5 && (
                     <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
                   )}
                 </label>

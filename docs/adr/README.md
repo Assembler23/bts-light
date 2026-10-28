@@ -71,3 +71,4 @@ hier eintragen.
 | [0059](0059-setzplatz-als-text-aus-dem-parser.md) | Setzplatz als fertiger Text, aufgelöst im Parser | accepted |
 | [0060](0060-upload-sperrt-btp-writes-schreib-gate.md) | TP-Upload sperrt BTP-Writes kurz (Schreib-Gate auf RwLock) | accepted |
 | [0061](0061-takt-upload-lebenszyklus-schnellhash-anhalteregel.md) | Takt-Upload: Lebenszyklus am Liveticker, Schnell-Hash ohne Gate, Anhalte-Regel | accepted |
+| [0062](0062-tp-upload-ereignis-ausloeser.md) | TP-Upload: Ereignis-Auslöser zieht den Takt vor, nur für Auslosung und Paarung, mit Drossel | accepted |
