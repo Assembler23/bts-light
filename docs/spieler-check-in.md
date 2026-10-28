@@ -260,11 +260,19 @@ und **genau zwei** Trägern: Ein badhub vor der `entry_id`-Auslieferung
 schickt überall 0 (nichts klumpt), unvollständige Doppel und Datenfehler
 (3+ Träger) bleiben ehrliche Einzelzeilen.
 
-Im Kopf der Seite stehen drei Knöpfe zur **öffentlichen badhub-Seite**:
-„Check-In-Seite öffnen" (Standard-Browser), „Link kopieren" (Zwischenablage,
-fürs Weitergeben per Messenger) und „Aushang (QR)" (die druckbare
-Aushang-Seite für die Halle). Die Adressen baut das **Backend**
-(`public_url`/`poster_url` in der `checkin_state`-Antwort, Helfer in
+Im Kopf der Seite stehen Knöpfe zu den **öffentlichen badhub-Seiten**. Vorn
+die beiden für den Turniertag: „Hallen-Ansicht" (`…/halle`, die
+Kiosk-Ansicht fürs Check-In-Tablet oder den Monitor in der Halle) und
+„Zeitplan" (`…/zeitplan`, alle Anfangszeiten). Dahinter „Check-In-Seite
+öffnen" (Standard-Browser), „Link kopieren" (Zwischenablage, fürs
+Weitergeben per Messenger) und „Aushang (QR)" (die druckbare Aushang-Seite).
+<!-- pruef: /Hallen-Ansicht\n\s*<\/button>/ in src/pages/CheckinPanel.tsx -->
+<!-- pruef: /Zeitplan\n\s*<\/button>/ in src/pages/CheckinPanel.tsx -->
+<!-- pruef: "{}/halle" in src-tauri/src/badhub/checkin_state.rs -->
+<!-- pruef: "{}/zeitplan" in src-tauri/src/badhub/checkin_state.rs -->
+Die Adressen baut das **Backend**
+(`public_url`/`poster_url`/`hall_url`/`schedule_url` in der
+`checkin_state`-Antwort, Helfer in
 [`badhub/checkin_state.rs`](../src-tauri/src/badhub/checkin_state.rs)) —
 das Frontend setzt keine URLs zusammen, Basis und GUID kennt nur die Config.
 

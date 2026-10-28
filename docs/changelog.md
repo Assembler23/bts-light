@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.308
+
+- **Check-In: Hallen-Ansicht und Zeitplan per Knopf.** Die Check-In-Seite in
+  bts-light öffnet jetzt auch die Hallen-Ansicht von badhub (für das
+  Check-In-Tablet oder den Monitor in der Halle) und den Zeitplan mit allen
+  Anfangszeiten. Beide Knöpfe stehen vorn.
+
 ## v0.9.307
 
 - **Englische Disziplin-Kürzel.** Events wie „MS A", „WD-B" oder „XD C"

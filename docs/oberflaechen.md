@@ -26,7 +26,7 @@ zeigen.
 | **Spielübersicht** | Das Arbeitspferd der Feldvergabe: oben die spielbereiten Spiele, darunter die Felder mit Ampel — grün frei, gelb belegt, **rot gesperrt**. Spiele zuweisen, Felder freigeben und sperren. | nie |
 | **Tablets** | Drei Reiter: **Übersicht** (welches Tablet hängt an welchem Feld, mit Akkustand), **In Vorbereitung** (gerufene Spiele), **QR-Codes** zum Einrichten der Geräte — die Adresse daneben ist ein Link und öffnet den Spielzettel im Browser des Turnier-PCs. | nie |
 | **Turnierleitung** | Hier entstehen die Zugänge für die Turnierleitungs-Oberfläche: Gerät koppeln, QR-Code zeigen, Zugang wieder entziehen. | nie — hier schaltet man sie schließlich ein |
-| **Check-In** | Wer ist da, wer fehlt — je Klasse, gesetzte Meldungen mit ihrem Setzplatz (`[1]`). Von Hand einchecken oder zurücksetzen, Fehlende ausrufen lassen, Check-In-Seite und QR-Aushang öffnen. | Check-In aus **oder** Turnier-Kennung fehlt |
+| **Check-In** | Wer ist da, wer fehlt — je Klasse, gesetzte Meldungen mit ihrem Setzplatz (`[1]`). Von Hand einchecken oder zurücksetzen, Fehlende ausrufen lassen, Hallen-Ansicht, Zeitplan, Check-In-Seite und QR-Aushang öffnen. | Check-In aus **oder** Turnier-Kennung fehlt |
 | **Schiedsrichter** | Einsatzplanung: Reihenfolge, Pausen, Sperrlisten, feldweise Schalter. Die Stammliste kommt aus BTP. | „Mit Schiedsrichtern spielen" aus |
 | **Ansagen** | Feld von Hand ansagen, Freitext sprechen, gespeicherte Ansagen, Verlauf mit „Erneut abspielen" — und alle Detail-Einstellungen zu Stimme und Tempo. | Ansagen aus |
 | **Monitore** | Die Geräteverwaltung für Fernseher und Pis: **welches Gerät zeigt was**. Siehe unten. | Court-Monitor aus |
@@ -109,7 +109,8 @@ seinen Gerätecode ein, sodass du ihn in der Liste sicher zuordnen kannst.
 ## Die öffentlichen Seiten auf badhub.de
 
 Diese Seiten gehören nicht zu BTS Light, sondern zu badhub — BTS Light füttert
-sie nur. Alle erreicht man ohne Zugangsdaten.
+sie nur. Alle erreicht man ohne Zugangsdaten — nur der Turnierleitungs-Modus
+der Check-In-Hallen-Ansicht will das Liveticker-Passwort.
 
 | Seite | Wer schaut drauf |
 |---|---|
@@ -117,6 +118,8 @@ sie nur. Alle erreicht man ohne Zugangsdaten.
 | **Hallen-Monitor** | Die Online-Fassung der Court-Übersicht, für einen Hallen-TV mit Internet. Lässt sich fest an eine Halle binden. |
 | **Nächste Spiele** | Die Online-Fassung der Vorbereitungs-Anzeige. |
 | **Check-In-Seite** | Spieler auf dem eigenen Telefon beim Ankommen. |
+| **Check-In-Hallen-Ansicht** | Ein Tablet oder Monitor am Eingang der Halle: eine Klasse im Vollbild mit allen Gemeldeten und Namenssuche, dazu ein Absprung zum Zeitplan. Mit dem Liveticker-Passwort schaltet die Turnierleitung dort ihren Modus frei. |
+| **Zeitplan** | Alle: die Anfangszeiten je Tag, Disziplin und Klasse. |
 | **Teilnehmerliste → eigene Spielerseite** | Ein Spieler sieht, in welcher Halle er spielt, wie viele Spiele noch vor ihm liegen und wann er etwa dran ist. |
 
 Am schnellsten kommst du an diese Adressen über den **Aushang**: Ein A4-Blatt
@@ -128,6 +131,8 @@ Aus der App heraus:
 | Seite | Wo der Knopf sitzt |
 |---|---|
 | Liveticker, Hallen-Monitor, Nächste Spiele | **Status → Anzeigen im Browser öffnen** |
+| Check-In-Hallen-Ansicht (Tablet/Monitor in der Halle) | **Check-In → Hallen-Ansicht** |
+| Zeitplan mit allen Anfangszeiten | **Check-In → Zeitplan** |
 | Check-In-Seite | **Check-In → Check-In-Seite öffnen** |
 | Teilnehmerliste | kein Knopf — sie steht als QR auf dem Aushang |
 
