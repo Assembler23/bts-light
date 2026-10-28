@@ -524,8 +524,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     Setup, Ablehnung fremder Dateien vor dem Senden (Ergänzung in der
     Takt-Spec). Offen: Datei über den BTP-Prozess selbst finden.
   - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1 — eingehalten.
-  - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf,
-    Lizenzfrage aus badhub-ADR 0047.
+  - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf.
+    Lizenzfrage aus badhub-ADR 0047 **geprüft 28.10.2026** (badhub
+    `docs/drafts/tp-datei-weitergabe-einschaetzung.md`): keine Einschränkung im
+    vorliegenden EULA; offen sind eine schriftliche Bestätigung von Visual
+    Reality, ein Freigabe-Satz des BVBB-Spielausschusses und die Ergänzung von
+    AVV § 13.2 und Datenschutzerklärung (Projektleitung badhub). Für
+    BVBB-Turniere vertretbar, für andere Verbände erst nach der AVV-Ergänzung.
 
 - **Setzplätze anzeigen** — Spec:
   [features/setzplaetze-anzeigen.md](features/setzplaetze-anzeigen.md),
