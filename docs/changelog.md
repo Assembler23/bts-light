@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.301
+
+- **Turnierdatei automatisch senden.** In den Einstellungen, Abschnitt
+  „TP-Datei (Turnierdatenbank)", gibt es das Häkchen **Automatisch senden,
+  solange der Liveticker läuft** mit einem Takt in Minuten (Voreinstellung 15,
+  mindestens 5; Standard aus). Solange der Liveticker läuft, prüft bts-light im
+  Takt, ob sich die Turnierdatei geändert hat, und sendet sie nur dann — eine
+  unveränderte Datei kostet weder BTP noch badhub etwas. Das Status-Fenster
+  zeigt Takt, nächste Prüfung und das letzte Ergebnis; bei Fehlern, die ein
+  neuer Versuch nicht heilt (etwa „Turnier bereits endgültig importiert"), hält
+  die Automatik sichtbar an und läuft nach einer Korrektur im Setup oder einem
+  gelungenen Klick weiter. Der Knopf bleibt für „jetzt sofort" und für den
+  Vorabend. Anleitung: [Automatisch senden](tp-datei-upload.md#automatisch-senden).
+
 ## v0.9.300
 
 - **Turnierdatei an badhub senden.** In den Einstellungen lässt sich die

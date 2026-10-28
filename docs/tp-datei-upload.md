@@ -114,10 +114,70 @@ Deshalb der doppelte Lesevorgang: Ändert sich die Datei dazwischen, wird nicht
 gesendet. Und badhub prüft die Datei noch einmal (lesbar? plausibel viele
 Spiele?), bevor es sie übernimmt.
 
+## Automatisch senden
+
+Statt jedes Mal zu klicken, kann bts-light die Datei **von selbst** senden —
+aber nur, solange der Liveticker läuft, und nur, wenn sich die Datei seit dem
+letzten Senden geändert hat.
+
+Einstellungen → Abschnitt „TP-Datei (Turnierdatenbank)“ → Häkchen
+**Automatisch senden, solange der Liveticker läuft**, darunter der Takt in
+Minuten (Voreinstellung 15, mindestens 5). Dann **Speichern**.
+<!-- pruef: "Automatisch senden, solange der Liveticker läuft" in src/pages/SetupWizard.tsx -->
+<!-- pruef: /TP_TAKT_STANDARD_MINUTEN: u16 = 15/ in src-tauri/src/config.rs -->
+<!-- pruef: /TP_TAKT_MIN_MINUTEN: u16 = 5/ in src-tauri/src/config.rs -->
+
+**Was dann passiert.** Mit dem Start des Livetickers beginnt die Automatik,
+die erste Prüfung kommt nach etwa einer Minute. Bei jeder Prüfung liest
+bts-light die Datei kurz ein und vergleicht sie mit dem zuletzt gesendeten
+Stand. Ist sie gleich, passiert nichts — BTP merkt davon nichts, badhub wird
+nicht angefragt. Hat sie sich geändert, läuft dasselbe wie beim Knopf
+(kurzes Zurückhalten der eigenen Schreibzugriffe, zweimal lesen, senden).
+Stoppst du den Liveticker, endet auch die Automatik; am Vorabend sendest du
+weiter mit dem Knopf.
+
+**Das heißt auch:** Mit eingeschalteter Automatik erscheint jede Änderung in
+BTP auf badhub, sobald der Takt sie erwischt — auch eine Auslosung, die du
+gerade erst gemacht hast. Schalte die Automatik erst ein, wenn das in Ordnung
+ist, oder mach die Auslosung, bevor du den Liveticker startest.
+
+**Die Zeile im Status-Fenster** unter dem Knopf zeigt den Stand, zum Beispiel
+„Automatik: alle 15 min · nächste Prüfung 14:47 · zuletzt 14:32
+(automatisch): übernommen, 312 Spiele“. Ist der Liveticker aus, steht dort
+**„Automatik startet mit dem Liveticker“**.
+<!-- pruef: "Automatik startet mit dem Liveticker" in src/pages/Dashboard.tsx -->
+
+**Wenn etwas nicht klappt.** Vorübergehende Störungen (BTP gerade
+beschäftigt, Datei in Bewegung, badhub nicht erreichbar, „badhub bittet um
+Geduld“) versucht die Automatik nach anderthalb Minuten noch einmal,
+höchstens zweimal hintereinander, dann wieder im normalen Takt; die Zeile
+nennt den Grund und den nächsten Versuch. Kennt dein badhub den Upload noch
+nicht, wartet die Automatik eine halbe Stunde.
+<!-- pruef: "badhub bittet um Geduld" in src-tauri/src/badhub/tp_upload.rs -->
+<!-- pruef: "nächster Versuch" in src-tauri/src/badhub/tp_takt.rs -->
+
+Bei Fehlern, die ein neuer Versuch nicht heilt, **hält die Automatik an** und
+die Zeile wird gelb: **„Automatik angehalten: …“** mit dem Grund aus der
+Tabelle oben — etwa „Turnier bereits endgültig importiert“, ein falsches
+Verbandskürzel oder Passwort, eine verschobene Datei (nach drei Fehlversuchen),
+oder die Kennung hat sich geändert („Datei neu wählen“). Daneben steht der
+Sprung ins Setup.
+<!-- pruef: "Automatik angehalten" in src/pages/Dashboard.tsx -->
+
+Die Automatik läuft wieder an, sobald du im Setup die Ursache behebst und
+speicherst — also die Datei neu wählst, die Turnier-Kennung, die
+Liveticker-Adresse, die badhub-Adresse oder das Passwort änderst — oder sobald
+ein Klick auf **TP-Datei an badhub senden** gelingt. Das Häkchen aus- und
+wieder einzuschalten löst den Halt **nicht**. Nach einem Neustart von bts-light
+beginnt die Automatik frisch: Die Zeile ist zunächst leer, der erste Lauf
+kommt eine Minute nach dem Start des Livetickers.
+
 ## Weiterlesen
 
 - [Einstellungen — TP-Datei (Turnierdatenbank)](einstellungen.md#tp-datei-turnierdatenbank)
 - [Master und Slave](master-slave.md) — nur der Master lädt hoch
 - Technik: Spec [features/tp-datei-upload.md](features/tp-datei-upload.md),
   [ADR 0060](adr/0060-upload-sperrt-btp-writes-schreib-gate.md),
-  [BTP-Protokoll — Schreib-Gate](btp_protocol.md#schreib-gate-fuer-den-tp-upload-adr-0060)
+  [BTP-Protokoll — Schreib-Gate](btp_protocol.md#schreib-gate-fuer-den-tp-upload-adr-0060);
+  Automatik: Spec [features/tp-takt-upload.md](features/tp-takt-upload.md),
+  [ADR 0061](adr/0061-takt-upload-lebenszyklus-schnellhash-anhalteregel.md)

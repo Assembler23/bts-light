@@ -991,3 +991,14 @@ plus Kopie. Nichts wird verworfen; der Nachschub (`flush_btp_retries`) läuft
 ohnehin verzögert. Die Konstanten `RUHE`, `MAX_WARTEZEIT`, `LESEABSTAND` sind
 Startwerte bis zur Nachlauf-Messung (Datei nach bestätigtem `SENDUPDATE`
 sekündlich hashen, bis Ruhe — siehe Spec, „Offene Fragen“).
+
+**Zweiter Leser außerhalb des Gates (Stufe 2, ADR 0061).** Die Automatik
+(Spec [features/tp-takt-upload.md](features/tp-takt-upload.md)) liest die
+Datei je Takt **einmal ohne** Schreibsperre und bildet den SHA-256
+(`badhub/tp_upload.rs` `lesen` + `sha256`, gemessen ~40 ms für 3 MB). Nur
+wenn der Hash vom zuletzt gesendeten Stand abweicht, folgt der Weg oben mit
+Gate. Eine halb geschriebene Seite in dieser Schnell-Lesung kostet höchstens
+einen überflüssigen Gate-Lauf, nie einen falschen Upload — gesendet wird
+weiterhin nur, was unter dem Gate zweimal gleich gelesen wurde. Für die Writes
+ändert sich nichts: Sie warten nur, wenn tatsächlich kopiert wird, also
+höchstens alle 5 Minuten (Mindesttakt) und nur bei geänderter Datei.

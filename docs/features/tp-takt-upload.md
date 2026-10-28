@@ -2,8 +2,9 @@
 
 > Status: **Freigegeben 28.10.2026** (Spec-Pipeline von Hand: Brief → Grill
 > → How-To → Review, siehe
-> [spec-pipeline-konzept.md](../spec-pipeline-konzept.md)). Umsetzung: PR L2
-> (bts-light), in Arbeit.
+> [spec-pipeline-konzept.md](../spec-pipeline-konzept.md)). **Umgesetzt in
+> v0.9.301** (PR L2; Handbuch [tp-datei-upload.md](../tp-datei-upload.md),
+> Abschnitt „Automatisch senden“).
 > Baut auf [tp-datei-upload.md](tp-datei-upload.md) (Stufe 1, umgesetzt in
 > v0.9.300 und badhub #1045–#1079) auf und ersetzt dort das Nicht-Ziel „Kein
 > Takt in Stufe 1“. Betroffenes Repo: **nur bts-light**. badhub bleibt
