@@ -551,7 +551,12 @@ und `score_status` und brauchen keine Änderung. Die Anonymisierung
   Spaltenpositivliste und Wächter, kein Body-Logging, Security-Review. Die
   Lizenzfrage aus badhub-ADR 0047 (Weitergabe von TP-Daten) wird mit dem
   Rollout an jeden Turnierleiter real und ist **vor dem Feldtest** zu klären;
-  das ist keine Technikfrage.
+  das ist keine Technikfrage. **Geprüft 28.10.2026** (badhub
+  `docs/drafts/tp-datei-weitergabe-einschaetzung.md`, Nachtrag ADR-0047): Der
+  vorliegende EULA schränkt die Datei nicht ein; offen bleiben die Bestätigung
+  durch Visual Reality, ein Freigabe-Satz des Veranstalters und die Ergänzung
+  von AVV § 13.2 und Datenschutzerklärung. Für BVBB-Turniere vertretbar, für
+  andere Verbände erst nach der AVV-Ergänzung.
 - **Unveröffentlichte Auslosungen** werden sichtbar: Hinweistext am Knopf und
   im Handbuch; bewusst so entschieden.
 - **Doppelter Master** (Turnier B in `multi-hall.md`): beide dürfen hochladen;
