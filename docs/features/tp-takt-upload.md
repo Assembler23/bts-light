@@ -362,7 +362,9 @@ her, nicht den vorherigen Wert.
 ## Offene Fragen / Annahmen
 
 - Jet-Nachlauf, Messung A2, Lizenzfrage (badhub-ADR 0047): **vor dem
-  Feldtest**, nicht vor dem Merge (T6). Unverändert aus Stufe 1.
+  Feldtest**, nicht vor dem Merge (T6). Die Lizenzfrage ist seit 28.10.2026
+  geprüft (Stand in der Stufe-1-Spec, „Risiken“); die Automatik erhöht nur die
+  Häufigkeit, nicht den Inhalt der Übermittlung.
 - mtime-Verhalten der offenen Datei: ungemessen, für diese Spec unerheblich.
 - Annahme: 15 Minuten sind „oft genug“; der Wert ist einstellbar.
 
