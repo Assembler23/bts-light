@@ -634,7 +634,8 @@ export function SetupWizard({
         path: tpPath,
         tournament_uuid: tpGuid,
         auto_enabled: tpAuto,
-        auto_minutes: Math.max(1, Math.round(Number(tpMinutes) || 15)),
+        // 1–1440: Rust klemmt unter 5; oberhalb von u16 schlüge sonst das ganze Speichern fehl.
+        auto_minutes: Math.min(1440, Math.max(1, Math.round(Number(tpMinutes) || 15))),
       },
       master_namespace: masterNamespace.trim(),
       // Hier wird nur der Modul-Schalter gepflegt; alle Detail-Einstellungen
@@ -1392,13 +1393,14 @@ export function SetupWizard({
                   <input
                     type="number"
                     min={5}
+                    max={1440}
                     step={1}
                     value={tpMinutes}
                     onChange={(e) => setTpMinutes(e.currentTarget.value)}
                     className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
                   />
                   Minuten
-                  {Number(tpMinutes) < 5 && (
+                  {tpMinutes.trim() !== "" && Number(tpMinutes) < 5 && (
                     <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
                   )}
                 </label>

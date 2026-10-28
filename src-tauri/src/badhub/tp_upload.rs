@@ -434,7 +434,7 @@ async fn abbilden(antwort: reqwest::Response, kuerzel: &str) -> UploadAntwort {
             received_at: koerper.received_at.unwrap_or_default(),
         },
         200 if koerper.status == "rejected" => UploadAntwort::Abgelehnt {
-            result: koerper.result.unwrap_or_default(),
+            result: meldung_bereinigt(&koerper.result.unwrap_or_default()),
             message: meldung_bereinigt(&koerper.message.unwrap_or_default()),
         },
         // 403/409 nur als Fachantwort, wenn der Körper von badhub stammt — ein
@@ -536,7 +536,7 @@ pub fn ergebnis_text(status: &StatusAntwort) -> String {
             .as_deref()
             .map(meldung_bereinigt)
             .filter(|m| !m.is_empty())
-            .unwrap_or_else(|| format!("abgelehnt ({code})")),
+            .unwrap_or_else(|| format!("abgelehnt ({})", meldung_bereinigt(code))),
         None => String::new(),
     }
 }

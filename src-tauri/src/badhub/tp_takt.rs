@@ -41,6 +41,9 @@ pub const STARTVERZUG: Duration = Duration::from_secs(60);
 pub const PRUEFTAKT: Duration = Duration::from_secs(5);
 /// Untergrenze für `Retry-After` — kürzer wäre Hämmern.
 pub const MIN_RETRY_AFTER: Duration = Duration::from_secs(5);
+/// Obergrenze für `Retry-After` — ein absurder Wert vom Server darf den Takt
+/// nicht still für Jahre schlafen legen (Security-Review N2).
+pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(60 * 60);
 
 /// Die Bytes, die der Server zuletzt angenommen oder als bekannt quittiert
 /// hat. Pfad und GUID gehören dazu: „Datei neu wählen“ oder ein GUID-Wechsel
@@ -96,17 +99,13 @@ pub enum Einordnung {
     NichtLesbar(String),
 }
 
-/// Ergebnis-Codes des Workers, die ein neuer Upload derselben Kennung nicht heilt.
-fn status_fatal(status: &StatusAntwort) -> bool {
+/// Ergebnis-Codes des Workers, die ein neuer Upload derselben Kennung nicht
+/// heilt — auch für den nachgeholten Status (Schritt 3a).
+pub fn status_fatal(status: &StatusAntwort) -> bool {
     matches!(
         status.result.as_deref(),
         Some("guid_mismatch") | Some("final_imported")
     )
-}
-
-/// Ist der nachgeholte Status (Schritt 3a) ein Halt? Dann der Knopf-Text.
-pub fn status_nachgeholt_fatal(status: &StatusAntwort) -> bool {
-    status_fatal(status)
 }
 
 /// Einordnungstabelle der Spec. `knopf_text` ist der fertige Dashboard-Text
@@ -290,10 +289,14 @@ impl TaktZustand {
 
     /// Ein Knopf-Upload hat den Server erreicht: hebt den Halt auf und merkt
     /// die Bytes, damit der Takt sie nicht gleich noch einmal schickt.
-    pub fn knopf_gesendet(&mut self, pfad: &Path, guid: &str, sha: [u8; 32]) {
+    /// `nachholen`: der Knopf bekam „dauert noch“ — der Takt fragt beim
+    /// nächsten Schritt einmal nach, sonst entginge ihm ein späteres
+    /// `guid_mismatch` (dieselben Bytes gehen ja nicht mehr raus).
+    pub fn knopf_gesendet(&mut self, pfad: &Path, guid: &str, sha: [u8; 32], nachholen: bool) {
         self.angehalten = None;
         self.nachversuche = 0;
         self.nicht_lesbar = 0;
+        self.nachholen = nachholen;
         self.merker = Some(SendeMerker {
             pfad: pfad.to_path_buf(),
             guid: guid.to_string(),
@@ -341,13 +344,17 @@ impl TaktZustand {
                 Terminart::Pause
             }
             Einordnung::Nachversuch { retry_after } => {
-                self.nachversuche += 1;
+                // Der Zähler fällt erst mit einem Erfolg, einer Pause oder einem
+                // Wiederanlauf: Nach zwei Nachversuchen gehen **alle** weiteren
+                // Fehler in Folge auf den regulären Takt (Spec „ab dem dritten
+                // in Folge“) — sonst gäbe es bei totem Server 90/90/Takt/90/90/…
+                self.nachversuche = self.nachversuche.saturating_add(1);
                 if self.nachversuche > MAX_NACHVERSUCHE {
-                    self.nachversuche = 0;
                     self.naechster_ms = Some(jetzt_ms + Self::ms(takt));
                     Terminart::Regulaer
                 } else {
-                    let warte = retry_after.map_or(NACHVERSUCH, |r| r.max(MIN_RETRY_AFTER));
+                    let warte = retry_after
+                        .map_or(NACHVERSUCH, |r| r.clamp(MIN_RETRY_AFTER, MAX_RETRY_AFTER));
                     self.naechster_ms = Some(jetzt_ms + Self::ms(warte));
                     Terminart::Nachversuch
                 }
@@ -581,7 +588,23 @@ mod tests {
             Terminart::Regulaer
         );
         assert_eq!(z.naechster_ms, Some(J + 15 * 60_000));
-        assert_eq!(z.nachversuche, 0, "Zähler nach dem regulären Takt zurück");
+        assert_eq!(z.nachversuche, 3, "Zähler bleibt bis zum Erfolg (M3)");
+        assert_eq!(
+            z.anwenden(nv.clone(), J, T, &pf(), "G"),
+            Terminart::Regulaer,
+            "jeder weitere Fehler in Folge: regulärer Takt"
+        );
+        z.anwenden(
+            Einordnung::Gesendet {
+                sha: sha(8),
+                nachholen: false,
+            },
+            J,
+            T,
+            &pf(),
+            "G",
+        );
+        assert_eq!(z.nachversuche, 0, "Erfolg setzt zurück");
         // Retry-After 7 s → 7 s; 2 s → 5 s (AK 6)
         let ra = |s| Einordnung::Nachversuch {
             retry_after: Some(Duration::from_secs(s)),
@@ -590,6 +613,11 @@ mod tests {
         assert_eq!(z.naechster_ms, Some(J + 7_000));
         z.anwenden(ra(2), J, T, &pf(), "G");
         assert_eq!(z.naechster_ms, Some(J + 5_000));
+        // Deckel: absurdes Retry-After → höchstens 1 h (Security N2); Zähler ist
+        // danach > MAX, also erst wieder zurücksetzen.
+        z.nachversuche = 0;
+        z.anwenden(ra(4_000_000_000), J, T, &pf(), "G");
+        assert_eq!(z.naechster_ms, Some(J + 3_600_000));
         // Erfolg setzt den Zähler zurück
         z.anwenden(
             Einordnung::Gesendet {
@@ -698,7 +726,8 @@ mod tests {
             nachversuche: 1,
             ..Default::default()
         };
-        z.knopf_gesendet(&pf(), "G", sha(4));
+        z.knopf_gesendet(&pf(), "G", sha(4), true);
+        assert!(z.nachholen, "Knopf „dauert noch“ → Takt fragt nach");
         assert!(z.angehalten.is_none());
         assert_eq!(z.nachversuche, 0);
         assert!(z.merker.as_ref().unwrap().passt(&pf(), "G", &sha(4)));
@@ -781,6 +810,34 @@ mod tests {
             J,
         );
         assert!(z.angehalten.is_none() && z.naechster_ms.is_none());
+    }
+
+    #[test]
+    fn config_gewechselt_mit_echtem_paar_minuten_und_fremdes_feld() {
+        let mut alt = AppConfig::default();
+        alt.tp_upload.auto_enabled = true;
+        alt.tp_upload.auto_minutes = 30;
+        // Nur Minuten geändert: ferner Termin → +60 s (AK 8).
+        let mut neu = alt.clone();
+        neu.tp_upload.auto_minutes = 5;
+        let mut z = TaktZustand {
+            naechster_ms: Some(J + 30 * 60_000),
+            ..Default::default()
+        };
+        z.config_gewechselt(bewerte_config(&alt, &neu), J);
+        assert_eq!(z.naechster_ms, Some(J + 60_000));
+        // Fremdes Feld: Zustand unverändert.
+        let mut neu = alt.clone();
+        neu.finished_warning_seconds += 1;
+        let vorher = TaktZustand {
+            naechster_ms: Some(J + 30 * 60_000),
+            angehalten: Some("x".into()),
+            nachversuche: 1,
+            ..Default::default()
+        };
+        let mut z = vorher.clone();
+        z.config_gewechselt(bewerte_config(&alt, &neu), J);
+        assert_eq!(z, vorher);
     }
 
     #[test]

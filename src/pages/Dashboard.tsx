@@ -220,7 +220,7 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
   const tpAutoZeile = tpAutomatikZeile(
     tpAuto,
     running,
-    Math.max(5, config.tp_upload.auto_minutes || 15),
+    Math.max(5, config.tp_upload.auto_minutes ?? 15),
     tpStatus,
   );
   async function tpSenden() {

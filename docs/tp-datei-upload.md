@@ -148,11 +148,12 @@ ist, oder mach die Auslosung, bevor du den Liveticker startest.
 <!-- pruef: "Automatik startet mit dem Liveticker" in src/pages/Dashboard.tsx -->
 
 **Wenn etwas nicht klappt.** Vorübergehende Störungen (BTP gerade
-beschäftigt, Datei in Bewegung, badhub nicht erreichbar, „badhub bittet um
-Geduld“) versucht die Automatik nach anderthalb Minuten noch einmal,
-höchstens zweimal hintereinander, dann wieder im normalen Takt; die Zeile
-nennt den Grund und den nächsten Versuch. Kennt dein badhub den Upload noch
-nicht, wartet die Automatik eine halbe Stunde.
+beschäftigt, Datei in Bewegung, badhub nicht erreichbar) versucht die
+Automatik nach anderthalb Minuten noch einmal, höchstens zweimal
+hintereinander, dann wieder im normalen Takt; bei „badhub bittet um Geduld“
+nach der Zeit, die badhub nennt. Die Zeile nennt den Grund und den nächsten
+Versuch. Kennt dein badhub den Upload noch nicht, wartet die Automatik eine
+halbe Stunde.
 <!-- pruef: "badhub bittet um Geduld" in src-tauri/src/badhub/tp_upload.rs -->
 <!-- pruef: "nächster Versuch" in src-tauri/src/badhub/tp_takt.rs -->
 
@@ -169,8 +170,8 @@ speicherst — also die Datei neu wählst, die Turnier-Kennung, die
 Liveticker-Adresse, die badhub-Adresse oder das Passwort änderst — oder sobald
 ein Klick auf **TP-Datei an badhub senden** gelingt. Das Häkchen aus- und
 wieder einzuschalten löst den Halt **nicht**. Nach einem Neustart von bts-light
-beginnt die Automatik frisch: Die Zeile ist zunächst leer, der erste Lauf
-kommt eine Minute nach dem Start des Livetickers.
+beginnt die Automatik frisch: Die Zeile sagt „noch nichts gesendet“, der erste
+Lauf kommt eine Minute nach dem Start des Livetickers.
 
 ## Weiterlesen
 

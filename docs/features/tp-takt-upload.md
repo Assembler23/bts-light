@@ -198,8 +198,8 @@ sich die Datei zwischen 4 und 7 geändert, ist das richtig so.
 | `Antwort` 200 `Unveraendert`, 200 `Abgelehnt` | Gesendet (Bytes bekannt) | Merker = SHA, Text wie Knopf |
 | `Antwort` 409 `BereitsEndgueltig`, 403 `VerbandFalsch`, 401 `Unauthorized`, `Serverfehler{413}` | **Halt** | Text wie Knopf |
 | `Antwort` `NochNichtVerfuegbar` (400/404/Basic-Wand) | Pause | `naechster = jetzt + 30 min`, Text „badhub kennt den Upload noch nicht — nächster Versuch hh:mm“ |
-| `Antwort` 429 `ZuSchnell{s}`, 503 `Ueberlastet{s}` | Nachversuch(s) | `naechster = jetzt + max(s, 5 s)`, zählt als Nachversuch |
-| `Beschaeftigt`, `Lesefehler(Unruhig)`, `Antwort` `NichtErreichbar` / `Status{_}` (jeder sonstige Code) / `Serverfehler{415}` | Nachversuch | `naechster = jetzt + 90 s`; ab dem dritten in Folge `jetzt + takt` |
+| `Antwort` 429 `ZuSchnell{s}`, 503 `Ueberlastet{s}` | Nachversuch(s) | `naechster = jetzt + clamp(s, 5 s, 1 h)`, zählt als Nachversuch; `jetzt` ist das **Ende** des Uploads |
+| `Beschaeftigt`, `Lesefehler(Unruhig)`, `Antwort` `NichtErreichbar` / `Status{_}` (jeder sonstige Code) / `Serverfehler{415}` | Nachversuch | `naechster = jetzt + 90 s`; ab dem dritten in Folge `jetzt + takt`, und zwar für **jeden** weiteren Fehler in Folge — der Zähler fällt erst mit Erfolg, Pause oder Wiederanlauf |
 | `Lesefehler(NichtLesbar)` | Nachversuch, ab dem dritten in Folge **Halt** | eigener Zähler; Text beim Halt wie Knopf |
 | `Lesefehler(KeineTpDatei / ZuGross)` | **Halt** | Text wie Knopf |
 
