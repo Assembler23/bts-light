@@ -151,7 +151,9 @@ export const importIdentity = (bundle: string): Promise<AppConfig> =>
 /** Installierte App-Version (Rust: CARGO_PKG_VERSION). */
 export const appVersion = (): Promise<string> => invoke("app_version");
 
-/** Öffnet eine externe https-URL im Standardbrowser. */
+/** Öffnet eine URL im Standardbrowser. Der Rust-Kern lässt nur zu: `https`,
+ *  `http` auf localhost/127.0.0.1/bts-light.local sowie `http` auf den
+ *  eigenen LAN-Tablet-Server (`open_url_erlaubt`); sonst lehnt das Promise ab. */
 export const openExternal = (url: string): Promise<void> =>
   invoke("open_external", { url });
 

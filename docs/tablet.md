@@ -792,7 +792,12 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
 
 1. In bts-light den Liveticker starten (BTP muss verbunden sein) – der
    Tablet-Server startet automatisch mit.
-2. „Tablet-Spielzettel" öffnen → pro Court QR-Code/Adresse.
+2. „Tablet-Spielzettel" öffnen → pro Court QR-Code/Adresse. Die Adresse ist
+   ein Link (**Im Browser öffnen**): Ein Klick öffnet den Spielzettel im
+   Standardbrowser des Turnier-PCs — zum Ausprobieren, ohne ein Tablet in
+   der Hand. Daneben kopiert **Adresse kopieren** sie in die Zwischenablage.
+   <!-- pruef: "Im Browser öffnen" in src/pages/TabletPanel.tsx -->
+   <!-- pruef: "Adresse kopieren" in src/pages/TabletPanel.tsx -->
 3. Am Spielfeld das Tablet mit dem Hallen-WLAN verbinden, die Court-URL
    öffnen (oder QR scannen).
 4. BTP muss das Spiel dem Court zugewiesen haben – dann erscheint es

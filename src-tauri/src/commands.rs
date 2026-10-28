@@ -2650,19 +2650,115 @@ pub fn open_live_view(
 ///   mDNS-Namen `bts-light.local` (Vorschau am Turnier-PC).
 /// Kein anderes Schema und keine Steuerzeichen/Leerzeichen → es wird kein
 /// präparierter String an die OS-Shell durchgereicht.
+/// - seit v0.9.304 auch den **eigenen LAN-Tablet-Server** per `http://` auf
+///   genau `lan_host` (`<ip>:8088`, siehe `tablet::server::lan_host`) — die
+///   Tablet-Adresse je Feld ist im Spielzettel-Panel ein Link.
 #[tauri::command]
-pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
-    let has_bad_chars = url.contains(|c: char| c.is_control() || c == ' ');
-    let is_https = url.starts_with("https://");
-    let is_local_http = url.starts_with("http://localhost:")
-        || url.starts_with("http://127.0.0.1:")
-        || url.starts_with("http://bts-light.local:");
-    if has_bad_chars || !(is_https || is_local_http) {
+pub fn open_external(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<(), String> {
+    // Nur den Schalter unter dem Lock lesen — `lan_host()` fragt die
+    // Netzwerkschnittstellen ab und gehört nicht unter den Config-Mutex.
+    let lan_an = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .connection_mode
+        .lan_enabled();
+    let lan_host = lan_an.then(crate::tablet::server::lan_host);
+    if !open_url_erlaubt(&url, lan_host.as_deref()) {
         return Err("Nur https- oder lokale bts-light-Links sind erlaubt.".to_string());
     }
     app.opener()
         .open_url(url, None::<String>)
         .map_err(|e| e.to_string())
+}
+
+/// Regel des Öffners, frei von Tauri: saubere `https://`, `http://` auf
+/// Loopback/mDNS-Name **mit reinem Port**, oder `http://` auf genau den
+/// eigenen LAN-Server (`lan_host` = `<ip>:<port>`). Der Host ist alles bis
+/// zum ersten `/`; verglichen wird auf Gleichheit, nie auf Präfix — sonst
+/// schickten `localhost:8088@evil.example` oder `…:8088.evil.de` den Browser
+/// auf einen fremden Host.
+fn open_url_erlaubt(url: &str, lan_host: Option<&str>) -> bool {
+    if url.contains(|c: char| c.is_control() || c == ' ') {
+        return false;
+    }
+    if url.starts_with("https://") {
+        return true;
+    }
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let host = rest.split('/').next().unwrap_or("");
+    let loopback = host.rsplit_once(':').is_some_and(|(name, port)| {
+        matches!(name, "localhost" | "127.0.0.1" | "bts-light.local")
+            && !port.is_empty()
+            && port.bytes().all(|b| b.is_ascii_digit())
+    });
+    loopback || lan_host.is_some_and(|lan| !lan.is_empty() && host == lan)
+}
+
+#[cfg(test)]
+mod open_url_tests {
+    use super::open_url_erlaubt;
+
+    #[test]
+    fn https_und_loopback_wie_bisher() {
+        assert!(open_url_erlaubt("https://badhub.de/live?t=bvbb", None));
+        assert!(open_url_erlaubt(
+            "http://localhost:8088/info/overview",
+            None
+        ));
+        assert!(open_url_erlaubt("http://127.0.0.1:8088/monitor", None));
+        assert!(open_url_erlaubt(
+            "http://bts-light.local:8088/monitor",
+            None
+        ));
+        assert!(!open_url_erlaubt("http://example.com/", None));
+        assert!(!open_url_erlaubt("file:///C:/Windows", None));
+        assert!(!open_url_erlaubt("https://badhub.de/live?t=bv bb", None));
+        assert!(!open_url_erlaubt("https://badhub.de/\u{1}", None));
+    }
+
+    #[test]
+    fn eigener_lan_server_nur_mit_genau_diesem_host() {
+        let lan = Some("192.168.1.50:8088");
+        assert!(open_url_erlaubt("http://192.168.1.50:8088/court/3", lan));
+        assert!(open_url_erlaubt("http://192.168.1.50:8088", lan));
+        assert!(!open_url_erlaubt(
+            "http://192.168.1.50:8088.evil.de/court/3",
+            lan
+        ));
+        assert!(!open_url_erlaubt("http://192.168.1.50:8089/court/3", lan));
+        assert!(!open_url_erlaubt("http://192.168.1.51:8088/court/3", lan));
+        // Ohne LAN-Server (Cloud-Modus) bleibt http auf fremde Hosts zu.
+        assert!(!open_url_erlaubt("http://192.168.1.50:8088/court/3", None));
+    }
+
+    #[test]
+    fn loopback_nur_mit_reinem_port_keine_userinfo_oder_suffix_tricks() {
+        // `host` ist alles bis zum ersten `/` — Benutzerinfo (`@`) oder ein
+        // angehängter Domain-Rest dürfen den Browser nicht auf einen fremden
+        // Host schicken.
+        assert!(!open_url_erlaubt(
+            "http://localhost:8088@evil.example/x",
+            None
+        ));
+        assert!(!open_url_erlaubt("http://127.0.0.1:8088.evil.de/", None));
+        assert!(!open_url_erlaubt("http://bts-light.local:8088:x/", None));
+        assert!(!open_url_erlaubt("http://localhost/", None));
+        assert!(!open_url_erlaubt("http://localhost:/", None));
+        assert!(open_url_erlaubt("http://localhost:8088", None));
+        // Dasselbe für den LAN-Host: Gleichheit, keine Präfixe.
+        let lan = Some("192.168.1.50:8088");
+        assert!(!open_url_erlaubt(
+            "http://192.168.1.50:8088@evil.example/",
+            lan
+        ));
+    }
 }
 
 // ───────────────────────────── Walkover nach Aufgabe ──────────────────────
