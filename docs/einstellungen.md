@@ -142,7 +142,12 @@ das ist die schnellste Kontrolle, ob du beim richtigen Turnier bist. Der Test
 |---|---|---|
 | **TP-Datei wählen** | keine | Die Turnierdatei, mit der BTP gerade arbeitet (`.TP`). Sie lässt sich im Status-Fenster an badhub senden — für einen vorläufigen Turnierstand noch am Turniertag, siehe [Turnierdatei an badhub senden](tp-datei-upload.md). Beim Wählen prüft die App Dateityp und Größe (höchstens 32 MB) und zeigt „Turnierdatei erkannt, 3,6 MB". Gespeichert wird nur, was die Prüfung besteht. |
 <!-- pruef: /TP_MAX_BYTES: u64 = 32 \* 1024 \* 1024/ in src-tauri/src/badhub/tp_upload.rs -->
-| **Entfernen** | — | Löscht die Auswahl wieder. |
+| **Entfernen** | — | Löscht die Auswahl wieder (und schaltet die Automatik aus). |
+| **Automatisch senden, solange der Liveticker läuft** | aus | Sendet die Datei von selbst, wenn sie sich geändert hat — nur bei laufendem Liveticker. Jede Änderung in BTP wird damit ohne Klick auf badhub sichtbar, auch eine frische Auslosung. Siehe [Automatisch senden](tp-datei-upload.md#automatisch-senden). |
+<!-- pruef: "Automatisch senden, solange der Liveticker läuft" in src/pages/SetupWizard.tsx -->
+| **alle … Minuten** | 15 | Takt der Prüfung; weniger als 5 Minuten nimmt die App nicht an (wird angehoben). Eine unveränderte Datei kostet nichts — weder BTP noch badhub. |
+<!-- pruef: /TP_TAKT_STANDARD_MINUTEN: u16 = 15/ in src-tauri/src/config.rs -->
+<!-- pruef: /TP_TAKT_MIN_MINUTEN: u16 = 5/ in src-tauri/src/config.rs -->
 
 Die Datei ist an die **Turnier-Kennung** aus „1 · Liveticker-Ziel" gebunden,
 die beim Wählen eingetragen war. Ändert sich die Kennung, bleibt der Pfad

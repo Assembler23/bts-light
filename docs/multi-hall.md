@@ -284,7 +284,10 @@ der BTP hält: Nur dort liegt die offene Datei, und nur dort greift das
 Schreib-Gate (ADR 0060), das die eigenen BTP-Writes während der Kopie
 zurückhält. Ein Ansage-Slave zeigt weder den Setup-Abschnitt noch den Knopf,
 und `pruefe_upload_bedingungen` lehnt im `slave_mode` ab — unabhängig von der
-Oberfläche.
+Oberfläche. Dasselbe gilt für die Automatik (Spec
+[features/tp-takt-upload.md](features/tp-takt-upload.md)): `start_sync`
+startet den Takt-Task nur bei `!slave_mode`, und der Takt-Schritt prüft den
+Modus vor jedem Lauf erneut.
 
 ## Master-Identität umziehen (v0.9.161, ADR 0006)
 

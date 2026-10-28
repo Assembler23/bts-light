@@ -2,8 +2,9 @@
 
 > Status: **Freigegeben 28.10.2026** (Spec-Pipeline von Hand: Brief → Grill
 > → How-To → Review, siehe
-> [spec-pipeline-konzept.md](../spec-pipeline-konzept.md)). Umsetzung: PR L2
-> (bts-light), in Arbeit.
+> [spec-pipeline-konzept.md](../spec-pipeline-konzept.md)). **Umgesetzt in
+> v0.9.301** (PR L2; Handbuch [tp-datei-upload.md](../tp-datei-upload.md),
+> Abschnitt „Automatisch senden“).
 > Baut auf [tp-datei-upload.md](tp-datei-upload.md) (Stufe 1, umgesetzt in
 > v0.9.300 und badhub #1045–#1079) auf und ersetzt dort das Nicht-Ziel „Kein
 > Takt in Stufe 1“. Betroffenes Repo: **nur bts-light**. badhub bleibt
@@ -197,8 +198,8 @@ sich die Datei zwischen 4 und 7 geändert, ist das richtig so.
 | `Antwort` 200 `Unveraendert`, 200 `Abgelehnt` | Gesendet (Bytes bekannt) | Merker = SHA, Text wie Knopf |
 | `Antwort` 409 `BereitsEndgueltig`, 403 `VerbandFalsch`, 401 `Unauthorized`, `Serverfehler{413}` | **Halt** | Text wie Knopf |
 | `Antwort` `NochNichtVerfuegbar` (400/404/Basic-Wand) | Pause | `naechster = jetzt + 30 min`, Text „badhub kennt den Upload noch nicht — nächster Versuch hh:mm“ |
-| `Antwort` 429 `ZuSchnell{s}`, 503 `Ueberlastet{s}` | Nachversuch(s) | `naechster = jetzt + max(s, 5 s)`, zählt als Nachversuch |
-| `Beschaeftigt`, `Lesefehler(Unruhig)`, `Antwort` `NichtErreichbar` / `Status{_}` (jeder sonstige Code) / `Serverfehler{415}` | Nachversuch | `naechster = jetzt + 90 s`; ab dem dritten in Folge `jetzt + takt` |
+| `Antwort` 429 `ZuSchnell{s}`, 503 `Ueberlastet{s}` | Nachversuch(s) | `naechster = jetzt + clamp(s, 5 s, 1 h)`, zählt als Nachversuch; `jetzt` ist das **Ende** des Uploads |
+| `Beschaeftigt`, `Lesefehler(Unruhig)`, `Antwort` `NichtErreichbar` / `Status{_}` (jeder sonstige Code) / `Serverfehler{415}` | Nachversuch | `naechster = jetzt + 90 s`; ab dem dritten in Folge `jetzt + takt`, und zwar für **jeden** weiteren Fehler in Folge — der Zähler fällt erst mit Erfolg, Pause oder Wiederanlauf |
 | `Lesefehler(NichtLesbar)` | Nachversuch, ab dem dritten in Folge **Halt** | eigener Zähler; Text beim Halt wie Knopf |
 | `Lesefehler(KeineTpDatei / ZuGross)` | **Halt** | Text wie Knopf |
 

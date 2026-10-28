@@ -124,12 +124,24 @@ pub fn basisname(pfad: &Path) -> String {
         .unwrap_or_else(|| "(ohne Namen)".to_string())
 }
 
+/// SHA-256 der Dateibytes — Schlüssel des Takt-Merkers (ADR 0061): Der Takt
+/// sendet nur, was der Server noch nicht kennt. 3 MB in ~40 ms (gemessen).
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
+    let d = ring::digest::digest(&ring::digest::SHA256, bytes);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(d.as_ref());
+    out
+}
+
 /// Datei vollständig lesen — mit hartem Deckel **beim** Lesen (`take`), nicht
 /// nur aus den Metadaten davor: zwischen Prüfung und Lesen kann die Datei
 /// gewachsen oder gegen etwas anderes getauscht worden sein (TOCTOU). Mehr als
 /// 32 MB + 1 landen so nie im Speicher; `is_file` wird am geöffneten Handle
 /// erneut geprüft (Gerät, FIFO, Verzeichnis hinter einem Symlink).
-async fn lesen(pfad: &Path) -> Result<Vec<u8>, LeseFehler> {
+///
+/// `pub(crate)` seit Stufe 2: der Takt liest **einmal ohne Gate** für den
+/// Schnell-Hash (ADR 0061) — derselbe Deckel, derselbe Kopf-Check, nichts im Log.
+pub(crate) async fn lesen(pfad: &Path) -> Result<Vec<u8>, LeseFehler> {
     let eigner = pfad.to_path_buf();
     let nicht_lesbar = || LeseFehler::NichtLesbar {
         basisname: basisname(pfad),
@@ -256,8 +268,11 @@ pub enum UploadAntwort {
     Unauthorized,
     /// 400, 404 oder Basic-Auth-Wand: altes badhub bzw. gesperrtes Testsystem.
     NochNichtVerfuegbar,
-    /// 413/415 — die Meldung des Servers.
-    Serverfehler { message: String },
+    /// 413/415 — die Meldung des Servers. Der Code reist mit, weil der Takt
+    /// 413 (zu groß → Halt) und 415 (kaputter Körper → Nachversuch) trennt.
+    Serverfehler { code: u16, message: String },
+    /// 503 mit `Retry-After` — der Worker hält gerade den Lock dieser GUID.
+    Ueberlastet { retry_after_s: u32 },
     /// Alles andere (5xx, Deploy-Fenster).
     Status { code: u16 },
     /// Netzwerkfehler, Timeout.
@@ -419,7 +434,7 @@ async fn abbilden(antwort: reqwest::Response, kuerzel: &str) -> UploadAntwort {
             received_at: koerper.received_at.unwrap_or_default(),
         },
         200 if koerper.status == "rejected" => UploadAntwort::Abgelehnt {
-            result: koerper.result.unwrap_or_default(),
+            result: meldung_bereinigt(&koerper.result.unwrap_or_default()),
             message: meldung_bereinigt(&koerper.message.unwrap_or_default()),
         },
         // 403/409 nur als Fachantwort, wenn der Körper von badhub stammt — ein
@@ -434,7 +449,11 @@ async fn abbilden(antwort: reqwest::Response, kuerzel: &str) -> UploadAntwort {
         401 if basic_wand => UploadAntwort::NochNichtVerfuegbar,
         401 => UploadAntwort::Unauthorized,
         400 | 404 => UploadAntwort::NochNichtVerfuegbar,
+        503 if retry_after.is_some() => UploadAntwort::Ueberlastet {
+            retry_after_s: retry_after.unwrap_or(5),
+        },
         413 | 415 => UploadAntwort::Serverfehler {
+            code,
             message: koerper
                 .message
                 .map(|m| meldung_bereinigt(&m))
@@ -494,7 +513,10 @@ pub fn antwort_text(a: &UploadAntwort) -> String {
         ),
         UploadAntwort::Unauthorized => crate::badhub::push::PushError::Unauthorized.to_string(),
         UploadAntwort::NochNichtVerfuegbar => "badhub kennt den Upload noch nicht".to_string(),
-        UploadAntwort::Serverfehler { message } => message.clone(),
+        UploadAntwort::Serverfehler { message, .. } => message.clone(),
+        UploadAntwort::Ueberlastet { retry_after_s } => {
+            format!("badhub bittet um Geduld, in {retry_after_s} s wieder möglich")
+        }
         UploadAntwort::Status { code } => format!("badhub antwortete mit HTTP-Status {code}"),
         UploadAntwort::NichtErreichbar => "badhub nicht erreichbar".to_string(),
     }
@@ -514,7 +536,7 @@ pub fn ergebnis_text(status: &StatusAntwort) -> String {
             .as_deref()
             .map(meldung_bereinigt)
             .filter(|m| !m.is_empty())
-            .unwrap_or_else(|| format!("abgelehnt ({code})")),
+            .unwrap_or_else(|| format!("abgelehnt ({})", meldung_bereinigt(code))),
         None => String::new(),
     }
 }
@@ -602,6 +624,34 @@ mod tests {
             }
         );
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn sha256_bekannter_vektor_und_jet_kopf_stabil() {
+        // NIST-Vektor „abc“.
+        let h = sha256(b"abc");
+        assert_eq!(
+            h[..4],
+            [0xba, 0x78, 0x16, 0xbf],
+            "SHA-256(abc) beginnt mit ba7816bf"
+        );
+        assert_eq!(sha256(&jet(b"x")), sha256(&jet(b"x")));
+        assert_ne!(sha256(&jet(b"x")), sha256(&jet(b"y")));
+    }
+
+    #[test]
+    fn antwort_text_ueberlastet_nennt_sekunden() {
+        assert_eq!(
+            antwort_text(&UploadAntwort::Ueberlastet { retry_after_s: 7 }),
+            "badhub bittet um Geduld, in 7 s wieder möglich"
+        );
+        assert_eq!(
+            antwort_text(&UploadAntwort::Serverfehler {
+                code: 413,
+                message: "Datei zu groß".into()
+            }),
+            "Datei zu groß"
+        );
     }
 
     #[tokio::test]
@@ -956,6 +1006,7 @@ mod tests {
                 "",
                 r#"{"status":"error","message":"Datei zu groß"}"#,
                 UploadAntwort::Serverfehler {
+                    code: 413,
                     message: "Datei zu groß".into(),
                 },
             ),
@@ -964,6 +1015,7 @@ mod tests {
                 "",
                 r#"{"status":"error","message":"keine TP-Datei"}"#,
                 UploadAntwort::Serverfehler {
+                    code: 415,
                     message: "keine TP-Datei".into(),
                 },
             ),
@@ -977,6 +1029,12 @@ mod tests {
                 "503 Service Unavailable",
                 "Retry-After: 5",
                 "",
+                UploadAntwort::Ueberlastet { retry_after_s: 5 },
+            ),
+            (
+                "503 Service Unavailable",
+                "",
+                "<html>Deploy</html>",
                 UploadAntwort::Status { code: 503 },
             ),
         ];

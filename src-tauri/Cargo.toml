@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.300"
+version = "0.9.301"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -52,6 +52,10 @@ mdns-sd = "0.21"
 # Lokale Uhrzeit fürs BTP-Spielende (Player.LastTimeOnCourt) — bereits
 # transitiv im Baum (Tauri-Ökosystem), daher keine neue Supply-Chain-Fläche.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# SHA-256 der TP-Datei für den Takt-Upload (ADR 0061): `ring` liegt über
+# rcgen/tokio-rustls ohnehin im Baum — nur eine direkte Abhängigkeit, kein
+# neuer Code im Build (die Stufe-1-Spec wollte deshalb kein `sha2`).
+ring = "0.17"
 
 # Stiller Druck des Schiedsrichterzettels (ADR 0042): GDI an einen
 # benannten Drucker, ohne Dialog. Von Microsoft gepflegt, MIT/Apache-2.0,

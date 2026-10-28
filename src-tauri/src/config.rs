@@ -355,13 +355,52 @@ pub struct PrintConfig {
 /// [`AppConfig::tp_datei_fuer_turnier`] liefert `None`, bis die Datei neu
 /// gewählt wird — eine fremde Datei darf nie unter einer anderen GUID landen.
 /// Es wird nichts still gelöscht.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// **Stufe 2 (Spec `docs/features/tp-takt-upload.md`, ADR 0061):** `auto_*`
+/// schaltet den Takt, der die Datei bei Änderung von selbst sendet — nur
+/// solange der Liveticker läuft. Standard **aus**: Der Takt veröffentlicht
+/// alles aus der Datei ohne Klick, das muss jemand bewusst wollen.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct TpUploadConfig {
     /// Pfad, wie ihn der Dialog geliefert hat; leer = keine Datei gewählt.
     pub path: String,
     /// Turnier-GUID zum Zeitpunkt der Dateiwahl (kanonisch gespeichert).
     pub tournament_uuid: String,
+    /// Automatisch senden, solange der Liveticker läuft (Stufe 2).
+    pub auto_enabled: bool,
+    /// Takt in Minuten. Gespeichert wird, was der Nutzer eintippt; die
+    /// Wahrheit ist [`TpUploadConfig::takt`], die unter
+    /// [`TP_TAKT_MIN_MINUTEN`] klemmt.
+    pub auto_minutes: u16,
+}
+
+/// Voreinstellung des Takts (Handbuch-Anker).
+pub const TP_TAKT_STANDARD_MINUTEN: u16 = 15;
+/// Untergrenze des Takts: 1 min läge auf der 60-s-Cooldown-Kante des Servers
+/// und kostete bei geänderter Datei ~5 s Write-Sperre je Minute.
+pub const TP_TAKT_MIN_MINUTEN: u16 = 5;
+
+impl Default for TpUploadConfig {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            tournament_uuid: String::new(),
+            auto_enabled: false,
+            auto_minutes: TP_TAKT_STANDARD_MINUTEN,
+        }
+    }
+}
+
+impl TpUploadConfig {
+    /// Wirksamer Takt: `None` wenn aus, sonst mindestens [`TP_TAKT_MIN_MINUTEN`].
+    pub fn takt(&self) -> Option<std::time::Duration> {
+        self.auto_enabled.then(|| {
+            std::time::Duration::from_secs(
+                60 * u64::from(self.auto_minutes.max(TP_TAKT_MIN_MINUTEN)),
+            )
+        })
+    }
 }
 
 /// Verschlüsselte LAN-Strecke (Spec `docs/features/lan-tls-verschluesselt.md`,
@@ -1408,6 +1447,35 @@ impl AppConfig {
 mod tests {
     use super::*;
 
+    // ── Takt-Upload (Spec tp-takt-upload, L2, AK 1) ────────────────────
+    #[test]
+    fn tp_upload_takt_alte_config_aus_klemmung_und_standard() {
+        // Alte config.json ohne die neuen Felder: Automatik aus, Standard 15.
+        let json = r#"{"path":"C:\\t.tp","tournament_uuid":"X"}"#;
+        let alt: TpUploadConfig = serde_json::from_str(json).unwrap();
+        assert!(!alt.auto_enabled);
+        assert_eq!(alt.auto_minutes, TP_TAKT_STANDARD_MINUTEN);
+        assert_eq!(alt.takt(), None, "aus → kein Takt");
+
+        let mut t = TpUploadConfig {
+            auto_enabled: true,
+            auto_minutes: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            t.takt(),
+            Some(std::time::Duration::from_secs(60 * 5)),
+            "unter dem Minimum → 5 min, gespeicherter Wert bleibt"
+        );
+        assert_eq!(t.auto_minutes, 1);
+        t.auto_minutes = 30;
+        assert_eq!(t.takt(), Some(std::time::Duration::from_secs(60 * 30)));
+        // Roundtrip hält die Felder.
+        let wieder: TpUploadConfig =
+            serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
+        assert_eq!(wieder, t);
+    }
+
     // ── TP-Datei an badhub (Spec tp-datei-upload, L1) ──────────────────
     #[test]
     fn tp_upload_config_roundtrip_und_alte_config_ohne_block() {
@@ -1935,6 +2003,8 @@ mod tests {
             tp_upload: TpUploadConfig {
                 path: r"C:\Turniere\test.tp".to_string(),
                 tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
+                auto_enabled: true,
+                auto_minutes: 10,
             },
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),

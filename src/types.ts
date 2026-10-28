@@ -127,6 +127,10 @@ export interface PrintConfig {
 export interface TpUploadConfig {
   path: string;
   tournament_uuid: string;
+  /** Stufe 2 (Spec tp-takt-upload): automatisch senden, solange der Liveticker läuft. */
+  auto_enabled: boolean;
+  /** Takt in Minuten; Rust klemmt unter 5 (`TP_TAKT_MIN_MINUTEN`), Standard 15. */
+  auto_minutes: number;
 }
 
 /** Urteil über einen gewählten Pfad (Rust: `badhub::tp_upload::TpFileInfo`). */
@@ -143,6 +147,13 @@ export interface TpUploadStatus {
   zeitpunkt_ms: number | null;
   groesse: number | null;
   ergebnis: string | null;
+  /** Wer `ergebnis` zuletzt geschrieben hat (Stufe 2). */
+  quelle: "knopf" | "takt" | null;
+  /** Takt-Zustand (Rust: `tp_takt::TaktZustand`, geflattet): nächster Termin,
+   *  letzte Schnell-Prüfung, Halt-Grund. `naechster_ms` null = Takt inaktiv. */
+  naechster_ms: number | null;
+  geprueft_ms: number | null;
+  angehalten: string | null;
 }
 
 /** Schiedsrichtermanagement — globale Schalter (Rust: config::OfficialsConfig).

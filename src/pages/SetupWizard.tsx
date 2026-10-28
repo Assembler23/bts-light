@@ -304,6 +304,12 @@ export function SetupWizard({
   // den Pfad stehen und zeigt „Datei neu wählen" (nichts wird still gelöscht).
   const [tpPath, setTpPath] = useState(initialConfig.tp_upload.path);
   const [tpGuid, setTpGuid] = useState(initialConfig.tp_upload.tournament_uuid);
+  // Stufe 2 (Spec tp-takt-upload): Automatik-Schalter + Takt in Minuten. Der
+  // Rust-Kern klemmt unter 5; hier nur `min=5` am Feld, gespeichert wird die Eingabe.
+  const [tpAuto, setTpAuto] = useState(initialConfig.tp_upload.auto_enabled ?? false);
+  const [tpMinutes, setTpMinutes] = useState(
+    String(initialConfig.tp_upload.auto_minutes ?? 15),
+  );
   /** Urteil über die GESPEICHERTE Datei (beim Laden geprüft; nach einer Wahl das der neuen). */
   const [tpInfo, setTpInfo] = useState<TpFileInfo | null>(null);
   /** Fehler der LETZTEN Wahl — bezieht sich auf die abgelehnte Datei, nicht auf den Pfad oben. */
@@ -624,7 +630,13 @@ export function SetupWizard({
       connection_mode: connectionMode,
       slave_mode: slaveMode,
       // Unverändert durchreichen: die Bindung an die GUID entsteht nur in pickTpDatei.
-      tp_upload: { path: tpPath, tournament_uuid: tpGuid },
+      tp_upload: {
+        path: tpPath,
+        tournament_uuid: tpGuid,
+        auto_enabled: tpAuto,
+        // 1–1440: Rust klemmt unter 5; oberhalb von u16 schlüge sonst das ganze Speichern fehl.
+        auto_minutes: Math.min(1440, Math.max(1, Math.round(Number(tpMinutes) || 15))),
+      },
       master_namespace: masterNamespace.trim(),
       // Hier wird nur der Modul-Schalter gepflegt; alle Detail-Einstellungen
       // (Stimmen, Azure, Halle …) leben auf der Ansagen-Seite und bleiben hier
@@ -1319,6 +1331,9 @@ export function SetupWizard({
                   setTpGuid("");
                   setTpInfo(null);
                   setTpError("");
+                  // Ohne Datei keine Automatik — sonst hielte sie beim nächsten
+                  // Schritt mit „Keine TP-Datei gewählt“ an (Spec AK 17a).
+                  setTpAuto(false);
                 }}
                 className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm
                            text-slate-500 transition-colors hover:bg-slate-100"
@@ -1360,6 +1375,42 @@ export function SetupWizard({
             <p className="text-xs text-slate-500">
               Die Datei liegt auf dem BTP-Rechner — Upload nur von dort empfohlen.
             </p>
+          )}
+          {/* Stufe 2 (Spec tp-takt-upload, ADR 0061): nur mit gewählter Datei. */}
+          {tpPath && (
+            <div className="mt-1 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={tpAuto}
+                  onChange={(e) => setTpAuto(e.currentTarget.checked)}
+                />
+                Automatisch senden, solange der Liveticker läuft
+              </label>
+              {tpAuto && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  alle
+                  <input
+                    type="number"
+                    min={5}
+                    max={1440}
+                    step={1}
+                    value={tpMinutes}
+                    onChange={(e) => setTpMinutes(e.currentTarget.value)}
+                    className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                  />
+                  Minuten
+                  {tpMinutes.trim() !== "" && Number(tpMinutes) < 5 && (
+                    <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
+                  )}
+                </label>
+              )}
+              <p className="text-xs text-slate-500">
+                Damit sendet bts-light jede Änderung der Datei von selbst — auch neue
+                Auslosungen, sobald sie in BTP stehen. Ohne laufenden Liveticker passiert
+                nichts; gesendet wird nur, wenn sich die Datei geändert hat.
+              </p>
+            </div>
           )}
         </section>
       )}
