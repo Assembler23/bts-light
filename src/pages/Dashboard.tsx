@@ -124,6 +124,40 @@ function CoverageBar(props: {
   );
 }
 
+/** Unix-ms → „14:47“ in der Zeitzone des Rechners. */
+function uhrzeit(ms: number): string {
+  return new Date(ms).toLocaleTimeString("de-DE", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Zeile der Automatik unter dem Knopf (Spec tp-takt-upload, „Status-Fenster“).
+ *  `null` = keine Zeile (Automatik aus). `warnung` = Halt in Warnfarbe. */
+export function tpAutomatikZeile(
+  auto: boolean,
+  running: boolean,
+  minuten: number,
+  s: TpUploadStatus | null,
+): { text: string; warnung: boolean } | null {
+  if (!auto) return null;
+  if (s?.angehalten) {
+    return { text: `Automatik angehalten: ${s.angehalten}`, warnung: true };
+  }
+  if (!running) {
+    return { text: "Automatik startet mit dem Liveticker", warnung: false };
+  }
+  const teile = [`Automatik: alle ${minuten} min`];
+  if (s?.naechster_ms) teile.push(`nächste Prüfung ${uhrzeit(s.naechster_ms)}`);
+  if (s?.zeitpunkt_ms && s.ergebnis) {
+    const wer = s.quelle === "knopf" ? "von Hand" : "automatisch";
+    teile.push(`zuletzt ${uhrzeit(s.zeitpunkt_ms)} (${wer}): ${s.ergebnis}`);
+  } else {
+    teile.push("noch nichts gesendet");
+  }
+  return { text: teile.join(" · "), warnung: false };
+}
+
 export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) {
   const running = status?.running ?? false;
   // Turnier-Kennzahlen + Hallen sind erst NACH dem Start bekannt (dann steht
@@ -171,6 +205,24 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
     }, 5_000);
     return () => window.clearInterval(id);
   }, [tpStatus?.laeuft]);
+  // Stufe 2 (Spec tp-takt-upload): solange die Automatik an ist und der
+  // Liveticker läuft, alle 30 s den Stand holen — ein Takt-Lauf zwischen zwei
+  // Dashboard-Besuchen wäre sonst unsichtbar.
+  const tpAuto = config.tp_upload.auto_enabled === true;
+  useEffect(() => {
+    if (!tpAuto || !running) return;
+    tpUploadStatus().then(setTpStatus).catch(() => {});
+    const id = window.setInterval(() => {
+      tpUploadStatus().then(setTpStatus).catch(() => {});
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [tpAuto, running]);
+  const tpAutoZeile = tpAutomatikZeile(
+    tpAuto,
+    running,
+    Math.max(5, config.tp_upload.auto_minutes || 15),
+    tpStatus,
+  );
   async function tpSenden() {
     setTpFehler("");
     try {
@@ -562,10 +614,30 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
               <span className="text-xs text-slate-500">läuft …</span>
             ) : tpFehler ? (
               <span className="text-xs text-rose-700">{tpFehler}</span>
-            ) : tpStatus?.ergebnis ? (
+            ) : tpStatus?.ergebnis && !tpAutoZeile ? (
               <span className="text-xs text-slate-600">{tpStatus.ergebnis}</span>
             ) : null}
           </div>
+          {tpAutoZeile && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={
+                  tpAutoZeile.warnung ? "text-xs text-amber-700" : "text-xs text-slate-600"
+                }
+              >
+                {tpAutoZeile.text}
+              </span>
+              {tpAutoZeile.warnung && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate?.("settings", "tp-datei")}
+                  className="text-xs text-blue-700 underline-offset-2 hover:underline"
+                >
+                  im Setup prüfen
+                </button>
+              )}
+            </div>
+          )}
           <p className="text-xs text-slate-400">
             Alles aus der Datei wird auf badhub sichtbar — auch noch nicht
             veröffentlichte Auslosungen. Ergebnisse aus dem Liveticker bleiben
