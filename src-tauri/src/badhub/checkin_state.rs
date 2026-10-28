@@ -18,7 +18,13 @@
 //!   Installationen, badhub wird unabhängig deployt.
 //! - [`Availability::Rejected`] — Passwort oder Turnier-GUID passen nicht
 //!   (401/403). Der einzige Fall, den die Turnierleitung selbst beheben kann,
-//!   und deshalb der einzige, der eine Meldung verdient.
+//!   und deshalb der einzige, der eine Meldung verdient. 401 und 403 bekommen
+//!   **getrennte** Texte: badhub unterscheidet „Passwort unbekannt" von
+//!   „Kennung gehört einem anderen Zugang", und wer nur „eins von beiden"
+//!   liest, sucht am falschen Ende. Ebenso **429** (Sperre nach
+//!   Fehlversuchen): Sie geht von allein vorbei, legt aber auch den
+//!   Liveticker-Push desselben Anschlusses still — deshalb kein ruhiges
+//!   „offline", sondern ein eigener Satz mit der Wartezeit.
 //!
 //! C3 und C4 laufen damit durch **denselben** Codepfad wie in der
 //! Spezifikation vorgesehen — sie sind gemeinsam getestet.
@@ -339,6 +345,53 @@ pub(crate) fn tl_ablage(classes: Vec<CheckinClass>) -> Vec<CheckinClass> {
         .collect()
 }
 
+/// 401: Das Passwort gehört zu keinem aktiven, gerade gültigen
+/// Liveticker-Zugang (badhub `checkin_tl_authorize`).
+const TEXT_PASSWORT_UNBEKANNT: &str = "badhub kennt dieses Liveticker-Passwort nicht — \
+     Passwort prüfen und ob der Zugang in badhub aktiv und gerade gültig ist.";
+
+/// 403: Passwort gültig, aber die Turnier-Kennung ist an einen anderen Zugang
+/// gebunden — an den, der zuletzt eine Meldeliste dafür gesendet hat (badhub
+/// überschreibt die Bindung bei jedem Push).
+const TEXT_FREMDE_KENNUNG: &str = "Diese Turnier-Kennung gehört in badhub zu einem anderen \
+     Zugang — Turnier-Kennung prüfen. Das Passwort selbst ist gültig.";
+
+/// 429: badhub sperrt diesen Anschluss nach zu vielen Fehlversuchen.
+///
+/// `Retry-After` nennt das **ganze** Fenster (900 s bzw. 86 400 s); weil das
+/// Fenster gleitet, endet die Sperre oft früher — daher „spätestens". Ohne
+/// verwertbaren Header bleibt der Satz ohne Zahl.
+fn zu_viele_versuche_text(retry_after_s: Option<u64>) -> String {
+    let dauer = retry_after_s.map(|s| {
+        let minuten = s.div_ceil(60).max(1);
+        if minuten >= 120 {
+            format!("{} Stunden", minuten.div_ceil(60))
+        } else if minuten == 1 {
+            "einer Minute".to_string()
+        } else {
+            format!("{minuten} Minuten")
+        }
+    });
+    match dauer {
+        Some(d) => format!(
+            "Zu viele Fehlversuche — badhub nimmt von diesem Anschluss spätestens in {d} \
+             wieder eine Anmeldung an. Bis dahin steht auch der Liveticker-Push."
+        ),
+        None => "Zu viele Fehlversuche — badhub nimmt von diesem Anschluss vorerst keine \
+                 Anmeldung an. Bis dahin steht auch der Liveticker-Push."
+            .to_string(),
+    }
+}
+
+/// `Retry-After` in Sekunden, falls badhub eine Zahl geschickt hat.
+fn retry_after_s(response: &reqwest::Response) -> Option<u64> {
+    response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
 /// HTTP-Client für den Check-In-Kanal.
 pub fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -403,11 +456,18 @@ pub async fn fetch_state(
                 "Dieses badhub kennt den Check-In noch nicht.",
             )
         }
-        401 | 403 => {
+        401 => return CheckinView::unavailable(Availability::Rejected, TEXT_PASSWORT_UNBEKANNT),
+        403 => return CheckinView::unavailable(Availability::Rejected, TEXT_FREMDE_KENNUNG),
+        429 => {
+            // Als `Rejected`, nicht als offline: Offline zeigte den Zusatz
+            // „das Turnier läuft unverändert weiter" — falsch, denn die
+            // Sperre trifft auch den Liveticker-Push dieses Anschlusses. Und
+            // wer das Passwort inzwischen korrigiert hat, hielte sonst die
+            // richtige Eingabe für falsch.
             return CheckinView::unavailable(
                 Availability::Rejected,
-                "badhub hat den Zugang abgelehnt — Liveticker-Passwort und Turnier-Kennung prüfen.",
-            )
+                zu_viele_versuche_text(retry_after_s(&response)),
+            );
         }
         other => {
             // 5xx und alles Übrige: wie offline behandeln. Der nächste Poll
@@ -463,6 +523,8 @@ async fn auswerten(antwort: Result<reqwest::Response, reqwest::Error>) -> WriteR
     };
 
     let status = response.status().as_u16();
+    // Vor `json()` lesen — das verbraucht die Antwort.
+    let retry_after = retry_after_s(&response);
     // Den Text von badhub bevorzugen: er ist auf die Turnierleitung gemünzt
     // („Der Anmeldeschluss liegt vor der Anfangszeit") und weiß mehr als ein
     // Statuscode hier je wissen könnte.
@@ -477,7 +539,12 @@ async fn auswerten(antwort: Result<reqwest::Response, reqwest::Error>) -> WriteR
         400 | 404 if text.is_empty() => {
             Err("Dieses badhub kennt den Check-In noch nicht.".to_string())
         }
-        401 | 403 if text.is_empty() => Err("badhub hat den Zugang abgelehnt.".to_string()),
+        // Anmelde-Fehler NICHT mit badhubs Text: der ist knapp und ohne
+        // Umlaute („Passwort nicht erkannt."), und Lese- und Schreibweg
+        // sollen dasselbe sagen.
+        401 => Err(TEXT_PASSWORT_UNBEKANNT.to_string()),
+        403 => Err(TEXT_FREMDE_KENNUNG.to_string()),
+        429 => Err(zu_viele_versuche_text(retry_after)),
         _ if !text.is_empty() => Err(text),
         other => Err(format!("badhub antwortete mit HTTP {other}.")),
     }
@@ -782,6 +849,98 @@ mod tests {
 
         assert_eq!(view.availability, Availability::Rejected);
         assert!(!view.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn passwort_und_kennung_haben_eigene_texte() {
+        // 401 = Passwort unbekannt, 403 = Kennung gehört einem anderen Zugang.
+        // Ein gemeinsamer Text schickte die Hälfte der Suchenden ans falsche Ende.
+        let base = spawn_mock("401 Unauthorized", r#"{"ok":false}"#).await;
+        let pw = fetch_state(&build_client(), &base, "pw", UUID).await;
+        let base = spawn_mock("403 Forbidden", r#"{"ok":false}"#).await;
+        let kennung = fetch_state(&build_client(), &base, "pw", UUID).await;
+
+        assert_eq!(pw.availability, Availability::Rejected);
+        assert_eq!(kennung.availability, Availability::Rejected);
+        assert!(
+            pw.message.contains("Liveticker-Passwort nicht"),
+            "{}",
+            pw.message
+        );
+        assert!(kennung.message.contains("Turnier-Kennung prüfen"));
+        assert_ne!(pw.message, kennung.message);
+    }
+
+    #[tokio::test]
+    async fn fehlversuchs_sperre_nennt_die_wartezeit() {
+        let base = spawn_mock(
+            "429 Too Many Requests\r\nRetry-After: 900",
+            r#"{"ok":false}"#,
+        )
+        .await;
+        let view = fetch_state(&build_client(), &base, "pw", UUID).await;
+
+        // Rejected, nicht offline: sonst stünde daneben „das Turnier läuft
+        // unverändert weiter", obwohl auch der Liveticker-Push gesperrt ist.
+        assert_eq!(view.availability, Availability::Rejected);
+        assert!(view.message.contains("Fehlversuche"), "{}", view.message);
+        assert!(
+            view.message.contains("spätestens in 15 Minuten"),
+            "{}",
+            view.message
+        );
+    }
+
+    #[test]
+    fn sperr_text_rechnet_lange_sperren_in_stunden() {
+        assert!(zu_viele_versuche_text(Some(86_400)).contains("24 Stunden"));
+        assert!(zu_viele_versuche_text(Some(30)).contains("einer Minute"));
+        let ohne = zu_viele_versuche_text(None);
+        assert!(ohne.contains("vorerst"), "{ohne}");
+        assert!(!ohne.chars().any(|c| c.is_ascii_digit()), "{ohne}");
+    }
+
+    #[test]
+    fn meldungen_haben_keine_leerzeichen_bloecke() {
+        // Eine verlorene `\`-Fortsetzung im Quelltext fiele sonst nur auf
+        // dem Bildschirm auf.
+        for t in [
+            TEXT_PASSWORT_UNBEKANNT.to_string(),
+            TEXT_FREMDE_KENNUNG.to_string(),
+            zu_viele_versuche_text(Some(900)),
+            zu_viele_versuche_text(None),
+        ] {
+            assert!(!t.contains("  "), "{t}");
+        }
+    }
+
+    #[tokio::test]
+    async fn schreibweg_unterscheidet_die_anmelde_fehler() {
+        // badhub schickt bei 401/403 eigenen Text mit — der Schreibweg soll
+        // trotzdem dieselben Sätze zeigen wie der Lesepfad.
+        let base = spawn_mock(
+            "401 Unauthorized",
+            r#"{"ok":false,"message":"Passwort nicht erkannt."}"#,
+        )
+        .await;
+        let r = set_player(&build_client(), &base, "pw", UUID, 5, 101, "check_in").await;
+        assert_eq!(r.unwrap_err(), TEXT_PASSWORT_UNBEKANNT);
+
+        let base = spawn_mock(
+            "403 Forbidden",
+            r#"{"ok":false,"message":"Dieses Turnier gehoert zu einem anderen Zugang."}"#,
+        )
+        .await;
+        let r = set_player(&build_client(), &base, "pw", UUID, 5, 101, "check_in").await;
+        assert_eq!(r.unwrap_err(), TEXT_FREMDE_KENNUNG);
+
+        let base = spawn_mock(
+            "429 Too Many Requests\r\nRetry-After: 900",
+            r#"{"ok":false,"message":"Zu viele Fehlversuche. Bitte spaeter erneut."}"#,
+        )
+        .await;
+        let r = set_player(&build_client(), &base, "pw", UUID, 5, 101, "check_in").await;
+        assert!(r.unwrap_err().contains("15 Minuten"));
     }
 
     #[tokio::test]

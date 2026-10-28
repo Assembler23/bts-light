@@ -12,6 +12,16 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Herrendoppel, wenn das Turnier englische Kürzel benutzt, sonst wie bisher
   Mädchendoppel.
 
+## v0.9.306
+
+- **Check-In: klare Meldung, warum badhub ablehnt.** Statt „Zugang
+  abgelehnt — Passwort und Turnier-Kennung prüfen" sagt bts-light jetzt, was
+  nicht passt: Das **Liveticker-Passwort** ist badhub unbekannt, oder die
+  **Turnier-Kennung** gehört zu einem anderen Zugang (dann ist das Passwort in
+  Ordnung). Nach zu vielen Fehlversuchen nennt die Meldung, wie lange badhub
+  den Anschluss höchstens sperrt (das trifft auch den Liveticker), statt nach
+  einem Netzproblem auszusehen.
+
 ## v0.9.305
 
 - **Turnierdatei sofort bei neuen Spielen senden.** Mit eingeschalteter
