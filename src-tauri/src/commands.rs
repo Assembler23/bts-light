@@ -1135,10 +1135,11 @@ fn tp_status_lock(status: &Mutex<TpUploadStatus>) -> std::sync::MutexGuard<'_, T
 /// schon ein Upload läuft (zweiter Klick ist ein No-op).
 pub(crate) fn upload_starten(
     status: &Mutex<TpUploadStatus>,
-) -> Result<TpUploadStatus, TpUploadStatus> {
+) -> Result<TpUploadStatus, Box<TpUploadStatus>> {
     let mut s = tp_status_lock(status);
     if s.laeuft {
-        return Err(s.clone());
+        // Geboxt: Der Status trägt seit Stufe 2 den Takt-Zustand (Clippy result_large_err).
+        return Err(Box::new(s.clone()));
     }
     s.laeuft = true;
     s.ergebnis = None;
@@ -1408,8 +1409,7 @@ pub(crate) async fn tp_takt_schritt(
     // 5 unverändert → nur Stempel
     {
         let mut s = tp_status_lock(status);
-        if s
-            .takt
+        if s.takt
             .merker
             .as_ref()
             .is_some_and(|m| m.passt(&pfad, &guid, &sha))
@@ -1535,7 +1535,7 @@ pub fn tp_upload_now(state: State<'_, AppState>) -> Result<TpUploadStatus, Strin
     let status = state.tp_upload.clone();
     let stand = match upload_starten(&status) {
         Ok(gestartet) => gestartet,
-        Err(laeuft_schon) => return Ok(laeuft_schon),
+        Err(laeuft_schon) => return Ok(*laeuft_schon),
     };
     tauri::async_runtime::spawn(async move {
         let client = crate::badhub::tp_upload::build_client();
@@ -6291,7 +6291,12 @@ mod tp_upload_tests {
 
     /// HTTP-Mock für den Upload-Task: POST → 202, GET → Status-JSON; zählt die Anfragen.
     async fn mock(status_json: &'static str) -> (String, Arc<AtomicUsize>) {
-        mock_mit("202 Accepted", r#"{"status":"accepted","job":"abc"}"#, status_json).await
+        mock_mit(
+            "202 Accepted",
+            r#"{"status":"accepted","job":"abc"}"#,
+            status_json,
+        )
+        .await
     }
 
     /// Wie `mock`, aber mit frei wählbarer POST-Antwort (409 für den Halt-Test).
@@ -6520,15 +6525,18 @@ mod tp_upload_tests {
         let client = crate::badhub::tp_upload::build_client();
         tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
         let s = status.lock().unwrap().clone();
-        assert_eq!(zaehler.load(Ordering::SeqCst), 2, "ein POST, ein Status-GET (AK 3)");
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            2,
+            "ein POST, ein Status-GET (AK 3)"
+        );
         assert_eq!(s.quelle, Some(Quelle::Takt));
         assert_eq!(s.ergebnis.as_deref(), Some("übernommen, 7 Spiele"));
-        assert!(s
-            .takt
-            .merker
-            .as_ref()
-            .unwrap()
-            .passt(&pfad, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", &datei_sha(&pfad)));
+        assert!(s.takt.merker.as_ref().unwrap().passt(
+            &pfad,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA",
+            &datei_sha(&pfad)
+        ));
         assert_eq!(s.takt.naechster_ms, Some(J + T15_MS));
         assert!(!s.laeuft);
         // Zweiter Schritt: dieselben Bytes → nichts.
@@ -6539,8 +6547,12 @@ mod tp_upload_tests {
 
     #[tokio::test]
     async fn takt_schritt_409_haelt_an_knopf_und_wiederanlauf_loesen() {
-        let (url, zaehler) =
-            mock_mit("409 Conflict", r#"{"status":"error","message":"final"}"#, "{}").await;
+        let (url, zaehler) = mock_mit(
+            "409 Conflict",
+            r#"{"status":"error","message":"final"}"#,
+            "{}",
+        )
+        .await;
         let pfad = tp_datei("takt-409.tp");
         let guid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
         let cfg = takt_config(&pfad, &url);
@@ -6555,13 +6567,19 @@ mod tp_upload_tests {
                 Some("Turnier bereits endgültig importiert"),
                 "AK 7"
             );
-            assert_eq!(s.ergebnis.as_deref(), Some("Turnier bereits endgültig importiert"));
+            assert_eq!(
+                s.ergebnis.as_deref(),
+                Some("Turnier bereits endgültig importiert")
+            );
             assert!(s.takt.merker.is_none(), "409 setzt keinen Merker");
         }
         // Angehalten: zweiter Schritt liest und sendet nicht.
         tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 5).await;
         assert_eq!(zaehler.load(Ordering::SeqCst), 1);
-        assert_eq!(status.lock().unwrap().takt.naechster_ms, Some(J + 5 + T15_MS));
+        assert_eq!(
+            status.lock().unwrap().takt.naechster_ms,
+            Some(J + 5 + T15_MS)
+        );
         // Knopf-Erfolg hebt den Halt auf und merkt die Bytes (AK 9) …
         knopf_nachlauf(
             &UploadAusgang::DauertNoch {
@@ -6573,10 +6591,17 @@ mod tp_upload_tests {
         );
         assert!(status.lock().unwrap().takt.angehalten.is_none());
         tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 9).await;
-        assert_eq!(zaehler.load(Ordering::SeqCst), 1, "… dieselben Bytes gehen nicht erneut");
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            1,
+            "… dieselben Bytes gehen nicht erneut"
+        );
         // … ein Wiederanlauf (Speichern mit geänderter GUID, AK 8) löscht den Merker → sendet wieder.
         status.lock().unwrap().takt.wiederanlauf(J + 10);
-        assert_eq!(status.lock().unwrap().takt.naechster_ms, Some(J + 10 + 60_000));
+        assert_eq!(
+            status.lock().unwrap().takt.naechster_ms,
+            Some(J + 10 + 60_000)
+        );
         tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 20).await;
         assert_eq!(zaehler.load(Ordering::SeqCst), 2);
     }
@@ -6620,7 +6645,11 @@ mod tp_upload_tests {
         tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
         let s = status.lock().unwrap().clone();
         assert!(
-            s.takt.angehalten.as_deref().unwrap().contains("Keine TP-Datei gewählt"),
+            s.takt
+                .angehalten
+                .as_deref()
+                .unwrap()
+                .contains("Keine TP-Datei gewählt"),
             "{:?}",
             s.takt.angehalten
         );
@@ -6674,7 +6703,11 @@ mod tp_upload_tests {
         let client = crate::badhub::tp_upload::build_client();
         tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
         let s = status.lock().unwrap().clone();
-        assert_eq!(zaehler.load(Ordering::SeqCst), 1, "genau ein Status-GET (AK 8b)");
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            1,
+            "genau ein Status-GET (AK 8b)"
+        );
         assert_eq!(s.takt.angehalten.as_deref(), Some("Kennung passt nicht"));
         assert!(!s.takt.nachholen);
     }

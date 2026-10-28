@@ -67,9 +67,15 @@ pub enum UploadAusgang {
     /// Lesen unter dem Gate scheiterte.
     Lesefehler(LeseFehler),
     /// Jede Antwort außer 202.
-    Antwort { antwort: UploadAntwort, sha: [u8; 32] },
+    Antwort {
+        antwort: UploadAntwort,
+        sha: [u8; 32],
+    },
     /// 202 und der Worker hat innerhalb der Frist ein `result` geliefert.
-    Verarbeitet { status: StatusAntwort, sha: [u8; 32] },
+    Verarbeitet {
+        status: StatusAntwort,
+        sha: [u8; 32],
+    },
     /// 202, aber kein `result` innerhalb der Frist.
     DauertNoch { sha: [u8; 32] },
 }
@@ -236,7 +242,10 @@ impl TaktZustand {
     /// oder zu naher wird auf `jetzt + STARTVERZUG` gesetzt.
     pub fn starten(&mut self, jetzt_ms: u64) {
         let fruehestens = jetzt_ms + Self::ms(STARTVERZUG);
-        self.naechster_ms = Some(self.naechster_ms.map_or(fruehestens, |n| n.max(fruehestens)));
+        self.naechster_ms = Some(
+            self.naechster_ms
+                .map_or(fruehestens, |n| n.max(fruehestens)),
+        );
     }
 
     /// Schalter aus oder Slave-Modus: kein Termin; Halt bleibt gespeichert.
@@ -502,10 +511,7 @@ mod tests {
             halt
         );
         assert_eq!(
-            einordnen(
-                &UploadAusgang::Lesefehler(LeseFehler::KeineTpDatei),
-                "K"
-            ),
+            einordnen(&UploadAusgang::Lesefehler(LeseFehler::KeineTpDatei), "K"),
             halt
         );
         assert_eq!(
@@ -561,10 +567,19 @@ mod tests {
     fn nachversuch_zweimal_90s_dann_takt_und_retry_after_mit_untergrenze() {
         let mut z = TaktZustand::default();
         let nv = Einordnung::Nachversuch { retry_after: None };
-        assert_eq!(z.anwenden(nv.clone(), J, T, &pf(), "G"), Terminart::Nachversuch);
+        assert_eq!(
+            z.anwenden(nv.clone(), J, T, &pf(), "G"),
+            Terminart::Nachversuch
+        );
         assert_eq!(z.naechster_ms, Some(J + 90_000));
-        assert_eq!(z.anwenden(nv.clone(), J, T, &pf(), "G"), Terminart::Nachversuch);
-        assert_eq!(z.anwenden(nv.clone(), J, T, &pf(), "G"), Terminart::Regulaer);
+        assert_eq!(
+            z.anwenden(nv.clone(), J, T, &pf(), "G"),
+            Terminart::Nachversuch
+        );
+        assert_eq!(
+            z.anwenden(nv.clone(), J, T, &pf(), "G"),
+            Terminart::Regulaer
+        );
         assert_eq!(z.naechster_ms, Some(J + 15 * 60_000));
         assert_eq!(z.nachversuche, 0, "Zähler nach dem regulären Takt zurück");
         // Retry-After 7 s → 7 s; 2 s → 5 s (AK 6)
@@ -593,7 +608,10 @@ mod tests {
     #[test]
     fn pause_halt_und_nicht_lesbar() {
         let mut z = TaktZustand::default();
-        assert_eq!(z.anwenden(Einordnung::Pause, J, T, &pf(), "G"), Terminart::Pause);
+        assert_eq!(
+            z.anwenden(Einordnung::Pause, J, T, &pf(), "G"),
+            Terminart::Pause
+        );
         assert_eq!(z.naechster_ms, Some(J + 30 * 60_000));
         assert!(z.angehalten.is_none());
 
@@ -602,14 +620,22 @@ mod tests {
             Terminart::Halt
         );
         assert_eq!(z.angehalten.as_deref(), Some("409"));
-        assert_eq!(z.naechster_ms, Some(J + 15 * 60_000), "Termin läuft fürs Dashboard weiter");
+        assert_eq!(
+            z.naechster_ms,
+            Some(J + 15 * 60_000),
+            "Termin läuft fürs Dashboard weiter"
+        );
 
         let mut z = TaktZustand::default();
         let nl = || Einordnung::NichtLesbar("weg".into());
         assert_eq!(z.anwenden(nl(), J, T, &pf(), "G"), Terminart::Nachversuch);
         assert_eq!(z.anwenden(nl(), J, T, &pf(), "G"), Terminart::Nachversuch);
         assert!(z.angehalten.is_none());
-        assert_eq!(z.anwenden(nl(), J, T, &pf(), "G"), Terminart::Halt, "3. in Folge");
+        assert_eq!(
+            z.anwenden(nl(), J, T, &pf(), "G"),
+            Terminart::Halt,
+            "3. in Folge"
+        );
         assert_eq!(z.angehalten.as_deref(), Some("weg"));
         // Eine erfolgreiche Lesung dazwischen setzt den Zähler zurück (AK 8a).
         let mut z = TaktZustand::default();
@@ -627,7 +653,11 @@ mod tests {
         assert_eq!(z.naechster_ms, Some(J + 60_000), "ohne Termin: +60 s");
         z.naechster_ms = Some(J + 600_000);
         z.starten(J);
-        assert_eq!(z.naechster_ms, Some(J + 600_000), "Termin in 10 min bleibt (AK 12)");
+        assert_eq!(
+            z.naechster_ms,
+            Some(J + 600_000),
+            "Termin in 10 min bleibt (AK 12)"
+        );
         z.naechster_ms = Some(J + 10_000);
         z.starten(J);
         assert_eq!(z.naechster_ms, Some(J + 60_000), "zu naher Termin → +60 s");
@@ -663,14 +693,19 @@ mod tests {
 
     #[test]
     fn knopf_gesendet_hebt_halt_und_setzt_merker() {
-        let mut z = TaktZustand::default();
-        z.angehalten = Some("409".into());
-        z.nachversuche = 1;
+        let mut z = TaktZustand {
+            angehalten: Some("409".into()),
+            nachversuche: 1,
+            ..Default::default()
+        };
         z.knopf_gesendet(&pf(), "G", sha(4));
         assert!(z.angehalten.is_none());
         assert_eq!(z.nachversuche, 0);
         assert!(z.merker.as_ref().unwrap().passt(&pf(), "G", &sha(4)));
-        assert!(!z.merker.as_ref().unwrap().passt(&pf(), "H", &sha(4)), "andere GUID");
+        assert!(
+            !z.merker.as_ref().unwrap().passt(&pf(), "H", &sha(4)),
+            "andere GUID"
+        );
         assert!(!z
             .merker
             .as_ref()
@@ -693,9 +728,14 @@ mod tests {
         let mut c = basis.clone();
         c.finished_warning_seconds += 1;
         c.upload_logs = !c.upload_logs;
-        assert_eq!(bewerte_config(&basis, &c), ConfigWechsel::default(), "fremde Felder");
+        assert_eq!(
+            bewerte_config(&basis, &c),
+            ConfigWechsel::default(),
+            "fremde Felder"
+        );
 
-        let felder: Vec<Box<dyn Fn(&mut AppConfig)>> = vec![
+        type Aenderung = Box<dyn Fn(&mut AppConfig)>;
+        let felder: Vec<Aenderung> = vec![
             Box::new(|c| c.tp_upload.path = "x".into()),
             Box::new(|c| c.tp_upload.tournament_uuid = "x".into()),
             Box::new(|c| c.tournament_uuid = "x".into()),
@@ -728,8 +768,10 @@ mod tests {
         assert!(w.ausgeschaltet && !w.minuten_geaendert);
 
         // Anwenden: Wiederanlauf schlägt alles; dann Schalter; dann Minuten.
-        let mut z = TaktZustand::default();
-        z.angehalten = Some("x".into());
+        let mut z = TaktZustand {
+            angehalten: Some("x".into()),
+            ..Default::default()
+        };
         z.config_gewechselt(
             ConfigWechsel {
                 wiederanlauf: true,
@@ -773,6 +815,8 @@ mod tests {
         };
         let json = serde_json::to_string(&z).unwrap();
         assert!(json.contains("naechster_ms") && json.contains("angehalten"));
-        assert!(!json.contains("merker") && !json.contains("nachversuche") && !json.contains("x.tp"));
+        assert!(
+            !json.contains("merker") && !json.contains("nachversuche") && !json.contains("x.tp")
+        );
     }
 }

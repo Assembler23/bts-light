@@ -1471,7 +1471,8 @@ mod tests {
         t.auto_minutes = 30;
         assert_eq!(t.takt(), Some(std::time::Duration::from_secs(60 * 30)));
         // Roundtrip hält die Felder.
-        let wieder: TpUploadConfig = serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
+        let wieder: TpUploadConfig =
+            serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
         assert_eq!(wieder, t);
     }
 
