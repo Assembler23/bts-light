@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.309
+
+- **Punktverlauf und Aufschlag an badhub.** bts-light schickt den
+  Punkt-für-Punkt-Verlauf der Tablet-Spiele samt Aufstellung zu Satzbeginn
+  an badhub. badhub speichert ihn dauerhaft und kann damit zeigen, wer
+  aufschlägt, von welcher Seite und wer annimmt. Karten, Disqualifikationen,
+  Verletzungen und Namen gehen dabei nicht mit.
+
 ## v0.9.308
 
 - **Check-In: Hallen-Ansicht und Zeitplan per Knopf.** Die Check-In-Seite in

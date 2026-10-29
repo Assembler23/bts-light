@@ -180,6 +180,13 @@ pub struct SyncEngine {
     sched_takt: SchedTakt,
     /// badhub kennt `sched` noch nicht? Dann nicht jeden Zyklus anklopfen.
     sched_unsupported_since: Option<Instant>,
+    /// Was badhub vom Punktverlauf zuletzt angenommen hat (`tverlauf`).
+    verlauf_stand: crate::badhub::verlauf::VerlaufStand,
+    /// Turnier, zu dem `verlauf_stand` gehört — ein neues sendet alles neu
+    /// (BTP-Match-IDs beginnen je Turnierdatei von vorn).
+    verlauf_turnier: String,
+    /// badhub kennt `tverlauf` noch nicht? Dann nicht jeden Zyklus anklopfen.
+    verlauf_unsupported_since: Option<Instant>,
 }
 
 /// Wie lange nach einem 404/400 des Check-In-Endpunkts pausiert wird, bevor
@@ -462,6 +469,9 @@ impl SyncEngine {
             btp_retry_start: 0,
             sched_takt: SchedTakt::neu(),
             sched_unsupported_since: None,
+            verlauf_stand: Default::default(),
+            verlauf_turnier: String::new(),
+            verlauf_unsupported_since: None,
         }
     }
 
@@ -589,6 +599,73 @@ impl SyncEngine {
             }
             Err(e) => {
                 tracing::warn!("Spielplan konnte nicht gesendet werden: {e}");
+            }
+        }
+    }
+
+    /// Punktverlauf und Aufschlag an badhub (`tverlauf`, badhub ADR-0060).
+    ///
+    /// Im selben 5-s-Takt wie der Score-Push, aber danach und mit eigenem
+    /// Fehlerpfad: der Liveticker-Stand ist die zeitkritische Funktion. Nur
+    /// Matches, deren Eintrag sich seit dem letzten angenommenen Push
+    /// geändert hat; ohne Änderung kein Request.
+    async fn send_verlauf(
+        &mut self,
+        config: &AppConfig,
+        http: &reqwest::Client,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+    ) {
+        use crate::badhub::verlauf;
+
+        if self
+            .verlauf_unsupported_since
+            .is_some_and(|t| t.elapsed() < CHECKIN_UNSUPPORTED_RETRY)
+        {
+            return;
+        }
+        if self.verlauf_turnier != snapshot.tournament_name {
+            self.verlauf_stand.leeren();
+            self.verlauf_turnier = snapshot.tournament_name.clone();
+        }
+        // Derselbe Stand wie der Verlauf (`overview_from`, nicht ein zweites
+        // Lesen des Tablet-Snapshots).
+        let pausen: HashMap<i64, serde_json::Value> = tablet
+            .overview_from(snapshot)
+            .into_iter()
+            .filter_map(|c| c.pause.map(|p| (c.match_id, p)))
+            .collect();
+        let alle = verlauf::eintraege(
+            snapshot,
+            |id| tablet.timeline_store().timeline(id),
+            |id| tablet.sheet_store().sheet(id),
+            &pausen,
+        );
+        let neu = self.verlauf_stand.geaendert(alle);
+        if neu.is_empty() {
+            return;
+        }
+        let msg = verlauf::build_verlauf(neu, self.rid, config.tournament_uuid_kanonisch());
+        match push::push_verlauf(http, &config.badhub.url, &config.badhub.password, &msg).await {
+            Ok(()) => {
+                tracing::debug!(
+                    spiele = msg.matches.len(),
+                    "Punktverlauf an badhub gesendet"
+                );
+                self.verlauf_stand.angenommen(&msg.matches);
+                self.verlauf_unsupported_since = None;
+            }
+            Err(push::PushError::Status(404)) | Err(push::PushError::Status(400)) => {
+                if self.verlauf_unsupported_since.is_none() {
+                    tracing::info!(
+                        "badhub kennt den Punktverlauf-Kanal noch nicht — naechster Versuch in {} Minuten",
+                        CHECKIN_UNSUPPORTED_RETRY.as_secs() / 60
+                    );
+                }
+                self.verlauf_unsupported_since = Some(Instant::now());
+            }
+            Err(e) => {
+                tracing::warn!("Punktverlauf konnte nicht gesendet werden: {e}");
             }
         }
     }
@@ -2322,6 +2399,9 @@ impl SyncEngine {
             jetzt_ms,
         )
         .await;
+        // Punktverlauf und Aufschlag (badhub ADR-0060) — additiv wie der
+        // Spielplan, deshalb nach dem Score-Push.
+        self.send_verlauf(config, http, &snapshot, tablet).await;
         match push_result {
             Ok(()) => {
                 let outcome = match update {

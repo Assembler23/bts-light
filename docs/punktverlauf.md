@@ -56,7 +56,7 @@ Tablet ──rally (je Ballwechsel)──▶ Host (TimelineStore) ──punktver
 konfiguriert) + `matches`-Map (match_id → Sätze als Punktfolgen
 `"ABBA…"`). Bewusst **ohne Spielernamen** — die Anzeige holt Namen zur
 Laufzeit aus dem Turnierstand; die Datei ist zugleich das fertige
-Dokument für den späteren badhub-Push (Folge-Feature).
+Dokument für den badhub-Push (`tverlauf`, siehe unten).
 
 - Slug aus dem Turniernamen: Whitelist `[a-z0-9-]` (Path-Traversal
   ausgeschlossen); Namenskollisionen führen dieselbe Datei weiter.
@@ -66,6 +66,35 @@ Dokument für den späteren badhub-Push (Folge-Feature).
 - Geschrieben wird best effort (atomar, debounced ~3 s; Resync und
   Finalisierung sofort) — ein Schreibfehler kostet den Graphen, nie das
   Zählen. Alte Turnier-Dateien bleiben liegen.
+
+## badhub-Push: `tverlauf` (seit v0.9.309, badhub ADR-0060)
+
+Im selben 5-s-Takt wie der Score-Push, aber danach und mit eigenem
+Fehlerpfad (`Sync::send_verlauf`, `src-tauri/src/badhub/verlauf.rs`), geht je
+Match der **ganze** Punktverlauf an `live_update.php`:
+
+```json
+{"type":"tverlauf","rid":7,"tournament_uuid":"<GUID>","matches":[{
+  "_id":"btp_4711","doubles":true,
+  "fmt":{"target":21,"cap":30,"bestOf":3,"intervalAt":11},
+  "timeline":{"sets":[{"startA":0,"startB":0,"points":"ABBA"}],"midGame":false,"retired":false,"finished":false},
+  "serve":[{"kind":"serve_start","set":1,"afterN":0,"team":0,"player":0,"receiverTeam":1,"receiverPlayer":0}],
+  "pause":{"kind":"eleven","endsAt":1793450000000}}]}
+```
+
+- **Ersetzen statt anhängen**: badhub ersetzt je Match den gespeicherten
+  Verlauf — Undo, Host-Neustart und verlorene Pushes heilen sich.
+- **Nur Geändertes**: `VerlaufStand` hält je Match den Hash des zuletzt
+  **angenommenen** Eintrags; abgelehnte gehen im nächsten Takt erneut, höchstens
+  64 Matches je Nachricht (der Rest folgt gestaffelt). Neues Turnier → alles neu.
+- **Vom Zettel nur `serve_start`** (nicht zurückgenommene) — keine Karten,
+  keine Disqualifikation, keine Verletzung (`is_sanction`-Regel). Pausen nur
+  `eleven`/`game` aus dem Tablet-Zustand. Keine Namen.
+- Aufschläger, Aufschlagfeld und Annehmer je Ballwechsel rechnet badhub aus
+  `serve_start` + Punktfolge nach; deshalb gehen keine Aufstellungen je
+  Ballwechsel mit.
+- Altes badhub (400/404 auf den Typ): Pause wie beim `sched`
+  (`CHECKIN_UNSUPPORTED_RETRY`), danach erneut.
 
 ## Kennzeichnungen
 

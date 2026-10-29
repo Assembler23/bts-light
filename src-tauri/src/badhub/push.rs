@@ -159,6 +159,32 @@ pub async fn push_sched(
     }
 }
 
+/// Sendet Punktverlauf und Aufschlag (`tverlauf`, badhub ADR-0060).
+///
+/// Gleicher Endpunkt und gleiche Auth wie `tset`/`sched`. Ein altes badhub
+/// antwortet mit 400 (unbekannter Typ) — der Aufrufer pausiert dann.
+pub async fn push_verlauf(
+    client: &reqwest::Client,
+    url: &str,
+    password: &str,
+    msg: &crate::badhub::verlauf::VerlaufMessage,
+) -> Result<(), PushError> {
+    let body = serde_json::to_vec(msg).expect("tverlauf-Serialisierung kann nicht fehlschlagen");
+
+    let response = client
+        .post(url)
+        .bearer_auth(password)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await?;
+
+    match response.status().as_u16() {
+        200 => Ok(()),
+        _ => Err(abgelehnt(&response)),
+    }
+}
+
 /// Leitet die Branding-Endpunkt-URL aus der konfigurierten Liveticker-URL ab.
 ///
 /// Der Sponsor-Endpunkt `POST /api/checkin-branding` ist — anders als die
