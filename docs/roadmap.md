@@ -496,6 +496,16 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Sprachansagen im Browser (Ansage-Seite)** — Spec:
+  [features/ansage-im-browser.md](features/ansage-im-browser.md) (Entwurf
+  29.10.2026, wartet auf Freigabe). Ansagen auf Pi/Tablet/Handy ohne
+  Windows-App: Turnier-PC vertont (Azure, später OneCore), Seite `/ansage`
+  spielt nur ab; Pi am TV über einen Ansage-Modus der Monitor-Seiten.
+  - **Etappen:** E1 LAN-Seite + TL-Aufträge/Freitext/Desktop-Knöpfe ·
+    E1b Monitor-Modus + Pi-Autoplay · E2 Erst-Ansage im Kern ·
+    E3 Offline-Stimme OneCore (erst nach Messung am Turnier-PC) ·
+    E4 Cloud mit eigenem Lese-Schlüssel.
+
 - **TP-Datei während des Turniertags an badhub** — Spec:
   [features/tp-datei-upload.md](features/tp-datei-upload.md),
   [ADR 0060](adr/0060-upload-sperrt-btp-writes-schreib-gate.md).
@@ -1177,6 +1187,18 @@ verliehen):
   (`…/display?courts=3,4`).
 
 ## Bekannte Einschränkungen / technische Schuld
+
+- **Azure-Schlüssel offen am Relay** (Befund 29.10.2026, Grill zur
+  Ansage-Seite): `/{ns}/info/announce/state` liefert die geerbte
+  Azure-Config samt Schlüssel an jeden, der die `install_id` kennt
+  (`relay/src/main.rs` `announce_state`, so gewollt seit ADR 0003). Die
+  `install_id` ist zugleich Tablet-Zugang. Eigener Fix nötig (z. B. Erbe nur
+  über die authentifizierte Slave-Kopplung); die Ansage-Seite nutzt diesen
+  Weg bewusst nicht.
+- **Azure-Audio mit Spielernamen dauerhaft auf der Platte** (Befund
+  29.10.2026): `azure_tts.rs` cacht jede Ansage als MP3 in
+  `app_data_dir/tts-cache/` ohne Verfall. Verfall/Räumen beim Turnierwechsel
+  prüfen.
 
 - **Kein Framing-Schutz für die Zähl-Seite** `/court/{id}` **im LAN**
   (Port 8088/8443 setzen weder `X-Frame-Options` noch `frame-ancestors`):
