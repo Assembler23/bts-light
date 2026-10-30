@@ -20,7 +20,8 @@
  */
 
 /** Query-Parameter, die beim Adressvergleich nicht zählen. */
-export const IGNORIERTE_PARAMS = ["device", "rotate", "dir"];
+// `ansage` = Ansage-Modus der Monitor-Seiten (Spec ansage-im-browser, E1b).
+export const IGNORIERTE_PARAMS = ["device", "rotate", "dir", "ansage"];
 
 /** Zeigt die Seite schon das, worauf `redirectTo` verweist? */
 export function urlPasst(hierHref, zielPfad, origin) {

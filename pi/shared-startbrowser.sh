@@ -155,6 +155,8 @@ discover() {
 launch() {
   pkill -f chromium-browser 2>/dev/null
   sleep 1
+  # --autoplay-policy: Ton ohne Tippen für den Ansage-Modus der Monitor-Seiten
+  # (?ansage=<Halle>, Spec ansage-im-browser E1b) — am TV tippt niemand.
   chromium-browser \
     --noerrdialogs \
     --disable-infobars \
@@ -163,6 +165,7 @@ launch() {
     --disable-features=Translate,TranslateUI \
     --disable-translate \
     --lang=de-DE --accept-lang=de-DE,de \
+    --autoplay-policy=no-user-gesture-required \
     --kiosk "$1" &
 }
 
