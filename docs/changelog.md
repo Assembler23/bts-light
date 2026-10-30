@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.312
+
+- **Ansage: Klasse klar abgesetzt.** Aus „Herreneinzel A" wurde beim
+  Sprechen oft „Herreneinzela". Die Klasse kommt jetzt nach einer kurzen
+  Pause („Herreneinzel, A"); mit Azure wird ein Buchstaben-Kürzel
+  buchstabiert, sodass auch die englische Stimme „A" nicht als Artikel liest.
+  Angezeigt wird es weiter als „Herreneinzel A".
+
 ## v0.9.311
 
 - **Ansagen im Browser (Etappe 1).** Tablets, Handys oder ein Pi im

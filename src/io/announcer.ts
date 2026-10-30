@@ -16,6 +16,7 @@ import { gongPlanen } from "./gongKlang.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
 import { disziplinName } from "./disziplinName.mjs";
+import { klasseSsml, klasseText } from "./klasseSprechen.mjs";
 import { startPlaySegments } from "./startPlayText.mjs";
 import { scorekeeperCallSegments } from "./scorekeeperCallText.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
@@ -381,6 +382,25 @@ export function disciplineWithClass(
   return disc && cls ? `${disc} ${cls}` : disc;
 }
 
+// Dasselbe zum SPRECHEN: Die Klasse wird abgesetzt, sonst klingt es wie
+// „Herreneinzela" (klasseSprechen.mjs). Ohne Disziplin keine Klasse.
+function disciplineSpoken(
+  d: Discipline,
+  className: string | undefined,
+  lang: AnnounceLang,
+): string {
+  return klasseText(disciplineWord(d, className, lang), className);
+}
+
+// SSML-Fassung (bereits escapt) mit echter Pause vor der Klasse.
+function disciplineSsml(
+  d: Discipline,
+  className: string | undefined,
+  lang: AnnounceLang,
+): string {
+  return klasseSsml(disciplineWord(d, className, lang), className);
+}
+
 // Schlüssel-Normalisierung fürs Matching: Diakritika UND fremde Sonderbuchstaben
 // falten, damit z. B. „Nguyên"/„Nguyen", „Yıldız"/„Yildiz", „García"/„Garcia"
 // alle denselben Wörterbuch-Eintrag treffen. NFD + Entfernen kombinierender
@@ -547,7 +567,7 @@ export function buildAnnouncementSegments(
     nameOverridesEnabled,
   );
   const versus = lang === "de" ? "gegen" : "versus";
-  const disc = disciplineWithClass(input.discipline, input.className, lang);
+  const disc = disciplineSpoken(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
 
   const segments: string[] = [`${court}.`];
@@ -787,9 +807,7 @@ export function buildAnnouncementSsml(
   sayMap?: Map<string, string>,
 ): string {
   const court = xmlEscape(resolveCourtPhrase(input.courtLabel, lang));
-  const disc = xmlEscape(
-    disciplineWithClass(input.discipline, input.className, lang),
-  );
+  const disc = disciplineSsml(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
   const versus = lang === "de" ? "gegen" : "versus";
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap, sayMap);
@@ -1194,7 +1212,7 @@ export function buildPreparationSegments(
     nameOverridesEnabled,
   );
   const versus = lang === "de" ? "gegen" : "versus";
-  const disc = disciplineWithClass(input.discipline, input.className, lang);
+  const disc = disciplineSpoken(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
   const hall = (input.hall || "").trim();
   const stagePrefix = callStagePrefix(input.callStage, lang);
@@ -1248,9 +1266,7 @@ export function buildPreparationSsml(
   langMap?: Map<string, string>,
   sayMap?: Map<string, string>,
 ): string {
-  const disc = xmlEscape(
-    disciplineWithClass(input.discipline, input.className, lang),
-  );
+  const disc = disciplineSsml(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
   const versus = lang === "de" ? "gegen" : "versus";
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap, sayMap);
