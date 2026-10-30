@@ -412,6 +412,14 @@
   // "/<namespace>/") für Flaggen, Werbung und die State-Abfrage.
   var MODE = "__MODE__";
   var BASE = "__BASE__";
+
+  // ?ansage=… (Ansage-Modus, Spec ansage-im-browser E1b) über jede Umleitung
+  // mitnehmen — sonst verstummte ein Pi beim ersten Zielwechsel.
+  function mitAnsage(href) {
+    var hier = new URLSearchParams(location.search);
+    if (!hier.has("ansage") || /[?&]ansage(=|&|$)/.test(href)) return href;
+    return href + (href.indexOf("?") >= 0 ? "&" : "?") + "ansage=" + encodeURIComponent(hier.get("ansage") || "");
+  }
   // Feldname – wird vom ersten /state-Poll gesetzt. Bewusst NICHT als
   // Platzhalter in dieses JS-Literal gebacken (nur in den HTML-Span oben,
   // dort HTML-escaped), damit kein Court-Name den String-Literal-Kontext
@@ -1105,7 +1113,7 @@
       var dest = BASE + state.redirectTo.replace(/^\//, "");
       if (location.pathname !== dest) {
         var sep = dest.indexOf("?") >= 0 ? "&" : "?";
-        location.href = dest + sep + "device=" + encodeURIComponent(DEVICE_ID);
+        location.href = mitAnsage(dest + sep + "device=" + encodeURIComponent(DEVICE_ID));
         return;
       }
     }
@@ -1704,5 +1712,611 @@
     setInterval(pollBar, 60000);
   })();
   </script>
+<script>
+/* Ansage-Modus (Spec docs/features/ansage-im-browser.md, Etappe E1b):
+   Mit ?ansage=<Halle> in der Adresse spricht diese Seite die Ansagen ihrer
+   Halle mit — derselbe Kern wie die Seite /ansage. Ohne den Parameter tut
+   dieser Block nichts. Eigener <script>-Block, damit er die Anzeige nie
+   mitreißt: Ein Fehler hier lässt die Seite unberührt. Die Kopien zwischen
+   den Markern hält scripts/test-ansage-kern.mjs wortgleich zu src/io/. */
+(function () {
+"use strict";
+var ANSAGE_BASIS = BASE;
+if (!/[?&]ansage(=|&|$)/.test(location.search)) return;
+
+/* <ansageSeite.mjs> */
+/** Abfrage-Takt der Seite. */
+const ANSAGE_TAKT_MS = 1500;
+/** Was länger als eine Minute in der Warteschlange liegt, verfällt — eine
+ *  Seite, die offline war, spricht beim Wiederkommen nichts nach. */
+const ANSAGE_VERFALL_MS = 60000;
+
+/** Die Arten, die diese Seite abspielt. Eine unbekannte (aus einer neueren
+ *  Fassung des Turnier-PCs) wird übersprungen. */
+const ANSAGE_ARTEN = [
+  "court_call", "prep_call", "officials", "start_play", "scorekeeper_call",
+  "freetext", "desktop", "court_assigned",
+];
+
+/** Hallenvergleich wie im Kern (`halle_passt`): Rand und Schreibweise zählen
+ *  nicht, ein leeres Ziel gilt allen. */
+function hallePasst(ziel, geraet) {
+  const z = String(ziel || "").trim().toLowerCase();
+  const g = String(geraet || "").trim().toLowerCase();
+  return z === "" || g === "" || z === g;
+}
+
+/** Ab zwei Hallen ist die Wahl Pflicht: „keine Halle" hieße „alle" — und
+ *  damit fremde Aufrufe in dieser Halle. */
+function halleNoetig(halls) {
+  return Array.isArray(halls) && halls.length >= 2;
+}
+
+/** Darf die Seite mit dieser Halle loslegen? Bei Pflicht nur mit einer
+ *  Halle, die es im Turnier gibt. */
+function halleGueltig(halls, gewaehlt) {
+  if (!halleNoetig(halls)) return true;
+  const g = String(gewaehlt || "").trim();
+  return g !== "" && halls.some((h) => hallePasst(h, g) && String(h).trim() !== "");
+}
+
+/**
+ * Nimmt einen Feed entgegen und sagt, was neu zu spielen ist.
+ *
+ * `stand` = `{ lastId, bestand }`. Der **erste** Feed ist Bestandsaufnahme:
+ * Was schon da war, wird nicht gesprochen — wer die Seite öffnet, will nicht
+ * die letzte Minute nachhören.
+ */
+function neueEintraege(stand, feed) {
+  const eintraege = Array.isArray(feed && feed.eintraege) ? feed.eintraege : [];
+  let lastId = stand.lastId || 0;
+  const neu = [];
+  for (const e of eintraege) {
+    if (!e || typeof e.id !== "number" || e.id <= lastId) continue;
+    if (stand.bestand && ANSAGE_ARTEN.indexOf(e.art) >= 0) neu.push(e);
+  }
+  for (const e of eintraege) {
+    if (e && typeof e.id === "number" && e.id > lastId) lastId = e.id;
+  }
+  neu.sort((a, b) => a.id - b.id);
+  return { stand: { lastId, bestand: true }, neu };
+}
+
+/** Passt ein Eintrag noch zur Belegung? Mit Spiel-Bezug nur, wenn genau
+ *  dieses Spiel auf genau diesem Feld steht. */
+function belegungPasst(e, belegung) {
+  if (e.courtId == null || e.matchId == null) return true;
+  return (belegung || []).some(
+    (b) => b.courtId === e.courtId && b.matchId === e.matchId,
+  );
+}
+
+/** Kurz vor dem Abspielen: noch frisch genug und noch richtig? Die Frist
+ *  zählt ab Empfang auf diesem Gerät — die Uhr des Geräts muss dafür nicht
+ *  zur Uhr des Turnier-PCs passen. */
+function nochAbspielbar(e, belegung, empfangenMs, jetztMs) {
+  return jetztMs - empfangenMs < ANSAGE_VERFALL_MS && belegungPasst(e, belegung);
+}
+
+/** Womit diese Seite spricht: Audio vom Turnier-PC, die eigene
+ *  Gerätestimme — oder gar nicht. */
+function stimme(hostAudio, geraeteStimme) {
+  if (hostAudio) return "host";
+  if (geraeteStimme) return "geraet";
+  return "keine";
+}
+
+/** Meldet sich die Seite als Ansage-Gerät ihrer Halle? Nur, wenn wirklich
+ *  etwas erklingen kann — sonst glaubte die Turnierleitung, ihr Aufruf
+ *  komme an. */
+function meldetPraesenz(feed, geraeteStimme, tonFrei) {
+  return !!(feed && feed.aktiv) && !!tonFrei &&
+    stimme(feed.hostAudio, geraeteStimme) !== "keine";
+}
+
+/** Text zum `grund` eines nicht aktiven Feeds. */
+function grundText(grund) {
+  switch (grund) {
+    case "schalter_aus":
+      return "Der Turnier-PC erzeugt keine Ansagen für diese Seite (Schalter „Audio für Ansage-Seiten erzeugen“ ist aus).";
+    case "slave":
+      return "Dieser Rechner ist ein Ansage-Slave — die Seite gehört an den Turnier-PC.";
+    case "renderer_weg":
+      return "Die Oberfläche von bts-light am Turnier-PC antwortet nicht — ist das Fenster geöffnet?";
+    case "turnier_pc_offline":
+      return "Der Turnier-PC ist nicht erreichbar.";
+    default:
+      return "Der Turnier-PC erzeugt gerade keine Ansagen.";
+  }
+}
+
+/** Adresse des Feeds. `base` endet mit `/`. */
+function feedAdresse(base, halle, since, hoert) {
+  return base + "ansage/feed?halle=" + encodeURIComponent(halle || "") +
+    "&since=" + (since || 0) + (hoert ? "&hoert=1" : "");
+}
+/* </ansageSeite.mjs> */
+
+/* <gongKlang.mjs> */
+/**
+ * Plant den Gong auf dem AudioContext ein und liefert den zuletzt stoppenden
+ * Oszillator samt geplantem Ende (Sekunden der Audio-Uhr) — daran hängt der
+ * Aufrufer sein Warten, damit die Sprache nicht in den Nachklang einsetzt.
+ *
+ * `match` = Spielaufruf: tiefer, zweitöniger ABSTEIGENDER Sinus-Gong
+ * (A5 → D5), wie ein Hotel-Gong. `info` = Info/Freitext: drei helle,
+ * perlende Töne (C-Dur-Dreiklang aufsteigend, Dreieck-Welle) — klar anders
+ * in Tonzahl, Klangfarbe und Bewegung.
+ *
+ * @param {AudioContext} ctx
+ * @param {"match" | "info"} kind
+ * @returns {{ letzter: OscillatorNode, endeSec: number }}
+ */
+function gongPlanen(ctx, kind) {
+  const now = ctx.currentTime;
+  if (kind === "info") {
+    const notes = [523.25, 659.25, 783.99]; // C5 – E5 – G5
+    const step = 0.15;
+    let letzter = null;
+    let endeSec = now;
+    for (let i = 0; i < notes.length; i++) {
+      const t = now + i * step;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.32, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+      g.connect(ctx.destination);
+      const o = ctx.createOscillator();
+      o.type = "triangle";
+      o.frequency.value = notes[i];
+      o.connect(g);
+      o.start(t);
+      const stopAt = t + 0.38;
+      o.stop(stopAt);
+      letzter = o;
+      endeSec = stopAt;
+    }
+    return { letzter, endeSec };
+  }
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.4, now + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+  gain.connect(ctx.destination);
+
+  const o1 = ctx.createOscillator();
+  o1.type = "sine";
+  o1.frequency.value = 880;
+  o1.connect(gain);
+  o1.start(now);
+  o1.stop(now + 0.6);
+
+  const o2 = ctx.createOscillator();
+  o2.type = "sine";
+  o2.frequency.value = 587.33;
+  o2.connect(gain);
+  o2.start(now + 0.18);
+  o2.stop(now + 1.1);
+
+  // `o2.stop` bei ~1,1 s beendet den Ton hart; die Gain-Rampe bis 1,2 s ist
+  // danach wirkungslos. 1,2 s dient nur der konservativen Fallback-Frist.
+  return { letzter: o2, endeSec: now + 1.2 };
+}
+/* </gongKlang.mjs> */
+
+/* <ansageKern.mjs> */
+/* Fristen des Audio-Wegs: Ohne sie hielte ein hängender Abruf (WLAN-Loch)
+   oder ein ausbleibendes `onended` (Kontext beim Sperren angehalten) die
+   Warteschlange für immer an — die Seite sähe verbunden aus und meldete
+   Präsenz, spräche aber nie wieder. */
+var AUDIO_LADE_FRIST_MS = 8000;
+var AUDIO_NACHLAUF_MS = 2000;
+/* Frist eines Feed-Abrufs. Ohne sie parkte der Takt auf einer toten Leitung
+   alle 1,5 s einen weiteren Abruf — auf einer Monitor-Seite blockierten die
+   bald die Verbindungen, über die die Anzeige selbst lädt
+   (Lehre Monitor-Stillstand 05./06.09.2026). */
+var ANSAGE_FEED_FRIST_MS = 5000;
+/* Kennt der Server den Feed nicht (404: Slave-Brücke, sehr alte Fassung),
+   fragt die Seite nur noch einmal je Minute nach statt im Takt. */
+var ANSAGE_FEHLT_PAUSE_MS = 60000;
+
+/**
+ * Baut den Kern einer Ansage-Seite.
+ *
+ * `opt`: `{ base, halle, halleFest, welt, beiAenderung, beiHallen }`.
+ * `base` endet mit `/`. `halleFest` = die Halle steht fest (Monitor-Modus,
+ * aus der Adresse) und wird nicht verworfen, wenn das Turnier sie nicht
+ * kennt — die Seite soll dann sagen, welche Halle fehlt. `welt` liefert
+ * `fetch`, `AudioContext`, `speechSynthesis`, Timer usw. (im Browser
+ * `window`). `beiAenderung()` meldet jeden neuen Stand an die Anzeige,
+ * `beiHallen(halls)` eine geänderte Hallenliste.
+ */
+function ansageKern(opt) {
+  var w = opt.welt;
+  var base = opt.base;
+  var halleFest = !!opt.halleFest;
+  var melden = opt.beiAenderung || function () {};
+  var hallenMelden = opt.beiHallen || function () {};
+  var jetzt = function () { return w.Date.now(); };
+
+  var z = {
+    halle: String(opt.halle || ""),
+    halls: [],
+    hallenGesehen: false,
+    feed: null,
+    stand: { lastId: 0, bestand: false },
+    verbunden: false,
+    // Der Server kennt den Feed nicht (404) — seit wann.
+    fehltSeit: 0,
+    // Gescheiterte Abrufe in Folge — ein einzelner Aussetzer ist kein
+    // Grund für einen Hinweis am TV.
+    fehlversuche: 0,
+    abrufLaeuft: false,
+    warteschlange: [],
+    spielt: false,
+    ctx: null,
+    tonFrei: false,
+    // Zuletzt gespielte Ansage: `{ ms, text }`.
+    letzte: null,
+  };
+
+  /* ── Stimme des Geräts ─────────────────────────────────────────── */
+  function geraeteStimmen(lang) {
+    try {
+      if (!w.speechSynthesis) return [];
+      var praefix = lang === "en" ? "en" : "de";
+      return w.speechSynthesis.getVoices().filter(function (v) {
+        return String(v.lang || "").toLowerCase().indexOf(praefix) === 0;
+      });
+    } catch (e) { return []; }
+  }
+  function hatGeraeteStimme() { return geraeteStimmen("de").length > 0; }
+
+  /* ── Ton ───────────────────────────────────────────────────────── */
+  function audioKontext() {
+    if (!z.ctx) {
+      var AC = w.AudioContext || w.webkitAudioContext;
+      if (!AC) return null;
+      try { z.ctx = new AC(); } catch (e) { return null; }
+    }
+    return z.ctx;
+  }
+  function tonPruefen() {
+    var ctx = audioKontext();
+    z.tonFrei = !!ctx && ctx.state === "running";
+    return z.tonFrei;
+  }
+  function freischalten() {
+    var ctx = audioKontext();
+    if (ctx && ctx.state !== "running") {
+      try { ctx.resume().then(melden, melden); } catch (e) { /* egal */ }
+    }
+    // Manche Browser geben die Sprachausgabe erst nach einer Äußerung in
+    // einer Nutzergeste frei — eine leere tut es.
+    try {
+      if (w.speechSynthesis && w.SpeechSynthesisUtterance) {
+        var u = new w.SpeechSynthesisUtterance(" ");
+        u.volume = 0;
+        w.speechSynthesis.speak(u);
+      }
+    } catch (e) { /* egal */ }
+  }
+
+  function gongSpielen(art) {
+    var ctx = audioKontext();
+    if (!ctx || ctx.state !== "running") return Promise.resolve();
+    return new Promise(function (fertig) {
+      var erledigt = false;
+      var ende = function () {
+        if (erledigt) return;
+        erledigt = true;
+        w.setTimeout(fertig, 150);
+      };
+      try {
+        var g = gongPlanen(ctx, art);
+        g.letzter.onended = ende;
+        w.setTimeout(ende, Math.max(0, (g.endeSec - ctx.currentTime) * 1000) + 250);
+      } catch (e) { ende(); }
+    });
+  }
+
+  function audioSpielen(e) {
+    var ctx = audioKontext();
+    if (!ctx || !e.audio) return Promise.reject(new Error("kein Audio"));
+    var abbruch = w.AbortController ? new w.AbortController() : null;
+    var ladeFrist = null;
+    var geladen = new Promise(function (ok, fehler) {
+      ladeFrist = w.setTimeout(function () {
+        if (abbruch) abbruch.abort();
+        fehler(new Error("Audio-Frist"));
+      }, AUDIO_LADE_FRIST_MS);
+      w.fetch(base + "ansage/audio/" + e.id, { cache: "no-store", signal: abbruch ? abbruch.signal : undefined })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.arrayBuffer();
+        })
+        .then(function (buf) {
+          return new Promise(function (dok, dfehler) { ctx.decodeAudioData(buf, dok, dfehler); });
+        })
+        .then(ok, fehler);
+    });
+    return geladen.then(function (puffer) {
+      w.clearTimeout(ladeFrist);
+      return new Promise(function (fertig) {
+        var erledigt = false;
+        var ende = function () { if (!erledigt) { erledigt = true; fertig(); } };
+        var quelle = ctx.createBufferSource();
+        quelle.buffer = puffer;
+        quelle.connect(ctx.destination);
+        quelle.onended = ende;
+        w.setTimeout(ende, puffer.duration * 1000 + AUDIO_NACHLAUF_MS);
+        quelle.start();
+      });
+    }, function (err) {
+      w.clearTimeout(ladeFrist);
+      throw err;
+    });
+  }
+
+  function segmenteSprechen(e) {
+    if (!w.speechSynthesis || !w.SpeechSynthesisUtterance) return Promise.resolve();
+    var stimmen = geraeteStimmen(e.lang);
+    var kette = Promise.resolve();
+    (e.segmente || []).forEach(function (text) {
+      kette = kette.then(function () {
+        return new Promise(function (fertig) {
+          var t = String(text || "").trim();
+          if (!t) { fertig(); return; }
+          var u = new w.SpeechSynthesisUtterance(t);
+          u.lang = e.lang === "en" ? "en-US" : "de-DE";
+          u.rate = e.rate || 0.8;
+          if (stimmen.length) u.voice = stimmen[0];
+          var fertigGemeldet = false;
+          var ende = function () { if (!fertigGemeldet) { fertigGemeldet = true; fertig(); } };
+          u.onend = ende;
+          u.onerror = ende;
+          w.setTimeout(ende, 2000 + t.length * 140);
+          w.speechSynthesis.speak(u);
+        });
+      });
+    });
+    return kette;
+  }
+
+  /* ── Warteschlange: strikt nacheinander, nichts überlappt ──────── */
+  function naechste() {
+    if (z.spielt) return;
+    var stueck = z.warteschlange.shift();
+    if (!stueck) return;
+    var belegung = (z.feed && z.feed.belegung) || [];
+    if (!nochAbspielbar(stueck.e, belegung, stueck.empfangen, jetzt())) {
+      naechste();
+      return;
+    }
+    z.spielt = true;
+    var e = stueck.e;
+    (e.gong ? gongSpielen(e.gong) : Promise.resolve())
+      .then(function () {
+        return audioSpielen(e).catch(function () { return segmenteSprechen(e); });
+      })
+      .catch(function () { /* weiter mit der nächsten */ })
+      .then(function () {
+        z.spielt = false;
+        z.letzte = { ms: jetzt(), text: String((e.segmente || []).join(" ")).slice(0, 140) };
+        melden();
+        naechste();
+      });
+  }
+
+  /* Die Halle, mit der die Seite fragt. Eine leere Liste heißt entweder „nur
+     eine Halle" oder „noch kein BTP-Stand" (Turnier-PC startet gerade neu).
+     Hat die Seite schon Hallen gesehen, ist es Letzteres: Dann bleibt sie bei
+     ihrer Halle — sonst stünde ein Pi nach jedem Neustart des PCs stumm da
+     oder hörte kurz fremde Hallen. Nur ohne je gesehene Hallen (Turnier mit
+     einer Halle) fragt sie ohne. */
+  function wirksameHalle() {
+    return z.halls.length || z.hallenGesehen ? z.halle : "";
+  }
+
+  /* Darf die Seite mit ihrer Halle spielen und sich melden? Eine fest
+     vorgegebene Halle muss es im Turnier geben, sobald es Hallen gibt. */
+  function halleOk() {
+    if (!halleGueltig(z.halls, z.halle)) return false;
+    if (!halleFest || !z.halls.length || String(z.halle).trim() === "") return true;
+    return z.halls.some(function (h) { return hallePasst(h, z.halle) && String(h).trim() !== ""; });
+  }
+
+  /* Neue Hallenliste übernehmen. Gemerkte oder per Link vorgegebene Halle
+     nur übernehmen, wenn es sie gibt; eine leere Liste ändert an der Wahl
+     nichts. */
+  function hallenUebernehmen(halls) {
+    if (JSON.stringify(halls) === JSON.stringify(z.halls)) return;
+    z.halls = halls;
+    if (halls.length) {
+      z.hallenGesehen = true;
+      var passend = halls.filter(function (h) { return hallePasst(h, z.halle) && z.halle !== ""; })[0];
+      z.halle = passend || (halleFest ? z.halle : "");
+    }
+    hallenMelden(halls);
+  }
+
+  function halleWaehlen(halle) {
+    var vorher = z.halle;
+    z.halle = String(halle || "");
+    // Neue Halle: Was schon in der Schlange liegt, gehört zur alten.
+    if (vorher !== z.halle) z.warteschlange = [];
+    melden();
+  }
+
+  /* ── Abfrage ───────────────────────────────────────────────────── */
+  function abfragen() {
+    if (z.abrufLaeuft) return;
+    if (z.fehltSeit && jetzt() - z.fehltSeit < ANSAGE_FEHLT_PAUSE_MS) return;
+    var hoert = meldetPraesenz(z.feed, hatGeraeteStimme(), tonPruefen()) && halleOk();
+    var abbruch = w.AbortController ? new w.AbortController() : null;
+    var abruf;
+    // Ein synchroner Wurf darf die Sperre nie setzen, ohne sie zu lösen —
+    // sonst fragte die Seite nie wieder (Review E1b).
+    try {
+      abruf = w.fetch(feedAdresse(base, wirksameHalle(), z.stand.lastId, hoert),
+        { cache: "no-store", signal: abbruch ? abbruch.signal : undefined });
+    } catch (e) {
+      abruf = Promise.reject(e);
+    }
+    var frist = w.setTimeout(function () { if (abbruch) abbruch.abort(); }, ANSAGE_FEED_FRIST_MS);
+    z.abrufLaeuft = true;
+    abruf
+      .then(function (r) {
+        if (r.status === 404) {
+          z.fehltSeit = jetzt();
+          throw new Error("kein Feed");
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (feed) {
+        z.verbunden = true;
+        z.fehltSeit = 0;
+        z.fehlversuche = 0;
+        z.feed = feed;
+        hallenUebernehmen(feed.halls || []);
+        var r = neueEintraege(z.stand, feed);
+        z.stand = r.stand;
+        // Nur abspielen, wenn diese Seite wirklich bereit ist — sonst liefen
+        // Aufrufe einer fremden Halle oder ohne Ton in die Schlange.
+        if (z.tonFrei && halleOk()) {
+          var empfangen = jetzt();
+          r.neu.forEach(function (e) { z.warteschlange.push({ e: e, empfangen: empfangen }); });
+          naechste();
+        }
+      })
+      .catch(function () { z.verbunden = false; z.fehlversuche += 1; })
+      .then(function () {
+        w.clearTimeout(frist);
+        z.abrufLaeuft = false;
+        melden();
+      });
+  }
+
+  function starten() {
+    // Läuft der Ton schon (Pi mit Autoplay-Freigabe, Kiosk-App), ist die
+    // Seite ohne Tippen bereit.
+    audioKontext();
+    melden();
+    abfragen();
+    w.setInterval(abfragen, ANSAGE_TAKT_MS);
+  }
+
+  return {
+    zustand: z,
+    starten: starten,
+    abfragen: abfragen,
+    freischalten: freischalten,
+    halleWaehlen: halleWaehlen,
+    halleOk: halleOk,
+    tonPruefen: tonPruefen,
+    hatGeraeteStimme: hatGeraeteStimme,
+    stimmeArt: function () { return stimme(z.feed && z.feed.hostAudio, hatGeraeteStimme()); },
+  };
+}
+
+/* ── Ansage-Modus der Monitor-Seiten (E1b) ───────────────────────────── */
+
+/** Liest den Modus aus der Adresse: `?ansage=<Halle>` schaltet ihn ein,
+ *  auch mit leerem Wert (Turnier mit einer Halle). */
+function ansageModusAusQuery(search) {
+  var such;
+  try { such = new URLSearchParams(search || ""); } catch (e) { return null; }
+  if (!such.has("ansage")) return null;
+  return { halle: String(such.get("ansage") || "").trim() };
+}
+
+/** Den Ansage-Feed gibt es in E1b nur am Turnier-PC im Hallennetz (Basis
+ *  `/`); über das Relay (`/bts-relay/<ns>/`) kommt er erst mit E4. */
+function ansageImLan(base) {
+  return base === "/";
+}
+
+/**
+ * Was der Monitor im Ansage-Modus als kleinen Hinweis zeigt — leer, wenn
+ * alles läuft (dann bleibt die Anzeige unverändert). `lage`: `{ lan, fehlt,
+ * verbunden, feed, tonFrei, halleOk, halle, stimme }`.
+ */
+function monitorHinweis(lage) {
+  if (!lage.lan) return "Ansage: nur im Hallennetz (LAN) am Turnier-PC — über die Cloud noch nicht.";
+  if (lage.fehlt) return "Ansage: Der Turnier-PC bietet hier keine Ansagen an (bts-light zu alt oder Slave-Brücke).";
+  if (!lage.verbunden || !lage.feed) return "Ansage: keine Verbindung zum Turnier-PC.";
+  if (!lage.feed.aktiv) return "Ansage: " + grundText(lage.feed.grund);
+  if (!lage.halleOk) {
+    return lage.halle
+      ? "Ansage: Die Halle „" + lage.halle + "“ gibt es in diesem Turnier nicht."
+      : "Ansage: Bitte die Halle angeben (?ansage=<Halle>).";
+  }
+  if (!lage.tonFrei) return "Ansage: Ton gesperrt — der Browser braucht die Autoplay-Freigabe (Pi-Einrichtung aktualisieren).";
+  if (lage.stimme === "keine") return "Ansage: Dieses Gerät kann nicht sprechen (kein Audio vom Turnier-PC, keine Gerätestimme).";
+  return "";
+}
+
+/**
+ * Startet den Ansage-Modus einer Monitor-Seite, wenn die Adresse ihn
+ * verlangt. Die Anzeige selbst bleibt unberührt; nur bei einem Problem
+ * erscheint unten links ein kleiner Hinweis. Ohne freigegebenen Ton meldet
+ * sich die Seite nicht als Ansage-Gerät (das regelt der Kern).
+ */
+function ansageMonitorStarten(base, welt, dokument) {
+  var modus = ansageModusAusQuery(welt.location && welt.location.search);
+  if (!modus) return null;
+  var hinweis = dokument.createElement("div");
+  hinweis.id = "ansage-hinweis";
+  hinweis.setAttribute("role", "status");
+  hinweis.style.cssText = "position:fixed;left:.6vmin;bottom:.6vmin;z-index:2147483000;" +
+    "max-width:60vw;padding:.4vmin .9vmin;border-radius:.6vmin;font:1.6vmin/1.3 system-ui,sans-serif;" +
+    "background:rgba(15,23,42,.82);color:#fbbf24;pointer-events:none;display:none";
+  dokument.body.appendChild(hinweis);
+  function zeigen(text) {
+    hinweis.textContent = text;
+    hinweis.style.display = text ? "block" : "none";
+  }
+  if (!ansageImLan(base)) {
+    // Kein Abruf, keine Fehlerschleife: Im Cloud-Pfad gibt es den Feed noch nicht.
+    zeigen(monitorHinweis({ lan: false }));
+    return null;
+  }
+  var kern = ansageKern({
+    base: base,
+    halle: modus.halle,
+    halleFest: true,
+    welt: welt,
+    beiAenderung: function () {
+      var z = kern ? kern.zustand : null;
+      if (!z) return;
+      zeigen(monitorHinweis({
+        lan: true,
+        fehlt: !!z.fehltSeit,
+        // Erst nach drei Fehlschlägen in Folge (≈ 5 s) — ein WLAN-Wackler
+        // soll nicht jedes Mal einen Hinweis in die Halle blitzen lassen.
+        verbunden: z.verbunden || (!!z.feed && z.fehlversuche < 3),
+        feed: z.feed,
+        tonFrei: kern.tonPruefen(),
+        halleOk: kern.halleOk(),
+        halle: z.halle,
+        stimme: kern.stimmeArt(),
+      }));
+    },
+  });
+  // Kein Freischalt-Knopf am TV — aber eine zufällige Geste (Maus, Taste)
+  // gibt den Ton frei, falls die Autoplay-Freigabe fehlt.
+  ["pointerdown", "keydown"].forEach(function (art) {
+    dokument.addEventListener(art, kern.freischalten, { passive: true });
+  });
+  kern.starten();
+  return kern;
+}
+/* </ansageKern.mjs> */
+
+ansageMonitorStarten(ANSAGE_BASIS, window, document);
+})();
+</script>
 </body>
 </html>

@@ -56,6 +56,14 @@ ok(
   true,
 );
 
+// Ansage-Modus (Spec ansage-im-browser, E1b): navigateWithRotate reicht
+// `ansage` weiter, das Ziel trägt es nie — sonst Endlos-Umleitung.
+ok(
+  "ansage zählt nicht als Unterschied (E1b)",
+  urlPasst(`${O}/combo?courts=1,2,3&device=abc&ansage=Halle%20A`, "/combo?courts=1,2,3", O),
+  true,
+);
+
 ok(
   "alle drei zusammen",
   urlPasst(

@@ -217,6 +217,14 @@
   // "/<namespace>/") für die State-Abfrage und den Monitor-Kanal.
   var MODE = "__MODE__";
   var BASE = "__BASE__";
+
+  // ?ansage=… (Ansage-Modus, Spec ansage-im-browser E1b) über jede Umleitung
+  // mitnehmen — sonst verstummte ein Pi beim ersten Zielwechsel.
+  function mitAnsage(href) {
+    var hier = new URLSearchParams(location.search);
+    if (!hier.has("ansage") || /[?&]ansage(=|&|$)/.test(href)) return href;
+    return href + (href.indexOf("?") >= 0 ? "&" : "?") + "ansage=" + encodeURIComponent(hier.get("ansage") || "");
+  }
   // Feldname – wird vom ersten /state-Poll gesetzt. Bewusst NICHT als
   // Platzhalter in dieses JS-Literal gebacken (nur in den HTML-Span oben,
   // dort HTML-escaped), damit kein Court-Name den String-Literal-Kontext
@@ -632,7 +640,7 @@
       var dest = BASE + state.redirectTo.replace(/^\//, "");
       if (location.pathname !== dest) {
         var sep = dest.indexOf("?") >= 0 ? "&" : "?";
-        location.href = dest + sep + "device=" + encodeURIComponent(DEVICE_ID);
+        location.href = mitAnsage(dest + sep + "device=" + encodeURIComponent(DEVICE_ID));
         return;
       }
     }
@@ -645,7 +653,7 @@
       if (++noRedirectPolls >= DEASSIGN_AFTER) {
         mlog("info", "deassign_to_monitor", { polls: noRedirectPolls });
         uploadMonitorLog();
-        location.href = BASE + "monitor?device=" + encodeURIComponent(DEVICE_ID);
+        location.href = mitAnsage(BASE + "monitor?device=" + encodeURIComponent(DEVICE_ID));
       }
       return;
     }

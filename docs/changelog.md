@@ -18,6 +18,22 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Version ändert den automatischen Aufruf am PC — zurück geht es nur über die
   Vorgängerversion; bitte vor dem ersten Turnier einmal testen.
 
+## v0.9.313
+
+- **Ansage am TV (Etappe 1b).** Einzelfeld-Anzeige, Feld-Übersicht und
+  Kombi-Anzeige sprechen mit `?ansage=<Halle>` an der Adresse die Ansagen
+  ihrer Halle mit — dieselben wie die Seite `/ansage`, die Anzeige bleibt
+  unverändert. Der Pi startet Chromium dafür mit Autoplay-Freigabe; ohne sie
+  zeigt der TV unten links einen kleinen Hinweis und meldet sich nicht als
+  Ansage-Gerät. **Bestehende Pis bekommen die Freigabe erst, wenn
+  `setup-monitor.sh` neu läuft oder ein neues Master-Image aufgespielt wird.**
+  Der Parameter wandert bei jeder Umstellung im Tool mit. Nur im Hallennetz;
+  über die Cloud bleibt der Modus vorerst still.
+- **Ansage-Seite robuster.** Die Abfrage hat jetzt eine Frist von 5 s und
+  läuft nie doppelt; kennt der Server den Feed nicht, fragt die Seite nur
+  noch einmal je Minute. Die Abspiel-Logik steckt in einem gemeinsamen
+  Modul für `/ansage` und die Monitor-Seiten.
+
 ## v0.9.312
 
 - **Ansage: Klasse klar abgesetzt.** Aus „Herreneinzel A" wurde beim

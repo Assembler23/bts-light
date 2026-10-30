@@ -91,7 +91,9 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 | Seite | Gerät | Was drauf ist |
 |---|---|---|
 | **Ansage-Seite** `/ansage` | Tablet, Handy, Pi mit Lautsprecher | Spricht die Ansagen einer Halle, die der Turnier-PC fertig vertont. Halle wählen, einmal **Ton freischalten** — fertig. Nur, wenn am PC „Audio für Ansage-Seiten erzeugen" an ist. Siehe [Ansage-Seite im Browser](announcements.md#ansage-seite-im-browser-seit-v09311). |
+| **Ansage am TV** `…?ansage=<Halle>` | Pi am Fernseher | Kein eigenes Ziel, sondern ein Zusatz an der Adresse von Einzelfeld, Feld-Übersicht oder Kombi: Der TV zeigt wie immer und spricht zusätzlich die Ansagen seiner Halle — ohne Knopf. Siehe [Ansage-Modus](court-monitor.md#ansage-modus-der-tv-spricht-mit-seit-v09313). |
 <!-- pruef: "/ansage" in src-tauri/src/tablet/server.rs -->
+<!-- pruef: "ansageModusAusQuery(welt.location && welt.location.search)" in src/io/ansageKern.mjs -->
 
 ## Wie ein Gerät zu seiner Anzeige kommt
 
