@@ -97,6 +97,16 @@ oder Auslosungsnamen („Gruppe 3", „Hauptrunde") werden nie angesagt**
 (Nutzer-Vorgabe vom Turnier 17.07.2026). Ohne erkennbares Kürzel bleibt die
 Ansage wie bisher („Herreneinzel").
 
+**Abgesetzt gesprochen** (seit v0.9.312): Mit nur einem Leerzeichen zogen
+die Stimmen das Kürzel ans Wort — es klang wie „Herreneinzela". Gesprochen
+wird deshalb „Herreneinzel, A": Die Gerätestimme bekommt ein Komma (ein
+Bindestrich wird oft mitgezogen), Azure eine echte Pause von 250 ms, und ein
+reines Buchstaben-Kürzel (1–2 Buchstaben) wird per `say-as characters`
+buchstabiert — sonst liest eine englische Stimme „A" als Artikel. „U15" oder
+„B2" bleiben unverändert. Die Anzeige (Vorbereitungsliste) zeigt weiter
+„Herreneinzel A". Code: `src/io/klasseSprechen.mjs`, getestet von
+`scripts/test-klasse-sprechen.mjs`.
+
 **Englische Kürzel** (seit v0.9.307): MS/WS/WD/XD/MIX zählen ebenfalls
 als Disziplin-Wörter (MD war es schon) — aus „MS A" ging sonst die Klasse
 „A" verloren. **GD** bleibt Mixed (Gemischtes Doppel), auch in einem

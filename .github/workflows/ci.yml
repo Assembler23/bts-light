@@ -115,6 +115,11 @@ jobs:
       - name: Disziplin-Namen Jugend (JS)
         run: node scripts/test-disziplin-name.mjs
 
+      # Die Klasse wird abgesetzt gesprochen („Herreneinzel, A"), sonst
+      # klebt sie am Wort („Herreneinzela").
+      - name: Klasse abgesetzt sprechen (JS)
+        run: node scripts/test-klasse-sprechen.mjs
+
       # Doppel-Gruppierung der Check-In-Liste: gleiche entry_id (genau zwei
       # Träger) wird eine Zeile; entry_id 0 (altes badhub) klumpt nie.
       - name: Check-In-Doppel (JS)
