@@ -50,11 +50,19 @@ pub fn player_key(p: &BtpPlayer) -> String {
 
 /// Reihenfolge, in der Spiele auf Felder kommen — **ohne** manuellen Präfix:
 /// manuell in die Vorbereitung gerufene zuerst, dann der BTP-Zeitplan von
-/// oben nach unten, **dann die Ansetzungsreihenfolge des Turnierplans**,
-/// zuletzt Spielnummer und ID. Spiele ohne Ansetzung landen am Ende ihrer
-/// Gruppe.
+/// oben nach unten, **dann BTPs Reihenfolge im Zeitfenster (`DisplayOrder`)**,
+/// dann die Auslosung, zuletzt Spielnummer und ID. Spiele ohne Ansetzung
+/// landen am Ende ihrer Gruppe.
 ///
-/// Die Ansetzungsreihenfolge (Auslosung, `DrawID`) muss vor die Spielnummer:
+/// `DisplayOrder` (in der TP-Datei `PlayerMatch.matchorder`) ist die
+/// Reihenfolge, die BTP in der Ansicht „Spiele – Angesetzt" innerhalb eines
+/// Zeitfensters zeigt (gemessen 30.10.2026). Ein Spiel ohne Wert (BTP: 0)
+/// steht dort **vor** den geordneten — deshalb zählt `None` als 0. Bis
+/// 09.08.2026 sortierte es hier hinter alle anderen, und weil die meisten
+/// Spiele keinen Wert tragen, rutschte das erste Spiel des Tages nach hinten;
+/// damals flog das Feld ganz heraus.
+///
+/// Die Auslosung (`DrawID`) muss vor die Spielnummer:
 /// In BTP tragen alle Spiele eines Zeitfensters dieselbe Zeit — ein ganzer
 /// Vormittag steht auf 9:00 —, und was darin zuerst drankommt, sagt allein
 /// dieses Feld. Ohne es entschied die Spielnummer, und die läuft quer: Aus
@@ -70,8 +78,15 @@ pub fn player_key(p: &BtpPlayer) -> String {
 /// BTP-Mess-Sonden (`tests/btp_location_probe.rs`,
 /// `tests/btp_displayorder_probe.rs`), die bewusst die reine BTP-Reihenfolge
 /// ohne jede lokale Überschreibung zeigen sollen.
-pub fn sort_key(m: &BtpMatch, called: bool) -> (bool, i64, i64, i64, i64) {
-    sort_key_parts(called, m.planned_time, Some(m.draw_id), m.match_num, m.id)
+pub fn sort_key(m: &BtpMatch, called: bool) -> (bool, i64, i64, i64, i64, i64) {
+    sort_key_parts(
+        called,
+        m.planned_time,
+        m.display_order,
+        Some(m.draw_id),
+        m.match_num,
+        m.id,
+    )
 }
 
 /// Wie [`sort_key`], aber aus Einzelwerten — für Aufrufer, die kein
@@ -80,13 +95,16 @@ pub fn sort_key(m: &BtpMatch, called: bool) -> (bool, i64, i64, i64, i64) {
 pub fn sort_key_parts(
     called: bool,
     planned_time: Option<i64>,
+    display_order: Option<i64>,
     draw_id: Option<i64>,
     match_num: Option<i64>,
     id: i64,
-) -> (bool, i64, i64, i64, i64) {
+) -> (bool, i64, i64, i64, i64, i64) {
     (
         !called,
         planned_time.unwrap_or(i64::MAX),
+        // Ohne Wert steht das Spiel in BTP vor den geordneten (siehe oben).
+        display_order.unwrap_or(0),
         draw_id.unwrap_or(i64::MAX),
         match_num.unwrap_or(i64::MAX),
         id,
@@ -95,8 +113,8 @@ pub fn sort_key_parts(
 
 /// Rückgabetyp von [`sort_key_with_manual_order`]/[`resolve_and_sort_key`] —
 /// benannt, damit ihn Aufrufer (an allen fünf Sortier-Stellen) nicht als
-/// unbenanntes Sechs-Tupel wiederholen müssen.
-pub type ManualOrderSortKey = (bool, usize, i64, i64, i64, i64);
+/// unbenanntes Sieben-Tupel wiederholen müssen.
+pub type ManualOrderSortKey = (bool, usize, i64, i64, i64, i64, i64);
 
 /// Wie [`sort_key_parts`], aber mit einem zusätzlichen, davorgeschalteten
 /// Sortierschlüssel: dem Rang im **manuellen Präfix** seiner Halle (Spec
@@ -115,6 +133,7 @@ pub fn sort_key_with_manual_order(
     called: bool,
     manual_rank: Option<usize>,
     planned_time: Option<i64>,
+    display_order: Option<i64>,
     draw_id: Option<i64>,
     match_num: Option<i64>,
     id: i64,
@@ -122,12 +141,13 @@ pub fn sort_key_with_manual_order(
     // Baut auf `sort_key_parts` auf (nicht nur begrifflich, auch im Code) —
     // der Präfix-Rang schiebt sich als zweite Komponente davor, der Rest
     // bleibt exakt die Basis-Definition.
-    let (not_called, planned_time, draw_id, match_num, id) =
-        sort_key_parts(called, planned_time, draw_id, match_num, id);
+    let (not_called, planned_time, display_order, draw_id, match_num, id) =
+        sort_key_parts(called, planned_time, display_order, draw_id, match_num, id);
     (
         not_called,
         manual_rank.unwrap_or(usize::MAX),
         planned_time,
+        display_order,
         draw_id,
         match_num,
         id,
@@ -164,6 +184,7 @@ pub fn resolve_and_sort_key(
         called,
         rank,
         m.planned_time,
+        m.display_order,
         Some(m.draw_id),
         m.match_num,
         m.id,
@@ -1533,10 +1554,9 @@ mod tests {
         // Spielnummer — genau so steht es in der aus BTP exportierten Liste:
         // „Gruppe 3 Nr 2, Gruppe 3 Nr 6, Gruppe 4 Nr 2, …".
         //
-        // Bis 09.08.2026 stand hier die `DisplayOrder` des Matches. Die haben
-        // aber nur wenige Spiele (im gemessenen Turnier rund jedes zehnte),
-        // und die ohne landeten hinter allen anderen — das erste Spiel des
-        // Tages stand plötzlich an fünfter Stelle.
+        // Ohne `DisplayOrder` (hier: keines der Spiele trägt einen Wert)
+        // entscheidet die Auslosung; mit Wert sticht er sie, siehe
+        // `im_zeitfenster_entscheidet_btps_displayorder_vor_der_auslosung`.
         let plan = |id, nr, draw| {
             let mut m = a_match(id);
             m.planned_time = Some(202_702_050_900); // alle 9:00
@@ -1559,6 +1579,36 @@ mod tests {
         assert_eq!(list[0], sort_key(&erst, false), "1241 zuerst (Ansetzung 1)");
         assert_eq!(list[1], sort_key(&dann, false), "dann 1236 — trotz Nr 6");
         assert_eq!(list[2], sort_key(&drittens, false));
+    }
+
+    #[test]
+    fn im_zeitfenster_entscheidet_btps_displayorder_vor_der_auslosung() {
+        // Gemessen 30.10.2026 am „Liveticker Test Turnier" gegen die
+        // BTP-Ansicht „Spiele – Angesetzt": Um 10:20 stehen dort XD #13/#14/
+        // #15 (DisplayOrder 1/2/3) VOR HE-A Gruppe E (DisplayOrder 13/14),
+        // obwohl Gruppe E die kleinere DrawID hat. `DisplayOrder` ist die
+        // Reihenfolge, die der Turnierleiter in BTP im Zeitfenster festlegt.
+        let plan = |id, draw, nr, order| {
+            let mut m = a_match(id);
+            m.planned_time = Some(202_701_231_020); // alle 10:20
+            m.draw_id = draw;
+            m.match_num = Some(nr);
+            m.display_order = order;
+            m
+        };
+        let gruppe_e_nr2 = plan(115, 5, 2, Some(13));
+        let gruppe_e_nr1 = plan(118, 5, 1, Some(14));
+        let xd_13 = plan(219, 8, 13, Some(1));
+        let xd_14 = plan(220, 8, 14, Some(2));
+        // Ohne DisplayOrder (BTP liefert 0, das Modell macht `None` daraus)
+        // steht ein Spiel in BTP VOR allen geordneten seines Zeitfensters —
+        // nicht dahinter. Genau das war der Fehler bis 09.08.2026.
+        let ohne = plan(300, 9, 1, None);
+
+        let mut list = [&gruppe_e_nr1, &xd_14, &gruppe_e_nr2, &ohne, &xd_13];
+        list.sort_by_key(|m| sort_key(m, false));
+        let ids: Vec<i64> = list.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![300, 219, 220, 115, 118]);
     }
 
     #[test]
@@ -1612,9 +1662,9 @@ mod tests {
     fn manual_order_ein_gerufenes_match_schlaegt_jeden_praefix_eintrag() {
         // Blocker 1 der Klärung: der Präfix wirkt nur INNERHALB der noch
         // nicht gerufenen Spiele — ein Aufruf sticht immer.
-        let called = sort_key_with_manual_order(true, None, Some(2), Some(2), Some(2), 2);
+        let called = sort_key_with_manual_order(true, None, Some(2), None, Some(2), Some(2), 2);
         let praefix_erster =
-            sort_key_with_manual_order(false, Some(0), Some(1), Some(1), Some(1), 1);
+            sort_key_with_manual_order(false, Some(0), Some(1), None, Some(1), Some(1), 1);
         assert!(called < praefix_erster, "gerufen schlägt Präfix-Rang 0");
     }
 
@@ -1622,16 +1672,17 @@ mod tests {
     fn manual_order_praefix_schlaegt_den_btp_zeitplan() {
         // Ein spät angesetztes Match mit Präfix-Rang 0 steht trotzdem vor
         // einem früh angesetzten Match ohne Präfix-Eintrag.
-        let vorgezogen = sort_key_with_manual_order(false, Some(0), Some(999), Some(1), Some(1), 9);
+        let vorgezogen =
+            sort_key_with_manual_order(false, Some(0), Some(999), None, Some(1), Some(1), 9);
         let frueh_ohne_praefix =
-            sort_key_with_manual_order(false, None, Some(1), Some(1), Some(1), 1);
+            sort_key_with_manual_order(false, None, Some(1), None, Some(1), Some(1), 1);
         assert!(vorgezogen < frueh_ohne_praefix);
     }
 
     #[test]
     fn manual_order_ohne_praefix_eintrag_bleibt_die_btp_reihenfolge_massgeblich() {
-        let frueh = sort_key_with_manual_order(false, None, Some(1), Some(1), Some(1), 1);
-        let spaet = sort_key_with_manual_order(false, None, Some(2), Some(1), Some(1), 2);
+        let frueh = sort_key_with_manual_order(false, None, Some(1), None, Some(1), Some(1), 1);
+        let spaet = sort_key_with_manual_order(false, None, Some(2), None, Some(1), Some(1), 2);
         assert!(frueh < spaet);
     }
 
@@ -1640,10 +1691,10 @@ mod tests {
         // Rückwärtskompatibilität: ohne jeden Präfix-Eintrag ist die
         // Reihenfolge identisch zu `sort_key_parts` — nur mit einem
         // zusätzlichen, für alle gleichen Rang-Feld in der Mitte.
-        let a = sort_key_parts(false, Some(1), Some(3), Some(2), 10);
-        let b = sort_key_parts(false, Some(1), Some(3), Some(4), 11);
-        let ma = sort_key_with_manual_order(false, None, Some(1), Some(3), Some(2), 10);
-        let mb = sort_key_with_manual_order(false, None, Some(1), Some(3), Some(4), 11);
+        let a = sort_key_parts(false, Some(1), None, Some(3), Some(2), 10);
+        let b = sort_key_parts(false, Some(1), None, Some(3), Some(4), 11);
+        let ma = sort_key_with_manual_order(false, None, Some(1), None, Some(3), Some(2), 10);
+        let mb = sort_key_with_manual_order(false, None, Some(1), None, Some(3), Some(4), 11);
         assert_eq!(a < b, ma < mb);
     }
 

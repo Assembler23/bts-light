@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.317
+
+- **Spielliste in derselben Reihenfolge wie BTP.** Innerhalb eines
+  Zeitfensters folgen Warteliste, automatische Feldvergabe, Vorbereitung
+  und Liveticker jetzt der Reihenfolge, die BTP unter „Spiele – Angesetzt"
+  zeigt. Bisher entschied dort die Auslosung, sodass zum Beispiel eine
+  Gruppe vor den Mixed-Spielen stand, die in BTP vorher dran waren. Eine
+  manuell umsortierte Liste im TL-Web bleibt unverändert vorn.
+
 ## v0.9.316
 
 - **Ansage-Seite hochkant: große Ansage füllt den Bildschirm.** Auf Handys

@@ -373,6 +373,30 @@ gesetzt", wie bei `LocationID`) in
 
 ### Die Reihenfolge der angesetzten Spiele
 
+**Seit 30.10.2026 (v0.9.317): `PlannedTime → DisplayOrder → DrawID →
+MatchNr → ID`.** Gemessen am „Liveticker Test Turnier" gegen die
+BTP-Ansicht **„Spiele – Angesetzt"** und gegen die TP-Datei:
+
+- `DisplayOrder` im Protokoll ist `PlayerMatch.matchorder` in der Datei.
+  Es ist die Reihenfolge **innerhalb eines Zeitfensters**, die BTP in der
+  Liste zeigt. Jedes Zeitfenster zählt neu ab 1 (10:20: XD #13/#14/#15 =
+  1/2/3, HE-A Gruppe E = 13/14). Die BTP-Liste folgt dem in allen
+  Zeitfenstern des Testturniers Position für Position.
+- **Ohne Wert (0) steht ein Spiel in BTP vor den geordneten seines
+  Zeitfensters, nicht dahinter.** Das Modell macht aus 0 `None`, der
+  Sortierschlüssel wieder 0.
+- Bei gleichem `DisplayOrder` (praktisch: alle 0) entscheiden wie bisher
+  Auslosung und Spielnummer. Wie BTP selbst unter lauter Nullen ordnet, ist
+  nur für gerufene Spiele gesehen (dort nach Feld). Für die Warteliste ist
+  es nicht gemessen, die Auslosung bleibt die Annahme aus der Messung von
+  2026.
+- Die TP-Datei kennt außerdem die Tabellen `OrderOfPlay`/`OrderOfPlayItem`
+  (Druck-Spielplan) und `tournamentschedule`. In den untersuchten Dateien
+  sind sie leer oder tragen keine Reihenfolge, die das Protokoll nicht schon
+  liefert. Der Weg über die Datei ist für die Reihenfolge also unnötig.
+
+Der Rest dieses Abschnitts ist die Vorgeschichte.
+
 **`PlannedTime` + Auslosung (`DrawID`) ergeben zusammen die gedruckte
 Spielliste.** Beides ist nötig, und beides war lange falsch bzw. gar nicht
 ausgewertet:
@@ -391,7 +415,10 @@ ausgewertet:
   einem echten Turnier trugen aber nur rund 10 % der Spiele einen Wert — die
   ohne landeten hinter allen anderen, das erste Spiel des Tages stand
   plötzlich an fünfter Stelle. `DrawID` ist an jedem Match gesetzt und
-  reproduziert dieselbe Reihenfolge zuverlässig.
+  reproduziert dieselbe Reihenfolge zuverlässig. *(Nachtrag 30.10.2026: Das
+  Problem war nicht `DisplayOrder` selbst, sondern dass Spiele **ohne** Wert
+  hinten statt vorn einsortiert wurden. Seit v0.9.317 steht `DisplayOrder`
+  wieder vor der Auslosung, siehe oben.)*
 
 Belegt an einem echten Turnier (878 Paarungen, 759 davon angesetzt): Die
 Sortierung `PlannedTime → DrawID → MatchNr → ID` reproduziert die aus BTP
