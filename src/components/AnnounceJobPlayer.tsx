@@ -5,10 +5,24 @@ import { playPrepared } from "../io/announcer";
 import { azureOption } from "../io/azureAnnounce";
 import type { AnnounceConfig, AnnounceJob, AzureTtsConfig } from "../types";
 
-const POLL_MS = 3000;
+// Seit E2 (Spec `ansage-im-browser`) kommt auch die Erst-Ansage „neues Spiel
+// auf dem Feld" als Auftrag — derselbe Takt wie zuvor der MatchAnnouncer,
+// damit der Aufruf nicht später erklingt als bisher.
+const POLL_MS = 2000;
+
+// Abhol-Stand **modulweit**, nicht im Bauteil: Die App hängt den Sprecher
+// beim Wechsel zwischen Einrichtung und Dashboard neu ein. Begänne er dann
+// jedes Mal mit einer Bestandsaufnahme, gingen die Aufrufe dieser Sekunden
+// verloren — seit E2 auch die Erst-Ansage eines frisch belegten Felds.
+let letzteId = 0;
+let hatBaseline = false;
+// Halle, für die die Bestandsaufnahme gilt.
+let baselineHalle = "";
 
 /**
- * App-weiter Sprecher für Ansage-Aufträge der Turnierleitungs-Seite.
+ * App-weiter Sprecher für Ansage-Aufträge: Aufrufe der
+ * Turnierleitungs-Seite und — seit E2 — die Erst-Ansage, die der Kern bei
+ * jeder neuen Feldbelegung ablegt (`court_assigned`).
  *
  * Die Seite im Browser spricht nie selbst: Sie steht im Zweifel im Büro,
  * hat keine Verbindung zur Anlage und kennt weder die eingestellte Stimme
@@ -17,9 +31,12 @@ const POLL_MS = 3000;
  * Aufruf gleich, egal wer ihn ausgelöst hat.
  *
  * Erste Runde ist nur Bestandsaufnahme: Was schon vor dem Start dieser
- * Instanz beauftragt wurde, wird nicht nachträglich gerufen. Der Turnier-PC
- * lässt Aufträge ohnehin nach einer Minute verfallen — was länger liegt,
- * gehört zu Spielen, die längst laufen.
+ * Instanz beauftragt wurde, wird nicht nachträglich gerufen. Dasselbe gilt
+ * nach dem Abschalten der Ansagen und nach einem Wechsel der Ansage-Halle —
+ * sonst holte das Wiedereinschalten oder eine hinzugenommene Halle die
+ * Aufrufe der letzten Minute nach (Slave-Befund 23.08.2026, damals im
+ * MatchAnnouncer). Der Turnier-PC lässt Aufträge ohnehin nach einer Minute
+ * verfallen.
  */
 export function AnnounceJobPlayer({
   announce,
@@ -32,35 +49,44 @@ export function AnnounceJobPlayer({
   cfgRef.current = announce;
   const azureRef = useRef(azureTts);
   azureRef.current = azureTts;
-  const lastIdRef = useRef(0);
-  const baselineRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
     const tick = () => {
+      const cfg = cfgRef.current;
       // Sind Ansagen aus, wird hier auch nicht abgefragt: Der Abruf gilt dem
       // Turnier-PC als Lebenszeichen eines Ansage-Geräts. Fragte dieses Gerät
       // trotzdem, meldete die Turnierleitungs-Seite „Aufruf ausgelöst",
       // während in der Halle nichts erklingt — die schlimmste Art von
       // Rückmeldung, weil sie beruhigt.
-      if (!cfgRef.current.enabled) return;
-      pendingAnnounceJobs(lastIdRef.current)
+      if (!cfg.enabled) {
+        hatBaseline = false;
+        return;
+      }
+      const halle = (cfg.announce_hall || "").trim();
+      if (halle !== baselineHalle) {
+        hatBaseline = false;
+        baselineHalle = halle;
+      }
+      pendingAnnounceJobs(letzteId)
         .then(async (jobs) => {
           if (!alive) return;
           if (jobs.length > 0) {
-            lastIdRef.current = jobs.reduce(
-              (m, j) => Math.max(m, j.id),
-              lastIdRef.current,
-            );
+            letzteId = jobs.reduce((m, j) => Math.max(m, j.id), letzteId);
           }
           // Erste Runde: nur merken, nicht sprechen.
-          if (!baselineRef.current) {
-            baselineRef.current = true;
+          if (!hatBaseline) {
+            hatBaseline = true;
             return;
           }
-          if (jobs.length === 0) return;
           for (const job of jobs) {
-            if (!alive) return;
+            if (!alive) {
+              // Ausgehängt mitten in der Runde (Wechsel Einrichtung ↔
+              // Dashboard): Den Rest nicht verlieren — die nächste Instanz
+              // holt ab diesem Auftrag wieder ab.
+              letzteId = Math.min(letzteId, job.id - 1);
+              return;
+            }
             await speak(job);
           }
         })

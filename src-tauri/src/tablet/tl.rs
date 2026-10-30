@@ -8095,7 +8095,7 @@ mod tests {
             ],
         ));
         // Ein Gerät in Halle B hört zu — sonst käme eine Warnung dazu.
-        tablet.announce_jobs_since("Halle B", 0, 50_000);
+        tablet.announce_jobs_since("Halle B", 0, 50_000, true);
 
         let done = apply_state_action(
             &tablet,
@@ -8112,7 +8112,7 @@ mod tests {
         assert!(done.warning.is_none(), "in Halle B hört jemand zu");
         assert_eq!(tablet.calls_made(3, 7), 2, "der erneute Aufruf ist der 2.");
 
-        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000, true);
         assert_eq!(jobs.len(), 1);
         assert_eq!(
             jobs[0].kind,
@@ -8124,7 +8124,9 @@ mod tests {
             }
         );
         assert!(
-            tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
+            tablet
+                .announce_jobs_since("Halle A", 0, 50_000, true)
+                .is_empty(),
             "Halle A geht der Aufruf nichts an"
         );
     }
@@ -8208,7 +8210,7 @@ mod tests {
             vec![match_on_court(7, 3)],
             Vec::new(),
         ));
-        tablet.announce_jobs_since("", 0, 50_000);
+        tablet.announce_jobs_since("", 0, 50_000, true);
         for _ in 0..4 {
             apply_state_action(
                 &tablet,
@@ -8236,7 +8238,7 @@ mod tests {
             vec![match_on_court(7, 3)],
             Vec::new(),
         ));
-        tablet.announce_jobs_since("", 0, 50_000);
+        tablet.announce_jobs_since("", 0, 50_000, true);
         let config = config_mit_unbegrenzten_aufrufen();
         let mut letzte = 0;
         for _ in 0..3 {
@@ -8251,11 +8253,11 @@ mod tests {
                 },
             )
             .unwrap();
-            let jobs = tablet.announce_jobs_since("", letzte, 50_000);
+            let jobs = tablet.announce_jobs_since("", letzte, 50_000, true);
             letzte = jobs.last().unwrap().id;
         }
         assert_eq!(tablet.calls_made(3, 7), 4, "der Zähler bleibt ehrlich");
-        let jobs = tablet.announce_jobs_since("", 0, 50_000);
+        let jobs = tablet.announce_jobs_since("", 0, 50_000, true);
         assert_eq!(
             jobs.last().unwrap().kind,
             crate::tablet::state::AnnounceJobKind::CourtCall {
@@ -8281,7 +8283,7 @@ mod tests {
             Vec::new(),
         ));
         tablet.record_score(3, 7, vec![(11, 7)]);
-        tablet.announce_jobs_since("", 0, 50_000);
+        tablet.announce_jobs_since("", 0, 50_000, true);
         apply_state_action(
             &tablet,
             &config_mit_unbegrenzten_aufrufen(),
@@ -8294,7 +8296,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tablet.calls_made(3, 7), 2, "gezählt wird ehrlich");
-        let jobs = tablet.announce_jobs_since("", 0, 50_000);
+        let jobs = tablet.announce_jobs_since("", 0, 50_000, true);
         assert_eq!(
             jobs.last().unwrap().kind,
             crate::tablet::state::AnnounceJobKind::CourtCall {
@@ -8318,7 +8320,7 @@ mod tests {
             vec![match_on_court(7, 3)],
             Vec::new(),
         ));
-        tablet.announce_jobs_since("", 0, 50_000);
+        tablet.announce_jobs_since("", 0, 50_000, true);
 
         let done = apply_state_action(
             &tablet,
@@ -8334,7 +8336,7 @@ mod tests {
         assert!(done.ok);
         assert_eq!(tablet.calls_made(3, 7), 2);
 
-        let jobs = tablet.announce_jobs_since("", 0, 50_000);
+        let jobs = tablet.announce_jobs_since("", 0, 50_000, true);
         assert_eq!(jobs.len(), 1);
         assert_eq!(
             jobs[0].kind,
@@ -8363,7 +8365,7 @@ mod tests {
             2,
             "Partei A und danach Partei B sind EIN Aufruf"
         );
-        let jobs = tablet.announce_jobs_since("", jobs[0].id, 51_000);
+        let jobs = tablet.announce_jobs_since("", jobs[0].id, 51_000, true);
         assert_eq!(jobs.len(), 1);
         assert_eq!(
             jobs[0].kind,
@@ -8390,7 +8392,7 @@ mod tests {
             serde_json::from_str(r#"{"action":"announce_court_call","courtId":3,"matchId":7}"#)
                 .unwrap();
         apply_state_action(&tablet, &AppConfig::default(), 50_000, &action).unwrap();
-        let jobs = tablet.announce_jobs_since("", 0, 50_000);
+        let jobs = tablet.announce_jobs_since("", 0, 50_000, true);
         assert_eq!(
             jobs[0].kind,
             crate::tablet::state::AnnounceJobKind::CourtCall {
@@ -8604,7 +8606,7 @@ mod tests {
             );
         }
         assert_eq!(
-            tablet.announce_jobs_since("", 0, 50_000).len(),
+            tablet.announce_jobs_since("", 0, 50_000, true).len(),
             4,
             "jede Auslösung erzeugt einen eigenen Auftrag"
         );
@@ -8643,7 +8645,7 @@ mod tests {
         )
         .unwrap();
 
-        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000, true);
         assert_eq!(jobs.len(), 1, "die Halle des Felds hört die Ansage");
         // Und es ist wirklich DIESE Ansage. Ohne die Typ-Prüfung wären alle
         // Tests hier auch dann grün, wenn der Arm versehentlich einen
@@ -8661,7 +8663,9 @@ mod tests {
             jobs[0].kind
         );
         assert!(
-            tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
+            tablet
+                .announce_jobs_since("Halle A", 0, 50_000, true)
+                .is_empty(),
             "die andere Halle nicht"
         );
     }
@@ -8779,7 +8783,7 @@ mod tests {
         )
         .unwrap();
 
-        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000, true);
         assert_eq!(jobs.len(), 1, "die Halle des Felds hört den Nachruf");
         assert!(
             matches!(
@@ -8794,7 +8798,9 @@ mod tests {
             jobs[0].kind
         );
         assert!(
-            tablet.announce_jobs_since("Halle A", 0, 50_000).is_empty(),
+            tablet
+                .announce_jobs_since("Halle A", 0, 50_000, true)
+                .is_empty(),
             "die andere Halle nicht"
         );
     }
@@ -8862,7 +8868,7 @@ mod tests {
         )
         .unwrap();
         assert!(done.ok);
-        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000);
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000, true);
         assert_eq!(jobs.len(), 1);
         assert_eq!(
             jobs[0].kind,

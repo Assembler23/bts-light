@@ -416,7 +416,18 @@ function App() {
           <MatchAnnouncer
             announce={config.announce}
             azureTts={config.azure_tts}
+            erkennen={config.slave_mode}
           />
+          {/* Auch während der Einrichtung: Am Master kommt die Erst-Ansage
+              seit E2 als Auftrag aus dem Kern (Spec `ansage-im-browser`) —
+              wer mitten im Turnier Einstellungen ändert, soll die
+              Feldaufrufe weiter hören, wie bisher beim MatchAnnouncer. */}
+          {!config.slave_mode && (
+            <AnnounceJobPlayer
+              announce={config.announce}
+              azureTts={config.azure_tts}
+            />
+          )}
         </div>
       </UpdateProvider>
     );
@@ -538,9 +549,13 @@ function App() {
         </AppShell>
         <Footer />
         <WalkoverPanel />
+        {/* Neue Feldbelegungen erkennt der MatchAnnouncer nur noch am
+            Ansage-Slave; am Master entsteht die Erst-Ansage im Kern und
+            kommt über den AnnounceJobPlayer (Spec `ansage-im-browser`, E2). */}
         <MatchAnnouncer
           announce={config.announce}
           azureTts={config.azure_tts}
+          erkennen={config.slave_mode}
         />
         <FreetextAnnouncer
           announce={config.announce}

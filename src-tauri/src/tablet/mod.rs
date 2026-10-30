@@ -7,6 +7,7 @@ pub mod assign;
 pub mod blatt;
 pub mod carrier;
 pub mod club_logos;
+pub mod erst_ansage;
 pub mod exclusion;
 pub mod hall_assign;
 pub mod match_times;

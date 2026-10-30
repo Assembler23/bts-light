@@ -4177,7 +4177,13 @@ pub async fn pending_announce_jobs(
         let text = resp.text().await.map_err(|e| e.to_string())?;
         Ok(crate::tablet::state::announce_jobs_aus_json(&text))
     } else {
-        Ok(state.tablet.announce_jobs_since(&hall, since, now_ms()))
+        // Die Desktop-App am Master spricht auch die Erst-Ansage aus dem
+        // Kern (`court_assigned`, Spec `ansage-im-browser` E2). Der
+        // LAN-Slave-Zweig oben fragt bewusst ohne `auto=1`: Er erkennt neue
+        // Spiele selbst und sagte sonst doppelt an.
+        Ok(state
+            .tablet
+            .announce_jobs_since(&hall, since, now_ms(), true))
     }
 }
 

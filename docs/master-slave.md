@@ -59,6 +59,12 @@ an.
 Einrichtung: **Ansage-Slave-Modus** einschalten, das Feld für den Master-Code
 **leer lassen**, und auf der Seite **Ansagen** die eigene Halle wählen. Fertig.
 
+Seit v0.9.314 entsteht der automatische Feld-Aufruf am Master im Programmkern
+und erreicht dort auch die Ansage-Seiten im Browser. Der LAN-Slave merkt neue
+Spiele weiterhin **selbst** und bekommt diesen Aufruf vom Master bewusst
+nicht mitgeliefert — jeder Aufruf erklingt am Slave also genau einmal. Ein
+Slave mit älterer Version neben einem neuen Master verhält sich genauso.
+
 ### Fall 2 — Getrennte Netze: der Cloud-Slave
 
 Die Hallen sind Kilometer auseinander oder hängen an getrennten Routern. Der

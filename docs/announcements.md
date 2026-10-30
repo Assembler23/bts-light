@@ -16,13 +16,35 @@ des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
   Gong wird per Web Audio API synthetisiert. Geräte-lokal, kein externer
   Dienst. Die Ansage spielt über die Lautsprecher des Turnier-PCs, auch
   wenn das Fenster ins Tray minimiert ist.
-- **Auslöser:** Die immer eingehängte Komponente
-  [`MatchAnnouncer`](../src/components/MatchAnnouncer.tsx) pollt alle 2 s
-  `tablet_overview()` und merkt sich pro Feld die `match_id`. Der **erste
-  Poll ist die Baseline** — bereits laufende Spiele werden nicht
-  nachträglich angesagt. Danach löst jede neue `match_id` auf einem Feld
-  eine Ansage aus. Eine Match-ID wird im 5-s-Fenster nicht doppelt
-  angesagt.
+- **Auslöser am Turnier-PC (Master, seit v0.9.314):** Der **Kern** vergleicht
+  in jedem Sync-Lauf die Feldbelegung mit der zuletzt gesehenen
+  ([`tablet/erst_ansage.rs`](../src-tauri/src/tablet/erst_ansage.rs), Aufruf
+  in `sync.rs` hinter dem Slave-Rücksprung, **nach** Schiedsrichter-Rotation
+  und Zettel-Autodruck — erst dann steht die Besetzung des neuen Felds fest).
+  Je neuer `match_id` auf einem Feld legt er einen Ansage-Auftrag
+  **`court_assigned`** ab (Feld, Spiel, Halle des Felds). Gesprochen wird er
+  am PC vom [`AnnounceJobPlayer`](../src/components/AnnounceJobPlayer.tsx)
+  (bei „Ansagen aktivieren") und auf den Ansage-Seiten im Browser vom
+  Vertoner — beide über `jobZuAnsage` → `courtAnsage`, also mit denselben
+  Angaben wie zuvor: Klasse, Runde, Tabletbedienung und SR/AR gemäß
+  Schaltern. Spec [ansage-im-browser](features/ansage-im-browser.md) (E2),
+  Entscheidung [ADR 0064](adr/0064-erst-ansage-im-kern.md).
+  <!-- pruef: "court_assigned" in src-tauri/src/tablet/state.rs -->
+- **Auslöser am LAN-Ansage-Slave:** unverändert die Komponente
+  [`MatchAnnouncer`](../src/components/MatchAnnouncer.tsx) (`erkennen` nur
+  bei `slave_mode`). Sie pollt alle 2 s `tablet_overview()` und vergleicht
+  mit [`src/io/announceBaseline.mjs`](../src/io/announceBaseline.mjs).
+  Der Slave holt die Aufträge des Masters **ohne** `?auto=1` ab und bekommt
+  `court_assigned` deshalb nicht — sonst hörte seine Halle jeden Aufruf
+  doppelt. Der Cloud-Ansage-Slave (`CloudAnnounceSlave`) ist unberührt.
+- **Regeln (Kern und Slave gleich):** Der **erste brauchbare Stand ist
+  Bestandsaufnahme** — bereits laufende Spiele werden nicht nachträglich
+  angesagt. Danach löst jede neue `match_id` auf einem Feld genau eine
+  Ansage aus; dieselbe Match-ID wird im 5-s-Fenster nicht doppelt angesagt.
+  Im Kern setzt zusätzlich ein **Turnierwechsel** (anderer Turniername) die
+  Bestandsaufnahme zurück. Der Stand liegt im `TabletState`, nicht in der
+  `SyncEngine` — er überlebt das Speichern der Einstellungen, das die Engine
+  neu baut.
 - **Eine leere Antwort taugt nicht als Baseline** (Befund 14.08.2026): Die
   ersten Abrufe nach dem Start kommen, bevor der Sync-Lauf seinen ersten
   BTP-Schnappschuss hat — `tablet_overview()` liefert dann **null Felder**.
@@ -30,9 +52,9 @@ des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
   und die App sagte beim Start **alle laufenden Spiele** an. Die Baseline
   gilt deshalb erst als gesetzt, wenn überhaupt Felder dabei sind; Felder
   **ohne** Spiel sind dagegen ein gültiger Anfangsstand (Turniermorgen —
-  sonst bliebe der erste Aufruf des Tages stumm). Die Entscheidung liegt in
-  [`src/io/announceBaseline.mjs`](../src/io/announceBaseline.mjs) und ist
-  über `scripts/test-announce-baseline.mjs` (CI) festgehalten.
+  sonst bliebe der erste Aufruf des Tages stumm). Festgehalten in
+  `scripts/test-announce-baseline.mjs` (Slave) und den Rust-Tests in
+  `tablet/erst_ansage.rs` (Port aller Fälle) und `sync.rs` (`erst_ansage_*`).
 - **Ein Hallenwechsel holt nichts nach** (Befund 23.08.2026, seit v0.9.257):
   Wurde die Ansage-Halle im Betrieb umgestellt — oder auf „alle Hallen" —,
   sagte das Gerät schlagartig **jedes dort laufende Spiel** noch einmal an.
@@ -49,6 +71,13 @@ des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
   Dieselbe Regel wie bei der Schiedsrichter-Rotation seit v0.9.253: Der erste
   beobachtete Stand ist Ausgangslage, kein Ereignis. Festgehalten in
   `scripts/test-announce-baseline.mjs` („Halle hinzunehmen holt nichts nach").
+
+  Am Master (seit v0.9.314) gilt dasselbe auf anderem Weg: Der Kern filtert
+  gar nicht nach Halle, jeder Auftrag trägt seine Halle, und erst die
+  Zustellung an das Gerät filtert. Wechselt dort die Ansage-Halle, beginnt
+  der `AnnounceJobPlayer` mit einer neuen Bestandsaufnahme — sonst holte er
+  die Aufträge der fremden Halle aus der letzten Minute nach. Ebenso nach dem
+  Aus- und Wiedereinschalten der Ansagen.
 - **Die Halle wird an drei Stellen gesetzt** — Dashboard, Ansage-Einstellungen
   und (am Cloud-Slave) das Geräte-Panel, das mit `announce_hall` zugleich
   festlegt, welche Halle das Gerät bedient. Die Ansage-Einstellungen halten
@@ -186,13 +215,11 @@ den Ansage-Geräten — mit demselben Code wie jeder andere Aufruf.
 
 | Baustein | Ort |
 |---|---|
-| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `start_play`) | `tablet/state.rs` |
-| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
-| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceStartPlay`) | `tablet/tl.rs` |
-| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `scorekeeper_call`) | `tablet/state.rs` |
-| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
-| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceScorekeeper`) | `tablet/tl.rs` |
-| Abholweg | Route `/info/announce/jobs`, Command `pending_announce_jobs` |
+| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `start_play`, `scorekeeper_call`; seit v0.9.314 `court_assigned` aus dem Kern) | `tablet/state.rs` |
+| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`; höchstens 128 Aufträge) | `tablet/state.rs` |
+| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceStartPlay`, `AnnounceScorekeeper`) | `tablet/tl.rs` |
+| Erst-Ansage (`court_assigned`, Feldbelegung im Sync-Lauf) | `tablet/erst_ansage.rs`, `TabletState::erst_ansage_pruefen` |
+| Abholweg | Route `/info/announce/jobs` (`court_assigned` nur mit `?auto=1`), Command `pending_announce_jobs` |
 | Sprecher | [`AnnounceJobPlayer.tsx`](../src/components/AnnounceJobPlayer.tsx) |
 
 Eigenschaften, die im Turnierbetrieb zählen:
@@ -366,11 +393,11 @@ freischalten** tippen. Danach spricht sie selbst.
 <!-- pruef: "/ansage" in src-tauri/src/tablet/server.rs -->
 <!-- pruef: "Ton freischalten" in src-tauri/assets/ansage.html -->
 
-Was die Seite spricht (Etappe E1): die Aufträge der Turnierleitungs-Seite
-(Aufruf, Nachruf, Besetzung, „Bitte beginnen", Bedienung), Freitexte und die
+Was die Seite spricht: die Aufträge der Turnierleitungs-Seite (Aufruf,
+Nachruf, Besetzung, „Bitte beginnen", Bedienung), Freitexte, die
 Ansage-Knöpfe der Desktop-App (Feld aufrufen, Vorbereitungs-Aufruf und
--Nachruf, SR/AR ansagen). Die **automatische** Ansage beim neuen Spiel auf
-einem Feld kommt erst mit Etappe E2.
+-Nachruf, SR/AR ansagen) und seit v0.9.314 (Etappe E2) auch die
+**automatische** Ansage, wenn ein neues Spiel auf ein Feld kommt.
 
 **Was die Seite nie tut:**
 
@@ -440,7 +467,7 @@ dem Turnier einmal die Test-Ansage drücken.
 | `gong` | Gong vor der Ansage (Default an) |
 | `name_overrides` | Phonetische Aussprache-Korrekturen (Nutzer), Liste `{ name, say }` (Default leer) |
 | `name_overrides_enabled` | Korrekturen anwenden (Basis-Wörterbuch + Nutzer)? Default `true` |
-| `announce_hall` | Mehr-Hallen: nur Spiele dieser Halle (BTP-Location-Name) ansagen; leer = alle (Default). `MatchAnnouncer` filtert neue Feldbelegungen auf `court.location`. Siehe [multi-hall.md](multi-hall.md). |
+| `announce_hall` | Mehr-Hallen: nur Spiele dieser Halle (BTP-Location-Name) ansagen; leer = alle (Default). Am Master filtert die Zustellung der Aufträge (`announce_jobs_since`), am LAN-Slave der `MatchAnnouncer` neue Feldbelegungen auf `court.location`. Siehe [multi-hall.md](multi-hall.md). |
 | `saved_announcements` | Gespeicherte Ansage-Blöcke (wiederkehrende Freitext-Ansagen), Liste `string` (Default leer). |
 | `announce_scorekeeper` | Zähltafelbedienung mit ansagen? Default `true`. An = angesagt wird, **was am Feld steht** (zugewiesene Bedienung *oder* pro-Feld-Hinweis), aus = nie. Löst die feste Regel aus ADR 0007 ab ([ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)). |
 | `announce_umpire` | Schiedsrichter/Aufschlagrichter in der Feld-Ansage nennen? Default `true`. Die eigenen Knöpfe „SR/AR ansagen" und „Bedienung nachrufen" bleiben unberührt. |
@@ -649,8 +676,13 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
 
 ## Bekannte Grenzen
 
-- Der 2-s-Poll kann ein extrem kurz belegtes und sofort wieder geräumtes
-  Feld verpassen — für reguläre Feld-Aufrufe unkritisch.
+- Der Sync-Takt (am Slave der 2-s-Poll) kann ein extrem kurz belegtes und
+  sofort wieder geräumtes Feld verpassen — für reguläre Feld-Aufrufe
+  unkritisch.
+- Wird die Übertragung längere Zeit gestoppt und wieder gestartet, gilt der
+  Stand vor dem Stopp weiter als Bestandsaufnahme: Felder, die in der Pause
+  neu belegt wurden, werden nach dem Start einmal angesagt (Aufträge
+  verfallen nach 60 s). Dasselbe Verhalten hatte der `MatchAnnouncer`.
 - Verfügbare Stimmen hängen vom Windows-System ab; ist die gewählte
   Stimme auf dem Rechner nicht vorhanden, nutzt der Browser seine
   Standardstimme.
@@ -673,7 +705,7 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
   `due_call_stage` (zeitliche Fälligkeit), `announcement_response` (Warnung
   ohne Ansage-Gerät).
 - `src/components/AnnounceJobPlayer.tsx` — spricht die Aufträge der
-  Turnierleitungs-Seite.
+  Turnierleitungs-Seite und (seit v0.9.314) die Erst-Ansage `court_assigned`.
 - `src/io/announceJobs.ts` — `jobZuAnsage`: Auftrag → fertige Ansage, geteilt
   von `AnnounceJobPlayer` und `AnsageVertoner`.
 - **Ansage-Seite:** `src/io/announcer.ts` `prepare*`/`playPrepared`,
@@ -732,7 +764,8 @@ Stimme die Namen **nativ** spricht. Ablauf:
   Azure (Region wählbar, z. B. West Europe/EU) gesendet — öffentliche Wettkampfdaten, opt-in über
   `enabled`. Ist Azure aus, verlässt nichts das Gerät.
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
-- `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
+- `src/components/MatchAnnouncer.tsx` — immer eingehängt (Audio-Freischaltung, Abbruch beim Abschalten); erkennt neue Feldbelegungen nur noch am Ansage-Slave.
+- `src-tauri/src/tablet/erst_ansage.rs` — Erst-Ansage im Kern (Master, seit v0.9.314).
 - `src/pages/SetupWizard.tsx` — Einstellungen.
 
 ## Schiedsrichter und Aufschlagrichter

@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.314
+
+- **Automatischer Feld-Aufruf jetzt auch auf den Ansage-Seiten (Etappe 2).**
+  Kommt ein neues Spiel auf ein Feld, entsteht der Aufruf jetzt im
+  Programmkern statt in der Oberfläche. Er erklingt wie bisher am Turnier-PC
+  (bei „Ansagen aktivieren") — mit Klasse, Runde, Schiedsrichtern und
+  Tabletbedienung gemäß den Schaltern — und zusätzlich auf den Ansage-Seiten
+  im Browser. App-Start, Speichern der Einstellungen und ein Turnierwechsel
+  rufen laufende Spiele weiterhin **nicht** erneut auf. Ein LAN-Ansage-Slave
+  erkennt neue Spiele wie bisher selbst und sagt nicht doppelt an; der
+  Cloud-Slave ist unverändert. **Hinweis für den Turnierbetrieb:** Diese
+  Version ändert den automatischen Aufruf am PC — zurück geht es nur über die
+  Vorgängerversion; bitte vor dem ersten Turnier einmal testen.
+
 ## v0.9.312
 
 - **Ansage: Klasse klar abgesetzt.** Aus „Herreneinzel A" wurde beim

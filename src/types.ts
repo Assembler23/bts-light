@@ -632,6 +632,15 @@ export type AnnounceJob = {
       courtId: number;
       matchId: number;
     }
+  | {
+      /** Erst-Ansage „neues Spiel auf dem Feld" — entsteht im Kern beim
+       *  Vergleich der Feldbelegung (Spec `ansage-im-browser`, E2, ADR 0064).
+       *  Nur der Master liefert sie aus; ein LAN-Ansage-Slave erkennt neue
+       *  Spiele selbst (`MatchAnnouncer`). */
+      kind: "court_assigned";
+      courtId: number;
+      matchId: number;
+    }
 );
 
 export interface AppConfig {

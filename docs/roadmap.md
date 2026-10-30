@@ -498,9 +498,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 - **Sprachansagen im Browser (Ansage-Seite)** — Spec:
   [features/ansage-im-browser.md](features/ansage-im-browser.md) (freigegeben
-  30.10.2026, PR #405). **E1 umgesetzt (v0.9.311, ADR 0063)**; offen E1b, E2,
-  E3 (nach Messung), E4 und der Feldtest von E1 auf Fire-Tablet, Android-Handy
-  und iPhone. Ansagen auf Pi/Tablet/Handy ohne
+  30.10.2026, PR #405). **E1 umgesetzt (v0.9.311, ADR 0063)**, **E2 umgesetzt
+  (v0.9.314, ADR 0064 — Erst-Ansage `court_assigned` im Kern; eigener Feldtest
+  nötig, Rollback nur per Version)**; offen E1b, E3 (nach Messung), E4 und der
+  Feldtest von E1 auf Fire-Tablet, Android-Handy und iPhone. Ansagen auf Pi/Tablet/Handy ohne
   Windows-App: Turnier-PC vertont (Azure, später OneCore), Seite `/ansage`
   spielt nur ab; Pi am TV über einen Ansage-Modus der Monitor-Seiten.
   - **Etappen:** E1 LAN-Seite + TL-Aufträge/Freitext/Desktop-Knöpfe ·

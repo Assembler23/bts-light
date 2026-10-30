@@ -58,6 +58,25 @@ export async function jobZuAnsage(
     };
   }
 
+  if (job.kind === "court_assigned") {
+    // Erst-Ansage aus dem Kern (E2): genau die Ansage, die bisher der
+    // MatchAnnouncer baute — Stufe 1, beide Parteien, SR/AR und Bedienung
+    // gemäß Schaltern (`courtAnsage`). Steht inzwischen ein anderes Spiel
+    // auf dem Feld, schweigt sie.
+    const info = await tabletOverview().catch(() => null);
+    const court = info?.courts.find((c) => c.court_id === job.courtId);
+    if (!court || court.match_id !== job.matchId) return null;
+    return {
+      ansage: courtAnsage(court, cfg, azureTts, 1, "both"),
+      ziel: {
+        art: "court_assigned",
+        hall: job.hall,
+        courtId: job.courtId,
+        matchId: job.matchId,
+      },
+    };
+  }
+
   if (job.kind === "officials") {
     // Nur die Besetzung: Namen stehen im aktuellen Feld-Stand.
     const info = await tabletOverview().catch(() => null);
