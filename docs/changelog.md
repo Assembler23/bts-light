@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.315
+
+- **Ansage-Seite: mitlesen und wiederholen.** Die Seite `/ansage` zeigt die
+  zuletzt gespielte Ansage sehr groß — die Schrift passt sich der Textlänge
+  und dem Bildschirm an, damit auch Hörlose mitlesen können. Darunter stehen
+  die fünf letzten Ansagen mit Uhrzeit und einem kleinen ↻-Knopf, der die
+  Ansage nur auf diesem Gerät noch einmal abspielt (mit Gong, nach einer
+  laufenden Ansage; das Audio hält die Seite dafür im Speicher). Die Liste
+  lebt nur in der offenen Seite.
+
 ## v0.9.314
 
 - **Automatischer Feld-Aufruf jetzt auch auf den Ansage-Seiten (Etappe 2).**

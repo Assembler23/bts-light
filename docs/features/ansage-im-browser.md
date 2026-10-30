@@ -168,6 +168,40 @@ Der Feed enthält **keine** Azure-Felder (Region, Schlüssel, Stimme).
 - Die Seite zeigt Status: verbunden / Halle / Stimme (Host-Audio, Gerät,
   keine) / letzte Ansage.
 
+#### Erweiterung 30.10.2026: Verlauf + Großanzeige (v0.9.315)
+
+Nutzerwunsch (30.10.2026, wörtlich): „Stelle auf der Ansage Seite /ansage die
+letzten 5 Ansagen dar, kann man einen kleinen Button anbieten, um die
+jeweilige Ansage auf dem Gerät zu wiederholen. Die letzte Ansage soll sehr
+groß möglichst viel vom Bildschirm ausfüllen, damit Hörlose sich die ggf.
+auch durch lesen können."
+
+- **Großanzeige:** die zuletzt **gespielte** Ansage (Text = `segmente`
+  zusammengefügt, `ansageText`) füllt den Großteil des Bildschirms. Die
+  Schriftgröße wird im Browser gemessen (Halbierungssuche `schriftSuchen`):
+  so groß, dass Höhe und längstes Wort passen; kein waagerechtes Scrollen.
+  Sie erscheint, sobald die Ansage zu klingen beginnt (Mitlesen beim Hören).
+  Kopf (Hallenwahl, Status) und Hinweise bleiben, aber schmal.
+- **Verlauf:** die letzten **5** gespielten (`ANSAGE_VERLAUF_MAX`), neueste
+  oben, mit Gerätezeit und ↻ (aria-label). Nur Gespieltes — Übersprungenes
+  (verfallen, falsches Spiel, fremde Halle) nicht. Nur im Speicher der
+  offenen Seite, **nie** im `localStorage` (Spielernamen).
+- **Wiederholen nur auf diesem Gerät:** reines GET, keine neue Route, keine
+  Präsenz- oder Serverwirkung. Das beim Abspielen geladene Audio bleibt am
+  Verlaufseintrag (nur fünf; auf dem PC verfällt es nach 60 s); ohne Audio
+  spricht die Gerätestimme die `segmente`. Die Wiederholung läuft durch
+  dieselbe strikte Warteschlange mit Gong; `nochAbspielbar` (Verfall,
+  Belegung) gilt für sie **nicht** — bewusst vom Nutzer angefordert. Sie legt
+  keinen neuen Verlaufseintrag an. Mehrfach-Tipp reiht dieselbe Ansage nur
+  einmal ein; bei angehaltenem Audio-Kontext wartet die Schlange auf
+  `resume()`, damit der Gong nicht wegfällt. Ein Hallenwechsel leert die
+  Schlange bis auf angeforderte Wiederholungen; der Verlauf bleibt.
+- **Nur `/ansage`:** Der Kern führt den Verlauf nur mit `verlauf: true`; die
+  Monitor-Seiten (E1b) halten kein Audio vor.
+- **Grenze:** Text gibt es nur, wenn der PC für die Halle vertont — also nur,
+  wenn dort eine Seite mit freigeschaltetem Ton zuhört. Reines Mitlesen ohne
+  Ton ist nicht Teil dieser Erweiterung.
+
 ### Ansage-Modus der Monitor-Seiten (E1b)
 
 - Die Monitor-, Übersichts- und Kombi-Seiten bekommen einen zuschaltbaren

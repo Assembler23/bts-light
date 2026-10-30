@@ -14,6 +14,7 @@
 import {
   ANSAGE_TAKT_MS, hallePasst, halleGueltig, neueEintraege, nochAbspielbar,
   stimme, meldetPraesenz, grundText, feedAdresse,
+  ANSAGE_VERLAUF_MAX, ansageText, verlaufAufnehmen, wiederholungsAuftrag,
 } from "./ansageSeite.mjs";
 import { gongPlanen } from "./gongKlang.mjs";
 
@@ -35,13 +36,15 @@ export var ANSAGE_FEHLT_PAUSE_MS = 60000;
 /**
  * Baut den Kern einer Ansage-Seite.
  *
- * `opt`: `{ base, halle, halleFest, welt, beiAenderung, beiHallen }`.
+ * `opt`: `{ base, halle, halleFest, welt, beiAenderung, beiHallen, verlauf }`.
  * `base` endet mit `/`. `halleFest` = die Halle steht fest (Monitor-Modus,
  * aus der Adresse) und wird nicht verworfen, wenn das Turnier sie nicht
  * kennt — die Seite soll dann sagen, welche Halle fehlt. `welt` liefert
  * `fetch`, `AudioContext`, `speechSynthesis`, Timer usw. (im Browser
  * `window`). `beiAenderung()` meldet jeden neuen Stand an die Anzeige,
- * `beiHallen(halls)` eine geänderte Hallenliste.
+ * `beiHallen(halls)` eine geänderte Hallenliste. `verlauf` = die Seite führt
+ * einen Verlauf der letzten gespielten Ansagen samt geladenem Audio zum
+ * Wiederholen (nur `/ansage`; die Monitor-Seiten halten kein Audio vor).
  */
 export function ansageKern(opt) {
   var w = opt.welt;
@@ -49,6 +52,7 @@ export function ansageKern(opt) {
   var halleFest = !!opt.halleFest;
   var melden = opt.beiAenderung || function () {};
   var hallenMelden = opt.beiHallen || function () {};
+  var mitVerlauf = !!opt.verlauf;
   var jetzt = function () { return w.Date.now(); };
 
   var z = {
@@ -70,6 +74,13 @@ export function ansageKern(opt) {
     tonFrei: false,
     // Zuletzt gespielte Ansage: `{ ms, text }`.
     letzte: null,
+    // Die letzten gespielten Ansagen, neueste vorn (nur mit `verlauf`):
+    // `{ id, ms, text, e, puffer }` — `puffer` ist das geladene Audio, das
+    // auf dem Turnier-PC nach einer Minute verfällt. Lebt nur im Speicher
+    // der offenen Seite (Spielernamen gehören nicht in den Gerätespeicher).
+    verlauf: [],
+    // Kennung der Ansage, die gerade erklingt (Original oder Wiederholung).
+    spieltId: null,
   };
 
   /* ── Stimme des Geräts ─────────────────────────────────────────── */
@@ -132,7 +143,7 @@ export function ansageKern(opt) {
     });
   }
 
-  function audioSpielen(e) {
+  function audioLaden(e) {
     var ctx = audioKontext();
     if (!ctx || !e.audio) return Promise.reject(new Error("kein Audio"));
     var abbruch = w.AbortController ? new w.AbortController() : null;
@@ -154,19 +165,36 @@ export function ansageKern(opt) {
     });
     return geladen.then(function (puffer) {
       w.clearTimeout(ladeFrist);
-      return new Promise(function (fertig) {
-        var erledigt = false;
-        var ende = function () { if (!erledigt) { erledigt = true; fertig(); } };
-        var quelle = ctx.createBufferSource();
-        quelle.buffer = puffer;
-        quelle.connect(ctx.destination);
-        quelle.onended = ende;
-        w.setTimeout(ende, puffer.duration * 1000 + AUDIO_NACHLAUF_MS);
-        quelle.start();
-      });
+      return puffer;
     }, function (err) {
       w.clearTimeout(ladeFrist);
       throw err;
+    });
+  }
+
+  function pufferSpielen(puffer) {
+    var ctx = audioKontext();
+    if (!ctx) return Promise.reject(new Error("kein Ton"));
+    return new Promise(function (fertig) {
+      var erledigt = false;
+      var ende = function () { if (!erledigt) { erledigt = true; fertig(); } };
+      var quelle = ctx.createBufferSource();
+      quelle.buffer = puffer;
+      quelle.connect(ctx.destination);
+      quelle.onended = ende;
+      w.setTimeout(ende, puffer.duration * 1000 + AUDIO_NACHLAUF_MS);
+      quelle.start();
+    });
+  }
+
+  /* Audio vom Turnier-PC — für eine Wiederholung das schon geladene aus dem
+     Verlauf (das auf dem PC nach einer Minute verfällt). Das frisch geladene
+     landet am Verlaufseintrag, damit ↻ es später ohne Abruf spielen kann. */
+  function audioSpielen(e, v) {
+    if (v && v.puffer) return pufferSpielen(v.puffer);
+    return audioLaden(e).then(function (puffer) {
+      if (v) v.puffer = puffer;
+      return pufferSpielen(puffer);
     });
   }
 
@@ -201,20 +229,35 @@ export function ansageKern(opt) {
     var stueck = z.warteschlange.shift();
     if (!stueck) return;
     var belegung = (z.feed && z.feed.belegung) || [];
-    if (!nochAbspielbar(stueck.e, belegung, stueck.empfangen, jetzt())) {
+    // Eine Wiederholung hat der Nutzer selbst angefordert — sie verfällt
+    // nicht und wird nicht gegen die Belegung geprüft.
+    if (!stueck.wiederholung && !nochAbspielbar(stueck.e, belegung, stueck.empfangen, jetzt())) {
       naechste();
       return;
     }
     z.spielt = true;
     var e = stueck.e;
+    var v = stueck.verlauf || null;
+    // Ein Original kommt in den Verlauf, sobald es erklingt — wer nicht hört,
+    // liest mit, während gesprochen wird. Eine Wiederholung ist kein neuer
+    // Eintrag.
+    if (mitVerlauf && !stueck.wiederholung) {
+      v = { id: e.id, ms: jetzt(), text: ansageText(e), e: e, puffer: null };
+      z.verlauf = verlaufAufnehmen(z.verlauf, v, ANSAGE_VERLAUF_MAX);
+    }
+    z.spieltId = e.id;
+    melden();
     (e.gong ? gongSpielen(e.gong) : Promise.resolve())
       .then(function () {
-        return audioSpielen(e).catch(function () { return segmenteSprechen(e); });
+        return audioSpielen(e, v).catch(function () { return segmenteSprechen(e); });
       })
       .catch(function () { /* weiter mit der nächsten */ })
       .then(function () {
         z.spielt = false;
-        z.letzte = { ms: jetzt(), text: String((e.segmente || []).join(" ")).slice(0, 140) };
+        z.spieltId = null;
+        if (!stueck.wiederholung) {
+          z.letzte = { ms: jetzt(), text: String((e.segmente || []).join(" ")).slice(0, 140) };
+        }
         melden();
         naechste();
       });
@@ -252,11 +295,39 @@ export function ansageKern(opt) {
     hallenMelden(halls);
   }
 
+  /* Spielt eine Ansage aus dem Verlauf noch einmal — nur auf diesem Gerät,
+     hinten in derselben strikten Schlange (nie über eine laufende Ansage).
+     Der Tipp auf ↻ ist eine Nutzergeste: Er gibt den Ton frei, falls nötig —
+     und die Schlange läuft erst weiter, wenn der Ton wieder läuft, sonst
+     fiele der Gong weg (Kontext nach Anruf/Bildschirm aus angehalten).
+     Mehrfaches Tippen stapelt nichts: Liegt dieselbe Ansage schon als
+     Wiederholung in der Schlange, bleibt es bei der einen. */
+  function wiederholen(id) {
+    var auftrag = wiederholungsAuftrag(z.verlauf, id);
+    if (!auftrag) return false;
+    var schonDa = z.warteschlange.some(function (s) { return s.wiederholung && s.e.id === id; });
+    if (schonDa) return true;
+    z.warteschlange.push(auftrag);
+    var ctx = audioKontext();
+    if (ctx && ctx.state !== "running") {
+      freischalten();
+      var weiter = function () { naechste(); };
+      try { ctx.resume().then(weiter, weiter); } catch (e) { weiter(); }
+      return true;
+    }
+    naechste();
+    return true;
+  }
+
   function halleWaehlen(halle) {
     var vorher = z.halle;
     z.halle = String(halle || "");
-    // Neue Halle: Was schon in der Schlange liegt, gehört zur alten.
-    if (vorher !== z.halle) z.warteschlange = [];
+    // Neue Halle: Was schon in der Schlange liegt, gehört zur alten — bis auf
+    // Wiederholungen, die der Nutzer selbst angefordert hat. Der Verlauf
+    // bleibt stehen: Er ist das, was dieses Gerät gespielt hat.
+    if (vorher !== z.halle) {
+      z.warteschlange = z.warteschlange.filter(function (s) { return s.wiederholung; });
+    }
     melden();
   }
 
@@ -325,6 +396,7 @@ export function ansageKern(opt) {
     abfragen: abfragen,
     freischalten: freischalten,
     halleWaehlen: halleWaehlen,
+    wiederholen: wiederholen,
     halleOk: halleOk,
     tonPruefen: tonPruefen,
     hatGeraeteStimme: hatGeraeteStimme,

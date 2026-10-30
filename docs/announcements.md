@@ -393,6 +393,38 @@ freischalten** tippen. Danach spricht sie selbst.
 <!-- pruef: "/ansage" in src-tauri/src/tablet/server.rs -->
 <!-- pruef: "Ton freischalten" in src-tauri/assets/ansage.html -->
 
+**Mitlesen und Wiederholen (seit v0.9.315):** Die zuletzt gespielte Ansage
+steht **sehr groß** auf dem Bildschirm — die Schrift passt sich der
+Textlänge an, im Hoch- wie im Querformat, damit auch Hörlose mitlesen können.
+Darunter (quer: rechts daneben) stehen die **Letzten Ansagen**: die fünf
+zuletzt gespielten, die neueste oben, je mit Uhrzeit (Uhr des Geräts) und
+einem kleinen **↻**-Knopf.
+<!-- pruef: "Letzte Ansagen" in src-tauri/assets/ansage.html -->
+<!-- pruef: "auf diesem Gerät wiederholen" in src-tauri/assets/ansage.html -->
+<!-- pruef: "ANSAGE_VERLAUF_MAX = 5" in src/io/ansageSeite.mjs -->
+
+- **↻ spielt nur auf diesem Gerät** — der Turnier-PC erfährt davon nichts,
+  andere Seiten der Halle bleiben still. Die Wiederholung wartet, bis eine
+  laufende Ansage zu Ende ist, und kommt mit Gong wie das Original. Sie gilt
+  auch, wenn inzwischen ein anderes Spiel auf dem Feld steht oder die Minute
+  abgelaufen ist — sie ist ja ausdrücklich gewünscht. Mehrfaches Tippen
+  spielt sie trotzdem nur einmal; war der Ton angehalten (Anruf, Bildschirm
+  aus), gibt der Tipp ihn wieder frei.
+- **Audio:** Die Seite hält das Audio der fünf im Speicher, denn auf dem
+  Turnier-PC verfällt es nach einer Minute. Ohne Audio (Gerätestimme) spricht
+  die Gerätestimme den Text erneut.
+- **Was in die Liste kommt:** nur, was die Seite gespielt hat — keine
+  verfallenen, keine für ein anderes Spiel, keine einer fremden Halle. Eine
+  Wiederholung ist kein neuer Eintrag.
+- **Nichts bleibt liegen:** Die Liste lebt nur in der offenen Seite. Neu
+  laden leert sie; im Gerätespeicher stehen keine Spielernamen. Beim
+  Wechsel der Halle bleibt sie stehen — sie zeigt, was dieses Gerät gespielt
+  hat.
+- **Grenze:** Text erscheint nur, wenn der Turnier-PC die Ansage für diese
+  Halle erzeugt — also nur, solange in der Halle eine Seite mit
+  freigeschaltetem Ton zuhört. Eine Seite nur zum Mitlesen, ohne Ton, gibt es
+  (noch) nicht. Die Monitor-Seiten im Ansage-Modus zeigen keinen Verlauf.
+
 Was die Seite spricht: die Aufträge der Turnierleitungs-Seite (Aufruf,
 Nachruf, Besetzung, „Bitte beginnen", Bedienung), Freitexte, die
 Ansage-Knöpfe der Desktop-App (Feld aufrufen, Vorbereitungs-Aufruf und
@@ -723,7 +755,9 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
   `commands.rs` `ansage_*`, `src-tauri/assets/ansage.html` mit Inline-Kopien
   von `src/io/ansageSeite.mjs` (Entscheidungen), `src/io/gongKlang.mjs` und
   `src/io/ansageKern.mjs` (Abfrage, Warteschlange, Fristen, Präsenz; seit
-  v0.9.313) — dieselben drei Kopien tragen `monitor.html`, `overview.html`
+  v0.9.313; Verlauf + Wiederholen mit `verlauf: true` seit v0.9.315 —
+  `ansageText`/`verlaufAufnehmen`/`wiederholungsAuftrag`/`schriftSuchen` in
+  `ansageSeite.mjs`) — dieselben drei Kopien tragen `monitor.html`, `overview.html`
   und `combo.html` für den Ansage-Modus (`ansageMonitorStarten`)
   (`scripts/test-ansage-seite.mjs`, `scripts/test-gong-klang.mjs`,
   `scripts/test-ansage-kern.mjs` — Verhalten mit Attrappen + Drift über alle
