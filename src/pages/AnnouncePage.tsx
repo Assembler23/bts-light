@@ -15,11 +15,12 @@ import {
 } from "lucide-react";
 import { publishFreetext, saveConfig, tabletOverview } from "../api";
 import { AnnounceSettings } from "../components/AnnounceSettings";
+import { AnsageSeitenPanel } from "../components/AnsageSeitenPanel";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { announceCourt } from "../io/announceCourt";
+import { vorbereitungAnsagen } from "../io/ansageTeilen";
 import {
   disciplineWithClass,
-  playPreparationAnnouncement,
   playTestAnnouncement,
   resolveAnnouncementLanguage,
 } from "../io/announcer";
@@ -180,7 +181,7 @@ export function AnnouncePage({
     const names = side === "a" ? p.team1 : p.team2;
     const nats = side === "a" ? p.team1_nationalities : p.team2_nationalities;
     const lang = resolveAnnouncementLanguage(nats, announce.language_mode);
-    void playPreparationAnnouncement(
+    vorbereitungAnsagen(
       {
         discipline: (p.discipline || "unknown") as Discipline,
         className: p.class_label,
@@ -590,6 +591,7 @@ export function AnnouncePage({
 
       {/* Alle Ansage-Einstellungen (Sprache, Stimmen, Tempo, Gong, Aussprache,
           Halle, Azure) — in den Einstellungen wird das Modul nur an-/ausgeschaltet. */}
+      <AnsageSeitenPanel config={config} onSaved={onConfigSaved} />
       <AnnounceSettings config={config} onSaved={onConfigSaved} />
     </main>
   );

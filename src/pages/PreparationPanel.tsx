@@ -17,10 +17,8 @@ import {
   queueReorder,
   retractPreparation,
 } from "../api";
-import {
-  playPreparationAnnouncement,
-  resolveAnnouncementLanguage,
-} from "../io/announcer";
+import { resolveAnnouncementLanguage } from "../io/announcer";
+import { vorbereitungAnsagen } from "../io/ansageTeilen";
 import { azureOption } from "../io/azureAnnounce";
 import { useDragReorder } from "../state/useDragReorder";
 import type {
@@ -251,7 +249,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
       [...c.team1_nationalities, ...c.team2_nationalities],
       announce.language_mode,
     );
-    void playPreparationAnnouncement(
+    vorbereitungAnsagen(
       {
         discipline: (c.discipline || "unknown") as Discipline,
         className: c.class_label,
@@ -281,7 +279,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
     const names = side === "a" ? c.team1 : c.team2;
     const nats = side === "a" ? c.team1_nationalities : c.team2_nationalities;
     const lang = resolveAnnouncementLanguage(nats, announce.language_mode);
-    void playPreparationAnnouncement(
+    vorbereitungAnsagen(
       {
         discipline: (c.discipline || "unknown") as Discipline,
         className: c.class_label,

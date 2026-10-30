@@ -22,6 +22,7 @@ import { Footer } from "./components/Footer";
 import { CloudAnnounceSlave } from "./components/CloudAnnounceSlave";
 import { FreetextAnnouncer } from "./components/FreetextAnnouncer";
 import { AnnounceJobPlayer } from "./components/AnnounceJobPlayer";
+import { AnsageVertoner } from "./components/AnsageVertoner";
 import { MatchAnnouncer } from "./components/MatchAnnouncer";
 import type { NavView, SettingsFocus } from "./components/SideNav";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
@@ -77,6 +78,7 @@ function defaultConfig(): AppConfig {
       share_corrections: false,
       announce_scorekeeper: true,
       announce_umpire: true,
+      page_audio: false,
     },
     azure_tts: {
       enabled: false,
@@ -547,6 +549,11 @@ function App() {
         <AnnounceJobPlayer
           announce={config.announce}
           azureTts={config.azure_tts}
+        />
+        <AnsageVertoner
+          announce={config.announce}
+          azureTts={config.azure_tts}
+          slave={config.slave_mode}
         />
         <CloudAnnounceSlave
           announce={config.announce}

@@ -51,6 +51,10 @@ export interface AnnounceConfig {
   /** Schiedsrichter/Aufschlagrichter in der Feldansage nennen? Default an.
    *  Der eigene Knopf „SR/AR ansagen" bleibt davon unberührt. */
   announce_umpire: boolean;
+  /** „Audio für Ansage-Seiten erzeugen" (Spec ansage-im-browser): Der PC
+   *  vertont Ansagen für die Browser-Seite `/ansage` — unabhängig davon, ob
+   *  er selbst spricht (`enabled`). Standard aus. */
+  page_audio: boolean;
 }
 
 /** Azure Neural TTS für die Ansage (Rust: config::AzureTtsConfig). */
@@ -1155,4 +1159,50 @@ export interface CourtSwitchesView {
   sr: boolean;
   ar: boolean;
   operator: boolean;
+}
+
+// ─── Ansage-Seite im Browser (Spec ansage-im-browser) ──────────────────────
+
+/** Wofür ein Ansage-Eintrag steht (Rust: relay_proto::AnsageArt). */
+export type AnsageArt =
+  | "court_call"
+  | "prep_call"
+  | "officials"
+  | "start_play"
+  | "scorekeeper_call"
+  | "freetext"
+  | "desktop"
+  | "court_assigned";
+
+/** Eine fertige Ansage zum Vertonen (Rust: commands::AnsageAuftrag). */
+export interface AnsageAuftrag {
+  art: AnsageArt;
+  hall: string;
+  courtId?: number;
+  matchId?: number;
+  gong?: "match" | "info";
+  lang: "de" | "en";
+  rate: number;
+  segmente: string[];
+  ssml?: string;
+}
+
+/** Vom Kern beanspruchte Quellen für den Vertoner (Rust: OffeneQuellen). */
+export interface AnsageQuellen {
+  jobs: AnnounceJob[];
+  freitexte: FreetextItem[];
+}
+
+/** Zuhörer der Ansage-Seiten (Rust: commands::AnsageHoerer). */
+export interface AnsageHoerer {
+  hallen: string[];
+  doppelbetrieb: string[];
+}
+
+/** Link einer Ansage-Seite (Rust: commands::AnsageLink). */
+export interface AnsageLink {
+  hall: string;
+  url: string;
+  url_tls: string;
+  qr_svg: string;
 }

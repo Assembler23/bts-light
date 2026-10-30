@@ -38,7 +38,17 @@ pub async fn synthesize(
             return Ok(bytes);
         }
     }
+    let bytes = synthesize_ohne_cache(region, key, ssml).await?;
+    // Best-effort cachen (Fehler beim Schreiben sind nicht fatal).
+    let _ = std::fs::create_dir_all(cache_dir);
+    let _ = std::fs::write(&cached, &bytes);
+    Ok(bytes)
+}
 
+/// Wie [`synthesize`], aber **ohne** Plattencache — für die Ansage-Seiten
+/// (Spec `ansage-im-browser`): Deren Audio enthält Spielernamen und darf nur
+/// 60 s im RAM leben, nie auf der Platte.
+pub async fn synthesize_ohne_cache(region: &str, key: &str, ssml: &str) -> Result<Vec<u8>, String> {
     let url = format!("https://{region}.tts.speech.microsoft.com/cognitiveservices/v1");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -75,9 +85,6 @@ pub async fn synthesize(
     if bytes.is_empty() {
         return Err("Azure-TTS lieferte leeres Audio".to_string());
     }
-    // Best-effort cachen (Fehler beim Schreiben sind nicht fatal).
-    let _ = std::fs::create_dir_all(cache_dir);
-    let _ = std::fs::write(&cached, &bytes);
     Ok(bytes)
 }
 

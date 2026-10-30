@@ -2,9 +2,54 @@
 // Paarung). Gemeinsam genutzt von der Ansagen-Seite und der Spielübersicht
 // („nochmal aufrufen"). Sprache automatisch/konfiguriert; der auslösende Klick
 // ist die User-Geste, die WebView2-Audio entsperrt.
-import { playAnnouncement, resolveAnnouncementLanguage } from "./announcer";
+//
+// Jede Ansage gibt es zweifach: als reinen Builder (`…Ansage`, liefert die
+// fertige Ansage ohne Ton — für den TL-Auftragssprecher und den Vertoner der
+// Ansage-Seiten) und als Desktop-Knopf (`announce…`), der sie am PC spielt
+// und zusätzlich an die Ansage-Seiten der Halle gibt (Spec
+// `ansage-im-browser`, Art `desktop`).
+import {
+  playPrepared,
+  prepareAnnouncement,
+  resolveAnnouncementLanguage,
+  type AnnounceOptions,
+  type PreparedAnnouncement,
+} from "./announcer";
 import { azureOption } from "./azureAnnounce";
+import { anSeitenGeben } from "./ansageTeilen";
 import type { AnnounceConfig, AzureTtsConfig, CourtOverview } from "../types";
+
+/** Die Abspiel-Optionen aus den Ansage-Einstellungen für eine Sprache. */
+export function ansageOptionen(
+  announce: AnnounceConfig,
+  lang: "de" | "en",
+  azureTts?: AzureTtsConfig,
+): AnnounceOptions {
+  return {
+    rate: announce.rate,
+    voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
+    gong: announce.gong,
+    nameOverrides: announce.name_overrides,
+    nameOverridesEnabled: announce.name_overrides_enabled,
+    azure: azureOption(azureTts),
+  };
+}
+
+/** Am PC spielen und an die Ansage-Seiten der Feld-Halle geben. */
+function amPcUndAufSeiten(
+  p: PreparedAnnouncement,
+  court: CourtOverview,
+  azureTts: AzureTtsConfig | undefined,
+  mitSpiel: boolean,
+): void {
+  void playPrepared(p, azureOption(azureTts)?.synthesize);
+  anSeitenGeben(p, {
+    art: "desktop",
+    hall: court.location,
+    courtId: court.court_id,
+    matchId: mitSpiel && court.match_id > 0 ? court.match_id : undefined,
+  });
+}
 
 /**
  * `side` benennt eine einzelne Partei (Nachruf „2. Aufruf für Partei A/B"
@@ -21,6 +66,22 @@ export function announceCourt(
   callStage: 1 | 2 | 3 = 1,
   side: "both" | "team1" | "team2" = "both",
 ): void {
+  amPcUndAufSeiten(
+    courtAnsage(court, announce, azureTts, callStage, side),
+    court,
+    azureTts,
+    true,
+  );
+}
+
+/** Builder zu [`announceCourt`]. */
+export function courtAnsage(
+  court: CourtOverview,
+  announce: AnnounceConfig,
+  azureTts?: AzureTtsConfig,
+  callStage: 1 | 2 | 3 = 1,
+  side: "both" | "team1" | "team2" = "both",
+): PreparedAnnouncement {
   const nurEine = side === "team1" || side === "team2";
   const zweite = side === "team2";
   const namen = nurEine && zweite ? court.team2 : court.team1;
@@ -28,7 +89,7 @@ export function announceCourt(
     ? (zweite ? court.team2_nationalities : court.team1_nationalities)
     : [...court.team1_nationalities, ...court.team2_nationalities];
   const lang = resolveAnnouncementLanguage(nats, announce.language_mode);
-  void playAnnouncement(
+  return prepareAnnouncement(
     {
       courtLabel: court.court,
       discipline: court.discipline,
@@ -55,14 +116,7 @@ export function announceCourt(
       callStage,
     },
     lang,
-    {
-      rate: announce.rate,
-      voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
-      gong: announce.gong,
-      nameOverrides: announce.name_overrides,
-      nameOverridesEnabled: announce.name_overrides_enabled,
-      azure: azureOption(azureTts),
-    },
+    ansageOptionen(announce, lang, azureTts),
   );
 }
 
@@ -78,12 +132,22 @@ export function announceOfficials(
   announce: AnnounceConfig,
   azureTts?: AzureTtsConfig,
 ): void {
-  if (court.sr.length === 0 && court.ar.length === 0) return;
+  const p = officialsAnsage(court, announce, azureTts);
+  if (p) amPcUndAufSeiten(p, court, azureTts, false);
+}
+
+/** Builder zu [`announceOfficials`]; `null` ohne Besetzung. */
+export function officialsAnsage(
+  court: CourtOverview,
+  announce: AnnounceConfig,
+  azureTts?: AzureTtsConfig,
+): PreparedAnnouncement | null {
+  if (court.sr.length === 0 && court.ar.length === 0) return null;
   const lang = resolveAnnouncementLanguage(
     [...court.team1_nationalities, ...court.team2_nationalities],
     announce.language_mode,
   );
-  void playAnnouncement(
+  return prepareAnnouncement(
     {
       courtLabel: court.court,
       discipline: court.discipline,
@@ -94,14 +158,7 @@ export function announceOfficials(
       officialsOnly: true,
     },
     lang,
-    {
-      rate: announce.rate,
-      voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
-      gong: announce.gong,
-      nameOverrides: announce.name_overrides,
-      nameOverridesEnabled: announce.name_overrides_enabled,
-      azure: azureOption(azureTts),
-    },
+    ansageOptionen(announce, lang, azureTts),
   );
 }
 
@@ -122,11 +179,20 @@ export function announceStartPlay(
   announce: AnnounceConfig,
   azureTts?: AzureTtsConfig,
 ): void {
+  amPcUndAufSeiten(startPlayAnsage(court, announce, azureTts), court, azureTts, true);
+}
+
+/** Builder zu [`announceStartPlay`]. */
+export function startPlayAnsage(
+  court: CourtOverview,
+  announce: AnnounceConfig,
+  azureTts?: AzureTtsConfig,
+): PreparedAnnouncement {
   const lang = resolveAnnouncementLanguage(
     [...court.team1_nationalities, ...court.team2_nationalities],
     announce.language_mode,
   );
-  void playAnnouncement(
+  return prepareAnnouncement(
     {
       courtLabel: court.court,
       discipline: court.discipline,
@@ -135,14 +201,7 @@ export function announceStartPlay(
       startPlayOnly: true,
     },
     lang,
-    {
-      rate: announce.rate,
-      voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
-      gong: announce.gong,
-      nameOverrides: announce.name_overrides,
-      nameOverridesEnabled: announce.name_overrides_enabled,
-      azure: azureOption(azureTts),
-    },
+    ansageOptionen(announce, lang, azureTts),
   );
 }
 
@@ -166,6 +225,18 @@ export function announceScorekeeper(
   announce: AnnounceConfig,
   azureTts?: AzureTtsConfig,
 ): void {
+  const p = scorekeeperAnsage(court, names, stage, announce, azureTts);
+  if (p) amPcUndAufSeiten(p, court, azureTts, true);
+}
+
+/** Builder zu [`announceScorekeeper`]; `null` ohne Namen. */
+export function scorekeeperAnsage(
+  court: CourtOverview,
+  names: string[],
+  stage: 1 | 2 | 3,
+  announce: AnnounceConfig,
+  azureTts?: AzureTtsConfig,
+): PreparedAnnouncement | null {
   // KEIN Schalter-Guard hier — das ist der ausdrückliche Knopf „Bedienung
   // nachrufen" aus der Spielübersicht bzw. TL-Web (ADR 0040: die
   // ausdrücklichen Knöpfe bleiben unberührt). Wer ihn drückt, sieht den Namen
@@ -179,12 +250,12 @@ export function announceScorekeeper(
   // Zuweisungen und füllt den Hinweis weiter (Review 18.08.2026). In der
   // automatischen Feld-Ansage hängt genau das am Schalter
   // `announce_scorekeeper`; hier steht der Name auf dem Knopf.
-  if (names.length === 0) return;
+  if (names.length === 0) return null;
   const lang = resolveAnnouncementLanguage(
     [...court.team1_nationalities, ...court.team2_nationalities],
     announce.language_mode,
   );
-  void playAnnouncement(
+  return prepareAnnouncement(
     {
       courtLabel: court.court,
       discipline: court.discipline,
@@ -195,13 +266,6 @@ export function announceScorekeeper(
       scorekeeperOnly: true,
     },
     lang,
-    {
-      rate: announce.rate,
-      voiceURI: lang === "de" ? announce.voice_de : announce.voice_en,
-      gong: announce.gong,
-      nameOverrides: announce.name_overrides,
-      nameOverridesEnabled: announce.name_overrides_enabled,
-      azure: azureOption(azureTts),
-    },
+    ansageOptionen(announce, lang, azureTts),
   );
 }
