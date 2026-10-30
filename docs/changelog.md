@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.310
+
+- **Turnierleitung: Zugangs-Adresse anklickbar.** Die Adresse unter dem
+  QR-Code eines neu gekoppelten Geräts öffnet per Klick direkt im Browser —
+  praktisch zum Testen am Turnier-PC selbst.
+
 ## v0.9.309
 
 - **Punktverlauf und Aufschlag an badhub.** bts-light schickt den
