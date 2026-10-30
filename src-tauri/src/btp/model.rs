@@ -362,8 +362,9 @@ pub struct BtpMatch {
     /// sagt allein dieses Feld: Es ist die Reihenfolge der Spielliste, die
     /// die Turnierleitung ausdruckt und abarbeitet.
     ///
-    /// `None`, wenn das Turnier sie nicht pflegt — dann bleibt es bei der
-    /// Spielnummer.
+    /// `None` bei BTP-Wert 0. Ein solches Spiel steht in BTP **vor** den
+    /// geordneten seines Zeitfensters; untereinander entscheiden Auslosung
+    /// und Spielnummer (`assign::sort_key_parts`).
     pub display_order: Option<i64>,
     /// Zeilenfarbe aus BTPs Menü „Hervorheben" (`Match.Highlight`, Spec
     /// `tl-zeilenfarbe`): `0` = keine, `1`–`6` = Gelb, Pink, Orange, Blau,

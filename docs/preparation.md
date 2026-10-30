@@ -76,7 +76,8 @@ nicht. Details: [schiedsrichterzettel.md](schiedsrichterzettel.md).
 
 - **Reihenfolge:** gerufene Spiele zuerst, danach der manuelle Präfix
   (seit 15.08.2026 **hallenübergreifend**, ADR 0026), sonst der
-  **BTP-Zeitplan** (`PlannedTime`), dann Auslosung (`DrawID`)/
+  **BTP-Zeitplan** (`PlannedTime`), darin BTPs Reihenfolge im Zeitfenster
+  (`DisplayOrder`, seit v0.9.317), dann Auslosung (`DrawID`)/
   Spielnummer/ID — `assign::resolve_and_sort_key`, **eine** Definition an
   allen fünf Sortier-Stellen (Details, Datenmodell und Messbefund zu
   `DisplayOrder`: [`docs/btp_protocol.md`](btp_protocol.md), Spec

@@ -291,7 +291,7 @@ async fn does_btp_accept_a_displayorder_write_for_a_scheduled_match() {
     println!("########################################");
 
     // Falls angenommen: gleich zeigen, wie sich das auf unseren eigenen
-    // Sortierschlüssel auswirkt (PlannedTime → DisplayOrder → MatchNr → ID)
+    // Sortierschlüssel auswirkt (PlannedTime → DisplayOrder → DrawID → MatchNr → ID)
     // — beantwortet zugleich, ob der neue Wert das Match innerhalb seines
     // PlannedTime-Slots tatsächlich nach hinten schiebt.
     if nach_match.display_order == Some(ziel_display_order) {
