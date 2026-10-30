@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.316
+
+- **Ansage-Seite hochkant: große Ansage füllt den Bildschirm.** Auf Handys
+  im Hochformat ist die Liste der letzten Ansagen jetzt auf eine Leiste
+  „Letzte Ansagen ▾" eingeklappt und per Tipp aufklappbar; die große
+  Ansage bekommt dadurch auf einem üblichen Handy gut drei Viertel statt
+  knapp die Hälfte der Höhe (gemessen 360×640: 77 % statt 43 %).
+  Ein eigener ↻-Knopf an der großen Ansage wiederholt die letzte auch ohne
+  Aufklappen. Quer bleibt alles wie bisher.
+- **Handbuch: Android-Handy erreicht den Turnier-PC nicht.** Neuer Hinweis
+  für Chrome auf neueren Android-Versionen („ERR_TOO_MANY_RETRIES", in
+  Firefox geht es): Chrome braucht die Berechtigung für das lokale Netz.
+
 ## v0.9.315
 
 - **Ansage-Seite: mitlesen und wiederholen.** Die Seite `/ansage` zeigt die

@@ -15,8 +15,10 @@
   Gong (hier erzeugt) → Audio vom Turnier-PC → sonst die Gerätestimme.
 
   Die zuletzt gespielte Ansage steht sehr groß zum Mitlesen (Hörlose),
-  darunter die letzten fünf mit ↻ zum Wiederholen nur auf diesem Gerät —
-  das Audio hält die Seite dafür im Speicher, nie im Gerätespeicher.
+  darunter (quer: daneben) die letzten fünf mit ↻ zum Wiederholen nur auf
+  diesem Gerät — das Audio hält die Seite dafür im Speicher, nie im
+  Gerätespeicher. Hochkant ist der Verlauf eingeklappt; ↻ an der großen
+  Ansage wiederholt die letzte auch ohne Aufklappen.
 -->
 <style>
   :root {
@@ -58,7 +60,10 @@
   #gross { flex: 1 1 auto; min-height: 40vh; display: flex; flex-direction: column; gap: .3rem;
     background: var(--surface); border: 1px solid var(--line); border-radius: 1rem; padding: .6rem .9rem; }
   #gross.laeuft { border-color: var(--akzent); }
-  #gross-zeit { flex: none; color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
+  /* Kopfzeile der großen Ansage: Uhrzeit links, ↻ rechts — so lässt sich
+     die letzte Ansage auch bei eingeklapptem Verlauf wiederholen. */
+  #gross-kopf { flex: none; display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+  #gross-zeit { color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
   #gross.laeuft #gross-zeit { color: var(--akzent); }
   /* Schriftgröße setzt das Skript (`grossEinpassen`): so groß, dass der Text
      gerade noch ohne Scrollen hineinpasst. Wörter brechen nur im Notfall. */
@@ -84,6 +89,11 @@
     background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
   .nochmal:active { background: var(--line); }
   #verlauf-leer { color: var(--muted); font-size: .9rem; padding: .3rem 0; }
+  /* Aufklapper des Verlaufs — nur hochkant sichtbar (siehe unten). */
+  #verlauf-auf { display: none; width: 100%; min-height: 2.75rem; padding: 0 .2rem; background: none; color: var(--text);
+    align-items: center; justify-content: space-between; gap: .5rem; font-size: .95rem; font-weight: 600; text-align: left; }
+  #verlauf-auf .pfeil { flex: none; color: var(--muted); font-size: 1.1rem; transition: transform .15s; }
+  #verlauf-auf[aria-expanded="true"] .pfeil { transform: rotate(180deg); }
 
   /* Quer (Laptop, Tablet quer, Handy quer): Verlauf rechts daneben, damit
      die große Ansage die volle Höhe bekommt. */
@@ -92,10 +102,15 @@
     #gross { min-height: 0; }
     #verlauf-karte { width: min(24rem, 34%); align-self: flex-start; max-height: 100%; overflow-y: auto; box-sizing: border-box; }
   }
-  /* Hochkant: Statuszeile unter Titel und Hallenwahl, Verlauf einzeilig —
-     jeder Zentimeter geht an die große Ansage. */
+  /* Hochkant: Statuszeile unter Titel und Hallenwahl, Verlauf standardmäßig
+     auf eine Leiste eingeklappt — die große Ansage soll den Bildschirm
+     möglichst füllen (zum Mitlesen für Hörlose). */
   @media not ((orientation: landscape) and (min-width: 560px)) {
     .status { order: 3; width: 100%; }
+    #verlauf-karte { padding: .1rem .5rem .1rem .6rem; }
+    #verlauf-karte h2 { display: none; }
+    #verlauf-auf { display: flex; }
+    #verlauf-karte.zu #verlauf-inhalt { display: none; }
     #verlauf .text { -webkit-line-clamp: 1; }
   }
 </style>
@@ -125,13 +140,22 @@
   <div class="buehne">
     <!-- Die zuletzt gespielte Ansage, so groß wie möglich: zum Mitlesen. -->
     <section id="gross" aria-label="Letzte Ansage">
-      <div id="gross-zeit">Letzte Ansage</div>
+      <div id="gross-kopf">
+        <div id="gross-zeit">Letzte Ansage</div>
+        <button id="gross-nochmal" type="button" class="nochmal aus" title="Auf diesem Gerät wiederholen"
+          aria-label="Letzte Ansage auf diesem Gerät wiederholen">↻</button>
+      </div>
       <p id="gross-text" class="leer"><span>Noch keine Ansage</span></p>
     </section>
-    <section id="verlauf-karte" aria-label="Letzte Ansagen">
+    <section id="verlauf-karte" class="zu" aria-label="Letzte Ansagen">
       <h2>Letzte Ansagen</h2>
-      <div id="verlauf-leer">Hier erscheinen die letzten fünf Ansagen — ↻ spielt eine auf diesem Gerät noch einmal.</div>
-      <ol id="verlauf"></ol>
+      <button id="verlauf-auf" type="button" aria-expanded="false" aria-controls="verlauf-inhalt">
+        <span id="verlauf-auf-text">Letzte Ansagen</span><span class="pfeil" aria-hidden="true">▾</span>
+      </button>
+      <div id="verlauf-inhalt">
+        <div id="verlauf-leer">Hier erscheinen die letzten fünf Ansagen — ↻ spielt eine auf diesem Gerät noch einmal.</div>
+        <ol id="verlauf"></ol>
+      </div>
     </section>
   </div>
 </main>
@@ -868,6 +892,26 @@ function gemerkt() {
   try { return localStorage.getItem(SPEICHER) || ""; } catch (e) { return ""; }
 }
 
+/* Verlauf hochkant auf- oder zugeklappt: reine Bedien-Vorliebe des Geräts,
+   gespeichert wird nur „1"/„0" — nie ein Ansagetext. */
+var SPEICHER_OFFEN = "bts-ansage-verlauf-offen";
+function verlaufOffenSetzen(offen, merkenAuch) {
+  $("verlauf-karte").classList.toggle("zu", !offen);
+  $("verlauf-auf").setAttribute("aria-expanded", offen ? "true" : "false");
+  if (merkenAuch) {
+    try { localStorage.setItem(SPEICHER_OFFEN, offen ? "1" : "0"); } catch (e) { /* privat/gesperrt */ }
+  }
+  // Die große Ansage bekommt dadurch mehr oder weniger Platz.
+  grossMass = "";
+  grossEinpassen();
+}
+function verlaufUmschalten() {
+  verlaufOffenSetzen($("verlauf-karte").classList.contains("zu"), true);
+}
+function verlaufOffenGemerkt() {
+  try { return localStorage.getItem(SPEICHER_OFFEN) === "1"; } catch (e) { return false; }
+}
+
 /* ── Hallenwahl ────────────────────────────────────────────────────── */
 function hallenSetzen(halls) {
   var sel = $("halle");
@@ -958,6 +1002,15 @@ function verlaufZeichnen() {
     ? uhrzeit(neueste.ms) + (z.spieltId === neueste.id ? " · läuft" : "")
     : "Letzte Ansage";
   $("gross").classList.toggle("laeuft", !!neueste && z.spieltId === neueste.id);
+  // ↻ an der großen Ansage: derselbe Knopf bleibt stehen, nur sein Ziel
+  // wechselt — so behält er den Fokus.
+  var grossKnopf = $("gross-nochmal");
+  zeigen("gross-nochmal", !!neueste);
+  if (neueste) {
+    grossKnopf.setAttribute("data-id", String(neueste.id));
+    grossKnopf.setAttribute("aria-label", "Letzte Ansage von " + uhrzeit(neueste.ms) + " auf diesem Gerät wiederholen");
+  }
+  $("verlauf-auf-text").textContent = v.length ? "Letzte Ansagen (" + v.length + ")" : "Letzte Ansagen";
 
   var liste = $("verlauf");
   if (marke === verlaufMarke) {
@@ -1045,6 +1098,9 @@ var kern;
   $("halle").addEventListener("change", halleGewaehlt);
   $("freischalten").addEventListener("click", freischalten);
   $("verlauf").addEventListener("click", wiederholenGeklickt);
+  $("gross-nochmal").addEventListener("click", wiederholenGeklickt);
+  $("verlauf-auf").addEventListener("click", verlaufUmschalten);
+  verlaufOffenSetzen(verlaufOffenGemerkt(), false);
   window.addEventListener("resize", function () { grossMass = ""; grossEinpassen(); });
   if (typeof speechSynthesis !== "undefined" && "onvoiceschanged" in speechSynthesis) {
     speechSynthesis.onvoiceschanged = anzeigen;

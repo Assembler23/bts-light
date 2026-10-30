@@ -270,6 +270,17 @@ nicht, taucht es auch in dessen Feldübersicht nicht als verbunden auf — das i
 für die Turnierleitung die schnellste Kontrolle. Häufigste Ursachen: falsches
 WLAN, oder die Windows-Firewall blockiert den Zugang.
 
+**Auf einem Android-Handy lädt die Seite in Chrome nicht
+(„ERR_TOO_MANY_RETRIES"), in Firefox geht es.**
+Neuere Android-Versionen verlangen für Chrome eine eigene Erlaubnis, Geräte
+im lokalen Netz zu erreichen — ohne sie kommt Chrome nicht zum Turnier-PC
+und meldet nur diesen Fehler (gesehen auf Android 17 mit Chrome 156). Abhilfe:
+Android-**Einstellungen → Apps → Chrome → Berechtigungen**, dort **Geräte in
+der Nähe** bzw. **Lokales Netzwerk** zulassen und Chrome neu starten. Chrome
+fragt beim ersten Aufruf auch selbst — wurde das abgelehnt, geht es nur noch
+über die Einstellungen. Zähl-Tablets mit der bts-light-Kiosk-App betrifft das
+nach bisherigem Stand nicht.
+
 **„Dieses Feld wird bereits geschiedst", obwohl niemand zählt.**
 Meist hängt noch eine alte Sitzung eines anderen Geräts. **Court übernehmen**
 löst das auf.
