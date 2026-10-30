@@ -2,6 +2,7 @@
 
 > Status: **Entwurf zur Freigabe 2026-10-29** (via /idee: Brief → Grill →
 > How-To → Spec). Quelle: Nutzer-Anforderung vom 29.10.2026.
+> Umsetzung: E1 v0.9.311 · **E1b v0.9.313** (Monitor-Modus + Pi-Autoplay).
 > Betroffene Crates: `src-tauri`, `relay-proto`, `relay`; Frontend `src/`;
 > `pi/`.
 > ADRs: werden je Etappe angelegt (vier neue, Nummern beim Anlegen
@@ -175,6 +176,25 @@ Der Feed enthält **keine** Azure-Felder (Region, Schlüssel, Stimme).
   `--autoplay-policy=no-user-gesture-required`. Ohne freigegebenen Ton zeigt
   die Seite einen kleinen Hinweis und meldet keine Präsenz.
 - Für bestehende Pis gilt das Flag erst nach Aktualisierung (Pi-Setup/Image).
+
+Umsetzung (v0.9.313), Entscheidungen beim Bau:
+
+- Der Kern (Abfrage, Warteschlange, Gong, Audio-Fristen, Gerätestimme,
+  Präsenz) liegt in `src/io/ansageKern.mjs` und wird mit `welt`-Attrappen
+  getestet; `ansage.html` und die drei Monitor-Seiten tragen dieselben
+  Inline-Kopien (`scripts/test-ansage-kern.mjs`). Auf den Monitor-Seiten in
+  einem eigenen `<script>`-Block, der ohne `?ansage` sofort endet.
+- Die Halle aus der Adresse ist **fest**: Kennt das Turnier sie nicht, wird
+  sie nicht verworfen (wie bei `/ansage`), sondern im Hinweis genannt.
+- `?ansage=` wandert über **jede** Geräte-Umleitung mit (auch Werbung,
+  Vorbereitung, Sieger, Zähltafel) und zählt beim Adressvergleich nicht —
+  sonst verstummte der Pi beim ersten Zielwechsel oder lüde endlos neu.
+- Cloud-Pfad (Basis ≠ `/`): kein einziger Abruf, nur der Hinweis. Ein 404
+  auf den Feed (Slave-Brücke) bremst auf einen Versuch je Minute.
+- Feed-Abruf mit 5-s-Frist und ohne Parallel-Abruf — gilt auch für
+  `/ansage`; auf einer Monitor-Seite hätten hängende Abrufe sonst die
+  Verbindungen der Anzeige selbst belegt.
+- Eine Maus-/Tastatureingabe gibt den Ton notfalls auch ohne Flag frei.
 
 ### Erst-Ansage im Kern (E2)
 

@@ -197,12 +197,14 @@ jobs:
 
       # Ansage-Seite im Browser (Spec ansage-im-browser): Bestandsaufnahme,
       # Hallen-Pflicht, nichts Falsches oder Verfallenes sprechen, Praesenz
-      # nur mit Stimme und Ton - und die Inline-Kopien in ansage.html
-      # wortgleich zu den Modulen.
+      # nur mit Stimme und Ton, Abspiel-Kern mit Fristen - und die
+      # Inline-Kopien in ansage.html und den Monitor-Seiten (E1b) wortgleich
+      # zu den Modulen.
       - name: Ansage-Seite und Gong (JS)
         run: |
           node scripts/test-ansage-seite.mjs
           node scripts/test-gong-klang.mjs
+          node scripts/test-ansage-kern.mjs
 
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde

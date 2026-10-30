@@ -484,7 +484,7 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
   function currentUrlMatches(redirectTo) {
     try {
       var here = new URL(location.href);
-      here.searchParams.delete('device'); here.searchParams.delete('rotate');
+      here.searchParams.delete('device'); here.searchParams.delete('rotate'); here.searchParams.delete('ansage');
       var there = new URL(redirectTo, location.origin);
       return here.pathname === there.pathname && here.searchParams.toString() === there.searchParams.toString();
     } catch (e) { return false; }
@@ -493,6 +493,12 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     var hereRotate = new URLSearchParams(location.search).get('rotate');
     if (hereRotate && href.indexOf('rotate=') < 0) {
       href += (href.indexOf('?') >= 0 ? '&' : '?') + 'rotate=' + encodeURIComponent(hereRotate);
+    }
+    // ?ansage=… (Ansage-Modus, Spec ansage-im-browser E1b) ebenso mitnehmen —
+    // sonst verstummte ein Pi beim ersten Zielwechsel.
+    var hereParams = new URLSearchParams(location.search);
+    if (hereParams.has('ansage') && !/[?&]ansage(=|&|$)/.test(href)) {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'ansage=' + encodeURIComponent(hereParams.get('ansage') || '');
     }
     location.href = href;
   }

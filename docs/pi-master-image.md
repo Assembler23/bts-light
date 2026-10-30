@@ -149,6 +149,16 @@ erreichen die Pis also über das normale **bts-light-Auto-Update** — ein
 neues Master-Image ist dafür **nicht** nötig. Ein neues Image braucht es
 nur, wenn sich an der Pi-Grundeinrichtung selbst etwas ändert.
 
+**So ein Fall ist v0.9.313:** Für den Ansage-Modus der Monitor-Seiten
+(`?ansage=<Halle>`, siehe [pi-setup.md](pi-setup.md) „Ton für Ansagen am TV")
+startet Chromium mit `--autoplay-policy=no-user-gesture-required`, damit der
+TV ohne Tippen sprechen darf. Ältere Images haben das Flag nicht — sie zeigen
+dann im Ansage-Modus „Ton gesperrt …" und bleiben stumm, die Anzeige selbst
+läuft unverändert. Für Hallen mit Ansage am TV das Master-Image neu bauen (auf dem Master-Pi
+das aktuelle `setup-monitor.sh` ausführen, dann `pi/build-master-image.sh`)
+oder auf den betroffenen Pis `setup-monitor.sh` erneut ausführen.
+<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/setup-monitor.sh -->
+
 ---
 
 ## Lessons Learned aus dem ersten Live-Test (2026-05-26)

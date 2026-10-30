@@ -860,6 +860,77 @@ Normalfall über den Kopplungs-Code) gilt immer die Wahl aus dem Dialog.
   Server-Zeit. Das Feld `CourtOverview.pause` wird in `overview()` 1:1 aus
   dem Tablet-`court_state` übernommen (wie `serving`).
 
+## Ansage-Modus: der TV spricht mit (seit v0.9.313)
+
+Hängt an der Monitor-Adresse `?ansage=<Halle>`, spricht die Seite die
+Ansagen dieser Halle mit — dieselben, die auch die
+[Ansage-Seite im Browser](announcements.md#ansage-seite-im-browser-seit-v09311)
+spricht (Aufrufe, Nachrufe, Freitexte), mit Gong und Stimme über den
+Lautsprecher des TVs. Die **Anzeige ändert sich dabei nicht**. Das gilt für
+die Einzelfeld-Anzeige (`/monitor`, `/court/<id>/display`), die
+Feld-Übersicht (`/info/overview`) und die Kombi-Anzeige (`/combo`).
+Spec: [features/ansage-im-browser.md](features/ansage-im-browser.md), Etappe E1b.
+<!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/combo.html -->
+<!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/overview.html -->
+<!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/monitor.html -->
+
+**Voraussetzungen:**
+
+- Am Turnier-PC ist **Audio für Ansage-Seiten erzeugen** eingeschaltet
+  (Seite **Ansagen**).
+- Der TV hängt **im Hallennetz** am Turnier-PC. Über die Cloud-Adresse
+  (`…/bts-relay/…`) bleibt der Modus vorerst stumm und zeigt einen Hinweis —
+  die Cloud folgt mit Etappe E4.
+- Der Browser darf **ohne Tippen** Ton abspielen. Am TV drückt niemand
+  „Ton freischalten"; der Pi startet Chromium deshalb mit
+  `--autoplay-policy=no-user-gesture-required` (siehe
+  [pi-setup.md](pi-setup.md), „Ton für Ansagen am TV").
+<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/setup-monitor.sh -->
+
+**Adresse eintragen:** In `bts-monitor-url.txt` auf der Karte des Pi, z. B.
+
+```text
+http://bts-light.local:8088/monitor?ansage=Halle%20A
+```
+
+Leerzeichen im Hallennamen als `%20` schreiben — das Startskript entfernt
+Leerzeichen aus der Datei. Groß-/Kleinschreibung zählt nicht. Bei einem
+Turnier mit **einer** Halle reicht `?ansage=` ohne Namen. Der Parameter
+wandert bei jeder Umstellung im Tool mit (Feld → Kombi → Übersicht → Werbung
+→ zurück); ein Pi bleibt also Sprecher, egal was er gerade zeigt. Sprechen
+tun aber nur Einzelfeld, Übersicht und Kombi — zeigt der TV gerade Werbung,
+Vorbereitung, Sieger oder die Zähltafel, schweigt er so lange.
+
+**Kleiner Hinweis unten links** — nur, wenn etwas fehlt; läuft alles, sieht
+der TV aus wie immer:
+
+| Hinweis | Ursache |
+|---|---|
+| „Ton gesperrt — der Browser braucht die Autoplay-Freigabe" | Pi ohne das Startflag (alte Einrichtung) — Pi aktualisieren |
+| „Die Halle „…" gibt es in diesem Turnier nicht" | Schreibfehler im Hallennamen |
+| „Dieses Gerät kann nicht sprechen" | Kein Azure am PC und keine Stimme im Browser (am Pi der Normalfall ohne Azure) |
+| „nur im Hallennetz (LAN)" | Cloud-Adresse — folgt mit E4 |
+| Grund vom Turnier-PC | z. B. Schalter „Audio für Ansage-Seiten erzeugen" aus |
+<!-- pruef: "Ton gesperrt — der Browser braucht die Autoplay-Freigabe" in src/io/ansageKern.mjs -->
+<!-- pruef: "kann nicht sprechen (kein Audio vom Turnier-PC" in src/io/ansageKern.mjs -->
+
+Solange ein Hinweis steht, meldet sich der TV **nicht** als Ansage-Gerät —
+die Turnierleitung sieht die Halle weiter als „ohne Ansage-Gerät" und weiß,
+dass ihr Aufruf dort nicht ankommt. Eine Maus- oder Tastatureingabe am Pi
+gibt den Ton notfalls auch ohne Flag frei.
+
+**Ein Pi braucht für Sprache Azure.** Chromium auf dem Pi bringt keine
+deutsche Stimme mit; ohne Azure am Turnier-PC erklingt dort nichts (bis die
+Windows-Stimme mit Etappe E3 kommt).
+
+**Technik:** Ein eigener `<script>`-Block am Ende der drei Seiten, der ohne
+`?ansage` sofort endet. Er trägt Inline-Kopien von `src/io/ansageSeite.mjs`,
+`src/io/gongKlang.mjs` und `src/io/ansageKern.mjs` — wortgleich wie
+`assets/ansage.html`, gehalten von `scripts/test-ansage-kern.mjs`. Ein Fehler
+darin reißt die Anzeige nicht mit. Feed-Abrufe haben eine Frist von 5 s und
+laufen nie parallel; kennt der Server den Feed nicht (404, z. B. Slave-Brücke),
+fragt die Seite nur noch einmal je Minute.
+
 ## Raspberry Pi — Kiosk-Einrichtung
 
 Ausführliche, einsteigertaugliche Schritt-für-Schritt-Anleitung:

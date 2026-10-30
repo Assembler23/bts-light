@@ -399,9 +399,16 @@ Die Seite **Ansagen** warnt dann — abschalten müssen Sie selbst.
 **Bildschirm:** Nur über die verschlüsselte Adresse (8443) kann die Seite den
 Bildschirm anhalten; sonst zeigt sie „Bitte den Bildschirm anlassen".
 
-**Grenzen (Stand E1):** nur im LAN (Cloud folgt mit E4); Pi am TV mit dem
-Ansage-Modus der Monitor-Seiten folgt mit E1b; ohne Azure kein Audio vom PC
-(Windows-Stimme folgt mit E3). Wechselt eine Seite die Halle, zählt sie noch bis
+**Am TV (seit v0.9.313, Etappe E1b):** Die Monitor-Seiten (Einzelfeld,
+Feld-Übersicht, Kombi) sprechen mit `?ansage=<Halle>` in der Adresse dieselben
+Ansagen — ohne Knopf, der Pi startet Chromium dafür mit Autoplay-Freigabe.
+Ohne Freigabe zeigt der TV einen kleinen Hinweis und meldet sich nicht als
+Ansage-Gerät. Einzelheiten: [court-monitor.md](court-monitor.md)
+„Ansage-Modus", Pi-Seite: [pi-setup.md](pi-setup.md).
+<!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/combo.html -->
+
+**Grenzen (Stand E1b):** nur im LAN (Cloud folgt mit E4); ohne Azure kein
+Audio vom PC (Windows-Stimme folgt mit E3). Wechselt eine Seite die Halle, zählt sie noch bis
 zu 30 Sekunden auch für die alte — die Seite liest nur und meldet sich nicht
 ab. Als Zuhörer zählt eine Seite nur mit einer Halle, die es im Turnier gibt.
 
@@ -682,8 +689,13 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
   `src/components/AnsageSeitenPanel.tsx`, `src-tauri/src/tablet/ansage.rs`
   (`AnsageStore`), Routen `/ansage*` in `tablet/server.rs`,
   `commands.rs` `ansage_*`, `src-tauri/assets/ansage.html` mit Inline-Kopien
-  von `src/io/ansageSeite.mjs` und `src/io/gongKlang.mjs`
-  (`scripts/test-ansage-seite.mjs`, `scripts/test-gong-klang.mjs`).
+  von `src/io/ansageSeite.mjs` (Entscheidungen), `src/io/gongKlang.mjs` und
+  `src/io/ansageKern.mjs` (Abfrage, Warteschlange, Fristen, Präsenz; seit
+  v0.9.313) — dieselben drei Kopien tragen `monitor.html`, `overview.html`
+  und `combo.html` für den Ansage-Modus (`ansageMonitorStarten`)
+  (`scripts/test-ansage-seite.mjs`, `scripts/test-gong-klang.mjs`,
+  `scripts/test-ansage-kern.mjs` — Verhalten mit Attrappen + Drift über alle
+  vier Seiten).
 
 ## Azure Neural TTS (hochwertige Cloud-Ansage, opt-in)
 
