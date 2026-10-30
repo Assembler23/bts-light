@@ -830,6 +830,13 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
   verbunden/getrennt und Match-Zuweisungen ins Log – siehe
   [logging.md](logging.md). Steht dort kein „Tablet verbunden", erreicht
   das Tablet den Server nicht (WLAN/Firewall prüfen).
+- Ein Android-Handy mit Chrome erreicht den Turnier-PC nicht
+  („ERR_TOO_MANY_RETRIES", Firefox geht): Chrome fehlt die Android-
+  Berechtigung für das lokale Netz (belegt auf Android 17 mit Chrome 156,
+  intern `ERR_LOCAL_NETWORK_PERMISSION_MISSING`, http wie https). In den
+  Android-Einstellungen bei Chrome **Geräte in der Nähe** bzw. **Lokales
+  Netzwerk** zulassen, Chrome neu starten — Einzelheiten in
+  [Das Zähltablett bedienen](tablet-bedienen.md).
 
 ## Bekannte Vereinfachungen
 

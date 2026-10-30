@@ -323,6 +323,15 @@ WebView-Versionsstand des Tablets gibt das Einrichtungsskript beim Setup
 aus; er hilft bei der Frage, ob die Amazon-WebView-Version für
 `tablet.html` (Module, `fetch`, Pointer-Events) noch ausreicht.
 
+**Lokales Netz und targetSdk:** Auf einem Android-17-Handy scheiterte Chrome
+156 im Hallennetz an jeder Verbindung zum Turnier-PC mit
+`ERR_LOCAL_NETWORK_PERMISSION_MISSING` (sichtbar nur als
+`ERR_TOO_MANY_RETRIES`), weil Chrome die Android-Berechtigung für das lokale
+Netz fehlte. Die Kiosk-App ist mit `targetSdk = 34` davon nicht betroffen;
+wer den targetSdk anhebt, muss prüfen, ob die App dann dieselbe Berechtigung
+anfordern muss — sonst erreicht ihre WebView den Turnier-PC nicht mehr.
+<!-- pruef: "targetSdk = 34" in android/app/build.gradle.kts -->
+
 Die Such- und Zustandslogik der App (Sonde, Scanner, Adressfilter,
 PIN-Regeln, Zustandsmaschine) liegt in reinen Kotlin-Klassen ohne
 Android-Abhängigkeit und ist mit 35 JVM-Unit-Tests abgedeckt; Activity,

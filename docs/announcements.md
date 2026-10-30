@@ -403,6 +403,18 @@ einem kleinen **↻**-Knopf.
 <!-- pruef: "auf diesem Gerät wiederholen" in src-tauri/assets/ansage.html -->
 <!-- pruef: "ANSAGE_VERLAUF_MAX = 5" in src/io/ansageSeite.mjs -->
 
+**Hochkant (seit v0.9.316)** ist die Liste auf eine Leiste
+**Letzte Ansagen ▾** (in Klammern die Anzahl) eingeklappt, damit die große
+Ansage deutlich mehr als die halbe Bildschirmhöhe bekommt (auf einem
+üblichen Handy gut drei Viertel); ein Tipp auf die Leiste klappt sie auf und
+wieder zu. Das Gerät merkt sich, ob sie offen war — gespeichert wird nur
+diese Vorliebe, kein Ansagetext. Zum Wiederholen der letzten Ansage muss
+man nicht aufklappen: Die große Ansage hat oben rechts ihren eigenen
+**↻**-Knopf. Quer bleibt die Liste immer offen.
+<!-- pruef: "Letzte Ansage auf diesem Gerät wiederholen" in src-tauri/assets/ansage.html -->
+<!-- pruef: "bts-ansage-verlauf-offen" in src-tauri/assets/ansage.html -->
+<!-- pruef: /id="verlauf-auf" type="button" aria-expanded="false" aria-controls="verlauf-inhalt"/ in src-tauri/assets/ansage.html -->
+
 - **↻ spielt nur auf diesem Gerät** — der Turnier-PC erfährt davon nichts,
   andere Seiten der Halle bleiben still. Die Wiederholung wartet, bis eine
   laufende Ansage zu Ende ist, und kommt mit Gong wie das Original. Sie gilt
@@ -417,7 +429,8 @@ einem kleinen **↻**-Knopf.
   verfallenen, keine für ein anderes Spiel, keine einer fremden Halle. Eine
   Wiederholung ist kein neuer Eintrag.
 - **Nichts bleibt liegen:** Die Liste lebt nur in der offenen Seite. Neu
-  laden leert sie; im Gerätespeicher stehen keine Spielernamen. Beim
+  laden leert sie; im Gerätespeicher stehen keine Spielernamen (nur die
+  gewählte Halle und, ob die Liste aufgeklappt war). Beim
   Wechsel der Halle bleibt sie stehen — sie zeigt, was dieses Gerät gespielt
   hat.
 - **Grenze:** Text erscheint nur, wenn der Turnier-PC die Ansage für diese
@@ -465,6 +478,18 @@ Ohne Freigabe zeigt der TV einen kleinen Hinweis und meldet sich nicht als
 Ansage-Gerät. Einzelheiten: [court-monitor.md](court-monitor.md)
 „Ansage-Modus", Pi-Seite: [pi-setup.md](pi-setup.md).
 <!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/combo.html -->
+
+**Die Seite lädt auf einem Android-Handy nicht („ERR_TOO_MANY_RETRIES"),
+in Firefox geht es.** Auf neueren Android-Versionen braucht Chrome eine
+eigene Erlaubnis, Geräte im lokalen Netz zu erreichen — also auch den
+Turnier-PC in der Halle. Fehlt sie, scheitert jede Verbindung, und Chrome
+zeigt nur „ERR_TOO_MANY_RETRIES" (gesehen auf Android 17 mit Chrome 156,
+bei `http` wie `https`). Abhilfe: In den Android-**Einstellungen → Apps →
+Chrome → Berechtigungen** den Eintrag **Geräte in der Nähe** bzw. **Lokales
+Netzwerk** zulassen und Chrome neu starten. Chrome fragt beim ersten
+Aufruf auch selbst nach — wer dort abgelehnt hat, kommt nur noch über die
+Einstellungen zurück. Die Kiosk-App auf den Zähl-Tablets ist nach
+bisherigem Stand nicht betroffen.
 
 **Grenzen (Stand E1b):** nur im LAN (Cloud folgt mit E4); ohne Azure kein
 Audio vom PC (Windows-Stimme folgt mit E3). Wechselt eine Seite die Halle, zählt sie noch bis
