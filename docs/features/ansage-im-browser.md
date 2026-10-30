@@ -1,8 +1,9 @@
 # Sprachansagen im Browser (Ansage-Seite) — Spezifikation
 
-> Status: **Entwurf zur Freigabe 2026-10-29** (via /idee: Brief → Grill →
+> Status: **freigegeben 2026-10-30** (via /idee: Brief → Grill →
 > How-To → Spec). Quelle: Nutzer-Anforderung vom 29.10.2026.
-> Umsetzung: E1 v0.9.311 · **E1b v0.9.313** (Monitor-Modus + Pi-Autoplay).
+> Umsetzung: **E1** v0.9.311 (ADR 0063), **E1b** v0.9.313 (Monitor-Modus +
+> Pi-Autoplay), **E2** v0.9.314 (ADR 0064); offen E3, E4.
 > Betroffene Crates: `src-tauri`, `relay-proto`, `relay`; Frontend `src/`;
 > `pi/`.
 > ADRs: werden je Etappe angelegt (vier neue, Nummern beim Anlegen

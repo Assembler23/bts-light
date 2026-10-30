@@ -1812,6 +1812,26 @@ struct FreetextQuery {
     since: u64,
 }
 
+/// Abfrage der Ansage-Aufträge: wie beim Freitext, dazu `auto`.
+#[derive(serde::Deserialize)]
+struct AnnounceJobsQuery {
+    #[serde(default)]
+    hall: String,
+    #[serde(default)]
+    since: u64,
+    /// `1` (oder `true`) = auch die Erst-Ansage `court_assigned` liefern.
+    /// Bewusst als Text: Ein unerwarteter Wert soll nicht die ganze Abfrage
+    /// mit 400 scheitern lassen, sondern schlicht „ohne" bedeuten.
+    #[serde(default)]
+    auto: String,
+}
+
+impl AnnounceJobsQuery {
+    fn mit_auto(&self) -> bool {
+        matches!(self.auto.trim(), "1" | "true")
+    }
+}
+
 /// Freitext-Ansagen für eine Halle (`id > since`). Ein Ansage-Slave pollt das
 /// vom Master, um Freitexte seiner Halle (oder „alle") anzusagen.
 async fn info_announce_freetext(
@@ -1827,11 +1847,18 @@ async fn info_announce_freetext(
 /// Derselbe Weg wie beim Freitext, nur mit Struktur statt fertigem Text: Der
 /// Aufruf wird erst am Ansage-Gerät zu Worten — mit dessen Stimme, Gong und
 /// Namenskorrektur, damit er klingt wie jeder andere Aufruf auch.
+///
+/// Die Erst-Ansage `court_assigned` (Spec `ansage-im-browser`, E2) nur mit
+/// `?auto=1`: Ein LAN-Ansage-Slave fragt ohne und erkennt neue Spiele selbst
+/// — sonst hörte seine Halle jeden Aufruf doppelt. Ältere Slaves kennen die
+/// Art ohnehin nicht und überspringen sie.
 async fn info_announce_jobs(
     State(ctx): State<Arc<ServerCtx>>,
-    Query(q): Query<FreetextQuery>,
+    Query(q): Query<AnnounceJobsQuery>,
 ) -> impl IntoResponse {
-    let items = ctx.tablet.announce_jobs_since(&q.hall, q.since, now_ms());
+    let items = ctx
+        .tablet
+        .announce_jobs_since(&q.hall, q.since, now_ms(), q.mit_auto());
     ([(header::CACHE_CONTROL, "no-store")], Json(items))
 }
 
@@ -4502,6 +4529,23 @@ mod tests {
         assert_eq!(c["match_id"], serde_json::json!(42), "Fixture: {v}");
         assert!(c["team1_seed"].is_null());
         assert_eq!(c["team2_seed"], serde_json::json!("1"));
+    }
+
+    /// `?auto=1` schaltet die Erst-Ansage zu (Spec `ansage-im-browser`, E2);
+    /// ohne den Parameter — so fragt ein LAN-Ansage-Slave — bleibt sie
+    /// draußen, und ein unerwarteter Wert lässt die Abfrage nicht scheitern.
+    #[test]
+    fn announce_jobs_query_auto_nur_bei_1_oder_true() {
+        let lies = |q: &str| {
+            let uri: axum::http::Uri = format!("/info/announce/jobs{q}").parse().unwrap();
+            Query::<AnnounceJobsQuery>::try_from_uri(&uri).unwrap().0
+        };
+        assert!(!lies("?hall=A&since=5").mit_auto());
+        assert!(lies("?hall=A&since=5&auto=1").mit_auto());
+        assert!(lies("?auto=true").mit_auto());
+        assert!(!lies("?auto=0").mit_auto());
+        assert!(!lies("?auto=ja").mit_auto());
+        assert_eq!(lies("?hall=Halle%20B&since=7&auto=1").since, 7);
     }
 
     fn make_ctx(port: u16) -> ServerCtx {

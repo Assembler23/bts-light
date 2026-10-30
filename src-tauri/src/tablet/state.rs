@@ -700,6 +700,11 @@ pub struct TabletState {
     /// Ansagen für die Browser-Seite `/ansage` samt deren Zuhörern (Spec
     /// `ansage-im-browser`) — nur im RAM.
     ansage: crate::tablet::ansage::AnsageStore,
+    /// Feldbelegung für die Erst-Ansage im Kern (Spec `ansage-im-browser`,
+    /// E2). Bewusst hier und nicht in der `SyncEngine`: Die wird beim
+    /// Speichern der Einstellungen neu gebaut, ein Merker dort riefe danach
+    /// alle laufenden Spiele erneut auf.
+    erst_ansage: Mutex<crate::tablet::erst_ansage::ErstAnsageStand>,
     /// Fehlgeschlagene BTP-Ergebnis-Writes, die der Sync-Loop nachschiebt
     /// (Nachschub-Queue, Cluster A5 — needsync-Prinzip aus Tilos BTS,
     /// robuster: periodischer Retry statt nur beim Reconnect). Je Match
@@ -1070,6 +1075,17 @@ pub enum AnnounceJobKind {
         #[serde(rename = "matchId")]
         match_id: i64,
     },
+    /// Erst-Ansage „neues Spiel auf dem Feld" — entsteht im Kern beim
+    /// Vergleich der Feldbelegung (Spec `ansage-im-browser`, E2, ADR 0064).
+    /// Geht über `/info/announce/jobs` nur mit `?auto=1` hinaus: Ein
+    /// LAN-Ansage-Slave erkennt neue Spiele selbst und sagte sonst doppelt an.
+    CourtAssigned {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        /// Die Ansage verstummt, wenn inzwischen ein anderes Spiel dort steht.
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
     /// Auffang für Ansagearten, die dieser Stand noch nicht kennt.
     #[serde(other)]
     Unknown,
@@ -1148,6 +1164,12 @@ pub fn announce_jobs_aus_json(json: &str) -> Vec<AnnounceJob> {
 /// Ein Gerät, das eine Minute weg war, soll beim Wiederkommen nicht die
 /// Aufrufe der letzten Minute nachplärren — die Spiele laufen längst.
 const ANNOUNCE_JOB_TTL_MS: u64 = 60_000;
+
+/// Obergrenze der Ansage-Aufträge. Seit der Erst-Ansage im Kern (E2) legt
+/// der Turniermorgen einen Schwall ab — eine Feldvergabe über alle Felder in
+/// einem Lauf. Bei 50 hätten 26 Felder zusammen mit Nachrufen der
+/// Turnierleitung schon Aufträge verdrängt, bevor ein Gerät sie abholte.
+const MAX_ANNOUNCE_JOBS: usize = 128;
 
 /// So lange gilt ein Ansage-Gerät nach seinem letzten Abruf als anwesend.
 ///
@@ -4246,10 +4268,58 @@ impl TabletState {
         // werden nie wieder gesprochen und müssen nicht mitwachsen.
         g.retain(|j| j.created_at_ms + ANNOUNCE_JOB_TTL_MS > now_ms);
         let len = g.len();
-        if len > 50 {
-            g.drain(0..len - 50);
+        if len > MAX_ANNOUNCE_JOBS {
+            g.drain(0..len - MAX_ANNOUNCE_JOBS);
         }
         id
+    }
+
+    /// Erst-Ansage im Kern (Spec `ansage-im-browser`, E2): vergleicht die
+    /// Feldbelegung dieses Stands mit der zuletzt gesehenen und legt je neu
+    /// belegtem Feld einen Auftrag `court_assigned` ab. Liefert die Zahl der
+    /// Aufträge.
+    ///
+    /// Nur der Master ruft das (Sync-Lauf, hinter dem Slave-Rücksprung) —
+    /// ein Slave kennt dieselben Felder und erzeugte sonst eine zweite
+    /// Ansage-Quelle.
+    pub fn erst_ansage_pruefen(&self, snap: &BtpSnapshot, now_ms: u64) -> usize {
+        use crate::tablet::erst_ansage::Feld;
+        let belegt: HashMap<i64, i64> = snap
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| m.court_id.map(|c| (c, m.id)))
+            .collect();
+        let felder: Vec<Feld> = snap
+            .court_infos
+            .iter()
+            .map(|c| Feld {
+                court_id: c.id,
+                match_id: belegt.get(&c.id).copied().unwrap_or(0),
+                // Dieselbe Halle wie in der Feld-Übersicht (`location`), an
+                // der sich der Hallenfilter der Desktop-Ansage bisher maß.
+                hall: snap.court_location_name(c.id),
+            })
+            .collect();
+        let neue =
+            self.erst_ansage
+                .lock()
+                .unwrap()
+                .vergleiche(&snap.tournament_name, &felder, now_ms);
+        for f in &neue {
+            self.publish_announce_job(
+                f.hall.clone(),
+                AnnounceJobKind::CourtAssigned {
+                    court_id: f.court_id,
+                    match_id: f.match_id,
+                },
+                now_ms,
+            );
+        }
+        if !neue.is_empty() {
+            tracing::info!("Erst-Ansage: {} Feld(er) neu belegt", neue.len());
+        }
+        neue.len()
     }
 
     /// Aufträge mit `id > since` für `hall`, die noch nicht verfallen sind.
@@ -4261,7 +4331,18 @@ impl TabletState {
     /// Nebenbei zählt der Abruf als Lebenszeichen der Halle: Wer abholt, ist
     /// ein Ansage-Gerät. Nur so kann die Turnierleitung erfahren, dass ihr
     /// Aufruf nirgends erklingt.
-    pub fn announce_jobs_since(&self, hall: &str, since: u64, now_ms: u64) -> Vec<AnnounceJob> {
+    ///
+    /// `mit_auto` entscheidet über die Erst-Ansage `court_assigned`: Die
+    /// Desktop-App am Master holt sie ab, ein LAN-Ansage-Slave nicht — der
+    /// erkennt neue Spiele selbst (`MatchAnnouncer`) und sagte sonst doppelt
+    /// an.
+    pub fn announce_jobs_since(
+        &self,
+        hall: &str,
+        since: u64,
+        now_ms: u64,
+        mit_auto: bool,
+    ) -> Vec<AnnounceJob> {
         let h = hall.trim();
         {
             // Die Abhol-Route steht im Hallennetz offen und der Hallenname
@@ -4282,6 +4363,7 @@ impl TabletState {
             .iter()
             .filter(|j| j.id > since)
             .filter(|j| j.created_at_ms + ANNOUNCE_JOB_TTL_MS > now_ms)
+            .filter(|j| mit_auto || !matches!(j.kind, AnnounceJobKind::CourtAssigned { .. }))
             .filter(|j| {
                 let target = j.hall.trim();
                 h.is_empty() || target.is_empty() || target.eq_ignore_ascii_case(h)
@@ -5584,7 +5666,7 @@ mod tests {
         // Ansage-Gerät verbunden", während der Aufruf gerade erklingt, und
         // jemand ruft zur Sicherheit per Funk ein zweites Mal.
         let st = TabletState::default();
-        st.announce_jobs_since("Halle A", 0, 10_000);
+        st.announce_jobs_since("Halle A", 0, 10_000, true);
         assert!(
             st.has_announce_listener("", 10_000),
             "das Gerät in Halle A hört auch den Aufruf ohne Halle"
@@ -5599,7 +5681,7 @@ mod tests {
         // mitsamt Tablet-Server und BTP-Übertragung.
         let st = TabletState::default();
         for i in 0..500 {
-            st.announce_jobs_since(&format!("Halle {i}"), 0, 10_000);
+            st.announce_jobs_since(&format!("Halle {i}"), 0, 10_000, true);
         }
         assert!(
             st.announce_listener_count() <= 64,
@@ -5607,7 +5689,7 @@ mod tests {
             st.announce_listener_count()
         );
         // Ein überlanger Name wird gekappt statt in voller Länge behalten.
-        st.announce_jobs_since(&"A".repeat(4096), 0, 10_000);
+        st.announce_jobs_since(&"A".repeat(4096), 0, 10_000, true);
         assert!(st.longest_announce_listener_key() <= 128);
     }
 
@@ -5620,7 +5702,7 @@ mod tests {
         let st = TabletState::default();
         assert!(!st.has_announce_listener("Halle A", 10_000));
 
-        st.announce_jobs_since("Halle A", 0, 10_000);
+        st.announce_jobs_since("Halle A", 0, 10_000, true);
         assert!(st.has_announce_listener("Halle A", 10_000));
         assert!(
             !st.has_announce_listener("Halle B", 10_000),
@@ -5628,7 +5710,7 @@ mod tests {
         );
 
         // Ein Gerät ohne eingestellte Halle spricht für alle (Einzelhalle).
-        st.announce_jobs_since("", 0, 10_000);
+        st.announce_jobs_since("", 0, 10_000, true);
         assert!(st.has_announce_listener("Halle B", 10_000));
 
         // Und wer lange nicht mehr abgeholt hat, zählt nicht mehr.
@@ -5652,10 +5734,10 @@ mod tests {
             },
             now,
         );
-        assert!(st.announce_jobs_since("Halle A", 0, now).is_empty());
-        assert_eq!(st.announce_jobs_since("Halle B", 0, now).len(), 1);
+        assert!(st.announce_jobs_since("Halle A", 0, now, true).is_empty());
+        assert_eq!(st.announce_jobs_since("Halle B", 0, now, true).len(), 1);
         assert_eq!(
-            st.announce_jobs_since("", 0, now).len(),
+            st.announce_jobs_since("", 0, now, true).len(),
             1,
             "ohne Halle: alles"
         );
@@ -5674,12 +5756,12 @@ mod tests {
         };
         st.publish_announce_job(String::new(), job, 100_000);
         assert_eq!(
-            st.announce_jobs_since("", 0, 155_000).len(),
+            st.announce_jobs_since("", 0, 155_000, true).len(),
             1,
             "55 s: noch gültig"
         );
         assert!(
-            st.announce_jobs_since("", 0, 161_000).is_empty(),
+            st.announce_jobs_since("", 0, 161_000, true).is_empty(),
             "nach 60 s verfällt der Auftrag"
         );
     }
@@ -5699,10 +5781,10 @@ mod tests {
         let first = st.publish_announce_job(String::new(), kind.clone(), 1_000);
         let second = st.publish_announce_job(String::new(), kind, 1_000);
         assert!(second > first, "die Nummer läuft weiter");
-        let neu = st.announce_jobs_since("", first, 1_000);
+        let neu = st.announce_jobs_since("", first, 1_000, true);
         assert_eq!(neu.len(), 1);
         assert_eq!(neu[0].id, second);
-        assert!(st.announce_jobs_since("", second, 1_000).is_empty());
+        assert!(st.announce_jobs_since("", second, 1_000, true).is_empty());
     }
 
     #[test]

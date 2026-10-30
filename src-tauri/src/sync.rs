@@ -824,6 +824,24 @@ impl SyncEngine {
         auftraege
     }
 
+    /// Erst-Ansage im Kern (Spec `ansage-im-browser`, E2, ADR 0064): Je
+    /// neu belegtem Feld ein Ansage-Auftrag `court_assigned`.
+    ///
+    /// Der Aufrufer steht hinter dem Slave-Rücksprung und **nach**
+    /// `track_officials`: Erst dann steht die Besetzung des frisch belegten
+    /// Felds fest, und die Ansage nennt Schiedsrichter und Bedienung.
+    /// `slave_mode` ist hier ein zweiter Riegel wie beim Autodruck — ein
+    /// LAN-Ansage-Slave erkennt neue Spiele selbst (`MatchAnnouncer`).
+    ///
+    /// Der Stand des Vergleichs lebt im `TabletState`: Diese Engine wird beim
+    /// Speichern der Einstellungen neu gebaut.
+    fn erst_ansage(config: &AppConfig, snapshot: &BtpSnapshot, tablet: &TabletState) -> usize {
+        if config.slave_mode {
+            return 0;
+        }
+        tablet.erst_ansage_pruefen(snapshot, now_ms())
+    }
+
     /// Zettel-Autodruck: Für jedes Spiel, das **auf einem Feld steht und
     /// einen Schiedsrichter hat**, einmal ein Blatt drucken (Spec
     /// `schiedsrichterzettel-autodruck`, E5).
@@ -2327,6 +2345,9 @@ impl SyncEngine {
         // sähe der Druck systematisch keinen Schiedsrichter und bliebe
         // stumm.
         self.autodruck(config, &snapshot, tablet);
+        // Erst-Ansage (Spec `ansage-im-browser`, E2) — nach Rotation und
+        // Autodruck, damit die Besetzung des neuen Felds feststeht.
+        Self::erst_ansage(config, &snapshot, tablet);
         tablet.apply_tablet_scores(&mut snapshot);
         // Von Hand geschriebene Feldzuweisungen, die BTP inzwischen
         // zurückmeldet, brauchen keine Vormerkung mehr — sie sollen das Feld
@@ -5780,5 +5801,246 @@ mod tests {
         );
         engine.push_roster_for_test(&cfg, &http, &snap).await;
         assert_eq!(seen.lock().await.len(), 2);
+    }
+
+    // ── Erst-Ansage im Kern (Spec `ansage-im-browser`, E2) ──
+
+    /// Die Erst-Ansagen, die ein Gerät mit `auto=1` abholen würde.
+    fn erst_ansagen(tablet: &TabletState, hall: &str) -> Vec<(i64, i64, String)> {
+        tablet
+            .announce_jobs_since(hall, 0, now_ms(), true)
+            .into_iter()
+            .filter_map(|j| match j.kind {
+                crate::tablet::state::AnnounceJobKind::CourtAssigned { court_id, match_id } => {
+                    Some((court_id, match_id, j.hall))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn erst_ansage_neues_spiel_ergibt_genau_einen_auftrag() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let leer = snap_with(vec![court(1, None), court(2, None)], Vec::new(), Vec::new());
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &leer, &tablet), 0);
+        let belegt = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![oncourt_named(10, 1, "A", "B")],
+            Vec::new(),
+        );
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &belegt, &tablet), 1);
+        assert_eq!(erst_ansagen(&tablet, ""), vec![(1, 10, String::new())]);
+        // Der nächste Lauf mit demselben Stand legt nichts nach.
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &belegt, &tablet), 0);
+        assert_eq!(erst_ansagen(&tablet, "").len(), 1);
+    }
+
+    /// Kriterium 19: App-Start mit laufenden Spielen — auch dann nicht,
+    /// wenn der erste Stand noch leer war.
+    #[test]
+    fn erst_ansage_app_start_sagt_laufende_spiele_nicht_an() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let nichts = snap_with(Vec::new(), Vec::new(), Vec::new());
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &nichts, &tablet), 0);
+        let laufend = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![
+                oncourt_named(10, 1, "A", "B"),
+                oncourt_named(11, 2, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &laufend, &tablet), 0);
+        assert!(erst_ansagen(&tablet, "").is_empty());
+    }
+
+    /// Kriterium 20: Speichern der Einstellungen baut die Engine neu — der
+    /// Stand im `TabletState` überlebt, nichts wird nachgerufen.
+    #[test]
+    fn erst_ansage_ueberlebt_neubau_der_engine() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let laufend = snap_with(
+            vec![court(1, None)],
+            vec![oncourt_named(10, 1, "A", "B")],
+            Vec::new(),
+        );
+        let mut alt = SyncEngine::new();
+        alt.track_officials(&laufend, &tablet);
+        SyncEngine::erst_ansage(&cfg, &laufend, &tablet);
+        drop(alt);
+        let mut neu = SyncEngine::new();
+        neu.track_officials(&laufend, &tablet);
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &laufend, &tablet), 0);
+        assert!(erst_ansagen(&tablet, "").is_empty());
+    }
+
+    /// Kriterium 21: Turnierwechsel ohne Neustart — keine Ansage aller Felder.
+    #[test]
+    fn erst_ansage_turnierwechsel_ruft_nichts_auf() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let alt = snap_with(vec![court(1, None)], Vec::new(), Vec::new());
+        SyncEngine::erst_ansage(&cfg, &alt, &tablet);
+        let mut neu = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![
+                oncourt_named(90, 1, "A", "B"),
+                oncourt_named(91, 2, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        neu.tournament_name = "Anderes Turnier".into();
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &neu, &tablet), 0);
+    }
+
+    /// Ein Ansage-Slave erzeugt nie eine Erst-Ansage (er hat seinen
+    /// `MatchAnnouncer`) — und hinterlässt auch keinen Stand.
+    #[test]
+    fn erst_ansage_slave_erzeugt_nichts() {
+        let tablet = TabletState::default();
+        let slave = AppConfig {
+            slave_mode: true,
+            ..AppConfig::default()
+        };
+        let frei = snap_with(vec![court(1, None)], Vec::new(), Vec::new());
+        let belegt = snap_with(
+            vec![court(1, None)],
+            vec![oncourt_named(10, 1, "A", "B")],
+            Vec::new(),
+        );
+        SyncEngine::erst_ansage(&slave, &frei, &tablet);
+        assert_eq!(SyncEngine::erst_ansage(&slave, &belegt, &tablet), 0);
+        assert!(erst_ansagen(&tablet, "").is_empty());
+    }
+
+    /// Mehr-Hallen: Der Auftrag trägt die Halle des Felds; zugestellt wird
+    /// nach Halle — und ohne `auto=1` gar nicht (LAN-Slave).
+    #[test]
+    fn erst_ansage_traegt_halle_und_braucht_auto() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let hallen = vec![
+            BtpLocation {
+                id: 1,
+                name: "Halle A".into(),
+            },
+            BtpLocation {
+                id: 2,
+                name: "Halle B".into(),
+            },
+        ];
+        let frei = snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            Vec::new(),
+            hallen.clone(),
+        );
+        SyncEngine::erst_ansage(&cfg, &frei, &tablet);
+        let belegt = snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            vec![
+                oncourt_named(10, 1, "A", "B"),
+                oncourt_named(20, 2, "C", "D"),
+            ],
+            hallen,
+        );
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &belegt, &tablet), 2);
+        assert_eq!(
+            erst_ansagen(&tablet, "Halle A"),
+            vec![(1, 10, "Halle A".to_string())]
+        );
+        assert_eq!(
+            erst_ansagen(&tablet, "halle b"),
+            vec![(2, 20, "Halle B".to_string())]
+        );
+        assert_eq!(erst_ansagen(&tablet, "").len(), 2);
+        // Ohne `auto=1` (LAN-Ansage-Slave): keine Erst-Ansage.
+        assert!(tablet
+            .announce_jobs_since("", 0, now_ms(), false)
+            .is_empty());
+    }
+
+    /// Die Ansage-Seiten (E1) bekommen die Erst-Ansage über den Vertoner —
+    /// mit Feld und Spiel, gegen die die Seite vor dem Abspielen prüft.
+    #[test]
+    fn erst_ansage_erreicht_den_vertoner_der_seiten() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let t0 = now_ms();
+        tablet.ansage().seite_hoert("", t0);
+        // Erster Abruf des Vertoners ist Bestandsaufnahme.
+        assert!(tablet.ansage_quellen_beanspruchen(t0).jobs.is_empty());
+        SyncEngine::erst_ansage(
+            &cfg,
+            &snap_with(vec![court(1, None)], Vec::new(), Vec::new()),
+            &tablet,
+        );
+        SyncEngine::erst_ansage(
+            &cfg,
+            &snap_with(
+                vec![court(1, None)],
+                vec![oncourt_named(10, 1, "A", "B")],
+                Vec::new(),
+            ),
+            &tablet,
+        );
+        let jobs = tablet.ansage_quellen_beanspruchen(now_ms()).jobs;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].kind,
+            crate::tablet::state::AnnounceJobKind::CourtAssigned {
+                court_id: 1,
+                match_id: 10
+            }
+        );
+        // Und auf dem Draht als `court_assigned` mit courtId/matchId — so
+        // kennt sie `ANSAGE_ARTEN` der Seite und der Typ im Frontend.
+        let json = serde_json::to_value(&jobs[0]).unwrap();
+        assert_eq!(json["kind"], "court_assigned");
+        assert_eq!(json["courtId"], 1);
+        assert_eq!(json["matchId"], 10);
+        // Genau einmal beansprucht.
+        assert!(tablet.ansage_quellen_beanspruchen(now_ms()).jobs.is_empty());
+    }
+
+    /// Turniermorgen: 26 Felder in einem Lauf — alle Aufträge bleiben
+    /// liegen, auch neben einem Schwall Nachrufe der Turnierleitung.
+    #[test]
+    fn erst_ansage_burst_26_felder_ueberlebt_den_deckel() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let felder: Vec<BtpCourt> = (1..=26).map(|c| court(c, None)).collect();
+        SyncEngine::erst_ansage(
+            &cfg,
+            &snap_with(felder.clone(), Vec::new(), Vec::new()),
+            &tablet,
+        );
+        let spiele: Vec<BtpMatch> = (1..=26)
+            .map(|c| oncourt_named(100 + c, c, "A", "B"))
+            .collect();
+        assert_eq!(
+            SyncEngine::erst_ansage(&cfg, &snap_with(felder, spiele, Vec::new()), &tablet),
+            26
+        );
+        for i in 0..60 {
+            tablet.publish_announce_job(
+                String::new(),
+                crate::tablet::state::AnnounceJobKind::Officials { court_id: i },
+                now_ms(),
+            );
+        }
+        assert_eq!(erst_ansagen(&tablet, "").len(), 26);
+        // Der Deckel selbst: höchstens 128 Aufträge.
+        for i in 0..200 {
+            tablet.publish_announce_job(
+                String::new(),
+                crate::tablet::state::AnnounceJobKind::Officials { court_id: i },
+                now_ms(),
+            );
+        }
+        assert_eq!(tablet.announce_jobs_since("", 0, now_ms(), true).len(), 128);
     }
 }

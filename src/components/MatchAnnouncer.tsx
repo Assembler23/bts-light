@@ -44,17 +44,27 @@ function resolveLanguage(
 interface Props {
   announce: AnnounceConfig;
   azureTts?: AzureTtsConfig;
+  /** Neue Feldbelegungen selbst erkennen und ansagen — **nur am
+   *  Ansage-Slave**. Am Master entsteht die Erst-Ansage seit E2 im Kern
+   *  (Auftrag `court_assigned`, gesprochen vom `AnnounceJobPlayer`, Spec
+   *  `ansage-im-browser`, ADR 0064); erkennte sie hier zusätzlich, erklänge
+   *  jeder Aufruf doppelt. */
+  erkennen: boolean;
 }
 
 /**
- * App-weiter, immer eingehängter Ansage-Detektor. Pollt die Felder-Übersicht
- * und sagt jedes Spiel an, das neu auf ein Feld gezogen wird (Gong → Feld →
- * Disziplin → Paarung → Feld). Rendert nichts.
+ * App-weiter, immer eingehängter Ansage-Baustein. Rendert nichts.
  *
- * Der erste Poll ist nur die Baseline: bereits laufende Spiele werden nicht
- * nachträglich angesagt.
+ * Immer: schaltet beim ersten Klick das WebView2-Audio frei und stoppt eine
+ * laufende Ansage, sobald Ansagen abgeschaltet werden.
+ *
+ * Mit `erkennen` (Ansage-Slave): pollt die Felder-Übersicht und sagt jedes
+ * Spiel an, das neu auf ein Feld gezogen wird (Gong → Feld → Disziplin →
+ * Paarung → Feld). Der erste Poll ist nur die Baseline: bereits laufende
+ * Spiele werden nicht nachträglich angesagt. Am Master erledigt das seit E2
+ * der Kern mit denselben Regeln (`tablet/erst_ansage.rs`).
  */
-export function MatchAnnouncer({ announce, azureTts }: Props) {
+export function MatchAnnouncer({ announce, azureTts, erkennen }: Props) {
   // CourtID → zuletzt gesehene Match-ID. Per CourtID, damit gleichnamige
   // Felder eines Mehr-Hallen-Turniers nicht denselben Eintrag teilen.
   // Stand der Baseline-Logik (src/io/announceBaseline.mjs) — dort getestet,
@@ -108,6 +118,11 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
   }, []);
 
   useEffect(() => {
+    if (!erkennen) return;
+    // Frische Bestandsaufnahme bei jedem Einschalten: Ein Stand aus der
+    // Zeit vor einem Rollenwechsel ließe alle seither belegten Felder als
+    // neu erscheinen.
+    standRef.current = { baseline: new Map(), hatBaseline: false };
     let alive = true;
     const tick = () => {
       tabletOverview()
@@ -173,7 +188,7 @@ export function MatchAnnouncer({ announce, azureTts }: Props) {
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [erkennen]);
 
   return null;
 }
