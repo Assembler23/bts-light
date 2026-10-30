@@ -7,7 +7,8 @@ import { dirname, join } from "node:path";
 import {
   ANSAGE_TAKT_MS, ANSAGE_VERFALL_MS, hallePasst, halleNoetig, halleGueltig,
   neueEintraege, belegungPasst, nochAbspielbar, stimme, meldetPraesenz,
-  grundText, feedAdresse,
+  grundText, feedAdresse, ANSAGE_VERLAUF_MAX, ansageText, verlaufAufnehmen,
+  wiederholungsAuftrag, schriftSuchen,
 } from "../src/io/ansageSeite.mjs";
 
 let failures = 0;
@@ -66,6 +67,29 @@ ok("Grundtext Schalter nennt den Schalter", grundText("schalter_aus").includes("
 ok("Grundtext unbekannt hat einen Text", grundText("xyz").length > 0, true);
 ok("Feed-Adresse", feedAdresse("/", "Halle Ü", 7, true), "/ansage/feed?halle=Halle%20%C3%9C&since=7&hoert=1");
 ok("Feed-Adresse ohne Präsenz", feedAdresse("/", "", 0, false), "/ansage/feed?halle=&since=0");
+
+// ── Verlauf + Großanzeige (Erweiterung 30.10.2026) ──────────────────────
+ok("Verlauf hält fünf", ANSAGE_VERLAUF_MAX, 5);
+ok("Text aus Segmenten", ansageText({ segmente: [" Feld 3: ", "", null, "Anna  Muster\ngegen Bea"] }),
+  "Feld 3: Anna Muster gegen Bea");
+ok("ohne Segmente leer", ansageText({}), "");
+{
+  let v = [];
+  for (let i = 1; i <= 7; i++) v = verlaufAufnehmen(v, { id: i, text: "A" + i });
+  ok("Deckel 5, neueste vorn", v.map((x) => x.id), [7, 6, 5, 4, 3]);
+  const gleich = { id: 5, text: "neu" };
+  v = verlaufAufnehmen(v, gleich);
+  ok("gleiche Ansage steht nie doppelt", v.map((x) => x.id), [5, 7, 6, 4, 3]);
+  ok("Eintrag wird nicht kopiert (Audio landet an ihm)", v[0] === gleich, true);
+  ok("eigener Deckel", verlaufAufnehmen(v, { id: 9 }, 2).map((x) => x.id), [9, 5]);
+  const a = wiederholungsAuftrag(v, 6);
+  ok("Wiederholungsauftrag trägt Ansage und Eintrag", [a.wiederholung, a.verlauf.id], [true, 6]);
+  ok("unbekannte Ansage: kein Auftrag", wiederholungsAuftrag(v, 99), null);
+}
+ok("Schrift: größte passende", schriftSuchen(16, 400, (px) => px <= 137), 137);
+ok("Schrift: alles passt → max", schriftSuchen(16, 400, () => true), 400);
+ok("Schrift: nichts passt → min", schriftSuchen(16, 400, () => false), 16);
+ok("Schrift: max unter min → min", schriftSuchen(16, 10, () => true), 16);
 
 // ── Inline-Kopie in ansage.html ─────────────────────────────────────────
 {

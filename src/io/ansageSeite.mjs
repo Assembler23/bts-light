@@ -115,3 +115,60 @@ export function feedAdresse(base, halle, since, hoert) {
   return base + "ansage/feed?halle=" + encodeURIComponent(halle || "") +
     "&since=" + (since || 0) + (hoert ? "&hoert=1" : "");
 }
+
+/* ── Verlauf + Großanzeige (Erweiterung 30.10.2026) ───────────────────── */
+
+/** So viele gespielte Ansagen zeigt die Seite `/ansage` — und hält für
+ *  ebenso viele das geladene Audio zum Wiederholen im Speicher. */
+export const ANSAGE_VERLAUF_MAX = 5;
+
+/** Lesbarer Text einer Ansage: ihre Segmente, zusammengefügt. */
+export function ansageText(e) {
+  const segmente = Array.isArray(e && e.segmente) ? e.segmente : [];
+  return segmente
+    .map((s) => String(s == null ? "" : s).trim())
+    .filter((s) => s !== "")
+    .join(" ")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Nimmt eine gerade gespielte Ansage in den Verlauf auf: neueste vorn,
+ * höchstens `max` Einträge. Gibt eine neue Liste zurück; der Eintrag
+ * `{ id, ms, text, e, puffer }` selbst wird nicht kopiert, damit das Audio
+ * später an ihm landen kann. Dieselbe Ansage (gleiche `id`) steht nie zweimal
+ * im Verlauf — eine Wiederholung ist kein neuer Eintrag.
+ */
+export function verlaufAufnehmen(verlauf, eintrag, max) {
+  const deckel = typeof max === "number" ? max : ANSAGE_VERLAUF_MAX;
+  const alt = (Array.isArray(verlauf) ? verlauf : []).filter((v) => v && v.id !== eintrag.id);
+  return [eintrag].concat(alt).slice(0, Math.max(0, deckel));
+}
+
+/** Auftrag für die Warteschlange, der eine Ansage aus dem Verlauf noch
+ *  einmal spielt — `null`, wenn es sie (nicht mehr) gibt. Eine Wiederholung
+ *  hat der Nutzer bewusst angefordert: Sie verfällt nicht und wird nicht
+ *  gegen die Belegung geprüft. */
+export function wiederholungsAuftrag(verlauf, id) {
+  const v = (Array.isArray(verlauf) ? verlauf : []).filter((x) => x && x.id === id)[0];
+  if (!v) return null;
+  return { e: v.e, wiederholung: true, verlauf: v };
+}
+
+/**
+ * Größte Schrift (ganze Pixel) zwischen `min` und `max`, bei der `passt(px)`
+ * noch wahr ist — Halbierungssuche, `passt` misst im Browser. Passt nicht
+ * einmal `min`, bleibt es bei `min`.
+ */
+export function schriftSuchen(min, max, passt) {
+  let unten = Math.floor(min);
+  let oben = Math.floor(max);
+  if (oben <= unten || !passt(unten)) return unten;
+  if (passt(oben)) return oben;
+  while (oben - unten > 1) {
+    const mitte = Math.floor((unten + oben) / 2);
+    if (passt(mitte)) unten = mitte;
+    else oben = mitte;
+  }
+  return unten;
+}

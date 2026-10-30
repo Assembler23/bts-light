@@ -251,6 +251,117 @@ for (const [art, warten, name] of [["404", 10, "Audio 404"], ["haengt", AUDIO_LA
   ok("… und danach wieder verbunden", k.zustand.verbunden && !k.zustand.fehltSeit, true);
 }
 
+// ── Verlauf + Wiederholen (Erweiterung 30.10.2026) ──────────────────────
+{
+  const t = welt();
+  const k = ansageKern({ base: "/", halle: "Halle A", halleFest: true, welt: t.w, verlauf: true });
+  const sieben = [1, 2, 3, 4, 5, 6, 7].map((i) => eintrag(i));
+  t.feed(feedVon([]));
+  t.feed(feedVon(sieben));
+  t.feed(feedVon(sieben.concat([eintrag(8, { courtId: 3, matchId: 99 })])));
+  k.starten();
+  await t.lauf(ANSAGE_TAKT_MS + 10);
+  ok("Verlauf: die gerade erklingende steht schon vorn", k.zustand.verlauf.map((v) => v.id), [1]);
+  ok("… mit ihrem Text", k.zustand.verlauf[0].text, "Spiel 1");
+  await t.lauf(30000);
+  ok("Verlauf: Deckel 5, neueste vorn", k.zustand.verlauf.map((v) => v.id), [7, 6, 5, 4, 3]);
+  ok("übersprungene (falsches Spiel) kommt nicht in den Verlauf", k.zustand.verlauf.some((v) => v.id === 8), false);
+  ok("Audio der fünf liegt im Speicher", k.zustand.verlauf.every((v) => !!v.puffer), true);
+  ok("letzte bleibt gesetzt", k.zustand.letzte.text, "Spiel 7");
+
+  // Nach Ablauf des Server-Audios: ↻ spielt das gemerkte Audio, ohne Abruf.
+  t.audioAntwort.art = "404";
+  const audioVorher = audioAbrufe(t).length;
+  const gespieltVorher = t.gespielt.length;
+  await t.lauf(120000);
+  ok("↻ auf eine bekannte Ansage", k.wiederholen(4), true);
+  await t.lauf(10000);
+  ok("↻ spielt das gemerkte Audio", t.gespielt.length, gespieltVorher + 1);
+  ok("↻ holt nichts vom Turnier-PC", audioAbrufe(t).length, audioVorher);
+  ok("↻ ist kein neuer Verlaufseintrag", k.zustand.verlauf.map((v) => v.id), [7, 6, 5, 4, 3]);
+  ok("↻ setzt letzte nicht um", k.zustand.letzte.text, "Spiel 7");
+  ok("↻ auf eine unbekannte Ansage", k.wiederholen(99), false);
+
+  // Dreifach-Tipp stapelt nicht; Hallenwechsel behält die Wiederholung.
+  const vorTipp = t.gespielt.length;
+  k.wiederholen(5); k.wiederholen(6); k.wiederholen(6); k.wiederholen(6);
+  ok("Mehrfach-Tipp: eine Wiederholung je Ansage in der Schlange",
+    k.zustand.warteschlange.map((s) => s.e.id), [6]);
+  k.halleWaehlen("Halle B");
+  ok("Hallenwechsel behält angeforderte Wiederholungen", k.zustand.warteschlange.map((s) => s.e.id), [6]);
+  await t.lauf(10000);
+  ok("… und spielt beide genau einmal", t.gespielt.length, vorTipp + 2);
+  ok("Verlauf bleibt nach Hallenwechsel", k.zustand.verlauf.length, 5);
+}
+{
+  // ↻ bei angehaltenem Ton (Anruf, Bildschirm aus): erst freigeben, dann mit Gong.
+  const t = welt();
+  const k = ansageKern({ base: "/", halle: "Halle A", halleFest: true, welt: t.w, verlauf: true });
+  t.feed(feedVon([]));
+  t.feed(feedVon([eintrag(1, { gong: "match" })]));
+  k.starten();
+  await t.lauf(ANSAGE_TAKT_MS + 10000);
+  const ctx = k.zustand.ctx;
+  ctx.state = "suspended";
+  let resumeFertig = null;
+  ctx.resume = function () { return new Promise((r) => { resumeFertig = () => { ctx.state = "running"; r(); }; }); };
+  let gongs = 0;
+  const osz = ctx.createOscillator.bind(ctx);
+  ctx.createOscillator = function () { gongs++; return osz(); };
+  const vorher = t.gespielt.length;
+  k.wiederholen(1);
+  await t.lauf(5000);
+  ok("angehaltener Ton: wartet auf die Freigabe", [t.gespielt.length, gongs], [vorher, 0]);
+  resumeFertig();
+  await t.lauf(10000);
+  ok("… dann Gong und Audio", [t.gespielt.length, gongs > 0], [vorher + 1, true]);
+}
+{
+  // Ohne Audio im Speicher (Gerätestimme): ↻ spricht die Segmente — auch wenn
+  // inzwischen ein anderes Spiel auf dem Feld steht (bewusst angefordert).
+  const t = welt({ stimmen: [{ lang: "de-DE" }] });
+  const k = ansageKern({ base: "/", halle: "Halle A", halleFest: true, welt: t.w, verlauf: true });
+  const e = eintrag(1, { audio: null, courtId: 3, matchId: 42, segmente: ["Feld 3", "Anna gegen Bea"] });
+  t.feed(feedVon([]));
+  t.feed(feedVon([e], { belegung: [{ courtId: 3, matchId: 42 }] }));
+  k.starten();
+  await t.lauf(ANSAGE_TAKT_MS + 10000);
+  ok("Gerätestimme: gesprochen", t.gesprochen, ["Feld 3", "Anna gegen Bea"]);
+  k.zustand.feed.belegung = [{ courtId: 3, matchId: 77 }];
+  await t.lauf(90000);
+  k.wiederholen(1);
+  await t.lauf(10000);
+  ok("↻ spricht erneut, trotz Belegung und Verfall", t.gesprochen.length, 4);
+  ok("↻ ohne Audio-Abruf", audioAbrufe(t), []);
+}
+{
+  // ↻ während einer laufenden Ansage: strikt danach, nie darüber.
+  const t = welt();
+  const k = ansageKern({ base: "/", halle: "Halle A", halleFest: true, welt: t.w, verlauf: true });
+  t.feed(feedVon([]));
+  t.feed(feedVon([eintrag(1)]));
+  t.feed(feedVon([eintrag(1), eintrag(2)]));
+  k.starten();
+  await t.lauf(ANSAGE_TAKT_MS + 5000);
+  await t.lauf(ANSAGE_TAKT_MS - 5000 + 10);
+  ok("zweite Ansage läuft", k.zustand.spieltId, 2);
+  k.wiederholen(1);
+  ok("↻ wartet in der Schlange", [k.zustand.spieltId, k.zustand.warteschlange.length], [2, 1]);
+  await t.lauf(10000);
+  ok("… und kommt danach", [k.zustand.spieltId, k.zustand.warteschlange.length], [null, 0]);
+}
+{
+  // Monitor-Modus: kein Verlauf, kein Audio im Speicher.
+  const t = welt();
+  const k = ansageKern({ base: "/", halle: "Halle A", halleFest: true, welt: t.w });
+  t.feed(feedVon([]));
+  t.feed(feedVon([eintrag(1)]));
+  k.starten();
+  await t.lauf(ANSAGE_TAKT_MS + 10000);
+  ok("ohne verlauf-Option bleibt der Verlauf leer", k.zustand.verlauf, []);
+  ok("… und ↻ greift ins Leere", k.wiederholen(1), false);
+}
+
 // ── Monitor-Modus: Adresse, LAN/Cloud, Hinweise ─────────────────────────
 ok("ohne Parameter kein Modus", ansageModusAusQuery("?device=abc"), null);
 ok("?ansage=Halle%20A", ansageModusAusQuery("?device=abc&ansage=Halle%20A"), { halle: "Halle A" });
