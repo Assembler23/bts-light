@@ -49,6 +49,11 @@ export const BEREICHE = [
     kapitel: ["docs/court-monitor.md", "docs/oberflaechen.md"],
   },
   {
+    muster: /^src-tauri\/assets\/ansage\.html$/,
+    was: "Ansage-Seite im Browser",
+    kapitel: ["docs/announcements.md", "docs/oberflaechen.md"],
+  },
+  {
     muster: /^src-tauri\/assets\/tl\.html$/,
     was: "Turnierleitungs-Oberfläche",
     kapitel: ["docs/turnierleitung-web.md"],

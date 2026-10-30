@@ -335,6 +335,66 @@ Abschnitt „Erneute Aufrufe — je Partei").
   dieselbe Regel wie beim Freitext und bewusst nicht geändert; die Abhilfe
   ist `announce.announce_hall` je Gerät zu setzen.
 
+## Ansage-Seite im Browser (seit v0.9.311)
+
+Tablets, Handys oder ein Pi sprechen die Ansagen einer Halle — **ohne**
+Windows-Programm. Der Turnier-PC baut die Ansage wie für seinen eigenen
+Lautsprecher, vertont sie mit Azure und legt sie ab; die Seite spielt sie nur
+ab. Spec: [features/ansage-im-browser.md](features/ansage-im-browser.md),
+Entscheidung: [ADR 0063](adr/0063-ansage-seiten-text-im-host-kern-vertont.md).
+
+**Einschalten:** Auf der Seite **Ansagen** den Schalter **Audio für
+Ansage-Seiten erzeugen** setzen (voreingestellt aus).
+<!-- pruef: "Audio für Ansage-Seiten erzeugen" in src/components/AnsageSeitenPanel.tsx -->
+Er ist unabhängig von „Ansagen aktivieren": Der PC kann im Büro stumm bleiben
+und trotzdem die Hallen versorgen. Darunter stehen Link und QR-Code je Halle.
+
+**Am Gerät:** Die Seite `http://<PC>:8088/ansage` öffnen (mit der
+verschlüsselten Strecke `https://<PC>:8443/ansage`), bei mehreren Hallen die
+Halle wählen — ohne Wahl startet sie nicht —, dann einmal **Ton
+freischalten** tippen. Danach spricht sie selbst.
+<!-- pruef: "/ansage" in src-tauri/src/tablet/server.rs -->
+<!-- pruef: "Ton freischalten" in src-tauri/assets/ansage.html -->
+
+Was die Seite spricht (Etappe E1): die Aufträge der Turnierleitungs-Seite
+(Aufruf, Nachruf, Besetzung, „Bitte beginnen", Bedienung), Freitexte und die
+Ansage-Knöpfe der Desktop-App (Feld aufrufen, Vorbereitungs-Aufruf und
+-Nachruf, SR/AR ansagen). Die **automatische** Ansage beim neuen Spiel auf
+einem Feld kommt erst mit Etappe E2.
+
+**Was die Seite nie tut:**
+
+- **Nachsprechen.** Die erste Abfrage ist Bestandsaufnahme; was länger als
+  eine Minute liegt, verfällt — auch nach einem Funkloch.
+- **Falsch sprechen.** Steht beim Abspielen ein anderes Spiel auf dem Feld,
+  schweigt sie für diesen Aufruf.
+- **Vertonen auf Zuruf.** Die Seite liest nur (GET). Der PC vertont nur,
+  wenn in der Halle gerade eine Seite zuhört — ohne Zuhörer keine
+  Azure-Kosten.
+
+**Stimme:** Audio vom Turnier-PC (Azure). Ohne Azure oder wenn das Audio
+nicht spielt, spricht die Gerätestimme den korrigierten Text. Hat das Gerät
+keine Stimme und der PC kein Audio, erklingt nur der Gong, die Seite warnt
+„Dieses Gerät kann nicht sprechen" — und meldet sich **nicht** als
+Ansage-Gerät.
+
+**Turnierleitung:** Eine Seite mit freigeschaltetem Ton zählt als
+Ansage-Gerät ihrer Halle; die Warnung „kein Ansage-Gerät" verschwindet dann
+wie bei einem Ansage-Slave.
+
+**Doppelbetrieb:** Spricht in derselben Halle zusätzlich diese App (mit
+„Ansagen aktivieren") oder ein Ansage-Slave, klingt jeder Aufruf doppelt.
+Die Seite **Ansagen** warnt dann — abschalten müssen Sie selbst.
+
+**Bildschirm:** Nur über die verschlüsselte Adresse (8443) kann die Seite den
+Bildschirm anhalten; sonst zeigt sie „Bitte den Bildschirm anlassen".
+
+**Grenzen (Stand E1):** nur im LAN (Cloud folgt mit E4); Pi am TV mit dem
+Ansage-Modus der Monitor-Seiten folgt mit E1b; ohne Azure kein Audio vom PC
+(Windows-Stimme folgt mit E3). Wechselt eine Seite die Halle, zählt sie noch bis
+zu 30 Sekunden auch für die alte — die Seite liest nur und meldet sich nicht
+ab. Als Zuhörer zählt eine Seite nur mit einer Halle, die es im Turnier gibt.
+
 ## Sprache: Deutsch / Englisch / Automatisch
 
 Einstellbar im Setup unter „Sprachansagen":
@@ -374,6 +434,7 @@ dem Turnier einmal die Test-Ansage drücken.
 | `saved_announcements` | Gespeicherte Ansage-Blöcke (wiederkehrende Freitext-Ansagen), Liste `string` (Default leer). |
 | `announce_scorekeeper` | Zähltafelbedienung mit ansagen? Default `true`. An = angesagt wird, **was am Feld steht** (zugewiesene Bedienung *oder* pro-Feld-Hinweis), aus = nie. Löst die feste Regel aus ADR 0007 ab ([ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)). |
 | `announce_umpire` | Schiedsrichter/Aufschlagrichter in der Feld-Ansage nennen? Default `true`. Die eigenen Knöpfe „SR/AR ansagen" und „Bedienung nachrufen" bleiben unberührt. |
+| `page_audio` | „Audio für Ansage-Seiten erzeugen": Der PC vertont Ansagen für die Browser-Seite `/ansage`, unabhängig von `enabled`. Default `false`. Siehe [Ansage-Seite im Browser](#ansage-seite-im-browser-seit-v09311). |
 
 > **UX:** Ist `azure_tts.enabled` aktiv, blendet [`AnnounceSettings`](../src/components/AnnounceSettings.tsx) die
 > Standard-Stimmen-Auswahl (`voice_de`/`voice_en`) aus — Azure spricht die ganze Ansage, die lokale Stimme
@@ -603,6 +664,16 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
   ohne Ansage-Gerät).
 - `src/components/AnnounceJobPlayer.tsx` — spricht die Aufträge der
   Turnierleitungs-Seite.
+- `src/io/announceJobs.ts` — `jobZuAnsage`: Auftrag → fertige Ansage, geteilt
+  von `AnnounceJobPlayer` und `AnsageVertoner`.
+- **Ansage-Seite:** `src/io/announcer.ts` `prepare*`/`playPrepared`,
+  `src/io/announceCourt.ts` (Builder `…Ansage` + Desktop-Knöpfe, die auch an
+  die Seiten geben), `src/io/ansageTeilen.ts`, `src/components/AnsageVertoner.tsx`,
+  `src/components/AnsageSeitenPanel.tsx`, `src-tauri/src/tablet/ansage.rs`
+  (`AnsageStore`), Routen `/ansage*` in `tablet/server.rs`,
+  `commands.rs` `ansage_*`, `src-tauri/assets/ansage.html` mit Inline-Kopien
+  von `src/io/ansageSeite.mjs` und `src/io/gongKlang.mjs`
+  (`scripts/test-ansage-seite.mjs`, `scripts/test-gong-klang.mjs`).
 
 ## Azure Neural TTS (hochwertige Cloud-Ansage, opt-in)
 

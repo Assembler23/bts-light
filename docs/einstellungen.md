@@ -202,6 +202,13 @@ ist dieser Menüpunkt ausgegraut. Details:
 Der Schalter wirkt **sofort**, ohne Neustart; eine laufende Ansage wird beim
 Ausschalten abgebrochen.
 
+**Audio für Ansage-Seiten erzeugen** — **voreingestellt aus**, auf der Seite
+**Ansagen**. Lässt Tablets, Handys oder einen Pi im Browser ansagen
+(`/ansage`); unabhängig davon, ob der PC selbst spricht. Mit Azure kostet
+jede Ansage, die eine Seite hört, einen Azure-Aufruf. Siehe
+[Ansage-Seite im Browser](announcements.md#ansage-seite-im-browser-seit-v09311).
+<!-- pruef: "page_audio: false" in src-tauri/src/config.rs -->
+
 ## Aufruf-Timer
 
 Hält fest, wie lange ein Feld schon gerufen ist, und stuft den Aufruf hoch.

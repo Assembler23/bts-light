@@ -3822,6 +3822,234 @@ pub fn finished_matches(state: State<'_, AppState>) -> Vec<FinishedMatchRow> {
     rows
 }
 
+// ─── Ansage-Seite im Browser (Spec `ansage-im-browser`, E1) ──────────────
+
+/// Höchstzahl Sprech-Abschnitte eines Eintrags und deren Länge — die
+/// Oberfläche baut selten mehr als ein Dutzend kurze Abschnitte.
+const MAX_ANSAGE_SEGMENTE: usize = 32;
+const MAX_ANSAGE_SEGMENT_LEN: usize = 1000;
+/// Obergrenze des SSML einer Ansage (Namen, IPA, Stimme).
+const MAX_ANSAGE_SSML_LEN: usize = 16 * 1024;
+
+/// Erzeugt dieser Rechner Ansagen für Seiten? Schalter an und kein Slave
+/// (ein Slave hat ohnehin keinen Tablet-Server).
+fn ansage_seiten_an(cfg: &AppConfig) -> bool {
+    cfg.announce.page_audio && !cfg.slave_mode
+}
+
+/// Vertoner (Desktop-Oberfläche): beansprucht die TL-Aufträge und Freitexte,
+/// die noch keiner bekommen hat und deren Halle gerade eine Seite hört. Der
+/// Abruf ist zugleich das Lebenszeichen des Vertoners — zählt aber **nicht**
+/// als Ansage-Gerät.
+#[tauri::command]
+pub fn ansage_offene_quellen(state: State<'_, AppState>) -> crate::tablet::ansage::OffeneQuellen {
+    let an = ansage_seiten_an(&state.config.lock().expect("Config-Mutex nicht vergiftet"));
+    if !an {
+        return Default::default();
+    }
+    let now = now_ms();
+    state.tablet.ansage().vertoner_lebt(now);
+    state.tablet.ansage_quellen_beanspruchen(now)
+}
+
+/// Eine fertig gebaute Ansage, die die Oberfläche zum Vertonen übergibt.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnsageAuftrag {
+    pub art: relay_proto::AnsageArt,
+    #[serde(default)]
+    pub hall: String,
+    #[serde(default)]
+    pub court_id: Option<i64>,
+    #[serde(default)]
+    pub match_id: Option<i64>,
+    #[serde(default)]
+    pub gong: Option<relay_proto::AnsageGong>,
+    pub lang: String,
+    pub rate: f32,
+    #[serde(default)]
+    pub segmente: Vec<String>,
+    /// Azure-SSML; fehlt, wenn Azure aus ist.
+    #[serde(default)]
+    pub ssml: Option<String>,
+}
+
+/// Prüft und kappt einen Auftrag. `None` = verwerfen.
+type AnsageEntwurfMitSsml = (crate::tablet::ansage::AnsageEntwurf, Option<String>);
+
+fn ansage_entwurf_aus(a: AnsageAuftrag) -> Option<AnsageEntwurfMitSsml> {
+    if matches!(a.art, relay_proto::AnsageArt::Unbekannt) {
+        return None;
+    }
+    let segmente: Vec<String> = a
+        .segmente
+        .into_iter()
+        .map(|s| {
+            s.trim()
+                .chars()
+                .take(MAX_ANSAGE_SEGMENT_LEN)
+                .collect::<String>()
+        })
+        .filter(|s| !s.is_empty())
+        .take(MAX_ANSAGE_SEGMENTE)
+        .collect();
+    if segmente.is_empty() {
+        return None;
+    }
+    let lang = if a.lang == "en" { "en" } else { "de" }.to_string();
+    // Dieselben Grenzen wie `clampRate` im Frontend.
+    let rate = if a.rate.is_finite() {
+        a.rate.clamp(0.5, 1.5)
+    } else {
+        0.8
+    };
+    let ssml = a
+        .ssml
+        .filter(|s| !s.trim().is_empty() && s.len() <= MAX_ANSAGE_SSML_LEN);
+    Some((
+        crate::tablet::ansage::AnsageEntwurf {
+            hall: a.hall,
+            art: a.art,
+            court_id: a.court_id,
+            match_id: a.match_id,
+            gong: a.gong,
+            lang,
+            rate,
+            segmente,
+        },
+        ssml,
+    ))
+}
+
+/// Vertont eine Ansage für die Seiten und legt sie ab. Liefert die Nummer
+/// des Eintrags oder `None`, wenn nichts abgelegt wurde (Schalter aus, Slave,
+/// niemand hört in der Halle zu, leerer Text).
+///
+/// **Ohne Zuhörer kein Azure-Aufruf** (Kriterium 7). Scheitert Azure, geht
+/// der Eintrag ohne Audio raus — die Seite spricht dann die Segmente.
+#[tauri::command]
+pub async fn ansage_vertonen(
+    state: State<'_, AppState>,
+    auftrag: AnsageAuftrag,
+) -> Result<Option<u64>, String> {
+    let cfg = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if !ansage_seiten_an(&cfg) {
+        return Ok(None);
+    }
+    let Some((entwurf, ssml)) = ansage_entwurf_aus(auftrag) else {
+        return Ok(None);
+    };
+    if !state.tablet.ansage().hat_seite(&entwurf.hall, now_ms()) {
+        return Ok(None);
+    }
+    // Nur die eigene Config: Der Vertoner läuft nie am Slave, geerbte
+    // Zugangsdaten spielen hier keine Rolle.
+    let audio = match (ssml, effective_azure(&cfg.azure_tts, None)) {
+        (Some(ssml), Some((region, key))) => {
+            match crate::azure_tts::synthesize_ohne_cache(&region, &key, &ssml).await {
+                Ok(bytes) => Some(("audio/mpeg".to_string(), bytes)),
+                Err(e) => {
+                    tracing::warn!(
+                        "Ansage-Seite: Azure-Vertonung gescheitert, Eintrag ohne Audio: {e}"
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+    Ok(Some(state.tablet.ansage().ablegen(
+        entwurf,
+        audio,
+        now_ms(),
+    )))
+}
+
+/// Zuhörer der Ansage-Seiten für die Einstellungen.
+#[derive(Debug, Clone, Serialize)]
+pub struct AnsageHoerer {
+    /// Hallen, in denen gerade eine Seite zuhört.
+    pub hallen: Vec<String>,
+    /// Hallen, in denen zusätzlich ein klassisches Ansage-Gerät spricht —
+    /// jeder Aufruf klänge dort doppelt (Kriterium 12).
+    pub doppelbetrieb: Vec<String>,
+}
+
+#[tauri::command]
+pub fn ansage_hoerer(state: State<'_, AppState>) -> AnsageHoerer {
+    let now = now_ms();
+    AnsageHoerer {
+        hallen: state.tablet.ansage().seiten_hallen(now),
+        doppelbetrieb: state.tablet.ansage_doppelbetrieb(now),
+    }
+}
+
+/// Link einer Ansage-Seite samt QR-Code.
+#[derive(Debug, Clone, Serialize)]
+pub struct AnsageLink {
+    /// Leer = Turnier mit nur einer Halle.
+    pub hall: String,
+    pub url: String,
+    /// Verschlüsselte Adresse (Bildschirm bleibt an, ADR 0047), leer ohne TLS.
+    pub url_tls: String,
+    pub qr_svg: String,
+}
+
+/// Links je Halle für die Ansage-Einstellungen. Leer ohne LAN — die Cloud
+/// kommt erst mit Etappe E4.
+#[tauri::command]
+pub fn ansage_link(state: State<'_, AppState>) -> Vec<AnsageLink> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if !config.connection_mode.lan_enabled() || config.slave_mode {
+        return Vec::new();
+    }
+    let host = crate::tablet::server::lan_host();
+    let tls_port = crate::tablet::server::tls_port_aktiv();
+    let host_tls = if config.tls.enabled && tls_port != 0 {
+        crate::tablet::server::lan_host_tls(tls_port)
+    } else {
+        String::new()
+    };
+    let mut hallen = state.tablet.ansage_hallen();
+    if hallen.is_empty() {
+        hallen.push(String::new());
+    }
+    hallen
+        .into_iter()
+        .map(|hall| {
+            let query = if hall.is_empty() {
+                String::new()
+            } else {
+                format!("?halle={}", relay_proto::path_encode(&hall))
+            };
+            let url = format!("http://{host}/ansage{query}");
+            let url_tls = if host_tls.is_empty() {
+                String::new()
+            } else {
+                format!("https://{host_tls}/ansage{query}")
+            };
+            // Der QR zeigt die verschlüsselte Adresse, wenn es sie gibt:
+            // Nur dort hält die Seite den Bildschirm an.
+            let qr_svg = crate::aushang::qr_svg(if url_tls.is_empty() { &url } else { &url_tls })
+                .unwrap_or_default();
+            AnsageLink {
+                hall,
+                url,
+                url_tls,
+                qr_svg,
+            }
+        })
+        .collect()
+}
+
 /// Master: eine Freitext-Ansage ablegen. `hall` = Ziel-Halle (BTP-Location-Name;
 /// leer = alle Hallen). Master + Slaves pollen sie über `pending_freetext`.
 #[tauri::command]
@@ -6146,6 +6374,34 @@ mod tests {
         let parsed: AppConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.install_id, "inst-roundtrip");
         assert_eq!(parsed.btp.password, None);
+    }
+
+    #[test]
+    fn ein_ansage_auftrag_wird_gekappt_und_unbekanntes_verworfen() {
+        let auftrag = |art, segmente: Vec<&str>| AnsageAuftrag {
+            art,
+            hall: "Halle A".into(),
+            court_id: None,
+            match_id: None,
+            gong: None,
+            lang: "fr".into(),
+            rate: 9.0,
+            segmente: segmente.into_iter().map(String::from).collect(),
+            ssml: Some("x".repeat(MAX_ANSAGE_SSML_LEN + 1)),
+        };
+        let (e, ssml) = ansage_entwurf_aus(auftrag(
+            relay_proto::AnsageArt::Freetext,
+            vec!["  Hallo  ", ""],
+        ))
+        .unwrap();
+        assert_eq!(e.segmente, ["Hallo"]);
+        assert_eq!(e.lang, "de", "nur de/en");
+        assert_eq!(e.rate, 1.5, "Rate wie clampRate");
+        assert!(ssml.is_none(), "überlanges SSML geht nicht an Azure");
+        assert!(ansage_entwurf_aus(auftrag(relay_proto::AnsageArt::Freetext, vec![" "])).is_none());
+        assert!(
+            ansage_entwurf_aus(auftrag(relay_proto::AnsageArt::Unbekannt, vec!["Hallo"])).is_none()
+        );
     }
 
     #[test]

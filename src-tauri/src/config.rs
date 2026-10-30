@@ -142,6 +142,12 @@ pub struct AnnounceConfig {
     /// Der eigene Knopf „SR/AR ansagen" bleibt unberührt — wer ihn drückt,
     /// will genau diese Ansage.
     pub announce_umpire: bool,
+    /// „Audio für Ansage-Seiten erzeugen" (Spec `ansage-im-browser`): Der
+    /// Turnier-PC vertont Ansagen für die Browser-Seite `/ansage`. Bewusst
+    /// **getrennt** von `enabled` (= am PC selbst abspielen): Der PC kann im
+    /// Büro stumm bleiben und trotzdem die Hallen versorgen. Default aus —
+    /// eine Seite kostet Azure-Aufrufe, das soll niemand ungefragt bekommen.
+    pub page_audio: bool,
 }
 
 /// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
@@ -178,6 +184,7 @@ impl Default for AnnounceConfig {
             // still dazu — sie hören ab dem Update mehr, nicht weniger.
             announce_scorekeeper: true,
             announce_umpire: true,
+            page_audio: false,
         }
     }
 }
@@ -2001,6 +2008,7 @@ mod tests {
                 share_corrections: true,
                 announce_scorekeeper: false,
                 announce_umpire: false,
+                page_audio: true,
             },
             azure_tts: AzureTtsConfig {
                 enabled: true,
@@ -2185,6 +2193,11 @@ mod tests {
             loaded.announce.announce_umpire,
             "fehlendes announce_umpire muss true sein"
         );
+        // Ansage-Seiten (Spec ansage-im-browser, Kriterium 15): Eine alte
+        // Config lädt, und die Seiten-Vertonung bleibt aus — sie kostet
+        // Azure-Aufrufe und soll niemand ungefragt bekommen.
+        assert!(!loaded.announce.page_audio, "page_audio muss aus sein");
+        assert!(!AnnounceConfig::default().page_audio);
     }
 
     #[test]

@@ -697,6 +697,9 @@ pub struct TabletState {
     announce_seq: AtomicU64,
     /// Zuletzt gesehene Ansage-Geräte: Halle (klein) → Zeitpunkt des Abrufs.
     announce_listeners: RwLock<HashMap<String, u64>>,
+    /// Ansagen für die Browser-Seite `/ansage` samt deren Zuhörern (Spec
+    /// `ansage-im-browser`) — nur im RAM.
+    ansage: crate::tablet::ansage::AnsageStore,
     /// Fehlgeschlagene BTP-Ergebnis-Writes, die der Sync-Loop nachschiebt
     /// (Nachschub-Queue, Cluster A5 — needsync-Prinzip aus Tilos BTS,
     /// robuster: periodischer Retry statt nur beim Reconnect). Je Match
@@ -961,7 +964,7 @@ const BTP_RETRY_CAP: usize = 200;
 /// Eine manuelle Freitext-Ansage. `hall` = Ziel-Halle (BTP-Location-Name;
 /// leer = alle Hallen). `id` ist fortlaufend, damit Sprecher (Master/Slaves)
 /// nur neue Einträge ansagen.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FreetextItem {
     pub id: u64,
     pub hall: String,
@@ -1637,6 +1640,89 @@ impl TabletState {
     /// `schiedsrichterzettel-autodruck`).
     pub fn print_log(&self) -> &crate::tablet::print_log::PrintLogStore {
         &self.print_log
+    }
+
+    /// Ablage der Browser-Ansagen (Spec `ansage-im-browser`).
+    pub fn ansage(&self) -> &crate::tablet::ansage::AnsageStore {
+        &self.ansage
+    }
+
+    /// Beansprucht für den Vertoner die TL-Aufträge und Freitexte, die noch
+    /// keiner bekommen hat (siehe [`crate::tablet::ansage::AnsageStore::beanspruche`]).
+    ///
+    /// Liest die Aufträge **direkt**, nicht über [`Self::announce_jobs_since`]:
+    /// Dieser Abruf ist kein Ansage-Gerät und darf der Turnierleitung nicht
+    /// melden, es höre jemand zu.
+    pub fn ansage_quellen_beanspruchen(&self, now_ms: u64) -> crate::tablet::ansage::OffeneQuellen {
+        let jobs: Vec<AnnounceJob> = self
+            .announce_jobs
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|j| j.created_at_ms + ANNOUNCE_JOB_TTL_MS > now_ms)
+            .cloned()
+            .collect();
+        let freitexte = self.freetext.read().unwrap().clone();
+        self.ansage.beanspruche(jobs, freitexte, now_ms)
+    }
+
+    /// Welches Spiel gerade auf welchem Feld steht — die Abspiel-Kontrolle
+    /// der Ansage-Seiten. Direkt aus dem BTP-Stand (R2), ohne den teuren
+    /// Bau der Feld-Übersicht: Eine Seite fragt alle 1,5 s.
+    pub fn ansage_belegung(&self) -> Vec<relay_proto::AnsageBelegung> {
+        let guard = self.snapshot.read().unwrap();
+        let Some(snap) = guard.as_ref() else {
+            return Vec::new();
+        };
+        snap.matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| {
+                m.court_id.map(|court_id| relay_proto::AnsageBelegung {
+                    court_id,
+                    match_id: m.id,
+                })
+            })
+            .collect()
+    }
+
+    /// Die Hallen zur Auswahl auf der Ansage-Seite — leer, solange das
+    /// Turnier nur eine Halle hat (dann gibt es nichts zu wählen).
+    pub fn ansage_hallen(&self) -> Vec<String> {
+        let mehrere = self
+            .snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|s| s.is_multi_hall());
+        if !mehrere {
+            return Vec::new();
+        }
+        let mut hallen = self.hall_names();
+        hallen.sort();
+        hallen.dedup();
+        hallen
+    }
+
+    /// Hallen, in denen eine Ansage-Seite **und** ein klassisches
+    /// Ansage-Gerät (diese App mit „Ansagen aktivieren" oder ein
+    /// Windows-Ansage-Slave) zugleich zuhören — dort klänge jeder Aufruf
+    /// doppelt. Die Oberfläche warnt; verhindert wird es bewusst nicht
+    /// (Grundentscheidung „Doppelbetrieb").
+    pub fn ansage_doppelbetrieb(&self, now_ms: u64) -> Vec<String> {
+        let klassisch: Vec<String> = self
+            .announce_listeners
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|(_, seen)| **seen + ANNOUNCE_LISTENER_TTL_MS > now_ms)
+            .map(|(hall, _)| hall.clone())
+            .collect();
+        self.ansage
+            .seiten_hallen(now_ms)
+            .into_iter()
+            .filter(|seite| klassisch.iter().any(|k| relay_proto::halle_passt(seite, k)))
+            .collect()
     }
 
     /// Der Spielzeiten-Speicher (Spec `spielzeiten-prognose`) — geteilt von
@@ -4214,6 +4300,12 @@ impl TabletState {
     /// Die Frist ist großzügig gegenüber dem Abfragetakt: Ein einzelner
     /// ausgefallener Abruf soll nicht als „niemand da" gelten.
     pub fn has_announce_listener(&self, hall: &str, now_ms: u64) -> bool {
+        // Eine Ansage-Seite im Browser zählt genauso (Spec
+        // `ansage-im-browser`): Sie meldet sich nur, wenn sie wirklich
+        // sprechen kann und der Ton freigeschaltet ist.
+        if self.ansage.hat_seite(hall, now_ms) {
+            return true;
+        }
         let h = hall.trim().to_lowercase();
         self.announce_listeners
             .read()

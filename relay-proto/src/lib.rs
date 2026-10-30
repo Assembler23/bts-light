@@ -2698,6 +2698,133 @@ pub struct SlaveInfo {
     pub last_seen_ms: u64,
 }
 
+// ─── Ansage-Seite im Browser (Spec `ansage-im-browser`) ──────────────────
+//
+// Ein Eintrag ist eine **fertige** Ansage: Den Text baut die Oberfläche des
+// Turnier-PCs (dieselbe Logik wie für den eigenen Lautsprecher), vertont wird
+// im Kern, die Seite spielt nur ab. Die Typen liegen hier, weil die Cloud
+// (Etappe E4) dieselben über den Relay trägt.
+
+/// Höchstzahl Einträge, die eine Ablage hält (Ältester fliegt).
+pub const MAX_ANSAGE_EINTRAEGE: usize = 32;
+/// Höchstgröße aller Audio-Daten einer Ablage zusammen.
+pub const MAX_ANSAGE_AUDIO_GESAMT: usize = 6 * 1024 * 1024;
+/// Höchstgröße eines einzelnen Audios — größere gehen ohne Audio raus.
+pub const MAX_ANSAGE_AUDIO: usize = 1024 * 1024;
+/// Verfall eines Eintrags: dieselbe Minute wie bei den Ansage-Aufträgen.
+pub const ANSAGE_TTL_MS: u64 = 60_000;
+
+/// Gehört eine Ansage für Halle `ziel` zu einem Gerät in Halle `geraet`?
+///
+/// **Eine** Regel für alle neuen Ansage-Wege: Leerzeichen am Rand zählen
+/// nicht, Groß-/Kleinschreibung auch nicht — und zwar für Umlaute ebenso
+/// (`"HALLE Ü"` = `"Halle ü"`), was `eq_ignore_ascii_case` nicht leistet.
+/// Ein leeres Ziel gilt allen Hallen, ein Gerät ohne Halle hört alles.
+pub fn halle_passt(ziel: &str, geraet: &str) -> bool {
+    let z = ziel.trim();
+    let g = geraet.trim();
+    z.is_empty() || g.is_empty() || z.to_lowercase() == g.to_lowercase()
+}
+
+/// Wofür ein Ansage-Eintrag steht — nur zur Anzeige und Diagnose; die Seite
+/// spielt jede bekannte Art gleich ab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnsageArt {
+    CourtCall,
+    PrepCall,
+    Officials,
+    StartPlay,
+    ScorekeeperCall,
+    Freetext,
+    /// Ein Ansage-Knopf der Desktop-App.
+    Desktop,
+    /// Erst-Ansage „neues Spiel auf dem Feld" (ab Etappe E2).
+    CourtAssigned,
+    /// Art aus einer neueren Fassung: Die Seite überspringt den Eintrag,
+    /// statt an ihm die ganze Antwort zu verlieren.
+    #[serde(other)]
+    Unbekannt,
+}
+
+/// Welcher Gong vor der Ansage erklingt (lokal auf dem Gerät erzeugt).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnsageGong {
+    /// Tiefer Zwei-Ton-Gong des Spielaufrufs.
+    Match,
+    /// Heller Dreiklang für Info/Freitext.
+    Info,
+}
+
+/// Vom Turnier-PC erzeugtes Audio zu einem Eintrag — abrufbar unter
+/// `…/ansage/audio/{id}`, nicht im Feed selbst.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnsageAudio {
+    /// `audio/mpeg` (Azure) oder `audio/wav` (ab E3 die Windows-Stimme).
+    pub mime: String,
+    pub bytes: u32,
+}
+
+/// Eine fertige Ansage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnsageEintrag {
+    pub id: u64,
+    #[serde(default)]
+    pub hall: String,
+    pub art: AnsageArt,
+    /// Feld und Spiel, gegen die die Seite vor dem Abspielen prüft: Steht
+    /// inzwischen ein anderes Spiel dort, wäre die Ansage falsch.
+    #[serde(rename = "courtId", default, skip_serializing_if = "Option::is_none")]
+    pub court_id: Option<i64>,
+    #[serde(rename = "matchId", default, skip_serializing_if = "Option::is_none")]
+    pub match_id: Option<i64>,
+    #[serde(rename = "createdAtMs")]
+    pub created_at_ms: u64,
+    /// Fehlt = kein Gong (Schalter „Gong" aus).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gong: Option<AnsageGong>,
+    /// `de` oder `en`.
+    pub lang: String,
+    pub rate: f32,
+    /// Der korrigierte Text in Sprech-Abschnitten — die Gerätestimme spricht
+    /// ihn, wenn kein Audio da ist oder es sich nicht abspielen lässt.
+    #[serde(default)]
+    pub segmente: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AnsageAudio>,
+}
+
+/// Ein belegtes Feld — die Grundlage der Abspiel-Kontrolle auf der Seite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnsageBelegung {
+    #[serde(rename = "courtId")]
+    pub court_id: i64,
+    #[serde(rename = "matchId")]
+    pub match_id: i64,
+}
+
+/// Antwort von `GET …/ansage/feed`. Enthält bewusst **keine** Azure-Angaben
+/// (Region, Schlüssel, Stimme) — die Seite braucht sie nicht.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct AnsageFeed {
+    /// Der Turnier-PC erzeugt gerade Ansagen für Seiten.
+    pub aktiv: bool,
+    /// Der Turnier-PC kann vertonen (Azure, ab E3 auch die Windows-Stimme).
+    #[serde(rename = "hostAudio")]
+    pub host_audio: bool,
+    /// Warum nicht `aktiv`: `schalter_aus`, `slave`, `renderer_weg`,
+    /// `turnier_pc_offline`, `unbekannt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grund: Option<String>,
+    #[serde(default)]
+    pub halls: Vec<String>,
+    #[serde(default)]
+    pub belegung: Vec<AnsageBelegung>,
+    #[serde(default)]
+    pub eintraege: Vec<AnsageEintrag>,
+}
+
 /// Frames vom Relay an den bts-light-Host.
 ///
 /// **Kein `Eq`** (nur `PartialEq`): `TlCommand` trägt ein [`TlAction`], und
@@ -3032,6 +3159,67 @@ pub enum CarrierServerMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Ansage-Seite (Spec ansage-im-browser) ───────────────────────────
+
+    #[test]
+    fn halle_passt_ignoriert_rand_und_schreibweise_auch_bei_umlauten() {
+        assert!(halle_passt("Halle Ü", " halle ü "));
+        assert!(halle_passt("HALLE A", "Halle a"));
+        assert!(!halle_passt("Halle A", "Halle B"));
+        // Leeres Ziel = alle Hallen, Gerät ohne Halle hört alles.
+        assert!(halle_passt("", "Halle B"));
+        assert!(halle_passt("Halle A", "  "));
+    }
+
+    #[test]
+    fn ansage_eintrag_roundtrip_und_unbekannte_art() {
+        let e = AnsageEintrag {
+            id: 7,
+            hall: "Halle A".into(),
+            art: AnsageArt::CourtCall,
+            court_id: Some(3),
+            match_id: Some(42),
+            created_at_ms: 1_000,
+            gong: Some(AnsageGong::Match),
+            lang: "de".into(),
+            rate: 0.8,
+            segmente: vec!["Feld drei.".into()],
+            audio: Some(AnsageAudio {
+                mime: "audio/mpeg".into(),
+                bytes: 4711,
+            }),
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains(r#""art":"court_call""#), "{json}");
+        assert!(json.contains(r#""courtId":3"#), "{json}");
+        assert_eq!(serde_json::from_str::<AnsageEintrag>(&json).unwrap(), e);
+
+        // Eine Art aus einer neueren Fassung darf den Eintrag nicht
+        // unlesbar machen — die Seite überspringt ihn dann.
+        let neu = json.replace("court_call", "kommt_noch");
+        let gelesen: AnsageEintrag = serde_json::from_str(&neu).unwrap();
+        assert_eq!(gelesen.art, AnsageArt::Unbekannt);
+    }
+
+    #[test]
+    fn ansage_feed_traegt_keine_azure_felder() {
+        let feed = AnsageFeed {
+            aktiv: true,
+            host_audio: true,
+            grund: None,
+            halls: vec!["Halle A".into()],
+            belegung: vec![AnsageBelegung {
+                court_id: 1,
+                match_id: 2,
+            }],
+            eintraege: vec![],
+        };
+        let json = serde_json::to_string(&feed).unwrap().to_lowercase();
+        for verboten in ["azure", "region", "key", "voice"] {
+            assert!(!json.contains(verboten), "{verboten} in {json}");
+        }
+    }
 
     /// Serde-Roundtrip: deserialisieren, was wir serialisiert haben.
     fn roundtrip<T>(value: &T)

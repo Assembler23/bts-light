@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.311
+
+- **Ansagen im Browser (Etappe 1).** Tablets, Handys oder ein Pi im
+  Hallennetz können jetzt Ansagen sprechen, ohne eigenes Programm: Seite
+  `/ansage` öffnen, Halle wählen, „Ton freischalten". Der Turnier-PC baut und
+  vertont die Ansage (Azure), die Seite spielt sie nur ab — Aufrufe der
+  Turnierleitung, Freitexte und die Ansage-Knöpfe der App. Einschalten auf der
+  Seite **Ansagen** mit „Audio für Ansage-Seiten erzeugen" (voreingestellt
+  aus); dort stehen auch Link und QR-Code je Halle. Die automatische Ansage
+  beim neuen Spiel und die Cloud folgen in späteren Etappen.
+
 ## v0.9.310
 
 - **Turnierleitung: Zugangs-Adresse anklickbar.** Die Adresse unter dem

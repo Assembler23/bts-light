@@ -12,6 +12,7 @@
 import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
 import { reportAzureFallback } from "../state/azureStatus";
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
+import { gongPlanen } from "./gongKlang.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
 import { disziplinName } from "./disziplinName.mjs";
@@ -115,75 +116,15 @@ function gongFinished(
   });
 }
 
-// Synthesizer-Gong über Web Audio. Zwei kurze Sinus-Töne (hoch → tiefer) mit
-// kleinem Decay, ähnlich einem Hotel-Gong. Liefert eine Promise, die
-// resolved, wenn der Gong durchgespielt ist — damit die Sprache erst danach
-// startet.
+// Synthesizer-Gong über Web Audio (Klang aus `gongKlang.mjs`, den auch die
+// Ansage-Seite im Browser nutzt). Liefert eine Promise, die resolved, wenn
+// der Gong durchgespielt ist — damit die Sprache erst danach startet.
 async function playGong(
   ctx: AudioContext,
   kind: "match" | "info" = "match",
 ): Promise<void> {
-  const now = ctx.currentTime;
-
-  // Info/Freitext: KLAR anderer Klang als der Spielaufruf – drei helle,
-  // perlende Töne (C-Dur-Dreiklang aufsteigend, Triangle-Wellenform, kurz
-  // gestoßen). Unterscheidet sich in Tonzahl (3 statt 2), Klangfarbe
-  // (Triangle statt Sinus) und Bewegung deutlich vom tiefen 2-Ton-Spielaufruf.
-  if (kind === "info") {
-    const notes = [523.25, 659.25, 783.99]; // C5 – E5 – G5
-    const step = 0.15;
-    let lastOsc: OscillatorNode | null = null;
-    let lastStop = now;
-    for (let i = 0; i < notes.length; i++) {
-      const t = now + i * step;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.32, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
-      g.connect(ctx.destination);
-      const o = ctx.createOscillator();
-      o.type = "triangle";
-      o.frequency.value = notes[i];
-      o.connect(g);
-      o.start(t);
-      const stopAt = t + 0.38;
-      o.stop(stopAt);
-      lastOsc = o;
-      lastStop = stopAt;
-    }
-    // Auflösen am echten Ende des dritten Tons (`o.stop` bei ~0,68 s ab now:
-    // 2·0,15 + 0,38) + Atempause.
-    return lastOsc ? gongFinished(ctx, lastOsc, lastStop) : Promise.resolve();
-  }
-
-  // Spielaufruf = tiefer, zweitöniger ABSTEIGENDER Sinus-Gong (A5 → D5),
-  // wie ein Hotel-Gong.
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.4, now + 0.05);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
-  gain.connect(ctx.destination);
-
-  const o1 = ctx.createOscillator();
-  o1.type = "sine";
-  o1.frequency.value = 880;
-  o1.connect(gain);
-  o1.start(now);
-  o1.stop(now + 0.6);
-
-  const o2 = ctx.createOscillator();
-  o2.type = "sine";
-  o2.frequency.value = 587.33;
-  o2.connect(gain);
-  o2.start(now + 0.18);
-  o2.stop(now + 1.1);
-
-  // Auflösen am echten Ende des zuletzt stoppenden Oszillators (o2): `o2.stop`
-  // bei ~1,1 s beendet den Ton hart, die Gain-Rampe bis 1,2 s ist danach
-  // wirkungslos — `onended` feuert real bei ~1,1 s. Plus Atempause, damit die
-  // Sprachausgabe nicht in den Gong-Nachklang einsetzt. Der scheduledEnd-Wert
-  // (1,2 s) dient nur der konservativen Fallback-Frist.
-  return gongFinished(ctx, o2, now + 1.2);
+  const { letzter, endeSec } = gongPlanen(ctx, kind);
+  return gongFinished(ctx, letzter, endeSec);
 }
 
 // Reusable AudioContext — Browser-Limit von 1–6 contexts pro Tab; einer reicht.
@@ -923,33 +864,166 @@ export function buildAnnouncementSsml(
   );
 }
 
-// Spielt Gong + spricht die Ansage. Wirft NICHT bei fehlendem
-// SpeechSynthesis-Support, läuft dann nur als Gong durch.
-export function playAnnouncement(
+// ─── Vorbereiten und Abspielen ───────────────────────────────────────────
+//
+// Eine Ansage entsteht in zwei Schritten: `prepare*` baut Text, SSML und die
+// Gong-Wahl (rein, ohne Ton), `playPrepared` spielt sie ab. Getrennt, weil
+// dieselbe fertige Ansage auch an die Ansage-Seiten im Browser geht (Spec
+// `ansage-im-browser`): Dort vertont der Kern das SSML, die Seite spielt ab
+// — und klingt damit wie der Lautsprecher am Turnier-PC.
+
+/** Eine fertig gebaute Ansage. */
+export interface PreparedAnnouncement {
+  /** Gong davor: Spielaufruf, Info/Freitext oder keiner. */
+  gong: "match" | "info" | null;
+  lang: AnnounceLang;
+  rate: number;
+  voiceURI?: string;
+  /** Korrigierter Text in Sprech-Abschnitten (Web Speech, Rückfall). */
+  segments: string[];
+  /** Azure-SSML — nur, wenn Azure eingerichtet ist. */
+  ssml?: string;
+}
+
+function gongWahl(
+  gong: boolean | undefined,
+  kind: "match" | "info",
+): PreparedAnnouncement["gong"] {
+  return gong === false ? null : kind;
+}
+
+/** Baut eine Spiel-/Feld-Ansage (Gong + Feld + Disziplin + Paarung …). */
+export function prepareAnnouncement(
   input: AnnounceMatchInput,
   lang: AnnounceLang,
   opts: AnnounceOptions = {},
+): PreparedAnnouncement {
+  const enabled = opts.nameOverridesEnabled ?? true;
+  let ssml: string | undefined;
+  if (opts.azure) {
+    // Stimme je Disziplin (optional): Herren-/Damen-Disziplinen können
+    // unterschiedliche Stimmen bekommen; sonst die Standard-Stimme.
+    const voice = voiceForDiscipline(
+      opts.azure.voice,
+      opts.azure.disciplineVoices,
+      input.discipline,
+    );
+    // Scheitert der SSML-Bau, bleibt es — wie früher — beim Web-Speech-
+    // Weg, sichtbar über den Azure-Hinweis.
+    try {
+      ssml = buildAnnouncementSsml(
+        input,
+        lang,
+        voice,
+        buildIpaMap(opts.nameOverrides, enabled),
+        buildLangOverrideMap(opts.nameOverrides, enabled),
+        buildOverrideMap(opts.nameOverrides, enabled),
+      );
+    } catch (e) {
+      reportAzureFallback(e);
+    }
+  }
+  return {
+    gong: gongWahl(opts.gong, "match"),
+    lang,
+    rate: clampRate(opts.rate),
+    voiceURI: opts.voiceURI,
+    segments: buildAnnouncementSegments(
+      input,
+      lang,
+      opts.nameOverrides,
+      enabled,
+    ),
+    ssml,
+  };
+}
+
+/** Baut eine Freitext-Ansage (Text 1:1, anderer Gong). `null` bei leerem Text. */
+export function prepareFreeText(
+  text: string,
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): PreparedAnnouncement | null {
+  const t = (text || "").trim();
+  if (!t) return null;
+  let ssml: string | undefined;
+  if (opts.azure) {
+    const speakLang = lang === "de" ? "de-DE" : "en-US";
+    ssml =
+      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
+      `<voice name="${xmlEscape(opts.azure.voice)}">${xmlEscape(t)}</voice></speak>`;
+  }
+  return {
+    // Freitext = kein Spielaufruf → anderer (aufsteigender) Gong.
+    gong: gongWahl(opts.gong, "info"),
+    lang,
+    rate: clampRate(opts.rate),
+    voiceURI: opts.voiceURI,
+    segments: [t],
+    ssml,
+  };
+}
+
+/** Baut eine Vorbereitungs-Ansage (ohne Feld, ggf. mit Halle). */
+export function preparePreparationAnnouncement(
+  input: AnnouncePreparationInput,
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): PreparedAnnouncement {
+  const enabled = opts.nameOverridesEnabled ?? true;
+  let ssml: string | undefined;
+  if (opts.azure) {
+    const voice = voiceForDiscipline(
+      opts.azure.voice,
+      opts.azure.disciplineVoices,
+      input.discipline,
+    );
+    // Scheitert der SSML-Bau, bleibt es — wie früher — beim Web-Speech-
+    // Weg, sichtbar über den Azure-Hinweis.
+    try {
+      ssml = buildPreparationSsml(
+        input,
+        lang,
+        voice,
+        buildIpaMap(opts.nameOverrides, enabled),
+        buildLangOverrideMap(opts.nameOverrides, enabled),
+        buildOverrideMap(opts.nameOverrides, enabled),
+      );
+    } catch (e) {
+      reportAzureFallback(e);
+    }
+  }
+  return {
+    gong: gongWahl(opts.gong, "match"),
+    lang,
+    rate: clampRate(opts.rate),
+    voiceURI: opts.voiceURI,
+    segments: buildPreparationSegments(
+      input,
+      lang,
+      opts.nameOverrides,
+      enabled,
+    ),
+    ssml,
+  };
+}
+
+/**
+ * Spielt eine fertige Ansage am eigenen Lautsprecher ab: Gong, dann Azure
+ * (wenn `synthesize` da ist und SSML gebaut wurde), sonst Web Speech. Strikt
+ * nacheinander über die eine Warteschlange. Wirft NICHT bei fehlendem
+ * SpeechSynthesis-Support, läuft dann nur als Gong durch.
+ */
+export function playPrepared(
+  p: PreparedAnnouncement,
+  synthesize?: (ssml: string) => Promise<string>,
 ): Promise<void> {
   return enqueueAnnouncement(async () => {
-    await maybeGong(opts.gong);
+    if (p.gong) await maybeGong(true, p.gong);
     // Hochwertiger Azure-Weg (ganze Ansage am Stück); bei Fehler → Web Speech.
-    if (opts.azure) {
+    if (synthesize && p.ssml) {
       try {
-        const enabled = opts.nameOverridesEnabled ?? true;
-        const ipaMap = buildIpaMap(opts.nameOverrides, enabled);
-        const langMap = buildLangOverrideMap(opts.nameOverrides, enabled);
-        const sayMap = buildOverrideMap(opts.nameOverrides, enabled);
-        // Stimme je Disziplin (optional): Herren-/Damen-Disziplinen können
-        // unterschiedliche Stimmen bekommen; sonst die Standard-Stimme.
-        const voice = voiceForDiscipline(
-          opts.azure.voice,
-          opts.azure.disciplineVoices,
-          input.discipline,
-        );
-        const b64 = await opts.azure.synthesize(
-          buildAnnouncementSsml(input, lang, voice, ipaMap, langMap, sayMap),
-        );
-        await playMp3Base64(b64);
+        await playMp3Base64(await synthesize(p.ssml));
         return;
       } catch (e) {
         // Azure aus/Netzfehler → Fallback unten, aber sichtbar (Banner),
@@ -957,18 +1031,21 @@ export function playAnnouncement(
         reportAzureFallback(e);
       }
     }
-    await speakSegments(
-      buildAnnouncementSegments(
-        input,
-        lang,
-        opts.nameOverrides,
-        opts.nameOverridesEnabled ?? true,
-      ),
-      lang,
-      clampRate(opts.rate),
-      opts.voiceURI,
-    );
+    await speakSegments(p.segments, p.lang, p.rate, p.voiceURI);
   });
+}
+
+// Spielt Gong + spricht die Ansage. Wirft NICHT bei fehlendem
+// SpeechSynthesis-Support, läuft dann nur als Gong durch.
+export function playAnnouncement(
+  input: AnnounceMatchInput,
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): Promise<void> {
+  return playPrepared(
+    prepareAnnouncement(input, lang, opts),
+    opts.azure?.synthesize,
+  );
 }
 
 // Spielt Gong + spricht einen FREIEN Text (manuelle Ansage). Azure, wenn
@@ -979,26 +1056,8 @@ export function playFreeText(
   lang: AnnounceLang,
   opts: AnnounceOptions = {},
 ): Promise<void> {
-  const t = (text || "").trim();
-  if (!t) return Promise.resolve();
-  return enqueueAnnouncement(async () => {
-    // Freitext = kein Spielaufruf → anderer (aufsteigender) Gong.
-    await maybeGong(opts.gong, "info");
-    if (opts.azure) {
-      try {
-        const speakLang = lang === "de" ? "de-DE" : "en-US";
-        const ssml =
-          `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
-          `<voice name="${xmlEscape(opts.azure.voice)}">${xmlEscape(t)}</voice></speak>`;
-        const b64 = await opts.azure.synthesize(ssml);
-        await playMp3Base64(b64);
-        return;
-      } catch (e) {
-        reportAzureFallback(e); // → Web Speech unten, mit sichtbarem Hinweis
-      }
-    }
-    await speakSegments([t], lang, clampRate(opts.rate), opts.voiceURI);
-  });
+  const p = prepareFreeText(text, lang, opts);
+  return p ? playPrepared(p, opts.azure?.synthesize) : Promise.resolve();
 }
 
 // Test-Ansage für die Einstellungen — feste Beispieldaten, damit der Klang
@@ -1244,40 +1303,10 @@ export function playPreparationAnnouncement(
   lang: AnnounceLang,
   opts: AnnounceOptions = {},
 ): Promise<void> {
-  return enqueueAnnouncement(async () => {
-    await maybeGong(opts.gong);
-    if (opts.azure) {
-      try {
-        const enabled = opts.nameOverridesEnabled ?? true;
-        const ipaMap = buildIpaMap(opts.nameOverrides, enabled);
-        const langMap = buildLangOverrideMap(opts.nameOverrides, enabled);
-        const sayMap = buildOverrideMap(opts.nameOverrides, enabled);
-        const voice = voiceForDiscipline(
-          opts.azure.voice,
-          opts.azure.disciplineVoices,
-          input.discipline,
-        );
-        const b64 = await opts.azure.synthesize(
-          buildPreparationSsml(input, lang, voice, ipaMap, langMap, sayMap),
-        );
-        await playMp3Base64(b64);
-        return;
-      } catch (e) {
-        reportAzureFallback(e); // → Web Speech unten, mit sichtbarem Hinweis
-      }
-    }
-    await speakSegments(
-      buildPreparationSegments(
-        input,
-        lang,
-        opts.nameOverrides,
-        opts.nameOverridesEnabled ?? true,
-      ),
-      lang,
-      clampRate(opts.rate),
-      opts.voiceURI,
-    );
-  });
+  return playPrepared(
+    preparePreparationAnnouncement(input, lang, opts),
+    opts.azure?.synthesize,
+  );
 }
 
 // Auto-Sprachwahl anhand der Nationalitäten: Englisch, sobald mindestens

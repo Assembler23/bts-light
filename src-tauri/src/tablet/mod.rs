@@ -1,6 +1,7 @@
 //! Digitaler Tablet-Spielzettel: geteilter Zustand, der eingebettete
 //! HTTP+WebSocket-Server (LAN-Modus) und der Relay-Client (Cloud-Modus).
 
+pub mod ansage;
 pub mod assets;
 pub mod assign;
 pub mod blatt;

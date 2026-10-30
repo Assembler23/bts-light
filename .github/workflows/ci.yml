@@ -190,6 +190,15 @@ jobs:
       - name: Akkustand am Tablet (JS)
         run: node scripts/test-akku.mjs
 
+      # Ansage-Seite im Browser (Spec ansage-im-browser): Bestandsaufnahme,
+      # Hallen-Pflicht, nichts Falsches oder Verfallenes sprechen, Praesenz
+      # nur mit Stimme und Ton - und die Inline-Kopien in ansage.html
+      # wortgleich zu den Modulen.
+      - name: Ansage-Seite und Gong (JS)
+        run: |
+          node scripts/test-ansage-seite.mjs
+          node scripts/test-gong-klang.mjs
+
       # Wann steht eine Anzeige still, ohne es zu merken? Ein Fehlalarm hier
       # schickt Log-Uploads von zwanzig Geraeten los und laesst eine gesunde
       # Halle krank aussehen; ein verpasster Fall laesst den Fehler weiter

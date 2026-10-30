@@ -78,6 +78,11 @@ pub const LOBBY_HTML: &str = include_str!("../../assets/lobby.html");
 /// `__BASE__` (mit Schrägstrich am Ende) und `__TABLET_PIN__` wie beim Tablet.
 pub const ANZEIGE_HTML: &str = include_str!("../../assets/anzeige.html");
 
+/// Ansage-Seite im Browser (`/ansage`, Spec `ansage-im-browser`): spielt die
+/// vom Turnier-PC fertig gebauten Ansagen einer Halle ab. Platzhalter
+/// `__BASE__` (mit Schrägstrich am Ende) wie bei der Anzeige-Hülle.
+pub const ANSAGE_HTML: &str = include_str!("../../assets/ansage.html");
+
 /// Gebündelte SVG-Länderflaggen, je Datei nach IOC-3-Buchstaben-Code
 /// (`GER.svg`, `POL.svg`, …) – ausgeliefert unter `/flags/{file}`.
 /// Herkunft/Lizenz siehe `NOTICE.md`.

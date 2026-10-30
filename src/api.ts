@@ -3,6 +3,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AnnounceJob,
+  AnsageAuftrag,
+  AnsageHoerer,
+  AnsageLink,
+  AnsageQuellen,
   AppConfig,
   CheckinView,
   CloudAnnounce,
@@ -323,6 +327,22 @@ export const publishFreetext = (hall: string, text: string): Promise<number> =>
  *  Slave: vom Master geholt). */
 export const pendingFreetext = (since: number): Promise<FreetextItem[]> =>
   invoke("pending_freetext", { since });
+
+/** Vertoner der Ansage-Seiten: beansprucht neue TL-Aufträge und Freitexte,
+ *  deren Halle gerade eine Seite hört (jede Quelle genau einmal). */
+export const ansageOffeneQuellen = (): Promise<AnsageQuellen> =>
+  invoke("ansage_offene_quellen");
+
+/** Eine fertige Ansage für die Ansage-Seiten vertonen und ablegen. `null`,
+ *  wenn nichts abgelegt wurde (Schalter aus, niemand hört zu). */
+export const ansageVertonen = (auftrag: AnsageAuftrag): Promise<number | null> =>
+  invoke("ansage_vertonen", { auftrag });
+
+/** Wo gerade Ansage-Seiten zuhören — und wo zugleich ein PC spricht. */
+export const ansageHoerer = (): Promise<AnsageHoerer> => invoke("ansage_hoerer");
+
+/** Links (und QR) der Ansage-Seite je Halle. */
+export const ansageLink = (): Promise<AnsageLink[]> => invoke("ansage_link");
 
 /** Neue Ansage-Aufträge der Turnierleitung (id > since) für die eigene Halle.
  *  Die Seite selbst spricht nie — sie beauftragt, gesprochen wird hier. */
