@@ -319,6 +319,21 @@ export const printWarning = (): Promise<string | null> =>
 export const clearPrintWarning = (): Promise<void> =>
   invoke("clear_print_warning");
 
+/** Zustand der automatischen Feldvergabe. `paused` ist nur `true`, wenn
+ *  die Automatik auch eingeschaltet ist. */
+export interface AutoAssignStatus {
+  enabled: boolean;
+  paused: boolean;
+}
+
+export const autoAssignStatus = (): Promise<AutoAssignStatus> =>
+  invoke("auto_assign_status");
+
+/** Automatik pausieren (`true`) oder fortsetzen (`false`) — derselbe
+ *  dauerhafte Weg wie im TL-Web (Config + Laufzeit-Zustand). */
+export const setAutoAssignPaused = (paused: boolean): Promise<void> =>
+  invoke("set_auto_assign_paused", { paused });
+
 export const matchTimeline = (matchId: number): Promise<MatchTimeline | null> =>
   invoke("match_timeline", { matchId });
 

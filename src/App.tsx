@@ -17,6 +17,7 @@ import { AlertBanner } from "./components/AlertBanner";
 import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
 import { AnsageAusgabeBanner } from "./components/AnsageAusgabeBanner";
 import { PrintWarningBanner } from "./components/PrintWarningBanner";
+import { AutoAssignPauseBanner } from "./components/AutoAssignPauseBanner";
 import { SlaveConnectBanner } from "./components/SlaveConnectBanner";
 import { AppShell } from "./components/AppShell";
 import { Footer } from "./components/Footer";
@@ -540,6 +541,7 @@ function App() {
         <AzureFallbackBanner />
         <AnsageAusgabeBanner />
         <PrintWarningBanner />
+        <AutoAssignPauseBanner />
         {runError && (
           <div className="bg-rose-600 px-4 py-2 text-sm font-medium text-white">
             Übertragung nicht gestartet: {runError}
