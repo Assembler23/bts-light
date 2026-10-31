@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.320
+
+- **Ausgabegerät der Ansage wählbar.** Auf der Seite **Ansagen** legt „Ansage
+  über:" fest, über welches Gerät die Ansage kommt — z. B. den Ausgang zur
+  Hallenanlage, unabhängig vom Windows-Standard. Fehlt das Gerät, spricht der
+  Windows-Standard, ein Banner sagt es und verschwindet, sobald es zurück ist.
+  Die Wahl gilt nur für diesen PC.
+
 ## v0.9.319
 
 - **Ansage-Seiten sprechen ohne Azure mit der Windows-Stimme.** Tablets,

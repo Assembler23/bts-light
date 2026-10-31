@@ -12,10 +12,19 @@
 //! für jedes Stück das aktuelle Windows-Standardgerät geholt, ein Strom
 //! gebaut, abgespielt und wieder geschlossen.
 //!
+//! **Gewähltes Gerät (PR 2):** Ist in den Einstellungen ein Gerät gewählt,
+//! wird je Stück zuerst dieses gesucht — nur unter den **aktiven**
+//! Endpunkten. Fehlt es oder lässt es sich nicht öffnen, spielt das Stück
+//! über den Windows-Standard, und der Bericht sagt `ersatz`. Kommt das Gerät
+//! zurück, nimmt es das nächste Stück wieder.
+//!
 //! **Datenschutz:** Gerätenamen gehen nie ins Log (Bluetooth-Geräte tragen
 //! oft Personennamen) — geloggt werden nur Ereignisarten.
 
-use super::super::{generation, ist_com_moduswechsel, pcm, Abspielbericht, Art, TonFehler};
+use super::super::{
+    generation, gleiche_id, ist_com_moduswechsel, pcm, Abspielbericht, Art, Geraet, GeraetInfo,
+    TonFehler,
+};
 use ::windows::Win32::Media::Audio::{eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator};
 use ::windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
@@ -55,6 +64,8 @@ struct Auftrag {
     samples: Arc<Vec<i16>>,
     rate: u32,
     art: Art,
+    /// Gewählte Geräte-ID (`announce.output_device`), `None` = Standard.
+    gewaehlt: Option<String>,
     antwort: oneshot::Sender<Innen>,
 }
 
@@ -109,6 +120,7 @@ pub async fn spielen(
     samples: Vec<i16>,
     rate: u32,
     art: Art,
+    gewaehlt: Option<String>,
 ) -> Result<Abspielbericht, TonFehler> {
     let samples = Arc::new(samples);
     let mut neu_aufgesetzt = 0u8;
@@ -124,6 +136,7 @@ pub async fn spielen(
             samples: Arc::clone(&samples),
             rate,
             art,
+            gewaehlt: gewaehlt.clone(),
             antwort,
         };
         if tx.send(auftrag).is_err() {
@@ -185,7 +198,8 @@ fn faden_haupt(rx: mpsc::Receiver<Auftrag>) {
 }
 
 /// Spielt ein Stück: auflösen, öffnen (mit Versuchen), abspielen, bei
-/// Abriss Sprache einmal von vorn.
+/// Abriss Sprache einmal von vorn — dabei wird neu aufgelöst (gewähltes
+/// Gerät, sonst Windows-Standard).
 fn stueck(a: &Auftrag) -> Innen {
     let mut neu = 0u8;
     let mut von_vorn = false;
@@ -198,15 +212,22 @@ fn stueck(a: &Auftrag) -> Innen {
             Err(innen) => return innen,
         };
         let ende = warten(&offen, a.gen);
+        let geraet = offen.geraet;
         drop(offen);
         match ende {
             Ende::Fertig => {
                 return Innen::Fertig(Abspielbericht {
                     abgebrochen: false,
                     neu_geoeffnet: neu,
+                    geraet,
                 })
             }
-            Ende::Abgebrochen => return Innen::Fertig(Abspielbericht::abgebrochen(neu)),
+            Ende::Abgebrochen => {
+                return Innen::Fertig(Abspielbericht {
+                    geraet,
+                    ..Abspielbericht::abgebrochen(neu)
+                })
+            }
             Ende::Abriss => match a.art {
                 Art::Gong => {
                     tracing::info!(
@@ -215,6 +236,7 @@ fn stueck(a: &Auftrag) -> Innen {
                     return Innen::Fertig(Abspielbericht {
                         abgebrochen: false,
                         neu_geoeffnet: neu,
+                        geraet,
                     });
                 }
                 Art::Sprache if !von_vorn => {
@@ -316,6 +338,8 @@ struct Offen {
     zustand: Arc<Zustand>,
     laenge: usize,
     signal: mpsc::Receiver<()>,
+    /// Über welche Art Gerät der Strom läuft (für den Bericht).
+    geraet: Geraet,
 }
 
 /// Endpunkt-ID des aktuellen Windows-Standardgeräts (Wiedergabe, „Konsole"
@@ -353,9 +377,114 @@ fn standard_geraet(host: &cpal::Host) -> Option<cpal::Device> {
     host.default_output_device()
 }
 
+/// Das gewählte Gerät, falls es gerade **aktiv** ist. cpal zählt in
+/// `output_devices()` nur Endpunkte im Zustand `DEVICE_STATE_ACTIVE` auf
+/// (`EnumAudioEndpoints`); abgezogene, deaktivierte oder nur noch als
+/// Altlast eingetragene Endpunkte fallen damit heraus. Eine kaputte ID
+/// (Parsefehler, anderer Host) zählt als „nicht da".
+fn gewaehltes_geraet(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
+    let gesucht: cpal::DeviceId = id.trim().parse().ok()?;
+    if gesucht.host() != cpal::HostId::Wasapi {
+        return None;
+    }
+    host.output_devices().ok()?.find(|d| {
+        d.id()
+            .map(|i| gleiche_id(&i.to_string(), id))
+            .unwrap_or(false)
+    })
+}
+
+/// Warum das gewählte Gerät zuletzt nicht benutzt wurde.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fehlt {
+    /// Nicht unter den aktiven Geräten — kommt es zurück, ist es nutzbar.
+    NichtGelistet,
+    /// Gelistet, aber das Öffnen scheiterte (gemessen: `GetMixFormat` →
+    /// `AUDCLNT_E_UNSUPPORTED_FORMAT`). Gilt als nicht verfügbar, bis ein
+    /// Stück wieder darauf spielt — sonst meldete die Anzeige „verfügbar",
+    /// während jede Ansage aus dem Ersatz kommt.
+    OeffnenGescheitert,
+}
+
+/// Letzter Stand des gewählten Geräts, **je ID**: Ein Wechsel der Wahl
+/// beginnt sauber, und das Log meldet nur den Wechsel statt jede Ansage.
+static GEWAEHLT_STAND: Mutex<Option<(String, Fehlt)>> = Mutex::new(None);
+
+fn gewaehlt_stand_setzen(id: &str, fehlt: Option<Fehlt>) {
+    let mut g = GEWAEHLT_STAND.lock().unwrap_or_else(|e| e.into_inner());
+    let vorher = match g.as_ref() {
+        Some((alt, f)) if gleiche_id(alt, id) => Some(*f),
+        _ => None,
+    };
+    if vorher != fehlt {
+        match fehlt {
+            Some(_) => tracing::warn!(
+                "Ansage-Ton: gewähltes Ausgabegerät nicht verfügbar – Ansage über den Windows-Standard"
+            ),
+            None if vorher.is_some() => {
+                tracing::info!("Ansage-Ton: gewähltes Ausgabegerät wieder verfügbar")
+            }
+            None => {}
+        }
+    }
+    *g = fehlt.map(|f| (id.to_string(), f));
+}
+
+/// Scheiterte zuletzt das Öffnen des (gelisteten) Geräts `id`?
+pub fn oeffnen_zuletzt_gescheitert(id: &str) -> bool {
+    let g = GEWAEHLT_STAND.lock().unwrap_or_else(|e| e.into_inner());
+    matches!(g.as_ref(), Some((alt, Fehlt::OeffnenGescheitert)) if gleiche_id(alt, id))
+}
+
+/// Löst das Gerät für dieses Stück auf und öffnet einen Strom: gewähltes
+/// Gerät, falls gesetzt und verfügbar, sonst das Windows-Standardgerät.
 fn oeffnen(a: &Auftrag) -> Result<Offen, OeffnenFehler> {
     let host = cpal::default_host();
+    let Some(id) = a.gewaehlt.as_deref() else {
+        let geraet = standard_geraet(&host).ok_or(OeffnenFehler::Ton(TonFehler::KeinGeraet))?;
+        return oeffnen_auf(&geraet, a, Geraet::Standard);
+    };
+    match gewaehltes_geraet(&host, id) {
+        Some(geraet) => match oeffnen_auf(&geraet, a, Geraet::Gewaehlt) {
+            Ok(offen) => {
+                gewaehlt_stand_setzen(id, None);
+                return Ok(offen);
+            }
+            // Der Thread muss neu aufgesetzt werden — das betrifft jedes
+            // Gerät, also nicht auf den Standard ausweichen.
+            Err(OeffnenFehler::Modus) => return Err(OeffnenFehler::Modus),
+            Err(OeffnenFehler::Ton(e)) => {
+                // Gemessen 31.10.2026: Ein Endpunkt kann aktiv gelistet sein
+                // und trotzdem schon bei `GetMixFormat` mit
+                // `AUDCLNT_E_UNSUPPORTED_FORMAT` scheitern (cpal
+                // `UnsupportedConfig`), ebenso kann er zwischen Auflösen und
+                // Öffnen verschwinden (`DeviceNotAvailable`). Beides heißt
+                // „gewähltes Gerät gerade nicht nutzbar" — das Stück soll
+                // über den Standard hörbar sein, statt als Fehler zu enden.
+                let detail = match &e {
+                    TonFehler::Intern(t) => t.as_str(),
+                    _ => "",
+                };
+                tracing::warn!(
+                    fehler = e.code(),
+                    detail,
+                    "Ansage-Ton: gewähltes Ausgabegerät lässt sich nicht öffnen – Windows-Standard"
+                );
+                gewaehlt_stand_setzen(id, Some(Fehlt::OeffnenGescheitert));
+            }
+        },
+        None => gewaehlt_stand_setzen(id, Some(Fehlt::NichtGelistet)),
+    }
     let geraet = standard_geraet(&host).ok_or(OeffnenFehler::Ton(TonFehler::KeinGeraet))?;
+    oeffnen_auf(&geraet, a, Geraet::Ersatz)
+}
+
+/// Öffnet einen Strom auf `geraet` und startet die Wiedergabe.
+fn oeffnen_auf(
+    geraet: &cpal::Device,
+    a: &Auftrag,
+    art_geraet: Geraet,
+) -> Result<Offen, OeffnenFehler> {
     let konfig = geraet.default_output_config().map_err(cpal_fehler)?;
     let kanaele = usize::from(konfig.channels()).max(1);
     let rate = konfig.sample_rate();
@@ -376,16 +505,16 @@ fn oeffnen(a: &Auftrag) -> Result<Offen, OeffnenFehler> {
     };
     let sk = konfig.config();
     let strom = match format {
-        SampleFormat::F32 => bauen::<f32>(&geraet, sk, teile),
-        SampleFormat::I16 => bauen::<i16>(&geraet, sk, teile),
-        SampleFormat::I32 => bauen::<i32>(&geraet, sk, teile),
-        SampleFormat::U16 => bauen::<u16>(&geraet, sk, teile),
-        SampleFormat::U32 => bauen::<u32>(&geraet, sk, teile),
-        SampleFormat::I8 => bauen::<i8>(&geraet, sk, teile),
-        SampleFormat::U8 => bauen::<u8>(&geraet, sk, teile),
-        SampleFormat::F64 => bauen::<f64>(&geraet, sk, teile),
-        SampleFormat::I64 => bauen::<i64>(&geraet, sk, teile),
-        SampleFormat::U64 => bauen::<u64>(&geraet, sk, teile),
+        SampleFormat::F32 => bauen::<f32>(geraet, sk, teile),
+        SampleFormat::I16 => bauen::<i16>(geraet, sk, teile),
+        SampleFormat::I32 => bauen::<i32>(geraet, sk, teile),
+        SampleFormat::U16 => bauen::<u16>(geraet, sk, teile),
+        SampleFormat::U32 => bauen::<u32>(geraet, sk, teile),
+        SampleFormat::I8 => bauen::<i8>(geraet, sk, teile),
+        SampleFormat::U8 => bauen::<u8>(geraet, sk, teile),
+        SampleFormat::F64 => bauen::<f64>(geraet, sk, teile),
+        SampleFormat::I64 => bauen::<i64>(geraet, sk, teile),
+        SampleFormat::U64 => bauen::<u64>(geraet, sk, teile),
         andere => {
             return Err(OeffnenFehler::Ton(TonFehler::Intern(format!(
                 "Sampleformat {andere:?} wird nicht unterstützt"
@@ -398,6 +527,7 @@ fn oeffnen(a: &Auftrag) -> Result<Offen, OeffnenFehler> {
         laenge: quelle.len(),
         zustand,
         signal,
+        geraet: art_geraet,
     })
 }
 
@@ -515,33 +645,67 @@ fn warten(offen: &Offen, gen: u64) -> Ende {
 /// Ansage warten. Ein frischer Thread hat keinen COM-Modus, den jemand
 /// anderes vorher festgelegt haben könnte.
 pub async fn standard_geraet_name() -> Result<Option<String>, TonFehler> {
+    auf_kurzem_faden("ansage-ton-name", name_lesen).await
+}
+
+/// Die aktiven Ausgabegeräte für die Auswahl — aus demselben Grund wie
+/// [`standard_geraet_name`] auf einem kurzlebigen eigenen Thread.
+pub async fn geraete() -> Result<Vec<GeraetInfo>, TonFehler> {
+    auf_kurzem_faden("ansage-ton-geraete", geraete_lesen).await
+}
+
+/// Führt `f` auf einem frischen Thread mit eigener COM-Initialisierung aus
+/// und liefert das Ergebnis zurück.
+async fn auf_kurzem_faden<T: Send + 'static>(
+    name: &str,
+    f: fn() -> Result<T, TonFehler>,
+) -> Result<T, TonFehler> {
     let (tx, rx) = oneshot::channel();
     std::thread::Builder::new()
-        .name("ansage-ton-name".to_string())
+        .name(name.to_string())
         .spawn(move || {
-            let _ = tx.send(name_lesen());
+            // Frischer Thread: COM selbst einrichten (für
+            // `standard_endpunkt_id` und die Aufzählung).
+            // SAFETY: Erster COM-Aufruf auf diesem kurzlebigen Thread; das
+            // Gegenstück folgt unten auf demselben Thread.
+            let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            let ergebnis = f();
+            if com.is_ok() {
+                // SAFETY: Gegenstück zum erfolgreichen `CoInitializeEx` oben;
+                // alle COM-Objekte dieses Threads sind freigegeben.
+                unsafe { CoUninitialize() };
+            }
+            let _ = tx.send(ergebnis);
         })
         .map_err(|e| TonFehler::Intern(format!("Thread startet nicht: {e}")))?;
     rx.await
-        .map_err(|_| TonFehler::Intern("Gerätename: Thread ohne Antwort".to_string()))?
+        .map_err(|_| TonFehler::Intern("Geräte-Abfrage: Thread ohne Antwort".to_string()))?
 }
 
 fn name_lesen() -> Result<Option<String>, TonFehler> {
-    // Frischer Thread: COM selbst einrichten (für `standard_endpunkt_id`).
-    // SAFETY: Erster COM-Aufruf auf diesem kurzlebigen Thread; das
-    // Gegenstück folgt unten auf demselben Thread.
-    let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-    let ergebnis = match standard_geraet(&cpal::default_host()) {
+    match standard_geraet(&cpal::default_host()) {
         None => Ok(None),
         Some(geraet) => geraet
             .description()
             .map(|d| Some(d.name().to_string()))
             .map_err(|e| TonFehler::Intern(format!("Gerätename: {:?}", e.kind()))),
-    };
-    if com.is_ok() {
-        // SAFETY: Gegenstück zum erfolgreichen `CoInitializeEx` oben; alle
-        // COM-Objekte dieses Threads sind freigegeben.
-        unsafe { CoUninitialize() };
     }
-    ergebnis
+}
+
+/// Nur aktive Wiedergabe-Endpunkte (siehe [`gewaehltes_geraet`]), nach Name
+/// sortiert, damit die Auswahl nicht springt. Geräte, deren ID oder Name
+/// sich nicht lesen lässt, fallen still heraus.
+fn geraete_lesen() -> Result<Vec<GeraetInfo>, TonFehler> {
+    let liste = cpal::default_host()
+        .output_devices()
+        .map_err(|e| TonFehler::Intern(format!("Geräteliste: {:?}", e.kind())))?;
+    let mut geraete: Vec<GeraetInfo> = liste
+        .filter_map(|d| {
+            let id = d.id().ok()?.to_string();
+            let name = d.description().ok()?.name().to_string();
+            Some(GeraetInfo { id, name })
+        })
+        .collect();
+    geraete.sort_by_key(|g| g.name.to_lowercase());
+    Ok(geraete)
 }

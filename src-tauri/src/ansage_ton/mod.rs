@@ -74,6 +74,21 @@ impl TonFehler {
     }
 }
 
+/// Über welches Gerät ein Stück lief (Spec `ansage-ausgabegeraet`, PR 2) —
+/// bewusst nur die **Art**, nie der Name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Geraet {
+    /// Keine Wahl getroffen: Windows-Standardgerät.
+    #[default]
+    Standard,
+    /// Das in den Einstellungen gewählte Gerät.
+    Gewaehlt,
+    /// Ein Gerät war gewählt, fehlte aber (oder ließ sich nicht öffnen) —
+    /// das Stück lief über den Windows-Standard.
+    Ersatz,
+}
+
 /// Ergebnis eines gespielten Stücks — **ohne Gerätenamen** (Datenschutz,
 /// Bluetooth-Geräte tragen oft Personennamen).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
@@ -84,6 +99,9 @@ pub struct Abspielbericht {
     /// Wie oft das Gerät neu geöffnet werden musste (gescheiterte Öffnungen,
     /// Neustart nach Abriss, Neuaufsetzen des Audio-Threads).
     pub neu_geoeffnet: u8,
+    /// Über welche Art Gerät das Stück zuletzt geöffnet wurde. Bei einem
+    /// Abbruch vor dem ersten Öffnen [`Geraet::Standard`].
+    pub geraet: Geraet,
 }
 
 impl Abspielbericht {
@@ -91,8 +109,20 @@ impl Abspielbericht {
         Self {
             abgebrochen: true,
             neu_geoeffnet,
+            geraet: Geraet::Standard,
         }
     }
+}
+
+/// Ein aktives Ausgabegerät für die Auswahl in den Einstellungen. Der Name
+/// ist nur für die Anzeige — nie ins Log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeraetInfo {
+    /// cpal-Geräte-ID als Text (`wasapi:{…}.{…}`), so wie sie in
+    /// `announce.output_device` gespeichert wird.
+    pub id: String,
+    pub name: String,
 }
 
 /// Generation der Ansage: Jedes Stück merkt sich beim Einreichen den Stand;
@@ -139,10 +169,17 @@ pub fn unterstuetzt() -> bool {
     cfg!(windows)
 }
 
-/// Spielt ein Mono-PCM16-Stück über das aktuelle Windows-Standardgerät und
-/// kehrt nach dessen Ende zurück.
-pub async fn spielen(samples: Vec<i16>, rate: u32, art: Art) -> Result<Abspielbericht, TonFehler> {
-    spielen_in(generation(), samples, rate, art).await
+/// Spielt ein Mono-PCM16-Stück und kehrt nach dessen Ende zurück.
+/// `gewaehlt` ist die gespeicherte Geräte-ID (`announce.output_device`);
+/// `None` oder ein fehlendes Gerät → aktuelles Windows-Standardgerät
+/// (der Bericht sagt, welches von beiden).
+pub async fn spielen(
+    samples: Vec<i16>,
+    rate: u32,
+    art: Art,
+    gewaehlt: Option<String>,
+) -> Result<Abspielbericht, TonFehler> {
+    spielen_in(generation(), samples, rate, art, gewaehlt).await
 }
 
 /// Wie [`spielen`], aber mit vorab festgehaltener Generation — für Stücke,
@@ -153,19 +190,64 @@ async fn spielen_in(
     samples: Vec<i16>,
     rate: u32,
     art: Art,
+    gewaehlt: Option<String>,
 ) -> Result<Abspielbericht, TonFehler> {
     if samples.is_empty() {
         return Err(TonFehler::Ungueltig("leeres Stück".to_string()));
     }
     #[cfg(windows)]
     {
-        self::windows::ausgabe::spielen(gen, samples, rate, art).await
+        self::windows::ausgabe::spielen(gen, samples, rate, art, gewaehlt).await
     }
     #[cfg(not(windows))]
     {
-        let _ = (gen, rate, art);
+        let _ = (gen, rate, art, gewaehlt);
         Err(TonFehler::NichtUnterstuetzt)
     }
+}
+
+/// Die **aktiven** Ausgabegeräte (ID + Name) für die Auswahl. Namen nur für
+/// die Anzeige, nie fürs Log.
+pub async fn geraete() -> Result<Vec<GeraetInfo>, TonFehler> {
+    #[cfg(windows)]
+    {
+        self::windows::ausgabe::geraete().await
+    }
+    #[cfg(not(windows))]
+    {
+        Err(TonFehler::NichtUnterstuetzt)
+    }
+}
+
+/// Ist das Gerät mit dieser ID gerade aktiv? Für die Anzeige „<Gerät> nicht
+/// verfügbar …". Ein Fehler beim Aufzählen zählt als „nicht verfügbar"
+/// (dann spielt die Ansage ohnehin über den Standard).
+pub async fn geraet_verfuegbar(id: &str) -> bool {
+    let gelistet = match geraete().await {
+        Ok(liste) => id_in_liste(&liste, id),
+        Err(_) => false,
+    };
+    #[cfg(windows)]
+    {
+        // Gelistet reicht nicht: Ein Endpunkt kann aktiv sein und sich doch
+        // nicht öffnen lassen (Review PR 2) — dann spielt der Kern über den
+        // Ersatz, und die Anzeige darf nicht „verfügbar" sagen.
+        gelistet && !self::windows::ausgabe::oeffnen_zuletzt_gescheitert(id)
+    }
+    #[cfg(not(windows))]
+    {
+        gelistet
+    }
+}
+
+/// Vergleich der Geräte-IDs: Windows-Endpunkt-IDs sind GUID-Texte, deren
+/// Groß-/Kleinschreibung nicht garantiert gleich bleibt.
+pub(crate) fn gleiche_id(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
+}
+
+fn id_in_liste(liste: &[GeraetInfo], id: &str) -> bool {
+    !id.trim().is_empty() && liste.iter().any(|g| gleiche_id(&g.id, id))
 }
 
 /// Name des aktuellen Windows-Standardgeräts — nur für die **Anzeige** im
@@ -237,11 +319,13 @@ pub async fn stimme_pcm(
 
 /// Synthetisiert und spielt eine Ansage mit der Windows-Stimme (Art
 /// Sprache). Ein Abbruch während der Synthese verwirft das Stück.
+/// `gewaehlt` wie bei [`spielen`].
 pub async fn stimme_spielen(
     segmente: Vec<String>,
     lang: String,
     stimme: String,
     rate: f64,
+    gewaehlt: Option<String>,
 ) -> Result<Abspielbericht, TonFehler> {
     let gen = generation();
     let (samples, sr) = stimme_pcm(segmente, lang, stimme, rate).await?;
@@ -249,7 +333,7 @@ pub async fn stimme_spielen(
         return Ok(Abspielbericht::abgebrochen(0));
     }
     pcm::dauer_pruefen(samples.len(), sr, MAX_SEKUNDEN_STIMME)?;
-    spielen_in(gen, samples, sr, Art::Sprache).await
+    spielen_in(gen, samples, sr, Art::Sprache, gewaehlt).await
 }
 
 #[cfg(windows)]
@@ -289,12 +373,46 @@ mod tests {
         let j = serde_json::to_value(Abspielbericht {
             abgebrochen: true,
             neu_geoeffnet: 2,
+            geraet: Geraet::Ersatz,
         })
         .unwrap();
         assert_eq!(
             j,
-            serde_json::json!({"abgebrochen": true, "neuGeoeffnet": 2})
+            serde_json::json!({"abgebrochen": true, "neuGeoeffnet": 2, "geraet": "ersatz"})
         );
+        // Ohne Wahl: Standard.
+        let j = serde_json::to_value(Abspielbericht::default()).unwrap();
+        assert_eq!(j["geraet"], "standard");
+        assert_eq!(
+            serde_json::to_value(Geraet::Gewaehlt).unwrap(),
+            serde_json::json!("gewaehlt")
+        );
+    }
+
+    #[test]
+    fn geraet_info_ist_camel_case() {
+        let j = serde_json::to_value(GeraetInfo {
+            id: "wasapi:{0.0.0.00000000}.{abc}".to_string(),
+            name: "USB-Box".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({"id": "wasapi:{0.0.0.00000000}.{abc}", "name": "USB-Box"})
+        );
+    }
+
+    #[test]
+    fn geraete_id_vergleich_ignoriert_schreibweise_und_leere() {
+        let liste = vec![GeraetInfo {
+            id: "wasapi:{0.0.0.00000000}.{ABC-def}".to_string(),
+            name: "x".to_string(),
+        }];
+        assert!(id_in_liste(&liste, "wasapi:{0.0.0.00000000}.{abc-DEF}"));
+        assert!(!id_in_liste(&liste, "wasapi:{0.0.0.00000000}.{andere}"));
+        assert!(!id_in_liste(&liste, ""));
+        assert!(!id_in_liste(&liste, "   "));
+        assert!(!id_in_liste(&[], "wasapi:{x}"));
     }
 
     #[test]
@@ -321,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn leeres_stueck_ist_ungueltig() {
         assert!(matches!(
-            spielen(vec![], 24000, Art::Gong).await,
+            spielen(vec![], 24000, Art::Gong, None).await,
             Err(TonFehler::Ungueltig(_))
         ));
     }
@@ -331,7 +449,7 @@ mod tests {
     async fn ohne_windows_ist_alles_nicht_unterstuetzt() {
         assert!(!unterstuetzt());
         assert_eq!(
-            spielen(vec![1, 2, 3], 24000, Art::Sprache).await,
+            spielen(vec![1, 2, 3], 24000, Art::Sprache, None).await,
             Err(TonFehler::NichtUnterstuetzt)
         );
         assert_eq!(
@@ -340,8 +458,10 @@ mod tests {
         );
         assert_eq!(stimmen().await, Err(TonFehler::NichtUnterstuetzt));
         assert_eq!(
-            stimme_spielen(vec!["Feld 1".into()], "de".into(), String::new(), 0.8).await,
+            stimme_spielen(vec!["Feld 1".into()], "de".into(), String::new(), 0.8, None).await,
             Err(TonFehler::NichtUnterstuetzt)
         );
+        assert_eq!(geraete().await, Err(TonFehler::NichtUnterstuetzt));
+        assert!(!geraet_verfuegbar("wasapi:{x}").await);
     }
 }

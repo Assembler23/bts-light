@@ -69,6 +69,9 @@ export const azureTtsSpeak = (ssml: string): Promise<string> =>
 export interface Abspielbericht {
   abgebrochen: boolean;
   neuGeoeffnet: number;
+  /** Worüber gespielt wurde: Windows-Standard, gewähltes Gerät oder — weil
+   *  das gewählte fehlte — Ersatz über den Standard. */
+  geraet: "standard" | "gewaehlt" | "ersatz";
 }
 
 /** Ausgabe für die Anzeige auf der Seite Ansagen. */
@@ -77,6 +80,16 @@ export interface AusgabeInfo {
   unterstuetzt: boolean;
   /** Name des Windows-Standardgeräts; nur zur Anzeige, nie ins Log. */
   standard: string | null;
+  /** Name des gewählten Geräts; `null` = Windows-Standard. */
+  gewaehlt: string | null;
+  /** false = das gewählte Gerät ist gerade nicht angeschlossen. */
+  verfuegbar: boolean;
+}
+
+/** Ein aktives Ausgabegerät für die Auswahl „Ansage über". */
+export interface GeraetInfo {
+  id: string;
+  name: string;
 }
 
 export interface StimmeInfo {
@@ -112,6 +125,14 @@ export const ansageAbbrechen = (hart = false): Promise<void> =>
 export const ansageAusgabe = (): Promise<AusgabeInfo> => invoke("ansage_ausgabe");
 
 export const ansageStimmen = (): Promise<StimmeInfo[]> => invoke("ansage_stimmen");
+
+export const ansageGeraete = (): Promise<GeraetInfo[]> => invoke("ansage_geraete");
+
+/** Gerät für die Ansage wählen (leere `id` = Windows-Standard). Eigener
+ *  Command statt save_config: Das Feld gehört dem PC und ist dort gegen
+ *  alte Stände aus anderen Formularen geschützt. */
+export const ansageAusgabeSetzen = (id: string, name: string): Promise<AppConfig> =>
+  invoke("ansage_ausgabe_setzen", { id, name });
 
 export const startSync = (): Promise<void> => invoke("start_sync");
 

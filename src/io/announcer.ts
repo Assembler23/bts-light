@@ -18,6 +18,7 @@ import {
 } from "../api";
 import {
   loeseAusgabeProblem,
+  loeseGeraetFehlt,
   meldeAusgabeProblem,
 } from "../state/ansageAusgabe";
 import {
@@ -225,13 +226,20 @@ type KernAusgang = "ok" | "abgebrochen" | "rueckfall";
 // ein gelungener Gong das Banner „keine Windows-Stimme" bei jeder Ansage
 // kurz aus und wieder ein.
 async function imKern(
-  aufruf: Promise<{ abgebrochen: boolean }>,
+  aufruf: Promise<{ abgebrochen: boolean; geraet?: string }>,
   fristMs: number,
   loest: boolean,
 ): Promise<KernAusgang> {
   const r = await mitFrist(aufruf, fristMs);
   if (r.ok) {
     if (r.wert.abgebrochen) return "abgebrochen";
+    // Gewähltes Gerät fehlte, der Kern spielte über den Windows-Standard
+    // (PR 2): kein Fehler, aber sichtbar. Das Banner löst sich, sobald das
+    // Gerät zurück ist (AnsageAusgabeBanner fragt nach).
+    if (r.wert.geraet === "ersatz") meldeAusgabeProblem("geraet_fehlt");
+    // Lief das Stück über das gewählte Gerät oder ist keins mehr gewählt,
+    // fehlt auch nichts mehr.
+    else loeseGeraetFehlt();
     if (loest) loeseAusgabeProblem();
     return "ok";
   }

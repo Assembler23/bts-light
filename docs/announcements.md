@@ -532,6 +532,23 @@ Klinke angeschlossene Hallenanlage, alle anderen Programme schon.
 - **Anzeige:** Auf der Seite **Ansagen** steht unter dem Test-Knopf, worüber
   die Ansage läuft.
   <!-- pruef: "Ausgabe: Windows-Standard" in src/components/AnsageAusgabeAnzeige.tsx -->
+- **Gerät wählen (seit v0.9.321):** Darunter legt **Ansage über:** ein festes
+  Gerät fest, z. B. den Kopfhörer-Ausgang zur Hallenanlage — auch wenn Windows
+  ein anderes als Standard führt. Ist das gewählte Gerät nicht angeschlossen,
+  kommt die Ansage über den Windows-Standard, ein gelbes Banner nennt das
+  fehlende Gerät und verschwindet von selbst, sobald es wieder da ist; die
+  nächste Ansage läuft dann wieder darüber. **Windows-Standard** stellt die
+  Wahl zurück.
+  <!-- pruef: "Ansage über:" in src/components/AnsageAusgabeAnzeige.tsx -->
+  <!-- pruef: "nicht verfügbar – Ansage läuft über den Windows-Standard" in src/components/AnsageAusgabeBanner.tsx -->
+  Das Banner erscheint mit der ersten Ansage über den Ersatz; vorher zeigt es
+  nur die Seite **Ansagen**.
+  Gemerkt wird das Gerät über seine Windows-Kennung. Steckt eine USB-Box
+  später an einem **anderen Anschluss**, sieht Windows ein neues Gerät — dann
+  einmal neu wählen.
+  Die Wahl gilt **nur für diesen PC**: Sie wandert beim PC-Umzug nicht im
+  Identitäts-Bündel mit, ein Ansage-Slave erbt sie nicht vom Master, und das
+  Speichern anderer Einstellungen setzt sie nicht zurück.
 - **Windows-Stimme statt Browser-Stimme:** Ohne Azure spricht die
   Windows-Stimme aus dem Kern — dieselben Stimmen wie bisher (Katja, Hedda,
   Stefan …), aber über denselben Weg wie der Gong. Die Stimmenliste in den
@@ -559,8 +576,8 @@ Klinke angeschlossene Hallenanlage, alle anderen Programme schon.
 ### Ansage kommt aus dem falschen Lautsprecher
 
 1. Seite **Ansagen**: Was steht bei „Ausgabe"? Ist es nicht das Gerät der
-   Anlage, in Windows das richtige Gerät als **Standard** wählen — die nächste
-   Ansage folgt.
+   Anlage, unter **Ansage über:** das Gerät der Anlage wählen (oder in Windows
+   als **Standard** setzen) — die nächste Ansage folgt.
 2. Steht dort schon das richtige Gerät und es klingt trotzdem woanders:
    Windows kann einem Programm ein festes Gerät zuordnen. **Einstellungen →
    System → Sound → Lautstärkemixer**, bei **BTS Light** das Ausgabegerät auf

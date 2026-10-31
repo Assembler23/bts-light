@@ -393,6 +393,12 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Automatik legt ein Spiel auf das kaputte Feld.
     incoming.locked_courts = current.locked_courts.clone();
     incoming.locked_courts_tournament = current.locked_courts_tournament.clone();
+    // Das Ausgabegerät der Ansage (Spec `ansage-ausgabegeraet`, PR 2) wird
+    // nur über `ansage_ausgabe_setzen` gesetzt. Setup-Assistent und
+    // Ansage-Einstellungen schicken ihren beim Öffnen aufgenommenen Stand
+    // zurück — ohne Schutz kippte jedes Speichern die Gerätewahl zurück.
+    incoming.announce.output_device = current.announce.output_device.clone();
+    incoming.announce.output_device_name = current.announce.output_device_name.clone();
     // Turnier-GUID spiegeln (ADR 0054): Liveticker-Push (tset/sched/tupdate)
     // liest das kanonische Wurzelfeld, Check-In-Meldeliste/Anfangszeiten lesen
     // weiterhin `checkin.tournament_uuid`. `load_from` stellt den Gleichlauf
@@ -490,6 +496,10 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     // durch einen eigenen Schritt, sondern automatisch, weil die Zeile
     // darüber die komplette `devices`-Liste leert.
     cfg.tl_web.devices.clear();
+    // Das Ausgabegerät der Ansage gehört dem PC (Endpunkt-IDs gibt es nur
+    // dort) — am neuen PC wäre es nie vorhanden und zeigte nur ein Banner.
+    cfg.announce.output_device.clear();
+    cfg.announce.output_device_name.clear();
     cfg
 }
 
@@ -514,6 +524,10 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     if imported.tl_web.devices.is_empty() {
         imported.tl_web.devices = current.tl_web.devices.clone();
     }
+    // Das Ausgabegerät der Ansage gilt je PC: immer das dieses PCs behalten,
+    // auch wenn ein (altes oder von Hand gebautes) Bündel eins mitbringt.
+    imported.announce.output_device = current.announce.output_device.clone();
+    imported.announce.output_device_name = current.announce.output_device_name.clone();
     // Raster-Anordnungen (Task 9/11) fehlen in Bündeln aus einer Version vor
     // deren Einführung — ein leeres Feld heißt dann „unbekannt", nicht „am
     // neuen PC absichtlich gelöscht". Sonst würde ein Identitäts-Import mit
@@ -4074,6 +4088,7 @@ fn pcm_auftrag_pruefen(
 #[tauri::command]
 pub async fn ansage_pcm_spielen(
     request: tauri::ipc::Request<'_>,
+    state: State<'_, AppState>,
 ) -> Result<crate::ansage_ton::Abspielbericht, String> {
     use crate::ansage_ton::{self as ton, TonFehler};
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
@@ -4095,9 +4110,27 @@ pub async fn ansage_pcm_spielen(
     )
     .map_err(|e| e.fuer_frontend())?;
     let samples = ton::pcm::pcm16_aus_le_bytes(bytes).map_err(|e| e.fuer_frontend())?;
-    ton::spielen(samples, rate, art)
+    let gewaehlt = gewaehltes_ausgabegeraet(&state);
+    ton::spielen(samples, rate, art, gewaehlt)
         .await
         .map_err(|e| e.fuer_frontend())
+}
+
+/// Die gewählte Geräte-ID (`announce.output_device`), leer → `None`
+/// (Windows-Standard). Rein, damit testbar.
+fn ausgabegeraet_aus(announce: &crate::config::AnnounceConfig) -> Option<String> {
+    let id = announce.output_device.trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+fn gewaehltes_ausgabegeraet(state: &State<'_, AppState>) -> Option<String> {
+    ausgabegeraet_aus(
+        &state
+            .config
+            .lock()
+            .expect("Config-Mutex nicht vergiftet")
+            .announce,
+    )
 }
 
 /// Spricht eine Ansage mit der Windows-Stimme (OneCore) über den Kern:
@@ -4106,10 +4139,23 @@ pub async fn ansage_pcm_spielen(
 /// leer = Standardstimme der Sprache), `lang` „de"/„en".
 #[tauri::command]
 pub async fn ansage_stimme_spielen(
+    state: State<'_, AppState>,
     segmente: Vec<String>,
     lang: String,
     voice: String,
     rate: f64,
+) -> Result<crate::ansage_ton::Abspielbericht, String> {
+    let gewaehlt = gewaehltes_ausgabegeraet(&state);
+    stimme_spielen_auf(segmente, lang, voice, rate, gewaehlt).await
+}
+
+/// Kern von [`ansage_stimme_spielen`] ohne `State` — testbar.
+async fn stimme_spielen_auf(
+    segmente: Vec<String>,
+    lang: String,
+    voice: String,
+    rate: f64,
+    gewaehlt: Option<String>,
 ) -> Result<crate::ansage_ton::Abspielbericht, String> {
     use crate::ansage_ton::{self as ton, TonFehler};
     let segmente = ansage_segmente_kappen(segmente);
@@ -4117,7 +4163,7 @@ pub async fn ansage_stimme_spielen(
         return Err(TonFehler::Ungueltig("keine Sprech-Abschnitte".to_string()).fuer_frontend());
     }
     let lang = if lang == "en" { "en" } else { "de" }.to_string();
-    ton::stimme_spielen(segmente, lang, voice, rate)
+    ton::stimme_spielen(segmente, lang, voice, rate, gewaehlt)
         .await
         .map_err(|e| e.fuer_frontend())
 }
@@ -4135,7 +4181,8 @@ pub fn ansage_abbrechen(hart: Option<bool>) {
     }
 }
 
-/// Anzeige „Ausgabe: Windows-Standard (<Gerät>)" auf der Seite Ansagen.
+/// Anzeige „Ausgabe: <Gerät>" bzw. „<Gerät> nicht verfügbar – Ansage läuft
+/// über Windows-Standard (<Standard>)" auf der Seite Ansagen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AusgabeInfo {
@@ -4145,22 +4192,117 @@ pub struct AusgabeInfo {
     /// nie fürs Log. `None`: kein Ausgabegerät aktiv (oder nicht
     /// unterstützt).
     pub standard: Option<String>,
+    /// Gespeicherter Name des gewählten Geräts (`output_device_name`), nur
+    /// wenn eins gewählt ist. `None` = Windows-Standard.
+    pub gewaehlt: Option<String>,
+    /// `true`, wenn nichts gewählt ist oder das gewählte Gerät gerade aktiv
+    /// ist; `false` → Banner „nicht verfügbar".
+    pub verfuegbar: bool,
 }
 
 #[tauri::command]
-pub async fn ansage_ausgabe() -> Result<AusgabeInfo, String> {
+pub async fn ansage_ausgabe(state: State<'_, AppState>) -> Result<AusgabeInfo, String> {
     use crate::ansage_ton::{self as ton, TonFehler};
+    // Konfiguration vor dem ersten `await` kopieren — die Sperre darf nicht
+    // über die Geräteabfrage gehalten werden.
+    let (gewaehlt_id, gewaehlt_name) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (
+            ausgabegeraet_aus(&cfg.announce),
+            cfg.announce.output_device_name.clone(),
+        )
+    };
+    let gewaehlt = gewaehlt_id.as_ref().map(|_| gewaehlt_name);
     match ton::standard_geraet_name().await {
-        Ok(standard) => Ok(AusgabeInfo {
-            unterstuetzt: true,
-            standard,
-        }),
+        // Scheitert nur der Name des Standardgeräts, bleibt die Auswahl
+        // trotzdem bedienbar (Review PR 2) — sonst ließe sich eine fehlende
+        // Box nicht mehr auf den Windows-Standard zurückstellen.
+        ergebnis @ (Ok(_) | Err(TonFehler::Intern(_))) => {
+            let standard = ergebnis.unwrap_or(None);
+            let verfuegbar = match &gewaehlt_id {
+                None => true,
+                Some(id) => ton::geraet_verfuegbar(id).await,
+            };
+            Ok(AusgabeInfo {
+                unterstuetzt: true,
+                standard,
+                gewaehlt,
+                verfuegbar,
+            })
+        }
+        // Ohne Kern-Ausgabe (Linux) gibt es keine Gerätewahl, die fehlen
+        // könnte — kein Banner.
         Err(TonFehler::NichtUnterstuetzt) => Ok(AusgabeInfo {
             unterstuetzt: false,
             standard: None,
+            gewaehlt,
+            verfuegbar: true,
         }),
         Err(e) => Err(e.fuer_frontend()),
     }
+}
+
+/// Die aktiven Ausgabegeräte für die Auswahl „Ansage über". Namen nur für
+/// die Anzeige, nie fürs Log.
+#[tauri::command]
+pub async fn ansage_geraete() -> Result<Vec<crate::ansage_ton::GeraetInfo>, String> {
+    crate::ansage_ton::geraete()
+        .await
+        .map_err(|e| e.fuer_frontend())
+}
+
+/// Längste gespeicherte Geräte-ID. Windows-Endpunkt-IDs sind rund 55
+/// Zeichen lang; der Deckel hält nur Unsinn aus der Konfiguration fern.
+const MAX_AUSGABE_ID_LEN: usize = 512;
+/// Längster gespeicherter Gerätename (nur Anzeige).
+const MAX_AUSGABE_NAME_LEN: usize = 200;
+
+/// Prüft und säubert die Gerätewahl für [`ansage_ausgabe_setzen`]. Leere
+/// `id` = Windows-Standard (dann wird auch der Name geleert). Sonst muss die
+/// ID mit `wasapi:` beginnen, ≤ 512 Zeichen lang und frei von Steuerzeichen
+/// sein; der Name wird getrimmt, von Steuerzeichen befreit und darf danach
+/// höchstens 200 Zeichen lang sein. Rein, damit testbar.
+fn ausgabe_wahl_pruefen(id: &str, name: &str) -> Result<(String, String), String> {
+    let ungueltig =
+        |grund: &str| crate::ansage_ton::TonFehler::Ungueltig(grund.to_string()).fuer_frontend();
+    let id = id.trim();
+    if id.is_empty() {
+        return Ok((String::new(), String::new()));
+    }
+    if !id.starts_with("wasapi:") {
+        return Err(ungueltig("Geräte-ID muss mit „wasapi:“ beginnen"));
+    }
+    if id.chars().count() > MAX_AUSGABE_ID_LEN {
+        return Err(ungueltig("Geräte-ID länger als 512 Zeichen"));
+    }
+    if id.chars().any(char::is_control) {
+        return Err(ungueltig("Geräte-ID enthält Steuerzeichen"));
+    }
+    let name: String = name.chars().filter(|c| !c.is_control()).collect();
+    let name = name.trim();
+    if name.chars().count() > MAX_AUSGABE_NAME_LEN {
+        return Err(ungueltig("Gerätename länger als 200 Zeichen"));
+    }
+    Ok((id.to_string(), name.to_string()))
+}
+
+/// Wählt das Ausgabegerät der Ansage (leere `id` = Windows-Standard). Eigener
+/// Command statt `save_config`: Das Feld gilt je PC und ist dort über
+/// `keep_host_managed_fields` gegen alte Formularstände geschützt. Liefert
+/// den neuen Stand (Muster `set_hall_color`).
+#[tauri::command]
+pub fn ansage_ausgabe_setzen(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<AppConfig, String> {
+    let (id, name) = ausgabe_wahl_pruefen(&id, &name)?;
+    mutate_config(&app, &state, move |cfg| {
+        cfg.announce.output_device = id;
+        cfg.announce.output_device_name = name;
+        Ok(())
+    })
 }
 
 /// Die installierten Windows-Stimmen (Name, Sprache) für die Einstellungen.
@@ -6057,20 +6199,158 @@ mod tests {
         let j = serde_json::to_value(AusgabeInfo {
             unterstuetzt: true,
             standard: Some("Lautsprecher".to_string()),
+            gewaehlt: Some("USB-Box".to_string()),
+            verfuegbar: false,
         })
         .unwrap();
         assert_eq!(
             j,
-            serde_json::json!({"unterstuetzt": true, "standard": "Lautsprecher"})
+            serde_json::json!({
+                "unterstuetzt": true,
+                "standard": "Lautsprecher",
+                "gewaehlt": "USB-Box",
+                "verfuegbar": false
+            })
         );
     }
 
     #[tokio::test]
     async fn ansage_stimme_spielen_ohne_text_ist_ungueltig() {
-        let e = ansage_stimme_spielen(vec!["  ".to_string()], "de".into(), String::new(), 0.8)
-            .await
-            .unwrap_err();
+        let e = stimme_spielen_auf(
+            vec!["  ".to_string()],
+            "de".into(),
+            String::new(),
+            0.8,
+            None,
+        )
+        .await
+        .unwrap_err();
         assert!(e.starts_with("ungueltig:"), "{e}");
+    }
+
+    const BOX_ID: &str = "wasapi:{0.0.0.00000000}.{16f9a587-0000-4000-8000-000000000001}";
+
+    fn mit_ausgabegeraet(id: &str, name: &str) -> AppConfig {
+        let mut cfg = AppConfig::default();
+        cfg.announce.output_device = id.to_string();
+        cfg.announce.output_device_name = name.to_string();
+        cfg
+    }
+
+    #[test]
+    fn ausgabegeraet_leer_heisst_windows_standard() {
+        let mut a = crate::config::AnnounceConfig::default();
+        assert_eq!(ausgabegeraet_aus(&a), None);
+        a.output_device = "   ".to_string();
+        assert_eq!(ausgabegeraet_aus(&a), None);
+        a.output_device = format!(" {BOX_ID} ");
+        assert_eq!(ausgabegeraet_aus(&a).as_deref(), Some(BOX_ID));
+    }
+
+    #[test]
+    fn ausgabe_wahl_leer_ist_standard_und_leert_den_namen() {
+        assert_eq!(
+            ausgabe_wahl_pruefen("", "USB-Box").unwrap(),
+            (String::new(), String::new())
+        );
+        assert_eq!(
+            ausgabe_wahl_pruefen("   ", "").unwrap(),
+            (String::new(), String::new())
+        );
+    }
+
+    #[test]
+    fn ausgabe_wahl_gueltig_wird_gesaeubert() {
+        let (id, name) =
+            ausgabe_wahl_pruefen(&format!("  {BOX_ID} "), "  USB\u{7}-Box\n ").unwrap();
+        assert_eq!(id, BOX_ID);
+        assert_eq!(name, "USB-Box");
+        // Genau an den Grenzen noch gültig.
+        let lang_id = format!("wasapi:{}", "x".repeat(MAX_AUSGABE_ID_LEN - 7));
+        let lang_name = "ä".repeat(MAX_AUSGABE_NAME_LEN);
+        let (id, name) = ausgabe_wahl_pruefen(&lang_id, &lang_name).unwrap();
+        assert_eq!(id.chars().count(), MAX_AUSGABE_ID_LEN);
+        assert_eq!(name.chars().count(), MAX_AUSGABE_NAME_LEN);
+    }
+
+    #[test]
+    fn ausgabe_wahl_ungueltig_wird_abgelehnt() {
+        let faelle = [
+            ("alsa:hw:0,0".to_string(), "x".to_string()),
+            ("{0.0.0.00000000}.{abc}".to_string(), "x".to_string()),
+            (
+                format!("wasapi:{}", "x".repeat(MAX_AUSGABE_ID_LEN - 6)),
+                "x".to_string(),
+            ),
+            ("wasapi:{a}\u{0}{b}".to_string(), "x".to_string()),
+            (BOX_ID.to_string(), "n".repeat(MAX_AUSGABE_NAME_LEN + 1)),
+        ];
+        for (id, name) in faelle {
+            let e = ausgabe_wahl_pruefen(&id, &name).unwrap_err();
+            assert!(e.starts_with("ungueltig:"), "{e}");
+        }
+    }
+
+    #[test]
+    fn keep_host_managed_fields_preserves_the_output_device() {
+        // Spec `ansage-ausgabegeraet`, Kriterium 20: Setup-Assistent und
+        // Ansage-Einstellungen schicken ihren alten Stand zurück — das darf
+        // die Gerätewahl weder löschen noch auf einen alten Wert setzen.
+        let current = mit_ausgabegeraet(BOX_ID, "USB-Box");
+
+        let mut from_ui = AppConfig::default();
+        from_ui.announce.rate = 1.1;
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.announce.rate, 1.1, "Einstellung wird übernommen");
+        assert_eq!(merged.announce.output_device, BOX_ID);
+        assert_eq!(merged.announce.output_device_name, "USB-Box");
+
+        // Auch ein veralteter, anderer Wert aus dem Formular setzt sich nicht
+        // durch — und „Standard" am PC bleibt Standard.
+        let alt = mit_ausgabegeraet("wasapi:{alt}", "Alte Box");
+        let merged = keep_host_managed_fields(alt, &AppConfig::default());
+        assert!(merged.announce.output_device.is_empty());
+        assert!(merged.announce.output_device_name.is_empty());
+    }
+
+    #[test]
+    fn identity_bundle_strips_the_output_device() {
+        // Kriterium 21: Die Gerätewahl gilt je PC und reist nicht mit.
+        let bundle = identity_bundle(mit_ausgabegeraet(BOX_ID, "USB-Box"));
+        assert!(bundle.announce.output_device.is_empty());
+        assert!(bundle.announce.output_device_name.is_empty());
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_the_output_device_of_this_pc() {
+        // Kriterium 21: Import behält die Wahl des Ziel-PCs — auch wenn das
+        // Bündel (alt oder von Hand gebaut) eine eigene mitbringt, und auch
+        // wenn hier „Standard" gilt.
+        let current = mit_ausgabegeraet(BOX_ID, "USB-Box");
+        let merged = apply_imported_identity(AppConfig::default(), &current);
+        assert_eq!(merged.announce.output_device, BOX_ID);
+        assert_eq!(merged.announce.output_device_name, "USB-Box");
+
+        let fremd = mit_ausgabegeraet("wasapi:{fremd}", "Fremde Box");
+        let merged = apply_imported_identity(fremd.clone(), &current);
+        assert_eq!(merged.announce.output_device, BOX_ID);
+        assert_eq!(merged.announce.output_device_name, "USB-Box");
+
+        let merged = apply_imported_identity(fremd, &AppConfig::default());
+        assert!(merged.announce.output_device.is_empty());
+        assert!(merged.announce.output_device_name.is_empty());
+    }
+
+    #[test]
+    fn ansage_slave_erbt_keine_geraetewahl() {
+        // Kriterium 22: Ein Ansage-Slave erbt vom Master nur die Azure-Daten
+        // (`AzureTtsShare`, ADR 0003) — nichts aus `announce`. Strukturell
+        // festgehalten: Taucht im geteilten Typ je ein Geräte-Feld auf,
+        // schlägt dieser Test an.
+        let j = serde_json::to_value(share("k", "westeurope")).unwrap();
+        let mut felder: Vec<&str> = j.as_object().unwrap().keys().map(String::as_str).collect();
+        felder.sort_unstable();
+        assert_eq!(felder, ["discipline_voices", "key", "region", "voice"]);
     }
 
     fn local_az(enabled: bool, key: &str, region: &str) -> crate::config::AzureTtsConfig {

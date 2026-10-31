@@ -1,6 +1,7 @@
 # Ausgabegerät für Ansagen — Spezifikation
 
-> Status: **Freigegeben 31.10.2026** (Spec-Pipeline von Hand: Brief → Grill →
+> Status: **Freigegeben 31.10.2026, umgesetzt** (PR 1 v0.9.318 #416, PR 1b v0.9.319,
+> PR 2 v0.9.320) (Spec-Pipeline von Hand: Brief → Grill →
 > Messung → How-To → Review, siehe [spec-pipeline-konzept.md](../spec-pipeline-konzept.md)).
 > Betroffenes Repo: **nur bts-light**. ADRs: [0065](../adr/0065-ansage-ton-aus-dem-kern-wasapi.md)
 > (Ausgabeweg), [0066](../adr/0066-windows-stimme-e3-im-kern.md) (Windows-Stimme).

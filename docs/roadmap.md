@@ -503,7 +503,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   (cpal/WASAPI), Gerät je Ansage neu aufgelöst; Windows-Stimme (E3 aus
   „Ansage im Browser") vorgezogen; Anzeige und selbstauflösende Banner;
   Gerätewahl je PC. **PR 1 umgesetzt (v0.9.318, #416)**, **PR 1b umgesetzt
-  (v0.9.319)** · **PR 1** Ton aus dem Kern + Windows-Stimme + Anzeige ·
+  (v0.9.319)**, **PR 2 umgesetzt (v0.9.320)** · **PR 1** Ton aus dem Kern + Windows-Stimme + Anzeige ·
   **PR 1b** OneCore-WAV für die Ansage-Seiten · **PR 2** Gerätewahl.
   Notfall-Schalter „Alter Abspielweg" drei Versionen nach PR 1 entfernen.
 
