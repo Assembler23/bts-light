@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.320
+## v0.9.321
 
 - **Ausgabegerät der Ansage wählbar.** Auf der Seite **Ansagen** legt „Ansage
   über:" fest, über welches Gerät die Ansage kommt — z. B. den Ausgang zur
@@ -12,13 +12,27 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Windows-Standard, ein Banner sagt es und verschwindet, sobald es zurück ist.
   Die Wahl gilt nur für diesen PC.
 
-## v0.9.319
+## v0.9.320
 
 - **Ansage-Seiten sprechen ohne Azure mit der Windows-Stimme.** Tablets,
   Handys und Pis mit der Seite `/ansage` bekamen bisher nur mit Azure fertiges
   Audio vom Turnier-PC; ohne Azure sprach das Gerät selbst — und ein Pi hat oft
   keine Stimme. Jetzt vertont der PC die Ansage mit seiner Windows-Stimme, so
   klingt jede Halle gleich.
+
+## v0.9.319
+
+- **Zähl-Tablet: Seiten oder Mannschaften korrigieren.** Neuer Knopf **⇄** in
+  der Kopfzeile (ohne PIN, mit Rückfrage), auch in Pause und Ergebnis-Ansicht:
+  **„Seiten tauschen"**, wenn Tablet und Feld nicht mehr zusammenpassen —
+  Namen und Punkte wandern gemeinsam, der Stand bleibt; **„Mannschaften
+  tauschen"**, wenn bei der Aufstellung die falsche Mannschaft links gewählt
+  wurde — nur die Namen wechseln, der gemeldete Stand dreht sich in allen
+  Sätzen. Im Doppel fragt das Tablet danach die Aufstellung neu ab.
+  „↩ Korrektur zurücknehmen" macht beides rückgängig. Zettel und
+  badhub-Verlauf ordnen alles davor der richtigen Mannschaft zu (neues
+  Ereignis `teams_corrected`, ADR 0067). „Mannschaften tauschen" erscheint
+  erst, wenn auch der Turnier-PC diese Version hat.
 
 ## v0.9.318
 

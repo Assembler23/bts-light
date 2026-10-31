@@ -95,15 +95,17 @@ pub struct Pause {
 
 /// Die gültigen `serve_start` eines Zettels: zurückgenommene fallen weg,
 /// alle anderen Arten (Karten, Verletzung, Schiri-Ruf …) ohnehin.
+///
+/// Berichtigte Mannschaften (ADR 0067) sind schon eingerechnet: badhub
+/// nimmt nur `serve_start` an und bekommt sie deshalb in Endkoordinaten.
 pub fn aufschlaege(sheet: &MatchSheet) -> Vec<Aufschlag> {
-    let zurueck: HashSet<&str> = sheet
-        .events
+    let events = crate::tablet::berichtigung::in_endkoordinaten(&sheet.events);
+    let zurueck: HashSet<&str> = events
         .iter()
         .filter(|e| e.kind == EventKind::Retract)
         .map(|e| e.retracts.as_str())
         .collect();
-    sheet
-        .events
+    events
         .iter()
         .filter(|e| e.kind == EventKind::ServeStart && !zurueck.contains(e.id.as_str()))
         .map(aufschlag_wire)
@@ -353,6 +355,31 @@ mod tests {
         assert_eq!(a[0].player, 1);
         let json = serde_json::to_string(&a).unwrap();
         assert!(!json.contains("card") && !json.contains("injury") && !json.contains("ts"));
+    }
+
+    /// Berichtigte Mannschaften (ADR 0067): badhub kennt nur `serve_start`,
+    /// also gehen sie gekippt mit; eine Rücknahme der Berichtigung hebt das
+    /// Kippen wieder auf.
+    #[test]
+    fn berichtigung_kippt_den_aufschlag_vor_dem_senden() {
+        let mut k = ereignis("aa02", EventKind::TeamsCorrected);
+        k.after_n = 4;
+        k.seq = 2;
+        let mut sheet = MatchSheet {
+            events: vec![ereignis("aa01", EventKind::ServeStart), k],
+            ..Default::default()
+        };
+        let a = aufschlaege(&sheet);
+        assert_eq!(a.len(), 1, "die Berichtigung selbst geht nicht mit");
+        assert_eq!((a[0].team, a[0].receiver_team), (1, 0));
+        assert_eq!(a[0].player, 1, "Spielerindex bleibt");
+
+        let mut zurueck = ereignis("aa03", EventKind::Retract);
+        zurueck.retracts = "aa02".to_string();
+        zurueck.after_n = 5;
+        sheet.events.push(zurueck);
+        let a = aufschlaege(&sheet);
+        assert_eq!((a[0].team, a[0].receiver_team), (0, 1));
     }
 
     #[test]

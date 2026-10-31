@@ -67,6 +67,43 @@ Ein Fehltipp lässt sich zurücknehmen. Der Verlauf wird dabei mit korrigiert.
 **Im Entscheidungssatz** weist das Tablet beim Erreichen der Pausen-Schwelle
 darauf hin, dass die **Seiten gewechselt** werden.
 
+## Seiten oder Mannschaften korrigieren
+
+Stimmt das Tablet nicht mehr mit dem Feld überein, tippst du in der Kopfzeile
+auf **⇄**. Eine PIN brauchst du dafür nicht. Der Dialog bietet zwei Wege:
+<!-- pruef: "Seiten oder Mannschaften korrigieren" in src-tauri/assets/tablet.html -->
+
+| Was ist passiert? | Knopf | Was danach gilt |
+|---|---|---|
+| Die Spieler stehen auf der anderen Hälfte als am Tablet — sie haben nicht gewechselt, obwohl das Tablet getauscht hat, oder umgekehrt | **Seiten tauschen** | Namen **und** Punkte wandern gemeinsam auf die andere Seite. Der Stand bleibt. |
+| Bei der Aufstellung wurde die falsche Mannschaft als „links" gewählt; du hast aber richtig auf die Seite getippt | **Mannschaften tauschen** | Nur die Namen wechseln, die Punkte bleiben auf ihrer Seite. Der gemeldete Stand dreht sich — auch in den fertigen Sätzen. |
+<!-- pruef: "Seiten tauschen" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Mannschaften tauschen" in src-tauri/assets/tablet.html -->
+
+Vor dem Tausch zeigt eine **Rückfrage**, wer danach wo steht, welcher Stand an
+die Turnierleitung geht und — bei „Mannschaften tauschen" am Spielende — wer
+dann gewonnen hat. Erst **„Ja, tauschen"** führt es aus.
+<!-- pruef: "Ja, tauschen" in src-tauri/assets/tablet.html -->
+
+Gut zu wissen:
+
+- **Im Doppel** fragt das Tablet nach „Mannschaften tauschen" sofort, **wer
+  gerade aufschlägt und wer annimmt** — welcher Spieler wo steht, weiß es nach
+  dem Tausch nicht. Der Stand bleibt dabei.
+- **„↩ Korrektur zurücknehmen"** steht danach dort, wo sonst „Letzten Punkt
+  zurück" steht, und macht den Tausch rückgängig. Erst danach nimmt der Knopf
+  wieder Punkte zurück.
+<!-- pruef: "Korrektur zurücknehmen" in src-tauri/assets/tablet.html -->
+- **Im Entscheidungssatz vor 11** wechseln die Seiten bei 11 trotzdem noch
+  einmal — die Rückfrage weist darauf hin. Korrigiert wird nur, was am Tablet
+  nicht zum Feld passt.
+- **In der Pause und am Spielende** verdeckt die Anzeige die Kopfzeile. Dort
+  steht dafür ein eigener Knopf **„⇄ Seiten / Mannschaften korrigieren"**.
+- **Nach dem Übermitteln** geht es am Tablet nicht mehr — dann ist die
+  Turnierleitung dran.
+- „Mannschaften tauschen" fehlt, solange der Turnier-PC noch eine ältere
+  Version hat.
+
 ## Pausen
 
 Das Tablet blendet die offiziellen Pausen selbst ein:
