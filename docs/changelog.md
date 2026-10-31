@@ -13,6 +13,32 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   läuft" im Browser. Der Umweg über das Aus- und Einschalten der Automatik in
   den Einstellungen ist nicht mehr nötig.
 
+## v0.9.325
+
+- **Geändert: Diagnose-Logs sind bei einer Neuinstallation standardmäßig
+  an.** Der Schalter **Einstellungen → Diagnose → „Diagnose-Logs senden"**
+  war bisher ein Opt-in — dadurch erreichte uns ausgerechnet von den
+  Turnieren, bei denen etwas schiefging, meist nichts. Der Assistent zeigt
+  das Häkchen beim ersten Start jetzt gesetzt; **abwählen bleibt jederzeit
+  möglich** und die Entscheidung steht dauerhaft in der `config.json`. Wer
+  den Schalter bewusst abgewählt hat, bleibt abgewählt; ein Update einer
+  bestehenden Installation schaltet nichts stillschweigend ein — das gilt
+  nur für Neuinstallationen. Inhalt und Umfang der Logs ändern sich nicht
+  (technische Daten, keine Spielernamen).
+
+## v0.9.324
+
+- **TL-Web: Das ⋮-Menü schließt nach der Wahl von selbst.** Bisher blieb es
+  nach jedem Eintrag offen und musste von Hand zugeklappt werden. Jetzt geht
+  es nach einem Tipp auf einen Eintrag zu — an der Wartelisten-Zeile, an der
+  Feldkachel (⋯) und am beendeten Spiel. Beim Hallen-Wähler und beim
+  Wunschfeld bleibt es offen, bis eine Halle bzw. ein Feld gewählt ist.
+- **TL-Web: Ruhigere Warteliste.** „In Vorbereitung rufen" (bisher das
+  Megafon) und „An den Anfang der Spielliste" (bisher ↑) stehen nicht mehr
+  als Knöpfe an jeder Zeile, sondern ganz oben im ⋮-Menü. Weil das Menü
+  danach zugeht, kostet keine der beiden Aktionen einen Tipp mehr als vorher.
+  Die vier Verschiebe-Knöpfe aus dem Profil-Schalter bleiben an der Zeile.
+
 ## v0.9.323
 
 - **Pause der Feld-Automatik bleibt bestehen.** Wurde die automatische
