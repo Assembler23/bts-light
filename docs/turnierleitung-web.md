@@ -79,19 +79,35 @@ LAN+Cloud voraus.
   („Feld 3. Meier, bitte als Tabletbedienung melden."). Ab dem zweiten Mal
   mit Stufenwort. Das ist **kein** Spieler-Aufruf: Die Aufruf-Zählung der
   Spieler bleibt stehen. Ohne zugewiesene Bedienung gibt es den Knopf nicht.
-- **In Vorbereitung rufen:** das **Megafon** an der Zeile. Es ist ein
-  Umschalter — hervorgehoben heißt „ist gerufen", noch einmal tippen nimmt
-  den Aufruf zurück.
-- **Was an einer Wartelisten-Zeile sichtbar ist:** rechts drei Knöpfe —
-  das **Megafon** (in Vorbereitung rufen), **↑** (an den Anfang der
-  Spielliste schieben) und das **⋮-Menü**. Links der Zieh-Griff ⠿.
-- **Das ⋮-Menü an einer Wartelisten-Zeile:** Alles, was seltener gebraucht
-  wird, steckt dahinter — **Nachruf** (beide Parteien oder nur eine), der
+- **In Vorbereitung rufen:** der oberste Eintrag im **⋮-Menü** der Zeile,
+  **📣 In Vorbereitung rufen**. Ist das Spiel gerufen, heißt derselbe
+  Eintrag **📣 Aufruf zurücknehmen**; an der Zeile steht dann die Marke
+  „gerufen". Bis v0.9.323 war das ein Megafon-Knopf direkt an der Zeile.
+  <!-- pruef: "In Vorbereitung rufen" in src-tauri/assets/tl.html -->
+  <!-- pruef: "Aufruf zurücknehmen" in src-tauri/assets/tl.html -->
+- **Was an einer Wartelisten-Zeile sichtbar ist:** rechts nur das
+  **⋮-Menü**, links der Zieh-Griff ⠿. Mit dem Profil-Schalter
+  „Verschiebe-Knöpfe" kommen die vier Knöpfe ⤒ ↑ ↓ ⤓ vor das Menü (siehe
+  [Spiele in der Warteliste umsortieren](#spiele-in-der-warteliste-umsortieren)).
+- **Das ⋮-Menü an einer Wartelisten-Zeile:** Ganz oben stehen die beiden
+  häufigsten Handgriffe, **📣 In Vorbereitung rufen** und **↑ An den Anfang
+  der Spielliste**, danach „Ergebnis eintragen", **🖨 Zettel (leer)**, der
   **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, das **Wunschfeld**,
-  **Hervorheben** (Zeilenfarbe wie in BTP), „Ergebnis eintragen" und
-  **🖨 Zettel (leer)**. Sichtbar bleibt an der Zeile nur, was ständig
-  gebraucht wird; so passt eine Zeile auch auf einem schmalen Tablet in eine
-  Zeile statt in vier.
+  **Hervorheben** (Zeilenfarbe wie in BTP) und — an einem gerufenen Spiel —
+  **Nachruf** (beide Parteien oder nur eine). An der Zeile selbst steht so
+  wenig wie möglich; so passt eine Zeile auch auf einem schmalen Tablet in
+  eine Zeile statt in vier.
+  <!-- pruef: "↑ An den Anfang der Spielliste" in src-tauri/assets/tl.html -->
+- **Das Menü schließt nach der Wahl von selbst** (seit v0.9.324) — an der
+  Wartelisten-Zeile, an der Feldkachel (⋯) und am beendeten Spiel. Ein Tipp
+  auf einen Eintrag führt die Aktion aus und klappt das Menü zu; eine
+  Aktion kostet damit genau zwei Tipps: Menü auf, Eintrag. Offen bleibt es
+  nur, solange die Wahl noch nicht getroffen ist: Beim **Hallen-Wähler**
+  und beim **Wunschfeld** schließt es erst, wenn ein Feld bzw. eine Halle
+  ausgewählt ist, nicht schon beim Aufklappen der Liste. Eine Farbe unter
+  **Hervorheben** ist mit einem Tipp gewählt und schließt sofort. Ein Tipp
+  auf eine Überschrift oder freie Fläche im Menü schließt nicht; ein Tipp
+  auf ⋮ (oder ein anderes Menü) schließt wie bisher.
 - **Hervorheben** (seit v0.9.277, Spec
   [`features/tl-zeilenfarbe.md`](features/tl-zeilenfarbe.md)): Im ⋮-Menü
   einer Zeile stehen **„keine" und sechs Farbfelder** — Gelb, Pink, Orange,
@@ -345,7 +361,7 @@ Was in der Zeile steht, hängt davon ab, wie viel BTP hergibt:
 Steht **eine** Seite schon fest, zeigt sie ihre echten Namen und nur die
 andere einen dieser Texte.
 
-**Was an so einer Zeile geht:** umsortieren (Griff, ↑-Knopf), Spielort setzen,
+**Was an so einer Zeile geht:** umsortieren (Griff, „An den Anfang" im ⋮-Menü), Spielort setzen,
 Wunschfeld, Auto-Vergabe-Ausnahme. Eine manuell gesetzte Position bleibt
 erhalten, wenn die Paarung später feststeht — das Spiel springt nicht zurück.
 
@@ -378,14 +394,18 @@ er **an**, auch an Geräten, die es schon vor diesem Update gab.
 
 ### Spiele in der Warteliste umsortieren
 
-**Der schnellste Weg — „ganz nach vorn":** der Knopf **↑** rechts an der
-Zeile. Ein Tipp, und das Spiel steht an der Spitze der umsortierbaren Liste.
-Kein Ziehen, kein Scrollen, egal wie lang die Liste ist. Der Knopf fehlt an
-einem Spiel, das schon vorn steht oder bereits gerufen ist — dort täte er
-nichts.
+**Der schnellste Weg — „ganz nach vorn":** im **⋮-Menü** der Zeile der
+zweite Eintrag, **↑ An den Anfang der Spielliste**. Ein Tipp, und das Spiel
+steht an der Spitze der umsortierbaren Liste; das Menü schließt dabei von
+selbst. Kein Ziehen, kein Scrollen, egal wie lang die Liste ist. Der
+Eintrag fehlt an einem Spiel, das schon vorn steht oder bereits gerufen ist
+— dort täte er nichts.
 
-> Diesen Befehl gab es schon länger, aber nur versteckt im ⋮-Menü; seit
-> v0.9.271 steht er sichtbar an der Zeile.
+> Von v0.9.271 bis v0.9.323 stand dafür ein eigener ↑-Knopf an der Zeile.
+> Seit v0.9.324 ist er wieder im Menü — diesmal ganz oben und hier
+> beschrieben, und weil das Menü nach der Wahl zugeht, kostet „ganz nach
+> vorn" keinen Tipp mehr als vorher (Wunsch 06.09.2026: weniger Knöpfe je
+> Zeile).
 
 Am **Griff** (⠿) links an einer Wartelisten-Zeile lässt sich das Spiel nach
 oben oder unten ziehen — auf dem Tablet wie mit der Maus. Ab dem ersten Zug
@@ -420,15 +440,17 @@ wird daraus ein Zug — den Griff nur zu berühren oder gedrückt zu halten änd
 nichts, auch nicht am Rand der Liste.
 
 **Ohne Ziehen:** Den Griff antippen bzw. mit Tab anfokussieren und mit ↑/↓
-verschieben. Ein Schritt je Tastendruck. Auch der **↑-Knopf** und die übrigen
-Knöpfe der Zeile lassen sich mit Tab ansteuern und mit Enter auslösen.
+verschieben. Ein Schritt je Tastendruck. Auch das **⋮-Menü** samt seinen
+Einträgen und die übrigen Knöpfe der Zeile lassen sich mit Tab ansteuern und
+mit Enter auslösen.
 
 **Vier Verschiebe-Knöpfe statt Ziehen** (seit v0.9.280, Profil-Schalter):
 Wo Ziehen nicht praktikabel ist (kleiner Bildschirm, ungenauer Stift,
 Handschuhe), schaltet das Häkchen **„Verschiebe-Knöpfe an jeder Zeile"** im
 Profil-Editor an jeder umsortierbaren Zeile vier Knöpfe frei: **⤒** an den
 Anfang, **↑** eine Position nach oben, **↓** eine nach unten, **⤓** ans Ende.
-Sie ersetzen den einzelnen ↑-Knopf und stehen immer in derselben Reihe; was
+Sie stehen direkt an der Zeile, vor dem ⋮-Menü (dessen Eintrag „An den
+Anfang der Spielliste" bleibt trotzdem da), und immer in derselben Reihe; was
 gerade nicht geht, ist ausgegraut statt versteckt: ⤒/↑ an der ersten Zeile,
 ↓/⤓ an der letzten — Letzteres nur, wenn die ganze Liste geladen ist. „Ans
 Ende" heißt das echte Ende der Liste, auch wenn sie noch nicht bis dorthin
@@ -606,7 +628,19 @@ Die Anzeige-Häkchen im Profil-Editor:
   unverändert.
 
 Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**
-an- und abschalten — der Schalter oben rechts.
+an- und abschalten — der Schalter oben rechts. Er zeigt **„Automatik läuft"**
+oder **„Automatik pausiert"** und erscheint nur, wenn die automatische
+Feldvergabe in den Einstellungen eingeschaltet ist.
+<!-- pruef: "Automatik pausiert" in src-tauri/assets/tl.html -->
+
+Die Pause **bleibt bestehen** (seit v0.9.323), auch wenn bts-light neu
+gestartet oder aktualisiert wird oder jemand am Turnier-PC die Einstellungen
+speichert. Sie gilt nur für das Turnier, in dem sie gesetzt wurde: Meldet BTP
+ein anderes Turnier, läuft die Automatik wieder. Ist das Gerät, das pausiert
+hat, nicht mehr da, hebst du die Pause am Turnier-PC auf: in den
+Einstellungen **Automatische Feldvergabe aktivieren** ausschalten, speichern,
+wieder einschalten und erneut speichern.
+<!-- pruef: "Automatische Feldvergabe aktivieren" in src/pages/SetupWizard.tsx -->
 
 #### Vereine (Vereinsname/-logo)
 

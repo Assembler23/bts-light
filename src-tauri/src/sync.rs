@@ -2281,6 +2281,10 @@ impl SyncEngine {
         // reconcile_on_court aus demselben Snapshot, damit beide Uhren
         // dieselbe Zuweisung sehen.
         self.reconcile_match_times(tablet, &snapshot, now_ms());
+        // Pause der Automatik ans Turnier binden, BEVOR `auto_assign` sie
+        // liest — `set_snapshot` läuft erst später im Poll, und sonst hielte
+        // die Pause des alten Turniers den Wechsel-Poll noch an. Idempotent.
+        tablet.bind_auto_assign_pause(&snapshot.tournament_name);
         self.reconcile_wish_courts(tablet, &snapshot);
         // Warnung „Spiel scheint fertig, aber kein Ergebnis" (Spec
         // `tl-warnung-fertiges-spiel`): einmal je Poll gegen den Live-Stand

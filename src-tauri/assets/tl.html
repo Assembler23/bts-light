@@ -565,6 +565,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    vier Knöpfe INNERHALB des Knopfblocks — die Kinderzahl bleibt fünf, die
    Zeile wird nur breiter; deshalb ist er standardmäßig aus.
 
+   Seit v0.9.324 (Wunsch 06.09.2026) stehen Vorbereitungs-Ruf und ↑ nicht
+   mehr auf der Zeile, sondern oben im ⋮-Menü — ohne Profil-Schalter trägt
+   der Knopfblock damit nur noch das Kebab. Die Zählung bleibt fünf.
+
    Der Gewinn kam nicht vom Weglassen, sondern vom Bündeln: Vorbereitungs-Ruf,
    ↑ und Kebab waren drei eigene Kinder und sind jetzt eines. Dieselbe
    Bewegung wie beim Statusblock weiter unten. Wer künftig etwas ergänzt,
@@ -685,48 +689,41 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   min-height: 28px; cursor: pointer;
 }
 .panel-head .reset-order:hover { border-color: var(--accent); color: var(--accent); }
-/* Quadratischer Umschalter mit Sinnbild, so groß wie ein Finger, ohne
-   Text — der Vorbereitungs-Aufruf bleibt PRIMÄR sichtbar (Spec
-   tl-web-panelsystem, Schritt 11: vermutlich die häufigste Einzelaktion an
-   einer Zeile). Die Auto-Vergabe-Ausnahme zieht dagegen ins Kebab-Menü
-   (siehe dort) — seltener gebraucht, und ihr eigenes Symbol war im
-   entschlackten Zeilenbild ohnehin leicht mit dem Vorbereitungs-Knopf zu
-   verwechseln. */
 /* Alle Knöpfe der Zeile in EINEM Flex-Kind — siehe die Budget-Rechnung bei
    `.who-block`. `flex: none`, damit der Block nicht schrumpft und die
    Trefferflächen erhalten bleiben; er darf als Ganzes umbrechen. */
 .row .row-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 
-/* Megafon und ↑ teilen sich Form und Trefferfläche: gleich große Sinnbilder
-   nebeneinander, damit sie als ein Paar lesbar sind. */
-.row .prep, .row .hoch {
+/* Die vier Verschiebe-Knöpfe (Profil-Schalter): Sinnbild-Quadrate mit
+   Fingergröße. Vorbereitungs-Ruf und der einzelne ↑ trugen dieselbe Form,
+   bis sie mit v0.9.324 ins ⋮-Menü zogen (Wunsch 06.09.2026). */
+.row .hoch {
   display: grid; place-items: center;
   width: var(--touch-min); height: var(--touch-min); padding: 0;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
-.row .prep:hover, .row .hoch:hover { border-color: var(--accent); color: var(--accent); }
+.row .hoch:hover { border-color: var(--accent); color: var(--accent); }
 .row .hoch { font-size: 1.05rem; line-height: 1; }
-/* Die vier Verschiebe-Knöpfe (Profil-Schalter): enger gesetzt als Megafon
-   und ↑, damit sie als EINE Reihe lesbar sind; ausgegraut heißt „hier
-   nicht möglich" (am Anfang bzw. am geladenen Ende). */
+/* Enger gesetzt als einzelne Knöpfe, damit die vier als EINE Reihe lesbar
+   sind; ausgegraut heißt „hier nicht möglich" (am Anfang bzw. am geladenen
+   Ende). */
 .row .mv-block { display: flex; align-items: center; gap: 3px; }
 .row .hoch[disabled] { opacity: .35; cursor: default; }
 .row .hoch[disabled]:hover { border-color: var(--line); color: var(--ink-soft); }
-.row .prep[aria-pressed="true"] {
-  border-color: var(--accent); background: #eff6ff; color: var(--accent);
-}
-.row[aria-selected="true"] .prep,
 .row[aria-selected="true"] .hoch { border-color: #475569; background: #1e293b; color: #e2e8f0; }
 
 /* ── Kebab-Menü: Sekundäres einer Zeile ODER einer Feldkachel ──────────
    Spec tl-web-panelsystem, Schritt 11: eine Zeile zeigt ohne geöffnetes
    Menü höchstens sechs Elemente. Bedienhäufigkeits-Einteilung (im
-   Code-Kommentar bei `queueRow()` ausführlicher begründet):
-   Vorbereitungs-Ruf bleibt PRIMÄR (siehe `.row .prep` oben); Nachrufe,
+   Code-Kommentar bei `queueRow()` ausführlicher begründet): Nachrufe,
    die Auto-Vergabe-Ausnahme und der (nur im Mehr-Hallen-Turnier ohne
    Regel überhaupt sichtbare) Spielort-Wähler sind seltener gebraucht und
-   wandern hierher. `<details>` statt eigenem JS-Zustand — der offene
+   wandern hierher — seit v0.9.324 auch Vorbereitungs-Ruf und „An den
+   Anfang", die bis dahin als Sinnbilder auf der Zeile standen.
+
+   Nach getaner Wahl schließt das Menü von selbst (`schliesseKebab`, eine
+   seitenweite Verdrahtung für alle drei Menü-Arten). `<details>` statt eigenem JS-Zustand — der offene
    Zustand wird beim Neuzeichnen über `openKebabMatchId` bzw.
    `openKebabCourtId` (Skript) gezielt wiederhergestellt, sonst schlösse
    sich das Menü alle zwei Sekunden von selbst (Poll-Takt).
@@ -1197,7 +1194,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Zug eine blau markierte Spur aus Namen und Überschriften, und auf dem
    Tablet springt zusätzlich die Lupe auf. Während eines laufenden Zugs gilt
    es für die ganze Seite — der Zeiger wandert ja über alles. */
-.row.pick, .card, .action-bar, .halls, h2, .prep, .hoch, .kebab-menu {
+.row.pick, .card, .action-bar, .halls, h2, .hoch, .kebab-menu {
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
@@ -1205,7 +1202,6 @@ body.dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; 
 /* Ohne Verbindung: Alles, was den Turnier-PC bräuchte, sichtbar
    zurücknehmen — Schreib-Aktionen ebenso wie Lese-Abrufe (der
    Punktverlauf wird per HTTP geladen und schlüge offline fehl). */
-body.offline .prep,
 body.offline .hoch,
 body.offline .kebab-menu button,
 body.offline .wo .actions button,
@@ -1729,25 +1725,14 @@ const UHR = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
   <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
 </svg>`;
 
-// Sinnbild für den Vorbereitungs-Aufruf: ein Megafon. Als Inline-SVG, damit
-// es die Schriftfarbe erbt und auf jedem Gerät gleich aussieht — ein Emoji
-// wäre je nach System ein anderes Bild.
 // Sinnbild für die noch laufende Mindestpause: eine Eieruhr. Als
-// Inline-SVG wie Uhr und Megafon, damit sie die Schriftfarbe erbt und auf
+// Inline-SVG wie die Uhr, damit sie die Schriftfarbe erbt und auf
 // jedem Gerät gleich aussieht.
 const EIERUHR = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"
   fill="none" stroke="currentColor" stroke-width="2"
   stroke-linecap="round" stroke-linejoin="round"
   style="vertical-align:-1px;margin-right:3px;opacity:.85">
   <path d="M6 3h12M6 21h12M8 3v3l4 4 4-4V3M8 21v-3l4-4 4 4v3"/>
-</svg>`;
-
-const MEGAFON = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
-  fill="none" stroke="currentColor" stroke-width="1.8"
-  stroke-linecap="round" stroke-linejoin="round">
-  <path d="M3 10v4a1 1 0 0 0 1 1h2l4 3.5V5.5L6 9H4a1 1 0 0 0-1 1Z"/>
-  <path d="M14.5 8.5a5 5 0 0 1 0 7"/>
-  <path d="M17.5 6a9 9 0 0 1 0 12"/>
 </svg>`;
 
 // ── Panel-Profile (Spec tl-web-panelsystem, ADR 0024/0025) ─────────────
@@ -3874,6 +3859,55 @@ function schliesseAndereKebabs(det) {
   });
 }
 
+/** Schließt ein ⋮-Menü und vergisst es in seinem Merker.
+ *
+ *  Der Merker wird SOFORT geleert, nicht erst im `toggle`-Handler: `toggle`
+ *  feuert asynchron, und ein Push-Neuzeichnen dazwischen läse sonst den
+ *  alten Merker und öffnete das Menü über das Markup wieder (`open` aus
+ *  `openKebab…Id`). */
+function schliesseKebab(det) {
+  if (!det || !det.open) return;
+  det.open = false;
+  if (det.dataset.kebab && openKebabMatchId === Number(det.dataset.kebab)) {
+    openKebabMatchId = null;
+  }
+  if (det.dataset.kebabCourt && openKebabCourtId === Number(det.dataset.kebabCourt)) {
+    openKebabCourtId = null;
+  }
+  if (det.dataset.kebabFin && openKebabFinishedId === Number(det.dataset.kebabFin)) {
+    openKebabFinishedId = null;
+  }
+}
+
+/** Nach getaner Wahl schließt das ⋮-Menü von selbst (Wunsch 06.09.2026) —
+ *  für ALLE Menü-Arten an einer Stelle (Spielzeile, Feldkachel, beendetes
+ *  Spiel), damit ein künftiger Eintrag es nicht eigens lernen muss.
+ *
+ *  „Getane Wahl" heißt: ein Knopf im Menü wurde ausgelöst (jeder Knopf dort
+ *  ist eine abschließende Aktion — auch eine Farbe in „Hervorheben", die ja
+ *  mit einem Tipp gesetzt ist), oder ein Wähler (Spielort, Wunschfeld) hat
+ *  einen neuen Wert. Das Aufklappen eines Wählers ist dagegen KEINE Wahl:
+ *  Ein `click` auf das `<select>` trifft keinen Knopf, und bis zum `change`
+ *  bleibt das Menü offen. Ein Tipp auf leere Menüfläche oder eine
+ *  Gruppen-Überschrift schließt ebenfalls nicht.
+ *
+ *  Capture-Phase aus zwei Gründen: Die Menüs stoppen das Weiterreichen ihrer
+ *  Klicks (sie dürfen die Zeile nicht auswählen), ein Lauscher in der
+ *  Bubble-Phase am Dokument hörte also nichts. Und das Menü ist so schon
+ *  zu, wenn der Knopf-Handler eine Rückfrage (`confirm`) oder ein Overlay
+ *  öffnet — es schwebte sonst `position: fixed` darüber bzw. dahinter
+ *  (Review-Fund 17.08.2026 an der Feldkachel). Die Knopf-Handler lesen
+ *  ihre Daten aus `dataset`/`state`, nicht aus dem offenen Menü. */
+document.addEventListener("click", (ev) => {
+  const btn = ev.target instanceof Element ? ev.target.closest(".kebab-menu button") : null;
+  if (!btn || btn.disabled) return;
+  schliesseKebab(btn.closest("details.kebab"));
+}, true);
+document.addEventListener("change", (ev) => {
+  const sel = ev.target instanceof Element ? ev.target.closest(".kebab-menu select") : null;
+  if (sel) schliesseKebab(sel.closest("details.kebab"));
+}, true);
+
 let kebabFolgePending = false;
 function folgeOffenenKebabs() {
   document.querySelectorAll(".kebab[open]").forEach((det) => {
@@ -4005,12 +4039,11 @@ function wireCourts(box) {
   // mit den Nachbar-Knöpfen stehen. Der Tipp schließt das Menü — sonst
   // schwebte es dank `position: fixed` hinter dem Graph-Overlay weiter
   // und läge nach dessen Schließen noch über fremden Kacheln
-  // (Review-Fund 17.08.2026).
+  // (Review-Fund 17.08.2026). Seit v0.9.324 erledigt das die seitenweite
+  // Verdrahtung bei `schliesseKebab` für jeden Menü-Eintrag.
   scopeAll(box, "button[data-zettel]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      const det = btn.closest(".kebab");
-      if (det) det.open = false;
       const c = state.courts.find((x) => String(x.match_id) === btn.dataset.zettel);
       if (!c) return;
       openZettel(
@@ -4022,8 +4055,6 @@ function wireCourts(box) {
   scopeAll(box, "button[data-graph]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      const det = btn.closest(".kebab");
-      if (det) det.open = false;
       const c = state.courts.find((x) => String(x.match_id) === btn.dataset.graph);
       if (!c) return;
       openTimeline(c.match_id, `${(c.team1 || []).join(" / ")} vs. ${(c.team2 || []).join(" / ")}`, null);
@@ -4573,12 +4604,14 @@ function scheduleFitCourts() {
  * 3. Name+Meta, EIN Block (`.who-block`).
  * 4. Statusblock, EIN Wrapper (`.row-status`): Hallen-Kürzel, Pausen-Eieruhr
  *    und die Abzeichen.
- * 5. Knopfblock, EIN Wrapper (`.row-actions`): Vorbereitungs-Ruf (die
- *    häufigste Einzelaktion an einer Zeile), „↑ nach oben" (nur wo es etwas
- *    bewirkt, siehe `kannHoch`) und das Kebab-Menü.
+ * 5. Knopfblock, EIN Wrapper (`.row-actions`): das Kebab-Menü, mit
+ *    Profil-Schalter davor die vier Verschiebe-Knöpfe.
  *
- * HINTER DEM KEBAB (⋮, seltener gebraucht): „Ergebnis eintragen", der
- * Vorabzettel, die Auto-Vergabe-Ausnahme (Umschalter, nicht die
+ * HINTER DEM KEBAB (⋮): zuoberst „In Vorbereitung rufen" und „An den Anfang
+ * der Spielliste" (bis v0.9.323 als Sinnbilder auf der Zeile — Wunsch
+ * 06.09.2026: weniger Knöpfe je Zeile; tragbar erst, seit das Menü nach der
+ * Wahl von selbst schließt, sonst kostete jede der beiden einen Tipp mehr),
+ * dann „Ergebnis eintragen", der Vorabzettel, die Auto-Vergabe-Ausnahme (Umschalter, nicht die
  * Anzeige-Badge — die bleibt primär sichtbar), alle drei Nachruf-Knöpfe
  * (braucht man nur, wenn jemand nicht kommt), der Spielort-Wähler und das
  * Wunschfeld (beide nur im Mehr-Hallen- bzw. entsprechend eingerichteten
@@ -4763,66 +4796,62 @@ function queueRow(m, topMatchId) {
       title="Die Paarung steht noch nicht fest — dieses Spiel lässt sich weder rufen noch einem Feld zuweisen">⋯ noch offen</span>`);
   }
   if (status.length) parts.push(`<span class="row-status">${status.join("")}</span>`);
-  // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
-  // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
-  // frei ist. Deshalb ein eigener Knopf statt einer Geste, und bewusst
-  // PRIMÄR sichtbar (vermutlich die häufigste Einzelaktion an einer Zeile).
-  //
-  // Als Sinnbild statt als Satz: In einer Liste mit 120 Zeilen frisst der
-  // ausgeschriebene Knopf die halbe Zeile. Ein Umschalter mit zwei Zuständen
-  // reicht — gedrückt heißt „ist gerufen". Beschriftung bleibt für
-  // Vorlesehilfen und als Tooltip erhalten, damit niemand raten muss.
-  const prepTitel = m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen";
   // Alle Knöpfe der Zeile stecken in EINEM Flex-Kind (`.row-actions`) —
-  // dieselbe Bündelung, die `.row-status` für die Marken schon macht. Sonst
-  // spränge der ↑-Knopf unten das Sechs-Elemente-Budget (Rechnung im
-  // CSS-Kommentar bei `.who-block`).
+  // dieselbe Bündelung, die `.row-status` für die Marken schon macht
+  // (Rechnung im CSS-Kommentar bei `.who-block`).
   const aktionen = [];
-  // Kein Aufruf ohne Paarung: Der Turnier-PC lehnt ihn ausdrücklich ab, und
-  // ein Knopf, der immer nur eine Fehlermeldung bringt, ist kein Bedien-Weg.
-  if (!offen) {
-    aktionen.push(`<button type="button" class="prep" data-prep="${m.match_id}"
-      aria-pressed="${m.prep_call ? "true" : "false"}"
-      title="${prepTitel}" aria-label="${prepTitel}">${MEGAFON}</button>`);
-  }
-
-  // „Nach oben schieben" (ADR 0026): der tastatur- und touchfreundliche Weg
-  // für den häufigsten Zug, ohne über eine womöglich hundert Zeilen lange
-  // Liste ziehen zu müssen. Kein neuer Wire-Vertrag nötig — es ist ein
-  // gewöhnliches `queue_reorder` vor die erste umsortierbare Zeile.
-  //
-  // Steht SICHTBAR an der Zeile statt im ⋮-Menü (Spec
-  // `tl-spielliste-sprung-umsortieren`, Schritt 5). Er lag zwei Jahre im
-  // Menü und wurde nie gefunden — die Menü-Aufzählung in
-  // `docs/turnierleitung-web.md` nannte ihn nicht einmal, und die
-  // Feldtest-Beschwerde „Umsortieren ist hakelig" kam von jemandem, der ihn
-  // nicht kannte. Ein Bedien-Weg, den niemand findet, ist fachlich dasselbe
-  // wie ein fehlender.
-  //
-  // Als Sinnbild wie das Megafon daneben: Ausgeschrieben fräße der Knopf in
-  // einer Liste mit 120 Zeilen zu viel Breite. Beschriftung bleibt als
-  // Tooltip und für Vorlesehilfen.
-  //
-  // Steht das Spiel schon vorn (oder ist es gerufen und damit gar nicht Teil
-  // der Reihenfolge), erscheint der Knopf gar nicht erst: ein sichtbarer
-  // Knopf, der nichts tut, ist schlimmer als keiner — niemand weiß, ob die
-  // Aktion misslang oder überflüssig war.
-  const kannHoch = sortierbar && topMatchId != null && topMatchId !== m.match_id;
-  // Mit eingeschaltetem Profil-Schalter ersetzen vier Knöpfe den einen ↑
-  // (Wunsch 06.09.2026). Nicht anwendbare Knöpfe sind ausgegraut statt
-  // weggelassen: Vier Knöpfe, die je nach Zeile springen, wären ein
-  // Zielraten — die Reihe steht immer gleich.
-  if (zeigeVerschiebeKnoepfe()) {
-    if (sortierbar) aktionen.push(verschiebeKnoepfeHtml(m.match_id));
-  } else if (kannHoch) {
-    aktionen.push(`<button type="button" class="hoch" data-queue-top="${m.match_id}"
-      title="An den Anfang der Spielliste schieben"
-      aria-label="An den Anfang der Spielliste schieben">↑</button>`);
+  // Mit eingeschaltetem Profil-Schalter stehen vier Verschiebe-Knöpfe an
+  // der Zeile (Wunsch 06.09.2026). Nicht anwendbare Knöpfe sind ausgegraut
+  // statt weggelassen: Vier Knöpfe, die je nach Zeile springen, wären ein
+  // Zielraten — die Reihe steht immer gleich. Wer den Schalter einschaltet,
+  // will das Sortieren bewusst auf der Zeile haben; die vier bleiben deshalb
+  // dort, nur der einzelne ↑ zog ins Menü.
+  if (zeigeVerschiebeKnoepfe() && sortierbar) {
+    aktionen.push(verschiebeKnoepfeHtml(m.match_id));
   }
 
   // ── Kebab-Menü: Sekundäres (Spec Schritt 11) ─────────────────────────
   const kebabGroups = [];
   const zeilenAktionen = [];
+  // Der Aufruf in die Vorbereitung ist eine eigene Handlung, nicht Teil des
+  // Zuweisens — er holt die Spieler an den Meeting Point, bevor ein Feld
+  // frei ist. Bis v0.9.323 stand er als Megafon-Sinnbild auf der Zeile; seit
+  // dem Wunsch vom 06.09.2026 („weniger Knöpfe je Zeile, ruhigere Liste am
+  // Tablet") zuoberst im Menü. Das kostet keinen Tipp mehr als vorher, weil
+  // das Menü nach der Wahl von selbst schließt (`schliesseKebab`). Ob das
+  // Spiel gerufen ist, sagt weiter die Marke „gerufen" im Statusblock.
+  //
+  // Kein Aufruf ohne Paarung: Der Turnier-PC lehnt ihn ausdrücklich ab, und
+  // ein Knopf, der immer nur eine Fehlermeldung bringt, ist kein Bedien-Weg.
+  if (!offen) {
+    const prepTitel = m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen";
+    zeilenAktionen.push(`<button type="button" data-prep="${m.match_id}"
+      aria-pressed="${m.prep_call ? "true" : "false"}"
+      title="${prepTitel}">📣 ${prepTitel}</button>`);
+  }
+  // „An den Anfang der Spielliste" (ADR 0026): der tastatur- und
+  // touchfreundliche Weg für den häufigsten Zug, ohne über eine womöglich
+  // hundert Zeilen lange Liste ziehen zu müssen. Kein neuer Wire-Vertrag
+  // nötig — es ist ein gewöhnliches `queue_reorder` vor die erste
+  // umsortierbare Zeile.
+  //
+  // Lag schon einmal im Menü und wurde dort nicht gefunden (Spec
+  // `tl-spielliste-sprung-umsortieren`, Schritt 5: die Menü-Aufzählung in
+  // `docs/turnierleitung-web.md` nannte ihn nicht). Er steht deshalb jetzt
+  // als ZWEITER Eintrag ganz oben, ausgeschrieben, und das Handbuch nennt
+  // ihn — anders als damals.
+  //
+  // Steht das Spiel schon vorn (oder ist es gerufen und damit gar nicht Teil
+  // der Reihenfolge), erscheint der Eintrag gar nicht erst: ein Knopf, der
+  // nichts tut, ist schlimmer als keiner — niemand weiß, ob die Aktion
+  // misslang oder überflüssig war. Auch mit eingeschalteten
+  // Verschiebe-Knöpfen bleibt er im Menü: Der Ort einer Aktion soll nicht
+  // von einem Profil-Schalter abhängen.
+  const kannHoch = sortierbar && topMatchId != null && topMatchId !== m.match_id;
+  if (kannHoch) {
+    zeilenAktionen.push(`<button type="button" data-queue-top="${m.match_id}"
+      title="An den Anfang der Spielliste schieben">↑ An den Anfang der Spielliste</button>`);
+  }
   // „Ergebnis eintragen" für ein Spiel, das nie auf einem Feld stand
   // (Zettel, mündliche Ansage). Öffnet exakt denselben Dialog wie das
   // Aktionsband oben — gemeinsamer Weg über `openQueueResultDialog()`,
@@ -4848,7 +4877,7 @@ function queueRow(m, topMatchId) {
       </div>`);
   }
   // Auto-Vergabe-Ausnahme: seltener gebraucht als der Vorbereitungs-Ruf,
-  // deshalb hier statt als zweiter Icon-Knopf auf der Zeile.
+  // deshalb unter ihm in einer eigenen Gruppe.
   const exclTitel = m.excluded_from_auto_assign
     ? "Wieder in die automatische Feldvergabe aufnehmen"
     : "Von der automatischen Feldvergabe ausnehmen";
@@ -4967,7 +4996,7 @@ let openKebabMatchId = null;
 function wireQueue(box) {
   // Der badhub-Spieler-Link öffnet die Spielerseite in einem neuen Tab —
   // ein Klick darauf darf das Spiel nicht ZUSÄTZLICH auswählen. Anders als
-  // beim Megafon-Knopf bleibt `pointerdown` aber unangetastet: Der Name ist
+  // beim Vorbereitungs-Knopf bleibt `pointerdown` aber unangetastet: Der Name ist
   // die größte Trefffläche der Zeile, ein dort angesetzter ZUG (Maus aufs
   // Feld ziehen) muss weiter funktionieren (Review-Fund 17.08.2026). Endet
   // so ein Zug über dem Namen, folgt noch ein Klick-Ereignis — das darf
@@ -5158,13 +5187,13 @@ function wireQueue(box) {
     el.addEventListener("keydown", (ev) => {
       // Enter/Leertaste auf einem fokussierten Bedienelement IN der Zeile
       // gehören diesem Element, nicht der Zeile: dem Spieler-Link (badhub-
-      // Seite öffnen, Review-Fund 17.08.2026), dem ↑-Knopf, dem
-      // Vorbereitungs-Ruf, dem ⋮-Menü und den Wählern darin.
+      // Seite öffnen, Review-Fund 17.08.2026), den Verschiebe-Knöpfen, dem
+      // ⋮-Menü und allem darin (Vorbereitungs-Ruf, „An den Anfang", Wähler).
       //
       // Ohne die Ausnahme unterdrückt `preventDefault()` den Klick, den der
       // Browser sonst aus Enter auf einem Knopf erzeugt — der Knopf löst nie
-      // aus, und stattdessen wird das Spiel zum Zuweisen ausgewählt. Beim
-      // ↑-Knopf wiegt das besonders: Er ist laut Doku der Hauptweg für
+      // aus, und stattdessen wird das Spiel zum Zuweisen ausgewählt. Bei „An
+      // den Anfang" wiegt das besonders: Er ist laut Doku der Hauptweg für
       // „ganz nach vorn" (Review-Fund 26.08.2026).
       if (ev.target instanceof Element
         && ev.target.closest("button, summary, select, a")) return;
@@ -8209,18 +8238,11 @@ function wireFinRow(box) {
   // Jede Aktion schliesst zuerst ihr Menue: Das `.kebab-menu` ist
   // `position: fixed` mit z-index 30, die Overlays liegen auf 70 — ein offen
   // gebliebenes Menue haengt sonst hinter dem Overlay und schwebt nach dem
-  // Schliessen ueber fremden Zeilen, wo es Klicks schluckt. Genau dafuer
-  // macht es die Feldkachel seit 17.08.2026 ebenso.
-  const menueZu = (b) => {
-    const det = b.closest("details.kebab");
-    if (det) {
-      det.open = false;
-      openKebabFinishedId = null;
-    }
-  };
+  // Schliessen ueber fremden Zeilen, wo es Klicks schluckt. Seit v0.9.324
+  // erledigt das die seitenweite Verdrahtung bei `schliesseKebab` (vor dem
+  // Handler, Capture-Phase) fuer alle Menues gleich.
   scopeAll(box, "[data-fin-zettel]").forEach((b) =>
     b.addEventListener("click", () => {
-      menueZu(b);
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finZettel);
       if (!f) return;
       openZettel([f.match_id], siegerZuerstText(f));
@@ -8229,7 +8251,6 @@ function wireFinRow(box) {
   // Liste — die Listener überleben seit dem Keyed-Abgleich viele Renders.
   scopeAll(box, "[data-fin-graph]").forEach((b) =>
     b.addEventListener("click", () => {
-      menueZu(b);
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finGraph);
       if (!f) return;
       openTimeline(
@@ -8240,7 +8261,6 @@ function wireFinRow(box) {
     }));
   scopeAll(box, "[data-fin-fix]").forEach((b) =>
     b.addEventListener("click", () => {
-      menueZu(b);
       const f = (state.finished || []).find((x) => String(x.match_id) === b.dataset.finFix);
       if (!f) return;
       openResultDialog({

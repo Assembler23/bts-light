@@ -547,9 +547,14 @@ pub struct TabletState {
     /// liest sie nie neu — eine Änderung an der Datei bliebe also wirkungslos.
     /// Dieser Schalter wirkt sofort und ist genau dafür da: Während die
     /// Turnierleitung von Hand umsortiert, soll die Automatik nicht
-    /// dazwischenfunken. Er gilt bis zum nächsten Start; danach zählt wieder
-    /// die Grundeinstellung aus der Konfiguration.
+    /// dazwischenfunken. Seit v0.9.323 steht er zusätzlich in der Config
+    /// (`auto_assign_paused`) und wird beim Start von dort geladen — so
+    /// überlebt die Pause Neustart, Update und das Speichern der
+    /// Einstellungen (das die Übertragung neu startet).
     auto_assign_paused: RwLock<bool>,
+    /// Turnier, an das die Pause gebunden ist (Muster ADR 0044). Wechselt
+    /// das Turnier im Snapshot, verfällt die Pause. Leer = noch keins.
+    auto_assign_paused_tournament: RwLock<String>,
     /// Letzte Warnung des Autodrucks (Spec
     /// `schiedsrichterzettel-autodruck`, E5). Reine Anzeige fürs
     /// Dashboard: Ein Drucker, der schweigt, darf nicht stumm scheitern —
@@ -1320,6 +1325,9 @@ impl TabletState {
         // und nicht in einem eigenen Store, gelten aber genauso nur für EIN
         // Turnier: CourtIDs vergibt BTP je Turnier neu.
         self.bind_locked_courts(&snapshot.tournament_name);
+        // Die Pause der automatischen Vergabe ebenso — sie gilt nur für das
+        // Turnier, in dem sie gesetzt wurde.
+        self.bind_auto_assign_pause(&snapshot.tournament_name);
         // Druck-Gedächtnis ebenso turniergebunden (Spec
         // `schiedsrichterzettel-autodruck`): Match-IDs gelten nur
         // innerhalb eines Turniers, ein Wechsel beginnt frisch.
@@ -3448,11 +3456,6 @@ impl TabletState {
         true
     }
 
-    /// Hält die automatische Feldvergabe an oder gibt sie wieder frei.
-    ///
-    /// Der Schalter lebt **nur zur Laufzeit** (die Einstellungen bleiben
-    /// unangetastet) und gilt bis zum Stoppen der Übertragung — siehe
-    /// [`Self::reset_runtime_switches`].
     /// Warnung des Autodrucks setzen (überschreibt die vorherige — die
     /// jüngste ist die, die zählt).
     pub fn set_print_warning(&self, text: impl Into<String>) {
@@ -3475,8 +3478,59 @@ impl TabletState {
         *self.print_warning.write().unwrap() = None;
     }
 
+    /// Hält die automatische Feldvergabe an oder gibt sie wieder frei —
+    /// nur im Laufzeit-Zustand. Wer die Pause dauerhaft setzt (TL-Web),
+    /// schreibt zuerst die Config und ruft dann [`Self::load_auto_assign_pause`].
     pub fn set_auto_assign_paused(&self, paused: bool) {
         *self.auto_assign_paused.write().unwrap() = paused;
+    }
+
+    /// Übernimmt die gespeicherte Pause samt Turnierbezug — beim Start der
+    /// Übertragung aus der Config und nach jedem Umschalten im TL-Web.
+    ///
+    /// Der Turnierbezug kommt **mit** (anders als bei der Sperrliste, deren
+    /// Laufzeit-Turnier leer startet): Sonst übernähme der erste Snapshot
+    /// nach einem Neustart jedes beliebige Turnier als „das eigene", und eine
+    /// Pause vom Vortag hielte das neue Turnier an.
+    pub fn load_auto_assign_pause(&self, paused: bool, tournament: &str) {
+        *self.auto_assign_paused.write().unwrap() = paused;
+        *self.auto_assign_paused_tournament.write().unwrap() = tournament.trim().to_string();
+    }
+
+    /// Turnier, an das die Pause gebunden ist (leer = noch keins).
+    pub fn auto_assign_paused_tournament(&self) -> String {
+        self.auto_assign_paused_tournament.read().unwrap().clone()
+    }
+
+    /// Bindet die Pause an ein Turnier und lässt sie beim Wechsel verfallen
+    /// (Muster ADR 0044). Ein **leerer** Name ändert nichts — den liefert der
+    /// Snapshot, bevor BTP den Turniernamen kennt.
+    ///
+    /// Die Config wird hier bewusst NICHT angefasst: Sie trägt dann noch die
+    /// Pause des alten Turniers, die beim nächsten Start geladen und beim
+    /// ersten Snapshot des neuen Turniers wieder verworfen wird. Ohne
+    /// Snapshot vergibt die Automatik ohnehin nichts.
+    pub fn bind_auto_assign_pause(&self, tournament: &str) {
+        let neu = tournament.trim();
+        if neu.is_empty() {
+            return;
+        }
+        let mut gemerkt = self.auto_assign_paused_tournament.write().unwrap();
+        if gemerkt.as_str() == neu {
+            return;
+        }
+        if !gemerkt.is_empty() {
+            let mut paused = self.auto_assign_paused.write().unwrap();
+            if *paused {
+                tracing::info!(
+                    "Turnierwechsel ({} → {}): Pause der automatischen Vergabe verfällt",
+                    gemerkt,
+                    neu
+                );
+                *paused = false;
+            }
+        }
+        *gemerkt = neu.to_string();
     }
 
     /// Ist die automatische Feldvergabe gerade angehalten?
@@ -3742,18 +3796,6 @@ impl TabletState {
         entry.1 = entry.1.max(stage);
         entry.2 = SIDE_BOTH;
         entry.1
-    }
-
-    /// Setzt die Schalter zurück, die nur zur Laufzeit gelten — beim Start
-    /// der Übertragung aufgerufen.
-    ///
-    /// Ohne das bliebe eine auf der Turnierleitungs-Seite gesetzte Pause der
-    /// automatischen Vergabe hängen, sobald das Gerät nicht mehr erreichbar
-    /// ist: Die Einstellungen sagen „an", die Vergabe läuft trotzdem nicht,
-    /// und es gibt keinen Griff, das zu ändern. Stoppen und Starten ist
-    /// dieser Griff.
-    pub fn reset_runtime_switches(&self) {
-        self.set_auto_assign_paused(false);
     }
 
     /// Gibt den Anspruch auf ein Feld sofort wieder frei.
@@ -5960,15 +6002,34 @@ mod tests {
     }
 
     #[test]
-    fn restarting_the_transfer_lets_the_automatic_assignment_run_again() {
-        // Die Pause wird auf der Turnierleitungs-Seite gesetzt. Ist das Tablet
-        // weg (leer, verlegt, Zugang widerrufen), gäbe es sonst keinen Weg
-        // zurück — die Automatik bliebe für den Rest des Turniers aus, obwohl
-        // sie in den Einstellungen eingeschaltet ist. Das Stoppen und Starten
-        // der Übertragung ist der Griff, den jede Turnierleitung kennt.
+    fn die_gespeicherte_pause_ueberlebt_den_start_im_selben_turnier() {
+        // Roadmap 06.09.2026: Nach Neustart/Update lief die Automatik wieder,
+        // obwohl sie im TL-Web pausiert war. Beim Start wird die Pause samt
+        // Turnierbezug aus der Config geladen; der erste Snapshot desselben
+        // Turniers bestätigt sie nur.
         let st = TabletState::default();
-        st.set_auto_assign_paused(true);
-        st.reset_runtime_switches();
+        st.load_auto_assign_pause(true, "Köpi-Cup");
+        st.set_snapshot(snap_named("Köpi-Cup"));
+        assert!(st.auto_assign_paused(), "gleiches Turnier ⇒ Pause bleibt");
+        st.set_snapshot(snap_named(""));
+        assert!(st.auto_assign_paused(), "leerer Name ist kein Wechsel");
+    }
+
+    #[test]
+    fn die_pause_verfaellt_bei_einem_anderen_turnier() {
+        // Eine Pause vom Vortag darf das nächste Turnier nicht anhalten —
+        // auch nicht direkt nach dem Start, wenn der erste Snapshot das
+        // neue Turnier meldet (deshalb reist der Turnierbezug mit).
+        let st = TabletState::default();
+        st.load_auto_assign_pause(true, "Köpi-Cup Tag 1");
+        st.set_snapshot(snap_named("Kreismeisterschaft"));
+        assert!(!st.auto_assign_paused(), "anderes Turnier ⇒ Pause verfällt");
+
+        // Auch zur Laufzeit: Turnierwechsel im laufenden Betrieb.
+        st.load_auto_assign_pause(true, "Kreismeisterschaft");
+        st.set_snapshot(snap_named("Kreismeisterschaft"));
+        assert!(st.auto_assign_paused());
+        st.set_snapshot(snap_named("Bezirksrangliste"));
         assert!(!st.auto_assign_paused());
     }
 

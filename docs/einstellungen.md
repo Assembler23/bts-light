@@ -321,6 +321,11 @@ nach. Details: [Schiedsrichterzettel drucken](schiedsrichterzettel.md).
 Die drei unteren Felder sind nur sichtbar, wenn die Automatik an ist.
 **Gesperrte Felder werden nie automatisch belegt.**
 
+Eine in der Turnierleitungs-Oberfläche gesetzte **Pause** der Automatik
+übersteht das Speichern dieser Seite. Schaltest du die Automatik hier **aus**,
+ist die Pause damit aufgehoben — nach dem Wiedereinschalten läuft sie sofort
+(Details: [Turnierleitungs-Oberfläche im Browser](turnierleitung-web.md)).
+
 Zwei Besonderheiten im Mehr-Hallen-Betrieb:
 
 - **Ohne** gesetzte aktive Halle werden nur Spiele verteilt, die du für die
@@ -407,9 +412,12 @@ alle zehn Minuten die aktuelle Logdatei übertragen. Sie enthält nur technische
 Daten, **keine Spielernamen**. Das hilft, einen Fehler nach dem Turnier
 nachzuvollziehen.
 
-**Voreingestellt ist er aus.** Ein Update ändert daran nichts: Was du einmal
-eingestellt hast, bleibt bestehen — in beide Richtungen. Details:
+**Bei einer Neuinstallation ist er an** — der Einrichtungs-Assistent zeigt das
+Häkchen gesetzt, du kannst es dort oder hier jederzeit abwählen. Ein Update
+ändert daran nichts: Was du einmal eingestellt hast, bleibt bestehen — in beide
+Richtungen; eine ältere Installation ohne den Schalter bleibt aus. Details:
 [Diagnose-Logs](logging.md).
+<!-- pruef: "upload_logs: true" in src-tauri/src/config.rs -->
 
 ## Wartung
 

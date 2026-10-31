@@ -331,10 +331,14 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
 - [~] Die automatische Feldvergabe ist als Zustand sichtbar und lässt sich
       umschalten; nach einer Zuweisung von Hand pausiert sie sichtbar für
       60 s, damit sie dem Helfer nicht dazwischenfunkt.
-- [x] Die Pause gilt **nur zur Laufzeit** und endet beim Stoppen/Starten der
-      Übertragung. Sonst bliebe sie hängen, sobald das Gerät weg ist, das sie
-      gesetzt hat — die Einstellungen sagten „an", vergeben würde trotzdem
-      nichts, und es gäbe keinen Griff dagegen.
+- [x] ~~Die Pause gilt **nur zur Laufzeit** und endet beim Stoppen/Starten
+      der Übertragung.~~ **Abgelöst in v0.9.323** (Roadmap 06.09.2026): Die
+      Pause steht turniergebunden in der Config (`auto_assign_paused` +
+      `auto_assign_paused_tournament`, Muster ADR 0044) und überlebt
+      Neustart, Update und das Speichern der Einstellungen — sie lief sonst
+      nach jedem Wiederanlauf ungewollt wieder an. Ein anderes Turnier lässt
+      sie verfallen. Der Griff, wenn das pausierende Gerät weg ist: die
+      Automatik in den Einstellungen ausschalten (hebt die Pause auf).
 
 **Aufrufe und Ansagen**
 

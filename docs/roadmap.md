@@ -945,24 +945,14 @@ mitgeändert worden:
 
 ## Wünsche vom 06.09.2026
 
-- **Pause der Feld-Automatik überlebt Neustart und Update nicht.** Wird die
-  automatische Feldvergabe in der Turnierleitungs-Sicht (TL-Web) pausiert
-  und bts-light danach neu gestartet oder aktualisiert, läuft die Automatik
-  wieder — der Pause-Zustand lebt nur im Speicher. Seit „Update im
-  Turnierbetrieb" (v0.9.279, Wiederanlauf per Marker) fällt das stärker
-  auf, weil die Übertragung nach dem Update von selbst wieder anläuft.
-  Lösung: Pause-Flag turniergebunden persistieren (Muster
-  `locked_courts_tournament`, ADR 0044) und beim Wiederanlauf lesen.
-- **Kebab-Menü (⋮) im TL-Web schließt nach einer Aktion nicht.** Wird ein
-  Eintrag gewählt oder ein Knopf gedrückt, bleibt das Menü offen und muss
-  von Hand geschlossen werden; in der Regel kann es direkt zugehen. Vor der
-  Umsetzung klären, ob mehrstufige Einträge (Farbwahl, Feldwähler Wunschfeld)
-  bewusst offen bleiben sollen.
-- **Warteliste: „In Vorbereitung rufen" und „An den Anfang der Spielliste
-  schieben" ins Kebab-Menü.** Weniger Knöpfe je Zeile, ruhigere Liste am
-  Tablet. Zusammen mit dem Punkt darüber umsetzen, sonst kostet jede der
-  beiden Aktionen künftig einen Tipp mehr. Vorher prüfen, welche der
-  Verschiebe-Knöpfe aus v0.9.280 gemeint sind.
+- ~~**Pause der Feld-Automatik überlebt Neustart und Update nicht.**~~ —
+  **erledigt in v0.9.323**: Die Pause steht turniergebunden in der Config
+  (`auto_assign_paused` + `auto_assign_paused_tournament`, Muster ADR 0044),
+  wird beim Start geladen und ist vor dem Speichern der Einstellungen
+  geschützt (`keep_host_managed_fields`). Nebenbei behoben: Auch jedes
+  Speichern der Einstellungen hob die Pause auf (Sync-Neustart). Neuer Griff
+  ohne TL-Gerät: Automatik in den Einstellungen aus- und wieder einschalten.
+  Bedienung: [turnierleitung-web.md](turnierleitung-web.md).
 
 ## Wünsche vom 23.08.2026
 
