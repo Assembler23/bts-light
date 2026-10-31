@@ -3,9 +3,9 @@
 //! VISUALXML besteht aus `GROUP`-Containern und skalaren `ITEM`-Elementen,
 //! jeweils mit `ID`-Attribut. Siehe `docs/btp_protocol.md`.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
-use quick_xml::escape::escape;
 use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 
@@ -218,6 +218,30 @@ fn encode_value_body(v: &Value, out: &mut String) {
     }
 }
 
+/// Maskiert die fünf XML-Sonderzeichen `<`, `>`, `&`, `'` und `"`.
+///
+/// Bewusst eigene Funktion statt `quick_xml::escape::escape`: Ab quick-xml
+/// 0.42 maskiert jene zusätzlich `\r` als `&#13;`. Was an BTP geht, soll
+/// sich durch ein Dependency-Update nicht still ändern — daher genau der
+/// Zeichenumfang von quick-xml 0.41.
+fn escape(raw: &str) -> Cow<'_, str> {
+    if !raw.contains(['<', '>', '&', '\'', '"']) {
+        return Cow::Borrowed(raw);
+    }
+    let mut out = String::with_capacity(raw.len() + 8);
+    for ch in raw.chars() {
+        match ch {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '\'' => out.push_str("&apos;"),
+            '"' => out.push_str("&quot;"),
+            c => out.push(c),
+        }
+    }
+    Cow::Owned(out)
+}
+
 // ---------------------------------------------------------------- Decoder ---
 
 /// Dekodiert ein VISUALXML-Dokument zu seinen Top-Level-Knoten.
@@ -231,24 +255,20 @@ pub fn decode(xml: &str) -> Result<Vec<Node>, XmlError> {
     loop {
         match reader.read_event()? {
             Event::Start(e) => match e.name().as_ref() {
-                b"VISUALXML" => {}
-                b"GROUP" => {
-                    group_ids.push(get_attr(&e, b"ID")?);
+                "VISUALXML" => {}
+                "GROUP" => {
+                    group_ids.push(get_attr(&e, "ID")?);
                     children_stack.push(Vec::new());
                 }
-                b"ITEM" => {
+                "ITEM" => {
                     let item = parse_item(&mut reader, &e)?;
                     push_node(&mut children_stack, item);
                 }
-                other => {
-                    return Err(XmlError::UnknownElement(
-                        String::from_utf8_lossy(other).into_owned(),
-                    ))
-                }
+                other => return Err(XmlError::UnknownElement(other.to_string())),
             },
             Event::Empty(e) => match e.name().as_ref() {
-                b"GROUP" => {
-                    let id = get_attr(&e, b"ID")?;
+                "GROUP" => {
+                    let id = get_attr(&e, "ID")?;
                     push_node(
                         &mut children_stack,
                         Node::Group {
@@ -257,17 +277,13 @@ pub fn decode(xml: &str) -> Result<Vec<Node>, XmlError> {
                         },
                     );
                 }
-                b"ITEM" => {
+                "ITEM" => {
                     let item = build_item(&e, String::new(), None)?;
                     push_node(&mut children_stack, item);
                 }
-                other => {
-                    return Err(XmlError::UnknownElement(
-                        String::from_utf8_lossy(other).into_owned(),
-                    ))
-                }
+                other => return Err(XmlError::UnknownElement(other.to_string())),
             },
-            Event::End(e) if e.name().as_ref() == b"GROUP" => {
+            Event::End(e) if e.name().as_ref() == "GROUP" => {
                 let children = children_stack.pop().expect("GROUP-Stack nie leer");
                 let id = group_ids.pop().expect("GROUP-ID-Stack nie leer");
                 push_node(&mut children_stack, Node::Group { id, children });
@@ -292,15 +308,15 @@ fn parse_item(reader: &mut Reader<&[u8]>, start: &BytesStart) -> Result<Node, Xm
         // Text-Events enthalten daher reinen Text.
         match reader.read_event()? {
             Event::Text(t) => {
-                text.push_str(&t.decode().map_err(quick_xml::Error::from)?);
+                text.push_str(&t);
             }
             Event::GeneralRef(r) => {
                 text.push_str(&resolve_entity(&r)?);
             }
-            Event::Empty(e) if e.name().as_ref() == b"DATETIME" => {
+            Event::Empty(e) if e.name().as_ref() == "DATETIME" => {
                 datetime = Some(parse_datetime(&e)?);
             }
-            Event::End(e) if e.name().as_ref() == b"ITEM" => break,
+            Event::End(e) if e.name().as_ref() == "ITEM" => break,
             Event::Eof => return Err(XmlError::UnexpectedEof),
             _ => {}
         }
@@ -313,8 +329,8 @@ fn build_item(
     text: String,
     datetime: Option<DateTime>,
 ) -> Result<Node, XmlError> {
-    let id = get_attr(start, b"ID")?;
-    let type_name = get_attr(start, b"TYPE")?;
+    let id = get_attr(start, "ID")?;
+    let type_name = get_attr(start, "TYPE")?;
     let value = match type_name.as_str() {
         "String" => Value::String(text),
         "Integer" => Value::Integer(parse_num(text.trim(), "Integer")?),
@@ -332,13 +348,13 @@ fn parse_datetime(e: &BytesStart) -> Result<DateTime, XmlError> {
         let attr = attr.map_err(quick_xml::Error::from)?;
         let raw = attr.normalized_value(XmlVersion::Implicit1_0)?;
         match attr.key.as_ref() {
-            b"Y" => dt.year = parse_num(raw.trim(), "DATETIME/Y")?,
-            b"MM" => dt.month = parse_num(raw.trim(), "DATETIME/MM")?,
-            b"D" => dt.day = parse_num(raw.trim(), "DATETIME/D")?,
-            b"H" => dt.hour = parse_num(raw.trim(), "DATETIME/H")?,
-            b"M" => dt.minute = parse_num(raw.trim(), "DATETIME/M")?,
-            b"S" => dt.second = parse_num(raw.trim(), "DATETIME/S")?,
-            b"MS" => dt.millis = parse_num(raw.trim(), "DATETIME/MS")?,
+            "Y" => dt.year = parse_num(raw.trim(), "DATETIME/Y")?,
+            "MM" => dt.month = parse_num(raw.trim(), "DATETIME/MM")?,
+            "D" => dt.day = parse_num(raw.trim(), "DATETIME/D")?,
+            "H" => dt.hour = parse_num(raw.trim(), "DATETIME/H")?,
+            "M" => dt.minute = parse_num(raw.trim(), "DATETIME/M")?,
+            "S" => dt.second = parse_num(raw.trim(), "DATETIME/S")?,
+            "MS" => dt.millis = parse_num(raw.trim(), "DATETIME/MS")?,
             _ => {}
         }
     }
@@ -351,8 +367,7 @@ fn resolve_entity(r: &BytesRef) -> Result<String, XmlError> {
     if let Some(ch) = r.resolve_char_ref()? {
         return Ok(ch.to_string());
     }
-    let name = r.decode().map_err(quick_xml::Error::from)?;
-    let resolved = match name.as_ref() {
+    let resolved = match &**r {
         "amp" => '&',
         "lt" => '<',
         "gt" => '>',
@@ -370,16 +385,14 @@ fn parse_num<T: std::str::FromStr>(raw: &str, ty: &'static str) -> Result<T, Xml
     })
 }
 
-fn get_attr(e: &BytesStart, name: &[u8]) -> Result<String, XmlError> {
+fn get_attr(e: &BytesStart, name: &str) -> Result<String, XmlError> {
     for attr in e.attributes() {
         let attr = attr.map_err(quick_xml::Error::from)?;
         if attr.key.as_ref() == name {
             return Ok(attr.normalized_value(XmlVersion::Implicit1_0)?.into_owned());
         }
     }
-    Err(XmlError::MissingAttribute(
-        String::from_utf8_lossy(name).into_owned(),
-    ))
+    Err(XmlError::MissingAttribute(name.to_string()))
 }
 
 #[cfg(test)]
@@ -419,6 +432,33 @@ mod tests {
         let nodes = vec![item("name", Value::String("Rot & Weiß <e.V.>".into()))];
         let xml = encode(&nodes);
         assert!(xml.contains("Rot &amp; Weiß &lt;e.V.&gt;"));
+    }
+
+    #[test]
+    fn encode_escapes_exactly_like_quick_xml_0_41() {
+        // Regression quick-xml 0.42: dessen `escape` maskiert auch `\r` als
+        // `&#13;`. An BTP geht weiterhin genau das alte Format — nur die fünf
+        // Sonderzeichen, Zeilenumbrüche/Tabs/Leerzeichen roh.
+        let nodes = vec![item(
+            "a'b\"",
+            Value::String("z1\r\nz2\r\tz3 'x' \"y\" &<>".into()),
+        )];
+        assert_eq!(
+            encode(&nodes),
+            r#"<?xml version="1.0" encoding="UTF-8"?><VISUALXML VERSION="1.0">"#.to_string()
+                + r#"<ITEM ID="a&apos;b&quot;" TYPE="String">"#
+                + "z1\r\nz2\r\tz3 &apos;x&apos; &quot;y&quot; &amp;&lt;&gt;"
+                + "</ITEM></VISUALXML>"
+        );
+    }
+
+    #[test]
+    fn decode_keeps_raw_line_endings() {
+        // Wie mit quick-xml 0.41: Text wird ohne EOL-Normalisierung
+        // übernommen (`into_inner`/Deref statt `xml10_content`).
+        let xml = "<VISUALXML VERSION=\"1.0\"><ITEM ID=\"s\" TYPE=\"String\">z1\r\nz2\rz3</ITEM></VISUALXML>";
+        let nodes = decode(xml).unwrap();
+        assert_eq!(nodes[0], item("s", Value::String("z1\r\nz2\rz3".into())));
     }
 
     #[test]
