@@ -755,12 +755,60 @@ Die Marke wird nie gekürzt; bei langen Doppel-Namen weicht zuerst der Name
 die Marke. Ändert die Turnierleitung eine Setzung in BTP, während das Spiel
 schon auf dem Feld liegt, zeigt die Anzeige sie mit dem nächsten Abruf.
 
-## Layout
+## Stile
 
-Das Anzeige-Layout ist im Setup wählbar. Aktuell gibt es **„A — Geteilt"**
-(Team 1 oben, Team 2 unten); die Auswahl ist die Grundlage für weitere
-Layouts. Der Monitor setzt das gewählte Layout als `data-layout` am
-Wurzelelement.
+Seit v0.9.327 wählt man das Aussehen **je Monitor**: Im Court-Monitor-Panel
+erscheint neben der Feldzuweisung ein Auswahlfeld **Stil**. Es gibt es nur
+bei Feld-Zielen, nicht bei Tafel, Übersicht, Werbung oder Kombi.
+<!-- pruef: "Stil" in src/pages/CourtMonitorPanel.tsx -->
+
+| Stil | Aussehen |
+|---|---|
+| **Standard** | wie bisher: Team 1 oben, Team 2 unten, Vorname klein über dem Nachnamen |
+| **International** | dunkle Teamzeilen, je Satz eine gleich breite Spalte, Nachname in Großbuchstaben |
+| **Riesen-Stand** | Stand des laufenden Satzes bildschirmfüllend, darüber klein Nachnamen und Satzstand; nach Spielende groß die gewonnenen Sätze |
+| **Nur Spieler** | Namen (mit Flagge und Verein laut Schalter), kein Stand |
+| **Hell** | Aufbau wie Standard, heller Grund und dunkle Schrift — für helle Hallen und Beamer |
+
+<!-- pruef: "Riesen-Stand" in src/pages/CourtMonitorPanel.tsx -->
+<!-- pruef: "Nur Spieler" in src/pages/CourtMonitorPanel.tsx -->
+<!-- pruef: "International" in src/pages/CourtMonitorPanel.tsx -->
+
+- Der TV wechselt **ohne Neuladen**, spätestens mit dem nächsten Abruf (im
+  LAN sofort, in der Cloud nach höchstens vier Sekunden).
+- Stellt man ein Gerät auf ein **anderes Feld**, bleibt der Stil. Stellt man
+  es auf Tafel, Übersicht, Werbung oder Kombi, ist er weg — zurück auf einem
+  Feld gilt wieder „Standard".
+- **Feste Adresse** (`/court/<id>/display`, ohne Zuweisung): Der Stil kommt
+  aus der Adresse, z. B. `/court/3/display?stil=riesen`. Erlaubt sind
+  `standard`, `international`, `riesen`, `spieler`, `hell`; alles andere zeigt
+  „Standard". Bei einem zugewiesenen Gerät zählt nur das Panel, ein `?stil=`
+  in der Adresse wird dort ignoriert.
+  <!-- pruef: "riesen" in src/io/monitorStil.mjs -->
+- Leerlauf-Werbung, Pausen-Banner, Aufruf-Uhr und „Identifizieren" verhalten
+  sich in allen Stilen gleich.
+- Das frühere Auswahlfeld „Layout" im Setup ist entfallen; es hatte nur eine
+  Möglichkeit. Hintergrund: [ADR 0068](adr/0068-monitor-stil-als-attribut-am-feld-ziel.md).
+
+## Nation und Verein
+
+Im Setup unter *Court-Monitor → Anzeige* stehen zwei Häkchen. Sie gelten für
+**alle** Anzeigen — Feld-Monitor, Tafel, Übersicht, Kombi — in LAN und Cloud:
+
+- **Nation (Flagge) anzeigen** — *voreingestellt an*, so wie die Monitore die
+  Flagge schon immer gezeigt haben.
+  <!-- pruef: "Nation (Flagge) anzeigen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /show_nations: true/ in src-tauri/src/config.rs -->
+- **Verein (Name + Logo) anzeigen** — *voreingestellt aus*. Eingeschaltet
+  steht der Verein klein unter jedem Spielernamen, mit Vereinslogo, wenn
+  badhub eines kennt.
+  <!-- pruef: "Verein (Name + Logo) anzeigen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /show_clubs: false/ in src-tauri/src/config.rs -->
+
+Ist ein Häkchen aus, verlässt die Angabe den Turnier-PC bzw. das Relay gar
+nicht erst — eine Anzeige kann sie also auch nicht über ihre Adresse
+sichtbar machen. Die Schalter sind getrennt von „Vereine anzeigen" für
+Tablets und TL-Web. Hintergrund: [ADR 0070](adr/0070-nation-verein-auf-anzeigen-serverseitig.md).
 
 ## Pausen-Timer (Retro-Klappanzeige)
 
@@ -1109,14 +1157,19 @@ ein bts-light-Problem.
 Nationalität ist ein IOC-Code (`GER`, `POL`, …). bts-light bündelt einen
 SVG-Flaggensatz (`src-tauri/assets/flags/`, ins Binary kompiliert),
 Anzeige per `<code>.svg`. Fehlt der Code, zeigt der Monitor den Namen
-ohne Flagge. Herkunft/Lizenz: [`NOTICE.md`](../NOTICE.md).
+ohne Flagge. Ob überhaupt eine Nationalität mitkommt, steuert das Häkchen
+„Nation (Flagge) anzeigen" (siehe [Nation und Verein](#nation-und-verein)).
+Herkunft/Lizenz: [`NOTICE.md`](../NOTICE.md).
 
 ## Lizenz-Hinweis
 
 Visuelle Referenz war `phihag/bup` (u. a. PR #43, Einzelturnier-Display).
 Davon wurde nur die **Idee** übernommen — **kein Code**, da die
 bup-Lizenz unklar ist. Diese Anzeige ist eine eigenständige
-Clean-Room-Umsetzung.
+Clean-Room-Umsetzung. Das gilt auch für die Stile (Spec
+[monitor-stile-und-stream](features/monitor-stile-und-stream.md)): angelehnt
+ist nur die Anordnung (Teamzeilen, Satzspalten, großer laufender Stand),
+Farben, Maße und Code sind eigene.
 
 ## Nicht umgesetzt
 

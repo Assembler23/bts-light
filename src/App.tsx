@@ -105,6 +105,8 @@ function defaultConfig(): AppConfig {
       show_ads: true,
       layout: "split",
       push_fallback_slow: false,
+      show_nations: true,
+      show_clubs: false,
     },
     call_timer: {
       enabled: false,

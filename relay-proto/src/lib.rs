@@ -168,6 +168,13 @@ pub struct MonitorPlayer {
     pub family: String,
     #[serde(default)]
     pub nationality: Option<String>,
+    /// Verein des Spielers — nur gesetzt, wenn die Turnierleitung „Verein
+    /// anzeigen" für die Anzeigen eingeschaltet hat (ADR 0070). Der Filter
+    /// sitzt beim Absender (Host bzw. Relay), nie im Browser.
+    /// `skip_serializing_if` hält das Frame bei ausgeschaltetem Schalter
+    /// bytegleich zum Stand vor diesem Feld.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub club: Option<String>,
 }
 
 /// Das aktuelle Match eines Feldes für die Monitor-Anzeige.
@@ -231,6 +238,14 @@ pub struct MonitorConfig {
     /// entlasten, nie etwas kaputt machen, das vorher lief.
     #[serde(rename = "pushFallbackSlow", default)]
     pub push_fallback_slow: bool,
+    /// Nation (Flagge) auf den Anzeigen zeigen (ADR 0070)? Standard **an**,
+    /// weil die Monitore die Flagge vor diesem Schalter immer zeigten —
+    /// ein älterer Absender ohne das Feld behält so sein Verhalten.
+    #[serde(rename = "showNations", default = "default_true")]
+    pub show_nations: bool,
+    /// Verein (Name + Logo) auf den Anzeigen zeigen (ADR 0070)? Standard aus.
+    #[serde(rename = "showClubs", default)]
+    pub show_clubs: bool,
 }
 
 fn default_true() -> bool {
@@ -255,6 +270,51 @@ impl Default for MonitorConfig {
             // Aus: Der langsame Sicherheits-Poll ist ein bewusst zu
             // setzender Schalter (Spec monitor-livestand-push, S6).
             push_fallback_slow: false,
+            show_nations: true,
+            show_clubs: false,
+        }
+    }
+}
+
+/// Darstellung des Feld-Monitors (Spec monitor-stile-und-stream, ADR 0068).
+///
+/// Hängt als optionales Feld an [`MonitorTarget::Court`] und reist im
+/// [`MonitorState`] zur Seite. `Unbekannt` fängt Stile einer neueren
+/// Fassung ab: Ein Eintrag mit fremdem Wert bleibt lesbar (kein 422 am
+/// Relay, kein verworfenes Gerät), wirkt wie `Standard` und wird beim
+/// Zurückschreiben weggelassen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorStil {
+    /// Die Anzeige wie vor den Stilen.
+    #[default]
+    Standard,
+    /// Teamzeilen mit einer Spalte je Satz.
+    International,
+    /// Laufender Satz bildschirmfüllend.
+    Riesen,
+    /// Nur die Namen, kein Stand.
+    Spieler,
+    /// Heller Grund, dunkle Schrift.
+    Hell,
+    /// Stil aus einer neueren Fassung.
+    #[serde(other)]
+    Unbekannt,
+}
+
+impl MonitorStil {
+    /// `true` für den Standard **und** für Unbekanntes — beides wird nicht
+    /// serialisiert, damit kein Platzhalterwert auf den Draht gerät.
+    pub fn ist_standard(&self) -> bool {
+        matches!(self, Self::Standard | Self::Unbekannt)
+    }
+
+    /// Der Stil, der tatsächlich wirkt (Unbekannt → Standard).
+    pub fn wirksam(self) -> Self {
+        if self.ist_standard() {
+            Self::Standard
+        } else {
+            self
         }
     }
 }
@@ -360,6 +420,10 @@ pub enum MonitorTarget {
     Court {
         #[serde(rename = "court_id")]
         court_id: i64,
+        /// Darstellung (ADR 0068). Standard wird weggelassen → die JSON-Form
+        /// bleibt `{"kind":"court","court_id":5}` wie vor den Stilen.
+        #[serde(default, skip_serializing_if = "MonitorStil::ist_standard")]
+        stil: MonitorStil,
     },
     /// Hallen-Übersicht (`/info/overview`). `hall = Some(name)` bindet den
     /// Monitor fest an eine Halle (`?halle=…`, ein Pi je Halle); `None` =
@@ -404,7 +468,24 @@ pub enum MonitorTarget {
 impl MonitorTarget {
     /// Court-Konstruktor zur Bequemlichkeit.
     pub fn court(court_id: i64) -> Self {
-        Self::Court { court_id }
+        Self::Court {
+            court_id,
+            stil: MonitorStil::Standard,
+        }
+    }
+
+    /// Feld-Ziel mit Darstellung (ADR 0068).
+    pub fn court_mit_stil(court_id: i64, stil: MonitorStil) -> Self {
+        Self::Court { court_id, stil }
+    }
+
+    /// Wirksame Darstellung des Ziels: der Stil eines Feld-Ziels, sonst
+    /// (und bei Unbekanntem) Standard.
+    pub fn stil(&self) -> MonitorStil {
+        match self {
+            Self::Court { stil, .. } => stil.wirksam(),
+            _ => MonitorStil::Standard,
+        }
     }
 
     /// Ad-Single-Konstruktor zur Bequemlichkeit.
@@ -429,7 +510,7 @@ impl MonitorTarget {
     /// gesamten Zuweisungs-Upload mit unbekanntem `kind` schon vorher ab.
     pub fn court_id(&self) -> Option<i64> {
         match self {
-            Self::Court { court_id } | Self::CourtTafel { court_id } => Some(*court_id),
+            Self::Court { court_id, .. } | Self::CourtTafel { court_id } => Some(*court_id),
             _ => None,
         }
     }
@@ -485,10 +566,12 @@ impl MonitorTarget {
     }
 }
 
-/// Minimaler URL-Encoder fürs Werbebild-Query. Akzeptiert ASCII-
+/// Minimaler URL-Encoder für Query-Werte. Akzeptiert ASCII-
 /// alphanumerisch + `.`, `-`, `_` 1:1 (das deckt alle nach
-/// `is_safe_image_name` erlaubten Zeichen ab); alles andere als `%HH`.
-fn url_encode(s: &str) -> String {
+/// `is_safe_image_name` erlaubten Zeichen ab); alles andere — auch jedes
+/// UTF-8-Byte — als `%HH`. Öffentlich, weil der Relay damit den Vereinsnamen
+/// für die Logo-Weiterleitung kodiert (ADR 0070).
+pub fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.bytes() {
         match c {
@@ -598,6 +681,13 @@ pub struct MonitorState {
     /// und dann verhält sich die Seite wie vor dieser Etappe.
     #[serde(default)]
     pub seq: u64,
+    /// Darstellung, die das zugewiesene Gerät zeigen soll (ADR 0068). Nur im
+    /// Geräte-Modus gesetzt; feste URLs wählen ihren Stil per `?stil=`.
+    /// Standard wird weggelassen, ein älterer Absender liest sich als
+    /// Standard. Der Wert gehört zur Zustands-Marke → ein Wechsel kommt als
+    /// neue Antwort an und schaltet ohne Neuladen um.
+    #[serde(default, skip_serializing_if = "MonitorStil::ist_standard")]
+    pub stil: MonitorStil,
 }
 
 /// Aufruf-Timer-Einstellungen für die Monitor-Anzeige (gespiegelt aus der
@@ -3914,6 +4004,7 @@ mod tests {
             on_court_since_ms: None,
             call_timer: CallTimerView::default(),
             seq: 4711,
+            stil: MonitorStil::Standard,
         })
         .expect("serialisierbar");
         json.as_object_mut().expect("Objekt").remove("seq");
@@ -3954,6 +4045,7 @@ mod tests {
             on_court_since_ms: None,
             call_timer: CallTimerView::default(),
             seq: 0,
+            stil: MonitorStil::Standard,
         })
         .unwrap();
         json.as_object_mut().unwrap().remove("hallColor").unwrap();
@@ -4021,12 +4113,14 @@ mod tests {
                     given: "Anna".into(),
                     family: "Berg".into(),
                     nationality: Some("GER".into()),
+                    club: None,
                 }],
                 team2: vec![MonitorPlayer {
                     name: "Hilde".into(),
                     given: String::new(),
                     family: "Hilde".into(),
                     nationality: None,
+                    club: None,
                 }],
                 sets: vec![SetAb { a: 21, b: 18 }, SetAb { a: 11, b: 7 }],
                 team1_seed: None,
@@ -4050,6 +4144,7 @@ mod tests {
                 third_call_minutes: 4.0,
             },
             seq: 1_787_000_000_007,
+            stil: MonitorStil::Standard,
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));
@@ -5838,5 +5933,130 @@ mod carrier_tests {
              ({} > {MAX_CARRIER_PAYLOAD_LEN})",
             umhuellt.len()
         );
+    }
+}
+
+/// Monitor-Stile und Nation/Verein-Schalter (Spec monitor-stile-und-stream,
+/// ADR 0068/0070) — vor allem die Abwärtsverträglichkeit auf dem Draht.
+#[cfg(test)]
+mod monitor_stil_tests {
+    use super::*;
+
+    #[test]
+    fn court_ohne_stil_serialisiert_bytegleich() {
+        let json = serde_json::to_string(&MonitorTarget::court(5)).unwrap();
+        assert_eq!(json, r#"{"kind":"court","court_id":5}"#);
+        let alt: MonitorTarget = serde_json::from_str(r#"{"kind":"court","court_id":5}"#).unwrap();
+        assert_eq!(alt, MonitorTarget::court(5));
+    }
+
+    #[test]
+    fn court_mit_stil_roundtrip() {
+        for stil in [
+            MonitorStil::International,
+            MonitorStil::Riesen,
+            MonitorStil::Spieler,
+            MonitorStil::Hell,
+        ] {
+            let ziel = MonitorTarget::court_mit_stil(7, stil);
+            let json = serde_json::to_string(&ziel).unwrap();
+            assert!(json.contains(r#""stil":""#), "{json}");
+            let zurueck: MonitorTarget = serde_json::from_str(&json).unwrap();
+            assert_eq!(zurueck, ziel);
+            assert_eq!(zurueck.stil(), stil);
+        }
+        let json =
+            serde_json::to_string(&MonitorTarget::court_mit_stil(7, MonitorStil::Riesen)).unwrap();
+        assert_eq!(json, r#"{"kind":"court","court_id":7,"stil":"riesen"}"#);
+    }
+
+    #[test]
+    fn unbekannter_stil_liest_als_unbekannt_und_schreibt_nichts() {
+        let ziel: MonitorTarget =
+            serde_json::from_str(r#"{"kind":"court","court_id":5,"stil":"zukunft"}"#).unwrap();
+        assert_eq!(
+            ziel,
+            MonitorTarget::Court {
+                court_id: 5,
+                stil: MonitorStil::Unbekannt
+            }
+        );
+        assert_eq!(ziel.stil(), MonitorStil::Standard);
+        assert_eq!(ziel.court_id(), Some(5));
+        assert_eq!(
+            serde_json::to_string(&ziel).unwrap(),
+            r#"{"kind":"court","court_id":5}"#
+        );
+    }
+
+    #[test]
+    fn monitor_control_mit_unbekanntem_stil_bleibt_lesbar() {
+        // Der Tafel-Fall (ADR 0055): Ein einziger unlesbarer Eintrag ließ den
+        // ganzen Upload scheitern und fror alle Zuweisungen ein.
+        let json = r#"{"assignments":{"a":5},"targets":{
+            "a":{"kind":"court","court_id":5,"stil":"neu_in_v2"},
+            "b":{"kind":"court","court_id":6,"stil":"hell"}},"commands":{}}"#;
+        let c: MonitorControl = serde_json::from_str(json).unwrap();
+        assert_eq!(c.targets["a"].stil(), MonitorStil::Standard);
+        assert_eq!(c.targets["b"].stil(), MonitorStil::Hell);
+    }
+
+    /// Spiegel des `MonitorTarget` vor den Stilen: So liest ein altes Relay
+    /// bzw. eine alte App die neue Form. Kein `deny_unknown_fields` → das
+    /// zusätzliche Feld fällt still weg, der Eintrag bleibt ein Feld-Ziel.
+    #[test]
+    fn alter_relay_liest_neuen_court() {
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum AltesZiel {
+            Court { court_id: i64 },
+            CourtTafel { court_id: i64 },
+        }
+        let neu =
+            serde_json::to_string(&MonitorTarget::court_mit_stil(9, MonitorStil::Spieler)).unwrap();
+        let alt: AltesZiel = serde_json::from_str(&neu).unwrap();
+        assert_eq!(alt, AltesZiel::Court { court_id: 9 });
+    }
+
+    #[test]
+    fn monitor_config_ohne_neue_felder_nation_an_verein_aus() {
+        let mut json = serde_json::to_value(MonitorConfig::default()).unwrap();
+        let obj = json.as_object_mut().unwrap();
+        obj.remove("showNations");
+        obj.remove("showClubs");
+        let alt: MonitorConfig = serde_json::from_value(json).unwrap();
+        assert!(alt.show_nations, "Flaggen bleiben wie vor dem Schalter an");
+        assert!(!alt.show_clubs);
+        assert!(MonitorConfig::default().show_nations);
+        assert!(!MonitorConfig::default().show_clubs);
+    }
+
+    #[test]
+    fn monitor_player_club_default_und_skip() {
+        let p: MonitorPlayer = serde_json::from_str(r#"{"name":"A B"}"#).unwrap();
+        assert_eq!(p.club, None);
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("club"), "{json}");
+        let mit = MonitorPlayer {
+            club: Some("TSV X".into()),
+            ..p
+        };
+        assert!(serde_json::to_string(&mit)
+            .unwrap()
+            .contains(r#""club":"TSV X""#));
+    }
+
+    #[test]
+    fn monitor_state_stil_wird_bei_standard_weggelassen() {
+        let mut s: MonitorState = serde_json::from_value(serde_json::json!({
+            "courtLabel": "1", "config": MonitorConfig::default(), "ads": []
+        }))
+        .unwrap();
+        assert_eq!(s.stil, MonitorStil::Standard);
+        assert!(!serde_json::to_string(&s).unwrap().contains("stil"));
+        s.stil = MonitorStil::Riesen;
+        assert!(serde_json::to_string(&s)
+            .unwrap()
+            .contains(r#""stil":"riesen""#));
     }
 }

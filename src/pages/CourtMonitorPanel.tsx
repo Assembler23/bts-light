@@ -28,6 +28,7 @@ import {
 } from "../api";
 import { HallFilter } from "../components/HallFilter";
 import { linkMitGuid } from "../io/liveLink.mjs";
+import { stilAusWert, zielMitStil, type Stil } from "../io/monitorStil.mjs";
 import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
 import type {
   AppConfig,
@@ -101,6 +102,16 @@ function valueToTarget(v: string): MonitorTarget | null {
   }
   return null;
 }
+
+// ─── Monitor-Stile (ADR 0068) ────────────────────────────────────────────
+// Beschriftungen stehen im Handbuch (docs/court-monitor.md, pruef-Anker).
+const STIL_OPTIONEN: { wert: Stil; text: string }[] = [
+  { wert: "standard", text: "Standard" },
+  { wert: "international", text: "International" },
+  { wert: "riesen", text: "Riesen-Stand" },
+  { wert: "spieler", text: "Nur Spieler" },
+  { wert: "hell", text: "Hell" },
+];
 
 // ─── Sortier-/Gruppier-Logik der Geräteliste ────────────────────────────
 // Eine fertig sortierte Anzeige-Struktur: Online-Block (ggf. nach Hallen
@@ -675,7 +686,19 @@ function DeviceRow({
       setComboOpen(true);
       return; // kein echtes Target — Dialog übernimmt
     }
-    onAssign(valueToTarget(value));
+    // Ein Feldwechsel behält den Stil (ADR 0068); jedes andere Ziel kennt
+    // keinen. Würde `valueToTarget` allein entscheiden, fiele der Stil bei
+    // jedem Feldwechsel still auf Standard zurück (Falle aus ADR 0049).
+    onAssign(zielMitStil(valueToTarget(value), aktuellerStil));
+  }
+
+  // Darstellung des Feld-Monitors — eigenes Auswahlfeld, nicht Teil des
+  // Options-Schlüssels `court:<id>`.
+  const aktuellerStil: Stil =
+    device.target?.kind === "court" ? stilAusWert(device.target.stil) : "standard";
+  function onStil(stil: string) {
+    if (device.target?.kind !== "court") return;
+    onAssign(zielMitStil(device.target, stil));
   }
 
   // Label der aktuellen Kombi-Zuweisung (für die Dropdown-Option).
@@ -828,6 +851,26 @@ function DeviceRow({
           </option>
         </optgroup>
       </select>
+
+      {/* Darstellung (Spec monitor-stile-und-stream, ADR 0068) — nur bei
+          einem Feld-Ziel. Wirkt ohne Neuladen, in LAN und Cloud. */}
+      {device.target?.kind === "court" && (
+        <label className="flex items-center gap-1.5 text-sm text-slate-600">
+          Stil
+          <select
+            value={aktuellerStil}
+            onChange={(e) => onStil(e.currentTarget.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm
+                       focus:border-slate-500 focus:outline-none"
+          >
+            {STIL_OPTIONEN.map((o) => (
+              <option key={o.wert} value={o.wert}>
+                {o.text}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {/* Explizite Halle (nur Mehr-Hallen-Turnier): überschreibt die aus dem
           Feld abgeleitete Halle – für Geräte ohne Feld (Info/Werbung/Kombi/

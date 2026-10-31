@@ -253,8 +253,11 @@ pub struct CourtMonitorConfig {
     /// Werbung im Leerlauf anzeigen? Aus → leeres Feld zeigt die neutrale
     /// Leerlauf-Seite statt der Werbebilder.
     pub show_ads: bool,
-    /// Anzeige-Layout des Monitors (`split` = „A — Geteilt"). Vorbereitet
-    /// für weitere Layouts.
+    /// **Veraltet** (ADR 0068): Anzeige-Layout des Monitors, kannte nur
+    /// `split`. Die Darstellung wählt man seit den Monitor-Stilen je Gerät an
+    /// der Zuweisung. Das Feld hat kein Bedienelement mehr, bleibt aber
+    /// lesbar und reist weiter auf dem Draht (`MonitorConfig.layout`), damit
+    /// ältere Seiten unverändert bleiben.
     pub layout: String,
     /// Kombi-Anzeige: Felder NEBENEINANDER (Hochformat je Feld) statt
     /// übereinander — **der alte globale Schalter**.
@@ -279,6 +282,16 @@ pub struct CourtMonitorConfig {
     /// `config.json` lesbar.
     #[serde(default)]
     pub push_fallback_slow: bool,
+    /// Nation (Flagge) auf den Anzeigen zeigen (ADR 0070)? **Standard an** —
+    /// die Monitore zeigten die Flagge vor diesem Schalter immer; ein Update
+    /// soll keine Flagge verschwinden lassen. Gefiltert wird serverseitig.
+    /// Fehlt das Feld in einer älteren `config.json`, greift das
+    /// `#[serde(default)]` der Struktur → `Default` → an.
+    pub show_nations: bool,
+    /// Verein (Name + Logo) auf den Anzeigen zeigen (ADR 0070)? Standard aus.
+    /// Getrennt vom Tablet-/TL-Schalter `DisplayConfig.show_club_names`, weil
+    /// die Hallen-TVs eine andere Öffentlichkeit sind.
+    pub show_clubs: bool,
 }
 
 impl Default for CourtMonitorConfig {
@@ -297,6 +310,8 @@ impl Default for CourtMonitorConfig {
             // Aus (Spec monitor-livestand-push, S6): Eine frisch
             // aktualisierte Installation verhält sich exakt wie vorher.
             push_fallback_slow: false,
+            show_nations: true,
+            show_clubs: false,
         }
     }
 }
@@ -2165,6 +2180,8 @@ mod tests {
                 layout: "split".to_string(),
                 combo_vertical: true,
                 push_fallback_slow: true,
+                show_nations: false,
+                show_clubs: true,
             },
             call_timer: CallTimerConfig {
                 enabled: true,
@@ -3043,5 +3060,34 @@ mod combo_dir_tests {
 
         let cfg: AppConfig = serde_json::from_value(doc).unwrap();
         assert!(cfg.court_monitor.combo_vertical);
+    }
+}
+
+/// Schalter Nation/Verein der Anzeigen (ADR 0070).
+#[cfg(test)]
+mod anzeige_schalter_tests {
+    use super::*;
+
+    #[test]
+    fn alte_config_ohne_schalter_nation_an_verein_aus() {
+        // Eine config.json von vor den Schaltern: Flaggen bleiben an.
+        let c: CourtMonitorConfig =
+            serde_json::from_str(r#"{"enabled":true,"layout":"split"}"#).unwrap();
+        assert!(c.show_nations);
+        assert!(!c.show_clubs);
+        let d = CourtMonitorConfig::default();
+        assert!(d.show_nations && !d.show_clubs);
+    }
+
+    #[test]
+    fn schalter_roundtrip() {
+        let c = CourtMonitorConfig {
+            show_nations: false,
+            show_clubs: true,
+            ..Default::default()
+        };
+        let zurueck: CourtMonitorConfig =
+            serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(zurueck, c);
     }
 }

@@ -311,8 +311,15 @@ export interface CourtMonitorConfig {
   show_match_clock: boolean;
   /** Werbung im Leerlauf anzeigen? Aus → neutrale Leerlauf-Seite. */
   show_ads: boolean;
-  /** Anzeige-Layout des Monitors (`split` = „A — Geteilt"). */
+  /**
+   * @deprecated Seit ADR 0068 wählt man die Darstellung je Gerät (Stil an der
+   * Zuweisung). Bleibt lesbar und wird unverändert durchgereicht.
+   */
   layout: string;
+  /** Nation (Flagge) auf den Anzeigen zeigen? Standard an (ADR 0070). */
+  show_nations: boolean;
+  /** Verein (Name + Logo) auf den Anzeigen zeigen? Standard aus (ADR 0070). */
+  show_clubs: boolean;
   /**
    * @deprecated Seit ADR 0049 wird die Kombi-Ausrichtung **je Gerät** gewählt
    * (`monitor-combo-dir.json`, Command `monitor_combo_dirs`). Dieses Feld ist
@@ -348,7 +355,12 @@ export interface CourtAd {
 /** Was ein Court-Monitor-Gerät anzeigen soll – Feld, Info-Anzeige oder
  *  Werbung (Rust: relay_proto::MonitorTarget). */
 export type MonitorTarget =
-  | { kind: "court"; court_id: number }
+  | {
+      kind: "court";
+      court_id: number;
+      /** Darstellung (ADR 0068); fehlt = Standard. */
+      stil?: string;
+    }
   | { kind: "court_tafel"; court_id: number }
   | { kind: "info_overview"; hall?: string | null }
   | { kind: "info_preparation" }

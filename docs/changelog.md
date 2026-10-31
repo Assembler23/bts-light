@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.327
+
+- **Neu: Stile für die Court-Monitore.** Im Court-Monitor-Panel wählt man je
+  Monitor neben dem Feld einen **Stil**: *Standard* (wie bisher),
+  *International* (Teamzeilen mit einer Spalte je Satz), *Riesen-Stand* (der
+  laufende Satz bildschirmfüllend), *Nur Spieler* (Namen ohne Stand) und
+  *Hell* (heller Grund für helle Hallen und Beamer). Der TV wechselt ohne
+  Neuladen, in LAN und Cloud. Feste Adressen nehmen den Stil aus der Adresse
+  (`/court/3/display?stil=riesen`). Das wirkungslose Auswahlfeld „Layout" im
+  Setup ist entfallen.
+- **Neu: Nation und Verein auf den Anzeigen schaltbar.** Zwei Häkchen im
+  Setup (Court-Monitor → Anzeige): *Nation (Flagge) anzeigen* — wie bisher an
+  — und *Verein (Name + Logo) anzeigen* — aus. Sie gelten für Feld-Monitor,
+  Tafel, Übersicht und Kombi; was aus ist, verlässt den Turnier-PC bzw. das
+  Relay gar nicht erst. Vereinslogos kommen in der Cloud jetzt ebenfalls an.
+
 ## v0.9.326
 
 - **„Automatik pausiert" am Turnier-PC sichtbar — mit Knopf „Fortsetzen".**

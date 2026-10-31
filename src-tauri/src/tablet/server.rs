@@ -1379,6 +1379,9 @@ fn uebersicht_json(
     // gleiche kanonische Hallenliste wie Desktop und TL-Web.
     let mut courts = ctx.tablet.overview();
     crate::hall_colors::paint(&mut courts, cfg, &ctx.tablet.hall_names());
+    // Nation/Verein nur laut Schalter (ADR 0070). Ein Schalterwechsel ist ein
+    // Config-Schreibvorgang und hebt die Revision → kein alter Cache-Stand.
+    monitor::anzeige_filtern(&mut courts, &cfg.court_monitor);
     let courts_json = serde_json::to_string(&courts).unwrap_or_else(|_| "[]".to_string());
     // **Die Marke hängt am Inhalt, nicht an der Revision.** Sonst hinge der
     // 304-Pfad an derselben Annahme wie der Cache — nur ohne dessen
@@ -1644,8 +1647,14 @@ async fn monitor_device_state(
         assignment,
         Some(relay_proto::MonitorTarget::CourtTafel { .. })
     );
+    // Darstellung aus der Zuweisung (ADR 0068); Tafel und Nicht-Feld-Ziele
+    // liefern hier Standard.
+    let stil = assignment
+        .as_ref()
+        .map(relay_proto::MonitorTarget::stil)
+        .unwrap_or_default();
     let mut state = match assignment {
-        Some(relay_proto::MonitorTarget::Court { court_id })
+        Some(relay_proto::MonitorTarget::Court { court_id, .. })
         | Some(relay_proto::MonitorTarget::CourtTafel { court_id }) => {
             let label = court_label_for(&ctx, court_id);
             let court_data = ctx.tablet.monitor_court(court_id);
@@ -1671,6 +1680,7 @@ async fn monitor_device_state(
             if ist_tafel {
                 s.redirect_to = Some(format!("/court/{court_id}/tafel"));
             }
+            s.stil = stil;
             s
         }
         // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
@@ -2141,7 +2151,8 @@ async fn combo_state(
             break;
         }
     }
-    let overview = ctx.tablet.overview();
+    let mut overview = ctx.tablet.overview();
+    monitor::anzeige_filtern(&mut overview, &ctx.app_config_arc().court_monitor);
     // Je gewünschter ID das passende Feld heraussuchen, Reihenfolge
     // beibehalten (nicht die overview-Reihenfolge). Unbekannte IDs
     // werden übersprungen.
@@ -7641,6 +7652,62 @@ mod tests {
         assert_eq!(v["redirectTo"], serde_json::json!("/court/101/tafel"));
         assert_eq!(v["unassigned"], serde_json::json!(false));
         assert!(v["match"].is_object(), "Feld-Stand reist mit");
+    }
+
+    #[tokio::test]
+    async fn geraete_state_traegt_stil_und_der_wechsel_aendert_die_marke() {
+        // ADR 0068: Der Stil reist in-band; ein Wechsel muss als neue Marke
+        // ankommen, sonst bekäme der TV nach dem Umstellen nur 304.
+        let mut ctx = make_ctx(1);
+        let dir = tempfile::tempdir().unwrap();
+        ctx.assignments_path = dir.path().join("assign.json");
+        let schreibe = |stil| {
+            let mut map = std::collections::HashMap::new();
+            map.insert(
+                "pi-s".to_string(),
+                relay_proto::MonitorTarget::court_mit_stil(101, stil),
+            );
+            map
+        };
+        monitor::write_assignments(
+            &ctx.assignments_path,
+            &schreibe(relay_proto::MonitorStil::Riesen),
+        )
+        .unwrap();
+        let ctx = Arc::new(ctx);
+        let hole = |ctx: Arc<ServerCtx>| async move {
+            let r = monitor_device_state(
+                State(ctx),
+                Query(DeviceQuery {
+                    device: "pi-s".to_string(),
+                    src: None,
+                }),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response();
+            let etag = r
+                .headers()
+                .get(header::ETAG)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            let bytes = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            (etag, v)
+        };
+        let (e1, v1) = hole(ctx.clone()).await;
+        assert_eq!(v1["stil"], serde_json::json!("riesen"));
+        assert_eq!(v1["courtId"], serde_json::json!(101));
+        monitor::write_assignments(
+            &ctx.assignments_path,
+            &schreibe(relay_proto::MonitorStil::Standard),
+        )
+        .unwrap();
+        let (e2, v2) = hole(ctx.clone()).await;
+        assert!(v2.get("stil").is_none(), "Standard wird weggelassen");
+        assert_ne!(e1, e2, "Stilwechsel ändert die Marke");
     }
 
     #[tokio::test]

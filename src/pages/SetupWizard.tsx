@@ -550,7 +550,10 @@ export function SetupWizard({
   const [cmTimer, setCmTimer] = useState(cm.show_timer);
   const [cmMatchClock, setCmMatchClock] = useState(cm.show_match_clock);
   const [cmAds, setCmAds] = useState(cm.show_ads);
-  const [cmLayout, setCmLayout] = useState(cm.layout || "split");
+  // Nation/Verein auf den Anzeigen (ADR 0070). `?? true` bzw. `?? false`:
+  // Eine Config von vor den Schaltern zeigt die Flaggen weiter.
+  const [cmNations, setCmNations] = useState(cm.show_nations ?? true);
+  const [cmClubs, setCmClubs] = useState(cm.show_clubs ?? false);
   // Turnierweite Vereins-Anzeige (TL-Web + Tablet). Zentral, nicht je Gerät.
   const disp = initialConfig.display ?? {
     show_club_names: false,
@@ -743,7 +746,9 @@ export function SetupWizard({
         show_timer: cmTimer,
         show_match_clock: cmMatchClock,
         show_ads: cmAds,
-        layout: cmLayout,
+        // `layout` reist über den Spread unverändert mit (veraltet, ADR 0068).
+        show_nations: cmNations,
+        show_clubs: cmClubs,
       },
       // Schwellen robust auflösen: ungültige/leere Eingabe → Standard; und der
       // 3. Aufruf muss nach dem 2. liegen (sonst übersprünge die Anzeige den
@@ -2416,19 +2421,6 @@ export function SetupWizard({
               <span className="text-sm font-medium text-slate-600">
                 Anzeige
               </span>
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-500">
-                  Layout
-                </span>
-                <select
-                  value={cmLayout}
-                  onChange={(e) => setCmLayout(e.currentTarget.value)}
-                  className="w-full rounded-lg border border-slate-300 bg-white
-                             px-2.5 py-1.5 text-sm text-slate-700"
-                >
-                  <option value="split">A — Geteilt (oben/unten)</option>
-                </select>
-              </label>
               {/* Live-Vorschau: aktualisiert sich mit jeder Checkbox. */}
               <MonitorPreview
                 showDiscipline={cmDiscipline}
@@ -2480,6 +2472,26 @@ export function SetupWizard({
                   onChange={(e) => setCmTimer(e.currentTarget.checked)}
                 />
                 Pausen-Countdown (Retro-Klappanzeige)
+              </label>
+              {/* Nation/Verein (ADR 0070): gelten für alle Anzeigen —
+                  Feld-Monitor, Tafel, Übersicht, Kombi —, in LAN und Cloud,
+                  und werden schon beim Absender gefiltert. Den Stil wählt
+                  man je Monitor im Court-Monitor-Panel. */}
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmNations}
+                  onChange={(e) => setCmNations(e.currentTarget.checked)}
+                />
+                Nation (Flagge) anzeigen
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmClubs}
+                  onChange={(e) => setCmClubs(e.currentTarget.checked)}
+                />
+                Verein (Name + Logo) anzeigen
               </label>
             </div>
           </div>
