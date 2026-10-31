@@ -595,6 +595,8 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Werbe-/Leisten-Zustand | `/info/ad/state`               | `/{ns}/info/ad/state`          |
 | **Perf-Zähler** (S0)   | `/debug/perf`                  | — (bewusst nur LAN)            |
 | **Turnierlogo**        | `/info/logo`                   | `/{ns}/info/logo`              |
+| Vereinslogo            | `/info/club-logo?name=`        | `/{ns}/info/club-logo?name=` (302 auf badhub) |
+| **Stream-Einblendung** | `/stream?courts=`              | `/{ns}/stream?courts=`         |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
 | Geräteliste            | —                              | `GET /{ns}/monitor-devices`    |
@@ -789,6 +791,39 @@ bei Feld-Zielen, nicht bei Tafel, Übersicht, Werbung oder Kombi.
   sich in allen Stilen gleich.
 - Das frühere Auswahlfeld „Layout" im Setup ist entfallen; es hatte nur eine
   Möglichkeit. Hintergrund: [ADR 0068](adr/0068-monitor-stil-als-attribut-am-feld-ziel.md).
+
+## Stream-Einblendung (OBS)
+
+Seit v0.9.328 gibt es eine Score-Leiste **ohne Hintergrund** für Livestreams.
+Man bindet sie in OBS als **Browserquelle** ein; Größe und Lage legt man in
+OBS fest, die Seite selbst hat keine Einstellungen.
+
+- Adresse im Hallennetz: `http://<Turnier-PC>:8088/stream?courts=3`
+  <!-- pruef: "/stream" in src-tauri/src/tablet/server.rs -->
+- über die Cloud: `https://badhub.de/bts-relay/<Kennung>/stream?courts=3`
+  <!-- pruef: "/{ns}/stream" in relay/src/main.rs -->
+- `courts=3` zeigt ein Feld, `courts=1,2,3` bis zu **drei** Felder
+  untereinander. Mehr Felder, doppelte Angaben und Unsinn werden ignoriert.
+  <!-- pruef: /MAX_FELDER = 3/ in src/io/streamAnsicht.mjs -->
+- Je Feld: Feldnummer (mit Turnierlogo), Namen, Flagge und Verein laut den
+  Häkchen im Setup, die Sätze, der laufende Satz hervorgehoben, ein Punkt
+  beim Aufschlag. Ein Feld ohne Spiel bekommt keine Zeile.
+- `&nation=0`, `&verein=0`, `&logo=0` blenden Flagge, Verein bzw.
+  Turnierlogo aus. **Einschalten** kann die Adresse nichts — was im Setup aus
+  ist, kommt gar nicht erst an.
+- Nie im Bild: Werbung, Pausen-Banner, „Identifizieren", Fehlermeldungen.
+  Bricht die Verbindung ab, bleibt der letzte Stand stehen; nach **60
+  Sekunden** ohne Daten wird die Leiste unsichtbar und erscheint von selbst
+  wieder, sobald Daten kommen.
+  <!-- pruef: /DATEN_FRIST_MS = 60000/ in src/io/streamAnsicht.mjs -->
+
+> **Adresse nur ans eigene Stream-Team.** Die Cloud-Adresse enthält die
+> Kennung des Turniers. Wer sie hat, sieht alle Anzeigen des Turniers und kann
+> Monitore neu laden oder „Identifizieren" auslösen. Hintergrund:
+> [ADR 0069](adr/0069-stream-einblendung-eigene-seite.md).
+
+Über einen Slave-PC einer fernen Halle gibt es die Einblendung nicht — dort
+nimmt man die Cloud-Adresse.
 
 ## Nation und Verein
 

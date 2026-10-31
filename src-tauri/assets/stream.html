@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stream-Einblendung</title>
+  <style>
+    /*
+     * Stream-Einblendung (Spec monitor-stile-und-stream, Etappe E2, ADR 0069):
+     * transparente Score-Leiste für die OBS-Browserquelle. Größe und Lage legt
+     * man in OBS fest; die Seite selbst hat keinen Hintergrund. Reine Anzeige,
+     * schreibt nie zurück, meldet sich nicht als Gerät an.
+     *
+     * Nie im Bild: Werbung, Pausenbanner, Identifizieren, Fehler- oder
+     * Offline-Hinweise. Nach 60 s ohne Daten wird die Seite durchsichtig.
+     */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; background: transparent; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      color: #f8fafc;
+    }
+    #leiste {
+      display: inline-flex; flex-direction: column; gap: 6px;
+      margin: 12px; transition: opacity .4s ease;
+    }
+    #leiste.weg { opacity: 0; }
+    .feld {
+      display: flex; align-items: stretch; border-radius: 8px; overflow: hidden;
+      background: rgba(11, 17, 32, .88);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+      font-size: 26px;
+    }
+    .feld .kopf {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; padding: 0 12px; background: #fbbf24; color: #1a1206;
+      font-weight: 900; min-width: 64px;
+    }
+    .feld .kopf img { height: 34px; width: auto; max-width: 90px; object-fit: contain; }
+    .feld .kopf .nr { font-size: 22px; letter-spacing: .04em; }
+    /* Füllt die Breite des breitesten Felds → die Satzspalten aller Felder
+       stehen bündig rechts untereinander. */
+    .feld .teams { display: flex; flex-direction: column; flex: 1 1 auto; }
+    .zeile {
+      display: flex; align-items: center; gap: 10px; padding: 5px 0 5px 12px;
+      min-height: 46px;
+    }
+    .zeile + .zeile { border-top: 1px solid rgba(255, 255, 255, .08); }
+    .auf {
+      width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto;
+      background: transparent;
+    }
+    .zeile.aufschlag .auf { background: #fbbf24; box-shadow: 0 0 8px rgba(251,191,36,.8); }
+    .namen { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+    .spieler { display: flex; align-items: center; gap: 8px; white-space: nowrap; font-weight: 700; }
+    .spieler .flagge { height: 18px; width: 27px; object-fit: cover; border-radius: 2px; }
+    .spieler .verein { font-size: .6em; font-weight: 600; color: #94a3b8; }
+    .spieler .verein img { height: 1.1em; vertical-align: -.2em; margin-right: 4px; }
+    .spieler .seed { font-size: .7em; color: #94a3b8; }
+    .saetze { display: flex; align-items: stretch; margin-left: 14px; align-self: stretch; }
+    .satz {
+      width: 46px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-variant-numeric: tabular-nums; color: #94a3b8;
+    }
+    .satz.gewonnen { color: #f8fafc; }
+    .satz.laufend {
+      width: 58px; background: #f8fafc; color: #0b1120; font-weight: 900;
+    }
+    .zeile.sieger .namen { color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div id="leiste" class="weg" aria-live="off"></div>
+  <script>
+  "use strict";
+  var BASE = "__BASE__";
+
+  // Inline-Kopie von src/io/streamAnsicht.mjs, wortgleich gehalten von
+  // scripts/test-stream-ansicht.mjs.
+/* <streamAnsicht.mjs> */
+var MAX_FELDER = 3;
+var DATEN_FRIST_MS = 60000;
+
+/** `?courts=1,2,3` → [1,2,3]; Unbrauchbares fällt weg, Doppelte auch. */
+function courtsAusQuery(roh) {
+  var teile = typeof roh === "string" ? roh.split(",") : [];
+  var ids = [];
+  for (var i = 0; i < teile.length && ids.length < MAX_FELDER; i++) {
+    var t = teile[i].trim();
+    if (!/^[1-9][0-9]{0,9}$/.test(t)) continue;
+    var id = Number(t);
+    if (ids.indexOf(id) < 0) ids.push(id);
+  }
+  return ids;
+}
+
+/** Optionen aus der Adresse: nur `=0` schaltet ab, alles andere lässt an. */
+function optionenAusQuery(nation, verein, logo) {
+  return { nation: nation !== "0", verein: verein !== "0", logo: logo !== "0" };
+}
+
+/** Zählt eine Antwort als Lebenszeichen des Turniers? Ein Relay ohne
+ *  verbundenen Host antwortet mit leerem Feldnamen — das ist kein Stand. */
+function zaehltAlsDaten(state) {
+  return !!state && typeof state.courtLabel === "string" && state.courtLabel !== "";
+}
+
+/** Sind die Daten jung genug, um sie zu zeigen? Ohne Daten nie. */
+function datenFrisch(letzterKontaktMs, jetztMs) {
+  return letzterKontaktMs > 0 && jetztMs - letzterKontaktMs < DATEN_FRIST_MS;
+}
+
+/** Bekommt ein Feld eine Zeile? Nur mit Spiel. */
+function feldSichtbar(state) {
+  return zaehltAlsDaten(state) && !!state.match;
+}
+/* </streamAnsicht.mjs> */
+
+  // Ordnung Push ↔ Abruf (Spec monitor-livestand-push, S4) und Gesundheit des
+  // Push-Kanals (S6) — Kopien von src/io/monitorSeq.mjs bzw. pushHealth.mjs,
+  // im Verhalten geprüft von scripts/test-inline-kopien.mjs.
+  function seqAnwenden(gezeigtSeq, seq, quelle) {
+    var gezeigt = Number.isFinite(gezeigtSeq) ? gezeigtSeq : 0;
+    var neu = Number.isFinite(seq) ? seq : 0;
+    if (neu <= 0) return true;
+    if (gezeigt <= 0) return true;
+    return quelle === "push" ? neu > gezeigt : neu >= gezeigt;
+  }
+  var HERZSCHLAG_STILL_MS = 25000;
+  var FALLBACK_LANGSAM_MS = 4000;
+  var FALLBACK_SCHNELL_MS = 250;
+  function pushGesund(z, nowMs) {
+    if (!z || !z.wsOpen) return false;
+    if (z.lastFetchOk === false) return false;
+    if ((z.failures || 0) > 0) return false;
+    var letztes = z.lastServerFrameMs || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes < HERZSCHLAG_STILL_MS;
+  }
+  function fallbackTakt(gesund, erlaubt) {
+    return gesund && erlaubt ? FALLBACK_LANGSAM_MS : FALLBACK_SCHNELL_MS;
+  }
+  function kanalIstTot(wsOffen, letztesFrame, nowMs) {
+    if (!wsOffen) return false;
+    var letztes = letztesFrame || 0;
+    if (letztes <= 0) return false;
+    return nowMs - letztes >= HERZSCHLAG_STILL_MS;
+  }
+
+  var q = new URLSearchParams(location.search);
+  var FELDER = courtsAusQuery(q.get("courts"));
+  var OPT = optionenAusQuery(q.get("nation"), q.get("verein"), q.get("logo"));
+  var ABRUF_FRIST_MS = 4000;
+  var leiste = document.getElementById("leiste");
+
+  // Je Feld: letzter Stand, Marke, Ordnungszahl, laufender Abruf.
+  var felder = FELDER.map(function (id) {
+    return { id: id, state: null, etag: null, seq: 0, faellig: false, laeuft: false, letzterAbrufMs: 0 };
+  });
+  var letzterKontaktMs = 0;   // letzte Antwort mit echtem Turnier-Stand
+  var lastFetchOk = true, fetchFehler = 0;
+  var langsamErlaubt = false;
+  var mws = null, mwsOpen = false, lastServerFrameAt = 0;
+  var mwsBackoff = 1000, mwsNextAt = 0;
+
+  function stateUrl(id) { return BASE + "court/" + id + "/state"; }
+
+  function abrufen(f) {
+    if (f.laeuft) { f.faellig = true; return; }
+    f.laeuft = true;
+    f.letzterAbrufMs = Date.now();
+    var ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, ABRUF_FRIST_MS);
+    var opt = { cache: "no-store" };
+    if (ctrl) opt.signal = ctrl.signal;
+    if (f.etag) opt.headers = { "If-None-Match": f.etag };
+    fetch(stateUrl(f.id), opt).then(function (r) {
+      if (r.status === 304) return null;
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      var etag = r.headers.get("ETag");
+      return r.json().then(function (s) { return { state: s, etag: etag }; });
+    }).then(function (paket) {
+      clearTimeout(timer);
+      lastFetchOk = true; fetchFehler = 0;
+      if (paket === null) {
+        // Nichts Neues zu einem gezeigten, echten Stand: Lebenszeichen.
+        if (zaehltAlsDaten(f.state)) letzterKontaktMs = Date.now();
+      } else {
+        var s = paket.state;
+        if (seqAnwenden(f.seq, s && s.seq || 0, "fetch")) {
+          f.state = s;
+          if (s && s.seq) f.seq = s.seq;
+          f.etag = paket.etag;
+          if (zaehltAlsDaten(s)) {
+            letzterKontaktMs = Date.now();
+            langsamErlaubt = !!(s.config && s.config.pushFallbackSlow);
+          }
+        }
+      }
+      fertig(f);
+    }).catch(function () {
+      clearTimeout(timer);
+      lastFetchOk = false; fetchFehler++;
+      fertig(f);
+    });
+  }
+  function fertig(f) {
+    f.laeuft = false;
+    zeichnen();
+    if (f.faellig) { f.faellig = false; abrufen(f); }
+  }
+
+  // ── Darstellung ─────────────────────────────────────────────────────
+  function parseCourtState(json) {
+    if (!json) return null;
+    try { return JSON.parse(json); } catch (e) { return null; }
+  }
+  function aufschlagTeam(cs) {
+    if (!cs) return null;
+    if (cs.serving && cs.serving.team) return cs.serving.team === "a" ? 1 : 2;
+    if (!cs.servingSide || !cs.teamOnSide) return null;
+    return cs.teamOnSide.a === cs.servingSide ? 1 : 2;
+  }
+  function siegerTeam(cs, saetze) {
+    if (cs && cs.retired) return cs.retiredWinner === "a" ? 1 : cs.retiredWinner === "b" ? 2 : null;
+    var a = 0, b = 0;
+    saetze.forEach(function (s) {
+      if ((s.a || 0) > (s.b || 0)) a++; else if ((s.b || 0) > (s.a || 0)) b++;
+    });
+    return a > b ? 1 : b > a ? 2 : null;
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function spielerEl(p, seed) {
+    var s = el("span", "spieler");
+    if (OPT.nation && p.nationality) {
+      var f = el("img", "flagge");
+      f.alt = "";
+      f.src = BASE + "flags/" + encodeURIComponent(String(p.nationality).trim().toUpperCase()) + ".svg";
+      f.onerror = function () { f.remove(); };
+      s.appendChild(f);
+    }
+    s.appendChild(el("span", "", p.name || ""));
+    if (OPT.verein && p.club) {
+      var v = el("span", "verein");
+      var logo = el("img");
+      logo.alt = "";
+      logo.src = BASE + "info/club-logo?name=" + encodeURIComponent(p.club);
+      logo.onerror = function () { logo.remove(); };
+      v.appendChild(logo);
+      v.appendChild(document.createTextNode(p.club));
+      s.appendChild(v);
+    }
+    if (seed) s.appendChild(el("span", "seed", "[" + seed + "]"));
+    return s;
+  }
+  function zeileEl(team, seed, saetze, seite, laufend, aufschlag, sieger) {
+    var z = el("div", "zeile" + (aufschlag ? " aufschlag" : "") + (sieger ? " sieger" : ""));
+    z.appendChild(el("span", "auf"));
+    var n = el("div", "namen");
+    (team || []).forEach(function (p, i) {
+      n.appendChild(spielerEl(p, i === team.length - 1 ? seed : null));
+    });
+    z.appendChild(n);
+    var box = el("div", "saetze");
+    saetze.forEach(function (s) {
+      var mein = seite === 1 ? s.a || 0 : s.b || 0;
+      var dein = seite === 1 ? s.b || 0 : s.a || 0;
+      box.appendChild(el("span", "satz" + (mein > dein ? " gewonnen" : ""), String(mein)));
+    });
+    if (laufend) {
+      box.appendChild(el("span", "satz laufend", String(seite === 1 ? laufend.a || 0 : laufend.b || 0)));
+    }
+    z.appendChild(box);
+    return z;
+  }
+  function feldEl(state) {
+    var m = state.match;
+    var cs = parseCourtState(state.courtState);
+    var roh = Array.isArray(m.sets) ? m.sets.slice() : [];
+    var entschieden = !!(cs && cs.finished);
+    var laufend = null, abgeschlossen;
+    if (entschieden) {
+      while (roh.length && !(roh[roh.length - 1].a || 0) && !(roh[roh.length - 1].b || 0)) roh.pop();
+      abgeschlossen = roh;
+    } else {
+      laufend = roh.length ? roh[roh.length - 1] : { a: 0, b: 0 };
+      abgeschlossen = roh.slice(0, Math.max(0, roh.length - 1));
+    }
+    var auf = entschieden ? null : aufschlagTeam(cs);
+    var sieger = entschieden ? siegerTeam(cs, abgeschlossen) : null;
+    var f = el("div", "feld");
+    var kopf = el("div", "kopf");
+    if (OPT.logo) {
+      var logo = el("img");
+      logo.alt = "";
+      logo.src = BASE + "info/logo";
+      logo.onerror = function () { logo.remove(); };
+      kopf.appendChild(logo);
+    }
+    kopf.appendChild(el("span", "nr", state.courtLabel));
+    f.appendChild(kopf);
+    var t = el("div", "teams");
+    t.appendChild(zeileEl(m.team1, m.team1Seed, abgeschlossen, 1, laufend, auf === 1, sieger === 1));
+    t.appendChild(zeileEl(m.team2, m.team2Seed, abgeschlossen, 2, laufend, auf === 2, sieger === 2));
+    f.appendChild(t);
+    return f;
+  }
+  // Nur neu zeichnen, wenn sich das Bild ändert — OBS rendert sonst je
+  // Abruf neu, und das Logo würde flackern.
+  var letzteSignatur = "";
+  function zeichnen() {
+    var sichtbar = felder.filter(function (f) { return feldSichtbar(f.state); });
+    var frisch = datenFrisch(letzterKontaktMs, Date.now());
+    var signatur = JSON.stringify(sichtbar.map(function (f) {
+      return [f.state.courtLabel, f.state.match, f.state.courtState];
+    }));
+    if (signatur !== letzteSignatur) {
+      letzteSignatur = signatur;
+      leiste.textContent = "";
+      sichtbar.forEach(function (f) { leiste.appendChild(feldEl(f.state)); });
+    }
+    leiste.classList.toggle("weg", !frisch || sichtbar.length === 0);
+  }
+
+  // ── Sicherheits-Abruf + Frist ───────────────────────────────────────
+  setInterval(function () {
+    var jetzt = Date.now();
+    var z = { wsOpen: mwsOpen, lastServerFrameMs: lastServerFrameAt, lastFetchOk: lastFetchOk, failures: fetchFehler };
+    if (kanalIstTot(mwsOpen, lastServerFrameAt, jetzt)) mwsTrennen();
+    var takt = fallbackTakt(pushGesund(z, jetzt), langsamErlaubt);
+    felder.forEach(function (f) {
+      if (jetzt - f.letzterAbrufMs >= takt) abrufen(f);
+    });
+    zeichnen();
+  }, FALLBACK_SCHNELL_MS);
+
+  // ── Monitor-WS-Nudge (ADR 0016) — alle Felder, Filter hier ──────────
+  function monitorWsUrl() {
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    return proto + location.host + BASE + "monitor-ws";
+  }
+  function mwsConnect() {
+    if (mws && mws.readyState !== WebSocket.CLOSED) return;
+    try { mws = new WebSocket(monitorWsUrl()); } catch (e) { mwsPlanen(); return; }
+    mws.onopen = function () {
+      mwsOpen = true; mwsBackoff = 1000; lastServerFrameAt = 0;
+      // Nach einem Neustart der Gegenstelle beginnt die Zählung neu.
+      felder.forEach(function (f) { f.seq = 0; });
+    };
+    mws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      lastServerFrameAt = Date.now();
+      if (typeof msg.court !== "number" || typeof msg.seq !== "number") return;
+      felder.forEach(function (f) {
+        if (f.id === msg.court && seqAnwenden(f.seq, msg.seq, "push")) abrufen(f);
+      });
+    };
+    mws.onclose = function () { mwsOpen = false; mwsPlanen(); };
+    mws.onerror = function () {};
+  }
+  function mwsTrennen() {
+    var alt = mws;
+    mws = null; mwsOpen = false; lastServerFrameAt = 0;
+    if (alt) {
+      alt.onopen = null; alt.onmessage = null; alt.onclose = null; alt.onerror = null;
+      try { alt.close(); } catch (e) {}
+    }
+    mwsPlanen();
+  }
+  function mwsPlanen() {
+    mwsNextAt = Date.now() + mwsBackoff;
+    mwsBackoff = Math.min(15000, mwsBackoff * 2);
+  }
+  setInterval(function () {
+    if (FELDER.length && (!mws || mws.readyState === WebSocket.CLOSED) && Date.now() >= mwsNextAt) mwsConnect();
+  }, 2000);
+
+  if (FELDER.length) {
+    felder.forEach(abrufen);
+    mwsConnect();
+  }
+  </script>
+</body>
+</html>

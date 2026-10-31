@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.328
+
+- **Neu: Stream-Einblendung für OBS.** Unter `/stream?courts=3` (im
+  Hallennetz) bzw. über die Cloud-Adresse gibt es eine durchsichtige
+  Score-Leiste für ein bis drei Felder — Namen, Sätze, laufender Satz,
+  Aufschlag. Als Browserquelle in OBS einbinden, Größe und Lage dort
+  festlegen. Flagge, Verein und Turnierlogo lassen sich per Adresse
+  ausblenden (`&nation=0`, `&verein=0`, `&logo=0`). Bricht die Verbindung ab,
+  verschwindet die Leiste nach 60 Sekunden, statt einen alten Stand zu zeigen.
+  Die Adresse nur ans eigene Stream-Team geben.
+
 ## v0.9.327
 
 - **Neu: Stile für die Court-Monitore.** Im Court-Monitor-Panel wählt man je

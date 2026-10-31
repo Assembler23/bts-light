@@ -580,6 +580,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/court/{id}/display", get(monitor_page))
         .route("/court/{id}/state", get(monitor_state))
         .route("/court/{id}/tafel", get(tafel_page))
+        .route("/stream", get(stream_page))
         .route("/monitor", get(monitor_device_page))
         .route("/monitor/state", get(monitor_device_state))
         .route("/qr/{id}", get(qr_svg))
@@ -1550,6 +1551,22 @@ async fn tafel_page(
     tracing::info!("Zähltafel ausgeliefert für Feld {court_id} ('{label}', {mode})");
     let body = render_tafel_html(mode, "/", &label);
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
+}
+
+/// Rendert `stream.html` (ADR 0069). Nur `__BASE__`; Felder und Optionen
+/// liest die Seite selbst aus der Adresse und prüft sie dort.
+fn render_stream_html(base: &str) -> String {
+    assets::STREAM_HTML.replace("__BASE__", base)
+}
+
+/// Stream-Einblendung für OBS (`/stream?courts=1,2,3`). Kein Gerät, keine
+/// Zuweisung — die Seite holt den Feld-Zustand je Feld wie ein fester
+/// Monitor.
+async fn stream_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(render_stream_html("/")),
+    )
 }
 
 /// Query der Tafel-Seite: `device` schaltet in den Gerätemodus.
@@ -7600,6 +7617,19 @@ mod tests {
                 && !html.contains("__BASE__")
                 && !html.contains("__COURT_LABEL__")
         );
+    }
+
+    #[tokio::test]
+    async fn stream_seite_ersetzt_basis_und_wird_nicht_gecacht() {
+        // ADR 0069: Die Einblendung bekommt nur `__BASE__`; Felder und
+        // Optionen liest sie selbst aus der Adresse.
+        let r = stream_page().await.into_response();
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(r.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+        let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        let html = String::from_utf8_lossy(&b);
+        assert!(html.contains(r#"var BASE = "/";"#));
+        assert!(!html.contains("__BASE__"));
     }
 
     #[test]

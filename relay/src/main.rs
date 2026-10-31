@@ -64,6 +64,8 @@ const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
 /// Die Zähltafel – dieselbe Datei wie in der bts-light-App (Spec
 /// zaehltafel-anzeige-huelle). Platzhalter wie `monitor.html`.
 const TAFEL_HTML: &str = include_str!("../../src-tauri/assets/tafel.html");
+/// Die Stream-Einblendung für OBS (ADR 0069) — dieselbe Datei wie im LAN.
+const STREAM_HTML: &str = include_str!("../../src-tauri/assets/stream.html");
 
 /// Der „In Vorbereitung"-Info-Monitor – dieselbe Datei wie im LAN. Leitet
 /// seinen Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/…` ohne
@@ -745,6 +747,7 @@ async fn main() {
         .route("/{ns}/court/{id}/display", get(monitor_page))
         .route("/{ns}/court/{id}/state", get(monitor_state))
         .route("/{ns}/court/{id}/tafel", get(tafel_page))
+        .route("/{ns}/stream", get(stream_page))
         .route("/{ns}/monitor", get(monitor_device_page))
         .route("/{ns}/monitor/state", get(monitor_device_state))
         .route("/{ns}/monitor/control", post(monitor_control_upload))
@@ -1010,6 +1013,17 @@ fn render_tafel_html(mode: &str, base: &str, court_label: &str) -> String {
         .replace("__COURT_LABEL__", &html_escape(court_label))
 }
 
+/// Liefert die Stream-Einblendung (`/{ns}/stream?courts=…`, ADR 0069).
+/// Die Adresse enthält den Namespace — bewusst akzeptiert, das Handbuch
+/// sagt: nur ans eigene Stream-Team weitergeben.
+async fn stream_page(State(broker): State<Broker>, Path(ns): Path<String>) -> Response {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let body = STREAM_HTML.replace("__BASE__", &monitor_base(&broker.public_base, &ns));
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
 /// Query der Tafel-Seite: `device` schaltet in den Gerätemodus.
 #[derive(serde::Deserialize, Default)]
 struct TafelQuery {
@@ -1064,17 +1078,22 @@ async fn anzeige_page(State(broker): State<Broker>, Path(ns): Path<String>) -> i
 async fn monitor_state(
     State(broker): State<Broker>,
     Path((ns, court_id)): Path<(String, i64)>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let map = broker.namespaces.lock().await;
-    let state = match map.get(&ns) {
-        Some(namespace) => build_monitor_state(namespace, court_id),
-        // Kein Host verbunden: leerer Zustand → neutrale Leerlauf-Seite.
-        None => empty_monitor_state(court_id, String::new()),
+    let state = {
+        let map = broker.namespaces.lock().await;
+        match map.get(&ns) {
+            Some(namespace) => build_monitor_state(namespace, court_id),
+            // Kein Host verbunden: leerer Zustand → neutrale Leerlauf-Seite.
+            None => empty_monitor_state(court_id, String::new()),
+        }
     };
-    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+    // Marke + 304 wie die Gerätestrecke (ADR 0069): Die Stream-Einblendung
+    // und feste Monitore fragen hier im Viertelsekundentakt.
+    monitor_state_response(&headers, state)
 }
 
 /// Query-Parameter der Geräte-Modus-Abfrage: die Geräte-ID.
@@ -10365,6 +10384,49 @@ mod tests {
         assert_eq!(s, StatusCode::OK);
         assert_eq!(body["courtId"], serde_json::json!(101));
         assert!(body.get("stil").is_none());
+    }
+
+    #[tokio::test]
+    async fn feste_state_route_antwortet_304_bei_bekannter_marke() {
+        // ADR 0069: Die Stream-Einblendung fragt die feste Route je Feld im
+        // Viertelsekundentakt — ohne Marke wäre jede Antwort voll.
+        const NS: &str = "c0000000-0000-0000-0000-000000000072";
+        let (broker, _host, _rx) = broker_mit_uebersicht(NS).await;
+        let erste = monitor_state(
+            State(broker.clone()),
+            Path((NS.to_string(), 101)),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        assert_eq!(erste.status(), StatusCode::OK);
+        let marke = erste
+            .headers()
+            .get(header::ETAG)
+            .expect("feste Route trägt eine Marke")
+            .clone();
+        let mut hm = axum::http::HeaderMap::new();
+        hm.insert(header::IF_NONE_MATCH, marke);
+        let zweite = monitor_state(State(broker.clone()), Path((NS.to_string(), 101)), hm)
+            .await
+            .into_response();
+        assert_eq!(zweite.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn stream_route_liefert_seite_mit_basis_und_404_bei_falschem_namespace() {
+        const NS: &str = "c0000000-0000-0000-0000-000000000073";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let r = stream_page(State(broker.clone()), Path(NS.to_string())).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        let html = String::from_utf8_lossy(&b);
+        assert!(
+            html.contains(&format!(r#"var BASE = "/bts-relay/{NS}/";"#)),
+            "{html}"
+        );
+        let falsch = stream_page(State(broker), Path("kein-namespace".to_string())).await;
+        assert_eq!(falsch.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

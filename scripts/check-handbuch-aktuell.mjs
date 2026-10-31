@@ -44,7 +44,7 @@ export const BEREICHE = [
     kapitel: ["docs/tablet-bedienen.md", "docs/tablet.md", "docs/umpire-mode.md"],
   },
   {
-    muster: /^src-tauri\/assets\/(monitor|combo|overview|preparation|winners|ad|tafel|anzeige|lobby|tv)\.html$/,
+    muster: /^src-tauri\/assets\/(monitor|combo|overview|preparation|winners|ad|tafel|anzeige|lobby|tv|stream)\.html$/,
     was: "Anzeigen in der Halle",
     kapitel: ["docs/court-monitor.md", "docs/oberflaechen.md"],
   },

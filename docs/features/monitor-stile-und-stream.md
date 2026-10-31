@@ -164,8 +164,10 @@ und Cloud.
   ETag. Dazu eine `monitor-ws` ohne Feldfilter als Nudge, `seq` je Feld und der Herzschlag wie am
   Monitor.
 - **Ausfall:**
-  - Als „Daten" zählen eine 200, eine 304 oder ein Herzschlag. Eine Relay-Antwort mit leerem
-    `courtLabel` (Host weg) zählt nicht.
+  - Als „Daten" zählen eine 200 mit Feldnamen und eine 304 auf einen solchen Stand. Eine
+    Relay-Antwort mit leerem `courtLabel` (Host weg) zählt nicht. **Der Herzschlag der
+    `monitor-ws` zählt nicht** (Umsetzung 31.10.2026): Das Relay schickt ihn weiter, auch
+    wenn der Turnier-PC weg ist — er belegt nur den Kanal, nicht das Turnier.
   - Der letzte Stand bleibt stehen. Nach **60 s** ohne Daten wird die Seite durchsichtig, ohne
     Fehlertext. Kommen wieder Daten, erscheint die Leiste wieder.
 
