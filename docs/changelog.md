@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.324
+
+- **TL-Web: Das ⋮-Menü schließt nach der Wahl von selbst.** Bisher blieb es
+  nach jedem Eintrag offen und musste von Hand zugeklappt werden. Jetzt geht
+  es nach einem Tipp auf einen Eintrag zu — an der Wartelisten-Zeile, an der
+  Feldkachel (⋯) und am beendeten Spiel. Beim Hallen-Wähler und beim
+  Wunschfeld bleibt es offen, bis eine Halle bzw. ein Feld gewählt ist.
+- **TL-Web: Ruhigere Warteliste.** „In Vorbereitung rufen" (bisher das
+  Megafon) und „An den Anfang der Spielliste" (bisher ↑) stehen nicht mehr
+  als Knöpfe an jeder Zeile, sondern ganz oben im ⋮-Menü. Weil das Menü
+  danach zugeht, kostet keine der beiden Aktionen einen Tipp mehr als vorher.
+  Die vier Verschiebe-Knöpfe aus dem Profil-Schalter bleiben an der Zeile.
+
 ## v0.9.322
 
 - **Zähl-Tablet: ⇄ und ⚙ in der Kopfzeile gut erkennbar.** Die beiden Knöpfe

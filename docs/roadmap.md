@@ -953,16 +953,6 @@ mitgeändert worden:
   auf, weil die Übertragung nach dem Update von selbst wieder anläuft.
   Lösung: Pause-Flag turniergebunden persistieren (Muster
   `locked_courts_tournament`, ADR 0044) und beim Wiederanlauf lesen.
-- **Kebab-Menü (⋮) im TL-Web schließt nach einer Aktion nicht.** Wird ein
-  Eintrag gewählt oder ein Knopf gedrückt, bleibt das Menü offen und muss
-  von Hand geschlossen werden; in der Regel kann es direkt zugehen. Vor der
-  Umsetzung klären, ob mehrstufige Einträge (Farbwahl, Feldwähler Wunschfeld)
-  bewusst offen bleiben sollen.
-- **Warteliste: „In Vorbereitung rufen" und „An den Anfang der Spielliste
-  schieben" ins Kebab-Menü.** Weniger Knöpfe je Zeile, ruhigere Liste am
-  Tablet. Zusammen mit dem Punkt darüber umsetzen, sonst kostet jede der
-  beiden Aktionen künftig einen Tipp mehr. Vorher prüfen, welche der
-  Verschiebe-Knöpfe aus v0.9.280 gemeint sind.
 
 ## Wünsche vom 23.08.2026
 
