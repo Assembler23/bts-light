@@ -293,7 +293,7 @@ export function AnnouncePage({
         <Volume2 size={16} /> Test-Ansage abspielen
       </button>
 
-      <AnsageAusgabeAnzeige legacy={announce.legacy_output === true} />
+      <AnsageAusgabeAnzeige config={config} onSaved={onConfigSaved} />
 
       {/* Freitext-Ansage: eintippen → in einer Halle oder allen ansagen. */}
       <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">

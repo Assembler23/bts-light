@@ -216,6 +216,12 @@ USB-Box) nicht mehr von selbst. Befristet. Siehe
 [Ausgabegerät](announcements.md#ausgabegerät-seit-v09318).
 <!-- pruef: "legacy_output: false" in src-tauri/src/config.rs -->
 
+**Ansage über:** — **voreingestellt Windows-Standard**, auf der Seite
+**Ansagen**. Legt seit v0.9.321 ein festes Ausgabegerät für die Ansage fest;
+gilt nur für diesen PC. Siehe
+[Ausgabegerät](announcements.md#ausgabegerät-seit-v09318).
+<!-- pruef: "output_device: String::new()" in src-tauri/src/config.rs -->
+
 ## Aufruf-Timer
 
 Hält fest, wie lange ein Feld schon gerufen ist, und stuft den Aufruf hoch.

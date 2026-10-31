@@ -14,6 +14,11 @@
 //!    der Kern den Audio-Thread neu auf; spätestens der nächste Ton ist
 //!    hörbar (kein mehrsekündiges Loch wie in Messung 5).
 //!
+//! 4. **Gewähltes Gerät** (`ANSAGE_PROBE_GERAET=<ID>`, IDs listet die
+//!    Sonde zu Beginn): Töne kommen über dieses Gerät (`geraet=Gewaehlt`);
+//!    abziehen → über den Standard (`geraet=Ersatz`); wieder anstecken →
+//!    zurück aufs gewählte.
+//!
 //! Dazu: Zahl der Windows-Stimmen, Latenz der WinRT-Synthese und ein
 //! gesprochener Satz über denselben Weg.
 //!
@@ -24,10 +29,11 @@
 //! ```
 //!
 //! Umgebungsvariablen: `ANSAGE_PROBE_RUNDEN` (Standard 5),
-//! `ANSAGE_PROBE_MS` (Tonlänge, Standard 400).
+//! `ANSAGE_PROBE_MS` (Tonlänge, Standard 400), `ANSAGE_PROBE_GERAET`
+//! (gewählte Geräte-ID, leer = Windows-Standard).
 //!
 //! **Datenschutz:** Die Ausgabe nennt **keine Gerätenamen** (Bluetooth-
-//! Geräte tragen oft Personennamen) — nur Bericht und Fehlercode.
+//! Geräte tragen oft Personennamen) — nur IDs, Bericht und Fehlercode.
 
 use bts_light_lib::ansage_ton::{self as ton, Art};
 use std::time::{Duration, Instant};
@@ -67,15 +73,34 @@ async fn ansage_ton_probe() {
         Err(e) => println!("Standardgerät: Fehler {}", e.code()),
     }
 
+    match ton::geraete().await {
+        Ok(liste) => {
+            println!("Aktive Ausgabegeräte: {}", liste.len());
+            for g in &liste {
+                println!("  {}", g.id);
+            }
+        }
+        Err(e) => println!("Ausgabegeräte: Fehler {}", e.code()),
+    }
+    let gewaehlt = std::env::var("ANSAGE_PROBE_GERAET")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    if let Some(id) = &gewaehlt {
+        println!(
+            "Gewähltes Gerät: {id} (verfügbar: {})",
+            ton::geraet_verfuegbar(id).await
+        );
+    }
+
     let (pcm, rate) = ton_pcm(ms);
     for runde in 1..=runden {
         let start = Instant::now();
-        let ergebnis = ton::spielen(pcm.clone(), rate, Art::Sprache).await;
+        let ergebnis = ton::spielen(pcm.clone(), rate, Art::Sprache, gewaehlt.clone()).await;
         let dauer = start.elapsed().as_millis();
         match ergebnis {
             Ok(b) => println!(
-                "Runde {runde:>2}: ok in {dauer} ms, abgebrochen={}, neuGeoeffnet={}",
-                b.abgebrochen, b.neu_geoeffnet
+                "Runde {runde:>2}: ok in {dauer} ms, abgebrochen={}, neuGeoeffnet={}, geraet={:?}",
+                b.abgebrochen, b.neu_geoeffnet, b.geraet
             ),
             Err(e) => println!("Runde {runde:>2}: Fehler {} nach {dauer} ms", e.code()),
         }
@@ -85,7 +110,7 @@ async fn ansage_ton_probe() {
     // Abbruch mitten im Ton: muss zügig mit abgebrochen=true zurückkehren.
     let (lang_pcm, lang_rate) = ton_pcm(3000);
     let start = Instant::now();
-    let laeuft = tokio::spawn(ton::spielen(lang_pcm, lang_rate, Art::Sprache));
+    let laeuft = tokio::spawn(ton::spielen(lang_pcm, lang_rate, Art::Sprache, None));
     tokio::time::sleep(Duration::from_millis(500)).await;
     ton::abbrechen();
     match laeuft.await.expect("Task") {
@@ -122,7 +147,7 @@ async fn ansage_ton_probe() {
         }
     }
     let start = Instant::now();
-    match ton::stimme_spielen(segmente, "de".into(), String::new(), 0.8).await {
+    match ton::stimme_spielen(segmente, "de".into(), String::new(), 0.8, None).await {
         Ok(b) => println!(
             "Gesprochen: ok in {} ms, neuGeoeffnet={}",
             start.elapsed().as_millis(),

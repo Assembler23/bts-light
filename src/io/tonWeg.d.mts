@@ -9,7 +9,11 @@ export type TonFehlerCode =
   | "ungueltig"
   | "intern";
 
-export type TonBanner = "kein_geraet" | "keine_stimme" | "rueckfall";
+export type TonBanner =
+  | "kein_geraet"
+  | "keine_stimme"
+  | "rueckfall"
+  | "geraet_fehlt";
 
 export declare function fehlerCode(err: unknown): TonFehlerCode;
 
