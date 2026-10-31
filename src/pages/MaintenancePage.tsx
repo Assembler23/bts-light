@@ -67,8 +67,11 @@ export function MaintenancePage() {
   function updateMessage(): string {
     if (!updateChecked) return "";
     if (updatePhase === "checking") return "Prüfe auf Update …";
-    if (updatePhase === "available")
-      return "Update verfügbar – siehe Banner oben.";
+    if (updatePhase === "downloading")
+      return "Update wird im Hintergrund geladen – siehe Banner oben.";
+    if (updatePhase === "ready")
+      return "Update liegt bereit – Einbau über das Banner oben.";
+    if (updatePhase === "installing") return "Update wird eingebaut …";
     if (updatePhase === "current") return "Aktuell auf dem neuesten Stand.";
     if (updatePhase === "error")
       return "Update-Prüfung fehlgeschlagen (offline?).";

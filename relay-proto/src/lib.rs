@@ -60,6 +60,12 @@ pub struct MatchBrief {
     pub team_a: Vec<PlayerBrief>,
     #[serde(rename = "teamB")]
     pub team_b: Vec<PlayerBrief>,
+    /// Setzplatz der Seite A bzw. B als Text („1", „3/4"; ohne Klammern,
+    /// ADR 0059). `None` = ungesetzt; ältere Absender lassen das Feld weg.
+    #[serde(rename = "seedA", default, skip_serializing_if = "Option::is_none")]
+    pub seed_a: Option<String>,
+    #[serde(rename = "seedB", default, skip_serializing_if = "Option::is_none")]
+    pub seed_b: Option<String>,
     #[serde(rename = "eventLabel")]
     pub event_label: String,
     #[serde(rename = "bestOfSets")]
@@ -131,6 +137,13 @@ pub struct MatchBrief {
     pub sr_names: Vec<String>,
     #[serde(rename = "arNames", default)]
     pub ar_names: Vec<String>,
+    /// `true`, wenn der Host das Ereignis [`EventKind::TeamsCorrected`]
+    /// kennt (ADR 0067). Nur dann bietet das Tablet „Mannschaften
+    /// tauschen" an: Eine ältere App verwürfe jeden Sync mit der neuen Art,
+    /// weil `EventKind` bewusst keinen Catch-All hat. `#[serde(default)]`
+    /// hält ältere Frames lesbar (false → Eingriff nicht angeboten).
+    #[serde(rename = "teamsCorrection", default)]
+    pub teams_correction: bool,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -164,6 +177,11 @@ pub struct MonitorMatch {
     pub match_id: i64,
     /// Disziplin als snake_case-Schlüssel; der Monitor lokalisiert selbst.
     pub discipline: String,
+    /// Klassen-Kürzel („A", „U15", …; leer = keins). Der Monitor braucht es,
+    /// um Jugendklassen („U15") als Jungen-/Mädchen-Disziplin zu benennen.
+    /// `#[serde(default)]` hält ältere Hosts/Relays ohne das Feld lesbar.
+    #[serde(rename = "classLabel", default)]
+    pub class_label: String,
     /// Auslosung + Runde, z. B. "HE G1" – für die Fußzeile.
     #[serde(rename = "eventLabel")]
     pub event_label: String,
@@ -171,6 +189,12 @@ pub struct MonitorMatch {
     pub match_number: Option<i64>,
     pub team1: Vec<MonitorPlayer>,
     pub team2: Vec<MonitorPlayer>,
+    /// Setzplatz von Team 1 bzw. 2 als Text („1", „3/4"; ohne Klammern,
+    /// ADR 0059). `None` = ungesetzt; ältere Absender lassen das Feld weg.
+    #[serde(rename = "team1Seed", default, skip_serializing_if = "Option::is_none")]
+    pub team1_seed: Option<String>,
+    #[serde(rename = "team2Seed", default, skip_serializing_if = "Option::is_none")]
+    pub team2_seed: Option<String>,
     /// Satzstand in Team-Koordinaten (abgeschlossene Sätze + laufender Satz).
     pub sets: Vec<SetAb>,
 }
@@ -1091,6 +1115,12 @@ pub enum EventKind {
     /// (ADR 0038); der Zettel druckt Zurückgenommenes durchgestrichen in
     /// der Protokollzeile, aber nicht im Raster.
     Retract,
+    /// Mannschaften berichtigt (ADR 0067): Am Tablet stand die falsche
+    /// Mannschaft auf der falschen Seite. Alles **davor** gilt mit
+    /// vertauschtem A/B — gedeutet wird das allein im Host
+    /// (`in_endkoordinaten`), nicht am Tablet. `team`/`player` sind
+    /// bedeutungslos.
+    TeamsCorrected,
 }
 
 impl EventKind {
@@ -1675,6 +1705,15 @@ pub struct TlDisplaySettingsWire {
     /// Browser-Stand, und genau das ist der gewollte Standard.
     #[serde(rename = "hideOpenMatches", default)]
     pub hide_open_matches: bool,
+    /// Setzplätze ausblenden (Spec `setzplaetze-anzeigen`). Invertiert wie
+    /// `hideOpenMatches`: fehlt das Feld, werden sie angezeigt.
+    #[serde(rename = "hideSeeds", default)]
+    pub hide_seeds: bool,
+    /// Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile (Wunsch
+    /// 06.09.2026). `#[serde(default)]` wie die Häkchen darüber: fehlt das
+    /// Feld (älterer Browser-Stand), bleibt es aus — das bisherige Bild.
+    #[serde(rename = "showMoveButtons", default)]
+    pub show_move_buttons: bool,
     #[serde(rename = "listPosition")]
     pub list_position: TlListPositionWire,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
@@ -2605,6 +2644,12 @@ pub struct PreparedMatch {
     pub team_a: Vec<PlayerBrief>,
     #[serde(rename = "teamB", default)]
     pub team_b: Vec<PlayerBrief>,
+    /// Setzplatz der Seite A bzw. B als Text („1", „3/4"; ohne Klammern,
+    /// ADR 0059). `None` = ungesetzt; ältere Absender lassen das Feld weg.
+    #[serde(rename = "seedA", default, skip_serializing_if = "Option::is_none")]
+    pub seed_a: Option<String>,
+    #[serde(rename = "seedB", default, skip_serializing_if = "Option::is_none")]
+    pub seed_b: Option<String>,
     /// Spielnummer (BTP `MatchNr`), falls vergeben – für die Übersicht.
     #[serde(
         rename = "matchNumber",
@@ -2664,6 +2709,137 @@ pub struct SlaveInfo {
     pub online: bool,
     #[serde(rename = "lastSeenMs", default)]
     pub last_seen_ms: u64,
+}
+
+// ─── Ansage-Seite im Browser (Spec `ansage-im-browser`) ──────────────────
+//
+// Ein Eintrag ist eine **fertige** Ansage: Den Text baut die Oberfläche des
+// Turnier-PCs (dieselbe Logik wie für den eigenen Lautsprecher), vertont wird
+// im Kern, die Seite spielt nur ab. Die Typen liegen hier, weil die Cloud
+// (Etappe E4) dieselben über den Relay trägt.
+
+/// Höchstzahl Einträge, die eine Ablage hält (Ältester fliegt).
+pub const MAX_ANSAGE_EINTRAEGE: usize = 32;
+/// Höchstgröße aller Audio-Daten einer Ablage zusammen. Seit die Seiten
+/// ohne Azure die Windows-Stimme als WAV bekommen (16 kHz mono ≈ 32 KB/s,
+/// eine Doppel-Ansage bei Tempo 0,8 ≈ 720 KB), muss ein Morgen-Schub von
+/// 32 Ansagen hineinpassen; darüber verlieren die ältesten nur ihr Audio.
+pub const MAX_ANSAGE_AUDIO_GESAMT: usize = 32 * 1024 * 1024;
+/// Höchstgröße eines einzelnen Audios — größere gehen ohne Audio raus.
+/// 3 MiB ≈ 98 s WAV der Windows-Stimme (Freitexte, Tempo 0,5).
+pub const MAX_ANSAGE_AUDIO: usize = 3 * 1024 * 1024;
+/// Verfall eines Eintrags: dieselbe Minute wie bei den Ansage-Aufträgen.
+pub const ANSAGE_TTL_MS: u64 = 60_000;
+
+/// Gehört eine Ansage für Halle `ziel` zu einem Gerät in Halle `geraet`?
+///
+/// **Eine** Regel für alle neuen Ansage-Wege: Leerzeichen am Rand zählen
+/// nicht, Groß-/Kleinschreibung auch nicht — und zwar für Umlaute ebenso
+/// (`"HALLE Ü"` = `"Halle ü"`), was `eq_ignore_ascii_case` nicht leistet.
+/// Ein leeres Ziel gilt allen Hallen, ein Gerät ohne Halle hört alles.
+pub fn halle_passt(ziel: &str, geraet: &str) -> bool {
+    let z = ziel.trim();
+    let g = geraet.trim();
+    z.is_empty() || g.is_empty() || z.to_lowercase() == g.to_lowercase()
+}
+
+/// Wofür ein Ansage-Eintrag steht — nur zur Anzeige und Diagnose; die Seite
+/// spielt jede bekannte Art gleich ab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnsageArt {
+    CourtCall,
+    PrepCall,
+    Officials,
+    StartPlay,
+    ScorekeeperCall,
+    Freetext,
+    /// Ein Ansage-Knopf der Desktop-App.
+    Desktop,
+    /// Erst-Ansage „neues Spiel auf dem Feld" (ab Etappe E2).
+    CourtAssigned,
+    /// Art aus einer neueren Fassung: Die Seite überspringt den Eintrag,
+    /// statt an ihm die ganze Antwort zu verlieren.
+    #[serde(other)]
+    Unbekannt,
+}
+
+/// Welcher Gong vor der Ansage erklingt (lokal auf dem Gerät erzeugt).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnsageGong {
+    /// Tiefer Zwei-Ton-Gong des Spielaufrufs.
+    Match,
+    /// Heller Dreiklang für Info/Freitext.
+    Info,
+}
+
+/// Vom Turnier-PC erzeugtes Audio zu einem Eintrag — abrufbar unter
+/// `…/ansage/audio/{id}`, nicht im Feed selbst.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnsageAudio {
+    /// `audio/mpeg` (Azure) oder `audio/wav` (ab E3 die Windows-Stimme).
+    pub mime: String,
+    pub bytes: u32,
+}
+
+/// Eine fertige Ansage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnsageEintrag {
+    pub id: u64,
+    #[serde(default)]
+    pub hall: String,
+    pub art: AnsageArt,
+    /// Feld und Spiel, gegen die die Seite vor dem Abspielen prüft: Steht
+    /// inzwischen ein anderes Spiel dort, wäre die Ansage falsch.
+    #[serde(rename = "courtId", default, skip_serializing_if = "Option::is_none")]
+    pub court_id: Option<i64>,
+    #[serde(rename = "matchId", default, skip_serializing_if = "Option::is_none")]
+    pub match_id: Option<i64>,
+    #[serde(rename = "createdAtMs")]
+    pub created_at_ms: u64,
+    /// Fehlt = kein Gong (Schalter „Gong" aus).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gong: Option<AnsageGong>,
+    /// `de` oder `en`.
+    pub lang: String,
+    pub rate: f32,
+    /// Der korrigierte Text in Sprech-Abschnitten — die Gerätestimme spricht
+    /// ihn, wenn kein Audio da ist oder es sich nicht abspielen lässt.
+    #[serde(default)]
+    pub segmente: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AnsageAudio>,
+}
+
+/// Ein belegtes Feld — die Grundlage der Abspiel-Kontrolle auf der Seite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnsageBelegung {
+    #[serde(rename = "courtId")]
+    pub court_id: i64,
+    #[serde(rename = "matchId")]
+    pub match_id: i64,
+}
+
+/// Antwort von `GET …/ansage/feed`. Enthält bewusst **keine** Azure-Angaben
+/// (Region, Schlüssel, Stimme) — die Seite braucht sie nicht.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct AnsageFeed {
+    /// Der Turnier-PC erzeugt gerade Ansagen für Seiten.
+    pub aktiv: bool,
+    /// Der Turnier-PC kann vertonen (Azure, ab E3 auch die Windows-Stimme).
+    #[serde(rename = "hostAudio")]
+    pub host_audio: bool,
+    /// Warum nicht `aktiv`: `schalter_aus`, `slave`, `renderer_weg`,
+    /// `turnier_pc_offline`, `unbekannt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grund: Option<String>,
+    #[serde(default)]
+    pub halls: Vec<String>,
+    #[serde(default)]
+    pub belegung: Vec<AnsageBelegung>,
+    #[serde(default)]
+    pub eintraege: Vec<AnsageEintrag>,
 }
 
 /// Frames vom Relay an den bts-light-Host.
@@ -3001,6 +3177,67 @@ pub enum CarrierServerMsg {
 mod tests {
     use super::*;
 
+    // ─── Ansage-Seite (Spec ansage-im-browser) ───────────────────────────
+
+    #[test]
+    fn halle_passt_ignoriert_rand_und_schreibweise_auch_bei_umlauten() {
+        assert!(halle_passt("Halle Ü", " halle ü "));
+        assert!(halle_passt("HALLE A", "Halle a"));
+        assert!(!halle_passt("Halle A", "Halle B"));
+        // Leeres Ziel = alle Hallen, Gerät ohne Halle hört alles.
+        assert!(halle_passt("", "Halle B"));
+        assert!(halle_passt("Halle A", "  "));
+    }
+
+    #[test]
+    fn ansage_eintrag_roundtrip_und_unbekannte_art() {
+        let e = AnsageEintrag {
+            id: 7,
+            hall: "Halle A".into(),
+            art: AnsageArt::CourtCall,
+            court_id: Some(3),
+            match_id: Some(42),
+            created_at_ms: 1_000,
+            gong: Some(AnsageGong::Match),
+            lang: "de".into(),
+            rate: 0.8,
+            segmente: vec!["Feld drei.".into()],
+            audio: Some(AnsageAudio {
+                mime: "audio/mpeg".into(),
+                bytes: 4711,
+            }),
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains(r#""art":"court_call""#), "{json}");
+        assert!(json.contains(r#""courtId":3"#), "{json}");
+        assert_eq!(serde_json::from_str::<AnsageEintrag>(&json).unwrap(), e);
+
+        // Eine Art aus einer neueren Fassung darf den Eintrag nicht
+        // unlesbar machen — die Seite überspringt ihn dann.
+        let neu = json.replace("court_call", "kommt_noch");
+        let gelesen: AnsageEintrag = serde_json::from_str(&neu).unwrap();
+        assert_eq!(gelesen.art, AnsageArt::Unbekannt);
+    }
+
+    #[test]
+    fn ansage_feed_traegt_keine_azure_felder() {
+        let feed = AnsageFeed {
+            aktiv: true,
+            host_audio: true,
+            grund: None,
+            halls: vec!["Halle A".into()],
+            belegung: vec![AnsageBelegung {
+                court_id: 1,
+                match_id: 2,
+            }],
+            eintraege: vec![],
+        };
+        let json = serde_json::to_string(&feed).unwrap().to_lowercase();
+        for verboten in ["azure", "region", "key", "voice"] {
+            assert!(!json.contains(verboten), "{verboten} in {json}");
+        }
+    }
+
     /// Serde-Roundtrip: deserialisieren, was wir serialisiert haben.
     fn roundtrip<T>(value: &T)
     where
@@ -3196,6 +3433,9 @@ mod tests {
                 finalized: false,
                 sr_names: vec!["Sabine Schiedsmann".into()],
                 ar_names: Vec::new(),
+                teams_correction: false,
+                seed_a: None,
+                seed_b: None,
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -3239,6 +3479,9 @@ mod tests {
             finalized: true,
             sr_names: vec!["Sabine Schiedsmann".into()],
             ar_names: vec!["Alex Aufschlag".into()],
+            teams_correction: true,
+            seed_a: None,
+            seed_b: None,
         };
         let json = serde_json::to_string(&brief).unwrap();
         assert!(json.contains(r#""finalized":true"#));
@@ -3255,6 +3498,46 @@ mod tests {
         assert!(!parsed.finalized, "fehlendes Feld → finalized=false");
         assert!(parsed.sr_names.is_empty());
         assert!(parsed.ar_names.is_empty());
+        // Ein alter Host kennt `teams_corrected` nicht → das Tablet darf
+        // „Mannschaften tauschen" nicht anbieten (ADR 0067).
+        assert!(!parsed.teams_correction, "fehlender Schalter → false");
+        assert!(json.contains(r#""teamsCorrection":true"#));
+        assert_eq!(parsed.seed_a, None, "fehlende Setzung → None");
+        assert_eq!(parsed.seed_b, None);
+        // Ungesetzt reist nichts mit (Frame bleibt so klein wie vorher).
+        assert!(!json.contains("seedA") && !json.contains("seedB"));
+    }
+
+    /// Setzplatz (Spec setzplaetze-anzeigen, ADR 0059): reist als Text in
+    /// camelCase, nur wenn gesetzt, und übersteht den Roundtrip — an
+    /// MatchBrief, PreparedMatch und MonitorMatch gleich.
+    #[test]
+    fn setzplatz_reist_als_text_nur_wenn_gesetzt() {
+        let brief: MatchBrief = serde_json::from_str(
+            r#"{"matchId":7,"teamA":[],"teamB":[],"eventLabel":"HE","bestOfSets":3,"targetScore":21,"seedA":"3/4"}"#,
+        )
+        .unwrap();
+        assert_eq!(brief.seed_a.as_deref(), Some("3/4"));
+        assert_eq!(brief.seed_b, None);
+        let json = serde_json::to_string(&brief).unwrap();
+        assert!(json.contains(r#""seedA":"3/4""#) && !json.contains("seedB"));
+        roundtrip(&brief);
+
+        let pm: PreparedMatch =
+            serde_json::from_str(r#"{"matchId":1,"calledAtMs":0,"seedB":"1"}"#).unwrap();
+        assert_eq!(pm.seed_b.as_deref(), Some("1"));
+        assert_eq!(pm.seed_a, None);
+        roundtrip(&pm);
+
+        let mm: MonitorMatch = serde_json::from_str(
+            r#"{"matchId":1,"discipline":"","eventLabel":"","team1":[],"team2":[],"sets":[],"team1Seed":"5/8"}"#,
+        )
+        .unwrap();
+        assert_eq!(mm.team1_seed.as_deref(), Some("5/8"));
+        assert_eq!(mm.team2_seed, None);
+        let json = serde_json::to_string(&mm).unwrap();
+        assert!(json.contains(r#""team1Seed":"5/8""#) && !json.contains("team2Seed"));
+        roundtrip(&mm);
     }
 
     #[test]
@@ -3376,6 +3659,8 @@ mod tests {
                 }],
                 match_number: Some(101),
                 called_at_ms: 1_700_000_000_000,
+                seed_a: None,
+                seed_b: None,
             }],
         });
 
@@ -3728,6 +4013,7 @@ mod tests {
             match_info: Some(MonitorMatch {
                 match_id: 14,
                 discipline: "mens_singles".into(),
+                class_label: String::new(),
                 event_label: "HE G2".into(),
                 match_number: Some(14),
                 team1: vec![MonitorPlayer {
@@ -3743,6 +4029,8 @@ mod tests {
                     nationality: None,
                 }],
                 sets: vec![SetAb { a: 21, b: 18 }, SetAb { a: 11, b: 7 }],
+                team1_seed: None,
+                team2_seed: None,
             }),
             court_state: Some(r#"{"servingSide":"left"}"#.into()),
             config: MonitorConfig::default(),
@@ -4598,9 +4886,11 @@ mod tests {
                 show_group: false,
                 show_court_remaining: true,
                 hide_open_matches: false,
+                show_move_buttons: false,
                 unlimited_court_calls: false,
                 list_position: TlListPositionWire::Bottom,
                 time_stats_axis: TlTimeStatsAxisWire::Group,
+                hide_seeds: false,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],
@@ -4630,6 +4920,24 @@ mod tests {
         assert!(json.contains(r#""hideOpenMatches":true"#), "{json}");
         let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
         assert!(zurueck.hide_open_matches);
+    }
+
+    #[test]
+    fn ein_profil_ohne_hide_seeds_zeigt_setzplaetze() {
+        // Spec `setzplaetze-anzeigen`: invertiert wie `hideOpenMatches`.
+        let ohne = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,
+            "showClubLogos":false,"showDiscipline":true,"showRound":true,
+            "showGroup":true,"listPosition":"bottom"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(ohne).expect("lesbar");
+        assert!(!alt.hide_seeds, "ohne das Feld werden Setzplätze angezeigt");
+        let mit = TlDisplaySettingsWire {
+            hide_seeds: true,
+            ..alt
+        };
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""hideSeeds":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert!(zurueck.hide_seeds);
     }
 
     /// Etappe D (`spielzeiten-prognose`): `showCourtRemaining` reist im
@@ -5155,6 +5463,38 @@ mod tests {
         assert!(frame.is_err());
     }
 
+    /// „Mannschaften berichtigt" (ADR 0067): eigener Draht-Name, gültig
+    /// ohne `retracts`, und **keine** Sanktion — es darf in den
+    /// badhub-Verlauf-Rechenweg, ohne dort aufzutauchen.
+    #[test]
+    fn mannschaften_berichtigt_auf_dem_draht() {
+        let e = MatchEvent {
+            kind: EventKind::TeamsCorrected,
+            ..beispiel_ereignis()
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains(r#""kind":"teams_corrected""#), "{json}");
+        assert_eq!(serde_json::from_str::<MatchEvent>(&json).unwrap(), e);
+        assert!(e.is_valid());
+        assert!(!EventKind::TeamsCorrected.is_sanction());
+        // So schickt es das Tablet: im Abgleich, den Relay und Host typisiert
+        // parsen — eine alte Fassung ohne die Art verwürfe den ganzen Frame.
+        let sync = r#"{"type":"match_event_sync","matchId":9,"events":[{"id":"ab12","set":1,"afterN":3,"kind":"teams_corrected"}]}"#;
+        match serde_json::from_str::<TabletMsg>(sync).unwrap() {
+            TabletMsg::MatchEventSync { events, .. } => {
+                assert_eq!(events[0].kind, EventKind::TeamsCorrected);
+                assert!(match_events_valid(&events));
+            }
+            other => panic!("falscher Frame: {other:?}"),
+        }
+        // Mit Rücknahme-Ziel ist es Unfug wie bei jeder Nicht-Rücknahme.
+        let falsch = MatchEvent {
+            retracts: "ab".into(),
+            ..e
+        };
+        assert!(!falsch.is_valid());
+    }
+
     /// Das leere `retracts` wird nicht mitgeschrieben: Bei
     /// [`MAX_EVENTS_PER_MATCH`] Ereignissen kostete es rund ein Kilobyte
     /// gegen [`MAX_SHEET_LEN`], ohne etwas zu sagen.
@@ -5360,6 +5700,34 @@ mod tests {
         // (ADR 0055).
         assert_eq!(t.court_id(), Some(7));
         assert_eq!(t.kind_str(), "court_tafel");
+    }
+
+    #[test]
+    fn monitor_match_carries_class_label_and_reads_old_frames() {
+        // Neu: Klassen-Kürzel für die Jugend-Benennung am Monitor.
+        let m = MonitorMatch {
+            match_id: 3,
+            discipline: "womens_singles".into(),
+            class_label: "U15".into(),
+            event_label: "ME U15 Gruppe 1".into(),
+            match_number: None,
+            team1: vec![],
+            team2: vec![],
+            sets: vec![],
+            team1_seed: None,
+            team2_seed: None,
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(json.contains(r#""classLabel":"U15""#), "{json}");
+        assert_eq!(serde_json::from_str::<MonitorMatch>(&json).unwrap(), m);
+        // Ältere Gegenstelle ohne das Feld → leer statt Fehler.
+        let alt = r#"{"matchId":3,"discipline":"mens_singles","eventLabel":"HE","team1":[],"team2":[],"sets":[]}"#;
+        assert_eq!(
+            serde_json::from_str::<MonitorMatch>(alt)
+                .unwrap()
+                .class_label,
+            ""
+        );
     }
 }
 

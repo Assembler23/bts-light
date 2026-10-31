@@ -161,7 +161,8 @@ Erfolgskriterien beim nächsten Turnier:
   `__TABLET_PIN__`, Cloud immer `0000` wie beim Tablet) → Menü:
   1. Anzeige wählen: Zähltafel · Feld-Monitor · Hallen-Übersicht · In Vorbereitung.
   2. Feld wechseln (Liste aus `/courts`; nur bei `tafel`/`feld` sichtbar).
-  3. Seiten spiegeln (nur bei `tafel`; gemerkt je Gerät in `localStorage`).
+  3. Seiten spiegeln (nur bei `tafel`; gemerkt je Gerät in `localStorage`) — seit v0.9.292
+     zusammen mit der Anordnung **ein** Eintrag „Ansicht: …" (s. Erweiterung 13.09.2026).
   4. Zum Zählen wechseln → vorher `/courts` abfragen; ist das Feld `occupied`, erscheint ein
      Warnhinweis mit Bestätigung („Auf diesem Feld zählt bereits ein Gerät …"), sonst direkt
      `court/{id}`. Die Relay-Feldliste liefert `occupied` seit v0.9.275; fehlt das Feld
@@ -225,8 +226,9 @@ Anzeige-Hülle:
       → Zähltafel; `court=abc` → Menü mit Feldwahl. Kein anderer Pfad ist über die Adresse
       erreichbar (Testfälle mit `../`, absoluten URLs, `javascript:`).
 - [ ] Zahnrad → falsche PIN öffnet nichts; richtige PIN öffnet das Menü mit den sieben Punkten,
-      „Feld wechseln" und „Seiten spiegeln" nur bei Feld-Layouts.
-- [ ] „Seiten spiegeln" wirkt sofort und überlebt Neuladen und App-Neustart (Gerät).
+      „Feld wechseln" und „Seiten spiegeln" nur bei Feld-Layouts (seit v0.9.292: „Ansicht").
+- [ ] „Seiten spiegeln" wirkt sofort und überlebt Neuladen und App-Neustart (Gerät)
+      (seit v0.9.292 als Stufe der „Ansicht").
 - [ ] „Zum Zählen wechseln" auf einem belegten Feld zeigt eine Warnung; erst die Bestätigung
       öffnet `court/{id}`. Auf einem freien Feld öffnet es direkt.
 - [ ] Hülle und Tafel öffnen nie `/ws`; das zählende Tablet bleibt Slot-Halter (Server-Log ohne
@@ -285,6 +287,196 @@ Zuweisung:
   ausgefallenen Tablet.
 - **Wake-Lock im LAN-http** fehlt technisch; ohne Geräteeinstellung geht das Display aus.
 - Rollback: ältere Version installierbar, keine Config-Migration nötig.
+
+## Erweiterung 06.09.2026 — Anordnung für den Platz hinter dem Feld
+
+**Problem:** Der Bediener der Zähltafel sitzt oft nicht am Schiedsrichterstuhl
+(seitlich am Netz), sondern **hinter dem Feld** an der Grundlinie. Von dort
+sind die Teams nicht links/rechts, sondern **vorn/hinten** — zwei Kacheln
+nebeneinander sagen ihm nichts.
+
+**Lösung:** Die Tafel kennt zwei Anordnungen der Punkte:
+
+- `nebeneinander` (bisher): links/rechts vom Schiedsrichterstuhl aus,
+  gemeinsamer Satzstand `1 : 0` klein darüber.
+- `uebereinander` (neu): **oben die ferne Seite (= „rechts"), unten die nahe
+  (= „links")**. Der gemeinsame Satzstand entfällt, weil ein `1 : 0` von
+  links nach rechts nichts mehr über oben/unten aussagt; stattdessen steht der
+  Satzstand je Seite gelb im Rand neben der Kachel, darunter der
+  Aufschlag-Punkt. „Seiten spiegeln" dreht auch oben/unten — wer am anderen
+  Ende sitzt, spiegelt.
+
+**Wahl der Anordnung** (`?anordnung=`, nur fester Modus wie `?spiegel=`):
+
+- `auto` (Standard, kein Query-Wert): folgt der Ausrichtung des Geräts —
+  **Hochformat → übereinander, Querformat → nebeneinander**. Drehen des
+  Tablets schaltet live um (`matchMedia("(orientation: portrait)")` +
+  `resize`), ohne Neuladen.
+- `nebeneinander` / `uebereinander`: Hand-Übersteuerung aus der
+  Anzeige-Hülle. Menüpunkt „Anordnung: automatisch / nebeneinander
+  (links–rechts) / übereinander (vorn–hinten)" reihum, nur beim Layout
+  Zähltafel, gemerkt je Gerät (`localStorage`, `badhub.anzeige.anordnung`)
+  wie die Spiegelung — bis v0.9.291; seit v0.9.292 stecken beide im
+  Schlüssel `badhub.anzeige.ansicht` (s. Erweiterung 13.09.2026).
+  Die Allowlist in `anzeigeZiel.zielPfad` lässt nur die
+  beiden Werte in die Adresse; `auto` und Unfug schreiben nichts.
+- Gerätemodus (TV per Zuweisung): Query wird wie `spiegel` ignoriert, es gilt
+  `auto` — ein hochkant montierter TV bekommt so trotzdem die passende Anordnung.
+
+**Reine Funktionen** in `src/io/tafelSeiten.mjs` (Inline-Kopie in `tafel.html`):
+`ANORDNUNGEN`, `anordnungAusQuery(roh)` → `auto` bei allem Unbekannten,
+`effektiveAnordnung(anordnung, hochformat)` → `nebeneinander|uebereinander`.
+`zielPfad(ziel, spiegel, anordnung)` in `anzeigeZiel.mjs` baut
+`court/{id}/tafel?spiegel=1&anordnung=uebereinander`.
+
+**Layout übereinander:** Kacheln je halbe Höhe, Ziffern `min(70vw, 40vh)` —
+„88" ist bei `font-weight 900` ~1,16 em breit (beide Ziffern zusammen,
+gemessen) und muss in die Kachel (85 vw neben dem 10-vw-Rand) passen; die
+Höhe deckelt bei 40 vh je Kachel. Im Hochformat eines 10-Zoll-Tablets sind
+das ~64 vmin, deutlich über dem Spec-Minimum von 35 vmin (Review-Befund S1:
+die erste Fassung mit `min(37vw, 38vh)` hatte die Breite je Zeichen statt je
+Zahl gerechnet und die Ziffern halb so groß gezeichnet wie möglich). Die Reihenfolge oben/unten dreht nur die CSS-`order` der beiden
+Seiten-Container; `tafelSeiten` bleibt unverändert.
+
+**Akzeptanz:**
+- [x] Hochformat ohne Query: Punkte übereinander, Team „rechts" oben, Satzstand
+      je Seite im Rand, Aufschlag-Punkt an der richtigen Kachel.
+- [x] Drehen des Tablets schaltet ohne Neuladen um (Hoch → übereinander,
+      Quer → nebeneinander).
+- [x] `?anordnung=nebeneinander` im Hochformat und `?anordnung=uebereinander`
+      im Querformat übersteuern; `?spiegel=1` dreht auch oben/unten.
+- [x] Querformat ohne Query sieht aus wie vor der Erweiterung.
+- [x] Hülle: Menüpunkt reihum, nur bei Zähltafel, überlebt Neuladen; Unfug in
+      `localStorage` fällt auf `auto` zurück.
+- [ ] Feldtest: 8- und 10-Zoll-Tablet im Hochformat hinter dem Feld.
+
+### Dasselbe am Zähl-Tablet (`tablet.html`)
+
+Der Wunsch gilt „nicht nur der Zähltafel, auch der Tabletsteuerung generell"
+(06.09.2026). Die Zählansicht bekommt dieselbe Anordnung, mit derselben
+Inline-Kopie von `anordnungAusQuery`/`effektiveAnordnung` und derselben
+Reihung im Zahnrad-Menü („Anordnung: automatisch / nebeneinander / übereinander",
+hinter der PIN, `localStorage` `badhub.tablet.anordnung`, je Gerät).
+
+- **Darstellung übereinander** (`.play.uebereinander`): Grid mit drei Zeilen
+  statt drei Spalten; `plus-right` oben (fern, „Hinten"), `plus-left` unten
+  (nah, „Vorne"); Court hochkant (61 × 134) mit eigener Linienzeichnung
+  (`.court-lines-hoch`, Netz waagerecht); Zellen per `order` gedreht:
+  `rightTop` oben links, `rightBottom` oben rechts, `leftTop` unten links,
+  `leftBottom` unten rechts — so bleibt das rechte Aufschlagfeld jedes
+  Spielers auf seiner rechten Hand (oben schaut man nach unten, unten nach
+  oben). Federball-Positionen/-Drehungen je Zelle passend. Satzstand als
+  Spalte: `right-score` über `left-score`, Doppelpunkt aus. Team-Label der
+  linken Seite wandert nach unten.
+- **Wortwahl:** `seiteWort(side)` liefert `vorne/hinten` statt `links/rechts`
+  (Seitenwahl-Titel und -Hinweis DE/EN, Spielerwahl bei Karten).
+  `anordnungAnwenden()` setzt Klasse, Plus-Beschriftungen und Menütext; läuft
+  als erste Zeile in jedem `render()`; `orientation`-Wechsel (`matchMedia`
+  `change`, Rückfall `resize`) rufen `render()`, damit auch ein offener
+  Seitenwahl-Dialog den Text wechselt. Satz-Historie, Endstand-Dialog und
+  Beenden-Zusammenfassung bleiben waagerecht links:rechts (= vorne:hinten);
+  die Schiri-Ansage bleibt DBV-Wortlaut aus Stuhl-Sicht (Review-Befund,
+  bewusst).
+- **Unverändert:** Zähllogik, `teamOnSide`, `servingSide`, Ergebnis, der
+  gespiegelte `courtState` — alles bleibt links/rechts. Die Zähltafel und der
+  Court-Monitor zeigen „links" weiterhin links; nur das Tablet des Bedieners
+  dreht seine Sicht.
+- **Platzaufteilung (Nachlese 08.09.2026, v0.9.284):** Feldtest-Befund am
+  Fire HD 10: Court hochkant nur 225 × 500 px, die beiden Plus-Zeilen je
+  17 % der Höhe, zwei Drittel der Breite leer. Darum: Plus-Knöpfe als feste
+  Maße statt Bruchteile (`--plus-leiste: 5.5rem` übereinander,
+  `--plus-spalte: min(9rem, 20vw)` nebeneinander, beide Ausrichtungen);
+  im Hochformat ab 480 px Breite (Handys behalten den Stapel, weil dort
+  die Mittelzeile niedriger als Satzstand + Schiri-Leiste wäre) wird
+  `.center` ein Grid `minmax(0,1fr) auto` mit Zeilen
+  `1fr auto auto 1fr` — Court links über alle Zeilen, Satzstand (Spalte,
+  Rückgängig über den Ziffern) und Schiri-Leiste rechts senkrecht zentriert,
+  je max. 38 vw. Namen in den Zellen skalieren mit `3.2vmin` statt `2.2vmin`.
+  Das Querformat mit Hand-Wahl „übereinander" behält die bestehende
+  Reihung (Satzstand links). Gemessen im Browser (800 × 1280): Court
+  413 × 908, Knopf 784 × 88; quer (1280 × 800): Court 960 × 437, Knopf
+  144 × 647.
+- **PIN-Freigabe (Nachlese 08.09.2026, v0.9.284):** Die Annahme „Menü
+  komplett hinter der PIN" gilt mit Einschränkung: Nach richtiger Eingabe
+  öffnet das Zahnrad an Hülle und Zählseite fünf Minuten lang ohne PIN
+  (gemeinsamer `localStorage`-Schlüssel `badhub.tablet.pinFreigabeBis`,
+  Regel `src/io/pinFreigabe.mjs`). Details in `docs/tablet-kiosk.md`.
+- **Akzeptanz:**
+  - [x] Hochformat ohne Wahl: Knöpfe oben/unten, Court hochkant, Aufschläger-
+        Zelle und Federball an der richtigen Stelle (Browser-Test mit
+        injiziertem Doppel: Aufschlag rechts bei 7 → `rightBottom` oben
+        rechts, Annehmer `leftTop` unten links).
+  - [x] Querformat ohne Wahl: Ansicht wie vor der Erweiterung.
+  - [x] Menü reihum, Wahl überlebt Neuladen; Seitenwahl-Text wechselt.
+  - [ ] Feldtest: Zählen im Hochformat hinter dem Feld über ein ganzes Spiel
+        inkl. Seitenwechsel und Satzpause.
+
+## Erweiterung 13.09.2026 — Ansicht per Tipp auf die Zahlen
+
+**Problem:** Spiegelung und Anordnung waren zwei Menü-Einträge hinter der
+PIN. Wer die Tafel am Feld aufstellt, will in Sekunden sehen, ob die Teams
+richtig herum stehen — Zahnrad, PIN, zwei Einträge sind dafür zu lang.
+
+**Lösung:** Beides ist für den Bediener eine Frage („Wo steht welches Team
+auf meinem Bildschirm?"), also **ein** Zyklus mit fünf Stufen, reihum per
+Tipp auf die Zahlen der Tafel — **ohne PIN** — und über einen einzigen
+Menü-Eintrag „Ansicht: …":
+
+| Ansicht | `spiegel` | `anordnung` |
+|---|---|---|
+| automatisch | aus | `auto` |
+| links/rechts | aus | `nebeneinander` |
+| rechts/links | an | `nebeneinander` |
+| oben/unten | an | `uebereinander` |
+| unten/oben | aus | `uebereinander` (= bisheriges Übereinander, links nah/unten) |
+
+Das Etikett nennt zuerst, wo die **linke Tablet-Seite** steht. „auto +
+gespiegelt" entfällt bewusst: Wer spiegelt, weiß, wie er sitzt — dann soll
+das Drehen des Geräts nichts mehr umwerfen.
+
+**Ablauf:** `tafel.html` hängt einen `click` an `.punkte` (nur im festen
+Modus und nur, wenn ein Elternfenster existiert) und schickt
+`postMessage({typ:"bts-anzeige:naechste-ansicht"}, location.origin)`. Die
+Hülle nimmt nur Nachrichten an, deren `origin` die eigene ist **und** deren
+`source` das eigene iframe ist; sie schaltet weiter, merkt
+`badhub.anzeige.ansicht`, lädt das iframe mit den neuen Parametern (wie
+bisher beim Menü) und blendet 1,5 s ein Etikett „Ansicht: …" ein
+(`pointer-events: none`, der nächste Tipp trifft sofort wieder die Tafel).
+Ohne Hülle (Tafel direkt im Browser) und im Gerätemodus (TV) tut der Tipp
+nichts — dort gab es auch bisher weder Spiegel noch Hand-Anordnung.
+
+**Migration:** Die Alt-Schlüssel `badhub.anzeige.spiegel` und
+`badhub.anzeige.anordnung` werden beim ersten Start einmalig in die Ansicht
+übersetzt (`ansichtAusParametern`) und gelöscht. Der Regelfall eines
+gespiegelten Tablets ist „Häkchen an, Anordnung nie angefasst" (= `auto`) —
+diese Kombination gibt es nicht mehr, der Spiegel bleibt aber erhalten: Die
+Hülle zurrt ihn über die jetzige Ausrichtung fest (Hochformat →
+„oben/unten", sonst „rechts/links"). Ein solches Tablet folgt danach also
+nicht mehr der Drehung, steht aber weiter richtig herum.
+
+**Kanonische Fassung** in `src/io/anzeigeZiel.mjs` (+ Inline-Kopie in
+`anzeige.html`, Test `scripts/test-anzeige-ziel.mjs`): `ANSICHTEN`,
+`ANSICHT_LABEL`, `ansichtAusWert`, `ansichtParameter`,
+`ansichtAusParametern`, `naechsteAnsicht`. `zielPfad` bleibt unverändert und
+bekommt die Parameter der Ansicht.
+
+**Bewusst hingenommen:** Zuschauer können die Ansicht verstellen — harmlos
+und mit einem weiteren Tipp behoben. Zwei Tipps innerhalb von 500 ms zählen
+als einer (Sperrfenster in der Hülle; `.punkte` trägt
+`touch-action: manipulation` gegen den Doppeltipp-Zoom auf iPadOS). Ohne laufendes Spiel (Leer-Ansicht)
+sind keine Zahlen da; dann bleibt der Menü-Eintrag.
+
+**Akzeptanz (Browsertest gegen Mock 13.09.2026):**
+- [x] Fünf Tipps durchlaufen alle Stufen und landen wieder bei „automatisch".
+- [x] iframe-Adresse trägt je Stufe die richtigen Parameter.
+- [x] Etikett erscheint nach dem Tipp und verschwindet von selbst.
+- [x] Menü-Eintrag zeigt die aktuelle Stufe und schaltet dieselbe Folge.
+- [x] Alt-Schlüssel (`spiegel=1`, `anordnung=uebereinander`) → „oben/unten",
+      Alt-Schlüssel danach gelöscht.
+- [x] Alt-Schlüssel nur `spiegel=1` (Querformat) → „rechts/links" — der
+      Spiegel überlebt das Update.
+- [x] Zwei Tipps innerhalb 500 ms schalten nur eine Stufe.
+- [ ] Feldtest am Tablet.
 
 ## Offene Fragen / Annahmen
 

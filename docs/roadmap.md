@@ -297,6 +297,22 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Als Nächstes
 
+- **Tablet-Kiosk-App: Kiosk-Verhalten ohne Gerätebesitzer (Fire OS 8).**
+  Befund 08.09.2026: Auf Fire OS 8 ist der Gerätebesitzer nie erreichbar —
+  Amazons Kindersicherung ist auch direkt nach einem Werksreset Profile
+  Owner, `dpm set-device-owner` scheitert immer. „Bildschirm anheften" ohne
+  Besitzer funktioniert seit v0.9.285 wieder (Home/Zuletzt gesperrt), sofern
+  die Kindersicherung „Touch-Funktion deaktivieren" aus hat. **Autostart
+  seit v0.9.285 gelöst** über `device_config put activity_manager
+  default_background_activity_starts_enabled true` im Skript (Feldtest:
+  Fokus nach jedem Neustart auf der App). Den Fixier-Dialog, den Android
+  ohne Besitzer bei jedem Anheften zeigt, bestätigt seit v0.9.285 der
+  Bedienungshilfe-Dienst `BestaetigungsDienst` (per adb eingeschaltet).
+  Was auf Fire OS bleibt: Home und Zuletzt sind nur durch das Anheften
+  gesperrt (Ausstieg über die Android-Geste), und nach „Kiosk verlassen"
+  holt nichts die App zurück — falls das je stört, könnte derselbe Dienst
+  nach dem Muster LauncherHijack die App beim Erscheinen des Launchers
+  zurückholen. Kein akuter Bedarf.
 - **Repo-Umbenennung** → Anzeigename „badhub BTP controller", GitHub-Repo
   `badhub-btp-controller`. Wichtig: Tauri-`identifier` `de.badhub.btslight`
   und der Updater-Pfad `download/bts-light/` bleiben **stabil**, sonst
@@ -304,6 +320,28 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   `productName` kann separat und mit Bedacht wechseln.
 
 ## Umgesetzt, aber noch nicht abgenommen
+
+- **Tablet-Kiosk-App für Android / Fire-Tablets — umgesetzt, Feldtest
+  offen.** Spec: [features/tablet-android-kiosk-app.md](features/tablet-android-kiosk-app.md),
+  ADR [0058](adr/0058-eigene-kiosk-app-statt-fully-kiosk.md). Aus dem
+  Nutzer-Wunsch vom 06.09.2026: Eine eigene, dünne Kotlin-App in `android/`
+  findet den Turnier-PC wie die Pi-Monitore selbst (gemerkte IP →
+  Subnetz-Scan → mDNS), zeigt die Felder-Lobby im Vollbild und sperrt das
+  Tablet als Gerätebesitzer — ohne Fully-PLUS-Lizenz und ohne Adresse je
+  Tablet. Bedienung: [tablet-android-app.md](tablet-android-app.md). Nur
+  echte Hardware klärt noch:
+  1. **Device Owner auf Fire OS:** `dpm set-device-owner` mit frischem
+     Tablet ohne Amazon-Konto. Wird es verweigert → weiche Sperre
+     dokumentieren, Alternative prüfen.
+  2. **Amazon-WebView-Stand:** reicht die Chromium-Version für
+     `tablet.html` (Module, `fetch`, Pointer-Events)? Ggf.
+     Mindestversion in die Doku.
+  3. **Lock-Task auf Fire OS:** Statusleiste wirklich weg? Fire-Launcher
+     unterdrückt? Sperrbildschirm aus?
+  4. **Boot-Zeit** bis zur Lobby, mit und ohne gemerkte IP.
+  5. **Scan-Dauer** im Hallen-WLAN (254 Adressen, Blöcke von 30).
+  6. **Akku-Badge** in der Übersicht sichtbar.
+  7. Ein Turniertag parallel zu einem Fully-Tablet.
 
 - **Mehrere Liveticker je Verband (v0.9.276)** — Spec:
   [features/liveticker-mehrere-turniere-je-verband.md](features/liveticker-mehrere-turniere-je-verband.md),
@@ -457,6 +495,86 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   5. **Sichtprüfung der Geräteverwaltung** im laufenden Fenster.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
+
+- **Ausgabegerät für Ansagen** — Spec:
+  [features/ansage-ausgabegeraet.md](features/ansage-ausgabegeraet.md)
+  (freigegeben 31.10.2026, ADR 0065/0066). Auslöser Senior-Cup 31.10.2026: Ansage kam
+  nicht über die Klinke an die Hallenanlage. Ton komplett aus dem Rust-Kern
+  (cpal/WASAPI), Gerät je Ansage neu aufgelöst; Windows-Stimme (E3 aus
+  „Ansage im Browser") vorgezogen; Anzeige und selbstauflösende Banner;
+  Gerätewahl je PC. **PR 1 umgesetzt (v0.9.318, #416)**, **PR 1b umgesetzt
+  (v0.9.320)**, **PR 2 umgesetzt (v0.9.321)** · **PR 1** Ton aus dem Kern + Windows-Stimme + Anzeige ·
+  **PR 1b** OneCore-WAV für die Ansage-Seiten · **PR 2** Gerätewahl.
+  Notfall-Schalter „Alter Abspielweg" drei Versionen nach PR 1 entfernen.
+
+- **Seiten und Mannschaften am Zähl-Tablet korrigieren** — Spec:
+  [features/tablet-seiten-korrigieren.md](features/tablet-seiten-korrigieren.md)
+  (freigegeben 30.10.2026, ADR 0067), **umgesetzt v0.9.319** — offen: Tag,
+  Feldtest. ⇄-Knopf ohne PIN: „Seiten tauschen" (alles
+  wandert mit) und „Mannschaften tauschen" (nur Namen, gemeldeter Stand kippt;
+  im Doppel Neuabfrage der Aufstellung; neues Ereignis `teams_corrected`).
+
+- **Sprachansagen im Browser (Ansage-Seite)** — Spec:
+  [features/ansage-im-browser.md](features/ansage-im-browser.md) (freigegeben
+  30.10.2026, PR #405). **E1 umgesetzt (v0.9.311, ADR 0063)**, **E1b
+  umgesetzt (v0.9.313)**, **E2 umgesetzt (v0.9.314, ADR 0064 — Erst-Ansage
+  `court_assigned` im Kern; eigener Feldtest nötig, Rollback nur per Version)**;
+  offen E3 (nach Messung), E4, der Feldtest von E1 auf Fire-Tablet,
+  Android-Handy und iPhone und der Feldtest von E1b am echten Pi
+  (Autoplay-Flag, HDMI-Ton, Stimme nur mit Azure). Ansagen auf Pi/Tablet/Handy ohne
+  Windows-App: Turnier-PC vertont (Azure, später OneCore), Seite `/ansage`
+  spielt nur ab; Pi am TV über einen Ansage-Modus der Monitor-Seiten.
+  - **Etappen:** E1 LAN-Seite + TL-Aufträge/Freitext/Desktop-Knöpfe ·
+    E1b Monitor-Modus + Pi-Autoplay · E2 Erst-Ansage im Kern ·
+    E3 Offline-Stimme OneCore (**vorgezogen in
+    [ansage-ausgabegeraet](features/ansage-ausgabegeraet.md)**, ADR 0066) ·
+    E4 Cloud mit eigenem Lese-Schlüssel.
+
+- **TP-Datei während des Turniertags an badhub** — Spec:
+  [features/tp-datei-upload.md](features/tp-datei-upload.md),
+  [ADR 0060](adr/0060-upload-sperrt-btp-writes-schreib-gate.md).
+  Aus der Idee vom 26.10.2026. bts-light kopiert die **offene** TP-Datei
+  (Messung `btp_tp_match_probe.rs`, PR #390: lesbar trotz `.ldb`,
+  `Match.ID` = `PlayerMatch.id`, GUID in `Settings.LinkCode`) und sendet sie
+  gzip-komprimiert an `POST /api/tp-upload`; badhub baut daraus ein
+  vorläufiges Turnier (`tournaments.source='tp_live'`) und mischt beim
+  Rendern die Liveticker-Stände in Spielliste, Baum und Tabellen.
+  - **Stufe 1 — ✅ umgesetzt:** badhub B1–B4 auf Prod (26.10.2026,
+    badhub-PRs #1045/#1046/#1055/#1057), bts-light L1 in **v0.9.300**
+    (Dateiwahl im Setup, Schreib-Gate, Knopf im Dashboard, Handbuch
+    [tp-datei-upload.md](tp-datei-upload.md)).
+  - **Stufe 2b Ereignis-Auslöser — ✅ umgesetzt in v0.9.305:** Auslosung
+    oder gefüllte Paarung zieht die Takt-Prüfung auf ~30 s vor, abschalt-
+    und drosselbar; Spec [features/tp-ereignis-upload.md](features/tp-ereignis-upload.md),
+    [ADR 0062](adr/0062-tp-upload-ereignis-ausloeser.md).
+  - **Stufe 2 — ✅ umgesetzt in v0.9.301:** Automatik, die nur solange der
+    Liveticker läuft und nur bei geänderter Datei sendet (ungegateter
+    SHA-256, Halt mit Wiederanlauf, Nachversuch 90 s × 2); Spec
+    [features/tp-takt-upload.md](features/tp-takt-upload.md),
+    [ADR 0061](adr/0061-takt-upload-lebenszyklus-schnellhash-anhalteregel.md).
+    Standard aus.
+  - **Turnier-Kennung aus der Datei — ✅ umgesetzt in v0.9.302:** GUID per
+    Byte-Muster `LinkCode` aus der TP-Datei (kein Jet-Parser); Übernahme im
+    Setup, Ablehnung fremder Dateien vor dem Senden (Ergänzung in der
+    Takt-Spec). Offen: Datei über den BTP-Prozess selbst finden.
+  - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1 — eingehalten.
+  - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf.
+    Lizenzfrage aus badhub-ADR 0047 **geprüft 28.10.2026** (badhub
+    `docs/drafts/tp-datei-weitergabe-einschaetzung.md`): keine Einschränkung im
+    vorliegenden EULA; offen sind eine schriftliche Bestätigung von Visual
+    Reality, ein Freigabe-Satz des BVBB-Spielausschusses und die Ergänzung von
+    AVV § 13.2 und Datenschutzerklärung (Projektleitung badhub). Für
+    BVBB-Turniere vertretbar, für andere Verbände erst nach der AVV-Ergänzung.
+
+- **Setzplätze anzeigen** — Spec:
+  [features/setzplaetze-anzeigen.md](features/setzplaetze-anzeigen.md),
+  [ADR 0059](adr/0059-setzplatz-als-text-aus-dem-parser.md).
+  Aus der Nutzerfrage vom 12.10.2026. BTP liefert die Setzung an
+  `StageEntry.Seed1/Seed2` (Messung `btp_seed_probe.rs`).
+  - **Anzeige:** `[1]`, `[3/4]` auf Monitoren (ohne Schalter), im TL-Web
+    (Profil-Schalter, Standard an) und im Desktop-Check-In.
+  - **Etappen:** PR 1 bts-light, PR 2 Payload an den badhub-Liveticker und
+    den Check-In, PR 3 Anzeige in badhub (`AFFECTS` badhub).
 
 - **Offene Paarungen in der TL-Spielliste** — Spec:
   [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md),
@@ -674,6 +792,51 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Geplant
 
+- **Linux-Variante (Entwickeln zuerst, Betreiben später).** Der Kern ist
+  plattformneutral, BTP dagegen ein Windows-Programm — ein bts-light auf
+  Linux spricht immer ein BTP auf einem anderen Rechner an (`btp.host` ist
+  frei konfigurierbar, das geht heute schon). Vier Stufen:
+  - **Stufe 0 — Linux als Test-Plattform (umgesetzt 15.09.2026):** CI-Job
+    `linux` (`ubuntu-22.04`, Tauri-System-Pakete) mit Clippy `-D warnings`
+    und `cargo test --workspace`. Hält den `not(windows)`-Zweig grün
+    (GDI-Druck → `NichtUnterstuetzt`, SSID → `iwgetid`), der seit v0.9.249
+    nie gebaut worden war. Der Windows-Job bleibt die Release-Referenz.
+  - **Stufe 1 — Linux-Paket im Release:** zweiter Build-Job `build-linux`
+    in `release.yml` (`.AppImage` + `.sig`, `.deb`), Eintrag
+    `linux-x86_64` in `latest.json`, Download-Zeile auf der Release-Seite.
+    Kein Firewall-Hook (nur NSIS); bei `ufw` müssen 8088/8443 von Hand auf
+    — Doku.
+  - **Stufe 2 — Auto-Update auf Linux:** Der Einbau ist selbst gebaut
+    (`update.rs`: Installer laden, `/S /UPDATE` starten). Auf Linux gibt es
+    keinen Installer; der Tauri-Updater tauscht beim AppImage die Datei.
+    Braucht einen `cfg`-Zweig und eine Entscheidung, ob „Beim Beenden
+    einbauen" (ADR 0057) für AppImage nachgebaut oder ausgeblendet wird.
+    `.deb` bekäme kein Auto-Update (Paketmanager).
+  - **Stufe 3 — Zettel-Autodruck über CUPS:** zweiter Ausgabeschritt
+    Elementliste (`blatt.rs`) → PDF → `lp -d <Drucker>`, Druckerliste über
+    `lpstat -a`; deckt später auch macOS ab. Bis dahin geht auf Linux nur
+    der Browser-Druck (Vorabzettel, TL-Web), und der Setup-Abschnitt sollte
+    das sagen statt eine leere Druckerliste zu zeigen.
+  - Bleibt: Messwerkzeuge (`tests/*_probe.rs`) und neue BTP-Mitschnitte
+    brauchen Windows. Stufen 1–3 vor dem Code durch `/idee` (Spec
+    `docs/features/linux.md`); macOS ist dieselbe Arbeit plus
+    Apple-Signierung (Developer-Konto) — ohne die widerspricht es dem
+    Plug-and-play-Anspruch.
+
+- **Update ohne jede Lücke (Stufe 3): Prozess-Übergabe oder Dienst +
+  Oberfläche.** Seit v0.9.279 (Spec
+  [features/update-im-turnierbetrieb.md](features/update-im-turnierbetrieb.md),
+  ADR 0057) ist die Update-Lücke eine Sache von ~20 s: Paket vorgeladen,
+  Übertragung läuft danach von selbst wieder an, Feldstempel überleben,
+  „Beim Beenden einbauen" als Alternative. Was bleibt, ist der Prozess-
+  Neustart selbst: LAN-Server (8088/8443), Relay-WebSocket, BTP-Verbindung
+  und Monitor-Sockets sind für Sekunden weg. Echte Nullzeit hieße, diese
+  Verbindungen an einen neuen Prozess zu übergeben (Socket-Handover unter
+  Windows) oder den Kern als Dienst vom Fenster zu trennen (die Oberfläche
+  startet neu, der Dienst nicht — und der Dienst selbst bräuchte dann
+  wieder einen Übergabe-Mechanismus). Beides ein großer Umbau; Nutzen
+  gegenüber Stufe 1+2 erst messen (Feldtest: wie oft wird überhaupt
+  mitten im Turnier aktualisiert?), dann entscheiden.
 - **Code-Signing des Windows-Installers.** Aktuell unsigniert → Windows
   zeigt beim ersten Start eine SmartScreen-Warnung. Optionen: Azure Trusted
   Signing vs. klassisches OV/EV-Zertifikat — Kostenentscheidung offen. Das
@@ -691,24 +854,32 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Changelog-Auszug zusätzlich in `latest.json → notes` (Update-Fenster
   zeigt „Was ist neu"). Plan 18 in
   [roadmap-plaene-2026-07.md](roadmap-plaene-2026-07.md).
-- **Handbuch Stufe 2 — die fehlenden Kapitel.** *Status: zurückgestellt ·
-  Priorität: mittel · Trigger: Wunsch vom 05.09.2026, nach Freigabe von
-  Stufe 1 (PR #333).* Stufe 1 veröffentlicht die vorhandene Doku unter
+- **Handbuch Stufe 2 — die fehlenden Kapitel.** *Status: **abgeschlossen
+  06.09.2026** · Trigger: Wunsch vom 05.09.2026, nach Freigabe von Stufe 1
+  (PR #333).* Alle vier Themen sind geschrieben und veröffentlicht; dazu kamen
+  Suche, Stichwortverzeichnis und ein aufgabenorientierter Einstieg.
+  Ursprünglicher Wortlaut zur Nachvollziehbarkeit:* Stufe 1 veröffentlicht die vorhandene Doku unter
   `badhub.de/download/bts-light/handbuch/`. Gewünscht ist darüber hinaus ein
   Handbuch, in dem **nachlesbar** ist:
-  - was die **Tablets** können — alle Funktionen des Spielzettels, nicht nur
-    der Zähl-Ablauf;
+  - ~~was die **Tablets** können~~ — **erledigt 06.09.2026**:
+    [tablet-bedienen.md](tablet-bedienen.md), aus Sicht der Person am Feld;
   - ~~**was welche Einstellung in der Software bewirkt**~~ — **erledigt
     06.09.2026**: [einstellungen.md](einstellungen.md), alle Abschnitte der
     Einstellungsseite plus Wartung, mit Standardwerten,
     Sichtbarkeitsbedingungen und der Frage, ab wann eine Änderung wirkt;
-  - wie der **Master-/Slave-Betrieb** funktioniert — heute verteilt über
-    [multi-hall.md](multi-hall.md) und [cloud-relay.md](cloud-relay.md), in
-    Architektursprache statt als Erklärung;
-  - was die **Oberflächen** jeweils können (Turnierleitungs-Sicht,
-    Court-Monitor, Info-Monitor, Siegerehrung, Aushang).
+  - ~~wie der **Master-/Slave-Betrieb** funktioniert~~ — **erledigt
+    06.09.2026**: [master-slave.md](master-slave.md), aus Sicht der
+    Turnierleitung statt der Architektur, mit den vier häufigsten
+    Missverständnissen;
+  - ~~was die **Oberflächen** jeweils können~~ — **erledigt 06.09.2026**:
+    [oberflaechen.md](oberflaechen.md), Überblick über App-Menü,
+    Hallen-Geräte und öffentliche Seiten.
 
-  Dazu weiterhin offen: Installation/Erste Schritte, Setup-Wizard, Wartung.
+  Dazu **erledigt 06.09.2026**: [erste-schritte.md](erste-schritte.md)
+  (Installation, Voraussetzung in BTP, erster Start, Beenden vs. Minimieren,
+  Updates im Turnierbetrieb) und die Wartungsseite als Teil von
+  [einstellungen.md](einstellungen.md). Offen bleibt ein Überblick über die
+  Oberflächen (welcher Bildschirm zeigt was).
   **Der Aufwand liegt im Schreiben, nicht in der Technik** — die Strecke
   Markdown → Website → Deploy steht. Neue Kapitel entstehen als normale
   `docs/*.md` und werden in [handbuch.json](handbuch.json) eingetragen; es
@@ -735,6 +906,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   ziehbare Anordnung je Feld komfortabler. Bewusst verschoben beim
   Erstwurf — Persistenz je Feld statt je Halle, eigene Speicher-UI,
   Zusammenspiel mit wechselnden Feldzahlen.
+- **Anstoß der Suche aus `tablet.html` über die JS-Brücke
+  (Tablet-Kiosk-App).** Bekommt der Turnier-PC mitten im Turnier eine neue
+  IP-Adresse, sieht die Tablet-Kiosk-App das nicht von selbst — die Suche
+  läuft bewusst nur bei App-Start, WLAN-Wechsel, Ladefehler oder Handgriff,
+  nie als Hintergrund-Takt. Ein Anstoß direkt aus der geladenen Seite über
+  die `fully`-JS-Brücke, sobald sie „Verbindung verloren" erkennt, wäre die
+  saubere Lösung, bräuchte aber eine Änderung an `tablet.html` — bewusst aus
+  der ersten Fassung ausgeklammert.
 
 ## Datenverlust-Pfade in der Konfiguration (Befunde 07.08.2026)
 
@@ -763,6 +942,27 @@ mitgeändert worden:
   der Halle wäre der Ablauf gewesen: kaputtes Feld sperren, jemand speichert
   am PC eine Einstellung, Sperre still weg, Automatik legt ein Spiel darauf.
   Ein Test hält den Pfad offen (`keep_host_managed_fields_preserves_the_locked_courts`).
+
+## Wünsche vom 06.09.2026
+
+- **Pause der Feld-Automatik überlebt Neustart und Update nicht.** Wird die
+  automatische Feldvergabe in der Turnierleitungs-Sicht (TL-Web) pausiert
+  und bts-light danach neu gestartet oder aktualisiert, läuft die Automatik
+  wieder — der Pause-Zustand lebt nur im Speicher. Seit „Update im
+  Turnierbetrieb" (v0.9.279, Wiederanlauf per Marker) fällt das stärker
+  auf, weil die Übertragung nach dem Update von selbst wieder anläuft.
+  Lösung: Pause-Flag turniergebunden persistieren (Muster
+  `locked_courts_tournament`, ADR 0044) und beim Wiederanlauf lesen.
+- **Kebab-Menü (⋮) im TL-Web schließt nach einer Aktion nicht.** Wird ein
+  Eintrag gewählt oder ein Knopf gedrückt, bleibt das Menü offen und muss
+  von Hand geschlossen werden; in der Regel kann es direkt zugehen. Vor der
+  Umsetzung klären, ob mehrstufige Einträge (Farbwahl, Feldwähler Wunschfeld)
+  bewusst offen bleiben sollen.
+- **Warteliste: „In Vorbereitung rufen" und „An den Anfang der Spielliste
+  schieben" ins Kebab-Menü.** Weniger Knöpfe je Zeile, ruhigere Liste am
+  Tablet. Zusammen mit dem Punkt darüber umsetzen, sonst kostet jede der
+  beiden Aktionen künftig einen Tipp mehr. Vorher prüfen, welche der
+  Verschiebe-Knöpfe aus v0.9.280 gemeint sind.
 
 ## Wünsche vom 23.08.2026
 
@@ -925,6 +1125,24 @@ verliehen):
   bäckt `http://bts-light.local:8088/monitor` als Kiosk-Adresse ein, eine
   DHCP-Reservierung am Verleih-Router ist nicht notwendig (kann als
   Worst-Case-Rückfall jederzeit nachgezogen werden).
+- **Server-Suche über badhub als weiterer Rückfall** (Idee 04.09.2026).
+  Heute findet das Master-Image (`pi/shared-startbrowser.sh`) den
+  Turnier-PC in dieser Reihenfolge: gemerkte IP → Subnetz-Scan des
+  eigenen /24 auf `:8088/health` (1–9 s) → mDNS mit Timeout. Idee: bts-light
+  hinterlegt beim Liveticker-Push seine **lokale IP** bei badhub; der Pi
+  fragt dort einmalig nach, welche lokalen IPs gerade aktiv sind.
+  Zuordnung ohne Kennung/Token über die **öffentliche Absender-IP**:
+  badhub merkt sich das Paar (öffentliche IP, lokale IP) und antwortet
+  nur mit Einträgen derselben öffentlichen IP → fremde Netze sehen
+  nichts. Nutzen liegt **nicht** im Tempo (der Scan ist schon schnell),
+  sondern im Fall, den der Scan nie abdeckt: PC und Pi in
+  **verschiedenen Subnetzen** (zwei Router, Gast-WLAN). Einordnung als
+  Rückfall hinter Cache und Scan, vor mDNS. Offene Punkte: Pis ohne
+  Internet (Verleih-Router ohne Uplink) bleiben auf Scan/mDNS angewiesen;
+  Carrier-Grade-NAT bei Mobilfunk-Hotspots macht die Zuordnung unscharf;
+  HTTPS am Pi ohne Echtzeituhr scheitert bis zum NTP-Abgleich still →
+  Wiederholung nach Zeitabgleich nötig. Betroffen: badhub-Endpoint,
+  Push-Payload, beide Pi-Launcher. Vor der Umsetzung `/idee`.
 - **Master-Image erstellen + hosten.** Den „Golden Master"-Pi einmal auf
   echter Hardware bauen, die Karte als `bts-monitor.img.xz` sichern und in
   den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).
@@ -942,6 +1160,15 @@ verliehen):
   „kernel image not found"). Empfehlung für Verleih-Set-Hardware:
   Pi Zero 2 W (klein, günstig, ausreichend für den Kiosk) oder Pi 4
   (deutlich kraftvoller).
+- **Gemeinsames Pi-Image startet nicht auf dem Pi 3 B+ Rev. 1.4** (09.10.2026,
+  Status: **auf dem 3 B+ bestätigt (10.10.2026), Zero-2-W-Gegenprobe offen**,
+  Priorität hoch — der
+  Zero 2 W ist nicht mehr lieferbar). Die Start-Firmware im Image ist vom
+  25.11.2020, Rev. 1.4 braucht eine ab September 2021.
+  `pi/update-boot-firmware.sh` tauscht nur die Firmware auf der Boot-Partition.
+  **Auslöser für den nächsten Schritt:** dieselbe Karte startet auch im
+  Zero 2 W → `bts-light-pi-v2.img.xz` auf badhub.de zum Standard machen.
+  Details: [pi-dual-image.md](pi-dual-image.md).
 - **Info-Monitor: Routen + HTML ausgeliefert** (v0.9.17, 2026-05-25), **UI-
   Zuweisung offen.** Der Tablet-Server liefert jetzt zwei Hallen-Displays
   unter dedizierten URLs: `/info/overview` (Court-Übersicht, Hallen ×
@@ -985,12 +1212,28 @@ verliehen):
 
 ## Bekannte Einschränkungen / technische Schuld
 
-- **Kein Framing-Schutz für die Zähl-Seite** `/court/{id}` (weder
-  `X-Frame-Options` noch `frame-ancestors`): Clickjacking auf die
-  Punkte-Knöpfe wäre möglich; die Ergebnis-Abgabe bleibt durch
-  `process_result` (R5) validiert. Ein globales `frame-ancestors 'self'`
-  wäre mit der Anzeige-Hülle (#328, same-origin-iframe) verträglich —
-  eigener PR.
+- **Azure-Schlüssel offen am Relay** (Befund 29.10.2026, Grill zur
+  Ansage-Seite): `/{ns}/info/announce/state` liefert die geerbte
+  Azure-Config samt Schlüssel an jeden, der die `install_id` kennt
+  (`relay/src/main.rs` `announce_state`, so gewollt seit ADR 0003). Die
+  `install_id` ist zugleich Tablet-Zugang. Eigener Fix nötig (z. B. Erbe nur
+  über die authentifizierte Slave-Kopplung); die Ansage-Seite nutzt diesen
+  Weg bewusst nicht.
+- **Azure-Audio mit Spielernamen dauerhaft auf der Platte** (Befund
+  29.10.2026): `azure_tts.rs` cacht jede Ansage als MP3 in
+  `app_data_dir/tts-cache/` ohne Verfall. Verfall/Räumen beim Turnierwechsel
+  prüfen.
+
+- **Kein Framing-Schutz für die Zähl-Seite** `/court/{id}` **im LAN**
+  (Port 8088/8443 setzen weder `X-Frame-Options` noch `frame-ancestors`):
+  Clickjacking auf die Punkte-Knöpfe wäre möglich; die Ergebnis-Abgabe
+  bleibt durch `process_result` (R5) validiert. **In der Cloud besteht die
+  Lücke nicht:** Der nginx vor `/bts-relay/` sendet `X-Frame-Options:
+  SAMEORIGIN` und eine CSP mit `default-src 'self'` (geprüft 04.09.2026 per
+  `curl -I` auf `…/court/1/tafel`, `…/anzeige`, `/bts-relay/health`) — das
+  erlaubt genau die Anzeige-Hülle (#328, same-origin-iframe) und sperrt
+  fremde Seiten aus. Für den LAN-Server wäre ein `frame-ancestors 'self'`
+  im `router()` das Gegenstück — eigener PR.
 - **Liga-Matches** (`PlayerMatches` in BTP) sind nicht abgedeckt — bts-light
   verarbeitet nur Einzel-/Doppel-Draws.
 - **Spielsystem fest Best-of-3 bis 21.** BTP liefert das Spielformat im

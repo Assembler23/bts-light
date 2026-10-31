@@ -96,6 +96,8 @@ main {
 .gold   .club  { font-size: 3.8vmin; }
 .silver .club, .bronze .club { font-size: 3.3vmin; }
 .wo { color: #f59e0b; font-weight: 700; }
+/* Setzplatz [1]/[3/4] des Platzes (Spec setzplaetze-anzeigen). */
+.seed { color: #94a3b8; font-weight: 700; white-space: nowrap; }
 
 /* Verein mit optionalem Logo davor. `.club-logo` skaliert über `em` mit der
    jeweiligen Vereins-Schriftgröße (Podium `.club` / Einzel `.solo-club`).
@@ -258,6 +260,7 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     var wrap = h('div', 'names' + (players.length > 1 ? ' duo' : ''));
     if (!players.length) { wrap.appendChild(h('div', 'fam', '—')); }
     players.forEach(function (x) { wrap.appendChild(playerNameEl(x)); });
+    if (place.seed) wrap.appendChild(h('span', 'seed', '[' + place.seed + ']'));
     if (place.walkover) wrap.appendChild(h('span', 'wo', '(kampflos)'));
     return wrap;
   }
@@ -363,6 +366,7 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
           names.appendChild(h('div', 'pl-line', full));
         });
         if (!players.length) names.appendChild(h('div', 'pl-line', '—'));
+        if (place.seed) names.appendChild(h('span', 'seed', '[' + place.seed + ']'));
         if (place.walkover) names.appendChild(h('span', 'wo', '(kampflos)'));
         entry.appendChild(names);
         var club = clubsEl(place, 'solo-club');
@@ -480,7 +484,7 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
   function currentUrlMatches(redirectTo) {
     try {
       var here = new URL(location.href);
-      here.searchParams.delete('device'); here.searchParams.delete('rotate');
+      here.searchParams.delete('device'); here.searchParams.delete('rotate'); here.searchParams.delete('ansage');
       var there = new URL(redirectTo, location.origin);
       return here.pathname === there.pathname && here.searchParams.toString() === there.searchParams.toString();
     } catch (e) { return false; }
@@ -490,13 +494,25 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
     if (hereRotate && href.indexOf('rotate=') < 0) {
       href += (href.indexOf('?') >= 0 ? '&' : '?') + 'rotate=' + encodeURIComponent(hereRotate);
     }
+    // ?ansage=… (Ansage-Modus, Spec ansage-im-browser E1b) ebenso mitnehmen —
+    // sonst verstummte ein Pi beim ersten Zielwechsel.
+    var hereParams = new URLSearchParams(location.search);
+    if (hereParams.has('ansage') && !/[?&]ansage(=|&|$)/.test(href)) {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'ansage=' + encodeURIComponent(hereParams.get('ansage') || '');
+    }
     location.href = href;
   }
+  // In-Flight-Schutz auch hier: Ohne ihn parkte der Sekundentakt während
+  // eines Hängers jede Sekunde einen weiteren Abruf auf einer toten
+  // Leitung (Review-Fund 08.09.2026).
+  var checkLaeuft = false;
   function checkReassignment() {
     if (!deviceId) return;
-    fetch('/monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    if (checkLaeuft) return;
+    checkLaeuft = true;
+    abrufMitFrist('/monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' }, function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
+        checkLaeuft = false;
         if (!s) return;
         if (s.redirectTo && !currentUrlMatches(s.redirectTo)) {
           var sep = s.redirectTo.indexOf('?') >= 0 ? '&' : '?';
@@ -505,16 +521,49 @@ body.solo main { align-items: center; padding: 0 4vw 2vh; overflow: hidden; }
           navigateWithRotate('/monitor?device=' + encodeURIComponent(deviceId));
         }
       })
-      .catch(function () {});
+      .catch(function () { checkLaeuft = false; });
   }
   setInterval(checkReassignment, 1000);
 
   function stateUrl() {
     return deviceId ? '/info/winners/state?device=' + encodeURIComponent(deviceId) : '/info/winners/state';
   }
+  // Frist des Stand-Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s. Ein Abruf,
+  // der weder scheitert noch antwortet, blockierte sonst alle folgenden
+  // (Turnier 05./06.09.2026). **Inline-Kopie von `src/io/abrufFrist.mjs`**
+  // — dort die kanonische Fassung mit Begründung und Test
+  // (`scripts/test-abruf-frist.mjs`, eigener CI-Schritt); hier ohne
+  // `fetchFn`-Parameter. Änderungen hier und dort gemeinsam.
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error('Abruf-Frist überschritten (' + was + ')'));
+      };
+      timer = setTimeout(function () { abbrechen('Kopfzeilen ' + KOPF_FRIST_MS + ' ms'); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error('Antwort nach Ablauf der Frist verworfen');
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen('Rumpf ' + RUMPF_FRIST_MS + ' ms'); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
   function tick() {
-    fetch(stateUrl(), { cache: 'no-store' })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    abrufMitFrist(stateUrl(), { cache: 'no-store' }, function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (data) { errorCount = 0; showOffline(false); applyData(data); setTimeout(tick, POLL_OK_MS); })
       .catch(function () { errorCount++; if (errorCount >= 2) showOffline(true); setTimeout(tick, POLL_FAIL_MS); });
   }

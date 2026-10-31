@@ -329,6 +329,7 @@ pub fn build_monitor_state(
     let match_info = court.current_match.map(|m| MonitorMatch {
         match_id: m.id,
         discipline: m.discipline.as_str().to_string(),
+        class_label: m.class_label.clone(),
         event_label: format!("{} {}", m.draw_name, m.round_name)
             .trim()
             .to_string(),
@@ -336,6 +337,8 @@ pub fn build_monitor_state(
         team1: m.team1.iter().map(player).collect(),
         team2: m.team2.iter().map(player).collect(),
         sets,
+        team1_seed: m.team1_seed.clone(),
+        team2_seed: m.team2_seed.clone(),
     });
     MonitorState {
         court_id,
@@ -614,6 +617,68 @@ mod tests {
             json.contains("\"pushFallbackSlow\":true"),
             "Feldname wie im Asset erwartet: {json}"
         );
+    }
+
+    /// Spec setzplaetze-anzeigen: Der Court-Monitor bekommt den Setzplatz im
+    /// Monitor-Zustand, ohne Schalter.
+    #[test]
+    fn build_monitor_state_traegt_die_setzung() {
+        use crate::btp::model::{BtpMatch, MatchResult, MatchStatus, ScoringFormat};
+        let m = BtpMatch {
+            id: 7,
+            draw_id: 1,
+            planning_id: 0,
+            from1: None,
+            from2: None,
+            display_order: None,
+            highlight: 0,
+            draw_name: "HE".into(),
+            discipline: crate::btp::model::Discipline::MensSingles,
+            class_label: String::new(),
+            round_name: "Finale".into(),
+            match_num: None,
+            planned_time: None,
+            team1: vec![],
+            team2: vec![],
+            entry1_id: 1,
+            entry2_id: 2,
+            team1_seed: None,
+            team2_seed: Some("1".into()),
+            court: None,
+            court_id: Some(101),
+            location_id: None,
+            official1_id: None,
+            official2_id: None,
+            sets: vec![],
+            winner: None,
+            result: MatchResult::Normal,
+            status: MatchStatus::OnCourt,
+            finished_at: None,
+            pause_ms: None,
+            preparation_call_ts: None,
+            preparation_hall: None,
+            scoring: ScoringFormat::default(),
+        };
+        let court = MonitorCourt {
+            tournament_name: String::new(),
+            current_match: Some(m),
+            sets: vec![],
+            court_state: None,
+            on_court_since_ms: None,
+            seq: 0,
+        };
+        let state = build_monitor_state(
+            101,
+            "1".into(),
+            None,
+            court,
+            &crate::config::CourtMonitorConfig::default(),
+            &crate::config::CallTimerConfig::default(),
+            AdAnzeige::default(),
+        );
+        let mi = state.match_info.expect("Match am Feld");
+        assert_eq!(mi.team1_seed, None);
+        assert_eq!(mi.team2_seed.as_deref(), Some("1"));
     }
 
     #[test]

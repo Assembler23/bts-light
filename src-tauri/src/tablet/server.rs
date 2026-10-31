@@ -598,6 +598,13 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/info/logo", get(info_tournament_logo))
         .route("/info/announce/freetext", get(info_announce_freetext))
         .route("/info/announce/jobs", get(info_announce_jobs))
+        // Ansage-Seite im Browser (Spec ansage-im-browser): bewusst nur
+        // GET — die Seite liest fertige Ansagen und vertont nichts auf
+        // Zuruf. Sonst spräche jeder im Hallennetz beliebigen Text auf
+        // Azure-Kosten in die Halle.
+        .route("/ansage", get(ansage_page))
+        .route("/ansage/feed", get(ansage_feed))
+        .route("/ansage/audio/{id}", get(ansage_audio))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
         .route("/combo", get(combo_page))
@@ -1805,6 +1812,26 @@ struct FreetextQuery {
     since: u64,
 }
 
+/// Abfrage der Ansage-Aufträge: wie beim Freitext, dazu `auto`.
+#[derive(serde::Deserialize)]
+struct AnnounceJobsQuery {
+    #[serde(default)]
+    hall: String,
+    #[serde(default)]
+    since: u64,
+    /// `1` (oder `true`) = auch die Erst-Ansage `court_assigned` liefern.
+    /// Bewusst als Text: Ein unerwarteter Wert soll nicht die ganze Abfrage
+    /// mit 400 scheitern lassen, sondern schlicht „ohne" bedeuten.
+    #[serde(default)]
+    auto: String,
+}
+
+impl AnnounceJobsQuery {
+    fn mit_auto(&self) -> bool {
+        matches!(self.auto.trim(), "1" | "true")
+    }
+}
+
 /// Freitext-Ansagen für eine Halle (`id > since`). Ein Ansage-Slave pollt das
 /// vom Master, um Freitexte seiner Halle (oder „alle") anzusagen.
 async fn info_announce_freetext(
@@ -1820,12 +1847,138 @@ async fn info_announce_freetext(
 /// Derselbe Weg wie beim Freitext, nur mit Struktur statt fertigem Text: Der
 /// Aufruf wird erst am Ansage-Gerät zu Worten — mit dessen Stimme, Gong und
 /// Namenskorrektur, damit er klingt wie jeder andere Aufruf auch.
+///
+/// Die Erst-Ansage `court_assigned` (Spec `ansage-im-browser`, E2) nur mit
+/// `?auto=1`: Ein LAN-Ansage-Slave fragt ohne und erkennt neue Spiele selbst
+/// — sonst hörte seine Halle jeden Aufruf doppelt. Ältere Slaves kennen die
+/// Art ohnehin nicht und überspringen sie.
 async fn info_announce_jobs(
     State(ctx): State<Arc<ServerCtx>>,
-    Query(q): Query<FreetextQuery>,
+    Query(q): Query<AnnounceJobsQuery>,
 ) -> impl IntoResponse {
-    let items = ctx.tablet.announce_jobs_since(&q.hall, q.since, now_ms());
+    let items = ctx
+        .tablet
+        .announce_jobs_since(&q.hall, q.since, now_ms(), q.mit_auto());
     ([(header::CACHE_CONTROL, "no-store")], Json(items))
+}
+
+/// Rendert `ansage.html`. `base` endet mit `/` (LAN `/`).
+fn render_ansage_html(base: &str) -> String {
+    assets::ANSAGE_HTML.replace("__BASE__", base)
+}
+
+/// Ansage-Seite (`/ansage`): Halle wählen, Ton freischalten, zuhören.
+async fn ansage_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(render_ansage_html("/")),
+    )
+}
+
+#[derive(serde::Deserialize)]
+struct AnsageQuery {
+    #[serde(default)]
+    halle: String,
+    #[serde(default)]
+    since: u64,
+    /// `1`, wenn die Seite sprechen kann und der Ton freigeschaltet ist —
+    /// nur dann zählt sie als Ansage-Gerät ihrer Halle.
+    #[serde(default)]
+    hoert: u8,
+}
+
+/// Baut den Feed einer Ansage-Seite. Getrennt von der Route, damit die
+/// Cloud (Etappe E4) dieselbe Regel nutzt.
+///
+/// Trägt bewusst **nichts** aus der Azure-Konfiguration außer der Aussage
+/// „der PC kann vertonen" (`hostAudio`).
+pub fn ansage_feed_bauen(
+    tablet: &TabletState,
+    cfg: &AppConfig,
+    halle: &str,
+    since: u64,
+    now_ms: u64,
+) -> relay_proto::AnsageFeed {
+    let grund = if cfg.slave_mode {
+        Some("slave")
+    } else if !cfg.announce.page_audio {
+        Some("schalter_aus")
+    } else if !tablet.ansage().vertoner_aktiv(now_ms) {
+        Some("renderer_weg")
+    } else {
+        None
+    };
+    let az = &cfg.azure_tts;
+    let azure = az.enabled && !az.key.trim().is_empty() && !az.region.trim().is_empty();
+    // Ohne Azure vertont der PC mit der Windows-Stimme (PR 1b, ADR 0066) —
+    // sonst meldete sich eine Seite ohne Gerätestimme (Pi) nie als Zuhörer,
+    // und es würde gar nicht erst vertont.
+    let host_audio = azure || crate::ansage_ton::seiten_stimme_vorhanden();
+    let belegung = tablet.ansage_belegung();
+    let eintraege = tablet
+        .ansage()
+        .eintraege_fuer(halle, since, &belegung, now_ms);
+    relay_proto::AnsageFeed {
+        aktiv: grund.is_none(),
+        host_audio,
+        grund: grund.map(str::to_string),
+        halls: tablet.ansage_hallen(),
+        belegung,
+        eintraege,
+    }
+}
+
+/// Darf eine Seite mit dieser Halle als Zuhörer zählen? Nur mit einer Halle,
+/// die es im Turnier gibt — bei nur einer Halle (Liste leer) ohne Wahl. Sonst
+/// könnte ein Gerät im Hallennetz mit erfundenen Hallennamen die
+/// Zuhörerliste füllen (echte Seiten blieben draußen und stumm) oder ohne
+/// Halle für alle Hallen „zuhören" und so Azure-Aufrufe auslösen, die
+/// niemand hört (Security-Review E1).
+fn praesenz_halle_bekannt(hallen: &[String], halle: &str) -> bool {
+    let h = halle.trim();
+    if hallen.is_empty() {
+        return h.is_empty();
+    }
+    !h.is_empty() && hallen.iter().any(|k| relay_proto::halle_passt(k, h))
+}
+
+/// Feed der Ansage-Seite (`/ansage/feed?halle=&since=&hoert=1`).
+async fn ansage_feed(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<AnsageQuery>,
+) -> impl IntoResponse {
+    let now = now_ms();
+    let feed = ansage_feed_bauen(&ctx.tablet, &ctx.app_config_arc(), &q.halle, q.since, now);
+    // Präsenz nur, solange der PC auch wirklich Ansagen erzeugt — sonst
+    // meldete die Turnierleitungs-Seite „Aufruf erklingt", während die
+    // Seite auf nichts wartet.
+    if q.hoert == 1 && feed.aktiv && praesenz_halle_bekannt(&feed.halls, &q.halle) {
+        ctx.tablet.ansage().seite_hoert(&q.halle, now);
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Json(feed))
+}
+
+/// Audio eines Ansage-Eintrags — nur im RAM, nach 60 s 404.
+async fn ansage_audio(State(ctx): State<Arc<ServerCtx>>, Path(id): Path<u64>) -> Response {
+    match ctx.tablet.ansage().audio(id, now_ms()) {
+        Some((mime, bytes)) => {
+            // Nur die beiden Formate, die der Kern selbst erzeugt.
+            let mime = if mime == "audio/wav" {
+                "audio/wav"
+            } else {
+                "audio/mpeg"
+            };
+            (
+                [
+                    (header::CONTENT_TYPE, mime),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                bytes.as_ref().clone(),
+            )
+                .into_response()
+        }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// Liefert die HTML der Werbe-Anzeige. Pollt `/info/ad/state` für die
@@ -2116,6 +2269,9 @@ async fn info_preparation_state(
                 "label": format!("{} {}", m.draw_name, m.round_name).trim().to_string(),
                 "team1": m.team1.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
                 "team2": m.team2.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+                // Setzplatz (ADR 0059); null = ungesetzt.
+                "team1_seed": m.team1_seed,
+                "team2_seed": m.team2_seed,
                 "match_num": m.match_num,
                 "planned_time": m.planned_time,
                 "draw_id": m.draw_id,
@@ -3261,6 +3417,9 @@ pub(crate) async fn write_result_to_btp(
     config: &AppConfig,
     update: &proto::MatchUpdate,
 ) -> Result<(), String> {
+    // Schreib-Gate (ADR 0060): solange der TP-Upload die Datei liest, wartet
+    // dieser Write — und umgekehrt wartet der Upload auf uns. Guard bis zum Ende.
+    let _schreibt = crate::btp::write_gate::GATE.schreiben().await;
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -3314,6 +3473,7 @@ pub(crate) async fn write_courts_to_btp(
     if courts.is_empty() && match_courts.is_empty() {
         return Ok(());
     }
+    let _schreibt = crate::btp::write_gate::GATE.schreiben().await; // ADR 0060
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -3353,6 +3513,7 @@ pub(crate) async fn write_officials_to_btp(
     if entries.is_empty() {
         return Ok(());
     }
+    let _schreibt = crate::btp::write_gate::GATE.schreiben().await; // ADR 0060
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -3389,6 +3550,7 @@ pub(crate) async fn write_highlight_to_btp(
     if entries.is_empty() {
         return Ok(());
     }
+    let _schreibt = crate::btp::write_gate::GATE.schreiben().await; // ADR 0060
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -3464,6 +3626,11 @@ pub(crate) fn match_brief(
         finalized,
         sr_names: officials.0,
         ar_names: officials.1,
+        // Dieser Host deutet `teams_corrected` (ADR 0067) → das Tablet darf
+        // „Mannschaften tauschen" anbieten.
+        teams_correction: true,
+        seed_a: m.team1_seed.clone(),
+        seed_b: m.team2_seed.clone(),
     }
 }
 
@@ -4301,6 +4468,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -4344,6 +4513,46 @@ mod tests {
         let mut m = match_on_court();
         m.scoring = scoring;
         make_ctx_with(port, m)
+    }
+
+    /// Spec setzplaetze-anzeigen: Die LAN-Vorbereitungsliste trägt den
+    /// Setzplatz unter `team1_seed`/`team2_seed` (ungesetzt = null).
+    #[tokio::test]
+    async fn vorbereitungsliste_traegt_die_setzung() {
+        let mut m = match_on_court();
+        m.status = MatchStatus::Scheduled;
+        m.court = None;
+        m.court_id = None;
+        m.team2_seed = Some("1".into());
+        let ctx = Arc::new(make_ctx_with(1, m));
+        let resp = info_preparation_state(State(ctx), Query(DeviceHeartbeat::default()))
+            .await
+            .into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let c = &v["candidates"][0];
+        assert_eq!(c["match_id"], serde_json::json!(42), "Fixture: {v}");
+        assert!(c["team1_seed"].is_null());
+        assert_eq!(c["team2_seed"], serde_json::json!("1"));
+    }
+
+    /// `?auto=1` schaltet die Erst-Ansage zu (Spec `ansage-im-browser`, E2);
+    /// ohne den Parameter — so fragt ein LAN-Ansage-Slave — bleibt sie
+    /// draußen, und ein unerwarteter Wert lässt die Abfrage nicht scheitern.
+    #[test]
+    fn announce_jobs_query_auto_nur_bei_1_oder_true() {
+        let lies = |q: &str| {
+            let uri: axum::http::Uri = format!("/info/announce/jobs{q}").parse().unwrap();
+            Query::<AnnounceJobsQuery>::try_from_uri(&uri).unwrap().0
+        };
+        assert!(!lies("?hall=A&since=5").mit_auto());
+        assert!(lies("?hall=A&since=5&auto=1").mit_auto());
+        assert!(lies("?auto=true").mit_auto());
+        assert!(!lies("?auto=0").mit_auto());
+        assert!(!lies("?auto=ja").mit_auto());
+        assert_eq!(lies("?hall=Halle%20B&since=7&auto=1").since, 7);
     }
 
     fn make_ctx(port: u16) -> ServerCtx {
@@ -4945,6 +5154,75 @@ mod tests {
         let e = ctx.tablet.match_times_store().entry(42).unwrap();
         assert!(e.finished_ms.is_some());
         assert!(e.regular, "regulär ausgespielt → Messwert");
+    }
+
+    /// ADR 0060 (TP-Upload): Jede der vier Write-Funktionen nimmt die
+    /// Lesesperre des Schreib-Gates — nach dem Frühausgang für leere Listen,
+    /// vor dem ersten BTP-Kontakt. Textprüfung, weil nur `write_result_to_btp`
+    /// unten auch dynamisch geprüft wird.
+    #[test]
+    fn alle_vier_write_funktionen_nehmen_das_schreib_gate() {
+        let quelle = include_str!("server.rs");
+        for name in [
+            "write_result_to_btp",
+            "write_courts_to_btp",
+            "write_officials_to_btp",
+            "write_highlight_to_btp",
+        ] {
+            let start = quelle
+                .find(&format!("pub(crate) async fn {name}("))
+                .unwrap_or_else(|| panic!("{name} nicht gefunden"));
+            let koerper = &quelle[start..];
+            let gate = koerper
+                .find("write_gate::GATE.schreiben().await")
+                .unwrap_or(usize::MAX);
+            let btp = koerper.find("client::send_request").unwrap_or(usize::MAX);
+            assert!(
+                gate < btp,
+                "{name}: Gate-Zeile fehlt oder steht nach dem ersten BTP-Kontakt"
+            );
+        }
+    }
+
+    /// ADR 0060 (TP-Upload): `write_result_to_btp` hält die Lesesperre des
+    /// Schreib-Gates — solange die Kopie den Guard hält, erreicht kein
+    /// SENDUPDATE den Mock; danach läuft der Write regulär durch, nichts geht
+    /// verloren. Nutzt das prozessweite `GATE` (die Write-Funktionen kennen nur
+    /// `&AppConfig`): Parallel laufende Tests werden in den 300 ms höchstens
+    /// kurz gebremst; `Beschaeftigt` käme nur, wenn ein fremder Test-Write
+    /// länger als 10 s die Lesesperre hielte — dann die Frist heben, nicht den
+    /// Test streichen.
+    #[tokio::test]
+    async fn write_result_haelt_das_schreib_gate() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let ctx = make_ctx(port);
+        let gate = &crate::btp::write_gate::GATE;
+        let kopie = gate
+            .fuer_kopie(
+                std::time::Duration::ZERO,
+                std::time::Duration::from_secs(10),
+            )
+            .await
+            .expect("kein Write hält das Gate");
+        let cfg = ctx.config.clone();
+        let write = tokio::spawn(async move {
+            write_result_to_btp(&cfg, &merker_update(vec![(21, 10), (21, 15)], true, 0)).await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "Write darf nicht laufen, solange die Kopie den Guard hält"
+        );
+        drop(kopie);
+        write
+            .await
+            .unwrap()
+            .expect("Write läuft nach der Kopie durch");
+        assert_eq!(
+            recorded.lock().unwrap().len(),
+            1,
+            "genau ein SENDUPDATE, nichts verloren"
+        );
     }
 
     /// Spec `spielzeiten-prognose` (E3): Eine Ergebniskorrektur überschreibt
@@ -7326,5 +7604,198 @@ mod tests {
         );
         // Die Uhrzeit gehört dazu, sonst ist keine Rate zu bilden.
         assert!(v["serverNowMs"].as_u64().unwrap_or(0) > 0);
+    }
+
+    // ─── Ansage-Seite (Spec ansage-im-browser, E1) ───────────────────────
+
+    /// Server mit voll gesetzter Azure-Konfiguration und eingeschalteter
+    /// Seiten-Vertonung auf einem freien Port.
+    async fn ansage_server() -> (String, Arc<ServerCtx>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        let mut config = AppConfig::default();
+        config.announce.page_audio = true;
+        config.azure_tts.enabled = true;
+        config.azure_tts.region = "westeurope".into();
+        config.azure_tts.key = "geheimer-schluessel".into();
+        config.azure_tts.voice = "de-DE-KatjaNeural".into();
+        config.save_to(&config_path).unwrap();
+        let tmp = std::env::temp_dir();
+        let shared = Arc::new(std::sync::Mutex::new(config.clone()));
+        let ctx = Arc::new(ServerCtx::new(
+            Arc::new(TabletState::default()),
+            config,
+            reqwest::Client::new(),
+            tmp.clone(),
+            config_path,
+            dir.path().join("assign.json"),
+            tmp,
+            shared,
+        ));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(ctx.clone());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}"), ctx, dir)
+    }
+
+    fn ansage_entwurf() -> crate::tablet::ansage::AnsageEntwurf {
+        crate::tablet::ansage::AnsageEntwurf {
+            hall: String::new(),
+            art: relay_proto::AnsageArt::Freetext,
+            court_id: None,
+            match_id: None,
+            gong: Some(relay_proto::AnsageGong::Info),
+            lang: "de".into(),
+            rate: 0.8,
+            segmente: vec!["Siegerehrung".into()],
+        }
+    }
+
+    #[tokio::test]
+    async fn der_ansage_feed_traegt_keine_azure_daten() {
+        let (base, ctx, _dir) = ansage_server().await;
+        ctx.tablet.ansage().vertoner_lebt(now_ms());
+        ctx.tablet.ansage().ablegen(
+            ansage_entwurf(),
+            Some(("audio/mpeg".into(), vec![1, 2, 3])),
+            now_ms(),
+        );
+        let text = reqwest::get(format!("{base}/ansage/feed"))
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["aktiv"], true, "{text}");
+        assert_eq!(v["hostAudio"], true, "{text}");
+        assert_eq!(v["eintraege"].as_array().unwrap().len(), 1);
+        // Kriterium 8: kein Feld und kein Wert der Azure-Konfiguration.
+        let klein = text.to_lowercase();
+        for verboten in ["azure", "region", "key", "westeurope", "geheim", "katja"] {
+            assert!(!klein.contains(verboten), "{verboten} in {text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn unter_ansage_gibt_es_nur_get() {
+        let (base, _ctx, _dir) = ansage_server().await;
+        let client = reqwest::Client::new();
+        for pfad in ["/ansage", "/ansage/feed", "/ansage/audio/1"] {
+            for methode in [
+                reqwest::Method::POST,
+                reqwest::Method::PUT,
+                reqwest::Method::DELETE,
+            ] {
+                let r = client
+                    .request(methode.clone(), format!("{base}{pfad}"))
+                    .body("Freitext auf Azure-Kosten")
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    r.status(),
+                    reqwest::StatusCode::METHOD_NOT_ALLOWED,
+                    "{methode} {pfad}"
+                );
+            }
+        }
+        let seite = reqwest::get(format!("{base}/ansage")).await.unwrap();
+        assert_eq!(seite.status(), reqwest::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn ansage_audio_ist_nach_einer_minute_weg() {
+        let (base, ctx, _dir) = ansage_server().await;
+        let jetzt = now_ms();
+        let frisch = ctx.tablet.ansage().ablegen(
+            ansage_entwurf(),
+            Some(("audio/mpeg".into(), vec![9; 16])),
+            jetzt,
+        );
+        let r = reqwest::get(format!("{base}/ansage/audio/{frisch}"))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), reqwest::StatusCode::OK);
+        assert_eq!(r.headers()[header::CONTENT_TYPE], "audio/mpeg");
+        assert_eq!(r.bytes().await.unwrap().len(), 16);
+
+        let alt = ctx.tablet.ansage().ablegen(
+            ansage_entwurf(),
+            Some(("audio/mpeg".into(), vec![9; 16])),
+            jetzt - relay_proto::ANSAGE_TTL_MS - 1,
+        );
+        let r = reqwest::get(format!("{base}/ansage/audio/{alt}"))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), reqwest::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn eine_seite_zaehlt_nur_als_zuhoerer_wenn_der_pc_ansagen_erzeugt() {
+        let (base, ctx, _dir) = ansage_server().await;
+        // Vertoner noch nie gesehen → nicht aktiv → keine Präsenz.
+        let v: serde_json::Value =
+            reqwest::get(format!("{base}/ansage/feed?halle=Halle%20A&hoert=1"))
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+        assert_eq!(v["grund"], "renderer_weg");
+        assert!(!ctx.tablet.has_announce_listener("Halle A", now_ms()));
+
+        ctx.tablet.ansage().vertoner_lebt(now_ms());
+        // Ohne `hoert=1` (Ton nicht frei, keine Stimme): keine Präsenz.
+        reqwest::get(format!("{base}/ansage/feed")).await.unwrap();
+        assert!(!ctx.tablet.has_announce_listener("", now_ms()));
+        // Turnier mit einer Halle: ein erfundener Hallenname zählt nicht.
+        reqwest::get(format!("{base}/ansage/feed?halle=Erfunden&hoert=1"))
+            .await
+            .unwrap();
+        assert!(!ctx.tablet.has_announce_listener("", now_ms()));
+        reqwest::get(format!("{base}/ansage/feed?hoert=1"))
+            .await
+            .unwrap();
+        assert!(ctx.tablet.has_announce_listener("", now_ms()));
+    }
+
+    #[test]
+    fn praesenz_nur_fuer_hallen_die_es_gibt() {
+        let zwei = vec!["Halle A".to_string(), "Halle B".to_string()];
+        assert!(praesenz_halle_bekannt(&zwei, " halle a "));
+        assert!(!praesenz_halle_bekannt(&zwei, "Erfunden 17"));
+        assert!(
+            !praesenz_halle_bekannt(&zwei, ""),
+            "ohne Wahl nicht alle Hallen"
+        );
+        // Eine Halle: nichts zu wählen, ein Hallenname wäre erfunden.
+        assert!(praesenz_halle_bekannt(&[], ""));
+        assert!(!praesenz_halle_bekannt(&[], "Halle A"));
+    }
+
+    #[test]
+    fn der_feed_nennt_den_grund_wenn_er_nicht_aktiv_ist() {
+        let tablet = TabletState::default();
+        let mut cfg = AppConfig::default();
+        assert_eq!(
+            ansage_feed_bauen(&tablet, &cfg, "", 0, 1_000)
+                .grund
+                .as_deref(),
+            Some("schalter_aus")
+        );
+        cfg.announce.page_audio = true;
+        cfg.slave_mode = true;
+        let f = ansage_feed_bauen(&tablet, &cfg, "", 0, 1_000);
+        assert!(!f.aktiv);
+        assert_eq!(f.grund.as_deref(), Some("slave"));
+        assert_eq!(
+            f.host_audio,
+            crate::ansage_ton::seiten_stimme_vorhanden(),
+            "ohne Azure vertont der PC nur mit einer Windows-Stimme"
+        );
     }
 }

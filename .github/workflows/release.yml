@@ -83,12 +83,72 @@ jobs:
             target/release/bundle/nsis/*-setup.exe
             target/release/bundle/nsis/*-setup.exe.sig
 
+  # Tablet-APK. Mit Keystore-Secret signiert (Release), sonst Debug-APK —
+  # dann müssen Tablets beim späteren Umstieg auf die signierte Variante
+  # einmal deinstalliert werden (andere Signatur).
+  # continue-on-error: ein APK-Fehlschlag darf den Windows-Installer und
+  # latest.json nie blockieren (Auto-Update der Desktop-App bleibt
+  # unberührt); publish kommt ohne APK aus.
+  android:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          # Nur `platform-tools`: Die Action installiert standardmäßig auch
+          # das alte SDK-Paket `tools`, das Google aus dem Repository
+          # entfernt hat — seit 15.09.2026 brach der Job damit vor dem
+          # ersten Gradle-Aufruf ab („Failed to find package 'tools'").
+          # Build-Tools und Plattform lädt AGP selbst nach (Lizenzen nimmt
+          # die Action an).
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: APK bauen
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          VERSION=$(jq -r .version ../package.json)
+          if [ -n "${KEYSTORE_B64}" ]; then
+            echo "${KEYSTORE_B64}" | base64 -d > release.keystore
+            export ANDROID_KEYSTORE_PATH="$PWD/release.keystore"
+            ./gradlew --no-daemon :app:assembleRelease
+            cp app/build/outputs/apk/release/app-release.apk "bts-light-tablet-${VERSION}.apk"
+          else
+            echo "::warning::ANDROID_KEYSTORE_B64 fehlt — Debug-APK statt signierter Release-APK"
+            ./gradlew --no-daemon :app:assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk "bts-light-tablet-${VERSION}-debug.apk"
+          fi
+          ls -la bts-light-tablet-*.apk
+      - name: APK ans GitHub-Release hängen
+        working-directory: android
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" bts-light-tablet-*.apk --clobber --repo "${GITHUB_REPOSITORY}"
+
   # Lädt die Release-Assets, baut latest.json und schiebt alles nach
   # badhub.de. Läuft auf Linux, weil rsync/ssh dort problemlos verfügbar
   # sind (Windows-Runner haben kein rsync).
   publish:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, android]
+    # publish darf vom android-Job NIE blockiert werden, egal wie GitHub
+    # continue-on-error in `needs` wertet — nur `build` muss grün sein.
+    # `always()` verhindert, dass ein (durch continue-on-error) fehlgeschlagener
+    # oder übersprungener android-Job den Job insgesamt abbricht, bevor die
+    # eigentliche Bedingung überhaupt geprüft wird.
+    if: always() && needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -131,6 +191,10 @@ jobs:
           ssh bts-deploy@178.104.221.177 \
             'ls /var/www/badhub/public/download/bts-light/ | grep "setup.exe$" || true' > exes.txt
           (cd rel && ls *-setup.exe) >> exes.txt
+          # Tablet-APKs genauso: was auf dem Server liegt plus die frisch gebaute.
+          ssh bts-deploy@178.104.221.177 \
+            'ls /var/www/badhub/public/download/bts-light/ | grep "^bts-light-tablet-.*\.apk$" || true' > apks.txt
+          (cd rel && ls bts-light-tablet-*.apk 2>/dev/null || true) >> apks.txt
           # Release-Daten je Version aus den Tags (Version → Erstell-Datum).
           git for-each-ref --format '%(refname:short) %(creatordate:short)' refs/tags > dates.txt
           # Zuletzt veroeffentlichter Tag VOR diesem: Damit umfassen die
@@ -150,6 +214,7 @@ jobs:
           node scripts/build-release-page.mjs \
             --changelog docs/changelog.md \
             --files exes.txt \
+            --apks apks.txt \
             --dates dates.txt \
             --out rel/index.html \
             --notes-out notes.txt \
@@ -194,8 +259,15 @@ jobs:
           set -euo pipefail
           SETUP=$(cd rel && ls *_*-setup.exe | head -1)
           cp "rel/${SETUP}" "rel/BTS.Light-setup.exe"
+          # Fester Name nur für die SIGNIERTE APK — eine Debug-APK (ohne Keystore-
+          # Secret gebaut) wäre debuggable und würde später keine signierte
+          # Aktualisierung annehmen; sie bleibt nur unter ihrem -debug-Namen erreichbar.
+          SIGNIERT=$(cd rel && ls bts-light-tablet-*.apk 2>/dev/null | grep -v -- '-debug\.apk$' | head -1 || true)
+          if [ -n "${SIGNIERT}" ]; then cp "rel/${SIGNIERT}" "rel/bts-light-tablet.apk"; fi
+          APKS=$(ls rel/*.apk 2>/dev/null || true)
           rsync -av \
             rel/latest.json \
             rel/index.html \
             rel/*-setup.exe \
+            ${APKS} \
             bts-deploy@178.104.221.177:/var/www/badhub/public/download/bts-light/

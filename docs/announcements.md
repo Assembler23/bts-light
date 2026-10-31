@@ -12,17 +12,42 @@ des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
 
 ## Funktionsweise
 
-- **Technik:** Browser-Web-Speech-API (`speechSynthesis`) im WebView; der
-  Gong wird per Web Audio API synthetisiert. Geräte-lokal, kein externer
-  Dienst. Die Ansage spielt über die Lautsprecher des Turnier-PCs, auch
-  wenn das Fenster ins Tray minimiert ist.
-- **Auslöser:** Die immer eingehängte Komponente
-  [`MatchAnnouncer`](../src/components/MatchAnnouncer.tsx) pollt alle 2 s
-  `tablet_overview()` und merkt sich pro Feld die `match_id`. Der **erste
-  Poll ist die Baseline** — bereits laufende Spiele werden nicht
-  nachträglich angesagt. Danach löst jede neue `match_id` auf einem Feld
-  eine Ansage aus. Eine Match-ID wird im 5-s-Fenster nicht doppelt
-  angesagt.
+- **Technik (seit v0.9.318):** Gong und Stimme spielt der **Rust-Kern**
+  über Windows (WASAPI) — siehe [Ausgabegerät](#ausgabegerät-seit-v09318).
+  Der Gong wird im Fenster per Web Audio gerendert, die Stimme ist Azure
+  (wenn eingerichtet) oder die **Windows-Stimme** (OneCore). Die
+  Browser-Stimme (`speechSynthesis`) springt nur noch als Rückfall ein. Die
+  Ansage spielt über die Lautsprecher des Turnier-PCs, auch wenn das Fenster
+  ins Tray minimiert ist.
+- **Auslöser am Turnier-PC (Master, seit v0.9.314):** Der **Kern** vergleicht
+  in jedem Sync-Lauf die Feldbelegung mit der zuletzt gesehenen
+  ([`tablet/erst_ansage.rs`](../src-tauri/src/tablet/erst_ansage.rs), Aufruf
+  in `sync.rs` hinter dem Slave-Rücksprung, **nach** Schiedsrichter-Rotation
+  und Zettel-Autodruck — erst dann steht die Besetzung des neuen Felds fest).
+  Je neuer `match_id` auf einem Feld legt er einen Ansage-Auftrag
+  **`court_assigned`** ab (Feld, Spiel, Halle des Felds). Gesprochen wird er
+  am PC vom [`AnnounceJobPlayer`](../src/components/AnnounceJobPlayer.tsx)
+  (bei „Ansagen aktivieren") und auf den Ansage-Seiten im Browser vom
+  Vertoner — beide über `jobZuAnsage` → `courtAnsage`, also mit denselben
+  Angaben wie zuvor: Klasse, Runde, Tabletbedienung und SR/AR gemäß
+  Schaltern. Spec [ansage-im-browser](features/ansage-im-browser.md) (E2),
+  Entscheidung [ADR 0064](adr/0064-erst-ansage-im-kern.md).
+  <!-- pruef: "court_assigned" in src-tauri/src/tablet/state.rs -->
+- **Auslöser am LAN-Ansage-Slave:** unverändert die Komponente
+  [`MatchAnnouncer`](../src/components/MatchAnnouncer.tsx) (`erkennen` nur
+  bei `slave_mode`). Sie pollt alle 2 s `tablet_overview()` und vergleicht
+  mit [`src/io/announceBaseline.mjs`](../src/io/announceBaseline.mjs).
+  Der Slave holt die Aufträge des Masters **ohne** `?auto=1` ab und bekommt
+  `court_assigned` deshalb nicht — sonst hörte seine Halle jeden Aufruf
+  doppelt. Der Cloud-Ansage-Slave (`CloudAnnounceSlave`) ist unberührt.
+- **Regeln (Kern und Slave gleich):** Der **erste brauchbare Stand ist
+  Bestandsaufnahme** — bereits laufende Spiele werden nicht nachträglich
+  angesagt. Danach löst jede neue `match_id` auf einem Feld genau eine
+  Ansage aus; dieselbe Match-ID wird im 5-s-Fenster nicht doppelt angesagt.
+  Im Kern setzt zusätzlich ein **Turnierwechsel** (anderer Turniername) die
+  Bestandsaufnahme zurück. Der Stand liegt im `TabletState`, nicht in der
+  `SyncEngine` — er überlebt das Speichern der Einstellungen, das die Engine
+  neu baut.
 - **Eine leere Antwort taugt nicht als Baseline** (Befund 14.08.2026): Die
   ersten Abrufe nach dem Start kommen, bevor der Sync-Lauf seinen ersten
   BTP-Schnappschuss hat — `tablet_overview()` liefert dann **null Felder**.
@@ -30,9 +55,9 @@ des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
   und die App sagte beim Start **alle laufenden Spiele** an. Die Baseline
   gilt deshalb erst als gesetzt, wenn überhaupt Felder dabei sind; Felder
   **ohne** Spiel sind dagegen ein gültiger Anfangsstand (Turniermorgen —
-  sonst bliebe der erste Aufruf des Tages stumm). Die Entscheidung liegt in
-  [`src/io/announceBaseline.mjs`](../src/io/announceBaseline.mjs) und ist
-  über `scripts/test-announce-baseline.mjs` (CI) festgehalten.
+  sonst bliebe der erste Aufruf des Tages stumm). Festgehalten in
+  `scripts/test-announce-baseline.mjs` (Slave) und den Rust-Tests in
+  `tablet/erst_ansage.rs` (Port aller Fälle) und `sync.rs` (`erst_ansage_*`).
 - **Ein Hallenwechsel holt nichts nach** (Befund 23.08.2026, seit v0.9.257):
   Wurde die Ansage-Halle im Betrieb umgestellt — oder auf „alle Hallen" —,
   sagte das Gerät schlagartig **jedes dort laufende Spiel** noch einmal an.
@@ -49,6 +74,13 @@ des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
   Dieselbe Regel wie bei der Schiedsrichter-Rotation seit v0.9.253: Der erste
   beobachtete Stand ist Ausgangslage, kein Ereignis. Festgehalten in
   `scripts/test-announce-baseline.mjs` („Halle hinzunehmen holt nichts nach").
+
+  Am Master (seit v0.9.314) gilt dasselbe auf anderem Weg: Der Kern filtert
+  gar nicht nach Halle, jeder Auftrag trägt seine Halle, und erst die
+  Zustellung an das Gerät filtert. Wechselt dort die Ansage-Halle, beginnt
+  der `AnnounceJobPlayer` mit einer neuen Bestandsaufnahme — sonst holte er
+  die Aufträge der fremden Halle aus der letzten Minute nach. Ebenso nach dem
+  Aus- und Wiedereinschalten der Ansagen.
 - **Die Halle wird an drei Stellen gesetzt** — Dashboard, Ansage-Einstellungen
   und (am Cloud-Slave) das Geräte-Panel, das mit `announce_hall` zugleich
   festlegt, welche Halle das Gerät bedient. Die Ansage-Einstellungen halten
@@ -69,8 +101,19 @@ dem BTP-**Event**, nicht aus dem Draw-Namen. Auflösungskette im Parser
 - `GameTypeID`: 1 = Einzel, 2 = Doppel.
 - `GenderID`: 1 = Herren, 2 = Damen, 3 = Mixed.
 
-Lässt sich das Event nicht auflösen, ist die Disziplin `Unknown` und wird
-in der Ansage weggelassen.
+Ergibt `GenderID` keinen dieser Werte (seit v0.9.297), liest der Parser
+die Disziplin aus dem Event-Namen, sonst aus dem Draw-Namen: Kürzel
+HE/DE/HD/DD/MX/GD und JE/ME/JD/MD, seit v0.9.307 auch die englischen
+MS/WS/WD/XD/MIX, ausgeschriebene Formen („Jungeneinzel") und zweiteilige
+(„Jungen Doppel"). **MD** ist doppeldeutig: Benutzt das Turnier irgendwo
+MS, WS, WD oder XD (Event- oder Draw-Name), heißt MD „Men's Doubles"
+(Herrendoppel), sonst wie im deutschen Jugend-Schema Mädchendoppel
+(`englisches_schema` in `btp/model.rs`). Anlass: Ein DBV-Jugendturnier
+(10/2026, „JE U15") lieferte einen anderen `GenderID`-Wert, die Ansage
+ließ Disziplin und Klasse komplett weg. Bekannte BTP-Werte haben weiter
+Vorrang. Nennt auch der Name kein Geschlecht („U11 offenes Doppel") oder
+lässt sich das Event nicht auflösen, ist die Disziplin `Unknown` und wird
+in der Ansage weggelassen — samt Klasse.
 
 ### Klasse (seit v0.9.145)
 
@@ -78,11 +121,42 @@ Direkt hinter der Disziplin wird das **Klassen-Kürzel** angesagt
 („Herreneinzel **A**"). Es kommt aus `model::class_label`: bevorzugt aus dem
 **Event-Namen** (trägt die Klasse auch in der Gruppenphase, wo Draws nur
 „Gruppe 1…n" heißen), sonst aus dem **Draw-Namen** („HE A" in der
-K.-o.-Phase). Bekannte Disziplin-Wörter werden entfernt; übrig bleiben darf
+K.-o.-Phase). Getrennt wird an Leerzeichen **und Bindestrichen** (seit
+v0.9.288: die BBB-Ranglisten nennen ihre Events „HD-A", „MX-C"), dann
+werden bekannte Disziplin-Wörter entfernt; übrig bleiben darf
 nur EIN kurzes Kürzel (≤ 4 Zeichen, z. B. „A", „B2", „U15") — **Gruppen-
 oder Auslosungsnamen („Gruppe 3", „Hauptrunde") werden nie angesagt**
 (Nutzer-Vorgabe vom Turnier 17.07.2026). Ohne erkennbares Kürzel bleibt die
-Ansage wie bisher („Herreneinzel"). Durchgereicht wird das Kürzel als
+Ansage wie bisher („Herreneinzel").
+
+**Abgesetzt gesprochen** (seit v0.9.312): Mit nur einem Leerzeichen zogen
+die Stimmen das Kürzel ans Wort — es klang wie „Herreneinzela". Gesprochen
+wird deshalb „Herreneinzel, A": Die Gerätestimme bekommt ein Komma (ein
+Bindestrich wird oft mitgezogen), Azure eine echte Pause von 250 ms, und ein
+reines Buchstaben-Kürzel (1–2 Buchstaben) wird per `say-as characters`
+buchstabiert — sonst liest eine englische Stimme „A" als Artikel. „U15" oder
+„B2" bleiben unverändert. Die Anzeige (Vorbereitungsliste) zeigt weiter
+„Herreneinzel A". Code: `src/io/klasseSprechen.mjs`, getestet von
+`scripts/test-klasse-sprechen.mjs`.
+
+**Englische Kürzel** (seit v0.9.307): MS/WS/WD/XD/MIX zählen ebenfalls
+als Disziplin-Wörter (MD war es schon) — aus „MS A" ging sonst die Klasse
+„A" verloren. **GD** bleibt Mixed (Gemischtes Doppel), auch in einem
+englisch benannten Turnier; das englische Jugend-Schema (BS/GS/BD/GD =
+Girls' Doubles) wird nicht unterstützt.
+
+**Jugendklassen** (seit v0.9.296): Jugendturniere nennen ihre Events
+„JE U15", „MD U17" oder „U11 offenes Doppel". Die Kürzel JE/JD/ME/MD,
+die ausgeschriebenen Jungen-/Mädchen-Wörter und „offenes" zählen deshalb
+ebenfalls als Disziplin-Wörter — sonst bliebe neben „U15" ein zweiter Rest
+übrig und die Klasse fiele weg. Weil BTP nur Herren/Damen/Mixed kennt,
+benennt `src/io/disziplinName.mjs` die Disziplin bei einer Klasse „U" + Zahl
+als **Jungeneinzel/Mädcheneinzel/Jungendoppel/Mädchendoppel** („Boys'/Girls'
+Singles/Doubles" auf Englisch). Dieselbe Tabelle steht wortgleich in
+`tl.html` (Kürzel JE/ME/JD/MD/MX) und `monitor.html` (der Monitor bekommt das
+Kürzel dafür als `MonitorMatch.classLabel`); `scripts/test-disziplin-name.mjs`
+hält die Kopien gleich. Die Stimmenwahl je Disziplin bleibt am
+snake_case-Schlüssel — Jungeneinzel nutzt die Stimme für `mens_singles`. Durchgereicht wird das Kürzel als
 `class_label` (CourtOverview, `MatchBrief.classLabel` für den Cloud-Slave,
 `PreparationCandidate`) und als `className` in den Announcer-Eingaben.
 
@@ -144,13 +218,11 @@ den Ansage-Geräten — mit demselben Code wie jeder andere Aufruf.
 
 | Baustein | Ort |
 |---|---|
-| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `start_play`) | `tablet/state.rs` |
-| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
-| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceStartPlay`) | `tablet/tl.rs` |
-| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `scorekeeper_call`) | `tablet/state.rs` |
-| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`) | `tablet/state.rs` |
-| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceScorekeeper`) | `tablet/tl.rs` |
-| Abholweg | Route `/info/announce/jobs`, Command `pending_announce_jobs` |
+| Auftragstypen `AnnounceJob`/`AnnounceJobKind` (`court_call`, `prep_call`, `officials`, `start_play`, `scorekeeper_call`; seit v0.9.314 `court_assigned` aus dem Kern) | `tablet/state.rs` |
+| Ablegen und Abholen (`publish_announce_job`, `announce_jobs_since`; höchstens 128 Aufträge) | `tablet/state.rs` |
+| Auslösende Aktionen (`AnnounceCourtCall`, `AnnouncePrepCall`, `AnnounceStartPlay`, `AnnounceScorekeeper`) | `tablet/tl.rs` |
+| Erst-Ansage (`court_assigned`, Feldbelegung im Sync-Lauf) | `tablet/erst_ansage.rs`, `TabletState::erst_ansage_pruefen` |
+| Abholweg | Route `/info/announce/jobs` (`court_assigned` nur mit `?auto=1`), Command `pending_announce_jobs` |
 | Sprecher | [`AnnounceJobPlayer.tsx`](../src/components/AnnounceJobPlayer.tsx) |
 
 Eigenschaften, die im Turnierbetrieb zählen:
@@ -303,6 +375,132 @@ Abschnitt „Erneute Aufrufe — je Partei").
   dieselbe Regel wie beim Freitext und bewusst nicht geändert; die Abhilfe
   ist `announce.announce_hall` je Gerät zu setzen.
 
+## Ansage-Seite im Browser (seit v0.9.311)
+
+Tablets, Handys oder ein Pi sprechen die Ansagen einer Halle — **ohne**
+Windows-Programm. Der Turnier-PC baut die Ansage wie für seinen eigenen
+Lautsprecher, vertont sie mit Azure und legt sie ab; die Seite spielt sie nur
+ab. Spec: [features/ansage-im-browser.md](features/ansage-im-browser.md),
+Entscheidung: [ADR 0063](adr/0063-ansage-seiten-text-im-host-kern-vertont.md).
+
+**Einschalten:** Auf der Seite **Ansagen** den Schalter **Audio für
+Ansage-Seiten erzeugen** setzen (voreingestellt aus).
+<!-- pruef: "Audio für Ansage-Seiten erzeugen" in src/components/AnsageSeitenPanel.tsx -->
+Er ist unabhängig von „Ansagen aktivieren": Der PC kann im Büro stumm bleiben
+und trotzdem die Hallen versorgen. Darunter stehen Link und QR-Code je Halle.
+
+**Am Gerät:** Die Seite `http://<PC>:8088/ansage` öffnen (mit der
+verschlüsselten Strecke `https://<PC>:8443/ansage`), bei mehreren Hallen die
+Halle wählen — ohne Wahl startet sie nicht —, dann einmal **Ton
+freischalten** tippen. Danach spricht sie selbst.
+<!-- pruef: "/ansage" in src-tauri/src/tablet/server.rs -->
+<!-- pruef: "Ton freischalten" in src-tauri/assets/ansage.html -->
+
+**Mitlesen und Wiederholen (seit v0.9.315):** Die zuletzt gespielte Ansage
+steht **sehr groß** auf dem Bildschirm — die Schrift passt sich der
+Textlänge an, im Hoch- wie im Querformat, damit auch Hörlose mitlesen können.
+Darunter (quer: rechts daneben) stehen die **Letzten Ansagen**: die fünf
+zuletzt gespielten, die neueste oben, je mit Uhrzeit (Uhr des Geräts) und
+einem kleinen **↻**-Knopf.
+<!-- pruef: "Letzte Ansagen" in src-tauri/assets/ansage.html -->
+<!-- pruef: "auf diesem Gerät wiederholen" in src-tauri/assets/ansage.html -->
+<!-- pruef: "ANSAGE_VERLAUF_MAX = 5" in src/io/ansageSeite.mjs -->
+
+**Hochkant (seit v0.9.316)** ist die Liste auf eine Leiste
+**Letzte Ansagen ▾** (in Klammern die Anzahl) eingeklappt, damit die große
+Ansage deutlich mehr als die halbe Bildschirmhöhe bekommt (auf einem
+üblichen Handy gut drei Viertel); ein Tipp auf die Leiste klappt sie auf und
+wieder zu. Das Gerät merkt sich, ob sie offen war — gespeichert wird nur
+diese Vorliebe, kein Ansagetext. Zum Wiederholen der letzten Ansage muss
+man nicht aufklappen: Die große Ansage hat oben rechts ihren eigenen
+**↻**-Knopf. Quer bleibt die Liste immer offen.
+<!-- pruef: "Letzte Ansage auf diesem Gerät wiederholen" in src-tauri/assets/ansage.html -->
+<!-- pruef: "bts-ansage-verlauf-offen" in src-tauri/assets/ansage.html -->
+<!-- pruef: /id="verlauf-auf" type="button" aria-expanded="false" aria-controls="verlauf-inhalt"/ in src-tauri/assets/ansage.html -->
+
+- **↻ spielt nur auf diesem Gerät** — der Turnier-PC erfährt davon nichts,
+  andere Seiten der Halle bleiben still. Die Wiederholung wartet, bis eine
+  laufende Ansage zu Ende ist, und kommt mit Gong wie das Original. Sie gilt
+  auch, wenn inzwischen ein anderes Spiel auf dem Feld steht oder die Minute
+  abgelaufen ist — sie ist ja ausdrücklich gewünscht. Mehrfaches Tippen
+  spielt sie trotzdem nur einmal; war der Ton angehalten (Anruf, Bildschirm
+  aus), gibt der Tipp ihn wieder frei.
+- **Audio:** Die Seite hält das Audio der fünf im Speicher, denn auf dem
+  Turnier-PC verfällt es nach einer Minute. Ohne Audio (Gerätestimme) spricht
+  die Gerätestimme den Text erneut.
+- **Was in die Liste kommt:** nur, was die Seite gespielt hat — keine
+  verfallenen, keine für ein anderes Spiel, keine einer fremden Halle. Eine
+  Wiederholung ist kein neuer Eintrag.
+- **Nichts bleibt liegen:** Die Liste lebt nur in der offenen Seite. Neu
+  laden leert sie; im Gerätespeicher stehen keine Spielernamen (nur die
+  gewählte Halle und, ob die Liste aufgeklappt war). Beim
+  Wechsel der Halle bleibt sie stehen — sie zeigt, was dieses Gerät gespielt
+  hat.
+- **Grenze:** Text erscheint nur, wenn der Turnier-PC die Ansage für diese
+  Halle erzeugt — also nur, solange in der Halle eine Seite mit
+  freigeschaltetem Ton zuhört. Eine Seite nur zum Mitlesen, ohne Ton, gibt es
+  (noch) nicht. Die Monitor-Seiten im Ansage-Modus zeigen keinen Verlauf.
+
+Was die Seite spricht: die Aufträge der Turnierleitungs-Seite (Aufruf,
+Nachruf, Besetzung, „Bitte beginnen", Bedienung), Freitexte, die
+Ansage-Knöpfe der Desktop-App (Feld aufrufen, Vorbereitungs-Aufruf und
+-Nachruf, SR/AR ansagen) und seit v0.9.314 (Etappe E2) auch die
+**automatische** Ansage, wenn ein neues Spiel auf ein Feld kommt.
+
+**Was die Seite nie tut:**
+
+- **Nachsprechen.** Die erste Abfrage ist Bestandsaufnahme; was länger als
+  eine Minute liegt, verfällt — auch nach einem Funkloch.
+- **Falsch sprechen.** Steht beim Abspielen ein anderes Spiel auf dem Feld,
+  schweigt sie für diesen Aufruf.
+- **Vertonen auf Zuruf.** Die Seite liest nur (GET). Der PC vertont nur,
+  wenn in der Halle gerade eine Seite zuhört — ohne Zuhörer keine
+  Azure-Kosten.
+
+**Stimme:** Audio vom Turnier-PC — Azure, wenn eingerichtet, sonst seit
+v0.9.320 die **Windows-Stimme des PCs** (dieselbe wie am PC, als WAV; ADR 0066).
+Gibt es auch die nicht (Linux, kein Sprachpaket) oder spielt das Audio nicht,
+spricht die Gerätestimme den korrigierten Text. Hat das Gerät
+keine Stimme und der PC kein Audio, erklingt nur der Gong, die Seite warnt
+„Dieses Gerät kann nicht sprechen" — und meldet sich **nicht** als
+Ansage-Gerät.
+
+**Turnierleitung:** Eine Seite mit freigeschaltetem Ton zählt als
+Ansage-Gerät ihrer Halle; die Warnung „kein Ansage-Gerät" verschwindet dann
+wie bei einem Ansage-Slave.
+
+**Doppelbetrieb:** Spricht in derselben Halle zusätzlich diese App (mit
+„Ansagen aktivieren") oder ein Ansage-Slave, klingt jeder Aufruf doppelt.
+Die Seite **Ansagen** warnt dann — abschalten müssen Sie selbst.
+
+**Bildschirm:** Nur über die verschlüsselte Adresse (8443) kann die Seite den
+Bildschirm anhalten; sonst zeigt sie „Bitte den Bildschirm anlassen".
+
+**Am TV (seit v0.9.313, Etappe E1b):** Die Monitor-Seiten (Einzelfeld,
+Feld-Übersicht, Kombi) sprechen mit `?ansage=<Halle>` in der Adresse dieselben
+Ansagen — ohne Knopf, der Pi startet Chromium dafür mit Autoplay-Freigabe.
+Ohne Freigabe zeigt der TV einen kleinen Hinweis und meldet sich nicht als
+Ansage-Gerät. Einzelheiten: [court-monitor.md](court-monitor.md)
+„Ansage-Modus", Pi-Seite: [pi-setup.md](pi-setup.md).
+<!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/combo.html -->
+
+**Die Seite lädt auf einem Android-Handy nicht („ERR_TOO_MANY_RETRIES"),
+in Firefox geht es.** Auf neueren Android-Versionen braucht Chrome eine
+eigene Erlaubnis, Geräte im lokalen Netz zu erreichen — also auch den
+Turnier-PC in der Halle. Fehlt sie, scheitert jede Verbindung, und Chrome
+zeigt nur „ERR_TOO_MANY_RETRIES" (gesehen auf Android 17 mit Chrome 156,
+bei `http` wie `https`). Abhilfe: In den Android-**Einstellungen → Apps →
+Chrome → Berechtigungen** den Eintrag **Geräte in der Nähe** bzw. **Lokales
+Netzwerk** zulassen und Chrome neu starten. Chrome fragt beim ersten
+Aufruf auch selbst nach — wer dort abgelehnt hat, kommt nur noch über die
+Einstellungen zurück. Die Kiosk-App auf den Zähl-Tablets ist nach
+bisherigem Stand nicht betroffen.
+
+**Grenzen (Stand E3):** nur im LAN (Cloud folgt mit E4); ohne Azure kommt
+das Audio vom PC als Windows-Stimme (seit v0.9.320, nur unter Windows). Wechselt eine Seite die Halle, zählt sie noch bis
+zu 30 Sekunden auch für die alte — die Seite liest nur und meldet sich nicht
+ab. Als Zuhörer zählt eine Seite nur mit einer Halle, die es im Turnier gibt.
+
 ## Sprache: Deutsch / Englisch / Automatisch
 
 Einstellbar im Setup unter „Sprachansagen":
@@ -320,8 +518,80 @@ wird „Feld <Zahlwort>" gesprochen (Zahl als Wort, sonst spricht der
 Browser „Feld erste"). Bei frei benannten Feldern (`"Center Court"`) wird
 das Label wörtlich gesprochen.
 
+## Ausgabegerät (seit v0.9.318)
+
+Spec [ansage-ausgabegeraet](features/ansage-ausgabegeraet.md), ADR 0065/0066.
+Auslöser: Am Senior-Cup (31.10.2026) kam die Ansage nicht über die per
+Klinke angeschlossene Hallenanlage, alle anderen Programme schon.
+
+- **Gerät je Ansage neu:** Der Kern fragt Windows **vor jedem Stück** (Gong,
+  Stimme), welches Gerät gerade Standard ist. Wer zwischen zwei Ansagen eine
+  Klinke einsteckt oder eine USB-Box abzieht, hört die nächste Ansage schon
+  über das neue Gerät — ohne Neustart, ohne Klick. Reißt das Gerät **während**
+  einer Ansage ab, beginnt sie auf dem neuen Gerät einmal von vorn.
+- **Anzeige:** Auf der Seite **Ansagen** steht unter dem Test-Knopf, worüber
+  die Ansage läuft.
+  <!-- pruef: "Ausgabe: Windows-Standard" in src/components/AnsageAusgabeAnzeige.tsx -->
+- **Gerät wählen (seit v0.9.321):** Darunter legt **Ansage über:** ein festes
+  Gerät fest, z. B. den Kopfhörer-Ausgang zur Hallenanlage — auch wenn Windows
+  ein anderes als Standard führt. Ist das gewählte Gerät nicht angeschlossen,
+  kommt die Ansage über den Windows-Standard, ein gelbes Banner nennt das
+  fehlende Gerät und verschwindet von selbst, sobald es wieder da ist; die
+  nächste Ansage läuft dann wieder darüber. **Windows-Standard** stellt die
+  Wahl zurück.
+  <!-- pruef: "Ansage über:" in src/components/AnsageAusgabeAnzeige.tsx -->
+  <!-- pruef: "nicht verfügbar – Ansage läuft über den Windows-Standard" in src/components/AnsageAusgabeBanner.tsx -->
+  Das Banner erscheint mit der ersten Ansage über den Ersatz; vorher zeigt es
+  nur die Seite **Ansagen**.
+  Gemerkt wird das Gerät über seine Windows-Kennung. Steckt eine USB-Box
+  später an einem **anderen Anschluss**, sieht Windows ein neues Gerät — dann
+  einmal neu wählen.
+  Die Wahl gilt **nur für diesen PC**: Sie wandert beim PC-Umzug nicht im
+  Identitäts-Bündel mit, ein Ansage-Slave erbt sie nicht vom Master, und das
+  Speichern anderer Einstellungen setzt sie nicht zurück.
+- **Windows-Stimme statt Browser-Stimme:** Ohne Azure spricht die
+  Windows-Stimme aus dem Kern — dieselben Stimmen wie bisher (Katja, Hedda,
+  Stefan …), aber über denselben Weg wie der Gong. Die Stimmenliste in den
+  Ansage-Einstellungen kommt jetzt aus Windows; früher gewählte Stimmen
+  gelten weiter.
+- **Rückfall, sichtbar:** Klappt die Ausgabe über Windows nicht, spielt das
+  Programmfenster wie früher, und ein gelbes Banner sagt es. Es verschwindet
+  von selbst, sobald die nächste Ansage wieder normal läuft.
+  <!-- pruef: "Kein Ausgabegerät gefunden" in src/components/AnsageAusgabeBanner.tsx -->
+  <!-- pruef: "Keine passende Windows-Stimme für die Ansage-Sprache installiert" in src/components/AnsageAusgabeBanner.tsx -->
+- **Fehlt die Windows-Stimme der Ansage-Sprache** (Sprachpaket), spricht die
+  Browser-Stimme — nie eine englische Stimme für einen deutschen Text.
+- **Pause nach dem Gong:** Die Windows-Stimme wird erst nach dem Gong
+  erzeugt. Beim allerersten Mal nach dem Start kann die Pause deshalb
+  knapp eine Sekunde länger sein, danach unter 0,1 s.
+- **Sehr lange Freitexte** teilt die App an Satzenden in Stücke von höchstens
+  1000 Zeichen; gesprochen wird alles.
+- **Notfall-Schalter:** In den Ansage-Einstellungen holt **Alter Abspielweg
+  (über das Programmfenster)** das Verhalten bis v0.9.317 zurück — ohne
+  Update. Dann folgt die Ansage einem Gerätewechsel nicht mehr von selbst.
+  Der Schalter ist befristet und fällt drei Versionen später weg.
+  <!-- pruef: "Alter Abspielweg (über das Programmfenster)" in src/components/AnnounceSettings.tsx -->
+- Unter Linux bleibt es beim Weg über das Programmfenster.
+
+### Ansage kommt aus dem falschen Lautsprecher
+
+1. Seite **Ansagen**: Was steht bei „Ausgabe"? Ist es nicht das Gerät der
+   Anlage, unter **Ansage über:** das Gerät der Anlage wählen (oder in Windows
+   als **Standard** setzen) — die nächste Ansage folgt.
+2. Steht dort schon das richtige Gerät und es klingt trotzdem woanders:
+   Windows kann einem Programm ein festes Gerät zuordnen. **Einstellungen →
+   System → Sound → Lautstärkemixer**, bei **BTS Light** das Ausgabegerät auf
+   **Standard** stellen. (Bis v0.9.317 hieß der Eintrag „Microsoft Edge
+   WebView2" — eine alte Zuordnung dort wirkt seitdem nicht mehr.)
+3. Kommt auch aus dem **Browser** kein Ton über das Gerät, hängt es in
+   Windows (gesehen nach häufigem Ab- und Anstecken einer USB-Box). Gerät aus-
+   und wieder einschalten bzw. neu anstecken; danach die Test-Ansage.
+4. Bluetooth-Boxen, die zwischen den Ansagen schlafen, verschlucken manchmal
+   die ersten Silben — dafür kann bts-light nichts; eine Kabelverbindung hilft.
+
 ## Tonausgabe freischalten (WebView2)
 
+Betrifft seit v0.9.318 nur noch den Rückfall-Weg über das Programmfenster.
 Windows-WebView2 startet die Tonausgabe erst nach einer Nutzergeste. Der
 **Test-Knopf** in den Einstellungen ist diese Geste; zusätzlich schaltet
 ein einmaliger Klick irgendwo im Fenster das Audio frei. Empfehlung: vor
@@ -338,10 +608,11 @@ dem Turnier einmal die Test-Ansage drücken.
 | `gong` | Gong vor der Ansage (Default an) |
 | `name_overrides` | Phonetische Aussprache-Korrekturen (Nutzer), Liste `{ name, say }` (Default leer) |
 | `name_overrides_enabled` | Korrekturen anwenden (Basis-Wörterbuch + Nutzer)? Default `true` |
-| `announce_hall` | Mehr-Hallen: nur Spiele dieser Halle (BTP-Location-Name) ansagen; leer = alle (Default). `MatchAnnouncer` filtert neue Feldbelegungen auf `court.location`. Siehe [multi-hall.md](multi-hall.md). |
+| `announce_hall` | Mehr-Hallen: nur Spiele dieser Halle (BTP-Location-Name) ansagen; leer = alle (Default). Am Master filtert die Zustellung der Aufträge (`announce_jobs_since`), am LAN-Slave der `MatchAnnouncer` neue Feldbelegungen auf `court.location`. Siehe [multi-hall.md](multi-hall.md). |
 | `saved_announcements` | Gespeicherte Ansage-Blöcke (wiederkehrende Freitext-Ansagen), Liste `string` (Default leer). |
 | `announce_scorekeeper` | Zähltafelbedienung mit ansagen? Default `true`. An = angesagt wird, **was am Feld steht** (zugewiesene Bedienung *oder* pro-Feld-Hinweis), aus = nie. Löst die feste Regel aus ADR 0007 ab ([ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)). |
 | `announce_umpire` | Schiedsrichter/Aufschlagrichter in der Feld-Ansage nennen? Default `true`. Die eigenen Knöpfe „SR/AR ansagen" und „Bedienung nachrufen" bleiben unberührt. |
+| `page_audio` | „Audio für Ansage-Seiten erzeugen": Der PC vertont Ansagen für die Browser-Seite `/ansage`, unabhängig von `enabled`. Default `false`. Siehe [Ansage-Seite im Browser](#ansage-seite-im-browser-seit-v09311). |
 
 > **UX:** Ist `azure_tts.enabled` aktiv, blendet [`AnnounceSettings`](../src/components/AnnounceSettings.tsx) die
 > Standard-Stimmen-Auswahl (`voice_de`/`voice_en`) aus — Azure spricht die ganze Ansage, die lokale Stimme
@@ -546,8 +817,13 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
 
 ## Bekannte Grenzen
 
-- Der 2-s-Poll kann ein extrem kurz belegtes und sofort wieder geräumtes
-  Feld verpassen — für reguläre Feld-Aufrufe unkritisch.
+- Der Sync-Takt (am Slave der 2-s-Poll) kann ein extrem kurz belegtes und
+  sofort wieder geräumtes Feld verpassen — für reguläre Feld-Aufrufe
+  unkritisch.
+- Wird die Übertragung längere Zeit gestoppt und wieder gestartet, gilt der
+  Stand vor dem Stopp weiter als Bestandsaufnahme: Felder, die in der Pause
+  neu belegt wurden, werden nach dem Start einmal angesagt (Aufträge
+  verfallen nach 60 s). Dasselbe Verhalten hatte der `MatchAnnouncer`.
 - Verfügbare Stimmen hängen vom Windows-System ab; ist die gewählte
   Stimme auf dem Rechner nicht vorhanden, nutzt der Browser seine
   Standardstimme.
@@ -570,7 +846,24 @@ kommt am Slave aus der Cloud statt aus BTP. Siehe auch
   `due_call_stage` (zeitliche Fälligkeit), `announcement_response` (Warnung
   ohne Ansage-Gerät).
 - `src/components/AnnounceJobPlayer.tsx` — spricht die Aufträge der
-  Turnierleitungs-Seite.
+  Turnierleitungs-Seite und (seit v0.9.314) die Erst-Ansage `court_assigned`.
+- `src/io/announceJobs.ts` — `jobZuAnsage`: Auftrag → fertige Ansage, geteilt
+  von `AnnounceJobPlayer` und `AnsageVertoner`.
+- **Ansage-Seite:** `src/io/announcer.ts` `prepare*`/`playPrepared`,
+  `src/io/announceCourt.ts` (Builder `…Ansage` + Desktop-Knöpfe, die auch an
+  die Seiten geben), `src/io/ansageTeilen.ts`, `src/components/AnsageVertoner.tsx`,
+  `src/components/AnsageSeitenPanel.tsx`, `src-tauri/src/tablet/ansage.rs`
+  (`AnsageStore`), Routen `/ansage*` in `tablet/server.rs`,
+  `commands.rs` `ansage_*`, `src-tauri/assets/ansage.html` mit Inline-Kopien
+  von `src/io/ansageSeite.mjs` (Entscheidungen), `src/io/gongKlang.mjs` und
+  `src/io/ansageKern.mjs` (Abfrage, Warteschlange, Fristen, Präsenz; seit
+  v0.9.313; Verlauf + Wiederholen mit `verlauf: true` seit v0.9.315 —
+  `ansageText`/`verlaufAufnehmen`/`wiederholungsAuftrag`/`schriftSuchen` in
+  `ansageSeite.mjs`) — dieselben drei Kopien tragen `monitor.html`, `overview.html`
+  und `combo.html` für den Ansage-Modus (`ansageMonitorStarten`)
+  (`scripts/test-ansage-seite.mjs`, `scripts/test-gong-klang.mjs`,
+  `scripts/test-ansage-kern.mjs` — Verhalten mit Attrappen + Drift über alle
+  vier Seiten).
 
 ## Azure Neural TTS (hochwertige Cloud-Ansage, opt-in)
 
@@ -619,7 +912,8 @@ Stimme die Namen **nativ** spricht. Ablauf:
   Azure (Region wählbar, z. B. West Europe/EU) gesendet — öffentliche Wettkampfdaten, opt-in über
   `enabled`. Ist Azure aus, verlässt nichts das Gerät.
 - `src/state/useAvailableVoices.ts` — System-Stimmen.
-- `src/components/MatchAnnouncer.tsx` — Detektor (immer eingehängt).
+- `src/components/MatchAnnouncer.tsx` — immer eingehängt (Audio-Freischaltung, Abbruch beim Abschalten); erkennt neue Feldbelegungen nur noch am Ansage-Slave.
+- `src-tauri/src/tablet/erst_ansage.rs` — Erst-Ansage im Kern (Master, seit v0.9.314).
 - `src/pages/SetupWizard.tsx` — Einstellungen.
 
 ## Schiedsrichter und Aufschlagrichter

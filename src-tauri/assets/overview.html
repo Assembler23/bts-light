@@ -148,7 +148,12 @@ main {
 }
 .trow__names .flag.hidden { visibility: hidden; box-shadow: none; }
 .trow__names .nm {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Setzplatz [1]/[3/4] hinter dem letzten Spieler (Spec setzplaetze-anzeigen):
+   wird nie gekürzt — bei langen Namen weicht zuerst der Name. */
+.trow__names .seed {
+  flex: 0 0 auto; white-space: nowrap; color: #94a3b8; font-weight: 600;
 }
 .trow__sets { flex: 0 0 auto; display: flex; gap: 1vw; font-variant-numeric: tabular-nums; }
 .sset {
@@ -434,7 +439,7 @@ main {
 
     // Eine Team-Zeile: bei Doppel die zwei Partner UNTEREINANDER (je Flagge +
     // Name), bei Einzel eine einzelne Zeile; Satzstand rechts.
-    function teamRow(names, nats, selfIdx, otherIdx) {
+    function teamRow(names, nats, seed, selfIdx, otherIdx) {
       var row = h('div', 'trow');
       var nameBox = h('div', 'trow__names');
       var list = (names && names.length) ? names : ['—'];
@@ -442,6 +447,8 @@ main {
         var pl = h('div', 'pl');
         pl.appendChild(flagEl(nats && nats[i]));
         pl.appendChild(h('span', 'nm', n));
+        // Setzplatz einmal je Seite, hinter dem letzten Spieler.
+        if (seed && i === list.length - 1) pl.appendChild(h('span', 'seed', '[' + seed + ']'));
         nameBox.appendChild(pl);
       });
       row.appendChild(nameBox);
@@ -450,8 +457,8 @@ main {
     }
 
     var teams = h('div', 'teams');
-    teams.appendChild(teamRow(c.team1, c.team1_nationalities, 0, 1));
-    teams.appendChild(teamRow(c.team2, c.team2_nationalities, 1, 0));
+    teams.appendChild(teamRow(c.team1, c.team1_nationalities, c.team1_seed, 0, 1));
+    teams.appendChild(teamRow(c.team2, c.team2_nationalities, c.team2_seed, 1, 0));
     card.appendChild(teams);
 
     return card;
@@ -600,6 +607,8 @@ main {
     if (!listeGleich(vorher.team2, nachher.team2)) return false;
     if (!listeGleich(vorher.team1_nationalities, nachher.team1_nationalities)) return false;
     if (!listeGleich(vorher.team2_nationalities, nachher.team2_nationalities)) return false;
+    if ((vorher.team1_seed || '') !== (nachher.team1_seed || '')) return false;
+    if ((vorher.team2_seed || '') !== (nachher.team2_seed || '')) return false;
     return true;
   }
   function istLiveFeld(c) {
@@ -937,6 +946,7 @@ main {
       var here = new URL(location.href);
       here.searchParams.delete('device');
       here.searchParams.delete('rotate');
+      here.searchParams.delete('ansage');
       here.searchParams.delete('hallSeconds');
       var there = new URL(redirectTo, location.origin);
       return here.pathname === there.pathname &&
@@ -950,6 +960,12 @@ main {
       var sep = href.indexOf('?') >= 0 ? '&' : '?';
       href += sep + 'rotate=' + encodeURIComponent(hereRotate);
     }
+    // ?ansage=… (Ansage-Modus, Spec ansage-im-browser E1b) ebenso mitnehmen —
+    // sonst verstummte ein Pi beim ersten Zielwechsel.
+    var hereParams = new URLSearchParams(location.search);
+    if (hereParams.has('ansage') && !/[?&]ansage(=|&|$)/.test(href)) {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'ansage=' + encodeURIComponent(hereParams.get('ansage') || '');
+    }
     location.href = href;
   }
   // Deassign-Entprellung: erst nach mehreren No-Redirect-Polls weg navigieren
@@ -957,16 +973,22 @@ main {
   // atomaren Schreiben server-seitig).
   var noRedirectPolls = 0;
   var DEASSIGN_AFTER = 3;
+  // In-Flight-Schutz auch hier: Ohne ihn parkte der Sekundentakt während
+  // eines Hängers jede Sekunde einen weiteren Abruf auf einer toten
+  // Leitung (Review-Fund 08.09.2026).
+  var checkLaeuft = false;
   function checkReassignment() {
     if (!deviceId) return;
+    if (checkLaeuft) return;
+    checkLaeuft = true;
     // `src=check` statt `push`/`poll`: Dieser Abruf ist KEINE Anzeige-
     // Aktualisierung, sondern die sekündliche Frage „bin ich noch diesem
     // Ziel zugewiesen?". Ohne eigene Kennzeichnung liefe er in den
     // Court-Monitor-Zähler und verfälschte die Messung, an der alle
     // Folge-Etappen hängen (Review-Fund 19.08.2026).
-    fetch(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    abrufMitFrist(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' }, function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
+        checkLaeuft = false;
         if (!s) return;
         if (s.deviceCode) lastDeviceCode = s.deviceCode;
         // Reihenfolge wie monitor.html: navigieren wir weg, wird KEIN Befehl
@@ -994,7 +1016,7 @@ main {
         // für die Übersicht verloren (der bisherige Bug).
         handleCommand(s.command);
       })
-      .catch(function () {});
+      .catch(function () { checkLaeuft = false; });
   }
   setInterval(checkReassignment, 1000);
 
@@ -1083,6 +1105,47 @@ main {
   // S1/S8 bleibt praktisch vollständig erhalten.
   var MARKE_SPAETESTENS_MS = 60000;
   var markeGesetztAt = 0;
+  // Frist des Stand-Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s. Ein Abruf,
+  // der weder scheitert noch antwortet, blockierte sonst alle folgenden
+  // (Turnier 05./06.09.2026). **Inline-Kopie von `src/io/abrufFrist.mjs`**
+  // — dort die kanonische Fassung mit Begründung und Test
+  // (`scripts/test-abruf-frist.mjs`, eigener CI-Schritt); hier ohne
+  // `fetchFn`-Parameter. Änderungen hier und dort gemeinsam.
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error('Abruf-Frist überschritten (' + was + ')'));
+      };
+      timer = setTimeout(function () { abbrechen('Kopfzeilen ' + KOPF_FRIST_MS + ' ms'); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error('Antwort nach Ablauf der Frist verworfen');
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen('Rumpf ' + RUMPF_FRIST_MS + ' ms'); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
+  // Ein Abruf ist geglückt — Kopfzeilen UND Rumpf. Ein Ort für beide Zweige
+  // (304 und voller Stand), damit die Entwarnung nirgends vor dem Rumpf steht.
+  function abrufGeglueckt() {
+    errorCount = 0; backoffUntil = 0; showOffline(false);
+    lastFetchOk = true;
+    letzterAbrufOkMs = Date.now();
+  }
   function pollHealth() {
     if (fetching) { refetchQueued = true; return; }
     fetching = true;
@@ -1094,35 +1157,44 @@ main {
     var quelle = naechsteQuelle;
     naechsteQuelle = 'poll';
     var kopf = letzteMarke ? { 'If-None-Match': letzteMarke } : undefined;
-    fetch(healthUrl(quelle), { cache: 'no-store', headers: kopf })
-      .then(function (r) {
+    abrufMitFrist(healthUrl(quelle), { cache: 'no-store', headers: kopf }, function (r) {
         // Erst prüfen, DANN entwarnen: Ein dauerhaft fehlerhafter Status
         // (Relay-404 bei unbekanntem Namespace, 502/503) setzte sonst bei
         // jeder Antwort den Fehlerzähler zurück, bevor er geworfen wird —
         // die Schwelle für die Offline-Blende wäre nie erreicht und der TV
         // zeigte endlos den eingefrorenen Stand (Review-Fund 19.08.2026).
         if (r.status !== 304 && !r.ok) throw new Error('HTTP ' + r.status);
-        errorCount = 0; backoffUntil = 0; showOffline(false);
-        lastFetchOk = true;
-        letzterAbrufOkMs = Date.now();
-        // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
-        // nichts zu rendern — und kein Grund, „offline" zu melden.
-        if (r.status === 304) {
-          // Für den Stillstands-Wächter zählt das wie ein angewendeter Stand:
-          // Der Server bestätigt gerade ausdrücklich, dass das Gezeigte
-          // stimmt (Spec monitor-livestand-push, S8). Ohne diese Zeile meldete
-          // eine ruhige Halle im Minutentakt Fehlalarme.
+        // Der Leser bleibt frei von Nebenwirkungen (Review-Fund 08.09.2026):
+        // Ein Rumpf, der erst nach der Frist eintrifft, darf weder entwarnen
+        // noch die Marke setzen. Deshalb steht die Buchführung in der äußeren
+        // Kette — und die läuft nur, wenn die Frist gehalten hat.
+        if (r.status === 304) return { status: 304 };
+        var marke = r.headers.get('ETag');
+        return r.json().then(function (data) { return { data: data, marke: marke }; });
+      })
+      .then(function (paket) {
+        // Entwarnt wird erst hier, wenn auch der Rumpf da ist: Kämen nur die
+        // Kopfzeilen und der Rumpf liefe in die Frist, stünde der Fehlerzähler
+        // sonst bei jedem Versuch wieder auf null, die Blende käme nie, und der
+        // Stillstands-Wächter hielte die Abrufe für geglückt.
+        abrufGeglueckt();
+        if (paket.status === 304) {
+          // 304: nichts Neues. Der gezeigte Stand bleibt gültig, es gibt
+          // nichts zu rendern — und kein Grund, „offline" zu melden. Für den
+          // Stillstands-Wächter zählt das wie ein angewendeter Stand: Der
+          // Server bestätigt gerade ausdrücklich, dass das Gezeigte stimmt
+          // (Spec monitor-livestand-push, S8). Ohne diese Zeile meldete eine
+          // ruhige Halle im Minutentakt Fehlalarme.
           letzterStandMs = Date.now();
           bestaetigungen++;
           pollDone();
-          return null;
+          return;
         }
-        var marke = r.headers.get('ETag');
-        if (marke) { letzteMarke = marke; markeGesetztAt = Date.now(); }
-        return r.json();
-      })
-      .then(function (data) {
-        if (!data) return;   // war ein 304
+        // Marke erst NACH dem Rumpf: Sonst fragte der nächste Abruf mit der
+        // Marke eines nie gezeigten Standes und bekäme ein 304 auf etwas, das
+        // die Anzeige nie gesehen hat.
+        if (paket.marke) { letzteMarke = paket.marke; markeGesetztAt = Date.now(); }
+        var data = paket.data;
         // Uhr-Versatz genau hier — nur eine frisch empfangene Antwort trägt
         // eine gültige Server-Zeit (siehe Kommentar in `renderIntern`).
         if (typeof data.serverNowMs === 'number' && data.serverNowMs > 0) {
@@ -1227,9 +1299,11 @@ main {
   // alle drei Auslöser des Log-Uploads (JS-Fehler, unhandledrejection,
   // pagehide). Erst dieser Takt macht den Zustand bezeugbar.
   //
-  // Er HEILT nichts: kein Reload, kein Zurücksetzen der Ordnungszahl. Wir
-  // wissen noch nicht, woran es liegt, und eine Selbstheilung würde genau die
-  // Spur verwischen, wegen der er gebaut wurde.
+  // Er HEILT nichts: kein Reload, kein Zurücksetzen der Ordnungszahl. Eine
+  // Ursache ist seit v0.9.287 bekannt und behoben — der Stand-Abruf ohne
+  // Frist (`abrufMitFrist`), der nach einem WLAN-Roaming alle folgenden
+  // blockierte. Ein `keine_abrufe` mit `fetchOk=true` wäre seither ein NEUER
+  // Befund; für den bleibt der Wächter stumm heilend, damit die Spur steht.
   //
   // Ein 304 zählt hier als angekommener Stand — die Übersicht bekommt in
   // einer ruhigen Halle minutenlang nichts anderes, und das ist gesund.
@@ -1423,6 +1497,740 @@ main {
     }
   }, 2000);
   mwsConnect();
+})();
+</script>
+<script>
+/* Ansage-Modus (Spec docs/features/ansage-im-browser.md, Etappe E1b):
+   Mit ?ansage=<Halle> in der Adresse spricht diese Seite die Ansagen ihrer
+   Halle mit — derselbe Kern wie die Seite /ansage. Ohne den Parameter tut
+   dieser Block nichts. Eigener <script>-Block, damit er die Anzeige nie
+   mitreißt: Ein Fehler hier lässt die Seite unberührt. Die Kopien zwischen
+   den Markern hält scripts/test-ansage-kern.mjs wortgleich zu src/io/. */
+(function () {
+"use strict";
+var ANSAGE_BASIS = location.pathname.replace(/info\/overview\/?$/, '');
+if (!/[?&]ansage(=|&|$)/.test(location.search)) return;
+
+/* <ansageSeite.mjs> */
+/** Abfrage-Takt der Seite. */
+const ANSAGE_TAKT_MS = 1500;
+/** Was länger als eine Minute in der Warteschlange liegt, verfällt — eine
+ *  Seite, die offline war, spricht beim Wiederkommen nichts nach. */
+const ANSAGE_VERFALL_MS = 60000;
+
+/** Die Arten, die diese Seite abspielt. Eine unbekannte (aus einer neueren
+ *  Fassung des Turnier-PCs) wird übersprungen. */
+const ANSAGE_ARTEN = [
+  "court_call", "prep_call", "officials", "start_play", "scorekeeper_call",
+  "freetext", "desktop", "court_assigned",
+];
+
+/** Hallenvergleich wie im Kern (`halle_passt`): Rand und Schreibweise zählen
+ *  nicht, ein leeres Ziel gilt allen. */
+function hallePasst(ziel, geraet) {
+  const z = String(ziel || "").trim().toLowerCase();
+  const g = String(geraet || "").trim().toLowerCase();
+  return z === "" || g === "" || z === g;
+}
+
+/** Ab zwei Hallen ist die Wahl Pflicht: „keine Halle" hieße „alle" — und
+ *  damit fremde Aufrufe in dieser Halle. */
+function halleNoetig(halls) {
+  return Array.isArray(halls) && halls.length >= 2;
+}
+
+/** Darf die Seite mit dieser Halle loslegen? Bei Pflicht nur mit einer
+ *  Halle, die es im Turnier gibt. */
+function halleGueltig(halls, gewaehlt) {
+  if (!halleNoetig(halls)) return true;
+  const g = String(gewaehlt || "").trim();
+  return g !== "" && halls.some((h) => hallePasst(h, g) && String(h).trim() !== "");
+}
+
+/**
+ * Nimmt einen Feed entgegen und sagt, was neu zu spielen ist.
+ *
+ * `stand` = `{ lastId, bestand }`. Der **erste** Feed ist Bestandsaufnahme:
+ * Was schon da war, wird nicht gesprochen — wer die Seite öffnet, will nicht
+ * die letzte Minute nachhören.
+ */
+function neueEintraege(stand, feed) {
+  const eintraege = Array.isArray(feed && feed.eintraege) ? feed.eintraege : [];
+  let lastId = stand.lastId || 0;
+  const neu = [];
+  for (const e of eintraege) {
+    if (!e || typeof e.id !== "number" || e.id <= lastId) continue;
+    if (stand.bestand && ANSAGE_ARTEN.indexOf(e.art) >= 0) neu.push(e);
+  }
+  for (const e of eintraege) {
+    if (e && typeof e.id === "number" && e.id > lastId) lastId = e.id;
+  }
+  neu.sort((a, b) => a.id - b.id);
+  return { stand: { lastId, bestand: true }, neu };
+}
+
+/** Passt ein Eintrag noch zur Belegung? Mit Spiel-Bezug nur, wenn genau
+ *  dieses Spiel auf genau diesem Feld steht. */
+function belegungPasst(e, belegung) {
+  if (e.courtId == null || e.matchId == null) return true;
+  return (belegung || []).some(
+    (b) => b.courtId === e.courtId && b.matchId === e.matchId,
+  );
+}
+
+/** Kurz vor dem Abspielen: noch frisch genug und noch richtig? Die Frist
+ *  zählt ab Empfang auf diesem Gerät — die Uhr des Geräts muss dafür nicht
+ *  zur Uhr des Turnier-PCs passen. */
+function nochAbspielbar(e, belegung, empfangenMs, jetztMs) {
+  return jetztMs - empfangenMs < ANSAGE_VERFALL_MS && belegungPasst(e, belegung);
+}
+
+/** Womit diese Seite spricht: Audio vom Turnier-PC, die eigene
+ *  Gerätestimme — oder gar nicht. */
+function stimme(hostAudio, geraeteStimme) {
+  if (hostAudio) return "host";
+  if (geraeteStimme) return "geraet";
+  return "keine";
+}
+
+/** Meldet sich die Seite als Ansage-Gerät ihrer Halle? Nur, wenn wirklich
+ *  etwas erklingen kann — sonst glaubte die Turnierleitung, ihr Aufruf
+ *  komme an. */
+function meldetPraesenz(feed, geraeteStimme, tonFrei) {
+  return !!(feed && feed.aktiv) && !!tonFrei &&
+    stimme(feed.hostAudio, geraeteStimme) !== "keine";
+}
+
+/** Text zum `grund` eines nicht aktiven Feeds. */
+function grundText(grund) {
+  switch (grund) {
+    case "schalter_aus":
+      return "Der Turnier-PC erzeugt keine Ansagen für diese Seite (Schalter „Audio für Ansage-Seiten erzeugen“ ist aus).";
+    case "slave":
+      return "Dieser Rechner ist ein Ansage-Slave — die Seite gehört an den Turnier-PC.";
+    case "renderer_weg":
+      return "Die Oberfläche von bts-light am Turnier-PC antwortet nicht — ist das Fenster geöffnet?";
+    case "turnier_pc_offline":
+      return "Der Turnier-PC ist nicht erreichbar.";
+    default:
+      return "Der Turnier-PC erzeugt gerade keine Ansagen.";
+  }
+}
+
+/** Adresse des Feeds. `base` endet mit `/`. */
+function feedAdresse(base, halle, since, hoert) {
+  return base + "ansage/feed?halle=" + encodeURIComponent(halle || "") +
+    "&since=" + (since || 0) + (hoert ? "&hoert=1" : "");
+}
+
+/* ── Verlauf + Großanzeige (Erweiterung 30.10.2026) ───────────────────── */
+
+/** So viele gespielte Ansagen zeigt die Seite `/ansage` — und hält für
+ *  ebenso viele das geladene Audio zum Wiederholen im Speicher. */
+const ANSAGE_VERLAUF_MAX = 5;
+
+/** Lesbarer Text einer Ansage: ihre Segmente, zusammengefügt. */
+function ansageText(e) {
+  const segmente = Array.isArray(e && e.segmente) ? e.segmente : [];
+  return segmente
+    .map((s) => String(s == null ? "" : s).trim())
+    .filter((s) => s !== "")
+    .join(" ")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Nimmt eine gerade gespielte Ansage in den Verlauf auf: neueste vorn,
+ * höchstens `max` Einträge. Gibt eine neue Liste zurück; der Eintrag
+ * `{ id, ms, text, e, puffer }` selbst wird nicht kopiert, damit das Audio
+ * später an ihm landen kann. Dieselbe Ansage (gleiche `id`) steht nie zweimal
+ * im Verlauf — eine Wiederholung ist kein neuer Eintrag.
+ */
+function verlaufAufnehmen(verlauf, eintrag, max) {
+  const deckel = typeof max === "number" ? max : ANSAGE_VERLAUF_MAX;
+  const alt = (Array.isArray(verlauf) ? verlauf : []).filter((v) => v && v.id !== eintrag.id);
+  return [eintrag].concat(alt).slice(0, Math.max(0, deckel));
+}
+
+/** Auftrag für die Warteschlange, der eine Ansage aus dem Verlauf noch
+ *  einmal spielt — `null`, wenn es sie (nicht mehr) gibt. Eine Wiederholung
+ *  hat der Nutzer bewusst angefordert: Sie verfällt nicht und wird nicht
+ *  gegen die Belegung geprüft. */
+function wiederholungsAuftrag(verlauf, id) {
+  const v = (Array.isArray(verlauf) ? verlauf : []).filter((x) => x && x.id === id)[0];
+  if (!v) return null;
+  return { e: v.e, wiederholung: true, verlauf: v };
+}
+
+/**
+ * Größte Schrift (ganze Pixel) zwischen `min` und `max`, bei der `passt(px)`
+ * noch wahr ist — Halbierungssuche, `passt` misst im Browser. Passt nicht
+ * einmal `min`, bleibt es bei `min`.
+ */
+function schriftSuchen(min, max, passt) {
+  let unten = Math.floor(min);
+  let oben = Math.floor(max);
+  if (oben <= unten || !passt(unten)) return unten;
+  if (passt(oben)) return oben;
+  while (oben - unten > 1) {
+    const mitte = Math.floor((unten + oben) / 2);
+    if (passt(mitte)) unten = mitte;
+    else oben = mitte;
+  }
+  return unten;
+}
+/* </ansageSeite.mjs> */
+
+/* <gongKlang.mjs> */
+/**
+ * Plant den Gong auf dem AudioContext ein und liefert den zuletzt stoppenden
+ * Oszillator samt geplantem Ende (Sekunden der Audio-Uhr) — daran hängt der
+ * Aufrufer sein Warten, damit die Sprache nicht in den Nachklang einsetzt.
+ *
+ * `match` = Spielaufruf: tiefer, zweitöniger ABSTEIGENDER Sinus-Gong
+ * (A5 → D5), wie ein Hotel-Gong. `info` = Info/Freitext: drei helle,
+ * perlende Töne (C-Dur-Dreiklang aufsteigend, Dreieck-Welle) — klar anders
+ * in Tonzahl, Klangfarbe und Bewegung.
+ *
+ * @param {AudioContext} ctx
+ * @param {"match" | "info"} kind
+ * @returns {{ letzter: OscillatorNode, endeSec: number }}
+ */
+function gongPlanen(ctx, kind) {
+  const now = ctx.currentTime;
+  if (kind === "info") {
+    const notes = [523.25, 659.25, 783.99]; // C5 – E5 – G5
+    const step = 0.15;
+    let letzter = null;
+    let endeSec = now;
+    for (let i = 0; i < notes.length; i++) {
+      const t = now + i * step;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.32, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+      g.connect(ctx.destination);
+      const o = ctx.createOscillator();
+      o.type = "triangle";
+      o.frequency.value = notes[i];
+      o.connect(g);
+      o.start(t);
+      const stopAt = t + 0.38;
+      o.stop(stopAt);
+      letzter = o;
+      endeSec = stopAt;
+    }
+    return { letzter, endeSec };
+  }
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.4, now + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+  gain.connect(ctx.destination);
+
+  const o1 = ctx.createOscillator();
+  o1.type = "sine";
+  o1.frequency.value = 880;
+  o1.connect(gain);
+  o1.start(now);
+  o1.stop(now + 0.6);
+
+  const o2 = ctx.createOscillator();
+  o2.type = "sine";
+  o2.frequency.value = 587.33;
+  o2.connect(gain);
+  o2.start(now + 0.18);
+  o2.stop(now + 1.1);
+
+  // `o2.stop` bei ~1,1 s beendet den Ton hart; die Gain-Rampe bis 1,2 s ist
+  // danach wirkungslos. 1,2 s dient nur der konservativen Fallback-Frist.
+  return { letzter: o2, endeSec: now + 1.2 };
+}
+/* </gongKlang.mjs> */
+
+/* <ansageKern.mjs> */
+/* Fristen des Audio-Wegs: Ohne sie hielte ein hängender Abruf (WLAN-Loch)
+   oder ein ausbleibendes `onended` (Kontext beim Sperren angehalten) die
+   Warteschlange für immer an — die Seite sähe verbunden aus und meldete
+   Präsenz, spräche aber nie wieder. */
+var AUDIO_LADE_FRIST_MS = 8000;
+var AUDIO_NACHLAUF_MS = 2000;
+/* Frist eines Feed-Abrufs. Ohne sie parkte der Takt auf einer toten Leitung
+   alle 1,5 s einen weiteren Abruf — auf einer Monitor-Seite blockierten die
+   bald die Verbindungen, über die die Anzeige selbst lädt
+   (Lehre Monitor-Stillstand 05./06.09.2026). */
+var ANSAGE_FEED_FRIST_MS = 5000;
+/* Kennt der Server den Feed nicht (404: Slave-Brücke, sehr alte Fassung),
+   fragt die Seite nur noch einmal je Minute nach statt im Takt. */
+var ANSAGE_FEHLT_PAUSE_MS = 60000;
+
+/**
+ * Baut den Kern einer Ansage-Seite.
+ *
+ * `opt`: `{ base, halle, halleFest, welt, beiAenderung, beiHallen, verlauf }`.
+ * `base` endet mit `/`. `halleFest` = die Halle steht fest (Monitor-Modus,
+ * aus der Adresse) und wird nicht verworfen, wenn das Turnier sie nicht
+ * kennt — die Seite soll dann sagen, welche Halle fehlt. `welt` liefert
+ * `fetch`, `AudioContext`, `speechSynthesis`, Timer usw. (im Browser
+ * `window`). `beiAenderung()` meldet jeden neuen Stand an die Anzeige,
+ * `beiHallen(halls)` eine geänderte Hallenliste. `verlauf` = die Seite führt
+ * einen Verlauf der letzten gespielten Ansagen samt geladenem Audio zum
+ * Wiederholen (nur `/ansage`; die Monitor-Seiten halten kein Audio vor).
+ */
+function ansageKern(opt) {
+  var w = opt.welt;
+  var base = opt.base;
+  var halleFest = !!opt.halleFest;
+  var melden = opt.beiAenderung || function () {};
+  var hallenMelden = opt.beiHallen || function () {};
+  var mitVerlauf = !!opt.verlauf;
+  var jetzt = function () { return w.Date.now(); };
+
+  var z = {
+    halle: String(opt.halle || ""),
+    halls: [],
+    hallenGesehen: false,
+    feed: null,
+    stand: { lastId: 0, bestand: false },
+    verbunden: false,
+    // Der Server kennt den Feed nicht (404) — seit wann.
+    fehltSeit: 0,
+    // Gescheiterte Abrufe in Folge — ein einzelner Aussetzer ist kein
+    // Grund für einen Hinweis am TV.
+    fehlversuche: 0,
+    abrufLaeuft: false,
+    warteschlange: [],
+    spielt: false,
+    ctx: null,
+    tonFrei: false,
+    // Zuletzt gespielte Ansage: `{ ms, text }`.
+    letzte: null,
+    // Die letzten gespielten Ansagen, neueste vorn (nur mit `verlauf`):
+    // `{ id, ms, text, e, puffer }` — `puffer` ist das geladene Audio, das
+    // auf dem Turnier-PC nach einer Minute verfällt. Lebt nur im Speicher
+    // der offenen Seite (Spielernamen gehören nicht in den Gerätespeicher).
+    verlauf: [],
+    // Kennung der Ansage, die gerade erklingt (Original oder Wiederholung).
+    spieltId: null,
+  };
+
+  /* ── Stimme des Geräts ─────────────────────────────────────────── */
+  function geraeteStimmen(lang) {
+    try {
+      if (!w.speechSynthesis) return [];
+      var praefix = lang === "en" ? "en" : "de";
+      return w.speechSynthesis.getVoices().filter(function (v) {
+        return String(v.lang || "").toLowerCase().indexOf(praefix) === 0;
+      });
+    } catch (e) { return []; }
+  }
+  function hatGeraeteStimme() { return geraeteStimmen("de").length > 0; }
+
+  /* ── Ton ───────────────────────────────────────────────────────── */
+  function audioKontext() {
+    if (!z.ctx) {
+      var AC = w.AudioContext || w.webkitAudioContext;
+      if (!AC) return null;
+      try { z.ctx = new AC(); } catch (e) { return null; }
+    }
+    return z.ctx;
+  }
+  function tonPruefen() {
+    var ctx = audioKontext();
+    z.tonFrei = !!ctx && ctx.state === "running";
+    return z.tonFrei;
+  }
+  function freischalten() {
+    var ctx = audioKontext();
+    if (ctx && ctx.state !== "running") {
+      try { ctx.resume().then(melden, melden); } catch (e) { /* egal */ }
+    }
+    // Manche Browser geben die Sprachausgabe erst nach einer Äußerung in
+    // einer Nutzergeste frei — eine leere tut es.
+    try {
+      if (w.speechSynthesis && w.SpeechSynthesisUtterance) {
+        var u = new w.SpeechSynthesisUtterance(" ");
+        u.volume = 0;
+        w.speechSynthesis.speak(u);
+      }
+    } catch (e) { /* egal */ }
+  }
+
+  function gongSpielen(art) {
+    var ctx = audioKontext();
+    if (!ctx || ctx.state !== "running") return Promise.resolve();
+    return new Promise(function (fertig) {
+      var erledigt = false;
+      var ende = function () {
+        if (erledigt) return;
+        erledigt = true;
+        w.setTimeout(fertig, 150);
+      };
+      try {
+        var g = gongPlanen(ctx, art);
+        g.letzter.onended = ende;
+        w.setTimeout(ende, Math.max(0, (g.endeSec - ctx.currentTime) * 1000) + 250);
+      } catch (e) { ende(); }
+    });
+  }
+
+  function audioLaden(e) {
+    var ctx = audioKontext();
+    if (!ctx || !e.audio) return Promise.reject(new Error("kein Audio"));
+    var abbruch = w.AbortController ? new w.AbortController() : null;
+    var ladeFrist = null;
+    var geladen = new Promise(function (ok, fehler) {
+      ladeFrist = w.setTimeout(function () {
+        if (abbruch) abbruch.abort();
+        fehler(new Error("Audio-Frist"));
+      }, AUDIO_LADE_FRIST_MS);
+      w.fetch(base + "ansage/audio/" + e.id, { cache: "no-store", signal: abbruch ? abbruch.signal : undefined })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.arrayBuffer();
+        })
+        .then(function (buf) {
+          return new Promise(function (dok, dfehler) { ctx.decodeAudioData(buf, dok, dfehler); });
+        })
+        .then(ok, fehler);
+    });
+    return geladen.then(function (puffer) {
+      w.clearTimeout(ladeFrist);
+      return puffer;
+    }, function (err) {
+      w.clearTimeout(ladeFrist);
+      throw err;
+    });
+  }
+
+  function pufferSpielen(puffer) {
+    var ctx = audioKontext();
+    if (!ctx) return Promise.reject(new Error("kein Ton"));
+    return new Promise(function (fertig) {
+      var erledigt = false;
+      var ende = function () { if (!erledigt) { erledigt = true; fertig(); } };
+      var quelle = ctx.createBufferSource();
+      quelle.buffer = puffer;
+      quelle.connect(ctx.destination);
+      quelle.onended = ende;
+      w.setTimeout(ende, puffer.duration * 1000 + AUDIO_NACHLAUF_MS);
+      quelle.start();
+    });
+  }
+
+  /* Audio vom Turnier-PC — für eine Wiederholung das schon geladene aus dem
+     Verlauf (das auf dem PC nach einer Minute verfällt). Das frisch geladene
+     landet am Verlaufseintrag, damit ↻ es später ohne Abruf spielen kann. */
+  function audioSpielen(e, v) {
+    if (v && v.puffer) return pufferSpielen(v.puffer);
+    return audioLaden(e).then(function (puffer) {
+      if (v) v.puffer = puffer;
+      return pufferSpielen(puffer);
+    });
+  }
+
+  function segmenteSprechen(e) {
+    if (!w.speechSynthesis || !w.SpeechSynthesisUtterance) return Promise.resolve();
+    var stimmen = geraeteStimmen(e.lang);
+    var kette = Promise.resolve();
+    (e.segmente || []).forEach(function (text) {
+      kette = kette.then(function () {
+        return new Promise(function (fertig) {
+          var t = String(text || "").trim();
+          if (!t) { fertig(); return; }
+          var u = new w.SpeechSynthesisUtterance(t);
+          u.lang = e.lang === "en" ? "en-US" : "de-DE";
+          u.rate = e.rate || 0.8;
+          if (stimmen.length) u.voice = stimmen[0];
+          var fertigGemeldet = false;
+          var ende = function () { if (!fertigGemeldet) { fertigGemeldet = true; fertig(); } };
+          u.onend = ende;
+          u.onerror = ende;
+          w.setTimeout(ende, 2000 + t.length * 140);
+          w.speechSynthesis.speak(u);
+        });
+      });
+    });
+    return kette;
+  }
+
+  /* ── Warteschlange: strikt nacheinander, nichts überlappt ──────── */
+  function naechste() {
+    if (z.spielt) return;
+    var stueck = z.warteschlange.shift();
+    if (!stueck) return;
+    var belegung = (z.feed && z.feed.belegung) || [];
+    // Eine Wiederholung hat der Nutzer selbst angefordert — sie verfällt
+    // nicht und wird nicht gegen die Belegung geprüft.
+    if (!stueck.wiederholung && !nochAbspielbar(stueck.e, belegung, stueck.empfangen, jetzt())) {
+      naechste();
+      return;
+    }
+    z.spielt = true;
+    var e = stueck.e;
+    var v = stueck.verlauf || null;
+    // Ein Original kommt in den Verlauf, sobald es erklingt — wer nicht hört,
+    // liest mit, während gesprochen wird. Eine Wiederholung ist kein neuer
+    // Eintrag.
+    if (mitVerlauf && !stueck.wiederholung) {
+      v = { id: e.id, ms: jetzt(), text: ansageText(e), e: e, puffer: null };
+      z.verlauf = verlaufAufnehmen(z.verlauf, v, ANSAGE_VERLAUF_MAX);
+    }
+    z.spieltId = e.id;
+    melden();
+    (e.gong ? gongSpielen(e.gong) : Promise.resolve())
+      .then(function () {
+        return audioSpielen(e, v).catch(function () { return segmenteSprechen(e); });
+      })
+      .catch(function () { /* weiter mit der nächsten */ })
+      .then(function () {
+        z.spielt = false;
+        z.spieltId = null;
+        if (!stueck.wiederholung) {
+          z.letzte = { ms: jetzt(), text: String((e.segmente || []).join(" ")).slice(0, 140) };
+        }
+        melden();
+        naechste();
+      });
+  }
+
+  /* Die Halle, mit der die Seite fragt. Eine leere Liste heißt entweder „nur
+     eine Halle" oder „noch kein BTP-Stand" (Turnier-PC startet gerade neu).
+     Hat die Seite schon Hallen gesehen, ist es Letzteres: Dann bleibt sie bei
+     ihrer Halle — sonst stünde ein Pi nach jedem Neustart des PCs stumm da
+     oder hörte kurz fremde Hallen. Nur ohne je gesehene Hallen (Turnier mit
+     einer Halle) fragt sie ohne. */
+  function wirksameHalle() {
+    return z.halls.length || z.hallenGesehen ? z.halle : "";
+  }
+
+  /* Darf die Seite mit ihrer Halle spielen und sich melden? Eine fest
+     vorgegebene Halle muss es im Turnier geben, sobald es Hallen gibt. */
+  function halleOk() {
+    if (!halleGueltig(z.halls, z.halle)) return false;
+    if (!halleFest || !z.halls.length || String(z.halle).trim() === "") return true;
+    return z.halls.some(function (h) { return hallePasst(h, z.halle) && String(h).trim() !== ""; });
+  }
+
+  /* Neue Hallenliste übernehmen. Gemerkte oder per Link vorgegebene Halle
+     nur übernehmen, wenn es sie gibt; eine leere Liste ändert an der Wahl
+     nichts. */
+  function hallenUebernehmen(halls) {
+    if (JSON.stringify(halls) === JSON.stringify(z.halls)) return;
+    z.halls = halls;
+    if (halls.length) {
+      z.hallenGesehen = true;
+      var passend = halls.filter(function (h) { return hallePasst(h, z.halle) && z.halle !== ""; })[0];
+      z.halle = passend || (halleFest ? z.halle : "");
+    }
+    hallenMelden(halls);
+  }
+
+  /* Spielt eine Ansage aus dem Verlauf noch einmal — nur auf diesem Gerät,
+     hinten in derselben strikten Schlange (nie über eine laufende Ansage).
+     Der Tipp auf ↻ ist eine Nutzergeste: Er gibt den Ton frei, falls nötig —
+     und die Schlange läuft erst weiter, wenn der Ton wieder läuft, sonst
+     fiele der Gong weg (Kontext nach Anruf/Bildschirm aus angehalten).
+     Mehrfaches Tippen stapelt nichts: Liegt dieselbe Ansage schon als
+     Wiederholung in der Schlange, bleibt es bei der einen. */
+  function wiederholen(id) {
+    var auftrag = wiederholungsAuftrag(z.verlauf, id);
+    if (!auftrag) return false;
+    var schonDa = z.warteschlange.some(function (s) { return s.wiederholung && s.e.id === id; });
+    if (schonDa) return true;
+    z.warteschlange.push(auftrag);
+    var ctx = audioKontext();
+    if (ctx && ctx.state !== "running") {
+      freischalten();
+      var weiter = function () { naechste(); };
+      try { ctx.resume().then(weiter, weiter); } catch (e) { weiter(); }
+      return true;
+    }
+    naechste();
+    return true;
+  }
+
+  function halleWaehlen(halle) {
+    var vorher = z.halle;
+    z.halle = String(halle || "");
+    // Neue Halle: Was schon in der Schlange liegt, gehört zur alten — bis auf
+    // Wiederholungen, die der Nutzer selbst angefordert hat. Der Verlauf
+    // bleibt stehen: Er ist das, was dieses Gerät gespielt hat.
+    if (vorher !== z.halle) {
+      z.warteschlange = z.warteschlange.filter(function (s) { return s.wiederholung; });
+    }
+    melden();
+  }
+
+  /* ── Abfrage ───────────────────────────────────────────────────── */
+  function abfragen() {
+    if (z.abrufLaeuft) return;
+    if (z.fehltSeit && jetzt() - z.fehltSeit < ANSAGE_FEHLT_PAUSE_MS) return;
+    var hoert = meldetPraesenz(z.feed, hatGeraeteStimme(), tonPruefen()) && halleOk();
+    var abbruch = w.AbortController ? new w.AbortController() : null;
+    var abruf;
+    // Ein synchroner Wurf darf die Sperre nie setzen, ohne sie zu lösen —
+    // sonst fragte die Seite nie wieder (Review E1b).
+    try {
+      abruf = w.fetch(feedAdresse(base, wirksameHalle(), z.stand.lastId, hoert),
+        { cache: "no-store", signal: abbruch ? abbruch.signal : undefined });
+    } catch (e) {
+      abruf = Promise.reject(e);
+    }
+    var frist = w.setTimeout(function () { if (abbruch) abbruch.abort(); }, ANSAGE_FEED_FRIST_MS);
+    z.abrufLaeuft = true;
+    abruf
+      .then(function (r) {
+        if (r.status === 404) {
+          z.fehltSeit = jetzt();
+          throw new Error("kein Feed");
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (feed) {
+        z.verbunden = true;
+        z.fehltSeit = 0;
+        z.fehlversuche = 0;
+        z.feed = feed;
+        hallenUebernehmen(feed.halls || []);
+        var r = neueEintraege(z.stand, feed);
+        z.stand = r.stand;
+        // Nur abspielen, wenn diese Seite wirklich bereit ist — sonst liefen
+        // Aufrufe einer fremden Halle oder ohne Ton in die Schlange.
+        if (z.tonFrei && halleOk()) {
+          var empfangen = jetzt();
+          r.neu.forEach(function (e) { z.warteschlange.push({ e: e, empfangen: empfangen }); });
+          naechste();
+        }
+      })
+      .catch(function () { z.verbunden = false; z.fehlversuche += 1; })
+      .then(function () {
+        w.clearTimeout(frist);
+        z.abrufLaeuft = false;
+        melden();
+      });
+  }
+
+  function starten() {
+    // Läuft der Ton schon (Pi mit Autoplay-Freigabe, Kiosk-App), ist die
+    // Seite ohne Tippen bereit.
+    audioKontext();
+    melden();
+    abfragen();
+    w.setInterval(abfragen, ANSAGE_TAKT_MS);
+  }
+
+  return {
+    zustand: z,
+    starten: starten,
+    abfragen: abfragen,
+    freischalten: freischalten,
+    halleWaehlen: halleWaehlen,
+    wiederholen: wiederholen,
+    halleOk: halleOk,
+    tonPruefen: tonPruefen,
+    hatGeraeteStimme: hatGeraeteStimme,
+    stimmeArt: function () { return stimme(z.feed && z.feed.hostAudio, hatGeraeteStimme()); },
+  };
+}
+
+/* ── Ansage-Modus der Monitor-Seiten (E1b) ───────────────────────────── */
+
+/** Liest den Modus aus der Adresse: `?ansage=<Halle>` schaltet ihn ein,
+ *  auch mit leerem Wert (Turnier mit einer Halle). */
+function ansageModusAusQuery(search) {
+  var such;
+  try { such = new URLSearchParams(search || ""); } catch (e) { return null; }
+  if (!such.has("ansage")) return null;
+  return { halle: String(such.get("ansage") || "").trim() };
+}
+
+/** Den Ansage-Feed gibt es in E1b nur am Turnier-PC im Hallennetz (Basis
+ *  `/`); über das Relay (`/bts-relay/<ns>/`) kommt er erst mit E4. */
+function ansageImLan(base) {
+  return base === "/";
+}
+
+/**
+ * Was der Monitor im Ansage-Modus als kleinen Hinweis zeigt — leer, wenn
+ * alles läuft (dann bleibt die Anzeige unverändert). `lage`: `{ lan, fehlt,
+ * verbunden, feed, tonFrei, halleOk, halle, stimme }`.
+ */
+function monitorHinweis(lage) {
+  if (!lage.lan) return "Ansage: nur im Hallennetz (LAN) am Turnier-PC — über die Cloud noch nicht.";
+  if (lage.fehlt) return "Ansage: Der Turnier-PC bietet hier keine Ansagen an (bts-light zu alt oder Slave-Brücke).";
+  if (!lage.verbunden || !lage.feed) return "Ansage: keine Verbindung zum Turnier-PC.";
+  if (!lage.feed.aktiv) return "Ansage: " + grundText(lage.feed.grund);
+  if (!lage.halleOk) {
+    return lage.halle
+      ? "Ansage: Die Halle „" + lage.halle + "“ gibt es in diesem Turnier nicht."
+      : "Ansage: Bitte die Halle angeben (?ansage=<Halle>).";
+  }
+  if (!lage.tonFrei) return "Ansage: Ton gesperrt — der Browser braucht die Autoplay-Freigabe (Pi-Einrichtung aktualisieren).";
+  if (lage.stimme === "keine") return "Ansage: Dieses Gerät kann nicht sprechen (kein Audio vom Turnier-PC, keine Gerätestimme).";
+  return "";
+}
+
+/**
+ * Startet den Ansage-Modus einer Monitor-Seite, wenn die Adresse ihn
+ * verlangt. Die Anzeige selbst bleibt unberührt; nur bei einem Problem
+ * erscheint unten links ein kleiner Hinweis. Ohne freigegebenen Ton meldet
+ * sich die Seite nicht als Ansage-Gerät (das regelt der Kern).
+ */
+function ansageMonitorStarten(base, welt, dokument) {
+  var modus = ansageModusAusQuery(welt.location && welt.location.search);
+  if (!modus) return null;
+  var hinweis = dokument.createElement("div");
+  hinweis.id = "ansage-hinweis";
+  hinweis.setAttribute("role", "status");
+  hinweis.style.cssText = "position:fixed;left:.6vmin;bottom:.6vmin;z-index:2147483000;" +
+    "max-width:60vw;padding:.4vmin .9vmin;border-radius:.6vmin;font:1.6vmin/1.3 system-ui,sans-serif;" +
+    "background:rgba(15,23,42,.82);color:#fbbf24;pointer-events:none;display:none";
+  dokument.body.appendChild(hinweis);
+  function zeigen(text) {
+    hinweis.textContent = text;
+    hinweis.style.display = text ? "block" : "none";
+  }
+  if (!ansageImLan(base)) {
+    // Kein Abruf, keine Fehlerschleife: Im Cloud-Pfad gibt es den Feed noch nicht.
+    zeigen(monitorHinweis({ lan: false }));
+    return null;
+  }
+  var kern = ansageKern({
+    base: base,
+    halle: modus.halle,
+    halleFest: true,
+    welt: welt,
+    beiAenderung: function () {
+      var z = kern ? kern.zustand : null;
+      if (!z) return;
+      zeigen(monitorHinweis({
+        lan: true,
+        fehlt: !!z.fehltSeit,
+        // Erst nach drei Fehlschlägen in Folge (≈ 5 s) — ein WLAN-Wackler
+        // soll nicht jedes Mal einen Hinweis in die Halle blitzen lassen.
+        verbunden: z.verbunden || (!!z.feed && z.fehlversuche < 3),
+        feed: z.feed,
+        tonFrei: kern.tonPruefen(),
+        halleOk: kern.halleOk(),
+        halle: z.halle,
+        stimme: kern.stimmeArt(),
+      }));
+    },
+  });
+  // Kein Freischalt-Knopf am TV — aber eine zufällige Geste (Maus, Taste)
+  // gibt den Ton frei, falls die Autoplay-Freigabe fehlt.
+  ["pointerdown", "keydown"].forEach(function (art) {
+    dokument.addEventListener(art, kern.freischalten, { passive: true });
+  });
+  kern.starten();
+  return kern;
+}
+/* </ansageKern.mjs> */
+
+ansageMonitorStarten(ANSAGE_BASIS, window, document);
 })();
 </script>
 </body>

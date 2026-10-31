@@ -1,11 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
+  CalendarClock,
   CheckCircle2,
   Clock,
   Copy,
   ExternalLink,
   Lock,
   Megaphone,
+  MonitorSmartphone,
   QrCode,
   RotateCcw,
   Unlock,
@@ -347,12 +349,32 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
         )}
       </div>
 
-      {/* Links zur öffentlichen badhub-Seite: öffnen für den schnellen
-          Blick, kopieren fürs Weitergeben (Messenger, Vereins-Chat), der
-          Aushang zum Ausdrucken für die Halle. Die Adressen baut das
-          Backend — hier wird nichts zusammengesetzt. */}
+      {/* Links zur öffentlichen badhub-Seite. Vorn die beiden, die eine
+          Turnierleitung am Turniertag braucht: die Hallen-Ansicht fürs
+          Check-In-Gerät und der Zeitplan. Dahinter die Handy-Seite zum
+          Öffnen und Weitergeben (Messenger, Vereins-Chat) und der Aushang
+          zum Ausdrucken. Die Adressen baut das Backend — hier wird nichts
+          zusammengesetzt. */}
       {view.public_url && (
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void openExternal(view.hall_url)}
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
+                       text-slate-700 hover:bg-slate-50"
+            title="Check-In-Ansicht für das Gerät in der Halle öffnen (Tablet oder Monitor)"
+          >
+            <MonitorSmartphone className="h-3.5 w-3.5" aria-hidden />
+            Hallen-Ansicht
+          </button>
+          <button
+            onClick={() => void openExternal(view.schedule_url)}
+            className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
+                       text-slate-700 hover:bg-slate-50"
+            title="Zeitplan mit den Anfangszeiten aller Klassen öffnen"
+          >
+            <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+            Zeitplan
+          </button>
           <button
             onClick={() => void openExternal(view.public_url)}
             className="flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs
@@ -535,6 +557,16 @@ export function CheckinPanel({ announce }: { announce: AnnounceConfig }) {
                         {spielerZelle(k, p, zeile.length > 1)}
                       </Fragment>
                     ))}
+                    {/* Setzplatz einmal je Meldung, hinter dem Paar
+                        (Spec setzplaetze-anzeigen). */}
+                    {zeile[0]?.seed && (
+                      <span
+                        className="whitespace-nowrap font-semibold text-slate-500"
+                        title="Setzplatz im Hauptfeld"
+                      >
+                        [{zeile[0].seed}]
+                      </span>
+                    )}
                   </li>
                 ))}
                 {k.players.length === 0 && (

@@ -66,3 +66,14 @@ hier eintragen.
 | [0053](0053-offene-spiele-in-der-manuellen-reihenfolge.md) | Offene Spiele nehmen an der manuellen Spielreihenfolge teil | accepted |
 | [0054](0054-liveticker-kind-turnier-je-guid.md) | Liveticker: Kind-Turnier je turnier.de-GUID statt zusammengesetztem Schlüssel | accepted |
 | [0055](0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md) | Zähltafel: Anzeige-Hülle als iframe-Container, Tafel als eigenes Zuweisungsziel (gegen 0049 abgegrenzt) | accepted |
+| [0056](0056-zeilenfarbe-btp-fuehrt-aufrufmarke-weicht.md) | Zeilenfarbe: BTP führt, die Aufrufmarke weicht der Handfarbe | accepted |
+| [0057](0057-update-ablauf-im-rust-kern.md) | Update-Ablauf im Rust-Kern, Wiederanlauf per Marker, stiller Installer beim Beenden | accepted |
+| [0058](0058-eigene-kiosk-app-statt-fully-kiosk.md) | Eigene Android-Kiosk-App statt Fully Kiosk, Suche nach dem Pi-Muster | accepted |
+| [0059](0059-setzplatz-als-text-aus-dem-parser.md) | Setzplatz als fertiger Text, aufgelöst im Parser | accepted |
+| [0060](0060-upload-sperrt-btp-writes-schreib-gate.md) | TP-Upload sperrt BTP-Writes kurz (Schreib-Gate auf RwLock) | accepted |
+| [0061](0061-takt-upload-lebenszyklus-schnellhash-anhalteregel.md) | Takt-Upload: Lebenszyklus am Liveticker, Schnell-Hash ohne Gate, Anhalte-Regel | accepted |
+| [0062](0062-tp-upload-ereignis-ausloeser.md) | TP-Upload: Ereignis-Auslöser zieht den Takt vor, nur für Auslosung und Paarung, mit Drossel | accepted |
+| [0063](0063-ansage-seiten-text-im-host-kern-vertont.md) | Ansage-Seiten: Text aus der Host-Oberfläche, Kern vertont (RAM, 60 s), Seite spielt nur ab | accepted |
+| [0064](0064-erst-ansage-im-kern.md) | Erst-Ansage im Kern als Auftrag `court_assigned`; `MatchAnnouncer` nur am Ansage-Slave | accepted |
+| [0065](0065-ansage-ton-aus-dem-kern-wasapi.md) | Ansage-Ton aus dem Rust-Kern (WASAPI über cpal), Gerät je Abspielvorgang neu aufgelöst | accepted |
+| [0066](0066-windows-stimme-e3-im-kern.md) | Windows-Stimme (E3) im Kern, vorgezogen und gemeinsam für Turnier-PC und Ansage-Seiten | accepted |

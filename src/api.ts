@@ -3,6 +3,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AnnounceJob,
+  AnsageAuftrag,
+  AnsageHoerer,
+  AnsageLink,
+  AnsageQuellen,
   AppConfig,
   CheckinView,
   CloudAnnounce,
@@ -10,6 +14,7 @@ import type {
   DrawInfo,
   FinishedMatchRow,
   MatchTimeline,
+  UpdateInfo,
   FreetextItem,
   HallColorsView,
   HallLayoutConfig,
@@ -32,6 +37,8 @@ import type {
   TlPairing,
   TlWebInfo,
   TournamentStats,
+  TpFileInfo,
+  TpUploadStatus,
   WalkoverProposal,
   WalkoverResult,
   WifiStatus,
@@ -55,17 +62,104 @@ export const testBtp = (
 export const azureTtsSpeak = (ssml: string): Promise<string> =>
   invoke("azure_tts_speak", { ssml });
 
+// ─── Ansage-Ton aus dem Kern (Spec ansage-ausgabegeraet, ADR 0065) ───────
+// Fehler kommen als "<code>: <Text>" (Codes in io/tonWeg.mjs).
+
+/** Ergebnis eines abgespielten Stücks. */
+export interface Abspielbericht {
+  abgebrochen: boolean;
+  neuGeoeffnet: number;
+  /** Worüber gespielt wurde: Windows-Standard, gewähltes Gerät oder — weil
+   *  das gewählte fehlte — Ersatz über den Standard. */
+  geraet: "standard" | "gewaehlt" | "ersatz";
+}
+
+/** Ausgabe für die Anzeige auf der Seite Ansagen. */
+export interface AusgabeInfo {
+  /** false = kein Kern-Weg (Linux) — dann spielt das Programmfenster. */
+  unterstuetzt: boolean;
+  /** Name des Windows-Standardgeräts; nur zur Anzeige, nie ins Log. */
+  standard: string | null;
+  /** Name des gewählten Geräts; `null` = Windows-Standard. */
+  gewaehlt: string | null;
+  /** false = das gewählte Gerät ist gerade nicht angeschlossen. */
+  verfuegbar: boolean;
+}
+
+/** Ein aktives Ausgabegerät für die Auswahl „Ansage über". */
+export interface GeraetInfo {
+  id: string;
+  name: string;
+}
+
+export interface StimmeInfo {
+  name: string;
+  sprache: string;
+}
+
+/** Spielt PCM16 mono (little endian) über den Kern; kehrt nach dem Ende
+ *  zurück. Raw-IPC: die Samples gehen ohne Base64/JSON über die Brücke. */
+export const ansagePcmSpielen = (
+  pcm: Int16Array,
+  rate: number,
+  art: "gong" | "sprache",
+): Promise<Abspielbericht> =>
+  invoke("ansage_pcm_spielen", new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength), {
+    headers: { "x-rate": String(rate), "x-art": art },
+  });
+
+/** Windows-Stimme im Kern: synthetisieren und abspielen. */
+export const ansageStimmeSpielen = (
+  segmente: string[],
+  lang: "de" | "en",
+  voice: string,
+  rate: number,
+): Promise<Abspielbericht> =>
+  invoke("ansage_stimme_spielen", { segmente, lang, voice, rate });
+
+/** `hart`: Frist abgelaufen — der Kern gibt zusätzlich seinen Audio-Thread
+ *  auf, damit ein hängender Treiberaufruf die folgenden Ansagen nicht bremst. */
+export const ansageAbbrechen = (hart = false): Promise<void> =>
+  invoke("ansage_abbrechen", { hart });
+
+export const ansageAusgabe = (): Promise<AusgabeInfo> => invoke("ansage_ausgabe");
+
+export const ansageStimmen = (): Promise<StimmeInfo[]> => invoke("ansage_stimmen");
+
+export const ansageGeraete = (): Promise<GeraetInfo[]> => invoke("ansage_geraete");
+
+/** Gerät für die Ansage wählen (leere `id` = Windows-Standard). Eigener
+ *  Command statt save_config: Das Feld gehört dem PC und ist dort gegen
+ *  alte Stände aus anderen Formularen geschützt. */
+export const ansageAusgabeSetzen = (id: string, name: string): Promise<AppConfig> =>
+  invoke("ansage_ausgabe_setzen", { id, name });
+
 export const startSync = (): Promise<void> => invoke("start_sync");
 
 export const stopSync = (): Promise<void> => invoke("stop_sync");
 
-/** Sichert den aufgelaufenen Live-Stand sofort auf die Platte.
- *
- *  Nötig vor jedem Beenden, das nicht über `stopSync` oder das Schließen des
- *  Fensters läuft — heute der Neustart nach einem Auto-Update. Seit der
- *  Entprellung (Spec `monitor-livestand-push`, S2) schreibt nicht mehr jeder
- *  gezählte Punkt selbst. */
-export const flushLiveScores = (): Promise<void> => invoke("flush_live_scores");
+// ── Update im Turnierbetrieb (Spec `update-im-turnierbetrieb`) ──
+// Der ganze Ablauf lebt im Rust-Kern (R1); das Frontend stößt an und liest.
+
+/** Auf ein Update prüfen und es sofort im Hintergrund laden. Kehrt sofort
+ *  zurück — der Fortschritt kommt über `updateInfo`. */
+export const updateCheck = (): Promise<void> => invoke("update_check");
+
+export const updateInfo = (): Promise<UpdateInfo> => invoke("update_info");
+
+/** Geladenes Update jetzt einbauen: sichert den Live-Stand, merkt sich, ob
+ *  die Übertragung lief (Wiederanlauf), und startet den Installer — die App
+ *  endet darin und kommt als neue Version zurück. */
+export const updateInstallNow = (): Promise<void> => invoke("update_install_now");
+
+/** Einbau beim Beenden vormerken bzw. die Vormerkung lösen. */
+export const updateSetInstallOnExit = (an: boolean): Promise<void> =>
+  invoke("update_set_install_on_exit", { an });
+
+/** Wiederanlauf-Marker abholen (einmalig beim Start): `true` = die
+ *  Übertragung lief vor dem Update und soll jetzt von selbst starten. */
+export const takeUpdateResume = (): Promise<boolean> =>
+  invoke("take_update_resume");
 
 export const getStatus = (): Promise<SyncStatus> => invoke("get_status");
 
@@ -133,7 +227,9 @@ export const importIdentity = (bundle: string): Promise<AppConfig> =>
 /** Installierte App-Version (Rust: CARGO_PKG_VERSION). */
 export const appVersion = (): Promise<string> => invoke("app_version");
 
-/** Öffnet eine externe https-URL im Standardbrowser. */
+/** Öffnet eine URL im Standardbrowser. Der Rust-Kern lässt nur zu: `https`,
+ *  `http` auf localhost/127.0.0.1/bts-light.local sowie `http` auf den
+ *  eigenen LAN-Tablet-Server (`open_url_erlaubt`); sonst lehnt das Promise ab. */
 export const openExternal = (url: string): Promise<void> =>
   invoke("open_external", { url });
 
@@ -303,6 +399,22 @@ export const publishFreetext = (hall: string, text: string): Promise<number> =>
  *  Slave: vom Master geholt). */
 export const pendingFreetext = (since: number): Promise<FreetextItem[]> =>
   invoke("pending_freetext", { since });
+
+/** Vertoner der Ansage-Seiten: beansprucht neue TL-Aufträge und Freitexte,
+ *  deren Halle gerade eine Seite hört (jede Quelle genau einmal). */
+export const ansageOffeneQuellen = (): Promise<AnsageQuellen> =>
+  invoke("ansage_offene_quellen");
+
+/** Eine fertige Ansage für die Ansage-Seiten vertonen und ablegen. `null`,
+ *  wenn nichts abgelegt wurde (Schalter aus, niemand hört zu). */
+export const ansageVertonen = (auftrag: AnsageAuftrag): Promise<number | null> =>
+  invoke("ansage_vertonen", { auftrag });
+
+/** Wo gerade Ansage-Seiten zuhören — und wo zugleich ein PC spricht. */
+export const ansageHoerer = (): Promise<AnsageHoerer> => invoke("ansage_hoerer");
+
+/** Links (und QR) der Ansage-Seite je Halle. */
+export const ansageLink = (): Promise<AnsageLink[]> => invoke("ansage_link");
 
 /** Neue Ansage-Aufträge der Turnierleitung (id > since) für die eigene Halle.
  *  Die Seite selbst spricht nie — sie beauftragt, gesprochen wird hier. */
@@ -561,3 +673,17 @@ export const officialsSetCourtSwitches = (
   operator: boolean,
 ): Promise<void> =>
   invoke("officials_set_court_switches", { courtId, sr, ar, operator });
+
+// ── TP-Datei an badhub (Spec tp-datei-upload, L1) ───────────────────────────
+
+/** Urteil über einen im Dialog gewählten Pfad (Rust: badhub::tp_upload::tp_file_check). */
+export const tpFileCheck = (path: string): Promise<TpFileInfo> =>
+  invoke("tp_file_check", { path });
+
+/** Knopf „TP-Datei an badhub senden": prüft die Vorbedingungen synchron (Fehler
+ *  = Text), startet sonst den Upload im Rust-Kern und liefert sofort „läuft". */
+export const tpUploadNow = (): Promise<TpUploadStatus> => invoke("tp_upload_now");
+
+/** Aktueller Stand des Uploads; das Dashboard pollt alle 5 s, solange `laeuft`. */
+export const tpUploadStatus = (): Promise<TpUploadStatus> =>
+  invoke("tp_upload_status");

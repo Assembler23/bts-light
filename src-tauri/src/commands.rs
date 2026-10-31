@@ -13,6 +13,7 @@ use tauri_plugin_opener::OpenerExt;
 use relay_proto::{MonitorCommandKind, MonitorDeviceInfo};
 
 use crate::badhub::push;
+use crate::badhub::tp_takt::UploadAusgang;
 use crate::btp::client;
 use crate::config::{AppConfig, ConnectionMode};
 use crate::sync::{SyncEngine, SyncOutcome};
@@ -101,6 +102,17 @@ pub struct AppState {
     /// Handle der Slave-Monitor-Brücke (`:8088` → Cloud-Monitor des Masters,
     /// nur im `slave_mode`), falls aktiv.
     pub slave_bridge: Mutex<Option<JoinHandle<()>>>,
+    /// Phasen des Update-Ablaufs + geladenes Paket (Spec
+    /// `update-im-turnierbetrieb`, ADR 0057).
+    pub update: crate::update::UpdateManager,
+    /// Stand des letzten TP-Datei-Uploads (Spec `tp-datei-upload`). Nur im
+    /// Speicher: nicht in der Config, nicht in der `SyncEngine` (die wird bei
+    /// jedem Speichern neu gebaut). Geht beim Neustart verloren — der Server
+    /// kennt den Stand. `Arc`, weil der Upload-Task ihn fortschreibt.
+    pub tp_upload: Arc<Mutex<TpUploadStatus>>,
+    /// Das vom Updater-Plugin geprüfte Update — nur damit lässt sich das
+    /// Paket über den Plugin-Weg (Installer mit Neustart) einbauen.
+    pub update_handle: Mutex<Option<tauri_plugin_updater::Update>>,
 }
 
 fn now_ms() -> u64 {
@@ -381,6 +393,12 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Automatik legt ein Spiel auf das kaputte Feld.
     incoming.locked_courts = current.locked_courts.clone();
     incoming.locked_courts_tournament = current.locked_courts_tournament.clone();
+    // Das Ausgabegerät der Ansage (Spec `ansage-ausgabegeraet`, PR 2) wird
+    // nur über `ansage_ausgabe_setzen` gesetzt. Setup-Assistent und
+    // Ansage-Einstellungen schicken ihren beim Öffnen aufgenommenen Stand
+    // zurück — ohne Schutz kippte jedes Speichern die Gerätewahl zurück.
+    incoming.announce.output_device = current.announce.output_device.clone();
+    incoming.announce.output_device_name = current.announce.output_device_name.clone();
     // Turnier-GUID spiegeln (ADR 0054): Liveticker-Push (tset/sched/tupdate)
     // liest das kanonische Wurzelfeld, Check-In-Meldeliste/Anfangszeiten lesen
     // weiterhin `checkin.tournament_uuid`. `load_from` stellt den Gleichlauf
@@ -419,6 +437,13 @@ pub fn save_config(
     // 2 MB) Bilddaten nicht erneut über die Leitung schicken. Vor dem Verschieben
     // von `config` in den State prüfen.
     let logo_changed = config.tournament_logo.data != current.tournament_logo.data;
+    // Takt-Upload (Spec `tp-takt-upload`): Wiederanlauf nach Halt, Schalter,
+    // vorgezogener Termin bei geändertem Minutenwert — alles aus dem Vergleich
+    // alt/neu, bevor `config` in den State wandert.
+    let takt_wechsel = crate::badhub::tp_takt::bewerte_config(&current, &config);
+    tp_status_lock(&state.tp_upload)
+        .takt
+        .config_gewechselt(takt_wechsel, now_ms());
     // Schiedsrichter-Schalter sofort wirksam machen: Der Sync-Lauf liest
     // seine Konfiguration nur beim Start, deshalb hält der Roster-Speicher
     // die globalen Schalter — sonst bliebe das Häkchen bis zum nächsten
@@ -471,6 +496,10 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     // durch einen eigenen Schritt, sondern automatisch, weil die Zeile
     // darüber die komplette `devices`-Liste leert.
     cfg.tl_web.devices.clear();
+    // Das Ausgabegerät der Ansage gehört dem PC (Endpunkt-IDs gibt es nur
+    // dort) — am neuen PC wäre es nie vorhanden und zeigte nur ein Banner.
+    cfg.announce.output_device.clear();
+    cfg.announce.output_device_name.clear();
     cfg
 }
 
@@ -495,6 +524,10 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     if imported.tl_web.devices.is_empty() {
         imported.tl_web.devices = current.tl_web.devices.clone();
     }
+    // Das Ausgabegerät der Ansage gilt je PC: immer das dieses PCs behalten,
+    // auch wenn ein (altes oder von Hand gebautes) Bündel eins mitbringt.
+    imported.announce.output_device = current.announce.output_device.clone();
+    imported.announce.output_device_name = current.announce.output_device_name.clone();
     // Raster-Anordnungen (Task 9/11) fehlen in Bündeln aus einer Version vor
     // deren Einführung — ein leeres Feld heißt dann „unbekannt", nicht „am
     // neuen PC absichtlich gelöscht". Sonst würde ein Identitäts-Import mit
@@ -766,11 +799,17 @@ pub async fn checkin_state(
     };
 
     let mut view = fetch_state(&checkin_client(), &base, &password, &uuid).await;
+    // Setzplätze aus dem BTP-Stand ergänzen (Spec setzplaetze-anzeigen).
+    if let Some(snap) = state.tablet.snapshot_clone() {
+        crate::badhub::checkin_state::setzungen_eintragen(&mut view, &snap.entries);
+    }
     // Links zur öffentlichen Seite und zum QR-Aushang: aus der Config
     // gebaut, sobald der Check-In eingerichtet ist — auch bei „offline",
     // denn die Adresse selbst gilt unabhängig von der Erreichbarkeit.
     view.public_url = crate::badhub::checkin_state::public_url(&base, &uuid);
     view.poster_url = crate::badhub::checkin_state::poster_url(&base, &uuid);
+    view.hall_url = crate::badhub::checkin_state::hall_url(&base, &uuid);
+    view.schedule_url = crate::badhub::checkin_state::schedule_url(&base, &uuid);
     Ok(view)
 }
 
@@ -975,6 +1014,642 @@ pub(crate) fn pruefe_startbedingungen(config: &crate::config::AppConfig) -> Resu
     Ok(())
 }
 
+// ── TP-Datei an badhub (Spec `tp-datei-upload`, L1) ─────────────────────────
+
+/// Stand des letzten Uploads fürs Dashboard. `laeuft` sperrt den zweiten
+/// Klick; `ergebnis` ist der fertige Text (Spec-Tabelle „Antwort → Status“).
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct TpUploadStatus {
+    pub laeuft: bool,
+    /// Unix-ms des Abschlusses (für „zuletzt hh:mm“ im Dashboard).
+    pub zeitpunkt_ms: Option<u64>,
+    /// Rohgröße der gesendeten Datei.
+    pub groesse: Option<u64>,
+    pub ergebnis: Option<String>,
+    /// Wer `ergebnis` zuletzt geschrieben hat (Stufe 2: Knopf oder Takt).
+    pub quelle: Option<Quelle>,
+    /// Zustand des Takt-Uploads (Spec `tp-takt-upload`, ADR 0061): Termin,
+    /// letzte Prüfung und Halt reisen ans Dashboard; Merker und Zähler nicht.
+    #[serde(flatten)]
+    pub takt: crate::badhub::tp_takt::TaktZustand,
+}
+
+/// Auslöser eines Uploads.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Quelle {
+    Knopf,
+    Takt,
+}
+
+/// Alles, was der Upload-Task aus der Config braucht — einmal geprüft, dann
+/// losgelöst von der Config, die sich währenddessen ändern darf.
+pub(crate) struct UploadVorgaben {
+    pub pfad: std::path::PathBuf,
+    /// Kanonische GUID.
+    pub guid: String,
+    /// Verbandskürzel aus der Liveticker-URL.
+    pub kuerzel: String,
+    pub tp_upload_url: String,
+    pub password: String,
+}
+
+/// Von Hand, damit das Passwort nie in einer Panic- oder Log-Ausgabe landet.
+impl std::fmt::Debug for UploadVorgaben {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UploadVorgaben")
+            .field("pfad", &self.pfad)
+            .field("guid", &self.guid)
+            .field("kuerzel", &self.kuerzel)
+            .field("tp_upload_url", &self.tp_upload_url)
+            .field("password", &"***")
+            .finish()
+    }
+}
+
+/// Zeitkonstanten des Upload-Tasks; Tests reichen kurze Werte herein.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UploadTakt {
+    pub ruhe: Duration,
+    pub max_wartezeit: Duration,
+    pub leseabstand: Duration,
+    pub status_abstand: Duration,
+    pub status_max: Duration,
+}
+
+impl UploadTakt {
+    pub(crate) const BETRIEB: UploadTakt = UploadTakt {
+        ruhe: crate::btp::write_gate::RUHE,
+        max_wartezeit: crate::btp::write_gate::MAX_WARTEZEIT,
+        leseabstand: crate::badhub::tp_upload::LESEABSTAND,
+        status_abstand: crate::badhub::tp_upload::STATUS_ABSTAND,
+        status_max: crate::badhub::tp_upload::STATUS_MAX,
+    };
+}
+
+pub(crate) const TEXT_BTP_BESCHAEFTIGT: &str =
+    "BTP ist gerade beschäftigt, bitte gleich noch einmal";
+
+/// Was vor einem Upload stimmen muss. Reine Funktion wie `pruefe_startbedingungen`;
+/// jede Verletzung hat ihren eigenen Text mit Verweis auf den Setup-Abschnitt.
+/// Reihenfolge: Slave → Passwort → GUID → Datei → Kürzel.
+pub(crate) fn pruefe_upload_bedingungen(config: &AppConfig) -> Result<UploadVorgaben, String> {
+    const SETUP_TP: &str = "Setup, Abschnitt „TP-Datei (Turnierdatenbank)“";
+    if config.slave_mode {
+        // Setup und Dashboard blenden Abschnitt und Knopf im Slave-Modus aus (AK 3);
+        // der Text erreicht nur einen direkten Command-Aufruf.
+        return Err(
+            "Nur der Master lädt die TP-Datei hoch — diese Instanz läuft als Slave.".to_string(),
+        );
+    }
+    if config.badhub.password.is_empty() {
+        return Err(
+            "Es ist kein Badhub-Passwort konfiguriert (Setup, „3 · Badhub-Zugang“).".to_string(),
+        );
+    }
+    let guid = config.tournament_uuid_kanonisch().ok_or_else(|| {
+        "Die Turnier-Kennung von turnier.de fehlt — im Setup unter „1 · Liveticker-Ziel“ \
+         die Adresse deines Turniers einfügen."
+            .to_string()
+    })?;
+    let pfad = match config.tp_datei_fuer_turnier() {
+        Some(p) => p,
+        None if config.tp_upload.path.trim().is_empty() => {
+            return Err(format!("Keine TP-Datei gewählt ({SETUP_TP})."));
+        }
+        None => {
+            return Err(format!(
+                "Datei neu wählen — die Turnier-GUID hat sich seit der Dateiwahl geändert ({SETUP_TP})."
+            ));
+        }
+    };
+    let kuerzel =
+        crate::aushang::kuerzel_aus_live_url(&config.badhub.live_url).ok_or_else(|| {
+            "Die Liveticker-Adresse enthält kein Verbandskürzel — „1 · Liveticker-Ziel“ prüfen \
+         (z. B. https://badhub.de/live?t=bvbb)."
+                .to_string()
+        })?;
+    Ok(UploadVorgaben {
+        pfad,
+        guid,
+        kuerzel,
+        tp_upload_url: crate::badhub::tp_upload::tp_upload_url(&config.badhub.url),
+        password: config.badhub.password.clone(),
+    })
+}
+
+/// Merker ohne Invarianten: ein vergifteter Mutex (Panic im Upload-Task) darf
+/// weder den 5-s-Poll des Dashboards noch den nächsten Klick in einen
+/// Command-Panic laufen lassen — der Wert ist auch dann brauchbar.
+fn tp_status_lock(status: &Mutex<TpUploadStatus>) -> std::sync::MutexGuard<'_, TpUploadStatus> {
+    status
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Merker auf „läuft“ setzen — oder den aktuellen Stand zurückgeben, wenn
+/// schon ein Upload läuft (zweiter Klick ist ein No-op).
+pub(crate) fn upload_starten(
+    status: &Mutex<TpUploadStatus>,
+) -> Result<TpUploadStatus, Box<TpUploadStatus>> {
+    let mut s = tp_status_lock(status);
+    if s.laeuft {
+        // Geboxt: Der Status trägt seit Stufe 2 den Takt-Zustand (Clippy result_large_err).
+        return Err(Box::new(s.clone()));
+    }
+    s.laeuft = true;
+    s.ergebnis = None;
+    Ok(s.clone())
+}
+
+/// Sicherheitsnetz: Bricht der Upload-Task ab (Panic, Runtime-Ende), bevor er
+/// den Merker regulär schreibt, gibt der Drop den Knopf wieder frei — sonst
+/// bliebe `laeuft` bis zum App-Neustart stehen. Der reguläre Pfad schreibt
+/// vorher `laeuft = false`, dann greift der Guard nicht mehr.
+struct LaeuftZurueck(Arc<Mutex<TpUploadStatus>>);
+
+impl Drop for LaeuftZurueck {
+    fn drop(&mut self) {
+        let mut s = tp_status_lock(&self.0);
+        if s.laeuft {
+            s.laeuft = false;
+            s.ergebnis
+                .get_or_insert_with(|| "Upload abgebrochen (interner Fehler)".to_string());
+        }
+    }
+}
+
+fn lese_fehler_text(e: &crate::badhub::tp_upload::LeseFehler) -> String {
+    use crate::badhub::tp_upload::LeseFehler;
+    match e {
+        LeseFehler::Unruhig => "Datei ändert sich gerade, bitte gleich noch einmal".to_string(),
+        LeseFehler::KeineTpDatei => {
+            "Die gewählte Datei ist keine TP-Datei — im Setup neu wählen".to_string()
+        }
+        LeseFehler::ZuGross => "TP-Datei ist größer als 32 MB — Upload nicht möglich".to_string(),
+        LeseFehler::NichtLesbar { basisname } => {
+            format!("TP-Datei nicht gefunden: {basisname} — im Setup neu wählen")
+        }
+    }
+}
+
+/// Knopf-Text, wenn die Datei zu einem anderen Turnier gehört (Handbuch-Anker).
+fn guid_fremd_text(name: &str, datei: &str, eingestellt: &str) -> String {
+    use crate::badhub::tp_guid::kurz;
+    format!(
+        "„{name}“ gehört zu Turnier {}, eingestellt ist {} — Kennung unter „1 · Liveticker-Ziel“ prüfen oder andere Datei wählen",
+        kurz(datei),
+        kurz(eingestellt)
+    )
+}
+
+/// Der eigentliche Upload, als freie Funktion ohne Tauri: Gate → stabil lesen
+/// (Guard danach sofort weg, erst dann senden) → Antwort → bei 202 steht
+/// „angenommen, wird verarbeitet“ im Merker (AK 4), dann wird der Status
+/// gepollt → Merker schreiben → eine Log-Zeile (Name, Größen, Dauer, Code;
+/// nie Inhalt, nie Header-Werte; die Server-Meldung ist bereinigt). Läuft im
+/// Rust-Task von `tp_upload_now` oder des Takt-Schritts.
+///
+/// Liefert den strukturierten [`UploadAusgang`] (Stufe 2): der Knopf braucht
+/// nur den Text im Merker, der Takt ordnet den Ausgang ein. Die Texte sind
+/// gegenüber Stufe 1 unverändert (Handbuch-Anker).
+pub(crate) async fn fuehre_upload_aus(
+    vorgaben: UploadVorgaben,
+    status: Arc<Mutex<TpUploadStatus>>,
+    gate: &crate::btp::write_gate::WriteGate,
+    client: &reqwest::Client,
+    takt: UploadTakt,
+    quelle: Quelle,
+) -> (UploadAusgang, String) {
+    use crate::badhub::tp_upload as tpu;
+    let _sicherheitsnetz = LaeuftZurueck(status.clone());
+    let start = std::time::Instant::now();
+    let name = tpu::basisname(&vorgaben.pfad);
+    let mut groesse: Option<u64> = None;
+    let mut log_zusatz = String::new();
+
+    let (text, ausgang) = match gate.fuer_kopie(takt.ruhe, takt.max_wartezeit).await {
+        Err(crate::btp::write_gate::GateFehler::Beschaeftigt) => (
+            TEXT_BTP_BESCHAEFTIGT.to_string(),
+            UploadAusgang::Beschaeftigt,
+        ),
+        Ok(guard) => {
+            let gelesen = tpu::lese_stabil(&vorgaben.pfad, takt.leseabstand).await;
+            drop(guard); // Writes dürfen weiter, bevor das Netz dran ist
+                         // Gehört die Datei zu einem anderen Turnier, geht nichts übers Netz.
+            let fremd = gelesen
+                .as_ref()
+                .ok()
+                .and_then(|b| crate::badhub::tp_guid::fremde_guid(b, &vorgaben.guid));
+            match (gelesen, fremd) {
+                (Err(e), _) => (lese_fehler_text(&e), UploadAusgang::Lesefehler(e)),
+                (Ok(bytes), Some(datei)) => {
+                    groesse = Some(bytes.len() as u64);
+                    (
+                        guid_fremd_text(&name, &datei, &vorgaben.guid),
+                        UploadAusgang::GuidFremd { datei },
+                    )
+                }
+                (Ok(bytes), None) => {
+                    groesse = Some(bytes.len() as u64);
+                    let sha = tpu::sha256(&bytes);
+                    let file_name = tpu::x_file_name(&vorgaben.pfad);
+                    let ziel = tpu::UploadZiel {
+                        tp_upload_url: &vorgaben.tp_upload_url,
+                        password: &vorgaben.password,
+                        guid: &vorgaben.guid,
+                        kuerzel: &vorgaben.kuerzel,
+                        file_name: &file_name,
+                    };
+                    let gesendet = tpu::sende(client, &ziel, &bytes).await;
+                    drop(bytes);
+                    log_zusatz = format!(
+                        ", gzip {} B, HTTP {}",
+                        gesendet.gzip_bytes,
+                        gesendet
+                            .http_status
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "-".to_string())
+                    );
+                    match gesendet.antwort {
+                        tpu::UploadAntwort::Angenommen { .. } => {
+                            // Zwischenstand sichtbar machen, solange gepollt wird (AK 4).
+                            tp_status_lock(&status).ergebnis =
+                                Some(tpu::antwort_text(&gesendet.antwort));
+                            match status_pollen(client, &vorgaben, takt).await {
+                                Some(st) => (
+                                    tpu::ergebnis_text(&st),
+                                    UploadAusgang::Verarbeitet { status: st, sha },
+                                ),
+                                None => (
+                                    tpu::TEXT_VERARBEITUNG_DAUERT.to_string(),
+                                    UploadAusgang::DauertNoch { sha },
+                                ),
+                            }
+                        }
+                        andere => (
+                            tpu::antwort_text(&andere),
+                            UploadAusgang::Antwort {
+                                antwort: andere,
+                                sha,
+                            },
+                        ),
+                    }
+                }
+            }
+        }
+    };
+
+    let dauer_ms = start.elapsed().as_millis();
+    let roh = groesse.map(|g| format!(", roh {g} B")).unwrap_or_default();
+    let wer = match quelle {
+        Quelle::Knopf => "Knopf",
+        Quelle::Takt => "Takt",
+    };
+    tracing::info!("TP-Upload ({wer}) „{name}“{roh}{log_zusatz}, {dauer_ms} ms → {text}");
+    let mut s = tp_status_lock(&status);
+    s.laeuft = false;
+    s.zeitpunkt_ms = Some(now_ms());
+    s.groesse = groesse;
+    s.ergebnis = Some(text.clone());
+    s.quelle = Some(quelle);
+    // Text auch zurückgeben: der Takt-Schritt braucht ihn für die Einordnung
+    // und darf ihn nicht aus dem geteilten Merker lesen (ein Knopf-Klick
+    // dazwischen setzt `ergebnis = None`).
+    (ausgang, text)
+}
+
+/// Nach 202: alle `status_abstand` den Status holen, bis `result` da ist oder
+/// die Frist `status_max` verstrichen ist — dann `None` („dauert noch“), der
+/// Knopf wird wieder frei. Der erste Poll kommt erst nach einem Abstand: der
+/// Worker läuft per Timer, sofort gibt es praktisch nie ein `result`.
+async fn status_pollen(
+    client: &reqwest::Client,
+    vorgaben: &UploadVorgaben,
+    takt: UploadTakt,
+) -> Option<crate::badhub::tp_upload::StatusAntwort> {
+    use crate::badhub::tp_upload as tpu;
+    let url = tpu::status_url(&vorgaben.tp_upload_url, &vorgaben.guid);
+    let frist = std::time::Instant::now() + takt.status_max;
+    loop {
+        let rest = frist.saturating_duration_since(std::time::Instant::now());
+        if rest.is_zero() {
+            return None;
+        }
+        tokio::time::sleep(takt.status_abstand.min(rest)).await;
+        let rest = frist.saturating_duration_since(std::time::Instant::now());
+        // Der Poll selbst darf die Frist nicht um den Client-Timeout überziehen.
+        let antwort = tokio::time::timeout(
+            rest.max(Duration::from_millis(50)),
+            tpu::status_abfragen(client, &url, &vorgaben.password),
+        )
+        .await;
+        if let Ok(Some(s)) = antwort {
+            if s.result.is_some() {
+                return Some(s);
+            }
+        }
+    }
+}
+
+/// Nachlauf des Knopfs (Stufe 2): Hat der Server die Bytes gesehen, hebt das
+/// einen Halt der Automatik auf und setzt den Merker — der Takt schickt
+/// dieselben Bytes nicht gleich noch einmal.
+pub(crate) fn knopf_nachlauf(
+    ausgang: &UploadAusgang,
+    status: &Mutex<TpUploadStatus>,
+    pfad: &std::path::Path,
+    guid: &str,
+) {
+    if let crate::badhub::tp_takt::Einordnung::Gesendet { sha, nachholen } =
+        crate::badhub::tp_takt::einordnen(ausgang, "")
+    {
+        let mut s = tp_status_lock(status);
+        s.takt.knopf_gesendet(pfad, guid, sha, nachholen);
+        // Auch der Knopf zählt für den Mindestabstand der Ereignisse (ADR 0062).
+        s.takt.letzter_upload_ms = Some(now_ms());
+    }
+}
+
+/// Ein Schritt des Takt-Uploads (Spec `tp-takt-upload`, „Takt-Schritt“).
+/// Frei von Tauri: Config über den geteilten Mutex, Zustand im Status-Merker,
+/// Uhr als Parameter. `gate` ist `'static`, weil der Upload als eigener Task
+/// läuft (ein Abbruch des Takt-Tasks beim Speichern lässt ihn zu Ende laufen).
+pub(crate) async fn tp_takt_schritt(
+    config: &Mutex<AppConfig>,
+    status: &Arc<Mutex<TpUploadStatus>>,
+    gate: &'static crate::btp::write_gate::WriteGate,
+    client: &reqwest::Client,
+    takt: UploadTakt,
+    jetzt_ms: u64,
+) {
+    use crate::badhub::tp_takt as tk;
+    use crate::badhub::tp_upload as tpu;
+
+    let cfg = config
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    // 1 Schalter / Slave
+    let Some(dauer) = cfg.tp_upload.takt().filter(|_| !cfg.slave_mode) else {
+        tp_status_lock(status).takt.ausschalten();
+        return;
+    };
+    // 2 Halt: nichts lesen, nichts senden
+    {
+        let mut s = tp_status_lock(status);
+        if s.takt.angehalten.is_some() {
+            s.takt.naechster_ms = Some(jetzt_ms + dauer.as_millis() as u64);
+            return;
+        }
+    }
+    // 3 Vorbedingungen
+    let vorgaben = match pruefe_upload_bedingungen(&cfg) {
+        Ok(v) => v,
+        Err(text) => {
+            tracing::info!("TP-Takt angehalten: {text}");
+            tp_status_lock(status).takt.halt(text, jetzt_ms, dauer);
+            return;
+        }
+    };
+    let pfad = vorgaben.pfad.clone();
+    let guid = vorgaben.guid.clone();
+    // 3a Status nachholen (nach „dauert noch“)
+    let nachholen = {
+        let mut s = tp_status_lock(status);
+        std::mem::take(&mut s.takt.nachholen)
+    };
+    if nachholen {
+        let url = tpu::status_url(&vorgaben.tp_upload_url, &vorgaben.guid);
+        if let Some(st) = tpu::status_abfragen(client, &url, &vorgaben.password).await {
+            if st.result.is_some() {
+                let text = tpu::ergebnis_text(&st);
+                let mut s = tp_status_lock(status);
+                if tk::status_fatal(&st) {
+                    tracing::info!("TP-Takt angehalten: {text}");
+                    s.takt.halt(text, jetzt_ms, dauer);
+                    return;
+                }
+                s.ergebnis = Some(text);
+                s.quelle = Some(Quelle::Takt);
+            }
+        }
+    }
+    // 4 Schnell-Lesung ohne Gate
+    let bytes = match tpu::lesen(&pfad).await {
+        Ok(b) => b,
+        Err(e) => {
+            let text = lese_fehler_text(&e);
+            let ausgang = UploadAusgang::Lesefehler(e);
+            let eo = tk::einordnen(&ausgang, &text);
+            let mut s = tp_status_lock(status);
+            let art = s.takt.anwenden(eo, jetzt_ms, dauer, &pfad, &guid);
+            takt_text_setzen(&mut s, art, &ausgang, &text);
+            return;
+        }
+    };
+    let sha = tpu::sha256(&bytes);
+    drop(bytes);
+    // 5 unverändert → nur Stempel
+    {
+        let mut s = tp_status_lock(status);
+        if s.takt
+            .merker
+            .as_ref()
+            .is_some_and(|m| m.passt(&pfad, &guid, &sha))
+        {
+            s.takt.unveraendert(jetzt_ms, dauer);
+            return;
+        }
+    }
+    // 6 Knopf läuft?
+    if upload_starten(status).is_err() {
+        tp_status_lock(status).takt.knopf_laeuft(jetzt_ms);
+        return;
+    }
+    // 7 Upload als eigener Task. Die Termine danach rechnen ab dem **Ende**
+    // des Uploads — er kann Minuten dauern, und `Retry-After` zählt ab der
+    // Antwort, nicht ab Schrittbeginn (Review M2/S2).
+    let start = std::time::Instant::now();
+    let st = status.clone();
+    let cl = client.clone();
+    let handle = tokio::spawn(async move {
+        fuehre_upload_aus(vorgaben, st, gate, &cl, takt, Quelle::Takt).await
+    });
+    let ergebnis = handle.await;
+    let jetzt_ms = jetzt_ms + start.elapsed().as_millis() as u64;
+    let Ok((ausgang, knopf_text)) = ergebnis else {
+        // Panic im Upload-Task: `LaeuftZurueck` hat den Merker schon
+        // geschrieben. Als Nachversuch werten, sonst stünde der Termin in der
+        // Vergangenheit und der nächste Tick liefe sofort wieder los (M1/S3).
+        tracing::warn!("TP-Takt: Upload-Task abgebrochen (Panic)");
+        tp_status_lock(status).takt.anwenden(
+            tk::Einordnung::Nachversuch { retry_after: None },
+            jetzt_ms,
+            dauer,
+            &pfad,
+            &guid,
+        );
+        return;
+    };
+    // 8 Einordnung
+    let mut s = tp_status_lock(status);
+    let eo = tk::einordnen(&ausgang, &knopf_text);
+    let art = s.takt.anwenden(eo, jetzt_ms, dauer, &pfad, &guid);
+    takt_text_setzen(&mut s, art, &ausgang, &knopf_text);
+}
+
+/// Text und Log-Zeile je Terminart; bei „Gesendet“ bleibt der Knopf-Text.
+fn takt_text_setzen(
+    s: &mut TpUploadStatus,
+    art: crate::badhub::tp_takt::Terminart,
+    ausgang: &UploadAusgang,
+    knopf_text: &str,
+) {
+    use crate::badhub::tp_takt::{grund_kurz, text_termin, Terminart};
+    let termin = s.takt.naechster_ms.unwrap_or(0);
+    let grund = grund_kurz(ausgang);
+    s.quelle = Some(Quelle::Takt);
+    match art {
+        Terminart::Nachversuch => s.ergebnis = Some(text_termin(&grund, termin, false)),
+        Terminart::Pause => {
+            tracing::info!("TP-Takt pausiert: {grund}");
+            s.ergebnis = Some(text_termin(&grund, termin, false));
+        }
+        Terminart::Halt => {
+            tracing::info!("TP-Takt angehalten: {knopf_text}");
+            s.ergebnis = Some(knopf_text.to_string());
+        }
+        // Regulärer Termin nach ausgeschöpften Nachversuchen: Grund + „nächste Prüfung“.
+        Terminart::Regulaer if !grund.is_empty() => {
+            s.ergebnis = Some(text_termin(&grund, termin, true))
+        }
+        Terminart::Regulaer => {}
+    }
+}
+
+/// Ist die Automatik laut aktueller Config aktiv (Schalter an, kein Slave)?
+fn tp_takt_an(config: &Mutex<AppConfig>) -> bool {
+    let c = config
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    c.tp_upload.takt().is_some() && !c.slave_mode
+}
+
+/// Startregel der Schleife (Spec Lebenszyklus 2): ein bestehender Termin
+/// bleibt, ein fehlender oder zu naher wird auf +60 s gehoben — `starten`
+/// trägt den `max`; ohne Schalter gibt es keinen Termin. Rein, für den Test.
+pub(crate) fn tp_takt_start(an: bool, status: &Mutex<TpUploadStatus>, jetzt_ms: u64) {
+    let mut s = tp_status_lock(status);
+    if an {
+        s.takt.starten(jetzt_ms);
+    } else {
+        s.takt.ausschalten();
+    }
+}
+
+/// Takt-Task (läuft im Sync-Task unter `TaktWaechter`): prüft alle
+/// `PRUEFTAKT`, ob der Termin fällig ist. Beim Start bleibt ein Termin aus dem
+/// vorigen Lauf stehen (Speichern = Stopp + Start), ein fehlender oder zu
+/// naher wird auf +60 s gesetzt; ist der Schalter aus, gibt es keinen Termin.
+/// Der Schritt läuft als eigener Task: Ein Panic darin beendet nicht still
+/// die Automatik (Review N4), sondern wird geloggt und als Nachversuch gewertet.
+pub(crate) async fn tp_takt_schleife(
+    config: Arc<Mutex<AppConfig>>,
+    status: Arc<Mutex<TpUploadStatus>>,
+) {
+    use crate::badhub::tp_takt::PRUEFTAKT;
+    let client = crate::badhub::tp_upload::build_client();
+    let mut takt = tokio::time::interval(PRUEFTAKT);
+    takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    tp_takt_start(tp_takt_an(&config), &status, now_ms());
+    loop {
+        takt.tick().await;
+        let jetzt = now_ms();
+        let an = tp_takt_an(&config);
+        let faellig = {
+            let mut s = tp_status_lock(&status);
+            if an && s.takt.naechster_ms.is_none() {
+                // Schalter ohne Neustart eingeschaltet (z. B. über `mutate_config`).
+                s.takt.starten(jetzt);
+            } else if !an {
+                s.takt.ausschalten();
+            }
+            an && s.takt.faellig(jetzt)
+        };
+        if !faellig {
+            continue;
+        }
+        let (c, st, cl) = (config.clone(), status.clone(), client.clone());
+        let lauf = tokio::spawn(async move {
+            tp_takt_schritt(
+                &c,
+                &st,
+                &crate::btp::write_gate::GATE,
+                &cl,
+                UploadTakt::BETRIEB,
+                jetzt,
+            )
+            .await
+        });
+        if lauf.await.is_err() {
+            tracing::warn!("TP-Takt: Schritt abgebrochen (Panic), nächster Versuch in 90 s");
+            tp_status_lock(&status).takt.knopf_laeuft(jetzt);
+        }
+    }
+}
+
+/// Urteil über einen im Dialog gewählten Pfad (Setup-Abschnitt „TP-Datei“).
+/// Liest die Datei ganz (Turnier-GUID), deshalb abseits des UI-Threads.
+#[tauri::command]
+pub async fn tp_file_check(path: String) -> crate::badhub::tp_upload::TpFileInfo {
+    let pfad = std::path::PathBuf::from(path.trim());
+    tokio::task::spawn_blocking(move || crate::badhub::tp_upload::tp_file_check(&pfad))
+        .await
+        .unwrap_or(crate::badhub::tp_upload::TpFileInfo::NichtGefunden)
+}
+
+/// Knopf „TP-Datei an badhub senden“: Vorbedingungen synchron (Verletzung →
+/// `Err` mit Text, kein Status), sonst Upload im eigenen Rust-Task und sofort
+/// „läuft“ zurück. Zweiter Klick während `laeuft` ist ein No-op (R1: alle
+/// Netzzugriffe im Rust-Kern, das Dashboard pollt nur `tp_upload_status`).
+#[tauri::command]
+pub fn tp_upload_now(state: State<'_, AppState>) -> Result<TpUploadStatus, String> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    let vorgaben = pruefe_upload_bedingungen(&config)?;
+    let status = state.tp_upload.clone();
+    let stand = match upload_starten(&status) {
+        Ok(gestartet) => gestartet,
+        Err(laeuft_schon) => return Ok(*laeuft_schon),
+    };
+    tauri::async_runtime::spawn(async move {
+        let client = crate::badhub::tp_upload::build_client();
+        let pfad = vorgaben.pfad.clone();
+        let guid = vorgaben.guid.clone();
+        let (ausgang, _) = fuehre_upload_aus(
+            vorgaben,
+            status.clone(),
+            &crate::btp::write_gate::GATE,
+            &client,
+            UploadTakt::BETRIEB,
+            Quelle::Knopf,
+        )
+        .await;
+        knopf_nachlauf(&ausgang, &status, &pfad, &guid);
+    });
+    Ok(stand)
+}
+
+/// Aktueller Stand des Uploads (Dashboard pollt alle 5 s, solange `laeuft`).
+#[tauri::command]
+pub fn tp_upload_status(state: State<'_, AppState>) -> TpUploadStatus {
+    tp_status_lock(&state.tp_upload).clone()
+}
+
 /// Startet die Hintergrund-Polling-Schleife (BTP → Badhub, alle 5 s).
 #[tauri::command]
 pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
@@ -1127,6 +1802,17 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
                 let _ = tauri::async_runtime::spawn_blocking(move || tab.flush_scores()).await;
             }
         }));
+        // Takt-Upload der TP-Datei (Spec `tp-takt-upload`, ADR 0061): nur
+        // solange der Liveticker läuft, deshalb hier und unter demselben
+        // Wächter. Liest die Config über das geteilte `Arc` (Schalter wirkt
+        // sofort), der Zustand lebt im Status-Merker von `AppState`. Nur am
+        // Master — der Slave hat weder Datei noch Upload.
+        let _tp_takt = (!slave_mode).then(|| {
+            let st = app_handle.state::<AppState>();
+            let cfg = st.config.clone();
+            let status = st.tp_upload.clone();
+            TaktWaechter(tauri::async_runtime::spawn(tp_takt_schleife(cfg, status)))
+        });
         loop {
             {
                 let lese = checkin_lese.clone();
@@ -1137,6 +1823,32 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
                 });
             }
             let outcome = engine.run_once(&sync_config, &http, &sync_tablet).await;
+            // Ereignis-Auslöser des TP-Uploads (ADR 0062): Auslosung oder
+            // Paarung erkannt → Takt-Termin vorziehen. Schalter und Drossel
+            // aus der GETEILTEN Config (nicht der Wertkopie `sync_config`):
+            // Abschalten im Setup wirkt so ab dem nächsten Abruf.
+            let app_state = app_handle.state::<AppState>();
+            // Vergifteter Mutex: weiterlesen statt den ganzen Sync-Loop
+            // (Liveticker-Push) für einen optionalen Auslöser abzureißen.
+            let abstand = app_state
+                .config
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .tp_upload
+                .ereignis_abstand();
+            let ereignis = engine.tp_ereignis_nehmen();
+            if let (Some(grund), Some(abstand)) = (ereignis, abstand) {
+                let jetzt = now_ms();
+                let mut tp = tp_status_lock(&app_state.tp_upload);
+                if tp.takt.ereignis(jetzt, grund, abstand) {
+                    tracing::info!(
+                        "TP-Takt: {grund} erkannt — Prüfung vorgezogen auf {}",
+                        crate::badhub::tp_takt::uhrzeit_aus_ms(
+                            tp.takt.naechster_ms.unwrap_or(jetzt)
+                        )
+                    );
+                }
+            }
             let mut status = status_from(&outcome);
             status.running = true;
             *app_handle
@@ -1329,6 +2041,226 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
 #[tauri::command]
 pub fn flush_live_scores(state: State<'_, AppState>) {
     state.tablet.flush_scores();
+}
+
+// ─────────────────────── Update im Turnierbetrieb ───────────────────────
+//
+// Spec `docs/features/update-im-turnierbetrieb.md`, ADR 0057. Der Ablauf
+// lebt im Rust-Kern statt im WebView (R1): Prüfen, Laden, Einbauen und der
+// Wiederanlauf-Marker greifen auf denselben Zustand zu wie der Schließpfad
+// in `lib.rs`. Die Tauri-freie Logik steht in `update.rs`.
+
+/// Pfad des Wiederanlauf-Markers im App-Datenverzeichnis.
+fn update_resume_pfad(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join(crate::update::RESUME_FILE)
+}
+
+/// Felder, auf denen gerade ein Spiel steht — die Entscheidungsgrundlage im
+/// Update-Banner („jetzt" oder „beim Beenden").
+fn belegte_felder(state: &AppState) -> usize {
+    state
+        .tablet
+        .overview()
+        .iter()
+        .filter(|c| c.match_id != 0)
+        .count()
+}
+
+/// Prüft auf ein Update und lädt es sofort im Hintergrund. Kehrt sofort
+/// zurück; das Frontend liest den Fortschritt über [`update_info`]. Ein
+/// zweiter Aufruf während Prüfen/Laden/Einbauen ist ein No-op; liegt
+/// dieselbe Version schon bereit, wird sie nicht erneut geladen.
+#[tauri::command]
+pub fn update_check(app: AppHandle, state: State<'_, AppState>) {
+    use crate::update::Phase;
+    // Prüfen + Umschalten atomar (Review 06.09.2026): Auto-Check beim Start
+    // und Klick auf der Wartungsseite laufen sonst beide los und laden zweimal.
+    let Some(bereit) = state.update.begin_check() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        use tauri_plugin_updater::UpdaterExt;
+        let st = app.state::<AppState>();
+        let geprueft = match app.updater() {
+            Ok(u) => u.check().await.map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        let update = match geprueft {
+            Ok(Some(u)) => u,
+            Ok(None) => {
+                if bereit.is_some() {
+                    // Das Manifest bietet die Version nicht mehr an
+                    // (zurückgezogen): Paket und Vormerkung räumen, statt
+                    // ein Update einzubauen, das es offiziell nicht gibt.
+                    tracing::info!("Bereitliegendes Update wurde vom Manifest zurückgezogen");
+                    st.update.paket_verwerfen();
+                    *st.update_handle
+                        .lock()
+                        .expect("Update-Mutex nicht vergiftet") = None;
+                }
+                st.update.set_phase(Phase::Current);
+                return;
+            }
+            Err(e) => {
+                tracing::info!("Update-Prüfung fehlgeschlagen: {e}");
+                // Offline ist in der Halle der Normalfall — ein schon
+                // geladenes Paket bleibt bereit, samt Vormerkung.
+                st.update.set_phase(match bereit {
+                    Some((version, notes)) => Phase::Ready { version, notes },
+                    None => Phase::Error(e),
+                });
+                return;
+            }
+        };
+        if bereit.as_ref().map(|(v, _)| v.as_str()) == Some(update.version.as_str()) {
+            // Paket liegt schon da — nur die Phase zurückdrehen.
+            st.update.set_phase(Phase::Ready {
+                version: update.version.clone(),
+                notes: update.body.clone(),
+            });
+            return;
+        }
+        st.update.set_phase(Phase::Downloading {
+            version: update.version.clone(),
+            notes: update.body.clone(),
+        });
+        tracing::info!("Update v{} gefunden, lade im Hintergrund", update.version);
+        match update.download(|_, _| {}, || {}).await {
+            Ok(bytes) => {
+                tracing::info!(
+                    "Update v{} geladen ({} KB), wartet auf den Einbau",
+                    update.version,
+                    bytes.len() / 1024
+                );
+                *st.update_handle
+                    .lock()
+                    .expect("Update-Mutex nicht vergiftet") = Some(update.clone());
+                st.update
+                    .paket_bereit(update.version.clone(), update.body.clone(), bytes);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Update v{} konnte nicht geladen werden: {e}",
+                    update.version
+                );
+                st.update.set_phase(Phase::Error(e.to_string()));
+            }
+        }
+    });
+}
+
+/// Aktueller Stand des Update-Ablaufs fürs Banner.
+#[tauri::command]
+pub fn update_info(state: State<'_, AppState>) -> crate::update::UpdateInfo {
+    let running = state.status.lock().map(|s| s.running).unwrap_or(false);
+    state.update.info(belegte_felder(&state), running)
+}
+
+/// Baut das geladene Update jetzt ein: Live-Stand sichern, Wiederanlauf-
+/// Marker schreiben, Installer über das Plugin starten (der Prozess endet
+/// darin; der Installer startet die neue Version). Scheitert der Start,
+/// verschwindet der Marker wieder.
+#[tauri::command]
+pub async fn update_install_now(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use crate::update::{Phase, ResumeMarker};
+    let notes = match state.update.phase() {
+        Phase::Ready { notes, .. } => notes,
+        _ => None,
+    };
+    let paket = state.update.paket().ok_or("Kein Update geladen.")?;
+    let handle = state
+        .update_handle
+        .lock()
+        .expect("Update-Mutex nicht vergiftet")
+        .clone()
+        .ok_or("Kein Update geladen.")?;
+    state.update.set_phase(Phase::Installing {
+        version: paket.version.clone(),
+    });
+    state.tablet.flush_scores();
+    let running = state.status.lock().map(|s| s.running).unwrap_or(false);
+    let marker_pfad = update_resume_pfad(&app);
+    let marker = ResumeMarker {
+        running,
+        written_ms: now_ms(),
+        from_version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    if let Err(e) = crate::update::write_resume(&marker_pfad, &marker) {
+        // Nicht fatal: dann muss die Turnierleitung eben selbst starten.
+        tracing::warn!("Wiederanlauf-Marker nicht geschrieben: {e}");
+    }
+    tracing::info!(
+        "Update auf v{} wird eingebaut (Übertragung lief: {running})",
+        paket.version
+    );
+    // Gelingt der Start, kehrt `install` nie zurück (`std::process::exit`).
+    // Beachte: Das Plugin ignoriert den Rückgabewert von `ShellExecuteW` —
+    // blockt ein Virenscanner den Installer, ist die App trotzdem weg; der
+    // Marker bleibt frisch, und der nächste Handstart setzt die Übertragung
+    // fort (Spec, „Offen").
+    if let Err(e) = handle.install(&paket.bytes) {
+        crate::update::remove_resume(&marker_pfad);
+        // Das Paket ist weiterhin gültig — zurück auf „bereit", nicht in
+        // einen Fehlerzustand, der einen zweiten 10-MB-Download erzwänge.
+        // Den Fehlertext zeigt das Frontend aus der abgelehnten Antwort.
+        state.update.set_phase(Phase::Ready {
+            version: paket.version.clone(),
+            notes,
+        });
+        return Err(format!("Update konnte nicht gestartet werden: {e}"));
+    }
+    Ok(())
+}
+
+/// Einbau beim Beenden vormerken (oder die Vormerkung lösen). Nur mit
+/// bereitliegendem Paket.
+#[tauri::command]
+pub fn update_set_install_on_exit(state: State<'_, AppState>, an: bool) -> Result<(), String> {
+    if state.update.set_install_on_exit(an) {
+        Ok(())
+    } else {
+        Err("Kein Update geladen.".to_string())
+    }
+}
+
+/// Liest und löscht den Wiederanlauf-Marker. `true` = die Übertragung lief
+/// vor dem Update und soll jetzt von selbst wieder anlaufen. Das Frontend
+/// ruft das einmal nach dem Laden der Konfiguration und startet dann über
+/// `start_sync` — derselbe Weg wie der Knopf, mit derselben Fehleranzeige.
+#[tauri::command]
+pub fn take_update_resume(app: AppHandle) -> bool {
+    let wieder = crate::update::take_resume(&update_resume_pfad(&app), now_ms());
+    if wieder {
+        tracing::info!("Wiederanlauf nach Update: Übertragung wird automatisch gestartet");
+    }
+    wieder
+}
+
+/// Schließpfad: Ist der Einbau beim Beenden vorgemerkt, legt das den
+/// Installer ab und startet ihn stumm (ohne Neustart der App). Fehler
+/// werden nur geloggt — das Beenden darf daran nicht scheitern.
+///
+/// Die Bytes stammen aus `Update::download()` des Plugins und sind dort
+/// bereits gegen den eingebauten Public Key signaturgeprüft (siehe
+/// `update::installer_ablegen`) — der stille Pfad umgeht die Prüfung nicht.
+pub fn update_beim_beenden(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(paket) = state.update.paket_fuer_beenden() else {
+        return;
+    };
+    let dir = std::env::temp_dir();
+    match crate::update::installer_ablegen(&dir, &paket.version, &paket.bytes)
+        .and_then(|pfad| crate::update::installer_stumm_starten(&pfad))
+    {
+        Ok(()) => tracing::info!(
+            "Update v{} wird beim Beenden still eingebaut",
+            paket.version
+        ),
+        Err(e) => tracing::warn!("Stiller Einbau von v{} gescheitert: {e}", paket.version),
+    }
 }
 
 /// Stoppt die Hintergrund-Polling-Schleife und den Tablet-Server.
@@ -1761,19 +2693,115 @@ pub fn open_live_view(
 ///   mDNS-Namen `bts-light.local` (Vorschau am Turnier-PC).
 /// Kein anderes Schema und keine Steuerzeichen/Leerzeichen → es wird kein
 /// präparierter String an die OS-Shell durchgereicht.
+/// - seit v0.9.304 auch den **eigenen LAN-Tablet-Server** per `http://` auf
+///   genau `lan_host` (`<ip>:8088`, siehe `tablet::server::lan_host`) — die
+///   Tablet-Adresse je Feld ist im Spielzettel-Panel ein Link.
 #[tauri::command]
-pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
-    let has_bad_chars = url.contains(|c: char| c.is_control() || c == ' ');
-    let is_https = url.starts_with("https://");
-    let is_local_http = url.starts_with("http://localhost:")
-        || url.starts_with("http://127.0.0.1:")
-        || url.starts_with("http://bts-light.local:");
-    if has_bad_chars || !(is_https || is_local_http) {
+pub fn open_external(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<(), String> {
+    // Nur den Schalter unter dem Lock lesen — `lan_host()` fragt die
+    // Netzwerkschnittstellen ab und gehört nicht unter den Config-Mutex.
+    let lan_an = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .connection_mode
+        .lan_enabled();
+    let lan_host = lan_an.then(crate::tablet::server::lan_host);
+    if !open_url_erlaubt(&url, lan_host.as_deref()) {
         return Err("Nur https- oder lokale bts-light-Links sind erlaubt.".to_string());
     }
     app.opener()
         .open_url(url, None::<String>)
         .map_err(|e| e.to_string())
+}
+
+/// Regel des Öffners, frei von Tauri: saubere `https://`, `http://` auf
+/// Loopback/mDNS-Name **mit reinem Port**, oder `http://` auf genau den
+/// eigenen LAN-Server (`lan_host` = `<ip>:<port>`). Der Host ist alles bis
+/// zum ersten `/`; verglichen wird auf Gleichheit, nie auf Präfix — sonst
+/// schickten `localhost:8088@evil.example` oder `…:8088.evil.de` den Browser
+/// auf einen fremden Host.
+fn open_url_erlaubt(url: &str, lan_host: Option<&str>) -> bool {
+    if url.contains(|c: char| c.is_control() || c == ' ') {
+        return false;
+    }
+    if url.starts_with("https://") {
+        return true;
+    }
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let host = rest.split('/').next().unwrap_or("");
+    let loopback = host.rsplit_once(':').is_some_and(|(name, port)| {
+        matches!(name, "localhost" | "127.0.0.1" | "bts-light.local")
+            && !port.is_empty()
+            && port.bytes().all(|b| b.is_ascii_digit())
+    });
+    loopback || lan_host.is_some_and(|lan| !lan.is_empty() && host == lan)
+}
+
+#[cfg(test)]
+mod open_url_tests {
+    use super::open_url_erlaubt;
+
+    #[test]
+    fn https_und_loopback_wie_bisher() {
+        assert!(open_url_erlaubt("https://badhub.de/live?t=bvbb", None));
+        assert!(open_url_erlaubt(
+            "http://localhost:8088/info/overview",
+            None
+        ));
+        assert!(open_url_erlaubt("http://127.0.0.1:8088/monitor", None));
+        assert!(open_url_erlaubt(
+            "http://bts-light.local:8088/monitor",
+            None
+        ));
+        assert!(!open_url_erlaubt("http://example.com/", None));
+        assert!(!open_url_erlaubt("file:///C:/Windows", None));
+        assert!(!open_url_erlaubt("https://badhub.de/live?t=bv bb", None));
+        assert!(!open_url_erlaubt("https://badhub.de/\u{1}", None));
+    }
+
+    #[test]
+    fn eigener_lan_server_nur_mit_genau_diesem_host() {
+        let lan = Some("192.168.1.50:8088");
+        assert!(open_url_erlaubt("http://192.168.1.50:8088/court/3", lan));
+        assert!(open_url_erlaubt("http://192.168.1.50:8088", lan));
+        assert!(!open_url_erlaubt(
+            "http://192.168.1.50:8088.evil.de/court/3",
+            lan
+        ));
+        assert!(!open_url_erlaubt("http://192.168.1.50:8089/court/3", lan));
+        assert!(!open_url_erlaubt("http://192.168.1.51:8088/court/3", lan));
+        // Ohne LAN-Server (Cloud-Modus) bleibt http auf fremde Hosts zu.
+        assert!(!open_url_erlaubt("http://192.168.1.50:8088/court/3", None));
+    }
+
+    #[test]
+    fn loopback_nur_mit_reinem_port_keine_userinfo_oder_suffix_tricks() {
+        // `host` ist alles bis zum ersten `/` — Benutzerinfo (`@`) oder ein
+        // angehängter Domain-Rest dürfen den Browser nicht auf einen fremden
+        // Host schicken.
+        assert!(!open_url_erlaubt(
+            "http://localhost:8088@evil.example/x",
+            None
+        ));
+        assert!(!open_url_erlaubt("http://127.0.0.1:8088.evil.de/", None));
+        assert!(!open_url_erlaubt("http://bts-light.local:8088:x/", None));
+        assert!(!open_url_erlaubt("http://localhost/", None));
+        assert!(!open_url_erlaubt("http://localhost:/", None));
+        assert!(open_url_erlaubt("http://localhost:8088", None));
+        // Dasselbe für den LAN-Host: Gleichheit, keine Präfixe.
+        let lan = Some("192.168.1.50:8088");
+        assert!(!open_url_erlaubt(
+            "http://192.168.1.50:8088@evil.example/",
+            lan
+        ));
+    }
 }
 
 // ───────────────────────────── Walkover nach Aufgabe ──────────────────────
@@ -2808,6 +3836,564 @@ pub fn finished_matches(state: State<'_, AppState>) -> Vec<FinishedMatchRow> {
     rows
 }
 
+// ─── Ansage-Seite im Browser (Spec `ansage-im-browser`, E1) ──────────────
+
+/// Höchstzahl Sprech-Abschnitte eines Eintrags und deren Länge — die
+/// Oberfläche baut selten mehr als ein Dutzend kurze Abschnitte.
+const MAX_ANSAGE_SEGMENTE: usize = 32;
+const MAX_ANSAGE_SEGMENT_LEN: usize = 1000;
+/// Obergrenze des SSML einer Ansage (Namen, IPA, Stimme).
+const MAX_ANSAGE_SSML_LEN: usize = 16 * 1024;
+
+/// Erzeugt dieser Rechner Ansagen für Seiten? Schalter an und kein Slave
+/// (ein Slave hat ohnehin keinen Tablet-Server).
+fn ansage_seiten_an(cfg: &AppConfig) -> bool {
+    cfg.announce.page_audio && !cfg.slave_mode
+}
+
+/// Vertoner (Desktop-Oberfläche): beansprucht die TL-Aufträge und Freitexte,
+/// die noch keiner bekommen hat und deren Halle gerade eine Seite hört. Der
+/// Abruf ist zugleich das Lebenszeichen des Vertoners — zählt aber **nicht**
+/// als Ansage-Gerät.
+#[tauri::command]
+pub fn ansage_offene_quellen(state: State<'_, AppState>) -> crate::tablet::ansage::OffeneQuellen {
+    let an = ansage_seiten_an(&state.config.lock().expect("Config-Mutex nicht vergiftet"));
+    if !an {
+        return Default::default();
+    }
+    let now = now_ms();
+    state.tablet.ansage().vertoner_lebt(now);
+    state.tablet.ansage_quellen_beanspruchen(now)
+}
+
+/// Eine fertig gebaute Ansage, die die Oberfläche zum Vertonen übergibt.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnsageAuftrag {
+    pub art: relay_proto::AnsageArt,
+    #[serde(default)]
+    pub hall: String,
+    #[serde(default)]
+    pub court_id: Option<i64>,
+    #[serde(default)]
+    pub match_id: Option<i64>,
+    #[serde(default)]
+    pub gong: Option<relay_proto::AnsageGong>,
+    pub lang: String,
+    pub rate: f32,
+    #[serde(default)]
+    pub segmente: Vec<String>,
+    /// Azure-SSML; fehlt, wenn Azure aus ist.
+    #[serde(default)]
+    pub ssml: Option<String>,
+}
+
+/// Kappt Sprech-Abschnitte auf die gemeinsamen Grenzen (Länge je
+/// Abschnitt, Anzahl) und wirft leere weg — geteilt von den Ansage-Seiten
+/// (`ansage_entwurf_aus`) und der Windows-Stimme im Kern
+/// (`ansage_stimme_spielen`).
+fn ansage_segmente_kappen(segmente: Vec<String>) -> Vec<String> {
+    segmente
+        .into_iter()
+        .map(|s| {
+            s.trim()
+                .chars()
+                .take(MAX_ANSAGE_SEGMENT_LEN)
+                .collect::<String>()
+        })
+        .filter(|s| !s.is_empty())
+        .take(MAX_ANSAGE_SEGMENTE)
+        .collect()
+}
+
+/// Prüft und kappt einen Auftrag. `None` = verwerfen.
+type AnsageEntwurfMitSsml = (crate::tablet::ansage::AnsageEntwurf, Option<String>);
+
+fn ansage_entwurf_aus(a: AnsageAuftrag) -> Option<AnsageEntwurfMitSsml> {
+    if matches!(a.art, relay_proto::AnsageArt::Unbekannt) {
+        return None;
+    }
+    let segmente = ansage_segmente_kappen(a.segmente);
+    if segmente.is_empty() {
+        return None;
+    }
+    let lang = if a.lang == "en" { "en" } else { "de" }.to_string();
+    // Dieselben Grenzen wie `clampRate` im Frontend.
+    let rate = if a.rate.is_finite() {
+        a.rate.clamp(0.5, 1.5)
+    } else {
+        0.8
+    };
+    let ssml = a
+        .ssml
+        .filter(|s| !s.trim().is_empty() && s.len() <= MAX_ANSAGE_SSML_LEN);
+    Some((
+        crate::tablet::ansage::AnsageEntwurf {
+            hall: a.hall,
+            art: a.art,
+            court_id: a.court_id,
+            match_id: a.match_id,
+            gong: a.gong,
+            lang,
+            rate,
+            segmente,
+        },
+        ssml,
+    ))
+}
+
+/// Vertont eine Ansage für die Seiten und legt sie ab. Liefert die Nummer
+/// des Eintrags oder `None`, wenn nichts abgelegt wurde (Schalter aus, Slave,
+/// niemand hört in der Halle zu, leerer Text).
+///
+/// **Ohne Zuhörer kein Azure-Aufruf** (Kriterium 7). Scheitert Azure, geht
+/// der Eintrag ohne Audio raus — die Seite spricht dann die Segmente.
+#[tauri::command]
+pub async fn ansage_vertonen(
+    state: State<'_, AppState>,
+    auftrag: AnsageAuftrag,
+) -> Result<Option<u64>, String> {
+    let cfg = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if !ansage_seiten_an(&cfg) {
+        return Ok(None);
+    }
+    let Some((entwurf, ssml)) = ansage_entwurf_aus(auftrag) else {
+        return Ok(None);
+    };
+    if !state.tablet.ansage().hat_seite(&entwurf.hall, now_ms()) {
+        return Ok(None);
+    }
+    // Nur die eigene Config: Der Vertoner läuft nie am Slave, geerbte
+    // Zugangsdaten spielen hier keine Rolle.
+    let audio = match (ssml, effective_azure(&cfg.azure_tts, None)) {
+        (Some(ssml), Some((region, key))) => {
+            match crate::azure_tts::synthesize_ohne_cache(&region, &key, &ssml).await {
+                Ok(bytes) => Some(("audio/mpeg".to_string(), bytes)),
+                Err(e) => {
+                    tracing::warn!(
+                        "Ansage-Seite: Azure-Vertonung gescheitert, Eintrag ohne Audio: {e}"
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+    // Ohne Azure (oder wenn Azure scheitert) die Windows-Stimme des PCs
+    // (OneCore, ADR 0066) — sonst sprächen die Seiten mit der Stimme des
+    // Geräts, und ein Pi hat oft gar keine. Reihenfolge Azure → OneCore →
+    // nur Text (E3-Kriterien 24–26).
+    let audio = match audio {
+        Some(a) => Some(a),
+        None => seiten_windows_stimme(&entwurf, &cfg.announce).await,
+    };
+    Ok(Some(state.tablet.ansage().ablegen(
+        entwurf,
+        audio,
+        now_ms(),
+    )))
+}
+
+/// Gespeicherte Stimme für die Sprache der Ansage (`voice_de`/`voice_en`).
+fn seiten_stimme(lang: &str, announce: &crate::config::AnnounceConfig) -> String {
+    if lang == "en" {
+        announce.voice_en.clone()
+    } else {
+        announce.voice_de.clone()
+    }
+}
+
+/// Vertont eine Seiten-Ansage mit der Windows-Stimme als WAV. `None`, wenn
+/// es keine Stimme der Sprache gibt, unter Linux oder bei einem Fehler —
+/// die Seite zeigt dann nur den Text bzw. spricht selbst.
+async fn seiten_windows_stimme(
+    entwurf: &crate::tablet::ansage::AnsageEntwurf,
+    announce: &crate::config::AnnounceConfig,
+) -> Option<(String, Vec<u8>)> {
+    let ergebnis = crate::ansage_ton::stimme_pcm(
+        entwurf.segmente.clone(),
+        entwurf.lang.clone(),
+        seiten_stimme(&entwurf.lang, announce),
+        f64::from(entwurf.rate),
+    )
+    .await;
+    match ergebnis {
+        Ok((samples, rate)) => Some((
+            "audio/wav".to_string(),
+            crate::ansage_ton::pcm::wav_schreiben(&samples, rate),
+        )),
+        Err(crate::ansage_ton::TonFehler::NichtUnterstuetzt) => None,
+        Err(e) => {
+            tracing::warn!(
+                fehler = e.code(),
+                "Ansage-Seite: Windows-Stimme gescheitert, Eintrag ohne Audio"
+            );
+            None
+        }
+    }
+}
+
+// ─── Ansage-Ton aus dem Kern (Spec `ansage-ausgabegeraet`, ADR 0065/0066) ──
+
+/// Größter Raw-IPC-Body für `ansage_pcm_spielen`: 60 s Mono-PCM16 bei
+/// 48 kHz sind 5,5 MiB; 8 MiB lassen Luft und deckeln einen Missbrauch.
+const MAX_ANSAGE_PCM_BYTES: usize = 8 * 1024 * 1024;
+/// Erlaubte Abtastraten des WebViews (Gong 48 kHz, Azure 24 kHz).
+const ANSAGE_PCM_RATEN: std::ops::RangeInclusive<u32> = 8000..=96000;
+
+/// Prüft die Kopfzeilen und die Länge eines PCM-Auftrags, bevor ein Byte
+/// angefasst wird (Spec, Kriterium 13). Rein, damit testbar.
+fn pcm_auftrag_pruefen(
+    rate_header: Option<&str>,
+    art_header: Option<&str>,
+    len: usize,
+) -> Result<(u32, crate::ansage_ton::Art), crate::ansage_ton::TonFehler> {
+    use crate::ansage_ton::{pcm, Art, TonFehler};
+    let rate: u32 = rate_header
+        .and_then(|r| r.trim().parse().ok())
+        .ok_or_else(|| TonFehler::Ungueltig("x-rate fehlt oder ist keine Zahl".to_string()))?;
+    if !ANSAGE_PCM_RATEN.contains(&rate) {
+        return Err(TonFehler::Ungueltig(format!(
+            "x-rate {rate} außerhalb 8000–96000"
+        )));
+    }
+    let art = match art_header.map(str::trim) {
+        None | Some("") | Some("sprache") => Art::Sprache,
+        Some("gong") => Art::Gong,
+        Some(_) => return Err(TonFehler::Ungueltig("x-art unbekannt".to_string())),
+    };
+    if len == 0 {
+        return Err(TonFehler::Ungueltig("leerer Body".to_string()));
+    }
+    if len > MAX_ANSAGE_PCM_BYTES {
+        return Err(TonFehler::Ungueltig("Body größer als 8 MiB".to_string()));
+    }
+    if !len.is_multiple_of(2) {
+        return Err(TonFehler::Ungueltig(
+            "PCM16 braucht eine gerade Byte-Zahl".to_string(),
+        ));
+    }
+    pcm::dauer_pruefen(len / 2, rate, pcm::MAX_SEKUNDEN)?;
+    Ok((rate, art))
+}
+
+/// Spielt ein Stück Mono-PCM16 (little-endian) über den Kern und kehrt nach
+/// dessen Ende zurück. Body als **Raw-IPC** (`Uint8Array`), Kopfzeilen
+/// `x-rate` (Hz) und `x-art` (`gong` | `sprache`, Standard sprache).
+/// Fehler als `"<code>: <Text>"` (Codes: `TonFehler::code`).
+#[tauri::command]
+pub async fn ansage_pcm_spielen(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, AppState>,
+) -> Result<crate::ansage_ton::Abspielbericht, String> {
+    use crate::ansage_ton::{self as ton, TonFehler};
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(
+            TonFehler::Ungueltig("Body muss Raw-IPC (Uint8Array) sein".to_string()).fuer_frontend(),
+        );
+    };
+    let kopf = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let (rate, art) = pcm_auftrag_pruefen(
+        kopf("x-rate").as_deref(),
+        kopf("x-art").as_deref(),
+        bytes.len(),
+    )
+    .map_err(|e| e.fuer_frontend())?;
+    let samples = ton::pcm::pcm16_aus_le_bytes(bytes).map_err(|e| e.fuer_frontend())?;
+    let gewaehlt = gewaehltes_ausgabegeraet(&state);
+    ton::spielen(samples, rate, art, gewaehlt)
+        .await
+        .map_err(|e| e.fuer_frontend())
+}
+
+/// Die gewählte Geräte-ID (`announce.output_device`), leer → `None`
+/// (Windows-Standard). Rein, damit testbar.
+fn ausgabegeraet_aus(announce: &crate::config::AnnounceConfig) -> Option<String> {
+    let id = announce.output_device.trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+fn gewaehltes_ausgabegeraet(state: &State<'_, AppState>) -> Option<String> {
+    ausgabegeraet_aus(
+        &state
+            .config
+            .lock()
+            .expect("Config-Mutex nicht vergiftet")
+            .announce,
+    )
+}
+
+/// Spricht eine Ansage mit der Windows-Stimme (OneCore) über den Kern:
+/// synthetisiert je Abschnitt, 300 ms Fuge, spielt alles als **ein** Stück.
+/// `voice` ist die gespeicherte Wahl (Chromium-`voiceURI` oder WinRT-Name,
+/// leer = Standardstimme der Sprache), `lang` „de"/„en".
+#[tauri::command]
+pub async fn ansage_stimme_spielen(
+    state: State<'_, AppState>,
+    segmente: Vec<String>,
+    lang: String,
+    voice: String,
+    rate: f64,
+) -> Result<crate::ansage_ton::Abspielbericht, String> {
+    let gewaehlt = gewaehltes_ausgabegeraet(&state);
+    stimme_spielen_auf(segmente, lang, voice, rate, gewaehlt).await
+}
+
+/// Kern von [`ansage_stimme_spielen`] ohne `State` — testbar.
+async fn stimme_spielen_auf(
+    segmente: Vec<String>,
+    lang: String,
+    voice: String,
+    rate: f64,
+    gewaehlt: Option<String>,
+) -> Result<crate::ansage_ton::Abspielbericht, String> {
+    use crate::ansage_ton::{self as ton, TonFehler};
+    let segmente = ansage_segmente_kappen(segmente);
+    if segmente.is_empty() {
+        return Err(TonFehler::Ungueltig("keine Sprech-Abschnitte".to_string()).fuer_frontend());
+    }
+    let lang = if lang == "en" { "en" } else { "de" }.to_string();
+    ton::stimme_spielen(segmente, lang, voice, rate, gewaehlt)
+        .await
+        .map_err(|e| e.fuer_frontend())
+}
+
+/// Bricht die laufende Ansage im Kern ab; wartende Stücke verfallen.
+/// `hart` (Frist im Frontend abgelaufen) gibt zusätzlich den Audio-Thread
+/// auf, damit ein hängender Treiberaufruf nicht alle folgenden Ansagen
+/// verzögert.
+#[tauri::command]
+pub fn ansage_abbrechen(hart: Option<bool>) {
+    if hart == Some(true) {
+        crate::ansage_ton::abbrechen_hart();
+    } else {
+        crate::ansage_ton::abbrechen();
+    }
+}
+
+/// Anzeige „Ausgabe: <Gerät>" bzw. „<Gerät> nicht verfügbar – Ansage läuft
+/// über Windows-Standard (<Standard>)" auf der Seite Ansagen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AusgabeInfo {
+    /// Läuft der Ton über den Kern? Unter Linux nicht.
+    pub unterstuetzt: bool,
+    /// Name des aktuellen Windows-Standardgeräts — nur für die Anzeige,
+    /// nie fürs Log. `None`: kein Ausgabegerät aktiv (oder nicht
+    /// unterstützt).
+    pub standard: Option<String>,
+    /// Gespeicherter Name des gewählten Geräts (`output_device_name`), nur
+    /// wenn eins gewählt ist. `None` = Windows-Standard.
+    pub gewaehlt: Option<String>,
+    /// `true`, wenn nichts gewählt ist oder das gewählte Gerät gerade aktiv
+    /// ist; `false` → Banner „nicht verfügbar".
+    pub verfuegbar: bool,
+}
+
+#[tauri::command]
+pub async fn ansage_ausgabe(state: State<'_, AppState>) -> Result<AusgabeInfo, String> {
+    use crate::ansage_ton::{self as ton, TonFehler};
+    // Konfiguration vor dem ersten `await` kopieren — die Sperre darf nicht
+    // über die Geräteabfrage gehalten werden.
+    let (gewaehlt_id, gewaehlt_name) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (
+            ausgabegeraet_aus(&cfg.announce),
+            cfg.announce.output_device_name.clone(),
+        )
+    };
+    let gewaehlt = gewaehlt_id.as_ref().map(|_| gewaehlt_name);
+    match ton::standard_geraet_name().await {
+        // Scheitert nur der Name des Standardgeräts, bleibt die Auswahl
+        // trotzdem bedienbar (Review PR 2) — sonst ließe sich eine fehlende
+        // Box nicht mehr auf den Windows-Standard zurückstellen.
+        ergebnis @ (Ok(_) | Err(TonFehler::Intern(_))) => {
+            let standard = ergebnis.unwrap_or(None);
+            let verfuegbar = match &gewaehlt_id {
+                None => true,
+                Some(id) => ton::geraet_verfuegbar(id).await,
+            };
+            Ok(AusgabeInfo {
+                unterstuetzt: true,
+                standard,
+                gewaehlt,
+                verfuegbar,
+            })
+        }
+        // Ohne Kern-Ausgabe (Linux) gibt es keine Gerätewahl, die fehlen
+        // könnte — kein Banner.
+        Err(TonFehler::NichtUnterstuetzt) => Ok(AusgabeInfo {
+            unterstuetzt: false,
+            standard: None,
+            gewaehlt,
+            verfuegbar: true,
+        }),
+        Err(e) => Err(e.fuer_frontend()),
+    }
+}
+
+/// Die aktiven Ausgabegeräte für die Auswahl „Ansage über". Namen nur für
+/// die Anzeige, nie fürs Log.
+#[tauri::command]
+pub async fn ansage_geraete() -> Result<Vec<crate::ansage_ton::GeraetInfo>, String> {
+    crate::ansage_ton::geraete()
+        .await
+        .map_err(|e| e.fuer_frontend())
+}
+
+/// Längste gespeicherte Geräte-ID. Windows-Endpunkt-IDs sind rund 55
+/// Zeichen lang; der Deckel hält nur Unsinn aus der Konfiguration fern.
+const MAX_AUSGABE_ID_LEN: usize = 512;
+/// Längster gespeicherter Gerätename (nur Anzeige).
+const MAX_AUSGABE_NAME_LEN: usize = 200;
+
+/// Prüft und säubert die Gerätewahl für [`ansage_ausgabe_setzen`]. Leere
+/// `id` = Windows-Standard (dann wird auch der Name geleert). Sonst muss die
+/// ID mit `wasapi:` beginnen, ≤ 512 Zeichen lang und frei von Steuerzeichen
+/// sein; der Name wird getrimmt, von Steuerzeichen befreit und darf danach
+/// höchstens 200 Zeichen lang sein. Rein, damit testbar.
+fn ausgabe_wahl_pruefen(id: &str, name: &str) -> Result<(String, String), String> {
+    let ungueltig =
+        |grund: &str| crate::ansage_ton::TonFehler::Ungueltig(grund.to_string()).fuer_frontend();
+    let id = id.trim();
+    if id.is_empty() {
+        return Ok((String::new(), String::new()));
+    }
+    if !id.starts_with("wasapi:") {
+        return Err(ungueltig("Geräte-ID muss mit „wasapi:“ beginnen"));
+    }
+    if id.chars().count() > MAX_AUSGABE_ID_LEN {
+        return Err(ungueltig("Geräte-ID länger als 512 Zeichen"));
+    }
+    if id.chars().any(char::is_control) {
+        return Err(ungueltig("Geräte-ID enthält Steuerzeichen"));
+    }
+    let name: String = name.chars().filter(|c| !c.is_control()).collect();
+    let name = name.trim();
+    if name.chars().count() > MAX_AUSGABE_NAME_LEN {
+        return Err(ungueltig("Gerätename länger als 200 Zeichen"));
+    }
+    Ok((id.to_string(), name.to_string()))
+}
+
+/// Wählt das Ausgabegerät der Ansage (leere `id` = Windows-Standard). Eigener
+/// Command statt `save_config`: Das Feld gilt je PC und ist dort über
+/// `keep_host_managed_fields` gegen alte Formularstände geschützt. Liefert
+/// den neuen Stand (Muster `set_hall_color`).
+#[tauri::command]
+pub fn ansage_ausgabe_setzen(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<AppConfig, String> {
+    let (id, name) = ausgabe_wahl_pruefen(&id, &name)?;
+    mutate_config(&app, &state, move |cfg| {
+        cfg.announce.output_device = id;
+        cfg.announce.output_device_name = name;
+        Ok(())
+    })
+}
+
+/// Die installierten Windows-Stimmen (Name, Sprache) für die Einstellungen.
+#[tauri::command]
+pub async fn ansage_stimmen() -> Result<Vec<crate::ansage_ton::StimmeInfo>, String> {
+    crate::ansage_ton::stimmen()
+        .await
+        .map_err(|e| e.fuer_frontend())
+}
+
+/// Zuhörer der Ansage-Seiten für die Einstellungen.
+#[derive(Debug, Clone, Serialize)]
+pub struct AnsageHoerer {
+    /// Hallen, in denen gerade eine Seite zuhört.
+    pub hallen: Vec<String>,
+    /// Hallen, in denen zusätzlich ein klassisches Ansage-Gerät spricht —
+    /// jeder Aufruf klänge dort doppelt (Kriterium 12).
+    pub doppelbetrieb: Vec<String>,
+}
+
+#[tauri::command]
+pub fn ansage_hoerer(state: State<'_, AppState>) -> AnsageHoerer {
+    let now = now_ms();
+    AnsageHoerer {
+        hallen: state.tablet.ansage().seiten_hallen(now),
+        doppelbetrieb: state.tablet.ansage_doppelbetrieb(now),
+    }
+}
+
+/// Link einer Ansage-Seite samt QR-Code.
+#[derive(Debug, Clone, Serialize)]
+pub struct AnsageLink {
+    /// Leer = Turnier mit nur einer Halle.
+    pub hall: String,
+    pub url: String,
+    /// Verschlüsselte Adresse (Bildschirm bleibt an, ADR 0047), leer ohne TLS.
+    pub url_tls: String,
+    pub qr_svg: String,
+}
+
+/// Links je Halle für die Ansage-Einstellungen. Leer ohne LAN — die Cloud
+/// kommt erst mit Etappe E4.
+#[tauri::command]
+pub fn ansage_link(state: State<'_, AppState>) -> Vec<AnsageLink> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if !config.connection_mode.lan_enabled() || config.slave_mode {
+        return Vec::new();
+    }
+    let host = crate::tablet::server::lan_host();
+    let tls_port = crate::tablet::server::tls_port_aktiv();
+    let host_tls = if config.tls.enabled && tls_port != 0 {
+        crate::tablet::server::lan_host_tls(tls_port)
+    } else {
+        String::new()
+    };
+    let mut hallen = state.tablet.ansage_hallen();
+    if hallen.is_empty() {
+        hallen.push(String::new());
+    }
+    hallen
+        .into_iter()
+        .map(|hall| {
+            let query = if hall.is_empty() {
+                String::new()
+            } else {
+                format!("?halle={}", relay_proto::path_encode(&hall))
+            };
+            let url = format!("http://{host}/ansage{query}");
+            let url_tls = if host_tls.is_empty() {
+                String::new()
+            } else {
+                format!("https://{host_tls}/ansage{query}")
+            };
+            // Der QR zeigt die verschlüsselte Adresse, wenn es sie gibt:
+            // Nur dort hält die Seite den Bildschirm an.
+            let qr_svg = crate::aushang::qr_svg(if url_tls.is_empty() { &url } else { &url_tls })
+                .unwrap_or_default();
+            AnsageLink {
+                hall,
+                url,
+                url_tls,
+                qr_svg,
+            }
+        })
+        .collect()
+}
+
 /// Master: eine Freitext-Ansage ablegen. `hall` = Ziel-Halle (BTP-Location-Name;
 /// leer = alle Hallen). Master + Slaves pollen sie über `pending_freetext`.
 #[tauri::command]
@@ -2935,7 +4521,13 @@ pub async fn pending_announce_jobs(
         let text = resp.text().await.map_err(|e| e.to_string())?;
         Ok(crate::tablet::state::announce_jobs_aus_json(&text))
     } else {
-        Ok(state.tablet.announce_jobs_since(&hall, since, now_ms()))
+        // Die Desktop-App am Master spricht auch die Erst-Ansage aus dem
+        // Kern (`court_assigned`, Spec `ansage-im-browser` E2). Der
+        // LAN-Slave-Zweig oben fragt bewusst ohne `auto=1`: Er erkennt neue
+        // Spiele selbst und sagte sonst doppelt an.
+        Ok(state
+            .tablet
+            .announce_jobs_since(&hall, since, now_ms(), true))
     }
 }
 
@@ -4516,6 +6108,251 @@ pub fn monitor_command(
 mod tests {
     use super::*;
 
+    // ─── Ansage-Ton aus dem Kern (Spec `ansage-ausgabegeraet`) ───────────
+
+    #[test]
+    fn seiten_stimme_folgt_der_sprache_der_ansage() {
+        // PR 1b: Die Seiten-Ansage nimmt die gespeicherte Stimme ihrer
+        // Sprache, nie die der anderen.
+        let a = crate::config::AnnounceConfig {
+            voice_de: "Microsoft Katja".to_string(),
+            voice_en: "Microsoft Zira".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(seiten_stimme("de", &a), "Microsoft Katja");
+        assert_eq!(seiten_stimme("en", &a), "Microsoft Zira");
+        // Unbekannte Sprache → Deutsch (wie `ansage_stimme_spielen`).
+        assert_eq!(seiten_stimme("fr", &a), "Microsoft Katja");
+    }
+
+    #[test]
+    fn pcm_auftrag_gueltig_mit_art() {
+        use crate::ansage_ton::Art;
+        assert_eq!(
+            pcm_auftrag_pruefen(Some("24000"), None, 4800).unwrap(),
+            (24000, Art::Sprache)
+        );
+        assert_eq!(
+            pcm_auftrag_pruefen(Some("48000"), Some("gong"), 2).unwrap(),
+            (48000, Art::Gong)
+        );
+        assert_eq!(
+            pcm_auftrag_pruefen(Some(" 8000 "), Some("sprache"), 2).unwrap(),
+            (8000, Art::Sprache)
+        );
+        assert_eq!(
+            pcm_auftrag_pruefen(Some("96000"), Some(""), 2).unwrap().0,
+            96000
+        );
+    }
+
+    #[test]
+    fn pcm_auftrag_rate_ausserhalb_oder_fehlend_wird_abgelehnt() {
+        for rate in [
+            None,
+            Some(""),
+            Some("abc"),
+            Some("7999"),
+            Some("96001"),
+            Some("-1"),
+        ] {
+            let e = pcm_auftrag_pruefen(rate, None, 2).unwrap_err();
+            assert_eq!(e.code(), "ungueltig", "{rate:?}");
+        }
+    }
+
+    #[test]
+    fn pcm_auftrag_unbekannte_art_wird_abgelehnt() {
+        assert_eq!(
+            pcm_auftrag_pruefen(Some("24000"), Some("musik"), 2)
+                .unwrap_err()
+                .code(),
+            "ungueltig"
+        );
+    }
+
+    #[test]
+    fn pcm_auftrag_laenge_deckel_und_gerade() {
+        // Leer, ungerade, über 8 MiB.
+        assert!(pcm_auftrag_pruefen(Some("24000"), None, 0).is_err());
+        assert!(pcm_auftrag_pruefen(Some("24000"), None, 4801).is_err());
+        assert!(pcm_auftrag_pruefen(Some("96000"), None, 8 * 1024 * 1024).is_ok());
+        assert!(pcm_auftrag_pruefen(Some("96000"), None, 8 * 1024 * 1024 + 2).is_err());
+        // 60-s-Deckel: bei 24 kHz sind 60 s genau 2 880 000 Bytes.
+        assert!(pcm_auftrag_pruefen(Some("24000"), None, 2_880_000).is_ok());
+        assert!(pcm_auftrag_pruefen(Some("24000"), None, 2_880_002).is_err());
+    }
+
+    #[test]
+    fn ansage_segmente_werden_gekappt_und_leere_entfernt() {
+        let lang = "x".repeat(MAX_ANSAGE_SEGMENT_LEN + 50);
+        let aus = ansage_segmente_kappen(vec!["  Feld 1  ".to_string(), "   ".to_string(), lang]);
+        assert_eq!(aus.len(), 2);
+        assert_eq!(aus[0], "Feld 1");
+        assert_eq!(aus[1].chars().count(), MAX_ANSAGE_SEGMENT_LEN);
+        let viele = vec!["a".to_string(); MAX_ANSAGE_SEGMENTE + 5];
+        assert_eq!(ansage_segmente_kappen(viele).len(), MAX_ANSAGE_SEGMENTE);
+    }
+
+    #[test]
+    fn ausgabe_info_ist_camel_case() {
+        let j = serde_json::to_value(AusgabeInfo {
+            unterstuetzt: true,
+            standard: Some("Lautsprecher".to_string()),
+            gewaehlt: Some("USB-Box".to_string()),
+            verfuegbar: false,
+        })
+        .unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({
+                "unterstuetzt": true,
+                "standard": "Lautsprecher",
+                "gewaehlt": "USB-Box",
+                "verfuegbar": false
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn ansage_stimme_spielen_ohne_text_ist_ungueltig() {
+        let e = stimme_spielen_auf(
+            vec!["  ".to_string()],
+            "de".into(),
+            String::new(),
+            0.8,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(e.starts_with("ungueltig:"), "{e}");
+    }
+
+    const BOX_ID: &str = "wasapi:{0.0.0.00000000}.{16f9a587-0000-4000-8000-000000000001}";
+
+    fn mit_ausgabegeraet(id: &str, name: &str) -> AppConfig {
+        let mut cfg = AppConfig::default();
+        cfg.announce.output_device = id.to_string();
+        cfg.announce.output_device_name = name.to_string();
+        cfg
+    }
+
+    #[test]
+    fn ausgabegeraet_leer_heisst_windows_standard() {
+        let mut a = crate::config::AnnounceConfig::default();
+        assert_eq!(ausgabegeraet_aus(&a), None);
+        a.output_device = "   ".to_string();
+        assert_eq!(ausgabegeraet_aus(&a), None);
+        a.output_device = format!(" {BOX_ID} ");
+        assert_eq!(ausgabegeraet_aus(&a).as_deref(), Some(BOX_ID));
+    }
+
+    #[test]
+    fn ausgabe_wahl_leer_ist_standard_und_leert_den_namen() {
+        assert_eq!(
+            ausgabe_wahl_pruefen("", "USB-Box").unwrap(),
+            (String::new(), String::new())
+        );
+        assert_eq!(
+            ausgabe_wahl_pruefen("   ", "").unwrap(),
+            (String::new(), String::new())
+        );
+    }
+
+    #[test]
+    fn ausgabe_wahl_gueltig_wird_gesaeubert() {
+        let (id, name) =
+            ausgabe_wahl_pruefen(&format!("  {BOX_ID} "), "  USB\u{7}-Box\n ").unwrap();
+        assert_eq!(id, BOX_ID);
+        assert_eq!(name, "USB-Box");
+        // Genau an den Grenzen noch gültig.
+        let lang_id = format!("wasapi:{}", "x".repeat(MAX_AUSGABE_ID_LEN - 7));
+        let lang_name = "ä".repeat(MAX_AUSGABE_NAME_LEN);
+        let (id, name) = ausgabe_wahl_pruefen(&lang_id, &lang_name).unwrap();
+        assert_eq!(id.chars().count(), MAX_AUSGABE_ID_LEN);
+        assert_eq!(name.chars().count(), MAX_AUSGABE_NAME_LEN);
+    }
+
+    #[test]
+    fn ausgabe_wahl_ungueltig_wird_abgelehnt() {
+        let faelle = [
+            ("alsa:hw:0,0".to_string(), "x".to_string()),
+            ("{0.0.0.00000000}.{abc}".to_string(), "x".to_string()),
+            (
+                format!("wasapi:{}", "x".repeat(MAX_AUSGABE_ID_LEN - 6)),
+                "x".to_string(),
+            ),
+            ("wasapi:{a}\u{0}{b}".to_string(), "x".to_string()),
+            (BOX_ID.to_string(), "n".repeat(MAX_AUSGABE_NAME_LEN + 1)),
+        ];
+        for (id, name) in faelle {
+            let e = ausgabe_wahl_pruefen(&id, &name).unwrap_err();
+            assert!(e.starts_with("ungueltig:"), "{e}");
+        }
+    }
+
+    #[test]
+    fn keep_host_managed_fields_preserves_the_output_device() {
+        // Spec `ansage-ausgabegeraet`, Kriterium 20: Setup-Assistent und
+        // Ansage-Einstellungen schicken ihren alten Stand zurück — das darf
+        // die Gerätewahl weder löschen noch auf einen alten Wert setzen.
+        let current = mit_ausgabegeraet(BOX_ID, "USB-Box");
+
+        let mut from_ui = AppConfig::default();
+        from_ui.announce.rate = 1.1;
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.announce.rate, 1.1, "Einstellung wird übernommen");
+        assert_eq!(merged.announce.output_device, BOX_ID);
+        assert_eq!(merged.announce.output_device_name, "USB-Box");
+
+        // Auch ein veralteter, anderer Wert aus dem Formular setzt sich nicht
+        // durch — und „Standard" am PC bleibt Standard.
+        let alt = mit_ausgabegeraet("wasapi:{alt}", "Alte Box");
+        let merged = keep_host_managed_fields(alt, &AppConfig::default());
+        assert!(merged.announce.output_device.is_empty());
+        assert!(merged.announce.output_device_name.is_empty());
+    }
+
+    #[test]
+    fn identity_bundle_strips_the_output_device() {
+        // Kriterium 21: Die Gerätewahl gilt je PC und reist nicht mit.
+        let bundle = identity_bundle(mit_ausgabegeraet(BOX_ID, "USB-Box"));
+        assert!(bundle.announce.output_device.is_empty());
+        assert!(bundle.announce.output_device_name.is_empty());
+    }
+
+    #[test]
+    fn apply_imported_identity_keeps_the_output_device_of_this_pc() {
+        // Kriterium 21: Import behält die Wahl des Ziel-PCs — auch wenn das
+        // Bündel (alt oder von Hand gebaut) eine eigene mitbringt, und auch
+        // wenn hier „Standard" gilt.
+        let current = mit_ausgabegeraet(BOX_ID, "USB-Box");
+        let merged = apply_imported_identity(AppConfig::default(), &current);
+        assert_eq!(merged.announce.output_device, BOX_ID);
+        assert_eq!(merged.announce.output_device_name, "USB-Box");
+
+        let fremd = mit_ausgabegeraet("wasapi:{fremd}", "Fremde Box");
+        let merged = apply_imported_identity(fremd.clone(), &current);
+        assert_eq!(merged.announce.output_device, BOX_ID);
+        assert_eq!(merged.announce.output_device_name, "USB-Box");
+
+        let merged = apply_imported_identity(fremd, &AppConfig::default());
+        assert!(merged.announce.output_device.is_empty());
+        assert!(merged.announce.output_device_name.is_empty());
+    }
+
+    #[test]
+    fn ansage_slave_erbt_keine_geraetewahl() {
+        // Kriterium 22: Ein Ansage-Slave erbt vom Master nur die Azure-Daten
+        // (`AzureTtsShare`, ADR 0003) — nichts aus `announce`. Strukturell
+        // festgehalten: Taucht im geteilten Typ je ein Geräte-Feld auf,
+        // schlägt dieser Test an.
+        let j = serde_json::to_value(share("k", "westeurope")).unwrap();
+        let mut felder: Vec<&str> = j.as_object().unwrap().keys().map(String::as_str).collect();
+        felder.sort_unstable();
+        assert_eq!(felder, ["discipline_voices", "key", "region", "voice"]);
+    }
+
     fn local_az(enabled: bool, key: &str, region: &str) -> crate::config::AzureTtsConfig {
         crate::config::AzureTtsConfig {
             enabled,
@@ -5135,6 +6972,34 @@ mod tests {
     }
 
     #[test]
+    fn ein_ansage_auftrag_wird_gekappt_und_unbekanntes_verworfen() {
+        let auftrag = |art, segmente: Vec<&str>| AnsageAuftrag {
+            art,
+            hall: "Halle A".into(),
+            court_id: None,
+            match_id: None,
+            gong: None,
+            lang: "fr".into(),
+            rate: 9.0,
+            segmente: segmente.into_iter().map(String::from).collect(),
+            ssml: Some("x".repeat(MAX_ANSAGE_SSML_LEN + 1)),
+        };
+        let (e, ssml) = ansage_entwurf_aus(auftrag(
+            relay_proto::AnsageArt::Freetext,
+            vec!["  Hallo  ", ""],
+        ))
+        .unwrap();
+        assert_eq!(e.segmente, ["Hallo"]);
+        assert_eq!(e.lang, "de", "nur de/en");
+        assert_eq!(e.rate, 1.5, "Rate wie clampRate");
+        assert!(ssml.is_none(), "überlanges SSML geht nicht an Azure");
+        assert!(ansage_entwurf_aus(auftrag(relay_proto::AnsageArt::Freetext, vec![" "])).is_none());
+        assert!(
+            ansage_entwurf_aus(auftrag(relay_proto::AnsageArt::Unbekannt, vec!["Hallo"])).is_none()
+        );
+    }
+
+    #[test]
     fn effective_azure_prefers_complete_local_config() {
         // Vollständige lokale Config gewinnt gegen die geerbte (ADR 0003).
         let got = effective_azure(
@@ -5241,6 +7106,7 @@ mod tests {
             scorekeeper_assigned: true,
             sr_names: vec!["S. Richter".into()],
             ar_names: vec!["A. Aufschlag".into()],
+            teams_correction: true,
             event_label: "Herreneinzel A Viertelfinale".into(),
             best_of_sets: 3,
             target_score: 21,
@@ -5250,6 +7116,8 @@ mod tests {
             show_club_names: false,
             show_club_logos: false,
             finalized: false,
+            seed_a: None,
+            seed_b: None,
         };
         let court = cloud_announce_court(relay_proto::AnnounceCourt {
             court_id: 7,
@@ -5373,5 +7241,806 @@ mod startbedingungen_tests {
         assert!(pruefe_startbedingungen(&cfg)
             .unwrap_err()
             .contains("Badhub-Passwort"));
+    }
+}
+
+/// TP-Datei an badhub (Spec `tp-datei-upload`, L1): Vorbedingungen, Merker
+/// und der Upload-Task gegen einen HTTP-Mock, der POST (202) und GET-Status
+/// nacheinander bedient.
+#[cfg(test)]
+mod tp_upload_tests {
+    use super::*;
+    use crate::badhub::tp_upload::{JET_KOPF, TEXT_VERARBEITUNG_DAUERT};
+    use crate::btp::write_gate::WriteGate;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    fn tp_datei(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("bts-light-tp-cmd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        let mut inhalt = JET_KOPF.to_vec();
+        inhalt.extend_from_slice(&[9u8; 4096]);
+        std::fs::write(&p, inhalt).unwrap();
+        p
+    }
+
+    fn basis(pfad: &std::path::Path) -> AppConfig {
+        let mut cfg = AppConfig::default();
+        cfg.badhub.password = "pw".to_string();
+        cfg.badhub.url = "https://badhub.de/api/live_update.php".to_string();
+        cfg.badhub.live_url = "https://badhub.de/live?t=bvbb".to_string();
+        cfg.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        cfg.tp_upload.path = pfad.display().to_string();
+        cfg.tp_upload.tournament_uuid = cfg.tournament_uuid.clone();
+        cfg
+    }
+
+    #[test]
+    fn pruefe_upload_bedingungen_alle_sechs_verletzungen_und_ok() {
+        let pfad = tp_datei("ok.tp");
+        let v = pruefe_upload_bedingungen(&basis(&pfad)).unwrap();
+        assert_eq!(v.pfad, pfad);
+        assert_eq!(v.guid, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA");
+        assert_eq!(v.kuerzel, "bvbb");
+        assert_eq!(v.tp_upload_url, "https://badhub.de/api/tp-upload");
+        assert_eq!(v.password, "pw");
+
+        let mut cfg = basis(&pfad);
+        cfg.slave_mode = true;
+        assert!(pruefe_upload_bedingungen(&cfg)
+            .unwrap_err()
+            .contains("Master"));
+
+        let mut cfg = basis(&pfad);
+        cfg.badhub.password.clear();
+        assert!(pruefe_upload_bedingungen(&cfg)
+            .unwrap_err()
+            .contains("3 · Badhub-Zugang"));
+
+        let mut cfg = basis(&pfad);
+        cfg.tournament_uuid.clear();
+        assert!(pruefe_upload_bedingungen(&cfg)
+            .unwrap_err()
+            .contains("1 · Liveticker-Ziel"));
+
+        let mut cfg = basis(&pfad);
+        cfg.tp_upload.path.clear();
+        let e = pruefe_upload_bedingungen(&cfg).unwrap_err();
+        assert!(
+            e.contains("Keine TP-Datei gewählt") && e.contains("TP-Datei (Turnierdatenbank)"),
+            "{e}"
+        );
+
+        let mut cfg = basis(&pfad);
+        cfg.tp_upload.tournament_uuid = "9AA7FE89-0000-4000-8000-000000000001".to_string();
+        let e = pruefe_upload_bedingungen(&cfg).unwrap_err();
+        assert!(e.contains("Datei neu wählen"), "{e}");
+
+        let mut cfg = basis(&pfad);
+        cfg.badhub.live_url = "https://badhub.de/".to_string();
+        let e = pruefe_upload_bedingungen(&cfg).unwrap_err();
+        assert!(
+            e.contains("Verbandskürzel") && e.contains("1 · Liveticker-Ziel"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn upload_starten_sperrt_den_zweiten_klick() {
+        let status = Mutex::new(TpUploadStatus::default());
+        let erster = upload_starten(&status).expect("frei");
+        assert!(erster.laeuft && erster.ergebnis.is_none());
+        let zweiter = upload_starten(&status).expect_err("läuft schon");
+        assert!(zweiter.laeuft);
+        status.lock().unwrap().laeuft = false;
+        assert!(upload_starten(&status).is_ok());
+    }
+
+    /// HTTP-Mock für den Upload-Task: POST → 202, GET → Status-JSON; zählt die Anfragen.
+    async fn mock(status_json: &'static str) -> (String, Arc<AtomicUsize>) {
+        mock_mit(
+            "202 Accepted",
+            "",
+            r#"{"status":"accepted","job":"abc"}"#,
+            status_json,
+        )
+        .await
+    }
+
+    /// Wie `mock`, aber mit frei wählbarer POST-Antwort (Statuszeile, Zusatzkopf
+    /// wie `Retry-After: 7`, Körper) — 409 für den Halt-Test, 503 für den Nachversuch.
+    async fn mock_mit(
+        post_status: &'static str,
+        post_kopf: &'static str,
+        post_body: &'static str,
+        status_json: &'static str,
+    ) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let zaehler = Arc::new(AtomicUsize::new(0));
+        let z = zaehler.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                loop {
+                    let n = sock.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let kopf = String::from_utf8_lossy(&buf[..pos]).to_ascii_lowercase();
+                        let laenge = kopf
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if buf.len() >= pos + 4 + laenge {
+                            break;
+                        }
+                    }
+                }
+                z.fetch_add(1, Ordering::SeqCst);
+                let (status_line, kopf, body) = if buf.starts_with(b"POST") {
+                    (post_status, post_kopf, post_body)
+                } else {
+                    ("200 OK", "", status_json)
+                };
+                let zusatz = if kopf.is_empty() {
+                    String::new()
+                } else {
+                    format!("{kopf}\r\n")
+                };
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\n{zusatz}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(response.as_bytes()).await;
+            }
+        });
+        (format!("http://{addr}/api/tp-upload"), zaehler)
+    }
+
+    fn takt_schnell() -> UploadTakt {
+        UploadTakt {
+            ruhe: Duration::from_millis(5),
+            max_wartezeit: Duration::from_millis(500),
+            leseabstand: Duration::from_millis(5),
+            status_abstand: Duration::from_millis(20),
+            status_max: Duration::from_millis(150),
+        }
+    }
+
+    fn vorgaben(pfad: std::path::PathBuf, url: &str) -> UploadVorgaben {
+        UploadVorgaben {
+            pfad,
+            guid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
+            kuerzel: "bvbb".to_string(),
+            tp_upload_url: url.to_string(),
+            password: "pw".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_task_202_dann_status_ok_schreibt_text_und_setzt_laeuft_zurueck() {
+        let (url, zaehler) = mock(
+            r#"{"received_at":"x","processed_at":"y","result":"ok","matches":7,"message":null}"#,
+        )
+        .await;
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        upload_starten(&status).unwrap();
+        let gate = WriteGate::new();
+        fuehre_upload_aus(
+            vorgaben(tp_datei("task-ok.tp"), &url),
+            status.clone(),
+            &gate,
+            &crate::badhub::tp_upload::build_client(),
+            takt_schnell(),
+            Quelle::Knopf,
+        )
+        .await;
+        let s = status.lock().unwrap().clone();
+        assert!(!s.laeuft);
+        assert_eq!(s.ergebnis.as_deref(), Some("übernommen, 7 Spiele"));
+        assert_eq!(s.groesse, Some(JET_KOPF.len() as u64 + 4096));
+        assert!(s.zeitpunkt_ms.unwrap() > 0);
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            2,
+            "ein POST, ein Status-GET"
+        );
+    }
+
+    /// TP-Datei mit `Settings.LinkCode` im Dateibild (komprimierter Jet-Unicode).
+    fn tp_datei_mit_guid(name: &str, guid: &str) -> std::path::PathBuf {
+        let p = tp_datei(name);
+        let mut inhalt = std::fs::read(&p).unwrap();
+        inhalt.extend_from_slice(b"\xff\xfeLinkCode\xff\xfe");
+        inhalt.extend_from_slice(guid.as_bytes());
+        inhalt.extend_from_slice(&[7u8; 64]);
+        std::fs::write(&p, inhalt).unwrap();
+        p
+    }
+
+    #[tokio::test]
+    async fn upload_task_fremde_guid_in_der_datei_sendet_nicht() {
+        let (url, zaehler) = mock(
+            r#"{"received_at":"x","processed_at":"y","result":"ok","matches":7,"message":null}"#,
+        )
+        .await;
+        let pfad = tp_datei_mit_guid("fremd.tp", "99f55fab-e301-41a2-a165-1d162cb84fc1");
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        upload_starten(&status).unwrap();
+        let gate = WriteGate::new();
+        let (ausgang, text) = fuehre_upload_aus(
+            vorgaben(pfad, &url),
+            status.clone(),
+            &gate,
+            &crate::badhub::tp_upload::build_client(),
+            takt_schnell(),
+            Quelle::Knopf,
+        )
+        .await;
+        assert_eq!(
+            ausgang,
+            UploadAusgang::GuidFremd {
+                datei: "99F55FAB-E301-41A2-A165-1D162CB84FC1".to_string()
+            }
+        );
+        // Beide Kennungen gekürzt und der Dateiname — wie die Server-Meldung.
+        assert!(
+            text.contains("fremd.tp") && text.contains("99F55FAB") && text.contains("0EA5FD86"),
+            "{text}"
+        );
+        assert!(!text.contains("E301-41A2"), "gekürzt: {text}");
+        assert_eq!(zaehler.load(Ordering::SeqCst), 0, "kein Netzzugriff");
+        let s = status.lock().unwrap().clone();
+        assert!(!s.laeuft);
+        assert_eq!(s.ergebnis.as_deref(), Some(text.as_str()));
+    }
+
+    #[tokio::test]
+    async fn upload_task_passende_guid_in_der_datei_sendet() {
+        let (url, zaehler) = mock(
+            r#"{"received_at":"x","processed_at":"y","result":"ok","matches":7,"message":null}"#,
+        )
+        .await;
+        let pfad = tp_datei_mit_guid("passt.tp", "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA");
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        upload_starten(&status).unwrap();
+        let gate = WriteGate::new();
+        fuehre_upload_aus(
+            vorgaben(pfad, &url),
+            status.clone(),
+            &gate,
+            &crate::badhub::tp_upload::build_client(),
+            takt_schnell(),
+            Quelle::Knopf,
+        )
+        .await;
+        assert_eq!(
+            status.lock().unwrap().ergebnis.as_deref(),
+            Some("übernommen, 7 Spiele")
+        );
+        assert_eq!(zaehler.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn upload_task_202_ohne_result_endet_nach_der_frist() {
+        let (url, zaehler) = mock(r#"{"received_at":"x","processed_at":null,"result":null,"matches":null,"message":null}"#).await;
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        upload_starten(&status).unwrap();
+        let gate = WriteGate::new();
+        fuehre_upload_aus(
+            vorgaben(tp_datei("task-dauert.tp"), &url),
+            status.clone(),
+            &gate,
+            &crate::badhub::tp_upload::build_client(),
+            takt_schnell(),
+            Quelle::Knopf,
+        )
+        .await;
+        let s = status.lock().unwrap().clone();
+        assert!(!s.laeuft, "Knopf wird wieder frei");
+        assert_eq!(s.ergebnis.as_deref(), Some(TEXT_VERARBEITUNG_DAUERT));
+        assert!(zaehler.load(Ordering::SeqCst) >= 3, "mehrfach gepollt");
+    }
+
+    #[tokio::test]
+    async fn upload_task_gate_beschaeftigt_und_datei_weg() {
+        let gate = Arc::new(WriteGate::new());
+        let g = gate.clone();
+        // Ein Write hält die Lesesperre länger als die Wartezeit des Tests.
+        let _write = tokio::spawn(async move {
+            let _s = g.schreiben().await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+        tokio::task::yield_now().await;
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let takt = UploadTakt {
+            max_wartezeit: Duration::from_millis(100),
+            ..takt_schnell()
+        };
+        fuehre_upload_aus(
+            vorgaben(tp_datei("task-busy.tp"), "http://127.0.0.1:1/api/tp-upload"),
+            status.clone(),
+            &gate,
+            &crate::badhub::tp_upload::build_client(),
+            takt,
+            Quelle::Knopf,
+        )
+        .await;
+        assert_eq!(
+            status.lock().unwrap().ergebnis.as_deref(),
+            Some(TEXT_BTP_BESCHAEFTIGT)
+        );
+
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let weg = std::env::temp_dir()
+            .join("bts-light-gibt-es-nicht")
+            .join("weg.tp");
+        fuehre_upload_aus(
+            vorgaben(weg, "http://127.0.0.1:1/api/tp-upload"),
+            status.clone(),
+            &WriteGate::new(),
+            &crate::badhub::tp_upload::build_client(),
+            takt_schnell(),
+            Quelle::Knopf,
+        )
+        .await;
+        let s = status.lock().unwrap().clone();
+        assert_eq!(
+            s.ergebnis.as_deref(),
+            Some("TP-Datei nicht gefunden: weg.tp — im Setup neu wählen")
+        );
+        assert_eq!(s.groesse, None);
+    }
+
+    // ── Takt-Schritt (Spec tp-takt-upload, AK 2, 3, 7, 8, 8a, 8b, 9, 10, 11) ──
+
+    const J: u64 = 1_000_000;
+    const T15_MS: u64 = 15 * 60_000;
+
+    fn leak_gate() -> &'static WriteGate {
+        Box::leak(Box::new(WriteGate::new()))
+    }
+
+    /// Config mit Automatik an; `badhub.url` so, dass `tp_upload_url` auf den Mock zeigt.
+    fn takt_config(pfad: &std::path::Path, mock_url: &str) -> Arc<Mutex<AppConfig>> {
+        let mut cfg = basis(pfad);
+        cfg.badhub.url = mock_url.replace("tp-upload", "live_update.php");
+        cfg.tp_upload.auto_enabled = true;
+        cfg.tp_upload.auto_minutes = 15;
+        Arc::new(Mutex::new(cfg))
+    }
+
+    fn datei_sha(pfad: &std::path::Path) -> [u8; 32] {
+        crate::badhub::tp_upload::sha256(&std::fs::read(pfad).unwrap())
+    }
+
+    const OK_JSON: &str =
+        r#"{"received_at":"x","processed_at":"y","result":"ok","matches":7,"message":null}"#;
+
+    #[tokio::test]
+    async fn takt_schritt_unveraendert_sendet_nicht_und_stempelt() {
+        let (url, zaehler) = mock(OK_JSON).await;
+        let pfad = tp_datei("takt-unv.tp");
+        let cfg = takt_config(&pfad, &url);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        status.lock().unwrap().takt.knopf_gesendet(
+            &pfad,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA",
+            datei_sha(&pfad),
+            false,
+        );
+        let client = crate::badhub::tp_upload::build_client();
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        let s = status.lock().unwrap().clone();
+        assert_eq!(zaehler.load(Ordering::SeqCst), 0, "kein Request (AK 2)");
+        assert_eq!(s.takt.geprueft_ms, Some(J));
+        assert_eq!(s.takt.naechster_ms, Some(J + T15_MS));
+        assert!(s.ergebnis.is_none() && !s.laeuft);
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_geaendert_sendet_einmal_setzt_merker_und_danach_ruhe() {
+        let (url, zaehler) = mock(OK_JSON).await;
+        let pfad = tp_datei("takt-neu.tp");
+        let cfg = takt_config(&pfad, &url);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        let s = status.lock().unwrap().clone();
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            2,
+            "ein POST, ein Status-GET (AK 3)"
+        );
+        assert_eq!(s.quelle, Some(Quelle::Takt));
+        assert_eq!(s.ergebnis.as_deref(), Some("übernommen, 7 Spiele"));
+        assert!(s.takt.merker.as_ref().unwrap().passt(
+            &pfad,
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA",
+            &datei_sha(&pfad)
+        ));
+        let n = s.takt.naechster_ms.unwrap();
+        assert!(
+            (J + T15_MS..J + T15_MS + 5_000).contains(&n),
+            "Termin ab Upload-Ende: {n}"
+        );
+        assert!(!s.laeuft);
+        // Zweiter Schritt: dieselben Bytes → nichts.
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 1).await;
+        assert_eq!(zaehler.load(Ordering::SeqCst), 2);
+        assert_eq!(status.lock().unwrap().takt.geprueft_ms, Some(J + 1));
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_409_haelt_an_knopf_und_wiederanlauf_loesen() {
+        let (url, zaehler) = mock_mit(
+            "409 Conflict",
+            "",
+            r#"{"status":"error","message":"final"}"#,
+            "{}",
+        )
+        .await;
+        let pfad = tp_datei("takt-409.tp");
+        let guid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
+        let cfg = takt_config(&pfad, &url);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        {
+            let s = status.lock().unwrap();
+            assert_eq!(zaehler.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                s.takt.angehalten.as_deref(),
+                Some("Turnier bereits endgültig importiert"),
+                "AK 7"
+            );
+            assert_eq!(
+                s.ergebnis.as_deref(),
+                Some("Turnier bereits endgültig importiert")
+            );
+            assert!(s.takt.merker.is_none(), "409 setzt keinen Merker");
+        }
+        // Angehalten: zweiter Schritt liest und sendet nicht.
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 5).await;
+        assert_eq!(zaehler.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            status.lock().unwrap().takt.naechster_ms,
+            Some(J + 5 + T15_MS)
+        );
+        // Knopf-Erfolg hebt den Halt auf und merkt die Bytes (AK 9) …
+        knopf_nachlauf(
+            &UploadAusgang::DauertNoch {
+                sha: datei_sha(&pfad),
+            },
+            &status,
+            &pfad,
+            guid,
+        );
+        assert!(status.lock().unwrap().takt.angehalten.is_none());
+        assert!(
+            status.lock().unwrap().takt.nachholen,
+            "Knopf „dauert noch“ → Takt holt den Status nach"
+        );
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 9).await;
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            2,
+            "… ein Status-GET (nachholen), aber kein zweiter Upload derselben Bytes"
+        );
+        assert!(!status.lock().unwrap().takt.nachholen);
+        // … ein Wiederanlauf (Speichern mit geänderter GUID, AK 8) löscht den Merker → sendet wieder.
+        status.lock().unwrap().takt.wiederanlauf(J + 10);
+        assert_eq!(
+            status.lock().unwrap().takt.naechster_ms,
+            Some(J + 10 + 60_000)
+        );
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 20).await;
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            3,
+            "neuer POST nach Wiederanlauf"
+        );
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_knopf_laeuft_schalter_aus_slave_und_vorbedingung() {
+        let (url, zaehler) = mock(OK_JSON).await;
+        let pfad = tp_datei("takt-knopf.tp");
+        let cfg = takt_config(&pfad, &url);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        // Knopf läuft: kein Upload, +90 s, kein Zähler (AK 10).
+        status.lock().unwrap().laeuft = true;
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        {
+            let s = status.lock().unwrap();
+            assert_eq!(zaehler.load(Ordering::SeqCst), 0);
+            assert_eq!(s.takt.naechster_ms, Some(J + 90_000));
+            assert_eq!(s.takt.nachversuche, 0);
+        }
+        status.lock().unwrap().laeuft = false;
+        // Schalter aus → kein Termin (AK 11).
+        cfg.lock().unwrap().tp_upload.auto_enabled = false;
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        assert_eq!(status.lock().unwrap().takt.naechster_ms, None);
+        // Slave-Modus → wie aus.
+        {
+            let mut c = cfg.lock().unwrap();
+            c.tp_upload.auto_enabled = true;
+            c.slave_mode = true;
+        }
+        status.lock().unwrap().takt.starten(J);
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        assert_eq!(status.lock().unwrap().takt.naechster_ms, None);
+        // Vorbedingung verletzt (Datei entfernt) → Halt mit dem Setup-Text.
+        {
+            let mut c = cfg.lock().unwrap();
+            c.slave_mode = false;
+            c.tp_upload.path.clear();
+        }
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        let s = status.lock().unwrap().clone();
+        assert!(
+            s.takt
+                .angehalten
+                .as_deref()
+                .unwrap()
+                .contains("Keine TP-Datei gewählt"),
+            "{:?}",
+            s.takt.angehalten
+        );
+        assert_eq!(zaehler.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_nicht_lesbar_zweimal_nachversuch_dann_halt() {
+        let weg = std::env::temp_dir()
+            .join("bts-light-gibt-es-nicht")
+            .join("takt-weg.tp");
+        let cfg = takt_config(&weg, "http://127.0.0.1:1/api/tp-upload");
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        for i in 1..=2u64 {
+            tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + i).await;
+            let s = status.lock().unwrap().clone();
+            assert!(s.takt.angehalten.is_none(), "Versuch {i}");
+            assert_eq!(s.takt.naechster_ms, Some(J + i + 90_000));
+            let t = s.ergebnis.unwrap();
+            assert!(
+                t.starts_with("Datei nicht lesbar: takt-weg.tp — nächster Versuch "),
+                "{t}"
+            );
+            assert!(!t.contains("bitte gleich"), "{t}");
+        }
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 3).await;
+        let s = status.lock().unwrap().clone();
+        assert_eq!(
+            s.takt.angehalten.as_deref(),
+            Some("TP-Datei nicht gefunden: takt-weg.tp — im Setup neu wählen"),
+            "AK 8a"
+        );
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_holt_status_nach_und_haelt_bei_guid_mismatch() {
+        let (url, zaehler) = mock(
+            r#"{"received_at":"x","processed_at":"y","result":"guid_mismatch","matches":null,"message":"Kennung passt nicht"}"#,
+        )
+        .await;
+        let pfad = tp_datei("takt-nachholen.tp");
+        let guid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
+        let cfg = takt_config(&pfad, &url);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        {
+            let mut s = status.lock().unwrap();
+            s.takt.knopf_gesendet(&pfad, guid, datei_sha(&pfad), false);
+            s.takt.nachholen = true;
+        }
+        let client = crate::badhub::tp_upload::build_client();
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        let s = status.lock().unwrap().clone();
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            1,
+            "genau ein Status-GET (AK 8b)"
+        );
+        assert_eq!(s.takt.angehalten.as_deref(), Some("Kennung passt nicht"));
+        assert!(!s.takt.nachholen);
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_503_mit_retry_after_nachversuch_und_text() {
+        let (url, zaehler) = mock_mit("503 Service Unavailable", "Retry-After: 7", "", "{}").await;
+        let pfad = tp_datei("takt-503.tp");
+        let cfg = takt_config(&pfad, &url);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        let s = status.lock().unwrap().clone();
+        assert_eq!(zaehler.load(Ordering::SeqCst), 1);
+        let n = s.takt.naechster_ms.unwrap();
+        assert!((J + 7_000..J + 12_000).contains(&n), "Retry-After 7 s: {n}");
+        assert_eq!(s.takt.nachversuche, 1);
+        assert!(s.takt.merker.is_none(), "503 kennt die Bytes nicht");
+        let t = s.ergebnis.unwrap();
+        assert!(
+            t.starts_with("badhub bittet um Geduld — nächster Versuch "),
+            "{t}"
+        );
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_beschaeftigt_zweimal_dann_regulaer_mit_pruefung_text() {
+        let gate = leak_gate();
+        // Ein Write hält die Lesesperre länger als die Wartezeit des Tests.
+        let _write = tokio::spawn(async move {
+            let _s = gate.schreiben().await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        tokio::task::yield_now().await;
+        let pfad = tp_datei("takt-busy.tp");
+        let cfg = takt_config(&pfad, "http://127.0.0.1:1/api/tp-upload");
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        let takt = UploadTakt {
+            max_wartezeit: Duration::from_millis(50),
+            ..takt_schnell()
+        };
+        for i in 1..=2u64 {
+            tp_takt_schritt(&cfg, &status, gate, &client, takt, J + i).await;
+            let s = status.lock().unwrap().clone();
+            let n = s.takt.naechster_ms.unwrap();
+            assert!(
+                (J + i + 90_000..J + i + 95_000).contains(&n),
+                "Nachversuch {i}: {n}"
+            );
+            let t = s.ergebnis.unwrap();
+            assert!(t.starts_with("BTP beschäftigt — nächster Versuch "), "{t}");
+            assert!(!s.laeuft);
+        }
+        tp_takt_schritt(&cfg, &status, gate, &client, takt, J + 3).await;
+        let s = status.lock().unwrap().clone();
+        let n = s.takt.naechster_ms.unwrap();
+        assert!((J + 3 + T15_MS..J + 3 + T15_MS + 5_000).contains(&n), "{n}");
+        let t = s.ergebnis.unwrap();
+        assert!(t.starts_with("BTP beschäftigt — nächste Prüfung "), "{t}");
+        assert!(s.takt.angehalten.is_none());
+    }
+
+    #[tokio::test]
+    async fn knopf_pfad_setzt_merker_und_takt_sendet_dieselben_bytes_nicht() {
+        let (url, zaehler) = mock(OK_JSON).await;
+        let pfad = tp_datei("takt-knopfpfad.tp");
+        let cfg = takt_config(&pfad, &url);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        // Knopf wie in `tp_upload_now`, nur ohne Tauri.
+        let vorgaben = pruefe_upload_bedingungen(&cfg.lock().unwrap()).unwrap();
+        let (p, g) = (vorgaben.pfad.clone(), vorgaben.guid.clone());
+        upload_starten(&status).unwrap();
+        let (ausgang, text) = fuehre_upload_aus(
+            vorgaben,
+            status.clone(),
+            leak_gate(),
+            &client,
+            takt_schnell(),
+            Quelle::Knopf,
+        )
+        .await;
+        assert_eq!(text, "übernommen, 7 Spiele");
+        knopf_nachlauf(&ausgang, &status, &p, &g);
+        assert_eq!(zaehler.load(Ordering::SeqCst), 2);
+        assert_eq!(status.lock().unwrap().quelle, Some(Quelle::Knopf));
+        // Takt: Bytes bekannt → kein Request (AK 9).
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        assert_eq!(zaehler.load(Ordering::SeqCst), 2);
+        assert_eq!(status.lock().unwrap().takt.geprueft_ms, Some(J));
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_dauert_noch_dann_status_nachgeholt_ok() {
+        let (url_a, zaehler_a) = mock(
+            r#"{"received_at":"x","processed_at":null,"result":null,"matches":null,"message":null}"#,
+        )
+        .await;
+        let (url_b, zaehler_b) = mock(OK_JSON).await;
+        let pfad = tp_datei("takt-dauert.tp");
+        let cfg = takt_config(&pfad, &url_a);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        {
+            let s = status.lock().unwrap();
+            assert!(
+                zaehler_a.load(Ordering::SeqCst) >= 3,
+                "POST + mehrere Polls"
+            );
+            assert!(s.takt.nachholen, "Marke „Status nachholen“");
+            assert!(s.takt.merker.is_some());
+            assert_eq!(s.ergebnis.as_deref(), Some(TEXT_VERARBEITUNG_DAUERT));
+        }
+        // Zweiter Schritt gegen den Server, der jetzt `ok` liefert: genau ein GET,
+        // Text übernommen, kein erneuter Upload (AK 8b).
+        cfg.lock().unwrap().badhub.url = url_b.replace("tp-upload", "live_update.php");
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 1).await;
+        let s = status.lock().unwrap().clone();
+        assert_eq!(zaehler_b.load(Ordering::SeqCst), 1);
+        assert_eq!(s.ergebnis.as_deref(), Some("übernommen, 7 Spiele"));
+        assert_eq!(s.quelle, Some(Quelle::Takt));
+        assert!(!s.takt.nachholen && s.takt.angehalten.is_none());
+    }
+
+    #[tokio::test]
+    async fn takt_schritt_parse_error_ist_weich() {
+        let (url, zaehler) = mock(
+            r#"{"received_at":"x","processed_at":"y","result":"parse_error","matches":null,"message":"Datei nicht lesbar (Extraktor)"}"#,
+        )
+        .await;
+        let pfad = tp_datei("takt-parse.tp");
+        let cfg = takt_config(&pfad, &url);
+        let status = Arc::new(Mutex::new(TpUploadStatus::default()));
+        let client = crate::badhub::tp_upload::build_client();
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J).await;
+        let s = status.lock().unwrap().clone();
+        assert_eq!(zaehler.load(Ordering::SeqCst), 2);
+        assert!(s.takt.angehalten.is_none(), "kein Halt");
+        assert!(s.takt.merker.is_some(), "Bytes bekannt");
+        assert_eq!(
+            s.ergebnis.as_deref(),
+            Some("Datei nicht lesbar (Extraktor)")
+        );
+        tp_takt_schritt(&cfg, &status, leak_gate(), &client, takt_schnell(), J + 1).await;
+        assert_eq!(
+            zaehler.load(Ordering::SeqCst),
+            2,
+            "dieselben Bytes nicht erneut"
+        );
+    }
+
+    #[test]
+    fn takt_start_regel_und_flatten_ans_frontend() {
+        // Startregel (AK 12, Spec Lebenszyklus 2).
+        let status = Mutex::new(TpUploadStatus::default());
+        tp_takt_start(true, &status, J);
+        assert_eq!(status.lock().unwrap().takt.naechster_ms, Some(J + 60_000));
+        status.lock().unwrap().takt.naechster_ms = Some(J + 10_000);
+        tp_takt_start(true, &status, J);
+        assert_eq!(
+            status.lock().unwrap().takt.naechster_ms,
+            Some(J + 60_000),
+            "zu nah → +60 s"
+        );
+        status.lock().unwrap().takt.naechster_ms = Some(J + 600_000);
+        tp_takt_start(true, &status, J);
+        assert_eq!(
+            status.lock().unwrap().takt.naechster_ms,
+            Some(J + 600_000),
+            "bleibt"
+        );
+        tp_takt_start(false, &status, J);
+        assert_eq!(status.lock().unwrap().takt.naechster_ms, None);
+        // Flatten: Takt-Felder oben, Merker nie (Frontend-Vertrag `types.ts`).
+        let v = serde_json::to_value(TpUploadStatus::default()).unwrap();
+        for k in [
+            "laeuft",
+            "ergebnis",
+            "quelle",
+            "naechster_ms",
+            "geprueft_ms",
+            "angehalten",
+        ] {
+            assert!(v.get(k).is_some(), "Schlüssel {k}");
+        }
+        assert!(v.get("takt").is_none() && v.get("merker").is_none());
     }
 }

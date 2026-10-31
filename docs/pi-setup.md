@@ -152,6 +152,37 @@ Da alle Monitore dieselbe Adresse nutzen, ist jeder weitere Pi schnell:
   automatisch mit seiner **eigenen Hardware-Seriennummer** — die geklonte
   Karte bleibt also je Pi eindeutig, du musst nichts umstellen.
 
+## Ton für Ansagen am TV (seit v0.9.313)
+
+Der Monitor kann die Ansagen seiner Halle mitsprechen — über den Lautsprecher
+des TVs. Dafür in `bts-monitor-url.txt` hinter die Adresse
+`?ansage=<Halle>` hängen, zum Beispiel:
+
+```text
+http://bts-light.local:8088/monitor?ansage=Halle%20A
+```
+
+Ein Leerzeichen im Hallennamen schreibst du als `%20` (das Startskript
+entfernt Leerzeichen). Bei nur einer Halle genügt `?ansage=`. Am Turnier-PC
+muss auf der Seite **Ansagen** der Schalter **Audio für Ansage-Seiten
+erzeugen** an sein, und für Sprache am Pi braucht es Azure. Mehr dazu:
+[court-monitor.md](court-monitor.md) „Ansage-Modus".
+
+Damit der Pi **ohne Tippen** Ton abspielen darf, startet das Kiosk-Skript
+Chromium mit `--autoplay-policy=no-user-gesture-required`.
+<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/setup-monitor.sh -->
+
+**Pis, die vor v0.9.313 eingerichtet wurden, haben dieses Flag noch nicht.**
+Sie zeigen im Ansage-Modus unten links „Ton gesperrt …" und sprechen nicht.
+Abhilfe: das aktuelle `setup-monitor.sh` einmal neu herunterladen und
+ausführen (Schritt 3) — Achtung, es fragt die Adresse neu ab und überschreibt
+`bts-monitor-url.txt`; gib dort gleich die Adresse mit `?ansage=…` ein. Oder
+die Karte mit einem neuen Master-Image bespielen. Pis mit dem gemeinsamen Startskript
+(`shared-startbrowser.sh`) bekommen die neue Fassung des Skripts.
+
+**Kein Ton am TV?** Im Pi-Desktop über das Lautsprecher-Symbol bzw. mit
+`sudo raspi-config` → *System Options* → *Audio* den HDMI-Ausgang wählen.
+
 ## Tipps & Problemlösung
 
 - **Keine feste IP nötig.** Der Turnier-PC meldet sich im Netz unter dem

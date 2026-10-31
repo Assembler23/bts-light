@@ -164,7 +164,12 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    Seit dem Schiedsrichterzettel ([Spec](features/schiedsrichterzettel-druck.md),
    ADR 0037/0038/0039) kommt ein **zweiter, eigener Strom** daneben:
    `match_event` je erfasstem Ereignis (Karte, Verletzung, Unterbrechung,
-   Überstimmung, Aufschlagfolge) und `match_event_sync` als Abgleich.
+   Überstimmung, Aufschlagfolge; seit v0.9.319 auch `teams_corrected`,
+   ADR 0067) und `match_event_sync` als Abgleich. `EventKind` hat keinen
+   Catch-All: Ein Relay oder Host ohne `teams_corrected` verwirft den ganzen
+   Frame. Deshalb meldet der Host im `MatchBrief` `teamsCorrection: true`, und
+   nur dann bietet das Tablet „Mannschaften tauschen" an. Ausrollen wie
+   immer Relay vor App (main-Merge deployt den Relay sofort).
    Getrennt vom Punktverlauf, weil Karten personenbezogene
    Sanktionsdaten sind und `MatchTimeline` personenbezugsfrei bleiben
    muss (ADR 0015) — mit eigenen Deckeln (`MAX_EVENTS_PER_MATCH`,
@@ -650,6 +655,26 @@ Der Broadcast-`TlState` trägt dagegen nur: `officials_managed`, die Liste
 **Reihenfolge beim Ausrollen:** Ein alter Relay lehnt unbekannte Aktionen ab
 — erst Relay deployen, dann den Client veröffentlichen.
 
+### Setzplätze (seit v0.9.298, Spec [setzplaetze-anzeigen](features/setzplaetze-anzeigen.md), ADR [0059](adr/0059-setzplatz-als-text-aus-dem-parser.md))
+
+Die Setzung reist als **fertiger Text** ohne Klammern („1", „3/4") und nur,
+wenn sie gesetzt ist (`skip_serializing_if`); ältere Gegenstellen lesen ein
+fehlendes Feld als „ungesetzt":
+
+- `MatchBrief.seedA`/`seedB` und `PreparedMatch.seedA`/`seedB` (Host → Relay)
+- `MonitorMatch.team1Seed`/`team2Seed` (Court-Monitor)
+- in der Cloud-Übersicht (`overview_health`) und der Vorbereitungsliste
+  **ausdrücklich** als `team1_seed`/`team2_seed` — gleicher Schlüssel wie die
+  LAN-`/health`; der Relay baut diese JSONs von Hand, ein neues Feld kommt
+  dort nur an, wenn es eingetragen wird.
+- im TL-Zustand an `TlMatch`/`TlCourt` (`team1_seed`/`team2_seed`), dazu der
+  Profil-Schalter `hideSeeds` (invertiert, fehlt = anzeigen).
+
+**Neusetzung an einem belegten Feld:** Die Setzung ist Teil des
+Push-Schlüssels `CourtPushKey` in `relay_client.rs`. Ändert sie sich, geht
+`MatchAssigned` mit derselben Match-ID erneut an den Relay — wie bei einem
+Wechsel der Schiedsrichter-Besetzung.
+
 ### Panel-Profile (Spec [tl-web-panelsystem](features/tl-web-panelsystem.md), ADR [0024](adr/0024-tl-panel-profile-verwaltung-im-web.md)/[0025](adr/0025-tl-panel-profile-transport-persistenz.md))
 
 Benannte Profile bündeln Panel-Sichtbarkeit/-Reihenfolge/-Höhe und die
@@ -701,7 +726,12 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   `#[serde(default)]`, alte Gegenstellen ignorieren es). Die
   Relay-Kürzungsleiter (`state_for_relay`) kennt die Liste: Reichen alle
   Warteliste-Stufen nicht, wird zuletzt das Anfangszeiten-Panel geopfert,
-  bevor der Zustand die Relay-Grenze reißen dürfte.
+  bevor der Zustand die Relay-Grenze reißen dürfte. Seit v0.9.280 trägt
+  `TlDisplaySettingsWire` zusätzlich `showMoveButtons` (vier
+  Verschiebe-Knöpfe an jeder Wartelisten-Zeile) — wieder
+  `#[serde(default)]`; fehlt es, bleibt der Schalter aus. Ein neuer Host
+  serialisiert es in jedem Profil, daran erkennt die Seite, ob sie das
+  Häkchen anbieten darf.
 - **Individuelle Geräte-Zuordnung** → reitet auf dem bestehenden
   `HostFrame::TlAuth`-Spiegel: `TlAuthDevice.profile_id` (neu, siehe unten).
   Der Relay hält eine zweite Parallel-Map neben `tl_tokens` (Zugang →

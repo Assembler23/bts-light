@@ -123,7 +123,7 @@ async fn serve(
     let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
     // CourtID → zuletzt ans Tablet gemeldete Match-ID. Verhindert, dass der
     // 2-s-Ticker unverändert dasselbe Match immer wieder pusht.
-    let mut last_match: HashMap<i64, Option<(i64, bool, String)>> = HashMap::new();
+    let mut last_match: HashMap<i64, Option<CourtPushKey>> = HashMap::new();
     // Zuletzt an den Relay gepushte Freitext-ID (B1a: Cloud-Ansage der fernen
     // Halle). Nur neue Items (id > last) werden geschickt.
     let mut last_freetext: u64 = 0;
@@ -466,7 +466,7 @@ async fn handle_frame(
     ctx: &Arc<ServerCtx>,
     frame: RelayFrame,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<(i64, bool, String)>>,
+    last_match: &mut HashMap<i64, Option<CourtPushKey>>,
     score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     match frame {
@@ -705,6 +705,13 @@ async fn handle_frame(
     }
 }
 
+/// Push-Schlüssel je Feld: Ändert sich einer seiner Teile, geht die
+/// Zuweisung erneut an den Relay. (Match-ID, finalisiert, Besetzung,
+/// Setzplatz Team 1, Setzplatz Team 2) — die Setzung gehört dazu, damit eine
+/// Neusetzung in BTP ein schon belegtes Feld in der Cloud erreicht
+/// (Spec setzplaetze-anzeigen, ADR 0059).
+type CourtPushKey = (i64, bool, String, Option<String>, Option<String>);
+
 /// Schiebt das aktuelle Match eines Felds (per CourtID) ans Tablet – nur,
 /// wenn es sich gegenüber dem zuletzt gemeldeten Stand geändert hat.
 /// `court_label` ist die Anzeige-Bezeichnung des Felds (bei Mehr-Hallen-
@@ -713,7 +720,7 @@ fn push_court(
     ctx: &ServerCtx,
     court_id: i64,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<(i64, bool, String)>>,
+    last_match: &mut HashMap<i64, Option<CourtPushKey>>,
     score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     let court_label = ctx.tablet.court_display_label(court_id);
@@ -740,6 +747,8 @@ fn push_court(
             m.id,
             finalized,
             crate::tablet::server::officials_key(&ctx.tablet.match_officials(m)),
+            m.team1_seed.clone(),
+            m.team2_seed.clone(),
         )
     });
     if last_match.get(&court_id) == Some(&key) {
@@ -794,7 +803,7 @@ fn push_court(
 fn push_all_courts(
     ctx: &ServerCtx,
     tx: &mpsc::UnboundedSender<WsMessage>,
-    last_match: &mut HashMap<i64, Option<(i64, bool, String)>>,
+    last_match: &mut HashMap<i64, Option<CourtPushKey>>,
     score_fp: &mut HashMap<i64, HostFrame>,
 ) {
     for court in ctx.tablet.courts() {
@@ -1083,6 +1092,8 @@ fn build_prepared_list(
                 team_b: players(&m.team2),
                 match_number: m.match_num,
                 called_at_ms: call.called_at_ms,
+                seed_a: m.team1_seed.clone(),
+                seed_b: m.team2_seed.clone(),
             })
         })
         .collect()
@@ -1402,6 +1413,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -1536,7 +1549,7 @@ mod tests {
     fn push_court_sends_once_dedups_then_clears() {
         let ctx = ctx_with(vec![match_on_court(42, 101)]);
         let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
-        let mut last: HashMap<i64, Option<(i64, bool, String)>> = HashMap::new();
+        let mut last: HashMap<i64, Option<CourtPushKey>> = HashMap::new();
         let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
 
         // Der Spiegel-Fingerabdruck des Felds ist gesetzt (als hätte der
@@ -1600,5 +1613,62 @@ mod tests {
             !score_fp.contains_key(&101),
             "auch die Aufhebung verwirft den Spiegel-Fingerabdruck"
         );
+    }
+
+    /// Eine Neusetzung in BTP ändert die Match-ID nicht, muss ein schon
+    /// belegtes Feld in der Cloud aber erreichen (Spec setzplaetze-anzeigen,
+    /// B5): Der Push-Schlüssel enthält die Setzung, der Brief trägt sie.
+    #[test]
+    fn push_court_sendet_bei_neusetzung_erneut() {
+        let mut m = match_on_court(42, 101);
+        m.team1_seed = Some("1".into());
+        let ctx = ctx_with(vec![m.clone()]);
+        let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
+        let mut last: HashMap<i64, Option<CourtPushKey>> = HashMap::new();
+        let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
+
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
+        let f1 = text_of(&rx.try_recv().expect("Zuweisung erwartet"));
+        assert!(
+            f1.contains("\"seedA\":\"1\""),
+            "Brief trägt die Setzung: {f1}"
+        );
+        assert!(
+            !f1.contains("seedB"),
+            "ungesetzte Seite fehlt auf der Wire: {f1}"
+        );
+
+        // Gleicher Stand → kein Push.
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
+        assert!(rx.try_recv().is_err(), "kein Push ohne Änderung");
+
+        // Neusetzung → erneuter Push mit dem neuen Wert.
+        m.team1_seed = Some("3/4".into());
+        ctx.tablet.set_snapshot(snapshot(vec![m]));
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
+        let f2 = text_of(&rx.try_recv().expect("erneuter Push erwartet"));
+        assert!(f2.contains("\"type\":\"match_assigned\""), "war: {f2}");
+        assert!(f2.contains("\"seedA\":\"3/4\""), "neue Setzung: {f2}");
+    }
+
+    /// Die Vorbereitungsliste für die Cloud trägt die Setzung mit; eine
+    /// ungesetzte Seite fehlt auf der Wire.
+    #[test]
+    fn vorbereitungsliste_traegt_die_setzung() {
+        use crate::tablet::state::PreparationCall;
+        let mut m = scheduled_match(42);
+        m.team2_seed = Some("5/8".into());
+        let snap = snapshot(vec![m]);
+        let calls = vec![PreparationCall {
+            match_id: 42,
+            location_id: None,
+            called_at_ms: 1_700_000_000_000,
+        }];
+        let prepared = build_prepared_list(&snap, &calls, &crate::config::AppConfig::default());
+        assert_eq!(prepared[0].seed_a, None);
+        assert_eq!(prepared[0].seed_b.as_deref(), Some("5/8"));
+        let json = serde_json::to_string(&prepared[0]).unwrap();
+        assert!(json.contains("\"seedB\":\"5/8\""), "{json}");
+        assert!(!json.contains("seedA"), "{json}");
     }
 }

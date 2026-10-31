@@ -63,7 +63,13 @@ Knopf zum Kopieren.
 
 ## 1 · Liveticker-Ziel
 
-**Verband wählen.** Sechs Kacheln (BVBB, BVRP, HBV, BBV, BWBV, NBV). Die Wahl
+**Verband wählen.** Zehn Kacheln: BVBB, BVRP, HBV, BBV (Bayern), BWBV, NBV,
+BVS (Sachsen), BVR (Rheinland), SBV (Saarland) und **DBV** für Turniere des
+Deutschen Badminton-Verbands. Die Wahl
+<!-- pruef: /id: "dbv"/ in src/presets.ts -->
+<!-- pruef: /id: "bvs"/ in src/presets.ts -->
+<!-- pruef: /id: "bvr"/ in src/presets.ts -->
+<!-- pruef: /id: "sbv"/ in src/presets.ts -->
 setzt Adresse und Zugangspasswort des Livetickers automatisch — du musst nichts
 eintippen. Voreingestellt ist BVBB, sofern sich aus einer vorhandenen
 Einrichtung nichts anderes ergibt.
@@ -120,11 +126,38 @@ reine Farbänderung nicht.
 |---|---|---|
 | **BTP-Adresse** | `127.0.0.1` | Der Rechner, auf dem der Tournament Planner läuft. `127.0.0.1` heißt „derselbe PC". |
 | **Port** | `9901` | Der Netzwerk-Port des TP-Netzwerkdienstes. Leer oder unsinnig ⇒ es gilt wieder 9901. |
+<!-- pruef: /port: 9901,/ in src-tauri/src/config.rs -->
 | **BTP-Passwort (falls gesetzt)** | leer | Nur nötig, wenn im Tournament Planner eines vergeben wurde. |
 
 **Verbindung testen** prüft sofort und zeigt bei Erfolg den Turniernamen an —
 das ist die schnellste Kontrolle, ob du beim richtigen Turnier bist. Der Test
 **speichert nichts**; zum Übernehmen musst du unten trotzdem speichern.
+
+## TP-Datei (Turnierdatenbank)
+
+*Nicht im Ansage-Slave-Modus — nur der Master lädt hoch.*
+<!-- pruef: "TP-Datei (Turnierdatenbank)" in src/pages/SetupWizard.tsx -->
+
+| Feld | Voreinstellung | Bedeutung |
+|---|---|---|
+| **TP-Datei wählen** | keine | Die Turnierdatei, mit der BTP gerade arbeitet (`.TP`). Sie lässt sich im Status-Fenster an badhub senden — für einen vorläufigen Turnierstand noch am Turniertag, siehe [Turnierdatei an badhub senden](tp-datei-upload.md). Beim Wählen prüft die App Dateityp und Größe (höchstens 32 MB) und zeigt „Turnierdatei erkannt, 3,6 MB". Gespeichert wird nur, was die Prüfung besteht. Die Turnier-Kennung liest die App aus der Datei mit: Fehlt sie unter „1 · Liveticker-Ziel", wird sie übernommen; gehört die Datei zu einem anderen Turnier als die eingetragene Kennung, fragt die App, ob sie die Kennung aus der Datei übernehmen soll. |
+<!-- pruef: /TP_MAX_BYTES: u64 = 32 \* 1024 \* 1024/ in src-tauri/src/badhub/tp_upload.rs -->
+| **Entfernen** | — | Löscht die Auswahl wieder (und schaltet die Automatik aus). |
+| **Automatisch senden, solange der Liveticker läuft** | aus | Sendet die Datei von selbst, wenn sie sich geändert hat — nur bei laufendem Liveticker. Jede Änderung in BTP wird damit ohne Klick auf badhub sichtbar, auch eine frische Auslosung. Siehe [Automatisch senden](tp-datei-upload.md#automatisch-senden). |
+<!-- pruef: "Automatisch senden, solange der Liveticker läuft" in src/pages/SetupWizard.tsx -->
+| **alle … Minuten** | 15 | Takt der Prüfung; weniger als 5 Minuten nimmt die App nicht an (wird angehoben). Eine unveränderte Datei kostet nichts — weder BTP noch badhub. |
+<!-- pruef: /TP_TAKT_STANDARD_MINUTEN: u16 = 15/ in src-tauri/src/config.rs -->
+<!-- pruef: /TP_TAKT_MIN_MINUTEN: u16 = 5/ in src-tauri/src/config.rs -->
+| **Bei neuen Spielen und Paarungen sofort prüfen** | an | Zieht die Prüfung auf etwa 30 Sekunden vor, sobald BTP neue Spiele (Auslosung) oder eine gefüllte Paarung meldet. Ergebnisse lösen nichts aus. Abschalten, falls Netz oder badhub zu viel abbekommen — dann bleibt der Takt. Siehe [Automatisch senden](tp-datei-upload.md#automatisch-senden). |
+<!-- pruef: "Bei neuen Spielen und Paarungen sofort prüfen" in src/pages/SetupWizard.tsx -->
+| **höchstens alle … Minuten** | 5 | Drossel: so oft darf ein solches Ereignis höchstens einen Upload auslösen; weniger als 5 wird angehoben. |
+<!-- pruef: /TP_EREIGNIS_STANDARD_MINUTEN: u16 = 5/ in src-tauri/src/config.rs -->
+
+Die Datei ist an die **Turnier-Kennung** aus „1 · Liveticker-Ziel" gebunden,
+die beim Wählen eingetragen war. Ändert sich die Kennung, bleibt der Pfad
+stehen, und es heißt **„Datei neu wählen"**, bis du die Datei erneut gewählt
+hast. Läuft bts-light nicht auf dem BTP-Rechner, steht hier ein Hinweis
+(Upload nur vom BTP-Rechner empfohlen).
 
 ## 3 · Badhub-Zugang
 
@@ -146,9 +179,14 @@ gesperrt.
 - **Über badhub.de – Cloud** *(voreingestellt aus)*: PC und Tablets verbinden
   sich nur nach außen. Funktioniert auch hinter gesperrten Firmen-Firewalls,
   setzt aber Internet voraus. Näheres: [Cloud-Verbindung](cloud-relay.md).
+<!-- Ausgeliefert wird ConnectionMode::Lan. Stuende hier Cloud oder
+     LanCloud als #[default], waere der Satz oben falsch — genau dieser
+     Fehler stand am 06.09.2026 im Entwurf. -->
+<!-- pruef: /#\[default\]\s*\n\s*Lan,/ in src-tauri/src/config.rs -->
 
 **Tablet-Einstellungs-PIN** — **voreingestellt `0000`**, nur Ziffern, höchstens
-acht. Schützt das Zahnrad-Menü am Zähltablett davor, dass jemand aus Versehen
+acht.
+<!-- pruef: /"0000"\.to_string\(\)/ in src-tauri/src/config.rs --> Schützt das Zahnrad-Menü am Zähltablett davor, dass jemand aus Versehen
 das Feld wechselt. Ein leeres Feld setzt die PIN auf `0000` zurück. Das ist ein
 Bedien-Schutz, **keine Gerätesperre** — die macht der Kiosk-Browser, siehe
 [Einstellungs-PIN & Kiosk-Sperre](tablet-kiosk.md).
@@ -163,6 +201,26 @@ ist dieser Menüpunkt ausgegraut. Details:
 
 Der Schalter wirkt **sofort**, ohne Neustart; eine laufende Ansage wird beim
 Ausschalten abgebrochen.
+
+**Audio für Ansage-Seiten erzeugen** — **voreingestellt aus**, auf der Seite
+**Ansagen**. Lässt Tablets, Handys oder einen Pi im Browser ansagen
+(`/ansage`); unabhängig davon, ob der PC selbst spricht. Mit Azure kostet
+jede Ansage, die eine Seite hört, einen Azure-Aufruf. Siehe
+[Ansage-Seite im Browser](announcements.md#ansage-seite-im-browser-seit-v09311).
+<!-- pruef: "page_audio: false" in src-tauri/src/config.rs -->
+
+**Alter Abspielweg (über das Programmfenster)** — **voreingestellt aus**, in
+den Ansage-Einstellungen. Notfall-Schalter seit v0.9.318: Die Ansage läuft
+dann wie bis v0.9.317 und folgt einem Wechsel des Ausgabegeräts (Klinke,
+USB-Box) nicht mehr von selbst. Befristet. Siehe
+[Ausgabegerät](announcements.md#ausgabegerät-seit-v09318).
+<!-- pruef: "legacy_output: false" in src-tauri/src/config.rs -->
+
+**Ansage über:** — **voreingestellt Windows-Standard**, auf der Seite
+**Ansagen**. Legt seit v0.9.321 ein festes Ausgabegerät für die Ansage fest;
+gilt nur für diesen PC. Siehe
+[Ausgabegerät](announcements.md#ausgabegerät-seit-v09318).
+<!-- pruef: "output_device: String::new()" in src-tauri/src/config.rs -->
 
 ## Aufruf-Timer
 
@@ -349,17 +407,12 @@ alle zehn Minuten die aktuelle Logdatei übertragen. Sie enthält nur technische
 Daten, **keine Spielernamen**. Das hilft, einen Fehler nach dem Turnier
 nachzuvollziehen.
 
-Der Startwert hängt davon ab, woher deine Einrichtung kommt:
-
-| Ausgangslage | Schalter |
-|---|---|
-| **Neuinstallation ab v0.9.279** | **an** — der Assistent zeigt das Häkchen gesetzt |
-| Neuinstallation mit einer älteren Version | **aus** |
-| Bestehende Installation, die vor v0.9.279 eingerichtet wurde | **bleibt aus** — ein Update schaltet nichts stillschweigend ein |
-| Du hast den Schalter selbst umgelegt | **deine Entscheidung gilt**, in beide Richtungen |
-
-**Abwählen ist jederzeit möglich** und bleibt dauerhaft bestehen. Details:
+**Bei einer Neuinstallation ist er an** — der Einrichtungs-Assistent zeigt das
+Häkchen gesetzt, du kannst es dort oder hier jederzeit abwählen. Ein Update
+ändert daran nichts: Was du einmal eingestellt hast, bleibt bestehen — in beide
+Richtungen; eine ältere Installation ohne den Schalter bleibt aus. Details:
 [Diagnose-Logs](logging.md).
+<!-- pruef: "upload_logs: true" in src-tauri/src/config.rs -->
 
 ## Wartung
 

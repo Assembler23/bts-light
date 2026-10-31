@@ -76,6 +76,11 @@ ok("Halle geändert", p(feld(), feld({ location: "Halle B" })), false);
 ok("Hallen-Farbe geändert", p(feld(), feld({ hall_color: "#14b8a6" })), false);
 ok("Spielername geändert", p(feld(), feld({ team1: ["Carla Neu"] })), false);
 ok("Nation geändert", p(feld(), feld({ team1_nationalities: ["AUT"] })), false);
+// Spec setzplaetze-anzeigen: Eine Neusetzung bei gleicher Match-ID baut neu.
+ok("Setzung kommt hinzu", p(feld(), feld({ team1_seed: "1" })), false);
+ok("Setzung geändert", p(feld({ team2_seed: "3/4" }), feld({ team2_seed: "1" })), false);
+ok("Setzung gleich", p(feld({ team1_seed: "5/8" }), feld({ team1_seed: "5/8" })), true);
+ok("null und fehlend sind gleich", p(feld({ team1_seed: null }), feld()), true);
 ok("anderes Feld", p(feld(), feld({ court_id: 102 })), false);
 
 // ── Brett-Anordnung ───────────────────────────────────────────────────────

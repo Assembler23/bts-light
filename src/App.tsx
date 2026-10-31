@@ -8,12 +8,14 @@ import {
   saveConfig,
   startSync,
   stopSync,
+  takeUpdateResume,
   wifiStatus,
 } from "./api";
-import { setSharedOverrides } from "./io/announcer";
+import { setLegacyOutput, setSharedOverrides } from "./io/announcer";
 import { isTournamentGuid } from "./tournamentGuid";
 import { AlertBanner } from "./components/AlertBanner";
 import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
+import { AnsageAusgabeBanner } from "./components/AnsageAusgabeBanner";
 import { PrintWarningBanner } from "./components/PrintWarningBanner";
 import { SlaveConnectBanner } from "./components/SlaveConnectBanner";
 import { AppShell } from "./components/AppShell";
@@ -21,6 +23,7 @@ import { Footer } from "./components/Footer";
 import { CloudAnnounceSlave } from "./components/CloudAnnounceSlave";
 import { FreetextAnnouncer } from "./components/FreetextAnnouncer";
 import { AnnounceJobPlayer } from "./components/AnnounceJobPlayer";
+import { AnsageVertoner } from "./components/AnsageVertoner";
 import { MatchAnnouncer } from "./components/MatchAnnouncer";
 import type { NavView, SettingsFocus } from "./components/SideNav";
 import { UpdateBanner, UpdateProvider } from "./components/UpdateBanner";
@@ -79,6 +82,10 @@ function defaultConfig(): AppConfig {
       share_corrections: false,
       announce_scorekeeper: true,
       announce_umpire: true,
+      page_audio: false,
+      legacy_output: false,
+      output_device: "",
+      output_device_name: "",
     },
     azure_tts: {
       enabled: false,
@@ -113,6 +120,14 @@ function defaultConfig(): AppConfig {
     scorekeeper: {
       enabled: false,
       break_seconds: 300,
+    },
+    tp_upload: {
+      path: "",
+      tournament_uuid: "",
+      auto_enabled: false,
+      auto_minutes: 15,
+      ereignis_enabled: true,
+      ereignis_minuten: 5,
     },
     print: {
       auto_enabled: false,
@@ -173,6 +188,12 @@ function App() {
   // hört einfach auf zu laden, ohne dass die Turnierleitung erfährt, warum.
   const [runError, setRunError] = useState("");
 
+  // Notfall-Schalter „Alter Abspielweg" an den Announcer weiterreichen
+  // (io/ ist kein React-Code und liest die Konfiguration nicht selbst).
+  useEffect(() => {
+    setLegacyOutput(config.announce.legacy_output === true);
+  }, [config.announce.legacy_output]);
+
   useEffect(() => {
     loadConfig()
       .then((c) => {
@@ -189,10 +210,33 @@ function App() {
         // beim Klick scheitern (ADR 0054, C1) — der Assistent führt stattdessen
         // sofort zum fehlenden Feld. Ein Ansage-Slave braucht keine GUID.
         const brauchtGuid = !c.slave_mode && !isTournamentGuid(c.tournament_uuid);
-        setView(c.badhub.password && !brauchtGuid ? "dashboard" : "wizard");
+        const eingerichtet = Boolean(c.badhub.password) && !brauchtGuid;
+        setView(eingerichtet ? "dashboard" : "wizard");
+        // Wiederanlauf nach einem Update (Spec `update-im-turnierbetrieb`):
+        // lief die Übertragung, als der Installer die App beendete, startet
+        // sie hier von selbst — derselbe Weg wie der Knopf, mit derselben
+        // Fehleranzeige. Nur bei eingerichteter App; sonst führt der
+        // Assistent ohnehin erst zum fehlenden Feld.
+        void wiederAnlaufen(eingerichtet);
       })
       .catch(() => setView("wizard"));
   }, []);
+
+  /** Marker immer abholen (sonst bliebe er liegen), starten nur bei
+   *  eingerichteter App. */
+  async function wiederAnlaufen(eingerichtet: boolean) {
+    try {
+      const wieder = await takeUpdateResume();
+      if (!wieder || !eingerichtet) return;
+      setBusy(true);
+      await startSync();
+      setStatus(await getStatus());
+    } catch (e) {
+      setRunError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Geteiltes Aussprache-Wörterbuch laden: einmal beim Start (nach dem
   // Config-Load, damit die Badhub-URL steht) und danach alle 30 Min, solange
@@ -371,6 +415,7 @@ function App() {
           <UpdateBanner />
           <AlertBanner />
           <AzureFallbackBanner />
+          <AnsageAusgabeBanner />
           <PrintWarningBanner />
           <div className="min-h-0 flex-1 overflow-auto">
             <SetupWizard
@@ -385,7 +430,18 @@ function App() {
           <MatchAnnouncer
             announce={config.announce}
             azureTts={config.azure_tts}
+            erkennen={config.slave_mode}
           />
+          {/* Auch während der Einrichtung: Am Master kommt die Erst-Ansage
+              seit E2 als Auftrag aus dem Kern (Spec `ansage-im-browser`) —
+              wer mitten im Turnier Einstellungen ändert, soll die
+              Feldaufrufe weiter hören, wie bisher beim MatchAnnouncer. */}
+          {!config.slave_mode && (
+            <AnnounceJobPlayer
+              announce={config.announce}
+              azureTts={config.azure_tts}
+            />
+          )}
         </div>
       </UpdateProvider>
     );
@@ -485,6 +541,7 @@ function App() {
         <UpdateBanner />
         <AlertBanner />
         <AzureFallbackBanner />
+        <AnsageAusgabeBanner />
         <PrintWarningBanner />
         {runError && (
           <div className="bg-rose-600 px-4 py-2 text-sm font-medium text-white">
@@ -507,9 +564,13 @@ function App() {
         </AppShell>
         <Footer />
         <WalkoverPanel />
+        {/* Neue Feldbelegungen erkennt der MatchAnnouncer nur noch am
+            Ansage-Slave; am Master entsteht die Erst-Ansage im Kern und
+            kommt über den AnnounceJobPlayer (Spec `ansage-im-browser`, E2). */}
         <MatchAnnouncer
           announce={config.announce}
           azureTts={config.azure_tts}
+          erkennen={config.slave_mode}
         />
         <FreetextAnnouncer
           announce={config.announce}
@@ -518,6 +579,11 @@ function App() {
         <AnnounceJobPlayer
           announce={config.announce}
           azureTts={config.azure_tts}
+        />
+        <AnsageVertoner
+          announce={config.announce}
+          azureTts={config.azure_tts}
+          slave={config.slave_mode}
         />
         <CloudAnnounceSlave
           announce={config.announce}

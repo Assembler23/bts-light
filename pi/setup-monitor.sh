@@ -149,12 +149,17 @@ PREF="\$HOME/.config/chromium/Default/Preferences"
 
 command -v unclutter >/dev/null && unclutter -idle 0.5 -root &
 
+# --autoplay-policy: Ton ohne Tippen — die Monitor-Seiten sprechen mit
+# ?ansage=<Halle> in der Adresse die Ansagen ihrer Halle (Spec
+# ansage-im-browser, E1b). Am TV gibt es niemanden, der „Ton freischalten"
+# drückt; ohne das Flag bleibt die Seite stumm und zeigt einen Hinweis.
 exec "$BROWSER" --no-memcheck \\
   --kiosk --incognito --noerrdialogs --disable-infobars \\
   --disable-session-crashed-bubble --no-first-run \\
   --check-for-update-interval=31536000 \\
   --disable-features=Translate,TranslateUI --disable-translate \\
   --lang=de-DE --accept-lang=de-DE,de \\
+  --autoplay-policy=no-user-gesture-required \\
   "\$TARGET"
 EOF
 chmod +x "$HOME/.local/bin/bts-monitor.sh"

@@ -14,9 +14,28 @@ use crate::btp::proto;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Der häufigste Grund für „Verbindung verweigert" ist kein Netzproblem,
+/// sondern eine Einstellung: In BTP ist **Tournament Planner Network** nicht
+/// eingeschaltet (Feldtest 06.09.2026 — der Turnier-PC zeigte nur
+/// `os error 10061`, und niemand wusste, was zu tun ist). Der Hinweis steht
+/// direkt im Fehlertext, weil der überall ankommt, wo jemand hinschaut:
+/// Dashboard-Status, Verbindungstest im Assistenten, Logdatei.
+pub const TP_NETWORK_HINWEIS: &str = " — In BTP prüfen: Menü Extras → „Tournament Planner Network…\" → Häkchen „Enabled\" setzen. Steht dort ein Passwort, gehört dasselbe in BTS Light unter Einstellungen → BTP-Verbindung → „BTP-Passwort\".";
+
+/// Hängt an „Verbindung verweigert" die Anleitung an; andere Ursachen
+/// (Host nicht erreichbar, Zeitüberschreitung) bekommen keinen Rat, der
+/// dort in die Irre führte.
+fn verbindungshinweis(e: &std::io::Error) -> &'static str {
+    if e.kind() == std::io::ErrorKind::ConnectionRefused {
+        TP_NETWORK_HINWEIS
+    } else {
+        ""
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("Verbindung zu {addr} fehlgeschlagen: {source}")]
+    #[error("Verbindung zu {addr} fehlgeschlagen: {source}{}", verbindungshinweis(.source))]
     Connect {
         addr: String,
         source: std::io::Error,
@@ -74,6 +93,31 @@ mod tests {
     use super::*;
     use tokio::net::TcpListener;
 
+    /// „Verbindung verweigert" trägt die Anleitung zu Tournament Planner
+    /// Network; ein anderer Verbindungsfehler bleibt ohne den Rat.
+    #[test]
+    fn verbindung_verweigert_nennt_tournament_planner_network() {
+        let verweigert = ClientError::Connect {
+            addr: "127.0.0.1:9901".into(),
+            source: std::io::Error::from(std::io::ErrorKind::ConnectionRefused),
+        };
+        let text = verweigert.to_string();
+        assert!(
+            text.starts_with("Verbindung zu 127.0.0.1:9901 fehlgeschlagen"),
+            "{text}"
+        );
+        assert!(text.contains("Tournament Planner Network"), "{text}");
+        assert!(text.contains("Enabled"), "{text}");
+
+        let unerreichbar = ClientError::Connect {
+            addr: "10.0.0.9:9901".into(),
+            source: std::io::Error::from(std::io::ErrorKind::HostUnreachable),
+        };
+        assert!(!unerreichbar
+            .to_string()
+            .contains("Tournament Planner Network"));
+    }
+
     /// Mini-BTP-Mock: liest einen Frame (4-Byte-Header + Payload) und
     /// antwortet mit den vorgegebenen Bytes, dann schließt er die Verbindung.
     async fn spawn_mock(reply: Vec<u8>) -> String {
@@ -109,5 +153,14 @@ mod tests {
         // Auf Port 1 lauscht praktisch nie ein Dienst.
         let result = send_request("127.0.0.1", 1, b"x").await;
         assert!(matches!(result, Err(ClientError::Connect { .. })));
+        // Der ECHTE OS-Fehler (Windows 10061 / ECONNREFUSED) muss als
+        // `ConnectionRefused` ankommen — sonst bliebe die Anleitung aus.
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Tournament Planner Network"),
+            "verweigerte Verbindung trägt die Anleitung"
+        );
     }
 }

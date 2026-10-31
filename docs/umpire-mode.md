@@ -20,7 +20,8 @@ geprüfte Zähl-Logik ein.
 > erst beim Drucken aus dem BTP-Snapshot.
 
 ## Aktivieren
-Tablet → **⚙ (Header) → PIN** (Standard `0000`, einstellbar) → **„Schiri-Modus: an"**.
+Tablet → **⚙ (Header) → PIN** (Standard `0000`, einstellbar; innerhalb der
+Fünf-Minuten-Freigabe nach einer Eingabe entfällt sie) → **„Schiri-Modus: an"**.
 Opt-in pro Tablet, lokal gespeichert (`localStorage`). Es erscheint eine **immer
 sichtbare Ansage-Leiste**.
 
@@ -75,6 +76,10 @@ Erfassbar sind sie **auch in Pausen und vor dem ersten Ballwechsel** — dort
 passieren die meisten davon. Ein Undo nimmt Ereignisse jenseits des neuen
 Schnitts ausdrücklich zurück; sie verschwinden nicht, sondern erscheinen auf dem
 Zettel **durchgestrichen**. Für einen Archivbeleg ist das ehrlicher.
+
+Nach **⇄ Seiten tauschen / Mannschaften tauschen** (seit v0.9.319) startet die
+Ansage neutral mit dem Stand — ohne „Aufschlagwechsel" —, wie nach einem Undo.
+Die Namen in der Ansage folgen der neuen Zuordnung von selbst.
 
 ## Formulierungen anpassen
 Alle Texte stehen gebündelt in den `ump*`-Funktionen in `tablet.html`

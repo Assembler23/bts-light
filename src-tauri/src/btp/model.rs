@@ -7,6 +7,7 @@
 //! `IsMatch = true`. Siehe `docs/btp_protocol.md`.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::Serialize;
 
@@ -82,6 +83,71 @@ impl Discipline {
         }
     }
 
+    /// Rückfall, wenn BTP keine bekannte `GenderID` liefert: die Disziplin
+    /// aus dem Event-/Draw-Namen lesen. Ein DBV-Jugendturnier (10/2026,
+    /// „JE U15", „MD U17") trug Werte jenseits von 1–3 — die Disziplin war
+    /// „unbekannt", die Ansage ließ Disziplin und Klasse ganz weg.
+    /// Erkannt werden die Kürzel (HE … MD, MX/GD) und die ausgeschriebenen
+    /// Formen, auch zweiteilig („Jungen Einzel"). „U11 offenes Doppel" nennt
+    /// kein Geschlecht und bleibt `Unknown`.
+    ///
+    /// Dazu die englischen Kürzel MS/WS/WD/XD/MIX. **„MD" ist doppeldeutig:**
+    /// im deutschen Jugend-Schema „Mädchendoppel", im englischen „Men's
+    /// Doubles". Das entscheidet nicht der einzelne Name, sondern das ganze
+    /// Turnier — `englisch` sagt, ob seine Events das englische Schema benutzen
+    /// ([`englisches_schema`]).
+    fn from_name(name: &str, englisch: bool) -> Discipline {
+        let mut maennlich = false;
+        let mut weiblich = false;
+        let mut einzel = false;
+        let mut doppel = false;
+        for tok in name
+            .split(|c: char| c.is_whitespace() || c == '-')
+            .map(str::to_lowercase)
+        {
+            match tok.as_str() {
+                "md" if englisch => return Discipline::MensDoubles,
+                "he" | "je" | "ms" | "herreneinzel" | "jungeneinzel" => {
+                    return Discipline::MensSingles
+                }
+                "de" | "me" | "ws" | "dameneinzel" | "mädcheneinzel" | "maedcheneinzel" => {
+                    return Discipline::WomensSingles
+                }
+                "hd" | "jd" | "herrendoppel" | "jungendoppel" => return Discipline::MensDoubles,
+                "dd" | "md" | "wd" | "damendoppel" | "mädchendoppel" | "maedchendoppel" => {
+                    return Discipline::WomensDoubles
+                }
+                "mx" | "gd" | "xd" | "mix" | "mixed" | "gemischtes" => return Discipline::Mixed,
+                "herren" | "jungen" => maennlich = true,
+                "damen" | "mädchen" | "maedchen" => weiblich = true,
+                "einzel" => einzel = true,
+                "doppel" => doppel = true,
+                _ => {}
+            }
+        }
+        match (maennlich, weiblich, einzel, doppel) {
+            (true, false, true, false) => Discipline::MensSingles,
+            (false, true, true, false) => Discipline::WomensSingles,
+            (true, false, false, true) => Discipline::MensDoubles,
+            (false, true, false, true) => Discipline::WomensDoubles,
+            _ => Discipline::Unknown,
+        }
+    }
+
+    /// BTP-Felder zuerst; nur wenn sie nichts Bekanntes ergeben, die Namen
+    /// (Event vor Draw) — siehe [`Discipline::from_name`].
+    fn resolve(game_type_id: i64, gender_id: i64, names: &[&str], englisch: bool) -> Discipline {
+        let aus_btp = Discipline::from_event(game_type_id, gender_id);
+        if aus_btp != Discipline::Unknown {
+            return aus_btp;
+        }
+        names
+            .iter()
+            .map(|n| Discipline::from_name(n, englisch))
+            .find(|d| *d != Discipline::Unknown)
+            .unwrap_or(Discipline::Unknown)
+    }
+
     /// snake_case-Schlüssel der Disziplin – identisch zur serde-Form, für
     /// die Wire-Typen ([`relay_proto::MatchBrief`]). Der Court-Monitor und
     /// die Sprachansage lokalisieren ihn selbst.
@@ -152,6 +218,10 @@ pub struct BtpEntry {
     /// sich nicht auflösen lassen, werden verworfen (sonst stünden namenlose
     /// Einträge auf der öffentlichen Check-In-Seite).
     pub players: Vec<BtpPlayer>,
+    /// Setzplatz im **Hauptfeld** (Stage-Typ 1) als fertiger Text („1",
+    /// „3/4") — für den Check-In, der nur das Hauptfeld kennt (ADR 0059).
+    /// `None` = ungesetzt.
+    pub seed: Option<String>,
 }
 
 /// Ein Standort/eine Halle des Turniers (BTP `Location`).
@@ -292,8 +362,9 @@ pub struct BtpMatch {
     /// sagt allein dieses Feld: Es ist die Reihenfolge der Spielliste, die
     /// die Turnierleitung ausdruckt und abarbeitet.
     ///
-    /// `None`, wenn das Turnier sie nicht pflegt — dann bleibt es bei der
-    /// Spielnummer.
+    /// `None` bei BTP-Wert 0. Ein solches Spiel steht in BTP **vor** den
+    /// geordneten seines Zeitfensters; untereinander entscheiden Auslosung
+    /// und Spielnummer (`assign::sort_key_parts`).
     pub display_order: Option<i64>,
     /// Zeilenfarbe aus BTPs Menü „Hervorheben" (`Match.Highlight`, Spec
     /// `tl-zeilenfarbe`): `0` = keine, `1`–`6` = Gelb, Pink, Orange, Blau,
@@ -340,6 +411,12 @@ pub struct BtpMatch {
     pub entry1_id: i64,
     /// EntryID von Team 2 (0, falls der Platz noch offen ist).
     pub entry2_id: i64,
+    /// Setzplatz von Team 1 als fertiger Text („1", „3/4") — die Setzung
+    /// an der Stage dieses Draws, sonst die Hauptfeld-Setzung derselben
+    /// Meldung (ADR 0059). `None` = ungesetzt oder Platz noch offen.
+    pub team1_seed: Option<String>,
+    /// Setzplatz von Team 2, Regel wie `team1_seed`.
+    pub team2_seed: Option<String>,
     /// Court-Name, falls dem Match ein Court zugewiesen ist. Achtung: bei
     /// Mehr-Hallen-Turnieren nicht eindeutig – für Identität `court_id`.
     pub court: Option<String>,
@@ -500,6 +577,7 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
     let disciplines = draw_discipline_map(t);
     let classes = draw_class_map(t);
     let scoring = scoring_by_draw(t);
+    let seeds = SeedIndex::aus(t);
 
     // Court-Namen nach CourtID sortiert – das ergibt die BTP-Anlegereihenfolge.
     let mut court_pairs: Vec<(&i64, &String)> = courts.iter().collect();
@@ -520,12 +598,13 @@ pub fn parse_snapshot(nodes: &[Node]) -> Result<BtpSnapshot, ModelError> {
             &disciplines,
             &classes,
             &scoring,
+            &seeds,
         ),
         courts: court_names,
         locations: location_list(t),
         court_infos: court_list(t),
         events: event_list(t),
-        entries: entry_list(t, &players),
+        entries: entry_list(t, &players, &seeds),
         officials: official_list(t),
     })
 }
@@ -590,17 +669,21 @@ fn event_list(t: &[Node]) -> Vec<BtpEvent> {
     let Some(events) = xml::find(t, "Events") else {
         return Vec::new();
     };
+    let englisch = englisches_schema(t);
     let mut list: Vec<BtpEvent> = events
         .children()
         .iter()
         .filter_map(|e| {
             let id = child_int(e, "ID")?;
+            let name = child_str(e, "Name").unwrap_or_default();
             Some(BtpEvent {
                 id,
-                name: child_str(e, "Name").unwrap_or_default().to_string(),
-                discipline: Discipline::from_event(
+                name: name.to_string(),
+                discipline: Discipline::resolve(
                     child_int(e, "GameTypeID").unwrap_or_default(),
                     child_int(e, "GenderID").unwrap_or_default(),
+                    &[name],
+                    englisch,
                 ),
             })
         })
@@ -613,9 +696,96 @@ fn event_list(t: &[Node]) -> Vec<BtpEvent> {
 /// (`tests/fixtures/btp-tournament*.bin`): 1 = Hauptfeld, 2 = Qualifikation,
 /// 8 = Playoff, 9998 = Reserve, 9999 = Ausschließen. Der **Typ** ist stabil —
 /// der Stage-**Name** ist frei benennbar und taugt nicht zum Filtern.
+const STAGE_HAUPTFELD: i64 = 1;
 const STAGE_QUALIFIKATION: i64 = 2;
 const STAGE_RESERVE: i64 = 9998;
 const STAGE_AUSSCHLIESSEN: i64 = 9999;
+
+/// Setzplatz als Anzeigetext aus BTPs `StageEntry.Seed1`/`Seed2` — die
+/// **einzige** Formatierungsstelle (ADR 0059); alle Abnehmer setzen nur noch
+/// die Klammern. `Seed1` ist der Platz bzw. die Untergrenze, `Seed2` die
+/// Obergrenze eines geteilten Platzes (gemessen 12.10.2026).
+///
+/// Werte ≤ 0 gelten als fehlend. Bewusst großzügig (Spec-Entscheidung): Ein
+/// Eintrag mit nur `Seed2` zeigt diesen Wert, eine verkehrt herum gelieferte
+/// Spanne wird aufsteigend gezeigt.
+pub fn seed_text(seed1: Option<i64>, seed2: Option<i64>) -> Option<String> {
+    let lo = seed1.filter(|&v| v > 0);
+    let hi = seed2.filter(|&v| v > 0);
+    match (lo, hi) {
+        (Some(a), Some(b)) if a == b => Some(a.to_string()),
+        (Some(a), Some(b)) => Some(format!("{}/{}", a.min(b), a.max(b))),
+        (Some(a), None) | (None, Some(a)) => Some(a.to_string()),
+        (None, None) => None,
+    }
+}
+
+/// Setzplätze des Turniers, einmal je Snapshot aus `StageEntries` gelesen.
+///
+/// BTP führt die Setzung **je Stage**: Eine Meldung, die aus der Gruppe ins
+/// Playoff kommt, trägt sie an beiden `StageEntry`-Einträgen. Ein Spiel zeigt
+/// deshalb die Setzung der Stage seines Draws und fällt nur ohne eine solche
+/// auf die Hauptfeld-Setzung zurück (Spec `setzplaetze-anzeigen`).
+#[derive(Debug, Default)]
+struct SeedIndex {
+    /// (EntryID, StageID) → Text.
+    by_stage: HashMap<(i64, i64), String>,
+    /// EntryID → Text an der Stage mit Typ Hauptfeld.
+    main: HashMap<i64, String>,
+    /// DrawID → StageID.
+    draw_stage: HashMap<i64, i64>,
+}
+
+impl SeedIndex {
+    fn aus(t: &[Node]) -> Self {
+        let mut stage_type: HashMap<i64, i64> = HashMap::new();
+        if let Some(group) = xml::find(t, "Stages") {
+            for s in group.children() {
+                if let (Some(id), Some(ty)) = (child_int(s, "ID"), child_int(s, "StageType")) {
+                    stage_type.insert(id, ty);
+                }
+            }
+        }
+        let mut index = SeedIndex::default();
+        if let Some(group) = xml::find(t, "Draws") {
+            for d in group.children() {
+                if let (Some(id), Some(stage)) = (child_int(d, "ID"), child_int(d, "StageID")) {
+                    index.draw_stage.insert(id, stage);
+                }
+            }
+        }
+        if let Some(group) = xml::find(t, "StageEntries") {
+            for se in group.children() {
+                let (Some(entry), Some(stage)) =
+                    (child_int(se, "EntryID"), child_int(se, "StageID"))
+                else {
+                    continue;
+                };
+                let Some(text) = seed_text(child_int(se, "Seed1"), child_int(se, "Seed2")) else {
+                    continue;
+                };
+                if stage_type.get(&stage) == Some(&STAGE_HAUPTFELD) {
+                    index.main.insert(entry, text.clone());
+                }
+                index.by_stage.insert((entry, stage), text);
+            }
+        }
+        index
+    }
+
+    /// Setzung einer Spielseite: erst die Stage des Draws, dann das
+    /// Hauptfeld. Ein offener Platz (`entry_id == 0`) ist nie gesetzt.
+    fn fuer(&self, draw_id: i64, entry_id: i64) -> Option<String> {
+        if entry_id == 0 {
+            return None;
+        }
+        self.draw_stage
+            .get(&draw_id)
+            .and_then(|stage| self.by_stage.get(&(entry_id, *stage)))
+            .or_else(|| self.main.get(&entry_id))
+            .cloned()
+    }
+}
 
 /// EntryIDs, die NICHT aufs Hauptfeld gehören (Filter der Check-In-Liste).
 ///
@@ -756,6 +926,34 @@ fn non_main_stage_entries(t: &[Node]) -> HashSet<i64> {
     raus
 }
 
+/// Zuletzt protokollierte Zahl gefilterter Meldungen — die Zeile erscheint
+/// nur, wenn sich die Zahl aendert (auch zurueck auf 0, denn dass der Filter
+/// nicht mehr greift, ist genauso eine Nachricht wie dass er greift).
+static HAUPTFELD_FILTER_GEMELDET: AtomicUsize = AtomicUsize::new(0);
+
+/// Meldet die Zahl der aus der Check-In-Liste gefilterten Meldungen, wenn sie
+/// sich seit der letzten Meldung geaendert hat.
+fn melde_hauptfeld_filter(gefiltert: usize) {
+    melde_hauptfeld_filter_mit(&HAUPTFELD_FILTER_GEMELDET, gefiltert);
+}
+
+/// Die Regel dahinter mit austauschbarem Merker, damit der Test nicht am
+/// prozessweiten Zaehler haengt (Tests laufen parallel). Liefert `true`, wenn
+/// eine Zeile geschrieben wurde.
+fn melde_hauptfeld_filter_mit(merker: &AtomicUsize, gefiltert: usize) -> bool {
+    let vorher = merker.swap(gefiltert, Ordering::Relaxed);
+    if vorher == gefiltert {
+        return false;
+    }
+    tracing::info!(
+        anzahl = gefiltert,
+        vorher,
+        "Meldungen ausserhalb des Hauptfelds aus der Check-In-Liste gefiltert \
+         (Qualifikation/Reserve/Ausschliessen)"
+    );
+    true
+}
+
 /// Meldeliste des Turniers (BTP `Entries`) mit aufgelösten Spielern, nach
 /// EntryID sortiert.
 ///
@@ -768,27 +966,24 @@ fn non_main_stage_entries(t: &[Node]) -> HashSet<i64> {
 /// verworfen werden Meldungen, die laut Stage-Zuordnung nicht aufs Hauptfeld
 /// gehören ([`non_main_stage_entries`]) — Reservisten, Ausgeschlossene und
 /// reine Quali-Platzierungen haben auf der Check-In-Liste nichts verloren.
-fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>) -> Vec<BtpEntry> {
+fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>, seeds: &SeedIndex) -> Vec<BtpEntry> {
     let Some(entries) = xml::find(t, "Entries") else {
         return Vec::new();
     };
     let nicht_hauptfeld = non_main_stage_entries(t);
-    // Einmal gesammelt protokollieren, warum Gemeldete auf der Check-In-Seite
-    // fehlen — sonst faellt es niemandem auf (dieselbe Lehre wie beim
-    // Anonymisierungs-Filter auf der badhub-Seite).
+    // Gesammelt protokollieren, warum Gemeldete auf der Check-In-Seite fehlen
+    // — sonst faellt es niemandem auf (dieselbe Lehre wie beim
+    // Anonymisierungs-Filter auf der badhub-Seite). Aber nur, wenn sich die
+    // Zahl aendert: Der Parser laeuft mit jedem BTP-Abruf, also alle 5 s, und
+    // dieselbe Zeile fuellte sonst mehr als die Haelfte des Tageslogs
+    // (Turnier 12./13.09.2026: 10 000 von 17 000 Zeilen).
     let gefiltert = entries
         .children()
         .iter()
         .filter_map(|e| child_int(e, "ID"))
         .filter(|id| nicht_hauptfeld.contains(id))
         .count();
-    if gefiltert > 0 {
-        tracing::info!(
-            anzahl = gefiltert,
-            "Meldungen ausserhalb des Hauptfelds aus der Check-In-Liste gefiltert \
-             (Qualifikation/Reserve/Ausschliessen)"
-        );
-    }
+    melde_hauptfeld_filter(gefiltert);
     let mut list: Vec<BtpEntry> = entries
         .children()
         .iter()
@@ -827,6 +1022,7 @@ fn entry_list(t: &[Node], players: &HashMap<i64, BtpPlayer>) -> Vec<BtpEntry> {
                 id,
                 event_id,
                 players: resolved,
+                seed: seeds.main.get(&id).cloned(),
             })
         })
         .collect();
@@ -937,13 +1133,34 @@ fn draw_map(t: &[Node]) -> HashMap<i64, String> {
 /// Kürzel (≤ 4 Zeichen, z. B. „A", „B2", „U15"). Alles andere — insbesondere
 /// Gruppen-/Auslosungsnamen wie „Gruppe 3" oder „Hauptrunde" — ergibt Leer:
 /// Die Ansage nennt nach Nutzer-Vorgabe NUR Disziplin + Klasse, nie Gruppen.
+///
+/// Getrennt wird an Leerzeichen **und** Bindestrichen: Die BBB-Ranglisten
+/// nennen ihre Events „HD-A", „MX-C" — Disziplin und Klasse in einem Wort.
+///
+/// Jugendturniere heißen „JE U15", „MD U17" oder „U11 offenes Doppel" —
+/// deshalb stehen auch die Jungen-/Mädchen-Kürzel und „offenes" in der
+/// Liste, sonst bliebe neben der Altersklasse ein zweiter Rest übrig.
+/// Ebenso die englischen Kürzel (MS, WS, WD, XD, MIX): „MS A" ergäbe sonst
+/// zwei Reste und keine Klasse.
 fn class_from(name: &str) -> String {
     const DISCIPLINE_TOKENS: &[&str] = &[
         "herreneinzel",
         "dameneinzel",
         "herrendoppel",
         "damendoppel",
+        "jungeneinzel",
+        "jungendoppel",
+        "mädcheneinzel",
+        "mädchendoppel",
+        "maedcheneinzel",
+        "maedchendoppel",
+        "herren",
+        "damen",
+        "jungen",
+        "mädchen",
+        "maedchen",
         "gemischtes",
+        "offenes",
         "mixed",
         "einzel",
         "doppel",
@@ -953,9 +1170,19 @@ fn class_from(name: &str) -> String {
         "dd",
         "gd",
         "mx",
+        "je",
+        "jd",
+        "me",
+        "md",
+        "ms",
+        "ws",
+        "wd",
+        "xd",
+        "mix",
     ];
     let rest: Vec<&str> = name
-        .split_whitespace()
+        .split(|c: char| c.is_whitespace() || c == '-')
+        .filter(|tok| !tok.is_empty())
         .filter(|tok| !DISCIPLINE_TOKENS.contains(&tok.to_lowercase().as_str()))
         .collect();
     match rest.as_slice() {
@@ -964,6 +1191,23 @@ fn class_from(name: &str) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// Benutzt das Turnier das englische Kürzel-Schema (MS, WS, WD, XD)?
+///
+/// Nur dafür da, „MD" aufzulösen: Ein Turnier mit MS/WS/WD/XD meint mit MD
+/// „Men's Doubles", ein deutsches Jugendturnier (JE/ME/JD/MD) „Mädchendoppel".
+/// Deutsche Erwachsenenturniere heißen HD, nie MD — ohne englisches Kürzel
+/// bleibt es deshalb beim Mädchendoppel. Geprüft werden Event- **und**
+/// Draw-Namen, weil manche Turniere die Disziplin nur am Draw tragen.
+fn englisches_schema(t: &[Node]) -> bool {
+    const ENGLISCH: &[&str] = &["ms", "ws", "wd", "xd"];
+    ["Events", "Draws"].iter().any(|gruppe| {
+        id_name_map(t, gruppe).values().any(|name| {
+            name.split(|c: char| c.is_whitespace() || c == '-')
+                .any(|tok| ENGLISCH.contains(&tok.to_lowercase().as_str()))
+        })
+    })
 }
 
 /// Klassen-Kürzel eines Draws: bevorzugt aus dem Event-Namen (trägt die
@@ -999,16 +1243,20 @@ fn draw_class_map(t: &[Node]) -> HashMap<i64, String> {
 }
 
 /// DrawID → Disziplin. BTP führt die Disziplin am Event (`GameTypeID` +
-/// `GenderID`); jeder Draw verweist per `EventID` auf sein Event.
+/// `GenderID`); jeder Draw verweist per `EventID` auf sein Event. Ergeben
+/// die Felder nichts Bekanntes, entscheiden Event- und Draw-Name
+/// ([`Discipline::resolve`]).
 fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
-    // EventID → Disziplin.
-    let mut events: HashMap<i64, Discipline> = HashMap::new();
+    let englisch = englisches_schema(t);
+    // EventID → (GameTypeID, GenderID, Name).
+    let mut events: HashMap<i64, (i64, i64, String)> = HashMap::new();
     if let Some(group) = xml::find(t, "Events") {
         for e in group.children() {
             if let Some(id) = child_int(e, "ID") {
                 let game = child_int(e, "GameTypeID").unwrap_or(0);
                 let gender = child_int(e, "GenderID").unwrap_or(0);
-                events.insert(id, Discipline::from_event(game, gender));
+                let name = child_str(e, "Name").unwrap_or_default().to_string();
+                events.insert(id, (game, gender, name));
             }
         }
     }
@@ -1017,13 +1265,14 @@ fn draw_discipline_map(t: &[Node]) -> HashMap<i64, Discipline> {
     if let Some(group) = xml::find(t, "Draws") {
         for d in group.children() {
             if let (Some(draw_id), Some(event_id)) = (child_int(d, "ID"), child_int(d, "EventID")) {
-                map.insert(
-                    draw_id,
-                    events
-                        .get(&event_id)
-                        .copied()
-                        .unwrap_or(Discipline::Unknown),
-                );
+                let draw_name = child_str(d, "Name").unwrap_or_default();
+                let disziplin = match events.get(&event_id) {
+                    Some((game, gender, name)) => {
+                        Discipline::resolve(*game, *gender, &[name, draw_name], englisch)
+                    }
+                    None => Discipline::Unknown,
+                };
+                map.insert(draw_id, disziplin);
             }
         }
     }
@@ -1112,6 +1361,7 @@ fn parse_matches(
     disciplines: &HashMap<i64, Discipline>,
     classes: &HashMap<i64, String>,
     scoring: &HashMap<i64, ScoringFormat>,
+    seeds: &SeedIndex,
 ) -> Vec<BtpMatch> {
     let mut out = Vec::new();
     let Some(matches) = xml::find(t, "Matches") else {
@@ -1178,6 +1428,8 @@ fn parse_matches(
             planned_time: parse_planned_time(m),
             team1,
             team2,
+            team1_seed: seeds.fuer(draw_id.unwrap_or_default(), entry1_id),
+            team2_seed: seeds.fuer(draw_id.unwrap_or_default(), entry2_id),
             entry1_id,
             entry2_id,
             court,
@@ -1332,6 +1584,36 @@ mod tests {
         assert!(matches!(parse_snapshot(&[]), Err(ModelError::NoTournament)));
     }
 
+    /// Die Filter-Zeile erscheint nur bei einer Aenderung der Zahl — der
+    /// Parser laeuft alle 5 s, und dieselbe Zeile fuellte sonst mehr als die
+    /// Haelfte des Tageslogs (Turnier 12./13.09.2026).
+    #[test]
+    fn hauptfeld_filter_meldet_nur_bei_aenderung() {
+        let merker = AtomicUsize::new(0);
+        assert!(
+            !melde_hauptfeld_filter_mit(&merker, 0),
+            "nichts gefiltert, nie gemeldet"
+        );
+        assert!(
+            melde_hauptfeld_filter_mit(&merker, 21),
+            "erstes Greifen wird gemeldet"
+        );
+        assert!(
+            !melde_hauptfeld_filter_mit(&merker, 21),
+            "gleiche Zahl bleibt still"
+        );
+        assert!(!melde_hauptfeld_filter_mit(&merker, 21));
+        assert!(
+            melde_hauptfeld_filter_mit(&merker, 24),
+            "Aenderung wird gemeldet"
+        );
+        assert!(
+            melde_hauptfeld_filter_mit(&merker, 0),
+            "Rueckgang auf 0 wird gemeldet"
+        );
+        assert!(!melde_hauptfeld_filter_mit(&merker, 0));
+    }
+
     #[test]
     fn class_label_extracts_short_class_tokens() {
         // Event-Name trägt die Klasse (auch in der Gruppenphase).
@@ -1343,6 +1625,232 @@ mod tests {
         // Ohne Event-Klasse greift der Draw-Name (K.-o.-Phase „HE A").
         assert_eq!(class_label("Herreneinzel", "HE A"), "A");
         assert_eq!(class_label("", "HE B"), "B");
+    }
+
+    #[test]
+    fn class_label_reads_hyphenated_event_names() {
+        // BBB-Ranglisten 09/2026: Events und K.-o.-Draws heißen „HD-A",
+        // „DD-B", „MX-C" — Disziplin und Klasse mit Bindestrich in EINEM
+        // Wort. Ohne Bindestrich-Trennung blieb die Klasse leer, die
+        // Turnierleitung zeigte nur „HD".
+        assert_eq!(class_label("HD-A", "Gruppe A"), "A");
+        assert_eq!(class_label("DD-B", "DD-B"), "B");
+        assert_eq!(class_label("MX-E", ""), "E");
+        assert_eq!(class_label("", "HE-C"), "C");
+        assert_eq!(class_label("Herrendoppel-U15", ""), "U15");
+        // Weiterhin kein Kürzel, wenn nach der Trennung mehr als ein Rest bleibt.
+        assert_eq!(class_label("U15 HE-A", ""), "");
+    }
+
+    #[test]
+    fn class_label_reads_youth_event_names() {
+        // DBV-Jugendturnier 10/2026: Events heißen „JE U15", „MD U17",
+        // „U11 offenes Doppel". JE/JD/ME/MD standen nicht in der Liste,
+        // also blieben zwei Reste übrig und die Altersklasse ging verloren.
+        for (event, klasse) in [
+            ("JE U11", "U11"),
+            ("JD U13", "U13"),
+            ("ME U15", "U15"),
+            ("MD U17", "U17"),
+            ("MX U19", "U19"),
+            ("U11 offenes Doppel", "U11"),
+            ("Jungeneinzel U15", "U15"),
+            ("Mädchendoppel U13", "U13"),
+            ("Maedcheneinzel U13", "U13"),
+            ("Jungen Doppel U17", "U17"),
+            ("JE-U15", "U15"),
+        ] {
+            assert_eq!(class_label(event, "Gruppe 2"), klasse, "{event}");
+        }
+        // Ohne Event greift der Draw-Name.
+        assert_eq!(class_label("", "ME U19"), "U19");
+        // Nur die Disziplin, keine Klasse.
+        assert_eq!(class_label("JE", "JE"), "");
+    }
+
+    #[test]
+    fn discipline_falls_back_to_youth_event_names() {
+        // DBV-Jugendturnier 10/2026: GenderID jenseits von 1–3 → ohne
+        // Rückfall „unbekannt", die Ansage ließ die Disziplin ganz weg.
+        for (name, erwartet) in [
+            ("JE U15", Discipline::MensSingles),
+            ("ME U11", Discipline::WomensSingles),
+            ("JD U17", Discipline::MensDoubles),
+            ("MD U13", Discipline::WomensDoubles),
+            ("MX U19", Discipline::Mixed),
+            ("JE-U15", Discipline::MensSingles),
+            ("Jungeneinzel U15", Discipline::MensSingles),
+            ("Mädchendoppel U13", Discipline::WomensDoubles),
+            ("Jungen Doppel U17", Discipline::MensDoubles),
+            ("Damen Einzel O35", Discipline::WomensSingles),
+            ("HD-A", Discipline::MensDoubles),
+            // Kein Geschlecht im Namen → bleibt unbekannt.
+            ("U11 offenes Doppel", Discipline::Unknown),
+            ("Gruppe 3", Discipline::Unknown),
+        ] {
+            assert_eq!(
+                Discipline::resolve(2, 4, &[name], false),
+                erwartet,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn discipline_prefers_btp_fields_over_the_name() {
+        // Bekannte BTP-Werte haben Vorrang — auch gegen einen irreführenden Namen.
+        assert_eq!(
+            Discipline::resolve(1, 2, &["JE U15"], false),
+            Discipline::WomensSingles
+        );
+        // Event-Name vor Draw-Name; leerer Event-Name → Draw-Name.
+        assert_eq!(
+            Discipline::resolve(0, 0, &["", "MD U17 Gruppe 1"], false),
+            Discipline::WomensDoubles
+        );
+        assert_eq!(Discipline::resolve(0, 0, &[], false), Discipline::Unknown);
+    }
+
+    #[test]
+    fn discipline_reads_english_codes() {
+        // Englisch benannte Turniere: MS/WS/MD/WD/XD, dazu MIX. Ohne
+        // bekannte GenderID entscheidet der Name.
+        for (name, erwartet) in [
+            ("MS A", Discipline::MensSingles),
+            ("WS", Discipline::WomensSingles),
+            ("MD-B", Discipline::MensDoubles),
+            ("WD C", Discipline::WomensDoubles),
+            ("XD A", Discipline::Mixed),
+            ("MIX", Discipline::Mixed),
+            ("GD B", Discipline::Mixed),
+        ] {
+            assert_eq!(Discipline::resolve(0, 0, &[name], true), erwartet, "{name}");
+        }
+        // XD/MIX/MS/WS/WD sind eindeutig — auch ohne englisches Schema.
+        assert_eq!(Discipline::resolve(0, 0, &["XD"], false), Discipline::Mixed);
+        assert_eq!(
+            Discipline::resolve(0, 0, &["MIX U15"], false),
+            Discipline::Mixed
+        );
+        assert_eq!(
+            Discipline::resolve(0, 0, &["MS"], false),
+            Discipline::MensSingles
+        );
+    }
+
+    #[test]
+    fn md_haengt_am_schema_des_turniers() {
+        // Deutsches Jugendturnier: MD = Mädchendoppel; englisches: Men's Doubles.
+        assert_eq!(
+            Discipline::resolve(0, 0, &["MD U17"], false),
+            Discipline::WomensDoubles
+        );
+        assert_eq!(
+            Discipline::resolve(0, 0, &["MD A"], true),
+            Discipline::MensDoubles
+        );
+        // Bekannte BTP-Felder schlagen das Schema.
+        assert_eq!(
+            Discipline::resolve(2, 2, &["MD"], true),
+            Discipline::WomensDoubles
+        );
+    }
+
+    #[test]
+    fn englisches_schema_erkennt_das_turnier() {
+        let turnier = |namen: &[&str]| {
+            vec![Node::group(
+                "Events",
+                namen
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| {
+                        Node::group(
+                            "Event",
+                            vec![Node::integer("ID", i as i64 + 1), Node::string("Name", *n)],
+                        )
+                    })
+                    .collect(),
+            )]
+        };
+        assert!(englisches_schema(&turnier(&["MS A", "MD A", "XD A"])));
+        assert!(englisches_schema(&turnier(&["WD-B"])));
+        assert!(!englisches_schema(&turnier(&[
+            "JE U15", "MD U17", "MX U19"
+        ])));
+        assert!(!englisches_schema(&turnier(&["HE A", "HD A", "GD A"])));
+        // MIX ist auch deutsch gebräuchlich — es schaltet das Schema nicht um.
+        assert!(!englisches_schema(&turnier(&["MIX A", "MD U17"])));
+        assert!(!englisches_schema(&[]));
+
+        // Manche Turniere tragen die Disziplin nur am Draw.
+        let nur_draws = vec![Node::group(
+            "Draws",
+            vec![Node::group(
+                "Draw",
+                vec![Node::integer("ID", 1), Node::string("Name", "XD A")],
+            )],
+        )];
+        assert!(englisches_schema(&nur_draws));
+    }
+
+    #[test]
+    fn md_im_englischen_turnier_kommt_als_herrendoppel_an() {
+        // Ende zu Ende über draw_discipline_map: unbekannte GenderID, das
+        // Schema kommt aus einem ANDEREN Event desselben Turniers.
+        let event = |id: i64, name: &str| {
+            Node::group(
+                "Event",
+                vec![
+                    Node::integer("ID", id),
+                    Node::string("Name", name),
+                    Node::integer("GameTypeID", 2),
+                    Node::integer("GenderID", 9),
+                ],
+            )
+        };
+        let draw = |id: i64, event_id: i64| {
+            Node::group(
+                "Draw",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", event_id),
+                    Node::string("Name", "Gruppe 1"),
+                ],
+            )
+        };
+        let t = vec![
+            Node::group("Events", vec![event(1, "MS A"), event(2, "MD A")]),
+            Node::group("Draws", vec![draw(10, 1), draw(20, 2)]),
+        ];
+        let map = draw_discipline_map(&t);
+        assert_eq!(map.get(&10), Some(&Discipline::MensSingles));
+        assert_eq!(map.get(&20), Some(&Discipline::MensDoubles));
+
+        // Dasselbe ohne englisches Kürzel: MD bleibt Mädchendoppel.
+        let t = vec![
+            Node::group("Events", vec![event(1, "JE U15"), event(2, "MD U15")]),
+            Node::group("Draws", vec![draw(10, 1), draw(20, 2)]),
+        ];
+        assert_eq!(
+            draw_discipline_map(&t).get(&20),
+            Some(&Discipline::WomensDoubles)
+        );
+    }
+
+    #[test]
+    fn class_label_reads_english_event_names() {
+        for (event, klasse) in [
+            ("MS A", "A"),
+            ("WS-B", "B"),
+            ("MD C", "C"),
+            ("WD A", "A"),
+            ("XD-D", "D"),
+            ("MIX E", "E"),
+            ("GD U15", "U15"),
+        ] {
+            assert_eq!(class_label(event, "Gruppe 1"), klasse, "{event}");
+        }
     }
 
     #[test]
@@ -2644,5 +3152,216 @@ mod tests {
         )];
         let snap = parse_snapshot(&tree).unwrap();
         assert_eq!(snap.rest_minutes, Some(20));
+    }
+
+    // --- Setzplätze (Spec setzplaetze-anzeigen, ADR 0059) ----------------
+
+    #[test]
+    fn seed_text_formatiert_alle_randfaelle() {
+        assert_eq!(seed_text(Some(1), None).as_deref(), Some("1"));
+        assert_eq!(seed_text(Some(3), Some(4)).as_deref(), Some("3/4"));
+        assert_eq!(seed_text(Some(5), Some(8)).as_deref(), Some("5/8"));
+        // Verkehrt herum geliefert → aufsteigend gezeigt.
+        assert_eq!(seed_text(Some(4), Some(3)).as_deref(), Some("3/4"));
+        assert_eq!(seed_text(Some(3), Some(3)).as_deref(), Some("3"));
+        // Ausreißer aus der Messung: nur Seed2 → großzügig angezeigt.
+        assert_eq!(seed_text(None, Some(6)).as_deref(), Some("6"));
+        assert_eq!(seed_text(None, None), None);
+        assert_eq!(seed_text(Some(0), None), None);
+        assert_eq!(seed_text(Some(0), Some(0)), None);
+        assert_eq!(seed_text(Some(-1), Some(2)).as_deref(), Some("2"));
+    }
+
+    /// Turnier mit Hauptfeld (Stage 1, Draw 10), Qualifikation (Stage 2,
+    /// Draw 20) und Playoff (Stage 5, Draw 30), vier Einzel-Meldungen.
+    /// `setzungen`: (EntryID, StageID, Seed1, Seed2). Spiel 1 (Hauptfeld)
+    /// und Spiel 3 (Playoff) sind 101 gegen 102, Spiel 2 (Quali) 104 gegen
+    /// 103, Spiel 4 (Playoff) hat einen offenen zweiten Platz.
+    fn turnier_mit_setzungen(setzungen: Vec<(i64, i64, Option<i64>, Option<i64>)>) -> Vec<Node> {
+        let stage = |id: i64, typ: i64| {
+            Node::group(
+                "Stage",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", 1),
+                    Node::integer("StageType", typ),
+                ],
+            )
+        };
+        let draw = |id: i64, stage: i64| {
+            Node::group(
+                "Draw",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", 1),
+                    Node::integer("StageID", stage),
+                ],
+            )
+        };
+        let spieler = |id: i64, name: &str| {
+            Node::group(
+                "Player",
+                vec![Node::integer("ID", id), Node::string("Lastname", name)],
+            )
+        };
+        let entry = |id: i64, player: i64| {
+            Node::group(
+                "Entry",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("EventID", 1),
+                    Node::integer("Player1ID", player),
+                ],
+            )
+        };
+        let slot = |draw: i64, planning: i64, entry: i64| {
+            Node::group(
+                "Match",
+                vec![
+                    Node::integer("DrawID", draw),
+                    Node::integer("PlanningID", planning),
+                    Node::integer("EntryID", entry),
+                ],
+            )
+        };
+        let spiel = |id: i64, draw: i64, from1: i64, from2: i64| {
+            Node::group(
+                "Match",
+                vec![
+                    Node::integer("ID", id),
+                    Node::integer("DrawID", draw),
+                    Node::Item {
+                        id: "IsMatch".to_string(),
+                        value: Value::Bool(true),
+                    },
+                    Node::integer("From1", from1),
+                    Node::integer("From2", from2),
+                ],
+            )
+        };
+        let stage_entries: Vec<Node> = setzungen
+            .iter()
+            .enumerate()
+            .map(|(i, (entry, stage, s1, s2))| {
+                let mut felder = vec![
+                    Node::integer("ID", 900 + i as i64),
+                    Node::integer("EntryID", *entry),
+                    Node::integer("StageID", *stage),
+                    Node::integer("Status", 0),
+                ];
+                if let Some(v) = s1 {
+                    felder.push(Node::integer("Seed1", *v));
+                }
+                if let Some(v) = s2 {
+                    felder.push(Node::integer("Seed2", *v));
+                }
+                Node::group("StageEntry", felder)
+            })
+            .collect();
+        tournament_with(vec![
+            Node::group("Stages", vec![stage(1, 1), stage(2, 2), stage(5, 8)]),
+            Node::group("Draws", vec![draw(10, 1), draw(20, 2), draw(30, 5)]),
+            Node::group(
+                "Players",
+                vec![
+                    spieler(1, "Anna"),
+                    spieler(2, "Bernd"),
+                    spieler(3, "Carla"),
+                    spieler(4, "Dora"),
+                ],
+            ),
+            Node::group(
+                "Entries",
+                vec![entry(101, 1), entry(102, 2), entry(103, 3), entry(104, 4)],
+            ),
+            Node::group("StageEntries", stage_entries),
+            Node::group(
+                "Matches",
+                vec![
+                    slot(10, 1, 101),
+                    slot(10, 2, 102),
+                    spiel(1, 10, 1, 2),
+                    slot(20, 1, 104),
+                    slot(20, 2, 103),
+                    spiel(2, 20, 1, 2),
+                    slot(30, 1, 101),
+                    slot(30, 2, 102),
+                    spiel(3, 30, 1, 2),
+                    // Offener zweiter Platz: From2 zeigt auf keinen Slot.
+                    spiel(4, 30, 1, 77),
+                ],
+            ),
+        ])
+    }
+
+    fn spiel_mit_id(snap: &BtpSnapshot, id: i64) -> &BtpMatch {
+        snap.matches.iter().find(|m| m.id == id).expect("Spiel")
+    }
+
+    #[test]
+    fn setzung_kommt_aus_der_stage_des_spiels() {
+        // 101 ist im Hauptfeld [1], im Playoff aber [2] gesetzt; das
+        // Playoff-Spiel zeigt die Playoff-, das Gruppenspiel die
+        // Hauptfeld-Setzung.
+        let tree = turnier_mit_setzungen(vec![
+            (101, 1, Some(1), None),
+            (101, 5, Some(2), None),
+            (102, 1, Some(3), Some(4)),
+        ]);
+        let snap = parse_snapshot(&tree).unwrap();
+        let gruppe = spiel_mit_id(&snap, 1);
+        assert_eq!(gruppe.team1_seed.as_deref(), Some("1"));
+        assert_eq!(gruppe.team2_seed.as_deref(), Some("3/4"));
+        let playoff = spiel_mit_id(&snap, 3);
+        assert_eq!(playoff.team1_seed.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn playoff_ohne_setzung_faellt_auf_das_hauptfeld_zurueck() {
+        // 102 hat einen Playoff-Eintrag OHNE Setzung, aber eine im Hauptfeld.
+        let tree = turnier_mit_setzungen(vec![
+            (101, 1, Some(1), None),
+            (102, 1, Some(3), Some(4)),
+            (102, 5, None, None),
+        ]);
+        let snap = parse_snapshot(&tree).unwrap();
+        let playoff = spiel_mit_id(&snap, 3);
+        assert_eq!(playoff.team1_seed.as_deref(), Some("1"));
+        assert_eq!(playoff.team2_seed.as_deref(), Some("3/4"));
+    }
+
+    #[test]
+    fn offener_platz_und_ungesetzte_meldung_haben_keine_setzung() {
+        let tree = turnier_mit_setzungen(vec![(101, 1, Some(1), None)]);
+        let snap = parse_snapshot(&tree).unwrap();
+        let offen = spiel_mit_id(&snap, 4);
+        assert_eq!(offen.entry2_id, 0);
+        assert_eq!(offen.team1_seed.as_deref(), Some("1"));
+        assert_eq!(offen.team2_seed, None);
+        // 102 trägt nirgends eine Setzung.
+        assert_eq!(spiel_mit_id(&snap, 1).team2_seed, None);
+    }
+
+    #[test]
+    fn meldung_traegt_nur_die_hauptfeld_setzung() {
+        // 103 ist nur in der Qualifikation gesetzt → keine Marke im
+        // Check-In; 101 trägt die Hauptfeld-, nicht die Playoff-Setzung.
+        let tree = turnier_mit_setzungen(vec![
+            (101, 1, Some(1), None),
+            (101, 5, Some(2), None),
+            (103, 2, Some(1), None),
+        ]);
+        let snap = parse_snapshot(&tree).unwrap();
+        let seed_of = |id: i64| {
+            snap.entries
+                .iter()
+                .find(|e| e.id == id)
+                .and_then(|e| e.seed.clone())
+        };
+        assert_eq!(seed_of(101).as_deref(), Some("1"));
+        assert_eq!(seed_of(102), None);
+        // 103 ist Quali-only platziert und fliegt deshalb ganz aus der
+        // Meldeliste; das Quali-Spiel selbst zeigt seine Stage-Setzung.
+        assert_eq!(spiel_mit_id(&snap, 2).team2_seed.as_deref(), Some("1"));
     }
 }

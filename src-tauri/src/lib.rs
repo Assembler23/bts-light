@@ -1,3 +1,4 @@
+pub mod ansage_ton;
 pub mod aushang;
 pub mod azure_tts;
 pub mod badhub;
@@ -10,6 +11,7 @@ pub mod log_upload;
 pub mod print;
 pub mod sync;
 pub mod tablet;
+pub mod update;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -109,9 +111,25 @@ pub fn run() {
             commands::save_config,
             commands::test_btp,
             commands::azure_tts_speak,
+            commands::ansage_offene_quellen,
+            commands::ansage_vertonen,
+            commands::ansage_hoerer,
+            commands::ansage_link,
+            commands::ansage_pcm_spielen,
+            commands::ansage_stimme_spielen,
+            commands::ansage_abbrechen,
+            commands::ansage_ausgabe,
+            commands::ansage_geraete,
+            commands::ansage_ausgabe_setzen,
+            commands::ansage_stimmen,
             commands::start_sync,
             commands::stop_sync,
             commands::flush_live_scores,
+            commands::update_check,
+            commands::update_info,
+            commands::update_install_now,
+            commands::update_set_install_on_exit,
+            commands::take_update_resume,
             commands::get_status,
             commands::wifi_status,
             commands::internet_status,
@@ -192,6 +210,9 @@ pub fn run() {
             commands::set_court_ad_bar,
             commands::set_court_ad_style,
             commands::read_tournament_logo,
+            commands::tp_file_check,
+            commands::tp_upload_now,
+            commands::tp_upload_status,
             commands::monitor_devices,
             commands::assign_monitor,
             commands::monitor_combo_dirs,
@@ -259,7 +280,12 @@ pub fn run() {
 /// sondern ein Sekundentakt. Ohne diesen letzten Schreibvorgang gingen beim
 /// Beenden bis zu einer Sekunde Spielstand verloren — und anders als bei
 /// einem Absturz gibt es hier keinen Grund, das hinzunehmen.
+///
+/// Ist ein Update „beim Beenden" vorgemerkt, startet hier zusätzlich der
+/// stille Installer (Spec `update-im-turnierbetrieb`) — nach dem Flush,
+/// damit auch der letzte Stand die Installation überlebt.
 fn beenden(app: &tauri::AppHandle) {
     app.state::<commands::AppState>().tablet.flush_scores();
+    commands::update_beim_beenden(app);
     app.exit(0);
 }

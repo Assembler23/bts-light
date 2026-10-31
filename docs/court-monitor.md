@@ -30,7 +30,9 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
 ```
 
 - **Kopfzeile:** Feldnummer + Disziplin (Herren-/Dameneinzel, Herren-/
-  Damendoppel, Mixed).
+  Damendoppel, Mixed). Bei einer Jugend-Altersklasse („U15") steht
+  stattdessen Jungen-/Mädcheneinzel bzw. Jungen-/Mädchendoppel.
+  <!-- pruef: "Mädcheneinzel" in src-tauri/assets/monitor.html -->
 - **Je Mannschaft (Bildschirmhälfte):** Landesflagge + Spielername(n) groß
   links; der **laufende Satzstand** ganz rechts am größten; abgeschlossene
   Sätze als kleinere Spalte daneben.
@@ -69,6 +71,23 @@ ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)).
   mitvollzogen); `?spiegel=1` tauscht die Seiten (nur fester Modus). Ohne
   Seiteninformation (vor der Seitenwahl, oder kein zählendes Tablet) steht
   Mannschaft 1 links, ohne Aufschlag-Punkt.
+- **Anordnung (seit v0.9.283):** Für den Platz **hinter dem Feld** stehen die
+  Punkte **übereinander** — oben die ferne Seite (= „rechts"), unten die nahe;
+  der Satzstand steht dann je Seite gelb neben der Kachel. Ohne Angabe folgt
+  die Tafel der Ausrichtung des Geräts (Hochformat → übereinander, Querformat
+  → nebeneinander, Drehen schaltet live um); `?anordnung=nebeneinander` bzw.
+  `?anordnung=uebereinander` übersteuert (nur fester Modus, im Gerätemodus
+  gilt immer die Automatik). `?spiegel=1` dreht auch oben/unten.
+- **Ansicht per Tipp (seit v0.9.292):** Läuft die Tafel in der
+  [Anzeige-Hülle](tablet.md#anzeige-hülle-anzeige-seit-v09275), schaltet ein
+  Tipp auf die Zahlen die Ansicht reihum — **ohne PIN**: automatisch →
+  links/rechts → rechts/links → oben/unten → unten/oben → automatisch. Das ist
+  Spiegelung und Anordnung in **einem** Zyklus; das Etikett nennt zuerst, wo
+  die linke Tablet-Seite steht („unten/oben" = übereinander, ungespiegelt).
+  Die Tafel selbst schaltet nichts: Sie schickt nur eine `postMessage` an
+  die Hülle derselben Herkunft, die das iframe mit den neuen Parametern neu
+  lädt. Ohne Hülle (Tafel direkt geöffnet) und im Gerätemodus passiert beim
+  Tipp nichts.
 - **Spielende:** der letzte gespielte Satz bleibt groß stehen und zählt im
   Satzstand; bei Aufgabe zählt der unvollständige Satz nicht. Ohne Spiel:
   Feldbezeichnung groß.
@@ -109,7 +128,10 @@ alle Geräte auf, die sich gemeldet haben:
   v0.9.255 meldet eine Anzeige, die stillsteht, das von sich aus ins Log
   (`stillstand`, siehe [logging.md](logging.md)) — bleibt ein Bild stehen,
   lohnt vor dem Neuladen ein Blick dorthin: Die Zeile sagt, ob überhaupt noch
-  etwas ankam oder ob die Seite es verworfen hat.
+  etwas ankam oder ob die Seite es verworfen hat. (Bis v0.9.288 meldete der
+  Einzelfeld-Monitor in jeder Spielpause fälschlich `keine_abrufe`, weil ein
+  `304` „nichts Neues" nicht als Lebenszeichen zählte — Details in
+  logging.md.)
 
 Die Zuweisungen liegen in `monitor-assignments.json` im
 App-Config-Verzeichnis und überstehen einen bts-light-Neustart.
@@ -183,6 +205,33 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
   `src/io/pushHealth.mjs` mit eigenem CI-Schritt; beide Anzeige-Seiten tragen
   eine Inline-Kopie. **Kein Regress** — fällt der Push aus, verhält sich die
   Anzeige wie zuvor, nur mit schnellerem Poll.
+- **Frist für den Stand-Abruf: Kopfzeilen 5 s, Rumpf 15 s** (seit v0.9.287,
+  Turnier 05./06.09.2026): Der Abruf hatte keinen Timeout. Ging eine Antwort
+  im WLAN-Roaming zwischen Router und Access-Point verloren, blieb der Abruf
+  offen — bei `monitor`, `overview` und `tafel` hielt der In-Flight-Schutz
+  jeden weiteren Poll zurück, bei `combo`, `winners`, `preparation` und der
+  Feldwahl `lobby` hängt der nächste Abruf am Ende des vorigen. Die Anzeige
+  fror **ohne Blende** ein, obwohl Tablets und TL-Web am selben Turnier-PC
+  sauber liefen; der WebSocket verband nach 25 s zwar neu, sein Anstoß lief
+  aber in denselben blockierten Abruf — und bei Feld-Monitor und Zähltafel
+  reist auch der Fernbefehl „Neu laden" über genau diesen Abruf (Übersicht
+  und Kombi bekommen ihn über den getrennten Zuweisungs-Check). Erst die
+  TCP-Sendewiederholung des Geräts löste den Knoten — nach Minuten. Seit
+  v0.9.287 endet ein Abruf als Fehler, wenn die Kopfzeilen nicht binnen 5 s
+  da sind oder der Rumpf danach länger als 15 s braucht, und nimmt damit den
+  bekannten Weg: Blende, Kanal ungesund, 250-ms-Takt, nächster Abruf auf
+  frischer Verbindung. Zwei Budgets, weil die Übersicht unkomprimiert rund
+  16 KB wiegt und eine ferne Halle am LTE-Hotspot langsam, aber lebendig sein
+  darf; zusammen bleiben sie unter der 25-s-Schwelle des Herzschlags. Drei
+  Folgeregeln gehören dazu: Die **ETag-Marke** wird erst nach dem Rumpf
+  übernommen (sonst fragte der nächste Abruf mit der Marke eines nie gezeigten
+  Standes und bekäme ein 304), die Übersicht **entwarnt** erst nach dem Rumpf
+  (sonst käme bei wiederholtem Kopfzeilen-ja/Rumpf-nein nie die Blende), und
+  der sekündliche **Zuweisungs-Check** hat denselben In-Flight-Schutz samt
+  Frist (sonst parkte er während eines Hängers jede Sekunde einen weiteren
+  Abruf auf der toten Leitung). Die Regel steht als `src/io/abrufFrist.mjs`
+  mit eigenem CI-Schritt; die acht Anzeige-Seiten (einschließlich der Werbe-Seite `ad`) und `tl.html` tragen eine
+  Inline-Kopie.
 - **Schalter `push_fallback_slow`** (`config.json`, Abschnitt `court_monitor`;
   **Standard aus**): Erst er erlaubt den 4-s-Takt. Ohne ihn pollt eine frisch
   aktualisierte Installation exakt wie vorher — die Entlastung ist der
@@ -692,6 +741,20 @@ Distanz gut lesbar, der Vorname geht nicht verloren, und das Bild ist für
 alle Spieler:innen einheitlich. Ein einteiliger Name steht ohne Vornamen-
 Zeile; ein sehr langer Einzelteil wird mit „…" abgeschnitten.
 
+## Setzplatz (seit v0.9.298)
+
+Ist eine Seite in BTP gesetzt, steht ihr Setzplatz in eckigen Klammern
+hinter dem letzten Spieler: `[1]`, `[3/4]`, `[5/8]` — auf dem Court-Monitor,
+in der Feld-Übersicht, der Kombi-Anzeige (waagerecht und senkrecht), der
+Vorbereitungs-Liste und der Siegerehrung. Ungesetzte Seiten tragen keine
+Marke. Einen Schalter dafür gibt es bewusst nicht.
+<!-- pruef: "seed" in src-tauri/assets/monitor.html -->
+
+Die Marke wird nie gekürzt; bei langen Doppel-Namen weicht zuerst der Name
+(„…"). Die Siegerehrung gibt es nur im LAN — in der Cloud entfällt dort auch
+die Marke. Ändert die Turnierleitung eine Setzung in BTP, während das Spiel
+schon auf dem Feld liegt, zeigt die Anzeige sie mit dem nächsten Abruf.
+
 ## Layout
 
 Das Anzeige-Layout ist im Setup wählbar. Aktuell gibt es **„A — Geteilt"**
@@ -796,6 +859,77 @@ Normalfall über den Kopplungs-Code) gilt immer die Wahl aus dem Dialog.
   die Pi keine synchrone Uhr haben muss; das Tablet setzt `endsAt` in
   Server-Zeit. Das Feld `CourtOverview.pause` wird in `overview()` 1:1 aus
   dem Tablet-`court_state` übernommen (wie `serving`).
+
+## Ansage-Modus: der TV spricht mit (seit v0.9.313)
+
+Hängt an der Monitor-Adresse `?ansage=<Halle>`, spricht die Seite die
+Ansagen dieser Halle mit — dieselben, die auch die
+[Ansage-Seite im Browser](announcements.md#ansage-seite-im-browser-seit-v09311)
+spricht (Aufrufe, Nachrufe, Freitexte), mit Gong und Stimme über den
+Lautsprecher des TVs. Die **Anzeige ändert sich dabei nicht**. Das gilt für
+die Einzelfeld-Anzeige (`/monitor`, `/court/<id>/display`), die
+Feld-Übersicht (`/info/overview`) und die Kombi-Anzeige (`/combo`).
+Spec: [features/ansage-im-browser.md](features/ansage-im-browser.md), Etappe E1b.
+<!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/combo.html -->
+<!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/overview.html -->
+<!-- pruef: "ansageMonitorStarten(ANSAGE_BASIS, window, document);" in src-tauri/assets/monitor.html -->
+
+**Voraussetzungen:**
+
+- Am Turnier-PC ist **Audio für Ansage-Seiten erzeugen** eingeschaltet
+  (Seite **Ansagen**).
+- Der TV hängt **im Hallennetz** am Turnier-PC. Über die Cloud-Adresse
+  (`…/bts-relay/…`) bleibt der Modus vorerst stumm und zeigt einen Hinweis —
+  die Cloud folgt mit Etappe E4.
+- Der Browser darf **ohne Tippen** Ton abspielen. Am TV drückt niemand
+  „Ton freischalten"; der Pi startet Chromium deshalb mit
+  `--autoplay-policy=no-user-gesture-required` (siehe
+  [pi-setup.md](pi-setup.md), „Ton für Ansagen am TV").
+<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/setup-monitor.sh -->
+
+**Adresse eintragen:** In `bts-monitor-url.txt` auf der Karte des Pi, z. B.
+
+```text
+http://bts-light.local:8088/monitor?ansage=Halle%20A
+```
+
+Leerzeichen im Hallennamen als `%20` schreiben — das Startskript entfernt
+Leerzeichen aus der Datei. Groß-/Kleinschreibung zählt nicht. Bei einem
+Turnier mit **einer** Halle reicht `?ansage=` ohne Namen. Der Parameter
+wandert bei jeder Umstellung im Tool mit (Feld → Kombi → Übersicht → Werbung
+→ zurück); ein Pi bleibt also Sprecher, egal was er gerade zeigt. Sprechen
+tun aber nur Einzelfeld, Übersicht und Kombi — zeigt der TV gerade Werbung,
+Vorbereitung, Sieger oder die Zähltafel, schweigt er so lange.
+
+**Kleiner Hinweis unten links** — nur, wenn etwas fehlt; läuft alles, sieht
+der TV aus wie immer:
+
+| Hinweis | Ursache |
+|---|---|
+| „Ton gesperrt — der Browser braucht die Autoplay-Freigabe" | Pi ohne das Startflag (alte Einrichtung) — Pi aktualisieren |
+| „Die Halle „…" gibt es in diesem Turnier nicht" | Schreibfehler im Hallennamen |
+| „Dieses Gerät kann nicht sprechen" | Kein Azure am PC und keine Stimme im Browser (am Pi der Normalfall ohne Azure) |
+| „nur im Hallennetz (LAN)" | Cloud-Adresse — folgt mit E4 |
+| Grund vom Turnier-PC | z. B. Schalter „Audio für Ansage-Seiten erzeugen" aus |
+<!-- pruef: "Ton gesperrt — der Browser braucht die Autoplay-Freigabe" in src/io/ansageKern.mjs -->
+<!-- pruef: "kann nicht sprechen (kein Audio vom Turnier-PC" in src/io/ansageKern.mjs -->
+
+Solange ein Hinweis steht, meldet sich der TV **nicht** als Ansage-Gerät —
+die Turnierleitung sieht die Halle weiter als „ohne Ansage-Gerät" und weiß,
+dass ihr Aufruf dort nicht ankommt. Eine Maus- oder Tastatureingabe am Pi
+gibt den Ton notfalls auch ohne Flag frei.
+
+**Ein Pi braucht für Sprache Azure.** Chromium auf dem Pi bringt keine
+deutsche Stimme mit; ohne Azure am Turnier-PC erklingt dort nichts (bis die
+Windows-Stimme mit Etappe E3 kommt).
+
+**Technik:** Ein eigener `<script>`-Block am Ende der drei Seiten, der ohne
+`?ansage` sofort endet. Er trägt Inline-Kopien von `src/io/ansageSeite.mjs`,
+`src/io/gongKlang.mjs` und `src/io/ansageKern.mjs` — wortgleich wie
+`assets/ansage.html`, gehalten von `scripts/test-ansage-kern.mjs`. Ein Fehler
+darin reißt die Anzeige nicht mit. Feed-Abrufe haben eine Frist von 5 s und
+laufen nie parallel; kennt der Server den Feed nicht (404, z. B. Slave-Brücke),
+fragt die Seite nur noch einmal je Minute.
 
 ## Raspberry Pi — Kiosk-Einrichtung
 

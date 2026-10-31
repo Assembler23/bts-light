@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.279"
+version = "0.9.325"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -52,6 +52,10 @@ mdns-sd = "0.21"
 # Lokale Uhrzeit fürs BTP-Spielende (Player.LastTimeOnCourt) — bereits
 # transitiv im Baum (Tauri-Ökosystem), daher keine neue Supply-Chain-Fläche.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# SHA-256 der TP-Datei für den Takt-Upload (ADR 0061): `ring` liegt über
+# rcgen/tokio-rustls ohnehin im Baum — nur eine direkte Abhängigkeit, kein
+# neuer Code im Build (die Stufe-1-Spec wollte deshalb kein `sha2`).
+ring = "0.17"
 
 # Stiller Druck des Schiedsrichterzettels (ADR 0042): GDI an einen
 # benannten Drucker, ohne Dialog. Von Microsoft gepflegt, MIT/Apache-2.0,
@@ -67,8 +71,27 @@ windows = { version = "0.62", features = [
   # StartDocW/EndDoc/StartPage/EndPage und DOCINFOW liegen im Binding
   # unter `Storage::Xps` — trotz ihres GDI-Ursprungs in gdi32.dll.
   "Win32_Storage_Xps",
+  # Feste COM-Initialisierung des Ansage-Audio-Threads (ADR 0065).
+  "Win32_System_Com",
+  # IMMDeviceEnumerator: aktuelles Standardgerät als konkreter Endpunkt
+  # (Ansage-Ton, ADR 0065) — cpal 0.18 gibt sonst das virtuelle Gerät.
+  "Win32_Media_Audio",
+  # Windows-Stimme im Kern (ADR 0066): `SpeechSynthesizer` samt
+  # `SynthesizeTextToStreamAsync` (braucht Media_Core + Storage_Streams)
+  # und `DataReader` zum Auslesen des WAV-Stroms.
+  "Foundation",
+  "Media_SpeechSynthesis",
+  "Media_Core",
+  "Storage_Streams",
 ] }
+# Ansage-Ton aus dem Kern (ADR 0065): WASAPI-Ausgabe mit Gerät je Stück.
+# Apache-2.0 (RustAudio), hängt an derselben `windows`-Version 0.62 — keine
+# zweite Kopie im Baum. Nur Windows: Der Linux-CI-Job hat kein ALSA, und
+# unter Linux bleibt die Ansage beim alten Weg im WebView.
+cpal = "0.18"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# Pausierte Zeit fuer die Gate-Tests (btp/write_gate.rs): start_paused/advance
+tokio = { version = "1.52.3", features = ["test-util"] }
 

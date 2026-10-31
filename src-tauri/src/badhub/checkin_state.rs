@@ -18,7 +18,13 @@
 //!   Installationen, badhub wird unabhängig deployt.
 //! - [`Availability::Rejected`] — Passwort oder Turnier-GUID passen nicht
 //!   (401/403). Der einzige Fall, den die Turnierleitung selbst beheben kann,
-//!   und deshalb der einzige, der eine Meldung verdient.
+//!   und deshalb der einzige, der eine Meldung verdient. 401 und 403 bekommen
+//!   **getrennte** Texte: badhub unterscheidet „Passwort unbekannt" von
+//!   „Kennung gehört einem anderen Zugang", und wer nur „eins von beiden"
+//!   liest, sucht am falschen Ende. Ebenso **429** (Sperre nach
+//!   Fehlversuchen): Sie geht von allein vorbei, legt aber auch den
+//!   Liveticker-Push desselben Anschlusses still — deshalb kein ruhiges
+//!   „offline", sondern ein eigener Satz mit der Wartezeit.
 //!
 //! C3 und C4 laufen damit durch **denselben** Codepfad wie in der
 //! Spezifikation vorgesehen — sie sind gemeinsam getestet.
@@ -81,6 +87,27 @@ pub struct CheckinPlayer {
     pub locked: bool,
     #[serde(default)]
     pub checked_in_at: Option<String>,
+    /// Setzplatz der Meldung im Hauptfeld („1", „3/4"; Spec
+    /// setzplaetze-anzeigen). Kommt **nicht** von badhub, sondern wird in
+    /// bts-light aus dem BTP-Stand ergänzt ([`setzungen_eintragen`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
+}
+
+/// Ergänzt die Setzplätze aus dem BTP-Stand (R2: BTP ist die Wahrheit) über
+/// die Meldungs-ID. `entry_id == 0` (älteres badhub ohne das Feld) oder eine
+/// unbekannte Meldung bleiben ohne Marke — nie geraten.
+pub fn setzungen_eintragen(view: &mut CheckinView, entries: &[crate::btp::model::BtpEntry]) {
+    let setzung: std::collections::HashMap<i64, &str> = entries
+        .iter()
+        .filter_map(|e| Some((e.id, e.seed.as_deref()?)))
+        .collect();
+    for spieler in view.classes.iter_mut().flat_map(|k| k.players.iter_mut()) {
+        spieler.seed = (spieler.entry_id != 0)
+            .then(|| setzung.get(&spieler.entry_id))
+            .flatten()
+            .map(|s| s.to_string());
+    }
 }
 
 fn state_open() -> String {
@@ -247,6 +274,12 @@ pub struct CheckinView {
     /// Druckbarer QR-Aushang (`…/aushang`) zum selben Turnier.
     #[serde(default)]
     pub poster_url: String,
+    /// Kiosk-Ansicht für das Check-In-Gerät in der Halle (`…/halle`).
+    #[serde(default)]
+    pub hall_url: String,
+    /// Zeitplan mit allen Anfangszeiten (`…/zeitplan`).
+    #[serde(default)]
+    pub schedule_url: String,
 }
 
 impl CheckinView {
@@ -259,6 +292,8 @@ impl CheckinView {
             message: message.into(),
             public_url: String::new(),
             poster_url: String::new(),
+            hall_url: String::new(),
+            schedule_url: String::new(),
         }
     }
 }
@@ -318,6 +353,53 @@ pub(crate) fn tl_ablage(classes: Vec<CheckinClass>) -> Vec<CheckinClass> {
         .collect()
 }
 
+/// 401: Das Passwort gehört zu keinem aktiven, gerade gültigen
+/// Liveticker-Zugang (badhub `checkin_tl_authorize`).
+const TEXT_PASSWORT_UNBEKANNT: &str = "badhub kennt dieses Liveticker-Passwort nicht — \
+     Passwort prüfen und ob der Zugang in badhub aktiv und gerade gültig ist.";
+
+/// 403: Passwort gültig, aber die Turnier-Kennung ist an einen anderen Zugang
+/// gebunden — an den, der zuletzt eine Meldeliste dafür gesendet hat (badhub
+/// überschreibt die Bindung bei jedem Push).
+const TEXT_FREMDE_KENNUNG: &str = "Diese Turnier-Kennung gehört in badhub zu einem anderen \
+     Zugang — Turnier-Kennung prüfen. Das Passwort selbst ist gültig.";
+
+/// 429: badhub sperrt diesen Anschluss nach zu vielen Fehlversuchen.
+///
+/// `Retry-After` nennt das **ganze** Fenster (900 s bzw. 86 400 s); weil das
+/// Fenster gleitet, endet die Sperre oft früher — daher „spätestens". Ohne
+/// verwertbaren Header bleibt der Satz ohne Zahl.
+fn zu_viele_versuche_text(retry_after_s: Option<u64>) -> String {
+    let dauer = retry_after_s.map(|s| {
+        let minuten = s.div_ceil(60).max(1);
+        if minuten >= 120 {
+            format!("{} Stunden", minuten.div_ceil(60))
+        } else if minuten == 1 {
+            "einer Minute".to_string()
+        } else {
+            format!("{minuten} Minuten")
+        }
+    });
+    match dauer {
+        Some(d) => format!(
+            "Zu viele Fehlversuche — badhub nimmt von diesem Anschluss spätestens in {d} \
+             wieder eine Anmeldung an. Bis dahin steht auch der Liveticker-Push."
+        ),
+        None => "Zu viele Fehlversuche — badhub nimmt von diesem Anschluss vorerst keine \
+                 Anmeldung an. Bis dahin steht auch der Liveticker-Push."
+            .to_string(),
+    }
+}
+
+/// `Retry-After` in Sekunden, falls badhub eine Zahl geschickt hat.
+fn retry_after_s(response: &reqwest::Response) -> Option<u64> {
+    response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
 /// HTTP-Client für den Check-In-Kanal.
 pub fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -348,6 +430,16 @@ pub fn public_url(base: &str, uuid: &str) -> String {
 /// Druckbare Aushang-Seite (QR + Kurz-URL) zum selben Turnier.
 pub fn poster_url(base: &str, uuid: &str) -> String {
     format!("{}/aushang", public_url(base, uuid))
+}
+
+/// Kiosk-Ansicht für das Check-In-Gerät in der Halle.
+pub fn hall_url(base: &str, uuid: &str) -> String {
+    format!("{}/halle", public_url(base, uuid))
+}
+
+/// Zeitplan-Seite mit den Anfangszeiten aller Klassen.
+pub fn schedule_url(base: &str, uuid: &str) -> String {
+    format!("{}/zeitplan", public_url(base, uuid))
 }
 
 /// Den vollständigen Check-In-Stand abrufen (AK-C1, C5).
@@ -382,11 +474,18 @@ pub async fn fetch_state(
                 "Dieses badhub kennt den Check-In noch nicht.",
             )
         }
-        401 | 403 => {
+        401 => return CheckinView::unavailable(Availability::Rejected, TEXT_PASSWORT_UNBEKANNT),
+        403 => return CheckinView::unavailable(Availability::Rejected, TEXT_FREMDE_KENNUNG),
+        429 => {
+            // Als `Rejected`, nicht als offline: Offline zeigte den Zusatz
+            // „das Turnier läuft unverändert weiter" — falsch, denn die
+            // Sperre trifft auch den Liveticker-Push dieses Anschlusses. Und
+            // wer das Passwort inzwischen korrigiert hat, hielte sonst die
+            // richtige Eingabe für falsch.
             return CheckinView::unavailable(
                 Availability::Rejected,
-                "badhub hat den Zugang abgelehnt — Liveticker-Passwort und Turnier-Kennung prüfen.",
-            )
+                zu_viele_versuche_text(retry_after_s(&response)),
+            );
         }
         other => {
             // 5xx und alles Übrige: wie offline behandeln. Der nächste Poll
@@ -419,6 +518,8 @@ pub async fn fetch_state(
         // bekannt, was badhub geantwortet hat.
         public_url: String::new(),
         poster_url: String::new(),
+        hall_url: String::new(),
+        schedule_url: String::new(),
     }
 }
 
@@ -442,6 +543,8 @@ async fn auswerten(antwort: Result<reqwest::Response, reqwest::Error>) -> WriteR
     };
 
     let status = response.status().as_u16();
+    // Vor `json()` lesen — das verbraucht die Antwort.
+    let retry_after = retry_after_s(&response);
     // Den Text von badhub bevorzugen: er ist auf die Turnierleitung gemünzt
     // („Der Anmeldeschluss liegt vor der Anfangszeit") und weiß mehr als ein
     // Statuscode hier je wissen könnte.
@@ -456,7 +559,12 @@ async fn auswerten(antwort: Result<reqwest::Response, reqwest::Error>) -> WriteR
         400 | 404 if text.is_empty() => {
             Err("Dieses badhub kennt den Check-In noch nicht.".to_string())
         }
-        401 | 403 if text.is_empty() => Err("badhub hat den Zugang abgelehnt.".to_string()),
+        // Anmelde-Fehler NICHT mit badhubs Text: der ist knapp und ohne
+        // Umlaute („Passwort nicht erkannt."), und Lese- und Schreibweg
+        // sollen dasselbe sagen.
+        401 => Err(TEXT_PASSWORT_UNBEKANNT.to_string()),
+        403 => Err(TEXT_FREMDE_KENNUNG.to_string()),
+        429 => Err(zu_viele_versuche_text(retry_after)),
         _ if !text.is_empty() => Err(text),
         other => Err(format!("badhub antwortete mit HTTP {other}.")),
     }
@@ -568,6 +676,7 @@ mod tests {
             source: None,
             locked: false,
             checked_in_at: None,
+            seed: None,
         };
         let klasse = CheckinClass {
             event_id: 1,
@@ -590,6 +699,70 @@ mod tests {
         );
         assert_eq!(ablage[0].gemeldet, 15, "der Abgemeldete zählt nicht mehr");
         assert_eq!(ablage[0].eingecheckt, 15, "eingecheckt bleibt unberührt");
+    }
+
+    /// Spec setzplaetze-anzeigen: Die Setzung kommt über die Meldungs-ID aus
+    /// dem BTP-Stand; beide Partner eines Doppels tragen sie, `entry_id` 0
+    /// (altes badhub) und unbekannte Meldungen bleiben ohne.
+    #[test]
+    fn setzungen_werden_ueber_die_meldung_eingetragen() {
+        use crate::btp::model::BtpEntry;
+        let spieler = |player_id: i64, entry_id: i64| CheckinPlayer {
+            player_id,
+            entry_id,
+            first: "Max".into(),
+            last: "Muster".into(),
+            club: None,
+            nationality: None,
+            state: "open".into(),
+            source: None,
+            locked: false,
+            checked_in_at: None,
+            // Ein veralteter Wert muss überschrieben werden.
+            seed: Some("99".into()),
+        };
+        let mut view = CheckinView::unavailable(Availability::Ready, "");
+        view.classes.push(CheckinClass {
+            event_id: 1,
+            name: "HD-A".into(),
+            discipline: "HD".into(),
+            starts_at: None,
+            closes_at: None,
+            opens_at: None,
+            state: "open".into(),
+            is_live: false,
+            gemeldet: 4,
+            eingecheckt: 0,
+            players: vec![
+                spieler(1, 10),
+                spieler(2, 10),
+                spieler(3, 0),
+                spieler(4, 77),
+            ],
+        });
+        let entries = vec![
+            BtpEntry {
+                id: 10,
+                event_id: 1,
+                players: Vec::new(),
+                seed: Some("3/4".into()),
+            },
+            BtpEntry {
+                id: 11,
+                event_id: 1,
+                players: Vec::new(),
+                seed: None,
+            },
+        ];
+        setzungen_eintragen(&mut view, &entries);
+        let seeds: Vec<Option<&str>> = view.classes[0]
+            .players
+            .iter()
+            .map(|p| p.seed.as_deref())
+            .collect();
+        assert_eq!(seeds, vec![Some("3/4"), Some("3/4"), None, None]);
+        let json = serde_json::to_string(&view.classes[0].players[2]).unwrap();
+        assert!(!json.contains("seed"), "ungesetzt fehlt das Feld: {json}");
     }
 
     #[test]
@@ -630,6 +803,14 @@ mod tests {
         assert_eq!(
             poster_url("https://badhub.de", UUID),
             format!("https://badhub.de/checkin/{UUID}/aushang")
+        );
+        assert_eq!(
+            hall_url("https://badhub.de/", UUID),
+            format!("https://badhub.de/checkin/{UUID}/halle")
+        );
+        assert_eq!(
+            schedule_url("https://test.badhub.de", UUID),
+            format!("https://test.badhub.de/checkin/{UUID}/zeitplan")
         );
     }
 
@@ -696,6 +877,98 @@ mod tests {
 
         assert_eq!(view.availability, Availability::Rejected);
         assert!(!view.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn passwort_und_kennung_haben_eigene_texte() {
+        // 401 = Passwort unbekannt, 403 = Kennung gehört einem anderen Zugang.
+        // Ein gemeinsamer Text schickte die Hälfte der Suchenden ans falsche Ende.
+        let base = spawn_mock("401 Unauthorized", r#"{"ok":false}"#).await;
+        let pw = fetch_state(&build_client(), &base, "pw", UUID).await;
+        let base = spawn_mock("403 Forbidden", r#"{"ok":false}"#).await;
+        let kennung = fetch_state(&build_client(), &base, "pw", UUID).await;
+
+        assert_eq!(pw.availability, Availability::Rejected);
+        assert_eq!(kennung.availability, Availability::Rejected);
+        assert!(
+            pw.message.contains("Liveticker-Passwort nicht"),
+            "{}",
+            pw.message
+        );
+        assert!(kennung.message.contains("Turnier-Kennung prüfen"));
+        assert_ne!(pw.message, kennung.message);
+    }
+
+    #[tokio::test]
+    async fn fehlversuchs_sperre_nennt_die_wartezeit() {
+        let base = spawn_mock(
+            "429 Too Many Requests\r\nRetry-After: 900",
+            r#"{"ok":false}"#,
+        )
+        .await;
+        let view = fetch_state(&build_client(), &base, "pw", UUID).await;
+
+        // Rejected, nicht offline: sonst stünde daneben „das Turnier läuft
+        // unverändert weiter", obwohl auch der Liveticker-Push gesperrt ist.
+        assert_eq!(view.availability, Availability::Rejected);
+        assert!(view.message.contains("Fehlversuche"), "{}", view.message);
+        assert!(
+            view.message.contains("spätestens in 15 Minuten"),
+            "{}",
+            view.message
+        );
+    }
+
+    #[test]
+    fn sperr_text_rechnet_lange_sperren_in_stunden() {
+        assert!(zu_viele_versuche_text(Some(86_400)).contains("24 Stunden"));
+        assert!(zu_viele_versuche_text(Some(30)).contains("einer Minute"));
+        let ohne = zu_viele_versuche_text(None);
+        assert!(ohne.contains("vorerst"), "{ohne}");
+        assert!(!ohne.chars().any(|c| c.is_ascii_digit()), "{ohne}");
+    }
+
+    #[test]
+    fn meldungen_haben_keine_leerzeichen_bloecke() {
+        // Eine verlorene `\`-Fortsetzung im Quelltext fiele sonst nur auf
+        // dem Bildschirm auf.
+        for t in [
+            TEXT_PASSWORT_UNBEKANNT.to_string(),
+            TEXT_FREMDE_KENNUNG.to_string(),
+            zu_viele_versuche_text(Some(900)),
+            zu_viele_versuche_text(None),
+        ] {
+            assert!(!t.contains("  "), "{t}");
+        }
+    }
+
+    #[tokio::test]
+    async fn schreibweg_unterscheidet_die_anmelde_fehler() {
+        // badhub schickt bei 401/403 eigenen Text mit — der Schreibweg soll
+        // trotzdem dieselben Sätze zeigen wie der Lesepfad.
+        let base = spawn_mock(
+            "401 Unauthorized",
+            r#"{"ok":false,"message":"Passwort nicht erkannt."}"#,
+        )
+        .await;
+        let r = set_player(&build_client(), &base, "pw", UUID, 5, 101, "check_in").await;
+        assert_eq!(r.unwrap_err(), TEXT_PASSWORT_UNBEKANNT);
+
+        let base = spawn_mock(
+            "403 Forbidden",
+            r#"{"ok":false,"message":"Dieses Turnier gehoert zu einem anderen Zugang."}"#,
+        )
+        .await;
+        let r = set_player(&build_client(), &base, "pw", UUID, 5, 101, "check_in").await;
+        assert_eq!(r.unwrap_err(), TEXT_FREMDE_KENNUNG);
+
+        let base = spawn_mock(
+            "429 Too Many Requests\r\nRetry-After: 900",
+            r#"{"ok":false,"message":"Zu viele Fehlversuche. Bitte spaeter erneut."}"#,
+        )
+        .await;
+        let r = set_player(&build_client(), &base, "pw", UUID, 5, 101, "check_in").await;
+        assert!(r.unwrap_err().contains("15 Minuten"));
     }
 
     #[tokio::test]
@@ -806,6 +1079,7 @@ mod tests {
                 source: None,
                 locked: false,
                 checked_in_at: None,
+                seed: None,
             })
             .collect();
         CheckinClass {
@@ -982,6 +1256,7 @@ mod tests {
             source: None,
             locked: false,
             checked_in_at: None,
+            seed: None,
         };
         assert_eq!(p.display_name(), "Anna Alt");
         p.first = String::new();

@@ -142,6 +142,30 @@ pub struct AnnounceConfig {
     /// Der eigene Knopf „SR/AR ansagen" bleibt unberührt — wer ihn drückt,
     /// will genau diese Ansage.
     pub announce_umpire: bool,
+    /// „Audio für Ansage-Seiten erzeugen" (Spec `ansage-im-browser`): Der
+    /// Turnier-PC vertont Ansagen für die Browser-Seite `/ansage`. Bewusst
+    /// **getrennt** von `enabled` (= am PC selbst abspielen): Der PC kann im
+    /// Büro stumm bleiben und trotzdem die Hallen versorgen. Default aus —
+    /// eine Seite kostet Azure-Aufrufe, das soll niemand ungefragt bekommen.
+    pub page_audio: bool,
+    /// Notfall-Schalter „Alter Abspielweg" (Spec `ansage-ausgabegeraet`, D10):
+    /// Ansage wie bis v0.9.317 über das Programmfenster (AudioContext +
+    /// `speechSynthesis`) statt über den Kern. Gedacht für den Fall, den kein
+    /// automatischer Rückfall erkennt: Der Kern spielt fehlerfrei, aber auf
+    /// dem falschen Gerät. Default aus. **Befristet:** wird drei Versionen
+    /// nach PR 1 der Spec wieder entfernt (Termin in `docs/roadmap.md`).
+    pub legacy_output: bool,
+    /// Gewähltes Ausgabegerät der Ansage (Spec `ansage-ausgabegeraet`, PR 2):
+    /// cpal-Geräte-ID als Text, z. B. `wasapi:{0.0.0.00000000}.{…}`. Leer =
+    /// Windows-Standard. Gilt **je PC** — wird nur über
+    /// `ansage_ausgabe_setzen` gesetzt, nie über `save_config`, wandert nicht
+    /// im Identitäts-Bündel und wird nie an Ansage-Slaves vererbt.
+    #[serde(default)]
+    pub output_device: String,
+    /// Name des gewählten Geräts — nur für die Anzeige, wenn das Gerät gerade
+    /// fehlt („<Gerät> nicht verfügbar …"). Nie fürs Log.
+    #[serde(default)]
+    pub output_device_name: String,
 }
 
 /// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
@@ -178,6 +202,10 @@ impl Default for AnnounceConfig {
             // still dazu — sie hören ab dem Update mehr, nicht weniger.
             announce_scorekeeper: true,
             announce_umpire: true,
+            page_audio: false,
+            legacy_output: false,
+            output_device: String::new(),
+            output_device_name: String::new(),
         }
     }
 }
@@ -345,6 +373,91 @@ pub struct PrintConfig {
     pub auto_enabled: bool,
     /// Zieldrucker; leer = Windows-Standarddrucker.
     pub printer_name: String,
+}
+
+/// TP-Datei an badhub (Spec `docs/features/tp-datei-upload.md`, ADR 0060).
+///
+/// Die offene Turnierdatenbank von BTP, im Setup per Dateiwähler gewählt. Der
+/// Pfad ist an die Turnier-GUID gebunden, die **beim Wählen** eingetragen war:
+/// Ändert der Turnierleiter die GUID später, bleibt der Pfad sichtbar, aber
+/// [`AppConfig::tp_datei_fuer_turnier`] liefert `None`, bis die Datei neu
+/// gewählt wird — eine fremde Datei darf nie unter einer anderen GUID landen.
+/// Es wird nichts still gelöscht.
+///
+/// **Stufe 2 (Spec `docs/features/tp-takt-upload.md`, ADR 0061):** `auto_*`
+/// schaltet den Takt, der die Datei bei Änderung von selbst sendet — nur
+/// solange der Liveticker läuft. Standard **aus**: Der Takt veröffentlicht
+/// alles aus der Datei ohne Klick, das muss jemand bewusst wollen.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct TpUploadConfig {
+    /// Pfad, wie ihn der Dialog geliefert hat; leer = keine Datei gewählt.
+    pub path: String,
+    /// Turnier-GUID zum Zeitpunkt der Dateiwahl (kanonisch gespeichert).
+    pub tournament_uuid: String,
+    /// Automatisch senden, solange der Liveticker läuft (Stufe 2).
+    pub auto_enabled: bool,
+    /// Takt in Minuten. Gespeichert wird, was der Nutzer eintippt; die
+    /// Wahrheit ist [`TpUploadConfig::takt`], die unter
+    /// [`TP_TAKT_MIN_MINUTEN`] klemmt.
+    pub auto_minutes: u16,
+    /// Ereignis-Auslöser (ADR 0062): Prüfung vorziehen, sobald BTP neue
+    /// Spiele oder eine gefüllte Paarung meldet. Wirkt nur mit `auto_enabled`.
+    /// Standard **an**; abschaltbar, falls Netz oder badhub zu viel abbekommen
+    /// — dann bleibt der reine Takt.
+    pub ereignis_enabled: bool,
+    /// Drossel: Mindestabstand in Minuten zwischen dem letzten Upload und
+    /// einem durch ein Ereignis vorgezogenen. Wahrheit ist
+    /// [`TpUploadConfig::ereignis_abstand`] (klemmt unter
+    /// [`TP_EREIGNIS_MIN_MINUTEN`]).
+    pub ereignis_minuten: u16,
+}
+
+/// Voreinstellung des Ereignis-Mindestabstands (Handbuch-Anker).
+pub const TP_EREIGNIS_STANDARD_MINUTEN: u16 = 5;
+/// Untergrenze der Drossel — dieselbe wie beim Takt: nie öfter als alle 5 min
+/// Schreib-Gate und Upload, weit über dem 60-s-Cooldown des Servers.
+pub const TP_EREIGNIS_MIN_MINUTEN: u16 = 5;
+
+/// Voreinstellung des Takts (Handbuch-Anker).
+pub const TP_TAKT_STANDARD_MINUTEN: u16 = 15;
+/// Untergrenze des Takts: 1 min läge auf der 60-s-Cooldown-Kante des Servers
+/// und kostete bei geänderter Datei ~5 s Write-Sperre je Minute.
+pub const TP_TAKT_MIN_MINUTEN: u16 = 5;
+
+impl Default for TpUploadConfig {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            tournament_uuid: String::new(),
+            auto_enabled: false,
+            auto_minutes: TP_TAKT_STANDARD_MINUTEN,
+            ereignis_enabled: true,
+            ereignis_minuten: TP_EREIGNIS_STANDARD_MINUTEN,
+        }
+    }
+}
+
+impl TpUploadConfig {
+    /// Wirksamer Mindestabstand des Ereignis-Auslösers: `None`, wenn die
+    /// Automatik oder der Auslöser aus ist, sonst mindestens
+    /// [`TP_EREIGNIS_MIN_MINUTEN`].
+    pub fn ereignis_abstand(&self) -> Option<std::time::Duration> {
+        (self.auto_enabled && self.ereignis_enabled).then(|| {
+            std::time::Duration::from_secs(
+                60 * u64::from(self.ereignis_minuten.max(TP_EREIGNIS_MIN_MINUTEN)),
+            )
+        })
+    }
+
+    /// Wirksamer Takt: `None` wenn aus, sonst mindestens [`TP_TAKT_MIN_MINUTEN`].
+    pub fn takt(&self) -> Option<std::time::Duration> {
+        self.auto_enabled.then(|| {
+            std::time::Duration::from_secs(
+                60 * u64::from(self.auto_minutes.max(TP_TAKT_MIN_MINUTEN)),
+            )
+        })
+    }
 }
 
 /// Verschlüsselte LAN-Strecke (Spec `docs/features/lan-tls-verschluesselt.md`,
@@ -778,6 +891,11 @@ pub struct AppConfig {
     /// `#[serde(default)]` hält ältere Konfigurationsdateien lesbar.
     #[serde(default)]
     pub tournament_logo: LogoConfig,
+    /// TP-Datei an badhub (Pfad + gebundene GUID). `#[serde(default)]` hält
+    /// ältere Konfigurationsdateien lesbar; eine ältere App-Version verwirft
+    /// den Block beim nächsten Speichern (hinnehmbar, Spec).
+    #[serde(default)]
+    pub tp_upload: TpUploadConfig,
     /// Vom Operator gesperrte Felder (CourtIDs) – werden nicht automatisch
     /// belegt. bts-light-seitig, persistiert über Neustarts. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar.
@@ -1125,6 +1243,15 @@ pub struct TlDisplaySettings {
     /// Schalter findet. So herum gilt für alle Profile — alte wie neue — der
     /// gewollte Standard „anzeigen".
     pub hide_open_matches: bool,
+    /// Setzplätze (`[1]`, `[3/4]`) **ausblenden** (Spec
+    /// `setzplaetze-anzeigen`). Invertiert aus demselben Grund wie
+    /// `hide_open_matches`: Bestandsprofile ohne das Feld zeigen sie.
+    pub hide_seeds: bool,
+    /// Vier Verschiebe-Knöpfe (⤒ ↑ ↓ ⤓) an JEDER umsortierbaren Zeile der
+    /// Warteliste statt nur „↑ an den Anfang" (Wunsch 06.09.2026: Ziehen ist
+    /// auf manchen Geräten nicht praktikabel). Default aus — die Zeile wird
+    /// damit spürbar breiter; wer es braucht, schaltet es im Profil ein.
+    pub show_move_buttons: bool,
     pub list_position: TlListPosition,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
     /// Gehört ins Profil und nicht ins Gerät: Sie beschreibt, WAS gezeigt
@@ -1299,6 +1426,21 @@ impl AppConfig {
         kanonische_guid(&self.tournament_uuid)
     }
 
+    /// Pfad der TP-Datei für das **aktuelle** Turnier — nur, wenn die beim
+    /// Wählen gebundene GUID zur heutigen kanonischen GUID passt. Beide Seiten
+    /// werden normalisiert verglichen (`{…}`, Groß/Klein), damit eine andere
+    /// Schreibweise nicht grundlos „Datei neu wählen" auslöst. Leerer Pfad,
+    /// fehlende oder abweichende GUID → `None`.
+    pub fn tp_datei_fuer_turnier(&self) -> Option<std::path::PathBuf> {
+        let pfad = self.tp_upload.path.trim();
+        if pfad.is_empty() {
+            return None;
+        }
+        let aktuell = self.tournament_uuid_kanonisch()?;
+        let gebunden = kanonische_guid(&self.tp_upload.tournament_uuid)?;
+        (aktuell == gebunden).then(|| std::path::PathBuf::from(pfad))
+    }
+
     /// Migration + Spiegel der Turnier-GUID (siehe Feld-Kommentar). Wird
     /// beim Laden gerufen; idempotent.
     pub fn spiegele_turnier_guid(&mut self) {
@@ -1359,9 +1501,7 @@ impl AppConfig {
                 crate::badhub_host::set_aus_push_url(&cfg.badhub.url);
                 Ok(cfg)
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Ok(AppConfig::neu_installation())
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AppConfig::neu_installation()),
             Err(e) => Err(ConfigError::Read(e)),
         }
     }
@@ -1388,6 +1528,122 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Takt-Upload (Spec tp-takt-upload, L2, AK 1) ────────────────────
+    #[test]
+    fn tp_upload_takt_alte_config_aus_klemmung_und_standard() {
+        // Alte config.json ohne die neuen Felder: Automatik aus, Standard 15.
+        let json = r#"{"path":"C:\\t.tp","tournament_uuid":"X"}"#;
+        let alt: TpUploadConfig = serde_json::from_str(json).unwrap();
+        assert!(!alt.auto_enabled);
+        assert_eq!(alt.auto_minutes, TP_TAKT_STANDARD_MINUTEN);
+        assert_eq!(alt.takt(), None, "aus → kein Takt");
+
+        let mut t = TpUploadConfig {
+            auto_enabled: true,
+            auto_minutes: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            t.takt(),
+            Some(std::time::Duration::from_secs(60 * 5)),
+            "unter dem Minimum → 5 min, gespeicherter Wert bleibt"
+        );
+        assert_eq!(t.auto_minutes, 1);
+        t.auto_minutes = 30;
+        assert_eq!(t.takt(), Some(std::time::Duration::from_secs(60 * 30)));
+        // Roundtrip hält die Felder.
+        let wieder: TpUploadConfig =
+            serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
+        assert_eq!(wieder, t);
+    }
+
+    // ── Ereignis-Auslöser (Spec tp-ereignis-upload, ADR 0062) ─────────
+    #[test]
+    fn tp_ereignis_schalter_und_drossel() {
+        // Alte config.json ohne die Felder: Ereignis an, 5 min Mindestabstand —
+        // wirkt aber erst mit eingeschalteter Automatik.
+        let alt: TpUploadConfig =
+            serde_json::from_str(r#"{"path":"C:\\t.tp","tournament_uuid":"X"}"#).unwrap();
+        assert!(alt.ereignis_enabled);
+        assert_eq!(alt.ereignis_minuten, TP_EREIGNIS_STANDARD_MINUTEN);
+        assert_eq!(
+            alt.ereignis_abstand(),
+            None,
+            "Automatik aus → kein Ereignis"
+        );
+
+        let mut t = TpUploadConfig {
+            auto_enabled: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            t.ereignis_abstand(),
+            Some(std::time::Duration::from_secs(60 * 5))
+        );
+        // Drosseln: größerer Abstand wirkt, kleinerer wird auf 5 geklemmt.
+        t.ereignis_minuten = 20;
+        assert_eq!(
+            t.ereignis_abstand(),
+            Some(std::time::Duration::from_secs(60 * 20))
+        );
+        t.ereignis_minuten = 1;
+        assert_eq!(
+            t.ereignis_abstand(),
+            Some(std::time::Duration::from_secs(60 * 5))
+        );
+        // Abschalten: nur der Ereignis-Auslöser, der Takt läuft weiter.
+        t.ereignis_enabled = false;
+        assert_eq!(t.ereignis_abstand(), None);
+        assert!(t.takt().is_some());
+        let wieder: TpUploadConfig =
+            serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
+        assert_eq!(wieder, t);
+    }
+
+    // ── TP-Datei an badhub (Spec tp-datei-upload, L1) ──────────────────
+    #[test]
+    fn tp_upload_config_roundtrip_und_alte_config_ohne_block() {
+        // Alte config.json ohne `tp_upload` lädt mit leerem Block …
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config lädt");
+        assert_eq!(cfg.tp_upload, TpUploadConfig::default());
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+        // … und Pfad + GUID überleben den Roundtrip unverändert.
+        let mut cfg = cfg;
+        cfg.tp_upload.path = r"C:\Turniere\Köpi-Cup 2026.TP".to_string();
+        cfg.tp_upload.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(wieder.tp_upload, cfg.tp_upload);
+    }
+
+    #[test]
+    fn tp_datei_nur_bei_gleicher_guid() {
+        let mut cfg = AppConfig::default();
+        cfg.tp_upload.path = r"D:\tp\turnier.tp".to_string();
+        // Gebunden in BTP-Schreibweise (geschweift, klein), aktuell kanonisch → passt.
+        cfg.tp_upload.tournament_uuid = "{0ea5fd86-a64f-4445-a8de-bae3dbf762ba}".to_string();
+        cfg.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        assert_eq!(
+            cfg.tp_datei_fuer_turnier(),
+            Some(std::path::PathBuf::from(r"D:\tp\turnier.tp"))
+        );
+        // GUID geändert → None („Datei neu wählen"), Pfad bleibt stehen.
+        cfg.tournament_uuid = "9AA7FE89-0000-4000-8000-000000000001".to_string();
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+        assert!(!cfg.tp_upload.path.is_empty());
+        // Keine aktuelle GUID → None.
+        cfg.tournament_uuid.clear();
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+        // Pfad leer → None, auch bei passender GUID.
+        cfg.tournament_uuid = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string();
+        cfg.tp_upload.path = "   ".to_string();
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+    }
 
     #[test]
     fn missing_file_yields_default_config() {
@@ -1619,9 +1875,11 @@ mod tests {
                 show_group: false,
                 show_court_remaining: true,
                 hide_open_matches: false,
+                show_move_buttons: false,
                 unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
+                hide_seeds: false,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],
@@ -1837,6 +2095,10 @@ mod tests {
                 share_corrections: true,
                 announce_scorekeeper: false,
                 announce_umpire: false,
+                page_audio: true,
+                legacy_output: true,
+                output_device: "wasapi:{0.0.0.00000000}.{box}".to_string(),
+                output_device_name: "USB-Box".to_string(),
             },
             azure_tts: AzureTtsConfig {
                 enabled: true,
@@ -1908,6 +2170,14 @@ mod tests {
             finished_warning_seconds: 60,
             locked_courts_tournament: "Testturnier".to_string(),
             tablet_settings_pin: "1234".to_string(),
+            tp_upload: TpUploadConfig {
+                path: r"C:\Turniere\test.tp".to_string(),
+                tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".to_string(),
+                auto_enabled: true,
+                auto_minutes: 10,
+                ereignis_enabled: false,
+                ereignis_minuten: 12,
+            },
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),
                 mime: "image/png".to_string(),
@@ -2013,6 +2283,53 @@ mod tests {
             loaded.announce.announce_umpire,
             "fehlendes announce_umpire muss true sein"
         );
+        // Ansage-Seiten (Spec ansage-im-browser, Kriterium 15): Eine alte
+        // Config lädt, und die Seiten-Vertonung bleibt aus — sie kostet
+        // Azure-Aufrufe und soll niemand ungefragt bekommen.
+        assert!(!loaded.announce.page_audio, "page_audio muss aus sein");
+        assert!(!AnnounceConfig::default().page_audio);
+    }
+
+    #[test]
+    fn announce_legacy_output_fehlt_in_alter_config_und_ist_dann_aus() {
+        // Spec `ansage-ausgabegeraet` D10: Eine config.json von vor dem
+        // Notfall-Schalter kennt das Feld nicht — sie muss laden und den
+        // neuen Abspielweg (Schalter aus) bekommen.
+        let alt: AnnounceConfig =
+            serde_json::from_str(r#"{"enabled":true,"voice_de":"Microsoft Katja","rate":0.9}"#)
+                .unwrap();
+        assert!(!alt.legacy_output);
+        assert!(alt.enabled);
+        assert!(!AnnounceConfig::default().legacy_output);
+        // Und der gesetzte Schalter überlebt den Roundtrip.
+        let an = AnnounceConfig {
+            legacy_output: true,
+            ..AnnounceConfig::default()
+        };
+        let zurueck: AnnounceConfig =
+            serde_json::from_str(&serde_json::to_string(&an).unwrap()).unwrap();
+        assert!(zurueck.legacy_output);
+    }
+
+    #[test]
+    fn announce_ausgabegeraet_fehlt_in_alter_config_und_ist_dann_standard() {
+        // Spec `ansage-ausgabegeraet`, Kriterium 23: Eine config.json von vor
+        // der Gerätewahl lädt und bedeutet Windows-Standard (leere Felder).
+        let alt: AnnounceConfig =
+            serde_json::from_str(r#"{"enabled":true,"legacy_output":false}"#).unwrap();
+        assert!(alt.output_device.is_empty());
+        assert!(alt.output_device_name.is_empty());
+        assert!(AnnounceConfig::default().output_device.is_empty());
+        assert!(AnnounceConfig::default().output_device_name.is_empty());
+        // Eine gesetzte Wahl überlebt den Roundtrip.
+        let gewaehlt = AnnounceConfig {
+            output_device: "wasapi:{0.0.0.00000000}.{abc}".to_string(),
+            output_device_name: "USB-Box".to_string(),
+            ..AnnounceConfig::default()
+        };
+        let zurueck: AnnounceConfig =
+            serde_json::from_str(&serde_json::to_string(&gewaehlt).unwrap()).unwrap();
+        assert_eq!(zurueck, gewaehlt);
     }
 
     #[test]

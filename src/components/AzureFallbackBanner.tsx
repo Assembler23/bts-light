@@ -16,7 +16,7 @@ export function AzureFallbackBanner() {
     <div className="flex items-center gap-2 bg-amber-500 px-4 py-2 text-sm font-medium text-white">
       <VolumeX size={16} className="shrink-0" />
       <span className="min-w-0">
-        Hochwertige Azure-Ansage fehlgeschlagen — die Standardstimme übernimmt.
+        Hochwertige Azure-Ansage fehlgeschlagen — die Ersatzstimme übernimmt.
         <span className="ml-1 font-normal opacity-90">({info.message})</span>
       </span>
       <button

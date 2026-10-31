@@ -67,7 +67,10 @@ einchecken, reine Quali-Teilnehmer erst, wenn sie sich qualifiziert haben.
 Gefiltert wird in `entry_list()` über `non_main_stage_entries()`
 ([`btp/model.rs`](../src-tauri/src/btp/model.rs)); die Anzahl gefilterter
 Meldungen wird geloggt (sonst fiele nie auf, warum jemand auf der Seite
-fehlt).
+fehlt) — seit v0.9.291 nur noch, wenn sich die Zahl **ändert** (auch zurück
+auf 0). Vorher stand die Zeile mit jedem BTP-Abruf alle 5 s im Log und
+machte mehr als die Hälfte des Tageslogs aus (12./13.09.2026: 10 000 von
+17 000 Zeilen).
 
 **Filterschlüssel ist der numerische `StageType`** (1 = Hauptfeld,
 2 = Qualifikation, 8 = Playoff, 9998 = Reserve, 9999 = Ausschließen —
@@ -120,7 +123,10 @@ Begründung und verworfene Alternativen stehen in
 Nachrichtentyp **`centry_list`** an denselben Endpunkt wie der Liveticker
 ([`badhub/payload.rs`](../src-tauri/src/badhub/payload.rs)):
 Turnier-GUID, Turniername, Klassen (EventID, Name, Disziplin) und Meldungen
-(EntryID, EventID, Spieler).
+(EntryID, EventID, Spieler, seit v0.9.299 optional `seed` — der Setzplatz im
+Hauptfeld als Text, „1" bzw. „3/4", fehlt bei ungesetzten Meldungen; Spec
+`setzplaetze-anzeigen`). Eine Neusetzung
+in BTP ändert die Nachricht und wird deshalb von selbst neu gesendet.
 
 **Gesendet wird nur bei echter Änderung** — Nachmeldung, Abmeldung,
 korrigierter Name, umbenannte Klasse, nachgepflegte Lizenznummer,
@@ -217,6 +223,14 @@ Seitenleisten-Punkt **Check-In**
 dort Zustand, Zeiten und die Zählung „x von y da"; aufgeklappt die Namen mit
 ihrem Zustand.
 
+**Setzplatz** (seit v0.9.298): Hinter einer gesetzten Meldung steht ihr
+Setzplatz im Hauptfeld, z. B. `[1]` oder `[3/4]` — so fällt sofort auf, wenn
+ein Gesetzter noch fehlt. Die Setzung kommt **nicht** von badhub: Der Command
+`checkin_state` ergänzt sie nach dem Abruf aus dem BTP-Stand
+(`checkin_state::setzungen_eintragen`, Verknüpfung über die Meldungs-ID).
+Liefert badhub keine Meldungs-ID (ältere Version), bleibt die Marke weg. Das
+TL-Web-Panel „Anfangszeiten" zeigt keine Setzung, weil es keine Namen zeigt.
+
 **TL-Web-Panel „Anfangszeiten"** (seit 17.08.2026): Der heutige Zeitplan
 aus demselben `GET …/tl/stand` steht auch der Turnierleitungs-Seite zur
 Verfügung — je Klasse Anfangszeit, Anmeldeschluss (ohne eigenen gilt die
@@ -246,11 +260,19 @@ und **genau zwei** Trägern: Ein badhub vor der `entry_id`-Auslieferung
 schickt überall 0 (nichts klumpt), unvollständige Doppel und Datenfehler
 (3+ Träger) bleiben ehrliche Einzelzeilen.
 
-Im Kopf der Seite stehen drei Knöpfe zur **öffentlichen badhub-Seite**:
-„Check-In-Seite öffnen" (Standard-Browser), „Link kopieren" (Zwischenablage,
-fürs Weitergeben per Messenger) und „Aushang (QR)" (die druckbare
-Aushang-Seite für die Halle). Die Adressen baut das **Backend**
-(`public_url`/`poster_url` in der `checkin_state`-Antwort, Helfer in
+Im Kopf der Seite stehen Knöpfe zu den **öffentlichen badhub-Seiten**. Vorn
+die beiden für den Turniertag: „Hallen-Ansicht" (`…/halle`, die
+Kiosk-Ansicht fürs Check-In-Tablet oder den Monitor in der Halle) und
+„Zeitplan" (`…/zeitplan`, alle Anfangszeiten). Dahinter „Check-In-Seite
+öffnen" (Standard-Browser), „Link kopieren" (Zwischenablage, fürs
+Weitergeben per Messenger) und „Aushang (QR)" (die druckbare Aushang-Seite).
+<!-- pruef: /Hallen-Ansicht\n\s*<\/button>/ in src/pages/CheckinPanel.tsx -->
+<!-- pruef: /Zeitplan\n\s*<\/button>/ in src/pages/CheckinPanel.tsx -->
+<!-- pruef: "{}/halle" in src-tauri/src/badhub/checkin_state.rs -->
+<!-- pruef: "{}/zeitplan" in src-tauri/src/badhub/checkin_state.rs -->
+Die Adressen baut das **Backend**
+(`public_url`/`poster_url`/`hall_url`/`schedule_url` in der
+`checkin_state`-Antwort, Helfer in
 [`badhub/checkin_state.rs`](../src-tauri/src/badhub/checkin_state.rs)) —
 das Frontend setzt keine URLs zusammen, Basis und GUID kennt nur die Config.
 
@@ -288,11 +310,27 @@ Check-In gerade benutzbar ist:
 | `ready` | badhub hat geantwortet | den Stand |
 | `offline` | keine Verbindung | „Der Check-In braucht Internet" — plus den Hinweis, dass das Turnier unverändert weiterläuft |
 | `unsupported` | badhub kennt den Kanal noch nicht (404/400) oder der Check-In ist nicht eingerichtet | denselben ruhigen Hinweis |
-| `rejected` | Passwort oder Kennung passen nicht (401/403) | die Aufforderung, beides zu prüfen |
+| `rejected` | Passwort oder Kennung passen nicht (401/403), oder Sperre nach Fehlversuchen (429) | **getrennt nach Ursache:** bei 401 „badhub kennt dieses Liveticker-Passwort nicht", bei 403 „Diese Turnier-Kennung gehört in badhub zu einem anderen Zugang" (das Passwort ist dann gültig) |
 
 `rejected` ist der einzige Fall, den die Turnierleitung selbst beheben kann —
 deshalb ist er als einziger von „offline" unterschieden. Ein 5xx wird wie
 offline behandelt: der nächste Abruf versucht es erneut.
+
+**429** läuft ebenfalls als `rejected`, mit eigenem Satz: badhub sperrt einen
+Anschluss (je IP) nach fünf Fehlversuchen innerhalb von 15 Minuten, nach
+fünfzig innerhalb von 24 Stunden für einen Tag. Die Meldung nennt die Dauer
+aus `Retry-After` als „spätestens" — das Fenster gleitet, die Sperre endet oft
+früher. Nicht `offline`, weil die Zähler mit dem **Liveticker-Push** geteilt
+sind: Die Sperre legt auch ihn still, der Offline-Zusatz „das Turnier läuft
+unverändert weiter" wäre falsch. Der Schreibweg zeigt bei 401/403/429 dieselben
+Sätze wie der Lesepfad, nicht badhubs knappen Text.
+
+**Woher die 403 kommt:** Eine Turnier-Kennung ist an den Zugang gebunden, der
+**zuletzt** eine Meldeliste für sie gesendet hat
+(`checkin_tournaments.tournament_key`, badhub überschreibt die Bindung bei
+jedem Push). Hat danach ein anderer Zugang dieselbe Kennung gesendet — eine
+zweite Installation, ein früherer Test —, bekommt der erste 403, auch mit
+gültigem Passwort. Sein nächster Meldelisten-Push holt die Kennung zurück.
 
 ### Eingreifen und Zeiten pflegen
 

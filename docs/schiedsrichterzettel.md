@@ -50,6 +50,24 @@ die danach erfasst wurden.
 > versehentlich vergebene Karte bleibt sichtbar.** Wer das nicht möchte, muss vor
 > dem Bestätigen genau hinsehen.
 
+### Mannschaften getauscht (seit v0.9.319)
+
+Wurde am Tablet die falsche Mannschaft als „links" aufgestellt und danach mit
+**⇄ → „Mannschaften tauschen"** berichtigt, steht auf dem Zettel eine
+Protokollzeile **„Mannschaften berichtigt"**. Alles, was davor erfasst wurde
+(Aufschlagfolge, Karten), druckt der Zettel bei der **richtigen** Mannschaft —
+der Turnier-PC rechnet es beim Lesen um (`tablet/berichtigung.rs`, ADR 0067);
+gespeichert bleibt der Bestand unverändert.
+
+- Zweimal berichtigt hebt sich auf; eine zurückgenommene Berichtigung steht
+  durchgestrichen im Protokoll und wirkt nicht mehr.
+- Im Doppel fragt das Tablet danach die Aufstellung neu ab. Ab diesem
+  Ballwechsel rechnet das Raster mit der neuen Aufstellung. **Davor** (und in
+  früheren Sätzen) kann der Zettel die beiden Spieler **innerhalb** einer
+  Mannschaft vertauscht zeigen — wer damals wo stand, weiß niemand.
+- „Seiten tauschen" ändert am Zettel nichts: er kennt nur Mannschaften, keine
+  Seiten.
+
 ### Gerätewechsel
 
 Übernimmt mitten im Spiel ein anderes Tablet das Feld, gehen **keine Ereignisse
@@ -94,7 +112,9 @@ kennen (ADR [0043](adr/0043-zettelblatt-nach-dbv-vorbild.md)):
   geraten wird nicht.
 - **Im Einzel** stehen die Spieler in Zeile 1 und 3, die anderen beiden bleiben
   frei. Der Bogen hat immer vier Zeilen.
-- **Kopf:** links Spiel-Nr., Disziplin, Feld und Datum · Mitte die beiden
+- **Kopf:** links Spiel-Nr., Disziplin (Draw-Name plus Klassen-Kürzel,
+  z. B. „Gruppe 3 A"; trägt der Draw die Klasse schon — „HE A", „HD-A" —
+  bleibt es dabei), Feld und Datum · Mitte die beiden
   Mannschaftskästen mit den Marken „L" und „R" und dazwischen das Satzergebnis ·
   rechts Schiedsrichter, Aufschlagrichter, Beginn, Ende, Dauer. Oben links steht
   das **Turnierlogo** (sofern hinterlegt) und der Turniername — **kein

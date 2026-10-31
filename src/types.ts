@@ -51,6 +51,20 @@ export interface AnnounceConfig {
   /** Schiedsrichter/Aufschlagrichter in der Feldansage nennen? Default an.
    *  Der eigene Knopf „SR/AR ansagen" bleibt davon unberührt. */
   announce_umpire: boolean;
+  /** „Audio für Ansage-Seiten erzeugen" (Spec ansage-im-browser): Der PC
+   *  vertont Ansagen für die Browser-Seite `/ansage` — unabhängig davon, ob
+   *  er selbst spricht (`enabled`). Standard aus. */
+  page_audio: boolean;
+  /** Notfall-Schalter „Alter Abspielweg" (Spec ansage-ausgabegeraet, D10):
+   *  Ansage wie bis v0.9.317 über das Programmfenster statt über den Kern.
+   *  Befristet, Standard aus. */
+  legacy_output: boolean;
+  /** Gewähltes Ausgabegerät der Ansage (Windows-Endpunkt-ID, Spec
+   *  ansage-ausgabegeraet PR 2); leer = Windows-Standard. Je PC, wird nur
+   *  über `ansage_ausgabe_setzen` geändert. */
+  output_device: string;
+  /** Name des gewählten Geräts — nur zur Anzeige, wenn es fehlt. */
+  output_device_name: string;
 }
 
 /** Azure Neural TTS für die Ansage (Rust: config::AzureTtsConfig). */
@@ -118,6 +132,50 @@ export interface ScorekeeperConfig {
 export interface PrintConfig {
   auto_enabled: boolean;
   printer_name: string;
+}
+
+/** TP-Datei an badhub (Rust: `config::TpUploadConfig`, Spec tp-datei-upload).
+ *  `path` = offene Turnierdatei von BTP, `tournament_uuid` = Turnier-GUID zum
+ *  Zeitpunkt der Dateiwahl (Bindung; weicht sie von `AppConfig.tournament_uuid`
+ *  ab, heißt es „Datei neu wählen"). */
+export interface TpUploadConfig {
+  path: string;
+  tournament_uuid: string;
+  /** Stufe 2 (Spec tp-takt-upload): automatisch senden, solange der Liveticker läuft. */
+  auto_enabled: boolean;
+  /** Takt in Minuten; Rust klemmt unter 5 (`TP_TAKT_MIN_MINUTEN`), Standard 15. */
+  auto_minutes: number;
+  /** Ereignis-Auslöser (ADR 0062): bei neuen Spielen/Paarungen vorziehen. Standard an. */
+  ereignis_enabled: boolean;
+  /** Drossel: Mindestabstand in Minuten; Rust klemmt unter 5, Standard 5. */
+  ereignis_minuten: number;
+}
+
+/** Urteil über einen gewählten Pfad (Rust: `badhub::tp_upload::TpFileInfo`). */
+export type TpFileInfo =
+  /** `guid` = Turnier-Kennung aus der Datei (`Settings.LinkCode`), kanonisch;
+   *  null, wenn die Datei keine, eine leere oder mehrere nennt. */
+  | { art: "erkannt"; groesse: number; anzeige: string; guid: string | null }
+  | { art: "keine_tp_datei" }
+  | { art: "zu_gross"; groesse: number }
+  | { art: "nicht_gefunden" };
+
+/** Stand des letzten Uploads (Rust: `commands::TpUploadStatus`). `ergebnis` ist
+ *  der fertige Dashboard-Text; `laeuft` sperrt den Knopf. */
+export interface TpUploadStatus {
+  laeuft: boolean;
+  zeitpunkt_ms: number | null;
+  groesse: number | null;
+  ergebnis: string | null;
+  /** Wer `ergebnis` zuletzt geschrieben hat (Stufe 2). */
+  quelle: "knopf" | "takt" | null;
+  /** Takt-Zustand (Rust: `tp_takt::TaktZustand`, geflattet): nächster Termin,
+   *  letzte Schnell-Prüfung, Halt-Grund. `naechster_ms` null = Takt inaktiv. */
+  naechster_ms: number | null;
+  geprueft_ms: number | null;
+  angehalten: string | null;
+  /** Warum der nächste Termin vorgezogen ist („neue Spiele“, „Paarung“); null = Takt. */
+  ereignis_grund: string | null;
 }
 
 /** Schiedsrichtermanagement — globale Schalter (Rust: config::OfficialsConfig).
@@ -193,6 +251,9 @@ export interface CheckinPlayer {
   /** Von der Turnierleitung zurückgesetzt: Selbst-Check-In gesperrt. */
   locked: boolean;
   checked_in_at: string | null;
+  /** Setzplatz der Meldung im Hauptfeld („1", „3/4"), aus dem BTP-Stand
+   *  ergänzt (Spec setzplaetze-anzeigen). Fehlt bei ungesetzten Meldungen. */
+  seed?: string | null;
 }
 
 /** Eine Spielklasse mit Check-In-Fenster und Meldungen. */
@@ -225,6 +286,10 @@ export interface CheckinView {
   public_url: string;
   /** Druckbarer QR-Aushang (`…/aushang`) zum selben Turnier. */
   poster_url: string;
+  /** Kiosk-Ansicht für das Check-In-Gerät in der Halle (`…/halle`). */
+  hall_url: string;
+  /** Zeitplan mit allen Anfangszeiten (`…/zeitplan`). */
+  schedule_url: string;
 }
 
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */
@@ -577,6 +642,15 @@ export type AnnounceJob = {
       courtId: number;
       matchId: number;
     }
+  | {
+      /** Erst-Ansage „neues Spiel auf dem Feld" — entsteht im Kern beim
+       *  Vergleich der Feldbelegung (Spec `ansage-im-browser`, E2, ADR 0064).
+       *  Nur der Master liefert sie aus; ein LAN-Ansage-Slave erkennt neue
+       *  Spiele selbst (`MatchAnnouncer`). */
+      kind: "court_assigned";
+      courtId: number;
+      matchId: number;
+    }
 );
 
 export interface AppConfig {
@@ -616,6 +690,8 @@ export interface AppConfig {
   scorekeeper: ScorekeeperConfig;
   /** Druck der Schiedsrichterzettel (Spec schiedsrichterzettel-autodruck). */
   print: PrintConfig;
+  /** TP-Datei an badhub (Spec tp-datei-upload). */
+  tp_upload: TpUploadConfig;
   /** Einstellungen der automatischen Feldvergabe. */
   auto_assign: AutoAssignConfig;
   /** Hallen-Check-In (ADR 0009). */
@@ -733,6 +809,32 @@ export interface LogoConfig {
   mime: string;
   /** CSS-Hintergrundfarbe hinter dem Logo (leer = badhub-Standard). */
   background_color: string;
+}
+
+/** Stand des Update-Ablaufs (Rust: update::UpdateInfo, Spec
+ *  `update-im-turnierbetrieb`). Das Paket wird nach dem Prüfen sofort
+ *  geladen; `ready` heißt: Einbau auf Knopfdruck oder beim Beenden. */
+export interface UpdateInfo {
+  phase:
+    | "idle"
+    | "checking"
+    | "downloading"
+    | "ready"
+    | "installing"
+    | "current"
+    | "error";
+  /** Angebotene Version (ab `downloading`). */
+  version: string | null;
+  /** „Was ist neu" aus dem Manifest. */
+  notes: string | null;
+  /** Fehlertext (nur `error`). */
+  message: string | null;
+  /** Felder, auf denen gerade ein Spiel steht. */
+  occupied_courts: number;
+  /** Läuft die Übertragung? */
+  sync_running: boolean;
+  /** Einbau beim Beenden vorgemerkt? */
+  install_on_exit: boolean;
 }
 
 export interface SyncStatus {
@@ -1078,4 +1180,50 @@ export interface CourtSwitchesView {
   sr: boolean;
   ar: boolean;
   operator: boolean;
+}
+
+// ─── Ansage-Seite im Browser (Spec ansage-im-browser) ──────────────────────
+
+/** Wofür ein Ansage-Eintrag steht (Rust: relay_proto::AnsageArt). */
+export type AnsageArt =
+  | "court_call"
+  | "prep_call"
+  | "officials"
+  | "start_play"
+  | "scorekeeper_call"
+  | "freetext"
+  | "desktop"
+  | "court_assigned";
+
+/** Eine fertige Ansage zum Vertonen (Rust: commands::AnsageAuftrag). */
+export interface AnsageAuftrag {
+  art: AnsageArt;
+  hall: string;
+  courtId?: number;
+  matchId?: number;
+  gong?: "match" | "info";
+  lang: "de" | "en";
+  rate: number;
+  segmente: string[];
+  ssml?: string;
+}
+
+/** Vom Kern beanspruchte Quellen für den Vertoner (Rust: OffeneQuellen). */
+export interface AnsageQuellen {
+  jobs: AnnounceJob[];
+  freitexte: FreetextItem[];
+}
+
+/** Zuhörer der Ansage-Seiten (Rust: commands::AnsageHoerer). */
+export interface AnsageHoerer {
+  hallen: string[];
+  doppelbetrieb: string[];
+}
+
+/** Link einer Ansage-Seite (Rust: commands::AnsageLink). */
+export interface AnsageLink {
+  hall: string;
+  url: string;
+  url_tls: string;
+  qr_svg: string;
 }

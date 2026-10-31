@@ -103,6 +103,14 @@ pub struct SyncEngine {
     /// Zuletzt geloggte Turnier-Topologie (Hallen, Felder, Matches) –
     /// das Diagnose-Log nennt sie nur bei Änderung, nicht jeden Zyklus.
     last_topology: Option<(usize, usize, usize)>,
+    /// Kern des letzten Snapshots für den Ereignis-Auslöser des TP-Uploads
+    /// (ADR 0062). `None` = noch kein Stand: Der erste Abruf nach dem Start
+    /// (auch nach dem Sync-Neustart beim Speichern) ist Ausgangslage, kein
+    /// Ereignis.
+    tp_kern: Option<crate::badhub::tp_ereignis::Kern>,
+    /// Im letzten Zyklus erkanntes Ereignis, bis der Sync-Loop es abholt
+    /// ([`SyncEngine::tp_ereignis_nehmen`]).
+    tp_ereignis: Option<&'static str>,
     /// Drossel der Perf-Zeile der Anzeige-Strecke (Spec
     /// monitor-livestand-push, S0). Sitzt hier, weil der Sync-Loop in
     /// **beiden** Betriebsarten läuft — der LAN-Server tut das nicht.
@@ -172,6 +180,13 @@ pub struct SyncEngine {
     sched_takt: SchedTakt,
     /// badhub kennt `sched` noch nicht? Dann nicht jeden Zyklus anklopfen.
     sched_unsupported_since: Option<Instant>,
+    /// Was badhub vom Punktverlauf zuletzt angenommen hat (`tverlauf`).
+    verlauf_stand: crate::badhub::verlauf::VerlaufStand,
+    /// Turnier, zu dem `verlauf_stand` gehört — ein neues sendet alles neu
+    /// (BTP-Match-IDs beginnen je Turnierdatei von vorn).
+    verlauf_turnier: String,
+    /// badhub kennt `tverlauf` noch nicht? Dann nicht jeden Zyklus anklopfen.
+    verlauf_unsupported_since: Option<Instant>,
 }
 
 /// Wie lange nach einem 404/400 des Check-In-Endpunkts pausiert wird, bevor
@@ -437,6 +452,8 @@ impl SyncEngine {
             last_push_at: None,
             logo_gesendet: None,
             last_topology: None,
+            tp_kern: None,
+            tp_ereignis: None,
             perf_log: crate::tablet::perf::PerfLog::neu(),
             oncourt_prev: HashMap::new(),
             officials_oncourt_prev: None,
@@ -452,7 +469,16 @@ impl SyncEngine {
             btp_retry_start: 0,
             sched_takt: SchedTakt::neu(),
             sched_unsupported_since: None,
+            verlauf_stand: Default::default(),
+            verlauf_turnier: String::new(),
+            verlauf_unsupported_since: None,
         }
+    }
+
+    /// Holt das im letzten Zyklus erkannte Ereignis ab (einmalig) — der
+    /// Sync-Loop reicht es an den Takt-Zustand weiter (ADR 0062).
+    pub fn tp_ereignis_nehmen(&mut self) -> Option<&'static str> {
+        self.tp_ereignis.take()
     }
 
     /// Entscheidet, ob in diesem Zyklus eine Meldeliste zu senden ist, und
@@ -573,6 +599,73 @@ impl SyncEngine {
             }
             Err(e) => {
                 tracing::warn!("Spielplan konnte nicht gesendet werden: {e}");
+            }
+        }
+    }
+
+    /// Punktverlauf und Aufschlag an badhub (`tverlauf`, badhub ADR-0060).
+    ///
+    /// Im selben 5-s-Takt wie der Score-Push, aber danach und mit eigenem
+    /// Fehlerpfad: der Liveticker-Stand ist die zeitkritische Funktion. Nur
+    /// Matches, deren Eintrag sich seit dem letzten angenommenen Push
+    /// geändert hat; ohne Änderung kein Request.
+    async fn send_verlauf(
+        &mut self,
+        config: &AppConfig,
+        http: &reqwest::Client,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+    ) {
+        use crate::badhub::verlauf;
+
+        if self
+            .verlauf_unsupported_since
+            .is_some_and(|t| t.elapsed() < CHECKIN_UNSUPPORTED_RETRY)
+        {
+            return;
+        }
+        if self.verlauf_turnier != snapshot.tournament_name {
+            self.verlauf_stand.leeren();
+            self.verlauf_turnier = snapshot.tournament_name.clone();
+        }
+        // Derselbe Stand wie der Verlauf (`overview_from`, nicht ein zweites
+        // Lesen des Tablet-Snapshots).
+        let pausen: HashMap<i64, serde_json::Value> = tablet
+            .overview_from(snapshot)
+            .into_iter()
+            .filter_map(|c| c.pause.map(|p| (c.match_id, p)))
+            .collect();
+        let alle = verlauf::eintraege(
+            snapshot,
+            |id| tablet.timeline_store().timeline(id),
+            |id| tablet.sheet_store().sheet(id),
+            &pausen,
+        );
+        let neu = self.verlauf_stand.geaendert(alle);
+        if neu.is_empty() {
+            return;
+        }
+        let msg = verlauf::build_verlauf(neu, self.rid, config.tournament_uuid_kanonisch());
+        match push::push_verlauf(http, &config.badhub.url, &config.badhub.password, &msg).await {
+            Ok(()) => {
+                tracing::debug!(
+                    spiele = msg.matches.len(),
+                    "Punktverlauf an badhub gesendet"
+                );
+                self.verlauf_stand.angenommen(&msg.matches);
+                self.verlauf_unsupported_since = None;
+            }
+            Err(push::PushError::Status(404)) | Err(push::PushError::Status(400)) => {
+                if self.verlauf_unsupported_since.is_none() {
+                    tracing::info!(
+                        "badhub kennt den Punktverlauf-Kanal noch nicht — naechster Versuch in {} Minuten",
+                        CHECKIN_UNSUPPORTED_RETRY.as_secs() / 60
+                    );
+                }
+                self.verlauf_unsupported_since = Some(Instant::now());
+            }
+            Err(e) => {
+                tracing::warn!("Punktverlauf konnte nicht gesendet werden: {e}");
             }
         }
     }
@@ -729,6 +822,24 @@ impl SyncEngine {
             }
         }
         auftraege
+    }
+
+    /// Erst-Ansage im Kern (Spec `ansage-im-browser`, E2, ADR 0064): Je
+    /// neu belegtem Feld ein Ansage-Auftrag `court_assigned`.
+    ///
+    /// Der Aufrufer steht hinter dem Slave-Rücksprung und **nach**
+    /// `track_officials`: Erst dann steht die Besetzung des frisch belegten
+    /// Felds fest, und die Ansage nennt Schiedsrichter und Bedienung.
+    /// `slave_mode` ist hier ein zweiter Riegel wie beim Autodruck — ein
+    /// LAN-Ansage-Slave erkennt neue Spiele selbst (`MatchAnnouncer`).
+    ///
+    /// Der Stand des Vergleichs lebt im `TabletState`: Diese Engine wird beim
+    /// Speichern der Einstellungen neu gebaut.
+    fn erst_ansage(config: &AppConfig, snapshot: &BtpSnapshot, tablet: &TabletState) -> usize {
+        if config.slave_mode {
+            return 0;
+        }
+        tablet.erst_ansage_pruefen(snapshot, now_ms())
     }
 
     /// Zettel-Autodruck: Für jedes Spiel, das **auf einem Feld steht und
@@ -2098,6 +2209,19 @@ impl SyncEngine {
             return SyncOutcome::SnapshotDiscarded;
         }
 
+        // Ereignis-Auslöser des TP-Uploads (ADR 0062): Auslosung oder
+        // gefüllte Paarung seit dem letzten Abruf? Nur merken — den Termin
+        // zieht der Sync-Loop vor, der den Takt-Zustand kennt.
+        {
+            let neu = crate::badhub::tp_ereignis::kern(&snapshot);
+            let (gemerkt, ereignis) =
+                crate::badhub::tp_ereignis::fortschreiben(self.tp_kern.take(), neu);
+            self.tp_kern = Some(gemerkt);
+            if ereignis.is_some() {
+                self.tp_ereignis = ereignis;
+            }
+        }
+
         // Turnier-Topologie ins Diagnose-Log – nur bei Änderung, damit es
         // den Log nicht jeden Poll-Zyklus flutet. Zeigt u. a., ob ein
         // Mehr-Hallen-Turnier korrekt erkannt wurde.
@@ -2147,6 +2271,10 @@ impl SyncEngine {
             .filter(|m| m.status == MatchStatus::OnCourt)
             .filter_map(|m| m.court_id.map(|c| (c, m.id)))
             .collect();
+        // Der Store `match_times` ist hier schon ans Turnier gebunden
+        // (`stamp_finished` weiter oben ruft `set_tournament`) — nur so
+        // greift beim ersten Lauf nach einem Neustart der Seed der
+        // Aufruf-Uhr aus `match-times.json` (Spec `update-im-turnierbetrieb`).
         tablet.reconcile_on_court(&oncourt_now, now_ms());
         // Spielzeiten-Messung (Spec `spielzeiten-prognose`, E4): der
         // persistente Erst-Stempel je Match — bewusst NACH
@@ -2217,6 +2345,9 @@ impl SyncEngine {
         // sähe der Druck systematisch keinen Schiedsrichter und bliebe
         // stumm.
         self.autodruck(config, &snapshot, tablet);
+        // Erst-Ansage (Spec `ansage-im-browser`, E2) — nach Rotation und
+        // Autodruck, damit die Besetzung des neuen Felds feststeht.
+        Self::erst_ansage(config, &snapshot, tablet);
         tablet.apply_tablet_scores(&mut snapshot);
         // Von Hand geschriebene Feldzuweisungen, die BTP inzwischen
         // zurückmeldet, brauchen keine Vormerkung mehr — sie sollen das Feld
@@ -2289,6 +2420,9 @@ impl SyncEngine {
             jetzt_ms,
         )
         .await;
+        // Punktverlauf und Aufschlag (badhub ADR-0060) — additiv wie der
+        // Spielplan, deshalb nach dem Score-Push.
+        self.send_verlauf(config, http, &snapshot, tablet).await;
         match push_result {
             Ok(()) => {
                 let outcome = match update {
@@ -2739,6 +2873,8 @@ mod tests {
                 official1_id: None,
                 official2_id: None,
                 scoring: crate::btp::model::ScoringFormat::default(),
+                team1_seed: None,
+                team2_seed: None,
             }],
         }
     }
@@ -2853,6 +2989,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -5536,6 +5674,7 @@ mod tests {
                 nationality: None,
                 club: None,
             }],
+            seed: None,
         }];
         s
     }
@@ -5662,5 +5801,246 @@ mod tests {
         );
         engine.push_roster_for_test(&cfg, &http, &snap).await;
         assert_eq!(seen.lock().await.len(), 2);
+    }
+
+    // ── Erst-Ansage im Kern (Spec `ansage-im-browser`, E2) ──
+
+    /// Die Erst-Ansagen, die ein Gerät mit `auto=1` abholen würde.
+    fn erst_ansagen(tablet: &TabletState, hall: &str) -> Vec<(i64, i64, String)> {
+        tablet
+            .announce_jobs_since(hall, 0, now_ms(), true)
+            .into_iter()
+            .filter_map(|j| match j.kind {
+                crate::tablet::state::AnnounceJobKind::CourtAssigned { court_id, match_id } => {
+                    Some((court_id, match_id, j.hall))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn erst_ansage_neues_spiel_ergibt_genau_einen_auftrag() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let leer = snap_with(vec![court(1, None), court(2, None)], Vec::new(), Vec::new());
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &leer, &tablet), 0);
+        let belegt = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![oncourt_named(10, 1, "A", "B")],
+            Vec::new(),
+        );
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &belegt, &tablet), 1);
+        assert_eq!(erst_ansagen(&tablet, ""), vec![(1, 10, String::new())]);
+        // Der nächste Lauf mit demselben Stand legt nichts nach.
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &belegt, &tablet), 0);
+        assert_eq!(erst_ansagen(&tablet, "").len(), 1);
+    }
+
+    /// Kriterium 19: App-Start mit laufenden Spielen — auch dann nicht,
+    /// wenn der erste Stand noch leer war.
+    #[test]
+    fn erst_ansage_app_start_sagt_laufende_spiele_nicht_an() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let nichts = snap_with(Vec::new(), Vec::new(), Vec::new());
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &nichts, &tablet), 0);
+        let laufend = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![
+                oncourt_named(10, 1, "A", "B"),
+                oncourt_named(11, 2, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &laufend, &tablet), 0);
+        assert!(erst_ansagen(&tablet, "").is_empty());
+    }
+
+    /// Kriterium 20: Speichern der Einstellungen baut die Engine neu — der
+    /// Stand im `TabletState` überlebt, nichts wird nachgerufen.
+    #[test]
+    fn erst_ansage_ueberlebt_neubau_der_engine() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let laufend = snap_with(
+            vec![court(1, None)],
+            vec![oncourt_named(10, 1, "A", "B")],
+            Vec::new(),
+        );
+        let mut alt = SyncEngine::new();
+        alt.track_officials(&laufend, &tablet);
+        SyncEngine::erst_ansage(&cfg, &laufend, &tablet);
+        drop(alt);
+        let mut neu = SyncEngine::new();
+        neu.track_officials(&laufend, &tablet);
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &laufend, &tablet), 0);
+        assert!(erst_ansagen(&tablet, "").is_empty());
+    }
+
+    /// Kriterium 21: Turnierwechsel ohne Neustart — keine Ansage aller Felder.
+    #[test]
+    fn erst_ansage_turnierwechsel_ruft_nichts_auf() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let alt = snap_with(vec![court(1, None)], Vec::new(), Vec::new());
+        SyncEngine::erst_ansage(&cfg, &alt, &tablet);
+        let mut neu = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![
+                oncourt_named(90, 1, "A", "B"),
+                oncourt_named(91, 2, "C", "D"),
+            ],
+            Vec::new(),
+        );
+        neu.tournament_name = "Anderes Turnier".into();
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &neu, &tablet), 0);
+    }
+
+    /// Ein Ansage-Slave erzeugt nie eine Erst-Ansage (er hat seinen
+    /// `MatchAnnouncer`) — und hinterlässt auch keinen Stand.
+    #[test]
+    fn erst_ansage_slave_erzeugt_nichts() {
+        let tablet = TabletState::default();
+        let slave = AppConfig {
+            slave_mode: true,
+            ..AppConfig::default()
+        };
+        let frei = snap_with(vec![court(1, None)], Vec::new(), Vec::new());
+        let belegt = snap_with(
+            vec![court(1, None)],
+            vec![oncourt_named(10, 1, "A", "B")],
+            Vec::new(),
+        );
+        SyncEngine::erst_ansage(&slave, &frei, &tablet);
+        assert_eq!(SyncEngine::erst_ansage(&slave, &belegt, &tablet), 0);
+        assert!(erst_ansagen(&tablet, "").is_empty());
+    }
+
+    /// Mehr-Hallen: Der Auftrag trägt die Halle des Felds; zugestellt wird
+    /// nach Halle — und ohne `auto=1` gar nicht (LAN-Slave).
+    #[test]
+    fn erst_ansage_traegt_halle_und_braucht_auto() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let hallen = vec![
+            BtpLocation {
+                id: 1,
+                name: "Halle A".into(),
+            },
+            BtpLocation {
+                id: 2,
+                name: "Halle B".into(),
+            },
+        ];
+        let frei = snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            Vec::new(),
+            hallen.clone(),
+        );
+        SyncEngine::erst_ansage(&cfg, &frei, &tablet);
+        let belegt = snap_with(
+            vec![court(1, Some(1)), court(2, Some(2))],
+            vec![
+                oncourt_named(10, 1, "A", "B"),
+                oncourt_named(20, 2, "C", "D"),
+            ],
+            hallen,
+        );
+        assert_eq!(SyncEngine::erst_ansage(&cfg, &belegt, &tablet), 2);
+        assert_eq!(
+            erst_ansagen(&tablet, "Halle A"),
+            vec![(1, 10, "Halle A".to_string())]
+        );
+        assert_eq!(
+            erst_ansagen(&tablet, "halle b"),
+            vec![(2, 20, "Halle B".to_string())]
+        );
+        assert_eq!(erst_ansagen(&tablet, "").len(), 2);
+        // Ohne `auto=1` (LAN-Ansage-Slave): keine Erst-Ansage.
+        assert!(tablet
+            .announce_jobs_since("", 0, now_ms(), false)
+            .is_empty());
+    }
+
+    /// Die Ansage-Seiten (E1) bekommen die Erst-Ansage über den Vertoner —
+    /// mit Feld und Spiel, gegen die die Seite vor dem Abspielen prüft.
+    #[test]
+    fn erst_ansage_erreicht_den_vertoner_der_seiten() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let t0 = now_ms();
+        tablet.ansage().seite_hoert("", t0);
+        // Erster Abruf des Vertoners ist Bestandsaufnahme.
+        assert!(tablet.ansage_quellen_beanspruchen(t0).jobs.is_empty());
+        SyncEngine::erst_ansage(
+            &cfg,
+            &snap_with(vec![court(1, None)], Vec::new(), Vec::new()),
+            &tablet,
+        );
+        SyncEngine::erst_ansage(
+            &cfg,
+            &snap_with(
+                vec![court(1, None)],
+                vec![oncourt_named(10, 1, "A", "B")],
+                Vec::new(),
+            ),
+            &tablet,
+        );
+        let jobs = tablet.ansage_quellen_beanspruchen(now_ms()).jobs;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].kind,
+            crate::tablet::state::AnnounceJobKind::CourtAssigned {
+                court_id: 1,
+                match_id: 10
+            }
+        );
+        // Und auf dem Draht als `court_assigned` mit courtId/matchId — so
+        // kennt sie `ANSAGE_ARTEN` der Seite und der Typ im Frontend.
+        let json = serde_json::to_value(&jobs[0]).unwrap();
+        assert_eq!(json["kind"], "court_assigned");
+        assert_eq!(json["courtId"], 1);
+        assert_eq!(json["matchId"], 10);
+        // Genau einmal beansprucht.
+        assert!(tablet.ansage_quellen_beanspruchen(now_ms()).jobs.is_empty());
+    }
+
+    /// Turniermorgen: 26 Felder in einem Lauf — alle Aufträge bleiben
+    /// liegen, auch neben einem Schwall Nachrufe der Turnierleitung.
+    #[test]
+    fn erst_ansage_burst_26_felder_ueberlebt_den_deckel() {
+        let tablet = TabletState::default();
+        let cfg = AppConfig::default();
+        let felder: Vec<BtpCourt> = (1..=26).map(|c| court(c, None)).collect();
+        SyncEngine::erst_ansage(
+            &cfg,
+            &snap_with(felder.clone(), Vec::new(), Vec::new()),
+            &tablet,
+        );
+        let spiele: Vec<BtpMatch> = (1..=26)
+            .map(|c| oncourt_named(100 + c, c, "A", "B"))
+            .collect();
+        assert_eq!(
+            SyncEngine::erst_ansage(&cfg, &snap_with(felder, spiele, Vec::new()), &tablet),
+            26
+        );
+        for i in 0..60 {
+            tablet.publish_announce_job(
+                String::new(),
+                crate::tablet::state::AnnounceJobKind::Officials { court_id: i },
+                now_ms(),
+            );
+        }
+        assert_eq!(erst_ansagen(&tablet, "").len(), 26);
+        // Der Deckel selbst: höchstens 128 Aufträge.
+        for i in 0..200 {
+            tablet.publish_announce_job(
+                String::new(),
+                crate::tablet::state::AnnounceJobKind::Officials { court_id: i },
+                now_ms(),
+            );
+        }
+        assert_eq!(tablet.announce_jobs_since("", 0, now_ms(), true).len(), 128);
     }
 }

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, ClipboardList, Copy, Plus, Trash2, X } from "lucide-react";
+import { Check, ClipboardList, Copy, ExternalLink, Plus, Trash2, X } from "lucide-react";
 import {
   getStatus,
+  openExternal,
   tlDeviceAdd,
   tlDeviceRemove,
   tlWebInfo,
@@ -227,11 +228,10 @@ export function TlWebPanel({ onConfigSaved }: Props) {
                 {/* Die Adresse zusätzlich als Text und zum Kopieren: Ohne sie
                     stünde man bei einer nicht scannbaren Kamera vor einem
                     verbrannten Zugang — und wer am selben Rechner testet,
-                    scannt gar nicht, sondern kopiert. */}
+                    scannt gar nicht, sondern kopiert — oder per Klick
+                    gleich im Browser öffnet. */}
                 <div className="flex max-w-xs items-start gap-1">
-                  <code className="break-all text-center text-[11px] text-emerald-800">
-                    {e.url}
-                  </code>
+                  <ZugangLink url={e.url} />
                   <CopyUrlButton url={e.url} />
                 </div>
               </figure>
@@ -329,6 +329,40 @@ function DeviceRow({
         </button>
       )}
     </div>
+  );
+}
+
+/** Zugangs-Adresse als Link: öffnet sie im Standardbrowser des Turnier-PCs
+ *  (R1: über den Rust-Öffner, der nur https, Loopback und den eigenen
+ *  LAN-Server zulässt). Lehnt der Kern ab — etwa weil der PC seit dem Koppeln
+ *  eine andere IP bekommen hat —, steht der Grund kurz darunter statt eines
+ *  stummen Klicks. Gleiche Mechanik wie `AddressLink` im TabletPanel.
+ *  `aria-label` statt der Adresse als Name: Ein Vorleser soll den Zugang
+ *  nicht laut vorlesen. */
+function ZugangLink({ url }: { url: string }) {
+  const [fehler, setFehler] = useState("");
+  return (
+    <span className="inline-flex flex-col items-center">
+      <button
+        type="button"
+        onClick={() => {
+          setFehler("");
+          openExternal(url).catch((err) => {
+            setFehler(String(err));
+            setTimeout(() => setFehler(""), 4000);
+          });
+        }}
+        title="Im Browser öffnen"
+        aria-label="Zugangs-Adresse im Browser öffnen"
+        className="inline-flex items-start gap-1 text-center font-mono text-[11px] text-emerald-800
+                   underline decoration-emerald-300 underline-offset-2 transition-colors
+                   hover:text-emerald-950 hover:decoration-emerald-700"
+      >
+        <span className="break-all">{url}</span>
+        <ExternalLink size={12} className="mt-0.5 shrink-0" />
+      </button>
+      {fehler && <span className="text-xs text-rose-600">{fehler}</span>}
+    </span>
   );
 }
 

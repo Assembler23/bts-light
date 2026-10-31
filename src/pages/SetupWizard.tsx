@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Check,
   Cloud,
+  Database,
   Gavel,
   Image,
   Info,
@@ -38,6 +39,7 @@ import {
   tabletOverview,
   testBtp,
   tournamentDraws,
+  tpFileCheck,
 } from "../api";
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
@@ -48,13 +50,18 @@ import {
   istUmschaltbar,
 } from "../io/badhubZiel.mjs";
 import { PRESETS, findPreset, findPresetFor } from "../presets";
-import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
+import {
+  extractTournamentGuid,
+  isTournamentGuid,
+  shortTournamentGuid,
+} from "../tournamentGuid";
 import type {
   AppConfig,
   ConnectionMode,
   CourtAd,
   DisciplineHallRule,
   DrawInfo,
+  TpFileInfo,
 } from "../types";
 
 interface Props {
@@ -65,7 +72,7 @@ interface Props {
   mode?: "wizard" | "settings";
   /** Abschnitt, zu dem beim Öffnen gescrollt wird (Sprung aus einem
    *  ausgegrauten Menüpunkt der Seitenleiste). */
-  focus?: "ansagen" | "court-monitor" | "check-in" | "schiedsrichter";
+  focus?: "ansagen" | "court-monitor" | "check-in" | "schiedsrichter" | "tp-datei";
 }
 
 type TestState =
@@ -296,6 +303,140 @@ export function SetupWizard({
   );
   // Ansage-Slave-Modus: nur BTP lesen + eigene Halle ansagen.
   const [slaveMode, setSlaveMode] = useState(initialConfig.slave_mode ?? false);
+  // TP-Datei an badhub (Spec tp-datei-upload): Pfad + GUID zum Zeitpunkt der
+  // Wahl. Die Bindung entsteht beim Wählen; eine spätere GUID-Änderung lässt
+  // den Pfad stehen und zeigt „Datei neu wählen" (nichts wird still gelöscht).
+  const [tpPath, setTpPath] = useState(initialConfig.tp_upload.path);
+  const [tpGuid, setTpGuid] = useState(initialConfig.tp_upload.tournament_uuid);
+  // Stufe 2 (Spec tp-takt-upload): Automatik-Schalter + Takt in Minuten. Der
+  // Rust-Kern klemmt unter 5; hier nur `min=5` am Feld, gespeichert wird die Eingabe.
+  const [tpAuto, setTpAuto] = useState(initialConfig.tp_upload.auto_enabled ?? false);
+  const [tpMinutes, setTpMinutes] = useState(
+    String(initialConfig.tp_upload.auto_minutes ?? 15),
+  );
+  // Ereignis-Auslöser (ADR 0062): Schalter + Drossel (Mindestabstand).
+  const [tpEreignis, setTpEreignis] = useState(
+    initialConfig.tp_upload.ereignis_enabled ?? true,
+  );
+  const [tpEreignisMinuten, setTpEreignisMinuten] = useState(
+    String(initialConfig.tp_upload.ereignis_minuten ?? 5),
+  );
+  /** Urteil über die GESPEICHERTE Datei (beim Laden geprüft; nach einer Wahl das der neuen). */
+  const [tpInfo, setTpInfo] = useState<TpFileInfo | null>(null);
+  /** Fehler der LETZTEN Wahl — bezieht sich auf die abgelehnte Datei, nicht auf den Pfad oben. */
+  const [tpError, setTpError] = useState("");
+  /** Hinweis der letzten Wahl, z. B. „Turnier-Kennung aus der Datei übernommen“. */
+  const [tpHinweis, setTpHinweis] = useState("");
+  /** Offene Rückfrage: Die Datei nennt eine andere Kennung als das Feld oben
+   *  (oder dort steht etwas, das keine Kennung ist). Erst nach „Kennung
+   *  übernehmen“ wird die Datei gespeichert und die Kennung oben ersetzt. */
+  const [tpFrage, setTpFrage] = useState<{
+    path: string;
+    name: string;
+    info: TpFileInfo;
+    dateiGuid: string;
+    /** Kanonische Kennung aus dem Feld oben; "" = Text ohne Kennung. */
+    eingetragen: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!tpPath) return;
+    tpFileCheck(tpPath).then(setTpInfo).catch(() => {});
+    // Nur beim Laden: Nach einer Wahl kommt das Urteil direkt aus pickTpDatei.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Die Bindung an die GUID entsteht beim Wählen. Die Datei nennt ihre Kennung
+  // selbst (`Settings.LinkCode`): Ist oben noch keine eingetragen, wird sie von
+  // dort übernommen; steht oben eine andere, wird die Datei abgelehnt.
+  const tpGuidJetzt = extractTournamentGuid(tournamentGuid);
+  /** Feld wirklich leer — nur dann wird die Kennung aus der Datei übernommen.
+   *  Steht dort eine halbe Adresse oder ein Tippfehler, wird nichts überschrieben. */
+  const tpFeldLeer = tournamentGuid.trim() === "";
+  /** Gebundene Kennung kanonisch — eine von Hand editierte config.json darf
+   *  keinen falschen „gehört zu einem anderen Turnier“-Hinweis auslösen. */
+  const tpGuidKanon = extractTournamentGuid(tpGuid);
+  function tpInfoText(info: TpFileInfo): string | null {
+    switch (info.art) {
+      case "erkannt":
+        return null;
+      case "zu_gross":
+        return "Die Datei ist größer als 32 MB — zu groß für den Upload.";
+      case "nicht_gefunden":
+        return "Datei nicht gefunden oder nicht lesbar — im Setup neu wählen.";
+      default:
+        return "Das ist keine TP-Datei (Turnierdatenbank von BTP).";
+    }
+  }
+  /** Antwort „Kennung übernehmen“ auf die Rückfrage: Datei speichern und die
+   *  Kennung oben durch die aus der Datei ersetzen — ausdrücklich, nie still. */
+  function uebernehmeKennungAusDatei() {
+    if (!tpFrage) return;
+    const { path, info, dateiGuid } = tpFrage;
+    setTpFrage(null);
+    setTournamentGuid(dateiGuid);
+    setTpInfo(info);
+    setTpPath(path);
+    setTpGuid(dateiGuid);
+    setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${dateiGuid}`);
+  }
+  async function pickTpDatei() {
+    setTpError("");
+    setTpHinweis("");
+    setTpFrage(null);
+    try {
+      const sel = await open({
+        multiple: false,
+        // Linux-Dialoge filtern groß/klein getrennt; BTP schreibt `.TP`.
+        filters: [{ name: "Turnierdatei (BTP)", extensions: ["tp", "TP"] }],
+      });
+      if (!sel) return;
+      const path = Array.isArray(sel) ? sel[0] : sel;
+      const name = path.split(/[\\/]/).pop() || path;
+      const info = await tpFileCheck(path);
+      const grund = tpInfoText(info);
+      if (grund !== null) {
+        // Nicht speichern (AK 1): der bisherige Pfad samt Urteil bleibt, der
+        // Fehler nennt die abgelehnte Datei.
+        setTpError(`„${name}“: ${grund}`);
+        return;
+      }
+      // Kennung aus der Datei: fehlt oben eine, wird sie übernommen. Eine
+      // ANDERE Kennung oben ist ein Fehler, keine Übernahme — sonst lenkte
+      // die Datei vom Vorjahr still den ganzen Liveticker auf ein fremdes
+      // Turnier um. Ohne Kennung in der Datei entscheidet weiter der Server.
+      const dateiGuid = info.art === "erkannt" ? (info.guid ?? "") : "";
+      let bindung = tpGuidJetzt;
+      if (bindung === "") {
+        if (dateiGuid === "") {
+          // Leer, mehrdeutig oder ohne Anker — die Datei allein reicht nicht.
+          setTpError(
+            `„${name}“ nennt keine eindeutige Turnier-Kennung — erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen, dann die Datei wählen.`,
+          );
+          return;
+        }
+        if (!tpFeldLeer) {
+          // Etwas steht im Feld, ist aber keine Kennung — nicht still
+          // ersetzen, sondern fragen.
+          setTpFrage({ path, name, info, dateiGuid, eingetragen: "" });
+          return;
+        }
+        bindung = dateiGuid;
+        setTournamentGuid(dateiGuid);
+        setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${dateiGuid}`);
+      } else if (dateiGuid !== "" && dateiGuid !== bindung) {
+        // Konflikt: Die Datei gehört zu einem anderen Turnier als die
+        // eingetragene Kennung. Nachfragen statt ablehnen — die Kennung
+        // steuert auch den Liveticker, deshalb ausdrücklich bestätigen lassen.
+        setTpFrage({ path, name, info, dateiGuid, eingetragen: bindung });
+        return;
+      }
+      setTpInfo(info);
+      setTpPath(path);
+      setTpGuid(bindung);
+    } catch (e) {
+      setTpError(String(e));
+    }
+  }
+  const tpGuidPasst = tpGuid !== "" && tpGuidJetzt === tpGuid;
   // Cloud-Ansage-Slave: Kopplungs-Code des Masters (leer = LAN-Slave, liest BTP).
   const [masterNamespace, setMasterNamespace] = useState(
     initialConfig.master_namespace ?? "",
@@ -562,6 +703,19 @@ export function SetupWizard({
       tournament_uuid: extractTournamentGuid(tournamentGuid),
       connection_mode: connectionMode,
       slave_mode: slaveMode,
+      // Unverändert durchreichen: die Bindung an die GUID entsteht nur in pickTpDatei.
+      tp_upload: {
+        path: tpPath,
+        tournament_uuid: tpGuid,
+        auto_enabled: tpAuto,
+        // 1–1440: Rust klemmt unter 5; oberhalb von u16 schlüge sonst das ganze Speichern fehl.
+        auto_minutes: Math.min(1440, Math.max(1, Math.round(Number(tpMinutes) || 15))),
+        ereignis_enabled: tpEreignis,
+        ereignis_minuten: Math.min(
+          1440,
+          Math.max(1, Math.round(Number(tpEreignisMinuten) || 5)),
+        ),
+      },
       master_namespace: masterNamespace.trim(),
       // Hier wird nur der Modul-Schalter gepflegt; alle Detail-Einstellungen
       // (Stimmen, Azure, Halle …) leben auf der Ansagen-Seite und bleiben hier
@@ -1189,6 +1343,17 @@ export function SetupWizard({
           onChange={setBtpPassword}
           type="password"
         />
+        {/* Die häufigste Stolperfalle beim ersten Start (Feldtest 06.09.2026):
+            BTP nimmt erst Verbindungen an, wenn Tournament Planner Network
+            eingeschaltet ist. Der Fehlertext sagt es dann auch — aber hier
+            steht es, BEVOR jemand rätselt. */}
+        <p className="text-xs text-slate-500">
+          Voraussetzung in BTP: Menü <strong>Extras → Tournament Planner
+          Network…</strong> öffnen und das Häkchen <strong>„Enabled"</strong>{" "}
+          setzen. Steht dort ein Passwort, gehört dasselbe in das Feld
+          „BTP-Passwort". Ohne diese Einstellung meldet der Test „Verbindung
+          verweigert".
+        </p>
         <button
           onClick={runTest}
           disabled={test.kind === "testing" || host.trim() === ""}
@@ -1208,6 +1373,205 @@ export function SetupWizard({
           </p>
         )}
       </section>
+
+      {/* TP-Datei an badhub (Spec tp-datei-upload, L1): die offene Turnierdatenbank,
+          gebunden an die Turnier-GUID zum Zeitpunkt der Wahl. Gesendet wird im
+          Dashboard; im Slave-Modus gibt es den Abschnitt nicht (nur der Master lädt hoch). */}
+      {!slaveMode && (
+        <section id="section-tp-datei" className="flex flex-col gap-2 scroll-mt-4">
+          <SectionHeader icon={Database}>TP-Datei (Turnierdatenbank)</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Die offene Turnierdatei von BTP (<code>.tp</code>) lässt sich im Dashboard an
+            badhub senden — dort entsteht noch am Turniertag ein vorläufiger Stand mit
+            Auslosungen, Gruppen, KO-Bäumen und Spielliste.{" "}
+            <strong>Alles aus der Datei wird sichtbar</strong>, Auslosungen also erst
+            senden, wenn sie veröffentlicht werden dürfen.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void pickTpDatei()}
+              className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                         text-slate-700 transition-colors hover:bg-slate-200"
+            >
+              {tpPath ? "Datei neu wählen" : "TP-Datei wählen"}
+            </button>
+            {tpPath && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTpPath("");
+                  setTpGuid("");
+                  setTpInfo(null);
+                  setTpError("");
+                  setTpHinweis("");
+                  setTpFrage(null);
+                  // Ohne Datei keine Automatik — sonst hielte sie beim nächsten
+                  // Schritt mit „Keine TP-Datei gewählt“ an (Spec AK 17a).
+                  setTpAuto(false);
+                }}
+                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm
+                           text-slate-500 transition-colors hover:bg-slate-100"
+              >
+                <Trash2 size={14} /> Entfernen
+              </button>
+            )}
+          </div>
+          {tpPath && (
+            <p className="break-all font-mono text-xs text-slate-600">{tpPath}</p>
+          )}
+          {tpFeldLeer && (
+            <p className="text-xs text-slate-500">
+              Unter „1 · Liveticker-Ziel“ ist noch keine Turnier-Kennung eingetragen —
+              beim Wählen übernimmt bts-light die Kennung aus der Datei.
+            </p>
+          )}
+          {tpPath && tpInfo?.art === "erkannt" && (
+            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+              <Check size={16} /> {tpInfo.anzeige}
+              {/* Nur, wenn die Kennung oben noch die gebundene ist — sonst
+                  stünde „passt“ neben „Datei neu wählen“. Nach einer
+                  Übernahme sagt es schon der Hinweis darunter. */}
+              {tpInfo.guid !== null &&
+                tpInfo.guid === tpGuidKanon &&
+                tpGuidPasst &&
+                !tpHinweis &&
+                " · Turnier-Kennung passt"}
+            </p>
+          )}
+          {tpPath &&
+            tpInfo?.art === "erkannt" &&
+            tpInfo.guid !== null &&
+            tpGuidKanon !== "" &&
+            tpInfo.guid !== tpGuidKanon && (
+              <p className="text-sm text-amber-700">
+                Die Datei gehört zu Turnier {shortTournamentGuid(tpInfo.guid)}, gebunden
+                ist {shortTournamentGuid(tpGuidKanon)} — Kennung unter „1 ·
+                Liveticker-Ziel“ prüfen oder andere Datei wählen.
+              </p>
+            )}
+          {tpHinweis && (
+            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+              <Check size={16} /> {tpHinweis}
+            </p>
+          )}
+          {tpFrage && (
+            <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p>
+                {tpFrage.eingetragen !== ""
+                  ? `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}, oben ist ${shortTournamentGuid(tpFrage.eingetragen)} eingetragen.`
+                  : `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}; die Eingabe unter „1 · Liveticker-Ziel“ ist keine Turnier-Kennung.`}{" "}
+                Kennung aus der Datei übernehmen? Damit zeigen auch Liveticker, Check-In
+                und Aushang auf dieses Turnier.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={uebernehmeKennungAusDatei}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white
+                             transition-colors hover:bg-amber-700"
+                >
+                  Kennung übernehmen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTpFrage(null)}
+                  className="rounded-lg px-3 py-1.5 text-sm text-slate-600 transition-colors
+                             hover:bg-slate-100"
+                >
+                  Abbrechen — Datei nicht speichern
+                </button>
+              </div>
+            </div>
+          )}
+          {tpPath && tpInfo && tpInfo.art !== "erkannt" && (
+            <p className="text-sm text-amber-700">{tpInfoText(tpInfo)}</p>
+          )}
+          {tpError && (
+            <p className="flex items-start gap-1.5 text-sm text-rose-700">
+              <X size={16} className="mt-0.5 shrink-0" /> {tpError}
+            </p>
+          )}
+          {tpPath && !tpGuidPasst && (
+            <p className="text-sm text-amber-700">
+              {tpGuid === ""
+                ? "Datei neu wählen — beim Wählen war noch keine Turnier-Kennung eingetragen."
+                : "Datei neu wählen — die Turnier-GUID hat sich seit der Dateiwahl geändert."}
+            </p>
+          )}
+          {!["127.0.0.1", "localhost"].includes(host.trim().toLowerCase()) && (
+            <p className="text-xs text-slate-500">
+              Die Datei liegt auf dem BTP-Rechner — Upload nur von dort empfohlen.
+            </p>
+          )}
+          {/* Stufe 2 (Spec tp-takt-upload, ADR 0061): nur mit gewählter Datei. */}
+          {tpPath && (
+            <div className="mt-1 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={tpAuto}
+                  onChange={(e) => setTpAuto(e.currentTarget.checked)}
+                />
+                Automatisch senden, solange der Liveticker läuft
+              </label>
+              {tpAuto && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  alle
+                  <input
+                    type="number"
+                    min={5}
+                    max={1440}
+                    step={1}
+                    value={tpMinutes}
+                    onChange={(e) => setTpMinutes(e.currentTarget.value)}
+                    className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                  />
+                  Minuten
+                  {tpMinutes.trim() !== "" && Number(tpMinutes) < 5 && (
+                    <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
+                  )}
+                </label>
+              )}
+              {/* Ereignis-Auslöser (ADR 0062): abschalt- und drosselbar, falls
+                  Netz oder badhub zu viel abbekommen — dann bleibt der Takt. */}
+              {tpAuto && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={tpEreignis}
+                    onChange={(e) => setTpEreignis(e.currentTarget.checked)}
+                  />
+                  Bei neuen Spielen und Paarungen sofort prüfen
+                </label>
+              )}
+              {tpAuto && tpEreignis && (
+                <label className="flex items-center gap-2 pl-6 text-sm text-slate-600">
+                  höchstens alle
+                  <input
+                    type="number"
+                    min={5}
+                    max={1440}
+                    step={1}
+                    value={tpEreignisMinuten}
+                    onChange={(e) => setTpEreignisMinuten(e.currentTarget.value)}
+                    className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                  />
+                  Minuten
+                  {tpEreignisMinuten.trim() !== "" && Number(tpEreignisMinuten) < 5 && (
+                    <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
+                  )}
+                </label>
+              )}
+              <p className="text-xs text-slate-500">
+                Damit sendet bts-light jede Änderung der Datei von selbst — auch neue
+                Auslosungen, sobald sie in BTP stehen. Ohne laufenden Liveticker passiert
+                nichts; gesendet wird nur, wenn sich die Datei geändert hat.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Schritt 3: Badhub (nur manuell) */}
       {isManual && (

@@ -182,6 +182,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -362,6 +364,7 @@ mod tests {
                 id: 10,
                 event_id: 1,
                 players: vec![player(1, "Anna", "Beispiel")],
+                seed: None,
             }],
             officials: Vec::new(),
         }
@@ -404,6 +407,7 @@ mod tests {
                 nationality: None,
                 club: None,
             }],
+            seed: None,
         });
         assert!(roster_update(Some(&sent), roster_of(&with_extra, 2)).is_some());
     }

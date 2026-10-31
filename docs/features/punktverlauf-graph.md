@@ -198,6 +198,13 @@ TDD, `cargo test` grün, `npm run build` fehlerfrei:
   `docs/btp_protocol.md` (Startdatum-Setting), `docs/changelog.md`
   (beim Release).
 
+## Nachtrag: Mannschaften getauscht (v0.9.319)
+
+„Mannschaften tauschen" am Tablet ([tablet-seiten-korrigieren](tablet-seiten-korrigieren.md),
+ADR 0067) kippt den Verlauf A↔B und schickt ihn per `rally_sync`; der Host
+ersetzt wie nach einem Undo. Nach einer Tablet-Übernahme gehen dabei die
+Ballwechsel-Details früherer Sätze verloren (AK-12 greift nicht mehr).
+
 ## Umsetzungs-Hinweise
 
 Reihenfolge und Details: [How-To (Phase 3)]-Ergebnis, verdichtet:

@@ -8,7 +8,10 @@ import { playNameTest, playTestAnnouncement } from "../io/announcer";
 import { azureOption } from "../io/azureAnnounce";
 import { useInheritedAzureVoice } from "../state/azureStatus";
 import { BASE_NAME_OVERRIDES } from "../io/nameOverrideBase";
-import { useAvailableVoices, voicesForLang } from "../state/useAvailableVoices";
+import {
+  stimmenAuswahlWert,
+  useStimmenOptionen,
+} from "../state/useAvailableVoices";
 import type { AnnounceLanguageMode, AppConfig, NameOverride } from "../types";
 
 export function AnnounceSettings({
@@ -18,7 +21,9 @@ export function AnnounceSettings({
   config: AppConfig;
   onSaved: (config: AppConfig) => void;
 }) {
-  const voices = useAvailableVoices();
+  // Stimmen aus Windows (Kern), sonst aus dem Browser (ADR 0066).
+  const stimmenDe = useStimmenOptionen("de");
+  const stimmenEn = useStimmenOptionen("en");
   const inheritedVoice = useInheritedAzureVoice();
   const a = config.announce;
   const az = config.azure_tts;
@@ -27,6 +32,7 @@ export function AnnounceSettings({
   const [annVoiceEn, setAnnVoiceEn] = useState(a.voice_en);
   const [annRate, setAnnRate] = useState(a.rate);
   const [annGong, setAnnGong] = useState(a.gong);
+  const [annLegacy, setAnnLegacy] = useState(a.legacy_output === true);
   const [annNameOverrides, setAnnNameOverrides] = useState<NameOverride[]>(
     a.name_overrides ?? [],
   );
@@ -117,6 +123,7 @@ export function AnnounceSettings({
         voice_en: annVoiceEn,
         rate: annRate,
         gong: annGong,
+        legacy_output: annLegacy,
         name_overrides: cleanOverrides,
         name_overrides_enabled: annOverridesEnabled,
         share_corrections: annShare,
@@ -262,15 +269,15 @@ export function AnnounceSettings({
               Deutsche Stimme
             </span>
             <select
-              value={annVoiceDe}
+              value={stimmenAuswahlWert(annVoiceDe, stimmenDe)}
               onChange={(e) => setAnnVoiceDe(e.currentTarget.value)}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
                          focus:border-slate-500 focus:outline-none"
             >
               <option value="">Standardstimme</option>
-              {voicesForLang(voices, "de").map((v) => (
-                <option key={v.voiceURI} value={v.voiceURI}>
-                  {v.name}
+              {stimmenDe.map((v) => (
+                <option key={v.value} value={v.value}>
+                  {v.label}
                 </option>
               ))}
             </select>
@@ -280,15 +287,15 @@ export function AnnounceSettings({
               Englische Stimme
             </span>
             <select
-              value={annVoiceEn}
+              value={stimmenAuswahlWert(annVoiceEn, stimmenEn)}
               onChange={(e) => setAnnVoiceEn(e.currentTarget.value)}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
                          focus:border-slate-500 focus:outline-none"
             >
               <option value="">Standardstimme</option>
-              {voicesForLang(voices, "en").map((v) => (
-                <option key={v.voiceURI} value={v.voiceURI}>
-                  {v.name}
+              {stimmenEn.map((v) => (
+                <option key={v.value} value={v.value}>
+                  {v.label}
                 </option>
               ))}
             </select>
@@ -320,6 +327,25 @@ export function AnnounceSettings({
           onChange={(e) => setAnnGong(e.currentTarget.checked)}
         />
         Gong vor der Ansage
+      </label>
+
+      {/* Notfall-Schalter (Spec ansage-ausgabegeraet, D10, befristet): Falls
+          die Ausgabe über Windows am Turniertag Probleme macht, ohne Update
+          zum Weg bis v0.9.317 zurück. */}
+      <label className="flex items-start gap-2 text-sm text-slate-600">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={annLegacy}
+          onChange={(e) => setAnnLegacy(e.currentTarget.checked)}
+        />
+        <span>
+          Alter Abspielweg (über das Programmfenster)
+          <span className="block text-xs text-slate-400">
+            Nur im Notfall: Die Ansage folgt dann einem Wechsel des
+            Ausgabegeräts (Klinke, USB-Box) nicht mehr von selbst.
+          </span>
+        </span>
       </label>
 
       {/* Wer außer den Spielern genannt wird. Beide Schalter wirken auf die

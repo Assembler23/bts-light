@@ -169,6 +169,13 @@ pub struct TsetMatch {
     pub p1: Vec<String>,
     pub p1_member_ids: Vec<Option<String>>,
     pub p1_nationalities: Vec<Option<String>>,
+    /// Setzplatz von Team 1 bzw. 2 als Text („1", „3/4"; ohne Klammern,
+    /// Spec setzplaetze-anzeigen, ADR 0059). Fehlt bei ungesetzten Seiten —
+    /// ein älterer badhub-Parser sieht den bisherigen Payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p0_seed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p1_seed: Option<String>,
     /// Ende-Zeitstempel (nur bei beendeten Matches).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_ts: Option<u64>,
@@ -231,6 +238,8 @@ fn to_tset_match(m: &BtpMatch) -> TsetMatch {
         p1: m.team2.iter().map(|p| p.name.clone()).collect(),
         p1_member_ids: m.team2.iter().map(|p| p.member_id.clone()).collect(),
         p1_nationalities: m.team2.iter().map(|p| p.nationality.clone()).collect(),
+        p0_seed: m.team1_seed.clone(),
+        p1_seed: m.team2_seed.clone(),
         end_ts: None,
         team1_won: None,
         match_num: None,
@@ -727,6 +736,12 @@ pub struct RosterEntry {
     pub entry_id: i64,
     pub event_id: i64,
     pub players: Vec<RosterPlayer>,
+    /// Setzplatz der Meldung im Hauptfeld („1", „3/4"; Spec
+    /// setzplaetze-anzeigen). Fehlt bei ungesetzten Meldungen. Eine
+    /// Neusetzung ändert die Nachricht und löst damit von selbst einen
+    /// Neuversand aus (`same_content_as`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
 }
 
 /// Ein gemeldeter Spieler.
@@ -784,6 +799,7 @@ pub fn build_checkin_roster(
         .map(|e| RosterEntry {
             entry_id: e.id,
             event_id: e.event_id,
+            seed: e.seed.clone(),
             players: e
                 .players
                 .iter()
@@ -873,6 +889,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -1149,6 +1167,36 @@ mod tests {
         assert_eq!(m.p0_member_ids, [Some("08-001234".to_string())]);
         assert_eq!(m.p1, ["Ben Schmidt"]);
         assert_eq!(m.p1_member_ids, [None]);
+    }
+
+    /// Spec setzplaetze-anzeigen (PR 2): Der Liveticker bekommt den
+    /// Setzplatz je Seite als Text; eine ungesetzte Seite fehlt im JSON.
+    #[test]
+    fn tset_traegt_die_setzung_nur_wenn_gesetzt() {
+        let mut gesetzt = sample_match(14, MatchStatus::OnCourt, Some("1"));
+        gesetzt.team1_seed = Some("3/4".into());
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+            matches: vec![gesetzt],
+        };
+        let msg = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        );
+        let m = &msg.event.matches[0];
+        assert_eq!(m.p0_seed.as_deref(), Some("3/4"));
+        assert_eq!(m.p1_seed, None);
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""p0_seed":"3/4""#), "{json}");
+        assert!(!json.contains("p1_seed"), "{json}");
     }
 
     #[test]
@@ -1575,6 +1623,7 @@ mod tests {
                     id: 10,
                     event_id: 1,
                     players: vec![roster_player(1, "Anna", "Beispiel")],
+                    seed: None,
                 },
                 BtpEntry {
                     id: 11,
@@ -1583,6 +1632,7 @@ mod tests {
                         roster_player(1, "Anna", "Beispiel"),
                         roster_player(2, "Bea", "Muster"),
                     ],
+                    seed: None,
                 },
             ],
             officials: Vec::new(),
@@ -1608,6 +1658,25 @@ mod tests {
         assert!(!json.contains("nationality"));
         // Datenschutz: nie ein Geburtsjahr, auch nicht mittelbar.
         assert!(!json.contains("birth"));
+    }
+
+    /// Spec setzplaetze-anzeigen (PR 2): Die Meldeliste trägt die
+    /// Hauptfeld-Setzung; eine Neusetzung ändert die Nachricht und wird
+    /// damit neu gesendet.
+    #[test]
+    fn checkin_roster_traegt_die_setzung_und_eine_neusetzung_wird_gesendet() {
+        let mut snap = roster_snapshot();
+        let ohne = build_checkin_roster(&snap, "GUID-1", 1);
+        assert!(!serde_json::to_string(&ohne).unwrap().contains("seed"));
+
+        snap.entries[1].seed = Some("1".into());
+        let mit = build_checkin_roster(&snap, "GUID-1", 2);
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""seed":"1""#), "{json}");
+        assert!(
+            crate::badhub::diff::roster_update(Some(&ohne), mit).is_some(),
+            "eine Neusetzung muss die Meldeliste neu senden"
+        );
     }
 
     #[test]

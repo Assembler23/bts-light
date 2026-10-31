@@ -142,9 +142,12 @@ Feldbelegung, egal welche Halle). In einem 2-Hallen-Setup soll aber jede Halle
 - **Einstellung** `AnnounceConfig.announce_hall` (BTP-Location-Name; leer = alle
   Hallen). UI im SetupWizard-Abschnitt „Sprachansagen" (Auswahl erscheint ab
   ≥2 erkannten Hallen). `config.rs`, `src/types.ts`, `SetupWizard.tsx`.
-- **Filter:** `MatchAnnouncer.tsx` sagt eine neue Feldbelegung nur an, wenn
-  `court.location == announce_hall` (sonst alle). Einzelhallen-Turniere bleiben
-  unverändert (Feld leer).
+- **Filter:** Am Master entsteht die Erst-Ansage seit v0.9.314 im Kern
+  (`tablet/erst_ansage.rs`, Auftrag `court_assigned` mit der Halle des Felds,
+  ADR 0064); die Zustellung (`announce_jobs_since`) liefert nur Aufträge der
+  eingestellten Halle (oder ohne Halle). Am LAN-Slave sagt `MatchAnnouncer.tsx`
+  eine neue Feldbelegung nur an, wenn `court.location == announce_hall`
+  (sonst alle). Einzelhallen-Turniere bleiben unverändert (Feld leer).
 - **Infobox:** sobald `is_multi_hall()` greift, zeigt die Status-Seite
   (`Dashboard.tsx`) einen Hinweis mit den erkannten Hallen + Sprung zur
   Einstellung.
@@ -188,8 +191,10 @@ Azure-/Web-Speech-Stimme, ohne Audio-Übertragung.
 - **Config:** `AppConfig.slave_mode: bool` (`config.rs`). Aktiv →
   `start_sync` (`commands.rs`) startet **keinen** Tablet-Server/mDNS/Relay; die
   Sync-Engine (`sync.rs::run_once`) **liest** BTP + `set_snapshot` (damit der
-  `MatchAnnouncer` ansagt), **überspringt** aber Auto-Feldvergabe und
-  Liveticker-Push (`SyncOutcome::SlaveActive`). Schreibt nie nach BTP.
+  `MatchAnnouncer` ansagt), **überspringt** aber Auto-Feldvergabe,
+  Liveticker-Push und die Erst-Ansage im Kern (`SyncOutcome::SlaveActive`).
+  Schreibt nie nach BTP. Aufträge holt der LAN-Slave vom Master **ohne**
+  `?auto=1` — `court_assigned` bleibt draußen, sonst sagte er doppelt an.
 - **Halle:** über die bestehende „Ansagen nur für Halle X"-Einstellung
   (`announce.announce_hall`, Phase 1) — der Slave sagt nur seine Halle an.
 - **UI:** Schalter „Ansage-Slave-Modus" oben im SetupWizard.
@@ -274,6 +279,20 @@ dass die Zusage nicht an der Position eines Aufrufs hängt.
 Für eine zweite Halle richtet man dort einen **Netzwerkdrucker** ein und wählt
 ihn am Master in den Einstellungen aus — die Zettel gehen dann quer durchs Netz
 in die richtige Halle.
+
+## Turnierdatei an badhub: nur der Master lädt hoch
+
+Der Upload der TP-Datei (Spec
+[features/tp-datei-upload.md](features/tp-datei-upload.md), Handbuch
+[Turnierdatei an badhub senden](tp-datei-upload.md)) gehört auf den Turnier-PC,
+der BTP hält: Nur dort liegt die offene Datei, und nur dort greift das
+Schreib-Gate (ADR 0060), das die eigenen BTP-Writes während der Kopie
+zurückhält. Ein Ansage-Slave zeigt weder den Setup-Abschnitt noch den Knopf,
+und `pruefe_upload_bedingungen` lehnt im `slave_mode` ab — unabhängig von der
+Oberfläche. Dasselbe gilt für die Automatik (Spec
+[features/tp-takt-upload.md](features/tp-takt-upload.md)): `start_sync`
+startet den Takt-Task nur bei `!slave_mode`, und der Takt-Schritt prüft den
+Modus vor jedem Lauf erneut.
 
 ## Master-Identität umziehen (v0.9.161, ADR 0006)
 

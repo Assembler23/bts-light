@@ -199,6 +199,15 @@ pruefe(
   seite.includes('href="pi-image/bts-light-pi.img.xz.sha256"'),
   "Release-Seite verlinkt die Pruefsumme des Pi-Images"
 );
+// Das Test-Image fuer den Pi 3 B+ steht bewusst als ZWEITER Link daneben und
+// muss den Vorbehalt fuer den Zero 2 W tragen — sonst haelt es jemand fuer den
+// Standard und beschreibt damit Karten fuer die vorhandenen Zero 2 W.
+pruefe(
+  seite.includes('href="pi-image/bts-light-pi-v2.img.xz"') &&
+    seite.includes('href="pi-image/bts-light-pi-v2.img.xz.sha256"') &&
+    seite.includes("Mit dem Pi Zero 2&nbsp;W noch nicht geprüft"),
+  "Release-Seite verlinkt das Test-Image fuer den Pi 3 B+ samt Pruefsumme und Vorbehalt"
+);
 pruefe(
   seite.includes('href="#pi-image"') && seite.includes('id="pi-image"'),
   "Kopf-Knopf neben dem Programm-Download springt zum Pi-Image-Block"

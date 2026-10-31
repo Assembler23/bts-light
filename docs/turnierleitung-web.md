@@ -22,9 +22,9 @@ anzeigen — auch nicht für Sie. Geht ein Gerät verloren, entziehen Sie ihm
 den Zugang und koppeln neu. Das ist der kürzere Weg als ein Zugang, der
 dauerhaft in einer Liste steht und irgendwann jemand anderes liest.
 
-Klappt das Scannen nicht, steht die Adresse unter dem QR-Code auch als Text —
-mit einem Kopier-Knopf daneben, etwa um sie am selben Rechner in einem
-Browser-Tab zu öffnen oder per Messenger auf das Gerät zu bringen.
+Klappt das Scannen nicht, steht die Adresse unter dem QR-Code auch als Text.
+Ein Klick darauf öffnet sie am selben Rechner im Browser; mit dem
+Kopier-Knopf daneben bringen Sie sie etwa per Messenger auf das Gerät.
 Sie enthält den Zugang hinter einem `#` — dieser Teil wird von keinem
 Browser an einen Server geschickt und taucht deshalb in keinem Protokoll auf.
 
@@ -122,6 +122,10 @@ LAN+Cloud voraus.
   Schreibweise — `HE-C`, `HD-D` — vor Auslosung und Runde. Turniere
   benennen ihre Gruppen frei, und „Gruppe 6" allein verrät nicht, worum es
   geht. Fehlt eine der beiden Hälften, steht die andere für sich.
+  Jugendklassen heißen wie auf dem Aushang `JE-U15`, `ME-U11`, `JD-U17`,
+  `MD-U13`, `MX-U19` — BTP kennt nur Herren und Damen, die Jugend erkennt
+  bts-light an der Altersklasse „U" + Zahl.
+  <!-- pruef: "Jungeneinzel" in src-tauri/assets/tl.html -->
 - **Bereitschaft als Farbe statt Text** (seit 17.08.2026): Die früheren
   Hinweistexte („nicht bereit", „X spielt gerade", „pausiert noch bis …",
   „ohne Halle") machten die Liste unübersichtlich und sind weg. Stattdessen:
@@ -176,6 +180,10 @@ LAN+Cloud voraus.
   **Abschalten:** In der `config.json` steht `finished_warning_seconds`
   (Default 60). `0` schaltet die Warnung ganz ab — der Rückzugsweg, falls sie
   im laufenden Turnier zu oft danebenliegt.
+- **Vom Feld nehmen im ⋯-Menü** (seit v0.9.280): Ein belegtes Feld bietet in
+  seinem ⋯-Menü **„↩ Vom Feld nehmen"** — derselbe Befehl wie im Band nach dem
+  Antippen der Kachel, nur ohne vorherige Auswahl. Läuft dort schon ein
+  Spielstand, fragt die Seite nach, weil er verloren geht.
 - **Felder sperren und freigeben** (seit v0.9.258): Im ⋯-Menü einer
   Feld-Kachel steht **„🔒 Feld sperren"**. Ein gesperrtes Feld bekommt von der
   automatischen Vergabe kein Spiel mehr — für ein kaputtes Netz, ein
@@ -348,6 +356,14 @@ bringen. Die automatische Feldvergabe überspringt diese Spiele ebenfalls, und
 sie bekommen **keine** Startzeit-Prognose — sonst verschöben sie die Prognose
 aller anderen.
 
+**Setzplätze** (seit v0.9.298): Gesetzte Paarungen tragen in der Spielliste
+und auf der Feldkachel ihren Setzplatz hinter dem Namen, z. B. `[1]` oder
+`[3/4]`. Das hilft bei der Frage, welches Spiel aufs Hauptfeld gehört. Im
+**Profile**-Knopf lässt sich das mit dem Häkchen „Setzplätze zeigen"
+ausschalten; standardmäßig ist es **an**, auch in bestehenden Profilen.
+Spiele mit noch offener Paarung und beendete Spiele zeigen keine Setzung.
+<!-- pruef: "Setzplätze zeigen" in src-tauri/assets/tl.html -->
+
 **Ausblenden:** Wer lieber die kurze Arbeitsliste sieht, nimmt im
 **Profile**-Knopf das Häkchen „Spiele mit noch offener Paarung zeigen"
 heraus. Der Schalter gilt für das Profil, also je Gerät — standardmäßig ist
@@ -406,6 +422,32 @@ nichts, auch nicht am Rand der Liste.
 **Ohne Ziehen:** Den Griff antippen bzw. mit Tab anfokussieren und mit ↑/↓
 verschieben. Ein Schritt je Tastendruck. Auch der **↑-Knopf** und die übrigen
 Knöpfe der Zeile lassen sich mit Tab ansteuern und mit Enter auslösen.
+
+**Vier Verschiebe-Knöpfe statt Ziehen** (seit v0.9.280, Profil-Schalter):
+Wo Ziehen nicht praktikabel ist (kleiner Bildschirm, ungenauer Stift,
+Handschuhe), schaltet das Häkchen **„Verschiebe-Knöpfe an jeder Zeile"** im
+Profil-Editor an jeder umsortierbaren Zeile vier Knöpfe frei: **⤒** an den
+Anfang, **↑** eine Position nach oben, **↓** eine nach unten, **⤓** ans Ende.
+Sie ersetzen den einzelnen ↑-Knopf und stehen immer in derselben Reihe; was
+gerade nicht geht, ist ausgegraut statt versteckt: ⤒/↑ an der ersten Zeile,
+↓/⤓ an der letzten — Letzteres nur, wenn die ganze Liste geladen ist. „Ans
+Ende" heißt das echte Ende der Liste, auch wenn sie noch nicht bis dorthin
+geladen ist; alles bis dahin Sichtbare gilt danach als von Hand sortiert.
+„Eine nach unten" an der letzten geladenen Zeile schiebt vor das nächste
+noch nicht geladene Spiel. Standard ist **aus** — die Zeile wird damit
+spürbar breiter.
+
+**Behoben in v0.9.280:**
+
+- Das **Ziehen** am Griff endete seit v0.9.271 fast immer damit, dass die
+  Zeile an ihren Platz zurücksprang und nichts gesendet wurde. Ursache: Der
+  Browser gibt den Zeigerfang eines Elements frei, sobald es beim
+  Einsortieren im DOM umgehängt wird, und das Sicherheitsnetz gegen
+  verlorene Gesten hielt das für einen Abbruch. Jetzt holt sich der Zug den
+  Fang zurück; nur wenn das nicht mehr geht, gilt die Geste als verworfen.
+- **Zweimal „an den Anfang"** (erst Spiel A, dann Spiel B) warf A wieder auf
+  seinen BTP-Platz zurück, statt es an zweiter Stelle zu halten. Der manuell
+  sortierte Block bleibt jetzt bei jedem Zug vollständig erhalten.
 
 ### Ein Spiel von der automatischen Feldvergabe ausnehmen
 
@@ -816,6 +858,15 @@ ohne WebSocket), fällt die Seite **geräuschlos** auf das bisherige
 Verhalten zurück — alle zwei Sekunden fragen. Es gibt nichts
 einzustellen und nichts zu bemerken; auch die Verbindungsanzeige oben
 rechts bedeutet unverändert dasselbe.
+
+Seit v0.9.287 hat der Stand-Abruf eine **Frist** (Kopfzeilen 5 s, Rumpf
+15 s): Ein Abruf, der weder scheitert noch antwortet — etwa weil das Handy
+zwischen zwei Access-Points gewechselt hat —, hielt vorher die Seite fest,
+und die Verbindungsanzeige meldete dabei weiter „aktuell", weil nur ein
+**gescheiterter** Abruf zählt. Jetzt endet er als Fehler, die Anzeige zeigt
+das Alter der Daten, und der nächste Abruf läuft auf frischer Verbindung.
+Dieselbe Regel wie bei den Court-Monitoren
+([court-monitor.md](court-monitor.md), „Frist für den Stand-Abruf").
 
 Technisch: `/tl-ws` trägt nur die Revisionsnummer, nie Turnierdaten
 (Spec [features/tl-web-push.md](features/tl-web-push.md), ADR 0034).

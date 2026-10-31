@@ -6,6 +6,7 @@ import {
   Check,
   Cloud,
   Copy,
+  ExternalLink,
   Info,
   LayoutGrid,
   Megaphone,
@@ -14,7 +15,7 @@ import {
   Tablet,
   Wifi,
 } from "lucide-react";
-import { tabletOverview } from "../api";
+import { openExternal, tabletOverview } from "../api";
 import { HallFilter } from "../components/HallFilter";
 import type {
   AnnounceConfig,
@@ -318,8 +319,8 @@ export function TabletPanel({ announce, azureTts }: Props) {
               {zoom.court.court}
               {mehrereAdressen && <AddressBadge kind={zoom.address.kind} />}
             </div>
-            <div className="mt-1 max-w-[20rem] break-all text-sm text-slate-500">
-              {zoom.address.courtUrl}
+            <div className="mt-1 max-w-[20rem] text-sm">
+              <AddressLink url={zoom.address.courtUrl} umbruch />
             </div>
             <div className="mt-3 text-xs text-slate-400">
               Zum Schließen tippen
@@ -404,8 +405,8 @@ function QrCard({
           </button>
           <div className="min-w-0 flex-1">
             {both && <AddressBadge kind={addr.kind} />}
-            <div className="truncate text-xs text-slate-500">
-              {addr.courtUrl}
+            <div className="truncate text-xs">
+              <AddressLink url={addr.courtUrl} />
             </div>
           </div>
           <CopyUrlButton url={addr.courtUrl} />
@@ -553,6 +554,40 @@ function CourtCard({ court }: { court: CourtOverview }) {
         <div className="mt-1 text-sm text-slate-400">frei</div>
       )}
     </div>
+  );
+}
+
+/** Tablet-Adresse als Link: öffnet sie im Standardbrowser des Turnier-PCs
+ *  (R1: über den Rust-Öffner, der nur https, Loopback und den eigenen
+ *  LAN-Server zulässt). `stopPropagation`, damit der Klick in der
+ *  QR-Vergrößerung das Overlay nicht schließt. `umbruch`: ganze Adresse
+ *  zeigen (Vergrößerung) statt abzuschneiden (Liste). Lehnt der Kern ab —
+ *  etwa weil der PC gerade eine andere IP hat als die angezeigte —, steht
+ *  der Grund kurz unter dem Link statt eines stummen Klicks. */
+function AddressLink({ url, umbruch = false }: { url: string; umbruch?: boolean }) {
+  const [fehler, setFehler] = useState("");
+  return (
+    <span className="inline-flex max-w-full flex-col items-start">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setFehler("");
+          openExternal(url).catch((err) => {
+            setFehler(String(err));
+            setTimeout(() => setFehler(""), 4000);
+          });
+        }}
+        title="Im Browser öffnen"
+        className="inline-flex max-w-full items-center gap-1 text-left text-slate-500
+                   underline decoration-slate-300 underline-offset-2 transition-colors
+                   hover:text-sky-700 hover:decoration-sky-400"
+      >
+        <span className={umbruch ? "break-all" : "truncate"}>{url}</span>
+        <ExternalLink size={12} className="shrink-0" />
+      </button>
+      {fehler && <span className="text-xs text-rose-600">{fehler}</span>}
+    </span>
   );
 }
 

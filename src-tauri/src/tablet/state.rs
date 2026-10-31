@@ -159,6 +159,12 @@ pub struct CourtOverview {
     /// keinen führt) – zuschaltbares Anzeige-Feld in TL-Web/Tablet.
     pub team1_clubs: Vec<String>,
     pub team2_clubs: Vec<String>,
+    /// Setzplatz von Team 1 als Text („1", „3/4"), aus dem BTP-Match
+    /// (ADR 0059). Ohne Schalter: Monitore zeigen ihn immer, wenn gesetzt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team1_seed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team2_seed: Option<String>,
     /// Aktueller Satzstand – vom Tablet, falls aktiv, sonst aus BTP.
     pub sets: Vec<(i64, i64)>,
     pub tablet_connected: bool,
@@ -508,6 +514,13 @@ pub struct TabletState {
     /// das aktuelle Spiel auf dem Feld steht. Grundlage des Aufruf-Timers; vom
     /// Sync-Loop je Poll abgeglichen.
     on_court_since: RwLock<HashMap<i64, (i64, u64)>>,
+    /// Hat der erste Abgleich nach dem Prozessstart schon stattgefunden?
+    /// Nur dieser erste Lauf darf die Feldstempel aus dem persistierten
+    /// Bruttostart (`match-times.json`) übernehmen — sonst begänne die
+    /// Aufruf-Uhr nach jedem Update bei null (Spec
+    /// `update-im-turnierbetrieb`). Danach gilt wieder: ein Spiel, das neu
+    /// aufs Feld kommt, wird mit „jetzt" gestempelt.
+    on_court_seeded: AtomicBool,
     /// Aktuell für die Siegerehrung gewählte Disziplin (Draw-ID), die der
     /// Sieger-Monitor zeigt. `None` = nichts gewählt (Begrüßungsbild). Vom
     /// Operator in bts-light gesetzt; NICHT rotierend — die Ehrung wird
@@ -684,6 +697,14 @@ pub struct TabletState {
     announce_seq: AtomicU64,
     /// Zuletzt gesehene Ansage-Geräte: Halle (klein) → Zeitpunkt des Abrufs.
     announce_listeners: RwLock<HashMap<String, u64>>,
+    /// Ansagen für die Browser-Seite `/ansage` samt deren Zuhörern (Spec
+    /// `ansage-im-browser`) — nur im RAM.
+    ansage: crate::tablet::ansage::AnsageStore,
+    /// Feldbelegung für die Erst-Ansage im Kern (Spec `ansage-im-browser`,
+    /// E2). Bewusst hier und nicht in der `SyncEngine`: Die wird beim
+    /// Speichern der Einstellungen neu gebaut, ein Merker dort riefe danach
+    /// alle laufenden Spiele erneut auf.
+    erst_ansage: Mutex<crate::tablet::erst_ansage::ErstAnsageStand>,
     /// Fehlgeschlagene BTP-Ergebnis-Writes, die der Sync-Loop nachschiebt
     /// (Nachschub-Queue, Cluster A5 — needsync-Prinzip aus Tilos BTS,
     /// robuster: periodischer Retry statt nur beim Reconnect). Je Match
@@ -948,7 +969,7 @@ const BTP_RETRY_CAP: usize = 200;
 /// Eine manuelle Freitext-Ansage. `hall` = Ziel-Halle (BTP-Location-Name;
 /// leer = alle Hallen). `id` ist fortlaufend, damit Sprecher (Master/Slaves)
 /// nur neue Einträge ansagen.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FreetextItem {
     pub id: u64,
     pub hall: String,
@@ -1054,6 +1075,17 @@ pub enum AnnounceJobKind {
         #[serde(rename = "matchId")]
         match_id: i64,
     },
+    /// Erst-Ansage „neues Spiel auf dem Feld" — entsteht im Kern beim
+    /// Vergleich der Feldbelegung (Spec `ansage-im-browser`, E2, ADR 0064).
+    /// Geht über `/info/announce/jobs` nur mit `?auto=1` hinaus: Ein
+    /// LAN-Ansage-Slave erkennt neue Spiele selbst und sagte sonst doppelt an.
+    CourtAssigned {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        /// Die Ansage verstummt, wenn inzwischen ein anderes Spiel dort steht.
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
     /// Auffang für Ansagearten, die dieser Stand noch nicht kennt.
     #[serde(other)]
     Unknown,
@@ -1132,6 +1164,12 @@ pub fn announce_jobs_aus_json(json: &str) -> Vec<AnnounceJob> {
 /// Ein Gerät, das eine Minute weg war, soll beim Wiederkommen nicht die
 /// Aufrufe der letzten Minute nachplärren — die Spiele laufen längst.
 const ANNOUNCE_JOB_TTL_MS: u64 = 60_000;
+
+/// Obergrenze der Ansage-Aufträge. Seit der Erst-Ansage im Kern (E2) legt
+/// der Turniermorgen einen Schwall ab — eine Feldvergabe über alle Felder in
+/// einem Lauf. Bei 50 hätten 26 Felder zusammen mit Nachrufen der
+/// Turnierleitung schon Aufträge verdrängt, bevor ein Gerät sie abholte.
+const MAX_ANNOUNCE_JOBS: usize = 128;
 
 /// So lange gilt ein Ansage-Gerät nach seinem letzten Abruf als anwesend.
 ///
@@ -1624,6 +1662,89 @@ impl TabletState {
     /// `schiedsrichterzettel-autodruck`).
     pub fn print_log(&self) -> &crate::tablet::print_log::PrintLogStore {
         &self.print_log
+    }
+
+    /// Ablage der Browser-Ansagen (Spec `ansage-im-browser`).
+    pub fn ansage(&self) -> &crate::tablet::ansage::AnsageStore {
+        &self.ansage
+    }
+
+    /// Beansprucht für den Vertoner die TL-Aufträge und Freitexte, die noch
+    /// keiner bekommen hat (siehe [`crate::tablet::ansage::AnsageStore::beanspruche`]).
+    ///
+    /// Liest die Aufträge **direkt**, nicht über [`Self::announce_jobs_since`]:
+    /// Dieser Abruf ist kein Ansage-Gerät und darf der Turnierleitung nicht
+    /// melden, es höre jemand zu.
+    pub fn ansage_quellen_beanspruchen(&self, now_ms: u64) -> crate::tablet::ansage::OffeneQuellen {
+        let jobs: Vec<AnnounceJob> = self
+            .announce_jobs
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|j| j.created_at_ms + ANNOUNCE_JOB_TTL_MS > now_ms)
+            .cloned()
+            .collect();
+        let freitexte = self.freetext.read().unwrap().clone();
+        self.ansage.beanspruche(jobs, freitexte, now_ms)
+    }
+
+    /// Welches Spiel gerade auf welchem Feld steht — die Abspiel-Kontrolle
+    /// der Ansage-Seiten. Direkt aus dem BTP-Stand (R2), ohne den teuren
+    /// Bau der Feld-Übersicht: Eine Seite fragt alle 1,5 s.
+    pub fn ansage_belegung(&self) -> Vec<relay_proto::AnsageBelegung> {
+        let guard = self.snapshot.read().unwrap();
+        let Some(snap) = guard.as_ref() else {
+            return Vec::new();
+        };
+        snap.matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| {
+                m.court_id.map(|court_id| relay_proto::AnsageBelegung {
+                    court_id,
+                    match_id: m.id,
+                })
+            })
+            .collect()
+    }
+
+    /// Die Hallen zur Auswahl auf der Ansage-Seite — leer, solange das
+    /// Turnier nur eine Halle hat (dann gibt es nichts zu wählen).
+    pub fn ansage_hallen(&self) -> Vec<String> {
+        let mehrere = self
+            .snapshot
+            .read()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|s| s.is_multi_hall());
+        if !mehrere {
+            return Vec::new();
+        }
+        let mut hallen = self.hall_names();
+        hallen.sort();
+        hallen.dedup();
+        hallen
+    }
+
+    /// Hallen, in denen eine Ansage-Seite **und** ein klassisches
+    /// Ansage-Gerät (diese App mit „Ansagen aktivieren" oder ein
+    /// Windows-Ansage-Slave) zugleich zuhören — dort klänge jeder Aufruf
+    /// doppelt. Die Oberfläche warnt; verhindert wird es bewusst nicht
+    /// (Grundentscheidung „Doppelbetrieb").
+    pub fn ansage_doppelbetrieb(&self, now_ms: u64) -> Vec<String> {
+        let klassisch: Vec<String> = self
+            .announce_listeners
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|(_, seen)| **seen + ANNOUNCE_LISTENER_TTL_MS > now_ms)
+            .map(|(hall, _)| hall.clone())
+            .collect();
+        self.ansage
+            .seiten_hallen(now_ms)
+            .into_iter()
+            .filter(|seite| klassisch.iter().any(|k| relay_proto::halle_passt(seite, k)))
+            .collect()
     }
 
     /// Der Spielzeiten-Speicher (Spec `spielzeiten-prognose`) — geteilt von
@@ -2338,13 +2459,40 @@ impl TabletState {
     /// oder gewechseltes Spiel wird mit `now` gestempelt; verlässt ein Spiel
     /// das Feld, fällt sein Eintrag weg. Idempotent – mehrfacher Aufruf mit
     /// gleichem Stand ändert die Zeitstempel nicht.
+    ///
+    /// **Erster Lauf nach dem Prozessstart:** Spiele, die schon auf dem Feld
+    /// stehen, bekommen den persistierten Bruttostart aus `match-times.json`
+    /// statt „jetzt" — so läuft die Aufruf-Uhr nach einem Update oder
+    /// Neustart weiter, statt bei null zu beginnen. Fehlt der Stempel
+    /// (Spiel wurde vor dem Start der App in BTP aufgerufen), bleibt es bei
+    /// „jetzt".
     pub fn reconcile_on_court(&self, oncourt: &HashMap<i64, i64>, now: u64) {
+        // Der Seed zählt erst, wenn der Store ans Turnier gebunden ist
+        // (Review 06.09.2026): Vorher ist er leer — etwa solange eine
+        // unlesbare `match-times.json` noch Ladeversuche bekommt — und der
+        // einmalige erste Lauf wäre folgenlos verbraucht. Ungebunden bleibt
+        // das Flag stehen, der Seed wartet auf den nächsten Poll.
+        let store_gebunden = !self.match_times.tournament().is_empty();
+        let erster_lauf = store_gebunden && !self.on_court_seeded.swap(true, Ordering::SeqCst);
+        // Stempel VOR dem Schreib-Lock holen — der Store hat sein eigenes
+        // Lock, und verschachtelte Locks sind hier unnötig.
+        let seed = |mid: i64| {
+            if erster_lauf {
+                self.match_times.first_assigned_ms(mid)
+            } else {
+                None
+            }
+        };
+        let neu: Vec<(i64, i64, u64)> = oncourt
+            .iter()
+            .map(|(&court_id, &mid)| (court_id, mid, seed(mid).unwrap_or(now)))
+            .collect();
         let mut map = self.on_court_since.write().unwrap();
         // Felder vergessen, auf denen jetzt kein bzw. ein anderes Spiel steht.
         map.retain(|court_id, (mid, _)| oncourt.get(court_id) == Some(mid));
         // Neu hinzugekommene Spiele stempeln (gewechselte sind oben rausgeflogen).
-        for (&court_id, &mid) in oncourt {
-            map.entry(court_id).or_insert((mid, now));
+        for (court_id, mid, ts) in neu {
+            map.entry(court_id).or_insert((mid, ts));
         }
         // Die Aufrufe gehören zur Standzeit: Verlässt ein Spiel das Feld,
         // müssen auch seine Aufrufe vergessen werden. Sonst zeigte dasselbe
@@ -4120,10 +4268,58 @@ impl TabletState {
         // werden nie wieder gesprochen und müssen nicht mitwachsen.
         g.retain(|j| j.created_at_ms + ANNOUNCE_JOB_TTL_MS > now_ms);
         let len = g.len();
-        if len > 50 {
-            g.drain(0..len - 50);
+        if len > MAX_ANNOUNCE_JOBS {
+            g.drain(0..len - MAX_ANNOUNCE_JOBS);
         }
         id
+    }
+
+    /// Erst-Ansage im Kern (Spec `ansage-im-browser`, E2): vergleicht die
+    /// Feldbelegung dieses Stands mit der zuletzt gesehenen und legt je neu
+    /// belegtem Feld einen Auftrag `court_assigned` ab. Liefert die Zahl der
+    /// Aufträge.
+    ///
+    /// Nur der Master ruft das (Sync-Lauf, hinter dem Slave-Rücksprung) —
+    /// ein Slave kennt dieselben Felder und erzeugte sonst eine zweite
+    /// Ansage-Quelle.
+    pub fn erst_ansage_pruefen(&self, snap: &BtpSnapshot, now_ms: u64) -> usize {
+        use crate::tablet::erst_ansage::Feld;
+        let belegt: HashMap<i64, i64> = snap
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .filter_map(|m| m.court_id.map(|c| (c, m.id)))
+            .collect();
+        let felder: Vec<Feld> = snap
+            .court_infos
+            .iter()
+            .map(|c| Feld {
+                court_id: c.id,
+                match_id: belegt.get(&c.id).copied().unwrap_or(0),
+                // Dieselbe Halle wie in der Feld-Übersicht (`location`), an
+                // der sich der Hallenfilter der Desktop-Ansage bisher maß.
+                hall: snap.court_location_name(c.id),
+            })
+            .collect();
+        let neue =
+            self.erst_ansage
+                .lock()
+                .unwrap()
+                .vergleiche(&snap.tournament_name, &felder, now_ms);
+        for f in &neue {
+            self.publish_announce_job(
+                f.hall.clone(),
+                AnnounceJobKind::CourtAssigned {
+                    court_id: f.court_id,
+                    match_id: f.match_id,
+                },
+                now_ms,
+            );
+        }
+        if !neue.is_empty() {
+            tracing::info!("Erst-Ansage: {} Feld(er) neu belegt", neue.len());
+        }
+        neue.len()
     }
 
     /// Aufträge mit `id > since` für `hall`, die noch nicht verfallen sind.
@@ -4135,7 +4331,18 @@ impl TabletState {
     /// Nebenbei zählt der Abruf als Lebenszeichen der Halle: Wer abholt, ist
     /// ein Ansage-Gerät. Nur so kann die Turnierleitung erfahren, dass ihr
     /// Aufruf nirgends erklingt.
-    pub fn announce_jobs_since(&self, hall: &str, since: u64, now_ms: u64) -> Vec<AnnounceJob> {
+    ///
+    /// `mit_auto` entscheidet über die Erst-Ansage `court_assigned`: Die
+    /// Desktop-App am Master holt sie ab, ein LAN-Ansage-Slave nicht — der
+    /// erkennt neue Spiele selbst (`MatchAnnouncer`) und sagte sonst doppelt
+    /// an.
+    pub fn announce_jobs_since(
+        &self,
+        hall: &str,
+        since: u64,
+        now_ms: u64,
+        mit_auto: bool,
+    ) -> Vec<AnnounceJob> {
         let h = hall.trim();
         {
             // Die Abhol-Route steht im Hallennetz offen und der Hallenname
@@ -4156,6 +4363,7 @@ impl TabletState {
             .iter()
             .filter(|j| j.id > since)
             .filter(|j| j.created_at_ms + ANNOUNCE_JOB_TTL_MS > now_ms)
+            .filter(|j| mit_auto || !matches!(j.kind, AnnounceJobKind::CourtAssigned { .. }))
             .filter(|j| {
                 let target = j.hall.trim();
                 h.is_empty() || target.is_empty() || target.eq_ignore_ascii_case(h)
@@ -4174,6 +4382,12 @@ impl TabletState {
     /// Die Frist ist großzügig gegenüber dem Abfragetakt: Ein einzelner
     /// ausgefallener Abruf soll nicht als „niemand da" gelten.
     pub fn has_announce_listener(&self, hall: &str, now_ms: u64) -> bool {
+        // Eine Ansage-Seite im Browser zählt genauso (Spec
+        // `ansage-im-browser`): Sie meldet sich nur, wenn sie wirklich
+        // sprechen kann und der Ton freigeschaltet ist.
+        if self.ansage.hat_seite(hall, now_ms) {
+            return true;
+        }
         let h = hall.trim().to_lowercase();
         self.announce_listeners
             .read()
@@ -4338,6 +4552,8 @@ impl TabletState {
                     team2_nationalities: m.map(|mm| nationalities(&mm.team2)).unwrap_or_default(),
                     team1_clubs: m.map(|mm| clubs(&mm.team1)).unwrap_or_default(),
                     team2_clubs: m.map(|mm| clubs(&mm.team2)).unwrap_or_default(),
+                    team1_seed: m.and_then(|mm| mm.team1_seed.clone()),
+                    team2_seed: m.and_then(|mm| mm.team2_seed.clone()),
                     sets,
                     tablet_connected,
                     // Aufruf-Stufe aus der gemeinsamen Zählung: Beide
@@ -4675,6 +4891,8 @@ mod tests {
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
+            team1_seed: None,
+            team2_seed: None,
         }
     }
 
@@ -4807,6 +5025,23 @@ mod tests {
         let c2 = ov.iter().find(|o| o.court_id == 102).unwrap();
         assert_eq!(c2.match_name, "");
         assert!(!c2.tablet_connected);
+    }
+
+    /// Spec setzplaetze-anzeigen: Der Setzplatz reist vom BTP-Match in die
+    /// Übersicht (`/health`); eine ungesetzte Seite fehlt im JSON.
+    #[test]
+    fn overview_traegt_die_setzung() {
+        let st = TabletState::default();
+        let mut m = match_on(1, Some(101), MatchStatus::OnCourt);
+        m.team1_seed = Some("3/4".into());
+        st.set_snapshot(snapshot(vec![m], vec![(101, "Court 1")]));
+        let ov = st.overview();
+        let c1 = ov.iter().find(|o| o.court_id == 101).unwrap();
+        assert_eq!(c1.team1_seed.as_deref(), Some("3/4"));
+        assert_eq!(c1.team2_seed, None);
+        let json = serde_json::to_string(c1).unwrap();
+        assert!(json.contains("\"team1_seed\":\"3/4\""), "{json}");
+        assert!(!json.contains("team2_seed"), "{json}");
     }
 
     #[test]
@@ -5431,7 +5666,7 @@ mod tests {
         // Ansage-Gerät verbunden", während der Aufruf gerade erklingt, und
         // jemand ruft zur Sicherheit per Funk ein zweites Mal.
         let st = TabletState::default();
-        st.announce_jobs_since("Halle A", 0, 10_000);
+        st.announce_jobs_since("Halle A", 0, 10_000, true);
         assert!(
             st.has_announce_listener("", 10_000),
             "das Gerät in Halle A hört auch den Aufruf ohne Halle"
@@ -5446,7 +5681,7 @@ mod tests {
         // mitsamt Tablet-Server und BTP-Übertragung.
         let st = TabletState::default();
         for i in 0..500 {
-            st.announce_jobs_since(&format!("Halle {i}"), 0, 10_000);
+            st.announce_jobs_since(&format!("Halle {i}"), 0, 10_000, true);
         }
         assert!(
             st.announce_listener_count() <= 64,
@@ -5454,7 +5689,7 @@ mod tests {
             st.announce_listener_count()
         );
         // Ein überlanger Name wird gekappt statt in voller Länge behalten.
-        st.announce_jobs_since(&"A".repeat(4096), 0, 10_000);
+        st.announce_jobs_since(&"A".repeat(4096), 0, 10_000, true);
         assert!(st.longest_announce_listener_key() <= 128);
     }
 
@@ -5467,7 +5702,7 @@ mod tests {
         let st = TabletState::default();
         assert!(!st.has_announce_listener("Halle A", 10_000));
 
-        st.announce_jobs_since("Halle A", 0, 10_000);
+        st.announce_jobs_since("Halle A", 0, 10_000, true);
         assert!(st.has_announce_listener("Halle A", 10_000));
         assert!(
             !st.has_announce_listener("Halle B", 10_000),
@@ -5475,7 +5710,7 @@ mod tests {
         );
 
         // Ein Gerät ohne eingestellte Halle spricht für alle (Einzelhalle).
-        st.announce_jobs_since("", 0, 10_000);
+        st.announce_jobs_since("", 0, 10_000, true);
         assert!(st.has_announce_listener("Halle B", 10_000));
 
         // Und wer lange nicht mehr abgeholt hat, zählt nicht mehr.
@@ -5499,10 +5734,10 @@ mod tests {
             },
             now,
         );
-        assert!(st.announce_jobs_since("Halle A", 0, now).is_empty());
-        assert_eq!(st.announce_jobs_since("Halle B", 0, now).len(), 1);
+        assert!(st.announce_jobs_since("Halle A", 0, now, true).is_empty());
+        assert_eq!(st.announce_jobs_since("Halle B", 0, now, true).len(), 1);
         assert_eq!(
-            st.announce_jobs_since("", 0, now).len(),
+            st.announce_jobs_since("", 0, now, true).len(),
             1,
             "ohne Halle: alles"
         );
@@ -5521,12 +5756,12 @@ mod tests {
         };
         st.publish_announce_job(String::new(), job, 100_000);
         assert_eq!(
-            st.announce_jobs_since("", 0, 155_000).len(),
+            st.announce_jobs_since("", 0, 155_000, true).len(),
             1,
             "55 s: noch gültig"
         );
         assert!(
-            st.announce_jobs_since("", 0, 161_000).is_empty(),
+            st.announce_jobs_since("", 0, 161_000, true).is_empty(),
             "nach 60 s verfällt der Auftrag"
         );
     }
@@ -5546,10 +5781,10 @@ mod tests {
         let first = st.publish_announce_job(String::new(), kind.clone(), 1_000);
         let second = st.publish_announce_job(String::new(), kind, 1_000);
         assert!(second > first, "die Nummer läuft weiter");
-        let neu = st.announce_jobs_since("", first, 1_000);
+        let neu = st.announce_jobs_since("", first, 1_000, true);
         assert_eq!(neu.len(), 1);
         assert_eq!(neu[0].id, second);
-        assert!(st.announce_jobs_since("", second, 1_000).is_empty());
+        assert!(st.announce_jobs_since("", second, 1_000, true).is_empty());
     }
 
     #[test]
@@ -6077,6 +6312,59 @@ mod tests {
         // Feld wird frei: Eintrag verschwindet.
         st.reconcile_on_court(&HashMap::new(), 9000);
         assert_eq!(st.on_court_since_ms(1, 200), None);
+    }
+
+    /// Nach einem Neustart (Update) übernimmt der ERSTE Abgleich den
+    /// persistierten Bruttostart, damit die Aufruf-Uhr weiterläuft; spätere
+    /// Abgleiche stempeln wie gehabt mit „jetzt" (Spec
+    /// `update-im-turnierbetrieb`).
+    #[test]
+    fn on_court_since_uebernimmt_beim_ersten_lauf_den_persistierten_start() {
+        let st = TabletState::default();
+        st.match_times_store().set_tournament("Testturnier");
+        // „Vor dem Neustart": Match 100 seit t=1000 auf dem Feld, Stempel
+        // liegt im Store (der die Datei überlebt hätte).
+        st.match_times_store()
+            .reconcile(&[(100, "HE", "mens_singles", "")], &HashSet::new(), 1000);
+
+        // Erster Abgleich der neuen App-Instanz bei t=60000: alter Stempel.
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(1000));
+
+        // Match 200 hat ebenfalls einen alten Stempel, kommt aber erst im
+        // ZWEITEN Lauf aufs Feld (Feldwechsel im laufenden Betrieb): „jetzt".
+        st.match_times_store()
+            .reconcile(&[(200, "HE", "mens_singles", "")], &HashSet::new(), 2000);
+        st.reconcile_on_court(&HashMap::from([(1, 100), (2, 200)]), 70_000);
+        assert_eq!(st.on_court_since_ms(2, 200), Some(70_000));
+        assert_eq!(st.on_court_since_ms(1, 100), Some(1000), "bleibt");
+    }
+
+    /// Ohne persistierten Stempel bleibt auch der erste Lauf bei „jetzt".
+    #[test]
+    fn on_court_since_erster_lauf_ohne_store_stempel_nimmt_jetzt() {
+        let st = TabletState::default();
+        st.match_times_store().set_tournament("Testturnier");
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000));
+    }
+
+    /// Solange der Store nicht ans Turnier gebunden ist, wird der erste Lauf
+    /// NICHT verbraucht — der Seed greift, sobald die Bindung da ist.
+    #[test]
+    fn on_court_since_seed_wartet_auf_die_store_bindung() {
+        let st = TabletState::default();
+        // Ungebunden: Feld 1 wird mit „jetzt" gestempelt, Flag bleibt frei.
+        st.reconcile_on_court(&HashMap::from([(1, 100)]), 60_000);
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000));
+
+        st.match_times_store().set_tournament("Testturnier");
+        st.match_times_store()
+            .reconcile(&[(200, "HE", "mens_singles", "")], &HashSet::new(), 1000);
+        // Erster GEBUNDENER Lauf: Match 200 bekommt seinen alten Stempel.
+        st.reconcile_on_court(&HashMap::from([(1, 100), (2, 200)]), 61_000);
+        assert_eq!(st.on_court_since_ms(2, 200), Some(1000));
+        assert_eq!(st.on_court_since_ms(1, 100), Some(60_000), "bleibt");
     }
 
     /// Reconnect-Erkennung (Turnier-Feedback 18.07.2026): Das Feld merkt

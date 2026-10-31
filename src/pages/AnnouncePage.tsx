@@ -3,6 +3,7 @@
 // für wiederkehrende Ansagen und ein Verlauf der letzten zehn manuell/Freitext
 // ausgelösten Ansagen mit „Erneut abspielen". Alle Ansage-Detail-Einstellungen
 // liegen unten im Abschnitt „Ansage-Einstellungen".
+import { AnsageAusgabeAnzeige } from "../components/AnsageAusgabeAnzeige";
 import { useEffect, useState } from "react";
 import {
   Bookmark,
@@ -15,11 +16,12 @@ import {
 } from "lucide-react";
 import { publishFreetext, saveConfig, tabletOverview } from "../api";
 import { AnnounceSettings } from "../components/AnnounceSettings";
+import { AnsageSeitenPanel } from "../components/AnsageSeitenPanel";
 import { CallTimerBadge } from "../components/CallTimerBadge";
 import { announceCourt } from "../io/announceCourt";
+import { vorbereitungAnsagen } from "../io/ansageTeilen";
 import {
   disciplineWithClass,
-  playPreparationAnnouncement,
   playTestAnnouncement,
   resolveAnnouncementLanguage,
 } from "../io/announcer";
@@ -180,7 +182,7 @@ export function AnnouncePage({
     const names = side === "a" ? p.team1 : p.team2;
     const nats = side === "a" ? p.team1_nationalities : p.team2_nationalities;
     const lang = resolveAnnouncementLanguage(nats, announce.language_mode);
-    void playPreparationAnnouncement(
+    vorbereitungAnsagen(
       {
         discipline: (p.discipline || "unknown") as Discipline,
         className: p.class_label,
@@ -290,6 +292,8 @@ export function AnnouncePage({
       >
         <Volume2 size={16} /> Test-Ansage abspielen
       </button>
+
+      <AnsageAusgabeAnzeige config={config} onSaved={onConfigSaved} />
 
       {/* Freitext-Ansage: eintippen → in einer Halle oder allen ansagen. */}
       <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
@@ -590,6 +594,7 @@ export function AnnouncePage({
 
       {/* Alle Ansage-Einstellungen (Sprache, Stimmen, Tempo, Gong, Aussprache,
           Halle, Azure) — in den Einstellungen wird das Modul nur an-/ausgeschaltet. */}
+      <AnsageSeitenPanel config={config} onSaved={onConfigSaved} />
       <AnnounceSettings config={config} onSaved={onConfigSaved} />
     </main>
   );

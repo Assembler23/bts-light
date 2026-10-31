@@ -24,6 +24,7 @@ automatisch mit umgestellt.
 | Strecke | Weg |
 |---|---|
 | Liveticker-Push (`live_update.php`) | `badhub.url` direkt |
+| TP-Datei-Upload (`tp-upload`, `tp-upload/status`) | `badhub::tp_upload::tp_upload_url` aus `badhub.url` (letztes Segment ersetzt) — auf `test.badhub.de` nur mit Basic-Auth-Ausnahme für `/api/tp-upload`, sonst „badhub kennt den Upload noch nicht" |
 | Live-Seite, Aushang-QR | `badhub.live_url` |
 | Hallen-Check-In, TL-Panel, Aussprache-Wörterbuch, Vereinslogos, Logo-/Sponsoren-Push | `commands::badhub_origin` aus `badhub.url` |
 | Cloud-Relay (Tablets, TL-Web, Monitore, Slave-Brücke) | Prozess-Schalter → `badhub_host::relay_https`/`relay_wss` |

@@ -8,6 +8,12 @@ Kein Code aus phihag/bts wurde übernommen – siehe [NOTICE.md](../NOTICE.md).
 
 ## Transport
 
+> **Vorbedingung in BTP:** Der TCP-Dienst läuft nur, wenn in BTP unter
+> **Extras → Tournament Planner Network…** das Häkchen „Enabled" gesetzt
+> ist. Sonst verweigert der Port die Verbindung (`os error 10061`);
+> `btp::client::ClientError::Connect` hängt in diesem Fall die Anleitung an
+> den Fehlertext (`TP_NETWORK_HINWEIS`).
+
 - **TCP**, Port **9901** (BTP, Einzelturniere) bzw. **9911** (BLP, Liga/Team).
 - BTP läuft als Server, der Client verbindet sich.
 - **Jeder Request ist eine eigene, kurzlebige TCP-Verbindung.** Der Server
@@ -167,13 +173,30 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
   `StageType`: **1 = Hauptfeld, 2 = Qualifikation, 8 = Playoff, 9998 =
   Reserve, 9999 = Ausschließen** (am Mitschnitt + laufendem Turnier
   gemessen). Der Typ ist stabil; der Stage-**Name** ist frei benennbar.
-- `StageEntries` → `StageEntry{ID, EntryID, StageID, Status, Seed1?}` – die
+- `StageEntries` → `StageEntry{ID, EntryID, StageID, Status, Seed1?, Seed2?}` – die
   **maßgebliche Zuordnung Meldung → Stage** (Struktur-Probe 12.08.2026,
   `tests/checkin_roster_probe.rs`). Ein Turnier mit 424 Meldungen hat 424
   `StageEntry`-Einträge; darüber steht, ob eine Meldung im Hauptfeld,
   in Reserve oder in Ausschließen liegt. **`Entry.StageID` bleibt in
   echten Daten leer** — der Hauptfeld-Filter der Check-In-Liste liest
   deshalb primär `StageEntries` ([spieler-check-in.md](spieler-check-in.md)).
+  **Setzplätze** stehen ebenfalls hier (Probe 12.10.2026,
+  `tests/btp_seed_probe.rs`, lokales Test-BTP, 13 Konkurrenzen):
+  - `Seed1` = Setzplatz bzw. untere Grenze, `Seed2` = obere Grenze eines
+    geteilten Platzes. Beides `Int`. Beispiele: `Seed1=1` → „1“,
+    `Seed1=3 Seed2=4` → „3/4“, `Seed1=5 Seed2=8` → „5/8“.
+  - Ungesetzte Meldungen haben **gar kein** Seed-Feld (nicht `0`).
+  - Die Setzung hängt **je Stage**, nicht je Meldung: Eine gesetzte
+    Meldung, die aus der Gruppe ins Playoff kommt, trägt sie an beiden
+    `StageEntry`-Einträgen (Hauptfeld **und** Playoff). Im Messturnier
+    waren die Werte an beiden stets gleich; dass BTP sie je Stage
+    unterschiedlich setzen *kann*, ist nicht ausgeschlossen.
+  - Ausreißer: Ein Eintrag hatte nur `Seed2=6` ohne `Seed1`. Ein Parser
+    muss den Fall verkraften, ohne ihn zu erfinden.
+  - Am `Event` gibt es zusätzlich `SeparateSeeding` (Bool, im Messturnier
+    überall `false`). Was der Schalter bewirkt, ist nicht gemessen.
+
+  bts-light liest die Setzplätze **noch nicht** aus.
 - `Courts` → `Court`
 - `Locations` → `Location` – Standorte/Hallen, von `Court.LocationID` referenziert
 - `Officials` → `Official` (Schiedsrichter)
@@ -350,6 +373,30 @@ gesetzt", wie bei `LocationID`) in
 
 ### Die Reihenfolge der angesetzten Spiele
 
+**Seit 30.10.2026 (v0.9.317): `PlannedTime → DisplayOrder → DrawID →
+MatchNr → ID`.** Gemessen am „Liveticker Test Turnier" gegen die
+BTP-Ansicht **„Spiele – Angesetzt"** und gegen die TP-Datei:
+
+- `DisplayOrder` im Protokoll ist `PlayerMatch.matchorder` in der Datei.
+  Es ist die Reihenfolge **innerhalb eines Zeitfensters**, die BTP in der
+  Liste zeigt. Jedes Zeitfenster zählt neu ab 1 (10:20: XD #13/#14/#15 =
+  1/2/3, HE-A Gruppe E = 13/14). Die BTP-Liste folgt dem in allen
+  Zeitfenstern des Testturniers Position für Position.
+- **Ohne Wert (0) steht ein Spiel in BTP vor den geordneten seines
+  Zeitfensters, nicht dahinter.** Das Modell macht aus 0 `None`, der
+  Sortierschlüssel wieder 0.
+- Bei gleichem `DisplayOrder` (praktisch: alle 0) entscheiden wie bisher
+  Auslosung und Spielnummer. Wie BTP selbst unter lauter Nullen ordnet, ist
+  nur für gerufene Spiele gesehen (dort nach Feld). Für die Warteliste ist
+  es nicht gemessen, die Auslosung bleibt die Annahme aus der Messung von
+  2026.
+- Die TP-Datei kennt außerdem die Tabellen `OrderOfPlay`/`OrderOfPlayItem`
+  (Druck-Spielplan) und `tournamentschedule`. In den untersuchten Dateien
+  sind sie leer oder tragen keine Reihenfolge, die das Protokoll nicht schon
+  liefert. Der Weg über die Datei ist für die Reihenfolge also unnötig.
+
+Der Rest dieses Abschnitts ist die Vorgeschichte.
+
 **`PlannedTime` + Auslosung (`DrawID`) ergeben zusammen die gedruckte
 Spielliste.** Beides ist nötig, und beides war lange falsch bzw. gar nicht
 ausgewertet:
@@ -368,7 +415,10 @@ ausgewertet:
   einem echten Turnier trugen aber nur rund 10 % der Spiele einen Wert — die
   ohne landeten hinter allen anderen, das erste Spiel des Tages stand
   plötzlich an fünfter Stelle. `DrawID` ist an jedem Match gesetzt und
-  reproduziert dieselbe Reihenfolge zuverlässig.
+  reproduziert dieselbe Reihenfolge zuverlässig. *(Nachtrag 30.10.2026: Das
+  Problem war nicht `DisplayOrder` selbst, sondern dass Spiele **ohne** Wert
+  hinten statt vorn einsortiert wurden. Seit v0.9.317 steht `DisplayOrder`
+  wieder vor der Auslosung, siehe oben.)*
 
 Belegt an einem echten Turnier (878 Paarungen, 759 davon angesetzt): Die
 Sortierung `PlannedTime → DrawID → MatchNr → ID` reproduziert die aus BTP
@@ -483,6 +533,15 @@ Die **Disziplin** eines Matches ergibt sich aus dem Event seines Draws:
 `Match.DrawID → Draw.EventID → Event{GameTypeID, GenderID}`. Der Draw-Name
 allein (z. B. „Gruppe A") trägt sie nicht.
 
+**Rückfall auf den Namen** (seit v0.9.297, `Discipline::resolve`): Liefert
+das Event eine `GenderID` außerhalb 1–3 — so bei einem DBV-Jugendturnier
+10/2026 („JE U15", „MD U17"; der genaue Wert ist ungemessen) —, wird die
+Disziplin aus Event- und dann Draw-Namen gelesen (JE → Herreneinzel-Schlüssel
+`mens_singles` usw.; die Jugend-Benennung macht `src/io/disziplinName.mjs` an
+der Klasse „U"+Zahl fest). Seit v0.9.307 auch englisch: MS, WS, WD, XD, MIX;
+**MD** gilt als Herrendoppel, wenn das Turnier irgendwo MS/WS/WD/XD benutzt
+(`englisches_schema`), sonst als Mädchendoppel.
+
 ## Score
 
 Satz-Ergebnisse hängen am Match unter `Sets`:
@@ -524,6 +583,24 @@ Hilde"). In einem 116-Draw-Turnier waren so 95 % aller Teilnehmer falsch.
 In einem KO-Draw bekommt eine beendete Paarung selbst eine `EntryID` (den
 Sieger) zugewiesen und wirkt damit als Feeder-Slot für die nächste Runde –
 derselbe `(DrawID, PlanningID)`-Lookup deckt das mit ab.
+
+### Setzplatz einer Spielseite (seit v0.9.298)
+
+Die Setzung steht an `StageEntry.Seed1`/`Seed2` (Messung 12.10.2026,
+`tests/btp_seed_probe.rs`) — **je Stage**, nicht je Meldung. `btp/model.rs`
+löst sie einmal je Snapshot auf (`SeedIndex`, ADR 0059):
+
+1. Ein offener Platz (`entry_id == 0`) hat keine Setzung.
+2. Sonst gilt die Setzung der Meldung an der Stage des Draws
+   (`Draw.StageID`) des Spiels.
+3. Fehlt sie dort, gilt die Setzung der Meldung an der Stage mit
+   `StageType 1` (Hauptfeld) — z. B. ein Playoff-Eintrag ohne eigene Setzung.
+
+Die Meldung selbst (`BtpEntry.seed`, Check-In) trägt nur die
+Hauptfeld-Setzung. Formatiert wird an genau einer Stelle,
+`model::seed_text`: Werte ≤ 0 gelten als fehlend, nur `Seed2` zeigt diesen
+Wert, gleiche Werte zeigen eine Zahl, eine Spanne steht aufsteigend als
+„3/4". Die Abnehmer setzen nur noch die Klammern.
 
 ### Rückwärts: das Vorspiel eines offenen Platzes finden
 
@@ -889,3 +966,77 @@ Fix:** Die eigenständige Form schreibt die `CourtID` jetzt immer mit — dann
 ist die Reihenfolge zweier Requests zum selben Match folgenlos, egal wie
 knapp oder weit sie zeitlich auseinanderliegen. Details:
 [schiedsrichter-management.md](schiedsrichter-management.md#courtid-immer-mitschreiben-live-befund-14082026).
+
+### Match-ID und Turnier-GUID gegen die TP-Datei (gemessen 26.10.2026)
+
+Grundlage der Spec `tp-datei-upload` (TP-Datei während des Turniertags an badhub,
+Spec in Arbeit, Phase 1). Messwerkzeug für die **Protokollseite**:
+`tests/btp_tp_match_probe.rs` gegen ein lokales BTP mit geöffneter `.TP`-Datei.
+Die **Dateiseite** wurde ad hoc mit `access-parser` 0.0.6 (Python) gelesen, kein
+Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
+
+- **`Match.ID` im Protokoll = `PlayerMatch.id` in der Datei.** Beide liefern 959
+  Match-Zeilen (inkl. Slots und Spiegel-Einträge; `IsMatch=true` bei 361) im
+  ID-Bereich 1–1874. Stichprobe ID 5: `DrawID`/`draw` 1,
+  `PlanningID`/`planning` 2001, `From1`/`van1` 2000, `From2`/`van2` 1000,
+  `Round`/`roundnr` 3, `MatchNr`/`matchnr` 6, `Duration`/`duration` 39,
+  `CourtID`/`court` 11, `PlannedTime`/`plandate` identisch. Ein Join
+  Liveticker ↔ TP-Datei ↔ `tournament_matches.match_id` braucht keine Abbildung.
+- **Die Turnier-GUID reist nicht im Snapshot** (kein GUID-artiger String im
+  ganzen Baum). In der Datei steht sie in `Settings` unter `LinkCode`
+  (`99F55FAB-…`, gleich der GUID aus turnier.de bzw. `tournament_uuid`).
+  Daneben `WebID` = turnier.de-Kurz-ID (`529398`, badhub `external_id`) und
+  `UniCode`/`SiteCode` (Tournament-Software-interne Kennungen).
+- **Die GUID lässt sich ohne Jet-Parser lesen** (gemessen 28.10.2026 an 30
+  TP-Dateien aus BBB-Ranglisten und BBEM): `Settings` ist eine
+  name/value-Tabelle, Jet legt die Werte als komprimierten Unicode ab, im
+  Dateibild steht `FF FE LinkCode FF FE <GUID>` — in **jeder** Datei genau
+  einmal, die unkomprimierte UCS-2-Form nie. GUID-förmige Strings **ohne**
+  diesen Anker gibt es bis zu 1.491 je Datei (Spieler, Jet-Interna). Seit
+  v0.9.302 liest `badhub/tp_guid.rs` so die Kennung beim Wählen der Datei und
+  vor jedem Upload (3,6 MB in 30 ms, Debug-Build). Sonde:
+  `BTS_TP_DATEI=<Pfad> cargo test guid_aus_echter_datei -- --ignored --nocapture`.
+- **Offene Datei lesbar:** BTP hält die `.TP` mit einer `.ldb`-Sperrdatei;
+  exklusives Öffnen scheitert, lesendes Öffnen mit Freigabe (`FileShare::ReadWrite`)
+  und `CopyFile` gelingen. Zwei Kopien im Abstand von 2 s hatten denselben
+  SHA-256; Kopf `Standard Jet DB`.
+- **BTP-Prozess:** heißt `btp.exe`, Fenstertitel
+  `Badminton Turnier Planer - <Dateiname ohne .TP>`. Eine Automatik zum Finden
+  der Datei hätte damit einen Anhaltspunkt (nicht umgesetzt).
+- `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst
+  **leer** — ein Artefakt der bekannten Null-Bitmap-Schwäche des Parsers; der
+  badhub-Extraktor mit seiner Reparatur (`tabelle_lesen`) liest aus derselben
+  Datei 79 gesetzte Meldungen. Lehre: rohe Tabellen nur über den Extraktor lesen.
+
+## Schreib-Gate für den TP-Upload (ADR 0060)
+
+Seit v0.9.300 gibt es eine weitere Stelle, an der ein BTP-Write **warten**
+kann: Der TP-Datei-Upload (Spec [features/tp-datei-upload.md](features/tp-datei-upload.md))
+kopiert die offene Datei und hält dafür die vier Write-Funktionen in
+`tablet/server.rs` (`write_result_to_btp`, `write_courts_to_btp`,
+`write_officials_to_btp`, `write_highlight_to_btp`) kurz zurück. Mechanik in
+`btp/write_gate.rs`: ein prozessweites `tokio::sync::RwLock` — jeder Write
+hält die Lesesperre (Writes blockieren sich nicht), die Kopie nimmt die
+Schreibsperre, wartet höchstens 20 s auf laufende Writes (sonst „BTP ist
+gerade beschäftigt“), lässt 3 s Ruhe für den Jet-Nachlauf und liest dann
+zweimal mit 2 s Abstand (Byte-Vergleich, eine Wiederholung). Erst nach dem
+Lesen wird die Sperre freigegeben, dann gesendet.
+
+Folge für die Writes: Ein Write, der während der Kopie eintrifft, wartet die
+Kopie ab (typisch 5 s, mit Wiederholung bis etwa 9 s); einer, der eintrifft,
+während die Kopie noch auf einen langen Write wartet, wartet Rest-Wartephase
+plus Kopie. Nichts wird verworfen; der Nachschub (`flush_btp_retries`) läuft
+ohnehin verzögert. Die Konstanten `RUHE`, `MAX_WARTEZEIT`, `LESEABSTAND` sind
+Startwerte bis zur Nachlauf-Messung (Datei nach bestätigtem `SENDUPDATE`
+sekündlich hashen, bis Ruhe — siehe Spec, „Offene Fragen“).
+
+**Zweiter Leser außerhalb des Gates (Stufe 2, ADR 0061).** Die Automatik
+(Spec [features/tp-takt-upload.md](features/tp-takt-upload.md)) liest die
+Datei je Takt **einmal ohne** Schreibsperre und bildet den SHA-256
+(`badhub/tp_upload.rs` `lesen` + `sha256`, gemessen ~40 ms für 3 MB). Nur
+wenn der Hash vom zuletzt gesendeten Stand abweicht, folgt der Weg oben mit
+Gate. Eine halb geschriebene Seite in dieser Schnell-Lesung kostet höchstens
+einen überflüssigen Gate-Lauf, nie einen falschen Upload — gesendet wird
+weiterhin nur, was unter dem Gate zweimal gleich gelesen wurde. Für die Writes
+ändert sich nichts: Sie warten nur, wenn tatsächlich kopiert wird, also
+höchstens alle 5 Minuten (Mindesttakt) und nur bei geänderter Datei.
