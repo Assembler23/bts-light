@@ -187,7 +187,17 @@ die Turnierleitung sieht, worüber sie läuft.
 
 ### PR 1b: Ansage-Seiten ohne Azure
 
-`ansage_vertonen` liefert ohne Azure OneCore-WAV (`audio/wav`, Deckel 1 MiB) statt „kein Audio".
+`ansage_vertonen` liefert ohne Azure OneCore-WAV (`audio/wav`) statt „kein Audio".
+Umgesetzt in v0.9.320, dabei (Review):
+- `hostAudio` im Feed ist jetzt „Azure **oder** Windows-Stimme vorhanden" — sonst meldet
+  sich eine Seite ohne Gerätestimme (Pi) nie als Zuhörer, und es wird gar nicht vertont.
+- WAV (16 kHz mono ≈ 32 KB/s, Doppel-Ansage bei Tempo 0,8 ≈ 720 KB) ist ~12× so groß wie
+  Azure-MP3: Deckel je Audio 1 → **3 MiB**, je Ablage 6 → **32 MiB**; über dem Gesamtdeckel
+  verlieren die ältesten Einträge nur ihr Audio statt ganz zu verschwinden; zu großes Audio
+  wird geloggt.
+- Bekannt: Zwei sehr schnell nacheinander ausgelöste Desktop-Ansagen können auf den Seiten
+  in vertauschter Reihenfolge ankommen (Nummer wird nach der Synthese vergeben; mit Azure
+  schon vorher so).
 Das erfüllt die E3-Kriterien 24–26 aus [ansage-im-browser.md](ansage-im-browser.md).
 
 ### Rückwärtskompatibilität
@@ -298,6 +308,18 @@ Das erfüllt die E3-Kriterien 24–26 aus [ansage-im-browser.md](ansage-im-brows
   der Rückfall auf dasselbe Gerät spielt. Das Log nennt seither bei `intern`
   die cpal-Fehlerart und den Windows-Text (ohne Gerätenamen).
   Handbuch-Hinweis: Kommt auch aus dem Browser nichts, liegt es am Gerät.
+
+## Hörtest Klinke (31.10.2026, Entwickler-PC)
+
+- Die Klinke erscheint als **eigener Endpunkt** „Headphones (2- Intel® Smart
+  Sound …)" neben „Lautsprecher (…)"; Windows macht sie beim Einstecken zum
+  Standard.
+- v0.9.318: Klinken-Box → Klinke gezogen → Laptop → eingesteckt → Klinken-Box;
+  mitten in der Ansage gezogen → von vorn auf dem Laptop (Log). Bestanden.
+- **Aber:** Auch v0.9.317 folgte an diesem PC dem Klinkenwechsel. Der
+  Senior-Cup-Fehler ist hier **nicht nachstellbar**; seine Ursache (Treiber
+  des Notebooks oder feste Zuordnung im Lautstärkemixer) bleibt unbewiesen.
+  Der Test am Senior-Cup-Notebook steht aus.
 
 ## Offene Fragen / Annahmen
 

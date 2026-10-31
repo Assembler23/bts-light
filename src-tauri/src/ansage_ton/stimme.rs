@@ -112,8 +112,23 @@ pub fn fuege_segmente(teile: Vec<(Vec<i16>, u32)>, pause_ms: u32) -> Option<(Vec
     Some((aus, rate))
 }
 
+/// Spricht eine Stimme eine der Ansage-Sprachen (Deutsch, Englisch)?
+pub fn ist_ansage_sprache(sprache: &str) -> bool {
+    let s = sprache.trim().to_ascii_lowercase();
+    s.starts_with("de") || s.starts_with("en")
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ansage_sprachen_sind_deutsch_und_englisch() {
+        assert!(super::ist_ansage_sprache("de-DE"));
+        assert!(super::ist_ansage_sprache("en-GB"));
+        assert!(super::ist_ansage_sprache("DE-at"));
+        assert!(!super::ist_ansage_sprache("fr-FR"));
+        assert!(!super::ist_ansage_sprache(""));
+    }
+
     use super::*;
 
     fn s(name: &str, sprache: &str) -> StimmeInfo {

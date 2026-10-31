@@ -1909,7 +1909,11 @@ pub fn ansage_feed_bauen(
         None
     };
     let az = &cfg.azure_tts;
-    let host_audio = az.enabled && !az.key.trim().is_empty() && !az.region.trim().is_empty();
+    let azure = az.enabled && !az.key.trim().is_empty() && !az.region.trim().is_empty();
+    // Ohne Azure vertont der PC mit der Windows-Stimme (PR 1b, ADR 0066) —
+    // sonst meldete sich eine Seite ohne Gerätestimme (Pi) nie als Zuhörer,
+    // und es würde gar nicht erst vertont.
+    let host_audio = azure || crate::ansage_ton::seiten_stimme_vorhanden();
     let belegung = tablet.ansage_belegung();
     let eintraege = tablet
         .ansage()
@@ -7788,6 +7792,10 @@ mod tests {
         let f = ansage_feed_bauen(&tablet, &cfg, "", 0, 1_000);
         assert!(!f.aktiv);
         assert_eq!(f.grund.as_deref(), Some("slave"));
-        assert!(!f.host_audio, "ohne Azure kann der PC nicht vertonen");
+        assert_eq!(
+            f.host_audio,
+            crate::ansage_ton::seiten_stimme_vorhanden(),
+            "ohne Azure vertont der PC nur mit einer Windows-Stimme"
+        );
     }
 }

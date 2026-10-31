@@ -196,6 +196,31 @@ pub fn auf_kanaele(mono: &[f32], kanaele: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Schreibt PCM16 mono als WAV-Datei (44-Byte-Kopf). Für die Ansage-Seiten
+/// im Browser: Ohne Azure liefert der Kern dort die Windows-Stimme als WAV
+/// (Spec `ansage-ausgabegeraet` PR 1b, E3-Kriterien 24–26).
+pub fn wav_schreiben(samples: &[i16], rate: u32) -> Vec<u8> {
+    let daten = u32::try_from(samples.len() * 2).unwrap_or(u32::MAX);
+    let mut out = Vec::with_capacity(44 + samples.len() * 2);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&daten.saturating_add(36).to_le_bytes());
+    out.extend_from_slice(b"WAVE");
+    out.extend_from_slice(b"fmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&1u16.to_le_bytes()); // mono
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&rate.saturating_mul(2).to_le_bytes()); // Bytes je Sekunde
+    out.extend_from_slice(&2u16.to_le_bytes()); // Block-Ausrichtung
+    out.extend_from_slice(&16u16.to_le_bytes()); // Bits je Sample
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&daten.to_le_bytes());
+    for s in samples {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,5 +444,28 @@ mod tests {
             Err(TonFehler::Ungueltig(_))
         ));
         assert!(dauer_pruefen(1, 0, MAX_SEKUNDEN).is_err());
+    }
+
+    #[test]
+    fn wav_schreiben_ergibt_lesbares_pcm16_mono() {
+        // Die Ansage-Seiten bekommen die Windows-Stimme als WAV (PR 1b);
+        // der eigene Leser und jeder Browser müssen sie verstehen.
+        let samples: Vec<i16> = vec![0, 1000, -1000, i16::MAX, i16::MIN];
+        let bytes = wav_schreiben(&samples, 16000);
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WAVE");
+        assert_eq!(bytes.len(), 44 + samples.len() * 2);
+        let (zurueck, rate) = wav_lesen(&bytes).expect("lesbar");
+        assert_eq!(rate, 16000);
+        assert_eq!(zurueck, samples);
+    }
+
+    #[test]
+    fn wav_schreiben_leer_ist_gueltiger_kopf() {
+        let bytes = wav_schreiben(&[], 24000);
+        assert_eq!(bytes.len(), 44);
+        let (zurueck, rate) = wav_lesen(&bytes).expect("lesbar");
+        assert!(zurueck.is_empty());
+        assert_eq!(rate, 24000);
     }
 }
