@@ -128,11 +128,26 @@ Drei Dinge dazu:
 Der Zweck ist der Rückweg: In einem echten Turnier steht kein Messgerät,
 aber das Log kommt über den Upload zurück.
 
-## Automatischer Upload (opt-in)
+## Automatischer Upload (Standard an, abwählbar)
 
-Im Setup lässt sich **„Diagnose-Logs senden"** aktivieren. Dann lädt
+Im Setup steht **„Diagnose-Logs senden"**. Ist der Schalter an, lädt
 bts-light seine Logdatei alle ~10 Minuten an badhub.de hoch, damit Fehler
 über alle Installationen hinweg zentral auswertbar sind.
+
+**Bei einer Neuinstallation ist der Schalter an** (seit v0.9.325). Grund: Als
+Opt-in erreichte uns ausgerechnet von den Turnieren, bei denen etwas
+schiefging, meist nichts — wer im Hallenstress ein Problem hat, öffnet keine
+Einstellungen. Der Assistent zeigt das Häkchen beim ersten Start gesetzt; die
+Turnierleitung kann es dort **jederzeit abwählen** (Opt-out), und die
+Entscheidung steht dauerhaft in der `config.json`.
+
+Abgrenzung — wessen Einstellung wann gilt:
+
+| Ausgangslage | `upload_logs` |
+|---|---|
+| Neuinstallation (keine `config.json`) | **an** — `AppConfig::neu_installation()` |
+| Häkchen bewusst abgewählt | bleibt **aus** — die Datei ist die Entscheidung |
+| Update einer Installation aus der Zeit vor dem Schalter (Feld fehlt) | bleibt **aus** — ein Update ist keine Neuinstallation |
 
 - **Endpunkt:** `POST https://badhub.de/api/bts_log.php`
 - **Auth:** fester Bearer-Token, in bts-light eingebacken.
@@ -146,7 +161,7 @@ bts-light seine Logdatei alle ~10 Minuten an badhub.de hoch, damit Fehler
   geöffnet", „Rückfall") und **nie Gerätenamen** — Bluetooth-Geräte tragen
   oft den Namen ihres Besitzers.
 
-Ohne den Schalter bleibt das Log rein lokal. Empfänger-Seite:
+Ist der Schalter abgewählt, bleibt das Log rein lokal. Empfänger-Seite:
 [badhub `docs/features/liveticker_bts.md`](https://badhub.de) →
 Abschnitt „Diagnose-Log-Upload".
 
