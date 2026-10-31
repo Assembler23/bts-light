@@ -134,7 +134,7 @@ Im Setup steht **„Diagnose-Logs senden"**. Ist der Schalter an, lädt
 bts-light seine Logdatei alle ~10 Minuten an badhub.de hoch, damit Fehler
 über alle Installationen hinweg zentral auswertbar sind.
 
-**Bei einer Neuinstallation ist der Schalter an** (seit v0.9.279). Grund: Als
+**Bei einer Neuinstallation ist der Schalter an** (seit v0.9.325). Grund: Als
 Opt-in erreichte uns ausgerechnet von den Turnieren, bei denen etwas
 schiefging, meist nichts — wer im Hallenstress ein Problem hat, öffnet keine
 Einstellungen. Der Assistent zeigt das Häkchen beim ersten Start gesetzt; die
