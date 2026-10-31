@@ -187,14 +187,15 @@ function feldSichtbar(state) {
         if (zaehltAlsDaten(f.state)) letzterKontaktMs = Date.now();
       } else {
         var s = paket.state;
-        if (seqAnwenden(f.seq, s && s.seq || 0, "fetch")) {
+        // Ein Stand ohne Turnier (Relay ohne Host, leerer Feldname) ersetzt
+        // den gezeigten NICHT: Sonst verschwände die Leiste bei jedem kurzen
+        // Host-Wiederverbinden sofort, statt die 60-s-Frist abzuwarten.
+        if (zaehltAlsDaten(s) && seqAnwenden(f.seq, s.seq || 0, "fetch")) {
           f.state = s;
           if (s && s.seq) f.seq = s.seq;
           f.etag = paket.etag;
-          if (zaehltAlsDaten(s)) {
-            letzterKontaktMs = Date.now();
-            langsamErlaubt = !!(s.config && s.config.pushFallbackSlow);
-          }
+          letzterKontaktMs = Date.now();
+          langsamErlaubt = !!(s.config && s.config.pushFallbackSlow);
         }
       }
       fertig(f);
@@ -320,9 +321,16 @@ function feldSichtbar(state) {
       return [f.state.courtLabel, f.state.match, f.state.courtState];
     }));
     if (signatur !== letzteSignatur) {
-      letzteSignatur = signatur;
-      leiste.textContent = "";
-      sichtbar.forEach(function (f) { leiste.appendChild(feldEl(f.state)); });
+      // Erst vollständig bauen, dann tauschen und merken: Wirft der Bau an
+      // kaputten Daten, bleibt der alte Stand stehen und der nächste Takt
+      // versucht es erneut — statt einer halb gebauten Leiste für immer.
+      try {
+        var neu = document.createDocumentFragment();
+        sichtbar.forEach(function (f) { neu.appendChild(feldEl(f.state)); });
+        leiste.textContent = "";
+        leiste.appendChild(neu);
+        letzteSignatur = signatur;
+      } catch (e) { /* alter Stand bleibt */ }
     }
     leiste.classList.toggle("weg", !frisch || sichtbar.length === 0);
   }
