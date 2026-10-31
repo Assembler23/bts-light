@@ -50,6 +50,24 @@ die danach erfasst wurden.
 > versehentlich vergebene Karte bleibt sichtbar.** Wer das nicht möchte, muss vor
 > dem Bestätigen genau hinsehen.
 
+### Mannschaften getauscht (seit v0.9.318)
+
+Wurde am Tablet die falsche Mannschaft als „links" aufgestellt und danach mit
+**⇄ → „Mannschaften tauschen"** berichtigt, steht auf dem Zettel eine
+Protokollzeile **„Mannschaften berichtigt"**. Alles, was davor erfasst wurde
+(Aufschlagfolge, Karten), druckt der Zettel bei der **richtigen** Mannschaft —
+der Turnier-PC rechnet es beim Lesen um (`tablet/berichtigung.rs`, ADR 0065);
+gespeichert bleibt der Bestand unverändert.
+
+- Zweimal berichtigt hebt sich auf; eine zurückgenommene Berichtigung steht
+  durchgestrichen im Protokoll und wirkt nicht mehr.
+- Im Doppel fragt das Tablet danach die Aufstellung neu ab. Ab diesem
+  Ballwechsel rechnet das Raster mit der neuen Aufstellung. **Davor** (und in
+  früheren Sätzen) kann der Zettel die beiden Spieler **innerhalb** einer
+  Mannschaft vertauscht zeigen — wer damals wo stand, weiß niemand.
+- „Seiten tauschen" ändert am Zettel nichts: er kennt nur Mannschaften, keine
+  Seiten.
+
 ### Gerätewechsel
 
 Übernimmt mitten im Spiel ein anderes Tablet das Feld, gehen **keine Ereignisse

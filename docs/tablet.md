@@ -374,6 +374,48 @@ und rot pulsierend **„Letzter Aufruf"**.
   Bruttostart aus `match-times.json` — die Uhr läuft nach einem Update
   weiter statt bei null zu beginnen (Spec `update-im-turnierbetrieb`).
 
+## Seiten und Mannschaften korrigieren (seit v0.9.318)
+
+Spec [features/tablet-seiten-korrigieren.md](features/tablet-seiten-korrigieren.md),
+[ADR 0065](adr/0065-mannschaften-berichtigt-kipp-ereignis.md). Bedienung im
+Handbuch-Kapitel [tablet-bedienen.md](tablet-bedienen.md).
+
+Der Knopf **⇄** (Kopfzeile, ohne PIN; in Pause und Ergebnis-Ansicht ein eigener
+Knopf, weil deren Overlays die Kopfzeile verdecken) öffnet zwei Eingriffe:
+
+| Eingriff | Zustand | Gemeldeter Stand | Gesendet |
+|---|---|---|---|
+| **Seiten tauschen** | wie der automatische Seitenwechsel (`seitenGetauscht` = `swapSides`) | bleibt | nur Stand (`state_sync`/`score_update`) |
+| **Mannschaften tauschen** | `teamOnSide` a↔b, `rallyLog` A↔B, `serveSetupTeam` und lokale Karten kippen, `positions` nach Listenposition, `retiredWinner` → neu wählen | kippt (A:B → B:A, alle Sätze) | `score_update`, `rally_sync`, Ereignis `teams_corrected` + `match_event_sync` |
+
+- **Freigabe** (`korrekturErlaubt`): Match + Aufstellung, `setup === 'playing'`,
+  nicht `pendingResult`/`submittedOk`/`finalized`/`locked`/`occupied`. Die
+  Ergebnis-Ansicht vor dem Abschicken zählt dazu.
+- **Eigener Undo-Schritt:** Der Eingriff legt einen Snapshot mit Marker
+  `korrektur: {art, eventId, folgeIds, serveSetupTeamVorher}` auf `history`.
+  `undo()`, `reopen()`, `setupBack()` und „Korrektur" in der Pause nehmen ihn
+  zuerst zurück (`korrekturZuruecknehmen`): Snapshot zurück, Ereignisse per
+  `retract` am selben Anker, Karten zurückkippen.
+- **Doppel:** Nach „Mannschaften tauschen" im laufenden Spiel setzt das Tablet
+  `serveSetupTeam` auf das aufschlagende Team und `berichtigtAbfrage` — die
+  Aufschläger-/Annehmer-Abfrage öffnet sofort (in einer Pause über `endBreak`).
+  Ihr `serve_start` trägt `phase: 'play'` und den aktuellen Anker; der Zettel
+  setzt die Rotation dort neu auf. Steht die Satzbeginn-Abfrage schon an, wird
+  nur `serveSetupTeam` gekippt.
+- **Anker im beendeten Spiel** (`korrekturAnker`): der letzte gespielte Satz,
+  nie Satz n+1 (würde bei best of 5 von `is_valid` verworfen).
+- **Deckel:** Ohne Platz für Korrektur, Aufschlagfolge und deren Rücknahmen
+  (`platzFuerKorrektur`) ist „Mannschaften tauschen" ausgegraut.
+- **Kompatibilität:** Nur wenn der `MatchBrief` `teamsCorrection: true` trägt,
+  wird „Mannschaften tauschen" angeboten (`STATE.hostKannBerichtigung`, bei
+  jedem `match_assigned` frisch gesetzt). Eine ältere App verwürfe Syncs mit der
+  neuen Ereignisart.
+- Reine Logik in `src/io/seitenKorrektur.mjs` (Test
+  `scripts/test-seiten-korrektur.mjs`), Inline-Kopie in `tablet.html`.
+- Deutung beim Host: `tablet/berichtigung.rs` `in_endkoordinaten` — siehe
+  [schiedsrichterzettel.md](schiedsrichterzettel.md) und
+  [punktverlauf.md](punktverlauf.md).
+
 ## Zählen hinter dem Feld: Anordnung vorn/hinten (seit v0.9.283)
 
 Der Bediener sitzt oft nicht seitlich am Netz, sondern **hinter dem Feld** an

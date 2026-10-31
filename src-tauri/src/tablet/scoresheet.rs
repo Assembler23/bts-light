@@ -212,6 +212,9 @@ impl Aufschlag {
 /// Zeile; bei Aufschlagwechsel wandert die Zelle zur neuen
 /// aufschlagenden Seite. So füllt sich auch ein Bogen aus Papier.
 pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool) -> Grid {
+    // Berichtigte Mannschaften (ADR 0065): alles in Endkoordinaten, bevor
+    // Raster und Protokoll es lesen.
+    let events = &super::berichtigung::in_endkoordinaten(events);
     // Zurückgenommenes gehört nicht ins Raster (ADR 0038).
     let zurueckgenommen: Vec<&str> = events
         .iter()
@@ -244,9 +247,18 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
     for (i, satz) in timeline.sets.iter().enumerate() {
         let nr = i as i64 + 1;
         let mut punkte = [satz.start_a, satz.start_b];
+        // Gilt ab Satzbeginn: die LETZTE Aufschlagfolge bei 0 — korrigiert
+        // jemand gleich zu Beginn die Mannschaften, fragt das Tablet die
+        // Aufstellung an derselben Stelle neu ab (ADR 0065). Ohne eine bei 0
+        // (Einstieg mit Zwischenstand) die erste des Satzes.
         let start = wirksam
             .iter()
-            .find(|e| e.kind == EventKind::ServeStart && e.set == nr)
+            .rfind(|e| e.kind == EventKind::ServeStart && e.set == nr && e.after_n == 0)
+            .or_else(|| {
+                wirksam
+                    .iter()
+                    .find(|e| e.kind == EventKind::ServeStart && e.set == nr)
+            })
             .filter(|_| !aufschlagfolge_fehlt);
         // Marken „A" und „R" des Bogens: Wer eröffnet, wer nimmt an. Ohne
         // aufgezeichnete Aufschlagfolge bleiben beide leer — geraten wird
@@ -270,6 +282,21 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
             .map(|e| Aufschlag::neu(e, punkte, volles_raster))
             .unwrap_or_else(Aufschlag::degradiert);
 
+        // Eine Aufschlagfolge mitten im Satz (Neuabfrage nach „Mannschaften
+        // tauschen" im Doppel) setzt die Rotation an ihrer Stelle neu auf;
+        // stehen mehrere an derselben Stelle, gilt die letzte — wie badhub
+        // `Verlauf.php`.
+        let neu_ab = |n: usize| -> Option<&&MatchEvent> {
+            if aufschlagfolge_fehlt {
+                return None;
+            }
+            wirksam.iter().rfind(|e| {
+                e.kind == EventKind::ServeStart
+                    && e.set == nr
+                    && e.after_n > 0
+                    && e.after_n == n as i64
+            })
+        };
         // Die Zeile ist **immer** die Zeile des Blatts (0–3): `2 * team +
         // player` im vollen Raster, `2 * team` bei fehlender
         // Aufschlagfolge. So brauchen Raster, Namen und Marken keine
@@ -277,6 +304,9 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
         // genau wie auf dem Papierbogen.
         let mut zellen = Vec::new();
         for (n, c) in satz.points.chars().enumerate() {
+            if let Some(e) = neu_ab(n) {
+                geo = Aufschlag::neu(e, punkte, volles_raster);
+            }
             let sieger: i64 = if c == 'A' { 0 } else { 1 };
             punkte[sieger as usize] += 1;
             let (team, spieler) = geo.nach_ballwechsel(sieger, punkte, volles_raster);
@@ -674,6 +704,71 @@ mod tests {
         // (ungerade) → es schlägt auf, wer links steht. B0 begann rechts
         // (Empfänger-Diagonale), also steht B1 links.
         assert_eq!((z[2].row, z[2].wert), (zeile(1, 1), 1));
+    }
+
+    /// „Mannschaften berichtigt" (ADR 0065): Die Aufschlagfolge davor stand
+    /// in vertauschten Koordinaten; den Punktverlauf hat das Tablet schon
+    /// gekippt. Das Raster liest beides in Endkoordinaten.
+    #[test]
+    fn berichtigte_mannschaften_kippen_die_aufschlagfolge() {
+        // Am Tablet hieß es „A schlägt auf" — gemeint war B.
+        let alt = aufschlag(1, 0, 0, 1, 0);
+        let mut k = ev("bb01", 1, 3, EventKind::TeamsCorrected, 0, 0);
+        k.seq = 10;
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "BBAB")]), &[alt, k], false);
+        let b = &grid.blocks[0];
+        assert_eq!(b.aufschlag_row, Some(zeile(1, 0)), "B eröffnet");
+        assert_eq!(b.rueckschlag_row, Some(zeile(0, 0)));
+        let berichtigt = grid
+            .protokoll
+            .iter()
+            .find(|z| z.art == EventKind::TeamsCorrected)
+            .expect("Berichtigung steht im Protokoll");
+        assert!(!berichtigt.zurueckgenommen);
+        assert_eq!(art_klartext(berichtigt.art), "Mannschaften berichtigt");
+    }
+
+    /// Berichtigt gleich bei 0:0: Die Neuabfrage liegt an derselben Stelle
+    /// wie die alte Aufschlagfolge — die neue gilt (Review-Befund).
+    #[test]
+    fn neuabfrage_bei_satzbeginn_ersetzt_die_alte_aufstellung() {
+        let mut alt = aufschlag(1, 0, 0, 1, 0);
+        alt.seq = 1;
+        let mut k = ev("bb01", 1, 0, EventKind::TeamsCorrected, 0, 0);
+        k.seq = 2;
+        // Neu (Endkoordinaten): B1 schlägt auf, A1 nimmt an.
+        let mut neu = aufschlag(1, 1, 1, 0, 1);
+        neu.id = "c2".into();
+        neu.seq = 3;
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "B")]), &[alt, k, neu], true);
+        assert_eq!(grid.blocks[0].aufschlag_row, Some(zeile(1, 1)));
+        assert_eq!(grid.blocks[0].rueckschlag_row, Some(zeile(0, 1)));
+        // B punktet als Aufschläger → derselbe Spieler bleibt dran.
+        assert_eq!(grid.blocks[0].zellen[0].row, zeile(1, 1));
+    }
+
+    /// Doppel: Die Neuabfrage nach der Berichtigung ist ein `serve_start`
+    /// mitten im Satz. Ab dort rechnet die Rotation mit der neuen
+    /// Aufstellung, davor mit der alten.
+    #[test]
+    fn neue_aufschlagfolge_mitten_im_satz_setzt_die_rotation_neu_auf() {
+        // Alte Aufstellung (schon in Endkoordinaten): A0 schlägt auf, B0 nimmt an.
+        let start = aufschlag(1, 0, 0, 1, 0);
+        // Nach drei Ballwechseln (2:1, B schlägt auf): B0 aus dem linken
+        // Feld, A0 nimmt an.
+        let mut neu = aufschlag(1, 1, 0, 0, 0);
+        neu.id = "c1".into();
+        neu.after_n = 3;
+        neu.seq = 20;
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "AABA")]), &[start, neu], true);
+        let z = &grid.blocks[0].zellen;
+        // Vor der Neuabfrage wie bisher: Side-out an B1.
+        assert_eq!((z[2].row, z[2].wert), (zeile(1, 1), 1));
+        // Nach ihr: A punktet bei 3 (ungerade) → wer links steht, schlägt
+        // auf — laut neuer Aufstellung A0 (ohne Neu-Aufsetzen wäre es A1).
+        assert_eq!((z[3].row, z[3].wert), (zeile(0, 0), 3));
+        // Die Eröffnungsmarke bleibt die vom Satzbeginn.
+        assert_eq!(grid.blocks[0].aufschlag_row, Some(zeile(0, 0)));
     }
 
     /// Altbestand ohne `serve_start`: zwei Zeilen, Werte korrekt, Hinweis.
@@ -1212,6 +1307,7 @@ pub(crate) fn art_klartext(art: EventKind) -> &'static str {
         EventKind::Retired => "Aufgabe",
         EventKind::Disqualified => "Disqualifikation",
         EventKind::Retract => "Rücknahme",
+        EventKind::TeamsCorrected => "Mannschaften berichtigt",
     }
 }
 

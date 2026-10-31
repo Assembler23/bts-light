@@ -1,6 +1,6 @@
 # 0065 — „Mannschaften berichtigt" als Kipp-Ereignis; Tablet-Korrektur als eigener Undo-Schritt
 
-- **Status:** accepted (Spec freigegeben 30.10.2026, Umsetzung offen)
+- **Status:** accepted (Spec freigegeben 30.10.2026, umgesetzt in v0.9.318)
 - **Datum:** 2026-10-30
 
 Gehört zu [docs/features/tablet-seiten-korrigieren.md](../features/tablet-seiten-korrigieren.md),

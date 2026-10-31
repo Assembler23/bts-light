@@ -1,6 +1,8 @@
 # 0038 — Zettel-Ereignisse sind append-only; eine Rücknahme ist ein Eintrag, kein Löschen
 
-- **Status:** accepted (umgesetzt 19.08.2026, Etappen E1–E8)
+- **Status:** accepted (umgesetzt 19.08.2026, Etappen E1–E8); erweitert durch
+  [ADR 0065](0065-mannschaften-berichtigt-kipp-ereignis.md) (Kipp-Ereignis
+  „Mannschaften berichtigt")
 - **Datum:** 2026-08-19
 
 Gehört zu [docs/features/schiedsrichterzettel-druck.md](../features/schiedsrichterzettel-druck.md),

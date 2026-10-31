@@ -498,7 +498,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 - **Seiten und Mannschaften am Zähl-Tablet korrigieren** — Spec:
   [features/tablet-seiten-korrigieren.md](features/tablet-seiten-korrigieren.md)
-  (freigegeben 30.10.2026, ADR 0065). ⇄-Knopf ohne PIN: „Seiten tauschen" (alles
+  (freigegeben 30.10.2026, ADR 0065), **umgesetzt v0.9.318** — offen: Tag,
+  Feldtest. ⇄-Knopf ohne PIN: „Seiten tauschen" (alles
   wandert mit) und „Mannschaften tauschen" (nur Namen, gemeldeter Stand kippt;
   im Doppel Neuabfrage der Aufstellung; neues Ereignis `teams_corrected`).
 

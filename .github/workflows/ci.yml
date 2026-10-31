@@ -85,6 +85,12 @@ jobs:
       - name: Zettel-Ereignisse (JS)
         run: node scripts/test-match-events.mjs
 
+      # Seiten/Mannschaften am Tablet korrigieren (Spec
+      # tablet-seiten-korrigieren, ADR 0065) — ein falscher Tausch fiele
+      # sonst erst am gemeldeten Ergebnis auf.
+      - name: Tablet-Seitenkorrektur (JS)
+        run: node scripts/test-seiten-korrektur.mjs
+
       # Gong-Auflöse-Timing (Plan 15) — onended-/Fallback-Pfad + done-Guard
       # der geteilten gongTiming.mjs (kein Überlappen der ersten Silbe).
       - name: Gong-Timing (JS)

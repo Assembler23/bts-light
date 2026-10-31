@@ -1,6 +1,6 @@
 # Seiten und Mannschaften am Zähl-Tablet korrigieren — Spezifikation
 
-- **Status:** freigegeben (30.10.2026)
+- **Status:** freigegeben (30.10.2026), umgesetzt in v0.9.318
 - **Herkunft:** /idee (Brief → Grill → How-To), Intake unter `docs/features/_intake/tablet-seiten-korrigieren/` (gitignoriert)
 - **Entscheidung:** [ADR 0065](../adr/0065-mannschaften-berichtigt-kipp-ereignis.md), erweitert [ADR 0038](../adr/0038-ereignisse-append-only.md)
 
@@ -197,6 +197,11 @@ und badhub-Verlauf. Das Tablet deutet nicht; den Punktverlauf kippt es selbst.
   früherer Sätze verloren (AK-12-Verschmelzung passt nicht mehr); Endstände bleiben.
 - Eine ältere Tablet-Seite liest einen Korrektur-Snapshot als normalen Punkt-Schritt.
 - In einer Pause zeigt die Feldgrafik im Doppel bis zur Abfrage ggf. falsche Positionen.
+- Solange nach „Mannschaften tauschen" die Doppel-Abfrage aussteht (etwa bis zum
+  Ende einer Pause), ist ⇄ gesperrt; „zurück" nimmt die Korrektur zurück.
+- Füllen nach der Korrektur weitere Ereignisse den Deckel (64), kann ihre
+  Rücknahme nicht mehr erfasst werden (`zettel_deckel` im Log); der Zettel
+  deutet dann weiter gekippt. Praktisch erst bei sehr vielen Karten/Rücknahmen.
 
 ## Tests
 
@@ -207,7 +212,11 @@ und badhub-Verlauf. Das Tablet deutet nicht; den Punktverlauf kippt es selbst.
   bei afterN 7, Protokollzeile, best of 5 beendet); `verlauf` (Deutung, Hash ändert sich).
 - **JS:** `scripts/test-seiten-korrektur.mjs` (beide Eingriffe Involution, Stand-Kippen,
   rallyLog, Einzel-ID-Mapping, Doppel → Abfrage, Freigabe-Matrix, `korrekturAnker`,
-  Deckel-Prüfung, Vorschau-Texte); `scripts/test-serving.mjs` erweitern; CI-Schritt.
+  Deckel-Prüfung); CI-Schritt. Die Aufschläger-Zuordnung nach dem Tausch ist
+  dort über das Einzel-ID-Mapping abgedeckt; `scripts/test-serving.mjs` blieb
+  unverändert, weil sich die Positionslogik selbst nicht ändert.
+- **Browser:** Ablauf im echten `tablet.html` (Doppel, Neuabfrage, Undo,
+  Ergebnis-Ansicht, 11er-Pause) mit nachgebautem WebSocket.
 - **Am Gerät:** beide Anordnungen, Einzel/Doppel, Pause, Satzpause, Ergebnis-Ansicht,
   Reload/Übernahme, LAN und Cloud.
 
