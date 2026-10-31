@@ -606,7 +606,19 @@ Die Anzeige-Häkchen im Profil-Editor:
   unverändert.
 
 Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**
-an- und abschalten — der Schalter oben rechts.
+an- und abschalten — der Schalter oben rechts. Er zeigt **„Automatik läuft"**
+oder **„Automatik pausiert"** und erscheint nur, wenn die automatische
+Feldvergabe in den Einstellungen eingeschaltet ist.
+<!-- pruef: "Automatik pausiert" in src-tauri/assets/tl.html -->
+
+Die Pause **bleibt bestehen** (seit v0.9.323), auch wenn bts-light neu
+gestartet oder aktualisiert wird oder jemand am Turnier-PC die Einstellungen
+speichert. Sie gilt nur für das Turnier, in dem sie gesetzt wurde: Meldet BTP
+ein anderes Turnier, läuft die Automatik wieder. Ist das Gerät, das pausiert
+hat, nicht mehr da, hebst du die Pause am Turnier-PC auf: in den
+Einstellungen **Automatische Feldvergabe aktivieren** ausschalten, speichern,
+wieder einschalten und erneut speichern.
+<!-- pruef: "Automatische Feldvergabe aktivieren" in src/pages/SetupWizard.tsx -->
 
 #### Vereine (Vereinsname/-logo)
 
