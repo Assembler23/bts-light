@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.323
+
+- **Pause der Feld-Automatik bleibt bestehen.** Wurde die automatische
+  Feldvergabe in der Turnierleitungs-Oberfläche pausiert, lief sie nach einem
+  Neustart, einem Update — und sogar nach jedem Speichern der Einstellungen —
+  wieder an. Die Pause wird jetzt gespeichert und gilt bis „Automatik läuft"
+  gedrückt wird oder BTP ein anderes Turnier meldet. Ohne Turnierleitungs-
+  Gerät hebt man sie am Turnier-PC auf, indem man die Automatik in den
+  Einstellungen aus- und wieder einschaltet.
+
 ## v0.9.322
 
 - **Zähl-Tablet: ⇄ und ⚙ in der Kopfzeile gut erkennbar.** Die beiden Knöpfe
