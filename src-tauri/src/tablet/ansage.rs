@@ -211,7 +211,16 @@ impl AnsageStore {
         audio: Option<(String, Vec<u8>)>,
         now_ms: u64,
     ) -> u64 {
-        let audio = audio.filter(|(_, b)| !b.is_empty() && b.len() <= MAX_ANSAGE_AUDIO);
+        let audio = audio.filter(|(_, b)| {
+            if b.len() > MAX_ANSAGE_AUDIO {
+                // Sonst bliebe ein Pi ohne Gerätestimme ohne jede Spur stumm.
+                tracing::warn!(
+                    bytes = b.len(),
+                    "Ansage-Seite: Audio über dem Deckel, Eintrag ohne Audio"
+                );
+            }
+            !b.is_empty() && b.len() <= MAX_ANSAGE_AUDIO
+        });
         let mut g = self.innen();
         g.aufraeumen(now_ms);
         g.seq = g.seq.max(now_ms) + 1;
@@ -242,10 +251,18 @@ impl AnsageStore {
             eintrag,
             audio: audio.map(|(_, b)| Arc::new(b)),
         });
-        while g.eintraege.len() > MAX_ANSAGE_EINTRAEGE
-            || (g.eintraege.len() > 1 && g.audio_gesamt() > MAX_ANSAGE_AUDIO_GESAMT)
-        {
+        while g.eintraege.len() > MAX_ANSAGE_EINTRAEGE {
             g.eintraege.pop_front();
+        }
+        // Über dem Gesamtdeckel verlieren die ältesten Einträge nur ihr Audio,
+        // nicht den Eintrag: Eine Seite, die beim Schub noch hinterherspielt,
+        // spricht dann den Text, statt die Ansage ganz zu verlieren.
+        let mut i = 0;
+        while g.audio_gesamt() > MAX_ANSAGE_AUDIO_GESAMT && i + 1 < g.eintraege.len() {
+            let e = &mut g.eintraege[i];
+            e.audio = None;
+            e.eintrag.audio = None;
+            i += 1;
         }
         id
     }
@@ -373,14 +390,20 @@ mod tests {
         assert!(e.audio.is_none());
         assert!(!e.segmente.is_empty(), "Segmente bleiben als Rückfall");
 
-        for _ in 0..10 {
+        let schub = MAX_ANSAGE_AUDIO_GESAMT / MAX_ANSAGE_AUDIO + 3;
+        for _ in 0..schub {
             s.ablegen(
                 entwurf(""),
-                Some(("audio/mpeg".into(), vec![0; MAX_ANSAGE_AUDIO])),
+                Some(("audio/wav".into(), vec![0; MAX_ANSAGE_AUDIO])),
                 1_000,
             );
         }
         assert!(s.innen().audio_gesamt() <= MAX_ANSAGE_AUDIO_GESAMT);
+        // Kein Eintrag geht verloren — die ältesten verlieren nur ihr Audio.
+        let alle = s.eintraege_fuer("", 0, &[], 1_000);
+        assert_eq!(alle.len(), schub + 1);
+        assert!(alle[1].audio.is_none(), "ältester Schub-Eintrag ohne Audio");
+        assert!(alle.last().unwrap().audio.is_some(), "neuester behält es");
     }
 
     #[test]

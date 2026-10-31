@@ -3969,11 +3969,58 @@ pub async fn ansage_vertonen(
         }
         _ => None,
     };
+    // Ohne Azure (oder wenn Azure scheitert) die Windows-Stimme des PCs
+    // (OneCore, ADR 0066) — sonst sprächen die Seiten mit der Stimme des
+    // Geräts, und ein Pi hat oft gar keine. Reihenfolge Azure → OneCore →
+    // nur Text (E3-Kriterien 24–26).
+    let audio = match audio {
+        Some(a) => Some(a),
+        None => seiten_windows_stimme(&entwurf, &cfg.announce).await,
+    };
     Ok(Some(state.tablet.ansage().ablegen(
         entwurf,
         audio,
         now_ms(),
     )))
+}
+
+/// Gespeicherte Stimme für die Sprache der Ansage (`voice_de`/`voice_en`).
+fn seiten_stimme(lang: &str, announce: &crate::config::AnnounceConfig) -> String {
+    if lang == "en" {
+        announce.voice_en.clone()
+    } else {
+        announce.voice_de.clone()
+    }
+}
+
+/// Vertont eine Seiten-Ansage mit der Windows-Stimme als WAV. `None`, wenn
+/// es keine Stimme der Sprache gibt, unter Linux oder bei einem Fehler —
+/// die Seite zeigt dann nur den Text bzw. spricht selbst.
+async fn seiten_windows_stimme(
+    entwurf: &crate::tablet::ansage::AnsageEntwurf,
+    announce: &crate::config::AnnounceConfig,
+) -> Option<(String, Vec<u8>)> {
+    let ergebnis = crate::ansage_ton::stimme_pcm(
+        entwurf.segmente.clone(),
+        entwurf.lang.clone(),
+        seiten_stimme(&entwurf.lang, announce),
+        f64::from(entwurf.rate),
+    )
+    .await;
+    match ergebnis {
+        Ok((samples, rate)) => Some((
+            "audio/wav".to_string(),
+            crate::ansage_ton::pcm::wav_schreiben(&samples, rate),
+        )),
+        Err(crate::ansage_ton::TonFehler::NichtUnterstuetzt) => None,
+        Err(e) => {
+            tracing::warn!(
+                fehler = e.code(),
+                "Ansage-Seite: Windows-Stimme gescheitert, Eintrag ohne Audio"
+            );
+            None
+        }
+    }
 }
 
 // ─── Ansage-Ton aus dem Kern (Spec `ansage-ausgabegeraet`, ADR 0065/0066) ──
@@ -5920,6 +5967,21 @@ mod tests {
     use super::*;
 
     // ─── Ansage-Ton aus dem Kern (Spec `ansage-ausgabegeraet`) ───────────
+
+    #[test]
+    fn seiten_stimme_folgt_der_sprache_der_ansage() {
+        // PR 1b: Die Seiten-Ansage nimmt die gespeicherte Stimme ihrer
+        // Sprache, nie die der anderen.
+        let a = crate::config::AnnounceConfig {
+            voice_de: "Microsoft Katja".to_string(),
+            voice_en: "Microsoft Zira".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(seiten_stimme("de", &a), "Microsoft Katja");
+        assert_eq!(seiten_stimme("en", &a), "Microsoft Zira");
+        // Unbekannte Sprache → Deutsch (wie `ansage_stimme_spielen`).
+        assert_eq!(seiten_stimme("fr", &a), "Microsoft Katja");
+    }
 
     #[test]
     fn pcm_auftrag_gueltig_mit_art() {

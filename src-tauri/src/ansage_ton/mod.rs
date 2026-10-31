@@ -193,6 +193,27 @@ pub async fn stimmen() -> Result<Vec<StimmeInfo>, TonFehler> {
     }
 }
 
+/// Kann der PC Seiten-Ansagen mit der Windows-Stimme vertonen — gibt es
+/// eine deutsche oder englische OneCore-Stimme? Einmal je Programmlauf
+/// abgefragt (ein neues Sprachpaket wirkt nach dem Neustart). Die Seite
+/// meldet sich nur als Ansage-Gerät, wenn der PC vertonen kann oder sie
+/// selbst eine Stimme hat (`hostAudio`, E3-Kriterium 25).
+pub fn seiten_stimme_vorhanden() -> bool {
+    #[cfg(windows)]
+    {
+        static DA: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *DA.get_or_init(|| {
+            self::windows::winrt_stimme::stimmen()
+                .map(|v| v.iter().any(|s| stimme::ist_ansage_sprache(&s.sprache)))
+                .unwrap_or(false)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 /// Synthetisiert die Abschnitte mit der Windows-Stimme zu **einem**
 /// Mono-PCM16-Stück (300 ms Fuge). Läuft in `spawn_blocking` (MTA), nie auf
 /// dem Audio-Thread — dort würde WinRT den COM-Modus kippen.

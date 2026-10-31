@@ -2707,10 +2707,14 @@ pub struct SlaveInfo {
 
 /// Höchstzahl Einträge, die eine Ablage hält (Ältester fliegt).
 pub const MAX_ANSAGE_EINTRAEGE: usize = 32;
-/// Höchstgröße aller Audio-Daten einer Ablage zusammen.
-pub const MAX_ANSAGE_AUDIO_GESAMT: usize = 6 * 1024 * 1024;
+/// Höchstgröße aller Audio-Daten einer Ablage zusammen. Seit die Seiten
+/// ohne Azure die Windows-Stimme als WAV bekommen (16 kHz mono ≈ 32 KB/s,
+/// eine Doppel-Ansage bei Tempo 0,8 ≈ 720 KB), muss ein Morgen-Schub von
+/// 32 Ansagen hineinpassen; darüber verlieren die ältesten nur ihr Audio.
+pub const MAX_ANSAGE_AUDIO_GESAMT: usize = 32 * 1024 * 1024;
 /// Höchstgröße eines einzelnen Audios — größere gehen ohne Audio raus.
-pub const MAX_ANSAGE_AUDIO: usize = 1024 * 1024;
+/// 3 MiB ≈ 98 s WAV der Windows-Stimme (Freitexte, Tempo 0,5).
+pub const MAX_ANSAGE_AUDIO: usize = 3 * 1024 * 1024;
 /// Verfall eines Eintrags: dieselbe Minute wie bei den Ansage-Aufträgen.
 pub const ANSAGE_TTL_MS: u64 = 60_000;
 

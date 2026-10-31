@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.319
+
+- **Ansage-Seiten sprechen ohne Azure mit der Windows-Stimme.** Tablets,
+  Handys und Pis mit der Seite `/ansage` bekamen bisher nur mit Azure fertiges
+  Audio vom Turnier-PC; ohne Azure sprach das Gerät selbst — und ein Pi hat oft
+  keine Stimme. Jetzt vertont der PC die Ansage mit seiner Windows-Stimme, so
+  klingt jede Halle gleich.
+
 ## v0.9.318
 
 - **Ansage folgt dem Ausgabegerät.** Gong und Stimme spielt jetzt der
