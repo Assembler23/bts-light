@@ -59,6 +59,12 @@ export interface AnnounceConfig {
    *  Ansage wie bis v0.9.317 über das Programmfenster statt über den Kern.
    *  Befristet, Standard aus. */
   legacy_output: boolean;
+  /** Gewähltes Ausgabegerät der Ansage (Windows-Endpunkt-ID, Spec
+   *  ansage-ausgabegeraet PR 2); leer = Windows-Standard. Je PC, wird nur
+   *  über `ansage_ausgabe_setzen` geändert. */
+  output_device: string;
+  /** Name des gewählten Geräts — nur zur Anzeige, wenn es fehlt. */
+  output_device_name: string;
 }
 
 /** Azure Neural TTS für die Ansage (Rust: config::AzureTtsConfig). */

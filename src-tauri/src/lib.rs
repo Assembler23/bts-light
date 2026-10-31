@@ -119,6 +119,8 @@ pub fn run() {
             commands::ansage_stimme_spielen,
             commands::ansage_abbrechen,
             commands::ansage_ausgabe,
+            commands::ansage_geraete,
+            commands::ansage_ausgabe_setzen,
             commands::ansage_stimmen,
             commands::start_sync,
             commands::stop_sync,

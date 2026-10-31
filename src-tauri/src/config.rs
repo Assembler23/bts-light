@@ -155,6 +155,17 @@ pub struct AnnounceConfig {
     /// dem falschen Gerät. Default aus. **Befristet:** wird drei Versionen
     /// nach PR 1 der Spec wieder entfernt (Termin in `docs/roadmap.md`).
     pub legacy_output: bool,
+    /// Gewähltes Ausgabegerät der Ansage (Spec `ansage-ausgabegeraet`, PR 2):
+    /// cpal-Geräte-ID als Text, z. B. `wasapi:{0.0.0.00000000}.{…}`. Leer =
+    /// Windows-Standard. Gilt **je PC** — wird nur über
+    /// `ansage_ausgabe_setzen` gesetzt, nie über `save_config`, wandert nicht
+    /// im Identitäts-Bündel und wird nie an Ansage-Slaves vererbt.
+    #[serde(default)]
+    pub output_device: String,
+    /// Name des gewählten Geräts — nur für die Anzeige, wenn das Gerät gerade
+    /// fehlt („<Gerät> nicht verfügbar …"). Nie fürs Log.
+    #[serde(default)]
+    pub output_device_name: String,
 }
 
 /// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
@@ -193,6 +204,8 @@ impl Default for AnnounceConfig {
             announce_umpire: true,
             page_audio: false,
             legacy_output: false,
+            output_device: String::new(),
+            output_device_name: String::new(),
         }
     }
 }
@@ -2018,6 +2031,8 @@ mod tests {
                 announce_umpire: false,
                 page_audio: true,
                 legacy_output: true,
+                output_device: "wasapi:{0.0.0.00000000}.{box}".to_string(),
+                output_device_name: "USB-Box".to_string(),
             },
             azure_tts: AzureTtsConfig {
                 enabled: true,
@@ -2228,6 +2243,27 @@ mod tests {
         let zurueck: AnnounceConfig =
             serde_json::from_str(&serde_json::to_string(&an).unwrap()).unwrap();
         assert!(zurueck.legacy_output);
+    }
+
+    #[test]
+    fn announce_ausgabegeraet_fehlt_in_alter_config_und_ist_dann_standard() {
+        // Spec `ansage-ausgabegeraet`, Kriterium 23: Eine config.json von vor
+        // der Gerätewahl lädt und bedeutet Windows-Standard (leere Felder).
+        let alt: AnnounceConfig =
+            serde_json::from_str(r#"{"enabled":true,"legacy_output":false}"#).unwrap();
+        assert!(alt.output_device.is_empty());
+        assert!(alt.output_device_name.is_empty());
+        assert!(AnnounceConfig::default().output_device.is_empty());
+        assert!(AnnounceConfig::default().output_device_name.is_empty());
+        // Eine gesetzte Wahl überlebt den Roundtrip.
+        let gewaehlt = AnnounceConfig {
+            output_device: "wasapi:{0.0.0.00000000}.{abc}".to_string(),
+            output_device_name: "USB-Box".to_string(),
+            ..AnnounceConfig::default()
+        };
+        let zurueck: AnnounceConfig =
+            serde_json::from_str(&serde_json::to_string(&gewaehlt).unwrap()).unwrap();
+        assert_eq!(zurueck, gewaehlt);
     }
 
     #[test]

@@ -32,6 +32,8 @@ export function fehlerCode(err) {
  * Kern-Weg nicht (heutiges Verhalten, kein Fehler), und ein Abbruch ist
  * gewollt.
  * @param {string} code  Fehlercode oder "frist"
+ * („geraet_fehlt" meldet announcer.ts selbst: Das ist kein Fehler, das
+ * Stück lief über den Ersatz.)
  * @returns {"kein_geraet" | "keine_stimme" | "rueckfall" | null}
  */
 export function bannerFuer(code) {

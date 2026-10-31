@@ -81,6 +81,8 @@ function defaultConfig(): AppConfig {
       announce_umpire: true,
       page_audio: false,
       legacy_output: false,
+      output_device: "",
+      output_device_name: "",
     },
     azure_tts: {
       enabled: false,
