@@ -382,11 +382,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           # Nur `platform-tools`: Die Action installiert standardmäßig auch
           # das alte SDK-Paket `tools`, das Google aus dem Repository
@@ -395,7 +395,7 @@ jobs:
           # Build-Tools und Plattform lädt AGP selbst nach (Lizenzen nimmt
           # die Action an).
           packages: platform-tools
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Tests + Debug-APK
         working-directory: android
         run: |
