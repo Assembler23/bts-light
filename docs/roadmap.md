@@ -496,6 +496,16 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Ausgabegerät für Ansagen** — Spec:
+  [features/ansage-ausgabegeraet.md](features/ansage-ausgabegeraet.md)
+  (freigegeben 31.10.2026, ADR 0065/0066). Auslöser Senior-Cup 31.10.2026: Ansage kam
+  nicht über die Klinke an die Hallenanlage. Ton komplett aus dem Rust-Kern
+  (cpal/WASAPI), Gerät je Ansage neu aufgelöst; Windows-Stimme (E3 aus
+  „Ansage im Browser") vorgezogen; Anzeige und selbstauflösende Banner;
+  Gerätewahl je PC. **PR 1** Ton aus dem Kern + Windows-Stimme + Anzeige ·
+  **PR 1b** OneCore-WAV für die Ansage-Seiten · **PR 2** Gerätewahl.
+  Notfall-Schalter „Alter Abspielweg" drei Versionen nach PR 1 entfernen.
+
 - **Sprachansagen im Browser (Ansage-Seite)** — Spec:
   [features/ansage-im-browser.md](features/ansage-im-browser.md) (freigegeben
   30.10.2026, PR #405). **E1 umgesetzt (v0.9.311, ADR 0063)**, **E1b
@@ -508,7 +518,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   spielt nur ab; Pi am TV über einen Ansage-Modus der Monitor-Seiten.
   - **Etappen:** E1 LAN-Seite + TL-Aufträge/Freitext/Desktop-Knöpfe ·
     E1b Monitor-Modus + Pi-Autoplay · E2 Erst-Ansage im Kern ·
-    E3 Offline-Stimme OneCore (erst nach Messung am Turnier-PC) ·
+    E3 Offline-Stimme OneCore (**vorgezogen in
+    [ansage-ausgabegeraet](features/ansage-ausgabegeraet.md)**, ADR 0066) ·
     E4 Cloud mit eigenem Lese-Schlüssel.
 
 - **TP-Datei während des Turniertags an badhub** — Spec:

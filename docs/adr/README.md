@@ -75,3 +75,5 @@ hier eintragen.
 | [0062](0062-tp-upload-ereignis-ausloeser.md) | TP-Upload: Ereignis-Auslöser zieht den Takt vor, nur für Auslosung und Paarung, mit Drossel | accepted |
 | [0063](0063-ansage-seiten-text-im-host-kern-vertont.md) | Ansage-Seiten: Text aus der Host-Oberfläche, Kern vertont (RAM, 60 s), Seite spielt nur ab | accepted |
 | [0064](0064-erst-ansage-im-kern.md) | Erst-Ansage im Kern als Auftrag `court_assigned`; `MatchAnnouncer` nur am Ansage-Slave | accepted |
+| [0065](0065-ansage-ton-aus-dem-kern-wasapi.md) | Ansage-Ton aus dem Rust-Kern (WASAPI über cpal), Gerät je Abspielvorgang neu aufgelöst | accepted |
+| [0066](0066-windows-stimme-e3-im-kern.md) | Windows-Stimme (E3) im Kern, vorgezogen und gemeinsam für Turnier-PC und Ansage-Seiten | accepted |
