@@ -1697,10 +1697,6 @@ fn bild_antwort(
     }
 }
 
-/// Liefert das hochgeladene **Turnierlogo** eines Namespace (Sponsor-Leiste im
-/// Cloud-Modus). Kein Logo → 404, damit die Seite per `onerror` sauber
-/// degradiert. Gegenstück zum LAN-`/info/logo`; die Cloud-Anzeigeseiten rufen
-/// beide über denselben relativen Pfad ab.
 /// Größte Länge eines Vereinsnamens in der Logo-Weiterleitung (Zeichen).
 const CLUB_LOGO_NAME_MAX: usize = 120;
 
@@ -1747,6 +1743,10 @@ async fn club_logo(Path(ns): Path<String>, Query(q): Query<ClubLogoQuery>) -> Re
     }
 }
 
+/// Liefert das hochgeladene **Turnierlogo** eines Namespace (Sponsor-Leiste im
+/// Cloud-Modus). Kein Logo → 404, damit die Seite per `onerror` sauber
+/// degradiert. Gegenstück zum LAN-`/info/logo`; die Cloud-Anzeigeseiten rufen
+/// beide über denselben relativen Pfad ab.
 async fn tournament_logo(
     State(broker): State<Broker>,
     Path(ns): Path<String>,

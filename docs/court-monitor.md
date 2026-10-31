@@ -807,7 +807,9 @@ Im Setup unter *Court-Monitor → Anzeige* stehen zwei Häkchen. Sie gelten für
 
 Ist ein Häkchen aus, verlässt die Angabe den Turnier-PC bzw. das Relay gar
 nicht erst — eine Anzeige kann sie also auch nicht über ihre Adresse
-sichtbar machen. Die Schalter sind getrennt von „Vereine anzeigen" für
+sichtbar machen. **Ausgenommen** ist die Siegerehrung (`/info/winners`): Sie zeigt den
+Verein der Platzierten wie bisher unabhängig vom Häkchen; Nationen trägt sie
+nicht. Die Vorbereitungsliste zeigt weder Nation noch Verein. Die Schalter sind getrennt von „Vereine anzeigen" für
 Tablets und TL-Web. Hintergrund: [ADR 0070](adr/0070-nation-verein-auf-anzeigen-serverseitig.md).
 
 ## Pausen-Timer (Retro-Klappanzeige)

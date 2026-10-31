@@ -7654,6 +7654,106 @@ mod tests {
         assert!(v["match"].is_object(), "Feld-Stand reist mit");
     }
 
+    /// Kontext mit einem Spieler, der Nation UND Verein trägt, und einer
+    /// eigenen Config-Datei mit den Anzeige-Schaltern (ADR 0070).
+    fn ctx_mit_schaltern(dir: &std::path::Path, nation: bool, verein: bool) -> Arc<ServerCtx> {
+        let mut m = match_on_court();
+        m.team1 = vec![BtpPlayer {
+            nationality: Some("GER".into()),
+            club: Some("TSV Schalterprobe".into()),
+            ..player("Anna")
+        }];
+        let mut ctx = make_ctx_with(1, m.clone());
+        // Mit Feld-Stammdaten — sonst bleibt die Übersicht leer.
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![m],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![crate::btp::model::BtpCourt {
+                id: 101,
+                name: "1".into(),
+                location_id: None,
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        ctx.config_path = dir.join("config.json");
+        let mut cfg = AppConfig::default();
+        cfg.court_monitor.show_nations = nation;
+        cfg.court_monitor.show_clubs = verein;
+        std::fs::write(&ctx.config_path, serde_json::to_string(&cfg).unwrap()).unwrap();
+        Arc::new(ctx)
+    }
+
+    /// Alle Anzeige-Antworten eines Kontexts als Text: `/health`, der schmale
+    /// Abruf `/health?court=` (S7) und `/combo/state`.
+    async fn anzeige_antworten(ctx: Arc<ServerCtx>) -> Vec<(&'static str, String)> {
+        async fn text(r: Response) -> String {
+            let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            String::from_utf8_lossy(&b).into_owned()
+        }
+        let voll = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let schmal = health(
+            State(ctx.clone()),
+            Query(DeviceHeartbeat {
+                device: None,
+                src: None,
+                court: Some("101".into()),
+            }),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let combo = combo_state(
+            State(ctx.clone()),
+            Query(ComboQuery {
+                courts: "101".into(),
+                device: None,
+            }),
+        )
+        .await
+        .into_response();
+        vec![
+            ("/health", text(voll).await),
+            ("/health?court=", text(schmal).await),
+            ("/combo/state", text(combo).await),
+        ]
+    }
+
+    #[tokio::test]
+    async fn anzeige_endpunkte_ohne_nation_und_verein_bei_schalter_aus() {
+        // Akzeptanzkriterien 9/10 an den Endpunkten, nicht nur an den
+        // Bausteinen: Rutscht der Filter je hinter den Cache, wird das rot.
+        let dir = tempfile::tempdir().unwrap();
+        for (route, body) in anzeige_antworten(ctx_mit_schaltern(dir.path(), false, false)).await {
+            assert!(body.contains("Anna"), "{route} trägt das Spiel: {body}");
+            assert!(!body.contains("GER"), "{route} ohne Nation: {body}");
+            assert!(
+                !body.contains("TSV Schalterprobe"),
+                "{route} ohne Verein: {body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn anzeige_endpunkte_mit_nation_und_verein_bei_schalter_an() {
+        // Gegenprobe: Ohne sie bewiese der Test oben nichts.
+        let dir = tempfile::tempdir().unwrap();
+        for (route, body) in anzeige_antworten(ctx_mit_schaltern(dir.path(), true, true)).await {
+            assert!(body.contains("GER"), "{route} mit Nation: {body}");
+            assert!(
+                body.contains("TSV Schalterprobe"),
+                "{route} mit Verein: {body}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn geraete_state_traegt_stil_und_der_wechsel_aendert_die_marke() {
         // ADR 0068: Der Stil reist in-band; ein Wechsel muss als neue Marke
