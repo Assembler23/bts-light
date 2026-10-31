@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.326
+
+- **„Automatik pausiert" am Turnier-PC sichtbar — mit Knopf „Fortsetzen".**
+  Ist die automatische Feldvergabe eingeschaltet und in der Turnierleitungs-
+  Oberfläche pausiert, zeigt die Windows-App jetzt oben einen orangefarbenen
+  Balken. **Fortsetzen** hebt die Pause auf — dauerhaft, genau wie „Automatik
+  läuft" im Browser. Der Umweg über das Aus- und Einschalten der Automatik in
+  den Einstellungen ist nicht mehr nötig.
+
 ## v0.9.325
 
 - **Geändert: Diagnose-Logs sind bei einer Neuinstallation standardmäßig

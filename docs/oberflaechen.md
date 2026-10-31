@@ -42,6 +42,14 @@ Statusanzeigen:
 - **Internet** beziehungsweise Cloud-Verbindung
 - **Ferne Halle** — nur, wenn eine gekoppelt ist
 
+Ist die automatische Feldvergabe eingeschaltet, aber in der
+[Turnierleitungs-Oberfläche](turnierleitung-web.md) pausiert, steht oben im
+Fenster, auf jeder Seite, ein orangefarbener Balken **„Automatik pausiert"** mit dem
+Knopf **Fortsetzen** (seit v0.9.326). Ein Klick darauf lässt die Automatik
+wieder freie Felder belegen — wie „Automatik läuft" im Browser.
+<!-- pruef: "Automatik pausiert" in src/components/AutoAssignPauseBanner.tsx -->
+<!-- pruef: "Fortsetzen" in src/components/AutoAssignPauseBanner.tsx -->
+
 ## Die Geräte in der Halle
 
 Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit

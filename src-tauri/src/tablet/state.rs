@@ -3479,14 +3479,14 @@ impl TabletState {
     }
 
     /// Hält die automatische Feldvergabe an oder gibt sie wieder frei —
-    /// nur im Laufzeit-Zustand. Wer die Pause dauerhaft setzt (TL-Web),
-    /// schreibt zuerst die Config und ruft dann [`Self::load_auto_assign_pause`].
+    /// nur im Laufzeit-Zustand. Wer die Pause dauerhaft setzt (TL-Web,
+    /// Desktop-Knopf), geht über [`Self::persist_auto_assign_pause`].
     pub fn set_auto_assign_paused(&self, paused: bool) {
         *self.auto_assign_paused.write().unwrap() = paused;
     }
 
     /// Übernimmt die gespeicherte Pause samt Turnierbezug — beim Start der
-    /// Übertragung aus der Config und nach jedem Umschalten im TL-Web.
+    /// Übertragung aus der Config und nach jedem Umschalten (TL-Web, PC).
     ///
     /// Der Turnierbezug kommt **mit** (anders als bei der Sperrliste, deren
     /// Laufzeit-Turnier leer startet): Sonst übernähme der erste Snapshot
@@ -3495,6 +3495,43 @@ impl TabletState {
     pub fn load_auto_assign_pause(&self, paused: bool, tournament: &str) {
         *self.auto_assign_paused.write().unwrap() = paused;
         *self.auto_assign_paused_tournament.write().unwrap() = tournament.trim().to_string();
+    }
+
+    /// Setzt oder hebt die Pause der automatischen Feldvergabe **dauerhaft**
+    /// — der eine gemeinsame Weg für das TL-Web (`SetAutoAssign`) und den
+    /// Desktop-Knopf „Fortsetzen" (`set_auto_assign_paused`-Command).
+    ///
+    /// `schreibe` bekommt die Änderung als Funktion auf die Config und führt
+    /// sie über den jeweils eigenen, gesperrten Schreibpfad aus (TL:
+    /// `ServerCtx::mutate_app_config`, Desktop: `mutate_config`). Erst die
+    /// Datei, dann der Arbeitsspeicher: Scheitert das Schreiben, bleibt der
+    /// Laufzeit-Zustand unverändert — nie eine Pause, die nur im RAM steht
+    /// und beim nächsten Start wieder verschwindet.
+    ///
+    /// Turnierbezug (Muster ADR 0044): aus dem Snapshot; ohne Snapshot (BTP
+    /// noch nicht verbunden) der bisher gemerkte, sonst leer — den übernimmt
+    /// dann der erste Snapshot.
+    pub fn persist_auto_assign_pause<E>(
+        &self,
+        paused: bool,
+        schreibe: impl FnOnce(&dyn Fn(&mut crate::config::AppConfig)) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let tournament = self
+            .snapshot_clone()
+            .map(|s| s.tournament_name.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| self.auto_assign_paused_tournament());
+        let anwenden = |cfg: &mut crate::config::AppConfig| {
+            cfg.auto_assign_paused = paused;
+            cfg.auto_assign_paused_tournament = if paused {
+                tournament.clone()
+            } else {
+                String::new()
+            };
+        };
+        schreibe(&anwenden)?;
+        self.load_auto_assign_pause(paused, &tournament);
+        Ok(())
     }
 
     /// Turnier, an das die Pause gebunden ist (leer = noch keins).
@@ -6031,6 +6068,65 @@ mod tests {
         assert!(st.auto_assign_paused());
         st.set_snapshot(snap_named("Bezirksrangliste"));
         assert!(!st.auto_assign_paused());
+    }
+
+    #[test]
+    fn dauerhafte_pause_schreibt_erst_die_config_und_dann_den_laufzeitzustand() {
+        // Gemeinsamer Weg von TL-Web und Desktop-Knopf „Fortsetzen":
+        // Turnierbezug aus dem Snapshot, Config und Arbeitsspeicher gleich.
+        let st = TabletState::default();
+        st.set_snapshot(snap_named("Köpi-Cup"));
+        let mut cfg = crate::config::AppConfig::default();
+        st.persist_auto_assign_pause(true, |anwenden| {
+            anwenden(&mut cfg);
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+        assert!(cfg.auto_assign_paused);
+        assert_eq!(cfg.auto_assign_paused_tournament, "Köpi-Cup");
+        assert!(st.auto_assign_paused());
+        assert_eq!(st.auto_assign_paused_tournament(), "Köpi-Cup");
+
+        // Fortsetzen leert den Turnierbezug in der Datei, damit eine alte
+        // Pause nie wieder aufleben kann.
+        st.persist_auto_assign_pause(false, |anwenden| {
+            anwenden(&mut cfg);
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+        assert!(!cfg.auto_assign_paused);
+        assert!(cfg.auto_assign_paused_tournament.is_empty());
+        assert!(!st.auto_assign_paused());
+    }
+
+    #[test]
+    fn scheitert_das_schreiben_bleibt_die_pause_im_laufzeitzustand_stehen() {
+        // Sonst hieße „Fortsetzen" am PC: Automatik läuft — bis zum nächsten
+        // Start, der die Pause wieder aus der Datei lädt.
+        let st = TabletState::default();
+        st.load_auto_assign_pause(true, "Köpi-Cup");
+        let ergebnis = st.persist_auto_assign_pause(false, |_| Err("Platte voll"));
+        assert_eq!(ergebnis, Err("Platte voll"));
+        assert!(
+            st.auto_assign_paused(),
+            "Pause bleibt, wenn die Datei nicht geschrieben wurde"
+        );
+        assert_eq!(st.auto_assign_paused_tournament(), "Köpi-Cup");
+    }
+
+    #[test]
+    fn ohne_snapshot_bleibt_der_gemerkte_turnierbezug() {
+        // BTP noch nicht verbunden: Der Turnierbezug kommt aus dem
+        // Laufzeit-Zustand statt leer geschrieben zu werden.
+        let st = TabletState::default();
+        st.load_auto_assign_pause(false, "Köpi-Cup");
+        let mut cfg = crate::config::AppConfig::default();
+        st.persist_auto_assign_pause(true, |anwenden| {
+            anwenden(&mut cfg);
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+        assert_eq!(cfg.auto_assign_paused_tournament, "Köpi-Cup");
     }
 
     #[test]

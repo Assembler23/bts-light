@@ -950,8 +950,10 @@ mitgeändert worden:
   (`auto_assign_paused` + `auto_assign_paused_tournament`, Muster ADR 0044),
   wird beim Start geladen und ist vor dem Speichern der Einstellungen
   geschützt (`keep_host_managed_fields`). Nebenbei behoben: Auch jedes
-  Speichern der Einstellungen hob die Pause auf (Sync-Neustart). Neuer Griff
-  ohne TL-Gerät: Automatik in den Einstellungen aus- und wieder einschalten.
+  Speichern der Einstellungen hob die Pause auf (Sync-Neustart). Griff ohne
+  TL-Gerät seit v0.9.326: Balken „Automatik pausiert" mit Knopf
+  „Fortsetzen" in der Desktop-App (`set_auto_assign_paused`, derselbe Weg
+  `persist_auto_assign_pause` wie die TL-Aktion).
   Bedienung: [turnierleitung-web.md](turnierleitung-web.md).
 
 ## Wünsche vom 23.08.2026

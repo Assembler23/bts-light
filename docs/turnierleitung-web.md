@@ -636,11 +636,12 @@ Feldvergabe in den Einstellungen eingeschaltet ist.
 Die Pause **bleibt bestehen** (seit v0.9.323), auch wenn bts-light neu
 gestartet oder aktualisiert wird oder jemand am Turnier-PC die Einstellungen
 speichert. Sie gilt nur für das Turnier, in dem sie gesetzt wurde: Meldet BTP
-ein anderes Turnier, läuft die Automatik wieder. Ist das Gerät, das pausiert
-hat, nicht mehr da, hebst du die Pause am Turnier-PC auf: in den
-Einstellungen **Automatische Feldvergabe aktivieren** ausschalten, speichern,
-wieder einschalten und erneut speichern.
-<!-- pruef: "Automatische Feldvergabe aktivieren" in src/pages/SetupWizard.tsx -->
+ein anderes Turnier, läuft die Automatik wieder. Am Turnier-PC steht während
+der Pause oben ein Balken **„Automatik pausiert"**; mit dem Knopf
+**Fortsetzen** hebst du sie dort auf (seit v0.9.326) — praktisch, wenn das
+Gerät, das pausiert hat, nicht mehr da ist.
+<!-- pruef: "Automatik pausiert" in src/components/AutoAssignPauseBanner.tsx -->
+<!-- pruef: "Fortsetzen" in src/components/AutoAssignPauseBanner.tsx -->
 
 #### Vereine (Vereinsname/-logo)
 

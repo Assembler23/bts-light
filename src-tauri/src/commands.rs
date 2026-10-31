@@ -393,14 +393,15 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Automatik legt ein Spiel auf das kaputte Feld.
     incoming.locked_courts = current.locked_courts.clone();
     incoming.locked_courts_tournament = current.locked_courts_tournament.clone();
-    // Die Pause der automatischen Vergabe wird nur im TL-Web geschaltet —
+    // Die Pause der automatischen Vergabe wird im TL-Web und mit dem Knopf
+    // „Fortsetzen" (`set_auto_assign_paused`) geschaltet, nie im Assistenten —
     // der Assistent kennt das Feld nicht und schickte „nicht pausiert"
     // zurück; jedes Speichern am PC hätte die Pause still aufgehoben.
     //
     // Ausnahme: Wer die Automatik in den Einstellungen AUSschaltet, hebt
-    // die Pause mit auf. Das ist der Griff, wenn das pausierende TL-Gerät
-    // nicht mehr da ist (leer, Zugang widerrufen) — bis v0.9.322 war es
-    // das Stoppen/Starten der Übertragung, das die Pause jetzt überlebt.
+    // die Pause mit auf. Ohne TL-Gerät (leer, Zugang widerrufen) ist seit
+    // v0.9.326 der Desktop-Knopf „Fortsetzen" der Griff; bis v0.9.322 war
+    // es das Stoppen/Starten der Übertragung, das die Pause jetzt überlebt.
     // Beim Wiedereinschalten läuft die Automatik dann sofort.
     if incoming.auto_assign.enabled {
         incoming.auto_assign_paused = current.auto_assign_paused;
@@ -3804,6 +3805,55 @@ pub fn clear_print_warning(state: State<'_, AppState>) {
     state.tablet.clear_print_warning();
 }
 
+/// Zustand der automatischen Feldvergabe für den Desktop-Hinweis
+/// „Automatik pausiert".
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct AutoAssignStatus {
+    /// Automatik in den Einstellungen eingeschaltet.
+    pub enabled: bool,
+    /// Pausiert (aus dem TL-Web) — nur `true`, wenn sie auch eingeschaltet
+    /// ist: Eine ausgeschaltete Automatik hat nichts fortzusetzen.
+    pub paused: bool,
+}
+
+/// Kernlogik von [`auto_assign_status`], ohne Tauri-Anbindung testbar.
+fn auto_assign_status_aus(cfg: &AppConfig, tablet: &TabletState) -> AutoAssignStatus {
+    let enabled = cfg.auto_assign.enabled;
+    AutoAssignStatus {
+        enabled,
+        paused: enabled && tablet.auto_assign_paused(),
+    }
+}
+
+/// Ist die automatische Feldvergabe eingeschaltet und gerade pausiert?
+/// Die Desktop-Oberfläche fragt im Takt mit — bis v0.9.325 sah man die im
+/// TL-Web gesetzte Pause am PC gar nicht.
+#[tauri::command]
+pub fn auto_assign_status(state: State<'_, AppState>) -> AutoAssignStatus {
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    auto_assign_status_aus(&cfg, &state.tablet)
+}
+
+/// Pausiert die automatische Feldvergabe oder setzt sie fort — derselbe
+/// dauerhafte Weg wie die TL-Aktion `SetAutoAssign`
+/// ([`TabletState::persist_auto_assign_pause`]: Turnierbezug, erst Datei,
+/// dann Arbeitsspeicher). Damit lässt sich eine Pause auch ohne TL-Gerät
+/// aufheben.
+#[tauri::command]
+pub fn set_auto_assign_paused(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    paused: bool,
+) -> Result<(), String> {
+    state.tablet.persist_auto_assign_pause(paused, |anwenden| {
+        mutate_config(&app, &state, |cfg| {
+            anwenden(cfg);
+            Ok(())
+        })
+        .map(|_| ())
+    })
+}
+
 /// Punktverlauf eines Matches (Spec punktverlauf-graph, R1: der Browser
 /// spricht nie selbst mit dem Store). `None` = kein Verlauf aufgezeichnet
 /// (Papier-Ergebnis oder Spiel vor Einführung).
@@ -6904,6 +6954,68 @@ mod tests {
             "und ihr Turnierbezug ebenso — sonst gälte sie als „unbekannt“ \
              und überlebte den nächsten Turnierwechsel"
         );
+    }
+
+    #[test]
+    fn auto_assign_status_meldet_die_pause_nur_bei_eingeschalteter_automatik() {
+        // Der Desktop-Hinweis „Automatik pausiert" mit „Fortsetzen" darf nur
+        // erscheinen, wenn es etwas fortzusetzen gibt.
+        let tablet = TabletState::default();
+        let mut cfg = AppConfig::default();
+        cfg.auto_assign.enabled = true;
+        assert_eq!(
+            auto_assign_status_aus(&cfg, &tablet),
+            AutoAssignStatus {
+                enabled: true,
+                paused: false
+            }
+        );
+        tablet.load_auto_assign_pause(true, "Köpi-Cup");
+        assert_eq!(
+            auto_assign_status_aus(&cfg, &tablet),
+            AutoAssignStatus {
+                enabled: true,
+                paused: true
+            }
+        );
+        cfg.auto_assign.enabled = false;
+        assert_eq!(
+            auto_assign_status_aus(&cfg, &tablet),
+            AutoAssignStatus {
+                enabled: false,
+                paused: false
+            },
+            "ausgeschaltet ⇒ kein Hinweis, auch wenn noch eine Pause gemerkt ist"
+        );
+    }
+
+    #[test]
+    fn fortsetzen_am_pc_geht_den_gesperrten_schreibpfad_und_hebt_die_pause_auf() {
+        // Desktop-Knopf „Fortsetzen": dieselbe Funktion wie die TL-Aktion,
+        // über `mutate_config_at` — Datei und Arbeitsspeicher stimmen danach.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let shared = Arc::new(Mutex::new(AppConfig {
+            auto_assign_paused: true,
+            auto_assign_paused_tournament: "Köpi-Cup".to_string(),
+            ..AppConfig::default()
+        }));
+        let tablet = TabletState::default();
+        tablet.load_auto_assign_pause(true, "Köpi-Cup");
+        tablet
+            .persist_auto_assign_pause(false, |anwenden| {
+                mutate_config_at(&path, &shared, |cfg| {
+                    anwenden(cfg);
+                    Ok(())
+                })
+                .map(|_| ())
+            })
+            .unwrap();
+        assert!(!tablet.auto_assign_paused());
+        let gespeichert = AppConfig::load_from(&path).unwrap();
+        assert!(!gespeichert.auto_assign_paused);
+        assert!(gespeichert.auto_assign_paused_tournament.is_empty());
+        assert!(!shared.lock().unwrap().auto_assign_paused);
     }
 
     #[test]

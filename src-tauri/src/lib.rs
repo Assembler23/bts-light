@@ -150,6 +150,8 @@ pub fn run() {
             commands::assign_court,
             commands::free_court,
             commands::set_court_locked,
+            commands::auto_assign_status,
+            commands::set_auto_assign_paused,
             commands::preparation_candidates,
             commands::tournament_draws,
             commands::tournament_stats,

@@ -1879,28 +1879,17 @@ fn execute_auto_assign_action(
     let relay_proto::TlAction::SetAutoAssign { enabled } = action else {
         return None;
     };
-    let paused = !*enabled;
-    // Ohne Snapshot (BTP noch nicht verbunden): Turnierbezug aus dem
-    // Laufzeit-Zustand, sonst leer — den übernimmt der erste Snapshot.
-    let tournament = ctx
-        .tablet
-        .snapshot_clone()
-        .map(|s| s.tournament_name.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .unwrap_or_else(|| ctx.tablet.auto_assign_paused_tournament());
-    // Erst die Datei, dann der Arbeitsspeicher (wie bei der Feldsperre):
-    // Scheitert das Schreiben, bleibt beides unverändert und das Gerät
-    // bekommt einen Fehler — nie eine Pause, die nur im RAM steht und beim
-    // nächsten Start wieder verschwindet.
-    let geschrieben = tournament.clone();
-    if let Err(rejected) = ctx.mutate_app_config(move |cfg| {
-        cfg.auto_assign_paused = paused;
-        cfg.auto_assign_paused_tournament = if paused { geschrieben } else { String::new() };
-        Ok(())
+    // Gemeinsamer Weg mit dem Desktop-Knopf „Fortsetzen" (Turnierbezug,
+    // erst Datei, dann Arbeitsspeicher): `persist_auto_assign_pause`.
+    // Scheitert das Schreiben, bekommt das Gerät den Fehler.
+    if let Err(rejected) = ctx.tablet.persist_auto_assign_pause(!*enabled, |anwenden| {
+        ctx.mutate_app_config(|cfg| {
+            anwenden(cfg);
+            Ok(())
+        })
     }) {
         return Some(rejected);
     }
-    ctx.tablet.load_auto_assign_pause(paused, &tournament);
     Some(relay_proto::TlResponse::ok(0))
 }
 

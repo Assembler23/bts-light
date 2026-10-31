@@ -337,8 +337,10 @@ ausgelöst, aber an genau einem Gerät je Halle gesprochen.
       `auto_assign_paused_tournament`, Muster ADR 0044) und überlebt
       Neustart, Update und das Speichern der Einstellungen — sie lief sonst
       nach jedem Wiederanlauf ungewollt wieder an. Ein anderes Turnier lässt
-      sie verfallen. Der Griff, wenn das pausierende Gerät weg ist: die
-      Automatik in den Einstellungen ausschalten (hebt die Pause auf).
+      sie verfallen. Der Griff, wenn das pausierende Gerät weg ist: seit
+      v0.9.326 der Desktop-Balken „Automatik pausiert" mit „Fortsetzen"
+      (gemeinsamer Weg `TabletState::persist_auto_assign_pause`); das
+      Ausschalten der Automatik in den Einstellungen hebt sie weiterhin auf.
 
 **Aufrufe und Ansagen**
 
