@@ -79,13 +79,19 @@
       border: 0; border-radius: .5rem; cursor: pointer;
       touch-action: manipulation;
     }
+    /* Neutrale Knöpfe (⇄, ⚙) brauchen einen eigenen dunklen Grund: Die
+       allgemeine button-Regel färbt sie sonst hellgrau, und das weiße Symbol
+       verschwand darauf (Rückmeldung 31.10.2026). Zweistufiger Selektor, damit
+       auch button:disabled den Grund nicht überschreibt. */
+    .header-btn.neutral { background: #334155; }
+    .header-btn.neutral:active { background: #1e293b; }
     .header-btn.injury { background: #b91c1c; }
     .header-btn.injury:active { background: #991b1b; }
     .header-btn.injury.on { background: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,.4); }
     .header-btn.megaphone { background: #b45309; }
     .header-btn.megaphone:active { background: #92400e; }
     .header-btn.megaphone.on { background: #f59e0b; color: #1f2937; box-shadow: 0 0 0 3px rgba(245,158,11,.4); }
-    .header-btn:disabled { opacity: .35; cursor: not-allowed; }
+    .header-btn:disabled { opacity: .35; cursor: not-allowed; color: #fff; }
     .match-clock {
       flex: 0 0 auto; font-variant-numeric: tabular-nums;
       font-size: 1.1rem; font-weight: 700; color: var(--muted);
@@ -758,7 +764,7 @@
     <button
       type="button"
       id="korrektur-btn"
-      class="header-btn"
+      class="header-btn neutral"
       disabled
       aria-label="Seiten oder Mannschaften korrigieren"
       title="Seiten oder Mannschaften korrigieren"
@@ -782,7 +788,7 @@
     <button
       type="button"
       id="settings-btn"
-      class="header-btn"
+      class="header-btn neutral"
       aria-label="Einstellungen"
       title="Einstellungen (PIN)"
     >⚙</button>

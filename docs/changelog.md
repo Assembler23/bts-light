@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.322
+
+- **Zähl-Tablet: ⇄ und ⚙ in der Kopfzeile gut erkennbar.** Die beiden Knöpfe
+  standen weiß auf Hellgrau und waren auf dem Tablet kaum zu sehen. Sie haben
+  jetzt einen dunklen Grund wie die roten und orangen Knöpfe daneben.
+
 ## v0.9.321
 
 - **Ausgabegerät der Ansage wählbar.** Auf der Seite **Ansagen** legt „Ansage
