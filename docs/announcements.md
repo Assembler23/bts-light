@@ -12,10 +12,13 @@ des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
 
 ## Funktionsweise
 
-- **Technik:** Browser-Web-Speech-API (`speechSynthesis`) im WebView; der
-  Gong wird per Web Audio API synthetisiert. Geräte-lokal, kein externer
-  Dienst. Die Ansage spielt über die Lautsprecher des Turnier-PCs, auch
-  wenn das Fenster ins Tray minimiert ist.
+- **Technik (seit v0.9.318):** Gong und Stimme spielt der **Rust-Kern**
+  über Windows (WASAPI) — siehe [Ausgabegerät](#ausgabegerät-seit-v09318).
+  Der Gong wird im Fenster per Web Audio gerendert, die Stimme ist Azure
+  (wenn eingerichtet) oder die **Windows-Stimme** (OneCore). Die
+  Browser-Stimme (`speechSynthesis`) springt nur noch als Rückfall ein. Die
+  Ansage spielt über die Lautsprecher des Turnier-PCs, auch wenn das Fenster
+  ins Tray minimiert ist.
 - **Auslöser am Turnier-PC (Master, seit v0.9.314):** Der **Kern** vergleicht
   in jedem Sync-Lauf die Feldbelegung mit der zuletzt gesehenen
   ([`tablet/erst_ansage.rs`](../src-tauri/src/tablet/erst_ansage.rs), Aufruf
@@ -513,8 +516,63 @@ wird „Feld <Zahlwort>" gesprochen (Zahl als Wort, sonst spricht der
 Browser „Feld erste"). Bei frei benannten Feldern (`"Center Court"`) wird
 das Label wörtlich gesprochen.
 
+## Ausgabegerät (seit v0.9.318)
+
+Spec [ansage-ausgabegeraet](features/ansage-ausgabegeraet.md), ADR 0065/0066.
+Auslöser: Am Senior-Cup (31.10.2026) kam die Ansage nicht über die per
+Klinke angeschlossene Hallenanlage, alle anderen Programme schon.
+
+- **Gerät je Ansage neu:** Der Kern fragt Windows **vor jedem Stück** (Gong,
+  Stimme), welches Gerät gerade Standard ist. Wer zwischen zwei Ansagen eine
+  Klinke einsteckt oder eine USB-Box abzieht, hört die nächste Ansage schon
+  über das neue Gerät — ohne Neustart, ohne Klick. Reißt das Gerät **während**
+  einer Ansage ab, beginnt sie auf dem neuen Gerät einmal von vorn.
+- **Anzeige:** Auf der Seite **Ansagen** steht unter dem Test-Knopf, worüber
+  die Ansage läuft.
+  <!-- pruef: "Ausgabe: Windows-Standard" in src/components/AnsageAusgabeAnzeige.tsx -->
+- **Windows-Stimme statt Browser-Stimme:** Ohne Azure spricht die
+  Windows-Stimme aus dem Kern — dieselben Stimmen wie bisher (Katja, Hedda,
+  Stefan …), aber über denselben Weg wie der Gong. Die Stimmenliste in den
+  Ansage-Einstellungen kommt jetzt aus Windows; früher gewählte Stimmen
+  gelten weiter.
+- **Rückfall, sichtbar:** Klappt die Ausgabe über Windows nicht, spielt das
+  Programmfenster wie früher, und ein gelbes Banner sagt es. Es verschwindet
+  von selbst, sobald die nächste Ansage wieder normal läuft.
+  <!-- pruef: "Kein Ausgabegerät gefunden" in src/components/AnsageAusgabeBanner.tsx -->
+  <!-- pruef: "Keine passende Windows-Stimme für die Ansage-Sprache installiert" in src/components/AnsageAusgabeBanner.tsx -->
+- **Fehlt die Windows-Stimme der Ansage-Sprache** (Sprachpaket), spricht die
+  Browser-Stimme — nie eine englische Stimme für einen deutschen Text.
+- **Pause nach dem Gong:** Die Windows-Stimme wird erst nach dem Gong
+  erzeugt. Beim allerersten Mal nach dem Start kann die Pause deshalb
+  knapp eine Sekunde länger sein, danach unter 0,1 s.
+- **Sehr lange Freitexte** teilt die App an Satzenden in Stücke von höchstens
+  1000 Zeichen; gesprochen wird alles.
+- **Notfall-Schalter:** In den Ansage-Einstellungen holt **Alter Abspielweg
+  (über das Programmfenster)** das Verhalten bis v0.9.317 zurück — ohne
+  Update. Dann folgt die Ansage einem Gerätewechsel nicht mehr von selbst.
+  Der Schalter ist befristet und fällt drei Versionen später weg.
+  <!-- pruef: "Alter Abspielweg (über das Programmfenster)" in src/components/AnnounceSettings.tsx -->
+- Unter Linux bleibt es beim Weg über das Programmfenster.
+
+### Ansage kommt aus dem falschen Lautsprecher
+
+1. Seite **Ansagen**: Was steht bei „Ausgabe"? Ist es nicht das Gerät der
+   Anlage, in Windows das richtige Gerät als **Standard** wählen — die nächste
+   Ansage folgt.
+2. Steht dort schon das richtige Gerät und es klingt trotzdem woanders:
+   Windows kann einem Programm ein festes Gerät zuordnen. **Einstellungen →
+   System → Sound → Lautstärkemixer**, bei **BTS Light** das Ausgabegerät auf
+   **Standard** stellen. (Bis v0.9.317 hieß der Eintrag „Microsoft Edge
+   WebView2" — eine alte Zuordnung dort wirkt seitdem nicht mehr.)
+3. Kommt auch aus dem **Browser** kein Ton über das Gerät, hängt es in
+   Windows (gesehen nach häufigem Ab- und Anstecken einer USB-Box). Gerät aus-
+   und wieder einschalten bzw. neu anstecken; danach die Test-Ansage.
+4. Bluetooth-Boxen, die zwischen den Ansagen schlafen, verschlucken manchmal
+   die ersten Silben — dafür kann bts-light nichts; eine Kabelverbindung hilft.
+
 ## Tonausgabe freischalten (WebView2)
 
+Betrifft seit v0.9.318 nur noch den Rückfall-Weg über das Programmfenster.
 Windows-WebView2 startet die Tonausgabe erst nach einer Nutzergeste. Der
 **Test-Knopf** in den Einstellungen ist diese Geste; zusätzlich schaltet
 ein einmaliger Klick irgendwo im Fenster das Audio frei. Empfehlung: vor

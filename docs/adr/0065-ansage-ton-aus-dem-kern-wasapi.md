@@ -64,6 +64,11 @@ Gemessen am 31.10.2026 (Entwickler-PC, Spec [ansage-ausgabegeraet](../features/a
 - **Gong nach Rust portieren:** dritte Kopie des Klangs neben `gongKlang.mjs` und `ansage.html`.
 - **Warteschlange in Rust:** doppelte Rückfall- und Generationslogik.
 
+**Nachtrag Hörtest (31.10.2026):** Das Standardgerät wird als **konkreter
+Endpunkt** aufgelöst (`IMMDeviceEnumerator::GetDefaultAudioEndpoint` →
+`Host::device_by_id`). cpal 0.18 liefert bei `default_output_device()` das
+virtuelle Standardgerät von Windows; darauf ist es nur noch Rückfall.
+
 ## Konsequenzen
 
 - **Abhängigkeit und Build:** Neue Abhängigkeit `cpal` (Apache-2.0, RustAudio, MSRV 1.85), nur

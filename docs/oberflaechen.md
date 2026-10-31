@@ -28,7 +28,7 @@ zeigen.
 | **Turnierleitung** | Hier entstehen die Zugänge für die Turnierleitungs-Oberfläche: Gerät koppeln, QR-Code zeigen, Zugang wieder entziehen. | nie — hier schaltet man sie schließlich ein |
 | **Check-In** | Wer ist da, wer fehlt — je Klasse, gesetzte Meldungen mit ihrem Setzplatz (`[1]`). Von Hand einchecken oder zurücksetzen, Fehlende ausrufen lassen, Hallen-Ansicht, Zeitplan, Check-In-Seite und QR-Aushang öffnen. | Check-In aus **oder** Turnier-Kennung fehlt |
 | **Schiedsrichter** | Einsatzplanung: Reihenfolge, Pausen, Sperrlisten, feldweise Schalter. Die Stammliste kommt aus BTP. | „Mit Schiedsrichtern spielen" aus |
-| **Ansagen** | Feld von Hand ansagen, Freitext sprechen, gespeicherte Ansagen, Verlauf mit „Erneut abspielen" — und alle Detail-Einstellungen zu Stimme und Tempo. | Ansagen aus |
+| **Ansagen** | Feld von Hand ansagen, Freitext sprechen, gespeicherte Ansagen, Verlauf mit „Erneut abspielen" — und alle Detail-Einstellungen zu Stimme und Tempo. Unter dem Test-Knopf steht, worüber die Ansage läuft („Ausgabe: Windows-Standard (…)"), siehe [Ausgabegerät](announcements.md#ausgabegerät-seit-v09318). | Ansagen aus |
 | **Monitore** | Die Geräteverwaltung für Fernseher und Pis: **welches Gerät zeigt was**. Siehe unten. | Court-Monitor aus |
 | **Siegerehrung** | Steuert, welche Disziplin der Sieger-Monitor gerade zeigt. Bewusst ohne Rotation, damit das Publikum das Podium fotografieren kann. | Court-Monitor aus |
 | **Einstellungen** | Derselbe Bildschirm wie der Einrichtungs-Assistent. Siehe [Einstellungen](einstellungen.md). | nie |

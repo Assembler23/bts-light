@@ -94,7 +94,7 @@ die Turnierleitung sieht, worüber sie läuft.
   - alles mit `#[serde(default)]`, alte Konfigurationen bleiben gültig.
 - **Abhängigkeiten:**
   - `cpal = "0.18"` **nur** unter `[target.'cfg(windows)'.dependencies]`. Lizenz Apache-2.0, nutzt dieselbe `windows`-Version 0.62. Der Linux-CI-Job hat kein ALSA, deshalb ist cpal dort ausgeschlossen.
-  - `windows`-Features neu: `Media_SpeechSynthesis`, `Media_Core`, `Storage_Streams`, `Foundation`, `Foundation_Collections`.
+  - `windows`-Features neu: `Media_SpeechSynthesis`, `Media_Core`, `Storage_Streams`, `Foundation`, `Win32_System_Com` (COM-Init des Audio-Threads).
 - **Datenschutz:** Gerätenamen (Bluetooth-Geräte tragen oft Personennamen) kommen **nie** ins
   Diagnose-Log (R6, `log_upload.rs`). Geloggt werden nur Ereignisarten.
 
@@ -276,6 +276,28 @@ Das erfüllt die E3-Kriterien 24–26 aus [ansage-im-browser.md](ansage-im-brows
 1. Automatischer Rückfall (sichtbar).
 2. Notfall-Schalter ohne Update.
 3. Updater auf die Vorversion.
+
+## Hörtest PR 1 (31.10.2026, Entwickler-PC, USB-Box + Laptop-Lautsprecher)
+
+- **Ergebnis:** Ansage auf der Box; Box zwischen zwei Ansagen abgezogen →
+  Laptop; wieder angesteckt → Box; mitten in der Ansage abgezogen → Log
+  „Ausgabestrom abgerissen" + „Stück beginnt von vorn", Ansage auf dem Laptop
+  von vorn. Kein Banner, kein Öffnen-Fehler.
+- **Befund 1 — konkretes statt virtuelles Standardgerät:** cpal 0.18 gibt bei
+  `default_output_device()` das **virtuelle** „Standard-Ausgabe"-Gerät von
+  Windows (`ActivateAudioInterfaceAsync`), nicht den Endpunkt. Der Kern löst
+  deshalb das Standardgerät selbst auf (`IMMDeviceEnumerator::
+  GetDefaultAudioEndpoint(eRender, eConsole)` → Endpunkt-ID →
+  `Host::device_by_id`); das virtuelle Gerät bleibt nur Rückfall.
+  `windows`-Feature `Win32_Media_Audio`.
+- **Befund 2 — gestörtes Gerät in Windows:** Nach vielem Ab- und Anstecken
+  bekam die Box eine neue Endpunkt-ID, und Windows lieferte für sie
+  `AUDCLNT_E_UNSUPPORTED_FORMAT` schon bei `GetMixFormat` — für **jedes**
+  Programm (auch der Browser blieb stumm). Erst Aus-/Einschalten der Box
+  heilte es. Die App zeigte das Rückfall-Banner; hörbar war nichts, weil auch
+  der Rückfall auf dasselbe Gerät spielt. Das Log nennt seither bei `intern`
+  die cpal-Fehlerart und den Windows-Text (ohne Gerätenamen).
+  Handbuch-Hinweis: Kommt auch aus dem Browser nichts, liegt es am Gerät.
 
 ## Offene Fragen / Annahmen
 

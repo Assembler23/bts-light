@@ -1,3 +1,4 @@
+pub mod ansage_ton;
 pub mod aushang;
 pub mod azure_tts;
 pub mod badhub;
@@ -114,6 +115,11 @@ pub fn run() {
             commands::ansage_vertonen,
             commands::ansage_hoerer,
             commands::ansage_link,
+            commands::ansage_pcm_spielen,
+            commands::ansage_stimme_spielen,
+            commands::ansage_abbrechen,
+            commands::ansage_ausgabe,
+            commands::ansage_stimmen,
             commands::start_sync,
             commands::stop_sync,
             commands::flush_live_scores,

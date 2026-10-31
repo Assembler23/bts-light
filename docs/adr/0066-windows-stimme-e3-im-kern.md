@@ -49,7 +49,7 @@ Gemessen am 31.10.2026:
 ## Konsequenzen
 
 - **`windows`-Features:** neu sind `Media_SpeechSynthesis`, `Media_Core`, `Storage_Streams`,
-  `Foundation` und `Foundation_Collections`.
+  `Foundation` und `Win32_System_Com` (COM-Init des Audio-Threads).
 - **Stimme:** Wer ohne Azure arbeitet, hört dieselbe Stimme über einen anderen Weg. Das Tempo
   kann leicht abweichen (Changelog).
 - **E3 in `ansage-im-browser.md`:** gilt mit dieser Spec als vorgezogen, die Messliste dort ist
