@@ -255,7 +255,7 @@ Umsetzung (v0.9.313), Entscheidungen beim Bau:
 
 ### Offline-Stimme (E3)
 
-> **Umgesetzt in v0.9.319** (Kriterien 24–26). **Vorgezogen (31.10.2026):** E3 wird gemeinsam mit der Spec
+> **Umgesetzt in v0.9.320** (Kriterien 24–26). **Vorgezogen (31.10.2026):** E3 wird gemeinsam mit der Spec
 > [ansage-ausgabegeraet.md](ansage-ausgabegeraet.md) gebaut (ADR 0066) — dort PR 1b für die
 > Seiten. Gemessen: Chromiums lokale Stimmen = OneCore-Stimmen, WAV in 8–44 ms.
 
@@ -287,7 +287,7 @@ Umsetzung (v0.9.313), Entscheidungen beim Bau:
   TL-Warnung auch für Cloud-Hallen.
 - Relay hält Einträge im RAM, 60 s ab Empfang; Deckel 32 Einträge und 32 MiB
   je Namespace, 3 MiB je Audio (größere WAV gehen ohne Audio raus; seit
-  v0.9.319 wegen der Windows-Stimme als WAV), 64
+  v0.9.320 wegen der Windows-Stimme als WAV), 64
   Zuhörer.
 - Hallenvergleich überall über eine gemeinsame Funktion
   (`trim` + Kleinschreibung, Unicode); die alte Slave-Route bleibt unberührt.

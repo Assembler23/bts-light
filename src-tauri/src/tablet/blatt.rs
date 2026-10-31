@@ -13,6 +13,7 @@
 //! über den Blattrand lief und das erst am Papier auffiel.
 
 use super::scoresheet::{Grid, SheetDoc};
+use relay_proto::EventKind;
 
 // ── Blattmaße ───────────────────────────────────────────────────────────
 //
@@ -859,8 +860,10 @@ fn anhang(doc: &SheetDoc) -> Seite {
     for z in &doc.grid.protokoll {
         let mut x = x0;
         let mannschaft = if z.team == 0 { "A" } else { "B" };
-        let spieler = match doc.grid.zeilen {
-            4 => format!("{mannschaft}{}", z.player + 1),
+        let spieler = match (z.art, doc.grid.zeilen) {
+            // Betrifft beide Mannschaften — keine Spalte zu füllen.
+            (EventKind::TeamsCorrected, _) => String::new(),
+            (_, 4) => format!("{mannschaft}{}", z.player + 1),
             _ => mannschaft.to_string(),
         };
         let art = format!(

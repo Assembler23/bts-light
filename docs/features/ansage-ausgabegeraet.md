@@ -188,7 +188,7 @@ die Turnierleitung sieht, worüber sie läuft.
 ### PR 1b: Ansage-Seiten ohne Azure
 
 `ansage_vertonen` liefert ohne Azure OneCore-WAV (`audio/wav`) statt „kein Audio".
-Umgesetzt in v0.9.319, dabei (Review):
+Umgesetzt in v0.9.320, dabei (Review):
 - `hostAudio` im Feed ist jetzt „Azure **oder** Windows-Stimme vorhanden" — sonst meldet
   sich eine Seite ohne Gerätestimme (Pi) nie als Zuhörer, und es wird gar nicht vertont.
 - WAV (16 kHz mono ≈ 32 KB/s, Doppel-Ansage bei Tempo 0,8 ≈ 720 KB) ist ~12× so groß wie

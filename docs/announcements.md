@@ -458,7 +458,7 @@ Ansage-Knöpfe der Desktop-App (Feld aufrufen, Vorbereitungs-Aufruf und
   Azure-Kosten.
 
 **Stimme:** Audio vom Turnier-PC — Azure, wenn eingerichtet, sonst seit
-v0.9.319 die **Windows-Stimme des PCs** (dieselbe wie am PC, als WAV; ADR 0066).
+v0.9.320 die **Windows-Stimme des PCs** (dieselbe wie am PC, als WAV; ADR 0066).
 Gibt es auch die nicht (Linux, kein Sprachpaket) oder spielt das Audio nicht,
 spricht die Gerätestimme den korrigierten Text. Hat das Gerät
 keine Stimme und der PC kein Audio, erklingt nur der Gong, die Seite warnt
@@ -497,7 +497,7 @@ Einstellungen zurück. Die Kiosk-App auf den Zähl-Tablets ist nach
 bisherigem Stand nicht betroffen.
 
 **Grenzen (Stand E3):** nur im LAN (Cloud folgt mit E4); ohne Azure kommt
-das Audio vom PC als Windows-Stimme (seit v0.9.319, nur unter Windows). Wechselt eine Seite die Halle, zählt sie noch bis
+das Audio vom PC als Windows-Stimme (seit v0.9.320, nur unter Windows). Wechselt eine Seite die Halle, zählt sie noch bis
 zu 30 Sekunden auch für die alte — die Seite liest nur und meldet sich nicht
 ab. Als Zuhörer zählt eine Seite nur mit einer Halle, die es im Turnier gibt.
 

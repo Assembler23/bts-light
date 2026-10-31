@@ -137,6 +137,13 @@ pub struct MatchBrief {
     pub sr_names: Vec<String>,
     #[serde(rename = "arNames", default)]
     pub ar_names: Vec<String>,
+    /// `true`, wenn der Host das Ereignis [`EventKind::TeamsCorrected`]
+    /// kennt (ADR 0067). Nur dann bietet das Tablet „Mannschaften
+    /// tauschen" an: Eine ältere App verwürfe jeden Sync mit der neuen Art,
+    /// weil `EventKind` bewusst keinen Catch-All hat. `#[serde(default)]`
+    /// hält ältere Frames lesbar (false → Eingriff nicht angeboten).
+    #[serde(rename = "teamsCorrection", default)]
+    pub teams_correction: bool,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -1108,6 +1115,12 @@ pub enum EventKind {
     /// (ADR 0038); der Zettel druckt Zurückgenommenes durchgestrichen in
     /// der Protokollzeile, aber nicht im Raster.
     Retract,
+    /// Mannschaften berichtigt (ADR 0067): Am Tablet stand die falsche
+    /// Mannschaft auf der falschen Seite. Alles **davor** gilt mit
+    /// vertauschtem A/B — gedeutet wird das allein im Host
+    /// (`in_endkoordinaten`), nicht am Tablet. `team`/`player` sind
+    /// bedeutungslos.
+    TeamsCorrected,
 }
 
 impl EventKind {
@@ -3420,6 +3433,7 @@ mod tests {
                 finalized: false,
                 sr_names: vec!["Sabine Schiedsmann".into()],
                 ar_names: Vec::new(),
+                teams_correction: false,
                 seed_a: None,
                 seed_b: None,
             },
@@ -3465,6 +3479,7 @@ mod tests {
             finalized: true,
             sr_names: vec!["Sabine Schiedsmann".into()],
             ar_names: vec!["Alex Aufschlag".into()],
+            teams_correction: true,
             seed_a: None,
             seed_b: None,
         };
@@ -3483,6 +3498,10 @@ mod tests {
         assert!(!parsed.finalized, "fehlendes Feld → finalized=false");
         assert!(parsed.sr_names.is_empty());
         assert!(parsed.ar_names.is_empty());
+        // Ein alter Host kennt `teams_corrected` nicht → das Tablet darf
+        // „Mannschaften tauschen" nicht anbieten (ADR 0067).
+        assert!(!parsed.teams_correction, "fehlender Schalter → false");
+        assert!(json.contains(r#""teamsCorrection":true"#));
         assert_eq!(parsed.seed_a, None, "fehlende Setzung → None");
         assert_eq!(parsed.seed_b, None);
         // Ungesetzt reist nichts mit (Frame bleibt so klein wie vorher).
@@ -5442,6 +5461,38 @@ mod tests {
         assert!(phase.is_err());
         let frame: Result<TabletMsg, _> = serde_json::from_str(r#"{"type":"match_event_v99"}"#);
         assert!(frame.is_err());
+    }
+
+    /// „Mannschaften berichtigt" (ADR 0067): eigener Draht-Name, gültig
+    /// ohne `retracts`, und **keine** Sanktion — es darf in den
+    /// badhub-Verlauf-Rechenweg, ohne dort aufzutauchen.
+    #[test]
+    fn mannschaften_berichtigt_auf_dem_draht() {
+        let e = MatchEvent {
+            kind: EventKind::TeamsCorrected,
+            ..beispiel_ereignis()
+        };
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains(r#""kind":"teams_corrected""#), "{json}");
+        assert_eq!(serde_json::from_str::<MatchEvent>(&json).unwrap(), e);
+        assert!(e.is_valid());
+        assert!(!EventKind::TeamsCorrected.is_sanction());
+        // So schickt es das Tablet: im Abgleich, den Relay und Host typisiert
+        // parsen — eine alte Fassung ohne die Art verwürfe den ganzen Frame.
+        let sync = r#"{"type":"match_event_sync","matchId":9,"events":[{"id":"ab12","set":1,"afterN":3,"kind":"teams_corrected"}]}"#;
+        match serde_json::from_str::<TabletMsg>(sync).unwrap() {
+            TabletMsg::MatchEventSync { events, .. } => {
+                assert_eq!(events[0].kind, EventKind::TeamsCorrected);
+                assert!(match_events_valid(&events));
+            }
+            other => panic!("falscher Frame: {other:?}"),
+        }
+        // Mit Rücknahme-Ziel ist es Unfug wie bei jeder Nicht-Rücknahme.
+        let falsch = MatchEvent {
+            retracts: "ab".into(),
+            ..e
+        };
+        assert!(!falsch.is_valid());
     }
 
     /// Das leere `retracts` wird nicht mitgeschrieben: Bei

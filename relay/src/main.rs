@@ -5362,6 +5362,7 @@ mod tests {
             finalized: false,
             sr_names: Vec::new(),
             ar_names: Vec::new(),
+            teams_correction: false,
             seed_a: None,
             seed_b: None,
         }
