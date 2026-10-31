@@ -322,6 +322,14 @@ Das erfüllt die E3-Kriterien 24–26 aus [ansage-im-browser.md](ansage-im-brows
   des Notebooks oder feste Zuordnung im Lautstärkemixer) bleibt unbewiesen.
   Der Test am Senior-Cup-Notebook steht aus.
 
+## Hörtest PR 2 (31.10.2026, Entwickler-PC, Klinken-Box + Laptop-Lautsprecher)
+
+Kriterien 18 und 19 bestanden: Laptop-Lautsprecher gewählt bei Klinke als Standard → Ansage
+aus dem Laptop; Klinke gewählt → Klinken-Box; Klinke gezogen → Ersatz über den Standard + Banner
+(Log „gewähltes Ausgabegerät nicht verfügbar"); eingesteckt → Banner weg, Log „wieder verfügbar",
+nächste Ansage über die Klinke. Zurückstellen auf „Windows-Standard" leert die Wahl in der
+`config.json`.
+
 ## Offene Fragen / Annahmen
 
 - **Gemessen nur am Entwickler-PC** (Intel Smart Sound + USB-Box). Ein Realtek-Notebook mit
