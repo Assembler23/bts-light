@@ -2,7 +2,7 @@
  * Seiten und Mannschaften am Zähl-Tablet von Hand korrigieren.
  *
  * Kanonische Fassung (Spec `docs/features/tablet-seiten-korrigieren.md`,
- * ADR 0065). `src-tauri/assets/tablet.html` trägt eine **Inline-Kopie**
+ * ADR 0067). `src-tauri/assets/tablet.html` trägt eine **Inline-Kopie**
  * (die Assets durchlaufen keinen Build und können keine Module laden) —
  * Änderungen hier und dort gemeinsam.
  *

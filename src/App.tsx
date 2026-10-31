@@ -11,10 +11,11 @@ import {
   takeUpdateResume,
   wifiStatus,
 } from "./api";
-import { setSharedOverrides } from "./io/announcer";
+import { setLegacyOutput, setSharedOverrides } from "./io/announcer";
 import { isTournamentGuid } from "./tournamentGuid";
 import { AlertBanner } from "./components/AlertBanner";
 import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
+import { AnsageAusgabeBanner } from "./components/AnsageAusgabeBanner";
 import { PrintWarningBanner } from "./components/PrintWarningBanner";
 import { SlaveConnectBanner } from "./components/SlaveConnectBanner";
 import { AppShell } from "./components/AppShell";
@@ -79,6 +80,7 @@ function defaultConfig(): AppConfig {
       announce_scorekeeper: true,
       announce_umpire: true,
       page_audio: false,
+      legacy_output: false,
     },
     azure_tts: {
       enabled: false,
@@ -180,6 +182,12 @@ function App() {
   // ohne diesen State verpufft ein Fehler von `start_sync` (C1): der Button
   // hört einfach auf zu laden, ohne dass die Turnierleitung erfährt, warum.
   const [runError, setRunError] = useState("");
+
+  // Notfall-Schalter „Alter Abspielweg" an den Announcer weiterreichen
+  // (io/ ist kein React-Code und liest die Konfiguration nicht selbst).
+  useEffect(() => {
+    setLegacyOutput(config.announce.legacy_output === true);
+  }, [config.announce.legacy_output]);
 
   useEffect(() => {
     loadConfig()
@@ -402,6 +410,7 @@ function App() {
           <UpdateBanner />
           <AlertBanner />
           <AzureFallbackBanner />
+          <AnsageAusgabeBanner />
           <PrintWarningBanner />
           <div className="min-h-0 flex-1 overflow-auto">
             <SetupWizard
@@ -527,6 +536,7 @@ function App() {
         <UpdateBanner />
         <AlertBanner />
         <AzureFallbackBanner />
+        <AnsageAusgabeBanner />
         <PrintWarningBanner />
         {runError && (
           <div className="bg-rose-600 px-4 py-2 text-sm font-medium text-white">

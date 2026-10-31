@@ -11,6 +11,22 @@
 
 import type { AnnounceLanguageMode, Discipline, NameOverride } from "../types";
 import { reportAzureFallback } from "../state/azureStatus";
+import {
+  ansageAbbrechen,
+  ansagePcmSpielen,
+  ansageStimmeSpielen,
+} from "../api";
+import {
+  loeseAusgabeProblem,
+  meldeAusgabeProblem,
+} from "../state/ansageAusgabe";
+import {
+  bannerFuer,
+  mitFrist,
+  pcmFristMs,
+  stimmeFristMs,
+  abschnitteTeilen,
+} from "./tonWeg.mjs";
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { gongPlanen } from "./gongKlang.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
@@ -184,6 +200,152 @@ async function playMp3Base64(b64: string): Promise<void> {
   });
 }
 
+// ─── Ton aus dem Kern (Spec ansage-ausgabegeraet, ADR 0065) ─────────────
+//
+// Gong und Stimme spielt der Rust-Kern über Windows (WASAPI) und löst das
+// Ausgabegerät für JEDES Stück neu auf — so folgt die Ansage einer
+// eingesteckten Klinke oder USB-Box. Ein dauerhaft offener Ausgabestrom wie
+// der gecachte AudioContext oben bleibt nach dem Abziehen still (gemessen
+// 31.10.2026, Senior-Cup). Das Fenster rechnet nur noch: Gong rendern,
+// Azure-MP3 dekodieren. Scheitert der Kern, springt der alte Weg über das
+// Programmfenster ein — sichtbar per Banner (io/tonWeg.mjs entscheidet).
+
+// Notfall-Schalter „Alter Abspielweg" (D10, befristet): alles wie bis
+// v0.9.317. Gesetzt aus App.tsx, weil io/ die Konfiguration nicht liest.
+let legacyOutput = false;
+export function setLegacyOutput(an: boolean): void {
+  legacyOutput = an;
+}
+
+type KernAusgang = "ok" | "abgebrochen" | "rueckfall";
+
+// Wartet auf einen Kern-Aufruf (mit Frist) und meldet den Ausgang an das
+// Ausgabe-Banner. „rueckfall" heißt: Aufrufer spielt über den alten Weg.
+// `loest`: Nur ein gelungenes Sprach-Stück löst das Banner — sonst blendete
+// ein gelungener Gong das Banner „keine Windows-Stimme" bei jeder Ansage
+// kurz aus und wieder ein.
+async function imKern(
+  aufruf: Promise<{ abgebrochen: boolean }>,
+  fristMs: number,
+  loest: boolean,
+): Promise<KernAusgang> {
+  const r = await mitFrist(aufruf, fristMs);
+  if (r.ok) {
+    if (r.wert.abgebrochen) return "abgebrochen";
+    if (loest) loeseAusgabeProblem();
+    return "ok";
+  }
+  if (r.code === "abgebrochen") return "abgebrochen";
+  // Hängt der Kern, das Stück dort beenden UND den Audio-Thread aufgeben —
+  // sonst klänge es nach, und alle folgenden Stücke warteten hinter einem
+  // hängenden Treiberaufruf bis zu ihrer eigenen Frist.
+  if (r.code === "frist") void ansageAbbrechen(true).catch(() => {});
+  const banner = bannerFuer(r.code);
+  if (banner) meldeAusgabeProblem(banner);
+  return "rueckfall";
+}
+
+// Float-Samples (−1…1) aus Web Audio → PCM16 für den Kern.
+function zuPcm16(f: Float32Array): Int16Array {
+  const out = new Int16Array(f.length);
+  for (let i = 0; i < f.length; i++) {
+    const v = Math.max(-1, Math.min(1, f[i]));
+    out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  return out;
+}
+
+// Der Gong wird je Art EINMAL offline gerendert — derselbe Klang wie im
+// AudioContext (gongKlang.mjs), aber ohne Ausgabegerät.
+const GONG_RATE = 48000;
+const GONG_SEKUNDEN = 1.3;
+const gongCache = new Map<"match" | "info", Promise<Int16Array>>();
+
+function gongPcm(kind: "match" | "info"): Promise<Int16Array> {
+  let p = gongCache.get(kind);
+  if (!p) {
+    p = (async () => {
+      const ctx = new OfflineAudioContext(
+        1,
+        Math.ceil(GONG_SEKUNDEN * GONG_RATE),
+        GONG_RATE,
+      );
+      gongPlanen(ctx, kind);
+      const buf = await ctx.startRendering();
+      // Stille nach dem Ausklingen abschneiden — sonst käme sie zur
+      // Atempause vor der Stimme noch hinzu.
+      const f = buf.getChannelData(0);
+      let ende = f.length;
+      while (ende > 0 && Math.abs(f[ende - 1]) < 1e-4) ende--;
+      return zuPcm16(f.subarray(0, ende));
+    })();
+    // Ein gescheitertes Rendern nicht für immer merken.
+    p.catch(() => gongCache.delete(kind));
+    gongCache.set(kind, p);
+  }
+  return p;
+}
+
+const pause = (ms: number) =>
+  new Promise<void>((r) => window.setTimeout(r, ms));
+
+// Azure liefert MP3 mit 24 kHz; das Fenster dekodiert, der Kern spielt.
+const AZURE_RATE = 24000;
+
+async function dekodiereMp3(b64: string): Promise<Int16Array> {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ctx = new OfflineAudioContext(1, 1, AZURE_RATE);
+  const buf = await ctx.decodeAudioData(bytes.buffer);
+  return zuPcm16(buf.getChannelData(0));
+}
+
+// Spielt eine Azure-Antwort: über den Kern, sonst (sichtbar) über das
+// Programmfenster. Wirft nur, wenn das Audio selbst kaputt ist — dann
+// übernimmt beim Aufrufer die Windows-Stimme.
+async function spieleAzure(b64: string, gen: number): Promise<void> {
+  if (legacyOutput) {
+    await playMp3Base64(b64);
+    return;
+  }
+  const pcm = await dekodiereMp3(b64);
+  // Während des Dekodierens abgebrochen (Ansagen aus) → nicht mehr spielen.
+  if (gen !== announceGen) return;
+  const aus = await imKern(
+    ansagePcmSpielen(pcm, AZURE_RATE, "sprache"),
+    pcmFristMs(pcm.length, AZURE_RATE),
+    true,
+  );
+  if (aus === "rueckfall") await playMp3Base64(b64);
+}
+
+// Höchstlänge eines Abschnitts im Kern (`MAX_ANSAGE_SEGMENT_LEN`).
+const MAX_KERN_ABSCHNITT = 1000;
+
+// Spricht Segmente mit der Windows-Stimme im Kern (E3, ADR 0066); fehlt sie
+// oder scheitert der Kern, spricht die Browser-Stimme wie bisher.
+async function sprich(
+  segments: string[],
+  lang: AnnounceLang,
+  rate: number,
+  voiceURI?: string,
+): Promise<void> {
+  if (!legacyOutput) {
+    // Der Kern nimmt je Abschnitt höchstens 1000 Zeichen — längere
+    // Freitexte teilen statt still kappen.
+    const teile = abschnitteTeilen(segments, MAX_KERN_ABSCHNITT);
+    const r = clampRate(rate);
+    const aus = await imKern(
+      ansageStimmeSpielen(teile, lang, voiceURI ?? "", r),
+      stimmeFristMs(teile, r),
+      true,
+    );
+    if (aus !== "rueckfall") return;
+  }
+  await speakSegments(segments, lang, rate, voiceURI);
+}
+
 // ─── Globale Ansage-Warteschlange ────────────────────────────────────────
 // ALLE Ansagen (Feld-Auto-Ansage, manuelle Ansage, Vorbereitung) laufen
 // strikt nacheinander durch DIESE eine Kette — so kann nie ein Gong starten,
@@ -210,8 +372,28 @@ function enqueueAnnouncement(task: () => Promise<void>): Promise<void> {
 async function maybeGong(
   gong: boolean | undefined,
   kind: "match" | "info" = "match",
+  gen: number = announceGen,
 ): Promise<void> {
   if (gong === false) return;
+  if (!legacyOutput) {
+    try {
+      const pcm = await gongPcm(kind);
+      // Während des ersten Renderns abgebrochen → keinen Gong mehr.
+      if (gen !== announceGen) return;
+      const aus = await imKern(
+        ansagePcmSpielen(pcm, GONG_RATE, "gong"),
+        pcmFristMs(pcm.length, GONG_RATE),
+        false,
+      );
+      if (aus === "abgebrochen") return;
+      if (aus === "ok") {
+        await pause(GONG_BREATH_MS);
+        return;
+      }
+    } catch {
+      // Rendern gescheitert → alter Weg unten.
+    }
+  }
   try {
     const ctx = getAudioContext();
     if (ctx.state === "suspended") {
@@ -261,7 +443,11 @@ function speakSegment(
     u.volume = 1;
     if (voiceURI) {
       const voices = window.speechSynthesis.getVoices();
-      const match = voices.find((v) => v.voiceURI === voiceURI);
+      // Gespeichert ist der Windows-Name („Microsoft Katja") oder eine
+      // alte Browser-voiceURI („Microsoft Katja - German (Germany)").
+      const match =
+        voices.find((v) => v.voiceURI === voiceURI) ??
+        voices.find((v) => v.name.split(" - ")[0] === voiceURI);
       if (match) u.voice = match;
     }
     let done = false;
@@ -1037,19 +1223,26 @@ export function playPrepared(
   synthesize?: (ssml: string) => Promise<string>,
 ): Promise<void> {
   return enqueueAnnouncement(async () => {
-    if (p.gong) await maybeGong(true, p.gong);
-    // Hochwertiger Azure-Weg (ganze Ansage am Stück); bei Fehler → Web Speech.
+    // Abgebrochen (Ansagen aus) → nach dem Gong nicht mehr weitersprechen.
+    const gen = announceGen;
+    if (p.gong) await maybeGong(true, p.gong, gen);
+    if (gen !== announceGen) return;
+    // Hochwertiger Azure-Weg (ganze Ansage am Stück); bei Fehler → Windows-Stimme.
     if (synthesize && p.ssml) {
       try {
-        await playMp3Base64(await synthesize(p.ssml));
+        const b64 = await synthesize(p.ssml);
+        // Während der Azure-Abfrage abgebrochen → keine Nachzügler.
+        if (gen !== announceGen) return;
+        await spieleAzure(b64, gen);
         return;
       } catch (e) {
-        // Azure aus/Netzfehler → Fallback unten, aber sichtbar (Banner),
-        // damit der Rückfall auf die Standardstimme nicht mehr stumm passiert.
+        // Azure aus/Netzfehler/kaputtes Audio → Windows-Stimme unten, aber
+        // sichtbar (Banner), damit der Rückfall nicht stumm passiert.
         reportAzureFallback(e);
       }
     }
-    await speakSegments(p.segments, p.lang, p.rate, p.voiceURI);
+    if (gen !== announceGen) return;
+    await sprich(p.segments, p.lang, p.rate, p.voiceURI);
   });
 }
 
@@ -1106,8 +1299,9 @@ export function playNameTest(
   lang: AnnounceLang,
   opts: AnnounceOptions = {},
 ): Promise<void> {
+  // Derselbe Weg wie die echte Ansage — sonst klänge der Test anders.
   return enqueueAnnouncement(() =>
-    speakSegments([text.trim()], lang, clampRate(opts.rate), opts.voiceURI),
+    sprich([text.trim()], lang, clampRate(opts.rate), opts.voiceURI),
   );
 }
 
@@ -1127,6 +1321,8 @@ export function cancelAnnouncements(): void {
   if (typeof window.speechSynthesis !== "undefined") {
     window.speechSynthesis.cancel();
   }
+  // Ton im Kern stoppen; unter Linux ein No-op.
+  void ansageAbbrechen().catch(() => {});
 }
 
 // ─── Vorbereitungs-Ansage ────────────────────────────────────────────────

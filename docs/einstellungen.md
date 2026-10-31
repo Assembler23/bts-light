@@ -209,6 +209,13 @@ jede Ansage, die eine Seite hört, einen Azure-Aufruf. Siehe
 [Ansage-Seite im Browser](announcements.md#ansage-seite-im-browser-seit-v09311).
 <!-- pruef: "page_audio: false" in src-tauri/src/config.rs -->
 
+**Alter Abspielweg (über das Programmfenster)** — **voreingestellt aus**, in
+den Ansage-Einstellungen. Notfall-Schalter seit v0.9.318: Die Ansage läuft
+dann wie bis v0.9.317 und folgt einem Wechsel des Ausgabegeräts (Klinke,
+USB-Box) nicht mehr von selbst. Befristet. Siehe
+[Ausgabegerät](announcements.md#ausgabegerät-seit-v09318).
+<!-- pruef: "legacy_output: false" in src-tauri/src/config.rs -->
+
 ## Aufruf-Timer
 
 Hält fest, wie lange ein Feld schon gerufen ist, und stuft den Aufruf hoch.

@@ -212,7 +212,7 @@ impl Aufschlag {
 /// Zeile; bei Aufschlagwechsel wandert die Zelle zur neuen
 /// aufschlagenden Seite. So füllt sich auch ein Bogen aus Papier.
 pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool) -> Grid {
-    // Berichtigte Mannschaften (ADR 0065): alles in Endkoordinaten, bevor
+    // Berichtigte Mannschaften (ADR 0067): alles in Endkoordinaten, bevor
     // Raster und Protokoll es lesen.
     let events = &super::berichtigung::in_endkoordinaten(events);
     // Zurückgenommenes gehört nicht ins Raster (ADR 0038).
@@ -249,7 +249,7 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
         let mut punkte = [satz.start_a, satz.start_b];
         // Gilt ab Satzbeginn: die LETZTE Aufschlagfolge bei 0 — korrigiert
         // jemand gleich zu Beginn die Mannschaften, fragt das Tablet die
-        // Aufstellung an derselben Stelle neu ab (ADR 0065). Ohne eine bei 0
+        // Aufstellung an derselben Stelle neu ab (ADR 0067). Ohne eine bei 0
         // (Einstieg mit Zwischenstand) die erste des Satzes.
         let start = wirksam
             .iter()
@@ -706,7 +706,7 @@ mod tests {
         assert_eq!((z[2].row, z[2].wert), (zeile(1, 1), 1));
     }
 
-    /// „Mannschaften berichtigt" (ADR 0065): Die Aufschlagfolge davor stand
+    /// „Mannschaften berichtigt" (ADR 0067): Die Aufschlagfolge davor stand
     /// in vertauschten Koordinaten; den Punktverlauf hat das Tablet schon
     /// gekippt. Das Raster liest beides in Endkoordinaten.
     #[test]

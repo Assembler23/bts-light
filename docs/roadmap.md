@@ -496,9 +496,19 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Ausgabegerät für Ansagen** — Spec:
+  [features/ansage-ausgabegeraet.md](features/ansage-ausgabegeraet.md)
+  (freigegeben 31.10.2026, ADR 0065/0066). Auslöser Senior-Cup 31.10.2026: Ansage kam
+  nicht über die Klinke an die Hallenanlage. Ton komplett aus dem Rust-Kern
+  (cpal/WASAPI), Gerät je Ansage neu aufgelöst; Windows-Stimme (E3 aus
+  „Ansage im Browser") vorgezogen; Anzeige und selbstauflösende Banner;
+  Gerätewahl je PC. **PR 1** Ton aus dem Kern + Windows-Stimme + Anzeige ·
+  **PR 1b** OneCore-WAV für die Ansage-Seiten · **PR 2** Gerätewahl.
+  Notfall-Schalter „Alter Abspielweg" drei Versionen nach PR 1 entfernen.
+
 - **Seiten und Mannschaften am Zähl-Tablet korrigieren** — Spec:
   [features/tablet-seiten-korrigieren.md](features/tablet-seiten-korrigieren.md)
-  (freigegeben 30.10.2026, ADR 0065), **umgesetzt v0.9.318** — offen: Tag,
+  (freigegeben 30.10.2026, ADR 0067), **umgesetzt v0.9.319** — offen: Tag,
   Feldtest. ⇄-Knopf ohne PIN: „Seiten tauschen" (alles
   wandert mit) und „Mannschaften tauschen" (nur Namen, gemeldeter Stand kippt;
   im Doppel Neuabfrage der Aufstellung; neues Ereignis `teams_corrected`).
@@ -515,7 +525,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   spielt nur ab; Pi am TV über einen Ansage-Modus der Monitor-Seiten.
   - **Etappen:** E1 LAN-Seite + TL-Aufträge/Freitext/Desktop-Knöpfe ·
     E1b Monitor-Modus + Pi-Autoplay · E2 Erst-Ansage im Kern ·
-    E3 Offline-Stimme OneCore (erst nach Messung am Turnier-PC) ·
+    E3 Offline-Stimme OneCore (**vorgezogen in
+    [ansage-ausgabegeraet](features/ansage-ausgabegeraet.md)**, ADR 0066) ·
     E4 Cloud mit eigenem Lese-Schlüssel.
 
 - **TP-Datei während des Turniertags an badhub** — Spec:

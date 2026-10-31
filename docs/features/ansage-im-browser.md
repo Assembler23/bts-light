@@ -255,6 +255,10 @@ Umsetzung (v0.9.313), Entscheidungen beim Bau:
 
 ### Offline-Stimme (E3)
 
+> **Vorgezogen (31.10.2026):** E3 wird gemeinsam mit der Spec
+> [ansage-ausgabegeraet.md](ansage-ausgabegeraet.md) gebaut (ADR 0066) — dort PR 1b für die
+> Seiten. Gemessen: Chromiums lokale Stimmen = OneCore-Stimmen, WAV in 8–44 ms.
+
 - Vertonung über `Windows.Media.SpeechSynthesis` (WinRT/OneCore), Ausgabe WAV.
 - Text = die korrigierten `segmente` (nicht die Azure-SSML).
 - Stimmenwahl: `announce.voice_de`/`voice_en` (WebView-`voiceURI`) wird auf

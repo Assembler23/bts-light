@@ -55,6 +55,10 @@ export interface AnnounceConfig {
    *  vertont Ansagen für die Browser-Seite `/ansage` — unabhängig davon, ob
    *  er selbst spricht (`enabled`). Standard aus. */
   page_audio: boolean;
+  /** Notfall-Schalter „Alter Abspielweg" (Spec ansage-ausgabegeraet, D10):
+   *  Ansage wie bis v0.9.317 über das Programmfenster statt über den Kern.
+   *  Befristet, Standard aus. */
+  legacy_output: boolean;
 }
 
 /** Azure Neural TTS für die Ansage (Rust: config::AzureTtsConfig). */

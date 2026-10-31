@@ -1051,7 +1051,7 @@
 </div>
 
 <!-- Seiten oder Mannschaften korrigieren (Spec tablet-seiten-korrigieren,
-     ADR 0065): erst die Wahl, dann eine Rückfrage mit Vorschau. -->
+     ADR 0067): erst die Wahl, dann eine Rückfrage mit Vorschau. -->
 <div class="modal" id="korrektur-modal">
   <div class="title" id="korrektur-title">Seiten korrigieren</div>
   <div class="subtitle" id="korrektur-subtitle"></div>
@@ -1447,7 +1447,7 @@ const STATE = {
   // abgefragt (Spec tablet-seiten-korrigieren). Solange das läuft, nimmt
   // „zurück" die Korrektur zurück statt einen Punkt.
   berichtigtAbfrage: /** @type {boolean} */ (false),
-  // Kennt der Host das Ereignis `teams_corrected` (ADR 0065)? Kommt mit
+  // Kennt der Host das Ereignis `teams_corrected` (ADR 0067)? Kommt mit
   // jedem `match_assigned`; ohne das wird „Mannschaften tauschen" nicht
   // angeboten — ein älterer Turnier-PC verwürfe sonst jeden Zettel-Abgleich.
   hostKannBerichtigung: /** @type {boolean} */ (false),
@@ -2914,7 +2914,7 @@ function finalizeSetup(server, serverTeamKey, receiver, receiverTeamKey) {
     receiverTeam: receiverTeamKey === 'a' ? 0 : 1,
     receiverPlayer: spielerIndex(receiverTeamKey, receiver),
     // Nach „Mannschaften tauschen" mitten im Satz: Der Zettel setzt die
-    // Rotation an dieser Stelle neu auf (ADR 0065).
+    // Rotation an dieser Stelle neu auf (ADR 0067).
     phase: berichtigt ? 'play' : 'pre_match',
   });
   // Die neue Aufschlagfolge gehört zur Korrektur: Wird sie zurückgenommen,
@@ -3568,7 +3568,7 @@ function oeffneKorrektur() {
     'Die Spieler stehen auf der anderen Hälfte als am Tablet. Namen und Punkte '
     + 'wandern gemeinsam, der Stand bleibt.';
   // „Mannschaften tauschen" nur, wenn der Turnier-PC das Ereignis kennt
-  // (ADR 0065), und nur, solange der Zettel noch Platz hat.
+  // (ADR 0067), und nur, solange der Zettel noch Platz hat.
   els.korrekturAb.hidden = !STATE.hostKannBerichtigung;
   const platz = platzFuerKorrektur(STATE.events, isDoubles());
   els.korrekturAb.classList.toggle('disabled', !platz);
@@ -3644,7 +3644,7 @@ function korrekturVorschauHtml(art) {
 
 /** Eine Korrektur ausführen — als eigener Schritt im Verlauf, damit
  *  „zurück" sie als Erstes zurücknimmt und das Zurücknehmen eines älteren
- *  Punkts sie nicht still aufhebt (ADR 0065). */
+ *  Punkts sie nicht still aufhebt (ADR 0067). */
 function fuehreKorrekturAus(art) {
   if (!korrekturMoeglich()) return;
   const doppel = isDoubles();

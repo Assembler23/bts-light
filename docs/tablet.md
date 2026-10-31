@@ -374,10 +374,10 @@ und rot pulsierend **„Letzter Aufruf"**.
   Bruttostart aus `match-times.json` — die Uhr läuft nach einem Update
   weiter statt bei null zu beginnen (Spec `update-im-turnierbetrieb`).
 
-## Seiten und Mannschaften korrigieren (seit v0.9.318)
+## Seiten und Mannschaften korrigieren (seit v0.9.319)
 
 Spec [features/tablet-seiten-korrigieren.md](features/tablet-seiten-korrigieren.md),
-[ADR 0065](adr/0065-mannschaften-berichtigt-kipp-ereignis.md). Bedienung im
+[ADR 0067](adr/0067-mannschaften-berichtigt-kipp-ereignis.md). Bedienung im
 Handbuch-Kapitel [tablet-bedienen.md](tablet-bedienen.md).
 
 Der Knopf **⇄** (Kopfzeile, ohne PIN; in Pause und Ergebnis-Ansicht ein eigener

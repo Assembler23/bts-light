@@ -358,11 +358,11 @@ Projektionen), `docs/tablet.md`, `docs/cloud-relay.md`, `docs/turnierleitung-web
 `docs/multi-hall.md`, `docs/schiedsrichter-management.md`, `docs/roadmap.md`,
 `docs/changelog.md`, `docs/adr/README.md`.
 
-## Nachtrag: Mannschaften berichtigt (v0.9.318)
+## Nachtrag: Mannschaften berichtigt (v0.9.319)
 
 Seit [tablet-seiten-korrigieren](tablet-seiten-korrigieren.md) gibt es die Art
 `teams_corrected`: Alles davor deutet der Host in vertauschten A/B-Koordinaten
-(`tablet/berichtigung.rs`, ADR 0065). Das Raster setzt außerdem an jedem
+(`tablet/berichtigung.rs`, ADR 0067). Das Raster setzt außerdem an jedem
 `serve_start` mit `afterN > 0` die Rotation neu auf.
 
 ## Offene Punkte / Annahmen

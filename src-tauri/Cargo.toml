@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.318"
+version = "0.9.319"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -71,7 +71,24 @@ windows = { version = "0.62", features = [
   # StartDocW/EndDoc/StartPage/EndPage und DOCINFOW liegen im Binding
   # unter `Storage::Xps` — trotz ihres GDI-Ursprungs in gdi32.dll.
   "Win32_Storage_Xps",
+  # Feste COM-Initialisierung des Ansage-Audio-Threads (ADR 0065).
+  "Win32_System_Com",
+  # IMMDeviceEnumerator: aktuelles Standardgerät als konkreter Endpunkt
+  # (Ansage-Ton, ADR 0065) — cpal 0.18 gibt sonst das virtuelle Gerät.
+  "Win32_Media_Audio",
+  # Windows-Stimme im Kern (ADR 0066): `SpeechSynthesizer` samt
+  # `SynthesizeTextToStreamAsync` (braucht Media_Core + Storage_Streams)
+  # und `DataReader` zum Auslesen des WAV-Stroms.
+  "Foundation",
+  "Media_SpeechSynthesis",
+  "Media_Core",
+  "Storage_Streams",
 ] }
+# Ansage-Ton aus dem Kern (ADR 0065): WASAPI-Ausgabe mit Gerät je Stück.
+# Apache-2.0 (RustAudio), hängt an derselben `windows`-Version 0.62 — keine
+# zweite Kopie im Baum. Nur Windows: Der Linux-CI-Job hat kein ALSA, und
+# unter Linux bleibt die Ansage beim alten Weg im WebView.
+cpal = "0.18"
 
 [dev-dependencies]
 tempfile = "3.27.0"

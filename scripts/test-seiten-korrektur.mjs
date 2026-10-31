@@ -1,6 +1,6 @@
 /**
  * Seiten und Mannschaften am Zähl-Tablet korrigieren (Spec
- * tablet-seiten-korrigieren, ADR 0065).
+ * tablet-seiten-korrigieren, ADR 0067).
  *
  * Prüft die kanonische Fassung aus `src/io/seitenKorrektur.mjs`. Die
  * Inline-Kopie in `src-tauri/assets/tablet.html` muss gemeinsam mit ihr

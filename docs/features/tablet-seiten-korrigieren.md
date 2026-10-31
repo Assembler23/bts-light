@@ -1,8 +1,8 @@
 # Seiten und Mannschaften am Zähl-Tablet korrigieren — Spezifikation
 
-- **Status:** freigegeben (30.10.2026), umgesetzt in v0.9.318
+- **Status:** freigegeben (30.10.2026), umgesetzt in v0.9.319
 - **Herkunft:** /idee (Brief → Grill → How-To), Intake unter `docs/features/_intake/tablet-seiten-korrigieren/` (gitignoriert)
-- **Entscheidung:** [ADR 0065](../adr/0065-mannschaften-berichtigt-kipp-ereignis.md), erweitert [ADR 0038](../adr/0038-ereignisse-append-only.md)
+- **Entscheidung:** [ADR 0067](../adr/0067-mannschaften-berichtigt-kipp-ereignis.md), erweitert [ADR 0038](../adr/0038-ereignisse-append-only.md)
 
 ## Kontext / Problem
 

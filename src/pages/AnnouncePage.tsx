@@ -3,6 +3,7 @@
 // für wiederkehrende Ansagen und ein Verlauf der letzten zehn manuell/Freitext
 // ausgelösten Ansagen mit „Erneut abspielen". Alle Ansage-Detail-Einstellungen
 // liegen unten im Abschnitt „Ansage-Einstellungen".
+import { AnsageAusgabeAnzeige } from "../components/AnsageAusgabeAnzeige";
 import { useEffect, useState } from "react";
 import {
   Bookmark,
@@ -291,6 +292,8 @@ export function AnnouncePage({
       >
         <Volume2 size={16} /> Test-Ansage abspielen
       </button>
+
+      <AnsageAusgabeAnzeige legacy={announce.legacy_output === true} />
 
       {/* Freitext-Ansage: eintippen → in einer Halle oder allen ansagen. */}
       <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">

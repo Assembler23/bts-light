@@ -3622,7 +3622,7 @@ pub(crate) fn match_brief(
         finalized,
         sr_names: officials.0,
         ar_names: officials.1,
-        // Dieser Host deutet `teams_corrected` (ADR 0065) → das Tablet darf
+        // Dieser Host deutet `teams_corrected` (ADR 0067) → das Tablet darf
         // „Mannschaften tauschen" anbieten.
         teams_correction: true,
         seed_a: m.team1_seed.clone(),

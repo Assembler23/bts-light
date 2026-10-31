@@ -77,7 +77,7 @@ passieren die meisten davon. Ein Undo nimmt Ereignisse jenseits des neuen
 Schnitts ausdrücklich zurück; sie verschwinden nicht, sondern erscheinen auf dem
 Zettel **durchgestrichen**. Für einen Archivbeleg ist das ehrlicher.
 
-Nach **⇄ Seiten tauschen / Mannschaften tauschen** (seit v0.9.318) startet die
+Nach **⇄ Seiten tauschen / Mannschaften tauschen** (seit v0.9.319) startet die
 Ansage neutral mit dem Stand — ohne „Aufschlagwechsel" —, wie nach einem Undo.
 Die Namen in der Ansage folgen der neuen Zuordnung von selbst.
 

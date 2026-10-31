@@ -141,7 +141,10 @@ bts-light seine Logdatei alle ~10 Minuten an badhub.de hoch, damit Fehler
   Datei, jeder Upload überschreibt sie mit dem Vollstand.
 - **Ablage:** `storage/bts-logs/<install-id>.log` auf dem Server.
 - **Datenschutz:** die Logs enthalten nur technische Daten (Match-IDs,
-  Court-Namen, BTP-Antworten, Fehler) – keine Spielernamen.
+  Court-Namen, BTP-Antworten, Fehler) – keine Spielernamen. Auch die
+  Ansage-Ausgabe (seit v0.9.318) loggt nur Ereignisarten („Gerät neu
+  geöffnet", „Rückfall") und **nie Gerätenamen** — Bluetooth-Geräte tragen
+  oft den Namen ihres Besitzers.
 
 Ohne den Schalter bleibt das Log rein lokal. Empfänger-Seite:
 [badhub `docs/features/liveticker_bts.md`](https://badhub.de) →

@@ -164,8 +164,8 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    Seit dem Schiedsrichterzettel ([Spec](features/schiedsrichterzettel-druck.md),
    ADR 0037/0038/0039) kommt ein **zweiter, eigener Strom** daneben:
    `match_event` je erfasstem Ereignis (Karte, Verletzung, Unterbrechung,
-   Überstimmung, Aufschlagfolge; seit v0.9.318 auch `teams_corrected`,
-   ADR 0065) und `match_event_sync` als Abgleich. `EventKind` hat keinen
+   Überstimmung, Aufschlagfolge; seit v0.9.319 auch `teams_corrected`,
+   ADR 0067) und `match_event_sync` als Abgleich. `EventKind` hat keinen
    Catch-All: Ein Relay oder Host ohne `teams_corrected` verwirft den ganzen
    Frame. Deshalb meldet der Host im `MatchBrief` `teamsCorrection: true`, und
    nur dann bietet das Tablet „Mannschaften tauschen" an. Ausrollen wie

@@ -138,7 +138,7 @@ pub struct MatchBrief {
     #[serde(rename = "arNames", default)]
     pub ar_names: Vec<String>,
     /// `true`, wenn der Host das Ereignis [`EventKind::TeamsCorrected`]
-    /// kennt (ADR 0065). Nur dann bietet das Tablet „Mannschaften
+    /// kennt (ADR 0067). Nur dann bietet das Tablet „Mannschaften
     /// tauschen" an: Eine ältere App verwürfe jeden Sync mit der neuen Art,
     /// weil `EventKind` bewusst keinen Catch-All hat. `#[serde(default)]`
     /// hält ältere Frames lesbar (false → Eingriff nicht angeboten).
@@ -1115,7 +1115,7 @@ pub enum EventKind {
     /// (ADR 0038); der Zettel druckt Zurückgenommenes durchgestrichen in
     /// der Protokollzeile, aber nicht im Raster.
     Retract,
-    /// Mannschaften berichtigt (ADR 0065): Am Tablet stand die falsche
+    /// Mannschaften berichtigt (ADR 0067): Am Tablet stand die falsche
     /// Mannschaft auf der falschen Seite. Alles **davor** gilt mit
     /// vertauschtem A/B — gedeutet wird das allein im Host
     /// (`in_endkoordinaten`), nicht am Tablet. `team`/`player` sind
@@ -3495,7 +3495,7 @@ mod tests {
         assert!(parsed.sr_names.is_empty());
         assert!(parsed.ar_names.is_empty());
         // Ein alter Host kennt `teams_corrected` nicht → das Tablet darf
-        // „Mannschaften tauschen" nicht anbieten (ADR 0065).
+        // „Mannschaften tauschen" nicht anbieten (ADR 0067).
         assert!(!parsed.teams_correction, "fehlender Schalter → false");
         assert!(json.contains(r#""teamsCorrection":true"#));
         assert_eq!(parsed.seed_a, None, "fehlende Setzung → None");
@@ -5459,7 +5459,7 @@ mod tests {
         assert!(frame.is_err());
     }
 
-    /// „Mannschaften berichtigt" (ADR 0065): eigener Draht-Name, gültig
+    /// „Mannschaften berichtigt" (ADR 0067): eigener Draht-Name, gültig
     /// ohne `retracts`, und **keine** Sanktion — es darf in den
     /// badhub-Verlauf-Rechenweg, ohne dort aufzutauchen.
     #[test]

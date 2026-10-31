@@ -148,6 +148,13 @@ pub struct AnnounceConfig {
     /// Büro stumm bleiben und trotzdem die Hallen versorgen. Default aus —
     /// eine Seite kostet Azure-Aufrufe, das soll niemand ungefragt bekommen.
     pub page_audio: bool,
+    /// Notfall-Schalter „Alter Abspielweg" (Spec `ansage-ausgabegeraet`, D10):
+    /// Ansage wie bis v0.9.317 über das Programmfenster (AudioContext +
+    /// `speechSynthesis`) statt über den Kern. Gedacht für den Fall, den kein
+    /// automatischer Rückfall erkennt: Der Kern spielt fehlerfrei, aber auf
+    /// dem falschen Gerät. Default aus. **Befristet:** wird drei Versionen
+    /// nach PR 1 der Spec wieder entfernt (Termin in `docs/roadmap.md`).
+    pub legacy_output: bool,
 }
 
 /// Eine Aussprache-Korrektur für die Ansage. `name` ist der ganze Name ODER ein
@@ -185,6 +192,7 @@ impl Default for AnnounceConfig {
             announce_scorekeeper: true,
             announce_umpire: true,
             page_audio: false,
+            legacy_output: false,
         }
     }
 }
@@ -2009,6 +2017,7 @@ mod tests {
                 announce_scorekeeper: false,
                 announce_umpire: false,
                 page_audio: true,
+                legacy_output: true,
             },
             azure_tts: AzureTtsConfig {
                 enabled: true,
@@ -2198,6 +2207,27 @@ mod tests {
         // Azure-Aufrufe und soll niemand ungefragt bekommen.
         assert!(!loaded.announce.page_audio, "page_audio muss aus sein");
         assert!(!AnnounceConfig::default().page_audio);
+    }
+
+    #[test]
+    fn announce_legacy_output_fehlt_in_alter_config_und_ist_dann_aus() {
+        // Spec `ansage-ausgabegeraet` D10: Eine config.json von vor dem
+        // Notfall-Schalter kennt das Feld nicht — sie muss laden und den
+        // neuen Abspielweg (Schalter aus) bekommen.
+        let alt: AnnounceConfig =
+            serde_json::from_str(r#"{"enabled":true,"voice_de":"Microsoft Katja","rate":0.9}"#)
+                .unwrap();
+        assert!(!alt.legacy_output);
+        assert!(alt.enabled);
+        assert!(!AnnounceConfig::default().legacy_output);
+        // Und der gesetzte Schalter überlebt den Roundtrip.
+        let an = AnnounceConfig {
+            legacy_output: true,
+            ..AnnounceConfig::default()
+        };
+        let zurueck: AnnounceConfig =
+            serde_json::from_str(&serde_json::to_string(&an).unwrap()).unwrap();
+        assert!(zurueck.legacy_output);
     }
 
     #[test]

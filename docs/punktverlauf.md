@@ -95,7 +95,7 @@ Match der **ganze** Punktverlauf an `live_update.php`:
   Ballwechsel mit.
 - Altes badhub (400/404 auf den Typ): Pause wie beim `sched`
   (`CHECKIN_UNSUPPORTED_RETRY`), danach erneut.
-- **Mannschaften berichtigt** (seit v0.9.318, ADR 0065): badhub kennt nur
+- **Mannschaften berichtigt** (seit v0.9.319, ADR 0067): badhub kennt nur
   `serve_start`. `aufschlaege()` liefert sie deshalb schon in Endkoordinaten
   (`tablet/berichtigung.rs` `in_endkoordinaten`); die Punktfolge kippt das
   Tablet selbst und schickt sie per `rally_sync` neu.
@@ -112,7 +112,7 @@ Match der **ganze** Punktverlauf an `live_update.php`:
 
 ## Grenzen
 
-- **Mannschaften getauscht am Tablet** (⇄, seit v0.9.318): Das Tablet kippt den
+- **Mannschaften getauscht am Tablet** (⇄, seit v0.9.319): Das Tablet kippt den
   Verlauf A↔B und schickt ihn per `rally_sync` komplett neu. Hatte vorher ein
   anderes Tablet übernommen, kannte es frühere Sätze nur als Endstand — deren
   Ballwechsel-Details gehen dann beim Host verloren (die AK-12-Verschmelzung

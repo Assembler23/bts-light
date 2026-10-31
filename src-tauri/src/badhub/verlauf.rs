@@ -96,7 +96,7 @@ pub struct Pause {
 /// Die gültigen `serve_start` eines Zettels: zurückgenommene fallen weg,
 /// alle anderen Arten (Karten, Verletzung, Schiri-Ruf …) ohnehin.
 ///
-/// Berichtigte Mannschaften (ADR 0065) sind schon eingerechnet: badhub
+/// Berichtigte Mannschaften (ADR 0067) sind schon eingerechnet: badhub
 /// nimmt nur `serve_start` an und bekommt sie deshalb in Endkoordinaten.
 pub fn aufschlaege(sheet: &MatchSheet) -> Vec<Aufschlag> {
     let events = crate::tablet::berichtigung::in_endkoordinaten(&sheet.events);
@@ -357,7 +357,7 @@ mod tests {
         assert!(!json.contains("card") && !json.contains("injury") && !json.contains("ts"));
     }
 
-    /// Berichtigte Mannschaften (ADR 0065): badhub kennt nur `serve_start`,
+    /// Berichtigte Mannschaften (ADR 0067): badhub kennt nur `serve_start`,
     /// also gehen sie gekippt mit; eine Rücknahme der Berichtigung hebt das
     /// Kippen wieder auf.
     #[test]

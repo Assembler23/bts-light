@@ -1,4 +1,4 @@
-//! „Mannschaften berichtigt" deuten (ADR 0065, Spec
+//! „Mannschaften berichtigt" deuten (ADR 0067, Spec
 //! `tablet-seiten-korrigieren`).
 //!
 //! Stand am Tablet die falsche Mannschaft auf der falschen Seite, sind alle
