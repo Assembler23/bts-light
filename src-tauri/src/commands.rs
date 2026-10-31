@@ -3874,15 +3874,12 @@ pub struct AnsageAuftrag {
     pub ssml: Option<String>,
 }
 
-/// Prüft und kappt einen Auftrag. `None` = verwerfen.
-type AnsageEntwurfMitSsml = (crate::tablet::ansage::AnsageEntwurf, Option<String>);
-
-fn ansage_entwurf_aus(a: AnsageAuftrag) -> Option<AnsageEntwurfMitSsml> {
-    if matches!(a.art, relay_proto::AnsageArt::Unbekannt) {
-        return None;
-    }
-    let segmente: Vec<String> = a
-        .segmente
+/// Kappt Sprech-Abschnitte auf die gemeinsamen Grenzen (Länge je
+/// Abschnitt, Anzahl) und wirft leere weg — geteilt von den Ansage-Seiten
+/// (`ansage_entwurf_aus`) und der Windows-Stimme im Kern
+/// (`ansage_stimme_spielen`).
+fn ansage_segmente_kappen(segmente: Vec<String>) -> Vec<String> {
+    segmente
         .into_iter()
         .map(|s| {
             s.trim()
@@ -3892,7 +3889,17 @@ fn ansage_entwurf_aus(a: AnsageAuftrag) -> Option<AnsageEntwurfMitSsml> {
         })
         .filter(|s| !s.is_empty())
         .take(MAX_ANSAGE_SEGMENTE)
-        .collect();
+        .collect()
+}
+
+/// Prüft und kappt einen Auftrag. `None` = verwerfen.
+type AnsageEntwurfMitSsml = (crate::tablet::ansage::AnsageEntwurf, Option<String>);
+
+fn ansage_entwurf_aus(a: AnsageAuftrag) -> Option<AnsageEntwurfMitSsml> {
+    if matches!(a.art, relay_proto::AnsageArt::Unbekannt) {
+        return None;
+    }
+    let segmente = ansage_segmente_kappen(a.segmente);
     if segmente.is_empty() {
         return None;
     }
@@ -3967,6 +3974,154 @@ pub async fn ansage_vertonen(
         audio,
         now_ms(),
     )))
+}
+
+// ─── Ansage-Ton aus dem Kern (Spec `ansage-ausgabegeraet`, ADR 0065/0066) ──
+
+/// Größter Raw-IPC-Body für `ansage_pcm_spielen`: 60 s Mono-PCM16 bei
+/// 48 kHz sind 5,5 MiB; 8 MiB lassen Luft und deckeln einen Missbrauch.
+const MAX_ANSAGE_PCM_BYTES: usize = 8 * 1024 * 1024;
+/// Erlaubte Abtastraten des WebViews (Gong 48 kHz, Azure 24 kHz).
+const ANSAGE_PCM_RATEN: std::ops::RangeInclusive<u32> = 8000..=96000;
+
+/// Prüft die Kopfzeilen und die Länge eines PCM-Auftrags, bevor ein Byte
+/// angefasst wird (Spec, Kriterium 13). Rein, damit testbar.
+fn pcm_auftrag_pruefen(
+    rate_header: Option<&str>,
+    art_header: Option<&str>,
+    len: usize,
+) -> Result<(u32, crate::ansage_ton::Art), crate::ansage_ton::TonFehler> {
+    use crate::ansage_ton::{pcm, Art, TonFehler};
+    let rate: u32 = rate_header
+        .and_then(|r| r.trim().parse().ok())
+        .ok_or_else(|| TonFehler::Ungueltig("x-rate fehlt oder ist keine Zahl".to_string()))?;
+    if !ANSAGE_PCM_RATEN.contains(&rate) {
+        return Err(TonFehler::Ungueltig(format!(
+            "x-rate {rate} außerhalb 8000–96000"
+        )));
+    }
+    let art = match art_header.map(str::trim) {
+        None | Some("") | Some("sprache") => Art::Sprache,
+        Some("gong") => Art::Gong,
+        Some(_) => return Err(TonFehler::Ungueltig("x-art unbekannt".to_string())),
+    };
+    if len == 0 {
+        return Err(TonFehler::Ungueltig("leerer Body".to_string()));
+    }
+    if len > MAX_ANSAGE_PCM_BYTES {
+        return Err(TonFehler::Ungueltig("Body größer als 8 MiB".to_string()));
+    }
+    if !len.is_multiple_of(2) {
+        return Err(TonFehler::Ungueltig(
+            "PCM16 braucht eine gerade Byte-Zahl".to_string(),
+        ));
+    }
+    pcm::dauer_pruefen(len / 2, rate, pcm::MAX_SEKUNDEN)?;
+    Ok((rate, art))
+}
+
+/// Spielt ein Stück Mono-PCM16 (little-endian) über den Kern und kehrt nach
+/// dessen Ende zurück. Body als **Raw-IPC** (`Uint8Array`), Kopfzeilen
+/// `x-rate` (Hz) und `x-art` (`gong` | `sprache`, Standard sprache).
+/// Fehler als `"<code>: <Text>"` (Codes: `TonFehler::code`).
+#[tauri::command]
+pub async fn ansage_pcm_spielen(
+    request: tauri::ipc::Request<'_>,
+) -> Result<crate::ansage_ton::Abspielbericht, String> {
+    use crate::ansage_ton::{self as ton, TonFehler};
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(
+            TonFehler::Ungueltig("Body muss Raw-IPC (Uint8Array) sein".to_string()).fuer_frontend(),
+        );
+    };
+    let kopf = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let (rate, art) = pcm_auftrag_pruefen(
+        kopf("x-rate").as_deref(),
+        kopf("x-art").as_deref(),
+        bytes.len(),
+    )
+    .map_err(|e| e.fuer_frontend())?;
+    let samples = ton::pcm::pcm16_aus_le_bytes(bytes).map_err(|e| e.fuer_frontend())?;
+    ton::spielen(samples, rate, art)
+        .await
+        .map_err(|e| e.fuer_frontend())
+}
+
+/// Spricht eine Ansage mit der Windows-Stimme (OneCore) über den Kern:
+/// synthetisiert je Abschnitt, 300 ms Fuge, spielt alles als **ein** Stück.
+/// `voice` ist die gespeicherte Wahl (Chromium-`voiceURI` oder WinRT-Name,
+/// leer = Standardstimme der Sprache), `lang` „de"/„en".
+#[tauri::command]
+pub async fn ansage_stimme_spielen(
+    segmente: Vec<String>,
+    lang: String,
+    voice: String,
+    rate: f64,
+) -> Result<crate::ansage_ton::Abspielbericht, String> {
+    use crate::ansage_ton::{self as ton, TonFehler};
+    let segmente = ansage_segmente_kappen(segmente);
+    if segmente.is_empty() {
+        return Err(TonFehler::Ungueltig("keine Sprech-Abschnitte".to_string()).fuer_frontend());
+    }
+    let lang = if lang == "en" { "en" } else { "de" }.to_string();
+    ton::stimme_spielen(segmente, lang, voice, rate)
+        .await
+        .map_err(|e| e.fuer_frontend())
+}
+
+/// Bricht die laufende Ansage im Kern ab; wartende Stücke verfallen.
+/// `hart` (Frist im Frontend abgelaufen) gibt zusätzlich den Audio-Thread
+/// auf, damit ein hängender Treiberaufruf nicht alle folgenden Ansagen
+/// verzögert.
+#[tauri::command]
+pub fn ansage_abbrechen(hart: Option<bool>) {
+    if hart == Some(true) {
+        crate::ansage_ton::abbrechen_hart();
+    } else {
+        crate::ansage_ton::abbrechen();
+    }
+}
+
+/// Anzeige „Ausgabe: Windows-Standard (<Gerät>)" auf der Seite Ansagen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AusgabeInfo {
+    /// Läuft der Ton über den Kern? Unter Linux nicht.
+    pub unterstuetzt: bool,
+    /// Name des aktuellen Windows-Standardgeräts — nur für die Anzeige,
+    /// nie fürs Log. `None`: kein Ausgabegerät aktiv (oder nicht
+    /// unterstützt).
+    pub standard: Option<String>,
+}
+
+#[tauri::command]
+pub async fn ansage_ausgabe() -> Result<AusgabeInfo, String> {
+    use crate::ansage_ton::{self as ton, TonFehler};
+    match ton::standard_geraet_name().await {
+        Ok(standard) => Ok(AusgabeInfo {
+            unterstuetzt: true,
+            standard,
+        }),
+        Err(TonFehler::NichtUnterstuetzt) => Ok(AusgabeInfo {
+            unterstuetzt: false,
+            standard: None,
+        }),
+        Err(e) => Err(e.fuer_frontend()),
+    }
+}
+
+/// Die installierten Windows-Stimmen (Name, Sprache) für die Einstellungen.
+#[tauri::command]
+pub async fn ansage_stimmen() -> Result<Vec<crate::ansage_ton::StimmeInfo>, String> {
+    crate::ansage_ton::stimmen()
+        .await
+        .map_err(|e| e.fuer_frontend())
 }
 
 /// Zuhörer der Ansage-Seiten für die Einstellungen.
@@ -5763,6 +5918,98 @@ pub fn monitor_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Ansage-Ton aus dem Kern (Spec `ansage-ausgabegeraet`) ───────────
+
+    #[test]
+    fn pcm_auftrag_gueltig_mit_art() {
+        use crate::ansage_ton::Art;
+        assert_eq!(
+            pcm_auftrag_pruefen(Some("24000"), None, 4800).unwrap(),
+            (24000, Art::Sprache)
+        );
+        assert_eq!(
+            pcm_auftrag_pruefen(Some("48000"), Some("gong"), 2).unwrap(),
+            (48000, Art::Gong)
+        );
+        assert_eq!(
+            pcm_auftrag_pruefen(Some(" 8000 "), Some("sprache"), 2).unwrap(),
+            (8000, Art::Sprache)
+        );
+        assert_eq!(
+            pcm_auftrag_pruefen(Some("96000"), Some(""), 2).unwrap().0,
+            96000
+        );
+    }
+
+    #[test]
+    fn pcm_auftrag_rate_ausserhalb_oder_fehlend_wird_abgelehnt() {
+        for rate in [
+            None,
+            Some(""),
+            Some("abc"),
+            Some("7999"),
+            Some("96001"),
+            Some("-1"),
+        ] {
+            let e = pcm_auftrag_pruefen(rate, None, 2).unwrap_err();
+            assert_eq!(e.code(), "ungueltig", "{rate:?}");
+        }
+    }
+
+    #[test]
+    fn pcm_auftrag_unbekannte_art_wird_abgelehnt() {
+        assert_eq!(
+            pcm_auftrag_pruefen(Some("24000"), Some("musik"), 2)
+                .unwrap_err()
+                .code(),
+            "ungueltig"
+        );
+    }
+
+    #[test]
+    fn pcm_auftrag_laenge_deckel_und_gerade() {
+        // Leer, ungerade, über 8 MiB.
+        assert!(pcm_auftrag_pruefen(Some("24000"), None, 0).is_err());
+        assert!(pcm_auftrag_pruefen(Some("24000"), None, 4801).is_err());
+        assert!(pcm_auftrag_pruefen(Some("96000"), None, 8 * 1024 * 1024).is_ok());
+        assert!(pcm_auftrag_pruefen(Some("96000"), None, 8 * 1024 * 1024 + 2).is_err());
+        // 60-s-Deckel: bei 24 kHz sind 60 s genau 2 880 000 Bytes.
+        assert!(pcm_auftrag_pruefen(Some("24000"), None, 2_880_000).is_ok());
+        assert!(pcm_auftrag_pruefen(Some("24000"), None, 2_880_002).is_err());
+    }
+
+    #[test]
+    fn ansage_segmente_werden_gekappt_und_leere_entfernt() {
+        let lang = "x".repeat(MAX_ANSAGE_SEGMENT_LEN + 50);
+        let aus = ansage_segmente_kappen(vec!["  Feld 1  ".to_string(), "   ".to_string(), lang]);
+        assert_eq!(aus.len(), 2);
+        assert_eq!(aus[0], "Feld 1");
+        assert_eq!(aus[1].chars().count(), MAX_ANSAGE_SEGMENT_LEN);
+        let viele = vec!["a".to_string(); MAX_ANSAGE_SEGMENTE + 5];
+        assert_eq!(ansage_segmente_kappen(viele).len(), MAX_ANSAGE_SEGMENTE);
+    }
+
+    #[test]
+    fn ausgabe_info_ist_camel_case() {
+        let j = serde_json::to_value(AusgabeInfo {
+            unterstuetzt: true,
+            standard: Some("Lautsprecher".to_string()),
+        })
+        .unwrap();
+        assert_eq!(
+            j,
+            serde_json::json!({"unterstuetzt": true, "standard": "Lautsprecher"})
+        );
+    }
+
+    #[tokio::test]
+    async fn ansage_stimme_spielen_ohne_text_ist_ungueltig() {
+        let e = ansage_stimme_spielen(vec!["  ".to_string()], "de".into(), String::new(), 0.8)
+            .await
+            .unwrap_err();
+        assert!(e.starts_with("ungueltig:"), "{e}");
+    }
 
     fn local_az(enabled: bool, key: &str, region: &str) -> crate::config::AzureTtsConfig {
         crate::config::AzureTtsConfig {

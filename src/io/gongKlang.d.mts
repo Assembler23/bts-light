@@ -1,4 +1,4 @@
 export function gongPlanen(
-  ctx: AudioContext,
+  ctx: BaseAudioContext,
   kind: "match" | "info",
 ): { letzter: OscillatorNode; endeSec: number };

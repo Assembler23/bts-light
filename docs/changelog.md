@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.318
+
+- **Ansage folgt dem Ausgabegerät.** Gong und Stimme spielt jetzt der
+  Programmkern direkt über Windows und fragt vor **jeder** Ansage, welches
+  Gerät gerade Standard ist. Klinke zur Hallenanlage einstecken oder USB-Box
+  abziehen genügt, die nächste Ansage kommt über das neue Gerät, ohne
+  Neustart. Bisher blieb die Ansage nach so einem Wechsel stumm oder auf dem
+  alten Lautsprecher (Senior-Cup, 31.10.2026). Auf der Seite **Ansagen**
+  steht, worüber die Ansage läuft.
+- **Windows-Stimme ohne Azure.** Ohne Azure spricht die Windows-Stimme jetzt
+  über denselben Weg wie der Gong. Es sind dieselben Stimmen wie bisher, das
+  Tempo kann leicht abweichen. Die Stimmenliste kommt aus Windows; früher
+  gewählte Stimmen gelten weiter.
+- **Rückfall und Notfall-Schalter.** Klappt die Ausgabe über Windows nicht,
+  spielt das Programmfenster wie früher und ein Banner sagt es. Der Schalter
+  „Alter Abspielweg (über das Programmfenster)" in den Ansage-Einstellungen
+  holt das alte Verhalten ohne Update zurück; er fällt in drei Versionen weg.
+
 ## v0.9.317
 
 - **Spielliste in derselben Reihenfolge wie BTP.** Innerhalb eines

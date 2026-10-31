@@ -90,6 +90,11 @@ jobs:
       - name: Gong-Timing (JS)
         run: node scripts/test-gong-timing.mjs
 
+      # Ansage-Tonweg (ADR 0065) — Fehlercodes, Banner, Fristen und die
+      # Frist-Klammer um die Kern-Aufrufe (die Ansage-Kette darf nie hängen).
+      - name: Ansage-Tonweg (JS)
+        run: node scripts/test-ton-weg.mjs
+
       # Satz-/Matchball-Erkennung der Felderübersicht (Plan 16).
       - name: Satz-/Matchball (JS)
         run: node scripts/test-gamepoint.mjs

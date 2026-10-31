@@ -62,6 +62,57 @@ export const testBtp = (
 export const azureTtsSpeak = (ssml: string): Promise<string> =>
   invoke("azure_tts_speak", { ssml });
 
+// ─── Ansage-Ton aus dem Kern (Spec ansage-ausgabegeraet, ADR 0065) ───────
+// Fehler kommen als "<code>: <Text>" (Codes in io/tonWeg.mjs).
+
+/** Ergebnis eines abgespielten Stücks. */
+export interface Abspielbericht {
+  abgebrochen: boolean;
+  neuGeoeffnet: number;
+}
+
+/** Ausgabe für die Anzeige auf der Seite Ansagen. */
+export interface AusgabeInfo {
+  /** false = kein Kern-Weg (Linux) — dann spielt das Programmfenster. */
+  unterstuetzt: boolean;
+  /** Name des Windows-Standardgeräts; nur zur Anzeige, nie ins Log. */
+  standard: string | null;
+}
+
+export interface StimmeInfo {
+  name: string;
+  sprache: string;
+}
+
+/** Spielt PCM16 mono (little endian) über den Kern; kehrt nach dem Ende
+ *  zurück. Raw-IPC: die Samples gehen ohne Base64/JSON über die Brücke. */
+export const ansagePcmSpielen = (
+  pcm: Int16Array,
+  rate: number,
+  art: "gong" | "sprache",
+): Promise<Abspielbericht> =>
+  invoke("ansage_pcm_spielen", new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength), {
+    headers: { "x-rate": String(rate), "x-art": art },
+  });
+
+/** Windows-Stimme im Kern: synthetisieren und abspielen. */
+export const ansageStimmeSpielen = (
+  segmente: string[],
+  lang: "de" | "en",
+  voice: string,
+  rate: number,
+): Promise<Abspielbericht> =>
+  invoke("ansage_stimme_spielen", { segmente, lang, voice, rate });
+
+/** `hart`: Frist abgelaufen — der Kern gibt zusätzlich seinen Audio-Thread
+ *  auf, damit ein hängender Treiberaufruf die folgenden Ansagen nicht bremst. */
+export const ansageAbbrechen = (hart = false): Promise<void> =>
+  invoke("ansage_abbrechen", { hart });
+
+export const ansageAusgabe = (): Promise<AusgabeInfo> => invoke("ansage_ausgabe");
+
+export const ansageStimmen = (): Promise<StimmeInfo[]> => invoke("ansage_stimmen");
+
 export const startSync = (): Promise<void> => invoke("start_sync");
 
 export const stopSync = (): Promise<void> => invoke("stop_sync");
