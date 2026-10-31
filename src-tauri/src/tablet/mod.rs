@@ -4,6 +4,7 @@
 pub mod ansage;
 pub mod assets;
 pub mod assign;
+pub mod berichtigung;
 pub mod blatt;
 pub mod carrier;
 pub mod club_logos;

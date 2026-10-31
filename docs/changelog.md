@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.319
+
+- **Zähl-Tablet: Seiten oder Mannschaften korrigieren.** Neuer Knopf **⇄** in
+  der Kopfzeile (ohne PIN, mit Rückfrage), auch in Pause und Ergebnis-Ansicht:
+  **„Seiten tauschen"**, wenn Tablet und Feld nicht mehr zusammenpassen —
+  Namen und Punkte wandern gemeinsam, der Stand bleibt; **„Mannschaften
+  tauschen"**, wenn bei der Aufstellung die falsche Mannschaft links gewählt
+  wurde — nur die Namen wechseln, der gemeldete Stand dreht sich in allen
+  Sätzen. Im Doppel fragt das Tablet danach die Aufstellung neu ab.
+  „↩ Korrektur zurücknehmen" macht beides rückgängig. Zettel und
+  badhub-Verlauf ordnen alles davor der richtigen Mannschaft zu (neues
+  Ereignis `teams_corrected`, ADR 0067). „Mannschaften tauschen" erscheint
+  erst, wenn auch der Turnier-PC diese Version hat.
+
 ## v0.9.318
 
 - **Ansage folgt dem Ausgabegerät.** Gong und Stimme spielt jetzt der

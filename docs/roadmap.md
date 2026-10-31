@@ -506,6 +506,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   **PR 1b** OneCore-WAV für die Ansage-Seiten · **PR 2** Gerätewahl.
   Notfall-Schalter „Alter Abspielweg" drei Versionen nach PR 1 entfernen.
 
+- **Seiten und Mannschaften am Zähl-Tablet korrigieren** — Spec:
+  [features/tablet-seiten-korrigieren.md](features/tablet-seiten-korrigieren.md)
+  (freigegeben 30.10.2026, ADR 0067), **umgesetzt v0.9.319** — offen: Tag,
+  Feldtest. ⇄-Knopf ohne PIN: „Seiten tauschen" (alles
+  wandert mit) und „Mannschaften tauschen" (nur Namen, gemeldeter Stand kippt;
+  im Doppel Neuabfrage der Aufstellung; neues Ereignis `teams_corrected`).
+
 - **Sprachansagen im Browser (Ansage-Seite)** — Spec:
   [features/ansage-im-browser.md](features/ansage-im-browser.md) (freigegeben
   30.10.2026, PR #405). **E1 umgesetzt (v0.9.311, ADR 0063)**, **E1b

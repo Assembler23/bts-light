@@ -6764,6 +6764,7 @@ mod tests {
             scorekeeper_assigned: true,
             sr_names: vec!["S. Richter".into()],
             ar_names: vec!["A. Aufschlag".into()],
+            teams_correction: true,
             event_label: "Herreneinzel A Viertelfinale".into(),
             best_of_sets: 3,
             target_score: 21,
