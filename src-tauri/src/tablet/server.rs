@@ -6298,6 +6298,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn die_automatik_pause_landet_in_der_config_und_ueberlebt_den_neustart() {
+        // Roadmap 06.09.2026: Die Pause lebte nur im Arbeitsspeicher; nach
+        // Neustart/Update lief die Automatik wieder. Jetzt muss sie BEIDE
+        // Ziele erreichen — Laufzeit-Zustand (wirkt sofort) und Datei (mit
+        // Turnierbezug) —, und ein frischer Zustand, der beim Start aus der
+        // Config lädt, muss pausiert sein.
+        let (ctx, shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2]));
+        let ctx = Arc::new(ctx);
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-auto-aus",
+            1,
+            0,
+            relay_proto::TlAction::SetAutoAssign { enabled: false },
+        )
+        .await;
+        assert!(response.ok, "Pausieren soll gelingen: {response:?}");
+        assert!(ctx.tablet.auto_assign_paused(), "wirkt sofort");
+        let cfg = shared.lock().unwrap().clone();
+        assert!(cfg.auto_assign_paused, "steht in der Config");
+        assert_eq!(cfg.auto_assign_paused_tournament, "Sperrtest");
+
+        // „Neustart": neuer Laufzeit-Zustand, geladen wie in `start_sync`.
+        let neu = TabletState::default();
+        neu.load_auto_assign_pause(cfg.auto_assign_paused, &cfg.auto_assign_paused_tournament);
+        neu.set_snapshot(snap_mit_feldern("", &[1, 2]));
+        assert!(neu.auto_assign_paused(), "die Pause überlebt den Neustart");
+
+        // Weiterlaufen lassen nimmt beides zurück.
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-auto-an",
+            1,
+            0,
+            relay_proto::TlAction::SetAutoAssign { enabled: true },
+        )
+        .await;
+        assert!(response.ok);
+        assert!(!ctx.tablet.auto_assign_paused());
+        let cfg = shared.lock().unwrap().clone();
+        assert!(!cfg.auto_assign_paused);
+        assert!(cfg.auto_assign_paused_tournament.is_empty());
+    }
+
+    #[tokio::test]
+    async fn die_automatik_pause_laesst_sich_ohne_turnier_aufheben() {
+        // Review-Fund: Nach einem Neustart ist die Pause wieder da, BTP aber
+        // womöglich noch nicht verbunden. Dann muss „Automatik läuft"
+        // trotzdem greifen — nicht „Es ist noch kein Turnier geladen".
+        let (ctx, shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.load_auto_assign_pause(true, "Sperrtest");
+        let ctx = Arc::new(ctx);
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-auto-an-ohne-snap",
+            1,
+            0,
+            relay_proto::TlAction::SetAutoAssign { enabled: true },
+        )
+        .await;
+        assert!(response.ok, "ohne Snapshot erlaubt: {response:?}");
+        assert!(!ctx.tablet.auto_assign_paused());
+        assert!(!shared.lock().unwrap().auto_assign_paused);
+    }
+
+    #[tokio::test]
     async fn ein_unbekanntes_feld_wird_abgelehnt() {
         // E6: Ohne diese Prüfung nähme der Host jede Zahl an — die Sperrliste
         // trüge Einträge, die in keiner Oberfläche auftauchen und die deshalb

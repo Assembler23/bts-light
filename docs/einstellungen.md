@@ -321,6 +321,11 @@ nach. Details: [Schiedsrichterzettel drucken](schiedsrichterzettel.md).
 Die drei unteren Felder sind nur sichtbar, wenn die Automatik an ist.
 **Gesperrte Felder werden nie automatisch belegt.**
 
+Eine in der Turnierleitungs-Oberfläche gesetzte **Pause** der Automatik
+übersteht das Speichern dieser Seite. Schaltest du die Automatik hier **aus**,
+ist die Pause damit aufgehoben — nach dem Wiedereinschalten läuft sie sofort
+(Details: [Turnierleitungs-Oberfläche im Browser](turnierleitung-web.md)).
+
 Zwei Besonderheiten im Mehr-Hallen-Betrieb:
 
 - **Ohne** gesetzte aktive Halle werden nur Spiele verteilt, die du für die

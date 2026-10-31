@@ -920,6 +920,19 @@ pub struct AppConfig {
     /// die erste Sperre und schreibt den Namen mit.
     #[serde(default)]
     pub locked_courts_tournament: String,
+    /// Ist die automatische Feldvergabe in der Turnierleitungs-Sicht
+    /// angehalten? Gesetzt ausschließlich über `TlAction::SetAutoAssign`
+    /// (Host-verwaltet, siehe `keep_host_managed_fields`).
+    ///
+    /// Lebte bis v0.9.322 nur im Arbeitsspeicher — nach Neustart, Update
+    /// oder dem Speichern der Einstellungen lief die Automatik wieder
+    /// (Roadmap 06.09.2026). `#[serde(default)]` = nicht pausiert.
+    #[serde(default)]
+    pub auto_assign_paused: bool,
+    /// Turnier, zu dem [`Self::auto_assign_paused`] gehört (BTP-Turniername,
+    /// Muster ADR 0044). Meldet BTP ein anderes Turnier, verfällt die Pause.
+    #[serde(default)]
+    pub auto_assign_paused_tournament: String,
     /// PIN für das Einstellungs-Menü am Zähltablett (Feldwechsel ohne QR).
     /// Reiner Bedien-Schutz gegen versehentliche Änderungen durch Helfer –
     /// KEINE Sicherheitsgrenze (der echte Kiosk-Lock liegt im Kiosk-Browser).
@@ -1973,6 +1986,36 @@ mod tests {
         assert!(cfg.tl_web.default_profile_id.is_empty());
     }
 
+    /// Eine Config von vor v0.9.323 kennt die gespeicherte Pause nicht —
+    /// sie lädt als „nicht pausiert", also wie bisher nach jedem Start.
+    #[test]
+    fn old_config_without_auto_assign_pause_is_not_paused() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Minimal-Config ohne Pause-Feld lädt");
+        assert!(!cfg.auto_assign_paused);
+        assert!(cfg.auto_assign_paused_tournament.is_empty());
+    }
+
+    /// Die Pause überlebt Speichern und Laden der Datei — der Weg, den sie
+    /// bei Neustart und Update nimmt.
+    #[test]
+    fn auto_assign_pause_survives_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let cfg = AppConfig {
+            auto_assign_paused: true,
+            auto_assign_paused_tournament: "Köpi-Cup".to_string(),
+            ..Default::default()
+        };
+        cfg.save_to(&path).unwrap();
+        let geladen = AppConfig::load_from(&path).unwrap();
+        assert!(geladen.auto_assign_paused);
+        assert_eq!(geladen.auto_assign_paused_tournament, "Köpi-Cup");
+    }
+
     fn rule(disc: &str, draw: &str, hall: &str) -> DisciplineHallRule {
         DisciplineHallRule {
             discipline: disc.to_string(),
@@ -2169,6 +2212,8 @@ mod tests {
             locked_courts: vec![3, 7],
             finished_warning_seconds: 60,
             locked_courts_tournament: "Testturnier".to_string(),
+            auto_assign_paused: true,
+            auto_assign_paused_tournament: "Testturnier".to_string(),
             tablet_settings_pin: "1234".to_string(),
             tp_upload: TpUploadConfig {
                 path: r"C:\Turniere\test.tp".to_string(),

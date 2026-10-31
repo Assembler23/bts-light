@@ -779,14 +779,8 @@ pub(crate) fn apply_state_action(
             );
             Ok(announcement_response(tablet, &hall, now_ms))
         }
-        A::SetAutoAssign { enabled } => {
-            // Laufzeit-Schalter, nicht die Grundeinstellung: Der Sync-Lauf
-            // liest die Konfiguration nach dem Start nicht neu, eine
-            // Dateiänderung bliebe also wirkungslos. Nach einem Neustart
-            // gilt wieder, was in den Einstellungen steht.
-            tablet.set_auto_assign_paused(!*enabled);
-            Ok(TlResponse::ok(0))
-        }
+        // `SetAutoAssign` schreibt seit v0.9.323 die Config und läuft deshalb
+        // über `execute_auto_assign_action`, nicht hier.
         // Alles Weitere berührt Felder oder BTP und läuft woanders.
         _ => Err(TlResponse::err(
             C::Unsupported,
@@ -1668,6 +1662,17 @@ pub(crate) async fn execute(
             "Dieser Rechner ist ein Ansage-Slave — Feldvergabe läuft nur am Turnier-PC.",
         );
     }
+    // Pause der Automatik: config-ändernd wie die Feldsperre, aber bewusst
+    // VOR dem Snapshot-Gate — die Pause ist seit v0.9.323 dauerhaft, und
+    // nach einem Neustart muss sie sich auch dann aufheben lassen, wenn BTP
+    // noch nicht verbunden ist. Der Snapshot liefert nur den Turnierbezug.
+    if let Some(response) = execute_auto_assign_action(ctx, &action) {
+        if response.ok {
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        }
+        return response;
+    }
     let Some(snap) = ctx.tablet.snapshot_clone() else {
         return TlResponse::err(C::NotAllowed, "Es ist noch kein Turnier geladen.");
     };
@@ -1858,6 +1863,45 @@ pub(crate) async fn execute(
             TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
         }
     }
+}
+
+/// Hält die automatische Feldvergabe an oder lässt sie weiterlaufen.
+/// `None` heißt: keine Automatik-Aktion.
+///
+/// Kein Ändern der Grundeinstellung (`auto_assign.enabled`), sondern ein
+/// eigener, Host-verwalteter Schalter. Er steht seit v0.9.323 in der Config
+/// — samt Turnierbezug (Muster ADR 0044) —, damit die Pause Neustart, Update
+/// und das Speichern der Einstellungen überlebt (Roadmap 06.09.2026).
+fn execute_auto_assign_action(
+    ctx: &crate::tablet::server::ServerCtx,
+    action: &relay_proto::TlAction,
+) -> Option<relay_proto::TlResponse> {
+    let relay_proto::TlAction::SetAutoAssign { enabled } = action else {
+        return None;
+    };
+    let paused = !*enabled;
+    // Ohne Snapshot (BTP noch nicht verbunden): Turnierbezug aus dem
+    // Laufzeit-Zustand, sonst leer — den übernimmt der erste Snapshot.
+    let tournament = ctx
+        .tablet
+        .snapshot_clone()
+        .map(|s| s.tournament_name.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| ctx.tablet.auto_assign_paused_tournament());
+    // Erst die Datei, dann der Arbeitsspeicher (wie bei der Feldsperre):
+    // Scheitert das Schreiben, bleibt beides unverändert und das Gerät
+    // bekommt einen Fehler — nie eine Pause, die nur im RAM steht und beim
+    // nächsten Start wieder verschwindet.
+    let geschrieben = tournament.clone();
+    if let Err(rejected) = ctx.mutate_app_config(move |cfg| {
+        cfg.auto_assign_paused = paused;
+        cfg.auto_assign_paused_tournament = if paused { geschrieben } else { String::new() };
+        Ok(())
+    }) {
+        return Some(rejected);
+    }
+    ctx.tablet.load_auto_assign_pause(paused, &tournament);
+    Some(relay_proto::TlResponse::ok(0))
 }
 
 /// Sperrt ein Feld oder gibt es frei (Spec `tl-web-felder-sperren`).

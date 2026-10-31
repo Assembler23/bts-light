@@ -393,6 +393,22 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Automatik legt ein Spiel auf das kaputte Feld.
     incoming.locked_courts = current.locked_courts.clone();
     incoming.locked_courts_tournament = current.locked_courts_tournament.clone();
+    // Die Pause der automatischen Vergabe wird nur im TL-Web geschaltet —
+    // der Assistent kennt das Feld nicht und schickte „nicht pausiert"
+    // zurück; jedes Speichern am PC hätte die Pause still aufgehoben.
+    //
+    // Ausnahme: Wer die Automatik in den Einstellungen AUSschaltet, hebt
+    // die Pause mit auf. Das ist der Griff, wenn das pausierende TL-Gerät
+    // nicht mehr da ist (leer, Zugang widerrufen) — bis v0.9.322 war es
+    // das Stoppen/Starten der Übertragung, das die Pause jetzt überlebt.
+    // Beim Wiedereinschalten läuft die Automatik dann sofort.
+    if incoming.auto_assign.enabled {
+        incoming.auto_assign_paused = current.auto_assign_paused;
+        incoming.auto_assign_paused_tournament = current.auto_assign_paused_tournament.clone();
+    } else {
+        incoming.auto_assign_paused = false;
+        incoming.auto_assign_paused_tournament = String::new();
+    }
     // Das Ausgabegerät der Ansage (Spec `ansage-ausgabegeraet`, PR 2) wird
     // nur über `ansage_ausgabe_setzen` gesetzt. Setup-Assistent und
     // Ansage-Einstellungen schicken ihren beim Öffnen aufgenommenen Stand
@@ -425,6 +441,13 @@ pub fn save_config(
     config
         .save_to(&config_path(&app))
         .map_err(|e| e.to_string())?;
+    // Automatik in den Einstellungen aus ⇒ die TL-Pause ist aufgehoben
+    // (`keep_host_managed_fields`). Auch im Laufzeit-Zustand, damit Datei
+    // und Arbeitsspeicher nicht auseinanderlaufen, falls kein Sync-Neustart
+    // folgt.
+    if !config.auto_assign.enabled {
+        state.tablet.load_auto_assign_pause(false, "");
+    }
     // Wurde auf das Testsystem (oder zurück) umgestellt, müssen Cloud-Relay
     // und Diagnose-Logs mitziehen – sie haben keinen Config-Zugriff und
     // lesen den Prozess-Schalter. Greift beim nächsten Stoppen/Starten der
@@ -1762,10 +1785,17 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         .set_guid(&config.checkin.tournament_uuid);
     // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
     tablet.set_locked_courts(config.locked_courts.iter().copied());
-    // Laufzeit-Schalter (Pause der automatischen Vergabe) beim Start lösen —
-    // sonst bliebe eine auf der Turnierleitungs-Seite gesetzte Pause auch
-    // dann bestehen, wenn das Gerät gar nicht mehr da ist.
-    tablet.reset_runtime_switches();
+    // Pause der automatischen Vergabe samt Turnierbezug aus der Config
+    // übernehmen (Roadmap 06.09.2026). Bis v0.9.322 wurde sie hier gelöst —
+    // damit lief die Automatik nach Neustart, Update UND jedem Speichern der
+    // Einstellungen (Sync-Neustart) wieder. Der Griff ohne TL-Gerät ist jetzt
+    // das Ausschalten der Automatik in den Einstellungen
+    // (`keep_host_managed_fields`); ein anderes Turnier lässt die Pause beim
+    // ersten Snapshot verfallen (`bind_auto_assign_pause`).
+    tablet.load_auto_assign_pause(
+        config.auto_assign_paused,
+        &config.auto_assign_paused_tournament,
+    );
 
     // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();
@@ -6874,6 +6904,56 @@ mod tests {
             "und ihr Turnierbezug ebenso — sonst gälte sie als „unbekannt“ \
              und überlebte den nächsten Turnierwechsel"
         );
+    }
+
+    #[test]
+    fn keep_host_managed_fields_preserves_the_auto_assign_pause() {
+        // Roadmap 06.09.2026: Die Pause wird im TL-Web gesetzt; der
+        // Assistent kennt das Feld nicht und schickt „nicht pausiert". Ohne
+        // Schutz höbe jedes Speichern am PC die Pause still auf — und danach
+        // startet `saveAndStart` die Übertragung neu, die sie aus der Datei
+        // lädt.
+        let mut current = AppConfig {
+            auto_assign_paused: true,
+            auto_assign_paused_tournament: "Köpi-Cup 2026".to_string(),
+            ..Default::default()
+        };
+        current.auto_assign.enabled = true;
+
+        let mut from_ui = AppConfig::default();
+        from_ui.auto_assign.enabled = true;
+        from_ui.badhub.url = "geändert".to_string();
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.badhub.url, "geändert");
+        assert!(merged.auto_assign_paused, "die Pause bleibt");
+        assert_eq!(merged.auto_assign_paused_tournament, "Köpi-Cup 2026");
+    }
+
+    #[test]
+    fn switching_the_automatic_assignment_off_in_the_settings_lifts_the_pause() {
+        // Der Griff ohne TL-Gerät: Automatik in den Einstellungen aus (und
+        // wieder an) — sonst bliebe eine Pause, deren Gerät weg ist, bis zum
+        // Turnierwechsel stehen.
+        let mut current = AppConfig {
+            auto_assign_paused: true,
+            auto_assign_paused_tournament: "Köpi-Cup 2026".to_string(),
+            ..Default::default()
+        };
+        current.auto_assign.enabled = true;
+
+        let mut from_ui = AppConfig::default();
+        from_ui.auto_assign.enabled = false;
+
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert!(!merged.auto_assign_paused);
+        assert!(merged.auto_assign_paused_tournament.is_empty());
+
+        // Wieder einschalten: keine Pause mehr, die Automatik läuft.
+        let mut wieder_an = AppConfig::default();
+        wieder_an.auto_assign.enabled = true;
+        let merged = keep_host_managed_fields(wieder_an, &merged);
+        assert!(!merged.auto_assign_paused);
     }
 
     #[test]
