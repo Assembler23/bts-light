@@ -22,8 +22,9 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Kürzel oder nichts. Was kein Platz zeigt, verlässt den Turnier-PC bzw. das
   Relay gar nicht erst, auch nicht Richtung Tafel, Übersicht und Kombi.
   Vereinslogos kommen in der Cloud jetzt ebenfalls an.
-- **Neu: Annehmer am Monitor.** Vor dem aufschlagenden Spieler steht wie
-  bisher ein Punkt ●, vor dem annehmenden jetzt ein Ring ○ — im Doppel beim
+- **Neu: Aufschläger und Annehmer am Monitor.** Vor dem aufschlagenden
+  Spieler steht jetzt ein Federball statt des gelben Punkts, vor dem
+  annehmenden ein Ring ○ — im Doppel beim
   richtigen Partner. Das Tablet schickt den Annehmer dafür mit.
 - **Vereinslogos auch im Testmodus.** Steht bts-light auf dem badhub-
   Testsystem, blieben die Vereinslogos leer: Das Testsystem verweist für die

@@ -767,7 +767,7 @@ bei Feld-Zielen, nicht bei Tafel, Übersicht, Werbung oder Kombi.
 | **Standard** | wie bisher: Team 1 oben, Team 2 unten, Vorname klein über dem Nachnamen |
 | **International** | dunkle Teamzeilen, je Satz eine gleich breite Spalte, Nachname in Großbuchstaben |
 | **Riesen-Stand** | Stand des laufenden Satzes bildschirmfüllend, darüber klein Nachnamen und Satzstand; nach Spielende groß die gewonnenen Sätze |
-| **Nur Spieler** | Namen (mit Flagge/Logo und Zeile darunter laut Setup), Aufschlag-Punkt und Annehmer-Ring, kein Stand |
+| **Nur Spieler** | Namen (mit Flagge/Logo und Zeile darunter laut Setup), Federball am Aufschläger und Annehmer-Ring, kein Stand |
 | **Hell** | Aufbau wie Standard, heller Grund und dunkle Schrift — für helle Hallen und Beamer |
 | **Nur Stand** | Satzstände und laufender Stand groß, keine Namen; die Stand-Karte des aufschlagenden Teams leuchtet |
 
@@ -779,10 +779,10 @@ bei Feld-Zielen, nicht bei Tafel, Übersicht, Werbung oder Kombi.
 **Zwei Monitore an einem Feld:** Den linken Monitor auf **Nur Spieler**,
 den rechten auf **Nur Stand** stellen. Beide teilen den Bildschirm gleich
 auf, deshalb steht Team 1 auf beiden Monitoren oben auf derselben Höhe.
-Links sieht man, wer aufschlägt (●) und wer annimmt (○), rechts den Stand.
+Links sieht man, wer aufschlägt (Federball) und wer annimmt (○), rechts den Stand.
 
 **Aufschlag und Annahme:** Vor dem Namen des aufschlagenden Spielers steht
-ein Punkt ●, vor dem des annehmenden ein Ring ○ — im Doppel jeweils beim
+ein Federball, vor dem des annehmenden ein Ring ○ — im Doppel jeweils beim
 richtigen Partner. Den Annehmer schicken Tablets ab v0.9.327 mit; bei einer
 noch nicht neu geladenen Tablet-Seite rechnet der Monitor ihn selbst aus der
 mitgeschickten Aufstellung aus.

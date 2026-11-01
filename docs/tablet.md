@@ -649,7 +649,7 @@ Findet sich erst mitten im Spiel jemand zum Zählen, schaltet der Haken
   (BWF-Parität, `computeServing`). Der Annehmer steht diagonal im
   gleichen Service-Court der Gegenseite (`computeReceiving`); beide reisen
   als `serving`/`receiving` (`{team, index}`) im gespiegelten Stand zum
-  Court-Monitor (Punkt ● bzw. Ring ○). Die Positionslogik ist durch
+  Court-Monitor (Federball bzw. Ring ○). Die Positionslogik ist durch
   `scripts/test-serving.mjs` (CI) abgesichert. Die Intervall-/Decider-Flags
   (`intervalDoneThisGame`, `midGameSwitchDone`) werden aus dem
   eingegebenen Stand abgeleitet, damit die 60-s-Pause bzw. der
