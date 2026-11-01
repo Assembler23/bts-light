@@ -1904,6 +1904,88 @@ function startConnectionWatchdog() {
   }, 5_000);
 }
 
+// ── Aufwachen: Hülle aufgeklappt, Bildschirm an, App wieder vorn ─────────
+// Inline-Kopie von `src/io/tabletAufwachen.mjs` (kanonische Fassung + Test
+// `scripts/test-tablet-aufwachen.mjs`, der die Wortgleichheit prüft).
+/* <tabletAufwachen.mjs> */
+// Ab dieser Stille gilt eine offene Verbindung als tot (wie der Wächter).
+var AUFWACH_STILLE_MS = 15000;
+// So lange wartet die Probe nach dem Aufwachen auf ein Lebenszeichen.
+var AUFWACH_PROBE_MS = 3000;
+
+// zustand: WebSocket.readyState (0 verbindet, 1 offen, 2 schließt, 3 zu)
+// oder null, wenn es keinen Socket gibt.
+// Ergebnis: 'verbinden' (keiner/zu → jetzt neu), 'ersetzen' (offen, aber
+// zu lange still → schließen und sofort neu), 'pruefen' (offen und frisch
+// → Ping schicken und nach AUFWACH_PROBE_MS nachsehen), 'warten'
+// (verbindet oder schließt gerade → nichts anfassen, sonst doppelte Sockets).
+function aufwachAktion(zustand, letzterKontaktMs, jetztMs) {
+  if (zustand === null || zustand === undefined || zustand === 3) return 'verbinden';
+  if (zustand !== 1) return 'warten';
+  if (!(letzterKontaktMs > 0) || jetztMs - letzterKontaktMs > AUFWACH_STILLE_MS) return 'ersetzen';
+  return 'pruefen';
+}
+
+// Nach der Probe: Kam seit dem Ping nichts vom Server, ist die Verbindung tot.
+function probeGescheitert(letzterKontaktMs, pingMs) {
+  return !(letzterKontaktMs >= pingMs);
+}
+/* </tabletAufwachen.mjs> */
+
+// Solange das Tablet schläft, stehen die Timer still — der Wächter oben
+// merkt eine tote Verbindung erst ein, zwei Takte nach dem Aufwachen. Hier
+// prüfen wir sofort. Beide Übergänge landen im Tablet-Log, damit ein
+// Logcheck „zugeklappt" von „WLAN weg" unterscheiden kann.
+let verdecktSeitMs = 0;
+let aufwachProbe = null;
+
+// Alten Socket stumm abhängen und sofort neu verbinden. Die Handler werden
+// vorher gelöst, damit sein spätes `onclose` die frische Verbindung nicht
+// als „getrennt" anzeigt.
+function verbindungErsetzen(grund) {
+  const alt = ws;
+  ws = null;
+  if (alt) {
+    alt.onopen = null; alt.onmessage = null; alt.onerror = null; alt.onclose = null;
+    try { alt.close(); } catch { /* ignore */ }
+  }
+  clearReidentify();
+  tlog('warn', 'ws_wach_ersetzt', { grund: grund, stilleMs: lastServerContact ? Date.now() - lastServerContact : null });
+  connect();
+}
+
+function beimAufwachen(anlass) {
+  const jetzt = Date.now();
+  const aktion = aufwachAktion(ws ? ws.readyState : null, lastServerContact, jetzt);
+  tlog('info', 'seite_sichtbar', { anlass: anlass, verdecktMs: verdecktSeitMs ? jetzt - verdecktSeitMs : null, aktion: aktion });
+  verdecktSeitMs = 0;
+  if (aktion === 'verbinden') { connect(); return; }
+  if (aktion === 'ersetzen') { verbindungErsetzen('still'); return; }
+  if (aktion !== 'pruefen') return;
+  const pingMs = Date.now();
+  try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* tot */ }
+  if (aufwachProbe) clearTimeout(aufwachProbe);
+  const geprobt = ws;
+  aufwachProbe = setTimeout(() => {
+    aufwachProbe = null;
+    // Inzwischen ersetzt oder zu → das regelt schon jemand anders.
+    if (ws !== geprobt || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (probeGescheitert(lastServerContact, pingMs)) verbindungErsetzen('probe');
+  }, AUFWACH_PROBE_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    verdecktSeitMs = Date.now();
+    tlog('info', 'seite_verdeckt');
+  } else {
+    beimAufwachen('sichtbar');
+  }
+});
+window.addEventListener('pageshow', (ev) => { if (ev.persisted) beimAufwachen('pageshow'); });
+// Netz wieder da (WLAN nach dem Aufwachen neu verbunden): nicht auf den Takt warten.
+window.addEventListener('online', () => { if (document.visibilityState !== 'hidden') beimAufwachen('online'); });
+
 // Meldet die Feld-Identität beim Server an. Wird bei jedem Reconnect und –
 // solange das Feld „belegt" gemeldet wird – per Retry erneut gesendet.
 function sendIdentify() {
