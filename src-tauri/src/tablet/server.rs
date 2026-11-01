@@ -1186,6 +1186,9 @@ async fn qr_svg(Path(court_id): Path<i64>, Query(q): Query<QrQuery>) -> impl Int
 struct DeviceHeartbeat {
     #[serde(default)]
     device: Option<String>,
+    /// `stream` → Stream-Filter für Nation/Verein (nur feste Feld-Route).
+    #[serde(default)]
+    zweck: Option<String>,
     /// Was den Abruf ausgelöst hat: `push` (ein Nudge kam) oder `poll`
     /// (Fallback-Takt). **Additiv** angehängt (Spec monitor-livestand-push,
     /// S0) — eine Seite aus einem älteren Stand sendet ihn nicht, und ihr
@@ -1590,12 +1593,21 @@ async fn monitor_state(
     // inklusive Turnierlogo) und die Werbebild-Liste aus dem
     // Zwischenstand statt per Verzeichnis-Lesen (Analyse 18.08.2026).
     let cfg = ctx.app_config_arc();
+    // Die Stream-Einblendung fragt mit `?zweck=stream` und bekommt Nation
+    // und Verein nach ihren eigenen Schaltern (ADR 0069/0070).
+    let stream_cfg;
+    let anzeige_cfg = if q.zweck.as_deref() == Some("stream") {
+        stream_cfg = cfg.court_monitor.fuer_stream();
+        &stream_cfg
+    } else {
+        &cfg.court_monitor
+    };
     let state = monitor::build_monitor_state(
         court_id,
         label,
         hall_color_for(&ctx, &cfg, court_id),
         court,
-        &cfg.court_monitor,
+        anzeige_cfg,
         &cfg.call_timer,
         {
             // EINE Momentaufnahme der Bildliste für beide Hälften: Wird
@@ -6907,6 +6919,7 @@ mod tests {
     fn takt(src: Option<&str>) -> Query<DeviceHeartbeat> {
         Query(DeviceHeartbeat {
             device: None,
+            zweck: None,
             src: src.map(|s| s.to_string()),
             court: None,
         })
@@ -7061,6 +7074,7 @@ mod tests {
     fn takt_feld(court: &str) -> Query<DeviceHeartbeat> {
         Query(DeviceHeartbeat {
             device: None,
+            zweck: None,
             src: Some("poll".to_string()),
             court: Some(court.to_string()),
         })
@@ -7742,6 +7756,7 @@ mod tests {
             State(ctx.clone()),
             Query(DeviceHeartbeat {
                 device: None,
+                zweck: None,
                 src: None,
                 court: Some("101".into()),
             }),
@@ -7778,6 +7793,56 @@ mod tests {
                 "{route} ohne Verein: {body}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn stream_folgt_eigenen_schaltern_nicht_den_monitor_plaetzen() {
+        async fn text(r: Response) -> String {
+            let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            String::from_utf8_lossy(&b).into_owned()
+        }
+        let abruf = |ctx: Arc<ServerCtx>, zweck: Option<&str>| {
+            let zweck = zweck.map(str::to_string);
+            async move {
+                let q = Query(DeviceHeartbeat {
+                    zweck,
+                    ..Default::default()
+                });
+                text(monitor_state(State(ctx), Path(101), q, axum::http::HeaderMap::new()).await)
+                    .await
+            }
+        };
+        // Monitor-Plätze ohne Nation und Verein, Stream mit Standard
+        // (Flagge an, Verein aus): Der Stream bekommt die Nation trotzdem.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_mit_schaltern(dir.path(), false, false);
+        let monitor = abruf(ctx.clone(), None).await;
+        assert!(!monitor.contains("GER"), "Monitor ohne Nation: {monitor}");
+        let stream = abruf(ctx.clone(), Some("stream")).await;
+        assert!(stream.contains("GER"), "Stream mit Flagge: {stream}");
+        assert!(
+            !stream.contains("TSV Schalterprobe"),
+            "Stream ohne Verein: {stream}"
+        );
+        // Umgekehrt: Monitor zeigt alles, Stream-Schalter aus → Stream ohne.
+        let dir2 = tempfile::tempdir().unwrap();
+        let ctx2 = ctx_mit_schaltern(dir2.path(), true, true);
+        let mut cfg: AppConfig =
+            serde_json::from_str(&std::fs::read_to_string(&ctx2.config_path).unwrap()).unwrap();
+        cfg.court_monitor.stream_nations = false;
+        cfg.court_monitor.stream_clubs = false;
+        std::fs::write(&ctx2.config_path, serde_json::to_string(&cfg).unwrap()).unwrap();
+        let stream = abruf(ctx2.clone(), Some("stream")).await;
+        assert!(!stream.contains("GER"), "Stream-Schalter aus: {stream}");
+        assert!(
+            !stream.contains("TSV Schalterprobe"),
+            "Stream-Schalter aus: {stream}"
+        );
+        let monitor = abruf(ctx2, None).await;
+        assert!(
+            monitor.contains("GER") && monitor.contains("TSV Schalterprobe"),
+            "{monitor}"
+        );
     }
 
     #[tokio::test]

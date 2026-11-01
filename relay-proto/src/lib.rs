@@ -263,6 +263,14 @@ pub struct MonitorConfig {
         skip_serializing_if = "String::is_empty"
     )]
     pub name_darunter: String,
+    /// Flagge in der Stream-Einblendung (`?zweck=stream`) — eigener
+    /// Schalter, unabhängig von den Plätzen am Feld-Monitor. Standard an,
+    /// wie die Leiste es vor dem Schalter zeigte.
+    #[serde(rename = "streamNations", default = "default_true")]
+    pub stream_nations: bool,
+    /// Verein in der Stream-Einblendung. Standard aus.
+    #[serde(rename = "streamClubs", default)]
+    pub stream_clubs: bool,
 }
 
 fn default_true() -> bool {
@@ -291,6 +299,8 @@ impl Default for MonitorConfig {
             show_clubs: false,
             name_davor: String::new(),
             name_darunter: String::new(),
+            stream_nations: true,
+            stream_clubs: false,
         }
     }
 }
@@ -6070,6 +6080,25 @@ mod monitor_stil_tests {
         assert!(json.contains(r#""nameDavor":"logo""#), "{json}");
         let zurueck: MonitorConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(zurueck, c);
+    }
+
+    #[test]
+    fn monitor_config_stream_schalter_default_und_roundtrip() {
+        // Älterer Absender ohne die Felder: Stream zeigt Flagge, keinen Verein.
+        let mut json = serde_json::to_value(MonitorConfig::default()).unwrap();
+        let obj = json.as_object_mut().unwrap();
+        obj.remove("streamNations");
+        obj.remove("streamClubs");
+        let alt: MonitorConfig = serde_json::from_value(json).unwrap();
+        assert!(alt.stream_nations && !alt.stream_clubs);
+        let c = MonitorConfig {
+            stream_nations: false,
+            stream_clubs: true,
+            ..Default::default()
+        };
+        let s = serde_json::to_string(&c).unwrap();
+        assert!(s.contains(r#""streamClubs":true"#), "{s}");
+        assert_eq!(serde_json::from_str::<MonitorConfig>(&s).unwrap(), c);
     }
 
     #[test]

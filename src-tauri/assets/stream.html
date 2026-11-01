@@ -183,7 +183,9 @@ function feldSichtbar(state) {
   var mws = null, mwsOpen = false, lastServerFrameAt = 0;
   var mwsBackoff = 1000, mwsNextAt = 0;
 
-  function stateUrl(id) { return BASE + "court/" + id + "/state"; }
+  // `zweck=stream`: Nation/Verein nach den Stream-Schaltern, nicht nach den
+  // Plätzen am Feld-Monitor (ADR 0069/0070).
+  function stateUrl(id) { return BASE + "court/" + id + "/state?zweck=stream"; }
 
   function abrufen(f) {
     if (f.laeuft) { f.faellig = true; return; }

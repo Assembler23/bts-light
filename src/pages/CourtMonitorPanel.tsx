@@ -1235,8 +1235,9 @@ function StreamBaukasten({
         </>
       )}
       <p className="text-xs text-slate-400">
-        Flagge und Verein erscheinen nur, wenn ein Platz am Namen im Setup sie
-        nutzt — die Häkchen hier können nur ausblenden. Läuft OBS auf diesem
+        Ob Flagge und Verein überhaupt mitkommen, legen die Häkchen
+        „Stream-Einblendung" im Setup fest — die Häkchen hier können nur
+        ausblenden. Läuft OBS auf diesem
         PC, geht auch <code>localhost</code> statt <code>bts-light.local</code>.
       </p>
     </section>

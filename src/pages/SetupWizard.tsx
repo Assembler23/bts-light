@@ -558,6 +558,9 @@ export function SetupWizard({
   const [cmDarunter, setCmDarunter] = useState<NamenDarunter>(
     cm.name_darunter ?? "ohne",
   );
+  // Stream-Einblendung: eigene Schalter, unabhängig von den Plätzen.
+  const [cmStreamNation, setCmStreamNation] = useState(cm.stream_nations ?? true);
+  const [cmStreamVerein, setCmStreamVerein] = useState(cm.stream_clubs ?? false);
   // Turnierweite Vereins-Anzeige (TL-Web + Tablet). Zentral, nicht je Gerät.
   const disp = initialConfig.display ?? {
     show_club_names: false,
@@ -753,6 +756,8 @@ export function SetupWizard({
         // `layout` reist über den Spread unverändert mit (veraltet, ADR 0068).
         name_davor: cmDavor,
         name_darunter: cmDarunter,
+        stream_nations: cmStreamNation,
+        stream_clubs: cmStreamVerein,
       },
       // Schwellen robust auflösen: ungültige/leere Eingabe → Standard; und der
       // 3. Aufruf muss nach dem 2. liegen (sonst übersprünge die Anzeige den
@@ -2507,6 +2512,25 @@ export function SetupWizard({
                   <option value="nation">Nation (Text)</option>
                   <option value="ohne">ohne</option>
                 </select>
+              </label>
+              {/* Stream-Einblendung (OBS): eigenes Publikum, eigene Schalter —
+                  unabhängig von den Plätzen am Feld-Monitor, serverseitig
+                  gefiltert (ADR 0069/0070). */}
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmStreamNation}
+                  onChange={(e) => setCmStreamNation(e.currentTarget.checked)}
+                />
+                Stream-Einblendung: Flagge zeigen
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={cmStreamVerein}
+                  onChange={(e) => setCmStreamVerein(e.currentTarget.checked)}
+                />
+                Stream-Einblendung: Verein zeigen
               </label>
             </div>
           </div>

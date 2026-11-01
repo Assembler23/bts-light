@@ -825,11 +825,21 @@ Hallennetz bzw. die Cloud.
 - `courts=3` zeigt ein Feld, `courts=1,2,3` bis zu **drei** Felder
   untereinander. Mehr Felder, doppelte Angaben und Unsinn werden ignoriert.
   <!-- pruef: /MAX_FELDER = 3/ in src/io/streamAnsicht.mjs -->
-- Je Feld: Feldnummer (mit Turnierlogo), Namen, Flagge und Verein, sofern
-  ein Platz am Namen im Setup sie nutzt, die Sätze und der laufende Satz.
+- Je Feld: Feldnummer (mit Turnierlogo), Namen, Flagge und Verein laut den
+  eigenen Stream-Häkchen im Setup, die Sätze und der laufende Satz.
   Beim aufschlagenden Team leuchtet die laufende Zahl amber, davor steht ein
   Punkt. Logos stehen auf weißem Grund, damit sie über jedem Video lesbar
   bleiben. Ein Feld ohne Spiel bekommt keine Zeile.
+- **Eigene Einstellungen:** Im Setup unter *Court-Monitor → Anzeige* stehen
+  **Stream-Einblendung: Flagge zeigen** (*voreingestellt an*) und
+  **Stream-Einblendung: Verein zeigen** (*voreingestellt aus*). Sie gelten nur
+  für den Stream und sind unabhängig von den Plätzen am Feld-Monitor — der
+  Stream darf also Flaggen zeigen, auch wenn der Monitor Vereinslogos zeigt.
+  Was hier aus ist, verlässt den Turnier-PC bzw. das Relay Richtung Stream gar
+  nicht erst.
+  <!-- pruef: "Stream-Einblendung: Flagge zeigen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /stream_nations: true/ in src-tauri/src/config.rs -->
+  <!-- pruef: /stream_clubs: false/ in src-tauri/src/config.rs -->
 - `&nation=0`, `&verein=0`, `&logo=0` blenden Flagge, Verein bzw.
   Turnierlogo aus. **Einschalten** kann die Adresse nichts — was im Setup aus
   ist, kommt gar nicht erst an.

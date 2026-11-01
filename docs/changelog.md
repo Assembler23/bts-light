@@ -15,6 +15,9 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   verschwindet die Leiste nach 60 Sekunden, statt einen alten Stand zu zeigen.
   Die fertige Adresse baut der neue Abschnitt **Stream-Einblendung (OBS)** im
   Court-Monitor-Panel: Felder antippen, Häkchen setzen, kopieren.
+- **Eigene Einstellungen für den Stream.** Im Setup legen *Stream-Einblendung:
+  Flagge zeigen* (an) und *Stream-Einblendung: Verein zeigen* (aus) fest, was
+  die Leiste zeigt — unabhängig davon, was die Feld-Monitore zeigen.
   Die Adresse nur ans eigene Stream-Team geben.
 
 ## v0.9.327

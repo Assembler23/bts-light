@@ -164,6 +164,15 @@ Tafel, Übersicht, Kombi und Stream, in LAN und Cloud.
   - Leere oder ungültige Liste: komplett durchsichtig.
 - **Optionen, nur abschaltend:** `nation=0`, `verein=0`, `logo=0` (Turnierlogo). Ohne
   Parameter ist das Turnierlogo an, Nation und Verein folgen dem Server.
+- **Eigene Stream-Schalter (Nachtrag 01.11.2026):** `CourtMonitorConfig.stream_nations`
+  (Standard an) und `stream_clubs` (Standard aus), im Setup „Stream-Einblendung: Flagge/Verein
+  zeigen". Die Seite fragt `court/{id}/state?zweck=stream`; LAN filtert dann mit
+  `CourtMonitorConfig::fuer_stream()`, das Relay mit `build_stream_state` nach
+  `MonitorConfig.streamNations`/`streamClubs`. So kann der Stream Flaggen zeigen, während der
+  Feld-Monitor Vereinslogos zeigt. Ein altes Relay ignoriert `zweck` → Monitor-Filter bis zum
+  automatischen Relay-Deploy.
+- **Baukasten:** Abschnitt „Stream-Einblendung (OBS)" im Court-Monitor-Panel baut die Adresse
+  (`src/io/streamLink.mjs`).
 - **Inhalt je Feld:**
   - Feldname
   - Namen, im Doppel beide

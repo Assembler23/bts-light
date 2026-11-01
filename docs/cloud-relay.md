@@ -844,8 +844,10 @@ die Plätze dann aus den Schaltern ab (Flagge davor bzw. Vereinsname darunter)
 
 ADR [0069](adr/0069-stream-einblendung-eigene-seite.md). `/{ns}/stream`
 liefert `stream.html`; die Seite holt je Feld (höchstens drei) den festen
-Zustand `/{ns}/court/{id}/state` und hört auf `/{ns}/monitor-ws` ohne
-Feldfilter. Die feste Zustandsroute antwortet seitdem wie die Gerätestrecke mit
+Zustand `/{ns}/court/{id}/state?zweck=stream` und hört auf `/{ns}/monitor-ws`
+ohne Feldfilter. `zweck=stream` lässt den Relay Nation/Verein nach
+`MonitorConfig.streamNations`/`streamClubs` filtern (`build_stream_state`) statt
+nach den Monitor-Schaltern. Die feste Zustandsroute antwortet seitdem wie die Gerätestrecke mit
 **`ETag` und 304** (`monitor_state_response`) — vorher nur `no-store`.
 
 Rückfall: Ein Relay-Rollback lässt `/{ns}/stream` mit 404 antworten; OBS zeigt
