@@ -115,6 +115,13 @@ dahinter, denn die Test-DB ist eine tägliche Kopie der Produktivdaten:
 | `/api/bts_log.php`, `/api/tablet_log.php`, `/api/pi_log.php` | Diagnose-Logs |
 | ~~`/bts-relay/`~~ | **Nicht freigegeben** — auf `test.badhub.de` gibt es gar keinen Relay-Block; der Cloud-Modus fällt im Testbetrieb aus, Tablets gehören dort auf LAN |
 
+**Vereinslogos:** `test.badhub.de/api/v1/club-logo` antwortet mit einem 302
+auf die Bilddatei des **Produktivsystems** (`https://badhub.de/assets/logos/…`).
+Der Turnier-PC lässt beim Logo-Abruf sonst nur Bilder derselben Origin zu
+(SSRF-Schutz in `tablet/club_logos.rs`); für genau dieses Paar —
+Testsystem gefragt, Produktivsystem liefert — gibt es eine feste Ausnahme
+(`bild_herkunft_erlaubt`). Ohne sie blieben im Testmodus alle Logos leer.
+
 ### Was bts-light stattdessen tut
 
 Ein 401 **mit** `WWW-Authenticate: Basic` ist kein falsches Liveticker-Passwort,

@@ -36,6 +36,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - **Neu: Annehmer am Monitor.** Vor dem aufschlagenden Spieler steht wie
   bisher ein Punkt ●, vor dem annehmenden jetzt ein Ring ○ — im Doppel beim
   richtigen Partner. Das Tablet schickt den Annehmer dafür mit.
+- **Vereinslogos auch im Testmodus.** Steht bts-light auf dem badhub-
+  Testsystem, blieben die Vereinslogos leer: Das Testsystem verweist für die
+  Bilder auf badhub.de, und der Turnier-PC nahm aus Sicherheitsgründen nur
+  Bilder vom gefragten Server an. Genau diese eine Weiterleitung ist jetzt
+  erlaubt.
 
 ## v0.9.326
 
