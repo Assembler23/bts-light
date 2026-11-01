@@ -84,7 +84,13 @@ impl BridgeConfig {
 /// Query-String (inkl. `device=…`) wird 1:1 angehängt, damit der Master-Relay
 /// das Gerät seinem Feld zuordnen kann. Reine Funktion → testbar.
 fn monitor_redirect_url(master_ns: &str, raw_query: Option<&str>) -> String {
-    let base = format!("{}/{master_ns}/monitor", relay_http());
+    mit_query(format!("{}/{master_ns}/monitor", relay_http()), raw_query)
+}
+
+/// Hängt die Original-Query an ein Weiterleitungs-Ziel — z. B. `?stil=` einer
+/// festen Feld-Anzeige (ADR 0068), die sonst beim Sprung in die Cloud verloren
+/// ginge. Die Query geht unverändert durch; die Zielseite prüft ihre Werte selbst.
+fn mit_query(base: String, raw_query: Option<&str>) -> String {
     match raw_query {
         Some(q) if !q.is_empty() => format!("{base}?{q}"),
         _ => base,
@@ -238,7 +244,11 @@ async fn monitor(State(cfg): State<Arc<BridgeConfig>>, RawQuery(query): RawQuery
 }
 
 /// `/court/{id}/display` — feste Court-Anzeige (nur im Träger-Betrieb).
-async fn court_display(State(cfg): State<Arc<BridgeConfig>>, Path(id): Path<i64>) -> Response {
+async fn court_display(
+    State(cfg): State<Arc<BridgeConfig>>,
+    Path(id): Path<i64>,
+    RawQuery(query): RawQuery,
+) -> Response {
     if cfg.traegt().is_none() {
         if cfg.traeger_betrieb() {
             return (
@@ -247,7 +257,11 @@ async fn court_display(State(cfg): State<Arc<BridgeConfig>>, Path(id): Path<i64>
             )
                 .into_response();
         }
-        return Redirect::to(&format!("{}/court/{id}/display", cfg.relay_basis())).into_response();
+        return Redirect::to(&mit_query(
+            format!("{}/court/{id}/display", cfg.relay_basis()),
+            query.as_deref(),
+        ))
+        .into_response();
     }
     // Label wie am LAN-Server mitgeben — sonst steht bis zum ersten
     // Zustands-Abruf nichts im Kopf der Anzeige.
@@ -718,6 +732,19 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feste_anzeige_behaelt_die_query_bei_der_weiterleitung() {
+        assert_eq!(
+            mit_query("https://r/court/5/display".into(), Some("stil=riesen")),
+            "https://r/court/5/display?stil=riesen"
+        );
+        assert_eq!(
+            mit_query("https://r/court/5/display".into(), None),
+            "https://r/court/5/display"
+        );
+        assert_eq!(mit_query("x".into(), Some("")), "x");
+    }
 
     fn brief(id: i64, label: &str, hall: &str) -> CourtBrief {
         CourtBrief {

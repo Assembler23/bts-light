@@ -91,6 +91,7 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /tl-ws` | TL-Push-Anstoß (Spec `tl-web-push`, ADR 0034): sendet nur `{"rev":n}`, Zugang im **ersten Frame** |
 | `GET /{ns}/ads/{index}` | Hochgeladenes Werbebild (per **Position** in der Liste) — der Anzeige-Stil reist positionell mit, siehe unten |
 | `GET /{ns}/info/logo` | Hochgeladenes Turnierlogo |
+| `GET /{ns}/info/club-logo?name=` | Vereinslogo der Anzeigen: relativer 302 auf den badhub-Resolver `/api/v1/club-logo?name=` (seit v0.9.327, ADR 0070) |
 | `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`, `adStyles`) |
 | `GET /health` | Status-Schnappschuss |
 
@@ -802,6 +803,41 @@ Zwei Eigenheiten, die man kennen muss (ADR 0041):
 Der Fingerabdruck in `relay_client.rs` führt Farbe und Häkchen mit
 (`ad_abdruck_zeile`) — ohne das löste eine reine Farbänderung nie einen Upload
 aus, weil sie weder Datei noch Verzeichnis anfasst.
+
+## Monitor-Stile und Nation/Verein (seit v0.9.327)
+
+Spec [monitor-stile-und-stream](features/monitor-stile-und-stream.md),
+ADR [0068](adr/0068-monitor-stil-als-attribut-am-feld-ziel.md) und
+[0070](adr/0070-nation-verein-auf-anzeigen-serverseitig.md).
+
+- **Stil:** `MonitorTarget::Court` trägt optional `stil`
+  (`international|riesen|spieler|hell|stand`; Standard wird weggelassen →
+  `{"kind":"court","court_id":5}` bleibt bytegleich). Der Geräte-Arm von
+  `/{ns}/monitor/state` übernimmt ihn als `MonitorState.stil`; die feste Route
+  `/{ns}/court/{id}/state` liefert nie einen. Ein unbekannter Wert liest sich
+  als `Unbekannt` (`serde(other)`) und wirkt wie Standard — der Upload bleibt
+  lesbar, kein 422, kein Einfrieren wie bei der Tafel (ADR 0055).
+- **Nation/Verein:** `MonitorConfig.showNations` (Standard an) und
+  `showClubs` (Standard aus) — der Host leitet sie aus den Plätzen am Namen
+  ab und schickt die Plätze selbst als `nameDavor`/`nameDarunter` mit (der
+  Relay reicht sie nur durch). Der Relay filtert in `monitor_player` und in
+  `overview_health` nach den Schaltern; ohne Host-Upload gilt der Standard.
+  `MonitorPlayer.club` ist neu und fehlt, solange der Schalter aus ist.
+- **Vereinslogo:** `/{ns}/info/club-logo?name=` leitet relativ auf den
+  badhub-Resolver weiter (Name kodiert, auf 120 Zeichen gekappt, fester Pfad
+  → kein offener Redirect). So nutzen die Seiten in LAN und Cloud dieselbe
+  Adresse `BASE + "info/club-logo?name="`.
+
+**Deploy-Reihenfolge und Rückfall:** Der Relay geht mit dem Merge automatisch
+live, der App-Tag folgt. Ein **alter Host** am neuen Relay bedeutet Standard-
+Stil, Nation an, Verein aus — also das bisherige Bild. Ein **alter Relay** am
+neuen Host (Relay-Rollback) ignoriert `stil` (Cloud zeigt Standard) **und
+`showNations`**: Nutzt kein Platz am Namen die Nation, stehen in der Cloud
+dann trotzdem wieder Flaggen. Das ist die einzige Datenschutz-Folge eines
+Rollbacks; der Verein bleibt aus, weil der alte Relay `club` gar nicht kennt.
+Ein alter Relay verliert außerdem `nameDavor`/`nameDarunter`; die Seite leitet
+die Plätze dann aus den Schaltern ab (Flagge davor bzw. Vereinsname darunter)
+— nur bis zum nächsten automatischen Relay-Deploy.
 
 ## Trägerverbindung der fernen Halle (`/{ns}/carrier-ws`)
 

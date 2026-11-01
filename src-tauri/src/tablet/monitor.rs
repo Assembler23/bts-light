@@ -311,6 +311,12 @@ pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
         show_ads: c.show_ads,
         layout: c.layout.clone(),
         push_fallback_slow: c.push_fallback_slow,
+        // Die Datenschalter folgen den Plätzen: Was kein Platz zeigt, geht
+        // gar nicht erst raus — auch das Relay filtert nach ihnen.
+        show_nations: c.nation_an(),
+        show_clubs: c.verein_an(),
+        name_davor: c.name_davor.als_str().to_string(),
+        name_darunter: c.name_darunter.als_str().to_string(),
     }
 }
 
@@ -334,8 +340,8 @@ pub fn build_monitor_state(
             .trim()
             .to_string(),
         match_number: m.match_num,
-        team1: m.team1.iter().map(player).collect(),
-        team2: m.team2.iter().map(player).collect(),
+        team1: m.team1.iter().map(|p| player(p, config)).collect(),
+        team2: m.team2.iter().map(|p| player(p, config)).collect(),
         sets,
         team1_seed: m.team1_seed.clone(),
         team2_seed: m.team2_seed.clone(),
@@ -364,10 +370,16 @@ pub fn build_monitor_state(
             second_call_minutes: call_timer.second_call_minutes,
             third_call_minutes: call_timer.third_call_minutes,
         },
+        // Den Stil setzt erst die Geräte-Route aus der Zuweisung (ADR 0068);
+        // die feste Route `/court/{id}/state` liefert nie einen.
+        stil: relay_proto::MonitorStil::Standard,
     }
 }
 
-fn player(p: &BtpPlayer) -> MonitorPlayer {
+/// Ein Spieler für die Anzeige. Nation und Verein werden **hier** nach den
+/// Schaltern gefiltert (ADR 0070) — was die Seite nicht bekommt, kann auch
+/// keine URL sichtbar machen.
+fn player(p: &BtpPlayer, config: &CourtMonitorConfig) -> MonitorPlayer {
     MonitorPlayer {
         name: p.name.clone(),
         // Vor- und Nachname getrennt aus den BTP-Daten – damit der
@@ -375,7 +387,36 @@ fn player(p: &BtpPlayer) -> MonitorPlayer {
         // zu zerlegen.
         given: p.first.clone(),
         family: p.last.clone(),
-        nationality: p.nationality.clone(),
+        nationality: if config.nation_an() {
+            p.nationality.clone()
+        } else {
+            None
+        },
+        club: if config.verein_an() {
+            p.club.clone().filter(|c| !c.trim().is_empty())
+        } else {
+            None
+        },
+    }
+}
+
+/// Filtert Nation und Verein aus einer Feld-Übersicht, bevor sie an eine
+/// Anzeige geht (`/health`, `/combo/state`; ADR 0070). Die interne
+/// Übersicht für Desktop und TL-Web bleibt unberührt — gefiltert wird nur
+/// die Kopie, die eine Anzeige zu sehen bekommt.
+pub fn anzeige_filtern(
+    courts: &mut [crate::tablet::state::CourtOverview],
+    config: &CourtMonitorConfig,
+) {
+    for c in courts {
+        if !config.nation_an() {
+            c.team1_nationalities.clear();
+            c.team2_nationalities.clear();
+        }
+        if !config.verein_an() {
+            c.team1_clubs.clear();
+            c.team2_clubs.clear();
+        }
     }
 }
 
@@ -591,6 +632,7 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
         server_now_ms: now_ms(),
         on_court_since_ms: None,
         call_timer: relay_proto::CallTimerView::default(),
+        stil: relay_proto::MonitorStil::Standard,
     }
 }
 
@@ -679,6 +721,149 @@ mod tests {
         let mi = state.match_info.expect("Match am Feld");
         assert_eq!(mi.team1_seed, None);
         assert_eq!(mi.team2_seed.as_deref(), Some("1"));
+    }
+
+    // ─── Monitor-Stile + Nation/Verein (ADR 0068/0070) ───────────────────
+
+    fn spieler_mit_allem() -> crate::btp::model::BtpPlayer {
+        crate::btp::model::BtpPlayer {
+            id: 1,
+            name: "Anna Muster".into(),
+            first: "Anna".into(),
+            last: "Muster".into(),
+            member_id: Some("05-123".into()),
+            nationality: Some("GER".into()),
+            club: Some("TSV X".into()),
+        }
+    }
+
+    #[test]
+    fn spieler_traegt_nation_und_verein_nur_mit_schalter() {
+        let p = spieler_mit_allem();
+        let standard = crate::config::CourtMonitorConfig::default();
+        let a = player(&p, &standard);
+        assert_eq!(
+            a.nationality.as_deref(),
+            Some("GER"),
+            "Nation standardmäßig an"
+        );
+        assert_eq!(a.club, None, "Verein standardmäßig aus");
+
+        let umgekehrt = crate::config::CourtMonitorConfig {
+            name_davor: crate::config::NamenDavor::Logo,
+            name_darunter: crate::config::NamenDarunter::Ohne,
+            ..Default::default()
+        };
+        let b = player(&p, &umgekehrt);
+        assert_eq!(b.nationality, None);
+        assert_eq!(b.club.as_deref(), Some("TSV X"));
+
+        // Leerer Verein reist nicht als leerer String.
+        let leer = crate::btp::model::BtpPlayer {
+            club: Some("  ".into()),
+            ..p
+        };
+        assert_eq!(player(&leer, &umgekehrt).club, None);
+    }
+
+    /// Datenschutz-Wächter (Muster `the_state_never_carries_personal_data_
+    /// beyond_its_purpose`): Was die Anzeige über einen Spieler bekommt, ist
+    /// strukturell begrenzt — nie Lizenznummer, nie Vereins-/Nationsdaten an
+    /// den Schaltern vorbei.
+    #[test]
+    fn monitor_state_traegt_verein_und_nation_nur_mit_schalter() {
+        let p = spieler_mit_allem();
+        let aus = crate::config::CourtMonitorConfig {
+            name_davor: crate::config::NamenDavor::Ohne,
+            name_darunter: crate::config::NamenDarunter::Ohne,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(player(&p, &aus)).unwrap();
+        let schluessel: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        for k in &schluessel {
+            assert!(
+                ["name", "given", "family", "nationality"].contains(k),
+                "unerwartetes Feld {k} im Anzeige-Spieler"
+            );
+        }
+        assert_eq!(json["nationality"], serde_json::Value::Null);
+        let text = json.to_string();
+        assert!(!text.contains("05-123"), "nie die Lizenznummer");
+        assert!(!text.contains("TSV X"));
+        assert!(!text.contains("GER"));
+    }
+
+    #[test]
+    fn anzeige_filtern_leert_nur_was_ausgeschaltet_ist() {
+        let feld = crate::tablet::state::CourtOverview {
+            team1_nationalities: vec!["GER".into()],
+            team2_nationalities: vec!["DEN".into()],
+            team1_clubs: vec!["TSV X".into()],
+            team2_clubs: vec!["SC Y".into()],
+            ..Default::default()
+        };
+        let mut standard = vec![feld.clone()];
+        anzeige_filtern(&mut standard, &crate::config::CourtMonitorConfig::default());
+        assert_eq!(standard[0].team1_nationalities, vec!["GER".to_string()]);
+        assert!(standard[0].team1_clubs.is_empty() && standard[0].team2_clubs.is_empty());
+
+        let mut ohne_nation = vec![feld];
+        anzeige_filtern(
+            &mut ohne_nation,
+            &crate::config::CourtMonitorConfig {
+                name_davor: crate::config::NamenDavor::Ohne,
+                name_darunter: crate::config::NamenDarunter::Verein,
+                ..Default::default()
+            },
+        );
+        assert!(ohne_nation[0].team1_nationalities.is_empty());
+        assert!(ohne_nation[0].team2_nationalities.is_empty());
+        assert_eq!(ohne_nation[0].team2_clubs, vec!["SC Y".to_string()]);
+    }
+
+    #[test]
+    fn read_assignments_behaelt_court_mit_unbekanntem_stil() {
+        // Downgrade-Fall (ADR 0068): Ein Stil aus einer neueren Fassung darf
+        // das Gerät nicht unzugewiesen machen.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MONITOR_ASSIGN_FILE);
+        std::fs::write(
+            &path,
+            r#"{"a":{"kind":"court","court_id":5,"stil":"zukunft"},
+                "b":{"kind":"court","court_id":6,"stil":"hell"}}"#,
+        )
+        .unwrap();
+        let map = read_assignments(&path);
+        assert_eq!(map["a"].court_id(), Some(5));
+        assert_eq!(map["a"].stil(), relay_proto::MonitorStil::Standard);
+        assert_eq!(map["b"].stil(), relay_proto::MonitorStil::Hell);
+    }
+
+    #[test]
+    fn to_monitor_config_leitet_die_schalter_aus_den_plaetzen_ab() {
+        let w = to_monitor_config(&crate::config::CourtMonitorConfig {
+            name_davor: crate::config::NamenDavor::Logo,
+            name_darunter: crate::config::NamenDarunter::Ohne,
+            ..Default::default()
+        });
+        assert!(!w.show_nations);
+        assert!(w.show_clubs);
+        assert_eq!(
+            (w.name_davor.as_str(), w.name_darunter.as_str()),
+            ("logo", "ohne")
+        );
+        let w = to_monitor_config(&crate::config::CourtMonitorConfig {
+            name_davor: crate::config::NamenDavor::Ohne,
+            name_darunter: crate::config::NamenDarunter::Nation,
+            ..Default::default()
+        });
+        assert!(w.show_nations && !w.show_clubs);
+        assert_eq!(w.name_darunter, "nation");
     }
 
     #[test]
@@ -1145,7 +1330,7 @@ mod tests {
                 "kombi-2".to_string(),
                 MonitorTarget::court_combo(vec![3, 4, 5]),
             ),
-            ("einzel".to_string(), MonitorTarget::Court { court_id: 7 }),
+            ("einzel".to_string(), MonitorTarget::court(7)),
             ("info".to_string(), MonitorTarget::InfoPreparation),
         ])
     }

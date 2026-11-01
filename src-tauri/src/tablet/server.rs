@@ -1379,6 +1379,9 @@ fn uebersicht_json(
     // gleiche kanonische Hallenliste wie Desktop und TL-Web.
     let mut courts = ctx.tablet.overview();
     crate::hall_colors::paint(&mut courts, cfg, &ctx.tablet.hall_names());
+    // Nation/Verein nur laut Schalter (ADR 0070). Ein Schalterwechsel ist ein
+    // Config-Schreibvorgang und hebt die Revision → kein alter Cache-Stand.
+    monitor::anzeige_filtern(&mut courts, &cfg.court_monitor);
     let courts_json = serde_json::to_string(&courts).unwrap_or_else(|_| "[]".to_string());
     // **Die Marke hängt am Inhalt, nicht an der Revision.** Sonst hinge der
     // 304-Pfad an derselben Annahme wie der Cache — nur ohne dessen
@@ -1644,8 +1647,14 @@ async fn monitor_device_state(
         assignment,
         Some(relay_proto::MonitorTarget::CourtTafel { .. })
     );
+    // Darstellung aus der Zuweisung (ADR 0068); Tafel und Nicht-Feld-Ziele
+    // liefern hier Standard.
+    let stil = assignment
+        .as_ref()
+        .map(relay_proto::MonitorTarget::stil)
+        .unwrap_or_default();
     let mut state = match assignment {
-        Some(relay_proto::MonitorTarget::Court { court_id })
+        Some(relay_proto::MonitorTarget::Court { court_id, .. })
         | Some(relay_proto::MonitorTarget::CourtTafel { court_id }) => {
             let label = court_label_for(&ctx, court_id);
             let court_data = ctx.tablet.monitor_court(court_id);
@@ -1671,6 +1680,7 @@ async fn monitor_device_state(
             if ist_tafel {
                 s.redirect_to = Some(format!("/court/{court_id}/tafel"));
             }
+            s.stil = stil;
             s
         }
         // Nicht-Court-Targets (Info, Ad): der Pi soll auf die passende
@@ -2141,7 +2151,8 @@ async fn combo_state(
             break;
         }
     }
-    let overview = ctx.tablet.overview();
+    let mut overview = ctx.tablet.overview();
+    monitor::anzeige_filtern(&mut overview, &ctx.app_config_arc().court_monitor);
     // Je gewünschter ID das passende Feld heraussuchen, Reihenfolge
     // beibehalten (nicht die overview-Reihenfolge). Unbekannte IDs
     // werden übersprungen.
@@ -7641,6 +7652,171 @@ mod tests {
         assert_eq!(v["redirectTo"], serde_json::json!("/court/101/tafel"));
         assert_eq!(v["unassigned"], serde_json::json!(false));
         assert!(v["match"].is_object(), "Feld-Stand reist mit");
+    }
+
+    /// Kontext mit einem Spieler, der Nation UND Verein trägt, und einer
+    /// eigenen Config-Datei mit den Anzeige-Schaltern (ADR 0070).
+    fn ctx_mit_schaltern(dir: &std::path::Path, nation: bool, verein: bool) -> Arc<ServerCtx> {
+        let mut m = match_on_court();
+        m.team1 = vec![BtpPlayer {
+            nationality: Some("GER".into()),
+            club: Some("TSV Schalterprobe".into()),
+            ..player("Anna")
+        }];
+        let mut ctx = make_ctx_with(1, m.clone());
+        // Mit Feld-Stammdaten — sonst bleibt die Übersicht leer.
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![m],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![crate::btp::model::BtpCourt {
+                id: 101,
+                name: "1".into(),
+                location_id: None,
+                sort_order: 1,
+            }],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        ctx.config_path = dir.join("config.json");
+        let mut cfg = AppConfig::default();
+        // Datenbedarf über die Plätze ausdrücken (ADR 0070).
+        cfg.court_monitor.name_davor = if nation {
+            crate::config::NamenDavor::Flagge
+        } else {
+            crate::config::NamenDavor::Ohne
+        };
+        cfg.court_monitor.name_darunter = if verein {
+            crate::config::NamenDarunter::Verein
+        } else {
+            crate::config::NamenDarunter::Ohne
+        };
+        std::fs::write(&ctx.config_path, serde_json::to_string(&cfg).unwrap()).unwrap();
+        Arc::new(ctx)
+    }
+
+    /// Alle Anzeige-Antworten eines Kontexts als Text: `/health`, der schmale
+    /// Abruf `/health?court=` (S7) und `/combo/state`.
+    async fn anzeige_antworten(ctx: Arc<ServerCtx>) -> Vec<(&'static str, String)> {
+        async fn text(r: Response) -> String {
+            let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            String::from_utf8_lossy(&b).into_owned()
+        }
+        let voll = health(State(ctx.clone()), takt(None), axum::http::HeaderMap::new())
+            .await
+            .into_response();
+        let schmal = health(
+            State(ctx.clone()),
+            Query(DeviceHeartbeat {
+                device: None,
+                src: None,
+                court: Some("101".into()),
+            }),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let combo = combo_state(
+            State(ctx.clone()),
+            Query(ComboQuery {
+                courts: "101".into(),
+                device: None,
+            }),
+        )
+        .await
+        .into_response();
+        vec![
+            ("/health", text(voll).await),
+            ("/health?court=", text(schmal).await),
+            ("/combo/state", text(combo).await),
+        ]
+    }
+
+    #[tokio::test]
+    async fn anzeige_endpunkte_ohne_nation_und_verein_bei_schalter_aus() {
+        // Akzeptanzkriterien 9/10 an den Endpunkten, nicht nur an den
+        // Bausteinen: Rutscht der Filter je hinter den Cache, wird das rot.
+        let dir = tempfile::tempdir().unwrap();
+        for (route, body) in anzeige_antworten(ctx_mit_schaltern(dir.path(), false, false)).await {
+            assert!(body.contains("Anna"), "{route} trägt das Spiel: {body}");
+            assert!(!body.contains("GER"), "{route} ohne Nation: {body}");
+            assert!(
+                !body.contains("TSV Schalterprobe"),
+                "{route} ohne Verein: {body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn anzeige_endpunkte_mit_nation_und_verein_bei_schalter_an() {
+        // Gegenprobe: Ohne sie bewiese der Test oben nichts.
+        let dir = tempfile::tempdir().unwrap();
+        for (route, body) in anzeige_antworten(ctx_mit_schaltern(dir.path(), true, true)).await {
+            assert!(body.contains("GER"), "{route} mit Nation: {body}");
+            assert!(
+                body.contains("TSV Schalterprobe"),
+                "{route} mit Verein: {body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn geraete_state_traegt_stil_und_der_wechsel_aendert_die_marke() {
+        // ADR 0068: Der Stil reist in-band; ein Wechsel muss als neue Marke
+        // ankommen, sonst bekäme der TV nach dem Umstellen nur 304.
+        let mut ctx = make_ctx(1);
+        let dir = tempfile::tempdir().unwrap();
+        ctx.assignments_path = dir.path().join("assign.json");
+        let schreibe = |stil| {
+            let mut map = std::collections::HashMap::new();
+            map.insert(
+                "pi-s".to_string(),
+                relay_proto::MonitorTarget::court_mit_stil(101, stil),
+            );
+            map
+        };
+        monitor::write_assignments(
+            &ctx.assignments_path,
+            &schreibe(relay_proto::MonitorStil::Riesen),
+        )
+        .unwrap();
+        let ctx = Arc::new(ctx);
+        let hole = |ctx: Arc<ServerCtx>| async move {
+            let r = monitor_device_state(
+                State(ctx),
+                Query(DeviceQuery {
+                    device: "pi-s".to_string(),
+                    src: None,
+                }),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response();
+            let etag = r
+                .headers()
+                .get(header::ETAG)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            let bytes = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            (etag, v)
+        };
+        let (e1, v1) = hole(ctx.clone()).await;
+        assert_eq!(v1["stil"], serde_json::json!("riesen"));
+        assert_eq!(v1["courtId"], serde_json::json!(101));
+        monitor::write_assignments(
+            &ctx.assignments_path,
+            &schreibe(relay_proto::MonitorStil::Standard),
+        )
+        .unwrap();
+        let (e2, v2) = hole(ctx.clone()).await;
+        assert!(v2.get("stil").is_none(), "Standard wird weggelassen");
+        assert_ne!(e1, e2, "Stilwechsel ändert die Marke");
     }
 
     #[tokio::test]

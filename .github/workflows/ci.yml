@@ -200,6 +200,12 @@ jobs:
       - name: Anzeige-Hülle Ziel-Allowlist (JS)
         run: node scripts/test-anzeige-ziel.mjs
 
+      # Monitor-Stile (ADR 0068): Nur Werte der Allowlist erreichen `data-stil`
+      # und damit CSS; ein Feldwechsel im Panel behält den Stil; die
+      # Inline-Kopie in monitor.html bleibt wortgleich zum Modul.
+      - name: Monitor-Stile (JS)
+        run: node scripts/test-monitor-stil.mjs
+
       # Akkustand am Tablet: Quellen-Reihenfolge (Kiosk-Brücke vor Web-API),
       # Schwellen, „kein Wert" darf nie als 0 % erscheinen — ein Tablet, das
       # fälschlich „kritisch" meldet, wird im Turnier unnötig getauscht.

@@ -752,6 +752,7 @@ async fn main() {
         .route("/{ns}/info/announce/state", get(announce_state))
         .route("/{ns}/info/ad/state", get(ad_bar_state))
         .route("/{ns}/info/logo", get(tournament_logo))
+        .route("/{ns}/info/club-logo", get(club_logo))
         .route("/{ns}/info/preparation", get(preparation_page))
         .route("/{ns}/info/preparation/state", get(preparation_state))
         .route("/{ns}/info/ad", get(ad_page))
@@ -1136,8 +1137,14 @@ async fn monitor_device_state(
                 .map(|&id| relay_proto::MonitorTarget::court(id))
         });
     let ist_tafel = matches!(target, Some(relay_proto::MonitorTarget::CourtTafel { .. }));
+    // Darstellung aus der Zuweisung (ADR 0068) — Tafel und Nicht-Feld-Ziele
+    // liefern Standard, ein unbekannter Stil ebenso.
+    let stil = target
+        .as_ref()
+        .map(relay_proto::MonitorTarget::stil)
+        .unwrap_or_default();
     let mut state = match target {
-        Some(relay_proto::MonitorTarget::Court { court_id })
+        Some(relay_proto::MonitorTarget::Court { court_id, .. })
         | Some(relay_proto::MonitorTarget::CourtTafel { court_id }) => {
             let mut s = build_monitor_state(namespace, court_id);
             // Zähltafel (ADR 0055): Feld-Stand + Umleitung auf die Tafel-Seite,
@@ -1145,6 +1152,7 @@ async fn monitor_device_state(
             if ist_tafel {
                 s.redirect_to = Some(format!("/court/{court_id}/tafel"));
             }
+            s.stil = stil;
             s
         }
         // Nur auf Ziele umleiten, die der Relay auch WIRKLICH ausliefert —
@@ -1458,6 +1466,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         // (Host→Relay-Push fehlt) → Default (aus). LAN-Pfad zeigt ihn bereits.
         on_court_since_ms: None,
         call_timer: relay_proto::CallTimerView::default(),
+        stil: relay_proto::MonitorStil::Standard,
     }
 }
 
@@ -1474,6 +1483,8 @@ fn unassigned_state(device_id: &str) -> MonitorState {
 /// (für ein Feld per CourtID).
 fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
     let monitor = namespace.monitor.as_ref();
+    // Ohne Host-Upload gilt der Default: Nation an, Verein aus (ADR 0070).
+    let config = monitor.map(|m| m.config.clone()).unwrap_or_default();
     let match_info = namespace
         .court_matches
         .get(&court_id)
@@ -1483,8 +1494,16 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
             class_label: mb.class_label.clone(),
             event_label: mb.event_label.clone(),
             match_number: mb.match_number,
-            team1: mb.team_a.iter().map(monitor_player).collect(),
-            team2: mb.team_b.iter().map(monitor_player).collect(),
+            team1: mb
+                .team_a
+                .iter()
+                .map(|p| monitor_player(p, &config))
+                .collect(),
+            team2: mb
+                .team_b
+                .iter()
+                .map(|p| monitor_player(p, &config))
+                .collect(),
             sets: namespace
                 .court_scores
                 .get(&court_id)
@@ -1518,7 +1537,7 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
             .unwrap_or_default(),
         match_info,
         court_state: namespace.court_state.get(&court_id).cloned(),
-        config: monitor.map(|m| m.config.clone()).unwrap_or_default(),
+        config,
         ads: monitor
             .map(|m| (0..m.ads.len()).map(|i| i.to_string()).collect())
             .unwrap_or_default(),
@@ -1535,17 +1554,32 @@ fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
         // aus dem Host-Upload → der Cloud-Monitor zeigt dieselbe Aufruf-Uhr.
         on_court_since_ms: namespace.court_on_court_since.get(&court_id).copied(),
         call_timer: monitor.map(|m| m.call_timer.clone()).unwrap_or_default(),
+        // Den Stil setzt nur der Geräte-Arm (ADR 0068).
+        stil: relay_proto::MonitorStil::Standard,
     }
 }
 
-fn monitor_player(p: &PlayerBrief) -> MonitorPlayer {
+/// Ein Spieler für die Anzeige. Nation und Verein werden **hier** nach den
+/// Schaltern des Hosts gefiltert (ADR 0070): Der Verein liegt im
+/// `PlayerBrief` ungefiltert vor (die Tablets brauchen ihn), eine Anzeige
+/// bekommt ihn nur bei eingeschaltetem Schalter.
+fn monitor_player(p: &PlayerBrief, config: &relay_proto::MonitorConfig) -> MonitorPlayer {
     MonitorPlayer {
         name: p.name.clone(),
         // `PlayerBrief` führt nur den kombinierten Namen – Vor-/Nachname
         // bleiben leer, der Court-Monitor zerlegt dann `name` selbst.
         given: String::new(),
         family: String::new(),
-        nationality: p.nationality.clone(),
+        nationality: if config.show_nations {
+            p.nationality.clone()
+        } else {
+            None
+        },
+        club: if config.show_clubs {
+            p.club.clone().filter(|c| !c.trim().is_empty())
+        } else {
+            None
+        },
     }
 }
 
@@ -1660,6 +1694,52 @@ fn bild_antwort(
             ],
         )
             .into_response(),
+    }
+}
+
+/// Größte Länge eines Vereinsnamens in der Logo-Weiterleitung (Zeichen).
+const CLUB_LOGO_NAME_MAX: usize = 120;
+
+#[derive(Debug, Deserialize)]
+struct ClubLogoQuery {
+    #[serde(default)]
+    name: String,
+}
+
+/// Wohin `/{ns}/info/club-logo?name=…` weiterleitet — `None` bei leerem Namen.
+///
+/// **Relativ** auf den badhub-Resolver (badhub #402): Der Relay läuft unter
+/// derselben Herkunft wie badhub (`/bts-relay/` hinter nginx), also landet
+/// die Anfrage am Resolver desselben Systems — im Testsystem am Testsystem.
+/// Fester Pfad, der Name nur als kodierter Query-Wert → kein offener Redirect.
+fn club_logo_ziel(name: &str) -> Option<String> {
+    let name: String = name.trim().chars().take(CLUB_LOGO_NAME_MAX).collect();
+    if name.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "/api/v1/club-logo?name={}",
+        relay_proto::url_encode(&name)
+    ))
+}
+
+/// Vereinslogo für die Anzeigen (ADR 0070): dieselbe Adresse wie im LAN
+/// (`info/club-logo?name=`), damit die Seiten LAN und Cloud nicht
+/// unterscheiden müssen.
+async fn club_logo(Path(ns): Path<String>, Query(q): Query<ClubLogoQuery>) -> Response {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    match club_logo_ziel(&q.name) {
+        Some(ziel) => (
+            StatusCode::FOUND,
+            [
+                (header::LOCATION, ziel),
+                (header::CACHE_CONTROL, "public, max-age=3600".to_string()),
+            ],
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "Kein Verein").into_response(),
     }
 }
 
@@ -1892,10 +1972,14 @@ async fn overview_health(
                         team.iter().map(|p| p.name.clone()).collect::<Vec<_>>()
                     };
                     // Nationalitäten parallel zu den Namen (leerer String = unbekannt)
-                    // — die Länderflaggen der Übersicht. Der Host pusht `nationality`
-                    // nur, wenn das (default-aus) Anzeige-Feld eingeschaltet ist; ist
-                    // es leer, blendet overview.html die Flagge stumm aus.
+                    // — die Länderflaggen der Übersicht. Nur laut Schalter des
+                    // Hosts (ADR 0070; ohne Upload: an). Ist die Liste leer,
+                    // blendet overview.html die Flagge stumm aus.
+                    let nationen_an = n.monitor.as_ref().is_none_or(|m| m.config.show_nations);
                     let nats = |team: &[relay_proto::PlayerBrief]| {
+                        if !nationen_an {
+                            return Vec::new();
+                        }
                         team.iter()
                             .map(|p| p.nationality.clone().unwrap_or_default())
                             .collect::<Vec<_>>()
@@ -10139,6 +10223,201 @@ mod tests {
             None,
             "unbekanntes Feld bleibt farblos"
         );
+    }
+
+    // ─── Monitor-Stile + Nation/Verein (ADR 0068/0070) ───────────────────
+
+    /// Namespace mit einem Match, an dem Nation UND Verein hängen.
+    fn ns_mit_verein(config: Option<MonitorConfig>) -> Namespace {
+        let mut ns = Namespace::new();
+        ns.courts = vec![relay_proto::CourtBrief {
+            id: 101,
+            label: "1".into(),
+            hall: String::new(),
+            hall_color: None,
+        }];
+        let mut b = brief(7);
+        b.team_a[0].club = Some("TSV X".into());
+        ns.court_matches.insert(101, b);
+        ns.monitor = config.map(|config| MonitorBundle {
+            config,
+            tournament_name: String::new(),
+            ads: Vec::new(),
+            call_timer: relay_proto::CallTimerView::default(),
+            logo: None,
+        });
+        ns
+    }
+
+    #[test]
+    fn alter_host_upload_ohne_schalter_zeigt_nation_ohne_verein() {
+        // Ein Host vor den Schaltern lädt eine Config ohne `showNations`/
+        // `showClubs` hoch: Flaggen bleiben wie bisher, der Verein bleibt weg.
+        let mut json = serde_json::to_value(MonitorConfig::default()).unwrap();
+        let obj = json.as_object_mut().unwrap();
+        obj.remove("showNations");
+        obj.remove("showClubs");
+        let alt: MonitorConfig = serde_json::from_value(json).unwrap();
+        for ns in [ns_mit_verein(Some(alt)), ns_mit_verein(None)] {
+            let st = build_monitor_state(&ns, 101);
+            let a = &st.match_info.as_ref().unwrap().team1[0];
+            assert_eq!(a.nationality.as_deref(), Some("GER"));
+            assert_eq!(a.club, None, "Verein nur mit Schalter");
+        }
+    }
+
+    #[test]
+    fn host_schaltet_nation_ab_und_verein_an_relay_filtert() {
+        let ns = ns_mit_verein(Some(MonitorConfig {
+            show_nations: false,
+            show_clubs: true,
+            ..Default::default()
+        }));
+        let st = build_monitor_state(&ns, 101);
+        let a = &st.match_info.as_ref().unwrap().team1[0];
+        assert_eq!(a.nationality, None);
+        assert_eq!(a.club.as_deref(), Some("TSV X"));
+        let json = serde_json::to_string(&st).unwrap();
+        assert!(!json.contains("GER"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn cloud_health_ohne_nationen_bei_schalter_aus() {
+        const NS: &str = "c0000000-0000-0000-0000-000000000068";
+        let broker = Broker::new("x".into());
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.insert(
+                NS.into(),
+                ns_mit_verein(Some(MonitorConfig {
+                    show_nations: false,
+                    ..Default::default()
+                })),
+            );
+        }
+        let resp = overview_health(
+            State(broker.clone()),
+            Path(NS.into()),
+            leer_query(),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), 8192).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let c0 = &v["courts"][0];
+        assert_eq!(c0["team1_nationalities"], serde_json::json!([]));
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("GER"), "{text}");
+        assert!(
+            !text.contains("TSV X"),
+            "die Cloud-Übersicht kennt keinen Verein"
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_geraet_court_mit_stil() {
+        const NS: &str = "c0000000-0000-0000-0000-000000000069";
+        let (broker, _host, _rx) = broker_mit_uebersicht(NS).await;
+        let mut control = relay_proto::MonitorControl::default();
+        control.targets.insert(
+            "pi-riesen".into(),
+            relay_proto::MonitorTarget::court_mit_stil(101, relay_proto::MonitorStil::Riesen),
+        );
+        control
+            .targets
+            .insert("pi-standard".into(), relay_proto::MonitorTarget::court(101));
+        control.targets.insert(
+            "pi-tafel".into(),
+            relay_proto::MonitorTarget::court_tafel(101),
+        );
+        let up =
+            monitor_control_upload(State(broker.clone()), Path(NS.into()), axum::Json(control))
+                .await
+                .into_response();
+        assert_eq!(up.status(), StatusCode::OK);
+        let (_, e_riesen, riesen) = hole_monitor(&broker, NS, "pi-riesen", &[]).await;
+        assert_eq!(riesen["stil"], serde_json::json!("riesen"));
+        assert_eq!(riesen["courtId"], serde_json::json!(101));
+        let (_, e_standard, standard) = hole_monitor(&broker, NS, "pi-standard", &[]).await;
+        assert!(standard.get("stil").is_none(), "Standard wird weggelassen");
+        assert_ne!(e_riesen, e_standard, "der Stil gehört zur Marke");
+        let (_, _, tafel) = hole_monitor(&broker, NS, "pi-tafel", &[]).await;
+        assert!(tafel.get("stil").is_none());
+    }
+
+    #[tokio::test]
+    async fn relay_akzeptiert_upload_mit_unbekanntem_stil() {
+        // Der Tafel-Fall (ADR 0055) darf sich nicht wiederholen: Ein Stil aus
+        // einer neueren App friert die Zuweisungen nicht ein.
+        const NS: &str = "c0000000-0000-0000-0000-000000000070";
+        let (broker, _host, _rx) = broker_mit_uebersicht(NS).await;
+        let control: relay_proto::MonitorControl = serde_json::from_str(
+            r#"{"targets":{"pi":{"kind":"court","court_id":101,"stil":"aus_der_zukunft"}},"commands":{}}"#,
+        )
+        .unwrap();
+        let up =
+            monitor_control_upload(State(broker.clone()), Path(NS.into()), axum::Json(control))
+                .await
+                .into_response();
+        assert_eq!(up.status(), StatusCode::OK);
+        let (s, _, body) = hole_monitor(&broker, NS, "pi", &[]).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(body["courtId"], serde_json::json!(101));
+        assert!(body.get("stil").is_none());
+    }
+
+    #[test]
+    fn club_logo_ziel_kodiert_und_kappt() {
+        assert_eq!(
+            club_logo_ziel(" TSV Ölbach 1890 ").as_deref(),
+            Some("/api/v1/club-logo?name=TSV%20%C3%96lbach%201890")
+        );
+        // Kein Ausbruch aus dem Query-Wert: Trenner werden kodiert.
+        assert_eq!(
+            club_logo_ziel("a&b=c#d/../x").as_deref(),
+            Some("/api/v1/club-logo?name=a%26b%3Dc%23d%2F..%2Fx")
+        );
+        assert_eq!(club_logo_ziel("   "), None);
+        let lang = "x".repeat(500);
+        let ziel = club_logo_ziel(&lang).unwrap();
+        assert_eq!(
+            ziel.len(),
+            "/api/v1/club-logo?name=".len() + CLUB_LOGO_NAME_MAX
+        );
+    }
+
+    #[tokio::test]
+    async fn club_logo_route_leitet_relativ_um() {
+        const NS: &str = "c0000000-0000-0000-0000-000000000071";
+        let r = club_logo(
+            Path(NS.into()),
+            Query(ClubLogoQuery {
+                name: "TSV X".into(),
+            }),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::FOUND);
+        assert_eq!(
+            r.headers().get(header::LOCATION).unwrap(),
+            "/api/v1/club-logo?name=TSV%20X"
+        );
+        let leer = club_logo(
+            Path(NS.into()),
+            Query(ClubLogoQuery {
+                name: String::new(),
+            }),
+        )
+        .await;
+        assert_eq!(leer.status(), StatusCode::NOT_FOUND);
+        let falsch = club_logo(
+            Path("kein-namespace".into()),
+            Query(ClubLogoQuery {
+                name: "TSV X".into(),
+            }),
+        )
+        .await;
+        assert_eq!(falsch.status(), StatusCode::NOT_FOUND);
     }
 
     /// Der Hallenfilter der Ansage-Antwort zeigt jeder Halle nur ihre eigenen

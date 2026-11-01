@@ -105,6 +105,8 @@ function defaultConfig(): AppConfig {
       show_ads: true,
       layout: "split",
       push_fallback_slow: false,
+      name_davor: "flagge",
+      name_darunter: "ohne",
     },
     call_timer: {
       enabled: false,

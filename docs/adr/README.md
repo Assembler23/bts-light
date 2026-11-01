@@ -77,3 +77,7 @@ hier eintragen.
 | [0064](0064-erst-ansage-im-kern.md) | Erst-Ansage im Kern als Auftrag `court_assigned`; `MatchAnnouncer` nur am Ansage-Slave | accepted |
 | [0065](0065-ansage-ton-aus-dem-kern-wasapi.md) | Ansage-Ton aus dem Rust-Kern (WASAPI über cpal), Gerät je Abspielvorgang neu aufgelöst | accepted |
 | [0066](0066-windows-stimme-e3-im-kern.md) | Windows-Stimme (E3) im Kern, vorgezogen und gemeinsam für Turnier-PC und Ansage-Seiten | accepted |
+| [0067](0067-mannschaften-berichtigt-kipp-ereignis.md) | „Mannschaften berichtigt" als Kipp-Ereignis; Tablet-Korrektur als eigener Undo-Schritt | accepted |
+| [0068](0068-monitor-stil-als-attribut-am-feld-ziel.md) | Monitor-Stil als Attribut am Feld-Ziel (`serde(other)`), in-band über `MonitorState` | accepted |
+| [0069](0069-stream-einblendung-eigene-seite.md) | Stream-Einblendung als eigene Seite auf dem Feld-Zustand je Feld, Namespace-Offenlegung akzeptiert | accepted |
+| [0070](0070-nation-verein-auf-anzeigen-serverseitig.md) | Nation (Standard an) und Verein (Standard aus) auf Anzeigen serverseitig gefiltert, URL nur abschaltend | accepted |

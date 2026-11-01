@@ -61,6 +61,8 @@ import type {
   CourtAd,
   DisciplineHallRule,
   DrawInfo,
+  NamenDarunter,
+  NamenDavor,
   TpFileInfo,
 } from "../types";
 
@@ -550,7 +552,12 @@ export function SetupWizard({
   const [cmTimer, setCmTimer] = useState(cm.show_timer);
   const [cmMatchClock, setCmMatchClock] = useState(cm.show_match_clock);
   const [cmAds, setCmAds] = useState(cm.show_ads);
-  const [cmLayout, setCmLayout] = useState(cm.layout || "split");
+  // Plätze vor/unter dem Namen (ADR 0070). `??`: Eine Config von vor den
+  // Plätzen zeigt die Flaggen weiter.
+  const [cmDavor, setCmDavor] = useState<NamenDavor>(cm.name_davor ?? "flagge");
+  const [cmDarunter, setCmDarunter] = useState<NamenDarunter>(
+    cm.name_darunter ?? "ohne",
+  );
   // Turnierweite Vereins-Anzeige (TL-Web + Tablet). Zentral, nicht je Gerät.
   const disp = initialConfig.display ?? {
     show_club_names: false,
@@ -743,7 +750,9 @@ export function SetupWizard({
         show_timer: cmTimer,
         show_match_clock: cmMatchClock,
         show_ads: cmAds,
-        layout: cmLayout,
+        // `layout` reist über den Spread unverändert mit (veraltet, ADR 0068).
+        name_davor: cmDavor,
+        name_darunter: cmDarunter,
       },
       // Schwellen robust auflösen: ungültige/leere Eingabe → Standard; und der
       // 3. Aufruf muss nach dem 2. liegen (sonst übersprünge die Anzeige den
@@ -2416,19 +2425,6 @@ export function SetupWizard({
               <span className="text-sm font-medium text-slate-600">
                 Anzeige
               </span>
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-500">
-                  Layout
-                </span>
-                <select
-                  value={cmLayout}
-                  onChange={(e) => setCmLayout(e.currentTarget.value)}
-                  className="w-full rounded-lg border border-slate-300 bg-white
-                             px-2.5 py-1.5 text-sm text-slate-700"
-                >
-                  <option value="split">A — Geteilt (oben/unten)</option>
-                </select>
-              </label>
               {/* Live-Vorschau: aktualisiert sich mit jeder Checkbox. */}
               <MonitorPreview
                 showDiscipline={cmDiscipline}
@@ -2480,6 +2476,37 @@ export function SetupWizard({
                   onChange={(e) => setCmTimer(e.currentTarget.checked)}
                 />
                 Pausen-Countdown (Retro-Klappanzeige)
+              </label>
+              {/* Plätze am Namen (ADR 0070): Die Anordnung gilt am
+                  Feld-Monitor. Was kein Platz nutzt, verlässt den Server gar
+                  nicht — auch Tafel, Übersicht und Kombi bekommen Nation
+                  bzw. Verein nur, wenn hier ein Platz sie zeigt. Den Stil
+                  wählt man je Monitor im Court-Monitor-Panel. */}
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <span className="w-36 shrink-0">Vor dem Namen</span>
+                <select
+                  value={cmDavor}
+                  onChange={(e) => setCmDavor(e.currentTarget.value as NamenDavor)}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                >
+                  <option value="flagge">Nation (Flagge)</option>
+                  <option value="logo">Vereinslogo</option>
+                  <option value="ohne">ohne</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <span className="w-36 shrink-0">Unter dem Namen</span>
+                <select
+                  value={cmDarunter}
+                  onChange={(e) =>
+                    setCmDarunter(e.currentTarget.value as NamenDarunter)
+                  }
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                >
+                  <option value="verein">Vereinsname</option>
+                  <option value="nation">Nation (Text)</option>
+                  <option value="ohne">ohne</option>
+                </select>
               </label>
             </div>
           </div>
