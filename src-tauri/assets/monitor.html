@@ -185,11 +185,22 @@
       font-size: 7vmin; font-weight: 700; color: #94a3b8; line-height: 1.2;
     }
     .players.doubles .seed { font-size: 5.6vmin; }
+    /* Feste Breite: Federball und ○ sind verschieden breit — ohne sie
+       rückten die Doppel-Namen beim Wechsel gegeneinander. */
     .serve-dot {
-      flex: 0 0 auto; font-size: 4.4vmin; color: #fbbf24; line-height: 1;
+      flex: 0 0 auto; width: 1.5em; text-align: center;
+      font-size: 5.4vmin; color: #fbbf24; line-height: 1;
       opacity: 0; transition: opacity .15s;
     }
-    .serve-dot.on { opacity: 1; }
+    /* Aufschläger: ein Federball (eigene SVG, keine Emoji-Schrift nötig —
+       der Pi hat oft keine). Flach in Amber wie die Stand-Karte, oben nur
+       sanft gerundete Federspitzen, um 45° gekippt. */
+    .serve-dot.on {
+      opacity: 1; height: 1.5em;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cg transform='rotate%28-45 32 32%29'%3E%3Cpath d='M10 12 Q11.5 4.5 18 9 Q21.5 3 27 8 Q32 2 37 8 Q42.5 3 46 9 Q52.5 4.5 54 12 L39 40 H25 Z' fill='%23fbbf24'/%3E%3Cpath d='M25 40 H39 V43 A7 7 0 0 1 25 43 Z' fill='%23f59e0b'/%3E%3Cpath d='M25 41 H39' stroke='%23b45309' stroke-width='1.6'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
+    }
+    /* Annehmer: hohler Ring in derselben Farbe, etwas zurückgenommen. */
+    .serve-dot.recv { opacity: .75; }
 
     /* Satzstand rechts: abgeschlossene Sätze klein, laufender Satz groß. */
     .scores { flex: 0 0 auto; display: flex; align-items: center; gap: 1.6vw; }
@@ -339,6 +350,134 @@
       font-size: 26vmin; font-weight: 900; line-height: 1; letter-spacing: .08em;
     }
     #identify-overlay .i-court { font-size: 7vmin; font-weight: 800; }
+
+    /* ─── Zeile unter dem Spielernamen (ADR 0070) ────────────────────── */
+    /* Vereinsname oder Nation (Kürzel) — je nach Platz „Unter dem
+       Namen" im Setup, Standard ohne. */
+    .name .club {
+      display: flex; align-items: center; gap: .8vmin; margin-top: .4vmin;
+      font-size: 3.6vmin; font-weight: 600; color: #94a3b8;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* Vereinslogo im Platz der Flagge: gleiche Box, Bild ungeschnitten, auf
+       weißem Grund wie die Logos der Sponsor-Leiste — dunkle Logos bleiben
+       so auf dem dunklen Monitor sichtbar. */
+    .flag.logo {
+      box-sizing: border-box; object-fit: contain;
+      background: #fff; border-radius: .8vmin; padding: .5vmin;
+    }
+    .players.doubles .name .club { font-size: 3vmin; }
+    /* Zwei Namen mit je einer Vereinszeile brauchen mehr Höhe als die
+       Hälfte hergibt — der Nachname weicht, sonst würde er unten
+       abgeschnitten. */
+    .players.doubles .name.mit-verein .family { font-size: 9vmin; }
+    .players.doubles .name.mit-verein .given { font-size: 3.4vmin; }
+
+    /* ─── Monitor-Stile (Spec monitor-stile-und-stream, ADR 0068) ─────── */
+    /* Der Stil steht als `data-stil` am #root. Nur die funktionale
+       Anordnung ist an Anzeigen anderer Programme angelehnt; Farben und
+       Maße sind eigene. */
+    #riesen { display: none; }
+
+    /* International: dunkle Teamzeilen, je Satz eine gleich breite Spalte. */
+    #root[data-stil="international"] .divider { display: none; }
+    #root[data-stil="international"] .half {
+      margin: 1.2vh 1.8vw; border-radius: 1.4vmin; background: #0f172a;
+      border-left-width: 1.2vmin; box-shadow: 0 .8vmin 2.4vmin rgba(0,0,0,.45);
+    }
+    #root[data-stil="international"] .half.serving {
+      background: linear-gradient(90deg, rgba(251,191,36,.12), #0f172a 30%);
+    }
+    #root[data-stil="international"] .name .given { display: none; }
+    #root[data-stil="international"] .name .family {
+      font-size: 11vmin; text-transform: uppercase; letter-spacing: .02em;
+    }
+    #root[data-stil="international"] .players.doubles .name .family { font-size: 8.5vmin; }
+    #root[data-stil="international"] .sets-done { gap: 1vw; }
+    #root[data-stil="international"] .set-done,
+    #root[data-stil="international"] .set-current {
+      width: 1.6em; text-align: center; font-size: 11vmin; line-height: 1.3;
+      border-radius: 1vmin; padding: 0;
+    }
+    #root[data-stil="international"] .set-done { background: #1e293b; }
+    #root[data-stil="international"] .scores.decided .set-done { font-size: 11vmin; }
+
+    /* Riesen-Stand: laufender Satz bildschirmfüllend. */
+    #root[data-stil="riesen"] .half,
+    #root[data-stil="riesen"] .divider { display: none; }
+    #root[data-stil="riesen"] #riesen {
+      flex: 1 1 auto; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; min-height: 0; gap: 1vh;
+    }
+    #riesen .r-kopf {
+      display: flex; align-items: baseline; justify-content: center;
+      gap: 3vw; width: 100%; padding: 0 3vw;
+      font-size: 6vmin; font-weight: 800; color: #cbd5e1;
+    }
+    #riesen .r-name {
+      flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis; text-transform: uppercase;
+    }
+    #riesen .r-name.links { text-align: right; }
+    #riesen .r-saetze {
+      flex: 0 0 auto; font-variant-numeric: tabular-nums; color: #94a3b8;
+    }
+    #riesen .r-stand {
+      display: flex; align-items: center; justify-content: center; gap: 2vw;
+      font-size: min(62vmin, 30vw); font-weight: 900; line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    #riesen .r-zahl { min-width: 2ch; text-align: center; }
+    #riesen .r-zahl.auf { color: #fbbf24; }
+    #riesen .r-doppel { font-size: .5em; color: #475569; }
+
+    /* Nur Spieler: Namen ohne Stand. Aufschlag-Punkt, Annehmer-Ring und
+       Aufschlag-Balken bleiben — im Monitor-Paar mit „Nur Stand" zeigt
+       dieser Monitor, WER aufschlägt. */
+    #root[data-stil="spieler"] .scores { display: none; }
+
+    /* Nur Stand: Gegenstück zu „Nur Spieler" für zwei Monitore an einem
+       Feld. Gleiche Hälften wie dort (Kopf, Fuß, Trenner bleiben), damit
+       Team 1 auf beiden Monitoren auf derselben Höhe steht. */
+    #root[data-stil="stand"] .players { display: none; }
+    #root[data-stil="stand"] .half { justify-content: center; }
+    #root[data-stil="stand"] .scores { gap: 3vw; }
+    #root[data-stil="stand"] .sets-done { gap: 2.4vw; }
+    #root[data-stil="stand"] .set-done { font-size: 16vmin; }
+    #root[data-stil="stand"] .set-current { font-size: 34vmin; padding: .4vmin 2.4vw; }
+    #root[data-stil="stand"] .scores.decided .set-done { font-size: 24vmin; }
+    /* Hochkant passen drei Endstände in dieser Größe nicht in die Breite. */
+    @media (orientation: portrait) {
+      #root[data-stil="stand"] .set-done { font-size: 9vw; }
+      #root[data-stil="stand"] .set-current { font-size: 22vw; }
+      #root[data-stil="stand"] .scores.decided .set-done { font-size: 14vw; }
+    }
+
+    /* Hell: heller Grund, dunkle Schrift — für helle Hallen und Beamer. */
+    #root[data-stil="hell"] { background: #f8fafc; color: #0f172a; }
+    #root[data-stil="hell"] header.bar,
+    #root[data-stil="hell"] footer.bar { background: #e2e8f0; color: #334155; }
+    #root[data-stil="hell"] header.bar .court { color: #b45309; }
+    #root[data-stil="hell"] header.bar .discipline { color: #334155; }
+    #root[data-stil="hell"] .name .given,
+    #root[data-stil="hell"] .name .club,
+    #root[data-stil="hell"] .seed { color: #475569; }
+    #root[data-stil="hell"] .set-done { color: #94a3b8; }
+    #root[data-stil="hell"] .set-done.won { color: #0f172a; }
+    #root[data-stil="hell"] .set-current {
+      color: #0f172a; background: #ffffff; border-color: #cbd5e1;
+    }
+    #root[data-stil="hell"] .set-current.serving {
+      color: #1a1206; background: linear-gradient(180deg, #fcd34d, #f59e0b);
+    }
+    #root[data-stil="hell"] .half.serving {
+      border-left-color: #d97706;
+      background: linear-gradient(90deg, rgba(217,119,6,.10), transparent 35%);
+    }
+    #root[data-stil="hell"] .serve-dot { color: #d97706; }
+    #root[data-stil="hell"] .divider {
+      background: linear-gradient(90deg, transparent, #cbd5e1 15%, #cbd5e1 85%, transparent);
+    }
   </style>
 </head>
 <body>
@@ -366,6 +505,19 @@
       <section class="half" id="half1"></section>
       <div class="divider"></div>
       <section class="half" id="half2"></section>
+      <!-- Riesen-Stand (ADR 0068): immer befüllt, nur per CSS sichtbar. -->
+      <section id="riesen" aria-hidden="true">
+        <div class="r-kopf">
+          <span class="r-name links" id="r-name1"></span>
+          <span class="r-saetze" id="r-saetze"></span>
+          <span class="r-name" id="r-name2"></span>
+        </div>
+        <div class="r-stand">
+          <span class="r-zahl" id="r-a"></span>
+          <span class="r-doppel">:</span>
+          <span class="r-zahl" id="r-b"></span>
+        </div>
+      </section>
       <footer class="bar" id="footer"></footer>
     </div>
 
@@ -425,6 +577,62 @@
   // dort HTML-escaped), damit kein Court-Name den String-Literal-Kontext
   // aufbrechen kann.
   var COURT_LABEL = "";
+
+  // Monitor-Stile (ADR 0068) — Inline-Kopie von src/io/monitorStil.mjs,
+  // wortgleich gehalten von scripts/test-monitor-stil.mjs.
+/* <monitorStil.mjs> */
+var STILE = ["standard", "international", "riesen", "spieler", "hell", "stand"];
+
+/** Ein beliebiger Wert als bekannter Stil, sonst `standard`. */
+function stilAusWert(roh) {
+  return typeof roh === "string" && STILE.indexOf(roh) >= 0 ? roh : "standard";
+}
+
+/** Der Stil, den die Seite zeigt: Gerät → Zustand, feste URL → `?stil=`. */
+function wirksamerStil(modus, stateStil, urlStil) {
+  return stilAusWert(modus === "device" ? stateStil : urlStil);
+}
+
+/** Feld-Ziel mit Stil fürs Panel. Standard wird weggelassen (bytegleiche
+ *  Zuweisung wie vor den Stilen); andere Ziele kennen keinen Stil. */
+function zielMitStil(ziel, stil) {
+  if (!ziel || ziel.kind !== "court") return ziel;
+  var s = stilAusWert(stil);
+  return s === "standard"
+    ? { kind: "court", court_id: ziel.court_id }
+    : { kind: "court", court_id: ziel.court_id, stil: s };
+}
+
+/** Kurzname eines Spielers: Nachname, sonst aus `name` abgeleitet
+ *  („Nachname, Vorname" → vor dem Komma, sonst das letzte Wort), sonst
+ *  der volle Name. Die Cloud liefert `given`/`family` leer. */
+function kurzname(name, given, family) {
+  var f = typeof family === "string" ? family.trim() : "";
+  if (f) return f;
+  var n = typeof name === "string" ? name.trim() : "";
+  var komma = n.indexOf(",");
+  var k = komma >= 0 ? n.slice(0, komma).trim() : n.split(/\s+/).pop() || "";
+  return k || n;
+}
+
+/** Plätze am Namen (ADR 0070) aus der Anzeige-Konfiguration: was vor und
+ *  was unter dem Namen steht. Nur Werte der Allowlist; ein älterer Absender
+ *  ohne `nameDavor`/`nameDarunter` wird aus seinen Datenschaltern
+ *  abgeleitet (Flagge davor, Verein darunter). */
+function namenPlaetze(cfg) {
+  var c = cfg || {};
+  var davor = ["flagge", "logo", "ohne"].indexOf(c.nameDavor) >= 0
+    ? c.nameDavor : (c.showNations === false ? "ohne" : "flagge");
+  var darunter = ["verein", "nation", "ohne"].indexOf(c.nameDarunter) >= 0
+    ? c.nameDarunter : (c.showClubs ? "verein" : "ohne");
+  return { davor: davor, darunter: darunter };
+}
+/* </monitorStil.mjs> */
+  // `?stil=` gilt nur für feste URLs; im Geräte-Modus entscheidet die
+  // Zuweisung im Panel (wirksamerStil).
+  var URL_STIL = (function () {
+    try { return new URLSearchParams(location.search).get("stil"); } catch (e) { return null; }
+  })();
 
   // Geräte-ID (nur Geräte-Modus). Bevorzugt aus dem URL-Parameter
   // `?device=` – der Pi-Kiosk setzt dort seine Hardware-Seriennummer ein,
@@ -524,6 +732,11 @@
     callTimer: document.getElementById("call-timer"),
     half1: document.getElementById("half1"),
     half2: document.getElementById("half2"),
+    rName1: document.getElementById("r-name1"),
+    rName2: document.getElementById("r-name2"),
+    rSaetze: document.getElementById("r-saetze"),
+    rA: document.getElementById("r-a"),
+    rB: document.getElementById("r-b"),
     footer: document.getElementById("footer"),
     timerOverlay: document.getElementById("timer-overlay"),
     timerLabel: document.getElementById("timer-label"),
@@ -649,13 +862,31 @@
     return img;
   }
 
+  // Vereinslogo im Platz vor dem Namen, gleich groß wie die Flagge. Fehlt
+  // das Logo, bleibt der Platz leer stehen, damit die Namen fluchten.
+  function logoEl(club) {
+    var img = document.createElement("img");
+    img.className = "flag logo";
+    img.alt = "";
+    if (club) {
+      img.src = BASE + "info/club-logo?name=" + encodeURIComponent(club);
+      img.onerror = function () { img.classList.add("hidden"); };
+    } else {
+      img.classList.add("hidden");
+    }
+    return img;
+  }
+
   // Baut eine Bildschirmhälfte für ein Team. `players` = [{name,nationality}],
   // `done` = abgeschlossene Sätze als [{v,won}], `current` = laufender
   // Satzwert (oder null, wenn das Match feststeht), `serving` = schlägt
   // dieses Team auf?, `isWinner` = dieses Team hat das Match gewonnen.
   // `servePlayerIdx` = Index des konkret aufschlagenden Spielers im Team
   // (BWF-Doppelregel); null → Team-Level-Fallback (Punkt beim ersten Namen).
-  function renderHalf(host, players, seed, done, current, serving, isWinner, servePlayerIdx) {
+  // `recvPlayerIdx` = Index des Annehmers, wenn dieses Team annimmt und das
+  // Tablet ihn liefert; sonst null (keine Marke, kein Raten).
+  // `plaetze` = { davor, darunter } aus namenPlaetze (ADR 0070).
+  function renderHalf(host, players, seed, done, current, serving, isWinner, servePlayerIdx, recvPlayerIdx, plaetze) {
     host.textContent = "";
     host.classList.toggle("serving", !!serving);
     host.classList.toggle("winner", !!isWinner);
@@ -671,11 +902,15 @@
       // altes Tablet ohne Info) beim ersten Spieler des aufschlagenden Teams.
       var dotHere = serving &&
         (servePlayerIdx == null ? i === 0 : i === servePlayerIdx);
+      var recvHere = !serving && recvPlayerIdx != null && i === recvPlayerIdx;
       var dot = document.createElement("span");
-      dot.className = "serve-dot" + (dotHere ? " on" : "");
-      dot.textContent = "●";
+      dot.className = "serve-dot" + (dotHere ? " on" : recvHere ? " recv" : "");
+      // Der Aufschläger bekommt den Federball als Hintergrundbild, also
+      // keinen Text; der Platzhalter der anderen bleibt unsichtbar.
+      dot.textContent = recvHere ? "○" : dotHere ? "" : "●";
       row.appendChild(dot);
-      row.appendChild(flagEl(p.nationality));
+      if (plaetze.davor === "flagge") row.appendChild(flagEl(p.nationality));
+      else if (plaetze.davor === "logo") row.appendChild(logoEl(p.club));
 
       // Name im Broadcast-Stil: Vorname klein, Nachname groß. Trägt der
       // Spieler die getrennten BTP-Felder (family nicht leer), werden sie
@@ -695,6 +930,18 @@
       family.textContent = parts.family;
       name.appendChild(given);
       name.appendChild(family);
+      // Zeile unter dem Namen (ADR 0070): Vereinsname oder Nation als
+      // Kürzel — nur, was der Server liefert.
+      var unten = plaetze.darunter === "verein" ? (p.club || "")
+        : plaetze.darunter === "nation" ? (p.nationality || "").trim().toUpperCase()
+        : "";
+      if (unten) {
+        name.classList.add("mit-verein");
+        var club = document.createElement("span");
+        club.className = "club";
+        club.textContent = unten;
+        name.appendChild(club);
+      }
       row.appendChild(name);
       // Setzplatz einmal je Seite, hinter dem letzten Spieler.
       if (seed && i === players.length - 1) {
@@ -855,13 +1102,19 @@
     var serveInfo = decided ? null : servingInfo(cs);
     var serving = serveInfo ? serveInfo.team : null;
     var servePlayerIdx = serveInfo ? serveInfo.playerIdx : null;
+    var recvInfo = decided ? null : receivingInfo(cs);
+    var plaetze = namenPlaetze(cfg);
+
+    renderRiesen(m, current, doneSets, serving, decided);
 
     renderHalf(els.half1, m.team1 || [], m.team1Seed, done1,
                current ? current.a : null, serving === 1, winnerTeam === 1,
-               serving === 1 ? servePlayerIdx : null);
+               serving === 1 ? servePlayerIdx : null,
+               recvInfo && recvInfo.team === 1 ? recvInfo.playerIdx : null, plaetze);
     renderHalf(els.half2, m.team2 || [], m.team2Seed, done2,
                current ? current.b : null, serving === 2, winnerTeam === 2,
-               serving === 2 ? servePlayerIdx : null);
+               serving === 2 ? servePlayerIdx : null,
+               recvInfo && recvInfo.team === 2 ? recvInfo.playerIdx : null, plaetze);
 
     // Fußzeile: Runde + Spielnummer (je nach Konfiguration).
     els.footer.textContent = "";
@@ -881,6 +1134,38 @@
       span.textContent = txt;
       els.footer.appendChild(span);
     });
+  }
+
+  // Riesen-Stand (ADR 0068): läuft das Spiel, steht der laufende Satz groß
+  // und darüber klein der Satzstand; steht es fest, groß die gewonnenen
+  // Sätze und klein die Satzergebnisse. Wird bei jedem Stil befüllt, damit
+  // ein Stilwechsel sofort etwas zeigt.
+  function renderRiesen(m, current, doneSets, serving, decided) {
+    function namen(team) {
+      return (team || []).map(function (p) {
+        return kurzname(p.name, p.given, p.family);
+      }).join(" / ");
+    }
+    els.rName1.textContent = namen(m.team1);
+    els.rName2.textContent = namen(m.team2);
+    var gewA = 0, gewB = 0;
+    doneSets.forEach(function (s) {
+      if ((s.a || 0) > (s.b || 0)) gewA++;
+      else if ((s.b || 0) > (s.a || 0)) gewB++;
+    });
+    if (decided || !current) {
+      els.rA.textContent = String(gewA);
+      els.rB.textContent = String(gewB);
+      els.rSaetze.textContent = doneSets.map(function (s) {
+        return (s.a || 0) + ":" + (s.b || 0);
+      }).join("  ");
+    } else {
+      els.rA.textContent = String(current.a || 0);
+      els.rB.textContent = String(current.b || 0);
+      els.rSaetze.textContent = gewA + " : " + gewB;
+    }
+    els.rA.classList.toggle("auf", serving === 1);
+    els.rB.classList.toggle("auf", serving === 2);
   }
 
   // Liefert 1 (Team 1), 2 (Team 2) oder null aus dem geparsten courtState.
@@ -903,6 +1188,33 @@
     }
     var t = servingTeam(cs);
     return t == null ? null : { team: t, playerIdx: null };
+  }
+
+  // Annehmer: { team:1|2, playerIdx:0|1 } oder null. Bevorzugt das vom
+  // Tablet gelieferte `receiving`; ältere Tablet-Seiten schicken es nicht,
+  // dann wird er aus der mitgespiegelten Aufstellung abgeleitet — dieselbe
+  // Regel wie `computeReceiving` in tablet.html: diagonal gegenüber, also
+  // dasselbe Aufschlagfeld (nach dem Stand des Aufschlägers) auf der
+  // Gegenseite.
+  function receivingInfo(cs) {
+    if (!cs) return null;
+    if (cs.receiving && cs.receiving.team && typeof cs.receiving.index === "number") {
+      return { team: cs.receiving.team === "a" ? 1 : 2, playerIdx: cs.receiving.index };
+    }
+    if (cs.setup !== "playing" || cs.finished) return null;
+    var auf = cs.servingSide, pos = cs.positions, seiten = cs.teamOnSide, m = cs.match;
+    if ((auf !== "left" && auf !== "right") || !pos || !seiten || !m || !cs.currentSet) return null;
+    var gegen = auf === "left" ? "right" : "left";
+    var stand = Number(cs.currentSet[auf]) || 0;
+    var feld = stand % 2 === 0 ? "rightSC" : "leftSC";
+    var id = pos[gegen] ? pos[gegen][feld] : null;
+    if (id == null) return null;
+    var team = seiten.a === gegen ? "a" : "b";
+    var liste = team === "a" ? m.teamA : m.teamB;
+    if (!Array.isArray(liste)) return null;
+    var idx = -1;
+    for (var i = 0; i < liste.length; i++) { if (liste[i] && liste[i].id === id) { idx = i; break; } }
+    return idx < 0 ? null : { team: team === "a" ? 1 : 2, playerIdx: idx };
   }
 
   // Sieger-Team (1 oder 2) eines feststehenden Matches, sonst null. Bei
@@ -1090,8 +1402,10 @@
     // Feld dieser Monitor zeigt (auch ohne Spiel/Werbung).
     els.fallbackCourt.textContent = state.courtLabel || COURT_LABEL || "";
 
-    // Layout am Wurzelelement markieren – Vorbereitung fuer weitere Layouts.
+    // Layout am Wurzelelement markieren (veraltet, nur noch `split`).
     els.root.dataset.layout = cfg.layout || "split";
+    // Darstellung (ADR 0068): nur Werte aus der Allowlist erreichen CSS.
+    els.root.dataset.stil = wirksamerStil(MODE, state.stil, URL_STIL);
 
     // Darf der Sicherheits-Poll langsamer laufen (Spec
     // monitor-livestand-push, S6)? Fehlt das Feld (älterer Server), bleibt

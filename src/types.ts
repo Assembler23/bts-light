@@ -293,6 +293,9 @@ export interface CheckinView {
 }
 
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */
+export type NamenDavor = "flagge" | "logo" | "ohne";
+export type NamenDarunter = "verein" | "nation" | "ohne";
+
 export interface CourtMonitorConfig {
   /** Court-Monitor eingerichtet/aktiv? Steuert nur die Sichtbarkeit der
    *  Monitor-Adressen – die Anzeige-Seite ist immer erreichbar. */
@@ -311,8 +314,23 @@ export interface CourtMonitorConfig {
   show_match_clock: boolean;
   /** Werbung im Leerlauf anzeigen? Aus → neutrale Leerlauf-Seite. */
   show_ads: boolean;
-  /** Anzeige-Layout des Monitors (`split` = „A — Geteilt"). */
+  /**
+   * @deprecated Seit ADR 0068 wählt man die Darstellung je Gerät (Stil an der
+   * Zuweisung). Bleibt lesbar und wird unverändert durchgereicht.
+   */
   layout: string;
+  /**
+   * Platz vor dem Namen am Feld-Monitor (ADR 0070). Standard `flagge`.
+   * Bestimmt zugleich, ob Nation bzw. Verein den Server Richtung Anzeige
+   * verlassen.
+   */
+  name_davor: NamenDavor;
+  /** Platz unter dem Namen am Feld-Monitor (ADR 0070). Standard `ohne`. */
+  name_darunter: NamenDarunter;
+  /** Flagge in der Stream-Einblendung — unabhängig von den Plätzen. Standard an. */
+  stream_nations: boolean;
+  /** Verein in der Stream-Einblendung. Standard aus. */
+  stream_clubs: boolean;
   /**
    * @deprecated Seit ADR 0049 wird die Kombi-Ausrichtung **je Gerät** gewählt
    * (`monitor-combo-dir.json`, Command `monitor_combo_dirs`). Dieses Feld ist
@@ -348,7 +366,12 @@ export interface CourtAd {
 /** Was ein Court-Monitor-Gerät anzeigen soll – Feld, Info-Anzeige oder
  *  Werbung (Rust: relay_proto::MonitorTarget). */
 export type MonitorTarget =
-  | { kind: "court"; court_id: number }
+  | {
+      kind: "court";
+      court_id: number;
+      /** Darstellung (ADR 0068); fehlt = Standard. */
+      stil?: string;
+    }
   | { kind: "court_tafel"; court_id: number }
   | { kind: "info_overview"; hall?: string | null }
   | { kind: "info_preparation" }

@@ -38,6 +38,11 @@ pub const MONITOR_HTML: &str = include_str!("../../assets/monitor.html");
 /// Platzhalter wie `monitor.html` (`__MODE__`, `__BASE__`, `__COURT_LABEL__`).
 pub const TAFEL_HTML: &str = include_str!("../../assets/tafel.html");
 
+/// Stream-Einblendung (Spec monitor-stile-und-stream, E2, ADR 0069):
+/// transparente Score-Leiste für OBS unter `/stream?courts=…`. Einziger
+/// Platzhalter `__BASE__`; die Felder kommen aus der Adresse.
+pub const STREAM_HTML: &str = include_str!("../../assets/stream.html");
+
 /// TV-Launcher (`/` und `/tv`): Vollbild-Menü zum Auswählen einer Anzeige per
 /// Fernbedienung (Pfeiltasten + OK) — man muss nur einmal die kurze Adresse
 /// tippen, statt lange `?halle=`-URLs. Holt die Hallen aus `/health`.

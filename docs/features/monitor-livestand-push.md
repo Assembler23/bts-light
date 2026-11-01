@@ -898,6 +898,17 @@ und Statuswechsel in [`0016`](../adr/0016-monitor-push-transport.md) ·
 `docs/regression-suite.md` · `docs/changelog.md` · `docs/roadmap.md` (beide A1-TODOs streichen) ·
 [`docs/multi-hall.md`](../multi-hall.md) (ferne Halle = nur Cloud) · `docs/logging.md` (Perf-Zeile).
 
+## Weitere Abnehmer
+
+**Stream-Einblendung** (`stream.html`, seit v0.9.328, Spec
+[monitor-stile-und-stream](monitor-stile-und-stream.md), ADR 0069): nutzt
+die feste Zustandsroute je Feld mit ETag/304 (S1-Muster, am Relay erst seit
+dieser Version), den Nudge der `monitor-ws` ohne Feldfilter (S3), `seq` je
+Feld (S4) und den Herzschlag für die Kanalgesundheit (S6) — mit eigenen
+Kopien von `monitorSeq`/`pushHealth`. `scripts/test-inline-kopien.mjs` prüft
+seitdem alle Kopien (monitor, tafel, overview, stream) im Verhalten gegen die
+Module.
+
 ## Offene Punkte / Annahmen
 
 - **Annahme:** Die Zielwerte in „Erfolgskriterien" sind aus einer Schätzung abgeleitet

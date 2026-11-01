@@ -28,6 +28,9 @@ import {
 } from "../api";
 import { HallFilter } from "../components/HallFilter";
 import { linkMitGuid } from "../io/liveLink.mjs";
+import { stilAusWert, zielMitStil, type Stil } from "../io/monitorStil.mjs";
+import { MAX_FELDER } from "../io/streamAnsicht.mjs";
+import { streamLink } from "../io/streamLink.mjs";
 import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
 import type {
   AppConfig,
@@ -101,6 +104,17 @@ function valueToTarget(v: string): MonitorTarget | null {
   }
   return null;
 }
+
+// ─── Monitor-Stile (ADR 0068) ────────────────────────────────────────────
+// Beschriftungen stehen im Handbuch (docs/court-monitor.md, pruef-Anker).
+const STIL_OPTIONEN: { wert: Stil; text: string }[] = [
+  { wert: "standard", text: "Standard" },
+  { wert: "international", text: "International" },
+  { wert: "riesen", text: "Riesen-Stand" },
+  { wert: "spieler", text: "Nur Spieler" },
+  { wert: "hell", text: "Hell" },
+  { wert: "stand", text: "Nur Stand" },
+];
 
 // ─── Sortier-/Gruppier-Logik der Geräteliste ────────────────────────────
 // Eine fertig sortierte Anzeige-Struktur: Online-Block (ggf. nach Hallen
@@ -475,6 +489,13 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
         </p>
       </section>
 
+      <StreamBaukasten
+        courts={courts}
+        lanEnabled={lanEnabled}
+        cloudEnabled={cloudEnabled}
+        relayBase={info?.relay_base ?? ""}
+      />
+
       {/* Geräteliste */}
       <section className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -675,7 +696,19 @@ function DeviceRow({
       setComboOpen(true);
       return; // kein echtes Target — Dialog übernimmt
     }
-    onAssign(valueToTarget(value));
+    // Ein Feldwechsel behält den Stil (ADR 0068); jedes andere Ziel kennt
+    // keinen. Würde `valueToTarget` allein entscheiden, fiele der Stil bei
+    // jedem Feldwechsel still auf Standard zurück (Falle aus ADR 0049).
+    onAssign(zielMitStil(valueToTarget(value), aktuellerStil));
+  }
+
+  // Darstellung des Feld-Monitors — eigenes Auswahlfeld, nicht Teil des
+  // Options-Schlüssels `court:<id>`.
+  const aktuellerStil: Stil =
+    device.target?.kind === "court" ? stilAusWert(device.target.stil) : "standard";
+  function onStil(stil: string) {
+    if (device.target?.kind !== "court") return;
+    onAssign(zielMitStil(device.target, stil));
   }
 
   // Label der aktuellen Kombi-Zuweisung (für die Dropdown-Option).
@@ -828,6 +861,26 @@ function DeviceRow({
           </option>
         </optgroup>
       </select>
+
+      {/* Darstellung (Spec monitor-stile-und-stream, ADR 0068) — nur bei
+          einem Feld-Ziel. Wirkt ohne Neuladen, in LAN und Cloud. */}
+      {device.target?.kind === "court" && (
+        <label className="flex items-center gap-1.5 text-sm text-slate-600">
+          Stil
+          <select
+            value={aktuellerStil}
+            onChange={(e) => onStil(e.currentTarget.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm
+                       focus:border-slate-500 focus:outline-none"
+          >
+            {STIL_OPTIONEN.map((o) => (
+              <option key={o.wert} value={o.wert}>
+                {o.text}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {/* Explizite Halle (nur Mehr-Hallen-Turnier): überschreibt die aus dem
           Feld abgeleitete Halle – für Geräte ohne Feld (Info/Werbung/Kombi/
@@ -1086,6 +1139,108 @@ function MonitorAddressRow({
       <code className="min-w-0 flex-1 truncate text-sm">{url}</code>
       <CopyButton url={url} />
     </div>
+  );
+}
+
+/**
+ * Baukasten für die OBS-Adresse der Stream-Einblendung (ADR 0069): bis zu
+ * drei Felder und die drei Abschalter wählen, fertige Adresse kopieren. Die
+ * Seite selbst hat keine Einstellungen — alles steckt in der Adresse.
+ */
+function StreamBaukasten({
+  courts,
+  lanEnabled,
+  cloudEnabled,
+  relayBase,
+}: {
+  courts: CourtOverview[];
+  lanEnabled: boolean;
+  cloudEnabled: boolean;
+  relayBase: string;
+}) {
+  const [felder, setFelder] = useState<number[]>([]);
+  const [nation, setNation] = useState(true);
+  const [verein, setVerein] = useState(true);
+  const [logo, setLogo] = useState(true);
+  // Reihenfolge der Auswahl = Reihenfolge in der Leiste.
+  function umschalten(id: number) {
+    setFelder((alt) =>
+      alt.includes(id)
+        ? alt.filter((x) => x !== id)
+        : alt.length >= MAX_FELDER
+          ? alt
+          : [...alt, id],
+    );
+  }
+  const opt = { nation, verein, logo };
+  const lan = streamLink("http://bts-light.local:8088", felder, opt);
+  const vorschau = streamLink("http://localhost:8088", felder, opt);
+  const cloud = relayBase ? streamLink(relayBase, felder, opt) : "";
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold text-slate-700">
+        Stream-Einblendung (OBS)
+      </h2>
+      <p className="text-xs text-slate-500">
+        Score-Leiste ohne Hintergrund für eine OBS-Browserquelle. Bis zu drei
+        Felder wählen — die Reihenfolge der Auswahl ist die Reihenfolge in der
+        Leiste. Größe und Lage legt man in OBS fest.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {courts.map((c) => {
+          const an = felder.includes(c.court_id);
+          const voll = !an && felder.length >= MAX_FELDER;
+          return (
+            <button
+              key={c.court_id}
+              onClick={() => umschalten(c.court_id)}
+              disabled={voll}
+              className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
+                an
+                  ? "border-amber-400 bg-amber-100 font-semibold text-amber-900"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              }`}
+            >
+              {an ? `${felder.indexOf(c.court_id) + 1}. ` : ""}
+              {c.court}
+              {c.location ? ` · ${c.location}` : ""}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={nation} onChange={(e) => setNation(e.currentTarget.checked)} />
+          Flagge
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={verein} onChange={(e) => setVerein(e.currentTarget.checked)} />
+          Verein
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={logo} onChange={(e) => setLogo(e.currentTarget.checked)} />
+          Turnierlogo
+        </label>
+      </div>
+      {felder.length === 0 ? (
+        <p className="text-xs text-slate-400">Erst ein Feld wählen.</p>
+      ) : (
+        <>
+          {lanEnabled && (
+            <OverviewLinkRow label="Hallennetz (LAN)" kind="local" url={lan} openUrl={vorschau} />
+          )}
+          {cloudEnabled && cloud && (
+            <OverviewLinkRow label="Über die Cloud" kind="online" url={cloud} openUrl={cloud} />
+          )}
+        </>
+      )}
+      <p className="text-xs text-slate-400">
+        Ob Flagge und Verein überhaupt mitkommen, legen die Häkchen
+        „Stream-Einblendung" im Setup fest — die Häkchen hier können nur
+        ausblenden. Läuft OBS auf diesem
+        PC, geht auch <code>localhost</code> statt <code>bts-light.local</code>.
+      </p>
+    </section>
   );
 }
 

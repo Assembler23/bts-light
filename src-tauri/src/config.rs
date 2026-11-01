@@ -230,6 +230,53 @@ pub struct DisplayConfig {
     pub show_club_logos: bool,
 }
 
+/// Was am Feld-Monitor **vor** dem Spielernamen steht (ADR 0070).
+/// Unbekannte Werte einer neueren Fassung lesen sich als `Ohne`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NamenDavor {
+    /// Flagge der Nation — so zeigten die Monitore es schon immer.
+    #[default]
+    Flagge,
+    /// Vereinslogo.
+    Logo,
+    #[serde(other)]
+    Ohne,
+}
+
+/// Was am Feld-Monitor **unter** dem Spielernamen steht (ADR 0070).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NamenDarunter {
+    /// Vereinsname.
+    Verein,
+    /// Nation als Kürzel („GER").
+    Nation,
+    #[default]
+    #[serde(other)]
+    Ohne,
+}
+
+impl NamenDavor {
+    pub fn als_str(self) -> &'static str {
+        match self {
+            Self::Flagge => "flagge",
+            Self::Logo => "logo",
+            Self::Ohne => "ohne",
+        }
+    }
+}
+
+impl NamenDarunter {
+    pub fn als_str(self) -> &'static str {
+        match self {
+            Self::Verein => "verein",
+            Self::Nation => "nation",
+            Self::Ohne => "ohne",
+        }
+    }
+}
+
 /// Einstellungen der Court-Monitor-Anzeige (TV am Spielfeld, Raspberry Pi).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -253,8 +300,11 @@ pub struct CourtMonitorConfig {
     /// Werbung im Leerlauf anzeigen? Aus → leeres Feld zeigt die neutrale
     /// Leerlauf-Seite statt der Werbebilder.
     pub show_ads: bool,
-    /// Anzeige-Layout des Monitors (`split` = „A — Geteilt"). Vorbereitet
-    /// für weitere Layouts.
+    /// **Veraltet** (ADR 0068): Anzeige-Layout des Monitors, kannte nur
+    /// `split`. Die Darstellung wählt man seit den Monitor-Stilen je Gerät an
+    /// der Zuweisung. Das Feld hat kein Bedienelement mehr, bleibt aber
+    /// lesbar und reist weiter auf dem Draht (`MonitorConfig.layout`), damit
+    /// ältere Seiten unverändert bleiben.
     pub layout: String,
     /// Kombi-Anzeige: Felder NEBENEINANDER (Hochformat je Feld) statt
     /// übereinander — **der alte globale Schalter**.
@@ -279,6 +329,53 @@ pub struct CourtMonitorConfig {
     /// `config.json` lesbar.
     #[serde(default)]
     pub push_fallback_slow: bool,
+    /// Platz vor dem Namen (ADR 0070). **Standard Flagge** — die Monitore
+    /// zeigten die Flagge schon immer; ein Update soll keine verschwinden
+    /// lassen.
+    pub name_davor: NamenDavor,
+    /// Platz unter dem Namen (ADR 0070). Standard ohne. Getrennt vom
+    /// Tablet-/TL-Schalter `DisplayConfig.show_club_names`, weil die
+    /// Hallen-TVs eine andere Öffentlichkeit sind.
+    pub name_darunter: NamenDarunter,
+    /// Flagge in der Stream-Einblendung (ADR 0069/0070)? Unabhängig von den
+    /// Plätzen am Feld-Monitor — der Stream ist ein eigenes Publikum.
+    /// Standard **an**, wie die Leiste es seit ihrem Start zeigte.
+    pub stream_nations: bool,
+    /// Verein (Name + Logo) in der Stream-Einblendung? Standard aus.
+    pub stream_clubs: bool,
+}
+
+impl CourtMonitorConfig {
+    /// Braucht irgendein Platz die Nation? Nur dann verlässt sie den Server
+    /// Richtung Anzeige — gefiltert wird serverseitig (ADR 0070).
+    pub fn nation_an(&self) -> bool {
+        self.name_davor == NamenDavor::Flagge || self.name_darunter == NamenDarunter::Nation
+    }
+
+    /// Braucht irgendein Platz den Verein?
+    /// Dieselbe Konfiguration, wie sie der Stream sehen darf: Die Plätze
+    /// werden durch die Stream-Schalter ersetzt, damit `player()` und
+    /// `build_monitor_state` unverändert nach `nation_an`/`verein_an`
+    /// filtern (ADR 0070 — gefiltert wird serverseitig).
+    pub fn fuer_stream(&self) -> Self {
+        Self {
+            name_davor: if self.stream_nations {
+                NamenDavor::Flagge
+            } else {
+                NamenDavor::Ohne
+            },
+            name_darunter: if self.stream_clubs {
+                NamenDarunter::Verein
+            } else {
+                NamenDarunter::Ohne
+            },
+            ..self.clone()
+        }
+    }
+
+    pub fn verein_an(&self) -> bool {
+        self.name_davor == NamenDavor::Logo || self.name_darunter == NamenDarunter::Verein
+    }
 }
 
 impl Default for CourtMonitorConfig {
@@ -297,6 +394,10 @@ impl Default for CourtMonitorConfig {
             // Aus (Spec monitor-livestand-push, S6): Eine frisch
             // aktualisierte Installation verhält sich exakt wie vorher.
             push_fallback_slow: false,
+            name_davor: NamenDavor::Flagge,
+            name_darunter: NamenDarunter::Ohne,
+            stream_nations: true,
+            stream_clubs: false,
         }
     }
 }
@@ -2165,6 +2266,10 @@ mod tests {
                 layout: "split".to_string(),
                 combo_vertical: true,
                 push_fallback_slow: true,
+                name_davor: NamenDavor::Logo,
+                name_darunter: NamenDarunter::Nation,
+                stream_nations: false,
+                stream_clubs: true,
             },
             call_timer: CallTimerConfig {
                 enabled: true,
@@ -3043,5 +3148,88 @@ mod combo_dir_tests {
 
         let cfg: AppConfig = serde_json::from_value(doc).unwrap();
         assert!(cfg.court_monitor.combo_vertical);
+    }
+}
+
+/// Plätze vor/unter dem Namen der Anzeigen (ADR 0070).
+#[cfg(test)]
+mod anzeige_schalter_tests {
+    use super::*;
+
+    #[test]
+    fn alte_config_ohne_plaetze_flagge_davor_nichts_darunter() {
+        // Eine config.json von vor den Plätzen: Flaggen bleiben an.
+        let c: CourtMonitorConfig =
+            serde_json::from_str(r#"{"enabled":true,"layout":"split"}"#).unwrap();
+        assert_eq!(c.name_davor, NamenDavor::Flagge);
+        assert_eq!(c.name_darunter, NamenDarunter::Ohne);
+        assert!(c.nation_an() && !c.verein_an());
+        let d = CourtMonitorConfig::default();
+        assert_eq!(
+            (d.name_davor, d.name_darunter),
+            (c.name_davor, c.name_darunter)
+        );
+    }
+
+    #[test]
+    fn plaetze_roundtrip_und_unbekannt_liest_als_ohne() {
+        let c = CourtMonitorConfig {
+            name_davor: NamenDavor::Logo,
+            name_darunter: NamenDarunter::Nation,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains(r#""name_davor":"logo""#), "{json}");
+        let zurueck: CourtMonitorConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(zurueck, c);
+        let neu: CourtMonitorConfig =
+            serde_json::from_str(r#"{"name_davor":"zukunft","name_darunter":"zukunft"}"#).unwrap();
+        assert_eq!(neu.name_davor, NamenDavor::Ohne);
+        assert_eq!(neu.name_darunter, NamenDarunter::Ohne);
+    }
+
+    #[test]
+    fn datenbedarf_folgt_den_plaetzen() {
+        let mit = |davor, darunter| CourtMonitorConfig {
+            name_davor: davor,
+            name_darunter: darunter,
+            ..Default::default()
+        };
+        use NamenDarunter as U;
+        use NamenDavor as V;
+        let c = mit(V::Ohne, U::Ohne);
+        assert!(!c.nation_an() && !c.verein_an());
+        let c = mit(V::Flagge, U::Ohne);
+        assert!(c.nation_an() && !c.verein_an());
+        let c = mit(V::Ohne, U::Nation);
+        assert!(c.nation_an() && !c.verein_an());
+        let c = mit(V::Logo, U::Ohne);
+        assert!(!c.nation_an() && c.verein_an());
+        let c = mit(V::Ohne, U::Verein);
+        assert!(!c.nation_an() && c.verein_an());
+        let c = mit(V::Logo, U::Nation);
+        assert!(c.nation_an() && c.verein_an());
+    }
+
+    #[test]
+    fn fuer_stream_ersetzt_plaetze_durch_stream_schalter() {
+        let c = CourtMonitorConfig {
+            name_davor: NamenDavor::Logo,
+            name_darunter: NamenDarunter::Ohne,
+            ..Default::default()
+        };
+        // Standard: Stream mit Flagge, ohne Verein — unabhängig vom Monitor.
+        let s = c.fuer_stream();
+        assert!(s.nation_an() && !s.verein_an());
+        let c = CourtMonitorConfig {
+            stream_nations: false,
+            stream_clubs: true,
+            ..c
+        };
+        let s = c.fuer_stream();
+        assert!(!s.nation_an() && s.verein_an());
+        // Alte config.json ohne die Felder: Flagge an, Verein aus.
+        let alt: CourtMonitorConfig = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert!(alt.stream_nations && !alt.stream_clubs);
     }
 }

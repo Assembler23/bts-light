@@ -200,6 +200,22 @@ jobs:
       - name: Anzeige-Hülle Ziel-Allowlist (JS)
         run: node scripts/test-anzeige-ziel.mjs
 
+      # Monitor-Stile (ADR 0068): Nur Werte der Allowlist erreichen `data-stil`
+      # und damit CSS; ein Feldwechsel im Panel behält den Stil; die
+      # Inline-Kopie in monitor.html bleibt wortgleich zum Modul.
+      - name: Monitor-Stile (JS)
+        run: node scripts/test-monitor-stil.mjs
+
+      # Stream-Einblendung (ADR 0069): Die Adresse kann nur Felder wählen und
+      # Optionen ABschalten; nach 60 s ohne Daten wird die Leiste durchsichtig.
+      - name: Stream-Einblendung (JS)
+        run: node scripts/test-stream-ansicht.mjs
+
+      # Push-Kopien (monitorSeq, pushHealth) in monitor/tafel/overview/stream
+      # verhalten sich wie die Module — sonst friert ein TV still ein.
+      - name: Inline-Kopien der Anzeige-Seiten (JS)
+        run: node scripts/test-inline-kopien.mjs
+
       # Akkustand am Tablet: Quellen-Reihenfolge (Kiosk-Brücke vor Web-API),
       # Schwellen, „kein Wert" darf nie als 0 % erscheinen — ein Tablet, das
       # fälschlich „kritisch" meldet, wird im Turnier unnötig getauscht.

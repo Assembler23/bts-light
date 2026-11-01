@@ -392,15 +392,32 @@ Alles Folgende ist nur sichtbar, wenn der Schalter an ist.
 
 - **Wechsel-Intervall** — Schieberegler von 3 bis 30 Sekunden,
   **voreingestellt 10**.
-- **Layout** — derzeit nur „A — Geteilt (oben/unten)".
 - Vier Häkchen, **alle voreingestellt an**: **Disziplin in der Kopfzeile**,
   **Runde in der Fußzeile**, **Spielnummer in der Fußzeile**, **Spieldauer in
   der Kopfzeile (Stoppuhr)**.
 - **Pausen-Countdown (Retro-Klappanzeige)** *(voreingestellt an)* — erscheint
   am Monitor nur während einer Spielpause.
+- **Vor dem Namen** *(voreingestellt Nation (Flagge))* — Nation (Flagge),
+  Vereinslogo oder ohne — und **Unter dem Namen** *(voreingestellt ohne)* —
+  Vereinsname, Nation (Text) oder ohne. Die Anordnung gilt am Feld-Monitor;
+  was kein Platz nutzt, verlässt den Turnier-PC gar nicht erst, auch nicht
+  Richtung Tafel, Übersicht und Kombi. Nutzt ein Platz die Nation, zeigen
+  Übersicht und Kombi die Flagge.
+  <!-- pruef: "Unter dem Namen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /name_davor: NamenDavor::Flagge/ in src-tauri/src/config.rs -->
+  <!-- pruef: /name_darunter: NamenDarunter::Ohne/ in src-tauri/src/config.rs -->
+- **Stream-Einblendung: Flagge zeigen** *(voreingestellt an)* und
+  **Stream-Einblendung: Verein zeigen** *(voreingestellt aus)* — nur für die
+  OBS-Einblendung, unabhängig von den Plätzen am Feld-Monitor.
+  <!-- pruef: "Stream-Einblendung: Verein zeigen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /stream_nations: true/ in src-tauri/src/config.rs -->
+
+Das Aussehen eines einzelnen Monitors (Standard, International, Riesen-Stand,
+Nur Spieler, Hell, Nur Stand) wählt man nicht hier, sondern im Court-Monitor-Panel neben
+der Feldzuweisung.
 
 Die Vorschau daneben ändert sich mit den Häkchen. Anders als die Werbebilder
-oben hängen Layout, Wechsel-Intervall und die Häkchen **am Speichern-Knopf** —
+oben hängen Wechsel-Intervall und die Häkchen **am Speichern-Knopf** —
 und greifen dann ohne weiteres Zutun, die Monitore müssen nicht neu geladen
 werden. Details:
 [Court-Monitor — TV-Anzeige am Spielfeld](court-monitor.md).

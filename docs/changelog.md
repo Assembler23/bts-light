@@ -16,6 +16,52 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   vorn" / „App verdeckt") zeigen jetzt, ob ein Tablet zugeklappt war oder
   das Netz verlor.
 
+## v0.9.328
+
+- **Neu: Stream-Einblendung für OBS.** Unter `/stream?courts=3` (im
+  Hallennetz) bzw. über die Cloud-Adresse gibt es eine durchsichtige
+  Score-Leiste für ein bis drei Felder — Namen, Sätze, laufender Satz,
+  Aufschlag. Als Browserquelle in OBS einbinden, Größe und Lage dort
+  festlegen. Flagge, Verein und Turnierlogo lassen sich per Adresse
+  ausblenden (`&nation=0`, `&verein=0`, `&logo=0`). Bricht die Verbindung ab,
+  verschwindet die Leiste nach 60 Sekunden, statt einen alten Stand zu zeigen.
+  Die fertige Adresse baut der neue Abschnitt **Stream-Einblendung (OBS)** im
+  Court-Monitor-Panel: Felder antippen, Häkchen setzen, kopieren.
+- **Eigene Einstellungen für den Stream.** Im Setup legen *Stream-Einblendung:
+  Flagge zeigen* (an) und *Stream-Einblendung: Verein zeigen* (aus) fest, was
+  die Leiste zeigt — unabhängig davon, was die Feld-Monitore zeigen.
+  Die Adresse nur ans eigene Stream-Team geben.
+
+## v0.9.327
+
+- **Neu: Stile für die Court-Monitore.** Im Court-Monitor-Panel wählt man je
+  Monitor neben dem Feld einen **Stil**: *Standard* (wie bisher),
+  *International* (Teamzeilen mit einer Spalte je Satz), *Riesen-Stand* (der
+  laufende Satz bildschirmfüllend), *Nur Spieler* (Namen ohne Stand), *Hell*
+  (heller Grund für helle Hallen und Beamer) und *Nur Stand* (Stand ohne
+  Namen). *Nur Spieler* links und *Nur Stand* rechts ergeben zwei Monitore
+  für ein Feld, Team 1 steht auf beiden auf derselben Höhe. Der TV wechselt ohne
+  Neuladen, in LAN und Cloud. Feste Adressen nehmen den Stil aus der Adresse
+  (`/court/3/display?stil=riesen`). Das wirkungslose Auswahlfeld „Layout" im
+  Setup ist entfallen.
+- **Neu: Nation und Verein am Namen wählbar.** Im Setup (Court-Monitor →
+  Anzeige) wählt man, was **vor** dem Namen steht — Flagge (wie bisher),
+  Vereinslogo oder nichts — und was **darunter** — Vereinsname, Nation als
+  Kürzel oder nichts. Was kein Platz zeigt, verlässt den Turnier-PC bzw. das
+  Relay gar nicht erst, auch nicht Richtung Tafel, Übersicht und Kombi.
+  Vereinslogos kommen in der Cloud jetzt ebenfalls an.
+- **Neu: Aufschläger und Annehmer am Monitor.** Vor dem aufschlagenden
+  Spieler steht jetzt ein Federball statt des gelben Punkts, vor dem
+  annehmenden ein Ring ○ — im Doppel beim
+  richtigen Partner. Das Tablet schickt den Annehmer dafür mit.
+  Der Federball am Zähl-Tablet hat dieselbe ruhige Form bekommen, dort mit
+  weißem Kranz für das grüne Feld.
+- **Vereinslogos auch im Testmodus.** Steht bts-light auf dem badhub-
+  Testsystem, blieben die Vereinslogos leer: Das Testsystem verweist für die
+  Bilder auf badhub.de, und der Turnier-PC nahm aus Sicherheitsgründen nur
+  Bilder vom gefragten Server an. Genau diese eine Weiterleitung ist jetzt
+  erlaubt.
+
 ## v0.9.326
 
 - **„Automatik pausiert" am Turnier-PC sichtbar — mit Knopf „Fortsetzen".**

@@ -595,6 +595,8 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Werbe-/Leisten-Zustand | `/info/ad/state`               | `/{ns}/info/ad/state`          |
 | **Perf-Zähler** (S0)   | `/debug/perf`                  | — (bewusst nur LAN)            |
 | **Turnierlogo**        | `/info/logo`                   | `/{ns}/info/logo`              |
+| Vereinslogo            | `/info/club-logo?name=`        | `/{ns}/info/club-logo?name=` (302 auf badhub) |
+| **Stream-Einblendung** | `/stream?courts=`              | `/{ns}/stream?courts=`         |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
 | Geräteliste            | —                              | `GET /{ns}/monitor-devices`    |
@@ -755,12 +757,137 @@ Die Marke wird nie gekürzt; bei langen Doppel-Namen weicht zuerst der Name
 die Marke. Ändert die Turnierleitung eine Setzung in BTP, während das Spiel
 schon auf dem Feld liegt, zeigt die Anzeige sie mit dem nächsten Abruf.
 
-## Layout
+## Stile
 
-Das Anzeige-Layout ist im Setup wählbar. Aktuell gibt es **„A — Geteilt"**
-(Team 1 oben, Team 2 unten); die Auswahl ist die Grundlage für weitere
-Layouts. Der Monitor setzt das gewählte Layout als `data-layout` am
-Wurzelelement.
+Seit v0.9.327 wählt man das Aussehen **je Monitor**: Im Court-Monitor-Panel
+erscheint neben der Feldzuweisung ein Auswahlfeld **Stil**. Es gibt es nur
+bei Feld-Zielen, nicht bei Tafel, Übersicht, Werbung oder Kombi.
+<!-- pruef: "Stil" in src/pages/CourtMonitorPanel.tsx -->
+
+| Stil | Aussehen |
+|---|---|
+| **Standard** | wie bisher: Team 1 oben, Team 2 unten, Vorname klein über dem Nachnamen |
+| **International** | dunkle Teamzeilen, je Satz eine gleich breite Spalte, Nachname in Großbuchstaben |
+| **Riesen-Stand** | Stand des laufenden Satzes bildschirmfüllend, darüber klein Nachnamen und Satzstand; nach Spielende groß die gewonnenen Sätze |
+| **Nur Spieler** | Namen (mit Flagge/Logo und Zeile darunter laut Setup), Federball am Aufschläger und Annehmer-Ring, kein Stand |
+| **Hell** | Aufbau wie Standard, heller Grund und dunkle Schrift — für helle Hallen und Beamer |
+| **Nur Stand** | Satzstände und laufender Stand groß, keine Namen; die Stand-Karte des aufschlagenden Teams leuchtet |
+
+<!-- pruef: "Riesen-Stand" in src/pages/CourtMonitorPanel.tsx -->
+<!-- pruef: "Nur Spieler" in src/pages/CourtMonitorPanel.tsx -->
+<!-- pruef: "International" in src/pages/CourtMonitorPanel.tsx -->
+<!-- pruef: "Nur Stand" in src/pages/CourtMonitorPanel.tsx -->
+
+**Zwei Monitore an einem Feld:** Den linken Monitor auf **Nur Spieler**,
+den rechten auf **Nur Stand** stellen. Beide teilen den Bildschirm gleich
+auf, deshalb steht Team 1 auf beiden Monitoren oben auf derselben Höhe.
+Links sieht man, wer aufschlägt (Federball) und wer annimmt (○), rechts den Stand.
+
+**Aufschlag und Annahme:** Vor dem Namen des aufschlagenden Spielers steht
+ein Federball, vor dem des annehmenden ein Ring ○ — im Doppel jeweils beim
+richtigen Partner. Den Annehmer schicken Tablets ab v0.9.327 mit; bei einer
+noch nicht neu geladenen Tablet-Seite rechnet der Monitor ihn selbst aus der
+mitgeschickten Aufstellung aus.
+
+- Der TV wechselt **ohne Neuladen**, spätestens mit dem nächsten Abruf (im
+  LAN sofort, in der Cloud nach höchstens vier Sekunden).
+- Stellt man ein Gerät auf ein **anderes Feld**, bleibt der Stil. Stellt man
+  es auf Tafel, Übersicht, Werbung oder Kombi, ist er weg — zurück auf einem
+  Feld gilt wieder „Standard".
+- **Feste Adresse** (`/court/<id>/display`, ohne Zuweisung): Der Stil kommt
+  aus der Adresse, z. B. `/court/3/display?stil=riesen`. Erlaubt sind
+  `standard`, `international`, `riesen`, `spieler`, `hell`, `stand`; alles andere zeigt
+  „Standard". Bei einem zugewiesenen Gerät zählt nur das Panel, ein `?stil=`
+  in der Adresse wird dort ignoriert.
+  <!-- pruef: "riesen" in src/io/monitorStil.mjs -->
+- Leerlauf-Werbung, Pausen-Banner, Aufruf-Uhr und „Identifizieren" verhalten
+  sich in allen Stilen gleich.
+- Das frühere Auswahlfeld „Layout" im Setup ist entfallen; es hatte nur eine
+  Möglichkeit. Hintergrund: [ADR 0068](adr/0068-monitor-stil-als-attribut-am-feld-ziel.md).
+
+## Stream-Einblendung (OBS)
+
+Seit v0.9.328 gibt es eine Score-Leiste **ohne Hintergrund** für Livestreams.
+Man bindet sie in OBS als **Browserquelle** ein; Größe und Lage legt man in
+OBS fest, die Seite selbst hat keine Einstellungen.
+
+**Adresse zusammenbauen:** Im Court-Monitor-Panel (**Monitore**) steht der
+Abschnitt **Stream-Einblendung (OBS)**. Dort tippt man bis zu drei Felder an —
+die Reihenfolge des Antippens ist die Reihenfolge in der Leiste —, wählt bei
+Bedarf Flagge, Verein oder Turnierlogo ab und kopiert die fertige Adresse fürs
+Hallennetz bzw. die Cloud.
+<!-- pruef: "Stream-Einblendung (OBS)" in src/pages/CourtMonitorPanel.tsx -->
+
+- Adresse im Hallennetz: `http://<Turnier-PC>:8088/stream?courts=3`
+  <!-- pruef: "/stream" in src-tauri/src/tablet/server.rs -->
+- über die Cloud: `https://badhub.de/bts-relay/<Kennung>/stream?courts=3`
+  <!-- pruef: "/{ns}/stream" in relay/src/main.rs -->
+- `courts=3` zeigt ein Feld, `courts=1,2,3` bis zu **drei** Felder
+  untereinander. Mehr Felder, doppelte Angaben und Unsinn werden ignoriert.
+  <!-- pruef: /MAX_FELDER = 3/ in src/io/streamAnsicht.mjs -->
+- Je Feld: Feldnummer (mit Turnierlogo), Namen, Flagge und Verein laut den
+  eigenen Stream-Häkchen im Setup, die Sätze und der laufende Satz.
+  Beim aufschlagenden Team leuchtet die laufende Zahl amber, davor steht ein
+  Punkt. Logos stehen auf weißem Grund, damit sie über jedem Video lesbar
+  bleiben. Ein Feld ohne Spiel bekommt keine Zeile.
+- **Eigene Einstellungen:** Im Setup unter *Court-Monitor → Anzeige* stehen
+  **Stream-Einblendung: Flagge zeigen** (*voreingestellt an*) und
+  **Stream-Einblendung: Verein zeigen** (*voreingestellt aus*). Sie gelten nur
+  für den Stream und sind unabhängig von den Plätzen am Feld-Monitor — der
+  Stream darf also Flaggen zeigen, auch wenn der Monitor Vereinslogos zeigt.
+  Was hier aus ist, verlässt den Turnier-PC bzw. das Relay Richtung Stream gar
+  nicht erst.
+  <!-- pruef: "Stream-Einblendung: Flagge zeigen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /stream_nations: true/ in src-tauri/src/config.rs -->
+  <!-- pruef: /stream_clubs: false/ in src-tauri/src/config.rs -->
+- `&nation=0`, `&verein=0`, `&logo=0` blenden Flagge, Verein bzw.
+  Turnierlogo aus. **Einschalten** kann die Adresse nichts — was im Setup aus
+  ist, kommt gar nicht erst an.
+- Nie im Bild: Werbung, Pausen-Banner, „Identifizieren", Fehlermeldungen.
+  Bricht die Verbindung ab, bleibt der letzte Stand stehen; nach **60
+  Sekunden** ohne Daten wird die Leiste unsichtbar und erscheint von selbst
+  wieder, sobald Daten kommen.
+  <!-- pruef: /DATEN_FRIST_MS = 60000/ in src/io/streamAnsicht.mjs -->
+
+> **Adresse nur ans eigene Stream-Team.** Die Cloud-Adresse enthält die
+> Kennung des Turniers. Wer sie hat, sieht alle Anzeigen des Turniers und kann
+> Monitore neu laden oder „Identifizieren" auslösen. Hintergrund:
+> [ADR 0069](adr/0069-stream-einblendung-eigene-seite.md).
+
+Über einen Slave-PC einer fernen Halle gibt es die Einblendung nicht — dort
+nimmt man die Cloud-Adresse.
+
+## Nation und Verein
+
+Im Setup unter *Court-Monitor → Anzeige* wählt man zwei Plätze am
+Spielernamen:
+
+- **Vor dem Namen:** *Nation (Flagge)*, *Vereinslogo* oder *ohne* —
+  *voreingestellt Nation (Flagge)*, so wie die Monitore die Flagge schon
+  immer gezeigt haben.
+  <!-- pruef: "Vor dem Namen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: "Vereinslogo" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /name_davor: NamenDavor::Flagge/ in src-tauri/src/config.rs -->
+- **Unter dem Namen:** *Vereinsname*, *Nation (Text)* (das Kürzel, z. B.
+  „GER") oder *ohne* — *voreingestellt ohne*.
+  <!-- pruef: "Unter dem Namen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: "Nation (Text)" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /name_darunter: NamenDarunter::Ohne/ in src-tauri/src/config.rs -->
+
+Die **Anordnung** gilt am Feld-Monitor. Zugleich entscheiden die Plätze,
+welche Angaben überhaupt hinausgehen: Nutzt kein Platz die Nation (bzw. den
+Verein), verlässt sie den Turnier-PC bzw. das Relay gar nicht erst — auch
+nicht Richtung Tafel, Übersicht und Kombi; eine Anzeige kann sie also auch
+nicht über ihre Adresse sichtbar machen. Umgekehrt gilt: Nutzt ein Platz die
+Nation (auch nur als Text darunter), zeigen Übersicht und Kombi die Flagge;
+nutzt einer den Verein, bekommen sie auch den Verein. Ein Vereinslogo erscheint, wenn
+badhub eines kennt; sonst bleibt der Platz leer, damit die Namen fluchten.
+
+**Ausgenommen** ist die Siegerehrung (`/info/winners`): Sie zeigt den
+Verein der Platzierten wie bisher unabhängig von den Plätzen; Nationen trägt
+sie nicht. Die Vorbereitungsliste zeigt weder Nation noch Verein. Die Plätze
+sind getrennt von „Vereine anzeigen" für
+Tablets und TL-Web. Hintergrund: [ADR 0070](adr/0070-nation-verein-auf-anzeigen-serverseitig.md).
 
 ## Pausen-Timer (Retro-Klappanzeige)
 
@@ -1109,14 +1236,19 @@ ein bts-light-Problem.
 Nationalität ist ein IOC-Code (`GER`, `POL`, …). bts-light bündelt einen
 SVG-Flaggensatz (`src-tauri/assets/flags/`, ins Binary kompiliert),
 Anzeige per `<code>.svg`. Fehlt der Code, zeigt der Monitor den Namen
-ohne Flagge. Herkunft/Lizenz: [`NOTICE.md`](../NOTICE.md).
+ohne Flagge. Ob überhaupt eine Nationalität mitkommt, steuern die Plätze
+am Namen (siehe [Nation und Verein](#nation-und-verein)).
+Herkunft/Lizenz: [`NOTICE.md`](../NOTICE.md).
 
 ## Lizenz-Hinweis
 
 Visuelle Referenz war `phihag/bup` (u. a. PR #43, Einzelturnier-Display).
 Davon wurde nur die **Idee** übernommen — **kein Code**, da die
 bup-Lizenz unklar ist. Diese Anzeige ist eine eigenständige
-Clean-Room-Umsetzung.
+Clean-Room-Umsetzung. Das gilt auch für die Stile (Spec
+[monitor-stile-und-stream](features/monitor-stile-und-stream.md)): angelehnt
+ist nur die Anordnung (Teamzeilen, Satzspalten, großer laufender Stand),
+Farben, Maße und Code sind eigene.
 
 ## Nicht umgesetzt
 
