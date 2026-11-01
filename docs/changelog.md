@@ -39,6 +39,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Spieler steht jetzt ein Federball statt des gelben Punkts, vor dem
   annehmenden ein Ring ○ — im Doppel beim
   richtigen Partner. Das Tablet schickt den Annehmer dafür mit.
+  Der Federball am Zähl-Tablet hat dieselbe ruhige Form bekommen, dort mit
+  weißem Kranz für das grüne Feld.
 - **Vereinslogos auch im Testmodus.** Steht bts-light auf dem badhub-
   Testsystem, blieben die Vereinslogos leer: Das Testsystem verweist für die
   Bilder auf badhub.de, und der Turnier-PC nahm aus Sicherheitsgründen nur
