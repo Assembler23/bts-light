@@ -107,6 +107,8 @@ function defaultConfig(): AppConfig {
       push_fallback_slow: false,
       name_davor: "flagge",
       name_darunter: "ohne",
+      stream_nations: true,
+      stream_clubs: false,
     },
     call_timer: {
       enabled: false,

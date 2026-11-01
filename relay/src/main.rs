@@ -64,6 +64,8 @@ const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
 /// Die Zähltafel – dieselbe Datei wie in der bts-light-App (Spec
 /// zaehltafel-anzeige-huelle). Platzhalter wie `monitor.html`.
 const TAFEL_HTML: &str = include_str!("../../src-tauri/assets/tafel.html");
+/// Die Stream-Einblendung für OBS (ADR 0069) — dieselbe Datei wie im LAN.
+const STREAM_HTML: &str = include_str!("../../src-tauri/assets/stream.html");
 
 /// Der „In Vorbereitung"-Info-Monitor – dieselbe Datei wie im LAN. Leitet
 /// seinen Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/…` ohne
@@ -745,6 +747,7 @@ async fn main() {
         .route("/{ns}/court/{id}/display", get(monitor_page))
         .route("/{ns}/court/{id}/state", get(monitor_state))
         .route("/{ns}/court/{id}/tafel", get(tafel_page))
+        .route("/{ns}/stream", get(stream_page))
         .route("/{ns}/monitor", get(monitor_device_page))
         .route("/{ns}/monitor/state", get(monitor_device_state))
         .route("/{ns}/monitor/control", post(monitor_control_upload))
@@ -1010,6 +1013,17 @@ fn render_tafel_html(mode: &str, base: &str, court_label: &str) -> String {
         .replace("__COURT_LABEL__", &html_escape(court_label))
 }
 
+/// Liefert die Stream-Einblendung (`/{ns}/stream?courts=…`, ADR 0069).
+/// Die Adresse enthält den Namespace — bewusst akzeptiert, das Handbuch
+/// sagt: nur ans eigene Stream-Team weitergeben.
+async fn stream_page(State(broker): State<Broker>, Path(ns): Path<String>) -> Response {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let body = STREAM_HTML.replace("__BASE__", &monitor_base(&broker.public_base, &ns));
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
 /// Query der Tafel-Seite: `device` schaltet in den Gerätemodus.
 #[derive(serde::Deserialize, Default)]
 struct TafelQuery {
@@ -1061,20 +1075,35 @@ async fn anzeige_page(State(broker): State<Broker>, Path(ns): Path<String>) -> i
 
 /// Anzeige-Zustand eines fest verdrahteten Feldes (per CourtID), im
 /// Sekundentakt gepollt.
+/// Query der festen Feld-Route: `zweck=stream` wählt den Stream-Filter.
+#[derive(serde::Deserialize, Default)]
+struct ZweckQuery {
+    #[serde(default)]
+    zweck: Option<String>,
+}
+
 async fn monitor_state(
     State(broker): State<Broker>,
     Path((ns, court_id)): Path<(String, i64)>,
+    Query(q): Query<ZweckQuery>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let map = broker.namespaces.lock().await;
-    let state = match map.get(&ns) {
-        Some(namespace) => build_monitor_state(namespace, court_id),
-        // Kein Host verbunden: leerer Zustand → neutrale Leerlauf-Seite.
-        None => empty_monitor_state(court_id, String::new()),
+    let stream = q.zweck.as_deref() == Some("stream");
+    let state = {
+        let map = broker.namespaces.lock().await;
+        match map.get(&ns) {
+            Some(namespace) if stream => build_stream_state(namespace, court_id),
+            Some(namespace) => build_monitor_state(namespace, court_id),
+            // Kein Host verbunden: leerer Zustand → neutrale Leerlauf-Seite.
+            None => empty_monitor_state(court_id, String::new()),
+        }
     };
-    ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
+    // Marke + 304 wie die Gerätestrecke (ADR 0069): Die Stream-Einblendung
+    // und feste Monitore fragen hier im Viertelsekundentakt.
+    monitor_state_response(&headers, state)
 }
 
 /// Query-Parameter der Geräte-Modus-Abfrage: die Geräte-ID.
@@ -1482,9 +1511,34 @@ fn unassigned_state(device_id: &str) -> MonitorState {
 /// Baut den Monitor-Anzeige-Zustand aus dem gespeicherten Namespace-Stand
 /// (für ein Feld per CourtID).
 fn build_monitor_state(namespace: &Namespace, court_id: i64) -> MonitorState {
-    let monitor = namespace.monitor.as_ref();
     // Ohne Host-Upload gilt der Default: Nation an, Verein aus (ADR 0070).
-    let config = monitor.map(|m| m.config.clone()).unwrap_or_default();
+    let config = namespace
+        .monitor
+        .as_ref()
+        .map(|m| m.config.clone())
+        .unwrap_or_default();
+    build_monitor_state_mit(namespace, court_id, config)
+}
+
+/// Derselbe Zustand für die Stream-Einblendung (`?zweck=stream`): Nation und
+/// Verein folgen den eigenen Stream-Schaltern statt den Monitor-Plätzen.
+fn build_stream_state(namespace: &Namespace, court_id: i64) -> MonitorState {
+    let mut config = namespace
+        .monitor
+        .as_ref()
+        .map(|m| m.config.clone())
+        .unwrap_or_default();
+    config.show_nations = config.stream_nations;
+    config.show_clubs = config.stream_clubs;
+    build_monitor_state_mit(namespace, court_id, config)
+}
+
+fn build_monitor_state_mit(
+    namespace: &Namespace,
+    court_id: i64,
+    config: relay_proto::MonitorConfig,
+) -> MonitorState {
+    let monitor = namespace.monitor.as_ref();
     let match_info = namespace
         .court_matches
         .get(&court_id)
@@ -10281,6 +10335,35 @@ mod tests {
         assert!(!json.contains("GER"), "{json}");
     }
 
+    #[test]
+    fn stream_state_folgt_den_stream_schaltern() {
+        // Monitor ohne Nation und Verein, Stream mit beidem.
+        let ns = ns_mit_verein(Some(MonitorConfig {
+            show_nations: false,
+            show_clubs: false,
+            stream_nations: true,
+            stream_clubs: true,
+            ..Default::default()
+        }));
+        let mon = build_monitor_state(&ns, 101);
+        let m = &mon.match_info.as_ref().unwrap().team1[0];
+        assert_eq!((m.nationality.as_deref(), m.club.as_deref()), (None, None));
+        let st = build_stream_state(&ns, 101);
+        let s = &st.match_info.as_ref().unwrap().team1[0];
+        assert_eq!(s.nationality.as_deref(), Some("GER"));
+        assert_eq!(s.club.as_deref(), Some("TSV X"));
+        // Und umgekehrt: Stream-Schalter aus, Monitor an.
+        let ns = ns_mit_verein(Some(MonitorConfig {
+            show_nations: true,
+            show_clubs: true,
+            stream_nations: false,
+            stream_clubs: false,
+            ..Default::default()
+        }));
+        let json = serde_json::to_string(&build_stream_state(&ns, 101)).unwrap();
+        assert!(!json.contains("GER") && !json.contains("TSV X"), "{json}");
+    }
+
     #[tokio::test]
     async fn cloud_health_ohne_nationen_bei_schalter_aus() {
         const NS: &str = "c0000000-0000-0000-0000-000000000068";
@@ -10365,6 +10448,55 @@ mod tests {
         assert_eq!(s, StatusCode::OK);
         assert_eq!(body["courtId"], serde_json::json!(101));
         assert!(body.get("stil").is_none());
+    }
+
+    #[tokio::test]
+    async fn feste_state_route_antwortet_304_bei_bekannter_marke() {
+        // ADR 0069: Die Stream-Einblendung fragt die feste Route je Feld im
+        // Viertelsekundentakt — ohne Marke wäre jede Antwort voll.
+        const NS: &str = "c0000000-0000-0000-0000-000000000072";
+        let (broker, _host, _rx) = broker_mit_uebersicht(NS).await;
+        let erste = monitor_state(
+            State(broker.clone()),
+            Path((NS.to_string(), 101)),
+            Query(ZweckQuery::default()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        assert_eq!(erste.status(), StatusCode::OK);
+        let marke = erste
+            .headers()
+            .get(header::ETAG)
+            .expect("feste Route trägt eine Marke")
+            .clone();
+        let mut hm = axum::http::HeaderMap::new();
+        hm.insert(header::IF_NONE_MATCH, marke);
+        let zweite = monitor_state(
+            State(broker.clone()),
+            Path((NS.to_string(), 101)),
+            Query(ZweckQuery::default()),
+            hm,
+        )
+        .await
+        .into_response();
+        assert_eq!(zweite.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn stream_route_liefert_seite_mit_basis_und_404_bei_falschem_namespace() {
+        const NS: &str = "c0000000-0000-0000-0000-000000000073";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let r = stream_page(State(broker.clone()), Path(NS.to_string())).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        let html = String::from_utf8_lossy(&b);
+        assert!(
+            html.contains(&format!(r#"var BASE = "/bts-relay/{NS}/";"#)),
+            "{html}"
+        );
+        let falsch = stream_page(State(broker), Path("kein-namespace".to_string())).await;
+        assert_eq!(falsch.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

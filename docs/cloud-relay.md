@@ -91,6 +91,7 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /tl-ws` | TL-Push-Anstoß (Spec `tl-web-push`, ADR 0034): sendet nur `{"rev":n}`, Zugang im **ersten Frame** |
 | `GET /{ns}/ads/{index}` | Hochgeladenes Werbebild (per **Position** in der Liste) — der Anzeige-Stil reist positionell mit, siehe unten |
 | `GET /{ns}/info/logo` | Hochgeladenes Turnierlogo |
+| `GET /{ns}/stream?courts=` | Stream-Einblendung für OBS (seit v0.9.328, ADR 0069); holt je Feld `/{ns}/court/{id}/state` |
 | `GET /{ns}/info/club-logo?name=` | Vereinslogo der Anzeigen: relativer 302 auf den badhub-Resolver `/api/v1/club-logo?name=` (seit v0.9.327, ADR 0070) |
 | `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`, `adStyles`) |
 | `GET /health` | Status-Schnappschuss |
@@ -838,6 +839,20 @@ Rollbacks; der Verein bleibt aus, weil der alte Relay `club` gar nicht kennt.
 Ein alter Relay verliert außerdem `nameDavor`/`nameDarunter`; die Seite leitet
 die Plätze dann aus den Schaltern ab (Flagge davor bzw. Vereinsname darunter)
 — nur bis zum nächsten automatischen Relay-Deploy.
+
+## Stream-Einblendung (seit v0.9.328)
+
+ADR [0069](adr/0069-stream-einblendung-eigene-seite.md). `/{ns}/stream`
+liefert `stream.html`; die Seite holt je Feld (höchstens drei) den festen
+Zustand `/{ns}/court/{id}/state?zweck=stream` und hört auf `/{ns}/monitor-ws`
+ohne Feldfilter. `zweck=stream` lässt den Relay Nation/Verein nach
+`MonitorConfig.streamNations`/`streamClubs` filtern (`build_stream_state`) statt
+nach den Monitor-Schaltern. Die feste Zustandsroute antwortet seitdem wie die Gerätestrecke mit
+**`ETag` und 304** (`monitor_state_response`) — vorher nur `no-store`.
+
+Rückfall: Ein Relay-Rollback lässt `/{ns}/stream` mit 404 antworten; OBS zeigt
+dann eine **nicht durchsichtige** Fehlerseite im Bild. Die feste Route fällt
+auf Antworten ohne Marke zurück, was nur Last kostet.
 
 ## Trägerverbindung der fernen Halle (`/{ns}/carrier-ws`)
 

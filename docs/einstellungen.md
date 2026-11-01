@@ -406,6 +406,11 @@ Alles Folgende ist nur sichtbar, wenn der Schalter an ist.
   <!-- pruef: "Unter dem Namen" in src/pages/SetupWizard.tsx -->
   <!-- pruef: /name_davor: NamenDavor::Flagge/ in src-tauri/src/config.rs -->
   <!-- pruef: /name_darunter: NamenDarunter::Ohne/ in src-tauri/src/config.rs -->
+- **Stream-Einblendung: Flagge zeigen** *(voreingestellt an)* und
+  **Stream-Einblendung: Verein zeigen** *(voreingestellt aus)* — nur für die
+  OBS-Einblendung, unabhängig von den Plätzen am Feld-Monitor.
+  <!-- pruef: "Stream-Einblendung: Verein zeigen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /stream_nations: true/ in src-tauri/src/config.rs -->
 
 Das Aussehen eines einzelnen Monitors (Standard, International, Riesen-Stand,
 Nur Spieler, Hell, Nur Stand) wählt man nicht hier, sondern im Court-Monitor-Panel neben

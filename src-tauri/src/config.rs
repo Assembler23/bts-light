@@ -337,6 +337,12 @@ pub struct CourtMonitorConfig {
     /// Tablet-/TL-Schalter `DisplayConfig.show_club_names`, weil die
     /// Hallen-TVs eine andere Öffentlichkeit sind.
     pub name_darunter: NamenDarunter,
+    /// Flagge in der Stream-Einblendung (ADR 0069/0070)? Unabhängig von den
+    /// Plätzen am Feld-Monitor — der Stream ist ein eigenes Publikum.
+    /// Standard **an**, wie die Leiste es seit ihrem Start zeigte.
+    pub stream_nations: bool,
+    /// Verein (Name + Logo) in der Stream-Einblendung? Standard aus.
+    pub stream_clubs: bool,
 }
 
 impl CourtMonitorConfig {
@@ -347,6 +353,26 @@ impl CourtMonitorConfig {
     }
 
     /// Braucht irgendein Platz den Verein?
+    /// Dieselbe Konfiguration, wie sie der Stream sehen darf: Die Plätze
+    /// werden durch die Stream-Schalter ersetzt, damit `player()` und
+    /// `build_monitor_state` unverändert nach `nation_an`/`verein_an`
+    /// filtern (ADR 0070 — gefiltert wird serverseitig).
+    pub fn fuer_stream(&self) -> Self {
+        Self {
+            name_davor: if self.stream_nations {
+                NamenDavor::Flagge
+            } else {
+                NamenDavor::Ohne
+            },
+            name_darunter: if self.stream_clubs {
+                NamenDarunter::Verein
+            } else {
+                NamenDarunter::Ohne
+            },
+            ..self.clone()
+        }
+    }
+
     pub fn verein_an(&self) -> bool {
         self.name_davor == NamenDavor::Logo || self.name_darunter == NamenDarunter::Verein
     }
@@ -370,6 +396,8 @@ impl Default for CourtMonitorConfig {
             push_fallback_slow: false,
             name_davor: NamenDavor::Flagge,
             name_darunter: NamenDarunter::Ohne,
+            stream_nations: true,
+            stream_clubs: false,
         }
     }
 }
@@ -2240,6 +2268,8 @@ mod tests {
                 push_fallback_slow: true,
                 name_davor: NamenDavor::Logo,
                 name_darunter: NamenDarunter::Nation,
+                stream_nations: false,
+                stream_clubs: true,
             },
             call_timer: CallTimerConfig {
                 enabled: true,
@@ -3179,5 +3209,27 @@ mod anzeige_schalter_tests {
         assert!(!c.nation_an() && c.verein_an());
         let c = mit(V::Logo, U::Nation);
         assert!(c.nation_an() && c.verein_an());
+    }
+
+    #[test]
+    fn fuer_stream_ersetzt_plaetze_durch_stream_schalter() {
+        let c = CourtMonitorConfig {
+            name_davor: NamenDavor::Logo,
+            name_darunter: NamenDarunter::Ohne,
+            ..Default::default()
+        };
+        // Standard: Stream mit Flagge, ohne Verein — unabhängig vom Monitor.
+        let s = c.fuer_stream();
+        assert!(s.nation_an() && !s.verein_an());
+        let c = CourtMonitorConfig {
+            stream_nations: false,
+            stream_clubs: true,
+            ..c
+        };
+        let s = c.fuer_stream();
+        assert!(!s.nation_an() && s.verein_an());
+        // Alte config.json ohne die Felder: Flagge an, Verein aus.
+        let alt: CourtMonitorConfig = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert!(alt.stream_nations && !alt.stream_clubs);
     }
 }

@@ -595,6 +595,8 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Werbe-/Leisten-Zustand | `/info/ad/state`               | `/{ns}/info/ad/state`          |
 | **Perf-Zähler** (S0)   | `/debug/perf`                  | — (bewusst nur LAN)            |
 | **Turnierlogo**        | `/info/logo`                   | `/{ns}/info/logo`              |
+| Vereinslogo            | `/info/club-logo?name=`        | `/{ns}/info/club-logo?name=` (302 auf badhub) |
+| **Stream-Einblendung** | `/stream?courts=`              | `/{ns}/stream?courts=`         |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
 | Geräteliste            | —                              | `GET /{ns}/monitor-devices`    |
@@ -802,6 +804,58 @@ mitgeschickten Aufstellung aus.
   sich in allen Stilen gleich.
 - Das frühere Auswahlfeld „Layout" im Setup ist entfallen; es hatte nur eine
   Möglichkeit. Hintergrund: [ADR 0068](adr/0068-monitor-stil-als-attribut-am-feld-ziel.md).
+
+## Stream-Einblendung (OBS)
+
+Seit v0.9.328 gibt es eine Score-Leiste **ohne Hintergrund** für Livestreams.
+Man bindet sie in OBS als **Browserquelle** ein; Größe und Lage legt man in
+OBS fest, die Seite selbst hat keine Einstellungen.
+
+**Adresse zusammenbauen:** Im Court-Monitor-Panel (**Monitore**) steht der
+Abschnitt **Stream-Einblendung (OBS)**. Dort tippt man bis zu drei Felder an —
+die Reihenfolge des Antippens ist die Reihenfolge in der Leiste —, wählt bei
+Bedarf Flagge, Verein oder Turnierlogo ab und kopiert die fertige Adresse fürs
+Hallennetz bzw. die Cloud.
+<!-- pruef: "Stream-Einblendung (OBS)" in src/pages/CourtMonitorPanel.tsx -->
+
+- Adresse im Hallennetz: `http://<Turnier-PC>:8088/stream?courts=3`
+  <!-- pruef: "/stream" in src-tauri/src/tablet/server.rs -->
+- über die Cloud: `https://badhub.de/bts-relay/<Kennung>/stream?courts=3`
+  <!-- pruef: "/{ns}/stream" in relay/src/main.rs -->
+- `courts=3` zeigt ein Feld, `courts=1,2,3` bis zu **drei** Felder
+  untereinander. Mehr Felder, doppelte Angaben und Unsinn werden ignoriert.
+  <!-- pruef: /MAX_FELDER = 3/ in src/io/streamAnsicht.mjs -->
+- Je Feld: Feldnummer (mit Turnierlogo), Namen, Flagge und Verein laut den
+  eigenen Stream-Häkchen im Setup, die Sätze und der laufende Satz.
+  Beim aufschlagenden Team leuchtet die laufende Zahl amber, davor steht ein
+  Punkt. Logos stehen auf weißem Grund, damit sie über jedem Video lesbar
+  bleiben. Ein Feld ohne Spiel bekommt keine Zeile.
+- **Eigene Einstellungen:** Im Setup unter *Court-Monitor → Anzeige* stehen
+  **Stream-Einblendung: Flagge zeigen** (*voreingestellt an*) und
+  **Stream-Einblendung: Verein zeigen** (*voreingestellt aus*). Sie gelten nur
+  für den Stream und sind unabhängig von den Plätzen am Feld-Monitor — der
+  Stream darf also Flaggen zeigen, auch wenn der Monitor Vereinslogos zeigt.
+  Was hier aus ist, verlässt den Turnier-PC bzw. das Relay Richtung Stream gar
+  nicht erst.
+  <!-- pruef: "Stream-Einblendung: Flagge zeigen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /stream_nations: true/ in src-tauri/src/config.rs -->
+  <!-- pruef: /stream_clubs: false/ in src-tauri/src/config.rs -->
+- `&nation=0`, `&verein=0`, `&logo=0` blenden Flagge, Verein bzw.
+  Turnierlogo aus. **Einschalten** kann die Adresse nichts — was im Setup aus
+  ist, kommt gar nicht erst an.
+- Nie im Bild: Werbung, Pausen-Banner, „Identifizieren", Fehlermeldungen.
+  Bricht die Verbindung ab, bleibt der letzte Stand stehen; nach **60
+  Sekunden** ohne Daten wird die Leiste unsichtbar und erscheint von selbst
+  wieder, sobald Daten kommen.
+  <!-- pruef: /DATEN_FRIST_MS = 60000/ in src/io/streamAnsicht.mjs -->
+
+> **Adresse nur ans eigene Stream-Team.** Die Cloud-Adresse enthält die
+> Kennung des Turniers. Wer sie hat, sieht alle Anzeigen des Turniers und kann
+> Monitore neu laden oder „Identifizieren" auslösen. Hintergrund:
+> [ADR 0069](adr/0069-stream-einblendung-eigene-seite.md).
+
+Über einen Slave-PC einer fernen Halle gibt es die Einblendung nicht — dort
+nimmt man die Cloud-Adresse.
 
 ## Nation und Verein
 

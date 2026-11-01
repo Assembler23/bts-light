@@ -32,6 +32,9 @@ Ein Schalter, der nur im Browser wirkt, wäre wirkungslos: Jeder mit der URL sä
    - LAN `build_monitor_state`, `uebersicht_json`, `combo_state`
    - Relay `monitor_player`, `overview_health`
    - Ohne Host-Upload gilt am Relay der Default (Nation an, Verein aus).
+   - Die Stream-Einblendung (`?zweck=stream`) hat eigene Schalter `stream_nations`/`stream_clubs`
+     (Nachtrag 01.11.2026) und wird mit ihnen statt mit den Plätzen gefiltert — ebenfalls
+     serverseitig (LAN `fuer_stream`, Relay `build_stream_state`).
 3. URL-Parameter (`nation=0`, `verein=0`) können nur **abschalten**, nie einschalten.
 4. Vereinslogo einheitlich über `BASE + "info/club-logo?name="`. LAN wie heute. Cloud über die
    neue Relay-Route `/{ns}/info/club-logo`, ein relativer 302 auf den badhub-Resolver

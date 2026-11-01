@@ -317,6 +317,8 @@ pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
         show_clubs: c.verein_an(),
         name_davor: c.name_davor.als_str().to_string(),
         name_darunter: c.name_darunter.als_str().to_string(),
+        stream_nations: c.stream_nations,
+        stream_clubs: c.stream_clubs,
     }
 }
 

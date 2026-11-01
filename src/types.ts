@@ -327,6 +327,10 @@ export interface CourtMonitorConfig {
   name_davor: NamenDavor;
   /** Platz unter dem Namen am Feld-Monitor (ADR 0070). Standard `ohne`. */
   name_darunter: NamenDarunter;
+  /** Flagge in der Stream-Einblendung — unabhängig von den Plätzen. Standard an. */
+  stream_nations: boolean;
+  /** Verein in der Stream-Einblendung. Standard aus. */
+  stream_clubs: boolean;
   /**
    * @deprecated Seit ADR 0049 wird die Kombi-Ausrichtung **je Gerät** gewählt
    * (`monitor-combo-dir.json`, Command `monitor_combo_dirs`). Dieses Feld ist

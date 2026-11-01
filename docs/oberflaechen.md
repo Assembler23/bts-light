@@ -87,6 +87,7 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 | **In Vorbereitung** `/info/preparation` | TV am Meeting Point | Die als Nächstes anstehenden Spiele, gerufene zuerst. |
 | **Siegerehrung** `/info/winners` | TV am Podest | Das Podium der gewählten Disziplin. Ein Bildschirm kann auch **nur einen Platz** zeigen — gedacht für je einen Monitor vor jeder Podeststufe. **Achtung beim dritten Platz:** Im Badminton gibt es **zwei** Dritte, und der Platz-3-Bildschirm zeigt beide untereinander — im Doppel also bis zu vier Namen. |
 | **Werbung** `/info/ad` | Werbe-TV | Sponsorenbilder, rotierend oder als Einzelbild. |
+| **Stream-Einblendung** `/stream?courts=3` | OBS-Browserquelle beim Livestream | Durchsichtige Score-Leiste für ein bis drei Felder. Adresse nur ans eigene Stream-Team geben — sie enthält in der Cloud die Kennung des Turniers. |
 
 ### Zum Steuern
 
@@ -118,6 +119,12 @@ dort sein Ziel:
 
 Erst danach schaltet das Gerät selbständig auf die richtige Seite um. Du musst
 an ihm nichts eintippen — das ist der ganze Sinn der Zuweisung.
+
+**Stream-Einblendung für OBS:** Unter **Monitore** baut der Abschnitt
+**Stream-Einblendung (OBS)** die Adresse für die OBS-Browserquelle: bis zu drei
+Felder antippen, Flagge, Verein und Turnierlogo bei Bedarf abwählen, fertige
+Adresse kopieren. Details: [Stream-Einblendung](court-monitor.md).
+<!-- pruef: "Stream-Einblendung (OBS)" in src/pages/CourtMonitorPanel.tsx -->
 
 **Welches Gerät ist welches?** Bei mehreren gleich aussehenden Fernsehern hilft
 die Funktion **Identifizieren**: Der angeklickte Bildschirm blendet daraufhin
