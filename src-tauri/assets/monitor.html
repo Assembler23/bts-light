@@ -185,14 +185,20 @@
       font-size: 7vmin; font-weight: 700; color: #94a3b8; line-height: 1.2;
     }
     .players.doubles .seed { font-size: 5.6vmin; }
-    /* Feste Breite: ● und ○ sind je nach Schrift verschieden breit — ohne
-       sie rückten die Doppel-Namen beim Annehmer-Wechsel gegeneinander. */
+    /* Feste Breite: Federball und ○ sind verschieden breit — ohne sie
+       rückten die Doppel-Namen beim Wechsel gegeneinander. */
     .serve-dot {
-      flex: 0 0 auto; width: 1em; text-align: center;
-      font-size: 4.4vmin; color: #fbbf24; line-height: 1;
+      flex: 0 0 auto; width: 1.5em; text-align: center;
+      font-size: 5.4vmin; color: #fbbf24; line-height: 1;
       opacity: 0; transition: opacity .15s;
     }
-    .serve-dot.on { opacity: 1; }
+    /* Aufschläger: ein Federball (eigene SVG, keine Emoji-Schrift nötig —
+       der Pi hat oft keine). Weiße Federn mit Amber-Kontur bleiben auf
+       dunklem wie auf hellem Grund sichtbar. */
+    .serve-dot.on {
+      opacity: 1; height: 1.5em;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 2h14l-4.2 13H9.2z' fill='%23f8fafc' stroke='%23fbbf24' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M9.4 2.3l1.2 12.4M14.6 2.3l-1.2 12.4M6.3 6.5h11.4' fill='none' stroke='%23fbbf24' stroke-width='.9'/%3E%3Cpath d='M9.2 15h5.6v1.8a2.8 2.8 0 0 1-5.6 0z' fill='%23fbbf24'/%3E%3C/svg%3E") center / contain no-repeat;
+    }
     /* Annehmer: hohler Ring in derselben Farbe, etwas zurückgenommen. */
     .serve-dot.recv { opacity: .75; }
 
@@ -899,7 +905,9 @@ function namenPlaetze(cfg) {
       var recvHere = !serving && recvPlayerIdx != null && i === recvPlayerIdx;
       var dot = document.createElement("span");
       dot.className = "serve-dot" + (dotHere ? " on" : recvHere ? " recv" : "");
-      dot.textContent = recvHere ? "○" : "●";
+      // Der Aufschläger bekommt den Federball als Hintergrundbild, also
+      // keinen Text; der Platzhalter der anderen bleibt unsichtbar.
+      dot.textContent = recvHere ? "○" : dotHere ? "" : "●";
       row.appendChild(dot);
       if (plaetze.davor === "flagge") row.appendChild(flagEl(p.nationality));
       else if (plaetze.davor === "logo") row.appendChild(logoEl(p.club));

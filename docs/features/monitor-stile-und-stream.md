@@ -34,7 +34,7 @@ einen Stil:
 | Standard | `standard` | wie heute |
 | International | `international` | dunkle Teamzeilen, je Satz eine Spalte, Flagge und Aufschlagmarke an der Zeile |
 | Riesen-Stand | `riesen` | Stand des laufenden Satzes bildschirmfüllend, klein darüber Satzstand und Kurznamen |
-| Nur Spieler | `spieler` | Namen (mit den Plätzen am Namen), Aufschlag-Punkt ● und Annehmer-Ring ○, kein Stand |
+| Nur Spieler | `spieler` | Namen (mit den Plätzen am Namen), Federball am Aufschläger und Annehmer-Ring ○, kein Stand |
 | Hell | `hell` | Aufbau wie Standard, heller Grund, dunkle Schrift |
 | Nur Stand | `stand` | Satzstände und laufender Stand groß, keine Namen; Gegenstück zu „Nur Spieler" |
 
