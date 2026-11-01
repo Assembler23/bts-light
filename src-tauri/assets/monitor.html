@@ -353,8 +353,13 @@
       font-size: 3.6vmin; font-weight: 600; color: #94a3b8;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    /* Vereinslogo im Platz der Flagge: gleiche Box, Bild ungeschnitten. */
-    .flag.logo { object-fit: contain; background: none; box-shadow: none; border-radius: 0; }
+    /* Vereinslogo im Platz der Flagge: gleiche Box, Bild ungeschnitten, auf
+       weißem Grund wie die Logos der Sponsor-Leiste — dunkle Logos bleiben
+       so auf dem dunklen Monitor sichtbar. */
+    .flag.logo {
+      box-sizing: border-box; object-fit: contain;
+      background: #fff; border-radius: .8vmin; padding: .5vmin;
+    }
     .players.doubles .name .club { font-size: 3vmin; }
     /* Zwei Namen mit je einer Vereinszeile brauchen mehr Höhe als die
        Hälfte hergibt — der Nachname weicht, sonst würde er unten
