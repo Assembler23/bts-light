@@ -785,8 +785,9 @@ Links sieht man, wer aufschlägt (●) und wer annimmt (○), rechts den Stand.
 
 **Aufschlag und Annahme:** Vor dem Namen des aufschlagenden Spielers steht
 ein Punkt ●, vor dem des annehmenden ein Ring ○ — im Doppel jeweils beim
-richtigen Partner. Den Annehmer schicken Tablets ab v0.9.327 mit; ein
-älteres Tablet zeigt nur den Aufschläger.
+richtigen Partner. Den Annehmer schicken Tablets ab v0.9.327 mit; bei einer
+noch nicht neu geladenen Tablet-Seite rechnet der Monitor ihn selbst aus der
+mitgeschickten Aufstellung aus.
 
 - Der TV wechselt **ohne Neuladen**, spätestens mit dem nächsten Abruf (im
   LAN sofort, in der Cloud nach höchstens vier Sekunden).
