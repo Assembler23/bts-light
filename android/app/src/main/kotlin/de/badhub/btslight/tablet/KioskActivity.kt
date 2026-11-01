@@ -179,12 +179,17 @@ class KioskActivity : AppCompatActivity() {
         Kiosk.nachheften(this, log::schreibe)
     }
 
+    // Vorn/verdeckt ins Geräte-Log: Ein Logcheck soll „Hülle zu" bzw.
+    // „Bildschirm aus" von einem WLAN-Ausfall unterscheiden können
+    // (Logcheck 31.10.2026). Die Seite selbst schreibt dasselbe ins Tablet-Log.
     override fun onStart() {
         super.onStart()
+        log.schreibe("App vorn (Bildschirm an)")
         netz?.start()
     }
 
     override fun onStop() {
+        log.schreibe("App verdeckt (Bildschirm aus oder andere App)")
         netz?.stop()
         super.onStop()
     }

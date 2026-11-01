@@ -319,6 +319,12 @@ jobs:
       - name: Aufruf-Uhr am Tablet (JS)
         run: node scripts/test-aufruf-uhr.mjs
 
+      # Aufwachen des Zaehl-Tablets (Huelle auf). Falsch entschieden, baut es
+      # einen zweiten Socket neben dem ersten auf oder bleibt an einer toten
+      # Verbindung haengen, bis der 5-s-Waechter sie bemerkt.
+      - name: Tablet-Aufwachen (JS)
+        run: node scripts/test-tablet-aufwachen.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

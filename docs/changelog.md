@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.329
+
+- **Tablet nach dem Aufklappen schneller wieder bereit.** Wird ein
+  zugeklapptes Zähl-Tablet geöffnet, prüft es seine Verbindung sofort statt
+  erst im nächsten 5-s-Takt: Eine tote Verbindung wird direkt ersetzt, eine
+  zweifelhafte mit einem Ping geprüft (3 s). Das nächste Spiel steht damit
+  früher auf dem Tablet. Schlafen darf das Tablet weiterhin.
+- **Zuklappen und Aufklappen stehen im Log.** Tablet-Log (`seite_verdeckt`,
+  `seite_sichtbar`, `ws_wach_ersetzt`) und Geräte-Log der Kiosk-App („App
+  vorn" / „App verdeckt") zeigen jetzt, ob ein Tablet zugeklappt war oder
+  das Netz verlor.
+
 ## v0.9.326
 
 - **„Automatik pausiert" am Turnier-PC sichtbar — mit Knopf „Fortsetzen".**

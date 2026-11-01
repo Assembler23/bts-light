@@ -708,6 +708,39 @@ kein „Feld belegt"-Overlay, kein manueller Übernehmen-Tap. Nur ein
 **fremdes** Gerät sieht weiterhin den Übernehmen-Dialog. Alte
 Tablet-Seiten ohne Kennung verhalten sich wie bisher.
 
+### Aufwachen: sofort neu verbinden (seit v0.9.329)
+
+Ein zugeklapptes Tablet darf schlafen — die Hülle schaltet den Bildschirm
+aus und spart Strom. Solange es schläft, stehen aber seine Timer still: Der
+Verbindungs-Wächter (alle 5 s, tote Verbindung nach 15 s ohne Antwort) merkt
+nach dem Aufklappen erst ein, zwei Takte später, dass die alte Verbindung
+nicht mehr lebt. Seit v0.9.329 prüft die Seite **im Moment des Aufwachens**
+(Seite wieder sichtbar, Seite aus dem Zwischenspeicher, Netz wieder da):
+
+- Keine oder geschlossene Verbindung → sofort neu verbinden.
+- Offen, aber länger als 15 s nichts vom Server gehört → die alte Verbindung
+  wird stumm abgehängt und sofort durch eine neue ersetzt.
+- Offen und frisch (nur kurz verdeckt) → ein Ping; kommt binnen 3 s keine
+  Antwort, wird die Verbindung ebenfalls ersetzt.
+- Verbindet oder schließt gerade → nichts anfassen (sonst zwei Sockets).
+
+Die Regel steht in `src/io/tabletAufwachen.mjs` (Test
+`scripts/test-tablet-aufwachen.mjs`, prüft auch die Inline-Kopie).
+
+Beide Übergänge stehen im Tablet-Log: `seite_verdeckt` beim Zuklappen,
+`seite_sichtbar` mit `verdecktMs` und der gewählten Aktion beim Aufklappen,
+`ws_wach_ersetzt` beim Ersetzen. Ein Logcheck sieht so, ob ein Tablet
+**zugeklappt** war oder **das Netz verlor** (dann fehlt `seite_verdeckt`).
+Die Kiosk-App schreibt dasselbe zusätzlich ins Geräte-Log („App vorn" /
+„App verdeckt"), siehe [tablet-android-app.md](tablet-android-app.md).
+<!-- pruef: "seite_verdeckt" in src-tauri/assets/tablet.html -->
+<!-- pruef: "seite_sichtbar" in src-tauri/assets/tablet.html -->
+<!-- pruef: "ws_wach_ersetzt" in src-tauri/assets/tablet.html -->
+
+Anlass war der Logcheck vom Berlin-Senior-Cup (31.10.2026): Sechs von acht
+Tablet-Trennungen lagen zwischen zwei Spielen, das Log konnte die Ursache
+aber nicht zeigen.
+
 ### Reconnect-Wahrheit: der Slot-Halter gewinnt (seit v0.9.197)
 
 Bei störanfälligem WLAN (hunderte Fremdgeräte in der Halle) muss das

@@ -42,6 +42,11 @@ selbst** (Kopfzeile beim Zählen, Feldwahl, Anzeige-Hülle; siehe
 ja keine Statusleiste mehr.
 Das Geräte-Log der App landet wie bei den Pi-Monitoren beim Turnier-PC
 (`pi-logs/fire-<ANDROID_ID>.log`) und von dort in der Cloud.
+Seit v0.9.329 vermerkt es auch, wann die App nach vorn kommt („App vorn
+(Bildschirm an)") und wann sie verdeckt wird („App verdeckt (Bildschirm aus
+oder andere App)") — so ist eine zugeklappte Hülle von einem WLAN-Ausfall zu
+unterscheiden.
+<!-- pruef: "App verdeckt (Bildschirm aus oder andere App)" in android/app/src/main/kotlin/de/badhub/btslight/tablet/KioskActivity.kt -->
 
 ## Einrichten (einmalig je Tablet, ca. 5 Minuten)
 
