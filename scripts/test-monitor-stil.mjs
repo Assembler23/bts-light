@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { STILE, stilAusWert, wirksamerStil, zielMitStil, kurzname } from "../src/io/monitorStil.mjs";
+import { STILE, stilAusWert, wirksamerStil, zielMitStil, kurzname, namenPlaetze } from "../src/io/monitorStil.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -15,7 +15,7 @@ function ok(name, got, want) {
 }
 
 // ── Allowlist ────────────────────────────────────────────────────────────
-ok("fünf Stile", STILE, ["standard", "international", "riesen", "spieler", "hell"]);
+ok("sechs Stile", STILE, ["standard", "international", "riesen", "spieler", "hell", "stand"]);
 for (const s of STILE) ok(`bekannter Stil ${s} bleibt`, stilAusWert(s), s);
 ok("unbekannt → standard", stilAusWert("zukunft"), "standard");
 ok("Groß-/Kleinschreibung zählt", stilAusWert("Hell"), "standard");
@@ -52,6 +52,16 @@ ok("einteilig", kurzname("Anna", "", ""), "Anna");
 ok("Rand-Leerzeichen", kurzname("  Anna   Muster  ", "", ""), "Muster");
 ok("leeres Komma-Vorderteil → voller Name", kurzname(", Anna", "", ""), ", Anna");
 ok("leer bleibt leer", kurzname("", "", ""), "");
+
+// ── Plätze am Namen (ADR 0070) ──────────────────────────────────────────
+ok("gesetzte Plätze gelten", namenPlaetze({ nameDavor: "logo", nameDarunter: "nation" }),
+  { davor: "logo", darunter: "nation" });
+ok("ohne Konfiguration: Flagge davor, nichts darunter", namenPlaetze(undefined),
+  { davor: "flagge", darunter: "ohne" });
+ok("älterer Absender: aus den Schaltern", namenPlaetze({ showNations: false, showClubs: true }),
+  { davor: "ohne", darunter: "verein" });
+ok("Unsinn → Ableitung", namenPlaetze({ nameDavor: "x\"]", nameDarunter: 3, showNations: true }),
+  { davor: "flagge", darunter: "ohne" });
 
 // ── Inline-Kopie in monitor.html ─────────────────────────────────────────
 {

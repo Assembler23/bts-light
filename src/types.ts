@@ -293,6 +293,9 @@ export interface CheckinView {
 }
 
 /** Einstellungen der Court-Monitor-Anzeige (Rust: config::CourtMonitorConfig). */
+export type NamenDavor = "flagge" | "logo" | "ohne";
+export type NamenDarunter = "verein" | "nation" | "ohne";
+
 export interface CourtMonitorConfig {
   /** Court-Monitor eingerichtet/aktiv? Steuert nur die Sichtbarkeit der
    *  Monitor-Adressen – die Anzeige-Seite ist immer erreichbar. */
@@ -316,10 +319,14 @@ export interface CourtMonitorConfig {
    * Zuweisung). Bleibt lesbar und wird unverändert durchgereicht.
    */
   layout: string;
-  /** Nation (Flagge) auf den Anzeigen zeigen? Standard an (ADR 0070). */
-  show_nations: boolean;
-  /** Verein (Name + Logo) auf den Anzeigen zeigen? Standard aus (ADR 0070). */
-  show_clubs: boolean;
+  /**
+   * Platz vor dem Namen am Feld-Monitor (ADR 0070). Standard `flagge`.
+   * Bestimmt zugleich, ob Nation bzw. Verein den Server Richtung Anzeige
+   * verlassen.
+   */
+  name_davor: NamenDavor;
+  /** Platz unter dem Namen am Feld-Monitor (ADR 0070). Standard `ohne`. */
+  name_darunter: NamenDarunter;
   /**
    * @deprecated Seit ADR 0049 wird die Kombi-Ausrichtung **je Gerät** gewählt
    * (`monitor-combo-dir.json`, Command `monitor_combo_dirs`). Dieses Feld ist

@@ -246,6 +246,23 @@ pub struct MonitorConfig {
     /// Verein (Name + Logo) auf den Anzeigen zeigen (ADR 0070)? Standard aus.
     #[serde(rename = "showClubs", default)]
     pub show_clubs: bool,
+    /// Platz vor dem Namen am Feld-Monitor: `flagge`, `logo` oder `ohne`.
+    /// Leer bei einem älteren Absender — die Seite leitet den Platz dann
+    /// aus `showNations` ab. Die Seite prüft den Wert gegen eine Allowlist.
+    #[serde(
+        rename = "nameDavor",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub name_davor: String,
+    /// Platz unter dem Namen: `verein`, `nation` oder `ohne`. Leer → aus
+    /// `showClubs` abgeleitet.
+    #[serde(
+        rename = "nameDarunter",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub name_darunter: String,
 }
 
 fn default_true() -> bool {
@@ -272,6 +289,8 @@ impl Default for MonitorConfig {
             push_fallback_slow: false,
             show_nations: true,
             show_clubs: false,
+            name_davor: String::new(),
+            name_darunter: String::new(),
         }
     }
 }
@@ -297,6 +316,9 @@ pub enum MonitorStil {
     Spieler,
     /// Heller Grund, dunkle Schrift.
     Hell,
+    /// Nur der Stand, keine Namen — Gegenstück zu `Spieler` für zwei
+    /// Monitore an einem Feld.
+    Stand,
     /// Stil aus einer neueren Fassung.
     #[serde(other)]
     Unbekannt,
@@ -5957,6 +5979,7 @@ mod monitor_stil_tests {
             MonitorStil::Riesen,
             MonitorStil::Spieler,
             MonitorStil::Hell,
+            MonitorStil::Stand,
         ] {
             let ziel = MonitorTarget::court_mit_stil(7, stil);
             let json = serde_json::to_string(&ziel).unwrap();
@@ -6029,6 +6052,24 @@ mod monitor_stil_tests {
         assert!(!alt.show_clubs);
         assert!(MonitorConfig::default().show_nations);
         assert!(!MonitorConfig::default().show_clubs);
+    }
+
+    #[test]
+    fn monitor_config_plaetze_leer_fehlen_auf_dem_draht_gesetzt_roundtrip() {
+        let leer = serde_json::to_string(&MonitorConfig::default()).unwrap();
+        assert!(
+            !leer.contains("nameDavor") && !leer.contains("nameDarunter"),
+            "{leer}"
+        );
+        let c = MonitorConfig {
+            name_davor: "logo".into(),
+            name_darunter: "nation".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains(r#""nameDavor":"logo""#), "{json}");
+        let zurueck: MonitorConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(zurueck, c);
     }
 
     #[test]

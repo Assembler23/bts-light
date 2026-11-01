@@ -185,11 +185,16 @@
       font-size: 7vmin; font-weight: 700; color: #94a3b8; line-height: 1.2;
     }
     .players.doubles .seed { font-size: 5.6vmin; }
+    /* Feste Breite: ● und ○ sind je nach Schrift verschieden breit — ohne
+       sie rückten die Doppel-Namen beim Annehmer-Wechsel gegeneinander. */
     .serve-dot {
-      flex: 0 0 auto; font-size: 4.4vmin; color: #fbbf24; line-height: 1;
+      flex: 0 0 auto; width: 1em; text-align: center;
+      font-size: 4.4vmin; color: #fbbf24; line-height: 1;
       opacity: 0; transition: opacity .15s;
     }
     .serve-dot.on { opacity: 1; }
+    /* Annehmer: hohler Ring in derselben Farbe, etwas zurückgenommen. */
+    .serve-dot.recv { opacity: .75; }
 
     /* Satzstand rechts: abgeschlossene Sätze klein, laufender Satz groß. */
     .scores { flex: 0 0 auto; display: flex; align-items: center; gap: 1.6vw; }
@@ -340,15 +345,16 @@
     }
     #identify-overlay .i-court { font-size: 7vmin; font-weight: 800; }
 
-    /* ─── Vereinsname unter dem Spielernamen (ADR 0070) ──────────────── */
-    /* Nur sichtbar, wenn der Server einen Verein liefert (Schalter
-       „Verein anzeigen", Standard aus). */
+    /* ─── Zeile unter dem Spielernamen (ADR 0070) ────────────────────── */
+    /* Vereinsname oder Nation (Kürzel) — je nach Platz „Unter dem
+       Namen" im Setup, Standard ohne. */
     .name .club {
       display: flex; align-items: center; gap: .8vmin; margin-top: .4vmin;
       font-size: 3.6vmin; font-weight: 600; color: #94a3b8;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .name .club img { height: 3.8vmin; width: auto; max-width: 8vmin; object-fit: contain; }
+    /* Vereinslogo im Platz der Flagge: gleiche Box, Bild ungeschnitten. */
+    .flag.logo { object-fit: contain; background: none; box-shadow: none; border-radius: 0; }
     .players.doubles .name .club { font-size: 3vmin; }
     /* Zwei Namen mit je einer Vereinszeile brauchen mehr Höhe als die
        Hälfte hergibt — der Nachname weicht, sonst würde er unten
@@ -414,11 +420,26 @@
     #riesen .r-zahl.auf { color: #fbbf24; }
     #riesen .r-doppel { font-size: .5em; color: #475569; }
 
-    /* Nur Spieler: Namen ohne Stand. */
-    #root[data-stil="spieler"] .scores,
-    #root[data-stil="spieler"] .serve-dot { display: none; }
-    #root[data-stil="spieler"] .half.serving {
-      border-left-color: transparent; background: none;
+    /* Nur Spieler: Namen ohne Stand. Aufschlag-Punkt, Annehmer-Ring und
+       Aufschlag-Balken bleiben — im Monitor-Paar mit „Nur Stand" zeigt
+       dieser Monitor, WER aufschlägt. */
+    #root[data-stil="spieler"] .scores { display: none; }
+
+    /* Nur Stand: Gegenstück zu „Nur Spieler" für zwei Monitore an einem
+       Feld. Gleiche Hälften wie dort (Kopf, Fuß, Trenner bleiben), damit
+       Team 1 auf beiden Monitoren auf derselben Höhe steht. */
+    #root[data-stil="stand"] .players { display: none; }
+    #root[data-stil="stand"] .half { justify-content: center; }
+    #root[data-stil="stand"] .scores { gap: 3vw; }
+    #root[data-stil="stand"] .sets-done { gap: 2.4vw; }
+    #root[data-stil="stand"] .set-done { font-size: 16vmin; }
+    #root[data-stil="stand"] .set-current { font-size: 34vmin; padding: .4vmin 2.4vw; }
+    #root[data-stil="stand"] .scores.decided .set-done { font-size: 24vmin; }
+    /* Hochkant passen drei Endstände in dieser Größe nicht in die Breite. */
+    @media (orientation: portrait) {
+      #root[data-stil="stand"] .set-done { font-size: 9vw; }
+      #root[data-stil="stand"] .set-current { font-size: 22vw; }
+      #root[data-stil="stand"] .scores.decided .set-done { font-size: 14vw; }
     }
 
     /* Hell: heller Grund, dunkle Schrift — für helle Hallen und Beamer. */
@@ -549,7 +570,7 @@
   // Monitor-Stile (ADR 0068) — Inline-Kopie von src/io/monitorStil.mjs,
   // wortgleich gehalten von scripts/test-monitor-stil.mjs.
 /* <monitorStil.mjs> */
-var STILE = ["standard", "international", "riesen", "spieler", "hell"];
+var STILE = ["standard", "international", "riesen", "spieler", "hell", "stand"];
 
 /** Ein beliebiger Wert als bekannter Stil, sonst `standard`. */
 function stilAusWert(roh) {
@@ -581,6 +602,19 @@ function kurzname(name, given, family) {
   var komma = n.indexOf(",");
   var k = komma >= 0 ? n.slice(0, komma).trim() : n.split(/\s+/).pop() || "";
   return k || n;
+}
+
+/** Plätze am Namen (ADR 0070) aus der Anzeige-Konfiguration: was vor und
+ *  was unter dem Namen steht. Nur Werte der Allowlist; ein älterer Absender
+ *  ohne `nameDavor`/`nameDarunter` wird aus seinen Datenschaltern
+ *  abgeleitet (Flagge davor, Verein darunter). */
+function namenPlaetze(cfg) {
+  var c = cfg || {};
+  var davor = ["flagge", "logo", "ohne"].indexOf(c.nameDavor) >= 0
+    ? c.nameDavor : (c.showNations === false ? "ohne" : "flagge");
+  var darunter = ["verein", "nation", "ohne"].indexOf(c.nameDarunter) >= 0
+    ? c.nameDarunter : (c.showClubs ? "verein" : "ohne");
+  return { davor: davor, darunter: darunter };
 }
 /* </monitorStil.mjs> */
   // `?stil=` gilt nur für feste URLs; im Geräte-Modus entscheidet die
@@ -817,13 +851,31 @@ function kurzname(name, given, family) {
     return img;
   }
 
+  // Vereinslogo im Platz vor dem Namen, gleich groß wie die Flagge. Fehlt
+  // das Logo, bleibt der Platz leer stehen, damit die Namen fluchten.
+  function logoEl(club) {
+    var img = document.createElement("img");
+    img.className = "flag logo";
+    img.alt = "";
+    if (club) {
+      img.src = BASE + "info/club-logo?name=" + encodeURIComponent(club);
+      img.onerror = function () { img.classList.add("hidden"); };
+    } else {
+      img.classList.add("hidden");
+    }
+    return img;
+  }
+
   // Baut eine Bildschirmhälfte für ein Team. `players` = [{name,nationality}],
   // `done` = abgeschlossene Sätze als [{v,won}], `current` = laufender
   // Satzwert (oder null, wenn das Match feststeht), `serving` = schlägt
   // dieses Team auf?, `isWinner` = dieses Team hat das Match gewonnen.
   // `servePlayerIdx` = Index des konkret aufschlagenden Spielers im Team
   // (BWF-Doppelregel); null → Team-Level-Fallback (Punkt beim ersten Namen).
-  function renderHalf(host, players, seed, done, current, serving, isWinner, servePlayerIdx) {
+  // `recvPlayerIdx` = Index des Annehmers, wenn dieses Team annimmt und das
+  // Tablet ihn liefert; sonst null (keine Marke, kein Raten).
+  // `plaetze` = { davor, darunter } aus namenPlaetze (ADR 0070).
+  function renderHalf(host, players, seed, done, current, serving, isWinner, servePlayerIdx, recvPlayerIdx, plaetze) {
     host.textContent = "";
     host.classList.toggle("serving", !!serving);
     host.classList.toggle("winner", !!isWinner);
@@ -839,11 +891,13 @@ function kurzname(name, given, family) {
       // altes Tablet ohne Info) beim ersten Spieler des aufschlagenden Teams.
       var dotHere = serving &&
         (servePlayerIdx == null ? i === 0 : i === servePlayerIdx);
+      var recvHere = !serving && recvPlayerIdx != null && i === recvPlayerIdx;
       var dot = document.createElement("span");
-      dot.className = "serve-dot" + (dotHere ? " on" : "");
-      dot.textContent = "●";
+      dot.className = "serve-dot" + (dotHere ? " on" : recvHere ? " recv" : "");
+      dot.textContent = recvHere ? "○" : "●";
       row.appendChild(dot);
-      row.appendChild(flagEl(p.nationality));
+      if (plaetze.davor === "flagge") row.appendChild(flagEl(p.nationality));
+      else if (plaetze.davor === "logo") row.appendChild(logoEl(p.club));
 
       // Name im Broadcast-Stil: Vorname klein, Nachname groß. Trägt der
       // Spieler die getrennten BTP-Felder (family nicht leer), werden sie
@@ -863,17 +917,16 @@ function kurzname(name, given, family) {
       family.textContent = parts.family;
       name.appendChild(given);
       name.appendChild(family);
-      // Verein nur, wenn der Server ihn liefert (Schalter, ADR 0070).
-      if (p.club) {
+      // Zeile unter dem Namen (ADR 0070): Vereinsname oder Nation als
+      // Kürzel — nur, was der Server liefert.
+      var unten = plaetze.darunter === "verein" ? (p.club || "")
+        : plaetze.darunter === "nation" ? (p.nationality || "").trim().toUpperCase()
+        : "";
+      if (unten) {
         name.classList.add("mit-verein");
         var club = document.createElement("span");
         club.className = "club";
-        var logo = document.createElement("img");
-        logo.alt = "";
-        logo.src = BASE + "info/club-logo?name=" + encodeURIComponent(p.club);
-        logo.onerror = function () { logo.remove(); };
-        club.appendChild(logo);
-        club.appendChild(document.createTextNode(p.club));
+        club.textContent = unten;
         name.appendChild(club);
       }
       row.appendChild(name);
@@ -1036,15 +1089,19 @@ function kurzname(name, given, family) {
     var serveInfo = decided ? null : servingInfo(cs);
     var serving = serveInfo ? serveInfo.team : null;
     var servePlayerIdx = serveInfo ? serveInfo.playerIdx : null;
+    var recvInfo = decided ? null : receivingInfo(cs);
+    var plaetze = namenPlaetze(cfg);
 
     renderRiesen(m, current, doneSets, serving, decided);
 
     renderHalf(els.half1, m.team1 || [], m.team1Seed, done1,
                current ? current.a : null, serving === 1, winnerTeam === 1,
-               serving === 1 ? servePlayerIdx : null);
+               serving === 1 ? servePlayerIdx : null,
+               recvInfo && recvInfo.team === 1 ? recvInfo.playerIdx : null, plaetze);
     renderHalf(els.half2, m.team2 || [], m.team2Seed, done2,
                current ? current.b : null, serving === 2, winnerTeam === 2,
-               serving === 2 ? servePlayerIdx : null);
+               serving === 2 ? servePlayerIdx : null,
+               recvInfo && recvInfo.team === 2 ? recvInfo.playerIdx : null, plaetze);
 
     // Fußzeile: Runde + Spielnummer (je nach Konfiguration).
     els.footer.textContent = "";
@@ -1118,6 +1175,15 @@ function kurzname(name, given, family) {
     }
     var t = servingTeam(cs);
     return t == null ? null : { team: t, playerIdx: null };
+  }
+
+  // Annehmer: { team:1|2, playerIdx:0|1 } oder null. Nur aus dem vom
+  // Tablet gelieferten `receiving` — ältere Tablets schicken ihn nicht,
+  // dann bleibt die Marke weg.
+  function receivingInfo(cs) {
+    if (!cs || !cs.receiving || !cs.receiving.team) return null;
+    if (typeof cs.receiving.index !== "number") return null;
+    return { team: cs.receiving.team === "a" ? 1 : 2, playerIdx: cs.receiving.index };
   }
 
   // Sieger-Team (1 oder 2) eines feststehenden Matches, sonst null. Bei

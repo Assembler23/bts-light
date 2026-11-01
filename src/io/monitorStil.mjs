@@ -10,7 +10,7 @@
  *  `scripts/test-monitor-stil.mjs` vergleicht beide wortgleich.
  */
 
-export var STILE = ["standard", "international", "riesen", "spieler", "hell"];
+export var STILE = ["standard", "international", "riesen", "spieler", "hell", "stand"];
 
 /** Ein beliebiger Wert als bekannter Stil, sonst `standard`. */
 export function stilAusWert(roh) {
@@ -42,4 +42,17 @@ export function kurzname(name, given, family) {
   var komma = n.indexOf(",");
   var k = komma >= 0 ? n.slice(0, komma).trim() : n.split(/\s+/).pop() || "";
   return k || n;
+}
+
+/** Plätze am Namen (ADR 0070) aus der Anzeige-Konfiguration: was vor und
+ *  was unter dem Namen steht. Nur Werte der Allowlist; ein älterer Absender
+ *  ohne `nameDavor`/`nameDarunter` wird aus seinen Datenschaltern
+ *  abgeleitet (Flagge davor, Verein darunter). */
+export function namenPlaetze(cfg) {
+  var c = cfg || {};
+  var davor = ["flagge", "logo", "ohne"].indexOf(c.nameDavor) >= 0
+    ? c.nameDavor : (c.showNations === false ? "ohne" : "flagge");
+  var darunter = ["verein", "nation", "ohne"].indexOf(c.nameDarunter) >= 0
+    ? c.nameDarunter : (c.showClubs ? "verein" : "ohne");
+  return { davor: davor, darunter: darunter };
 }

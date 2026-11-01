@@ -34,11 +34,22 @@ einen Stil:
 | Standard | `standard` | wie heute |
 | International | `international` | dunkle Teamzeilen, je Satz eine Spalte, Flagge und Aufschlagmarke an der Zeile |
 | Riesen-Stand | `riesen` | Stand des laufenden Satzes bildschirmfüllend, klein darüber Satzstand und Kurznamen |
-| Nur Spieler | `spieler` | Namen (mit Nation/Verein laut Schalter), kein Stand |
+| Nur Spieler | `spieler` | Namen (mit den Plätzen am Namen), Aufschlag-Punkt ● und Annehmer-Ring ○, kein Stand |
 | Hell | `hell` | Aufbau wie Standard, heller Grund, dunkle Schrift |
+| Nur Stand | `stand` | Satzstände und laufender Stand groß, keine Namen; Gegenstück zu „Nur Spieler" |
 
-Dazu kommen zwei turnierweite Schalter für alle Anzeigen: **Nation (Flagge) anzeigen**
-(Standard **an**) und **Verein (Name + Logo) anzeigen** (Standard **aus**).
+Dazu kommen zwei turnierweite **Plätze am Namen** (Nachtrag 01.11.2026, ersetzt die zwei
+Häkchen): **Vor dem Namen** — Nation (Flagge) *(Standard)*, Vereinslogo, ohne — und **Unter dem
+Namen** — Vereinsname, Nation (Text), ohne *(Standard)*. Die Anordnung gilt am Feld-Monitor;
+der Datenbedarf (Nation/Verein überhaupt senden?) folgt daraus für alle Anzeigen.
+
+**Nachtrag 01.11.2026 — zwei Monitore je Feld und Annehmer:** „Nur Spieler" links und „Nur
+Stand" rechts teilen den Bildschirm gleich auf (Kopf, Fuß, Trenner bleiben), damit Team 1 auf
+beiden Monitoren auf derselben Höhe steht. „Nur Spieler" zeigt dafür den Aufschlag (Punkt und
+Balken). Das Tablet schickt zusätzlich `receiving: {team, index}` (diagonal gegenüber dem
+Aufschläger, `computeReceiving`) im gespiegelten Stand; der Feld-Monitor markiert den Annehmer
+mit einem Ring ○. Host und Relay reichen den Stand unverändert durch, eine Wire-Änderung ist
+dafür nicht nötig. Ältere Tablets schicken kein `receiving` → keine Marke.
 
 **Etappe E2: Stream-Einblendung.** Unter `/stream?courts=…` gibt es eine transparente Seite für
 die OBS-Browser-Quelle, in LAN und Cloud. Mit einem Feld zeigt sie eine Score-Leiste
@@ -81,19 +92,20 @@ Erfolgskriterien:
 
 | Typ | Neu | Default / Form |
 |---|---|---|
-| `MonitorStil` | Enum `Standard, International, Riesen, Spieler, Hell` + `#[serde(other)] Unbekannt`, `snake_case` | `Standard`; `ist_standard()` gilt für Standard **und** Unbekannt |
+| `MonitorStil` | Enum `Standard, International, Riesen, Spieler, Hell, Stand` + `#[serde(other)] Unbekannt`, `snake_case` | `Standard`; `ist_standard()` gilt für Standard **und** Unbekannt |
 | `MonitorTarget::Court` | `stil: MonitorStil` | `default`, `skip_serializing_if = ist_standard` → `{"kind":"court","court_id":5}` bleibt bytegleich |
 | `MonitorState` | `stil: MonitorStil` | `default` |
-| `MonitorConfig` | `showNations: bool`, `showClubs: bool` | `true` bzw. `false` |
+| `MonitorConfig` | `showNations: bool`, `showClubs: bool` (aus den Plätzen abgeleitet), `nameDavor: String`, `nameDarunter: String` | `true` bzw. `false`; Plätze leer → weggelassen, Seite leitet aus den Schaltern ab |
 | `MonitorPlayer` | `club: Option<String>` | `default`, `skip_serializing_if = is_none` |
 
-**Config (`config.rs` `CourtMonitorConfig`):** `show_nations` (Standard `true`), `show_clubs`
-(Standard `false`). Das Feld `layout` bleibt lesbar, wird aber als veraltet markiert und nicht mehr
+**Config (`config.rs` `CourtMonitorConfig`):** `name_davor` (`flagge`|`logo`|`ohne`, Standard
+`flagge`), `name_darunter` (`verein`|`nation`|`ohne`, Standard `ohne`); `nation_an()`/`verein_an()`
+leiten den Datenbedarf ab. Das Feld `layout` bleibt lesbar, wird aber als veraltet markiert und nicht mehr
 angeboten. Der Stil wohnt **nicht** in der Config, sondern an der Zuweisung (ADR 0068).
 
 **Datenschutz:** Gefiltert wird auf dem Server (ADR 0070):
 
-- Nation nur bei `show_nations`, Verein (Name und Logo) nur bei `show_clubs`.
+- Nation nur bei `nation_an()`, Verein (Name und Logo) nur bei `verein_an()`.
 - Das gilt für den Feld-Zustand in LAN (`build_monitor_state`) und Relay (`monitor_player`), für
   LAN-`/health`, Cloud-`/health` und `/combo/state`. Die heute ungenutzt mitreisenden
   `team*_clubs` werden bei Verein aus geleert.
@@ -123,21 +135,23 @@ angeboten. Der Stil wohnt **nicht** in der Config, sondern an der Zuweisung (ADR
   Regel: Kurzname = `family`. Fehlt er, bei einem Komma in `name` („Nachname, Vorname") der Teil
   vor dem Komma, sonst das letzte Wort von `name`. Ist das Ergebnis leer, gilt der volle `name`.
   Diese Regel setzt `kurzname()` in `src/io/monitorStil.mjs` um, und der Test deckt jeden Fall ab.
-- **Verein:** Den Namen zeigt die Seite unter dem Spielernamen. Das Logo kommt einheitlich über
+- **Verein:** Den Namen zeigt die Seite unter dem Spielernamen (Platz „Unter dem Namen"), das Logo
+  vor ihm in der Box der Flagge (Platz „Vor dem Namen"). Das Logo kommt einheitlich über
   `BASE + "info/club-logo?name=<verein>"`:
   - LAN: Host-Endpoint wie heute.
   - Cloud: neue Relay-Route `/{ns}/info/club-logo`. Sie antwortet mit einem relativen 302 auf den
     badhub-Resolver `/api/v1/club-logo?name=<kodiert>`, den Namen kodiert und auf 120 Zeichen
     gekappt.
-  - Fehlt das Logo, blendet `onerror` es aus.
+  - Fehlt das Logo, blendet `onerror` es aus; der Platz bleibt stehen, damit die Namen fluchten.
 - **Slave-Brücke:** `court_display` reicht die Query weiter, damit `?stil=` erhalten bleibt.
 
-### E1: Schalter im Setup
+### E1: Plätze im Setup
 
-Im Abschnitt Court-Monitor des Setup-Assistenten erscheinen zwei Häkchen: **Nation (Flagge)
-anzeigen** (an) und **Verein (Name + Logo) anzeigen** (aus). Das Auswahlfeld „Layout" entfällt.
-Die Schalter gelten turnierweit für Feld-Monitor, Tafel, Übersicht, Kombi und Stream, in LAN
-und Cloud.
+Im Abschnitt Court-Monitor des Setup-Assistenten erscheinen zwei Auswahlfelder: **Vor dem
+Namen** (Nation (Flagge) · Vereinslogo · ohne; Standard Flagge) und **Unter dem Namen**
+(Vereinsname · Nation (Text) · ohne; Standard ohne). Das Auswahlfeld „Layout" entfällt. Die
+Anordnung gilt am Feld-Monitor; der abgeleitete Datenbedarf turnierweit für Feld-Monitor,
+Tafel, Übersicht, Kombi und Stream, in LAN und Cloud.
 
 ### E2: Stream-Einblendung (`stream.html`)
 

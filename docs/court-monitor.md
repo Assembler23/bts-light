@@ -769,12 +769,24 @@ bei Feld-Zielen, nicht bei Tafel, Übersicht, Werbung oder Kombi.
 | **Standard** | wie bisher: Team 1 oben, Team 2 unten, Vorname klein über dem Nachnamen |
 | **International** | dunkle Teamzeilen, je Satz eine gleich breite Spalte, Nachname in Großbuchstaben |
 | **Riesen-Stand** | Stand des laufenden Satzes bildschirmfüllend, darüber klein Nachnamen und Satzstand; nach Spielende groß die gewonnenen Sätze |
-| **Nur Spieler** | Namen (mit Flagge und Verein laut Schalter), kein Stand |
+| **Nur Spieler** | Namen (mit Flagge/Logo und Zeile darunter laut Setup), Aufschlag-Punkt und Annehmer-Ring, kein Stand |
 | **Hell** | Aufbau wie Standard, heller Grund und dunkle Schrift — für helle Hallen und Beamer |
+| **Nur Stand** | Satzstände und laufender Stand groß, keine Namen; die Stand-Karte des aufschlagenden Teams leuchtet |
 
 <!-- pruef: "Riesen-Stand" in src/pages/CourtMonitorPanel.tsx -->
 <!-- pruef: "Nur Spieler" in src/pages/CourtMonitorPanel.tsx -->
 <!-- pruef: "International" in src/pages/CourtMonitorPanel.tsx -->
+<!-- pruef: "Nur Stand" in src/pages/CourtMonitorPanel.tsx -->
+
+**Zwei Monitore an einem Feld:** Den linken Monitor auf **Nur Spieler**,
+den rechten auf **Nur Stand** stellen. Beide teilen den Bildschirm gleich
+auf, deshalb steht Team 1 auf beiden Monitoren oben auf derselben Höhe.
+Links sieht man, wer aufschlägt (●) und wer annimmt (○), rechts den Stand.
+
+**Aufschlag und Annahme:** Vor dem Namen des aufschlagenden Spielers steht
+ein Punkt ●, vor dem des annehmenden ein Ring ○ — im Doppel jeweils beim
+richtigen Partner. Den Annehmer schicken Tablets ab v0.9.327 mit; ein
+älteres Tablet zeigt nur den Aufschläger.
 
 - Der TV wechselt **ohne Neuladen**, spätestens mit dem nächsten Abruf (im
   LAN sofort, in der Cloud nach höchstens vier Sekunden).
@@ -783,7 +795,7 @@ bei Feld-Zielen, nicht bei Tafel, Übersicht, Werbung oder Kombi.
   Feld gilt wieder „Standard".
 - **Feste Adresse** (`/court/<id>/display`, ohne Zuweisung): Der Stil kommt
   aus der Adresse, z. B. `/court/3/display?stil=riesen`. Erlaubt sind
-  `standard`, `international`, `riesen`, `spieler`, `hell`; alles andere zeigt
+  `standard`, `international`, `riesen`, `spieler`, `hell`, `stand`; alles andere zeigt
   „Standard". Bei einem zugewiesenen Gerät zählt nur das Panel, ein `?stil=`
   in der Adresse wird dort ignoriert.
   <!-- pruef: "riesen" in src/io/monitorStil.mjs -->
@@ -827,24 +839,34 @@ nimmt man die Cloud-Adresse.
 
 ## Nation und Verein
 
-Im Setup unter *Court-Monitor → Anzeige* stehen zwei Häkchen. Sie gelten für
-**alle** Anzeigen — Feld-Monitor, Tafel, Übersicht, Kombi — in LAN und Cloud:
+Im Setup unter *Court-Monitor → Anzeige* wählt man zwei Plätze am
+Spielernamen:
 
-- **Nation (Flagge) anzeigen** — *voreingestellt an*, so wie die Monitore die
-  Flagge schon immer gezeigt haben.
-  <!-- pruef: "Nation (Flagge) anzeigen" in src/pages/SetupWizard.tsx -->
-  <!-- pruef: /show_nations: true/ in src-tauri/src/config.rs -->
-- **Verein (Name + Logo) anzeigen** — *voreingestellt aus*. Eingeschaltet
-  steht der Verein klein unter jedem Spielernamen, mit Vereinslogo, wenn
-  badhub eines kennt.
-  <!-- pruef: "Verein (Name + Logo) anzeigen" in src/pages/SetupWizard.tsx -->
-  <!-- pruef: /show_clubs: false/ in src-tauri/src/config.rs -->
+- **Vor dem Namen:** *Nation (Flagge)*, *Vereinslogo* oder *ohne* —
+  *voreingestellt Nation (Flagge)*, so wie die Monitore die Flagge schon
+  immer gezeigt haben.
+  <!-- pruef: "Vor dem Namen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: "Vereinslogo" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /name_davor: NamenDavor::Flagge/ in src-tauri/src/config.rs -->
+- **Unter dem Namen:** *Vereinsname*, *Nation (Text)* (das Kürzel, z. B.
+  „GER") oder *ohne* — *voreingestellt ohne*.
+  <!-- pruef: "Unter dem Namen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: "Nation (Text)" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /name_darunter: NamenDarunter::Ohne/ in src-tauri/src/config.rs -->
 
-Ist ein Häkchen aus, verlässt die Angabe den Turnier-PC bzw. das Relay gar
-nicht erst — eine Anzeige kann sie also auch nicht über ihre Adresse
-sichtbar machen. **Ausgenommen** ist die Siegerehrung (`/info/winners`): Sie zeigt den
-Verein der Platzierten wie bisher unabhängig vom Häkchen; Nationen trägt sie
-nicht. Die Vorbereitungsliste zeigt weder Nation noch Verein. Die Schalter sind getrennt von „Vereine anzeigen" für
+Die **Anordnung** gilt am Feld-Monitor. Zugleich entscheiden die Plätze,
+welche Angaben überhaupt hinausgehen: Nutzt kein Platz die Nation (bzw. den
+Verein), verlässt sie den Turnier-PC bzw. das Relay gar nicht erst — auch
+nicht Richtung Tafel, Übersicht und Kombi; eine Anzeige kann sie also auch
+nicht über ihre Adresse sichtbar machen. Umgekehrt gilt: Nutzt ein Platz die
+Nation (auch nur als Text darunter), zeigen Übersicht und Kombi die Flagge;
+nutzt einer den Verein, bekommen sie auch den Verein. Ein Vereinslogo erscheint, wenn
+badhub eines kennt; sonst bleibt der Platz leer, damit die Namen fluchten.
+
+**Ausgenommen** ist die Siegerehrung (`/info/winners`): Sie zeigt den
+Verein der Platzierten wie bisher unabhängig von den Plätzen; Nationen trägt
+sie nicht. Die Vorbereitungsliste zeigt weder Nation noch Verein. Die Plätze
+sind getrennt von „Vereine anzeigen" für
 Tablets und TL-Web. Hintergrund: [ADR 0070](adr/0070-nation-verein-auf-anzeigen-serverseitig.md).
 
 ## Pausen-Timer (Retro-Klappanzeige)
@@ -1194,8 +1216,8 @@ ein bts-light-Problem.
 Nationalität ist ein IOC-Code (`GER`, `POL`, …). bts-light bündelt einen
 SVG-Flaggensatz (`src-tauri/assets/flags/`, ins Binary kompiliert),
 Anzeige per `<code>.svg`. Fehlt der Code, zeigt der Monitor den Namen
-ohne Flagge. Ob überhaupt eine Nationalität mitkommt, steuert das Häkchen
-„Nation (Flagge) anzeigen" (siehe [Nation und Verein](#nation-und-verein)).
+ohne Flagge. Ob überhaupt eine Nationalität mitkommt, steuern die Plätze
+am Namen (siehe [Nation und Verein](#nation-und-verein)).
 Herkunft/Lizenz: [`NOTICE.md`](../NOTICE.md).
 
 ## Lizenz-Hinweis

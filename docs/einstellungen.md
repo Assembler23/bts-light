@@ -397,14 +397,18 @@ Alles Folgende ist nur sichtbar, wenn der Schalter an ist.
   der Kopfzeile (Stoppuhr)**.
 - **Pausen-Countdown (Retro-Klappanzeige)** *(voreingestellt an)* — erscheint
   am Monitor nur während einer Spielpause.
-- **Nation (Flagge) anzeigen** *(voreingestellt an)* und **Verein (Name + Logo)
-  anzeigen** *(voreingestellt aus)* — gelten für alle Anzeigen in LAN und
-  Cloud; was aus ist, verlässt den Turnier-PC gar nicht erst.
-  <!-- pruef: "Verein (Name + Logo) anzeigen" in src/pages/SetupWizard.tsx -->
-  <!-- pruef: /show_nations: true/ in src-tauri/src/config.rs -->
+- **Vor dem Namen** *(voreingestellt Nation (Flagge))* — Nation (Flagge),
+  Vereinslogo oder ohne — und **Unter dem Namen** *(voreingestellt ohne)* —
+  Vereinsname, Nation (Text) oder ohne. Die Anordnung gilt am Feld-Monitor;
+  was kein Platz nutzt, verlässt den Turnier-PC gar nicht erst, auch nicht
+  Richtung Tafel, Übersicht und Kombi. Nutzt ein Platz die Nation, zeigen
+  Übersicht und Kombi die Flagge.
+  <!-- pruef: "Unter dem Namen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /name_davor: NamenDavor::Flagge/ in src-tauri/src/config.rs -->
+  <!-- pruef: /name_darunter: NamenDarunter::Ohne/ in src-tauri/src/config.rs -->
 
 Das Aussehen eines einzelnen Monitors (Standard, International, Riesen-Stand,
-Nur Spieler, Hell) wählt man nicht hier, sondern im Court-Monitor-Panel neben
+Nur Spieler, Hell, Nur Stand) wählt man nicht hier, sondern im Court-Monitor-Panel neben
 der Feldzuweisung.
 
 Die Vorschau daneben ändert sich mit den Häkchen. Anders als die Werbebilder
