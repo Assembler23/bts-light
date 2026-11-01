@@ -71,6 +71,22 @@ fn base_url(cfg: &crate::config::BadhubConfig) -> Option<String> {
     Some(base)
 }
 
+/// Darf ein Bild von `bild` (Origin) kommen, wenn `base` gefragt wurde?
+/// Grundsätzlich nur von derselben Origin. **Einzige Ausnahme:** Das
+/// Testsystem leitet seine Logos auf die Bilddateien des Produktivsystems
+/// weiter (Befund 01.11.2026: `test.badhub.de/api/v1/club-logo` → 302 auf
+/// `https://badhub.de/assets/logos/…`) — ohne die Ausnahme blieben im
+/// Testmodus alle Logos leer. Beide Origins sind feste Konstanten, ein
+/// beliebiges Ziel wird dadurch nicht erreichbar.
+fn bild_herkunft_erlaubt(base: &str, bild: &str) -> bool {
+    if bild == base {
+        return true;
+    }
+    let test = format!("https://{}", crate::badhub_host::HOST_TEST);
+    let live = format!("https://{}", crate::badhub_host::HOST_LIVE);
+    base == test && bild == live
+}
+
 /// Fragt badhubs Singular-Resolver für EINEN Vereinsnamen ab und liefert das
 /// Bild direkt — der Endpoint antwortet mit einem Redirect auf die
 /// Bilddatei, `reqwest` folgt dem automatisch (Standard-Redirect-Policy).
@@ -88,7 +104,7 @@ async fn fetch(http: &reqwest::Client, base: &str, name: &str) -> CachedImg {
     // Origin kommen wie der konfigurierte badhub-Endpoint — Origin
     // strukturell vergleichen (ein reiner Präfix-Check ließe sich mit z. B.
     // „badhub.de.evil.com" umgehen).
-    if resp.url().origin().ascii_serialization() != base {
+    if !bild_herkunft_erlaubt(base, &resp.url().origin().ascii_serialization()) {
         return None;
     }
     let ct = resp
@@ -167,6 +183,40 @@ mod tests {
         };
         // Verbandsunabhängig: kein Slug nötig, nur die Origin.
         assert_eq!(base_url(&cfg).as_deref(), Some("https://badhub.de"));
+    }
+
+    #[test]
+    fn bild_nur_von_derselben_origin_ausser_test_auf_live() {
+        assert!(bild_herkunft_erlaubt(
+            "https://badhub.de",
+            "https://badhub.de"
+        ));
+        assert!(bild_herkunft_erlaubt(
+            "https://test.badhub.de",
+            "https://test.badhub.de"
+        ));
+        // Testsystem → Bilddateien des Produktivsystems.
+        assert!(bild_herkunft_erlaubt(
+            "https://test.badhub.de",
+            "https://badhub.de"
+        ));
+        // Nicht umgekehrt, nicht fremd, nicht über http.
+        assert!(!bild_herkunft_erlaubt(
+            "https://badhub.de",
+            "https://test.badhub.de"
+        ));
+        assert!(!bild_herkunft_erlaubt(
+            "https://test.badhub.de",
+            "http://badhub.de"
+        ));
+        assert!(!bild_herkunft_erlaubt(
+            "https://test.badhub.de",
+            "https://badhub.de.evil.com"
+        ));
+        assert!(!bild_herkunft_erlaubt(
+            "https://eigene-instanz.example",
+            "https://badhub.de"
+        ));
     }
 
     #[test]
