@@ -49,7 +49,9 @@ beiden Monitoren auf derselben Höhe steht. „Nur Spieler" zeigt dafür den Auf
 Balken). Das Tablet schickt zusätzlich `receiving: {team, index}` (diagonal gegenüber dem
 Aufschläger, `computeReceiving`) im gespiegelten Stand; der Feld-Monitor markiert den Annehmer
 mit einem Ring ○. Host und Relay reichen den Stand unverändert durch, eine Wire-Änderung ist
-dafür nicht nötig. Ältere Tablets schicken kein `receiving` → keine Marke.
+dafür nicht nötig. Ältere Tablet-Seiten schicken kein `receiving`; dann leitet der Monitor den
+Annehmer nach derselben Regel aus `positions`/`servingSide`/`teamOnSide`/`currentSet`/`match` ab
+(`receivingInfo` in `monitor.html`).
 
 **Etappe E2: Stream-Einblendung.** Unter `/stream?courts=…` gibt es eine transparente Seite für
 die OBS-Browser-Quelle, in LAN und Cloud. Mit einem Feld zeigt sie eine Score-Leiste

@@ -1182,13 +1182,31 @@ function namenPlaetze(cfg) {
     return t == null ? null : { team: t, playerIdx: null };
   }
 
-  // Annehmer: { team:1|2, playerIdx:0|1 } oder null. Nur aus dem vom
-  // Tablet gelieferten `receiving` — ältere Tablets schicken ihn nicht,
-  // dann bleibt die Marke weg.
+  // Annehmer: { team:1|2, playerIdx:0|1 } oder null. Bevorzugt das vom
+  // Tablet gelieferte `receiving`; ältere Tablet-Seiten schicken es nicht,
+  // dann wird er aus der mitgespiegelten Aufstellung abgeleitet — dieselbe
+  // Regel wie `computeReceiving` in tablet.html: diagonal gegenüber, also
+  // dasselbe Aufschlagfeld (nach dem Stand des Aufschlägers) auf der
+  // Gegenseite.
   function receivingInfo(cs) {
-    if (!cs || !cs.receiving || !cs.receiving.team) return null;
-    if (typeof cs.receiving.index !== "number") return null;
-    return { team: cs.receiving.team === "a" ? 1 : 2, playerIdx: cs.receiving.index };
+    if (!cs) return null;
+    if (cs.receiving && cs.receiving.team && typeof cs.receiving.index === "number") {
+      return { team: cs.receiving.team === "a" ? 1 : 2, playerIdx: cs.receiving.index };
+    }
+    if (cs.setup !== "playing" || cs.finished) return null;
+    var auf = cs.servingSide, pos = cs.positions, seiten = cs.teamOnSide, m = cs.match;
+    if ((auf !== "left" && auf !== "right") || !pos || !seiten || !m || !cs.currentSet) return null;
+    var gegen = auf === "left" ? "right" : "left";
+    var stand = Number(cs.currentSet[auf]) || 0;
+    var feld = stand % 2 === 0 ? "rightSC" : "leftSC";
+    var id = pos[gegen] ? pos[gegen][feld] : null;
+    if (id == null) return null;
+    var team = seiten.a === gegen ? "a" : "b";
+    var liste = team === "a" ? m.teamA : m.teamB;
+    if (!Array.isArray(liste)) return null;
+    var idx = -1;
+    for (var i = 0; i < liste.length; i++) { if (liste[i] && liste[i].id === id) { idx = i; break; } }
+    return idx < 0 ? null : { team: team === "a" ? 1 : 2, playerIdx: idx };
   }
 
   // Sieger-Team (1 oder 2) eines feststehenden Matches, sonst null. Bei
