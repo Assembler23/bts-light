@@ -16,9 +16,18 @@ Ein Schalter, der nur im Browser wirkt, wäre wirkungslos: Jeder mit der URL sä
 
 ## Entscheidung
 
-1. Zwei turnierweite Schalter in `CourtMonitorConfig`: `show_nations` (Standard **an**, damit
-   sich das heutige Verhalten nicht ändert) und `show_clubs` (Standard **aus**, gilt für Name und
-   Logo). Sie sind getrennt vom Tablet/TL-Schalter `DisplayConfig.show_club_names`.
+1. Zwei turnierweite **Plätze** am Namen in `CourtMonitorConfig` (Nachtrag 01.11.2026, vor dem
+   ersten Release; ersetzt die zwei Häkchen `show_nations`/`show_clubs`):
+   - `name_davor`: `flagge` | `logo` | `ohne`, Standard **`flagge`**, damit sich das heutige
+     Verhalten nicht ändert.
+   - `name_darunter`: `verein` | `nation` | `ohne`, Standard **`ohne`**.
+
+   Die Plätze legen die Anordnung am Feld-Monitor fest **und** den Datenbedarf:
+   `nation_an()` = ein Platz zeigt die Nation, `verein_an()` = ein Platz zeigt den Verein. Nur
+   diese abgeleiteten Werte steuern den Filter; auf dem Draht reisen sie weiter als
+   `MonitorConfig.showNations`/`showClubs`, die Plätze zusätzlich als `nameDavor`/`nameDarunter`
+   (leer bei älteren Absendern → die Seite leitet aus den Schaltern ab). Getrennt vom
+   Tablet/TL-Schalter `DisplayConfig.show_club_names`.
 2. Gefiltert wird **serverseitig** an jeder Anzeige-Projektion:
    - LAN `build_monitor_state`, `uebersicht_json`, `combo_state`
    - Relay `monitor_player`, `overview_health`
@@ -37,6 +46,9 @@ Ein Schalter, der nur im Browser wirkt, wäre wirkungslos: Jeder mit der URL sä
   TL-Web an die Hallen-TVs gekoppelt, obwohl das unterschiedliche Öffentlichkeiten sind.
   Verworfen.
 - **Filter nur im Browser / URL mit Vorrang:** hebelt den zentralen Schalter aus. Verworfen.
+- **Plätze je Monitor** (wie der Stil an der Zuweisung): flexibler, aber der Datenfilter müsste je
+  Gerät laufen, und Tafel/Übersicht/Kombi bekämen keinen eindeutigen Bedarf. Verworfen zugunsten
+  turnierweiter Plätze.
 - **Logo in der Cloud direkt vom badhub-Resolver laden** (wie `tl.html`): Die Seiten müssten LAN
   und Cloud unterscheiden, und die Slave-Brücke ginge leer aus. Verworfen zugunsten der
   Relay-Weiterleitung.

@@ -311,8 +311,12 @@ pub fn to_monitor_config(c: &CourtMonitorConfig) -> MonitorConfig {
         show_ads: c.show_ads,
         layout: c.layout.clone(),
         push_fallback_slow: c.push_fallback_slow,
-        show_nations: c.show_nations,
-        show_clubs: c.show_clubs,
+        // Die Datenschalter folgen den Plätzen: Was kein Platz zeigt, geht
+        // gar nicht erst raus — auch das Relay filtert nach ihnen.
+        show_nations: c.nation_an(),
+        show_clubs: c.verein_an(),
+        name_davor: c.name_davor.als_str().to_string(),
+        name_darunter: c.name_darunter.als_str().to_string(),
     }
 }
 
@@ -383,12 +387,12 @@ fn player(p: &BtpPlayer, config: &CourtMonitorConfig) -> MonitorPlayer {
         // zu zerlegen.
         given: p.first.clone(),
         family: p.last.clone(),
-        nationality: if config.show_nations {
+        nationality: if config.nation_an() {
             p.nationality.clone()
         } else {
             None
         },
-        club: if config.show_clubs {
+        club: if config.verein_an() {
             p.club.clone().filter(|c| !c.trim().is_empty())
         } else {
             None
@@ -405,11 +409,11 @@ pub fn anzeige_filtern(
     config: &CourtMonitorConfig,
 ) {
     for c in courts {
-        if !config.show_nations {
+        if !config.nation_an() {
             c.team1_nationalities.clear();
             c.team2_nationalities.clear();
         }
-        if !config.show_clubs {
+        if !config.verein_an() {
             c.team1_clubs.clear();
             c.team2_clubs.clear();
         }
@@ -746,8 +750,8 @@ mod tests {
         assert_eq!(a.club, None, "Verein standardmäßig aus");
 
         let umgekehrt = crate::config::CourtMonitorConfig {
-            show_nations: false,
-            show_clubs: true,
+            name_davor: crate::config::NamenDavor::Logo,
+            name_darunter: crate::config::NamenDarunter::Ohne,
             ..Default::default()
         };
         let b = player(&p, &umgekehrt);
@@ -770,8 +774,8 @@ mod tests {
     fn monitor_state_traegt_verein_und_nation_nur_mit_schalter() {
         let p = spieler_mit_allem();
         let aus = crate::config::CourtMonitorConfig {
-            show_nations: false,
-            show_clubs: false,
+            name_davor: crate::config::NamenDavor::Ohne,
+            name_darunter: crate::config::NamenDarunter::Ohne,
             ..Default::default()
         };
         let json = serde_json::to_value(player(&p, &aus)).unwrap();
@@ -812,8 +816,8 @@ mod tests {
         anzeige_filtern(
             &mut ohne_nation,
             &crate::config::CourtMonitorConfig {
-                show_nations: false,
-                show_clubs: true,
+                name_davor: crate::config::NamenDavor::Ohne,
+                name_darunter: crate::config::NamenDarunter::Verein,
                 ..Default::default()
             },
         );
@@ -841,14 +845,25 @@ mod tests {
     }
 
     #[test]
-    fn to_monitor_config_reicht_die_schalter_durch() {
+    fn to_monitor_config_leitet_die_schalter_aus_den_plaetzen_ab() {
         let w = to_monitor_config(&crate::config::CourtMonitorConfig {
-            show_nations: false,
-            show_clubs: true,
+            name_davor: crate::config::NamenDavor::Logo,
+            name_darunter: crate::config::NamenDarunter::Ohne,
             ..Default::default()
         });
         assert!(!w.show_nations);
         assert!(w.show_clubs);
+        assert_eq!(
+            (w.name_davor.as_str(), w.name_darunter.as_str()),
+            ("logo", "ohne")
+        );
+        let w = to_monitor_config(&crate::config::CourtMonitorConfig {
+            name_davor: crate::config::NamenDavor::Ohne,
+            name_darunter: crate::config::NamenDarunter::Nation,
+            ..Default::default()
+        });
+        assert!(w.show_nations && !w.show_clubs);
+        assert_eq!(w.name_darunter, "nation");
     }
 
     #[test]

@@ -2575,6 +2575,27 @@ function computeServing() {
   return { team: teamKey, index: idx };
 }
 
+// Wer nimmt an? Diagonal gegenüber: dasselbe Aufschlagfeld (nach der
+// Parität des AUFSCHLAGENDEN Teams) auf der Gegenseite. Ergebnis wie
+// computeServing { team, index } für die Annehmer-Marke am Monitor.
+// ⚠️ Nachgebaut in scripts/test-serving.mjs (`receiverOf`).
+function computeReceiving() {
+  if (STATE.setup !== 'playing' || STATE.finished) return null;
+  if (!STATE.positions || !STATE.servingSide || !STATE.teamOnSide || !STATE.match) return null;
+  const side = STATE.servingSide === 'left' ? 'right' : 'left';
+  const serverScore = STATE.servingSide === 'left' ? STATE.currentSet.left : STATE.currentSet.right;
+  const field = (serverScore % 2 === 0) ? 'rightSC' : 'leftSC';
+  const pos = STATE.positions[side];
+  if (!pos) return null;
+  const playerId = pos[field];
+  if (playerId == null) return null;
+  const teamKey = (STATE.teamOnSide.a === side) ? 'a' : 'b';
+  const arr = teamKey === 'a' ? STATE.match.teamA : STATE.match.teamB;
+  let idx = arr.findIndex(p => p.id === playerId);
+  if (idx < 0) idx = 0;
+  return { team: teamKey, index: idx };
+}
+
 function persistState(fromRestore) {
   // Ohne Match nichts zu sichern – außer ein Ergebnis hängt noch in der
   // Übermittlung oder wurde abgelehnt; beides muss einen Reload überleben
@@ -2598,6 +2619,8 @@ function persistState(fromRestore) {
     // Anzeige: { team:'a'|'b', index:0|1 }. Das Tablet kennt die Spieler-
     // IDs + Positionen, der Server nicht — daher hier berechnet.
     serving: computeServing(),
+    // Gegenstück für die Annehmer-Marke am Monitor, gleiche Form.
+    receiving: computeReceiving(),
     setup: STATE.setup,
     // Per-Satz-Aufschlagwahl überlebt einen Reload (anders als pendingServer):
     // sonst stünde nach einem Reload während der Abfrage wieder die volle

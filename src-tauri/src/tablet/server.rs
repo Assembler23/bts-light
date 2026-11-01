@@ -7683,8 +7683,17 @@ mod tests {
         });
         ctx.config_path = dir.join("config.json");
         let mut cfg = AppConfig::default();
-        cfg.court_monitor.show_nations = nation;
-        cfg.court_monitor.show_clubs = verein;
+        // Datenbedarf über die Plätze ausdrücken (ADR 0070).
+        cfg.court_monitor.name_davor = if nation {
+            crate::config::NamenDavor::Flagge
+        } else {
+            crate::config::NamenDavor::Ohne
+        };
+        cfg.court_monitor.name_darunter = if verein {
+            crate::config::NamenDarunter::Verein
+        } else {
+            crate::config::NamenDarunter::Ohne
+        };
         std::fs::write(&ctx.config_path, serde_json::to_string(&cfg).unwrap()).unwrap();
         Arc::new(ctx)
     }

@@ -500,8 +500,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   [features/monitor-stile-und-stream.md](features/monitor-stile-und-stream.md)
   (freigegeben 31.10.2026, ADR 0068/0069/0070). Wunsch: die Ansichten aus bup auch für unsere
   Monitore, als Neubau (bup ohne Lizenz). **E1:** Stile je Feld-Monitor im Panel
-  (Standard, International, Riesen-Stand, Nur Spieler, Hell) + turnierweite Schalter Nation
-  (an) / Verein mit Logo (aus), serverseitig gefiltert. **E2:** transparente OBS-Einblendung
+  (Standard, International, Riesen-Stand, Nur Spieler, Hell, Nur Stand) + turnierweite Plätze
+  vor/unter dem Namen (Flagge/Logo/ohne, Vereinsname/Nation/ohne), serverseitig gefiltert;
+  Annehmer-Ring am Monitor. **E2:** transparente OBS-Einblendung
   `/stream?courts=` für 1–3 Felder, LAN und Cloud. Je Etappe ein PR und ein Release.
 
 - **Ausgabegerät für Ansagen** — Spec:

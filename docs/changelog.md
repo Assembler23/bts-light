@@ -9,16 +9,22 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - **Neu: Stile für die Court-Monitore.** Im Court-Monitor-Panel wählt man je
   Monitor neben dem Feld einen **Stil**: *Standard* (wie bisher),
   *International* (Teamzeilen mit einer Spalte je Satz), *Riesen-Stand* (der
-  laufende Satz bildschirmfüllend), *Nur Spieler* (Namen ohne Stand) und
-  *Hell* (heller Grund für helle Hallen und Beamer). Der TV wechselt ohne
+  laufende Satz bildschirmfüllend), *Nur Spieler* (Namen ohne Stand), *Hell*
+  (heller Grund für helle Hallen und Beamer) und *Nur Stand* (Stand ohne
+  Namen). *Nur Spieler* links und *Nur Stand* rechts ergeben zwei Monitore
+  für ein Feld, Team 1 steht auf beiden auf derselben Höhe. Der TV wechselt ohne
   Neuladen, in LAN und Cloud. Feste Adressen nehmen den Stil aus der Adresse
   (`/court/3/display?stil=riesen`). Das wirkungslose Auswahlfeld „Layout" im
   Setup ist entfallen.
-- **Neu: Nation und Verein auf den Anzeigen schaltbar.** Zwei Häkchen im
-  Setup (Court-Monitor → Anzeige): *Nation (Flagge) anzeigen* — wie bisher an
-  — und *Verein (Name + Logo) anzeigen* — aus. Sie gelten für Feld-Monitor,
-  Tafel, Übersicht und Kombi; was aus ist, verlässt den Turnier-PC bzw. das
-  Relay gar nicht erst. Vereinslogos kommen in der Cloud jetzt ebenfalls an.
+- **Neu: Nation und Verein am Namen wählbar.** Im Setup (Court-Monitor →
+  Anzeige) wählt man, was **vor** dem Namen steht — Flagge (wie bisher),
+  Vereinslogo oder nichts — und was **darunter** — Vereinsname, Nation als
+  Kürzel oder nichts. Was kein Platz zeigt, verlässt den Turnier-PC bzw. das
+  Relay gar nicht erst, auch nicht Richtung Tafel, Übersicht und Kombi.
+  Vereinslogos kommen in der Cloud jetzt ebenfalls an.
+- **Neu: Annehmer am Monitor.** Vor dem aufschlagenden Spieler steht wie
+  bisher ein Punkt ●, vor dem annehmenden jetzt ein Ring ○ — im Doppel beim
+  richtigen Partner. Das Tablet schickt den Annehmer dafür mit.
 
 ## v0.9.326
 

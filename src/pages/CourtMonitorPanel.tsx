@@ -111,6 +111,7 @@ const STIL_OPTIONEN: { wert: Stil; text: string }[] = [
   { wert: "riesen", text: "Riesen-Stand" },
   { wert: "spieler", text: "Nur Spieler" },
   { wert: "hell", text: "Hell" },
+  { wert: "stand", text: "Nur Stand" },
 ];
 
 // ─── Sortier-/Gruppier-Logik der Geräteliste ────────────────────────────

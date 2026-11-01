@@ -811,15 +811,17 @@ ADR [0068](adr/0068-monitor-stil-als-attribut-am-feld-ziel.md) und
 [0070](adr/0070-nation-verein-auf-anzeigen-serverseitig.md).
 
 - **Stil:** `MonitorTarget::Court` trägt optional `stil`
-  (`international|riesen|spieler|hell`; Standard wird weggelassen →
+  (`international|riesen|spieler|hell|stand`; Standard wird weggelassen →
   `{"kind":"court","court_id":5}` bleibt bytegleich). Der Geräte-Arm von
   `/{ns}/monitor/state` übernimmt ihn als `MonitorState.stil`; die feste Route
   `/{ns}/court/{id}/state` liefert nie einen. Ein unbekannter Wert liest sich
   als `Unbekannt` (`serde(other)`) und wirkt wie Standard — der Upload bleibt
   lesbar, kein 422, kein Einfrieren wie bei der Tafel (ADR 0055).
 - **Nation/Verein:** `MonitorConfig.showNations` (Standard an) und
-  `showClubs` (Standard aus). Der Relay filtert in `monitor_player` und in
-  `overview_health` danach; ohne Host-Upload gilt der Standard.
+  `showClubs` (Standard aus) — der Host leitet sie aus den Plätzen am Namen
+  ab und schickt die Plätze selbst als `nameDavor`/`nameDarunter` mit (der
+  Relay reicht sie nur durch). Der Relay filtert in `monitor_player` und in
+  `overview_health` nach den Schaltern; ohne Host-Upload gilt der Standard.
   `MonitorPlayer.club` ist neu und fehlt, solange der Schalter aus ist.
 - **Vereinslogo:** `/{ns}/info/club-logo?name=` leitet relativ auf den
   badhub-Resolver weiter (Name kodiert, auf 120 Zeichen gekappt, fester Pfad
@@ -830,9 +832,12 @@ ADR [0068](adr/0068-monitor-stil-als-attribut-am-feld-ziel.md) und
 live, der App-Tag folgt. Ein **alter Host** am neuen Relay bedeutet Standard-
 Stil, Nation an, Verein aus — also das bisherige Bild. Ein **alter Relay** am
 neuen Host (Relay-Rollback) ignoriert `stil` (Cloud zeigt Standard) **und
-`showNations`**: Hat die Turnierleitung „Nation" ausgeschaltet, stehen in der
-Cloud dann wieder Flaggen. Das ist die einzige Datenschutz-Folge eines
+`showNations`**: Nutzt kein Platz am Namen die Nation, stehen in der Cloud
+dann trotzdem wieder Flaggen. Das ist die einzige Datenschutz-Folge eines
 Rollbacks; der Verein bleibt aus, weil der alte Relay `club` gar nicht kennt.
+Ein alter Relay verliert außerdem `nameDavor`/`nameDarunter`; die Seite leitet
+die Plätze dann aus den Schaltern ab (Flagge davor bzw. Vereinsname darunter)
+— nur bis zum nächsten automatischen Relay-Deploy.
 
 ## Trägerverbindung der fernen Halle (`/{ns}/carrier-ws`)
 

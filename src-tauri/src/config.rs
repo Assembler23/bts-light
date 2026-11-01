@@ -230,6 +230,53 @@ pub struct DisplayConfig {
     pub show_club_logos: bool,
 }
 
+/// Was am Feld-Monitor **vor** dem Spielernamen steht (ADR 0070).
+/// Unbekannte Werte einer neueren Fassung lesen sich als `Ohne`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NamenDavor {
+    /// Flagge der Nation — so zeigten die Monitore es schon immer.
+    #[default]
+    Flagge,
+    /// Vereinslogo.
+    Logo,
+    #[serde(other)]
+    Ohne,
+}
+
+/// Was am Feld-Monitor **unter** dem Spielernamen steht (ADR 0070).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NamenDarunter {
+    /// Vereinsname.
+    Verein,
+    /// Nation als Kürzel („GER").
+    Nation,
+    #[default]
+    #[serde(other)]
+    Ohne,
+}
+
+impl NamenDavor {
+    pub fn als_str(self) -> &'static str {
+        match self {
+            Self::Flagge => "flagge",
+            Self::Logo => "logo",
+            Self::Ohne => "ohne",
+        }
+    }
+}
+
+impl NamenDarunter {
+    pub fn als_str(self) -> &'static str {
+        match self {
+            Self::Verein => "verein",
+            Self::Nation => "nation",
+            Self::Ohne => "ohne",
+        }
+    }
+}
+
 /// Einstellungen der Court-Monitor-Anzeige (TV am Spielfeld, Raspberry Pi).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -282,16 +329,27 @@ pub struct CourtMonitorConfig {
     /// `config.json` lesbar.
     #[serde(default)]
     pub push_fallback_slow: bool,
-    /// Nation (Flagge) auf den Anzeigen zeigen (ADR 0070)? **Standard an** —
-    /// die Monitore zeigten die Flagge vor diesem Schalter immer; ein Update
-    /// soll keine Flagge verschwinden lassen. Gefiltert wird serverseitig.
-    /// Fehlt das Feld in einer älteren `config.json`, greift das
-    /// `#[serde(default)]` der Struktur → `Default` → an.
-    pub show_nations: bool,
-    /// Verein (Name + Logo) auf den Anzeigen zeigen (ADR 0070)? Standard aus.
-    /// Getrennt vom Tablet-/TL-Schalter `DisplayConfig.show_club_names`, weil
-    /// die Hallen-TVs eine andere Öffentlichkeit sind.
-    pub show_clubs: bool,
+    /// Platz vor dem Namen (ADR 0070). **Standard Flagge** — die Monitore
+    /// zeigten die Flagge schon immer; ein Update soll keine verschwinden
+    /// lassen.
+    pub name_davor: NamenDavor,
+    /// Platz unter dem Namen (ADR 0070). Standard ohne. Getrennt vom
+    /// Tablet-/TL-Schalter `DisplayConfig.show_club_names`, weil die
+    /// Hallen-TVs eine andere Öffentlichkeit sind.
+    pub name_darunter: NamenDarunter,
+}
+
+impl CourtMonitorConfig {
+    /// Braucht irgendein Platz die Nation? Nur dann verlässt sie den Server
+    /// Richtung Anzeige — gefiltert wird serverseitig (ADR 0070).
+    pub fn nation_an(&self) -> bool {
+        self.name_davor == NamenDavor::Flagge || self.name_darunter == NamenDarunter::Nation
+    }
+
+    /// Braucht irgendein Platz den Verein?
+    pub fn verein_an(&self) -> bool {
+        self.name_davor == NamenDavor::Logo || self.name_darunter == NamenDarunter::Verein
+    }
 }
 
 impl Default for CourtMonitorConfig {
@@ -310,8 +368,8 @@ impl Default for CourtMonitorConfig {
             // Aus (Spec monitor-livestand-push, S6): Eine frisch
             // aktualisierte Installation verhält sich exakt wie vorher.
             push_fallback_slow: false,
-            show_nations: true,
-            show_clubs: false,
+            name_davor: NamenDavor::Flagge,
+            name_darunter: NamenDarunter::Ohne,
         }
     }
 }
@@ -2180,8 +2238,8 @@ mod tests {
                 layout: "split".to_string(),
                 combo_vertical: true,
                 push_fallback_slow: true,
-                show_nations: false,
-                show_clubs: true,
+                name_davor: NamenDavor::Logo,
+                name_darunter: NamenDarunter::Nation,
             },
             call_timer: CallTimerConfig {
                 enabled: true,
@@ -3063,31 +3121,63 @@ mod combo_dir_tests {
     }
 }
 
-/// Schalter Nation/Verein der Anzeigen (ADR 0070).
+/// Plätze vor/unter dem Namen der Anzeigen (ADR 0070).
 #[cfg(test)]
 mod anzeige_schalter_tests {
     use super::*;
 
     #[test]
-    fn alte_config_ohne_schalter_nation_an_verein_aus() {
-        // Eine config.json von vor den Schaltern: Flaggen bleiben an.
+    fn alte_config_ohne_plaetze_flagge_davor_nichts_darunter() {
+        // Eine config.json von vor den Plätzen: Flaggen bleiben an.
         let c: CourtMonitorConfig =
             serde_json::from_str(r#"{"enabled":true,"layout":"split"}"#).unwrap();
-        assert!(c.show_nations);
-        assert!(!c.show_clubs);
+        assert_eq!(c.name_davor, NamenDavor::Flagge);
+        assert_eq!(c.name_darunter, NamenDarunter::Ohne);
+        assert!(c.nation_an() && !c.verein_an());
         let d = CourtMonitorConfig::default();
-        assert!(d.show_nations && !d.show_clubs);
+        assert_eq!(
+            (d.name_davor, d.name_darunter),
+            (c.name_davor, c.name_darunter)
+        );
     }
 
     #[test]
-    fn schalter_roundtrip() {
+    fn plaetze_roundtrip_und_unbekannt_liest_als_ohne() {
         let c = CourtMonitorConfig {
-            show_nations: false,
-            show_clubs: true,
+            name_davor: NamenDavor::Logo,
+            name_darunter: NamenDarunter::Nation,
             ..Default::default()
         };
-        let zurueck: CourtMonitorConfig =
-            serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains(r#""name_davor":"logo""#), "{json}");
+        let zurueck: CourtMonitorConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(zurueck, c);
+        let neu: CourtMonitorConfig =
+            serde_json::from_str(r#"{"name_davor":"zukunft","name_darunter":"zukunft"}"#).unwrap();
+        assert_eq!(neu.name_davor, NamenDavor::Ohne);
+        assert_eq!(neu.name_darunter, NamenDarunter::Ohne);
+    }
+
+    #[test]
+    fn datenbedarf_folgt_den_plaetzen() {
+        let mit = |davor, darunter| CourtMonitorConfig {
+            name_davor: davor,
+            name_darunter: darunter,
+            ..Default::default()
+        };
+        use NamenDarunter as U;
+        use NamenDavor as V;
+        let c = mit(V::Ohne, U::Ohne);
+        assert!(!c.nation_an() && !c.verein_an());
+        let c = mit(V::Flagge, U::Ohne);
+        assert!(c.nation_an() && !c.verein_an());
+        let c = mit(V::Ohne, U::Nation);
+        assert!(c.nation_an() && !c.verein_an());
+        let c = mit(V::Logo, U::Ohne);
+        assert!(!c.nation_an() && c.verein_an());
+        let c = mit(V::Ohne, U::Verein);
+        assert!(!c.nation_an() && c.verein_an());
+        let c = mit(V::Logo, U::Nation);
+        assert!(c.nation_an() && c.verein_an());
     }
 }
