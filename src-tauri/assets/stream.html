@@ -21,50 +21,70 @@
       color: #f8fafc;
     }
     #leiste {
-      display: inline-flex; flex-direction: column; gap: 6px;
-      margin: 12px; transition: opacity .4s ease;
+      display: inline-flex; flex-direction: column; gap: 8px;
+      margin: 14px; transition: opacity .4s ease;
     }
     #leiste.weg { opacity: 0; }
     .feld {
-      display: flex; align-items: stretch; border-radius: 8px; overflow: hidden;
-      background: rgba(11, 17, 32, .88);
-      box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+      display: flex; align-items: stretch; border-radius: 10px; overflow: hidden;
+      background: linear-gradient(180deg, rgba(22, 32, 54, .94), rgba(11, 17, 32, .94));
+      box-shadow: 0 6px 18px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 255, 255, .06);
       font-size: 26px;
     }
     .feld .kopf {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 4px; padding: 0 12px; background: #fbbf24; color: #1a1206;
-      font-weight: 900; min-width: 64px;
+      gap: 6px; padding: 8px 14px; min-width: 76px;
+      background: linear-gradient(180deg, #fcd34d, #f59e0b); color: #1a1206;
+      font-weight: 900;
     }
-    .feld .kopf img { height: 34px; width: auto; max-width: 90px; object-fit: contain; }
-    .feld .kopf .nr { font-size: 22px; letter-spacing: .04em; }
+    /* Logos auf weißem Grund wie in der Sponsor-Leiste der Monitore — dunkle
+       Logos bleiben so über jedem Video sichtbar. */
+    .feld .kopf img {
+      height: 36px; width: auto; max-width: 96px; object-fit: contain;
+      background: #fff; border-radius: 6px; padding: 3px;
+    }
+    .feld .kopf .nr { font-size: 20px; letter-spacing: .05em; white-space: nowrap; }
     /* Füllt die Breite des breitesten Felds → die Satzspalten aller Felder
        stehen bündig rechts untereinander. */
     .feld .teams { display: flex; flex-direction: column; flex: 1 1 auto; }
     .zeile {
-      display: flex; align-items: center; gap: 10px; padding: 5px 0 5px 12px;
-      min-height: 46px;
+      display: flex; align-items: center; gap: 10px; padding: 7px 0 7px 12px;
+      min-height: 50px;
     }
-    .zeile + .zeile { border-top: 1px solid rgba(255, 255, 255, .08); }
+    .zeile + .zeile { border-top: 1px solid rgba(255, 255, 255, .12); }
     .auf {
-      width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto;
+      width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
       background: transparent;
     }
     .zeile.aufschlag .auf { background: #fbbf24; box-shadow: 0 0 8px rgba(251,191,36,.8); }
-    .namen { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-    .spieler { display: flex; align-items: center; gap: 8px; white-space: nowrap; font-weight: 700; }
-    .spieler .flagge { height: 18px; width: 27px; object-fit: cover; border-radius: 2px; }
+    .namen { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; line-height: 1.15; }
+    .spieler { display: flex; align-items: center; gap: 10px; white-space: nowrap; font-weight: 700; }
+    .spieler .flagge {
+      height: 18px; width: 27px; object-fit: cover; border-radius: 3px;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, .25);
+    }
     .spieler .verein { font-size: .6em; font-weight: 600; color: #94a3b8; }
-    .spieler .verein img { height: 1.1em; vertical-align: -.2em; margin-right: 4px; }
+    .spieler .verein img {
+      height: 1.3em; vertical-align: -.35em; margin-right: 6px;
+      background: #fff; border-radius: 3px; padding: 1px;
+    }
     .spieler .seed { font-size: .7em; color: #94a3b8; }
-    .saetze { display: flex; align-items: stretch; margin-left: 14px; align-self: stretch; }
+    /* Satzspalten mit einer feinen Linie von den Namen getrennt. */
+    .saetze {
+      display: flex; align-items: stretch; margin-left: 18px; align-self: stretch;
+      border-left: 1px solid rgba(255, 255, 255, .12);
+    }
     .satz {
-      width: 46px; display: flex; align-items: center; justify-content: center;
-      font-weight: 800; font-variant-numeric: tabular-nums; color: #94a3b8;
+      width: 48px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-variant-numeric: tabular-nums; color: #64748b;
     }
     .satz.gewonnen { color: #f8fafc; }
     .satz.laufend {
-      width: 58px; background: #f8fafc; color: #0b1120; font-weight: 900;
+      width: 62px; background: rgba(255, 255, 255, .1); color: #f8fafc; font-weight: 900;
+    }
+    /* Aufschlag: die laufende Zahl leuchtet amber wie am Feld-Monitor. */
+    .zeile.aufschlag .satz.laufend {
+      background: linear-gradient(180deg, #fcd34d, #f59e0b); color: #1a1206;
     }
     .zeile.sieger .namen { color: #fbbf24; }
   </style>
