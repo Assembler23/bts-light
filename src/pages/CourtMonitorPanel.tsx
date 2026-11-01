@@ -29,6 +29,8 @@ import {
 import { HallFilter } from "../components/HallFilter";
 import { linkMitGuid } from "../io/liveLink.mjs";
 import { stilAusWert, zielMitStil, type Stil } from "../io/monitorStil.mjs";
+import { MAX_FELDER } from "../io/streamAnsicht.mjs";
+import { streamLink } from "../io/streamLink.mjs";
 import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
 import type {
   AppConfig,
@@ -486,6 +488,13 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
           Turnier-PC (über <code>localhost</code>).
         </p>
       </section>
+
+      <StreamBaukasten
+        courts={courts}
+        lanEnabled={lanEnabled}
+        cloudEnabled={cloudEnabled}
+        relayBase={info?.relay_base ?? ""}
+      />
 
       {/* Geräteliste */}
       <section className="flex flex-col gap-2">
@@ -1130,6 +1139,107 @@ function MonitorAddressRow({
       <code className="min-w-0 flex-1 truncate text-sm">{url}</code>
       <CopyButton url={url} />
     </div>
+  );
+}
+
+/**
+ * Baukasten für die OBS-Adresse der Stream-Einblendung (ADR 0069): bis zu
+ * drei Felder und die drei Abschalter wählen, fertige Adresse kopieren. Die
+ * Seite selbst hat keine Einstellungen — alles steckt in der Adresse.
+ */
+function StreamBaukasten({
+  courts,
+  lanEnabled,
+  cloudEnabled,
+  relayBase,
+}: {
+  courts: CourtOverview[];
+  lanEnabled: boolean;
+  cloudEnabled: boolean;
+  relayBase: string;
+}) {
+  const [felder, setFelder] = useState<number[]>([]);
+  const [nation, setNation] = useState(true);
+  const [verein, setVerein] = useState(true);
+  const [logo, setLogo] = useState(true);
+  // Reihenfolge der Auswahl = Reihenfolge in der Leiste.
+  function umschalten(id: number) {
+    setFelder((alt) =>
+      alt.includes(id)
+        ? alt.filter((x) => x !== id)
+        : alt.length >= MAX_FELDER
+          ? alt
+          : [...alt, id],
+    );
+  }
+  const opt = { nation, verein, logo };
+  const lan = streamLink("http://bts-light.local:8088", felder, opt);
+  const vorschau = streamLink("http://localhost:8088", felder, opt);
+  const cloud = relayBase ? streamLink(relayBase, felder, opt) : "";
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold text-slate-700">
+        Stream-Einblendung (OBS)
+      </h2>
+      <p className="text-xs text-slate-500">
+        Score-Leiste ohne Hintergrund für eine OBS-Browserquelle. Bis zu drei
+        Felder wählen — die Reihenfolge der Auswahl ist die Reihenfolge in der
+        Leiste. Größe und Lage legt man in OBS fest.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {courts.map((c) => {
+          const an = felder.includes(c.court_id);
+          const voll = !an && felder.length >= MAX_FELDER;
+          return (
+            <button
+              key={c.court_id}
+              onClick={() => umschalten(c.court_id)}
+              disabled={voll}
+              className={`rounded-md border px-2.5 py-1 text-sm transition-colors ${
+                an
+                  ? "border-amber-400 bg-amber-100 font-semibold text-amber-900"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              }`}
+            >
+              {an ? `${felder.indexOf(c.court_id) + 1}. ` : ""}
+              {c.court}
+              {c.location ? ` · ${c.location}` : ""}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={nation} onChange={(e) => setNation(e.currentTarget.checked)} />
+          Flagge
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={verein} onChange={(e) => setVerein(e.currentTarget.checked)} />
+          Verein
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={logo} onChange={(e) => setLogo(e.currentTarget.checked)} />
+          Turnierlogo
+        </label>
+      </div>
+      {felder.length === 0 ? (
+        <p className="text-xs text-slate-400">Erst ein Feld wählen.</p>
+      ) : (
+        <>
+          {lanEnabled && (
+            <OverviewLinkRow label="Hallennetz (LAN)" kind="local" url={lan} openUrl={vorschau} />
+          )}
+          {cloudEnabled && cloud && (
+            <OverviewLinkRow label="Über die Cloud" kind="online" url={cloud} openUrl={cloud} />
+          )}
+        </>
+      )}
+      <p className="text-xs text-slate-400">
+        Flagge und Verein erscheinen nur, wenn ein Platz am Namen im Setup sie
+        nutzt — die Häkchen hier können nur ausblenden. Läuft OBS auf diesem
+        PC, geht auch <code>localhost</code> statt <code>bts-light.local</code>.
+      </p>
+    </section>
   );
 }
 

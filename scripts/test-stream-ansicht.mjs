@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { streamLink } from "../src/io/streamLink.mjs";
 import {
   MAX_FELDER, DATEN_FRIST_MS, courtsAusQuery, optionenAusQuery,
   zaehltAlsDaten, datenFrisch, feldSichtbar,
@@ -61,6 +62,24 @@ ok("Spiel ohne Host unsichtbar", feldSichtbar({ courtLabel: "", match: {} }), fa
   ok("kein innerHTML", /innerHTML/.test(html), false);
   ok("Hintergrund transparent", /html, body \{[^}]*background: transparent/.test(html), true);
   ok("keine Geräte-ID", /device=/.test(html), false);
+}
+
+// ── Baukasten im Panel: gebaute Adresse liest die Seite genau so ─────────
+{
+  const lan = "http://bts-light.local:8088";
+  ok("ein Feld", streamLink(lan, [3], {}), lan + "/stream?courts=3");
+  ok("Optionen nur als =0", streamLink(lan, [1, 2], { nation: true, verein: false, logo: false }),
+    lan + "/stream?courts=1,2&verein=0&logo=0");
+  ok("höchstens drei, ohne Doppelte", streamLink(lan, [1, 1, 2, 3, 4], {}), lan + "/stream?courts=1,2,3");
+  ok("ohne Feld leer", streamLink(lan, [], {}), "");
+  ok("ohne Basis leer", streamLink("", [1], {}), "");
+  ok("Schrägstrich am Ende", streamLink("https://badhub.de/bts-relay/abc/", [5], {}),
+    "https://badhub.de/bts-relay/abc/stream?courts=5");
+  const u = new URL(streamLink(lan, [7, 9], { nation: false }));
+  ok("Rundweg Felder", courtsAusQuery(u.searchParams.get("courts")), [7, 9]);
+  ok("Rundweg Optionen",
+    optionenAusQuery(u.searchParams.get("nation"), u.searchParams.get("verein"), u.searchParams.get("logo")),
+    { nation: false, verein: true, logo: true });
 }
 
 if (failures) {

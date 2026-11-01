@@ -120,6 +120,12 @@ dort sein Ziel:
 Erst danach schaltet das Gerät selbständig auf die richtige Seite um. Du musst
 an ihm nichts eintippen — das ist der ganze Sinn der Zuweisung.
 
+**Stream-Einblendung für OBS:** Unter **Monitore** baut der Abschnitt
+**Stream-Einblendung (OBS)** die Adresse für die OBS-Browserquelle: bis zu drei
+Felder antippen, Flagge, Verein und Turnierlogo bei Bedarf abwählen, fertige
+Adresse kopieren. Details: [Stream-Einblendung](court-monitor.md).
+<!-- pruef: "Stream-Einblendung (OBS)" in src/pages/CourtMonitorPanel.tsx -->
+
 **Welches Gerät ist welches?** Bei mehreren gleich aussehenden Fernsehern hilft
 die Funktion **Identifizieren**: Der angeklickte Bildschirm blendet daraufhin
 seinen Gerätecode ein, sodass du ihn in der Liste sicher zuordnen kannst.

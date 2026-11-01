@@ -811,6 +811,13 @@ Seit v0.9.328 gibt es eine Score-Leiste **ohne Hintergrund** für Livestreams.
 Man bindet sie in OBS als **Browserquelle** ein; Größe und Lage legt man in
 OBS fest, die Seite selbst hat keine Einstellungen.
 
+**Adresse zusammenbauen:** Im Court-Monitor-Panel (**Monitore**) steht der
+Abschnitt **Stream-Einblendung (OBS)**. Dort tippt man bis zu drei Felder an —
+die Reihenfolge des Antippens ist die Reihenfolge in der Leiste —, wählt bei
+Bedarf Flagge, Verein oder Turnierlogo ab und kopiert die fertige Adresse fürs
+Hallennetz bzw. die Cloud.
+<!-- pruef: "Stream-Einblendung (OBS)" in src/pages/CourtMonitorPanel.tsx -->
+
 - Adresse im Hallennetz: `http://<Turnier-PC>:8088/stream?courts=3`
   <!-- pruef: "/stream" in src-tauri/src/tablet/server.rs -->
 - über die Cloud: `https://badhub.de/bts-relay/<Kennung>/stream?courts=3`

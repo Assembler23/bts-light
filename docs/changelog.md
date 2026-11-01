@@ -13,6 +13,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   festlegen. Flagge, Verein und Turnierlogo lassen sich per Adresse
   ausblenden (`&nation=0`, `&verein=0`, `&logo=0`). Bricht die Verbindung ab,
   verschwindet die Leiste nach 60 Sekunden, statt einen alten Stand zu zeigen.
+  Die fertige Adresse baut der neue Abschnitt **Stream-Einblendung (OBS)** im
+  Court-Monitor-Panel: Felder antippen, Häkchen setzen, kopieren.
   Die Adresse nur ans eigene Stream-Team geben.
 
 ## v0.9.327
