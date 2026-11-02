@@ -12,6 +12,8 @@ import { ScoresheetOverlay } from "../components/ScoresheetOverlay";
 import {
   callPreparation,
   hallColorsView,
+  meetingpointSet,
+  officialClear,
   preparationCandidates,
   queueOrderReset,
   queueReorder,
@@ -25,6 +27,7 @@ import type {
   AnnounceConfig,
   AzureTtsConfig,
   Discipline,
+  MpPlatz,
   PreparationCandidate,
   PreparationLocation,
 } from "../types";
@@ -235,6 +238,34 @@ export function PreparationPanel({ announce, azureTts }: Props) {
       await refresh();
     } catch {
       /* ignorieren */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Meetingpoint: Platz von Hand ein-/auschecken (Korrektur, Spec
+  // `meetingpoint-spielbereit`).
+  const setMeetingpoint = async (matchId: number, platz: MpPlatz, present: boolean) => {
+    setBusy(true);
+    try {
+      await meetingpointSet(matchId, platz, present);
+      await refresh();
+    } catch {
+      /* Fehler zeigt der nächste Abruf (Stand bleibt unverändert) */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // „Ohne Schiedsrichter" (Meetingpoint mit SR-Pflicht): löst den SR des
+  // gerufenen Spiels ausdrücklich — dann zählen nur noch die Spieler.
+  const ohneSchiedsrichter = async (matchId: number) => {
+    setBusy(true);
+    try {
+      await officialClear(matchId, "sr");
+      await refresh();
+    } catch {
+      /* Fehler zeigt der nächste Abruf */
     } finally {
       setBusy(false);
     }
@@ -520,6 +551,14 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                     <span className="text-slate-400">gegen</span>{" "}
                     {c.team2.length > 0 ? c.team2.join(" / ") : "—"}
                   </span>
+                  {c.meetingpoint && (
+                    <MeetingpointZeile
+                      c={c}
+                      busy={busy}
+                      onSet={(platz, present) => setMeetingpoint(c.match_id, platz, present)}
+                      onOhneSr={() => ohneSchiedsrichter(c.match_id)}
+                    />
+                  )}
                 </span>
                 {c.call && (
                   <span className="shrink-0 text-xs text-sky-700">
@@ -600,4 +639,76 @@ function sinceLabel(calledAtMs: number): string {
   const mins = Math.floor((Date.now() - calledAtMs) / 60000);
   if (mins <= 0) return "gerade eben";
   return `vor ${mins} Min.`;
+}
+
+/** Meetingpoint-Stand einer gerufenen Partie: je Person ein Knopf (antippen =
+ *  von Hand ein-/auschecken), dazu „spielbereit" bzw. wer fehlt. */
+function MeetingpointZeile({
+  c,
+  busy,
+  onSet,
+  onOhneSr,
+}: {
+  c: PreparationCandidate;
+  busy: boolean;
+  onSet: (platz: MpPlatz, present: boolean) => void;
+  onOhneSr: () => void;
+}) {
+  const mp = c.meetingpoint!;
+  const chips: { key: string; name: string; da: boolean; platz: MpPlatz }[] = [];
+  mp.team1Present.forEach((da, i) =>
+    chips.push({ key: `1${i}`, name: c.team1[i] ?? "?", da, platz: { art: "spieler", seite: 1, pos: i } }),
+  );
+  mp.team2Present.forEach((da, i) =>
+    chips.push({ key: `2${i}`, name: c.team2[i] ?? "?", da, platz: { art: "spieler", seite: 2, pos: i } }),
+  );
+  if (mp.srName) {
+    chips.push({
+      key: "sr",
+      name: `${mp.srName} (SR${mp.srVorab ? ", vorläufig" : ""})`,
+      da: mp.srPresent,
+      platz: { art: "sr" },
+    });
+  }
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-1">
+      {mp.bereit ? (
+        <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[11px] font-semibold text-white">
+          spielbereit
+        </span>
+      ) : (
+        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">
+          Meetingpoint
+        </span>
+      )}
+      {chips.map((ch) => (
+        <button
+          key={ch.key}
+          onClick={() => onSet(ch.platz, !ch.da)}
+          disabled={busy}
+          title={ch.da ? "Auschecken" : "Von Hand einchecken"}
+          className={
+            "rounded-md border px-1.5 py-0.5 text-[11px] transition-colors disabled:opacity-50 " +
+            (ch.da
+              ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+              : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50")
+          }
+        >
+          {ch.da ? "✓ " : "○ "}
+          {ch.name}
+        </button>
+      ))}
+      {mp.ohneSr && <span className="text-[11px] text-slate-500">ohne Schiedsrichter</span>}
+      {mp.srNoetig && !mp.ohneSr && (
+        <button
+          onClick={onOhneSr}
+          disabled={busy}
+          title="Diese Partie ohne Schiedsrichter spielen lassen"
+          className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+        >
+          Ohne Schiedsrichter
+        </button>
+      )}
+    </span>
+  );
 }

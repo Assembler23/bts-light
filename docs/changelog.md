@@ -4,6 +4,42 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.330
+
+- **Aufrufe „in Vorbereitung" überleben Neustart und Update.** Die
+  gerufenen Spiele stehen nach einem App-Neustart oder Update wieder da,
+  mit ihrem ursprünglichen Aufrufzeitpunkt; das gelbe BTP-Highlight bleibt
+  richtig zugeordnet und verschwindet wie gewohnt, wenn das Spiel aufs Feld
+  kommt.
+- **„Vom Feld nehmen" holt den Aufruf zurück.** Wird ein gerufenes Spiel
+  wieder vom Feld genommen, steht es wieder als gerufen in der Liste.
+- **Erneut in dieselbe Halle rufen setzt die Uhr nicht zurück.** „In
+  Vorbereitung · seit X Min" zählt ab dem ersten Aufruf weiter; ein Aufruf
+  in eine andere Halle beginnt neu.
+- **Neu: Meetingpoint.** Zum Meetingpoint gerufene Partien checken sich an
+  einem Tablet oder Touch-Bildschirm je Halle einzeln ein
+  (`/meetingpoint?halle=…`, Hallennetz, Cloud und Slave-PC; auch als Ansicht
+  der Anzeige-Hülle). Die Turnierleitung sieht im TL-Web und am Turnier-PC,
+  wer da ist und welche Partie **spielbereit** ist, kann von Hand korrigieren
+  und die Liste auf spielbereite Partien filtern. Alles ab Werk aus
+  (Einstellungen → Meetingpoint). Handbuch: „Meetingpoint".
+- **Nur spielbereite Partien aufs Feld** (Schalter): Die automatische
+  Feldvergabe nimmt dann nur eingecheckte Partien; ein Wunschfeld hält sein
+  Feld erst ab Spielbereitschaft frei; das TL-Web warnt, wenn ein Feld frei
+  steht und nichts bereit ist.
+- **Schiedsrichter schon beim Aufruf:** Mit Rotation bekommt eine gerufene
+  Partie vorläufig den nächsten freien Schiedsrichter (in BTP erst, wenn sie
+  aufs Feld kommt). Optional muss er für „spielbereit" eingecheckt sein;
+  einzelne Partien lassen sich auf „ohne Schiedsrichter" setzen.
+- **Aufruf-Automatik:** ruft je Halle eine feste Anzahl Partien zum
+  Meetingpoint oder so viele, wie laut Restzeit bald Felder frei werden.
+- **Fehlende:** Warnung im TL-Web und einmalige Ansage der Fehlenden mit
+  Namen, beides einstellbar.
+- **Anwesenheit am Zähl-Tablet** (optional): Spieler und Schiedsrichter
+  bestätigen bei der Seitenwahl, dass sie da sind — nur als Hinweis.
+- **Reihenfolge beim Ausrollen:** Relay vor der App deployen (neue Routen
+  und Aktionen).
+
 ## v0.9.329
 
 - **Tablet nach dem Aufklappen schneller wieder bereit.** Wird ein

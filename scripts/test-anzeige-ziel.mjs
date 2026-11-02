@@ -15,7 +15,13 @@ function ok(name, got, want) {
 }
 
 // ── Allowlist ────────────────────────────────────────────────────────────
-ok("vier Layouts", LAYOUTS, ["tafel", "feld", "uebersicht", "vorbereitung"]);
+ok("fünf Layouts", LAYOUTS, ["tafel", "feld", "uebersicht", "vorbereitung", "meetingpoint"]);
+ok("Meetingpoint ohne Halle", zielPfad(zielAusQuery("meetingpoint", null), false), "meetingpoint");
+ok("Meetingpoint mit Halle kodiert", zielPfad(zielAusQuery("meetingpoint", null, "Halle A&x=1"), false), "meetingpoint?halle=Halle%20A%26x%3D1");
+ok("Halle getrimmt", zielAusQuery("meetingpoint", null, "  Halle B ").halle, "Halle B");
+ok("Halle mit Steuerzeichen → leer", zielAusQuery("meetingpoint", null, "Halle\nB").halle, "");
+ok("Halle zu lang → leer", zielAusQuery("meetingpoint", null, "x".repeat(65)).halle, "");
+ok("Halle kein String → leer", zielAusQuery("meetingpoint", null, 5).halle, "");
 for (const l of LAYOUTS) ok(`bekanntes Layout ${l} bleibt`, zielAusQuery(l, "3").layout, l);
 ok("unbekanntes Layout → tafel", zielAusQuery("monitor", "3").layout, "tafel");
 ok("leeres Layout → tafel", zielAusQuery("", "3").layout, "tafel");

@@ -867,6 +867,106 @@ impl Default for AzureTtsConfig {
     }
 }
 
+/// Betriebsart der Aufruf-Automatik des Meetingpoints (Spec
+/// `meetingpoint-spielbereit`, Entscheidung 9).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoCallMode {
+    /// Keine automatischen Aufrufe.
+    #[default]
+    Aus,
+    /// Je Halle immer `fixed_per_hall` vergebbare Partien gerufen halten.
+    Fest,
+    /// Bedarf aus der erwarteten Restzeit der laufenden Spiele.
+    Restzeit,
+    /// Unbekannter Wert aus einer neueren Version — wie `Aus` (die Config
+    /// wandert per Identitäts-Export zwischen Versionen).
+    #[serde(other)]
+    Unbekannt,
+}
+
+/// Aufruf-Automatik des Meetingpoints (ADR 0075).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct AutoCallConfig {
+    pub mode: AutoCallMode,
+    /// Ziel im Modus `fest`: gerufene, vergebbare Partien je Halle.
+    pub fixed_per_hall: u32,
+    /// Modus `restzeit`: Felder, die innerhalb dieser Minuten frei werden,
+    /// brauchen eine wartende Partie.
+    pub horizon_minutes: u32,
+    /// Modus `restzeit`: zusätzliche Partien über den Bedarf hinaus.
+    pub buffer: u32,
+    /// Höchstzahl aktiver Aufrufe je Halle (beide Modi).
+    pub cap_per_hall: u32,
+}
+
+impl Default for AutoCallConfig {
+    fn default() -> Self {
+        Self {
+            mode: AutoCallMode::Aus,
+            fixed_per_hall: 2,
+            horizon_minutes: 10,
+            buffer: 1,
+            cap_per_hall: 4,
+        }
+    }
+}
+
+/// Meetingpoint: Einchecken je Partie und „spielbereit" (Spec
+/// `meetingpoint-spielbereit`). Alles standardmäßig aus.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MeetingpointConfig {
+    /// Meetingpoint an (Seite, Check-in, TL-Status). Aus → Routen 404.
+    pub enabled: bool,
+    /// Muss der Schiedsrichter für „spielbereit" eingecheckt sein?
+    pub require_umpire: bool,
+    /// Feld-Automatik vergibt nur spielbereite Partien (ADR 0073).
+    pub strict_auto_assign: bool,
+    /// Aufruf-Automatik (ADR 0075).
+    pub auto_call: AutoCallConfig,
+    /// Warnung in der TL, wenn eine Partie nach X Minuten nicht bereit ist.
+    pub missing_warn_enabled: bool,
+    pub missing_warn_minutes: u32,
+    /// Ansage der Fehlenden nach X Minuten (genau einmal je Partie).
+    pub missing_announce_enabled: bool,
+    pub missing_announce_minutes: u32,
+    /// Anwesenheits-Bestätigung am Zähl-Tablet (nur Anzeige für die TL).
+    pub field_check_enabled: bool,
+}
+
+impl Default for MeetingpointConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            require_umpire: false,
+            strict_auto_assign: false,
+            auto_call: AutoCallConfig::default(),
+            missing_warn_enabled: false,
+            missing_warn_minutes: 5,
+            missing_announce_enabled: false,
+            missing_announce_minutes: 5,
+            field_check_enabled: false,
+        }
+    }
+}
+
+impl MeetingpointConfig {
+    /// Wirkt der strikte Modus? Nur zusammen mit dem Meetingpoint.
+    pub fn strict(&self) -> bool {
+        self.enabled && self.strict_auto_assign
+    }
+
+    /// Läuft die Aufruf-Automatik, und in welcher Betriebsart?
+    pub fn auto_call_mode(&self) -> AutoCallMode {
+        match (self.enabled, self.auto_call.mode) {
+            (true, m @ (AutoCallMode::Fest | AutoCallMode::Restzeit)) => m,
+            _ => AutoCallMode::Aus,
+        }
+    }
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -983,6 +1083,10 @@ pub struct AppConfig {
     /// Konfigurationsdateien lesbar.
     #[serde(default)]
     pub officials: OfficialsConfig,
+    /// Meetingpoint (Spec `meetingpoint-spielbereit`). `#[serde(default)]`
+    /// hält ältere Konfigurationsdateien lesbar.
+    #[serde(default)]
+    pub meetingpoint: MeetingpointConfig,
     /// Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
     /// ein (manuell + automatisch). Leer = keine Einschränkung. `#[serde(default)]`
     /// hält ältere Konfigurationsdateien lesbar.
@@ -2308,6 +2412,23 @@ mod tests {
                 enabled: true,
                 rotation_sr: true,
                 rotation_ar: false,
+            },
+            meetingpoint: MeetingpointConfig {
+                enabled: true,
+                require_umpire: true,
+                strict_auto_assign: true,
+                auto_call: AutoCallConfig {
+                    mode: AutoCallMode::Restzeit,
+                    fixed_per_hall: 3,
+                    horizon_minutes: 12,
+                    buffer: 2,
+                    cap_per_hall: 5,
+                },
+                missing_warn_enabled: true,
+                missing_warn_minutes: 7,
+                missing_announce_enabled: true,
+                missing_announce_minutes: 8,
+                field_check_enabled: true,
             },
             discipline_hall_rules: vec![DisciplineHallRule {
                 discipline: "mens_singles".to_string(),

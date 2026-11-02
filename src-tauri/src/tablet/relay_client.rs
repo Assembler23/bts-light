@@ -144,6 +144,9 @@ async fn serve(
     // (Cluster C Stufe 2) — `None` erzwingt das erste Senden nach dem
     // Verbinden (auch für die Wiederbefüllung nach einem Reconnect).
     let mut prepared_fp: Option<String> = None;
+    // Meetingpoint-Stand (Spec `meetingpoint-spielbereit`): im 2-s-Takt,
+    // nur bei Änderung; `None` erzwingt das erste Senden nach dem Verbinden.
+    let mut meetingpoint_fp: Option<String> = None;
     // Geräte-Steuerung: Feld-Zuweisungen/Befehle pushen, Geräteliste holen.
     let mut control_ticker = tokio::time::interval(CONTROL_TICK);
     control_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -231,6 +234,7 @@ async fn serve(
                 // niemanden kennt, dem er ihn zeigen dürfte.
                 push_tl_auth(ctx, &tx, &mut tl_auth_fp);
                 push_tl_state(ctx, &tx, &mut tl_state_rev);
+                push_meetingpoint(ctx, &tx, &mut meetingpoint_fp);
             }
             _ = monitor_ticker.tick() => {
                 maybe_upload_monitor(ctx, install_id, &mut monitor_fp).await;
@@ -542,6 +546,30 @@ async fn handle_frame(
                 permanent: resp.permanent,
             }));
         }
+        // Meetingpoint-Check-in aus der Cloud: dieselbe Prüfung wie im
+        // Hallennetz (ADR 0074, R5-Analogie). Rein lokal, kein BTP-Write.
+        RelayFrame::MeetingpointCheckin { req_id, body } => {
+            // In einem eigenen Task wie `TlCommand`: Der Check-in klont den
+            // Stand und schreibt auf die Platte — diese Schleife bedient aber
+            // alle Tablets der Halle und beantwortet die Pings (Security-
+            // Review M2).
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let config = ctx.app_config();
+                let result = crate::tablet::meetingpoint::checkin(
+                    &ctx.tablet,
+                    &config.meetingpoint,
+                    &body,
+                    monitor::now_ms(),
+                );
+                let _ = tx.send(text(&HostFrame::MeetingpointAck {
+                    req_id,
+                    ok: result.is_ok(),
+                    error: result.err(),
+                }));
+            });
+        }
         // TL-Web über die Cloud: **derselbe** Ausführungsweg wie im
         // Hallennetz (`tl::execute`) — so wird jede Mutation genau einmal
         // geprüft, ganz wie bei den Ergebnissen der Tablets (R5).
@@ -773,14 +801,18 @@ fn push_court(
                 hall,
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(
+                    let cfg = ctx.app_config();
+                    let mut brief = match_brief(
                         &m,
                         sk,
                         ska,
-                        &ctx.app_config().display,
+                        &cfg.display,
                         finalized,
                         ctx.tablet.match_officials(&m),
-                    )
+                    );
+                    brief.feld_check =
+                        cfg.meetingpoint.enabled && cfg.meetingpoint.field_check_enabled;
+                    brief
                 },
                 // Autoritativer 1.-Aufruf-Zeitstempel vom Host (gleiche Quelle
                 // wie die Spielübersicht) – auch bei Reconnect identisch.
@@ -1097,6 +1129,28 @@ fn build_prepared_list(
             })
         })
         .collect()
+}
+
+/// Pusht den Meetingpoint-Stand aller Hallen an den Relay — nur bei
+/// Änderung. Der Relay schneidet ihn je Seite auf die Halle zu.
+fn push_meetingpoint(
+    ctx: &ServerCtx,
+    tx: &mpsc::UnboundedSender<WsMessage>,
+    last_fp: &mut Option<String>,
+) {
+    let config = ctx.app_config();
+    let snapshot = ctx.tablet.snapshot_clone();
+    let view = crate::tablet::meetingpoint::view_alle_hallen(
+        &ctx.tablet,
+        snapshot.as_ref(),
+        &config.meetingpoint,
+    );
+    let fp = serde_json::to_string(&view).unwrap_or_default();
+    if last_fp.as_deref() == Some(fp.as_str()) {
+        return;
+    }
+    *last_fp = Some(fp);
+    let _ = tx.send(text(&HostFrame::Meetingpoint { view }));
 }
 
 /// Pusht die aufgerufenen Spiele an den Relay – nur bei Änderung gegenüber dem

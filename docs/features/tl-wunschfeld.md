@@ -173,3 +173,10 @@ verschöben. Dieselbe Behandlung wie bei ausgenommenen Spielen.
 `docs/turnierleitung-web.md` (Bedienung) · `docs/btp_protocol.md`
 (Vergabe/Kaskade) · `docs/cloud-relay.md` (Wire) · `docs/changelog.md` ·
 CLAUDE.md-Tabelle · Versions-Trippel.
+
+## Nachtrag: strikter Meetingpoint-Modus (v0.9.330, ADR 0073)
+
+Ist „Automatische Feldvergabe nur für spielbereite Partien" an, hält ein
+Wunschfeld sein Feld erst frei, wenn die Partie am Meetingpoint spielbereit
+ist — sonst blockierte ein nicht eingechecktes Wunschspiel das Feld
+unbegrenzt.

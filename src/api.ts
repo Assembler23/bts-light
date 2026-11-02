@@ -43,6 +43,7 @@ import type {
   WalkoverResult,
   WifiStatus,
   WinnersView,
+  MpPlatz,
 } from "./types";
 
 export const loadConfig = (): Promise<AppConfig> => invoke("load_config");
@@ -507,6 +508,14 @@ export const callPreparation = (
   matchIds: number[],
   locationId: number | null,
 ): Promise<void> => invoke("call_preparation", { matchIds, locationId });
+
+/** Meetingpoint: einen Platz einer gerufenen Partie von Hand ein- oder
+ *  auschecken (Korrektur am Turnier-PC). */
+export const meetingpointSet = (
+  matchId: number,
+  platz: MpPlatz,
+  present: boolean,
+): Promise<void> => invoke("meetingpoint_set", { matchId, platz, present });
 
 /** Nimmt den „in Vorbereitung"-Aufruf eines Spiels zurück. */
 export const retractPreparation = (matchId: number): Promise<void> =>

@@ -465,6 +465,13 @@
       font-size: 1rem; line-height: 1.35; text-align: center; color: #fde68a;
     }
     .modal .sk-hint[hidden] { display: none; }
+    .modal .anwesend { margin: .2rem 0 .8rem; text-align: center; }
+    .modal .anwesend[hidden] { display: none; }
+    .modal .anwesend .aw-titel { color: #94a3b8; font-size: .9rem; margin-bottom: .35rem; }
+    .modal .anwesend .aw-liste { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; }
+    .modal .anwesend button { font: inherit; font-size: 1rem; color: #e2e8f0; background: #1e293b;
+      border: 2px solid #334155; border-radius: .6rem; padding: .45rem .8rem; cursor: pointer; }
+    .modal .anwesend button.da { background: #14532d; border-color: #22c55e; color: #fff; }
     .modal .sk-hint .sk-names { font-weight: 700; color: #fff; }
     .modal .sk-hint .sk-label { opacity: .85; }
     /* Einstellungen (PIN + Feldwechsel). */
@@ -941,6 +948,10 @@
        schiedsrichter-management). Kommt als Namen im MatchBrief, LAN wie
        Cloud; leer, wenn ohne Schiedsrichter gespielt wird. -->
   <div class="sk-hint" id="setup-officials" hidden></div>
+  <!-- Anwesenheit am Feld (Spec meetingpoint-spielbereit Nr. 11): nur wenn
+       der Turnier-PC es anbietet (`MatchBrief.feldCheck`). Reine Anzeige für
+       die Turnierleitung — zählen geht jederzeit, auch ohne Bestätigung. -->
+  <div class="anwesend" id="setup-anwesend" hidden></div>
   <div class="options" id="setup-options"></div>
   <button type="button" class="setup-back" id="setup-back">← Zurück · Back</button>
 </div>
@@ -1574,6 +1585,7 @@ const els = {
   setupOptions: document.getElementById('setup-options'),
   setupScorekeeper: document.getElementById('setup-scorekeeper'),
   setupOfficials: document.getElementById('setup-officials'),
+  setupAnwesend: document.getElementById('setup-anwesend'),
   setupBack: document.getElementById('setup-back'),
   finishedOverlay: document.getElementById('finished-overlay'),
   finishedUmpire: document.getElementById('finished-umpire'),
@@ -4527,6 +4539,7 @@ function renderSetupModal() {
   // Vorspiel auf dem Feld bekannt ist: der Verlierer bedient die Zähltafel.
   renderScorekeeperHint(STATE.setup === 'choose-side');
   renderOfficialsHint(STATE.setup === 'choose-side');
+  renderAnwesenheit(STATE.setup === 'choose-side');
   if (STATE.setup === 'choose-side') {
     if (uebereinander()) {
       setSetupText(
@@ -4656,6 +4669,58 @@ function renderOfficialsHint(show) {
   }
   els.setupOfficials.innerHTML = `⚖️ ` + teile.join(' · ');
   els.setupOfficials.hidden = false;
+}
+
+// ── Anwesenheit am Feld (Meetingpoint, nur Anzeige) ─────────────────────
+// Bestätigte Plätze je Spiel: Schlüssel `matchId:platz`. Nur im Speicher —
+// die Wahrheit hält der Turnier-PC, das Tablet merkt sich bloß, was es
+// erfolgreich gemeldet hat.
+const ANWESEND = {};
+function anwesendSchluessel(matchId, platz) {
+  return matchId + ':' + platz.art + ':' + (platz.seite || 0) + ':' + (platz.pos || 0);
+}
+function renderAnwesenheit(show) {
+  const m = STATE.match;
+  if (!show || !m || !m.feldCheck) { els.setupAnwesend.hidden = true; return; }
+  const plaetze = [];
+  (m.teamA || []).forEach((p, i) => plaetze.push({ name: p.name, platz: { art: 'spieler', seite: 1, pos: i } }));
+  (m.teamB || []).forEach((p, i) => plaetze.push({ name: p.name, platz: { art: 'spieler', seite: 2, pos: i } }));
+  const sr = Array.isArray(m.srNames) ? m.srNames : [];
+  if (sr.length) plaetze.push({ name: sr[0], platz: { art: 'sr' } });
+  els.setupAnwesend.innerHTML = '';
+  const titel = document.createElement('div');
+  titel.className = 'aw-titel';
+  titel.textContent = 'Anwesenheit bestätigen · Confirm presence (antippen)';
+  els.setupAnwesend.appendChild(titel);
+  const liste = document.createElement('div');
+  liste.className = 'aw-liste';
+  plaetze.forEach((e) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const schl = anwesendSchluessel(m.matchId, e.platz);
+    const da = !!ANWESEND[schl];
+    b.className = da ? 'da' : '';
+    b.textContent = (da ? '✓ ' : '') + e.name;
+    b.addEventListener('click', () => anwesenheitMelden(m.matchId, e.platz, !da));
+    liste.appendChild(b);
+  });
+  els.setupAnwesend.appendChild(liste);
+  els.setupAnwesend.hidden = false;
+}
+async function anwesenheitMelden(matchId, platz, present) {
+  const schl = anwesendSchluessel(matchId, platz);
+  try {
+    const res = await fetch(BASE_PATH + '/meetingpoint/checkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ halle: '', matchId, platz, present, ort: 'feld' }),
+    });
+    const data = await res.json().catch(() => null);
+    if (data && data.ok) {
+      if (present) ANWESEND[schl] = true; else delete ANWESEND[schl];
+    }
+  } catch (e) { /* Netz weg: nichts gemerkt, erneut antippen */ }
+  if (STATE.match && STATE.match.matchId === matchId) renderAnwesenheit(STATE.setup === 'choose-side');
 }
 
 function renderPartnerHint(teamKey, playerId) {

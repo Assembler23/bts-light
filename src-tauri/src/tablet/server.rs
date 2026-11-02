@@ -603,6 +603,11 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         // GET — die Seite liest fertige Ansagen und vertont nichts auf
         // Zuruf. Sonst spräche jeder im Hallennetz beliebigen Text auf
         // Azure-Kosten in die Halle.
+        // Meetingpoint (Spec meetingpoint-spielbereit, ADR 0074): offen wie
+        // die Anzeige-Seiten; jede Meldung prüft `meetingpoint::checkin`.
+        .route("/meetingpoint", get(meetingpoint_page))
+        .route("/meetingpoint/state", get(meetingpoint_state))
+        .route("/meetingpoint/checkin", post(meetingpoint_checkin))
         .route("/ansage", get(ansage_page))
         .route("/ansage/feed", get(ansage_feed))
         .route("/ansage/audio/{id}", get(ansage_audio))
@@ -1904,6 +1909,80 @@ async fn info_announce_jobs(
 /// Rendert `ansage.html`. `base` endet mit `/` (LAN `/`).
 fn render_ansage_html(base: &str) -> String {
     assets::ANSAGE_HTML.replace("__BASE__", base)
+}
+
+/// Rendert `meetingpoint.html`. `base` endet mit `/` (LAN `/`).
+pub(crate) fn render_meetingpoint_html(base: &str) -> String {
+    assets::MEETINGPOINT_HTML.replace("__BASE__", base)
+}
+
+#[derive(serde::Deserialize)]
+struct MeetingpointQuery {
+    #[serde(default)]
+    halle: String,
+}
+
+/// Meetingpoint-Seite. Ausgeschaltet → 404, damit niemand eine tote Seite
+/// an den Meetingpoint hängt.
+async fn meetingpoint_page(State(ctx): State<Arc<ServerCtx>>) -> axum::response::Response {
+    if !ctx.app_config().meetingpoint.enabled {
+        return (StatusCode::NOT_FOUND, "Meetingpoint ist ausgeschaltet").into_response();
+    }
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(render_meetingpoint_html("/")),
+    )
+        .into_response()
+}
+
+/// Zustand der Meetingpoint-Seite einer Halle — nur Namen und Flags.
+async fn meetingpoint_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<MeetingpointQuery>,
+) -> axum::response::Response {
+    let config = ctx.app_config();
+    if !config.meetingpoint.enabled {
+        return (StatusCode::NOT_FOUND, "Meetingpoint ist ausgeschaltet").into_response();
+    }
+    let snap = ctx.tablet.snapshot_clone();
+    let view = crate::tablet::meetingpoint::view(
+        &ctx.tablet,
+        snap.as_ref(),
+        &config.meetingpoint,
+        &q.halle,
+    );
+    ([(header::CACHE_CONTROL, "no-store")], Json(view)).into_response()
+}
+
+/// Check-in von der Meetingpoint-Seite bzw. dem Zähl-Tablet (`ort=feld`).
+async fn meetingpoint_checkin(
+    State(ctx): State<Arc<ServerCtx>>,
+    Json(body): Json<relay_proto::MpCheckinBody>,
+) -> axum::response::Response {
+    let config = ctx.app_config();
+    if !config.meetingpoint.enabled {
+        return (StatusCode::NOT_FOUND, "Meetingpoint ist ausgeschaltet").into_response();
+    }
+    match crate::tablet::meetingpoint::checkin(
+        &ctx.tablet,
+        &config.meetingpoint,
+        &body,
+        crate::tablet::monitor::now_ms(),
+    ) {
+        Ok(()) => Json(relay_proto::MpCheckinResponse {
+            ok: true,
+            error: None,
+        })
+        .into_response(),
+        Err(e) => (
+            StatusCode::CONFLICT,
+            Json(relay_proto::MpCheckinResponse {
+                ok: false,
+                error: Some(e),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 /// Ansage-Seite (`/ansage`): Halle wählen, Ton freischalten, zuhören.
@@ -3669,6 +3748,8 @@ pub(crate) fn match_brief(
         // Dieser Host deutet `teams_corrected` (ADR 0067) → das Tablet darf
         // „Mannschaften tauschen" anbieten.
         teams_correction: true,
+        // Wird am Aufrufer aus der Meetingpoint-Config gesetzt.
+        feld_check: false,
         seed_a: m.team1_seed.clone(),
         seed_b: m.team2_seed.clone(),
     }
@@ -4247,14 +4328,18 @@ async fn push_match(
             ServerMsg::MatchAssigned {
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
-                    match_brief(
+                    let cfg = ctx.app_config_arc();
+                    let mut brief = match_brief(
                         m,
                         sk,
                         ska,
-                        &ctx.app_config_arc().display,
+                        &cfg.display,
                         finalized,
                         ctx.tablet.match_officials(m),
-                    )
+                    );
+                    brief.feld_check =
+                        cfg.meetingpoint.enabled && cfg.meetingpoint.field_check_enabled;
+                    brief
                 },
             }
         }

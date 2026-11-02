@@ -20,6 +20,7 @@ import {
   Volume2,
   Wifi,
   X,
+  MapPin,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -57,6 +58,7 @@ import {
 } from "../tournamentGuid";
 import type {
   AppConfig,
+  AutoCallMode,
   ConnectionMode,
   CourtAd,
   DisciplineHallRule,
@@ -531,6 +533,21 @@ export function SetupWizard({
   const [offEnabled, setOffEnabled] = useState(off?.enabled ?? false);
   const [offRotationSr, setOffRotationSr] = useState(off?.rotation_sr ?? false);
   const [offRotationAr, setOffRotationAr] = useState(off?.rotation_ar ?? false);
+  // Meetingpoint (Spec meetingpoint-spielbereit): alles standardmäßig aus.
+  const mpc = initialConfig.meetingpoint;
+  const [mpEnabled, setMpEnabled] = useState(mpc?.enabled ?? false);
+  const [mpRequireUmpire, setMpRequireUmpire] = useState(mpc?.require_umpire ?? false);
+  const [mpStrict, setMpStrict] = useState(mpc?.strict_auto_assign ?? false);
+  const [mpMode, setMpMode] = useState<AutoCallMode>(mpc?.auto_call?.mode ?? "aus");
+  const [mpFixed, setMpFixed] = useState(String(mpc?.auto_call?.fixed_per_hall ?? 2));
+  const [mpHorizon, setMpHorizon] = useState(String(mpc?.auto_call?.horizon_minutes ?? 10));
+  const [mpBuffer, setMpBuffer] = useState(String(mpc?.auto_call?.buffer ?? 1));
+  const [mpCap, setMpCap] = useState(String(mpc?.auto_call?.cap_per_hall ?? 4));
+  const [mpWarn, setMpWarn] = useState(mpc?.missing_warn_enabled ?? false);
+  const [mpWarnMin, setMpWarnMin] = useState(String(mpc?.missing_warn_minutes ?? 5));
+  const [mpAnnounce, setMpAnnounce] = useState(mpc?.missing_announce_enabled ?? false);
+  const [mpAnnounceMin, setMpAnnounceMin] = useState(String(mpc?.missing_announce_minutes ?? 5));
+  const [mpFieldCheck, setMpFieldCheck] = useState(mpc?.field_check_enabled ?? false);
   // Automatische Feldvergabe.
   const aa = initialConfig.auto_assign;
   const [aaEnabled, setAaEnabled] = useState(aa?.enabled ?? false);
@@ -792,6 +809,30 @@ export function SetupWizard({
         rotation_sr: offRotationSr,
         rotation_ar: offRotationAr,
       },
+      meetingpoint: (() => {
+        // Leere/ungültige Eingaben fallen auf den Standard zurück.
+        const zahl = (v: string, fallback: number, min = 0) => {
+          const n = Math.round(Number(v));
+          return Number.isFinite(n) && n >= min ? n : fallback;
+        };
+        return {
+          enabled: mpEnabled,
+          require_umpire: mpRequireUmpire,
+          strict_auto_assign: mpStrict,
+          auto_call: {
+            mode: mpMode,
+            fixed_per_hall: zahl(mpFixed, 2),
+            horizon_minutes: zahl(mpHorizon, 10),
+            buffer: zahl(mpBuffer, 1),
+            cap_per_hall: zahl(mpCap, 4, 1),
+          },
+          missing_warn_enabled: mpWarn,
+          missing_warn_minutes: zahl(mpWarnMin, 5, 1),
+          missing_announce_enabled: mpAnnounce,
+          missing_announce_minutes: zahl(mpAnnounceMin, 5, 1),
+          field_check_enabled: mpFieldCheck,
+        };
+      })(),
       auto_assign: {
         enabled: aaEnabled,
         // Negative/leere Eingabe abfangen; 0 ist erlaubt (sofort belegen).
@@ -1911,6 +1952,168 @@ export function SetupWizard({
               befindliche und Schiedsrichter mit Vereins-/Personen-Konflikt
               werden übersprungen.
             </p>
+          </div>
+        )}
+      </section>
+
+      {/* Meetingpoint (Spec meetingpoint-spielbereit) */}
+      <section id="section-meetingpoint" className="flex flex-col gap-2 scroll-mt-4">
+        <SectionHeader icon={MapPin}>Meetingpoint</SectionHeader>
+        <p className="text-xs text-slate-500">
+          Zum Meetingpoint gerufene Partien checken sich an einem Tablet oder
+          Touch-Bildschirm einzeln ein (Seite <code>/meetingpoint?halle=…</code>).
+          Die Turnierleitung sieht, wer da ist, und bringt spielbereite Partien
+          aufs Feld. Der Zähltafelbediener checkt nicht ein.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={mpEnabled}
+            onChange={(e) => setMpEnabled(e.currentTarget.checked)}
+          />
+          Meetingpoint verwenden
+        </label>
+        {mpEnabled && (
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={mpRequireUmpire}
+                onChange={(e) => setMpRequireUmpire(e.currentTarget.checked)}
+              />
+              Schiedsrichter muss für „spielbereit“ eingecheckt sein
+            </label>
+            <p className="text-xs text-slate-500">
+              Gilt nur mit Schiedsrichtern und Rotation: Eine gerufene Partie
+              bekommt dann schon beim Aufruf vorläufig einen freien
+              Schiedsrichter. Fehlen Schiedsrichter, lässt sich eine Partie
+              einzeln auf „ohne Schiedsrichter“ setzen.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={mpStrict}
+                onChange={(e) => setMpStrict(e.currentTarget.checked)}
+              />
+              Automatische Feldvergabe nur für spielbereite Partien
+            </label>
+            <p className="text-xs text-slate-500">
+              Dann bekommen nur eingecheckte Partien automatisch ein Feld —
+              Spiele, die niemand zum Meetingpoint ruft, bleiben liegen. Von
+              Hand lässt sich weiterhin jedes Spiel vergeben. Steht ein Feld
+              frei, ohne dass eine Partie bereit ist, warnt die
+              Turnierleitungs-Seite.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              Partien automatisch zum Meetingpoint rufen
+              <select
+                value={mpMode}
+                onChange={(e) => setMpMode(e.currentTarget.value as AutoCallMode)}
+                className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              >
+                <option value="aus">aus</option>
+                <option value="fest">feste Anzahl je Halle</option>
+                <option value="restzeit">nach Restzeit der laufenden Spiele</option>
+              </select>
+            </label>
+            {mpMode !== "aus" && (
+              <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
+                {mpMode === "fest" && (
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                Partien je Halle
+                <input
+                  type="number"
+                  min={0}
+                  value={mpFixed}
+                  onChange={(e) => setMpFixed(e.currentTarget.value)}
+                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+                )}
+                {mpMode === "restzeit" && (
+                  <>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                Felder frei in (Min.)
+                <input
+                  type="number"
+                  min={0}
+                  value={mpHorizon}
+                  onChange={(e) => setMpHorizon(e.currentTarget.value)}
+                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                Puffer (Partien)
+                <input
+                  type="number"
+                  min={0}
+                  value={mpBuffer}
+                  onChange={(e) => setMpBuffer(e.currentTarget.value)}
+                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+                  </>
+                )}
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                höchstens je Halle
+                <input
+                  type="number"
+                  min={0}
+                  value={mpCap}
+                  onChange={(e) => setMpCap(e.currentTarget.value)}
+                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={mpWarn}
+                onChange={(e) => setMpWarn(e.currentTarget.checked)}
+              />
+              Warnung, wenn eine Partie nicht vollständig erscheint
+            </label>
+            {mpWarn && (
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                nach Minuten
+                <input
+                  type="number"
+                  min={0}
+                  value={mpWarnMin}
+                  onChange={(e) => setMpWarnMin(e.currentTarget.value)}
+                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+            )}
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={mpAnnounce}
+                onChange={(e) => setMpAnnounce(e.currentTarget.checked)}
+              />
+              Fehlende automatisch zum Meetingpoint ansagen (einmal)
+            </label>
+            {mpAnnounce && (
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                nach Minuten
+                <input
+                  type="number"
+                  min={0}
+                  value={mpAnnounceMin}
+                  onChange={(e) => setMpAnnounceMin(e.currentTarget.value)}
+                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+            )}
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={mpFieldCheck}
+                onChange={(e) => setMpFieldCheck(e.currentTarget.checked)}
+              />
+              Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen
+            </label>
           </div>
         )}
       </section>

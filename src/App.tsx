@@ -155,6 +155,18 @@ function defaultConfig(): AppConfig {
       rotation_sr: false,
       rotation_ar: false,
     },
+    // Meetingpoint: alles aus (wie der Rust-Default).
+    meetingpoint: {
+      enabled: false,
+      require_umpire: false,
+      strict_auto_assign: false,
+      auto_call: { mode: "aus", fixed_per_hall: 2, horizon_minutes: 10, buffer: 1, cap_per_hall: 4 },
+      missing_warn_enabled: false,
+      missing_warn_minutes: 5,
+      missing_announce_enabled: false,
+      missing_announce_minutes: 5,
+      field_check_enabled: false,
+    },
     discipline_hall_rules: [],
     locked_courts: [],
     tablet_settings_pin: "0000",

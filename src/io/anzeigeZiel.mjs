@@ -2,7 +2,7 @@
  *  `docs/features/zaehltafel-anzeige-huelle.md`, Abschnitt „Anzeige-Hülle").
  *
  *  Die Hülle bettet eine Anzeige-Seite in ein iframe. Was dort geladen wird,
- *  entscheidet ausschließlich dieses Modul: vier feste Layouts, eine CourtID
+ *  entscheidet ausschließlich dieses Modul: fünf feste Layouts, eine CourtID
  *  als positive Ganzzahl — nie freier Text aus der Adresse. Ein unbekanntes
  *  Layout fällt auf die Zähltafel zurück, eine unbrauchbare CourtID wird
  *  `null` (die Hülle öffnet dann die Feldwahl).
@@ -14,7 +14,17 @@
  *  durchlaufen keinen Build) — Änderungen hier und dort gemeinsam.
  */
 
-export const LAYOUTS = ["tafel", "feld", "uebersicht", "vorbereitung"];
+export const LAYOUTS = ["tafel", "feld", "uebersicht", "vorbereitung", "meetingpoint"];
+
+/** Hallenname für den Meetingpoint (`?halle=`): getrimmt, höchstens 64
+ *  Zeichen, ohne Steuerzeichen — sonst leer. Er geht nur kodiert in die
+ *  Query der Meetingpoint-Seite, nie in einen Pfad. */
+export function halleAusWert(roh) {
+  if (typeof roh !== "string") return "";
+  const h = roh.trim();
+  if (!h || h.length > 64 || /[\u0000-\u001f\u007f]/.test(h)) return "";
+  return h;
+}
 
 /** Braucht das Layout ein Feld? */
 export function feldbezogen(layout) {
@@ -24,16 +34,17 @@ export function feldbezogen(layout) {
 /**
  * @param {unknown} layoutRoh Wert aus `?layout=` (oder gemerkt).
  * @param {unknown} courtRoh Wert aus `?court=` (oder gemerkt).
- * @returns {{layout:string, court:number|null}}
+ * @param {unknown} [halleRoh] Wert aus `?halle=` (nur Meetingpoint).
+ * @returns {{layout:string, court:number|null, halle:string}}
  */
-export function zielAusQuery(layoutRoh, courtRoh) {
+export function zielAusQuery(layoutRoh, courtRoh, halleRoh) {
   const l = typeof layoutRoh === "string" ? layoutRoh : "";
   const layout = LAYOUTS.includes(l) ? l : "tafel";
   const c = courtRoh == null ? "" : String(courtRoh);
   // Nur 1–10 Ziffern ohne führende Null: keine Vorzeichen, Brüche,
   // Exponenten, Pfadteile oder Leerzeichen.
   const court = /^[1-9][0-9]{0,9}$/.test(c) ? Number(c) : null;
-  return { layout, court };
+  return { layout, court, halle: halleAusWert(halleRoh) };
 }
 
 /**
@@ -60,6 +71,10 @@ export function zielPfad(ziel, spiegel, anordnung) {
       return "info/overview";
     case "vorbereitung":
       return "info/preparation";
+    case "meetingpoint": {
+      const h = halleAusWert(ziel.halle);
+      return "meetingpoint" + (h ? "?halle=" + encodeURIComponent(h) : "");
+    }
     default:
       return null;
   }

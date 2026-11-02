@@ -624,6 +624,59 @@ async fn club_logo(cfg: &BridgeConfig, query: Option<&str>) -> Response {
     }
 }
 
+/// `/meetingpoint` — Meetingpoint-Seite. Im Träger-Betrieb lokal (Abrufe
+/// laufen über diesen Server), sonst Weiterleitung in die Cloud samt
+/// `?halle=`.
+async fn meetingpoint(State(cfg): State<Arc<BridgeConfig>>, RawQuery(query): RawQuery) -> Response {
+    if cfg.traegt().is_none() {
+        if cfg.traeger_betrieb() {
+            return (
+                [(header::CACHE_CONTROL, "no-store")],
+                Html(warteseite_html("Der Meetingpoint ist gleich wieder da.")),
+            )
+                .into_response();
+        }
+        return Redirect::to(&mit_query(
+            format!("{}/meetingpoint", cfg.relay_basis()),
+            query.as_deref(),
+        ))
+        .into_response();
+    }
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(super::server::render_meetingpoint_html("/")),
+    )
+        .into_response()
+}
+
+/// `/meetingpoint/checkin` — Check-in an den Relay, der ihn dem Master
+/// vorlegt. Eigener HTTP-Aufruf wie `/result`; die Prüfung liegt beim Master.
+async fn meetingpoint_checkin(State(cfg): State<Arc<BridgeConfig>>, rumpf: String) -> Response {
+    if cfg.traegt().is_none() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    let url = format!("{}/meetingpoint/checkin", cfg.relay_basis());
+    match cfg
+        .http
+        .post(&url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(rumpf)
+        .send()
+        .await
+    {
+        Ok(antwort) => {
+            let status =
+                StatusCode::from_u16(antwort.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let text = antwort.text().await.unwrap_or_default();
+            (status, [(header::CONTENT_TYPE, "application/json")], text).into_response()
+        }
+        Err(e) => {
+            tracing::warn!("Meetingpoint-Check-in an {url}: {e}");
+            StatusCode::BAD_GATEWAY.into_response()
+        }
+    }
+}
+
 /// `/result` — Ergebnis des Tablets an den Relay.
 ///
 /// Geht als eigener HTTP-Aufruf, nicht durch den Träger: Der Relay wartet auf
@@ -708,6 +761,15 @@ pub async fn run(
         .route("/ws", get(tablet_ws))
         .route("/monitor-ws", get(monitor_ws))
         .route("/result", post(result))
+        // Meetingpoint der fernen Halle (Spec meetingpoint-spielbereit, G10):
+        // Seite lokal im Träger-Betrieb, sonst 303 in die Cloud; Stand
+        // lesend durchgereicht, Check-in wie `/result` an den Relay.
+        .route("/meetingpoint", get(meetingpoint))
+        .route("/meetingpoint/state", get(lesend))
+        .route(
+            "/meetingpoint/checkin",
+            post(meetingpoint_checkin).layer(axum::extract::DefaultBodyLimit::max(2 * 1024)),
+        )
         // Lesende Zusatz-Abrufe der Seiten — als eigene HTTPS-Anfrage, nicht
         // durch den Träger (siehe `durchreichen`).
         .route("/courts", get(lesend))

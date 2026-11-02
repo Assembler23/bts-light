@@ -512,3 +512,20 @@ verwaltung ganz aus, kennt der Host nie einen SR, und die Automatik bleibt
 bauartbedingt stumm. Die Zuordnung darf dabei **nach** der Feldvergabe kommen
 (Rotation oder von Hand): Geprüft wird ein Zustand, nicht ein Augenblick.
 
+## Vorläufige Zuteilung beim Meetingpoint-Aufruf (seit v0.9.330, ADR 0072)
+
+Mit eingeschaltetem Meetingpoint und SR-Rotation bekommt jede gerufene Partie
+ohne wirksamen SR (und ohne „ohne Schiedsrichter" = `Some(0)`) **vorläufig**
+den nächsten freien SR (`meetingpoint::vorab_sr_verteilen`, je Sync-Lauf nach
+`track_officials`, zustandsbasiert). Belegt sind SR/AR laufender Spiele und
+alle schon vorläufig Zugeteilten; freiwerdende SR gehen an die älteste
+gerufene Partie.
+
+Der vorläufige SR liegt im Meetingpoint-Store, **nicht** in
+`OfficialsStore.assignments` — sonst schriebe `officials_entries` ihn sofort
+nach BTP, und eine Rücknahme hinterließe `Some(0)`. Übernommen wird er beim
+Aufs-Feld-Kommen (`uebernimm_vorab_sr`): in `auto_assign` vor
+`officials_for_write` (reist im selben Write mit) bzw. zustandsbasiert in
+`track_officials` für Hand-/BTP-Vergaben, vor der Feld-Rotation. Ist der
+Feldschalter `sr` aus, BTP/Hand schon belegt oder der SR inzwischen im
+Dienst, verfällt er. Die Feld-Rotation überspringt vorläufig Zugeteilte.

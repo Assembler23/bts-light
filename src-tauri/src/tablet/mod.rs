@@ -13,6 +13,7 @@ pub mod exclusion;
 pub mod hall_assign;
 pub mod match_times;
 pub mod mdns;
+pub mod meetingpoint;
 pub mod monitor;
 pub mod officials;
 pub mod perf;

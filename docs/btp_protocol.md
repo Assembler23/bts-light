@@ -783,6 +783,10 @@ Nebenwirkung am Check-in-`Status`. Zwei Schreiber nutzen den Request:
   Web-Sicht angefasst wurden; gelöscht wird nur, wenn BTP noch `1` liefert.
   Eine andere Farbe an einem gerufenen Spiel bleibt stehen. Gelb an einem
   gerufenen Spiel gilt immer als Aufrufmarke (auch nach Sync-Neustart).
+  Seit v0.9.330 überleben die Aufrufe auch einen **App-Neustart**
+  (`meetingpoint.json`, ADR 0071): Das Gelb eines gerufenen Spiels wird
+  danach weiter als Aufrufmarke geführt und beim Ruf aufs Feld gelöscht —
+  vorher blieb es nach einem Neustart verwaist stehen.
 
 Ein Einzelfall bleibt unerklärt: Ein Spiel, das bts-light kurz zuvor
 automatisch aufs Feld gelegt hatte, stand beim Lesen auf `1`, wurde im

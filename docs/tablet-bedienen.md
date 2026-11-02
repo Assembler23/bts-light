@@ -44,6 +44,15 @@ Ein kurzer Assistent führt dann durch drei Fragen:
 Bei Doppel und Mixed wird **nach jedem Satz neu gefragt**, wer aufschlägt und
 annimmt. Das ist gewollt: Die Aufstellung darf sich zwischen den Sätzen ändern.
 
+### Anwesenheit bestätigen (Meetingpoint)
+
+Hat die Turnierleitung es eingeschaltet, stehen bei der Seitenwahl die Namen
+der Spieler (und des Schiedsrichters) unter **Anwesenheit bestätigen**. Wer
+da ist, tippt seinen Namen an — der Haken geht an die Turnierleitung. Das ist
+nur ein Hinweis für sie: Gezählt werden kann jederzeit, auch ohne
+Bestätigung. Siehe [meetingpoint.md](meetingpoint.md).
+<!-- pruef: "Anwesenheit bestätigen · Confirm presence" in src-tauri/assets/tablet.html -->
+
 ## Zählen
 
 Getippt wird auf die Seite, die den Punkt gemacht hat. Das Tablet führt den

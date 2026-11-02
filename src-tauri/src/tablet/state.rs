@@ -442,7 +442,12 @@ pub struct TabletState {
     /// Offene Walkover-Vorschläge nach Aufgaben (je EntryID höchstens einer).
     walkovers: RwLock<Vec<WalkoverProposal>>,
     /// „In Vorbereitung" gerufene Spiele (je Match-ID höchstens einer).
-    preparation_calls: RwLock<Vec<PreparationCall>>,
+    /// Vorbereitungs-Aufrufe, persistent und turniergebunden (ADR 0071).
+    preparation_calls: crate::tablet::meetingpoint::MeetingpointStore,
+    /// Strikter Modus: seit wann ein Feld frei steht, ohne dass eine
+    /// spielbereite Partie wartet (Warnung in der TL, ADR 0073). Im
+    /// TabletState, nicht in der SyncEngine — überlebt den Sync-Neustart.
+    mp_idle_since: RwLock<Option<u64>>,
     /// Geräte-ID → Live-Zustand der Court-Monitore (zuletzt gesehen +
     /// offener Fernbefehl). Im LAN-Modus vom Server gepflegt.
     monitor_live: RwLock<HashMap<String, MonitorLive>>,
@@ -1068,6 +1073,23 @@ pub enum AnnounceJobKind {
         /// erführen nie, dass es der letzte vor der kampflosen Wertung war.
         stage: u8,
     },
+    /// Die Aufruf-Automatik des Meetingpoints hat ein Spiel in die
+    /// Vorbereitung gerufen (Spec `meetingpoint-spielbereit`) — gesprochen
+    /// wie ein Vorbereitungs-Aufruf aus der Desktop-App. Ältere
+    /// Ansage-Geräte schweigen (`Unknown`).
+    MeetingpointCall {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+    /// Nachruf an die Fehlenden einer gerufenen Partie („<Name>, bitte zum
+    /// Meetingpoint"). Ausnahmsweise **mit Namen**: Wer fehlt, weiß nur der
+    /// Turnier-PC (Check-in-Stand); die Aussprache-Korrektur greift am
+    /// Ansage-Gerät trotzdem.
+    MeetingpointMissing {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        names: Vec<String>,
+    },
     /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
     /// besetztes Feld, auf dem noch kein Punkt gefallen ist. **Kein
     /// Aufruf:** Sie trägt keine Stufe, und der Host zählt bei ihr keine
@@ -1319,6 +1341,9 @@ impl TabletState {
         // Wunschfelder ebenso turniergebunden (Spec `tl-wunschfeld`):
         // Match- UND CourtIDs gelten nur innerhalb eines Turniers.
         self.wish_courts.set_tournament(&snapshot.tournament_name);
+        // Vorbereitungs-Aufrufe ebenso (ADR 0071).
+        self.preparation_calls
+            .set_tournament(&snapshot.tournament_name);
         // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
         self.queue_order.set_tournament(&snapshot.tournament_name);
         // Gesperrte Felder ebenso (ADR 0044). Sie liegen zwar in der Config
@@ -4119,49 +4144,69 @@ impl TabletState {
     // ─────────────────────────── Spiele in Vorbereitung ───────────────────
 
     /// Hinterlegt einen „in Vorbereitung"-Aufruf. Je Match-ID gibt es
-    /// höchstens einen – ein erneuter für dasselbe Match ersetzt den alten.
+    /// höchstens einen. Erneut in dieselbe Halle gerufen, bleibt der erste
+    /// Zeitpunkt stehen; in eine andere Halle ersetzt der Aufruf den alten
+    /// (Spec `meetingpoint-spielbereit`, Entscheidung 4).
     pub fn add_preparation_call(&self, call: PreparationCall) {
-        let mut list = self.preparation_calls.write().unwrap();
-        list.retain(|c| c.match_id != call.match_id);
-        list.push(call);
+        self.preparation_calls.call(call);
     }
 
-    /// Alle aktuell gerufenen „in Vorbereitung"-Spiele.
+    /// Alle aktiven „in Vorbereitung"-Aufrufe in Aufrufreihenfolge. Spiele,
+    /// die gerade auf dem Feld stehen, zählen nicht (ihr Aufruf ruht).
     pub fn preparation_calls(&self) -> Vec<PreparationCall> {
-        self.preparation_calls.read().unwrap().clone()
+        self.preparation_calls.active_calls()
     }
 
     /// Entfernt den Aufruf eines Matches (zurückgenommen).
     pub fn remove_preparation_call(&self, match_id: i64) {
-        self.preparation_calls
-            .write()
-            .unwrap()
-            .retain(|c| c.match_id != match_id);
+        self.preparation_calls.retract(match_id);
     }
 
-    /// Stempelt die aktiven Vorbereitungs-Aufrufe in den Snapshot. Aufrufe,
-    /// deren Match nicht mehr ruf-bar ist (auf Court gewechselt, beendet,
-    /// verschwunden oder eine Mannschaft nicht mehr gesetzt), werden dabei
-    /// verworfen – so bleiben keine Geister-Aufrufe stehen. Für jeden
-    /// überlebenden Aufruf werden die transienten Felder
-    /// `preparation_call_ts` und `preparation_hall` des zugehörigen Matches
-    /// gesetzt.
+    /// Der Meetingpoint-Speicher (Tests, Sync-Frühbindung).
+    pub fn meetingpoint_store(&self) -> &crate::tablet::meetingpoint::MeetingpointStore {
+        &self.preparation_calls
+    }
+
+    /// Strikter Modus: Feld frei ohne spielbereite Partie seit (Unix-ms).
+    pub fn mp_idle_since(&self) -> Option<u64> {
+        *self.mp_idle_since.read().unwrap()
+    }
+
+    /// Setzt bzw. löscht die Leerlauf-Marke; ein bestehender Zeitpunkt bleibt.
+    pub fn set_mp_idle(&self, idle: bool, now: u64) {
+        let mut g = self.mp_idle_since.write().unwrap();
+        match (idle, *g) {
+            (true, None) => *g = Some(now),
+            (false, Some(_)) => *g = None,
+            _ => {}
+        }
+    }
+
+    /// Ablage-Datei der Vorbereitungs-Aufrufe setzen (beim App-Start).
+    pub fn set_meetingpoint_path(&self, path: std::path::PathBuf) {
+        self.preparation_calls.set_path(path);
+    }
+
+    /// Gleicht die Aufrufe mit dem BTP-Stand ab und stempelt die aktiven in
+    /// den Snapshot. Spiele auf dem Feld parken ihren Aufruf; wird ein Spiel
+    /// bestätigt wieder vom Feld genommen, lebt er wieder auf. Beendete,
+    /// verschwundene oder nicht mehr gepaarte Spiele verlieren ihn — so
+    /// bleiben keine Geister-Aufrufe stehen. Für jeden aktiven Aufruf werden
+    /// die transienten Felder `preparation_call_ts` und `preparation_hall`
+    /// des zugehörigen Matches gesetzt.
     pub fn apply_preparation_calls(&self, snapshot: &mut BtpSnapshot) {
-        let mut calls = self.preparation_calls.write().unwrap();
-        // Match-IDs, die im Snapshot noch ruf-bar sind: eingeplant und mit
-        // zwei feststehenden Mannschaften – dieselbe Bedingung wie die
-        // Kandidaten-Liste, damit kein Aufruf ohne sichtbares Match bleibt.
-        let callable: std::collections::HashSet<i64> = snapshot
-            .matches
-            .iter()
-            .filter(|m| {
-                m.status == MatchStatus::Scheduled && !m.team1.is_empty() && !m.team2.is_empty()
-            })
-            .map(|m| m.id)
-            .collect();
-        // Aufrufe ohne (noch) ruf-bares Match fallen heraus.
-        calls.retain(|c| callable.contains(&c.match_id));
-        for call in calls.iter() {
+        self.preparation_calls
+            .set_tournament(&snapshot.tournament_name);
+        // Gelöschte Aufrufe vergessen auch ihre Nachruf-Stufen — sonst erbte
+        // ein späterer neuer Aufruf desselben Spiels „Dritter Aufruf".
+        for match_id in self.preparation_calls.reconcile(snapshot) {
+            self.forget_prep_calls(match_id);
+        }
+        // Wer anderswo auf dem Feld steht, ist hier ausgecheckt; wen BTP
+        // ersetzt hat, ebenso (Spec `meetingpoint-spielbereit`, Nr. 4).
+        let feld = crate::tablet::meetingpoint::auf_dem_feld(self, snapshot);
+        self.preparation_calls.bereinige_checkins(snapshot, &feld);
+        for call in self.preparation_calls.active_calls().iter() {
             // Hallenname aus der LocationID auflösen (None → kein Halleneintrag).
             let hall = call.location_id.and_then(|lid| {
                 snapshot
@@ -4175,7 +4220,6 @@ impl TabletState {
                 m.preparation_hall = hall;
             }
         }
-        drop(calls);
 
         // Von Hand gesetzte Spielorte genauso einstempeln — **ohne**
         // Aufruf-Zeitstempel: Einen Ort festzulegen ist kein Aufruf, sonst
@@ -4917,7 +4961,7 @@ pub fn melde_druckwarnung(slot: &std::sync::Arc<RwLock<Option<String>>>, text: i
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::btp::model::{BtpPlayer, MatchResult};
 
@@ -4935,7 +4979,7 @@ mod tests {
 
     /// Baut ein Match, das (per CourtID) einem Feld zugewiesen ist. `court`
     /// ist die CourtID des Felds (`None` = kein Feld).
-    fn match_on(id: i64, court: Option<i64>, status: MatchStatus) -> BtpMatch {
+    pub(crate) fn match_on(id: i64, court: Option<i64>, status: MatchStatus) -> BtpMatch {
         BtpMatch {
             display_order: None,
             highlight: 0,
@@ -4976,7 +5020,7 @@ mod tests {
     }
 
     /// Baut einen Snapshot. `courts` ist eine Liste `(CourtID, Feldname)`.
-    fn snapshot(matches: Vec<BtpMatch>, courts: Vec<(i64, &str)>) -> BtpSnapshot {
+    pub(crate) fn snapshot(matches: Vec<BtpMatch>, courts: Vec<(i64, &str)>) -> BtpSnapshot {
         let court_infos: Vec<BtpCourt> = courts
             .iter()
             .enumerate()
@@ -6408,6 +6452,69 @@ mod tests {
             m5.preparation_hall.as_deref(),
             Some("Halle B"),
             "die Hand-Halle behält Vorrang vor der Auto-Halle"
+        );
+    }
+
+    #[test]
+    fn vom_feld_genommen_lebt_der_aufruf_wieder_auf() {
+        // Spec `meetingpoint-spielbereit`, Entscheidung 4: Der Aufruf ruht,
+        // solange das Spiel auf dem Feld steht, und kommt nach bestätigter
+        // Abnahme mit seinem ersten Zeitpunkt zurück.
+        let st = TabletState::default();
+        st.add_preparation_call(PreparationCall {
+            match_id: 1,
+            location_id: None,
+            called_at_ms: 1000,
+        });
+        let mut feld = snapshot(vec![match_on(1, Some(101), MatchStatus::OnCourt)], vec![]);
+        st.apply_preparation_calls(&mut feld);
+        assert!(
+            st.preparation_calls().is_empty(),
+            "auf dem Feld kein Aufruf"
+        );
+        assert_eq!(feld.matches[0].preparation_call_ts, None);
+
+        for _ in 0..crate::tablet::match_times::DEASSIGN_CONFIRM_POLLS {
+            let mut geplant = snapshot(vec![match_on(1, None, MatchStatus::Scheduled)], vec![]);
+            st.apply_preparation_calls(&mut geplant);
+        }
+        let mut geplant = snapshot(vec![match_on(1, None, MatchStatus::Scheduled)], vec![]);
+        st.apply_preparation_calls(&mut geplant);
+        assert_eq!(st.preparation_calls().len(), 1);
+        assert_eq!(geplant.matches[0].preparation_call_ts, Some(1000));
+    }
+
+    #[test]
+    fn die_aufrufe_ueberleben_einen_neustart_des_tablet_zustands() {
+        // ADR 0071: vorher nur im RAM — nach einem Update waren alle weg.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("meetingpoint.json");
+        {
+            let st = TabletState::default();
+            st.set_meetingpoint_path(path.clone());
+            st.set_snapshot(snapshot(
+                vec![match_on(1, None, MatchStatus::Scheduled)],
+                vec![],
+            ));
+            st.add_preparation_call(PreparationCall {
+                match_id: 1,
+                location_id: Some(7),
+                called_at_ms: 1000,
+            });
+        }
+        let st = TabletState::default();
+        st.set_meetingpoint_path(path);
+        st.set_snapshot(snapshot(
+            vec![match_on(1, None, MatchStatus::Scheduled)],
+            vec![],
+        ));
+        assert_eq!(
+            st.preparation_calls(),
+            vec![PreparationCall {
+                match_id: 1,
+                location_id: Some(7),
+                called_at_ms: 1000,
+            }]
         );
     }
 

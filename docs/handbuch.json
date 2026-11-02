@@ -102,6 +102,7 @@
         "einstellungen",
         "turnierleitung",
         "vorbereitung",
+        "meetingpoint",
         "walkover",
         "master-und-slave"
       ]
@@ -207,6 +208,11 @@
           "datei": "docs/preparation.md",
           "slug": "vorbereitung",
           "titel": "Spiele in Vorbereitung aufrufen"
+        },
+        {
+          "datei": "docs/meetingpoint.md",
+          "slug": "meetingpoint",
+          "titel": "Meetingpoint: Einchecken und spielbereit"
         },
         {
           "datei": "docs/announcements.md",

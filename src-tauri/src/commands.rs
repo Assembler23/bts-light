@@ -281,6 +281,14 @@ fn tablet_exclusions_path(app: &AppHandle) -> std::path::PathBuf {
         .join("excluded-matches.json")
 }
 
+/// Ablage der Vorbereitungs-Aufrufe (Meetingpoint, ADR 0071).
+fn tablet_meetingpoint_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("App-Datenverzeichnis ist verfügbar")
+        .join("meetingpoint.json")
+}
+
 /// Ablage der Wunschfelder — turniergebunden wie die Ausnahmeliste.
 fn tablet_wish_courts_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
@@ -1748,6 +1756,8 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // kommt mit dem ersten Snapshot.
     tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
     tablet.set_wish_courts_path(tablet_wish_courts_path(&app));
+    // Vorbereitungs-Aufrufe überleben Neustart und Update (ADR 0071).
+    tablet.set_meetingpoint_path(tablet_meetingpoint_path(&app));
     tablet.set_queue_order_path(tablet_queue_order_path(&app));
     // Druck-Gedächtnis des Autodrucks (Spec
     // `schiedsrichterzettel-autodruck`): ebenso Pfad jetzt, Turnier
@@ -3376,6 +3386,10 @@ pub struct PreparationCandidate {
     pub hall: String,
     /// Steht dieses Spiel gerade im manuellen Präfix seiner Halle?
     pub manual: bool,
+    /// Meetingpoint-Stand (Spec `meetingpoint-spielbereit`) — nur an
+    /// gerufenen Spielen und bei eingeschaltetem Meetingpoint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meetingpoint: Option<relay_proto::TlMeetingpoint>,
 }
 
 /// Rückgabe von [`preparation_candidates`]: die Kandidaten-Spiele und die
@@ -3402,6 +3416,30 @@ pub struct PreparationLocation {
 /// zuletzt). Reiner Lesepfad – nicht mehr ruf-bare Matches erscheinen
 /// einfach nicht in der Liste, ihre Aufrufe räumt der Sync-Lauf
 /// (`apply_preparation_calls` in `run_once`) auf.
+/// Meetingpoint: einen Platz einer gerufenen Partie von Hand ein- oder
+/// auschecken (Korrektur am Turnier-PC, Spec `meetingpoint-spielbereit`).
+#[tauri::command]
+pub fn meetingpoint_set(
+    state: State<'_, AppState>,
+    match_id: i64,
+    platz: relay_proto::MpPlatz,
+    present: bool,
+) -> Result<(), String> {
+    let cfg = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    crate::tablet::meetingpoint::checkin_tl(
+        &state.tablet,
+        &cfg.meetingpoint,
+        match_id,
+        platz,
+        present,
+        crate::tablet::monitor::now_ms(),
+    )
+}
+
 #[tauri::command]
 pub fn preparation_candidates(state: State<'_, AppState>) -> PreparationView {
     let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
@@ -3426,6 +3464,20 @@ pub fn preparation_candidates_for(
     let calls = tablet.preparation_calls();
     let manual_halls = tablet.manual_halls();
     let auto_halls = tablet.auto_hall_store().halls();
+    let mp_stand: std::collections::HashMap<i64, relay_proto::TlMeetingpoint> =
+        if cfg.meetingpoint.enabled {
+            crate::tablet::meetingpoint::bewertungen(tablet, &snapshot, &cfg.meetingpoint)
+                .iter()
+                .map(|(c, sr, b)| {
+                    (
+                        c.match_id,
+                        crate::tablet::meetingpoint::tl_meetingpoint(c, sr, b),
+                    )
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
 
     // Erst nur Ordnungsschlüssel + Halle sammeln (Muster `tl.rs::build_state`)
     // — **derselbe** gemeinsame Helfer wie an den anderen vier Sortier-
@@ -3507,6 +3559,7 @@ pub fn preparation_candidates_for(
                     .collect(),
                 match_num: m.match_num,
                 call,
+                meetingpoint: mp_stand.get(&m.id).cloned(),
                 excluded: tablet.auto_assign_excluded(m.id),
                 hall,
                 manual,
@@ -7299,6 +7352,7 @@ mod tests {
             sr_names: vec!["S. Richter".into()],
             ar_names: vec!["A. Aufschlag".into()],
             teams_correction: true,
+            feld_check: false,
             event_label: "Herreneinzel A Viertelfinale".into(),
             best_of_sets: 3,
             target_score: 21,

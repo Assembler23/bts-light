@@ -101,3 +101,8 @@ pub fn flag_svg(name: &str) -> Option<&'static [u8]> {
     }
     FLAGS.get_file(name).map(|f| f.contents())
 }
+
+/// Meetingpoint-Seite (`/meetingpoint?halle=…`, Spec
+/// `meetingpoint-spielbereit`): gerufene Partien, Namen antippen =
+/// ein-/auschecken. Platzhalter `__BASE__` (mit Schrägstrich am Ende).
+pub const MEETINGPOINT_HTML: &str = include_str!("../../assets/meetingpoint.html");
