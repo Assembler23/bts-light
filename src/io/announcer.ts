@@ -1117,7 +1117,8 @@ export function prepareAnnouncement(
         buildIpaMap(opts.nameOverrides, enabled),
         buildLangOverrideMap(opts.nameOverrides, enabled),
         buildOverrideMap(opts.nameOverrides, enabled),
-        opts.rate,
+        // Gleiches Standardtempo wie der Web-Speech-Weg (0,8), auch ohne `rate`.
+        clampRate(opts.rate),
       );
     } catch (e) {
       reportAzureFallback(e);
@@ -1148,7 +1149,7 @@ export function prepareFreeText(
   if (!t) return null;
   let ssml: string | undefined;
   if (opts.azure) {
-    ssml = ssmlDokument(lang, opts.azure.voice, [xmlEscape(t)], opts.rate);
+    ssml = ssmlDokument(lang, opts.azure.voice, [xmlEscape(t)], clampRate(opts.rate));
   }
   return {
     // Freitext = kein Spielaufruf → anderer (aufsteigender) Gong.
@@ -1204,7 +1205,7 @@ export function prepareMeetingpointMissing(
         lang,
         opts.azure.voice,
         [`${namenSsml}.`, xmlEscape(ziel)],
-        opts.rate,
+        clampRate(opts.rate),
       );
     } catch (e) {
       reportAzureFallback(e);
@@ -1244,7 +1245,8 @@ export function preparePreparationAnnouncement(
         buildIpaMap(opts.nameOverrides, enabled),
         buildLangOverrideMap(opts.nameOverrides, enabled),
         buildOverrideMap(opts.nameOverrides, enabled),
-        opts.rate,
+        // Gleiches Standardtempo wie der Web-Speech-Weg (0,8), auch ohne `rate`.
+        clampRate(opts.rate),
       );
     } catch (e) {
       reportAzureFallback(e);
