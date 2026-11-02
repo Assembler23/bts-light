@@ -19,7 +19,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   jede Vorbereitungs-Ansage mit „Bitte zum Meetingpoint gehen.“ (englisch
   „Please proceed to the meeting point.“). Der Satz ist unter Einstellungen →
   Meetingpoint änderbar, um den Ort in der Halle genauer zu nennen; leer =
-  kein Zusatz.
+  kein Zusatz. Auch die automatische Ansage der Fehlenden endet mit diesem
+  Satz.
 - **Meetingpoint-Adresse zum Scannen.** Unter Tablets → QR-Codes steht bei
   eingeschaltetem Meetingpoint die Adresse der Meetingpoint-Seite je Halle
   (Hallennetz, verschlüsselt und Cloud) mit QR-Code, Link und Kopier-Knopf

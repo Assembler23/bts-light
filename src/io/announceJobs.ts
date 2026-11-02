@@ -127,11 +127,15 @@ export async function jobZuAnsage(
     // Namen kommen fertig vom Turnier-PC; die Sprache folgt der Einstellung
     // (keine Nationalitäten im Auftrag).
     const lang = resolveAnnouncementLanguage([], cfg.language_mode);
+    // Der einstellbare Meetingpoint-Satz kommt vom Turnier-PC mit der
+    // Vorbereitungs-Sicht; ohne sie bleibt es beim festen Text.
+    const view = await preparationCandidates().catch(() => null);
     const ansage = prepareMeetingpointMissing(
       job.names,
       job.hall || undefined,
       lang,
       ansageOptionen(cfg, lang, azureTts),
+      mpAnsageZusatz(view, lang),
     );
     return ansage ? { ansage, ziel: { art: "prep_call", hall: job.hall } } : null;
   }

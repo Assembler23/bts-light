@@ -347,7 +347,7 @@ Bedienung in [meetingpoint.md](meetingpoint.md). Alles ist ab Werk aus.
 | **Warnung, wenn eine Partie nicht vollständig erscheint** | aus, 5 Min. | Marke an der Partie im TL-Web wird orange, nennt die Fehlenden |
 | **Fehlende automatisch zum Meetingpoint ansagen (einmal)** | aus, 5 Min. | eine Ansage je Partie mit den Namen der Fehlenden |
 | **Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen** | aus | Knöpfe bei der Seitenwahl am Tablet, nur Anzeige |
-| **Zusatz in der Vorbereitungs-Ansage** (Deutsch/Englisch) | „Bitte zum Meetingpoint gehen.“ / „Please proceed to the meeting point.“ | wird bei eingeschaltetem Meetingpoint ans Ende jedes Vorbereitungs-Aufrufs gesprochen; frei änderbar, leer = kein Zusatz |
+| **Zusatz in der Vorbereitungs-Ansage** (Deutsch/Englisch) | „Bitte zum Meetingpoint gehen.“ / „Please proceed to the meeting point.“ | wird bei eingeschaltetem Meetingpoint ans Ende jedes Vorbereitungs-Aufrufs und der Ansage der Fehlenden gesprochen; frei änderbar, leer = kein Zusatz |
 <!-- pruef: "Zusatz in der Vorbereitungs-Ansage" in src/pages/SetupWizard.tsx -->
 <!-- pruef: "Bitte zum Meetingpoint gehen." in src-tauri/src/config.rs -->
 <!-- pruef: "Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen" in src/pages/SetupWizard.tsx -->

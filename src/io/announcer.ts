@@ -1181,19 +1181,27 @@ export function prepareFreeText(
  * `meetingpoint-spielbereit`): „<Namen>. Bitte zum Meetingpoint in <Halle>."
  * Die Namen kommen fertig vom Turnier-PC (wer fehlt, weiß nur er); die
  * Aussprache-Korrektur greift hier wie bei jedem Aufruf.
+ *
+ * Mit Meetingpoint-Zusatz (`zusatz`, der einstellbare Satz der
+ * Vorbereitungs-Ansage) lautet das Ziel „Bitte in <Halle>. <Zusatz>" — so
+ * hören die Fehlenden dieselbe Ortsangabe wie beim Aufruf. Ohne Zusatz
+ * bleibt es beim festen „Bitte zum Meetingpoint in <Halle>."
  */
 export function prepareMeetingpointMissing(
   names: string[],
   hall: string | undefined,
   lang: AnnounceLang,
   opts: AnnounceOptions = {},
+  zusatz?: string,
 ): PreparedAnnouncement | null {
   const liste = (names || []).map((n) => n.trim()).filter(Boolean);
   if (liste.length === 0) return null;
   const enabled = opts.nameOverridesEnabled ?? true;
   const h = (hall || "").trim();
-  const ziel =
-    lang === "de"
+  const z = (zusatz || "").trim();
+  const ziel = z
+    ? `${h ? (lang === "de" ? `Bitte in ${h}. ` : `Please report to ${h}. `) : ""}${z}`
+    : lang === "de"
       ? `Bitte zum Meetingpoint${h ? ` in ${h}` : ""}.`
       : `Please report to the meeting point${h ? ` in ${h}` : ""}.`;
   const namen = joinNames(liste, lang, buildOverrideMap(opts.nameOverrides, enabled), enabled);

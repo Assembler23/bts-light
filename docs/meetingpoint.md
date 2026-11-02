@@ -159,7 +159,8 @@ und dritten, egal ob von Hand, aus dem TL-Web oder von der Automatik:
 > In Vorbereitung. Herreneinzel. Anna Muster gegen Bea Beispiel. Bitte in
 > Halle A. **Bitte zum Meetingpoint gehen.**
 
-Den Satz ändern Sie unter Einstellungen → Meetingpoint → **Zusatz in der
+Derselbe Satz steht auch am Ende der automatischen Ansage der Fehlenden
+(siehe unten). Den Satz ändern Sie unter Einstellungen → Meetingpoint → **Zusatz in der
 Vorbereitungs-Ansage**, je für deutsche und englische Ansagen — etwa
 „Bitte zum Meetingpoint neben der Tribüne gehen.“ Leer lassen schaltet den
 Zusatz ab; **Vorgabe wiederherstellen** holt den Standardtext zurück.
@@ -175,7 +176,10 @@ PC einer fernen Halle) spricht ihn nicht.
   Minuten): Nach dieser Zeit wird die Marke an der Partie orange und nennt,
   wer fehlt.
 - **Fehlende automatisch zum Meetingpoint ansagen (einmal)** (ab Werk aus, 5
-  Minuten): „<Name>, bitte zum Meetingpoint in <Halle>." — genau einmal je
+  Minuten): „<Name>. Bitte in <Halle>. Bitte zum Meetingpoint gehen." — mit
+  dem einstellbaren Satz aus [Hinweis auf den Meetingpoint in der
+  Ansage](#hinweis-auf-den-meetingpoint-in-der-ansage); ist er leer:
+  „<Name>, bitte zum Meetingpoint in <Halle>." Genau einmal je
   Partie, auch über einen Neustart hinweg. Weitere Nachrufe wie gewohnt von
   Hand.
 <!-- pruef: "Fehlende automatisch zum Meetingpoint ansagen (einmal)" in src/pages/SetupWizard.tsx -->
