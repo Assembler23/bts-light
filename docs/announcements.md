@@ -954,3 +954,16 @@ Relay reicht den `MatchBrief` unverändert durch — nur die Umwandlung in
 einen Schiedsrichter einteilt, löst die Ansage mit dem Knopf „ansagen" aus —
 in der Schiedsrichter-Seite des Clients oder an der Feld-Kachel in TL-Web.
 Diese Ansage nennt nur Feld und Besetzung, nicht noch einmal die Paarung.
+
+## Meetingpoint-Ansagen (seit v0.9.330)
+
+Zwei Auftragsarten aus dem Kern (`AnnounceJobKind`, Ältere Geräte schweigen
+über `Unknown`):
+
+- `meetingpoint_call` — die Aufruf-Automatik hat ein Spiel gerufen;
+  gesprochen wie ein erster Vorbereitungs-Aufruf („In Vorbereitung …").
+- `meetingpoint_missing` — Fehlende einer gerufenen Partie nach der
+  eingestellten Zeit, **mit Namen** (nur der Turnier-PC weiß, wer fehlt):
+  „<Namen>. Bitte zum Meetingpoint in <Halle>." (`prepareMeetingpointMissing`
+  in `io/announcer.ts`). Genau einmal je Partie und Halle; der Merker liegt
+  im Meetingpoint-Store und überlebt Neustarts.

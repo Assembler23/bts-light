@@ -333,6 +333,23 @@ Zwei Besonderheiten im Mehr-Hallen-Betrieb:
 - **Mit** gesetzter aktiver Halle ist die automatische Hallen-Vorverteilung
   ausgeschlossen — beides zusammen geht nicht.
 
+## Meetingpoint
+
+Gerufene Partien checken sich am Meetingpoint einzeln ein; Details und
+Bedienung in [meetingpoint.md](meetingpoint.md). Alles ist ab Werk aus.
+
+| Einstellung | Standard | Wirkung |
+|---|---|---|
+| **Meetingpoint verwenden** | aus | Seite `/meetingpoint`, Check-in, Anzeige in TL-Web und Spielübersicht |
+| **Schiedsrichter muss für „spielbereit“ eingecheckt sein** | aus | SR zählt mit; vorläufige SR-Zuteilung schon beim Aufruf |
+| **Automatische Feldvergabe nur für spielbereite Partien** | aus | Strikter Modus: nicht gerufene/nicht eingecheckte Spiele bekommen automatisch kein Feld |
+| **Partien automatisch zum Meetingpoint rufen** | aus | feste Anzahl je Halle (2) oder nach Restzeit (10 Min., Puffer 1), höchstens 4 je Halle |
+| **Warnung, wenn eine Partie nicht vollständig erscheint** | aus, 5 Min. | Marke an der Partie im TL-Web wird orange, nennt die Fehlenden |
+| **Fehlende automatisch zum Meetingpoint ansagen (einmal)** | aus, 5 Min. | eine Ansage je Partie mit den Namen der Fehlenden |
+| **Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen** | aus | Knöpfe bei der Seitenwahl am Tablet, nur Anzeige |
+<!-- pruef: "Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen" in src/pages/SetupWizard.tsx -->
+<!-- pruef: /missing_warn_enabled: false,\n            missing_warn_minutes: 5,/ in src-tauri/src/config.rs -->
+
 ## Disziplinen je Halle
 
 *Erscheint erst, wenn mindestens zwei Hallen erkannt wurden oder schon Regeln

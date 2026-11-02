@@ -474,6 +474,51 @@ pub struct LiveRemainInput {
     pub brutto_median_min: u64,
 }
 
+/// Eingabe der Restzeit eines belegten Felds — geteilt von TL-Zustand und
+/// Aufruf-Automatik (ADR 0075), damit beide dieselbe Zahl sehen.
+pub struct FeldRest {
+    pub now_ms: u64,
+    pub sets: Vec<(i64, i64)>,
+    pub best_of: i64,
+    pub target: i64,
+    pub cap: i64,
+    /// Tablet/Zähltafel verbunden?
+    pub tablet_connected: bool,
+    pub first_assigned_ms: Option<u64>,
+    pub first_point_ms: Option<u64>,
+    pub times: GroupTimes,
+}
+
+/// Erwartete Restzeit eines belegten Felds in Minuten (mindestens 1).
+/// Live-Restzeit (Etappe D), sobald das Feld wirklich zählt (Tablet/
+/// Zähltafel verbunden oder es kamen schon Punkte an) — sonst Gruppenwert
+/// minus verstrichene Zeit. BTP-Satzstände laufender Spiele gibt es nicht,
+/// das Gate schützt also vor einem Modell ohne Datengrundlage.
+pub fn feld_rest_min(f: FeldRest) -> u64 {
+    if f.tablet_connected || f.first_point_ms.is_some() {
+        live_remaining_min(&LiveRemainInput {
+            now_ms: f.now_ms,
+            sets: f.sets,
+            best_of: f.best_of,
+            target: f.target,
+            cap: f.cap,
+            first_assigned_ms: f.first_assigned_ms,
+            first_point_ms: f.first_point_ms,
+            netto_median_min: f.times.netto_min,
+            brutto_median_min: f.times.brutto_min,
+        })
+    } else {
+        // „~0 min Rest" wäre eine verwirrende Anzeige — Untergrenze 1 wie
+        // im Live-Modell.
+        let now_min = f.now_ms / 60_000;
+        let elapsed = f
+            .first_assigned_ms
+            .map(|s| now_min.saturating_sub(s / 60_000))
+            .unwrap_or(0);
+        f.times.brutto_min.saturating_sub(elapsed).max(1)
+    }
+}
+
 /// Prior-Anteil eines dritten Satzes an der erwarteten Gesamtpunktzahl
 /// eines Matches — nur noch fürs **Tempo-Prior** (Sekunden je Punkt aus
 /// dem Netto-Median). Der tatsächliche Entscheidungssatz-Anteil kommt

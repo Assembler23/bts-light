@@ -343,3 +343,20 @@ auf dem Vorbereitungs-Monitor, und rufen lässt sich ein solches Spiel auch
 nicht (der Turnier-PC lehnt den Aufruf ausdrücklich ab). Es gibt schlicht
 niemanden anzusagen. Sichtbar sind sie nur in der Turnierleitungs-Oberfläche,
 siehe [features/tl-offene-paarungen.md](features/tl-offene-paarungen.md).
+
+## Meetingpoint (seit v0.9.330)
+
+Auf den Aufruf baut der **Meetingpoint** auf: Die Beteiligten checken sich je
+Partie ein, die Turnierleitung sieht „spielbereit", und die Feldvergabe kann
+auf spielbereite Partien beschränkt werden. Eine Aufruf-Automatik ruft auf
+Wunsch selbst. Bedienung: [meetingpoint.md](meetingpoint.md), Spec
+[features/meetingpoint-spielbereit.md](features/meetingpoint-spielbereit.md).
+
+Für die Aufrufe selbst ändert sich dadurch:
+- Ein Aufruf trägt im Store seine Check-ins, den vorläufigen SR, ob er von
+  der Automatik kam und ob Fehlende schon angesagt wurden
+  (`tablet/meetingpoint.rs`, ADR 0071).
+- `call_mit(…, auto)` markiert Aufrufe der Automatik; ein Hand-Aufruf
+  derselben Partie nimmt die Marke weg.
+- `apply_preparation_calls` checkt Personen aus, die anderswo auf dem Feld
+  stehen, und entwertet Check-ins, deren Platz BTP neu besetzt hat.

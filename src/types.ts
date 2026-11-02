@@ -674,6 +674,19 @@ export type AnnounceJob = {
       courtId: number;
       matchId: number;
     }
+  | {
+      /** Die Aufruf-Automatik des Meetingpoints hat ein Spiel gerufen —
+       *  gesprochen wie ein Vorbereitungs-Aufruf. */
+      kind: "meetingpoint_call";
+      matchId: number;
+    }
+  | {
+      /** Nachruf an die Fehlenden einer gerufenen Partie. Trägt die Namen
+       *  (wer fehlt, weiß nur der Turnier-PC). */
+      kind: "meetingpoint_missing";
+      matchId: number;
+      names: string[];
+    }
 );
 
 export interface AppConfig {
@@ -721,6 +734,9 @@ export interface AppConfig {
   checkin: CheckinConfig;
   /** Schiedsrichtermanagement (globale Schalter). */
   officials: OfficialsConfig;
+  /** Meetingpoint (Spec `meetingpoint-spielbereit`); alles standardmäßig aus.
+   *  Optional: ältere gespeicherte Stände kennen das Feld nicht. */
+  meetingpoint?: MeetingpointConfig;
   /** Disziplin/Klasse→Halle-Regeln (Mehr-Hallen): schränken die Feldvergabe
    *  ein (manuell + automatisch). Leer = keine Einschränkung. */
   discipline_hall_rules: DisciplineHallRule[];
@@ -1087,6 +1103,50 @@ export interface PreparationCandidate {
   /** Steht dieses Spiel gerade im manuellen Präfix der (einen, globalen)
    *  Reihenfolge? */
   manual: boolean;
+  /** Meetingpoint-Stand (nur gerufen + Meetingpoint an). */
+  meetingpoint?: MeetingpointStand;
+}
+
+/** Ein einzucheckender Platz (Rust: relay_proto::MpPlatz). */
+export type MpPlatz =
+  | { art: "spieler"; seite: 1 | 2; pos: number }
+  | { art: "sr" };
+
+/** Meetingpoint-Stand einer gerufenen Partie (Rust: relay_proto::TlMeetingpoint). */
+export interface MeetingpointStand {
+  team1Present: boolean[];
+  team2Present: boolean[];
+  srName?: string;
+  srPresent: boolean;
+  srVorab: boolean;
+  ohneSr: boolean;
+  srNoetig: boolean;
+  bereit: boolean;
+  calledAtMs: number;
+  auto: boolean;
+  fehlend: string[];
+}
+
+/** Betriebsart der Aufruf-Automatik (Rust: config::AutoCallMode). */
+export type AutoCallMode = "aus" | "fest" | "restzeit";
+
+/** Meetingpoint-Einstellungen (Rust: config::MeetingpointConfig). */
+export interface MeetingpointConfig {
+  enabled: boolean;
+  require_umpire: boolean;
+  strict_auto_assign: boolean;
+  auto_call: {
+    mode: AutoCallMode;
+    fixed_per_hall: number;
+    horizon_minutes: number;
+    buffer: number;
+    cap_per_hall: number;
+  };
+  missing_warn_enabled: boolean;
+  missing_warn_minutes: number;
+  missing_announce_enabled: boolean;
+  missing_announce_minutes: number;
+  field_check_enabled: boolean;
 }
 
 /** Eine Halle des Turniers (Rust: commands::PreparationLocation). */

@@ -1008,3 +1008,24 @@ Betriebsarten identisch. Mehrere Kennungen mit Komma ergeben einen Stapeldruck
 > **Der Relay hält keine Zettel vor.** Ist der Turnier-PC getrennt, gibt es 503
 > und kein zwischengespeichertes Dokument — beim Punktverlauf ist das eine Frage
 > des Mobilfunk-Budgets, hier zusätzlich eine des Datenschutzes.
+
+## Meetingpoint (seit v0.9.330)
+
+Ist der Meetingpoint am Turnier-PC eingeschaltet ([meetingpoint.md](meetingpoint.md)):
+
+- Jede gerufene Partie trägt neben „gerufen" eine Marke `🧍 x/y` (eingecheckt
+  von nötig) bzw. **✓ spielbereit**. Mit eingeschalteter Warnung wird die
+  Marke nach der eingestellten Zeit orange und nennt die Fehlenden.
+- Im ⋮-Menü der Zeile steht die Gruppe **Meetingpoint**: je Person ein Knopf
+  zum Ein-/Auschecken von Hand (`meetingpoint_set`), bei SR-Pflicht dazu
+  **Ohne Schiedsrichter** (setzt die vorhandene Aktion `official_clear`).
+- Oben neben den Hallen schaltet **✓ nur spielbereite** die Spielliste auf
+  eingecheckte Partien (je Gerät gemerkt).
+- Im strikten Modus meldet das Störungsband, wenn ein Feld seit über einer
+  Minute frei steht, ohne dass eine Partie bereit ist
+  (`TlState.meetingpoint.idle_since_ms`).
+
+Wire: `TlMatch.meetingpoint` (`relay_proto::TlMeetingpoint`, nur Flags und
+Namen), `TlState.meetingpoint` (`TlMeetingpointLage`), Aktion
+`TlAction::MeetingpointSet{matchId, platz, present}`. Der Relay parst
+`TlAction` selbst — **Relay vor App deployen**.

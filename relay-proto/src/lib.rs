@@ -144,6 +144,11 @@ pub struct MatchBrief {
     /// hält ältere Frames lesbar (false → Eingriff nicht angeboten).
     #[serde(rename = "teamsCorrection", default)]
     pub teams_correction: bool,
+    /// Bietet das Tablet „Ich bin da" am Feld an (Meetingpoint, Spec
+    /// `meetingpoint-spielbereit` Nr. 11)? Nur Anzeige für die TL, keine
+    /// Zählsperre. `#[serde(default)]`: ein alter Host bietet nichts an.
+    #[serde(rename = "feldCheck", default)]
+    pub feld_check: bool,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -2185,6 +2190,14 @@ pub enum TlAction {
         match_id: i64,
         role: TlOfficialRole,
     },
+    /// Meetingpoint: einen Platz einer gerufenen Partie von Hand ein- oder
+    /// auschecken (Korrektur durch die TL).
+    MeetingpointSet {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        platz: MpPlatz,
+        present: bool,
+    },
     /// Einen Schiedsrichter pausieren oder wieder einteilen.
     OfficialPause {
         #[serde(rename = "officialId")]
@@ -2418,6 +2431,186 @@ impl TlResponse {
     }
 }
 
+// ─────────────────────────── Meetingpoint ───────────────────────────────
+// Spec `docs/features/meetingpoint-spielbereit.md`, ADR 0071/0074.
+
+/// Ein einzucheckender Platz einer Partie. Nach außen die einzige Kennung
+/// einer Person — **nie** die Lizenznummer (Datenschutz).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "art", rename_all = "snake_case")]
+pub enum MpPlatz {
+    /// Spieler: Seite 1/2, Position 0/1 (Doppel).
+    Spieler { seite: u8, pos: u8 },
+    /// Der Schiedsrichter (nicht der Assistent, nie der Zähltafelbediener).
+    Sr,
+    /// Unbekannter Platz aus einer neueren Version — wird abgelehnt.
+    #[serde(other)]
+    Unbekannt,
+}
+
+/// Wo eingecheckt wurde.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MpOrt {
+    /// Am Meetingpoint (gerufene Partie).
+    #[default]
+    Meetingpoint,
+    /// Am Zähl-Tablet, Partie steht auf dem Feld (nur Anzeige).
+    Feld,
+    #[serde(other)]
+    Unbekannt,
+}
+
+/// Ein Check-in von der Meetingpoint-Seite oder dem Zähl-Tablet. Dieselbe
+/// Form auf allen Wegen (LAN-POST, Relay-Frame, Slave-Durchreiche).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MpCheckinBody {
+    /// Halle der Seite (`?halle=`); leer im Ein-Hallen-Turnier.
+    #[serde(default)]
+    pub halle: String,
+    #[serde(rename = "matchId")]
+    pub match_id: i64,
+    pub platz: MpPlatz,
+    /// `true` = einchecken, `false` = auschecken.
+    pub present: bool,
+    #[serde(default)]
+    pub ort: MpOrt,
+}
+
+/// Antwort auf einen Check-in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MpCheckinResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<String>,
+}
+
+/// Ein Platz auf der Meetingpoint-Seite: nur Name und Flag.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MpPlatzView {
+    pub platz: MpPlatz,
+    pub name: String,
+    pub present: bool,
+}
+
+/// Eine gerufene Partie auf der Meetingpoint-Seite.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MpPartie {
+    #[serde(rename = "matchId")]
+    pub match_id: i64,
+    /// Halle des Aufrufs (BTP-Schreibweise); leer = hallenunabhängig.
+    #[serde(default)]
+    pub halle: String,
+    /// Klasse + Runde, z. B. „HE A · VF".
+    #[serde(default)]
+    pub label: String,
+    #[serde(rename = "calledAtMs", default)]
+    pub called_at_ms: u64,
+    #[serde(default)]
+    pub plaetze: Vec<MpPlatzView>,
+    /// Alle nötigen Plätze eingecheckt (bzw. SR nicht nötig).
+    #[serde(default)]
+    pub bereit: bool,
+    /// Die TL hat „ohne Schiedsrichter" gesetzt.
+    #[serde(rename = "ohneSr", default)]
+    pub ohne_sr: bool,
+    /// Zählt der SR-Platz für „spielbereit"? Sonst steht der SR nur zur
+    /// Information da und geht nicht in den Zähler der Seite ein.
+    #[serde(rename = "srNoetig", default)]
+    pub sr_noetig: bool,
+}
+
+/// Zustand der Meetingpoint-Seite (`/meetingpoint/state`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MeetingpointView {
+    /// Meetingpoint am Host eingeschaltet?
+    #[serde(default)]
+    pub enabled: bool,
+    /// Gefilterte Halle; leer = alle (Ein-Hallen-Turnier).
+    #[serde(default)]
+    pub halle: String,
+    /// Alle Hallen des Turniers (für die Hallenwahl). Leer = eine Halle.
+    #[serde(default)]
+    pub hallen: Vec<String>,
+    /// Muss eine Halle gewählt werden (Mehr-Hallen ohne/mit unbekannter Halle)?
+    #[serde(rename = "halleWaehlen", default)]
+    pub halle_waehlen: bool,
+    #[serde(default)]
+    pub partien: Vec<MpPartie>,
+}
+
+/// Höchstzahl Partien in einem Meetingpoint-Stand (Deckel gegen
+/// pathologische Frames am Relay).
+pub const MAX_MP_PARTIEN: usize = 200;
+
+impl MeetingpointView {
+    /// Schneidet einen Gesamtstand (alle Hallen) auf die Halle einer Seite zu.
+    /// Ein-Hallen-Turnier (`hallen` leer): alles. Mehr-Hallen ohne passende
+    /// Halle: keine Partien, stattdessen Hallenwahl. Geteilt von Relay und
+    /// Slave-Brücke, damit beide dieselbe Regel anwenden wie der Host.
+    pub fn fuer_halle(&self, halle: &str) -> MeetingpointView {
+        let mut v = self.clone();
+        let halle = halle.trim();
+        if v.hallen.is_empty() {
+            v.halle = String::new();
+            v.halle_waehlen = false;
+            return v;
+        }
+        match v.hallen.iter().find(|h| h.eq_ignore_ascii_case(halle)) {
+            Some(h) => {
+                let h = h.clone();
+                v.partien.retain(|p| p.halle.eq_ignore_ascii_case(&h));
+                v.halle = h;
+                v.halle_waehlen = false;
+            }
+            None => {
+                v.partien.clear();
+                v.halle = String::new();
+                v.halle_waehlen = true;
+            }
+        }
+        v
+    }
+}
+
+/// TL-Sicht auf den Meetingpoint-Stand einer gerufenen Partie — nur Flags,
+/// die Namen kennt der TL-Zustand ohnehin.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TlMeetingpoint {
+    /// Je Spieler der Seite 1 bzw. 2: eingecheckt?
+    #[serde(rename = "team1Present", default)]
+    pub team1_present: Vec<bool>,
+    #[serde(rename = "team2Present", default)]
+    pub team2_present: Vec<bool>,
+    /// Name des (ggf. vorläufig) eingeteilten SR; `None` = keiner.
+    #[serde(rename = "srName", skip_serializing_if = "Option::is_none", default)]
+    pub sr_name: Option<String>,
+    /// SR eingecheckt?
+    #[serde(rename = "srPresent", default)]
+    pub sr_present: bool,
+    /// SR ist nur vorläufig (Meetingpoint-Rotation, noch nicht in BTP).
+    #[serde(rename = "srVorab", default)]
+    pub sr_vorab: bool,
+    /// TL hat „ohne Schiedsrichter" gesetzt.
+    #[serde(rename = "ohneSr", default)]
+    pub ohne_sr: bool,
+    /// Zählt der SR für „spielbereit"?
+    #[serde(rename = "srNoetig", default)]
+    pub sr_noetig: bool,
+    /// Spielbereit.
+    #[serde(default)]
+    pub bereit: bool,
+    /// Erster Aufrufzeitpunkt (Uhr für Fehlende).
+    #[serde(rename = "calledAtMs", default)]
+    pub called_at_ms: u64,
+    /// Von der Aufruf-Automatik gerufen.
+    #[serde(default)]
+    pub auto: bool,
+    /// Namen der Fehlenden (Spieler und ggf. SR).
+    #[serde(default)]
+    pub fehlend: Vec<String>,
+}
+
 /// Frames von bts-light (dem „Host" eines Namespace) an den Relay.
 // `MatchAssigned` trägt ein volles `MatchBrief` und ist damit deutlich
 // größer als die schlanken Varianten (`MatchCleared` etc.) — bewusst
@@ -2510,6 +2703,20 @@ pub enum HostFrame {
     Prepared {
         #[serde(default)]
         prepared: Vec<PreparedMatch>,
+    },
+    /// Meetingpoint-Stand aller aktiven Aufrufe (alle Hallen; der Relay
+    /// filtert je Seite). Bei Änderung gepusht, ersetzt den Stand im Relay.
+    Meetingpoint {
+        #[serde(default)]
+        view: MeetingpointView,
+    },
+    /// Antwort auf einen weitergeleiteten Meetingpoint-Check-in.
+    MeetingpointAck {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        ok: bool,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        error: Option<String>,
     },
     /// Antwort auf eine zuvor weitergeleitete Ergebnis-Übermittlung.
     ResultAck {
@@ -3004,6 +3211,13 @@ pub enum RelayFrame {
         /// (alte Tablet-Seite/alter Relay) → Verhalten wie bisher.
         #[serde(rename = "matchId", default)]
         match_id: i64,
+    },
+    /// Check-in von der Meetingpoint-Seite bzw. dem Zähl-Tablet in der
+    /// Cloud — `req_id` korreliert das `MeetingpointAck`.
+    MeetingpointCheckin {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        body: MpCheckinBody,
     },
     /// Endergebnis von einem Tablet – `req_id` korreliert die `ResultAck`.
     Result {
@@ -3556,6 +3770,7 @@ mod tests {
                 sr_names: vec!["Sabine Schiedsmann".into()],
                 ar_names: Vec::new(),
                 teams_correction: false,
+                feld_check: false,
                 seed_a: None,
                 seed_b: None,
             },
@@ -3602,6 +3817,7 @@ mod tests {
             sr_names: vec!["Sabine Schiedsmann".into()],
             ar_names: vec!["Alex Aufschlag".into()],
             teams_correction: true,
+            feld_check: false,
             seed_a: None,
             seed_b: None,
         };
@@ -6128,5 +6344,112 @@ mod monitor_stil_tests {
         assert!(serde_json::to_string(&s)
             .unwrap()
             .contains(r#""stil":"riesen""#));
+    }
+}
+
+#[cfg(test)]
+mod meetingpoint_tests {
+    use super::*;
+
+    fn roundtrip<T>(value: &T)
+    where
+        T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug,
+    {
+        let json = serde_json::to_string(value).unwrap();
+        let back: T = serde_json::from_str(&json).unwrap();
+        assert_eq!(&back, value, "{json}");
+    }
+
+    // ─────────────── Meetingpoint (Spec meetingpoint-spielbereit) ───────────────
+
+    #[test]
+    fn mp_platz_und_ort_reisen_stabil_und_fangen_unbekanntes_auf() {
+        roundtrip(&MpPlatz::Spieler { seite: 2, pos: 1 });
+        roundtrip(&MpPlatz::Sr);
+        assert_eq!(
+            serde_json::to_string(&MpPlatz::Spieler { seite: 1, pos: 0 }).unwrap(),
+            r#"{"art":"spieler","seite":1,"pos":0}"#
+        );
+        let neu: MpPlatz = serde_json::from_str(r#"{"art":"assistent"}"#).unwrap();
+        assert_eq!(neu, MpPlatz::Unbekannt);
+        let ort: MpOrt = serde_json::from_str(r#""irgendwo""#).unwrap();
+        assert_eq!(ort, MpOrt::Unbekannt);
+        // Ohne `ort` gilt der Meetingpoint.
+        let body: MpCheckinBody =
+            serde_json::from_str(r#"{"matchId":7,"platz":{"art":"sr"},"present":true}"#).unwrap();
+        assert_eq!(body.ort, MpOrt::Meetingpoint);
+        assert_eq!(body.halle, "");
+    }
+
+    #[test]
+    fn meetingpoint_frames_und_aktion_roundtrip() {
+        roundtrip(&HostFrame::MeetingpointAck {
+            req_id: 3,
+            ok: true,
+            error: None,
+        });
+        roundtrip(&RelayFrame::MeetingpointCheckin {
+            req_id: 4,
+            body: MpCheckinBody {
+                halle: "Halle A".into(),
+                match_id: 7,
+                platz: MpPlatz::Spieler { seite: 1, pos: 0 },
+                present: true,
+                ort: MpOrt::Feld,
+            },
+        });
+        roundtrip(&TlAction::MeetingpointSet {
+            match_id: 7,
+            platz: MpPlatz::Sr,
+            present: false,
+        });
+        roundtrip(&HostFrame::Meetingpoint {
+            view: MeetingpointView::default(),
+        });
+    }
+
+    #[test]
+    fn fuer_halle_schneidet_zu_und_verlangt_die_wahl() {
+        let p = |id: i64, h: &str| MpPartie {
+            match_id: id,
+            halle: h.into(),
+            label: String::new(),
+            called_at_ms: 0,
+            plaetze: Vec::new(),
+            bereit: false,
+            ohne_sr: false,
+            sr_noetig: false,
+        };
+        let eins = MeetingpointView {
+            enabled: true,
+            partien: vec![p(1, "")],
+            ..Default::default()
+        };
+        assert_eq!(
+            eins.fuer_halle("egal").partien.len(),
+            1,
+            "Ein-Hallen: alles"
+        );
+        let zwei = MeetingpointView {
+            enabled: true,
+            hallen: vec!["Halle A".into(), "Halle B".into()],
+            partien: vec![p(1, "Halle A"), p(2, "Halle B")],
+            ..Default::default()
+        };
+        let a = zwei.fuer_halle(" halle a ");
+        assert_eq!(a.halle, "Halle A");
+        assert_eq!(a.partien.len(), 1);
+        let x = zwei.fuer_halle("Halle X");
+        assert!(x.halle_waehlen && x.partien.is_empty());
+    }
+
+    #[test]
+    fn match_brief_ohne_feld_check_bietet_nichts_an() {
+        // Ein alter Host kennt `feldCheck` nicht → das Tablet zeigt keinen
+        // Anwesenheits-Knopf.
+        let json = r#"{"matchId":1,"teamA":[],"teamB":[],"eventLabel":"","bestOfSets":3,"targetScore":21,"capScore":30,"intervalAt":11,"discipline":"","classLabel":""}"#;
+        if let Ok(b) = serde_json::from_str::<MatchBrief>(json) {
+            assert!(!b.feld_check);
+        }
     }
 }

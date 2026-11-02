@@ -1176,6 +1176,55 @@ export function prepareFreeText(
   };
 }
 
+/**
+ * Nachruf an die Fehlenden einer gerufenen Partie (Meetingpoint, Spec
+ * `meetingpoint-spielbereit`): „<Namen>. Bitte zum Meetingpoint in <Halle>."
+ * Die Namen kommen fertig vom Turnier-PC (wer fehlt, weiß nur er); die
+ * Aussprache-Korrektur greift hier wie bei jedem Aufruf.
+ */
+export function prepareMeetingpointMissing(
+  names: string[],
+  hall: string | undefined,
+  lang: AnnounceLang,
+  opts: AnnounceOptions = {},
+): PreparedAnnouncement | null {
+  const liste = (names || []).map((n) => n.trim()).filter(Boolean);
+  if (liste.length === 0) return null;
+  const enabled = opts.nameOverridesEnabled ?? true;
+  const h = (hall || "").trim();
+  const ziel =
+    lang === "de"
+      ? `Bitte zum Meetingpoint${h ? ` in ${h}` : ""}.`
+      : `Please report to the meeting point${h ? ` in ${h}` : ""}.`;
+  const namen = joinNames(liste, lang, buildOverrideMap(opts.nameOverrides, enabled), enabled);
+  let ssml: string | undefined;
+  if (opts.azure) {
+    try {
+      const namenSsml = joinNamesSsml(
+        liste,
+        lang,
+        buildIpaMap(opts.nameOverrides, enabled),
+        buildLangOverrideMap(opts.nameOverrides, enabled),
+        buildOverrideMap(opts.nameOverrides, enabled),
+      );
+      const speakLang = lang === "de" ? "de-DE" : "en-US";
+      ssml =
+        `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
+        `<voice name="${xmlEscape(opts.azure.voice)}">${namenSsml}. ${xmlEscape(ziel)}</voice></speak>`;
+    } catch (e) {
+      reportAzureFallback(e);
+    }
+  }
+  return {
+    gong: gongWahl(opts.gong, "match"),
+    lang,
+    rate: clampRate(opts.rate),
+    voiceURI: opts.voiceURI,
+    segments: [`${namen}.`, ziel],
+    ssml,
+  };
+}
+
 /** Baut eine Vorbereitungs-Ansage (ohne Feld, ggf. mit Halle). */
 export function preparePreparationAnnouncement(
   input: AnnouncePreparationInput,

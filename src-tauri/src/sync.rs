@@ -1730,6 +1730,23 @@ impl SyncEngine {
             im_dienst.extend(w.ar);
         }
 
+        // Vorläufige Meetingpoint-SR (ADR 0072) übernehmen — zustandsbasiert
+        // für JEDES laufende Spiel, nicht nur neu belegte Felder: Sonst
+        // verschluckte die Ausgangslage nach einem Sync-Neustart die
+        // Übernahme. Vor der Rotation, damit diese nicht jemand anderen holt.
+        for (&court_id, &match_id) in &oncourt_now {
+            if let Some(m) = snapshot.matches.iter().find(|m| m.id == match_id) {
+                if let Some(id) =
+                    crate::tablet::meetingpoint::uebernimm_vorab_sr(tablet, m, court_id, &im_dienst)
+                {
+                    im_dienst.insert(id);
+                }
+            }
+        }
+        // Vorläufig für gerufene Partien reservierte SR stehen der Feld-
+        // Rotation nicht zur Verfügung.
+        im_dienst.extend(tablet.meetingpoint_store().alle_vorab_sr().into_values());
+
         // Neu belegte Felder bestücken — nach CourtID sortiert, damit die
         // Verteilung bei mehreren gleichzeitig deterministisch ist.
         let mut courts: Vec<(i64, i64)> = oncourt_now.iter().map(|(&c, &m)| (c, m)).collect();
@@ -1824,6 +1841,7 @@ impl SyncEngine {
         // gepflegt, damit ein Wiedereinschalten nicht auf altem Stand
         // aufsetzt.
         if !config.auto_assign.enabled || tablet.auto_assign_paused() {
+            tablet.set_mp_idle(false, now);
             return (Vec::new(), Vec::new());
         }
         // Wartezeit robust: NaN/Inf/negativ → 0 (sofort).
@@ -1894,6 +1912,18 @@ impl SyncEngine {
         };
         // Aufruf-Pflicht nur im Mehr-Hallen-Fall OHNE gesetzte aktive Halle.
         let require_call = multi_hall && active_loc.is_none();
+        // Strikter Meetingpoint-Modus (ADR 0073): zusätzliches Gate, ändert
+        // an Aufruf-Pflicht und Hallenbindung nichts.
+        let strict = config.meetingpoint.strict();
+        let mp_bereit: HashSet<i64> = if strict {
+            crate::tablet::meetingpoint::bereite_partien(tablet, snapshot, &config.meetingpoint)
+        } else {
+            HashSet::new()
+        };
+        let mut officials_im_dienst =
+            crate::tablet::meetingpoint::officials_im_dienst(tablet, snapshot);
+        // Feld frei, aber keine spielbereite Partie — für die Warnung.
+        let mut feld_ohne_bereite = false;
         let calls = tablet.preparation_calls();
         let call_for = |mid: i64| calls.iter().find(|c| c.match_id == mid);
 
@@ -1993,6 +2023,12 @@ impl SyncEngine {
                 if availability.blocked(m, now).is_some() {
                     return None;
                 }
+                // Strikt: reserviert erst ab Spielbereitschaft (ADR 0073) —
+                // sonst hielte ein nicht eingechecktes Wunschspiel sein Feld
+                // unbegrenzt leer.
+                if strict && !mp_bereit.contains(&m.id) {
+                    return None;
+                }
                 Some((court, m.id))
             })
             .collect();
@@ -2023,6 +2059,7 @@ impl SyncEngine {
             if now.saturating_sub(free_since) < wait_ms {
                 continue;
             }
+            let strikt_verhindert = std::cell::Cell::new(false);
             let pick = ready.iter().find(|m| {
                 if used.contains(&m.id) || pending_matches.contains(&m.id) {
                     return false;
@@ -2086,7 +2123,7 @@ impl SyncEngine {
                 {
                     return false;
                 }
-                if require_call {
+                let vergebbar = if require_call {
                     // Mehr-Hallen ohne aktive Halle: nur für diese Halle
                     // gerufene Matches — ODER ein Spiel, dessen Halle bereits
                     // feststeht und das in genau dieser Halle ein Feld
@@ -2122,9 +2159,31 @@ impl SyncEngine {
                     // Ein-Hallen oder aktive Halle gesetzt: jedes spielbereite
                     // Match (Reihenfolge regelt die Zeit-Sortierung).
                     true
+                };
+                if !vergebbar {
+                    return false;
                 }
+                // Strikter Meetingpoint-Modus als LETZTES Gate (ADR 0073):
+                // nur spielbereite Partien, im Mehr-Hallen-Betrieb nur in
+                // ihrer Aufruf-Halle. Zuletzt geprüft, damit „das Feld blieb
+                // wegen des strikten Modus leer" eindeutig ist — nur dann
+                // warnt die TL (nicht bei Turnierende oder Pausen).
+                if strict {
+                    let falsche_halle = multi_hall
+                        && call_for(m.id)
+                            .and_then(|c| c.location_id)
+                            .is_some_and(|loc| court.location_id != Some(loc));
+                    if !mp_bereit.contains(&m.id) || falsche_halle {
+                        strikt_verhindert.set(true);
+                        return false;
+                    }
+                }
+                true
             });
-            let Some(m) = pick else { continue };
+            let Some(m) = pick else {
+                feld_ohne_bereite |= strikt_verhindert.get();
+                continue;
+            };
             used.insert(m.id);
             // Spieler dieses Matches für den Rest des Zyklus als belegt merken.
             for p in m.team1.iter().chain(m.team2.iter()) {
@@ -2134,6 +2193,16 @@ impl SyncEngine {
                 court_id: court.id,
                 match_id: Some(m.id),
             });
+            // Vorläufiger Meetingpoint-SR wird jetzt echt (ADR 0072) und
+            // reist im selben Write mit.
+            if let Some(id) = crate::tablet::meetingpoint::uebernimm_vorab_sr(
+                tablet,
+                m,
+                court.id,
+                &officials_im_dienst,
+            ) {
+                officials_im_dienst.insert(id);
+            }
             match_courts.push(crate::btp::proto::MatchCourt {
                 match_id: m.id,
                 draw_id: m.draw_id,
@@ -2154,6 +2223,7 @@ impl SyncEngine {
             // Schutz muss in BEIDE Richtungen wirken, sonst ist er keiner.
             tablet.try_reserve_court(court.id, m.id, now);
         }
+        tablet.set_mp_idle(strict && feld_ohne_bereite, now);
         (courts, match_courts)
     }
 
@@ -2353,6 +2423,39 @@ impl SyncEngine {
         // gebunden und um neue BTP-Officials ergänzt. Master-only: der
         // Ansage-Slave ist oben schon zurückgekehrt.
         self.track_officials(&snapshot, tablet);
+        // Meetingpoint: gerufenen Partien vorläufig einen freien SR geben
+        // (ADR 0072) — nach der Feld-Rotation, die Vorrang hat.
+        crate::tablet::meetingpoint::vorab_sr_verteilen(tablet, &snapshot, &config.meetingpoint);
+        // Aufruf-Automatik (ADR 0075): ruft über denselben Weg wie ein
+        // Hand-Aufruf; der Aufruf räumt die Auto-Halle (E3).
+        for (match_id, location_id) in
+            crate::tablet::meetingpoint::auto_aufrufe(tablet, &snapshot, config, now_ms())
+        {
+            tablet.meetingpoint_store().call_mit(
+                crate::tablet::state::PreparationCall {
+                    match_id,
+                    location_id,
+                    called_at_ms: now_ms(),
+                },
+                true,
+            );
+            tablet.auto_hall_store().remove(match_id);
+            tracing::info!("Meetingpoint: Spiel {match_id} automatisch gerufen");
+            // Ein automatischer Aufruf wird angesagt wie einer von Hand.
+            tablet.publish_announce_job(
+                crate::tablet::meetingpoint::hallen_name(&snapshot, location_id),
+                crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id },
+                now_ms(),
+            );
+        }
+        // Fehlende nach X Minuten ansagen — genau einmal je Partie und Halle
+        // (der Merker liegt im Store und überlebt Neustarts).
+        crate::tablet::meetingpoint::fehlende_ansagen(
+            tablet,
+            &snapshot,
+            &config.meetingpoint,
+            now_ms(),
+        );
         // Zettel-Autodruck (Spec `schiedsrichterzettel-autodruck`, E5) —
         // **unmittelbar nach der Rotation**: Erst hier steht die
         // Besetzung des frisch belegten Felds fest. Eine Zeile früher
@@ -3867,6 +3970,213 @@ mod tests {
         );
         engine.reconcile_queue_order(&tablet, &snap);
         assert_eq!(tablet.queue_order_store().rank(7), Some(0));
+    }
+
+    // ─────────── Strikter Meetingpoint-Modus (ADR 0073) ───────────
+
+    fn cfg_strikt() -> AppConfig {
+        let mut c = cfg_auto(true, 0.0);
+        c.meetingpoint = crate::config::MeetingpointConfig {
+            enabled: true,
+            strict_auto_assign: true,
+            ..Default::default()
+        };
+        c
+    }
+
+    fn checke_alle_ein(tablet: &TabletState, cfg: &AppConfig, match_id: i64) {
+        for (seite, pos) in [(1u8, 0u8), (2, 0)] {
+            crate::tablet::meetingpoint::checkin(
+                tablet,
+                &cfg.meetingpoint,
+                &relay_proto::MpCheckinBody {
+                    halle: String::new(),
+                    match_id,
+                    platz: relay_proto::MpPlatz::Spieler { seite, pos },
+                    present: true,
+                    ort: relay_proto::MpOrt::Meetingpoint,
+                },
+                1,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn strikt_vergibt_nie_gerufene_spiele_nicht_und_warnt() {
+        // AK 28.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        tablet.set_snapshot(snap.clone());
+        let (courts, _) = engine.auto_assign(&cfg_strikt(), &snap, &tablet);
+        assert!(courts.is_empty());
+        assert!(
+            tablet.mp_idle_since().is_some(),
+            "Warnung: Feld frei, nichts bereit"
+        );
+        // Schalter aus → wie bisher (AK 33).
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+    }
+
+    #[test]
+    fn strikt_warnt_nicht_wenn_gar_nichts_zu_vergeben_ist() {
+        // Turnierende: freies Feld, kein Spiel mehr — keine Meetingpoint-Warnung.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(vec![court(1, None)], Vec::new(), Vec::new());
+        tablet.set_snapshot(snap.clone());
+        engine.auto_assign(&cfg_strikt(), &snap, &tablet);
+        assert!(tablet.mp_idle_since().is_none());
+    }
+
+    #[test]
+    fn strikt_vergibt_erst_nach_dem_letzten_checkin() {
+        // AK 29.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        tablet.set_snapshot(snap.clone());
+        let cfg = cfg_strikt();
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        });
+        let (courts, _) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert!(courts.is_empty(), "gerufen, aber noch niemand da");
+        checke_alle_ein(&tablet, &cfg, 7);
+        let (courts, _) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(7));
+        assert!(tablet.mp_idle_since().is_none(), "Warnung erlischt");
+    }
+
+    #[test]
+    fn strikt_haelt_das_wunschfeld_erst_ab_spielbereitschaft() {
+        // AK 31: Das nicht eingecheckte Wunschspiel blockiert sein Feld nicht.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut zweites = ready_match(8, 2);
+        zweites.team1 = vec![player("C")];
+        zweites.team2 = vec![player("D")];
+        let snap = snap_with(
+            vec![court(3, None)],
+            vec![ready_match(7, 1), zweites],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        let cfg = cfg_strikt();
+        for id in [7, 8] {
+            tablet.add_preparation_call(PreparationCall {
+                match_id: id,
+                location_id: None,
+                called_at_ms: 0,
+            });
+        }
+        tablet.set_wish_court(7, Some(3));
+        checke_alle_ein(&tablet, &cfg, 8);
+        let (courts, _) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(
+            courts[0].match_id,
+            Some(8),
+            "Feld 3 geht an die bereite Partie"
+        );
+    }
+
+    #[test]
+    fn strikt_bindet_im_mehrhallenbetrieb_an_die_aufrufhalle() {
+        // AK 30.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let locs = vec![
+            BtpLocation {
+                id: 1,
+                name: "Halle A".into(),
+            },
+            BtpLocation {
+                id: 2,
+                name: "Halle B".into(),
+            },
+        ];
+        let snap = snap_with(vec![court(5, Some(2))], vec![ready_match(7, 1)], locs);
+        tablet.set_snapshot(snap.clone());
+        let cfg = cfg_strikt();
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: Some(1),
+            called_at_ms: 0,
+        });
+        let mut c = cfg.clone();
+        c.meetingpoint.strict_auto_assign = true;
+        let halle = "Halle A".to_string();
+        crate::tablet::meetingpoint::checkin(
+            &tablet,
+            &c.meetingpoint,
+            &relay_proto::MpCheckinBody {
+                halle: halle.clone(),
+                match_id: 7,
+                platz: relay_proto::MpPlatz::Spieler { seite: 1, pos: 0 },
+                present: true,
+                ort: relay_proto::MpOrt::Meetingpoint,
+            },
+            1,
+        )
+        .unwrap();
+        crate::tablet::meetingpoint::checkin(
+            &tablet,
+            &c.meetingpoint,
+            &relay_proto::MpCheckinBody {
+                halle,
+                match_id: 7,
+                platz: relay_proto::MpPlatz::Spieler { seite: 2, pos: 0 },
+                present: true,
+                ort: relay_proto::MpOrt::Meetingpoint,
+            },
+            1,
+        )
+        .unwrap();
+        let (courts, _) = engine.auto_assign(&c, &snap, &tablet);
+        assert!(
+            courts.is_empty(),
+            "bereit in Halle A, Feld steht in Halle B"
+        );
+    }
+
+    #[test]
+    fn der_vorlaeufige_sr_reist_im_selben_zuweisungs_write_mit() {
+        // ADR 0072: Übernahme in `auto_assign` vor `officials_for_write`.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        snap.officials = vec![crate::btp::model::BtpOfficial {
+            id: 100,
+            name: "Richter".into(),
+            first: String::new(),
+            nationality: None,
+        }];
+        tablet.set_snapshot(snap.clone());
+        let store = tablet.officials_store();
+        store.set_enabled(true);
+        store.set_rotation(true, false);
+        store.set_tournament("T");
+        store.sync_roster(&[100]);
+        let cfg = {
+            let mut c = cfg_auto(true, 0.0);
+            c.meetingpoint.enabled = true;
+            c
+        };
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        });
+        crate::tablet::meetingpoint::vorab_sr_verteilen(&tablet, &snap, &cfg.meetingpoint);
+        assert_eq!(tablet.meetingpoint_store().vorab_sr(7), Some(100));
+        let (_, matches) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert_eq!(matches[0].officials, Some((100, 0)));
     }
 
     #[test]

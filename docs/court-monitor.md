@@ -1255,3 +1255,14 @@ Farben, Maße und Code sind eigene.
 - **2-Felder-pro-TV-Modus** (`…/display?courts=3,4`) — siehe
   [roadmap.md](roadmap.md).
 - **Pro-Feld unterschiedliche Werbung** — bewusst ein gemeinsamer Satz.
+
+## Meetingpoint in der Anzeige-Hülle (seit v0.9.330)
+
+Die Anzeige-Hülle (`/anzeige`) kennt das Layout **Meetingpoint**
+(`?layout=meetingpoint&halle=…`, `src/io/anzeigeZiel.mjs`). Der Hallenname
+wird nur kodiert in die Query der Meetingpoint-Seite geschrieben
+(`halleAusWert`: getrimmt, ≤ 64 Zeichen, keine Steuerzeichen). Wählt man die
+Halle in der Seite selbst, meldet sie sie per `postMessage`
+(`bts-anzeige:meetingpoint-halle`) an die Hülle, die sie sich merkt. Die
+Meetingpoint-Seite schickt nie `bts-anzeige:naechste-ansicht` — ein Tipp
+checkt ein. Bedienung: [meetingpoint.md](meetingpoint.md).

@@ -2796,6 +2796,8 @@ async function assignTo(court) {
 let state = null;
 let hallFilter = new URLSearchParams(location.search).get("halle")
   || localStorage.getItem("bts-tl-halle") || "";
+/// Meetingpoint-Filter „nur spielbereite" (je Gerät gemerkt).
+let mpNurBereit = localStorage.getItem("bts-tl-mp-bereit") === "1";
 let failures = 0;
 let lastOkMs = 0;
 /// Mitschnitt der zuletzt erhaltenen Fassung — leer, solange keiner kam.
@@ -3162,6 +3164,16 @@ function fertigOhneErgebnisAlle() {
     .sort((a, b) => a.decided_since_ms - b.decided_since_ms);
 }
 
+/** Strikter Meetingpoint-Modus: Ein Feld steht frei, aber keine Partie ist
+ *  spielbereit (ADR 0073). Erst nach einer Minute, damit der normale
+ *  Wechsel zwischen zwei Spielen keinen Alarm auslöst. */
+function mpLeerlaufText() {
+  const mp = state && state.meetingpoint;
+  if (!mp || !mp.strict || !mp.idle_since_ms) return "";
+  if (serverNow() - mp.idle_since_ms < 60000) return "";
+  return "Meetingpoint: Ein Feld ist frei, aber keine gerufene Partie ist spielbereit — bitte Spiele zum Meetingpoint rufen oder Anwesenheit prüfen.";
+}
+
 function renderConnection() {
   const level = connectionLevel();
   const conn = $("conn");
@@ -3212,6 +3224,9 @@ function renderConnection() {
       ? `${nenne(fertig[0])}: Spiel sieht fertig aus, aber es kam kein Ergebnis.`
       : `${fertig.length} Felder ohne Ergebnis: ${fertig.map(nenne).join(", ")}.`;
     banner.textContent = `${kopf} Bitte am Feld nachsehen.`;
+    banner.classList.add("show");
+  } else if (mpLeerlaufText()) {
+    banner.textContent = mpLeerlaufText();
     banner.classList.add("show");
   } else {
     banner.classList.remove("show");
@@ -3380,13 +3395,26 @@ function shortSide(team) {
 
 function renderHalls() {
   const box = $("halls");
-  if (!state || !state.multi_hall) { box.innerHTML = ""; return; }
-  const options = ["", ...state.halls.map((h) => h.name)];
-  box.innerHTML = options.map((h) =>
+  if (!state) { box.innerHTML = ""; return; }
+  const options = state.multi_hall ? ["", ...state.halls.map((h) => h.name)] : [];
+  let html = options.map((h) =>
     `<button type="button" data-hall="${esc(h)}" aria-pressed="${h === hallFilter}">${h ? hallMarke(h) + esc(h) : "Alle Hallen"}</button>`
   ).join("");
-  scopeAll(box, "button").forEach((b) =>
+  // Meetingpoint: Spielliste auf spielbereite Partien beschränken (je Gerät
+  // gemerkt). Nur sichtbar, wenn der Meetingpoint am Turnier-PC an ist.
+  if (state.meetingpoint) {
+    html += `<button type="button" data-mp-filter aria-pressed="${mpNurBereit}"
+      title="Spielliste auf eingecheckte (spielbereite) Partien beschränken">✓ nur spielbereite</button>`;
+  }
+  box.innerHTML = html;
+  scopeAll(box, "button[data-hall]").forEach((b) =>
     b.addEventListener("click", () => setHall(b.dataset.hall)));
+  scopeAll(box, "button[data-mp-filter]").forEach((b) =>
+    b.addEventListener("click", () => {
+      mpNurBereit = !mpNurBereit;
+      try { localStorage.setItem("bts-tl-mp-bereit", mpNurBereit ? "1" : "0"); } catch (e) {}
+      render();
+    }));
 }
 
 /**
@@ -3595,8 +3623,16 @@ function courtCard(c, cellStyle) {
            ~${Number(c.remaining_min)}<small>min Rest</small>
          </span>`
       : "";
+    // Meetingpoint-Feld-Check (nur Anzeige): wie viele am Zähl-Tablet
+    // „Ich bin da" bestätigt haben. Fehlt bei ausgeschaltetem Feld-Check.
+    const fc = Array.isArray(c.feld_check) ? c.feld_check : null;
+    const feldCheck = fc
+      ? `<span class="badge ${fc[0] >= fc[1] ? "badge-info" : "badge-warn"} num"
+           title="Am Feld bestätigt (Zähl-Tablet) — nur ein Hinweis, kein Nachweis">✓ ${fc[0]}/${fc[1]} am Feld</span>`
+      : "";
     foot = `<span class="score num" title="Satzstand">${esc(sets)}</span>
             ${rest}
+            ${feldCheck}
             <span class="clock num stage${stage}" data-since="${c.on_court_since_ms || ""}" data-court="${c.court_id}"
                   title="${isPlaying(c) ? "im Spiel seit" : "auf dem Feld seit"}">
               ${UHR}<span class="zeit">${c.on_court_since_ms ? "" : "–"}</span>
@@ -4757,6 +4793,10 @@ function queueRow(m, topMatchId) {
     status.push(`<span class="badge badge-info">gerufen</span>`);
     status.push(`<span class="called num" data-since="${m.prep_call.called_at_ms}"></span>`);
   }
+  // Meetingpoint (Spec meetingpoint-spielbereit): wer ist eingecheckt? Die
+  // Warnfarbe setzt `tickClocks` über `data-mp-warn-at`, damit sie ohne neuen
+  // Zustand vom Turnier-PC umschlägt.
+  if (m.prep_call && m.meetingpoint) status.push(mpMarkeHtml(m.meetingpoint));
   // Wunschfeld (Spec `tl-wunschfeld`): Ohne diese Marke sähe ein wartendes
   // Wunschspiel in der Liste aus wie jedes andere spielbereite — und niemand
   // wüsste, worauf es wartet.
@@ -4955,6 +4995,9 @@ function queueRow(m, topMatchId) {
         </div>
       </div>`);
   }
+  // Meetingpoint: Plätze von Hand ein-/auschecken (Korrektur, B6) und
+  // „ohne Schiedsrichter" bei SR-Mangel.
+  if (m.prep_call && m.meetingpoint) kebabGroups.push(mpKebabHtml(m));
   // Nachruf, wenn jemand nicht erscheint — seltener gebraucht als der
   // Erst-Ruf, deshalb hier statt auf der Zeile. Getrennt nach Partei, weil
   // in der Regel nur eine fehlt.
@@ -4984,6 +5027,69 @@ function queueRow(m, topMatchId) {
                data-match="${m.match_id}" data-id="${m.match_id}"
                ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
             ${parts.join("")}</div>`;
+}
+
+// ── Meetingpoint (Spec meetingpoint-spielbereit) ─────────────────────────
+/** Zahl der Plätze, die für „spielbereit" zählen, und wie viele davon da sind. */
+function mpZaehlung(mp) {
+  const spieler = [...(mp.team1Present || []), ...(mp.team2Present || [])];
+  let gesamt = spieler.length;
+  let da = spieler.filter(Boolean).length;
+  if (mp.srNoetig && !mp.ohneSr) {
+    gesamt += 1;
+    if (mp.srPresent) da += 1;
+  }
+  return { da, gesamt };
+}
+
+/** Zeitpunkt, ab dem eine nicht bereite Partie als „fehlt" warnt (0 = nie). */
+function mpWarnAb(mp) {
+  const min = state && state.meetingpoint && state.meetingpoint.warn_minutes;
+  if (!min || mp.bereit || !mp.calledAtMs) return 0;
+  return mp.calledAtMs + min * 60000;
+}
+
+function mpMarkeHtml(mp) {
+  if (mp.bereit) {
+    return `<span class="badge badge-info mp-marke mp-bereit" title="Alle eingecheckt — spielbereit">✓ spielbereit</span>`;
+  }
+  const z = mpZaehlung(mp);
+  const fehlt = (mp.fehlend || []).join(", ");
+  const warnAb = mpWarnAb(mp);
+  const warnt = warnAb && serverNow() >= warnAb;
+  return `<span class="badge ${warnt ? "badge-warn" : "badge-info"} mp-marke num"
+      ${warnAb ? `data-mp-warn-at="${warnAb}"` : ""}
+      title="Meetingpoint: ${z.da} von ${z.gesamt} eingecheckt${fehlt ? " — fehlt: " + esc(fehlt) : ""}">🧍 ${z.da}/${z.gesamt}${warnt && fehlt ? " · fehlt: " + esc(fehlt) : ""}</span>`;
+}
+
+/** Name eines Spielers aus der Zeile (Doppel: zweiter Eintrag). */
+function mpName(team, pos) {
+  return (team && team[pos]) || "";
+}
+
+function mpKebabHtml(m) {
+  const mp = m.meetingpoint;
+  const knopf = (platz, name, da) => `<button type="button" data-mp-for="${m.match_id}"
+      data-mp-platz='${esc(JSON.stringify(platz))}' data-mp-present="${da ? "0" : "1"}"
+      aria-pressed="${da ? "true" : "false"}"
+      title="${da ? "Auschecken" : "Einchecken"}">${da ? "✓ " : "○ "}${esc(name)}</button>`;
+  const btns = [];
+  (mp.team1Present || []).forEach((da, i) =>
+    btns.push(knopf({ art: "spieler", seite: 1, pos: i }, mpName(m.team1, i), da)));
+  (mp.team2Present || []).forEach((da, i) =>
+    btns.push(knopf({ art: "spieler", seite: 2, pos: i }, mpName(m.team2, i), da)));
+  if (mp.srName) {
+    btns.push(knopf({ art: "sr" }, `${mp.srName} (SR${mp.srVorab ? ", vorläufig" : ""})`, mp.srPresent));
+  }
+  let ohne = "";
+  if (mp.srNoetig && !mp.ohneSr) {
+    ohne = `<button type="button" data-mp-ohne-sr="${m.match_id}"
+        title="Diese Partie ohne Schiedsrichter spielen lassen — dann zählt für spielbereit nur die Anwesenheit der Spieler">Ohne Schiedsrichter</button>`;
+  }
+  return `<div class="kebab-group">
+      <span class="kebab-label">Meetingpoint (von Hand ein-/auschecken)</span>
+      <div class="kebab-actions">${btns.join("")}${ohne}</div>
+    </div>`;
 }
 
 /** Welche Zeile ihr Kebab-Menü gerade offen hat — über Neuzeichnen hinweg
@@ -5158,6 +5264,33 @@ function wireQueue(box) {
         highlight ? `Hervorgehoben: ${HL_FARBEN[highlight].name}.` : "Hervorhebung entfernt.",
       );
     });
+  });
+  scopeAll(box, "button[data-mp-for]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(btn.dataset.mpFor);
+      let platz = null;
+      try { platz = JSON.parse(btn.dataset.mpPlatz); } catch (e) { return; }
+      const present = btn.dataset.mpPresent === "1";
+      send(
+        `mp-${matchId}-${btn.dataset.mpPlatz}-${present}`,
+        { action: "meetingpoint_set", matchId, platz, present },
+        present ? "Eingecheckt." : "Ausgecheckt.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  scopeAll(box, "button[data-mp-ohne-sr]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(btn.dataset.mpOhneSr);
+      send(
+        `mp-ohne-sr-${matchId}`,
+        { action: "official_clear", courtId: 0, matchId, role: "sr" },
+        "Spielt ohne Schiedsrichter.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
   scopeAll(box, "button[data-recall]").forEach((btn) => {
     btn.addEventListener("click", (ev) => {
@@ -6525,7 +6658,10 @@ function visibleQueue() {
   const gesamt = zeigeOffeneSpiele()
     ? mischeOffene(state.queue, state.open_queue)
     : state.queue;
-  return gesamt.filter((m) => !hallFilter || m.hall === hallFilter || !m.hall);
+  return gesamt
+    .filter((m) => !hallFilter || m.hall === hallFilter || !m.hall)
+    .filter((m) => !mpNurBereit || !state.meetingpoint
+      || (m.meetingpoint && m.meetingpoint.bereit));
 }
 
 /** Kennung der ersten UMSORTIERBAREN Zeile der gerade gezeigten Liste — das
@@ -8516,6 +8652,12 @@ function tickClocks() {
   document.querySelectorAll(".called[data-since]").forEach((el) => {
     const since = Number(el.dataset.since);
     if (since) el.textContent = "seit " + elapsed(since);
+  });
+  document.querySelectorAll(".mp-marke[data-mp-warn-at]").forEach((el) => {
+    const ab = Number(el.dataset.mpWarnAt);
+    const warnt = ab && serverNow() >= ab;
+    el.classList.toggle("badge-warn", !!warnt);
+    el.classList.toggle("badge-info", !warnt);
   });
   document.querySelectorAll(".sk-wait[data-since]").forEach((el) => {
     const since = Number(el.dataset.since);

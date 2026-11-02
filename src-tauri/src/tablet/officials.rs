@@ -635,7 +635,7 @@ impl OfficialsStore {
     /// BTP kennt ihn, er ist nicht pausiert, hat keinen Dienst und keinen
     /// Konflikt. Konflikte werden hier **still** übersprungen — gewarnt wird
     /// nur bei manueller Zuweisung (Spec Nr. 4).
-    fn next_free(
+    pub fn next_free(
         &self,
         bekannt: &[i64],
         vergeben: &HashSet<i64>,

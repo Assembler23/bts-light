@@ -936,3 +936,15 @@ Ereignisse hält der Host die Wahrheit — ein Tablet, das ein Feld übernimmt, 
 die Karten seines Vorgängers nicht und dürfte sie deshalb nie überschreiben.
 Daraus folgt: Der Abgleich ist unschädlich und wird bei jeder Gelegenheit
 mitgeschickt, an der auch `rally_sync` geht.
+
+## Anwesenheit am Feld (Meetingpoint)
+
+Seit v0.9.330 (Spec `meetingpoint-spielbereit`, Nr. 11): Trägt der
+`MatchBrief` `feldCheck: true` (Host-Schalter
+`meetingpoint.field_check_enabled`), zeigt das Tablet in der Seitenwahl
+(`renderAnwesenheit`) je Spieler und SR einen Knopf. Ein Tipp schickt
+`POST {BASE_PATH}/meetingpoint/checkin` mit `ort: "feld"` — derselbe Weg wie
+die Meetingpoint-Seite, in LAN, Cloud und über die Slave-Brücke. Der Host
+nimmt ihn nur an, solange die Partie auf dem Feld steht; er ändert nichts an
+„spielbereit" und sperrt das Zählen nie. Ein alter Host ohne `feldCheck`
+bekommt keinen Knopf angeboten.

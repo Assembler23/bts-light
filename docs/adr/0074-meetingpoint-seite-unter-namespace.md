@@ -32,3 +32,19 @@ ist. Slave: 303 auf den Relay bzw. Durchreichen im Träger-Betrieb.
 
 Wer die Adresse kennt, kann Personen ein-/auschecken; Schaden begrenzt
 (TL-Korrektur, strikt wirkt nur auf die Automatik). Relay-Deploy vor App-Release.
+
+**Ausdrücklich (Security-Review 02.11.2026, M1):** Ist der strikte Modus an,
+entscheidet der Check-in über die automatische Feldvergabe. Wer die Adresse
+kennt, kann also eine gerufene Partie „bereit" melden — die Automatik legt sie
+dann aufs Feld und schreibt nach BTP — oder eine Partie durch Auschecken
+zurückhalten. Das ist Teil des bewusst hingenommenen Risikos. Gegenmittel:
+Die Turnierleitung sieht jeden Stand und kann korrigieren; ein Feld lässt
+sich jederzeit von Hand freigeben. Ein Hallen-PIN für die Seite (Security-
+Review, Option b) bleibt als Ausbaustufe möglich.
+
+Gegen Überlastung (M2–M4): Der Relay drosselt Check-ins je Namespace
+(höchstens 10 je Sekunde, höchstens 4 gleichzeitig unterwegs, eigener Deckel
+neben dem der Ergebnisse) und kappt gepushte Stände (Hallen, Plätze, Texte).
+Der Host bearbeitet Cloud-Check-ins in einem eigenen Task und baut den Stand
+nur bei echter Änderung neu.
+

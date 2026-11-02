@@ -538,3 +538,16 @@ Relay. In der Halle taucht dann keine badhub-Adresse mehr auf.
 er hält die echte Verbindung dorthin. Versagt er dabei, räumt der Relay den
 Substrom nach 15 s selbst ab, damit ein Ersatzgerät das Feld bekommt. Bricht
 der Träger weg, räumt der Relay alle seine Substrome.
+
+## Meetingpoint je Halle (seit v0.9.330)
+
+Jede Halle hat ihren eigenen Meetingpoint (`/meetingpoint?halle=<Name>`); die
+Seite zeigt nur Partien, die in diese Halle gerufen sind, und der Turnier-PC
+lehnt Check-ins für andere Hallen ab. Die ferne Halle erreicht ihn über den
+Slave-PC: Im Weiterleitungs-Betrieb leitet die Brücke per 303 in die Cloud,
+im Träger-Betrieb liefert sie die Seite selbst aus, reicht
+`/meetingpoint/state` lesend durch und `/meetingpoint/checkin` an den Relay
+weiter (Muster `/result`). Strikter Modus: Im Mehr-Hallen-Betrieb vergibt die
+Automatik eine spielbereite Partie nur an Felder ihrer Aufruf-Halle (ADR
+0073); `require_call`/ADR 0030 bleiben unverändert. Die Aufruf-Automatik ruft
+nur Spiele mit aufgelöster Halle. Siehe [meetingpoint.md](meetingpoint.md).

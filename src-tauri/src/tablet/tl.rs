@@ -604,6 +604,22 @@ pub(crate) fn apply_state_action(
                 .clear_assignment(*match_id, tl_role(*role));
             Ok(TlResponse::ok(0))
         }
+        A::MeetingpointSet {
+            match_id,
+            platz,
+            present,
+        } => {
+            crate::tablet::meetingpoint::checkin_tl(
+                tablet,
+                &config.meetingpoint,
+                *match_id,
+                *platz,
+                *present,
+                now_ms,
+            )
+            .map_err(|e| TlResponse::err(C::NotAllowed, e))?;
+            Ok(TlResponse::ok(0))
+        }
         A::OfficialPause {
             official_id,
             paused,
@@ -2232,6 +2248,15 @@ async fn execute_result_action(
 ///
 /// Der Fingerabdruck wird **nie** protokolliert (dafür ist `action_label` da)
 /// — er darf deshalb auch Namen aus einer Zähltafelbediener-Meldung tragen.
+/// Kurzschlüssel eines Meetingpoint-Platzes (Protokoll, Fingerabdruck).
+fn mp_platz_key(platz: relay_proto::MpPlatz) -> String {
+    match platz {
+        relay_proto::MpPlatz::Spieler { seite, pos } => format!("s{seite}{pos}"),
+        relay_proto::MpPlatz::Sr => "sr".to_string(),
+        relay_proto::MpPlatz::Unbekannt => "?".to_string(),
+    }
+}
+
 fn action_fingerprint(action: &relay_proto::TlAction) -> String {
     use relay_proto::TlAction as A;
     let ids = |v: &[i64]| {
@@ -2309,6 +2334,11 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::OfficialClear { match_id, role, .. } => {
             format!("off-clear:{match_id}:{}", role_key(*role))
         }
+        A::MeetingpointSet {
+            match_id,
+            platz,
+            present,
+        } => format!("mp:{match_id}:{}:{present}", mp_platz_key(*platz)),
         A::OfficialPause {
             official_id,
             paused,
@@ -2446,6 +2476,15 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         } => format!("Schiedsrichter für Spiel {match_id} (Feld {court_id})"),
         A::OfficialClear { court_id, .. } => {
             format!("Schiedsrichter von Feld {court_id} gelöst")
+        }
+        A::MeetingpointSet {
+            match_id, present, ..
+        } => {
+            if *present {
+                format!("Meetingpoint: Spiel {match_id} eingecheckt")
+            } else {
+                format!("Meetingpoint: Spiel {match_id} ausgecheckt")
+            }
         }
         A::OfficialPause { paused, .. } => {
             if *paused {
@@ -2649,6 +2688,48 @@ fn assign_error_response(
     }
 }
 
+/// Meetingpoint-Einstellungen und -Lage für die TL-Seite.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TlMeetingpointLage {
+    /// Feld-Automatik vergibt nur spielbereite Partien.
+    pub strict: bool,
+    /// SR zählt für „spielbereit".
+    pub require_umpire: bool,
+    /// Warnung „nicht bereit nach X Minuten"; `None` = aus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warn_minutes: Option<u32>,
+    /// Aufruf-Automatik: `aus` | `fest` | `restzeit`.
+    pub auto_call: String,
+    /// Strikter Modus: Seit wann steht ein Feld frei, ohne dass eine
+    /// spielbereite Partie wartet (Unix-ms)? `None` = alles gut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_since_ms: Option<u64>,
+}
+
+/// Meetingpoint-Lage aus Config und Tablet-Zustand.
+fn meetingpoint_lage(tablet: &TabletState, config: &AppConfig) -> Option<TlMeetingpointLage> {
+    let mp = &config.meetingpoint;
+    if !mp.enabled {
+        return None;
+    }
+    Some(TlMeetingpointLage {
+        strict: mp.strict(),
+        require_umpire: mp.require_umpire,
+        warn_minutes: mp.missing_warn_enabled.then_some(mp.missing_warn_minutes),
+        auto_call: match mp.auto_call_mode() {
+            crate::config::AutoCallMode::Fest => "fest",
+            crate::config::AutoCallMode::Restzeit => "restzeit",
+            _ => "aus",
+        }
+        .to_string(),
+        idle_since_ms: if mp.strict() {
+            tablet.mp_idle_since()
+        } else {
+            None
+        },
+    })
+}
+
 /// Der komplette Anzeige-Zustand.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TlState {
@@ -2687,6 +2768,10 @@ pub struct TlState {
     /// tippte auf Orange und hielte das Spiel für markiert.
     #[serde(default)]
     pub can_set_highlight: bool,
+    /// Meetingpoint-Einstellungen und -Lage (Spec
+    /// `meetingpoint-spielbereit`); `None` = Meetingpoint aus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meetingpoint: Option<TlMeetingpointLage>,
     /// Kennt dieser Turnier-PC den Fernbefehl „alle Tablets neu laden"
     /// (Spec `tablet-version-abgleich`)? Gleiche Begründung wie bei
     /// [`Self::can_lock_courts`]: Ein älterer Host verwirft die unbekannte
@@ -2969,6 +3054,12 @@ pub struct TlCourt {
     /// `display.show_court_remaining`.
     #[serde(default)]
     pub remaining_min: Option<u64>,
+    /// Meetingpoint-Feld-Check (Spec `meetingpoint-spielbereit` Nr. 11):
+    /// wie viele Personen ihre Anwesenheit am Zähl-Tablet bestätigt haben
+    /// `[bestätigt, gesamt]`. Nur Anzeige; fehlt bei ausgeschaltetem
+    /// Feld-Check und freiem Feld.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feld_check: Option<[u32; 2]>,
     /// Wie oft dieses Spiel schon aufgerufen wurde, **gezählt am
     /// Turnier-PC** (0 = noch nie; mit „Aufrufe unbegrenzt" nach oben
     /// offen, sonst maximal 3 — kein `min(…, 3)` daraufsetzen). Nicht zu
@@ -3071,6 +3162,12 @@ pub struct TlMatch {
     /// andere spielbereite.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wish_court: Option<i64>,
+    /// Meetingpoint-Stand der gerufenen Partie (Spec
+    /// `meetingpoint-spielbereit`): wer eingecheckt ist, wer fehlt,
+    /// spielbereit. Nur Flags und Namen, die der Zustand ohnehin trägt;
+    /// fehlt bei ausgeschaltetem Meetingpoint und ungerufenen Spielen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meetingpoint: Option<relay_proto::TlMeetingpoint>,
     /// Zeilenfarbe aus BTPs „Hervorheben" (Spec `tl-zeilenfarbe`), `0`–`6`;
     /// `0` bleibt auf dem Draht weg (kein Rev-Churn für die vielen Zeilen
     /// ohne Farbe). Die Seite malt den Zeilenhintergrund in demselben Ton
@@ -3483,6 +3580,7 @@ pub(crate) fn build_state_limited(
             multi_hall: false,
             can_set_wish_court: true,
             can_set_highlight: true,
+            meetingpoint: meetingpoint_lage(tablet, config),
             finished_warning_seconds: config.finished_warning_seconds,
             // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
             // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
@@ -3551,7 +3649,15 @@ pub(crate) fn build_state_limited(
             let fertig_seit = (c.match_id != 0)
                 .then(|| tablet.match_times_store().decided_seen_ms(c.match_id))
                 .flatten();
-            court_view(c, clearing, schalter, spiel, fertig_seit)
+            let mut view = court_view(c, clearing, schalter, spiel, fertig_seit);
+            if config.meetingpoint.enabled && config.meetingpoint.field_check_enabled {
+                if let Some(m) = spiel {
+                    view.feld_check = Some(crate::tablet::meetingpoint::feld_check_zaehlung(
+                        tablet, m, &snap,
+                    ));
+                }
+            }
+            view
         })
         .collect();
 
@@ -3671,26 +3777,17 @@ pub(crate) fn build_state_limited(
                     // verstrichene Zeit. BTP-Satzstände laufender Spiele
                     // gibt es nicht, das Gate schützt also vor einem
                     // Modell ohne Datengrundlage.
-                    let remaining = if c.tablet_connected || first_point.is_some() {
-                        predict::live_remaining_min(&predict::LiveRemainInput {
-                            now_ms,
-                            sets: c.sets.clone(),
-                            best_of: c.best_of,
-                            target: c.target_score,
-                            cap: c.cap_score,
-                            first_assigned_ms: since,
-                            first_point_ms: first_point,
-                            netto_median_min: times.netto_min,
-                            brutto_median_min: times.brutto_min,
-                        })
-                    } else {
-                        // „~0 min Rest" wäre eine verwirrende Anzeige —
-                        // Untergrenze 1 wie im Live-Modell.
-                        let elapsed = since
-                            .map(|s| now_min.saturating_sub(s / 60_000))
-                            .unwrap_or(0);
-                        times.brutto_min.saturating_sub(elapsed).max(1)
-                    };
+                    let remaining = predict::feld_rest_min(predict::FeldRest {
+                        now_ms,
+                        sets: c.sets.clone(),
+                        best_of: c.best_of,
+                        target: c.target_score,
+                        cap: c.cap_score,
+                        tablet_connected: c.tablet_connected,
+                        first_assigned_ms: since,
+                        first_point_ms: first_point,
+                        times,
+                    });
                     c.remaining_min = Some(remaining);
                     now_min + remaining
                 } else {
@@ -3779,6 +3876,21 @@ pub(crate) fn build_state_limited(
 
     // Turnierweit kappen, nicht je Halle (ADR 0026) — die Liste ist eine
     // einzige Abfolge, also gibt es auch nur eine Grenze.
+    // Meetingpoint-Stand je gerufener Partie (eine Bewertung für alle).
+    let mp_stand: std::collections::HashMap<i64, relay_proto::TlMeetingpoint> =
+        if config.meetingpoint.enabled {
+            crate::tablet::meetingpoint::bewertungen(tablet, &snap, &config.meetingpoint)
+                .iter()
+                .map(|(call, sr, b)| {
+                    (
+                        call.match_id,
+                        crate::tablet::meetingpoint::tl_meetingpoint(call, sr, b),
+                    )
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
     let queue_truncated = ordered.len().saturating_sub(queue_limit);
     let mut queue: Vec<TlMatch> = Vec::new();
     for (_, m, hall, hall_source) in ordered.into_iter().take(queue_limit) {
@@ -3828,6 +3940,7 @@ pub(crate) fn build_state_limited(
             blocked: availability.blocked(m, now_ms).map(TlBlocked::from),
             excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
             wish_court: tablet.wish_court(m.id),
+            meetingpoint: mp_stand.get(&m.id).cloned(),
             highlight: m.highlight,
             manual: manually_ordered,
             predicted_start_ms: predictions.get(&m.id).map(|p| p.start_min * 60_000),
@@ -3990,6 +4103,7 @@ pub(crate) fn build_state_limited(
         can_lock_courts: true,
         can_set_wish_court: true,
         can_set_highlight: true,
+        meetingpoint: meetingpoint_lage(tablet, config),
         can_reload_tablets: true,
         finished_warning_seconds: config.finished_warning_seconds,
         rev,
@@ -4724,6 +4838,8 @@ fn court_view(
         on_court_since_ms: c.on_court_since_ms,
         // Wird — falls die Prognose an ist — beim Simulation-Bau gefüllt.
         remaining_min: None,
+        // Setzt der Aufrufer, wenn der Meetingpoint-Feld-Check an ist.
+        feld_check: None,
         best_of: c.best_of,
         target_score: c.target_score,
         cap_score: c.cap_score,
@@ -10673,7 +10789,47 @@ mod tests {
                 }],
             },
         ])));
+        // Meetingpoint (Spec meetingpoint-spielbereit): Die wartende Partie
+        // ist gerufen und teils eingecheckt. Ihr Meetingpoint-Stand darf nur
+        // Flags und die ohnehin vorhandenen Namen tragen — nie eine
+        // Lizenznummer, keinen Verein, keine Nation (Wächter unten).
+        config.meetingpoint.enabled = true;
+        tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+            match_id: 2,
+            location_id: None,
+            called_at_ms: 1_000,
+        });
+        crate::tablet::meetingpoint::checkin(
+            &tablet,
+            &config.meetingpoint,
+            &relay_proto::MpCheckinBody {
+                halle: String::new(),
+                match_id: 2,
+                platz: relay_proto::MpPlatz::Spieler { seite: 1, pos: 0 },
+                present: true,
+                ort: relay_proto::MpOrt::Meetingpoint,
+            },
+            1_000,
+        )
+        .unwrap();
         let s = build_state(&tablet, &config, 1_000_000, 7);
+        {
+            let mp: Vec<String> = s
+                .queue
+                .iter()
+                .filter_map(|m| m.meetingpoint.as_ref())
+                .map(|mp| serde_json::to_string(mp).unwrap())
+                .collect();
+            assert_eq!(mp.len(), 1, "der Meetingpoint-Stand reist mit");
+            for verboten in ["08-", "SC Musterstadt", "GER", "member", "club"] {
+                assert!(
+                    !mp[0].contains(verboten),
+                    "{verboten} im Meetingpoint-Stand: {}",
+                    mp[0]
+                );
+            }
+            assert!(mp[0].contains("\"team1Present\":[true]"), "{}", mp[0]);
+        }
         assert!(
             !s.finished.is_empty(),
             "Fixture-Fehler: das Fixture muss ein beendetes Spiel enthalten"

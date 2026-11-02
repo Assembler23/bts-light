@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meetingpoint – bts-light</title>
+<!--
+  Meetingpoint (Spec docs/features/meetingpoint-spielbereit.md): zeigt die
+  zum Meetingpoint dieser Halle gerufenen Partien. Wer seinen Namen antippt,
+  ist eingecheckt; ein zweiter Tipp checkt wieder aus. Sind alle da, steht
+  die Partie auf „spielbereit".
+
+  Die Seite fragt alle 2 s `meetingpoint/state?halle=…` ab und meldet jeden
+  Tipp per POST an `meetingpoint/checkin`. Der Turnier-PC prüft jede Meldung
+  (richtige Halle, gerufene Partie, existierender Platz) — die Seite selbst
+  entscheidet nichts. Sie zeigt nur Namen, keine Lizenznummer, keinen
+  Verein, keine Nation.
+
+  Läuft auch in der Anzeige-Hülle: Ein Tipp schaltet dort NIE die Ansicht
+  weiter (Tipp = Einchecken).
+-->
+<style>
+  :root {
+    --bg: #0b1020; --surface: #111c33; --surface-2: #1e293b; --text: #f1f5f9;
+    --muted: #94a3b8; --line: #334155; --ok: #15803d; --ok-hell: #22c55e; --warn: #b45309;
+  }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { box-sizing: border-box; padding: max(.6rem, env(safe-area-inset-top)) .9rem 1.2rem; }
+  .kopf { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem 1rem; margin-bottom: .7rem; }
+  h1 { margin: 0; font-size: 1.5rem; }
+  .halle { font-size: 1.2rem; color: var(--muted); }
+  .hinweis { color: var(--muted); font-size: 1rem; margin: .4rem 0 .8rem; }
+  .status { margin-left: auto; color: var(--muted); font-size: .9rem; }
+  .status.fehler { color: #f87171; font-weight: 700; }
+  #partien { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: .8rem; }
+  .partie { background: var(--surface); border: 2px solid var(--line); border-radius: .9rem; padding: .7rem .8rem; }
+  .partie.bereit { border-color: var(--ok-hell); }
+  .p-kopf { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
+  .p-label { font-weight: 700; font-size: 1.05rem; }
+  .p-zeit { color: var(--muted); font-size: .9rem; }
+  .p-zaehler { margin-left: auto; font-size: .95rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .p-bereit { margin-left: auto; background: var(--ok); color: #fff; font-weight: 800; border-radius: .5rem;
+    padding: .15rem .55rem; font-size: .95rem; }
+  .seite { display: flex; flex-direction: column; gap: .4rem; }
+  .gegen { text-align: center; color: var(--muted); margin: .35rem 0; font-size: .9rem; }
+  .sr-zeile { margin-top: .6rem; padding-top: .5rem; border-top: 1px dashed var(--line); }
+  .sr-zeile .rolle { color: var(--muted); font-size: .85rem; margin-bottom: .25rem; }
+  button.name { display: flex; align-items: center; gap: .6rem; width: 100%; min-height: 3.2rem;
+    font: inherit; font-size: 1.25rem; text-align: left; color: var(--text);
+    background: var(--surface-2); border: 2px solid var(--line); border-radius: .7rem; padding: .45rem .7rem;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  button.name .haken { width: 1.8rem; height: 1.8rem; flex: none; border-radius: 50%; border: 2px solid var(--muted);
+    display: flex; align-items: center; justify-content: center; font-weight: 900; }
+  button.name.da { background: #14532d; border-color: var(--ok-hell); }
+  button.name.da .haken { background: var(--ok-hell); border-color: var(--ok-hell); color: #052e16; }
+  button.name.wartet { opacity: .6; }
+  .leer { color: var(--muted); font-size: 1.2rem; text-align: center; margin-top: 3rem; }
+  #hallen { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1rem; }
+  #hallen a { display: block; background: var(--surface-2); color: var(--text); text-decoration: none;
+    border: 2px solid var(--line); border-radius: .7rem; padding: .9rem 1.4rem; font-size: 1.3rem; }
+  .aus { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="kopf">
+    <h1>Meetingpoint</h1>
+    <span class="halle" id="halle-text"></span>
+    <span class="status" id="status">verbinde …</span>
+  </div>
+  <div id="hallenwahl" class="aus">
+    <div class="hinweis" id="hallen-hinweis">Bitte die Halle dieses Meetingpoints wählen.</div>
+    <div id="hallen"></div>
+  </div>
+  <div id="anleitung" class="hinweis aus">Euer Spiel ist aufgerufen? Tippt auf euren Namen — alle Spieler einzeln.</div>
+  <div id="partien"></div>
+  <div id="leer" class="leer aus">Gerade ist kein Spiel zum Meetingpoint gerufen.</div>
+</main>
+<script>
+"use strict";
+var BASE = "__BASE__";
+
+// ── Inline-Kopie von src/io/meetingpoint.mjs (Drift-Test:
+//    scripts/test-meetingpoint.mjs). Änderungen nur gemeinsam. ──────────
+/** Halle aus der Query (`?halle=…`); leer, wenn keine angegeben ist. */
+function mpHalleAusQuery(search) {
+  var s = String(search || "");
+  if (s.charAt(0) === "?") s = s.slice(1);
+  var teile = s.split("&");
+  for (var i = 0; i < teile.length; i++) {
+    var kv = teile[i].split("=");
+    if (kv[0] === "halle" && kv.length > 1) {
+      try {
+        return decodeURIComponent(kv.slice(1).join("=").replace(/\+/g, " ")).trim();
+      } catch (e) {
+        return "";
+      }
+    }
+  }
+  return "";
+}
+
+/** Partien in Aufrufreihenfolge (ältester Aufruf oben), stabil nach ID. */
+function mpSortiert(partien) {
+  var liste = (partien || []).slice();
+  liste.sort(function (a, b) {
+    var d = (a.calledAtMs || 0) - (b.calledAtMs || 0);
+    return d !== 0 ? d : (a.matchId || 0) - (b.matchId || 0);
+  });
+  return liste;
+}
+
+/** Plätze einer Partie nach Seite 1, Seite 2 und Schiedsrichter. */
+function mpGruppen(partie) {
+  var g = { team1: [], team2: [], sr: null };
+  var plaetze = (partie && partie.plaetze) || [];
+  for (var i = 0; i < plaetze.length; i++) {
+    var p = plaetze[i];
+    var art = p && p.platz && p.platz.art;
+    if (art === "spieler" && p.platz.seite === 1) g.team1.push(p);
+    else if (art === "spieler" && p.platz.seite === 2) g.team2.push(p);
+    else if (art === "sr") g.sr = p;
+  }
+  return g;
+}
+
+/** Wie viele der für „spielbereit" nötigen Plätze sind eingecheckt? Der
+ *  SR zählt nur mit, wenn er nötig ist (`srNoetig`) — sonst wiche die Seite
+ *  vom Zähler der Turnierleitung ab. */
+function mpZaehler(partie) {
+  var plaetze = (partie && partie.plaetze) || [];
+  var srNoetig = !!(partie && partie.srNoetig);
+  var da = 0, gesamt = 0;
+  for (var i = 0; i < plaetze.length; i++) {
+    var art = plaetze[i].platz && plaetze[i].platz.art;
+    if (art === "sr" && !srNoetig) continue;
+    gesamt++;
+    if (plaetze[i].present) da++;
+  }
+  return { da: da, gesamt: gesamt };
+}
+
+/** Body eines Check-ins (gleiche Form in LAN, Cloud und am Slave). */
+function mpCheckinBody(halle, matchId, platz, present) {
+  return {
+    halle: String(halle || ""),
+    matchId: matchId,
+    platz: platz,
+    present: !!present,
+    ort: "meetingpoint",
+  };
+}
+
+/** Uhrzeit des Aufrufs als „HH:MM" (Ortszeit des Geräts). */
+function mpUhrzeit(ms) {
+  if (!ms) return "";
+  var d = new Date(ms);
+  var h = d.getHours(), m = d.getMinutes();
+  return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+}
+
+// ── Ende der Inline-Kopie ───────────────────────────────────────────────
+
+var HALLE = mpHalleAusQuery(location.search);
+var stand = null;
+// Laufende Tipps je „matchId:platz" — bis zur Antwort halb durchsichtig,
+// damit niemand doppelt tippt.
+var unterwegs = {};
+
+function el(tag, cls, text) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function platzSchluessel(matchId, platz) {
+  return matchId + ":" + platz.art + ":" + (platz.seite || 0) + ":" + (platz.pos || 0);
+}
+
+function status(text, fehler) {
+  var s = document.getElementById("status");
+  s.textContent = text;
+  s.className = "status" + (fehler ? " fehler" : "");
+}
+
+function nameKnopf(partie, p) {
+  var b = el("button", "name" + (p.present ? " da" : ""));
+  b.type = "button";
+  var schl = platzSchluessel(partie.matchId, p.platz);
+  if (unterwegs[schl]) b.className += " wartet";
+  var h = el("span", "haken", p.present ? "✓" : "");
+  b.appendChild(h);
+  b.appendChild(el("span", "", p.name));
+  b.addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    tippen(partie, p);
+  });
+  return b;
+}
+
+function zeichne() {
+  var v = stand;
+  var hw = document.getElementById("hallenwahl");
+  var liste = document.getElementById("partien");
+  var leer = document.getElementById("leer");
+  var anl = document.getElementById("anleitung");
+  document.getElementById("halle-text").textContent = v && v.halle ? v.halle : "";
+  liste.innerHTML = "";
+  if (!v) return;
+  if (v.halleWaehlen) {
+    hw.classList.remove("aus");
+    anl.classList.add("aus");
+    leer.classList.add("aus");
+    document.getElementById("hallen-hinweis").textContent = HALLE
+      ? "Die Halle „" + HALLE + "“ kennt dieses Turnier nicht. Bitte wählen:"
+      : "Bitte die Halle dieses Meetingpoints wählen.";
+    var hallen = document.getElementById("hallen");
+    hallen.innerHTML = "";
+    (v.hallen || []).forEach(function (h) {
+      var a = el("a", "", h);
+      a.href = "?halle=" + encodeURIComponent(h);
+      hallen.appendChild(a);
+    });
+    return;
+  }
+  hw.classList.add("aus");
+  halleMelden(v.halle);
+  var partien = mpSortiert(v.partien);
+  leer.classList.toggle("aus", partien.length > 0);
+  anl.classList.toggle("aus", partien.length === 0);
+  partien.forEach(function (partie) {
+    var karte = el("section", "partie" + (partie.bereit ? " bereit" : ""));
+    var kopf = el("div", "p-kopf");
+    kopf.appendChild(el("span", "p-label", partie.label || ("Spiel " + partie.matchId)));
+    kopf.appendChild(el("span", "p-zeit", "gerufen " + mpUhrzeit(partie.calledAtMs)));
+    if (partie.bereit) {
+      kopf.appendChild(el("span", "p-bereit", "spielbereit"));
+    } else {
+      var z = mpZaehler(partie);
+      kopf.appendChild(el("span", "p-zaehler", z.da + " / " + z.gesamt + " da"));
+    }
+    karte.appendChild(kopf);
+    var g = mpGruppen(partie);
+    var s1 = el("div", "seite");
+    g.team1.forEach(function (p) { s1.appendChild(nameKnopf(partie, p)); });
+    karte.appendChild(s1);
+    karte.appendChild(el("div", "gegen", "gegen"));
+    var s2 = el("div", "seite");
+    g.team2.forEach(function (p) { s2.appendChild(nameKnopf(partie, p)); });
+    karte.appendChild(s2);
+    if (g.sr) {
+      var sr = el("div", "sr-zeile");
+      sr.appendChild(el("div", "rolle", "Schiedsrichter"));
+      sr.appendChild(nameKnopf(partie, g.sr));
+      karte.appendChild(sr);
+    } else if (partie.ohneSr) {
+      karte.appendChild(el("div", "sr-zeile rolle", "ohne Schiedsrichter"));
+    }
+    liste.appendChild(karte);
+  });
+}
+
+// In der Anzeige-Hülle: die gewählte Halle an die Hülle melden, damit sie
+// sie sich merkt. Gleicher Ursprung, fester Typ-Name (anzeige.html).
+var gemeldeteHalle = null;
+function halleMelden(h) {
+  if (!h || h === gemeldeteHalle || window.parent === window) return;
+  gemeldeteHalle = h;
+  try {
+    window.parent.postMessage({ typ: "bts-anzeige:meetingpoint-halle", halle: h }, location.origin);
+  } catch (e) { /* keine Hülle */ }
+}
+
+function tippen(partie, p) {
+  var schl = platzSchluessel(partie.matchId, p.platz);
+  if (unterwegs[schl]) return;
+  unterwegs[schl] = true;
+  // Sofort umschalten (optimistisch) — die nächste Abfrage zeigt die Wahrheit.
+  p.present = !p.present;
+  zeichne();
+  var body = mpCheckinBody(HALLE, partie.matchId, p.platz, p.present);
+  fetch(BASE + "meetingpoint/checkin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(function (r) {
+    return r.json().catch(function () { return { ok: r.ok }; });
+  }).then(function (antwort) {
+    delete unterwegs[schl];
+    if (!antwort || !antwort.ok) {
+      status((antwort && antwort.error) || "Nicht übernommen", true);
+    } else {
+      status("aktuell", false);
+    }
+    abrufen();
+  }).catch(function () {
+    delete unterwegs[schl];
+    status("Turnier-PC antwortet nicht", true);
+    abrufen();
+  });
+}
+
+var abrufLaeuft = false;
+function abrufen() {
+  if (abrufLaeuft) return;
+  abrufLaeuft = true;
+  var ctl = typeof AbortController === "function" ? new AbortController() : null;
+  var t = setTimeout(function () { if (ctl) ctl.abort(); }, 8000);
+  fetch(BASE + "meetingpoint/state?halle=" + encodeURIComponent(HALLE), {
+    cache: "no-store",
+    signal: ctl ? ctl.signal : undefined,
+  }).then(function (r) {
+    if (r.status === 404) throw new Error("aus");
+    if (!r.ok) throw new Error("http");
+    return r.json();
+  }).then(function (v) {
+    stand = v;
+    if (!Object.keys(unterwegs).length) zeichne();
+    status("aktuell", false);
+  }).catch(function (e) {
+    status(e && e.message === "aus"
+      ? "Meetingpoint ist am Turnier-PC ausgeschaltet"
+      : "Turnier-PC antwortet nicht", true);
+  }).then(function () {
+    clearTimeout(t);
+    abrufLaeuft = false;
+  });
+}
+
+abrufen();
+setInterval(abrufen, 2000);
+</script>
+</body>
+</html>

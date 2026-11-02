@@ -1159,3 +1159,23 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   — Adaptereinstellungen → IPv4 → „Folgende DNS-Serveradressen
   verwenden". Das macht Liveticker und Cloud-Relay unabhängig vom
   Router-DNS.
+
+## Meetingpoint (seit v0.9.330, ADR 0074)
+
+- `GET /{ns}/meetingpoint?halle=` — Seite; `GET /{ns}/meetingpoint/state?halle=`
+  — aus dem zuletzt gepushten Gesamtstand (`HostFrame::Meetingpoint{view}`,
+  alle Hallen, gedeckelt auf `MAX_MP_PARTIEN`) per
+  `MeetingpointView::fuer_halle` zugeschnitten; 404, solange der Host den
+  Meetingpoint nicht eingeschaltet meldet.
+- `POST /{ns}/meetingpoint/checkin` (Body `MpCheckinBody`, ≤ 2 KiB) →
+  `RelayFrame::MeetingpointCheckin{reqId, body}` an den Host →
+  `HostFrame::MeetingpointAck{reqId, ok, error}`; Muster `/result` mit
+  `pending`, `MAX_PENDING_PER_NS`, `RESULT_TIMEOUT`. Der Relay urteilt nicht —
+  die Prüfung (Halle, gerufene Partie, Platz) liegt beim Host.
+- Der Host pusht den Stand im 2-s-Takt nur bei Änderung (Fingerabdruck).
+- Die Seite liegt unter der Namespace-Adresse wie Tafel/Anzeige; dass die
+  Kennung dort ablesbar ist, ist bewusst hingenommen (Abgrenzung ADR 0012).
+- Neu: `TlAction::MeetingpointSet`, `MatchBrief.feldCheck` (`serde(default)`).
+  Neue Enums `MpPlatz`/`MpOrt` haben einen `serde(other)`-Auffang.
+  **Deploy-Reihenfolge: Relay vor App** (der Relay parst `TlAction`; ein alter
+  Relay kennt die Routen nicht).

@@ -1,6 +1,6 @@
 # Meetingpoint: Einchecken je Partie und „spielbereit" — Spezifikation
 
-> Status: **freigegeben 02.11.2026** (via /idee: Brief → Grill →
+> Status: **freigegeben 02.11.2026, umgesetzt in v0.9.330 (ein Sammel-PR statt neun)** (via /idee: Brief → Grill →
 > How-To → Spec+Review, manuell geführt).
 > Betroffene Crates: src-tauri, relay-proto, relay (neue Routen, Frames,
 > eingebettete Seiten → **Relay-Deploy vor App-Release** in PR 2, 3, 8).
@@ -107,7 +107,9 @@ Aus Brief (B), Grill (G) und How-To (H), alle vom Nutzer bestätigt.
    - `restzeit`: Ziel = min(`cap_per_hall`, Anzahl Felder der Halle, die jetzt
      frei sind oder laut Prognose innerhalb `horizon_minutes` frei werden, +
      `buffer`). Ein freies Feld zählt als „jetzt frei"; ohne Messwerte gilt die
-     Startdauer der Prognose.
+     Startdauer der Prognose. Wird innerhalb von X Minuten **kein** Feld frei,
+     ist das Ziel 0 — der Puffer kommt nur zu einem echten Bedarf hinzu
+     (Klarstellung bei der Umsetzung).
    - Ruft in Reihenfolge der Feld-Automatik, solange Vorrat < Ziel und aktive
      Aufrufe der Halle < `cap_per_hall`.
    - Ruft jede Partie in ihre aufgelöste Halle; im Mehr-Hallen-Betrieb ohne

@@ -104,6 +104,13 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 <!-- pruef: "/ansage" in src-tauri/src/tablet/server.rs -->
 <!-- pruef: "ansageModusAusQuery(welt.location && welt.location.search)" in src/io/ansageKern.mjs -->
 
+### Meetingpoint (seit v0.9.330)
+
+Tablet oder Touch-Bildschirm am Meetingpoint einer Halle:
+`/meetingpoint?halle=<Halle>` (LAN, Cloud, Slave-PC; auch als Ansicht der
+Anzeige-Hülle). Gerufene Partien, Namen antippen = einchecken. Siehe
+[meetingpoint.md](meetingpoint.md).
+
 ## Wie ein Gerät zu seiner Anzeige kommt
 
 Ein frisch aufgestellter Fernseher zeigt **nicht** sofort ein Feld, sondern

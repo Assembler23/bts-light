@@ -444,6 +444,10 @@ pub struct TabletState {
     /// „In Vorbereitung" gerufene Spiele (je Match-ID höchstens einer).
     /// Vorbereitungs-Aufrufe, persistent und turniergebunden (ADR 0071).
     preparation_calls: crate::tablet::meetingpoint::MeetingpointStore,
+    /// Strikter Modus: seit wann ein Feld frei steht, ohne dass eine
+    /// spielbereite Partie wartet (Warnung in der TL, ADR 0073). Im
+    /// TabletState, nicht in der SyncEngine — überlebt den Sync-Neustart.
+    mp_idle_since: RwLock<Option<u64>>,
     /// Geräte-ID → Live-Zustand der Court-Monitore (zuletzt gesehen +
     /// offener Fernbefehl). Im LAN-Modus vom Server gepflegt.
     monitor_live: RwLock<HashMap<String, MonitorLive>>,
@@ -1068,6 +1072,23 @@ pub enum AnnounceJobKind {
         /// bliebe jeder Nachruf ein „Zweiter Aufruf", und die Wartenden
         /// erführen nie, dass es der letzte vor der kampflosen Wertung war.
         stage: u8,
+    },
+    /// Die Aufruf-Automatik des Meetingpoints hat ein Spiel in die
+    /// Vorbereitung gerufen (Spec `meetingpoint-spielbereit`) — gesprochen
+    /// wie ein Vorbereitungs-Aufruf aus der Desktop-App. Ältere
+    /// Ansage-Geräte schweigen (`Unknown`).
+    MeetingpointCall {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+    /// Nachruf an die Fehlenden einer gerufenen Partie („<Name>, bitte zum
+    /// Meetingpoint"). Ausnahmsweise **mit Namen**: Wer fehlt, weiß nur der
+    /// Turnier-PC (Check-in-Stand); die Aussprache-Korrektur greift am
+    /// Ansage-Gerät trotzdem.
+    MeetingpointMissing {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        names: Vec<String>,
     },
     /// „Feld X. Bitte mit dem Spielen beginnen." — die Aufforderung an ein
     /// besetztes Feld, auf dem noch kein Punkt gefallen ist. **Kein
@@ -4146,6 +4167,21 @@ impl TabletState {
         &self.preparation_calls
     }
 
+    /// Strikter Modus: Feld frei ohne spielbereite Partie seit (Unix-ms).
+    pub fn mp_idle_since(&self) -> Option<u64> {
+        *self.mp_idle_since.read().unwrap()
+    }
+
+    /// Setzt bzw. löscht die Leerlauf-Marke; ein bestehender Zeitpunkt bleibt.
+    pub fn set_mp_idle(&self, idle: bool, now: u64) {
+        let mut g = self.mp_idle_since.write().unwrap();
+        match (idle, *g) {
+            (true, None) => *g = Some(now),
+            (false, Some(_)) => *g = None,
+            _ => {}
+        }
+    }
+
     /// Ablage-Datei der Vorbereitungs-Aufrufe setzen (beim App-Start).
     pub fn set_meetingpoint_path(&self, path: std::path::PathBuf) {
         self.preparation_calls.set_path(path);
@@ -4166,6 +4202,10 @@ impl TabletState {
         for match_id in self.preparation_calls.reconcile(snapshot) {
             self.forget_prep_calls(match_id);
         }
+        // Wer anderswo auf dem Feld steht, ist hier ausgecheckt; wen BTP
+        // ersetzt hat, ebenso (Spec `meetingpoint-spielbereit`, Nr. 4).
+        let feld = crate::tablet::meetingpoint::auf_dem_feld(self, snapshot);
+        self.preparation_calls.bereinige_checkins(snapshot, &feld);
         for call in self.preparation_calls.active_calls().iter() {
             // Hallenname aus der LocationID auflösen (None → kein Halleneintrag).
             let hall = call.location_id.and_then(|lid| {

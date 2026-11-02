@@ -123,3 +123,10 @@ Spielern. Beendete Spiele tragen ihre Ist-Zeiten in der Beendet-Zeile
 - Erfolgsmaß (Spec E12): am Testturnier ≥ 70 % der Spiele innerhalb
   ±10 Minuten — beim Bruttostart-Stempel schreibt der Host die zuletzt
   publizierte Prognose ins Diagnose-Log, daraus lässt sich das auswerten.
+
+## Restzeit als gemeinsamer Helfer (seit v0.9.330)
+
+Die Restzeit je belegtem Feld rechnet `predict::feld_rest_min` — dieselbe
+Funktion für die TL-Anzeige und die Aufruf-Automatik des Meetingpoints
+(Modus „nach Restzeit", ADR 0075). Ohne Messwerte gilt der Startwert; ein
+freies Feld zählt als „jetzt frei".

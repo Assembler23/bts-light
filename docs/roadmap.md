@@ -321,6 +321,15 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Meetingpoint: Einchecken je Partie und „spielbereit"** — Spec:
+  [features/meetingpoint-spielbereit.md](features/meetingpoint-spielbereit.md)
+  (freigegeben 02.11.2026, ADR 0071–0075) — **umgesetzt v0.9.330 als Sammel-PR, Feldtest offen; Relay vor App deployen**. Gerufene Partien checken sich am
+  Meetingpoint-Gerät je Halle einzeln ein (Spieler, optional SR); TL sieht den
+  Status, strikte Feld-Automatik vergibt nur spielbereite Partien; SR-Rotation
+  schon beim Aufruf; Aufruf-Automatik (fest N / Bedarf aus Restzeit);
+  Fehlende-Warnung + Ansage; Feld-Check am Zähl-Tablet. Aufrufe überleben
+  künftig Neustarts. Alles standardmäßig aus.
+
 - **Tablet-Kiosk-App für Android / Fire-Tablets — umgesetzt, Feldtest
   offen.** Spec: [features/tablet-android-kiosk-app.md](features/tablet-android-kiosk-app.md),
   ADR [0058](adr/0058-eigene-kiosk-app-statt-fully-kiosk.md). Aus dem
@@ -496,14 +505,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Meetingpoint: Einchecken je Partie und „spielbereit"** — Spec:
-  [features/meetingpoint-spielbereit.md](features/meetingpoint-spielbereit.md)
-  (freigegeben 02.11.2026, ADR 0071–0075). Gerufene Partien checken sich am
-  Meetingpoint-Gerät je Halle einzeln ein (Spieler, optional SR); TL sieht den
-  Status, strikte Feld-Automatik vergibt nur spielbereite Partien; SR-Rotation
-  schon beim Aufruf; Aufruf-Automatik (fest N / Bedarf aus Restzeit);
-  Fehlende-Warnung + Ansage; Feld-Check am Zähl-Tablet. Aufrufe überleben
-  künftig Neustarts. Neun PRs, alles standardmäßig aus.
 
 - **Monitor-Stile und Stream-Einblendung** — Spec:
   [features/monitor-stile-und-stream.md](features/monitor-stile-und-stream.md)

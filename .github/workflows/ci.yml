@@ -222,6 +222,12 @@ jobs:
       - name: Akkustand am Tablet (JS)
         run: node scripts/test-akku.mjs
 
+      # Meetingpoint-Seite (Spec meetingpoint-spielbereit): Gruppierung,
+      # Reihenfolge, Check-in-Form — und die Inline-Kopie in der Seite muss
+      # sich verhalten wie das Modul.
+      - name: Meetingpoint-Seite (JS)
+        run: node scripts/test-meetingpoint.mjs
+
       # Ansage-Seite im Browser (Spec ansage-im-browser): Bestandsaufnahme,
       # Hallen-Pflicht, nichts Falsches oder Verfallenes sprechen, Praesenz
       # nur mit Stimme und Ton, Abspiel-Kern mit Fristen - und die

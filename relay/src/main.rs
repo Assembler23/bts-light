@@ -14,7 +14,7 @@
 //! Läuft als systemd-Dienst auf dem Hetzner-Server hinter nginx
 //! (`https://badhub.de/bts-relay/` → `127.0.0.1:8090`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -58,6 +58,8 @@ fn seiten_marke() -> &'static str {
 /// Eine Quelle für LAN und Cloud: Was im Hallennetz erprobt wurde, ist
 /// unterwegs dieselbe Seite.
 const TL_HTML: &str = include_str!("../../src-tauri/assets/tl.html");
+/// Meetingpoint-Seite (Spec `meetingpoint-spielbereit`).
+const MEETINGPOINT_HTML: &str = include_str!("../../src-tauri/assets/meetingpoint.html");
 
 /// Die Court-Monitor-Anzeige – dieselbe Datei wie in der bts-light-App.
 const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
@@ -391,6 +393,9 @@ struct Namespace {
     /// die Slave-Spielübersicht + den Nachruf am Slave (Cluster C Stufe 2).
     /// Vom Host via `HostFrame::Prepared` gepusht; ersetzt jeweils die Liste.
     prepared: Vec<relay_proto::PreparedMatch>,
+    /// Meetingpoint-Stand aller Hallen (Spec `meetingpoint-spielbereit`),
+    /// vom Host bei Änderung gepusht; je Seite auf die Halle zugeschnitten.
+    meetingpoint: relay_proto::MeetingpointView,
     /// Azure-TTS-Konfiguration des Masters für die Vererbung an Cloud-Ansage-
     /// Slaves (ADR 0003). Kommt mit jedem `HostFrame::Courts`-Push; `None`
     /// überschreibt bewusst — Azure am Master aus = Vererbung endet. Enthält
@@ -405,6 +410,12 @@ struct Namespace {
     monitor_seen: HashMap<String, u64>,
     /// Offene Ergebnis-Übermittlungen: `req_id` → wartender HTTP-Handler.
     pending: HashMap<u64, oneshot::Sender<ResultResponse>>,
+    /// Offene Meetingpoint-Check-ins (Teilmenge von `pending`): eigener,
+    /// kleinerer Deckel, damit Check-ins nie die Plätze der Ergebnisse
+    /// belegen (Security-Review M2).
+    mp_offen: HashSet<u64>,
+    /// Drossel der Meetingpoint-Check-ins: (Sekunde, Anzahl darin).
+    mp_takt: (u64, u32),
     /// Fortlaufende Request-ID für Ergebnis-Übermittlungen.
     next_req: u64,
     /// Zugänge der Turnierleitungs-Geräte, vom Turnier-PC gespiegelt
@@ -528,6 +539,7 @@ impl Namespace {
             court_labels: HashMap::new(),
             court_hall: HashMap::new(),
             prepared: Vec::new(),
+            meetingpoint: relay_proto::MeetingpointView::default(),
             freetext: Vec::new(),
             slaves: HashMap::new(),
             courts: Vec::new(),
@@ -536,6 +548,8 @@ impl Namespace {
             monitor_control: MonitorControl::default(),
             monitor_seen: HashMap::new(),
             pending: HashMap::new(),
+            mp_offen: HashSet::new(),
+            mp_takt: (0, 0),
             next_req: 1,
             tl_tokens: HashMap::new(),
             tl_token_profile: HashMap::new(),
@@ -756,6 +770,14 @@ async fn main() {
         .route("/{ns}/info/ad/state", get(ad_bar_state))
         .route("/{ns}/info/logo", get(tournament_logo))
         .route("/{ns}/info/club-logo", get(club_logo))
+        // Meetingpoint (Spec meetingpoint-spielbereit, ADR 0074): offen wie
+        // die Anzeige-Seiten; jede Meldung prüft der Host.
+        .route("/{ns}/meetingpoint", get(meetingpoint_page))
+        .route("/{ns}/meetingpoint/state", get(meetingpoint_state))
+        .route(
+            "/{ns}/meetingpoint/checkin",
+            post(meetingpoint_checkin).layer(DefaultBodyLimit::max(MP_CHECKIN_LIMIT)),
+        )
         .route("/{ns}/info/preparation", get(preparation_page))
         .route("/{ns}/info/preparation/state", get(preparation_state))
         .route("/{ns}/info/ad", get(ad_page))
@@ -2244,6 +2266,155 @@ fn uebersicht_marke(courts_json: &str, call_timer_json: &str) -> String {
 /// Der „In Vorbereitung"-Info-Monitor im Cloud-Modus (HTML). Dieselbe Datei wie
 /// im LAN; sie leitet ihren Basis-Pfad aus der eigenen URL ab, läuft also unter
 /// `/{ns}/info/preparation` ohne Templating.
+/// Größter Check-in-Body (ein Platz, eine Halle) — großzügig, aber klein.
+const MP_CHECKIN_LIMIT: usize = 2 * 1024;
+/// Höchstens so viele Check-ins je Namespace gleichzeitig unterwegs.
+const MAX_MP_PENDING_PER_NS: usize = 4;
+/// Höchstens so viele Check-ins je Namespace und Sekunde.
+const MAX_MP_CHECKINS_PER_SEC: u32 = 10;
+/// Deckel für die Teile eines gepushten Meetingpoint-Stands.
+const MAX_MP_HALLEN: usize = 32;
+const MAX_MP_PLAETZE: usize = 6;
+const MAX_MP_TEXT: usize = 128;
+
+#[derive(serde::Deserialize, Default)]
+struct MpQuery {
+    #[serde(default)]
+    halle: String,
+}
+
+/// Meetingpoint-Seite (`/{ns}/meetingpoint?halle=…`).
+async fn meetingpoint_page(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let body = MEETINGPOINT_HTML.replace("__BASE__", &monitor_base(&broker.public_base, &ns));
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
+/// Meetingpoint-Stand einer Halle aus dem gepushten Gesamtstand. Nur Namen
+/// und Flags — der Host schickt nichts anderes.
+async fn meetingpoint_state(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    Query(q): Query<MpQuery>,
+) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let view = {
+        let map = broker.namespaces.lock().await;
+        map.get(&ns).map(|n| n.meetingpoint.fuer_halle(&q.halle))
+    };
+    match view {
+        Some(v) if v.enabled => ([(header::CACHE_CONTROL, "no-store")], Json(v)).into_response(),
+        _ => (StatusCode::NOT_FOUND, "Meetingpoint ist aus").into_response(),
+    }
+}
+
+/// Check-in über die Cloud: an den Host weiterreichen und sein Urteil
+/// zurückgeben (Muster `result`, gedeckelt über `MAX_PENDING_PER_NS`).
+async fn meetingpoint_checkin(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    Json(body): Json<relay_proto::MpCheckinBody>,
+) -> impl IntoResponse {
+    let fehler = |code: StatusCode, text: &str| {
+        (
+            code,
+            Json(relay_proto::MpCheckinResponse {
+                ok: false,
+                error: Some(text.to_string()),
+            }),
+        )
+            .into_response()
+    };
+    if !valid_namespace(&ns) {
+        return fehler(StatusCode::NOT_FOUND, "Unbekannter Namespace.");
+    }
+    let (ack_tx, ack_rx) = oneshot::channel();
+    let req_id;
+    {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(&ns) else {
+            return fehler(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "bts-light ist nicht mit dem Relay verbunden.",
+            );
+        };
+        let Some(host) = namespace.host.clone() else {
+            return fehler(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "bts-light ist nicht mit dem Relay verbunden.",
+            );
+        };
+        let sekunde = now_ms() / 1000;
+        if namespace.mp_takt.0 != sekunde {
+            namespace.mp_takt = (sekunde, 0);
+        }
+        if namespace.mp_takt.1 >= MAX_MP_CHECKINS_PER_SEC
+            || namespace.mp_offen.len() >= MAX_MP_PENDING_PER_NS
+            || namespace.pending.len() >= MAX_PENDING_PER_NS
+        {
+            return fehler(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Meldungen – bitte kurz warten.",
+            );
+        }
+        namespace.mp_takt.1 += 1;
+        req_id = namespace.next_req;
+        namespace.next_req += 1;
+        namespace.pending.insert(req_id, ack_tx);
+        namespace.mp_offen.insert(req_id);
+        let frame = RelayFrame::MeetingpointCheckin { req_id, body };
+        if host.send(text(&frame)).is_err() {
+            namespace.pending.remove(&req_id);
+            namespace.mp_offen.remove(&req_id);
+            return fehler(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "bts-light ist nicht erreichbar.",
+            );
+        }
+    }
+    let antwort = tokio::time::timeout(RESULT_TIMEOUT, ack_rx).await;
+    {
+        let mut map = broker.namespaces.lock().await;
+        if let Some(namespace) = map.get_mut(&ns) {
+            namespace.mp_offen.remove(&req_id);
+        }
+    }
+    match antwort {
+        Ok(Ok(resp)) => {
+            let code = if resp.ok {
+                StatusCode::OK
+            } else {
+                StatusCode::CONFLICT
+            };
+            (
+                code,
+                Json(relay_proto::MpCheckinResponse {
+                    ok: resp.ok,
+                    error: resp.error,
+                }),
+            )
+                .into_response()
+        }
+        _ => {
+            let mut map = broker.namespaces.lock().await;
+            if let Some(namespace) = map.get_mut(&ns) {
+                namespace.pending.remove(&req_id);
+            }
+            fehler(
+                StatusCode::GATEWAY_TIMEOUT,
+                "Zeitüberschreitung – bts-light hat nicht geantwortet.",
+            )
+        }
+    }
+}
+
 async fn preparation_page(Path(ns): Path<String>) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
@@ -5174,6 +5345,36 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // (Ownership aktiv, sicherer Default).
             namespace.reconnect_legacy_rev = reconnect_legacy_rev;
         }
+        HostFrame::Meetingpoint { mut view } => {
+            // Jeder Push ersetzt den Stand (Muster `Prepared`), gedeckelt —
+            // auch Hallen, Plätze und Texte (Security-Review M4).
+            let kurz = |t: &mut String| {
+                if t.chars().count() > MAX_MP_TEXT {
+                    *t = t.chars().take(MAX_MP_TEXT).collect();
+                }
+            };
+            view.partien.truncate(relay_proto::MAX_MP_PARTIEN);
+            view.hallen.truncate(MAX_MP_HALLEN);
+            view.hallen.iter_mut().for_each(kurz);
+            kurz(&mut view.halle);
+            for p in view.partien.iter_mut() {
+                p.plaetze.truncate(MAX_MP_PLAETZE);
+                kurz(&mut p.halle);
+                kurz(&mut p.label);
+                p.plaetze.iter_mut().for_each(|pl| kurz(&mut pl.name));
+            }
+            namespace.meetingpoint = view;
+        }
+        HostFrame::MeetingpointAck { req_id, ok, error } => {
+            // Urteil des Hosts unverändert weiterreichen (R5 liegt dort).
+            if let Some(pending) = namespace.pending.remove(&req_id) {
+                let _ = pending.send(ResultResponse {
+                    ok,
+                    error,
+                    permanent: false,
+                });
+            }
+        }
         HostFrame::Prepared { mut prepared } => {
             // Aufgerufene Spiele der fernen Hallen für die Slave-Spielübersicht
             // + den Nachruf merken (Cluster C Stufe 2). Jeder Push ersetzt die
@@ -5501,6 +5702,7 @@ mod tests {
             sr_names: Vec::new(),
             ar_names: Vec::new(),
             teams_correction: false,
+            feld_check: false,
             seed_a: None,
             seed_b: None,
         }
@@ -9145,6 +9347,67 @@ mod tests {
             Some(&r#"{"match":{"matchId":7},"a":11}"#.to_string()),
             "State eines fremden Matches wird verworfen"
         );
+    }
+
+    #[tokio::test]
+    async fn meetingpoint_stand_wird_je_halle_ausgeliefert_und_ack_durchgereicht() {
+        // Spec meetingpoint-spielbereit: Der Host pusht den Gesamtstand, die
+        // Seite bekommt nur ihre Halle; der Check-in-Ack erreicht die
+        // wartende Anfrage unverändert.
+        use relay_proto::{MeetingpointView, MpPartie};
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, "ns1", &host).await;
+        let partie = |id: i64, halle: &str| MpPartie {
+            match_id: id,
+            halle: halle.into(),
+            label: String::new(),
+            called_at_ms: 0,
+            plaetze: Vec::new(),
+            bereit: false,
+            ohne_sr: false,
+            sr_noetig: false,
+        };
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::Meetingpoint {
+                view: MeetingpointView {
+                    enabled: true,
+                    hallen: vec!["Halle A".into(), "Halle B".into()],
+                    partien: vec![partie(1, "Halle A"), partie(2, "Halle B")],
+                    ..Default::default()
+                },
+            },
+            &host,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            let a = map["ns1"].meetingpoint.fuer_halle("Halle A");
+            assert_eq!(a.partien.len(), 1);
+            assert_eq!(a.partien[0].match_id, 1);
+            assert!(map["ns1"].meetingpoint.fuer_halle("").halle_waehlen);
+        }
+        let (ack_tx, ack_rx) = oneshot::channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut("ns1").unwrap().pending.insert(9, ack_tx);
+        }
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MeetingpointAck {
+                req_id: 9,
+                ok: false,
+                error: Some("andere Halle".into()),
+            },
+            &host,
+        )
+        .await;
+        let r = ack_rx.await.unwrap();
+        assert!(!r.ok);
+        assert_eq!(r.error.as_deref(), Some("andere Halle"));
     }
 
     #[tokio::test]

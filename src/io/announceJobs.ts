@@ -17,6 +17,7 @@ import {
   ansageOptionen,
 } from "./announceCourt";
 import {
+  prepareMeetingpointMissing,
   preparePreparationAnnouncement,
   resolveAnnouncementLanguage,
   type PreparedAnnouncement,
@@ -121,7 +122,20 @@ export async function jobZuAnsage(
       : null;
   }
 
-  if (job.kind !== "prep_call") {
+  if (job.kind === "meetingpoint_missing") {
+    // Namen kommen fertig vom Turnier-PC; die Sprache folgt der Einstellung
+    // (keine Nationalitäten im Auftrag).
+    const lang = resolveAnnouncementLanguage([], cfg.language_mode);
+    const ansage = prepareMeetingpointMissing(
+      job.names,
+      job.hall || undefined,
+      lang,
+      ansageOptionen(cfg, lang, azureTts),
+    );
+    return ansage ? { ansage, ziel: { art: "prep_call", hall: job.hall } } : null;
+  }
+
+  if (job.kind !== "prep_call" && job.kind !== "meetingpoint_call") {
     // Ansageart aus einem neueren Turnier-PC, die dieser Stand nicht kennt:
     // schweigen. Ohne diese Weiche fiele sie unten in den
     // Vorbereitungs-Zweig und die Halle hörte einen FALSCHEN Aufruf —
@@ -134,8 +148,9 @@ export async function jobZuAnsage(
   const view = await preparationCandidates().catch(() => null);
   const c = view?.candidates.find((x) => x.match_id === job.matchId);
   if (!c) return null;
-  const beideParteien = job.side === "both";
-  const ersteParteiGemeint = job.side !== "team2";
+  const side = job.kind === "prep_call" ? job.side : "both";
+  const beideParteien = side === "both";
+  const ersteParteiGemeint = side !== "team2";
   const namen = beideParteien ? c.team1 : ersteParteiGemeint ? c.team1 : c.team2;
   const nats = beideParteien
     ? [...c.team1_nationalities, ...c.team2_nationalities]
@@ -155,7 +170,9 @@ export async function jobZuAnsage(
       // Die Staffelung 2 → 3 zählt der Turnier-PC: Wer dreimal gerufen
       // wird und dreimal „Zweiter Aufruf" hört, erfährt nie, dass es der
       // letzte vor der kampflosen Wertung war.
-      callStage: job.stage >= 3 ? 3 : 2,
+      // Ein automatischer Meetingpoint-Aufruf ist ein ERSTER Aufruf
+      // („In Vorbereitung …"), kein Nachruf.
+      callStage: job.kind === "meetingpoint_call" ? 1 : job.stage >= 3 ? 3 : 2,
     },
     lang,
     ansageOptionen(cfg, lang, azureTts),

@@ -158,7 +158,7 @@
     var p = "__TABLET_PIN__";
     return (!p || p === "__TABLET" + "_PIN__") ? "0000" : p;
   })();
-  var LAYOUT_LABEL = { tafel: "Zähltafel", feld: "Feld-Monitor", uebersicht: "Hallen-Übersicht", vorbereitung: "In Vorbereitung" };
+  var LAYOUT_LABEL = { tafel: "Zähltafel", feld: "Feld-Monitor", uebersicht: "Hallen-Übersicht", vorbereitung: "In Vorbereitung", meetingpoint: "Meetingpoint" };
   // Ansicht der Zähltafel (Spiegelung + Anordnung als ein Wert), gemerkt je
   // Gerät. Die beiden Alt-Schlüssel (bis v0.9.288 getrennt) werden beim
   // Start einmalig übernommen und dann gelöscht.
@@ -169,20 +169,28 @@
   // Nachricht der Tafel im iframe: Tipp auf die Zahlen → nächste Ansicht.
   // Fester Typ-Name, den tafel.html genauso schreibt.
   var NACHRICHT_NAECHSTE_ANSICHT = "bts-anzeige:naechste-ansicht";
+  // Fester Typ-Name, den meetingpoint.html genauso schreibt.
+  var NACHRICHT_MP_HALLE = "bts-anzeige:meetingpoint-halle";
 
   // ── Inline-Kopie von src/io/anzeigeZiel.mjs — Änderungen dort und hier gemeinsam ──
-  var LAYOUTS = ["tafel", "feld", "uebersicht", "vorbereitung"];
+  var LAYOUTS = ["tafel", "feld", "uebersicht", "vorbereitung", "meetingpoint"];
+  function halleAusWert(roh) {
+    if (typeof roh !== "string") return "";
+    const h = roh.trim();
+    if (!h || h.length > 64 || /[\u0000-\u001f\u007f]/.test(h)) return "";
+    return h;
+  }
   function feldbezogen(layout) {
     return layout === "tafel" || layout === "feld";
   }
-  function zielAusQuery(layoutRoh, courtRoh) {
+  function zielAusQuery(layoutRoh, courtRoh, halleRoh) {
     const l = typeof layoutRoh === "string" ? layoutRoh : "";
     const layout = LAYOUTS.includes(l) ? l : "tafel";
     const c = courtRoh == null ? "" : String(courtRoh);
     // Nur 1–10 Ziffern ohne führende Null: keine Vorzeichen, Brüche,
     // Exponenten, Pfadteile oder Leerzeichen.
     const court = /^[1-9][0-9]{0,9}$/.test(c) ? Number(c) : null;
-    return { layout, court };
+    return { layout, court, halle: halleAusWert(halleRoh) };
   }
   function zielPfad(ziel, spiegel, anordnung) {
     const court = ziel && Number.isInteger(ziel.court) && ziel.court > 0 ? ziel.court : null;
@@ -200,6 +208,10 @@
         return "info/overview";
       case "vorbereitung":
         return "info/preparation";
+      case "meetingpoint": {
+        const h = halleAusWert(ziel.halle);
+        return "meetingpoint" + (h ? "?halle=" + encodeURIComponent(h) : "");
+      }
       default:
         return null;
     }
@@ -345,7 +357,8 @@
   if (!gemerkt || typeof gemerkt !== "object") gemerkt = {};
   var ziel = zielAusQuery(
     params.has("layout") ? params.get("layout") : gemerkt.layout,
-    params.has("court") ? params.get("court") : (gemerkt.court == null ? null : String(gemerkt.court))
+    params.has("court") ? params.get("court") : (gemerkt.court == null ? null : String(gemerkt.court)),
+    params.has("halle") ? params.get("halle") : gemerkt.halle
   );
   // Ansicht: neuer Schlüssel; fehlt er, einmalig aus den Alt-Schlüsseln
   // (Spiegel-Häkchen + Anordnung) übernehmen, damit ein eingerichtetes
@@ -389,9 +402,10 @@
     var src = BASE + pfad;
     if (els.rahmen.getAttribute("src") !== src) els.rahmen.src = src;
     document.title = LAYOUT_LABEL[ziel.layout] + (feldbezogen(ziel.layout) ? " – " + feldName(ziel.court) : "") + " – bts-light";
-    var q = "?layout=" + ziel.layout + (feldbezogen(ziel.layout) && ziel.court ? "&court=" + ziel.court : "");
+    var q = "?layout=" + ziel.layout + (feldbezogen(ziel.layout) && ziel.court ? "&court=" + ziel.court : "") +
+      (ziel.layout === "meetingpoint" && ziel.halle ? "&halle=" + encodeURIComponent(ziel.halle) : "");
     try { history.replaceState(null, "", location.pathname + q); } catch (e) {}
-    try { localStorage.setItem(ZULETZT_KEY, JSON.stringify({ layout: ziel.layout, court: ziel.court })); } catch (e) {}
+    try { localStorage.setItem(ZULETZT_KEY, JSON.stringify({ layout: ziel.layout, court: ziel.court, halle: ziel.halle })); } catch (e) {}
   }
 
   // ── Menü mit PIN ─────────────────────────────────────────────────────────
@@ -473,7 +487,7 @@
       b.className = "opt" + (l === ziel.layout ? " aktiv" : "");
       b.textContent = LAYOUT_LABEL[l];
       b.addEventListener("click", function () {
-        ziel = { layout: l, court: ziel.court };
+        ziel = { layout: l, court: ziel.court, halle: ziel.halle };
         schliesseMenue(); zeige();
       });
       els.layoutListe.appendChild(b);
@@ -495,7 +509,7 @@
           b.className = "opt" + (aktuell ? " aktiv" : "");
           b.textContent = feldNamen[id] + (aktuell ? " (aktuell)" : "") + (c.occupied === true ? " · wird gezählt" : "");
           b.addEventListener("click", function () {
-            ziel = { layout: feldbezogen(ziel.layout) ? ziel.layout : "tafel", court: id };
+            ziel = { layout: feldbezogen(ziel.layout) ? ziel.layout : "tafel", court: id, halle: ziel.halle };
             schliesseMenue(); zeige();
           });
           els.feldListe.appendChild(b);
@@ -541,7 +555,19 @@
   // zählen; alles andere (fremde Fenster, andere Typen) wird ignoriert.
   window.addEventListener("message", function (e) {
     if (e.origin !== location.origin || e.source !== els.rahmen.contentWindow) return;
-    if (!e.data || e.data.typ !== NACHRICHT_NAECHSTE_ANSICHT) return;
+    if (!e.data) return;
+    // Meetingpoint: Die Seite meldet die gewählte Halle, damit die Hülle sie
+    // sich merkt (nach einem Neustart sonst wieder Hallenwahl). Ein Tipp
+    // dort schaltet NIE die Ansicht weiter — Tipp = Einchecken.
+    if (e.data.typ === NACHRICHT_MP_HALLE) {
+      if (ziel.layout !== "meetingpoint") return;
+      var h = halleAusWert(e.data.halle);
+      if (h === ziel.halle) return;
+      ziel = { layout: ziel.layout, court: ziel.court, halle: h };
+      zeige();
+      return;
+    }
+    if (e.data.typ !== NACHRICHT_NAECHSTE_ANSICHT) return;
     if (ziel.layout !== "tafel") return;
     ansichtWeiter();
   });

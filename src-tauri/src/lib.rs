@@ -153,6 +153,7 @@ pub fn run() {
             commands::auto_assign_status,
             commands::set_auto_assign_paused,
             commands::preparation_candidates,
+            commands::meetingpoint_set,
             commands::tournament_draws,
             commands::tournament_stats,
             commands::fetch_pronunciations,
