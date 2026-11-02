@@ -1147,6 +1147,9 @@ export interface MeetingpointConfig {
   missing_announce_enabled: boolean;
   missing_announce_minutes: number;
   field_check_enabled: boolean;
+  /** Zusatz am Ende der Vorbereitungs-Ansage (leer = keiner). */
+  announce_text_de: string;
+  announce_text_en: string;
 }
 
 /** Eine Halle des Turniers (Rust: commands::PreparationLocation). */
@@ -1159,6 +1162,9 @@ export interface PreparationLocation {
 export interface PreparationView {
   candidates: PreparationCandidate[];
   locations: PreparationLocation[];
+  /** Zusatz am Ende jeder Vorbereitungs-Ansage; null bei ausgeschaltetem
+   *  Meetingpoint (Rust: config::MpAnsageZusatz). */
+  meetingpoint_ansage?: { de: string; en: string } | null;
 }
 
 /** Eine Zeile der „Abgeschlossene Spiele"-Tabelle (Rust: commands::FinishedMatchRow). */
@@ -1301,6 +1307,15 @@ export interface AnsageQuellen {
 export interface AnsageHoerer {
   hallen: string[];
   doppelbetrieb: string[];
+}
+
+/** Adresse der Meetingpoint-Seite (Rust: commands::MeetingpointLink). */
+export interface MeetingpointLink {
+  /** Leer = Turnier mit nur einer Halle. */
+  hall: string;
+  kind: "lan" | "lan-tls" | "cloud";
+  url: string;
+  qr_svg: string;
 }
 
 /** Link einer Ansage-Seite (Rust: commands::AnsageLink). */

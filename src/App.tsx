@@ -166,6 +166,8 @@ function defaultConfig(): AppConfig {
       missing_announce_enabled: false,
       missing_announce_minutes: 5,
       field_check_enabled: false,
+      announce_text_de: "Bitte zum Meetingpoint gehen.",
+      announce_text_en: "Please proceed to the meeting point.",
     },
     discipline_hall_rules: [],
     locked_courts: [],

@@ -3,6 +3,13 @@
 Diese Seite geht die Einstellungen der Windows-App der Reihe nach durch: was
 eine Option tut, was voreingestellt ist, und ab wann eine Änderung wirkt.
 
+Die Seite ist in **sechs Bereiche** gegliedert — Turnier & Verbindung,
+Feldvergabe & Planung, Aufruf, Ansage & Meetingpoint, Schiedsrichter &
+Zähltafel, Anzeigen & Check-In, Diagnose. Die Leiste oben springt per Klick
+zum Bereich und bleibt beim Scrollen stehen. Dieses Kapitel folgt derselben
+Reihenfolge.
+<!-- pruef: "Aufruf, Ansage & Meetingpoint" in src/pages/SetupWizard.tsx -->
+
 Du erreichst sie über **Einstellungen** in der linken Leiste. Es ist dieselbe
 Seite wie der Einrichtungs-Assistent beim ersten Start — nur heißt der Knopf
 unten dann „Speichern" statt „Speichern & Liveticker starten".
@@ -30,7 +37,9 @@ Der Speichern-Knopf bleibt **gesperrt**, solange etwas Wichtiges fehlt:
 - oder — bei „Anderes Turnier (manuell)" — keine Badhub-URL beziehungsweise
   kein Badhub-Passwort. **Diese Bedingung gilt auch im Slave-Modus.**
 
-## Ansage-Slave-Modus (zweite Halle)
+## Bereich: Turnier & Verbindung
+
+### Ansage-Slave-Modus (zweite Halle)
 
 Ganz oben, noch vor allem anderen. **Voreingestellt: aus.**
 
@@ -61,7 +70,7 @@ Telefon durchgeben kannst. Voraussetzung: Der Cloud-Weg ist aktiv und die
 Übertragung läuft. Darunter steht zusätzlich der lange Kopplungs-Code mit einem
 Knopf zum Kopieren.
 
-## 1 · Liveticker-Ziel
+### 1 · Liveticker-Ziel
 
 **Verband wählen.** Zehn Kacheln: BVBB, BVRP, HBV, BBV (Bayern), BWBV, NBV,
 BVS (Sachsen), BVR (Rheinland), SBV (Saarland) und **DBV** für Turniere des
@@ -106,7 +115,7 @@ gewähltem Verband — im manuellen Modus steht das Passwort in Abschnitt 3)* �
 Testsystem hat eigene Zugangsdaten. Produktiv gilt immer das Passwort des
 gewählten Verbands.
 
-## Turnierlogo (optional)
+### Turnierlogo (optional)
 
 Erscheint oben auf der Live-Seite, auf Schiedsrichterzetteln, auf dem Aushang
 und auf den Anzeigen in der Halle. BTP liefert kein Logo — deshalb hier.
@@ -120,7 +129,7 @@ und auf den Anzeigen in der Halle. BTP liefert kein Logo — deshalb hier.
 Ein **neues Bild** wird zusätzlich einmalig an den Check-In übertragen; eine
 reine Farbänderung nicht.
 
-## 2 · BTP-Verbindung
+### 2 · BTP-Verbindung
 
 | Feld | Voreinstellung | Bedeutung |
 |---|---|---|
@@ -133,7 +142,7 @@ reine Farbänderung nicht.
 das ist die schnellste Kontrolle, ob du beim richtigen Turnier bist. Der Test
 **speichert nichts**; zum Übernehmen musst du unten trotzdem speichern.
 
-## TP-Datei (Turnierdatenbank)
+### TP-Datei (Turnierdatenbank)
 
 *Nicht im Ansage-Slave-Modus — nur der Master lädt hoch.*
 <!-- pruef: "TP-Datei (Turnierdatenbank)" in src/pages/SetupWizard.tsx -->
@@ -159,7 +168,7 @@ stehen, und es heißt **„Datei neu wählen"**, bis du die Datei erneut gewähl
 hast. Läuft bts-light nicht auf dem BTP-Rechner, steht hier ein Hinweis
 (Upload nur vom BTP-Rechner empfohlen).
 
-## 3 · Badhub-Zugang
+### 3 · Badhub-Zugang
 
 *Nur sichtbar, wenn oben „Anderes Turnier (manuell)" gewählt ist.*
 
@@ -167,7 +176,7 @@ hast. Läuft bts-light nicht auf dem BTP-Rechner, steht hier ein Hinweis
 optional)** ist die öffentliche Adresse, die auf dem Aushang und in den
 QR-Codes landet.
 
-## Tablet-Verbindung
+### Tablet-Verbindung
 
 Wie erreichen die Zähl-Tablets diesen PC? **Beide Wege lassen sich zusammen
 aktivieren** — mindestens einer muss an sein, sonst bleibt der Speichern-Knopf
@@ -191,7 +200,62 @@ das Feld wechselt. Ein leeres Feld setzt die PIN auf `0000` zurück. Das ist ein
 Bedien-Schutz, **keine Gerätesperre** — die macht der Kiosk-Browser, siehe
 [Einstellungs-PIN & Kiosk-Sperre](tablet-kiosk.md).
 
-## Ansagen
+## Bereich: Feldvergabe & Planung
+
+### Automatische Feldvergabe
+
+| Feld | Voreinstellung | Bedeutung |
+|---|---|---|
+| **Automatische Feldvergabe aktivieren** | aus | Freie Felder werden selbst belegt. |
+| **Wartezeit, bis ein freies Feld belegt wird (Minuten)** | 1 | `0` = sofort. |
+| **Pause nach Spielende je Spieler (Minuten)** | 0 | `0` = es gilt die Pausenregel aus BTP. |
+| **Aktive Halle (Tages-Halle, leer = alle)** | leer | Beschränkt die Vergabe auf eine Halle. |
+
+Die drei unteren Felder sind nur sichtbar, wenn die Automatik an ist.
+**Gesperrte Felder werden nie automatisch belegt.**
+
+Eine in der Turnierleitungs-Oberfläche gesetzte **Pause** der Automatik
+übersteht das Speichern dieser Seite. Schaltest du die Automatik hier **aus**,
+ist die Pause damit aufgehoben — nach dem Wiedereinschalten läuft sie sofort
+(Details: [Turnierleitungs-Oberfläche im Browser](turnierleitung-web.md)).
+
+Zwei Besonderheiten im Mehr-Hallen-Betrieb:
+
+- **Ohne** gesetzte aktive Halle werden nur Spiele verteilt, die du für die
+  jeweilige Halle ausdrücklich „in Vorbereitung" gerufen hast.
+- **Mit** gesetzter aktiver Halle ist die automatische Hallen-Vorverteilung
+  ausgeschlossen — beides zusammen geht nicht.
+
+### Disziplinen je Halle
+
+*Erscheint erst, wenn mindestens zwei Hallen erkannt wurden oder schon Regeln
+bestehen. Die Hallen kommen aus BTP, also erst nach der Verbindung.*
+
+Hier legst du fest, in welcher Halle eine Disziplin gespielt wird. Je Regel
+wählst du einen Geltungsbereich und eine Halle:
+
+- **Kategorie** („Alle HE", „Alle DD", …) gilt als Standard für die ganze
+  Disziplin.
+- **Eine einzelne Auslosung** sticht diesen Standard für genau diese Klasse.
+
+Ohne Regel gibt es keine Einschränkung. Eine Zeile, in der die Halle noch auf
+„Halle wählen …" steht, ist unvollständig und **verschwindet beim Speichern**.
+Felder ohne Hallenangabe bleiben immer erlaubt.
+
+### Startzeit-Prognose
+
+| Feld | Voreinstellung | Bedeutung |
+|---|---|---|
+| **Prognose anzeigen** | **an** | Zeigt geschätzte Startzeiten als „~hh:mm". |
+| **Angenommene Spieldauer ohne Messwerte (Minuten)** | 25 | Nur wirksam, solange zu wenige echte Messwerte vorliegen. |
+
+Sobald genügend Spiele gemessen sind, rechnet die Software mit den echten
+Zeiten und der eingetragene Wert spielt keine Rolle mehr. Mehr dazu:
+[Spielzeiten & Startzeit-Prognose](spielzeiten-prognose.md).
+
+## Bereich: Aufruf, Ansage & Meetingpoint
+
+### Ansagen
 
 **Ansagen aktivieren** — **voreingestellt aus**. Hier gibt es bewusst nur den
 einen Schalter; Stimme, Tempo, Gong, Aussprache und Halle stehen auf der
@@ -222,7 +286,7 @@ gilt nur für diesen PC. Siehe
 [Ausgabegerät](announcements.md#ausgabegerät-seit-v09318).
 <!-- pruef: "output_device: String::new()" in src-tauri/src/config.rs -->
 
-## Aufruf-Timer
+### Aufruf-Timer
 
 Hält fest, wie lange ein Feld schon gerufen ist, und stuft den Aufruf hoch.
 
@@ -244,36 +308,29 @@ Trägst du für den 3. Aufruf eine Zeit ein, die **nicht nach** dem 2. liegt,
 warnt die Seite und hebt den Wert beim Speichern selbst an. Sobald der erste
 Punkt gezählt ist, endet die Stufenzählung.
 
-## Startzeit-Prognose
+### Meetingpoint
 
-| Feld | Voreinstellung | Bedeutung |
+Gerufene Partien checken sich am Meetingpoint einzeln ein; Details und
+Bedienung in [meetingpoint.md](meetingpoint.md). Alles ist ab Werk aus.
+
+| Einstellung | Standard | Wirkung |
 |---|---|---|
-| **Prognose anzeigen** | **an** | Zeigt geschätzte Startzeiten als „~hh:mm". |
-| **Angenommene Spieldauer ohne Messwerte (Minuten)** | 25 | Nur wirksam, solange zu wenige echte Messwerte vorliegen. |
+| **Meetingpoint verwenden** | aus | Seite `/meetingpoint`, Check-in, Anzeige in TL-Web und Spielübersicht |
+| **Schiedsrichter muss für „spielbereit“ eingecheckt sein** | aus | SR zählt mit; vorläufige SR-Zuteilung schon beim Aufruf |
+| **Automatische Feldvergabe nur für spielbereite Partien** | aus | Strikter Modus: nicht gerufene/nicht eingecheckte Spiele bekommen automatisch kein Feld |
+| **Partien automatisch zum Meetingpoint rufen** | aus | feste Anzahl je Halle (2) oder nach Restzeit (10 Min., Puffer 1), höchstens 4 je Halle |
+| **Warnung, wenn eine Partie nicht vollständig erscheint** | aus, 5 Min. | Marke an der Partie im TL-Web wird orange, nennt die Fehlenden |
+| **Fehlende automatisch zum Meetingpoint ansagen (einmal)** | aus, 5 Min. | eine Ansage je Partie mit den Namen der Fehlenden |
+| **Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen** | aus | Knöpfe bei der Seitenwahl am Tablet, nur Anzeige |
+| **Zusatz in der Vorbereitungs-Ansage** (Deutsch/Englisch) | „Bitte zum Meetingpoint gehen.“ / „Please proceed to the meeting point.“ | wird bei eingeschaltetem Meetingpoint ans Ende jedes Vorbereitungs-Aufrufs und der Ansage der Fehlenden gesprochen; frei änderbar, leer = kein Zusatz |
+<!-- pruef: "Zusatz in der Vorbereitungs-Ansage" in src/pages/SetupWizard.tsx -->
+<!-- pruef: "Bitte zum Meetingpoint gehen." in src-tauri/src/config.rs -->
+<!-- pruef: "Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen" in src/pages/SetupWizard.tsx -->
+<!-- pruef: /missing_warn_enabled: false,\n            missing_warn_minutes: 5,/ in src-tauri/src/config.rs -->
 
-Sobald genügend Spiele gemessen sind, rechnet die Software mit den echten
-Zeiten und der eingetragene Wert spielt keine Rolle mehr. Mehr dazu:
-[Spielzeiten & Startzeit-Prognose](spielzeiten-prognose.md).
+## Bereich: Schiedsrichter & Zähltafel
 
-## Hallen-Check-In
-
-| Feld | Voreinstellung | Bedeutung |
-|---|---|---|
-| **Hallen-Check-In aktivieren** | aus | Spieler bestätigen ihre Anwesenheit über eine Webseite. |
-| **Namen in der „Es fehlen noch"-Ansage** | 8 | Wie viele Namen die Ansage vorliest. `0` = nie Namen, nur die Anzahl. |
-
-**Wichtig:** Ohne gültige Turnier-Kennung aus Abschnitt 1 bleibt der Check-In
-aus — auch wenn das Häkchen gesetzt ist. Solange er aus ist, ist der Menüpunkt
-**Check-In** ausgegraut. Details: [Hallen-Check-In](spieler-check-in.md).
-
-## Zähltafelbediener
-
-**Zähltafelbediener-Warteschlange führen** — **voreingestellt aus**. Ist sie an,
-kommt der Verlierer eines regulär beendeten Spiels in die Warteschlange.
-**Walkover und Aufgabe erzeugen keinen Eintrag.** Details:
-[Zähltafelbediener einteilen](zaehltafelbediener.md).
-
-## Schiedsrichter
+### Schiedsrichter
 
 | Feld | Voreinstellung | Bedeutung |
 |---|---|---|
@@ -290,7 +347,14 @@ Sperrlisten und Reihenfolge gehören zum Turnier, nicht zur Einrichtung, und
 stehen deshalb nicht hier. Details:
 [Schiedsrichter verwalten](schiedsrichter-management.md).
 
-## Schiedsrichterzettel
+### Zähltafelbediener
+
+**Zähltafelbediener-Warteschlange führen** — **voreingestellt aus**. Ist sie an,
+kommt der Verlierer eines regulär beendeten Spiels in die Warteschlange.
+**Walkover und Aufgabe erzeugen keinen Eintrag.** Details:
+[Zähltafelbediener einteilen](zaehltafelbediener.md).
+
+### Schiedsrichterzettel
 
 | Feld | Voreinstellung | Bedeutung |
 |---|---|---|
@@ -309,75 +373,9 @@ Gedruckt wird **A4 quer**, ohne Dialog, auf dem Rechner, auf dem BTS Light
 läuft. Jedes Spiel wird **genau einmal** gedruckt; ein Neustart druckt nichts
 nach. Details: [Schiedsrichterzettel drucken](schiedsrichterzettel.md).
 
-## Automatische Feldvergabe
+## Bereich: Anzeigen & Check-In
 
-| Feld | Voreinstellung | Bedeutung |
-|---|---|---|
-| **Automatische Feldvergabe aktivieren** | aus | Freie Felder werden selbst belegt. |
-| **Wartezeit, bis ein freies Feld belegt wird (Minuten)** | 1 | `0` = sofort. |
-| **Pause nach Spielende je Spieler (Minuten)** | 0 | `0` = es gilt die Pausenregel aus BTP. |
-| **Aktive Halle (Tages-Halle, leer = alle)** | leer | Beschränkt die Vergabe auf eine Halle. |
-
-Die drei unteren Felder sind nur sichtbar, wenn die Automatik an ist.
-**Gesperrte Felder werden nie automatisch belegt.**
-
-Eine in der Turnierleitungs-Oberfläche gesetzte **Pause** der Automatik
-übersteht das Speichern dieser Seite. Schaltest du die Automatik hier **aus**,
-ist die Pause damit aufgehoben — nach dem Wiedereinschalten läuft sie sofort
-(Details: [Turnierleitungs-Oberfläche im Browser](turnierleitung-web.md)).
-
-Zwei Besonderheiten im Mehr-Hallen-Betrieb:
-
-- **Ohne** gesetzte aktive Halle werden nur Spiele verteilt, die du für die
-  jeweilige Halle ausdrücklich „in Vorbereitung" gerufen hast.
-- **Mit** gesetzter aktiver Halle ist die automatische Hallen-Vorverteilung
-  ausgeschlossen — beides zusammen geht nicht.
-
-## Meetingpoint
-
-Gerufene Partien checken sich am Meetingpoint einzeln ein; Details und
-Bedienung in [meetingpoint.md](meetingpoint.md). Alles ist ab Werk aus.
-
-| Einstellung | Standard | Wirkung |
-|---|---|---|
-| **Meetingpoint verwenden** | aus | Seite `/meetingpoint`, Check-in, Anzeige in TL-Web und Spielübersicht |
-| **Schiedsrichter muss für „spielbereit“ eingecheckt sein** | aus | SR zählt mit; vorläufige SR-Zuteilung schon beim Aufruf |
-| **Automatische Feldvergabe nur für spielbereite Partien** | aus | Strikter Modus: nicht gerufene/nicht eingecheckte Spiele bekommen automatisch kein Feld |
-| **Partien automatisch zum Meetingpoint rufen** | aus | feste Anzahl je Halle (2) oder nach Restzeit (10 Min., Puffer 1), höchstens 4 je Halle |
-| **Warnung, wenn eine Partie nicht vollständig erscheint** | aus, 5 Min. | Marke an der Partie im TL-Web wird orange, nennt die Fehlenden |
-| **Fehlende automatisch zum Meetingpoint ansagen (einmal)** | aus, 5 Min. | eine Ansage je Partie mit den Namen der Fehlenden |
-| **Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen** | aus | Knöpfe bei der Seitenwahl am Tablet, nur Anzeige |
-<!-- pruef: "Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen" in src/pages/SetupWizard.tsx -->
-<!-- pruef: /missing_warn_enabled: false,\n            missing_warn_minutes: 5,/ in src-tauri/src/config.rs -->
-
-## Disziplinen je Halle
-
-*Erscheint erst, wenn mindestens zwei Hallen erkannt wurden oder schon Regeln
-bestehen. Die Hallen kommen aus BTP, also erst nach der Verbindung.*
-
-Hier legst du fest, in welcher Halle eine Disziplin gespielt wird. Je Regel
-wählst du einen Geltungsbereich und eine Halle:
-
-- **Kategorie** („Alle HE", „Alle DD", …) gilt als Standard für die ganze
-  Disziplin.
-- **Eine einzelne Auslosung** sticht diesen Standard für genau diese Klasse.
-
-Ohne Regel gibt es keine Einschränkung. Eine Zeile, in der die Halle noch auf
-„Halle wählen …" steht, ist unvollständig und **verschwindet beim Speichern**.
-Felder ohne Hallenangabe bleiben immer erlaubt.
-
-## Vereine anzeigen
-
-| Feld | Voreinstellung | Bedeutung |
-|---|---|---|
-| **Vereinsnamen anzeigen** | aus | Verein unter den Spielernamen. |
-| **Vereinslogos anzeigen** | aus | Wappen neben den Namen. |
-
-Beides gilt **turnierweit für alle Geräte**, nicht je Gerät. Die Tablets
-übernehmen die Änderung beim nächsten Neuladen. Ist für einen Verein kein Logo
-hinterlegt, bleibt die Zeile schlicht ohne Wappen.
-
-## Court-Monitor
+### Court-Monitor
 
 **Court-Monitor aktivieren** — **voreingestellt aus**. Der Schalter blendet
 lediglich die Monitor-Adressen und die Menüpunkte **Monitore** und
@@ -387,7 +385,7 @@ Schalter aus ist.
 
 Alles Folgende ist nur sichtbar, wenn der Schalter an ist.
 
-### Werbebilder
+#### Werbebilder
 
 - **Werbung im Leerlauf anzeigen** *(voreingestellt an)* — ist sie aus, zeigt
   ein freies Feld eine neutrale Leerlauf-Seite statt der Bilder.
@@ -405,7 +403,7 @@ Alles Folgende ist nur sichtbar, wenn der Schalter an ist.
 > Diese Angaben werden **beim Klick beziehungsweise beim Verlassen des Feldes
 > sofort gespeichert** — sie hängen nicht am Speichern-Knopf unten.
 
-### Anzeige
+#### Anzeige
 
 - **Wechsel-Intervall** — Schieberegler von 3 bis 30 Sekunden,
   **voreingestellt 10**.
@@ -438,6 +436,28 @@ oben hängen Wechsel-Intervall und die Häkchen **am Speichern-Knopf** —
 und greifen dann ohne weiteres Zutun, die Monitore müssen nicht neu geladen
 werden. Details:
 [Court-Monitor — TV-Anzeige am Spielfeld](court-monitor.md).
+
+### Vereine anzeigen
+
+| Feld | Voreinstellung | Bedeutung |
+|---|---|---|
+| **Vereinsnamen anzeigen** | aus | Verein unter den Spielernamen. |
+| **Vereinslogos anzeigen** | aus | Wappen neben den Namen. |
+
+Beides gilt **turnierweit für alle Geräte**, nicht je Gerät. Die Tablets
+übernehmen die Änderung beim nächsten Neuladen. Ist für einen Verein kein Logo
+hinterlegt, bleibt die Zeile schlicht ohne Wappen.
+
+### Hallen-Check-In
+
+| Feld | Voreinstellung | Bedeutung |
+|---|---|---|
+| **Hallen-Check-In aktivieren** | aus | Spieler bestätigen ihre Anwesenheit über eine Webseite. |
+| **Namen in der „Es fehlen noch"-Ansage** | 8 | Wie viele Namen die Ansage vorliest. `0` = nie Namen, nur die Anzahl. |
+
+**Wichtig:** Ohne gültige Turnier-Kennung aus Abschnitt 1 bleibt der Check-In
+aus — auch wenn das Häkchen gesetzt ist. Solange er aus ist, ist der Menüpunkt
+**Check-In** ausgegraut. Details: [Hallen-Check-In](spieler-check-in.md).
 
 ## Diagnose
 

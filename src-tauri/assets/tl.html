@@ -5006,9 +5006,15 @@ function queueRow(m, topMatchId) {
     // dem nächsten Neuzeichnen zählt als Wiederholung, ein bewusster zweiter
     // Nachruf danach geht durch.
     const stand = m.prep_call.recalls || 0;
+    // „Erste Ansage wiederholen": dieselbe „In Vorbereitung …"-Ansage noch
+    // einmal, ohne Nachruf-Stufe — nur, wenn der Turnier-PC die Aktion kennt.
+    const wiederholen = state.can_repeat_prep_call
+      ? `<button type="button" data-repeat-call="${m.match_id}" title="Die Ansage „In Vorbereitung …“ noch einmal abspielen (zählt nicht als Nachruf)">Erste Ansage wiederholen</button>`
+      : "";
     kebabGroups.push(`<div class="kebab-group">
         <span class="kebab-label">Nachruf</span>
         <div class="recall kebab-actions">
+          ${wiederholen}
           <button type="button" data-recall="${m.match_id}" data-side="both" data-made="${stand}">beide Parteien</button>
           <button type="button" data-recall="${m.match_id}" data-side="team1" data-made="${stand}">${esc(shortSide(m.team1))}</button>
           <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
@@ -5288,6 +5294,20 @@ function wireQueue(box) {
         `mp-ohne-sr-${matchId}`,
         { action: "official_clear", courtId: 0, matchId, role: "sr" },
         "Spielt ohne Schiedsrichter.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  scopeAll(box, "button[data-repeat-call]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const matchId = Number(btn.dataset.repeatCall);
+      // Eigene Vorgangskennung je Klick: Jede Wiederholung ist gewollt;
+      // nur ein Doppeltipp innerhalb einer Sekunde fällt zusammen.
+      send(
+        `repeat-${matchId}-${Math.floor(Date.now() / 1000)}`,
+        { action: "repeat_prep_call", matchId },
+        "Ansage wiederholt.",
       );
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());

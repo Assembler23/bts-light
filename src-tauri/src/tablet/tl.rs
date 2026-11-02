@@ -315,18 +315,15 @@ pub(crate) fn apply_state_action(
                     ),
                 ));
             }
-            for match_id in match_ids {
-                tablet.add_preparation_call(crate::tablet::state::PreparationCall {
-                    match_id: *match_id,
-                    location_id: *location_id,
-                    called_at_ms: now_ms,
-                });
-                // Der Aufruf ist die frischere Entscheidung als die
-                // automatische Vorverteilung — er räumt deren Eintrag (E3,
-                // Spec `hallen-vorverteilung`); der Sync-Reconcile ist nur
-                // das Sicherheitsnetz.
-                tablet.auto_hall_store().remove(*match_id);
-            }
+            // Eintragen, die automatisch vorverteilte Halle räumen (E3) und
+            // jeden neuen Aufruf ansagen — derselbe Weg wie am Desktop.
+            crate::tablet::meetingpoint::hand_aufruf(
+                tablet,
+                match_ids,
+                *location_id,
+                now_ms,
+                !config.slave_mode,
+            );
             Ok(TlResponse::ok(0))
         }
         A::RetractPreparation { match_id } => {
@@ -575,6 +572,34 @@ pub(crate) fn apply_state_action(
                     match_id: *match_id,
                     side: *side,
                     stage,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
+        A::RepeatPrepCall { match_id } => {
+            // Dieselbe erste Ansage wie beim Aufruf (Auftrag
+            // `meetingpoint_call`, Stufe 1) — ohne den Nachruf-Zähler
+            // anzufassen: Wer nur wiederholt, was überhört wurde, soll beim
+            // nächsten Nachruf nicht schon beim „letzten" landen.
+            let Some(call) = tablet
+                .preparation_calls()
+                .into_iter()
+                .find(|c| c.match_id == *match_id)
+            else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Dieses Spiel ist nicht in Vorbereitung gerufen.",
+                ));
+            };
+            let hall = tablet
+                .snapshot_clone()
+                .map(|s| crate::tablet::meetingpoint::hallen_name(&s, call.location_id))
+                .unwrap_or_default();
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::MeetingpointCall {
+                    match_id: *match_id,
                 },
                 now_ms,
             );
@@ -2231,6 +2256,15 @@ async fn execute_result_action(
     })
 }
 
+/// Kurzschlüssel eines Meetingpoint-Platzes (Protokoll, Fingerabdruck).
+fn mp_platz_key(platz: relay_proto::MpPlatz) -> String {
+    match platz {
+        relay_proto::MpPlatz::Spieler { seite, pos } => format!("s{seite}{pos}"),
+        relay_proto::MpPlatz::Sr => "sr".to_string(),
+        relay_proto::MpPlatz::Unbekannt => "?".to_string(),
+    }
+}
+
 /// Kurzer, stabiler Fingerabdruck einer Aktion — erkennt, ob eine wiederholte
 /// Vorgangskennung wirklich dieselbe Absicht trägt.
 ///
@@ -2248,15 +2282,6 @@ async fn execute_result_action(
 ///
 /// Der Fingerabdruck wird **nie** protokolliert (dafür ist `action_label` da)
 /// — er darf deshalb auch Namen aus einer Zähltafelbediener-Meldung tragen.
-/// Kurzschlüssel eines Meetingpoint-Platzes (Protokoll, Fingerabdruck).
-fn mp_platz_key(platz: relay_proto::MpPlatz) -> String {
-    match platz {
-        relay_proto::MpPlatz::Spieler { seite, pos } => format!("s{seite}{pos}"),
-        relay_proto::MpPlatz::Sr => "sr".to_string(),
-        relay_proto::MpPlatz::Unbekannt => "?".to_string(),
-    }
-}
-
 fn action_fingerprint(action: &relay_proto::TlAction) -> String {
     use relay_proto::TlAction as A;
     let ids = |v: &[i64]| {
@@ -2300,6 +2325,7 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             format!("call:{match_id}:{court_id}:{side:?}")
         }
         A::AnnouncePrepCall { match_id, side } => format!("prep-call:{match_id}:{side:?}"),
+        A::RepeatPrepCall { match_id } => format!("prep-repeat:{match_id}"),
         A::EnterResult {
             match_id,
             sets,
@@ -2460,6 +2486,7 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             _ => format!("Erneuter Aufruf Feld {court_id}"),
         },
         A::AnnouncePrepCall { .. } => "Erneuter Vorbereitungs-Aufruf".to_string(),
+        A::RepeatPrepCall { match_id } => format!("Erste Ansage wiederholt, Spiel {match_id}"),
         A::SetHallPrefill { enabled, window } => format!(
             "Hallen-Vorverteilung {} (x={window})",
             if *enabled { "an" } else { "aus" }
@@ -2768,6 +2795,11 @@ pub struct TlState {
     /// tippte auf Orange und hielte das Spiel für markiert.
     #[serde(default)]
     pub can_set_highlight: bool,
+    /// Kennt dieser Turnier-PC „Erste Ansage wiederholen"
+    /// (`TlAction::RepeatPrepCall`)? Ein älterer Host lehnte die unbekannte
+    /// Aktion ab — die Seite blendet den Knopf dann aus.
+    #[serde(default)]
+    pub can_repeat_prep_call: bool,
     /// Meetingpoint-Einstellungen und -Lage (Spec
     /// `meetingpoint-spielbereit`); `None` = Meetingpoint aus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3580,6 +3612,7 @@ pub(crate) fn build_state_limited(
             multi_hall: false,
             can_set_wish_court: true,
             can_set_highlight: true,
+            can_repeat_prep_call: true,
             meetingpoint: meetingpoint_lage(tablet, config),
             finished_warning_seconds: config.finished_warning_seconds,
             // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
@@ -4103,6 +4136,7 @@ pub(crate) fn build_state_limited(
         can_lock_courts: true,
         can_set_wish_court: true,
         can_set_highlight: true,
+        can_repeat_prep_call: true,
         meetingpoint: meetingpoint_lage(tablet, config),
         can_reload_tablets: true,
         finished_warning_seconds: config.finished_warning_seconds,
@@ -9031,6 +9065,75 @@ mod tests {
     }
 
     #[test]
+    fn repeating_the_first_call_announces_stage_one_without_counting() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![a_match(7)],
+            vec![crate::btp::model::BtpLocation {
+                id: 2,
+                name: "Halle B".to_string(),
+            }],
+        ));
+        tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+            match_id: 7,
+            location_id: Some(2),
+            called_at_ms: 10_000,
+        });
+        let wiederhole = || {
+            apply_state_action(
+                &tablet,
+                &AppConfig::default(),
+                50_000,
+                &relay_proto::TlAction::RepeatPrepCall { match_id: 7 },
+            )
+            .unwrap()
+        };
+        assert!(wiederhole().ok);
+        assert!(wiederhole().ok);
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000, true);
+        assert_eq!(jobs.len(), 2);
+        assert!(jobs
+            .iter()
+            .all(|j| j.kind
+                == crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id: 7 }));
+        // Der nächste Nachruf ist trotzdem erst der zweite Aufruf.
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnouncePrepCall {
+                match_id: 7,
+                side: relay_proto::PrepCallSide::Both,
+            },
+        )
+        .unwrap();
+        let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000, true);
+        assert_eq!(
+            jobs.last().unwrap().kind,
+            crate::tablet::state::AnnounceJobKind::PrepCall {
+                match_id: 7,
+                side: relay_proto::PrepCallSide::Both,
+                stage: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn the_first_call_cannot_be_repeated_without_a_call() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(Vec::new(), vec![a_match(7)], Vec::new()));
+        let err = apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::RepeatPrepCall { match_id: 7 },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::NotAllowed));
+    }
+
+    #[test]
     fn a_preparation_call_that_was_never_made_cannot_be_repeated() {
         let tablet = TabletState::default();
         tablet.set_snapshot(snap(Vec::new(), vec![a_match(7)], Vec::new()));
@@ -9827,6 +9930,9 @@ mod tests {
             // Fähigkeitsmerkmal (Spec tl-zeilenfarbe): reines Bool „dieser
             // Turnier-PC kennt die Zeilenfarbe".
             "can_set_highlight",
+            // Fähigkeitsmerkmal: reines Bool „dieser Turnier-PC kennt
+            // ‚Erste Ansage wiederholen'".
+            "can_repeat_prep_call",
             // Spec tl-zeilenfarbe: BTPs Zeilenfarbe 1–6 — eine Notiz der
             // Turnierleitung AM SPIEL, ohne Bedeutung über Personen; die
             // Bedeutung der Farbe vereinbart das Team, sie steht nirgends.

@@ -4,6 +4,39 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.331
+
+- **Ein Aufruf in die Vorbereitung wird jetzt angesagt.** Wer ein Spiel von
+  Hand ruft (Desktop „Aufrufen" oder TL-Web „In Vorbereitung rufen"), hört
+  sofort „In Vorbereitung … Bitte in Halle X" — wie bisher schon bei der
+  Aufruf-Automatik des Meetingpoints. Bisher trug der Hand-Aufruf nur ein;
+  im TL-Web gab es für die erste Ansage gar keinen Weg. Ein erneuter Aufruf
+  in dieselbe Halle wird nicht noch einmal angesagt. Der „Ansage"-Knopf am
+  Desktop bleibt zum Wiederholen; die Nachruf-Knöpfe beginnen wie gewohnt
+  bei „Zweiter Aufruf". Voraussetzung ist ein laufendes Ansage-Gerät der
+  Halle (Desktop-App oder Ansage-Seite).
+- **Einstellungen übersichtlich gegliedert.** Die lange Einstellungsseite ist
+  in sechs Bereiche geordnet (Turnier & Verbindung, Feldvergabe & Planung,
+  Aufruf/Ansage/Meetingpoint, Schiedsrichter & Zähltafel, Anzeigen &
+  Check-In, Diagnose), jeder in eigenem Kasten mit kurzer Erklärung. Eine
+  Leiste oben springt per Klick zum Bereich und bleibt beim Scrollen
+  stehen. An den Einstellungen selbst ändert sich nichts.
+- **TL-Web: „Erste Ansage wiederholen".** Im ⋮-Menü eines gerufenen Spiels
+  (Gruppe „Nachruf") spielt der neue Knopf die Ansage „In Vorbereitung …"
+  noch einmal ab, wenn die Halle sie überhört hat. Er zählt nicht als
+  Nachruf: Der nächste Nachruf bleibt „Zweiter Aufruf". Braucht den
+  Turnier-PC ab v0.9.331 (sonst ist der Knopf ausgeblendet).
+- **Ansage nennt den Meetingpoint.** Bei eingeschaltetem Meetingpoint endet
+  jede Vorbereitungs-Ansage mit „Bitte zum Meetingpoint gehen.“ (englisch
+  „Please proceed to the meeting point.“). Der Satz ist unter Einstellungen →
+  Meetingpoint änderbar, um den Ort in der Halle genauer zu nennen; leer =
+  kein Zusatz. Auch die automatische Ansage der Fehlenden endet mit diesem
+  Satz.
+- **Meetingpoint-Adresse zum Scannen.** Unter Tablets → QR-Codes steht bei
+  eingeschaltetem Meetingpoint die Adresse der Meetingpoint-Seite je Halle
+  (Hallennetz, verschlüsselt und Cloud) mit QR-Code, Link und Kopier-Knopf
+  — bisher musste man sie selbst zusammensetzen.
+
 ## v0.9.330
 
 - **Aufrufe „in Vorbereitung" überleben Neustart und Update.** Die

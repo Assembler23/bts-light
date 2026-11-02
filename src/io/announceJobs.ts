@@ -19,6 +19,7 @@ import {
 import {
   prepareMeetingpointMissing,
   preparePreparationAnnouncement,
+  mpAnsageZusatz,
   resolveAnnouncementLanguage,
   type PreparedAnnouncement,
 } from "./announcer";
@@ -126,11 +127,15 @@ export async function jobZuAnsage(
     // Namen kommen fertig vom Turnier-PC; die Sprache folgt der Einstellung
     // (keine Nationalitäten im Auftrag).
     const lang = resolveAnnouncementLanguage([], cfg.language_mode);
+    // Der einstellbare Meetingpoint-Satz kommt vom Turnier-PC mit der
+    // Vorbereitungs-Sicht; ohne sie bleibt es beim festen Text.
+    const view = await preparationCandidates().catch(() => null);
     const ansage = prepareMeetingpointMissing(
       job.names,
       job.hall || undefined,
       lang,
       ansageOptionen(cfg, lang, azureTts),
+      mpAnsageZusatz(view, lang),
     );
     return ansage ? { ansage, ziel: { art: "prep_call", hall: job.hall } } : null;
   }
@@ -173,6 +178,7 @@ export async function jobZuAnsage(
       // Ein automatischer Meetingpoint-Aufruf ist ein ERSTER Aufruf
       // („In Vorbereitung …"), kein Nachruf.
       callStage: job.kind === "meetingpoint_call" ? 1 : job.stage >= 3 ? 3 : 2,
+      meetingpointText: mpAnsageZusatz(view, lang),
     },
     lang,
     ansageOptionen(cfg, lang, azureTts),

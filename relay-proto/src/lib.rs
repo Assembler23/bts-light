@@ -2120,6 +2120,14 @@ pub enum TlAction {
         match_id: i64,
         side: PrepCallSide,
     },
+    /// Die **erste** Vorbereitungs-Ansage („In Vorbereitung …") eines
+    /// gerufenen Spiels unverändert wiederholen — wenn die Halle sie
+    /// überhört hat. Zählt **keine** Nachruf-Stufe hoch. Nur senden, wenn
+    /// der Host `can_repeat_prep_call` meldet (ältere Hosts kennen sie nicht).
+    RepeatPrepCall {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
     /// Ergebnis eintragen.
     ///
     /// `retired` deckt die **Aufgabe mitten im Spiel** ab — dann sind die
@@ -4846,6 +4854,7 @@ mod tests {
                 match_id: 4711,
                 side: PrepCallSide::Team2,
             },
+            TlAction::RepeatPrepCall { match_id: 4711 },
             TlAction::EnterResult {
                 match_id: 4711,
                 sets: vec![SetAb { a: 21, b: 15 }, SetAb { a: 21, b: 19 }],

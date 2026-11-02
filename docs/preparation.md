@@ -54,10 +54,16 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
    `renderNextRow`) liest `preparation_call_ts` und kennzeichnet die
    Zeile mit „In Vorbereitung · seit X Min" (Status-Pille). Mit
    `&halle=<Name>` filtert sie auf `upcoming_matches[].hall`.
-6. **Ansage** — der „Ansage"-Knopf je gerufenem Spiel löst
-   `playPreparationAnnouncement` aus: Gong → „In Vorbereitung" →
-   Disziplin → Paarung → „Bitte in Halle X". Sprache aus `AnnounceConfig`
-   oder automatisch (siehe [announcements.md](announcements.md)).
+6. **Ansage** — seit v0.9.331 sagt der Turnier-PC jeden **neuen**
+   Hand-Aufruf (Desktop und TL-Web) selbst an:
+   `meetingpoint::hand_aufruf` legt einen Ansage-Auftrag
+   `meetingpoint_call` ab, den das Ansage-Gerät der Halle als ersten
+   Aufruf spricht — Gong → „In Vorbereitung" → Disziplin → Paarung →
+   „Bitte in Halle X". Nicht erneut angesagt wird ein Spiel, das schon in
+   dieselbe Halle gerufen ist, oder eines auf dem Feld. Der „Ansage"-Knopf
+   je gerufenem Spiel spielt dieselbe Ansage am Desktop noch einmal ab
+   (Wiederholung). Sprache aus `AnnounceConfig` oder automatisch (siehe
+   [announcements.md](announcements.md)).
 7. **Aufräumen** — kommt das Match auf ein Feld, **ruht** sein Aufruf
    (`apply_preparation_calls` parkt ihn; er zählt nicht mehr als Aufruf,
    das BTP-Gelb geht weg). Wird das Spiel wieder vom Feld genommen und
@@ -259,9 +265,11 @@ Frontend-Spiegel:
 
 ## Bewusste Designentscheidungen
 
-- **Manuell statt automatisch:** Aufruf und Ansage sind getrennte Schritte
-  und beide explizit. Die Turnierleitung entscheidet pro Spiel, wann sie
-  ruft und wann sie spricht — kein Auto-Mechanismus.
+- **Aufruf = Ansage (seit v0.9.331):** Bis v0.9.330 waren Aufruf und
+  Ansage getrennte Schritte; im TL-Web gab es für die erste Ansage gar
+  keinen Knopf, und seit der Aufruf-Automatik des Meetingpoints wurden
+  automatische Aufrufe angesagt, Hand-Aufrufe aber nicht. Jetzt sagt jeder
+  neue Aufruf an — von Hand wie automatisch, über denselben Auftrag.
 - **Per Match-ID statt per Entry:** Aufrufe identifizieren sich über die
   Match-ID. Anders als bei Walkover (per `EntryID`) gibt es keinen
   Mannschaftsbezug.

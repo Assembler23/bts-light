@@ -83,6 +83,14 @@ LAN+Cloud voraus.
   **📣 In Vorbereitung rufen**. Ist das Spiel gerufen, heißt derselbe
   Eintrag **📣 Aufruf zurücknehmen**; an der Zeile steht dann die Marke
   „gerufen". Bis v0.9.323 war das ein Megafon-Knopf direkt an der Zeile.
+  Seit v0.9.331 wird jeder neue Aufruf **angesagt** („In Vorbereitung …
+  Bitte in Halle X"), sofern ein Ansage-Gerät läuft; ein erneuter Aufruf in
+  dieselbe Halle nicht noch einmal. Hat die Halle die Ansage überhört, spielt
+  **Erste Ansage wiederholen** (⋮-Menü, Gruppe „Nachruf") sie unverändert
+  noch einmal ab — das zählt **nicht** als Nachruf.
+  <!-- pruef: "Erste Ansage wiederholen" in src-tauri/assets/tl.html -->
+  Nachrufe danach beginnen bei „Zweiter
+  Aufruf".
   <!-- pruef: "In Vorbereitung rufen" in src-tauri/assets/tl.html -->
   <!-- pruef: "Aufruf zurücknehmen" in src-tauri/assets/tl.html -->
 - **Was an einer Wartelisten-Zeile sichtbar ist:** rechts nur das
@@ -94,7 +102,8 @@ LAN+Cloud voraus.
   der Spielliste**, danach „Ergebnis eintragen", **🖨 Zettel (leer)**, der
   **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, das **Wunschfeld**,
   **Hervorheben** (Zeilenfarbe wie in BTP) und — an einem gerufenen Spiel —
-  **Nachruf** (beide Parteien oder nur eine). An der Zeile selbst steht so
+  **Nachruf** (beide Parteien oder nur eine; dazu **Erste Ansage
+  wiederholen**, siehe unten). An der Zeile selbst steht so
   wenig wie möglich; so passt eine Zeile auch auf einem schmalen Tablet in
   eine Zeile statt in vier.
   <!-- pruef: "↑ An den Anfang der Spielliste" in src-tauri/assets/tl.html -->

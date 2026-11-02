@@ -35,6 +35,13 @@ mit „nicht gefunden"), und an der Feldvergabe ändert sich nichts.
 <!-- pruef: /\.route\(.\/meetingpoint., get\(meetingpoint_page\)\)/ in src-tauri/src/tablet/server.rs -->
 <!-- pruef: /\.route\(.\/\{ns\}\/meetingpoint., get\(meetingpoint_page\)\)/ in relay/src/main.rs -->
 
+**Wo finde ich die Adresse?** Am Turnier-PC unter **Tablets → QR-Codes**:
+Bei eingeschaltetem Meetingpoint steht dort oben der Block
+**Meetingpoint-Seite** mit je Halle und Verbindungsweg einem QR-Code (zum
+Scannen am Meetingpoint-Gerät), der Adresse als Link und einem
+Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
+<!-- pruef: "Meetingpoint-Seite" in src/pages/TabletPanel.tsx -->
+
 - **Ein Meetingpoint je Halle.** Im Mehr-Hallen-Turnier gehört der
   Hallenname in die Adresse. Fehlt er oder ist er unbekannt, zeigt die Seite
   zuerst eine Hallenwahl. Im Ein-Hallen-Turnier genügt `/meetingpoint`.
@@ -143,13 +150,36 @@ Häkchen **Automatische Feldvergabe nur für spielbereite Partien**:
 - Ein automatischer Aufruf wird angesagt wie ein Aufruf von Hand (wenn ein
   Ansage-Gerät angeschlossen ist).
 
+## Hinweis auf den Meetingpoint in der Ansage
+
+Solange der Meetingpoint an ist, endet jede Vorbereitungs-Ansage mit
+**„Bitte zum Meetingpoint gehen.“** — beim ersten Aufruf wie beim zweiten
+und dritten, egal ob von Hand, aus dem TL-Web oder von der Automatik:
+
+> In Vorbereitung. Herreneinzel. Anna Muster gegen Bea Beispiel. Bitte in
+> Halle A. **Bitte zum Meetingpoint gehen.**
+
+Derselbe Satz steht auch am Ende der automatischen Ansage der Fehlenden
+(siehe unten). Den Satz ändern Sie unter Einstellungen → Meetingpoint → **Zusatz in der
+Vorbereitungs-Ansage**, je für deutsche und englische Ansagen — etwa
+„Bitte zum Meetingpoint neben der Tribüne gehen.“ Leer lassen schaltet den
+Zusatz ab; **Vorgabe wiederherstellen** holt den Standardtext zurück.
+<!-- pruef: "Vorgabe wiederherstellen" in src/pages/SetupWizard.tsx -->
+
+Gesprochen wird der Text, der am Turnier-PC eingestellt ist — auch auf den
+Ansage-Seiten im Browser. Nur der Nachruf-Knopf am Ansage-Slave (eigener
+PC einer fernen Halle) spricht ihn nicht.
+
 ## Wenn jemand nicht kommt
 
 - **Warnung, wenn eine Partie nicht vollständig erscheint** (ab Werk aus, 5
   Minuten): Nach dieser Zeit wird die Marke an der Partie orange und nennt,
   wer fehlt.
 - **Fehlende automatisch zum Meetingpoint ansagen (einmal)** (ab Werk aus, 5
-  Minuten): „<Name>, bitte zum Meetingpoint in <Halle>." — genau einmal je
+  Minuten): „<Name>. Bitte in <Halle>. Bitte zum Meetingpoint gehen." — mit
+  dem einstellbaren Satz aus [Hinweis auf den Meetingpoint in der
+  Ansage](#hinweis-auf-den-meetingpoint-in-der-ansage); ist er leer:
+  „<Name>, bitte zum Meetingpoint in <Halle>." Genau einmal je
   Partie, auch über einen Neustart hinweg. Weitere Nachrufe wie gewohnt von
   Hand.
 <!-- pruef: "Fehlende automatisch zum Meetingpoint ansagen (einmal)" in src/pages/SetupWizard.tsx -->

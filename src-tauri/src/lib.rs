@@ -115,6 +115,7 @@ pub fn run() {
             commands::ansage_vertonen,
             commands::ansage_hoerer,
             commands::ansage_link,
+            commands::meetingpoint_links,
             commands::ansage_pcm_spielen,
             commands::ansage_stimme_spielen,
             commands::ansage_abbrechen,

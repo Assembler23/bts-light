@@ -934,7 +934,28 @@ pub struct MeetingpointConfig {
     pub missing_announce_minutes: u32,
     /// Anwesenheits-Bestätigung am Zähl-Tablet (nur Anzeige für die TL).
     pub field_check_enabled: bool,
+    /// Zusatz am Ende jeder Vorbereitungs-Ansage, solange der Meetingpoint
+    /// an ist (deutsch). Frei änderbar, um den Ort in der Halle genauer zu
+    /// nennen; leer = kein Zusatz.
+    pub announce_text_de: String,
+    /// Dasselbe für englische Ansagen.
+    pub announce_text_en: String,
 }
+
+/// Höchstlänge des Meetingpoint-Zusatzes (Zeichen).
+pub const MP_ANSAGE_MAX: usize = 200;
+
+/// Der Meetingpoint-Zusatz je Ansagesprache.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MpAnsageZusatz {
+    pub de: String,
+    pub en: String,
+}
+
+/// Vorgabe des Meetingpoint-Zusatzes in deutschen Ansagen.
+pub const MP_ANSAGE_DE: &str = "Bitte zum Meetingpoint gehen.";
+/// Vorgabe des Meetingpoint-Zusatzes in englischen Ansagen.
+pub const MP_ANSAGE_EN: &str = "Please proceed to the meeting point.";
 
 impl Default for MeetingpointConfig {
     fn default() -> Self {
@@ -948,11 +969,27 @@ impl Default for MeetingpointConfig {
             missing_announce_enabled: false,
             missing_announce_minutes: 5,
             field_check_enabled: false,
+            announce_text_de: MP_ANSAGE_DE.to_string(),
+            announce_text_en: MP_ANSAGE_EN.to_string(),
         }
     }
 }
 
 impl MeetingpointConfig {
+    /// Zusatz für die Vorbereitungs-Ansage, `None` bei ausgeschaltetem
+    /// Meetingpoint. Leere Texte bleiben leer (= bewusst kein Zusatz);
+    /// gekappt, damit kein Romantext in jede Ansage gerät.
+    pub fn ansage_zusatz(&self) -> Option<MpAnsageZusatz> {
+        if !self.enabled {
+            return None;
+        }
+        let kappen = |s: &str| s.trim().chars().take(MP_ANSAGE_MAX).collect::<String>();
+        Some(MpAnsageZusatz {
+            de: kappen(&self.announce_text_de),
+            en: kappen(&self.announce_text_en),
+        })
+    }
+
     /// Wirkt der strikte Modus? Nur zusammen mit dem Meetingpoint.
     pub fn strict(&self) -> bool {
         self.enabled && self.strict_auto_assign
@@ -2429,6 +2466,8 @@ mod tests {
                 missing_announce_enabled: true,
                 missing_announce_minutes: 8,
                 field_check_enabled: true,
+                announce_text_de: "Bitte zum Meetingpoint am Eingang.".to_string(),
+                announce_text_en: "Please go to the meeting point.".to_string(),
             },
             discipline_hall_rules: vec![DisciplineHallRule {
                 discipline: "mens_singles".to_string(),
@@ -3352,5 +3391,46 @@ mod anzeige_schalter_tests {
         // Alte config.json ohne die Felder: Flagge an, Verein aus.
         let alt: CourtMonitorConfig = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
         assert!(alt.stream_nations && !alt.stream_clubs);
+    }
+}
+
+#[cfg(test)]
+mod meetingpoint_ansage_tests {
+    use super::*;
+
+    #[test]
+    fn alte_config_ohne_text_bekommt_die_vorgabe() {
+        let mp: MeetingpointConfig = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert_eq!(mp.announce_text_de, MP_ANSAGE_DE);
+        assert_eq!(mp.announce_text_en, MP_ANSAGE_EN);
+        assert_eq!(
+            mp.ansage_zusatz(),
+            Some(MpAnsageZusatz {
+                de: MP_ANSAGE_DE.into(),
+                en: MP_ANSAGE_EN.into()
+            })
+        );
+    }
+
+    #[test]
+    fn ohne_meetingpoint_kein_zusatz() {
+        assert_eq!(MeetingpointConfig::default().ansage_zusatz(), None);
+    }
+
+    #[test]
+    fn eigener_text_wird_getrimmt_und_gekappt_leer_bleibt_leer() {
+        let mp = MeetingpointConfig {
+            enabled: true,
+            announce_text_de: format!(
+                "  Bitte zum Meetingpoint an der Tribüne. {}",
+                "x".repeat(500)
+            ),
+            announce_text_en: "   ".into(),
+            ..Default::default()
+        };
+        let z = mp.ansage_zusatz().unwrap();
+        assert!(z.de.starts_with("Bitte zum Meetingpoint an der Tribüne."));
+        assert_eq!(z.de.chars().count(), MP_ANSAGE_MAX);
+        assert_eq!(z.en, "");
     }
 }

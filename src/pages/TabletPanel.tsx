@@ -15,12 +15,13 @@ import {
   Tablet,
   Wifi,
 } from "lucide-react";
-import { openExternal, tabletOverview } from "../api";
+import { meetingpointLinks, openExternal, tabletOverview } from "../api";
 import { HallFilter } from "../components/HallFilter";
 import type {
   AnnounceConfig,
   AzureTtsConfig,
   CourtOverview,
+  MeetingpointLink,
   TabletInfo,
 } from "../types";
 import { PreparationPanel } from "./PreparationPanel";
@@ -63,6 +64,9 @@ export function TabletPanel({ announce, azureTts }: Props) {
   );
   // Hallen-Filter (null = alle) für Übersicht + QR-Codes.
   const [hallFilter, setHallFilter] = useState<string | null>(null);
+  // Adressen der Meetingpoint-Seite (leer, solange der Meetingpoint aus ist).
+  const [mpLinks, setMpLinks] = useState<MeetingpointLink[]>([]);
+  const [mpZoom, setMpZoom] = useState<MeetingpointLink | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -80,6 +84,26 @@ export function TabletPanel({ announce, azureTts }: Props) {
       clearInterval(id);
     };
   }, []);
+
+  // Meetingpoint-Adressen nur, solange der QR-Reiter offen ist — der Kern
+  // rechnet dafür QR-Codes je Halle und Weg.
+  useEffect(() => {
+    if (tab !== "qr") return;
+    let active = true;
+    const laden = () => {
+      meetingpointLinks()
+        .then((l) => {
+          if (active) setMpLinks(l);
+        })
+        .catch(() => {});
+    };
+    laden();
+    const id = setInterval(laden, 5000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [tab]);
 
   const host = info?.server_host ?? "";
   const hostTls = info?.server_host_tls ?? "";
@@ -279,6 +303,15 @@ export function TabletPanel({ announce, azureTts }: Props) {
                     ? "Tablet und PC brauchen je eine Internet-Verbindung – kein gemeinsames WLAN nötig."
                     : "Tablet und dieser PC müssen im selben WLAN sein."}
               </p>
+              {mpLinks.length > 0 && (
+                <MeetingpointLinks
+                  links={mpLinks.filter(
+                    (l) => hallFilter === null || l.hall === "" || l.hall === hallFilter,
+                  )}
+                  mehrereWege={new Set(mpLinks.map((l) => l.kind)).size > 1}
+                  onZoom={setMpZoom}
+                />
+              )}
               {visibleGroups.map((g) => (
                 <div key={g.location} className="flex flex-col gap-2">
                   <HallHeading name={g.location} />
@@ -301,6 +334,32 @@ export function TabletPanel({ announce, azureTts }: Props) {
             </section>
           )}
         </>
+      )}
+
+      {mpZoom !== null && (
+        <div
+          onClick={() => setMpZoom(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+        >
+          <div className="flex flex-col items-center rounded-xl bg-white p-6 text-center">
+            <div
+              className="bg-white"
+              style={{ width: "min(72vw, 72vh)", height: "min(72vw, 72vh)" }}
+              // Der QR-Code kommt als SVG aus dem Kern.
+              dangerouslySetInnerHTML={{ __html: mpZoom.qr_svg }}
+            />
+            <div className="mt-3 flex items-center gap-2 text-lg font-semibold">
+              Meetingpoint{mpZoom.hall ? ` · ${mpZoom.hall}` : ""}
+              <AddressBadge kind={mpZoom.kind} />
+            </div>
+            <div className="mt-1 max-w-[20rem] text-sm">
+              <AddressLink url={mpZoom.url} umbruch />
+            </div>
+            <div className="mt-3 text-xs text-slate-400">
+              Zum Schließen tippen
+            </div>
+          </div>
+        </div>
       )}
 
       {zoom !== null && (
@@ -412,6 +471,63 @@ function QrCard({
           <CopyUrlButton url={addr.courtUrl} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Adressen der Meetingpoint-Seite (Spec `meetingpoint-spielbereit`): je Halle
+ * und Verbindungsweg ein QR-Code zum Scannen am Meetingpoint-Gerät. Die
+ * Seite ist zum Einchecken da — deshalb der Hinweis, die Adresse nicht
+ * auszuhängen (ADR 0074).
+ */
+function MeetingpointLinks({
+  links,
+  mehrereWege,
+  onZoom,
+}: {
+  links: MeetingpointLink[];
+  mehrereWege: boolean;
+  onZoom: (link: MeetingpointLink) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-sky-200 bg-sky-50/40 p-2">
+      <h3 className="px-1 text-sm font-semibold text-slate-600">
+        Meetingpoint-Seite
+      </h3>
+      <p className="px-1 text-xs text-slate-500">
+        Am Meetingpoint-Tablet oder Touch-Bildschirm öffnen: Dort checken sich
+        die gerufenen Spieler ein. Die Adresse nicht aushängen — wer sie kennt,
+        kann ein- und auschecken.
+      </p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {links.map((l) => (
+          <div
+            key={`${l.hall}|${l.kind}`}
+            className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 shadow-sm"
+          >
+            <button
+              onClick={() => onZoom(l)}
+              title="QR-Code groß anzeigen"
+              className="h-16 w-16 shrink-0 rounded bg-white"
+              // Der QR-Code kommt als SVG aus dem Kern.
+              dangerouslySetInnerHTML={{ __html: l.qr_svg }}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                {l.hall && (
+                  <span className="truncate text-sm font-medium">{l.hall}</span>
+                )}
+                {mehrereWege && <AddressBadge kind={l.kind} />}
+              </div>
+              <div className="truncate text-xs">
+                <AddressLink url={l.url} />
+              </div>
+            </div>
+            <CopyUrlButton url={l.url} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

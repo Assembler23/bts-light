@@ -1181,19 +1181,27 @@ export function prepareFreeText(
  * `meetingpoint-spielbereit`): „<Namen>. Bitte zum Meetingpoint in <Halle>."
  * Die Namen kommen fertig vom Turnier-PC (wer fehlt, weiß nur er); die
  * Aussprache-Korrektur greift hier wie bei jedem Aufruf.
+ *
+ * Mit Meetingpoint-Zusatz (`zusatz`, der einstellbare Satz der
+ * Vorbereitungs-Ansage) lautet das Ziel „Bitte in <Halle>. <Zusatz>" — so
+ * hören die Fehlenden dieselbe Ortsangabe wie beim Aufruf. Ohne Zusatz
+ * bleibt es beim festen „Bitte zum Meetingpoint in <Halle>."
  */
 export function prepareMeetingpointMissing(
   names: string[],
   hall: string | undefined,
   lang: AnnounceLang,
   opts: AnnounceOptions = {},
+  zusatz?: string,
 ): PreparedAnnouncement | null {
   const liste = (names || []).map((n) => n.trim()).filter(Boolean);
   if (liste.length === 0) return null;
   const enabled = opts.nameOverridesEnabled ?? true;
   const h = (hall || "").trim();
-  const ziel =
-    lang === "de"
+  const z = (zusatz || "").trim();
+  const ziel = z
+    ? `${h ? (lang === "de" ? `Bitte in ${h}. ` : `Please report to ${h}. `) : ""}${z}`
+    : lang === "de"
       ? `Bitte zum Meetingpoint${h ? ` in ${h}` : ""}.`
       : `Please report to the meeting point${h ? ` in ${h}` : ""}.`;
   const namen = joinNames(liste, lang, buildOverrideMap(opts.nameOverrides, enabled), enabled);
@@ -1406,6 +1414,22 @@ export interface AnnouncePreparationInput {
    *  Aufruf", 3 = „Dritter und letzter Aufruf". Bei 2/3 wird meist nur die
    *  fehlende Partei genannt (teamBNames leer lassen). Default 1. */
   callStage?: 1 | 2 | 3;
+  /** Zusatz ganz am Ende, in jeder Stufe — bei eingeschaltetem Meetingpoint
+   *  „Bitte zum Meetingpoint gehen." oder der eigene Text der
+   *  Turnierleitung (`mpAnsageZusatz`). Leer/undefined = kein Zusatz. */
+  meetingpointText?: string;
+}
+
+/** Der Meetingpoint-Zusatz in der Ansagesprache aus der Vorbereitungs-Sicht
+ *  des Turnier-PCs; `undefined`, wenn der Meetingpoint aus ist oder der Text
+ *  leer. */
+export function mpAnsageZusatz(
+  view: { meetingpoint_ansage?: { de: string; en: string } | null } | null | undefined,
+  lang: AnnounceLang,
+): string | undefined {
+  const z = view?.meetingpoint_ansage;
+  const text = (lang === "de" ? z?.de : z?.en)?.trim();
+  return text ? text : undefined;
 }
 
 // Führt-Präfix je Aufruf-Stufe (an Tilos BTS angelehnt). null = Stufe 1
@@ -1468,6 +1492,7 @@ export function buildPreparationSegments(
   const disc = disciplineSpoken(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
   const hall = (input.hall || "").trim();
+  const zusatz = (input.meetingpointText || "").trim();
   const stagePrefix = callStagePrefix(input.callStage, lang);
 
   // Wiederholungsaufruf (Stufe 2/3): terse „Zweiter/Dritter Aufruf für:
@@ -1486,6 +1511,7 @@ export function buildPreparationSegments(
         lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
       );
     }
+    if (zusatz) segments.push(zusatz);
     return segments;
   }
 
@@ -1507,6 +1533,7 @@ export function buildPreparationSegments(
       lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
     );
   }
+  if (zusatz) segments.push(zusatz);
   return segments;
 }
 
@@ -1525,6 +1552,7 @@ export function buildPreparationSsml(
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap, sayMap);
   const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap, sayMap);
   const hall = xmlEscape((input.hall || "").trim());
+  const zusatz = xmlEscape((input.meetingpointText || "").trim());
   const stagePrefix = callStagePrefix(input.callStage, lang);
 
   let parts: string[];
@@ -1558,6 +1586,7 @@ export function buildPreparationSsml(
       );
     }
   }
+  if (zusatz) parts.push(zusatz);
   const speakLang = lang === "de" ? "de-DE" : "en-US";
   return (
     `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +

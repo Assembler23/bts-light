@@ -745,13 +745,23 @@ Wort in `applyOverride`: **Wörterbuch/Tabelle → Regel-Engine → unverändert
 
 ## Vorbereitungs-Ansage (Spiele in Vorbereitung)
 
-Neben der Feld-Ansage gibt es eine zweite Variante: aus dem
-„In Vorbereitung"-Tab kann die Turnierleitung je gerufenem Spiel eine
-**Hallen-Ansage** auslösen — Knopf „Ansage" neben dem Aufruf
-([preparation.md](preparation.md)). Format:
+Neben der Feld-Ansage gibt es eine zweite Variante, die **Hallen-Ansage**
+eines in Vorbereitung gerufenen Spiels. Seit v0.9.331 erklingt sie bei
+jedem **neuen** Aufruf von selbst — gleich ob von Hand (Desktop „Aufrufen",
+TL-Web „In Vorbereitung rufen") oder durch die Aufruf-Automatik des
+Meetingpoints; ein erneuter Aufruf in dieselbe Halle wird nicht noch einmal
+angesagt. Der Knopf „Ansage" neben dem Aufruf im Vorbereitungs-Tab
+wiederholt sie ([preparation.md](preparation.md)). Format:
 
 > Gong → **„In Vorbereitung."** → Disziplin → Paarung („… gegen …") →
-> **„Bitte in *Halle X*."** (entfällt bei Ein-Hallen-Turnieren)
+> **„Bitte in *Halle X*."** (entfällt bei Ein-Hallen-Turnieren) →
+> Meetingpoint-Zusatz (nur bei eingeschaltetem Meetingpoint, Standard
+> „Bitte zum Meetingpoint gehen.", siehe [meetingpoint.md](meetingpoint.md))
+
+Der Zusatz steht auch am Ende des zweiten/dritten Aufrufs. Er reist in der
+Vorbereitungs-Sicht des Turnier-PCs mit (`PreparationView.meetingpoint_ansage`,
+`mpAnsageZusatz` in `announcer.ts`), damit Desktop-Knöpfe, Ansage-Aufträge und
+Ansage-Seiten denselben Text sprechen.
 
 Englisch entsprechend: „Preparation call." → Discipline → „… versus …" →
 „Please report to *hall*."
@@ -761,9 +771,11 @@ Unterschiede zur Feld-Ansage:
 - **Kein Feld** — die Ansage trägt keinen Court (das Spiel ist noch nicht
   auf einem Feld); statt des wiederholten Court-Worts steht am Ende die
   Halle, in die gerufen wurde.
-- **Manueller Auslöser, kein Auto-Detektor.** Eine eigene `MatchAnnouncer`-
-  Schwester gibt es nicht — der Knopf-Klick im Panel ist gleichzeitig die
-  User-Geste, die WebView2 zum Entsperren der Tonausgabe braucht.
+- **Auslöser ist der Aufruf, kein Auto-Detektor.** Eine eigene
+  `MatchAnnouncer`-Schwester gibt es nicht: Der Turnier-PC legt beim
+  Aufruf einen Auftrag `meetingpoint_call` ab, den das Ansage-Gerät der
+  Halle abholt und als ersten Aufruf spricht. Der „Ansage"-Knopf am
+  Desktop spielt direkt ab (Wiederholung).
 - **Sprach-Auflösung geteilt** mit der Feld-Ansage:
   `resolveAnnouncementLanguage(nationalities, mode)` in `announcer.ts` —
   Auto-Modus nutzt dieselbe Regel (≥ Hälfte international ⇒ Englisch).

@@ -2441,7 +2441,7 @@ impl SyncEngine {
             );
             tablet.auto_hall_store().remove(match_id);
             tracing::info!("Meetingpoint: Spiel {match_id} automatisch gerufen");
-            // Ein automatischer Aufruf wird angesagt wie einer von Hand.
+            // Angesagt wie ein Hand-Aufruf (`meetingpoint::hand_aufruf`).
             tablet.publish_announce_job(
                 crate::tablet::meetingpoint::hallen_name(&snapshot, location_id),
                 crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id },
