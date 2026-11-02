@@ -3,12 +3,15 @@
 Wird in BTP ein Spiel auf ein Feld gezogen, spielt bts-light auf dem
 Turnier-PC eine gesprochene Ansage ab: **Gong → „Feld X" → Disziplin
 (+ Klasse) → Paarung → „Feld X"**. Deutsch oder Englisch, wählbare Stimmen,
-einstellbares Tempo. Eingeführt in v0.6.0; Klassen-Ansage
+einstellbares Tempo (Standard 0,8 — seit v0.9.333 gilt der Regler auch für die
+Azure-Stimme, die vorher immer im Normaltempo sprach; zwischen den Teilen der
+Ansage liegen jetzt kurze Pausen). Eingeführt in v0.6.0; Klassen-Ansage
 („Herreneinzel **A**") seit v0.9.145. Steht am Feld eine Bedienung, folgt am Ende zusätzlich
 „**Tabletbedienung: {Name}**" (`scorekeeperNames` in `AnnounceMatchInput`) —
 seit v0.9.246 gesteuert vom Schalter `announce_scorekeeper`
 ([ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)) statt von der Herkunft
 des Namens; siehe [zaehltafelbediener.md](zaehltafelbediener.md).
+<!-- pruef: "DEFAULT_SPEECH_RATE = 0.8" in src/io/announcer.ts -->
 
 ## Funktionsweise
 
