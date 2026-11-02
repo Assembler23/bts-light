@@ -1039,7 +1039,11 @@ hinter nginx.
 
 **Binary** – wird per GitHub-Actions gebaut und deployt
 (`.github/workflows/relay-deploy.yml`, Trigger: Änderungen an `relay/`,
-`relay-proto/` oder `tablet.html` auf `main`, plus `workflow_dispatch`).
+`relay-proto/` oder an einer der Seiten, die das Relay per `include_str!`
+einbettet, auf `main`, plus `workflow_dispatch`). Wer im Relay eine Seite
+neu einbettet, muss sie in die `paths` des Workflows aufnehmen — sonst bleibt
+eine Änderung an ihr in der Cloud unsichtbar. Die CI prüft das
+(`scripts/test-relay-deploy-pfade.mjs`).
 Reproduzierbar gebaut, kein Rust-Toolchain auf dem Prod-Server nötig.
 
 **Sicherung als Rückweg (seit v0.9.261).** Vor dem Umbenennen auf die neue
