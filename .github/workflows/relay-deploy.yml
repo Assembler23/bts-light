@@ -17,19 +17,27 @@ on:
       - "relay/**"
       - "relay-proto/**"
       # ALLE Seiten, die das Relay-Binary per `include_str!` einbettet
-      # (`relay/src/main.rs`, Zeilen 40–62). Fehlt eine davon hier, bleibt
+      # (`relay/src/main.rs`). Fehlt eine davon hier, bleibt
       # eine Änderung an ihr im Cloud-Betrieb unsichtbar, während sie im LAN
       # längst wirkt — bis zufällig ein anderer Deploy läuft.
       #
       # Dreimal passiert: `tl.html` fehlte anfangs, und `overview.html`,
-      # `preparation.html` und `ad.html` bis v0.9.238. **Wer im Relay ein
-      # `include_str!` ergänzt, ergänzt hier den Pfad.**
+      # `preparation.html` und `ad.html` bis v0.9.238, und `tafel.html`,
+      # `stream.html`, `anzeige.html` und `meetingpoint.html` bis 02.11.2026.
+      # Seitdem prüft `scripts/test-relay-deploy-pfade.mjs` in der CI, dass
+      # jedes `include_str!`/`include_bytes!`/`include_dir!` des Relays hier steht.
       - "src-tauri/assets/tablet.html"
       - "src-tauri/assets/monitor.html"
       - "src-tauri/assets/tl.html"
       - "src-tauri/assets/overview.html"
       - "src-tauri/assets/preparation.html"
       - "src-tauri/assets/ad.html"
+      - "src-tauri/assets/tafel.html"
+      - "src-tauri/assets/stream.html"
+      - "src-tauri/assets/anzeige.html"
+      - "src-tauri/assets/meetingpoint.html"
+      # Flaggen-Verzeichnis, per `include_dir!` eingebettet.
+      - "src-tauri/assets/flags/**"
       - ".github/workflows/relay-deploy.yml"
 
 jobs:

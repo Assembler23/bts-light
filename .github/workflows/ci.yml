@@ -228,6 +228,11 @@ jobs:
       - name: Meetingpoint-Seite (JS)
         run: node scripts/test-meetingpoint.mjs
 
+      # Jede Datei, die das Relay-Binary einbettet, muss den Relay-Deploy
+      # auslösen — sonst bleibt eine Änderung an ihr in der Cloud unsichtbar.
+      - name: Relay-Deploy-Pfade vollständig
+        run: node scripts/test-relay-deploy-pfade.mjs
+
       # Ansage-Seite im Browser (Spec ansage-im-browser): Bestandsaufnahme,
       # Hallen-Pflicht, nichts Falsches oder Verfallenes sprechen, Praesenz
       # nur mit Stimme und Ton, Abspiel-Kern mit Fristen - und die
