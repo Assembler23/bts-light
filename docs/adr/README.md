@@ -26,10 +26,10 @@ hier eintragen.
 | [0013](0013-ergebniskorrektur-nur-ohne-folgespiel.md) | Ergebniskorrektur nur, wo nichts daran hängt | accepted (vorläufig) |
 | [0014](0014-punktverlauf-expliziter-rally-frame.md) | Punktverlauf: expliziter Rally-Frame vom Tablet | accepted |
 | [0015](0015-punktverlauf-datei-je-turnier.md) | Punktverlauf: eine JSON-Datei je Turnier beim Host | accepted |
-| [0016](0016-monitor-push-transport.md) | Monitor-Push-Transport: WebSocket-Nudge statt SSE oder Poll | proposed |
-| [0017](0017-reconnect-ownership.md) | Reconnect-Konfliktmodell: Ownership „Slot-Halter gewinnt" statt rev-Zähler | proposed |
-| [0018](0018-ergebnis-weg-verlustsicher.md) | Ergebnis-Weg verlustsicher: Idempotenz, persistente Retry-Queue | proposed |
-| [0019](0019-relay-last-soak-inprocess.md) | Relay-Last-/Soak-Test: In-Process, Multi-Thread, ehrliche Abgrenzung | proposed |
+| [0016](0016-monitor-push-transport.md) | Monitor-Push-Transport: WebSocket-Nudge statt SSE oder Poll | accepted |
+| [0017](0017-reconnect-ownership.md) | Reconnect-Konfliktmodell: Ownership „Slot-Halter gewinnt" statt rev-Zähler | accepted |
+| [0018](0018-ergebnis-weg-verlustsicher.md) | Ergebnis-Weg verlustsicher: Idempotenz, persistente Retry-Queue | accepted |
+| [0019](0019-relay-last-soak-inprocess.md) | Relay-Last-/Soak-Test: In-Process, Multi-Thread, ehrliche Abgrenzung | accepted |
 | [0020](0020-tote-verbindung-read-idle-tablet-stale.md) | Tote-Verbindungs-Erkennung: Read-Idle (Option A) + Tablet-Empfangs-Stale | accepted |
 | [0021](0021-officials-ruecksync-eigenstaendiger-write.md) | Officials-Rücksync: eigenständiger Write, BTP gewinnt | accepted |
 | [0022](0022-officials-turnierdaten-eigene-datei.md) | Officials-Turnierdaten: eigene turniergebundene Datei | accepted |
@@ -44,8 +44,8 @@ hier eintragen.
 | [0031](0031-hallen-farben-eigener-config-store.md) | Hallen-Farben: eigene `hall_colors`-Struktur statt `HallLayoutConfig`-Umbau | accepted |
 | [0032](0032-hallen-farben-deterministische-auto-palette.md) | Hallen-Farben: deterministische Auto-Palette über die sortierte Hallenliste | accepted |
 | [0033](0033-hallen-farben-hex-auf-dem-draht.md) | Hallen-Farben: Hex-String auf dem Draht, Palettenzwang nur am Schreibpunkt | accepted |
-| [0034](0034-tl-web-push-transport.md) | TL-Web-Push: WebSocket-Nudge mit In-Band-Auth | proposed |
-| [0035](0035-monitor-livestand-ordnung.md) | Monitor-Livestand: schmaler Abruf, Ordnung über `seq`, additive Nudges | proposed |
+| [0034](0034-tl-web-push-transport.md) | TL-Web-Push: WebSocket-Nudge mit In-Band-Auth | accepted |
+| [0035](0035-monitor-livestand-ordnung.md) | Monitor-Livestand: schmaler Abruf, Ordnung über `seq`, additive Nudges | accepted |
 | [0036](0036-hallen-achse-im-messwert.md) | Hallen-Achse: Halle im Messwert stempeln statt zur Anzeigezeit nachschlagen | accepted |
 | [0037](0037-zettel-ereignisse-eigener-strom.md) | Zettel-Ereignisse: eigener Frame, eigener Store, eigene Datei | accepted |
 | [0038](0038-ereignisse-append-only.md) | Zettel-Ereignisse sind append-only; eine Rücknahme ist ein Eintrag, kein Löschen | accepted |
@@ -81,3 +81,8 @@ hier eintragen.
 | [0068](0068-monitor-stil-als-attribut-am-feld-ziel.md) | Monitor-Stil als Attribut am Feld-Ziel (`serde(other)`), in-band über `MonitorState` | accepted |
 | [0069](0069-stream-einblendung-eigene-seite.md) | Stream-Einblendung als eigene Seite auf dem Feld-Zustand je Feld, Namespace-Offenlegung akzeptiert | accepted |
 | [0070](0070-nation-verein-auf-anzeigen-serverseitig.md) | Nation (Standard an) und Verein (Standard aus) auf Anzeigen serverseitig gefiltert, URL nur abschaltend | accepted |
+| [0071](0071-meetingpoint-zustand-ein-store.md) | Meetingpoint: Aufrufe und Check-ins in einem turniergebundenen Store, Parken auf dem Feld | accepted |
+| [0072](0072-sr-vorab-zuteilung-vorlaeufig.md) | SR-Vorab-Zuteilung als vorläufige Reservierung, BTP-Write erst mit Feld | accepted |
+| [0073](0073-strikter-modus-zusaetzliches-gate.md) | Strikter Modus „nur spielbereite" als zusätzliches Gate der Feld-Automatik | accepted |
+| [0074](0074-meetingpoint-seite-unter-namespace.md) | Meetingpoint-Seite unter `/{ns}/` mit Request/Ack, Namespace-Offenlegung akzeptiert | accepted |
+| [0075](0075-bedarf-der-aufruf-automatik.md) | Aufruf-Automatik: gemeinsamer Freiwerde-Helfer, Vorrat = gerufene vergebbare Partien | accepted |
