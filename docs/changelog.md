@@ -15,6 +15,12 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Desktop bleibt zum Wiederholen; die Nachruf-Knöpfe beginnen wie gewohnt
   bei „Zweiter Aufruf". Voraussetzung ist ein laufendes Ansage-Gerät der
   Halle (Desktop-App oder Ansage-Seite).
+- **Einstellungen übersichtlich gegliedert.** Die lange Einstellungsseite ist
+  in sechs Bereiche geordnet (Turnier & Verbindung, Feldvergabe & Planung,
+  Aufruf/Ansage/Meetingpoint, Schiedsrichter & Zähltafel, Anzeigen &
+  Check-In, Diagnose), jeder in eigenem Kasten mit kurzer Erklärung. Eine
+  Leiste oben springt per Klick zum Bereich und bleibt beim Scrollen
+  stehen. An den Einstellungen selbst ändert sich nichts.
 - **TL-Web: „Erste Ansage wiederholen".** Im ⋮-Menü eines gerufenen Spiels
   (Gruppe „Nachruf") spielt der neue Knopf die Ansage „In Vorbereitung …"
   noch einmal ab, wenn die Halle sie überhört hat. Er zählt nicht als

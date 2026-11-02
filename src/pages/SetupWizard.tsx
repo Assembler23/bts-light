@@ -90,6 +90,71 @@ const MP_ANSAGE_DE = "Bitte zum Meetingpoint gehen.";
 const MP_ANSAGE_EN = "Please proceed to the meeting point.";
 const MANUAL = "manual";
 
+/** Die Gruppen der Einstellungsseite — Reihenfolge = Reihenfolge auf der
+ *  Seite. Die Abschnitte darin behalten ihre `section-*`-Sprungziele. */
+const EINSTELLUNGS_GRUPPEN: { id: string; titel: string; beschreibung: string }[] = [
+  { id: "grundlagen", titel: "Turnier & Verbindung", beschreibung: "Liveticker, BTP, badhub und wie die Tablets den Turnier-PC erreichen." },
+  { id: "feldvergabe", titel: "Feldvergabe & Planung", beschreibung: "Wie Spiele aufs Feld kommen und wann sie voraussichtlich starten." },
+  { id: "aufruf", titel: "Aufruf, Ansage & Meetingpoint", beschreibung: "Was in der Halle gesprochen wird und wie Spieler zum Feld finden." },
+  { id: "personal", titel: "Schiedsrichter & Zähltafel", beschreibung: "Wer pfeift, wer zählt und welche Zettel gedruckt werden." },
+  { id: "anzeigen", titel: "Anzeigen & Check-In", beschreibung: "Monitore, Vereinsnamen und die Anmeldung in der Halle." },
+  { id: "diagnose", titel: "Diagnose", beschreibung: "Fehlerberichte an badhub." },
+];
+
+/** Sprungleiste oben: je Gruppe ein Knopf, bleibt beim Scrollen stehen.
+ *  Knöpfe statt `#`-Links, damit die Adresse der App unberührt bleibt. */
+function EinstellungsNavigation({
+  gruppen,
+}: {
+  gruppen: { id: string; titel: string }[];
+}) {
+  return (
+    <nav
+      aria-label="Bereiche der Einstellungen"
+      // Einzeilig und waagerecht scrollbar statt umbrechend: Die Leiste bleibt
+      // so immer gleich hoch, und `scroll-mt-14` der Sprungziele passt.
+      className="sticky top-0 z-10 -mx-6 flex gap-1.5 overflow-x-auto border-b border-slate-200
+                 bg-white/95 px-6 py-2 backdrop-blur"
+    >
+      {gruppen.map((g) => (
+        <button
+          key={g.id}
+          type="button"
+          onClick={() =>
+            document
+              .getElementById(`gruppe-${g.id}`)
+              ?.scrollIntoView({ behavior: "smooth", block: "start" })
+          }
+          className="shrink-0 whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs
+                     font-medium text-slate-600 transition-colors hover:border-slate-300
+                     hover:bg-slate-100"
+        >
+          {g.titel}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/** Eine Gruppe der Einstellungsseite: Überschrift, ein Satz, worum es geht,
+ *  und darunter ihre Abschnitte, durch Linien getrennt. */
+function Gruppe({ id, children }: { id: string; children: ReactNode }) {
+  const g = EINSTELLUNGS_GRUPPEN.find((x) => x.id === id);
+  return (
+    <div
+      id={`gruppe-${id}`}
+      className="flex scroll-mt-14 flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-4
+                 [&>*+*]:border-t [&>*+*]:border-slate-100 [&>*+*]:pt-5"
+    >
+      <div>
+        <h2 className="text-base font-semibold text-slate-800">{g?.titel ?? id}</h2>
+        {g?.beschreibung && <p className="text-xs text-slate-500">{g.beschreibung}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /** Abschnitts-Überschrift mit Icon. */
 function SectionHeader({
   icon: Icon,
@@ -99,10 +164,10 @@ function SectionHeader({
   children: ReactNode;
 }) {
   return (
-    <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+    <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
       <Icon size={16} className="text-slate-400" />
       {children}
-    </h2>
+    </h3>
   );
 }
 
@@ -1068,1746 +1133,1760 @@ export function SetupWizard({
         </div>
       </header>
 
-      {/* Ansage-Slave-Modus: macht diese Instanz zum reinen Ansage-Rechner für
-          eine zweite Halle (nur BTP lesen + ansagen). */}
-      <section className="rounded-xl border border-violet-300 bg-violet-50 p-4">
-        <label className="flex items-start gap-2.5 text-sm">
-          <input
-            type="checkbox"
-            checked={slaveMode}
-            onChange={(e) => setSlaveMode(e.currentTarget.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="font-semibold text-violet-900">
-              Ansage-Slave-Modus (zweite Halle)
-            </span>
-            <span className="mt-1 block text-violet-800">
-              Dieser Rechner <strong>sagt nur an</strong> (keine Feldvergabe,
-              kein Liveticker). Die <strong>Tablets und TVs</strong> dieser
-              Halle hängen <strong>direkt über die Cloud</strong> am Master —
-              ihre QR-Codes/Links erscheinen nach dem Koppeln auf dem{" "}
-              <strong>Dashboard</strong>. Den Master (mit der laufenden
-              BTP-Steuerung) gibt es genau einmal; beliebig viele Slaves dürfen
-              mitlaufen. Trage unten den <strong>Master-Kopplungs-Code</strong>{" "}
-              ein; die <strong>Halle</strong> wählst du danach auf dem{" "}
-              <strong>Dashboard</strong> („Geräte dieser Halle"), die Stimme
-              unter „Sprachansagen".
-            </span>
-          </span>
-        </label>
+      <EinstellungsNavigation gruppen={EINSTELLUNGS_GRUPPEN} />
 
-        {/* Geführte Cloud-Kopplung für die ferne Halle (Slave). */}
-        {slaveMode && (
-          <div className="mt-3 border-t border-violet-200 pt-3">
-            <div className="text-sm font-semibold text-violet-900">
-              Ferne Halle über Cloud einrichten (kein gemeinsames Netz)
-            </div>
-            <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800">
-              <li>
-                Am <strong>Master</strong> (PC mit BTP) den{" "}
-                <strong>8-stelligen Telefon-Code</strong> erzeugen lassen (dort
-                unten in diesem Feld) und hier eintippen — oder den langen
-                Kopplungs-Code einfügen:
-              </li>
-            </ol>
+      <Gruppe id="grundlagen">
+        {/* Ansage-Slave-Modus: macht diese Instanz zum reinen Ansage-Rechner für
+            eine zweite Halle (nur BTP lesen + ansagen). */}
+        <section className="rounded-xl border border-violet-300 bg-violet-50 p-4">
+          <label className="flex items-start gap-2.5 text-sm">
             <input
-              type="text"
-              value={masterNamespace}
-              placeholder="Telefon-Code (8 Ziffern) oder langer Kopplungs-Code"
-              onChange={(e) => onMasterCodeInput(e.currentTarget.value)}
-              className="mt-2 w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm
-                         focus:border-violet-500 focus:outline-none"
+              type="checkbox"
+              checked={slaveMode}
+              onChange={(e) => setSlaveMode(e.currentTarget.checked)}
+              className="mt-0.5"
             />
-            {redeem && (
-              <p
-                className={`mt-1 text-xs ${
-                  redeem.kind === "ok"
-                    ? "text-emerald-700"
-                    : redeem.kind === "err"
-                      ? "text-rose-700"
-                      : "text-violet-700"
-                }`}
-              >
-                {redeem.msg}
-              </p>
-            )}
-            <ol
-              className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800"
-              start={2}
-            >
-              <li>
-                Unter <strong>„Sprachansagen"</strong> die{" "}
-                <strong>Halle</strong> dieser fernen Halle wählen (+ Stimme).
-              </li>
-              <li>
-                <strong>Internet</strong> muss da sein (LTE/WLAN) — die Ansagen
-                kommen über die Cloud vom Master.
-              </li>
-            </ol>
-            <p className="mt-2 text-xs text-violet-700">
-              Feld leer lassen = klassischer <strong>LAN-Slave</strong> (liest
-              BTP direkt im selben Netz).
-            </p>
-          </div>
-        )}
+            <span>
+              <span className="font-semibold text-violet-900">
+                Ansage-Slave-Modus (zweite Halle)
+              </span>
+              <span className="mt-1 block text-violet-800">
+                Dieser Rechner <strong>sagt nur an</strong> (keine Feldvergabe,
+                kein Liveticker). Die <strong>Tablets und TVs</strong> dieser
+                Halle hängen <strong>direkt über die Cloud</strong> am Master —
+                ihre QR-Codes/Links erscheinen nach dem Koppeln auf dem{" "}
+                <strong>Dashboard</strong>. Den Master (mit der laufenden
+                BTP-Steuerung) gibt es genau einmal; beliebig viele Slaves dürfen
+                mitlaufen. Trage unten den <strong>Master-Kopplungs-Code</strong>{" "}
+                ein; die <strong>Halle</strong> wählst du danach auf dem{" "}
+                <strong>Dashboard</strong> („Geräte dieser Halle"), die Stimme
+                unter „Sprachansagen".
+              </span>
+            </span>
+          </label>
 
-        {/* Eigener Kopplungs-Code (am MASTER ablesen, an der fernen Halle
-            eintragen). Mit Kopieren-Knopf. */}
-        {!slaveMode && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-violet-200 pt-3">
-            {/* Telefon-Code (ADR 0004): 8 Ziffern, 1 Stunde gültig — zum
-                Durchsagen. Braucht laufenden Cloud-Modus (Host verbunden). */}
-            <span className="text-sm text-violet-800">
-              <strong>Telefon-Code</strong> (für ferne Hallen, 1 Stunde gültig):
-            </span>
-            {phoneCode?.code ? (
-              <span className="select-all rounded bg-white px-2.5 py-1 font-mono text-lg font-bold tracking-wider text-violet-900">
-                {phoneCode.code.slice(0, 4)}&thinsp;{phoneCode.code.slice(4)}
+          {/* Geführte Cloud-Kopplung für die ferne Halle (Slave). */}
+          {slaveMode && (
+            <div className="mt-3 border-t border-violet-200 pt-3">
+              <div className="text-sm font-semibold text-violet-900">
+                Ferne Halle über Cloud einrichten (kein gemeinsames Netz)
+              </div>
+              <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800">
+                <li>
+                  Am <strong>Master</strong> (PC mit BTP) den{" "}
+                  <strong>8-stelligen Telefon-Code</strong> erzeugen lassen (dort
+                  unten in diesem Feld) und hier eintippen — oder den langen
+                  Kopplungs-Code einfügen:
+                </li>
+              </ol>
+              <input
+                type="text"
+                value={masterNamespace}
+                placeholder="Telefon-Code (8 Ziffern) oder langer Kopplungs-Code"
+                onChange={(e) => onMasterCodeInput(e.currentTarget.value)}
+                className="mt-2 w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm
+                           focus:border-violet-500 focus:outline-none"
+              />
+              {redeem && (
+                <p
+                  className={`mt-1 text-xs ${
+                    redeem.kind === "ok"
+                      ? "text-emerald-700"
+                      : redeem.kind === "err"
+                        ? "text-rose-700"
+                        : "text-violet-700"
+                  }`}
+                >
+                  {redeem.msg}
+                </p>
+              )}
+              <ol
+                className="mt-1 list-decimal space-y-1 pl-5 text-sm text-violet-800"
+                start={2}
+              >
+                <li>
+                  Unter <strong>„Sprachansagen"</strong> die{" "}
+                  <strong>Halle</strong> dieser fernen Halle wählen (+ Stimme).
+                </li>
+                <li>
+                  <strong>Internet</strong> muss da sein (LTE/WLAN) — die Ansagen
+                  kommen über die Cloud vom Master.
+                </li>
+              </ol>
+              <p className="mt-2 text-xs text-violet-700">
+                Feld leer lassen = klassischer <strong>LAN-Slave</strong> (liest
+                BTP direkt im selben Netz).
+              </p>
+            </div>
+          )}
+
+          {/* Eigener Kopplungs-Code (am MASTER ablesen, an der fernen Halle
+              eintragen). Mit Kopieren-Knopf. */}
+          {!slaveMode && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-violet-200 pt-3">
+              {/* Telefon-Code (ADR 0004): 8 Ziffern, 1 Stunde gültig — zum
+                  Durchsagen. Braucht laufenden Cloud-Modus (Host verbunden). */}
+              <span className="text-sm text-violet-800">
+                <strong>Telefon-Code</strong> (für ferne Hallen, 1 Stunde gültig):
               </span>
-            ) : null}
-            <button
-              type="button"
-              onClick={() =>
-                void pairingCode()
-                  .then((p) => setPhoneCode({ code: p.code }))
-                  .catch((e) => setPhoneCode({ err: String(e) }))
-              }
-              className="rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-medium text-white
-                         transition-colors hover:bg-violet-700"
-            >
-              {phoneCode?.code ? "Neuen Code erzeugen" : "Code erzeugen"}
-            </button>
-            {phoneCode?.err && (
-              <span className="w-full text-xs text-rose-700">
-                {phoneCode.err}
-              </span>
-            )}
-            <span className="w-full text-xs text-violet-700">
-              Der fernen Halle telefonisch durchsagen — sie tippt ihn beim
-              Koppeln ein. Der Master braucht dafür <strong>Cloud</strong> (bei
-              eigenen LAN-Tablets in dieser Halle: <strong>LAN + Cloud</strong>)
-              oben aktiv und gestartet.
-            </span>
-            <span className="w-full text-xs text-violet-700">
-              Alternativ der lange <strong>Kopplungs-Code</strong>:{" "}
-              <span className="select-all rounded bg-white px-1.5 py-0.5 font-mono text-xs font-semibold text-violet-900">
-                {initialConfig.install_id || "—"}
-              </span>{" "}
+              {phoneCode?.code ? (
+                <span className="select-all rounded bg-white px-2.5 py-1 font-mono text-lg font-bold tracking-wider text-violet-900">
+                  {phoneCode.code.slice(0, 4)}&thinsp;{phoneCode.code.slice(4)}
+                </span>
+              ) : null}
               <button
                 type="button"
                 onClick={() =>
-                  void navigator.clipboard?.writeText(
-                    initialConfig.install_id || "",
-                  )
+                  void pairingCode()
+                    .then((p) => setPhoneCode({ code: p.code }))
+                    .catch((e) => setPhoneCode({ err: String(e) }))
                 }
-                className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800
-                           transition-colors hover:bg-violet-200"
+                className="rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-medium text-white
+                           transition-colors hover:bg-violet-700"
               >
-                Kopieren
+                {phoneCode?.code ? "Neuen Code erzeugen" : "Code erzeugen"}
               </button>
-            </span>
-          </div>
-        )}
-      </section>
+              {phoneCode?.err && (
+                <span className="w-full text-xs text-rose-700">
+                  {phoneCode.err}
+                </span>
+              )}
+              <span className="w-full text-xs text-violet-700">
+                Der fernen Halle telefonisch durchsagen — sie tippt ihn beim
+                Koppeln ein. Der Master braucht dafür <strong>Cloud</strong> (bei
+                eigenen LAN-Tablets in dieser Halle: <strong>LAN + Cloud</strong>)
+                oben aktiv und gestartet.
+              </span>
+              <span className="w-full text-xs text-violet-700">
+                Alternativ der lange <strong>Kopplungs-Code</strong>:{" "}
+                <span className="select-all rounded bg-white px-1.5 py-0.5 font-mono text-xs font-semibold text-violet-900">
+                  {initialConfig.install_id || "—"}
+                </span>{" "}
+                <button
+                  type="button"
+                  onClick={() =>
+                    void navigator.clipboard?.writeText(
+                      initialConfig.install_id || "",
+                    )
+                  }
+                  className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800
+                             transition-colors hover:bg-violet-200"
+                >
+                  Kopieren
+                </button>
+              </span>
+            </div>
+          )}
+        </section>
 
-      {/* Schritt 1: Verband / Ziel */}
-      <section className="flex flex-col gap-2">
-        <SectionHeader icon={Target}>1 · Liveticker-Ziel</SectionHeader>
-        {PRESETS.map((preset) => {
-          // Die Kacheln zeigen die Adresse des gewählten Systems, damit beim
-          // Testbetrieb sichtbar ist, wohin wirklich gesendet wird.
-          const liveUrl = badhubUrlFuer(preset.badhub.live_url, testAktiv);
-          return (
-            <div key={preset.id} className="flex items-stretch gap-2">
-              <div className="min-w-0 flex-1">
-                <ChoiceCard
-                  icon={Target}
-                  title={preset.label}
-                  description={liveUrl}
-                  active={presetId === preset.id}
-                  onClick={() => waehleZiel(preset.id)}
-                />
+        {/* Schritt 1: Verband / Ziel */}
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={Target}>1 · Liveticker-Ziel</SectionHeader>
+          {PRESETS.map((preset) => {
+            // Die Kacheln zeigen die Adresse des gewählten Systems, damit beim
+            // Testbetrieb sichtbar ist, wohin wirklich gesendet wird.
+            const liveUrl = badhubUrlFuer(preset.badhub.live_url, testAktiv);
+            return (
+              <div key={preset.id} className="flex items-stretch gap-2">
+                <div className="min-w-0 flex-1">
+                  <ChoiceCard
+                    icon={Target}
+                    title={preset.label}
+                    description={liveUrl}
+                    active={presetId === preset.id}
+                    onClick={() => waehleZiel(preset.id)}
+                  />
+                </div>
+                <CopyBadgeButton liveUrl={liveUrl} />
               </div>
-              <CopyBadgeButton liveUrl={liveUrl} />
-            </div>
-          );
-        })}
+            );
+          })}
 
-        <label className="mt-1 flex flex-col gap-1 text-sm text-slate-600">
-          <span>
-            Turnier bei turnier.de{" "}
-            {!slaveMode && <span className="text-rose-600">*</span>}
-          </span>
-          <input
-            className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
-            placeholder="turnier.de-Adresse einfügen oder Turnier-GUID"
-            value={tournamentGuid}
-            onChange={(e) => {
-              // Aus einer eingefügten Adresse die GUID herausziehen — kopiert
-              // wird fast immer die ganze URL aus dem Browser. Nur dann
-              // ersetzen: sonst würde jedes Tippen mitten in einer schon
-              // gültigen Kennung den Feldinhalt neu setzen.
-              const raw = e.currentTarget.value;
-              const looksLikeUrl = /[/:]/.test(raw);
-              const found = looksLikeUrl ? extractTournamentGuid(raw) : "";
-              setTournamentGuid(found || raw);
-            }}
-          />
-          <span className="text-xs text-slate-500">
-            Öffne dein Turnier auf turnier.de und füge die Adresse hier ein —
-            die Kennung wird automatisch herausgelesen. badhub hält damit dein
-            Turnier von anderen des Verbands auseinander, die am selben Tag
-            laufen; Aushang und Liveticker-Link zeigen direkt auf dein Turnier.
-          </span>
-          {tournamentGuid.trim() !== "" && !isTournamentGuid(tournamentGuid) && (
-            <span className="text-xs font-medium text-amber-600">
-              Das sieht noch nicht nach einer Turnier-Kennung aus. Erwartet
-              wird die Adresse deines Turniers bei turnier.de.
+          <label className="mt-1 flex flex-col gap-1 text-sm text-slate-600">
+            <span>
+              Turnier bei turnier.de{" "}
+              {!slaveMode && <span className="text-rose-600">*</span>}
             </span>
-          )}
-          {tournamentGuid.trim() === "" && !slaveMode && (
-            <span className="text-xs font-medium text-amber-600">
-              Pflichtfeld — ohne Kennung lässt sich die Übertragung nicht
-              starten.
-            </span>
-          )}
-        </label>
-
-        <ChoiceCard
-          icon={KeyRound}
-          title="Anderes Turnier (manuell)"
-          description="Badhub-URL und Passwort selbst eintragen"
-          active={isManual}
-          onClick={() => waehleZiel(MANUAL)}
-        />
-
-        {/* Testsystem: eigenes badhub mit eigener Datenbank. Bewusst hier
-            unter dem Ziel und nicht in einer Entwickler-Ecke – wer damit ein
-            Turnier fährt, muss es bei jedem Blick auf die Einstellungen
-            sehen. */}
-        {umschaltbar ? (
-          <ToggleCard
-            icon={Stethoscope}
-            title="Testsystem (test.badhub.de)"
-            description="Probelauf ohne Folgen: Liveticker, Check-In, Cloud-Verbindung der Tablets und Diagnose-Logs gehen auf das Testsystem. Die Produktiv-Datenbank bleibt unberührt."
-            active={testAktiv}
-            onToggle={toggleTestSystem}
-          />
-        ) : (
-          <p className="text-xs text-slate-500">
-            Der Testsystem-Schalter gilt nur für Adressen auf badhub.de – eine
-            eigene Liveticker-Instanz bleibt unverändert.
-          </p>
-        )}
-        {testAktiv && (
-          <div
-            className="flex gap-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3.5
-                       text-sm text-amber-900"
-          >
-            <Info
-              size={18}
-              strokeWidth={2}
-              className="mt-0.5 shrink-0 text-amber-600"
-            />
-            <p>
-              Diese Installation sendet an <strong>test.badhub.de</strong>. Auf
-              der öffentlichen Live-Seite erscheint <strong>nichts</strong>.
-              Braucht das Testsystem ein eigenes Liveticker-Passwort, trage es
-              unten ein – sonst meldet der Liveticker „Badhub lehnte die
-              Anmeldung ab". Zum Zurückschalten den Schalter wieder ausmachen;
-              die Tablet-Cloud-Verbindung folgt beim nächsten Stoppen/Starten.
-            </p>
-          </div>
-        )}
-        {testAktiv && !isManual && (
-          <Field
-            label="Liveticker-Passwort des Testsystems"
-            value={badhubPassword}
-            onChange={setBadhubPassword}
-            type="password"
-          />
-        )}
-      </section>
-
-      {/* Turnierlogo (badhub-Liveticker) */}
-      <section className="flex flex-col gap-2">
-        <SectionHeader icon={Image}>Turnierlogo (optional)</SectionHeader>
-        <p className="text-sm text-slate-600">
-          Erscheint oben auf der Live-Seite (badhub.de/live). BTP liefert kein
-          Logo – lade es hier hoch (PNG, JPG, WEBP, GIF, SVG; max. 2 MB).
-        </p>
-        <div className="flex items-center gap-3">
-          {logoData ? (
-            <img
-              src={`data:${logoMime};base64,${logoData}`}
-              alt="Turnierlogo-Vorschau"
-              className="h-16 w-16 rounded-lg border border-slate-200 object-contain"
-              style={{ background: logoBg || "#ffffff" }}
-            />
-          ) : (
-            <div
-              className="flex h-16 w-16 items-center justify-center rounded-lg
-                         border border-dashed border-slate-300 text-slate-400"
-            >
-              <Image size={22} />
-            </div>
-          )}
-          <div className="flex flex-col gap-1.5">
-            <button
-              onClick={() => void pickLogo()}
-              className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm
-                         font-medium text-slate-700 transition-colors hover:bg-slate-200"
-            >
-              {logoData ? "Logo ersetzen" : "Logo wählen"}
-            </button>
-            {logoData && (
-              <button
-                onClick={clearLogo}
-                className="inline-flex items-center gap-1 self-start text-xs
-                           text-rose-700 hover:underline"
-              >
-                <Trash2 size={13} /> Entfernen
-              </button>
-            )}
-          </div>
-        </div>
-        {logoData && (
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            Hintergrundfarbe
             <input
-              type="color"
-              value={logoBg || "#ffffff"}
-              onChange={(e) => setLogoBg(e.target.value)}
-              className="h-7 w-10 cursor-pointer rounded border border-slate-200"
+              className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+              placeholder="turnier.de-Adresse einfügen oder Turnier-GUID"
+              value={tournamentGuid}
+              onChange={(e) => {
+                // Aus einer eingefügten Adresse die GUID herausziehen — kopiert
+                // wird fast immer die ganze URL aus dem Browser. Nur dann
+                // ersetzen: sonst würde jedes Tippen mitten in einer schon
+                // gültigen Kennung den Feldinhalt neu setzen.
+                const raw = e.currentTarget.value;
+                const looksLikeUrl = /[/:]/.test(raw);
+                const found = looksLikeUrl ? extractTournamentGuid(raw) : "";
+                setTournamentGuid(found || raw);
+              }}
             />
             <span className="text-xs text-slate-500">
-              für transparente Logos (sonst Standard-Weiß)
+              Öffne dein Turnier auf turnier.de und füge die Adresse hier ein —
+              die Kennung wird automatisch herausgelesen. badhub hält damit dein
+              Turnier von anderen des Verbands auseinander, die am selben Tag
+              laufen; Aushang und Liveticker-Link zeigen direkt auf dein Turnier.
             </span>
+            {tournamentGuid.trim() !== "" && !isTournamentGuid(tournamentGuid) && (
+              <span className="text-xs font-medium text-amber-600">
+                Das sieht noch nicht nach einer Turnier-Kennung aus. Erwartet
+                wird die Adresse deines Turniers bei turnier.de.
+              </span>
+            )}
+            {tournamentGuid.trim() === "" && !slaveMode && (
+              <span className="text-xs font-medium text-amber-600">
+                Pflichtfeld — ohne Kennung lässt sich die Übertragung nicht
+                starten.
+              </span>
+            )}
           </label>
-        )}
-        {logoError && <p className="text-xs text-rose-700">{logoError}</p>}
-      </section>
 
-      {/* Schritt 2: BTP-Verbindung */}
-      <section className="flex flex-col gap-3">
-        <SectionHeader icon={Server}>2 · BTP-Verbindung</SectionHeader>
-        <Field
-          label="BTP-Adresse"
-          value={host}
-          onChange={setHost}
-          placeholder="127.0.0.1"
-        />
-        <Field label="Port" value={port} onChange={setPort} type="number" />
-        <Field
-          label="BTP-Passwort (falls gesetzt)"
-          value={btpPassword}
-          onChange={setBtpPassword}
-          type="password"
-        />
-        {/* Die häufigste Stolperfalle beim ersten Start (Feldtest 06.09.2026):
-            BTP nimmt erst Verbindungen an, wenn Tournament Planner Network
-            eingeschaltet ist. Der Fehlertext sagt es dann auch — aber hier
-            steht es, BEVOR jemand rätselt. */}
-        <p className="text-xs text-slate-500">
-          Voraussetzung in BTP: Menü <strong>Extras → Tournament Planner
-          Network…</strong> öffnen und das Häkchen <strong>„Enabled"</strong>{" "}
-          setzen. Steht dort ein Passwort, gehört dasselbe in das Feld
-          „BTP-Passwort". Ohne diese Einstellung meldet der Test „Verbindung
-          verweigert".
-        </p>
-        <button
-          onClick={runTest}
-          disabled={test.kind === "testing" || host.trim() === ""}
-          className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                     text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
-        >
-          {test.kind === "testing" ? "Teste …" : "Verbindung testen"}
-        </button>
-        {test.kind === "ok" && (
-          <p className="flex items-center gap-1.5 text-sm text-emerald-700">
-            <Check size={16} /> BTP gefunden – Turnier „{test.tournament}"
-          </p>
-        )}
-        {test.kind === "error" && (
-          <p className="flex items-start gap-1.5 text-sm text-rose-700">
-            <X size={16} className="mt-0.5 shrink-0" /> {test.message}
-          </p>
-        )}
-      </section>
+          <ChoiceCard
+            icon={KeyRound}
+            title="Anderes Turnier (manuell)"
+            description="Badhub-URL und Passwort selbst eintragen"
+            active={isManual}
+            onClick={() => waehleZiel(MANUAL)}
+          />
 
-      {/* TP-Datei an badhub (Spec tp-datei-upload, L1): die offene Turnierdatenbank,
-          gebunden an die Turnier-GUID zum Zeitpunkt der Wahl. Gesendet wird im
-          Dashboard; im Slave-Modus gibt es den Abschnitt nicht (nur der Master lädt hoch). */}
-      {!slaveMode && (
-        <section id="section-tp-datei" className="flex flex-col gap-2 scroll-mt-4">
-          <SectionHeader icon={Database}>TP-Datei (Turnierdatenbank)</SectionHeader>
-          <p className="text-xs text-slate-500">
-            Die offene Turnierdatei von BTP (<code>.tp</code>) lässt sich im Dashboard an
-            badhub senden — dort entsteht noch am Turniertag ein vorläufiger Stand mit
-            Auslosungen, Gruppen, KO-Bäumen und Spielliste.{" "}
-            <strong>Alles aus der Datei wird sichtbar</strong>, Auslosungen also erst
-            senden, wenn sie veröffentlicht werden dürfen.
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void pickTpDatei()}
-              className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                         text-slate-700 transition-colors hover:bg-slate-200"
+          {/* Testsystem: eigenes badhub mit eigener Datenbank. Bewusst hier
+              unter dem Ziel und nicht in einer Entwickler-Ecke – wer damit ein
+              Turnier fährt, muss es bei jedem Blick auf die Einstellungen
+              sehen. */}
+          {umschaltbar ? (
+            <ToggleCard
+              icon={Stethoscope}
+              title="Testsystem (test.badhub.de)"
+              description="Probelauf ohne Folgen: Liveticker, Check-In, Cloud-Verbindung der Tablets und Diagnose-Logs gehen auf das Testsystem. Die Produktiv-Datenbank bleibt unberührt."
+              active={testAktiv}
+              onToggle={toggleTestSystem}
+            />
+          ) : (
+            <p className="text-xs text-slate-500">
+              Der Testsystem-Schalter gilt nur für Adressen auf badhub.de – eine
+              eigene Liveticker-Instanz bleibt unverändert.
+            </p>
+          )}
+          {testAktiv && (
+            <div
+              className="flex gap-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3.5
+                         text-sm text-amber-900"
             >
-              {tpPath ? "Datei neu wählen" : "TP-Datei wählen"}
-            </button>
-            {tpPath && (
-              <button
-                type="button"
-                onClick={() => {
-                  setTpPath("");
-                  setTpGuid("");
-                  setTpInfo(null);
-                  setTpError("");
-                  setTpHinweis("");
-                  setTpFrage(null);
-                  // Ohne Datei keine Automatik — sonst hielte sie beim nächsten
-                  // Schritt mit „Keine TP-Datei gewählt“ an (Spec AK 17a).
-                  setTpAuto(false);
-                }}
-                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm
-                           text-slate-500 transition-colors hover:bg-slate-100"
-              >
-                <Trash2 size={14} /> Entfernen
-              </button>
-            )}
-          </div>
-          {tpPath && (
-            <p className="break-all font-mono text-xs text-slate-600">{tpPath}</p>
-          )}
-          {tpFeldLeer && (
-            <p className="text-xs text-slate-500">
-              Unter „1 · Liveticker-Ziel“ ist noch keine Turnier-Kennung eingetragen —
-              beim Wählen übernimmt bts-light die Kennung aus der Datei.
-            </p>
-          )}
-          {tpPath && tpInfo?.art === "erkannt" && (
-            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
-              <Check size={16} /> {tpInfo.anzeige}
-              {/* Nur, wenn die Kennung oben noch die gebundene ist — sonst
-                  stünde „passt“ neben „Datei neu wählen“. Nach einer
-                  Übernahme sagt es schon der Hinweis darunter. */}
-              {tpInfo.guid !== null &&
-                tpInfo.guid === tpGuidKanon &&
-                tpGuidPasst &&
-                !tpHinweis &&
-                " · Turnier-Kennung passt"}
-            </p>
-          )}
-          {tpPath &&
-            tpInfo?.art === "erkannt" &&
-            tpInfo.guid !== null &&
-            tpGuidKanon !== "" &&
-            tpInfo.guid !== tpGuidKanon && (
-              <p className="text-sm text-amber-700">
-                Die Datei gehört zu Turnier {shortTournamentGuid(tpInfo.guid)}, gebunden
-                ist {shortTournamentGuid(tpGuidKanon)} — Kennung unter „1 ·
-                Liveticker-Ziel“ prüfen oder andere Datei wählen.
-              </p>
-            )}
-          {tpHinweis && (
-            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
-              <Check size={16} /> {tpHinweis}
-            </p>
-          )}
-          {tpFrage && (
-            <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <Info
+                size={18}
+                strokeWidth={2}
+                className="mt-0.5 shrink-0 text-amber-600"
+              />
               <p>
-                {tpFrage.eingetragen !== ""
-                  ? `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}, oben ist ${shortTournamentGuid(tpFrage.eingetragen)} eingetragen.`
-                  : `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}; die Eingabe unter „1 · Liveticker-Ziel“ ist keine Turnier-Kennung.`}{" "}
-                Kennung aus der Datei übernehmen? Damit zeigen auch Liveticker, Check-In
-                und Aushang auf dieses Turnier.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={uebernehmeKennungAusDatei}
-                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white
-                             transition-colors hover:bg-amber-700"
-                >
-                  Kennung übernehmen
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTpFrage(null)}
-                  className="rounded-lg px-3 py-1.5 text-sm text-slate-600 transition-colors
-                             hover:bg-slate-100"
-                >
-                  Abbrechen — Datei nicht speichern
-                </button>
-              </div>
-            </div>
-          )}
-          {tpPath && tpInfo && tpInfo.art !== "erkannt" && (
-            <p className="text-sm text-amber-700">{tpInfoText(tpInfo)}</p>
-          )}
-          {tpError && (
-            <p className="flex items-start gap-1.5 text-sm text-rose-700">
-              <X size={16} className="mt-0.5 shrink-0" /> {tpError}
-            </p>
-          )}
-          {tpPath && !tpGuidPasst && (
-            <p className="text-sm text-amber-700">
-              {tpGuid === ""
-                ? "Datei neu wählen — beim Wählen war noch keine Turnier-Kennung eingetragen."
-                : "Datei neu wählen — die Turnier-GUID hat sich seit der Dateiwahl geändert."}
-            </p>
-          )}
-          {!["127.0.0.1", "localhost"].includes(host.trim().toLowerCase()) && (
-            <p className="text-xs text-slate-500">
-              Die Datei liegt auf dem BTP-Rechner — Upload nur von dort empfohlen.
-            </p>
-          )}
-          {/* Stufe 2 (Spec tp-takt-upload, ADR 0061): nur mit gewählter Datei. */}
-          {tpPath && (
-            <div className="mt-1 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={tpAuto}
-                  onChange={(e) => setTpAuto(e.currentTarget.checked)}
-                />
-                Automatisch senden, solange der Liveticker läuft
-              </label>
-              {tpAuto && (
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  alle
-                  <input
-                    type="number"
-                    min={5}
-                    max={1440}
-                    step={1}
-                    value={tpMinutes}
-                    onChange={(e) => setTpMinutes(e.currentTarget.value)}
-                    className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
-                  />
-                  Minuten
-                  {tpMinutes.trim() !== "" && Number(tpMinutes) < 5 && (
-                    <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
-                  )}
-                </label>
-              )}
-              {/* Ereignis-Auslöser (ADR 0062): abschalt- und drosselbar, falls
-                  Netz oder badhub zu viel abbekommen — dann bleibt der Takt. */}
-              {tpAuto && (
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={tpEreignis}
-                    onChange={(e) => setTpEreignis(e.currentTarget.checked)}
-                  />
-                  Bei neuen Spielen und Paarungen sofort prüfen
-                </label>
-              )}
-              {tpAuto && tpEreignis && (
-                <label className="flex items-center gap-2 pl-6 text-sm text-slate-600">
-                  höchstens alle
-                  <input
-                    type="number"
-                    min={5}
-                    max={1440}
-                    step={1}
-                    value={tpEreignisMinuten}
-                    onChange={(e) => setTpEreignisMinuten(e.currentTarget.value)}
-                    className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
-                  />
-                  Minuten
-                  {tpEreignisMinuten.trim() !== "" && Number(tpEreignisMinuten) < 5 && (
-                    <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
-                  )}
-                </label>
-              )}
-              <p className="text-xs text-slate-500">
-                Damit sendet bts-light jede Änderung der Datei von selbst — auch neue
-                Auslosungen, sobald sie in BTP stehen. Ohne laufenden Liveticker passiert
-                nichts; gesendet wird nur, wenn sich die Datei geändert hat.
+                Diese Installation sendet an <strong>test.badhub.de</strong>. Auf
+                der öffentlichen Live-Seite erscheint <strong>nichts</strong>.
+                Braucht das Testsystem ein eigenes Liveticker-Passwort, trage es
+                unten ein – sonst meldet der Liveticker „Badhub lehnte die
+                Anmeldung ab". Zum Zurückschalten den Schalter wieder ausmachen;
+                die Tablet-Cloud-Verbindung folgt beim nächsten Stoppen/Starten.
               </p>
             </div>
+          )}
+          {testAktiv && !isManual && (
+            <Field
+              label="Liveticker-Passwort des Testsystems"
+              value={badhubPassword}
+              onChange={setBadhubPassword}
+              type="password"
+            />
           )}
         </section>
-      )}
 
-      {/* Schritt 3: Badhub (nur manuell) */}
-      {isManual && (
-        <section className="flex flex-col gap-3">
-          <SectionHeader icon={KeyRound}>3 · Badhub-Zugang</SectionHeader>
-          <div className="flex gap-2.5 rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-sm text-sky-900">
-            <Info
-              size={18}
-              strokeWidth={2}
-              className="mt-0.5 shrink-0 text-sky-600"
-            />
-            <p>
-              Für ein <strong>eigenes Turnier</strong> brauchst du einen eigenen
-              Zugang. Wende dich vorab an{" "}
-              <a
-                href="mailto:info@badhub.de"
-                className="font-medium underline underline-offset-2"
+        {/* Turnierlogo (badhub-Liveticker) */}
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={Image}>Turnierlogo (optional)</SectionHeader>
+          <p className="text-sm text-slate-600">
+            Erscheint oben auf der Live-Seite (badhub.de/live). BTP liefert kein
+            Logo – lade es hier hoch (PNG, JPG, WEBP, GIF, SVG; max. 2 MB).
+          </p>
+          <div className="flex items-center gap-3">
+            {logoData ? (
+              <img
+                src={`data:${logoMime};base64,${logoData}`}
+                alt="Turnierlogo-Vorschau"
+                className="h-16 w-16 rounded-lg border border-slate-200 object-contain"
+                style={{ background: logoBg || "#ffffff" }}
+              />
+            ) : (
+              <div
+                className="flex h-16 w-16 items-center justify-center rounded-lg
+                           border border-dashed border-slate-300 text-slate-400"
               >
-                info@badhub.de
-              </a>{" "}
-              — dann bekommst du eine individuelle Liveticker-Adresse und die
-              passenden Zugangsdaten (URL&nbsp;+&nbsp;Passwort), die du hier
-              einträgst.
-            </p>
-          </div>
-          <Field label="Badhub-URL" value={badhubUrl} onChange={setBadhubUrl} />
-          <Field
-            label="Badhub-Passwort"
-            value={badhubPassword}
-            onChange={setBadhubPassword}
-            type="password"
-          />
-          <Field
-            label="Live-Seite (URL, optional)"
-            value={badhubLiveUrl}
-            onChange={setBadhubLiveUrl}
-            placeholder="https://badhub.de/live?t=…"
-          />
-        </section>
-      )}
-
-      {/* Tablet-Verbindung */}
-      <section className="flex flex-col gap-2">
-        <SectionHeader icon={Wifi}>Tablet-Verbindung</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Wie erreichen die Schiedsrichter-Tablets diesen PC? Beide Wege lassen
-          sich zusammen aktivieren – etwa für ein Zwei-Hallen-Turnier (eine
-          Halle per LAN, die andere über die Cloud). Lässt sich später in den
-          Einstellungen umstellen.
-        </p>
-        <ToggleCard
-          icon={Wifi}
-          title="LAN – lokales Netz"
-          description="Tablets verbinden sich direkt im Hallen-WLAN. Schnell und offline – braucht aber einen freigegebenen Port (Windows-Firewall)."
-          active={lanEnabled}
-          onToggle={() => setLanEnabled((v) => !v)}
-        />
-        <ToggleCard
-          icon={Cloud}
-          title="Über badhub.de – Cloud"
-          description="Tablets und PC verbinden sich nur nach außen. Funktioniert auch hinter gesperrten Firmen-Firewalls – Internet vorausgesetzt."
-          active={cloudEnabled}
-          onToggle={() => setCloudEnabled((v) => !v)}
-        />
-        {!lanEnabled && !cloudEnabled && (
-          <p className="flex items-start gap-1.5 text-xs text-rose-700">
-            <X size={14} className="mt-0.5 shrink-0" />
-            Mindestens einen Verbindungsweg aktivieren.
-          </p>
-        )}
-        <div className="mt-1">
-          <Field
-            label="Tablet-Einstellungs-PIN"
-            value={tabletPin}
-            onChange={(v) => setTabletPin(v.replace(/\D/g, "").slice(0, 8))}
-            placeholder="0000"
-            type="tel"
-          />
-          <p className="mt-1 text-xs text-slate-500">
-            Schützt das Zahnrad-Menü am Zähltablett (Feld wechseln ohne QR). Nur
-            Ziffern. Reiner Bedien-Schutz – die echte Kiosk-Sperre macht der
-            Kiosk-Browser (eigener Exit-PIN).
-          </p>
-        </div>
-      </section>
-
-      {/* Sprachansagen */}
-      <section id="section-ansagen" className="flex flex-col gap-2 scroll-mt-4">
-        <SectionHeader icon={Volume2}>Ansagen</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Das ganze Ansage-Modul: sagt jedes Spiel an, das in BTP auf ein Feld
-          gezogen wird (Gong, Feld, Disziplin, Paarung). Hier wird das Modul nur
-          <strong> an- oder ausgeschaltet</strong> — ist es aus, gibt es keine
-          Ansagen (auch keine Freitext-Ansagen).
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={annEnabled}
-            onChange={(e) => setAnnEnabled(e.currentTarget.checked)}
-          />
-          Ansagen aktivieren
-        </label>
-        {annEnabled && (
-          <p className="text-xs text-slate-500">
-            Sprache, Stimmen, Tempo, Gong, Aussprache-Korrekturen, Azure und die
-            Halle stellst du auf der Seite <strong>„Ansagen"</strong> ein
-            (Menüpunkt links).
-          </p>
-        )}
-      </section>
-
-      {/* Aufruf-Timer (1./2./3. Aufruf) */}
-      <section className="flex flex-col gap-2">
-        <SectionHeader icon={Timer}>Aufruf-Timer</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Der Aufruf aufs Feld ist der <strong>1. Aufruf</strong>. bts-light
-          zeigt dann je belegtem Feld eine hochzählende Uhr und meldet ab den
-          eingestellten Minuten den <strong>2.</strong> und{" "}
-          <strong>3./letzten</strong> Aufruf als fällig.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={ctEnabled}
-            onChange={(e) => setCtEnabled(e.currentTarget.checked)}
-          />
-          Aufruf-Timer aktivieren
-        </label>
-
-        {ctEnabled && (
-          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            <Field
-              label="2. Aufruf nach (Minuten)"
-              value={ctSecond}
-              onChange={setCtSecond}
-              type="number"
-            />
-            <Field
-              label="3./letzter Aufruf nach (Minuten)"
-              value={ctThird}
-              onChange={setCtThird}
-              type="number"
-            />
-            <p className="text-xs text-slate-500">
-              Minuten ab dem 1. Aufruf. Beispiel: 2 und 4 → der 2. Aufruf wird
-              nach 2 Minuten fällig, der letzte nach 4.
-            </p>
-            {Number(ctThird) <= Number(ctSecond) && (
-              <p className="flex items-start gap-1.5 text-xs text-amber-700">
-                <X size={14} className="mt-0.5 shrink-0" />
-                Der 3. Aufruf sollte nach dem 2. liegen — beim Speichern wird er
-                sonst automatisch angehoben.
-              </p>
+                <Image size={22} />
+              </div>
             )}
+            <div className="flex flex-col gap-1.5">
+              <button
+                onClick={() => void pickLogo()}
+                className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm
+                           font-medium text-slate-700 transition-colors hover:bg-slate-200"
+              >
+                {logoData ? "Logo ersetzen" : "Logo wählen"}
+              </button>
+              {logoData && (
+                <button
+                  onClick={clearLogo}
+                  className="inline-flex items-center gap-1 self-start text-xs
+                             text-rose-700 hover:underline"
+                >
+                  <Trash2 size={13} /> Entfernen
+                </button>
+              )}
+            </div>
           </div>
-        )}
-
-        {/* Bewusst außerhalb des Schalters oben: Die Einfärbung ist eine
-            Anzeige, kein Aufruf-Automatismus — sie hilft auch Turnieren, die
-            ohne Aufruf-Timer arbeiten. */}
-        <div className="mt-2 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
-          <Field
-            label="Feld färbt sich rot, wenn nach (Minuten) noch kein Punkt gefallen ist"
-            value={ctNotStarted}
-            onChange={setCtNotStarted}
-            type="number"
-          />
-          <p className="text-xs text-slate-500">
-            Gilt für die <strong>Turnierleitungs-Oberfläche</strong>: Dort ist
-            jedes Feld nach seinem Zustand eingefärbt — aufgerufen, überfällig,
-            im Spiel, beendet. „Überfällig" heißt: aufgerufen, aber nach dieser
-            Zeit ist noch kein einziger Punkt gefallen.
-          </p>
-        </div>
-      </section>
-
-      {/* Startzeit-Prognose (Spec spielzeiten-prognose) */}
-      <section className="flex flex-col gap-2">
-        <SectionHeader icon={Timer}>Startzeit-Prognose</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Die Turnierleitungs-Oberfläche zeigt an jedem wartenden Spiel, wann
-          es voraussichtlich aufgerufen wird — berechnet aus den gemessenen
-          Spielzeiten dieses Turniers (je Klasse und Disziplin), den freien
-          Feldern und der Spielreihenfolge.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={predEnabled}
-            onChange={(e) => setPredEnabled(e.currentTarget.checked)}
-          />
-          Prognose anzeigen
-        </label>
-        {predEnabled && (
-          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            <Field
-              label="Angenommene Spieldauer ohne Messwerte (Minuten)"
-              value={predDefault}
-              onChange={setPredDefault}
-              type="number"
-            />
-            <p className="text-xs text-slate-500">
-              Gilt nur, solange eine Klasse noch keine drei gemessenen Spiele
-              hat — solche Prognosen zeigt die Spielliste als „~hh:mm".
-              Danach rechnet bts-light automatisch mit den echten Zeiten.
-            </p>
-          </div>
-        )}
-      </section>
-
-      {/* Hallen-Check-In (ADR 0009). Die id ist der Sprungpunkt aus dem
-          ausgegrauten Menüpunkt „Check-In" in der Seitenleiste. */}
-      <section id="section-check-in" className="flex flex-col gap-2">
-        <SectionHeader icon={Users}>Hallen-Check-In</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Spieler bestätigen vor Beginn ihrer Spielklasse über eine Webseite
-          selbst, dass sie in der Halle sind — du siehst dann schon vor der
-          Auslosung, wer fehlt. Die Adresse verteilst du per QR-Aushang in der
-          Halle. Braucht Internet; ohne Verbindung läuft das Turnier
-          unverändert weiter.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={ciEnabled}
-            onChange={(e) => setCiEnabled(e.currentTarget.checked)}
-          />
-          Hallen-Check-In aktivieren
-        </label>
-
-        {ciEnabled && (
-          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            <p className="text-xs text-slate-500">
-              Die Turnier-Kennung kommt aus Abschnitt „1 · Liveticker-Ziel".
-            </p>
-
-            <label className="flex flex-col gap-1 text-sm text-slate-600">
-              <span>Namen in der „Es fehlen noch"-Ansage</span>
+          {logoData && (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              Hintergrundfarbe
               <input
-                type="number"
-                min={0}
-                max={50}
-                className="w-24 rounded-lg border border-slate-300 px-3 py-2"
-                value={ciMissingMax}
-                onChange={(e) => setCiMissingMax(e.currentTarget.value)}
+                type="color"
+                value={logoBg || "#ffffff"}
+                onChange={(e) => setLogoBg(e.target.value)}
+                className="h-7 w-10 cursor-pointer rounded border border-slate-200"
               />
               <span className="text-xs text-slate-500">
-                Bis zu so vielen fehlenden Spielern werden die Namen
-                vorgelesen. Darüber sagt die Ansage nur die Anzahl — sonst
-                läuft sie kurz nach Öffnung des Check-Ins minutenlang.
+                für transparente Logos (sonst Standard-Weiß)
               </span>
             </label>
-          </div>
-        )}
-      </section>
+          )}
+          {logoError && <p className="text-xs text-rose-700">{logoError}</p>}
+        </section>
 
-      {/* Zähltafelbediener */}
-      <section className="flex flex-col gap-2">
-        <SectionHeader icon={Users}>Zähltafelbediener</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Wie im Original-BTS: der <strong>Verlierer</strong> eines regulär
-          beendeten Spiels kommt in eine Warteschlange und ist als nächster
-          Zähltafelbediener dran. Die Reihenfolge siehst und pflegst du in der
-          Spielübersicht. (Walkover/Aufgabe erzeugen keinen Eintrag.)
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={skEnabled}
-            onChange={(e) => setSkEnabled(e.currentTarget.checked)}
+        {/* Schritt 2: BTP-Verbindung */}
+        <section className="flex flex-col gap-3">
+          <SectionHeader icon={Server}>2 · BTP-Verbindung</SectionHeader>
+          <Field
+            label="BTP-Adresse"
+            value={host}
+            onChange={setHost}
+            placeholder="127.0.0.1"
           />
-          Zähltafelbediener-Warteschlange führen
-        </label>
-      </section>
-
-      {/* Schiedsrichter (SR/AR) */}
-      <section id="section-schiedsrichter" className="flex flex-col gap-2 scroll-mt-4">
-        <SectionHeader icon={Gavel}>Schiedsrichter</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Für Turniere mit Schiedsrichtern: BTS Light übernimmt die
-          Schiedsrichterliste aus BTP; jedem Spiel lassen sich Schiedsrichter
-          (SR) und Aufschlagrichter (AR) zuweisen. Ausgeschaltet erscheint
-          nirgends ein SR/AR-Element.
-        </p>
-        <p className="flex items-start gap-1.5 text-xs text-amber-700">
-          <Info size={14} className="mt-0.5 shrink-0" />
-          Die Bedienung (Zuweisung, Reihenfolge, Sperrlisten) wird gerade
-          schrittweise ausgebaut und erscheint mit den nächsten Updates in der
-          Spielübersicht und auf der Turnierleitungs-Seite. Die Schalter hier
-          legen jetzt schon fest, ob und wie sie dann eingeblendet wird.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={offEnabled}
-            onChange={(e) => setOffEnabled(e.currentTarget.checked)}
+          <Field label="Port" value={port} onChange={setPort} type="number" />
+          <Field
+            label="BTP-Passwort (falls gesetzt)"
+            value={btpPassword}
+            onChange={setBtpPassword}
+            type="password"
           />
-          Mit Schiedsrichtern spielen
-        </label>
+          {/* Die häufigste Stolperfalle beim ersten Start (Feldtest 06.09.2026):
+              BTP nimmt erst Verbindungen an, wenn Tournament Planner Network
+              eingeschaltet ist. Der Fehlertext sagt es dann auch — aber hier
+              steht es, BEVOR jemand rätselt. */}
+          <p className="text-xs text-slate-500">
+            Voraussetzung in BTP: Menü <strong>Extras → Tournament Planner
+            Network…</strong> öffnen und das Häkchen <strong>„Enabled"</strong>{" "}
+            setzen. Steht dort ein Passwort, gehört dasselbe in das Feld
+            „BTP-Passwort". Ohne diese Einstellung meldet der Test „Verbindung
+            verweigert".
+          </p>
+          <button
+            onClick={runTest}
+            disabled={test.kind === "testing" || host.trim() === ""}
+            className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                       text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+          >
+            {test.kind === "testing" ? "Teste …" : "Verbindung testen"}
+          </button>
+          {test.kind === "ok" && (
+            <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+              <Check size={16} /> BTP gefunden – Turnier „{test.tournament}"
+            </p>
+          )}
+          {test.kind === "error" && (
+            <p className="flex items-start gap-1.5 text-sm text-rose-700">
+              <X size={16} className="mt-0.5 shrink-0" /> {test.message}
+            </p>
+          )}
+        </section>
 
-        {offEnabled && (
-          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={offRotationSr}
-                onChange={(e) => setOffRotationSr(e.currentTarget.checked)}
-              />
-              Schiedsrichter automatisch rotieren
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={offRotationAr}
-                onChange={(e) => setOffRotationAr(e.currentTarget.checked)}
-              />
-              Aufschlagrichter automatisch rotieren
-            </label>
+        {/* TP-Datei an badhub (Spec tp-datei-upload, L1): die offene Turnierdatenbank,
+            gebunden an die Turnier-GUID zum Zeitpunkt der Wahl. Gesendet wird im
+            Dashboard; im Slave-Modus gibt es den Abschnitt nicht (nur der Master lädt hoch). */}
+        {!slaveMode && (
+          <section id="section-tp-datei" className="flex flex-col gap-2 scroll-mt-14">
+            <SectionHeader icon={Database}>TP-Datei (Turnierdatenbank)</SectionHeader>
             <p className="text-xs text-slate-500">
-              Die Rotation bestückt neu belegte Felder mit dem nächsten freien
-              Schiedsrichter aus der Reihenfolge; pausierte, im Einsatz
-              befindliche und Schiedsrichter mit Vereins-/Personen-Konflikt
-              werden übersprungen.
+              Die offene Turnierdatei von BTP (<code>.tp</code>) lässt sich im Dashboard an
+              badhub senden — dort entsteht noch am Turniertag ein vorläufiger Stand mit
+              Auslosungen, Gruppen, KO-Bäumen und Spielliste.{" "}
+              <strong>Alles aus der Datei wird sichtbar</strong>, Auslosungen also erst
+              senden, wenn sie veröffentlicht werden dürfen.
             </p>
-          </div>
-        )}
-      </section>
-
-      {/* Meetingpoint (Spec meetingpoint-spielbereit) */}
-      <section id="section-meetingpoint" className="flex flex-col gap-2 scroll-mt-4">
-        <SectionHeader icon={MapPin}>Meetingpoint</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Zum Meetingpoint gerufene Partien checken sich an einem Tablet oder
-          Touch-Bildschirm einzeln ein. Adresse und QR-Code je Halle stehen
-          danach unter Tablets → QR-Codes.
-          Die Turnierleitung sieht, wer da ist, und bringt spielbereite Partien
-          aufs Feld. Der Zähltafelbediener checkt nicht ein.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={mpEnabled}
-            onChange={(e) => setMpEnabled(e.currentTarget.checked)}
-          />
-          Meetingpoint verwenden
-        </label>
-        {mpEnabled && (
-          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={mpRequireUmpire}
-                onChange={(e) => setMpRequireUmpire(e.currentTarget.checked)}
-              />
-              Schiedsrichter muss für „spielbereit“ eingecheckt sein
-            </label>
-            <p className="text-xs text-slate-500">
-              Gilt nur mit Schiedsrichtern und Rotation: Eine gerufene Partie
-              bekommt dann schon beim Aufruf vorläufig einen freien
-              Schiedsrichter. Fehlen Schiedsrichter, lässt sich eine Partie
-              einzeln auf „ohne Schiedsrichter“ setzen.
-            </p>
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={mpStrict}
-                onChange={(e) => setMpStrict(e.currentTarget.checked)}
-              />
-              Automatische Feldvergabe nur für spielbereite Partien
-            </label>
-            <p className="text-xs text-slate-500">
-              Dann bekommen nur eingecheckte Partien automatisch ein Feld —
-              Spiele, die niemand zum Meetingpoint ruft, bleiben liegen. Von
-              Hand lässt sich weiterhin jedes Spiel vergeben. Steht ein Feld
-              frei, ohne dass eine Partie bereit ist, warnt die
-              Turnierleitungs-Seite.
-            </p>
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              Partien automatisch zum Meetingpoint rufen
-              <select
-                value={mpMode}
-                onChange={(e) => setMpMode(e.currentTarget.value as AutoCallMode)}
-                className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void pickTpDatei()}
+                className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                           text-slate-700 transition-colors hover:bg-slate-200"
               >
-                <option value="aus">aus</option>
-                <option value="fest">feste Anzahl je Halle</option>
-                <option value="restzeit">nach Restzeit der laufenden Spiele</option>
-              </select>
-            </label>
-            {mpMode !== "aus" && (
-              <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
-                {mpMode === "fest" && (
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                Partien je Halle
-                <input
-                  type="number"
-                  min={0}
-                  value={mpFixed}
-                  onChange={(e) => setMpFixed(e.currentTarget.value)}
-                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-              </label>
-                )}
-                {mpMode === "restzeit" && (
-                  <>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                Felder frei in (Min.)
-                <input
-                  type="number"
-                  min={0}
-                  value={mpHorizon}
-                  onChange={(e) => setMpHorizon(e.currentTarget.value)}
-                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                Puffer (Partien)
-                <input
-                  type="number"
-                  min={0}
-                  value={mpBuffer}
-                  onChange={(e) => setMpBuffer(e.currentTarget.value)}
-                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-              </label>
-                  </>
-                )}
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                höchstens je Halle
-                <input
-                  type="number"
-                  min={0}
-                  value={mpCap}
-                  onChange={(e) => setMpCap(e.currentTarget.value)}
-                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-              </label>
-              </div>
-            )}
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={mpWarn}
-                onChange={(e) => setMpWarn(e.currentTarget.checked)}
-              />
-              Warnung, wenn eine Partie nicht vollständig erscheint
-            </label>
-            {mpWarn && (
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                nach Minuten
-                <input
-                  type="number"
-                  min={0}
-                  value={mpWarnMin}
-                  onChange={(e) => setMpWarnMin(e.currentTarget.value)}
-                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-              </label>
-            )}
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={mpAnnounce}
-                onChange={(e) => setMpAnnounce(e.currentTarget.checked)}
-              />
-              Fehlende automatisch zum Meetingpoint ansagen (einmal)
-            </label>
-            {mpAnnounce && (
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                nach Minuten
-                <input
-                  type="number"
-                  min={0}
-                  value={mpAnnounceMin}
-                  onChange={(e) => setMpAnnounceMin(e.currentTarget.value)}
-                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-              </label>
-            )}
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={mpFieldCheck}
-                onChange={(e) => setMpFieldCheck(e.currentTarget.checked)}
-              />
-              Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen
-            </label>
-            <div className="flex flex-col gap-1">
-              <span className="text-sm text-slate-600">
-                Zusatz in der Vorbereitungs-Ansage
-              </span>
-              <p className="text-xs text-slate-500">
-                Wird am Ende jedes Aufrufs in die Vorbereitung gesprochen (auch
-                beim zweiten und dritten Aufruf). Hier lässt sich der Ort genauer
-                nennen, z. B. „Bitte zum Meetingpoint neben der Tribüne gehen.“
-                Leer lassen = kein Zusatz.
-              </p>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="w-16 shrink-0">Deutsch</span>
-                <input
-                  type="text"
-                  maxLength={200}
-                  value={mpTextDe}
-                  onChange={(e) => setMpTextDe(e.currentTarget.value)}
-                  className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="w-16 shrink-0">Englisch</span>
-                <input
-                  type="text"
-                  maxLength={200}
-                  value={mpTextEn}
-                  onChange={(e) => setMpTextEn(e.currentTarget.value)}
-                  className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                />
-              </label>
-              {(mpTextDe !== MP_ANSAGE_DE || mpTextEn !== MP_ANSAGE_EN) && (
+                {tpPath ? "Datei neu wählen" : "TP-Datei wählen"}
+              </button>
+              {tpPath && (
                 <button
                   type="button"
                   onClick={() => {
-                    setMpTextDe(MP_ANSAGE_DE);
-                    setMpTextEn(MP_ANSAGE_EN);
+                    setTpPath("");
+                    setTpGuid("");
+                    setTpInfo(null);
+                    setTpError("");
+                    setTpHinweis("");
+                    setTpFrage(null);
+                    // Ohne Datei keine Automatik — sonst hielte sie beim nächsten
+                    // Schritt mit „Keine TP-Datei gewählt“ an (Spec AK 17a).
+                    setTpAuto(false);
                   }}
-                  className="self-start text-xs text-sky-700 hover:underline"
+                  className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm
+                             text-slate-500 transition-colors hover:bg-slate-100"
                 >
-                  Vorgabe wiederherstellen
+                  <Trash2 size={14} /> Entfernen
                 </button>
               )}
             </div>
-          </div>
-        )}
-      </section>
-
-      {/* Schiedsrichterzettel drucken (Spec schiedsrichterzettel-autodruck) */}
-      <section
-        id="section-zetteldruck"
-        className="flex flex-col gap-2 scroll-mt-4"
-      >
-        <SectionHeader icon={Printer}>Schiedsrichterzettel</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Zettel lassen sich jederzeit von Hand drucken — in der Spielübersicht
-          und im Tab „In Vorbereitung". Zusätzlich kann BTS Light den Zettel
-          selbsttätig ausdrucken, sobald ein Spiel auf ein Feld kommt.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={printAuto}
-            onChange={(e) => setPrintAuto(e.currentTarget.checked)}
-          />
-          Zettel bei der Feldvergabe automatisch drucken
-        </label>
-        {printAuto && !offEnabled && (
-          <p className="flex items-start gap-1.5 text-xs text-amber-700">
-            <Info size={14} className="mt-0.5 shrink-0" />
-            Gedruckt wird nur für Spiele, denen ein <strong>Schiedsrichter</strong>{" "}
-            zugeordnet ist. Solange „Mit Schiedsrichtern spielen" oben aus ist,
-            kennt BTS Light keinen — dann druckt die Automatik nie.
-          </p>
-        )}
-        <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-          <label className="flex flex-col gap-1 text-sm text-slate-600">
-            Drucker
-            <select
-              value={printerName}
-              onChange={(e) => setPrinterName(e.currentTarget.value)}
-              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5
-                         text-sm text-slate-700"
-            >
-              <option value="">Windows-Standarddrucker</option>
-              {/* Ein früher eingestellter Drucker, den Windows gerade nicht
-                  meldet (aus, abgezogen), bleibt wählbar — sonst fiele die
-                  Einstellung beim nächsten Speichern still auf „Standard"
-                  zurück. */}
-              {(printers.includes(printerName) || printerName === ""
-                ? printers
-                : [printerName, ...printers]
-              ).map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                setPrintProbe("läuft");
-                printerList()
-                  .then((liste) => {
-                    setPrinters(liste);
-                    setPrintProbe(
-                      liste.length > 0
-                        ? `${liste.length} Drucker gefunden.`
-                        : "Windows meldet keinen Drucker.",
-                    );
-                  })
-                  .catch(() => setPrintProbe("Druckerliste nicht lesbar."));
-              }}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm
-                         font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Drucker suchen
-            </button>
-            {printProbe && (
-              <span className="text-xs text-slate-500">{printProbe}</span>
+            {tpPath && (
+              <p className="break-all font-mono text-xs text-slate-600">{tpPath}</p>
             )}
-          </div>
-          <p className="text-xs text-slate-500">
-            Der Zettel wird <strong>A4 quer</strong> gedruckt — das stellt BTS
-            Light selbst ein. Gedruckt wird ohne Dialog auf dem Rechner, auf dem
-            BTS Light läuft; ein Drucker in einer anderen Halle muss dort als
-            Netzwerkdrucker eingerichtet sein.
-          </p>
-        </div>
-      </section>
-
-      {/* Automatische Feldvergabe */}
-      <section className="flex flex-col gap-2">
-        <SectionHeader icon={LayoutGrid}>
-          Automatische Feldvergabe
-        </SectionHeader>
-        <p className="text-xs text-slate-500">
-          Belegt freie Felder automatisch mit dem nächsten spielbereiten Spiel –
-          in der Reihenfolge der BTP-Ansetzung (Zeitplan von oben nach unten),
-          und überspringt Spiele, deren Spieler gerade spielen oder noch Pause
-          haben. Schreibt die Zuweisung nach BTP (wie das Ziehen in der
-          Spielübersicht). Gesperrte Felder bleiben frei.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={aaEnabled}
-            onChange={(e) => setAaEnabled(e.currentTarget.checked)}
-          />
-          Automatische Feldvergabe aktivieren
-        </label>
-
-        {aaEnabled && (
-          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
-            <Field
-              label="Wartezeit, bis ein freies Feld belegt wird (Minuten)"
-              value={aaWait}
-              onChange={setAaWait}
-              type="number"
-            />
-            <p className="text-xs text-slate-500">
-              Verhindert, dass ein Feld sofort in der kurzen Lücke zwischen zwei
-              Spielen belegt wird. 0 = sofort.{" "}
-              {initialConfig.locked_courts.length > 0 && (
-                <>Aktuell gesperrte Felder werden nicht automatisch belegt.</>
+            {tpFeldLeer && (
+              <p className="text-xs text-slate-500">
+                Unter „1 · Liveticker-Ziel“ ist noch keine Turnier-Kennung eingetragen —
+                beim Wählen übernimmt bts-light die Kennung aus der Datei.
+              </p>
+            )}
+            {tpPath && tpInfo?.art === "erkannt" && (
+              <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+                <Check size={16} /> {tpInfo.anzeige}
+                {/* Nur, wenn die Kennung oben noch die gebundene ist — sonst
+                    stünde „passt“ neben „Datei neu wählen“. Nach einer
+                    Übernahme sagt es schon der Hinweis darunter. */}
+                {tpInfo.guid !== null &&
+                  tpInfo.guid === tpGuidKanon &&
+                  tpGuidPasst &&
+                  !tpHinweis &&
+                  " · Turnier-Kennung passt"}
+              </p>
+            )}
+            {tpPath &&
+              tpInfo?.art === "erkannt" &&
+              tpInfo.guid !== null &&
+              tpGuidKanon !== "" &&
+              tpInfo.guid !== tpGuidKanon && (
+                <p className="text-sm text-amber-700">
+                  Die Datei gehört zu Turnier {shortTournamentGuid(tpInfo.guid)}, gebunden
+                  ist {shortTournamentGuid(tpGuidKanon)} — Kennung unter „1 ·
+                  Liveticker-Ziel“ prüfen oder andere Datei wählen.
+                </p>
               )}
-            </p>
-            <Field
-              label="Pause nach Spielende je Spieler (Minuten)"
-              value={aaPause}
-              onChange={setAaPause}
-              type="number"
-            />
-            <p className="text-xs text-slate-500">
-              Ein Spieler wird erst nach dieser Pause wieder automatisch
-              aufgerufen. <strong>0 = Wert aus BTP übernehmen</strong> (BTP-
-              Einstellung „Pause", Setting 1303). Unabhängig davon wird niemand
-              aufgerufen, der gerade auf einem anderen Feld spielt.
-            </p>
-            <Field
-              label="Aktive Halle (Tages-Halle, leer = alle)"
-              value={aaActiveHall}
-              onChange={setAaActiveHall}
-              placeholder="z. B. Halle A"
-            />
-            <p className="text-xs text-slate-500">
-              Nur für <strong>Mehr-Hallen-Turniere</strong>, bei denen an einem
-              Tag nur in <strong>einer</strong> Halle gespielt wird (z. B. eine
-              Datei für zwei Tage). Trägst du hier den Hallennamen ein (wie in
-              BTP), verteilt die Auto-Vergabe nur auf diese Halle —{" "}
-              <strong>ohne</strong> dass du Spiele erst „in Vorbereitung" rufen
-              musst. Leer lassen bei Ein-Hallen-Turnieren.
-            </p>
-            <p className="flex items-start gap-1.5 text-xs text-amber-700">
-              <Info size={14} className="mt-0.5 shrink-0" />
-              Mehr-Hallen OHNE gesetzte aktive Halle: es werden nur Spiele
-              verteilt, die du für die jeweilige Halle „in Vorbereitung" gerufen
-              hast.
-            </p>
-          </div>
-        )}
-      </section>
-
-      {/* Disziplinen je Halle (Mehr-Hallen-Vergabe-Constraint). Nur sichtbar bei
-          ≥2 Hallen oder wenn bereits Regeln bestehen. */}
-      {(halls.length >= 2 || disciplineHallRules.length > 0) && (
-        <section className="flex flex-col gap-2">
-          <SectionHeader icon={LayoutGrid}>Disziplinen je Halle</SectionHeader>
-          <p className="text-xs text-slate-500">
-            Lege fest, welche Disziplinen/Klassen in welcher Halle gespielt
-            werden. Spiele dürfen dann nur in ihre Halle vergeben werden —
-            manuell wie automatisch. „Alle HE" = Kategorie-Standard; eine
-            einzelne Klasse (z. B. „HE A") überschreibt ihn. Ohne Eintrag: keine
-            Einschränkung.
-          </p>
-          <div className="mt-1 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
-            {disciplineHallRules.length === 0 && (
-              <p className="text-xs text-slate-400">Noch keine Regel.</p>
+            {tpHinweis && (
+              <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+                <Check size={16} /> {tpHinweis}
+              </p>
             )}
-            {disciplineHallRules.map((rule, i) => {
-              const scopeVal = rule.draw_name
-                ? `draw:${rule.discipline}:${rule.draw_name}`
-                : `cat:${rule.discipline}`;
-              const scopeKnown = scopeOptions.some((o) => o.value === scopeVal);
-              return (
-                <div
-                  key={`${scopeVal}-${i}`}
-                  className="flex flex-wrap items-center gap-2"
-                >
-                  <select
-                    value={scopeVal}
-                    onChange={(e) => {
-                      const v = e.currentTarget.value;
-                      setDisciplineHallRules((rs) =>
-                        rs.map((r, j) => {
-                          if (j !== i) return r;
-                          if (v.startsWith("cat:")) {
-                            return {
-                              ...r,
-                              discipline: v.slice(4),
-                              draw_name: "",
-                            };
-                          }
-                          const rest = v.slice(5); // nach "draw:"
-                          const sep = rest.indexOf(":");
-                          return {
-                            ...r,
-                            discipline: rest.slice(0, sep),
-                            draw_name: rest.slice(sep + 1),
-                          };
-                        }),
-                      );
-                    }}
-                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
-                  >
-                    {!scopeKnown && (
-                      <option value={scopeVal}>
-                        {rule.draw_name || disciplineLabel(rule.discipline)}
-                      </option>
-                    )}
-                    {scopeOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-slate-400">→</span>
-                  <select
-                    value={rule.hall}
-                    onChange={(e) => {
-                      const v = e.currentTarget.value;
-                      setDisciplineHallRules((rs) =>
-                        rs.map((r, j) => (j === i ? { ...r, hall: v } : r)),
-                      );
-                    }}
-                    className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
-                  >
-                    <option value="">Halle wählen …</option>
-                    {hallOptionsFor(rule.hall).map((h) => (
-                      <option key={h} value={h}>
-                        {h}
-                      </option>
-                    ))}
-                  </select>
+            {tpFrage && (
+              <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <p>
+                  {tpFrage.eingetragen !== ""
+                    ? `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}, oben ist ${shortTournamentGuid(tpFrage.eingetragen)} eingetragen.`
+                    : `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}; die Eingabe unter „1 · Liveticker-Ziel“ ist keine Turnier-Kennung.`}{" "}
+                  Kennung aus der Datei übernehmen? Damit zeigen auch Liveticker, Check-In
+                  und Aushang auf dieses Turnier.
+                </p>
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      setDisciplineHallRules((rs) =>
-                        rs.filter((_, j) => j !== i),
-                      )
-                    }
-                    title="Regel entfernen"
-                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                    onClick={uebernehmeKennungAusDatei}
+                    className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white
+                               transition-colors hover:bg-amber-700"
                   >
-                    ✕
+                    Kennung übernehmen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTpFrage(null)}
+                    className="rounded-lg px-3 py-1.5 text-sm text-slate-600 transition-colors
+                               hover:bg-slate-100"
+                  >
+                    Abbrechen — Datei nicht speichern
                   </button>
                 </div>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() =>
-                setDisciplineHallRules((rs) => [
-                  ...rs,
-                  {
-                    discipline: categoriesPresent[0] ?? "",
-                    draw_name: "",
-                    hall: "",
-                  },
-                ])
-              }
-              className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
-            >
-              + Regel hinzufügen
-            </button>
+              </div>
+            )}
+            {tpPath && tpInfo && tpInfo.art !== "erkannt" && (
+              <p className="text-sm text-amber-700">{tpInfoText(tpInfo)}</p>
+            )}
+            {tpError && (
+              <p className="flex items-start gap-1.5 text-sm text-rose-700">
+                <X size={16} className="mt-0.5 shrink-0" /> {tpError}
+              </p>
+            )}
+            {tpPath && !tpGuidPasst && (
+              <p className="text-sm text-amber-700">
+                {tpGuid === ""
+                  ? "Datei neu wählen — beim Wählen war noch keine Turnier-Kennung eingetragen."
+                  : "Datei neu wählen — die Turnier-GUID hat sich seit der Dateiwahl geändert."}
+              </p>
+            )}
+            {!["127.0.0.1", "localhost"].includes(host.trim().toLowerCase()) && (
+              <p className="text-xs text-slate-500">
+                Die Datei liegt auf dem BTP-Rechner — Upload nur von dort empfohlen.
+              </p>
+            )}
+            {/* Stufe 2 (Spec tp-takt-upload, ADR 0061): nur mit gewählter Datei. */}
+            {tpPath && (
+              <div className="mt-1 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={tpAuto}
+                    onChange={(e) => setTpAuto(e.currentTarget.checked)}
+                  />
+                  Automatisch senden, solange der Liveticker läuft
+                </label>
+                {tpAuto && (
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    alle
+                    <input
+                      type="number"
+                      min={5}
+                      max={1440}
+                      step={1}
+                      value={tpMinutes}
+                      onChange={(e) => setTpMinutes(e.currentTarget.value)}
+                      className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                    />
+                    Minuten
+                    {tpMinutes.trim() !== "" && Number(tpMinutes) < 5 && (
+                      <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
+                    )}
+                  </label>
+                )}
+                {/* Ereignis-Auslöser (ADR 0062): abschalt- und drosselbar, falls
+                    Netz oder badhub zu viel abbekommen — dann bleibt der Takt. */}
+                {tpAuto && (
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={tpEreignis}
+                      onChange={(e) => setTpEreignis(e.currentTarget.checked)}
+                    />
+                    Bei neuen Spielen und Paarungen sofort prüfen
+                  </label>
+                )}
+                {tpAuto && tpEreignis && (
+                  <label className="flex items-center gap-2 pl-6 text-sm text-slate-600">
+                    höchstens alle
+                    <input
+                      type="number"
+                      min={5}
+                      max={1440}
+                      step={1}
+                      value={tpEreignisMinuten}
+                      onChange={(e) => setTpEreignisMinuten(e.currentTarget.value)}
+                      className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+                    />
+                    Minuten
+                    {tpEreignisMinuten.trim() !== "" && Number(tpEreignisMinuten) < 5 && (
+                      <span className="text-xs text-amber-700">mindestens 5 — wird angehoben</span>
+                    )}
+                  </label>
+                )}
+                <p className="text-xs text-slate-500">
+                  Damit sendet bts-light jede Änderung der Datei von selbst — auch neue
+                  Auslosungen, sobald sie in BTP stehen. Ohne laufenden Liveticker passiert
+                  nichts; gesendet wird nur, wenn sich die Datei geändert hat.
+                </p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Schritt 3: Badhub (nur manuell) */}
+        {isManual && (
+          <section className="flex flex-col gap-3">
+            <SectionHeader icon={KeyRound}>3 · Badhub-Zugang</SectionHeader>
+            <div className="flex gap-2.5 rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-sm text-sky-900">
+              <Info
+                size={18}
+                strokeWidth={2}
+                className="mt-0.5 shrink-0 text-sky-600"
+              />
+              <p>
+                Für ein <strong>eigenes Turnier</strong> brauchst du einen eigenen
+                Zugang. Wende dich vorab an{" "}
+                <a
+                  href="mailto:info@badhub.de"
+                  className="font-medium underline underline-offset-2"
+                >
+                  info@badhub.de
+                </a>{" "}
+                — dann bekommst du eine individuelle Liveticker-Adresse und die
+                passenden Zugangsdaten (URL&nbsp;+&nbsp;Passwort), die du hier
+                einträgst.
+              </p>
+            </div>
+            <Field label="Badhub-URL" value={badhubUrl} onChange={setBadhubUrl} />
+            <Field
+              label="Badhub-Passwort"
+              value={badhubPassword}
+              onChange={setBadhubPassword}
+              type="password"
+            />
+            <Field
+              label="Live-Seite (URL, optional)"
+              value={badhubLiveUrl}
+              onChange={setBadhubLiveUrl}
+              placeholder="https://badhub.de/live?t=…"
+            />
+          </section>
+        )}
+
+        {/* Tablet-Verbindung */}
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={Wifi}>Tablet-Verbindung</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Wie erreichen die Schiedsrichter-Tablets diesen PC? Beide Wege lassen
+            sich zusammen aktivieren – etwa für ein Zwei-Hallen-Turnier (eine
+            Halle per LAN, die andere über die Cloud). Lässt sich später in den
+            Einstellungen umstellen.
+          </p>
+          <ToggleCard
+            icon={Wifi}
+            title="LAN – lokales Netz"
+            description="Tablets verbinden sich direkt im Hallen-WLAN. Schnell und offline – braucht aber einen freigegebenen Port (Windows-Firewall)."
+            active={lanEnabled}
+            onToggle={() => setLanEnabled((v) => !v)}
+          />
+          <ToggleCard
+            icon={Cloud}
+            title="Über badhub.de – Cloud"
+            description="Tablets und PC verbinden sich nur nach außen. Funktioniert auch hinter gesperrten Firmen-Firewalls – Internet vorausgesetzt."
+            active={cloudEnabled}
+            onToggle={() => setCloudEnabled((v) => !v)}
+          />
+          {!lanEnabled && !cloudEnabled && (
+            <p className="flex items-start gap-1.5 text-xs text-rose-700">
+              <X size={14} className="mt-0.5 shrink-0" />
+              Mindestens einen Verbindungsweg aktivieren.
+            </p>
+          )}
+          <div className="mt-1">
+            <Field
+              label="Tablet-Einstellungs-PIN"
+              value={tabletPin}
+              onChange={(v) => setTabletPin(v.replace(/\D/g, "").slice(0, 8))}
+              placeholder="0000"
+              type="tel"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Schützt das Zahnrad-Menü am Zähltablett (Feld wechseln ohne QR). Nur
+              Ziffern. Reiner Bedien-Schutz – die echte Kiosk-Sperre macht der
+              Kiosk-Browser (eigener Exit-PIN).
+            </p>
           </div>
         </section>
-      )}
+      </Gruppe>
 
-      {/* Vereins-Anzeige (turnierweit, TL-Web + Tablet) */}
-      <section
-        id="section-vereine"
-        className="flex flex-col gap-2 scroll-mt-4"
-      >
-        <SectionHeader icon={Image}>Vereine anzeigen</SectionHeader>
-        <p className="text-xs text-slate-500">
-          Zeigt in der <strong>Turnierleitungssicht</strong> und auf dem{" "}
-          <strong>Tablet-Spielzettel</strong> optional den Verein zu jedem
-          Spieler. Gilt <strong>turnierweit</strong> für alle Geräte, nicht je
-          Gerät. Standardmäßig aus. Die Tablets übernehmen die Änderung beim
-          nächsten Neuladen.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={showClubNames}
-            onChange={(e) => setShowClubNames(e.currentTarget.checked)}
-          />
-          Vereinsnamen anzeigen
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={showClubLogos}
-            onChange={(e) => setShowClubLogos(e.currentTarget.checked)}
-          />
-          Vereinslogos anzeigen
-        </label>
-        <p className="text-xs text-slate-500">
-          Die Logos kommen aus dem badhub-Bestand (wie auf der Siegerliste). Zu
-          einem Verein ohne hinterlegtes Logo bleibt die Zeile ohne Wappen.
-        </p>
-      </section>
+      <Gruppe id="feldvergabe">
+        {/* Automatische Feldvergabe */}
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={LayoutGrid}>
+            Automatische Feldvergabe
+          </SectionHeader>
+          <p className="text-xs text-slate-500">
+            Belegt freie Felder automatisch mit dem nächsten spielbereiten Spiel –
+            in der Reihenfolge der BTP-Ansetzung (Zeitplan von oben nach unten),
+            und überspringt Spiele, deren Spieler gerade spielen oder noch Pause
+            haben. Schreibt die Zuweisung nach BTP (wie das Ziehen in der
+            Spielübersicht). Gesperrte Felder bleiben frei.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={aaEnabled}
+              onChange={(e) => setAaEnabled(e.currentTarget.checked)}
+            />
+            Automatische Feldvergabe aktivieren
+          </label>
 
-      {/* Court-Monitor */}
-      <section
-        id="section-court-monitor"
-        className="flex flex-col gap-2 scroll-mt-4"
-      >
-        <SectionHeader icon={Monitor}>Court-Monitor</SectionHeader>
-        <p className="text-xs text-slate-500">
-          TV-Anzeige am Spielfeld (Raspberry Pi): Werbung im Leerlauf, die
-          Match-Ansicht sobald ein Spiel aufs Feld kommt. Die Monitor-Adressen
-          stehen auf der Tablet-Spielzettel-Seite.
-        </p>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={cmEnabled}
-            onChange={(e) => setCmEnabled(e.currentTarget.checked)}
-          />
-          Court-Monitor aktivieren
-        </label>
+          {aaEnabled && (
+            <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+              <Field
+                label="Wartezeit, bis ein freies Feld belegt wird (Minuten)"
+                value={aaWait}
+                onChange={setAaWait}
+                type="number"
+              />
+              <p className="text-xs text-slate-500">
+                Verhindert, dass ein Feld sofort in der kurzen Lücke zwischen zwei
+                Spielen belegt wird. 0 = sofort.{" "}
+                {initialConfig.locked_courts.length > 0 && (
+                  <>Aktuell gesperrte Felder werden nicht automatisch belegt.</>
+                )}
+              </p>
+              <Field
+                label="Pause nach Spielende je Spieler (Minuten)"
+                value={aaPause}
+                onChange={setAaPause}
+                type="number"
+              />
+              <p className="text-xs text-slate-500">
+                Ein Spieler wird erst nach dieser Pause wieder automatisch
+                aufgerufen. <strong>0 = Wert aus BTP übernehmen</strong> (BTP-
+                Einstellung „Pause", Setting 1303). Unabhängig davon wird niemand
+                aufgerufen, der gerade auf einem anderen Feld spielt.
+              </p>
+              <Field
+                label="Aktive Halle (Tages-Halle, leer = alle)"
+                value={aaActiveHall}
+                onChange={setAaActiveHall}
+                placeholder="z. B. Halle A"
+              />
+              <p className="text-xs text-slate-500">
+                Nur für <strong>Mehr-Hallen-Turniere</strong>, bei denen an einem
+                Tag nur in <strong>einer</strong> Halle gespielt wird (z. B. eine
+                Datei für zwei Tage). Trägst du hier den Hallennamen ein (wie in
+                BTP), verteilt die Auto-Vergabe nur auf diese Halle —{" "}
+                <strong>ohne</strong> dass du Spiele erst „in Vorbereitung" rufen
+                musst. Leer lassen bei Ein-Hallen-Turnieren.
+              </p>
+              <p className="flex items-start gap-1.5 text-xs text-amber-700">
+                <Info size={14} className="mt-0.5 shrink-0" />
+                Mehr-Hallen OHNE gesetzte aktive Halle: es werden nur Spiele
+                verteilt, die du für die jeweilige Halle „in Vorbereitung" gerufen
+                hast.
+              </p>
+            </div>
+          )}
+        </section>
 
-        {cmEnabled && (
-          <div className="mt-1 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4">
-            {/* Werbebilder */}
-            <div className="flex flex-col gap-2">
-              <span className="text-sm font-medium text-slate-600">
-                Werbebilder
-              </span>
+        {/* Disziplinen je Halle (Mehr-Hallen-Vergabe-Constraint). Nur sichtbar bei
+            ≥2 Hallen oder wenn bereits Regeln bestehen. */}
+        {(halls.length >= 2 || disciplineHallRules.length > 0) && (
+          <section className="flex flex-col gap-2">
+            <SectionHeader icon={LayoutGrid}>Disziplinen je Halle</SectionHeader>
+            <p className="text-xs text-slate-500">
+              Lege fest, welche Disziplinen/Klassen in welcher Halle gespielt
+              werden. Spiele dürfen dann nur in ihre Halle vergeben werden —
+              manuell wie automatisch. „Alle HE" = Kategorie-Standard; eine
+              einzelne Klasse (z. B. „HE A") überschreibt ihn. Ohne Eintrag: keine
+              Einschränkung.
+            </p>
+            <div className="mt-1 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+              {disciplineHallRules.length === 0 && (
+                <p className="text-xs text-slate-400">Noch keine Regel.</p>
+              )}
+              {disciplineHallRules.map((rule, i) => {
+                const scopeVal = rule.draw_name
+                  ? `draw:${rule.discipline}:${rule.draw_name}`
+                  : `cat:${rule.discipline}`;
+                const scopeKnown = scopeOptions.some((o) => o.value === scopeVal);
+                return (
+                  <div
+                    key={`${scopeVal}-${i}`}
+                    className="flex flex-wrap items-center gap-2"
+                  >
+                    <select
+                      value={scopeVal}
+                      onChange={(e) => {
+                        const v = e.currentTarget.value;
+                        setDisciplineHallRules((rs) =>
+                          rs.map((r, j) => {
+                            if (j !== i) return r;
+                            if (v.startsWith("cat:")) {
+                              return {
+                                ...r,
+                                discipline: v.slice(4),
+                                draw_name: "",
+                              };
+                            }
+                            const rest = v.slice(5); // nach "draw:"
+                            const sep = rest.indexOf(":");
+                            return {
+                              ...r,
+                              discipline: rest.slice(0, sep),
+                              draw_name: rest.slice(sep + 1),
+                            };
+                          }),
+                        );
+                      }}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                    >
+                      {!scopeKnown && (
+                        <option value={scopeVal}>
+                          {rule.draw_name || disciplineLabel(rule.discipline)}
+                        </option>
+                      )}
+                      {scopeOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-slate-400">→</span>
+                    <select
+                      value={rule.hall}
+                      onChange={(e) => {
+                        const v = e.currentTarget.value;
+                        setDisciplineHallRules((rs) =>
+                          rs.map((r, j) => (j === i ? { ...r, hall: v } : r)),
+                        );
+                      }}
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                    >
+                      <option value="">Halle wählen …</option>
+                      {hallOptionsFor(rule.hall).map((h) => (
+                        <option key={h} value={h}>
+                          {h}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDisciplineHallRules((rs) =>
+                          rs.filter((_, j) => j !== i),
+                        )
+                      }
+                      title="Regel entfernen"
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() =>
+                  setDisciplineHallRules((rs) => [
+                    ...rs,
+                    {
+                      discipline: categoriesPresent[0] ?? "",
+                      draw_name: "",
+                      hall: "",
+                    },
+                  ])
+                }
+                className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+              >
+                + Regel hinzufügen
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Startzeit-Prognose (Spec spielzeiten-prognose) */}
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={Timer}>Startzeit-Prognose</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Die Turnierleitungs-Oberfläche zeigt an jedem wartenden Spiel, wann
+            es voraussichtlich aufgerufen wird — berechnet aus den gemessenen
+            Spielzeiten dieses Turniers (je Klasse und Disziplin), den freien
+            Feldern und der Spielreihenfolge.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={predEnabled}
+              onChange={(e) => setPredEnabled(e.currentTarget.checked)}
+            />
+            Prognose anzeigen
+          </label>
+          {predEnabled && (
+            <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+              <Field
+                label="Angenommene Spieldauer ohne Messwerte (Minuten)"
+                value={predDefault}
+                onChange={setPredDefault}
+                type="number"
+              />
+              <p className="text-xs text-slate-500">
+                Gilt nur, solange eine Klasse noch keine drei gemessenen Spiele
+                hat — solche Prognosen zeigt die Spielliste als „~hh:mm".
+                Danach rechnet bts-light automatisch mit den echten Zeiten.
+              </p>
+            </div>
+          )}
+        </section>
+      </Gruppe>
+
+      <Gruppe id="aufruf">
+        {/* Sprachansagen */}
+        <section id="section-ansagen" className="flex flex-col gap-2 scroll-mt-14">
+          <SectionHeader icon={Volume2}>Ansagen</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Das ganze Ansage-Modul: sagt jedes Spiel an, das in BTP auf ein Feld
+            gezogen wird (Gong, Feld, Disziplin, Paarung). Hier wird das Modul nur
+            <strong> an- oder ausgeschaltet</strong> — ist es aus, gibt es keine
+            Ansagen (auch keine Freitext-Ansagen).
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={annEnabled}
+              onChange={(e) => setAnnEnabled(e.currentTarget.checked)}
+            />
+            Ansagen aktivieren
+          </label>
+          {annEnabled && (
+            <p className="text-xs text-slate-500">
+              Sprache, Stimmen, Tempo, Gong, Aussprache-Korrekturen, Azure und die
+              Halle stellst du auf der Seite <strong>„Ansagen"</strong> ein
+              (Menüpunkt links).
+            </p>
+          )}
+        </section>
+
+        {/* Aufruf-Timer (1./2./3. Aufruf) */}
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={Timer}>Aufruf-Timer</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Der Aufruf aufs Feld ist der <strong>1. Aufruf</strong>. bts-light
+            zeigt dann je belegtem Feld eine hochzählende Uhr und meldet ab den
+            eingestellten Minuten den <strong>2.</strong> und{" "}
+            <strong>3./letzten</strong> Aufruf als fällig.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={ctEnabled}
+              onChange={(e) => setCtEnabled(e.currentTarget.checked)}
+            />
+            Aufruf-Timer aktivieren
+          </label>
+
+          {ctEnabled && (
+            <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+              <Field
+                label="2. Aufruf nach (Minuten)"
+                value={ctSecond}
+                onChange={setCtSecond}
+                type="number"
+              />
+              <Field
+                label="3./letzter Aufruf nach (Minuten)"
+                value={ctThird}
+                onChange={setCtThird}
+                type="number"
+              />
+              <p className="text-xs text-slate-500">
+                Minuten ab dem 1. Aufruf. Beispiel: 2 und 4 → der 2. Aufruf wird
+                nach 2 Minuten fällig, der letzte nach 4.
+              </p>
+              {Number(ctThird) <= Number(ctSecond) && (
+                <p className="flex items-start gap-1.5 text-xs text-amber-700">
+                  <X size={14} className="mt-0.5 shrink-0" />
+                  Der 3. Aufruf sollte nach dem 2. liegen — beim Speichern wird er
+                  sonst automatisch angehoben.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Bewusst außerhalb des Schalters oben: Die Einfärbung ist eine
+              Anzeige, kein Aufruf-Automatismus — sie hilft auch Turnieren, die
+              ohne Aufruf-Timer arbeiten. */}
+          <div className="mt-2 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
+            <Field
+              label="Feld färbt sich rot, wenn nach (Minuten) noch kein Punkt gefallen ist"
+              value={ctNotStarted}
+              onChange={setCtNotStarted}
+              type="number"
+            />
+            <p className="text-xs text-slate-500">
+              Gilt für die <strong>Turnierleitungs-Oberfläche</strong>: Dort ist
+              jedes Feld nach seinem Zustand eingefärbt — aufgerufen, überfällig,
+              im Spiel, beendet. „Überfällig" heißt: aufgerufen, aber nach dieser
+              Zeit ist noch kein einziger Punkt gefallen.
+            </p>
+          </div>
+        </section>
+
+        {/* Meetingpoint (Spec meetingpoint-spielbereit) */}
+        <section id="section-meetingpoint" className="flex flex-col gap-2 scroll-mt-14">
+          <SectionHeader icon={MapPin}>Meetingpoint</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Zum Meetingpoint gerufene Partien checken sich an einem Tablet oder
+            Touch-Bildschirm einzeln ein. Adresse und QR-Code je Halle stehen
+            danach unter Tablets → QR-Codes.
+            Die Turnierleitung sieht, wer da ist, und bringt spielbereite Partien
+            aufs Feld. Der Zähltafelbediener checkt nicht ein.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={mpEnabled}
+              onChange={(e) => setMpEnabled(e.currentTarget.checked)}
+            />
+            Meetingpoint verwenden
+          </label>
+          {mpEnabled && (
+            <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
               <label className="flex items-center gap-2 text-sm text-slate-600">
                 <input
                   type="checkbox"
-                  checked={cmAds}
-                  onChange={(e) => setCmAds(e.currentTarget.checked)}
+                  checked={mpRequireUmpire}
+                  onChange={(e) => setMpRequireUmpire(e.currentTarget.checked)}
                 />
-                Werbung im Leerlauf anzeigen
+                Schiedsrichter muss für „spielbereit“ eingecheckt sein
               </label>
               <p className="text-xs text-slate-500">
-                {cmAds
-                  ? "Werden im Leerlauf nacheinander gezeigt – ein gemeinsamer Satz für alle Felder."
-                  : "Aus: Ein freies Feld zeigt eine neutrale Leerlauf-Seite statt der Werbung."}
+                Gilt nur mit Schiedsrichtern und Rotation: Eine gerufene Partie
+                bekommt dann schon beim Aufruf vorläufig einen freien
+                Schiedsrichter. Fehlen Schiedsrichter, lässt sich eine Partie
+                einzeln auf „ohne Schiedsrichter“ setzen.
               </p>
-              {ads.length > 0 && (
-                <ul className="flex flex-col gap-1">
-                  {ads.map((ad, i) => (
-                    <li
-                      key={ad.file}
-                      className="flex flex-col gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
-                    >
-                     <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={ad.label}
-                        placeholder={`Werbebild ${i + 1}`}
-                        maxLength={80}
-                        onChange={(e) => {
-                          // Optimistisch lokal anwenden, damit der Operator
-                          // beim Tippen direkt sieht; auf Blur persistieren.
-                          const v = e.currentTarget.value;
-                          setAds((prev) =>
-                            prev.map((a) =>
-                              a.file === ad.file ? { ...a, label: v } : a,
-                            ),
-                          );
-                        }}
-                        onBlur={(e) => {
-                          void setCourtAdLabel(
-                            ad.file,
-                            e.currentTarget.value.trim(),
-                          );
-                        }}
-                        className="flex-1 min-w-0 rounded border border-transparent bg-transparent
-                                   px-1.5 py-0.5 text-sm text-slate-700 placeholder:text-slate-400
-                                   focus:border-slate-300 focus:bg-white focus:outline-none"
-                      />
-                      <label
-                        className="flex flex-shrink-0 items-center gap-1 text-xs text-slate-500"
-                        title="Auch klein in der oberen Leiste der Anzeigeseiten zeigen (neben dem Turnierlogo)"
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={mpStrict}
+                  onChange={(e) => setMpStrict(e.currentTarget.checked)}
+                />
+                Automatische Feldvergabe nur für spielbereite Partien
+              </label>
+              <p className="text-xs text-slate-500">
+                Dann bekommen nur eingecheckte Partien automatisch ein Feld —
+                Spiele, die niemand zum Meetingpoint ruft, bleiben liegen. Von
+                Hand lässt sich weiterhin jedes Spiel vergeben. Steht ein Feld
+                frei, ohne dass eine Partie bereit ist, warnt die
+                Turnierleitungs-Seite.
+              </p>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                Partien automatisch zum Meetingpoint rufen
+                <select
+                  value={mpMode}
+                  onChange={(e) => setMpMode(e.currentTarget.value as AutoCallMode)}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                >
+                  <option value="aus">aus</option>
+                  <option value="fest">feste Anzahl je Halle</option>
+                  <option value="restzeit">nach Restzeit der laufenden Spiele</option>
+                </select>
+              </label>
+              {mpMode !== "aus" && (
+                <div className="flex flex-wrap gap-x-5 gap-y-2 pl-1">
+                  {mpMode === "fest" && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  Partien je Halle
+                  <input
+                    type="number"
+                    min={0}
+                    value={mpFixed}
+                    onChange={(e) => setMpFixed(e.currentTarget.value)}
+                    className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                </label>
+                  )}
+                  {mpMode === "restzeit" && (
+                    <>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  Felder frei in (Min.)
+                  <input
+                    type="number"
+                    min={0}
+                    value={mpHorizon}
+                    onChange={(e) => setMpHorizon(e.currentTarget.value)}
+                    className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  Puffer (Partien)
+                  <input
+                    type="number"
+                    min={0}
+                    value={mpBuffer}
+                    onChange={(e) => setMpBuffer(e.currentTarget.value)}
+                    className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                </label>
+                    </>
+                  )}
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  höchstens je Halle
+                  <input
+                    type="number"
+                    min={0}
+                    value={mpCap}
+                    onChange={(e) => setMpCap(e.currentTarget.value)}
+                    className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                </label>
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={mpWarn}
+                  onChange={(e) => setMpWarn(e.currentTarget.checked)}
+                />
+                Warnung, wenn eine Partie nicht vollständig erscheint
+              </label>
+              {mpWarn && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  nach Minuten
+                  <input
+                    type="number"
+                    min={0}
+                    value={mpWarnMin}
+                    onChange={(e) => setMpWarnMin(e.currentTarget.value)}
+                    className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={mpAnnounce}
+                  onChange={(e) => setMpAnnounce(e.currentTarget.checked)}
+                />
+                Fehlende automatisch zum Meetingpoint ansagen (einmal)
+              </label>
+              {mpAnnounce && (
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  nach Minuten
+                  <input
+                    type="number"
+                    min={0}
+                    value={mpAnnounceMin}
+                    onChange={(e) => setMpAnnounceMin(e.currentTarget.value)}
+                    className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={mpFieldCheck}
+                  onChange={(e) => setMpFieldCheck(e.currentTarget.checked)}
+                />
+                Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen
+              </label>
+              <div className="flex flex-col gap-1">
+                <span className="text-sm text-slate-600">
+                  Zusatz in der Vorbereitungs-Ansage
+                </span>
+                <p className="text-xs text-slate-500">
+                  Wird am Ende jedes Aufrufs in die Vorbereitung gesprochen (auch
+                  beim zweiten und dritten Aufruf). Hier lässt sich der Ort genauer
+                  nennen, z. B. „Bitte zum Meetingpoint neben der Tribüne gehen.“
+                  Leer lassen = kein Zusatz.
+                </p>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="w-16 shrink-0">Deutsch</span>
+                  <input
+                    type="text"
+                    maxLength={200}
+                    value={mpTextDe}
+                    onChange={(e) => setMpTextDe(e.currentTarget.value)}
+                    className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="w-16 shrink-0">Englisch</span>
+                  <input
+                    type="text"
+                    maxLength={200}
+                    value={mpTextEn}
+                    onChange={(e) => setMpTextEn(e.currentTarget.value)}
+                    className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  />
+                </label>
+                {(mpTextDe !== MP_ANSAGE_DE || mpTextEn !== MP_ANSAGE_EN) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMpTextDe(MP_ANSAGE_DE);
+                      setMpTextEn(MP_ANSAGE_EN);
+                    }}
+                    className="self-start text-xs text-sky-700 hover:underline"
+                  >
+                    Vorgabe wiederherstellen
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      </Gruppe>
+
+      <Gruppe id="personal">
+        {/* Schiedsrichter (SR/AR) */}
+        <section id="section-schiedsrichter" className="flex flex-col gap-2 scroll-mt-14">
+          <SectionHeader icon={Gavel}>Schiedsrichter</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Für Turniere mit Schiedsrichtern: BTS Light übernimmt die
+            Schiedsrichterliste aus BTP; jedem Spiel lassen sich Schiedsrichter
+            (SR) und Aufschlagrichter (AR) zuweisen. Ausgeschaltet erscheint
+            nirgends ein SR/AR-Element.
+          </p>
+          <p className="flex items-start gap-1.5 text-xs text-amber-700">
+            <Info size={14} className="mt-0.5 shrink-0" />
+            Die Bedienung (Zuweisung, Reihenfolge, Sperrlisten) wird gerade
+            schrittweise ausgebaut und erscheint mit den nächsten Updates in der
+            Spielübersicht und auf der Turnierleitungs-Seite. Die Schalter hier
+            legen jetzt schon fest, ob und wie sie dann eingeblendet wird.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={offEnabled}
+              onChange={(e) => setOffEnabled(e.currentTarget.checked)}
+            />
+            Mit Schiedsrichtern spielen
+          </label>
+
+          {offEnabled && (
+            <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={offRotationSr}
+                  onChange={(e) => setOffRotationSr(e.currentTarget.checked)}
+                />
+                Schiedsrichter automatisch rotieren
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={offRotationAr}
+                  onChange={(e) => setOffRotationAr(e.currentTarget.checked)}
+                />
+                Aufschlagrichter automatisch rotieren
+              </label>
+              <p className="text-xs text-slate-500">
+                Die Rotation bestückt neu belegte Felder mit dem nächsten freien
+                Schiedsrichter aus der Reihenfolge; pausierte, im Einsatz
+                befindliche und Schiedsrichter mit Vereins-/Personen-Konflikt
+                werden übersprungen.
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Zähltafelbediener */}
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={Users}>Zähltafelbediener</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Wie im Original-BTS: der <strong>Verlierer</strong> eines regulär
+            beendeten Spiels kommt in eine Warteschlange und ist als nächster
+            Zähltafelbediener dran. Die Reihenfolge siehst und pflegst du in der
+            Spielübersicht. (Walkover/Aufgabe erzeugen keinen Eintrag.)
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={skEnabled}
+              onChange={(e) => setSkEnabled(e.currentTarget.checked)}
+            />
+            Zähltafelbediener-Warteschlange führen
+          </label>
+        </section>
+
+        {/* Schiedsrichterzettel drucken (Spec schiedsrichterzettel-autodruck) */}
+        <section
+          id="section-zetteldruck"
+          className="flex flex-col gap-2 scroll-mt-14"
+        >
+          <SectionHeader icon={Printer}>Schiedsrichterzettel</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Zettel lassen sich jederzeit von Hand drucken — in der Spielübersicht
+            und im Tab „In Vorbereitung". Zusätzlich kann BTS Light den Zettel
+            selbsttätig ausdrucken, sobald ein Spiel auf ein Feld kommt.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={printAuto}
+              onChange={(e) => setPrintAuto(e.currentTarget.checked)}
+            />
+            Zettel bei der Feldvergabe automatisch drucken
+          </label>
+          {printAuto && !offEnabled && (
+            <p className="flex items-start gap-1.5 text-xs text-amber-700">
+              <Info size={14} className="mt-0.5 shrink-0" />
+              Gedruckt wird nur für Spiele, denen ein <strong>Schiedsrichter</strong>{" "}
+              zugeordnet ist. Solange „Mit Schiedsrichtern spielen" oben aus ist,
+              kennt BTS Light keinen — dann druckt die Automatik nie.
+            </p>
+          )}
+          <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Drucker
+              <select
+                value={printerName}
+                onChange={(e) => setPrinterName(e.currentTarget.value)}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5
+                           text-sm text-slate-700"
+              >
+                <option value="">Windows-Standarddrucker</option>
+                {/* Ein früher eingestellter Drucker, den Windows gerade nicht
+                    meldet (aus, abgezogen), bleibt wählbar — sonst fiele die
+                    Einstellung beim nächsten Speichern still auf „Standard"
+                    zurück. */}
+                {(printers.includes(printerName) || printerName === ""
+                  ? printers
+                  : [printerName, ...printers]
+                ).map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setPrintProbe("läuft");
+                  printerList()
+                    .then((liste) => {
+                      setPrinters(liste);
+                      setPrintProbe(
+                        liste.length > 0
+                          ? `${liste.length} Drucker gefunden.`
+                          : "Windows meldet keinen Drucker.",
+                      );
+                    })
+                    .catch(() => setPrintProbe("Druckerliste nicht lesbar."));
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm
+                           font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Drucker suchen
+              </button>
+              {printProbe && (
+                <span className="text-xs text-slate-500">{printProbe}</span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              Der Zettel wird <strong>A4 quer</strong> gedruckt — das stellt BTS
+              Light selbst ein. Gedruckt wird ohne Dialog auf dem Rechner, auf dem
+              BTS Light läuft; ein Drucker in einer anderen Halle muss dort als
+              Netzwerkdrucker eingerichtet sein.
+            </p>
+          </div>
+        </section>
+      </Gruppe>
+
+      <Gruppe id="anzeigen">
+        {/* Court-Monitor */}
+        <section
+          id="section-court-monitor"
+          className="flex flex-col gap-2 scroll-mt-14"
+        >
+          <SectionHeader icon={Monitor}>Court-Monitor</SectionHeader>
+          <p className="text-xs text-slate-500">
+            TV-Anzeige am Spielfeld (Raspberry Pi): Werbung im Leerlauf, die
+            Match-Ansicht sobald ein Spiel aufs Feld kommt. Die Monitor-Adressen
+            stehen auf der Tablet-Spielzettel-Seite.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={cmEnabled}
+              onChange={(e) => setCmEnabled(e.currentTarget.checked)}
+            />
+            Court-Monitor aktivieren
+          </label>
+
+          {cmEnabled && (
+            <div className="mt-1 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4">
+              {/* Werbebilder */}
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium text-slate-600">
+                  Werbebilder
+                </span>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cmAds}
+                    onChange={(e) => setCmAds(e.currentTarget.checked)}
+                  />
+                  Werbung im Leerlauf anzeigen
+                </label>
+                <p className="text-xs text-slate-500">
+                  {cmAds
+                    ? "Werden im Leerlauf nacheinander gezeigt – ein gemeinsamer Satz für alle Felder."
+                    : "Aus: Ein freies Feld zeigt eine neutrale Leerlauf-Seite statt der Werbung."}
+                </p>
+                {ads.length > 0 && (
+                  <ul className="flex flex-col gap-1">
+                    {ads.map((ad, i) => (
+                      <li
+                        key={ad.file}
+                        className="flex flex-col gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm"
                       >
+                       <div className="flex items-center gap-2">
                         <input
-                          type="checkbox"
-                          checked={ad.in_bar}
+                          type="text"
+                          value={ad.label}
+                          placeholder={`Werbebild ${i + 1}`}
+                          maxLength={80}
                           onChange={(e) => {
-                            const on = e.currentTarget.checked;
+                            // Optimistisch lokal anwenden, damit der Operator
+                            // beim Tippen direkt sieht; auf Blur persistieren.
+                            const v = e.currentTarget.value;
                             setAds((prev) =>
                               prev.map((a) =>
-                                a.file === ad.file ? { ...a, in_bar: on } : a,
+                                a.file === ad.file ? { ...a, label: v } : a,
                               ),
                             );
-                            void setCourtAdBar(ad.file, on);
                           }}
+                          onBlur={(e) => {
+                            void setCourtAdLabel(
+                              ad.file,
+                              e.currentTarget.value.trim(),
+                            );
+                          }}
+                          className="flex-1 min-w-0 rounded border border-transparent bg-transparent
+                                     px-1.5 py-0.5 text-sm text-slate-700 placeholder:text-slate-400
+                                     focus:border-slate-300 focus:bg-white focus:outline-none"
                         />
-                        Leiste
-                      </label>
-                      <button
-                        onClick={() => void deleteAd(ad.file)}
-                        title="Werbebild entfernen"
-                        className="rounded p-1 text-slate-400 transition-colors
-                                   hover:bg-rose-50 hover:text-rose-600"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                     </div>
-                     {/* Anzeige im Leerlauf-Vollbild (Spec
-                         werbung-hintergrund-und-feld): Hintergrundfarbe und
-                         Feldbezeichnung je Bild, daneben eine Vorschau — der
-                         Turnierleiter soll das Ergebnis vor dem Turnier
-                         sehen, nicht erst auf dem Hallenbildschirm. */}
-                     <div className="flex flex-wrap items-center gap-3 pl-1 text-xs text-slate-500">
-                       <label className="flex items-center gap-1.5" title="Hintergrund hinter diesem Bild im Leerlauf-Vollbild">
-                         <input
-                           type="color"
-                           value={ad.bg || "#000000"}
-                           onChange={(e) => {
-                             // Nur lokal mitziehen: React bildet `onChange` auf
-                             // das `input`-Ereignis ab, das WebView2 waehrend
-                             // des Ziehens im Farbdialog fortlaufend feuert.
-                             // Jeder Schreibvorgang waere ein volles
-                             // Lesen-Aendern-Schreiben der Stil-Datei.
-                             const farbe = e.currentTarget.value.toLowerCase();
-                             setAds((prev) =>
-                               prev.map((a) =>
-                                 a.file === ad.file ? { ...a, bg: farbe } : a,
-                               ),
-                             );
+                        <label
+                          className="flex flex-shrink-0 items-center gap-1 text-xs text-slate-500"
+                          title="Auch klein in der oberen Leiste der Anzeigeseiten zeigen (neben dem Turnierlogo)"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={ad.in_bar}
+                            onChange={(e) => {
+                              const on = e.currentTarget.checked;
+                              setAds((prev) =>
+                                prev.map((a) =>
+                                  a.file === ad.file ? { ...a, in_bar: on } : a,
+                                ),
+                              );
+                              void setCourtAdBar(ad.file, on);
+                            }}
+                          />
+                          Leiste
+                        </label>
+                        <button
+                          onClick={() => void deleteAd(ad.file)}
+                          title="Werbebild entfernen"
+                          className="rounded p-1 text-slate-400 transition-colors
+                                     hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                       </div>
+                       {/* Anzeige im Leerlauf-Vollbild (Spec
+                           werbung-hintergrund-und-feld): Hintergrundfarbe und
+                           Feldbezeichnung je Bild, daneben eine Vorschau — der
+                           Turnierleiter soll das Ergebnis vor dem Turnier
+                           sehen, nicht erst auf dem Hallenbildschirm. */}
+                       <div className="flex flex-wrap items-center gap-3 pl-1 text-xs text-slate-500">
+                         <label className="flex items-center gap-1.5" title="Hintergrund hinter diesem Bild im Leerlauf-Vollbild">
+                           <input
+                             type="color"
+                             value={ad.bg || "#000000"}
+                             onChange={(e) => {
+                               // Nur lokal mitziehen: React bildet `onChange` auf
+                               // das `input`-Ereignis ab, das WebView2 waehrend
+                               // des Ziehens im Farbdialog fortlaufend feuert.
+                               // Jeder Schreibvorgang waere ein volles
+                               // Lesen-Aendern-Schreiben der Stil-Datei.
+                               const farbe = e.currentTarget.value.toLowerCase();
+                               setAds((prev) =>
+                                 prev.map((a) =>
+                                   a.file === ad.file ? { ...a, bg: farbe } : a,
+                                 ),
+                               );
+                             }}
+                             onBlur={(e) => {
+                               // Persistiert wird beim Verlassen — wie beim
+                               // Label-Feld daneben. Schlaegt es fehl, gewinnt
+                               // die Platte: Der optimistische Stand wird
+                               // zurueckgeholt, statt eine Farbe anzuzeigen,
+                               // die nirgends steht.
+                               const farbe = e.currentTarget.value.toLowerCase();
+                               void setCourtAdStyle(ad.file, farbe, ad.show_court)
+                                 .catch(() => void ladeAds());
+                             }}
+                             className="h-6 w-8 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+                           />
+                           Hintergrund
+                         </label>
+                         <label
+                           className="flex items-center gap-1"
+                           title="Feldbezeichnung über der Werbung zeigen — das Bild wird dafür etwas verkleinert"
+                         >
+                           <input
+                             type="checkbox"
+                             checked={ad.show_court}
+                             onChange={(e) => {
+                               const on = e.currentTarget.checked;
+                               setAds((prev) =>
+                                 prev.map((a) =>
+                                   a.file === ad.file ? { ...a, show_court: on } : a,
+                                 ),
+                               );
+                               void setCourtAdStyle(
+                                 ad.file,
+                                 ad.bg || "#000000",
+                                 on,
+                               ).catch(() => void ladeAds());
+                             }}
+                           />
+                           Feld zeigen
+                         </label>
+                         <span
+                           className="flex items-center rounded border border-slate-300 px-2 py-0.5"
+                           style={{
+                             backgroundColor: ad.bg || "#000000",
+                             color: adSchriftfarbe(ad.bg || "#000000"),
                            }}
-                           onBlur={(e) => {
-                             // Persistiert wird beim Verlassen — wie beim
-                             // Label-Feld daneben. Schlaegt es fehl, gewinnt
-                             // die Platte: Der optimistische Stand wird
-                             // zurueckgeholt, statt eine Farbe anzuzeigen,
-                             // die nirgends steht.
-                             const farbe = e.currentTarget.value.toLowerCase();
-                             void setCourtAdStyle(ad.file, farbe, ad.show_court)
-                               .catch(() => void ladeAds());
-                           }}
-                           className="h-6 w-8 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
-                         />
-                         Hintergrund
-                       </label>
-                       <label
-                         className="flex items-center gap-1"
-                         title="Feldbezeichnung über der Werbung zeigen — das Bild wird dafür etwas verkleinert"
-                       >
-                         <input
-                           type="checkbox"
-                           checked={ad.show_court}
-                           onChange={(e) => {
-                             const on = e.currentTarget.checked;
-                             setAds((prev) =>
-                               prev.map((a) =>
-                                 a.file === ad.file ? { ...a, show_court: on } : a,
-                               ),
-                             );
-                             void setCourtAdStyle(
-                               ad.file,
-                               ad.bg || "#000000",
-                               on,
-                             ).catch(() => void ladeAds());
-                           }}
-                         />
-                         Feld zeigen
-                       </label>
-                       <span
-                         className="flex items-center rounded border border-slate-300 px-2 py-0.5"
-                         style={{
-                           backgroundColor: ad.bg || "#000000",
-                           color: adSchriftfarbe(ad.bg || "#000000"),
-                         }}
-                         title="So sieht die Feldbezeichnung auf dieser Farbe aus"
-                       >
-                         {ad.show_court ? "Feld 3" : "Vorschau"}
-                       </span>
-                     </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <button
-                onClick={() => void pickAds()}
-                className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
-                           text-slate-700 transition-colors hover:bg-slate-200"
-              >
-                Werbebild hinzufügen …
-              </button>
-              {adError && <p className="text-xs text-rose-700">{adError}</p>}
+                           title="So sieht die Feldbezeichnung auf dieser Farbe aus"
+                         >
+                           {ad.show_court ? "Feld 3" : "Vorschau"}
+                         </span>
+                       </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button
+                  onClick={() => void pickAds()}
+                  className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                             text-slate-700 transition-colors hover:bg-slate-200"
+                >
+                  Werbebild hinzufügen …
+                </button>
+                {adError && <p className="text-xs text-rose-700">{adError}</p>}
+              </div>
+
+              {/* Wechsel-Intervall */}
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-slate-600">
+                  Wechsel-Intervall: {cmInterval} s
+                </span>
+                <input
+                  type="range"
+                  min={3}
+                  max={30}
+                  step={1}
+                  value={cmInterval}
+                  onChange={(e) => setCmInterval(Number(e.currentTarget.value))}
+                  className="w-full"
+                />
+              </label>
+
+              {/* Anzeige-Optionen */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-sm font-medium text-slate-600">
+                  Anzeige
+                </span>
+                {/* Live-Vorschau: aktualisiert sich mit jeder Checkbox. */}
+                <MonitorPreview
+                  showDiscipline={cmDiscipline}
+                  showRound={cmRound}
+                  showMatchNumber={cmMatchNumber}
+                  showTimer={cmTimer}
+                  showMatchClock={cmMatchClock}
+                />
+                <p className="mb-1 text-xs text-slate-500">
+                  Vorschau – ändert sich mit den Häkchen. Der Pausen-Countdown
+                  erscheint am Monitor nur während einer Spielpause.
+                </p>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cmDiscipline}
+                    onChange={(e) => setCmDiscipline(e.currentTarget.checked)}
+                  />
+                  Disziplin in der Kopfzeile
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cmRound}
+                    onChange={(e) => setCmRound(e.currentTarget.checked)}
+                  />
+                  Runde in der Fußzeile
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cmMatchNumber}
+                    onChange={(e) => setCmMatchNumber(e.currentTarget.checked)}
+                  />
+                  Spielnummer in der Fußzeile
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cmMatchClock}
+                    onChange={(e) => setCmMatchClock(e.currentTarget.checked)}
+                  />
+                  Spieldauer in der Kopfzeile (Stoppuhr)
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cmTimer}
+                    onChange={(e) => setCmTimer(e.currentTarget.checked)}
+                  />
+                  Pausen-Countdown (Retro-Klappanzeige)
+                </label>
+                {/* Plätze am Namen (ADR 0070): Die Anordnung gilt am
+                    Feld-Monitor. Was kein Platz nutzt, verlässt den Server gar
+                    nicht — auch Tafel, Übersicht und Kombi bekommen Nation
+                    bzw. Verein nur, wenn hier ein Platz sie zeigt. Den Stil
+                    wählt man je Monitor im Court-Monitor-Panel. */}
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="w-36 shrink-0">Vor dem Namen</span>
+                  <select
+                    value={cmDavor}
+                    onChange={(e) => setCmDavor(e.currentTarget.value as NamenDavor)}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                  >
+                    <option value="flagge">Nation (Flagge)</option>
+                    <option value="logo">Vereinslogo</option>
+                    <option value="ohne">ohne</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <span className="w-36 shrink-0">Unter dem Namen</span>
+                  <select
+                    value={cmDarunter}
+                    onChange={(e) =>
+                      setCmDarunter(e.currentTarget.value as NamenDarunter)
+                    }
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                  >
+                    <option value="verein">Vereinsname</option>
+                    <option value="nation">Nation (Text)</option>
+                    <option value="ohne">ohne</option>
+                  </select>
+                </label>
+                {/* Stream-Einblendung (OBS): eigenes Publikum, eigene Schalter —
+                    unabhängig von den Plätzen am Feld-Monitor, serverseitig
+                    gefiltert (ADR 0069/0070). */}
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cmStreamNation}
+                    onChange={(e) => setCmStreamNation(e.currentTarget.checked)}
+                  />
+                  Stream-Einblendung: Flagge zeigen
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={cmStreamVerein}
+                    onChange={(e) => setCmStreamVerein(e.currentTarget.checked)}
+                  />
+                  Stream-Einblendung: Verein zeigen
+                </label>
+              </div>
             </div>
+          )}
+        </section>
 
-            {/* Wechsel-Intervall */}
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-slate-600">
-                Wechsel-Intervall: {cmInterval} s
-              </span>
-              <input
-                type="range"
-                min={3}
-                max={30}
-                step={1}
-                value={cmInterval}
-                onChange={(e) => setCmInterval(Number(e.currentTarget.value))}
-                className="w-full"
-              />
-            </label>
+        {/* Vereins-Anzeige (turnierweit, TL-Web + Tablet) */}
+        <section
+          id="section-vereine"
+          className="flex flex-col gap-2 scroll-mt-14"
+        >
+          <SectionHeader icon={Image}>Vereine anzeigen</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Zeigt in der <strong>Turnierleitungssicht</strong> und auf dem{" "}
+            <strong>Tablet-Spielzettel</strong> optional den Verein zu jedem
+            Spieler. Gilt <strong>turnierweit</strong> für alle Geräte, nicht je
+            Gerät. Standardmäßig aus. Die Tablets übernehmen die Änderung beim
+            nächsten Neuladen.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={showClubNames}
+              onChange={(e) => setShowClubNames(e.currentTarget.checked)}
+            />
+            Vereinsnamen anzeigen
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={showClubLogos}
+              onChange={(e) => setShowClubLogos(e.currentTarget.checked)}
+            />
+            Vereinslogos anzeigen
+          </label>
+          <p className="text-xs text-slate-500">
+            Die Logos kommen aus dem badhub-Bestand (wie auf der Siegerliste). Zu
+            einem Verein ohne hinterlegtes Logo bleibt die Zeile ohne Wappen.
+          </p>
+        </section>
 
-            {/* Anzeige-Optionen */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-slate-600">
-                Anzeige
-              </span>
-              {/* Live-Vorschau: aktualisiert sich mit jeder Checkbox. */}
-              <MonitorPreview
-                showDiscipline={cmDiscipline}
-                showRound={cmRound}
-                showMatchNumber={cmMatchNumber}
-                showTimer={cmTimer}
-                showMatchClock={cmMatchClock}
-              />
-              <p className="mb-1 text-xs text-slate-500">
-                Vorschau – ändert sich mit den Häkchen. Der Pausen-Countdown
-                erscheint am Monitor nur während einer Spielpause.
+        {/* Hallen-Check-In (ADR 0009). Die id ist der Sprungpunkt aus dem
+            ausgegrauten Menüpunkt „Check-In" in der Seitenleiste. */}
+        <section id="section-check-in" className="flex flex-col gap-2 scroll-mt-14">
+          <SectionHeader icon={Users}>Hallen-Check-In</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Spieler bestätigen vor Beginn ihrer Spielklasse über eine Webseite
+            selbst, dass sie in der Halle sind — du siehst dann schon vor der
+            Auslosung, wer fehlt. Die Adresse verteilst du per QR-Aushang in der
+            Halle. Braucht Internet; ohne Verbindung läuft das Turnier
+            unverändert weiter.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={ciEnabled}
+              onChange={(e) => setCiEnabled(e.currentTarget.checked)}
+            />
+            Hallen-Check-In aktivieren
+          </label>
+
+          {ciEnabled && (
+            <div className="mt-1 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-xs text-slate-500">
+                Die Turnier-Kennung kommt aus Abschnitt „1 · Liveticker-Ziel".
               </p>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
+
+              <label className="flex flex-col gap-1 text-sm text-slate-600">
+                <span>Namen in der „Es fehlen noch"-Ansage</span>
                 <input
-                  type="checkbox"
-                  checked={cmDiscipline}
-                  onChange={(e) => setCmDiscipline(e.currentTarget.checked)}
+                  type="number"
+                  min={0}
+                  max={50}
+                  className="w-24 rounded-lg border border-slate-300 px-3 py-2"
+                  value={ciMissingMax}
+                  onChange={(e) => setCiMissingMax(e.currentTarget.value)}
                 />
-                Disziplin in der Kopfzeile
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={cmRound}
-                  onChange={(e) => setCmRound(e.currentTarget.checked)}
-                />
-                Runde in der Fußzeile
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={cmMatchNumber}
-                  onChange={(e) => setCmMatchNumber(e.currentTarget.checked)}
-                />
-                Spielnummer in der Fußzeile
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={cmMatchClock}
-                  onChange={(e) => setCmMatchClock(e.currentTarget.checked)}
-                />
-                Spieldauer in der Kopfzeile (Stoppuhr)
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={cmTimer}
-                  onChange={(e) => setCmTimer(e.currentTarget.checked)}
-                />
-                Pausen-Countdown (Retro-Klappanzeige)
-              </label>
-              {/* Plätze am Namen (ADR 0070): Die Anordnung gilt am
-                  Feld-Monitor. Was kein Platz nutzt, verlässt den Server gar
-                  nicht — auch Tafel, Übersicht und Kombi bekommen Nation
-                  bzw. Verein nur, wenn hier ein Platz sie zeigt. Den Stil
-                  wählt man je Monitor im Court-Monitor-Panel. */}
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="w-36 shrink-0">Vor dem Namen</span>
-                <select
-                  value={cmDavor}
-                  onChange={(e) => setCmDavor(e.currentTarget.value as NamenDavor)}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
-                >
-                  <option value="flagge">Nation (Flagge)</option>
-                  <option value="logo">Vereinslogo</option>
-                  <option value="ohne">ohne</option>
-                </select>
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <span className="w-36 shrink-0">Unter dem Namen</span>
-                <select
-                  value={cmDarunter}
-                  onChange={(e) =>
-                    setCmDarunter(e.currentTarget.value as NamenDarunter)
-                  }
-                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
-                >
-                  <option value="verein">Vereinsname</option>
-                  <option value="nation">Nation (Text)</option>
-                  <option value="ohne">ohne</option>
-                </select>
-              </label>
-              {/* Stream-Einblendung (OBS): eigenes Publikum, eigene Schalter —
-                  unabhängig von den Plätzen am Feld-Monitor, serverseitig
-                  gefiltert (ADR 0069/0070). */}
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={cmStreamNation}
-                  onChange={(e) => setCmStreamNation(e.currentTarget.checked)}
-                />
-                Stream-Einblendung: Flagge zeigen
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-600">
-                <input
-                  type="checkbox"
-                  checked={cmStreamVerein}
-                  onChange={(e) => setCmStreamVerein(e.currentTarget.checked)}
-                />
-                Stream-Einblendung: Verein zeigen
+                <span className="text-xs text-slate-500">
+                  Bis zu so vielen fehlenden Spielern werden die Namen
+                  vorgelesen. Darüber sagt die Ansage nur die Anzahl — sonst
+                  läuft sie kurz nach Öffnung des Check-Ins minutenlang.
+                </span>
               </label>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      </Gruppe>
 
-      {/* Diagnose */}
-      <section className="flex flex-col gap-2">
-        <SectionHeader icon={Stethoscope}>Diagnose</SectionHeader>
-        <label className="flex items-start gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={uploadLogs}
-            onChange={(e) => setUploadLogs(e.currentTarget.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            Diagnose-Logs automatisch an badhub senden – hilft, Fehler zu finden
-            und zu beheben. Enthält nur technische Daten (keine Spielernamen).
-            Standardmäßig an; hier jederzeit abwählbar.
-          </span>
-        </label>
-      </section>
+      <Gruppe id="diagnose">
+        {/* Diagnose */}
+        <section className="flex flex-col gap-2">
+          <SectionHeader icon={Stethoscope}>Diagnose</SectionHeader>
+          <label className="flex items-start gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={uploadLogs}
+              onChange={(e) => setUploadLogs(e.currentTarget.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Diagnose-Logs automatisch an badhub senden – hilft, Fehler zu finden
+              und zu beheben. Enthält nur technische Daten (keine Spielernamen).
+              Standardmäßig an; hier jederzeit abwählbar.
+            </span>
+          </label>
+        </section>
+      </Gruppe>
 
       {saveError && <p className="text-sm text-rose-700">{saveError}</p>}
       {saved && isSettings && (
