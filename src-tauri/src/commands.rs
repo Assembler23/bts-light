@@ -3401,6 +3401,11 @@ pub struct PreparationView {
     /// Hallen des Turniers (BTP `Locations`). Ab zwei Einträgen blendet das
     /// Frontend die Hallen-Auswahl ein.
     pub locations: Vec<PreparationLocation>,
+    /// Zusatz am Ende jeder Vorbereitungs-Ansage („Bitte zum Meetingpoint
+    /// gehen."), nur bei eingeschaltetem Meetingpoint. Reist hier mit, weil
+    /// jede Vorbereitungs-Ansage diese Sicht ohnehin liest — so spricht das
+    /// Ansage-Gerät den Text des Turnier-PCs.
+    pub meetingpoint_ansage: Option<crate::config::MpAnsageZusatz>,
 }
 
 /// Eine Halle des Turniers für die Frontend-Auswahl.
@@ -3459,6 +3464,7 @@ pub fn preparation_candidates_for(
         return PreparationView {
             candidates: Vec::new(),
             locations: Vec::new(),
+            meetingpoint_ansage: cfg.meetingpoint.ansage_zusatz(),
         };
     };
     let calls = tablet.preparation_calls();
@@ -3579,6 +3585,7 @@ pub fn preparation_candidates_for(
     PreparationView {
         candidates,
         locations,
+        meetingpoint_ansage: cfg.meetingpoint.ansage_zusatz(),
     }
 }
 

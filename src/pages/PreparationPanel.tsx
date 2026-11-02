@@ -19,7 +19,7 @@ import {
   queueReorder,
   retractPreparation,
 } from "../api";
-import { resolveAnnouncementLanguage } from "../io/announcer";
+import { mpAnsageZusatz, resolveAnnouncementLanguage } from "../io/announcer";
 import { vorbereitungAnsagen } from "../io/ansageTeilen";
 import { azureOption } from "../io/azureAnnounce";
 import { useDragReorder } from "../state/useDragReorder";
@@ -62,6 +62,8 @@ export function PreparationPanel({ announce, azureTts }: Props) {
   // gesagte Stufe. Erster Nachruf = 2 („Zweiter Aufruf"), weitere = 3
   // („Dritter und letzter Aufruf"). Nur im Master-Fenster, kein Server-State.
   const [callStages, setCallStages] = useState<Map<string, 2 | 3>>(new Map());
+  // Meetingpoint-Zusatz der Vorbereitungs-Ansage (null = Meetingpoint aus).
+  const [mpAnsage, setMpAnsage] = useState<{ de: string; en: string } | null>(null);
   /** Offener Vorabzettel (Spec `schiedsrichterzettel-autodruck`): die
    *  ausgewählten Spiele und ihre Überschrift. `null` = zu. */
   const [vorabZettel, setVorabZettel] = useState<{
@@ -77,6 +79,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
           if (!alive) return;
           setCandidates(v.candidates);
           setLocations(v.locations);
+          setMpAnsage(v.meetingpoint_ansage ?? null);
         })
         .catch(() => {});
     };
@@ -180,6 +183,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
       .then((v) => {
         setCandidates(v.candidates);
         setLocations(v.locations);
+        setMpAnsage(v.meetingpoint_ansage ?? null);
       })
       .catch(() => {});
 
@@ -287,6 +291,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         teamANames: c.team1,
         teamBNames: c.team2,
         hall: c.call?.hall || undefined,
+        meetingpointText: mpAnsageZusatz({ meetingpoint_ansage: mpAnsage }, lang),
       },
       lang,
       {
@@ -318,6 +323,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         teamBNames: [], // nur die fehlende Partei ansagen
         hall: c.call?.hall || undefined,
         callStage: stage,
+        meetingpointText: mpAnsageZusatz({ meetingpoint_ansage: mpAnsage }, lang),
       },
       lang,
       {

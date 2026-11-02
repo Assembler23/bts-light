@@ -85,6 +85,9 @@ type TestState =
   | { kind: "ok"; tournament: string }
   | { kind: "error"; message: string };
 
+/** Vorgaben des Meetingpoint-Zusatzes (wie `config.rs` `MP_ANSAGE_*`). */
+const MP_ANSAGE_DE = "Bitte zum Meetingpoint gehen.";
+const MP_ANSAGE_EN = "Please proceed to the meeting point.";
 const MANUAL = "manual";
 
 /** Abschnitts-Überschrift mit Icon. */
@@ -548,6 +551,8 @@ export function SetupWizard({
   const [mpAnnounce, setMpAnnounce] = useState(mpc?.missing_announce_enabled ?? false);
   const [mpAnnounceMin, setMpAnnounceMin] = useState(String(mpc?.missing_announce_minutes ?? 5));
   const [mpFieldCheck, setMpFieldCheck] = useState(mpc?.field_check_enabled ?? false);
+  const [mpTextDe, setMpTextDe] = useState(mpc?.announce_text_de ?? MP_ANSAGE_DE);
+  const [mpTextEn, setMpTextEn] = useState(mpc?.announce_text_en ?? MP_ANSAGE_EN);
   // Automatische Feldvergabe.
   const aa = initialConfig.auto_assign;
   const [aaEnabled, setAaEnabled] = useState(aa?.enabled ?? false);
@@ -831,6 +836,8 @@ export function SetupWizard({
           missing_announce_enabled: mpAnnounce,
           missing_announce_minutes: zahl(mpAnnounceMin, 5, 1),
           field_check_enabled: mpFieldCheck,
+          announce_text_de: mpTextDe.trim(),
+          announce_text_en: mpTextEn.trim(),
         };
       })(),
       auto_assign: {
@@ -2115,6 +2122,49 @@ export function SetupWizard({
               />
               Anwesenheit zusätzlich am Zähl-Tablet bestätigen lassen
             </label>
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-slate-600">
+                Zusatz in der Vorbereitungs-Ansage
+              </span>
+              <p className="text-xs text-slate-500">
+                Wird am Ende jedes Aufrufs in die Vorbereitung gesprochen (auch
+                beim zweiten und dritten Aufruf). Hier lässt sich der Ort genauer
+                nennen, z. B. „Bitte zum Meetingpoint neben der Tribüne gehen.“
+                Leer lassen = kein Zusatz.
+              </p>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <span className="w-16 shrink-0">Deutsch</span>
+                <input
+                  type="text"
+                  maxLength={200}
+                  value={mpTextDe}
+                  onChange={(e) => setMpTextDe(e.currentTarget.value)}
+                  className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <span className="w-16 shrink-0">Englisch</span>
+                <input
+                  type="text"
+                  maxLength={200}
+                  value={mpTextEn}
+                  onChange={(e) => setMpTextEn(e.currentTarget.value)}
+                  className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+              {(mpTextDe !== MP_ANSAGE_DE || mpTextEn !== MP_ANSAGE_EN) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMpTextDe(MP_ANSAGE_DE);
+                    setMpTextEn(MP_ANSAGE_EN);
+                  }}
+                  className="self-start text-xs text-sky-700 hover:underline"
+                >
+                  Vorgabe wiederherstellen
+                </button>
+              )}
+            </div>
           </div>
         )}
       </section>

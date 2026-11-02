@@ -19,6 +19,7 @@ import {
 import {
   prepareMeetingpointMissing,
   preparePreparationAnnouncement,
+  mpAnsageZusatz,
   resolveAnnouncementLanguage,
   type PreparedAnnouncement,
 } from "./announcer";
@@ -173,6 +174,7 @@ export async function jobZuAnsage(
       // Ein automatischer Meetingpoint-Aufruf ist ein ERSTER Aufruf
       // („In Vorbereitung …"), kein Nachruf.
       callStage: job.kind === "meetingpoint_call" ? 1 : job.stage >= 3 ? 3 : 2,
+      meetingpointText: mpAnsageZusatz(view, lang),
     },
     lang,
     ansageOptionen(cfg, lang, azureTts),

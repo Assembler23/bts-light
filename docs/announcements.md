@@ -754,7 +754,14 @@ angesagt. Der Knopf „Ansage" neben dem Aufruf im Vorbereitungs-Tab
 wiederholt sie ([preparation.md](preparation.md)). Format:
 
 > Gong → **„In Vorbereitung."** → Disziplin → Paarung („… gegen …") →
-> **„Bitte in *Halle X*."** (entfällt bei Ein-Hallen-Turnieren)
+> **„Bitte in *Halle X*."** (entfällt bei Ein-Hallen-Turnieren) →
+> Meetingpoint-Zusatz (nur bei eingeschaltetem Meetingpoint, Standard
+> „Bitte zum Meetingpoint gehen.", siehe [meetingpoint.md](meetingpoint.md))
+
+Der Zusatz steht auch am Ende des zweiten/dritten Aufrufs. Er reist in der
+Vorbereitungs-Sicht des Turnier-PCs mit (`PreparationView.meetingpoint_ansage`,
+`mpAnsageZusatz` in `announcer.ts`), damit Desktop-Knöpfe, Ansage-Aufträge und
+Ansage-Seiten denselben Text sprechen.
 
 Englisch entsprechend: „Preparation call." → Discipline → „… versus …" →
 „Please report to *hall*."

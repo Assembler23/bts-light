@@ -15,6 +15,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Desktop bleibt zum Wiederholen; die Nachruf-Knöpfe beginnen wie gewohnt
   bei „Zweiter Aufruf". Voraussetzung ist ein laufendes Ansage-Gerät der
   Halle (Desktop-App oder Ansage-Seite).
+- **Ansage nennt den Meetingpoint.** Bei eingeschaltetem Meetingpoint endet
+  jede Vorbereitungs-Ansage mit „Bitte zum Meetingpoint gehen.“ (englisch
+  „Please proceed to the meeting point.“). Der Satz ist unter Einstellungen →
+  Meetingpoint änderbar, um den Ort in der Halle genauer zu nennen; leer =
+  kein Zusatz.
 - **Meetingpoint-Adresse zum Scannen.** Unter Tablets → QR-Codes steht bei
   eingeschaltetem Meetingpoint die Adresse der Meetingpoint-Seite je Halle
   (Hallennetz, verschlüsselt und Cloud) mit QR-Code, Link und Kopier-Knopf

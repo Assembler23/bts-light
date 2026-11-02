@@ -150,6 +150,25 @@ Häkchen **Automatische Feldvergabe nur für spielbereite Partien**:
 - Ein automatischer Aufruf wird angesagt wie ein Aufruf von Hand (wenn ein
   Ansage-Gerät angeschlossen ist).
 
+## Hinweis auf den Meetingpoint in der Ansage
+
+Solange der Meetingpoint an ist, endet jede Vorbereitungs-Ansage mit
+**„Bitte zum Meetingpoint gehen.“** — beim ersten Aufruf wie beim zweiten
+und dritten, egal ob von Hand, aus dem TL-Web oder von der Automatik:
+
+> In Vorbereitung. Herreneinzel. Anna Muster gegen Bea Beispiel. Bitte in
+> Halle A. **Bitte zum Meetingpoint gehen.**
+
+Den Satz ändern Sie unter Einstellungen → Meetingpoint → **Zusatz in der
+Vorbereitungs-Ansage**, je für deutsche und englische Ansagen — etwa
+„Bitte zum Meetingpoint neben der Tribüne gehen.“ Leer lassen schaltet den
+Zusatz ab; **Vorgabe wiederherstellen** holt den Standardtext zurück.
+<!-- pruef: "Vorgabe wiederherstellen" in src/pages/SetupWizard.tsx -->
+
+Gesprochen wird der Text, der am Turnier-PC eingestellt ist — auch auf den
+Ansage-Seiten im Browser. Nur der Nachruf-Knopf am Ansage-Slave (eigener
+PC einer fernen Halle) spricht ihn nicht.
+
 ## Wenn jemand nicht kommt
 
 - **Warnung, wenn eine Partie nicht vollständig erscheint** (ab Werk aus, 5

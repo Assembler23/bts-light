@@ -1406,6 +1406,22 @@ export interface AnnouncePreparationInput {
    *  Aufruf", 3 = „Dritter und letzter Aufruf". Bei 2/3 wird meist nur die
    *  fehlende Partei genannt (teamBNames leer lassen). Default 1. */
   callStage?: 1 | 2 | 3;
+  /** Zusatz ganz am Ende, in jeder Stufe — bei eingeschaltetem Meetingpoint
+   *  „Bitte zum Meetingpoint gehen." oder der eigene Text der
+   *  Turnierleitung (`mpAnsageZusatz`). Leer/undefined = kein Zusatz. */
+  meetingpointText?: string;
+}
+
+/** Der Meetingpoint-Zusatz in der Ansagesprache aus der Vorbereitungs-Sicht
+ *  des Turnier-PCs; `undefined`, wenn der Meetingpoint aus ist oder der Text
+ *  leer. */
+export function mpAnsageZusatz(
+  view: { meetingpoint_ansage?: { de: string; en: string } | null } | null | undefined,
+  lang: AnnounceLang,
+): string | undefined {
+  const z = view?.meetingpoint_ansage;
+  const text = (lang === "de" ? z?.de : z?.en)?.trim();
+  return text ? text : undefined;
 }
 
 // Führt-Präfix je Aufruf-Stufe (an Tilos BTS angelehnt). null = Stufe 1
@@ -1468,6 +1484,7 @@ export function buildPreparationSegments(
   const disc = disciplineSpoken(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
   const hall = (input.hall || "").trim();
+  const zusatz = (input.meetingpointText || "").trim();
   const stagePrefix = callStagePrefix(input.callStage, lang);
 
   // Wiederholungsaufruf (Stufe 2/3): terse „Zweiter/Dritter Aufruf für:
@@ -1486,6 +1503,7 @@ export function buildPreparationSegments(
         lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
       );
     }
+    if (zusatz) segments.push(zusatz);
     return segments;
   }
 
@@ -1507,6 +1525,7 @@ export function buildPreparationSegments(
       lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
     );
   }
+  if (zusatz) segments.push(zusatz);
   return segments;
 }
 
@@ -1525,6 +1544,7 @@ export function buildPreparationSsml(
   const teamA = joinNamesSsml(input.teamANames, lang, ipaMap, langMap, sayMap);
   const teamB = joinNamesSsml(input.teamBNames, lang, ipaMap, langMap, sayMap);
   const hall = xmlEscape((input.hall || "").trim());
+  const zusatz = xmlEscape((input.meetingpointText || "").trim());
   const stagePrefix = callStagePrefix(input.callStage, lang);
 
   let parts: string[];
@@ -1558,6 +1578,7 @@ export function buildPreparationSsml(
       );
     }
   }
+  if (zusatz) parts.push(zusatz);
   const speakLang = lang === "de" ? "de-DE" : "en-US";
   return (
     `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
