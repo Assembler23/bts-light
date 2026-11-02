@@ -616,6 +616,7 @@ Partei reist als `relay_proto::PrepCallSide` (`"both"` / `"team1"` /
 | `TlAction` | Partei-Feld | Verhalten |
 |---|---|---|
 | `announce_prep_call` | `side` — **Pflicht** | Nachruf am Meeting Point. Die Stufe wird **je Partei** gezählt (`prep_call_stages`); die eine kann längst da sein, während die andere fehlt. |
+| `repeat_prep_call` | `matchId` | Erste Vorbereitungs-Ansage unverändert wiederholen (Auftrag `meetingpoint_call`, Stufe 1), **ohne** Nachruf-Stufe (seit v0.9.331). Nur mit Fähigkeitsmerkmal `can_repeat_prep_call` im `TlState`; ein älterer Host kennt die Aktion nicht. |
 | `announce_court_call` | `side` — **optional**, fehlend = beide | Erneuter Aufruf am Feld. Die Stufe gehört dem **Feld**, nicht der Partei — alle Geräte zeigen dieselbe Zahl. |
 
 `announce_court_call.side` ist die **einzige** Ausnahme von der Regel „kein

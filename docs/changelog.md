@@ -15,6 +15,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Desktop bleibt zum Wiederholen; die Nachruf-Knöpfe beginnen wie gewohnt
   bei „Zweiter Aufruf". Voraussetzung ist ein laufendes Ansage-Gerät der
   Halle (Desktop-App oder Ansage-Seite).
+- **TL-Web: „Erste Ansage wiederholen".** Im ⋮-Menü eines gerufenen Spiels
+  (Gruppe „Nachruf") spielt der neue Knopf die Ansage „In Vorbereitung …"
+  noch einmal ab, wenn die Halle sie überhört hat. Er zählt nicht als
+  Nachruf: Der nächste Nachruf bleibt „Zweiter Aufruf". Braucht den
+  Turnier-PC ab v0.9.331 (sonst ist der Knopf ausgeblendet).
 - **Ansage nennt den Meetingpoint.** Bei eingeschaltetem Meetingpoint endet
   jede Vorbereitungs-Ansage mit „Bitte zum Meetingpoint gehen.“ (englisch
   „Please proceed to the meeting point.“). Der Satz ist unter Einstellungen →
