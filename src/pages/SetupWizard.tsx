@@ -92,13 +92,19 @@ const MANUAL = "manual";
 
 /** Die Gruppen der Einstellungsseite — Reihenfolge = Reihenfolge auf der
  *  Seite. Die Abschnitte darin behalten ihre `section-*`-Sprungziele. */
-const EINSTELLUNGS_GRUPPEN: { id: string; titel: string; beschreibung: string }[] = [
-  { id: "grundlagen", titel: "Turnier & Verbindung", beschreibung: "Liveticker, BTP, badhub und wie die Tablets den Turnier-PC erreichen." },
-  { id: "feldvergabe", titel: "Feldvergabe & Planung", beschreibung: "Wie Spiele aufs Feld kommen und wann sie voraussichtlich starten." },
-  { id: "aufruf", titel: "Aufruf, Ansage & Meetingpoint", beschreibung: "Was in der Halle gesprochen wird und wie Spieler zum Feld finden." },
-  { id: "personal", titel: "Schiedsrichter & Zähltafel", beschreibung: "Wer pfeift, wer zählt und welche Zettel gedruckt werden." },
-  { id: "anzeigen", titel: "Anzeigen & Check-In", beschreibung: "Monitore, Vereinsnamen und die Anmeldung in der Halle." },
-  { id: "diagnose", titel: "Diagnose", beschreibung: "Fehlerberichte an badhub." },
+const EINSTELLUNGS_GRUPPEN: {
+  id: string;
+  titel: string;
+  /** Kurzform für die Sprungleiste — sechs Knöpfe passen so ohne Scrollen. */
+  kurz: string;
+  beschreibung: string;
+}[] = [
+  { id: "grundlagen", kurz: "Verbindung", titel: "Turnier & Verbindung", beschreibung: "Liveticker, BTP, badhub und wie die Tablets den Turnier-PC erreichen." },
+  { id: "feldvergabe", kurz: "Feldvergabe", titel: "Feldvergabe & Planung", beschreibung: "Wie Spiele aufs Feld kommen und wann sie voraussichtlich starten." },
+  { id: "aufruf", kurz: "Aufruf & Ansage", titel: "Aufruf, Ansage & Meetingpoint", beschreibung: "Was in der Halle gesprochen wird und wie Spieler zum Feld finden." },
+  { id: "personal", kurz: "SR & Zähltafel", titel: "Schiedsrichter & Zähltafel", beschreibung: "Wer pfeift, wer zählt und welche Zettel gedruckt werden." },
+  { id: "anzeigen", kurz: "Anzeigen & Check-In", titel: "Anzeigen & Check-In", beschreibung: "Monitore, Vereinsnamen und die Anmeldung in der Halle." },
+  { id: "diagnose", kurz: "Diagnose", titel: "Diagnose", beschreibung: "Fehlerberichte an badhub." },
 ];
 
 /** Sprungleiste oben: je Gruppe ein Knopf, bleibt beim Scrollen stehen.
@@ -106,30 +112,32 @@ const EINSTELLUNGS_GRUPPEN: { id: string; titel: string; beschreibung: string }[
 function EinstellungsNavigation({
   gruppen,
 }: {
-  gruppen: { id: string; titel: string }[];
+  gruppen: { id: string; kurz: string; titel: string }[];
 }) {
   return (
     <nav
       aria-label="Bereiche der Einstellungen"
-      // Einzeilig und waagerecht scrollbar statt umbrechend: Die Leiste bleibt
-      // so immer gleich hoch, und `scroll-mt-14` der Sprungziele passt.
-      className="sticky top-0 z-10 -mx-6 flex gap-1.5 overflow-x-auto border-b border-slate-200
+      // Festes Raster (3 × 2) statt waagerechtem Scrollen: Alle Bereiche sind
+      // auf einen Blick da, und die Leiste ist immer gleich hoch — darauf
+      // ist `scroll-mt-24` der Sprungziele abgestimmt.
+      className="sticky top-0 z-10 -mx-6 grid grid-cols-3 gap-1.5 border-b border-slate-200
                  bg-white/95 px-6 py-2 backdrop-blur"
     >
       {gruppen.map((g) => (
         <button
           key={g.id}
           type="button"
+          title={g.titel}
           onClick={() =>
             document
               .getElementById(`gruppe-${g.id}`)
               ?.scrollIntoView({ behavior: "smooth", block: "start" })
           }
-          className="shrink-0 whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs
+          className="truncate rounded-full border border-slate-200 bg-white px-2 py-1 text-xs
                      font-medium text-slate-600 transition-colors hover:border-slate-300
                      hover:bg-slate-100"
         >
-          {g.titel}
+          {g.kurz}
         </button>
       ))}
     </nav>
@@ -143,7 +151,7 @@ function Gruppe({ id, children }: { id: string; children: ReactNode }) {
   return (
     <div
       id={`gruppe-${id}`}
-      className="flex scroll-mt-14 flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-4
+      className="flex scroll-mt-24 flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-4
                  [&>*+*]:border-t [&>*+*]:border-slate-100 [&>*+*]:pt-5"
     >
       <div>
@@ -1508,7 +1516,7 @@ export function SetupWizard({
             gebunden an die Turnier-GUID zum Zeitpunkt der Wahl. Gesendet wird im
             Dashboard; im Slave-Modus gibt es den Abschnitt nicht (nur der Master lädt hoch). */}
         {!slaveMode && (
-          <section id="section-tp-datei" className="flex flex-col gap-2 scroll-mt-14">
+          <section id="section-tp-datei" className="flex flex-col gap-2 scroll-mt-24">
             <SectionHeader icon={Database}>TP-Datei (Turnierdatenbank)</SectionHeader>
             <p className="text-xs text-slate-500">
               Die offene Turnierdatei von BTP (<code>.tp</code>) lässt sich im Dashboard an
@@ -2015,7 +2023,7 @@ export function SetupWizard({
 
       <Gruppe id="aufruf">
         {/* Sprachansagen */}
-        <section id="section-ansagen" className="flex flex-col gap-2 scroll-mt-14">
+        <section id="section-ansagen" className="flex flex-col gap-2 scroll-mt-24">
           <SectionHeader icon={Volume2}>Ansagen</SectionHeader>
           <p className="text-xs text-slate-500">
             Das ganze Ansage-Modul: sagt jedes Spiel an, das in BTP auf ein Feld
@@ -2106,7 +2114,7 @@ export function SetupWizard({
         </section>
 
         {/* Meetingpoint (Spec meetingpoint-spielbereit) */}
-        <section id="section-meetingpoint" className="flex flex-col gap-2 scroll-mt-14">
+        <section id="section-meetingpoint" className="flex flex-col gap-2 scroll-mt-24">
           <SectionHeader icon={MapPin}>Meetingpoint</SectionHeader>
           <p className="text-xs text-slate-500">
             Zum Meetingpoint gerufene Partien checken sich an einem Tablet oder
@@ -2314,7 +2322,7 @@ export function SetupWizard({
 
       <Gruppe id="personal">
         {/* Schiedsrichter (SR/AR) */}
-        <section id="section-schiedsrichter" className="flex flex-col gap-2 scroll-mt-14">
+        <section id="section-schiedsrichter" className="flex flex-col gap-2 scroll-mt-24">
           <SectionHeader icon={Gavel}>Schiedsrichter</SectionHeader>
           <p className="text-xs text-slate-500">
             Für Turniere mit Schiedsrichtern: BTS Light übernimmt die
@@ -2388,7 +2396,7 @@ export function SetupWizard({
         {/* Schiedsrichterzettel drucken (Spec schiedsrichterzettel-autodruck) */}
         <section
           id="section-zetteldruck"
-          className="flex flex-col gap-2 scroll-mt-14"
+          className="flex flex-col gap-2 scroll-mt-24"
         >
           <SectionHeader icon={Printer}>Schiedsrichterzettel</SectionHeader>
           <p className="text-xs text-slate-500">
@@ -2475,7 +2483,7 @@ export function SetupWizard({
         {/* Court-Monitor */}
         <section
           id="section-court-monitor"
-          className="flex flex-col gap-2 scroll-mt-14"
+          className="flex flex-col gap-2 scroll-mt-24"
         >
           <SectionHeader icon={Monitor}>Court-Monitor</SectionHeader>
           <p className="text-xs text-slate-500">
@@ -2789,7 +2797,7 @@ export function SetupWizard({
         {/* Vereins-Anzeige (turnierweit, TL-Web + Tablet) */}
         <section
           id="section-vereine"
-          className="flex flex-col gap-2 scroll-mt-14"
+          className="flex flex-col gap-2 scroll-mt-24"
         >
           <SectionHeader icon={Image}>Vereine anzeigen</SectionHeader>
           <p className="text-xs text-slate-500">
@@ -2823,7 +2831,7 @@ export function SetupWizard({
 
         {/* Hallen-Check-In (ADR 0009). Die id ist der Sprungpunkt aus dem
             ausgegrauten Menüpunkt „Check-In" in der Seitenleiste. */}
-        <section id="section-check-in" className="flex flex-col gap-2 scroll-mt-14">
+        <section id="section-check-in" className="flex flex-col gap-2 scroll-mt-24">
           <SectionHeader icon={Users}>Hallen-Check-In</SectionHeader>
           <p className="text-xs text-slate-500">
             Spieler bestätigen vor Beginn ihrer Spielklasse über eine Webseite
@@ -2888,27 +2896,35 @@ export function SetupWizard({
         </section>
       </Gruppe>
 
-      {saveError && <p className="text-sm text-rose-700">{saveError}</p>}
-      {saved && isSettings && (
-        <p className="flex items-center gap-1.5 text-sm text-emerald-700">
-          <Check size={16} /> Gespeichert – Liveticker neu gestartet.
-        </p>
-      )}
-
-      <button
-        onClick={saveAndStart}
-        disabled={!canSave || saving}
-        className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-medium text-white
-                   transition-colors hover:bg-slate-900 disabled:opacity-50"
+      {/* Speichern-Leiste klebt unten: Wer mitten auf der Seite etwas
+          ändert, sieht den Knopf, ohne ans Ende zu scrollen — vergessenes
+          Speichern war der häufigste Stolperstein. */}
+      <div
+        className="sticky bottom-0 z-10 -mx-6 -mb-6 flex flex-col gap-2 border-t border-slate-200
+                   bg-white/95 px-6 py-3 backdrop-blur"
       >
-        {saving
-          ? isSettings
-            ? "Wird gespeichert …"
-            : "Wird gestartet …"
-          : isSettings
-            ? "Speichern"
-            : "Speichern & Liveticker starten"}
-      </button>
+        {saveError && <p className="text-sm text-rose-700">{saveError}</p>}
+        {saved && isSettings && (
+          <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+            <Check size={16} /> Gespeichert – Liveticker neu gestartet.
+          </p>
+        )}
+
+        <button
+          onClick={saveAndStart}
+          disabled={!canSave || saving}
+          className="rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-medium text-white
+                     transition-colors hover:bg-slate-900 disabled:opacity-50"
+        >
+          {saving
+            ? isSettings
+              ? "Wird gespeichert …"
+              : "Wird gestartet …"
+            : isSettings
+              ? "Speichern"
+              : "Speichern & Liveticker starten"}
+        </button>
+      </div>
     </main>
   );
 }

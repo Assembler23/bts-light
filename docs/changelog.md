@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.332
+
+- **Speichern-Knopf klebt unten.** In den Einstellungen bleibt der Knopf
+  „Speichern" immer am unteren Fensterrand sichtbar — wer mitten auf der
+  Seite etwas ändert, muss nicht mehr ans Ende scrollen und vergisst das
+  Speichern seltener.
+- **Sprungleiste ohne Scrollen.** Die Leiste oben zeigt alle sechs Bereiche
+  in zwei Reihen mit kurzen Namen, statt seitlich zu scrollen.
+- **QR-Codes passen in ihren Kasten.** Die QR-Codes der Meetingpoint-Seite
+  (Tablets → QR-Codes) und der Ansage-Seite ragten über ihren Rahmen hinaus;
+  sie werden jetzt auf die Kastengröße verkleinert.
+
 ## v0.9.331
 
 - **Ein Aufruf in die Vorbereitung wird jetzt angesagt.** Wer ein Spiel von

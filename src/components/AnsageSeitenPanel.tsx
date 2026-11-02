@@ -110,7 +110,7 @@ export function AnsageSeitenPanel({
                     {l.hall || "Ansage"}
                   </figcaption>
                   <div
-                    className="w-40 bg-white p-2"
+                    className="w-40 bg-white p-2 [&>svg]:h-auto [&>svg]:w-full"
                     // Der QR-Code kommt als SVG aus dem Kern.
                     dangerouslySetInnerHTML={{ __html: l.qr_svg }}
                   />
