@@ -34,6 +34,7 @@ import { resolveNameCorrection } from "./nameCorrection.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
 import { disziplinName } from "./disziplinName.mjs";
 import { klasseSsml, klasseText } from "./klasseSprechen.mjs";
+import { ssmlDokument } from "./ssmlRahmen.mjs";
 import { startPlaySegments } from "./startPlayText.mjs";
 import { scorekeeperCallSegments } from "./scorekeeperCallText.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
@@ -999,6 +1000,8 @@ export function buildAnnouncementSsml(
   ipaMap?: Map<string, string>,
   langMap?: Map<string, string>,
   sayMap?: Map<string, string>,
+  /** Tempo 0,5–1,5 wie am Regler; wirkt per `<prosody>` auch bei Azure. */
+  rate?: number,
 ): string {
   const court = xmlEscape(resolveCourtPhrase(input.courtLabel, lang));
   const disc = disciplineSsml(input.discipline, input.className, lang);
@@ -1022,11 +1025,7 @@ export function buildAnnouncementSsml(
     // `<speak>`-Rahmens ohne Inhalt — den schickte der Azure-Pfad sonst
     // ab, während der Web-Speech-Pfad sauber schweigt.
     if (teile.length === 0) return "";
-    const speakLangSk = lang === "de" ? "de-DE" : "en-US";
-    return (
-      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangSk}">` +
-      `<voice name="${xmlEscape(voice)}">${teile.join(" ")}</voice></speak>`
-    );
+    return ssmlDokument(lang, voice, teile, rate);
   }
   // Dieselben Segmente wie im Web-Speech-Pfad (`startPlaySegments`), damit
   // beide Wege Wort für Wort dasselbe sagen. Gebaut wird aus der ROHEN
@@ -1037,19 +1036,11 @@ export function buildAnnouncementSsml(
       resolveCourtPhrase(input.courtLabel, lang),
       lang,
     ).map(xmlEscape);
-    const speakLangStart = lang === "de" ? "de-DE" : "en-US";
-    return (
-      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangStart}">` +
-      `<voice name="${xmlEscape(voice)}">${teile.join(" ")}</voice></speak>`
-    );
+    return ssmlDokument(lang, voice, teile, rate);
   }
   if (input.officialsOnly) {
     for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
-    const speakLangOnly = lang === "de" ? "de-DE" : "en-US";
-    return (
-      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLangOnly}">` +
-      `<voice name="${xmlEscape(voice)}">${parts.join(" ")}</voice></speak>`
-    );
+    return ssmlDokument(lang, voice, parts, rate);
   }
   if (disc) parts.push(`${disc}.`);
   if (round) parts.push(`${xmlEscape(round)}.`);
@@ -1069,11 +1060,7 @@ export function buildAnnouncementSsml(
   // beide Wege Wort für Wort dasselbe ansagen.
   for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
 
-  const speakLang = lang === "de" ? "de-DE" : "en-US";
-  return (
-    `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
-    `<voice name="${xmlEscape(voice)}">${parts.join(" ")}</voice></speak>`
-  );
+  return ssmlDokument(lang, voice, parts, rate);
 }
 
 // ─── Vorbereiten und Abspielen ───────────────────────────────────────────
@@ -1130,6 +1117,7 @@ export function prepareAnnouncement(
         buildIpaMap(opts.nameOverrides, enabled),
         buildLangOverrideMap(opts.nameOverrides, enabled),
         buildOverrideMap(opts.nameOverrides, enabled),
+        opts.rate,
       );
     } catch (e) {
       reportAzureFallback(e);
@@ -1160,10 +1148,7 @@ export function prepareFreeText(
   if (!t) return null;
   let ssml: string | undefined;
   if (opts.azure) {
-    const speakLang = lang === "de" ? "de-DE" : "en-US";
-    ssml =
-      `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
-      `<voice name="${xmlEscape(opts.azure.voice)}">${xmlEscape(t)}</voice></speak>`;
+    ssml = ssmlDokument(lang, opts.azure.voice, [xmlEscape(t)], opts.rate);
   }
   return {
     // Freitext = kein Spielaufruf → anderer (aufsteigender) Gong.
@@ -1215,10 +1200,12 @@ export function prepareMeetingpointMissing(
         buildLangOverrideMap(opts.nameOverrides, enabled),
         buildOverrideMap(opts.nameOverrides, enabled),
       );
-      const speakLang = lang === "de" ? "de-DE" : "en-US";
-      ssml =
-        `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
-        `<voice name="${xmlEscape(opts.azure.voice)}">${namenSsml}. ${xmlEscape(ziel)}</voice></speak>`;
+      ssml = ssmlDokument(
+        lang,
+        opts.azure.voice,
+        [`${namenSsml}.`, xmlEscape(ziel)],
+        opts.rate,
+      );
     } catch (e) {
       reportAzureFallback(e);
     }
@@ -1257,6 +1244,7 @@ export function preparePreparationAnnouncement(
         buildIpaMap(opts.nameOverrides, enabled),
         buildLangOverrideMap(opts.nameOverrides, enabled),
         buildOverrideMap(opts.nameOverrides, enabled),
+        opts.rate,
       );
     } catch (e) {
       reportAzureFallback(e);
@@ -1545,6 +1533,8 @@ export function buildPreparationSsml(
   ipaMap?: Map<string, string>,
   langMap?: Map<string, string>,
   sayMap?: Map<string, string>,
+  /** Tempo 0,5–1,5 wie am Regler; wirkt per `<prosody>` auch bei Azure. */
+  rate?: number,
 ): string {
   const disc = disciplineSsml(input.discipline, input.className, lang);
   const round = knockoutRoundLabel(input.roundName, lang);
@@ -1587,11 +1577,7 @@ export function buildPreparationSsml(
     }
   }
   if (zusatz) parts.push(zusatz);
-  const speakLang = lang === "de" ? "de-DE" : "en-US";
-  return (
-    `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${speakLang}">` +
-    `<voice name="${xmlEscape(voice)}">${parts.join(" ")}</voice></speak>`
-  );
+  return ssmlDokument(lang, voice, parts, rate);
 }
 
 // Spielt Gong + spricht die Vorbereitungs-Ansage. Wirft NICHT bei

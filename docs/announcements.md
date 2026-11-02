@@ -604,7 +604,7 @@ dem Turnier einmal die Test-Ansage drücken.
 | `enabled` | Ansagen an/aus (Default aus) |
 | `language_mode` | `de` · `en` · `auto` |
 | `voice_de` / `voice_en` | bevorzugte Stimme je Sprache (`voiceURI`), leer = Browser-Standard |
-| `rate` | Sprech-Geschwindigkeit 0,5–1,5 (Default 0,8) |
+| `rate` | Sprech-Geschwindigkeit 0,5–1,5 (Default 0,8). Gilt seit v0.9.333 **auch für Azure** (`<prosody rate>`, 0,8 = „-20%“); vorher sprach Azure immer im Normaltempo. |
 | `gong` | Gong vor der Ansage (Default an) |
 | `name_overrides` | Phonetische Aussprache-Korrekturen (Nutzer), Liste `{ name, say }` (Default leer) |
 | `name_overrides_enabled` | Korrekturen anwenden (Basis-Wörterbuch + Nutzer)? Default `true` |
@@ -613,6 +613,12 @@ dem Turnier einmal die Test-Ansage drücken.
 | `announce_scorekeeper` | Zähltafelbedienung mit ansagen? Default `true`. An = angesagt wird, **was am Feld steht** (zugewiesene Bedienung *oder* pro-Feld-Hinweis), aus = nie. Löst die feste Regel aus ADR 0007 ab ([ADR 0040](adr/0040-ansage-besetzung-einstellbar.md)). |
 | `announce_umpire` | Schiedsrichter/Aufschlagrichter in der Feld-Ansage nennen? Default `true`. Die eigenen Knöpfe „SR/AR ansagen" und „Bedienung nachrufen" bleiben unberührt. |
 | `page_audio` | „Audio für Ansage-Seiten erzeugen": Der PC vertont Ansagen für die Browser-Seite `/ansage`, unabhängig von `enabled`. Default `false`. Siehe [Ansage-Seite im Browser](#ansage-seite-im-browser-seit-v09311). |
+
+> **Pausen im Azure-SSML (seit v0.9.333, `src/io/ssmlRahmen.mjs`):** Zwischen den Blöcken
+> (Feld · Klasse · Paarung · „gegen" · Halle) steht eine echte Pause von 350 ms, vor und nach
+> einem fremdsprachigen Namen (`<lang>`) je 120 ms — an diesen Sprachwechseln verschluckte die
+> Stimme sonst gern Wörter. Das Tempo bekommt jedes Stück einzeln, weil Azure kein `<lang>`
+> in `<prosody>` erlaubt.
 
 > **UX:** Ist `azure_tts.enabled` aktiv, blendet [`AnnounceSettings`](../src/components/AnnounceSettings.tsx) die
 > Standard-Stimmen-Auswahl (`voice_de`/`voice_en`) aus — Azure spricht die ganze Ansage, die lokale Stimme

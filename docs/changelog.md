@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.333
+
+- **Azure-Ansagen langsamer und mit Pausen.** Der Tempo-Regler der Ansagen
+  wirkt jetzt auch bei der Azure-Stimme — bisher sprach sie immer im
+  Normaltempo, für die Halle zu schnell. Zwischen Feld, Klasse, Paarung und
+  Halle stehen echte Pausen, und fremdsprachige Namen werden kurz abgesetzt,
+  damit an den Sprachwechseln nichts mehr verschluckt wird.
+
 ## v0.9.332
 
 - **Speichern-Knopf klebt unten.** In den Einstellungen bleibt der Knopf
