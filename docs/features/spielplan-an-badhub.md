@@ -66,6 +66,19 @@ Zeit gesendet statt einer falschen — badhub zeigt das Feld dann nicht an.
 beendeten Spiel ist „wann bin ich dran" sinnlos, und ein stehengebliebener
 Wert wäre schlimmer als keiner.
 
+**Die Prognose rechnet der Spielplan-Versand selbst (seit v0.9.334).** Sie
+entsteht beim Bau des Turnierleitungs-Zustands (`tl::build_state`). Bis
+v0.9.333 baute den nur eine **offene** TL-Seite — ohne sie ging der Spielplan
+ohne `predicted_start_ts` hinaus, oder mit den Werten der zuletzt offenen
+Ansicht, die längst in der Vergangenheit lagen. Jetzt ruft `send_sched` vor
+jedem Versand `tl::prognose_auffrischen` (voller Zustandsbau, Ergebnis
+verworfen): höchstens einmal je Minute, und badhub bekommt garantiert dieselbe
+Prognose wie die TL-Liste. Gesendet werden **nur die frisch gerechneten**
+Werte, nicht der gemergte Prognose-Speicher: Der behält Einträge von Spielen,
+die keine Prognose mehr bekommen (Wunschfeld, Ausnahme von der Vergabe, hinter
+die Wartelisten-Grenze gerutscht). Mit ausgeschaltetem Prognose-Schalter
+(`prediction.enabled`) wird nichts gerechnet und nichts gesendet.
+
 ## Takt
 
 `SchedTakt::faellig(jetzt_ms)` gibt höchstens alle 60 Sekunden `true`.

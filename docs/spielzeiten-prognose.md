@@ -117,12 +117,16 @@ Spielern. Beendete Spiele tragen ihre Ist-Zeiten in der Beendet-Zeile
 
 - Die Prognose ist eine **Anzeige-Hilfe der Turnierleitung** — kein
   verbindlicher Zeitplan und bewusst nicht auf Monitoren oder im
-  badhub-Ticker sichtbar.
+  badhub-Ticker sichtbar. Der Spielplan an badhub (Spielerseite, Spec
+  `spielplan-an-badhub`) trägt sie für wartende Spiele mit; seit v0.9.334
+  auch dann, wenn gerade keine Turnierleitungs-Ansicht offen ist.
 - Bei BTP-Zeitfenster-Planung (alle Vormittagsspiele „9:00") ersetzt die
   Prognose die BTP-Zeiten, sie nutzt sie nicht.
 - Erfolgsmaß (Spec E12): am Testturnier ≥ 70 % der Spiele innerhalb
   ±10 Minuten — beim Bruttostart-Stempel schreibt der Host die zuletzt
   publizierte Prognose ins Diagnose-Log, daraus lässt sich das auswerten.
+  Seit v0.9.334 ist dieser Wert bei laufender Übertragung höchstens eine
+  Minute alt (Spielplan-Versand), auch ohne offene Turnierleitungs-Ansicht.
 
 ## Restzeit als gemeinsamer Helfer (seit v0.9.330)
 

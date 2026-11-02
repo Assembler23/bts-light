@@ -1,6 +1,6 @@
 // Rahmen, Tempo und Pausen für das Azure-SSML der Ansagen.
 //
-// Warum: Bis v0.9.332 sprach Azure jede Ansage im Normaltempo — der Regler
+// Warum: Bis v0.9.334 sprach Azure jede Ansage im Normaltempo — der Regler
 // „Tempo" (Standard 0,8) wirkte nur auf Windows-/Browser-Stimme. Und die
 // Blöcke (Klasse | Namen | „gegen" | Feld) standen nur durch Punkte getrennt
 // hintereinander; im Hallenhall verschwammen die Übergänge, Wörter wurden
