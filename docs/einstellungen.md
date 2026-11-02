@@ -5,9 +5,13 @@ eine Option tut, was voreingestellt ist, und ab wann eine Änderung wirkt.
 
 Die Seite ist in **sechs Bereiche** gegliedert — Turnier & Verbindung,
 Feldvergabe & Planung, Aufruf, Ansage & Meetingpoint, Schiedsrichter &
-Zähltafel, Anzeigen & Check-In, Diagnose. Die Leiste oben springt per Klick
-zum Bereich und bleibt beim Scrollen stehen. Dieses Kapitel folgt derselben
+Zähltafel, Anzeigen & Check-In, Diagnose. Die Leiste oben zeigt alle sechs
+auf einen Blick (in Kurzform, etwa „Aufruf & Ansage"), springt per Klick zum
+Bereich und bleibt beim Scrollen stehen. Dieses Kapitel folgt derselben
 Reihenfolge.
+
+Der **Speichern-Knopf klebt unten am Fenster** — er ist von jeder Stelle der
+Seite aus sichtbar, man muss zum Speichern nicht ans Ende scrollen.
 <!-- pruef: "Aufruf, Ansage & Meetingpoint" in src/pages/SetupWizard.tsx -->
 
 Du erreichst sie über **Einstellungen** in der linken Leiste. Es ist dieselbe

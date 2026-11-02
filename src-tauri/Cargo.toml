@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.331"
+version = "0.9.332"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"

@@ -343,7 +343,7 @@ export function TabletPanel({ announce, azureTts }: Props) {
         >
           <div className="flex flex-col items-center rounded-xl bg-white p-6 text-center">
             <div
-              className="bg-white"
+              className="bg-white [&>svg]:h-full [&>svg]:w-full"
               style={{ width: "min(72vw, 72vh)", height: "min(72vw, 72vh)" }}
               // Der QR-Code kommt als SVG aus dem Kern.
               dangerouslySetInnerHTML={{ __html: mpZoom.qr_svg }}
@@ -509,7 +509,9 @@ function MeetingpointLinks({
             <button
               onClick={() => onZoom(l)}
               title="QR-Code groß anzeigen"
-              className="h-16 w-16 shrink-0 rounded bg-white"
+              // Das SVG aus dem Kern hat feste 220 px — ohne die `[&>svg]`-Regel
+              // ragte es aus dem kleinen Knopf heraus.
+              className="h-16 w-16 shrink-0 overflow-hidden rounded bg-white [&>svg]:h-full [&>svg]:w-full"
               // Der QR-Code kommt als SVG aus dem Kern.
               dangerouslySetInnerHTML={{ __html: l.qr_svg }}
             />
