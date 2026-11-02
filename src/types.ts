@@ -1303,6 +1303,15 @@ export interface AnsageHoerer {
   doppelbetrieb: string[];
 }
 
+/** Adresse der Meetingpoint-Seite (Rust: commands::MeetingpointLink). */
+export interface MeetingpointLink {
+  /** Leer = Turnier mit nur einer Halle. */
+  hall: string;
+  kind: "lan" | "lan-tls" | "cloud";
+  url: string;
+  qr_svg: string;
+}
+
 /** Link einer Ansage-Seite (Rust: commands::AnsageLink). */
 export interface AnsageLink {
   hall: string;

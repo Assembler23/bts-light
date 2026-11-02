@@ -35,6 +35,13 @@ mit „nicht gefunden"), und an der Feldvergabe ändert sich nichts.
 <!-- pruef: /\.route\(.\/meetingpoint., get\(meetingpoint_page\)\)/ in src-tauri/src/tablet/server.rs -->
 <!-- pruef: /\.route\(.\/\{ns\}\/meetingpoint., get\(meetingpoint_page\)\)/ in relay/src/main.rs -->
 
+**Wo finde ich die Adresse?** Am Turnier-PC unter **Tablets → QR-Codes**:
+Bei eingeschaltetem Meetingpoint steht dort oben der Block
+**Meetingpoint-Seite** mit je Halle und Verbindungsweg einem QR-Code (zum
+Scannen am Meetingpoint-Gerät), der Adresse als Link und einem
+Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
+<!-- pruef: "Meetingpoint-Seite" in src/pages/TabletPanel.tsx -->
+
 - **Ein Meetingpoint je Halle.** Im Mehr-Hallen-Turnier gehört der
   Hallenname in die Adresse. Fehlt er oder ist er unbekannt, zeigt die Seite
   zuerst eine Hallenwahl. Im Ein-Hallen-Turnier genügt `/meetingpoint`.

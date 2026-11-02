@@ -83,6 +83,10 @@ LAN+Cloud voraus.
   **📣 In Vorbereitung rufen**. Ist das Spiel gerufen, heißt derselbe
   Eintrag **📣 Aufruf zurücknehmen**; an der Zeile steht dann die Marke
   „gerufen". Bis v0.9.323 war das ein Megafon-Knopf direkt an der Zeile.
+  Seit v0.9.331 wird jeder neue Aufruf **angesagt** („In Vorbereitung …
+  Bitte in Halle X"), sofern ein Ansage-Gerät läuft; ein erneuter Aufruf in
+  dieselbe Halle nicht noch einmal. Nachrufe danach beginnen bei „Zweiter
+  Aufruf".
   <!-- pruef: "In Vorbereitung rufen" in src-tauri/assets/tl.html -->
   <!-- pruef: "Aufruf zurücknehmen" in src-tauri/assets/tl.html -->
 - **Was an einer Wartelisten-Zeile sichtbar ist:** rechts nur das

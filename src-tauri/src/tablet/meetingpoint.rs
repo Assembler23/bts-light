@@ -832,6 +832,63 @@ pub fn hallen_name(snap: &BtpSnapshot, location_id: Option<i64>) -> String {
         .unwrap_or_default()
 }
 
+/// Ruft Spiele von Hand in die Vorbereitung (Desktop „Aufrufen" und TL-Web
+/// „In Vorbereitung rufen") und sagt jeden **neuen** Aufruf an — als ersten
+/// Aufruf („In Vorbereitung …"), genau wie die Aufruf-Automatik. Vorher
+/// trug der Hand-Aufruf nur ein; gesprochen wurde erst über den
+/// Lautsprecher-Knopf am Desktop, im TL-Web gar nicht.
+///
+/// Nicht erneut angesagt wird ein Spiel, das schon in **dieselbe** Halle
+/// gerufen ist (dort bleibt auch die Uhr stehen), und eines, das gerade auf
+/// dem Feld steht. Eine andere Halle ist ein neuer Aufruf und wird
+/// angesagt. Der Aufruf räumt die automatisch vorverteilte Halle (E3, Spec
+/// `hallen-vorverteilung`). `ansagen = false` am Slave: Ansage-Aufträge
+/// legt nur der Turnier-PC ab, sonst gäbe es zwei Quellen. Liefert die Zahl
+/// der Ansage-Aufträge.
+pub fn hand_aufruf(
+    tablet: &TabletState,
+    match_ids: &[i64],
+    location_id: Option<i64>,
+    now_ms: u64,
+    ansagen: bool,
+) -> usize {
+    let snap = tablet.snapshot_clone();
+    let schon_gerufen: Vec<i64> = tablet
+        .meetingpoint_store()
+        .active_calls()
+        .iter()
+        .filter(|c| c.location_id == location_id)
+        .map(|c| c.match_id)
+        .collect();
+    let mut auftraege = 0;
+    for &match_id in match_ids {
+        tablet.add_preparation_call(PreparationCall {
+            match_id,
+            location_id,
+            called_at_ms: now_ms,
+        });
+        tablet.auto_hall_store().remove(match_id);
+        if !ansagen || schon_gerufen.contains(&match_id) {
+            continue;
+        }
+        let Some(snap) = snap.as_ref() else { continue };
+        let auf_dem_feld = snap
+            .matches
+            .iter()
+            .any(|m| m.id == match_id && m.status == MatchStatus::OnCourt);
+        if auf_dem_feld {
+            continue;
+        }
+        tablet.publish_announce_job(
+            hallen_name(snap, location_id),
+            crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id },
+            now_ms,
+        );
+        auftraege += 1;
+    }
+    auftraege
+}
+
 /// Passt der Hallenparameter einer Seite zum Aufruf? Ein-Hallen-Turnier:
 /// immer. Mehr-Hallen: nur exakt diese Halle (ohne Groß/Klein).
 fn halle_passt(snap: &BtpSnapshot, seite: &str, call_halle: &str) -> bool {
@@ -2195,5 +2252,75 @@ mod tests {
         fertig.matches[1].status = MatchStatus::Finished;
         t.meetingpoint_store().reconcile(&fertig);
         assert!(t.meetingpoint_store().feld_checks(11).is_empty());
+    }
+
+    // ── Ansage beim Hand-Aufruf ──
+
+    fn ansagen(t: &TabletState, halle: &str) -> Vec<i64> {
+        t.announce_jobs_since(halle, 0, 10_000, true)
+            .into_iter()
+            .filter_map(|j| match j.kind {
+                crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id } => {
+                    Some(match_id)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ein_hand_aufruf_wird_angesagt() {
+        let t = zustand(turnier(false));
+        assert_eq!(hand_aufruf(&t, &[10, 11], None, 1_000, true), 2);
+        assert_eq!(ids(t.meetingpoint_store()), vec![10, 11]);
+        assert_eq!(ansagen(&t, ""), vec![10, 11]);
+    }
+
+    #[test]
+    fn erneut_in_dieselbe_halle_gerufen_wird_nicht_wieder_angesagt() {
+        let t = zustand(turnier(true));
+        assert_eq!(hand_aufruf(&t, &[10], Some(1), 1_000, true), 1);
+        assert_eq!(hand_aufruf(&t, &[10], Some(1), 2_000, true), 0);
+        assert_eq!(ansagen(&t, "Halle A"), vec![10]);
+        // Die Uhr des ersten Aufrufs bleibt.
+        assert_eq!(t.meetingpoint_store().active_calls()[0].called_at_ms, 1_000);
+    }
+
+    #[test]
+    fn in_eine_andere_halle_gerufen_wird_neu_angesagt() {
+        let t = zustand(turnier(true));
+        hand_aufruf(&t, &[10], Some(1), 1_000, true);
+        assert_eq!(hand_aufruf(&t, &[10], Some(2), 2_000, true), 1);
+        assert_eq!(ansagen(&t, "Halle A"), vec![10]);
+        assert_eq!(ansagen(&t, "Halle B"), vec![10]);
+    }
+
+    #[test]
+    fn ein_geparkter_aufruf_wird_beim_erneuten_rufen_wieder_angesagt() {
+        let t = zustand(turnier(false));
+        hand_aufruf(&t, &[10], None, 1_000, true);
+        let mut feld = turnier(false);
+        feld.matches[0].status = MatchStatus::OnCourt;
+        t.meetingpoint_store().reconcile(&feld);
+        assert!(ids(t.meetingpoint_store()).is_empty(), "geparkt");
+        assert_eq!(hand_aufruf(&t, &[10], None, 2_000, true), 1);
+        assert_eq!(ansagen(&t, ""), vec![10, 10]);
+    }
+
+    #[test]
+    fn am_slave_wird_eingetragen_aber_nicht_angesagt() {
+        let t = zustand(turnier(false));
+        assert_eq!(hand_aufruf(&t, &[10], None, 1_000, false), 0);
+        assert_eq!(ids(t.meetingpoint_store()), vec![10]);
+        assert!(ansagen(&t, "").is_empty());
+    }
+
+    #[test]
+    fn ein_spiel_auf_dem_feld_wird_nicht_angesagt() {
+        let mut s = turnier(false);
+        s.matches[0].status = MatchStatus::OnCourt;
+        let t = zustand(s);
+        assert_eq!(hand_aufruf(&t, &[10], None, 1_000, true), 0);
+        assert!(ansagen(&t, "").is_empty());
     }
 }

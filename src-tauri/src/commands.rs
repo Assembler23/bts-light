@@ -4527,6 +4527,80 @@ pub fn ansage_link(state: State<'_, AppState>) -> Vec<AnsageLink> {
         .collect()
 }
 
+/// Eine Adresse der Meetingpoint-Seite samt QR-Code.
+#[derive(Debug, Clone, Serialize)]
+pub struct MeetingpointLink {
+    /// Leer = Turnier mit nur einer Halle (die Seite braucht dann keine).
+    pub hall: String,
+    /// `lan`, `lan-tls` oder `cloud`.
+    pub kind: String,
+    pub url: String,
+    pub qr_svg: String,
+}
+
+/// Adressen der Meetingpoint-Seite je Halle und Verbindungsweg, damit die
+/// Turnierleitung sie nicht selbst zusammenbauen muss (Spec
+/// `meetingpoint-spielbereit`). Leer, solange der Meetingpoint aus ist —
+/// dann antwortet die Seite ohnehin mit „nicht gefunden" — und am Slave
+/// (die Links gehören an den Turnier-PC).
+#[tauri::command]
+pub fn meetingpoint_links(state: State<'_, AppState>) -> Vec<MeetingpointLink> {
+    let config = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .clone();
+    if !config.meetingpoint.enabled || config.slave_mode {
+        return Vec::new();
+    }
+    let mut basen: Vec<(&str, String)> = Vec::new();
+    if config.connection_mode.lan_enabled() {
+        basen.push((
+            "lan",
+            format!("http://{}", crate::tablet::server::lan_host()),
+        ));
+        let tls_port = crate::tablet::server::tls_port_aktiv();
+        if config.tls.enabled && tls_port != 0 {
+            basen.push((
+                "lan-tls",
+                format!("https://{}", crate::tablet::server::lan_host_tls(tls_port)),
+            ));
+        }
+    }
+    if config.connection_mode.cloud_enabled() && !config.install_id.trim().is_empty() {
+        basen.push((
+            "cloud",
+            format!(
+                "{}/{}",
+                crate::badhub_host::relay_https(),
+                config.install_id
+            ),
+        ));
+    }
+    let mut hallen = state.tablet.ansage_hallen();
+    if hallen.is_empty() {
+        hallen.push(String::new());
+    }
+    let mut out = Vec::new();
+    for hall in &hallen {
+        let query = if hall.is_empty() {
+            String::new()
+        } else {
+            format!("?halle={}", relay_proto::path_encode(hall))
+        };
+        for (kind, basis) in &basen {
+            let url = format!("{basis}/meetingpoint{query}");
+            out.push(MeetingpointLink {
+                hall: hall.clone(),
+                kind: (*kind).to_string(),
+                qr_svg: crate::aushang::qr_svg(&url).unwrap_or_default(),
+                url,
+            });
+        }
+    }
+    out
+}
+
 /// Master: eine Freitext-Ansage ablegen. `hall` = Ziel-Halle (BTP-Location-Name;
 /// leer = alle Hallen). Master + Slaves pollen sie über `pending_freetext`.
 #[tauri::command]
@@ -5244,19 +5318,21 @@ pub async fn slave_devices(state: State<'_, AppState>) -> Result<SlaveDeviceInfo
 /// Aufruf an eine Halle (oder `None` bei einem hallenunabhängigen Aufruf).
 #[tauri::command]
 pub fn call_preparation(state: State<'_, AppState>, match_ids: Vec<i64>, location_id: Option<i64>) {
-    let now = now_ms();
-    for match_id in match_ids {
-        state
-            .tablet
-            .add_preparation_call(crate::tablet::state::PreparationCall {
-                match_id,
-                location_id,
-                called_at_ms: now,
-            });
-        // Der Aufruf räumt eine automatisch vorverteilte Halle (E3, Spec
-        // `hallen-vorverteilung`) — wie im TL-Web-Pfad.
-        state.tablet.auto_hall_store().remove(match_id);
-    }
+    // Eintragen, Auto-Halle räumen (E3) und jeden neuen Aufruf ansagen —
+    // derselbe Weg wie im TL-Web. Am Slave nur eintragen: Ansage-Aufträge
+    // legt allein der Turnier-PC ab.
+    let slave = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .slave_mode;
+    crate::tablet::meetingpoint::hand_aufruf(
+        &state.tablet,
+        &match_ids,
+        location_id,
+        now_ms(),
+        !slave,
+    );
 }
 
 /// Nimmt den „in Vorbereitung"-Aufruf eines Spiels zurück.

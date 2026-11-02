@@ -1961,7 +1961,8 @@ export function SetupWizard({
         <SectionHeader icon={MapPin}>Meetingpoint</SectionHeader>
         <p className="text-xs text-slate-500">
           Zum Meetingpoint gerufene Partien checken sich an einem Tablet oder
-          Touch-Bildschirm einzeln ein (Seite <code>/meetingpoint?halle=…</code>).
+          Touch-Bildschirm einzeln ein. Adresse und QR-Code je Halle stehen
+          danach unter Tablets → QR-Codes.
           Die Turnierleitung sieht, wer da ist, und bringt spielbereite Partien
           aufs Feld. Der Zähltafelbediener checkt nicht ein.
         </p>

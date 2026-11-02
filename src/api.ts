@@ -6,6 +6,7 @@ import type {
   AnsageAuftrag,
   AnsageHoerer,
   AnsageLink,
+  MeetingpointLink,
   AnsageQuellen,
   AppConfig,
   CheckinView,
@@ -431,6 +432,10 @@ export const ansageHoerer = (): Promise<AnsageHoerer> => invoke("ansage_hoerer")
 
 /** Links (und QR) der Ansage-Seite je Halle. */
 export const ansageLink = (): Promise<AnsageLink[]> => invoke("ansage_link");
+
+/** Adressen der Meetingpoint-Seite je Halle (leer, solange er aus ist). */
+export const meetingpointLinks = (): Promise<MeetingpointLink[]> =>
+  invoke("meetingpoint_links");
 
 /** Neue Ansage-Aufträge der Turnierleitung (id > since) für die eigene Halle.
  *  Die Seite selbst spricht nie — sie beauftragt, gesprochen wird hier. */

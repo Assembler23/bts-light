@@ -315,18 +315,15 @@ pub(crate) fn apply_state_action(
                     ),
                 ));
             }
-            for match_id in match_ids {
-                tablet.add_preparation_call(crate::tablet::state::PreparationCall {
-                    match_id: *match_id,
-                    location_id: *location_id,
-                    called_at_ms: now_ms,
-                });
-                // Der Aufruf ist die frischere Entscheidung als die
-                // automatische Vorverteilung — er räumt deren Eintrag (E3,
-                // Spec `hallen-vorverteilung`); der Sync-Reconcile ist nur
-                // das Sicherheitsnetz.
-                tablet.auto_hall_store().remove(*match_id);
-            }
+            // Eintragen, die automatisch vorverteilte Halle räumen (E3) und
+            // jeden neuen Aufruf ansagen — derselbe Weg wie am Desktop.
+            crate::tablet::meetingpoint::hand_aufruf(
+                tablet,
+                match_ids,
+                *location_id,
+                now_ms,
+                !config.slave_mode,
+            );
             Ok(TlResponse::ok(0))
         }
         A::RetractPreparation { match_id } => {

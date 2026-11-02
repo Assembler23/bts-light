@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.331
+
+- **Ein Aufruf in die Vorbereitung wird jetzt angesagt.** Wer ein Spiel von
+  Hand ruft (Desktop „Aufrufen" oder TL-Web „In Vorbereitung rufen"), hört
+  sofort „In Vorbereitung … Bitte in Halle X" — wie bisher schon bei der
+  Aufruf-Automatik des Meetingpoints. Bisher trug der Hand-Aufruf nur ein;
+  im TL-Web gab es für die erste Ansage gar keinen Weg. Ein erneuter Aufruf
+  in dieselbe Halle wird nicht noch einmal angesagt. Der „Ansage"-Knopf am
+  Desktop bleibt zum Wiederholen; die Nachruf-Knöpfe beginnen wie gewohnt
+  bei „Zweiter Aufruf". Voraussetzung ist ein laufendes Ansage-Gerät der
+  Halle (Desktop-App oder Ansage-Seite).
+- **Meetingpoint-Adresse zum Scannen.** Unter Tablets → QR-Codes steht bei
+  eingeschaltetem Meetingpoint die Adresse der Meetingpoint-Seite je Halle
+  (Hallennetz, verschlüsselt und Cloud) mit QR-Code, Link und Kopier-Knopf
+  — bisher musste man sie selbst zusammensetzen.
+
 ## v0.9.330
 
 - **Aufrufe „in Vorbereitung" überleben Neustart und Update.** Die
