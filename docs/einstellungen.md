@@ -265,7 +265,8 @@ Zeiten und der eingetragene Wert spielt keine Rolle mehr. Mehr dazu:
 einen Schalter; Stimme, Tempo, Gong, Aussprache und Halle stehen auf der
 eigenen Seite **Ansagen** in der linken Leiste. Solange der Schalter aus ist,
 ist dieser Menüpunkt ausgegraut. Details:
-[Sprachansagen für Feld-Aufrufe](announcements.md).
+[Sprachansagen für Feld-Aufrufe](announcements.md). Das **Tempo** gilt seit
+v0.9.335 für jede Stimme, auch für Azure.
 
 Der Schalter wirkt **sofort**, ohne Neustart; eine laufende Ansage wird beim
 Ausschalten abgebrochen.
