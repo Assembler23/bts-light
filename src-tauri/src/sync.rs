@@ -2285,6 +2285,12 @@ impl SyncEngine {
         // liest — `set_snapshot` läuft erst später im Poll, und sonst hielte
         // die Pause des alten Turniers den Wechsel-Poll noch an. Idempotent.
         tablet.bind_auto_assign_pause(&snapshot.tournament_name);
+        // Vorbereitungs-Aufrufe ebenso VOR `auto_assign` binden (ADR 0071):
+        // Sonst sähe die Vergabe im ersten Poll nach dem Start noch keinen
+        // der gespeicherten Aufrufe, beim Turnierwechsel die alten.
+        tablet
+            .meetingpoint_store()
+            .set_tournament(&snapshot.tournament_name);
         self.reconcile_wish_courts(tablet, &snapshot);
         // Warnung „Spiel scheint fertig, aber kein Ergebnis" (Spec
         // `tl-warnung-fertiges-spiel`): einmal je Poll gegen den Live-Stand
@@ -2336,6 +2342,10 @@ impl SyncEngine {
         // Ansage-Slave: nur lesen + lokal ansagen (MatchAnnouncer liest den
         // Snapshot). KEIN Liveticker-Push (würde mit dem Master kollidieren).
         if config.slave_mode {
+            // Auch am Slave gespeicherte Aufrufe aufräumen (ADR 0071): Sie
+            // lägen sonst bis zum Turnierwechsel auf der Platte und lebten
+            // nach einem Wechsel zum Master als Geister-Aufrufe wieder auf.
+            tablet.apply_preparation_calls(&mut snapshot.clone());
             return SyncOutcome::SlaveActive;
         }
         // Schiedsrichter-Rotation (Spec schiedsrichter-management Nr. 4):

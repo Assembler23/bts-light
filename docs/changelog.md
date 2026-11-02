@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.330
+
+- **Aufrufe „in Vorbereitung" überleben Neustart und Update.** Die
+  gerufenen Spiele stehen nach einem App-Neustart oder Update wieder da,
+  mit ihrem ursprünglichen Aufrufzeitpunkt; das gelbe BTP-Highlight bleibt
+  richtig zugeordnet und verschwindet wie gewohnt, wenn das Spiel aufs Feld
+  kommt.
+- **„Vom Feld nehmen" holt den Aufruf zurück.** Wird ein gerufenes Spiel
+  wieder vom Feld genommen, steht es wieder als gerufen in der Liste.
+- **Erneut in dieselbe Halle rufen setzt die Uhr nicht zurück.** „In
+  Vorbereitung · seit X Min" zählt ab dem ersten Aufruf weiter; ein Aufruf
+  in eine andere Halle beginnt neu. Erster Baustein des Meetingpoints
+  (Spec `meetingpoint-spielbereit`).
+
 ## v0.9.329
 
 - **Tablet nach dem Aufklappen schneller wieder bereit.** Wird ein

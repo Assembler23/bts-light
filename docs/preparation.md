@@ -37,7 +37,9 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
    an und (bei Mehr-Hallen-Turnieren) wählt die Halle.
 2. **Aufrufen** — der Knopf „In Halle X aufrufen" schickt einen
    `call_preparation`-Command an den Kern. Pro Match-ID gibt es höchstens
-   einen aktiven Aufruf (ein zweiter ersetzt den ersten).
+   einen Aufruf. Ein erneuter Aufruf in **dieselbe** Halle ändert nichts
+   (der erste Zeitpunkt bleibt, „seit X Min" läuft weiter); ein Aufruf in
+   eine **andere** Halle ersetzt den alten samt Zeitpunkt.
 3. **Stempeln** — der Sync-Lauf ruft `apply_preparation_calls` auf den
    nächsten BTP-Snapshot an: aufgerufene Matches bekommen die transienten
    Felder `preparation_call_ts` (Unix-ms) und `preparation_hall`
@@ -56,10 +58,15 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
    `playPreparationAnnouncement` aus: Gong → „In Vorbereitung" →
    Disziplin → Paarung → „Bitte in Halle X". Sprache aus `AnnounceConfig`
    oder automatisch (siehe [announcements.md](announcements.md)).
-7. **Aufräumen** — kommt das Match auf Court, beendet es oder verschwindet
-   es aus dem BTP-Stand, verwirft `apply_preparation_calls` den Aufruf
-   automatisch (keine Geister-Aufrufe). `diff.rs` löst dabei einen vollen
-   `tset` aus, sodass der Aufruf sofort vom Monitor verschwindet.
+7. **Aufräumen** — kommt das Match auf ein Feld, **ruht** sein Aufruf
+   (`apply_preparation_calls` parkt ihn; er zählt nicht mehr als Aufruf,
+   das BTP-Gelb geht weg). Wird das Spiel wieder vom Feld genommen und
+   führt BTP es drei Abrufe in Folge als geplant, lebt der Aufruf mit
+   seinem ersten Zeitpunkt wieder auf — egal ob über Desktop, TL-Web oder
+   BTP. Ist das Match beendet, verschwunden oder fehlt eine Mannschaft,
+   wird der Aufruf gelöscht (keine Geister-Aufrufe). `diff.rs` löst dabei
+   einen vollen `tset` aus, sodass der Aufruf sofort vom Monitor
+   verschwindet.
 8. **Zurücknehmen** — die Turnierleitung kann einen Aufruf jederzeit per
    `retract_preparation` manuell zurücknehmen.
 
@@ -143,12 +150,27 @@ heraus (keine Inkonsistenz zwischen Liste und State).
 
 - `PreparationCall { match_id, location_id: Option<i64>, called_at_ms }`
   — ein offener Aufruf; je `match_id` höchstens einer.
-- `TabletState.preparation_calls: RwLock<Vec<PreparationCall>>` — geteilt
-  zwischen Sync-Loop und Tauri-Command-Handlern.
+- **Seit v0.9.330 auf der Platte** (Spec
+  [`features/meetingpoint-spielbereit.md`](features/meetingpoint-spielbereit.md),
+  [ADR 0071](adr/0071-meetingpoint-zustand-ein-store.md)):
+  `tablet/meetingpoint.rs` `MeetingpointStore` hält die Aufrufe in
+  `meetingpoint.json` im App-Datenverzeichnis, turniergebunden nach dem
+  Muster ADR 0022 (Turnierwechsel verwirft, unlesbare Datei → leer). Je
+  Aufruf eine Phase **aktiv** oder **geparkt** (Spiel steht auf dem Feld).
+  Aufrufe überleben damit App-Neustart, Update und „Übertragung
+  stoppen/starten"; vorher waren sie nach jedem Neustart weg und das
+  BTP-Gelb blieb verwaist stehen. Der Sync-Loop bindet den Store schon vor
+  `auto_assign` ans Turnier.
+  Die **Nachruf-Stufen** („Zweiter/Dritter Aufruf") liegen weiter nur im
+  Arbeitsspeicher: Nach einem Neustart beginnt der nächste Nachruf wieder
+  bei „Zweiter Aufruf". Wird ein Aufruf gelöscht (Spielende, Paarung weg),
+  vergisst bts-light seine Stufen mit. Auch der Slave räumt seine Aufrufe
+  je Abruf auf, ruft aber selbst nichts.
 - `add_preparation_call` / `preparation_calls` / `remove_preparation_call`
-  — Mutationen / Abfrage, Muster wie die Walkover-Vorschläge.
-- `apply_preparation_calls(&mut snapshot)` — räumt nicht-ruf-bare Aufrufe
-  auf und stempelt die überlebenden in den Snapshot.
+  — Mutationen / Abfrage; `preparation_calls()` liefert nur **aktive**
+  Aufrufe in Aufrufreihenfolge.
+- `apply_preparation_calls(&mut snapshot)` — parkt, reaktiviert und räumt
+  auf (siehe Schritt 7) und stempelt die aktiven Aufrufe in den Snapshot.
 
 `btp/model.rs` – zwei transiente Felder auf `BtpMatch`, die der **Parser
 nicht** setzt:
