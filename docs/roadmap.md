@@ -496,6 +496,15 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Meetingpoint: Einchecken je Partie und „spielbereit"** — Spec:
+  [features/meetingpoint-spielbereit.md](features/meetingpoint-spielbereit.md)
+  (freigegeben 02.11.2026, ADR 0071–0075). Gerufene Partien checken sich am
+  Meetingpoint-Gerät je Halle einzeln ein (Spieler, optional SR); TL sieht den
+  Status, strikte Feld-Automatik vergibt nur spielbereite Partien; SR-Rotation
+  schon beim Aufruf; Aufruf-Automatik (fest N / Bedarf aus Restzeit);
+  Fehlende-Warnung + Ansage; Feld-Check am Zähl-Tablet. Aufrufe überleben
+  künftig Neustarts. Neun PRs, alles standardmäßig aus.
+
 - **Monitor-Stile und Stream-Einblendung** — Spec:
   [features/monitor-stile-und-stream.md](features/monitor-stile-und-stream.md)
   (freigegeben 31.10.2026, ADR 0068/0069/0070). Wunsch: die Ansichten aus bup auch für unsere
