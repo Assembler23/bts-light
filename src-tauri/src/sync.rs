@@ -564,7 +564,7 @@ impl SyncEngine {
         http: &reqwest::Client,
         snapshot: &BtpSnapshot,
         ctx: &crate::badhub::payload::LivetickerContext<'_>,
-        predicted: std::collections::HashMap<i64, u64>,
+        tablet: &TabletState,
         jetzt_ms: u64,
     ) {
         if self
@@ -577,6 +577,11 @@ impl SyncEngine {
             return;
         }
 
+        // Prognose erst jetzt rechnen, also nur, wenn der Spielplan wirklich
+        // hinausgeht — sonst stünde ohne offene Turnierleitungs-Ansicht nie
+        // ein `predicted_start_ts` darin (oder ein veralteter). Nur die frisch
+        // gerechneten Werte, nicht der gemergte Speicher (siehe dort).
+        let predicted = crate::tablet::tl::prognose_auffrischen(tablet, config, jetzt_ms);
         let sched = crate::badhub::payload::build_sched(snapshot, ctx, &predicted, self.rid);
         let anzahl = sched.event.matches.len();
 
@@ -2528,15 +2533,8 @@ impl SyncEngine {
         // danach — ein hängender Endpunkt darf die Ergebnisübertragung nicht
         // um seinen Timeout verzögern.
         let jetzt_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
-        self.send_sched(
-            config,
-            http,
-            &snapshot,
-            &queue_ctx,
-            tablet.predicted_starts_snapshot(),
-            jetzt_ms,
-        )
-        .await;
+        self.send_sched(config, http, &snapshot, &queue_ctx, tablet, jetzt_ms)
+            .await;
         // Punktverlauf und Aufschlag (badhub ADR-0060) — additiv wie der
         // Spielplan, deshalb nach dem Score-Push.
         self.send_verlauf(config, http, &snapshot, tablet).await;
