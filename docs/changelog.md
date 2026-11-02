@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.334
+
+- **Prognose an badhub auch ohne offene Turnierleitung.** Die voraussichtliche
+  Startzeit im Spielplan an badhub entstand bisher nur, solange irgendwo eine
+  Turnierleitungs-Seite offen war. Ohne sie fehlte die Zeit auf der
+  Spielerseite oder zeigte einen längst vergangenen Stand. bts-light rechnet
+  die Prognose jetzt bei jedem Spielplan-Versand selbst mit (höchstens einmal
+  pro Minute).
+
 ## v0.9.332
 
 - **Speichern-Knopf klebt unten.** In den Einstellungen bleibt der Knopf

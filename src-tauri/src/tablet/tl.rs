@@ -3589,6 +3589,42 @@ pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u
     build_state_limited(tablet, config, now_ms, rev, QUEUE_LIMIT)
 }
 
+/// Rechnet die Startzeit-Prognose frisch und legt sie im Host ab
+/// ([`TabletState::merge_predicted_starts`]) — ohne dass eine
+/// Turnierleitungs-Ansicht offen sein muss.
+///
+/// Warum: Die Prognose entsteht nur beim Bau des TL-Zustands. Ist keine
+/// TL-Seite offen, baut niemand ihn, und der Spielplan an badhub (`sched`)
+/// ging ohne `predicted_start_ts` hinaus — oder mit Werten von der letzten
+/// offenen Ansicht, die längst in der Vergangenheit lagen. Der Sync-Loop
+/// ruft das deshalb einmal je Spielplan-Versand (höchstens minütlich).
+///
+/// Bewusst über den vollen Zustandsbau und nicht über eine abgespeckte
+/// Kopie der Simulation: So kann die Prognose an badhub nie von der in der
+/// TL-Liste abweichen (dieselbe Begründung wie beim Snapshot-Kommentar im
+/// Prognose-Block).
+///
+/// Zurück kommen **nur die frisch gerechneten** Werte (Match-ID →
+/// Startzeit in ms), nicht der gemergte Speicher: Der behält Einträge von
+/// Spielen, die inzwischen keine Prognose mehr haben (Wunschfeld,
+/// Ausnahme, hinter die Wartelisten-Grenze gerutscht, Schalter aus) — an
+/// badhub ginge sonst ein stehengebliebener Wert, und der ist schlimmer als
+/// keiner. Bei ausgeschalteter Prognose: leer.
+pub(crate) fn prognose_auffrischen(
+    tablet: &TabletState,
+    config: &AppConfig,
+    now_ms: u64,
+) -> std::collections::HashMap<i64, u64> {
+    if !config.prediction.enabled {
+        return std::collections::HashMap::new();
+    }
+    build_state(tablet, config, now_ms, 0)
+        .queue
+        .iter()
+        .filter_map(|m| m.predicted_start_ms.map(|p| (m.match_id, p)))
+        .collect()
+}
+
 /// Wie [`build_state`], aber mit vorgegebener Wartelisten-Länge
 /// (turnierweit).
 ///
@@ -5910,6 +5946,59 @@ mod tests {
         assert_eq!(s.courts[0].court_id, 1);
         assert_eq!(s.courts[0].match_id, 7);
         assert_eq!(s.courts[0].team1, vec!["Müller".to_string()]);
+    }
+
+    #[test]
+    fn die_prognose_entsteht_auch_ohne_offene_tl_ansicht() {
+        // Regression 02.11.2026: Ohne offene TL-Seite baute niemand den
+        // Zustand, und der Spielplan an badhub ging ohne Prognose hinaus.
+        let tablet = TabletState::default();
+        let mut m2 = a_match(2);
+        m2.team1 = vec![player("Weber")];
+        m2.team2 = vec![player("Fischer")];
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![a_match(1), m2],
+            Vec::new(),
+        ));
+        assert_eq!(tablet.predicted_start_ms(1), None, "noch nichts gerechnet");
+
+        let frisch = prognose_auffrischen(&tablet, &AppConfig::default(), 3_600_000);
+        assert_eq!(frisch.get(&1), Some(&((60 + 2) * 60_000)));
+        assert_eq!(tablet.predicted_start_ms(1), Some((60 + 2) * 60_000));
+        assert_eq!(
+            tablet.predicted_start_ms(2),
+            Some((60 + 2 + 25 + 2) * 60_000),
+            "dieselben Werte wie in der TL-Liste"
+        );
+
+        // Eine Minute später frisch gerechnet, nicht beim alten Wert stehen
+        // geblieben.
+        prognose_auffrischen(&tablet, &AppConfig::default(), 3_660_000);
+        assert_eq!(tablet.predicted_start_ms(1), Some((61 + 2) * 60_000));
+
+        // Bekommt Spiel 2 ein Wunschfeld, fällt es aus der Prognose. Der
+        // Speicher behält den alten Wert (Prognose-Kontrolle), der
+        // Spielplan darf ihn aber nicht mehr senden.
+        tablet.set_wish_court(2, Some(1));
+        let frisch = prognose_auffrischen(&tablet, &AppConfig::default(), 3_720_000);
+        assert!(frisch.contains_key(&1));
+        assert!(!frisch.contains_key(&2), "kein stehengebliebener Wert");
+    }
+
+    #[test]
+    fn ohne_prognose_schalter_rechnet_der_spielplan_nichts() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![a_match(1)], Vec::new()));
+        let mut config = AppConfig::default();
+        // Vorher mit Schalter an gerechnet: der Speicher ist gefüllt.
+        prognose_auffrischen(&tablet, &AppConfig::default(), 3_600_000);
+        assert!(tablet.predicted_start_ms(1).is_some());
+        config.prediction.enabled = false;
+        assert!(
+            prognose_auffrischen(&tablet, &config, 3_660_000).is_empty(),
+            "Schalter aus = nichts an badhub, auch keine Altwerte"
+        );
     }
 
     #[test]
