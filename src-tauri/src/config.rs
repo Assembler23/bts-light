@@ -898,21 +898,32 @@ pub const DIENSTE: &[&str] = &[
     "elevenlabs_v4",
     "elevenlabs_flash",
     "openai",
-    "gemini_flash",
-    "gemini_pro",
+    "gemini_38_flash",
+    "gemini_38_lite",
 ];
 
 /// `dienst`-Wert → Anbieter + Modell. Unbekannt (oder leer) = Azure. Die Liste
 /// spiegelt `src/io/sprachdienst.mjs` (Drift-Test `test-sprachdienst.mjs`).
-pub fn dienst_art(dienst: &str) -> DienstArt {
+/// Alte Dienst-Werte auf ihre Nachfolger: Die Gemini-2.5-Vorschaumodelle
+/// (`gemini_flash`/`gemini_pro`, v0.9.336) schaltet Google am 17.11.2026 ab;
+/// wer sie gewählt hatte, landet bei Gemini 3.8 Flash. Gilt für die eigene
+/// Config (beim Laden) wie für die Share eines älteren Masters.
+pub fn dienst_normalisiert(dienst: &str) -> &str {
     match dienst {
+        "gemini_flash" | "gemini_pro" => "gemini_38_flash",
+        d => d,
+    }
+}
+
+pub fn dienst_art(dienst: &str) -> DienstArt {
+    match dienst_normalisiert(dienst) {
         "elevenlabs_v2" => DienstArt::ElevenLabs("eleven_multilingual_v2"),
         "elevenlabs_v3" => DienstArt::ElevenLabs("eleven_v3"),
         "elevenlabs_v4" => DienstArt::ElevenLabs("eleven_v4"),
         "elevenlabs_flash" => DienstArt::ElevenLabs("eleven_flash_v2_5"),
         "openai" => DienstArt::OpenAi("gpt-4o-mini-tts"),
-        "gemini_flash" => DienstArt::Gemini("gemini-2.5-flash-preview-tts"),
-        "gemini_pro" => DienstArt::Gemini("gemini-2.5-pro-preview-tts"),
+        "gemini_38_flash" => DienstArt::Gemini("gemini-3.8-flash-tts"),
+        "gemini_38_lite" => DienstArt::Gemini("gemini-3.8-flash-lite-tts"),
         _ => DienstArt::Azure,
     }
 }
@@ -1844,6 +1855,9 @@ impl AppConfig {
                 // spiegeln (ADR 0054). Vor dem Push-URL-Schalter, damit ein
                 // Fehler hier nicht den Testsystem-Schalter überspringt.
                 cfg.spiegele_turnier_guid();
+                // Abgeschaltete Sprachdienst-Werte auf den Nachfolger heben,
+                // damit Auswahl im Frontend und Kern denselben Dienst zeigen.
+                cfg.azure_tts.dienst = dienst_normalisiert(&cfg.azure_tts.dienst).to_string();
                 // Produktiv- oder Testsystem? Die Push-URL ist die einzige
                 // Wahrheit; Cloud-Relay und Diagnose-Logs haben keinen
                 // Config-Zugriff und lesen den daraus gesetzten
@@ -1880,6 +1894,26 @@ mod sprachdienst_tests {
     use super::*;
 
     #[test]
+    fn alte_gemini_werte_landen_bei_3_8_flash() {
+        for alt in ["gemini_flash", "gemini_pro"] {
+            assert_eq!(dienst_normalisiert(alt), "gemini_38_flash");
+            assert_eq!(dienst_art(alt), DienstArt::Gemini("gemini-3.8-flash-tts"));
+        }
+        assert_eq!(dienst_normalisiert("openai"), "openai");
+        let dir = std::env::temp_dir().join(format!("bts-dienst-alt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let datei = dir.join("config.json");
+        let mut cfg = AppConfig::default();
+        cfg.azure_tts.dienst = "gemini_pro".into();
+        std::fs::write(&datei, serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(
+            AppConfig::load_from(&datei).unwrap().azure_tts.dienst,
+            "gemini_38_flash"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn dienst_wert_kehrt_dienst_art_um() {
         for d in DIENSTE {
             assert_eq!(dienst_wert(dienst_art(d)), *d);
@@ -1914,7 +1948,7 @@ mod sprachdienst_tests {
             region: "we".into(),
             ..Default::default()
         };
-        for (dienst, feld) in [("elevenlabs_v3", 0), ("openai", 1), ("gemini_flash", 2)] {
+        for (dienst, feld) in [("elevenlabs_v3", 0), ("openai", 1), ("gemini_38_flash", 2)] {
             az.dienst = dienst.into();
             assert!(!az.vollstaendig(), "{dienst} ohne Schlüssel");
             match feld {

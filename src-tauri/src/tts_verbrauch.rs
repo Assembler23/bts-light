@@ -278,11 +278,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bts-tts-zaehler-{}", std::process::id()));
         let datei = dir.join(VERBRAUCH_DATEI);
         let _ = std::fs::remove_file(&datei);
-        buchen_in_datei(&datei, "2026-11-03", "gemini_flash", 50, false);
-        let p = buchen_in_datei(&datei, "2026-11-03", "gemini_flash", 50, true);
+        buchen_in_datei(&datei, "2026-11-03", "gemini_38_flash", 50, false);
+        let p = buchen_in_datei(&datei, "2026-11-03", "gemini_38_flash", 50, true);
         assert_eq!(p.zeichen, 50);
         assert_eq!(p.aus_cache, 1);
-        assert_eq!(laden(&datei).tage["2026-11-03"]["gemini_flash"].neu, 1);
+        assert_eq!(laden(&datei).tage["2026-11-03"]["gemini_38_flash"].neu, 1);
         std::fs::write(&datei, b"{kaputt").unwrap();
         assert_eq!(laden(&datei), Verbrauch::default());
         let _ = std::fs::remove_dir_all(&dir);

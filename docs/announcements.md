@@ -946,7 +946,7 @@ Spec: [features/ansage-elevenlabs.md](features/ansage-elevenlabs.md).
 
 **Bedienung:** Seite **Ansagen** → „Hochwertige Cloud-Stimme" anhaken →
 Auswahl **Sprachdienst**: Azure · ElevenLabs v2 · v3 · v4 · Flash v2.5 ·
-OpenAI · Gemini Flash · Gemini Pro. Ist der gewählte Dienst schon fertig
+OpenAI · Gemini 3.8 Flash · Gemini 3.8 Flash-Lite. Ist der gewählte Dienst schon fertig
 eingerichtet (Schlüssel gespeichert), gilt der Wechsel **sofort** ab der
 nächsten Ansage, ohne den Speichern-Knopf — zum Vergleichen einfach hin- und
 herschalten. Fehlt der Schlüssel noch, bleibt der bisherige Dienst aktiv, bis
@@ -954,7 +954,7 @@ Schlüssel und Auswahl gespeichert sind; so verlieren ferne Hallen beim
 Einrichten nicht ihre Stimme.
 <!-- pruef: "Sprachdienst" in src/components/AnnounceSettings.tsx -->
 <!-- pruef: "ElevenLabs Flash v2.5 (günstiger)" in src/io/sprachdienst.mjs -->
-<!-- pruef: "Gemini Pro TTS" in src/io/sprachdienst.mjs -->
+<!-- pruef: "Gemini 3.8 Flash-Lite TTS (günstiger)" in src/io/sprachdienst.mjs -->
 
 - **Dienste prüfen:** Der Knopf unter der Auswahl schickt an jeden Dienst mit
   gespeichertem Schlüssel eine winzige Probe („Test.", ohne Cache) und zeigt
@@ -974,9 +974,21 @@ Einrichten nicht ihre Stimme.
   Ausgabenlimit, Google-Schlüssel auf die „Generative Language API" beschränkt.
 - **Gemini kostenlos?** Mit einem Gratis-Schlüssel aus AI Studio darf Google
   die Eingaben (also die Spielernamen) zur Produktverbesserung nutzen, und die
-  Vorschau-Modelle erlauben nur wenige Anfragen pro Minute und Tag — im
-  Turnier kommt dann schnell die Ersatzstimme. Für den Einsatz die Abrechnung
-  im Google-Konto aktivieren.
+  Gratis-Stufe erlaubt nur wenige Anfragen pro Minute und Tag — im Turnier
+  kommt dann schnell die Ersatzstimme. Für den Einsatz die Abrechnung im
+  Google-Konto aktivieren; dann nutzt Google die Eingaben nicht. Kosten bis
+  31.12.2026 laut Google etwa 0,00225 $ (Flash) bzw. 0,0015 $ (Flash-Lite) je
+  10 s Audio, ab 2027 das Doppelte — ein Turniertag mit 400 Ansagen à 14 s
+  also gut 1 $.
+- **Gemini 3.8 statt 2.5 (seit v0.9.338):** Die bisherigen Modelle
+  `gemini-2.5-flash-preview-tts`/`-pro-preview-tts` schaltet Google am
+  **17.11.2026** ab. Die App nutzt jetzt **Gemini 3.8 Flash TTS** (beste
+  Qualität) und **3.8 Flash-Lite TTS** (schneller, günstiger) über die
+  Interactions-Schnittstelle. Wer vorher „Gemini Flash" oder „Gemini Pro"
+  gewählt hatte, ist automatisch auf 3.8 Flash umgestellt. Ton und Tempo
+  stehen jetzt in einem eigenen Feld statt vor dem Text — die Anweisung kann
+  also nicht mehr mitgesprochen werden. Die Anfrage geht mit `store: false`
+  raus, damit Google sie nicht als Interaktion aufbewahrt.
 - **Stimme:** Auswahl aus den Standardstimmen des Dienstes oder ein eigener
   Name/eine eigene ID. Eine Stimme für alle Disziplinen; die Stimme je
   Disziplin gilt nur für Azure. Voreinstellungen: ElevenLabs „Sarah", OpenAI
@@ -990,8 +1002,9 @@ Einrichten nicht ihre Stimme.
 - **Tempo:** ElevenLabs nimmt nur Tempo 0,7–1,2 an; der gesendete Wert wird
   darauf begrenzt. OpenAI (`gpt-4o-mini-tts`) und Gemini kennen keinen
   Tempo-Wert — dort steht das Tempo als Sprechanweisung („etwas langsamer als
-  normal") vor dem Text, zusammen mit „ruhig und deutlich, Namen wie in ihrer
-  Herkunftssprache".
+  normal"), zusammen mit „ruhig und deutlich, Namen wie in ihrer
+  Herkunftssprache": bei OpenAI als `instructions`, bei Gemini als
+  `speech_metadata.style`.
 - **Pausen:** ElevenLabs v2 bekommt `<break time="0.35s" />`; alle übrigen
   Modelle einen Satzpunkt (Break-Tags sind nur dort sicher dokumentiert).
 - **Bei Fehler** (kein Schlüssel, Kontingent leer, offline) spricht die
@@ -1006,9 +1019,7 @@ Einrichten nicht ihre Stimme.
   (2 Stunden, höchstens 32 MB, weg beim Beenden): Nachruf, „nochmal" oder
   dieselbe Ansage in einer zweiten Halle kosten so nur einmal, und Audio mit
   Namen kommt trotzdem nie auf die Platte. Gemini braucht je Ansage
-  spürbar länger (Zeitlimit 20 s statt 10 s). Bekannte Eigenheit: Gemini
-  spricht die vorangestellte Anweisung gelegentlich mit — beim Hörtest
-  darauf achten.
+  spürbar länger (Zeitlimit 20 s statt 10 s).
 - **Verbrauch der Cloud-Stimme:** Unter „Dienste prüfen" steht je Tag und
   Dienst, wie viele Zeichen an den Anbieter gingen, wie viele Ansagen neu
   vertont wurden und wie viele aus einem Cache kamen (letzte 14 Tage,
@@ -1036,8 +1047,9 @@ Ziel `TtsZiel`; [`tts_text.rs`](../src-tauri/src/tts_text.rs) wandelt das SSML
 in Klartext (Tags weg, Pausen je Dienst, `<prosody rate>` → Tempo), und je ein
 Modul ruft den Dienst: `elevenlabs_tts.rs` (`POST /v1/text-to-speech/{stimme}`,
 MP3), `openai_tts.rs` (`POST /v1/audio/speech`, MP3, `instructions`),
-`gemini_tts.rs` (`generateContent` mit `responseModalities: AUDIO`; liefert
-PCM, wird zu WAV). Der Command heißt aus Kompatibilität weiter
+`gemini_tts.rs` (`POST /v1beta/interactions`, Text wörtlich + Stil in
+`speech_metadata`, Antwort WAV aus `steps[model_output].content[audio]`;
+rohes PCM würde zu WAV). Der Command heißt aus Kompatibilität weiter
 `azure_tts_speak`. Konfig-Felder: `azure_tts.dienst` und je Dienst
 `*_key`/`*_voice`. Messwerkzeuge gegen die echten Dienste (kosten Kontingent):
 `ELEVENLABS_TEST_KEY=… cargo test --lib elevenlabs_echt -- --ignored`, ebenso

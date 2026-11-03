@@ -1,6 +1,8 @@
 export type DienstArt = "azure" | "elevenlabs" | "openai" | "gemini";
 /** Wählbare Sprachdienste in Anzeige-Reihenfolge. */
 export const DIENSTE: ReadonlyArray<{ wert: string; name: string; art: DienstArt }>;
+/** Dienst-Wert mit alten Werten (Gemini 2.5) auf ihren Nachfolger gehoben. */
+export function dienstNormalisiert(dienst: string | undefined | null): string | undefined | null;
 /** Anbieter zu einem `dienst`-Wert; unbekannt/leer → "azure". */
 export function dienstArt(dienst: string | undefined | null): DienstArt;
 /** Anzeigename; unbekannt → "Azure". */

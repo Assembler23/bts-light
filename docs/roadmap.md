@@ -325,12 +325,12 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   [features/ansage-elevenlabs.md](features/ansage-elevenlabs.md) (freigegeben
   02.11.2026, erweitert 03.11.2026) — **umgesetzt v0.9.336, Hörtest beim
   Turnier offen**. Auswahl „Sprachdienst" (Azure · ElevenLabs v2/v3/v4/Flash
-  v2.5 · OpenAI · Gemini Flash/Pro) auf der Seite Ansagen. Offen: welcher
+  v2.5 · OpenAI · Gemini 3.8 Flash/Flash-Lite) auf der Seite Ansagen. Offen: welcher
   Dienst die Namen am besten trifft, ob v3/v4/Flash/OpenAI/Gemini auf den
   Satzpunkt eine Pause machen, Latenz in der Halle, Kosten pro Turniertag;
   OpenAI und Gemini sind **noch nie gegen den echten Dienst gelaufen** (kein
   Schlüssel), die Modell-IDs `gpt-4o-mini-tts` und
-  `gemini-2.5-*-preview-tts` sind ungeprüft. Danach entscheiden, welche
+  `gemini-3.8-flash(-lite)-tts` (Interactions API) sind ungeprüft. Danach entscheiden, welche
   Dienste bleiben (dann Datenschutz-Abwägung festhalten).
 
 - **Meetingpoint: Einchecken je Partie und „spielbereit"** — Spec:

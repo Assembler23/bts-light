@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.338
+
+- **Gemini auf 3.8 umgestellt.** Google schaltet die bisherigen
+  Gemini-Sprachmodelle am 17.11.2026 ab. Zur Auswahl stehen jetzt
+  „Gemini 3.8 Flash TTS" und das günstigere „Gemini 3.8 Flash-Lite TTS";
+  eine alte Gemini-Auswahl wird automatisch auf 3.8 Flash umgestellt. Die
+  Sprechanweisung steht jetzt getrennt vom Text und wird nicht mehr
+  mitgesprochen.
+  Ansage-Slaves mit Gemini bitte mit aktualisieren: Ein älterer Slave
+  erkennt die neuen Gemini-Werte nicht und spricht dann mit der Ersatzstimme.
+
 ## v0.9.337
 
 - **Verbrauch der Cloud-Stimme sichtbar.** Auf der Seite „Ansagen" zeigt ein
