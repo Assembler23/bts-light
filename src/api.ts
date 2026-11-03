@@ -45,6 +45,7 @@ import type {
   WifiStatus,
   WinnersView,
   MpPlatz,
+  DienstPruefung,
 } from "./types";
 
 export const loadConfig = (): Promise<AppConfig> => invoke("load_config");
@@ -63,6 +64,11 @@ export const testBtp = (
  *  Wirft, wenn Azure aus/fehlerhaft ist → Aufrufer fällt auf Web Speech zurück. */
 export const azureTtsSpeak = (ssml: string): Promise<string> =>
   invoke("azure_tts_speak", { ssml });
+
+/** „Dienste prüfen": winzige Probe an jeden eingerichteten Sprachdienst
+ *  (gespeicherter Stand). Kostet je Dienst ein paar Zeichen. */
+export const ttsDienstePruefen = (): Promise<DienstPruefung[]> =>
+  invoke("tts_dienste_pruefen");
 
 // ─── Ansage-Ton aus dem Kern (Spec ansage-ausgabegeraet, ADR 0065) ───────
 // Fehler kommen als "<code>: <Text>" (Codes in io/tonWeg.mjs).

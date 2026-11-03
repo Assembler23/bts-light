@@ -1251,14 +1251,46 @@ fn push_tl_state(ctx: &ServerCtx, tx: &mpsc::UnboundedSender<WsMessage>, last_re
 /// verwirft dann eine früher geerbte Config.
 fn azure_share(ctx: &ServerCtx) -> Option<relay_proto::AzureTtsShare> {
     let az = ctx.app_config().azure_tts;
-    (az.enabled && !az.key.is_empty() && !az.region.is_empty()).then_some(
-        relay_proto::AzureTtsShare {
-            region: az.region,
-            key: az.key,
-            voice: az.voice,
-            discipline_voices: az.discipline_voices,
-        },
-    )
+    azure_share_aus(&az)
+}
+
+/// Rein & testbar: Share nur, wenn der GEWÄHLTE Dienst vollständig ist, und
+/// darin nur dessen Zugangsdaten (Spec `ansage-elevenlabs`, Review 03.11.2026):
+/// Die Share ist über den Namespace lesbar — ein eingetragener, aber gerade
+/// nicht genutzter Schlüssel soll nicht mitreisen. Bei ElevenLabs/OpenAI/
+/// Gemini bleiben auch die Azure-Felder leer; ein alter Slave sieht dann
+/// keine Stimme und bleibt still bei seiner Ersatzstimme statt bei jeder
+/// Ansage einen Azure-Fehler zu melden.
+fn azure_share_aus(az: &crate::config::AzureTtsConfig) -> Option<relay_proto::AzureTtsShare> {
+    use crate::config::{dienst_art, DienstArt};
+    if !az.vollstaendig() {
+        return None;
+    }
+    let mut s = relay_proto::AzureTtsShare {
+        dienst: az.dienst.clone(),
+        ..Default::default()
+    };
+    match dienst_art(&az.dienst) {
+        DienstArt::Azure => {
+            s.region = az.region.clone();
+            s.key = az.key.clone();
+            s.voice = az.voice.clone();
+            s.discipline_voices = az.discipline_voices.clone();
+        }
+        DienstArt::ElevenLabs(_) => {
+            s.elevenlabs_key = az.elevenlabs_key.clone();
+            s.elevenlabs_voice = az.elevenlabs_voice.clone();
+        }
+        DienstArt::OpenAi(_) => {
+            s.openai_key = az.openai_key.clone();
+            s.openai_voice = az.openai_voice.clone();
+        }
+        DienstArt::Gemini(_) => {
+            s.gemini_key = az.gemini_key.clone();
+            s.gemini_voice = az.gemini_voice.clone();
+        }
+    }
+    Some(s)
 }
 
 /// Trägt das Monitor-Nudge-Abo des Score-Spiegels beim Sitzungsende wieder
@@ -1317,6 +1349,38 @@ fn text<T: serde::Serialize>(value: &T) -> WsMessage {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn share_traegt_nur_die_zugangsdaten_des_gewaehlten_dienstes() {
+        let mut az = crate::config::AzureTtsConfig {
+            enabled: true,
+            region: "we".into(),
+            key: "az".into(),
+            elevenlabs_key: "el".into(),
+            openai_key: "oa".into(),
+            gemini_key: "gm".into(),
+            ..Default::default()
+        };
+        let s = super::azure_share_aus(&az).unwrap();
+        assert_eq!((s.key.as_str(), s.region.as_str()), ("az", "we"));
+        assert!(s.elevenlabs_key.is_empty() && s.openai_key.is_empty() && s.gemini_key.is_empty());
+
+        az.dienst = "elevenlabs_v3".into();
+        let s = super::azure_share_aus(&az).unwrap();
+        assert_eq!(s.elevenlabs_key, "el");
+        // Kein Azure mehr: alter Slave sieht keine Stimme → kein Fehlerbanner.
+        assert!(s.key.is_empty() && s.region.is_empty() && s.voice.is_empty());
+        assert!(s.openai_key.is_empty() && s.gemini_key.is_empty());
+
+        az.dienst = "gemini_pro".into();
+        let s = super::azure_share_aus(&az).unwrap();
+        assert_eq!(s.gemini_key, "gm");
+        assert!(s.elevenlabs_key.is_empty() && s.key.is_empty());
+
+        // Gewählt, aber ohne Schlüssel → gar keine Share.
+        az.gemini_key.clear();
+        assert!(super::azure_share_aus(&az).is_none());
+    }
+
     use super::*;
     use crate::btp::model::{
         BtpMatch, BtpPlayer, BtpSnapshot, Discipline, MatchResult, MatchStatus, ScoringFormat,

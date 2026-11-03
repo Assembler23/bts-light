@@ -3,16 +3,88 @@
 // Einstellungen wird das Ansage-Modul nur noch an-/ausgeschaltet. Speichert die
 // geänderten Felder in die App-Konfiguration (announce + azure_tts).
 import { useEffect, useState } from "react";
-import { saveConfig, sharePronunciations, tabletOverview } from "../api";
+import { saveConfig, sharePronunciations, tabletOverview, ttsDienstePruefen } from "../api";
 import { playNameTest, playTestAnnouncement } from "../io/announcer";
-import { azureOption } from "../io/azureAnnounce";
+import { azureOption, cloudStimmeVollstaendig } from "../io/azureAnnounce";
+import { DIENSTE, dienstArt, dienstName } from "../io/sprachdienst.mjs";
 import { useInheritedAzureVoice } from "../state/azureStatus";
 import { BASE_NAME_OVERRIDES } from "../io/nameOverrideBase";
 import {
   stimmenAuswahlWert,
   useStimmenOptionen,
 } from "../state/useAvailableVoices";
-import type { AnnounceLanguageMode, AppConfig, NameOverride } from "../types";
+import type {
+  AnnounceLanguageMode,
+  AppConfig,
+  DienstPruefung,
+  NameOverride,
+} from "../types";
+
+// Zugangsdaten der Dienste außer Azure (Spec `ansage-elevenlabs`). Die
+// Dienstliste selbst steht in `io/sprachdienst.mjs` (Drift-Test gegen Rust).
+type FremdArt = "elevenlabs" | "openai" | "gemini";
+
+const ANBIETER: Record<
+  FremdArt,
+  {
+    name: string;
+    schluessel: string;
+    platzhalter: string;
+    land: string;
+    stimmen: ReadonlyArray<readonly [string, string]>;
+  }
+> = {
+  elevenlabs: {
+    name: "ElevenLabs",
+    schluessel: "ElevenLabs-Schlüssel",
+    platzhalter: "sk_…",
+    land: "ElevenLabs (USA)",
+    // Mehrsprachige Standardstimmen; die erste ist die Voreinstellung (Rust
+    // `ELEVENLABS_STANDARD_STIMME`).
+    stimmen: [
+      ["EXAVITQu4vr4xnSDxMaL", "Sarah (weiblich, ruhig)"],
+      ["Xb7hH8MSUJpSbSDYk0k2", "Alice (weiblich, klar)"],
+      ["XrExE9yKIg1WjnnlVkGX", "Matilda (weiblich, sachlich)"],
+      ["pFZP5JQG7iQjIQuC4Bku", "Lily (weiblich, warm)"],
+      ["JBFqnCBsd6RMkjVDRZzb", "George (männlich, warm)"],
+      ["onwK4e9ZLuTAKqWW03F9", "Daniel (männlich, Sprecher)"],
+      ["nPczCjzI2devNBz1zQrb", "Brian (männlich, tief)"],
+      ["pqHfZKP75CvOlQylNhV4", "Bill (männlich, ruhig)"],
+    ],
+  },
+  openai: {
+    name: "OpenAI",
+    schluessel: "OpenAI-API-Schlüssel",
+    platzhalter: "sk-…",
+    land: "OpenAI (USA)",
+    stimmen: [
+      ["coral", "Coral (weiblich, warm)"],
+      ["nova", "Nova (weiblich, hell)"],
+      ["shimmer", "Shimmer (weiblich, sanft)"],
+      ["sage", "Sage (weiblich, ruhig)"],
+      ["alloy", "Alloy (neutral)"],
+      ["ash", "Ash (männlich, klar)"],
+      ["onyx", "Onyx (männlich, tief)"],
+      ["echo", "Echo (männlich, ruhig)"],
+    ],
+  },
+  gemini: {
+    name: "Gemini",
+    schluessel: "Gemini-Schlüssel (Google AI Studio)",
+    platzhalter: "AIza…",
+    land: "Google (USA)",
+    stimmen: [
+      ["Kore", "Kore (weiblich, fest)"],
+      ["Aoede", "Aoede (weiblich, luftig)"],
+      ["Leda", "Leda (weiblich, jugendlich)"],
+      ["Zephyr", "Zephyr (weiblich, hell)"],
+      ["Charon", "Charon (männlich, sachlich)"],
+      ["Orus", "Orus (männlich, fest)"],
+      ["Puck", "Puck (männlich, munter)"],
+      ["Fenrir", "Fenrir (männlich, lebhaft)"],
+    ],
+  },
+};
 
 export function AnnounceSettings({
   config,
@@ -69,6 +141,43 @@ export function AnnounceSettings({
   const [azDiscVoices, setAzDiscVoices] = useState<Record<string, string>>(
     az?.discipline_voices ?? {},
   );
+  // Sprachdienst + Zugänge der übrigen Dienste (Spec `ansage-elevenlabs`).
+  const [azDienst, setAzDienst] = useState(az?.dienst || "azure");
+  const [zugang, setZugang] = useState<Record<FremdArt, { key: string; voice: string }>>({
+    elevenlabs: {
+      key: az?.elevenlabs_key ?? "",
+      voice: az?.elevenlabs_voice || ANBIETER.elevenlabs.stimmen[0][0],
+    },
+    openai: {
+      key: az?.openai_key ?? "",
+      voice: az?.openai_voice || ANBIETER.openai.stimmen[0][0],
+    },
+    gemini: {
+      key: az?.gemini_key ?? "",
+      voice: az?.gemini_voice || ANBIETER.gemini.stimmen[0][0],
+    },
+  });
+  const art = dienstArt(azDienst);
+  const fremd: FremdArt | null = art === "azure" ? null : art;
+  const setzeZugang = (a: FremdArt, feld: "key" | "voice", wert: string) =>
+    setZugang((z) => ({ ...z, [a]: { ...z[a], [feld]: wert } }));
+  const [dienstMeldung, setDienstMeldung] = useState("");
+  const [wechselLaeuft, setWechselLaeuft] = useState(false);
+  // „Dienste prüfen": null = noch nicht geprüft.
+  const [pruefung, setPruefung] = useState<DienstPruefung[] | null>(null);
+  const [prueftGerade, setPrueftGerade] = useState(false);
+  async function diensteProbieren() {
+    setPrueftGerade(true);
+    try {
+      setPruefung(await ttsDienstePruefen());
+    } catch (e) {
+      setPruefung([
+        { dienst: "", ok: false, eingerichtet: true, meldung: String(e), dauer_ms: 0 },
+      ]);
+    } finally {
+      setPrueftGerade(false);
+    }
+  }
   const [halls, setHalls] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -101,6 +210,39 @@ export function AnnounceSettings({
       clearInterval(id);
     };
   }, []);
+
+  // Schnellwechsel beim Turnier (E1): Die Auswahl gilt sofort, ohne den
+  // Speichern-Knopf — aber NUR, wenn der Zieldienst im GESPEICHERTEN Stand
+  // schon vollständig ist. Sonst würde ein Wechsel zum Schlüssel-Eintragen
+  // sofort die Cloud-Stimme abschalten und allen fernen Hallen die geerbte
+  // nehmen (Review 03.11.2026). Gespeichert wird nur der Dienst; halb
+  // ausgefüllte andere Felder bleiben unberührt.
+  async function dienstWechseln(dienst: string) {
+    setAzDienst(dienst);
+    setDienstMeldung("");
+    const next: AppConfig = {
+      ...config,
+      azure_tts: { ...config.azure_tts, dienst },
+    };
+    if (!cloudStimmeVollstaendig(next.azure_tts)) {
+      setDienstMeldung(
+        config.azure_tts.enabled
+          ? "Noch nicht aktiv: Zugang eintragen und speichern."
+          : "Wird mit „Speichern“ aktiv.",
+      );
+      return;
+    }
+    setWechselLaeuft(true);
+    try {
+      await saveConfig(next);
+      onSaved(next);
+      setDienstMeldung("Gilt ab der nächsten Ansage.");
+    } catch (e) {
+      setDienstMeldung(`Nicht gespeichert: ${String(e)}`);
+    } finally {
+      setWechselLaeuft(false);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -143,6 +285,13 @@ export function AnnounceSettings({
         discipline_voices: Object.fromEntries(
           Object.entries(azDiscVoices).filter(([, v]) => v && v.trim() !== ""),
         ),
+        dienst: azDienst,
+        elevenlabs_key: zugang.elevenlabs.key.trim(),
+        elevenlabs_voice: zugang.elevenlabs.voice.trim(),
+        openai_key: zugang.openai.key.trim(),
+        openai_voice: zugang.openai.voice.trim(),
+        gemini_key: zugang.gemini.key.trim(),
+        gemini_voice: zugang.gemini.voice.trim(),
       },
     };
     try {
@@ -176,7 +325,7 @@ export function AnnounceSettings({
           )}
           <button
             onClick={() => void save()}
-            disabled={saving}
+            disabled={saving || wechselLaeuft}
             className="rounded-lg bg-slate-800 px-3.5 py-1.5 text-sm font-medium text-white
                        transition-colors hover:bg-slate-700 disabled:opacity-50"
           >
@@ -258,8 +407,8 @@ export function AnnounceSettings({
           hätten keinen Effekt → ausblenden statt verwirren. */}
       {azEnabled ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-          Hochwertige <strong>Azure-Stimme</strong> ist aktiv – sie spricht alle
-          Ansagen. Die Standard-Stimmenauswahl ist deshalb deaktiviert. (Bei
+          Hochwertige <strong>Cloud-Stimme</strong> ({dienstName(azDienst)}) ist
+          aktiv – sie spricht alle Ansagen. Die Standard-Stimmenauswahl ist deshalb deaktiviert. (Bei
           Fehler/offline springt automatisch die lokale Stimme ein.)
         </div>
       ) : (
@@ -387,6 +536,10 @@ export function AnnounceSettings({
                 key: azKey,
                 voice: azVoice,
                 discipline_voices: azDiscVoices,
+                dienst: azDienst,
+                elevenlabs_key: zugang.elevenlabs.key,
+                openai_key: zugang.openai.key,
+                gemini_key: zugang.gemini.key,
               }),
             })
           }
@@ -397,7 +550,7 @@ export function AnnounceSettings({
         </button>
         <p className="text-xs text-slate-500">
           Vor dem Turnier einmal drücken – das schaltet die Tonausgabe am Rechner
-          frei. Für Azure die Einstellungen vorher speichern.
+          frei. Für die Cloud-Stimme die Einstellungen vorher speichern.
         </p>
       </div>
 
@@ -551,27 +704,153 @@ export function AnnounceSettings({
             checked={azEnabled}
             onChange={(e) => setAzEnabled(e.currentTarget.checked)}
           />
-          Hochwertige Stimme über Azure (Cloud)
+          Hochwertige Cloud-Stimme (Azure oder ElevenLabs)
         </label>
         <p className="text-xs text-slate-500">
-          Spricht die ganze Ansage mit einer neuronalen Azure-Stimme und gibt
-          asiatische/internationale Namen <strong>nativ</strong> wieder. Braucht
-          Internet; bei Fehler/offline greift automatisch die lokale Stimme.
-          Schlüssel + Region aus deiner Azure-Speech-Ressource. Wird nach dem
+          Spricht die ganze Ansage mit einer neuronalen Cloud-Stimme und gibt
+          internationale Namen <strong>nativ</strong> wieder. Braucht Internet;
+          bei Fehler/offline greift automatisch die lokale Stimme. Wird nach dem
           Speichern aktiv.
         </p>
+        {azEnabled && (
+          <label className="text-sm font-medium text-slate-700">
+            Sprachdienst
+            <select
+              value={azDienst}
+              disabled={wechselLaeuft || saving}
+              onChange={(e) => void dienstWechseln(e.currentTarget.value)}
+              className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+            >
+              {DIENSTE.map((d) => (
+                <option key={d.wert} value={d.wert}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs font-normal text-slate-500">
+              Wechsel gilt sofort ab der nächsten Ansage – gedacht zum
+              Vergleichen in der Halle.{" "}
+              {dienstMeldung && <strong>{dienstMeldung}</strong>}
+            </span>
+          </label>
+        )}
+        {azEnabled && (
+          <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void diensteProbieren()}
+                disabled={prueftGerade}
+                className="rounded-lg bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700
+                           ring-1 ring-slate-200 transition-colors hover:bg-slate-200 disabled:opacity-50"
+              >
+                {prueftGerade ? "Prüfe …" : "Dienste prüfen"}
+              </button>
+              <span className="text-xs text-slate-500">
+                Kurze Probe an jeden Dienst mit gespeichertem Schlüssel – zeigt,
+                ob Schlüssel und Kontingent noch reichen.
+              </span>
+            </div>
+            {pruefung && (
+              <ul className="flex flex-col gap-0.5 text-xs">
+                {pruefung
+                  .filter((p) => p.eingerichtet)
+                  .map((p) => (
+                    <li
+                      key={p.dienst || "fehler"}
+                      className={p.ok ? "text-emerald-700" : "text-rose-700"}
+                    >
+                      {p.ok ? "✓" : "✗"} <strong>{p.dienst ? dienstName(p.dienst) : "Prüfung"}</strong>
+                      {": "}
+                      {p.meldung}
+                      {p.ok && ` (${(p.dauer_ms / 1000).toFixed(1)} s)`}
+                    </li>
+                  ))}
+                {pruefung.every((p) => !p.eingerichtet) && (
+                  <li className="text-slate-500">
+                    Noch kein Dienst eingerichtet – Schlüssel eintragen und speichern.
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
+        )}
         {/* Cloud-Slave: Azure-Zugang kommt vom Master (ADR 0003) — dann sind
             lokale Eingaben optional und dienen nur als Übersteuerung. */}
         {inheritedVoice && (
           <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
             <strong>Vom Master geerbt ✓</strong> — dieser PC nutzt die
-            Azure-Zugangsdaten des Masters (Stimme: {inheritedVoice}). Es sind
+            Cloud-Stimme des Masters ({inheritedVoice}). Es sind
             keine Eingaben nötig; lokale, vollständige Eingaben hätten Vorrang.
           </p>
         )}
         {/* Genau der stumme Turnier-Bug: Schalter an, aber Key/Region fehlen →
             ohne Vererbung bliebe nur die Standardstimme. Sichtbar warnen. */}
-        {azEnabled && !inheritedVoice && (!azKey.trim() || !azRegion.trim()) && (
+        {azEnabled && fremd && !inheritedVoice && !zugang[fremd].key.trim() && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <strong>Unvollständig:</strong> Ohne {ANBIETER[fremd].schluessel} bleibt
+            die Cloud-Stimme aus — es spricht die Standardstimme.
+          </p>
+        )}
+        {azEnabled && fremd && (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm text-slate-600">
+              {ANBIETER[fremd].schluessel}
+              <input
+                type="password"
+                value={zugang[fremd].key}
+                placeholder={ANBIETER[fremd].platzhalter}
+                onChange={(e) => setzeZugang(fremd, "key", e.currentTarget.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+              />
+            </label>
+            <label className="text-sm text-slate-600">
+              Stimme
+              <select
+                value={
+                  ANBIETER[fremd].stimmen.some(([id]) => id === zugang[fremd].voice)
+                    ? zugang[fremd].voice
+                    : "eigene"
+                }
+                onChange={(e) => {
+                  const v = e.currentTarget.value;
+                  setzeZugang(fremd, "voice", v === "eigene" ? "" : v);
+                }}
+                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+              >
+                {ANBIETER[fremd].stimmen.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+                <option value="eigene">Andere Stimme …</option>
+              </select>
+            </label>
+            {!ANBIETER[fremd].stimmen.some(([id]) => id === zugang[fremd].voice) && (
+              <label className="text-sm text-slate-600">
+                Stimmen-Name oder -ID
+                <input
+                  type="text"
+                  value={zugang[fremd].voice}
+                  placeholder={ANBIETER[fremd].stimmen[0][0]}
+                  onChange={(e) => setzeZugang(fremd, "voice", e.currentTarget.value)}
+                  className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </label>
+            )}
+            <p className="text-xs text-slate-500">
+              {ANBIETER[fremd].name} bekommt die Namen so, wie sie in BTP stehen;
+              es gelten nur deine eigenen Aussprache-Korrekturen. Die
+              Spielernamen gehen dabei an {ANBIETER[fremd].land}. Jede neue
+              Ansage kostet beim Anbieter; Wiederholungen kommen aus dem Cache.
+              Nur einen eingeschränkten Schlüssel mit Ausgabenlimit eintragen –
+              ferne Hallen bekommen ihn über die Cloud mit.
+              {fremd === "gemini" &&
+                " Mit einem kostenlosen AI-Studio-Schlüssel darf Google die Namen zur Produktverbesserung nutzen, und es gibt nur wenige Anfragen pro Minute – für das Turnier die Abrechnung aktivieren."}
+            </p>
+          </div>
+        )}
+        {azEnabled && !fremd && !inheritedVoice && (!azKey.trim() || !azRegion.trim()) && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <strong>Unvollständig:</strong> Ohne{" "}
             {!azKey.trim() && !azRegion.trim()
@@ -582,7 +861,7 @@ export function AnnounceSettings({
             bleibt die Azure-Stimme aus — es spricht die Standardstimme.
           </p>
         )}
-        {azEnabled && (
+        {azEnabled && !fremd && (
           <div className="flex flex-col gap-2">
             <label className="text-sm text-slate-600">
               Region

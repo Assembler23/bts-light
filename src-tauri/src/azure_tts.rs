@@ -13,7 +13,7 @@ const OUTPUT_FORMAT: &str = "audio-24khz-48kbitrate-mono-mp3";
 /// bewusst NICHT `DefaultHasher` (dessen Ergebnis ist über Rust-Versionen/
 /// Plattformen NICHT stabil → der ganze Cache würde nach einem Toolchain-Update
 /// stillschweigend ungültig). Kein kryptografischer Hash nötig, nur stabil.
-fn cache_name(ssml: &str) -> String {
+pub(crate) fn cache_name(ssml: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for b in ssml.bytes() {
         hash ^= u64::from(b);

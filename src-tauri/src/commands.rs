@@ -515,6 +515,11 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     cfg.badhub.password = String::new();
     // Azure-Key ist ein echtes Secret (Speech-Ressource) — NIE mitexportieren.
     cfg.azure_tts.key = String::new();
+    // Dasselbe für die Schlüssel der übrigen Sprachdienste (Spec
+    // `ansage-elevenlabs`, E3).
+    cfg.azure_tts.elevenlabs_key = String::new();
+    cfg.azure_tts.openai_key = String::new();
+    cfg.azure_tts.gemini_key = String::new();
     // Turnierleitungs-Geräte wandern NICHT mit (ADR 0012): Sonst bliebe der
     // alte PC über die exportierten Tokens schreibberechtigt, und das Bündel
     // wäre zugleich ein Satz gültiger Zugänge. Die Geräte koppeln sich am
@@ -547,6 +552,15 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
     }
     if imported.azure_tts.key.is_empty() {
         imported.azure_tts.key = current.azure_tts.key.clone();
+    }
+    if imported.azure_tts.elevenlabs_key.is_empty() {
+        imported.azure_tts.elevenlabs_key = current.azure_tts.elevenlabs_key.clone();
+    }
+    if imported.azure_tts.openai_key.is_empty() {
+        imported.azure_tts.openai_key = current.azure_tts.openai_key.clone();
+    }
+    if imported.azure_tts.gemini_key.is_empty() {
+        imported.azure_tts.gemini_key = current.azure_tts.gemini_key.clone();
     }
     // Turnierleitungs-Geräte kommen nie im Bündel (identity_bundle löscht
     // sie) — die am DIESEM PC gekoppelten müssen deshalb erhalten bleiben.
@@ -991,32 +1005,264 @@ pub async fn azure_tts_speak(
         .lock()
         .expect("inherited_azure-Mutex nicht vergiftet")
         .clone();
-    let (region, key) = match effective_azure(&cfg.azure_tts, inherited.as_ref()) {
-        Some(rk) => rk,
-        None => return Err("Azure TTS nicht konfiguriert".to_string()),
+    let Some(ziel) = effective_tts(&cfg.azure_tts, inherited.as_ref()) else {
+        return Err("Cloud-Stimme nicht konfiguriert".to_string());
     };
     let cache_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("tts-cache");
-    let bytes = crate::azure_tts::synthesize(&region, &key, &ssml, &cache_dir).await?;
+    let (_, bytes) = ziel.vertonen(&ssml, Some(&cache_dir)).await?;
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
-/// Vorrangregel der Azure-Zugangsdaten (ADR 0003): vollständige lokale Config
-/// (aktiv + Key + Region) gewinnt, sonst die vom Master geerbte. `None`, wenn
-/// keine von beiden nutzbar ist.
-fn effective_azure(
+/// Wohin eine Ansage zur Vertonung geht (Spec `ansage-elevenlabs`). Der
+/// Command heißt aus Kompatibilität weiter `azure_tts_speak`; das SSML ist
+/// für alle Dienste dasselbe, die übrigen bekommen es umgewandelt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TtsZiel {
+    Azure {
+        region: String,
+        key: String,
+    },
+    ElevenLabs {
+        key: String,
+        voice: String,
+        modell: &'static str,
+    },
+    OpenAi {
+        key: String,
+        voice: String,
+        modell: &'static str,
+    },
+    Gemini {
+        key: String,
+        voice: String,
+        modell: &'static str,
+    },
+}
+
+impl TtsZiel {
+    /// Vertont das SSML zu (MIME-Typ, Audio); mit `cache_dir` über den
+    /// Plattencache, ohne (Ansage-Seiten) nur im Speicher.
+    async fn vertonen(
+        &self,
+        ssml: &str,
+        cache_dir: Option<&std::path::Path>,
+    ) -> Result<(&'static str, Vec<u8>), String> {
+        let mp3 = "audio/mpeg";
+        match self {
+            Self::Azure { region, key } => match cache_dir {
+                Some(dir) => crate::azure_tts::synthesize(region, key, ssml, dir).await,
+                None => crate::azure_tts::synthesize_ohne_cache(region, key, ssml).await,
+            }
+            .map(|b| (mp3, b)),
+            Self::ElevenLabs { key, voice, modell } => {
+                crate::elevenlabs_tts::vertonen(key, voice, modell, ssml, cache_dir)
+                    .await
+                    .map(|b| (mp3, b))
+            }
+            Self::OpenAi { key, voice, modell } => {
+                crate::openai_tts::vertonen(key, voice, modell, ssml, cache_dir)
+                    .await
+                    .map(|b| (mp3, b))
+            }
+            Self::Gemini { key, voice, modell } => {
+                crate::gemini_tts::vertonen(key, voice, modell, ssml, cache_dir)
+                    .await
+                    .map(|b| ("audio/wav", b))
+            }
+        }
+    }
+}
+
+/// Stimme oder die Voreinstellung, wenn leer.
+fn stimme_oder(voice: &str, standard: &str) -> String {
+    if voice.trim().is_empty() {
+        standard.to_string()
+    } else {
+        voice.trim().to_string()
+    }
+}
+
+/// Ziel aus Dienst + den Zugangsdaten des jeweiligen Anbieters; `None`, wenn
+/// der Schlüssel des GEWÄHLTEN Dienstes fehlt. Gemeinsam für eigene und
+/// geerbte Config.
+fn tts_ziel(
+    dienst: &str,
+    azure: (&str, &str),
+    elevenlabs: (&str, &str),
+    openai: (&str, &str),
+    gemini: (&str, &str),
+) -> Option<TtsZiel> {
+    use crate::config::{
+        dienst_art, DienstArt, ELEVENLABS_STANDARD_STIMME, GEMINI_STANDARD_STIMME,
+        OPENAI_STANDARD_STIMME,
+    };
+    let da = |k: &str| (!k.trim().is_empty()).then(|| k.trim().to_string());
+    match dienst_art(dienst) {
+        DienstArt::Azure => {
+            let (region, key) = azure;
+            Some(TtsZiel::Azure {
+                region: da(region)?,
+                key: da(key)?,
+            })
+        }
+        DienstArt::ElevenLabs(modell) => Some(TtsZiel::ElevenLabs {
+            key: da(elevenlabs.0)?,
+            voice: stimme_oder(elevenlabs.1, ELEVENLABS_STANDARD_STIMME),
+            modell,
+        }),
+        DienstArt::OpenAi(modell) => Some(TtsZiel::OpenAi {
+            key: da(openai.0)?,
+            voice: stimme_oder(openai.1, OPENAI_STANDARD_STIMME),
+            modell,
+        }),
+        DienstArt::Gemini(modell) => Some(TtsZiel::Gemini {
+            key: da(gemini.0)?,
+            voice: stimme_oder(gemini.1, GEMINI_STANDARD_STIMME),
+            modell,
+        }),
+    }
+}
+
+/// Ziel aus der eigenen Config — nur, wenn der GEWÄHLTE Dienst vollständig ist.
+fn tts_ziel_lokal(az: &crate::config::AzureTtsConfig) -> Option<TtsZiel> {
+    if !az.enabled {
+        return None;
+    }
+    tts_ziel(
+        &az.dienst,
+        (&az.region, &az.key),
+        (&az.elevenlabs_key, &az.elevenlabs_voice),
+        (&az.openai_key, &az.openai_voice),
+        (&az.gemini_key, &az.gemini_voice),
+    )
+}
+
+/// Ziel aus der vom Master geerbten Config. Ein alter Master schickt kein
+/// `dienst` → Azure.
+fn tts_ziel_geerbt(a: &relay_proto::AzureTtsShare) -> Option<TtsZiel> {
+    tts_ziel(
+        &a.dienst,
+        (&a.region, &a.key),
+        (&a.elevenlabs_key, &a.elevenlabs_voice),
+        (&a.openai_key, &a.openai_voice),
+        (&a.gemini_key, &a.gemini_voice),
+    )
+}
+
+/// Ergebnis von „Dienste prüfen" je Sprachdienst.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DienstPruefung {
+    pub dienst: String,
+    /// `true` = Probe-Ansage kam als Audio zurück.
+    pub ok: bool,
+    /// `false` = kein Schlüssel gespeichert, nicht geprüft.
+    pub eingerichtet: bool,
+    /// Klartext für die Turnierleitung (Einordnung + gekürzte Rohmeldung).
+    pub meldung: String,
+    pub dauer_ms: u64,
+}
+
+/// Fehlermeldung eines Dienstes → verständlicher Grund. Rein & testbar.
+fn pruef_fehler_einordnen(roh: &str) -> String {
+    let r = roh.to_lowercase();
+    // Reihenfolge zählt: ElevenLabs meldet leeres Guthaben als 401 mit
+    // `quota_exceeded`, Google einen falschen Schlüssel als 400.
+    let grund = if r.contains("http 402")
+        || r.contains("quota")
+        || r.contains("credits")
+        || r.contains("insufficient")
+    {
+        "Kontingent oder Guthaben aufgebraucht"
+    } else if r.contains("http 401")
+        || r.contains("http 403")
+        || r.contains("api key not valid")
+        || r.contains("api_key_invalid")
+    {
+        "Schlüssel ungültig, abgelaufen oder ohne Berechtigung"
+    } else if r.contains("http 429") {
+        "Zu viele Anfragen oder Kontingent aufgebraucht"
+    } else if r.contains("http 404") || (r.contains("http 400") && r.contains("model")) {
+        "Modell oder Stimme beim Dienst unbekannt"
+    } else if r.contains("anfrage:") || r.contains("-request:") {
+        "Keine Verbindung zum Dienst"
+    } else if r.contains("http 5") {
+        "Störung beim Dienst"
+    } else {
+        "Fehler"
+    };
+    let kurz: String = roh.chars().take(160).collect();
+    format!("{grund} ({kurz})")
+}
+
+/// „Dienste prüfen": schickt an jeden Dienst, dessen Schlüssel gespeichert
+/// ist, eine winzige Probe („Test.", ohne Cache — sonst prüfte man nur die
+/// Platte) und meldet je Dienst, ob er funktioniert. Kostet wenige Zeichen je
+/// Dienst. Nur die eigene Config, nie geerbte Schlüssel.
+#[tauri::command]
+pub async fn tts_dienste_pruefen(app: AppHandle) -> Result<Vec<DienstPruefung>, String> {
+    let cfg = AppConfig::load_from(&config_path(&app)).map_err(|e| e.to_string())?;
+    const PROBE: &str = r#"<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="de-DE"><voice name="VOICE">Test.</voice></speak>"#;
+    let mut out = Vec::new();
+    for dienst in crate::config::DIENSTE {
+        let mut az = cfg.azure_tts.clone();
+        az.enabled = true;
+        az.dienst = (*dienst).to_string();
+        let Some(ziel) = tts_ziel_lokal(&az) else {
+            out.push(DienstPruefung {
+                dienst: (*dienst).to_string(),
+                ok: false,
+                eingerichtet: false,
+                meldung: "Kein Schlüssel gespeichert".to_string(),
+                dauer_ms: 0,
+            });
+            continue;
+        };
+        let probe = PROBE.replace("VOICE", &xml_attr(&az.voice));
+        let start = now_ms();
+        let erg = ziel.vertonen(&probe, None).await;
+        let dauer_ms = now_ms().saturating_sub(start);
+        out.push(match erg {
+            Ok(_) => DienstPruefung {
+                dienst: (*dienst).to_string(),
+                ok: true,
+                eingerichtet: true,
+                meldung: "Funktioniert".to_string(),
+                dauer_ms,
+            },
+            Err(e) => {
+                tracing::warn!("Dienste prüfen: {dienst} gescheitert: {e}");
+                DienstPruefung {
+                    dienst: (*dienst).to_string(),
+                    ok: false,
+                    eingerichtet: true,
+                    meldung: pruef_fehler_einordnen(&e),
+                    dauer_ms,
+                }
+            }
+        });
+    }
+    Ok(out)
+}
+
+/// Attributwert für XML escapen (Stimmenname in der Probe).
+fn xml_attr(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Vorrangregel (ADR 0003): vollständige lokale Config gewinnt, sonst die vom
+/// Master geerbte. `None`, wenn keine von beiden nutzbar ist.
+fn effective_tts(
     local: &crate::config::AzureTtsConfig,
     inherited: Option<&relay_proto::AzureTtsShare>,
-) -> Option<(String, String)> {
-    if local.enabled && !local.key.is_empty() && !local.region.is_empty() {
-        return Some((local.region.clone(), local.key.clone()));
-    }
-    inherited
-        .filter(|a| !a.key.is_empty() && !a.region.is_empty())
-        .map(|a| (a.region.clone(), a.key.clone()))
+) -> Option<TtsZiel> {
+    tts_ziel_lokal(local).or_else(|| inherited.and_then(tts_ziel_geerbt))
 }
 
 /// Was vor dem Start der Übertragung stimmen muss. Reine Funktion, damit die
@@ -4109,18 +4355,16 @@ pub async fn ansage_vertonen(
     }
     // Nur die eigene Config: Der Vertoner läuft nie am Slave, geerbte
     // Zugangsdaten spielen hier keine Rolle.
-    let audio = match (ssml, effective_azure(&cfg.azure_tts, None)) {
-        (Some(ssml), Some((region, key))) => {
-            match crate::azure_tts::synthesize_ohne_cache(&region, &key, &ssml).await {
-                Ok(bytes) => Some(("audio/mpeg".to_string(), bytes)),
-                Err(e) => {
-                    tracing::warn!(
-                        "Ansage-Seite: Azure-Vertonung gescheitert, Eintrag ohne Audio: {e}"
-                    );
-                    None
-                }
+    let audio = match (ssml, tts_ziel_lokal(&cfg.azure_tts)) {
+        (Some(ssml), Some(ziel)) => match ziel.vertonen(&ssml, None).await {
+            Ok((mime, bytes)) => Some((mime.to_string(), bytes)),
+            Err(e) => {
+                tracing::warn!(
+                    "Ansage-Seite: Cloud-Vertonung gescheitert, Eintrag ohne Audio: {e}"
+                );
+                None
             }
-        }
+        },
         _ => None,
     };
     // Ohne Azure (oder wenn Azure scheitert) die Windows-Stimme des PCs
@@ -4808,6 +5052,10 @@ pub struct CloudAnnounce {
     /// Vom Master geerbte Stimme je Disziplin (Disziplin-Kürzel → Stimme).
     /// Leer ohne Vererbung/ohne Zuordnung → der Slave nutzt die Standard-Stimme.
     pub azure_discipline_voices: std::collections::HashMap<String, String>,
+    /// Vom Master geerbter Sprachdienst (`"azure"`, `"elevenlabs_v2"`, …),
+    /// `None` ohne Vererbung. Das Frontend wählt danach die Namens-Korrekturen
+    /// (Spec `ansage-elevenlabs`, E2). Kein Secret.
+    pub azure_dienst: Option<String>,
 }
 
 /// Cloud-Ansage-Slave (B1a): holt aus dem Cloud-Relay des Masters die Matches
@@ -4827,6 +5075,7 @@ pub async fn cloud_announce_state(
                 prepared: Vec::new(),
                 azure_voice: None,
                 azure_discipline_voices: std::collections::HashMap::new(),
+                azure_dienst: None,
             });
         }
         (
@@ -4843,33 +5092,28 @@ pub async fn cloud_announce_state(
     // liefert (Azure am Master deaktiviert).
     // Geerbte Stimme UND Disziplin-Stimmen aus derselben Master-Config ableiten,
     // damit die ferne Halle exakt dieselbe Zuordnung nutzt wie der Master.
-    let azure_voice;
-    let azure_discipline_voices;
-    match &fetched {
-        Some(st) => {
-            azure_voice = st.azure_tts.as_ref().map(|a| a.voice.clone());
-            azure_discipline_voices = st
-                .azure_tts
-                .as_ref()
-                .map(|a| a.discipline_voices.clone())
-                .unwrap_or_default();
-            *state
-                .inherited_azure
-                .lock()
-                .expect("inherited_azure-Mutex nicht vergiftet") = st.azure_tts.clone();
+    let geerbt = {
+        let mut guard = state
+            .inherited_azure
+            .lock()
+            .expect("inherited_azure-Mutex nicht vergiftet");
+        if let Some(st) = &fetched {
+            *guard = st.azure_tts.clone();
         }
-        None => {
-            let guard = state
-                .inherited_azure
-                .lock()
-                .expect("inherited_azure-Mutex nicht vergiftet");
-            azure_voice = guard.as_ref().map(|a| a.voice.clone());
-            azure_discipline_voices = guard
-                .as_ref()
-                .map(|a| a.discipline_voices.clone())
-                .unwrap_or_default();
-        }
+        guard.clone()
     };
+    let azure_voice = geerbt.as_ref().map(|a| a.voice.clone());
+    let azure_discipline_voices = geerbt
+        .as_ref()
+        .map(|a| a.discipline_voices.clone())
+        .unwrap_or_default();
+    let azure_dienst = geerbt.as_ref().map(|a| {
+        if a.dienst.is_empty() {
+            "azure".to_string()
+        } else {
+            a.dienst.clone()
+        }
+    });
     let st = fetched.unwrap_or_default();
 
     let courts = st
@@ -4908,6 +5152,7 @@ pub async fn cloud_announce_state(
         prepared,
         azure_voice,
         azure_discipline_voices,
+        azure_dienst,
     })
 }
 
@@ -6566,7 +6811,24 @@ mod tests {
         let j = serde_json::to_value(share("k", "westeurope")).unwrap();
         let mut felder: Vec<&str> = j.as_object().unwrap().keys().map(String::as_str).collect();
         felder.sort_unstable();
-        assert_eq!(felder, ["discipline_voices", "key", "region", "voice"]);
+        // Seit Spec `ansage-elevenlabs` erbt er zusätzlich Dienstwahl und
+        // ElevenLabs-Zugang — das sind Ansage-, keine Geräte-Felder.
+        assert_eq!(
+            felder,
+            [
+                "dienst",
+                "discipline_voices",
+                "elevenlabs_key",
+                "elevenlabs_voice",
+                "gemini_key",
+                "gemini_voice",
+                "key",
+                "openai_key",
+                "openai_voice",
+                "region",
+                "voice"
+            ]
+        );
     }
 
     fn local_az(enabled: bool, key: &str, region: &str) -> crate::config::AzureTtsConfig {
@@ -6576,6 +6838,7 @@ mod tests {
             key: key.into(),
             voice: "lokal-stimme".into(),
             discipline_voices: std::collections::HashMap::new(),
+            ..Default::default()
         }
     }
 
@@ -6585,6 +6848,7 @@ mod tests {
             key: key.into(),
             voice: "master-stimme".into(),
             discipline_voices: std::collections::HashMap::new(),
+            ..Default::default()
         }
     }
 
@@ -6628,6 +6892,27 @@ mod tests {
         assert_eq!(bundle.btp.password, None);
         assert!(bundle.badhub.password.is_empty());
         assert!(bundle.azure_tts.key.is_empty(), "Azure-Key darf nie raus");
+    }
+
+    #[test]
+    fn elevenlabs_schluessel_geht_nie_ins_buendel_und_bleibt_beim_import() {
+        let mut cfg = AppConfig::default();
+        cfg.azure_tts.elevenlabs_key = "el-geheim".into();
+        cfg.azure_tts.openai_key = "oa-geheim".into();
+        cfg.azure_tts.gemini_key = "gm-geheim".into();
+        cfg.azure_tts.dienst = "elevenlabs_v2".into();
+        let bundle = identity_bundle(cfg.clone());
+        assert!(bundle.azure_tts.elevenlabs_key.is_empty());
+        assert!(bundle.azure_tts.openai_key.is_empty());
+        assert!(bundle.azure_tts.gemini_key.is_empty());
+        assert_eq!(
+            bundle.azure_tts.dienst, "elevenlabs_v2",
+            "Wahl ist kein Secret"
+        );
+        let merged = apply_imported_identity(bundle, &cfg);
+        assert_eq!(merged.azure_tts.elevenlabs_key, "el-geheim");
+        assert_eq!(merged.azure_tts.openai_key, "oa-geheim");
+        assert_eq!(merged.azure_tts.gemini_key, "gm-geheim");
     }
 
     #[test]
@@ -7327,40 +7612,160 @@ mod tests {
         );
     }
 
+    fn azure(region: &str, key: &str) -> Option<TtsZiel> {
+        Some(TtsZiel::Azure {
+            region: region.into(),
+            key: key.into(),
+        })
+    }
+
     #[test]
-    fn effective_azure_prefers_complete_local_config() {
+    fn effective_tts_prefers_complete_local_config() {
         // Vollständige lokale Config gewinnt gegen die geerbte (ADR 0003).
-        let got = effective_azure(
+        let got = effective_tts(
             &local_az(true, "lokal", "germanywestcentral"),
             Some(&share("geerbt", "westeurope")),
         );
-        assert_eq!(got, Some(("germanywestcentral".into(), "lokal".into())));
+        assert_eq!(got, azure("germanywestcentral", "lokal"));
     }
 
     #[test]
-    fn effective_azure_falls_back_to_inherited_when_local_incomplete() {
+    fn effective_tts_falls_back_to_inherited_when_local_incomplete() {
         // Genau der Turnier-Bug: Schalter an, Key fehlt → geerbte Config zieht.
-        let got = effective_azure(
+        let got = effective_tts(
             &local_az(true, "", "westeurope"),
             Some(&share("geerbt", "westeurope")),
         );
-        assert_eq!(got, Some(("westeurope".into(), "geerbt".into())));
+        assert_eq!(got, azure("westeurope", "geerbt"));
         // Auch bei lokal komplett aus.
-        let got = effective_azure(
+        let got = effective_tts(
             &local_az(false, "", ""),
             Some(&share("geerbt", "westeurope")),
         );
-        assert_eq!(got, Some(("westeurope".into(), "geerbt".into())));
+        assert_eq!(got, azure("westeurope", "geerbt"));
     }
 
     #[test]
-    fn effective_azure_none_without_usable_config() {
-        assert_eq!(effective_azure(&local_az(true, "", ""), None), None);
+    fn effective_tts_none_without_usable_config() {
+        assert_eq!(effective_tts(&local_az(true, "", ""), None), None);
         // Unvollständig geerbte Config (defensiv) zählt nicht.
         assert_eq!(
-            effective_azure(&local_az(false, "", ""), Some(&share("", "westeurope"))),
+            effective_tts(&local_az(false, "", ""), Some(&share("", "westeurope"))),
             None
         );
+    }
+
+    #[test]
+    fn elevenlabs_lokal_braucht_nur_den_eigenen_schluessel() {
+        // Spec `ansage-elevenlabs`: Wer ElevenLabs wählt, braucht kein Azure.
+        let mut az = local_az(true, "", "");
+        az.dienst = "elevenlabs_v3".into();
+        az.elevenlabs_key = "el".into();
+        az.elevenlabs_voice = String::new();
+        assert_eq!(
+            effective_tts(&az, Some(&share("geerbt", "westeurope"))),
+            Some(TtsZiel::ElevenLabs {
+                key: "el".into(),
+                voice: crate::config::ELEVENLABS_STANDARD_STIMME.into(),
+                modell: "eleven_v3",
+            })
+        );
+        // Gewählt, aber ohne Schlüssel → NICHT still auf das lokale Azure,
+        // sondern Vorrangregel: geerbte Config.
+        let mut az = local_az(true, "lokal", "westeurope");
+        az.dienst = "elevenlabs_v2".into();
+        assert_eq!(
+            effective_tts(&az, Some(&share("geerbt", "westeurope"))),
+            azure("westeurope", "geerbt")
+        );
+        assert_eq!(effective_tts(&az, None), None);
+        // Schalter aus gilt auch für ElevenLabs.
+        az.elevenlabs_key = "el".into();
+        az.enabled = false;
+        assert_eq!(effective_tts(&az, None), None);
+    }
+
+    #[test]
+    fn pruef_fehler_werden_verstaendlich() {
+        assert!(
+            pruef_fehler_einordnen("ElevenLabs HTTP 401 Unauthorized: x")
+                .starts_with("Schlüssel ungültig")
+        );
+        assert!(
+            pruef_fehler_einordnen(r#"ElevenLabs HTTP 401: {"status":"quota_exceeded"}"#)
+                .starts_with("Kontingent"),
+            "ElevenLabs meldet leeres Guthaben als 401"
+        );
+        assert!(pruef_fehler_einordnen(
+            "Gemini HTTP 400 Bad Request: API key not valid. Please pass a valid API key."
+        )
+        .starts_with("Schlüssel ungültig"));
+        assert!(
+            pruef_fehler_einordnen("Azure-TTS-Request: connection refused")
+                .starts_with("Keine Verbindung")
+        );
+        assert!(
+            pruef_fehler_einordnen("OpenAI HTTP 429 Too Many Requests: insufficient_quota")
+                .starts_with("Kontingent")
+        );
+        assert!(
+            pruef_fehler_einordnen("Gemini HTTP 429 Too Many Requests: rate")
+                .starts_with("Zu viele")
+        );
+        assert!(
+            pruef_fehler_einordnen("Gemini HTTP 404 Not Found: models/x").starts_with("Modell")
+        );
+        assert!(pruef_fehler_einordnen("OpenAI-Anfrage: dns error").starts_with("Keine Verbindung"));
+        assert!(pruef_fehler_einordnen("Azure-TTS HTTP 503: x").starts_with("Störung"));
+    }
+
+    #[test]
+    fn elevenlabs_wird_geerbt_und_alter_master_bleibt_azure() {
+        let mut s = share("", "");
+        s.dienst = "elevenlabs_v2".into();
+        s.elevenlabs_key = "el".into();
+        s.elevenlabs_voice = "Stimme1".into();
+        assert_eq!(
+            effective_tts(&local_az(false, "", ""), Some(&s)),
+            Some(TtsZiel::ElevenLabs {
+                key: "el".into(),
+                voice: "Stimme1".into(),
+                modell: "eleven_multilingual_v2",
+            })
+        );
+        // Alter Master: kein `dienst` → Azure, wie bisher.
+        assert_eq!(
+            effective_tts(&local_az(false, "", ""), Some(&share("k", "we"))),
+            azure("we", "k")
+        );
+        // OpenAI und Gemini mit Standardstimme.
+        let mut az = local_az(true, "", "");
+        az.dienst = "openai".into();
+        az.openai_key = "oa".into();
+        az.openai_voice = String::new();
+        assert_eq!(
+            effective_tts(&az, None),
+            Some(TtsZiel::OpenAi {
+                key: "oa".into(),
+                voice: crate::config::OPENAI_STANDARD_STIMME.into(),
+                modell: "gpt-4o-mini-tts",
+            })
+        );
+        let mut s = share("", "");
+        s.dienst = "gemini_flash".into();
+        s.gemini_key = "gm".into();
+        assert_eq!(
+            effective_tts(&local_az(false, "", ""), Some(&s)),
+            Some(TtsZiel::Gemini {
+                key: "gm".into(),
+                voice: crate::config::GEMINI_STANDARD_STIMME.into(),
+                modell: "gemini-2.5-flash-preview-tts",
+            })
+        );
+        // Unbekannter Dienst einer neueren Version → Azure statt Absturz.
+        let mut az = local_az(true, "k", "we");
+        az.dienst = "zukunft_v9".into();
+        assert_eq!(effective_tts(&az, None), azure("we", "k"));
     }
 
     #[test]

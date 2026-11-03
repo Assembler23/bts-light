@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.336
+
+- **Weitere Ansage-Stimmen: ElevenLabs, OpenAI, Gemini.** Auf der Seite
+  „Ansagen" lässt sich die Cloud-Stimme jetzt zwischen Azure, ElevenLabs (v2,
+  v3, v4, Flash v2.5), OpenAI und Gemini umschalten — bei eingerichtetem
+  Dienst sofort, ohne Speichern, zum Vergleichen in der Halle. Die neuen
+  Dienste bekommen die Namen so, wie sie in BTP stehen, und nur die eigenen
+  Aussprache-Korrekturen. Ohne Schlüssel oder bei einem Fehler spricht die
+  Windows-Stimme. Die Schlüssel bleiben beim Identitäts-Export außen vor; an
+  Ansage-Slaves geht nur der Zugang des gewählten Dienstes. Der Knopf
+  „Dienste prüfen" zeigt je Dienst, ob Schlüssel und Kontingent noch reichen.
+
 ## v0.9.335
 
 - **Azure-Ansagen langsamer und mit Pausen.** Der Tempo-Regler der Ansagen

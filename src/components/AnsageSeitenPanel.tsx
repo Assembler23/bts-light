@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { ansageHoerer, ansageLink, openExternal, saveConfig } from "../api";
 import type { AnsageHoerer, AnsageLink, AppConfig } from "../types";
+import { cloudStimmeVollstaendig } from "../io/azureAnnounce";
 
 const TAKT_MS = 5000;
 
@@ -20,7 +21,7 @@ export function AnsageSeitenPanel({
   const [hoerer, setHoerer] = useState<AnsageHoerer>({ hallen: [], doppelbetrieb: [] });
   const [err, setErr] = useState("");
   const az = config.azure_tts;
-  const azure = az.enabled && az.key.trim() !== "" && az.region.trim() !== "";
+  const azure = cloudStimmeVollstaendig(az);
 
   useEffect(() => {
     if (!an) return;
