@@ -102,6 +102,15 @@ export const PRESETS: Preset[] = [
     },
   },
   {
+    id: "gr-no",
+    label: "GR-NO – DBV-Gruppe Nord",
+    badhub: {
+      url: PUSH_URL,
+      password: "9ff7e01cf989abc808527556",
+      live_url: "https://badhub.de/live?t=gr-no",
+    },
+  },
+  {
     id: "dbv",
     label: "DBV – Deutscher Badminton-Verband",
     badhub: {
