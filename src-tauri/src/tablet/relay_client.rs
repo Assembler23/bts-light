@@ -1371,7 +1371,7 @@ mod tests {
         assert!(s.key.is_empty() && s.region.is_empty() && s.voice.is_empty());
         assert!(s.openai_key.is_empty() && s.gemini_key.is_empty());
 
-        az.dienst = "gemini_pro".into();
+        az.dienst = "gemini_38_lite".into();
         let s = super::azure_share_aus(&az).unwrap();
         assert_eq!(s.gemini_key, "gm");
         assert!(s.elevenlabs_key.is_empty() && s.key.is_empty());

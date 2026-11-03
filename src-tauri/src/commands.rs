@@ -7918,14 +7918,14 @@ mod tests {
             })
         );
         let mut s = share("", "");
-        s.dienst = "gemini_flash".into();
+        s.dienst = "gemini_38_flash".into();
         s.gemini_key = "gm".into();
         assert_eq!(
             effective_tts(&local_az(false, "", ""), Some(&s)),
             Some(TtsZiel::Gemini {
                 key: "gm".into(),
                 voice: crate::config::GEMINI_STANDARD_STIMME.into(),
-                modell: "gemini-2.5-flash-preview-tts",
+                modell: "gemini-3.8-flash-tts",
             })
         );
         // Unbekannter Dienst einer neueren Version → Azure statt Absturz.
