@@ -95,11 +95,11 @@ pub async fn vertonen(
     modell: &str,
     ssml: &str,
     cache_dir: Option<&Path>,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, bool), String> {
     let t = ssml_zu_text(ssml, Pausen::Satzzeichen);
     let schluessel = cache_schluessel(voice, modell, &t);
     if let Some(bytes) = cache_dir.and_then(|d| netz::cache_holen(d, &schluessel)) {
-        return Ok(bytes);
+        return Ok((bytes, true));
     }
     if !netz::stimme_gueltig(voice)
         || !modell
@@ -143,7 +143,7 @@ pub async fn vertonen(
     if let Some(d) = cache_dir {
         netz::cache_ablegen(d, &schluessel, &wav);
     }
-    Ok(wav)
+    Ok((wav, false))
 }
 
 #[cfg(test)]
@@ -208,7 +208,8 @@ mod echt {
                 None,
             )
             .await
-            .unwrap_or_else(|e| panic!("{modell}: {e}"));
+            .unwrap_or_else(|e| panic!("{modell}: {e}"))
+            .0;
             assert_eq!(&wav[..4], b"RIFF", "{modell}");
         }
     }

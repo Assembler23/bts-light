@@ -22,7 +22,7 @@ pub(crate) fn cache_name(ssml: &str) -> String {
     format!("{hash:016x}.mp3")
 }
 
-/// Synthetisiert das SSML zu MP3-Bytes. Liefert gecachte Bytes, falls vorhanden;
+/// Synthetisiert das SSML zu MP3-Bytes (+ `true`, wenn aus dem Cache). Liefert gecachte Bytes, falls vorhanden;
 /// sonst Aufruf der Azure-REST-API und Ablage im Cache. Fehler (Netz, 4xx/5xx)
 /// werden als `Err(String)` gemeldet — der Aufrufer fällt dann auf die lokale
 /// Web-Speech-Ansage zurück.
@@ -31,18 +31,18 @@ pub async fn synthesize(
     key: &str,
     ssml: &str,
     cache_dir: &Path,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, bool), String> {
     let cached = cache_dir.join(cache_name(ssml));
     if let Ok(bytes) = std::fs::read(&cached) {
         if !bytes.is_empty() {
-            return Ok(bytes);
+            return Ok((bytes, true));
         }
     }
     let bytes = synthesize_ohne_cache(region, key, ssml).await?;
     // Best-effort cachen (Fehler beim Schreiben sind nicht fatal).
     let _ = std::fs::create_dir_all(cache_dir);
     let _ = std::fs::write(&cached, &bytes);
-    Ok(bytes)
+    Ok((bytes, false))
 }
 
 /// Wie [`synthesize`], aber **ohne** Plattencache — für die Ansage-Seiten

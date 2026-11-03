@@ -15,6 +15,7 @@ pub mod print;
 pub mod sync;
 pub mod tablet;
 pub mod tts_text;
+pub mod tts_verbrauch;
 pub mod update;
 
 use tauri::menu::{Menu, MenuItem};
@@ -116,6 +117,7 @@ pub fn run() {
             commands::test_btp,
             commands::azure_tts_speak,
             commands::tts_dienste_pruefen,
+            commands::tts_verbrauch,
             commands::ansage_offene_quellen,
             commands::ansage_vertonen,
             commands::ansage_hoerer,

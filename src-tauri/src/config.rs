@@ -917,6 +917,16 @@ pub fn dienst_art(dienst: &str) -> DienstArt {
     }
 }
 
+/// Umkehrung von [`dienst_art`]: Anbieter+Modell → Config-Wert (für Zähler
+/// und Anzeige). Unbekannt → `"azure"`.
+pub fn dienst_wert(art: DienstArt) -> &'static str {
+    DIENSTE
+        .iter()
+        .copied()
+        .find(|w| dienst_art(w) == art)
+        .unwrap_or("azure")
+}
+
 impl AzureTtsConfig {
     /// Ist der **gewählte** Dienst vollständig eingerichtet? Der Schalter
     /// `enabled` („Cloud-Stimme verwenden") gilt für alle Dienste.
@@ -1868,6 +1878,14 @@ impl AppConfig {
 #[cfg(test)]
 mod sprachdienst_tests {
     use super::*;
+
+    #[test]
+    fn dienst_wert_kehrt_dienst_art_um() {
+        for d in DIENSTE {
+            assert_eq!(dienst_wert(dienst_art(d)), *d);
+        }
+        assert_eq!(dienst_wert(DienstArt::ElevenLabs("gibt_es_nicht")), "azure");
+    }
 
     #[test]
     fn dienstliste_und_zuordnung_passen_zusammen() {

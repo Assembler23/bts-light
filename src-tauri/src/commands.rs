@@ -113,6 +113,9 @@ pub struct AppState {
     /// Das vom Updater-Plugin geprüfte Update — nur damit lässt sich das
     /// Paket über den Plugin-Weg (Installer mit Neustart) einbauen.
     pub update_handle: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// Arbeitsspeicher-Cache der Ansage-Seiten (Spec `ansage-elevenlabs` E9):
+    /// Audio mit Namen nie auf der Platte, nur kurz im RAM.
+    pub seiten_cache: Mutex<crate::tts_verbrauch::SeitenCache>,
 }
 
 fn now_ms() -> u64 {
@@ -1008,13 +1011,64 @@ pub async fn azure_tts_speak(
     let Some(ziel) = effective_tts(&cfg.azure_tts, inherited.as_ref()) else {
         return Err("Cloud-Stimme nicht konfiguriert".to_string());
     };
-    let cache_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("tts-cache");
-    let (_, bytes) = ziel.vertonen(&ssml, Some(&cache_dir)).await?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let v = ziel
+        .vertonen(&ssml, Some(&app_dir.join("tts-cache")))
+        .await?;
+    verbrauch_buchen(&app_dir, &ziel, &ssml, v.aus_cache);
+    Ok(base64::engine::general_purpose::STANDARD.encode(v.bytes))
+}
+
+/// Ergebnis einer Vertonung.
+struct Vertont {
+    mime: &'static str,
+    bytes: Vec<u8>,
+    /// `true` = kam aus dem Plattencache, beim Anbieter fiel nichts an.
+    aus_cache: bool,
+}
+
+/// Zeichen, die eine Ansage beim Anbieter kostet — der gesprochene Text ohne
+/// SSML-Tags. Näherung: Azure zählt so, ElevenLabs v2 zusätzlich seine
+/// Pausen-Tags, OpenAI/Gemini rechnen in Token bzw. Audiosekunden.
+fn ansage_zeichen(ssml: &str) -> u64 {
+    crate::tts_text::ssml_zu_text(ssml, crate::tts_text::Pausen::Satzzeichen)
+        .text
+        .chars()
+        .count() as u64
+}
+
+/// Bucht eine Vertonung in den Zeichenzähler (`tts-zeichen.json`, E8) und
+/// schreibt bei neuer Vertonung eine Logzeile — nur Zahlen, nie Text.
+fn verbrauch_buchen(app_dir: &std::path::Path, ziel: &TtsZiel, ssml: &str, aus_cache: bool) {
+    let zeichen = ansage_zeichen(ssml);
+    let dienst = ziel.dienst_wert();
+    let tag = crate::tts_verbrauch::heute();
+    let p = crate::tts_verbrauch::buchen_in_datei(
+        &app_dir.join(crate::tts_verbrauch::VERBRAUCH_DATEI),
+        &tag,
+        dienst,
+        zeichen,
+        aus_cache,
+    );
+    if !aus_cache {
+        tracing::info!(
+            dienst,
+            zeichen,
+            tag_zeichen = p.zeichen,
+            tag_ansagen = p.neu,
+            "Cloud-Stimme: Zeichen verbraucht"
+        );
+    }
+}
+
+/// Zeichenzähler der letzten 14 Tage für die Ansagen-Seite (E8).
+#[tauri::command]
+pub fn tts_verbrauch(app: AppHandle) -> Result<Vec<crate::tts_verbrauch::VerbrauchZeile>, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(
+        crate::tts_verbrauch::laden(&app_dir.join(crate::tts_verbrauch::VERBRAUCH_DATEI))
+            .zeilen(14),
+    )
 }
 
 /// Wohin eine Ansage zur Vertonung geht (Spec `ansage-elevenlabs`). Der
@@ -1050,30 +1104,59 @@ impl TtsZiel {
         &self,
         ssml: &str,
         cache_dir: Option<&std::path::Path>,
-    ) -> Result<(&'static str, Vec<u8>), String> {
-        let mp3 = "audio/mpeg";
-        match self {
-            Self::Azure { region, key } => match cache_dir {
-                Some(dir) => crate::azure_tts::synthesize(region, key, ssml, dir).await,
-                None => crate::azure_tts::synthesize_ohne_cache(region, key, ssml).await,
-            }
-            .map(|b| (mp3, b)),
-            Self::ElevenLabs { key, voice, modell } => {
-                crate::elevenlabs_tts::vertonen(key, voice, modell, ssml, cache_dir)
-                    .await
-                    .map(|b| (mp3, b))
-            }
-            Self::OpenAi { key, voice, modell } => {
-                crate::openai_tts::vertonen(key, voice, modell, ssml, cache_dir)
-                    .await
-                    .map(|b| (mp3, b))
-            }
-            Self::Gemini { key, voice, modell } => {
-                crate::gemini_tts::vertonen(key, voice, modell, ssml, cache_dir)
-                    .await
-                    .map(|b| ("audio/wav", b))
-            }
-        }
+    ) -> Result<Vertont, String> {
+        let (mime, (bytes, aus_cache)) = match self {
+            Self::Azure { region, key } => (
+                "audio/mpeg",
+                match cache_dir {
+                    Some(dir) => crate::azure_tts::synthesize(region, key, ssml, dir).await?,
+                    None => (
+                        crate::azure_tts::synthesize_ohne_cache(region, key, ssml).await?,
+                        false,
+                    ),
+                },
+            ),
+            Self::ElevenLabs { key, voice, modell } => (
+                "audio/mpeg",
+                crate::elevenlabs_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+            ),
+            Self::OpenAi { key, voice, modell } => (
+                "audio/mpeg",
+                crate::openai_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+            ),
+            Self::Gemini { key, voice, modell } => (
+                "audio/wav",
+                crate::gemini_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+            ),
+        };
+        Ok(Vertont {
+            mime,
+            bytes,
+            aus_cache,
+        })
+    }
+
+    /// Config-Wert des Dienstes (`"elevenlabs_v3"` …) für Zähler und Cache.
+    fn dienst_wert(&self) -> &'static str {
+        use crate::config::{dienst_wert, DienstArt};
+        dienst_wert(match self {
+            Self::Azure { .. } => DienstArt::Azure,
+            Self::ElevenLabs { modell, .. } => DienstArt::ElevenLabs(modell),
+            Self::OpenAi { modell, .. } => DienstArt::OpenAi(modell),
+            Self::Gemini { modell, .. } => DienstArt::Gemini(modell),
+        })
+    }
+
+    /// Schlüssel des Seiten-Caches: Dienst, Stimme und SSML (Tempo und bei
+    /// Azure die Stimme stecken im SSML). **Nie** der API-Schlüssel.
+    fn seiten_cache_schluessel(&self, ssml: &str) -> String {
+        let stimme = match self {
+            Self::Azure { .. } => "",
+            Self::ElevenLabs { voice, .. }
+            | Self::OpenAi { voice, .. }
+            | Self::Gemini { voice, .. } => voice,
+        };
+        crate::azure_tts::cache_name(&format!("{}|{stimme}|{ssml}", self.dienst_wert()))
     }
 }
 
@@ -1225,6 +1308,11 @@ pub async fn tts_dienste_pruefen(app: AppHandle) -> Result<Vec<DienstPruefung>, 
         let start = now_ms();
         let erg = ziel.vertonen(&probe, None).await;
         let dauer_ms = now_ms().saturating_sub(start);
+        if erg.is_ok() {
+            if let Ok(dir) = app.path().app_data_dir() {
+                verbrauch_buchen(&dir, &ziel, &probe, false);
+            }
+        }
         out.push(match erg {
             Ok(_) => DienstPruefung {
                 dienst: (*dienst).to_string(),
@@ -4336,6 +4424,7 @@ fn ansage_entwurf_aus(a: AnsageAuftrag) -> Option<AnsageEntwurfMitSsml> {
 /// der Eintrag ohne Audio raus — die Seite spricht dann die Segmente.
 #[tauri::command]
 pub async fn ansage_vertonen(
+    app: AppHandle,
     state: State<'_, AppState>,
     auftrag: AnsageAuftrag,
 ) -> Result<Option<u64>, String> {
@@ -4356,15 +4445,7 @@ pub async fn ansage_vertonen(
     // Nur die eigene Config: Der Vertoner läuft nie am Slave, geerbte
     // Zugangsdaten spielen hier keine Rolle.
     let audio = match (ssml, tts_ziel_lokal(&cfg.azure_tts)) {
-        (Some(ssml), Some(ziel)) => match ziel.vertonen(&ssml, None).await {
-            Ok((mime, bytes)) => Some((mime.to_string(), bytes)),
-            Err(e) => {
-                tracing::warn!(
-                    "Ansage-Seite: Cloud-Vertonung gescheitert, Eintrag ohne Audio: {e}"
-                );
-                None
-            }
-        },
+        (Some(ssml), Some(ziel)) => seiten_cloud_audio(&app, &state, &ziel, &ssml).await,
         _ => None,
     };
     // Ohne Azure (oder wenn Azure scheitert) die Windows-Stimme des PCs
@@ -4380,6 +4461,47 @@ pub async fn ansage_vertonen(
         audio,
         now_ms(),
     )))
+}
+
+/// Cloud-Audio einer Seiten-Ansage: erst aus dem Arbeitsspeicher-Cache (E9),
+/// sonst neu vertont **ohne** Plattencache (Audio mit Namen nie auf die
+/// Platte, Spec `ansage-im-browser` Kriterium 10). Beides wird gezählt (E8).
+async fn seiten_cloud_audio(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    ziel: &TtsZiel,
+    ssml: &str,
+) -> Option<(String, Vec<u8>)> {
+    let app_dir = app.path().app_data_dir().ok();
+    let schluessel = ziel.seiten_cache_schluessel(ssml);
+    let treffer = state
+        .seiten_cache
+        .lock()
+        .expect("seiten_cache-Mutex nicht vergiftet")
+        .holen(&schluessel, now_ms());
+    if let Some(audio) = treffer {
+        if let Some(dir) = &app_dir {
+            verbrauch_buchen(dir, ziel, ssml, true);
+        }
+        return Some(audio);
+    }
+    match ziel.vertonen(ssml, None).await {
+        Ok(v) => {
+            if let Some(dir) = &app_dir {
+                verbrauch_buchen(dir, ziel, ssml, false);
+            }
+            state
+                .seiten_cache
+                .lock()
+                .expect("seiten_cache-Mutex nicht vergiftet")
+                .ablegen(schluessel, v.mime.to_string(), v.bytes.clone(), now_ms());
+            Some((v.mime.to_string(), v.bytes))
+        }
+        Err(e) => {
+            tracing::warn!("Ansage-Seite: Cloud-Vertonung gescheitert, Eintrag ohne Audio: {e}");
+            None
+        }
+    }
 }
 
 /// Gespeicherte Stimme für die Sprache der Ansage (`voice_de`/`voice_en`).
@@ -7683,6 +7805,50 @@ mod tests {
         az.elevenlabs_key = "el".into();
         az.enabled = false;
         assert_eq!(effective_tts(&az, None), None);
+    }
+
+    #[test]
+    fn seiten_cache_schluessel_trennt_dienst_und_stimme_ohne_api_schluessel() {
+        let el = |voice: &str, modell: &'static str| TtsZiel::ElevenLabs {
+            key: "geheim-el".into(),
+            voice: voice.into(),
+            modell,
+        };
+        let ssml = "<speak>Feld 3</speak>";
+        let a = el("v1", "eleven_v3").seiten_cache_schluessel(ssml);
+        assert_eq!(a, el("v1", "eleven_v3").seiten_cache_schluessel(ssml));
+        assert_ne!(a, el("v2", "eleven_v3").seiten_cache_schluessel(ssml));
+        assert_ne!(
+            a,
+            el("v1", "eleven_flash_v2_5").seiten_cache_schluessel(ssml)
+        );
+        assert_ne!(
+            a,
+            el("v1", "eleven_v3").seiten_cache_schluessel("<speak>Feld 4</speak>")
+        );
+        // Anderer API-Schlüssel, sonst gleich → derselbe Eintrag; der
+        // Schlüssel fließt also nicht ein (und steht nicht im Cache-Namen).
+        let anders = TtsZiel::ElevenLabs {
+            key: "anderer".into(),
+            voice: "v1".into(),
+            modell: "eleven_v3",
+        };
+        assert_eq!(a, anders.seiten_cache_schluessel(ssml));
+        assert!(!a.contains("geheim"));
+        assert_eq!(el("v1", "eleven_v3").dienst_wert(), "elevenlabs_v3");
+        let az = TtsZiel::Azure {
+            region: "we".into(),
+            key: "k".into(),
+        };
+        assert_eq!(az.dienst_wert(), "azure");
+    }
+
+    #[test]
+    fn ansage_zeichen_zaehlt_nur_gesprochenen_text() {
+        let ssml = r#"<speak version="1.0" xml:lang="de-DE"><voice name="de-DE-X"><prosody rate="-10%">Feld 3</prosody><break time="350ms"/>Anna &amp; Bo</voice></speak>"#;
+        let text = crate::tts_text::ssml_zu_text(ssml, crate::tts_text::Pausen::Satzzeichen).text;
+        assert_eq!(ansage_zeichen(ssml), text.chars().count() as u64);
+        assert!(ansage_zeichen(ssml) < 25, "Tags dürfen nicht mitzählen");
     }
 
     #[test]

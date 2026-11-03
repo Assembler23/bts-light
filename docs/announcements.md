@@ -1002,10 +1002,27 @@ Einrichten nicht ihre Stimme.
 - **Kosten:** Jede neue Ansage kostet beim Anbieter (ElevenLabs deutlich mehr
   als Azure, Flash etwa die Hälfte von v2/v3); Wiederholungen kommen aus dem
   Cache (`tts-cache/`, Schlüssel über Dienst, Modell, Stimme, Tempo und Text).
-  Ansage-Seiten im Browser vertonen ohne Cache. Gemini braucht je Ansage
+  Ansage-Seiten im Browser haben einen eigenen Cache **nur im Arbeitsspeicher**
+  (2 Stunden, höchstens 32 MB, weg beim Beenden): Nachruf, „nochmal" oder
+  dieselbe Ansage in einer zweiten Halle kosten so nur einmal, und Audio mit
+  Namen kommt trotzdem nie auf die Platte. Gemini braucht je Ansage
   spürbar länger (Zeitlimit 20 s statt 10 s). Bekannte Eigenheit: Gemini
   spricht die vorangestellte Anweisung gelegentlich mit — beim Hörtest
   darauf achten.
+- **Verbrauch der Cloud-Stimme:** Unter „Dienste prüfen" steht je Tag und
+  Dienst, wie viele Zeichen an den Anbieter gingen, wie viele Ansagen neu
+  vertont wurden und wie viele aus einem Cache kamen (letzte 14 Tage,
+  „Aktualisieren" lädt neu). Gezählt wird der gesprochene Text ohne SSML —
+  bei Azure und ElevenLabs ziemlich genau die Abrechnung (ElevenLabs Flash
+  kostet je Zeichen einen halben Credit), OpenAI und Gemini rechnen nach Token
+  bzw. Audiolänge. Die Proben von „Dienste prüfen" zählen mit. Jeder PC zählt
+  nur, was er selbst vertont: ein Ansage-Slave mit geerbter Stimme zählt bei
+  sich, nicht beim Master. Die Datei `tts-zeichen.json` im App-Datenordner
+  enthält nur Tag, Dienst und Zahlen, nie Text; ältere Tage als 90 fallen
+  heraus. Jede neue Vertonung schreibt außerdem eine Logzeile
+  „Cloud-Stimme: Zeichen verbraucht" mit dem Tagesstand.
+  <!-- pruef: "Verbrauch der Cloud-Stimme" in src/components/AnnounceSettings.tsx -->
+  <!-- pruef: "tts-zeichen.json" in src-tauri/src/tts_verbrauch.rs -->
 - **Datenschutz:** Bei Auswahl eines dieser Dienste gehen die Namen der
   gerufenen Paarung an den Anbieter (alle drei USA) — nur nach aktiver
   Auswahl, Hinweis im Block.
