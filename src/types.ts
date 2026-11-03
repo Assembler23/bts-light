@@ -105,6 +105,19 @@ export interface DienstPruefung {
   dauer_ms: number;
 }
 
+/** Zeichenzähler je Tag und Dienst (Rust: tts_verbrauch::VerbrauchZeile). */
+export interface VerbrauchZeile {
+  /** JJJJ-MM-TT (Ortszeit). */
+  tag: string;
+  dienst: string;
+  /** Zeichen, die an den Anbieter gingen. */
+  zeichen: number;
+  /** Neu vertonte Ansagen (kosten). */
+  neu: number;
+  /** Ansagen aus dem Cache (kosten nichts). */
+  aus_cache: number;
+}
+
 /** Aussprache-Korrektur für die Ansage (Rust: config::NameOverride). */
 export interface NameOverride {
   /** Ganzer Name ODER einzelner Namensteil (z. B. Nachname). */

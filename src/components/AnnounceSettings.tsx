@@ -3,7 +3,13 @@
 // Einstellungen wird das Ansage-Modul nur noch an-/ausgeschaltet. Speichert die
 // geänderten Felder in die App-Konfiguration (announce + azure_tts).
 import { useEffect, useState } from "react";
-import { saveConfig, sharePronunciations, tabletOverview, ttsDienstePruefen } from "../api";
+import {
+  saveConfig,
+  sharePronunciations,
+  tabletOverview,
+  ttsDienstePruefen,
+  ttsVerbrauch,
+} from "../api";
 import { playNameTest, playTestAnnouncement } from "../io/announcer";
 import { azureOption, cloudStimmeVollstaendig } from "../io/azureAnnounce";
 import { DIENSTE, dienstArt, dienstName } from "../io/sprachdienst.mjs";
@@ -17,6 +23,7 @@ import type {
   AnnounceLanguageMode,
   AppConfig,
   DienstPruefung,
+  VerbrauchZeile,
   NameOverride,
 } from "../types";
 
@@ -176,8 +183,21 @@ export function AnnounceSettings({
       ]);
     } finally {
       setPrueftGerade(false);
+      void verbrauchLaden();
     }
   }
+  // Zeichenzähler (E8): null = noch nicht geladen.
+  const [verbrauch, setVerbrauch] = useState<VerbrauchZeile[] | null>(null);
+  async function verbrauchLaden() {
+    try {
+      setVerbrauch(await ttsVerbrauch());
+    } catch {
+      setVerbrauch([]);
+    }
+  }
+  useEffect(() => {
+    void verbrauchLaden();
+  }, []);
   const [halls, setHalls] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -773,6 +793,50 @@ export function AnnounceSettings({
                 )}
               </ul>
             )}
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-700">Verbrauch der Cloud-Stimme</span>
+              <button
+                type="button"
+                onClick={() => void verbrauchLaden()}
+                className="rounded px-1.5 text-xs text-slate-500 ring-1 ring-slate-200 hover:bg-slate-100"
+              >
+                Aktualisieren
+              </button>
+            </div>
+            {verbrauch && verbrauch.length === 0 && (
+              <p className="text-xs text-slate-500">Noch nichts gezählt.</p>
+            )}
+            {verbrauch && verbrauch.length > 0 && (
+              <table className="text-xs text-slate-700">
+                <thead>
+                  <tr className="text-left text-slate-500">
+                    <th className="pr-3 font-normal">Tag</th>
+                    <th className="pr-3 font-normal">Dienst</th>
+                    <th className="pr-3 text-right font-normal">Zeichen</th>
+                    <th className="pr-3 text-right font-normal">neu vertont</th>
+                    <th className="text-right font-normal">aus Cache</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {verbrauch.map((z) => (
+                    <tr key={`${z.tag}|${z.dienst}`}>
+                      <td className="pr-3">{z.tag.split("-").reverse().join(".")}</td>
+                      <td className="pr-3">{dienstName(z.dienst)}</td>
+                      <td className="pr-3 text-right tabular-nums">
+                        {z.zeichen.toLocaleString("de-DE")}
+                      </td>
+                      <td className="pr-3 text-right tabular-nums">{z.neu}</td>
+                      <td className="text-right tabular-nums">{z.aus_cache}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <span className="text-xs text-slate-500">
+              Nur dieser PC, letzte 14 Tage. Gezählt wird der gesprochene Text;
+              ElevenLabs rechnet je Zeichen ab (Flash zur Hälfte), OpenAI und
+              Gemini nach Token bzw. Audiolänge.
+            </span>
           </div>
         )}
         {/* Cloud-Slave: Azure-Zugang kommt vom Master (ADR 0003) — dann sind

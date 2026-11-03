@@ -345,7 +345,10 @@ Umsetzung (v0.9.313), Entscheidungen beim Bau:
    — die Zeichenfolgen `azure`, `region` oder `key` als Feld.
 9. Unter `/ansage*` existiert keine Route außer GET.
 10. Audio ist nach 60 s unter `/ansage/audio/{id}` nicht mehr abrufbar (404)
-    und wurde nie auf die Platte geschrieben.
+    und wurde nie auf die Platte geschrieben. *(Seit v0.9.337 hält der Kern
+    das Cloud-Audio zusätzlich bis zu 2 h im Arbeitsspeicher, damit
+    Wiederholungen nichts kosten — nicht abrufbar, nie auf der Platte; Spec
+    `ansage-elevenlabs` E9.)*
 11. Eine Seite ohne Gerätestimme, bei `hostAudio: false`: Gong + Warnung, und
     die TL-Seite meldet für die Halle „kein Ansage-Gerät".
 12. Läuft in Halle A die App mit `enabled` **und** eine Seite, zeigt die App

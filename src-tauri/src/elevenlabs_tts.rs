@@ -43,17 +43,17 @@ pub async fn vertonen(
     modell: &str,
     ssml: &str,
     cache_dir: Option<&Path>,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, bool), String> {
     let t = text_fuer(ssml, modell);
     let schluessel = cache_schluessel(voice, modell, &t);
     if let Some(bytes) = cache_dir.and_then(|d| netz::cache_holen(d, &schluessel)) {
-        return Ok(bytes);
+        return Ok((bytes, true));
     }
     let bytes = anfragen(key, voice, modell, &t).await?;
     if let Some(d) = cache_dir {
         netz::cache_ablegen(d, &schluessel, &bytes);
     }
-    Ok(bytes)
+    Ok((bytes, false))
 }
 
 async fn anfragen(key: &str, voice: &str, modell: &str, t: &TtsText) -> Result<Vec<u8>, String> {
@@ -150,7 +150,8 @@ mod echt {
                 None,
             )
             .await
-            .unwrap_or_else(|e| panic!("{modell}: {e}"));
+            .unwrap_or_else(|e| panic!("{modell}: {e}"))
+            .0;
             assert!(mp3.len() > 1000, "{modell}: zu kurz");
             assert!(
                 mp3.starts_with(b"ID3") || mp3[0] == 0xFF,

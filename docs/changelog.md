@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.337
+
+- **Verbrauch der Cloud-Stimme sichtbar.** Auf der Seite „Ansagen" zeigt ein
+  Zähler je Tag und Dienst, wie viele Zeichen an Azure, ElevenLabs, OpenAI
+  oder Gemini gingen und wie viele Ansagen aus dem Cache kamen — damit nach
+  einem Turnier feststeht, welches Kontingent man wirklich braucht. Es werden
+  nur Zahlen gespeichert, keine Namen.
+- **Ansage-Seiten zahlen Wiederholungen nicht doppelt.** Nachruf, „nochmal"
+  oder dieselbe Ansage in einer zweiten Halle kommen jetzt aus einem kurzen
+  Zwischenspeicher im Arbeitsspeicher statt neu vom Anbieter.
+
 ## v0.9.336
 
 - **Weitere Ansage-Stimmen: ElevenLabs, OpenAI, Gemini.** Auf der Seite

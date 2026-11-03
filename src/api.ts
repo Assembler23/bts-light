@@ -46,6 +46,7 @@ import type {
   WinnersView,
   MpPlatz,
   DienstPruefung,
+  VerbrauchZeile,
 } from "./types";
 
 export const loadConfig = (): Promise<AppConfig> => invoke("load_config");
@@ -69,6 +70,10 @@ export const azureTtsSpeak = (ssml: string): Promise<string> =>
  *  (gespeicherter Stand). Kostet je Dienst ein paar Zeichen. */
 export const ttsDienstePruefen = (): Promise<DienstPruefung[]> =>
   invoke("tts_dienste_pruefen");
+
+/** Zeichenzähler der Cloud-Stimmen, letzte 14 Tage, neuester Tag zuerst.
+ *  Nur Zahlen je Tag und Dienst (dieser PC). */
+export const ttsVerbrauch = (): Promise<VerbrauchZeile[]> => invoke("tts_verbrauch");
 
 // ─── Ansage-Ton aus dem Kern (Spec ansage-ausgabegeraet, ADR 0065) ───────
 // Fehler kommen als "<code>: <Text>" (Codes in io/tonWeg.mjs).

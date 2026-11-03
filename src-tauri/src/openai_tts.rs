@@ -50,11 +50,11 @@ pub async fn vertonen(
     modell: &str,
     ssml: &str,
     cache_dir: Option<&Path>,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, bool), String> {
     let t = ssml_zu_text(ssml, Pausen::Satzzeichen);
     let schluessel = cache_schluessel(voice, modell, &t);
     if let Some(bytes) = cache_dir.and_then(|d| netz::cache_holen(d, &schluessel)) {
-        return Ok(bytes);
+        return Ok((bytes, true));
     }
     if !netz::stimme_gueltig(voice) {
         return Err("OpenAI: ungültige Stimme".to_string());
@@ -91,7 +91,7 @@ pub async fn vertonen(
     if let Some(d) = cache_dir {
         netz::cache_ablegen(d, &schluessel, &bytes);
     }
-    Ok(bytes)
+    Ok((bytes, false))
 }
 
 #[cfg(test)]
@@ -138,7 +138,8 @@ mod echt {
             None,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
         assert!(mp3.len() > 1000);
     }
 }
