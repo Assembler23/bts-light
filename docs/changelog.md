@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.339
+
+- **Neue Liveticker-Kachel: DBV-Gruppe Nord.** In den Einstellungen steht
+  jetzt eine elfte Verbands-Kachel „GR-NO“ für Turniere, die auf badhub unter
+  der Gruppe Nord geführt werden — etwa die Norddeutschen Meisterschaften.
+  Damit verlinken sich Turnierseite und Liveticker, und die TP-Datei wird
+  angenommen; über die BVBB-Kachel ginge beides nicht, weil das Turnier nicht
+  zum BVBB gehört.
+
 ## v0.9.338
 
 - **Gemini auf 3.8 umgestellt.** Google schaltet die bisherigen

@@ -76,10 +76,14 @@ Knopf zum Kopieren.
 
 ### 1 · Liveticker-Ziel
 
-**Verband wählen.** Zehn Kacheln: BVBB, BVRP, HBV, BBV (Bayern), BWBV, NBV,
-BVS (Sachsen), BVR (Rheinland), SBV (Saarland) und **DBV** für Turniere des
-Deutschen Badminton-Verbands. Die Wahl
+**Verband wählen.** Elf Kacheln: BVBB, BVRP, HBV, BBV (Bayern), BWBV, NBV,
+BVS (Sachsen), BVR (Rheinland), SBV (Saarland), **GR-NO** für Turniere der
+DBV-Gruppe Nord (etwa die Norddeutschen Meisterschaften) und **DBV** für
+Turniere des Deutschen Badminton-Verbands. Ein Turnier gehört unter die Kachel
+des Verbands, unter dem es auf badhub steht — nur dann verlinken sich
+Turnierseite und Liveticker, und die TP-Datei wird angenommen. Die Wahl
 <!-- pruef: /id: "dbv"/ in src/presets.ts -->
+<!-- pruef: /id: "gr-no"/ in src/presets.ts -->
 <!-- pruef: /id: "bvs"/ in src/presets.ts -->
 <!-- pruef: /id: "bvr"/ in src/presets.ts -->
 <!-- pruef: /id: "sbv"/ in src/presets.ts -->
