@@ -1011,6 +1011,19 @@ Relay die ganze Halle blind.
   dieselben Disziplinen mit denselben Stimmen an wie der Master; fürs
   Slave-Frontend als `CloudAnnounce.azure_discipline_voices` exponiert. Auch
   serde-abwärtskompatibel (alter Master ohne Feld → leere Zuordnung).
+  Seit **v0.9.336** (Spec `ansage-elevenlabs`) zusätzlich `dienst` und je
+  Dienst `elevenlabs_key`/`elevenlabs_voice`, `openai_key`/`openai_voice`,
+  `gemini_key`/`gemini_voice` (Schlüssel sind Secrets, nie loggen). Gesendet
+  wird, sobald der **gewählte** Dienst am Master vollständig ist, und **nur
+  mit dessen** Zugangsdaten (`azure_share_aus` in `relay_client.rs`): Die
+  Share ist über `GET /{ns}/info/announce/state` mit dem Namespace lesbar, ein
+  eingetragener, aber ungenutzter Schlüssel reist deshalb nicht mit. Bei einem
+  Nicht-Azure-Dienst bleiben auch die Azure-Felder leer — ein **alter** Slave
+  sieht dann keine Stimme und spricht still mit seiner Ersatzstimme; für die
+  neuen Dienste müssen Slaves mit aktualisiert werden. Leeres `dienst` (alter
+  Master) = Azure. Das Slave-Frontend sieht nur `CloudAnnounce.azure_dienst`,
+  nie einen Schlüssel. Der Relay muss neu ausgerollt sein, sonst fallen die
+  neuen Felder beim Durchreichen weg.
 
 ## Last-/Soak-Test des Brokers (Cluster-Hebel C, ADR 0019)
 

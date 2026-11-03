@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { cloudAnnounceState } from "../api";
 import { azureOption, inheritedAzureOption } from "../io/azureAnnounce";
+import { dienstName } from "../io/sprachdienst.mjs";
 import {
   playAnnouncement,
   playFreeText,
@@ -48,7 +49,13 @@ export function CloudAnnounceSlave({
           // Vererbungs-Status für die Ansage-Einstellungen publizieren
           // („vom Master geerbt ✓"). Null = keine Vererbung (kein Slave,
           // Azure am Master aus oder alter Relay).
-          setInheritedAzureVoice(state.azure_voice);
+          // Bei ElevenLabs/OpenAI/Gemini ist die Azure-Stimme leer → Dienst
+          // zeigen statt „nicht geerbt".
+          setInheritedAzureVoice(
+            state.azure_voice == null
+              ? null
+              : state.azure_voice || dienstName(state.azure_dienst),
+          );
           // Aufgerufene Spiele der eigenen Halle für die Ansagen-Seite
           // (Cluster C Stufe 2) veröffentlichen — ein Poll, zwei Verbraucher.
           setPreparedGames(state.prepared);
@@ -84,6 +91,7 @@ export function CloudAnnounceSlave({
             inheritedAzureOption(
               state.azure_voice,
               state.azure_discipline_voices,
+              state.azure_dienst,
             );
           // Neue Feld-Belegungen ansagen.
           for (const c of state.courts) {

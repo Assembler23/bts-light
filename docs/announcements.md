@@ -937,6 +937,95 @@ Stimme die Namen **nativ** spricht. Ablauf:
 - `src-tauri/src/tablet/erst_ansage.rs` — Erst-Ansage im Kern (Master, seit v0.9.314).
 - `src/pages/SetupWizard.tsx` — Einstellungen.
 
+## Weitere Sprachdienste: ElevenLabs, OpenAI, Gemini (seit v0.9.336)
+
+Statt Azure kann die Cloud-Stimme auch von **ElevenLabs**, **OpenAI** oder
+**Gemini** (Google AI Studio) kommen — gedacht, um in der Halle zu hören,
+welcher Dienst schwierige Namen am besten trifft.
+Spec: [features/ansage-elevenlabs.md](features/ansage-elevenlabs.md).
+
+**Bedienung:** Seite **Ansagen** → „Hochwertige Cloud-Stimme" anhaken →
+Auswahl **Sprachdienst**: Azure · ElevenLabs v2 · v3 · v4 · Flash v2.5 ·
+OpenAI · Gemini Flash · Gemini Pro. Ist der gewählte Dienst schon fertig
+eingerichtet (Schlüssel gespeichert), gilt der Wechsel **sofort** ab der
+nächsten Ansage, ohne den Speichern-Knopf — zum Vergleichen einfach hin- und
+herschalten. Fehlt der Schlüssel noch, bleibt der bisherige Dienst aktiv, bis
+Schlüssel und Auswahl gespeichert sind; so verlieren ferne Hallen beim
+Einrichten nicht ihre Stimme.
+<!-- pruef: "Sprachdienst" in src/components/AnnounceSettings.tsx -->
+<!-- pruef: "ElevenLabs Flash v2.5 (günstiger)" in src/io/sprachdienst.mjs -->
+<!-- pruef: "Gemini Pro TTS" in src/io/sprachdienst.mjs -->
+
+- **Dienste prüfen:** Der Knopf unter der Auswahl schickt an jeden Dienst mit
+  gespeichertem Schlüssel eine winzige Probe („Test.", ohne Cache) und zeigt
+  je Dienst ✓ mit Antwortzeit oder ✗ mit Grund: Schlüssel ungültig,
+  Kontingent/Guthaben aufgebraucht, zu viele Anfragen, Modell oder Stimme
+  unbekannt, keine Verbindung, Störung beim Dienst. Kostet je Dienst ein paar
+  Zeichen. Ein Restkontingent zeigt er nicht an (die eingeschränkten
+  Schlüssel dürfen das Konto meist nicht lesen).
+  <!-- pruef: "Dienste prüfen" in src/components/AnnounceSettings.tsx -->
+- **Schlüssel:** je Dienst ein eigenes Feld (ElevenLabs `sk_…`, OpenAI
+  `sk-…`, Gemini aus Google AI Studio). Kein Schlüssel wandert in die
+  exportierte Identität. An Ansage-Slaves vererbt wird **nur** der Zugang des
+  gerade gewählten Dienstes — über den Relay, wo er mit dem Namespace (der in
+  jeder Monitor-URL steht) lesbar ist, wie schon der Azure-Schlüssel
+  (ADR 0003). Deshalb **nur eingeschränkte Schlüssel** eintragen: ElevenLabs
+  nur mit „Text to Speech" und Zeichenlimit, OpenAI als Projekt-Schlüssel mit
+  Ausgabenlimit, Google-Schlüssel auf die „Generative Language API" beschränkt.
+- **Gemini kostenlos?** Mit einem Gratis-Schlüssel aus AI Studio darf Google
+  die Eingaben (also die Spielernamen) zur Produktverbesserung nutzen, und die
+  Vorschau-Modelle erlauben nur wenige Anfragen pro Minute und Tag — im
+  Turnier kommt dann schnell die Ersatzstimme. Für den Einsatz die Abrechnung
+  im Google-Konto aktivieren.
+- **Stimme:** Auswahl aus den Standardstimmen des Dienstes oder ein eigener
+  Name/eine eigene ID. Eine Stimme für alle Disziplinen; die Stimme je
+  Disziplin gilt nur für Azure. Voreinstellungen: ElevenLabs „Sarah", OpenAI
+  „coral", Gemini „Kore".
+  <!-- pruef: "EXAVITQu4vr4xnSDxMaL" in src-tauri/src/config.rs -->
+- **Namen:** Die übrigen Dienste bekommen die Namen **so, wie sie in BTP
+  stehen**. Es gelten nur die **eigenen** Aussprache-Korrekturen; das geteilte
+  Community-Wörterbuch, das Basis-Wörterbuch und die Lautschrift (IPA) bleiben
+  bei Azure — sie sind für deutsche Stimmen gebaut. Eine Sprache wird nicht
+  erzwungen, damit fremde Namen nicht eingedeutscht werden.
+- **Tempo:** ElevenLabs nimmt nur Tempo 0,7–1,2 an; der gesendete Wert wird
+  darauf begrenzt. OpenAI (`gpt-4o-mini-tts`) und Gemini kennen keinen
+  Tempo-Wert — dort steht das Tempo als Sprechanweisung („etwas langsamer als
+  normal") vor dem Text, zusammen mit „ruhig und deutlich, Namen wie in ihrer
+  Herkunftssprache".
+- **Pausen:** ElevenLabs v2 bekommt `<break time="0.35s" />`; alle übrigen
+  Modelle einen Satzpunkt (Break-Tags sind nur dort sicher dokumentiert).
+- **Bei Fehler** (kein Schlüssel, Kontingent leer, offline) spricht die
+  Windows-Stimme, und der Hinweisbanner nennt den Grund. Am eigenen PC wird
+  nicht still auf Azure gewechselt. **Ausnahme Ansage-Slave:** Fehlt dort der
+  Schlüssel des lokal gewählten Dienstes, gilt wie immer die vom Master geerbte
+  Cloud-Stimme (Vorrangregel ADR 0003).
+- **Kosten:** Jede neue Ansage kostet beim Anbieter (ElevenLabs deutlich mehr
+  als Azure, Flash etwa die Hälfte von v2/v3); Wiederholungen kommen aus dem
+  Cache (`tts-cache/`, Schlüssel über Dienst, Modell, Stimme, Tempo und Text).
+  Ansage-Seiten im Browser vertonen ohne Cache. Gemini braucht je Ansage
+  spürbar länger (Zeitlimit 20 s statt 10 s). Bekannte Eigenheit: Gemini
+  spricht die vorangestellte Anweisung gelegentlich mit — beim Hörtest
+  darauf achten.
+- **Datenschutz:** Bei Auswahl eines dieser Dienste gehen die Namen der
+  gerufenen Paarung an den Anbieter (alle drei USA) — nur nach aktiver
+  Auswahl, Hinweis im Block.
+
+**Technik:** Das Frontend baut für alle Dienste dasselbe SSML
+(`ssmlKorrekturen` in `announcer.ts` wählt die Korrekturen nach Dienst; die
+Dienstliste steht in [`io/sprachdienst.mjs`](../src/io/sprachdienst.mjs), Drift-Test
+`scripts/test-sprachdienst.mjs` gegen Rust `config::dienst_art`). Im Kern
+entscheidet `effective_tts` (`commands.rs`, Vorrangregel ADR 0003) über das
+Ziel `TtsZiel`; [`tts_text.rs`](../src-tauri/src/tts_text.rs) wandelt das SSML
+in Klartext (Tags weg, Pausen je Dienst, `<prosody rate>` → Tempo), und je ein
+Modul ruft den Dienst: `elevenlabs_tts.rs` (`POST /v1/text-to-speech/{stimme}`,
+MP3), `openai_tts.rs` (`POST /v1/audio/speech`, MP3, `instructions`),
+`gemini_tts.rs` (`generateContent` mit `responseModalities: AUDIO`; liefert
+PCM, wird zu WAV). Der Command heißt aus Kompatibilität weiter
+`azure_tts_speak`. Konfig-Felder: `azure_tts.dienst` und je Dienst
+`*_key`/`*_voice`. Messwerkzeuge gegen die echten Dienste (kosten Kontingent):
+`ELEVENLABS_TEST_KEY=… cargo test --lib elevenlabs_echt -- --ignored`, ebenso
+`OPENAI_TEST_KEY` + `openai_echt` und `GEMINI_TEST_KEY` + `gemini_echt`.
+
 ## Schiedsrichter und Aufschlagrichter
 
 Läuft das Turnier mit Schiedsrichtern (Spec

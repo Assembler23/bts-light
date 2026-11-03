@@ -80,6 +80,29 @@ export interface AzureTtsConfig {
   /** Optionale Stimme je Disziplin (Disziplin-Kürzel wie „mens_singles" →
    *  Azure-Stimmenname). Fehlt eine Disziplin → `voice`. Frei wählbar. */
   discipline_voices?: Record<string, string>;
+  /** Gewählter Sprachdienst (Spec `ansage-elevenlabs`), Werte siehe
+   *  `src/io/sprachdienst.mjs`; Standard "azure". */
+  dienst?: string;
+  /** ElevenLabs-API-Schlüssel (Secret, nicht im Export). */
+  elevenlabs_key?: string;
+  /** ElevenLabs-Stimmen-ID; leer → Standardstimme „Sarah". */
+  elevenlabs_voice?: string;
+  /** OpenAI-API-Schlüssel (Secret) und Stimme (z. B. „coral"). */
+  openai_key?: string;
+  openai_voice?: string;
+  /** Gemini-Schlüssel aus Google AI Studio (Secret) und Stimme (z. B. „Kore"). */
+  gemini_key?: string;
+  gemini_voice?: string;
+}
+
+/** Ergebnis von „Dienste prüfen" je Sprachdienst (Rust: commands::DienstPruefung). */
+export interface DienstPruefung {
+  dienst: string;
+  ok: boolean;
+  /** false = kein Schlüssel gespeichert, nicht geprüft. */
+  eingerichtet: boolean;
+  meldung: string;
+  dauer_ms: number;
 }
 
 /** Aussprache-Korrektur für die Ansage (Rust: config::NameOverride). */
@@ -544,6 +567,8 @@ export interface CloudAnnounce {
   /** Vom Master geerbte Stimme je Disziplin (Disziplin-Kürzel → Stimme);
    *  leer ohne Vererbung/Zuordnung → Slave nutzt die Standard-Stimme. */
   azure_discipline_voices?: Record<string, string>;
+  /** Vom Master geerbter Sprachdienst; `null` ohne Vererbung. */
+  azure_dienst?: string | null;
 }
 
 /** Turnier-Kennzahlen fürs Dashboard (Rust: commands::TournamentStats).

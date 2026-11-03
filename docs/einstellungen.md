@@ -266,7 +266,11 @@ einen Schalter; Stimme, Tempo, Gong, Aussprache und Halle stehen auf der
 eigenen Seite **Ansagen** in der linken Leiste. Solange der Schalter aus ist,
 ist dieser Menüpunkt ausgegraut. Details:
 [Sprachansagen für Feld-Aufrufe](announcements.md). Das **Tempo** gilt seit
-v0.9.335 für jede Stimme, auch für Azure.
+v0.9.335 für jede Stimme, auch für Azure. Seit v0.9.336 lässt sich die
+Cloud-Stimme dort zwischen **Azure**, **ElevenLabs**, **OpenAI** und
+**Gemini** umschalten (Auswahl **Sprachdienst**, wirkt sofort, sobald der
+Dienst eingerichtet ist); Details:
+[Weitere Sprachdienste](announcements.md#weitere-sprachdienste-elevenlabs-openai-gemini-seit-v09336).
 
 Der Schalter wirkt **sofort**, ohne Neustart; eine laufende Ansage wird beim
 Ausschalten abgebrochen.
@@ -497,7 +501,8 @@ Hallen neu koppeln zu müssen.
 
 - **Identität exportieren** legt eine Datei `bts-light-identitaet.json` an.
   **Passwörter sind darin nicht enthalten** — BTP-Passwort, badhub-Passwort und
-  der Azure-Schlüssel werden entfernt. Trotzdem enthält sie den Kopplungs-Token
+  die Schlüssel aller Sprachdienste (Azure, ElevenLabs, OpenAI, Gemini)
+  werden entfernt. Trotzdem enthält sie den Kopplungs-Token
   und ist **wie ein Passwort zu behandeln**.
 - **Identität importieren** übernimmt eine solche Datei nach einer
   ausdrücklichen Rückfrage. Vorhandene Passwörter auf diesem PC bleiben

@@ -3,6 +3,7 @@
 // über Web Speech. `azureTtsSpeak` ruft den Rust-Command (Key bleibt im Backend).
 import { azureTtsSpeak } from "../api";
 import type { AnnounceOptions } from "./announcer";
+import { cloudStimmeVollstaendig, dienstArt } from "./sprachdienst.mjs";
 import type { AzureTtsConfig } from "../types";
 
 export function azureOption(
@@ -11,14 +12,17 @@ export function azureOption(
   // Nur bei vollständiger Config (Key + Region) — sonst würde der Rust-
   // Command ohnehin ablehnen und die Ansage fiele still auf Web Speech
   // zurück (genau der stumme Slave-Bug vom Zwei-Hallen-Test).
-  return az && az.enabled && az.key && az.region
+  return az && cloudStimmeVollstaendig(az)
     ? {
         voice: az.voice,
         disciplineVoices: az.discipline_voices,
         synthesize: azureTtsSpeak,
+        dienst: az.dienst || "azure",
       }
     : undefined;
 }
+
+export { cloudStimmeVollstaendig };
 
 /** Azure-Option aus der vom Master geerbten Config (ADR 0003): Der Slave
  *  kennt nur die Stimme(n); Key/Region hält das Rust-Backend (`AppState`).
@@ -27,8 +31,11 @@ export function azureOption(
 export function inheritedAzureOption(
   voice: string | null | undefined,
   disciplineVoices?: Record<string, string>,
+  dienst?: string | null,
 ): AnnounceOptions["azure"] {
-  return voice
-    ? { voice, disciplineVoices, synthesize: azureTtsSpeak }
+  // Bei ElevenLabs/OpenAI/Gemini schickt der Master keine Azure-Stimme mit
+  // (leer) — die Vererbung gilt trotzdem.
+  return voice || (voice != null && dienstArt(dienst) !== "azure")
+    ? { voice: voice ?? "", disciplineVoices, synthesize: azureTtsSpeak, dienst: dienst || "azure" }
     : undefined;
 }

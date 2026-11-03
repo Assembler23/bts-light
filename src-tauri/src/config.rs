@@ -853,6 +853,84 @@ pub struct AzureTtsConfig {
     /// Stimme ansagen — frei pro Disziplin wählbar, kein Zwang.
     #[serde(default)]
     pub discipline_voices: std::collections::HashMap<String, String>,
+    /// Gewählter Sprachdienst (Spec `ansage-elevenlabs`), Werte siehe
+    /// [`dienst_art`]. Bewusst Text statt Enum: ein unbekannter Wert einer
+    /// neueren Version darf die Config nicht unlesbar machen — er gilt dann
+    /// einfach als Azure.
+    pub dienst: String,
+    /// API-Schlüssel von ElevenLabs. Secret wie `key`: nie loggen, nie im
+    /// Identitäts-Bündel.
+    pub elevenlabs_key: String,
+    /// ElevenLabs-Stimmen-ID (eine für alle Disziplinen).
+    pub elevenlabs_voice: String,
+    /// API-Schlüssel von OpenAI (Secret).
+    pub openai_key: String,
+    /// OpenAI-Stimme, z. B. „coral".
+    pub openai_voice: String,
+    /// API-Schlüssel aus Google AI Studio für Gemini (Secret).
+    pub gemini_key: String,
+    /// Gemini-Stimme, z. B. „Kore".
+    pub gemini_voice: String,
+}
+
+/// Voreingestellte ElevenLabs-Stimme: „Sarah", eine der mehrsprachigen
+/// Standardstimmen, die jedes Konto ohne Freischaltung nutzen darf.
+pub const ELEVENLABS_STANDARD_STIMME: &str = "EXAVITQu4vr4xnSDxMaL";
+/// Voreingestellte OpenAI-Stimme.
+pub const OPENAI_STANDARD_STIMME: &str = "coral";
+/// Voreingestellte Gemini-Stimme.
+pub const GEMINI_STANDARD_STIMME: &str = "Kore";
+
+/// Welcher Anbieter hinter einem `dienst`-Wert steht, mit Modell-ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DienstArt {
+    Azure,
+    ElevenLabs(&'static str),
+    OpenAi(&'static str),
+    Gemini(&'static str),
+}
+
+/// Alle wählbaren `dienst`-Werte in Anzeige-Reihenfolge (für „Dienste prüfen").
+pub const DIENSTE: &[&str] = &[
+    "azure",
+    "elevenlabs_v2",
+    "elevenlabs_v3",
+    "elevenlabs_v4",
+    "elevenlabs_flash",
+    "openai",
+    "gemini_flash",
+    "gemini_pro",
+];
+
+/// `dienst`-Wert → Anbieter + Modell. Unbekannt (oder leer) = Azure. Die Liste
+/// spiegelt `src/io/sprachdienst.mjs` (Drift-Test `test-sprachdienst.mjs`).
+pub fn dienst_art(dienst: &str) -> DienstArt {
+    match dienst {
+        "elevenlabs_v2" => DienstArt::ElevenLabs("eleven_multilingual_v2"),
+        "elevenlabs_v3" => DienstArt::ElevenLabs("eleven_v3"),
+        "elevenlabs_v4" => DienstArt::ElevenLabs("eleven_v4"),
+        "elevenlabs_flash" => DienstArt::ElevenLabs("eleven_flash_v2_5"),
+        "openai" => DienstArt::OpenAi("gpt-4o-mini-tts"),
+        "gemini_flash" => DienstArt::Gemini("gemini-2.5-flash-preview-tts"),
+        "gemini_pro" => DienstArt::Gemini("gemini-2.5-pro-preview-tts"),
+        _ => DienstArt::Azure,
+    }
+}
+
+impl AzureTtsConfig {
+    /// Ist der **gewählte** Dienst vollständig eingerichtet? Der Schalter
+    /// `enabled` („Cloud-Stimme verwenden") gilt für alle Dienste.
+    pub fn vollstaendig(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        match dienst_art(&self.dienst) {
+            DienstArt::Azure => !self.key.trim().is_empty() && !self.region.trim().is_empty(),
+            DienstArt::ElevenLabs(_) => !self.elevenlabs_key.trim().is_empty(),
+            DienstArt::OpenAi(_) => !self.openai_key.trim().is_empty(),
+            DienstArt::Gemini(_) => !self.gemini_key.trim().is_empty(),
+        }
+    }
 }
 
 impl Default for AzureTtsConfig {
@@ -863,6 +941,13 @@ impl Default for AzureTtsConfig {
             key: String::new(),
             voice: "de-DE-SeraphinaMultilingualNeural".to_string(),
             discipline_voices: std::collections::HashMap::new(),
+            dienst: "azure".to_string(),
+            elevenlabs_key: String::new(),
+            elevenlabs_voice: ELEVENLABS_STANDARD_STIMME.to_string(),
+            openai_key: String::new(),
+            openai_voice: OPENAI_STANDARD_STIMME.to_string(),
+            gemini_key: String::new(),
+            gemini_voice: GEMINI_STANDARD_STIMME.to_string(),
         }
     }
 }
@@ -1781,6 +1866,52 @@ impl AppConfig {
 }
 
 #[cfg(test)]
+mod sprachdienst_tests {
+    use super::*;
+
+    #[test]
+    fn dienstliste_und_zuordnung_passen_zusammen() {
+        assert_eq!(DIENSTE[0], "azure");
+        for d in &DIENSTE[1..] {
+            assert_ne!(dienst_art(d), DienstArt::Azure, "{d} fehlt in dienst_art");
+        }
+    }
+
+    #[test]
+    fn altes_azure_json_ohne_dienst_bleibt_azure() {
+        let az: AzureTtsConfig =
+            serde_json::from_str(r#"{"enabled":true,"region":"westeurope","key":"k","voice":"v"}"#)
+                .unwrap();
+        assert_eq!(az.dienst, "azure");
+        assert_eq!(dienst_art(&az.dienst), DienstArt::Azure);
+        assert!(az.vollstaendig());
+        assert_eq!(az.elevenlabs_voice, ELEVENLABS_STANDARD_STIMME);
+    }
+
+    #[test]
+    fn jeder_dienst_braucht_seinen_eigenen_schluessel() {
+        let mut az = AzureTtsConfig {
+            enabled: true,
+            key: "azure".into(),
+            region: "we".into(),
+            ..Default::default()
+        };
+        for (dienst, feld) in [("elevenlabs_v3", 0), ("openai", 1), ("gemini_flash", 2)] {
+            az.dienst = dienst.into();
+            assert!(!az.vollstaendig(), "{dienst} ohne Schlüssel");
+            match feld {
+                0 => az.elevenlabs_key = "x".into(),
+                1 => az.openai_key = "x".into(),
+                _ => az.gemini_key = "x".into(),
+            }
+            assert!(az.vollstaendig(), "{dienst} mit Schlüssel");
+        }
+        az.dienst = "unbekannt_v9".into();
+        assert_eq!(dienst_art(&az.dienst), DienstArt::Azure);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2394,6 +2525,13 @@ mod tests {
                     "womens_singles".to_string(),
                     "de-DE-SeraphinaMultilingualNeural".to_string(),
                 )]),
+                dienst: "elevenlabs_v3".to_string(),
+                elevenlabs_key: "el-secret".to_string(),
+                elevenlabs_voice: "stimme-x".to_string(),
+                openai_key: "oa-secret".to_string(),
+                openai_voice: "nova".to_string(),
+                gemini_key: "gm-secret".to_string(),
+                gemini_voice: "Puck".to_string(),
             },
             court_monitor: CourtMonitorConfig {
                 enabled: true,

@@ -6,11 +6,15 @@ pub mod badhub_host;
 pub mod btp;
 pub mod commands;
 pub mod config;
+pub mod elevenlabs_tts;
+pub mod gemini_tts;
 pub mod hall_colors;
 pub mod log_upload;
+pub mod openai_tts;
 pub mod print;
 pub mod sync;
 pub mod tablet;
+pub mod tts_text;
 pub mod update;
 
 use tauri::menu::{Menu, MenuItem};
@@ -111,6 +115,7 @@ pub fn run() {
             commands::save_config,
             commands::test_btp,
             commands::azure_tts_speak,
+            commands::tts_dienste_pruefen,
             commands::ansage_offene_quellen,
             commands::ansage_vertonen,
             commands::ansage_hoerer,

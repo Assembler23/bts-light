@@ -2899,10 +2899,11 @@ pub struct TlAuthDevice {
     pub profile_id: String,
 }
 
-/// Vom Master an Cloud-Slaves vererbte Azure-TTS-Konfiguration (ADR 0003).
-/// Enthält bewusst kein `enabled`: gesendet wird sie nur, wenn Azure am
-/// Master aktiv und vollständig konfiguriert ist.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Vom Master an Cloud-Slaves vererbte Cloud-Stimmen-Konfiguration (ADR 0003;
+/// seit Spec `ansage-elevenlabs` mit Dienstwahl). Enthält bewusst kein
+/// `enabled`: gesendet wird sie nur, wenn der gewählte Dienst am Master aktiv
+/// und vollständig konfiguriert ist.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AzureTtsShare {
     /// Azure-Region der Speech-Ressource, z. B. „westeurope".
     #[serde(default)]
@@ -2918,6 +2919,27 @@ pub struct AzureTtsShare {
     /// Leer/fehlend → Standard-Stimme (abwärtskompatibel per Default).
     #[serde(default)]
     pub discipline_voices: std::collections::HashMap<String, String>,
+    /// Gewählter Sprachdienst des Masters (Spec `ansage-elevenlabs`), Werte
+    /// wie `AzureTtsConfig.dienst`. Leer (alter Master) = Azure. Gefüllt sind
+    /// immer nur die Felder des gewählten Dienstes.
+    #[serde(default)]
+    pub dienst: String,
+    /// ElevenLabs-API-Schlüssel des Masters. Secret — nie loggen.
+    #[serde(default)]
+    pub elevenlabs_key: String,
+    /// ElevenLabs-Stimmen-ID des Masters.
+    #[serde(default)]
+    pub elevenlabs_voice: String,
+    /// OpenAI-Schlüssel des Masters (Secret) und Stimme.
+    #[serde(default)]
+    pub openai_key: String,
+    #[serde(default)]
+    pub openai_voice: String,
+    /// Gemini-Schlüssel (AI Studio) des Masters (Secret) und Stimme.
+    #[serde(default)]
+    pub gemini_key: String,
+    #[serde(default)]
+    pub gemini_voice: String,
 }
 
 /// Eine Freitext-Ansage (Relay-Zwischenspeicher; Quelle = Master). `id`
@@ -4019,6 +4041,22 @@ mod tests {
     }
 
     #[test]
+    fn tts_share_traegt_dienst_und_bleibt_alt_lesbar() {
+        let neu = AzureTtsShare {
+            dienst: "gemini_flash".into(),
+            gemini_key: "gm".into(),
+            gemini_voice: "Kore".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&neu).unwrap();
+        assert_eq!(serde_json::from_str::<AzureTtsShare>(&json).unwrap(), neu);
+        let alt: AzureTtsShare =
+            serde_json::from_str(r#"{"region":"we","key":"k","voice":"v"}"#).unwrap();
+        assert_eq!(alt.dienst, "");
+        assert!(alt.elevenlabs_key.is_empty() && alt.openai_key.is_empty());
+    }
+
+    #[test]
     fn azure_tts_share_roundtrips_and_defaults() {
         // Courts-Frame mit Azure-Vererbung (ADR 0003) hält den Roundtrip …
         roundtrip(&HostFrame::Courts {
@@ -4031,6 +4069,7 @@ mod tests {
                     "mens_singles".to_string(),
                     "de-DE-FlorianMultilingualNeural".to_string(),
                 )]),
+                ..Default::default()
             }),
             reconnect_legacy_rev: false,
         });
@@ -4070,6 +4109,7 @@ mod tests {
                 key: "k".into(),
                 voice: "v".into(),
                 discipline_voices: std::collections::HashMap::new(),
+                ..Default::default()
             })
         );
         // Neuer Master MIT discipline_voices → kommt beim Slave an.

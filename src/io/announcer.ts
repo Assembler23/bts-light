@@ -35,6 +35,7 @@ import { voiceForDiscipline } from "./disciplineVoice.mjs";
 import { disziplinName } from "./disziplinName.mjs";
 import { klasseSsml, klasseText } from "./klasseSprechen.mjs";
 import { ssmlDokument } from "./ssmlRahmen.mjs";
+import { dienstArt } from "./sprachdienst.mjs";
 import { startPlaySegments } from "./startPlayText.mjs";
 import { scorekeeperCallSegments } from "./scorekeeperCallText.mjs";
 import { BASE_NAME_OVERRIDES } from "./nameOverrideBase";
@@ -107,6 +108,9 @@ export interface AnnounceOptions {
      *  für eine Disziplin → `voice`. Frei pro Disziplin wählbar. */
     disciplineVoices?: Record<string, string>;
     synthesize: (ssml: string) => Promise<string>;
+    /** Gewählter Dienst (`"azure"`, `"elevenlabs_v2"`, …). Bestimmt nur, welche
+     *  Namens-Korrekturen ins SSML gehen; vertont wird im Kern. Fehlt → Azure. */
+    dienst?: string;
   };
 }
 
@@ -863,6 +867,42 @@ function buildIpaMap(
   return map;
 }
 
+// Nur die eigenen Ersatzschreibweisen aus der Nutzer-Tabelle — ohne Basis-
+// Wörterbuch und ohne geteilte Community-Korrekturen (Spec `ansage-elevenlabs`,
+// E2): Die sind für deutsche Stimmen gemacht und verschlechtern die
+// mehrsprachigen Stimmen der übrigen Dienste eher.
+function buildUserOnlyOverrideMap(
+  userOverrides: NameOverride[] | undefined,
+  enabled: boolean,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!enabled) return map;
+  for (const o of userOverrides ?? []) {
+    const key = normalizeName(o.name);
+    const say = (o.say ?? "").trim();
+    if (key && say) map.set(key, say);
+  }
+  return map;
+}
+
+// Die drei Korrektur-Maps fürs Cloud-SSML (IPA, Sprache, Ersatzschreibweise).
+// Azure: alles wie bisher. ElevenLabs/OpenAI/Gemini: Name roh, nur eigene
+// Schreibweisen (kein IPA — sie kennen `<phoneme>` nicht; kein erzwungenes
+// `<lang>`).
+function ssmlKorrekturen(
+  opts: AnnounceOptions,
+  enabled: boolean,
+): [Map<string, string>, Map<string, string>, Map<string, string>] {
+  if (dienstArt(opts.azure?.dienst) !== "azure") {
+    return [new Map(), new Map(), buildUserOnlyOverrideMap(opts.nameOverrides, enabled)];
+  }
+  return [
+    buildIpaMap(opts.nameOverrides, enabled),
+    buildLangOverrideMap(opts.nameOverrides, enabled),
+    buildOverrideMap(opts.nameOverrides, enabled),
+  ];
+}
+
 // Manuelle Sprach-Korrektur (normalisierter Voll-Name → `lang`-Wert: ""=auto
 // ausgelassen, "de"=deutscher Default erzwingen, sonst NameLang). Nur aus der
 // Nutzer-Tabelle (bewusste Einzelfall-Korrektur). Leer, wenn Korrektur aus.
@@ -1114,9 +1154,7 @@ export function prepareAnnouncement(
         input,
         lang,
         voice,
-        buildIpaMap(opts.nameOverrides, enabled),
-        buildLangOverrideMap(opts.nameOverrides, enabled),
-        buildOverrideMap(opts.nameOverrides, enabled),
+        ...ssmlKorrekturen(opts, enabled),
         // Gleiches Standardtempo wie der Web-Speech-Weg (0,8), auch ohne `rate`.
         clampRate(opts.rate),
       );
@@ -1197,9 +1235,7 @@ export function prepareMeetingpointMissing(
       const namenSsml = joinNamesSsml(
         liste,
         lang,
-        buildIpaMap(opts.nameOverrides, enabled),
-        buildLangOverrideMap(opts.nameOverrides, enabled),
-        buildOverrideMap(opts.nameOverrides, enabled),
+        ...ssmlKorrekturen(opts, enabled),
       );
       ssml = ssmlDokument(
         lang,
@@ -1242,9 +1278,7 @@ export function preparePreparationAnnouncement(
         input,
         lang,
         voice,
-        buildIpaMap(opts.nameOverrides, enabled),
-        buildLangOverrideMap(opts.nameOverrides, enabled),
-        buildOverrideMap(opts.nameOverrides, enabled),
+        ...ssmlKorrekturen(opts, enabled),
         // Gleiches Standardtempo wie der Web-Speech-Weg (0,8), auch ohne `rate`.
         clampRate(opts.rate),
       );

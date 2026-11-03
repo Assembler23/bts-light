@@ -2027,7 +2027,7 @@ pub fn ansage_feed_bauen(
         None
     };
     let az = &cfg.azure_tts;
-    let azure = az.enabled && !az.key.trim().is_empty() && !az.region.trim().is_empty();
+    let azure = az.vollstaendig();
     // Ohne Azure vertont der PC mit der Windows-Stimme (PR 1b, ADR 0066) —
     // sonst meldete sich eine Seite ohne Gerätestimme (Pi) nie als Zuhörer,
     // und es würde gar nicht erst vertont.
@@ -8047,6 +8047,10 @@ mod tests {
         config.azure_tts.region = "westeurope".into();
         config.azure_tts.key = "geheimer-schluessel".into();
         config.azure_tts.voice = "de-DE-KatjaNeural".into();
+        // Auch die Schlüssel der übrigen Dienste dürfen nie in den Feed.
+        config.azure_tts.elevenlabs_key = "el-geheim".into();
+        config.azure_tts.openai_key = "oa-geheim".into();
+        config.azure_tts.gemini_key = "gm-geheim".into();
         config.save_to(&config_path).unwrap();
         let tmp = std::env::temp_dir();
         let shared = Arc::new(std::sync::Mutex::new(config.clone()));
@@ -8103,7 +8107,17 @@ mod tests {
         assert_eq!(v["eintraege"].as_array().unwrap().len(), 1);
         // Kriterium 8: kein Feld und kein Wert der Azure-Konfiguration.
         let klein = text.to_lowercase();
-        for verboten in ["azure", "region", "key", "westeurope", "geheim", "katja"] {
+        for verboten in [
+            "azure",
+            "region",
+            "key",
+            "westeurope",
+            "geheim",
+            "katja",
+            "elevenlabs",
+            "openai",
+            "gemini",
+        ] {
             assert!(!klein.contains(verboten), "{verboten} in {text}");
         }
     }
