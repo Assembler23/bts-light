@@ -353,8 +353,13 @@ Geräte). In der Regel 1–2 Bilder, kein Rotieren. Fehlt ein Motiv, entfernt
 
 ## Hintergrundfarbe und Feldbezeichnung je Werbebild (seit v0.9.247)
 
-Das **Leerlauf-Vollbild** (Werbung, solange kein Spiel auf dem Feld läuft) lag
-bisher immer auf Schwarz. Jedes Bild bekommt jetzt im Setup zwei eigene
+Das **Leerlauf-Vollbild** (Werbung, solange kein Spiel auf dem Feld läuft)
+zieht jedes Bild immer so weit auf, dass es die volle Breite **oder** die volle
+Höhe des Bildschirms füllt — je nach Seitenverhältnis, ohne zu verzerren oder
+abzuschneiden. Das gilt auch für kleine Bilder (seit v0.9.340; vorher wurden
+sie nur verkleinert, nie vergrößert).
+
+Der Hintergrund war bisher immer schwarz. Jedes Bild bekommt jetzt im Setup zwei eigene
 Einstellungen — direkt unter seinem Namen, mit Vorschau daneben:
 
 - **Hintergrund**: eine frei wählbare Farbe, die die Fläche füllt, die das
