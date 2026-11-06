@@ -210,6 +210,12 @@ jobs:
       - name: Entschlackungs-Liste (JS)
         run: node scripts/test-entschlackung-liste.mjs
 
+      # Akku-Schwellen der Kiosk-Wartekarte (Kotlin) gegen die Tablet-Seiten
+      # (src/io/akku.mjs). Weichen sie ab, färbt dasselbe Gerät denselben
+      # Akku je nach Ansicht anders.
+      - name: Kiosk-Akku-Schwellen (JS)
+        run: node scripts/test-kiosk-akku.mjs
+
       # Was die Anzeige-Hülle ins iframe lädt. Rutscht hier freier Text aus der
       # Adresse durch, lädt ein Tablet in der Halle, was immer in der Adresse
       # stand; fällt ein gültiges Feld heraus, zeigt die Hülle nur die Feldwahl.

@@ -321,6 +321,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Kiosk-App: Akku auf der Wartekarte + Drei-Finger-Geste** — Spec:
+  [features/kiosk-akku-und-ausgang.md](features/kiosk-akku-und-ausgang.md)
+  (freigegeben 06.11.2026) — **v0.9.343, Feldtest auf Fire HD offen.**
+
 - **„Zuletzt gespielt" in der Turnierleitungs-Liste** — Spec:
   [features/tl-zuletzt-gespielt.md](features/tl-zuletzt-gespielt.md)
   (freigegeben 06.11.2026) — **v0.9.342, Feldtest offen.** Profil-Häkchen,

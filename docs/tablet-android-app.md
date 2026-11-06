@@ -152,9 +152,29 @@ und die Suche läuft, zeigt die Karte „Suche Turnier-PC im WLAN …" mit
 Versuchszähler, der eigenen IP-Adresse und der zuletzt bekannten
 Turnier-PC-Adresse, dazu den Knopf „Erneut suchen" (ohne PIN nutzbar).
 
-Das **Hüllen-Menü** öffnet sich, wenn man zwei Sekunden lang den Finger in
-die linke obere Ecke des Bildschirms hält, gefolgt von der Kiosk-PIN. Es
-bietet vier Punkte:
+Rechts oben zeigt die Wartekarte den **Akkustand** (seit v0.9.343) — so
+sieht man auch zu Hause ohne Turnier-PC, ob das Tablet geladen werden muss:
+`🔋 73 %`, am Ladegerät `⚡ 73 %`, unter 20 % orange, unter 10 % rot (wie auf
+den Tablet-Seiten). Android meldet jede Änderung selbst, die Anzeige hat
+keinen eigenen Takt. Ist die Seite des Turnier-PCs geladen, zeigt diese den
+Akku wie bisher selbst.
+
+Das **Hüllen-Menü** ist bewusst versteckt. Es gibt zwei Wege, beide gefolgt
+von der Kiosk-PIN:
+
+- **Drei Finger irgendwo auf den Bildschirm legen und zwei Sekunden halten**
+  (seit v0.9.343). Das geht überall. **Auf der Zählseite aber Vorsicht:**
+  Sie zählt schon beim Aufsetzen eines Fingers — wer die Finger auf eine
+  Punktefläche legt, hat damit einen Punkt gezählt (bzw. auf „Letzten Punkt
+  zurück" einen zurückgenommen). Darum die drei Finger dort auf die
+  Kopfzeile oder neben die Punkteflächen legen, oder den Punkt danach
+  korrigieren. Hebt ein Finger vorher ab oder kommt ein vierter dazu,
+  passiert nichts.
+- **Zwei Sekunden den Finger in die linke obere Ecke halten** (wie bisher;
+  liegt dort „Letzten Punkt zurück", nimmt das Aufsetzen einen Punkt
+  zurück).
+
+Das Menü bietet vier Punkte:
 
 - **„Turnier-PC neu suchen"** stößt sofort einen neuen Suchlauf an.
 - **„Adresse von Hand eingeben"** fragt eine IP-Adresse ab, für den Fall
@@ -163,7 +183,8 @@ bietet vier Punkte:
   ist dieser Dialog abbrechbar. Eine ungültige Eingabe setzt die PIN nicht,
   sondern zeigt nur den Hinweis „PIN muss 4–8 Ziffern haben" — man landet
   wieder im Menü, statt in einer Endlosschleife zu hängen.
-- **„Kiosk verlassen"** beendet die Sperre und die App. Als Gerätebesitzer
+- **„Kiosk verlassen und App schließen"** (bis v0.9.342: „Kiosk
+  verlassen") beendet die Sperre und die App. Als Gerätebesitzer
   löscht dieser Schritt zusätzlich die Home-Vorgabe der App (sonst würde
   Android sie als bevorzugten Home-Bildschirm sofort wieder in den
   Vordergrund holen); danach verhält sich das Tablet wie ein normales

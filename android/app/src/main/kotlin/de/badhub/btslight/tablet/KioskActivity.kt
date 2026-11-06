@@ -1,6 +1,12 @@
 package de.badhub.btslight.tablet
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Color
+import android.os.BatteryManager
 import android.net.nsd.NsdManager
 import android.os.Bundle
 import android.os.Handler
@@ -20,8 +26,11 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import de.badhub.btslight.tablet.kern.AdressFilter
+import de.badhub.btslight.tablet.kern.AkkuAnzeige
+import de.badhub.btslight.tablet.kern.DreiFinger
 import de.badhub.btslight.tablet.kern.Ereignis
 import de.badhub.btslight.tablet.kern.GeraeteId
 import de.badhub.btslight.tablet.kern.Huelle
@@ -57,6 +66,7 @@ class KioskActivity : AppCompatActivity() {
     private lateinit var wartekarteTitel: TextView
     private lateinit var wartekarteDetail: TextView
     private lateinit var wartekarteHinweis: TextView
+    private lateinit var wartekarteAkku: TextView
     private lateinit var einstellungen: Einstellungen
     private lateinit var suche: ServerSuche
     private lateinit var geraeteId: String
@@ -80,6 +90,7 @@ class KioskActivity : AppCompatActivity() {
         wartekarteTitel = findViewById(R.id.wartekarte_titel)
         wartekarteDetail = findViewById(R.id.wartekarte_detail)
         wartekarteHinweis = findViewById(R.id.wartekarte_hinweis)
+        wartekarteAkku = findViewById(R.id.wartekarte_akku)
         findViewById<Button>(R.id.erneut).setOnClickListener { verarbeite(Ereignis.Handgriff) }
 
         log.schreibe("Start $geraeteId, Version ${BuildConfig.VERSION_NAME}")
@@ -186,12 +197,42 @@ class KioskActivity : AppCompatActivity() {
         super.onStart()
         log.schreibe("App vorn (Bildschirm an)")
         netz?.start()
+        // Akku: Android meldet jede Änderung selbst, kein eigener Timer. Der
+        // Rückgabewert ist der letzte (sticky) Stand — sofort anzeigen.
+        ContextCompat.registerReceiver(this, akkuEmpfaenger, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+            ?.let { akkuAnzeigen(it) }
     }
 
     override fun onStop() {
         log.schreibe("App verdeckt (Bildschirm aus oder andere App)")
         netz?.stop()
+        runCatching { unregisterReceiver(akkuEmpfaenger) }
+        // Bildschirm aus mitten im Dreigriff: Das UP kommt nie an — sonst
+        // feuerte der Timer auf der verdeckten App (Review 06.11.2026).
+        handler.removeCallbacks(dreiFingerAusloeser)
+        dreiFinger.beruehrung(0)
         super.onStop()
+    }
+
+    // ---- Akku auf der Wartekarte ----------------------------------------------
+
+    private val akkuEmpfaenger = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = akkuAnzeigen(intent)
+    }
+
+    /** Text + Farbe wie auf den Tablet-Seiten (`AkkuAnzeige`); ohne Wert leer. */
+    private fun akkuAnzeigen(i: Intent) {
+        val prozent = AkkuAnzeige.prozent(
+            i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1),
+            i.getIntExtra(BatteryManager.EXTRA_SCALE, -1),
+        )
+        val amNetz = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+        wartekarteAkku.text = AkkuAnzeige.text(prozent, amNetz) ?: ""
+        wartekarteAkku.setTextColor(when (AkkuAnzeige.stufe(prozent)) {
+            AkkuAnzeige.Stufe.Kritisch -> Color.parseColor("#EF4444")
+            AkkuAnzeige.Stufe.Niedrig -> Color.parseColor("#F59E0B")
+            else -> Color.parseColor("#9CA3AF")
+        })
     }
 
     // ---- Zustandsmaschine -------------------------------------------------
@@ -212,11 +253,13 @@ class KioskActivity : AppCompatActivity() {
                 log.schreibe("Lobby laden: ${w.ip}")
                 web.loadUrl("http://${w.ip}:8088/felder")
                 wartekarte.visibility = View.GONE
+                wartekarteAkku.visibility = View.GONE
                 uploadStarten(w.ip)
             }
             Wirkung.Wartekarte -> {
                 uploadTakt?.cancel()
                 wartekarte.visibility = View.VISIBLE
+                wartekarteAkku.visibility = View.VISIBLE
                 // Die versteckte Seite darf keinen Gong spielen und keine Tipps bekommen.
                 web.loadUrl("about:blank")
             }
@@ -316,7 +359,11 @@ class KioskActivity : AppCompatActivity() {
     // ---- Hüllen-Menü ----------------------------------------------------------
 
     /**
-     * Hüllen-Geste: 2 s Fingerdruck links oben. Wird beim Verteilen der
+     * Zwei geheime Wege ins Hüllen-Menü: drei Finger 2 s irgendwo halten
+     * (Spec `kiosk-akku-und-ausgang` — die Ecke ist auf der Zählseite oft
+     * belegt) und, wie bisher, 2 s Fingerdruck links oben.
+     *
+     * Ecken-Geste: 2 s Fingerdruck links oben. Wird beim Verteilen der
      * Ereignisse beobachtet und NICHT verschluckt — die Zählseite hat in
      * derselben Ecke ihren „Letzten Punkt zurück"-Knopf. Feuert der Timer,
      * bekommt die Seite ein ACTION_CANCEL, damit ihr Knopf nicht zusätzlich
@@ -332,18 +379,52 @@ class KioskActivity : AppCompatActivity() {
             }
             MotionEvent.ACTION_MOVE -> if (eckeGedrueckt && !inEcke) eckeAbbrechen()
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> eckeAbbrechen()
+            // Ein zweiter Finger ist keine Ecken-Geste mehr.
+            MotionEvent.ACTION_POINTER_DOWN -> eckeAbbrechen()
+        }
+        // Jede neue Berührung beginnt bei null: Nach dem Menü-Dialog kam das
+        // letzte UP womöglich nie bei der Activity an (Review 06.11.2026).
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) dreiFinger.beruehrung(0)
+        // Finger NACH diesem Ereignis: Bei POINTER_UP zählt der abhebende noch mit.
+        val finger = when (ev.actionMasked) {
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> 0
+            MotionEvent.ACTION_POINTER_UP -> ev.pointerCount - 1
+            else -> ev.pointerCount
+        }
+        when (dreiFinger.beruehrung(finger)) {
+            DreiFinger.Aktion.Starten -> handler.postDelayed(dreiFingerAusloeser, DreiFinger.HALTEN_MS)
+            DreiFinger.Aktion.Abbrechen -> handler.removeCallbacks(dreiFingerAusloeser)
+            DreiFinger.Aktion.Nichts -> Unit
         }
         return super.dispatchTouchEvent(ev)
     }
 
-    private var eckeGedrueckt = false
-    private val eckeAusloeser = Runnable {
-        eckeGedrueckt = false
+    private val dreiFinger = DreiFinger()
+    private val dreiFingerAusloeser = Runnable {
+        dreiFinger.ausgeloest()
+        log.schreibe("Drei-Finger-Geste")
+        geheimeGesteAusgeloest()
+    }
+
+    /**
+     * Seite bekommt ein ACTION_CANCEL, dann PIN → Menü. Der Abbruch verhindert
+     * nur einen Click beim Loslassen — die Zählseite zählt schon beim
+     * Aufsetzen (`onScoreTap`, pointerdown). Ein Finger, der auf einer
+     * Punktefläche begann, hat seinen Punkt also schon gezählt; die Doku
+     * sagt das (Review 06.11.2026).
+     */
+    private fun geheimeGesteAusgeloest() {
         val jetzt = SystemClock.uptimeMillis()
         val cancel = MotionEvent.obtain(jetzt, jetzt, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
         web.dispatchTouchEvent(cancel)
         cancel.recycle()
         pinAbfragen { menuZeigen() }
+    }
+
+    private var eckeGedrueckt = false
+    private val eckeAusloeser = Runnable {
+        eckeGedrueckt = false
+        geheimeGesteAusgeloest()
     }
 
     private fun eckeAbbrechen() {
