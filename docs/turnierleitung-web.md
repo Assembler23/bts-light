@@ -635,6 +635,23 @@ Die Anzeige-Häkchen im Profil-Editor:
   ohne eingeschaltete Prognose erscheint nichts. Erfordert einen Host ab
   v0.9.212 — ältere Hosts senden das Feld nicht, die Kachel bleibt dann
   unverändert.
+- **Zuletzt gespielt zeigen** (Standard: **aus**) — an jeder Seite einer
+  wartenden oder gerufenen Paarung eine kleine graue Marke **„vor 42 min"**:
+  wie lange das letzte Spiel dieser Seite her ist. Im Doppel zählt der
+  Partner, der zuletzt gespielt hat (die kürzere Pause). Die Marke steht
+  unabhängig von der Pflichtpause — läuft die noch, stehen Eieruhr und Marke
+  nebeneinander. Kampflose Spiele (Walkover) zählen nicht, Aufgabe und
+  Disqualifikation schon. Keine Marke erscheint, wenn die Seite heute noch
+  nicht gespielt hat (ein Spiel, das länger als zwölf Stunden her ist, zählt
+  nicht — etwa vom Vortag) oder einer ihrer Spieler gerade auf einem anderen Feld
+  steht (dann ist sein Name rot). Der Tooltip nennt die Uhrzeit des
+  Spielendes. Als Spielende gilt das Eintragen des Ergebnisses am Tablet
+  oder in der Turnierleitung, sonst der Moment, in dem bts-light das
+  Ergebnis in BTP sieht. Wird bts-light erst mitten im Turniertag
+  eingerichtet, gelten alle bis dahin beendeten Spiele als „gerade eben"
+  beendet. Erfordert einen Host ab v0.9.342; ältere Hosts zeigen das
+  Häkchen nicht.
+  <!-- pruef: "Zuletzt gespielt zeigen" in src-tauri/assets/tl.html -->
 
 Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts. Er zeigt **„Automatik läuft"**

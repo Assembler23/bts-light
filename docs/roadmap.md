@@ -321,6 +321,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **„Zuletzt gespielt" in der Turnierleitungs-Liste** — Spec:
+  [features/tl-zuletzt-gespielt.md](features/tl-zuletzt-gespielt.md)
+  (freigegeben 06.11.2026) — **v0.9.342, Feldtest offen.** Profil-Häkchen,
+  Marke „vor N min" je Seite an wartenden und gerufenen Spielen. Später
+  denkbar: Einfärbung nach Schwelle; Altbestand bei Einrichtung mitten im
+  Turniertag nicht als „gerade eben" zeigen.
+
 - **Spielfolge-Anzeige** (laufende + kommende Spiele, Laufband) — Spec:
   [features/spielfolge-anzeige.md](features/spielfolge-anzeige.md), ADR 0076 —
   **v0.9.341, Feldtest offen.** Nachzuholen: Ansage-Modus, Cloud-Etappe,

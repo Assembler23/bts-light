@@ -367,6 +367,9 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    die ganze Zeile: Dort steht er vor dem Namen, also ebenfalls an der
    Mittelachse beim „vs.", die Nation außen. */
 .paar .seed { flex: 0 0 auto; white-space: nowrap; color: var(--ink-faint); font-size: .85em; }
+/* „Zuletzt gespielt" je Seite (Spec tl-zuletzt-gespielt): gedämpft, damit
+   sie nicht mit der orangen Pausen-Eieruhr konkurriert. */
+.paar .zuletzt { white-space: nowrap; color: var(--ink-faint); font-size: .78rem; }
 /* Bereitschaftslage als Hintergrundfarbe statt Hinweistext (17.08.2026):
    Rot = steht gerade auf einem Feld, Orange = noch in der Mindestpause.
    Farbtöpfe der Badge-Familie (`.badge-alarm`/`.badge-warn`), damit kein
@@ -1652,6 +1655,17 @@ function restzeit(untilMs) {
   return zeitspanne(Math.max(0, Math.ceil((untilMs - serverNow()) / 1000)));
 }
 
+// ── Inline-Kopie von src/io/zuletztGespielt.mjs ─────────────────────────
+// Die Seite hat keinen Build-Schritt; die kanonische Fassung samt Tests liegt
+// im Modul, `scripts/test-zuletzt-gespielt.mjs` vergleicht das Verhalten.
+function zuletztText(sinceMs, nowMs) {
+  const min = Math.max(0, Math.floor((nowMs - sinceMs) / 60000));
+  if (!Number.isFinite(min) || min < 1) return "gerade eben";
+  if (min < 60) return `vor ${min} min`;
+  const h = Math.floor(min / 60);
+  return `vor ${h} h ${String(min % 60).padStart(2, "0")}`;
+}
+
 /** Sind auf diesem Feld schon Punkte gefallen? Dann läuft das Spiel. */
 const isPlaying = (court) =>
   court.match_id > 0 && (court.sets || []).some(([a, b]) => a > 0 || b > 0);
@@ -1836,6 +1850,8 @@ function builtInProfile() {
       // Vier Verschiebe-Knöpfe an jeder Zeile (Wunsch 06.09.2026): aus,
       // weil die Zeile damit deutlich breiter wird.
       showMoveButtons: false,
+      // „Zuletzt gespielt" je Seite (Spec `tl-zuletzt-gespielt`): aus.
+      showLastPlayed: false,
       // Abgelöst durch `columns`/`column` (Plan tl-liste-vereinfachen F),
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
@@ -2051,6 +2067,16 @@ function zeigeSetzplaetze() { return !activeDisplay().hideSeeds; }
  *  „↑ an den Anfang" — für Geräte, auf denen Ziehen nicht praktikabel ist
  *  (Wunsch 06.09.2026). Profil-Schalter, Standard aus. */
 function zeigeVerschiebeKnoepfe() { return !!activeDisplay().showMoveButtons; }
+/** „Zuletzt gespielt" je Seite an wartenden und gerufenen Spielen (Spec
+ *  `tl-zuletzt-gespielt`). Profil-Schalter, Standard aus. */
+function zeigeZuletztGespielt() { return !!activeDisplay().showLastPlayed; }
+/** Kennt der Turnier-PC `showLastPlayed`? Regel wie
+ *  `hostKenntVerschiebeKnoepfe`: Ein alter Host verwürfe das Häkchen still. */
+function hostKenntZuletztGespielt() {
+  const profile = (state && state.profiles) || [];
+  if (!profile.length) return true;
+  return profile.some((p) => p.display && "showLastPlayed" in p.display);
+}
 /** Kennt dieser Turnier-PC offene Paarungen überhaupt?
  *
  *  Der Relay bettet diese Seite ein und wird bei jedem Merge deployt, die App
@@ -3320,10 +3346,17 @@ function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
       return `<span class="spieler">${haupt}${unter}</span>`;
     }).join("");
   };
+  // „Zuletzt gespielt" (Spec `tl-zuletzt-gespielt`): Text füllt
+  // `tickClocks()` — ein eingebetteter Minutenwert hebelte den
+  // Keyed-Abgleich der Zeilen aus (Muster der Gerufen-Uhr).
+  const zuletzt = (ms) => ms
+    ? `<span class="zuletzt num" data-last-played="${ms}" title="Letztes Spiel dieser Seite endete um ${
+        esc(new Date(ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))}"></span>`
+    : "";
   return `<span class="paar">
-    <span class="seite">${seite(t1, nat1, club1, extra && extra.ids1, extra && extra.seed1)}</span>
+    <span class="seite">${seite(t1, nat1, club1, extra && extra.ids1, extra && extra.seed1)}${zuletzt(extra && extra.zuletzt1)}</span>
     <span class="vs">vs.</span>
-    <span class="seite">${seite(t2, nat2, club2, extra && extra.ids2, extra && extra.seed2)}</span>
+    <span class="seite">${seite(t2, nat2, club2, extra && extra.ids2, extra && extra.seed2)}${zuletzt(extra && extra.zuletzt2)}</span>
   </span>`;
 }
 
@@ -4749,7 +4782,9 @@ function queueRow(m, topMatchId) {
         <span class="seite"><span class="spieler offen-seite">${esc(seitenText(m, 2))}</span></span>
       </span>`
     : pairOf(m.team1, m.team2, m.team1_nat, m.team2_nat, m.team1_club, m.team2_club,
-        { ids1: m.team1_ids, ids2: m.team2_ids, seed1: m.team1_seed, seed2: m.team2_seed, lage });
+        { ids1: m.team1_ids, ids2: m.team2_ids, seed1: m.team1_seed, seed2: m.team2_seed, lage,
+          zuletzt1: zeigeZuletztGespielt() ? m.team1_last_played_ms : null,
+          zuletzt2: zeigeZuletztGespielt() ? m.team2_last_played_ms : null });
   parts.push(`<span class="who-block">
       <span class="who">${paarHtml}</span>
       <span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>
@@ -7808,6 +7843,10 @@ function uebernehmeEditorFelder() {
     showMoveButtons: $("prof-show-move")
       ? $("prof-show-move").checked
       : !!kopie.display.showMoveButtons,
+    // Fehlt das Häkchen (älterer Turnier-PC), bleibt der gespeicherte Wert.
+    showLastPlayed: $("prof-show-last-played")
+      ? $("prof-show-last-played").checked
+      : !!kopie.display.showLastPlayed,
     // Achse des Panels „Spielzeiten": Auswahlfeld statt Häkchen — es sind
     // vier Werte, kein An/Aus. Ein unbekannter Wert (Profil aus einer
     // neueren Version) fiele beim Lesen ohnehin auf „group" zurück.
@@ -7876,6 +7915,7 @@ function renderProfileEditor() {
       <label class="checkbox-row"><input type="checkbox" id="prof-show-round" ${d.showRound ? "checked" : ""} /> Runde zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
       <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
+      ${hostKenntZuletztGespielt() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-last-played" ${d.showLastPlayed ? "checked" : ""} /> Zuletzt gespielt zeigen (wie lange das letzte Spiel jeder Seite her ist)</label>` : ""}
       <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
       ${hostKenntOffeneSpiele() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-open" ${d.hideOpenMatches ? "" : "checked"} /> Spiele mit noch offener Paarung zeigen (z. B. Halbfinale vor der Vorrunde)</label>` : ""}
       ${hostKenntSetzplaetze() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-seeds" ${d.hideSeeds ? "" : "checked"} /> Setzplätze zeigen ([1], [3/4])</label>` : ""}
@@ -8686,6 +8726,13 @@ function tickClocks() {
   // Pausen-Eieruhr der Spielliste: der Rest-Countdown tickt sekündlich
   // herunter. Gezielt ins Zeit-Feld schreiben (wie bei der Feld-Uhr) —
   // vor der Zahl steht das Eieruhr-Sinnbild.
+  // „Zuletzt gespielt": Minutenauflösung, aber im selben Takt geschrieben —
+  // ein eigener Timer lohnt nicht, und das Umschlagen auf „vor 1 min"
+  // käme sonst bis zu einer Minute zu spät.
+  document.querySelectorAll(".zuletzt[data-last-played]").forEach((el) => {
+    const since = Number(el.dataset.lastPlayed);
+    if (since) el.textContent = zuletztText(since, serverNow());
+  });
   document.querySelectorAll(".wartet[data-until]").forEach((el) => {
     const until = Number(el.dataset.until);
     const zeit = el.querySelector(".zeit");

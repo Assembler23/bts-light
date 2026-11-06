@@ -1613,6 +1613,11 @@ pub struct TlDisplaySettings {
     /// auf manchen Geräten nicht praktikabel). Default aus — die Zeile wird
     /// damit spürbar breiter; wer es braucht, schaltet es im Profil ein.
     pub show_move_buttons: bool,
+    /// Seit wann jede Seite einer wartenden/gerufenen Paarung nicht mehr
+    /// auf dem Feld stand (Spec `tl-zuletzt-gespielt`). Default aus — hier
+    /// ist „fehlt = aus" ausnahmsweise genau der gewollte Standard, deshalb
+    /// nicht invertiert wie `hide_seeds`.
+    pub show_last_played: bool,
     pub list_position: TlListPosition,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
     /// Gehört ins Profil und nicht ins Gerät: Sie beschreibt, WAS gezeigt
@@ -2314,6 +2319,7 @@ mod tests {
                 show_court_remaining: true,
                 hide_open_matches: false,
                 show_move_buttons: false,
+                show_last_played: true,
                 unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
                 time_stats_axis: Default::default(),

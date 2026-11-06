@@ -1878,6 +1878,12 @@ pub struct TlDisplaySettingsWire {
     /// Feld (älterer Browser-Stand), bleibt es aus — das bisherige Bild.
     #[serde(rename = "showMoveButtons", default)]
     pub show_move_buttons: bool,
+    /// „Zuletzt gespielt" je Seite an wartenden und gerufenen Spielen (Spec
+    /// `tl-zuletzt-gespielt`). `#[serde(default)]`: fehlt das Feld (älterer
+    /// Browser-Stand oder Bestandsprofil), bleibt die Anzeige aus — der
+    /// gewollte Standard.
+    #[serde(rename = "showLastPlayed", default)]
+    pub show_last_played: bool,
     #[serde(rename = "listPosition")]
     pub list_position: TlListPositionWire,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
@@ -5316,6 +5322,7 @@ mod tests {
                 show_court_remaining: true,
                 hide_open_matches: false,
                 show_move_buttons: false,
+                show_last_played: true,
                 unlimited_court_calls: false,
                 list_position: TlListPositionWire::Bottom,
                 time_stats_axis: TlTimeStatsAxisWire::Group,
@@ -5387,6 +5394,24 @@ mod tests {
         let alt: TlDisplaySettingsWire = serde_json::from_str(legacy).unwrap();
         assert!(!alt.show_court_remaining);
         assert!(alt.show_numbers);
+    }
+
+    /// Spec `tl-zuletzt-gespielt`: `showLastPlayed` reist im Profil mit;
+    /// ein Profil ohne das Feld (Bestand, älterer Browser) bleibt aus.
+    #[test]
+    fn display_settings_last_played_roundtrip_and_default() {
+        let d = TlDisplaySettingsWire {
+            show_last_played: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains(r#""showLastPlayed":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert_eq!(zurueck, d);
+
+        let legacy = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,"showClubLogos":false,"showDiscipline":false,"showRound":false,"showGroup":false,"listPosition":"right"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(legacy).unwrap();
+        assert!(!alt.show_last_played);
     }
 
     /// Option „Aufrufe unbegrenzt" (Feldtest 17.08.2026): reist als

@@ -3175,6 +3175,16 @@ pub struct TlMatch {
     pub team1_seed: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team2_seed: Option<String>,
+    /// Ende des letzten **gespielten** Spiels dieser Seite (Unix-ms) — der
+    /// jüngste Wert über ihre Spieler, also die kürzeste Pause (Spec
+    /// `tl-zuletzt-gespielt`). Walkover zählen nicht. `None` = heute noch
+    /// nicht gespielt **oder** ein Spieler steht gerade auf einem anderen
+    /// Feld (das sagen dann die rot gefärbten Namen). Reist unabhängig vom
+    /// Profil-Schalter — der wirkt im Browser, wie alle Anzeige-Optionen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team1_last_played_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team2_last_played_ms: Option<u64>,
     /// In welche Halle das Spiel gehört, und woher wir das wissen.
     pub hall: String,
     pub hall_source: HallSource,
@@ -3570,6 +3580,66 @@ fn finished_times(tablet: &TabletState, match_id: i64) -> Option<(i64, Option<i6
     Some((brutto, netto))
 }
 
+/// Jüngstes Spielende je Spieler ([`assign::player_key`]) über alle
+/// beendeten Spiele außer Walkover (Spec `tl-zuletzt-gespielt`) — einmal je
+/// Zustandsbau, nicht je Zeile.
+///
+/// Bevorzugt das echte Ergebnis-Eintragen (`finished_ms`, E3), sonst das
+/// erste Sehen im BTP-Stand (`finished_at`): Ein am Tablet um 10:15
+/// eingetragenes Ergebnis, das BTP erst um 10:20 liefert, endete um 10:15.
+fn last_played_by_player(
+    snap: &crate::btp::model::BtpSnapshot,
+    zeiten: &std::collections::HashMap<i64, crate::tablet::match_times::MatchTimeEntry>,
+) -> std::collections::HashMap<String, u64> {
+    use crate::btp::model::{MatchResult, MatchStatus};
+    let mut zuletzt: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for m in snap
+        .matches
+        .iter()
+        .filter(|m| m.status == MatchStatus::Finished && m.result != MatchResult::Walkover)
+    {
+        let ende = zeiten
+            .get(&m.id)
+            .and_then(|e| e.finished_ms)
+            .or(m.finished_at);
+        let Some(ende) = ende else { continue };
+        for p in m.team1.iter().chain(m.team2.iter()) {
+            let e = zuletzt.entry(assign::player_key(p)).or_insert(0);
+            *e = (*e).max(ende);
+        }
+    }
+    zuletzt
+}
+
+/// Älter als das zählt ein Spielende nicht mehr als „zuletzt gespielt":
+/// Bei mehrtägigen Turnieren stünde morgens sonst „vor 14 h 05" vom Vortag
+/// an jeder Seite — formal richtig, für den Aufruf aber wertlos (Spec:
+/// „heute noch nicht gespielt = keine Marke"). Zwölf Stunden statt
+/// Kalendertag, weil der Host keine Zeitzone kennt.
+const LAST_PLAYED_MAX_AGE_MS: u64 = 12 * 60 * 60 * 1000;
+
+/// „Zuletzt gespielt" einer Seite: das jüngste Spielende ihrer Spieler.
+/// `None`, wenn keiner in den letzten zwölf Stunden gespielt hat oder einer
+/// gerade auf einem anderen Feld steht — dann ist die Zeit bedeutungslos.
+fn side_last_played(
+    team: &[crate::btp::model::BtpPlayer],
+    match_id: i64,
+    zuletzt: &std::collections::HashMap<String, u64>,
+    availability: &PlayerAvailability,
+    now_ms: u64,
+) -> Option<u64> {
+    if team
+        .iter()
+        .any(|p| availability.on_court_elsewhere(p, match_id))
+    {
+        return None;
+    }
+    team.iter()
+        .filter_map(|p| zuletzt.get(&assign::player_key(p)).copied())
+        .max()
+        .filter(|&ende| now_ms.saturating_sub(ende) <= LAST_PLAYED_MAX_AGE_MS)
+}
+
 /// Ordnungsschlüssel eines wartenden Spiels samt dem Spiel selbst und seiner
 /// Halle — die Zwischenform, in der sortiert und gekappt wird, bevor die
 /// teuren Zeichenketten der Anzeige entstehen.
@@ -3750,6 +3820,7 @@ pub(crate) fn build_state_limited(
     let auto = tablet.auto_hall_store().halls();
 
     let availability = PlayerAvailability::from_snapshot(&snap, config);
+    let zuletzt = last_played_by_player(&snap, &tablet.match_times_store().entries());
 
     // Alle geplanten Spiele — auch die, deren Paarung noch aus einem Vorspiel
     // kommt (Spec `tl-offene-paarungen`). Sie werden gleich unten von den
@@ -3999,6 +4070,8 @@ pub(crate) fn build_state_limited(
             team2_ids: license_ids(&m.team2),
             team1_seed: m.team1_seed.clone(),
             team2_seed: m.team2_seed.clone(),
+            team1_last_played_ms: side_last_played(&m.team1, m.id, &zuletzt, &availability, now_ms),
+            team2_last_played_ms: side_last_played(&m.team2, m.id, &zuletzt, &availability, now_ms),
             hall,
             hall_source,
             prep_call: call.map(|(hall, called_at_ms)| TlPrepCall {
@@ -4326,6 +4399,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             hide_open_matches: p.display.hide_open_matches,
             hide_seeds: p.display.hide_seeds,
             show_move_buttons: p.display.show_move_buttons,
+            show_last_played: p.display.show_last_played,
             unlimited_court_calls: p.display.unlimited_court_calls,
             list_position: match p.display.list_position {
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
@@ -4380,6 +4454,7 @@ fn display_settings_from_wire(
         hide_open_matches: d.hide_open_matches,
         hide_seeds: d.hide_seeds,
         show_move_buttons: d.show_move_buttons,
+        show_last_played: d.show_last_played,
         unlimited_court_calls: d.unlimited_court_calls,
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
@@ -6170,6 +6245,161 @@ mod tests {
         let s = build_state(&tablet, &cfg, 3_600_000, 7);
         assert_eq!(s.queue[0].predicted_start_ms, None);
         assert!(s.time_stats.is_none());
+    }
+
+    // ── Spec `tl-zuletzt-gespielt` ────────────────────────────────────
+
+    /// Ein beendetes Spiel `id` zwischen `t1` und `t2`, gesehen um `ende`.
+    fn beendet(id: i64, t1: Vec<BtpPlayer>, t2: Vec<BtpPlayer>, ende: u64) -> BtpMatch {
+        let mut m = a_match(id);
+        m.team1 = t1;
+        m.team2 = t2;
+        m.status = MatchStatus::Finished;
+        m.winner = Some(1);
+        m.finished_at = Some(ende);
+        m
+    }
+
+    fn wartend(id: i64, t1: Vec<BtpPlayer>, t2: Vec<BtpPlayer>) -> BtpMatch {
+        let mut m = a_match(id);
+        m.team1 = t1;
+        m.team2 = t2;
+        m
+    }
+
+    fn zeile(s: &TlState, id: i64) -> &TlMatch {
+        s.queue
+            .iter()
+            .find(|m| m.match_id == id)
+            .expect("in der Warteliste")
+    }
+
+    #[test]
+    fn zuletzt_gespielt_steht_je_seite_und_fehlt_bei_wer_noch_nicht_spielte() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![
+                beendet(1, vec![player("Müller")], vec![player("Weber")], 600_000),
+                wartend(2, vec![player("Müller")], vec![player("Neu")]),
+            ],
+            Vec::new(),
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), 3_000_000, 7);
+        let m = zeile(&s, 2);
+        assert_eq!(m.team1_last_played_ms, Some(600_000));
+        assert_eq!(m.team2_last_played_ms, None, "heute noch nicht gespielt");
+    }
+
+    #[test]
+    fn im_doppel_zaehlt_der_partner_mit_der_kuerzesten_pause() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![
+                beendet(1, vec![player("A")], vec![player("X")], 100_000),
+                beendet(2, vec![player("B")], vec![player("Y")], 900_000),
+                wartend(
+                    3,
+                    vec![player("A"), player("B")],
+                    vec![player("C"), player("D")],
+                ),
+            ],
+            Vec::new(),
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), 3_000_000, 7);
+        assert_eq!(zeile(&s, 3).team1_last_played_ms, Some(900_000));
+        assert_eq!(zeile(&s, 3).team2_last_played_ms, None);
+    }
+
+    #[test]
+    fn ein_walkover_zaehlt_nicht_eine_aufgabe_schon() {
+        let tablet = TabletState::default();
+        let mut wo = beendet(2, vec![player("A")], vec![player("X")], 900_000);
+        wo.result = MatchResult::Walkover;
+        let mut aufgabe = beendet(3, vec![player("B")], vec![player("Y")], 800_000);
+        aufgabe.result = MatchResult::Retired;
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![
+                beendet(1, vec![player("A")], vec![player("Z")], 100_000),
+                wo,
+                aufgabe,
+                wartend(4, vec![player("A")], vec![player("B")]),
+            ],
+            Vec::new(),
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), 3_000_000, 7);
+        assert_eq!(
+            zeile(&s, 4).team1_last_played_ms,
+            Some(100_000),
+            "der Walkover setzt die Uhr nicht zurück — das Spiel davor gilt"
+        );
+        assert_eq!(zeile(&s, 4).team2_last_played_ms, Some(800_000));
+    }
+
+    #[test]
+    fn wer_gerade_auf_einem_anderen_feld_steht_bekommt_keine_zeit() {
+        let tablet = TabletState::default();
+        let mut laeuft = wartend(2, vec![player("A")], vec![player("Q")]);
+        laeuft.status = MatchStatus::OnCourt;
+        laeuft.court_id = Some(1);
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![
+                beendet(1, vec![player("A")], vec![player("B")], 100_000),
+                laeuft,
+                wartend(3, vec![player("A")], vec![player("B")]),
+            ],
+            Vec::new(),
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), 3_000_000, 7);
+        assert_eq!(zeile(&s, 3).team1_last_played_ms, None);
+        assert_eq!(zeile(&s, 3).team2_last_played_ms, Some(100_000));
+    }
+
+    #[test]
+    fn ein_spiel_vom_vortag_zaehlt_nicht_mehr() {
+        let tablet = TabletState::default();
+        let tag = 24 * 60 * 60 * 1000;
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![
+                beendet(1, vec![player("A")], vec![player("B")], tag),
+                wartend(2, vec![player("A")], vec![player("B")]),
+            ],
+            Vec::new(),
+        ));
+        let gestern_abend = build_state(&tablet, &AppConfig::default(), tag + 11 * 3_600_000, 7);
+        assert_eq!(zeile(&gestern_abend, 2).team1_last_played_ms, Some(tag));
+        let heute_frueh = build_state(&tablet, &AppConfig::default(), tag + 13 * 3_600_000, 7);
+        assert_eq!(zeile(&heute_frueh, 2).team1_last_played_ms, None);
+    }
+
+    #[test]
+    fn das_eingetragene_spielende_schlaegt_das_erste_sehen_in_btp() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![
+                beendet(1, vec![player("A")], vec![player("B")], 1_200_000),
+                wartend(2, vec![player("A")], vec![player("C")]),
+            ],
+            Vec::new(),
+        ));
+        // Am Tablet um 15 min eingetragen, BTP lieferte es erst bei 20 min.
+        tablet.match_times_store().stamp_finished(1, true, 900_000);
+        let s = build_state(&tablet, &AppConfig::default(), 3_000_000, 7);
+        assert_eq!(zeile(&s, 2).team1_last_played_ms, Some(900_000));
+    }
+
+    #[test]
+    fn ohne_zeit_bleibt_das_feld_vom_draht_weg() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![a_match(1)], Vec::new()));
+        let s = build_state(&tablet, &AppConfig::default(), 3_000_000, 7);
+        let json = serde_json::to_string(&s.queue[0]).unwrap();
+        assert!(!json.contains("last_played"), "{json}");
     }
 
     #[test]
@@ -10141,6 +10371,11 @@ mod tests {
             // Feld — der Datenschutz-Wächter prüft die Stellen strukturell.
             "team1_seed",
             "team2_seed",
+            // Ende des letzten gespielten Spiels je Seite (Spec
+            // tl-zuletzt-gespielt): ein Zeitstempel ohne Namen oder Nummer,
+            // aus dem öffentlichen Liveticker ohnehin ablesbar.
+            "team1_last_played_ms",
+            "team2_last_played_ms",
             "sets",
             "tablet_connected",
             "injury",
@@ -10331,6 +10566,8 @@ mod tests {
             // Profil-Schalter „Verschiebe-Knöpfe an jeder Zeile" (Wunsch
             // 06.09.2026) — ein Anzeige-Häkchen, kein Personenbezug.
             "showMoveButtons",
+            // Profil-Schalter „Zuletzt gespielt" (Spec tl-zuletzt-gespielt).
+            "showLastPlayed",
             "listPosition",
             // Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`)
             // — reine Anzeige-Präferenz wie die Häkchen daneben, ein Wort
@@ -10456,6 +10693,7 @@ mod tests {
                 unlimited_court_calls: true,
                 hide_open_matches: false,
                 show_move_buttons: false,
+                show_last_played: false,
                 list_position: crate::config::TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
                 hide_seeds: false,
@@ -11213,6 +11451,33 @@ mod tests {
         assert!(
             !offene_liste.contains("5/8"),
             "ein Kandidat darf keine Setzung mitbringen: {offene_liste}"
+        );
+        // „Zuletzt gespielt" (Spec tl-zuletzt-gespielt) nur an der
+        // Warteliste — nie an Kandidaten offener Paarungen, die das Spiel
+        // womöglich nie bestreiten.
+        let mut zuletzt_orte: Vec<String> = Vec::new();
+        fn suche_zuletzt(wert: &serde_json::Value, pfad: &str, orte: &mut Vec<String>) {
+            match wert {
+                serde_json::Value::Object(map) => {
+                    for (schluessel, unterwert) in map {
+                        if schluessel.ends_with("_last_played_ms") {
+                            orte.push(format!("{pfad}.{schluessel}"));
+                        }
+                        suche_zuletzt(unterwert, &format!("{pfad}.{schluessel}"), orte);
+                    }
+                }
+                serde_json::Value::Array(werte) => {
+                    for unterwert in werte {
+                        suche_zuletzt(unterwert, &format!("{pfad}[]"), orte);
+                    }
+                }
+                _ => {}
+            }
+        }
+        suche_zuletzt(&baum, "", &mut zuletzt_orte);
+        assert!(
+            zuletzt_orte.iter().all(|o| o.starts_with(".queue[]")),
+            "„zuletzt gespielt“ nur an der Warteliste: {zuletzt_orte:?}"
         );
         // Gegenprobe: Die Namen, die die Turnierleitung zum Arbeiten braucht,
         // sind sehr wohl da — sonst prüfte der Test nur einen leeren Zustand.
