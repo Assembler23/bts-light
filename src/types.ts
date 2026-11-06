@@ -414,7 +414,15 @@ export type MonitorTarget =
   | { kind: "info_winners"; rank?: number | null }
   | { kind: "ad_rotation" }
   | { kind: "ad_single"; file: string }
-  | { kind: "court_combo"; court_ids: number[] };
+  | { kind: "court_combo"; court_ids: number[] }
+  | {
+      kind: "info_spielfolge";
+      hall?: string | null;
+      /** "oben" (Standard) · "spalten" · "liste" */
+      anordnung?: string | null;
+      /** Kommende Spiele 1–60; fehlt = 19. */
+      anzahl?: number | null;
+    };
 
 /** Kombi-Ausrichtung je Monitor-Gerät (Rust: tablet::monitor::ComboDirStore).
  *  `devices[deviceId] === true` heißt „Felder nebeneinander"; `last` ist die

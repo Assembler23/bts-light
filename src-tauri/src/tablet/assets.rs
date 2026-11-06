@@ -73,6 +73,8 @@ pub const AD_HTML: &str = include_str!("../../assets/ad.html");
 /// Bildschirm). CourtIDs via `?courts=1,2,3`, optional `?device=` +
 /// `?rotate=`. Pollt `/combo/state` für die Live-Stände.
 pub const COMBO_HTML: &str = include_str!("../../assets/combo.html");
+/// Spielfolge-Anzeige (Spec spielfolge-anzeige).
+pub const SPIELFOLGE_HTML: &str = include_str!("../../assets/spielfolge.html");
 
 /// Felder-Lobby (`/felder`): Start-Seite fürs Zähltablett. Kacheln aller
 /// Felder mit Live-Belegung (Poll `/courts`), Tippen führt auf `/court/{id}`.

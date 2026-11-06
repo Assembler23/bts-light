@@ -932,6 +932,46 @@ Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tau
 Die Einrichtungs-Adresse und die Feld-Zuweisung der Geräte stehen auf der
 Seite **„Court-Monitore"** (Dashboard → Court-Monitore).
 
+## Spielfolge (`/info/spielfolge`, seit v0.9.341)
+
+Eine Hallen-Anzeige für die Frage „Wann bin ich dran?": oben bzw. links alle
+**laufenden Spiele** mit Satzstand, darunter bzw. rechts die **nächsten Spiele
+der Warteliste** — in derselben Reihenfolge, die die Turnierleitung im TL-Web
+sieht, einschließlich Handsortierung. Spiele mit noch offener Paarung stehen
+an ihrer Position mit „A oder B", „aus Spiel 42" oder „noch offen".
+Spec: [features/spielfolge-anzeige.md](features/spielfolge-anzeige.md).
+
+**Einrichten:** Dashboard → Court-Monitore → beim Gerät in der Ziel-Auswahl
+die Gruppe **Spielfolge (nur LAN)**. Daneben erscheinen zwei Felder:
+
+<!-- pruef: "Spielfolge (nur LAN)" in src/pages/CourtMonitorPanel.tsx -->
+
+- **Anordnung:** „Laufende oben, Warteliste darunter" (Standard), „Zwei
+  Spalten" oder „Eine durchgehende Liste".
+- **Kommende Spiele:** 1–60, Standard **19**.
+<!-- pruef: "const SPIELFOLGE_ANZAHL_STANDARD = 19;" in src/pages/CourtMonitorPanel.tsx -->
+
+Je Zeile der Warteliste: Platznummer, Disziplin + Runde, beide Seiten, die
+voraussichtliche Startzeit („ca. 14:35", unsicher „~", nur bei eingeschalteter
+Prognose und nicht bei schon gerufenen Spielen) und die Marken „In
+Vorbereitung", Wunschfeld („→ Feld 3") und Halle.
+
+**Laufband:** Passt eine Liste nicht auf den Bildschirm, läuft sie langsam
+nach oben durch und beginnt nahtlos von vorn. Neue Daten (alle 3 s) setzen das
+Band nicht zurück. Passt alles, steht die Anzeige still.
+
+**Nur LAN.** Ein Gerät, das über die Cloud verbunden ist, zeigt mit diesem
+Ziel die Kopplungsseite; die Zuweisung reist gar nicht erst zum Relay. Auch
+die Slave-Brücke einer fernen Halle liefert die Seite nicht.
+
+**Ohne Panel** lässt sich die Seite direkt öffnen:
+`http://bts-light.local:8088/info/spielfolge?anordnung=spalten&anzahl=25&halle=Halle%202`
+(alle Parameter optional; `?rotate=` wie überall).
+<!-- pruef: "get(info_spielfolge_page)" in src-tauri/src/tablet/server.rs -->
+
+**Bekannte Lücke:** Die Seite kennt den Ansage-Modus (`?ansage=`) nicht. Ein
+Pi, der in der Halle ansagt, verstummt, solange er die Spielfolge zeigt.
+
 ## Kombi-Anzeige (`combo.html`)
 
 Mehrere Felder auf einem TV (bis zu 3), als Bänder über- oder nebeneinander —

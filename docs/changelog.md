@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.341
+
+- **Neue Hallen-Anzeige „Spielfolge".** Ein TV zeigt alle laufenden Spiele und
+  die nächsten Spiele der Warteliste (Standard 19, je Gerät einstellbar) — in
+  der Reihenfolge der Turnierleitung, mit Platznummer, voraussichtlicher
+  Startzeit und „In Vorbereitung". Drei Anordnungen zur Wahl; passt die Liste
+  nicht auf den Bildschirm, läuft sie langsam durch. Einrichten im Dashboard
+  unter Court-Monitore → „Spielfolge". Zunächst nur im LAN-Betrieb.
+
 ## v0.9.340
 
 - **Werbebilder füllen den Monitor.** Im Leerlauf eines Court-Monitors wird

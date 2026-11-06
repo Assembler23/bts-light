@@ -321,6 +321,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Spielfolge-Anzeige** (laufende + kommende Spiele, Laufband) — Spec:
+  [features/spielfolge-anzeige.md](features/spielfolge-anzeige.md), ADR 0076 —
+  **v0.9.341, Feldtest offen.** Nachzuholen: Ansage-Modus, Cloud-Etappe,
+  Prognose-Zeit serverseitig formatieren (Kiosk ohne Zeitzone).
+
 - **Weitere Sprachdienste der Ansage (ElevenLabs, OpenAI, Gemini)** — Spec:
   [features/ansage-elevenlabs.md](features/ansage-elevenlabs.md) (freigegeben
   02.11.2026, erweitert 03.11.2026) — **umgesetzt v0.9.336, Hörtest beim

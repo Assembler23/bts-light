@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Spielfolge</title>
+<style>
+/* Spielfolge-Anzeige (Spec spielfolge-anzeige): laufende Spiele plus die
+   naechsten N der Warteliste. Palette wie overview/preparation. */
+html, body {
+  margin: 0; height: 100%; background: #0b1120; color: #f8fafc;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: none; overflow: hidden;
+}
+body.rotate-90  { transform: rotate(90deg);  transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+body.rotate-180 { transform: rotate(180deg); }
+body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+body { display: flex; flex-direction: column; }
+
+header.bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 2vw;
+  padding: 1vh 2.5vw;
+  background: linear-gradient(180deg, #141f33, #1c2942);
+  border-bottom: .3vh solid #334155;
+}
+header.bar .live-dot {
+  width: 1.4vmin; height: 1.4vmin; border-radius: 50%;
+  background: #f43f5e; box-shadow: 0 0 1.5vmin #f43f5e;
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes live-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+header.bar .title {
+  font-size: 3.4vmin; font-weight: 800; letter-spacing: .02em;
+  color: #fbbf24; text-transform: uppercase;
+}
+header.bar .hall-name { font-size: 3vmin; font-weight: 600; color: #cbd5e1; }
+header.bar .uhr {
+  margin-left: auto; font-size: 3.4vmin; font-weight: 800; color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+header.bar .sponsor-bar { display: flex; align-items: center; gap: 1.2vw; }
+header.bar .sponsor-bar img {
+  height: 5.5vh; width: auto; max-width: 18vw; object-fit: contain;
+  background: #fff; border-radius: .6vh; padding: .4vh;
+}
+
+main {
+  flex: 1 1 auto; min-height: 0; display: flex; gap: 1.2vh 2vw;
+  padding: 1.4vh 2vw;
+}
+main.oben, main.liste { flex-direction: column; }
+main.spalten { flex-direction: row; }
+main.spalten > .bereich { flex: 1 1 0; min-width: 0; }
+main.oben > .bereich.lauf { flex: 0 1 auto; max-height: 55%; }
+main.oben > .bereich.komm { flex: 1 1 0; }
+main.liste > .bereich { flex: 1 1 0; }
+
+.bereich { display: flex; flex-direction: column; min-height: 0; }
+.bereich h2 {
+  flex: 0 0 auto; margin: 0 0 .8vh; font-size: 2.6vmin; font-weight: 800;
+  color: #94a3b8; text-transform: uppercase; letter-spacing: .06em;
+}
+/* Das Band schneidet ab; die Spur darin wird per transform verschoben. */
+.band { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.spur { will-change: transform; }
+.trenner {
+  height: 4vh; display: flex; align-items: center; justify-content: center;
+  color: #475569; font-size: 2vmin; letter-spacing: .3em;
+}
+.zwischen {
+  margin: 1.2vh 0 .8vh; font-size: 2.6vmin; font-weight: 800; color: #94a3b8;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+
+.zeile {
+  display: grid; grid-template-columns: 7vmin 1fr auto; gap: 1.4vw;
+  align-items: center; padding: 1vh 1.4vw; margin-bottom: .8vh;
+  background: linear-gradient(180deg, #1a2842, #0f1a30);
+  border: .25vmin solid #334155; border-radius: 1.2vmin;
+}
+.zeile.gerufen { border-color: #fbbf24; background: linear-gradient(180deg, #2a2410, #1a1408); }
+.zeile.laeuft { border-color: #10b981; }
+.zeile .nr {
+  font-size: 3.6vmin; font-weight: 900; color: #fbbf24; text-align: center;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.zeile.laeuft { grid-template-columns: minmax(7vmin, auto) 1fr auto; }
+.zeile.laeuft .nr { color: #34d399; font-size: 2.8vmin; white-space: nowrap; }
+/* Zwei Spalten: wenig Breite → die beiden Seiten untereinander statt
+   abgeschnitten. */
+main.spalten .zeile .paar { white-space: normal; }
+main.spalten .zeile .paar > span:not(.vs) {
+  display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+main.spalten .zeile .paar .vs { display: block; font-size: .6em; padding: 0; line-height: 1.1; }
+.zeile .mitte { min-width: 0; }
+.zeile .disz {
+  font-size: 2.2vmin; font-weight: 700; color: #94a3b8;
+  text-transform: uppercase; letter-spacing: .04em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.zeile .paar {
+  font-size: 3vmin; font-weight: 700; color: #f1f5f9;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.zeile .paar .vs { color: #64748b; font-weight: 500; padding: 0 .7vw; }
+.zeile .paar .offen { color: #cbd5e1; font-style: italic; font-weight: 600; }
+.zeile .paar .seed { color: #fbbf24; font-weight: 600; font-size: .8em; }
+.zeile .paar .nat { color: #94a3b8; font-weight: 600; font-size: .75em; }
+.zeile .rechts {
+  display: flex; flex-direction: column; align-items: flex-end; gap: .4vh;
+  white-space: nowrap;
+}
+.zeile .zeit { font-size: 3vmin; font-weight: 800; color: #e2e8f0; font-variant-numeric: tabular-nums; }
+.zeile .saetze { font-size: 3.2vmin; font-weight: 800; color: #f8fafc; font-variant-numeric: tabular-nums; }
+.marke {
+  display: inline-block; border-radius: 999px; padding: .2vh 1vw;
+  font-size: 2vmin; font-weight: 800; letter-spacing: .03em;
+}
+.marke.prep { background: rgba(251,191,36,.25); color: #fbbf24; border: .2vmin solid #fbbf24; text-transform: uppercase; }
+.marke.halle { color: #cbd5e1; border: .2vmin solid #475569; }
+.marke.wunsch { color: #a5b4fc; border: .2vmin solid #6366f1; }
+.punkt { display: inline-block; width: .6em; height: .6em; border-radius: 50%; margin-right: .35em; }
+
+.leer { color: #64748b; font-size: 2.6vmin; padding: 1vh 0; }
+
+#offline {
+  position: fixed; top: 1vh; right: 2vw; display: none;
+  background: rgba(244,63,94,.18); color: #fda4af;
+  border: .2vmin solid #b91c1c; border-radius: 1vmin;
+  padding: .5vh 1.4vw; font-size: 2.4vmin; font-weight: 700;
+}
+#offline.show { display: block; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <span class="live-dot" aria-hidden="true"></span>
+  <span class="title">Spielfolge</span>
+  <span class="hall-name" id="hall-name"></span>
+  <span class="uhr" id="uhr"></span>
+  <span class="sponsor-bar" id="sponsor-bar"></span>
+</header>
+<main id="board"></main>
+<div id="offline">Keine Verbindung zum Turnier-PC</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var params = new URLSearchParams(location.search);
+  // LAN "/"; die Seite liegt unter "<BASE>info/spielfolge".
+  var BASE = location.pathname.replace(/info\/spielfolge\/?$/, '');
+
+  var rotate = (params.get('rotate') || '0').replace(/[^0-9]/g, '');
+  if (rotate === '90' || rotate === '180' || rotate === '270') {
+    document.body.classList.add('rotate-' + rotate);
+  }
+  var deviceId = (params.get('device') || '').trim();
+  var halle = (params.get('halle') || '').trim();
+  var anordnung = (params.get('anordnung') || 'oben').trim();
+  if (anordnung !== 'spalten' && anordnung !== 'liste') anordnung = 'oben';
+  var anzahl = (params.get('anzahl') || '').replace(/[^0-9]/g, '');
+  if (halle) document.getElementById('hall-name').textContent = '· ' + halle;
+
+  // Laufband-Tempo: eine Zeile braucht SEK_JE_ZEILE, um ihre Höhe zu
+  // durchlaufen (Spec: ≥ 4 s je Zeile im Bild).
+  var SEK_JE_ZEILE = 4;
+  var reduziert = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var uhrVersatz = 0; // Server-Zeit minus lokale Zeit (Pi ohne RTC)
+
+  function h(tag, cls, text) {
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+  function farbPunkt(farbe) {
+    if (!farbe || !/^#[0-9a-fA-F]{6}$/.test(farbe)) return null;
+    var p = h('span', 'punkt');
+    p.style.background = farbe;
+    return p;
+  }
+  function hhmm(ms) {
+    var d = new Date(ms);
+    var m = d.getMinutes();
+    return d.getHours() + ':' + (m < 10 ? '0' : '') + m;
+  }
+
+  // Eine Seite des Paars: Namen (Doppel mit „/"), Nation, Setzplatz — oder
+  // das Label einer offenen Seite.
+  function seite(namen, nat, seed, offen) {
+    var span = h('span');
+    if (offen) { span.appendChild(h('span', 'offen', offen)); return span; }
+    if (!namen || !namen.length) { span.appendChild(h('span', 'offen', '—')); return span; }
+    namen.forEach(function (n, i) {
+      if (i > 0) span.appendChild(document.createTextNode(' / '));
+      span.appendChild(document.createTextNode(n));
+      if (nat && nat[i]) span.appendChild(h('span', 'nat', ' ' + nat[i]));
+    });
+    if (seed) span.appendChild(h('span', 'seed', ' [' + seed + ']'));
+    return span;
+  }
+  function paarung(x) {
+    var p = h('div', 'paar');
+    p.appendChild(seite(x.team1, x.team1_nat, x.team1_seed, x.offen1));
+    p.appendChild(h('span', 'vs', 'gegen'));
+    p.appendChild(seite(x.team2, x.team2_nat, x.team2_seed, x.offen2));
+    return p;
+  }
+  function disziplin(x) {
+    return [x.class_label, x.round_name].filter(function (s) { return s; }).join(' · ');
+  }
+
+  function laufZeile(c) {
+    var z = h('div', 'zeile laeuft');
+    z.appendChild(h('div', 'nr', c.court));
+    var m = h('div', 'mitte');
+    var d = h('div', 'disz');
+    var punkt = farbPunkt(c.hall_color);
+    if (punkt && c.hall) { d.appendChild(punkt); d.appendChild(document.createTextNode(c.hall + ' · ')); }
+    d.appendChild(document.createTextNode(disziplin(c)));
+    m.appendChild(d);
+    m.appendChild(paarung(c));
+    z.appendChild(m);
+    var r = h('div', 'rechts');
+    var saetze = (c.sets || []).map(function (s) { return s[0] + ':' + s[1]; }).join('  ');
+    r.appendChild(h('span', 'saetze', saetze || '0:0'));
+    z.appendChild(r);
+    return z;
+  }
+
+  function kommZeile(k) {
+    var z = h('div', 'zeile' + (k.gerufen ? ' gerufen' : ''));
+    z.appendChild(h('div', 'nr', String(k.platz)));
+    var m = h('div', 'mitte');
+    m.appendChild(h('div', 'disz', disziplin(k)));
+    m.appendChild(paarung(k));
+    z.appendChild(m);
+    var r = h('div', 'rechts');
+    if (k.prognose_ms) {
+      r.appendChild(h('span', 'zeit', (k.prognose_unsicher ? '~ ' : 'ca. ') + hhmm(k.prognose_ms)));
+    }
+    var marken = h('div');
+    if (k.gerufen) marken.appendChild(h('span', 'marke prep', 'In Vorbereitung'));
+    if (k.wunschfeld) {
+      marken.appendChild(document.createTextNode(' '));
+      marken.appendChild(h('span', 'marke wunsch', '→ ' + k.wunschfeld));
+    }
+    if (k.hall && !halle) {
+      marken.appendChild(document.createTextNode(' '));
+      var hm = h('span', 'marke halle');
+      var punkt = farbPunkt(k.hall_color);
+      if (punkt) hm.appendChild(punkt);
+      hm.appendChild(document.createTextNode(k.hall));
+      marken.appendChild(hm);
+    }
+    if (marken.childNodes.length) r.appendChild(marken);
+    z.appendChild(r);
+    return z;
+  }
+
+  // ── Laufband ──────────────────────────────────────────────────────────
+  // Ein Bereich = Band (schneidet ab) + Spur (wird verschoben). Passt der
+  // Inhalt, steht er still. Sonst folgt ihm ein Trenner und eine Kopie;
+  // der Versatz läuft modulo Zyklus — nahtlos, und ein Datenwechsel behält
+  // den Versatz (kein Sprung nach oben).
+  var baender = {};
+
+  function bereich(schluessel, titel, klasse) {
+    var b = baender[schluessel];
+    if (!b) {
+      var sektion = h('section', 'bereich ' + klasse);
+      if (titel) sektion.appendChild(h('h2', null, titel));
+      var band = h('div', 'band');
+      var spur = h('div', 'spur');
+      band.appendChild(spur);
+      sektion.appendChild(band);
+      b = { sektion: sektion, band: band, spur: spur, versatz: 0, zyklus: 0, tempo: 0 };
+      baender[schluessel] = b;
+    }
+    return b;
+  }
+
+  function fuelle(b, knoten) {
+    var spur = b.spur;
+    spur.textContent = '';
+    var block = h('div');
+    knoten.forEach(function (k) { block.appendChild(k); });
+    spur.appendChild(block);
+    var hoehe = block.offsetHeight;
+    var platz = b.band.clientHeight;
+    if (hoehe <= platz + 1 || knoten.length === 0) {
+      b.zyklus = 0; b.versatz = 0;
+      spur.style.transform = '';
+      return;
+    }
+    var trenner = h('div', 'trenner', '• • •');
+    spur.appendChild(trenner);
+    spur.appendChild(block.cloneNode(true));
+    b.zyklus = hoehe + trenner.offsetHeight;
+    b.versatz = b.versatz % b.zyklus;
+    var ersteZeile = block.querySelector('.zeile');
+    var zeilenHoehe = ersteZeile ? ersteZeile.offsetHeight : 60;
+    b.tempo = zeilenHoehe / SEK_JE_ZEILE; // px je Sekunde
+    if (reduziert) b.tempo = 0;
+    spur.style.transform = 'translateY(' + (-b.versatz) + 'px)';
+  }
+
+  var letzteZeit = 0;
+  function schritt(t) {
+    var dt = letzteZeit ? Math.min(0.25, (t - letzteZeit) / 1000) : 0;
+    letzteZeit = t;
+    Object.keys(baender).forEach(function (s) {
+      var b = baender[s];
+      if (!b.zyklus || !b.tempo) return;
+      b.versatz += b.tempo * dt;
+      if (b.versatz >= b.zyklus) b.versatz -= b.zyklus;
+      b.spur.style.transform = 'translateY(' + (-b.versatz).toFixed(1) + 'px)';
+    });
+    requestAnimationFrame(schritt);
+  }
+  requestAnimationFrame(schritt);
+
+  // Reduzierte Bewegung: seitenweise blättern statt fließen.
+  if (reduziert) {
+    setInterval(function () {
+      Object.keys(baender).forEach(function (s) {
+        var b = baender[s];
+        if (!b.zyklus) return;
+        b.versatz = (b.versatz + b.band.clientHeight) % b.zyklus;
+        b.spur.style.transform = 'translateY(' + (-b.versatz) + 'px)';
+      });
+    }, 8000);
+  }
+
+  // ── Aufbau je Anordnung ───────────────────────────────────────────────
+  var board = document.getElementById('board');
+  board.className = anordnung;
+  var aufgebaut = false;
+
+  var letzteDaten = null;
+  function render(data) {
+    letzteDaten = data;
+    var lauf = (data && data.laufend) || [];
+    var komm = (data && data.kommend) || [];
+    if (data && data.serverNowMs) uhrVersatz = data.serverNowMs - Date.now();
+
+    var laufKnoten = lauf.map(laufZeile);
+    var kommKnoten = komm.map(kommZeile);
+    if (!laufKnoten.length) laufKnoten = [h('div', 'leer', 'Gerade läuft kein Spiel.')];
+    if (!kommKnoten.length) kommKnoten = [h('div', 'leer', 'Keine weiteren Spiele in der Warteliste.')];
+
+    if (anordnung === 'liste') {
+      var b = bereich('alles', 'Auf den Feldern', 'alles');
+      if (!aufgebaut) { board.appendChild(b.sektion); aufgebaut = true; }
+      var alle = laufKnoten.slice();
+      alle.push(h('div', 'zwischen', 'Als Nächstes'));
+      fuelle(b, alle.concat(kommKnoten));
+      return;
+    }
+    var bl = bereich('lauf', 'Auf den Feldern', 'lauf');
+    var bk = bereich('komm', 'Als Nächstes', 'komm');
+    if (!aufgebaut) { board.appendChild(bl.sektion); board.appendChild(bk.sektion); aufgebaut = true; }
+    // Im Modus „oben" wächst der Laufend-Block mit seinem Inhalt (bis 55 %)
+    // → erst ihn füllen, dann ist die Höhe des Kommend-Bands bekannt.
+    fuelle(bl, laufKnoten);
+    fuelle(bk, kommKnoten);
+  }
+
+  // Im Modus „oben" darf der Laufend-Block nur so hoch werden wie sein
+  // Inhalt (max. 55 %). Das Band hat flex:1 und kollabierte sonst auf 0.
+  if (anordnung === 'oben') {
+    var stil = document.createElement('style');
+    stil.textContent = 'main.oben > .bereich.lauf .band { flex: 0 1 auto; }';
+    document.head.appendChild(stil);
+  }
+
+  // ── Uhr ───────────────────────────────────────────────────────────────
+  function uhr() {
+    document.getElementById('uhr').textContent = hhmm(Date.now() + uhrVersatz);
+  }
+  uhr();
+  setInterval(uhr, 5000);
+
+  // ── Frist des Abrufs ─────────────────────────────────────────────────
+  // **Inline-Kopie von `src/io/abrufFrist.mjs`** (ohne `fetchFn`) —
+  // Änderungen dort und hier gemeinsam. Ein hängender Abruf blockierte sonst
+  // alle folgenden (Turnier 05./06.09.2026).
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error('Abruf-Frist überschritten (' + was + ')'));
+      };
+      timer = setTimeout(function () { abbrechen('Kopfzeilen ' + KOPF_FRIST_MS + ' ms'); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error('Antwort nach Ablauf der Frist verworfen');
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen('Rumpf ' + RUMPF_FRIST_MS + ' ms'); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
+  // ── Stand abrufen ────────────────────────────────────────────────────
+  var POLL_OK_MS = 3000, POLL_FAIL_MS = 6000, fehler = 0;
+  function stateUrl() {
+    var q = [];
+    if (deviceId) q.push('device=' + encodeURIComponent(deviceId));
+    if (halle) q.push('halle=' + encodeURIComponent(halle));
+    if (anzahl) q.push('anzahl=' + anzahl);
+    return BASE + 'info/spielfolge/state' + (q.length ? '?' + q.join('&') : '');
+  }
+  function zeigeOffline(an) {
+    document.getElementById('offline').classList.toggle('show', !!an);
+  }
+  function tick() {
+    abrufMitFrist(stateUrl(), { cache: 'no-store' }, function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (data) {
+      fehler = 0; zeigeOffline(false);
+      render(data);
+      setTimeout(tick, POLL_OK_MS);
+    }).catch(function () {
+      fehler++;
+      if (fehler >= 2) zeigeOffline(true);
+      setTimeout(tick, POLL_FAIL_MS);
+    });
+  }
+  tick();
+
+  // Größenwechsel (Drehung, Fenster) → neu messen.
+  window.addEventListener('resize', function () { if (letzteDaten) render(letzteDaten); });
+
+  // ── Zielwechsel (wie preparation.html) ───────────────────────────────
+  function currentUrlMatches(redirectTo) {
+    try {
+      var here = new URL(location.href);
+      here.searchParams.delete('device');
+      here.searchParams.delete('rotate');
+      here.searchParams.delete('ansage');
+      var there = new URL(redirectTo, location.origin);
+      return here.pathname === there.pathname &&
+             here.searchParams.toString() === there.searchParams.toString();
+    } catch (e) { return false; }
+  }
+  function navigateWithRotate(href) {
+    var hereRotate = params.get('rotate');
+    if (hereRotate && href.indexOf('rotate=') < 0) {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'rotate=' + encodeURIComponent(hereRotate);
+    }
+    if (params.has('ansage') && !/[?&]ansage(=|&|$)/.test(href)) {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'ansage=' + encodeURIComponent(params.get('ansage') || '');
+    }
+    location.href = href;
+  }
+  function resolveDest(redirectTo) { return BASE + String(redirectTo).replace(/^\//, ''); }
+  var checkLaeuft = false;
+  function checkReassignment() {
+    if (!deviceId || checkLaeuft) return;
+    checkLaeuft = true;
+    abrufMitFrist(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check',
+      { cache: 'no-store' }, function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        checkLaeuft = false;
+        if (!s) return;
+        if (s.redirectTo) {
+          var dest = resolveDest(s.redirectTo);
+          if (!currentUrlMatches(dest)) {
+            navigateWithRotate(dest + (dest.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(deviceId));
+          }
+        } else {
+          navigateWithRotate(BASE + 'monitor?device=' + encodeURIComponent(deviceId));
+        }
+      })
+      .catch(function () { checkLaeuft = false; });
+  }
+  setInterval(checkReassignment, 1000);
+
+  // ── Sponsor-Leiste ───────────────────────────────────────────────────
+  (function sponsorBar() {
+    var box = document.getElementById('sponsor-bar');
+    function paint(st) {
+      var html = '';
+      if (st && st.hasLogo) html += '<img src="' + BASE + 'info/logo" alt="" onerror="this.remove()">';
+      ((st && st.barAds) || []).forEach(function (f) {
+        html += '<img src="' + BASE + 'ads/' + encodeURIComponent(f) + '" alt="" onerror="this.remove()">';
+      });
+      box.innerHTML = html;
+    }
+    function poll() {
+      fetch(BASE + 'info/ad/state', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(paint).catch(function () {});
+    }
+    poll();
+    setInterval(poll, 60000);
+  })();
+})();
+</script>
+</body>
+</html>

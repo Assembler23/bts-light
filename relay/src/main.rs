@@ -7238,6 +7238,16 @@ mod tests {
             "pi-winners".to_string(),
             relay_proto::MonitorTarget::InfoWinners { rank: None },
         );
+        // Spielfolge (nur LAN): Upload muss angenommen werden, das Gerät
+        // bleibt im Cloud aber „unzugewiesen" (Spec spielfolge-anzeige).
+        targets.insert(
+            "pi-spielfolge".to_string(),
+            relay_proto::MonitorTarget::InfoSpielfolge {
+                hall: None,
+                anordnung: Some("liste".into()),
+                anzahl: Some(19),
+            },
+        );
         // Zähltafel (ADR 0055): voller Feld-Stand + Umleitung auf die Tafel.
         targets.insert(
             "pi-tafel".to_string(),
@@ -7298,6 +7308,10 @@ mod tests {
         let win = read_state("pi-winners").await;
         assert!(win["redirectTo"].is_null());
         assert_eq!(win["unassigned"], serde_json::json!(true));
+
+        let sf = read_state("pi-spielfolge").await;
+        assert!(sf["redirectTo"].is_null());
+        assert_eq!(sf["unassigned"], serde_json::json!(true));
 
         let tafel = read_state("pi-tafel").await;
         assert_eq!(tafel["redirectTo"], serde_json::json!("/court/5/tafel"));

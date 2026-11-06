@@ -121,7 +121,16 @@ pub struct ServerCtx {
     /// `(Änderungszeit, Größe)` nicht zu erkennen — der Zwischenstand
     /// lieferte die alte Ausrichtung dann unbegrenzt weiter.
     combo_dir_cache: std::sync::Mutex<ComboDirCache>,
+    /// Zuletzt gebauter TL-Zustand für die Spielfolge-Anzeige samt Bauzeit
+    /// (Spec spielfolge-anzeige). Gemeinsam für alle Spielfolge-TVs, damit
+    /// der teure `tl::build_state` höchstens alle
+    /// [`SPIELFOLGE_CACHE_MS`] läuft — unabhängig von der Zahl der Geräte.
+    /// Gebaut wird nur auf Abruf: ohne Spielfolge-TV keine Last.
+    spielfolge_cache: std::sync::Mutex<Option<(u64, Arc<crate::tablet::tl::TlState>)>>,
 }
+
+/// Lebensdauer des Spielfolge-Caches.
+const SPIELFOLGE_CACHE_MS: u64 = 3_000;
 
 /// Das dekodierte Turnierlogo, geschlüsselt nach der Marke seines Inhalts.
 type LogoCache = Option<(String, Arc<Vec<u8>>)>;
@@ -272,6 +281,7 @@ impl ServerCtx {
             bar_cache: std::sync::Mutex::new(None),
             style_cache: std::sync::Mutex::new(None),
             combo_dir_cache: std::sync::Mutex::new(None),
+            spielfolge_cache: std::sync::Mutex::new(None),
             score_push: Arc::new(ScorePushQueue::default()),
         }
     }
@@ -613,6 +623,8 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/ansage/audio/{id}", get(ansage_audio))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
+        .route("/info/spielfolge", get(info_spielfolge_page))
+        .route("/info/spielfolge/state", get(info_spielfolge_state))
         .route("/combo", get(combo_page))
         .route("/combo/state", get(combo_state))
         // Turnierleitungs-Oberfläche. Ohne freigeschaltetes Feature und
@@ -2216,6 +2228,68 @@ async fn combo_page() -> impl IntoResponse {
         [(header::CACHE_CONTROL, "no-store")],
         Html(assets::COMBO_HTML),
     )
+}
+
+/// Spielfolge-Anzeige (Spec spielfolge-anzeige): laufende Spiele plus die
+/// nächsten N der TL-Warteliste. Pollt `/info/spielfolge/state`.
+async fn info_spielfolge_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::SPIELFOLGE_HTML),
+    )
+}
+
+#[derive(serde::Deserialize, Default)]
+struct SpielfolgeQuery {
+    #[serde(default)]
+    device: Option<String>,
+    #[serde(default)]
+    halle: Option<String>,
+    #[serde(default)]
+    anzahl: Option<String>,
+}
+
+/// JSON der Spielfolge-Anzeige. Die Reihenfolge stammt aus demselben
+/// `tl::build_state` wie die TL-Warteliste — keine zweite Sortierlogik.
+async fn info_spielfolge_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<SpielfolgeQuery>,
+) -> impl IntoResponse {
+    if let Some(d) = q.device.as_deref() {
+        if !d.is_empty() && d.len() <= 64 {
+            let _ = ctx.tablet.record_monitor_poll(d);
+        }
+    }
+    let jetzt = monitor::now_ms();
+    let cfg = ctx.app_config_arc();
+    let tl = {
+        // Der Lock bleibt über den Bau gehalten: Fragen zehn TVs zugleich,
+        // baut genau einer, die übrigen bekommen sein Ergebnis.
+        let mut cache = ctx
+            .spielfolge_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match cache.as_ref() {
+            Some((gebaut, st)) if jetzt.saturating_sub(*gebaut) < SPIELFOLGE_CACHE_MS => st.clone(),
+            _ => {
+                let st = Arc::new(crate::tablet::tl::build_state(&ctx.tablet, &cfg, jetzt, 0));
+                *cache = Some((jetzt, st.clone()));
+                st
+            }
+        }
+    };
+    let mut overview = ctx.tablet.overview();
+    crate::hall_colors::paint(&mut overview, &cfg, &ctx.tablet.hall_names());
+    monitor::anzeige_filtern(&mut overview, &cfg.court_monitor);
+    let view = crate::tablet::spielfolge::spielfolge_view(
+        &tl,
+        &overview,
+        &cfg.court_monitor,
+        q.halle.as_deref().unwrap_or(""),
+        crate::tablet::spielfolge::anzahl_aus(q.anzahl.as_deref()),
+        jetzt,
+    );
+    ([(header::CACHE_CONTROL, "no-store")], Json(view))
 }
 
 /// Query der Kombi-Anzeige: `courts=1,2,3` (kommasepariert) plus

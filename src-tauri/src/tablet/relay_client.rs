@@ -429,6 +429,18 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
     Ok(())
 }
 
+/// Entfernt Ziele, die nur der Turnier-PC ausliefert (Spielfolge, Spec
+/// spielfolge-anzeige), vor dem Upload. Ein Relay, das die Variante nicht
+/// kennt, verwürfe sonst den **ganzen** Upload, und alle Cloud-Zuweisungen
+/// frören ein. Im Cloud zeigt ein solches Gerät die Kopplungsseite — genau
+/// das, was der Relay mit der Variante ohnehin täte.
+fn ohne_nur_lan_ziele(
+    mut targets: std::collections::HashMap<String, relay_proto::MonitorTarget>,
+) -> std::collections::HashMap<String, relay_proto::MonitorTarget> {
+    targets.retain(|_, t| !matches!(t, relay_proto::MonitorTarget::InfoSpielfolge { .. }));
+    targets
+}
+
 /// Gleicht die Monitor-Geräte-Steuerung mit dem Relay ab: pusht die
 /// Feld-Zuweisungen + Fernbefehle (nur bei Änderung) und holt die
 /// aktuelle Geräteliste für die „Court-Monitore"-Seite.
@@ -437,7 +449,7 @@ async fn sync_monitor_control(ctx: &ServerCtx, install_id: &str, last_fp: &mut S
     // Sieger, Werbung, Kombi) — so kann der Cloud-Monitor auch Nicht-Court-
     // Sichten umleiten. `assignments` (nur CourtID) bleibt zusätzlich befüllt,
     // damit ein noch nicht aktualisiertes Relay wenigstens die Court-Ziele kennt.
-    let targets = monitor::read_assignments(&ctx.assignments_path);
+    let targets = ohne_nur_lan_ziele(monitor::read_assignments(&ctx.assignments_path));
     let assignments: std::collections::HashMap<String, i64> = targets
         .iter()
         .filter_map(|(k, t)| t.court_id().map(|c| (k.clone(), c)))
@@ -1349,6 +1361,24 @@ fn text<T: serde::Serialize>(value: &T) -> WsMessage {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn spielfolge_ziel_reist_nicht_zum_relay() {
+        let mut t = std::collections::HashMap::new();
+        t.insert("a".to_string(), relay_proto::MonitorTarget::court(1));
+        t.insert(
+            "b".to_string(),
+            relay_proto::MonitorTarget::InfoSpielfolge {
+                hall: None,
+                anordnung: None,
+                anzahl: None,
+            },
+        );
+        let rest = super::ohne_nur_lan_ziele(t);
+        assert_eq!(rest.len(), 1);
+        assert!(rest.contains_key("a"));
+    }
+
     #[test]
     fn share_traegt_nur_die_zugangsdaten_des_gewaehlten_dienstes() {
         let mut az = crate::config::AzureTtsConfig {
