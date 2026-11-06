@@ -544,6 +544,12 @@ keinen messbaren Akku. Liefert die Brücke beim Start nichts, steht einmalig
 speist aus **einer** Quelle sowohl die Kopfzeile als auch den
 `battery`-Frame an den Host.
 
+Findet die Kiosk-App keinen Turnier-PC, gibt es keine Seite — dann zeigt die
+**Wartekarte** der App den Akkustand selbst, mit denselben Zeichen und
+Schwellen (seit v0.9.343, `kern/AkkuAnzeige.kt`, Drift-Test
+`scripts/test-kiosk-akku.mjs`; Spec
+[features/kiosk-akku-und-ausgang.md](features/kiosk-akku-und-ausgang.md)).
+
 ## Meldungen an die Turnierleitung
 
 In der Kopfzeile rechts gibt es zwei Melde-Buttons:

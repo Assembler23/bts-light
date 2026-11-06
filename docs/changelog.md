@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.343
+
+- **Tablet-App: Akku ohne Turnier-PC.** Findet die Kiosk-App keinen
+  Turnier-PC (etwa zu Hause nach dem Turnier), zeigt die Wartekarte rechts
+  oben den Akkustand.
+- **Tablet-App: einfacher raus.** Das versteckte Menü öffnet jetzt auch mit
+  **drei Fingern, zwei Sekunden irgendwo gehalten** (danach die Kiosk-PIN) —
+  die Ecke links oben war auf der Zählseite oft belegt. Der Menüpunkt heißt
+  jetzt „Kiosk verlassen und App schließen".
+
 ## v0.9.342
 
 - **Turnierleitung (Web): „Zuletzt gespielt".** Neues Häkchen im Profil

@@ -62,4 +62,16 @@
             android:textSize="13sp"
             android:visibility="gone" />
     </LinearLayout>
+
+    <!-- Akkustand auf der Wartekarte (Spec kiosk-akku-und-ausgang): Ohne
+         Turnier-PC gibt es keine Seite, die ihn zeigt, und die Statusleiste
+         blendet der Kiosk aus. Sichtbar nur zusammen mit der Wartekarte. -->
+    <TextView
+        android:id="@+id/wartekarte_akku"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="20dp"
+        android:textColor="#9CA3AF"
+        android:textSize="18sp" />
 </FrameLayout>
