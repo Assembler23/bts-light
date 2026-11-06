@@ -215,7 +215,7 @@ ok("Rumpf-Budget ist großzügiger als die Kopf-Frist", RUMPF_FRIST_MS > KOPF_FR
   const { dirname, join } = await import("node:path");
   const assets = join(dirname(fileURLToPath(import.meta.url)), "..", "src-tauri", "assets");
   const seiten = ["monitor.html", "overview.html", "tafel.html", "combo.html", "winners.html",
-    "preparation.html", "lobby.html", "ad.html", "tl.html"];
+    "preparation.html", "lobby.html", "ad.html", "tl.html", "spielfolge.html"];
   // Einrückung der ersten Zeile von allen Zeilen abziehen (tl.html ist ein
   // Modul-Skript ohne umschließende Funktion, dort liegt alles zwei Stufen
   // weiter links), Anführungszeichen vereinheitlichen.

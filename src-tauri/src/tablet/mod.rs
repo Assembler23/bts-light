@@ -25,6 +25,7 @@ pub mod scoresheet;
 pub mod server;
 pub mod sheet;
 pub mod slave_bridge;
+pub mod spielfolge;
 pub mod state;
 pub mod timeline;
 pub mod tl;

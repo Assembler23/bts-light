@@ -56,6 +56,9 @@ import type {
 //   "ad_single:<dateiname>"  → MonitorTarget::AdSingle { file }
 //   "combo:1,2,3"            → MonitorTarget::CourtCombo { court_ids }
 //   "__combo_edit__"         → öffnet den Kombi-Dialog (kein echtes Target)
+//   "info_spielfolge"        → MonitorTarget::InfoSpielfolge (alle Hallen)
+//   "info_spielfolge:<halle>"→ InfoSpielfolge, fest auf eine Halle
+//                              (Anordnung/Anzahl: eigene Felder daneben)
 
 function targetToValue(t: MonitorTarget | null): string {
   if (!t) return "";
@@ -65,6 +68,7 @@ function targetToValue(t: MonitorTarget | null): string {
   if (t.kind === "info_winners" && t.rank) return `info_winners:${t.rank}`;
   if (t.kind === "ad_single") return `ad_single:${t.file}`;
   if (t.kind === "court_combo") return `combo:${t.court_ids.join(",")}`;
+  if (t.kind === "info_spielfolge" && t.hall) return `info_spielfolge:${t.hall}`;
   return t.kind;
 }
 
@@ -76,6 +80,11 @@ function valueToTarget(v: string): MonitorTarget | null {
     if (hall.length > 0) return { kind: "info_overview", hall };
   }
   if (v === "info_preparation") return { kind: "info_preparation" };
+  if (v === "info_spielfolge") return { kind: "info_spielfolge" };
+  if (v.startsWith("info_spielfolge:")) {
+    const hall = v.slice("info_spielfolge:".length);
+    if (hall.length > 0) return { kind: "info_spielfolge", hall };
+  }
   if (v === "info_winners") return { kind: "info_winners" };
   if (v.startsWith("info_winners:")) {
     const rank = Number(v.slice("info_winners:".length));
@@ -104,6 +113,15 @@ function valueToTarget(v: string): MonitorTarget | null {
   }
   return null;
 }
+
+// ─── Spielfolge-Anzeige (Spec spielfolge-anzeige) ────────────────────────
+const SPIELFOLGE_ANZAHL_STANDARD = 19;
+const SPIELFOLGE_ANZAHL_MAX = 60;
+const SPIELFOLGE_ANORDNUNGEN: { wert: string; text: string }[] = [
+  { wert: "oben", text: "Laufende oben, Warteliste darunter" },
+  { wert: "spalten", text: "Zwei Spalten" },
+  { wert: "liste", text: "Eine durchgehende Liste" },
+];
 
 // ─── Monitor-Stile (ADR 0068) ────────────────────────────────────────────
 // Beschriftungen stehen im Handbuch (docs/court-monitor.md, pruef-Anker).
@@ -699,7 +717,43 @@ function DeviceRow({
     // Ein Feldwechsel behält den Stil (ADR 0068); jedes andere Ziel kennt
     // keinen. Würde `valueToTarget` allein entscheiden, fiele der Stil bei
     // jedem Feldwechsel still auf Standard zurück (Falle aus ADR 0049).
-    onAssign(zielMitStil(valueToTarget(value), aktuellerStil));
+    const ziel = valueToTarget(value);
+    // Hallenwechsel einer Spielfolge behält Anordnung und Anzahl.
+    if (ziel?.kind === "info_spielfolge" && device.target?.kind === "info_spielfolge") {
+      onAssign({
+        ...ziel,
+        anordnung: device.target.anordnung ?? null,
+        anzahl: device.target.anzahl ?? null,
+      });
+      return;
+    }
+    onAssign(zielMitStil(ziel, aktuellerStil));
+  }
+
+  // Spielfolge-Einstellungen (Spec spielfolge-anzeige): reisen im Ziel mit.
+  const spielfolge = device.target?.kind === "info_spielfolge" ? device.target : null;
+  const [anzahlEingabe, setAnzahlEingabe] = useState<string>(
+    String(spielfolge?.anzahl ?? SPIELFOLGE_ANZAHL_STANDARD),
+  );
+  useEffect(() => {
+    setAnzahlEingabe(String(spielfolge?.anzahl ?? SPIELFOLGE_ANZAHL_STANDARD));
+  }, [spielfolge?.anzahl]);
+  function setzeSpielfolge(aenderung: { anordnung?: string; anzahl?: number }) {
+    if (!spielfolge) return;
+    onAssign({ ...spielfolge, ...aenderung });
+  }
+  function anzahlUebernehmen() {
+    if (!spielfolge) return;
+    const n = Math.round(Number(anzahlEingabe));
+    if (!Number.isFinite(n)) {
+      setAnzahlEingabe(String(spielfolge.anzahl ?? SPIELFOLGE_ANZAHL_STANDARD));
+      return;
+    }
+    const geklemmt = Math.min(SPIELFOLGE_ANZAHL_MAX, Math.max(1, n));
+    setAnzahlEingabe(String(geklemmt));
+    if (geklemmt !== (spielfolge.anzahl ?? SPIELFOLGE_ANZAHL_STANDARD)) {
+      setzeSpielfolge({ anzahl: geklemmt });
+    }
   }
 
   // Darstellung des Feld-Monitors — eigenes Auswahlfeld, nicht Teil des
@@ -807,6 +861,19 @@ function DeviceRow({
           <option value="info_winners:2">Siegerehrung – nur Platz 2</option>
           <option value="info_winners:3">Siegerehrung – nur Platz 3</option>
         </optgroup>
+        {/* Spielfolge: laufende + kommende Spiele (nur LAN — im Cloud zeigt
+            das Gerät die Kopplungsseite). */}
+        <optgroup label="Spielfolge (nur LAN)">
+          <option value="info_spielfolge">
+            {grouped ? "Spielfolge – alle Hallen" : "Spielfolge"}
+          </option>
+          {grouped &&
+            hallNames.map((hall) => (
+              <option key={`sf:${hall}`} value={`info_spielfolge:${hall}`}>
+                Spielfolge – {hall}
+              </option>
+            ))}
+        </optgroup>
         {/* Werbe-Anzeige: rotierend oder Einzelbild. Wenn keine Werbe-
             bilder hinterlegt sind, ist die Gruppe deaktiviert (das HTML
             erlaubt `disabled` auf optgroup). Eine bereits zugewiesene
@@ -880,6 +947,42 @@ function DeviceRow({
             ))}
           </select>
         </label>
+      )}
+
+      {spielfolge && (
+        <>
+          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+            Anordnung
+            <select
+              value={spielfolge.anordnung ?? "oben"}
+              onChange={(e) => setzeSpielfolge({ anordnung: e.currentTarget.value })}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm
+                         focus:border-slate-500 focus:outline-none"
+            >
+              {SPIELFOLGE_ANORDNUNGEN.map((o) => (
+                <option key={o.wert} value={o.wert}>
+                  {o.text}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+            Kommende Spiele
+            <input
+              type="number"
+              min={1}
+              max={SPIELFOLGE_ANZAHL_MAX}
+              value={anzahlEingabe}
+              onChange={(e) => setAnzahlEingabe(e.currentTarget.value)}
+              onBlur={anzahlUebernehmen}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") anzahlUebernehmen();
+              }}
+              className="w-20 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm
+                         focus:border-slate-500 focus:outline-none"
+            />
+          </label>
+        </>
       )}
 
       {/* Explizite Halle (nur Mehr-Hallen-Turnier): überschreibt die aus dem

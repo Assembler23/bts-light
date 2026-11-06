@@ -500,6 +500,21 @@ pub enum MonitorTarget {
         #[serde(rename = "court_id")]
         court_id: i64,
     },
+    /// Spielfolge-Anzeige (`/info/spielfolge`, Spec spielfolge-anzeige):
+    /// laufende Spiele plus die nächsten N der Warteliste. **Nur LAN** — der
+    /// Relay kennt die Variante nur, damit er den Zuweisungs-Upload nicht
+    /// verwirft, und zeigt dem Gerät die Kopplungsseite. Anordnung und
+    /// Anzahl reisen in der URL (Felder bei `None` weggelassen).
+    InfoSpielfolge {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hall: Option<String>,
+        /// `oben` (Standard) · `spalten` · `liste`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        anordnung: Option<String>,
+        /// Kommende Spiele, 1–60; `None` = Standard 19.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        anzahl: Option<u16>,
+    },
 }
 
 impl MonitorTarget {
@@ -576,6 +591,27 @@ impl MonitorTarget {
                 Some(format!("/info/ad?mode=single&file={}", url_encode(file)))
             }
             Self::CourtTafel { court_id } => Some(format!("/court/{court_id}/tafel")),
+            Self::InfoSpielfolge {
+                hall,
+                anordnung,
+                anzahl,
+            } => {
+                let mut teile: Vec<String> = Vec::new();
+                if let Some(h) = hall.as_deref().filter(|h| !h.trim().is_empty()) {
+                    teile.push(format!("halle={}", url_encode(h)));
+                }
+                if let Some(a) = anordnung.as_deref().filter(|a| !a.trim().is_empty()) {
+                    teile.push(format!("anordnung={}", url_encode(a)));
+                }
+                if let Some(n) = anzahl {
+                    teile.push(format!("anzahl={n}"));
+                }
+                Some(if teile.is_empty() {
+                    "/info/spielfolge".to_string()
+                } else {
+                    format!("/info/spielfolge?{}", teile.join("&"))
+                })
+            }
             Self::CourtCombo { court_ids } => {
                 // CourtIDs als kommaseparierte Query (?courts=1,2,3).
                 let csv = court_ids
@@ -599,6 +635,7 @@ impl MonitorTarget {
             Self::AdSingle { .. } => "ad_single",
             Self::CourtTafel { .. } => "court_tafel",
             Self::CourtCombo { .. } => "court_combo",
+            Self::InfoSpielfolge { .. } => "info_spielfolge",
         }
     }
 }
@@ -6079,6 +6116,34 @@ mod tests {
         // Alte Formen bleiben lesbar (keine Änderung am Tag-Schema).
         let alt: MonitorTarget = serde_json::from_str(r#"{"kind":"court","court_id":5}"#).unwrap();
         assert_eq!(alt, MonitorTarget::court(5));
+    }
+
+    #[test]
+    fn info_spielfolge_serde_und_umleitung() {
+        let leer = MonitorTarget::InfoSpielfolge {
+            hall: None,
+            anordnung: None,
+            anzahl: None,
+        };
+        let json = serde_json::to_string(&leer).unwrap();
+        assert_eq!(json, r#"{"kind":"info_spielfolge"}"#);
+        assert_eq!(serde_json::from_str::<MonitorTarget>(&json).unwrap(), leer);
+        assert_eq!(leer.redirect_path().as_deref(), Some("/info/spielfolge"));
+        assert_eq!(leer.kind_str(), "info_spielfolge");
+        assert_eq!(leer.court_id(), None);
+
+        let voll = MonitorTarget::InfoSpielfolge {
+            hall: Some("Halle 2".into()),
+            anordnung: Some("spalten".into()),
+            anzahl: Some(25),
+        };
+        let back: MonitorTarget =
+            serde_json::from_str(&serde_json::to_string(&voll).unwrap()).unwrap();
+        assert_eq!(back, voll);
+        assert_eq!(
+            voll.redirect_path().as_deref(),
+            Some("/info/spielfolge?halle=Halle%202&anordnung=spalten&anzahl=25")
+        );
     }
 
     #[test]
