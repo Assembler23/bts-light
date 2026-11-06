@@ -485,6 +485,16 @@ impl PlayerAvailability {
         Self { busy, free_at }
     }
 
+    /// Steht dieser Spieler gerade in einem ANDEREN Spiel als `match_id` auf
+    /// dem Feld? Dieselbe Auskunft, die [`Self::blocked`] als
+    /// `Blocked::Playing` meldet — einzeln abfragbar für die Anzeige
+    /// „zuletzt gespielt" (Spec `tl-zuletzt-gespielt`).
+    pub fn on_court_elsewhere(&self, p: &BtpPlayer, match_id: i64) -> bool {
+        self.busy
+            .get(&player_key(p))
+            .is_some_and(|&in_match| in_match != match_id)
+    }
+
     /// Steht diesem Spiel gerade jemand im Weg? `None` = spielbereit.
     ///
     /// „Spielt gerade" schlägt „pausiert": Wer auf dem Feld steht, ist auch

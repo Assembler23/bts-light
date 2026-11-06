@@ -704,7 +704,10 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   Längen (`MAX_TL_PROFILE_PANELS`, `MAX_TL_PROFILE_COLUMN_WIDTHS`), damit
   ein einzelner Aufruf den `TlState` nicht über `MAX_TL_STATE_LEN` treiben
   kann (R4). Seit Spec `spielzeiten-prognose` Etappe D trägt
-  `TlDisplaySettingsWire` zusätzlich `showCourtRemaining`
+  `TlDisplaySettingsWire` zusätzlich `showCourtRemaining` (seit v0.9.342
+  außerdem `showLastPlayed`, Spec `tl-zuletzt-gespielt`, `#[serde(default)]`
+  = aus; das Anzeigedatum reist als `TlMatch.team1_last_played_ms`/
+  `team2_last_played_ms` im opaken `TlState`-JSON)
   (`#[serde(default)]` — alte Browser-Profile ohne das Feld lesen sich als
   „aus"); das zugehörige Anzeigedatum reist als `TlCourt.remaining_min`
   im opaken `TlState`-JSON mit (Serde-Default, alte Gegenstellen

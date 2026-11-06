@@ -192,6 +192,12 @@ jobs:
       - name: Offene Paarungen mischen und beschriften (JS)
         run: node scripts/test-offene-spiele.mjs
 
+      # Text der Marke „zuletzt gespielt" und Gleichlauf der Inline-Kopie in
+      # tl.html. Eine falsche Dauer verleitet die Turnierleitung, eine
+      # Paarung ohne Pause aufzurufen.
+      - name: Zuletzt gespielt (JS)
+        run: node scripts/test-zuletzt-gespielt.mjs
+
       # Was links und rechts auf der Zähltafel steht. Falsche Seite oder ein
       # gezählter Geistersatz zeigt Spielern und Zuschauern am Feld einen
       # falschen Stand — und niemand merkt es, weil keine Namen dabeistehen.

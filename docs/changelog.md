@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.342
+
+- **Turnierleitung (Web): „Zuletzt gespielt".** Neues Häkchen im Profil
+  „Zuletzt gespielt zeigen": An jeder Seite einer wartenden oder gerufenen
+  Paarung steht dann, wie lange ihr letztes Spiel her ist („vor 42 min") —
+  unabhängig von der Pflichtpause. Walkover zählen nicht. Standard: aus.
+
 ## v0.9.341
 
 - **Neue Hallen-Anzeige „Spielfolge".** Ein TV zeigt alle laufenden Spiele und
