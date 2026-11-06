@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.340
+
+- **Werbebilder füllen den Monitor.** Im Leerlauf eines Court-Monitors wird
+  jedes Werbebild jetzt immer bis an den Rand aufgezogen — volle Breite oder
+  volle Höhe, je nach Seitenverhältnis. Bisher blieben kleine Bilder in
+  ihrer Originalgröße klein in der Mitte stehen. Mit „Feld zeigen" bleibt
+  der Rand für die Feldbezeichnung wie gewohnt frei.
+
 ## v0.9.339
 
 - **Neue Liveticker-Kachel: DBV-Gruppe Nord.** In den Einstellungen steht
