@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.346
+
+- **Meetingpoint: Reihenfolge wie auf dem Feld.** Die Meetingpoint-Seite
+  sortiert die gerufenen Partien jetzt so, wie sie aufs Feld kommen — nach der
+  Spielliste samt Umsortierung im TL-Web. Bisher stand der älteste Aufruf
+  oben; vergeben wurde aber nach der Spielliste. Eine Partie, die die
+  Aufruf-Automatik übersprungen und später nachgeholt hatte, stand deshalb
+  unten, kam aber vor allen anderen aufs Feld. In der Cloud wirkt die
+  Änderung, sobald der Relay und die App aktualisiert sind.
+
 ## v0.9.345
 
 - **Meetingpoint: „Feld frei in ca. 6 min".** Jede gerufene Partie zeigt auf

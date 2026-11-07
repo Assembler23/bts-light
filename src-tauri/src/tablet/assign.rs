@@ -176,20 +176,25 @@ pub fn resolve_and_sort_key(
     order: &QueueOrderStore,
 ) -> (String, HallSource, ManualOrderSortKey) {
     let (hall, source) = hall_for_match(config, snap, m, manual_hall, called_hall, auto_hall);
-    // Der Rang kommt aus EINER globalen Reihenfolge (ADR 0026) — die Halle
-    // wird hier nur noch aufgelöst, weil die Aufrufer sie für die Anzeige
-    // brauchen, nicht mehr für den Nachschlag.
-    let rank = order.rank(m.id);
-    let key = sort_key_with_manual_order(
+    // Die Halle wird hier nur noch aufgelöst, weil die Aufrufer sie für die
+    // Anzeige brauchen — für den Schlüssel spielt sie keine Rolle (ADR 0026).
+    (hall, source, sort_key_for(m, called, order))
+}
+
+/// Der Ordnungsschlüssel eines Spiels **ohne** Hallen-Auflösung — für
+/// Stellen, die nur sortieren müssen (Meetingpoint-Seite). Derselbe Schlüssel
+/// wie in [`resolve_and_sort_key`], damit die Anzeige nie von der Vergabe
+/// abweicht. Der Rang kommt aus EINER globalen Reihenfolge (ADR 0026).
+pub fn sort_key_for(m: &BtpMatch, called: bool, order: &QueueOrderStore) -> ManualOrderSortKey {
+    sort_key_with_manual_order(
         called,
-        rank,
+        order.rank(m.id),
         m.planned_time,
         m.display_order,
         Some(m.draw_id),
         m.match_num,
         m.id,
-    );
-    (hall, source, key)
+    )
 }
 
 /// Die aktuelle, vollständig sortierte Match-ID-Liste des Turniers —

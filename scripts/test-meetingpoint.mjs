@@ -22,9 +22,6 @@ ok("Halle aus Query", mp.mpHalleAusQuery("?halle=Halle%20A"), "Halle A");
 ok("Halle mit Plus", mp.mpHalleAusQuery("?x=1&halle=Halle+B"), "Halle B");
 ok("keine Halle", mp.mpHalleAusQuery("?x=1"), "");
 ok("kaputte Kodierung → leer", mp.mpHalleAusQuery("?halle=%E0%A4%A"), "");
-ok("Sortierung nach Aufruf, dann ID",
-  mp.mpSortiert([{ matchId: 3, calledAtMs: 20 }, { matchId: 2, calledAtMs: 10 }, { matchId: 1, calledAtMs: 20 }]).map((p) => p.matchId),
-  [2, 1, 3]);
 const partie = { matchId: 7, plaetze: [P(1, 0, "Anna", true), P(1, 1, "Bea", false), P(2, 0, "Cem", true), SR("Dora", false)] };
 const g = mp.mpGruppen(partie);
 ok("Gruppen Seite 1", g.team1.map((p) => p.name), ["Anna", "Bea"]);
@@ -48,6 +45,10 @@ ok("Feld frei: volle Stunde", mp.mpFeldFrei(J + 120 * 60000, true, J), "Feld fre
 // ── Inline-Kopie ─────────────────────────────────────────────────────────
 const hier = dirname(fileURLToPath(import.meta.url));
 const seite = readFileSync(join(hier, "../src-tauri/assets/meetingpoint.html"), "utf8");
+// Die Reihenfolge der Partien ist die Vergabe-Reihenfolge des Hosts — die
+// Seite darf sie nicht nach Aufrufzeit umstellen (sonst stand oben, wer am
+// längsten wartet, nicht wer als Nächstes aufs Feld kommt).
+ok("Seite sortiert die Partien nicht selbst", /\.sort\(/.test(seite), false);
 function funktion(text, name) {
   const start = text.indexOf("function " + name + "(");
   if (start < 0) return null;
@@ -58,14 +59,13 @@ function funktion(text, name) {
   }
   return null;
 }
-const NAMEN = ["mpHalleAusQuery", "mpSortiert", "mpGruppen", "mpZaehler", "mpCheckinBody", "mpUhrzeit", "mpFeldFrei"];
+const NAMEN = ["mpHalleAusQuery", "mpGruppen", "mpZaehler", "mpCheckinBody", "mpUhrzeit", "mpFeldFrei"];
 const quellen = NAMEN.map((n) => funktion(seite, n));
 ok("alle Funktionen in der Seite", quellen.map((q) => q !== null), NAMEN.map(() => true));
 // eslint-disable-next-line no-new-func
 const kopie = new Function(quellen.join("\n") + "\nreturn {" + NAMEN.join(",") + "};")();
 const FAELLE = {
   mpHalleAusQuery: [["?halle=Halle%20A"], ["?x=1&halle=B+C"], [""], ["?halle=%E0%A4%A"]],
-  mpSortiert: [[[{ matchId: 3, calledAtMs: 20 }, { matchId: 2, calledAtMs: 10 }, { matchId: 1, calledAtMs: 20 }]], [null]],
   mpGruppen: [[partie], [null], [{ plaetze: [SR("Z", true)] }]],
   mpZaehler: [[partie], [{}], [{ ...partie, srNoetig: true }]],
   mpCheckinBody: [["A", 1, { art: "sr" }, true], [null, 2, { art: "spieler", seite: 1, pos: 0 }, 0]],
