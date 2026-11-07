@@ -332,6 +332,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   denkbar: Einfärbung nach Schwelle; Altbestand bei Einrichtung mitten im
   Turniertag nicht als „gerade eben" zeigen.
 
+- **Reihenfolge der gerufenen Partien** (Meetingpoint / In Vorbereitung) —
+  Spec: [features/meetingpoint-reihenfolge.md](features/meetingpoint-reihenfolge.md)
+  (freigegeben 07.11.2026), ADR 0077 — wer zuerst gerufen ist, kommt zuerst
+  aufs Feld; Gerufene im TL-Web und am Desktop umsortierbar.
+
 - **Spielfolge-Anzeige** (laufende + kommende Spiele, Laufband) — Spec:
   [features/spielfolge-anzeige.md](features/spielfolge-anzeige.md), ADR 0076 —
   **v0.9.341, Feldtest offen.** Nachzuholen: Ansage-Modus, Cloud-Etappe,

@@ -277,6 +277,7 @@ mod tests {
             pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             official1_id: None,
             official2_id: None,
             scoring: ScoringFormat {

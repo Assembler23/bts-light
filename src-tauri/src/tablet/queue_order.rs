@@ -181,6 +181,22 @@ impl QueueOrderStore {
         self.persist();
     }
 
+    /// Ein Spiel aus dem Präfix nehmen (beim Vorbereitungs-Aufruf, ADR 0077:
+    /// unter Gerufenen zählt nur noch der Aufruf-Rang). Liefert `true`, wenn
+    /// es drinstand.
+    pub fn remove(&self, match_id: i64) -> bool {
+        let changed = {
+            let mut inner = self.inner.lock().unwrap();
+            let before = inner.file.queue.len();
+            inner.file.queue.retain(|id| *id != match_id);
+            inner.file.queue.len() != before
+        };
+        if changed {
+            self.persist();
+        }
+        changed
+    }
+
     /// Alle Match-IDs entfernen, die nicht mehr im `keep`-Set stehen
     /// (Aufräumen bei Zuweisung/Spielende/Verschwinden, aus
     /// `sync.rs::reconcile_queue_order`; Muster `exclusion.rs::retain`).

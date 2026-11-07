@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.347
+
+- **Wer zuerst gerufen ist, kommt zuerst aufs Feld.** Gerufene Spiele („In
+  Vorbereitung" bzw. zum Meetingpoint) gehen jetzt in der Reihenfolge ihres
+  Aufrufs aufs Feld, nicht mehr nach der Spielliste. Ein später nachgeholtes
+  Spiel drängelt sich nicht mehr vor die Wartenden. Das gilt auch ohne
+  Meetingpoint. Ein Spiel, das in der Warteliste nach oben gezogen wurde, wird
+  als Nächstes gerufen und stellt sich dann hinten an. Kann die erste Gerufene
+  gerade nicht aufs Feld (Spieler noch auf dem Feld, im strikten Modus nicht
+  vollständig), kommt die nächste dran.
+- **Gerufene umsortieren:** im TL-Web am Griff oder über das ⋮-Menü
+  („An den Anfang der Gerufenen", „Eine Position nach oben/unten"), in der
+  Desktop-App im Block „In Vorbereitung" (Griff und Pfeile). Im
+  Mehr-Hallen-Turnier jeweils innerhalb der Aufruf-Halle.
+- **Meetingpoint: „Aufgerufen – Feld 3".** Kommt eine Partie aufs Feld, bleibt
+  ihre Karte noch 2 Minuten gelb oben stehen und nennt das Feld.
+- Ein einzelner Abruf, in dem BTP eine Paarung leer meldet, kostet einen Aufruf
+  nicht mehr seinen Platz. Gelöscht wird erst nach drei Abrufen.
+- Beim ersten Start nach dem Update werden schon gerufene Spiele einmal so
+  geordnet, wie sie bisher vergeben worden wären. So springt mitten im
+  Turnier nichts.
+
 ## v0.9.346
 
 - **Meetingpoint: Reihenfolge wie auf dem Feld.** Die Meetingpoint-Seite

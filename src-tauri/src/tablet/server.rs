@@ -2416,7 +2416,7 @@ async fn info_preparation_state(
                 manual_hall,
                 called_hall,
                 auto_halls.get(&m.id).map(String::as_str),
-                call.is_some(),
+                calls.iter().position(|c| c.match_id == m.id),
                 ctx.tablet.queue_order_store(),
             );
             (key, m, hall)
@@ -4664,6 +4664,7 @@ mod tests {
             pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             official1_id: None,
             official2_id: None,
             scoring: ScoringFormat::default(),

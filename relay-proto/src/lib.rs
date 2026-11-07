@@ -2060,6 +2060,22 @@ pub enum TlAction {
     /// bewusst ohne Teil-Reset, weder je Halle noch je Spiel (Nicht-Ziel
     /// der Spec).
     QueueOrderReset,
+    /// Ein **gerufenes** Spiel in der Aufruf-Reihenfolge vor ein anderes
+    /// gerufenes Spiel derselben Aufruf-Halle ziehen (Spec
+    /// `meetingpoint-reihenfolge`, ADR 0077); `before_match_id = None` heißt
+    /// „ans Ende der Gerufenen". Die Reihenfolge bestimmt, wer zuerst aufs
+    /// Feld kommt. Fehler (nicht gerufen, andere Halle) werden gemeldet,
+    /// nie still verworfen.
+    CalledReorder {
+        #[serde(rename = "matchId")]
+        match_id: i64,
+        #[serde(
+            rename = "beforeMatchId",
+            skip_serializing_if = "Option::is_none",
+            default
+        )]
+        before_match_id: Option<i64>,
+    },
     /// Automatische Hallen-Vorverteilung schalten (Spec
     /// `hallen-vorverteilung`, ADR 0029/0030). Schalter und Fenstergröße
     /// reisen **atomar** — die Seite kennt beim Umschalten das aktuelle x,
@@ -2545,7 +2561,7 @@ pub struct MpPlatzView {
 }
 
 /// Eine gerufene Partie auf der Meetingpoint-Seite.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct MpPartie {
     #[serde(rename = "matchId")]
     pub match_id: i64,
@@ -2587,7 +2603,22 @@ pub struct MpPartie {
         skip_serializing_if = "std::ops::Not::not"
     )]
     pub feld_frei_unsicher: bool,
+    /// Die Partie ist gerade aus dem Meetingpoint aufs Feld gekommen: Name
+    /// des Felds (BTP-Schreibweise, z. B. „3"). Die Karte bleibt dann noch
+    /// [`MP_AUFGERUFEN_ANZEIGE_MS`] stehen und sagt, wohin es geht (Spec
+    /// `meetingpoint-reihenfolge`, Nachtrag 07.11.2026). `None` = wartet noch.
+    #[serde(
+        rename = "aufgerufenFeld",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub aufgerufen_feld: Option<String>,
 }
+
+/// So lange bleibt eine aufs Feld gerufene Partie auf der Meetingpoint-Seite
+/// stehen (mit „Aufgerufen – Feld N"), damit, wer gerade nicht hinsah, es
+/// noch mitbekommt.
+pub const MP_AUFGERUFEN_ANZEIGE_MS: u64 = 120_000;
 
 /// Zustand der Meetingpoint-Seite (`/meetingpoint/state`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -4919,6 +4950,14 @@ mod tests {
                 before_match_id: Some(4712),
             },
             TlAction::QueueOrderReset,
+            TlAction::CalledReorder {
+                match_id: 4711,
+                before_match_id: Some(4712),
+            },
+            TlAction::CalledReorder {
+                match_id: 4711,
+                before_match_id: None,
+            },
             TlAction::SetHallPrefill {
                 enabled: true,
                 window: 18,
@@ -6600,6 +6639,7 @@ mod meetingpoint_tests {
             sr_noetig: false,
             feld_frei_ms: None,
             feld_frei_unsicher: false,
+            aufgerufen_feld: None,
         };
         let eins = MeetingpointView {
             enabled: true,

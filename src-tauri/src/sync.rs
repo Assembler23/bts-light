@@ -1253,7 +1253,7 @@ impl SyncEngine {
                     manual_halls.get(&m.id).map(String::as_str),
                     called_hall,
                     auto_halls.get(&m.id).map(String::as_str),
-                    call.is_some(),
+                    calls.iter().position(|c| c.match_id == m.id),
                     tablet.queue_order_store(),
                 );
                 (key, m.id, (!hall.is_empty()).then_some(hall))
@@ -1295,10 +1295,18 @@ impl SyncEngine {
         // Rang wieder weg, und das Umsortieren nähme sich vor den Augen der
         // Turnierleitung selbst zurück. Der Lebenszyklus bleibt sonst
         // unverändert: Wer aufs Feld geht oder beendet wird, fällt heraus.
+        // Gerufene fallen ebenfalls heraus (ADR 0077): Unter ihnen zählt nur
+        // der Aufruf-Rang. Der Aufruf nimmt sie schon selbst heraus; das hier
+        // ist das Netz für Altbestände (nach der einmaligen Ordnung).
+        let gerufen: HashSet<i64> = tablet
+            .preparation_calls()
+            .iter()
+            .map(|c| c.match_id)
+            .collect();
         let keep: HashSet<i64> = snapshot
             .matches
             .iter()
-            .filter(|m| m.status == MatchStatus::Scheduled)
+            .filter(|m| m.status == MatchStatus::Scheduled && !gerufen.contains(&m.id))
             .map(|m| m.id)
             .collect();
         tablet.queue_order_store().retain(&keep);
@@ -2021,7 +2029,7 @@ impl SyncEngine {
                     manual_hall,
                     called_hall,
                     auto_halls.get(&m.id).map(String::as_str),
-                    call.is_some(),
+                    calls.iter().position(|c| c.match_id == m.id),
                     tablet.queue_order_store(),
                 );
                 (m.id, (hall, source, key))
@@ -2396,9 +2404,7 @@ impl SyncEngine {
         // Vorbereitungs-Aufrufe ebenso VOR `auto_assign` binden (ADR 0071):
         // Sonst sähe die Vergabe im ersten Poll nach dem Start noch keinen
         // der gespeicherten Aufrufe, beim Turnierwechsel die alten.
-        tablet
-            .meetingpoint_store()
-            .set_tournament(&snapshot.tournament_name);
+        tablet.binde_meetingpoint(&snapshot);
         self.reconcile_wish_courts(tablet, &snapshot);
         // Warnung „Spiel scheint fertig, aber kein Ergebnis" (Spec
         // `tl-warnung-fertiges-spiel`): einmal je Poll gegen den Live-Stand
@@ -2469,7 +2475,7 @@ impl SyncEngine {
         for (match_id, location_id) in
             crate::tablet::meetingpoint::auto_aufrufe(tablet, &snapshot, config, now_ms())
         {
-            tablet.meetingpoint_store().call_mit(
+            tablet.add_preparation_call_mit(
                 crate::tablet::state::PreparationCall {
                     match_id,
                     location_id,
@@ -3051,6 +3057,7 @@ mod tests {
                 pause_ms: None,
                 preparation_call_ts: None,
                 preparation_hall: None,
+                preparation_call_rank: None,
                 official1_id: None,
                 official2_id: None,
                 scoring: crate::btp::model::ScoringFormat::default(),
@@ -3167,6 +3174,7 @@ mod tests {
             pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
@@ -4616,6 +4624,98 @@ mod tests {
         assert_eq!(player_key(&p), "müller");
         p.member_id = Some("  08-001234 ".to_string());
         assert_eq!(player_key(&p), "08-001234");
+    }
+
+    #[test]
+    fn auto_assign_vergibt_gerufene_in_aufrufreihenfolge() {
+        // ADR 0077: 8 ist früher angesetzt und steht im Präfix vorn, wurde
+        // aber NACH 7 gerufen — das Feld bekommt 7.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, Some(202506141400), "A", "B"),
+                ready_named(8, Some(202506141000), "C", "D"),
+            ],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        let ruf = |id| crate::tablet::state::PreparationCall {
+            match_id: id,
+            location_id: None,
+            called_at_ms: 1,
+        };
+        tablet.add_preparation_call(ruf(7));
+        tablet.add_preparation_call(ruf(8));
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts[0].match_id, Some(7));
+    }
+
+    #[test]
+    fn eine_blockierte_erste_gerufene_bleibt_vorn_die_zweite_spielt() {
+        // Regel 6: 7s Spieler A steht auf Feld 2 → 8 bekommt Feld 1; 7 bleibt
+        // auf Rang 0 und ist beim nächsten Feld dran.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, None), court(2, None)],
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+                oncourt_named(9, 2, "A", "X"),
+            ],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        for id in [7, 8] {
+            tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+                match_id: id,
+                location_id: None,
+                called_at_ms: 1,
+            });
+        }
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(8));
+        assert_eq!(tablet.preparation_calls()[0].match_id, 7, "7 bleibt vorn");
+    }
+
+    #[test]
+    fn ein_zug_in_der_warteliste_aendert_die_gerufenen_nicht() {
+        // Regression: Ein Warteliste-Zug baute den Präfix ohne die Gerufenen
+        // neu — deren Reihenfolge sprang. Jetzt zählt allein der Aufruf-Rang.
+        let tablet = TabletState::default();
+        let snap = snap_with(
+            vec![court(1, None)],
+            vec![
+                ready_named(7, Some(3), "A", "B"),
+                ready_named(8, Some(2), "C", "D"),
+                ready_named(9, Some(1), "E", "F"),
+            ],
+            Vec::new(),
+        );
+        tablet.set_snapshot(snap.clone());
+        for id in [7, 8] {
+            tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+                match_id: id,
+                location_id: None,
+                called_at_ms: 1,
+            });
+        }
+        tablet.queue_reorder(&AppConfig::default(), 9, None);
+        let calls = tablet.preparation_calls();
+        let rang = |id: i64| calls.iter().position(|c| c.match_id == id);
+        let keys: Vec<_> = snap
+            .matches
+            .iter()
+            .filter(|m| rang(m.id).is_some())
+            .map(|m| crate::tablet::assign::sort_key_for(m, rang(m.id), tablet.queue_order_store()))
+            .collect();
+        assert!(
+            keys[0] < keys[1],
+            "7 (Rang 0) vor 8 (Rang 1), trotz Ansetzung"
+        );
     }
 
     #[test]

@@ -46,11 +46,19 @@ Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
   Hallenname in die Adresse. Fehlt er oder ist er unbekannt, zeigt die Seite
   zuerst eine Hallenwahl. Im Ein-Hallen-Turnier genügt `/meetingpoint`.
 - Die Seite zeigt alle Partien, die **in diese Halle** zum Meetingpoint
-  gerufen sind, mit der Uhrzeit des Aufrufs. **Oben steht die Partie, die als
-  Nächstes aufs Feld kommt** — die Reihenfolge der Spielliste (samt
-  Umsortierung im TL-Web), nicht die des Aufrufs. Eine später gerufene Partie
-  kann also über länger wartende rutschen, wenn sie in der Spielliste weiter
-  oben steht.
+  gerufen sind, mit der Uhrzeit des Aufrufs. **Wer zuerst gerufen wurde,
+  steht oben und kommt zuerst aufs Feld.** Ein neu gerufenes Spiel stellt
+  sich hinten an. Die Turnierleitung kann die Reihenfolge im TL-Web und in der
+  Desktop-App ändern (siehe [Reihenfolge der Gerufenen](preparation.md#reihenfolge-der-gerufenen)).
+  Ausnahme: Eine Partie, bei der noch jemand fehlt oder deren Spieler noch auf
+  einem anderen Feld stehen, bleibt oben stehen, und die nächste kommt zuerst
+  dran.
+- **Aufgerufen – Feld 3.** Kommt eine Partie aufs Feld, bleibt ihre Karte
+  noch **2 Minuten** ganz oben stehen, gelb markiert, mit dem Feld, auf das
+  es geht. So erfährt es auch, wer gerade nicht hingesehen hat. Die Namen
+  sind dann nicht mehr antippbar.
+<!-- pruef: "Aufgerufen – " in src-tauri/assets/meetingpoint.html -->
+<!-- pruef: "MP_AUFGERUFEN_ANZEIGE_MS: u64 = 120_000" in relay-proto/src/lib.rs -->
 - **Namen antippen = einchecken**, noch einmal antippen = auschecken (falls
   sich jemand vertippt hat). Eingecheckte Namen werden grün mit Haken.
 - Sind alle nötigen Personen da, trägt die Karte **spielbereit**.

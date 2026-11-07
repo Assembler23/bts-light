@@ -450,6 +450,18 @@ pub(crate) fn apply_state_action(
             tablet.queue_order_reset();
             Ok(TlResponse::ok(0))
         }
+        A::CalledReorder {
+            match_id,
+            before_match_id,
+        } => {
+            // ADR 0077: Fehler sichtbar machen — ein stilles Ok ließe die
+            // Seite einen Zug melden, der nie geschah.
+            tablet
+                .meetingpoint_store()
+                .verschiebe(*match_id, *before_match_id)
+                .map_err(|f| TlResponse::err(C::NotAllowed, f.text()))?;
+            Ok(TlResponse::ok(0))
+        }
         A::ScorekeeperAdd { names } => {
             let names: Vec<String> = names
                 .iter()
@@ -2396,6 +2408,10 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             before_match_id,
         } => format!("queue-order:{match_id}:{}", before_match_id.unwrap_or(0)),
         A::QueueOrderReset => "queue-order-reset".to_string(),
+        A::CalledReorder {
+            match_id,
+            before_match_id,
+        } => format!("called-order:{match_id}:{}", before_match_id.unwrap_or(0)),
         // Panel-Profile (Spec tl-web-panelsystem): der Fingerabdruck
         // beschreibt den ganzen Inhalt (wie `EnterResult`), damit ein
         // wiederverwendetes `op_id` zwei inhaltlich verschiedene Speicher-
@@ -2533,6 +2549,9 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             format!("Spielbeginn-Ansage Feld {court_id}")
         }
         A::QueueReorder { match_id, .. } => format!("Spielliste umsortiert (Spiel {match_id})"),
+        A::CalledReorder { match_id, .. } => {
+            format!("Gerufene umsortiert (Spiel {match_id})")
+        }
         A::QueueOrderReset => "Manuelle Spielreihenfolge zurückgesetzt".to_string(),
         A::SetAutoAssign { enabled } => {
             format!(
@@ -2800,6 +2819,11 @@ pub struct TlState {
     /// Aktion ab — die Seite blendet den Knopf dann aus.
     #[serde(default)]
     pub can_repeat_prep_call: bool,
+    /// Kennt dieser Turnier-PC das Umsortieren der Gerufenen
+    /// (`TlAction::CalledReorder`, ADR 0077)? Ohne zeigt die Seite keine
+    /// Griffe an gerufenen Spielen.
+    #[serde(default)]
+    pub can_reorder_called: bool,
     /// Meetingpoint-Einstellungen und -Lage (Spec
     /// `meetingpoint-spielbereit`); `None` = Meetingpoint aus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3735,6 +3759,7 @@ pub(crate) fn build_state_limited(
             can_set_wish_court: true,
             can_set_highlight: true,
             can_repeat_prep_call: true,
+            can_reorder_called: true,
             meetingpoint: meetingpoint_lage(tablet, config),
             finished_warning_seconds: config.finished_warning_seconds,
             // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
@@ -3863,7 +3888,7 @@ pub(crate) fn build_state_limited(
                 manual_hall,
                 called_hall_str,
                 auto.get(&m.id).map(String::as_str),
-                call.is_some(),
+                calls.iter().position(|c| c.match_id == m.id),
                 tablet.queue_order_store(),
             );
             (key, m, hall, hall_source)
@@ -4262,6 +4287,7 @@ pub(crate) fn build_state_limited(
         can_set_wish_court: true,
         can_set_highlight: true,
         can_repeat_prep_call: true,
+        can_reorder_called: true,
         meetingpoint: meetingpoint_lage(tablet, config),
         can_reload_tablets: true,
         finished_warning_seconds: config.finished_warning_seconds,
@@ -5084,6 +5110,7 @@ mod tests {
             pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
@@ -8075,6 +8102,44 @@ mod tests {
     }
 
     #[test]
+    fn called_reorder_verschiebt_gerufene_und_meldet_fehler() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            Vec::new(),
+            vec![a_match(1), a_match(2), a_match(3)],
+            Vec::new(),
+        ));
+        for (id, halle) in [(1, Some(1)), (2, Some(1)), (3, Some(2))] {
+            tablet.add_preparation_call(PreparationCall {
+                match_id: id,
+                location_id: halle,
+                called_at_ms: 1,
+            });
+        }
+        let zug = |m: i64, b: Option<i64>| {
+            apply_state_action(
+                &tablet,
+                &AppConfig::default(),
+                0,
+                &relay_proto::TlAction::CalledReorder {
+                    match_id: m,
+                    before_match_id: b,
+                },
+            )
+        };
+        assert!(zug(2, Some(1)).is_ok());
+        let ids: Vec<i64> = tablet
+            .preparation_calls()
+            .iter()
+            .map(|c| c.match_id)
+            .collect();
+        assert_eq!(ids, vec![2, 1, 3]);
+        // Über die Hallengrenze und nicht gerufen: Fehler, kein stilles Ok.
+        assert!(!zug(3, Some(2)).unwrap_err().ok);
+        assert!(!zug(99, None).unwrap_err().ok);
+    }
+
+    #[test]
     fn queue_order_reset_clears_every_halls_prefix() {
         let tablet = TabletState::default();
         tablet.set_snapshot(snap(
@@ -10268,6 +10333,8 @@ mod tests {
             // Fähigkeitsmerkmal: reines Bool „dieser Turnier-PC kennt
             // ‚Erste Ansage wiederholen'".
             "can_repeat_prep_call",
+            // Fähigkeitsmerkmal (Spec meetingpoint-reihenfolge): reines Bool.
+            "can_reorder_called",
             // Spec tl-zeilenfarbe: BTPs Zeilenfarbe 1–6 — eine Notiz der
             // Turnierleitung AM SPIEL, ohne Bedeutung über Personen; die
             // Bedeutung der Farbe vereinbart das Team, sie steht nirgends.

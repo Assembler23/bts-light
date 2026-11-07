@@ -701,6 +701,7 @@ mod tests {
             pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             scoring: ScoringFormat::default(),
         };
         let court = MonitorCourt {

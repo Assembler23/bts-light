@@ -221,6 +221,15 @@ export const queueReorder = (
   beforeMatchId: number | null,
 ): Promise<void> => invoke("queue_reorder", { matchId, beforeMatchId });
 
+/** Ein gerufenes Spiel in der Aufruf-Reihenfolge vor ein anderes gerufenes
+ *  Spiel derselben Halle ziehen (Spec `meetingpoint-reihenfolge`, ADR 0077);
+ *  `beforeMatchId = null` heißt „ans Ende der Gerufenen". Fehler (andere
+ *  Halle, nicht mehr gerufen) kommen als Ablehnung zurück. */
+export const calledReorder = (
+  matchId: number,
+  beforeMatchId: number | null,
+): Promise<void> => invoke("called_reorder", { matchId, beforeMatchId });
+
 /** Verwirft die manuelle Spielreihenfolge ALLER Hallen auf einmal (globaler
  *  Reset-Knopf, Spec `spielliste-manuelle-reihenfolge`). */
 export const queueOrderReset = (): Promise<void> => invoke("queue_order_reset");

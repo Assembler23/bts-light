@@ -36,6 +36,9 @@
   #partien { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: .8rem; }
   .partie { background: var(--surface); border: 2px solid var(--line); border-radius: .9rem; padding: .7rem .8rem; }
   .partie.bereit { border-color: var(--ok-hell); }
+  .partie.aufgerufen { border-color: #facc15; background: #3b2f06; }
+  .p-aufgerufen { font-weight: 900; font-size: 1.6rem; color: #fde047; margin: .1rem 0 .5rem; }
+  .partie.aufgerufen .namen-still { font-size: 1.15rem; padding: .25rem 0; }
   .p-kopf { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
   .p-label { font-weight: 700; font-size: 1.05rem; }
   .p-zeit { color: var(--muted); font-size: .9rem; }
@@ -100,6 +103,14 @@ function mpHalleAusQuery(search) {
     }
   }
   return "";
+}
+
+/** Text der Karte einer gerade aufs Feld gerufenen Partie. Reine Feldnummer
+ *  → „Feld 3"; ein Name, der schon „Feld …" o. ä. sagt, bleibt, wie er ist. */
+function mpAufgerufenText(feld) {
+  var f = String(feld == null ? "" : feld).trim();
+  if (!f) return "";
+  return "Aufgerufen – " + (/^\d+$/.test(f) ? "Feld " + f : f);
 }
 
 /** Plätze einer Partie nach Seite 1, Seite 2 und Schiedsrichter. */
@@ -246,6 +257,10 @@ function zeichne() {
   leer.classList.toggle("aus", partien.length > 0);
   anl.classList.toggle("aus", partien.length === 0);
   partien.forEach(function (partie) {
+    if (partie.aufgerufenFeld) {
+      liste.appendChild(aufgerufenKarte(partie));
+      return;
+    }
     var karte = el("section", "partie" + (partie.bereit ? " bereit" : ""));
     var kopf = el("div", "p-kopf");
     kopf.appendChild(el("span", "p-label", partie.label || ("Spiel " + partie.matchId)));
@@ -277,6 +292,22 @@ function zeichne() {
     }
     liste.appendChild(karte);
   });
+}
+
+// Gerade aufs Feld gerufen: Die Karte bleibt kurz stehen und sagt, wohin.
+// Namen sind hier nicht antippbar — einchecken ist vorbei.
+function aufgerufenKarte(partie) {
+  var karte = el("section", "partie aufgerufen");
+  var kopf = el("div", "p-kopf");
+  kopf.appendChild(el("span", "p-label", partie.label || ("Spiel " + partie.matchId)));
+  karte.appendChild(kopf);
+  karte.appendChild(el("div", "p-aufgerufen", mpAufgerufenText(partie.aufgerufenFeld)));
+  var g = mpGruppen(partie);
+  var namen = function (liste) { return liste.map(function (p) { return p.name; }).join(" / "); };
+  karte.appendChild(el("div", "namen-still", namen(g.team1)));
+  karte.appendChild(el("div", "gegen", "gegen"));
+  karte.appendChild(el("div", "namen-still", namen(g.team2)));
+  return karte;
 }
 
 // In der Anzeige-Hülle: die gewählte Halle an die Hülle melden, damit sie

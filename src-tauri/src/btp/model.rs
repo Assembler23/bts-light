@@ -464,6 +464,11 @@ pub struct BtpMatch {
     /// hallenweise gerufen wurde. Transientes Feld wie `preparation_call_ts`:
     /// der Parser schreibt immer `None`.
     pub preparation_hall: Option<String>,
+    /// Aufruf-Rang (Position in der Liste der aktiven Aufrufe, ADR 0077) —
+    /// gestempelt im selben Moment wie `preparation_call_ts`, damit der
+    /// Liveticker gerufene Spiele in Aufruf-Reihenfolge zeigt. Transient,
+    /// der Parser schreibt immer `None`.
+    pub preparation_call_rank: Option<usize>,
     /// Zählweise des Matches (Sätze, Spielende, Cap, Intervall-Schwelle) –
     /// aus dem BTP-`ScoringFormat` der Stage des Draws aufgelöst. Steuert auf
     /// dem Tablet Satzgewinn und Pausen. Default = 3×21.
@@ -1452,6 +1457,7 @@ fn parse_matches(
             // apply_preparation_calls, nicht der Parser.
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             // Zählweise über die Stage des Draws; ohne Zuordnung 3×21.
             scoring: draw_id
                 .and_then(|id| scoring.get(&id).cloned())
