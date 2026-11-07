@@ -26,16 +26,6 @@ export function mpHalleAusQuery(search) {
   return "";
 }
 
-/** Partien in Aufrufreihenfolge (ältester Aufruf oben), stabil nach ID. */
-export function mpSortiert(partien) {
-  var liste = (partien || []).slice();
-  liste.sort(function (a, b) {
-    var d = (a.calledAtMs || 0) - (b.calledAtMs || 0);
-    return d !== 0 ? d : (a.matchId || 0) - (b.matchId || 0);
-  });
-  return liste;
-}
-
 /** Plätze einer Partie nach Seite 1, Seite 2 und Schiedsrichter. */
 export function mpGruppen(partie) {
   var g = { team1: [], team2: [], sr: null };

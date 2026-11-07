@@ -46,7 +46,11 @@ Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
   Hallenname in die Adresse. Fehlt er oder ist er unbekannt, zeigt die Seite
   zuerst eine Hallenwahl. Im Ein-Hallen-Turnier genügt `/meetingpoint`.
 - Die Seite zeigt alle Partien, die **in diese Halle** zum Meetingpoint
-  gerufen sind, die älteste oben, mit der Uhrzeit des Aufrufs.
+  gerufen sind, mit der Uhrzeit des Aufrufs. **Oben steht die Partie, die als
+  Nächstes aufs Feld kommt** — die Reihenfolge der Spielliste (samt
+  Umsortierung im TL-Web), nicht die des Aufrufs. Eine später gerufene Partie
+  kann also über länger wartende rutschen, wenn sie in der Spielliste weiter
+  oben steht.
 - **Namen antippen = einchecken**, noch einmal antippen = auschecken (falls
   sich jemand vertippt hat). Eingecheckte Namen werden grün mit Haken.
 - Sind alle nötigen Personen da, trägt die Karte **spielbereit**.
