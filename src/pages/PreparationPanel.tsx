@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   ArrowUpDown,
   GripVertical,
   Megaphone,
@@ -11,6 +13,7 @@ import {
 import { ScoresheetOverlay } from "../components/ScoresheetOverlay";
 import {
   callPreparation,
+  calledReorder,
   hallColorsView,
   meetingpointSet,
   officialClear,
@@ -22,6 +25,7 @@ import {
 import { mpAnsageZusatz, resolveAnnouncementLanguage } from "../io/announcer";
 import { vorbereitungAnsagen } from "../io/ansageTeilen";
 import { azureOption } from "../io/azureAnnounce";
+import { rufZielKnopf, rufZielZug } from "../io/gerufeneReihe.mjs";
 import { useDragReorder } from "../state/useDragReorder";
 import type {
   AnnounceConfig,
@@ -64,6 +68,8 @@ export function PreparationPanel({ announce, azureTts }: Props) {
   const [callStages, setCallStages] = useState<Map<string, 2 | 3>>(new Map());
   // Meetingpoint-Zusatz der Vorbereitungs-Ansage (null = Meetingpoint aus).
   const [mpAnsage, setMpAnsage] = useState<{ de: string; en: string } | null>(null);
+  // Gerufene umsortierbar? (nicht am Ansage-Slave, Spec meetingpoint-reihenfolge)
+  const [canReorderCalled, setCanReorderCalled] = useState(false);
   /** Offener Vorabzettel (Spec `schiedsrichterzettel-autodruck`): die
    *  ausgewählten Spiele und ihre Überschrift. `null` = zu. */
   const [vorabZettel, setVorabZettel] = useState<{
@@ -184,6 +190,7 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         setCandidates(v.candidates);
         setLocations(v.locations);
         setMpAnsage(v.meetingpoint_ansage ?? null);
+        setCanReorderCalled(v.can_reorder_called ?? false);
       })
       .catch(() => {});
 
@@ -210,6 +217,30 @@ export function PreparationPanel({ announce, azureTts }: Props) {
     open,
     (c) => c.match_id,
     reorderOpen,
+  );
+
+  // Gerufene Spiele: eigene Reihenfolge (wer zuerst gerufen ist, kommt
+  // zuerst aufs Feld, ADR 0077), umsortierbar nur innerhalb derselben
+  // Aufruf-Halle. Das Ziel bestimmt dieselbe Funktion wie im TL-Web.
+  const rufListe = useMemo(
+    () => called.map((c) => ({ match_id: c.match_id, prep_call: { hall: c.call?.hall ?? "" } })),
+    [called],
+  );
+  const sendeRufZug = (matchId: number, ziel: number | null | undefined) => {
+    if (ziel === undefined) {
+      refresh();
+      return;
+    }
+    calledReorder(matchId, ziel)
+      .catch(() => {})
+      .finally(refresh);
+  };
+  const {
+    order: calledOrder,
+    registerRow: registerCalledRow,
+    dragHandleProps: calledHandleProps,
+  } = useDragReorder(called, (c) => c.match_id, (id, beforeId) =>
+    sendeRufZug(id, rufZielZug(rufListe, id, beforeId)),
   );
 
   const callSelected = async () => {
@@ -538,12 +569,48 @@ export function PreparationPanel({ announce, azureTts }: Props) {
             In Vorbereitung
           </h3>
           <ul className="flex flex-col gap-1.5">
-            {called.map((c) => (
+            {calledOrder.map((c) => (
               <li
                 key={c.match_id}
+                ref={(el) => registerCalledRow(c.match_id, el)}
                 className="flex items-center gap-3 rounded-lg border border-sky-200
                            bg-sky-50 px-3 py-2"
               >
+                {canReorderCalled && (
+                  <span className="flex shrink-0 items-center gap-0.5">
+                    <span
+                      {...calledHandleProps(c.match_id)}
+                      tabIndex={0}
+                      role="button"
+                      title="Reihenfolge der Gerufenen ändern — ziehen oder Pfeiltasten"
+                      aria-label={`${c.label || "Spiel"} in der Reihenfolge der Gerufenen verschieben`}
+                      className="cursor-grab touch-none rounded text-sky-400 outline-none
+                                 focus-visible:ring-2 focus-visible:ring-sky-400 active:cursor-grabbing"
+                    >
+                      <GripVertical size={16} />
+                    </span>
+                    <span className="flex flex-col">
+                      <button
+                        onClick={() => sendeRufZug(c.match_id, rufZielKnopf(rufListe, c.match_id, "up"))}
+                        disabled={rufZielKnopf(rufListe, c.match_id, "up") === undefined}
+                        title="Eine Position nach oben"
+                        aria-label="Eine Position nach oben"
+                        className="rounded text-sky-700 hover:bg-sky-100 disabled:opacity-30"
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        onClick={() => sendeRufZug(c.match_id, rufZielKnopf(rufListe, c.match_id, "down"))}
+                        disabled={rufZielKnopf(rufListe, c.match_id, "down") === undefined}
+                        title="Eine Position nach unten"
+                        aria-label="Eine Position nach unten"
+                        className="rounded text-sky-700 hover:bg-sky-100 disabled:opacity-30"
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                    </span>
+                  </span>
+                )}
                 <Megaphone size={16} className="shrink-0 text-sky-600" />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="text-sm">

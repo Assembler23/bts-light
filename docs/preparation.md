@@ -83,11 +83,42 @@ Bewusst an der Auswahl statt als „alles drucken" — wer eine ganze Runde
 braucht, hakt sie an; mehr als 40 Blatt je Auftrag nimmt der Kern ohnehin
 nicht. Details: [schiedsrichterzettel.md](schiedsrichterzettel.md).
 
+## Reihenfolge der Gerufenen
+
+Seit v0.9.347 (Spec [meetingpoint-reihenfolge](features/meetingpoint-reihenfolge.md),
+ADR 0077) gilt unter den „in Vorbereitung" bzw. zum Meetingpoint gerufenen
+Spielen: **Wer zuerst gerufen wurde, kommt zuerst aufs Feld.** Das gilt immer,
+auch ohne eingeschalteten Meetingpoint.
+
+- Ein **neuer Aufruf** stellt sich hinten an, ob von Hand oder von der
+  Aufruf-Automatik. Werden mehrere Spiele auf einmal gerufen, reihen sie
+  sich in der Reihenfolge der Spielliste an, nicht in der Klickfolge.
+- Seinen **Platz behält** ein Spiel bei einem erneuten Aufruf in dieselbe
+  Halle und wenn es nur kurz vom Feld genommen wird. Ein Aufruf in eine
+  **andere Halle** oder Zurücknehmen und neu Rufen stellt hinten an.
+- Wer in der Spielliste **nach oben gezogen** wurde, wird damit als Nächstes
+  *gerufen*. Unter den Gerufenen zählt dann nur noch der Aufruf.
+- Kann die erste Gerufene gerade nicht aufs Feld, weil ein Spieler noch
+  spielt oder Pause hat oder im strikten Meetingpoint-Modus noch jemand
+  fehlt, bekommt die nächste das Feld. Die erste bleibt vorn. Ein
+  **Wunschfeld** wirkt weiter vor der Reihenfolge.
+
+**Umsortieren am Desktop:** Im Block **In Vorbereitung** stehen an jeder
+Zeile ein Griff zum Ziehen und zwei Pfeile (eine Position nach oben bzw.
+unten). Im Mehr-Hallen-Turnier wirkt das nur innerhalb derselben
+Aufruf-Halle. Am Ansage-Slave fehlen Griff und Pfeile, denn die Vergabe läuft
+am Turnier-PC.
+<!-- pruef: "Reihenfolge der Gerufenen ändern — ziehen oder Pfeiltasten" in src/pages/PreparationPanel.tsx -->
+
+Im TL-Web: [Gerufene Spiele umsortieren](turnierleitung-web.md#gerufene-spiele-umsortieren).
+
 ## Auto-Feldvergabe: Reihenfolge + Spieler-Verfügbarkeit
 
 `auto_assign` (`src-tauri/src/sync.rs`) belegt freie Felder automatisch:
 
-- **Reihenfolge:** gerufene Spiele zuerst, danach der manuelle Präfix
+- **Reihenfolge:** gerufene Spiele zuerst, **untereinander in
+  Aufruf-Reihenfolge** (seit v0.9.347, ADR 0077, siehe
+  [Reihenfolge der Gerufenen](#reihenfolge-der-gerufenen)), danach der manuelle Präfix
   (seit 15.08.2026 **hallenübergreifend**, ADR 0026), sonst der
   **BTP-Zeitplan** (`PlannedTime`), darin BTPs Reihenfolge im Zeitfenster
   (`DisplayOrder`, seit v0.9.317), dann Auslosung (`DrawID`)/

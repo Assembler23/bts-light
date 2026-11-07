@@ -1211,6 +1211,8 @@ export interface PreparationView {
   /** Zusatz am Ende jeder Vorbereitungs-Ansage; null bei ausgeschaltetem
    *  Meetingpoint (Rust: config::MpAnsageZusatz). */
   meetingpoint_ansage?: { de: string; en: string } | null;
+  /** Gerufene umsortierbar (nicht am Ansage-Slave; Spec meetingpoint-reihenfolge). */
+  can_reorder_called?: boolean;
 }
 
 /** Eine Zeile der „Abgeschlossene Spiele"-Tabelle (Rust: commands::FinishedMatchRow). */

@@ -74,6 +74,10 @@ struct StoredCall {
     /// Von der Aufruf-Automatik gerufen (nur Anzeige).
     #[serde(default)]
     auto: bool,
+    /// Seit wann geparkt (aufs Feld gekommen, Unix-ms) — die Seite zeigt die
+    /// Partie dann noch kurz mit ihrem Feld an.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    geparkt_ms: Option<u64>,
 }
 
 /// Ein Check-in: Platz, Personen-Fingerabdruck, Zeitpunkt. Der Fingerabdruck
@@ -217,6 +221,41 @@ struct MeetingpointFile {
     /// unabhängig vom Aufruf, gelöscht bei Spielende).
     #[serde(default)]
     feld_check: HashMap<i64, Vec<StoredCheckin>>,
+    /// Stand der Reihenfolge-Bedeutung (ADR 0077). Fehlt das Feld (Datei aus
+    /// einer älteren Version), ordnet [`MeetingpointStore::ordne_einmalig`]
+    /// die Aufrufe beim ersten Binden einmal nach dem bisherigen
+    /// Vergabe-Schlüssel — sonst sprängen gerufene Partien beim Update-Neustart
+    /// mitten im Turnier.
+    #[serde(default)]
+    order_v: u32,
+}
+
+/// Aktueller Stand von [`MeetingpointFile::order_v`]: Die Position in
+/// `calls` ist der Aufruf-Rang der Vergabe.
+const REIHENFOLGE_V: u32 = 1;
+
+/// Warum ein Umsortieren der Gerufenen abgelehnt wurde.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerschiebeFehler {
+    /// Das zu verschiebende Spiel ist nicht (mehr) aktiv gerufen.
+    NichtGerufen,
+    /// Das Ziel ist nicht (mehr) aktiv gerufen.
+    ZielNichtGerufen,
+    /// Ziel steht in einer anderen Aufruf-Halle — dort wirkte der Zug nicht.
+    AndereHalle,
+}
+
+impl VerschiebeFehler {
+    /// Meldung für die Turnierleitung.
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::NichtGerufen => "Das Spiel ist nicht mehr gerufen.",
+            Self::ZielNichtGerufen => "Das Zielspiel ist nicht mehr gerufen.",
+            Self::AndereHalle => {
+                "Gerufene Spiele lassen sich nur innerhalb ihrer Halle umsortieren."
+            }
+        }
+    }
 }
 
 /// Ergebnis eines Ladeversuchs (Muster `WishCourtStore`).
@@ -234,6 +273,12 @@ struct Inner {
     /// geführt wurde. Bewusst nicht auf der Platte: Nach einem Neustart
     /// beginnt die Bestätigung von vorn, das kostet höchstens drei Abrufe.
     off_court_polls: HashMap<i64, u32>,
+    /// Abrufe in Folge mit leerer Paarung. Ein einzelner leerer Abruf (BTP
+    /// mitten im Speichern) soll Aufruf und Platz nicht kosten; erst nach
+    /// [`DEASSIGN_CONFIRM_POLLS`] wird gelöscht. Nur RAM, wie oben.
+    leer_polls: HashMap<i64, u32>,
+    /// Geladene Altdatei wartet auf die einmalige Ordnung (ADR 0077).
+    ordnung_offen: bool,
 }
 
 /// Der Meetingpoint-Speicher. Lebt im
@@ -277,6 +322,7 @@ impl MeetingpointStore {
                             // Aufrufe, die im RAM entstanden sind, bevor das
                             // Turnier feststand, gehen nicht verloren.
                             let frueh = std::mem::take(&mut inner.file.calls);
+                            inner.ordnung_offen = file.order_v < REIHENFOLGE_V;
                             inner.file = file;
                             if frueh.is_empty() {
                                 return;
@@ -291,20 +337,28 @@ impl MeetingpointStore {
                             return;
                         }
                     }
-                    Ladung::Leer => inner.loaded = true,
+                    Ladung::Leer => {
+                        inner.loaded = true;
+                        inner.file.order_v = REIHENFOLGE_V;
+                    }
                     Ladung::Unlesbar => return,
                 }
             }
             if inner.file.tournament.is_empty() {
                 // Erstbindung: frühe RAM-Aufrufe gehören zu diesem Turnier.
                 inner.file.tournament = name.to_string();
+                inner.file.order_v = REIHENFOLGE_V;
+                inner.ordnung_offen = false;
             } else if inner.file.tournament != name {
                 // Turnierwechsel: Match-IDs gelten nur innerhalb eines Turniers.
                 inner.file = MeetingpointFile {
                     tournament: name.to_string(),
+                    order_v: REIHENFOLGE_V,
                     ..Default::default()
                 };
                 inner.off_court_polls.clear();
+                inner.leer_polls.clear();
+                inner.ordnung_offen = false;
             }
         }
         self.persist();
@@ -313,6 +367,68 @@ impl MeetingpointStore {
     /// Aktuell gebundenes Turnier.
     pub fn tournament(&self) -> String {
         self.inner.lock().unwrap().file.tournament.clone()
+    }
+
+    /// Ordnet eine geladene Altdatei (ohne `order_v`) einmal stabil nach
+    /// `schluessel` (dem bisherigen Vergabe-Schlüssel, ADR 0077) und setzt
+    /// die Marke. Läuft nur einmal je Datei; sonst ohne Wirkung.
+    pub fn ordne_einmalig<K: Ord>(&self, schluessel: impl Fn(i64) -> K) {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if !inner.ordnung_offen {
+                return;
+            }
+            inner.ordnung_offen = false;
+            inner.file.calls.sort_by_key(|c| schluessel(c.match_id));
+            inner.file.order_v = REIHENFOLGE_V;
+        }
+        self.persist();
+    }
+
+    /// Verschiebt einen aktiven Aufruf vor `before` (ein anderer aktiver
+    /// Aufruf **derselben** Halle) bzw. mit `None` ans Ende. Zeitpunkt,
+    /// Check-ins und vorläufiger SR bleiben. `Ok(false)` = keine Bewegung.
+    pub fn verschiebe(&self, match_id: i64, before: Option<i64>) -> Result<bool, VerschiebeFehler> {
+        let changed = {
+            let mut inner = self.inner.lock().unwrap();
+            let calls = &mut inner.file.calls;
+            let Some(von) = calls
+                .iter()
+                .position(|c| c.match_id == match_id && c.phase == Phase::Aktiv)
+            else {
+                return Err(VerschiebeFehler::NichtGerufen);
+            };
+            if before == Some(match_id) {
+                return Ok(false);
+            }
+            let halle = calls[von].location_id;
+            if let Some(b) = before {
+                let Some(ziel) = calls
+                    .iter()
+                    .find(|c| c.match_id == b && c.phase == Phase::Aktiv)
+                else {
+                    return Err(VerschiebeFehler::ZielNichtGerufen);
+                };
+                if ziel.location_id != halle {
+                    return Err(VerschiebeFehler::AndereHalle);
+                }
+            }
+            let vorher: Vec<i64> = calls.iter().map(|c| c.match_id).collect();
+            let eintrag = calls.remove(von);
+            let nach = match before {
+                Some(b) => calls
+                    .iter()
+                    .position(|c| c.match_id == b)
+                    .expect("Ziel oben geprüft"),
+                None => calls.len(),
+            };
+            calls.insert(nach, eintrag);
+            calls.iter().map(|c| c.match_id).collect::<Vec<_>>() != vorher
+        };
+        if changed {
+            self.persist();
+        }
+        Ok(changed)
     }
 
     /// Ruft ein Spiel (Hand oder Automatik). Gleiche Halle wie ein schon
@@ -340,6 +456,7 @@ impl MeetingpointStore {
                     vorab_sr: None,
                     missing_announced: false,
                     auto,
+                    geparkt_ms: None,
                 },
             )
         };
@@ -353,6 +470,7 @@ impl MeetingpointStore {
         let changed = {
             let mut inner = self.inner.lock().unwrap();
             inner.off_court_polls.remove(&match_id);
+            inner.leer_polls.remove(&match_id);
             let before = inner.file.calls.len();
             inner.file.calls.retain(|c| c.match_id != match_id);
             before != inner.file.calls.len()
@@ -402,6 +520,7 @@ impl MeetingpointStore {
             let Inner {
                 file,
                 off_court_polls,
+                leer_polls,
                 ..
             } = &mut *inner;
             let mut changed = false;
@@ -410,22 +529,42 @@ impl MeetingpointStore {
             for mut c in file.calls.drain(..) {
                 let Some(m) = snapshot.matches.iter().find(|m| m.id == c.match_id) else {
                     off_court_polls.remove(&c.match_id);
+                    leer_polls.remove(&c.match_id);
                     changed = true;
                     geloescht.push(c.match_id);
                     continue; // verschwunden
                 };
-                if m.status == MatchStatus::Finished || m.team1.is_empty() || m.team2.is_empty() {
+                if m.status == MatchStatus::Finished {
                     off_court_polls.remove(&c.match_id);
+                    leer_polls.remove(&c.match_id);
                     changed = true;
                     geloescht.push(c.match_id);
-                    continue; // beendet oder Paarung weg
+                    continue; // beendet
                 }
+                if m.team1.is_empty() || m.team2.is_empty() {
+                    // Paarung weg — erst nach bestätigten Abrufen löschen,
+                    // sonst kostete ein einzelner leerer Abruf den Platz in
+                    // der Reihenfolge (ADR 0077).
+                    let n = leer_polls.entry(c.match_id).or_insert(0);
+                    *n += 1;
+                    if *n >= DEASSIGN_CONFIRM_POLLS {
+                        leer_polls.remove(&c.match_id);
+                        off_court_polls.remove(&c.match_id);
+                        changed = true;
+                        geloescht.push(c.match_id);
+                        continue;
+                    }
+                    keep.push(c);
+                    continue;
+                }
+                leer_polls.remove(&c.match_id);
                 match (&m.status, c.phase) {
                     (&MatchStatus::OnCourt, Phase::Geparkt) => {
                         off_court_polls.remove(&c.match_id);
                     }
                     (&MatchStatus::OnCourt, _) => {
                         c.phase = Phase::Geparkt;
+                        c.geparkt_ms = Some(crate::tablet::monitor::now_ms());
                         off_court_polls.remove(&c.match_id);
                         changed = true;
                     }
@@ -436,6 +575,7 @@ impl MeetingpointStore {
                         if *n >= DEASSIGN_CONFIRM_POLLS {
                             off_court_polls.remove(&c.match_id);
                             c.phase = Phase::Aktiv;
+                            c.geparkt_ms = None;
                             changed = true;
                         }
                     }
@@ -481,6 +621,37 @@ impl MeetingpointStore {
                 checkins: c.checkins.iter().map(|k| (k.platz, k.fp.clone())).collect(),
             })
             .collect()
+    }
+
+    /// Geparkte Aufrufe, die höchstens `frist_ms` vor `now` aufs Feld kamen
+    /// (neueste zuerst) — für „Aufgerufen – Feld N" auf der Seite.
+    pub fn kuerzlich_aufgerufen(&self, now: u64, frist_ms: u64) -> Vec<MpCall> {
+        let inner = self.inner.lock().unwrap();
+        let mut out: Vec<(u64, MpCall)> = inner
+            .file
+            .calls
+            .iter()
+            .filter(|c| c.phase == Phase::Geparkt)
+            .filter_map(|c| {
+                let seit = c.geparkt_ms?;
+                (now.saturating_sub(seit) < frist_ms).then(|| {
+                    (
+                        seit,
+                        MpCall {
+                            match_id: c.match_id,
+                            location_id: c.location_id,
+                            called_at_ms: c.called_at_ms,
+                            auto: c.auto,
+                            vorab_sr: c.vorab_sr,
+                            missing_announced: c.missing_announced,
+                            checkins: c.checkins.iter().map(|k| (k.platz, k.fp.clone())).collect(),
+                        },
+                    )
+                })
+            })
+            .collect();
+        out.sort_by_key(|(seit, _)| std::cmp::Reverse(*seit));
+        out.into_iter().map(|(_, c)| c).collect()
     }
 
     /// Einen Platz am Meetingpoint ein- (`Some(fp)`) oder auschecken
@@ -726,6 +897,9 @@ fn upsert(calls: &mut Vec<StoredCall>, neu: StoredCall) -> bool {
             let changed = alt.phase != neu.phase || alt.auto != auto;
             alt.phase = neu.phase;
             alt.auto = auto;
+            if alt.phase == Phase::Aktiv {
+                alt.geparkt_ms = None;
+            }
             return changed;
         }
     }
@@ -794,10 +968,10 @@ pub fn sr_lage(
 
 /// Alle aktiven Aufrufe mit Partie, SR-Lage und Bewertung — in
 /// **Vergabe-Reihenfolge**: derselbe Schlüssel, nach dem `auto_assign` die
-/// gerufenen Partien aufs Feld bringt (Warteliste samt Umsortierung), nicht
-/// die Aufrufzeit. Sonst stand oben auf der Meetingpoint-Seite, wer am
-/// längsten wartet, während ein später gerufenes, in der Warteliste höheres
-/// Spiel das nächste Feld bekam.
+/// gerufenen Partien aufs Feld bringt. Seit ADR 0077 ist das die
+/// Aufruf-Reihenfolge (samt Umsortierung durch die Turnierleitung); der
+/// Schlüssel bleibt trotzdem die eine Quelle, damit Seite und Vergabe nie
+/// auseinanderlaufen.
 pub fn bewertungen(
     tablet: &TabletState,
     snap: &BtpSnapshot,
@@ -808,11 +982,12 @@ pub fn bewertungen(
         .meetingpoint_store()
         .active_entries()
         .into_iter()
-        .filter_map(|call| {
+        .enumerate()
+        .filter_map(|(rang, call)| {
             let m = snap.matches.iter().find(|m| m.id == call.match_id)?;
             let sr = sr_lage(tablet, m, snap, cfg);
             let b = bewerte(m, &call, &sr);
-            let key = crate::tablet::assign::sort_key_for(m, true, order);
+            let key = crate::tablet::assign::sort_key_for(m, Some(rang), order);
             Some((key, (call, sr, b)))
         })
         .collect();
@@ -869,8 +1044,21 @@ pub fn hand_aufruf(
         .filter(|c| c.location_id == location_id)
         .map(|c| c.match_id)
         .collect();
+    // Mehrfachruf: in Warteliste-Reihenfolge anstellen, nicht in Klickfolge
+    // (Spec `meetingpoint-reihenfolge`, Regel 3). Unbekannte stabil ans Ende.
+    let mut reihe: Vec<i64> = match_ids.to_vec();
+    if let Some(snap) = snap.as_ref() {
+        let order = tablet.queue_order_store();
+        reihe.sort_by_cached_key(|id| {
+            snap.matches
+                .iter()
+                .find(|m| m.id == *id)
+                .map(|m| crate::tablet::assign::sort_key_for(m, None, order))
+                .map_or((1u8, None), |k| (0u8, Some(k)))
+        });
+    }
     let mut auftraege = 0;
-    for &match_id in match_ids {
+    for match_id in reihe {
         tablet.add_preparation_call(PreparationCall {
             match_id,
             location_id,
@@ -962,6 +1150,45 @@ pub fn view(
         return v;
     }
     let jetzt = crate::tablet::monitor::now_ms();
+    // Gerade aufs Feld gerufen: noch kurz oben stehen lassen, mit Feld
+    // (Nachtrag 07.11.2026) — wer nicht hinsah, erfährt so, wohin es geht.
+    for call in tablet
+        .meetingpoint_store()
+        .kuerzlich_aufgerufen(jetzt, relay_proto::MP_AUFGERUFEN_ANZEIGE_MS)
+    {
+        let call_halle = hallen_name(snap, call.location_id);
+        if !halle_passt(snap, halle, &call_halle) {
+            continue;
+        }
+        let Some(m) = snap.matches.iter().find(|m| m.id == call.match_id) else {
+            continue;
+        };
+        let Some(feld) = m
+            .court
+            .as_deref()
+            .map(str::trim)
+            .filter(|f| !f.is_empty() && m.status == MatchStatus::OnCourt)
+        else {
+            continue;
+        };
+        let plaetze: Vec<MpPlatzView> = spieler_plaetze(m)
+            .into_iter()
+            .map(|(platz, p)| MpPlatzView {
+                platz,
+                name: p.name.clone(),
+                present: call.eingecheckt(platz, &spieler_fp(p)),
+            })
+            .collect();
+        v.partien.push(MpPartie {
+            match_id: call.match_id,
+            halle: call_halle,
+            label: partie_label(m),
+            called_at_ms: call.called_at_ms,
+            plaetze,
+            aufgerufen_feld: Some(feld.to_string()),
+            ..Default::default()
+        });
+    }
     for (call, sr, b) in bewertungen(tablet, snap, cfg) {
         let prognose = tablet.mp_prognose(call.match_id, jetzt);
         let call_halle = hallen_name(snap, call.location_id);
@@ -997,6 +1224,7 @@ pub fn view(
             sr_noetig: sr.noetig && !sr.ohne,
             feld_frei_ms: prognose.map(|(ms, _)| ms),
             feld_frei_unsicher: prognose.is_some_and(|(_, u)| u),
+            aufgerufen_feld: None,
         });
     }
     v
@@ -1376,7 +1604,7 @@ pub fn auto_aufrufe(
                     manual_hall,
                     None,
                     auto.get(&m.id).map(String::as_str),
-                    false,
+                    None,
                     tablet.queue_order_store(),
                 );
                 if halle.trim().is_empty() || !halle.trim().eq_ignore_ascii_case(&name) {
@@ -1675,13 +1903,159 @@ mod tests {
         store.call(aufruf(13, None, 4));
         let mut ohne_paarung = spiel(12, MatchStatus::Scheduled);
         ohne_paarung.team2.clear();
-        let geloescht = store.reconcile(&snap(vec![
+        let stand = snap(vec![
             spiel(10, MatchStatus::Finished),
             ohne_paarung,
             spiel(13, MatchStatus::Scheduled),
-        ]));
-        assert_eq!(geloescht, vec![10, 11, 12]);
+        ]);
+        let geloescht = store.reconcile(&stand);
+        // Beendet und verschwunden sofort; die leere Paarung erst bestätigt
+        // (ADR 0077: ein einzelner leerer Abruf kostet nicht den Platz).
+        assert_eq!(geloescht, vec![10, 11]);
+        assert_eq!(ids(&store), vec![12, 13]);
+        assert!(store.reconcile(&stand).is_empty());
+        assert_eq!(store.reconcile(&stand), vec![12]);
         assert_eq!(ids(&store), vec![13]);
+    }
+
+    #[test]
+    fn ein_abruf_mit_leerer_paarung_behaelt_aufruf_und_platz() {
+        let store = MeetingpointStore::default();
+        store.call(aufruf(10, None, 1));
+        store.call(aufruf(11, None, 2));
+        let mut leer = spiel(10, MatchStatus::Scheduled);
+        leer.team1.clear();
+        store.reconcile(&snap(vec![leer.clone(), spiel(11, MatchStatus::Scheduled)]));
+        store.reconcile(&snap(vec![leer, spiel(11, MatchStatus::Scheduled)]));
+        // Paarung wieder da → Zähler von vorn, Platz unverändert.
+        let gut = snap(vec![
+            spiel(10, MatchStatus::Scheduled),
+            spiel(11, MatchStatus::Scheduled),
+        ]);
+        assert!(store.reconcile(&gut).is_empty());
+        assert_eq!(ids(&store), vec![10, 11]);
+    }
+
+    #[test]
+    fn verschieben_vor_ein_ziel_und_ans_ende() {
+        let store = MeetingpointStore::default();
+        for id in [10, 11, 12] {
+            store.call(aufruf(id, None, 1));
+        }
+        assert_eq!(store.verschiebe(12, Some(10)), Ok(true));
+        assert_eq!(ids(&store), vec![12, 10, 11]);
+        assert_eq!(store.verschiebe(12, None), Ok(true));
+        assert_eq!(ids(&store), vec![10, 11, 12]);
+        assert_eq!(store.verschiebe(12, None), Ok(false), "schon am Ende");
+        assert_eq!(store.verschiebe(11, Some(11)), Ok(false), "vor sich selbst");
+    }
+
+    #[test]
+    fn verschieben_meldet_jeden_fehler_und_aendert_nichts() {
+        let store = MeetingpointStore::default();
+        store.call(aufruf(10, Some(1), 1));
+        store.call(aufruf(11, Some(1), 2));
+        store.call(aufruf(20, Some(2), 3));
+        store.call(aufruf(12, Some(1), 4));
+        // 12 aufs Feld → geparkt
+        store.reconcile(&snap(vec![
+            spiel(10, MatchStatus::Scheduled),
+            spiel(11, MatchStatus::Scheduled),
+            spiel(20, MatchStatus::Scheduled),
+            spiel(12, MatchStatus::OnCourt),
+        ]));
+        assert_eq!(
+            store.verschiebe(99, None),
+            Err(VerschiebeFehler::NichtGerufen)
+        );
+        assert_eq!(
+            store.verschiebe(12, None),
+            Err(VerschiebeFehler::NichtGerufen)
+        );
+        assert_eq!(
+            store.verschiebe(11, Some(12)),
+            Err(VerschiebeFehler::ZielNichtGerufen)
+        );
+        assert_eq!(
+            store.verschiebe(11, Some(20)),
+            Err(VerschiebeFehler::AndereHalle)
+        );
+        assert_eq!(ids(&store), vec![10, 11, 20]);
+    }
+
+    #[test]
+    fn verschieben_behaelt_zeitpunkt_und_checkins_und_uebersteht_den_neustart() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = store_mit_datei(dir.path());
+            store.call(aufruf(10, None, 1000));
+            store.call(aufruf(11, None, 2000));
+            store.verschiebe(11, Some(10)).unwrap();
+        }
+        let neu = store_mit_datei(dir.path());
+        assert_eq!(
+            neu.active_calls(),
+            vec![aufruf(11, None, 2000), aufruf(10, None, 1000)]
+        );
+    }
+
+    #[test]
+    fn eine_altdatei_wird_einmal_nach_dem_alten_schluessel_geordnet() {
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("meetingpoint.json");
+        // Datei einer älteren Version: kein `order_v`, Reihenfolge [11, 10].
+        let alt = serde_json::json!({
+            "tournament": TURNIER,
+            "calls": [
+                {"match_id": 11, "called_at_ms": 1},
+                {"match_id": 10, "called_at_ms": 2},
+            ],
+        });
+        std::fs::write(&pfad, alt.to_string()).unwrap();
+        let store = store_mit_datei(dir.path());
+        // Bisheriger Schlüssel stellte 10 vor 11.
+        store.ordne_einmalig(|id| id);
+        assert_eq!(ids(&store), vec![10, 11]);
+        // Ein zweites Mal ordnet nichts mehr — auch nicht nach Neustart.
+        store.verschiebe(11, Some(10)).unwrap();
+        store.ordne_einmalig(|id| id);
+        assert_eq!(ids(&store), vec![11, 10]);
+        let neu = store_mit_datei(dir.path());
+        neu.ordne_einmalig(|id| id);
+        assert_eq!(ids(&neu), vec![11, 10]);
+    }
+
+    #[test]
+    fn eine_neue_datei_braucht_keine_ordnung() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = store_mit_datei(dir.path());
+            store.call(aufruf(11, None, 1));
+            store.call(aufruf(10, None, 2));
+        }
+        let neu = store_mit_datei(dir.path());
+        neu.ordne_einmalig(|id| id);
+        assert_eq!(ids(&neu), vec![11, 10], "Aufrufreihenfolge bleibt");
+    }
+
+    #[test]
+    fn ein_aufs_feld_gerufenes_spiel_bleibt_kurz_als_aufgerufen_stehen() {
+        let store = MeetingpointStore::default();
+        store.call(aufruf(10, None, 1));
+        store.call(aufruf(11, None, 2));
+        store.reconcile(&snap(vec![
+            spiel(10, MatchStatus::OnCourt),
+            spiel(11, MatchStatus::Scheduled),
+        ]));
+        let jetzt = crate::tablet::monitor::now_ms();
+        let frist = relay_proto::MP_AUFGERUFEN_ANZEIGE_MS;
+        let k: Vec<i64> = store
+            .kuerzlich_aufgerufen(jetzt, frist)
+            .iter()
+            .map(|c| c.match_id)
+            .collect();
+        assert_eq!(k, vec![10]);
+        assert!(store.kuerzlich_aufgerufen(jetzt + frist, frist).is_empty());
     }
 
     #[test]
@@ -1950,11 +2324,20 @@ mod tests {
         assert!(gesamt.fuer_halle("").halle_waehlen);
     }
 
+    fn seiten_ids(t: &TabletState, cfg: &MeetingpointConfig) -> Vec<i64> {
+        let snap = t.snapshot_clone().unwrap();
+        view(t, Some(&snap), cfg, "")
+            .partien
+            .iter()
+            .map(|p| p.match_id)
+            .collect()
+    }
+
     #[test]
-    fn die_seite_zeigt_die_vergabe_reihenfolge_nicht_die_aufrufzeit() {
-        // Spiel 10 steht in der Warteliste vor 11, wurde aber später gerufen
-        // (seine Spieler standen noch auf dem Feld). Aufs Feld kommt zuerst
-        // 10 — also muss es auch oben auf der Seite stehen.
+    fn die_seite_zeigt_die_aufruf_reihenfolge() {
+        // ADR 0077: Spiel 10 steht in der Warteliste vor 11, wurde aber
+        // später gerufen (seine Spieler standen noch auf dem Feld). Wer
+        // zuerst gerufen wurde, kommt zuerst dran — und steht oben.
         let mut snap = turnier(false);
         snap.matches[0].planned_time = Some(100);
         snap.matches[1].planned_time = Some(200);
@@ -1962,18 +2345,62 @@ mod tests {
         let cfg = mp_an();
         t.add_preparation_call(aufruf(11, None, 1_000));
         t.add_preparation_call(aufruf(10, None, 2_000));
-        let snap = t.snapshot_clone().unwrap();
-        let ids = |t: &TabletState| -> Vec<i64> {
-            view(t, Some(&snap), &cfg, "")
-                .partien
-                .iter()
-                .map(|p| p.match_id)
-                .collect()
-        };
-        assert_eq!(ids(&t), vec![10, 11]);
-        // Eine Umsortierung der Warteliste wirkt auch hier (Präfix-Rang).
+        assert_eq!(seiten_ids(&t, &cfg), vec![11, 10]);
+        // Umsortieren der Gerufenen wirkt hier.
+        t.meetingpoint_store().verschiebe(10, Some(11)).unwrap();
+        assert_eq!(seiten_ids(&t, &cfg), vec![10, 11]);
+    }
+
+    #[test]
+    fn der_aufruf_nimmt_das_spiel_aus_dem_praefix_der_warteliste() {
+        // Regel 4: In der Warteliste nach oben gezogen heißt „als Nächstes
+        // gerufen" — unter den Gerufenen stellt es sich hinten an.
+        let t = zustand(turnier(false));
+        let cfg = mp_an();
         t.queue_order_store().reorder(&[10, 11], 11, Some(10));
-        assert_eq!(ids(&t), vec![11, 10]);
+        assert_eq!(t.queue_order_store().rank(11), Some(0));
+        t.add_preparation_call(aufruf(10, None, 1));
+        t.add_preparation_call(aufruf(11, None, 2));
+        assert_eq!(t.queue_order_store().rank(11), None, "Präfix weg");
+        assert_eq!(seiten_ids(&t, &cfg), vec![10, 11]);
+    }
+
+    #[test]
+    fn ein_mehrfachruf_reiht_sich_in_warteliste_reihenfolge_an() {
+        let mut snap = turnier(false);
+        let mut drittes = spiel(12, MatchStatus::Scheduled);
+        drittes.team1 = vec![sp(7, "Gabi")];
+        drittes.team2 = vec![sp(8, "Hugo")];
+        snap.matches.push(drittes);
+        snap.matches[0].planned_time = Some(100); // 10
+        snap.matches[1].planned_time = Some(200); // 11
+        snap.matches[2].planned_time = Some(300); // 12
+        let t = zustand(snap);
+        hand_aufruf(&t, &[12, 10, 11], None, 1, false);
+        let ids: Vec<i64> = t.preparation_calls().iter().map(|c| c.match_id).collect();
+        assert_eq!(ids, vec![10, 11, 12], "Warteliste, nicht Klickfolge");
+    }
+
+    #[test]
+    fn die_seite_zeigt_ein_aufs_feld_gerufenes_spiel_mit_feld() {
+        let t = zustand(turnier(false));
+        let cfg = mp_an();
+        rufe(&t, 10, None);
+        rufe(&t, 11, None);
+        let mut feld = turnier(false);
+        feld.matches[0].status = MatchStatus::OnCourt;
+        feld.matches[0].court = Some("3".into());
+        feld.matches[0].court_id = Some(3);
+        t.set_snapshot(feld.clone());
+        t.apply_preparation_calls(&mut feld);
+        let snap = t.snapshot_clone().unwrap();
+        let v = view(&t, Some(&snap), &cfg, "");
+        let karten: Vec<(i64, Option<String>)> = v
+            .partien
+            .iter()
+            .map(|p| (p.match_id, p.aufgerufen_feld.clone()))
+            .collect();
+        assert_eq!(karten, vec![(10, Some("3".into())), (11, None)]);
     }
 
     #[test]

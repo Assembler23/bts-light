@@ -2442,6 +2442,17 @@ function sendeQueueReorder(matchId, ziel, okText) {
   );
 }
 
+/** Ein gerufenes Spiel in der Aufruf-Reihenfolge verschieben (ADR 0077);
+ *  `ziel = null` heißt ans Ende der Gerufenen. Ablehnungen (andere Halle,
+ *  nicht mehr gerufen) zeigt `send` als Fehler. */
+function sendeCalledReorder(matchId, ziel, okText) {
+  send(
+    `called-reorder-${matchId}-${ziel ?? "end"}-${opSitzung}-${++queueOpSeq}`,
+    { action: "called_reorder", matchId, beforeMatchId: ziel },
+    okText,
+  );
+}
+
 function toast(text, bad) {
   $("toast-text").textContent = text;
   $("toast").className = "toast show" + (bad ? " bad" : "");
@@ -4750,15 +4761,19 @@ function queueRow(m, topMatchId) {
   // eine pausierende Zeile wählbar; vor dem Schreiben fragt `assignTo()`
   // nach (Feldtest 22.08.2026).
   const pickable = !offen && (!m.blocked || m.blocked.reason === "pause");
-  // Der Zieh-Griff hängt allein daran, dass das Spiel noch NICHT gerufen
-  // ist: Der manuelle Präfix wirkt nur innerhalb der nicht gerufenen Spiele
-  // (`assign::ready_queue`), ein Zug an einer gerufenen Zeile wäre
-  // serverseitig ein stilles No-Op. Blockierte Zeilen sind seit ADR 0026
+  // Zwei Reihenfolgen, zwei Wege: Der manuelle Präfix wirkt nur innerhalb
+  // der nicht gerufenen Spiele (`assign::ready_queue`, `queue_reorder`);
+  // gerufene ordnen sich nach dem Aufruf (`called_reorder`, ADR 0077).
+  // Blockierte Zeilen sind seit ADR 0026
   // ausdrücklich ziehbar — Spielbereitschaft ist kein Sortierkriterium
   // mehr, und wer vorausplant, muss auch ein noch pausierendes Spiel
   // einsortieren können.
   const sortierbar = !m.prep_call;
-  if (sortierbar) {
+  // Gerufene Spiele haben eine EIGENE Reihenfolge (Aufruf-Reihenfolge, ADR
+  // 0077) — umsortierbar über `called_reorder`, nur wenn der Turnier-PC es
+  // kennt. Ein Zug landet dann im Block der Gerufenen (`queueReorder`).
+  const rufSortierbar = !!m.prep_call && !!state.can_reorder_called;
+  if (sortierbar || rufSortierbar) {
     // Zieh-Griff: eigenes Element statt der ganzen Zeile als Ziehfläche
     // (siehe CSS-Erklärung bei `.drag-griff` und `enableReorderDrag` im
     // Skript). Fokussierbar mit Pfeiltasten-Fallback (wie beim
@@ -4912,6 +4927,9 @@ function queueRow(m, topMatchId) {
   if (zeigeVerschiebeKnoepfe() && sortierbar) {
     aktionen.push(verschiebeKnoepfeHtml(m.match_id));
   }
+  if (zeigeVerschiebeKnoepfe() && rufSortierbar) {
+    aktionen.push(rufKnoepfeHtml(m.match_id));
+  }
 
   // ── Kebab-Menü: Sekundäres (Spec Schritt 11) ─────────────────────────
   const kebabGroups = [];
@@ -4950,6 +4968,17 @@ function queueRow(m, topMatchId) {
   // misslang oder überflüssig war. Auch mit eingeschalteten
   // Verschiebe-Knöpfen bleibt er im Menü: Der Ort einer Aktion soll nicht
   // von einem Profil-Schalter abhängen.
+  // Gerufene: dieselbe Idee für ihre eigene Reihenfolge (wer zuerst aufs
+  // Feld kommt). Nur die Einträge, die etwas bewirken.
+  if (rufSortierbar) {
+    const liste = visibleQueue();
+    const eintrag = (art, text) => rufZielKnopf(liste, m.match_id, art) === undefined ? ""
+      : `<button type="button" data-called-move="${art}" data-match-id="${m.match_id}" title="${text}">${text}</button>`;
+    zeilenAktionen.push(
+      eintrag("top", "⤒ An den Anfang der Gerufenen"),
+      eintrag("up", "↑ Eine Position nach oben"),
+      eintrag("down", "↓ Eine Position nach unten"));
+  }
   const kannHoch = sortierbar && topMatchId != null && topMatchId !== m.match_id;
   if (kannHoch) {
     zeilenAktionen.push(`<button type="button" data-queue-top="${m.match_id}"
@@ -5236,6 +5265,15 @@ function wireQueue(box) {
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       verschiebeSpiel(Number(btn.dataset.matchId), btn.dataset.queueMove);
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  // Gerufene verschieben (Knöpfe auf der Zeile und im Menü): Ziel beim Tipp
+  // aus der aktuellen Liste, wie oben.
+  scopeAll(box, "button[data-called-move]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      verschiebeGerufenes(Number(btn.dataset.matchId), btn.dataset.calledMove);
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -6690,6 +6728,68 @@ function renderPanels() {
  * blockiert am Ende den Zeitplan (Verhalten des früheren Panels „Ohne
  * Hallenzuordnung", jetzt als Zeilen-Status in derselben Liste).
  */
+// ── Inline-Kopie von src/io/gerufeneReihe.mjs ────────────────────────
+// Ziel beim Umsortieren der GERUFENEN Spiele (Aufruf-Reihenfolge, ADR 0077).
+// Kanonische Fassung samt Tests: `src/io/gerufeneReihe.mjs`
+// (`scripts/test-gerufene-reihe.mjs`). Änderungen hier und dort gemeinsam.
+function rufReihe(liste, matchId) {
+  var eigen = null;
+  for (var i = 0; i < (liste || []).length; i++) {
+    if (liste[i].match_id === matchId) { eigen = liste[i]; break; }
+  }
+  if (!eigen || !eigen.prep_call) return [];
+  var halle = eigen.prep_call.hall || "";
+  return liste
+    .filter(function (m) { return m.prep_call && (m.prep_call.hall || "") === halle; })
+    .map(function (m) { return m.match_id; });
+}
+function rufZielZug(liste, matchId, beforeId) {
+  var reihe = rufReihe(liste, matchId);
+  if (!reihe.length) return undefined;
+  var ab = beforeId == null ? liste.length
+    : liste.findIndex(function (m) { return m.match_id === Number(beforeId); });
+  if (ab < 0) ab = liste.length;
+  var ziel = null;
+  for (var i = ab; i < liste.length; i++) {
+    var id = liste[i].match_id;
+    if (id !== matchId && reihe.indexOf(id) >= 0) { ziel = id; break; }
+  }
+  var pos = reihe.indexOf(matchId);
+  var naechstes = pos + 1 < reihe.length ? reihe[pos + 1] : null;
+  return ziel === naechstes ? undefined : ziel;
+}
+function rufZielKnopf(liste, matchId, art) {
+  var reihe = rufReihe(liste, matchId);
+  var i = reihe.indexOf(matchId);
+  if (i < 0) return undefined;
+  var letzte = i >= reihe.length - 1;
+  if (art === "top") return i === 0 ? undefined : reihe[0];
+  if (art === "up") return i === 0 ? undefined : reihe[i - 1];
+  if (art === "down") return letzte ? undefined : (i + 2 < reihe.length ? reihe[i + 2] : null);
+  if (art === "end") return letzte ? undefined : null;
+  return undefined;
+}
+
+/** Die vier Verschiebe-Knöpfe an einer GERUFENEN Zeile — sie wirken auf
+ *  die Aufruf-Reihenfolge ihrer Halle; nicht Anwendbares ist ausgegraut. */
+function rufKnoepfeHtml(matchId) {
+  const liste = visibleQueue();
+  const k = (art, sym, titel) => {
+    const aus = rufZielKnopf(liste, matchId, art) === undefined;
+    return `<button type="button" class="hoch mv" data-called-move="${art}" data-match-id="${matchId}"
+      title="${titel}" aria-label="${titel}"${aus ? " disabled" : ""}>${sym}</button>`;
+  };
+  return `<span class="mv-block">${k("top", "⤒", "An den Anfang der Gerufenen")}${k("up", "↑", "Eine Position nach oben")}${k("down", "↓", "Eine Position nach unten")}${k("end", "⤓", "Ans Ende der Gerufenen")}</span>`;
+}
+
+const RUF_TEXT = { top: "An den Anfang der Gerufenen.", up: "Eine Position nach oben.",
+  down: "Eine Position nach unten.", end: "Ans Ende der Gerufenen." };
+function verschiebeGerufenes(matchId, art) {
+  const ziel = rufZielKnopf(visibleQueue(), matchId, art);
+  if (ziel === undefined) return;
+  sendeCalledReorder(matchId, ziel, RUF_TEXT[art] || "Reihenfolge geändert.");
+}
+
 // ── Inline-Kopie von src/io/offeneSpiele.mjs ─────────────────────────
 // Die Assets durchlaufen keinen Build und können keine Module laden; die
 // kanonische Fassung samt Tests liegt unter `src/io/offeneSpiele.mjs`
@@ -6924,6 +7024,15 @@ function queueNachladenWaehrendZug() {
  */
 function queueReorder(id, beforeId) {
   const matchId = Number(id);
+  const gezogen = visibleQueue().find((m) => m.match_id === matchId);
+  if (gezogen && gezogen.prep_call) {
+    // Gerufenes Spiel: Ziel im Block der Gerufenen derselben Halle.
+    const rufZiel = rufZielZug(visibleQueue(), matchId,
+      beforeId == null ? null : Number(beforeId));
+    if (rufZiel === undefined) { renderQueue(); return; }
+    sendeCalledReorder(matchId, rufZiel, "Reihenfolge der Gerufenen geändert.");
+    return;
+  }
   const ziel = queueReorderTarget(beforeId);
   if (ziel === matchId) { renderQueue(); return; }
   sendeQueueReorder(matchId, ziel, "Reihenfolge geändert.");

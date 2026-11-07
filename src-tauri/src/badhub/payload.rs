@@ -340,7 +340,7 @@ fn upcoming(snapshot: &BtpSnapshot, ctx: &LivetickerContext) -> Vec<TsetMatch> {
             manual_hall,
             called_hall,
             auto_hall,
-            m.preparation_call_ts.is_some(),
+            m.preparation_call_rank,
             ctx.order,
         );
         key
@@ -573,7 +573,7 @@ fn sortier_schluessel(
         ctx.manual_halls.get(&m.id).map(String::as_str),
         m.preparation_hall.as_deref(),
         ctx.auto_halls.get(&m.id).map(String::as_str),
-        m.preparation_call_ts.is_some(),
+        m.preparation_call_rank,
         ctx.order,
     );
     (halle, key)
@@ -886,6 +886,7 @@ mod tests {
             pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
@@ -1025,6 +1026,7 @@ mod tests {
         laufend.court_id = Some(101);
         let mut gerufen = sample_match(2, MatchStatus::Scheduled, None);
         gerufen.preparation_call_ts = Some(NOW);
+        gerufen.preparation_call_rank = Some(0);
         gerufen.preparation_hall = Some("Halle A".to_string());
         BtpSnapshot {
             tournament_name: "T".to_string(),
@@ -1355,6 +1357,7 @@ mod tests {
         let mut called = sample_match(5, MatchStatus::Scheduled, None);
         called.match_num = Some(50);
         called.preparation_call_ts = Some(NOW - 120_000);
+        called.preparation_call_rank = Some(0);
         called.preparation_hall = Some("Halle 2".to_string());
         let mut uncalled = sample_match(9, MatchStatus::Scheduled, None);
         uncalled.match_num = Some(9);
@@ -1386,6 +1389,42 @@ mod tests {
         assert_eq!(upcoming[1].id, "btp_9");
         assert_eq!(upcoming[1].preparation_call_ts, None);
         assert_eq!(upcoming[1].hall, None);
+    }
+
+    #[test]
+    fn upcoming_folgt_unter_gerufenen_dem_aufruf_rang() {
+        // ADR 0077: Der Liveticker zeigt die Gerufenen so, wie sie aufs Feld
+        // kommen — zuerst gerufen zuerst, nicht nach Spielnummer.
+        let mut zuerst = sample_match(7, MatchStatus::Scheduled, None);
+        zuerst.match_num = Some(70);
+        zuerst.preparation_call_ts = Some(NOW);
+        zuerst.preparation_call_rank = Some(0);
+        let mut danach = sample_match(3, MatchStatus::Scheduled, None);
+        danach.match_num = Some(3);
+        danach.preparation_call_ts = Some(NOW);
+        danach.preparation_call_rank = Some(1);
+        let snapshot = BtpSnapshot {
+            tournament_name: "T".to_string(),
+            rest_minutes: None,
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+            matches: vec![danach, zuerst],
+        };
+        let ids: Vec<String> = build_tset(
+            &snapshot,
+            1,
+            &LivetickerContext::bare(&AppConfig::default()),
+        )
+        .event
+        .upcoming_matches
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+        assert_eq!(ids, vec!["btp_7", "btp_3"]);
     }
 
     #[test]

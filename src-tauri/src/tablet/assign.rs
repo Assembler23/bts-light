@@ -112,25 +112,30 @@ pub fn sort_key_parts(
 }
 
 /// Rückgabetyp von [`sort_key_with_manual_order`]/[`resolve_and_sort_key`] —
-/// benannt, damit ihn Aufrufer (an allen fünf Sortier-Stellen) nicht als
-/// unbenanntes Sieben-Tupel wiederholen müssen.
-pub type ManualOrderSortKey = (bool, usize, i64, i64, i64, i64, i64);
+/// benannt, damit ihn Aufrufer (an allen Sortier-Stellen) nicht als
+/// unbenanntes Acht-Tupel wiederholen müssen.
+pub type ManualOrderSortKey = (bool, usize, usize, i64, i64, i64, i64, i64);
 
-/// Wie [`sort_key_parts`], aber mit einem zusätzlichen, davorgeschalteten
-/// Sortierschlüssel: dem Rang im **manuellen Präfix** seiner Halle (Spec
-/// `spielliste-manuelle-reihenfolge.md`, ADR 0023). `manual_rank` kommt aus
-/// [`crate::tablet::queue_order::QueueOrderStore::rank`].
+/// Wie [`sort_key_parts`], aber mit zwei davorgeschalteten Rängen:
 ///
-/// **Löst den Vorrang „gerufen vor Präfix" ohne eigene Fallunterscheidung:**
-/// `!called` bleibt die erste Tupel-Komponente, `manual_rank` die zweite —
-/// ein bereits gerufenes Spiel (`called = true`, `!called = false`) steht
-/// damit immer vor jedem nicht gerufenen Spiel, unabhängig von dessen
-/// Präfix-Rang, weil Tupel lexikografisch verglichen werden und `false <
-/// true`. Ein Match ohne Präfix-Eintrag (`manual_rank = None`) fällt hinter
-/// jeden Präfix-Eintrag zurück, behält aber unter den übrigen
-/// nicht-eingereihten Spielen weiterhin BTPs eigene Reihenfolge.
+/// 1. dem **Aufruf-Rang** (`call_rank`, Spec `meetingpoint-reihenfolge`,
+///    ADR 0077) — der Position des aktiven Aufrufs in der Aufrufliste
+///    (`TabletState::preparation_calls`; die Liste ist die Wahrheit, der
+///    Rang wird nie gespeichert). `Some` heißt „gerufen"; gerufene Spiele stehen vor
+///    allen anderen und untereinander in Aufruf-Reihenfolge: wer zuerst
+///    gerufen wurde, kommt zuerst aufs Feld. Ein bloßes „gerufen ja/nein"
+///    gibt es bewusst nicht mehr — es ließ ein spät nachgeholtes Spiel nach
+///    der Spielliste vor alle Wartenden rutschen.
+/// 2. dem Rang im **manuellen Präfix** (Spec
+///    `spielliste-manuelle-reihenfolge.md`, ADR 0023), aus
+///    [`crate::tablet::queue_order::QueueOrderStore::rank`]. Ein Match ohne
+///    Präfix-Eintrag fällt hinter jeden Präfix-Eintrag zurück, behält aber
+///    unter den übrigen weiterhin BTPs eigene Reihenfolge.
+///
+/// Tupel werden lexikografisch verglichen (`false < true`), deshalb braucht
+/// der Vorrang keine eigene Fallunterscheidung.
 pub fn sort_key_with_manual_order(
-    called: bool,
+    call_rank: Option<usize>,
     manual_rank: Option<usize>,
     planned_time: Option<i64>,
     display_order: Option<i64>,
@@ -139,12 +144,19 @@ pub fn sort_key_with_manual_order(
     id: i64,
 ) -> ManualOrderSortKey {
     // Baut auf `sort_key_parts` auf (nicht nur begrifflich, auch im Code) —
-    // der Präfix-Rang schiebt sich als zweite Komponente davor, der Rest
-    // bleibt exakt die Basis-Definition.
-    let (not_called, planned_time, display_order, draw_id, match_num, id) =
-        sort_key_parts(called, planned_time, display_order, draw_id, match_num, id);
+    // die Ränge schieben sich davor, der Rest bleibt exakt die
+    // Basis-Definition.
+    let (not_called, planned_time, display_order, draw_id, match_num, id) = sort_key_parts(
+        call_rank.is_some(),
+        planned_time,
+        display_order,
+        draw_id,
+        match_num,
+        id,
+    );
     (
         not_called,
+        call_rank.unwrap_or(usize::MAX),
         manual_rank.unwrap_or(usize::MAX),
         planned_time,
         display_order,
@@ -154,16 +166,15 @@ pub fn sort_key_with_manual_order(
     )
 }
 
-/// Bündelt Hallen-Auflösung + Präfix-Rang-Nachschlag + Schlüsselbau — der
-/// **verpflichtende gemeinsame Helfer** für alle fünf Sortier-Stellen
-/// (Blocker 4 der Klärung, ADR 0023): Ohne ihn müsste jede Stelle Halle und
-/// Rang einzeln verketten, und genau diese Verkettung ist das Risiko, vor
-/// dem `docs/btp_protocol.md` warnt.
+/// Bündelt Hallen-Auflösung + Rang-Nachschlag + Schlüsselbau — der
+/// **verpflichtende gemeinsame Helfer** für alle Sortier-Stellen (Blocker 4
+/// der Klärung, ADR 0023): Ohne ihn müsste jede Stelle Halle und Rang einzeln
+/// verketten, und genau diese Verkettung ist das Risiko, vor dem
+/// `docs/btp_protocol.md` warnt.
 ///
 /// Liefert Halle + Herkunft **mit zurück** (Code-Review-Fund 14.08.2026):
 /// Aufrufer, die die Halle ohnehin brauchen (Gruppierung, Anzeige), riefen
-/// sonst `hall_for_match` ein zweites Mal mit denselben Argumenten auf —
-/// unnötige doppelte Locations-/Regel-Suche bei jedem Sortierlauf.
+/// sonst `hall_for_match` ein zweites Mal mit denselben Argumenten auf.
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_and_sort_key(
     config: &AppConfig,
@@ -172,22 +183,26 @@ pub fn resolve_and_sort_key(
     manual_hall: Option<&str>,
     called_hall: Option<&str>,
     auto_hall: Option<&str>,
-    called: bool,
+    call_rank: Option<usize>,
     order: &QueueOrderStore,
 ) -> (String, HallSource, ManualOrderSortKey) {
     let (hall, source) = hall_for_match(config, snap, m, manual_hall, called_hall, auto_hall);
     // Die Halle wird hier nur noch aufgelöst, weil die Aufrufer sie für die
     // Anzeige brauchen — für den Schlüssel spielt sie keine Rolle (ADR 0026).
-    (hall, source, sort_key_for(m, called, order))
+    (hall, source, sort_key_for(m, call_rank, order))
 }
 
 /// Der Ordnungsschlüssel eines Spiels **ohne** Hallen-Auflösung — für
-/// Stellen, die nur sortieren müssen (Meetingpoint-Seite). Derselbe Schlüssel
-/// wie in [`resolve_and_sort_key`], damit die Anzeige nie von der Vergabe
-/// abweicht. Der Rang kommt aus EINER globalen Reihenfolge (ADR 0026).
-pub fn sort_key_for(m: &BtpMatch, called: bool, order: &QueueOrderStore) -> ManualOrderSortKey {
+/// Stellen, die nur sortieren müssen. Derselbe Schlüssel wie in
+/// [`resolve_and_sort_key`], damit keine Anzeige von der Vergabe abweicht.
+/// Der Präfix-Rang kommt aus EINER globalen Reihenfolge (ADR 0026).
+pub fn sort_key_for(
+    m: &BtpMatch,
+    call_rank: Option<usize>,
+    order: &QueueOrderStore,
+) -> ManualOrderSortKey {
     sort_key_with_manual_order(
-        called,
+        call_rank,
         order.rank(m.id),
         m.planned_time,
         m.display_order,
@@ -234,7 +249,7 @@ pub fn ready_queue(
             let manual = manual_halls.get(&m.id).map(String::as_str);
             let auto = auto_halls.get(&m.id).map(String::as_str);
             let (_, _, key) =
-                resolve_and_sort_key(config, snap, m, manual, None, auto, false, order);
+                resolve_and_sort_key(config, snap, m, manual, None, auto, None, order);
             (key, m.id)
         })
         .collect();
@@ -914,6 +929,7 @@ mod tests {
             pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),
@@ -1674,12 +1690,33 @@ mod tests {
     }
 
     #[test]
+    fn gerufene_ordnen_sich_nach_aufrufrang_nicht_nach_praefix_oder_ansetzung() {
+        // ADR 0077: Unter Gerufenen entscheidet allein der Aufruf-Rang. Rang 0
+        // ist spät angesetzt und ohne Präfix, Rang 1 früh angesetzt mit
+        // Präfix-Rang 0 — trotzdem kommt Rang 0 zuerst.
+        let erst_gerufen =
+            sort_key_with_manual_order(Some(0), None, Some(999), None, Some(9), Some(9), 9);
+        let spaeter_gerufen =
+            sort_key_with_manual_order(Some(1), Some(0), Some(1), None, Some(1), Some(1), 1);
+        assert!(erst_gerufen < spaeter_gerufen);
+    }
+
+    #[test]
+    fn jede_gerufene_steht_vor_jeder_nicht_gerufenen() {
+        let letzte_gerufene =
+            sort_key_with_manual_order(Some(usize::MAX - 1), None, None, None, None, None, 99);
+        let beste_wartende =
+            sort_key_with_manual_order(None, Some(0), Some(0), None, Some(0), Some(0), 0);
+        assert!(letzte_gerufene < beste_wartende);
+    }
+
+    #[test]
     fn manual_order_ein_gerufenes_match_schlaegt_jeden_praefix_eintrag() {
         // Blocker 1 der Klärung: der Präfix wirkt nur INNERHALB der noch
         // nicht gerufenen Spiele — ein Aufruf sticht immer.
-        let called = sort_key_with_manual_order(true, None, Some(2), None, Some(2), Some(2), 2);
+        let called = sort_key_with_manual_order(Some(0), None, Some(2), None, Some(2), Some(2), 2);
         let praefix_erster =
-            sort_key_with_manual_order(false, Some(0), Some(1), None, Some(1), Some(1), 1);
+            sort_key_with_manual_order(None, Some(0), Some(1), None, Some(1), Some(1), 1);
         assert!(called < praefix_erster, "gerufen schlägt Präfix-Rang 0");
     }
 
@@ -1688,16 +1725,16 @@ mod tests {
         // Ein spät angesetztes Match mit Präfix-Rang 0 steht trotzdem vor
         // einem früh angesetzten Match ohne Präfix-Eintrag.
         let vorgezogen =
-            sort_key_with_manual_order(false, Some(0), Some(999), None, Some(1), Some(1), 9);
+            sort_key_with_manual_order(None, Some(0), Some(999), None, Some(1), Some(1), 9);
         let frueh_ohne_praefix =
-            sort_key_with_manual_order(false, None, Some(1), None, Some(1), Some(1), 1);
+            sort_key_with_manual_order(None, None, Some(1), None, Some(1), Some(1), 1);
         assert!(vorgezogen < frueh_ohne_praefix);
     }
 
     #[test]
     fn manual_order_ohne_praefix_eintrag_bleibt_die_btp_reihenfolge_massgeblich() {
-        let frueh = sort_key_with_manual_order(false, None, Some(1), None, Some(1), Some(1), 1);
-        let spaet = sort_key_with_manual_order(false, None, Some(2), None, Some(1), Some(1), 2);
+        let frueh = sort_key_with_manual_order(None, None, Some(1), None, Some(1), Some(1), 1);
+        let spaet = sort_key_with_manual_order(None, None, Some(2), None, Some(1), Some(1), 2);
         assert!(frueh < spaet);
     }
 
@@ -1708,8 +1745,8 @@ mod tests {
         // zusätzlichen, für alle gleichen Rang-Feld in der Mitte.
         let a = sort_key_parts(false, Some(1), None, Some(3), Some(2), 10);
         let b = sort_key_parts(false, Some(1), None, Some(3), Some(4), 11);
-        let ma = sort_key_with_manual_order(false, None, Some(1), None, Some(3), Some(2), 10);
-        let mb = sort_key_with_manual_order(false, None, Some(1), None, Some(3), Some(4), 11);
+        let ma = sort_key_with_manual_order(None, None, Some(1), None, Some(3), Some(2), 10);
+        let mb = sort_key_with_manual_order(None, None, Some(1), None, Some(3), Some(4), 11);
         assert_eq!(a < b, ma < mb);
     }
 
@@ -1732,9 +1769,9 @@ mod tests {
         order.reorder(&[1, 4], 4, Some(1)); // Match 4 vor Match 1 ziehen
 
         let (hall_vorgezogen, _, key_vorgezogen) =
-            resolve_and_sort_key(&config, &s, &vorgezogen, None, None, None, false, &order);
+            resolve_and_sort_key(&config, &s, &vorgezogen, None, None, None, None, &order);
         let (_, _, key_frueh) =
-            resolve_and_sort_key(&config, &s, &frueh, None, None, None, false, &order);
+            resolve_and_sort_key(&config, &s, &frueh, None, None, None, None, &order);
         assert_eq!(hall_vorgezogen, "", "Halle wird mit zurückgegeben");
         assert!(
             key_vorgezogen < key_frueh,
@@ -1760,9 +1797,9 @@ mod tests {
         order.reorder(&[1, 2], 2, Some(1));
 
         let (hall_a, _, key_a) =
-            resolve_and_sort_key(&config, &s, &a, Some("Halle A"), None, None, false, &order);
+            resolve_and_sort_key(&config, &s, &a, Some("Halle A"), None, None, None, &order);
         let (hall_b, _, key_b) =
-            resolve_and_sort_key(&config, &s, &b, Some("Halle B"), None, None, false, &order);
+            resolve_and_sort_key(&config, &s, &b, Some("Halle B"), None, None, None, &order);
         assert_eq!(hall_a, "Halle A");
         assert_eq!(hall_b, "Halle B");
         assert!(key_b < key_a, "der Präfix kennt keine Hallengrenze mehr");

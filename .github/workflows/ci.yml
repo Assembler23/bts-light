@@ -198,6 +198,12 @@ jobs:
       - name: Zuletzt gespielt (JS)
         run: node scripts/test-zuletzt-gespielt.mjs
 
+      # Ziel beim Umsortieren der gerufenen Spiele (Aufruf-Reihenfolge) und
+      # Gleichlauf der Inline-Kopie in tl.html. Ein falsches Ziel brächte
+      # die falsche Partie zuerst aufs Feld.
+      - name: Gerufene umsortieren (JS)
+        run: node scripts/test-gerufene-reihe.mjs
+
       # Was links und rechts auf der Zähltafel steht. Falsche Seite oder ein
       # gezählter Geistersatz zeigt Spielern und Zuschauern am Feld einen
       # falschen Stand — und niemand merkt es, weil keine Namen dabeistehen.

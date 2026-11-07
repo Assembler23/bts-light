@@ -33,6 +33,9 @@ ok("Zähler mit SR-Pflicht", mp.mpZaehler({ ...partie, srNoetig: true }), { da: 
 ok("Check-in-Body", mp.mpCheckinBody("Halle A", 7, { art: "sr" }, 1),
   { halle: "Halle A", matchId: 7, platz: { art: "sr" }, present: true, ort: "meetingpoint" });
 ok("Uhrzeit leer ohne Wert", mp.mpUhrzeit(0), "");
+ok("Aufgerufen: Nummer → Feld", mp.mpAufgerufenText("3"), "Aufgerufen – Feld 3");
+ok("Aufgerufen: Name bleibt", mp.mpAufgerufenText("Court 2"), "Aufgerufen – Court 2");
+ok("Aufgerufen: leer", mp.mpAufgerufenText(null), "");
 const J = 1_000_000_000;
 ok("Feld frei: ohne Prognose leer", mp.mpFeldFrei(undefined, false, J), "");
 ok("Feld frei: angebrochene Minute zählt voll", mp.mpFeldFrei(J + 5 * 60000 + 1, false, J), "Feld frei in ca. 6 min");
@@ -59,7 +62,7 @@ function funktion(text, name) {
   }
   return null;
 }
-const NAMEN = ["mpHalleAusQuery", "mpGruppen", "mpZaehler", "mpCheckinBody", "mpUhrzeit", "mpFeldFrei"];
+const NAMEN = ["mpHalleAusQuery", "mpGruppen", "mpZaehler", "mpCheckinBody", "mpUhrzeit", "mpFeldFrei", "mpAufgerufenText"];
 const quellen = NAMEN.map((n) => funktion(seite, n));
 ok("alle Funktionen in der Seite", quellen.map((q) => q !== null), NAMEN.map(() => true));
 // eslint-disable-next-line no-new-func
@@ -70,6 +73,7 @@ const FAELLE = {
   mpZaehler: [[partie], [{}], [{ ...partie, srNoetig: true }]],
   mpCheckinBody: [["A", 1, { art: "sr" }, true], [null, 2, { art: "spieler", seite: 1, pos: 0 }, 0]],
   mpUhrzeit: [[0], [Date.UTC(2026, 10, 2, 9, 5)]],
+  mpAufgerufenText: [["3"], [" 12 "], ["Feld 4"], [""], [null]],
   mpFeldFrei: [[0, false, J], [J + 5 * 60000 + 1, false, J], [J + 6 * 60000, true, J], [J - 1, false, J], [J + 75 * 60000, false, J], [J + 120 * 60000, true, J]],
 };
 for (const n of NAMEN) {

@@ -104,7 +104,9 @@ ans Ende der Gerufenen. Die Knöpfe erscheinen nur, wenn der Host
 wirken die Knöpfe nur auf Nachbarn derselben Halle.
 
 **Desktop-App.** Im Block „In Vorbereitung" der Vorbereitungs-Seite gibt es
-Ziehen und Knöpfe nach demselben Muster, gruppiert nach Aufruf-Halle.
+Ziehen und zwei Pfeile (eine Position hoch bzw. runter). Das Ziel bestimmt
+dieselbe Funktion wie im TL-Web (`src/io/gerufeneReihe.mjs`), also nur
+innerhalb derselben Aufruf-Halle; der Block selbst bleibt ungruppiert.
 
 **Am Ansage-Slave** gibt es weder Griffe noch Knöpfe. Die Vergabe läuft am
 Master, ein Zug am Slave hätte keine Wirkung. Die TL-Aktion wird dort
@@ -268,6 +270,28 @@ gibt keinen neuen Auth- oder Dateipfad.
   Spielliste. Das ist bewusst so (Brief, Antwort 5) und steht im Changelog.
 - **Rollback:** Eine ältere App ignoriert `order_v` und sortiert wieder nach
   der Spielliste. Die Vec-Reihenfolge bleibt dabei unschädlich erhalten.
+
+## Nachtrag 07.11.2026: „Aufgerufen – Feld N" auf der Meetingpoint-Seite
+
+Wunsch der Turnierleitung während der Umsetzung: Kommt eine Partie aus dem
+Meetingpoint aufs Feld, bleibt ihre Karte noch **2 Minuten** stehen und sagt,
+dass sie aufgerufen ist und auf welches Feld.
+
+- `StoredCall.geparkt_ms` hält fest, wann der Aufruf geparkt wurde (BTP
+  meldet die Partie auf einem Feld). Der Wert wird persistiert und beim
+  Reaktivieren gelöscht.
+- `MeetingpointStore::kuerzlich_aufgerufen(now, frist)` liefert geparkte
+  Aufrufe innerhalb von `relay_proto::MP_AUFGERUFEN_ANZEIGE_MS` (120 s),
+  neueste zuerst.
+- `meetingpoint::view` stellt sie **vor** die wartenden Partien, mit
+  `MpPartie.aufgerufen_feld` (JSON `aufgerufenFeld`, BTP-Feldname). Das
+  geschieht nur, solange BTP die Partie auf dem Feld führt.
+- Die Seite zeichnet eine gelbe Karte „Aufgerufen – Feld 3" (`mpAufgerufenText`
+  in `src/io/meetingpoint.mjs` und als Inline-Kopie). Die Namen sind dort
+  nicht antippbar.
+- Entschieden in der Umsetzung (an sie delegiert): oben statt an alter
+  Stelle, damit der Hinweis auffällt; feste 2 Minuten ohne Einstellung; keine
+  SR-Zeile auf der Karte.
 
 ## Offene Fragen / Annahmen
 

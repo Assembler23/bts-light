@@ -4171,7 +4171,36 @@ impl TabletState {
     /// Zeitpunkt stehen; in eine andere Halle ersetzt der Aufruf den alten
     /// (Spec `meetingpoint-spielbereit`, Entscheidung 4).
     pub fn add_preparation_call(&self, call: PreparationCall) {
-        self.preparation_calls.call(call);
+        self.add_preparation_call_mit(call, false);
+    }
+
+    /// Wie [`add_preparation_call`](Self::add_preparation_call); `auto`
+    /// markiert einen Aufruf der Aufruf-Automatik. Der Aufruf nimmt das Spiel
+    /// aus dem Präfix der Warteliste (ADR 0077): Unter Gerufenen zählt nur
+    /// der Aufruf-Rang, „nach oben gezogen" hieß „als Nächstes gerufen" —
+    /// und nach einer Rücknahme steht es wieder auf seinem BTP-Platz.
+    pub fn add_preparation_call_mit(&self, call: PreparationCall, auto: bool) {
+        let match_id = call.match_id;
+        self.preparation_calls.call_mit(call, auto);
+        self.queue_order.remove(match_id);
+    }
+
+    /// Bindet die Aufrufe ans Turnier des Snapshots (vor `auto_assign`, ADR
+    /// 0071) und ordnet eine Altdatei einmal nach dem **bisherigen**
+    /// Vergabe-Schlüssel (ADR 0077) — vor `reconcile_queue_order`, solange
+    /// der Präfix der Gerufenen noch steht.
+    pub fn binde_meetingpoint(&self, snapshot: &BtpSnapshot) {
+        self.preparation_calls
+            .set_tournament(&snapshot.tournament_name);
+        self.preparation_calls.ordne_einmalig(|id| {
+            snapshot
+                .matches
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| crate::tablet::assign::sort_key_for(m, None, &self.queue_order))
+                // Unbekannte Spiele ans Ende (`None` < `Some` umgekehrt).
+                .map_or((1u8, None), |k| (0u8, Some(k)))
+        });
     }
 
     /// Alle aktiven „in Vorbereitung"-Aufrufe in Aufrufreihenfolge. Spiele,
@@ -4218,8 +4247,7 @@ impl TabletState {
     /// die transienten Felder `preparation_call_ts` und `preparation_hall`
     /// des zugehörigen Matches gesetzt.
     pub fn apply_preparation_calls(&self, snapshot: &mut BtpSnapshot) {
-        self.preparation_calls
-            .set_tournament(&snapshot.tournament_name);
+        self.binde_meetingpoint(snapshot);
         // Gelöschte Aufrufe vergessen auch ihre Nachruf-Stufen — sonst erbte
         // ein späterer neuer Aufruf desselben Spiels „Dritter Aufruf".
         for match_id in self.preparation_calls.reconcile(snapshot) {
@@ -4229,7 +4257,7 @@ impl TabletState {
         // ersetzt hat, ebenso (Spec `meetingpoint-spielbereit`, Nr. 4).
         let feld = crate::tablet::meetingpoint::auf_dem_feld(self, snapshot);
         self.preparation_calls.bereinige_checkins(snapshot, &feld);
-        for call in self.preparation_calls.active_calls().iter() {
+        for (rang, call) in self.preparation_calls.active_calls().iter().enumerate() {
             // Hallenname aus der LocationID auflösen (None → kein Halleneintrag).
             let hall = call.location_id.and_then(|lid| {
                 snapshot
@@ -4240,6 +4268,7 @@ impl TabletState {
             });
             if let Some(m) = snapshot.matches.iter_mut().find(|m| m.id == call.match_id) {
                 m.preparation_call_ts = Some(call.called_at_ms);
+                m.preparation_call_rank = Some(rang);
                 m.preparation_hall = hall;
             }
         }
@@ -5034,6 +5063,7 @@ pub(crate) mod tests {
             pause_ms: None,
             preparation_call_ts: None,
             preparation_hall: None,
+            preparation_call_rank: None,
             official1_id: None,
             official2_id: None,
             scoring: crate::btp::model::ScoringFormat::default(),

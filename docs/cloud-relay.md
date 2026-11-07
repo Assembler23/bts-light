@@ -1202,6 +1202,17 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   Restdauer, weil der Relay den Stand nur bei Änderung bekommt; die Seite
   rechnet gegen den `Date`-Kopf der Antwort. Ein Relay vor v0.9.345 lässt
   die Felder beim Durchreichen fallen → kein Countdown, sonst unverändert.
+- `MpPartie.aufgerufenFeld` (seit v0.9.347, `serde(default)`, ohne Wert nicht
+  serialisiert): Die Partie kam gerade aufs Feld. Die Seite zeigt sie noch
+  `MP_AUFGERUFEN_ANZEIGE_MS` (2 min) als „Aufgerufen – Feld N". Ein alter
+  Relay lässt das Feld fallen, dann erscheint eine leere Karte ohne Hinweis.
+  Der Relay deployt beim Merge aber vor jeder App.
+- `TlAction::CalledReorder { matchId, beforeMatchId? }` (JSON
+  `called_reorder`, seit v0.9.347, ADR 0077): ein gerufenes Spiel in der
+  Aufruf-Reihenfolge verschieben, nur innerhalb derselben Aufruf-Halle.
+  Fehler kommen als `NotAllowed` mit Text zurück. Der Relay leitet die Aktion
+  typisiert weiter, ohne eigene Logik. Die Seite zeigt Griffe nur bei
+  `TlState.can_reorder_called`.
 - Neu: `TlAction::MeetingpointSet`, `MatchBrief.feldCheck` (`serde(default)`).
   Neue Enums `MpPlatz`/`MpOrt` haben einen `serde(other)`-Auffang.
   **Deploy-Reihenfolge: Relay vor App** (der Relay parst `TlAction`; ein alter

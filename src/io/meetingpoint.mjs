@@ -26,6 +26,14 @@ export function mpHalleAusQuery(search) {
   return "";
 }
 
+/** Text der Karte einer gerade aufs Feld gerufenen Partie. Reine Feldnummer
+ *  → „Feld 3"; ein Name, der schon „Feld …" o. ä. sagt, bleibt, wie er ist. */
+export function mpAufgerufenText(feld) {
+  var f = String(feld == null ? "" : feld).trim();
+  if (!f) return "";
+  return "Aufgerufen – " + (/^\d+$/.test(f) ? "Feld " + f : f);
+}
+
 /** Plätze einer Partie nach Seite 1, Seite 2 und Schiedsrichter. */
 export function mpGruppen(partie) {
   var g = { team1: [], team2: [], sr: null };

@@ -460,9 +460,15 @@ gegeneinander. `DisplayOrder` selbst lässt sich **nicht** nach BTP
 zurückschreiben (siehe Abschnitt weiter unten) — die manuelle Reihenfolge
 bleibt daher rein host-lokal.
 
-Nicht betroffen: die Liste der **in Vorbereitung gerufenen** Spiele
-(`build_prepared_list`). Sie folgt der Reihenfolge der Aufrufe — wer
-zuerst gerufen wurde, steht oben, und das ist dort die richtige Ordnung.
+**Gerufene Spiele** (seit v0.9.347, ADR 0077): Unter ihnen entscheidet der
+**Aufruf-Rang**, die Position in der Aufrufliste (`MeetingpointStore.calls`).
+`sort_key_with_manual_order` nimmt dafür `call_rank: Option<usize>` statt
+eines bloßen `called: bool`. Der Schlüssel ist `(nicht gerufen, Aufruf-Rang,
+Präfix-Rang, PlannedTime, DisplayOrder, DrawID, Spielnummer, ID)`. Ein Aufruf
+nimmt das Spiel aus dem Präfix. Für den Liveticker stempelt
+`apply_preparation_calls` den Rang als `BtpMatch.preparation_call_rank`. Damit
+folgen alle Sortierstellen derselben Ordnung wie `build_prepared_list` (der
+Cloud-Vorbereitungsmonitor), der schon immer die Aufrufreihenfolge zeigte.
 
 ### `DisplayOrder` zurückschreiben — geht nicht
 

@@ -3730,7 +3730,8 @@ pub struct PreparationCandidate {
 /// Hallen des Turniers (für das hallenweise Aufrufen im Frontend).
 #[derive(Serialize)]
 pub struct PreparationView {
-    /// Eingeplante, ruf-bare Spiele – gerufene zuerst, dann nach Spielnummer.
+    /// Eingeplante, ruf-bare Spiele – gerufene zuerst (in Aufruf-Reihenfolge,
+    /// ADR 0077), dann in der Reihenfolge der Spielliste.
     pub candidates: Vec<PreparationCandidate>,
     /// Hallen des Turniers (BTP `Locations`). Ab zwei Einträgen blendet das
     /// Frontend die Hallen-Auswahl ein.
@@ -3740,6 +3741,10 @@ pub struct PreparationView {
     /// jede Vorbereitungs-Ansage diese Sicht ohnehin liest — so spricht das
     /// Ansage-Gerät den Text des Turnier-PCs.
     pub meetingpoint_ansage: Option<crate::config::MpAnsageZusatz>,
+    /// Dürfen die Gerufenen hier umsortiert werden (Spec
+    /// `meetingpoint-reihenfolge`)? Nicht am Ansage-Slave — die Vergabe läuft
+    /// am Master.
+    pub can_reorder_called: bool,
 }
 
 /// Eine Halle des Turniers für die Frontend-Auswahl.
@@ -3799,6 +3804,7 @@ pub fn preparation_candidates_for(
             candidates: Vec::new(),
             locations: Vec::new(),
             meetingpoint_ansage: cfg.meetingpoint.ansage_zusatz(),
+            can_reorder_called: !cfg.slave_mode,
         };
     };
     let calls = tablet.preparation_calls();
@@ -3849,7 +3855,7 @@ pub fn preparation_candidates_for(
                 manual_hall,
                 called_hall,
                 auto_halls.get(&m.id).map(String::as_str),
-                call.is_some(),
+                calls.iter().position(|c| c.match_id == m.id),
                 tablet.queue_order_store(),
             );
             (key, m, hall)
@@ -3920,6 +3926,7 @@ pub fn preparation_candidates_for(
         candidates,
         locations,
         meetingpoint_ansage: cfg.meetingpoint.ansage_zusatz(),
+        can_reorder_called: !cfg.slave_mode,
     }
 }
 
@@ -5989,6 +5996,32 @@ pub fn queue_reorder(
     let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
     state.tablet.queue_reorder(&cfg, match_id, before_match_id);
     Ok(())
+}
+
+/// Ein **gerufenes** Spiel in der Aufruf-Reihenfolge verschieben (Spec
+/// `meetingpoint-reihenfolge`, ADR 0077) — derselbe Store-Weg wie
+/// `TlAction::CalledReorder`. Am Ansage-Slave abgelehnt: Die Vergabe läuft
+/// am Master, ein Zug hier hätte keine Wirkung.
+#[tauri::command]
+pub fn called_reorder(
+    state: State<'_, AppState>,
+    match_id: i64,
+    before_match_id: Option<i64>,
+) -> Result<(), String> {
+    let slave = state
+        .config
+        .lock()
+        .expect("Config-Mutex nicht vergiftet")
+        .slave_mode;
+    if slave {
+        return Err("Am Ansage-Slave wirkungslos — bitte am Turnier-PC umsortieren.".into());
+    }
+    state
+        .tablet
+        .meetingpoint_store()
+        .verschiebe(match_id, before_match_id)
+        .map(|_| ())
+        .map_err(|f| f.text().to_string())
 }
 
 /// Die manuelle Spielreihenfolge **aller** Hallen auf einmal verwerfen

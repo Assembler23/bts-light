@@ -82,6 +82,7 @@ fn a_match(id: i64, match_num: i64, planned_time: i64) -> BtpMatch {
         pause_ms: None,
         preparation_call_ts: None,
         preparation_hall: None,
+        preparation_call_rank: None,
         scoring: ScoringFormat::default(),
         team1_seed: None,
         team2_seed: None,
@@ -363,4 +364,76 @@ fn all_three_views_fall_back_to_the_btp_schedule_without_a_prefix() {
     assert_eq!(tl_ids, vec![1, 2, 3]);
     assert_eq!(desktop_ids, tl_ids);
     assert_eq!(live_ids, tl_ids);
+}
+
+#[test]
+fn alle_ansichten_zeigen_gerufene_in_aufrufreihenfolge() {
+    // ADR 0077: Gerufen werden 3 (Präfix vorn, spät angesetzt), dann 1.
+    // Unter Gerufenen zählt allein der Aufruf-Rang: 3, 1 — danach 2.
+    // Dazu Meetingpoint-Seite (`meetingpoint::view`) mit derselben Folge.
+    let matches = vec![
+        a_match(1, 1, 202_608_071_200),
+        a_match(2, 2, 202_608_071_300),
+        a_match(3, 3, 202_608_071_400),
+    ];
+    let snap = snapshot(matches);
+    let mut config = AppConfig::default();
+    config.meetingpoint.enabled = true;
+
+    let tablet = TabletState::default();
+    tablet.set_snapshot(snap.clone());
+    tablet.queue_order_store().reorder(&[1, 2, 3], 3, Some(1));
+    for id in [3, 1] {
+        tablet.add_preparation_call(bts_light_lib::tablet::state::PreparationCall {
+            match_id: id,
+            location_id: None,
+            called_at_ms: 1,
+        });
+    }
+    let mut gestempelt = snap.clone();
+    tablet.apply_preparation_calls(&mut gestempelt);
+
+    let tl_ids: Vec<i64> = tl::build_state(&tablet, &config, 0, 1)
+        .queue
+        .iter()
+        .map(|m| m.match_id)
+        .collect();
+    assert_eq!(tl_ids, vec![3, 1, 2], "TL-Web: Aufruf-Rang vor Ansetzung");
+
+    let desktop_ids: Vec<i64> = preparation_candidates_for(&tablet, &config)
+        .candidates
+        .iter()
+        .map(|c| c.match_id)
+        .collect();
+    assert_eq!(desktop_ids, tl_ids, "Desktop weicht ab");
+
+    let ctx = LivetickerContext::new(
+        &config,
+        tablet.manual_halls(),
+        tablet.auto_hall_store().halls(),
+        tablet.queue_order_store(),
+    );
+    let live_ids: Vec<i64> = build_tset(&gestempelt, 1, &ctx)
+        .event
+        .upcoming_matches
+        .iter()
+        .map(|m| {
+            m.id.strip_prefix("btp_")
+                .and_then(|s| s.parse::<i64>().ok())
+                .expect("Match-ID im erwarteten Format")
+        })
+        .collect();
+    assert_eq!(live_ids, tl_ids, "Liveticker weicht ab");
+
+    let mp_ids: Vec<i64> = bts_light_lib::tablet::meetingpoint::view(
+        &tablet,
+        Some(&gestempelt),
+        &config.meetingpoint,
+        "",
+    )
+    .partien
+    .iter()
+    .map(|p| p.match_id)
+    .collect();
+    assert_eq!(mp_ids, vec![3, 1], "Meetingpoint-Seite weicht ab");
 }

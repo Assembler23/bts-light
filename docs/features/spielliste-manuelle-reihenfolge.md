@@ -456,6 +456,9 @@ Drei Befunde aus dem Betrieb, alle in einem Zug behoben:
 gerufenen** Spiele vollständig. Ein gerade gerufenes Präfix-Mitglied nimmt an
 `ready_queue` nicht teil und fällt beim nächsten Zug aus dem Präfix — nach
 dem Aufruf ist die Reihenfolge ohnehin nicht mehr seine Sache.
+**Seit v0.9.347 (ADR 0077)** nimmt der Aufruf das Spiel ausdrücklich aus dem
+Präfix. Gerufene ordnen sich nach dem Aufruf-Rang und sind über
+`called_reorder` eigens umsortierbar (Spec `meetingpoint-reihenfolge`).
 
 **Bekannte Doppelgeste am Griff (vorbestehend, unverändert):** Auf Touch
 startet ein Griff-Tipp neben dem Umsortier-Zug auch den Zuweisungs-Drag

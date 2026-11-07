@@ -428,6 +428,26 @@ Stelle — das wirkte bisher beim dritten Mal nicht, wenn alles innerhalb von
 zwanzig Sekunden passierte. Der Turnier-PC hielt den Zug für ein Versehen und
 bestätigte ihn, ohne etwas zu tun. Jetzt zählt jeder Zug.
 
+### Gerufene Spiele umsortieren
+
+Gerufene Spiele stehen oben in der Liste und kommen **in der Reihenfolge
+ihres Aufrufs** aufs Feld: Wer zuerst gerufen wurde, ist zuerst dran (seit
+v0.9.347). Diese Reihenfolge lässt sich ändern:
+
+- am **Griff** (⠿) einer gerufenen Zeile ziehen. Wer auf eine wartende
+  Zeile ablegt, schiebt das Spiel ans Ende der Gerufenen;
+- im **⋮-Menü** der Zeile: **⤒ An den Anfang der Gerufenen**,
+  **↑ Eine Position nach oben**, **↓ Eine Position nach unten**;
+<!-- pruef: "⤒ An den Anfang der Gerufenen" in src-tauri/assets/tl.html -->
+- mit eingeschalteten Verschiebe-Knöpfen (Profil) auch direkt an der Zeile.
+
+Im Mehr-Hallen-Turnier gilt die Reihenfolge je Halle: Verschoben wird nur
+zwischen Spielen, die in dieselbe Halle gerufen wurden. Ein Zug über die
+Hallengrenze wird mit einer Meldung abgelehnt. Wird ein Spiel in der
+Warteliste nach oben gezogen, ändert das nichts an den Gerufenen. Es wird
+nur als Nächstes gerufen und stellt sich dann hinten an. Mehr:
+[Reihenfolge der Gerufenen](preparation.md#reihenfolge-der-gerufenen).
+
 **Über lange Listen ziehen** (seit v0.9.271): Zieh die Zeile an den oberen
 oder unteren Rand der Liste und **bleib dort stehen** — die Liste scrollt
 weiter, solange du hältst. Wie schnell, hängt davon ab, wie weit du zum Rand
