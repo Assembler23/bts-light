@@ -16,6 +16,14 @@ use relay_proto::{MonitorCommand, MonitorCommandKind, MonitorDeviceInfo};
 use crate::btp::model::{BtpCourt, BtpMatch, BtpSnapshot, Discipline, MatchStatus};
 use crate::tablet::perf;
 
+/// Match-ID → (Feld frei in Unix-ms, Prognose unsicher).
+pub(crate) type MpPrognoseWerte = HashMap<i64, (u64, bool)>;
+
+/// Wie alt die Meetingpoint-Prognose höchstens sein darf, bevor die Seite
+/// sie verschweigt — Takt 30 s, also reichlich Luft für einen langsamen
+/// Zyklus, aber kein minutenlang erstarrter Countdown.
+pub(crate) const MP_PROGNOSE_MAX_ALTER_MS: u64 = 3 * 60_000;
+
 /// Aktuelle Unix-Zeit in Millisekunden.
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -657,6 +665,13 @@ pub struct TabletState {
     /// Diagnose-Gedächtnis für den Prognose/Wirklichkeit-Vergleich (E12),
     /// gepflegt von `tl::build_state_limited`.
     predicted_starts: RwLock<HashMap<i64, u64>>,
+    /// Frische Prognose für die Meetingpoint-Seite: (Rechenzeitpunkt,
+    /// Match-ID → (Feld frei in Unix-ms, unsicher)). **Ersetzt** statt
+    /// gemergt — anders als `predicted_starts` darf hier kein Altwert eines
+    /// Spiels stehen bleiben, das keine Prognose mehr hat (Wunschfeld,
+    /// Schalter aus): Ein stehengebliebener Countdown wäre schlimmer als
+    /// keiner. Gefüllt vom Sync-Loop (`SyncEngine::mp_prognose_auffrischen`).
+    mp_prognose: RwLock<(u64, MpPrognoseWerte)>,
     /// (Messwert-Generation, Statistik): Cache für `cached_time_stats` —
     /// neu gerechnet nur, wenn sich am Zeiten-Store etwas geändert hat.
     time_stats_cache: Mutex<Option<(u64, std::sync::Arc<crate::tablet::predict::TimeStats>)>>,
@@ -1814,6 +1829,23 @@ impl TabletState {
     /// [`Self::retain_predicted_starts`] (aus dem Turnier verschwunden).
     pub(crate) fn merge_predicted_starts(&self, map: std::collections::HashMap<i64, u64>) {
         self.predicted_starts.write().unwrap().extend(map);
+    }
+
+    /// Meetingpoint-Prognose ersetzen (siehe Feld `mp_prognose`).
+    pub(crate) fn set_mp_prognose(&self, stand_ms: u64, werte: MpPrognoseWerte) {
+        *self.mp_prognose.write().unwrap() = (stand_ms, werte);
+    }
+
+    /// Prognose „Feld frei" einer gerufenen Partie für die Meetingpoint-
+    /// Seite. Ein Stand, der älter als [`MP_PROGNOSE_MAX_ALTER_MS`] ist,
+    /// zählt nicht: Steht der Sync-Loop (BTP weg, Übertragung gestoppt),
+    /// soll die Seite keinen erstarrten Countdown zeigen.
+    pub(crate) fn mp_prognose(&self, match_id: i64, now_ms: u64) -> Option<(u64, bool)> {
+        let g = self.mp_prognose.read().unwrap();
+        if now_ms.saturating_sub(g.0) > MP_PROGNOSE_MAX_ALTER_MS {
+            return None;
+        }
+        g.1.get(&match_id).copied()
     }
 
     /// Zuletzt publizierte Prognose eines Matches — nur die Tests lesen

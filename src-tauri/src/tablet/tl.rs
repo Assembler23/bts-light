@@ -3685,13 +3685,29 @@ pub(crate) fn prognose_auffrischen(
     config: &AppConfig,
     now_ms: u64,
 ) -> std::collections::HashMap<i64, u64> {
+    prognose_mit_unsicherheit(tablet, config, now_ms)
+        .into_iter()
+        .map(|(id, (ms, _))| (id, ms))
+        .collect()
+}
+
+/// Wie [`prognose_auffrischen`], aber samt Unsicherheits-Flag (zu wenige
+/// Messwerte) — für die Meetingpoint-Seite, die dann „ca." davorsetzt.
+pub(crate) fn prognose_mit_unsicherheit(
+    tablet: &TabletState,
+    config: &AppConfig,
+    now_ms: u64,
+) -> std::collections::HashMap<i64, (u64, bool)> {
     if !config.prediction.enabled {
         return std::collections::HashMap::new();
     }
     build_state(tablet, config, now_ms, 0)
         .queue
         .iter()
-        .filter_map(|m| m.predicted_start_ms.map(|p| (m.match_id, p)))
+        .filter_map(|m| {
+            m.predicted_start_ms
+                .map(|p| (m.match_id, (p, m.predicted_uncertain)))
+        })
         .collect()
 }
 

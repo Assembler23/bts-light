@@ -77,6 +77,21 @@ export function mpCheckinBody(halle, matchId, platz, present) {
   };
 }
 
+/** Countdown „Feld frei in …" aus der Prognose (`feldFreiMs`, Uhr des
+ *  Turnier-PCs) und der Serverzeit `jetztMs`. Leer ohne Prognose. Ganze
+ *  Minuten, aufgerundet — „in 0 min" gibt es nicht, dann „jetzt".
+ *  Bewusst keine Tilde: Die bedeutet in der TL-Liste schon „noch keine
+ *  Messwerte" — hier steht dafür „(grob geschätzt)". */
+export function mpFeldFrei(feldFreiMs, unsicher, jetztMs) {
+  if (!feldFreiMs) return "";
+  var min = Math.ceil((feldFreiMs - jetztMs) / 60000);
+  if (!(min > 0)) return "Feld wird jetzt frei";
+  var dauer = min < 60
+    ? min + " min"
+    : Math.floor(min / 60) + " h" + (min % 60 ? " " + (min % 60) + " min" : "");
+  return "Feld frei in ca. " + dauer + (unsicher ? " (grob geschätzt)" : "");
+}
+
 /** Uhrzeit des Aufrufs als „HH:MM" (Ortszeit des Geräts). */
 export function mpUhrzeit(ms) {
   if (!ms) return "";

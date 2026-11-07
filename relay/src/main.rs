@@ -9381,6 +9381,8 @@ mod tests {
             bereit: false,
             ohne_sr: false,
             sr_noetig: false,
+            feld_frei_ms: None,
+            feld_frei_unsicher: false,
         };
         handle_host_frame(
             &broker,

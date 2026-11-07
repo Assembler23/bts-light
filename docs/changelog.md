@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.345
+
+- **Meetingpoint: „Feld frei in ca. 6 min".** Jede gerufene Partie zeigt auf
+  der Meetingpoint-Seite, wann nach der Prognose ein Feld für sie frei wird —
+  bei unsicherer Prognose mit „(grob geschätzt)", am Ende „Feld wird jetzt
+  frei". Voraussetzung: Startzeit-Prognose eingeschaltet. In der Cloud
+  erscheint die Zeile, sobald der Relay aktualisiert ist.
+
 ## v0.9.344
 
 - **Turnierleitung (Web): Profil-Editor aufgeräumt.** Die Einstellungen eines

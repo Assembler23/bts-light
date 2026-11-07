@@ -1196,6 +1196,12 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
 - Der Host pusht den Stand im 2-s-Takt nur bei Änderung (Fingerabdruck).
 - Die Seite liegt unter der Namespace-Adresse wie Tafel/Anzeige; dass die
   Kennung dort ablesbar ist, ist bewusst hingenommen (Abgrenzung ADR 0012).
+- `MpPartie.feldFreiMs` (Unix-ms, Uhr des Hosts) + `feldFreiUnsicher`
+  (seit v0.9.345, beide `serde(default)`, ohne Wert nicht serialisiert):
+  Prognose „Feld frei" für den Countdown der Seite. **Absolut** statt als
+  Restdauer, weil der Relay den Stand nur bei Änderung bekommt; die Seite
+  rechnet gegen den `Date`-Kopf der Antwort. Ein Relay vor v0.9.345 lässt
+  die Felder beim Durchreichen fallen → kein Countdown, sonst unverändert.
 - Neu: `TlAction::MeetingpointSet`, `MatchBrief.feldCheck` (`serde(default)`).
   Neue Enums `MpPlatz`/`MpOrt` haben einen `serde(other)`-Auffang.
   **Deploy-Reihenfolge: Relay vor App** (der Relay parst `TlAction`; ein alter

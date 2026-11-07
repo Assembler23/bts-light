@@ -952,7 +952,9 @@ pub fn view(
     if !cfg.enabled || !halle_ok {
         return v;
     }
+    let jetzt = crate::tablet::monitor::now_ms();
     for (call, sr, b) in bewertungen(tablet, snap, cfg) {
+        let prognose = tablet.mp_prognose(call.match_id, jetzt);
         let call_halle = hallen_name(snap, call.location_id);
         if !halle_passt(snap, halle, &call_halle) {
             continue;
@@ -984,6 +986,8 @@ pub fn view(
             bereit: b.bereit,
             ohne_sr: sr.ohne,
             sr_noetig: sr.noetig && !sr.ohne,
+            feld_frei_ms: prognose.map(|(ms, _)| ms),
+            feld_frei_unsicher: prognose.is_some_and(|(_, u)| u),
         });
     }
     v
@@ -1991,6 +1995,32 @@ mod tests {
         store.sync_roster(ids);
         t.set_snapshot(snap.clone());
         snap
+    }
+
+    #[test]
+    fn die_seite_traegt_die_frische_prognose_und_verschweigt_alte() {
+        let t = zustand(turnier(false));
+        let snap = t.snapshot_clone().unwrap();
+        let cfg = mp_an();
+        rufe(&t, 10, None);
+        rufe(&t, 11, None);
+        let jetzt = crate::tablet::monitor::now_ms();
+        // Nur Spiel 10 hat eine Prognose (11 z. B. mit Wunschfeld).
+        t.set_mp_prognose(
+            jetzt,
+            [(10, (jetzt + 6 * 60_000, true))].into_iter().collect(),
+        );
+        let v = view(&t, Some(&snap), &cfg, "");
+        let p = |id: i64| v.partien.iter().find(|p| p.match_id == id).unwrap();
+        assert_eq!(p(10).feld_frei_ms, Some(jetzt + 6 * 60_000));
+        assert!(p(10).feld_frei_unsicher);
+        assert_eq!(p(11).feld_frei_ms, None, "ohne Prognose kein Countdown");
+        assert!(!p(11).feld_frei_unsicher);
+        // Ein Stand von vor über drei Minuten (Sync-Loop steht) zählt nicht.
+        let alt = jetzt - crate::tablet::state::MP_PROGNOSE_MAX_ALTER_MS - 1;
+        t.set_mp_prognose(alt, [(10, (jetzt + 60_000, false))].into_iter().collect());
+        let v = view(&t, Some(&snap), &cfg, "");
+        assert!(v.partien.iter().all(|p| p.feld_frei_ms.is_none()));
     }
 
     #[test]

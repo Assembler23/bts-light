@@ -51,6 +51,10 @@ fn logo_marke(turnier: &str, logo: &crate::config::LogoConfig) -> String {
     format!("{:x}", hasher.finish())
 }
 
+/// Takt der Meetingpoint-Prognose: Die Seite zeigt ganze Minuten, öfter
+/// zu rechnen brächte nichts — der Zustandsbau ist nicht umsonst.
+const MP_PROGNOSE_TAKT_MS: u64 = 30_000;
+
 /// Aktuelle Zeit in Unix-Millisekunden.
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -178,6 +182,10 @@ pub struct SyncEngine {
     btp_retry_start: usize,
     /// Taktgeber für den `sched`-Versand (vollständiger Spielplan).
     sched_takt: SchedTakt,
+    /// Wann die Meetingpoint-Prognose zuletzt gerechnet wurde (Unix-ms,
+    /// 0 = nie). Geht beim Speichern der Einstellungen verloren — dann wird
+    /// eben sofort neu gerechnet, das ist gewollt.
+    mp_prognose_ms: u64,
     /// badhub kennt `sched` noch nicht? Dann nicht jeden Zyklus anklopfen.
     sched_unsupported_since: Option<Instant>,
     /// Was badhub vom Punktverlauf zuletzt angenommen hat (`tverlauf`).
@@ -468,6 +476,7 @@ impl SyncEngine {
             checkin_unsupported_since: None,
             btp_retry_start: 0,
             sched_takt: SchedTakt::neu(),
+            mp_prognose_ms: 0,
             sched_unsupported_since: None,
             verlauf_stand: Default::default(),
             verlauf_turnier: String::new(),
@@ -550,6 +559,30 @@ impl SyncEngine {
                 tracing::warn!("Meldeliste konnte nicht gesendet werden: {e}");
             }
         }
+    }
+
+    /// Prognose „Feld frei" für die Meetingpoint-Seite frisch rechnen —
+    /// höchstens alle [`MP_PROGNOSE_TAKT_MS`]. Eigener Takt statt des
+    /// `sched`-Versands: Der läuft nur mit Liveticker, der Meetingpoint
+    /// braucht die Zahl auch ohne. Derselbe volle Zustandsbau wie dort,
+    /// damit Meetingpoint, TL-Liste und badhub nie verschiedene Zeiten
+    /// nennen. Meetingpoint oder Prognose aus: Stand leeren, nichts rechnen.
+    fn mp_prognose_auffrischen(&mut self, config: &AppConfig, tablet: &TabletState, jetzt_ms: u64) {
+        if !config.meetingpoint.enabled || !config.prediction.enabled {
+            if self.mp_prognose_ms != 0 {
+                tablet.set_mp_prognose(0, Default::default());
+                self.mp_prognose_ms = 0;
+            }
+            return;
+        }
+        if self.mp_prognose_ms != 0
+            && jetzt_ms.saturating_sub(self.mp_prognose_ms) < MP_PROGNOSE_TAKT_MS
+        {
+            return;
+        }
+        let werte = crate::tablet::tl::prognose_mit_unsicherheit(tablet, config, jetzt_ms);
+        tablet.set_mp_prognose(jetzt_ms, werte);
+        self.mp_prognose_ms = jetzt_ms;
     }
 
     /// Sendet den vollständigen Spielplan (`sched`), höchstens minütlich.
@@ -2461,6 +2494,8 @@ impl SyncEngine {
             &config.meetingpoint,
             now_ms(),
         );
+        // Countdown „Feld frei in …" auf der Meetingpoint-Seite.
+        self.mp_prognose_auffrischen(config, tablet, now_ms());
         // Zettel-Autodruck (Spec `schiedsrichterzettel-autodruck`, E5) —
         // **unmittelbar nach der Rotation**: Erst hier steht die
         // Besetzung des frisch belegten Felds fest. Eine Zeile früher
@@ -2739,6 +2774,37 @@ mod tests {
         assert!(!takt.faellig(59_999), "kurz vor der Minute nicht");
         assert!(takt.faellig(60_000), "nach 60 s wieder");
         assert!(!takt.faellig(60_001), "und danach wieder Ruhe");
+    }
+
+    #[test]
+    fn mp_prognose_rechnet_im_takt_und_raeumt_beim_abschalten() {
+        let tablet = TabletState::default();
+        let mut engine = SyncEngine::new();
+        let mut cfg = AppConfig::default();
+        cfg.meetingpoint.enabled = true;
+        cfg.prediction.enabled = true;
+        let t0 = 10_000_000;
+        engine.mp_prognose_auffrischen(&cfg, &tablet, t0);
+        assert_eq!(engine.mp_prognose_ms, t0, "erster Lauf rechnet sofort");
+        engine.mp_prognose_auffrischen(&cfg, &tablet, t0 + MP_PROGNOSE_TAKT_MS - 1);
+        assert_eq!(engine.mp_prognose_ms, t0, "innerhalb des Takts nichts");
+        engine.mp_prognose_auffrischen(&cfg, &tablet, t0 + MP_PROGNOSE_TAKT_MS);
+        assert_eq!(engine.mp_prognose_ms, t0 + MP_PROGNOSE_TAKT_MS);
+        // Ein Altwert liegt vor; Meetingpoint aus → sofort geleert, kein
+        // erstarrter Countdown.
+        let jetzt = t0 + MP_PROGNOSE_TAKT_MS;
+        tablet.set_mp_prognose(jetzt, [(7, (jetzt + 60_000, false))].into_iter().collect());
+        cfg.meetingpoint.enabled = false;
+        engine.mp_prognose_auffrischen(&cfg, &tablet, jetzt);
+        assert_eq!(engine.mp_prognose_ms, 0);
+        assert_eq!(tablet.mp_prognose(7, jetzt), None);
+        // Prognose aus wirkt genauso.
+        cfg.meetingpoint.enabled = true;
+        cfg.prediction.enabled = false;
+        tablet.set_mp_prognose(jetzt, [(7, (jetzt + 60_000, false))].into_iter().collect());
+        engine.mp_prognose_ms = 1;
+        engine.mp_prognose_auffrischen(&cfg, &tablet, jetzt);
+        assert_eq!(tablet.mp_prognose(7, jetzt), None);
     }
 
     #[test]

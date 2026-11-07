@@ -2569,6 +2569,24 @@ pub struct MpPartie {
     /// Information da und geht nicht in den Zähler der Seite ein.
     #[serde(rename = "srNoetig", default)]
     pub sr_noetig: bool,
+    /// Prognose: wann wird für diese Partie ein Feld frei (ms seit Epoche,
+    /// Uhr des Turnier-PCs)? `None` = keine Prognose (Schalter aus, zu
+    /// wenig Messwerte, Wunschfeld …). Die Seite rechnet daraus einen
+    /// Countdown — absolut statt relativ, weil der Relay den Stand nur bei
+    /// Änderung bekommt und eine Restdauer darin veralten würde.
+    #[serde(
+        rename = "feldFreiMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub feld_frei_ms: Option<u64>,
+    /// Die Prognose stützt sich auf zu wenige Messwerte („ca." davor).
+    #[serde(
+        rename = "feldFreiUnsicher",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub feld_frei_unsicher: bool,
 }
 
 /// Zustand der Meetingpoint-Seite (`/meetingpoint/state`).
@@ -6548,6 +6566,28 @@ mod meetingpoint_tests {
     }
 
     #[test]
+    fn mp_partie_feld_frei_ist_abwaertskompatibel() {
+        // Ein alter Host schickt das Feld nicht → keine Prognose.
+        let alt = r#"{"matchId":7}"#;
+        let p: MpPartie = serde_json::from_str(alt).unwrap();
+        assert_eq!(p.feld_frei_ms, None);
+        assert!(!p.feld_frei_unsicher);
+        // Ohne Prognose wird nichts serialisiert (schlanker Stand).
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("feldFrei"), "{json}");
+        // Mit Prognose: Roundtrip unter den camelCase-Namen.
+        let mit = MpPartie {
+            feld_frei_ms: Some(1_800_000),
+            feld_frei_unsicher: true,
+            ..p
+        };
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""feldFreiMs":1800000"#), "{json}");
+        assert!(json.contains(r#""feldFreiUnsicher":true"#), "{json}");
+        assert_eq!(serde_json::from_str::<MpPartie>(&json).unwrap(), mit);
+    }
+
+    #[test]
     fn fuer_halle_schneidet_zu_und_verlangt_die_wahl() {
         let p = |id: i64, h: &str| MpPartie {
             match_id: id,
@@ -6558,6 +6598,8 @@ mod meetingpoint_tests {
             bereit: false,
             ohne_sr: false,
             sr_noetig: false,
+            feld_frei_ms: None,
+            feld_frei_unsicher: false,
         };
         let eins = MeetingpointView {
             enabled: true,
