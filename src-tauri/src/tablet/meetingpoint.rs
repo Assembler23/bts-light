@@ -792,13 +792,19 @@ pub fn sr_lage(
     }
 }
 
-/// Alle aktiven Aufrufe mit Partie, SR-Lage und Bewertung.
+/// Alle aktiven Aufrufe mit Partie, SR-Lage und Bewertung — in
+/// **Vergabe-Reihenfolge**: derselbe Schlüssel, nach dem `auto_assign` die
+/// gerufenen Partien aufs Feld bringt (Warteliste samt Umsortierung), nicht
+/// die Aufrufzeit. Sonst stand oben auf der Meetingpoint-Seite, wer am
+/// längsten wartet, während ein später gerufenes, in der Warteliste höheres
+/// Spiel das nächste Feld bekam.
 pub fn bewertungen(
     tablet: &TabletState,
     snap: &BtpSnapshot,
     cfg: &MeetingpointConfig,
 ) -> Vec<(MpCall, SrLage, Bewertung)> {
-    tablet
+    let order = tablet.queue_order_store();
+    let mut liste: Vec<_> = tablet
         .meetingpoint_store()
         .active_entries()
         .into_iter()
@@ -806,9 +812,12 @@ pub fn bewertungen(
             let m = snap.matches.iter().find(|m| m.id == call.match_id)?;
             let sr = sr_lage(tablet, m, snap, cfg);
             let b = bewerte(m, &call, &sr);
-            Some((call, sr, b))
+            let key = crate::tablet::assign::sort_key_for(m, true, order);
+            Some((key, (call, sr, b)))
         })
-        .collect()
+        .collect();
+    liste.sort_by_key(|(key, _)| *key);
+    liste.into_iter().map(|(_, e)| e).collect()
 }
 
 /// Match-IDs aller spielbereiten gerufenen Partien (strikter Modus, Bedarf).
@@ -1939,6 +1948,32 @@ mod tests {
         assert_eq!(gesamt.fuer_halle("halle a").partien, v.partien);
         assert!(gesamt.fuer_halle("Halle B").partien.is_empty());
         assert!(gesamt.fuer_halle("").halle_waehlen);
+    }
+
+    #[test]
+    fn die_seite_zeigt_die_vergabe_reihenfolge_nicht_die_aufrufzeit() {
+        // Spiel 10 steht in der Warteliste vor 11, wurde aber später gerufen
+        // (seine Spieler standen noch auf dem Feld). Aufs Feld kommt zuerst
+        // 10 — also muss es auch oben auf der Seite stehen.
+        let mut snap = turnier(false);
+        snap.matches[0].planned_time = Some(100);
+        snap.matches[1].planned_time = Some(200);
+        let t = zustand(snap);
+        let cfg = mp_an();
+        t.add_preparation_call(aufruf(11, None, 1_000));
+        t.add_preparation_call(aufruf(10, None, 2_000));
+        let snap = t.snapshot_clone().unwrap();
+        let ids = |t: &TabletState| -> Vec<i64> {
+            view(t, Some(&snap), &cfg, "")
+                .partien
+                .iter()
+                .map(|p| p.match_id)
+                .collect()
+        };
+        assert_eq!(ids(&t), vec![10, 11]);
+        // Eine Umsortierung der Warteliste wirkt auch hier (Präfix-Rang).
+        t.queue_order_store().reorder(&[10, 11], 11, Some(10));
+        assert_eq!(ids(&t), vec![11, 10]);
     }
 
     #[test]
