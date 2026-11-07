@@ -1198,6 +1198,11 @@ pub fn view(
         let Some(m) = snap.matches.iter().find(|m| m.id == call.match_id) else {
             continue;
         };
+        // Paarung kurz leer (BTP mitten im Speichern): Der Aufruf bleibt
+        // stehen (ADR 0077), eine namenlose Karte zeigt die Seite aber nicht.
+        if m.team1.is_empty() || m.team2.is_empty() {
+            continue;
+        }
         let mut plaetze: Vec<MpPlatzView> = spieler_plaetze(m)
             .into_iter()
             .map(|(platz, p)| MpPlatzView {
@@ -2023,6 +2028,42 @@ mod tests {
         let neu = store_mit_datei(dir.path());
         neu.ordne_einmalig(|id| id);
         assert_eq!(ids(&neu), vec![11, 10]);
+    }
+
+    #[test]
+    fn die_migration_sieht_den_praefix_schon_im_ersten_abruf() {
+        // Review-Fund 08.11.2026: Im ersten Abruf nach dem Start war der
+        // Präfix-Speicher noch nicht geladen — die Ordnung sah keinen Rang.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("meetingpoint.json"),
+            serde_json::json!({
+                "tournament": TURNIER,
+                "calls": [
+                    {"match_id": 10, "called_at_ms": 1},
+                    {"match_id": 11, "called_at_ms": 2},
+                ],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        // 11 war von Hand vor 10 gezogen (Präfix-Rang 0).
+        std::fs::write(
+            dir.path().join("queue-order.json"),
+            serde_json::json!({"tournament": TURNIER, "queue": [11, 10]}).to_string(),
+        )
+        .unwrap();
+        let t = TabletState::default();
+        t.set_meetingpoint_path(dir.path().join("meetingpoint.json"));
+        t.set_queue_order_path(dir.path().join("queue-order.json"));
+        let mut s = snap(vec![
+            spiel(10, MatchStatus::Scheduled),
+            spiel(11, MatchStatus::Scheduled),
+        ]);
+        s.matches[0].planned_time = Some(100);
+        s.matches[1].planned_time = Some(200);
+        t.binde_meetingpoint(&s);
+        assert_eq!(ids(t.meetingpoint_store()), vec![11, 10]);
     }
 
     #[test]

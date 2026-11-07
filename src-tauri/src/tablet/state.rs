@@ -4192,6 +4192,11 @@ impl TabletState {
     pub fn binde_meetingpoint(&self, snapshot: &BtpSnapshot) {
         self.preparation_calls
             .set_tournament(&snapshot.tournament_name);
+        // Den Präfix VOR der Ordnung laden: Im ersten Abruf nach dem Start
+        // läuft `set_snapshot` erst später — ohne das sähe die Migration
+        // keinen einzigen Präfix-Rang und ordnete still falsch
+        // (Review-Fund 08.11.2026). Idempotent.
+        self.queue_order.set_tournament(&snapshot.tournament_name);
         self.preparation_calls.ordne_einmalig(|id| {
             snapshot
                 .matches
