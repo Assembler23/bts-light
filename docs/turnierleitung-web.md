@@ -59,7 +59,7 @@ LAN+Cloud voraus.
   Die Stufe zählt der Turnier-PC — alle Geräte, auch die Desktop-App, zeigen
   dieselbe Zahl. Im Regelfall endet der Knopf nach dem dritten Aufruf und
   verschwindet, sobald Punkte gefallen sind. Mit der Profil-Option
-  **„Aufrufe unbegrenzt"** (Anzeige-Abschnitt des Profil-Editors, seit
+  **„Aufrufe unbegrenzt"** (Gruppe „Felder" im Profil-Editor, seit
   17.08.2026) bleibt er dagegen immer da — auch bei laufendem Spiel und
   über den dritten Aufruf hinaus („Erneut aufrufen"). Ab dem vierten
   Aufruf erklingt die schlichte Feld-Ansage ohne Stufenwort; „Dritter und
@@ -616,6 +616,22 @@ am jeweiligen Gerät seins.
   Betrachtungsabstand genau dieses Geräts. Die Wahl hängt am Gerät
   (`localStorage`) und übersteht ein Neuladen; die Feldkacheln passen
   ihre Kompaktstufe automatisch an.
+
+Der Profil-Editor ist in Gruppen geordnet (seit v0.9.344):
+
+| Gruppe | Inhalt |
+|---|---|
+| **Aufbau der Seite** | Spaltenzahl, Panels (sichtbar, Reihenfolge, Spalte) |
+| **Spielangaben** | Spielnummer, Disziplin/Klasse, Runde, Gruppe, Setzplätze |
+| **Spieler** | Nationen, Vereinsnamen, Vereinslogos, Zuletzt gespielt |
+| **Spielliste** | Spiele mit offener Paarung, Verschiebe-Knöpfe |
+| **Felder** | Restzeit laufender Spiele, Aufrufe unbegrenzt |
+| **Spielzeiten** | Gruppierung des Panels „Spielzeiten" |
+<!-- pruef: "Aufbau der Seite" in src-tauri/assets/tl.html -->
+<!-- pruef: "Spielangaben" in src-tauri/assets/tl.html -->
+
+Häkchen, die der Turnier-PC noch nicht kennt (ältere Version), fehlen; eine
+Gruppe ohne Häkchen erscheint dann gar nicht.
 
 Die Anzeige-Häkchen im Profil-Editor:
 
