@@ -36,6 +36,14 @@ ok("Zähler mit SR-Pflicht", mp.mpZaehler({ ...partie, srNoetig: true }), { da: 
 ok("Check-in-Body", mp.mpCheckinBody("Halle A", 7, { art: "sr" }, 1),
   { halle: "Halle A", matchId: 7, platz: { art: "sr" }, present: true, ort: "meetingpoint" });
 ok("Uhrzeit leer ohne Wert", mp.mpUhrzeit(0), "");
+const J = 1_000_000_000;
+ok("Feld frei: ohne Prognose leer", mp.mpFeldFrei(undefined, false, J), "");
+ok("Feld frei: angebrochene Minute zählt voll", mp.mpFeldFrei(J + 5 * 60000 + 1, false, J), "Feld frei in ca. 6 min");
+ok("Feld frei: unsicher → grob", mp.mpFeldFrei(J + 6 * 60000, true, J), "Feld frei in ca. 6 min (grob geschätzt)");
+ok("Feld frei: überfällig → jetzt", mp.mpFeldFrei(J - 60000, false, J), "Feld wird jetzt frei");
+ok("Feld frei: genau jetzt", mp.mpFeldFrei(J, false, J), "Feld wird jetzt frei");
+ok("Feld frei: Stunden", mp.mpFeldFrei(J + 75 * 60000, false, J), "Feld frei in ca. 1 h 15 min");
+ok("Feld frei: volle Stunde", mp.mpFeldFrei(J + 120 * 60000, true, J), "Feld frei in ca. 2 h (grob geschätzt)");
 
 // ── Inline-Kopie ─────────────────────────────────────────────────────────
 const hier = dirname(fileURLToPath(import.meta.url));
@@ -50,7 +58,7 @@ function funktion(text, name) {
   }
   return null;
 }
-const NAMEN = ["mpHalleAusQuery", "mpSortiert", "mpGruppen", "mpZaehler", "mpCheckinBody", "mpUhrzeit"];
+const NAMEN = ["mpHalleAusQuery", "mpSortiert", "mpGruppen", "mpZaehler", "mpCheckinBody", "mpUhrzeit", "mpFeldFrei"];
 const quellen = NAMEN.map((n) => funktion(seite, n));
 ok("alle Funktionen in der Seite", quellen.map((q) => q !== null), NAMEN.map(() => true));
 // eslint-disable-next-line no-new-func
@@ -62,6 +70,7 @@ const FAELLE = {
   mpZaehler: [[partie], [{}], [{ ...partie, srNoetig: true }]],
   mpCheckinBody: [["A", 1, { art: "sr" }, true], [null, 2, { art: "spieler", seite: 1, pos: 0 }, 0]],
   mpUhrzeit: [[0], [Date.UTC(2026, 10, 2, 9, 5)]],
+  mpFeldFrei: [[0, false, J], [J + 5 * 60000 + 1, false, J], [J + 6 * 60000, true, J], [J - 1, false, J], [J + 75 * 60000, false, J], [J + 120 * 60000, true, J]],
 };
 for (const n of NAMEN) {
   for (const args of FAELLE[n]) {

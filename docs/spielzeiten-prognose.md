@@ -120,6 +120,9 @@ Spielern. Beendete Spiele tragen ihre Ist-Zeiten in der Beendet-Zeile
   badhub-Ticker sichtbar. Der Spielplan an badhub (Spielerseite, Spec
   `spielplan-an-badhub`) trägt sie für wartende Spiele mit; seit v0.9.334
   auch dann, wenn gerade keine Turnierleitungs-Ansicht offen ist.
+- **Ausnahme Meetingpoint** (seit v0.9.345): Die Meetingpoint-Seite zeigt an
+  jeder gerufenen Partie „Feld frei in ca. N min" — dieselbe Prognose,
+  alle 30 s frisch gerechnet. Siehe [meetingpoint.md](meetingpoint.md).
 - Bei BTP-Zeitfenster-Planung (alle Vormittagsspiele „9:00") ersetzt die
   Prognose die BTP-Zeiten, sie nutzt sie nicht.
 - Erfolgsmaß (Spec E12): am Testturnier ≥ 70 % der Spiele innerhalb

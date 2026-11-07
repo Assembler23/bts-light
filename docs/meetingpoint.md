@@ -51,6 +51,26 @@ Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
   sich jemand vertippt hat). Eingecheckte Namen werden grün mit Haken.
 - Sind alle nötigen Personen da, trägt die Karte **spielbereit**.
 <!-- pruef: "spielbereit" in src-tauri/assets/meetingpoint.html -->
+- **Wann geht es los?** Unter dem Kopf jeder Karte steht, wann nach der
+  [Prognose](spielzeiten-prognose.md) ein Feld für diese Partie frei wird,
+  etwa **„Feld frei in ca. 6 min"** — in ganzen Minuten, aufgerundet, ab
+  einer Stunde als „1 h 15 min". Ist die Zeit schon erreicht, steht dort
+  **„Feld wird jetzt frei"**. Fehlen noch eigene Messwerte für die Klasse,
+  kommt **„(grob geschätzt)"** dazu (seit v0.9.345).
+<!-- pruef: "Feld frei in ca. " in src-tauri/assets/meetingpoint.html -->
+<!-- pruef: "Feld wird jetzt frei" in src-tauri/assets/meetingpoint.html -->
+<!-- pruef: "(grob geschätzt)" in src-tauri/assets/meetingpoint.html -->
+  Die Zeile fehlt, wenn die Startzeit-Prognose in den Einstellungen aus ist
+  oder die Partie keine Prognose hat (z. B. Wunschfeld, von der
+  automatischen Feldvergabe ausgenommen). Der Turnier-PC rechnet sie alle
+  30 Sekunden neu; stockt er länger als drei Minuten (BTP weg, Übertragung
+  gestoppt), verschwindet sie, statt stehenzubleiben. Die Uhr des
+  Anzeigegeräts spielt keine Rolle — gerechnet wird gegen die Uhr des
+  Servers, der die Seite ausliefert. Über die Cloud muss dafür die Uhr des
+  Turnier-PCs stimmen (unter Windows normalerweise automatisch): Geht sie
+  falsch, geht der Countdown um genau so viel falsch.
+<!-- pruef: /MP_PROGNOSE_TAKT_MS: u64 = 30_000/ in src-tauri/src/sync.rs -->
+<!-- pruef: /MP_PROGNOSE_MAX_ALTER_MS: u64 = 3 \* 60_000/ in src-tauri/src/tablet/state.rs -->
 - Die Seite zeigt nur Namen — keine Lizenznummer, keinen Verein, keine Nation.
 - Am Kiosk-Tablet: In der Anzeige-Hülle (`/anzeige`) gibt es die Ansicht
   **Meetingpoint**; die gewählte Halle merkt sich die Hülle. Ein Tipp auf die

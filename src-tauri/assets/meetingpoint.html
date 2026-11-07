@@ -39,6 +39,7 @@
   .p-kopf { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
   .p-label { font-weight: 700; font-size: 1.05rem; }
   .p-zeit { color: var(--muted); font-size: .9rem; }
+  .p-frei { font-weight: 700; font-size: 1.05rem; color: var(--text); margin: -.2rem 0 .5rem; }
   .p-zaehler { margin-left: auto; font-size: .95rem; color: var(--muted); font-variant-numeric: tabular-nums; }
   .p-bereit { margin-left: auto; background: var(--ok); color: #fff; font-weight: 800; border-radius: .5rem;
     padding: .15rem .55rem; font-size: .95rem; }
@@ -152,6 +153,21 @@ function mpCheckinBody(halle, matchId, platz, present) {
   };
 }
 
+/** Countdown „Feld frei in …" aus der Prognose (`feldFreiMs`, Uhr des
+ *  Turnier-PCs) und der Serverzeit `jetztMs`. Leer ohne Prognose. Ganze
+ *  Minuten, aufgerundet — „in 0 min" gibt es nicht, dann „jetzt".
+ *  Bewusst keine Tilde: Die bedeutet in der TL-Liste schon „noch keine
+ *  Messwerte" — hier steht dafür „(grob geschätzt)". */
+function mpFeldFrei(feldFreiMs, unsicher, jetztMs) {
+  if (!feldFreiMs) return "";
+  var min = Math.ceil((feldFreiMs - jetztMs) / 60000);
+  if (!(min > 0)) return "Feld wird jetzt frei";
+  var dauer = min < 60
+    ? min + " min"
+    : Math.floor(min / 60) + " h" + (min % 60 ? " " + (min % 60) + " min" : "");
+  return "Feld frei in ca. " + dauer + (unsicher ? " (grob geschätzt)" : "");
+}
+
 /** Uhrzeit des Aufrufs als „HH:MM" (Ortszeit des Geräts). */
 function mpUhrzeit(ms) {
   if (!ms) return "";
@@ -167,6 +183,13 @@ var stand = null;
 // Laufende Tipps je „matchId:platz" — bis zur Antwort halb durchsichtig,
 // damit niemand doppelt tippt.
 var unterwegs = {};
+// Abstand Geräte-Uhr → Serveruhr (aus dem `Date`-Kopf jeder Antwort): Der
+// Countdown rechnet gegen die Uhr des ausliefernden Servers (Turnier-PC,
+// Slave-PC oder Relay), nicht gegen die des Hallen-TVs — ein Pi ohne
+// Echtzeituhr geht gern Minuten falsch. Die Prognose selbst trägt die Uhr
+// des Turnier-PCs; in der Cloud gehen beide Uhren nur gleich, solange der
+// Turnier-PC seine Zeit synchronisiert (Windows-Standard).
+var uhrVersatz = 0;
 
 function el(tag, cls, text) {
   var e = document.createElement(tag);
@@ -242,6 +265,8 @@ function zeichne() {
       kopf.appendChild(el("span", "p-zaehler", z.da + " / " + z.gesamt + " da"));
     }
     karte.appendChild(kopf);
+    var frei = mpFeldFrei(partie.feldFreiMs, partie.feldFreiUnsicher, Date.now() + uhrVersatz);
+    if (frei) karte.appendChild(el("div", "p-frei", frei));
     var g = mpGruppen(partie);
     var s1 = el("div", "seite");
     g.team1.forEach(function (p) { s1.appendChild(nameKnopf(partie, p)); });
@@ -314,6 +339,8 @@ function abrufen() {
   }).then(function (r) {
     if (r.status === 404) throw new Error("aus");
     if (!r.ok) throw new Error("http");
+    var datum = Date.parse(r.headers.get("date") || "");
+    if (datum > 0) uhrVersatz = datum - Date.now();
     return r.json();
   }).then(function (v) {
     stand = v;
