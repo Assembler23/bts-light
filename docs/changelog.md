@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.344
+
+- **Turnierleitung (Web): Profil-Editor aufgeräumt.** Die Einstellungen eines
+  Profils stehen jetzt in Gruppen — **Aufbau der Seite** (Spalten und
+  Panels), **Spielangaben**, **Spieler**, **Spielliste**, **Felder** und
+  **Spielzeiten** — statt in einer langen Häkchenliste. Erläuterungen stehen
+  klein unter dem Häkchen, die Spaltenzahl wird nebeneinander gewählt, und
+  **Speichern** bleibt beim Scrollen unten sichtbar. An den Einstellungen
+  selbst ändert sich nichts.
+
 ## v0.9.343
 
 - **Tablet-App: Akku ohne Turnier-PC.** Findet die Kiosk-App keinen

@@ -1444,6 +1444,34 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 }
 .prof-editor fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
 .prof-editor legend { font-size: .78rem; font-weight: 700; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .05em; padding: 0 4px; }
+/* Erläuterung unter einem Häkchen: zweite, leisere Zeile statt Klammer. */
+.prof-editor .prof-opt { display: flex; flex-direction: column; gap: 1px; }
+.prof-editor .prof-opt small { font-size: .76rem; color: var(--ink-faint); }
+.prof-editor .checkbox-row { padding: 6px 4px; }
+.prof-editor .prof-sub {
+  font-size: .8rem; font-weight: 700; color: var(--ink-soft); margin: 4px 0 4px;
+}
+/* Spaltenzahl als Segmentleiste nebeneinander statt drei Radio-Zeilen. */
+.prof-editor .prof-segment { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+.prof-editor .prof-segment .radio-row {
+  padding: 4px 14px; border: 1px solid var(--line); border-radius: 8px; font-weight: 650;
+}
+.prof-editor .prof-segment .radio-row:has(input:checked) { border-color: var(--accent); color: var(--accent); }
+.prof-editor .prof-panels { margin-bottom: 0; }
+.prof-editor select {
+  font: inherit; font-size: .88rem; color: var(--ink);
+  min-height: var(--touch-min); padding: 4px 8px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card);
+}
+.prof-editor fieldset label.prof-field { margin-bottom: 0; }
+/* Der Editor ist lang — Speichern bleibt beim Scrollen erreichbar. */
+.prof-editor .dlg-foot {
+  position: sticky; bottom: -12px; background: var(--card);
+  padding: 10px 0 12px; margin-bottom: -12px; border-top: 1px solid var(--line);
+}
+/* Abbrechen/Speichern behalten die komfortable Touch-Fläche der übrigen
+   Dialoge — `.prof-editor button` oben würde sie sonst verkleinern. */
+.prof-editor .dlg-foot button { padding: 9px 16px; min-height: var(--touch-komf); font-size: inherit; }
 </style>
 </head>
 <body>
@@ -7890,38 +7918,61 @@ function renderProfileEditor() {
       </li>`;
   };
   const d = kopie.display;
-  $("profiles-body").innerHTML = `
+  // Ein Häkchen samt optionaler Erläuterung in einer zweiten, leiseren
+  // Zeile — statt Klammer-Nachsätzen, die die Liste unruhig machten.
+  const haken = (id, an, text, hinweis = "") =>
+    `<label class="checkbox-row"><input type="checkbox" class="prof-check" id="${id}" ${an ? "checked" : ""} />
+       <span class="prof-opt">${text}${hinweis ? `<small>${hinweis}</small>` : ""}</span></label>`;
+  // Gruppe nur zeichnen, wenn sie etwas enthält: Bei einem älteren
+  // Turnier-PC fallen einzelne Häkchen weg (`hostKenne*`), eine leere
+  // Überschrift wäre dann nur Rauschen.
+  const gruppe = (titel, inhalt) => inhalt.trim()
+    ? `<fieldset><legend>${titel}</legend>${inhalt}</fieldset>`
+    : "";
+  $("profiles-body").innerHTML = `<div class="prof-editor">
     <label class="prof-field">Name
       <input type="text" id="prof-edit-name" value="${esc(kopie.name)}" maxlength="60" required />
     </label>
     <fieldset>
-      <legend>Spalten</legend>
-      <p class="prof-empty-hint">Wie viele Spalten die Seite nebeneinander zeigt. Auf schmalen
-        Geräten (Tablet im Hochformat, Telefon) stehen die Spalten immer untereinander.</p>
-      ${Array.from({ length: MAX_SPALTEN }, (_, i) =>
-        `<label class="radio-row"><input type="radio" name="prof-cols" id="prof-cols-${i + 1}"
-           ${spalten === i + 1 ? "checked" : ""} /> ${i + 1}</label>`).join("")}
+      <legend>Aufbau der Seite</legend>
+      <div class="prof-sub">Spalten</div>
+      <div class="prof-segment" role="radiogroup" aria-label="Spalten">
+        ${Array.from({ length: MAX_SPALTEN }, (_, i) =>
+          `<label class="radio-row"><input type="radio" name="prof-cols" id="prof-cols-${i + 1}"
+             ${spalten === i + 1 ? "checked" : ""} /> ${i + 1}</label>`).join("")}
+      </div>
+      <p class="prof-empty-hint">Auf schmalen Geräten (Tablet im Hochformat, Telefon) stehen
+        die Spalten immer untereinander.</p>
+      <div class="prof-sub">Panels</div>
+      <p class="prof-empty-hint">Häkchen = sichtbar. Am Griff ziehen, um die Reihenfolge zu ändern.</p>
+      <ul class="prof-panels" id="prof-panels-list">
+        ${kopie.panels.map(panelLi).join("")}
+      </ul>
     </fieldset>
-    <ul class="prof-panels" id="prof-panels-list">
-      ${kopie.panels.map(panelLi).join("")}
-    </ul>
+    ${gruppe("Spielangaben", [
+      haken("prof-show-numbers", d.showNumbers, "Spielnummer zeigen"),
+      haken("prof-show-discipline", d.showDiscipline, "Disziplin/Klasse zeigen"),
+      haken("prof-show-round", d.showRound, "Runde zeigen"),
+      haken("prof-show-group", d.showGroup, "Gruppe zeigen"),
+      hostKenntSetzplaetze() ? haken("prof-show-seeds", !d.hideSeeds, "Setzplätze zeigen", "z. B. [1], [3/4]") : "",
+    ].join(""))}
+    ${gruppe("Spieler", [
+      haken("prof-show-nations", d.showNations, "Nationen zeigen", "Flagge neben dem Namen"),
+      haken("prof-show-club-names", d.showClubNames, "Vereinsnamen zeigen"),
+      haken("prof-show-club-logos", d.showClubLogos, "Vereinslogos zeigen"),
+      hostKenntZuletztGespielt() ? haken("prof-show-last-played", d.showLastPlayed, "Zuletzt gespielt zeigen", "Wie lange das letzte Spiel jeder Seite her ist") : "",
+    ].join(""))}
+    ${gruppe("Spielliste", [
+      hostKenntOffeneSpiele() ? haken("prof-show-open", !d.hideOpenMatches, "Spiele mit noch offener Paarung zeigen", "z. B. Halbfinale, solange die Vorrunde läuft") : "",
+      hostKenntVerschiebeKnoepfe() ? haken("prof-show-move", d.showMoveButtons, "Verschiebe-Knöpfe an jeder Zeile", "⤒ ↑ ↓ ⤓ statt nur ↑") : "",
+    ].join(""))}
+    ${gruppe("Felder", [
+      haken("prof-show-court-remaining", d.showCourtRemaining, "Restzeit laufender Spiele zeigen"),
+      haken("prof-unlimited-calls", d.unlimitedCourtCalls, "Aufrufe unbegrenzt", "Auch über den 3. hinaus und bei laufendem Spiel"),
+    ].join(""))}
     <fieldset>
-      <legend>Anzeige</legend>
-      <label class="checkbox-row"><input type="checkbox" id="prof-show-numbers" ${d.showNumbers ? "checked" : ""} /> Spielnummer zeigen</label>
-      <label class="checkbox-row"><input type="checkbox" id="prof-show-nations" ${d.showNations ? "checked" : ""} /> Nationen zeigen</label>
-      <label class="checkbox-row"><input type="checkbox" id="prof-show-club-names" ${d.showClubNames ? "checked" : ""} /> Vereinsnamen zeigen</label>
-      <label class="checkbox-row"><input type="checkbox" id="prof-show-club-logos" ${d.showClubLogos ? "checked" : ""} /> Vereinslogos zeigen</label>
-      <label class="checkbox-row"><input type="checkbox" id="prof-show-discipline" ${d.showDiscipline ? "checked" : ""} /> Disziplin/Klasse zeigen</label>
-      <label class="checkbox-row"><input type="checkbox" id="prof-show-round" ${d.showRound ? "checked" : ""} /> Runde zeigen</label>
-      <label class="checkbox-row"><input type="checkbox" id="prof-show-group" ${d.showGroup ? "checked" : ""} /> Gruppe zeigen</label>
-      <label class="checkbox-row"><input type="checkbox" id="prof-show-court-remaining" ${d.showCourtRemaining ? "checked" : ""} /> Restzeit laufender Spiele zeigen</label>
-      ${hostKenntZuletztGespielt() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-last-played" ${d.showLastPlayed ? "checked" : ""} /> Zuletzt gespielt zeigen (wie lange das letzte Spiel jeder Seite her ist)</label>` : ""}
-      <label class="checkbox-row"><input type="checkbox" id="prof-unlimited-calls" ${d.unlimitedCourtCalls ? "checked" : ""} /> Aufrufe unbegrenzt (auch über den 3. hinaus und bei laufendem Spiel)</label>
-      ${hostKenntOffeneSpiele() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-open" ${d.hideOpenMatches ? "" : "checked"} /> Spiele mit noch offener Paarung zeigen (z. B. Halbfinale vor der Vorrunde)</label>` : ""}
-      ${hostKenntSetzplaetze() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-seeds" ${d.hideSeeds ? "" : "checked"} /> Setzplätze zeigen ([1], [3/4])</label>` : ""}
-      ${hostKenntVerschiebeKnoepfe() ? `<label class="checkbox-row"><input type="checkbox" id="prof-show-move" ${d.showMoveButtons ? "checked" : ""} /> Verschiebe-Knöpfe an jeder Zeile der Spielliste (⤒ ↑ ↓ ⤓ statt nur ↑)</label>` : ""}
-      <label class="checkbox-row" style="gap:8px">
-        <span>Spielzeiten gruppieren nach</span>
+      <legend>Spielzeiten</legend>
+      <label class="prof-field">Spielzeiten gruppieren nach
         <select id="prof-time-axis">${ZEITEN_ACHSEN
           // „Halle" nur bei Mehr-Hallen-Turnieren anbieten (A1.6): Sonst
           // wäre die Auswertung eine einzige Zeile ohne Aussage. Ein Profil,
@@ -7938,7 +7989,8 @@ function renderProfileEditor() {
     <div class="dlg-foot">
       <button type="button" id="prof-edit-cancel">Abbrechen</button>
       <button type="button" id="prof-edit-save" class="primary">Speichern</button>
-    </div>`;
+    </div>
+  </div>`;
   wireProfileEditorEvents();
 }
 
@@ -7982,7 +8034,11 @@ function wireProfileEditorEvents() {
       const layout = normalizedLayout(kopie);
       kopie.panels = layout.panels;
       kopie.columnWidths = layout.widths;
+      // Scrollstand halten: Der Editor ist lang, ein Sprung nach oben beim
+      // Neuzeichnen risse einen aus der Stelle, an der man gerade arbeitet.
+      const scroll = $("profiles-body").scrollTop;
       renderProfilesOverlay();
+      $("profiles-body").scrollTop = scroll;
     });
   }
   $("prof-edit-cancel").addEventListener("click", () => { profilesEditCtx = null; renderProfilesOverlay(); });
