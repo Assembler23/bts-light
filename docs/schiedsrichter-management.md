@@ -68,6 +68,28 @@ liegen — sie sind die Grundlage der Einsatz-Ableitung (Spec Nr. 11: keine
 eigene Historien-Datenhaltung). Geräumt wird nur beim Abschalten von
 `officials.enabled` (`clear_assignments`) und beim Turnierwechsel.
 
+### Einsatz-Zählung: Walkover zählt nicht (seit v0.9.353)
+
+Ein Einsatz ist ein **beendetes** Spiel, an dem die Person als SR oder AR
+eingeteilt war (BTP-Wert oder lokale Zuweisung, `OfficialsStore::appearances`).
+Seit v0.9.353 (Spec `tl-warteliste-schiedsrichter`, AK 17) zählt ein Spiel mit
+Ergebnis **Walkover** (`MatchResult::Walkover`) **nicht** mehr: Kampflos wurde
+nicht gespielt, also war auch niemand im Dienst. **Aufgabe** (`Retired`) und
+**Disqualifikation** zählen weiter — da stand jemand am Feld.
+
+- Das ist eine **bewusste Statistik-Änderung**: Wer im laufenden Turnier
+  Walkover-Spiele in der Besetzung hatte, sieht nach dem Update einen
+  kleineren Zähler.
+- Betroffen sind alle vier Stellen, weil sie dieselbe Ableitung lesen:
+  TL-Web-Zähler (`TlOfficial.appearances`), Desktop-Zähler
+  (`OfficialView.appearances`) und die Detail-Listen (`official_detail_json`,
+  `official_appearances`). Das Walkover-Spiel fehlt deshalb auch **in der
+  Liste** — Zähler und Listenlänge stimmen immer überein.
+- Die Eingabe baut überall `FinishedMatch::aus_btp(&BtpMatch)` (eine Stelle
+  statt drei Kopien), das Feld `FinishedMatch.walkover` trägt die Kennung.
+- Unverändert: die Rotation (`move_to_end`) und die Reservierung (ein
+  Walkover beendet sie wie jedes Spielende).
+
 **Feldweise Schalter: Default alles aktiv.** Ohne Eintrag gilt
 `CourtSwitches::default()` (alle drei `true`); ein auf Default gesetztes Feld
 verliert seinen Eintrag wieder. So bleibt das Bestandsverhalten der

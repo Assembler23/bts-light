@@ -147,6 +147,25 @@ pub struct FinishedMatch {
     pub court_id: Option<i64>,
     /// Endezeit (Unix-ms) aus `stamp_finished`.
     pub finished_at: Option<u64>,
+    /// Kampflos entschieden (Walkover): Es wurde nicht gespielt, also war
+    /// auch niemand im Einsatz (Spec `tl-warteliste-schiedsrichter` AK 17).
+    pub walkover: bool,
+}
+
+impl FinishedMatch {
+    /// Die eine Stelle, an der ein BTP-Match zur Einsatz-Eingabe wird —
+    /// damit Desktop-Zähler, TL-Web-Zähler und Detail-Listen nie
+    /// auseinanderlaufen (z. B. beim Walkover).
+    pub fn aus_btp(m: &BtpMatch) -> Self {
+        FinishedMatch {
+            match_id: m.id,
+            btp_sr: m.official1_id,
+            btp_ar: m.official2_id,
+            court_id: m.court_id,
+            finished_at: m.finished_at,
+            walkover: m.result == crate::btp::model::MatchResult::Walkover,
+        }
+    }
 }
 
 /// Ein Einsatz eines Officials (abgeleitet, nicht gespeichert).
@@ -918,9 +937,15 @@ impl OfficialsStore {
     /// Einsätze je Official, abgeleitet aus den **beendeten** Spielen
     /// (Spec Nr. 11 — keine eigene Historien-Datenhaltung). Je Official
     /// chronologisch nach Endezeit.
+    ///
+    /// Ein Walkover zählt **nicht**: Ohne Spiel gab es keinen Dienst. Zähler
+    /// und Detail-Liste kommen beide von hier, deshalb taucht das Spiel auch
+    /// in der Liste nicht auf. Aufgabe und Disqualifikation zählen weiter —
+    /// da stand jemand am Feld. Die Rotation (`move_to_end`) ist davon
+    /// unberührt.
     pub fn appearances(&self, finished: &[FinishedMatch]) -> HashMap<i64, Vec<Appearance>> {
         let mut out: HashMap<i64, Vec<Appearance>> = HashMap::new();
-        for f in finished {
+        for f in finished.iter().filter(|f| !f.walkover) {
             let wirksam = self.effective(f.match_id, f.btp_sr, f.btp_ar);
             for (id, role) in [
                 (wirksam.sr, OfficialRole::Sr),
@@ -1396,6 +1421,7 @@ mod tests {
                 btp_ar: None,
                 court_id: Some(5),
                 finished_at: Some(1_000),
+                walkover: false,
             },
             FinishedMatch {
                 match_id: 501,
@@ -1403,6 +1429,7 @@ mod tests {
                 btp_ar: None,
                 court_id: Some(6),
                 finished_at: Some(2_000),
+                walkover: false,
             },
             // Ein Spiel, an dem BTP selbst einen Schiedsrichter trägt.
             FinishedMatch {
@@ -1411,6 +1438,7 @@ mod tests {
                 btp_ar: None,
                 court_id: Some(5),
                 finished_at: Some(3_000),
+                walkover: false,
             },
         ];
         let e = store.appearances(&beendet);
@@ -1440,6 +1468,7 @@ mod tests {
             btp_ar: None,
             court_id: Some(5),
             finished_at: Some(1_000),
+            walkover: false,
         }];
         assert!(store.appearances(&beendet).is_empty());
     }
@@ -2142,6 +2171,56 @@ mod tests {
             store.assignment(10).sr,
             Some(2),
             "1 ist für Spiel 11 reserviert"
+        );
+    }
+
+    // ── Einsatz-Zählung ohne Walkover (AK 17) ─────────────────────────
+
+    #[test]
+    fn ein_walkover_zaehlt_nicht_als_einsatz_aufgabe_und_dq_schon() {
+        // Kampflos heißt: kein Spiel, also auch kein Dienst. Wer bei
+        // Aufgabe oder Disqualifikation am Feld stand, hat aber gearbeitet.
+        let store = store_an();
+        let beendet: Vec<FinishedMatch> = [
+            (1, MatchResult::Normal),
+            (2, MatchResult::Walkover),
+            (3, MatchResult::Retired),
+            (4, MatchResult::Disqualified),
+        ]
+        .into_iter()
+        .map(|(id, result)| {
+            let mut m = spiel(id, MatchStatus::Finished, Some(7), Some(8));
+            m.result = result;
+            m.finished_at = Some(id as u64 * 1_000);
+            FinishedMatch::aus_btp(&m)
+        })
+        .collect();
+        assert!(beendet[1].walkover);
+        assert!(!beendet[2].walkover && !beendet[3].walkover);
+
+        let e = store.appearances(&beendet);
+        for official in [7, 8] {
+            let ids: Vec<i64> = e[&official].iter().map(|a| a.match_id).collect();
+            assert_eq!(ids, vec![1, 3, 4], "Walkover fehlt in Zähler und Liste");
+        }
+    }
+
+    #[test]
+    fn aus_btp_uebernimmt_besetzung_feld_und_endezeit() {
+        let mut m = spiel(5, MatchStatus::Finished, Some(1), Some(2));
+        m.court_id = Some(9);
+        m.finished_at = Some(42);
+        let f = FinishedMatch::aus_btp(&m);
+        assert_eq!(
+            (
+                f.match_id,
+                f.btp_sr,
+                f.btp_ar,
+                f.court_id,
+                f.finished_at,
+                f.walkover
+            ),
+            (5, Some(1), Some(2), Some(9), Some(42), false)
         );
     }
 }

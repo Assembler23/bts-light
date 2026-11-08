@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.353
+
+- **Walkover zählt nicht mehr als Schiedsrichter-Einsatz.** Ein kampflos
+  entschiedenes Spiel erscheint weder im Einsatz-Zähler (TL-Web und Desktop)
+  noch in der Einsatz-Liste eines Schiedsrichters. Aufgabe und
+  Disqualifikation zählen weiter. **Statistik-Änderung:** Wer im laufenden
+  Turnier Walkover-Spiele in der Besetzung hatte, sieht nach dem Update einen
+  kleineren Zähler. Die Rotation bleibt unverändert.
+
 ## v0.9.352
 
 - **Fest eingeteilte Schiedsrichter bleiben für ihr Spiel reserviert.** Wer
