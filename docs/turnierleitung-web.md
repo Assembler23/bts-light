@@ -290,8 +290,8 @@ Die Farbe steht nie allein: Satzstand und Uhrbeschriftung („im Spiel seit"
 gegenüber „auf dem Feld seit") sagen dasselbe in Worten.
 
 Zusätzlich zum Zustands-Streifen bekommt eine laufende Kachel bei Satz- oder
-Matchball einen zweiten, umlaufenden Rahmen plus Abzeichen: **„Satzball"**
-für den letzten Punkt eines Satzes, **„Matchball"** (pulsierend — das Feld
+Spielpunkt einen zweiten, umlaufenden Rahmen plus Abzeichen: **„Satzpunkt"**
+für den letzten Punkt eines Satzes, **„Spielpunkt"** (pulsierend — das Feld
 wird gleich frei) für den letzten Punkt des Matches. Das ist nur eine
 Planungshilfe für die Turnierleitung, keine Wertungslogik, und erscheint
 **ausschließlich hier**, nie auf den Hallen-TVs (Court-Monitor/Overview) —
@@ -304,14 +304,14 @@ Skala — man muss sich nicht je Abzeichen merken, was seine Farbe bedeutet:
 
 | Stufe | Sieht so aus | Was da steht |
 |---|---|---|
-| **Info** | ruhig, nur umrandet | „Satzball", „Matchball", „manuell einsortiert" — Planungshilfe, nichts zu tun |
+| **Info** | ruhig, nur umrandet | „Satzpunkt", „Spielpunkt", „manuell einsortiert" — Planungshilfe, nichts zu tun |
 | **Warnung** | gelb-orange gefüllt | „⏸ Auto-Vergabe aus", Schiedsrichter-Konflikt — bewusst gesetzt oder nachsehen |
 | **Alarm** | rot gefüllt | überfällig, gesperrt, Verletzung, „TL gerufen" — da muss jemand hin |
 
-Info-Abzeichen sind bewusst nur **umrandet** statt ausgefüllt: „Matchball"
+Info-Abzeichen sind bewusst nur **umrandet** statt ausgefüllt: „Spielpunkt"
 ist dadurch auf den ersten Blick von einem Alarm zu unterscheiden, auch
 wenn beide rötlich sind. Am Feld-**Streifen** heißt Rot weiterhin
-„überfällig", nie „Matchball".
+„überfällig", nie „Spielpunkt".
 
 ### Spielort
 

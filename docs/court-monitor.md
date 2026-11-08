@@ -677,7 +677,13 @@ synchronen Pi-Uhr driftet. Gated durch die `call_timer`-Einstellung
 
 - **Einzelanzeige** (`monitor.html`, `renderCallTimer`): hochzählende Uhr
   `M:SS` + Ampel „1. Aufruf → 2. Aufruf → Letzter Aufruf" (neutral/gelb/rot),
-  solange ein Spiel auf dem Feld steht.
+  **bis gespielt wird** (seit v0.9.350): Sobald am Tablet die Aufstellung
+  bestätigt ist (`court_state.startedAt`), das Spiel beendet ist oder ein
+  Punkt im Satzstand steht, verschwindet die Uhr — wie am Tablet und in der
+  Übersicht. Vorher lief sie das ganze Spiel über weiter und blinkte ab
+  „Letzter Aufruf" rot, obwohl längst gespielt wurde (Schiri-Feedback
+  08.11.2026). Auf einem Feld ohne zählendes Tablet erkennt der Monitor den
+  Beginn erst am ersten Punkt, den BTP meldet.
 - **Multifeld-Übersicht** (`overview.html`, v0.9.156): je Feld ein Chip
   „vor X min · 1./2./Letzter Aufruf" mit derselben Ampel — **nur in der
   Wartephase** (aufgerufen, aber noch nicht am Zählen; `hasStarted()` prüft

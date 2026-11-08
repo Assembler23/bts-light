@@ -6177,6 +6177,9 @@ pub fn officials_set_court_switches(
         court_id,
         crate::tablet::officials::CourtSwitches { sr, ar, operator },
     );
+    // Der Bediener-Schalter ändert, wer in der Übersicht steht (und damit
+    // angesagt wird) — gecachte Übersichten verwerfen.
+    state.tablet.bump_overview_rev();
     Ok(())
 }
 

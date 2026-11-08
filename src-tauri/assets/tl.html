@@ -3657,8 +3657,8 @@ function courtCard(c, cellStyle) {
   // klar vom alarmroten „überfällig"-Streifen auseinander (Akzeptanz-
   // kriterium), obwohl beide dieselbe Grundfarbe (Rose/Rot) nutzen.
   const ball = c.match_id && !c.locked ? gamePointKind(c) : null;
-  if (ball === "match") { classes.push("gp-match"); badges.push('<span class="badge badge-info badge-info-match">Matchball</span>'); }
-  else if (ball === "set") { classes.push("gp-set"); badges.push('<span class="badge badge-info badge-info-set">Satzball</span>'); }
+  if (ball === "match") { classes.push("gp-match"); badges.push('<span class="badge badge-info badge-info-match">Spielpunkt</span>'); }
+  else if (ball === "set") { classes.push("gp-set"); badges.push('<span class="badge badge-info badge-info-set">Satzpunkt</span>'); }
 
   let body, foot = "";
   if (pending && pending.courtId === c.court_id) {

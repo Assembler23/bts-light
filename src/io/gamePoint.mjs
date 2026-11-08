@@ -1,6 +1,6 @@
 // Satz-/Matchball-Erkennung für die Felderübersicht (Plan 16). Reine Logik,
 // in Node testbar (scripts/test-gamepoint.mjs). Portiert aus der Tablet-
-// Näherung `umpPointBadge` (tablet.html): der Führende ist einen Punkt vom
+// Näherung des früheren `umpPointBadge` (tablet.html): der Führende ist einen Punkt vom
 // Satzgewinn entfernt → Satzball; würde damit der entscheidende Satz fallen →
 // Matchball. Nur eine Turnierleitungs-Planungshilfe, keine Wertungslogik.
 

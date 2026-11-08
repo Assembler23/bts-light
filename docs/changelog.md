@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.350
+
+Rückmeldungen der Schiedsrichter vom ersten echten Einsatz des Schiri-Modus:
+
+- **„Satzpunkt" statt „Satzball".** Die Ansage nennt den Satz- bzw.
+  Spielpunkt jetzt im Wortlaut des DBV-Vokabulars zwischen den Ständen
+  („20 Satzpunkt 6", „29 Satzpunkt beide"). Auch die Verlängerung bis 29:29
+  wird richtig erkannt. Im TL-Web heißen die Abzeichen ebenso.
+- **„Feldseiten wechseln" nur noch im Entscheidungssatz.** Nach einem Satz
+  sagt die Ansage keinen Seitenwechsel mehr an. Bei der Punktepause im
+  Entscheidungssatz kommt „Feldseiten wechseln" dagegen neu dazu.
+- **Aufschlag und Annahme schon in der Satzpause.** Im Doppel lassen sich
+  Aufschläger und Annehmer des nächsten Satzes während der Pause eintragen.
+- **Einspielzeit groß.** Nach abgeschlossener Wahl zeigt der Schiri-Modus die
+  Einspielzeit groß über der Eröffnungsansage, bis der erste Ballwechsel
+  gespielt ist.
+- **Court-Monitor: Die Aufruf-Uhr verschwindet, sobald gespielt wird.**
+  Bisher lief sie das ganze Spiel über weiter und blinkte rot.
+- **Felder ohne Tabletbedienung rufen keinen Bediener mehr auf.** Ist für
+  ein Feld „Bediener" abgeschaltet, nennt und sagt bts-light dort auch den
+  Verlierer des Vorspiels nicht mehr als Tabletbedienung an.
+
 ## v0.9.349
 
 - **Feldzuweisung in BTP geht nicht mehr verloren, wenn ein Schiedsrichter

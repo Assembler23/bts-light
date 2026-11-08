@@ -134,6 +134,15 @@ versehentlich weiterzählen.
 zurück"**. Das bricht die Pause ab und nimmt den Punkt zurück, der sie
 ausgelöst hat — der Fall „Ball wird wiederholt".
 
+**Aufschlag schon in der Satzpause festlegen (Doppel).** Zwischen zwei Sätzen
+steht im Pausenbild **„Aufschlag & Annahme jetzt festlegen"**. Damit lassen sich
+Aufschläger und Annehmer des nächsten Satzes eintragen, während die Pause
+weiterläuft; die Restzeit steht dabei oben im Auswahlfenster. **„← Zurück zur
+Pause"** schließt die Auswahl ohne Wahl — dann fragt das Tablet wie gewohnt nach
+**Weiterspielen**.
+<!-- pruef: "Aufschlag &amp; Annahme jetzt festlegen" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Zurück zur Pause" in src-tauri/assets/tablet.html -->
+
 **Die Pause endet nicht von allein.** Läuft der Countdown ab, zählt die
 Anzeige rot weiter („überzogen +0:37"), bis jemand **Weiterspielen** tippt.
 Das ist Absicht: Die Turnierleitung sieht dadurch feldgenau, wo es hakt.

@@ -991,11 +991,26 @@ function namenPlaetze(cfg) {
   // Aufruf-Timer: hochzählende Uhr seit dem 1. Aufruf (Spiel kam aufs Feld)
   // plus Ampel-Chip „1. Aufruf → 2. Aufruf → Letzter Aufruf". Rechnet relativ
   // zur Server-Zeit (Pi-Uhr oft nicht synchron). Leer, wenn aus/kein Spiel.
+  //
+  // Leer auch, sobald gespielt wird — wie am Tablet und in der Übersicht.
+  // Vorher lief die Uhr hier das ganze Spiel über weiter und blinkte ab
+  // „Letzter Aufruf" rot, obwohl längst gespielt wurde (Schiri-Feedback
+  // 08.11.2026). „Gespielt" heißt: Aufstellung am Tablet bestätigt
+  // (`startedAt`, ab da läuft die Spieldauer), Spiel beendet, oder ein
+  // Punkt steht im Satzstand (Feld ohne zählendes Tablet).
+  function spielGestartet(state) {
+    var cs = parseCourtState(state.courtState);
+    if (cs && ((typeof cs.startedAt === "number" && cs.startedAt > 0) || cs.finished)) {
+      return true;
+    }
+    var sets = state.match && Array.isArray(state.match.sets) ? state.match.sets : [];
+    return sets.some(function (s) { return !!s && ((s.a || 0) + (s.b || 0)) > 0; });
+  }
   function renderCallTimer(state) {
     var el = els.callTimer;
     if (!el) return;
     var ct = state.callTimer || {};
-    if (!ct.enabled || !state.match ||
+    if (!ct.enabled || !state.match || spielGestartet(state) ||
         typeof state.onCourtSinceMs !== "number" || state.onCourtSinceMs <= 0) {
       el.textContent = "";
       el.className = "call-timer";
