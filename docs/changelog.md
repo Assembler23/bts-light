@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.350
+
+- **Umteilen eines Schiedsrichters ersetzt den Eintrag in BTP.** Stand in
+  BTP schon ein Schiedsrichter oder Aufschlagrichter am Spiel und die
+  Turnierleitung teilte jemand anderen ein (Feld-Kachel im TL-Web oder
+  Turnier-PC), verwarf bts-light die neue Einteilung, ohne sie nach BTP zu
+  schreiben. Jetzt geht sie nach BTP und ersetzt den alten Eintrag. Ändert
+  danach jemand die Besetzung direkt in BTP, gilt BTP.
+
 ## v0.9.349
 
 - **Feldzuweisung in BTP geht nicht mehr verloren, wenn ein Schiedsrichter

@@ -238,6 +238,52 @@ impl MatchOfficials {
     }
 }
 
+/// BTP-Stand eines Spiels zum Zeitpunkt einer lokalen Einteilung — je
+/// Dienst `None` = noch nicht erfasst, `Some(0)` = BTP trug niemanden.
+///
+/// Grundlage der Frage „hat jemand IN BTP umgeteilt?" (AK 12, Spec
+/// `tl-warteliste-schiedsrichter`): Weicht BTP von der lokalen Absicht ab,
+/// zählt das nur dann als Entscheidung in BTP, wenn BTP inzwischen etwas
+/// anderes führt als beim Einteilen. Liegt in der Datei statt im Sync-Lauf,
+/// weil der bei jedem Speichern der Einstellungen neu startet.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+struct Ausgangswert {
+    sr: Option<i64>,
+    ar: Option<i64>,
+    /// Eine frühere, noch unbestätigte eigene Einteilung desselben Dienstes
+    /// (beim Umteilen, während der erste Write unterwegs war). Zeigt BTP
+    /// sie, ist das die verspätete Übernahme des eigenen Writes — keine
+    /// Umteilung in BTP.
+    sr_vorher: Option<i64>,
+    ar_vorher: Option<i64>,
+}
+
+/// Einen Dienst gegen den BTP-Stand prüfen (siehe
+/// [`OfficialsStore::confirm`]): loslassen, wenn BTP den lokalen Wert trägt
+/// oder vom Ausgangswert abweicht; sonst den Ausgangswert erfassen.
+fn pruefe_dienst(
+    lokal: &mut Option<i64>,
+    ausgang: &mut Option<i64>,
+    vorher: &mut Option<i64>,
+    btp: Option<i64>,
+) {
+    let Some(wert) = *lokal else {
+        *ausgang = None;
+        *vorher = None;
+        return;
+    };
+    let btp = dienst(btp).unwrap_or(0);
+    let in_btp_umgeteilt = ausgang.is_some_and(|b| b != btp) && *vorher != Some(btp);
+    if btp == wert || in_btp_umgeteilt {
+        *lokal = None;
+        *ausgang = None;
+        *vorher = None;
+    } else if ausgang.is_none() {
+        *ausgang = Some(btp);
+    }
+}
+
 /// Eine Official-ID als echter Dienst: `Some(0)` (ausdrücklich keiner) und
 /// `None` werden beide zu „kein Dienst".
 fn dienst(id: Option<i64>) -> Option<i64> {
@@ -286,6 +332,11 @@ struct OfficialsFile {
     /// Match-ID → lokale Zuweisung (bleibt nach Spielende liegen).
     #[serde(default)]
     assignments: HashMap<i64, MatchOfficials>,
+    /// Match-ID → BTP-Stand beim Einteilen (nur solange eine Zuweisung
+    /// besteht; fehlt in älteren Dateien ⇒ wird beim nächsten Abgleich
+    /// erfasst).
+    #[serde(default)]
+    ausgang: HashMap<i64, Ausgangswert>,
     /// CourtID → feldweise Schalter (fehlt = Default „alles aktiv").
     #[serde(default)]
     courts: HashMap<i64, CourtSwitches>,
@@ -295,7 +346,8 @@ struct OfficialsFile {
 /// und „komme gerade nicht dran" entscheidet, ob überschrieben werden darf.
 enum Ladung {
     /// Ein gelesener Stand (kann zu einem anderen Turnier gehören).
-    Stand(OfficialsFile),
+    // Geboxt: Die Datei ist groß, die übrigen Varianten sind leer.
+    Stand(Box<OfficialsFile>),
     /// Keine Datei (oder Persistenz aus, oder kaputter Inhalt) ⇒ leer starten.
     Leer,
     /// Datei vorhanden, aber nicht lesbar ⇒ nicht anfassen, später erneut.
@@ -360,7 +412,7 @@ impl OfficialsStore {
                     Ladung::Stand(file) => {
                         inner.loaded = true;
                         if file.tournament == name {
-                            inner.file = file;
+                            inner.file = *file;
                             return;
                         }
                     }
@@ -533,10 +585,7 @@ impl OfficialsStore {
         if match_id <= 0 || official_id <= 0 {
             return;
         }
-        self.mit_zuweisung(match_id, |a| match role {
-            OfficialRole::Sr => a.sr = Some(official_id),
-            OfficialRole::Ar => a.ar = Some(official_id),
-        });
+        self.mit_zuweisung(match_id, role, official_id);
     }
 
     /// Zuweisung eines Spiels lösen.
@@ -548,10 +597,7 @@ impl OfficialsStore {
         if match_id <= 0 {
             return;
         }
-        self.mit_zuweisung(match_id, |a| match role {
-            OfficialRole::Sr => a.sr = Some(0),
-            OfficialRole::Ar => a.ar = Some(0),
-        });
+        self.mit_zuweisung(match_id, role, 0);
     }
 
     /// Alle Zuweisungen räumen — beim Abschalten von `officials.enabled`
@@ -563,17 +609,39 @@ impl OfficialsStore {
                 return;
             }
             inner.file.assignments.clear();
+            inner.file.ausgang.clear();
         }
         self.persist();
     }
 
-    fn mit_zuweisung(&self, match_id: i64, f: impl FnOnce(&mut MatchOfficials)) {
+    /// Einen Dienst lokal setzen (`0` = ausdrücklich keiner). Eine neue
+    /// Einteilung misst gegen den **dann** gültigen BTP-Stand: Der
+    /// Ausgangswert des Dienstes wird verworfen und beim nächsten Abgleich
+    /// neu erfasst. Ausnahme: Ist die bisherige Einteilung noch unbestätigt
+    /// (ihr Write womöglich unterwegs), bleibt der Ausgangswert, und die
+    /// bisherige Einteilung wird als „eigene" gemerkt — sonst hielte der
+    /// Abgleich ihre verspätete Übernahme für eine Umteilung in BTP.
+    fn mit_zuweisung(&self, match_id: i64, role: OfficialRole, wert: i64) {
         {
             let mut inner = self.inner.lock().unwrap();
-            let a = inner.file.assignments.entry(match_id).or_default();
-            f(a);
-            if a.is_empty() {
-                inner.file.assignments.remove(&match_id);
+            let file = &mut inner.file;
+            let a = file.assignments.entry(match_id).or_default();
+            let b = file.ausgang.entry(match_id).or_default();
+            let (lokal, ausgang, vorher) = match role {
+                OfficialRole::Sr => (&mut a.sr, &mut b.sr, &mut b.sr_vorher),
+                OfficialRole::Ar => (&mut a.ar, &mut b.ar, &mut b.ar_vorher),
+            };
+            match *lokal {
+                Some(alt) if alt != wert => *vorher = Some(alt),
+                Some(_) => {}
+                None => {
+                    *ausgang = None;
+                    *vorher = None;
+                }
+            }
+            *lokal = Some(wert);
+            if *b == Ausgangswert::default() {
+                file.ausgang.remove(&match_id);
             }
         }
         self.persist();
@@ -709,46 +777,53 @@ impl OfficialsStore {
         out
     }
 
-    /// Eine lokale Absicht loslassen, sobald BTP sie zeigt (R2).
+    /// Eine lokale Absicht loslassen, sobald BTP sie zeigt — oder sobald
+    /// jemand **in BTP** umgeteilt hat (R2, AK 12).
     ///
     /// Der Schreibweg bevorzugt die lokale Zuweisung — sonst ließe sich eine
     /// einmal geschriebene Besetzung nie wieder ändern. Bliebe sie danach
     /// aber liegen, überschriebe der nächste Sync-Zyklus **jede** spätere
-    /// Änderung in BTP selbst, für den Rest des Turniers. Deshalb: Sobald
-    /// der Snapshot einen Wert für diesen Dienst trägt (egal welchen) oder
-    /// das ausdrückliche „keiner" bestätigt, wird der lokale Eintrag
-    /// entfernt und BTP ist wieder allein die Wahrheit.
+    /// Änderung in BTP selbst, für den Rest des Turniers. Deshalb wird ein
+    /// Dienst losgelassen, wenn
+    ///
+    /// - BTP genau den lokalen Wert trägt (bestätigt; bei „keiner": BTP
+    ///   trägt niemanden), oder
+    /// - BTP etwas **anderes** führt als beim Einteilen (Ausgangswert):
+    ///   Dann hat jemand in BTP entschieden, und BTP gewinnt.
+    ///
+    /// Führt BTP noch den Ausgangswert, bleibt die Absicht stehen und geht
+    /// nach BTP — sonst ließe sich ein Schiedsrichter, den BTP schon führt,
+    /// nie umteilen (früher: losgelassen, sobald BTP irgendeinen Wert trug).
+    /// Der Ausgangswert wird beim ersten Abgleich nach dem Einteilen
+    /// erfasst; liegen Einteilung und Änderung in BTP im selben Sync-Takt,
+    /// gilt die Einteilung.
     ///
     /// Die Einsatz-Ableitung verliert dadurch nichts: Sie liest denselben
     /// Wert dann aus dem BTP-Match.
     pub fn confirm(&self, match_id: i64, btp_sr: Option<i64>, btp_ar: Option<i64>) {
         {
             let mut inner = self.inner.lock().unwrap();
-            let Some(a) = inner.file.assignments.get_mut(&match_id) else {
+            let file = &mut inner.file;
+            let Some(a) = file.assignments.get_mut(&match_id) else {
                 return;
             };
-            let erfuellt = |lokal: Option<i64>, btp: Option<i64>| -> bool {
-                match lokal {
-                    // Ausdrückliches „keiner": erfüllt, sobald BTP auch
-                    // niemanden mehr trägt.
-                    Some(0) => dienst(btp).is_none(),
-                    // Zuweisung: erfüllt, sobald BTP überhaupt etwas trägt —
-                    // auch einen anderen Wert, denn dann hat jemand in BTP
-                    // entschieden, und BTP gewinnt.
-                    Some(_) => dienst(btp).is_some(),
-                    None => false,
-                }
-            };
-            if erfuellt(a.sr, btp_sr) {
-                a.sr = None;
-            }
-            if erfuellt(a.ar, btp_ar) {
-                a.ar = None;
-            }
+            let vorher = (*a, file.ausgang.get(&match_id).copied());
+            let b = file.ausgang.entry(match_id).or_default();
+            pruefe_dienst(&mut a.sr, &mut b.sr, &mut b.sr_vorher, btp_sr);
+            pruefe_dienst(&mut a.ar, &mut b.ar, &mut b.ar_vorher, btp_ar);
+            let a = *a;
             if a.is_empty() {
-                inner.file.assignments.remove(&match_id);
-            } else {
-                return; // nichts verändert oder nur teilweise — kein Schreiben
+                file.assignments.remove(&match_id);
+                file.ausgang.remove(&match_id);
+            } else if *b == Ausgangswert::default() {
+                file.ausgang.remove(&match_id);
+            }
+            let nachher = (
+                file.assignments.get(&match_id).copied().unwrap_or_default(),
+                file.ausgang.get(&match_id).copied(),
+            );
+            if vorher == nachher {
+                return; // der Normalfall jedes Sync-Takts — nicht schreiben
             }
         }
         self.persist();
@@ -818,7 +893,7 @@ impl OfficialsStore {
             }
         };
         match serde_json::from_str::<OfficialsFile>(&text) {
-            Ok(file) => Ladung::Stand(file),
+            Ok(file) => Ladung::Stand(Box::new(file)),
             Err(_) => {
                 // Kaputter Inhalt ist nicht zu retten — hier ist Überschreiben
                 // richtig, anders als beim Lesefehler.
@@ -1220,16 +1295,99 @@ mod tests {
         store.confirm(500, Some(1), None);
         assert_eq!(store.assignment(500), MatchOfficials::default());
 
-        // Anderer Wert in BTP (dort von Hand geändert) ⇒ ebenfalls
-        // loslassen: BTP gewinnt, und der nächste Zyklus schreibt nichts
-        // mehr dagegen.
+        // Führte BTP schon jemanden (9), als hier umgeteilt wurde, ist das
+        // kein Widerspruch, sondern genau die Absicht (AK 12): Die
+        // Einteilung bleibt stehen und geht nach BTP.
         store.confirm(501, None, Some(9));
+        assert_eq!(store.assignment(501).ar, Some(2));
+        // Ändert danach jemand IN BTP auf einen dritten Wert ⇒ loslassen:
+        // BTP gewinnt, und der nächste Zyklus schreibt nichts mehr dagegen.
+        store.confirm(501, None, Some(11));
         assert_eq!(store.assignment(501), MatchOfficials::default());
 
         // Ausdrückliches „keiner" gilt als erfüllt, sobald BTP auch nichts
         // mehr trägt.
         store.confirm(502, None, None);
         assert_eq!(store.assignment(502), MatchOfficials::default());
+    }
+
+    #[test]
+    fn umteilen_gegen_einen_btp_wert_bleibt_bis_zur_uebernahme_stehen() {
+        // AK 12 (Spec tl-warteliste-schiedsrichter): BTP führt Y, die TL
+        // teilt X ein. Früher ließ `confirm` X sofort los, weil BTP
+        // „irgendeinen" Wert trug — X ging nie nach BTP.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.assign(500, OfficialRole::Sr, 1);
+        // Mehrere Zyklen, in denen BTP noch Y (7) zeigt: X bleibt.
+        store.confirm(500, Some(7), None);
+        store.confirm(500, Some(7), None);
+        assert_eq!(store.assignment(500).sr, Some(1));
+        // Der Ausgangswert überlebt einen Neustart (Datei neu lesen) — der
+        // Sync-Merker `officials_written` täte das nicht.
+        let wieder = store_mit_datei(dir.path());
+        wieder.confirm(500, Some(7), None);
+        assert_eq!(wieder.assignment(500).sr, Some(1));
+        // BTP übernimmt X ⇒ loslassen.
+        wieder.confirm(500, Some(1), None);
+        assert_eq!(wieder.assignment(500), MatchOfficials::default());
+    }
+
+    #[test]
+    fn ein_ausdrueckliches_keiner_weicht_einer_aenderung_in_btp() {
+        // „Ohne" gegen BTP-Y: bleibt, bis BTP niemanden mehr trägt — es sei
+        // denn, jemand teilt IN BTP auf Z um; dann gilt Z.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.clear_assignment(500, OfficialRole::Sr);
+        store.confirm(500, Some(7), None);
+        assert_eq!(store.assignment(500).sr, Some(0));
+        store.confirm(500, Some(8), None);
+        assert_eq!(store.assignment(500), MatchOfficials::default());
+    }
+
+    #[test]
+    fn dieselbe_person_wie_in_btp_wird_sofort_losgelassen() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.assign(500, OfficialRole::Sr, 7);
+        store.confirm(500, Some(7), None);
+        assert_eq!(store.assignment(500), MatchOfficials::default());
+    }
+
+    #[test]
+    fn umteilen_waehrend_der_erste_write_unterwegs_ist_bleibt_stehen() {
+        // Review-Befund: BTP Y (7), TL teilt X (1) ein, Write geht raus; noch
+        // bevor BTP X zeigt, teilt die TL auf X2 (2) um. Landet danach der
+        // erste Write (BTP zeigt X), ist das keine Umteilung in BTP.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.assign(500, OfficialRole::Sr, 1);
+        store.confirm(500, Some(7), None);
+        store.assign(500, OfficialRole::Sr, 2);
+        store.confirm(500, Some(7), None);
+        store.confirm(500, Some(1), None);
+        assert_eq!(store.assignment(500).sr, Some(2), "X2 geht noch nach BTP");
+        // Eine echte Änderung in BTP gewinnt weiterhin.
+        store.confirm(500, Some(9), None);
+        assert_eq!(store.assignment(500), MatchOfficials::default());
+    }
+
+    #[test]
+    fn eine_neue_einteilung_misst_gegen_den_dann_gueltigen_btp_wert() {
+        // Wer nach einer BTP-Änderung erneut umteilt, meint den neuen Stand:
+        // Der Ausgangswert gehört zur jeweiligen Einteilung.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.assign(500, OfficialRole::Sr, 1);
+        store.assign(500, OfficialRole::Ar, 2);
+        store.confirm(500, Some(7), Some(8)); // Ausgangswerte 7 / 8
+        store.confirm(500, Some(9), Some(8)); // SR in BTP umgeteilt ⇒ los
+        assert_eq!(store.assignment(500).sr, None);
+        assert_eq!(store.assignment(500).ar, Some(2));
+        store.assign(500, OfficialRole::Sr, 3);
+        store.confirm(500, Some(9), Some(8)); // neuer Ausgangswert 9
+        assert_eq!(store.assignment(500).sr, Some(3));
     }
 
     #[test]
