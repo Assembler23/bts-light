@@ -242,6 +242,11 @@ Wire-Ebene und Bedienung sind in [cloud-relay.md](cloud-relay.md) bzw.
 - **Broadcast-`TlState`** trägt `officials_managed`, die reduzierte Liste
   `officials` (`id`, `name`, `paused`, `on_duty_court_id`, `appearances`)
   und je Feld `sr`/`ar`/`official_warn` plus die drei Feld-Schalter.
+- **Warteliste** (seit v0.9.348): jeder `TlMatch` trägt dieselben
+  `sr`/`ar`/`official_warn` aus `court_officials` (wirksame Besetzung,
+  BTP oder Hand). Leer bleiben sie auf dem Draht weg, damit das
+  64-KiB-Fenster der Cloud nicht wächst. Die vorläufige Meetingpoint-
+  Zuteilung (ADR 0072) zählt nicht dazu — sie zeigt die Meetingpoint-Marke.
 - **Sperrlisten, Verein und Einsatz-Liste** kommen ausschließlich über
   `GET /tl/api/officials/{id}` (Geräte-Token; im Cloud-Modus durchgereicht
   per `OfficialDetailRequest`/`OfficialDetail`). Beide Wächter-Tests in

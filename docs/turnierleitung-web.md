@@ -814,6 +814,10 @@ zeigt die Seite zusätzlich:
 - **An jeder belegten Feld-Kachel** „SR: … · AR: …" samt Warnfarbe, wenn ein
   Konflikt besteht (Kategorie „Verein" oder „Person" — der Grund bleibt am
   Turnier-PC), plus den Knopf **einteilen** für die Auswahl je Dienst.
+- **In der Warteliste** (seit v0.9.348) eine Marke „SR: … · AR: …" an
+  jedem Spiel, dessen Besetzung schon feststeht — in BTP vorab eingetragen
+  oder hier von Hand zugewiesen. Warnfarbe bei einem Konflikt wie an der
+  Kachel. Zuweisen geht dort noch nicht, nur über die Feld-Kachel.
 
 Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
 Turnierleitung entscheidet. Steht in BTP schon ein Schiedsrichter am Spiel,

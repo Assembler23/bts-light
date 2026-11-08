@@ -4886,6 +4886,18 @@ function queueRow(m, topMatchId) {
       title="Die Automatik legt dieses Spiel nur auf ${esc(String(name))}${
         belegt ? " — das Feld ist gerade belegt" : ""}">⌖ ${esc(String(name))}</span>`);
   }
+  // Schon feststehende Besetzung (in BTP vorab eingetragen oder von Hand):
+  // ohne die Marke sähe die Turnierleitung den Schiedsrichter erst, wenn das
+  // Spiel auf dem Feld steht. Gleiche Quelle und Konflikt-Kategorie wie an
+  // der Kachel; leer reist das Feld gar nicht erst mit.
+  if (state.officials_managed && ((m.sr || []).length || (m.ar || []).length)) {
+    const besetzung = [
+      (m.sr || []).length ? `SR: ${m.sr.join(" / ")}` : "",
+      (m.ar || []).length ? `AR: ${m.ar.join(" / ")}` : "",
+    ].filter(Boolean).join(" · ");
+    status.push(`<span class="badge ${m.official_warn ? "badge-warn" : "badge-info"}"
+      title="Eingeteilt: ${esc(besetzung)}${m.official_warn ? ` — Konflikt: ${esc(m.official_warn)}` : ""}">${esc(besetzung)}</span>`);
+  }
   if (m.blocked && m.blocked.reason === "pause") {
     // Mindestpause: Eieruhr + Rest-Countdown statt Badge und Satz — WER
     // pausiert, sagen die orange gefärbten Namen links daneben. Tickt
