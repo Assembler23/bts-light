@@ -342,6 +342,12 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   **v0.9.341, Feldtest offen.** Nachzuholen: Ansage-Modus, Cloud-Etappe,
   Prognose-Zeit serverseitig formatieren (Kiosk ohne Zeitzone).
 
+- **Schiedsrichter in der TL-Web-Warteliste fest einteilen** — Spec:
+  [features/tl-warteliste-schiedsrichter.md](features/tl-warteliste-schiedsrichter.md)
+  (freigegeben 08.11.2026), ADR 0078 — Einteilung über das ⋮-Menü der Warteliste,
+  Rotation reserviert die Besetzung wartender Spiele (auch BTP-vorab), Umteilen
+  gegen BTP, Walkover zählt nicht als Einsatz. Anzeige schon live (v0.9.348).
+
 - **Weitere Sprachdienste der Ansage (ElevenLabs, OpenAI, Gemini)** — Spec:
   [features/ansage-elevenlabs.md](features/ansage-elevenlabs.md) (freigegeben
   02.11.2026, erweitert 03.11.2026) — **umgesetzt v0.9.336, Hörtest beim
