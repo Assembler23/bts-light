@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.348
+
+- **Schiedsrichter in der Warteliste des TL-Web.** Steht für ein wartendes
+  Spiel schon ein Schiedsrichter oder Aufschlagrichter fest (in BTP vorab
+  eingetragen oder von Hand zugewiesen), zeigt die Zeile „SR: … · AR: …",
+  bei einem Konflikt in Warnfarbe. Bisher erschien die Besetzung erst, wenn
+  das Spiel auf dem Feld stand. Zuweisen in der Warteliste folgt.
+
 ## v0.9.347
 
 - **Wer zuerst gerufen ist, kommt zuerst aufs Feld.** Gerufene Spiele („In

@@ -3255,6 +3255,18 @@ pub struct TlMatch {
     /// Die Seite zeigt dann „~hh:mm" statt „hh:mm" (E7).
     #[serde(default)]
     pub predicted_uncertain: bool,
+    /// Wirksame Besetzung (SR/AR) eines wartenden Spiels — in BTP vorab
+    /// eingetragen oder hier von Hand zugewiesen. Dieselbe Quelle wie an
+    /// der Feld-Kachel (`court_officials`): ohne Schiedsrichter-Betrieb
+    /// leer. Leer bleibt auf dem Draht weg — die meisten Wartespiele haben
+    /// keinen, und das 64-KiB-Fenster der Cloud soll nicht wachsen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sr: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ar: Vec<String>,
+    /// Konflikt-**Kategorie** wie an der Kachel, nie der Grund.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub official_warn: Option<String>,
 }
 
 /// Ein Spiel, dessen Paarung noch nicht (vollständig) feststeht — Spec
@@ -4076,6 +4088,7 @@ pub(crate) fn build_state_limited(
     let mut queue: Vec<TlMatch> = Vec::new();
     for (_, m, hall, hall_source) in ordered.into_iter().take(queue_limit) {
         let call = called_hall(m.id);
+        let (sr, ar, official_warn) = tablet.court_officials(Some(m), &snap);
         let manually_ordered = tablet.queue_order_store().rank(m.id).is_some();
         queue.push(TlMatch {
             match_id: m.id,
@@ -4128,6 +4141,9 @@ pub(crate) fn build_state_limited(
             manual: manually_ordered,
             predicted_start_ms: predictions.get(&m.id).map(|p| p.start_min * 60_000),
             predicted_uncertain: predictions.get(&m.id).is_some_and(|p| p.uncertain),
+            sr,
+            ar,
+            official_warn,
         });
     }
 
@@ -5146,6 +5162,74 @@ mod tests {
         let tablet = TabletState::default();
         tablet.set_snapshot(snapshot);
         build_state(&tablet, config, 1_000_000, 7)
+    }
+
+    /// Die Warteliste nennt die schon feststehende Besetzung — sonst sieht
+    /// die Turnierleitung einen in BTP vorab eingetragenen Schiedsrichter
+    /// erst, wenn das Spiel auf dem Feld steht (Feldwunsch 08.11.2026).
+    #[test]
+    fn die_warteliste_zeigt_den_vorab_eingetragenen_schiedsrichter() {
+        let mut m = a_match(7);
+        m.official1_id = Some(1);
+        m.official2_id = Some(2);
+        let mut s = snap(vec![a_court(1, None)], vec![m, a_match(8)], Vec::new());
+        s.officials = vec![
+            crate::btp::model::BtpOfficial {
+                id: 1,
+                name: "Schmidt".into(),
+                first: "Sabine".into(),
+                nationality: None,
+            },
+            crate::btp::model::BtpOfficial {
+                id: 2,
+                name: "Meier".into(),
+                first: "Max".into(),
+                nationality: None,
+            },
+        ];
+        let tablet = TabletState::default();
+        tablet.set_snapshot(s);
+
+        // Ohne Schiedsrichter-Betrieb bleibt die Zeile leer — wie die Kachel.
+        let aus = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let zeile = aus
+            .queue
+            .iter()
+            .find(|q| q.match_id == 7)
+            .expect("Spiel 7 wartet");
+        assert!(zeile.sr.is_empty() && zeile.ar.is_empty());
+
+        tablet.officials_store().set_enabled(true);
+        let an = build_state(&tablet, &AppConfig::default(), 1_000_000, 2);
+        let zeile = an
+            .queue
+            .iter()
+            .find(|q| q.match_id == 7)
+            .expect("Spiel 7 wartet");
+        assert_eq!(zeile.sr, vec!["Sabine Schmidt".to_string()]);
+        assert_eq!(zeile.ar, vec!["Max Meier".to_string()]);
+
+        // Eine Hand-Zuweisung an einem wartenden Spiel gilt genauso.
+        tablet
+            .officials_store()
+            .assign(8, crate::tablet::officials::OfficialRole::Sr, 2);
+        let hand = build_state(&tablet, &AppConfig::default(), 1_000_000, 3);
+        let zeile = hand
+            .queue
+            .iter()
+            .find(|q| q.match_id == 8)
+            .expect("Spiel 8 wartet");
+        assert_eq!(zeile.sr, vec!["Max Meier".to_string()]);
+
+        // Leere Besetzung reist nicht mit (64-KiB-Fenster der Cloud).
+        let json = serde_json::to_value(&an).unwrap();
+        let ohne = json["queue"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|q| q["match_id"] == 8)
+            .unwrap();
+        assert!(ohne.get("sr").is_none() && ohne.get("official_warn").is_none());
     }
 
     /// Ein Spiel, dessen Platz aus einem Vorspiel gespeist wird: `from1`
