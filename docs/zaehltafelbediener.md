@@ -70,7 +70,7 @@ Feld übrig. Ohne Eintrag gilt „Vergabe aktiv"; für bestehende Installationen
 Schiedsrichter-Betrieb eingeschaltet ist — sonst wäre er nach dem Abschalten
 nirgends mehr zurückzunehmen.
 
-**Auf so einem Feld wird auch niemand genannt oder angesagt** (seit v0.9.350,
+**Auf so einem Feld wird auch niemand genannt oder angesagt** (seit v0.9.351,
 `TabletState::feld_ohne_bediener`). Vorher prüfte nur die Vergabe den
 Schalter; der pro-Feld-Hinweis (Verlierer des Vorspiels) landete trotzdem in
 `CourtOverview.scorekeeper` und damit in jeder Feld-Ansage („Tabletbedienung:

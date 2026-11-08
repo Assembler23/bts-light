@@ -677,7 +677,7 @@ synchronen Pi-Uhr driftet. Gated durch die `call_timer`-Einstellung
 
 - **Einzelanzeige** (`monitor.html`, `renderCallTimer`): hochzählende Uhr
   `M:SS` + Ampel „1. Aufruf → 2. Aufruf → Letzter Aufruf" (neutral/gelb/rot),
-  **bis gespielt wird** (seit v0.9.350): Sobald am Tablet die Aufstellung
+  **bis gespielt wird** (seit v0.9.351): Sobald am Tablet die Aufstellung
   bestätigt ist (`court_state.startedAt`), das Spiel beendet ist oder ein
   Punkt im Satzstand steht, verschwindet die Uhr — wie am Tablet und in der
   Übersicht. Vorher lief sie das ganze Spiel über weiter und blinkte ab

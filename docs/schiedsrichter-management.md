@@ -363,12 +363,34 @@ nicht wörtlich gilt:
   Schiedsrichter spielendes Feld nach einem App-Neustart wieder einen
   zugeteilt (dort sieht jedes belegte Feld wie neu belegt aus).
 - **Loslassen nach Bestätigung** (`OfficialsStore::confirm`, im Sync-Loop vor
-  dem Diff): Sobald der Snapshot für einen Dienst einen Wert zeigt — oder das
-  ausdrückliche „keiner" bestätigt —, wird der lokale Eintrag entfernt und
-  BTP ist wieder allein die Wahrheit (R2). **Ohne diesen Schritt** würde eine
-  spätere Änderung *in BTP* bei jedem Sync-Zyklus wieder überschrieben, für
-  den Rest des Turniers. Die Einsatz-Ableitung verliert dabei nichts: Sie
-  liest denselben Wert dann aus dem BTP-Match.
+  dem Diff): Ein lokaler Dienst wird entfernt, sobald der Snapshot **genau
+  den lokalen Wert** zeigt (beim ausdrücklichen „keiner": niemanden) — oder
+  sobald BTP etwas **anderes führt als beim Einteilen** (dann hat jemand in
+  BTP umgeteilt, und BTP gewinnt, R2). Führt BTP noch den alten Wert, bleibt
+  die Absicht stehen und geht nach BTP: So ersetzt eine Umteilung von Y auf
+  X den Y in BTP (Spec `tl-warteliste-schiedsrichter`, AK 12; bis v0.9.349
+  ließ `confirm` X fallen, sobald BTP *irgendeinen* Wert trug, und X wurde
+  nie geschrieben). **Ohne das Loslassen** würde eine spätere Änderung *in
+  BTP* bei jedem Sync-Zyklus wieder überschrieben, für den Rest des
+  Turniers. Die Einsatz-Ableitung verliert dabei nichts: Sie liest denselben
+  Wert dann aus dem BTP-Match.
+- **Ausgangswert in der Datei, nicht im Sync-Lauf.** Den BTP-Stand beim
+  Einteilen merkt sich `officials-state.json` (Feld `ausgang`, je Match und
+  Dienst, `serde(default)`); erfasst wird er beim ersten Abgleich nach der
+  Einteilung, eine neue Einteilung erfasst ihn neu. Der Sync-Merker
+  `officials_written` taugt dafür nicht: Er wird bei jedem Speichern der
+  Einstellungen geleert, und BTP übernimmt asynchron — ein Abgleich, der BTP
+  noch beim alten Wert sieht, hielte das sonst für eine Umteilung in BTP und
+  verwürfe die eigene Einteilung. Ältere Dateien ohne `ausgang` verhalten
+  sich wie bisher. Teilt die Turnierleitung erneut um, während der erste
+  Write noch unterwegs ist, bleibt der Ausgangswert stehen und die frühere
+  Einteilung wird als eigene gemerkt (`sr_vorher`/`ar_vorher`): Ihre
+  verspätete Übernahme in BTP gilt nicht als Umteilung dort. Grenze: Teilt
+  die Turnierleitung im selben Sync-Takt um, in dem jemand in BTP ändert,
+  gilt die Einteilung.
+- **Merker `officials_written` nur bis zur Übernahme.** Zeigt BTP den
+  geschriebenen Stand, fällt der Eintrag heraus. Sonst unterdrückte er
+  einen späteren gleichen Write, nachdem jemand in BTP umgeteilt hat.
 
 ### CourtID immer mitschreiben (Live-Befund 14.08.2026)
 

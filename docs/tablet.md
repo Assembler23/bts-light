@@ -307,7 +307,7 @@ Aufstellung:
   und läuft mit getauschter Aufstellung automatisch weiter. Die Wahl
   übersteht einen Tablet-Reload (`serveSetupTeam` wird persistiert);
   „Korrektur — letzter Punkt zurück" in der Satzpause hebt sie wieder auf.
-  **Schon in der Satzpause** (seit v0.9.350, Schiri-Feedback 08.11.2026):
+  **Schon in der Satzpause** (seit v0.9.351, Schiri-Feedback 08.11.2026):
   Das Pausen-Overlay zeigt im Doppel „**Aufschlag & Annahme jetzt
   festlegen**". Der Knopf öffnet dieselbe Wahl, während die Pause weiterläuft
   (`setup` ist dann nicht `playing`, das Overlay tritt zurück, die Pausenuhr

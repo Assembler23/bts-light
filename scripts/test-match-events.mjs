@@ -125,7 +125,7 @@ const ev = (id, set, afterN, seq, kind = "card_yellow") => ({
   assert.ok(!istZurueckgenommen(mitRuecknahme, "b2"));
 }
 
-// ── Aufschlagfolge aus der Satzpause, danach Undo (v0.9.350) ──────────
+// ── Aufschlagfolge aus der Satzpause, danach Undo (v0.9.351) ──────────
 {
   // Satz 1 endete, in der Pause wurde die Aufschlagfolge für Satz 2 gewählt
   // (Anker 2/0) und eine Karte gegeben; dann „letzter Punkt zurück".
