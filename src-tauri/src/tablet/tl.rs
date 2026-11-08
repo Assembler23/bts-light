@@ -1166,7 +1166,7 @@ fn checkin_times_heute(
 /// Umgerechnet in die lokale Zeitzone des Turnier-PCs: badhub liefert
 /// Berlin-Wandzeit, und der Rechner steht in derselben Halle (dieselbe
 /// Abwägung wie `checkin_state::deadline_text`).
-fn heutiges_datum(now_ms: u64) -> chrono::NaiveDate {
+pub(crate) fn heutiges_datum(now_ms: u64) -> chrono::NaiveDate {
     use chrono::TimeZone;
     chrono::Local
         .timestamp_millis_opt(now_ms as i64)

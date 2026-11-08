@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.351
+
+- **Fest eingeteilte Schiedsrichter bleiben für ihr Spiel reserviert.** Wer
+  für ein wartendes Spiel als Schiedsrichter oder Aufschlagrichter feststeht
+  (von Hand eingeteilt oder in BTP vorab eingetragen), wird von der Rotation
+  und von der vorläufigen Zuteilung des Meetingpoints nirgends sonst
+  eingesetzt, bis sein Spiel beendet ist. Das gilt für Spiele, die heute oder
+  früher angesetzt sind oder keine Ansetzung haben.
+- **Die automatische Feldvergabe wartet auf den Schiedsrichter.** Pfeift der
+  eingeteilte Schiedsrichter noch auf einem anderen Feld, kommt sein Spiel
+  erst danach aufs Feld; die Automatik nimmt solange das nächste. Die
+  Vergabe von Hand bleibt jederzeit möglich.
+- **Achtung bei laufenden Turnieren:** Mit diesem Update nehmen alle
+  BTP-Vorabeinträge für heute ihre Schiedsrichter sofort aus der Rotation.
+  Wer viele Schiedsrichter in BTP vorab einträgt, spielt das Update am besten
+  vor Turnierbeginn ein. Ohne Schiedsrichter-Betrieb ändert sich nichts.
+
 ## v0.9.350
 
 - **Umteilen eines Schiedsrichters ersetzt den Eintrag in BTP.** Stand in

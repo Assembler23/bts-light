@@ -1985,10 +1985,12 @@ impl TabletState {
         if lokal.sr.is_none() && lokal.ar.is_none() {
             return None;
         }
-        Some((
-            lokal.sr.or(m.official1_id).unwrap_or(0),
-            lokal.ar.or(m.official2_id).unwrap_or(0),
-        ))
+        // Dieselbe Sicht „Hand vor BTP" wie die Reservierung (ADR 0078) —
+        // die Regel steht nur in `OfficialsStore::fuer_schreiben`.
+        let w = self
+            .officials
+            .fuer_schreiben(m.id, m.official1_id, m.official2_id);
+        Some((w.sr.unwrap_or(0), w.ar.unwrap_or(0)))
     }
 
     /// Die wirksamen Official-IDs eines Spiels (0 = keiner) — für die

@@ -159,6 +159,64 @@ gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
   Dienst.
 - **Globaler Schalter aus** ⇒ `clear_assignments()` (Spec Nr. 1).
 - Niemand frei ⇒ das Feld bleibt ohne diesen Dienst, ohne Fehler.
+- **Reservierte** überspringt die Rotation ebenfalls (seit v0.9.351, siehe
+  nächster Abschnitt).
+
+## Reservierung wartender Spiele (seit v0.9.351, ADR 0078)
+
+Wer für ein **wartendes** Spiel als Schiedsrichter oder Aufschlagrichter
+feststeht, ist für dieses Spiel **reserviert**. Die Rotation setzt ihn
+nirgends sonst ein, bis sein Spiel beendet ist. Das gilt für Einteilungen von
+Hand (Feld-Kachel, Turnier-PC) **und** für Schiedsrichter, die in BTP vorab
+am Spiel eingetragen sind. Spec:
+[tl-warteliste-schiedsrichter](features/tl-warteliste-schiedsrichter.md).
+
+- **Welche Spiele reservieren?** Wartende Spiele, die **heute oder früher**
+  angesetzt sind oder gar keine Ansetzung haben. „Heute" ist das Datum des
+  Turnier-PCs. Ein Vorabeintrag für ein Spiel am nächsten Turniertag nimmt
+  niemanden aus der Rotation.
+  <!-- pruef: "t / 10_000 <= heute_schluessel" in src-tauri/src/tablet/officials.rs -->
+- **Welche Besetzung zählt?** Die eigene Einteilung, sonst der BTP-Eintrag.
+  Wer gerade umgeteilt wurde, ist sofort reserviert, nicht erst nach der
+  Bestätigung durch BTP. „Ohne Schiedsrichter" reserviert niemanden, auch
+  nicht den Schiedsrichter, den BTP vorher trug. Gezählt wird nur, wer in der
+  Schiedsrichter-Liste von BTP steht.
+- **Wann endet die Reservierung?** Kommt das Spiel aufs Feld, pfeift genau
+  die eingeteilte Person; die Rotation ersetzt sie nicht. Ist das Spiel
+  beendet (auch kampflos), ist sie wieder frei. Wird das Spiel vom Feld
+  genommen, ist sie wieder reserviert.
+- **Pause:** Eine pausierte Person bleibt eingeteilt.
+- **Meetingpoint:** Die vorläufige Zuteilung beim Aufruf überspringt
+  Reservierte ebenfalls (siehe unten).
+
+### Die automatische Feldvergabe wartet auf den Schiedsrichter
+
+Steht der Schiedsrichter oder Aufschlagrichter eines wartenden Spiels noch auf
+einem anderen Feld, legt die **automatische** Feldvergabe dieses Spiel nicht
+aufs Feld. Sie nimmt das nächste Spiel und versucht es im nächsten Lauf
+wieder. In einem Lauf vergibt sie nie zwei Felder mit derselben Person. Ein
+Wunschfeld wird für das Spiel nicht freigehalten, solange sein Schiedsrichter
+noch pfeift. Eine Pause blockiert nicht.
+
+Ein Feld kann deshalb kurz leer stehen. Das ist gewollt: Kein Spiel soll ohne
+seinen Schiedsrichter beginnen. Die Turnierleitung kann den Schiedsrichter
+lösen oder umteilen, das Spiel von der Automatik ausnehmen oder es **von
+Hand** aufs Feld legen — die manuelle Vergabe (Kachel, Turnier-PC, BTP) sperrt
+nichts. Die Prognose kennt die Wartesperre nicht und ist für solche Spiele
+etwas zu optimistisch.
+
+> **Für bestehende Turniere:** Mit dem Update nehmen alle BTP-Vorabeinträge
+> für heute ihre Schiedsrichter sofort aus der Rotation. Wer in BTP viele
+> Schiedsrichter vorab einträgt, spielt das Update am besten vor
+> Turnierbeginn ein.
+
+Technik: Eine Quelle `officials.rs::Belegung` (`aus(store, snap, heute)`)
+rechnet Dienst (laufende Spiele, Sicht `effective`) und Reservierung
+(wartende Spiele, Sicht `fuer_schreiben` = Hand vor BTP). Verbraucher sind
+`track_officials` (`belegt_ausser` je Feld), `auto_assign` (Wartesperre,
+auch bei der Wunschfeld-Reservierung, vor dem strikten Meetingpoint-Gate),
+`uebernimm_vorab_sr` und `vorab_sr_verteilen`. `officials_for_write` baut
+auf `fuer_schreiben` auf.
 
 ## Feldweise Schalter (Schritt 6)
 
@@ -568,3 +626,6 @@ Aufs-Feld-Kommen (`uebernimm_vorab_sr`): in `auto_assign` vor
 `track_officials` für Hand-/BTP-Vergaben, vor der Feld-Rotation. Ist der
 Feldschalter `sr` aus, BTP/Hand schon belegt oder der SR inzwischen im
 Dienst, verfällt er. Die Feld-Rotation überspringt vorläufig Zugeteilte.
+Seit v0.9.351 überspringt die Verteilung auch **Reservierte** (ADR 0078);
+ein vorläufiger SR, der inzwischen für ein anderes wartendes Spiel
+eingeteilt ist, verfällt, und die Partie bekommt den nächsten freien.

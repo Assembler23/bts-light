@@ -1793,35 +1793,42 @@ impl SyncEngine {
             store.move_to_end(&fertig);
         }
 
-        // Wer tut gerade irgendwo Dienst? Aus den laufenden Spielen, damit
-        // niemand zwei Felder gleichzeitig bekommt.
+        // Wer ist gebunden? Dienst auf einem laufenden Feld UND Reservierung
+        // für ein wartendes Spiel (ADR 0078) — aus der einen Quelle
+        // `Belegung`, damit niemand zwei Felder gleichzeitig bekommt und
+        // niemand eingesetzt wird, der für sein eigenes Spiel feststeht.
         let bekannt: Vec<i64> = snapshot.officials.iter().map(|o| o.id).collect();
-        let mut im_dienst: HashSet<i64> = HashSet::new();
-        for m in snapshot.matches.iter().filter(|m| {
-            m.status == MatchStatus::OnCourt
-                && m.court_id.is_some_and(|c| oncourt_now.contains_key(&c))
-        }) {
-            let w = store.effective(m.id, m.official1_id, m.official2_id);
-            im_dienst.extend(w.sr);
-            im_dienst.extend(w.ar);
-        }
+        let belegung = crate::tablet::officials::Belegung::aus(
+            store,
+            snapshot,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
+        // In diesem Lauf zusätzlich Gebundene: übernommene und vorläufige
+        // Meetingpoint-SR, frisch Zugewiesene.
+        let mut zusaetzlich: HashSet<i64> = HashSet::new();
 
         // Vorläufige Meetingpoint-SR (ADR 0072) übernehmen — zustandsbasiert
         // für JEDES laufende Spiel, nicht nur neu belegte Felder: Sonst
         // verschluckte die Ausgangslage nach einem Sync-Neustart die
         // Übernahme. Vor der Rotation, damit diese nicht jemand anderen holt.
-        for (&court_id, &match_id) in &oncourt_now {
+        // Nach CourtID sortiert: Bei zwei Feldern entscheidet sonst die
+        // HashMap-Reihenfolge.
+        let mut belegte: Vec<(i64, i64)> = oncourt_now.iter().map(|(&c, &m)| (c, m)).collect();
+        belegte.sort_by_key(|&(c, _)| c);
+        for &(court_id, match_id) in &belegte {
             if let Some(m) = snapshot.matches.iter().find(|m| m.id == match_id) {
+                let mut belegt = belegung.belegt_ausser(match_id);
+                belegt.extend(&zusaetzlich);
                 if let Some(id) =
-                    crate::tablet::meetingpoint::uebernimm_vorab_sr(tablet, m, court_id, &im_dienst)
+                    crate::tablet::meetingpoint::uebernimm_vorab_sr(tablet, m, court_id, &belegt)
                 {
-                    im_dienst.insert(id);
+                    zusaetzlich.insert(id);
                 }
             }
         }
         // Vorläufig für gerufene Partien reservierte SR stehen der Feld-
         // Rotation nicht zur Verfügung.
-        im_dienst.extend(tablet.meetingpoint_store().alle_vorab_sr().into_values());
+        zusaetzlich.extend(tablet.meetingpoint_store().alle_vorab_sr().into_values());
 
         // Neu belegte Felder bestücken — nach CourtID sortiert, damit die
         // Verteilung bei mehreren gleichzeitig deterministisch ist.
@@ -1841,13 +1848,16 @@ impl SyncEngine {
             let players: Vec<crate::btp::model::BtpPlayer> =
                 m.team1.iter().chain(m.team2.iter()).cloned().collect();
             let vorher = store.effective(match_id, m.official1_id, m.official2_id);
+            // Reservierte überspringen, außer an ihrem eigenen Spiel.
+            let mut belegt = belegung.belegt_ausser(match_id);
+            belegt.extend(&zusaetzlich);
             store.rotate_court(crate::tablet::officials::RotationInput {
                 match_id,
                 players: &players,
                 btp_sr: m.official1_id,
                 btp_ar: m.official2_id,
                 bekannt: &bekannt,
-                im_dienst: &im_dienst,
+                belegt: &belegt,
                 sr: rotation_sr && schalter.sr,
                 ar: rotation_ar && schalter.ar,
             });
@@ -1855,10 +1865,10 @@ impl SyncEngine {
             // das nächste Feld im selben Zyklus dieselbe Person.
             let nachher = store.effective(match_id, m.official1_id, m.official2_id);
             if vorher.sr != nachher.sr {
-                im_dienst.extend(nachher.sr);
+                zusaetzlich.extend(nachher.sr);
             }
             if vorher.ar != nachher.ar {
-                im_dienst.extend(nachher.ar);
+                zusaetzlich.extend(nachher.ar);
             }
         }
         self.officials_oncourt_prev = Some(oncourt_now);
@@ -1996,8 +2006,48 @@ impl SyncEngine {
         } else {
             HashSet::new()
         };
-        let mut officials_im_dienst =
-            crate::tablet::meetingpoint::officials_im_dienst(tablet, snapshot);
+        // Schiedsrichter-Bindung (ADR 0078): Dienst und Reservierung aus der
+        // einen Quelle. Ohne Schiedsrichter-Betrieb leer ⇒ keine Wartesperre.
+        let belegung = crate::tablet::officials::Belegung::aus(
+            tablet.officials_store(),
+            snapshot,
+            crate::tablet::tl::heutiges_datum(now),
+        );
+        let bekannte_officials: HashSet<i64> = snapshot.officials.iter().map(|o| o.id).collect();
+        // Die feststehende Besetzung eines Kandidaten (Sicht „Hand vor BTP",
+        // nur echte Dienste von Personen, die BTP kennt).
+        let besetzung_von = |m: &crate::btp::model::BtpMatch| -> Vec<i64> {
+            if !tablet.officials_store().enabled() {
+                return Vec::new();
+            }
+            let w = tablet
+                .officials_store()
+                .fuer_schreiben(m.id, m.official1_id, m.official2_id);
+            [w.sr, w.ar]
+                .into_iter()
+                .flatten()
+                .filter(|id| *id > 0 && bekannte_officials.contains(id))
+                .collect()
+        };
+        // Wartesperre: Tut der SR oder AR des Spiels gerade auf einem anderen
+        // Feld Dienst, wartet das Spiel (AK 14). Pause blockiert nicht. Nur
+        // hier, nicht in `PlayerAvailability` — die Hand-Vergabe bleibt frei.
+        let sr_im_dienst = |m: &crate::btp::model::BtpMatch| -> bool {
+            besetzung_von(m)
+                .iter()
+                .any(|id| belegung.im_dienst_bei(*id).is_some())
+        };
+        // Officials, die in diesem Lauf (oder mit einer noch unbestätigten
+        // Vergabe) schon an ein Feld gehen — kein zweites Feld mit derselben
+        // Person, solange BTP den ersten Ruf noch nicht zurückmeldet.
+        let mut used_officials: HashSet<i64> = snapshot
+            .matches
+            .iter()
+            .filter(|m| pending_matches.contains(&m.id))
+            .flat_map(&besetzung_von)
+            .collect();
+        // Übernommene Vorab-SR dieses Laufs (ADR 0072).
+        let mut vorab_uebernommen: HashSet<i64> = HashSet::new();
         // Feld frei, aber keine spielbereite Partie — für die Warnung.
         let mut feld_ohne_bereite = false;
         let calls = tablet.preparation_calls();
@@ -2105,6 +2155,12 @@ impl SyncEngine {
                 if strict && !mp_bereit.contains(&m.id) {
                     return None;
                 }
+                // Der SR des Wunschspiels pfeift noch woanders ⇒ das Feld
+                // wird nicht freigehalten (AK 14): Es bekäme das Spiel ja
+                // ohnehin erst, wenn er frei ist.
+                if sr_im_dienst(m) {
+                    return None;
+                }
                 Some((court, m.id))
             })
             .collect();
@@ -2172,6 +2228,17 @@ impl SyncEngine {
                     let k = player_key(p);
                     used_players.contains(&k) || reserved_players.contains(&k)
                 }) {
+                    return false;
+                }
+                // Wartesperre der Schiedsrichter (ADR 0078): Die feststehende
+                // Besetzung tut woanders Dienst oder geht in diesem Lauf schon
+                // an ein anderes Feld ⇒ das Spiel wartet. Vor dem strikten
+                // Meetingpoint-Gate, damit dessen Warnung eindeutig bleibt.
+                if sr_im_dienst(m)
+                    || besetzung_von(m)
+                        .iter()
+                        .any(|id| used_officials.contains(id))
+                {
                     return false;
                 }
                 // Disziplin/Klasse→Halle-Regel: Match darf nur in seine erlaubte
@@ -2271,14 +2338,17 @@ impl SyncEngine {
             });
             // Vorläufiger Meetingpoint-SR wird jetzt echt (ADR 0072) und
             // reist im selben Write mit.
-            if let Some(id) = crate::tablet::meetingpoint::uebernimm_vorab_sr(
-                tablet,
-                m,
-                court.id,
-                &officials_im_dienst,
-            ) {
-                officials_im_dienst.insert(id);
+            let mut belegt = belegung.belegt_ausser(m.id);
+            belegt.extend(&vorab_uebernommen);
+            belegt.extend(&used_officials);
+            if let Some(id) =
+                crate::tablet::meetingpoint::uebernimm_vorab_sr(tablet, m, court.id, &belegt)
+            {
+                vorab_uebernommen.insert(id);
             }
+            // Die Besetzung dieses Felds ist für den Rest des Laufs vergeben
+            // (nach der Übernahme, damit der Vorab-SR mitzählt).
+            used_officials.extend(besetzung_von(m));
             match_courts.push(crate::btp::proto::MatchCourt {
                 match_id: m.id,
                 draw_id: m.draw_id,
@@ -2499,7 +2569,12 @@ impl SyncEngine {
         self.track_officials(&snapshot, tablet);
         // Meetingpoint: gerufenen Partien vorläufig einen freien SR geben
         // (ADR 0072) — nach der Feld-Rotation, die Vorrang hat.
-        crate::tablet::meetingpoint::vorab_sr_verteilen(tablet, &snapshot, &config.meetingpoint);
+        crate::tablet::meetingpoint::vorab_sr_verteilen(
+            tablet,
+            &snapshot,
+            &config.meetingpoint,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
         // Aufruf-Automatik (ADR 0075): ruft über denselben Weg wie ein
         // Hand-Aufruf; der Aufruf räumt die Auto-Halle (E3).
         for (match_id, location_id) in
@@ -4275,7 +4350,12 @@ mod tests {
             location_id: None,
             called_at_ms: 0,
         });
-        crate::tablet::meetingpoint::vorab_sr_verteilen(&tablet, &snap, &cfg.meetingpoint);
+        crate::tablet::meetingpoint::vorab_sr_verteilen(
+            &tablet,
+            &snap,
+            &cfg.meetingpoint,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
         assert_eq!(tablet.meetingpoint_store().vorab_sr(7), Some(100));
         let (_, matches) = engine.auto_assign(&cfg, &snap, &tablet);
         assert_eq!(matches[0].officials, Some((100, 0)));
@@ -6032,6 +6112,233 @@ mod tests {
         tablet.officials_store().set_enabled(false);
         engine.track_officials(&snap, &tablet);
         assert!(tablet.officials_store().assignments().is_empty());
+    }
+
+    // ── Reservierung wartender Spiele + Wartesperre (ADR 0078) ─────────
+
+    #[test]
+    fn track_officials_ueberspringt_reservierte() {
+        let (mut engine, tablet) = officials_setup(true, false);
+        // 1 steht in BTP vorab an Spiel 20, 2 ist von Hand für Spiel 21
+        // eingeteilt — beide warten noch. Für Feld 5 bleibt nur 3.
+        let mut btp_vorab = ready_named(20, None, "C", "D");
+        btp_vorab.official1_id = Some(1);
+        let hand = ready_named(21, None, "E", "F");
+        let snap = snap_officials(
+            vec![oncourt_named(10, 5, "A", "B"), btp_vorab, hand],
+            &[1, 2, 3],
+        );
+        tablet.set_snapshot(snap.clone());
+        tablet
+            .officials_store()
+            .assign(21, crate::tablet::officials::OfficialRole::Sr, 2);
+        engine.track_officials(&snap, &tablet);
+        assert_eq!(tablet.officials_store().assignment(10).sr, Some(3));
+    }
+
+    #[test]
+    fn track_officials_ersetzt_die_feststehende_besetzung_nicht() {
+        // AK 13: Kommt das Spiel aufs Feld, pfeift die eingeteilte Person.
+        let (mut engine, tablet) = officials_setup(true, true);
+        let snap = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+        tablet
+            .officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Sr, 3);
+        engine.track_officials(&snap, &tablet);
+        let a = tablet.officials_store().assignment(10);
+        assert_eq!(a.sr, Some(3), "die Einteilung bleibt");
+        assert_eq!(a.ar, Some(1), "nur der offene Dienst wird besetzt");
+    }
+
+    /// Auto-Vergabe mit Schiedsrichter-Betrieb: Felder und Officials 1–4.
+    fn sr_auto_setup(
+        courts: &[i64],
+        matches: Vec<BtpMatch>,
+    ) -> (SyncEngine, TabletState, BtpSnapshot) {
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut snap = snap_officials(matches, &[1, 2, 3, 4]);
+        snap.court_infos = courts.iter().map(|c| court(*c, None)).collect();
+        tablet.set_snapshot(snap.clone());
+        (SyncEngine::new(), tablet, snap)
+    }
+
+    /// SR (`Official1ID`) eines Spiels setzen.
+    fn mit_btp_sr(mut m: BtpMatch, sr: i64) -> BtpMatch {
+        m.official1_id = Some(sr);
+        m
+    }
+
+    #[test]
+    fn auto_assign_wartet_wenn_der_sr_noch_auf_einem_anderen_feld_pfeift() {
+        let (mut engine, tablet, snap) = sr_auto_setup(
+            &[1],
+            vec![
+                mit_btp_sr(oncourt_named(5, 9, "E", "F"), 1),
+                mit_btp_sr(ready_named(7, Some(1), "A", "B"), 1),
+                ready_named(8, Some(2), "C", "D"),
+            ],
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(courts[0].match_id, Some(8), "7 wartet auf seinen SR");
+
+        // Auch der AR sperrt.
+        let (mut engine, tablet, snap) = sr_auto_setup(
+            &[1],
+            vec![
+                mit_btp_sr(oncourt_named(5, 9, "E", "F"), 1),
+                ready_named(7, Some(1), "A", "B"),
+                ready_named(8, Some(2), "C", "D"),
+            ],
+        );
+        tablet
+            .officials_store()
+            .assign(7, crate::tablet::officials::OfficialRole::Ar, 1);
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts[0].match_id, Some(8));
+    }
+
+    #[test]
+    fn auto_assign_umteilen_von_hand_loest_die_wartesperre() {
+        // BTP führt 1 an Spiel 7, 1 pfeift woanders; die TL teilt 3 ein —
+        // ab sofort zählt 3 (Sicht „Hand vor BTP"), 7 darf aufs Feld.
+        let (mut engine, tablet, snap) = sr_auto_setup(
+            &[1],
+            vec![
+                mit_btp_sr(oncourt_named(5, 9, "E", "F"), 1),
+                mit_btp_sr(ready_named(7, Some(1), "A", "B"), 1),
+            ],
+        );
+        tablet
+            .officials_store()
+            .assign(7, crate::tablet::officials::OfficialRole::Sr, 3);
+        let (courts, matches) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts[0].match_id, Some(7));
+        assert_eq!(matches[0].officials, Some((3, 0)));
+    }
+
+    #[test]
+    fn auto_assign_vergibt_keine_zwei_felder_mit_derselben_person() {
+        let (mut engine, tablet, snap) = sr_auto_setup(
+            &[1, 2],
+            vec![
+                mit_btp_sr(ready_named(7, Some(1), "A", "B"), 1),
+                mit_btp_sr(ready_named(8, Some(2), "C", "D"), 1),
+                ready_named(9, Some(3), "E", "F"),
+            ],
+        );
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        let vergeben: Vec<_> = courts.iter().map(|c| (c.court_id, c.match_id)).collect();
+        assert_eq!(vergeben, vec![(1, Some(7)), (2, Some(9))]);
+    }
+
+    #[test]
+    fn auto_assign_zaehlt_den_sr_einer_unbestaetigten_vergabe_mit() {
+        // Spiel 7 ging im letzten Lauf mit SR 1 auf Feld 1, BTP hat es noch
+        // nicht bestätigt (steht noch wartend im Schnappschuss). Spiel 8 mit
+        // demselben SR darf nicht auf Feld 2.
+        let (mut engine, tablet, snap) = sr_auto_setup(
+            &[1, 2],
+            vec![
+                mit_btp_sr(ready_named(7, Some(1), "A", "B"), 1),
+                mit_btp_sr(ready_named(8, Some(2), "C", "D"), 1),
+                ready_named(9, Some(3), "E", "F"),
+            ],
+        );
+        engine.pending_auto.insert(1, (7, now_ms()));
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        let vergeben: Vec<_> = courts.iter().map(|c| (c.court_id, c.match_id)).collect();
+        assert_eq!(vergeben, vec![(2, Some(9))]);
+    }
+
+    #[test]
+    fn auto_assign_wunschfeld_haelt_nicht_frei_solange_der_sr_pfeift() {
+        let (mut engine, tablet, snap) = sr_auto_setup(
+            &[1],
+            vec![
+                mit_btp_sr(oncourt_named(5, 9, "E", "F"), 1),
+                ready_named(7, Some(1), "A", "B"),
+                mit_btp_sr(ready_named(8, Some(2), "C", "D"), 1),
+            ],
+        );
+        tablet.set_wish_court(8, Some(1));
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts.len(), 1);
+        assert_eq!(
+            courts[0].match_id,
+            Some(7),
+            "das Wunschfeld wird nicht für ein Spiel freigehalten, dessen SR noch pfeift"
+        );
+    }
+
+    #[test]
+    fn auto_assign_ein_pausierter_reservierter_blockiert_nicht() {
+        let (mut engine, tablet, snap) =
+            sr_auto_setup(&[1], vec![mit_btp_sr(ready_named(7, Some(1), "A", "B"), 1)]);
+        tablet.officials_store().set_paused(1, true);
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts[0].match_id, Some(7));
+    }
+
+    #[test]
+    fn auto_assign_ohne_schiedsrichterbetrieb_keine_wartesperre() {
+        // AK 19: Ohne Schiedsrichter-Betrieb bleibt alles wie bisher.
+        let (mut engine, tablet, snap) = sr_auto_setup(
+            &[1],
+            vec![
+                mit_btp_sr(oncourt_named(5, 9, "E", "F"), 1),
+                mit_btp_sr(ready_named(7, Some(1), "A", "B"), 1),
+                ready_named(8, Some(2), "C", "D"),
+            ],
+        );
+        tablet.officials_store().set_enabled(false);
+        let (courts, _) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts[0].match_id, Some(7));
+    }
+
+    #[test]
+    fn ein_vorab_sr_der_fuer_ein_anderes_spiel_reserviert_ist_geht_nicht_mit_aufs_feld() {
+        // Grill-Testfall: Vorab 100 an der gerufenen Partie 7, die TL teilt
+        // 100 für Spiel 8 ein ⇒ 7 kommt ohne 100 aufs Feld.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut snap = snap_with(
+            vec![court(1, None)],
+            vec![ready_match(7, 1), ready_named(8, None, "C", "D")],
+            Vec::new(),
+        );
+        snap.officials = vec![official_named(100)];
+        tablet.set_snapshot(snap.clone());
+        let store = tablet.officials_store();
+        store.set_enabled(true);
+        store.set_rotation(true, false);
+        let mut cfg = cfg_auto(true, 0.0);
+        cfg.meetingpoint.enabled = true;
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        });
+        crate::tablet::meetingpoint::vorab_sr_verteilen(
+            &tablet,
+            &snap,
+            &cfg.meetingpoint,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
+        assert_eq!(tablet.meetingpoint_store().vorab_sr(7), Some(100));
+        store.assign(8, crate::tablet::officials::OfficialRole::Sr, 100);
+        tablet.set_auto_assign_excluded(8, true);
+        let (courts, matches) = engine.auto_assign(&cfg, &snap, &tablet);
+        assert_eq!(courts[0].match_id, Some(7));
+        assert_eq!(matches[0].officials, None, "100 bleibt für Spiel 8");
+        assert_eq!(store.assignment(7).sr, None);
+        assert_eq!(
+            tablet.meetingpoint_store().vorab_sr(7),
+            None,
+            "Vorab verfallen"
+        );
     }
 
     #[test]

@@ -6,6 +6,9 @@
 > [0022 (Ablage Turnierdaten)](../adr/0022-officials-turnierdaten-eigene-datei.md).
 > Schritt 1 (BTP-Messung) am 13.08.2026 **erledigt** — Ergebnisse eingearbeitet,
 > Details in [btp_protocol.md](../btp_protocol.md) („Officials: Struktur & Schreibweg").
+> Erweitert durch [tl-warteliste-schiedsrichter](tl-warteliste-schiedsrichter.md)
+> (ADR 0078): Die Besetzung wartender Spiele reserviert ihre Schiedsrichter, und die
+> automatische Feldvergabe wartet auf einen Schiedsrichter, der noch woanders pfeift.
 
 ## Kontext / Problem
 
