@@ -17,9 +17,9 @@ Rückmeldungen der Schiedsrichter vom ersten echten Einsatz des Schiri-Modus:
   Entscheidungssatz kommt „Feldseiten wechseln" dagegen neu dazu.
 - **Aufschlag und Annahme schon in der Satzpause.** Im Doppel lassen sich
   Aufschläger und Annehmer des nächsten Satzes während der Pause eintragen.
-- **Einspielzeit groß.** Nach abgeschlossener Wahl zeigt der Schiri-Modus die
-  Einspielzeit groß über der Eröffnungsansage, bis der erste Ballwechsel
-  gespielt ist.
+- **Einspielzeit groß.** Nach abgeschlossener Wahl zeigt das Tablet die
+  Einspielzeit groß an, bis der erste Ballwechsel gespielt ist, auch ohne
+  Schiri-Modus. Nach 2 Minuten wird sie rot.
 - **Court-Monitor: Die Aufruf-Uhr verschwindet, sobald gespielt wird.**
   Bisher lief sie das ganze Spiel über weiter und blinkte rot.
 - **Felder ohne Tabletbedienung rufen keinen Bediener mehr auf.** Ist für

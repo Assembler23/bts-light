@@ -524,6 +524,7 @@
       background: #1e3a8a; color: #fff;
     }
     .umpire-einspiel[hidden] { display: none; }
+    .umpire-einspiel.vorbei { background: #b91c1c; }
     .umpire-einspiel .lbl { font-size: 1.2rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
     .umpire-einspiel .zeit { font-size: 3.2rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
     /* overflow-wrap: in der schmalen Seitenspalte (übereinander) dürfen lange
@@ -2276,6 +2277,9 @@ function showSwitchToast() {
 // mehr automatisch bei 0: Sie bleibt bestehen, bis der Schiedsrichter
 // „Weiterspielen" tippt — nach Ablauf zählt die Anzeige rot hoch
 // („überzogen"), und die Turnierleitung sieht die Überziehung feldgenau.
+/** Ab hier gilt das Einspielen als vorbei (Anzeige rot). Zwei Minuten —
+ *  Wunsch der Schiedsrichter vom 08.11.2026. */
+const EINSPIEL_SEKUNDEN = 120;
 const BREAK_SECONDS = { eleven: 60, game: 120 };
 let breakTimer = null;
 
@@ -2710,9 +2714,13 @@ function renderClock() {
 // renderClock; mit dem ersten Punkt verschwindet sie.
 function renderEinspielzeit() {
   if (!els.umpireEinspiel) return;
-  const zeigen = STATE.umpireMode && einspielPhase();
+  const zeigen = einspielPhase();
   els.umpireEinspiel.hidden = !zeigen;
-  if (zeigen) els.umpireEinspielZeit.textContent = einspielZeitText();
+  if (!zeigen) return;
+  els.umpireEinspielZeit.textContent = einspielZeitText();
+  // Nach EINSPIEL_SEKUNDEN wird die Anzeige rot: Das Einspielen ist um.
+  const s = (Date.now() - STATE.startedAt) / 1000;
+  els.umpireEinspiel.classList.toggle('vorbei', s >= EINSPIEL_SEKUNDEN);
 }
 
 // ─────────────────────────────── State-Mutationen ─────────────────────
@@ -5428,9 +5436,21 @@ function renderUmpireBar() {
   if (els.settingsUmpire) {
     els.settingsUmpire.textContent = 'Schiri-Modus: ' + (STATE.umpireMode ? 'an' : 'aus');
   }
-  const show = STATE.umpireMode && !!STATE.match;
+  // Ohne Schiri-Modus erscheint die Leiste nur für die Einspielzeit — und
+  // dann ohne Ansage, Karten und Karten-Knopf (Wunsch 08.11.2026: die
+  // Einspielzeit auch für Zähltafelbediener sichtbar). Die Leiste selbst,
+  // weil sie in allen Anordnungen (nebeneinander/übereinander, hoch/quer)
+  // schon ihren Platz hat.
+  const nurEinspiel = !STATE.umpireMode && einspielPhase();
+  const show = !!STATE.match && (STATE.umpireMode || nurEinspiel);
   els.umpireBar.hidden = !show;
   if (!show) return;
+  for (const el of [els.umpireSay, els.umpireCards]) el.style.display = nurEinspiel ? 'none' : '';
+  if (nurEinspiel) {
+    els.umpireBadge.hidden = true;
+    els.umpireCardBtn.hidden = true;
+    return;
+  }
   const a = umpAnnouncement();
   els.umpireSay.textContent = a.say || '';
   els.umpireBadge.textContent = a.badge || '';

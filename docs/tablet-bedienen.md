@@ -113,6 +113,14 @@ Gut zu wissen:
 - „Mannschaften tauschen" fehlt, solange der Turnier-PC noch eine ältere
   Version hat.
 
+## Einspielzeit
+
+Ist die Seiten- und Aufschlagwahl abgeschlossen, zeigt das Tablet bis zum
+ersten Ballwechsel groß die **Einspielzeit** — die Zeit seit der Wahl. Nach
+**2 Minuten** wird sie rot. Mit dem ersten Punkt verschwindet sie.
+<!-- pruef: "Einspielzeit" in src-tauri/assets/tablet.html -->
+<!-- pruef: /EINSPIEL_SEKUNDEN = 120;/ in src-tauri/assets/tablet.html -->
+
 ## Pausen
 
 Das Tablet blendet die offiziellen Pausen selbst ein:
