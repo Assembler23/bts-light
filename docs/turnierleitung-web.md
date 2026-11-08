@@ -821,7 +821,9 @@ zeigt die Seite zusätzlich:
 
 Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
 Turnierleitung entscheidet. Steht in BTP schon ein Schiedsrichter am Spiel,
-gilt dieser — die Auswahl hier wirkt dann nicht.
+**ersetzt** die Auswahl hier ihn: Sie geht nach BTP, bis zur Übernahme zeigt
+die Kachel kurz noch den alten Namen (seit v0.9.350). Ändert danach jemand
+die Besetzung **in BTP**, gilt BTP — bts-light schreibt nicht dagegen.
 
 Sperrlisten, Verein und Einsatz-Liste stehen **nicht** im Zustand, den alle
 gekoppelten Geräte bekommen: Sie kodieren persönliche Beziehungen und werden

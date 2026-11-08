@@ -314,6 +314,28 @@ fn prepare_btp_retry(
     RetryAction::Write(Box::new(update))
 }
 
+/// Den Merker „schon geschrieben" auf das beschränken, was BTP noch nicht
+/// zeigt. Was BTP übernommen hat, fällt heraus — sonst unterdrückte er
+/// einen späteren, gleichen Write, nachdem jemand in BTP umgeteilt hat
+/// (AK 12), und die Karte wüchse über das Turnier.
+fn geschrieben_aufraeumen(geschrieben: &mut HashMap<i64, (i64, i64)>, snapshot: &BtpSnapshot) {
+    geschrieben.retain(|id, wert| {
+        snapshot.matches.iter().any(|m| {
+            m.id == *id && (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)) != *wert
+        })
+    });
+}
+
+/// Lokale Schiedsrichter-Absichten loslassen, die BTP bestätigt oder in BTP
+/// selbst umgeteilt hat (`OfficialsStore::confirm`, AK 12). Läuft vor dem
+/// Diff, damit eine Änderung IN BTP nicht zurückgeschrieben wird.
+fn officials_loslassen(tablet: &TabletState, snapshot: &BtpSnapshot) {
+    let store = tablet.officials_store();
+    for m in &snapshot.matches {
+        store.confirm(m.id, m.official1_id, m.official2_id);
+    }
+}
+
 /// Die Schiedsrichter-Änderungen, die noch nach BTP müssen (ADR 0021).
 ///
 /// Rein und damit testbar: Soll-Stand ist die **wirksame** Besetzung
@@ -787,17 +809,10 @@ impl SyncEngine {
     ) {
         // Erst loslassen, was BTP inzwischen zeigt (R2) — sonst schriebe der
         // Diff unten eine spätere Änderung IN BTP wieder zurück.
-        let store = tablet.officials_store();
-        for m in &snapshot.matches {
-            store.confirm(m.id, m.official1_id, m.official2_id);
-        }
+        officials_loslassen(tablet, snapshot);
+        geschrieben_aufraeumen(&mut self.officials_written, snapshot);
         let entries = officials_entries(tablet, snapshot, &self.officials_written, now_ms());
         if entries.is_empty() {
-            // Aufräumen: Was BTP inzwischen trägt, muss nicht länger als
-            // „geschrieben" gemerkt werden (sonst wüchse die Karte über das
-            // Turnier).
-            self.officials_written
-                .retain(|id, _| snapshot.matches.iter().any(|m| m.id == *id));
             return;
         }
         match crate::tablet::server::write_officials_to_btp(config, &entries).await {
@@ -5409,6 +5424,64 @@ mod tests {
         // Ohne Schiedsrichter-Betrieb wird gar nichts geschrieben.
         tablet.officials_store().set_enabled(false);
         assert!(officials_entries(&tablet, &snap, &HashMap::new(), now_ms()).is_empty());
+    }
+
+    #[test]
+    fn officials_umteilen_gegen_btp_geht_nach_btp_und_eine_btp_aenderung_gewinnt() {
+        // AK 12 (Spec tl-warteliste-schiedsrichter): BTP führt Y (7), die TL
+        // teilt X (1) ein. Früher ließ das Loslassen vor dem Diff X sofort
+        // fallen — es wurde nie geschrieben. Gilt für Feld und Warteliste.
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut feld = oncourt_named(10, 5, "A", "B");
+        feld.official1_id = Some(7);
+        let mut wartend = ready_named(20, None, "C", "D");
+        wartend.official1_id = Some(7);
+        let snap = snap_officials(vec![feld.clone(), wartend.clone()], &[1, 2, 7, 9]);
+        tablet.set_snapshot(snap.clone());
+        let store = tablet.officials_store();
+        store.assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
+        store.assign(20, crate::tablet::officials::OfficialRole::Sr, 2);
+
+        officials_loslassen(&tablet, &snap);
+        let offen = officials_entries(&tablet, &snap, &HashMap::new(), now_ms());
+        let mut ziele: Vec<_> = offen.iter().map(|e| (e.match_id, e.officials)).collect();
+        ziele.sort();
+        assert_eq!(
+            ziele,
+            vec![(10, Some((1, 0))), (20, Some((2, 0)))],
+            "die Einteilung ersetzt den BTP-Wert"
+        );
+
+        // Danach teilt jemand IN BTP auf Z (9) um: Z gilt, kein Write dagegen.
+        feld.official1_id = Some(9);
+        wartend.official1_id = Some(9);
+        let snap2 = snap_officials(vec![feld, wartend], &[1, 2, 7, 9]);
+        tablet.set_snapshot(snap2.clone());
+        officials_loslassen(&tablet, &snap2);
+        assert!(officials_entries(&tablet, &snap2, &HashMap::new(), now_ms()).is_empty());
+    }
+
+    #[test]
+    fn officials_merker_faellt_nach_der_uebernahme_weg() {
+        // Review-Befund: X geschrieben und übernommen, dann in BTP auf Z
+        // umgeteilt, dann teilt die TL erneut X ein — der alte Merker (X, 0)
+        // darf den Write nicht unterdrücken.
+        let mut m = oncourt_named(10, 5, "A", "B");
+        m.official1_id = Some(1);
+        let snap = snap_officials(vec![m], &[1, 9]);
+        let mut geschrieben = HashMap::new();
+        geschrieben.insert(10i64, (1i64, 0i64));
+        geschrieben.insert(99i64, (1i64, 0i64)); // Spiel nicht mehr im Snapshot
+        geschrieben_aufraeumen(&mut geschrieben, &snap);
+        assert!(
+            geschrieben.is_empty(),
+            "übernommen bzw. verschwunden ⇒ raus"
+        );
+        // Noch nicht übernommen ⇒ bleibt.
+        geschrieben.insert(10, (2, 0));
+        geschrieben_aufraeumen(&mut geschrieben, &snap);
+        assert_eq!(geschrieben.get(&10), Some(&(2, 0)));
     }
 
     #[test]
