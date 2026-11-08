@@ -27,7 +27,7 @@ use std::sync::{Mutex, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::btp::model::BtpPlayer;
+use crate::btp::model::{BtpMatch, BtpPlayer, BtpSnapshot, MatchStatus};
 
 /// Warum ein Official nicht zu einem Spiel passt. Mehr Kategorien braucht
 /// die Anzeige nicht — der *Grund* (welcher Verein, welcher Spieler) bleibt
@@ -172,8 +172,11 @@ pub struct RotationInput<'a> {
     pub btp_ar: Option<i64>,
     /// Official-IDs, die BTP aktuell kennt; nur die dürfen zugewiesen werden.
     pub bekannt: &'a [i64],
-    /// Wer gerade auf einem ANDEREN Feld Dienst tut (SR oder AR).
-    pub im_dienst: &'a HashSet<i64>,
+    /// Wer für dieses Spiel nicht in Frage kommt: Dienst auf einem anderen
+    /// Feld oder reserviert für ein anderes wartendes Spiel
+    /// ([`Belegung::belegt_ausser`], ADR 0078), plus vorläufige
+    /// Meetingpoint-SR und in diesem Lauf schon Vergebene.
+    pub belegt: &'a HashSet<i64>,
     /// SR-Rotation für dieses Feld aktiv (globaler Schalter UND Feldschalter)?
     pub sr: bool,
     /// AR-Rotation für dieses Feld aktiv?
@@ -288,6 +291,147 @@ fn pruefe_dienst(
 /// `None` werden beide zu „kein Dienst".
 fn dienst(id: Option<i64>) -> Option<i64> {
     id.filter(|v| *v > 0)
+}
+
+/// Reserviert ein wartendes Spiel seine Besetzung (ADR 0078)? Ja, wenn es
+/// am heutigen Tag oder davor angesetzt ist oder gar keine Ansetzung hat.
+/// Spiele späterer Tage reservieren nicht — sonst verkleinerten
+/// BTP-Vorabeinträge den Pool tagelang. „Heute" kommt von außen (lokales
+/// Datum des Turnier-PCs), damit der Kern ohne Uhr auskommt.
+pub fn ist_reservierend(m: &BtpMatch, heute: chrono::NaiveDate) -> bool {
+    use chrono::Datelike;
+    if m.status != MatchStatus::Scheduled {
+        return false;
+    }
+    let heute_schluessel =
+        i64::from(heute.year()) * 10_000 + i64::from(heute.month()) * 100 + i64::from(heute.day());
+    // `planned_time` ist `YYYYMMDDHHMM` — ohne die Uhrzeit bleibt der Tag.
+    m.planned_time
+        .is_none_or(|t| t / 10_000 <= heute_schluessel)
+}
+
+/// Wer ist wo gebunden? Die **eine** Quelle für Dienst und Reservierung
+/// (ADR 0078) — Rotation, Meetingpoint-Vorab-Verteilung, Übernahme des
+/// Vorab-SR und Auto-Vergabe lesen alle hier, damit keine zwei Stellen
+/// verschieden rechnen.
+///
+/// - **Im Dienst:** SR/AR eines laufenden Spiels (Sicht `effective`, so
+///   wie das Feld es zeigt).
+/// - **Reserviert:** SR/AR eines reservierenden wartenden Spiels (Sicht
+///   [`OfficialsStore::fuer_schreiben`]; `Some(0)` reserviert niemanden).
+///
+/// Gezählt wird nur, wer in der BTP-Officials-Liste steht. Das Ende der
+/// Reservierung ergibt sich aus dem Status: aufs Feld ⇒ im Dienst,
+/// beendet ⇒ frei, vom Feld genommen ⇒ wieder reserviert. Ohne
+/// Schiedsrichter-Betrieb ist die Belegung leer (AK 19).
+#[derive(Debug, Clone, Default)]
+pub struct Belegung {
+    /// Official-ID → (Match-ID, CourtID) der laufenden Spiele. Eine Liste,
+    /// weil ein inkonsistenter Stand (BTP oder Hand) dieselbe Person an zwei
+    /// Feldern führen kann — dann ist sie für beide gebunden.
+    im_dienst: HashMap<i64, Vec<(i64, Option<i64>)>>,
+    /// Official-ID → Match-IDs der wartenden Spiele, für die er reserviert
+    /// ist (aufsteigend).
+    reserviert: HashMap<i64, Vec<i64>>,
+}
+
+impl Belegung {
+    /// Belegung aus dem Roster-Speicher und dem BTP-Schnappschuss.
+    pub fn aus(store: &OfficialsStore, snap: &BtpSnapshot, heute: chrono::NaiveDate) -> Self {
+        let mut out = Self::default();
+        if !store.enabled() {
+            return out;
+        }
+        let bekannt: HashSet<i64> = snap.officials.iter().map(|o| o.id).collect();
+        for m in &snap.matches {
+            let besetzung = match m.status {
+                MatchStatus::OnCourt => store.effective(m.id, m.official1_id, m.official2_id),
+                MatchStatus::Scheduled if ist_reservierend(m, heute) => {
+                    store.fuer_schreiben(m.id, m.official1_id, m.official2_id)
+                }
+                _ => continue,
+            };
+            for id in [dienst(besetzung.sr), dienst(besetzung.ar)]
+                .into_iter()
+                .flatten()
+                .filter(|id| bekannt.contains(id))
+            {
+                if m.status == MatchStatus::OnCourt {
+                    out.im_dienst
+                        .entry(id)
+                        .or_default()
+                        .push((m.id, m.court_id));
+                } else {
+                    let liste = out.reserviert.entry(id).or_default();
+                    if !liste.contains(&m.id) {
+                        liste.push(m.id);
+                    }
+                }
+            }
+        }
+        for liste in out.reserviert.values_mut() {
+            liste.sort_unstable();
+        }
+        for felder in out.im_dienst.values_mut() {
+            felder.sort_unstable();
+        }
+        out
+    }
+
+    /// Tut der Official gerade auf einem Feld Dienst? Liefert die CourtID
+    /// (`None` im Ergebnis heißt: nicht im Dienst; ein laufendes Spiel ohne
+    /// CourtID meldet `Some(0)`).
+    pub fn im_dienst_bei(&self, official_id: i64) -> Option<i64> {
+        self.im_dienst
+            .get(&official_id)
+            .and_then(|felder| felder.first())
+            .map(|(_, court)| court.unwrap_or(0))
+    }
+
+    /// Die wartenden Spiele, für die der Official reserviert ist.
+    pub fn reserviert_fuer(&self, official_id: i64) -> &[i64] {
+        self.reserviert
+            .get(&official_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// An zwei oder mehr wartenden Spielen eingeteilt? Dienst auf einem
+    /// laufenden Feld zählt nicht als Doppel-Einteilung (AK 11).
+    pub fn doppelt(&self, official_id: i64) -> bool {
+        self.reserviert_fuer(official_id).len() >= 2
+    }
+
+    /// Im Dienst oder irgendwo reserviert?
+    pub fn ist_belegt(&self, official_id: i64) -> bool {
+        self.im_dienst.contains_key(&official_id) || self.reserviert.contains_key(&official_id)
+    }
+
+    /// Wer für **dieses** Spiel nicht in Frage kommt: Dienst an einem
+    /// anderen Spiel oder reserviert für ein anderes. Die eigene Einteilung
+    /// bleibt draußen — sonst sperrte sich ein Spiel selbst.
+    pub fn belegt_ausser(&self, match_id: i64) -> HashSet<i64> {
+        let dienst = self
+            .im_dienst
+            .iter()
+            .filter(|(_, spiele)| spiele.iter().any(|(m, _)| *m != match_id))
+            .map(|(id, _)| *id);
+        let reserviert = self
+            .reserviert
+            .iter()
+            .filter(|(_, spiele)| spiele.iter().any(|m| *m != match_id))
+            .map(|(id, _)| *id);
+        dienst.chain(reserviert).collect()
+    }
+
+    /// Alle Gebundenen (Dienst und Reservierung).
+    pub fn alle(&self) -> HashSet<i64> {
+        self.im_dienst
+            .keys()
+            .chain(self.reserviert.keys())
+            .copied()
+            .collect()
+    }
 }
 
 /// Feldweise Schalter (Spec Nr. 6): SR-Rotation, AR-Rotation und
@@ -663,6 +807,27 @@ impl OfficialsStore {
         }
     }
 
+    /// Die Besetzung in der Sicht **„Hand vor BTP"**: die lokale Absicht,
+    /// falls vorhanden, sonst der BTP-Wert. `Some(0)` heißt ausdrücklich
+    /// kein Dienst.
+    ///
+    /// Grundlage des Rücksyncs (`TabletState::officials_for_write`) und der
+    /// Reservierung wartender Spiele (ADR 0078): Wer gerade umgeteilt wurde,
+    /// ist ab sofort reserviert, nicht erst nach der Bestätigung durch BTP.
+    /// Die Anzeige bleibt bei [`effective`](Self::effective) (R2).
+    pub fn fuer_schreiben(
+        &self,
+        match_id: i64,
+        btp_sr: Option<i64>,
+        btp_ar: Option<i64>,
+    ) -> MatchOfficials {
+        let lokal = self.assignment(match_id);
+        MatchOfficials {
+            sr: lokal.sr.or(btp_sr),
+            ar: lokal.ar.or(btp_ar),
+        }
+    }
+
     /// Freie Dienste eines neu belegten Felds aus der Reihenfolge besetzen
     /// (Spec Nr. 4). Belegte Dienste bleiben unangetastet — auch deshalb ist
     /// der Aufruf idempotent.
@@ -683,7 +848,7 @@ impl OfficialsStore {
         }
         // Wer an DIESEM Spiel schon Dienst tut, kommt für den zweiten Dienst
         // nicht in Frage — dieselbe Person ist nie SR und AR zugleich.
-        let mut vergeben: HashSet<i64> = input.im_dienst.clone();
+        let mut vergeben: HashSet<i64> = input.belegt.clone();
         vergeben.extend(wirksam.sr);
         vergeben.extend(wirksam.ar);
 
@@ -979,7 +1144,7 @@ mod tests {
         match_id: i64,
         players: &'a [BtpPlayer],
         bekannt: &'a [i64],
-        im_dienst: &'a HashSet<i64>,
+        belegt: &'a HashSet<i64>,
     ) -> RotationInput<'a> {
         RotationInput {
             match_id,
@@ -987,7 +1152,7 @@ mod tests {
             btp_sr: None,
             btp_ar: None,
             bekannt,
-            im_dienst,
+            belegt,
             sr: true,
             ar: true,
         }
@@ -1717,5 +1882,266 @@ mod tests {
         store.set_tournament("   ");
         assert!(store.extra(1).paused);
         assert_eq!(store.tournament(), "Test BTS Light");
+    }
+
+    // ── Reservierung wartender Spiele (ADR 0078) ──────────────────────
+
+    use crate::btp::model::{BtpOfficial, MatchResult};
+
+    /// Der Turniertag der Tests.
+    fn heute() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, 8).unwrap()
+    }
+
+    /// Ein Spiel mit Status, Feld und BTP-Besetzung.
+    fn spiel(id: i64, status: MatchStatus, sr: Option<i64>, ar: Option<i64>) -> BtpMatch {
+        let court = (status == MatchStatus::OnCourt).then_some(id + 100);
+        let mut m = crate::tablet::state::tests::match_on(id, court, status);
+        m.official1_id = sr;
+        m.official2_id = ar;
+        m
+    }
+
+    /// Schnappschuss mit Spielen und der BTP-Officials-Liste.
+    fn snap_mit(matches: Vec<BtpMatch>, officials: &[i64]) -> BtpSnapshot {
+        let mut s = crate::tablet::state::tests::snapshot(matches, vec![]);
+        s.officials = officials
+            .iter()
+            .map(|id| BtpOfficial {
+                id: *id,
+                name: format!("SR{id}"),
+                first: String::new(),
+                nationality: None,
+            })
+            .collect();
+        s
+    }
+
+    fn store_an() -> OfficialsStore {
+        let store = OfficialsStore::default();
+        store.set_enabled(true);
+        store
+    }
+
+    #[test]
+    fn fuer_schreiben_nimmt_die_hand_vor_btp_und_kennt_das_ohne() {
+        let store = store_an();
+        // Nie angefasst: BTP.
+        assert_eq!(
+            store.fuer_schreiben(1, Some(7), None),
+            MatchOfficials {
+                sr: Some(7),
+                ar: None
+            }
+        );
+        // Umgeteilt: die Hand gewinnt, auch gegen einen BTP-Wert.
+        store.assign(1, OfficialRole::Sr, 8);
+        assert_eq!(store.fuer_schreiben(1, Some(7), None).sr, Some(8));
+        // Ausdrücklich ohne: `Some(0)`, nicht der BTP-Wert.
+        store.clear_assignment(1, OfficialRole::Sr);
+        assert_eq!(store.fuer_schreiben(1, Some(7), None).sr, Some(0));
+        // Die Anzeige bleibt bei BTP.
+        assert_eq!(store.effective(1, Some(7), None).sr, Some(7));
+    }
+
+    #[test]
+    fn belegung_reserviert_btp_vorab_und_hand_einteilung() {
+        let store = store_an();
+        store.assign(2, OfficialRole::Ar, 5);
+        let snap = snap_mit(
+            vec![
+                spiel(1, MatchStatus::Scheduled, Some(4), None),
+                spiel(2, MatchStatus::Scheduled, None, None),
+            ],
+            &[4, 5, 6],
+        );
+        let b = Belegung::aus(&store, &snap, heute());
+        assert_eq!(b.reserviert_fuer(4), &[1]);
+        assert_eq!(b.reserviert_fuer(5), &[2]);
+        assert!(b.reserviert_fuer(6).is_empty());
+        assert_eq!(b.im_dienst_bei(4), None);
+    }
+
+    #[test]
+    fn belegung_reserviert_heute_davor_und_ohne_zeit_aber_nicht_spaeter() {
+        let store = store_an();
+        let mut heute_m = spiel(1, MatchStatus::Scheduled, Some(1), None);
+        heute_m.planned_time = Some(202_611_081_830);
+        let mut gestern = spiel(2, MatchStatus::Scheduled, Some(2), None);
+        gestern.planned_time = Some(202_611_071_000);
+        let ohne_zeit = spiel(3, MatchStatus::Scheduled, Some(3), None);
+        let mut morgen = spiel(4, MatchStatus::Scheduled, Some(4), None);
+        morgen.planned_time = Some(202_611_090_900);
+        let snap = snap_mit(vec![heute_m, gestern, ohne_zeit, morgen], &[1, 2, 3, 4]);
+        let b = Belegung::aus(&store, &snap, heute());
+        assert_eq!(b.reserviert_fuer(1), &[1]);
+        assert_eq!(b.reserviert_fuer(2), &[2], "liegengeblieben vom Vortag");
+        assert_eq!(b.reserviert_fuer(3), &[3], "ohne Ansetzung");
+        assert!(
+            b.reserviert_fuer(4).is_empty(),
+            "späterer Tag reserviert nicht"
+        );
+        assert!(!b.ist_belegt(4));
+    }
+
+    #[test]
+    fn belegung_zaehlt_nur_wen_btp_kennt() {
+        let store = store_an();
+        let snap = snap_mit(
+            vec![
+                spiel(1, MatchStatus::Scheduled, Some(9), None),
+                spiel(2, MatchStatus::OnCourt, Some(8), None),
+            ],
+            &[1],
+        );
+        let b = Belegung::aus(&store, &snap, heute());
+        assert!(!b.ist_belegt(9));
+        assert!(!b.ist_belegt(8));
+    }
+
+    #[test]
+    fn belegung_endet_mit_spielende_auch_beim_walkover() {
+        let store = store_an();
+        store.assign(1, OfficialRole::Sr, 3);
+        let mut fertig = spiel(1, MatchStatus::Finished, None, None);
+        fertig.winner = Some(1);
+        fertig.result = MatchResult::Walkover;
+        let snap = snap_mit(vec![fertig], &[3]);
+        let b = Belegung::aus(&store, &snap, heute());
+        assert!(!b.ist_belegt(3));
+    }
+
+    #[test]
+    fn belegung_aufs_feld_heisst_dienst_und_vom_feld_wieder_reserviert() {
+        let store = store_an();
+        store.assign(1, OfficialRole::Sr, 3);
+        let auf_dem_feld = snap_mit(vec![spiel(1, MatchStatus::OnCourt, None, None)], &[3]);
+        let b = Belegung::aus(&store, &auf_dem_feld, heute());
+        assert_eq!(b.im_dienst_bei(3), Some(101));
+        assert!(b.reserviert_fuer(3).is_empty());
+        // Vom Feld genommen: wieder wartend ⇒ wieder reserviert.
+        let zurueck = snap_mit(vec![spiel(1, MatchStatus::Scheduled, None, None)], &[3]);
+        let b = Belegung::aus(&store, &zurueck, heute());
+        assert_eq!(b.im_dienst_bei(3), None);
+        assert_eq!(b.reserviert_fuer(3), &[1]);
+    }
+
+    #[test]
+    fn belegung_ohne_reserviert_niemanden_auch_nicht_den_btp_wert() {
+        let store = store_an();
+        store.clear_assignment(1, OfficialRole::Sr);
+        let snap = snap_mit(vec![spiel(1, MatchStatus::Scheduled, Some(3), None)], &[3]);
+        let b = Belegung::aus(&store, &snap, heute());
+        assert!(!b.ist_belegt(3));
+    }
+
+    #[test]
+    fn belegt_ausser_nimmt_das_eigene_spiel_aus() {
+        let store = store_an();
+        let snap = snap_mit(
+            vec![
+                spiel(1, MatchStatus::Scheduled, Some(3), Some(4)),
+                spiel(2, MatchStatus::OnCourt, Some(5), None),
+            ],
+            &[3, 4, 5],
+        );
+        let b = Belegung::aus(&store, &snap, heute());
+        assert_eq!(b.belegt_ausser(1), HashSet::from([5]));
+        assert_eq!(b.belegt_ausser(2), HashSet::from([3, 4]));
+        assert_eq!(b.belegt_ausser(99), HashSet::from([3, 4, 5]));
+        assert_eq!(b.alle(), HashSet::from([3, 4, 5]));
+    }
+
+    #[test]
+    fn doppelt_nur_bei_zwei_wartenden_spielen() {
+        let store = store_an();
+        let snap = snap_mit(
+            vec![
+                spiel(1, MatchStatus::Scheduled, Some(3), None),
+                spiel(2, MatchStatus::Scheduled, None, Some(3)),
+                spiel(3, MatchStatus::OnCourt, Some(4), None),
+                spiel(4, MatchStatus::Scheduled, Some(4), None),
+            ],
+            &[3, 4],
+        );
+        let b = Belegung::aus(&store, &snap, heute());
+        assert!(b.doppelt(3));
+        assert_eq!(b.reserviert_fuer(3), &[1, 2]);
+        // Dienst auf einem laufenden Feld + eine Reservierung ist nicht doppelt.
+        assert!(!b.doppelt(4));
+        // An beiden fremden Spielen gebunden ⇒ für keines frei.
+        assert!(b.belegt_ausser(1).contains(&3));
+    }
+
+    #[test]
+    fn eine_offene_paarung_reserviert_ebenso() {
+        let store = store_an();
+        let mut finale = spiel(1, MatchStatus::Scheduled, None, None);
+        finale.team1.clear();
+        finale.team2.clear();
+        store.assign(1, OfficialRole::Sr, 3);
+        let snap = snap_mit(vec![finale], &[3]);
+        assert_eq!(
+            Belegung::aus(&store, &snap, heute()).reserviert_fuer(3),
+            &[1]
+        );
+    }
+
+    #[test]
+    fn dienst_an_zwei_feldern_bindet_fuer_beide_und_ohne_feld_meldet_null() {
+        let store = store_an();
+        let mut ohne_feld = spiel(3, MatchStatus::OnCourt, Some(4), None);
+        ohne_feld.court_id = None;
+        let snap = snap_mit(
+            vec![
+                spiel(1, MatchStatus::OnCourt, Some(3), None),
+                spiel(2, MatchStatus::OnCourt, None, Some(3)),
+                ohne_feld,
+            ],
+            &[3, 4],
+        );
+        let b = Belegung::aus(&store, &snap, heute());
+        assert!(b.belegt_ausser(1).contains(&3), "an Spiel 2 im Dienst");
+        assert!(b.belegt_ausser(2).contains(&3), "an Spiel 1 im Dienst");
+        assert_eq!(b.im_dienst_bei(3), Some(101));
+        assert_eq!(b.im_dienst_bei(4), Some(0));
+    }
+
+    #[test]
+    fn ohne_schiedsrichter_betrieb_ist_niemand_gebunden() {
+        let store = OfficialsStore::default();
+        let snap = snap_mit(
+            vec![
+                spiel(1, MatchStatus::Scheduled, Some(3), None),
+                spiel(2, MatchStatus::OnCourt, Some(4), None),
+            ],
+            &[3, 4],
+        );
+        let b = Belegung::aus(&store, &snap, heute());
+        assert!(b.alle().is_empty());
+    }
+
+    #[test]
+    fn rotation_ueberspringt_reservierte_ausser_am_eigenen_spiel() {
+        let store = store_an();
+        store.sync_roster(&[1, 2]);
+        let snap = snap_mit(
+            vec![
+                spiel(10, MatchStatus::OnCourt, None, None),
+                spiel(11, MatchStatus::Scheduled, Some(1), None),
+            ],
+            &[1, 2],
+        );
+        let b = Belegung::aus(&store, &snap, heute());
+        let belegt = b.belegt_ausser(10);
+        let players = [spieler(50, "X")];
+        let mut e = eingabe(10, &players, &[1, 2], &belegt);
+        e.ar = false;
+        store.rotate_court(e);
+        assert_eq!(
+            store.assignment(10).sr,
+            Some(2),
+            "1 ist für Spiel 11 reserviert"
+        );
     }
 }
