@@ -12,6 +12,7 @@ import {
   sortiere,
   vereinigen,
   undoSchnitt,
+  aufschlagJenseitsSatz,
   istZurueckgenommen,
   ankerNachBuchung,
   neueKennung,
@@ -122,6 +123,21 @@ const ev = (id, set, afterN, seq, kind = "card_yellow") => ({
   assert.deepEqual(undoSchnitt(mitRuecknahme, 1, 5), ["b2"]);
   assert.ok(istZurueckgenommen(mitRuecknahme, "c3"));
   assert.ok(!istZurueckgenommen(mitRuecknahme, "b2"));
+}
+
+// ── Aufschlagfolge aus der Satzpause, danach Undo (v0.9.351) ──────────
+{
+  // Satz 1 endete, in der Pause wurde die Aufschlagfolge für Satz 2 gewählt
+  // (Anker 2/0) und eine Karte gegeben; dann „letzter Punkt zurück".
+  const events = [
+    { id: "s1", set: 1, afterN: 0, seq: 1, kind: "serve_start" },
+    { id: "s2", set: 2, afterN: 0, seq: 2, kind: "serve_start" },
+    { id: "k2", set: 2, afterN: 0, seq: 3, kind: "card_yellow" },
+  ];
+  assert.deepEqual(aufschlagJenseitsSatz(events, 1), ["s2"], "nur die Folge des verworfenen Satzes");
+  assert.deepEqual(aufschlagJenseitsSatz(events, 2), [], "im laufenden Satz nichts");
+  const mitRuecknahme = [...events, { id: "r", set: 1, afterN: 0, seq: 4, kind: "retract", retracts: "s2" }];
+  assert.deepEqual(aufschlagJenseitsSatz(mitRuecknahme, 1), [], "nicht doppelt zurücknehmen");
 }
 
 // ── Anker über eine Satzgrenze (Review-Befund E6) ─────────────────────

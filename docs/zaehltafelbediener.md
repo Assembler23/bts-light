@@ -70,6 +70,14 @@ Feld übrig. Ohne Eintrag gilt „Vergabe aktiv"; für bestehende Installationen
 Schiedsrichter-Betrieb eingeschaltet ist — sonst wäre er nach dem Abschalten
 nirgends mehr zurückzunehmen.
 
+**Auf so einem Feld wird auch niemand genannt oder angesagt** (seit v0.9.351,
+`TabletState::feld_ohne_bediener`). Vorher prüfte nur die Vergabe den
+Schalter; der pro-Feld-Hinweis (Verlierer des Vorspiels) landete trotzdem in
+`CourtOverview.scorekeeper` und damit in jeder Feld-Ansage („Tabletbedienung:
+…"), in der TL-Kachel und am Tablet. Jetzt bleiben `scorekeeper` (Übersicht)
+und `scorekeeper_display` (Tablet, ferne Halle) dort leer — auch für eine
+Zuweisung, die noch von vor dem Umschalten stammt.
+
 ## Ansage (Scheibe 3, v0.9.165)
 
 Steht am Feld eine Bedienung, hängt die Feld-Ansage am Ende

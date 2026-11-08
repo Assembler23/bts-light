@@ -12,6 +12,10 @@ export declare function vereinigen<T extends MatchEventLike>(
   vorhanden: readonly T[] | undefined,
   neu: readonly T[] | undefined,
 ): T[];
+export declare function aufschlagJenseitsSatz(
+  events: ReadonlyArray<{ id: string; set?: number; kind: string; retracts?: string }> | null | undefined,
+  set: number,
+): string[];
 export declare function undoSchnitt(
   events: readonly MatchEventLike[] | undefined,
   set: number,

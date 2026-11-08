@@ -709,6 +709,8 @@ pub(crate) fn apply_state_action(
                     operator: *operator,
                 },
             );
+            // Bediener-Schalter ändert die Übersicht (siehe commands.rs).
+            tablet.bump_overview_rev();
             Ok(TlResponse::ok(0))
         }
         A::AnnounceOfficials { court_id } => {
@@ -807,8 +809,13 @@ pub(crate) fn apply_state_action(
             // (A2.4): leere Warteschlange, Feld mit abgeschalteter Vergabe
             // (`CourtSwitches::operator`) und global ausgeschaltete
             // Verwaltung — in allen dreien weist der Sync-Lauf gar nicht
-            // erst zu.
-            let namen = tablet.assigned_scorekeeper(*court_id).unwrap_or_default();
+            // erst zu. Wird die Vergabe NACH der Zuweisung abgeschaltet,
+            // steht die alte Zuweisung noch — auch dann niemanden rufen.
+            let namen = if tablet.feld_ohne_bediener(*court_id) {
+                Vec::new()
+            } else {
+                tablet.assigned_scorekeeper(*court_id).unwrap_or_default()
+            };
             if namen.is_empty() {
                 return Err(TlResponse::err(
                     C::NotAllowed,
