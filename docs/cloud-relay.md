@@ -658,6 +658,34 @@ Der Broadcast-`TlState` trägt dagegen nur: `officials_managed`, die Liste
 **Reihenfolge beim Ausrollen:** Ein alter Relay lehnt unbekannte Aktionen ab
 — erst Relay deployen, dann den Client veröffentlichen.
 
+**Einteilung an der Warteliste** (seit v0.9.354, Spec
+[tl-warteliste-schiedsrichter](features/tl-warteliste-schiedsrichter.md),
+ADR 0078). Kein neuer Wire-Typ: `official_assign`/`official_clear` mit
+`courtId: 0` gab es schon. Neu sind nur additive `TlState`-Felder, alle
+`serde(default)` und leer **nicht** serialisiert (64-KiB-Fenster):
+
+- `can_assign_waiting_officials` (Bool): Der Host prüft die Einteilung und
+  reserviert die Person. Die Seite zeigt den Menüpunkt nur damit.
+- `TlMatch.sr_id`/`ar_id` (0 fehlt): IDs der angezeigten Besetzung für die
+  Vorauswahl im Dialog.
+- `TlOpenMatch.sr`/`ar`/`sr_id`/`ar_id`/`official_warn`: dieselbe Besetzung
+  an offenen Paarungen. Nur Schiedsrichter-Namen, keine Lizenznummer.
+- `official_warn` an Warteliste und offener Liste: bleibt **Kategorie-Text**,
+  jetzt in fester Reihenfolge `<Verein|Person> · SR doppelt · AR in Pause`
+  (nur vorhandene Teile). Die Feld-Kachel trägt weiter nur die Kategorie.
+- `TlOfficial.reserved` (Bool) und `reserved_match_num` (Spielnummer, fehlt
+  ohne Nummer).
+
+Der Host lehnt `official_assign`/`official_clear` als `NotAllowed` mit Text
+ab, wenn das Spiel unbekannt oder beendet ist, die Person nicht in der
+BTP-Liste steht oder dieselbe Person SR und AR wäre. Über die Cloud kann jede
+beliebige `matchId` ankommen, deshalb prüft der Host vor dem Speichern.
+
+**Deploy-Reihenfolge:** Der Relay braucht keinen Code, deployt aber beim Merge
+das neue `tl.html` (PR 4b). An einem älteren Host fehlt das Flag, der
+Menüpunkt bleibt verborgen. Sonst landete die Einteilung ungeprüft und ohne
+Reservierung im alten Host.
+
 ### Setzplätze (seit v0.9.298, Spec [setzplaetze-anzeigen](features/setzplaetze-anzeigen.md), ADR [0059](adr/0059-setzplatz-als-text-aus-dem-parser.md))
 
 Die Setzung reist als **fertiger Text** ohne Klammern („1", „3/4") und nur,

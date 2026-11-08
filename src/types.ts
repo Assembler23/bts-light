@@ -1280,6 +1280,10 @@ export interface OfficialView {
   on_duty_role: string | null;
   /** Bisherige Einsätze, abgeleitet aus den beendeten Spielen. */
   appearances: number;
+  /** Für ein wartendes Spiel eingeteilt (ADR 0078)? */
+  reserved: boolean;
+  /** Spielnummer der Reservierung (bei mehreren die kleinste), sonst null. */
+  reserved_match_num: number | null;
 }
 
 /** Ein abgeleiteter Einsatz fürs Detail-Overlay (Rust: AppearanceView). */

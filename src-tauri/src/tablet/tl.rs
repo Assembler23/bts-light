@@ -625,6 +625,10 @@ pub(crate) fn apply_state_action(
             role,
         } => {
             officials_an(tablet)?;
+            // Über die Cloud kommt jede beliebige Match-ID an — erst
+            // prüfen, dann speichern (AK 4). Bei Ablehnung bleibt alles,
+            // wie es war, und nichts geht nach BTP.
+            einteilung_pruefen(tablet, *match_id, *role, Some(*official_id))?;
             tablet
                 .officials_store()
                 .assign(*match_id, tl_role(*role), *official_id);
@@ -636,6 +640,7 @@ pub(crate) fn apply_state_action(
             role,
         } => {
             officials_an(tablet)?;
+            einteilung_pruefen(tablet, *match_id, *role, None)?;
             tablet
                 .officials_store()
                 .clear_assignment(*match_id, tl_role(*role));
@@ -1609,6 +1614,25 @@ fn officials_an(tablet: &TabletState) -> Result<(), relay_proto::TlResponse> {
     ))
 }
 
+/// [`crate::tablet::officials::pruefe_einteilung`] gegen den aktuellen
+/// Schnappschuss, Ablehnung als `NotAllowed` mit dem Text der Prüfung.
+fn einteilung_pruefen(
+    tablet: &TabletState,
+    match_id: i64,
+    role: relay_proto::TlOfficialRole,
+    official_id: Option<i64>,
+) -> Result<(), relay_proto::TlResponse> {
+    let snap = tablet.snapshot_clone();
+    crate::tablet::officials::pruefe_einteilung(
+        tablet.officials_store(),
+        snap.as_ref(),
+        match_id,
+        tl_role(role),
+        official_id,
+    )
+    .map_err(|text| relay_proto::TlResponse::err(relay_proto::TlErrorCode::NotAllowed, text))
+}
+
 /// Wire-Rolle in die Rolle des Roster-Speichers übersetzen.
 fn tl_role(role: relay_proto::TlOfficialRole) -> crate::tablet::officials::OfficialRole {
     match role {
@@ -1798,11 +1822,19 @@ pub(crate) async fn execute(
                 ok
             }
             Err(rejected) => {
+                // Die Ablehnung einer Schiedsrichter-Einteilung nennt die
+                // Person beim Namen (SR = AR) — der Text geht ans Gerät,
+                // aber nicht ins Protokoll, das zur Fehlersuche hochgeladen
+                // wird.
+                let grund = match &action {
+                    relay_proto::TlAction::OfficialAssign { .. }
+                    | relay_proto::TlAction::OfficialClear { .. } => "Einteilung ungültig",
+                    _ => rejected.error.as_deref().unwrap_or("ohne Grund"),
+                };
                 tracing::info!(
-                    "TL-Web [{}]: {} abgelehnt ({})",
+                    "TL-Web [{}]: {} abgelehnt ({grund})",
                     device.id,
                     action_label(&action),
-                    rejected.error.as_deref().unwrap_or("ohne Grund")
                 );
                 return rejected;
             }
@@ -2521,11 +2553,25 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         A::ScorekeeperAdvance { .. } => "Zähltafelbediener vorziehen".to_string(),
         A::ScorekeeperRemove { .. } => "Zähltafelbediener entfernen".to_string(),
         A::ScorekeeperAdd { .. } => "Zähltafelbediener ergänzen".to_string(),
+        // `court_id == 0` heißt Einteilung an der Warteliste — „(Feld 0)"
+        // im Protokoll führte in die Irre (AK 5).
         A::OfficialAssign {
             court_id, match_id, ..
-        } => format!("Schiedsrichter für Spiel {match_id} (Feld {court_id})"),
-        A::OfficialClear { court_id, .. } => {
-            format!("Schiedsrichter von Feld {court_id} gelöst")
+        } => {
+            if *court_id == 0 {
+                format!("Schiedsrichter für Spiel {match_id} (Warteliste)")
+            } else {
+                format!("Schiedsrichter für Spiel {match_id} (Feld {court_id})")
+            }
+        }
+        A::OfficialClear {
+            court_id, match_id, ..
+        } => {
+            if *court_id == 0 {
+                format!("Schiedsrichter von Spiel {match_id} gelöst")
+            } else {
+                format!("Schiedsrichter von Feld {court_id} gelöst")
+            }
         }
         A::MeetingpointSet {
             match_id, present, ..
@@ -2831,6 +2877,15 @@ pub struct TlState {
     /// Griffe an gerufenen Spielen.
     #[serde(default)]
     pub can_reorder_called: bool,
+    /// Kennt dieser Turnier-PC die Schiedsrichter-Einteilung an
+    /// **wartenden** Spielen (Spec `tl-warteliste-schiedsrichter`)? Die
+    /// Aktion selbst (`OfficialAssign` mit `courtId 0`) gab es schon — ein
+    /// älterer Host speicherte sie aber ungeprüft und ohne Reservierung,
+    /// die Rotation setzte die Person trotzdem anderswo ein. Dieselbe
+    /// Begründung wie bei [`Self::can_lock_courts`]: Die Seite zeigt den
+    /// Menüpunkt nur, wenn dieses Feld ankommt.
+    #[serde(default)]
+    pub can_assign_waiting_officials: bool,
     /// Meetingpoint-Einstellungen und -Lage (Spec
     /// `meetingpoint-spielbereit`); `None` = Meetingpoint aus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2976,6 +3031,20 @@ pub struct TlOfficial {
     pub on_duty_court_id: i64,
     /// Zahl der bisherigen Einsätze, aus den beendeten Spielen abgeleitet.
     pub appearances: usize,
+    /// Für ein wartendes Spiel eingeteilt (ADR 0078, [`Belegung`])? Die
+    /// Seite zeigt dann „reserviert" und überspringt ihn in der Vorschau
+    /// „nächster". `serde(default)`: Ein alter Host kennt das Feld nicht.
+    ///
+    /// [`Belegung`]: crate::tablet::officials::Belegung
+    #[serde(default)]
+    pub reserved: bool,
+    /// Spielnummer (Papierplan) der Reservierung — bei mehreren die
+    /// kleinste ([`Belegung::reserviert_spielnummer`]). `None` heißt bei
+    /// `reserved` nur „reserviert" ohne Nummer.
+    ///
+    /// [`Belegung::reserviert_spielnummer`]: crate::tablet::officials::Belegung::reserviert_spielnummer
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reserved_match_num: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -3271,9 +3340,18 @@ pub struct TlMatch {
     pub sr: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ar: Vec<String>,
-    /// Konflikt-**Kategorie** wie an der Kachel, nie der Grund.
+    /// Konflikt-**Kategorie** wie an der Kachel, nie der Grund — an der
+    /// Warteliste ergänzt um „SR doppelt"/„AR doppelt" und „SR in Pause"/
+    /// „AR in Pause" ([`wartelisten_warnung`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub official_warn: Option<String>,
+    /// IDs der angezeigten Besetzung (Sicht `effective`, wie die Marke;
+    /// 0 = keiner). Der Einteilungs-Dialog wählt damit die Person vor, nicht
+    /// den Namen. `0` bleibt auf dem Draht weg (64-KiB-Fenster der Cloud).
+    #[serde(default, skip_serializing_if = "id_leer")]
+    pub sr_id: i64,
+    #[serde(default, skip_serializing_if = "id_leer")]
+    pub ar_id: i64,
 }
 
 /// Ein Spiel, dessen Paarung noch nicht (vollständig) feststeht — Spec
@@ -3331,11 +3409,86 @@ pub struct TlOpenMatch {
     /// Paarung kann im Planer markiert sein.
     #[serde(default, skip_serializing_if = "highlight_leer")]
     pub highlight: u8,
+    /// Besetzung des Spiels (SR/AR), wie an [`TlMatch::sr`]: Das Finale
+    /// wird oft eingeteilt, bevor die Halbfinals vorbei sind. Die Namen
+    /// sind die der **Schiedsrichter**, keine Kandidaten-Information —
+    /// deshalb ohne Lizenznummer, Verein oder Nation (Datenschutz-Wächter).
+    /// Leer bleibt auf dem Draht weg.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sr: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ar: Vec<String>,
+    /// Siehe [`TlMatch::sr_id`].
+    #[serde(default, skip_serializing_if = "id_leer")]
+    pub sr_id: i64,
+    #[serde(default, skip_serializing_if = "id_leer")]
+    pub ar_id: i64,
+    /// Siehe [`TlMatch::official_warn`] — nur Kategorie-Text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub official_warn: Option<String>,
 }
 
 /// Serde-Hilfe: `0` (keine Farbe) bleibt auf dem Draht weg.
 fn highlight_leer(h: &u8) -> bool {
     *h == 0
+}
+
+/// Serde-Hilfe: Official-ID `0` (keiner) bleibt auf dem Draht weg.
+fn id_leer(id: &i64) -> bool {
+    *id == 0
+}
+
+/// Die Warnung an einer Wartelisten-Zeile (Warteliste **und** offene
+/// Paarungen, AK 10/11): Konflikt-Kategorie aus [`TabletState::court_officials`]
+/// plus „SR doppelt"/„AR doppelt" (an zwei oder mehr reservierenden
+/// wartenden Spielen eingeteilt — Dienst auf einem Feld zählt nicht) und
+/// „SR in Pause"/„AR in Pause". Feste Reihenfolge, mit „ · " verbunden,
+/// nur vorhandene Teile.
+///
+/// Gerechnet in der Sicht [`OfficialsStore::fuer_schreiben`] — dieselbe,
+/// in der die Reservierung gilt. Bewusst **nur** hier und nicht in
+/// `court_officials`: Das speist auch Feld-Kachel und Tablet, wo „doppelt"
+/// und „in Pause" nichts bedeuten.
+///
+/// [`OfficialsStore::fuer_schreiben`]: crate::tablet::officials::OfficialsStore::fuer_schreiben
+fn wartelisten_warnung(
+    konflikt: Option<String>,
+    m: &crate::btp::model::BtpMatch,
+    store: &crate::tablet::officials::OfficialsStore,
+    belegung: &crate::tablet::officials::Belegung,
+) -> Option<String> {
+    let mut teile: Vec<String> = konflikt.into_iter().collect();
+    if store.enabled() {
+        let besetzung = store.fuer_schreiben(m.id, m.official1_id, m.official2_id);
+        let gezeigt = store.effective(m.id, m.official1_id, m.official2_id);
+        // Nur warnen, wenn die gezeigte Person (Sicht `effective`) auch die
+        // reservierte ist. Im kurzen Fenster einer Umteilung gegen BTP (X in
+        // BTP, Y von Hand, noch unbestätigt) zeigte die Zeile sonst X mit
+        // einer Warnung, die Y betrifft. Nach der Bestätigung stimmen beide
+        // Sichten wieder überein.
+        let rollen = [
+            ("SR", besetzung.sr, gezeigt.sr),
+            ("AR", besetzung.ar, gezeigt.ar),
+        ];
+        let personen: Vec<(&str, i64)> = rollen
+            .into_iter()
+            .filter_map(|(rolle, id, sicht)| {
+                id.filter(|v| *v > 0 && Some(*v) == sicht)
+                    .map(|id| (rolle, id))
+            })
+            .collect();
+        for (rolle, id) in &personen {
+            if belegung.doppelt(*id) && belegung.reserviert_fuer(*id).contains(&m.id) {
+                teile.push(format!("{rolle} doppelt"));
+            }
+        }
+        for (rolle, id) in &personen {
+            if store.extra(*id).paused {
+                teile.push(format!("{rolle} in Pause"));
+            }
+        }
+    }
+    (!teile.is_empty()).then(|| teile.join(" · "))
 }
 
 /// Eine Halle des Turniers.
@@ -3779,6 +3932,7 @@ pub(crate) fn build_state_limited(
             can_set_highlight: true,
             can_repeat_prep_call: true,
             can_reorder_called: true,
+            can_assign_waiting_officials: true,
             meetingpoint: meetingpoint_lage(tablet, config),
             finished_warning_seconds: config.finished_warning_seconds,
             // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
@@ -3881,6 +4035,14 @@ pub(crate) fn build_state_limited(
 
     let availability = PlayerAvailability::from_snapshot(&snap, config);
     let zuletzt = last_played_by_player(&snap, &tablet.match_times_store().entries());
+    // Wer ist wo gebunden (ADR 0078)? Einmal je Bau — Warnungen an der
+    // Warteliste und die Marke „reserviert" in der SR-Liste lesen beide
+    // daraus. Ohne Schiedsrichter-Betrieb leer.
+    let belegung = crate::tablet::officials::Belegung::aus(
+        tablet.officials_store(),
+        &snap,
+        heutiges_datum(now_ms),
+    );
 
     // Alle geplanten Spiele — auch die, deren Paarung noch aus einem Vorspiel
     // kommt (Spec `tl-offene-paarungen`). Sie werden gleich unten von den
@@ -4095,7 +4257,9 @@ pub(crate) fn build_state_limited(
     let mut queue: Vec<TlMatch> = Vec::new();
     for (_, m, hall, hall_source) in ordered.into_iter().take(queue_limit) {
         let call = called_hall(m.id);
-        let (sr, ar, official_warn) = tablet.court_officials(Some(m), &snap);
+        let (sr, ar, konflikt) = tablet.court_officials(Some(m), &snap);
+        let official_warn = wartelisten_warnung(konflikt, m, tablet.officials_store(), &belegung);
+        let (sr_id, ar_id) = tablet.court_official_ids(Some(m));
         let manually_ordered = tablet.queue_order_store().rank(m.id).is_some();
         queue.push(TlMatch {
             match_id: m.id,
@@ -4151,6 +4315,8 @@ pub(crate) fn build_state_limited(
             sr,
             ar,
             official_warn,
+            sr_id,
+            ar_id,
         });
     }
 
@@ -4159,6 +4325,9 @@ pub(crate) fn build_state_limited(
     let open_queue_truncated = offene.len().saturating_sub(OPEN_QUEUE_LIMIT);
     let mut open_queue: Vec<TlOpenMatch> = Vec::new();
     for (queue_index, (_, m, hall, hall_source)) in offene.into_iter().take(OPEN_QUEUE_LIMIT) {
+        let (sr, ar, konflikt) = tablet.court_officials(Some(m), &snap);
+        let official_warn = wartelisten_warnung(konflikt, m, tablet.officials_store(), &belegung);
+        let (sr_id, ar_id) = tablet.court_official_ids(Some(m));
         open_queue.push(TlOpenMatch {
             match_id: m.id,
             match_num: m.match_num,
@@ -4188,6 +4357,11 @@ pub(crate) fn build_state_limited(
             excluded_from_auto_assign: tablet.auto_assign_excluded(m.id),
             wish_court: tablet.wish_court(m.id),
             highlight: m.highlight,
+            sr,
+            ar,
+            sr_id,
+            ar_id,
+            official_warn,
         });
     }
 
@@ -4234,7 +4408,7 @@ pub(crate) fn build_state_limited(
     // über die gezielte Leseroute).
     let officials_managed = tablet.officials_store().enabled();
     let officials = if officials_managed {
-        officials_view(tablet, &snap)
+        officials_view(tablet, &snap, &belegung)
     } else {
         Vec::new()
     };
@@ -4311,6 +4485,7 @@ pub(crate) fn build_state_limited(
         can_set_highlight: true,
         can_repeat_prep_call: true,
         can_reorder_called: true,
+        can_assign_waiting_officials: true,
         meetingpoint: meetingpoint_lage(tablet, config),
         can_reload_tablets: true,
         finished_warning_seconds: config.finished_warning_seconds,
@@ -4891,6 +5066,7 @@ pub(crate) fn official_detail_json(
 fn officials_view(
     tablet: &crate::tablet::state::TabletState,
     snap: &crate::btp::model::BtpSnapshot,
+    belegung: &crate::tablet::officials::Belegung,
 ) -> Vec<TlOfficial> {
     use crate::btp::model::MatchStatus;
     let store = tablet.officials_store();
@@ -4931,6 +5107,8 @@ fn officials_view(
                     paused: store.extra(o.id).paused,
                     on_duty_court_id: dienst.get(&o.id).copied().unwrap_or(0),
                     appearances: einsaetze.get(&o.id).map(Vec::len).unwrap_or(0),
+                    reserved: !belegung.reserviert_fuer(o.id).is_empty(),
+                    reserved_match_num: belegung.reserviert_spielnummer(o.id, snap),
                 },
             )
         })
@@ -5157,6 +5335,376 @@ mod tests {
         let tablet = TabletState::default();
         tablet.set_snapshot(snapshot);
         build_state(&tablet, config, 1_000_000, 7)
+    }
+
+    // ── Wartelisten-Einteilung, Turnier-PC-Seite (Spec
+    //    tl-warteliste-schiedsrichter, PR 4a) ─────────────────────────
+
+    /// Ein Official der BTP-Liste mit Anzeigename „<first> <name>".
+    fn ein_official(id: i64, first: &str, name: &str) -> crate::btp::model::BtpOfficial {
+        crate::btp::model::BtpOfficial {
+            id,
+            name: name.into(),
+            first: first.into(),
+            nationality: None,
+        }
+    }
+
+    /// Turnier mit SR-Betrieb: wartende Spiele 7 und 8, offene Paarung 9
+    /// (Vorspiel 8), Spiel 10 auf Feld 1, beendetes Spiel 11; Officials 1–3.
+    fn sr_turnier() -> TabletState {
+        let mut auf_feld = a_match(10);
+        auf_feld.status = MatchStatus::OnCourt;
+        auf_feld.court_id = Some(1);
+        let mut beendet = a_match(11);
+        beendet.status = MatchStatus::Finished;
+        beendet.winner = Some(1);
+        let mut vorspiel = a_match(8);
+        vorspiel.planning_id = 808;
+        let mut offen = a_match(9);
+        offen.from1 = Some(808);
+        offen.team1 = Vec::new();
+        offen.team2 = Vec::new();
+        let mut s = snap(
+            vec![a_court(1, None)],
+            vec![a_match(7), vorspiel, offen, auf_feld, beendet],
+            Vec::new(),
+        );
+        s.officials = vec![
+            ein_official(1, "Sabine", "Schmidt"),
+            ein_official(2, "Max", "Meier"),
+            ein_official(3, "Olga", "Ober"),
+        ];
+        let tablet = TabletState::default();
+        tablet.set_snapshot(s);
+        tablet.officials_store().set_enabled(true);
+        tablet
+    }
+
+    #[test]
+    fn der_host_meldet_die_wartelisten_einteilung_auch_ohne_turnier() {
+        let leer = build_state(&TabletState::default(), &AppConfig::default(), 1_000, 1);
+        assert!(leer.can_assign_waiting_officials);
+        let voll = build_state(&sr_turnier(), &AppConfig::default(), 1_000, 1);
+        assert!(voll.can_assign_waiting_officials);
+    }
+
+    #[test]
+    fn die_warteliste_traegt_die_ids_der_besetzung_und_laesst_null_weg() {
+        let tablet = sr_turnier();
+        tablet
+            .officials_store()
+            .assign(7, crate::tablet::officials::OfficialRole::Sr, 2);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let zeile = s.queue.iter().find(|q| q.match_id == 7).unwrap();
+        assert_eq!((zeile.sr_id, zeile.ar_id), (2, 0));
+        let json = serde_json::to_value(zeile).unwrap();
+        assert_eq!(json["sr_id"], 2);
+        assert!(json.get("ar_id").is_none(), "0 bleibt auf dem Draht weg");
+        let ohne = s.queue.iter().find(|q| q.match_id == 8).unwrap();
+        let json = serde_json::to_value(ohne).unwrap();
+        assert!(json.get("sr_id").is_none() && json.get("sr").is_none());
+    }
+
+    #[test]
+    fn eine_offene_paarung_zeigt_ihre_besetzung() {
+        let tablet = sr_turnier();
+        tablet
+            .officials_store()
+            .assign(9, crate::tablet::officials::OfficialRole::Ar, 3);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let offen = s.open_queue.iter().find(|o| o.match_id == 9).unwrap();
+        assert!(offen.sr.is_empty());
+        assert_eq!(offen.ar, vec!["Olga Ober".to_string()]);
+        assert_eq!((offen.sr_id, offen.ar_id), (0, 3));
+        let json = serde_json::to_value(offen).unwrap();
+        assert!(json.get("sr").is_none() && json.get("sr_id").is_none());
+        assert!(json.get("official_warn").is_none());
+        // Ohne Schiedsrichter-Betrieb: nichts (AK 19).
+        tablet.officials_store().set_enabled(false);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 2);
+        let offen = s.open_queue.iter().find(|o| o.match_id == 9).unwrap();
+        assert!(offen.ar.is_empty() && offen.ar_id == 0 && offen.official_warn.is_none());
+    }
+
+    #[test]
+    fn die_warnung_der_warteliste_steht_in_fester_reihenfolge() {
+        let tablet = sr_turnier();
+        let store = tablet.officials_store();
+        use crate::tablet::officials::OfficialRole as R;
+        // Spiel 7: SR 1 hat Vereinskonflikt und ist zusätzlich an Spiel 9
+        // (offene Paarung) eingeteilt; AR 2 pausiert.
+        let mut snap = tablet.snapshot_clone().unwrap();
+        snap.matches.iter_mut().find(|m| m.id == 7).unwrap().team1[0].club =
+            Some("TSV Heim".into());
+        tablet.set_snapshot(snap);
+        store.set_club(1, "TSV Heim");
+        store.assign(7, R::Sr, 1);
+        store.assign(9, R::Sr, 1);
+        store.assign(7, R::Ar, 2);
+        store.set_paused(2, true);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let zeile = s.queue.iter().find(|q| q.match_id == 7).unwrap();
+        assert_eq!(
+            zeile.official_warn.as_deref(),
+            Some("Verein · SR doppelt · AR in Pause")
+        );
+        let offen = s.open_queue.iter().find(|o| o.match_id == 9).unwrap();
+        assert_eq!(offen.official_warn.as_deref(), Some("SR doppelt"));
+        // Die Feld-Kachel kennt nur die Konflikt-Kategorie — „doppelt" und
+        // „in Pause" sind Warteliste.
+        let m7 = tablet
+            .snapshot_clone()
+            .unwrap()
+            .matches
+            .into_iter()
+            .find(|m| m.id == 7)
+            .unwrap();
+        let (_, _, kachel) = tablet.court_officials(Some(&m7), &tablet.snapshot_clone().unwrap());
+        assert_eq!(kachel.as_deref(), Some("Verein"));
+    }
+
+    #[test]
+    fn dienst_auf_dem_feld_ist_keine_doppel_einteilung() {
+        let tablet = sr_turnier();
+        use crate::tablet::officials::OfficialRole as R;
+        // 3 pfeift Spiel 10 auf Feld 1 und ist für Spiel 7 eingeteilt.
+        tablet.officials_store().assign(10, R::Sr, 3);
+        tablet.officials_store().assign(7, R::Sr, 3);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let zeile = s.queue.iter().find(|q| q.match_id == 7).unwrap();
+        assert_eq!(zeile.official_warn, None);
+    }
+
+    #[test]
+    fn die_sr_liste_markiert_reservierte_mit_spielnummer() {
+        let tablet = sr_turnier();
+        use crate::tablet::officials::OfficialRole as R;
+        tablet.officials_store().assign(8, R::Sr, 1);
+        tablet.officials_store().assign(7, R::Ar, 1);
+        tablet.officials_store().assign(10, R::Sr, 2);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let person = |id: i64| s.officials.iter().find(|o| o.id == id).unwrap();
+        assert!(person(1).reserved);
+        assert_eq!(person(1).reserved_match_num, Some(7), "die kleinste Nummer");
+        assert!(
+            !person(2).reserved,
+            "Dienst auf dem Feld ist keine Reservierung"
+        );
+        assert_eq!(person(2).on_duty_court_id, 1);
+        let frei = serde_json::to_value(person(3)).unwrap();
+        assert_eq!(frei["reserved"], false);
+        assert!(frei.get("reserved_match_num").is_none());
+    }
+
+    #[test]
+    fn die_einteilung_lehnt_unbekannte_und_beendete_spiele_ab() {
+        use relay_proto::{TlAction as A, TlOfficialRole as Rolle};
+        let tablet = sr_turnier();
+        let config = AppConfig::default();
+        let ablehnung = |action: A| {
+            let fehler = apply_state_action(&tablet, &config, 1_000, &action).unwrap_err();
+            assert_eq!(fehler.code, Some(relay_proto::TlErrorCode::NotAllowed));
+            fehler.error.unwrap_or_default()
+        };
+        let text = ablehnung(A::OfficialAssign {
+            court_id: 0,
+            match_id: 4711,
+            official_id: 1,
+            role: Rolle::Sr,
+        });
+        assert!(text.contains("Spiel 4711 gibt es"), "{text}");
+        let text = ablehnung(A::OfficialAssign {
+            court_id: 0,
+            match_id: 11,
+            official_id: 1,
+            role: Rolle::Sr,
+        });
+        assert!(text.contains("schon beendet"), "{text}");
+        let text = ablehnung(A::OfficialClear {
+            court_id: 0,
+            match_id: 11,
+            role: Rolle::Ar,
+        });
+        assert!(text.contains("schon beendet"), "{text}");
+        // Nichts gespeichert.
+        let store = tablet.officials_store();
+        assert_eq!(store.assignment(4711), Default::default());
+        assert_eq!(store.assignment(11), Default::default());
+    }
+
+    #[test]
+    fn die_einteilung_lehnt_dieselbe_person_als_sr_und_ar_ab() {
+        use relay_proto::{TlAction as A, TlOfficialRole as Rolle};
+        let tablet = sr_turnier();
+        let config = AppConfig::default();
+        let setze = |match_id: i64, official_id: i64, role: Rolle| {
+            apply_state_action(
+                &tablet,
+                &config,
+                1_000,
+                &A::OfficialAssign {
+                    court_id: 0,
+                    match_id,
+                    official_id,
+                    role,
+                },
+            )
+        };
+        // Wartespiel mit `courtId 0`: erlaubt und gespeichert.
+        assert!(setze(7, 1, Rolle::Sr).is_ok());
+        assert_eq!(tablet.officials_store().assignment(7).sr, Some(1));
+        let fehler = setze(7, 1, Rolle::Ar).unwrap_err();
+        let text = fehler.error.unwrap_or_default();
+        assert!(text.contains("Sabine Schmidt"), "{text}");
+        assert_eq!(
+            tablet.officials_store().assignment(7).ar,
+            None,
+            "abgelehnt heißt: nichts gespeichert"
+        );
+        // Lösen an einem wartenden Spiel geht, auch an der offenen Paarung.
+        assert!(apply_state_action(
+            &tablet,
+            &config,
+            1_000,
+            &A::OfficialClear {
+                court_id: 0,
+                match_id: 9,
+                role: Rolle::Sr,
+            },
+        )
+        .is_ok());
+        assert_eq!(
+            tablet.officials_store().assignment(9).sr,
+            Some(0),
+            "ausdrücklich ohne"
+        );
+    }
+
+    #[test]
+    fn das_protokoll_nennt_die_warteliste_statt_feld_null() {
+        use relay_proto::{TlAction as A, TlOfficialRole as Rolle};
+        assert_eq!(
+            action_label(&A::OfficialAssign {
+                court_id: 0,
+                match_id: 42,
+                official_id: 1,
+                role: Rolle::Sr,
+            }),
+            "Schiedsrichter für Spiel 42 (Warteliste)"
+        );
+        assert_eq!(
+            action_label(&A::OfficialClear {
+                court_id: 0,
+                match_id: 42,
+                role: Rolle::Ar,
+            }),
+            "Schiedsrichter von Spiel 42 gelöst"
+        );
+        // Am Feld bleibt es beim bisherigen Wortlaut.
+        assert_eq!(
+            action_label(&A::OfficialAssign {
+                court_id: 3,
+                match_id: 42,
+                official_id: 1,
+                role: Rolle::Sr,
+            }),
+            "Schiedsrichter für Spiel 42 (Feld 3)"
+        );
+        assert_eq!(
+            action_label(&A::OfficialClear {
+                court_id: 3,
+                match_id: 42,
+                role: Rolle::Sr,
+            }),
+            "Schiedsrichter von Feld 3 gelöst"
+        );
+    }
+
+    #[test]
+    fn die_warnung_nennt_nie_eine_andere_person_als_die_marke() {
+        // BTP führt 1 an Spiel 7, die TL hat 2 eingeteilt (noch nicht
+        // bestätigt); 2 ist außerdem an Spiel 8 eingeteilt und pausiert.
+        let tablet = sr_turnier();
+        let mut snap = tablet.snapshot_clone().unwrap();
+        snap.matches
+            .iter_mut()
+            .find(|m| m.id == 7)
+            .unwrap()
+            .official1_id = Some(1);
+        tablet.set_snapshot(snap);
+        use crate::tablet::officials::OfficialRole as R;
+        tablet.officials_store().assign(7, R::Sr, 2);
+        tablet.officials_store().assign(8, R::Sr, 2);
+        tablet.officials_store().set_paused(2, true);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let zeile = s.queue.iter().find(|q| q.match_id == 7).unwrap();
+        assert_eq!(zeile.sr_id, 1, "die Marke zeigt BTP (R2)");
+        assert_eq!(zeile.official_warn, None, "keine Warnung über Person 2");
+        let acht = s.queue.iter().find(|q| q.match_id == 8).unwrap();
+        assert_eq!(
+            acht.official_warn.as_deref(),
+            Some("SR doppelt · SR in Pause")
+        );
+        assert_eq!(
+            s.officials
+                .iter()
+                .find(|o| o.id == 2)
+                .unwrap()
+                .reserved_match_num,
+            Some(7),
+            "die Reservierung gilt trotzdem schon (AK 12)"
+        );
+    }
+
+    #[test]
+    fn ein_alter_zustand_ohne_wartelisten_einteilung_bleibt_lesbar() {
+        // Ein neues tl.html/Relay liest den Zustand eines älteren Hosts:
+        // Fehlen Flag, IDs, Besetzung der offenen Paarung und Reservierung,
+        // gilt der Standard — vor allem `can_assign_waiting_officials = false`.
+        let tablet = sr_turnier();
+        tablet
+            .officials_store()
+            .assign(7, crate::tablet::officials::OfficialRole::Sr, 1);
+        tablet
+            .officials_store()
+            .assign(9, crate::tablet::officials::OfficialRole::Sr, 2);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let mut json = serde_json::to_value(&s).unwrap();
+        let wurzel = json.as_object_mut().unwrap();
+        assert!(wurzel.remove("can_assign_waiting_officials").is_some());
+        for liste in ["queue", "open_queue"] {
+            for e in wurzel[liste].as_array_mut().unwrap() {
+                let e = e.as_object_mut().unwrap();
+                for k in ["sr_id", "ar_id"] {
+                    e.remove(k);
+                }
+                if liste == "open_queue" {
+                    for k in ["sr", "ar", "official_warn"] {
+                        e.remove(k);
+                    }
+                }
+            }
+        }
+        for o in wurzel["officials"].as_array_mut().unwrap() {
+            let o = o.as_object_mut().unwrap();
+            o.remove("reserved");
+            o.remove("reserved_match_num");
+        }
+        let alt: TlState = serde_json::from_value(json).expect("alter Zustand lesbar");
+        assert!(!alt.can_assign_waiting_officials);
+        assert!(alt.queue.iter().all(|q| q.sr_id == 0 && q.ar_id == 0));
+        assert!(alt
+            .open_queue
+            .iter()
+            .all(|o| o.sr.is_empty() && o.sr_id == 0));
+        assert!(alt
+            .officials
+            .iter()
+            .all(|o| !o.reserved && o.reserved_match_num.is_none()));
+        // Und vorwärts: der neue Zustand übersteht den Rundweg.
+        let rund: TlState = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(rund, s);
     }
 
     /// Die Warteliste nennt die schon feststehende Besetzung — sonst sieht
@@ -10414,6 +10962,10 @@ mod tests {
             "can_repeat_prep_call",
             // Fähigkeitsmerkmal (Spec meetingpoint-reihenfolge): reines Bool.
             "can_reorder_called",
+            // Fähigkeitsmerkmal (Spec tl-warteliste-schiedsrichter): reines
+            // Bool „dieser Turnier-PC prüft und reserviert die Einteilung an
+            // wartenden Spielen".
+            "can_assign_waiting_officials",
             // Spec tl-zeilenfarbe: BTPs Zeilenfarbe 1–6 — eine Notiz der
             // Turnierleitung AM SPIEL, ohne Bedeutung über Personen; die
             // Bedeutung der Farbe vereinbart das Team, sie steht nirgends.
@@ -10627,6 +11179,11 @@ mod tests {
             "paused",
             "on_duty_court_id",
             "appearances",
+            // Reservierung für ein wartendes Spiel (ADR 0078): ein Bool und
+            // eine Spielnummer aus dem Papierplan — Betriebsangaben ohne
+            // Personenbezug über den ohnehin gezeigten Namen hinaus.
+            "reserved",
+            "reserved_match_num",
             // SR/AR je Feld + Konflikt-KATEGORIE (nie der Grund) und die
             // drei Feld-Schalter, die die Seite auch setzen kann.
             "sr",
@@ -10942,7 +11499,7 @@ mod tests {
         tablet.set_snapshot(schnappschuss.clone());
         tablet.officials_store().set_enabled(true);
 
-        let liste = officials_view(&tablet, &schnappschuss);
+        let liste = officials_view(&tablet, &schnappschuss, &Default::default());
         let sabine = liste.iter().find(|o| o.id == 1).expect("SR in der Liste");
         assert_eq!(sabine.appearances, 1, "der Walkover zählt nicht");
 
@@ -11352,6 +11909,13 @@ mod tests {
         tablet
             .officials_store()
             .set_blocklists(1, vec!["SC Gesperrt".into()], vec![4242]);
+        // Derselbe Schiedsrichter ist für die OFFENE Paarung eingeteilt und
+        // pausiert (Spec tl-warteliste-schiedsrichter): Sein Name darf an
+        // `open_queue` mitreisen, die Warnung nur als Kategorie-Text.
+        tablet
+            .officials_store()
+            .assign(5, crate::tablet::officials::OfficialRole::Sr, 1);
+        tablet.officials_store().set_paused(1, true);
         let mut config = AppConfig::default();
         config.scorekeeper.enabled = true;
         // Auch hier ein Raster-Eintrag, damit `layouts` nicht leer bleibt —
@@ -11605,6 +12169,12 @@ mod tests {
             "der Kandidatenname aus dem Vorspiel gehört in die Anzeige, war: {}",
             offener.open_slot1_label
         );
+        // Die Besetzung der offenen Paarung: Name positiv, Warnung nur als
+        // Kategorie — Sperrlisten und Stammverein prüft die Verbotsliste
+        // oben für den ganzen Zustand.
+        assert_eq!(offener.sr, vec!["Sabine Schiedsmann".to_string()]);
+        assert_eq!(offener.sr_id, 1);
+        assert_eq!(offener.official_warn.as_deref(), Some("SR in Pause"));
         let offene_liste = serde_json::to_string(&s.open_queue).unwrap();
         for nummer in ["08-007070", "08-008080"] {
             assert!(

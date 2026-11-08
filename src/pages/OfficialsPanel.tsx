@@ -77,6 +77,9 @@ export function OfficialsPanel({
   /** Zuletzt gemeldeter Konflikt je Feld — die Zuweisung wird trotzdem
    *  ausgeführt, die Warnung steht nur daneben (Spec Nr. 2). */
   const [warnung, setWarnung] = useState<Record<number, string>>({});
+  /** Abgelehnte Einteilung je Feld (z. B. SR = AR, Spiel schon beendet) —
+   *  der Turnier-PC hat dann nichts gespeichert. */
+  const [fehler, setFehler] = useState<Record<number, string>>({});
 
   const laden = useCallback(() => {
     officialsRoster()
@@ -243,6 +246,13 @@ export function OfficialsPanel({
                     im Dienst ({o.on_duty_role === "ar" ? "AR" : "SR"})
                   </span>
                 )}
+                {o.reserved && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    {o.reserved_match_num != null
+                      ? `reserviert Sp. ${o.reserved_match_num}`
+                      : "reserviert"}
+                  </span>
+                )}
                 {o.paused && (
                   <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
                     Pause
@@ -342,13 +352,18 @@ export function OfficialsPanel({
                       onChange={(e) => {
                         const wert = e.target.value;
                         const fertig = () => {
+                          setFehler((f) => ({ ...f, [c.court_id]: "" }));
+                          laden();
+                        };
+                        const abgelehnt = (e: unknown) => {
+                          setFehler((f) => ({ ...f, [c.court_id]: String(e) }));
                           laden();
                         };
                         if (wert === "") {
                           setWarnung((w) => ({ ...w, [c.court_id]: "" }));
                           officialClear(c.match_id, rolle)
                             .then(fertig)
-                            .catch(() => {});
+                            .catch(abgelehnt);
                           return;
                         }
                         officialAssign(c.match_id, rolle, Number(wert))
@@ -356,7 +371,7 @@ export function OfficialsPanel({
                             setWarnung((w) => ({ ...w, [c.court_id]: k ?? "" }));
                             fertig();
                           })
-                          .catch(() => {});
+                          .catch(abgelehnt);
                       }}
                       className="rounded border border-slate-200 px-1.5 py-1 text-xs"
                     >
@@ -372,6 +387,11 @@ export function OfficialsPanel({
                 {(warnung[c.court_id] || c.official_warn) && (
                   <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">
                     Konflikt: {warnung[c.court_id] || c.official_warn}
+                  </span>
+                )}
+                {fehler[c.court_id] && (
+                  <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800">
+                    {fehler[c.court_id]}
                   </span>
                 )}
                 {/* Nachträgliche Zuweisungen sagen nie von selbst an

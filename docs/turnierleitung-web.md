@@ -817,10 +817,24 @@ zeigt die Seite zusätzlich:
 - **In der Warteliste** (seit v0.9.348) eine Marke „SR: … · AR: …" an
   jedem Spiel, dessen Besetzung schon feststeht — in BTP vorab eingetragen
   oder hier von Hand zugewiesen. Warnfarbe bei einem Konflikt wie an der
-  Kachel. Zuweisen geht dort noch nicht, nur über die Feld-Kachel.
+  Kachel. Seit v0.9.354 warnt die Marke außerdem, wenn dieselbe Person an
+  zwei wartenden Spielen eingeteilt ist (**„SR doppelt"** bzw. „AR doppelt")
+  oder gerade pausiert (**„SR in Pause"** bzw. „AR in Pause"). Dienst auf
+  einem laufenden Feld zählt nicht als doppelt. Die Einteilung bleibt in
+  beiden Fällen bestehen; die Turnierleitung entscheidet.
+  <!-- pruef: "doppelt" in src-tauri/src/tablet/tl.rs -->
+  <!-- pruef: "in Pause" in src-tauri/src/tablet/tl.rs -->
+  Zuweisen geht dort noch nicht, nur über die Feld-Kachel.
 
 Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
-Turnierleitung entscheidet. Steht in BTP schon ein Schiedsrichter am Spiel,
+Turnierleitung entscheidet. **Abgelehnt** wird sie dagegen (seit v0.9.354),
+wenn das Spiel schon beendet ist (auch das Lösen) oder im Turnierstand fehlt
+und wenn dieselbe Person Schiedsrichter **und** Aufschlagrichter desselben
+Spiels wäre. Die Seite zeigt dann die Meldung des Turnier-PCs, gespeichert
+wird nichts. Wer SR und AR tauschen will, löst deshalb erst einen der beiden
+Dienste.
+<!-- pruef: "ist schon beendet — die Besetzung lässt sich nicht mehr ändern." in src-tauri/src/tablet/officials.rs -->
+<!-- pruef: "zugleich Schiedsrichter und Aufschlagrichter sein." in src-tauri/src/tablet/officials.rs --> Steht in BTP schon ein Schiedsrichter am Spiel,
 **ersetzt** die Auswahl hier ihn: Sie geht nach BTP, bis zur Übernahme zeigt
 die Kachel kurz noch den alten Namen (seit v0.9.350). Ändert danach jemand
 die Besetzung **in BTP**, gilt BTP — bts-light schreibt nicht dagegen.

@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.354
+
+- **Schiedsrichter-Einteilung wird geprüft.** Der Turnier-PC lehnt eine
+  Einteilung (TL-Web und Desktop) mit verständlicher Meldung ab, wenn das
+  Spiel schon beendet ist oder im Turnierstand fehlt, die Person nicht in der
+  BTP-Liste steht oder dieselbe Person Schiedsrichter und Aufschlagrichter
+  desselben Spiels wäre. Dann wird nichts gespeichert. Wer SR und AR tauschen
+  will, löst zuerst einen der beiden Dienste.
+- **Warnungen an der Warteliste:** Die SR-Marke eines wartenden Spiels warnt
+  zusätzlich bei „SR doppelt" (an zwei wartenden Spielen eingeteilt) und
+  „SR in Pause".
+- **Desktop-App:** Die Schiedsrichter-Liste zeigt „reserviert Sp. N" für
+  Personen, die für ein wartendes Spiel eingeteilt sind.
+- Vorarbeit für die Einteilung direkt an der TL-Web-Warteliste (folgt mit dem
+  nächsten Relay-Deploy): Der Turnier-PC meldet die Fähigkeit und liefert die
+  Besetzung auch an offenen Paarungen. Das Protokoll nennt
+  „Schiedsrichter für Spiel N (Warteliste)" statt „(Feld 0)".
+
 ## v0.9.353
 
 - **Walkover zählt nicht mehr als Schiedsrichter-Einsatz.** Ein kampflos
