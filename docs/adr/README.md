@@ -86,3 +86,4 @@ hier eintragen.
 | [0073](0073-strikter-modus-zusaetzliches-gate.md) | Strikter Modus „nur spielbereite" als zusätzliches Gate der Feld-Automatik | accepted |
 | [0074](0074-meetingpoint-seite-unter-namespace.md) | Meetingpoint-Seite unter `/{ns}/` mit Request/Ack, Namespace-Offenlegung akzeptiert | accepted |
 | [0075](0075-bedarf-der-aufruf-automatik.md) | Aufruf-Automatik: gemeinsamer Freiwerde-Helfer, Vorrat = gerufene vergebbare Partien | accepted |
+| [0078](0078-besetzung-wartender-spiele-reserviert.md) | Die Besetzung wartender Spiele reserviert ihre Schiedsrichter | accepted |
