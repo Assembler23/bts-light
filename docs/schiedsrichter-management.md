@@ -326,6 +326,18 @@ v0.9.103). Löschen eines Dienstes ist die `0`.
    Geschriebene, bis der Snapshot nachzieht. **Trägt immer die aktuell
    bekannte `CourtID` mit** (`m.court_id.unwrap_or(0)` aus dem Snapshot) —
    dazu mehr im Abschnitt „CourtID immer mitschreiben" unten.
+   **Wartet, solange eine Feldzuweisung unterwegs ist** (seit v0.9.349):
+   Hat die Auto-Vergabe oder das TL-Web ein Spiel gerade aufs Feld gelegt
+   und BTP das noch nicht bestätigt (`reserved_courts`), zeigt der Snapshot
+   kein Feld. Ein eigenständiger Write mit `CourtID 0` und leerem
+   `Courts`-Block hätte die frische Feldzuweisung in BTP gelöscht — im
+   selben Sync-Lauf direkt nach der Auto-Vergabe, z. B. bei der Übernahme
+   des Meetingpoint-Vorab-SR. Die Besetzung reist ohnehin im
+   Zuweisungs-Write mit (Weg 2); der eigenständige Abgleich setzt erst nach
+   der Bestätigung (oder dem Ablauf des Anspruchs) wieder ein. Die
+   Feldvergabe aus der Desktop-App vermerkt dafür seit v0.9.349 ebenfalls
+   einen Anspruch (nach dem erfolgreichen Write, damit sie nie an einer
+   TL-Web-Vormerkung scheitert).
 2. **Eingebettet** beim Ruf aufs Feld: derselbe `court_assign_request` trägt
    dann zusätzlich den `Courts`-Block, die Officials additiv
    (`MatchCourt::officials`), verdrahtet an allen drei Einstiegen
