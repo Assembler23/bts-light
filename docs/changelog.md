@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.351
+## v0.9.352
 
 - **Fest eingeteilte Schiedsrichter bleiben für ihr Spiel reserviert.** Wer
   für ein wartendes Spiel als Schiedsrichter oder Aufschlagrichter feststeht
@@ -20,6 +20,28 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   BTP-Vorabeinträge für heute ihre Schiedsrichter sofort aus der Rotation.
   Wer viele Schiedsrichter in BTP vorab einträgt, spielt das Update am besten
   vor Turnierbeginn ein. Ohne Schiedsrichter-Betrieb ändert sich nichts.
+
+## v0.9.351
+
+Rückmeldungen der Schiedsrichter vom ersten echten Einsatz des Schiri-Modus:
+
+- **„Satzpunkt" statt „Satzball".** Die Ansage nennt den Satz- bzw.
+  Spielpunkt jetzt im Wortlaut des DBV-Vokabulars zwischen den Ständen
+  („20 Satzpunkt 6", „29 Satzpunkt beide"). Auch die Verlängerung bis 29:29
+  wird richtig erkannt. Im TL-Web heißen die Abzeichen ebenso.
+- **„Feldseiten wechseln" nur noch im Entscheidungssatz.** Nach einem Satz
+  sagt die Ansage keinen Seitenwechsel mehr an. Bei der Punktepause im
+  Entscheidungssatz kommt „Feldseiten wechseln" dagegen neu dazu.
+- **Aufschlag und Annahme schon in der Satzpause.** Im Doppel lassen sich
+  Aufschläger und Annehmer des nächsten Satzes während der Pause eintragen.
+- **Einspielzeit groß.** Nach abgeschlossener Wahl zeigt das Tablet die
+  Einspielzeit groß an, bis der erste Ballwechsel gespielt ist, auch ohne
+  Schiri-Modus. Nach 2 Minuten wird sie rot.
+- **Court-Monitor: Die Aufruf-Uhr verschwindet, sobald gespielt wird.**
+  Bisher lief sie das ganze Spiel über weiter und blinkte rot.
+- **Felder ohne Tabletbedienung rufen keinen Bediener mehr auf.** Ist für
+  ein Feld „Bediener" abgeschaltet, nennt und sagt bts-light dort auch den
+  Verlierer des Vorspiels nicht mehr als Tabletbedienung an.
 
 ## v0.9.350
 

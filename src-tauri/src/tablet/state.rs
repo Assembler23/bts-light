@@ -2330,7 +2330,7 @@ impl TabletState {
     /// ein einmal ausgenommenes Feld nach dem Abschalten für immer ohne
     /// Bediener, ohne dass es irgendwo zurückzunehmen wäre.
     pub fn assign_scorekeeper_for_court(&self, court_id: i64, match_id: i64) {
-        if self.officials.enabled() && !self.officials.court_switches(court_id).operator {
+        if self.feld_ohne_bediener(court_id) {
             return;
         }
         {
@@ -2368,10 +2368,27 @@ impl TabletState {
             .insert(court_id, match_id);
     }
 
+    /// Soll auf diesem Feld niemand das Tablet bedienen (Schalter
+    /// „Bediener" je Feld in der Schiedsrichter-Oberfläche)? Gilt wie der
+    /// Schalter selbst nur bei eingeschaltetem Schiedsrichter-Betrieb.
+    ///
+    /// Dann gibt es dort auch **keinen** Bediener zu nennen oder anzusagen —
+    /// weder den pro-Feld-Hinweis (Verlierer des Vorspiels) noch eine
+    /// Zuweisung, die noch von vor dem Umschalten stammt. Vorher prüfte nur
+    /// die Vergabe den Schalter, der Hinweis rutschte in jede Ansage
+    /// („Tabletbedienung: …", Schiri-Feedback 08.11.2026).
+    pub fn feld_ohne_bediener(&self, court_id: i64) -> bool {
+        self.officials.enabled() && !self.officials.court_switches(court_id).operator
+    }
+
     /// Anzuzeigender Zähltafelbediener eines Felds für Tablet/ferne Halle:
     /// zugewiesener Bediener (Verwaltung aktiv) mit Flag `true`, sonst der
     /// pro-Feld-Hinweis mit `false`. Nur bei `true` wird er angesagt.
+    /// Leer auf einem Feld ohne Bediener (`feld_ohne_bediener`).
     pub fn scorekeeper_display(&self, court_id: i64) -> (Vec<String>, bool) {
+        if self.feld_ohne_bediener(court_id) {
+            return (Vec::new(), false);
+        }
         if let Some(names) = self.assigned_scorekeeper(court_id) {
             (names, true)
         } else {
@@ -4697,7 +4714,10 @@ impl TabletState {
                     .and_then(|v| v.get("pause").filter(|p| !p.is_null()).cloned());
                 // Zugewiesener Zähltafelbediener (einmal lesen, für scorekeeper
                 // + scorekeeper_assigned wiederverwendet).
-                let assigned_sk = if m.is_some() {
+                // Auf einem Feld ohne Bediener (Schalter je Feld) weder
+                // Zuweisung noch Hinweis — sonst würde er angesagt.
+                let ohne_bediener = self.feld_ohne_bediener(court.id);
+                let assigned_sk = if m.is_some() && !ohne_bediener {
                     self.assigned_scorekeeper(court.id)
                 } else {
                     None
@@ -4758,7 +4778,7 @@ impl TabletState {
                     // (ADR 0007) der beim Aufruf ZUGEWIESENE Bediener; sonst der
                     // pro-Feld-Hinweis (Verlierer des zuletzt hier beendeten
                     // Spiels). Nur zeigen, wenn gerade ein Spiel läuft.
-                    scorekeeper: if m.is_some() {
+                    scorekeeper: if m.is_some() && !ohne_bediener {
                         assigned_sk.clone().unwrap_or_else(|| {
                             self.scorekeeper_by_court
                                 .read()
@@ -7226,6 +7246,47 @@ pub(crate) mod tests {
         st.enqueue_scorekeeper(2, vec!["B".into()], 9, 2_000);
         st.assign_scorekeeper_for_court(5, 44);
         assert_eq!(st.assigned_scorekeeper(5), Some(vec!["B".to_string()]));
+    }
+
+    #[test]
+    fn feld_ohne_bediener_nennt_und_sagt_keinen_an() {
+        // Schiri-Feedback 08.11.2026: Auf einem Feld ohne Tabletbedienung
+        // wurde trotzdem „Tabletbedienung: …" angesagt — der pro-Feld-Hinweis
+        // (Verlierer des Vorspiels) umging den Schalter. Weder Hinweis noch
+        // eine Zuweisung von vor dem Umschalten dürfen dort erscheinen.
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        st.set_scorekeeper(101, vec!["Hint".into()]);
+        st.officials_store().set_enabled(true);
+        // Zuweisung, solange das Feld noch einen Bediener hatte.
+        st.enqueue_scorekeeper(9, vec!["Op".into()], 7, 1_000);
+        st.assign_scorekeeper_for_court(101, 1);
+        assert_eq!(st.scorekeeper_display(101), (vec!["Op".to_string()], true));
+
+        st.officials_store().set_court_switches(
+            101,
+            crate::tablet::officials::CourtSwitches {
+                sr: true,
+                ar: true,
+                operator: false,
+            },
+        );
+        assert_eq!(st.scorekeeper_display(101), (Vec::new(), false));
+        let c = st
+            .overview()
+            .into_iter()
+            .find(|c| c.court_id == 101)
+            .unwrap();
+        assert!(c.scorekeeper.is_empty(), "kein Hinweis in der Übersicht");
+        assert!(!c.scorekeeper_assigned);
+
+        // Ohne Schiedsrichter-Betrieb greift der Schalter nicht (wie bei der
+        // Vergabe) — dann bleibt alles beim Alten.
+        st.officials_store().set_enabled(false);
+        assert_eq!(st.scorekeeper_display(101), (vec!["Op".to_string()], true));
     }
 
     #[test]

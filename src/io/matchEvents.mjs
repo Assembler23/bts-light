@@ -86,6 +86,34 @@ export function undoSchnitt(events, set, afterN) {
 }
 
 /**
+ * Undo über die Satzgrenze: Welche Aufschlagfolgen (`serve_start`) gehören
+ * zu einem Satz **nach** `set` und sind noch nicht zurückgenommen?
+ *
+ * Wird im Doppel Aufschlag/Annahme schon in der Satzpause festgelegt, steht
+ * die Aufschlagfolge am Anfang des nächsten Satzes `(set + 1, 0)`. Nimmt
+ * „Korrektur — letzter Punkt zurück" danach den satzentscheidenden Punkt
+ * zurück, gibt es diesen Satz nicht mehr — `undoSchnitt` sucht aber nur im
+ * Satz des Schnitts. Ohne diese Rücknahme blieben zwei Aufschlagfolgen für
+ * denselben Satz stehen, und der Zettel nähme womöglich die falsche.
+ *
+ * Bewusst nur `serve_start`: Eine Karte aus der Satzpause bleibt gültig,
+ * auch wenn der letzte Punkt korrigiert wird.
+ */
+export function aufschlagJenseitsSatz(events, set) {
+  const zurueckgenommen = new Set(
+    (events || []).filter((e) => e.kind === "retract").map((e) => e.retracts),
+  );
+  return (events || [])
+    .filter(
+      (e) =>
+        e.kind === "serve_start" &&
+        !zurueckgenommen.has(e.id) &&
+        (e.set || 0) > set,
+    )
+    .map((e) => e.id);
+}
+
+/**
  * Ist dieses Ereignis zurückgenommen?
  *
  * Gebraucht für die Anzeige: Ein zurückgenommenes Ereignis verschwindet

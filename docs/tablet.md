@@ -307,6 +307,14 @@ Aufstellung:
   und läuft mit getauschter Aufstellung automatisch weiter. Die Wahl
   übersteht einen Tablet-Reload (`serveSetupTeam` wird persistiert);
   „Korrektur — letzter Punkt zurück" in der Satzpause hebt sie wieder auf.
+  **Schon in der Satzpause** (seit v0.9.351, Schiri-Feedback 08.11.2026):
+  Das Pausen-Overlay zeigt im Doppel „**Aufschlag & Annahme jetzt
+  festlegen**". Der Knopf öffnet dieselbe Wahl, während die Pause weiterläuft
+  (`setup` ist dann nicht `playing`, das Overlay tritt zurück, die Pausenuhr
+  steht klein im Wahl-Dialog). „← Zurück zur Pause" führt ohne Wahl zurück —
+  die Wahl bleibt fällig und öffnet sonst wie bisher nach „Weiterspielen".
+  Ist sie getroffen, kehrt das Overlay zurück; „Weiterspielen" fragt dann
+  nicht noch einmal. Der Status an den Host bleibt `break_game`.
 - **Zurück-Schritt:** Ab Schritt 2 gibt es einen **„← Zurück · Back"**-
   Button. Er verwirft die zuletzt getroffene Wahl und springt einen
   Schritt zurück – so lassen sich Fehleingaben korrigieren, ohne das

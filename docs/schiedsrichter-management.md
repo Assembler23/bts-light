@@ -159,10 +159,10 @@ gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
   Dienst.
 - **Globaler Schalter aus** ⇒ `clear_assignments()` (Spec Nr. 1).
 - Niemand frei ⇒ das Feld bleibt ohne diesen Dienst, ohne Fehler.
-- **Reservierte** überspringt die Rotation ebenfalls (seit v0.9.351, siehe
+- **Reservierte** überspringt die Rotation ebenfalls (seit v0.9.352, siehe
   nächster Abschnitt).
 
-## Reservierung wartender Spiele (seit v0.9.351, ADR 0078)
+## Reservierung wartender Spiele (seit v0.9.352, ADR 0078)
 
 Wer für ein **wartendes** Spiel als Schiedsrichter oder Aufschlagrichter
 feststeht, ist für dieses Spiel **reserviert**. Die Rotation setzt ihn
@@ -626,6 +626,6 @@ Aufs-Feld-Kommen (`uebernimm_vorab_sr`): in `auto_assign` vor
 `track_officials` für Hand-/BTP-Vergaben, vor der Feld-Rotation. Ist der
 Feldschalter `sr` aus, BTP/Hand schon belegt oder der SR inzwischen im
 Dienst, verfällt er. Die Feld-Rotation überspringt vorläufig Zugeteilte.
-Seit v0.9.351 überspringt die Verteilung auch **Reservierte** (ADR 0078);
+Seit v0.9.352 überspringt die Verteilung auch **Reservierte** (ADR 0078);
 ein vorläufiger SR, der inzwischen für ein anderes wartendes Spiel
 eingeteilt ist, verfällt, und die Partie bekommt den nächsten freien.

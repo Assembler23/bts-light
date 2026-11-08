@@ -451,6 +451,12 @@
     /* Zurück-Schritt im Setup-Assistenten. `flex: 0 0 auto` hebt das
        `flex: 1` der Basis-Button-Regel auf – im Modal (Flex-Spalte) würde
        der Button sonst die ganze Höhe füllen. */
+    .modal .setup-pause {
+      font-size: 1.1rem; font-weight: 700; color: #7dd3fc;
+      font-variant-numeric: tabular-nums;
+    }
+    .modal .setup-pause.overrun { color: #f87171; }
+    .modal .setup-pause[hidden] { display: none; }
     .modal .setup-back {
       flex: 0 0 auto; align-self: center;
       margin-top: .25rem; padding: .7rem 1.8rem;
@@ -512,6 +518,15 @@
       background: #f59e0b; color: #1a1206;
     }
     .umpire-badge[hidden] { display: none; }
+    .umpire-einspiel {
+      display: flex; align-items: baseline; justify-content: center; gap: .8rem;
+      margin: .1rem 0 .45rem; padding: .35rem .9rem; border-radius: .6rem;
+      background: #1e3a8a; color: #fff;
+    }
+    .umpire-einspiel[hidden] { display: none; }
+    .umpire-einspiel.vorbei { background: #b91c1c; }
+    .umpire-einspiel .lbl { font-size: 1.2rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .umpire-einspiel .zeit { font-size: 3.2rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
     /* overflow-wrap: in der schmalen Seitenspalte (übereinander) dürfen lange
        Einzelwörter/Doppelnamen nicht über den Rand ragen. */
     .umpire-say { font-size: 1.6rem; font-weight: 800; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
@@ -850,6 +865,11 @@
         <!-- Schiri-Modus: immer sichtbare Ansage zum Vorlesen (hidden, bis aktiviert). -->
         <div id="umpire-bar" class="umpire-bar" hidden>
           <div class="umpire-badge" id="umpire-badge" hidden></div>
+          <!-- Einspielzeit: groß, solange nach der Wahl noch kein Ballwechsel
+               gespielt ist (Schiri-Feedback 08.11.2026). -->
+          <div class="umpire-einspiel" id="umpire-einspiel" hidden>
+            <span class="lbl">Einspielzeit</span><span class="zeit" id="umpire-einspiel-zeit"></span>
+          </div>
           <div class="umpire-say" id="umpire-say"></div>
           <div class="umpire-cards" id="umpire-cards"></div>
           <button type="button" id="umpire-card-btn" class="umpire-card-btn">Karte / Verwarnung</button>
@@ -942,6 +962,8 @@
 <div class="modal" id="setup-modal">
   <div class="title" id="setup-title">Wer schlägt zuerst auf?</div>
   <div class="subtitle" id="setup-subtitle"></div>
+  <!-- Wahl während der Satzpause: die Pausenuhr bleibt sichtbar. -->
+  <div class="setup-pause" id="setup-pause" hidden></div>
   <!-- Hinweis Zähltafelbediener: Verlierer des Vorspiels auf diesem Feld. -->
   <div class="sk-hint" id="setup-scorekeeper" hidden></div>
   <!-- Schiedsrichter/Aufschlagrichter dieses Spiels (Spec
@@ -1036,6 +1058,11 @@
   <div class="break-umpire" id="break-umpire" hidden></div>
   <div class="break-countdown" id="break-countdown">1:00</div>
   <button class="primary" id="break-skip">Weiterspielen</button>
+  <!-- Doppel: Aufschläger/Annehmer des nächsten Satzes schon in der
+       Satzpause festlegen (Schiri-Feedback 08.11.2026). -->
+  <button id="break-aufschlag" style="display:none">
+    Aufschlag &amp; Annahme jetzt festlegen
+  </button>
   <button id="break-correct" style="display:none">
     ↩ Korrektur — letzter Punkt zurück
   </button>
@@ -1599,6 +1626,8 @@ const els = {
   breakUmpire: document.getElementById('break-umpire'),
   breakCountdown: document.getElementById('break-countdown'),
   breakSkip: document.getElementById('break-skip'),
+  breakAufschlag: document.getElementById('break-aufschlag'),
+  setupPause: document.getElementById('setup-pause'),
   breakCorrect: document.getElementById('break-correct'),
   matchClock: document.getElementById('match-clock'),
   callTimer: document.getElementById('call-timer'),
@@ -1643,6 +1672,8 @@ const els = {
   plusLeftLabel: document.getElementById('plus-left-label'),
   plusRightLabel: document.getElementById('plus-right-label'),
   umpireBar: document.getElementById('umpire-bar'),
+  umpireEinspiel: document.getElementById('umpire-einspiel'),
+  umpireEinspielZeit: document.getElementById('umpire-einspiel-zeit'),
   umpireBadge: document.getElementById('umpire-badge'),
   umpireSay: document.getElementById('umpire-say'),
   umpireCards: document.getElementById('umpire-cards'),
@@ -2246,6 +2277,9 @@ function showSwitchToast() {
 // mehr automatisch bei 0: Sie bleibt bestehen, bis der Schiedsrichter
 // „Weiterspielen" tippt — nach Ablauf zählt die Anzeige rot hoch
 // („überzogen"), und die Turnierleitung sieht die Überziehung feldgenau.
+/** Ab hier gilt das Einspielen als vorbei (Anzeige rot). Zwei Minuten —
+ *  Wunsch der Schiedsrichter vom 08.11.2026. */
+const EINSPIEL_SEKUNDEN = 120;
 const BREAK_SECONDS = { eleven: 60, game: 120 };
 let breakTimer = null;
 
@@ -2500,8 +2534,50 @@ function tickBreak() {
   renderBreak();
 }
 
+/** Läuft die Aufschlagwahl gerade WÄHREND der Satzpause? Dann tritt das
+ *  Pausen-Overlay zurück, damit das Setup-Modal bedienbar ist; die
+ *  Pausenuhr steht klein im Modal. */
+function wahlInPause() {
+  return !!STATE.pause && STATE.setup !== 'playing';
+}
+
+/** Restzeit der BWF-Pause als Text („1:23", überzogen „+0:37"). */
+function pausenUhr() {
+  const rest = Math.round((STATE.pause.endsAt - serverNow()) / 1000);
+  const secs = Math.abs(rest);
+  const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  return { text: rest < 0 ? `+${mmss}` : mmss, ueberzogen: rest < 0 };
+}
+
+/** Darf die Aufschlagwahl des nächsten Satzes schon in der Satzpause
+ *  geöffnet werden? Nur im Doppel (Einzel braucht keine Wahl), nur wenn
+ *  sie ansteht (`serveSetupTeam`) und nicht mitten in einer Korrektur. */
+function aufschlagInPauseMoeglich() {
+  return !!STATE.pause && STATE.pause.kind === 'game' && !!STATE.serveSetupTeam
+    && STATE.setup === 'playing' && !STATE.finished && !STATE.berichtigtAbfrage
+    && !STATE.locked && !STATE.occupied && isDoubles();
+}
+
+function oeffneAufschlagInPause() {
+  if (!aufschlagInPauseMoeglich()) return;
+  STATE.pendingServer = null;
+  STATE.setup = 'choose-server';
+  tlog('info', 'serve_setup_in_break');
+  persistState();
+  render();
+}
+
 function renderBreak() {
-  if (!STATE.pause) {
+  const imModal = wahlInPause() && !!STATE.pause.endsAt;
+  if (els.setupPause) {
+    els.setupPause.hidden = !imModal;
+    if (imModal) {
+      const u = pausenUhr();
+      els.setupPause.textContent = (u.ueberzogen ? 'Satzpause überzogen · ' : 'Satzpause läuft · ') + u.text;
+      els.setupPause.classList.toggle('overrun', u.ueberzogen);
+    }
+  }
+  if (!STATE.pause || wahlInPause()) {
     els.breakOverlay.classList.remove('visible');
     return;
   }
@@ -2512,24 +2588,23 @@ function renderBreak() {
   } else {
     // Nach Ablauf zählt die Anzeige ROT hoch („+0:37") statt zu enden —
     // die Pause hält, bis „Weiterspielen" gedrückt wird (E9, ADR 0028).
-    const rest = Math.round((STATE.pause.endsAt - serverNow()) / 1000);
-    const secs = Math.abs(rest);
-    const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-    els.breakCountdown.textContent = rest < 0 ? `+${mmss}` : mmss;
-    els.breakCountdown.classList.toggle('overrun', rest < 0);
+    const u = pausenUhr();
+    els.breakCountdown.textContent = u.text;
+    els.breakCountdown.classList.toggle('overrun', u.ueberzogen);
     // Die Schwelle steht NICHT fest bei 11: Sie kommt aus der Zählweise
     // des Spiels (21er → 11, 15er → 8). Der feste Text war bei jedem
     // 15er-Turnier schlicht falsch (Turnier-Befund 24.08.2026).
     const schwelle = intervalThreshold();
     els.breakTitle.textContent = (STATE.pause.kind === 'eleven'
       ? (schwelle ? `Pause bei ${schwelle} Punkten` : 'Punktepause')
-      : 'Satzpause') + (rest < 0 ? ' — überzogen' : '');
+      : 'Satzpause') + (u.ueberzogen ? ' — überzogen' : '');
   }
   // Neue Fassung verfügbar? Nur zeigen, solange ein Spiel läuft — ohne Spiel
   // hat die Seite sich längst selbst neu geladen.
   if (els.updateHinweis) {
     els.updateHinweis.style.display = neueFassungMarke ? 'flex' : 'none';
   }
+  els.breakAufschlag.style.display = aufschlagInPauseMoeglich() ? '' : 'none';
   // „Spiel abbrechen" nur in der Behandlungspause anbieten.
   els.breakAbort.style.display = STATE.pause.kind === 'injury' ? '' : 'none';
   // „Korrektur — letzter Punkt zurück" bei den BWF-Intervallen (11er-/
@@ -2540,8 +2615,8 @@ function renderBreak() {
   els.breakCorrect.textContent = oberKorrektur()
     ? '↩ Korrektur zurücknehmen' : '↩ Korrektur — letzter Punkt zurück';
   els.breakKorrektur.style.display = korrekturMoeglich() ? '' : 'none';
-  // Schiri-Modus: den Ansagetext (z. B. „Satz. Den ersten Satz gewinnt … Bitte
-  // die Seiten wechseln.") auch in der Pausen-Überlagerung zeigen – sonst
+  // Schiri-Modus: den Ansagetext (z. B. „Satz. Der erste Satz wurde gewonnen
+  // von … mit 21:12.") auch in der Pausen-Überlagerung zeigen – sonst
   // verdecken Countdown/Buttons die Ansage-Leiste darunter.
   if (STATE.umpireMode) {
     els.breakUmpire.textContent = umpAnnouncement().say || '';
@@ -2631,6 +2706,21 @@ function renderClock() {
   } else {
     els.matchClock.textContent = '';
   }
+  renderEinspielzeit();
+}
+
+// Einspielzeit im Schiri-Modus: groß in der Ansage-Leiste, solange nach
+// der Wahl noch kein Ballwechsel gespielt ist. Im Sekundentakt über
+// renderClock; mit dem ersten Punkt verschwindet sie.
+function renderEinspielzeit() {
+  if (!els.umpireEinspiel) return;
+  const zeigen = einspielPhase();
+  els.umpireEinspiel.hidden = !zeigen;
+  if (!zeigen) return;
+  els.umpireEinspielZeit.textContent = einspielZeitText();
+  // Nach EINSPIEL_SEKUNDEN wird die Anzeige rot: Das Einspielen ist um.
+  const s = (Date.now() - STATE.startedAt) / 1000;
+  els.umpireEinspiel.classList.toggle('vorbei', s >= EINSPIEL_SEKUNDEN);
 }
 
 // ─────────────────────────────── State-Mutationen ─────────────────────
@@ -2972,9 +3062,17 @@ function setupBack() {
     // Per-Satz-Aufschlagwahl: 'choose-server' ist der erste Schritt → kein
     // Zurück (würde sonst teamOnSide löschen und mitten im Match die
     // Seitenwahl neu öffnen). Nur beim Match-Start zurück zur Seitenwahl.
-    if (STATE.serveSetupTeam) return;
-    STATE.teamOnSide = null;
-    STATE.setup = 'choose-side';
+    // Wahl aus der Satzpause heraus geöffnet: zurück zur Pause, die Wahl
+    // bleibt fällig (serveSetupTeam) und öffnet sonst nach „Weiterspielen".
+    if (STATE.serveSetupTeam && STATE.pause) {
+      STATE.pendingServer = null;
+      STATE.setup = 'playing';
+    } else if (STATE.serveSetupTeam) {
+      return;
+    } else {
+      STATE.teamOnSide = null;
+      STATE.setup = 'choose-side';
+    }
   } else {
     return;
   }
@@ -3897,6 +3995,11 @@ function undo() {
   for (const id of meUndoSchnitt(STATE.events, schnitt.set, schnitt.afterN)) {
     nimmZurueck(id);
   }
+  // Aufschlagfolge eines Satzes, den es nach dem Undo nicht mehr gibt
+  // (in der Satzpause gewählt, dann den Satzpunkt zurückgenommen).
+  for (const id of meAufschlagJenseitsSatz(STATE.events, schnitt.set)) {
+    nimmZurueck(id);
+  }
   STATE.lastEvent = null; // nach Undo neutralen Stand ansagen (kein „Aufschlagwechsel")
   commitScoreView();
   // Undo korrigiert den Verlauf (Spec-Entscheidung): der Host bekommt den
@@ -4530,11 +4633,15 @@ function renderSetupModal() {
   // Zurück-Schritt ab dem zweiten Setup-Schritt anbieten. Bei der Per-Satz-
   // Aufschlagwahl ist 'choose-server' der erste Schritt (kein Zurück — das
   // Gewinnerteam steht durch den Satzstand fest, nicht zur Wahl).
+  // Aus der Satzpause heraus geöffnet, führt „Zurück" in die Pause.
+  const zurPause = STATE.setup === 'choose-server' && STATE.serveSetupTeam
+    && !STATE.berichtigtAbfrage && !!STATE.pause;
   const hideBack = STATE.setup === 'choose-side'
-    || (STATE.setup === 'choose-server' && STATE.serveSetupTeam && !STATE.berichtigtAbfrage);
+    || (STATE.setup === 'choose-server' && STATE.serveSetupTeam && !STATE.berichtigtAbfrage && !zurPause);
   els.setupBack.style.display = hideBack ? 'none' : '';
   els.setupBack.textContent = STATE.setup === 'choose-server' && STATE.berichtigtAbfrage
-    ? '← Korrektur zurücknehmen' : '← Zurück · Back';
+    ? '← Korrektur zurücknehmen'
+    : zurPause ? '← Zurück zur Pause · Back to interval' : '← Zurück · Back';
   // Hinweis Zähltafelbediener nur im ersten Schritt (Seitenwahl), wenn ein
   // Vorspiel auf dem Feld bekannt ist: der Verlierer bedient die Zähltafel.
   renderScorekeeperHint(STATE.setup === 'choose-side');
@@ -5099,7 +5206,7 @@ function zurAnzeige() {
 // ─────────────────────────── Schiri-Modus (Ansagen) ───────────────────
 // Erzeugt aus dem aktuellen Spielstand die immer sichtbare Ansage zum
 // Vorlesen (Deutsch/DBV). Aufschlägerstand zuerst; Gleichstand „N beide";
-// Aufschlagwechsel als Präfix; Satz-/Matchball als Badge.
+// Aufschlagwechsel als Präfix; Satz-/Spielpunkt im Text und als Badge.
 
 function umpTeamNames(teamKey) {
   if (!STATE.match) return '';
@@ -5149,27 +5256,34 @@ function umpReceiverName() {
 }
 
 // Stand mit Aufschlägerstand zuerst, als Text: „5:3" bzw. „4 beide".
+// Steht eine Seite einen Punkt vor dem Satz, gehört das Wort dazwischen —
+// „20 Satzpunkt 6", „29 Satzpunkt beide" (DBV-Vokabular 3.1.10–3.1.13;
+// Anhang 4, 7.1.3: Aufschlägerstand, Ansage, Rückschlägerstand).
+// Schiri-Feedback 08.11.2026: „Satzpunkt", nicht „Satzball".
 function umpScoreSpoken() {
-  if (!STATE.servingSide) {
-    const l = STATE.currentSet.left, r = STATE.currentSet.right;
-    return l === r ? `${l} beide` : `${l}:${r}`;
-  }
-  const sv = STATE.servingSide === 'left' ? STATE.currentSet.left : STATE.currentSet.right;
-  const rv = STATE.servingSide === 'left' ? STATE.currentSet.right : STATE.currentSet.left;
-  return sv === rv ? `${sv} beide` : `${sv}:${rv}`;
+  const lage = umpPunktLage();
+  const wort = lage ? ` ${lage.wort} ` : null;
+  let sv = STATE.currentSet.left, rv = STATE.currentSet.right;
+  if (STATE.servingSide === 'right') [sv, rv] = [rv, sv];
+  if (sv === rv) return wort ? `${sv}${wort}beide` : `${sv} beide`;
+  return wort ? `${sv}${wort}${rv}` : `${sv}:${rv}`;
 }
 
-/** Wie der beginnende Satz angesagt wird: „Zweiter Satz." — oder
- *  „Entscheidungssatz.", wenn beide Parteien einen Satz vor dem Sieg stehen.
- *  Dieselbe Bedingung wie beim Seitenwechsel im Entscheidungssatz. */
-function umpSatzAnsage(n) {
-  if (!STATE.match) return `${umpCap(umpOrdinal(n))} Satz.`;
+/** Steht der laufende Satz im Entscheidungssatz? Beide Parteien stehen
+ *  einen Satz vor dem Sieg — dieselbe Bedingung wie beim Seitenwechsel
+ *  bei 11 (`addPointOnSide`). */
+function umpIstEntscheidungssatz() {
+  if (!STATE.match || !(STATE.match.bestOfSets > 1)) return false;
   const need = requiredSetsToWin(STATE.match.bestOfSets);
   const links = STATE.setsCompleted.filter(s => s.left > s.right).length;
   const rechts = STATE.setsCompleted.filter(s => s.right > s.left).length;
-  const entscheidung = STATE.match.bestOfSets > 1
-    && links === need - 1 && rechts === need - 1;
-  return entscheidung ? 'Entscheidungssatz.' : `${umpCap(umpOrdinal(n))} Satz.`;
+  return links === need - 1 && rechts === need - 1;
+}
+
+/** Wie der beginnende Satz angesagt wird: „Zweiter Satz." — oder
+ *  „Entscheidungssatz.", wenn beide Parteien einen Satz vor dem Sieg stehen. */
+function umpSatzAnsage(n) {
+  return umpIstEntscheidungssatz() ? 'Entscheidungssatz.' : `${umpCap(umpOrdinal(n))} Satz.`;
 }
 
 function umpOpeningSpoken() {
@@ -5231,20 +5345,41 @@ function umpMatchEndSpoken() {
   return `Spiel. Das Spiel wurde gewonnen von ${winner} mit ${stand}.`;
 }
 
-// Satzball/Matchball-Badge (Näherung: Führender 1 Punkt vom Satzgewinn entfernt).
-function umpPointBadge() {
-  if (!STATE.match) return '';
+/** Satzpunkt/Spielpunkt: Gewinnt eine Seite mit dem nächsten Ballwechsel
+ *  den Satz? Gerechnet über `setWinnerSide`, also mit Verlängerung und Cap
+ *  (21er: 20:19, 21:20 … 29:29; 11er: 10, 14:14) statt der früheren
+ *  Näherung „Führender bei Ziel − 1", die 29:29 nicht kannte.
+ *  `null` = kein Satzpunkt; sonst { wort, beide }. Spielpunkt, wenn der
+ *  Satz zugleich das Spiel entschiede (bei „beide" nur, wenn das für beide
+ *  Seiten gilt — sonst „Satzpunkt beide"). */
+function umpPunktLage() {
+  if (!STATE.match || STATE.finished) return null;
   const target = STATE.match.targetScore;
-  if (!target || target >= 99) return '';
+  if (!target || target >= 99) return null;
   const l = STATE.currentSet.left, r = STATE.currentSet.right;
-  const lead = Math.max(l, r), trail = Math.min(l, r);
-  const gamePoint = (lead - trail >= 1) && (lead >= target - 1);
-  if (!gamePoint) return '';
+  const links = setWinnerSide({ left: l + 1, right: r }, target) === 'left';
+  const rechts = setWinnerSide({ left: l, right: r + 1 }, target) === 'right';
+  if (!links && !rechts) return null;
   const need = requiredSetsToWin(STATE.match.bestOfSets);
-  const leaderSide = l >= r ? 'left' : 'right';
-  const wins = STATE.setsCompleted.filter(s =>
-    leaderSide === 'left' ? s.left > s.right : s.right > s.left).length;
-  return wins === need - 1 ? 'Matchball' : 'Satzball';
+  const spielFuer = side => STATE.setsCompleted.filter(s =>
+    side === 'left' ? s.left > s.right : s.right > s.left).length === need - 1;
+  const spiel = links && rechts
+    ? spielFuer('left') && spielFuer('right')
+    : spielFuer(links ? 'left' : 'right');
+  return { wort: spiel ? 'Spielpunkt' : 'Satzpunkt', beide: links && rechts };
+}
+
+/** Einspielphase: Aufstellung (Wahl) bestätigt, aber noch kein Ballwechsel
+ *  gespielt. Die Spieldauer läuft ab der Bestätigung (`startedAt`) — in
+ *  dieser Phase ist sie die Einspielzeit. Nicht beim Einstieg mitten im
+ *  Spiel. */
+function einspielPhase() {
+  return !!STATE.match && !STATE.finished && !STATE.pause && !STATE.midGameSetup
+    && !!STATE.startedAt && isFreshAfterSetup();
+}
+function einspielZeitText() {
+  const s = Math.max(0, Math.floor((Date.now() - STATE.startedAt) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 // Die aktuelle Ansage: { say, badge }.
@@ -5254,9 +5389,18 @@ function umpAnnouncement() {
   if (STATE.setup !== 'playing') return { say: 'Aufstellung wählen …', badge: '' };
   if (STATE.pause) {
     if (STATE.pause.kind === 'injury') return { say: 'Spielunterbrechung.', badge: 'Pause' };
-    if (STATE.pause.kind === 'eleven') return { say: `${umpScoreSpoken()} – Pause.`, badge: 'Pause' };
+    if (STATE.pause.kind === 'eleven') {
+      // Anhang 4, 7.2: „Aufschlagwechsel" (sofern zutreffend), Stand,
+      // „Pause" — und NUR im Entscheidungssatz „Feldseiten wechseln"
+      // (Schiri-Feedback 08.11.2026; vorher fehlte es dort, und nach jedem
+      // Satz stand stattdessen „Bitte die Seiten wechseln").
+      const ev = STATE.lastEvent;
+      const vorn = ev && ev.type === 'point' && ev.serveChanged ? 'Aufschlagwechsel, ' : '';
+      const wechsel = umpIstEntscheidungssatz() ? ' Feldseiten wechseln.' : '';
+      return { say: `${vorn}${umpScoreSpoken()} – Pause.${wechsel}`, badge: 'Pause' };
+    }
     if (STATE.pause.kind === 'game') {
-      return { say: umpSetEndSpoken() + ' Bitte die Seiten wechseln.', badge: 'Satzpause' };
+      return { say: umpSetEndSpoken(), badge: 'Satzpause' };
     }
   }
   const noPoint = STATE.currentSet.left === 0 && STATE.currentSet.right === 0;
@@ -5282,8 +5426,9 @@ function umpAnnouncement() {
     return { say: ev.say, badge };
   }
   let say = umpScoreSpoken();
-  if (ev && ev.type === 'point' && ev.serveChanged) say = 'Aufschlagwechsel ' + say;
-  return { say, badge: umpPointBadge() };
+  if (ev && ev.type === 'point' && ev.serveChanged) say = 'Aufschlagwechsel, ' + say;
+  const lage = umpPunktLage();
+  return { say, badge: lage ? lage.wort : '' };
 }
 function umpCap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
@@ -5291,9 +5436,21 @@ function renderUmpireBar() {
   if (els.settingsUmpire) {
     els.settingsUmpire.textContent = 'Schiri-Modus: ' + (STATE.umpireMode ? 'an' : 'aus');
   }
-  const show = STATE.umpireMode && !!STATE.match;
+  // Ohne Schiri-Modus erscheint die Leiste nur für die Einspielzeit — und
+  // dann ohne Ansage, Karten und Karten-Knopf (Wunsch 08.11.2026: die
+  // Einspielzeit auch für Zähltafelbediener sichtbar). Die Leiste selbst,
+  // weil sie in allen Anordnungen (nebeneinander/übereinander, hoch/quer)
+  // schon ihren Platz hat.
+  const nurEinspiel = !STATE.umpireMode && einspielPhase();
+  const show = !!STATE.match && (STATE.umpireMode || nurEinspiel);
   els.umpireBar.hidden = !show;
   if (!show) return;
+  for (const el of [els.umpireSay, els.umpireCards]) el.style.display = nurEinspiel ? 'none' : '';
+  if (nurEinspiel) {
+    els.umpireBadge.hidden = true;
+    els.umpireCardBtn.hidden = true;
+    return;
+  }
   const a = umpAnnouncement();
   els.umpireSay.textContent = a.say || '';
   els.umpireBadge.textContent = a.badge || '';
@@ -5336,6 +5493,13 @@ function meUndoSchnitt(events, set, afterN) {
   const zurueck = new Set((events || []).filter(e => e.kind === 'retract').map(e => e.retracts));
   return (events || [])
     .filter(e => e.kind !== 'retract' && !zurueck.has(e.id) && (e.set || 0) === set && (e.afterN || 0) > afterN)
+    .map(e => e.id);
+}
+
+function meAufschlagJenseitsSatz(events, set) {
+  const zurueck = new Set((events || []).filter(e => e.kind === 'retract').map(e => e.retracts));
+  return (events || [])
+    .filter(e => e.kind === 'serve_start' && !zurueck.has(e.id) && (e.set || 0) > set)
     .map(e => e.id);
 }
 
@@ -5776,6 +5940,7 @@ els.finishCancel.addEventListener('click', closeFinishModal);
 els.submitBtn.addEventListener('click', submit);
 els.reopenBtn.addEventListener('click', reopen);
 els.breakSkip.addEventListener('click', endBreak);
+els.breakAufschlag.addEventListener('click', oeffneAufschlagInPause);
 if (els.updateJetzt) {
   els.updateJetzt.addEventListener('click', () => neuLaden(neueFassungMarke));
 }

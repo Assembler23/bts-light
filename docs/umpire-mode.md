@@ -33,14 +33,27 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 | Eröffnung | „Meine Damen und Herren: zu meiner Rechten {rechts}, **und** zu meiner Linken {links}. {Aufschläger} schlägt auf {Rückschläger}. Null beide – bitte spielen." Die Reihenfolge ist fest: **immer erst rechts**, unabhängig davon, wer aufschlägt. |
 | Punkt | „{Aufschläger}:{Rückschläger}" |
 | Gleichstand | „{n} beide" |
-| Aufschlagwechsel | „Aufschlagwechsel {Stand}" |
+| Satzpunkt / Spielpunkt | „{Aufschläger} **Satzpunkt** {Rückschläger}" — z. B. „20 Satzpunkt 6", bei Gleichstand „29 Satzpunkt beide". „**Spielpunkt**", wenn der Satz zugleich das Spiel entschiede. Das Wort steht immer zwischen Aufschläger- und Rückschlägerstand (DBV-Vokabular, Anhang 4, 3.1.10–3.1.13 und 7.1.3). Erkannt über die echte Satzregel samt Verlängerung und Obergrenze (21er: ab 20, bis 29:29; 11er: ab 10, bis 14:14). |
+| Aufschlagwechsel | „Aufschlagwechsel, {Stand}" |
 | Nach jeder Pause | „{Stand}, bitte spielen." — die Freigabe gehört dazu; sie gilt bis zum nächsten Ballwechsel. |
-| Punktepause | „{Stand} – Pause." — die **Überschrift** der Pause nennt die Schwelle der jeweiligen Zählweise („Pause bei 11 Punkten", bei 15ern „Pause bei 8 Punkten"). |
-| Satzende | „Satz. Der {n}. Satz wurde gewonnen von {Sieger} mit {Stand}. Bitte die Seiten wechseln." Steht es danach **gleich**, folgt der Zwischenstand: „Einen Satz beide." (bzw. „Zwei Sätze beide.") — bei Führung sagt der Ablaufplan nichts, wir auch nicht. |
+| Punktepause | „{Stand} – Pause." — mit „Aufschlagwechsel, " davor, wenn der Punkt zur Pause ein Aufschlagwechsel war. **Nur im Entscheidungssatz** folgt „**Feldseiten wechseln.**" — nur dort wechseln die Spieler bei der Punktepause die Seiten. Die **Überschrift** der Pause nennt die Schwelle der jeweiligen Zählweise („Pause bei 11 Punkten", bei 15ern „Pause bei 8 Punkten"). |
+| Satzende | „Satz. Der {n}. Satz wurde gewonnen von {Sieger} mit {Stand}." Ein „Seiten wechseln" wird nach dem Satz **nicht** angesagt (bis v0.9.350 stand dort „Bitte die Seiten wechseln."). Steht es danach **gleich**, folgt der Zwischenstand: „Einen Satz beide." (bzw. „Zwei Sätze beide.") — bei Führung sagt der Ablaufplan nichts, wir auch nicht. |
 | Satzbeginn | „{N}. Satz. Null beide – bitte spielen." — steht es **Satz gegen Satz** (allgemein: beide eine Partie vor dem Sieg), heißt es „**Entscheidungssatz.**" statt der Nummer. |
 | Spielende | „Spiel. Das Spiel wurde gewonnen von {Sieger} mit {Satzstände}." — Stände aus Siegersicht, **„und" vor dem letzten**. Die Satzbilanz („zwei Sätze zu eins") gehört nicht in die Ansage; die Stände sagen sie ohnehin. |
 
-Badges: **Satzball** / **Matchball**.
+Badges: **Satzpunkt** / **Spielpunkt** (bis v0.9.350 „Satzball"/„Matchball";
+Schiri-Feedback vom 08.11.2026 — das Vokabular sagt „Satzpunkt").
+<!-- pruef: "Spielpunkt" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Feldseiten wechseln." in src-tauri/assets/tablet.html -->
+
+**Einspielzeit.** Ist die Wahl abgeschlossen (Aufstellung bestätigt), aber noch
+kein Ballwechsel gespielt, steht über der Eröffnungsansage groß
+„**Einspielzeit** M:SS" — gezählt ab der Bestätigung. Nach **2 Minuten** wird
+sie rot. Mit dem ersten Punkt verschwindet sie; danach läuft die Spieldauer
+klein in der Kopfzeile weiter. Die Einspielzeit erscheint **auch ohne
+Schiri-Modus** — dann allein in der Leiste, ohne Ansage und Karten.
+<!-- pruef: "Einspielzeit" in src-tauri/assets/tablet.html -->
+<!-- pruef: /EINSPIEL_SEKUNDEN = 120;/ in src-tauri/assets/tablet.html -->
 
 ## Karten / Verwarnungen
 Button **„Karte / Verwarnung"** → Spieler wählen → Farbe:
