@@ -99,7 +99,9 @@ LAN+Cloud voraus.
   [Spiele in der Warteliste umsortieren](#spiele-in-der-warteliste-umsortieren)).
 - **Das ⋮-Menü an einer Wartelisten-Zeile:** Ganz oben stehen die beiden
   häufigsten Handgriffe, **📣 In Vorbereitung rufen** und **↑ An den Anfang
-  der Spielliste**, danach „Ergebnis eintragen", **🖨 Zettel (leer)**, der
+  der Spielliste**, danach — im Schiedsrichter-Betrieb — **Schiedsrichter
+  einteilen** (siehe [Schiedsrichter einteilen](#schiedsrichter-einteilen)),
+  „Ergebnis eintragen", **🖨 Zettel (leer)**, der
   **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, das **Wunschfeld**,
   **Hervorheben** (Zeilenfarbe wie in BTP) und — an einem gerufenen Spiel —
   **Nachruf** (beide Parteien oder nur eine; dazu **Erste Ansage
@@ -371,7 +373,7 @@ Steht **eine** Seite schon fest, zeigt sie ihre echten Namen und nur die
 andere einen dieser Texte.
 
 **Was an so einer Zeile geht:** umsortieren (Griff, „An den Anfang" im ⋮-Menü), Spielort setzen,
-Wunschfeld, Auto-Vergabe-Ausnahme. Eine manuell gesetzte Position bleibt
+Wunschfeld, Auto-Vergabe-Ausnahme, Schiedsrichter einteilen (seit v0.9.355). Eine manuell gesetzte Position bleibt
 erhalten, wenn die Paarung später feststeht — das Spiel springt nicht zurück.
 
 **Was nicht geht:** in die Vorbereitung rufen, einem Feld zuweisen, Ergebnis
@@ -824,15 +826,43 @@ zeigt die Seite zusätzlich:
   beiden Fällen bestehen; die Turnierleitung entscheidet.
   <!-- pruef: "doppelt" in src-tauri/src/tablet/tl.rs -->
   <!-- pruef: "in Pause" in src-tauri/src/tablet/tl.rs -->
-  Zuweisen geht dort noch nicht, nur über die Feld-Kachel.
+- **Einteilen in der Warteliste** (seit v0.9.355): Im **⋮-Menü** jeder
+  Wartelisten-Zeile steht **Schiedsrichter einteilen** — auch an Spielen,
+  deren Paarung noch offen ist. Der Dialog heißt „Spiel N · Paarung" (an
+  einer offenen Paarung mit den möglichen Teilnehmern) und zeigt die
+  aktuelle Besetzung vorausgewählt. Jede Person trägt einen Zusatz, wenn
+  sie gerade nicht frei ist: **(im Dienst)** auf einem Feld,
+  **(reserviert Sp. N)** für ein anderes wartendes Spiel (ohne Spielnummer
+  nur „(reserviert)") oder **(Pause)**. Die Wahl gilt sofort, ein
+  Speichern-Knopf ist nicht nötig. Danach steht die Person an der Zeile
+  („SR: … · AR: …") und ist für dieses Spiel reserviert: Die Rotation setzt
+  sie an keinem anderen Feld ein.
+  <!-- pruef: "Schiedsrichter einteilen" in src-tauri/assets/tl.html -->
+  <!-- pruef: "reserviert Sp. " in src-tauri/assets/tl.html -->
+  Den Eintrag gibt es nur, wenn der Turnier-PC mindestens v0.9.354 hat; an
+  einem älteren fehlt er, die Feld-Kachel geht weiter.
+- **In der Schiedsrichter-Liste** (seit v0.9.355) trägt eine reservierte
+  Person die Marke **„reserviert Sp. N"**. Die Vorschau „nächster: …"
+  überspringt reservierte Personen, weil die Rotation sie nicht einsetzt.
 
 Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
 Turnierleitung entscheidet. **Abgelehnt** wird sie dagegen (seit v0.9.354),
 wenn das Spiel schon beendet ist (auch das Lösen) oder im Turnierstand fehlt
 und wenn dieselbe Person Schiedsrichter **und** Aufschlagrichter desselben
 Spiels wäre. Die Seite zeigt dann die Meldung des Turnier-PCs, gespeichert
-wird nichts. Wer SR und AR tauschen will, löst deshalb erst einen der beiden
-Dienste.
+wird nichts, und die Auswahl springt auf den gespeicherten Stand zurück.
+
+**Tauschen** (seit v0.9.355, an Kachel und Warteliste): Wählt man als
+Schiedsrichter die Person, die gerade Aufschlagrichter ist (oder umgekehrt),
+tauscht der Dialog die beiden. Er löst dafür zuerst den anderen Dienst, teilt
+dann ein und setzt die bisherige Person in den anderen Dienst. So entsteht
+kein Zwischenstand, in dem eine Person beides wäre. War der eigene Dienst
+vorher leer, bleibt der andere danach leer. Lehnt der Turnier-PC das
+Einteilen ab, holt der Dialog den gelösten Dienst zurück. Scheitert erst der
+letzte Schritt, sagt die Meldung, wer jetzt nicht mehr eingeteilt ist. Die
+Auswahl zeigt danach den Stand, den der Turnier-PC bestätigt hat. Kurz nach
+einer Änderung kann ein neu geöffneter Dialog noch den BTP-Stand zeigen, bis
+BTP die Änderung übernommen hat.
 <!-- pruef: "ist schon beendet — die Besetzung lässt sich nicht mehr ändern." in src-tauri/src/tablet/officials.rs -->
 <!-- pruef: "zugleich Schiedsrichter und Aufschlagrichter sein." in src-tauri/src/tablet/officials.rs --> Steht in BTP schon ein Schiedsrichter am Spiel,
 **ersetzt** die Auswahl hier ihn: Sie geht nach BTP, bis zur Übernahme zeigt

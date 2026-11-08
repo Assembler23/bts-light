@@ -213,8 +213,21 @@ am Spiel eingetragen sind. Spec:
 - **Anzeige** (seit v0.9.354): In der Schiedsrichter-Liste am Turnier-PC
   trägt eine reservierte Person die Marke **„reserviert Sp. N"**, ohne
   Spielnummer nur „reserviert". Ist sie für mehrere Spiele eingeteilt, steht
-  dort die kleinste Spielnummer.
+  dort die kleinste Spielnummer. Dieselbe Marke steht seit v0.9.355 in der
+  Schiedsrichter-Liste der TL-Web-Seite, und die Vorschau „nächster: …"
+  überspringt Reservierte.
   <!-- pruef: "reserviert Sp. " in src/pages/OfficialsPanel.tsx -->
+  <!-- pruef: "reserviert Sp. " in src-tauri/assets/tl.html -->
+- **Einteilen in der TL-Web-Warteliste** (seit v0.9.355): ⋮-Menü der Zeile →
+  **Schiedsrichter einteilen**, auch an offenen Paarungen. Der Dialog wählt
+  die aktuelle Besetzung vor, kennzeichnet „(im Dienst)", „(reserviert Sp. N)"
+  und „(Pause)" und sendet `official_assign`/`official_clear` mit
+  `courtId: 0`. Wer als SR die Person wählt, die gerade AR ist (oder
+  umgekehrt), tauscht beide: erst den anderen Dienst lösen, dann einteilen,
+  dann die bisherige Person in den anderen Dienst — nie SR = AR, auch nicht
+  kurz. Der Menüpunkt erscheint nur mit `can_assign_waiting_officials`
+  (Host ab v0.9.354). Bedienung: [turnierleitung-web.md](turnierleitung-web.md#schiedsrichter-einteilen).
+  <!-- pruef: "Schiedsrichter einteilen" in src-tauri/assets/tl.html -->
 - **Warnungen an der Warteliste** (seit v0.9.354): Ist dieselbe Person an
   zwei oder mehr reservierenden wartenden Spielen eingeteilt, warnen alle
   diese Zeilen mit „SR doppelt" bzw. „AR doppelt". Pausiert eine eingeteilte

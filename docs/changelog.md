@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.355
+
+- **Schiedsrichter in der TL-Web-Warteliste einteilen.** Im ⋮-Menü jeder
+  Wartelisten-Zeile steht „Schiedsrichter einteilen", auch an offenen
+  Paarungen. Der Dialog nennt Spielnummer und Paarung, wählt die aktuelle
+  Besetzung vor und kennzeichnet „(im Dienst)", „(reserviert Sp. N)" und
+  „(Pause)". Die eingeteilte Person ist für dieses Spiel reserviert. Der
+  Eintrag erscheint nur an einem Turnier-PC ab v0.9.354.
+- **SR und AR tauschen:** Wählt man an Kachel oder Warteliste als
+  Schiedsrichter den bisherigen Aufschlagrichter (oder umgekehrt), tauscht
+  der Dialog beide, ohne dass eine Person kurz beides wäre. Eine Ablehnung
+  des Turnier-PCs erscheint als Meldung, die Auswahl springt auf den
+  gespeicherten Stand zurück.
+- **Schiedsrichter-Liste im TL-Web:** Marke „reserviert Sp. N"; die Vorschau
+  „nächster: …" überspringt Reservierte.
+- Cloud: Die Seite kommt mit dem Relay-Deploy beim Merge.
+
 ## v0.9.354
 
 - **Schiedsrichter-Einteilung wird geprüft.** Der Turnier-PC lehnt eine
