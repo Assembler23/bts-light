@@ -4835,13 +4835,7 @@ pub(crate) fn official_detail_json(
                 .matches
                 .iter()
                 .filter(|m| m.status == MatchStatus::Finished)
-                .map(|m| crate::tablet::officials::FinishedMatch {
-                    match_id: m.id,
-                    btp_sr: m.official1_id,
-                    btp_ar: m.official2_id,
-                    court_id: m.court_id,
-                    finished_at: m.finished_at,
-                })
+                .map(crate::tablet::officials::FinishedMatch::aus_btp)
                 .collect();
             store
                 .appearances(&beendet)
@@ -4905,13 +4899,7 @@ fn officials_view(
             .matches
             .iter()
             .filter(|m| m.status == MatchStatus::Finished)
-            .map(|m| crate::tablet::officials::FinishedMatch {
-                match_id: m.id,
-                btp_sr: m.official1_id,
-                btp_ar: m.official2_id,
-                court_id: m.court_id,
-                finished_at: m.finished_at,
-            })
+            .map(crate::tablet::officials::FinishedMatch::aus_btp)
             .collect::<Vec<_>>(),
     );
     let mut dienst: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
@@ -10926,6 +10914,42 @@ mod tests {
             "Nicht freigegebene Felder im Anzeige-Zustand: {unerlaubt:?} — \
              eintragen und begründen, warum sie nach außen dürfen"
         );
+    }
+
+    #[test]
+    fn ein_walkover_fehlt_im_tl_zaehler_und_in_der_detail_liste() {
+        // AK 17: Zähler an der SR-Liste und Länge der Detail-Liste kommen
+        // aus derselben Ableitung — kampflos zählt an beiden Stellen nicht.
+        let tablet = TabletState::default();
+        let mut gespielt = a_match(3);
+        gespielt.status = MatchStatus::Finished;
+        gespielt.winner = Some(1);
+        gespielt.finished_at = Some(500_000);
+        gespielt.official1_id = Some(1);
+        let mut kampflos = a_match(4);
+        kampflos.status = MatchStatus::Finished;
+        kampflos.winner = Some(1);
+        kampflos.result = MatchResult::Walkover;
+        kampflos.finished_at = Some(600_000);
+        kampflos.official1_id = Some(1);
+        let mut schnappschuss = snap(vec![a_court(1, None)], vec![gespielt, kampflos], Vec::new());
+        schnappschuss.officials = vec![crate::btp::model::BtpOfficial {
+            id: 1,
+            name: "Schiedsmann".to_string(),
+            first: "Sabine".to_string(),
+            nationality: None,
+        }];
+        tablet.set_snapshot(schnappschuss.clone());
+        tablet.officials_store().set_enabled(true);
+
+        let liste = officials_view(&tablet, &schnappschuss);
+        let sabine = liste.iter().find(|o| o.id == 1).expect("SR in der Liste");
+        assert_eq!(sabine.appearances, 1, "der Walkover zählt nicht");
+
+        let v: serde_json::Value = serde_json::from_str(&official_detail_json(&tablet, 1)).unwrap();
+        let einsaetze = v["appearances"].as_array().unwrap();
+        assert_eq!(einsaetze.len(), sabine.appearances);
+        assert_eq!(einsaetze[0]["match_id"], 3);
     }
 
     #[test]

@@ -5853,13 +5853,7 @@ fn officials_finished_input(
     snap.matches
         .iter()
         .filter(|m| m.status == crate::btp::model::MatchStatus::Finished)
-        .map(|m| crate::tablet::officials::FinishedMatch {
-            match_id: m.id,
-            btp_sr: m.official1_id,
-            btp_ar: m.official2_id,
-            court_id: m.court_id,
-            finished_at: m.finished_at,
-        })
+        .map(crate::tablet::officials::FinishedMatch::aus_btp)
         .collect()
 }
 
