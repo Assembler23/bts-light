@@ -336,13 +336,28 @@ fn officials_entries(
     tablet: &TabletState,
     snapshot: &BtpSnapshot,
     geschrieben: &HashMap<i64, (i64, i64)>,
+    now: u64,
 ) -> Vec<crate::btp::proto::MatchCourt> {
     let store = tablet.officials_store();
     if !store.enabled() {
         return Vec::new();
     }
+    // Spiele, deren Feldzuweisung gerade unterwegs ist (Auto-Vergabe oder
+    // TL-Web, von BTP noch nicht bestätigt): Der Snapshot kennt ihr Feld
+    // noch nicht und lieferte `court_id = 0`. Ein eigenständiger Write mit
+    // `0` und leerem Courts-Block löschte in BTP die frische Feldzuweisung
+    // (Regressionsklasse v0.9.103). Die Besetzung reist ohnehin im
+    // Zuweisungs-Write mit (ADR 0021) — bis zur Bestätigung also warten.
+    let unterwegs: std::collections::HashSet<i64> = tablet
+        .reserved_courts(now)
+        .into_iter()
+        .map(|(_, match_id)| match_id)
+        .collect();
     let mut out = Vec::new();
     for m in &snapshot.matches {
+        if unterwegs.contains(&m.id) {
+            continue;
+        }
         let Some((sr, ar)) = tablet.officials_for_write(m) else {
             continue;
         };
@@ -776,7 +791,7 @@ impl SyncEngine {
         for m in &snapshot.matches {
             store.confirm(m.id, m.official1_id, m.official2_id);
         }
-        let entries = officials_entries(tablet, snapshot, &self.officials_written);
+        let entries = officials_entries(tablet, snapshot, &self.officials_written, now_ms());
         if entries.is_empty() {
             // Aufräumen: Was BTP inzwischen trägt, muss nicht länger als
             // „geschrieben" gemerkt werden (sonst wüchse die Karte über das
@@ -5378,7 +5393,7 @@ mod tests {
             .officials_store()
             .assign(11, crate::tablet::officials::OfficialRole::Sr, 2);
 
-        let offen = officials_entries(&tablet, &snap, &HashMap::new());
+        let offen = officials_entries(&tablet, &snap, &HashMap::new(), now_ms());
         assert_eq!(offen.len(), 1, "nur Match 10 weicht ab");
         assert_eq!(offen[0].match_id, 10);
         assert_eq!(offen[0].draw_id, 3);
@@ -5389,11 +5404,11 @@ mod tests {
         // erneut schreiben, sonst liefe jeder Zyklus in denselben Write.
         let mut geschrieben = HashMap::new();
         geschrieben.insert(10i64, (1i64, 0i64));
-        assert!(officials_entries(&tablet, &snap, &geschrieben).is_empty());
+        assert!(officials_entries(&tablet, &snap, &geschrieben, now_ms()).is_empty());
 
         // Ohne Schiedsrichter-Betrieb wird gar nichts geschrieben.
         tablet.officials_store().set_enabled(false);
-        assert!(officials_entries(&tablet, &snap, &HashMap::new()).is_empty());
+        assert!(officials_entries(&tablet, &snap, &HashMap::new(), now_ms()).is_empty());
     }
 
     #[test]
@@ -5413,7 +5428,7 @@ mod tests {
             .officials_store()
             .clear_assignment(10, crate::tablet::officials::OfficialRole::Sr);
 
-        let offen = officials_entries(&tablet, &snap, &HashMap::new());
+        let offen = officials_entries(&tablet, &snap, &HashMap::new(), now_ms());
         assert_eq!(offen.len(), 1);
         assert_eq!(
             offen[0].officials,
@@ -5445,7 +5460,7 @@ mod tests {
             .officials_store()
             .assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
 
-        let offen = officials_entries(&tablet, &snap, &HashMap::new());
+        let offen = officials_entries(&tablet, &snap, &HashMap::new(), now_ms());
         assert_eq!(offen.len(), 1);
         assert_eq!(
             offen[0].court_id, 8,
@@ -5465,9 +5480,43 @@ mod tests {
         tablet
             .officials_store()
             .assign(20, crate::tablet::officials::OfficialRole::Sr, 2);
-        let offen2 = officials_entries(&tablet, &snap2, &HashMap::new());
+        let offen2 = officials_entries(&tablet, &snap2, &HashMap::new(), now_ms());
         assert_eq!(offen2.len(), 1);
         assert_eq!(offen2[0].court_id, 0);
+    }
+
+    #[test]
+    fn officials_entries_wartet_auf_die_bestaetigung_einer_unterwegs_befindlichen_feldzuweisung() {
+        // Grill-Befund 08.11.2026: Die Auto-Vergabe schreibt Spiel+Feld+
+        // Besetzung; im selben Lauf sah der Schiedsrichter-Abgleich danach
+        // noch den alten Snapshot (Spiel ohne Feld) und schrieb
+        // `court_id = 0` ohne Courts-Block hinterher — das hätte in BTP die
+        // gerade gesetzte Feldzuweisung gelöscht. Getroffen hat das die
+        // Übernahme des Meetingpoint-Vorab-SR.
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut m = ready_named(20, None, "C", "D");
+        m.draw_id = 3;
+        m.planning_id = 2001;
+        let snap = snap_officials(vec![m], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        tablet
+            .officials_store()
+            .assign(20, crate::tablet::officials::OfficialRole::Sr, 1);
+        let jetzt = now_ms();
+        assert!(tablet.try_reserve_court(8, 20, jetzt));
+
+        assert!(
+            officials_entries(&tablet, &snap, &HashMap::new(), jetzt).is_empty(),
+            "solange die Feldzuweisung unterwegs ist, kein eigenständiger Write mit Feld 0"
+        );
+
+        // Wird der Anspruch frei (bestätigt oder verworfen), schreibt der
+        // Abgleich wieder — mit dem Feld, das der Snapshot dann zeigt.
+        tablet.release_court_claim(8);
+        let offen = officials_entries(&tablet, &snap, &HashMap::new(), jetzt);
+        assert_eq!(offen.len(), 1);
+        assert_eq!(offen[0].officials, Some((1, 0)));
     }
 
     // --- Schiedsrichter-Rotation (Spec schiedsrichter-management, Nr. 4) ---

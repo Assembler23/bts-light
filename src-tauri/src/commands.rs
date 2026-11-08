@@ -3587,7 +3587,14 @@ pub async fn assign_court(
         }],
         &match_courts,
     )
-    .await
+    .await?;
+    // Wie Auto-Vergabe und TL-Web den Anspruch vermerken, bis BTP die
+    // Zuweisung bestätigt: Sonst sähe der Schiedsrichter-Abgleich im
+    // nächsten Lauf noch ein Spiel ohne Feld und schriebe `CourtID 0`
+    // hinterher (v0.9.349). Erst NACH dem Write, damit die Desktop-Vergabe
+    // nicht an einer TL-Web-Vormerkung scheitert — sie war nie gesperrt.
+    state.tablet.try_reserve_court(court_id, match_id, now_ms());
+    Ok(())
 }
 
 /// Gibt ein Feld frei – löst die Court-Verknüpfung (`Court` ohne `MatchID`)

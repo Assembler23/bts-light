@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.349
+
+- **Feldzuweisung in BTP geht nicht mehr verloren, wenn ein Schiedsrichter
+  mitreist.** Legte die automatische Feldvergabe ein Spiel aufs Feld, an
+  dem bts-light schon einen Schiedsrichter eingetragen hatte (z. B. den
+  vorläufigen SR des Meetingpoints), konnte direkt danach ein zweiter
+  Schreibvorgang die frische Feldzuweisung in BTP wieder löschen. Der
+  Schiedsrichter-Abgleich wartet jetzt, bis BTP die Feldzuweisung bestätigt.
+
 ## v0.9.348
 
 - **Schiedsrichter in der Warteliste des TL-Web.** Steht für ein wartendes
