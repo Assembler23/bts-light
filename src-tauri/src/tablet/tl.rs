@@ -1822,11 +1822,19 @@ pub(crate) async fn execute(
                 ok
             }
             Err(rejected) => {
+                // Die Ablehnung einer Schiedsrichter-Einteilung nennt die
+                // Person beim Namen (SR = AR) — der Text geht ans Gerät,
+                // aber nicht ins Protokoll, das zur Fehlersuche hochgeladen
+                // wird.
+                let grund = match &action {
+                    relay_proto::TlAction::OfficialAssign { .. }
+                    | relay_proto::TlAction::OfficialClear { .. } => "Einteilung ungültig",
+                    _ => rejected.error.as_deref().unwrap_or("ohne Grund"),
+                };
                 tracing::info!(
-                    "TL-Web [{}]: {} abgelehnt ({})",
+                    "TL-Web [{}]: {} abgelehnt ({grund})",
                     device.id,
                     action_label(&action),
-                    rejected.error.as_deref().unwrap_or("ohne Grund")
                 );
                 return rejected;
             }
@@ -3452,10 +3460,22 @@ fn wartelisten_warnung(
     let mut teile: Vec<String> = konflikt.into_iter().collect();
     if store.enabled() {
         let besetzung = store.fuer_schreiben(m.id, m.official1_id, m.official2_id);
-        let rollen = [("SR", besetzung.sr), ("AR", besetzung.ar)];
+        let gezeigt = store.effective(m.id, m.official1_id, m.official2_id);
+        // Nur warnen, wenn die gezeigte Person (Sicht `effective`) auch die
+        // reservierte ist. Im kurzen Fenster einer Umteilung gegen BTP (X in
+        // BTP, Y von Hand, noch unbestätigt) zeigte die Zeile sonst X mit
+        // einer Warnung, die Y betrifft. Nach der Bestätigung stimmen beide
+        // Sichten wieder überein.
+        let rollen = [
+            ("SR", besetzung.sr, gezeigt.sr),
+            ("AR", besetzung.ar, gezeigt.ar),
+        ];
         let personen: Vec<(&str, i64)> = rollen
             .into_iter()
-            .filter_map(|(rolle, id)| id.filter(|v| *v > 0).map(|id| (rolle, id)))
+            .filter_map(|(rolle, id, sicht)| {
+                id.filter(|v| *v > 0 && Some(*v) == sicht)
+                    .map(|id| (rolle, id))
+            })
             .collect();
         for (rolle, id) in &personen {
             if belegung.doppelt(*id) && belegung.reserviert_fuer(*id).contains(&m.id) {
@@ -5598,6 +5618,42 @@ mod tests {
                 role: Rolle::Sr,
             }),
             "Schiedsrichter von Feld 3 gelöst"
+        );
+    }
+
+    #[test]
+    fn die_warnung_nennt_nie_eine_andere_person_als_die_marke() {
+        // BTP führt 1 an Spiel 7, die TL hat 2 eingeteilt (noch nicht
+        // bestätigt); 2 ist außerdem an Spiel 8 eingeteilt und pausiert.
+        let tablet = sr_turnier();
+        let mut snap = tablet.snapshot_clone().unwrap();
+        snap.matches
+            .iter_mut()
+            .find(|m| m.id == 7)
+            .unwrap()
+            .official1_id = Some(1);
+        tablet.set_snapshot(snap);
+        use crate::tablet::officials::OfficialRole as R;
+        tablet.officials_store().assign(7, R::Sr, 2);
+        tablet.officials_store().assign(8, R::Sr, 2);
+        tablet.officials_store().set_paused(2, true);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let zeile = s.queue.iter().find(|q| q.match_id == 7).unwrap();
+        assert_eq!(zeile.sr_id, 1, "die Marke zeigt BTP (R2)");
+        assert_eq!(zeile.official_warn, None, "keine Warnung über Person 2");
+        let acht = s.queue.iter().find(|q| q.match_id == 8).unwrap();
+        assert_eq!(
+            acht.official_warn.as_deref(),
+            Some("SR doppelt · SR in Pause")
+        );
+        assert_eq!(
+            s.officials
+                .iter()
+                .find(|o| o.id == 2)
+                .unwrap()
+                .reserved_match_num,
+            Some(7),
+            "die Reservierung gilt trotzdem schon (AK 12)"
         );
     }
 

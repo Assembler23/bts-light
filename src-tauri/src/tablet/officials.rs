@@ -505,9 +505,14 @@ pub fn pruefe_einteilung(
             "Spiel {nummer} ist schon beendet — die Besetzung lässt sich nicht mehr ändern."
         ));
     }
-    let Some(neu) = official_id.filter(|id| *id > 0) else {
+    let Some(neu) = official_id else {
         return Ok(());
     };
+    // `0`/negativ ist keine Person — `assign` verwürfe sie still, und die
+    // Seite meldete „eingeteilt", obwohl nichts geschah.
+    if neu <= 0 {
+        return Err("Keine gültige Person ausgewählt.".to_string());
+    }
     let Some(person) = snap.official(neu) else {
         return Err(format!(
             "Diese Person steht nicht in der Schiedsrichter-Liste aus BTP (ID {neu})."
@@ -2361,6 +2366,12 @@ mod tests {
         let fehler =
             pruefe_einteilung(&store, Some(&snap), 1, OfficialRole::Sr, Some(77)).unwrap_err();
         assert!(fehler.contains("77"), "{fehler}");
+        for kaputt in [0, -3] {
+            assert!(
+                pruefe_einteilung(&store, Some(&snap), 1, OfficialRole::Sr, Some(kaputt)).is_err(),
+                "ID {kaputt} ist keine Person"
+            );
+        }
     }
 
     #[test]

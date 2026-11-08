@@ -221,6 +221,8 @@ am Spiel eingetragen sind. Spec:
   Person, warnt die Zeile mit „SR in Pause" bzw. „AR in Pause". Dienst auf
   einem laufenden Feld ist keine Doppel-Einteilung. Mehrere Warnungen stehen
   in fester Reihenfolge: Konflikt (Verein/Person) · doppelt · Pause.
+  Gewarnt wird nur über die Person, die die Marke zeigt: Ist eine Umteilung
+  gegen BTP noch nicht bestätigt, warnt die Zeile erst nach der Bestätigung.
 
 ### Einteilung wird geprüft (seit v0.9.354)
 

@@ -299,8 +299,10 @@ export function PreparationPanel({ announce, azureTts }: Props) {
     try {
       await officialClear(matchId, "sr");
       await refresh();
-    } catch {
-      /* Fehler zeigt der nächste Abruf */
+    } catch (e) {
+      // Seit v0.9.354 kann der Turnier-PC ablehnen (Spiel inzwischen
+      // beendet oder nicht mehr im Turnierstand) — das muss man sehen.
+      window.alert(String(e));
     } finally {
       setBusy(false);
     }
