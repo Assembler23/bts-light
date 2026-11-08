@@ -210,6 +210,35 @@ am Spiel eingetragen sind. Spec:
 - **Pause:** Eine pausierte Person bleibt eingeteilt.
 - **Meetingpoint:** Die vorläufige Zuteilung beim Aufruf überspringt
   Reservierte ebenfalls (siehe unten).
+- **Anzeige** (seit v0.9.354): In der Schiedsrichter-Liste am Turnier-PC
+  trägt eine reservierte Person die Marke **„reserviert Sp. N"**, ohne
+  Spielnummer nur „reserviert". Ist sie für mehrere Spiele eingeteilt, steht
+  dort die kleinste Spielnummer.
+  <!-- pruef: "reserviert Sp. " in src/pages/OfficialsPanel.tsx -->
+- **Warnungen an der Warteliste** (seit v0.9.354): Ist dieselbe Person an
+  zwei oder mehr reservierenden wartenden Spielen eingeteilt, warnen alle
+  diese Zeilen mit „SR doppelt" bzw. „AR doppelt". Pausiert eine eingeteilte
+  Person, warnt die Zeile mit „SR in Pause" bzw. „AR in Pause". Dienst auf
+  einem laufenden Feld ist keine Doppel-Einteilung. Mehrere Warnungen stehen
+  in fester Reihenfolge: Konflikt (Verein/Person) · doppelt · Pause.
+
+### Einteilung wird geprüft (seit v0.9.354)
+
+Der Turnier-PC prüft jede Einteilung und jedes Lösen, bevor er etwas
+speichert, im TL-Web (LAN und Cloud) wie in der Desktop-App
+(`officials::pruefe_einteilung`). Abgelehnt wird:
+
+- ein Spiel, das der aktuelle Turnierstand nicht kennt,
+- ein beendetes Spiel, auch beim Lösen,
+- eine Person, die nicht in der Schiedsrichter-Liste aus BTP steht,
+- dieselbe Person als Schiedsrichter **und** Aufschlagrichter desselben
+  Spiels. Geprüft wird gegen die Besetzung, die nach BTP ginge (eigene
+  Einteilung vor BTP-Wert).
+
+Bei Ablehnung wird nichts gespeichert und nichts nach BTP geschrieben. Das
+TL-Web bekommt `NotAllowed` mit dem Text, die Desktop-App zeigt ihn rot neben
+dem Feld. Das Protokoll nennt Einteilungen mit `courtId 0` „Schiedsrichter für
+Spiel N (Warteliste)" statt „(Feld 0)".
 
 ### Die automatische Feldvergabe wartet auf den Schiedsrichter
 
@@ -293,8 +322,8 @@ Zusätzlich zeigt die **Spielübersicht** an jeder belegten Feld-Kachel
 
 | Command | Zweck |
 |---|---|
-| `officials_roster` | Liste in Rotationsreihenfolge: Name, Position, Pause, Verein, **Anzahl** Sperren, aktueller Dienst, Einsatz-Zähler |
-| `official_assign` / `official_clear` | Zuweisung setzen/lösen; `assign` liefert die Konflikt-Kategorie zurück |
+| `officials_roster` | Liste in Rotationsreihenfolge: Name, Position, Pause, Verein, **Anzahl** Sperren, aktueller Dienst, Einsatz-Zähler, Reservierung (`reserved`, `reserved_match_num`, seit v0.9.354) |
+| `official_assign` / `official_clear` | Zuweisung setzen/lösen; `assign` liefert die Konflikt-Kategorie zurück. Seit v0.9.354 vorher geprüft (`pruefe_einteilung`), Ablehnung als `Err(String)` |
 | `official_pause`, `official_reorder`, `official_set_club` | Pause, Reihenfolge, Stammverein |
 | `official_blocklists` / `official_set_blocklists` | Sperrlisten **gezielt** lesen/schreiben |
 | `official_appearances` | Einsatz-Liste eines Officials (Spiel, Rolle, Feld, Endezeit) |
@@ -320,8 +349,16 @@ Wire-Ebene und Bedienung sind in [cloud-relay.md](cloud-relay.md) bzw.
 [turnierleitung-web.md](turnierleitung-web.md) beschrieben. Der Kern:
 
 - **Broadcast-`TlState`** trägt `officials_managed`, die reduzierte Liste
-  `officials` (`id`, `name`, `paused`, `on_duty_court_id`, `appearances`)
-  und je Feld `sr`/`ar`/`official_warn` plus die drei Feld-Schalter.
+  `officials` (`id`, `name`, `paused`, `on_duty_court_id`, `appearances`,
+  seit v0.9.354 `reserved`/`reserved_match_num`) und je Feld
+  `sr`/`ar`/`official_warn` plus die drei Feld-Schalter.
+- **Einteilung an der Warteliste** (seit v0.9.354): Flag
+  `can_assign_waiting_officials`, `TlMatch.sr_id`/`ar_id`, an offenen
+  Paarungen `TlOpenMatch.sr`/`ar`/`sr_id`/`ar_id`/`official_warn`. Die
+  Warnung an Warteliste und offener Liste ergänzt `wartelisten_warnung` in
+  `build_state` um „doppelt" und „in Pause" — nicht `court_officials`, das
+  auch Kachel und Tablet speist. Die Belegung wird einmal je Zustandsbau
+  gerechnet.
 - **Warteliste** (seit v0.9.348): jeder `TlMatch` trägt dieselben
   `sr`/`ar`/`official_warn` aus `court_officials` (wirksame Besetzung,
   BTP oder Hand). Leer bleiben sie auf dem Draht weg, damit das

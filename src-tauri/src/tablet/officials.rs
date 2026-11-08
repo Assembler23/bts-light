@@ -451,6 +451,81 @@ impl Belegung {
             .copied()
             .collect()
     }
+
+    /// Die Spielnummer (Papierplan) für die Marke „reserviert Sp. N" in der
+    /// SR-Liste (AK 16). Bei mehreren Reservierungen die **kleinste**
+    /// Spielnummer — ein fester, für alle Geräte gleicher Wert, der nicht
+    /// mit der Warteliste umspringt; die Doppel-Einteilung meldet ohnehin
+    /// die Zeile („SR doppelt"). `None`, wenn nicht reserviert oder keines
+    /// der Spiele eine Nummer trägt (dann nur „reserviert").
+    pub fn reserviert_spielnummer(&self, official_id: i64, snap: &BtpSnapshot) -> Option<i64> {
+        self.reserviert_fuer(official_id)
+            .iter()
+            .filter_map(|id| snap.matches.iter().find(|m| m.id == *id))
+            .filter_map(|m| m.match_num)
+            .min()
+    }
+}
+
+/// Darf die Besetzung dieses Spiels so geändert werden (AK 4)? Prüft eine
+/// Einteilung (`official_id = Some(..)`) oder ein Lösen (`None`), **bevor**
+/// etwas gespeichert wird — TL-Web (LAN wie Cloud) und Desktop teilen
+/// sich diese Prüfung, weil über die Cloud jede beliebige Match-ID
+/// ankommen kann.
+///
+/// Abgelehnt werden:
+/// - ein Spiel, das der aktuelle Turnierstand nicht kennt (auch: noch kein
+///   Turnierstand),
+/// - ein beendetes Spiel — Einteilen **und** Lösen, die Besetzung steht
+///   dann im Spielbericht,
+/// - eine Person, die nicht in der BTP-Officials-Liste steht (sie ginge
+///   sonst als unbekannte ID nach BTP),
+/// - dieselbe Person als SR **und** AR desselben Spiels, in der Sicht
+///   [`OfficialsStore::fuer_schreiben`] (also gegen das, was nach BTP
+///   ginge, nicht gegen den zuletzt bestätigten Stand).
+///
+/// Der Fehlertext geht unverändert an die Turnierleitung.
+pub fn pruefe_einteilung(
+    store: &OfficialsStore,
+    snap: Option<&BtpSnapshot>,
+    match_id: i64,
+    role: OfficialRole,
+    official_id: Option<i64>,
+) -> Result<(), String> {
+    let unbekannt = || format!("Spiel {match_id} gibt es im aktuellen Turnierstand nicht.");
+    let Some(snap) = snap else {
+        return Err(unbekannt());
+    };
+    let Some(m) = snap.matches.iter().find(|m| m.id == match_id) else {
+        return Err(unbekannt());
+    };
+    let nummer = m.match_num.unwrap_or(m.id);
+    if m.status == MatchStatus::Finished {
+        return Err(format!(
+            "Spiel {nummer} ist schon beendet — die Besetzung lässt sich nicht mehr ändern."
+        ));
+    }
+    let Some(neu) = official_id.filter(|id| *id > 0) else {
+        return Ok(());
+    };
+    let Some(person) = snap.official(neu) else {
+        return Err(format!(
+            "Diese Person steht nicht in der Schiedsrichter-Liste aus BTP (ID {neu})."
+        ));
+    };
+    let jetzt = store.fuer_schreiben(m.id, m.official1_id, m.official2_id);
+    let (andere, andere_rolle) = match role {
+        OfficialRole::Sr => (jetzt.ar, "Aufschlagrichter"),
+        OfficialRole::Ar => (jetzt.sr, "Schiedsrichter"),
+    };
+    if dienst(andere) == Some(neu) {
+        return Err(format!(
+            "{} ist an Spiel {nummer} schon {andere_rolle} — eine Person kann nicht \
+             zugleich Schiedsrichter und Aufschlagrichter sein.",
+            person.display_name()
+        ));
+    }
+    Ok(())
 }
 
 /// Feldweise Schalter (Spec Nr. 6): SR-Rotation, AR-Rotation und
@@ -2222,5 +2297,90 @@ mod tests {
             ),
             (5, Some(1), Some(2), Some(9), Some(42), false)
         );
+    }
+
+    // ── Prüfung der Einteilung (AK 4) ─────────────────────────────────
+
+    #[test]
+    fn pruefe_einteilung_lehnt_unbekanntes_und_beendetes_spiel_ab() {
+        let store = store_an();
+        let mut beendet = spiel(2, MatchStatus::Finished, Some(4), None);
+        beendet.match_num = Some(42);
+        let snap = snap_mit(
+            vec![spiel(1, MatchStatus::Scheduled, None, None), beendet],
+            &[4, 5],
+        );
+        // Unbekannt — auch ganz ohne Turnierstand.
+        let fehler =
+            pruefe_einteilung(&store, Some(&snap), 99, OfficialRole::Sr, Some(4)).unwrap_err();
+        assert!(fehler.contains("Spiel 99 gibt es"), "{fehler}");
+        assert!(pruefe_einteilung(&store, None, 1, OfficialRole::Sr, Some(4)).is_err());
+        // Beendet — Einteilen und Lösen; der Text nennt die Spielnummer.
+        for neu in [Some(5), None] {
+            let fehler =
+                pruefe_einteilung(&store, Some(&snap), 2, OfficialRole::Sr, neu).unwrap_err();
+            assert!(fehler.contains("Spiel 42 ist schon beendet"), "{fehler}");
+        }
+        // Ein wartendes Spiel (Warteliste, `courtId 0`) ist erlaubt.
+        assert!(pruefe_einteilung(&store, Some(&snap), 1, OfficialRole::Sr, Some(4)).is_ok());
+        assert!(pruefe_einteilung(&store, Some(&snap), 1, OfficialRole::Ar, None).is_ok());
+    }
+
+    #[test]
+    fn pruefe_einteilung_lehnt_sr_gleich_ar_in_sicht_fuer_schreiben_ab() {
+        let store = store_an();
+        // BTP führt 4 als AR; von Hand ist 5 als AR eingeteilt — für BTP
+        // ist also 5 der AR, 4 ist frei.
+        store.assign(1, OfficialRole::Ar, 5);
+        let snap = snap_mit(
+            vec![spiel(1, MatchStatus::Scheduled, None, Some(4))],
+            &[4, 5],
+        );
+        let fehler =
+            pruefe_einteilung(&store, Some(&snap), 1, OfficialRole::Sr, Some(5)).unwrap_err();
+        assert!(
+            fehler.contains("SR5"),
+            "der Text nennt die Person: {fehler}"
+        );
+        assert!(fehler.contains("Aufschlagrichter"), "{fehler}");
+        assert!(
+            pruefe_einteilung(&store, Some(&snap), 1, OfficialRole::Sr, Some(4)).is_ok(),
+            "der umgeteilte BTP-AR darf SR werden"
+        );
+        // Spiegelbildlich: BTP-SR 4 als AR einteilen.
+        let snap = snap_mit(vec![spiel(3, MatchStatus::OnCourt, Some(4), None)], &[4, 5]);
+        assert!(pruefe_einteilung(&store, Some(&snap), 3, OfficialRole::Ar, Some(4)).is_err());
+        // Dieselbe Rolle erneut setzen ist kein Konflikt.
+        assert!(pruefe_einteilung(&store, Some(&snap), 3, OfficialRole::Sr, Some(4)).is_ok());
+    }
+
+    #[test]
+    fn pruefe_einteilung_lehnt_personen_ausserhalb_der_btp_liste_ab() {
+        let store = store_an();
+        let snap = snap_mit(vec![spiel(1, MatchStatus::Scheduled, None, None)], &[4]);
+        let fehler =
+            pruefe_einteilung(&store, Some(&snap), 1, OfficialRole::Sr, Some(77)).unwrap_err();
+        assert!(fehler.contains("77"), "{fehler}");
+    }
+
+    #[test]
+    fn reserviert_spielnummer_nimmt_die_kleinste_nummer() {
+        let store = store_an();
+        let mut a = spiel(1, MatchStatus::Scheduled, Some(4), None);
+        a.match_num = Some(30);
+        let mut b = spiel(2, MatchStatus::Scheduled, Some(4), None);
+        b.match_num = Some(12);
+        let mut ohne = spiel(3, MatchStatus::Scheduled, Some(5), None);
+        ohne.match_num = None;
+        let snap = snap_mit(vec![a, b, ohne], &[4, 5, 6]);
+        let bel = Belegung::aus(&store, &snap, heute());
+        assert_eq!(bel.reserviert_spielnummer(4, &snap), Some(12));
+        assert_eq!(
+            bel.reserviert_spielnummer(5, &snap),
+            None,
+            "reserviert ohne Nummer"
+        );
+        assert!(bel.ist_belegt(5));
+        assert_eq!(bel.reserviert_spielnummer(6, &snap), None);
     }
 }

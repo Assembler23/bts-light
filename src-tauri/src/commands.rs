@@ -5781,6 +5781,11 @@ pub struct OfficialView {
     pub on_duty_role: Option<String>,
     /// Zahl der bisherigen Einsätze (aus den beendeten Spielen abgeleitet).
     pub appearances: usize,
+    /// Für ein wartendes Spiel eingeteilt (ADR 0078)? Die Liste zeigt dann
+    /// „reserviert Sp. N" bzw. ohne Spielnummer „reserviert" (AK 16).
+    pub reserved: bool,
+    /// Spielnummer der Reservierung, bei mehreren die kleinste.
+    pub reserved_match_num: Option<i64>,
 }
 
 /// Ein abgeleiteter Einsatz für das Detail-Overlay.
@@ -5884,6 +5889,13 @@ pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
             dienst.insert(id, (court_id, "ar".to_string()));
         }
     }
+    // Reservierungen wartender Spiele — dieselbe Quelle wie Rotation und
+    // TL-Web, damit beide Oberflächen dieselbe Marke zeigen.
+    let belegung = crate::tablet::officials::Belegung::aus(
+        store,
+        &snap,
+        crate::tablet::tl::heutiges_datum(now_ms()),
+    );
     let reihenfolge = store.order();
     let mut out: Vec<OfficialView> = snap
         .officials
@@ -5904,6 +5916,8 @@ pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
                 on_duty_court_id: dienst.get(&o.id).map(|(c, _)| *c),
                 on_duty_role: dienst.get(&o.id).map(|(_, r)| r.clone()),
                 appearances: einsaetze.get(&o.id).map(Vec::len).unwrap_or(0),
+                reserved: !belegung.reserviert_fuer(o.id).is_empty(),
+                reserved_match_num: belegung.reserviert_spielnummer(o.id, &snap),
             }
         })
         .collect();
@@ -5926,6 +5940,14 @@ pub fn official_assign(
     officials_an(&state)?;
     let role = parse_role(&role)?;
     let store = state.tablet.officials_store();
+    // Dieselbe Prüfung wie im TL-Web (AK 4): bei Ablehnung nichts speichern.
+    crate::tablet::officials::pruefe_einteilung(
+        store,
+        state.tablet.snapshot_clone().as_ref(),
+        match_id,
+        role,
+        Some(official_id),
+    )?;
     store.assign(match_id, role, official_id);
     let warnung = state.tablet.snapshot_clone().and_then(|snap| {
         let m = snap.matches.iter().find(|m| m.id == match_id)?;
@@ -5945,10 +5967,16 @@ pub fn official_clear(
     role: String,
 ) -> Result<(), String> {
     officials_an(&state)?;
-    state
-        .tablet
-        .officials_store()
-        .clear_assignment(match_id, parse_role(&role)?);
+    let role = parse_role(&role)?;
+    let store = state.tablet.officials_store();
+    crate::tablet::officials::pruefe_einteilung(
+        store,
+        state.tablet.snapshot_clone().as_ref(),
+        match_id,
+        role,
+        None,
+    )?;
+    store.clear_assignment(match_id, role);
     Ok(())
 }
 
