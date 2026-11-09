@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.368
+
+- **TL-Web: „Spiel komplett ansagen".** Im ⋯-Menü jeder belegten Feldkachel
+  lässt sich das Spiel jetzt jederzeit noch einmal vollständig ansagen —
+  auch wenn es schon läuft oder der letzte Aufruf gesprochen ist. Es zählt
+  nicht als Aufruf. Braucht den Relay-Stand dieses Merges.
+
 ## v0.9.367
 
 - **Schiedsrichter-Write löscht kein Feld mehr.** Eine Messung an BTP

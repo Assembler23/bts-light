@@ -2358,6 +2358,21 @@ pub enum TlAction {
         #[serde(rename = "matchId")]
         match_id: i64,
     },
+    /// Das Spiel auf dem Feld noch einmal **vollständig** ansagen — Feld,
+    /// Disziplin, Paarung und (nach den Ansage-Schaltern) Besetzung, also
+    /// dieselbe Ansage wie beim ersten Aufruf, ohne Stufenwort.
+    ///
+    /// **Ausdrücklich kein Aufruf**, wie [`TlAction::AnnounceStartPlay`]:
+    /// Der Host lässt `call_stages` unberührt, die Ansage ist beliebig oft
+    /// und in jedem Zustand des Spiels auslösbar (auch wenn es läuft oder
+    /// der letzte Aufruf schon gesprochen ist). Nur senden, wenn der Host
+    /// `can_announce_court_full` meldet — ältere Hosts kennen sie nicht.
+    AnnounceCourtFull {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
 
     // ── Panel-Profile (Spec tl-web-panelsystem, ADR 0024/0025) ──────────
     /// Ein Profil anlegen oder überschreiben (Upsert nach `id`; leere `id`
@@ -5094,6 +5109,10 @@ mod tests {
             TlAction::AnnounceOfficials { court_id: 5 },
             TlAction::AnnounceScorekeeper { court_id: 5 },
             TlAction::AnnounceStartPlay {
+                court_id: 5,
+                match_id: 77,
+            },
+            TlAction::AnnounceCourtFull {
                 court_id: 5,
                 match_id: 77,
             },

@@ -3793,6 +3793,17 @@ function courtCard(c, cellStyle) {
         data-made="${gesprochen}" data-call-side="team2"
         title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team2))}</button>`);
   }
+  // „Spiel komplett ansagen" (Wunsch 09.11.2026): IMMER da, solange ein
+  // Spiel auf dem Feld steht — egal ob es läuft, ob schon der letzte Aufruf
+  // gesprochen ist oder die Aufruf-Knöpfe oben fehlen. Spricht die
+  // vollständige Erst-Ansage (Feld, Disziplin, Paarung, Besetzung nach den
+  // Ansage-Schaltern) ohne Stufenwort und ist KEIN Aufruf: Die Stufe bleibt
+  // stehen. Nur wenn der Turnier-PC die Aktion kennt — ein älterer verwirft
+  // sie still (Muster `can_lock_courts`).
+  if (c.match_id && state.can_announce_court_full) {
+    kachelAktionen.push(`<button type="button" data-say-full="${c.court_id}" data-match="${c.match_id}"
+        title="Das Spiel noch einmal vollständig ansagen (zählt nicht als Aufruf)">📣 Spiel komplett ansagen</button>`);
+  }
   // Nachruf an die Zähltafelbedienung (Spec tl-sicht-feinschliff, Punkt 2 —
   // der seit ADR 0007 offene Baustein). `scorekeeper_assigned` deckt alle
   // drei Fälle ab, in denen es niemanden zu rufen gibt: leere
@@ -4051,6 +4062,10 @@ window.addEventListener("resize", folgeOffenenKebabs);
  *  (siehe Kommentar an der Verdrahtung). */
 const spielbeginnZuletzt = new Map();
 
+/** Zeitpunkt der letzten Komplett-Ansage je Feld — die Doppeltipp-Sperre
+ *  (Begründung wie bei `spielbeginnZuletzt`). */
+const komplettAnsageZuletzt = new Map();
+
 /** Zeitpunkt des letzten Bediener-Nachrufs je Feld — die Doppeltipp-Sperre.
  *  Bewusst hier statt am Knopf: Der überlebt den nächsten Redraw nicht
  *  (siehe Kommentar an der Verdrahtung). */
@@ -4266,6 +4281,27 @@ function wireCourts(box) {
       send(
         `startplay-${courtId}-${matchId}-${Date.now()}`,
         { action: "announce_start_play", courtId, matchId },
+        "Ansage ausgelöst.",
+      );
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // „Spiel komplett ansagen": beliebig oft auslösbar, deshalb Zeitstempel-
+  // Nonce statt `OP_WINDOW_MS` (das Fenster schluckte eine BEWUSSTE
+  // Wiederholung stumm) und die Doppeltipp-Sperre im Modul-Zustand — Muster
+  // und Begründung wie bei „Bitte anfangen" darüber.
+  scopeAll(box, "button[data-say-full]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const courtId = Number(btn.dataset.sayFull);
+      const matchId = Number(btn.dataset.match);
+      const zuletzt = komplettAnsageZuletzt.get(courtId) || 0;
+      if (Date.now() - zuletzt < 1000) return;
+      komplettAnsageZuletzt.set(courtId, Date.now());
+      send(
+        `say-full-${courtId}-${matchId}-${Date.now()}`,
+        { action: "announce_court_full", courtId, matchId },
         "Ansage ausgelöst.",
       );
     });

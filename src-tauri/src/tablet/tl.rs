@@ -769,6 +769,45 @@ pub(crate) fn apply_state_action(
             );
             Ok(announcement_response(tablet, &hall, now_ms))
         }
+        A::AnnounceCourtFull { court_id, match_id } => {
+            let Some(snap) = tablet.snapshot_clone() else {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    "Es ist noch kein Turnier geladen.",
+                ));
+            };
+            // Nur ein Feld, auf dem GENAU dieses Spiel steht — sonst ginge
+            // die Paarung eines Spiels in die Halle, das dort gar nicht
+            // (mehr) spielt. BTP ist die Wahrheit (R2), nicht die Kachel.
+            let steht_dort = snap
+                .matches
+                .iter()
+                .any(|m| m.id == *match_id && m.court_id == Some(*court_id));
+            if !steht_dort {
+                return Err(TlResponse::err(
+                    C::CourtFree,
+                    "Dieses Spiel steht nicht mehr auf dem Feld — bitte neu laden.",
+                ));
+            }
+            let hall = hall_of_court(&snap, *court_id);
+            // **Kein** `note_court_call_at_least`: Die Komplett-Ansage ist
+            // kein Aufruf. Zählte sie mit, spränge das Aufruf-Abzeichen, und
+            // die Zählung, an der die kampflose Wertung hängt, wäre verfälscht.
+            // Stufe 4 ist im Auftrag die Marke „ohne Stufenwort": Jedes
+            // Ansage-Gerät spricht daraus die vollständige Feld-Ansage wie
+            // beim ersten Aufruf (`jobZuAnsage`), für beide Parteien.
+            tablet.publish_announce_job(
+                hall.clone(),
+                crate::tablet::state::AnnounceJobKind::CourtCall {
+                    court_id: *court_id,
+                    match_id: *match_id,
+                    stage: COURT_FULL_JOB_STAGE,
+                    side: relay_proto::PrepCallSide::Both,
+                },
+                now_ms,
+            );
+            Ok(announcement_response(tablet, &hall, now_ms))
+        }
         A::AnnounceStartPlay { court_id, match_id } => {
             let Some(snap) = tablet.snapshot_clone() else {
                 return Err(TlResponse::err(
@@ -1231,6 +1270,14 @@ fn side_key(side: &relay_proto::PrepCallSide) -> &'static str {
         relay_proto::PrepCallSide::Team2 => "team2",
     }
 }
+
+/// Auftrags-Stufe der Komplett-Ansage (`TlAction::AnnounceCourtFull`).
+///
+/// Ab Stufe 4 sprechen alle Ansage-Geräte die vollständige Feld-Ansage ohne
+/// Stufenwort (`jobZuAnsage` in `src/io/announceJobs.ts`) — genau die
+/// Ansage, die die Komplett-Ansage will. Der Aufruf-Zähler bleibt davon
+/// unberührt; die Zahl lebt nur im Auftrag.
+const COURT_FULL_JOB_STAGE: u8 = 4;
 
 /// Welche Aufruf-Stufe ist nach der **Uhr** fällig?
 ///
@@ -2484,6 +2531,9 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::AnnounceStartPlay { court_id, match_id } => {
             format!("start-play:{court_id}:{match_id}")
         }
+        A::AnnounceCourtFull { court_id, match_id } => {
+            format!("court-full:{court_id}:{match_id}")
+        }
         A::QueueReorder {
             match_id,
             before_match_id,
@@ -2643,6 +2693,9 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         A::AnnounceScorekeeper { court_id } => format!("Bediener-Nachruf Feld {court_id}"),
         A::AnnounceStartPlay { court_id, .. } => {
             format!("Spielbeginn-Ansage Feld {court_id}")
+        }
+        A::AnnounceCourtFull { court_id, .. } => {
+            format!("Komplett-Ansage Feld {court_id}")
         }
         A::QueueReorder { match_id, .. } => format!("Spielliste umsortiert (Spiel {match_id})"),
         A::CalledReorder { match_id, .. } => {
@@ -2915,6 +2968,11 @@ pub struct TlState {
     /// Aktion ab — die Seite blendet den Knopf dann aus.
     #[serde(default)]
     pub can_repeat_prep_call: bool,
+    /// Kennt dieser Turnier-PC „Spiel komplett ansagen"
+    /// (`TlAction::AnnounceCourtFull`)? Ein älterer Host verwirft die
+    /// unbekannte Aktion still — die Seite blendet den Eintrag dann aus.
+    #[serde(default)]
+    pub can_announce_court_full: bool,
     /// Kennt dieser Turnier-PC das Umsortieren der Gerufenen
     /// (`TlAction::CalledReorder`, ADR 0077)? Ohne zeigt die Seite keine
     /// Griffe an gerufenen Spielen.
@@ -3989,6 +4047,7 @@ pub(crate) fn build_state_limited(
             can_set_wish_court: true,
             can_set_highlight: true,
             can_repeat_prep_call: true,
+            can_announce_court_full: true,
             can_reorder_called: true,
             can_assign_waiting_officials: true,
             meetingpoint: meetingpoint_lage(tablet, config),
@@ -4545,6 +4604,7 @@ pub(crate) fn build_state_limited(
         can_set_wish_court: true,
         can_set_highlight: true,
         can_repeat_prep_call: true,
+        can_announce_court_full: true,
         can_reorder_called: true,
         can_assign_waiting_officials: true,
         meetingpoint: meetingpoint_lage(tablet, config),
@@ -10132,6 +10192,120 @@ mod tests {
     }
 
     #[test]
+    fn die_komplett_ansage_geht_auch_nach_dem_letzten_aufruf_und_zaehlt_nicht() {
+        // Der Kern des Wunsches: Egal, ob schon „Letzter Aufruf" gesprochen
+        // wurde — die Turnierleitung kann das Spiel jederzeit noch einmal
+        // vollständig ansagen, und der Aufruf-Zähler bleibt, wo er war.
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        for _ in 0..3 {
+            tablet.note_court_call(3, 7, false);
+        }
+        let vorher = tablet.calls_made(3, 7);
+        assert_eq!(vorher, 3, "Ausgangslage: letzter Aufruf erfolgt");
+        let aktion = relay_proto::TlAction::AnnounceCourtFull {
+            court_id: 3,
+            match_id: 7,
+        };
+
+        for durchgang in 1..=3 {
+            let done = apply_state_action(&tablet, &AppConfig::default(), 50_000, &aktion);
+            assert!(done.is_ok(), "Durchgang {durchgang} muss durchgehen");
+        }
+        assert_eq!(
+            tablet.calls_made(3, 7),
+            vorher,
+            "die Komplett-Ansage darf keine Aufruf-Stufe verbrauchen"
+        );
+        let jobs = tablet.announce_jobs_since("", 0, 50_000, true);
+        assert_eq!(
+            jobs.len(),
+            3,
+            "jede Auslösung erzeugt einen eigenen Auftrag"
+        );
+        // Stufe ≥ 4 = vollständige Ansage ohne Stufenwort, für beide
+        // Parteien. Eine kleinere Stufe spräche „Zweiter/Letzter Aufruf".
+        assert!(
+            matches!(
+                jobs[0].kind,
+                crate::tablet::state::AnnounceJobKind::CourtCall {
+                    court_id: 3,
+                    match_id: 7,
+                    stage: 4..,
+                    side: relay_proto::PrepCallSide::Both,
+                }
+            ),
+            "erwartet: Feld-Aufruf ohne Stufenwort für beide, war: {:?}",
+            jobs[0].kind
+        );
+    }
+
+    #[test]
+    fn die_komplett_ansage_braucht_genau_dieses_spiel_auf_dem_feld() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(3, None), a_court(4, None)],
+            vec![match_on_court(7, 3)],
+            Vec::new(),
+        ));
+        for (court_id, match_id, warum) in [
+            (4, 7, "freies Feld: nichts anzusagen"),
+            (3, 99, "inzwischen steht ein anderes Spiel auf dem Feld"),
+        ] {
+            let r = apply_state_action(
+                &tablet,
+                &AppConfig::default(),
+                50_000,
+                &relay_proto::TlAction::AnnounceCourtFull { court_id, match_id },
+            );
+            assert!(r.is_err(), "{warum}");
+        }
+        assert!(tablet.announce_jobs_since("", 0, 50_000, true).is_empty());
+    }
+
+    #[test]
+    fn die_komplett_ansage_geht_nur_in_die_halle_des_felds() {
+        let tablet = TabletState::default();
+        let mut schnappschuss = snap(
+            vec![a_court(3, Some(2))],
+            vec![match_on_court(7, 3)],
+            vec![
+                crate::btp::model::BtpLocation {
+                    id: 1,
+                    name: "Halle A".to_string(),
+                },
+                crate::btp::model::BtpLocation {
+                    id: 2,
+                    name: "Halle B".to_string(),
+                },
+            ],
+        );
+        schnappschuss.court_infos.push(a_court(9, Some(1)));
+        tablet.set_snapshot(schnappschuss);
+        apply_state_action(
+            &tablet,
+            &AppConfig::default(),
+            50_000,
+            &relay_proto::TlAction::AnnounceCourtFull {
+                court_id: 3,
+                match_id: 7,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            tablet.announce_jobs_since("Halle B", 0, 50_000, true).len(),
+            1
+        );
+        assert!(tablet
+            .announce_jobs_since("Halle A", 0, 50_000, true)
+            .is_empty());
+    }
+
+    #[test]
     fn der_bediener_nachruf_zaehlt_getrennt_von_den_spieler_aufrufen() {
         // A2.5 und der ganze Grund für die eigene Ansageart: Zöge ein
         // Nachruf an die Bedienung die Spieler-Aufrufzahl hoch, glaubte die
@@ -11211,6 +11385,9 @@ mod tests {
             // Fähigkeitsmerkmal: reines Bool „dieser Turnier-PC kennt
             // ‚Erste Ansage wiederholen'".
             "can_repeat_prep_call",
+            // Fähigkeitsmerkmal „Spiel komplett ansagen": reines Bool über
+            // die Programmversion, kein Personenbezug.
+            "can_announce_court_full",
             // Fähigkeitsmerkmal (Spec meetingpoint-reihenfolge): reines Bool.
             "can_reorder_called",
             // Fähigkeitsmerkmal (Spec tl-warteliste-schiedsrichter): reines
