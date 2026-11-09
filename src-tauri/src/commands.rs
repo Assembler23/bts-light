@@ -5814,6 +5814,14 @@ pub struct OfficialView {
     pub reserved_match_num: Option<i64>,
     /// Was die Person übernehmen darf (ADR 0079): „beides", „sr", „ar".
     pub role: String,
+    /// Position in der AR-Liste (Modus A; sonst wie `position`).
+    pub position_ar: usize,
+    /// Vorschau: welchen Dienst die Automatik dieser Person als Nächstes
+    /// gäbe („sr"/„ar") und in welcher Runde (0 = nächste Besetzung).
+    /// `None` = keine Vorschau (pausiert, im Dienst, reserviert, Rolle passt
+    /// zu keinem rotierten Dienst, Rotation aus).
+    pub next_role: Option<String>,
+    pub next_rank: Option<u32>,
 }
 
 /// Ein abgeleiteter Einsatz für das Detail-Overlay.
@@ -5945,6 +5953,8 @@ pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
         crate::tablet::tl::heutiges_datum(now_ms()),
     );
     let reihenfolge = store.order();
+    let reihenfolge_ar = store.order_ar();
+    let vorschau = store.prognose_aus(&snap, &belegung);
     let mut out: Vec<OfficialView> = snap
         .officials
         .iter()
@@ -5967,6 +5977,12 @@ pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
                 reserved: !belegung.reserviert_fuer(o.id).is_empty(),
                 reserved_match_num: belegung.reserviert_spielnummer(o.id, &snap),
                 role: rolle_str(extra.role).to_string(),
+                position_ar: reihenfolge_ar
+                    .iter()
+                    .position(|id| *id == o.id)
+                    .unwrap_or(usize::MAX),
+                next_role: vorschau.get(&o.id).map(|(r, _)| role_str(*r)),
+                next_rank: vorschau.get(&o.id).map(|(_, n)| *n),
             }
         })
         .collect();
@@ -6123,12 +6139,18 @@ pub fn official_reorder(
     state: State<'_, AppState>,
     official_id: i64,
     before_official_id: Option<i64>,
+    list: Option<String>,
 ) -> Result<(), String> {
     officials_an(&state)?;
+    // „ar" = AR-Liste (Modus A, ADR 0079); sonst die Hauptliste.
+    let liste = match list.as_deref() {
+        Some("ar") => crate::tablet::officials::Reihenfolge::Ar,
+        _ => crate::tablet::officials::Reihenfolge::Haupt,
+    };
     state
         .tablet
         .officials_store()
-        .reorder(official_id, before_official_id);
+        .reorder_in(liste, official_id, before_official_id);
     Ok(())
 }
 

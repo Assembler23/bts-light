@@ -3016,6 +3016,10 @@ pub struct TlState {
     /// Geräte-Token authentifizierte Anfrage (`/tl/officials`).
     #[serde(default)]
     pub officials: Vec<TlOfficial>,
+    /// Einteilungsprinzip, nur wenn nicht „abwechselnd" (ADR 0079) — die
+    /// Seite beschriftet ihre Liste in Modus A als „SR-Reihenfolge".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub officials_rotation_mode: Option<String>,
     /// Der Panel-Profil-Katalog (Spec tl-web-panelsystem, ADR 0025) —
     /// geteilt, klein, unkritisch, Muster `layouts_view`/`layouts`.
     /// Wiederverwendet direkt den `relay-proto`-Wire-Typ statt eines
@@ -3055,6 +3059,18 @@ pub struct TlOfficial {
     /// [`Belegung::reserviert_spielnummer`]: crate::tablet::officials::Belegung::reserviert_spielnummer
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reserved_match_num: Option<i64>,
+    /// Einsatzrolle, nur wenn nicht „beides": „sr" oder „ar" (ADR 0079).
+    /// Eine Einsatzplanung, keine Personenbeziehung — darf in den
+    /// TL-Zustand (CLAUDE.md „Datenschutz").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// Vorschau „als Nächstes" (Host rechnet, ADR 0079): Dienst „sr"/„ar"
+    /// und Runde (0 = nächste Besetzung). Fehlen beide bei allen (alter
+    /// Host, Rotation aus), zeigt die Seite die bisherige Vorschau.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_rank: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -3965,6 +3981,7 @@ pub(crate) fn build_state_limited(
             show_club_logos: config.display.show_club_logos,
             officials_managed: tablet.officials_store().enabled(),
             officials: Vec::new(),
+            officials_rotation_mode: None,
             // Der Profil-Katalog ist Host-Konfiguration, kein Turnierstand
             // — er gilt auch, solange BTP noch nichts geliefert hat
             // (dieselbe Begründung wie bei `layouts` oben).
@@ -4544,6 +4561,11 @@ pub(crate) fn build_state_limited(
         open_queue_truncated,
         officials_managed,
         officials,
+        officials_rotation_mode: match tablet.officials_store().rotation_mode() {
+            crate::config::RotationMode::Abwechselnd => None,
+            crate::config::RotationMode::Getrennt => Some("getrennt".into()),
+            crate::config::RotationMode::Rollenwechsel => Some("rollenwechsel".into()),
+        },
         scorekeeper_managed,
         scorekeepers,
         finished,
@@ -5091,6 +5113,7 @@ fn officials_view(
         }
     }
     let order = store.order();
+    let vorschau = store.prognose_aus(snap, belegung);
     let mut out: Vec<(usize, TlOfficial)> = snap
         .officials
         .iter()
@@ -5109,6 +5132,19 @@ fn officials_view(
                     appearances: einsaetze.get(&o.id).map(Vec::len).unwrap_or(0),
                     reserved: !belegung.reserviert_fuer(o.id).is_empty(),
                     reserved_match_num: belegung.reserviert_spielnummer(o.id, snap),
+                    role: match store.extra(o.id).role {
+                        crate::tablet::officials::Einsatzrolle::Beides => None,
+                        crate::tablet::officials::Einsatzrolle::NurSr => Some("sr".into()),
+                        crate::tablet::officials::Einsatzrolle::NurAr => Some("ar".into()),
+                    },
+                    next_role: vorschau.get(&o.id).map(|(r, _)| {
+                        match r {
+                            crate::tablet::officials::OfficialRole::Sr => "sr",
+                            crate::tablet::officials::OfficialRole::Ar => "ar",
+                        }
+                        .to_string()
+                    }),
+                    next_rank: vorschau.get(&o.id).map(|(_, n)| *n),
                 },
             )
         })
@@ -5379,6 +5415,45 @@ mod tests {
         tablet.set_snapshot(s);
         tablet.officials_store().set_enabled(true);
         tablet
+    }
+
+    #[test]
+    fn der_tl_zustand_traegt_rolle_und_vorschau_aber_keine_sperrlisten() {
+        // AK31/AK32 (ADR 0079): Rolle und Vorschau reisen mit, Sperrlisten
+        // und Stammverein weiterhin nicht.
+        use crate::tablet::officials::Einsatzrolle;
+        let tablet = sr_turnier();
+        let store = tablet.officials_store();
+        store.set_rotation(true, true);
+        store.sync_roster(&[1, 2, 3]);
+        store.set_role(3, Einsatzrolle::NurAr);
+        store.set_club(3, "TSV Geheim");
+        store.set_blocklists(3, vec!["SC Gesperrt".into()], vec![4711]);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let o = |id: i64| s.officials.iter().find(|o| o.id == id).unwrap();
+        assert_eq!(o(3).role.as_deref(), Some("ar"));
+        assert_eq!(o(1).role, None, "beides wird weggelassen");
+        assert_eq!(
+            (o(1).next_role.as_deref(), o(1).next_rank),
+            (Some("sr"), Some(0))
+        );
+        assert_eq!(
+            (o(2).next_role.as_deref(), o(2).next_rank),
+            (Some("ar"), Some(0))
+        );
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(
+            !json.contains("TSV Geheim") && !json.contains("SC Gesperrt"),
+            "{json}"
+        );
+        assert!(!json.contains("4711"));
+        assert_eq!(
+            s.officials_rotation_mode, None,
+            "abwechselnd wird weggelassen"
+        );
+        store.set_rotation_mode(crate::config::RotationMode::Getrennt);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        assert_eq!(s.officials_rotation_mode.as_deref(), Some("getrennt"));
     }
 
     #[test]

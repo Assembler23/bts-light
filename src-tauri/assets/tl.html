@@ -7515,12 +7515,28 @@ function renderOfficials() {
   // Reservierte überspringt die Vorschau (Spec `tl-warteliste-schiedsrichter`,
   // AK 16): Die Rotation setzt sie ohnehin nicht ein, „nächster: X" wäre
   // also eine falsche Ankündigung.
+  //
+  // Seit ADR 0079 rechnet der Turnier-PC die Vorschau selbst (`next_role`/
+  // `next_rank`, Modus, Rolle, Vorrolle). Fehlen die Felder bei allen (alter
+  // Turnier-PC oder Rotation aus), bleibt die bisherige Regel.
+  const mitVorschau = list.some((o) => o.next_rank != null);
+  const nextSr = list.find((o) => o.next_rank === 0 && o.next_role === "sr");
+  const nextAr = list.find((o) => o.next_rank === 0 && o.next_role === "ar");
   const next = list.find((o) => !o.paused && !o.on_duty_court_id && !o.reserved);
-  setPanelPreview("officials", next ? `nächster: ${next.name}` : "niemand frei");
+  const neu = [nextSr ? `SR: ${nextSr.name}` : "", nextAr ? `AR: ${nextAr.name}` : ""]
+    .filter(Boolean)
+    .join(" · ");
+  const vorschau = mitVorschau
+    ? (neu ? `nächster ${neu}` : "")
+    : (next ? `nächster: ${next.name}` : "");
+  setPanelPreview("officials", vorschau || "niemand frei");
   const box = $("off-list");
   if (!box) return; // Panel gerade ausgeblendet oder zugeklappt.
   const naechsterEl = $("off-next");
-  if (naechsterEl) naechsterEl.textContent = next ? `nächster: ${next.name}` : "";
+  // In Modus A (getrennte Listen) zeigt diese Seite die SR-Reihenfolge; die
+  // AR-Liste pflegt der Turnier-PC (zweite Liste im TL-Web: PR 5).
+  const listenName = state.officials_rotation_mode === "getrennt" ? "SR-Reihenfolge" : "";
+  if (naechsterEl) naechsterEl.textContent = [listenName, vorschau].filter(Boolean).join(" · ");
   // Während eines laufenden Zugs die Liste NICHT neu bauen (Code-Review-Fund
   // 14.08.2026): `innerHTML` ersetzt jede Zeile durch einen neuen Knoten —
   // die gerade gezogene würde dabei aus dem DOM gerissen, `move()` mischte
@@ -7535,6 +7551,10 @@ function renderOfficials() {
         aria-label="${esc(o.name)} in der Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>
       <span class="num">${i + 1}.</span>
       <span class="off-name">${esc(o.name)}</span>
+      ${o.role === "sr" ? `<span class="meta" title="Darf nur Schiedsrichter sein">nur SR</span>` : ""}
+      ${o.role === "ar" ? `<span class="meta" title="Darf nur Aufschlagrichter sein">nur AR</span>` : ""}
+      ${o.next_role ? `<span class="meta" title="Vorschau: diesen Dienst gäbe die Automatik als Nächstes">${
+        o.next_rank === 0 ? "als Nächstes " : "→ "}${o.next_role === "ar" ? "AR" : "SR"}</span>` : ""}
       ${o.on_duty_court_id ? `<span class="meta">im Dienst</span>` : ""}
       ${o.reserved ? `<span class="meta" title="Für ein wartendes Spiel eingeteilt — die Rotation setzt diese Person bis dahin nicht ein">${
         o.reserved_match_num != null ? `reserviert Sp. ${esc(String(o.reserved_match_num))}` : "reserviert"}</span>` : ""}
@@ -7758,8 +7778,11 @@ function openOfficialAssign(courtId, matchId) {
   // Zusatz je Person: Wer schon pfeift oder für ein anderes Spiel
   // vorgesehen ist, soll vor der Wahl auffallen, nicht erst an der Warnung
   // danach. Der eigene Dienst bzw. die eigene Reservierung ist kein Hinweis.
-  const zusatz = (o) => {
+  const zusatz = (o, rolle) => {
     const teile = [];
+    // Rolle gegen Dienst: erlaubt, aber vorher sichtbar (ADR 0079).
+    if (rolle === "sr" && o.role === "ar") teile.push("nur AR");
+    if (rolle === "ar" && o.role === "sr") teile.push("nur SR");
     if (o.on_duty_court_id && o.on_duty_court_id !== courtId) teile.push("im Dienst");
     if (o.reserved && !(spielNr != null && o.reserved_match_num === spielNr)) {
       teile.push(o.reserved_match_num != null ? `reserviert Sp. ${o.reserved_match_num}` : "reserviert");
@@ -7776,7 +7799,7 @@ function openOfficialAssign(courtId, matchId) {
         <option value="">—</option>
         ${liste.map((o) => `<option value="${Number(o.id)}" ${
           o.id === aktuell ? "selected" : ""
-        }>${esc(o.name)}${esc(zusatz(o))}</option>`).join("")}
+        }>${esc(o.name)}${esc(zusatz(o, rolle))}</option>`).join("")}
       </select>
     </label>`;
   $("off-body").innerHTML = auswahl("sr", stand.sr) + auswahl("ar", stand.ar) +

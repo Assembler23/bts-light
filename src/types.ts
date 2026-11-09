@@ -1297,6 +1297,11 @@ export interface OfficialView {
   reserved_match_num: number | null;
   /** Was die Person übernehmen darf (ADR 0079); fehlt bei älteren. */
   role?: EinsatzRolle;
+  /** Position in der AR-Liste (Modus A). */
+  position_ar?: number;
+  /** Vorschau: nächster Dienst „sr"/„ar" und Runde (0 = als Nächstes). */
+  next_role?: "sr" | "ar" | null;
+  next_rank?: number | null;
 }
 
 /** Einsatzrolle je Official (Rust: officials::Einsatzrolle). */

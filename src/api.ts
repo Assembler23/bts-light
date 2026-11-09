@@ -683,8 +683,10 @@ export const officialPause = (
 export const officialReorder = (
   officialId: number,
   beforeOfficialId: number | null,
+  /** „ar" = AR-Liste in Modus A (ADR 0079); sonst die Hauptliste. */
+  list?: "ar",
 ): Promise<void> =>
-  invoke("official_reorder", { officialId, beforeOfficialId });
+  invoke("official_reorder", { officialId, beforeOfficialId, list: list ?? null });
 
 /** Pflegt den Stammverein (BTP liefert am Official keinen). */
 export const officialSetClub = (
