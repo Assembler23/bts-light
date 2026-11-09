@@ -134,9 +134,10 @@ in BTP oder von Hand jemand anderen einteilen — das hat Vorrang. Fehlen
 Schiedsrichter, setzt die Turnierleitung einzelne Partien im ⋮-Menü auf
 **Ohne Schiedsrichter**.
 
+Der vorläufige Schiedsrichter wird nach denselben Regeln gewählt wie am Feld
+(siehe [Schiedsrichter verwalten](schiedsrichter-management.md)).
 Wer für ein anderes wartendes Spiel fest eingeteilt ist (in BTP vorab oder von
-Hand, siehe [Schiedsrichter verwalten](schiedsrichter-management.md)), wird
-übersprungen. Wird ein vorläufig zugeteilter Schiedsrichter nachträglich für
+Hand), wird übersprungen. Wird ein vorläufig zugeteilter Schiedsrichter nachträglich für
 ein anderes Spiel eingeteilt, verliert die gerufene Partie ihn und bekommt den
 nächsten freien.
 

@@ -1756,6 +1756,7 @@ impl SyncEngine {
         // sehen). Siehe `officials_oncourt_prev`.
         let ausgangslage = self.officials_oncourt_prev.is_none();
         let prev = self.officials_oncourt_prev.take().unwrap_or_default();
+        let modus = store.rotation_mode();
 
         // Verlassene Felder: War das vorige Spiel beendet, rücken seine
         // Officials ans Ende der Reihenfolge — nach CourtID sortiert, damit
@@ -1790,8 +1791,24 @@ impl SyncEngine {
                     fertig
                 );
             }
-            store.move_to_end(&fertig);
+            store.nach_spielende(wirksam.sr, wirksam.ar, modus);
         }
+
+        // Vorrolle je Official (nur Modus C, ADR 0079): einmal je Takt aus
+        // den beendeten Spielen — nach dem Ende-Rücken, damit das gerade
+        // beendete Spiel schon zählt; Besetzungen dieses Takts ändern sie
+        // nicht.
+        let vorrolle = if modus == crate::config::RotationMode::Rollenwechsel {
+            let fertige: Vec<crate::tablet::officials::FinishedMatch> = snapshot
+                .matches
+                .iter()
+                .filter(|m| m.status == MatchStatus::Finished)
+                .map(crate::tablet::officials::FinishedMatch::aus_btp)
+                .collect();
+            store.vorrollen(&fertige)
+        } else {
+            HashMap::new()
+        };
 
         // Wer ist gebunden? Dienst auf einem laufenden Feld UND Reservierung
         // für ein wartendes Spiel (ADR 0078) — aus der einen Quelle
@@ -1860,6 +1877,8 @@ impl SyncEngine {
                 belegt: &belegt,
                 sr: rotation_sr && schalter.sr,
                 ar: rotation_ar && schalter.ar,
+                modus,
+                vorrolle: &vorrolle,
             });
             // Frisch Zugewiesene zählen sofort als im Dienst — sonst bekäme
             // das nächste Feld im selben Zyklus dieselbe Person.
@@ -6003,14 +6022,75 @@ mod tests {
         engine.track_officials(&snap2, &tablet);
         assert_eq!(
             tablet.officials_store().order(),
-            vec![3, 1, 2],
-            "SR und AR des beendeten Spiels rücken ans Ende"
+            vec![3, 2, 1],
+            "AR (2) und SR (1) des beendeten Spiels rücken ans Ende — in der Folge \
+             AR, SR, damit das Paar beim nächsten Mal getauscht hochkommt (ADR 0079)"
         );
         assert_eq!(
             tablet.officials_store().assignment(10).sr,
             Some(1),
             "Zuweisung bleibt dem beendeten Spiel erhalten"
         );
+    }
+
+    #[test]
+    fn track_officials_rollenwechsel_nimmt_die_vorrolle_aus_beendeten_spielen() {
+        // AK19 (ADR 0079): Zwei Felder im selben Takt, Modus C. Die Vorrolle
+        // kommt aus dem beendeten Spiel 9 (SR 1, AR 2); die Besetzung von
+        // Feld 3 ändert die Wahl auf Feld 7 nur über die Belegung.
+        let (mut engine, tablet) = officials_setup(true, true);
+        tablet
+            .officials_store()
+            .set_rotation_mode(crate::config::RotationMode::Rollenwechsel);
+        let mut fertig = finished_named(9, 1, "X", "Y");
+        fertig.official1_id = Some(1);
+        fertig.official2_id = Some(2);
+        let snap = snap_officials(
+            vec![
+                fertig,
+                oncourt_named(10, 3, "A", "B"),
+                oncourt_named(11, 7, "C", "D"),
+            ],
+            &[1, 2, 3, 4],
+        );
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        let store = tablet.officials_store();
+        assert_eq!(store.assignment(10).sr, Some(2), "zuletzt AR ⇒ jetzt SR");
+        assert_eq!(store.assignment(10).ar, Some(1), "zuletzt SR ⇒ jetzt AR");
+        assert_eq!(
+            store.assignment(11).sr,
+            Some(3),
+            "ohne Vorgeschichte: SR zuerst"
+        );
+        assert_eq!(store.assignment(11).ar, Some(4));
+    }
+
+    #[test]
+    fn track_officials_getrennt_rueckt_sr_und_ar_je_liste() {
+        // AK8 auf Takt-Ebene: SR nur in der SR-Liste, AR nur in der AR-Liste.
+        let (mut engine, tablet) = officials_setup(true, true);
+        let store = tablet.officials_store();
+        store.set_rotation_mode(crate::config::RotationMode::Getrennt);
+        let snap1 = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        // Turnier vorab binden — sonst verwirft der erste Takt den Stand.
+        store.set_tournament(&snap1.tournament_name);
+        store.sync_roster(&[1, 2, 3]);
+        store.reorder_in(crate::tablet::officials::Reihenfolge::Ar, 3, Some(1));
+        tablet.set_snapshot(snap1.clone());
+        engine.track_officials(&snap1, &tablet);
+        assert_eq!(store.assignment(10).sr, Some(1));
+        assert_eq!(
+            store.assignment(10).ar,
+            Some(3),
+            "AR kommt aus der AR-Liste"
+        );
+
+        let snap2 = snap_officials(vec![finished_named(10, 42, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap2.clone());
+        engine.track_officials(&snap2, &tablet);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        assert_eq!(store.order_ar(), vec![1, 2, 3]);
     }
 
     #[test]
@@ -6044,9 +6124,9 @@ mod tests {
         engine.track_officials(&snap2, &tablet);
         assert_eq!(
             tablet.officials_store().order(),
-            vec![1, 2, 3, 4],
-            "Feld 3 (kleinere CourtID) rückt zuerst ans Ende (1,2), danach Feld 7 (3,4) — \
-             deterministisch nach CourtID, nicht nach HashMap-Reihenfolge"
+            vec![2, 1, 4, 3],
+            "Feld 3 (kleinere CourtID) rückt zuerst ans Ende (AR 2, SR 1), danach Feld 7 \
+             (AR 4, SR 3) — deterministisch nach CourtID, nicht nach HashMap-Reihenfolge"
         );
     }
 

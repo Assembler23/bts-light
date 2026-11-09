@@ -1368,7 +1368,17 @@ pub fn uebernimm_vorab_sr(
         return None;
     }
     let wirksam = store.effective(m.id, m.official1_id, m.official2_id);
-    if wirksam.sr.is_some() || store.assignment(m.id).sr.is_some() || belegt.contains(&vorab) {
+    // Inzwischen „nur AR" ⇒ nicht übernehmen; die Rotation besetzt den SR
+    // neu (ADR 0079).
+    let rolle_passt = store
+        .extra(vorab)
+        .role
+        .erlaubt(crate::tablet::officials::OfficialRole::Sr);
+    if wirksam.sr.is_some()
+        || store.assignment(m.id).sr.is_some()
+        || belegt.contains(&vorab)
+        || !rolle_passt
+    {
         return None;
     }
     store.assign(m.id, crate::tablet::officials::OfficialRole::Sr, vorab);
@@ -1403,6 +1413,19 @@ pub fn vorab_sr_verteilen(
     }
     let belegung = crate::tablet::officials::Belegung::aus(store, snap, heute);
     let bekannt: Vec<i64> = snap.officials.iter().map(|o| o.id).collect();
+    // Dieselbe Wahl wie am Feld (ADR 0079): Modus, Rolle, Vorrolle.
+    let modus = store.rotation_mode();
+    let vorrolle = if modus == crate::config::RotationMode::Rollenwechsel {
+        let fertige: Vec<crate::tablet::officials::FinishedMatch> = snap
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::Finished)
+            .map(crate::tablet::officials::FinishedMatch::aus_btp)
+            .collect();
+        store.vorrollen(&fertige)
+    } else {
+        std::collections::HashMap::new()
+    };
     // Belegt: im Dienst, reserviert, und jeder bereits vorläufig oder
     // wirksam eingeteilte SR einer gerufenen Partie.
     let mut belegt: HashSet<i64> = belegung.alle();
@@ -1431,14 +1454,21 @@ pub fn vorab_sr_verteilen(
             // Die eigene SR-Reservierung dieser Partie ist oben schon
             // abgefangen — jede verbleibende Bindung liegt woanders (oder
             // ist der AR dieser Partie) und schließt `v` aus.
-            let weg = belegung.ist_belegt(v) || store.extra(v).paused || !bekannt.contains(&v);
+            let extra = store.extra(v);
+            let weg = belegung.ist_belegt(v)
+                || extra.paused
+                || !bekannt.contains(&v)
+                || !extra
+                    .role
+                    .erlaubt(crate::tablet::officials::OfficialRole::Sr);
             if !weg {
                 continue;
             }
             mp.set_vorab_sr(m.id, None); // steht inzwischen woanders
         }
         let spieler: Vec<BtpPlayer> = m.team1.iter().chain(m.team2.iter()).cloned().collect();
-        if let Some(id) = store.next_free(&bekannt, &belegt, &spieler) {
+        let (sr, _) = store.waehle(modus, &bekannt, &belegt, &spieler, &vorrolle, true, false);
+        if let Some(id) = sr {
             mp.set_vorab_sr(m.id, Some(id));
             belegt.insert(id);
         }
@@ -2553,6 +2583,69 @@ mod tests {
             .plaetze
             .iter()
             .any(|p| p.platz == MpPlatz::Sr && p.name == "SR100"));
+    }
+
+    #[test]
+    fn die_vorab_verteilung_folgt_rolle_und_modus() {
+        // AK23 (ADR 0079): „nur AR" wird nie Vorab-SR; in Modus A kommt der
+        // SR aus der SR-Liste; in C bekommt ihn bevorzugt, wer zuletzt
+        // nicht SR war.
+        use crate::tablet::officials::{Einsatzrolle, Reihenfolge};
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101]);
+        let store = t.officials_store();
+        store.set_role(100, Einsatzrolle::NurAr);
+        rufe(&t, 11, None);
+        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
+        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(101));
+
+        // Modus A: SR-Liste ist maßgeblich, nicht die AR-Liste.
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101]);
+        let store = t.officials_store();
+        store.set_rotation_mode(crate::config::RotationMode::Getrennt);
+        store.reorder_in(Reihenfolge::Ar, 101, Some(100));
+        rufe(&t, 11, None);
+        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
+        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(100));
+
+        // Modus C: 100 war zuletzt SR (beendetes Spiel 12) ⇒ 101.
+        let t = zustand(turnier(false));
+        let mut snap = mit_sr(&t, &[100, 101]);
+        let mut fertig = spiel(12, MatchStatus::Finished);
+        fertig.official1_id = Some(100);
+        fertig.finished_at = Some(5);
+        snap.matches.push(fertig);
+        t.set_snapshot(snap.clone());
+        let store = t.officials_store();
+        store.set_rotation_mode(crate::config::RotationMode::Rollenwechsel);
+        rufe(&t, 11, None);
+        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
+        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(101));
+    }
+
+    #[test]
+    fn ein_vorab_sr_mit_neuer_rolle_nur_ar_wird_nicht_uebernommen() {
+        // AK24
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101]);
+        rufe(&t, 11, None);
+        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
+        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(100));
+        t.officials_store()
+            .set_role(100, crate::tablet::officials::Einsatzrolle::NurAr);
+        let m = snap.matches.iter().find(|m| m.id == 11).unwrap();
+        assert_eq!(uebernimm_vorab_sr(&t, m, 1, &HashSet::new()), None);
+        assert_eq!(t.officials_store().assignment(11).sr, None);
+        // Die Verteilung tauscht ihn ebenfalls aus.
+        let t2 = zustand(turnier(false));
+        let snap2 = mit_sr(&t2, &[100, 101]);
+        rufe(&t2, 11, None);
+        vorab_sr_verteilen(&t2, &snap2, &mp_an(), heute());
+        t2.officials_store()
+            .set_role(100, crate::tablet::officials::Einsatzrolle::NurAr);
+        vorab_sr_verteilen(&t2, &snap2, &mp_an(), heute());
+        assert_eq!(t2.meetingpoint_store().vorab_sr(11), Some(101));
     }
 
     #[test]
