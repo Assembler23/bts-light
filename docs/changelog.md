@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.358
+
+- **„Ohne Schiedsrichter" bleibt stehen.** Setzt die Turnierleitung ein
+  wartendes Spiel auf „Ohne Schiedsrichter", bekommt es auch später keinen
+  vorläufigen Schiedsrichter mehr zugeteilt. Bisher konnte der
+  Meetingpoint die Lücke im nächsten Takt wieder füllen.
+- **TL-Web-Warteliste zeigt Umteilungen sofort.** Die Marke „SR: … · AR: …"
+  an wartenden Spielen zeigt die frische Einteilung, nicht mehr erst den von
+  BTP bestätigten Stand.
+- Messwerkzeug für BTP (Schiedsrichter an Spielen ohne Feld) als Vorbereitung
+  der Zuteilung beim Aufruf.
+
 ## v0.9.357
 
 - **Schiedsrichter-Paare tauschen die Dienste.** Nach Spielende rücken

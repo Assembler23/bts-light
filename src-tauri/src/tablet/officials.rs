@@ -475,7 +475,9 @@ struct Ausgangswert {
 
 /// Einen Dienst gegen den BTP-Stand prüfen (siehe
 /// [`OfficialsStore::confirm`]): loslassen, wenn BTP den lokalen Wert trägt
-/// oder vom Ausgangswert abweicht; sonst den Ausgangswert erfassen.
+/// oder vom Ausgangswert abweicht; sonst den Ausgangswert erfassen. Ein
+/// bestätigtes „ohne" (`Some(0)`, BTP führt niemanden) bleibt stehen
+/// (ADR 0080).
 fn pruefe_dienst(
     lokal: &mut Option<i64>,
     ausgang: &mut Option<i64>,
@@ -489,7 +491,18 @@ fn pruefe_dienst(
     };
     let btp = dienst(btp).unwrap_or(0);
     let in_btp_umgeteilt = ausgang.is_some_and(|b| b != btp) && *vorher != Some(btp);
-    if btp == wert || in_btp_umgeteilt {
+    if wert == 0 && btp == 0 {
+        // „Ohne" bleibt dauerhaft stehen (ADR 0080): BTP führt ebenfalls
+        // niemanden, also ist es bestätigt — auch wenn BTP vorher jemanden
+        // trug (dann ist die 0 unser eigener Write, keine Umteilung in BTP).
+        // Loslassen hieße, dass ein Lauf, der offene Dienste auffüllt, das
+        // Spiel im nächsten Takt wieder besetzt. Der Ausgangswert 0 sorgt
+        // dafür, dass eine spätere Einteilung in BTP trotzdem gewinnt.
+        // Solche Einträge bleiben bis zum Turnierwechsel liegen — höchstens
+        // einer je Spiel.
+        *ausgang = Some(0);
+        *vorher = None;
+    } else if btp == wert || in_btp_umgeteilt {
         *lokal = None;
         *ausgang = None;
         *vorher = None;
@@ -1355,8 +1368,8 @@ impl OfficialsStore {
     /// Änderung in BTP selbst, für den Rest des Turniers. Deshalb wird ein
     /// Dienst losgelassen, wenn
     ///
-    /// - BTP genau den lokalen Wert trägt (bestätigt; bei „keiner": BTP
-    ///   trägt niemanden), oder
+    /// - BTP genau den lokalen Wert trägt (bestätigt) — außer beim
+    ///   ausdrücklichen „keiner", das stehen bleibt (ADR 0080), oder
     /// - BTP etwas **anderes** führt als beim Einteilen (Ausgangswert):
     ///   Dann hat jemand in BTP entschieden, und BTP gewinnt.
     ///
@@ -1974,10 +1987,56 @@ mod tests {
         store.confirm(501, None, Some(11));
         assert_eq!(store.assignment(501), MatchOfficials::default());
 
-        // Ausdrückliches „keiner" gilt als erfüllt, sobald BTP auch nichts
-        // mehr trägt.
+        // Ausdrückliches „keiner" bleibt stehen, auch wenn BTP nichts trägt
+        // (ADR 0080) — sonst füllte ein Lauf über wartende Spiele es wieder
+        // auf.
         store.confirm(502, None, None);
-        assert_eq!(store.assignment(502), MatchOfficials::default());
+        assert_eq!(store.assignment(502).sr, Some(0));
+    }
+
+    #[test]
+    fn ohne_bleibt_stehen_solange_btp_niemanden_fuehrt() {
+        // ADR 0080 (Spec sr-ar-beim-aufruf AK6): Über beliebig viele Läufe.
+        let store = OfficialsStore::default();
+        store.clear_assignment(700, OfficialRole::Sr);
+        for _ in 0..5 {
+            store.confirm(700, None, None);
+            assert_eq!(store.assignment(700).sr, Some(0));
+        }
+        // Die wirksame Sicht kennt keinen Dienst, die Schreib-Sicht „keiner".
+        assert_eq!(store.effective(700, None, None).sr, None);
+        assert_eq!(store.fuer_schreiben(700, None, None).sr, Some(0));
+    }
+
+    #[test]
+    fn ohne_weicht_einer_einteilung_in_btp() {
+        let store = OfficialsStore::default();
+        store.clear_assignment(701, OfficialRole::Ar);
+        store.confirm(701, None, None);
+        assert_eq!(store.assignment(701).ar, Some(0));
+        // Jemand trägt in BTP eine Person ein ⇒ BTP gewinnt (R2).
+        store.confirm(701, None, Some(5));
+        assert_eq!(store.assignment(701), MatchOfficials::default());
+        assert_eq!(store.effective(701, None, Some(5)).ar, Some(5));
+    }
+
+    #[test]
+    fn ohne_gegen_einen_btp_wert_bleibt_nach_der_bestaetigung_stehen() {
+        // BTP führt 9, die TL löst ⇒ die 0 geht nach BTP; danach bleibt das
+        // „ohne" stehen, statt losgelassen zu werden.
+        let store = OfficialsStore::default();
+        store.confirm(702, Some(9), None);
+        store.clear_assignment(702, OfficialRole::Sr);
+        store.confirm(702, Some(9), None);
+        assert_eq!(
+            store.fuer_schreiben(702, Some(9), None).sr,
+            Some(0),
+            "0 geht nach BTP"
+        );
+        store.confirm(702, None, None);
+        assert_eq!(store.assignment(702).sr, Some(0));
+        store.confirm(702, None, None);
+        assert_eq!(store.assignment(702).sr, Some(0));
     }
 
     #[test]

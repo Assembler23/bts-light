@@ -2029,14 +2029,60 @@ impl TabletState {
         m: Option<&BtpMatch>,
         snap: &BtpSnapshot,
     ) -> (Vec<String>, Vec<String>, Option<String>) {
+        self.officials_anzeige(m, snap, false)
+    }
+
+    /// Wie [`court_officials`](Self::court_officials), aber für **wartende**
+    /// Zeilen (Warteliste, offene Paarungen) in der Sicht „Hand vor BTP"
+    /// (`fuer_schreiben`, ADR 0080): Eine Umteilung ist sofort sichtbar,
+    /// auch bevor BTP sie spiegelt. Laufende Felder bleiben bei `effective`
+    /// (R2).
+    pub fn wartende_officials(
+        &self,
+        m: &BtpMatch,
+        snap: &BtpSnapshot,
+    ) -> (Vec<String>, Vec<String>, Option<String>) {
+        self.officials_anzeige(Some(m), snap, true)
+    }
+
+    /// IDs zu [`wartende_officials`](Self::wartende_officials) (0 = keiner).
+    pub fn wartende_official_ids(&self, m: &BtpMatch) -> (i64, i64) {
+        if !self.officials.enabled() {
+            return (0, 0);
+        }
+        let w = self
+            .officials
+            .fuer_schreiben(m.id, m.official1_id, m.official2_id);
+        (
+            w.sr.filter(|v| *v > 0).unwrap_or(0),
+            w.ar.filter(|v| *v > 0).unwrap_or(0),
+        )
+    }
+
+    fn officials_anzeige(
+        &self,
+        m: Option<&BtpMatch>,
+        snap: &BtpSnapshot,
+        hand_vor_btp: bool,
+    ) -> (Vec<String>, Vec<String>, Option<String>) {
         let leer = (Vec::new(), Vec::new(), None);
         if !self.officials.enabled() {
             return leer;
         }
         let Some(m) = m else { return leer };
-        let wirksam = self
-            .officials
-            .effective(m.id, m.official1_id, m.official2_id);
+        let wirksam = if hand_vor_btp {
+            let w = self
+                .officials
+                .fuer_schreiben(m.id, m.official1_id, m.official2_id);
+            // `Some(0)` = ausdrücklich keiner.
+            crate::tablet::officials::MatchOfficials {
+                sr: w.sr.filter(|v| *v > 0),
+                ar: w.ar.filter(|v| *v > 0),
+            }
+        } else {
+            self.officials
+                .effective(m.id, m.official1_id, m.official2_id)
+        };
         let name = |id: Option<i64>| -> Vec<String> {
             id.and_then(|id| snap.official(id))
                 .map(|o| vec![o.display_name()])

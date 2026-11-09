@@ -59,6 +59,11 @@ Feld-Kachel, also erst, wenn das Spiel schon auf dem Feld steht. Zwei Lücken ko
   vorhanden, sonst der BTP-Wert. `Some(0)` („ohne") heißt kein Dienst. Gezählt wird nur,
   wer in der BTP-Officials-Liste steht.
 - **Anzeige** an Zeile und Kachel: weiter `effective` (bestätigter Stand, R2).
+  *Nachtrag v0.9.358 (Spec `sr-ar-beim-aufruf`, ADR 0080):* Wartende Zeilen
+  (Warteliste und offene Paarungen) zeigen jetzt die Sicht „Hand vor BTP"
+  (`TabletState::wartende_officials`); die Kachel laufender Felder bleibt bei
+  `effective`. Damit entfällt die Sonderregel, dass die Warnung erst nach der
+  Bestätigung erscheint.
 
 ## Betroffene Komponenten / Architekturregeln / Daten
 

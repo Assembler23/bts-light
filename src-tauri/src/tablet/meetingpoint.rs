@@ -2649,6 +2649,22 @@ mod tests {
     }
 
     #[test]
+    fn ohne_schiedsrichter_bekommt_auch_spaeter_keinen_vorab_sr() {
+        // ADR 0080: „ohne" bleibt, auch wenn BTP niemanden führt — früher
+        // ließ `confirm` es los und die Vorab-Verteilung füllte es wieder.
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100]);
+        rufe(&t, 11, None);
+        let store = t.officials_store();
+        store.clear_assignment(11, crate::tablet::officials::OfficialRole::Sr);
+        for _ in 0..3 {
+            store.confirm(11, None, None);
+            vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
+            assert_eq!(t.meetingpoint_store().vorab_sr(11), None);
+        }
+    }
+
+    #[test]
     fn ein_sr_im_dienst_kommt_erst_wenn_er_frei_wird() {
         let t = zustand(turnier(false));
         let mut snap = mit_sr(&t, &[100]);
