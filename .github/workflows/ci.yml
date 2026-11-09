@@ -249,6 +249,12 @@ jobs:
       - name: Inline-Kopien der Anzeige-Seiten (JS)
         run: node scripts/test-inline-kopien.mjs
 
+      # Meetingpoint-Eintrag der Kiosk-Feldwahl: An/Aus aus dem HTTP-Status
+      # (Aussetzer halten den Stand), Knopf „Zurück zum Meetingpoint" nur bei
+      # gemerktem Meetingpoint, Marke löschen ohne die Halle zu verlieren.
+      - name: Meetingpoint in der Feldwahl (JS)
+        run: node scripts/test-lobby-meetingpoint.mjs
+
       # Akkustand am Tablet: Quellen-Reihenfolge (Kiosk-Brücke vor Web-API),
       # Schwellen, „kein Wert" darf nie als 0 % erscheinen — ein Tablet, das
       # fälschlich „kritisch" meldet, wird im Turnier unnötig getauscht.

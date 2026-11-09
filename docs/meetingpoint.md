@@ -88,6 +88,20 @@ Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
   **Meetingpoint**; die gewählte Halle merkt sich die Hülle. Ein Tipp auf die
   Seite schaltet dort die Ansicht **nicht** weiter — er checkt ein.
 <!-- pruef: /meetingpoint: .Meetingpoint./ in src-tauri/assets/anzeige.html -->
+- **Kiosk-Tablet am Meetingpoint auslegen** (seit v0.9.363): In der
+  Feldwahl des Tablets (`/felder`, dort startet die Kiosk-App) steht unter
+  den Feldern die Kachel **Meetingpoint** — nur, solange der Meetingpoint
+  eingeschaltet ist. Antippen, PIN eingeben (dieselbe wie am Zahnrad), fertig:
+  Das Tablet zeigt den Meetingpoint und belegt **kein** Feld.
+<!-- pruef: "Anzeige für Spieler · belegt kein Feld" in src-tauri/assets/lobby.html -->
+  Verliert das Tablet kurz das WLAN, lädt die Kiosk-App wieder die Feldwahl.
+  Dann steht oben ein großer Knopf **Zurück zum Meetingpoint** — den darf
+  jeder antippen, ohne PIN. Von selbst springt das Tablet nicht zurück.
+<!-- pruef: "Zurück zum Meetingpoint" in src-tauri/assets/lobby.html -->
+  Zurück zum Zählen: Zahnrad → PIN → **Zur Feldwahl**. Danach verschwindet
+  der Zurück-Knopf auf diesem Tablet. Das gilt nur im Hallennetz und nur am
+  Turnier-PC — eine Feldwahl am Slave-PC hat die Kachel nicht.
+<!-- pruef: "Zur Feldwahl" in src-tauri/assets/anzeige.html -->
 - Ferne Halle mit Slave-PC: Die Adresse am Slave (`:8088/meetingpoint`)
   funktioniert ebenso; der Slave reicht alles an den Turnier-PC weiter.
 

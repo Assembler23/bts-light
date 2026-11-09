@@ -547,6 +547,12 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Meetingpoint am Kiosk-Tablet** — Spec:
+  [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)
+  (freigegeben 09.11.2026). Eintrag „Meetingpoint" in der Feldwahl `/felder` (nur wenn an, hinter der
+  PIN, belegt kein Feld), Knopf „Zurück zum Meetingpoint" nach WLAN-Rückfall, „Zur Feldwahl" im
+  Hüllen-Menü. Nur LAN-Master, keine Auto-Rückkehr.
+
 - **SR und AR schon beim Aufruf in Vorbereitung zuteilen** — Spec:
   [features/sr-ar-beim-aufruf.md](features/sr-ar-beim-aufruf.md) (freigegeben 09.11.2026),
   ADR 0080 (löst 0072 ab) — Rotation teilt beim Aufruf fest zu (auch ohne Meetingpoint),

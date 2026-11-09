@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.363
+
+- **Tablet als Meetingpoint auslegen.** Die Feldwahl der Tablets (`/felder`)
+  zeigt bei eingeschaltetem Meetingpoint eine Kachel **Meetingpoint**. Nach
+  der PIN zeigt das Tablet die Meetingpoint-Seite, ohne ein Feld zu belegen.
+  Fällt es nach einem WLAN-Aussetzer auf die Feldwahl zurück, bringt der
+  Knopf **Zurück zum Meetingpoint** es ohne PIN wieder hin. Im Zahnrad der
+  Anzeige führt **Zur Feldwahl** zurück zum Zählen. Nur im Hallennetz.
+
 ## v0.9.362
 
 - **Einteilungsprinzip im Setup wählbar.** Unter „Schiedsrichter":

@@ -59,7 +59,7 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 
 | Seite | Gerät | Was drauf ist |
 |---|---|---|
-| **Felder-Lobby** `/felder` | Zähl-Tablet | Die Startseite eines Tablets: eine Kachel je Feld mit Paarung und Zustand. Antippen führt zum Feld. |
+| **Felder-Lobby** `/felder` | Zähl-Tablet | Die Startseite eines Tablets: eine Kachel je Feld mit Paarung und Zustand. Antippen führt zum Feld. Ist der Meetingpoint an, steht darunter die Kachel **Meetingpoint** (mit PIN), die das Tablet zur Meetingpoint-Anzeige macht. |
 | **Spielzettel** `/court/<Feld>` | Zähl-Tablet | Der eigentliche Zählbildschirm. Siehe [Das Zähltablett bedienen](tablet-bedienen.md). |
 | **Zähltafel** `/court/<Feld>/tafel` | Tablet am Netz oder TV | Nur zwei große Punktzahlen und der Satzstand — wie eine klassische Tafel, ohne Namen. |
 | **Anzeige-Hülle** `/anzeige` | Tablet, das nur anzeigen soll | Zeigt eine der Anzeigen bildschirmfüllend, mit Zahnrad zum Umschalten. Praktisch, wenn ein Tablet nicht zählt, sondern nur zeigen soll. |

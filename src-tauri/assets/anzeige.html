@@ -127,6 +127,9 @@
              auseinanderlaufen. -->
         <div class="opt" id="ansicht">Ansicht: automatisch</div>
         <div class="opt" id="zaehlen">Zum Zählen wechseln</div>
+        <!-- Rückweg zur Kiosk-Feldwahl, nur im Hallennetz (Spec
+             meetingpoint-am-kiosk-tablet) — in der Cloud gibt es /felder nicht. -->
+        <div class="opt" id="feldwahl">Zur Feldwahl</div>
         <div class="opt" id="neuladen">Neu laden</div>
         <div class="opt" id="vollbild">Vollbild ein/aus</div>
         <div class="opt" id="schliessen">Schließen</div>
@@ -166,6 +169,22 @@
   var SPIEGEL_KEY_ALT = "badhub.anzeige.spiegel";
   var ANORDNUNG_KEY_ALT = "badhub.anzeige.anordnung";
   var ZULETZT_KEY = "badhub.anzeige.zuletzt";
+  // Hallennetz (LAN, auch TLS-Port) liefert die Hülle unter `/` aus, das
+  // Relay unter `/bts-relay/<ns>/` — nur im Hallennetz gibt es /felder.
+  var IM_HALLENNETZ = BASE === "/";
+  // Inline-Kopie aus src/io/lobbyMeetingpoint.mjs (Drift-Test
+  // scripts/test-inline-kopien.mjs) — Änderungen dort und hier gemeinsam.
+  function merkerLesen(roh) {
+    if (typeof roh !== "string" || roh === "") return null;
+    var o;
+    try { o = JSON.parse(roh); } catch (e) { return null; }
+    return o && typeof o === "object" && !Array.isArray(o) ? o : null;
+  }
+  function ohneMeetingpointMarke(roh) {
+    var o = merkerLesen(roh);
+    if (!o || o.layout !== "meetingpoint") return null;
+    return JSON.stringify({ layout: "tafel", court: o.court === undefined ? null : o.court, halle: o.halle === undefined ? null : o.halle });
+  }
   // Nachricht der Tafel im iframe: Tipp auf die Zahlen → nächste Ansicht.
   // Fester Typ-Name, den tafel.html genauso schreibt.
   var NACHRICHT_NAECHSTE_ANSICHT = "bts-anzeige:naechste-ansicht";
@@ -338,6 +357,7 @@
     ansicht: document.getElementById("ansicht"),
     ansichtEtikett: document.getElementById("ansicht-etikett"),
     zaehlen: document.getElementById("zaehlen"),
+    feldwahl: document.getElementById("feldwahl"),
     neuladen: document.getElementById("neuladen"),
     vollbild: document.getElementById("vollbild"),
     schliessen: document.getElementById("schliessen"),
@@ -448,6 +468,7 @@
     els.layoutTitel.hidden = !!nurFeldwahl; els.layoutListe.hidden = !!nurFeldwahl;
     els.ansicht.hidden = !!nurFeldwahl;
     els.zaehlen.hidden = !!nurFeldwahl;
+    els.feldwahl.hidden = true;
     els.vollbild.hidden = !!nurFeldwahl;
     els.schliessen.hidden = !!nurFeldwahl;
     els.feldTitel.hidden = false; els.feldListe.hidden = false;
@@ -463,6 +484,7 @@
     els.feldTitel.hidden = !feld; els.feldListe.hidden = !feld;
     els.ansicht.hidden = ziel.layout !== "tafel";
     els.zaehlen.hidden = !feld;
+    els.feldwahl.hidden = !IM_HALLENNETZ;
     els.vollbild.hidden = false;
     els.schliessen.hidden = false;
     els.stand.textContent = LAYOUT_LABEL[ziel.layout] + (feld && ziel.court ? " · " + feldName(ziel.court) : "");
@@ -586,6 +608,17 @@
       .catch(zumZaehlen);
   });
   els.warnungWeiter.addEventListener("click", zumZaehlen);
+  // Zur Feldwahl: Die Marke „zuletzt Meetingpoint" fällt dabei weg, sonst
+  // stünde der Knopf „Zurück zum Meetingpoint" dauerhaft auf einem Tablet,
+  // das jetzt wieder zählt. Die gemerkte Halle bleibt.
+  els.feldwahl.addEventListener("click", function () {
+    if (!IM_HALLENNETZ) return;
+    try {
+      var neu = ohneMeetingpointMarke(localStorage.getItem(ZULETZT_KEY));
+      if (neu !== null) localStorage.setItem(ZULETZT_KEY, neu);
+    } catch (e) { /* kein Speicher → nichts zu löschen */ }
+    location.href = "/felder";
+  });
   // M4: „Abbrechen" fiel bisher aufs nackte iframe zurück (nur die Warnung
   // schloss). Zurück ins Hauptmenü — ohne erneute PIN, die wurde gerade für
   // „Zum Zählen wechseln" eingegeben.
