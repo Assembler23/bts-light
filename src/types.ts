@@ -729,6 +729,9 @@ export type AnnounceJob = {
       /** Die Aufruf-Automatik des Meetingpoints hat ein Spiel gerufen —
        *  gesprochen wie ein Vorbereitungs-Aufruf. */
       kind: "meetingpoint_call";
+      /** Besetzung fertig vom Turnier-PC (ADR 0080); fehlt bei älteren. */
+      sr?: string[];
+      ar?: string[];
       matchId: number;
     }
   | {
@@ -1156,6 +1159,9 @@ export interface PreparationCandidate {
   manual: boolean;
   /** Meetingpoint-Stand (nur gerufen + Meetingpoint an). */
   meetingpoint?: MeetingpointStand;
+  /** SR/AR eines gerufenen Spiels (ADR 0080); fehlt, wenn niemand. */
+  sr?: string[];
+  ar?: string[];
 }
 
 /** Ein einzucheckender Platz (Rust: relay_proto::MpPlatz). */

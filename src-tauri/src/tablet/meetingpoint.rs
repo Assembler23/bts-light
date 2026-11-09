@@ -1113,7 +1113,7 @@ pub fn hand_aufruf(
         }
         tablet.publish_announce_job(
             hallen_name(snap, location_id),
-            crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id },
+            aufruf_auftrag(tablet, snap, match_id),
             now_ms,
         );
         auftraege += 1;
@@ -1377,6 +1377,40 @@ pub fn checkin(
         MpOrt::Unbekannt => return Err("Unbekannter Ort.".into()),
     }
     Ok(())
+}
+
+/// Namen von SR und AR eines Spiels für den Ansage-Auftrag (Sicht „Hand vor
+/// BTP", ADR 0080). Ohne Schiedsrichter-Betrieb oder bei „ohne" leer.
+pub fn besetzung_namen(
+    tablet: &TabletState,
+    snap: &BtpSnapshot,
+    match_id: i64,
+) -> (Vec<String>, Vec<String>) {
+    let store = tablet.officials_store();
+    let Some(m) = snap.matches.iter().find(|m| m.id == match_id) else {
+        return (Vec::new(), Vec::new());
+    };
+    if !store.enabled() {
+        return (Vec::new(), Vec::new());
+    }
+    let b = store.fuer_schreiben(m.id, m.official1_id, m.official2_id);
+    let name = |id: Option<i64>| -> Vec<String> {
+        id.filter(|v| *v > 0)
+            .and_then(|id| snap.official(id))
+            .map(|o| vec![o.display_name()])
+            .unwrap_or_default()
+    };
+    (name(b.sr), name(b.ar))
+}
+
+/// Der Ansage-Auftrag eines Erst-Aufrufs, samt Besetzung (ADR 0080).
+pub fn aufruf_auftrag(
+    tablet: &TabletState,
+    snap: &BtpSnapshot,
+    match_id: i64,
+) -> crate::tablet::state::AnnounceJobKind {
+    let (sr, ar) = besetzung_namen(tablet, snap, match_id);
+    crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id, sr, ar }
 }
 
 /// Will mindestens ein Feld der Aufruf-Halle diesen Dienst (Feldschalter)?
@@ -2719,6 +2753,40 @@ mod tests {
     }
 
     #[test]
+    fn der_ansage_auftrag_traegt_die_besetzung_des_aufrufs() {
+        // AK1/AK22 (ADR 0080): Namen fertig im Auftrag, SR und AR.
+        let t = zustand(turnier(false));
+        let _ = mit_sr(&t, &[100, 101]);
+        t.officials_store().set_rotation(true, true);
+        hand_aufruf(&t, &[11], None, 1_000, true);
+        let jobs = t.announce_jobs_since("", 0, 10_000, true);
+        let auftrag = jobs
+            .iter()
+            .find_map(|j| match &j.kind {
+                crate::tablet::state::AnnounceJobKind::MeetingpointCall {
+                    match_id: 11,
+                    sr,
+                    ar,
+                } => Some((sr.clone(), ar.clone())),
+                _ => None,
+            })
+            .expect("Auftrag für Spiel 11");
+        assert_eq!(
+            auftrag,
+            (vec!["SR100".to_string()], vec!["SR101".to_string()])
+        );
+    }
+
+    #[test]
+    fn ohne_schiedsrichter_betrieb_traegt_der_auftrag_keine_namen() {
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100]);
+        t.officials_store().assign(11, Rolle::Sr, 100);
+        t.officials_store().set_enabled(false);
+        assert_eq!(besetzung_namen(&t, &snap, 11), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
     fn engpass_und_nachruecken_in_vergabe_reihenfolge() {
         // AK7: Wer frei wird, geht an die erste gerufene Partie mit Lücke in
         // Vergabe-Reihenfolge (hier: Aufruf-Rang 11 vor 10).
@@ -3222,7 +3290,7 @@ mod tests {
         t.announce_jobs_since(halle, 0, 10_000, true)
             .into_iter()
             .filter_map(|j| match j.kind {
-                crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id } => {
+                crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id, .. } => {
                     Some(match_id)
                 }
                 _ => None,

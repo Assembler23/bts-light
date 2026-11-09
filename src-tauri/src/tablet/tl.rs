@@ -604,17 +604,20 @@ pub(crate) fn apply_state_action(
                     "Dieses Spiel ist nicht in Vorbereitung gerufen.",
                 ));
             };
-            let hall = tablet
-                .snapshot_clone()
-                .map(|s| crate::tablet::meetingpoint::hallen_name(&s, call.location_id))
+            let snap = tablet.snapshot_clone();
+            let hall = snap
+                .as_ref()
+                .map(|s| crate::tablet::meetingpoint::hallen_name(s, call.location_id))
                 .unwrap_or_default();
-            tablet.publish_announce_job(
-                hall.clone(),
-                crate::tablet::state::AnnounceJobKind::MeetingpointCall {
+            let auftrag = match snap.as_ref() {
+                Some(s) => crate::tablet::meetingpoint::aufruf_auftrag(tablet, s, *match_id),
+                None => crate::tablet::state::AnnounceJobKind::MeetingpointCall {
                     match_id: *match_id,
+                    sr: Vec::new(),
+                    ar: Vec::new(),
                 },
-                now_ms,
-            );
+            };
+            tablet.publish_announce_job(hall.clone(), auftrag, now_ms);
             Ok(announcement_response(tablet, &hall, now_ms))
         }
         // ── Schiedsrichter (Spec schiedsrichter-management) ─────────
@@ -10143,10 +10146,10 @@ mod tests {
         assert!(wiederhole().ok);
         let jobs = tablet.announce_jobs_since("Halle B", 0, 50_000, true);
         assert_eq!(jobs.len(), 2);
-        assert!(jobs
-            .iter()
-            .all(|j| j.kind
-                == crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id: 7 }));
+        assert!(jobs.iter().all(|j| matches!(
+            j.kind,
+            crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id: 7, .. }
+        )));
         // Der nächste Nachruf ist trotzdem erst der zweite Aufruf.
         apply_state_action(
             &tablet,

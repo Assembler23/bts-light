@@ -2587,7 +2587,7 @@ impl SyncEngine {
             // Angesagt wie ein Hand-Aufruf (`meetingpoint::hand_aufruf`).
             tablet.publish_announce_job(
                 crate::tablet::meetingpoint::hallen_name(&snapshot, location_id),
-                crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id },
+                crate::tablet::meetingpoint::aufruf_auftrag(tablet, &snapshot, match_id),
                 now_ms(),
             );
         }

@@ -31,6 +31,7 @@ import {
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { gongPlanen } from "./gongKlang.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
+import { besetzungSegmente } from "./prepBesetzung.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
 import { disziplinName } from "./disziplinName.mjs";
 import { klasseSsml, klasseText } from "./klasseSprechen.mjs";
@@ -822,22 +823,10 @@ export function buildAnnouncementSegments(
 /** Die SR/AR-Segmente — eine Quelle für Segment- und SSML-Bauer, damit
  *  beide Wege dasselbe sagen (sie werden getrennt zusammengesetzt). */
 function officialSegments(
-  input: AnnounceMatchInput,
+  input: { umpireNames?: string[]; serviceJudgeNames?: string[] },
   lang: AnnounceLang,
 ): string[] {
-  const clean = (v?: string[]) => (v ?? []).map((n) => n.trim()).filter(Boolean);
-  const out: string[] = [];
-  const sr = clean(input.umpireNames);
-  const ar = clean(input.serviceJudgeNames);
-  if (sr.length > 0) {
-    const label = lang === "de" ? "Schiedsrichter" : "Umpire";
-    out.push(`${label}: ${sr.join(" / ")}.`);
-  }
-  if (ar.length > 0) {
-    const label = lang === "de" ? "Aufschlagrichter" : "Service judge";
-    out.push(`${label}: ${ar.join(" / ")}.`);
-  }
-  return out;
+  return besetzungSegmente(input.umpireNames, input.serviceJudgeNames, lang);
 }
 
 // ─── Azure-SSML (hochwertige Ansage am Stück) ────────────────────────────
@@ -1442,6 +1431,11 @@ export interface AnnouncePreparationInput {
    *  „Bitte zum Meetingpoint gehen." oder der eigene Text der
    *  Turnierleitung (`mpAnsageZusatz`). Leer/undefined = kein Zusatz. */
   meetingpointText?: string;
+  /** Schiedsrichter und Aufschlagrichter (ADR 0080) — nur beim
+   *  Erst-Aufruf, nach „Bitte in {Halle}." und vor dem Meetingpoint-Zusatz.
+   *  Leer/fehlend = nicht ansagen. */
+  umpireNames?: string[];
+  serviceJudgeNames?: string[];
 }
 
 /** Der Meetingpoint-Zusatz in der Ansagesprache aus der Vorbereitungs-Sicht
@@ -1557,6 +1551,7 @@ export function buildPreparationSegments(
       lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
     );
   }
+  for (const seg of officialSegments(input, lang)) segments.push(seg);
   if (zusatz) segments.push(zusatz);
   return segments;
 }
@@ -1611,6 +1606,7 @@ export function buildPreparationSsml(
         lang === "de" ? `Bitte in ${hall}.` : `Please report to ${hall}.`,
       );
     }
+    for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
   }
   if (zusatz) parts.push(zusatz);
   return ssmlDokument(lang, voice, parts, rate);
