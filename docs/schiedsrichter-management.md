@@ -313,7 +313,7 @@ rechnet Dienst (laufende Spiele, Sicht `effective`) und Reservierung
 (wartende Spiele, Sicht `fuer_schreiben` = Hand vor BTP). Verbraucher sind
 `track_officials` (`belegt_ausser` je Feld), `auto_assign` (Wartesperre,
 auch bei der Wunschfeld-Reservierung, vor dem strikten Meetingpoint-Gate),
-`uebernimm_vorab_sr` und `vorab_sr_verteilen`. `officials_for_write` baut
+`meetingpoint::gerufene_besetzen` (seit v0.9.359, ADR 0080). `officials_for_write` baut
 auf `fuer_schreiben` auf.
 
 ## Feldweise Schalter (Schritt 6)
@@ -725,23 +725,60 @@ verwaltung ganz aus, kennt der Host nie einen SR, und die Automatik bleibt
 bauartbedingt stumm. Die Zuordnung darf dabei **nach** der Feldvergabe kommen
 (Rotation oder von Hand): Geprüft wird ein Zustand, nicht ein Augenblick.
 
-## Vorläufige Zuteilung beim Meetingpoint-Aufruf (seit v0.9.330, ADR 0072)
+## Zuteilung schon beim Aufruf (seit v0.9.359, ADR 0080)
 
-Mit eingeschaltetem Meetingpoint und SR-Rotation bekommt jede gerufene Partie
-ohne wirksamen SR (und ohne „ohne Schiedsrichter" = `Some(0)`) **vorläufig**
-den nächsten freien SR (`meetingpoint::vorab_sr_verteilen`, je Sync-Lauf nach
-`track_officials`, zustandsbasiert). Belegt sind SR/AR laufender Spiele und
-alle schon vorläufig Zugeteilten; freiwerdende SR gehen an die älteste
-gerufene Partie.
+Wird ein Spiel **in Vorbereitung gerufen** (Turnier-PC, TL-Web oder
+Aufruf-Automatik), teilt die Rotation Schiedsrichter und Aufschlagrichter
+**fest** zu — auch ohne Meetingpoint, sobald die Schiedsrichter-Verwaltung und
+die jeweilige Rotation an sind. Die beiden stehen sofort an der gerufenen
+Zeile und können sich vor dem Feldaufruf treffen. Es wird nach denselben
+Regeln gewählt wie am Feld (Einteilungsprinzip, Rolle, Pausen, Konflikte,
+Reservierungen).
+<!-- pruef: "pub fn gerufene_besetzen" in src-tauri/src/tablet/meetingpoint.rs -->
 
-Der vorläufige SR liegt im Meetingpoint-Store, **nicht** in
-`OfficialsStore.assignments` — sonst schriebe `officials_entries` ihn sofort
-nach BTP, und eine Rücknahme hinterließe `Some(0)`. Übernommen wird er beim
-Aufs-Feld-Kommen (`uebernimm_vorab_sr`): in `auto_assign` vor
-`officials_for_write` (reist im selben Write mit) bzw. zustandsbasiert in
-`track_officials` für Hand-/BTP-Vergaben, vor der Feld-Rotation. Ist der
-Feldschalter `sr` aus, BTP/Hand schon belegt oder der SR inzwischen im
-Dienst, verfällt er. Die Feld-Rotation überspringt vorläufig Zugeteilte.
-Seit v0.9.352 überspringt die Verteilung auch **Reservierte** (ADR 0078);
-ein vorläufiger SR, der inzwischen für ein anderes wartendes Spiel
-eingeteilt ist, verfällt, und die Partie bekommt den nächsten freien.
+- **Fest:** Die Zuteilung ist eine echte Einteilung, geht sofort nach BTP und
+  reserviert die Person (auch, wenn das Spiel an einem späteren Tag angesetzt
+  ist). Eine Einteilung von Hand oder in BTP wird nie ersetzt;
+  **Ohne Schiedsrichter** bleibt stehen.
+- **Engpass:** Ist niemand frei, wird das Spiel mit Lücke gerufen. Wer frei
+  wird, geht zuerst an ein Feld, das gerade ein neues Spiel bekommen hat, dann
+  an die gerufenen Spiele in ihrer Vergabe-Reihenfolge. Das Nachrücken wird
+  nicht angesagt.
+- **Halle:** Zugeteilt wird ein Dienst nur, wenn mindestens ein Feld der
+  Aufruf-Halle ihn will (Feldschalter). Kommt das Spiel auf ein Feld ohne
+  diesen Dienst, wird die Rotations-Zuteilung dort wieder gelöst.
+- **Rotation abschalten:** Bestehende Zuteilungen bleiben stehen, es kommt nur
+  nichts Neues hinzu.
+- **Zurücknehmen:** Wird ein Aufruf zurückgenommen oder gelöscht, werden nur
+  die Zuteilungen der Rotation frei; eine Einteilung von Hand bleibt stehen.
+  Wird ein Spiel vom Feld genommen und der Aufruf lebt wieder auf, bleibt die
+  Zuteilung.
+- **Nur am Turnier-PC:** Ein Aufruf an einem Slave-Rechner teilt nichts zu.
+
+Technik: `meetingpoint::gerufene_besetzen` läuft synchron im Aufruf
+(`hand_aufruf`, vor dem Ansage-Auftrag) und in jedem Sync-Takt nach
+`track_officials` (Feld hat Vorrang), beides unter
+`OfficialsStore::vergabe_sperre`. Gewählt wird über
+`rotate_court(…, Herkunft::Aufruf)` → `waehle_besetzung`. Der
+Herkunfts-Merker `vorab_rotation` in `officials-state.json` (Match → je Dienst
+`{id, frei}`) unterscheidet Rotation von Hand/BTP; er gilt nur, solange die
+Sicht „Hand vor BTP" seine Person trägt (`pflege_vorab_rotation`). Die
+Freigabe (`rotation_freigeben`) hinterlässt kein bleibendes `Some(0)`: ohne
+BTP-Gegenstück lokal weg, mit Gegenstück `Some(0)` + `frei` (gilt für die
+Rotation als offen, `confirm` räumt nach der Bestätigung der 0). Lösen am Feld
+ohne Dienst: `rotation_loesen_am_feld` vor jedem Feld-Write (Auto-Vergabe,
+TL-Web, Turnier-PC) und zustandsbasiert für laufende Spiele. Endet ein Spiel
+ohne Feld, verschwindet eine nie nach BTP gelangte Zuteilung (kein Einsatz ohne
+Dienst).
+
+**Ablösung des vorläufigen SR (ADR 0072):** `vorab_sr_verteilen`,
+`uebernimm_vorab_sr` und der Merker `vorab_sr` am Aufruf entfallen. Noch
+gespeicherte `vorab_sr` übernimmt der erste Lauf einmalig als feste Zuteilung
+(`nimm_vorab_sr`), wenn die Person frei ist und die Rolle passt; sonst
+verfallen sie. Ein SR-Check-in am Meetingpoint verfällt, wenn der SR der
+Partie wechselt.
+
+**BTP:** Dass der Officials-Write an Spielen ohne Feld eine frische
+Feldzuweisung nicht löscht, ist eine Annahme; sie wird vor dem Release mit
+`tests/btp_officials_ohne_feld_probe.rs` gemessen (siehe
+[btp_protocol.md](btp_protocol.md)).

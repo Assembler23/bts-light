@@ -82,7 +82,7 @@ hier eintragen.
 | [0069](0069-stream-einblendung-eigene-seite.md) | Stream-Einblendung als eigene Seite auf dem Feld-Zustand je Feld, Namespace-Offenlegung akzeptiert | accepted |
 | [0070](0070-nation-verein-auf-anzeigen-serverseitig.md) | Nation (Standard an) und Verein (Standard aus) auf Anzeigen serverseitig gefiltert, URL nur abschaltend | accepted |
 | [0071](0071-meetingpoint-zustand-ein-store.md) | Meetingpoint: Aufrufe und Check-ins in einem turniergebundenen Store, Parken auf dem Feld | accepted |
-| [0072](0072-sr-vorab-zuteilung-vorlaeufig.md) | SR-Vorab-Zuteilung als vorläufige Reservierung, BTP-Write erst mit Feld | accepted |
+| [0072](0072-sr-vorab-zuteilung-vorlaeufig.md) | SR-Vorab-Zuteilung als vorläufige Reservierung, BTP-Write erst mit Feld | superseded by 0080 |
 | [0073](0073-strikter-modus-zusaetzliches-gate.md) | Strikter Modus „nur spielbereite" als zusätzliches Gate der Feld-Automatik | accepted |
 | [0074](0074-meetingpoint-seite-unter-namespace.md) | Meetingpoint-Seite unter `/{ns}/` mit Request/Ack, Namespace-Offenlegung akzeptiert | accepted |
 | [0075](0075-bedarf-der-aufruf-automatik.md) | Aufruf-Automatik: gemeinsamer Freiwerde-Helfer, Vorrat = gerufene vergebbare Partien | accepted |

@@ -392,7 +392,8 @@ Wunsch selbst. Bedienung: [meetingpoint.md](meetingpoint.md), Spec
 [features/meetingpoint-spielbereit.md](features/meetingpoint-spielbereit.md).
 
 Für die Aufrufe selbst ändert sich dadurch:
-- Ein Aufruf trägt im Store seine Check-ins, den vorläufigen SR, ob er von
+- Ein Aufruf trägt im Store seine Check-ins (der vorläufige SR entfiel mit
+  v0.9.359, ADR 0080 — SR/AR werden beim Aufruf fest zugeteilt), ob er von
   der Automatik kam und ob Fehlende schon angesagt wurden
   (`tablet/meetingpoint.rs`, ADR 0071).
 - `call_mit(…, auto)` markiert Aufrufe der Automatik; ein Hand-Aufruf
