@@ -642,6 +642,13 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         // Kennungen mit Komma = Stapeldruck einer Runde.
         .route("/tl/api/scoresheet/{ids}", get(tl_scoresheet))
         .route("/tl/api/officials/{official_id}", get(tl_official_detail))
+        // Spielersuche (Spec tl-spielersuche, ADR 0081): POST, damit der
+        // Suchbegriff — ein Personenname — nie in einer URL und damit nie in
+        // einem Access-Log steht. Kleiner Body-Deckel statt axums 2 MB.
+        .route(
+            "/tl/api/search",
+            post(tl_search).layer(axum::extract::DefaultBodyLimit::max(TL_SEARCH_BODY_MAX)),
+        )
         // TL-Push (Spec tl-web-push): Anstoß-Kanal `{"rev":n}` — nie Daten,
         // die holt die Seite über `/tl/api/state`. Auth im ersten Frame
         // (Browser-WebSockets können keine Header setzen, und der Zugang
@@ -2937,6 +2944,66 @@ async fn tl_official_detail(
         crate::tablet::tl::official_detail_json(&ctx.tablet, official_id),
     )
         .into_response()
+}
+
+/// Höchstgröße des Rumpfs einer Suchanfrage (`{"q":…,"candidates":…}`).
+const TL_SEARCH_BODY_MAX: usize = 1024;
+
+/// Rumpf einer Suchanfrage.
+#[derive(serde::Deserialize)]
+struct TlSearchBody {
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    candidates: bool,
+}
+
+/// Spielersuche über den ganzen Turnierbestand (Spec `tl-spielersuche`,
+/// ADR 0081). Gleicher Zugang wie `tl_state`. Der Begriff wird nie
+/// protokolliert; die Antwort ist nie cachebar.
+async fn tl_search(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if tl_device(&ctx, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, "Kein gültiger Zugang.").into_response();
+    }
+    if body.len() > TL_SEARCH_BODY_MAX {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Anfrage zu groß.").into_response();
+    }
+    let Ok(anfrage) = serde_json::from_slice::<TlSearchBody>(&body) else {
+        return (StatusCode::BAD_REQUEST, "Ungültige Anfrage.").into_response();
+    };
+    let cfg = ctx.app_config_arc();
+    let tablet = ctx.tablet.clone();
+    // Abseits des Async-Takts rechnen — die Suche läuft über alle Spiele.
+    let ergebnis = tokio::task::spawn_blocking(move || {
+        crate::tablet::suche::search_json_begrenzt(
+            &tablet,
+            &cfg,
+            &anfrage.q,
+            anfrage.candidates,
+            monitor::now_ms(),
+        )
+    })
+    .await;
+    match ergebnis {
+        Ok(Ok(json)) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            json,
+        )
+            .into_response(),
+        Ok(Err(fehler @ crate::tablet::suche::SuchFehler::Belegt)) => {
+            (StatusCode::TOO_MANY_REQUESTS, fehler.text()).into_response()
+        }
+        Ok(Err(fehler)) => (StatusCode::BAD_REQUEST, fehler.text()).into_response(),
+        Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "Suche fehlgeschlagen.").into_response(),
+    }
 }
 
 /// Rumpf eines Kommandos: die Aktion plus die Vorgangskennung, mit der eine
@@ -6416,6 +6483,70 @@ mod tests {
             format!("Bearer {token}").parse().unwrap(),
         );
         headers
+    }
+
+    fn tl_geraet(token: &str) -> crate::config::TlDevice {
+        crate::config::TlDevice {
+            id: "dev-s".into(),
+            token: token.into(),
+            label: "Suche".into(),
+            created_at_ms: 1,
+            hall: String::new(),
+            profile_id: String::new(),
+        }
+    }
+
+    async fn status_und_text(r: Response) -> (StatusCode, String) {
+        let status = r.status();
+        let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    #[tokio::test]
+    async fn tl_search_prueft_zugang_begriff_und_groesse() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_geraet("tok-s")]);
+        let ctx = Arc::new(ctx);
+        let body = |s: &str| axum::body::Bytes::from(s.to_string());
+
+        let r = tl_search(
+            State(ctx.clone()),
+            axum::http::HeaderMap::new(),
+            body(r#"{"q":"mü"}"#),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+        let r = tl_search(
+            State(ctx.clone()),
+            bearer_headers("falsch"),
+            body(r#"{"q":"mü"}"#),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+
+        let r = tl_search(
+            State(ctx.clone()),
+            bearer_headers("tok-s"),
+            body(r#"{"q":"a"}"#),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        let gross = format!(r#"{{"q":"{}"}}"#, "x".repeat(2000));
+        let r = tl_search(State(ctx.clone()), bearer_headers("tok-s"), body(&gross)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let r = tl_search(
+            State(ctx.clone()),
+            bearer_headers("tok-s"),
+            body(r#"{"q":"müller","candidates":true}"#),
+        )
+        .await;
+        assert_eq!(r.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+        let (status, text) = status_und_text(r).await;
+        assert_eq!(status, StatusCode::OK);
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["has_data"], false, "noch kein Turnier geladen");
     }
 
     #[tokio::test]
