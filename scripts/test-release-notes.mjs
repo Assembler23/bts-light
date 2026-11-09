@@ -199,14 +199,18 @@ pruefe(
   seite.includes('href="pi-image/bts-light-pi.img.xz.sha256"'),
   "Release-Seite verlinkt die Pruefsumme des Pi-Images"
 );
-// Das Test-Image fuer den Pi 3 B+ steht bewusst als ZWEITER Link daneben und
-// muss den Vorbehalt fuer den Zero 2 W tragen — sonst haelt es jemand fuer den
-// Standard und beschreibt damit Karten fuer die vorhandenen Zero 2 W.
+// Seit November 2026 gilt EIN Image fuer beide Pi-Modelle. Das alte
+// Test-Image (Firmware-Tausch fuer den 3 B+) darf nicht wieder auftauchen —
+// es ist das BTS-Image ohne CEC und Schreibschutz.
 pruefe(
-  seite.includes('href="pi-image/bts-light-pi-v2.img.xz"') &&
-    seite.includes('href="pi-image/bts-light-pi-v2.img.xz.sha256"') &&
-    seite.includes("Mit dem Pi Zero 2&nbsp;W noch nicht geprüft"),
-  "Release-Seite verlinkt das Test-Image fuer den Pi 3 B+ samt Pruefsumme und Vorbehalt"
+  !seite.includes("bts-light-pi-v2.img.xz"),
+  "Release-Seite verlinkt das alte Test-Image fuer den Pi 3 B+ nicht mehr"
+);
+// Ohne eigenes Netzteil haengt der Pi am TV-USB — die haeufigste Ursache
+// fuer „startet erst nach Umstecken". Der Hinweis gehoert auf die Seite.
+pruefe(
+  seite.includes("eigenem Netzteil"),
+  "Release-Seite nennt das eigene Netzteil fuer den Pi"
 );
 pruefe(
   seite.includes('href="#pi-image"') && seite.includes('id="pi-image"'),

@@ -1277,12 +1277,13 @@ verliehen):
   (deutlich kraftvoller).
 - **Neues Pi-Image für Zero 2 W und 3 B+** (09.11.2026, löst das gemeinsame
   BTS-Image ab — die BTS-Unterstützung ist ausgebaut, damit entfällt auch der
-  Firmware-Tausch für den Pi 3 B+ Rev. 1.4). Offen: Master-Pi mit aktuellem
-  Raspberry Pi OS (64-bit) und `pi/setup-monitor.sh` einrichten, Image bauen,
-  als `pi-image/bts-light-pi.img.xz` hochladen; danach auf der Release-Seite
-  (`scripts/build-release-page.mjs` + `scripts/test-release-notes.mjs`) den
-  BTS-Text und das Test-Image `bts-light-pi-v2.img.xz` entfernen. Feldtest:
-  CEC-Einschalten je TV-Marke, Nur-Lese-Modus nach hartem Abschalten.
+  Firmware-Tausch für den Pi 3 B+ Rev. 1.4). Emuliert gebaut
+  (`pi/build-image-docker.sh`, Bookworm Lite 2026-10-06) und als
+  `pi-image/bts-light-pi.img.xz` hochgeladen; Release-Seite angepasst.
+  **Offen: Probestart auf echter Hardware** (das Image lief nie auf einem
+  Pi) und Feldtest: CEC-Einschalten je TV-Marke, Nur-Lese-Modus nach hartem
+  Abschalten. Das alte BTS-Image liegt auf dem Server als
+  `bts-light-pi-bts-2026-06.img.xz`.
 - **Info-Monitor: Routen + HTML ausgeliefert** (v0.9.17, 2026-05-25), **UI-
   Zuweisung offen.** Der Tablet-Server liefert jetzt zwei Hallen-Displays
   unter dedizierten URLs: `/info/overview` (Court-Übersicht, Hallen ×

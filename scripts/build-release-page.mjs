@@ -313,12 +313,9 @@ if (notesOut && notesVersion) {
 // und nicht aus --files abgeleitet.
 const PI_IMAGE_URL = "pi-image/bts-light-pi.img.xz";
 const PI_IMAGE_SHA_URL = "pi-image/bts-light-pi.img.xz.sha256";
-// Zweite Fassung mit neuerer Start-Firmware fuer den Pi 3 B+ Rev. 1.4
-// (docs/pi-master-image.md). Steht NEBEN dem bisherigen Image, solange sie auf
-// dem Zero 2 W nicht gegengeprueft ist (3 B+ bestaetigt am 10.10.2026) —
-// danach wird sie zum Standard und dieser zweite Link entfaellt wieder.
-const PI_IMAGE_V2_URL = "pi-image/bts-light-pi-v2.img.xz";
-const PI_IMAGE_V2_SHA_URL = "pi-image/bts-light-pi-v2.img.xz.sha256";
+// Seit November 2026 EIN Image (aktuelles Pi OS) fuer Pi Zero 2 W und
+// Pi 3 B+ — das fruehere Test-Image fuer den 3 B+ (Firmware-Tausch) und die
+// BTS-Unterstuetzung sind entfallen.
 
 // ── Handbuch ──────────────────────────────────────────────
 // Die Anleitung liegt als eigene statische Seite im Unterordner handbuch/
@@ -456,23 +453,26 @@ const html = `<!DOCTYPE html>
       <h2>Court-Monitore: Raspberry-Pi-Image für die SD-Karten</h2>
       <a class="dl" href="${PI_IMAGE_URL}">Image herunterladen</a>
     </div>
-    <p>Ein Image für beide Systeme — der Pi findet beim Start selbst, ob BTS oder
-       BTS Light im Hallen-WLAN läuft. Rund 1&nbsp;GB gepackt, wächst beim ersten Boot
-       auf die volle Kartengröße (jede Karte ab 4&nbsp;GB).</p>
+    <p>Ein Image für <strong>Pi Zero 2&nbsp;W und Pi 3&nbsp;B+</strong>. Der Pi verbindet sich
+       mit dem WLAN <code>btsaccess</code>, findet den Turnier-PC von selbst, schaltet den
+       Fernseher per HDMI-CEC ein und läuft schreibgeschützt — den Strom einfach abziehen
+       schadet der Karte nicht. Jede Karte ab 8&nbsp;GB.</p>
+    <p><strong>Der Download ist passwortgeschützt</strong>, weil das Image die Zugangsdaten
+       des Verleih-WLANs enthält. Benutzername und Passwort gibt es auf Anfrage bei badhub.</p>
     <ol>
       <li>Im <strong>Raspberry Pi Imager</strong> „Eigenes Image verwenden“ wählen und die
           <code>.img.xz</code> angeben — nicht vorher entpacken.</li>
       <li>Ziel-Karte wählen und schreiben.</li>
       <li><strong>Keine</strong> Imager-Anpassungen (Hostname, WLAN, SSH) setzen — WLAN und
           Kiosk-Start sind im Image enthalten und würden überschrieben.</li>
-      <li>Karte in den Pi, einschalten — der Kiosk startet von allein.</li>
+      <li>Pi mit <strong>eigenem Netzteil</strong> versorgen, nicht über die USB-Buchse des
+          Fernsehers. Am Fernseher einmal HDMI-CEC einschalten (Anynet+, SimpLink,
+          Bravia Sync, EasyLink …).</li>
+      <li>Karte in den Pi, einschalten. Beim allerersten Start startet der Pi zweimal
+          von selbst neu (Karte vergrößern, Schreibschutz einschalten) — danach zeigt der
+          Fernseher den Kopplungs-Code.</li>
     </ol>
     <p class="sha">Prüfsumme: <a href="${PI_IMAGE_SHA_URL}">bts-light-pi.img.xz.sha256</a></p>
-    <p><strong>Raspberry Pi 3&nbsp;B+:</strong> Neu gekaufte Geräte starten mit dem Image oben
-       nicht. Dafür gibt es ein <a href="${PI_IMAGE_V2_URL}">Test-Image mit neuerer
-       Start-Firmware</a> — sonst gleich, auf einem Pi 3&nbsp;B+ bestätigt (10.10.2026).
-       <strong>Mit dem Pi Zero 2&nbsp;W noch nicht geprüft</strong> — dort weiter das Image oben verwenden.</p>
-    <p class="sha">Prüfsumme Test-Image: <a href="${PI_IMAGE_V2_SHA_URL}">bts-light-pi-v2.img.xz.sha256</a></p>
   </section>${apkSectionHtml}
 ${versionHtml}
 </main>
