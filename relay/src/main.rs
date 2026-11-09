@@ -5362,6 +5362,12 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 kurz(&mut p.halle);
                 kurz(&mut p.label);
                 p.plaetze.iter_mut().for_each(|pl| kurz(&mut pl.name));
+                if let Some(ar) = p.ar.as_mut() {
+                    kurz(ar);
+                }
+                if let Some(feld) = p.aufgerufen_feld.as_mut() {
+                    kurz(feld);
+                }
             }
             namespace.meetingpoint = view;
         }
@@ -9384,6 +9390,7 @@ mod tests {
             feld_frei_ms: None,
             feld_frei_unsicher: false,
             aufgerufen_feld: None,
+            ar: None,
         };
         handle_host_frame(
             &broker,
@@ -9405,6 +9412,27 @@ mod tests {
             assert_eq!(a.partien.len(), 1);
             assert_eq!(a.partien[0].match_id, 1);
             assert!(map["ns1"].meetingpoint.fuer_halle("").halle_waehlen);
+        }
+        // Der AR-Name wird wie alle Texte gedeckelt (ADR 0080, Security M4).
+        let mut lang = partie(3, "Halle A");
+        lang.ar = Some("x".repeat(MAX_MP_TEXT + 50));
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::Meetingpoint {
+                view: MeetingpointView {
+                    enabled: true,
+                    partien: vec![lang],
+                    ..Default::default()
+                },
+            },
+            &host,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            let ar = map["ns1"].meetingpoint.partien[0].ar.clone().unwrap();
+            assert_eq!(ar.chars().count(), MAX_MP_TEXT);
         }
         let (ack_tx, ack_rx) = oneshot::channel();
         {

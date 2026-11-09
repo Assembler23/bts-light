@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.361
+
+- **Meetingpoint-Seite zeigt den Aufschlagrichter.** Unter dem
+  Schiedsrichter einer gerufenen Partie steht jetzt auch der
+  Aufschlagrichter — nur zur Information, einchecken muss er sich nicht.
+- Cloud: Die Seite und der Relay kommen mit dem Relay-Deploy beim Merge.
+
 ## v0.9.359
 
 - **Schiedsrichter und Aufschlagrichter schon beim Aufruf.** Wird ein Spiel

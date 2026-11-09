@@ -140,6 +140,11 @@ Wer für ein anderes wartendes Spiel fest eingeteilt ist (in BTP vorab oder von
 Hand), wird übersprungen. Wechselt der Schiedsrichter einer Partie, muss er
 sich am Meetingpoint neu melden.
 
+Auf der Meetingpoint-Seite steht unter dem Schiedsrichter seit v0.9.361 auch
+der **Aufschlagrichter**. Er wird nur angezeigt; einchecken muss er sich nicht,
+und für „spielbereit" zählt weiterhin nur der Schiedsrichter.
+<!-- pruef: "Aufschlagrichter" in src-tauri/assets/meetingpoint.html -->
+
 ## Sicht der Turnierleitung
 
 **TL-Web (Spielliste):** An jeder gerufenen Partie steht `🧍 2/4` (eingecheckt
