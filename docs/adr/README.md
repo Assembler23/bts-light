@@ -87,4 +87,5 @@ hier eintragen.
 | [0074](0074-meetingpoint-seite-unter-namespace.md) | Meetingpoint-Seite unter `/{ns}/` mit Request/Ack, Namespace-Offenlegung akzeptiert | accepted |
 | [0075](0075-bedarf-der-aufruf-automatik.md) | Aufruf-Automatik: gemeinsamer Freiwerde-Helfer, Vorrat = gerufene vergebbare Partien | accepted |
 | [0078](0078-besetzung-wartender-spiele-reserviert.md) | Die Besetzung wartender Spiele reserviert ihre Schiedsrichter | accepted |
+| [0079](0079-rotationsmodi-schiedsrichter.md) | Rotationsmodi: zwei Reihenfolgen in A, abgeleitete Vorrolle, eine Wahl-Funktion | accepted |
 | [0080](0080-rotation-teilt-beim-aufruf-zu.md) | Feste Rotations-Zuteilung beim Aufruf mit Herkunfts-Merker (löst 0072 ab) | accepted |
