@@ -68,6 +68,16 @@ LAN+Cloud voraus.
   Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
   Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
   Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
+- **Spiel komplett ansagen** (seit v0.9.370): Im ⋯-Menü jeder belegten
+  Feld-Kachel steht **immer** „📣 Spiel komplett ansagen" — egal, ob das
+  Spiel schon läuft, ob der letzte Aufruf gesprochen ist oder die
+  Aufruf-Knöpfe gerade fehlen. Es erklingt noch einmal die vollständige
+  Ansage wie beim ersten Aufruf (Feld, Disziplin, Paarung und — je nach
+  Ansage-Einstellungen — Schiedsrichter und Bedienung), ohne „Zweiter" oder
+  „Letzter Aufruf". Das ist **kein** Aufruf: Die Aufruf-Zählung bleibt
+  stehen, und du kannst beliebig oft wiederholen. Ein älterer Turnier-PC
+  kennt die Ansage noch nicht, dann fehlt der Eintrag.
+  <!-- pruef: "Spiel komplett ansagen" in src-tauri/assets/tl.html -->
 - **Bitte anfangen:** Steht ein Spiel auf dem Feld, ohne dass ein Punkt
   fällt, löst „Bitte anfangen" im ⋯-Menü der Kachel die Ansage
   **„Feld X. Bitte mit dem Spielen beginnen."** aus. Das ist **kein**

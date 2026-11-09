@@ -513,6 +513,15 @@ statt an einem die ganze Charge zu verlieren (siehe
 [announcements.md](announcements.md)). In einer per Relay angebundenen
 **fernen** Halle erklingt die Ansage weiterhin gar nicht — dort holt der
 Slave bewusst keine Aufträge ab.
+**Komplett-Ansage** (v0.9.370): eine neue `TlAction`-Variante
+`announce_court_full { courtId, matchId }`. Der Relay parst Aktionen
+**typisiert** — ein alter Relay antwortet **422**, also **Relay-Deploy vor
+dem Client-Release** (geschieht automatisch beim main-Merge). Der Host legt
+einen gewöhnlichen `court_call`-Auftrag mit Stufe 4 ab (= vollständige
+Ansage ohne Stufenwort, beide Parteien), ohne den Aufruf-Zähler anzufassen —
+kein neuer Auftragstyp, alle Ansage-Geräte können ihn schon. Der Zustand
+trägt das Fähigkeitsmerkmal `can_announce_court_full`; fehlt es (älterer
+Host, der die Aktion still verwürfe), zeigt die Seite den Eintrag nicht.
 **Nachruf an die Zähltafelbedienung** (Spec `tl-sicht-feinschliff` Punkt 2,
 v0.9.232): eine neue `TlAction`-Variante `announce_scorekeeper { courtId }`.
 Der Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**.
