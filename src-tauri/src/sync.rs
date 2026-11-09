@@ -393,6 +393,7 @@ fn officials_entries(
             planning_id: m.planning_id,
             court_id: m.court_id.unwrap_or(0),
             officials: Some((sr, ar)),
+            highlight: None,
         });
     }
     out
@@ -416,11 +417,17 @@ fn officials_entries(
 /// - Spiele, deren SR/AR in BTP seit `alt` geändert wurden, fallen heraus —
 ///   sonst überschriebe der Write die Hand-Umteilung in BTP (R2); der
 ///   nächste Zyklus entscheidet auf dem neuen Stand.
+///
+/// `CourtID` und Farbe nimmt der Write aus dem **eigenen** Merkstand
+/// (`eigen`, `btp::eigene_writes`), solange ein eigener Write desselben
+/// Spiels noch nicht sicher in BTP sichtbar ist (gemessen bis 840 ms) — sonst
+/// löschte ein SR-Write im selben Lauf das eben geschriebene Aufruf-Gelb.
 pub(crate) fn feld_aus_frischem_stand(
     entries: &[crate::btp::proto::MatchCourt],
     alt: &[crate::btp::model::BtpMatch],
     frisch: &[crate::btp::model::BtpMatch],
     reserviert: &HashSet<i64>,
+    eigen: &dyn Fn(i64) -> Option<crate::btp::eigene_writes::Planung>,
 ) -> Vec<crate::btp::proto::MatchCourt> {
     let besetzung = |m: &crate::btp::model::BtpMatch| {
         (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0))
@@ -435,12 +442,59 @@ pub(crate) fn feld_aus_frischem_stand(
                     return None;
                 }
             }
+            let eigen = eigen(m.id);
             Some(crate::btp::proto::MatchCourt {
                 match_id: m.id,
                 draw_id: m.draw_id,
                 planning_id: m.planning_id,
-                court_id: m.court_id.unwrap_or(0),
+                court_id: eigen.map_or(m.court_id.unwrap_or(0), |p| p.court_id),
                 officials: e.officials,
+                // BTP übernimmt auch die Farbe aus dem Write, ein fehlendes
+                // Element heißt 0 (Messung 09.11.2026) — sonst verlöre ein
+                // gerufenes Spiel sein Gelb mit der Besetzung.
+                highlight: Some(eigen.map_or(m.highlight, |p| p.highlight)),
+            })
+        })
+        .collect()
+}
+
+/// Setzt Feld und Besetzung eines Farb-Writes aus dem **unmittelbar
+/// vorher** gelesenen BTP-Stand (Gegenstück zu [`feld_aus_frischem_stand`]).
+///
+/// BTP übernimmt `CourtID`, `Official1ID` und `Official2ID` aus jedem
+/// Match-Write; ein fehlendes Element löscht sie (Messung 09.11.2026,
+/// `tests/btp_highlight_sr_write_probe.rs`). Ein Farb-Write muss sie also mit
+/// dem Wert tragen, den BTP gerade zeigt — sonst verliert ein laufendes Spiel
+/// sein Feld und ein wartendes seine Besetzung. Die Identität kommt ebenfalls
+/// aus dem frischen Stand; Spiele, die BTP nicht mehr kennt, fallen heraus.
+///
+/// Feld und Besetzung aus dem **eigenen** Merkstand (`eigen`) haben Vorrang,
+/// solange ein eigener Write desselben Spiels noch nicht sicher in BTP
+/// sichtbar ist — sonst nähme der Farb-Write eine eben geschriebene
+/// Feldvergabe oder SR/AR-Besetzung wieder weg. Rein.
+pub(crate) fn planung_aus_frischem_stand(
+    entries: &[crate::btp::proto::HighlightEntry],
+    frisch: &[crate::btp::model::BtpMatch],
+    eigen: &dyn Fn(i64) -> Option<crate::btp::eigene_writes::Planung>,
+) -> Vec<crate::btp::proto::HighlightEntry> {
+    entries
+        .iter()
+        .filter_map(|e| {
+            let m = frisch.iter().find(|m| m.id == e.match_id)?;
+            let (court_id, officials) = match eigen(m.id) {
+                Some(p) => (p.court_id, p.officials),
+                None => (
+                    m.court_id.unwrap_or(0),
+                    (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
+                ),
+            };
+            Some(crate::btp::proto::HighlightEntry {
+                match_id: m.id,
+                draw_id: m.draw_id,
+                planning_id: m.planning_id,
+                highlight: e.highlight,
+                court_id,
+                officials,
             })
         })
         .collect()
@@ -526,6 +580,10 @@ fn highlight_entries(
                 draw_id: m.draw_id,
                 planning_id: m.planning_id,
                 highlight: if want { HIGHLIGHT_PREP_CALL } else { 0 },
+                // Vorläufig aus dem Zyklus-Snapshot; `write_highlight_to_btp`
+                // setzt beide unmittelbar vor dem Senden frisch.
+                court_id: m.court_id.unwrap_or(0),
+                officials: (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
             })
         })
         .collect()
@@ -829,7 +887,7 @@ impl SyncEngine {
             return;
         }
         match crate::tablet::server::write_highlight_to_btp(config, &entries).await {
-            Ok(()) => {
+            Ok(_) => {
                 tracing::info!(
                     "BTP-Highlight aktualisiert: {} Änderung(en) ({} gerufen)",
                     entries.len(),
@@ -2403,6 +2461,7 @@ impl SyncEngine {
                 // Die Besetzung wandert mit ins Zuweisungs-Update
                 // (ADR 0021) — ein Request statt zwei.
                 officials: tablet.officials_for_write(m),
+                highlight: None,
             });
             // Feld gilt jetzt als belegt – Wartezeit zurücksetzen und die
             // Zuweisung als „unterwegs" merken, damit weder Feld noch Match bis
@@ -5655,6 +5714,8 @@ mod tests {
             planning_id: 1000 + id,
             court_id,
             officials: Some((1, 2)),
+            // Farbe kommt wie die CourtID aus dem frischen Stand (hier 0).
+            highlight: Some(0),
         };
         let alt_stand = vec![
             ready_named(10, None, "A", "B"),
@@ -5668,7 +5729,7 @@ mod tests {
             oncourt_named(10, 7, "A", "B"),
             ready_named(11, None, "C", "D"),
         ];
-        let neu = feld_aus_frischem_stand(&alt, &alt_stand, &frisch, &HashSet::new());
+        let neu = feld_aus_frischem_stand(&alt, &alt_stand, &frisch, &HashSet::new(), &|_| None);
         assert_eq!(neu, vec![eintrag(10, 7), eintrag(11, 0)]);
     }
 
@@ -5684,10 +5745,11 @@ mod tests {
             planning_id: 10,
             court_id: 0,
             officials: Some((1, 2)),
+            highlight: None,
         };
         let stand = vec![ready_named(10, None, "A", "B")];
         let reserviert: HashSet<i64> = [10].into_iter().collect();
-        assert!(feld_aus_frischem_stand(&[e], &stand, &stand, &reserviert).is_empty());
+        assert!(feld_aus_frischem_stand(&[e], &stand, &stand, &reserviert, &|_| None).is_empty());
     }
 
     #[test]
@@ -5702,11 +5764,124 @@ mod tests {
             planning_id: 10,
             court_id: 0,
             officials: Some((1, 2)),
+            highlight: None,
         };
         let alt = vec![ready_named(10, None, "A", "B")];
         let mut umgeteilt = ready_named(10, None, "A", "B");
         umgeteilt.official1_id = Some(5);
-        assert!(feld_aus_frischem_stand(&[e], &alt, &[umgeteilt], &HashSet::new()).is_empty());
+        assert!(
+            feld_aus_frischem_stand(&[e], &alt, &[umgeteilt], &HashSet::new(), &|_| None)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn feld_aus_frischem_stand_traegt_die_zeilenfarbe_von_jetzt() {
+        // Messung 09.11.2026 (btp_highlight_sr_write_probe, K1/K2): Ein
+        // Schiedsrichter-Write ohne `Highlight` setzte die Farbe auf 0 — das
+        // Gelb gerufener Spiele verschwand, sobald die Rotation SR/AR
+        // schrieb. Der Write trägt deshalb die Farbe aus dem frischen Stand.
+        use crate::btp::proto::MatchCourt;
+        let e = MatchCourt {
+            match_id: 10,
+            draw_id: 10,
+            planning_id: 10,
+            court_id: 0,
+            officials: Some((1, 2)),
+            highlight: None,
+        };
+        let alt = vec![ready_named(10, None, "A", "B")];
+        let mut gelb = ready_named(10, None, "A", "B");
+        gelb.highlight = crate::btp::proto::HIGHLIGHT_PREP_CALL;
+        let neu = feld_aus_frischem_stand(&[e], &alt, &[gelb], &HashSet::new(), &|_| None);
+        assert_eq!(neu.len(), 1);
+        assert_eq!(
+            neu[0].highlight,
+            Some(crate::btp::proto::HIGHLIGHT_PREP_CALL)
+        );
+    }
+
+    #[test]
+    fn planung_aus_frischem_stand_haelt_feld_und_besetzung_beim_farb_write() {
+        // Messung 09.11.2026 (btp_highlight_sr_write_probe, K3/K4): Ein
+        // Farb-Write ohne `CourtID`/`Official1ID`/`Official2ID` nahm einem
+        // laufenden Spiel Feld und Schiedsrichter und einem wartenden seine
+        // Besetzung. Unmittelbar vor dem Write gelten beide aus dem frisch
+        // gelesenen Stand; Spiele, die BTP nicht mehr kennt, fallen heraus.
+        use crate::btp::proto::HighlightEntry;
+        let eintrag = |id| HighlightEntry {
+            match_id: id,
+            draw_id: 0,
+            planning_id: 0,
+            highlight: 3,
+            court_id: 0,
+            officials: (0, 0),
+        };
+        let mut laufend = oncourt_named(10, 4, "A", "B");
+        laufend.official1_id = Some(7);
+        let mut wartend = ready_named(11, None, "C", "D");
+        wartend.official1_id = Some(1);
+        wartend.official2_id = Some(2);
+        let neu = planung_aus_frischem_stand(
+            &[eintrag(10), eintrag(11), eintrag(12)],
+            &[laufend.clone(), wartend.clone()],
+            &|_| None,
+        );
+        assert_eq!(neu.len(), 2, "12 kennt BTP nicht mehr");
+        assert_eq!(
+            (neu[0].court_id, neu[0].officials, neu[0].highlight),
+            (4, (7, 0), 3)
+        );
+        assert_eq!(
+            (neu[0].draw_id, neu[0].planning_id),
+            (laufend.draw_id, laufend.planning_id)
+        );
+        assert_eq!((neu[1].court_id, neu[1].officials), (0, (1, 2)));
+    }
+
+    #[test]
+    fn eigene_writes_gehen_vor_einem_noch_nicht_uebernommenen_frischen_stand() {
+        // Messung 09.11.2026: BTP zeigt einen eigenen Write erst nach
+        // 350–840 ms. Im selben Sync-Lauf schreibt `reconcile_highlights` das
+        // Aufruf-Gelb und Millisekunden später `reconcile_officials` SR/AR —
+        // das frische Lesen des zweiten Writes sähe noch Farbe 0 und löschte
+        // das Gelb (Review-Fund). Umgekehrt nähme ein Farb-Write eine eben
+        // geschriebene Feldvergabe oder Besetzung weg. Der eigene Merkstand
+        // hat deshalb Vorrang.
+        use crate::btp::eigene_writes::Planung;
+        use crate::btp::proto::{HighlightEntry, MatchCourt, HIGHLIGHT_PREP_CALL};
+        let frisch = vec![ready_named(10, None, "A", "B")]; // BTP: noch alles 0
+        let eigen = |id: i64| {
+            (id == 10).then_some(Planung {
+                court_id: 4,
+                officials: (7, 8),
+                highlight: HIGHLIGHT_PREP_CALL,
+            })
+        };
+
+        let sr = MatchCourt {
+            match_id: 10,
+            draw_id: 0,
+            planning_id: 0,
+            court_id: 0,
+            officials: Some((7, 8)),
+            highlight: None,
+        };
+        let neu = feld_aus_frischem_stand(&[sr], &frisch, &frisch, &HashSet::new(), &eigen);
+        assert_eq!(neu[0].highlight, Some(HIGHLIGHT_PREP_CALL), "Gelb bleibt");
+        assert_eq!(neu[0].court_id, 4, "eben vergebenes Feld bleibt");
+
+        let farbe = HighlightEntry {
+            match_id: 10,
+            draw_id: 0,
+            planning_id: 0,
+            highlight: 0,
+            court_id: 0,
+            officials: (0, 0),
+        };
+        let neu = planung_aus_frischem_stand(&[farbe], &frisch, &eigen);
+        assert_eq!((neu[0].court_id, neu[0].officials), (4, (7, 8)));
+        assert_eq!(neu[0].highlight, 0, "die eigene neue Farbe zählt");
     }
 
     #[test]

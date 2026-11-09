@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.369
+
+- **Gelbe Aufrufmarke bleibt stehen.** Gerufene Spiele verloren ihre gelbe
+  Farbe in BTP, sobald ihnen Schiedsrichter zugeteilt wurden. Eine Messung
+  ergab: BTP setzt bei jedem Spiel-Write Feld, Schiedsrichter,
+  Aufschlagrichter und Farbe neu, und was im Write fehlt, wird gelöscht.
+  Schiedsrichter- und Farb-Writes schicken die übrigen Felder jetzt so mit,
+  wie BTP sie gerade zeigt — oder wie bts-light sie eben selbst geschrieben
+  hat, denn BTP zeigt einen Write erst nach bis zu einer Sekunde.
+- **Farbe setzen nimmt kein Feld mehr weg.** Aus demselben Grund nahm eine
+  Zeilenfarbe aus der Turnierleitungs-Seite einem laufenden Spiel Feld und
+  Schiedsrichter und einem wartenden Spiel seine Besetzung. Behoben.
+
 ## v0.9.368
 
 - **Spielersuche in der Turnierleitungs-Seite.** Oben in der Kopfleiste

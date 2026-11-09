@@ -303,7 +303,29 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   TL-Web/Desktop, Wiederholungspfad in `sync.rs`) trägt `Official*` ohne
   `CourtID` — stand das Spiel doch auf einem Feld, ist der Spielort in BTP
   danach weg. Folge gering (Spiel ist beendet); Abhilfe: CourtID aus dem
-  Snapshot bzw. frisch gelesen mitschicken.
+  Snapshot bzw. frisch gelesen mitschicken. Nachtrag (Messung 09.11.2026,
+  v0.9.369): Dasselbe gilt für `Highlight` — jeder Match-Write ohne das
+  Element setzt die Farbe auf 0.
+- **Handfarbe überlebt den Ruf aufs Feld nicht.** Feldvergabe und Freigabe
+  (`court_assign_request` mit `Courts`-Block) tragen kein `Highlight`, BTP
+  setzt die Farbe dabei auf 0 (Messung 09.11.2026). Für die gelbe
+  Aufrufmarke ist das gewollt; eine von der Turnierleitung gesetzte andere
+  Farbe geht aber mit verloren. Abhilfe: Handfarben (≠ Gelb) frisch gelesen
+  mitschicken. **Gleiche Ursache, schwerer:** Feldvergabe und Freigabe ohne
+  lokal bekannte Besetzung (`officials_for_write` → `None`, also
+  `assign_court`, `free_court`, `plan_court_action`, `auto_assign`) schicken
+  kein `Official1ID/2ID`. `officials_for_write` liefert `None` auch, sobald
+  BTP eine eigene Besetzung bestätigt hat (`confirm` lässt die lokale Absicht
+  los) — betroffen ist also **jede** bestätigte SR/AR-Besetzung, auch die
+  beim Aufruf geschriebene (ADR 0080), nicht nur eine von Hand in BTP
+  gesetzte. Sie ist weg, sobald das Spiel aufs Feld geht oder freigegeben
+  wird; ob die Rotation sie danach wieder einträgt (im Log vom 09.11.2026
+  folgte nach dem Ruf aufs Feld ein erneuter SR-Write), ist nicht geprüft.
+  Für den Zuweisungs-Write mit `Courts`-Block ist das nicht eigens gemessen,
+  folgt aber aus der Messung. Der Kommentar in `commands.rs::free_court`
+  („Besetzung nicht anfassen") stimmt dann nicht. Abhilfe wie beim
+  Schiedsrichter-Write: frisch lesen (plus Merkstand
+  `btp::eigene_writes`) und die Besetzung mitschicken; vorher kurz messen.
 - **Tablet-Kiosk-App: Kiosk-Verhalten ohne Gerätebesitzer (Fire OS 8).**
   Befund 08.09.2026: Auf Fire OS 8 ist der Gerätebesitzer nie erreichbar —
   Amazons Kindersicherung ist auch direkt nach einem Werksreset Profile

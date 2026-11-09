@@ -292,6 +292,14 @@ pub struct MatchCourt {
     /// Schiedsrichter schreiben dann kein zusätzliches Feld, und der
     /// Request bleibt exakt wie bisher.
     pub officials: Option<(i64, i64)>,
+    /// Zeilenfarbe (`Match.Highlight`), die mitgeschrieben werden soll.
+    /// BTP setzt sie bei jedem Match-Write auf den Wert im Knoten, ein
+    /// fehlendes Element heißt 0 (Messung 09.11.2026): Ein
+    /// Schiedsrichter-Write ohne sie löschte das Gelb gerufener Spiele.
+    /// `Some` = reassertieren (eigenständiger Schiedsrichter-Write, Wert aus
+    /// dem frischen Stand), `None` = weglassen — beim Ruf aufs Feld und
+    /// beim Freigeben ist das Löschen der Aufrufmarke gewollt.
+    pub highlight: Option<u8>,
 }
 
 /// Ein Match, dessen Zeilenfarbe `Match.Highlight` in BTP gesetzt werden
@@ -305,18 +313,51 @@ pub struct HighlightEntry {
     pub planning_id: i64,
     /// `0` = keine Farbe, `1`–`6` = die Menüfarben (`relay_proto::MAX_HIGHLIGHT`).
     pub highlight: u8,
+    /// Feld und Besetzung, die der Write **unverändert mitträgt**. BTP setzt
+    /// bei jedem Match-Write `CourtID`, `Official1ID` und `Official2ID` auf
+    /// den Wert im Knoten — ein fehlendes Element heißt 0 (Messung
+    /// 09.11.2026, `tests/btp_highlight_sr_write_probe.rs`): Ein Farb-Write
+    /// ohne sie nahm einem laufenden Spiel Feld und Schiedsrichter.
+    /// `server.rs::write_highlight_to_btp` setzt beide unmittelbar vor dem
+    /// Senden aus einem frisch gelesenen Stand.
+    pub court_id: i64,
+    pub officials: (i64, i64),
+}
+
+impl HighlightEntry {
+    /// Was dieser Write in BTP setzt (alle vier Planungsfelder).
+    pub fn planung(&self) -> crate::btp::eigene_writes::Planung {
+        crate::btp::eigene_writes::Planung {
+            court_id: self.court_id,
+            officials: self.officials,
+            highlight: self.highlight,
+        }
+    }
+}
+
+impl MatchCourt {
+    /// Was dieser Write in BTP setzt: Weggelassene Elemente heißen für BTP 0
+    /// (Messung 09.11.2026) — auch `officials: None` löscht die Besetzung.
+    pub fn planung(&self) -> crate::btp::eigene_writes::Planung {
+        crate::btp::eigene_writes::Planung {
+            court_id: self.court_id,
+            officials: self.officials.unwrap_or((0, 0)),
+            highlight: self.highlight.unwrap_or(0),
+        }
+    }
 }
 
 /// Wert der Aufrufmarke (P1): Gelb.
 pub const HIGHLIGHT_PREP_CALL: u8 = 1;
 
-/// Fertige Wire-Bytes für einen `SENDUPDATE`, der **ausschließlich**
-/// `Match.Highlight` setzt. Der Match-Knoten trägt NUR die Identität
-/// (`ID`/`DrawID`/`PlanningID`) + `Highlight` — bewusst **kein** `Status`
-/// (Check-in-Bitfeld, v0.9.103-Falle) und keine Ergebnisfelder, damit die
-/// Farbe nichts anderes am Match verändert (gleiche Vorsicht wie
-/// `court_assign_request`). BTP nimmt jeden Wert 0–6 an und zeichnet ihn
-/// sofort (gemessen 05.09.2026, `tests/btp_highlight_probe.rs`).
+/// Fertige Wire-Bytes für einen `SENDUPDATE`, der `Match.Highlight` setzt.
+/// Der Match-Knoten trägt Identität (`ID`/`DrawID`/`PlanningID`) +
+/// `Highlight` und **reasserted** Feld und Besetzung (`CourtID`,
+/// `Official1ID`, `Official2ID`) — BTP übernimmt sie aus jedem Match-Write,
+/// ein fehlendes Element löscht sie (Messung 09.11.2026). Bewusst **kein**
+/// `Status` (Check-in-Bitfeld, v0.9.103-Falle) und keine Ergebnisfelder.
+/// BTP nimmt jeden Farbwert 0–6 an und zeichnet ihn sofort (gemessen
+/// 05.09.2026, `tests/btp_highlight_probe.rs`).
 pub fn highlight_request(
     entries: &[HighlightEntry],
     session_key: &str,
@@ -332,6 +373,9 @@ pub fn highlight_request(
                     Node::integer("DrawID", h.draw_id),
                     Node::integer("PlanningID", h.planning_id),
                     Node::integer("Highlight", i64::from(h.highlight)),
+                    Node::integer("CourtID", h.court_id),
+                    Node::integer("Official1ID", h.officials.0),
+                    Node::integer("Official2ID", h.officials.1),
                 ],
             )
         })
@@ -398,6 +442,9 @@ pub fn court_assign_request(
                 // Officials nur, wenn dieses Turnier sie führt (ADR 0021) —
                 // sonst bleibt der Request unverändert zum Bestand.
                 push_officials_nodes(&mut children, mc.officials);
+                if let Some(h) = mc.highlight {
+                    children.push(Node::integer("Highlight", i64::from(h)));
+                }
                 Node::group("Match", children)
             })
             .collect();
@@ -868,6 +915,7 @@ mod tests {
                 planning_id: 1002,
                 court_id: 0,
                 officials: None,
+                highlight: None,
             }],
             "S",
             None,
@@ -902,6 +950,7 @@ mod tests {
                 planning_id: 1002,
                 court_id: 7,
                 officials: Some((5, 0)),
+                highlight: None,
             }],
             "S",
             None,
@@ -922,6 +971,7 @@ mod tests {
                 planning_id: 1002,
                 court_id: 7,
                 officials: None,
+                highlight: None,
             }],
             "S",
             None,
@@ -940,6 +990,8 @@ mod tests {
                 draw_id: 7,
                 planning_id: 1001,
                 highlight: HIGHLIGHT_PREP_CALL,
+                court_id: 0,
+                officials: (0, 0),
             }],
             "S-9",
             None,
@@ -952,13 +1004,57 @@ mod tests {
         assert_eq!(child_int(&m, "DrawID"), Some(7));
         assert_eq!(child_int(&m, "PlanningID"), Some(1001));
         assert_eq!(child_int(&m, "Highlight"), Some(1));
-        // KEIN Status (Check-in-Falle) und KEINE Ergebnis-/Feldfelder — der
+        // KEIN Status (Check-in-Falle) und KEINE Ergebnisfelder — der
         // Aufruf-Marker darf sonst nichts am Match verändern.
         assert!(xml::find(&m, "Status").is_none(), "kein Status-Bitfeld");
         assert!(xml::find(&m, "ScoreStatus").is_none());
         assert!(xml::find(&m, "Sets").is_none());
         assert!(xml::find(&m, "Winner").is_none());
-        assert!(xml::find(&m, "CourtID").is_none());
+    }
+
+    /// Messung 09.11.2026 (`btp_highlight_sr_write_probe`): BTP übernimmt
+    /// `CourtID` und `Official1ID/2ID` aus JEDEM Match-Write, ein fehlendes
+    /// Element löscht sie. Ein Farb-Write muss beide deshalb mittragen —
+    /// ohne sie verlor ein laufendes Spiel Feld und Schiedsrichter.
+    #[test]
+    fn highlight_request_reasserts_court_and_officials() {
+        let req = highlight_request(
+            &[HighlightEntry {
+                match_id: 70,
+                draw_id: 2,
+                planning_id: 3,
+                highlight: 4,
+                court_id: 4,
+                officials: (7, 9),
+            }],
+            "S",
+            None,
+        );
+        let m = match_node(&req);
+        assert_eq!(child_int(&m, "Highlight"), Some(4));
+        assert_eq!(child_int(&m, "CourtID"), Some(4));
+        assert_eq!(child_int(&m, "Official1ID"), Some(7));
+        assert_eq!(child_int(&m, "Official2ID"), Some(9));
+    }
+
+    /// Gegenrichtung derselben Messung: Ein Schiedsrichter-Write ohne
+    /// `Highlight` setzte die Farbe auf 0 — das Gelb gerufener Spiele
+    /// verschwand mit der Besetzung. `Some` schreibt die Farbe mit, `None`
+    /// lässt das Element weg (Ruf aufs Feld: Löschen gewollt).
+    #[test]
+    fn court_assign_request_reasserts_highlight_only_when_set() {
+        let eintrag = |highlight| MatchCourt {
+            match_id: 42,
+            draw_id: 3,
+            planning_id: 1002,
+            court_id: 0,
+            officials: Some((5, 0)),
+            highlight,
+        };
+        let mit = court_assign_request(&[], &[eintrag(Some(1))], "S", None);
+        assert_eq!(child_int(&match_node(&mit), "Highlight"), Some(1));
+        let ohne = court_assign_request(&[], &[eintrag(None)], "S", None);
+        assert!(xml::find(&match_node(&ohne), "Highlight").is_none());
     }
 
     #[test]
@@ -970,6 +1066,8 @@ mod tests {
                 draw_id: 2,
                 planning_id: 3,
                 highlight: 0,
+                court_id: 0,
+                officials: (0, 0),
             }],
             "S",
             None,
@@ -988,6 +1086,8 @@ mod tests {
                 draw_id: 2,
                 planning_id: 3,
                 highlight: 6,
+                court_id: 0,
+                officials: (0, 0),
             }],
             "S",
             None,
