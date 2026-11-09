@@ -165,6 +165,7 @@ pub(crate) fn plan_court_action(
                     // Zustand). Die Besetzung trägt der Aufrufer nach, der
                     // den Roster kennt (ADR 0021).
                     officials: None,
+                    highlight: None,
                 }]
             })
             .unwrap_or_default()
@@ -2710,6 +2711,10 @@ fn highlight_entry_fuer(
         draw_id: m.draw_id,
         planning_id: m.planning_id,
         highlight,
+        // Vorläufig aus dem Snapshot; `write_highlight_to_btp` setzt beide
+        // unmittelbar vor dem Senden frisch (Messung 09.11.2026).
+        court_id: m.court_id.unwrap_or(0),
+        officials: (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
     })
 }
 
@@ -2740,7 +2745,13 @@ async fn execute_highlight_action(
         Err(response) => return Some(response),
     };
     match crate::tablet::server::write_highlight_to_btp(config, &[entry]).await {
-        Ok(()) => {
+        // BTP kennt das Spiel nicht mehr (frisch gelesen) — nichts gesendet,
+        // also auch kein Echo und keine Erfolgsmeldung.
+        Ok(0) => Some(TlResponse::err(
+            C::NotAllowed,
+            format!("Spiel {match_id} gibt es in BTP nicht mehr."),
+        )),
+        Ok(_) => {
             // Erst nach dem Erfolg merken: Ein Echo für einen Write, den BTP
             // nie gesehen hat, zeigte der Turnierleitung eine Farbe, die es
             // nicht gibt.

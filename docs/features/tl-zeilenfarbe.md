@@ -38,7 +38,11 @@ nicht und kann sie nicht setzen; er muss dafür an den BTP-PC.
 - **BTP nimmt den Wert per `SENDUPDATE` an** (Match-Knoten nur mit
   `ID`/`DrawID`/`PlanningID`/`Highlight`, wie der bestehende Aufruf-Marker
   P1): Setzen, Löschen und Zurücksetzen halten beim Nachlesen; keine
-  Nebenwirkung am Check-in-`Status`. Der Planer **zeichnet die Farbe sofort**
+  Nebenwirkung am Check-in-`Status`. **Nachtrag 09.11.2026:** Diese
+  Schreibform löschte `CourtID` und `Official1ID/2ID` — BTP übernimmt sie aus
+  jedem Match-Write, ein fehlendes Element heißt 0. Seit v0.9.368 trägt der
+  Farb-Write beide aus einem frisch gelesenen Stand mit (Details
+  `docs/btp_protocol.md`, Abschnitt `Match.Highlight`). Der Planer **zeichnet die Farbe sofort**
   und behält sie auch, wenn danach im BTP an anderen Zeilen gearbeitet wird
   (Pink-Probe an Gruppe 1 Spiel 10, nach Bedienschritten im BTP nachgelesen).
 - **Ungeklärt bleibt ein Einzelfall:** Ein Spiel, das bts-light um 09:01 Uhr
