@@ -328,6 +328,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Spielersuche im TL-Web** — Spec:
+  [features/tl-spielersuche.md](features/tl-spielersuche.md) (freigegeben
+  09.11.2026), ADR 0081 — **v0.9.369 (Turnier-PC/Relay) + v0.9.370 (Seite),
+  Feldtest offen**: Suchfeld in der Kopfleiste findet Spieler und SR/AR am
+  Feld, in der ganzen Warteliste und in allen beendeten Spielen. Zu prüfen:
+  Bildschirmtastatur auf Fire-Tablets, Sprung bei zugeklapptem Panel.
+
 - **Ansage in Teilen vertonen** — Spec:
   [features/ansage-in-teilen.md](features/ansage-in-teilen.md) (freigegeben
   09.11.2026) — **umgesetzt v0.9.366, Hörtest offen**: klingt die
@@ -559,12 +566,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   5. **Sichtprüfung der Geräteverwaltung** im laufenden Fenster.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
-
-- **Spielersuche im TL-Web** — Spec:
-  [features/tl-spielersuche.md](features/tl-spielersuche.md) (freigegeben 09.11.2026), ADR 0081 —
-  Suchfeld in der Kopfleiste findet Spieler und SR/AR am Feld, in der ganzen Warteliste und in
-  allen beendeten Spielen; Suche am Turnier-PC (LAN + Relay), Trefferliste mit Sprung zur Zeile.
-  Zwei PRs (Turnier-PC/Relay, dann Seite).
 
 - **Meetingpoint am Kiosk-Tablet** — Spec:
   [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)

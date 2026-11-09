@@ -166,7 +166,7 @@ Trefferliste schließt, dann:
 | Lage | Anzeige |
 |---|---|
 | < 2 Zeichen | keine Anfrage, keine Liste |
-| 400 (zu lang / zu viele Wörter) | „Bitte kürzer suchen" |
+| 400 (zu kurz nach der Faltung, zu lang, zu viele Wörter) | „Bitte anders suchen – 2 bis 64 Zeichen, höchstens 6 Wörter." |
 | 401 | „Dieses Gerät ist nicht mehr freigegeben" |
 | 429 | „Zu viele Anfragen – kurz warten" |
 | 503 / Zeitüberschreitung | „Turnier-PC nicht erreichbar" |

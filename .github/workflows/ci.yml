@@ -203,6 +203,12 @@ jobs:
       - name: Zuletzt gespielt (JS)
         run: node scripts/test-zuletzt-gespielt.mjs
 
+      # Spielersuche: Sprungziel eines Treffers (Filter nie still umstellen,
+      # nichts versprechen, was hinter dem Deckel liegt) und Gleichlauf der
+      # Inline-Kopie in tl.html.
+      - name: Spielersuche (JS)
+        run: node scripts/test-spielersuche.mjs
+
       # Ziel beim Umsortieren der gerufenen Spiele (Aufruf-Reihenfolge) und
       # Gleichlauf der Inline-Kopie in tl.html. Ein falsches Ziel brächte
       # die falsche Partie zuerst aufs Feld.
