@@ -125,21 +125,20 @@ Turnier-PCs.
 ## Schiedsrichter schon beim Aufruf
 
 Mit Schiedsrichtern und eingeschalteter Schiedsrichter-Rotation bekommt eine
-gerufene Partie gleich beim Aufruf **vorläufig** den nächsten freien
-Schiedsrichter (nicht im Einsatz, nicht pausiert, nicht für ein anderes
-wartendes Spiel eingeteilt). Wird ein Schiedsrichter
-frei, geht er an die älteste gerufene Partie ohne Schiedsrichter. In BTP
-steht er erst, wenn die Partie aufs Feld kommt; vorher kann die Turnierleitung
-in BTP oder von Hand jemand anderen einteilen — das hat Vorrang. Fehlen
-Schiedsrichter, setzt die Turnierleitung einzelne Partien im ⋮-Menü auf
-**Ohne Schiedsrichter**.
+gerufene Partie gleich beim Aufruf **fest** ihren Schiedsrichter und, wenn die
+Aufschlagrichter-Rotation an ist, ihren Aufschlagrichter (seit v0.9.359; das
+gilt auch ohne Meetingpoint). Die Einteilung steht sofort in BTP. Wird jemand
+frei, geht er an die vorderste gerufene Partie, der noch jemand fehlt. Eine
+Einteilung von Hand oder in BTP hat Vorrang. Fehlen Schiedsrichter, setzt die
+Turnierleitung einzelne Partien im ⋮-Menü auf **Ohne Schiedsrichter** — das
+bleibt dann so. Nimmt die Turnierleitung den Aufruf zurück, wird die
+Einteilung der Rotation wieder frei.
 
-Der vorläufige Schiedsrichter wird nach denselben Regeln gewählt wie am Feld
-(siehe [Schiedsrichter verwalten](schiedsrichter-management.md)).
+Gewählt wird nach denselben Regeln wie am Feld (siehe
+[Schiedsrichter verwalten](schiedsrichter-management.md#zuteilung-schon-beim-aufruf-seit-v09359-adr-0080)).
 Wer für ein anderes wartendes Spiel fest eingeteilt ist (in BTP vorab oder von
-Hand), wird übersprungen. Wird ein vorläufig zugeteilter Schiedsrichter nachträglich für
-ein anderes Spiel eingeteilt, verliert die gerufene Partie ihn und bekommt den
-nächsten freien.
+Hand), wird übersprungen. Wechselt der Schiedsrichter einer Partie, muss er
+sich am Meetingpoint neu melden.
 
 ## Sicht der Turnierleitung
 

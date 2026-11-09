@@ -4282,6 +4282,18 @@ impl TabletState {
     /// Entfernt den Aufruf eines Matches (zurückgenommen).
     pub fn remove_preparation_call(&self, match_id: i64) {
         self.preparation_calls.retract(match_id);
+        // Rotations-Zuteilungen des Aufrufs sofort freigeben (ADR 0080);
+        // Hand- und BTP-Einteilungen bleiben. Das Nachrücken der frei
+        // gewordenen Person geschieht im nächsten Sync-Takt.
+        if let Some(m) = self.snapshot_match(match_id) {
+            if m.status == crate::btp::model::MatchStatus::Scheduled {
+                use crate::tablet::officials::OfficialRole;
+                self.officials
+                    .rotation_freigeben(match_id, OfficialRole::Sr, m.official1_id);
+                self.officials
+                    .rotation_freigeben(match_id, OfficialRole::Ar, m.official2_id);
+            }
+        }
     }
 
     /// Der Meetingpoint-Speicher (Tests, Sync-Frühbindung).
@@ -4326,7 +4338,9 @@ impl TabletState {
         // Wer anderswo auf dem Feld steht, ist hier ausgecheckt; wen BTP
         // ersetzt hat, ebenso (Spec `meetingpoint-spielbereit`, Nr. 4).
         let feld = crate::tablet::meetingpoint::auf_dem_feld(self, snapshot);
-        self.preparation_calls.bereinige_checkins(snapshot, &feld);
+        let sr = crate::tablet::meetingpoint::sr_fingerabdruecke(self, snapshot);
+        self.preparation_calls
+            .bereinige_checkins(snapshot, &feld, &sr);
         for (rang, call) in self.preparation_calls.active_calls().iter().enumerate() {
             // Hallenname aus der LocationID auflösen (None → kein Halleneintrag).
             let hall = call.location_id.and_then(|lid| {

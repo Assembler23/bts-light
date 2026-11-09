@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.359
+
+- **Schiedsrichter und Aufschlagrichter schon beim Aufruf.** Wird ein Spiel
+  in Vorbereitung gerufen, teilt die Rotation SR und AR fest zu — auch ohne
+  Meetingpoint. Die beiden stehen sofort an der gerufenen Zeile und in BTP und
+  können sich vor dem Feldaufruf treffen. Wer frei wird, rückt an die
+  vorderste gerufene Partie mit Lücke nach. Rücknahme des Aufrufs gibt die
+  Zuteilung wieder frei; Einteilungen von Hand bleiben.
+- Der bisherige „vorläufige" Meetingpoint-Schiedsrichter entfällt; ein noch
+  gespeicherter wird einmalig übernommen.
+
 ## v0.9.358
 
 - **„Ohne Schiedsrichter" bleibt stehen.** Setzt die Turnierleitung ein

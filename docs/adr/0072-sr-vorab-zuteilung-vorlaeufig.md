@@ -1,6 +1,6 @@
 # 0072 — SR-Vorab-Zuteilung als vorläufige Reservierung
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0080](0080-rotation-teilt-beim-aufruf-zu.md)
 - **Datum:** 2026-11-02
 - Ergänzt [ADR 0021](0021-officials-ruecksync-eigenstaendiger-write.md) / ADR 0022.
 

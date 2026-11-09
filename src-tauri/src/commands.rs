@@ -3579,10 +3579,15 @@ pub async fn assign_court(
             court_id,
             // Beim Ruf aufs Feld wandert die Besetzung mit (ADR 0021) —
             // ein Request statt zwei.
-            officials: state
-                .tablet
-                .snapshot_match(match_id)
-                .and_then(|m| state.tablet.officials_for_write(&m)),
+            officials: state.tablet.snapshot_match(match_id).and_then(|m| {
+                // Rotations-Zuteilung einer Rolle, die das Feld nicht will,
+                // vorher lösen (ADR 0080).
+                state
+                    .tablet
+                    .officials_store()
+                    .rotation_loesen_am_feld(&m, court_id);
+                state.tablet.officials_for_write(&m)
+            }),
         }],
         None => Vec::new(),
     };

@@ -206,7 +206,7 @@ gewinnt BTP.
 - [ ] AK11: Nachrücken erzeugt keinen Ansage-Auftrag.
 
 **Freigabe**
-- [ ] AK12: Rücknahme oder Parken gibt Rotations-Einteilungen sofort frei; Hand- und
+- [ ] AK12: Rücknahme gibt Rotations-Einteilungen sofort frei (ein geparkter Aufruf nicht, R-D.1); Hand- und
   BTP-Einteilungen bleiben.
 - [ ] AK13: „Vom Feld genommen" behält die Besetzung.
 - [ ] AK14: Kommt das Spiel auf ein Feld ohne AR-Dienst, wird der Rotations-AR gelöst; ein Hand-AR

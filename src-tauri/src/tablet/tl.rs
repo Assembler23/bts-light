@@ -1862,7 +1862,14 @@ pub(crate) async fn execute(
                     .matches
                     .iter()
                     .find(|m| m.id == mc.match_id)
-                    .and_then(|m| ctx.tablet.officials_for_write(m));
+                    .and_then(|m| {
+                        // Rotations-Zuteilung einer Rolle, die das Feld
+                        // nicht will, vorher lösen (ADR 0080).
+                        ctx.tablet
+                            .officials_store()
+                            .rotation_loesen_am_feld(m, mc.court_id);
+                        ctx.tablet.officials_for_write(m)
+                    });
             }
             plan
         }

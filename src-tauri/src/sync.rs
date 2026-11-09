@@ -1820,32 +1820,11 @@ impl SyncEngine {
             snapshot,
             crate::tablet::tl::heutiges_datum(now_ms()),
         );
-        // In diesem Lauf zusätzlich Gebundene: übernommene und vorläufige
-        // Meetingpoint-SR, frisch Zugewiesene.
+        // In diesem Lauf zusätzlich Gebundene: frisch Zugewiesene.
         let mut zusaetzlich: HashSet<i64> = HashSet::new();
-
-        // Vorläufige Meetingpoint-SR (ADR 0072) übernehmen — zustandsbasiert
-        // für JEDES laufende Spiel, nicht nur neu belegte Felder: Sonst
-        // verschluckte die Ausgangslage nach einem Sync-Neustart die
-        // Übernahme. Vor der Rotation, damit diese nicht jemand anderen holt.
-        // Nach CourtID sortiert: Bei zwei Feldern entscheidet sonst die
-        // HashMap-Reihenfolge.
-        let mut belegte: Vec<(i64, i64)> = oncourt_now.iter().map(|(&c, &m)| (c, m)).collect();
-        belegte.sort_by_key(|&(c, _)| c);
-        for &(court_id, match_id) in &belegte {
-            if let Some(m) = snapshot.matches.iter().find(|m| m.id == match_id) {
-                let mut belegt = belegung.belegt_ausser(match_id);
-                belegt.extend(&zusaetzlich);
-                if let Some(id) =
-                    crate::tablet::meetingpoint::uebernimm_vorab_sr(tablet, m, court_id, &belegt)
-                {
-                    zusaetzlich.insert(id);
-                }
-            }
-        }
-        // Vorläufig für gerufene Partien reservierte SR stehen der Feld-
-        // Rotation nicht zur Verfügung.
-        zusaetzlich.extend(tablet.meetingpoint_store().alle_vorab_sr().into_values());
+        // Vergabe-Sperre (ADR 0080): Ein Hand-Aufruf außerhalb des Takts darf
+        // nicht dieselbe Person vergeben wie diese Feld-Rotation.
+        let _sperre = store.vergabe_sperre();
 
         // Neu belegte Felder bestücken — nach CourtID sortiert, damit die
         // Verteilung bei mehreren gleichzeitig deterministisch ist.
@@ -1879,6 +1858,7 @@ impl SyncEngine {
                 ar: rotation_ar && schalter.ar,
                 modus,
                 vorrolle: &vorrolle,
+                herkunft: crate::tablet::officials::Herkunft::Feld,
             });
             // Frisch Zugewiesene zählen sofort als im Dienst — sonst bekäme
             // das nächste Feld im selben Zyklus dieselbe Person.
@@ -2065,8 +2045,6 @@ impl SyncEngine {
             .filter(|m| pending_matches.contains(&m.id))
             .flat_map(&besetzung_von)
             .collect();
-        // Übernommene Vorab-SR dieses Laufs (ADR 0072).
-        let mut vorab_uebernommen: HashSet<i64> = HashSet::new();
         // Feld frei, aber keine spielbereite Partie — für die Warnung.
         let mut feld_ohne_bereite = false;
         let calls = tablet.preparation_calls();
@@ -2355,18 +2333,12 @@ impl SyncEngine {
                 court_id: court.id,
                 match_id: Some(m.id),
             });
-            // Vorläufiger Meetingpoint-SR wird jetzt echt (ADR 0072) und
-            // reist im selben Write mit.
-            let mut belegt = belegung.belegt_ausser(m.id);
-            belegt.extend(&vorab_uebernommen);
-            belegt.extend(&used_officials);
-            if let Some(id) =
-                crate::tablet::meetingpoint::uebernimm_vorab_sr(tablet, m, court.id, &belegt)
-            {
-                vorab_uebernommen.insert(id);
-            }
-            // Die Besetzung dieses Felds ist für den Rest des Laufs vergeben
-            // (nach der Übernahme, damit der Vorab-SR mitzählt).
+            // Rotations-Zuteilung einer Rolle, die dieses Feld nicht will,
+            // vorher lösen (ADR 0080) — sie reist dann nicht mit.
+            tablet
+                .officials_store()
+                .rotation_loesen_am_feld(m, court.id);
+            // Die Besetzung dieses Felds ist für den Rest des Laufs vergeben.
             used_officials.extend(besetzung_von(m));
             match_courts.push(crate::btp::proto::MatchCourt {
                 match_id: m.id,
@@ -2586,29 +2558,32 @@ impl SyncEngine {
         // gebunden und um neue BTP-Officials ergänzt. Master-only: der
         // Ansage-Slave ist oben schon zurückgekehrt.
         self.track_officials(&snapshot, tablet);
-        // Meetingpoint: gerufenen Partien vorläufig einen freien SR geben
-        // (ADR 0072) — nach der Feld-Rotation, die Vorrang hat.
-        crate::tablet::meetingpoint::vorab_sr_verteilen(
-            tablet,
-            &snapshot,
-            &config.meetingpoint,
-            crate::tablet::tl::heutiges_datum(now_ms()),
-        );
         // Aufruf-Automatik (ADR 0075): ruft über denselben Weg wie ein
-        // Hand-Aufruf; der Aufruf räumt die Auto-Halle (E3).
-        for (match_id, location_id) in
-            crate::tablet::meetingpoint::auto_aufrufe(tablet, &snapshot, config, now_ms())
-        {
+        // Hand-Aufruf; der Aufruf räumt die Auto-Halle (E3). Erst alle
+        // eintragen, dann SR/AR zuteilen, dann ansagen (ADR 0080) — so trägt
+        // der Ansage-Auftrag schon die Besetzung desselben Laufs.
+        let auto_gerufen =
+            crate::tablet::meetingpoint::auto_aufrufe(tablet, &snapshot, config, now_ms());
+        for (match_id, location_id) in &auto_gerufen {
             tablet.add_preparation_call_mit(
                 crate::tablet::state::PreparationCall {
-                    match_id,
-                    location_id,
+                    match_id: *match_id,
+                    location_id: *location_id,
                     called_at_ms: now_ms(),
                 },
                 true,
             );
-            tablet.auto_hall_store().remove(match_id);
+            tablet.auto_hall_store().remove(*match_id);
             tracing::info!("Meetingpoint: Spiel {match_id} automatisch gerufen");
+        }
+        // Gerufene Partien besetzen (ADR 0080) — nach der Feld-Rotation, die
+        // Vorrang hat; auch ohne neue Aufrufe (Nachrücken, Freigaben).
+        crate::tablet::meetingpoint::gerufene_besetzen(
+            tablet,
+            &snapshot,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
+        for (match_id, location_id) in auto_gerufen {
             // Angesagt wie ein Hand-Aufruf (`meetingpoint::hand_aufruf`).
             tablet.publish_announce_job(
                 crate::tablet::meetingpoint::hallen_name(&snapshot, location_id),
@@ -4342,8 +4317,9 @@ mod tests {
     }
 
     #[test]
-    fn der_vorlaeufige_sr_reist_im_selben_zuweisungs_write_mit() {
-        // ADR 0072: Übernahme in `auto_assign` vor `officials_for_write`.
+    fn die_zuteilung_beim_aufruf_reist_im_selben_zuweisungs_write_mit() {
+        // ADR 0080: Die feste Zuteilung steht schon vor dem Feld fest und
+        // reist mit der Feldzuweisung.
         let mut engine = SyncEngine::new();
         let tablet = TabletState::default();
         let mut snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
@@ -4369,13 +4345,12 @@ mod tests {
             location_id: None,
             called_at_ms: 0,
         });
-        crate::tablet::meetingpoint::vorab_sr_verteilen(
+        crate::tablet::meetingpoint::gerufene_besetzen(
             &tablet,
             &snap,
-            &cfg.meetingpoint,
             crate::tablet::tl::heutiges_datum(now_ms()),
         );
-        assert_eq!(tablet.meetingpoint_store().vorab_sr(7), Some(100));
+        assert_eq!(store.assignment(7).sr, Some(100));
         let (_, matches) = engine.auto_assign(&cfg, &snap, &tablet);
         assert_eq!(matches[0].officials, Some((100, 0)));
     }
@@ -6379,46 +6354,142 @@ mod tests {
     }
 
     #[test]
-    fn ein_vorab_sr_der_fuer_ein_anderes_spiel_reserviert_ist_geht_nicht_mit_aufs_feld() {
-        // Grill-Testfall: Vorab 100 an der gerufenen Partie 7, die TL teilt
-        // 100 für Spiel 8 ein ⇒ 7 kommt ohne 100 aufs Feld.
-        let mut engine = SyncEngine::new();
+    fn auto_aufruf_hat_sr_vor_dem_ansage_auftrag_im_selben_lauf() {
+        // AK2 (ADR 0080): Die Automatik ruft, der Lauf teilt im selben Takt
+        // zu — der Auftrag entsteht erst danach.
+        let tablet = TabletState::default();
+        let mut snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        snap.officials = vec![official_named(100)];
+        tablet.set_snapshot(snap.clone());
+        let store = tablet.officials_store();
+        store.set_enabled(true);
+        store.set_rotation(true, false);
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        });
+        let geaendert = crate::tablet::meetingpoint::gerufene_besetzen(
+            &tablet,
+            &snap,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
+        assert_eq!(geaendert, vec![7]);
+        assert_eq!(store.assignment(7).sr, Some(100));
+    }
+
+    #[test]
+    fn aufruf_und_takt_gleichzeitig_vergeben_niemanden_doppelt() {
+        // AK30: Vergabe-Sperre — zwei gerufene Partien, ein Official, zwei
+        // Threads besetzen gleichzeitig.
+        for _ in 0..20 {
+            let tablet = std::sync::Arc::new(TabletState::default());
+            let mut snap = snap_with(
+                vec![court(1, None)],
+                vec![ready_match(7, 1), ready_named(8, None, "C", "D")],
+                Vec::new(),
+            );
+            snap.officials = vec![official_named(100)];
+            tablet.set_snapshot(snap.clone());
+            let store = tablet.officials_store();
+            store.set_enabled(true);
+            store.set_rotation(true, false);
+            for id in [7, 8] {
+                tablet.add_preparation_call(PreparationCall {
+                    match_id: id,
+                    location_id: None,
+                    called_at_ms: 0,
+                });
+            }
+            let heute = crate::tablet::tl::heutiges_datum(now_ms());
+            let griffe: Vec<_> = (0..2)
+                .map(|_| {
+                    let t = tablet.clone();
+                    let s = snap.clone();
+                    std::thread::spawn(move || {
+                        crate::tablet::meetingpoint::gerufene_besetzen(&t, &s, heute)
+                    })
+                })
+                .collect();
+            for g in griffe {
+                g.join().unwrap();
+            }
+            let n = [7, 8]
+                .iter()
+                .filter(|id| store.assignment(**id).sr == Some(100))
+                .count();
+            assert_eq!(n, 1, "100 steht an genau einer Partie");
+        }
+    }
+
+    #[test]
+    fn nach_einem_sync_neustart_bleibt_die_zuteilung_und_luecken_fuellen_sich() {
+        // AK10: Der Lauf ist zustandsbasiert — eine neue Engine (Speichern der
+        // Einstellungen) ändert nichts Bestehendes.
         let tablet = TabletState::default();
         let mut snap = snap_with(
             vec![court(1, None)],
             vec![ready_match(7, 1), ready_named(8, None, "C", "D")],
             Vec::new(),
         );
-        snap.officials = vec![official_named(100)];
+        snap.officials = vec![official_named(100), official_named(101)];
         tablet.set_snapshot(snap.clone());
         let store = tablet.officials_store();
         store.set_enabled(true);
         store.set_rotation(true, false);
-        let mut cfg = cfg_auto(true, 0.0);
-        cfg.meetingpoint.enabled = true;
         tablet.add_preparation_call(PreparationCall {
             match_id: 7,
             location_id: None,
             called_at_ms: 0,
         });
-        crate::tablet::meetingpoint::vorab_sr_verteilen(
+        let heute = crate::tablet::tl::heutiges_datum(now_ms());
+        crate::tablet::meetingpoint::gerufene_besetzen(&tablet, &snap, heute);
+        let vorher = store.assignment(7).sr;
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 8,
+            location_id: None,
+            called_at_ms: 1,
+        });
+        // „Neue Engine": derselbe Store, erster Lauf.
+        crate::tablet::meetingpoint::gerufene_besetzen(&tablet, &snap, heute);
+        assert_eq!(store.assignment(7).sr, vorher);
+        assert!(store.assignment(8).sr.is_some(), "Lücke gefüllt");
+    }
+
+    #[test]
+    fn ein_feld_ohne_sr_schalter_loest_die_rotations_zuteilung_im_write() {
+        // AK18 (ADR 0080): Kommt die gerufene Partie auf ein Feld ohne
+        // SR-Rotation, reist der Rotations-SR nicht mit.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        snap.officials = vec![official_named(100)];
+        tablet.set_snapshot(snap.clone());
+        let store = tablet.officials_store();
+        store.set_enabled(true);
+        store.set_rotation(true, false);
+        let cfg = cfg_auto(true, 0.0);
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        });
+        crate::tablet::meetingpoint::gerufene_besetzen(
             &tablet,
             &snap,
-            &cfg.meetingpoint,
             crate::tablet::tl::heutiges_datum(now_ms()),
         );
-        assert_eq!(tablet.meetingpoint_store().vorab_sr(7), Some(100));
-        store.assign(8, crate::tablet::officials::OfficialRole::Sr, 100);
-        tablet.set_auto_assign_excluded(8, true);
+        assert_eq!(store.assignment(7).sr, Some(100));
+        let mut sw = store.court_switches(1);
+        sw.sr = false;
+        store.set_court_switches(1, sw);
         let (courts, matches) = engine.auto_assign(&cfg, &snap, &tablet);
         assert_eq!(courts[0].match_id, Some(7));
-        assert_eq!(matches[0].officials, None, "100 bleibt für Spiel 8");
-        assert_eq!(store.assignment(7).sr, None);
         assert_eq!(
-            tablet.meetingpoint_store().vorab_sr(7),
-            None,
-            "Vorab verfallen"
+            matches[0].officials, None,
+            "kein Rotations-SR im Write (nichts Lokales mehr ⇒ Officials unangetastet)"
         );
+        assert_eq!(store.assignment(7).sr, None);
     }
 
     #[test]

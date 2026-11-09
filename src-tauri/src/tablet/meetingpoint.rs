@@ -63,10 +63,11 @@ struct StoredCall {
     /// Check-ins am Meetingpoint (je Platz höchstens einer).
     #[serde(default)]
     checkins: Vec<StoredCheckin>,
-    /// Vorläufig eingeteilter Schiedsrichter (ADR 0072) — wird erst beim
-    /// Aufs-Feld-Kommen zur echten Zuweisung und nie vorher nach BTP
-    /// geschrieben.
-    #[serde(default)]
+    /// Vorläufig eingeteilter Schiedsrichter (ADR 0072, abgelöst durch ADR
+    /// 0080). Nur noch lesbar: Der erste Lauf übernimmt ihn einmalig als
+    /// feste Zuteilung ([`MeetingpointStore::nimm_vorab_sr`]); danach steht
+    /// er nicht mehr in der Datei.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     vorab_sr: Option<i64>,
     /// Fehlende wurden schon angesagt (genau einmal je Partie und Halle).
     #[serde(default)]
@@ -96,7 +97,6 @@ pub struct MpCall {
     pub location_id: Option<i64>,
     pub called_at_ms: u64,
     pub auto: bool,
-    pub vorab_sr: Option<i64>,
     pub missing_announced: bool,
     /// Platz → Fingerabdruck der eingecheckten Person.
     pub checkins: Vec<(MpPlatz, String)>,
@@ -149,15 +149,13 @@ pub fn platz_fp(m: &BtpMatch, platz: MpPlatz) -> Option<String> {
         .map(|(_, pl)| spieler_fp(pl))
 }
 
-/// Schiedsrichter-Lage einer Partie, vom Aufrufer aus Officials-Store,
-/// BTP und vorläufiger Zuteilung zusammengesetzt.
+/// Schiedsrichter-Lage einer Partie, vom Aufrufer aus Officials-Store und
+/// BTP zusammengesetzt (Sicht „Hand vor BTP", ADR 0080).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SrLage {
-    /// Eingeteilter SR (wirksam oder vorläufig); `None` = keiner.
+    /// Eingeteilter SR; `None` = keiner.
     pub id: Option<i64>,
     pub name: Option<String>,
-    /// Nur vorläufig (noch nicht in BTP).
-    pub vorab: bool,
     /// Die TL hat „ohne Schiedsrichter" gesetzt.
     pub ohne: bool,
     /// Zählt der SR für „spielbereit" (Schalter + SR-Management an)?
@@ -616,7 +614,6 @@ impl MeetingpointStore {
                 location_id: c.location_id,
                 called_at_ms: c.called_at_ms,
                 auto: c.auto,
-                vorab_sr: c.vorab_sr,
                 missing_announced: c.missing_announced,
                 checkins: c.checkins.iter().map(|k| (k.platz, k.fp.clone())).collect(),
             })
@@ -642,7 +639,6 @@ impl MeetingpointStore {
                             location_id: c.location_id,
                             called_at_ms: c.called_at_ms,
                             auto: c.auto,
-                            vorab_sr: c.vorab_sr,
                             missing_announced: c.missing_announced,
                             checkins: c.checkins.iter().map(|k| (k.platz, k.fp.clone())).collect(),
                         },
@@ -715,28 +711,18 @@ impl MeetingpointStore {
             .unwrap_or_default()
     }
 
-    /// Vorläufigen SR setzen oder lösen (ADR 0072). Auch an geparkten
-    /// Aufrufen lesbar, damit die Übernahme beim Aufs-Feld-Kommen ihn findet.
-    pub fn set_vorab_sr(&self, match_id: i64, sr: Option<i64>) {
-        let changed = {
-            let mut inner = self.inner.lock().unwrap();
-            match inner.file.calls.iter_mut().find(|c| c.match_id == match_id) {
-                Some(c) if c.vorab_sr != sr => {
-                    c.vorab_sr = sr;
-                    // Neuer SR: sein alter Check-in gehört zu jemand anderem.
-                    c.checkins.retain(|k| k.platz != MpPlatz::Sr);
-                    true
-                }
-                _ => false,
-            }
-        };
-        if changed {
-            self.persist();
+    /// Nur für Tests: einen alten vorläufigen SR hinterlegen (ADR 0072).
+    #[cfg(test)]
+    pub fn setze_vorab_sr_fuer_test(&self, match_id: i64, sr: i64) {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(c) = inner.file.calls.iter_mut().find(|c| c.match_id == match_id) {
+            c.vorab_sr = Some(sr);
         }
     }
 
-    /// Vorläufiger SR einer Partie (aktiv oder geparkt).
-    pub fn vorab_sr(&self, match_id: i64) -> Option<i64> {
+    /// Halle eines Aufrufs (aktiv oder geparkt); `None` = ohne Halle oder
+    /// kein Aufruf.
+    pub fn location_of(&self, match_id: i64) -> Option<i64> {
         self.inner
             .lock()
             .unwrap()
@@ -744,19 +730,29 @@ impl MeetingpointStore {
             .calls
             .iter()
             .find(|c| c.match_id == match_id)
-            .and_then(|c| c.vorab_sr)
+            .and_then(|c| c.location_id)
     }
 
-    /// Alle vorläufig eingeteilten SR (Match → Official), aktiv und geparkt.
-    pub fn alle_vorab_sr(&self) -> HashMap<i64, i64> {
-        self.inner
-            .lock()
-            .unwrap()
-            .file
-            .calls
-            .iter()
-            .filter_map(|c| c.vorab_sr.map(|sr| (c.match_id, sr)))
-            .collect()
+    /// Einmalige Übernahme (ADR 0080 löst ADR 0072 ab): liefert die noch
+    /// gespeicherten vorläufigen SR (aktive **und** geparkte Aufrufe, Match →
+    /// Official), deren Spiel `bekannt` gilt, und leert genau diese. Danach
+    /// schreibt die Datei kein `vorab_sr` mehr. Ein kurz leerer Abruf (Spiel
+    /// noch nicht im Snapshot) verwirft also nichts. Idempotent.
+    pub fn nimm_vorab_sr(&self, bekannt: impl Fn(i64) -> bool) -> HashMap<i64, i64> {
+        let out: HashMap<i64, i64> = {
+            let mut inner = self.inner.lock().unwrap();
+            inner
+                .file
+                .calls
+                .iter_mut()
+                .filter(|c| bekannt(c.match_id))
+                .filter_map(|c| c.vorab_sr.take().map(|sr| (c.match_id, sr)))
+                .collect()
+        };
+        if !out.is_empty() {
+            self.persist();
+        }
+        out
     }
 
     /// Fehlende dieser Partie als angesagt merken.
@@ -780,10 +776,14 @@ impl MeetingpointStore {
     /// oder nicht mehr auf dem Platz (BTP-Ersatz). `auf_dem_feld` ordnet
     /// jedem Fingerabdruck die Partie zu, in der die Person gerade spielt
     /// bzw. Schiedsrichter ist. Liefert `true` bei einer Änderung.
+    ///
+    /// `sr_je_partie` = Fingerabdruck des aktuell eingeteilten SR je Partie:
+    /// Wechselt der SR, verfällt der alte SR-Check-in (ADR 0080).
     pub fn bereinige_checkins(
         &self,
         snapshot: &BtpSnapshot,
         auf_dem_feld: &HashMap<String, i64>,
+        sr_je_partie: &HashMap<i64, String>,
     ) -> bool {
         let changed = {
             let mut inner = self.inner.lock().unwrap();
@@ -805,7 +805,7 @@ impl MeetingpointStore {
                         MpPlatz::Spieler { .. } => {
                             m.and_then(|m| platz_fp(m, k.platz)).as_deref() == Some(&k.fp)
                         }
-                        MpPlatz::Sr => true, // SR-Wechsel prüft `set_vorab_sr`/die Bewertung
+                        MpPlatz::Sr => sr_je_partie.get(&c.match_id) == Some(&k.fp),
                         MpPlatz::Unbekannt => false,
                     }
                 });
@@ -935,6 +935,25 @@ pub fn auf_dem_feld(tablet: &TabletState, snap: &BtpSnapshot) -> HashMap<String,
     out
 }
 
+/// Fingerabdruck des aktuell eingeteilten SR je Spiel (Sicht „Hand vor
+/// BTP") — damit ein SR-Wechsel den alten SR-Check-in entwertet.
+pub fn sr_fingerabdruecke(tablet: &TabletState, snap: &BtpSnapshot) -> HashMap<i64, String> {
+    let officials = tablet.officials_store();
+    if !officials.enabled() {
+        return HashMap::new();
+    }
+    snap.matches
+        .iter()
+        .filter_map(|m| {
+            officials
+                .fuer_schreiben(m.id, m.official1_id, m.official2_id)
+                .sr
+                .filter(|v| *v > 0)
+                .map(|id| (m.id, sr_fp(id)))
+        })
+        .collect()
+}
+
 /// Schiedsrichter-Lage einer gerufenen Partie.
 pub fn sr_lage(
     tablet: &TabletState,
@@ -946,21 +965,14 @@ pub fn sr_lage(
     if !officials.enabled() {
         return SrLage::default();
     }
-    let lokal = officials.assignment(m.id);
-    let wirksam = officials.effective(m.id, m.official1_id, m.official2_id);
-    let ohne = wirksam.sr.is_none() && lokal.sr == Some(0);
-    let (id, vorab) = match wirksam.sr {
-        Some(id) => (Some(id), false),
-        None if ohne => (None, false),
-        None => match tablet.meetingpoint_store().vorab_sr(m.id) {
-            Some(id) => (Some(id), true),
-            None => (None, false),
-        },
-    };
+    // Sicht „Hand vor BTP" wie an der Warteliste (ADR 0080): Die Zuteilung
+    // beim Aufruf steht sofort hier, nicht erst nach der BTP-Bestätigung.
+    let besetzung = officials.fuer_schreiben(m.id, m.official1_id, m.official2_id);
+    let ohne = besetzung.sr == Some(0);
+    let id = besetzung.sr.filter(|v| *v > 0);
     SrLage {
         id,
         name: id.and_then(|i| snap.official(i)).map(|o| o.display_name()),
-        vorab,
         ohne,
         noetig: cfg.require_umpire,
     }
@@ -977,6 +989,22 @@ pub fn bewertungen(
     snap: &BtpSnapshot,
     cfg: &MeetingpointConfig,
 ) -> Vec<(MpCall, SrLage, Bewertung)> {
+    gerufene_in_vergabe_reihenfolge(tablet, snap)
+        .into_iter()
+        .map(|(call, m)| {
+            let sr = sr_lage(tablet, m, snap, cfg);
+            let b = bewerte(m, &call, &sr);
+            (call, sr, b)
+        })
+        .collect()
+}
+
+/// Aktive Aufrufe mit ihrer Partie in **Vergabe-Reihenfolge** (ADR 0077) —
+/// die eine Quelle für Seite, Feldvergabe und die Zuteilung beim Aufruf.
+pub fn gerufene_in_vergabe_reihenfolge<'a>(
+    tablet: &TabletState,
+    snap: &'a BtpSnapshot,
+) -> Vec<(MpCall, &'a BtpMatch)> {
     let order = tablet.queue_order_store();
     let mut liste: Vec<_> = tablet
         .meetingpoint_store()
@@ -985,10 +1013,8 @@ pub fn bewertungen(
         .enumerate()
         .filter_map(|(rang, call)| {
             let m = snap.matches.iter().find(|m| m.id == call.match_id)?;
-            let sr = sr_lage(tablet, m, snap, cfg);
-            let b = bewerte(m, &call, &sr);
             let key = crate::tablet::assign::sort_key_for(m, Some(rang), order);
-            Some((key, (call, sr, b)))
+            Some((key, (call, m)))
         })
         .collect();
     liste.sort_by_key(|(key, _)| *key);
@@ -1027,8 +1053,9 @@ pub fn hallen_name(snap: &BtpSnapshot, location_id: Option<i64>) -> String {
 /// dem Feld steht. Eine andere Halle ist ein neuer Aufruf und wird
 /// angesagt. Der Aufruf räumt die automatisch vorverteilte Halle (E3, Spec
 /// `hallen-vorverteilung`). `ansagen = false` am Slave: Ansage-Aufträge
-/// legt nur der Turnier-PC ab, sonst gäbe es zwei Quellen. Liefert die Zahl
-/// der Ansage-Aufträge.
+/// legt nur der Turnier-PC ab, sonst gäbe es zwei Quellen — und nur er teilt
+/// SR/AR zu (ADR 0080), und zwar **bevor** der Ansage-Auftrag entsteht.
+/// Liefert die Zahl der Ansage-Aufträge.
 pub fn hand_aufruf(
     tablet: &TabletState,
     match_ids: &[i64],
@@ -1057,14 +1084,22 @@ pub fn hand_aufruf(
                 .map_or((1u8, None), |k| (0u8, Some(k)))
         });
     }
-    let mut auftraege = 0;
-    for match_id in reihe {
+    for &match_id in &reihe {
         tablet.add_preparation_call(PreparationCall {
             match_id,
             location_id,
             called_at_ms: now_ms,
         });
         tablet.auto_hall_store().remove(match_id);
+    }
+    // SR/AR zuteilen, bevor angesagt wird (ADR 0080) — nur am Turnier-PC.
+    if ansagen {
+        if let Some(snap) = snap.as_ref() {
+            gerufene_besetzen(tablet, snap, crate::tablet::tl::heutiges_datum(now_ms));
+        }
+    }
+    let mut auftraege = 0;
+    for match_id in reihe {
         if !ansagen || schon_gerufen.contains(&match_id) {
             continue;
         }
@@ -1344,76 +1379,136 @@ pub fn checkin(
     Ok(())
 }
 
-/// Übernimmt den vorläufigen SR einer Partie, die gerade aufs Feld kommt,
-/// als echte Zuweisung (ADR 0072). Der Vorab-Eintrag verfällt in jedem
-/// Fall — auch wenn die Übernahme nicht greift (Feldschalter aus, BTP oder
-/// Hand haben schon jemanden, der SR steht inzwischen woanders oder ist
-/// für ein anderes wartendes Spiel reserviert).
-///
-/// `belegt` = wer für **dieses** Spiel nicht in Frage kommt
-/// ([`Belegung::belegt_ausser`](crate::tablet::officials::Belegung::belegt_ausser)
-/// plus in diesem Lauf schon Übernommene, ADR 0078).
-/// Liefert die übernommene Official-ID.
-pub fn uebernimm_vorab_sr(
-    tablet: &TabletState,
-    m: &BtpMatch,
-    court_id: i64,
-    belegt: &HashSet<i64>,
-) -> Option<i64> {
-    let mp = tablet.meetingpoint_store();
-    let vorab = mp.vorab_sr(m.id)?;
-    mp.set_vorab_sr(m.id, None);
-    let store = tablet.officials_store();
-    if !store.enabled() || !store.rotation().0 || !store.court_switches(court_id).sr {
-        return None;
+/// Will mindestens ein Feld der Aufruf-Halle diesen Dienst (Feldschalter)?
+/// Ohne Halle, im Ein-Hallen-Turnier oder wenn kein Feld der Halle bekannt
+/// ist, zählen alle Felder. Gesperrte Felder zählen mit — eine Sperre ist
+/// vorübergehend. Ohne bekannte Felder: ja (Schalter-Default „an").
+pub fn dienst_in_halle(
+    snap: &BtpSnapshot,
+    store: &crate::tablet::officials::OfficialsStore,
+    location_id: Option<i64>,
+    role: crate::tablet::officials::OfficialRole,
+) -> bool {
+    use crate::tablet::officials::OfficialRole;
+    let alle: Vec<i64> = snap.court_infos.iter().map(|c| c.id).collect();
+    let in_halle: Vec<i64> = match location_id {
+        Some(lid) if snap.is_multi_hall() => snap
+            .court_infos
+            .iter()
+            .filter(|c| c.location_id == Some(lid))
+            .map(|c| c.id)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let felder = if in_halle.is_empty() { alle } else { in_halle };
+    if felder.is_empty() {
+        return true;
     }
-    let wirksam = store.effective(m.id, m.official1_id, m.official2_id);
-    // Inzwischen „nur AR" ⇒ nicht übernehmen; die Rotation besetzt den SR
-    // neu (ADR 0079).
-    let rolle_passt = store
-        .extra(vorab)
-        .role
-        .erlaubt(crate::tablet::officials::OfficialRole::Sr);
-    if wirksam.sr.is_some()
-        || store.assignment(m.id).sr.is_some()
-        || belegt.contains(&vorab)
-        || !rolle_passt
-    {
-        return None;
-    }
-    store.assign(m.id, crate::tablet::officials::OfficialRole::Sr, vorab);
-    Some(vorab)
+    felder.iter().any(|c| {
+        let sw = store.court_switches(*c);
+        match role {
+            OfficialRole::Sr => sw.sr,
+            OfficialRole::Ar => sw.ar,
+        }
+    })
 }
 
-/// Teilt gerufenen Partien ohne SR vorläufig den nächsten freien SR zu
-/// (ADR 0072). Zustandsbasiert je Sync-Lauf (Master): Wird ein SR frei
-/// (Spiel vorbei, Pause aufgehoben), bekommt ihn die älteste gerufene Partie
-/// ohne SR. Schreibt nichts nach BTP.
+/// Teilt gerufenen Partien SR und AR **fest** zu (ADR 0080, löst ADR 0072
+/// ab). Zustandsbasiert: läuft synchron im Aufruf und in jedem Sync-Takt
+/// (nach der Feld-Rotation, die Vorrang hat) — so überstehen Nachrücken,
+/// Sync-Neustart und Migration jeden Neustart ohne Kanten-Merker. Nur am
+/// Turnier-PC. Unter der Vergabe-Sperre, damit Aufruf und Sync-Lauf nie
+/// dieselbe Person zweimal vergeben.
 ///
-/// Übersprungen wird, wer im Dienst ist oder für ein wartendes Spiel
-/// reserviert (ADR 0078, eine Quelle: `Belegung`). Ein Vorab-SR, der
-/// inzwischen für ein **anderes** Spiel reserviert ist, verfällt, und die
-/// Partie bekommt den nächsten freien. `heute` = lokales Datum des
-/// Turnier-PCs (Tagesgrenze der Reservierung).
-pub fn vorab_sr_verteilen(
+/// Ablauf: einmalige Übernahme alter `vorab_sr` → Merker pflegen →
+/// Freigaben (Aufruf weg ohne Feld, Feld ohne Dienst) → gerufene Partien in
+/// Vergabe-Reihenfolge besetzen (keine Obergrenze). Gewählt wird über
+/// `rotate_court` → `waehle_besetzung` (Modus, Rolle, Vorrolle, ADR 0079).
+/// Liefert die Match-IDs, deren Besetzung sich geändert hat.
+pub fn gerufene_besetzen(
     tablet: &TabletState,
     snap: &BtpSnapshot,
-    cfg: &MeetingpointConfig,
     heute: chrono::NaiveDate,
-) {
-    let mp = tablet.meetingpoint_store();
+) -> Vec<i64> {
+    use crate::tablet::officials::{Belegung, Herkunft, OfficialRole, RotationInput};
     let store = tablet.officials_store();
-    let aktiv = cfg.enabled && store.enabled() && store.rotation().0;
-    let calls = mp.active_entries();
-    if !aktiv {
-        for c in calls.iter().filter(|c| c.vorab_sr.is_some()) {
-            mp.set_vorab_sr(c.match_id, None);
-        }
-        return;
+    let mp = tablet.meetingpoint_store();
+    if !store.enabled() {
+        return Vec::new();
     }
-    let belegung = crate::tablet::officials::Belegung::aus(store, snap, heute);
+    let _sperre = store.vergabe_sperre();
+    let (rot_sr, rot_ar) = store.rotation();
     let bekannt: Vec<i64> = snap.officials.iter().map(|o| o.id).collect();
-    // Dieselbe Wahl wie am Feld (ADR 0079): Modus, Rolle, Vorrolle.
+    let mut geaendert: Vec<i64> = Vec::new();
+
+    // 1. Einmalige Übernahme alter vorläufiger SR (ADR 0072).
+    let alt = mp.nimm_vorab_sr(|mid| snap.matches.iter().any(|m| m.id == mid));
+    if !alt.is_empty() {
+        let belegung = Belegung::aus(store, snap, heute);
+        let mut ids: Vec<(i64, i64)> = alt.into_iter().collect();
+        ids.sort_unstable();
+        for (mid, sr) in ids {
+            let Some(m) = snap.matches.iter().find(|m| m.id == mid) else {
+                continue;
+            };
+            let extra = store.extra(sr);
+            let besetzung = store.fuer_schreiben(m.id, m.official1_id, m.official2_id);
+            let feld_will = match m.status {
+                MatchStatus::OnCourt => m.court_id.is_none_or(|c| store.court_switches(c).sr),
+                MatchStatus::Scheduled => {
+                    let lid = mp.location_of(mid);
+                    dienst_in_halle(snap, store, lid, OfficialRole::Sr)
+                }
+                _ => false,
+            };
+            let passt = rot_sr
+                && extra.role.erlaubt(OfficialRole::Sr)
+                && !extra.paused
+                && besetzung.sr.is_none()
+                && bekannt.contains(&sr)
+                && !belegung.belegt_ausser(mid).contains(&sr)
+                && besetzung.ar != Some(sr)
+                && feld_will;
+            if passt {
+                store.uebernimm_als_aufruf(mid, OfficialRole::Sr, sr);
+                geaendert.push(mid);
+                tracing::info!("Meetingpoint: vorläufiger SR {sr} für Spiel {mid} übernommen");
+            }
+        }
+    }
+
+    // 2. Merker pflegen, 3. Freigaben.
+    store.pflege_vorab_rotation(snap);
+    for mid in store.vorab_rotation_spiele() {
+        let Some(m) = snap.matches.iter().find(|m| m.id == mid) else {
+            continue;
+        };
+        match m.status {
+            MatchStatus::Scheduled if mp.phase(mid).is_none() => {
+                // Aufruf zurückgenommen oder wegen leerer Paarung gelöscht.
+                for (role, btp) in [
+                    (OfficialRole::Sr, m.official1_id),
+                    (OfficialRole::Ar, m.official2_id),
+                ] {
+                    if store.rotation_freigeben(mid, role, btp) {
+                        geaendert.push(mid);
+                    }
+                }
+            }
+            MatchStatus::OnCourt => {
+                if let Some(c) = m.court_id {
+                    store.rotation_loesen_am_feld(m, c);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 4. Besetzen, vorn zuerst.
+    if !rot_sr && !rot_ar {
+        return geaendert;
+    }
+    let belegung = Belegung::aus(store, snap, heute);
     let modus = store.rotation_mode();
     let vorrolle = if modus == crate::config::RotationMode::Rollenwechsel {
         let fertige: Vec<crate::tablet::officials::FinishedMatch> = snap
@@ -1424,55 +1519,43 @@ pub fn vorab_sr_verteilen(
             .collect();
         store.vorrollen(&fertige)
     } else {
-        std::collections::HashMap::new()
+        HashMap::new()
     };
-    // Belegt: im Dienst, reserviert, und jeder bereits vorläufig oder
-    // wirksam eingeteilte SR einer gerufenen Partie.
-    let mut belegt: HashSet<i64> = belegung.alle();
-    belegt.extend(mp.alle_vorab_sr().into_values());
-    for c in &calls {
-        if let Some(m) = snap.matches.iter().find(|m| m.id == c.match_id) {
-            let w = store.effective(m.id, m.official1_id, m.official2_id);
-            belegt.extend(w.sr);
-            belegt.extend(w.ar);
-        }
-    }
-    for c in calls {
-        let Some(m) = snap.matches.iter().find(|m| m.id == c.match_id) else {
-            continue;
-        };
-        let wirksam = store.effective(m.id, m.official1_id, m.official2_id);
-        let ohne = store.assignment(m.id).sr == Some(0);
-        if wirksam.sr.is_some() || ohne {
-            // BTP oder Hand haben entschieden — der Vorab-Eintrag weicht.
-            if c.vorab_sr.is_some() {
-                mp.set_vorab_sr(m.id, None);
-            }
+    let mut im_lauf: HashSet<i64> = HashSet::new();
+    for (call, m) in gerufene_in_vergabe_reihenfolge(tablet, snap) {
+        if m.team1.is_empty() || m.team2.is_empty() || m.status != MatchStatus::Scheduled {
             continue;
         }
-        if let Some(v) = c.vorab_sr {
-            // Die eigene SR-Reservierung dieser Partie ist oben schon
-            // abgefangen — jede verbleibende Bindung liegt woanders (oder
-            // ist der AR dieser Partie) und schließt `v` aus.
-            let extra = store.extra(v);
-            let weg = belegung.ist_belegt(v)
-                || extra.paused
-                || !bekannt.contains(&v)
-                || !extra
-                    .role
-                    .erlaubt(crate::tablet::officials::OfficialRole::Sr);
-            if !weg {
-                continue;
-            }
-            mp.set_vorab_sr(m.id, None); // steht inzwischen woanders
+        let sr = rot_sr && dienst_in_halle(snap, store, call.location_id, OfficialRole::Sr);
+        let ar = rot_ar && dienst_in_halle(snap, store, call.location_id, OfficialRole::Ar);
+        if !sr && !ar {
+            continue;
         }
         let spieler: Vec<BtpPlayer> = m.team1.iter().chain(m.team2.iter()).cloned().collect();
-        let (sr, _) = store.waehle(modus, &bekannt, &belegt, &spieler, &vorrolle, true, false);
-        if let Some(id) = sr {
-            mp.set_vorab_sr(m.id, Some(id));
-            belegt.insert(id);
+        let mut belegt = belegung.belegt_ausser(m.id);
+        belegt.extend(&im_lauf);
+        let (neu_sr, neu_ar) = store.rotate_court(RotationInput {
+            match_id: m.id,
+            players: &spieler,
+            btp_sr: m.official1_id,
+            btp_ar: m.official2_id,
+            bekannt: &bekannt,
+            belegt: &belegt,
+            sr,
+            ar,
+            modus,
+            vorrolle: &vorrolle,
+            herkunft: Herkunft::Aufruf,
+        });
+        if neu_sr.is_some() || neu_ar.is_some() {
+            geaendert.push(m.id);
         }
+        im_lauf.extend(neu_sr);
+        im_lauf.extend(neu_ar);
     }
+    geaendert.sort_unstable();
+    geaendert.dedup();
+    geaendert
 }
 
 /// Restzeit je nicht gesperrtem Feld in Minuten (`0` = frei), mit Halle —
@@ -1763,7 +1846,9 @@ pub fn tl_meetingpoint(call: &MpCall, sr: &SrLage, b: &Bewertung) -> relay_proto
         team2_present: b.team2_present.clone(),
         sr_name: sr.name.clone(),
         sr_present: b.sr_present,
-        sr_vorab: sr.vorab,
+        // Seit ADR 0080 gibt es keine vorläufige Zuteilung mehr; das Feld
+        // bleibt für ältere Seiten auf dem Draht.
+        sr_vorab: false,
         ohne_sr: sr.ohne,
         sr_noetig: sr.noetig,
         bereit: b.bereit,
@@ -2565,51 +2650,117 @@ mod tests {
         assert!(v.partien.iter().all(|p| p.feld_frei_ms.is_none()));
     }
 
+    use crate::tablet::officials::OfficialRole as Rolle;
+
+    fn besetzen(t: &TabletState, snap: &BtpSnapshot) -> Vec<i64> {
+        gerufene_besetzen(t, snap, heute())
+    }
+
     #[test]
-    fn ein_freier_sr_wird_vorlaeufig_zugeteilt_ohne_btp_zuweisung() {
+    fn der_aufruf_teilt_den_sr_fest_zu() {
+        // AK1 (ADR 0080): feste Einteilung mit Herkunfts-Merker; die Seite
+        // zeigt den SR, ohne „vorläufig".
         let t = zustand(turnier(false));
         let snap = mit_sr(&t, &[100, 101]);
         let cfg = mp_an();
         rufe(&t, 10, None);
         rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &cfg, heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(10), Some(100));
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(101));
-        // Nichts in den Zuweisungen → `officials_entries` schreibt nichts.
-        assert!(t.officials_store().assignments().is_empty());
-        // Die Seite zeigt den SR schon.
+        assert_eq!(besetzen(&t, &snap), vec![10, 11]);
+        let store = t.officials_store();
+        assert_eq!(store.assignment(10).sr, Some(100));
+        assert_eq!(store.assignment(11).sr, Some(101));
+        assert_eq!(store.vorab_rotation(10), (Some(100), None));
         let v = view(&t, Some(&snap), &cfg, "");
         assert!(v.partien[0]
             .plaetze
             .iter()
             .any(|p| p.platz == MpPlatz::Sr && p.name == "SR100"));
+        let (_, sr, b) = &bewertungen(&t, &snap, &cfg)[0];
+        assert!(!tl_meetingpoint(&bewertungen(&t, &snap, &cfg)[0].0, sr, b).sr_vorab);
+        // Ein zweiter Lauf ändert nichts.
+        assert!(besetzen(&t, &snap).is_empty());
     }
 
     #[test]
-    fn die_vorab_verteilung_folgt_rolle_und_modus() {
-        // AK23 (ADR 0079): „nur AR" wird nie Vorab-SR; in Modus A kommt der
-        // SR aus der SR-Liste; in C bekommt ihn bevorzugt, wer zuletzt
-        // nicht SR war.
+    fn sr_und_ar_folgen_den_rotationsschaltern() {
+        // AK3
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101, 102]);
+        t.officials_store().set_rotation(true, true);
+        rufe(&t, 10, None);
+        besetzen(&t, &snap);
+        assert_eq!(t.officials_store().assignment(10).sr, Some(100));
+        assert_eq!(t.officials_store().assignment(10).ar, Some(101));
+
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100]);
+        t.officials_store().set_rotation(false, false);
+        rufe(&t, 10, None);
+        assert!(besetzen(&t, &snap).is_empty());
+        assert_eq!(t.officials_store().assignment(10), Default::default());
+    }
+
+    #[test]
+    fn hand_aufruf_besetzt_vor_dem_ansage_auftrag_und_nur_am_master() {
+        // AK1 + AK28
+        let t = zustand(turnier(false));
+        let _ = mit_sr(&t, &[100]);
+        assert_eq!(hand_aufruf(&t, &[11], None, 1_000, true), 1);
+        assert_eq!(t.officials_store().assignment(11).sr, Some(100));
+
+        let t = zustand(turnier(false));
+        let _ = mit_sr(&t, &[100]);
+        assert_eq!(hand_aufruf(&t, &[11], None, 1_000, false), 0);
+        assert_eq!(
+            t.officials_store().assignment(11).sr,
+            None,
+            "am Slave keine Zuteilung"
+        );
+    }
+
+    #[test]
+    fn engpass_und_nachruecken_in_vergabe_reihenfolge() {
+        // AK7: Wer frei wird, geht an die erste gerufene Partie mit Lücke in
+        // Vergabe-Reihenfolge (hier: Aufruf-Rang 11 vor 10).
+        let t = zustand(turnier(false));
+        let mut snap = mit_sr(&t, &[100]);
+        let mut laufend = spiel(12, MatchStatus::OnCourt);
+        laufend.court_id = Some(1);
+        laufend.official1_id = Some(100);
+        snap.matches.push(laufend);
+        t.set_snapshot(snap.clone());
+        rufe(&t, 11, None);
+        rufe(&t, 10, None);
+        besetzen(&t, &snap);
+        assert_eq!(t.officials_store().assignment(11).sr, None, "100 im Dienst");
+        snap.matches[2].status = MatchStatus::Finished;
+        t.set_snapshot(snap.clone());
+        besetzen(&t, &snap);
+        assert_eq!(t.officials_store().assignment(11).sr, Some(100));
+        assert_eq!(t.officials_store().assignment(10).sr, None);
+    }
+
+    #[test]
+    fn die_zuteilung_folgt_rolle_und_modus() {
+        // AK5 (ADR 0079): „nur AR" wird nie SR; in A kommt der SR aus der
+        // SR-Liste; in C bekommt ihn, wer zuletzt nicht SR war.
         use crate::tablet::officials::{Einsatzrolle, Reihenfolge};
         let t = zustand(turnier(false));
         let snap = mit_sr(&t, &[100, 101]);
-        let store = t.officials_store();
-        store.set_role(100, Einsatzrolle::NurAr);
+        t.officials_store().set_role(100, Einsatzrolle::NurAr);
         rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(101));
+        besetzen(&t, &snap);
+        assert_eq!(t.officials_store().assignment(11).sr, Some(101));
 
-        // Modus A: SR-Liste ist maßgeblich, nicht die AR-Liste.
         let t = zustand(turnier(false));
         let snap = mit_sr(&t, &[100, 101]);
         let store = t.officials_store();
         store.set_rotation_mode(crate::config::RotationMode::Getrennt);
         store.reorder_in(Reihenfolge::Ar, 101, Some(100));
         rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(100));
+        besetzen(&t, &snap);
+        assert_eq!(store.assignment(11).sr, Some(100));
 
-        // Modus C: 100 war zuletzt SR (beendetes Spiel 12) ⇒ 101.
         let t = zustand(turnier(false));
         let mut snap = mit_sr(&t, &[100, 101]);
         let mut fertig = spiel(12, MatchStatus::Finished);
@@ -2617,110 +2768,35 @@ mod tests {
         fertig.finished_at = Some(5);
         snap.matches.push(fertig);
         t.set_snapshot(snap.clone());
-        let store = t.officials_store();
-        store.set_rotation_mode(crate::config::RotationMode::Rollenwechsel);
-        rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(101));
-    }
-
-    #[test]
-    fn ein_vorab_sr_mit_neuer_rolle_nur_ar_wird_nicht_uebernommen() {
-        // AK24
-        let t = zustand(turnier(false));
-        let snap = mit_sr(&t, &[100, 101]);
-        rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(100));
         t.officials_store()
-            .set_role(100, crate::tablet::officials::Einsatzrolle::NurAr);
-        let m = snap.matches.iter().find(|m| m.id == 11).unwrap();
-        assert_eq!(uebernimm_vorab_sr(&t, m, 1, &HashSet::new()), None);
-        assert_eq!(t.officials_store().assignment(11).sr, None);
-        // Die Verteilung tauscht ihn ebenfalls aus.
-        let t2 = zustand(turnier(false));
-        let snap2 = mit_sr(&t2, &[100, 101]);
-        rufe(&t2, 11, None);
-        vorab_sr_verteilen(&t2, &snap2, &mp_an(), heute());
-        t2.officials_store()
-            .set_role(100, crate::tablet::officials::Einsatzrolle::NurAr);
-        vorab_sr_verteilen(&t2, &snap2, &mp_an(), heute());
-        assert_eq!(t2.meetingpoint_store().vorab_sr(11), Some(101));
+            .set_rotation_mode(crate::config::RotationMode::Rollenwechsel);
+        rufe(&t, 11, None);
+        besetzen(&t, &snap);
+        assert_eq!(t.officials_store().assignment(11).sr, Some(101));
     }
 
     #[test]
-    fn ohne_schiedsrichter_bekommt_auch_spaeter_keinen_vorab_sr() {
-        // ADR 0080: „ohne" bleibt, auch wenn BTP niemanden führt — früher
-        // ließ `confirm` es los und die Vorab-Verteilung füllte es wieder.
+    fn hand_btp_und_ohne_werden_nicht_ersetzt() {
+        // AK6
         let t = zustand(turnier(false));
-        let snap = mit_sr(&t, &[100]);
-        rufe(&t, 11, None);
+        let mut snap = mit_sr(&t, &[100, 101, 102]);
+        snap.matches[0].official1_id = Some(102); // BTP-Vorab an 10
+        t.set_snapshot(snap.clone());
         let store = t.officials_store();
-        store.clear_assignment(11, crate::tablet::officials::OfficialRole::Sr);
+        store.clear_assignment(11, Rolle::Sr); // „ohne" an 11
+        rufe(&t, 10, None);
+        rufe(&t, 11, None);
         for _ in 0..3 {
             store.confirm(11, None, None);
-            vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-            assert_eq!(t.meetingpoint_store().vorab_sr(11), None);
+            besetzen(&t, &snap);
         }
+        assert_eq!(store.assignment(10).sr, None, "BTP-Vorab bleibt");
+        assert_eq!(store.assignment(11).sr, Some(0), "„ohne\" bleibt");
     }
 
     #[test]
-    fn ein_sr_im_dienst_kommt_erst_wenn_er_frei_wird() {
-        let t = zustand(turnier(false));
-        let mut snap = mit_sr(&t, &[100]);
-        // SR100 pfeift gerade Spiel 12.
-        let mut laufend = spiel(12, MatchStatus::OnCourt);
-        laufend.court_id = Some(1);
-        laufend.official1_id = Some(100);
-        snap.matches.push(laufend);
-        t.set_snapshot(snap.clone());
-        let cfg = mp_an();
-        rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &cfg, heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), None);
-        // Spiel 12 endet → SR100 ist frei und geht an die gerufene Partie.
-        snap.matches[2].status = MatchStatus::Finished;
-        t.set_snapshot(snap.clone());
-        vorab_sr_verteilen(&t, &snap, &cfg, heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(100));
-    }
-
-    #[test]
-    fn der_vorlaeufige_sr_wird_beim_aufs_feld_kommen_echt() {
-        let t = zustand(turnier(false));
-        let snap = mit_sr(&t, &[100]);
-        let cfg = mp_an();
-        rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &cfg, heute());
-        let m = snap.matches.iter().find(|m| m.id == 11).unwrap();
-        assert_eq!(uebernimm_vorab_sr(&t, m, 1, &HashSet::new()), Some(100));
-        assert_eq!(t.officials_store().assignment(11).sr, Some(100));
-        assert_eq!(
-            t.meetingpoint_store().vorab_sr(11),
-            None,
-            "Vorab verbraucht"
-        );
-    }
-
-    #[test]
-    fn feldschalter_aus_verwirft_den_vorlaeufigen_sr() {
-        let t = zustand(turnier(false));
-        let snap = mit_sr(&t, &[100]);
-        rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        let mut sw = t.officials_store().court_switches(1);
-        sw.sr = false;
-        t.officials_store().set_court_switches(1, sw);
-        let m = snap.matches.iter().find(|m| m.id == 11).unwrap();
-        assert_eq!(uebernimm_vorab_sr(&t, m, 1, &HashSet::new()), None);
-        assert_eq!(t.officials_store().assignment(11).sr, None);
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), None);
-    }
-
-    #[test]
-    fn die_vorab_verteilung_ueberspringt_reservierte() {
-        // ADR 0078: 100 steht in BTP vorab an Spiel 12 (wartend, heute) —
-        // die gerufene Partie 11 bekommt 101.
+    fn die_zuteilung_ueberspringt_reservierte() {
+        // ADR 0078: 100 steht in BTP vorab an Spiel 12 (wartend, heute).
         let t = zustand(turnier(false));
         let mut snap = mit_sr(&t, &[100, 101]);
         let mut vorab = spiel(12, MatchStatus::Scheduled);
@@ -2728,40 +2804,228 @@ mod tests {
         snap.matches.push(vorab);
         t.set_snapshot(snap.clone());
         rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(101));
+        besetzen(&t, &snap);
+        assert_eq!(t.officials_store().assignment(11).sr, Some(101));
     }
 
     #[test]
-    fn ein_fuer_ein_anderes_spiel_reservierter_vorab_sr_verfaellt() {
-        // Grill-Testfall: Vorab 100 an der gerufenen Partie 11, die TL teilt
-        // 100 für Spiel 10 ein ⇒ 11 bekommt einen anderen.
+    fn die_zuteilung_reserviert_auch_an_einem_spaeteren_tag() {
+        // AK9: Eine gerufene Partie mit Merker reserviert tagesunabhängig.
+        let t = zustand(turnier(false));
+        let mut snap = mit_sr(&t, &[100]);
+        snap.matches[1].planned_time = Some(203_001_011_000); // weit in der Zukunft
+        t.set_snapshot(snap.clone());
+        rufe(&t, 11, None);
+        besetzen(&t, &snap);
+        assert_eq!(t.officials_store().assignment(11).sr, Some(100));
+        let b = crate::tablet::officials::Belegung::aus(t.officials_store(), &snap, heute());
+        assert!(b.ist_belegt(100), "reserviert trotz späterem Tag");
+    }
+
+    #[test]
+    fn ruecknahme_gibt_nur_rotations_zuteilungen_frei() {
+        // AK12 + AK14
         let t = zustand(turnier(false));
         let snap = mit_sr(&t, &[100, 101]);
         rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(100));
-        t.officials_store()
-            .assign(10, crate::tablet::officials::OfficialRole::Sr, 100);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(101));
+        besetzen(&t, &snap);
+        let store = t.officials_store();
+        store.assign(11, Rolle::Ar, 101); // Hand-AR
+        t.remove_preparation_call(11);
+        assert_eq!(store.assignment(11).sr, None, "Rotation frei, kein Some(0)");
+        assert_eq!(store.assignment(11).ar, Some(101), "Hand bleibt");
+        assert!(!store.hat_vorab_rotation(11));
     }
 
     #[test]
-    fn die_uebernahme_greift_nicht_bei_einer_reservierung_fuer_ein_anderes_spiel() {
+    fn hand_einteilung_loescht_den_merker() {
+        // AK12: Umteilen von Hand ⇒ ab jetzt Hand-Einteilung, Rücknahme lässt
+        // sie stehen.
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101]);
+        rufe(&t, 11, None);
+        besetzen(&t, &snap);
+        let store = t.officials_store();
+        store.assign(11, Rolle::Sr, 101);
+        assert!(!store.hat_vorab_rotation(11));
+        t.remove_preparation_call(11);
+        assert_eq!(store.assignment(11).sr, Some(101));
+    }
+
+    #[test]
+    fn ein_geloeschter_aufruf_gibt_im_naechsten_lauf_frei() {
+        // Aufruf weg ohne Rücknahme-Befehl (z. B. leere Paarung): der Lauf
+        // gibt frei.
         let t = zustand(turnier(false));
         let snap = mit_sr(&t, &[100]);
         rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &mp_an(), heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), Some(100));
-        t.officials_store()
-            .assign(10, crate::tablet::officials::OfficialRole::Sr, 100);
-        let belegt = crate::tablet::officials::Belegung::aus(t.officials_store(), &snap, heute())
-            .belegt_ausser(11);
-        let m = snap.matches.iter().find(|m| m.id == 11).unwrap();
-        assert_eq!(uebernimm_vorab_sr(&t, m, 1, &belegt), None);
+        besetzen(&t, &snap);
+        t.meetingpoint_store().retract(11);
+        besetzen(&t, &snap);
         assert_eq!(t.officials_store().assignment(11).sr, None);
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), None, "Vorab verfallen");
+    }
+
+    #[test]
+    fn ein_spiel_ohne_feld_beendet_behaelt_keine_nie_geschriebene_zuteilung() {
+        // AK17
+        let t = zustand(turnier(false));
+        let mut snap = mit_sr(&t, &[100]);
+        rufe(&t, 11, None);
+        besetzen(&t, &snap);
+        snap.matches[1].status = MatchStatus::Finished;
+        t.set_snapshot(snap.clone());
+        besetzen(&t, &snap);
+        let store = t.officials_store();
+        assert_eq!(store.assignment(11).sr, None);
+        assert!(!store.hat_vorab_rotation(11));
+    }
+
+    #[test]
+    fn halle_ohne_ar_schalter_bekommt_keinen_ar() {
+        // AK4
+        let t = zustand(turnier(true));
+        let mut snap = mit_sr(&t, &[100, 101, 102]);
+        snap.court_infos = vec![
+            crate::btp::model::BtpCourt {
+                id: 1,
+                name: "1".into(),
+                location_id: Some(1),
+                sort_order: 1,
+            },
+            crate::btp::model::BtpCourt {
+                id: 2,
+                name: "2".into(),
+                location_id: Some(2),
+                sort_order: 1,
+            },
+        ];
+        t.set_snapshot(snap.clone());
+        let store = t.officials_store();
+        store.set_rotation(true, true);
+        let mut sw = store.court_switches(1);
+        sw.ar = false;
+        store.set_court_switches(1, sw);
+        rufe(&t, 11, Some(1));
+        besetzen(&t, &snap);
+        assert_eq!(store.assignment(11).sr, Some(100));
+        assert_eq!(store.assignment(11).ar, None, "Halle A will keinen AR");
+        // Ohne Halle zählt irgendein Feld (Feld 2 will AR).
+        rufe(&t, 10, None);
+        besetzen(&t, &snap);
+        assert_eq!(store.assignment(10).ar, Some(102), "Feld 2 will einen AR");
+    }
+
+    #[test]
+    fn ein_alter_vorlaeufiger_sr_wird_einmalig_uebernommen() {
+        // AK20
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101]);
+        rufe(&t, 10, None);
+        rufe(&t, 11, None);
+        let mp = t.meetingpoint_store();
+        mp.setze_vorab_sr_fuer_test(11, 101);
+        mp.setze_vorab_sr_fuer_test(10, 999); // nicht in BTP ⇒ verfällt
+        besetzen(&t, &snap);
+        let store = t.officials_store();
+        assert_eq!(store.assignment(11).sr, Some(101), "übernommen");
+        assert_eq!(store.vorab_rotation(11), (Some(101), None));
+        assert_eq!(store.assignment(10).sr, Some(100), "neu gewählt");
+        assert!(
+            mp.nimm_vorab_sr(|_| true).is_empty(),
+            "nichts mehr gespeichert"
+        );
+    }
+
+    #[test]
+    fn ein_alter_vorlaeufiger_sr_ueberlebt_einen_leeren_abruf() {
+        // Spiel fehlt kurz im Snapshot ⇒ der Eintrag bleibt für später.
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101]);
+        rufe(&t, 11, None);
+        t.meetingpoint_store().setze_vorab_sr_fuer_test(11, 101);
+        let mut leer = snap.clone();
+        leer.matches.clear();
+        besetzen(&t, &leer);
+        besetzen(&t, &snap);
+        assert_eq!(t.officials_store().assignment(11).sr, Some(101));
+    }
+
+    #[test]
+    fn vom_feld_genommen_behaelt_die_zuteilung() {
+        // AK16: Das Spiel kommt aufs Feld (Aufruf geparkt) und wird wieder
+        // genommen (Aufruf lebt auf) — die Rotations-Zuteilung bleibt.
+        let t = zustand(turnier(false));
+        let mut snap = mit_sr(&t, &[100]);
+        rufe(&t, 11, None);
+        besetzen(&t, &snap);
+        snap.matches[1].status = MatchStatus::OnCourt;
+        snap.matches[1].court_id = Some(1);
+        t.apply_preparation_calls(&mut snap.clone());
+        t.set_snapshot(snap.clone());
+        besetzen(&t, &snap);
+        assert_eq!(
+            t.officials_store().assignment(11).sr,
+            Some(100),
+            "geparkt: bleibt"
+        );
+        snap.matches[1].status = MatchStatus::Scheduled;
+        snap.matches[1].court_id = None;
+        t.apply_preparation_calls(&mut snap.clone());
+        t.set_snapshot(snap.clone());
+        besetzen(&t, &snap);
+        assert_eq!(
+            t.officials_store().assignment(11).sr,
+            Some(100),
+            "vom Feld: bleibt"
+        );
+        assert!(t.officials_store().hat_vorab_rotation(11));
+    }
+
+    #[test]
+    fn rotation_aus_nimmt_laufenden_spielen_nichts_weg() {
+        // AK19 / Spec R-D.6
+        let t = zustand(turnier(false));
+        let mut snap = mit_sr(&t, &[100]);
+        rufe(&t, 11, None);
+        besetzen(&t, &snap);
+        snap.matches[1].status = MatchStatus::OnCourt;
+        snap.matches[1].court_id = Some(1);
+        snap.matches[1].official1_id = Some(100); // BTP hat übernommen
+        t.set_snapshot(snap.clone());
+        t.officials_store().set_rotation(false, false);
+        besetzen(&t, &snap);
+        let store = t.officials_store();
+        assert_ne!(
+            store.fuer_schreiben(11, Some(100), None).sr,
+            Some(0),
+            "keine 0 nach BTP"
+        );
+        assert!(store.hat_vorab_rotation(11));
+        // Ein neuer Aufruf bekommt nichts mehr.
+        rufe(&t, 10, None);
+        besetzen(&t, &snap);
+        assert_eq!(store.assignment(10).sr, None);
+    }
+
+    #[test]
+    fn ein_sr_wechsel_entwertet_den_alten_sr_check_in() {
+        // AK27
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101]);
+        let cfg = mp_an();
+        rufe(&t, 11, None);
+        besetzen(&t, &snap);
+        checkin(&t, &cfg, &body("", 11, MpPlatz::Sr, true), 1).unwrap();
+        let sr_da = |t: &TabletState| {
+            t.meetingpoint_store().active_entries()[0]
+                .checkins
+                .iter()
+                .any(|(p, _)| *p == MpPlatz::Sr)
+        };
+        assert!(sr_da(&t));
+        t.officials_store().assign(11, Rolle::Sr, 101);
+        t.apply_preparation_calls(&mut snap.clone());
+        assert!(!sr_da(&t), "der alte SR-Check-in ist verfallen");
     }
 
     #[test]
@@ -2774,18 +3038,18 @@ mod tests {
             ..Default::default()
         };
         rufe(&t, 11, None);
-        vorab_sr_verteilen(&t, &snap, &cfg, heute());
+        gerufene_besetzen(&t, &snap, heute());
         checkin(&t, &cfg, &body("", 11, s(1, 0), true), 1).unwrap();
         checkin(&t, &cfg, &body("", 11, s(2, 0), true), 1).unwrap();
         assert!(bereit(&t, &cfg).is_empty(), "SR fehlt noch");
         checkin(&t, &cfg, &body("", 11, MpPlatz::Sr, true), 1).unwrap();
         assert_eq!(bereit(&t, &cfg), HashSet::from([11]));
-        // Ohne Schiedsrichter: SR-Platz zählt nicht mehr, Vorab weicht.
+        // Ohne Schiedsrichter: SR-Platz zählt nicht mehr.
         checkin(&t, &cfg, &body("", 11, MpPlatz::Sr, false), 1).unwrap();
         t.officials_store()
             .clear_assignment(11, crate::tablet::officials::OfficialRole::Sr);
-        vorab_sr_verteilen(&t, &snap, &cfg, heute());
-        assert_eq!(t.meetingpoint_store().vorab_sr(11), None);
+        gerufene_besetzen(&t, &snap, heute());
+        assert_eq!(t.officials_store().assignment(11).sr, Some(0));
         assert_eq!(bereit(&t, &cfg), HashSet::from([11]));
         // Schalter aus: Spieler genügen ohnehin.
         assert_eq!(bereit(&t, &mp_an()), HashSet::from([11]));

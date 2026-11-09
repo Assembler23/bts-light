@@ -208,6 +208,18 @@ pub struct RotationInput<'a> {
     /// gelesen. Einmal je Takt gerechnet — Besetzungen desselben Takts
     /// ändern sie nicht.
     pub vorrolle: &'a HashMap<i64, OfficialRole>,
+    /// Wer besetzt: die Feld-Rotation oder die Zuteilung beim Aufruf
+    /// (ADR 0080). Nur Letztere setzt den Herkunfts-Merker.
+    pub herkunft: Herkunft,
+}
+
+/// Anlass einer automatischen Besetzung (ADR 0080).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Herkunft {
+    /// Neu belegtes Feld (`track_officials`).
+    Feld,
+    /// Aufruf in Vorbereitung (`meetingpoint::gerufene_besetzen`).
+    Aufruf,
 }
 
 /// Eingabe der reinen Wahl-Funktion [`waehle_besetzung`] (ADR 0079).
@@ -567,10 +579,15 @@ impl Belegung {
             return out;
         }
         let bekannt: HashSet<i64> = snap.officials.iter().map(|o| o.id).collect();
+        // Eine gerufene Partie mit Rotations-Zuteilung reserviert unabhängig
+        // vom Tag (ADR 0080) — sonst vergäbe die Rotation ihre Leute doppelt.
+        let mit_merker: HashSet<i64> = store.vorab_rotation_spiele().into_iter().collect();
         for m in &snap.matches {
             let besetzung = match m.status {
                 MatchStatus::OnCourt => store.effective(m.id, m.official1_id, m.official2_id),
-                MatchStatus::Scheduled if ist_reservierend(m, heute) => {
+                MatchStatus::Scheduled
+                    if ist_reservierend(m, heute) || mit_merker.contains(&m.id) =>
+                {
                     store.fuer_schreiben(m.id, m.official1_id, m.official2_id)
                 }
                 _ => continue,
@@ -795,6 +812,53 @@ struct OfficialsFile {
     /// CourtID → feldweise Schalter (fehlt = Default „alles aktiv").
     #[serde(default)]
     courts: HashMap<i64, CourtSwitches>,
+    /// Match-ID → Herkunfts-Merker der Zuteilung beim Aufruf (ADR 0080).
+    /// Unterscheidet Rotations-Zuteilungen von Hand- und BTP-Einteilungen:
+    /// Nur sie werden frei, wenn der Aufruf ohne Feld endet. Überlebt
+    /// `confirm` und Neustart.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    vorab_rotation: HashMap<i64, VorabRotation>,
+}
+
+/// Herkunfts-Merker je Dienst eines Spiels (ADR 0080).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+struct VorabRotation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sr: Option<VorabDienst>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ar: Option<VorabDienst>,
+}
+
+impl VorabRotation {
+    fn rolle(&mut self, role: OfficialRole) -> &mut Option<VorabDienst> {
+        match role {
+            OfficialRole::Sr => &mut self.sr,
+            OfficialRole::Ar => &mut self.ar,
+        }
+    }
+    fn leer(&self) -> bool {
+        self.sr.is_none() && self.ar.is_none()
+    }
+}
+
+/// Die von der Rotation beim Aufruf gesetzte Person.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct VorabDienst {
+    id: i64,
+    /// Freigabe angestoßen: lokal steht `Some(0)`, die 0 ist unterwegs
+    /// nach BTP. Bis zur Bestätigung gilt der Dienst als offen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    frei: bool,
+}
+
+/// Was eine Zuweisung mit dem Herkunfts-Merker der Rolle macht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Merker {
+    /// Hand, „ohne", Tausch oder Feld-Rotation: Merker der Rolle weg.
+    Entfernen,
+    /// Zuteilung beim Aufruf: Merker auf diese Person.
+    Setzen,
 }
 
 /// Ergebnis eines Ladeversuchs. Der Unterschied zwischen „gibt es nicht"
@@ -836,6 +900,10 @@ pub struct OfficialsStore {
     inner: Mutex<Inner>,
     /// Serialisiert die Dateizugriffe (Muster `scores_persist_lock`).
     persist_lock: Mutex<()>,
+    /// Vergabe-Sperre (ADR 0080): Ein Hand-Aufruf läuft außerhalb des
+    /// Sync-Laufs. Ohne sie könnten Aufruf und Feld-Rotation dieselbe Person
+    /// zweimal vergeben. Nie über ein `await` halten.
+    vergabe: Mutex<()>,
 }
 
 impl OfficialsStore {
@@ -1077,7 +1145,7 @@ impl OfficialsStore {
         if match_id <= 0 || official_id <= 0 {
             return;
         }
-        self.mit_zuweisung(match_id, role, official_id);
+        self.mit_zuweisung(match_id, role, official_id, Merker::Entfernen);
     }
 
     /// Zuweisung eines Spiels lösen.
@@ -1089,7 +1157,7 @@ impl OfficialsStore {
         if match_id <= 0 {
             return;
         }
-        self.mit_zuweisung(match_id, role, 0);
+        self.mit_zuweisung(match_id, role, 0, Merker::Entfernen);
     }
 
     /// Alle Zuweisungen räumen — beim Abschalten von `officials.enabled`
@@ -1097,11 +1165,12 @@ impl OfficialsStore {
     pub fn clear_assignments(&self) {
         {
             let mut inner = self.inner.lock().unwrap();
-            if inner.file.assignments.is_empty() {
+            if inner.file.assignments.is_empty() && inner.file.vorab_rotation.is_empty() {
                 return;
             }
             inner.file.assignments.clear();
             inner.file.ausgang.clear();
+            inner.file.vorab_rotation.clear();
         }
         self.persist();
     }
@@ -1113,10 +1182,23 @@ impl OfficialsStore {
     /// (ihr Write womöglich unterwegs), bleibt der Ausgangswert, und die
     /// bisherige Einteilung wird als „eigene" gemerkt — sonst hielte der
     /// Abgleich ihre verspätete Übernahme für eine Umteilung in BTP.
-    fn mit_zuweisung(&self, match_id: i64, role: OfficialRole, wert: i64) {
+    fn mit_zuweisung(&self, match_id: i64, role: OfficialRole, wert: i64, merker: Merker) {
         {
             let mut inner = self.inner.lock().unwrap();
             let file = &mut inner.file;
+            // Herkunft im selben Lock wie der Wert — sonst sähe ein
+            // gleichzeitiger Leser eine Rotations-Zuteilung ohne Merker.
+            let v = file.vorab_rotation.entry(match_id).or_default();
+            *v.rolle(role) = match merker {
+                Merker::Setzen if wert > 0 => Some(VorabDienst {
+                    id: wert,
+                    frei: false,
+                }),
+                _ => None,
+            };
+            if v.leer() {
+                file.vorab_rotation.remove(&match_id);
+            }
             let a = file.assignments.entry(match_id).or_default();
             let b = file.ausgang.entry(match_id).or_default();
             let (lokal, ausgang, vorher) = match role {
@@ -1179,20 +1261,26 @@ impl OfficialsStore {
     /// Freie Dienste eines neu belegten Felds aus der Reihenfolge besetzen
     /// (Spec Nr. 4). Belegte Dienste bleiben unangetastet — auch deshalb ist
     /// der Aufruf idempotent.
-    pub fn rotate_court(&self, input: RotationInput<'_>) {
+    ///
+    /// Liefert die neu gesetzten Personen `(sr, ar)`.
+    pub fn rotate_court(&self, input: RotationInput<'_>) -> (Option<i64>, Option<i64>) {
         if input.match_id <= 0 {
-            return;
+            return (None, None);
         }
         let wirksam = self.effective(input.match_id, input.btp_sr, input.btp_ar);
         // Ein ausdrücklich gelöster Dienst (`Some(0)`) ist **kein** offener
         // Dienst: Wer von Hand ohne Schiedsrichter spielen lässt, soll ihn
         // auch nach einem Neustart nicht zurückbekommen — dort sieht jedes
-        // belegte Feld wie neu belegt aus.
+        // belegte Feld wie neu belegt aus. Ausnahme: eine freigegebene
+        // Rotations-Zuteilung (`frei`, ADR 0080) — ihr `Some(0)` ist nur die
+        // unterwegs befindliche Löschung, BTP zeigt womöglich noch die alte
+        // Person.
         let lokal = self.assignment(input.match_id);
-        let sr_offen = input.sr && wirksam.sr.is_none() && lokal.sr.is_none();
-        let ar_offen = input.ar && wirksam.ar.is_none() && lokal.ar.is_none();
+        let (frei_sr, frei_ar) = self.frei_merker(input.match_id);
+        let sr_offen = input.sr && (frei_sr || (wirksam.sr.is_none() && lokal.sr.is_none()));
+        let ar_offen = input.ar && (frei_ar || (wirksam.ar.is_none() && lokal.ar.is_none()));
         if !sr_offen && !ar_offen {
-            return;
+            return (None, None);
         }
         // Wer an DIESEM Spiel schon Dienst tut, kommt für den zweiten Dienst
         // nicht in Frage — dieselbe Person ist nie SR und AR zugleich.
@@ -1210,11 +1298,237 @@ impl OfficialsStore {
             ar_offen,
         );
         // Niemand frei ⇒ das Feld bleibt ohne diesen Dienst.
+        let merker = match input.herkunft {
+            Herkunft::Aufruf => Merker::Setzen,
+            Herkunft::Feld => Merker::Entfernen,
+        };
         if let Some(id) = sr {
-            self.assign(input.match_id, OfficialRole::Sr, id);
+            self.mit_zuweisung(input.match_id, OfficialRole::Sr, id, merker);
         }
         if let Some(id) = ar {
-            self.assign(input.match_id, OfficialRole::Ar, id);
+            self.mit_zuweisung(input.match_id, OfficialRole::Ar, id, merker);
+        }
+        (sr, ar)
+    }
+
+    // ── Zuteilung beim Aufruf: Herkunft und Freigabe (ADR 0080) ───────
+
+    /// Vergabe-Sperre nehmen (siehe Feld `vergabe`).
+    pub fn vergabe_sperre(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.vergabe.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Eine Person als Zuteilung beim Aufruf eintragen (mit Merker) — für
+    /// die einmalige Übernahme alter vorläufiger SR (ADR 0080).
+    pub fn uebernimm_als_aufruf(&self, match_id: i64, role: OfficialRole, official_id: i64) {
+        if match_id <= 0 || official_id <= 0 {
+            return;
+        }
+        self.mit_zuweisung(match_id, role, official_id, Merker::Setzen);
+    }
+
+    /// Steht für dieses Spiel ein Herkunfts-Merker (irgendeine Rolle)?
+    pub fn hat_vorab_rotation(&self, match_id: i64) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .file
+            .vorab_rotation
+            .contains_key(&match_id)
+    }
+
+    /// Die von der Rotation beim Aufruf gesetzte Person je Rolle (ohne
+    /// freigegebene) — für Tests und Anzeige.
+    pub fn vorab_rotation(&self, match_id: i64) -> (Option<i64>, Option<i64>) {
+        let inner = self.inner.lock().unwrap();
+        let v = inner
+            .file
+            .vorab_rotation
+            .get(&match_id)
+            .copied()
+            .unwrap_or_default();
+        let id = |d: Option<VorabDienst>| d.filter(|d| !d.frei).map(|d| d.id);
+        (id(v.sr), id(v.ar))
+    }
+
+    /// Match-IDs mit Herkunfts-Merker.
+    pub fn vorab_rotation_spiele(&self) -> Vec<i64> {
+        let mut ids: Vec<i64> = self
+            .inner
+            .lock()
+            .unwrap()
+            .file
+            .vorab_rotation
+            .keys()
+            .copied()
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    fn frei_merker(&self, match_id: i64) -> (bool, bool) {
+        let inner = self.inner.lock().unwrap();
+        let v = inner
+            .file
+            .vorab_rotation
+            .get(&match_id)
+            .copied()
+            .unwrap_or_default();
+        (v.sr.is_some_and(|d| d.frei), v.ar.is_some_and(|d| d.frei))
+    }
+
+    /// Eine Rotations-Zuteilung freigeben (Aufruf endet ohne Feld, Feld ohne
+    /// diesen Dienst). Nur mit gültigem Merker; Hand- und BTP-Einteilungen
+    /// bleiben. Hinterlässt **kein** bleibendes `Some(0)`:
+    /// - BTP trägt die Person nicht ⇒ lokal weg.
+    /// - BTP trägt sie (unser Write kam schon an) ⇒ lokal `Some(0)` mit
+    ///   `frei`; die 0 geht nach BTP, `confirm` räumt nach der Bestätigung.
+    ///
+    /// Liefert `true`, wenn etwas freigegeben wurde.
+    pub fn rotation_freigeben(&self, match_id: i64, role: OfficialRole, btp: Option<i64>) -> bool {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let file = &mut inner.file;
+            let Some(v) = file.vorab_rotation.get_mut(&match_id) else {
+                return false;
+            };
+            let Some(d) = *v.rolle(role) else {
+                return false;
+            };
+            if d.frei {
+                return false;
+            }
+            let a = file.assignments.entry(match_id).or_default();
+            let lokal = match role {
+                OfficialRole::Sr => &mut a.sr,
+                OfficialRole::Ar => &mut a.ar,
+            };
+            // Gültig nur, solange die Sicht „Hand vor BTP" noch genau diese
+            // Person trägt — sonst hat jemand anders entschieden.
+            if lokal.or(btp).filter(|x| *x > 0) != Some(d.id) {
+                *v.rolle(role) = None;
+            } else if dienst(btp) == Some(d.id) {
+                *lokal = Some(0);
+                *v.rolle(role) = Some(VorabDienst {
+                    id: d.id,
+                    frei: true,
+                });
+            } else {
+                *lokal = None;
+                *v.rolle(role) = None;
+                if let Some(b) = file.ausgang.get_mut(&match_id) {
+                    match role {
+                        OfficialRole::Sr => {
+                            b.sr = None;
+                            b.sr_vorher = None;
+                        }
+                        OfficialRole::Ar => {
+                            b.ar = None;
+                            b.ar_vorher = None;
+                        }
+                    }
+                }
+            }
+            if v.leer() {
+                file.vorab_rotation.remove(&match_id);
+            }
+            if file
+                .assignments
+                .get(&match_id)
+                .is_some_and(|a| a.is_empty())
+            {
+                file.assignments.remove(&match_id);
+                file.ausgang.remove(&match_id);
+            }
+        }
+        self.persist();
+        true
+    }
+
+    /// Kommt ein Spiel auf ein Feld, dessen Schalter einen Dienst nicht
+    /// will, wird **nur** die Rotations-Zuteilung dieser Rolle gelöst
+    /// (ADR 0080). Vor jedem Feld-Write aufrufen und zustandsbasiert für
+    /// laufende Spiele.
+    ///
+    /// Bewusst nur der **Feldschalter**, nicht der globale
+    /// `rotation_sr`/`rotation_ar`: Schaltet die Turnierleitung die Rotation
+    /// mitten im Turnier ab, bleiben bestehende Zuteilungen stehen — es kommt
+    /// nur nichts Neues hinzu (Spec R-D.6).
+    pub fn rotation_loesen_am_feld(&self, m: &BtpMatch, court_id: i64) {
+        if !self.hat_vorab_rotation(m.id) {
+            return;
+        }
+        let sw = self.court_switches(court_id);
+        if !sw.sr {
+            self.rotation_freigeben(m.id, OfficialRole::Sr, m.official1_id);
+        }
+        if !sw.ar {
+            self.rotation_freigeben(m.id, OfficialRole::Ar, m.official2_id);
+        }
+    }
+
+    /// Merker gegen den Turnierstand pflegen (je Takt, vor dem Besetzen):
+    /// - Spiel beendet ⇒ Merker weg; trägt BTP die Person nicht, auch die
+    ///   nie geschriebene lokale Zuteilung (kein Einsatz ohne Dienst).
+    /// - Merker ohne `frei` gilt nur, solange „Hand vor BTP" seine Person
+    ///   trägt; ein freigegebener nur, solange lokal `Some(0)` steht.
+    /// - Spiel fehlt im Snapshot ⇒ nichts (kurz leerer Abruf).
+    pub fn pflege_vorab_rotation(&self, snap: &BtpSnapshot) {
+        let geaendert = {
+            let mut inner = self.inner.lock().unwrap();
+            let file = &mut inner.file;
+            let mut geaendert = false;
+            let ids: Vec<i64> = file.vorab_rotation.keys().copied().collect();
+            for mid in ids {
+                let Some(m) = snap.matches.iter().find(|m| m.id == mid) else {
+                    continue;
+                };
+                let lokal = file.assignments.get(&mid).copied().unwrap_or_default();
+                let v = file
+                    .vorab_rotation
+                    .get_mut(&mid)
+                    .expect("Schlüssel eben gelesen");
+                for (role, l, btp) in [
+                    (OfficialRole::Sr, lokal.sr, m.official1_id),
+                    (OfficialRole::Ar, lokal.ar, m.official2_id),
+                ] {
+                    let Some(d) = *v.rolle(role) else { continue };
+                    let gueltig = if m.status == MatchStatus::Finished {
+                        false
+                    } else if d.frei {
+                        l == Some(0)
+                    } else {
+                        l.or(btp).filter(|x| *x > 0) == Some(d.id)
+                    };
+                    if gueltig {
+                        continue;
+                    }
+                    *v.rolle(role) = None;
+                    geaendert = true;
+                    if m.status == MatchStatus::Finished && dienst(btp) != Some(d.id) {
+                        if let Some(a) = file.assignments.get_mut(&mid) {
+                            let feld = match role {
+                                OfficialRole::Sr => &mut a.sr,
+                                OfficialRole::Ar => &mut a.ar,
+                            };
+                            if *feld == Some(d.id) || (d.frei && *feld == Some(0)) {
+                                *feld = None;
+                            }
+                        }
+                    }
+                }
+                if v.leer() {
+                    file.vorab_rotation.remove(&mid);
+                }
+                if file.assignments.get(&mid).is_some_and(|a| a.is_empty()) {
+                    file.assignments.remove(&mid);
+                    file.ausgang.remove(&mid);
+                }
+            }
+            geaendert
+        };
+        if geaendert {
+            self.persist();
         }
     }
 
@@ -1390,6 +1704,29 @@ impl OfficialsStore {
                 return;
             };
             let vorher = (*a, file.ausgang.get(&match_id).copied());
+            let merker_vorher = file.vorab_rotation.get(&match_id).copied();
+            // Freigabe abschließen (ADR 0080): BTP hat die 0 übernommen ⇒ das
+            // `Some(0)` verschwindet samt Merker — sonst bliebe es als „ohne"
+            // stehen und sperrte die spätere Feld-Rotation.
+            if let Some(v) = file.vorab_rotation.get_mut(&match_id) {
+                for (role, btp) in [(OfficialRole::Sr, btp_sr), (OfficialRole::Ar, btp_ar)] {
+                    let feld = match role {
+                        OfficialRole::Sr => &mut a.sr,
+                        OfficialRole::Ar => &mut a.ar,
+                    };
+                    if v.rolle(role).is_some_and(|d| d.frei)
+                        && *feld == Some(0)
+                        && dienst(btp).is_none()
+                    {
+                        *feld = None;
+                        *v.rolle(role) = None;
+                    }
+                }
+                if v.leer() {
+                    file.vorab_rotation.remove(&match_id);
+                }
+            }
+            let merker_geaendert = merker_vorher != file.vorab_rotation.get(&match_id).copied();
             let b = file.ausgang.entry(match_id).or_default();
             pruefe_dienst(&mut a.sr, &mut b.sr, &mut b.sr_vorher, btp_sr);
             pruefe_dienst(&mut a.ar, &mut b.ar, &mut b.ar_vorher, btp_ar);
@@ -1404,7 +1741,7 @@ impl OfficialsStore {
                 file.assignments.get(&match_id).copied().unwrap_or_default(),
                 file.ausgang.get(&match_id).copied(),
             );
-            if vorher == nachher {
+            if vorher == nachher && !merker_geaendert {
                 return; // der Normalfall jedes Sync-Takts — nicht schreiben
             }
         }
@@ -1668,6 +2005,7 @@ mod tests {
             ar: true,
             modus: RotationMode::Abwechselnd,
             vorrolle: Box::leak(Box::new(HashMap::new())),
+            herkunft: Herkunft::Feld,
         }
     }
 
@@ -2660,6 +2998,160 @@ mod tests {
         store.rotate_court(e);
         assert_eq!(store.assignment(501).sr, Some(3));
         assert_eq!(store.assignment(501).ar, Some(2));
+    }
+
+    // ── Zuteilung beim Aufruf: Merker und Freigabe (ADR 0080, PR 2) ───
+
+    fn aufruf_eingabe<'a>(
+        match_id: i64,
+        players: &'a [BtpPlayer],
+        bekannt: &'a [i64],
+        belegt: &'a HashSet<i64>,
+    ) -> RotationInput<'a> {
+        let mut e = eingabe(match_id, players, bekannt, belegt);
+        e.herkunft = Herkunft::Aufruf;
+        e.ar = false;
+        e
+    }
+
+    #[test]
+    fn merker_ueberlebt_bestaetigung_und_neustart() {
+        // AK11
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        assert_eq!(
+            store.rotate_court(aufruf_eingabe(500, &players, &[1, 2], &dienst)),
+            (Some(1), None)
+        );
+        store.confirm(500, Some(1), None);
+        assert_eq!(store.assignment(500).sr, None, "lokal losgelassen");
+        assert_eq!(store.vorab_rotation(500), (Some(1), None), "Merker bleibt");
+        let neu = store_mit_datei(dir.path());
+        assert_eq!(neu.vorab_rotation(500), (Some(1), None));
+    }
+
+    #[test]
+    fn feld_rotation_setzt_keinen_merker() {
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(eingabe(500, &players, &[1], &dienst));
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn umteilung_in_btp_loescht_den_merker() {
+        // AK13
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1, 2], &dienst));
+        store.confirm(500, Some(1), None);
+        let mut m = crate::tablet::state::tests::match_on(500, None, MatchStatus::Scheduled);
+        m.official1_id = Some(2);
+        let snap = crate::tablet::state::tests::snapshot(vec![m], vec![]);
+        store.pflege_vorab_rotation(&snap);
+        assert!(!store.hat_vorab_rotation(500));
+        assert!(
+            !store.rotation_freigeben(500, OfficialRole::Sr, Some(2)),
+            "nichts frei"
+        );
+    }
+
+    #[test]
+    fn freigabe_ohne_btp_gegenstueck_hinterlaesst_kein_ohne() {
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1], &dienst));
+        assert!(store.rotation_freigeben(500, OfficialRole::Sr, None));
+        assert_eq!(store.assignment(500), MatchOfficials::default());
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn freigabe_mit_btp_gegenstueck_laeuft_ueber_ein_freies_null() {
+        // AK14 + AK15: BTP trägt die Person schon ⇒ 0 geht nach BTP, der
+        // Dienst gilt sofort als offen, nach der Bestätigung bleibt nichts.
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1, 2], &dienst));
+        store.confirm(500, Some(1), None);
+        assert!(store.rotation_freigeben(500, OfficialRole::Sr, Some(1)));
+        assert_eq!(
+            store.fuer_schreiben(500, Some(1), None).sr,
+            Some(0),
+            "0 geht nach BTP"
+        );
+        // Der Dienst ist offen: Die Feld-Rotation besetzt ihn, obwohl BTP noch
+        // die alte Person zeigt.
+        let mut e = eingabe(500, &players, &[1, 2], &dienst);
+        e.btp_sr = Some(1);
+        e.ar = false;
+        let belegt: HashSet<i64> = [1].into_iter().collect();
+        e.belegt = &belegt;
+        assert_eq!(store.rotate_court(e), (Some(2), None));
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn freigabe_wird_nach_der_bestaetigung_der_null_geraeumt() {
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1], &dienst));
+        store.confirm(500, Some(1), None);
+        store.rotation_freigeben(500, OfficialRole::Sr, Some(1));
+        store.confirm(500, Some(1), None); // 0 noch unterwegs
+        assert_eq!(store.assignment(500).sr, Some(0));
+        store.confirm(500, None, None); // BTP hat die 0
+        assert_eq!(
+            store.assignment(500),
+            MatchOfficials::default(),
+            "kein „ohne\""
+        );
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn rotation_aus_raeumt_auch_die_merker() {
+        // AK19
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1], &dienst));
+        store.clear_assignments();
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn loesen_am_feld_nur_fuer_rollen_ohne_schalter() {
+        let store = OfficialsStore::default();
+        store.set_enabled(true);
+        store.set_rotation(true, true);
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        let mut e = aufruf_eingabe(500, &players, &[1, 2], &dienst);
+        e.ar = true;
+        store.rotate_court(e);
+        let mut sw = store.court_switches(7);
+        sw.ar = false;
+        store.set_court_switches(7, sw);
+        let m = crate::tablet::state::tests::match_on(500, Some(7), MatchStatus::OnCourt);
+        store.rotation_loesen_am_feld(&m, 7);
+        assert_eq!(store.assignment(500).sr, Some(1), "SR bleibt");
+        assert_eq!(store.assignment(500).ar, None, "Rotations-AR gelöst");
     }
 
     fn store_mit_datei(dir: &Path) -> OfficialsStore {
