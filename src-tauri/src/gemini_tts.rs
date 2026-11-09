@@ -8,7 +8,7 @@
 // 17.11.2026 abschaltet). Antwort ist WAV (24 kHz, mono, 16 bit); kommt doch
 // rohes PCM, wird es hier zu WAV.
 
-use crate::tts_text::{netz, ssml_zu_text, Pausen, TtsText};
+use crate::tts_text::{netz, ssml_zu_text, Format, Pausen, TtsText};
 use base64::Engine;
 use std::path::Path;
 
@@ -109,13 +109,15 @@ fn cache_schluessel(voice: &str, modell: &str, t: &TtsText) -> String {
 }
 
 /// Vertont zu WAV (+ `true`, wenn aus dem Cache); mit `cache_dir` über den
-/// Plattencache.
+/// Plattencache. Gemini liefert in beiden Formaten WAV 24 kHz, `format`
+/// ändert deshalb weder Anfrage noch Cache-Eintrag.
 pub async fn vertonen(
     key: &str,
     voice: &str,
     modell: &str,
     ssml: &str,
     cache_dir: Option<&Path>,
+    _format: Format,
 ) -> Result<(Vec<u8>, bool), String> {
     let t = ssml_zu_text(ssml, Pausen::Satzzeichen);
     let schluessel = cache_schluessel(voice, modell, &t);
@@ -249,6 +251,7 @@ mod echt {
                 modell,
                 ssml,
                 None,
+                crate::tts_text::Format::Mp3,
             )
             .await
             .unwrap_or_else(|e| panic!("{modell}: {e}"))

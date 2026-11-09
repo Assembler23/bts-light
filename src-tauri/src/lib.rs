@@ -14,6 +14,7 @@ pub mod openai_tts;
 pub mod print;
 pub mod sync;
 pub mod tablet;
+pub mod tts_teile;
 pub mod tts_text;
 pub mod tts_verbrauch;
 pub mod update;

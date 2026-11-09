@@ -1012,15 +1012,122 @@ pub async fn azure_tts_speak(
         .lock()
         .expect("inherited_azure-Mutex nicht vergiftet")
         .clone();
-    let Some(ziel) = effective_tts(&cfg.azure_tts, inherited.as_ref()) else {
+    let Some((ziel, teilen)) = effective_tts_mit_teilen(&cfg.azure_tts, inherited.as_ref()) else {
         return Err("Cloud-Stimme nicht konfiguriert".to_string());
     };
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let v = ziel
-        .vertonen(&ssml, Some(&app_dir.join("tts-cache")))
-        .await?;
+    let cache_dir = app_dir.join("tts-cache");
+    // Spec `ansage-in-teilen`: Teile einzeln über den Plattencache; scheitert
+    // das, geht die Ansage als Ganzes (wie ohne Schalter).
+    if let Some(teile) = teilen
+        .then(|| crate::tts_teile::teile_aus_ssml(&ssml))
+        .flatten()
+    {
+        match in_teilen_vertonen(&ziel, &teile, TeileCache::Platte(&cache_dir)).await {
+            Ok(e) => {
+                verbrauch_buchen_zeichen(&app_dir, &ziel, e.zeichen_neu, e.alle_aus_cache);
+                return Ok(base64::engine::general_purpose::STANDARD.encode(e.wav));
+            }
+            Err(e) => tracing::warn!("Ansage in Teilen gescheitert, vertone als Ganzes: {e}"),
+        }
+    }
+    let v = ziel.vertonen(&ssml, Some(&cache_dir)).await?;
     verbrauch_buchen(&app_dir, &ziel, &ssml, v.aus_cache);
     Ok(base64::engine::general_purpose::STANDARD.encode(v.bytes))
+}
+
+/// Wo die Teile einer geteilten Ansage zwischengespeichert werden (T5): am
+/// PC auf der Platte wie bisher, für die Ansage-Seiten nur im Arbeitsspeicher.
+enum TeileCache<'a> {
+    Platte(&'a std::path::Path),
+    Ram(&'a Mutex<crate::tts_verbrauch::SeitenCache>),
+}
+
+/// Ergebnis einer geteilten Vertonung.
+struct TeileErgebnis {
+    wav: Vec<u8>,
+    /// Zeichen der neu vertonten Teile (nur die kosten).
+    zeichen_neu: u64,
+    alle_aus_cache: bool,
+}
+
+/// Vertont die Teile (fehlende gleichzeitig), cacht jeden Teil und setzt sie
+/// zu einer WAV zusammen (Spec `ansage-in-teilen`, T4–T7). Scheitert ein
+/// Teil, scheitert das Ganze — nie eine halbe Ansage.
+async fn in_teilen_vertonen(
+    ziel: &TtsZiel,
+    teile: &[String],
+    cache: TeileCache<'_>,
+) -> Result<TeileErgebnis, String> {
+    let ram_schluessel: Vec<String> = teile
+        .iter()
+        .map(|t| ziel.seiten_cache_schluessel(&format!("teil-wav24|{t}")))
+        .collect();
+    teile_zusammenbauen(teile, &ram_schluessel, cache, |teil, dir| {
+        ziel.vertonen_fmt(teil, dir, crate::tts_text::Format::Wav24)
+    })
+    .await
+}
+
+/// Kern von [`in_teilen_vertonen`] ohne Netz: `vertone(teil, plattencache)`
+/// liefert einen Teil — im Test ein Zähler-Mock.
+async fn teile_zusammenbauen<'a, F, Fut>(
+    teile: &'a [String],
+    ram_schluessel: &[String],
+    cache: TeileCache<'a>,
+    vertone: F,
+) -> Result<TeileErgebnis, String>
+where
+    F: Fn(&'a str, Option<&'a std::path::Path>) -> Fut,
+    Fut: std::future::Future<Output = Result<Vertont, String>>,
+{
+    let mut audio: Vec<Option<Vec<u8>>> = vec![None; teile.len()];
+    let mut aus_cache = vec![false; teile.len()];
+    if let TeileCache::Ram(c) = &cache {
+        let mut c = c.lock().expect("seiten_cache-Mutex nicht vergiftet");
+        for (i, k) in ram_schluessel.iter().enumerate() {
+            if let Some((_, bytes)) = c.holen(k, now_ms()) {
+                audio[i] = Some(bytes);
+                aus_cache[i] = true;
+            }
+        }
+    }
+    let dir = match &cache {
+        TeileCache::Platte(d) => Some(*d),
+        TeileCache::Ram(_) => None,
+    };
+    let fehlend: Vec<usize> = (0..teile.len()).filter(|i| audio[*i].is_none()).collect();
+    let ergebnisse =
+        futures_util::future::join_all(fehlend.iter().map(|&i| vertone(teile[i].as_str(), dir)))
+            .await;
+    for (&i, erg) in fehlend.iter().zip(ergebnisse) {
+        let v = erg.map_err(|e| format!("Teil {}: {e}", i + 1))?;
+        aus_cache[i] = v.aus_cache;
+        if let TeileCache::Ram(c) = &cache {
+            c.lock()
+                .expect("seiten_cache-Mutex nicht vergiftet")
+                .ablegen(
+                    ram_schluessel[i].clone(),
+                    "audio/wav".to_string(),
+                    v.bytes.clone(),
+                    now_ms(),
+                );
+        }
+        audio[i] = Some(v.bytes);
+    }
+    let zeichen_neu = teile
+        .iter()
+        .zip(&aus_cache)
+        .filter(|(_, c)| !**c)
+        .map(|(t, _)| ansage_zeichen(t))
+        .sum();
+    let alle_aus_cache = aus_cache.iter().all(|c| *c);
+    let wavs: Vec<Vec<u8>> = audio.into_iter().flatten().collect();
+    Ok(TeileErgebnis {
+        wav: crate::tts_teile::zusammensetzen(&wavs)?,
+        zeichen_neu,
+        alle_aus_cache,
+    })
 }
 
 /// Ergebnis einer Vertonung.
@@ -1044,7 +1151,18 @@ fn ansage_zeichen(ssml: &str) -> u64 {
 /// Bucht eine Vertonung in den Zeichenzähler (`tts-zeichen.json`, E8) und
 /// schreibt bei neuer Vertonung eine Logzeile — nur Zahlen, nie Text.
 fn verbrauch_buchen(app_dir: &std::path::Path, ziel: &TtsZiel, ssml: &str, aus_cache: bool) {
-    let zeichen = ansage_zeichen(ssml);
+    let zeichen = if aus_cache { 0 } else { ansage_zeichen(ssml) };
+    verbrauch_buchen_zeichen(app_dir, ziel, zeichen, aus_cache);
+}
+
+/// Wie [`verbrauch_buchen`], mit schon gezählten Zeichen (geteilte Ansage:
+/// nur die neu vertonten Teile, T7).
+fn verbrauch_buchen_zeichen(
+    app_dir: &std::path::Path,
+    ziel: &TtsZiel,
+    zeichen: u64,
+    aus_cache: bool,
+) {
     let dienst = ziel.dienst_wert();
     let tag = crate::tts_verbrauch::heute();
     let p = crate::tts_verbrauch::buchen_in_datei(
@@ -1109,28 +1227,47 @@ impl TtsZiel {
         ssml: &str,
         cache_dir: Option<&std::path::Path>,
     ) -> Result<Vertont, String> {
+        self.vertonen_fmt(ssml, cache_dir, crate::tts_text::Format::Mp3)
+            .await
+    }
+
+    /// Wie [`Self::vertonen`], im gewünschten Format (WAV für Teile).
+    async fn vertonen_fmt(
+        &self,
+        ssml: &str,
+        cache_dir: Option<&std::path::Path>,
+        format: crate::tts_text::Format,
+    ) -> Result<Vertont, String> {
+        use crate::tts_text::Format;
+        let mp3_oder_wav = match format {
+            Format::Mp3 => "audio/mpeg",
+            Format::Wav24 => "audio/wav",
+        };
         let (mime, (bytes, aus_cache)) = match self {
             Self::Azure { region, key } => (
-                "audio/mpeg",
+                mp3_oder_wav,
                 match cache_dir {
-                    Some(dir) => crate::azure_tts::synthesize(region, key, ssml, dir).await?,
+                    Some(dir) => {
+                        crate::azure_tts::synthesize(region, key, ssml, dir, format).await?
+                    }
                     None => (
-                        crate::azure_tts::synthesize_ohne_cache(region, key, ssml).await?,
+                        crate::azure_tts::synthesize_ohne_cache(region, key, ssml, format).await?,
                         false,
                     ),
                 },
             ),
             Self::ElevenLabs { key, voice, modell } => (
-                "audio/mpeg",
-                crate::elevenlabs_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+                mp3_oder_wav,
+                crate::elevenlabs_tts::vertonen(key, voice, modell, ssml, cache_dir, format)
+                    .await?,
             ),
             Self::OpenAi { key, voice, modell } => (
-                "audio/mpeg",
-                crate::openai_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+                mp3_oder_wav,
+                crate::openai_tts::vertonen(key, voice, modell, ssml, cache_dir, format).await?,
             ),
             Self::Gemini { key, voice, modell } => (
                 "audio/wav",
-                crate::gemini_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+                crate::gemini_tts::vertonen(key, voice, modell, ssml, cache_dir, format).await?,
             ),
         };
         Ok(Vertont {
@@ -1350,11 +1487,23 @@ fn xml_attr(s: &str) -> String {
 
 /// Vorrangregel (ADR 0003): vollständige lokale Config gewinnt, sonst die vom
 /// Master geerbte. `None`, wenn keine von beiden nutzbar ist.
+#[cfg(test)]
 fn effective_tts(
     local: &crate::config::AzureTtsConfig,
     inherited: Option<&relay_proto::AzureTtsShare>,
 ) -> Option<TtsZiel> {
-    tts_ziel_lokal(local).or_else(|| inherited.and_then(tts_ziel_geerbt))
+    effective_tts_mit_teilen(local, inherited).map(|(z, _)| z)
+}
+
+/// Wie [`effective_tts`], dazu der Schalter „Ansage in Teilen" aus derselben
+/// Quelle wie das Ziel (lokal oder vom Master geerbt, T8).
+fn effective_tts_mit_teilen(
+    local: &crate::config::AzureTtsConfig,
+    inherited: Option<&relay_proto::AzureTtsShare>,
+) -> Option<(TtsZiel, bool)> {
+    tts_ziel_lokal(local)
+        .map(|z| (z, local.teile))
+        .or_else(|| inherited.and_then(|a| tts_ziel_geerbt(a).map(|z| (z, a.teile))))
 }
 
 /// Was vor dem Start der Übertragung stimmen muss. Reine Funktion, damit die
@@ -4485,7 +4634,9 @@ pub async fn ansage_vertonen(
     // Nur die eigene Config: Der Vertoner läuft nie am Slave, geerbte
     // Zugangsdaten spielen hier keine Rolle.
     let audio = match (ssml, tts_ziel_lokal(&cfg.azure_tts)) {
-        (Some(ssml), Some(ziel)) => seiten_cloud_audio(&app, &state, &ziel, &ssml).await,
+        (Some(ssml), Some(ziel)) => {
+            seiten_cloud_audio(&app, &state, &ziel, &ssml, cfg.azure_tts.teile).await
+        }
         _ => None,
     };
     // Ohne Azure (oder wenn Azure scheitert) die Windows-Stimme des PCs
@@ -4511,8 +4662,24 @@ async fn seiten_cloud_audio(
     state: &State<'_, AppState>,
     ziel: &TtsZiel,
     ssml: &str,
+    teilen: bool,
 ) -> Option<(String, Vec<u8>)> {
     let app_dir = app.path().app_data_dir().ok();
+    // Spec `ansage-in-teilen`: Teile nur im Arbeitsspeicher (T5, Kriterium 5).
+    if let Some(teile) = teilen
+        .then(|| crate::tts_teile::teile_aus_ssml(ssml))
+        .flatten()
+    {
+        match in_teilen_vertonen(ziel, &teile, TeileCache::Ram(&state.seiten_cache)).await {
+            Ok(e) => {
+                if let Some(dir) = &app_dir {
+                    verbrauch_buchen_zeichen(dir, ziel, e.zeichen_neu, e.alle_aus_cache);
+                }
+                return Some(("audio/wav".to_string(), e.wav));
+            }
+            Err(e) => tracing::warn!("Ansage-Seite: Teile gescheitert, vertone als Ganzes: {e}"),
+        }
+    }
     let schluessel = ziel.seiten_cache_schluessel(ssml);
     let treffer = state
         .seiten_cache
@@ -7115,6 +7282,7 @@ mod tests {
                 "openai_key",
                 "openai_voice",
                 "region",
+                "teile",
                 "voice"
             ]
         );
@@ -9109,5 +9277,141 @@ mod tp_upload_tests {
             assert!(v.get(k).is_some(), "Schlüssel {k}");
         }
         assert!(v.get("takt").is_none() && v.get("merker").is_none());
+    }
+}
+
+/// Spec `ansage-in-teilen`: Teile-Kern mit Zähler-Mock statt Netz.
+#[cfg(test)]
+mod teile_tests {
+    use super::*;
+
+    fn teil_wav(n: usize) -> Vec<u8> {
+        let roh: Vec<u8> = (0..n)
+            .flat_map(|i| (((i % 50) as i16 - 25) * 400).to_le_bytes())
+            .collect();
+        crate::tts_teile::wav_aus_pcm16(&roh, 24_000)
+    }
+
+    fn ssml_teil(text: &str) -> String {
+        format!("<speak><voice name=\"v\">{text}</voice></speak>")
+    }
+
+    /// Vertont zwei Ansagen über den RAM-Weg und merkt sich jede Anfrage.
+    #[tokio::test]
+    async fn teile_zweite_ansage_fragt_nur_die_neuen_namen_an() {
+        let cache = Mutex::new(crate::tts_verbrauch::SeitenCache::default());
+        let anfragen: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
+        let ansage = |namen1: &str, namen2: &str| -> Vec<String> {
+            [
+                "Feld 3.",
+                "Herrendoppel.",
+                "Viertelfinale.",
+                namen1,
+                "gegen",
+                namen2,
+            ]
+            .iter()
+            .map(|t| ssml_teil(t))
+            .collect()
+        };
+        let lauf = |teile: Vec<String>| {
+            let cache = &cache;
+            let anfragen = &anfragen;
+            async move {
+                let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+                teile_zusammenbauen(&teile, &schluessel, TeileCache::Ram(cache), |teil, dir| {
+                    // Kriterium 5: der RAM-Weg reicht nie ein Plattenverzeichnis durch.
+                    anfragen
+                        .lock()
+                        .unwrap()
+                        .push((teil.to_string(), dir.is_some()));
+                    async move {
+                        Ok(Vertont {
+                            mime: "audio/wav",
+                            bytes: teil_wav(2_400),
+                            aus_cache: false,
+                        })
+                    }
+                })
+                .await
+                .unwrap()
+            }
+        };
+
+        let erste = ansage("Anna Muster und Ben Beispiel", "Cem Test und Dana Probe");
+        let e1 = lauf(erste.clone()).await;
+        assert_eq!(anfragen.lock().unwrap().len(), 6);
+        assert!(!e1.alle_aus_cache);
+        // Kriterium 6: es zählen genau die neu vertonten Teile.
+        let summe: u64 = erste.iter().map(|t| ansage_zeichen(t)).sum();
+        assert_eq!(e1.zeichen_neu, summe);
+        assert!(crate::tts_teile::pcm_aus_wav(&e1.wav).is_some());
+
+        anfragen.lock().unwrap().clear();
+        let zweite = ansage("Eva Neu und Finn Neu", "Gina Neu und Hans Neu");
+        let e2 = lauf(zweite.clone()).await;
+        let a = anfragen.lock().unwrap().clone();
+        // Kriterium 2: nur die beiden Namen-Teile gehen an den Anbieter.
+        assert_eq!(
+            a.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
+            vec![zweite[3].clone(), zweite[5].clone()]
+        );
+        assert!(a.iter().all(|(_, platte)| !platte));
+        assert_eq!(
+            e2.zeichen_neu,
+            ansage_zeichen(&zweite[3]) + ansage_zeichen(&zweite[5])
+        );
+
+        anfragen.lock().unwrap().clear();
+        let e3 = lauf(zweite).await;
+        assert!(anfragen.lock().unwrap().is_empty());
+        assert!(e3.alle_aus_cache);
+        assert_eq!(e3.zeichen_neu, 0);
+    }
+
+    #[tokio::test]
+    async fn teile_scheitert_ganz_wenn_ein_teil_scheitert() {
+        let dir = std::env::temp_dir();
+        let teile: Vec<String> = ["Feld 1.", "kaputt"].iter().map(|t| ssml_teil(t)).collect();
+        let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+        let erg = teile_zusammenbauen(&teile, &schluessel, TeileCache::Platte(&dir), |teil, d| {
+            assert!(d.is_some(), "PC-Weg nutzt den Plattencache");
+            let kaputt = teil.contains("kaputt");
+            async move {
+                if kaputt {
+                    Err("Anbieter 500".to_string())
+                } else {
+                    Ok(Vertont {
+                        mime: "audio/wav",
+                        bytes: teil_wav(2_400),
+                        aus_cache: true,
+                    })
+                }
+            }
+        })
+        .await;
+        let fehler = erg.err().expect("halbe Ansage darf nicht entstehen");
+        assert!(fehler.contains("Teil 2"), "{fehler}");
+    }
+
+    #[tokio::test]
+    async fn teile_aus_dem_plattencache_kosten_nichts() {
+        let dir = std::env::temp_dir();
+        let teile: Vec<String> = ["Feld 1.", "Neu"].iter().map(|t| ssml_teil(t)).collect();
+        let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+        let e = teile_zusammenbauen(&teile, &schluessel, TeileCache::Platte(&dir), |teil, _| {
+            let neu = teil.contains("Neu");
+            async move {
+                Ok(Vertont {
+                    mime: "audio/wav",
+                    bytes: teil_wav(2_400),
+                    aus_cache: !neu,
+                })
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!e.alle_aus_cache);
+        assert_eq!(e.zeichen_neu, ansage_zeichen(&teile[1]));
     }
 }

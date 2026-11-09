@@ -1049,6 +1049,25 @@ Einrichten nicht ihre Stimme.
   „Cloud-Stimme: Zeichen verbraucht" mit dem Tagesstand.
   <!-- pruef: "Verbrauch der Cloud-Stimme" in src/components/AnnounceSettings.tsx -->
   <!-- pruef: "tts-zeichen.json" in src-tauri/src/tts_verbrauch.rs -->
+- **Ansage in Teilen vertonen (seit v0.9.366, Standard aus):** Häkchen
+  **„Ansage in Teilen vertonen (spart Zeichen)"** im Cloud-Stimmen-Block,
+  wirkt sofort wie die Dienstwahl und gilt für jeden Dienst. Die Ansage wird
+  an ihren Blockpausen geschnitten („Feld 3." · „Herrendoppel." ·
+  „Viertelfinale." · Namen · „gegen" · Namen), jeder Teil einzeln vertont und
+  gecacht — Feld, Disziplin und Runde kosten dann nur beim ersten Mal, danach
+  nur noch die neuen Namen. Geschätzt **50–60 % weniger Zeichen** je
+  Turniertag. Die Teile werden zu einer WAV zusammengesetzt, Randstille
+  gekürzt, dazwischen genau 350 ms Pause. Grenzen: Die Stimme kann zwischen
+  den Teilen leicht anders klingen (vor allem ElevenLabs v3) — darum vorher
+  anhören; beim ersten Mal bis zu acht gleichzeitige Anfragen je Ansage (die
+  Gemini-Gratisstufe reicht dafür nicht). Scheitert ein Teil, wird die
+  Ansage als Ganzes vertont, nie halb gespielt. Ein Ansage-Slave mit geerbter
+  Stimme übernimmt den Schalter vom Master. Ansage-Seiten cachen die Teile
+  weiterhin nur im Arbeitsspeicher. Der Verbrauchszähler bucht nur die neu
+  vertonten Teile; eine Ansage zählt „aus Cache", wenn alle Teile von dort
+  kamen. Spec: [features/ansage-in-teilen.md](features/ansage-in-teilen.md).
+  <!-- pruef: "Ansage in Teilen vertonen (spart Zeichen)" in src/components/AnnounceSettings.tsx -->
+  <!-- pruef: "teile: false" in src-tauri/src/config.rs -->
 - **Datenschutz:** Bei Auswahl eines dieser Dienste gehen die Namen der
   gerufenen Paarung an den Anbieter (alle drei USA) — nur nach aktiver
   Auswahl, Hinweis im Block.
@@ -1069,6 +1088,13 @@ rohes PCM würde zu WAV). Der Command heißt aus Kompatibilität weiter
 `*_key`/`*_voice`. Messwerkzeuge gegen die echten Dienste (kosten Kontingent):
 `ELEVENLABS_TEST_KEY=… cargo test --lib elevenlabs_echt -- --ignored`, ebenso
 `OPENAI_TEST_KEY` + `openai_echt` und `GEMINI_TEST_KEY` + `gemini_echt`.
+Geteilte Ansage: [`tts_teile.rs`](../src-tauri/src/tts_teile.rs) schneidet das
+SSML an `<break time="350ms"/>` (offenes `<prosody>` wird je Teil ergänzt) und
+setzt PCM 24 kHz mono 16 bit wieder zusammen; `in_teilen_vertonen`
+(`commands.rs`) fragt fehlende Teile gleichzeitig im Format `Format::Wav24`
+an (eigene Cache-Einträge, nie mit MP3 vermischt). Schalter
+`azure_tts.teile`, in der Share `AzureTtsShare.teile` (serde-Default aus).
+Messwerkzeug: `ELEVENLABS_TEST_KEY=… cargo test --lib elevenlabs_teile_echt -- --ignored`.
 
 ## Schiedsrichter und Aufschlagrichter
 

@@ -93,6 +93,9 @@ export interface AzureTtsConfig {
   /** Gemini-Schlüssel aus Google AI Studio (Secret) und Stimme (z. B. „Kore"). */
   gemini_key?: string;
   gemini_voice?: string;
+  /** Ansage in Teilen vertonen und je Teil cachen (Spec `ansage-in-teilen`,
+   *  spart Zeichen); Standard aus. */
+  teile?: boolean;
 }
 
 /** Ergebnis von „Dienste prüfen" je Sprachdienst (Rust: commands::DienstPruefung). */

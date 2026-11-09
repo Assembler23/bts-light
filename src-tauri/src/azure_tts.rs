@@ -6,8 +6,12 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::tts_text::Format;
+
 /// MP3-Ausgabeformat (klein, gut genug für eine Hallen-Ansage).
 const OUTPUT_FORMAT: &str = "audio-24khz-48kbitrate-mono-mp3";
+/// WAV für die Teile einer geteilten Ansage (Spec `ansage-in-teilen`).
+const OUTPUT_FORMAT_WAV: &str = "riff-24khz-16bit-mono-pcm";
 
 /// Cache-Dateiname aus dem SSML (inkl. Stimme, die im SSML steckt). FNV-1a —
 /// bewusst NICHT `DefaultHasher` (dessen Ergebnis ist über Rust-Versionen/
@@ -31,14 +35,21 @@ pub async fn synthesize(
     key: &str,
     ssml: &str,
     cache_dir: &Path,
+    format: Format,
 ) -> Result<(Vec<u8>, bool), String> {
-    let cached = cache_dir.join(cache_name(ssml));
+    // WAV-Teile bekommen einen eigenen Namen, damit sie nie als MP3 gelten.
+    let cached = match format {
+        Format::Mp3 => cache_dir.join(cache_name(ssml)),
+        Format::Wav24 => {
+            cache_dir.join(cache_name(&format!("wav24|{ssml}")).replace(".mp3", ".wav"))
+        }
+    };
     if let Ok(bytes) = std::fs::read(&cached) {
         if !bytes.is_empty() {
             return Ok((bytes, true));
         }
     }
-    let bytes = synthesize_ohne_cache(region, key, ssml).await?;
+    let bytes = synthesize_ohne_cache(region, key, ssml, format).await?;
     // Best-effort cachen (Fehler beim Schreiben sind nicht fatal).
     let _ = std::fs::create_dir_all(cache_dir);
     let _ = std::fs::write(&cached, &bytes);
@@ -48,7 +59,12 @@ pub async fn synthesize(
 /// Wie [`synthesize`], aber **ohne** Plattencache — für die Ansage-Seiten
 /// (Spec `ansage-im-browser`): Deren Audio enthält Spielernamen und darf nur
 /// 60 s im RAM leben, nie auf der Platte.
-pub async fn synthesize_ohne_cache(region: &str, key: &str, ssml: &str) -> Result<Vec<u8>, String> {
+pub async fn synthesize_ohne_cache(
+    region: &str,
+    key: &str,
+    ssml: &str,
+    format: Format,
+) -> Result<Vec<u8>, String> {
     let url = format!("https://{region}.tts.speech.microsoft.com/cognitiveservices/v1");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -58,7 +74,13 @@ pub async fn synthesize_ohne_cache(region: &str, key: &str, ssml: &str) -> Resul
         .post(&url)
         .header("Ocp-Apim-Subscription-Key", key)
         .header("Content-Type", "application/ssml+xml")
-        .header("X-Microsoft-OutputFormat", OUTPUT_FORMAT)
+        .header(
+            "X-Microsoft-OutputFormat",
+            match format {
+                Format::Mp3 => OUTPUT_FORMAT,
+                Format::Wav24 => OUTPUT_FORMAT_WAV,
+            },
+        )
         .header("User-Agent", "bts-light")
         .body(ssml.to_string())
         .send()

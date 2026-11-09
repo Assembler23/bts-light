@@ -275,6 +275,13 @@ Cloud-Stimme dort zwischen **Azure**, **ElevenLabs**, **OpenAI** und
 **Gemini** umschalten (Auswahl **Sprachdienst**, wirkt sofort, sobald der
 Dienst eingerichtet ist); Details:
 [Weitere Sprachdienste](announcements.md#weitere-sprachdienste-elevenlabs-openai-gemini-seit-v09336).
+Darunter steht seit v0.9.366 das Häkchen **Ansage in Teilen vertonen (spart
+Zeichen)** — **voreingestellt aus**, wirkt sofort. Es vertont Feld,
+Disziplin, Runde und Namen einzeln, sodass Wiederholungen nichts mehr kosten;
+die Stimme kann zwischen den Teilen leicht anders klingen, deshalb vorher
+anhören.
+<!-- pruef: "Ansage in Teilen vertonen (spart Zeichen)" in src/components/AnnounceSettings.tsx -->
+<!-- pruef: "teile: false" in src-tauri/src/config.rs -->
 
 Der Schalter wirkt **sofort**, ohne Neustart; eine laufende Ansage wird beim
 Ausschalten abgebrochen.
