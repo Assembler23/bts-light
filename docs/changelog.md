@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.356
+
+- **Vorbereitung Rotationsmodus (Schiedsrichter).** Unsichtbarer Unterbau für
+  die drei Einteilungsprinzipien (getrennte Listen, abwechselnd,
+  Rollenwechsel; ADR 0079): Einstellung `officials.rotation_mode` (Standard
+  „Abwechselnd"), Einsatzrolle je Official und eine eigene AR-Liste. Am
+  Verhalten der Rotation ändert sich in dieser Version noch nichts.
+
 ## v0.9.355
 
 - **Schiedsrichter in der TL-Web-Warteliste einteilen.** Im ⋮-Menü jeder

@@ -28,6 +28,7 @@ use std::sync::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 
 use crate::btp::model::{BtpMatch, BtpPlayer, BtpSnapshot, MatchStatus};
+use crate::config::RotationMode;
 
 /// Warum ein Official nicht zu einem Spiel passt. Mehr Kategorien braucht
 /// die Anzeige nicht — der *Grund* (welcher Verein, welcher Spieler) bleibt
@@ -213,6 +214,53 @@ pub enum OfficialRole {
     Ar,
 }
 
+/// Was eine Person übernehmen darf (Spec `sr-rotationsmodus`, ADR 0079).
+/// Gilt in allen Rotationsmodi: Die Automatik setzt niemanden in einen
+/// Dienst, den seine Rolle nicht erlaubt. Eine Handeinteilung dagegen bleibt
+/// möglich (nur Warnung).
+///
+/// Bewusst nicht `OfficialRole` genannt — das ist im Code schon der Dienst.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Einsatzrolle {
+    /// SR und AR (Standard).
+    #[default]
+    #[serde(rename = "beides")]
+    Beides,
+    /// Nur Schiedsrichter.
+    #[serde(rename = "sr")]
+    NurSr,
+    /// Nur Aufschlagrichter.
+    #[serde(rename = "ar")]
+    NurAr,
+}
+
+impl Einsatzrolle {
+    /// Darf die Person diesen Dienst übernehmen?
+    pub fn erlaubt(self, dienst: OfficialRole) -> bool {
+        match self {
+            Einsatzrolle::Beides => true,
+            Einsatzrolle::NurSr => dienst == OfficialRole::Sr,
+            Einsatzrolle::NurAr => dienst == OfficialRole::Ar,
+        }
+    }
+
+    /// Standardrolle? (Für `skip_serializing_if` — „beides" steht nicht in
+    /// der Datei, damit leere Zusatzdaten leer bleiben.)
+    pub fn ist_beides(&self) -> bool {
+        *self == Einsatzrolle::Beides
+    }
+}
+
+/// Welche Rotationsliste gemeint ist. In Modus A (getrennt) gibt es eine
+/// eigene AR-Liste; sonst wirkt alles auf die gemeinsame Hauptliste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reihenfolge {
+    /// Gemeinsame Liste (B/C) bzw. SR-Liste (A).
+    Haupt,
+    /// AR-Liste (nur Modus A).
+    Ar,
+}
+
 /// Zusatzdaten je Official — alles, was BTP nicht liefert.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -228,6 +276,10 @@ pub struct OfficialExtra {
     pub blocked_clubs: Vec<String>,
     /// Gesperrte Spieler (BTP-`PlayerID`; Personendaten).
     pub blocked_players: Vec<i64>,
+    /// Was die Person übernehmen darf (ADR 0079). Fehlt in älteren Dateien
+    /// ⇒ „beides"; „beides" wird nicht geschrieben.
+    #[serde(skip_serializing_if = "Einsatzrolle::ist_beides")]
+    pub role: Einsatzrolle,
 }
 
 impl OfficialExtra {
@@ -238,6 +290,7 @@ impl OfficialExtra {
             && self.club.is_empty()
             && self.blocked_clubs.is_empty()
             && self.blocked_players.is_empty()
+            && self.role.ist_beides()
     }
 }
 
@@ -566,9 +619,16 @@ struct OfficialsFile {
     /// BTP-Turniername (Setting 1001) — der Schlüssel des Stands.
     #[serde(default)]
     tournament: String,
-    /// Rotationsreihenfolge (Official-IDs).
+    /// Rotationsreihenfolge (Official-IDs). In Modus A die SR-Liste, sonst
+    /// die gemeinsame Liste.
     #[serde(default)]
     order: Vec<i64>,
+    /// Eigene AR-Liste für Modus A (ADR 0079). `None` = noch nie gebraucht;
+    /// gelesen wird dann eine Kopie von `order`. Angelegt wird sie erst beim
+    /// ersten Schreibbedarf — so entsteht keine Migration, und eine ältere
+    /// App liest die Datei weiter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    order_ar: Option<Vec<i64>>,
     /// Official-ID → Zusatzdaten.
     #[serde(default)]
     extras: HashMap<i64, OfficialExtra>,
@@ -617,6 +677,10 @@ pub struct OfficialsStore {
     enabled: RwLock<bool>,
     /// Automatische Rotation (SR, AR) — ebenfalls Spiegel der Konfiguration.
     rotation: RwLock<(bool, bool)>,
+    /// Einteilungsprinzip (ADR 0079) — Spiegel der Konfiguration, aus
+    /// demselben Grund wie `rotation`: Der Sync-Lauf liest seine Config nie
+    /// neu.
+    rotation_mode: RwLock<RotationMode>,
     inner: Mutex<Inner>,
     /// Serialisiert die Dateizugriffe (Muster `scores_persist_lock`).
     persist_lock: Mutex<()>,
@@ -707,6 +771,18 @@ impl OfficialsStore {
         *self.rotation.write().unwrap() = (sr, ar);
     }
 
+    /// Einteilungsprinzip der Rotation (ADR 0079).
+    pub fn rotation_mode(&self) -> RotationMode {
+        *self.rotation_mode.read().unwrap()
+    }
+
+    /// Einteilungsprinzip setzen (beim Start und beim Speichern der
+    /// Einstellungen). Wirkt ab der nächsten Besetzung; es werden keine
+    /// Daten umgebaut.
+    pub fn set_rotation_mode(&self, mode: RotationMode) {
+        *self.rotation_mode.write().unwrap() = mode;
+    }
+
     /// Turnier, zu dem der aktuelle Stand gehört (leer = noch keins).
     pub fn tournament(&self) -> String {
         self.inner.lock().unwrap().file.tournament.clone()
@@ -736,6 +812,11 @@ impl OfficialsStore {
     pub fn set_club(&self, official_id: i64, club: &str) {
         let club = club.trim().to_string();
         self.mit_extra(official_id, |e| e.club = club);
+    }
+
+    /// Rolle setzen (beides / nur SR / nur AR, ADR 0079).
+    pub fn set_role(&self, official_id: i64, role: Einsatzrolle) {
+        self.mit_extra(official_id, |e| e.role = role);
     }
 
     /// Sperrlisten setzen (ersetzen beide Listen).
@@ -772,6 +853,12 @@ impl OfficialsStore {
         self.inner.lock().unwrap().file.order.clone()
     }
 
+    /// Die AR-Liste (Modus A). Gibt es sie noch nicht, gilt eine Kopie der
+    /// Hauptliste. Lesen legt nichts an und speichert nichts.
+    pub fn order_ar(&self) -> Vec<i64> {
+        ar_liste(&self.inner.lock().unwrap().file)
+    }
+
     /// Reihenfolge komplett setzen (manuelles Umsortieren).
     pub fn set_order(&self, order: Vec<i64>) {
         {
@@ -798,6 +885,16 @@ impl OfficialsStore {
             }
             if neu.is_empty() {
                 return;
+            }
+            // Eine schon angelegte AR-Liste bekommt die Neuen ebenfalls
+            // hinten (ohne Doppel) — sonst fehlten sie dort bis zur
+            // Selbstheilung beim Lesen.
+            if let Some(ar) = inner.file.order_ar.as_mut() {
+                for id in &neu {
+                    if !ar.contains(id) {
+                        ar.push(*id);
+                    }
+                }
             }
             inner.file.order.extend(neu);
         }
@@ -986,30 +1083,34 @@ impl OfficialsStore {
         None
     }
 
-    /// Einen Official in der Reihenfolge vor einen anderen ziehen
+    /// Einen Official in der Hauptliste vor einen anderen ziehen
     /// (`before = None` ⇒ ans Ende). Unbekannte IDs ändern nichts.
     pub fn reorder(&self, official_id: i64, before: Option<i64>) {
+        self.reorder_in(Reihenfolge::Haupt, official_id, before);
+    }
+
+    /// Wie [`reorder`](Self::reorder), aber in der gewählten Liste. Die
+    /// AR-Liste wird dabei bei Bedarf als Kopie der Hauptliste angelegt; die
+    /// jeweils andere Liste bleibt unberührt.
+    pub fn reorder_in(&self, liste: Reihenfolge, official_id: i64, before: Option<i64>) {
         {
             let mut inner = self.inner.lock().unwrap();
-            let order = &mut inner.file.order;
-            let Some(von) = order.iter().position(|id| *id == official_id) else {
-                return;
+            let file = &mut inner.file;
+            if liste == Reihenfolge::Ar {
+                // Eine unbekannte ID darf keine AR-Liste anlegen.
+                if !ar_liste(file).contains(&official_id) {
+                    return;
+                }
+                let geheilt = ar_liste(file);
+                file.order_ar = Some(geheilt);
+            }
+            let order = match liste {
+                Reihenfolge::Haupt => &mut file.order,
+                Reihenfolge::Ar => file.order_ar.as_mut().expect("eben angelegt"),
             };
-            // Vor sich selbst ziehen ist keine Bewegung.
-            if before == Some(official_id) {
+            if !verschiebe(order, official_id, before) {
                 return;
             }
-            let ziel = match before {
-                Some(b) => match order.iter().position(|id| *id == b) {
-                    Some(p) => p,
-                    None => return, // unbekanntes Ziel ⇒ lieber nichts tun
-                },
-                None => order.len(),
-            };
-            let id = order.remove(von);
-            // Nach dem Entfernen rutscht alles hinter `von` eine Stelle vor.
-            let ziel = if ziel > von { ziel - 1 } else { ziel };
-            order.insert(ziel, id);
         }
         self.persist();
     }
@@ -1199,6 +1300,48 @@ impl OfficialsStore {
             }
         }
     }
+}
+
+/// Die AR-Liste in ihrer wirksamen Form: die angelegte Liste, ergänzt um
+/// IDs der Hauptliste, die dort fehlen (etwa weil eine ältere App sie nicht
+/// pflegte) — oder, solange es keine gibt, eine Kopie der Hauptliste.
+fn ar_liste(file: &OfficialsFile) -> Vec<i64> {
+    match &file.order_ar {
+        None => file.order.clone(),
+        Some(ar) => {
+            let mut out = ar.clone();
+            for id in &file.order {
+                if !out.contains(id) {
+                    out.push(*id);
+                }
+            }
+            out
+        }
+    }
+}
+
+/// Verschiebt `id` vor `before` (`None` ⇒ ans Ende). `false`, wenn sich
+/// nichts geändert hat (unbekannte ID, unbekanntes Ziel, vor sich selbst).
+fn verschiebe(order: &mut Vec<i64>, id: i64, before: Option<i64>) -> bool {
+    let Some(von) = order.iter().position(|x| *x == id) else {
+        return false;
+    };
+    // Vor sich selbst ziehen ist keine Bewegung.
+    if before == Some(id) {
+        return false;
+    }
+    let ziel = match before {
+        Some(b) => match order.iter().position(|x| *x == b) {
+            Some(p) => p,
+            None => return false, // unbekanntes Ziel ⇒ lieber nichts tun
+        },
+        None => order.len(),
+    };
+    let id = order.remove(von);
+    // Nach dem Entfernen rutscht alles hinter `von` eine Stelle vor.
+    let ziel = if ziel > von { ziel - 1 } else { ziel };
+    order.insert(ziel, id);
+    true
 }
 
 #[cfg(test)]
@@ -1717,6 +1860,158 @@ mod tests {
         // Unbekannte IDs ändern nichts.
         store.move_to_end(&[99]);
         assert_eq!(store.order(), vec![1, 2, 3]);
+    }
+
+    // ── Rotationsmodus: Datenmodell (ADR 0079, PR 1) ──────────────────
+
+    fn datei_text(dir: &Path) -> String {
+        std::fs::read_to_string(dir.join("officials-state.json")).unwrap_or_default()
+    }
+
+    #[test]
+    fn rolle_erlaubt_nur_passende_dienste() {
+        use Einsatzrolle::*;
+        assert!(Beides.erlaubt(OfficialRole::Sr) && Beides.erlaubt(OfficialRole::Ar));
+        assert!(NurSr.erlaubt(OfficialRole::Sr) && !NurSr.erlaubt(OfficialRole::Ar));
+        assert!(NurAr.erlaubt(OfficialRole::Ar) && !NurAr.erlaubt(OfficialRole::Sr));
+        assert_eq!(serde_json::to_string(&NurSr).unwrap(), "\"sr\"");
+        assert_eq!(serde_json::to_string(&NurAr).unwrap(), "\"ar\"");
+        assert_eq!(serde_json::to_string(&Beides).unwrap(), "\"beides\"");
+    }
+
+    #[test]
+    fn rolle_ueberlebt_neustart_und_beides_hinterlaesst_keinen_eintrag() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.set_role(7, Einsatzrolle::NurAr);
+        let neu = store_mit_datei(dir.path());
+        assert_eq!(neu.extra(7).role, Einsatzrolle::NurAr);
+
+        // Zurück auf „beides" ohne weitere Zusatzdaten ⇒ Eintrag weg.
+        neu.set_role(7, Einsatzrolle::Beides);
+        assert!(
+            !datei_text(dir.path()).contains("\"7\""),
+            "leere Zusatzdaten werden nicht aufbewahrt"
+        );
+        assert!(!datei_text(dir.path()).contains("\"role\""));
+    }
+
+    #[test]
+    fn rolle_allein_haelt_den_eintrag_am_leben() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.set_paused(7, true);
+        store.set_role(7, Einsatzrolle::NurSr);
+        store.set_paused(7, false);
+        assert_eq!(store.extra(7).role, Einsatzrolle::NurSr);
+    }
+
+    #[test]
+    fn alte_datei_ohne_rolle_und_ar_liste_laedt_unveraendert() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("officials-state.json"),
+            r#"{"tournament":"Test BTS Light","order":[3,1,2],
+                "extras":{"1":{"paused":true,"blocked_clubs":["SC X"]}}}"#,
+        )
+        .unwrap();
+        let store = store_mit_datei(dir.path());
+        assert_eq!(store.order(), vec![3, 1, 2]);
+        assert_eq!(
+            store.order_ar(),
+            vec![3, 1, 2],
+            "ohne AR-Liste gilt die Kopie"
+        );
+        let e = store.extra(1);
+        assert!(e.paused);
+        assert_eq!(e.blocked_clubs, vec!["SC X".to_string()]);
+        assert_eq!(e.role, Einsatzrolle::Beides);
+    }
+
+    #[test]
+    fn ar_liste_lesen_legt_nichts_an() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        let vorher = datei_text(dir.path());
+        assert_eq!(store.order_ar(), vec![1, 2, 3]);
+        assert_eq!(datei_text(dir.path()), vorher);
+        assert!(!vorher.contains("order_ar"));
+    }
+
+    #[test]
+    fn ar_umsortieren_legt_kopie_an_und_laesst_hauptliste_stehen() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.reorder_in(Reihenfolge::Ar, 3, Some(1));
+        assert_eq!(store.order_ar(), vec![3, 1, 2]);
+        assert_eq!(store.order(), vec![1, 2, 3], "Hauptliste unberührt");
+        assert!(datei_text(dir.path()).contains("order_ar"));
+
+        // Umgekehrt: Hauptliste umsortieren lässt die AR-Liste stehen.
+        store.reorder_in(Reihenfolge::Haupt, 1, None);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        assert_eq!(store.order_ar(), vec![3, 1, 2]);
+
+        // Überlebt einen Neustart.
+        let neu = store_mit_datei(dir.path());
+        assert_eq!(neu.order_ar(), vec![3, 1, 2]);
+        assert_eq!(neu.order(), vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn ar_umsortieren_mit_unbekannter_id_oder_ziel_aendert_nichts() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.reorder_in(Reihenfolge::Ar, 99, Some(1));
+        store.reorder_in(Reihenfolge::Ar, 1, Some(99));
+        assert_eq!(store.order_ar(), vec![1, 2, 3]);
+        assert!(!datei_text(dir.path()).contains("order_ar"));
+    }
+
+    #[test]
+    fn neue_officials_kommen_an_beide_listen_ohne_doppel() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2]);
+        store.reorder_in(Reihenfolge::Ar, 2, Some(1));
+        store.sync_roster(&[1, 2, 3, 3]);
+        assert_eq!(store.order(), vec![1, 2, 3]);
+        assert_eq!(store.order_ar(), vec![2, 1, 3]);
+    }
+
+    #[test]
+    fn ar_liste_heilt_fehlende_ids_beim_lesen() {
+        let dir = tempfile::tempdir().unwrap();
+        // Eine ältere App hat `order` erweitert, `order_ar` aber nicht.
+        std::fs::write(
+            dir.path().join("officials-state.json"),
+            r#"{"tournament":"Test BTS Light","order":[1,2,3],"order_ar":[2,1]}"#,
+        )
+        .unwrap();
+        let store = store_mit_datei(dir.path());
+        assert_eq!(store.order_ar(), vec![2, 1, 3]);
+    }
+
+    #[test]
+    fn turnierwechsel_verwirft_die_ar_liste() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2]);
+        store.reorder_in(Reihenfolge::Ar, 2, Some(1));
+        store.set_tournament("Anderes Turnier");
+        assert!(store.order_ar().is_empty());
+        assert!(!datei_text(dir.path()).contains("order_ar"));
+    }
+
+    #[test]
+    fn rotationsmodus_ist_ein_laufzeit_spiegel() {
+        let store = OfficialsStore::default();
+        assert_eq!(store.rotation_mode(), RotationMode::Abwechselnd);
+        store.set_rotation_mode(RotationMode::Getrennt);
+        assert_eq!(store.rotation_mode(), RotationMode::Getrennt);
     }
 
     fn store_mit_datei(dir: &Path) -> OfficialsStore {

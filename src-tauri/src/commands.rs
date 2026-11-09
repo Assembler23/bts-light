@@ -491,6 +491,10 @@ pub fn save_config(
         .tablet
         .officials_store()
         .set_rotation(config.officials.rotation_sr, config.officials.rotation_ar);
+    state
+        .tablet
+        .officials_store()
+        .set_rotation_mode(config.officials.rotation_mode);
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = config;
     // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
     // (Hallen-Farben, Aufruf-Timer) — nach dem Speichern ist er überholt
@@ -2085,6 +2089,9 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     tablet
         .officials_store()
         .set_rotation(config.officials.rotation_sr, config.officials.rotation_ar);
+    tablet
+        .officials_store()
+        .set_rotation_mode(config.officials.rotation_mode);
     // Ausnahmeliste der automatischen Feldvergabe (Spec
     // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
     // kommt mit dem ersten Snapshot.
