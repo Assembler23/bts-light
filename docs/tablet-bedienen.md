@@ -28,6 +28,12 @@ Gerätetausch gibt es **Court übernehmen**; wer nur zuschauen will, wählt
 <!-- pruef: "Nur Spielstand anzeigen" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Dieses Feld wird bereits geschiedst" in src-tauri/assets/tablet.html -->
 
+**Die Kachel „Meetingpoint"** unter den Feldern ist nicht zum Zählen da: Sie
+macht das Tablet (nach der PIN) zur Meetingpoint-Anzeige für die Spieler
+und belegt kein Feld. Sie erscheint nur, wenn die Turnierleitung den
+Meetingpoint eingeschaltet hat. Siehe [Meetingpoint](meetingpoint.md).
+<!-- pruef: "PIN — antippen" in src-tauri/assets/lobby.html -->
+
 ## Ein Spiel aufsetzen
 
 Liegt ein Spiel auf dem Feld, zeigt die Kopfzeile eine **Aufruf-Uhr**:

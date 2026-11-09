@@ -853,8 +853,24 @@ Rahmen ein und liefert die Tablet-Bedienung dazu.
 - **Zahnrad** (dieselbe PIN wie am Tablet, im Cloud-Modus immer `0000`;
   nach richtiger Eingabe fünf Minuten lang ohne PIN, siehe
   [tablet-kiosk.md](tablet-kiosk.md)): Anzeige wählen · Feld wechseln ·
-  Ansicht (nur Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln · Neu
-  laden · Vollbild · Schließen.
+  Ansicht (nur Zähltafel, gemerkt je Gerät) · Zum Zählen wechseln · Zur
+  Feldwahl (nur im Hallennetz, seit v0.9.363) · Neu laden · Vollbild ·
+  Schließen.
+- **Zur Feldwahl** führt auf `/felder` und löscht dabei die Marke „zuletzt
+  Meetingpoint" im Merker der Hülle (`badhub.anzeige.zuletzt`, nur `layout`
+  → `tafel`, die Halle bleibt), damit auf einem wieder zählenden Tablet kein
+  „Zurück zum Meetingpoint" stehen bleibt. In der Cloud-Hülle (Basis
+  `/bts-relay/<ns>/`) fehlt der Eintrag — dort gibt es keine Feldwahl.
+- **Meetingpoint aus der Feldwahl** (seit v0.9.363, Spec
+  [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)):
+  `/felder` fragt alle 15 s `GET /meetingpoint/state` (ohne `halle`; 200 =
+  an, 404 = aus, Fehler = Stand bleibt) und zeigt danach die Kachel
+  „Meetingpoint" (PIN, geteilte 5-Minuten-Freigabe) bzw. — wenn der Merker
+  der Hülle `layout: "meetingpoint"` trägt — den PIN-freien Knopf „Zurück zum
+  Meetingpoint". Ziel ist `/anzeige?layout=meetingpoint` ohne `halle`, damit
+  der Hallen-Merker greift. Ein Feld-Tipp in der Lobby löscht die Marke
+  ebenso. Logik: `src/io/lobbyMeetingpoint.mjs` (Inline-Kopien in
+  `lobby.html`/`anzeige.html`, Drift-Test `scripts/test-inline-kopien.mjs`).
 - **Ansicht** (seit v0.9.292; davor getrennt „Seiten spiegeln" + „Anordnung",
   v0.9.283): Wo welches Team auf dem Bildschirm steht, ist **ein** Zyklus
   mit fünf Stufen — **automatisch** (folgt der Drehung: Hochformat →

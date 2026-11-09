@@ -1317,3 +1317,9 @@ Halle in der Seite selbst, meldet sie sie per `postMessage`
 (`bts-anzeige:meetingpoint-halle`) an die Hülle, die sie sich merkt. Die
 Meetingpoint-Seite schickt nie `bts-anzeige:naechste-ansicht` — ein Tipp
 checkt ein. Bedienung: [meetingpoint.md](meetingpoint.md).
+
+Seit v0.9.363 führt auch die Kachel **Meetingpoint** der Kiosk-Feldwahl
+(`/felder`) in dieses Layout, und das Zahnrad der Hülle hat im Hallennetz den
+Eintrag **Zur Feldwahl** (Spec
+[features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md),
+Details in [tablet.md](tablet.md#anzeige-hülle-anzeige-seit-v09275)).

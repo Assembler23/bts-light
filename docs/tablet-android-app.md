@@ -29,6 +29,11 @@ Hat die Suche den Turnier-PC gefunden, lädt die App
 eintragen. Die App selbst trifft keine Turnier-Entscheidungen — sie ist
 bewusst dumm und bleibt bei der Kiosk-Hülle.
 
+Nach einem WLAN-Aussetzer oder Ladefehler lädt die App wieder `/felder` —
+auch auf einem Tablet, das gerade eine Anzeige zeigte. Für ein am
+Meetingpoint ausgelegtes Tablet steht dann oben der Knopf **Zurück zum
+Meetingpoint** (ohne PIN, seit v0.9.363; siehe [meetingpoint.md](meetingpoint.md)).
+
 Als Gerätebesitzer sperrt die App das Tablet hart: keine Android-Buttons
 (Home, Zurück, Zuletzt), keine Statusleiste, keine anderen Apps, kein
 Zugriff auf fremde Adressen aus der geladenen Seite heraus. Der Bildschirm
