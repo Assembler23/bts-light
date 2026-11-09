@@ -3743,6 +3743,13 @@ pub struct PreparationCandidate {
     /// gerufenen Spielen und bei eingeschaltetem Meetingpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meetingpoint: Option<relay_proto::TlMeetingpoint>,
+    /// Schiedsrichter und Aufschlagrichter eines **gerufenen** Spiels
+    /// (Sicht „Hand vor BTP", ADR 0080) — Marke in der Liste und Namen für
+    /// den Knopf „Ansage". Leer an nicht gerufenen Spielen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sr: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ar: Vec<String>,
 }
 
 /// Rückgabe von [`preparation_candidates`]: die Kandidaten-Spiele und die
@@ -3900,6 +3907,11 @@ pub fn preparation_candidates_for(
                 }
             });
             let manual = tablet.queue_order_store().rank(m.id).is_some();
+            let (sr, ar) = if call.is_some() {
+                crate::tablet::meetingpoint::besetzung_namen(tablet, &snapshot, m.id)
+            } else {
+                (Vec::new(), Vec::new())
+            };
             PreparationCandidate {
                 match_id: m.id,
                 label: format!("{} {}", m.draw_name, m.round_name)
@@ -3928,6 +3940,8 @@ pub fn preparation_candidates_for(
                 excluded: tablet.auto_assign_excluded(m.id),
                 hall,
                 manual,
+                sr,
+                ar,
             }
         })
         .collect();
