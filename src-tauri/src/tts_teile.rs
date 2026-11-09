@@ -115,7 +115,9 @@ pub fn pcm_aus_wav(wav: &[u8]) -> Option<(Vec<i16>, u32)> {
                 let format = u16::from_le_bytes([f[0], f[1]]);
                 let kanaele = u16::from_le_bytes([f[2], f[3]]);
                 let bits = u16::from_le_bytes([f[14], f[15]]);
-                if format != 1 || kanaele != 1 || bits != 16 {
+                // 1 = PCM; 0xFFFE = WAVE_FORMAT_EXTENSIBLE (bei 16 bit mono
+                // ebenfalls schlichtes PCM, manche Dienste schreiben ihn so).
+                if !matches!(format, 1 | 0xFFFE) || kanaele != 1 || bits != 16 {
                     return None;
                 }
                 rate = Some(u32::from_le_bytes(f[4..8].try_into().ok()?));
@@ -313,4 +315,16 @@ mod tests {
         assert!(zusammensetzen(&[teil(10), fremd]).is_err());
         assert!(zusammensetzen(&[b"kaputt".to_vec()]).is_err());
     }
+
+    #[test]
+    fn wav_mit_erweitertem_kopf_wird_gelesen() {
+        let mut wav = wav_aus_pcm16(&[1, 0, 2, 0], 24_000);
+        // Format-Feld im fmt-Chunk auf WAVE_FORMAT_EXTENSIBLE setzen.
+        let fmt = wav.windows(4).position(|w| w == b"fmt ").unwrap() + 8;
+        wav[fmt..fmt + 2].copy_from_slice(&0xFFFEu16.to_le_bytes());
+        assert_eq!(pcm_aus_wav(&wav), Some((vec![1, 2], 24_000)));
+        wav[fmt..fmt + 2].copy_from_slice(&3u16.to_le_bytes());
+        assert_eq!(pcm_aus_wav(&wav), None, "Gleitkomma bleibt abgelehnt");
+    }
 }
+

@@ -1028,7 +1028,15 @@ pub async fn azure_tts_speak(
                 verbrauch_buchen_zeichen(&app_dir, &ziel, e.zeichen_neu, e.alle_aus_cache);
                 return Ok(base64::engine::general_purpose::STANDARD.encode(e.wav));
             }
-            Err(e) => tracing::warn!("Ansage in Teilen gescheitert, vertone als Ganzes: {e}"),
+            Err(e) => {
+                if e.zeichen_neu > 0 {
+                    verbrauch_buchen_zeichen(&app_dir, &ziel, e.zeichen_neu, false);
+                }
+                tracing::warn!(
+                    "Ansage in Teilen gescheitert, vertone als Ganzes: {}",
+                    e.meldung
+                );
+            }
         }
     }
     let v = ziel.vertonen(&ssml, Some(&cache_dir)).await?;
@@ -1051,6 +1059,17 @@ struct TeileErgebnis {
     alle_aus_cache: bool,
 }
 
+/// Gescheiterte geteilte Vertonung; `zeichen_neu` = schon bezahlte Teile,
+/// die trotzdem in den Zähler gehören (danach kommt die ganze Ansage).
+#[derive(Debug)]
+struct TeileFehler {
+    meldung: String,
+    zeichen_neu: u64,
+}
+
+/// Wie viele Teile einer Ansage höchstens gleichzeitig beim Anbieter liegen.
+const TEILE_GLEICHZEITIG: usize = 3;
+
 /// Vertont die Teile (fehlende gleichzeitig), cacht jeden Teil und setzt sie
 /// zu einer WAV zusammen (Spec `ansage-in-teilen`, T4–T7). Scheitert ein
 /// Teil, scheitert das Ganze — nie eine halbe Ansage.
@@ -1058,7 +1077,7 @@ async fn in_teilen_vertonen(
     ziel: &TtsZiel,
     teile: &[String],
     cache: TeileCache<'_>,
-) -> Result<TeileErgebnis, String> {
+) -> Result<TeileErgebnis, TeileFehler> {
     let ram_schluessel: Vec<String> = teile
         .iter()
         .map(|t| ziel.seiten_cache_schluessel(&format!("teil-wav24|{t}")))
@@ -1076,7 +1095,7 @@ async fn teile_zusammenbauen<'a, F, Fut>(
     ram_schluessel: &[String],
     cache: TeileCache<'a>,
     vertone: F,
-) -> Result<TeileErgebnis, String>
+) -> Result<TeileErgebnis, TeileFehler>
 where
     F: Fn(&'a str, Option<&'a std::path::Path>) -> Fut,
     Fut: std::future::Future<Output = Result<Vertont, String>>,
@@ -1096,13 +1115,36 @@ where
         TeileCache::Platte(d) => Some(*d),
         TeileCache::Ram(_) => None,
     };
-    let fehlend: Vec<usize> = (0..teile.len()).filter(|i| audio[*i].is_none()).collect();
-    let ergebnisse =
-        futures_util::future::join_all(fehlend.iter().map(|&i| vertone(teile[i].as_str(), dir)))
+    // Gleiche Teile („Feld 3." vorn und hinten) nur einmal anfragen und zahlen.
+    let mut fehlend: Vec<usize> = Vec::new();
+    for i in (0..teile.len()).filter(|i| audio[*i].is_none()) {
+        if !fehlend.iter().any(|&j| teile[j] == teile[i]) {
+            fehlend.push(i);
+        }
+    }
+    // Höchstens drei Anfragen gleichzeitig: kleine Tarife (ElevenLabs
+    // Free/Starter) lehnen mehr parallele Anfragen mit 429 ab.
+    use futures_util::StreamExt;
+    let ergebnisse: Vec<Result<Vertont, String>> =
+        futures_util::stream::iter(fehlend.iter().map(|&i| vertone(teile[i].as_str(), dir)))
+            .buffered(TEILE_GLEICHZEITIG)
+            .collect()
             .await;
+    // Erst alles Erfolgreiche ablegen und zählen, dann einen Fehler melden —
+    // sonst wären schon bezahlte Teile weder gecacht noch gebucht.
+    let mut zeichen_neu = 0;
+    let mut fehler = None;
     for (&i, erg) in fehlend.iter().zip(ergebnisse) {
-        let v = erg.map_err(|e| format!("Teil {}: {e}", i + 1))?;
-        aus_cache[i] = v.aus_cache;
+        let v = match erg {
+            Ok(v) => v,
+            Err(e) => {
+                fehler.get_or_insert(format!("Teil {}: {e}", i + 1));
+                continue;
+            }
+        };
+        if !v.aus_cache {
+            zeichen_neu += ansage_zeichen(&teile[i]);
+        }
         if let TeileCache::Ram(c) = &cache {
             c.lock()
                 .expect("seiten_cache-Mutex nicht vergiftet")
@@ -1113,18 +1155,25 @@ where
                     now_ms(),
                 );
         }
-        audio[i] = Some(v.bytes);
+        for j in (0..teile.len()).filter(|&j| audio[j].is_none() && teile[j] == teile[i]) {
+            audio[j] = Some(v.bytes.clone());
+            aus_cache[j] = v.aus_cache;
+        }
     }
-    let zeichen_neu = teile
-        .iter()
-        .zip(&aus_cache)
-        .filter(|(_, c)| !**c)
-        .map(|(t, _)| ansage_zeichen(t))
-        .sum();
+    if let Some(meldung) = fehler {
+        return Err(TeileFehler {
+            meldung,
+            zeichen_neu,
+        });
+    }
     let alle_aus_cache = aus_cache.iter().all(|c| *c);
     let wavs: Vec<Vec<u8>> = audio.into_iter().flatten().collect();
+    let wav = crate::tts_teile::zusammensetzen(&wavs).map_err(|meldung| TeileFehler {
+        meldung,
+        zeichen_neu,
+    })?;
     Ok(TeileErgebnis {
-        wav: crate::tts_teile::zusammensetzen(&wavs)?,
+        wav,
         zeichen_neu,
         alle_aus_cache,
     })
@@ -4677,7 +4726,15 @@ async fn seiten_cloud_audio(
                 }
                 return Some(("audio/wav".to_string(), e.wav));
             }
-            Err(e) => tracing::warn!("Ansage-Seite: Teile gescheitert, vertone als Ganzes: {e}"),
+            Err(e) => {
+                if let (Some(dir), true) = (&app_dir, e.zeichen_neu > 0) {
+                    verbrauch_buchen_zeichen(dir, ziel, e.zeichen_neu, false);
+                }
+                tracing::warn!(
+                    "Ansage-Seite: Teile gescheitert, vertone als Ganzes: {}",
+                    e.meldung
+                );
+            }
         }
     }
     let schluessel = ziel.seiten_cache_schluessel(ssml);
@@ -9391,7 +9448,7 @@ mod teile_tests {
         })
         .await;
         let fehler = erg.err().expect("halbe Ansage darf nicht entstehen");
-        assert!(fehler.contains("Teil 2"), "{fehler}");
+        assert!(fehler.meldung.contains("Teil 2"), "{}", fehler.meldung);
     }
 
     #[tokio::test]
@@ -9414,4 +9471,82 @@ mod teile_tests {
         assert!(!e.alle_aus_cache);
         assert_eq!(e.zeichen_neu, ansage_zeichen(&teile[1]));
     }
+
+    #[tokio::test]
+    async fn teile_gleiche_teile_nur_einmal_und_hoechstens_drei_gleichzeitig() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let cache = Mutex::new(crate::tts_verbrauch::SeitenCache::default());
+        let teile: Vec<String> = ["Feld 3.", "A", "B", "C", "D", "E", "Feld 3."]
+            .iter()
+            .map(|t| ssml_teil(t))
+            .collect();
+        let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+        let anfragen = AtomicUsize::new(0);
+        let laufend = AtomicUsize::new(0);
+        let spitze = AtomicUsize::new(0);
+        let e = teile_zusammenbauen(&teile, &schluessel, TeileCache::Ram(&cache), |_, _| {
+            anfragen.fetch_add(1, Ordering::SeqCst);
+            let (laufend, spitze) = (&laufend, &spitze);
+            async move {
+                let jetzt = laufend.fetch_add(1, Ordering::SeqCst) + 1;
+                spitze.fetch_max(jetzt, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                laufend.fetch_sub(1, Ordering::SeqCst);
+                Ok(Vertont {
+                    mime: "audio/wav",
+                    bytes: teil_wav(2_400),
+                    aus_cache: false,
+                })
+            }
+        })
+        .await
+        .unwrap();
+        // „Feld 3." vorn und hinten: eine Anfrage, einmal gezählt.
+        assert_eq!(anfragen.load(Ordering::SeqCst), 6);
+        let einmal: u64 = teile[..6].iter().map(|t| ansage_zeichen(t)).sum();
+        assert_eq!(e.zeichen_neu, einmal);
+        assert!(spitze.load(Ordering::SeqCst) <= TEILE_GLEICHZEITIG);
+        // Beide Vorkommen klingen im Ergebnis mit: sieben Teile, sechs Pausen.
+        let (pcm, _) = crate::tts_teile::pcm_aus_wav(&e.wav).unwrap();
+        let (eins, _) = crate::tts_teile::pcm_aus_wav(&teil_wav(2_400)).unwrap();
+        let teil = crate::tts_teile::randstille_kuerzen(&eins, 24_000).len();
+        assert_eq!(pcm.len(), 7 * teil + 6 * 24_000 * 350 / 1000);
+    }
+
+    #[tokio::test]
+    async fn teile_fehler_bucht_und_cacht_die_schon_bezahlten_teile() {
+        let cache = Mutex::new(crate::tts_verbrauch::SeitenCache::default());
+        let teile: Vec<String> = ["kaputt", "Feld 1.", "Halbfinale."]
+            .iter()
+            .map(|t| ssml_teil(t))
+            .collect();
+        let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+        let fehler = teile_zusammenbauen(&teile, &schluessel, TeileCache::Ram(&cache), |t, _| {
+            let kaputt = t.contains("kaputt");
+            async move {
+                if kaputt {
+                    Err("429".to_string())
+                } else {
+                    Ok(Vertont {
+                        mime: "audio/wav",
+                        bytes: teil_wav(2_400),
+                        aus_cache: false,
+                    })
+                }
+            }
+        })
+        .await
+        .err()
+        .unwrap();
+        assert!(fehler.meldung.contains("Teil 1"), "{}", fehler.meldung);
+        assert_eq!(
+            fehler.zeichen_neu,
+            ansage_zeichen(&teile[1]) + ansage_zeichen(&teile[2])
+        );
+        // Auch die Teile hinter dem gescheiterten liegen im Cache.
+        let mut c = cache.lock().unwrap();
+        assert!(c.holen(&schluessel[1], now_ms()).is_some());
+        assert!(c.holen(&schluessel[2], now_ms()).is_some());
+    }
 }
+
