@@ -351,13 +351,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   offene Paarung, Vorabzettel) und die **BTP-Messung**, ob BTP `Official1ID` an
   einem Spiel ohne Feld übernimmt (mit `CourtID 0` bzw. ohne CourtID-Element).
 
-- **SR und AR schon beim Aufruf in Vorbereitung zuteilen** — Spec:
-  [features/sr-ar-beim-aufruf.md](features/sr-ar-beim-aufruf.md) (freigegeben 09.11.2026),
-  ADR 0080 (löst 0072 ab) — Rotation teilt beim Aufruf fest zu (auch ohne Meetingpoint),
-  Ansage nennt SR/AR, Nachrücken still, Freigabe bei Rücknahme. Nach `sr-rotationsmodus`
-  PR 1+2. Folgeidee: Erkennen, dass ein Official selbst in einem laufenden oder gerufenen
-  Spiel steht.
-
 - **Weitere Sprachdienste der Ansage (ElevenLabs, OpenAI, Gemini)** — Spec:
   [features/ansage-elevenlabs.md](features/ansage-elevenlabs.md) (freigegeben
   02.11.2026, erweitert 03.11.2026) — **umgesetzt v0.9.336, Hörtest beim
@@ -553,6 +546,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   5. **Sichtprüfung der Geräteverwaltung** im laufenden Fenster.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
+
+- **SR und AR schon beim Aufruf in Vorbereitung zuteilen** — Spec:
+  [features/sr-ar-beim-aufruf.md](features/sr-ar-beim-aufruf.md) (freigegeben 09.11.2026),
+  ADR 0080 (löst 0072 ab) — Rotation teilt beim Aufruf fest zu (auch ohne Meetingpoint),
+  Ansage nennt SR/AR, Nachrücken still, Freigabe bei Rücknahme. Nach `sr-rotationsmodus`
+  PR 1+2. Folgeidee: Erkennen, dass ein Official selbst in einem laufenden oder gerufenen
+  Spiel steht.
 
 - **Rotationsmodus Schiedsrichter/Aufschlagrichter** — Spec:
   [features/sr-rotationsmodus.md](features/sr-rotationsmodus.md)
