@@ -121,6 +121,35 @@ Master", den du beliebig oft klonst.
 > Schritt 2–3 sind der einzige etwas technische Teil — einmalig. Beim
 > ersten Mal am besten gemeinsam durchgehen.
 
+## Das fertige Image zum Herunterladen
+
+Auf `badhub.de/download/bts-light/` liegt ein fertig gebautes Image
+(`pi-image/bts-light-pi.img.xz`), das du ohne Teil B direkt auf alle Karten
+schreiben kannst. Es ist so gebaut wie in Teil B beschrieben, auf
+Raspberry Pi OS Lite (64-bit, Bookworm), und läuft auf Pi Zero 2 W und Pi 3 B+.
+
+| Eingebaut | Wert |
+|---|---|
+| WLAN | `btsaccess` (das WLAN des Verleih-Routers, versteckte SSID erlaubt) |
+| Benutzer | `badhub`, Passwort `bts-light` — nur an Tastatur und Bildschirm, SSH ist aus |
+| Monitor-Adresse | `http://bts-light.local:8088/monitor` (Turnier-PC wird selbst gesucht) |
+| Schreibschutz | schaltet sich nach dem ersten Start von selbst ein |
+
+Im Raspberry Pi Imager **keine** Anpassungen setzen. Beim ersten Start
+vergrößert der Pi die Karte, startet neu, schaltet den Schreibschutz ein und
+startet noch einmal — danach erscheint der Kopplungs-Code. Ein anderes WLAN
+oder ein anderes Passwort: Karte beschreibbar schalten
+([pi-setup.md](pi-setup.md) „Nur-Lese-Modus"), am Pi ändern, Schalterdatei
+wieder löschen.
+
+Das Image wird **emuliert** gebaut (Docker, ARM-Emulation) mit
+`pi/build-image-docker.sh` — dieselben Schritte wie am echten Pi:
+`setup-monitor.sh` als `badhub`, dann `build-master-image.sh`
+(`WLAN_PSK='…' bash pi/build-image-docker.sh <ordner>`, Dauer gut zehn
+Minuten). Hochladen nach `download/bts-light/pi-image/` per `scp` auf den
+badhub-Server, das Vorgänger-Image vorher umbenennen. Weil es dabei nie auf einem Pi läuft, gehört nach
+jedem Neubau ein Probestart auf echter Hardware dazu.
+
 ## Teil C — Verteilen & klonen
 
 - **Weitere Pis fürs eigene Set:** den „SD Card Copier" auf dem Master-Pi
