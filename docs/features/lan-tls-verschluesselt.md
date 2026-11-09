@@ -49,7 +49,7 @@ bricht. Der Turnierleiter bekommt in der Feld-Übersicht je Feld einen zweiten Q
    Zertifikatswarnung der **Akkustand in der Turnierleitung sichtbar**
    (`TabletPanel.tsx:476`, Badge erscheint) — im reinen LAN-Betrieb, ohne Internet.
 2. Ein Bestands-Pi, der per Subnetz-Scan `http://…:8088/health` sucht, findet den
-   Server **unverändert** (`pi/shared-startbrowser.sh:84-100`).
+   Server **unverändert** (damals `pi/shared-startbrowser.sh`, seit 11/2026 das Kiosk-Skript aus `pi/setup-monitor.sh`).
 3. Nach Neustart von App **und** Tablet ist **keine erneute** Zertifikatsbestätigung
    nötig.
 4. Ein Gerät mit falsch gestellter Uhr (RTC-los, ohne NTP) lädt die https-Seite
@@ -60,7 +60,7 @@ bricht. Der Turnierleiter bekommt in der Feld-Übersicht je Feld einen zweiten Q
 ## Nicht-Ziele
 
 - **Kein Zwangs-Rollout auf die Pi-Flotte.** Court-Monitore dürfen auf
-  `http://…:8088` bleiben. `pi/shared-startbrowser.sh` und `pi/setup-monitor.sh`
+  `http://…:8088` bleiben. `pi/setup-monitor.sh` (damals auch `pi/shared-startbrowser.sh`)
   werden hier **nicht** umgestellt.
 - **Kein Anspruch „durchgängig verschlüsselt".** Es gilt *verschlüsselt, wo das Gerät
   es kann*. Diese Formulierung ist bewusst gewählt und gehört so in die Doku.
@@ -232,7 +232,7 @@ Es gibt keinen Migrationsschritt, der sich nicht rückgängig machen ließe.
 - Soll der Knopf „Zertifikat neu erzeugen" (Notfall bei IP-Wechsel) sofort mitkommen
   oder erst, wenn der Bedarf im Feld auftritt? *Empfehlung: sofort, aber gut versteckt
   unter Wartung — er entwertet alle bestehenden Ausnahmen.*
-- Bleiben `pi/shared-startbrowser.sh` und `pi/setup-monitor.sh` dauerhaft auf HTTP,
+- Bleiben `pi/setup-monitor.sh` (damals auch `pi/shared-startbrowser.sh`) dauerhaft auf HTTP,
   oder gibt es später ein Kriterium für die Umstellung? *Hier bewusst Nicht-Ziel.*
 - `commands.rs:2647` und `:2716` bauen im **klassischen LAN-Slave** hart
   `http://{btp.host}:8088/…`. Das bleibt funktionsfähig, solange 8088 offen ist —
@@ -242,7 +242,7 @@ Es gibt keinen Migrationsschritt, der sich nicht rückgängig machen ließe.
 
 - `docs/tablet.md` — Tablet-Server, Adressen, die einmalige Zertifikatswarnung.
 - `docs/court-monitor.md` — Monitor-Adressen; warum die Pis auf HTTP bleiben.
-- `docs/pi-setup.md` und `docs/pi-dual-image.md` — ausdrücklicher Vermerk, dass die
+- `docs/pi-setup.md` (damals auch `docs/pi-dual-image.md`, seit 11/2026 entfernt) — ausdrücklicher Vermerk, dass die
   Pi-Skripte unverändert HTTP sprechen.
 - `docs/changelog.md` — veröffentlichte Version.
 - `docs/roadmap.md` — Verweis auf diese Spec.

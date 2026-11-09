@@ -228,4 +228,4 @@ das Feld bei 0:0 startet — die Diagnose-Zeile für den 14.06.-Vorfall).
 
 > Früher luden die Pis **direkt** per HTTPS in die Cloud — das scheiterte bei
 > falscher Pi-Uhr (keine RTC) still an der TLS-Prüfung. Der Weg über den PC
-> behebt das. (Pi-Seite: `pi/shared-startbrowser.sh` → `upload_log`.)
+> behebt das. (Pi-Seite: Kiosk-Skript aus `pi/setup-monitor.sh` → `log_senden`.)

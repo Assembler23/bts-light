@@ -127,7 +127,7 @@ zusätzlich das Test-Image `bts-light-pi-v2.img.xz` für den Pi 3 B+, dort
 bestätigt, im Zero 2 W noch ungeprüft) — die Karten werden
 beim Hallenaufbau beschrieben, oft ohne Zugriff auf dieses Repo. Der Block ist
 im Generator fest verdrahtet (das Image kommt **nicht** aus dem
-Release-Workflow, sondern per rsync, siehe [pi-dual-image.md](pi-dual-image.md));
+Release-Workflow, sondern per rsync, siehe [pi-master-image.md](pi-master-image.md));
 `scripts/test-release-notes.mjs` hält fest, dass er auf der Seite steht. Der
 Workflow `release-seite` prüft nach dem Hochladen zusätzlich die Live-Seite; er
 lädt sie dafür erst vollständig und sucht dann (ein `curl | grep -q` meldete

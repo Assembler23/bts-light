@@ -32,8 +32,8 @@ name: Secret Scan
 #
 # Beide Ausnahmen sind mit condition = "AND" und regexTarget = "line" an das
 # konkrete Konstrukt gebunden, NICHT an den Dateipfad. Gegengeprueft: Ein
-# AWS-Key in presets.ts und ein zweites Token in shared-startbrowser.sh werden
-# weiterhin gemeldet. Ohne diese beiden Schalter waeren die zwei Dateien
+# AWS-Key in presets.ts und ein zweites Token in shared-startbrowser.sh (seit
+# 11/2026 entfernt, nur noch in der Historie) werden weiterhin gemeldet. Ohne diese beiden Schalter waeren die zwei Dateien
 # komplette blinde Flecken geworden — ausgerechnet die, in denen ein kuenftiges
 # Geheimnis am ehesten landet.
 on:

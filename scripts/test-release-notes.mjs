@@ -186,7 +186,7 @@ pruefe(
 // Die Release-Seite verweist auf das Pi-Image der Court-Monitore.
 //
 // WARUM DAS ZÄHLT: Die SD-Karten werden beim Hallenaufbau beschrieben, oft von
-// Leuten ohne das Repo. Stand der Link nur in docs/pi-dual-image.md, war er
+// Leuten ohne das Repo. Stand der Link nur in docs/pi-master-image.md, war er
 // genau dann nicht erreichbar, wenn er gebraucht wurde. Der Block wird beim
 // Release mitgeneriert — faellt er still weg (Umbau am Seitengerüst), merkt es
 // niemand, bis wieder jemand in einer Halle danach sucht.

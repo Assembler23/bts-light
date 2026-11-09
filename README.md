@@ -56,12 +56,11 @@ Einstellung. Die Einstellung bleibt in BTP gespeichert.
   zweiter Start holt das bestehende Fenster nach vorn (sonst kollidierte
   der Tablet-Server-Port).
 - **Court-Monitor (Raspberry Pi)** – ein Pi im Hallen-WLAN zeigt
-  Live-Score bzw. Feldnummer als Kiosk auf einem TV. Ein **gemeinsames
-  Image** bedient sowohl Tilos BTS als auch bts-light (Auto-Discovery per
-  Subnetz-Scan, kein Karten-/Image-Tausch). Fertiges Image zum Schreiben
-  mit Raspberry Pi Imager + Anleitung:
-  [docs/pi-dual-image.md](docs/pi-dual-image.md) · Download (empfohlen, klein &
-  auto-wachsend):
+  Live-Score bzw. Feldnummer als Kiosk auf einem TV. Der Pi findet den
+  Turnier-PC selbst (Subnetz-Scan), schaltet den TV per HDMI-CEC ein und
+  läuft im Nur-Lese-Modus (verträgt hartes Abschalten). Einrichtung:
+  [docs/pi-setup.md](docs/pi-setup.md) · Master-Image:
+  [docs/pi-master-image.md](docs/pi-master-image.md) · Download:
   <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz>.
 
 Noch nicht signiert: Der Windows-Installer hat kein Code-Signing-

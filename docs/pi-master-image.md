@@ -96,11 +96,17 @@ Ein Pi wird einmal sauber eingerichtet; seine SD-Karte wird zum „Golden
 Master", den du beliebig oft klonst.
 
 1. **Einen Pi einrichten** nach [pi-setup.md](pi-setup.md):
-   - Raspberry Pi OS (Desktop) flashen; im Imager WLAN **`Turnier`** +
-     Passwort eintragen.
+   - Aktuelles Raspberry Pi OS (64-bit) flashen — dasselbe Image läuft auf
+     Pi Zero 2 W und Pi 3 B+; im Imager WLAN **`Turnier`** + Passwort
+     eintragen.
    - `setup-monitor.sh` ausführen; bei der Adresse **Enter** drücken →
      Standard `http://bts-light.local:8088/monitor`.
-   - Neu starten und prüfen: am TV erscheint die Kopplungs-Seite. ✓
+   - Neu starten und prüfen: am TV erscheint die Kopplungs-Seite, und der
+     TV schaltet sich beim Einschalten auf den Pi (CEC). ✓
+   - `sudo bash build-master-image.sh` ausführen, dann
+     `sudo shutdown -h now` — **nicht** neu starten: Das Skript schaltet
+     den Nur-Lese-Modus für die Klone scharf, ein Neustart würde den Master
+     selbst schreibgeschützt machen.
 2. **Karte als Image sichern.** Die fertige Karte in den Computer stecken
    und in eine `.img`-Datei zurücklesen:
    - Windows: *Win32 Disk Imager* → „Read".

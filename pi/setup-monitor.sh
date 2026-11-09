@@ -33,6 +33,16 @@ else
 fi
 echo "→ Pi OS Variante: $VARIANT"
 
+# Im Nur-Lese-Modus wären alle Änderungen nach dem Neustart weg.
+if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]; then
+  echo "FEHLER: Die Karte läuft im Nur-Lese-Modus – Änderungen gingen verloren."
+  echo "  Datei bts-schreiben-erlaubt.txt auf der Boot-Partition anlegen"
+  echo "  (sudo touch /boot/firmware/bts-schreiben-erlaubt.txt), neu starten,"
+  echo "  ca. 2 Minuten warten (der Pi startet von selbst ein zweites Mal),"
+  echo "  dann dieses Skript erneut ausführen."
+  exit 1
+fi
+
 # Boot-Partition finden (Bookworm: /boot/firmware, älter: /boot).
 BOOT_DIR="/boot/firmware"
 [ -d "$BOOT_DIR" ] || BOOT_DIR="/boot"
@@ -63,7 +73,7 @@ echo
 echo "→ Pakete installieren (auf Lite dauert das ein paar Minuten)…"
 sudo apt-get update -qq
 # v4l-utils bringt cec-ctl mit (TV per HDMI-CEC einschalten, Abschnitt 3c).
-COMMON_PKGS="unclutter fonts-noto-color-emoji v4l-utils"
+COMMON_PKGS="unclutter fonts-noto-color-emoji v4l-utils curl overlayroot initramfs-tools"
 LITE_PKGS="xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils matchbox-window-manager chromium avahi-utils xdotool"
 
 if [ "$VARIANT" = "lite" ]; then
@@ -219,6 +229,95 @@ sudo systemctl daemon-reload
 sudo systemctl enable bts-cec.service >/dev/null 2>&1 || true
 echo "→ CEC-Dienst eingerichtet (bts-cec.service): TV wird beim Start geweckt"
 
+# ─── 3d) Nur-Lese-Modus für die SD-Karte ─────────────────────────────────
+# Die Sets werden nach dem Turnier einfach vom Strom genommen. Ein Pi, der
+# dabei gerade schreibt, kann seine SD-Karte beschädigen. Im Nur-Lese-Modus
+# (overlayfs) landet jede Änderung im Arbeitsspeicher und ist nach dem
+# Neustart weg – die Karte bleibt unberührt. Die Feldzuweisung überlebt,
+# weil die Geräte-Kennung aus der Seriennummer kommt.
+#
+# Gesteuert über eine Schalterdatei auf der Boot-Partition (am Computer
+# anlegbar): Liegt bts-schreiben-erlaubt.txt dort, bleibt bzw. wird die
+# Karte beschreibbar (für Updates, Master-Image); fehlt sie, schaltet der
+# Dienst beim nächsten Start den Nur-Lese-Modus ein. Das Einrichten legt
+# die Datei an, damit Master-Pi und Einrichtung beschreibbar bleiben;
+# build-master-image.sh entfernt sie als letzten Schritt.
+sudo tee /usr/local/bin/bts-nur-lesen.sh >/dev/null <<'NURLESEN'
+#!/usr/bin/env bash
+# bts-light Court-Monitor: Nur-Lese-Modus der SD-Karte nach Schalterdatei.
+set -u
+BOOT_DIR="/boot/firmware"; [ -d "$BOOT_DIR" ] || BOOT_DIR="/boot"
+SCHALTER="$BOOT_DIR/bts-schreiben-erlaubt.txt"
+ZAEHLER="$BOOT_DIR/bts-nur-lesen-versuche.txt"
+MAX_VERSUCHE=2
+log() { echo "bts-nur-lesen: $*"; }
+
+aktiv() { [ "$(findmnt -n -o FSTYPE /)" = "overlay" ]; }
+
+# Erststart einer frisch beschriebenen Karte abwarten: Raspberry Pi Imager
+# richtet WLAN/Hostname beim ersten Start ein – das muss noch auf die Karte.
+if grep -q "firstrun" "$BOOT_DIR/cmdline.txt" 2>/dev/null; then
+  log "Erststart-Einrichtung steht noch aus – nichts zu tun"; exit 0
+fi
+command -v cloud-init >/dev/null && cloud-init status --wait >/dev/null 2>&1
+sleep 30
+
+if [ -e "$SCHALTER" ]; then soll="schreiben"; else soll="nur-lesen"; fi
+if aktiv; then ist="nur-lesen"; else ist="schreiben"; fi
+if [ "$soll" = "$ist" ]; then
+  rm -f "$ZAEHLER"
+  log "Karte ist im gewünschten Zustand: $ist"; exit 0
+fi
+
+# Schutz gegen eine Neustart-Schleife, falls das Umschalten nicht greift.
+versuche=$(cat "$ZAEHLER" 2>/dev/null || echo 0)
+case "$versuche" in ''|*[!0-9]*) versuche=0 ;; esac
+if [ "$versuche" -ge $MAX_VERSUCHE ]; then
+  log "Umschalten auf $soll nach $versuche Versuchen erfolglos – gebe auf"; exit 0
+fi
+echo $((versuche + 1)) > "$ZAEHLER"
+
+if [ "$soll" = "nur-lesen" ]; then
+  log "schalte Nur-Lese-Modus ein und starte neu"
+  raspi-config nonint enable_overlayfs || { log "Einschalten fehlgeschlagen"; exit 0; }
+else
+  log "Schalterdatei gefunden – schalte Nur-Lese-Modus aus und starte neu"
+  # Selbst ausschalten statt nur raspi-config: Dessen Änderung könnte im
+  # RAM-Overlay landen und wäre nach dem Neustart weg. cmdline.txt liegt auf
+  # der (nicht überlagerten) Boot-Partition; overlayroot.conf ändert
+  # overlayroot-chroot direkt auf der Karte.
+  sed -i -E '1 s/[[:space:]]+(overlayroot=[^[:space:]]*|boot=overlay)//g' "$BOOT_DIR/cmdline.txt"
+  if command -v overlayroot-chroot >/dev/null && [ -f /etc/overlayroot.conf ]; then
+    overlayroot-chroot sed -i -E 's/^overlayroot=.*/overlayroot=""/' /etc/overlayroot.conf >/dev/null 2>&1
+  fi
+  raspi-config nonint disable_overlayfs >/dev/null 2>&1 || true
+fi
+sync
+systemctl reboot
+NURLESEN
+sudo chmod 755 /usr/local/bin/bts-nur-lesen.sh
+
+sudo tee /etc/systemd/system/bts-nur-lesen.service >/dev/null <<'UNIT'
+[Unit]
+Description=bts-light: SD-Karte im Nur-Lese-Modus betreiben (Schalterdatei auf der Boot-Partition)
+Documentation=https://github.com/Assembler23/bts-light/blob/main/docs/pi-setup.md
+After=local-fs.target
+
+[Service]
+# simple, nicht oneshot: das Warten im Skript darf den Start des Kiosks
+# nicht aufhalten.
+Type=simple
+ExecStart=/usr/local/bin/bts-nur-lesen.sh
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable bts-nur-lesen.service >/dev/null 2>&1 || true
+sudo touch "$BOOT_DIR/bts-schreiben-erlaubt.txt"
+echo "→ Nur-Lese-Dienst eingerichtet (bts-nur-lesen.service); Karte bleibt"
+echo "  beschreibbar, solange $BOOT_DIR/bts-schreiben-erlaubt.txt existiert"
+
 # ─── 4) Hinweisseite „noch keine Adresse" ────────────────────────────────
 ASSET_DIR="$HOME/.local/share/bts-monitor"
 mkdir -p "$ASSET_DIR"
@@ -242,52 +341,189 @@ Laufwerk). Die Adresse steht in bts-light unter „Court-Monitore".</p>
 HTML
 
 # ─── 5) Kiosk-Startskript ────────────────────────────────────────────────
+# Dauerschleife statt Einmal-Start (übernommen aus dem früheren gemeinsamen
+# Startskript, im Feld erprobt): sucht den Turnier-PC, startet den Kiosk,
+# startet ihn neu, wenn Chromium abstürzt oder der PC eine neue Adresse hat,
+# und sucht weiter, solange kein PC da ist („erst Pi, dann PC" ist egal).
 mkdir -p "$HOME/.local/bin"
+# Kopf mit den Werten aus der Einrichtung, Rumpf wörtlich (ohne Expansion).
 cat > "$HOME/.local/bin/bts-monitor.sh" <<EOF
 #!/usr/bin/env bash
-# Court-Monitor-Kiosk – aufgerufen vom Autostart. Liest die Adresse bei
-# jedem Start frisch aus der Boot-Partition.
+# Court-Monitor-Kiosk – aufgerufen vom Autostart (eingerichtet von setup-monitor.sh).
+BROWSER="$BROWSER"
+NO_URL_PAGE="file://$ASSET_DIR/no-url.html"
+EOF
+cat >> "$HOME/.local/bin/bts-monitor.sh" <<'EOF'
 set -u
+LOG="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor.log"
+CACHE="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor-ip"
+PORT_STANDARD=8088
+log() { echo "$(date '+%F %T') - $*" >> "$LOG"; }
 
-# Monitor-Adresse aus der Boot-Partition (whitespace tolerieren).
-BOOT_DIR="/boot/firmware"; [ -d "\$BOOT_DIR" ] || BOOT_DIR="/boot"
-URL="\$(tr -d '[:space:]' < "\$BOOT_DIR/bts-monitor-url.txt" 2>/dev/null || true)"
+# Monitor-Adresse aus der Boot-Partition, bei jedem Start frisch gelesen
+# (am Computer editierbar, Leerzeichen werden entfernt).
+BOOT_DIR="/boot/firmware"; [ -d "$BOOT_DIR" ] || BOOT_DIR="/boot"
+URL="$(tr -d '[:space:]' < "$BOOT_DIR/bts-monitor-url.txt" 2>/dev/null || true)"
 
-# Geräte-ID aus der Hardware-Seriennummer (letzte 8 Stellen). Frisch bei
-# jedem Start gelesen → eine geklonte Karte bleibt je Pi eindeutig.
-SERIAL="\$(tr -d '\\0' < /sys/firmware/devicetree/base/serial-number 2>/dev/null || true)"
-[ -z "\$SERIAL" ] && SERIAL="\$(awk '/^Serial/{print \$NF}' /proc/cpuinfo 2>/dev/null || true)"
-[ -z "\$SERIAL" ] && SERIAL="\$(hostname)"
-DEVICE="\$(printf '%s' "\$SERIAL" | tail -c 8)"
+# Geräte-Kennung = Hardware-Seriennummer (eine geklonte Karte bleibt je Pi
+# eindeutig). Format pi-<serial> wie beim früheren gemeinsamen Image, damit
+# bereits zugewiesene Monitore nach dem Neubespielen ihr Feld behalten.
+SERIAL="$(awk -F': ' '/^Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')"
+[ -z "$SERIAL" ] && SERIAL="$(tr -d '\0' 2>/dev/null < /sys/firmware/devicetree/base/serial-number || true)"
+[ -z "$SERIAL" ] && SERIAL="$(hostname | tr -d '[:space:]')"
+DEVICE_ID="pi-${SERIAL}"
 
-if [ -n "\$URL" ]; then
-  SEP="?"; case "\$URL" in *\\?*) SEP="&" ;; esac
-  TARGET="\${URL}\${SEP}device=\${DEVICE}"
-else
-  # Keine Adresse hinterlegt → Hinweisseite.
-  TARGET="file://$ASSET_DIR/no-url.html"
-fi
+# Adresse zerlegen: http://HOST[:PORT][/PFAD][?QUERY]
+REST="${URL#*://}"
+ANFRAGE=""
+case "$REST" in *\?*) ANFRAGE="?${REST#*\?}"; REST="${REST%%\?*}" ;; esac
+HOSTPORT="${REST%%/*}"
+PFAD="/${REST#*/}"; [ "$REST" = "$HOSTPORT" ] && PFAD="/monitor"
+PFAD="${PFAD}${ANFRAGE}"
+HOST="${HOSTPORT%%:*}"
+PORT="${HOSTPORT##*:}"; [ "$PORT" = "$HOSTPORT" ] && PORT=""
 
-# Nach einem Stromausfall Chromiums „Wiederherstellen?"-Frage unterdrücken.
-PREF="\$HOME/.config/chromium/Default/Preferences"
-[ -f "\$PREF" ] && sed -i \\
-  's/"exited_cleanly":false/"exited_cleanly":true/;s/"exit_type":"[^"]*"/"exit_type":"Normal"/' \\
-  "\$PREF" 2>/dev/null || true
+# Erreichbar? Echte HTTP-Antwort; kein ping (Windows beantwortet ICMP nicht).
+erreichbar() {
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 1 --max-time 2 "$1" 2>/dev/null)
+  [ -n "$code" ] && [ "$code" != "000" ]
+}
+
+# Eigenes /24 parallel auf :PORT/health absuchen – unabhängig von mDNS,
+# das über WLAN im Feld minutenlang hing.
+subnetz_suchen() {
+  local praefix n treffer="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor-scan"
+  praefix=$(hostname -I 2>/dev/null | tr ' ' '\n' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | sed -E 's/\.[0-9]+$/./')
+  [ -z "$praefix" ] && return 1
+  rm -f "$treffer"
+  for n in $(seq 1 254); do
+    ( erreichbar "http://${praefix}${n}:$1/health" && echo "${praefix}${n}" > "$treffer" ) &
+    if [ $((n % 30)) -eq 0 ]; then wait; [ -s "$treffer" ] && break; fi
+  done
+  wait
+  [ -s "$treffer" ] && { head -1 "$treffer"; return 0; }
+  return 1
+}
+
+# Turnier-PC finden: gemerkte IP → Subnetz-Suche → mDNS (immer mit timeout).
+pc_ip() {
+  local ip port="$1"
+  ip=$(cat "$CACHE" 2>/dev/null)
+  if [ -n "$ip" ] && erreichbar "http://$ip:$port/health"; then echo "$ip"; return 0; fi
+  ip=$(subnetz_suchen "$port")
+  if [ -z "$ip" ]; then
+    ip=$(timeout 3 getent hosts "$HOST" 2>/dev/null | awk '{print $1; exit}')
+    [ -n "$ip" ] && ! erreichbar "http://$ip:$port/health" && ip=""
+  fi
+  [ -n "$ip" ] || return 1
+  [ "$ip" != "$(cat "$CACHE" 2>/dev/null)" ] && log "Turnier-PC gefunden: $ip"
+  echo "$ip" > "$CACHE"
+  echo "$ip"
+}
+
+# Ziel-Adresse dieses Durchlaufs (leer = nichts erreichbar).
+ziel() {
+  local ip port sep
+  case "$PFAD" in *\?*) sep="&" ;; *) sep="?" ;; esac
+  if [ "$HOST" = "bts-light.local" ]; then
+    # Standardfall: den PC selbst suchen, Pfad und Parameter (z. B. ?ansage=)
+    # aus der Datei übernehmen.
+    port="${PORT:-$PORT_STANDARD}"
+    ip=$(pc_ip "$port") || return 1
+    echo "http://$ip:$port${PFAD}${sep}device=${DEVICE_ID}"
+  else
+    # Feste Adresse (IP oder Cloud): so nehmen, wie sie in der Datei steht.
+    erreichbar "$URL" || return 1
+    echo "${URL}${sep}device=${DEVICE_ID}"
+  fi
+}
+
+# Log an den Turnier-PC (der leitet es an die Cloud weiter) – nur im LAN-Fall.
+log_senden() {
+  local ip port="${PORT:-$PORT_STANDARD}"
+  ip=$(cat "$CACHE" 2>/dev/null); [ -n "$ip" ] || return 0
+  tail -n 800 "$LOG" 2>/dev/null | curl -s --max-time 8 -X POST \
+    -H "Content-Type: text/plain" --data-binary @- \
+    "http://${ip}:${port}/pi-log?device=${DEVICE_ID}" >/dev/null 2>&1 || true
+}
+
+BROWSER_PID=""
+starten() {
+  [ -n "$BROWSER_PID" ] && kill "$BROWSER_PID" 2>/dev/null && sleep 1
+  # Nach einem Stromausfall Chromiums „Wiederherstellen?"-Frage unterdrücken.
+  local pref="$HOME/.config/chromium/Default/Preferences"
+  [ -f "$pref" ] && sed -i \
+    's/"exited_cleanly":false/"exited_cleanly":true/;s/"exit_type":"[^"]*"/"exit_type":"Normal"/' \
+    "$pref" 2>/dev/null
+  # --autoplay-policy: Ton ohne Tippen — die Monitor-Seiten sprechen mit
+  # ?ansage=<Halle> in der Adresse die Ansagen ihrer Halle (Spec
+  # ansage-im-browser, E1b). Am TV gibt es niemanden, der „Ton freischalten"
+  # drückt; ohne das Flag bleibt die Seite stumm und zeigt einen Hinweis.
+  "$BROWSER" --no-memcheck \
+    --kiosk --incognito --noerrdialogs --disable-infobars \
+    --disable-session-crashed-bubble --no-first-run \
+    --check-for-update-interval=31536000 \
+    --disable-features=Translate,TranslateUI --disable-translate \
+    --lang=de-DE --accept-lang=de-DE,de \
+    --autoplay-policy=no-user-gesture-required \
+    "$1" >/dev/null 2>&1 &
+  BROWSER_PID=$!
+}
 
 command -v unclutter >/dev/null && unclutter -idle 0.5 -root &
+log "Kiosk gestartet (Gerät $DEVICE_ID, Adresse ${URL:-keine})"
 
-# --autoplay-policy: Ton ohne Tippen — die Monitor-Seiten sprechen mit
-# ?ansage=<Halle> in der Adresse die Ansagen ihrer Halle (Spec
-# ansage-im-browser, E1b). Am TV gibt es niemanden, der „Ton freischalten"
-# drückt; ohne das Flag bleibt die Seite stumm und zeigt einen Hinweis.
-exec "$BROWSER" --no-memcheck \\
-  --kiosk --incognito --noerrdialogs --disable-infobars \\
-  --disable-session-crashed-bubble --no-first-run \\
-  --check-for-update-interval=31536000 \\
-  --disable-features=Translate,TranslateUI --disable-translate \\
-  --lang=de-DE --accept-lang=de-DE,de \\
-  --autoplay-policy=no-user-gesture-required \\
-  "\$TARGET"
+if [ -z "$URL" ]; then
+  # Keine Adresse hinterlegt → Hinweisseite, Chromium bei Absturz neu starten.
+  while true; do
+    { [ -z "$BROWSER_PID" ] || ! kill -0 "$BROWSER_PID" 2>/dev/null; } && starten "$NO_URL_PAGE"
+    sleep 10
+  done
+fi
+
+# Auf eine eigene IP warten (kein Internet-Zwang).
+for _ in $(seq 1 60); do
+  hostname -I 2>/dev/null | grep -qE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' && break
+  sleep 2
+done
+log "Netz: $(hostname -I 2>/dev/null)"
+
+# Dauerschleife. Ein EINZELNER Aussetzer beendet den Kiosk nicht (sonst
+# flackert er bei WLAN-Wacklern) – erst nach FEHL_GRENZE Runden. Eine
+# erfolglose Runde dauert mit Subnetz-Suche ~20–30 s, zusammen ~1–1,5 min.
+AKTUELL=""
+FEHL=0
+FEHL_GRENZE=3
+TAKT=0
+while true; do
+  TAKT=$((TAKT + 1))
+  BESTE="$(ziel || true)"
+  if [ -n "$BESTE" ]; then
+    FEHL=0
+    if [ "$BESTE" != "$AKTUELL" ] || [ -z "$BROWSER_PID" ] || ! kill -0 "$BROWSER_PID" 2>/dev/null; then
+      log "Anzeige: $BESTE"
+      starten "$BESTE"
+      AKTUELL="$BESTE"
+    fi
+  else
+    FEHL=$((FEHL + 1))
+    [ $((FEHL % 6)) -eq 1 ] && log "noch kein Turnier-PC – suche weiter (Versuch $FEHL)"
+    if [ -n "$AKTUELL" ] && [ "$FEHL" -ge "$FEHL_GRENZE" ]; then
+      log "Turnier-PC seit $FEHL Versuchen weg – Kiosk beendet, suche weiter"
+      kill "$BROWSER_PID" 2>/dev/null
+      AKTUELL=""
+    fi
+  fi
+  # Log gleich beim ersten Durchlauf und danach alle ~5 min an den PC.
+  if [ $(( (TAKT - 1) % 30 )) -eq 0 ]; then
+    log_senden &
+    # Log im RAM kurz halten (Nur-Lese-Modus: alles liegt im Arbeitsspeicher).
+    tail -n 2000 "$LOG" > "$LOG.neu" 2>/dev/null && mv "$LOG.neu" "$LOG"
+  fi
+  sleep 10
+done
 EOF
 chmod +x "$HOME/.local/bin/bts-monitor.sh"
 
@@ -347,6 +583,9 @@ echo "✓ Fertig eingerichtet (Variante: $VARIANT)."
 echo
 echo "  Adresse setzen/ändern: $URL_FILE bearbeiten"
 echo "  (geht auch am Computer – die Datei liegt auf dem Karten-Laufwerk)."
+echo
+echo "  Nur-Lese-Modus:     startet, sobald $BOOT_DIR/bts-schreiben-erlaubt.txt"
+echo "                      gelöscht ist (build-master-image.sh tut das selbst)."
 echo
 echo "  Jetzt neu starten:  sudo reboot"
 if [ "$VARIANT" = "lite" ]; then
