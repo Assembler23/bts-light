@@ -700,7 +700,7 @@ das neue `tl.html` mit dem Menüpunkt (v0.9.355). An einem älteren Host fehlt d
 Menüpunkt bleibt verborgen. Sonst landete die Einteilung ungeprüft und ohne
 Reservierung im alten Host.
 
-### Spielersuche (seit v0.9.369, Spec [tl-spielersuche](features/tl-spielersuche.md), ADR [0081](adr/0081-tl-spielersuche-am-turnier-pc.md))
+### Spielersuche (seit v0.9.368, Spec [tl-spielersuche](features/tl-spielersuche.md), ADR [0081](adr/0081-tl-spielersuche-am-turnier-pc.md))
 
 Die Suche läuft **am Turnier-PC** über den ganzen BTP-Bestand; der Relay ist
 nur Briefträger. Frame-Paar nach dem Muster der Schiedsrichter-Details:
@@ -733,7 +733,7 @@ nur Briefträger. Frame-Paar nach dem Muster der Schiedsrichter-Details:
   SR-/AR-Namen an beendeten Spielen (nur mit Schiedsrichter-Betrieb).
 
 **Deploy-Reihenfolge:** Der Relay deployt beim Merge und kennt die Route
-dann; der Turnier-PC meldet `can_search` erst ab v0.9.369. Bis dahin bleibt
+dann; der Turnier-PC meldet `can_search` erst ab v0.9.368. Bis dahin bleibt
 das Suchfeld verborgen.
 
 ### Setzplätze (seit v0.9.298, Spec [setzplaetze-anzeigen](features/setzplaetze-anzeigen.md), ADR [0059](adr/0059-setzplatz-als-text-aus-dem-parser.md))

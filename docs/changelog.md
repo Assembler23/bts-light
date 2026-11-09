@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.370
+## v0.9.368
 
 - **Spielersuche in der Turnierleitungs-Seite.** Oben in der Kopfleiste
   steht ein Suchfeld „Spieler oder SR suchen". Es findet alle Spiele einer
@@ -12,15 +12,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Startzeit) und beendet (mit Ergebnis), auch vom Vortag. Ein Tipp springt
   zur Zeile. Schiedsrichter werden mit eingeschaltetem
   Schiedsrichter-Betrieb gefunden. Im Profil abschaltbar
-  („Spielersuche zeigen").
-
-## v0.9.369
-
-- **Spielersuche, Teil 1 (Turnier-PC und Relay).** Der Turnier-PC kann jetzt
-  über das ganze Turnier nach Spielern und Schiedsrichtern suchen — am Feld,
-  in der kompletten Warteliste und in allen beendeten Spielen, auch vom
-  Vortag. Das Suchfeld in der Turnierleitungs-Seite folgt mit Teil 2; bis
-  dahin ändert sich an der Oberfläche nichts.
+  („Spielersuche zeigen"). Die Suche läuft am Turnier-PC; über die Cloud
+  reicht der Relay sie nur durch.
 
 ## v0.9.367
 

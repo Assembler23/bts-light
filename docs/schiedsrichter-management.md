@@ -436,7 +436,7 @@ Wire-Ebene und Bedienung sind in [cloud-relay.md](cloud-relay.md) bzw.
   `tl.rs` prüfen das mit einem Officials-Fixture: Der **Name** ist bewusst
   freigegeben (Gegenprobe im Test), Sperrlisten und Stammverein stehen auf
   der Verbotsliste.
-- **Spielersuche** (seit v0.9.369/370, Spec
+- **Spielersuche** (seit v0.9.368, Spec
   [tl-spielersuche](features/tl-spielersuche.md), ADR 0081): Die Suche im
   TL-Web findet SR und AR am Feld (`court_officials`), an wartenden Spielen
   (`wartende_officials`) und an **beendeten** Spielen — dort mit derselben

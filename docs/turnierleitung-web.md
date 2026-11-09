@@ -733,7 +733,7 @@ stehen, obwohl badhub eines hatte). Fehlt ein Logo bei badhub tatsächlich,
 bleibt es beim Namen. Der **Verein** ist wie die Nationalität ein bewusst
 zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Datenschutz).
 
-### Spieler und Schiedsrichter suchen (seit v0.9.370)
+### Spieler und Schiedsrichter suchen (seit v0.9.368)
 
 Oben in der Kopfleiste steht ein Suchfeld **„Spieler oder SR suchen"**. Ab
 zwei Buchstaben erscheint nach einer kurzen Tipp-Pause unter der Kopfleiste
@@ -789,7 +789,7 @@ Liste, sagt der Treffer, warum:
 Das Suchfeld lässt sich je Profil ausblenden (**Profile → Spielliste →
 „Spielersuche zeigen"**). Das ist nur eine Anzeige-Einstellung, keine
 Sperre. Der Suchbegriff wird nirgends gespeichert. Es erscheint erst, wenn
-der Turnier-PC die Suche kennt (ab v0.9.369).
+der Turnier-PC die Suche kennt (ab v0.9.368).
 <!-- pruef: "Spielersuche zeigen" in src-tauri/assets/tl.html -->
 
 Details: [features/tl-spielersuche.md](features/tl-spielersuche.md).
