@@ -682,7 +682,7 @@ BTP-Liste steht oder dieselbe Person SR und AR wäre. Über die Cloud kann jede
 beliebige `matchId` ankommen, deshalb prüft der Host vor dem Speichern.
 
 **Deploy-Reihenfolge:** Der Relay braucht keinen Code, deployt aber beim Merge
-das neue `tl.html` (PR 4b). An einem älteren Host fehlt das Flag, der
+das neue `tl.html` mit dem Menüpunkt (v0.9.355). An einem älteren Host fehlt das Flag, der
 Menüpunkt bleibt verborgen. Sonst landete die Einteilung ungeprüft und ohne
 Reservierung im alten Host.
 

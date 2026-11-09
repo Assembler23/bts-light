@@ -346,7 +346,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   [features/tl-warteliste-schiedsrichter.md](features/tl-warteliste-schiedsrichter.md)
   (freigegeben 08.11.2026), ADR 0078 — Einteilung über das ⋮-Menü der Warteliste,
   Rotation reserviert die Besetzung wartender Spiele (auch BTP-vorab), Umteilen
-  gegen BTP, Walkover zählt nicht als Einsatz. Anzeige schon live (v0.9.348).
+  gegen BTP, Walkover zählt nicht als Einsatz. **Umgesetzt v0.9.350–v0.9.355**
+  (Menüpunkt + Dialog in v0.9.355). Offen: **Feldtest** (LAN, Cloud, alter Host,
+  offene Paarung, Vorabzettel) und die **BTP-Messung**, ob BTP `Official1ID` an
+  einem Spiel ohne Feld übernimmt (mit `CourtID 0` bzw. ohne CourtID-Element).
 
 - **Weitere Sprachdienste der Ansage (ElevenLabs, OpenAI, Gemini)** — Spec:
   [features/ansage-elevenlabs.md](features/ansage-elevenlabs.md) (freigegeben

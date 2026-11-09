@@ -4996,6 +4996,16 @@ function queueRow(m, topMatchId) {
     zeilenAktionen.push(`<button type="button" data-queue-top="${m.match_id}"
       title="An den Anfang der Spielliste schieben">↑ An den Anfang der Spielliste</button>`);
   }
+  // Schiedsrichter schon in der Warteliste einteilen (Spec
+  // `tl-warteliste-schiedsrichter`, AK 1) — auch an offenen Paarungen: Wer
+  // das Halbfinale pfeift, steht oft fest, bevor feststeht, wer es spielt.
+  // Nur wenn der Turnier-PC die Einteilung wartender Spiele kennt; ein
+  // älterer Host lehnte `courtId: 0` nicht ab, sondern hielte sie für eine
+  // Kachel-Einteilung ohne Feld (dieselbe Versions-Schere wie beim Sperren).
+  if (state.officials_managed && state.can_assign_waiting_officials) {
+    zeilenAktionen.push(`<button type="button" data-queue-off="${m.match_id}"
+      title="Schiedsrichter und Aufschlagrichter für dieses Spiel festlegen">Schiedsrichter einteilen</button>`);
+  }
   // „Ergebnis eintragen" für ein Spiel, das nie auf einem Feld stand
   // (Zettel, mündliche Ansage). Öffnet exakt denselben Dialog wie das
   // Aktionsband oben — gemeinsamer Weg über `openQueueResultDialog()`,
@@ -5295,6 +5305,15 @@ function wireQueue(box) {
       // Klick-Zeit-Auflösung, siehe `data-prep`.
       const match = findeSpiel(btn.dataset.queueResult);
       if (match) openQueueResultDialog(match);
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+  scopeAll(box, "button[data-queue-off]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      // Klick-Zeit-Auflösung, siehe `data-prep`; der Dialog sucht das Spiel
+      // selbst in Warteliste und offenen Paarungen.
+      openOfficialAssign(0, Number(btn.dataset.queueOff));
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });
@@ -7492,7 +7511,11 @@ function renderOfficials() {
   // Kopf des ZUGEKLAPPTEN Panels (ADR 0026, Plan D): Sie stand schon immer
   // im Panel-Inhalt, wird jetzt zusätzlich hochgezogen. Deshalb VOR dem
   // Ausstieg unten — die Kopfzeile gibt es auch ohne Inhalt.
-  const next = list.find((o) => !o.paused && !o.on_duty_court_id);
+  //
+  // Reservierte überspringt die Vorschau (Spec `tl-warteliste-schiedsrichter`,
+  // AK 16): Die Rotation setzt sie ohnehin nicht ein, „nächster: X" wäre
+  // also eine falsche Ankündigung.
+  const next = list.find((o) => !o.paused && !o.on_duty_court_id && !o.reserved);
   setPanelPreview("officials", next ? `nächster: ${next.name}` : "niemand frei");
   const box = $("off-list");
   if (!box) return; // Panel gerade ausgeblendet oder zugeklappt.
@@ -7513,6 +7536,8 @@ function renderOfficials() {
       <span class="num">${i + 1}.</span>
       <span class="off-name">${esc(o.name)}</span>
       ${o.on_duty_court_id ? `<span class="meta">im Dienst</span>` : ""}
+      ${o.reserved ? `<span class="meta" title="Für ein wartendes Spiel eingeteilt — die Rotation setzt diese Person bis dahin nicht ein">${
+        o.reserved_match_num != null ? `reserviert Sp. ${esc(String(o.reserved_match_num))}` : "reserviert"}</span>` : ""}
       <button type="button" data-off-detail="${o.id}" title="Sperren, Verein und Einsätze">${o.appearances}×</button>
       <button type="button" data-off-pause="${o.id}" data-paused="${o.paused ? "1" : ""}"
         title="${o.paused ? "wieder einteilen" : "pausieren"}">${o.paused ? "▶" : "❚❚"}</button>
@@ -7694,17 +7719,54 @@ function renderOffChips() {
 }
 
 /**
- * Einteilung eines Felds: je Dienst eine Auswahl aus der Rotationsliste.
+ * Einteilung eines Spiels: je Dienst eine Auswahl aus der Rotationsliste.
+ *
+ * Zwei Einstiege, ein Dialog: die Feldkachel (`courtId` = Feld) und seit der
+ * Spec `tl-warteliste-schiedsrichter` die Warteliste (`courtId === 0`, das
+ * Spiel steht in `queue` oder `open_queue`). Der Turnier-PC unterscheidet
+ * beide nur am Protokolltext; geprüft wird dort wie hier dasselbe.
  *
  * Eine Zuweisung mit Konflikt wird **ausgeführt** — die Turnierleitung
  * entscheidet, die App warnt nur (Spec Nr. 2). Die Warnung selbst kommt mit
- * dem nächsten Zustand an der Kachel an, weil der Turnier-PC sie berechnet.
+ * dem nächsten Zustand an Kachel bzw. Zeile an, weil der Turnier-PC sie
+ * berechnet.
+ *
+ * Jede Auswahl geht sofort hinaus (kein „Speichern"-Knopf). Wählt man als
+ * SR die Person, die gerade AR ist (oder umgekehrt), tauscht der Dialog die
+ * beiden — der Turnier-PC lehnt SR = AR ab, und genau diesen Zwischenstand
+ * darf die Reihenfolge nie erzeugen: erst den anderen Dienst lösen, dann
+ * einteilen, dann die bisherige Person in den anderen Dienst setzen.
  */
 function openOfficialAssign(courtId, matchId) {
-  const c = (state.courts || []).find((x) => x.court_id === courtId);
+  const imFeld = courtId !== 0;
+  const c = imFeld ? (state.courts || []).find((x) => x.court_id === courtId) : null;
+  // Warteliste: zuerst die spielbereiten, dann die offenen Paarungen
+  // (`findeSpiel`, derselbe Weg wie jeder andere Zeilen-Knopf).
+  const m = imFeld ? null : findeSpiel(matchId);
+  const eintrag = imFeld ? c : m;
   const liste = state.officials || [];
   offCtx = null; // kein Detail-Abruf offen
-  $("off-title").textContent = c ? `Feld ${c.court}` : "Einteilung";
+  const spielNr = eintrag && eintrag.match_num != null ? eintrag.match_num : null;
+  $("off-title").textContent = imFeld
+    ? (c ? `Feld ${c.court}` : "Einteilung")
+    : (m ? `Spiel ${spielNr != null ? spielNr : "?"} · ${seitenText(m, 1)} – ${seitenText(m, 2)}`
+      : "Einteilung");
+  // Der zuletzt bestätigte Stand dieses Dialogs. Nach einer Ablehnung
+  // springt die Auswahl hierher zurück, statt einen Wert zu zeigen, den der
+  // Turnier-PC nie übernommen hat.
+  const stand = { sr: (eintrag && eintrag.sr_id) || 0, ar: (eintrag && eintrag.ar_id) || 0 };
+  // Zusatz je Person: Wer schon pfeift oder für ein anderes Spiel
+  // vorgesehen ist, soll vor der Wahl auffallen, nicht erst an der Warnung
+  // danach. Der eigene Dienst bzw. die eigene Reservierung ist kein Hinweis.
+  const zusatz = (o) => {
+    const teile = [];
+    if (o.on_duty_court_id && o.on_duty_court_id !== courtId) teile.push("im Dienst");
+    if (o.reserved && !(spielNr != null && o.reserved_match_num === spielNr)) {
+      teile.push(o.reserved_match_num != null ? `reserviert Sp. ${o.reserved_match_num}` : "reserviert");
+    }
+    if (o.paused) teile.push("Pause");
+    return teile.map((t) => ` (${t})`).join("");
+  };
   // Vorauswahl über die ID, nicht über den Namen: Zwei Schiedsrichter mit
   // gleichem Anzeigenamen sind in einer großen Liste realistisch, und die
   // Auswahl muss die Person treffen.
@@ -7712,27 +7774,80 @@ function openOfficialAssign(courtId, matchId) {
     <label class="off-field">${rolle === "sr" ? "Schiedsrichter" : "Aufschlagrichter"}
       <select data-off-role="${rolle}">
         <option value="">—</option>
-        ${liste.map((o) => `<option value="${o.id}" ${
+        ${liste.map((o) => `<option value="${Number(o.id)}" ${
           o.id === aktuell ? "selected" : ""
-        }>${esc(o.name)}${o.paused ? " (Pause)" : ""}</option>`).join("")}
+        }>${esc(o.name)}${esc(zusatz(o))}</option>`).join("")}
       </select>
     </label>`;
-  $("off-body").innerHTML = auswahl("sr", c && c.sr_id) + auswahl("ar", c && c.ar_id) +
-    `<p class="graph-note">Die Auswahl geht an BTP und erscheint dort im
-      nächsten Abgleich; bis dahin zeigt die Kachel noch den Stand aus BTP.</p>`;
+  $("off-body").innerHTML = auswahl("sr", stand.sr) + auswahl("ar", stand.ar) +
+    `<p class="graph-note">${imFeld
+      ? "Die Auswahl geht an BTP und erscheint dort im nächsten Abgleich; bis dahin zeigt die Kachel noch den Stand aus BTP."
+      : "Die Auswahl geht an BTP und erscheint dort im nächsten Abgleich. Bis das Spiel aufs Feld kommt, setzt die Rotation die Eingeteilten an keinem anderen Feld ein."}</p>`;
   $("off-overlay").hidden = false;
-  $("off-body").querySelectorAll("select[data-off-role]").forEach((sel) => {
-    sel.addEventListener("change", () => {
-      const rolle = sel.dataset.offRole;
-      const wert = sel.value;
-      const stempel = Math.floor(Date.now() / OP_WINDOW_MS);
-      if (!wert) {
-        send(`off-clear-${matchId}-${rolle}-${stempel}`,
-          { action: "official_clear", courtId, matchId, role: rolle }, "Zuweisung gelöst.");
-      } else {
-        send(`off-assign-${matchId}-${rolle}-${wert}-${stempel}`,
-          { action: "official_assign", courtId, matchId, officialId: Number(wert), role: rolle },
-          "Eingeteilt.");
+  const selects = Array.from($("off-body").querySelectorAll("select[data-off-role]"));
+  const sel = (rolle) => selects.find((s) => s.dataset.offRole === rolle);
+  const zeigeStand = () => {
+    sel("sr").value = stand.sr ? String(stand.sr) : "";
+    sel("ar").value = stand.ar ? String(stand.ar) : "";
+  };
+  // Eigene Vorgangskennung je Schritt: Das Zeitfenster der übrigen Knöpfe
+  // fasst Doppeltipps zusammen — hier hielte es „X einteilen, lösen, X
+  // wieder einteilen" binnen 20 s für eine Wiederholung des ersten Schritts,
+  // und der Turnier-PC antwortete aus dem Gedächtnis, ohne einzuteilen.
+  let lauf = 0;
+  const schritt = (rolle, id, okText, opts) => {
+    lauf += 1;
+    const kennung = `off-${courtId}-${matchId}-${rolle}-${id}-${Date.now()}-${lauf}`;
+    return send(kennung, id
+      ? { action: "official_assign", courtId, matchId, officialId: id, role: rolle }
+      : { action: "official_clear", courtId, matchId, role: rolle }, okText, opts);
+  };
+  const name = (id) => {
+    const o = liste.find((x) => x.id === id);
+    return o ? o.name : "Die bisherige Person";
+  };
+  const dienstWort = (rolle) => (rolle === "sr" ? "Schiedsrichter" : "Aufschlagrichter");
+  selects.forEach((s) => {
+    s.addEventListener("change", async () => {
+      const rolle = s.dataset.offRole;
+      const andere = rolle === "sr" ? "ar" : "sr";
+      const neu = Number(s.value) || 0;
+      if (neu === stand[rolle]) return;
+      // Während die Schritte laufen, keine zweite Wahl: Sie bezöge sich auf
+      // einen Stand, der gerade erst entsteht.
+      selects.forEach((x) => { x.disabled = true; });
+      try {
+        if (neu && neu === stand[andere]) {
+          const bisher = stand[rolle];
+          if (!(await schritt(andere, 0, null))) return;
+          stand[andere] = 0;
+          if (!(await schritt(rolle, neu, bisher ? null : "Eingeteilt."))) {
+            // Den gelösten Dienst zurückholen, sonst stünde die Person nach
+            // einer Ablehnung gar nicht mehr am Spiel (Review-Fund). Die
+            // Ablehnung selbst hat `send` schon gemeldet.
+            if (await schritt(andere, neu, null)) stand[andere] = neu;
+            return;
+          }
+          stand[rolle] = neu;
+          if (bisher) {
+            // Scheitert der letzte Schritt, ist die bisherige Person nicht
+            // mehr eingeteilt — das sagt die Meldung ausdrücklich, statt es
+            // in der Ablehnung untergehen zu lassen.
+            let grund = "";
+            if (!(await schritt(andere, bisher, "Getauscht.", { onError: (t) => { grund = t; } }))) {
+              toast(`${grund} ${name(bisher)} ist jetzt nicht mehr ${dienstWort(andere)} dieses Spiels.`, true);
+              return;
+            }
+            stand[andere] = bisher;
+          }
+        } else if (await schritt(rolle, neu, neu ? "Eingeteilt." : "Zuweisung gelöst.")) {
+          stand[rolle] = neu;
+        }
+      } finally {
+        // Erfolg wie Ablehnung: die Auswahl zeigt, was der Turnier-PC
+        // angenommen hat. Die Ablehnung selbst meldet `send` als Toast.
+        zeigeStand();
+        selects.forEach((x) => { x.disabled = false; });
       }
     });
   });
