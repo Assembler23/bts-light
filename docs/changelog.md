@@ -11,6 +11,16 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Aufschlagrichter — nur zur Information, einchecken muss er sich nicht.
 - Cloud: Die Seite und der Relay kommen mit dem Relay-Deploy beim Merge.
 
+## v0.9.360
+
+- **Die Aufruf-Ansage nennt Schiedsrichter und Aufschlagrichter.** „In
+  Vorbereitung … Bitte in Halle A. Schiedsrichter: … Aufschlagrichter: …" —
+  nur beim ersten Aufruf, nach dem Häkchen für die Besetzungs-Ansage. Auch
+  der Knopf „Ansage" im Vorbereitungs-Tab nennt sie.
+- **Vorbereitungs-Tab:** Unter einem gerufenen Spiel steht „SR: … · AR: …".
+  Der Zusatz „vorläufig" am Meetingpoint-Schiedsrichter entfällt — seit
+  v0.9.359 ist die Zuteilung beim Aufruf fest.
+
 ## v0.9.359
 
 - **Schiedsrichter und Aufschlagrichter schon beim Aufruf.** Wird ein Spiel

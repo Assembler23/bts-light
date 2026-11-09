@@ -1095,6 +1095,14 @@ pub enum AnnounceJobKind {
     MeetingpointCall {
         #[serde(rename = "matchId")]
         match_id: i64,
+        /// Namen von Schiedsrichter und Aufschlagrichter, **fertig vom
+        /// Turnier-PC** (ADR 0080): Das Abspielgerät — etwa ein LAN-Slave —
+        /// hat keine Schiedsrichter-Daten. Leer = niemand (oder älterer
+        /// Turnier-PC); ältere Abspielgeräte ignorieren die Felder.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sr: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ar: Vec<String>,
     },
     /// Nachruf an die Fehlenden einer gerufenen Partie („<Name>, bitte zum
     /// Meetingpoint"). Ausnahmsweise **mit Namen**: Wer fehlt, weiß nur der
@@ -8046,6 +8054,45 @@ pub(crate) mod tests {
         assert_eq!(jobs.len(), 2, "die beiden bekannten Auftraege ueberleben");
         assert_eq!(jobs[0].id, 1);
         assert_eq!(jobs[1].id, 3);
+    }
+
+    #[test]
+    fn der_aufruf_auftrag_mit_besetzung_bleibt_abwaertskompatibel() {
+        // ADR 0080: alter Auftrag ohne `sr`/`ar` lesbar (Default leer), neuer
+        // mit Namen im Roundtrip; ohne Namen fehlen die Felder ganz.
+        let json = r#"[
+          {"id":1,"hall":"","createdAtMs":1000,"kind":"meetingpoint_call","matchId":7},
+          {"id":2,"hall":"","createdAtMs":1001,"kind":"meetingpoint_call","matchId":8,
+           "sr":["Anna Schulz"],"ar":["Bob Meier"]}
+        ]"#;
+        let jobs = announce_jobs_aus_json(json);
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(
+            jobs[0].kind,
+            AnnounceJobKind::MeetingpointCall {
+                match_id: 7,
+                sr: vec![],
+                ar: vec![]
+            }
+        );
+        assert_eq!(
+            jobs[1].kind,
+            AnnounceJobKind::MeetingpointCall {
+                match_id: 8,
+                sr: vec!["Anna Schulz".into()],
+                ar: vec!["Bob Meier".into()],
+            }
+        );
+        let ohne = serde_json::to_string(&AnnounceJobKind::MeetingpointCall {
+            match_id: 7,
+            sr: vec![],
+            ar: vec![],
+        })
+        .unwrap();
+        assert!(
+            !ohne.contains("\"sr\"") && !ohne.contains("\"ar\""),
+            "{ohne}"
+        );
     }
 
     #[test]

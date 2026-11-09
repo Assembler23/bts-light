@@ -72,6 +72,11 @@ jobs:
       - name: Ansage-Baseline (JS)
         run: node scripts/test-announce-baseline.mjs
 
+      # Besetzung im Vorbereitungs-Aufruf (Spec sr-ar-beim-aufruf, ADR 0080):
+      # Satzbau, Besetzungs-Schalter, Nachrufe ohne Namen.
+      - name: Besetzung im Aufruf (JS)
+        run: node scripts/test-vorbereitung-besetzung.mjs
+
       # BWF-Aufschlag-Positionierung des Tablets (Plan 12b) — reiner
       # Node-Test der sicherheitskritischen Positionslogik.
       - name: Tablet-Aufschlagpositionen (JS)

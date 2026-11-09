@@ -325,6 +325,10 @@ export function PreparationPanel({ announce, azureTts }: Props) {
         teamBNames: c.team2,
         hall: c.call?.hall || undefined,
         meetingpointText: mpAnsageZusatz({ meetingpoint_ansage: mpAnsage }, lang),
+        // Der Knopf ist ausdrücklich gedrückt — er nennt die Besetzung wie
+        // der automatische Erst-Aufruf (ADR 0080, Schalter ADR 0040).
+        umpireNames: announce.announce_umpire !== false ? c.sr : undefined,
+        serviceJudgeNames: announce.announce_umpire !== false ? c.ar : undefined,
       },
       lang,
       {
@@ -626,6 +630,16 @@ export function PreparationPanel({ announce, azureTts }: Props) {
                     <span className="text-slate-400">gegen</span>{" "}
                     {c.team2.length > 0 ? c.team2.join(" / ") : "—"}
                   </span>
+                  {((c.sr?.length ?? 0) > 0 || (c.ar?.length ?? 0) > 0) && (
+                    <span className="truncate text-xs text-sky-800">
+                      {[
+                        (c.sr?.length ?? 0) > 0 ? `SR: ${c.sr!.join(" / ")}` : "",
+                        (c.ar?.length ?? 0) > 0 ? `AR: ${c.ar!.join(" / ")}` : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  )}
                   {c.meetingpoint && (
                     <MeetingpointZeile
                       c={c}
@@ -740,7 +754,7 @@ function MeetingpointZeile({
   if (mp.srName) {
     chips.push({
       key: "sr",
-      name: `${mp.srName} (SR${mp.srVorab ? ", vorläufig" : ""})`,
+      name: `${mp.srName} (SR)`,
       da: mp.srPresent,
       platz: { art: "sr" },
     });
