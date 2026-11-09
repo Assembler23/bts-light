@@ -19,7 +19,7 @@ Kiosk-Sperre (Buttons sperren, kein Internet, Exit-PIN) gibt es zudem nur in
 der bezahlten PLUS-Variante von Fully.
 
 Die Court-Monitore auf Raspberry Pi haben dasselbe Problem längst gelöst
-(`pi/shared-startbrowser.sh`): gemerkte IP zuerst, dann Subnetz-Scan auf
+(Kiosk-Skript aus `pi/setup-monitor.sh`, damals `pi/shared-startbrowser.sh`): gemerkte IP zuerst, dann Subnetz-Scan auf
 `:8088/health`, mDNS nur als Rückfall, Chromium im Kiosk. Dieses Muster
 bekommt jetzt eine Android-App.
 
@@ -68,7 +68,7 @@ müssten.
 
 ### Suche nach dem Pi-Muster
 
-Reihenfolge nach Zuverlässigkeit, identisch zu `shared-startbrowser.sh`:
+Reihenfolge nach Zuverlässigkeit, identisch zum Pi-Kiosk-Skript:
 
 1. **Gemerkte IP** (App-Einstellungen). Antwortet `http://<ip>:8088/health`
    mit 200 und JSON, ist die Suche fertig.
