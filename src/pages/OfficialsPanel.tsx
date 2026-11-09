@@ -13,7 +13,7 @@ import {
   Play,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useMemo, useCallback, useEffect, useState } from "react";
 import {
   officialAssign,
   officialClear,
@@ -32,6 +32,7 @@ import {
 import { announceOfficials } from "../io/announceCourt";
 import { useDragReorder } from "../state/useDragReorder";
 import type {
+  RotationMode,
   EinsatzRolle,
   AnnounceConfig,
   AppearanceView,
@@ -51,12 +52,18 @@ function timeOf(ms: number | null): string {
   });
 }
 
+/** Stabile leere Liste (siehe `arListe`). */
+const KEINE_OFFICIALS: OfficialView[] = [];
+
 export function OfficialsPanel({
   enabled,
+  rotationMode,
   announce,
   azureTts,
 }: {
   enabled: boolean;
+  /** Einteilungsprinzip (ADR 0079) — in „getrennt" zwei Listen. */
+  rotationMode?: RotationMode;
   announce: AnnounceConfig;
   azureTts?: AzureTtsConfig;
 }) {
@@ -147,8 +154,34 @@ export function OfficialsPanel({
       .catch(() => {});
   };
 
-  const { order, registerRow, dragHandleProps, draggingId } = useDragReorder(
-    roster,
+  // In Modus A (getrennte Listen) gibt es zwei Reihenfolgen (ADR 0079):
+  // die SR-Liste (alle außer „nur AR") und die AR-Liste (alle außer
+  // „nur SR", sortiert nach `position_ar`). Beide Hooks laufen immer
+  // (Hook-Regeln); die zweite Liste wird nur in A gezeigt.
+  //
+  // Stabile Referenzen sind Pflicht: `useDragReorder` setzt seinen Stand bei
+  // jeder neuen `items`-Referenz neu — ein in jedem Render frisch gebautes
+  // Array löste eine Endlosschleife aus (Review-Fund).
+  const getrennt = rotationMode === "getrennt";
+  const srListe = useMemo(
+    () => (getrennt ? roster.filter((o) => o.role !== "ar") : roster),
+    [roster, getrennt],
+  );
+  const arListe = useMemo(
+    () =>
+      getrennt
+        ? roster
+            .filter((o) => o.role !== "sr")
+            .slice()
+            .sort(
+              (a, b) =>
+                (a.position_ar ?? a.position) - (b.position_ar ?? b.position) || a.id - b.id,
+            )
+        : KEINE_OFFICIALS,
+    [roster, getrennt],
+  );
+  const dragSr = useDragReorder(
+    srListe,
     (o) => o.id,
     (id, beforeId) => {
       officialReorder(id, beforeId)
@@ -156,80 +189,32 @@ export function OfficialsPanel({
         .catch(() => {});
     },
   );
+  const dragAr = useDragReorder(
+    arListe,
+    (o) => o.id,
+    (id, beforeId) => {
+      officialReorder(id, beforeId, "ar")
+        .then(laden)
+        .catch(() => {});
+    },
+  );
+  const order = dragSr.order;
 
   const belegte = felder.filter((c) => c.match_id > 0);
 
-  if (!enabled) {
-    return (
-      <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
-        <header>
-          <h1 className="text-2xl font-semibold leading-tight">
-            Schiedsrichter
-          </h1>
-        </header>
-        <div className="flex gap-2.5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
-          <Info size={18} className="mt-0.5 shrink-0 text-slate-400" />
-          <span>
-            Der Schiedsrichter-Betrieb ist ausgeschaltet. Er lässt sich in den
-            Einstellungen unter „Schiedsrichter" einschalten — dann erscheinen
-            hier die Schiedsrichter aus BTP.
-          </span>
-        </div>
-      </main>
-    );
-  }
-
-  return (
-    <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
-      <header className="flex items-center gap-3">
-        <div className="flex-1">
-          <h1 className="text-2xl font-semibold leading-tight">
-            Schiedsrichter
-          </h1>
-          <p className="text-sm text-slate-500">
-            Reihenfolge der Rotation, Pausen und Konflikt-Angaben. Die Liste
-            selbst kommt aus BTP.
-          </p>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-          <Gavel size={14} />
-          {roster.length} in der Liste
-        </span>
-      </header>
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">
-          Rotationsreihenfolge
-        </h2>
-        <p className="text-xs text-slate-500">
-          Von oben nach unten wird zugeteilt. Pausierte werden übersprungen,
-          behalten aber ihren Platz; nach einem Spiel rückt ein Schiedsrichter
-          ans Ende. Der Verein dient der Konflikt-Warnung — BTP überträgt ihn
-          nicht mit.
-        </p>
-        {roster.length === 0 ? (
-          <div className="flex gap-2.5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
-            <Info size={18} className="mt-0.5 shrink-0 text-slate-400" />
-            <span>
-              BTP führt für dieses Turnier keine Schiedsrichter. Sobald welche
-              in BTP angelegt sind, erscheinen sie hier.
-            </span>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {order.map((o, i) => (
+  const zeile = (o: OfficialView, i: number, d: typeof dragSr) => (
               <div
                 key={o.id}
-                ref={(el) => registerRow(o.id, el)}
+                ref={(el) => d.registerRow(o.id, el)}
                 className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                  draggingId === o.id ? "border-sky-400 bg-sky-50 shadow-md" :
+                  d.draggingId === o.id ? "border-sky-400 bg-sky-50 shadow-md" :
                   o.paused
                     ? "border-slate-200 bg-slate-50 text-slate-400"
                     : "border-slate-200 bg-white text-slate-700"
                 }`}
               >
                 <span
-                  {...dragHandleProps(o.id)}
+                  {...d.dragHandleProps(o.id)}
                   tabIndex={0}
                   role="button"
                   title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
@@ -242,6 +227,20 @@ export function OfficialsPanel({
                   {i + 1}.
                 </span>
                 <span className="min-w-40 flex-1 font-medium">{o.name}</span>
+
+                {o.next_role && (
+                  <span
+                    title="Vorschau: diesen Dienst gäbe die Automatik als Nächstes"
+                    className={
+                      o.next_rank === 0
+                        ? "rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800"
+                        : "rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500"
+                    }
+                  >
+                    {o.next_rank === 0 ? "als Nächstes " : ""}
+                    {o.next_role === "ar" ? "AR" : "SR"}
+                  </span>
+                )}
 
                 {o.on_duty_court_id != null && (
                   <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
@@ -328,7 +327,80 @@ export function OfficialsPanel({
                   {o.paused ? <Play size={13} /> : <Pause size={13} />}
                 </button>
               </div>
-            ))}
+  );
+
+  if (!enabled) {
+    return (
+      <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
+        <header>
+          <h1 className="text-2xl font-semibold leading-tight">
+            Schiedsrichter
+          </h1>
+        </header>
+        <div className="flex gap-2.5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
+          <Info size={18} className="mt-0.5 shrink-0 text-slate-400" />
+          <span>
+            Der Schiedsrichter-Betrieb ist ausgeschaltet. Er lässt sich in den
+            Einstellungen unter „Schiedsrichter" einschalten — dann erscheinen
+            hier die Schiedsrichter aus BTP.
+          </span>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto flex min-h-full max-w-4xl flex-col gap-5 p-6 text-slate-800">
+      <header className="flex items-center gap-3">
+        <div className="flex-1">
+          <h1 className="text-2xl font-semibold leading-tight">
+            Schiedsrichter
+          </h1>
+          <p className="text-sm text-slate-500">
+            Reihenfolge der Rotation, Pausen und Konflikt-Angaben. Die Liste
+            selbst kommt aus BTP.
+          </p>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+          <Gavel size={14} />
+          {roster.length} in der Liste
+        </span>
+      </header>
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">
+          Rotationsreihenfolge
+        </h2>
+        <p className="text-xs text-slate-500">
+          Von oben nach unten wird zugeteilt. Pausierte werden übersprungen,
+          behalten aber ihren Platz; nach einem Spiel rückt ein Schiedsrichter
+          ans Ende. Der Verein dient der Konflikt-Warnung — BTP überträgt ihn
+          nicht mit.
+        </p>
+        {roster.length === 0 ? (
+          <div className="flex gap-2.5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
+            <Info size={18} className="mt-0.5 shrink-0 text-slate-400" />
+            <span>
+              BTP führt für dieses Turnier keine Schiedsrichter. Sobald welche
+              in BTP angelegt sind, erscheinen sie hier.
+            </span>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {getrennt && (
+              <h3 className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Schiedsrichter-Liste
+              </h3>
+            )}
+            {order.map((o, i) => zeile(o, i, dragSr))}
+            {getrennt && (
+              <>
+                <h3 className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Aufschlagrichter-Liste
+                </h3>
+                {dragAr.order.map((o, i) => zeile(o, i, dragAr))}
+              </>
+            )}
           </div>
         )}
       </section>

@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.363
+
+- **Vorschau „als Nächstes SR/AR".** Die Schiedsrichter-Liste am Turnier-PC
+  und im TL-Web zeigt, wen die Automatik als Nächstes einsetzen würde —
+  passend zum Einteilungsprinzip und zur Rolle. Im TL-Web steht oben
+  „nächster SR: … · AR: …".
+- **Getrennte Listen am Turnier-PC:** In diesem Modus zeigt das
+  Schiedsrichter-Panel eine SR- und eine AR-Liste, jede einzeln umsortierbar.
+- TL-Web: Marke „nur SR"/„nur AR" in der Liste und im Einteilungsdialog.
+
 ## v0.9.362
 
 - **Einteilungsprinzip im Setup wählbar.** Unter „Schiedsrichter":

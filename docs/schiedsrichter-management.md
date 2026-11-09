@@ -180,6 +180,17 @@ Rückmeldung der Einteilung (`OfficialsStore::rollen_warnung`, eingehängt in
 `TabletState::court_officials` und `official_assign`). Sie ist **kein**
 Konflikt und keine Ablehnung — der SR⇄AR-Tausch muss weiter gehen.
 
+**Vorschau „als Nächstes"** (seit v0.9.363): `OfficialsStore::prognose`
+simuliert die Wahl Runde für Runde auf einem geklonten Stand, ohne etwas zu
+speichern oder eine AR-Liste anzulegen, und liefert je Person Dienst und Runde
+(0 = nächste Besetzung). Kandidaten sind die Freien laut `Belegung` (ohne
+Konfliktprüfung, es gibt noch kein Spiel); offene Dienste nach den globalen
+Schaltern; beide aus ⇒ keine Vorschau. `prognose_aus` ist die eine Rechnung
+für das Panel am Turnier-PC (`OfficialView.next_role/next_rank`) und das
+TL-Web (`TlOfficial.next_role/next_rank`, dazu `TlOfficial.role` und
+`TlState.officials_rotation_mode`). Im Panel zeigt Modus A zwei Listen, jede
+einzeln ziehbar (`official_reorder(…, list: "ar")`).
+
 Die **Vorrolle** (`OfficialsStore::vorrollen`) wird je Takt aus den beendeten
 Spielen abgeleitet, nicht gespeichert: Sicht `effective`, Walkover zählt
 nicht, maßgeblich ist `(finished_at oder 0, match_id)`. Besetzungen desselben
@@ -377,7 +388,7 @@ Zusätzlich zeigt die **Spielübersicht** an jeder belegten Feld-Kachel
 
 | Command | Zweck |
 |---|---|
-| `officials_roster` | Liste in Rotationsreihenfolge: Name, Position, Pause, Verein, **Anzahl** Sperren, aktueller Dienst, Einsatz-Zähler, Reservierung (`reserved`, `reserved_match_num`, seit v0.9.354) |
+| `officials_roster` | Liste in Rotationsreihenfolge: Name, Position, Pause, Verein, **Anzahl** Sperren, aktueller Dienst, Einsatz-Zähler, Reservierung (`reserved`, `reserved_match_num`, seit v0.9.354), Rolle (`role`, seit v0.9.362), Position in der AR-Liste und Vorschau (`position_ar`, `next_role`, `next_rank`, seit v0.9.363) |
 | `official_assign` / `official_clear` | Zuweisung setzen/lösen; `assign` liefert die Konflikt-Kategorie zurück. Seit v0.9.354 vorher geprüft (`pruefe_einteilung`), Ablehnung als `Err(String)` |
 | `official_pause`, `official_reorder`, `official_set_club` | Pause, Reihenfolge, Stammverein |
 | `official_blocklists` / `official_set_blocklists` | Sperrlisten **gezielt** lesen/schreiben |

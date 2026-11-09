@@ -1596,6 +1596,72 @@ impl OfficialsStore {
         })
     }
 
+    /// Vorschau „als Nächstes" (ADR 0079): simuliert die Wahl Runde für Runde
+    /// auf einem geklonten Stand, **ohne etwas zu verändern** (keine
+    /// AR-Liste angelegt, nichts gespeichert). Liefert je Person den Dienst
+    /// und die Runde (0 = nächste Besetzung). Kandidaten: frei laut
+    /// `belegt`, ohne Konfliktprüfung (es gibt noch kein konkretes Spiel).
+    /// Beide Rotationen aus ⇒ leer.
+    pub fn prognose(
+        &self,
+        bekannt: &[i64],
+        belegt: &HashSet<i64>,
+        vorrolle: &HashMap<i64, OfficialRole>,
+        rot_sr: bool,
+        rot_ar: bool,
+    ) -> HashMap<i64, (OfficialRole, u32)> {
+        let mut out = HashMap::new();
+        if !rot_sr && !rot_ar {
+            return out;
+        }
+        let modus = self.rotation_mode();
+        let mut vergeben = belegt.clone();
+        let mut runde: u32 = 0;
+        // Höchstens so viele Runden wie Personen — jede Runde vergibt
+        // mindestens eine, sonst endet die Schleife.
+        while runde as usize <= bekannt.len() {
+            let (sr, ar) = self.waehle(modus, bekannt, &vergeben, &[], vorrolle, rot_sr, rot_ar);
+            if sr.is_none() && ar.is_none() {
+                break;
+            }
+            for (id, rolle) in [(sr, OfficialRole::Sr), (ar, OfficialRole::Ar)] {
+                if let Some(id) = id {
+                    out.insert(id, (rolle, runde));
+                    vergeben.insert(id);
+                }
+            }
+            runde += 1;
+        }
+        out
+    }
+
+    /// Vorschau aus dem Turnierstand: Belegung (Dienst + Reservierung) und
+    /// Vorrolle wie beim echten Besetzen — eine Rechnung für Desktop und
+    /// TL-Web.
+    pub fn prognose_aus(
+        &self,
+        snap: &BtpSnapshot,
+        belegung: &Belegung,
+    ) -> HashMap<i64, (OfficialRole, u32)> {
+        if !self.enabled() {
+            return HashMap::new();
+        }
+        let (rot_sr, rot_ar) = self.rotation();
+        let bekannt: Vec<i64> = snap.officials.iter().map(|o| o.id).collect();
+        let vorrolle = if self.rotation_mode() == RotationMode::Rollenwechsel {
+            let fertige: Vec<FinishedMatch> = snap
+                .matches
+                .iter()
+                .filter(|m| m.status == MatchStatus::Finished)
+                .map(FinishedMatch::aus_btp)
+                .collect();
+            self.vorrollen(&fertige)
+        } else {
+            HashMap::new()
+        };
+        self.prognose(&bekannt, &belegung.alle(), &vorrolle, rot_sr, rot_ar)
+    }
+
     /// Vorrolle je Official: der Dienst im zuletzt beendeten Spiel (ADR
     /// 0079). Dieselbe Sicht wie die Einsatz-Ableitung (`effective`, Hand,
     /// BTP und Automatik gleich); ein Walkover zählt nicht. Maßgeblich ist
@@ -3191,6 +3257,65 @@ mod tests {
         store.rotation_loesen_am_feld(&m, 7);
         assert_eq!(store.assignment(500).sr, Some(1), "SR bleibt");
         assert_eq!(store.assignment(500).ar, None, "Rotations-AR gelöst");
+    }
+
+    // ── Vorschau „als Nächstes" (ADR 0079, PR 4) ─────────────────────
+
+    #[test]
+    fn prognose_ohne_seiteneffekte_und_b_abwechselnd() {
+        // AK28/AK30
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3, 4]);
+        let vorher = datei_text(dir.path());
+        let p = store.prognose(&[1, 2, 3, 4], &HashSet::new(), &HashMap::new(), true, true);
+        assert_eq!(p.get(&1), Some(&(SR, 0)));
+        assert_eq!(p.get(&2), Some(&(AR, 0)));
+        assert_eq!(p.get(&3), Some(&(SR, 1)));
+        assert_eq!(p.get(&4), Some(&(AR, 1)));
+        assert_eq!(datei_text(dir.path()), vorher, "nichts gespeichert");
+        assert!(!vorher.contains("order_ar"));
+    }
+
+    #[test]
+    fn prognose_c_folgt_der_vorrolle_und_a_den_listen() {
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1, 2]);
+        store.set_rotation_mode(C);
+        let vor: HashMap<i64, OfficialRole> = [(1, SR), (2, AR)].into_iter().collect();
+        let p = store.prognose(&[1, 2], &HashSet::new(), &vor, true, true);
+        assert_eq!(p.get(&1), Some(&(AR, 0)));
+        assert_eq!(p.get(&2), Some(&(SR, 0)));
+
+        store.set_rotation_mode(A);
+        store.reorder_in(Reihenfolge::Ar, 2, Some(1));
+        let p = store.prognose(&[1, 2], &HashSet::new(), &HashMap::new(), true, true);
+        assert_eq!(p.get(&1), Some(&(SR, 0)), "SR-Liste: 1 oben");
+        assert_eq!(p.get(&2), Some(&(AR, 0)), "AR-Liste: 2 oben");
+    }
+
+    #[test]
+    fn prognose_markiert_keine_gebundenen_und_unpassenden() {
+        // AK29
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1, 2, 3, 4]);
+        store.set_paused(1, true);
+        store.set_role(4, Einsatzrolle::NurAr);
+        let belegt: HashSet<i64> = [2].into_iter().collect();
+        let p = store.prognose(&[1, 2, 3, 4], &belegt, &HashMap::new(), true, false);
+        assert_eq!(p.get(&3), Some(&(SR, 0)));
+        assert!(!p.contains_key(&1), "pausiert");
+        assert!(!p.contains_key(&2), "im Dienst/reserviert");
+        assert!(!p.contains_key(&4), "nur AR bei abgeschalteter AR-Rotation");
+        assert!(store
+            .prognose(
+                &[1, 2, 3, 4],
+                &HashSet::new(),
+                &HashMap::new(),
+                false,
+                false
+            )
+            .is_empty());
     }
 
     fn store_mit_datei(dir: &Path) -> OfficialsStore {

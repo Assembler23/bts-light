@@ -847,6 +847,17 @@ zeigt die Seite zusätzlich:
 - **In der Schiedsrichter-Liste** (seit v0.9.355) trägt eine reservierte
   Person die Marke **„reserviert Sp. N"**. Die Vorschau „nächster: …"
   überspringt reservierte Personen, weil die Rotation sie nicht einsetzt.
+- **Vorschau als Nächstes** (seit v0.9.363): Der Turnier-PC rechnet aus,
+  wen die Automatik als Nächstes einsetzen würde — nach Einteilungsprinzip
+  und Rolle. Der Kopf der Liste zeigt dann **„nächster SR: … · AR: …"**, jede
+  Zeile ihren voraussichtlichen Dienst („als Nächstes SR", sonst „→ AR").
+  Personen mit fester Rolle tragen die Marke **„nur SR"** bzw. **„nur AR"**;
+  im Einteilungsdialog steht der Hinweis schon vor der Wahl. In Modus
+  „Getrennte Listen" zeigt die Seite die **SR-Reihenfolge**; die
+  AR-Reihenfolge pflegt man am Turnier-PC. Ein älterer Turnier-PC liefert
+  keine Vorschau, dann bleibt es bei „nächster: …".
+  <!-- pruef: "als Nächstes " in src-tauri/assets/tl.html -->
+  <!-- pruef: "SR-Reihenfolge" in src-tauri/assets/tl.html -->
 
 Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
 Turnierleitung entscheidet. **Abgelehnt** wird sie dagegen (seit v0.9.354),
