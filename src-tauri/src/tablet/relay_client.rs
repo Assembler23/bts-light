@@ -742,6 +742,31 @@ async fn handle_frame(
             let json = crate::tablet::tl::official_detail_json(&ctx.tablet, official_id);
             let _ = tx.send(text(&HostFrame::OfficialDetail { req_id, json }));
         }
+        RelayFrame::TlSearchRequest {
+            req_id,
+            query,
+            candidates,
+        } => {
+            // Abseits der Frame-Schleife rechnen: Die Suche läuft über den
+            // ganzen Bestand und soll Punktstände nicht aufhalten (Spec
+            // `tl-spielersuche`). Fehler (Begriff ungültig, belegt) reisen als
+            // `{"error":…}`, der Relay macht 400/429 daraus. Den Begriff nie
+            // protokollieren.
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let cfg = ctx.app_config_arc();
+                let json = crate::tablet::suche::search_json_begrenzt(
+                    &ctx.tablet,
+                    &cfg,
+                    &query,
+                    candidates,
+                    crate::tablet::monitor::now_ms(),
+                )
+                .unwrap_or_else(|f| f.relay_json());
+                let _ = tx.send(text(&HostFrame::TlSearchResult { req_id, json }));
+            });
+        }
     }
 }
 

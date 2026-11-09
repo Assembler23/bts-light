@@ -165,6 +165,7 @@ pub(crate) fn plan_court_action(
                     // Zustand). Die Besetzung trägt der Aufrufer nach, der
                     // den Roster kennt (ADR 0021).
                     officials: None,
+                    highlight: None,
                 }]
             })
             .unwrap_or_default()
@@ -1450,26 +1451,7 @@ pub(crate) fn offener_platz_text(
     m: &crate::btp::model::BtpMatch,
     seite: u8,
 ) -> String {
-    // Steht die Mannschaft schon fest (EntryID gesetzt) und nur ihre Namen
-    // sind nicht auflösbar, wäre jede Kandidatenliste eine falsche Aussage:
-    // Der Platz ist vergeben, es kommt niemand anderes mehr. Dann lieber
-    // nichts behaupten (Code-Review 30.08.2026).
-    let entry_id = if seite == 1 { m.entry1_id } else { m.entry2_id };
-    if entry_id != 0 {
-        return OFFEN.to_string();
-    }
-    let from = if seite == 1 { m.from1 } else { m.from2 };
-    let Some(slot) = from else {
-        return OFFEN.to_string();
-    };
-    // Die Kante zeigt auf eine Slot-PlanningID. Ein Vorspiel gibt es nur,
-    // wenn ein Match im SELBEN Draw genau diese Position belegt; sonst
-    // speist ein Setzplatz, ein Freilos oder eine andere Auslosung.
-    let Some(vorspiel) = snap
-        .matches
-        .iter()
-        .find(|o| o.draw_id == m.draw_id && o.planning_id == slot && o.id != m.id)
-    else {
+    let Some(vorspiel) = vorspiel_fuer(snap, m, seite) else {
         return OFFEN.to_string();
     };
     if !vorspiel.team1.is_empty() && !vorspiel.team2.is_empty() {
@@ -1484,6 +1466,33 @@ pub(crate) fn offener_platz_text(
         Some(nr) => format!("aus Spiel {nr}"),
         None => OFFEN.to_string(),
     }
+}
+
+/// Das direkte Vorspiel, das den offenen Platz `seite` (1/2) speist — die
+/// Kante hinter [`offener_platz_text`], geteilt mit der Spielersuche (Spec
+/// `tl-spielersuche`), damit Label und Kandidaten-Treffer dieselbe Kante
+/// lesen. `None`, wenn die Mannschaft schon feststeht (EntryID gesetzt) oder
+/// kein Vorspiel im selben Draw diese Position belegt.
+pub(crate) fn vorspiel_fuer<'a>(
+    snap: &'a crate::btp::model::BtpSnapshot,
+    m: &crate::btp::model::BtpMatch,
+    seite: u8,
+) -> Option<&'a crate::btp::model::BtpMatch> {
+    // Steht die Mannschaft schon fest (EntryID gesetzt) und nur ihre Namen
+    // sind nicht auflösbar, wäre jede Kandidatenliste eine falsche Aussage:
+    // Der Platz ist vergeben, es kommt niemand anderes mehr. Dann lieber
+    // nichts behaupten (Code-Review 30.08.2026).
+    let entry_id = if seite == 1 { m.entry1_id } else { m.entry2_id };
+    if entry_id != 0 {
+        return None;
+    }
+    let slot = if seite == 1 { m.from1 } else { m.from2 }?;
+    // Die Kante zeigt auf eine Slot-PlanningID. Ein Vorspiel gibt es nur,
+    // wenn ein Match im SELBEN Draw genau diese Position belegt; sonst
+    // speist ein Setzplatz, ein Freilos oder eine andere Auslosung.
+    snap.matches
+        .iter()
+        .find(|o| o.draw_id == m.draw_id && o.planning_id == slot && o.id != m.id)
 }
 
 /// Beschriftung eines Platzes, über den nichts bekannt ist.
@@ -2763,6 +2772,10 @@ fn highlight_entry_fuer(
         draw_id: m.draw_id,
         planning_id: m.planning_id,
         highlight,
+        // Vorläufig aus dem Snapshot; `write_highlight_to_btp` setzt beide
+        // unmittelbar vor dem Senden frisch (Messung 09.11.2026).
+        court_id: m.court_id.unwrap_or(0),
+        officials: (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
     })
 }
 
@@ -2793,7 +2806,13 @@ async fn execute_highlight_action(
         Err(response) => return Some(response),
     };
     match crate::tablet::server::write_highlight_to_btp(config, &[entry]).await {
-        Ok(()) => {
+        // BTP kennt das Spiel nicht mehr (frisch gelesen) — nichts gesendet,
+        // also auch kein Echo und keine Erfolgsmeldung.
+        Ok(0) => Some(TlResponse::err(
+            C::NotAllowed,
+            format!("Spiel {match_id} gibt es in BTP nicht mehr."),
+        )),
+        Ok(_) => {
             // Erst nach dem Erfolg merken: Ein Echo für einen Write, den BTP
             // nie gesehen hat, zeigte der Turnierleitung eine Farbe, die es
             // nicht gibt.
@@ -2998,6 +3017,13 @@ pub struct TlState {
     /// hielte die Tablets für aufgefrischt.
     #[serde(default)]
     pub can_reload_tablets: bool,
+    /// Kennt dieser Turnier-PC die Spielersuche (`POST /tl/api/search`,
+    /// Spec `tl-spielersuche`, ADR 0081)? Der Relay liefert die neue Seite
+    /// sofort nach dem Merge aus, der Turnier-PC kommt erst mit dem Tag —
+    /// ohne dieses Merkmal hinge jede Suche gegen einen älteren Host 20 s
+    /// am Relay-Timeout. Ohne es zeigt die Seite kein Suchfeld.
+    #[serde(default)]
+    pub can_search: bool,
     /// Nach wie vielen Sekunden ein „fertig aussehendes" Spiel gemeldet wird
     /// (`0` = Warnung aus). Kommt aus der Konfiguration; die Seite rechnet
     /// damit gegen [`TlCourt::decided_since_ms`].
@@ -3801,8 +3827,11 @@ pub struct TlFinished {
     pub result: String,
     /// Feld, auf dem es lief; leer, wenn direkt in BTP gewertet.
     pub court: String,
-    /// Nur zur Laufzeit gestempelt — Spiele, die vor dem App-Start
-    /// beendet waren, haben keinen Zeitstempel und stehen am Ende.
+    /// Zeitpunkt, an dem **diese App** das Spiel zum ersten Mal als beendet
+    /// gesehen hat (`stamp_finished`/`stamp_finished_seen`) — BTP liefert
+    /// kein Spielende. Nach einer Neuinstallation oder am Folgetag tragen
+    /// deshalb auch alte Spiele „jetzt"; als echte Uhrzeit taugt der Wert
+    /// nur mit gemessener Spielzeit (siehe Spielersuche, `ended_ms`).
     pub finished_at_ms: Option<u64>,
     /// Siehe [`TlCourt::has_timeline`] — Papier-Ergebnisse haben keinen
     /// Verlauf, die Beendet-Zeile bietet den Klick dann nicht an.
@@ -3880,7 +3909,7 @@ pub struct TlTimeStatsRow {
 /// überall sonst unterdrückt. Netto ist auf Brutto geklemmt: Erreicht der
 /// erste Score den Host vor dem ersten Sync-Poll, läge der Punktstempel
 /// sonst VOR dem Zuweisungsstempel („40 min (netto 43)").
-fn finished_times(tablet: &TabletState, match_id: i64) -> Option<(i64, Option<i64>)> {
+pub(crate) fn finished_times(tablet: &TabletState, match_id: i64) -> Option<(i64, Option<i64>)> {
     let e = tablet.match_times_store().entry(match_id)?;
     let finished = e.finished_ms?;
     let brutto =
@@ -3955,161 +3984,43 @@ fn side_last_played(
 /// Ordnungsschlüssel eines wartenden Spiels samt dem Spiel selbst und seiner
 /// Halle — die Zwischenform, in der sortiert und gekappt wird, bevor die
 /// teuren Zeichenketten der Anzeige entstehen.
-type OrderedMatch<'a> = (
+pub(crate) type OrderedMatch<'a> = (
     assign::ManualOrderSortKey,
     &'a crate::btp::model::BtpMatch,
     String,
     HallSource,
 );
 
-/// Baut den Anzeige-Zustand aus dem aktuellen BTP-Stand und dem, was der Host
-/// selbst verwaltet (Aufrufe, Sperren, Live-Spielstände).
-///
-/// `rev` gibt der Aufrufer vor — er entscheidet, ob sich gegenüber dem
-/// zuletzt ausgelieferten Stand überhaupt etwas geändert hat.
-pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u64) -> TlState {
-    build_state_limited(tablet, config, now_ms, rev, QUEUE_LIMIT)
+/// Halle und Zeitpunkt des Vorbereitungs-Aufrufs eines Spiels.
+pub(crate) fn aufruf_halle(
+    calls: &[crate::tablet::state::PreparationCall],
+    snap: &crate::btp::model::BtpSnapshot,
+    match_id: i64,
+) -> Option<(String, u64)> {
+    calls.iter().find(|c| c.match_id == match_id).map(|c| {
+        let hall = c
+            .location_id
+            .and_then(|id| snap.locations.iter().find(|l| l.id == id))
+            .map(|l| l.name.clone())
+            .unwrap_or_default();
+        (hall, c.called_at_ms)
+    })
 }
 
-/// Rechnet die Startzeit-Prognose frisch und legt sie im Host ab
-/// ([`TabletState::merge_predicted_starts`]) — ohne dass eine
-/// Turnierleitungs-Ansicht offen sein muss.
-///
-/// Warum: Die Prognose entsteht nur beim Bau des TL-Zustands. Ist keine
-/// TL-Seite offen, baut niemand ihn, und der Spielplan an badhub (`sched`)
-/// ging ohne `predicted_start_ts` hinaus — oder mit Werten von der letzten
-/// offenen Ansicht, die längst in der Vergangenheit lagen. Der Sync-Loop
-/// ruft das deshalb einmal je Spielplan-Versand (höchstens minütlich).
-///
-/// Bewusst über den vollen Zustandsbau und nicht über eine abgespeckte
-/// Kopie der Simulation: So kann die Prognose an badhub nie von der in der
-/// TL-Liste abweichen (dieselbe Begründung wie beim Snapshot-Kommentar im
-/// Prognose-Block).
-///
-/// Zurück kommen **nur die frisch gerechneten** Werte (Match-ID →
-/// Startzeit in ms), nicht der gemergte Speicher: Der behält Einträge von
-/// Spielen, die inzwischen keine Prognose mehr haben (Wunschfeld,
-/// Ausnahme, hinter die Wartelisten-Grenze gerutscht, Schalter aus) — an
-/// badhub ginge sonst ein stehengebliebener Wert, und der ist schlimmer als
-/// keiner. Bei ausgeschalteter Prognose: leer.
-pub(crate) fn prognose_auffrischen(
+/// Feldkacheln aus einem Schnappschuss — geteilt von `build_state_limited`
+/// und der Spielersuche (Spec `tl-spielersuche`), damit beide dieselben
+/// Felder sehen.
+pub(crate) fn felder_bauen(
     tablet: &TabletState,
     config: &AppConfig,
-    now_ms: u64,
-) -> std::collections::HashMap<i64, u64> {
-    prognose_mit_unsicherheit(tablet, config, now_ms)
-        .into_iter()
-        .map(|(id, (ms, _))| (id, ms))
-        .collect()
-}
-
-/// Wie [`prognose_auffrischen`], aber samt Unsicherheits-Flag (zu wenige
-/// Messwerte) — für die Meetingpoint-Seite, die dann „ca." davorsetzt.
-pub(crate) fn prognose_mit_unsicherheit(
-    tablet: &TabletState,
-    config: &AppConfig,
-    now_ms: u64,
-) -> std::collections::HashMap<i64, (u64, bool)> {
-    if !config.prediction.enabled {
-        return std::collections::HashMap::new();
-    }
-    build_state(tablet, config, now_ms, 0)
-        .queue
-        .iter()
-        .filter_map(|m| {
-            m.predicted_start_ms
-                .map(|p| (m.match_id, (p, m.predicted_uncertain)))
-        })
-        .collect()
-}
-
-/// Wie [`build_state`], aber mit vorgegebener Wartelisten-Länge
-/// (turnierweit).
-///
-/// Für den Weg über den Relay: Der legt einen zu großen Zustand gar nicht
-/// erst ab, und der Host erfährt davon nichts. Er muss also selbst kürzen —
-/// was wegfällt, meldet `queue_truncated` wie immer.
-pub(crate) fn build_state_limited(
-    tablet: &TabletState,
-    config: &AppConfig,
-    now_ms: u64,
-    rev: u64,
-    queue_limit: usize,
-) -> TlState {
-    let Some(snap) = tablet.snapshot_clone() else {
-        // Noch kein Turnier geladen: leerer, aber gültiger Zustand — die
-        // Seite zeigt „warte auf Turnierdaten" statt eines Fehlers.
-        return TlState {
-            rev,
-            server_now_ms: now_ms,
-            tournament: String::new(),
-            multi_hall: false,
-            can_set_wish_court: true,
-            can_set_highlight: true,
-            can_repeat_prep_call: true,
-            can_announce_court_full: true,
-            can_reorder_called: true,
-            can_assign_waiting_officials: true,
-            meetingpoint: meetingpoint_lage(tablet, config),
-            finished_warning_seconds: config.finished_warning_seconds,
-            // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
-            // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
-            // lehnt die Aktion ohnehin ab (E7).
-            can_lock_courts: true,
-            can_reload_tablets: true,
-            halls: Vec::new(),
-            auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
-            hall_prefill: Some(hall_prefill_view(config, 0, false)),
-            call_timer: call_timer_view(config),
-            rest_minutes: None,
-            courts: Vec::new(),
-            queue: Vec::new(),
-            walkovers: Vec::new(),
-            queue_truncated: 0,
-            open_queue: Vec::new(),
-            open_queue_truncated: 0,
-            scorekeeper_managed: config.scorekeeper.enabled,
-            scorekeepers: Vec::new(),
-            finished: Vec::new(),
-            time_stats: None,
-            checkin_times: None,
-            checkin_stale: false,
-            // Die Raster-Einstellung ist Host-Konfiguration, kein
-            // Turnierstand — sie gilt auch, solange BTP noch nichts
-            // geliefert hat.
-            layouts: layouts_view(config),
-            show_club_names: config.display.show_club_names,
-            show_club_logos: config.display.show_club_logos,
-            officials_managed: tablet.officials_store().enabled(),
-            officials: Vec::new(),
-            officials_rotation_mode: None,
-            officials_ar_order: Vec::new(),
-            can_set_official_role: true,
-            // Der Profil-Katalog ist Host-Konfiguration, kein Turnierstand
-            // — er gilt auch, solange BTP noch nichts geliefert hat
-            // (dieselbe Begründung wie bei `layouts` oben).
-            profiles: profiles_view(config),
-            default_profile_id: config.tl_web.default_profile_id.clone(),
-        };
-    };
-
-    // Felder und Warteliste stammen aus **demselben** Schnappschuss. Zwei
-    // getrennte Lesevorgänge könnten den Sync-Lauf dazwischen erwischen —
-    // dann beschrieben Felder und Liste zwei verschiedene Turnierstände.
-    // Match-ID → Spiel, einmal für den ganzen Bau. Zwei Nutzer: Die
-    // Feldkachel braucht den Spieler-Datensatz für die Lizenznummern
-    // (`CourtOverview` führt sie bewusst nicht mit — sie geht auch an
-    // Tablet und Court-Monitor), und der Prognose-Block weiter unten
-    // suchte bisher je belegtem Feld linear über alle Spiele. Bei einem
-    // großen Turnier sind das ein Aufbau gegen bis zu 26 volle Scans.
-    let match_by_id: std::collections::HashMap<i64, &crate::btp::model::BtpMatch> =
-        snap.matches.iter().map(|m| (m.id, m)).collect();
-
-    let mut courts: Vec<TlCourt> = tablet
-        .overview_from(&snap)
+    snap: &crate::btp::model::BtpSnapshot,
+    match_by_id: &std::collections::HashMap<i64, &crate::btp::model::BtpMatch>,
+) -> Vec<TlCourt> {
+    tablet
+        .overview_from(snap)
         .into_iter()
         .map(|c| {
-            let clearing = clearing_match(&snap, c.court_id, c.match_id);
+            let clearing = clearing_match(snap, c.court_id, c.match_id);
             let schalter = tablet.officials_store().court_switches(c.court_id);
             // `match_id == 0` heißt „Feld frei" und ist keine Kennung —
             // ohne die Wache bekäme jedes freie Feld die Nummern eines
@@ -4126,43 +4037,30 @@ pub(crate) fn build_state_limited(
             if config.meetingpoint.enabled && config.meetingpoint.field_check_enabled {
                 if let Some(m) = spiel {
                     view.feld_check = Some(crate::tablet::meetingpoint::feld_check_zaehlung(
-                        tablet, m, &snap,
+                        tablet, m, snap,
                     ));
                 }
             }
             view
         })
-        .collect();
+        .collect()
+}
 
-    // Aufrufe einmal auflösen: Match-ID → Halle des Aufrufs.
-    let calls = tablet.preparation_calls();
-    let called_hall = |match_id: i64| -> Option<(String, u64)> {
-        calls.iter().find(|c| c.match_id == match_id).map(|c| {
-            let hall = c
-                .location_id
-                .and_then(|id| snap.locations.iter().find(|l| l.id == id))
-                .map(|l| l.name.clone())
-                .unwrap_or_default();
-            (hall, c.called_at_ms)
-        })
-    };
-
+/// Turnierweite Wartelisten-Ordnung aller angesetzten Spiele, getrennt in
+/// spielbereite und offene Paarungen (mit ihrem Index in der gemeinsamen
+/// Folge). Geteilt von `build_state_limited` und der Spielersuche (Spec
+/// `tl-spielersuche`) — eine Reihenfolge, nicht zwei.
+pub(crate) fn wartelisten_ordnung<'a>(
+    tablet: &TabletState,
+    config: &AppConfig,
+    snap: &'a crate::btp::model::BtpSnapshot,
+    calls: &[crate::tablet::state::PreparationCall],
+) -> (Vec<OrderedMatch<'a>>, Vec<(usize, OrderedMatch<'a>)>) {
     // Die von Hand gesetzten und automatisch vorverteilten Hallen einmal
     // holen, nicht je Spiel — sonst sperrte der Aufbau der Liste
     // hundertfach.
     let manual = tablet.manual_halls();
     let auto = tablet.auto_hall_store().halls();
-
-    let availability = PlayerAvailability::from_snapshot(&snap, config);
-    let zuletzt = last_played_by_player(&snap, &tablet.match_times_store().entries());
-    // Wer ist wo gebunden (ADR 0078)? Einmal je Bau — Warnungen an der
-    // Warteliste und die Marke „reserviert" in der SR-Liste lesen beide
-    // daraus. Ohne Schiedsrichter-Betrieb leer.
-    let belegung = crate::tablet::officials::Belegung::aus(
-        tablet.officials_store(),
-        &snap,
-        heutiges_datum(now_ms),
-    );
 
     // Alle geplanten Spiele — auch die, deren Paarung noch aus einem Vorspiel
     // kommt (Spec `tl-offene-paarungen`). Sie werden gleich unten von den
@@ -4174,17 +4072,17 @@ pub(crate) fn build_state_limited(
         .iter()
         .filter(|m| m.status == crate::btp::model::MatchStatus::Scheduled)
         .map(|m| {
-            let call = called_hall(m.id);
+            let call = aufruf_halle(calls, snap, m.id);
             let manual_hall = manual.get(&m.id).map(String::as_str);
             let called_hall_str = call.as_ref().map(|(h, _)| h.as_str());
             // Dieselbe Auflösung wie in der Vergabe (Spec `tl-wunschfeld`):
             // Zeigte die Liste eine andere Halle als die Automatik benutzt,
             // verlöre die Turnierleitung das Vertrauen in beide.
             let manual_hall =
-                assign::manual_hall_from_wish(&snap, tablet.wish_court(m.id), manual_hall);
+                assign::manual_hall_from_wish(snap, tablet.wish_court(m.id), manual_hall);
             let (hall, hall_source, key) = assign::resolve_and_sort_key(
                 config,
-                &snap,
+                snap,
                 m,
                 manual_hall,
                 called_hall_str,
@@ -4215,26 +4113,38 @@ pub(crate) fn build_state_limited(
             spielbereit.push(eintrag);
         }
     }
-    let ordered = spielbereit;
+    (spielbereit, offene)
+}
 
-    // Startzeit-Prognose (Spec `spielzeiten-prognose`, E5–E8): Statistik
-    // aus dem Zeiten-Store + deterministische Simulation der Warteliste —
-    // hier und nicht im Sync-Loop, damit Prognose, Felder und Liste aus
-    // DEMSELBEN Snapshot stammen und LAN wie Cloud identisch anzeigen (R3).
-    // Alles minutengranular, damit der Fingerprint unten nicht jede
-    // Sekunde kippt (Rev-Churn-Wächter).
+/// Startzeit-Prognose der ersten `queue_limit` spielbereiten Spiele (Spec
+/// `spielzeiten-prognose`) — **ohne** Seiteneffekt: Das Merken für die
+/// Prognose-Kontrolle (`merge_predicted_starts`) bleibt beim Aufrufer, damit
+/// die Spielersuche (Spec `tl-spielersuche`) denselben Wert rechnen kann,
+/// ohne den Host-Zustand zu verändern. Setzt `remaining_min` der Felder.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prognose_rechnen(
+    tablet: &TabletState,
+    config: &AppConfig,
+    snap: &crate::btp::model::BtpSnapshot,
+    courts: &mut [TlCourt],
+    ordered: &[OrderedMatch<'_>],
+    queue_limit: usize,
+    availability: &PlayerAvailability,
+    match_by_id: &std::collections::HashMap<i64, &crate::btp::model::BtpMatch>,
+    now_ms: u64,
+) -> (
+    Option<std::sync::Arc<predict::TimeStats>>,
+    std::collections::HashMap<i64, predict::Prediction>,
+) {
     let stats = config
         .prediction
         .enabled
         .then(|| tablet.cached_time_stats());
-    // Einmal aus dem Store holen, beide Felder (Zeilen + Stale-Marke)
-    // bedienen — nicht zweimal klonen (Review 17.08.2026).
-    let checkin = tablet.checkin_classes();
     let predictions: std::collections::HashMap<i64, predict::Prediction> = match &stats {
         Some(stats) => {
             let default_mins = config.prediction.default_duration_mins;
             let now_min = now_ms / 60_000;
-            let rest_min = effective_rest_minutes(&snap, config).unwrap_or(0).max(0) as u64;
+            let rest_min = effective_rest_minutes(snap, config).unwrap_or(0).max(0) as u64;
             let buffer_min = predict::effective_buffer_min(
                 config.auto_assign.enabled,
                 config.auto_assign.wait_minutes,
@@ -4333,28 +4243,216 @@ pub(crate) fn build_state_limited(
                         .collect(),
                 });
             }
-            let predictions = predict::predict_starts(&predict::PredictInput {
+            predict::predict_starts(&predict::PredictInput {
                 now_min,
                 buffer_min,
                 rest_min,
                 courts: sim_courts,
                 player_ready_min: player_ready,
                 queue: sim_queue,
-            });
-            // Fürs Diagnose-Log merken (Prognose-Kontrolle, E12): Beim
-            // echten Aufruf vergleicht der Sync-Loop Prognose und
-            // Wirklichkeit. Gemergt, nicht ersetzt — die Relay-Leiter baut
-            // denselben Zustand mit kleineren Wartelisten (F6).
-            tablet.merge_predicted_starts(
-                predictions
-                    .iter()
-                    .map(|(id, p)| (*id, p.start_min * 60_000))
-                    .collect(),
-            );
-            predictions
+            })
         }
         None => std::collections::HashMap::new(),
     };
+    (stats, predictions)
+}
+
+/// Baut den Anzeige-Zustand aus dem aktuellen BTP-Stand und dem, was der Host
+/// selbst verwaltet (Aufrufe, Sperren, Live-Spielstände).
+///
+/// `rev` gibt der Aufrufer vor — er entscheidet, ob sich gegenüber dem
+/// zuletzt ausgelieferten Stand überhaupt etwas geändert hat.
+pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u64) -> TlState {
+    build_state_limited(tablet, config, now_ms, rev, QUEUE_LIMIT)
+}
+
+/// Rechnet die Startzeit-Prognose frisch und legt sie im Host ab
+/// ([`TabletState::merge_predicted_starts`]) — ohne dass eine
+/// Turnierleitungs-Ansicht offen sein muss.
+///
+/// Warum: Die Prognose entsteht nur beim Bau des TL-Zustands. Ist keine
+/// TL-Seite offen, baut niemand ihn, und der Spielplan an badhub (`sched`)
+/// ging ohne `predicted_start_ts` hinaus — oder mit Werten von der letzten
+/// offenen Ansicht, die längst in der Vergangenheit lagen. Der Sync-Loop
+/// ruft das deshalb einmal je Spielplan-Versand (höchstens minütlich).
+///
+/// Bewusst über den vollen Zustandsbau und nicht über eine abgespeckte
+/// Kopie der Simulation: So kann die Prognose an badhub nie von der in der
+/// TL-Liste abweichen (dieselbe Begründung wie beim Snapshot-Kommentar im
+/// Prognose-Block).
+///
+/// Zurück kommen **nur die frisch gerechneten** Werte (Match-ID →
+/// Startzeit in ms), nicht der gemergte Speicher: Der behält Einträge von
+/// Spielen, die inzwischen keine Prognose mehr haben (Wunschfeld,
+/// Ausnahme, hinter die Wartelisten-Grenze gerutscht, Schalter aus) — an
+/// badhub ginge sonst ein stehengebliebener Wert, und der ist schlimmer als
+/// keiner. Bei ausgeschalteter Prognose: leer.
+pub(crate) fn prognose_auffrischen(
+    tablet: &TabletState,
+    config: &AppConfig,
+    now_ms: u64,
+) -> std::collections::HashMap<i64, u64> {
+    prognose_mit_unsicherheit(tablet, config, now_ms)
+        .into_iter()
+        .map(|(id, (ms, _))| (id, ms))
+        .collect()
+}
+
+/// Wie [`prognose_auffrischen`], aber samt Unsicherheits-Flag (zu wenige
+/// Messwerte) — für die Meetingpoint-Seite, die dann „ca." davorsetzt.
+pub(crate) fn prognose_mit_unsicherheit(
+    tablet: &TabletState,
+    config: &AppConfig,
+    now_ms: u64,
+) -> std::collections::HashMap<i64, (u64, bool)> {
+    if !config.prediction.enabled {
+        return std::collections::HashMap::new();
+    }
+    build_state(tablet, config, now_ms, 0)
+        .queue
+        .iter()
+        .filter_map(|m| {
+            m.predicted_start_ms
+                .map(|p| (m.match_id, (p, m.predicted_uncertain)))
+        })
+        .collect()
+}
+
+/// Wie [`build_state`], aber mit vorgegebener Wartelisten-Länge
+/// (turnierweit).
+///
+/// Für den Weg über den Relay: Der legt einen zu großen Zustand gar nicht
+/// erst ab, und der Host erfährt davon nichts. Er muss also selbst kürzen —
+/// was wegfällt, meldet `queue_truncated` wie immer.
+pub(crate) fn build_state_limited(
+    tablet: &TabletState,
+    config: &AppConfig,
+    now_ms: u64,
+    rev: u64,
+    queue_limit: usize,
+) -> TlState {
+    let Some(snap) = tablet.snapshot_clone() else {
+        // Noch kein Turnier geladen: leerer, aber gültiger Zustand — die
+        // Seite zeigt „warte auf Turnierdaten" statt eines Fehlers.
+        return TlState {
+            rev,
+            server_now_ms: now_ms,
+            tournament: String::new(),
+            multi_hall: false,
+            can_set_wish_court: true,
+            can_set_highlight: true,
+            can_repeat_prep_call: true,
+            can_announce_court_full: true,
+            can_reorder_called: true,
+            can_assign_waiting_officials: true,
+            meetingpoint: meetingpoint_lage(tablet, config),
+            finished_warning_seconds: config.finished_warning_seconds,
+            // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
+            // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
+            // lehnt die Aktion ohnehin ab (E7).
+            can_lock_courts: true,
+            can_reload_tablets: true,
+            can_search: true,
+            halls: Vec::new(),
+            auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
+            hall_prefill: Some(hall_prefill_view(config, 0, false)),
+            call_timer: call_timer_view(config),
+            rest_minutes: None,
+            courts: Vec::new(),
+            queue: Vec::new(),
+            walkovers: Vec::new(),
+            queue_truncated: 0,
+            open_queue: Vec::new(),
+            open_queue_truncated: 0,
+            scorekeeper_managed: config.scorekeeper.enabled,
+            scorekeepers: Vec::new(),
+            finished: Vec::new(),
+            time_stats: None,
+            checkin_times: None,
+            checkin_stale: false,
+            // Die Raster-Einstellung ist Host-Konfiguration, kein
+            // Turnierstand — sie gilt auch, solange BTP noch nichts
+            // geliefert hat.
+            layouts: layouts_view(config),
+            show_club_names: config.display.show_club_names,
+            show_club_logos: config.display.show_club_logos,
+            officials_managed: tablet.officials_store().enabled(),
+            officials: Vec::new(),
+            officials_rotation_mode: None,
+            officials_ar_order: Vec::new(),
+            can_set_official_role: true,
+            // Der Profil-Katalog ist Host-Konfiguration, kein Turnierstand
+            // — er gilt auch, solange BTP noch nichts geliefert hat
+            // (dieselbe Begründung wie bei `layouts` oben).
+            profiles: profiles_view(config),
+            default_profile_id: config.tl_web.default_profile_id.clone(),
+        };
+    };
+
+    // Felder und Warteliste stammen aus **demselben** Schnappschuss. Zwei
+    // getrennte Lesevorgänge könnten den Sync-Lauf dazwischen erwischen —
+    // dann beschrieben Felder und Liste zwei verschiedene Turnierstände.
+    // Match-ID → Spiel, einmal für den ganzen Bau. Zwei Nutzer: Die
+    // Feldkachel braucht den Spieler-Datensatz für die Lizenznummern
+    // (`CourtOverview` führt sie bewusst nicht mit — sie geht auch an
+    // Tablet und Court-Monitor), und der Prognose-Block weiter unten
+    // suchte bisher je belegtem Feld linear über alle Spiele. Bei einem
+    // großen Turnier sind das ein Aufbau gegen bis zu 26 volle Scans.
+    let match_by_id: std::collections::HashMap<i64, &crate::btp::model::BtpMatch> =
+        snap.matches.iter().map(|m| (m.id, m)).collect();
+
+    let mut courts = felder_bauen(tablet, config, &snap, &match_by_id);
+
+    // Aufrufe einmal auflösen: Match-ID → Halle des Aufrufs.
+    let calls = tablet.preparation_calls();
+    let called_hall = |match_id: i64| aufruf_halle(&calls, &snap, match_id);
+
+    let availability = PlayerAvailability::from_snapshot(&snap, config);
+    let zuletzt = last_played_by_player(&snap, &tablet.match_times_store().entries());
+    // Wer ist wo gebunden (ADR 0078)? Einmal je Bau — Warnungen an der
+    // Warteliste und die Marke „reserviert" in der SR-Liste lesen beide
+    // daraus. Ohne Schiedsrichter-Betrieb leer.
+    let belegung = crate::tablet::officials::Belegung::aus(
+        tablet.officials_store(),
+        &snap,
+        heutiges_datum(now_ms),
+    );
+
+    let (ordered, offene) = wartelisten_ordnung(tablet, config, &snap, &calls);
+
+    // Startzeit-Prognose (Spec `spielzeiten-prognose`, E5–E8): Statistik
+    // aus dem Zeiten-Store + deterministische Simulation der Warteliste —
+    // hier und nicht im Sync-Loop, damit Prognose, Felder und Liste aus
+    // DEMSELBEN Snapshot stammen und LAN wie Cloud identisch anzeigen (R3).
+    // Alles minutengranular, damit der Fingerprint unten nicht jede
+    // Sekunde kippt (Rev-Churn-Wächter).
+    let (stats, predictions) = prognose_rechnen(
+        tablet,
+        config,
+        &snap,
+        &mut courts,
+        &ordered,
+        queue_limit,
+        &availability,
+        &match_by_id,
+        now_ms,
+    );
+    // Fürs Diagnose-Log merken (Prognose-Kontrolle, E12): Beim echten
+    // Aufruf vergleicht der Sync-Loop Prognose und Wirklichkeit. Gemergt,
+    // nicht ersetzt — die Relay-Leiter baut denselben Zustand mit kleineren
+    // Wartelisten (F6). Bewusst hier und nicht in `prognose_rechnen`: Die
+    // Spielersuche rechnet dieselbe Prognose und darf nichts merken.
+    if stats.is_some() {
+        tablet.merge_predicted_starts(
+            predictions
+                .iter()
+                .map(|(id, p)| (*id, p.start_min * 60_000))
+                .collect(),
+        );
+    }
+    // Einmal aus dem Store holen, beide Felder (Zeilen + Stale-Marke)
+    // bedienen — nicht zweimal klonen (Review 17.08.2026).
+    let checkin = tablet.checkin_classes();
 
     // Turnierweit kappen, nicht je Halle (ADR 0026) — die Liste ist eine
     // einzige Abfolge, also gibt es auch nur eine Grenze.
@@ -4609,6 +4707,7 @@ pub(crate) fn build_state_limited(
         can_assign_waiting_officials: true,
         meetingpoint: meetingpoint_lage(tablet, config),
         can_reload_tablets: true,
+        can_search: true,
         finished_warning_seconds: config.finished_warning_seconds,
         rev,
         server_now_ms: now_ms,
@@ -4779,6 +4878,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             show_court_remaining: p.display.show_court_remaining,
             hide_open_matches: p.display.hide_open_matches,
             hide_seeds: p.display.hide_seeds,
+            hide_search: p.display.hide_search,
             show_move_buttons: p.display.show_move_buttons,
             show_last_played: p.display.show_last_played,
             unlimited_court_calls: p.display.unlimited_court_calls,
@@ -4834,6 +4934,7 @@ fn display_settings_from_wire(
         show_court_remaining: d.show_court_remaining,
         hide_open_matches: d.hide_open_matches,
         hide_seeds: d.hide_seeds,
+        hide_search: d.hide_search,
         show_move_buttons: d.show_move_buttons,
         show_last_played: d.show_last_played,
         unlimited_court_calls: d.unlimited_court_calls,
@@ -5278,7 +5379,7 @@ fn officials_view(
 /// dieser Art im Zustand; Warteliste, Feldkachel und Beendet-Liste teilen
 /// sie sich, damit die Stellungsgleichheit nicht an drei Orten gepflegt
 /// werden muss.
-fn license_ids(players: &[crate::btp::model::BtpPlayer]) -> Vec<String> {
+pub(crate) fn license_ids(players: &[crate::btp::model::BtpPlayer]) -> Vec<String> {
     players
         .iter()
         .map(|p| p.member_id.clone().unwrap_or_default())
@@ -6350,6 +6451,31 @@ mod tests {
             zurueck.hide_open_matches,
             "und aus dem Gerät zurück in die Konfiguration"
         );
+    }
+
+    #[test]
+    fn der_schalter_suche_ausblenden_reist_in_beide_richtungen() {
+        let mut cfg = AppConfig::default();
+        cfg.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "p1".into(),
+            name: "Wandmonitor".into(),
+            display: crate::config::TlDisplaySettings {
+                hide_search: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let sicht = profiles_view(&cfg);
+        let wire = sicht.iter().find(|p| p.id == "p1").expect("das Profil");
+        assert!(
+            wire.display.hide_search,
+            "der Schalter muss zum Gerät reisen"
+        );
+        assert!(display_settings_from_wire(&wire.display).hide_search);
+        // Bestandskonfiguration ohne das Feld → Suche sichtbar.
+        let alt: crate::config::TlDisplaySettings =
+            serde_json::from_str(r#"{"show_numbers":true}"#).expect("lesbar");
+        assert!(!alt.hide_search);
     }
 
     #[test]
@@ -11413,6 +11539,9 @@ mod tests {
             // Fähigkeitsmerkmal (Spec tablet-version-abgleich): reines Bool
             // „dieser Turnier-PC kennt den Fernbefehl".
             "can_reload_tablets",
+            // Fähigkeitsmerkmal (Spec tl-spielersuche): reines Bool „dieser
+            // Turnier-PC kennt die Spielersuche".
+            "can_search",
             // Hallen-Farbe (Spec hallen-farben): reiner Hex-Anzeigewert je
             // Halle — kein Personenbezug. Der Beendet-Hallenname reist als
             // ohnehin erlaubtes "hall".
@@ -11723,6 +11852,9 @@ mod tests {
             // Profil-Schalter „Setzplätze zeigen" (Spec
             // setzplaetze-anzeigen), invertiert wie `hideOpenMatches`.
             "hideSeeds",
+            // Profil-Schalter „Spielersuche zeigen" (Spec tl-spielersuche),
+            // invertiert wie `hideOpenMatches` — reines Anzeige-Bool.
+            "hideSearch",
             // Profil-Schalter „Verschiebe-Knöpfe an jeder Zeile" (Wunsch
             // 06.09.2026) — ein Anzeige-Häkchen, kein Personenbezug.
             "showMoveButtons",
@@ -11857,6 +11989,7 @@ mod tests {
                 list_position: crate::config::TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
                 hide_seeds: false,
+                hide_search: false,
             },
             updated_at_ms: 1_000,
             ..Default::default()

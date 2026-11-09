@@ -93,7 +93,7 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 
 | Seite | Gerät | Was drauf ist |
 |---|---|---|
-| **Turnierleitungs-Oberfläche** `/tl` | Tablet oder Telefon | Dieselben Entscheidungen wie am PC, aber unterwegs in der Halle: Felder, Aufgaben, Zähltafel-Warteschlange, Schiedsrichter, Spiele, beendete Spiele, Spielzeiten, Anfangszeiten. Welche dieser Panels ein Gerät zeigt, lässt sich je Gerät einstellen. Siehe [Turnierleitungs-Oberfläche im Browser](turnierleitung-web.md). |
+| **Turnierleitungs-Oberfläche** `/tl` | Tablet oder Telefon | Dieselben Entscheidungen wie am PC, aber unterwegs in der Halle: Felder, Aufgaben, Zähltafel-Warteschlange, Schiedsrichter, Spiele, beendete Spiele, Spielzeiten, Anfangszeiten — dazu oben ein Suchfeld, das Spieler und Schiedsrichter im ganzen Turnier findet. Welche dieser Panels ein Gerät zeigt, lässt sich je Gerät einstellen. Siehe [Turnierleitungs-Oberfläche im Browser](turnierleitung-web.md). |
 
 ### Zum Ansagen
 

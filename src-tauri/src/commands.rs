@@ -3795,6 +3795,7 @@ pub async fn assign_court(
                     .rotation_loesen_am_feld(&m, court_id);
                 state.tablet.officials_for_write(&m)
             }),
+            highlight: None,
         }],
         None => Vec::new(),
     };
@@ -3840,6 +3841,7 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
             // Beim Freigeben die Besetzung nicht anfassen: Das Spiel ist
             // nicht zu Ende, es wird nur vom Feld genommen.
             officials: None,
+            highlight: None,
         }],
         None => Vec::new(),
     };

@@ -140,6 +140,67 @@ header {
 }
 .profiles-btn:hover, .profiles-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
 
+/* ── Spielersuche (Spec tl-spielersuche) ────────────────────────────────
+   Das Feld steht im STATISCHEN Kopf — nicht in `#halls`, das jeder Render
+   per innerHTML neu schreibt: Fokus und Bildschirmtastatur überleben so
+   die Push-Renders. 16 px Mindestschrift, sonst zoomt iOS beim Antippen. */
+.tl-search {
+  font: inherit; font-size: max(16px, .9rem);
+  min-height: var(--touch-min); padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--ink);
+  flex: 0 1 15rem; min-width: 9rem;
+}
+.tl-search:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tl-search[hidden] { display: none; }
+/* Trefferliste unter der Kopfleiste, außerhalb von `#app` — sie überlebt
+   jeden Render und lässt das Suchfeld darüber bedienbar. */
+.such-overlay {
+  position: fixed; z-index: 65; top: var(--kopf, 62px); right: 8px;
+  width: min(560px, calc(100vw - 16px));
+  max-height: calc(100dvh - var(--kopf, 62px) - 16px);
+  display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: 0 8px 24px rgba(15, 23, 42, .18);
+}
+.such-overlay[hidden] { display: none; }
+.such-kopf {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  font-size: .85rem; color: var(--ink-soft);
+}
+.such-kopf .such-stand { flex: 1; }
+.such-kopf button {
+  font: inherit; font-size: .85rem; cursor: pointer; padding: 4px 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink-soft);
+}
+.such-kopf button.such-zu { border: 0; font-size: 1.3rem; line-height: 1; padding: 2px 6px; }
+.such-body { overflow-y: auto; padding: 4px 0 8px; }
+.such-gruppe { padding: 6px 12px 2px; font-size: .8rem; font-weight: 700; color: var(--ink-soft); }
+.such-hinweis { padding: 6px 12px; font-size: .85rem; color: var(--ink-soft); }
+.such-hinweis.fehler { color: var(--alarm); }
+.such-mehr { padding: 2px 12px 6px; font-size: .8rem; color: var(--ink-faint); }
+.such-treffer {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: inherit; background: none; border: 0;
+  border-top: 1px solid var(--line); padding: 8px 12px;
+}
+.such-treffer:hover, .such-treffer:focus-visible { background: var(--bg); }
+.such-treffer .such-paar { font-weight: 600; }
+.such-treffer .such-meta { font-size: .8rem; color: var(--ink-soft); }
+.such-rolle {
+  display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px;
+  font-size: .72rem; font-weight: 700; background: var(--bg); color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+.such-lage { padding: 4px 12px 8px; font-size: .82rem; color: var(--warn); }
+.such-lage button {
+  font: inherit; font-size: .82rem; cursor: pointer; margin-left: 6px; padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--accent);
+}
+/* Kurzes Aufleuchten der Zielzeile nach dem Sprung. */
+.such-markiert { outline: 3px solid var(--accent); outline-offset: 2px; transition: outline-color .4s; }
+
 /* Schalter für die automatische Vergabe. Sein Zustand muss auf einen Blick
    erkennbar sein: Läuft sie mit, während jemand von Hand umsortiert, räumt
    sie ihm die Felder um, und niemand versteht, warum. */
@@ -1487,6 +1548,12 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
     <span class="brand">Turnierleitung</span>
     <span class="tournament" id="tournament"></span>
     <span class="halls" id="halls"></span>
+    <!-- Spielersuche (Spec tl-spielersuche): erscheint nur, wenn der
+         Turnier-PC `can_search` meldet und das Profil sie nicht ausblendet.
+         Der Begriff wird nirgends gespeichert (kein localStorage, keine URL). -->
+    <input type="search" class="tl-search" id="tl-search" hidden
+           placeholder="Spieler oder SR suchen" aria-label="Spieler oder Schiedsrichter suchen"
+           autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" maxlength="64" />
     <button type="button" class="auto" id="auto-toggle" hidden></button>
     <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
     <!-- Profile (Spec tl-web-panelsystem) ersetzen das frühere
@@ -1602,6 +1669,17 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
     </div>
     <div class="graph-body" id="profiles-body"></div>
   </div>
+</div>
+
+<!-- Trefferliste der Spielersuche (Spec tl-spielersuche) — außerhalb von
+     #app wie die übrigen Overlays, damit kein Render sie abreißt. -->
+<div class="such-overlay" id="such-overlay" hidden role="region" aria-label="Suchergebnisse">
+  <div class="such-kopf">
+    <span class="such-stand" id="such-stand"></span>
+    <button type="button" id="such-neu">neu suchen</button>
+    <button type="button" class="such-zu" id="such-zu" aria-label="Suche schließen">×</button>
+  </div>
+  <div class="such-body" id="such-body"></div>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite">
@@ -1875,6 +1953,9 @@ function builtInProfile() {
       // Setzplätze zeigen (Spec `setzplaetze-anzeigen`), invertiert wie
       // `hideOpenMatches`: `false` ist der Standard „anzeigen".
       hideSeeds: false,
+      // Spielersuche zeigen (Spec `tl-spielersuche`), invertiert wie
+      // `hideOpenMatches`: `false` ist der Standard „anzeigen".
+      hideSearch: false,
       // Vier Verschiebe-Knöpfe an jeder Zeile (Wunsch 06.09.2026): aus,
       // weil die Zeile damit deutlich breiter wird.
       showMoveButtons: false,
@@ -8231,6 +8312,11 @@ function uebernehmeEditorFelder() {
     hideSeeds: $("prof-show-seeds")
       ? !$("prof-show-seeds").checked
       : !!kopie.display.hideSeeds,
+    // Positiv gefragt, invertiert gespeichert; fehlt das Häkchen (älterer
+    // Turnier-PC ohne Suche), bleibt der gespeicherte Wert.
+    hideSearch: $("prof-show-search")
+      ? !$("prof-show-search").checked
+      : !!kopie.display.hideSearch,
     // Fehlt das Häkchen (älterer Turnier-PC), bleibt der gespeicherte Wert.
     showMoveButtons: $("prof-show-move")
       ? $("prof-show-move").checked
@@ -8328,6 +8414,7 @@ function renderProfileEditor() {
     ].join(""))}
     ${gruppe("Spielliste", [
       hostKenntOffeneSpiele() ? haken("prof-show-open", !d.hideOpenMatches, "Spiele mit noch offener Paarung zeigen", "z. B. Halbfinale, solange die Vorrunde läuft") : "",
+      state && state.can_search ? haken("prof-show-search", !d.hideSearch, "Spielersuche zeigen", "Suchfeld oben in der Kopfleiste") : "",
       hostKenntVerschiebeKnoepfe() ? haken("prof-show-move", d.showMoveButtons, "Verschiebe-Knöpfe an jeder Zeile", "⤒ ↑ ↓ ⤓ statt nur ↑") : "",
     ].join(""))}
     ${gruppe("Felder", [
@@ -8436,6 +8523,7 @@ function wireProfileEditorEvents() {
 }
 
 $("tablets-reload").addEventListener("click", reloadTablets);
+verdrahteSuche();
 $("profiles-open").addEventListener("click", openProfilesOverlay);
 $("profiles-close").addEventListener("click", closeProfilesOverlay);
 $("profiles-overlay").addEventListener("click", (ev) => {
@@ -8941,6 +9029,414 @@ function renderAutoToggle() {
 // main-Merge deployt, die App erst mit einem Release-Tag — dazwischen spricht
 // diese Seite womöglich mit einem älteren Host, der eine unbekannte Aktion
 // STILL verwirft. Die Turnierleitung hielte die Tablets für aufgefrischt.
+// ── Spielersuche (Spec tl-spielersuche, ADR 0081) ─────────────────────
+// Die Suche läuft am Turnier-PC über den ganzen Bestand (`POST
+// /tl/api/search`, Begriff nur im Body). Die Seite zeigt die Treffer als
+// Standbild und springt auf Wunsch zur Zeile. Der Begriff wird NIE
+// gespeichert oder protokolliert — kein localStorage, keine URL, keine
+// Konsole.
+
+// INLINE-KOPIE von src/io/spielersuche.mjs — dort die kanonische Fassung,
+// `scripts/test-spielersuche.mjs` prüft den Gleichlauf. Änderungen hier
+// und dort gemeinsam.
+function suchbereit(q) {
+  const zeichen = Array.from(String(q ?? "")).filter(
+    (c) => !/\s/.test(c) && !"-,'./’".includes(c),
+  );
+  return zeichen.length >= 2 && Array.from(String(q)).length <= 64;
+}
+function sprungZiel(gruppe, lage) {
+  if (!lage.panelSichtbar || !lage.inListe) {
+    return { art: "unsichtbar", platz: lage.platz || null };
+  }
+  const filter = lage.hallFilter || "";
+  const halle = lage.halle || "";
+  const hallePasst =
+    gruppe === "finished" ||
+    !filter ||
+    halle === filter ||
+    (gruppe === "waiting" && !halle);
+  if (!hallePasst) return { art: "halle", halle };
+  if (gruppe === "waiting" && lage.mpVerborgen) return { art: "filterMp" };
+  if (lage.panelZu) return { art: "panelZu" };
+  return { art: "zeile" };
+}
+function rollenText(roles) {
+  const namen = { player: "Spieler", sr: "SR", ar: "AR", candidate: "möglicher Teilnehmer" };
+  return (Array.isArray(roles) ? roles : []).map((r) => (Object.hasOwn(namen, r) ? namen[r] : "")).filter(Boolean);
+}
+function fehlerText(status) {
+  if (status === 400) return "Bitte anders suchen – 2 bis 64 Zeichen, höchstens 6 Wörter.";
+  if (status === 401) return "Dieses Gerät ist nicht mehr freigegeben.";
+  if (status === 429) return "Zu viele Anfragen – kurz warten.";
+  return "Turnier-PC nicht erreichbar.";
+}
+function mehrText(more) {
+  return more > 0 ? `weitere ${more} – bitte genauer suchen` : "";
+}
+
+const SUCH_PANEL = { court: "courts", waiting: "queue", finished: "finished" };
+const SUCH_TITEL = { court: "Am Feld", waiting: "Warteliste", finished: "Beendet" };
+/** Letzte Antwort (Standbild) und der Begriff, zu dem sie gehört. */
+let suchErgebnis = null;
+let suchBegriff = "";
+let suchFehler = "";
+/** Höchstens eine Anfrage zugleich: Läuft eine, merkt sich ein neuer
+ *  Begriff nur vor und wird danach genau einmal nachgeschickt. */
+let suchLaeuft = false;
+let suchVorgemerkt = null;
+let suchTimer = null;
+/** Hinweis an einem Treffer („liegt in Halle B …") — Schlüssel des Treffers. */
+let suchLage = null;
+
+function suchenErlaubt() {
+  return !!(state && state.can_search) && !activeDisplay().hideSearch;
+}
+
+function renderSuchfeld() {
+  const feld = $("tl-search");
+  if (!feld) return;
+  const an = suchenErlaubt();
+  if (feld.hidden === an) {
+    feld.hidden = !an;
+    // Die Kopfleiste ändert ihre Höhe womöglich (Umbruch).
+    messeKopf();
+  }
+  if (!an) {
+    feld.value = "";
+    schliesseSuche();
+  }
+}
+
+function schliesseSuche() {
+  clearTimeout(suchTimer);
+  suchVorgemerkt = null;
+  suchErgebnis = null;
+  suchFehler = "";
+  suchLage = null;
+  const o = $("such-overlay");
+  if (o) o.hidden = true;
+}
+
+function verdrahteSuche() {
+  const feld = $("tl-search");
+  feld.addEventListener("input", () => {
+    clearTimeout(suchTimer);
+    const q = feld.value;
+    if (!suchbereit(q)) {
+      schliesseSuche();
+      return;
+    }
+    // Erst nach einer Tipp-Pause fragen — sonst je Taste eine Anfrage.
+    suchTimer = setTimeout(() => sucheStarten(q), 300);
+  });
+  // Zurück ins Feld getippt (nach einem Sprung): das Standbild wieder zeigen.
+  feld.addEventListener("focus", () => {
+    if (suchErgebnis && feld.value === suchBegriff) zeichneSuche();
+  });
+  feld.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && suchbereit(feld.value)) {
+      clearTimeout(suchTimer);
+      sucheStarten(feld.value);
+    }
+  });
+  $("such-neu").addEventListener("click", () => {
+    if (suchbereit(feld.value)) sucheStarten(feld.value);
+  });
+  $("such-zu").addEventListener("click", () => {
+    feld.value = "";
+    schliesseSuche();
+  });
+}
+
+async function sucheStarten(q) {
+  if (!suchenErlaubt()) return;
+  if (suchLaeuft) {
+    suchVorgemerkt = q;
+    return;
+  }
+  suchLaeuft = true;
+  try {
+    let status = 0;
+    let daten = null;
+    try {
+      daten = await abrufMitFrist(API + "/search", {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: "Bearer " + token },
+        body: JSON.stringify({ q, candidates: zeigeOffeneSpiele() }),
+        cache: "no-store",
+      }, async (r) => {
+        status = r.status;
+        return r.ok ? r.json() : null;
+      });
+    } catch (_) {
+      status = 0;
+    }
+    // Inzwischen geschlossen oder umgetippt? Dann zählt diese Antwort nicht.
+    if ($("tl-search").value !== q) return;
+    suchBegriff = q;
+    suchLage = null;
+    if (daten && typeof daten === "object") {
+      suchErgebnis = daten;
+      suchFehler = "";
+    } else {
+      suchErgebnis = null;
+      suchFehler = fehlerText(status);
+    }
+    zeichneSuche();
+  } finally {
+    suchLaeuft = false;
+    // Nachgeschickt wird, was JETZT im Feld steht — nicht der vorgemerkte
+    // Zwischenstand, falls inzwischen zurückgelöscht wurde.
+    const vorgemerkt = suchVorgemerkt !== null;
+    suchVorgemerkt = null;
+    const jetzt = $("tl-search").value;
+    if (vorgemerkt && jetzt !== suchBegriff && suchbereit(jetzt)) {
+      sucheStarten(jetzt);
+    }
+  }
+}
+
+const uhr = (ms) => new Date(ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+
+/** Eine Seite einer Paarung: Namen (mit Verein, wenn das Profil es will)
+ *  oder — bei offener Paarung — das Kandidaten-Label. */
+function suchSeite(namen, vereine, label) {
+  if (!namen || !namen.length) return esc(label || "noch offen");
+  const mitVerein = zeigeVereinsnamenAktiv() && Array.isArray(vereine);
+  return namen.map((n, i) => {
+    const v = mitVerein ? vereine[i] : "";
+    return esc(n) + (v ? ` <span class="such-meta">(${esc(v)})</span>` : "");
+  }).join(" / ");
+}
+
+/** Ein Treffer in sicherer Form — Listen bleiben Listen, Sätze Zahlenpaare.
+ *  Die Antwort kommt über das Netz; ein verformter Treffer soll die Liste
+ *  nicht abbrechen lassen (Security-Review 09.11.2026). */
+function suchTrefferSicher(h) {
+  const liste = (x) => (Array.isArray(x) ? x.map((v) => String(v ?? "")) : []);
+  return {
+    ...h,
+    team1: liste(h.team1), team2: liste(h.team2),
+    team1_club: Array.isArray(h.team1_club) ? liste(h.team1_club) : null,
+    team2_club: Array.isArray(h.team2_club) ? liste(h.team2_club) : null,
+    sr: liste(h.sr), ar: liste(h.ar),
+    sets: (Array.isArray(h.sets) ? h.sets : [])
+      .filter((s) => Array.isArray(s) && s.length === 2)
+      .map(([a, b]) => [Number(a) || 0, Number(b) || 0]),
+  };
+}
+
+function suchTrefferHtml(gruppe, roh, i) {
+  const h = suchTrefferSicher(roh);
+  const paar = `${suchSeite(h.team1, h.team1_club, h.open_slot1_label)} – ${suchSeite(h.team2, h.team2_club, h.open_slot2_label)}`;
+  const rollen = rollenText(h.roles).map((r) => `<span class="such-rolle">${esc(r)}</span>`).join("");
+  // Spielnummer immer: Zwei Spiele derselben Paarung (Gruppe, Rückspiel)
+  // sähen sonst gleich aus.
+  const teile = [h.match_num ? `Nr. ${h.match_num}` : "", klasse(h.discipline, h.class_label), h.round_name];
+  if (gruppe === "court") {
+    teile.unshift(h.court);
+    if (h.on_court_since_ms) teile.push("seit " + uhr(h.on_court_since_ms));
+    const saetze = (h.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ");
+    if (saetze) teile.push(saetze);
+  } else if (gruppe === "waiting") {
+    if (h.predicted_start_ms) {
+      teile.unshift("ca. " + uhr(h.predicted_start_ms) + (h.predicted_uncertain ? " (unsicher)" : ""));
+    } else if (h.position) {
+      teile.unshift(`Platz ${h.position} in der Warteliste`);
+    }
+    if (h.called) teile.push("gerufen");
+    if (h.excluded) teile.push("von der Automatik ausgenommen");
+  } else {
+    const saetze = (h.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ");
+    if (saetze) teile.push(saetze);
+    if (Object.hasOwn(ERGEBNIS_BADGE, h.result)) teile.push(ERGEBNIS_BADGE[h.result]);
+    if (h.court) teile.push(h.court);
+    if (h.ended_ms) teile.push("Ende " + uhr(h.ended_ms));
+  }
+  const dienst = [
+    (h.sr || []).length ? "SR: " + h.sr.join(", ") : "",
+    (h.ar || []).length ? "AR: " + h.ar.join(", ") : "",
+  ].filter(Boolean).join(" · ");
+  const halle = h.hall ? `${hallMarke(h.hall)}${esc(h.hall)} · ` : "";
+  const schluessel = `${gruppe}:${h.match_id}`;
+  const lage = suchLage && suchLage.schluessel === schluessel ? suchLageHtml(suchLage, gruppe, h) : "";
+  return `<button type="button" class="such-treffer" data-such-gruppe="${gruppe}" data-such-i="${i}">
+      <div class="such-paar">${paar}${rollen}</div>
+      <div class="such-meta">${halle}${esc(teile.filter(Boolean).join(" · "))}</div>
+      ${dienst ? `<div class="such-meta">${esc(dienst)}</div>` : ""}
+    </button>${lage}`;
+}
+
+function suchLageHtml(lage, gruppe, h) {
+  if (lage.art === "halle") {
+    return `<div class="such-lage">Liegt in Halle ${esc(lage.halle)} – Filter umstellen?
+      <button type="button" data-such-halle="${esc(lage.halle)}">Halle ${esc(lage.halle)} zeigen</button></div>`;
+  }
+  if (lage.art === "filterMp") {
+    return `<div class="such-lage">Der Filter „nur spielbereite" verbirgt dieses Spiel.
+      <button type="button" data-such-mp-aus>Filter aus</button></div>`;
+  }
+  // „unsichtbar": hinter dem Listen-Deckel oder Panel ausgeblendet.
+  const platz = lage.platz ? ` (Platz ${lage.platz})` : "";
+  const knoepfe = gruppe === "finished" && h.has_timeline
+    ? `<button type="button" data-such-graph="${Number(h.match_id) || 0}">Punktverlauf</button>
+       <button type="button" data-such-zettel="${Number(h.match_id) || 0}">Zettel</button>`
+    : "";
+  return `<div class="such-lage">nicht in der Liste sichtbar${platz}${knoepfe}</div>`;
+}
+
+function zeichneSuche() {
+  const o = $("such-overlay");
+  const body = $("such-body");
+  if (!o || !body) return;
+  o.hidden = false;
+  const e = suchErgebnis;
+  $("such-stand").textContent = e && e.server_now_ms ? "Stand " + uhr(e.server_now_ms) : "";
+  if (!e) {
+    body.innerHTML = `<p class="such-hinweis fehler">${esc(suchFehler || "Suche fehlgeschlagen.")}</p>`;
+    return;
+  }
+  if (!e.has_data) {
+    body.innerHTML = `<p class="such-hinweis">Keine Turnierdaten.</p>`;
+    return;
+  }
+  const teile = [];
+  if (!e.officials_managed) {
+    teile.push(`<p class="such-hinweis">Schiedsrichter-Betrieb aus – gesucht wird nur nach Spielern.</p>`);
+  }
+  let leer = true;
+  for (const gruppe of ["court", "waiting", "finished"]) {
+    const g = (e[gruppe] && typeof e[gruppe] === "object") ? e[gruppe] : { hits: [], more: 0 };
+    // Bereinigt ZURÜCKSCHREIBEN: Der Klick sucht den Treffer über seinen
+    // Index in `suchErgebnis[gruppe].hits` — der muss zur Anzeige passen.
+    const hits = (Array.isArray(g.hits) ? g.hits : []).filter((h) => h && typeof h === "object");
+    e[gruppe] = { hits, more: Number(g.more) || 0 };
+    if (!hits.length) continue;
+    leer = false;
+    teile.push(`<div class="such-gruppe">${SUCH_TITEL[gruppe]} (${hits.length + (Number(g.more) || 0)})</div>`);
+    hits.forEach((h, i) => teile.push(suchTrefferHtml(gruppe, h, i)));
+    const mehr = mehrText(Number(g.more) || 0);
+    if (mehr) teile.push(`<div class="such-mehr">${esc(mehr)}</div>`);
+  }
+  if (leer) teile.push(`<p class="such-hinweis">Keine Treffer.</p>`);
+  body.innerHTML = teile.join("");
+  body.querySelectorAll("[data-such-i]").forEach((b) => b.addEventListener("click", () => {
+    if (!state) return;
+    const gruppe = b.dataset.suchGruppe;
+    const h = ((suchErgebnis && suchErgebnis[gruppe] && suchErgebnis[gruppe].hits) || [])[Number(b.dataset.suchI)];
+    if (h) springeZuTreffer(gruppe, h);
+  }));
+  body.querySelectorAll("[data-such-halle]").forEach((b) => b.addEventListener("click", () => {
+    setHall(b.dataset.suchHalle);
+    suchLage = null;
+    zeichneSuche();
+  }));
+  body.querySelectorAll("[data-such-mp-aus]").forEach((b) => b.addEventListener("click", () => {
+    mpNurBereit = false;
+    try { localStorage.setItem("bts-tl-mp-bereit", "0"); } catch (_) { /* privat */ }
+    render();
+    suchLage = null;
+    zeichneSuche();
+  }));
+  body.querySelectorAll("[data-such-graph]").forEach((b) => b.addEventListener("click", () => {
+    const h = suchTrefferNachId("finished", b.dataset.suchGraph);
+    if (h) openTimeline(h.match_id, `${(h.team1 || []).join(" / ")} vs. ${(h.team2 || []).join(" / ")}`, h.sets || []);
+  }));
+  body.querySelectorAll("[data-such-zettel]").forEach((b) => b.addEventListener("click", () => {
+    const h = suchTrefferNachId("finished", b.dataset.suchZettel);
+    if (h) openZettel([h.match_id], `${(h.team1 || []).join(" / ")} – ${(h.team2 || []).join(" / ")}`);
+  }));
+}
+
+function suchTrefferNachId(gruppe, id) {
+  const hits = (suchErgebnis && suchErgebnis[gruppe] && suchErgebnis[gruppe].hits) || [];
+  return hits.find((h) => String(h.match_id) === String(id)) || null;
+}
+
+/** Lage eines Treffers im AKTUELLEN TL-Zustand — zur Klickzeit ermittelt,
+ *  nicht zur Suchzeit (das Standbild kann Minuten alt sein). */
+function suchLageVon(gruppe, h) {
+  const layout = normalizedLayout(resolveActiveProfile());
+  const panel = layout.panels.find((p) => p.key === SUCH_PANEL[gruppe]) || {};
+  let inListe = false;
+  let halle = h.hall || "";
+  let mpVerborgen = false;
+  if (gruppe === "court") {
+    const c = (state.courts || []).find((x) => x.match_id === h.match_id);
+    inListe = !!c;
+    if (c) halle = c.location || "";
+  } else if (gruppe === "waiting") {
+    const m = h.open
+      ? (zeigeOffeneSpiele() ? (state.open_queue || []).find((x) => x.match_id === h.match_id) : null)
+      : (state.queue || []).find((x) => x.match_id === h.match_id);
+    inListe = !!m;
+    if (m) {
+      halle = m.hall || "";
+      mpVerborgen = mpNurBereit && !!state.meetingpoint && !(m.meetingpoint && m.meetingpoint.bereit);
+    }
+  } else {
+    inListe = (state.finished || []).some((x) => x.match_id === h.match_id);
+  }
+  return {
+    panelSichtbar: panel.visible !== false,
+    panelZu: !!panel.collapsed,
+    inListe,
+    platz: h.position || null,
+    halle,
+    hallFilter,
+    mpVerborgen,
+  };
+}
+
+function suchZeilenElement(gruppe, h) {
+  const id = Number(h.match_id) || 0;
+  if (gruppe === "court") {
+    // Das Feld zur Klickzeit aus dem AKTUELLEN Zustand: Das Standbild kann
+    // Minuten alt sein, das Spiel inzwischen auf einem anderen Feld laufen
+    // und auf dem alten schon das nächste (Code-Review 09.11.2026).
+    const c = (state.courts || []).find((x) => x.match_id === id);
+    return c ? document.querySelector(`.card[data-court="${Number(c.court_id) || 0}"]`) : null;
+  }
+  if (gruppe === "waiting") return document.querySelector(`#queue-list .row[data-id="${id}"]`);
+  return document.querySelector(`.fin-row[data-fin="${id}"]`);
+}
+
+async function springeZuTreffer(gruppe, h, versuch = 0) {
+  const ziel = sprungZiel(gruppe, suchLageVon(gruppe, h));
+  if (ziel.art === "panelZu" && versuch === 0) {
+    const key = SUCH_PANEL[gruppe];
+    await mutateActiveProfile((p) => {
+      const s = p.panels.find((x) => x.key === key);
+      if (s) s.collapsed = false;
+    }, `Panel „${PANEL_TITLES[key]}" aufgeklappt`);
+    return springeZuTreffer(gruppe, h, 1);
+  }
+  if (ziel.art !== "zeile" && ziel.art !== "panelZu") {
+    suchLage = { ...ziel, schluessel: `${gruppe}:${h.match_id}` };
+    zeichneSuche();
+    return;
+  }
+  // Erreichbar: Liste ggf. weiter aufblättern, Trefferliste schließen, dann
+  // nach dem nächsten Anstrich hinscrollen — der Render baut die Zeile erst.
+  if (gruppe === "waiting") {
+    const idx = visibleQueue().findIndex((m) => m.match_id === h.match_id);
+    if (idx >= queueShown) queueShown = Math.ceil((idx + 1) / QUEUE_PAGE) * QUEUE_PAGE;
+  }
+  $("such-overlay").hidden = true;
+  render();
+  requestAnimationFrame(() => {
+    const el = suchZeilenElement(gruppe, h);
+    if (!el) {
+      toast("Die Zeile ist gerade nicht in der Liste.", true);
+      return;
+    }
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.add("such-markiert");
+    setTimeout(() => el.classList.remove("such-markiert"), 2000);
+  });
+}
+
 function renderTabletsReload() {
   const btn = $("tablets-reload");
   if (btn) btn.hidden = !state.can_reload_tablets;
@@ -9061,6 +9557,7 @@ function render() {
   renderHalls();
   renderAutoToggle();
   renderTabletsReload();
+  renderSuchfeld();
   renderActionBar();
   // Erst das Gerüst (Spalten, Sichtbarkeit/Reihenfolge/Höhe aus dem aktiven
   // Profil), DANACH die einzelnen Panel-Inhalte — die brauchen die frisch
@@ -9262,7 +9759,7 @@ function start() {
   });
   // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); closeZettel(); closeProfilesOverlay(); }
+    if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); closeZettel(); closeProfilesOverlay(); schliesseSuche(); }
   });
   // Anzeige-Einstellungen (Spielnummer/Nationen/Vereine/Disziplin/Runde/
   // Gruppe) sind seit dem Panel-System Teil des aktiven Profils
