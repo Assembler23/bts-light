@@ -111,14 +111,19 @@ später **nicht** automatisch nachgefüllt.
 - **Turnierwechsel:** verwirft `order_ar` wie den übrigen Stand (ADR 0022).
 - **Rolle beides:** Die Person steht in beiden Listen auf getrennten Plätzen.
 
-### Meetingpoint (Vorab-SR, ADR 0072)
+### Jede automatische Wahl nutzt dieselbe Funktion
 
-- `vorab_sr_verteilen` wählt über dieselbe Funktion `waehle_besetzung` (nur SR offen, Modus,
-  Vorrolle, Rolle). In A kommt der Vorab-SR aus `order`.
-- Ein Vorab-SR verfällt zusätzlich, wenn seine Rolle SR nicht mehr erlaubt. `uebernimm_vorab_sr`
-  übernimmt ihn dann nicht, und die Rotation besetzt den SR neu.
-- `next_free` wird auf die Wahl-Funktion umgebogen oder entfernt. Ziel: Es gibt keinen zweiten
-  Wahlweg mehr.
+- `waehle_besetzung` ist der **einzige** Weg, auf dem Officials automatisch gewählt werden:
+  Feld-Rotation, Meetingpoint-Vorab-SR (ADR 0072) und die geplante Zuteilung beim Aufruf
+  in Vorbereitung samt Nachrücken (Spec `sr-ar-beim-aufruf`, ADR 0080). `next_free` wird auf
+  die Wahl-Funktion umgebogen oder entfernt, damit kein zweiter Wahlweg bleibt.
+- **Abgrenzung zu `sr-ar-beim-aufruf`:** Diese Spec legt fest, *wie* gewählt wird (Modus,
+  Rolle, Vorrolle). `sr-ar-beim-aufruf` legt fest, *wann* und *für welches Spiel*. Löst sie den
+  Vorab-SR aus ADR 0072 ab, entfällt dessen Anpassung hier ersatzlos.
+- Solange der Vorab-SR besteht, gilt: `vorab_sr_verteilen` wählt mit „nur SR offen", Modus,
+  Vorrolle und Rolle (in A aus `order`). Ein Vorab-SR, dessen Rolle SR nicht mehr erlaubt,
+  wird von `uebernimm_vorab_sr` nicht übernommen, und die Rotation besetzt den SR neu. Dieser
+  Teil wird erst umgesetzt, wenn feststeht, dass `sr-ar-beim-aufruf` nicht vorher kommt.
 
 ### Handzuweisung gegen die Rolle
 
@@ -232,9 +237,9 @@ später **nicht** automatisch nachgefüllt.
 - [ ] AK21: Feldschalter und `rotation_sr/ar` gelten unverändert. Ein von Hand gelöster Dienst (`Some(0)`) wird nicht besetzt.
 - [ ] AK22: Eine BTP-Besetzung gewinnt. Die Rotation füllt nur offene Dienste. Reservierte Personen (ADR 0078) werden übersprungen.
 
-**Meetingpoint**
-- [ ] AK23: Der Vorab-SR folgt Modus und Rolle: in A aus der SR-Liste, in C wird eine Person bevorzugt, deren Vorrolle nicht SR ist.
-- [ ] AK24: Wird eine Person mit Vorab-SR auf „nur AR" gestellt, wird sie nicht übernommen, und die Rotation besetzt den SR neu.
+**Meetingpoint / Aufruf**
+- [ ] AK23: Jede automatische Wahl (Feld, Vorab-SR bzw. Aufruf-Zuteilung) folgt Modus und Rolle. In A kommt der SR aus der SR-Liste, in C wird eine Person bevorzugt, deren Vorrolle nicht SR ist. Im Code gibt es keinen zweiten Wahlweg neben `waehle_besetzung`.
+- [ ] AK24: Nur solange der Vorab-SR aus ADR 0072 besteht: Wird eine Person mit Vorab-SR auf „nur AR" gestellt, wird sie nicht übernommen, und die Rotation besetzt den SR neu.
 
 **Warnung**
 - [ ] AK25: Eine Handzuweisung einer Person „nur AR" als SR wird ausgeführt. Feldkachel, TL-Feld, Warteliste und die Desktop-Rückmeldung zeigen „SR: nur AR".
@@ -334,7 +339,8 @@ dann einmal für den neuen `TlAction`.
    - `waehle_besetzung` (rein, auf geklonten Listen/Extras), `vorrollen`
    - `RotationInput.modus/vorrolle`, `rotate_court` umstellen, `nach_spielende`
    - Verdrahtung in `track_officials`
-   - Meetingpoint (`vorab_sr_verteilen`, `uebernimm_vorab_sr`), `next_free` abbauen
+   - `next_free` auf `waehle_besetzung` umbiegen. Die Vorab-SR-Rollenprüfung kommt nur hinein, wenn `sr-ar-beim-aufruf` nicht vorher landet.
+   - **Reihenfolge:** PR 1 und PR 2 vor `sr-ar-beim-aufruf`, PR 3 bis PR 5 danach. Alle berühren `officials.rs`, `sync.rs` und `meetingpoint.rs`; parallel umgesetzt gäbe es Konflikte.
 3. **PR 3 – Setup + Rollenpflege Desktop + Warnung:**
    - Radio „Einteilungsprinzip" mit je einem Satz Erklärung und dem Schalter-Hinweis
    - `official_set_role`, Rollenauswahl im OfficialsPanel

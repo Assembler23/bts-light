@@ -23,7 +23,7 @@ Der Meetingpoint wählt seinen Vorab-SR (ADR 0072) heute über dieselbe Funktion
   ist der Schlüssel `(finished_at oder 0, match_id)`.
 - **Eine reine Wahl-Funktion je Feld** (`waehle_besetzung`) besetzt alle offenen Dienste eines
   Felds gemeinsam. C wählt personenweise mit Rückfall auf „erster Freier mit passender Rolle".
-  Rotation, Meetingpoint-Vorab-SR und die Vorschau nutzen diese Funktion. `next_free` als zweiter
+  Rotation, Meetingpoint-Vorab-SR, die geplante Zuteilung beim Aufruf (Spec `sr-ar-beim-aufruf`, ADR 0080) und die Vorschau nutzen diese Funktion. `next_free` als zweiter
   Wahlweg entfällt.
 - **Die Vorschau „als Nächstes" rechnet der Host.** Er simuliert die Wahl-Funktion Runde für
   Runde, ohne etwas zu verändern, und liefert das Ergebnis an Desktop und TL-Web. Im Browser
