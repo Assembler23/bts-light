@@ -62,7 +62,8 @@ echo "→ gespeichert in $URL_FILE: $URL"
 echo
 echo "→ Pakete installieren (auf Lite dauert das ein paar Minuten)…"
 sudo apt-get update -qq
-COMMON_PKGS="unclutter fonts-noto-color-emoji"
+# v4l-utils bringt cec-ctl mit (TV per HDMI-CEC einschalten, Abschnitt 3c).
+COMMON_PKGS="unclutter fonts-noto-color-emoji v4l-utils"
 LITE_PKGS="xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils matchbox-window-manager chromium avahi-utils xdotool"
 
 if [ "$VARIANT" = "lite" ]; then
@@ -91,6 +92,132 @@ if [ -f "$CONFIG_TXT" ] && ! grep -qE "^\s*hdmi_force_hotplug=1" "$CONFIG_TXT"; 
   echo "hdmi_force_hotplug=1" | sudo tee -a "$CONFIG_TXT" >/dev/null
   echo "→ hdmi_force_hotplug=1 in $CONFIG_TXT gesetzt (Bild auch ohne TV beim Boot)"
 fi
+# Auf aktuellem Pi OS (KMS-Grafiktreiber vc4) wirkt hdmi_force_hotplug nicht
+# mehr – dort übernimmt der Kernel-Parameter vc4.force_hotplug (Bitmaske,
+# 1 = erster HDMI-Anschluss; Zero 2 W/3B+ haben nur diesen, Pi 4/5 am
+# linken Anschluss ebenso). Beides
+# zusammen deckt alte und neue Images ab. cmdline.txt MUSS einzeilig bleiben.
+CMDLINE_TXT="$BOOT_DIR/cmdline.txt"
+if [ -f "$CMDLINE_TXT" ] && ! grep -q "vc4.force_hotplug=" "$CMDLINE_TXT"; then
+  sudo sed -i '1 s/[[:space:]]*$/ vc4.force_hotplug=1/' "$CMDLINE_TXT"
+  echo "→ vc4.force_hotplug=1 in $CMDLINE_TXT gesetzt (KMS-Gegenstück)"
+fi
+
+# ─── 3c) TV per HDMI-CEC einschalten und auf den Pi-Eingang holen ────────
+# Ziel: Steckdosenleiste an → TV und Pi bekommen gleichzeitig Strom → der
+# TV zeigt ohne Fernbedienung die Monitor-Seite. Der Pi bootet langsamer
+# als der TV; deshalb weckt ein kleiner Dienst den TV nach dem Start
+# wiederholt (bis er „an" meldet) und meldet sich erneut als aktiver
+# Eingang, wenn der TV später aus dem Standby kommt. Nur am Übergang
+# Standby → an – wer bewusst auf einen anderen Eingang schaltet, wird
+# nicht zurückgeholt. Abschalten je Karte: Datei bts-cec-aus.txt auf der
+# Boot-Partition anlegen. Läuft auf Pi Zero 2 W, 3B+, 4, 5 (/dev/cec0).
+sudo tee /usr/local/bin/bts-cec.sh >/dev/null <<'CEC'
+#!/usr/bin/env bash
+# bts-light Court-Monitor: TV per HDMI-CEC wecken und auf den Pi-Eingang holen.
+set -u
+DEV=/dev/cec0
+BOOT_DIR="/boot/firmware"; [ -d "$BOOT_DIR" ] || BOOT_DIR="/boot"
+# Startphase: so lange wird ein noch nicht eingeschalteter TV geweckt.
+START_FENSTER_S=180
+TAKT_S=5
+
+log() { echo "bts-cec: $*"; }
+
+if [ -e "$BOOT_DIR/bts-cec-aus.txt" ]; then
+  log "abgeschaltet (bts-cec-aus.txt vorhanden)"; exit 0
+fi
+command -v cec-ctl >/dev/null || { log "cec-ctl fehlt (Paket v4l-utils)"; exit 0; }
+
+# Auf das CEC-Gerät warten (Treiber lädt evtl. nach dem Dienst).
+for _ in $(seq 1 60); do [ -e "$DEV" ] && break; sleep 2; done
+[ -e "$DEV" ] || { log "$DEV fehlt – kein CEC an diesem Pi/Image"; exit 0; }
+
+# Als Abspielgerät anmelden; der Kernel meldet sich selbst neu an, sobald
+# der TV seine Adresse (über HDMI) bekannt gibt.
+cec-ctl -d "$DEV" -s --playback -o "BTS Monitor" >/dev/null 2>&1 \
+  || log "Anmelden als Abspielgerät fehlgeschlagen (TV noch ohne Strom?)"
+
+# Physische Adresse dieses Eingangs, z. B. 1.0.0.0 (f.f.f.f = unbekannt).
+# Bewusst ohne -s: die Adresse steht im Info-Block, den -s weglässt.
+phys() { cec-ctl -d "$DEV" 2>/dev/null | awk -F': *' '/Physical Address/{print $2; exit}'; }
+# Leistungszustand des TVs: on | standby | to-on | to-standby | leer (keine Antwort).
+tv_zustand() {
+  cec-ctl -d "$DEV" -s --to 0 --give-device-power-status 2>/dev/null \
+    | awk '/pwr-state:/{print $2; exit}'
+}
+# TV einschalten und diesen Eingang als aktiv melden.
+holen() {
+  local pa wecken="fehlgeschlagen" eingang="nicht gesendet"
+  cec-ctl -d "$DEV" -s --to 0 --image-view-on >/dev/null 2>&1 && wecken="ok"
+  pa="$(phys)"
+  [ "$pa" = "f.f.f.f" ] && pa=""
+  if [ -n "$pa" ]; then
+    # Active Source ist eine Rundsendung (an 15); Rückfall: direkt an den TV.
+    eingang="fehlgeschlagen"
+    { cec-ctl -d "$DEV" -s --to 15 --active-source "phys-addr=$pa" >/dev/null 2>&1 \
+      || cec-ctl -d "$DEV" -s --to 0 --active-source "phys-addr=$pa" >/dev/null 2>&1; } \
+      && eingang="ok"
+  fi
+  log "Grund: $1 · Wecken: $wecken · Eingang: $eingang (Adresse ${pa:-unbekannt})"
+}
+
+# Ab so vielen Sekunden ohne Antwort gilt der TV als aus (manche TVs
+# schweigen im Standby). Einzelne verlorene Antworten lösen nichts aus –
+# sonst würde ein bewusst umgeschalteter Eingang zurückgeholt.
+STUMM_ALS_AUS_S=30
+
+beginn=$(date +%s)
+startphase=1
+war_aus=0          # TV seit dem letzten „an" im Standby oder lange stumm
+zuletzt_antwort=$beginn
+while true; do
+  jetzt=$(date +%s)
+  zustand="$(tv_zustand)"
+  if [ -n "$zustand" ]; then
+    zuletzt_antwort=$jetzt
+  elif [ $(( jetzt - zuletzt_antwort )) -ge $STUMM_ALS_AUS_S ]; then
+    war_aus=1
+  fi
+  case "$zustand" in standby|to-standby) war_aus=1 ;; esac
+
+  if [ "$startphase" = 1 ]; then
+    holen "Start, TV: ${zustand:-keine Antwort}"
+    # Startphase endet erst bei echtem „on" (dabei eben geholt) – ein TV im
+    # Hochfahren („to-on") verwirft Befehle oft noch – oder nach dem Fenster.
+    if [ "$zustand" = "on" ] || [ $(( jetzt - beginn )) -ge $START_FENSTER_S ]; then
+      startphase=0
+      war_aus=0
+      log "Startphase beendet (TV: ${zustand:-keine Antwort})"
+    fi
+  elif { [ "$zustand" = "on" ] || [ "$zustand" = "to-on" ]; } && [ "$war_aus" = 1 ]; then
+    # TV kam aus dem Standby (oder war ohne Strom) → Eingang neu melden.
+    holen "TV eingeschaltet ($zustand)"
+    # Bei „to-on" noch einmal versuchen, sobald der TV wirklich „on" meldet.
+    [ "$zustand" = "on" ] && war_aus=0
+  fi
+  sleep "$TAKT_S"
+done
+CEC
+sudo chmod 755 /usr/local/bin/bts-cec.sh
+
+sudo tee /etc/systemd/system/bts-cec.service >/dev/null <<'UNIT'
+[Unit]
+Description=bts-light: TV per HDMI-CEC einschalten und auf den Pi-Eingang holen
+Documentation=https://github.com/Assembler23/bts-light/blob/main/docs/pi-setup.md
+After=local-fs.target
+
+[Service]
+ExecStart=/usr/local/bin/bts-cec.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable bts-cec.service >/dev/null 2>&1 || true
+echo "→ CEC-Dienst eingerichtet (bts-cec.service): TV wird beim Start geweckt"
 
 # ─── 4) Hinweisseite „noch keine Adresse" ────────────────────────────────
 ASSET_DIR="$HOME/.local/share/bts-monitor"

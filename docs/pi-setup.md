@@ -27,7 +27,9 @@ Das Feature selbst ist in [court-monitor.md](court-monitor.md) beschrieben.
 - **microSD-Karte**, mind. 16 GB (für das Master-Image-Konzept empfohlen
   32 GB+ einer Marken-Karte wie SanDisk Ultra A1/A2 — Class-10 / A1 / A2
   ist auf Random-IO optimiert und für Pi-Betrieb deutlich angenehmer).
-- **Netzteil** für den Pi.
+- **Eigenes Netzteil** für den Pi — **nicht** die USB-Buchse des TVs
+  (siehe [„Strom und Einschalten"](#strom-und-einschalten)). Pi Zero 2 W
+  und Pi 3B+: offizielles Micro-USB-Netzteil 5,1 V / 2,5 A.
 - **HDMI-Kabel** zum TV. ⚠️ Pi 4 und Pi 5 haben **micro-HDMI**-Buchsen,
   Pi Zero / Pi Zero 2 W haben **mini-HDMI** (anderer Stecker!) — dann
   brauchst du ein passendes Adapter-Kabel.
@@ -183,6 +185,53 @@ die Karte mit einem neuen Master-Image bespielen. Pis mit dem gemeinsamen Starts
 **Kein Ton am TV?** Im Pi-Desktop über das Lautsprecher-Symbol bzw. mit
 `sudo raspi-config` → *System Options* → *Audio* den HDMI-Ausgang wählen.
 
+## Strom und Einschalten
+
+Ziel: **Steckdosenleiste an → TV zeigt die Anzeige**, ohne Fernbedienung,
+ohne Umstecken.
+
+**Eigenes Netzteil, nicht der USB-Anschluss am TV.** Die USB-Buchse eines
+Fernsehers liefert meist nur 0,5–0,9 A und schaltet im Standby oft ab. Ein
+Pi 3B+ braucht mit Chromium über 1 A, ein Pi Zero 2 W beim Hochfahren
+ebenfalls mehr, als die Buchse hergibt. Folgen: Der Pi startet nicht, hängt
+oder läuft erst nach Aus- und Einstecken des Kabels. Netzteil und TV am besten
+an **dieselbe Steckdosenleiste** — dann starten beide gemeinsam.
+
+Ob ein Pi zu wenig Strom bekommen hat, zeigt im Terminal
+`vcgencmd get_throttled`: `throttled=0x0` heißt in Ordnung, jeder andere
+Wert (z. B. `0x50005`) heißt, die Spannung ist eingebrochen.
+
+**Der Pi schaltet den TV selbst ein (HDMI-CEC).** Das Einrichtungsskript
+installiert einen kleinen Dienst, der nach dem Start den TV weckt und ihn auf
+den Eingang des Pi schaltet. Er wiederholt das bis zu drei Minuten, bis der
+TV „an" meldet — Fernseher sind nach dem Einstecken unterschiedlich schnell
+bereit. Kommt der TV später aus dem Standby (Fernbedienung), meldet sich der
+Pi noch einmal als aktiver Eingang. Wer bewusst auf einen anderen Eingang
+schaltet, wird **nicht** zurückgeholt.
+<!-- pruef: "bts-cec.service" in pi/setup-monitor.sh -->
+
+Dafür muss CEC **am TV eingeschaltet** sein. Der Menüpunkt heißt je Marke
+anders: Samsung **Anynet+**, LG **SimpLink**, Sony **Bravia Sync**,
+Philips **EasyLink**, Panasonic **VIERA Link**, sonst meist „HDMI-CEC" oder
+„HDMI-Gerätesteuerung".
+
+- **Abschalten** für eine Karte (z. B. ein TV, der damit Unsinn macht): auf
+  dem Karten-Laufwerk eine leere Datei `bts-cec-aus.txt` anlegen. Wirkt
+  ab dem nächsten Start des Pi.
+  <!-- pruef: "bts-cec-aus.txt" in pi/setup-monitor.sh -->
+- **Was tut der Dienst gerade?** `journalctl -u bts-cec` im Terminal.
+
+Das Skript setzt außerdem `vc4.force_hotplug=1` in `cmdline.txt`: Der Pi gibt
+auch dann ein Bild aus, wenn der TV beim Booten noch dunkel war. (Das ältere
+`hdmi_force_hotplug=1` in `config.txt` wirkt auf aktuellem Pi OS nicht mehr,
+bleibt aber für alte Images stehen.)
+<!-- pruef: "vc4.force_hotplug=1" in pi/setup-monitor.sh -->
+
+**Ein Image für Pi Zero 2 W und Pi 3B+:** Beide laufen mit demselben
+aktuellen **Raspberry Pi OS (64-bit)**. Karte für einen der beiden
+einrichten, als Master-Image klonen ([pi-master-image.md](pi-master-image.md))
+und auf alle Pis spielen.
+
 ## Tipps & Problemlösung
 
 - **Keine feste IP nötig.** Der Turnier-PC meldet sich im Netz unter dem
@@ -195,6 +244,13 @@ die Karte mit einem neuen Master-Image bespielen. Pis mit dem gemeinsamen Starts
 - **TV bleibt schwarz / „kein Signal":** anderen HDMI-Eingang am TV
   wählen; bei Pi 4/5 prüfen, ob das Kabel im **linken** micro-HDMI-Port
   (näher am USB-C-Strom) steckt.
+- **TV schaltet nicht von selbst auf den Pi:** CEC im TV-Menü einschalten
+  (siehe [„Strom und Einschalten"](#strom-und-einschalten)); dann
+  `journalctl -u bts-cec` ansehen. Steht dort „Eingang: nicht gesendet
+  (Adresse unbekannt)", erkennt
+  der Pi den TV über HDMI nicht — anderes Kabel oder anderen Eingang probieren.
+- **Pi startet nur nach Aus- und Einstecken:** fast immer zu wenig Strom —
+  eigenes Netzteil statt TV-USB.
 - **Kiosk beenden** (zum Konfigurieren): Tastatur anschließen, **Alt+F4**.
   Danach bist du wieder auf dem Desktop.
 - **Monitor hängt:** in bts-light unter „Court-Monitore" auf **„Neu
