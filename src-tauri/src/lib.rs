@@ -188,6 +188,7 @@ pub fn run() {
             commands::queue_order_reset,
             commands::official_reorder,
             commands::official_set_club,
+            commands::official_set_role,
             commands::official_blocklists,
             commands::official_set_blocklists,
             commands::official_appearances,

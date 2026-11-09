@@ -22,7 +22,7 @@ BTP-Draht: [btp_protocol.md](btp_protocol.md) („Officials: Struktur & Schreibw
 | `enabled` | `false` | Mit Schiedsrichtern spielen. Aus ⇒ keine SR/AR-Elemente in Client, TL-Web, Tablet und Ansagen (Bestandsverhalten). |
 | `rotation_sr` | `false` | Automatische Rotation für Schiedsrichter (Official1). |
 | `rotation_ar` | `false` | Automatische Rotation für Aufschlagrichter (Official2). |
-| `rotation_mode` | `abwechselnd` | Einteilungsprinzip (seit v0.9.356, ADR 0079): `getrennt` (A), `abwechselnd` (B), `rollenwechsel` (C). Ein unbekannter Wert lädt als `abwechselnd`. Bis zum Wahl-Kern (Spec `sr-rotationsmodus`, PR 2) wirkt der Wert noch nicht; eine Auswahl im Setup kommt mit PR 3. |
+| `rotation_mode` | `abwechselnd` | Einteilungsprinzip (seit v0.9.356, ADR 0079): `getrennt` (A), `abwechselnd` (B), `rollenwechsel` (C). Ein unbekannter Wert lädt als `abwechselnd`. Wirkt seit v0.9.357; Auswahl „Einteilungsprinzip" im Setup seit v0.9.362. |
 
 Alle Felder tragen `#[serde(default)]` — ältere `config.json` bleiben lesbar,
 Bestandsinstallationen verhalten sich nach dem Auto-Update unverändert
@@ -171,6 +171,14 @@ und das Einteilungsprinzip `rotation_mode`:
 | A `getrennt` | SR = erste passende Person der SR-Liste (`order`), AR = erste passende der AR-Liste (`order_ar`), die nicht schon SR ist. |
 | B `abwechselnd` (Standard) | Beide aus `order`: erster Freier SR, nächster AR. |
 | C `rollenwechsel` | Personenweise von oben: Jeder bekommt den offenen Dienst, den er im zuletzt beendeten Spiel **nicht** hatte (feste Rolle schlägt die Vorrolle, ohne Vorgeschichte SR vor AR). Ist der Wunsch vergeben, wird die Person übersprungen. Was offen bleibt, bekommt die erste passende freie Person (Rückfall). |
+
+**Rolle je Person** (seit v0.9.362 im Schiedsrichter-Panel wählbar: „SR und
+AR", „nur SR", „nur AR"; Command `official_set_role`). Eine Besetzung gegen
+die Rolle — von Hand oder in BTP — ist erlaubt, warnt aber mit „SR: nur AR"
+bzw. „AR: nur SR" an Feldkachel, TL-Feld, Übersicht und Warteliste und in der
+Rückmeldung der Einteilung (`OfficialsStore::rollen_warnung`, eingehängt in
+`TabletState::court_officials` und `official_assign`). Sie ist **kein**
+Konflikt und keine Ablehnung — der SR⇄AR-Tausch muss weiter gehen.
 
 Die **Vorrolle** (`OfficialsStore::vorrollen`) wird je Takt aus den beendeten
 Spielen abgeleitet, nicht gespeichert: Sicht `effective`, Walkover zählt

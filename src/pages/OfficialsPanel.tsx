@@ -23,6 +23,7 @@ import {
   officialReorder,
   officialSetBlocklists,
   officialSetClub,
+  officialSetRole,
   officialsCourtSwitches,
   officialsRoster,
   officialsSetCourtSwitches,
@@ -31,6 +32,7 @@ import {
 import { announceOfficials } from "../io/announceCourt";
 import { useDragReorder } from "../state/useDragReorder";
 import type {
+  EinsatzRolle,
   AnnounceConfig,
   AppearanceView,
   AzureTtsConfig,
@@ -258,6 +260,21 @@ export function OfficialsPanel({
                     Pause
                   </span>
                 )}
+
+                <select
+                  value={o.role ?? "beides"}
+                  onChange={(e) =>
+                    officialSetRole(o.id, e.target.value as EinsatzRolle)
+                      .then(laden)
+                      .catch(() => {})
+                  }
+                  title="Welche Dienste die Automatik dieser Person gibt"
+                  className="rounded border border-slate-200 px-1.5 py-1 text-xs text-slate-600"
+                >
+                  <option value="beides">SR und AR</option>
+                  <option value="sr">nur SR</option>
+                  <option value="ar">nur AR</option>
+                </select>
 
                 <input
                   type="text"

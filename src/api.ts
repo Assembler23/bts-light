@@ -2,6 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  EinsatzRolle,
   AnnounceJob,
   AnsageAuftrag,
   AnsageHoerer,
@@ -690,6 +691,12 @@ export const officialSetClub = (
   officialId: number,
   club: string,
 ): Promise<void> => invoke("official_set_club", { officialId, club });
+
+/** Rolle eines Officials setzen (ADR 0079): „beides", nur SR, nur AR. */
+export const officialSetRole = (
+  officialId: number,
+  role: EinsatzRolle,
+): Promise<void> => invoke("official_set_role", { officialId, role });
 
 /** Lädt die Sperrlisten eines Schiedsrichters — gezielt auf Anfrage, damit
  *  diese Personendaten nicht in jeder Listen-Abfrage mitreisen. */

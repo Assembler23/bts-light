@@ -2100,13 +2100,18 @@ impl TabletState {
         // Kategorie. Beide Dienste werden geprüft, der erste Treffer zählt.
         let spieler: Vec<crate::btp::model::BtpPlayer> =
             m.team1.iter().chain(m.team2.iter()).cloned().collect();
-        let warn = [wirksam.sr, wirksam.ar]
+        let konflikt = [wirksam.sr, wirksam.ar]
             .into_iter()
             .flatten()
             .find_map(|id| {
                 crate::tablet::officials::official_conflict(&self.officials.extra(id), &spieler)
             })
             .map(|k| k.label().to_string());
+        // Dazu „SR: nur AR"/„AR: nur SR" (ADR 0079) — Kachel, TL-Feld,
+        // Übersicht und Warteliste lesen alle hier.
+        let mut teile: Vec<String> = konflikt.into_iter().collect();
+        teile.extend(self.officials.rollen_warnung(wirksam.sr, wirksam.ar));
+        let warn = (!teile.is_empty()).then(|| teile.join(" · "));
         (name(wirksam.sr), name(wirksam.ar), warn)
     }
 

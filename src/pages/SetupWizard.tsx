@@ -57,6 +57,7 @@ import {
   shortTournamentGuid,
 } from "../tournamentGuid";
 import type {
+  RotationMode,
   AppConfig,
   AutoCallMode,
   ConnectionMode,
@@ -609,6 +610,9 @@ export function SetupWizard({
   const [offEnabled, setOffEnabled] = useState(off?.enabled ?? false);
   const [offRotationSr, setOffRotationSr] = useState(off?.rotation_sr ?? false);
   const [offRotationAr, setOffRotationAr] = useState(off?.rotation_ar ?? false);
+  const [offRotationMode, setOffRotationMode] = useState<RotationMode>(
+    off?.rotation_mode ?? "abwechselnd",
+  );
   // Meetingpoint (Spec meetingpoint-spielbereit): alles standardmäßig aus.
   const mpc = initialConfig.meetingpoint;
   const [mpEnabled, setMpEnabled] = useState(mpc?.enabled ?? false);
@@ -886,9 +890,7 @@ export function SetupWizard({
         enabled: offEnabled,
         rotation_sr: offRotationSr,
         rotation_ar: offRotationAr,
-        // Noch ohne Auswahl im Setup (kommt mit PR 3): den geladenen Wert
-        // mitschicken, sonst setzte jedes Speichern auf „Abwechselnd" zurück.
-        rotation_mode: off?.rotation_mode ?? "abwechselnd",
+        rotation_mode: offRotationMode,
       },
       meetingpoint: (() => {
         // Leere/ungültige Eingaben fallen auf den Standard zurück.
@@ -2333,13 +2335,6 @@ export function SetupWizard({
             (SR) und Aufschlagrichter (AR) zuweisen. Ausgeschaltet erscheint
             nirgends ein SR/AR-Element.
           </p>
-          <p className="flex items-start gap-1.5 text-xs text-amber-700">
-            <Info size={14} className="mt-0.5 shrink-0" />
-            Die Bedienung (Zuweisung, Reihenfolge, Sperrlisten) wird gerade
-            schrittweise ausgebaut und erscheint mit den nächsten Updates in der
-            Spielübersicht und auf der Turnierleitungs-Seite. Die Schalter hier
-            legen jetzt schon fest, ob und wie sie dann eingeblendet wird.
-          </p>
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input
               type="checkbox"
@@ -2373,6 +2368,56 @@ export function SetupWizard({
                 befindliche und Schiedsrichter mit Vereins-/Personen-Konflikt
                 werden übersprungen.
               </p>
+              <fieldset className="flex flex-col gap-1.5">
+                <legend className="mb-1 text-sm font-medium text-slate-700">
+                  Einteilungsprinzip
+                </legend>
+                {(
+                  [
+                    [
+                      "abwechselnd",
+                      "Abwechselnd",
+                      "Eine Liste: Der erste Freie wird Schiedsrichter, der nächste Aufschlagrichter.",
+                    ],
+                    [
+                      "rollenwechsel",
+                      "Rollenwechsel",
+                      "Eine Liste: Jeder bekommt den Dienst, den er im letzten Spiel nicht hatte.",
+                    ],
+                    [
+                      "getrennt",
+                      "Getrennte Listen",
+                      "Eigene Reihenfolge für Schiedsrichter und für Aufschlagrichter.",
+                    ],
+                  ] as const
+                ).map(([wert, titel, text]) => (
+                  <label key={wert} className="flex items-start gap-2 text-sm text-slate-600">
+                    <input
+                      type="radio"
+                      name="rotation-mode"
+                      className="mt-1"
+                      checked={offRotationMode === wert}
+                      onChange={() => setOffRotationMode(wert)}
+                    />
+                    <span>
+                      <span className="font-medium text-slate-700">{titel}</span>
+                      <span className="block text-xs text-slate-500">{text}</span>
+                    </span>
+                  </label>
+                ))}
+                <p className="text-xs text-slate-500">
+                  Wer nur Schiedsrichter oder nur Aufschlagrichter machen darf, stellst
+                  du in der Schiedsrichter-Liste ein — die Automatik hält sich daran.
+                </p>
+                {offRotationMode !== "abwechselnd" && offRotationSr !== offRotationAr && (
+                  <p className="flex items-start gap-1.5 text-xs text-amber-700">
+                    <Info size={14} className="mt-0.5 shrink-0" />
+                    {offRotationMode === "getrennt"
+                      ? `Nur die ${offRotationSr ? "Schiedsrichter" : "Aufschlagrichter"}-Rotation ist an: Wer „nur ${offRotationSr ? "AR" : "SR"}" ist, wird nie automatisch eingesetzt.`
+                      : "Nur eine Rotation ist an: Wer zuletzt diesen Dienst hatte, wird übersprungen, solange ein anderer frei ist."}
+                  </p>
+                )}
+              </fieldset>
             </div>
           )}
         </section>

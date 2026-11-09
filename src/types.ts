@@ -1295,7 +1295,12 @@ export interface OfficialView {
   reserved: boolean;
   /** Spielnummer der Reservierung (bei mehreren die kleinste), sonst null. */
   reserved_match_num: number | null;
+  /** Was die Person übernehmen darf (ADR 0079); fehlt bei älteren. */
+  role?: EinsatzRolle;
 }
+
+/** Einsatzrolle je Official (Rust: officials::Einsatzrolle). */
+export type EinsatzRolle = "beides" | "sr" | "ar";
 
 /** Ein abgeleiteter Einsatz fürs Detail-Overlay (Rust: AppearanceView). */
 export interface AppearanceView {

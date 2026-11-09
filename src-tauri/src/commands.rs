@@ -5812,6 +5812,8 @@ pub struct OfficialView {
     pub reserved: bool,
     /// Spielnummer der Reservierung, bei mehreren die kleinste.
     pub reserved_match_num: Option<i64>,
+    /// Was die Person übernehmen darf (ADR 0079): „beides", „sr", „ar".
+    pub role: String,
 }
 
 /// Ein abgeleiteter Einsatz für das Detail-Overlay.
@@ -5866,6 +5868,26 @@ fn parse_role(role: &str) -> Result<crate::tablet::officials::OfficialRole, Stri
         "sr" => Ok(crate::tablet::officials::OfficialRole::Sr),
         "ar" => Ok(crate::tablet::officials::OfficialRole::Ar),
         _ => Err(format!("unbekannte Rolle: {role}")),
+    }
+}
+
+/// Einsatzrolle als Draht-Text (ADR 0079).
+fn rolle_str(r: crate::tablet::officials::Einsatzrolle) -> &'static str {
+    use crate::tablet::officials::Einsatzrolle as E;
+    match r {
+        E::Beides => "beides",
+        E::NurSr => "sr",
+        E::NurAr => "ar",
+    }
+}
+
+fn parse_rolle(r: &str) -> Result<crate::tablet::officials::Einsatzrolle, String> {
+    use crate::tablet::officials::Einsatzrolle as E;
+    match r {
+        "beides" => Ok(E::Beides),
+        "sr" => Ok(E::NurSr),
+        "ar" => Ok(E::NurAr),
+        _ => Err(format!("unbekannte Einsatzrolle: {r}")),
     }
 }
 
@@ -5944,6 +5966,7 @@ pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
                 appearances: einsaetze.get(&o.id).map(Vec::len).unwrap_or(0),
                 reserved: !belegung.reserviert_fuer(o.id).is_empty(),
                 reserved_match_num: belegung.reserviert_spielnummer(o.id, &snap),
+                role: rolle_str(extra.role).to_string(),
             }
         })
         .collect();
@@ -5975,14 +5998,20 @@ pub fn official_assign(
         Some(official_id),
     )?;
     store.assign(match_id, role, official_id);
-    let warnung = state.tablet.snapshot_clone().and_then(|snap| {
+    let konflikt = state.tablet.snapshot_clone().and_then(|snap| {
         let m = snap.matches.iter().find(|m| m.id == match_id)?;
         let spieler: Vec<crate::btp::model::BtpPlayer> =
             m.team1.iter().chain(m.team2.iter()).cloned().collect();
         crate::tablet::officials::official_conflict(&store.extra(official_id), &spieler)
             .map(|k| k.label().to_string())
     });
-    Ok(warnung)
+    // Rolle gegen Dienst: nur Warnung, ausgeführt wird trotzdem (ADR 0079).
+    let rolle = match role {
+        crate::tablet::officials::OfficialRole::Sr => store.rollen_warnung(Some(official_id), None),
+        crate::tablet::officials::OfficialRole::Ar => store.rollen_warnung(None, Some(official_id)),
+    };
+    let teile: Vec<String> = konflikt.into_iter().chain(rolle).collect();
+    Ok((!teile.is_empty()).then(|| teile.join(" · ")))
 }
 
 /// Eine Zuweisung lösen.
@@ -6100,6 +6129,21 @@ pub fn official_reorder(
         .tablet
         .officials_store()
         .reorder(official_id, before_official_id);
+    Ok(())
+}
+
+/// Rolle eines Officials setzen: „beides", „sr" (nur Schiedsrichter) oder
+/// „ar" (nur Aufschlagrichter), ADR 0079. Die Automatik setzt niemanden
+/// gegen seine Rolle ein; von Hand bleibt es möglich (mit Warnung).
+#[tauri::command]
+pub fn official_set_role(
+    state: State<'_, AppState>,
+    official_id: i64,
+    role: String,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    let rolle = parse_rolle(&role)?;
+    state.tablet.officials_store().set_role(official_id, rolle);
     Ok(())
 }
 
@@ -6781,6 +6825,16 @@ pub fn monitor_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn einsatzrolle_hin_und_zurueck_und_unbekannt_abgelehnt() {
+        use crate::tablet::officials::Einsatzrolle as E;
+        for (r, t) in [(E::Beides, "beides"), (E::NurSr, "sr"), (E::NurAr, "ar")] {
+            assert_eq!(rolle_str(r), t);
+            assert_eq!(parse_rolle(t), Ok(r));
+        }
+        assert!(parse_rolle("chef").is_err());
+    }
 
     // ─── Ansage-Ton aus dem Kern (Spec `ansage-ausgabegeraet`) ───────────
 
