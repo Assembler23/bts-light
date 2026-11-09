@@ -854,8 +854,15 @@ zeigt die Seite zusätzlich:
   Personen mit fester Rolle tragen die Marke **„nur SR"** bzw. **„nur AR"**;
   im Einteilungsdialog steht der Hinweis schon vor der Wahl. In Modus
   „Getrennte Listen" zeigt die Seite die **SR-Reihenfolge**; die
-  AR-Reihenfolge pflegt man am Turnier-PC. Ein älterer Turnier-PC liefert
+  AR-Reihenfolge steht seit v0.9.365 darunter (siehe unten). Ein älterer Turnier-PC liefert
   keine Vorschau, dann bleibt es bei „nächster: …".
+- **AR-Reihenfolge und Rolle im TL-Web** (seit v0.9.365): In Modus
+  „Getrennte Listen" steht unter der SR-Reihenfolge eine zweite, eigene
+  **AR-Reihenfolge**, ebenso ziehbar. Im Dialog einer Person (Klick auf die
+  Einsatz-Zahl) lässt sich die **Rolle** wählen: „SR und AR", „nur
+  Schiedsrichter" oder „nur Aufschlagrichter" — sie gilt sofort.
+  <!-- pruef: "AR-Reihenfolge" in src-tauri/assets/tl.html -->
+  <!-- pruef: "nur Aufschlagrichter" in src-tauri/assets/tl.html -->
   <!-- pruef: "als Nächstes " in src-tauri/assets/tl.html -->
   <!-- pruef: "SR-Reihenfolge" in src-tauri/assets/tl.html -->
 

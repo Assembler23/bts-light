@@ -840,13 +840,13 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Profil trotzdem ausgeblendet" (Spec tl-web-panelsystem, `panelAvailable`
    im Skript). Zeilenstil der Spielliste, aber kompakter — hier geht es um
    Namen und Wartezeit, nicht um eine ganze Paarung. */
-#sk-list, #off-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-#off-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
-#off-list li.paused { opacity: .55; }
-#off-list .off-name { flex: 1; }
+#sk-list, #off-list, #off-list-ar { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#off-list li, #off-list-ar li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+#off-list li.paused, #off-list-ar li.paused { opacity: .55; }
+#off-list .off-name, #off-list-ar .off-name { flex: 1; }
 #off-list button { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; cursor: pointer; color: inherit; }
 #off-list button:hover { border-color: var(--accent); color: var(--accent); }
-#off-list .drag-griff {
+#off-list .drag-griff, #off-list-ar .drag-griff {
   /* Trefffläche vergrößern, wie beim Spielliste-Griff (`.row .drag-griff`) —
      per Minus-Rand aus dem Fluss zurückgerechnet. */
   padding: 9px 8px;
@@ -854,7 +854,7 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 /* Während des Ziehens gehoben + hervorgehoben — die Zeile wandert ja schon
    live im DOM, das hier ist nur die Rückmeldung „das ist die gegriffene". */
-#off-list li.dragging-item {
+#off-list li.dragging-item, #off-list-ar li.dragging-item {
   box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
   border-color: var(--accent);
   background: #eff6ff;
@@ -6351,7 +6351,9 @@ function panelBodySkeleton(key) {
     case "officials":
       return `
         <p class="meta" id="off-next"></p>
-        <ol id="off-list"></ol>`;
+        <ol id="off-list"></ol>
+        <p class="meta" id="off-ar-titel" hidden>AR-Reihenfolge</p>
+        <ol id="off-list-ar" hidden></ol>`;
     case "queue":
       // Drei Geschwister statt eines Containers (ADR 0026): `#queue-list`
       // trägt AUSSCHLIESSLICH Zeilen — es ist die Zieh-Liste, und
@@ -7591,6 +7593,48 @@ function renderOfficials() {
     { action: "official_reorder", officialId: Number(id), beforeOfficialId: beforeId === null ? null : Number(beforeId) },
     "Reihenfolge geändert.",
   ));
+  renderOfficialsAr(list);
+}
+
+// Zweite Liste in Modus „Getrennte Listen" (ADR 0079): die AR-Reihenfolge
+// kommt als ID-Liste vom Turnier-PC (`officials_ar_order`), ziehbar mit
+// `list: "ar"`. Fehlt sie (anderer Modus, älterer Turnier-PC), bleibt die
+// Liste verborgen.
+function renderOfficialsAr(list) {
+  const boxAr = $("off-list-ar");
+  const titel = $("off-ar-titel");
+  if (!boxAr || !titel) return;
+  const ids = state.officials_ar_order || [];
+  const zeigen = ids.length > 0;
+  boxAr.hidden = !zeigen;
+  titel.hidden = !zeigen;
+  if (!zeigen) {
+    boxAr.innerHTML = "";
+    return;
+  }
+  const nachId = new Map(list.map((o) => [o.id, o]));
+  const arListe = ids.map((id) => nachId.get(id)).filter((o) => o && o.role !== "sr");
+  const html = arListe.map((o, i) => `<li class="${o.paused ? "paused" : ""}" data-id="${o.id}">
+      <span class="drag-griff" tabindex="0" role="button"
+        title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+        aria-label="${esc(o.name)} in der AR-Reihenfolge verschieben — ziehen oder Pfeiltasten">⠿</span>
+      <span class="num">${i + 1}.</span>
+      <span class="off-name">${esc(o.name)}</span>
+      ${o.role === "ar" ? `<span class="meta">nur AR</span>` : ""}
+      ${o.next_role === "ar" ? `<span class="meta">${o.next_rank === 0 ? "als Nächstes " : "→ "}AR</span>` : ""}
+      ${o.on_duty_court_id ? `<span class="meta">im Dienst</span>` : ""}
+    </li>`).join("");
+  if (!setzeHtmlWennNeu(boxAr, html)) {
+    const sollIds = arListe.map((o) => String(o.id)).join(",");
+    const istIds = Array.from(boxAr.children).map((li) => li.dataset.id || "").filter(Boolean).join(",");
+    if (istIds === sollIds) return;
+    boxAr.innerHTML = html;
+  }
+  enableReorderDrag(boxAr, (id, beforeId) => send(
+    `off-reorder-ar-${id}-${beforeId ?? "end"}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
+    { action: "official_reorder", officialId: Number(id), beforeOfficialId: beforeId === null ? null : Number(beforeId), list: "ar" },
+    "AR-Reihenfolge geändert.",
+  ));
 }
 
 /** Offener Pflege-Dialog: `{ id, name }` oder null. */
@@ -7638,7 +7682,18 @@ function renderOfficialDetail(d) {
       (d.pick_players || []).find((p) => p.id === id) || { id, name: `Spieler ${id}`, club: "" }),
     gewaehlteClubs: (d.blocked_clubs || []).slice(),
   };
-  $("off-body").innerHTML = `
+  // Rolle (ADR 0079) — nur, wenn der Turnier-PC die Aktion kennt.
+  const person = (state.officials || []).find((x) => offCtx && x.id === offCtx.id);
+  const rolleJetzt = (person && person.role) || "beides";
+  const rolleFeld = state.can_set_official_role ? `
+    <label class="off-field">Rolle
+      <select id="off-role">
+        <option value="beides" ${rolleJetzt === "beides" ? "selected" : ""}>SR und AR</option>
+        <option value="sr" ${rolleJetzt === "sr" ? "selected" : ""}>nur Schiedsrichter</option>
+        <option value="ar" ${rolleJetzt === "ar" ? "selected" : ""}>nur Aufschlagrichter</option>
+      </select>
+    </label>` : "";
+  $("off-body").innerHTML = rolleFeld + `
     <label class="off-field">Verein
       <input type="text" id="off-club" maxlength="80" list="off-club-list" value="${esc(d.club || "")}" />
       <datalist id="off-club-list">
@@ -7691,6 +7746,20 @@ function renderOfficialDetail(d) {
       }));
   });
 
+  const rolleWahl = $("off-role");
+  if (rolleWahl) {
+    // Sofort senden wie die Pause — kein Speichern nötig.
+    rolleWahl.addEventListener("change", () => {
+      if (!offCtx) return;
+      send(
+        // Eindeutig je Wahl (nicht je 20-s-Fenster): Ein „falsch gewählt,
+        // zurück" (ar → sr → ar) wäre sonst als Wiederholung verschluckt worden.
+        `off-role-${offCtx.id}-${rolleWahl.value}-${Date.now()}`,
+        { action: "official_set_role", officialId: offCtx.id, role: rolleWahl.value },
+        "Rolle geändert.",
+      );
+    });
+  }
   $("off-save").addEventListener("click", () => {
     const id = offCtx && offCtx.id;
     if (!id) return;
