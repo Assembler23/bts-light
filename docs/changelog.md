@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.357
+
+- **Schiedsrichter-Paare tauschen die Dienste.** Nach Spielende rücken
+  Aufschlagrichter und Schiedsrichter in dieser Folge ans Ende der Rotation.
+  Kommt das Paar wieder dran, wird der bisherige Aufschlagrichter
+  Schiedsrichter und umgekehrt. Bisher bekamen dieselben Leute immer wieder
+  denselben Dienst.
+- **Rotationsmodus wirkt** (noch ohne Auswahl im Setup, kommt mit der
+  nächsten Version): getrennte SR-/AR-Listen, abwechselnd (Standard) oder
+  Rollenwechsel je Person; die Rolle „nur SR"/„nur AR" wird beachtet, auch
+  beim vorläufigen Meetingpoint-Schiedsrichter.
+
 ## v0.9.356
 
 - **Vorbereitung Rotationsmodus (Schiedsrichter).** Unsichtbarer Unterbau für

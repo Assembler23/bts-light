@@ -201,6 +201,145 @@ pub struct RotationInput<'a> {
     pub sr: bool,
     /// AR-Rotation für dieses Feld aktiv?
     pub ar: bool,
+    /// Einteilungsprinzip (ADR 0079), vom Aufrufer aus
+    /// [`OfficialsStore::rotation_mode`] gelesen.
+    pub modus: RotationMode,
+    /// Vorrolle je Official ([`OfficialsStore::vorrollen`]); nur in Modus C
+    /// gelesen. Einmal je Takt gerechnet — Besetzungen desselben Takts
+    /// ändern sie nicht.
+    pub vorrolle: &'a HashMap<i64, OfficialRole>,
+}
+
+/// Eingabe der reinen Wahl-Funktion [`waehle_besetzung`] (ADR 0079).
+pub struct Wahleingabe<'a> {
+    pub modus: RotationMode,
+    /// Gemeinsame Liste (B/C) bzw. SR-Liste (A).
+    pub order: &'a [i64],
+    /// AR-Liste — nur in Modus A gelesen.
+    pub order_ar: &'a [i64],
+    /// Darf diese Person überhaupt eingesetzt werden? (BTP kennt sie, nicht
+    /// pausiert, nicht belegt oder reserviert, kein Konflikt.)
+    pub frei: &'a dyn Fn(i64) -> bool,
+    /// Rolle je Person.
+    pub rolle: &'a dyn Fn(i64) -> Einsatzrolle,
+    /// Dienst im zuletzt beendeten Spiel (nur Modus C).
+    pub vorrolle: &'a HashMap<i64, OfficialRole>,
+    pub sr_offen: bool,
+    pub ar_offen: bool,
+}
+
+/// Der jeweils andere Dienst.
+fn gegenteil(d: OfficialRole) -> OfficialRole {
+    match d {
+        OfficialRole::Sr => OfficialRole::Ar,
+        OfficialRole::Ar => OfficialRole::Sr,
+    }
+}
+
+/// Besetzt die offenen Dienste eines Spiels gemeinsam (ADR 0079) — der
+/// **einzige** Weg, auf dem Officials automatisch gewählt werden. Liefert
+/// `(sr, ar)`; `None` = niemand Passendes frei (der Dienst bleibt leer).
+///
+/// - **A (getrennt):** SR = erste passende Person der SR-Liste, AR = erste
+///   passende der AR-Liste, die nicht schon SR ist.
+/// - **B (abwechselnd):** wie A, beide aus der gemeinsamen Liste.
+/// - **C (Rollenwechsel):** personenweise von oben: Jede freie Person
+///   bekommt den offenen Dienst, den sie zuletzt nicht hatte (feste Rolle
+///   schlägt die Vorrolle; ohne Vorrolle SR vor AR). Ist ihr Wunsch
+///   vergeben oder nicht offen, wird sie übersprungen. Was danach offen
+///   bleibt, bekommt die erste freie Person mit passender Rolle
+///   (Rückfall) — so bleibt kein Dienst leer, solange jemand passt.
+pub fn waehle_besetzung(e: &Wahleingabe) -> (Option<i64>, Option<i64>) {
+    let kann = |id: i64, d: OfficialRole| (e.frei)(id) && (e.rolle)(id).erlaubt(d);
+    match e.modus {
+        RotationMode::Getrennt | RotationMode::Abwechselnd => {
+            let liste_ar = if e.modus == RotationMode::Getrennt {
+                e.order_ar
+            } else {
+                e.order
+            };
+            let sr = if e.sr_offen {
+                e.order
+                    .iter()
+                    .copied()
+                    .find(|&id| kann(id, OfficialRole::Sr))
+            } else {
+                None
+            };
+            let ar = if e.ar_offen {
+                liste_ar
+                    .iter()
+                    .copied()
+                    .find(|&id| Some(id) != sr && kann(id, OfficialRole::Ar))
+            } else {
+                None
+            };
+            (sr, ar)
+        }
+        RotationMode::Rollenwechsel => {
+            let mut offen: Vec<OfficialRole> = Vec::new();
+            if e.sr_offen {
+                offen.push(OfficialRole::Sr);
+            }
+            if e.ar_offen {
+                offen.push(OfficialRole::Ar);
+            }
+            let mut sr = None;
+            let mut ar = None;
+            // Durchgang 1: Rollenwechsel je Person.
+            for &id in e.order {
+                if offen.is_empty() {
+                    break;
+                }
+                if !(e.frei)(id) {
+                    continue;
+                }
+                let rolle = (e.rolle)(id);
+                let erlaubt: Vec<OfficialRole> = offen
+                    .iter()
+                    .copied()
+                    .filter(|d| rolle.erlaubt(*d))
+                    .collect();
+                let Some(&erster) = erlaubt.first() else {
+                    continue;
+                };
+                let dienst = if !rolle.ist_beides() {
+                    // Feste Rolle: nur ein Dienst ist überhaupt möglich.
+                    erster
+                } else {
+                    match e.vorrolle.get(&id) {
+                        // Ohne Vorgeschichte: SR, falls offen, sonst AR.
+                        None => erster,
+                        Some(&v) => {
+                            let wunsch = gegenteil(v);
+                            if !erlaubt.contains(&wunsch) {
+                                continue; // nur die Vorrolle wäre frei
+                            }
+                            wunsch
+                        }
+                    }
+                };
+                offen.retain(|d| *d != dienst);
+                match dienst {
+                    OfficialRole::Sr => sr = Some(id),
+                    OfficialRole::Ar => ar = Some(id),
+                }
+            }
+            // Durchgang 2: Rückfall auf die erste passende freie Person.
+            for d in offen {
+                let gewaehlt = e
+                    .order
+                    .iter()
+                    .copied()
+                    .find(|&id| Some(id) != sr && Some(id) != ar && kann(id, d));
+                match d {
+                    OfficialRole::Sr => sr = gewaehlt,
+                    OfficialRole::Ar => ar = gewaehlt,
+                }
+            }
+            (sr, ar)
+        }
+    }
 }
 
 /// Dienst eines Officials an einem Spiel. BTP: `Official1ID` = SR,
@@ -1048,39 +1187,95 @@ impl OfficialsStore {
         vergeben.extend(wirksam.sr);
         vergeben.extend(wirksam.ar);
 
-        for (offen, role) in [(sr_offen, OfficialRole::Sr), (ar_offen, OfficialRole::Ar)] {
-            if !offen {
-                continue;
-            }
-            let Some(id) = self.next_free(input.bekannt, &vergeben, input.players) else {
-                continue; // niemand frei ⇒ Feld bleibt ohne diesen Dienst
-            };
-            vergeben.insert(id);
-            self.assign(input.match_id, role, id);
+        let (sr, ar) = self.waehle(
+            input.modus,
+            input.bekannt,
+            &vergeben,
+            input.players,
+            input.vorrolle,
+            sr_offen,
+            ar_offen,
+        );
+        // Niemand frei ⇒ das Feld bleibt ohne diesen Dienst.
+        if let Some(id) = sr {
+            self.assign(input.match_id, OfficialRole::Sr, id);
+        }
+        if let Some(id) = ar {
+            self.assign(input.match_id, OfficialRole::Ar, id);
         }
     }
 
-    /// Der nächste Official der Reihenfolge, der zugewiesen werden darf:
-    /// BTP kennt ihn, er ist nicht pausiert, hat keinen Dienst und keinen
-    /// Konflikt. Konflikte werden hier **still** übersprungen — gewarnt wird
-    /// nur bei manueller Zuweisung (Spec Nr. 4).
-    pub fn next_free(
+    /// Wählt über [`waehle_besetzung`] auf einem einmal geklonten Stand
+    /// (Listen, Zusatzdaten) — ein Lock statt einem je Kandidat. Frei ist,
+    /// wen BTP kennt, wer nicht pausiert ist, nicht in `vergeben` steht und
+    /// keinen Konflikt mit den Spielern hat. Konflikte werden **still**
+    /// übersprungen — gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
+    #[allow(clippy::too_many_arguments)]
+    pub fn waehle(
         &self,
+        modus: RotationMode,
         bekannt: &[i64],
         vergeben: &HashSet<i64>,
         players: &[BtpPlayer],
-    ) -> Option<i64> {
-        for id in self.order() {
-            if !bekannt.contains(&id) || vergeben.contains(&id) {
-                continue;
+        vorrolle: &HashMap<i64, OfficialRole>,
+        sr_offen: bool,
+        ar_offen: bool,
+    ) -> (Option<i64>, Option<i64>) {
+        let (order, order_ar, extras) = {
+            let inner = self.inner.lock().unwrap();
+            (
+                inner.file.order.clone(),
+                ar_liste(&inner.file),
+                inner.file.extras.clone(),
+            )
+        };
+        let leer = OfficialExtra::default();
+        let extra = |id: i64| extras.get(&id).unwrap_or(&leer);
+        let frei = |id: i64| {
+            bekannt.contains(&id)
+                && !vergeben.contains(&id)
+                && !extra(id).paused
+                && official_conflict(extra(id), players).is_none()
+        };
+        let rolle = |id: i64| extra(id).role;
+        waehle_besetzung(&Wahleingabe {
+            modus,
+            order: &order,
+            order_ar: &order_ar,
+            frei: &frei,
+            rolle: &rolle,
+            vorrolle,
+            sr_offen,
+            ar_offen,
+        })
+    }
+
+    /// Vorrolle je Official: der Dienst im zuletzt beendeten Spiel (ADR
+    /// 0079). Dieselbe Sicht wie die Einsatz-Ableitung (`effective`, Hand,
+    /// BTP und Automatik gleich); ein Walkover zählt nicht. Maßgeblich ist
+    /// `(finished_at oder 0, match_id)` — gleiche Endezeit entscheidet die
+    /// höhere Match-ID, ein Spiel ohne Endezeit ist älter als jedes
+    /// gestempelte.
+    pub fn vorrollen(&self, finished: &[FinishedMatch]) -> HashMap<i64, OfficialRole> {
+        let assignments = self.assignments();
+        let mut zuletzt: HashMap<i64, ((u64, i64), OfficialRole)> = HashMap::new();
+        for f in finished.iter().filter(|f| !f.walkover) {
+            let lokal = assignments.get(&f.match_id).copied().unwrap_or_default();
+            let sr = dienst(f.btp_sr).or(dienst(lokal.sr));
+            let ar = dienst(f.btp_ar).or(dienst(lokal.ar));
+            let schluessel = (f.finished_at.unwrap_or(0), f.match_id);
+            for (id, rolle) in [(sr, OfficialRole::Sr), (ar, OfficialRole::Ar)] {
+                let Some(id) = id else { continue };
+                let neuer = zuletzt
+                    .get(&id)
+                    .map(|(k, _)| schluessel > *k)
+                    .unwrap_or(true);
+                if neuer {
+                    zuletzt.insert(id, (schluessel, rolle));
+                }
             }
-            let extra = self.extra(id);
-            if extra.paused || official_conflict(&extra, players).is_some() {
-                continue;
-            }
-            return Some(id);
         }
-        None
+        zuletzt.into_iter().map(|(id, (_, r))| (id, r)).collect()
     }
 
     /// Einen Official in der Hauptliste vor einen anderen ziehen
@@ -1143,6 +1338,9 @@ impl OfficialsStore {
         }
         for liste in out.values_mut() {
             // Ohne Endezeit (Altbestand) ans Ende, sonst chronologisch.
+            // Achtung: `vorrollen` behandelt dieselben Spiele umgekehrt (als
+            // ältestes, ADR 0079) — hier geht es um die Anzeige-Reihenfolge,
+            // dort darum, dass ein ungestempeltes Spiel keine Vorrolle prägt.
             liste.sort_by_key(|a| (a.finished_at.unwrap_or(u64::MAX), a.match_id));
         }
         out
@@ -1200,7 +1398,43 @@ impl OfficialsStore {
         self.persist();
     }
 
-    /// Officials ans Ende der Reihenfolge rücken (nach Spielende, Spec Nr. 4).
+    /// Nach Spielende rücken SR und AR ans Ende (ADR 0079):
+    /// - B/C: in der gemeinsamen Liste erst der AR, dann der SR — das Paar
+    ///   kommt getauscht wieder hoch (früher `[SR, AR]`: Die Dienste blieben
+    ///   an den Personen kleben).
+    /// - A: der SR nur in der SR-Liste, der AR nur in der AR-Liste (die bei
+    ///   Bedarf angelegt wird).
+    pub fn nach_spielende(&self, sr: Option<i64>, ar: Option<i64>, modus: RotationMode) {
+        if modus != RotationMode::Getrennt {
+            let folge: Vec<i64> = ar.into_iter().chain(sr).collect();
+            self.move_to_end(&folge);
+            return;
+        }
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let file = &mut inner.file;
+            // AR-Liste VOR dem SR-Rücken ziehen: Gibt es sie noch nicht, ist
+            // sie eine Kopie der Hauptliste — und zwar der unveränderten.
+            let mut liste = ar_liste(file);
+            let mut geaendert = false;
+            if let Some(id) = sr {
+                geaendert |= ans_ende(&mut file.order, &[id]);
+            }
+            if let Some(id) = ar {
+                geaendert |= ans_ende(&mut liste, &[id]);
+            }
+            if !geaendert {
+                return;
+            }
+            // Auch wenn nur der SR rückte: Ab jetzt ist die AR-Liste eigen —
+            // sonst machte ihre Kopie das SR-Rücken mit.
+            file.order_ar = Some(liste);
+        }
+        self.persist();
+    }
+
+    /// Officials ans Ende der Hauptliste rücken (Baustein von
+    /// [`nach_spielende`](Self::nach_spielende)).
     pub fn move_to_end(&self, official_ids: &[i64]) {
         {
             let mut inner = self.inner.lock().unwrap();
@@ -1320,6 +1554,22 @@ fn ar_liste(file: &OfficialsFile) -> Vec<i64> {
     }
 }
 
+/// Rückt die bekannten unter `ids` in dieser Folge ans Ende. `false`, wenn
+/// keine davon in der Liste steht.
+fn ans_ende(order: &mut Vec<i64>, ids: &[i64]) -> bool {
+    let betroffen: Vec<i64> = ids
+        .iter()
+        .copied()
+        .filter(|id| order.contains(id))
+        .collect();
+    if betroffen.is_empty() {
+        return false;
+    }
+    order.retain(|id| !betroffen.contains(id));
+    order.extend(betroffen);
+    true
+}
+
 /// Verschiebt `id` vor `before` (`None` ⇒ ans Ende). `false`, wenn sich
 /// nichts geändert hat (unbekannte ID, unbekanntes Ziel, vor sich selbst).
 fn verschiebe(order: &mut Vec<i64>, id: i64, before: Option<i64>) -> bool {
@@ -1403,6 +1653,8 @@ mod tests {
             belegt,
             sr: true,
             ar: true,
+            modus: RotationMode::Abwechselnd,
+            vorrolle: Box::leak(Box::new(HashMap::new())),
         }
     }
 
@@ -2012,6 +2264,343 @@ mod tests {
         assert_eq!(store.rotation_mode(), RotationMode::Abwechselnd);
         store.set_rotation_mode(RotationMode::Getrennt);
         assert_eq!(store.rotation_mode(), RotationMode::Getrennt);
+    }
+
+    // ── Rotationsmodus: Wahl-Kern (ADR 0079, PR 2) ────────────────────
+
+    /// Wahl mit allen frei, Rollen und Vorrollen aus Tabellen.
+    fn wahl(
+        modus: RotationMode,
+        order: &[i64],
+        order_ar: &[i64],
+        rollen: &[(i64, Einsatzrolle)],
+        vor: &[(i64, OfficialRole)],
+        sr_offen: bool,
+        ar_offen: bool,
+    ) -> (Option<i64>, Option<i64>) {
+        wahl_mit(modus, order, order_ar, rollen, vor, &[], sr_offen, ar_offen)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn wahl_mit(
+        modus: RotationMode,
+        order: &[i64],
+        order_ar: &[i64],
+        rollen: &[(i64, Einsatzrolle)],
+        vor: &[(i64, OfficialRole)],
+        nicht_frei: &[i64],
+        sr_offen: bool,
+        ar_offen: bool,
+    ) -> (Option<i64>, Option<i64>) {
+        let rollen: HashMap<i64, Einsatzrolle> = rollen.iter().copied().collect();
+        let vorrolle: HashMap<i64, OfficialRole> = vor.iter().copied().collect();
+        let frei = |id: i64| !nicht_frei.contains(&id);
+        let rolle = |id: i64| rollen.get(&id).copied().unwrap_or_default();
+        waehle_besetzung(&Wahleingabe {
+            modus,
+            order,
+            order_ar,
+            frei: &frei,
+            rolle: &rolle,
+            vorrolle: &vorrolle,
+            sr_offen,
+            ar_offen,
+        })
+    }
+
+    use OfficialRole::{Ar as AR, Sr as SR};
+    use RotationMode::{Abwechselnd as B, Getrennt as A, Rollenwechsel as C};
+
+    #[test]
+    fn a_waehlt_aus_getrennten_listen() {
+        // AK7: SR aus der SR-Liste, AR aus der AR-Liste.
+        assert_eq!(
+            wahl(A, &[1, 2], &[3, 4], &[], &[], true, true),
+            (Some(1), Some(3))
+        );
+        // „beides" oben in beiden Listen ⇒ SR; der AR kommt vom Nächsten der
+        // AR-Liste.
+        assert_eq!(
+            wahl(A, &[1, 2], &[1, 3], &[], &[], true, true),
+            (Some(1), Some(3))
+        );
+        // Rollen filtern je Liste.
+        assert_eq!(
+            wahl(
+                A,
+                &[1, 2],
+                &[3, 4],
+                &[(1, Einsatzrolle::NurAr), (3, Einsatzrolle::NurSr)],
+                &[],
+                true,
+                true
+            ),
+            (Some(2), Some(4))
+        );
+    }
+
+    #[test]
+    fn b_erster_sr_naechster_ar_mit_rollenfilter() {
+        assert_eq!(
+            wahl(B, &[1, 2, 3], &[9], &[], &[], true, true),
+            (Some(1), Some(2))
+        );
+        // AK11: „nur AR" oben wird nie SR, bekommt aber den AR.
+        assert_eq!(
+            wahl(
+                B,
+                &[1, 2, 3],
+                &[],
+                &[(1, Einsatzrolle::NurAr)],
+                &[],
+                true,
+                true
+            ),
+            (Some(2), Some(1))
+        );
+        // Die Vorrolle spielt in B keine Rolle.
+        assert_eq!(
+            wahl(B, &[1, 2], &[], &[], &[(1, SR)], true, true),
+            (Some(1), Some(2))
+        );
+    }
+
+    #[test]
+    fn c_wechselt_je_person() {
+        // AK12: P1 zuletzt SR, P2 zuletzt AR ⇒ getauscht.
+        assert_eq!(
+            wahl(C, &[1, 2], &[], &[], &[(1, SR), (2, AR)], true, true),
+            (Some(2), Some(1))
+        );
+        // AK13: P2 will auch AR, das hat schon P1 ⇒ P2 übersprungen, P3 SR.
+        assert_eq!(
+            wahl(
+                C,
+                &[1, 2, 3],
+                &[],
+                &[],
+                &[(1, SR), (2, SR), (3, AR)],
+                true,
+                true
+            ),
+            (Some(3), Some(1))
+        );
+    }
+
+    #[test]
+    fn c_ohne_vorgeschichte_sr_vor_ar() {
+        // AK14
+        assert_eq!(
+            wahl(C, &[1, 2], &[], &[], &[], true, true),
+            (Some(1), Some(2))
+        );
+        assert_eq!(
+            wahl(C, &[1, 2], &[], &[], &[], false, true),
+            (None, Some(1))
+        );
+    }
+
+    #[test]
+    fn c_faellt_zurueck_wenn_niemand_wechseln_kann() {
+        // AK15: nur SR offen, alle zuletzt SR ⇒ erste freie SR-fähige Person.
+        assert_eq!(
+            wahl(C, &[1, 2], &[], &[], &[(1, SR), (2, SR)], true, false),
+            (Some(1), None)
+        );
+        // Rückfall beachtet die Rolle.
+        assert_eq!(
+            wahl(
+                C,
+                &[1, 2],
+                &[],
+                &[(1, Einsatzrolle::NurAr)],
+                &[(1, AR), (2, SR)],
+                true,
+                false
+            ),
+            (Some(2), None)
+        );
+    }
+
+    #[test]
+    fn c_feste_rolle_schlaegt_die_vorrolle() {
+        // AK16
+        assert_eq!(
+            wahl(
+                C,
+                &[1, 2],
+                &[],
+                &[(1, Einsatzrolle::NurSr)],
+                &[(1, SR), (2, SR)],
+                true,
+                true
+            ),
+            (Some(1), Some(2))
+        );
+    }
+
+    #[test]
+    fn niemand_passendes_frei_laesst_den_dienst_leer() {
+        // AK20, in allen Modi.
+        for m in [A, B, C] {
+            assert_eq!(
+                wahl(m, &[1], &[1], &[(1, Einsatzrolle::NurAr)], &[], true, false),
+                (None, None),
+                "{m:?}"
+            );
+            assert_eq!(
+                wahl_mit(m, &[1, 2], &[1, 2], &[], &[], &[1, 2], true, true),
+                (None, None),
+                "{m:?}: niemand frei"
+            );
+        }
+        // Belegte werden übersprungen.
+        assert_eq!(
+            wahl_mit(C, &[1, 2, 3], &[], &[], &[], &[1], true, true),
+            (Some(2), Some(3))
+        );
+    }
+
+    fn fertig(match_id: i64, sr: i64, ar: i64, ende: Option<u64>, walkover: bool) -> FinishedMatch {
+        FinishedMatch {
+            match_id,
+            btp_sr: Some(sr),
+            btp_ar: Some(ar),
+            court_id: None,
+            finished_at: ende,
+            walkover,
+        }
+    }
+
+    #[test]
+    fn vorrolle_kommt_aus_dem_zuletzt_beendeten_spiel() {
+        let store = OfficialsStore::default();
+        let v = store.vorrollen(&[
+            fertig(1, 10, 20, Some(100), false),
+            fertig(2, 20, 10, Some(200), false),
+        ]);
+        assert_eq!(v.get(&10), Some(&AR));
+        assert_eq!(v.get(&20), Some(&SR));
+    }
+
+    #[test]
+    fn vorrolle_ignoriert_walkover() {
+        // AK17
+        let store = OfficialsStore::default();
+        let v = store.vorrollen(&[
+            fertig(1, 10, 20, Some(100), false),
+            fertig(2, 20, 10, Some(200), true),
+        ]);
+        assert_eq!(v.get(&10), Some(&SR));
+        assert_eq!(v.get(&20), Some(&AR));
+    }
+
+    #[test]
+    fn vorrolle_gleichstand_hoehere_match_id_ohne_endezeit_aelter() {
+        // AK18
+        let store = OfficialsStore::default();
+        let v = store.vorrollen(&[
+            fertig(7, 10, 20, Some(100), false),
+            fertig(5, 20, 10, Some(100), false),
+        ]);
+        assert_eq!(
+            v.get(&10),
+            Some(&SR),
+            "Match 7 ist bei gleicher Zeit das spätere"
+        );
+        let v = store.vorrollen(&[
+            fertig(9, 10, 20, None, false),
+            fertig(3, 20, 10, Some(1), false),
+        ]);
+        assert_eq!(
+            v.get(&10),
+            Some(&AR),
+            "ohne Endezeit älter als jedes gestempelte"
+        );
+    }
+
+    #[test]
+    fn vorrolle_liest_auch_lokale_zuweisungen() {
+        let store = OfficialsStore::default();
+        store.assign(1, OfficialRole::Sr, 10);
+        let f = FinishedMatch {
+            btp_sr: None,
+            btp_ar: None,
+            ..fertig(1, 0, 0, Some(5), false)
+        };
+        assert_eq!(store.vorrollen(&[f]).get(&10), Some(&SR));
+    }
+
+    #[test]
+    fn nach_spielende_b_und_c_ruecken_ar_vor_sr_ans_ende() {
+        // AK10
+        for m in [B, C] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = store_mit_datei(dir.path());
+            store.sync_roster(&[1, 2, 3]);
+            store.nach_spielende(Some(1), Some(2), m);
+            assert_eq!(store.order(), vec![3, 2, 1], "{m:?}");
+            assert!(!datei_text(dir.path()).contains("order_ar"));
+        }
+    }
+
+    #[test]
+    fn nach_spielende_a_rueckt_je_liste() {
+        // AK8
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.nach_spielende(Some(1), Some(2), A);
+        assert_eq!(store.order(), vec![2, 3, 1], "SR rückt nur in der SR-Liste");
+        assert_eq!(
+            store.order_ar(),
+            vec![1, 3, 2],
+            "AR rückt nur in der AR-Liste"
+        );
+        // Nur einer besetzt.
+        store.nach_spielende(None, Some(3), A);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        assert_eq!(store.order_ar(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn nach_spielende_a_nur_sr_laesst_die_ar_reihenfolge_stehen() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.nach_spielende(Some(1), None, A);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        assert_eq!(
+            store.order_ar(),
+            vec![1, 2, 3],
+            "AR-Liste macht das SR-Rücken nicht mit"
+        );
+    }
+
+    #[test]
+    fn rotation_folgt_dem_modus_und_der_rolle() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.set_role(1, Einsatzrolle::NurAr);
+        let players = vec![spieler(10, "")];
+        let bekannt = [1, 2, 3];
+        let dienst = HashSet::new();
+        store.rotate_court(eingabe(500, &players, &bekannt, &dienst));
+        assert_eq!(store.assignment(500).sr, Some(2), "„nur AR\" wird nicht SR");
+        assert_eq!(store.assignment(500).ar, Some(1));
+
+        // Modus C mit Vorrolle.
+        let vor: HashMap<i64, OfficialRole> = [(2, SR), (3, AR)].into_iter().collect();
+        let mut e = eingabe(501, &players, &bekannt, &dienst);
+        e.modus = C;
+        e.vorrolle = &vor;
+        store.set_role(1, Einsatzrolle::Beides);
+        let belegt: HashSet<i64> = [1].into_iter().collect();
+        e.belegt = &belegt;
+        store.rotate_court(e);
+        assert_eq!(store.assignment(501).sr, Some(3));
+        assert_eq!(store.assignment(501).ar, Some(2));
     }
 
     fn store_mit_datei(dir: &Path) -> OfficialsStore {

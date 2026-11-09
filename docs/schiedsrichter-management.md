@@ -154,11 +154,28 @@ dem Turnier-PC.
 Felds; orchestriert wird sie vom Master-Hook `sync.rs::track_officials`
 (nach `set_snapshot`, damit der Roster gebunden und aktuell ist).
 
-Ein Official wird genommen, wenn er **alle** Bedingungen erfüllt: BTP kennt
+Ein Official kommt in Frage, wenn er **alle** Bedingungen erfüllt: BTP kennt
 ihn noch, er ist nicht pausiert, er tut nirgends sonst Dienst (SR *oder* AR),
 er hat keinen Konflikt mit diesem Spiel und er ist nicht schon der andere
 Dienst desselben Spiels. Konflikte werden dabei **still** übersprungen —
 gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
+
+**Wer welchen Dienst bekommt** (seit v0.9.357, ADR 0079), entscheidet die
+reine Funktion `officials.rs::waehle_besetzung` — der einzige Wahlweg; Feld-
+Rotation und Meetingpoint-Vorab-SR rufen sie über `OfficialsStore::waehle`
+auf. Sie beachtet die Rolle je Person (`nur SR`/`nur AR` nie im anderen Dienst)
+und das Einteilungsprinzip `rotation_mode`:
+
+| Modus | Regel |
+|---|---|
+| A `getrennt` | SR = erste passende Person der SR-Liste (`order`), AR = erste passende der AR-Liste (`order_ar`), die nicht schon SR ist. |
+| B `abwechselnd` (Standard) | Beide aus `order`: erster Freier SR, nächster AR. |
+| C `rollenwechsel` | Personenweise von oben: Jeder bekommt den offenen Dienst, den er im zuletzt beendeten Spiel **nicht** hatte (feste Rolle schlägt die Vorrolle, ohne Vorgeschichte SR vor AR). Ist der Wunsch vergeben, wird die Person übersprungen. Was offen bleibt, bekommt die erste passende freie Person (Rückfall). |
+
+Die **Vorrolle** (`OfficialsStore::vorrollen`) wird je Takt aus den beendeten
+Spielen abgeleitet, nicht gespeichert: Sicht `effective`, Walkover zählt
+nicht, maßgeblich ist `(finished_at oder 0, match_id)`. Besetzungen desselben
+Takts ändern sie nicht.
 
 - **Nur beim Neu-Belegen:** Bestückt wird ein Feld in dem Zyklus, in dem ein
   anderes Spiel darauf kommt (Merker `officials_oncourt_prev`). Wer eine
@@ -177,7 +194,12 @@ gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
 - **BTP gewinnt:** Trägt das Match `Official1ID`/`Official2ID`, gilt dieser
   Wert (`store.effective(...)`); die Rotation füllt dort nichts nach.
 - **Nach Spielende** rücken die Officials des beendeten Spiels ans Ende der
-  Reihenfolge; ihre Zuweisung bleibt am Match stehen (Einsatz-Ableitung).
+  Reihenfolge (`nach_spielende`); ihre Zuweisung bleibt am Match stehen
+  (Einsatz-Ableitung). Seit v0.9.357 in der Folge **erst AR, dann SR**: Bleibt
+  das Paar in der Liste zusammen, tauscht es beim nächsten Mal die Dienste
+  (bis v0.9.356 `[SR, AR]` — dann bekamen dieselben Leute immer wieder
+  dieselben Dienste). In Modus A rückt jeder nur in seiner eigenen Liste.
+  <!-- pruef: "let folge: Vec<i64> = ar.into_iter().chain(sr).collect();" in src-tauri/src/tablet/officials.rs -->
   Werden mehrere Felder im selben Zyklus fertig, rücken ihre Officials **nach
   CourtID sortiert** ans Ende — dieselbe Deterministik wie bei der Zuteilung
   unten (bis v0.9.201 hing die Reihenfolge von der zufälligen
