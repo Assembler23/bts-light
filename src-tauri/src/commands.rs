@@ -1125,11 +1125,17 @@ where
     // Höchstens drei Anfragen gleichzeitig: kleine Tarife (ElevenLabs
     // Free/Starter) lehnen mehr parallele Anfragen mit 429 ab.
     use futures_util::StreamExt;
-    let ergebnisse: Vec<Result<Vertont, String>> =
-        futures_util::stream::iter(fehlend.iter().map(|&i| vertone(teile[i].as_str(), dir)))
-            .buffered(TEILE_GLEICHZEITIG)
-            .collect()
-            .await;
+    // Futures vorab als Vec: eine Closure im Stream-Typ bricht die
+    // `Send`-Prüfung der Tauri-Commands (höherrangige Lebensdauer).
+    let anfragen: Vec<Fut> = fehlend
+        .iter()
+        .copied()
+        .map(|i| vertone(teile[i].as_str(), dir))
+        .collect();
+    let ergebnisse: Vec<Result<Vertont, String>> = futures_util::stream::iter(anfragen)
+        .buffered(TEILE_GLEICHZEITIG)
+        .collect()
+        .await;
     // Erst alles Erfolgreiche ablegen und zählen, dann einen Fehler melden —
     // sonst wären schon bezahlte Teile weder gecacht noch gebucht.
     let mut zeichen_neu = 0;
@@ -1155,7 +1161,10 @@ where
                     now_ms(),
                 );
         }
-        for j in (0..teile.len()).filter(|&j| audio[j].is_none() && teile[j] == teile[i]) {
+        let gleiche: Vec<usize> = (0..teile.len())
+            .filter(|&j| audio[j].is_none() && teile[j] == teile[i])
+            .collect();
+        for j in gleiche {
             audio[j] = Some(v.bytes.clone());
             aus_cache[j] = v.aus_cache;
         }
@@ -9549,4 +9558,3 @@ mod teile_tests {
         assert!(c.holen(&schluessel[2], now_ms()).is_some());
     }
 }
-

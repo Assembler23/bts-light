@@ -327,4 +327,3 @@ mod tests {
         assert_eq!(pcm_aus_wav(&wav), None, "Gleitkomma bleibt abgelehnt");
     }
 }
-
