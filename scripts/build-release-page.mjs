@@ -306,15 +306,15 @@ if (notesOut && notesVersion) {
 
 // ── Pi-Image (Court-Monitore) ──────────────────────────────────
 // Die SD-Karten fuer die Court-Monitore werden vor Ort beschrieben — der
-// Link stand bisher nur in docs/pi-dual-image.md im Repo, das ein Aufbau-Team
+// Link stand bisher nur in docs/pi-master-image.md im Repo, das ein Aufbau-Team
 // in der Halle nicht hat. Er gehoert deshalb auf die oeffentliche Seite.
 // Das Image liegt NICHT im Release-Workflow, sondern wird per rsync gepflegt
-// (siehe docs/pi-dual-image.md) — die Datei ist hier bewusst fest verdrahtet
+// (siehe docs/pi-master-image.md) — die Datei ist hier bewusst fest verdrahtet
 // und nicht aus --files abgeleitet.
 const PI_IMAGE_URL = "pi-image/bts-light-pi.img.xz";
 const PI_IMAGE_SHA_URL = "pi-image/bts-light-pi.img.xz.sha256";
 // Zweite Fassung mit neuerer Start-Firmware fuer den Pi 3 B+ Rev. 1.4
-// (docs/pi-dual-image.md). Steht NEBEN dem bisherigen Image, solange sie auf
+// (docs/pi-master-image.md). Steht NEBEN dem bisherigen Image, solange sie auf
 // dem Zero 2 W nicht gegengeprueft ist (3 B+ bestaetigt am 10.10.2026) —
 // danach wird sie zum Standard und dieser zweite Link entfaellt wieder.
 const PI_IMAGE_V2_URL = "pi-image/bts-light-pi-v2.img.xz";
