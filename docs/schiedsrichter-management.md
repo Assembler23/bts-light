@@ -262,8 +262,12 @@ am Spiel eingetragen sind. Spec:
   Person, warnt die Zeile mit „SR in Pause" bzw. „AR in Pause". Dienst auf
   einem laufenden Feld ist keine Doppel-Einteilung. Mehrere Warnungen stehen
   in fester Reihenfolge: Konflikt (Verein/Person) · doppelt · Pause.
-  Gewarnt wird nur über die Person, die die Marke zeigt: Ist eine Umteilung
-  gegen BTP noch nicht bestätigt, warnt die Zeile erst nach der Bestätigung.
+  Gewarnt wird nur über die Person, die die Marke zeigt. Seit v0.9.358 zeigt
+  die Marke einer wartenden Zeile die frische Einteilung („Hand vor BTP"):
+  Wer eben umgeteilt wurde, steht sofort an der Zeile, samt Warnung —
+  nicht erst nach der Bestätigung durch BTP. Laufende Felder zeigen weiter
+  den bestätigten Stand.
+  <!-- pruef: "pub fn wartende_officials" in src-tauri/src/tablet/state.rs -->
 
 ### Einteilung wird geprüft (seit v0.9.354)
 
@@ -522,9 +526,19 @@ nicht wörtlich gilt:
   **erledigt**, nicht als offen — sonst bekäme ein bewusst ohne
   Schiedsrichter spielendes Feld nach einem App-Neustart wieder einen
   zugeteilt (dort sieht jedes belegte Feld wie neu belegt aus).
+- **„Ohne Schiedsrichter" bleibt stehen** (seit v0.9.358, ADR 0080): Ein
+  ausdrückliches „keiner" (`Some(0)`) wird **nicht** losgelassen, wenn BTP
+  ebenfalls niemanden führt — auch nicht, wenn die 0 unser eigener Write war,
+  nachdem BTP vorher jemanden trug. Bis v0.9.357 fiel es dann weg, und ein
+  Lauf über wartende Spiele (der vorläufige Meetingpoint-SR, künftig die
+  Zuteilung beim Aufruf) besetzte das Spiel im nächsten Takt wieder. Der
+  Ausgangswert steht danach auf 0: Trägt jemand in BTP eine Person ein,
+  gewinnt BTP weiterhin. Solche Einträge bleiben in `officials-state.json` bis zum
+  Turnierwechsel stehen, auch an beendeten Spielen — höchstens einer je
+  Spiel, ohne zusätzlichen Schreibzugriff je Takt.
 - **Loslassen nach Bestätigung** (`OfficialsStore::confirm`, im Sync-Loop vor
   dem Diff): Ein lokaler Dienst wird entfernt, sobald der Snapshot **genau
-  den lokalen Wert** zeigt (beim ausdrücklichen „keiner": niemanden) — oder
+  den lokalen Wert** zeigt (außer beim ausdrücklichen „keiner", siehe oben) — oder
   sobald BTP etwas **anderes führt als beim Einteilen** (dann hat jemand in
   BTP umgeteilt, und BTP gewinnt, R2). Führt BTP noch den alten Wert, bleibt
   die Absicht stehen und geht nach BTP: So ersetzt eine Umteilung von Y auf

@@ -359,6 +359,14 @@ gepflegten Schiedsrichtern; ADR
   Feldzuweisungs-Form mit `CourtID` + `Courts`-Block (V2). Löschen per
   Wert `0`. Keine Nebenwirkungen an `CourtID`/`Sets`/`Winner`/`Status`;
   Restores verifiziert.
+- **Offen (Messwerkzeug seit v0.9.358):** `tests/btp_officials_ohne_feld_probe.rs`
+  prüft, ob ein Officials-Write mit `CourtID 0` (Form von `officials_entries`)
+  an einem wartenden Spiel eine **frische Feldzuweisung** desselben Spiels
+  löscht, wenn er unmittelbar danach eintrifft — einmal mit `CourtID 0`,
+  einmal ohne `CourtID`-Element — und ob Löschen mit `0` ohne Feld geht.
+  Grundlage der Zuteilung beim Aufruf (Spec `sr-ar-beim-aufruf`, ADR 0080):
+  Sie geht nur in ein Release, wenn das Feld in beiden Wettläufen bleibt.
+  Ergebnis hier nachtragen.
 - **Asynchrone Übernahme:** Die Antwort ist sofort `Result=1`, aber ein
   unmittelbar folgender `SENDTOURNAMENTINFO` zeigt noch den alten Stand;
   nach ≤1 s steht der neue Wert. Schreibpfade müssen also tolerant

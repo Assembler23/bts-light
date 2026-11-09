@@ -823,7 +823,10 @@ zeigt die Seite zusätzlich:
   zwei wartenden Spielen eingeteilt ist (**„SR doppelt"** bzw. „AR doppelt")
   oder gerade pausiert (**„SR in Pause"** bzw. „AR in Pause"). Dienst auf
   einem laufenden Feld zählt nicht als doppelt. Die Einteilung bleibt in
-  beiden Fällen bestehen; die Turnierleitung entscheidet.
+  beiden Fällen bestehen; die Turnierleitung entscheidet. Seit v0.9.358
+  zeigt die Marke eine Umteilung sofort, auch bevor BTP sie übernommen hat.
+  Steht ein Spiel auf **Ohne Schiedsrichter**, bleibt das so, bis jemand von
+  Hand oder in BTP wieder einteilt.
   <!-- pruef: "doppelt" in src-tauri/src/tablet/tl.rs -->
   <!-- pruef: "in Pause" in src-tauri/src/tablet/tl.rs -->
 - **Einteilen in der Warteliste** (seit v0.9.355): Im **⋮-Menü** jeder

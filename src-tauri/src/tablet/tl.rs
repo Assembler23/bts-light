@@ -3439,7 +3439,7 @@ fn id_leer(id: &i64) -> bool {
 }
 
 /// Die Warnung an einer Wartelisten-Zeile (Warteliste **und** offene
-/// Paarungen, AK 10/11): Konflikt-Kategorie aus [`TabletState::court_officials`]
+/// Paarungen, AK 10/11): Konflikt-Kategorie aus [`TabletState::wartende_officials`]
 /// plus „SR doppelt"/„AR doppelt" (an zwei oder mehr reservierenden
 /// wartenden Spielen eingeteilt — Dienst auf einem Feld zählt nicht) und
 /// „SR in Pause"/„AR in Pause". Feste Reihenfolge, mit „ · " verbunden,
@@ -3459,23 +3459,13 @@ fn wartelisten_warnung(
 ) -> Option<String> {
     let mut teile: Vec<String> = konflikt.into_iter().collect();
     if store.enabled() {
+        // Dieselbe Sicht wie die Marke der wartenden Zeile
+        // (`TabletState::wartende_officials`, ADR 0080) — die Warnung meint
+        // also immer die gezeigte Person.
         let besetzung = store.fuer_schreiben(m.id, m.official1_id, m.official2_id);
-        let gezeigt = store.effective(m.id, m.official1_id, m.official2_id);
-        // Nur warnen, wenn die gezeigte Person (Sicht `effective`) auch die
-        // reservierte ist. Im kurzen Fenster einer Umteilung gegen BTP (X in
-        // BTP, Y von Hand, noch unbestätigt) zeigte die Zeile sonst X mit
-        // einer Warnung, die Y betrifft. Nach der Bestätigung stimmen beide
-        // Sichten wieder überein.
-        let rollen = [
-            ("SR", besetzung.sr, gezeigt.sr),
-            ("AR", besetzung.ar, gezeigt.ar),
-        ];
-        let personen: Vec<(&str, i64)> = rollen
+        let personen: Vec<(&str, i64)> = [("SR", besetzung.sr), ("AR", besetzung.ar)]
             .into_iter()
-            .filter_map(|(rolle, id, sicht)| {
-                id.filter(|v| *v > 0 && Some(*v) == sicht)
-                    .map(|id| (rolle, id))
-            })
+            .filter_map(|(rolle, id)| id.filter(|v| *v > 0).map(|id| (rolle, id)))
             .collect();
         for (rolle, id) in &personen {
             if belegung.doppelt(*id) && belegung.reserviert_fuer(*id).contains(&m.id) {
@@ -4257,9 +4247,9 @@ pub(crate) fn build_state_limited(
     let mut queue: Vec<TlMatch> = Vec::new();
     for (_, m, hall, hall_source) in ordered.into_iter().take(queue_limit) {
         let call = called_hall(m.id);
-        let (sr, ar, konflikt) = tablet.court_officials(Some(m), &snap);
+        let (sr, ar, konflikt) = tablet.wartende_officials(m, &snap);
         let official_warn = wartelisten_warnung(konflikt, m, tablet.officials_store(), &belegung);
-        let (sr_id, ar_id) = tablet.court_official_ids(Some(m));
+        let (sr_id, ar_id) = tablet.wartende_official_ids(m);
         let manually_ordered = tablet.queue_order_store().rank(m.id).is_some();
         queue.push(TlMatch {
             match_id: m.id,
@@ -4325,9 +4315,9 @@ pub(crate) fn build_state_limited(
     let open_queue_truncated = offene.len().saturating_sub(OPEN_QUEUE_LIMIT);
     let mut open_queue: Vec<TlOpenMatch> = Vec::new();
     for (queue_index, (_, m, hall, hall_source)) in offene.into_iter().take(OPEN_QUEUE_LIMIT) {
-        let (sr, ar, konflikt) = tablet.court_officials(Some(m), &snap);
+        let (sr, ar, konflikt) = tablet.wartende_officials(m, &snap);
         let official_warn = wartelisten_warnung(konflikt, m, tablet.officials_store(), &belegung);
-        let (sr_id, ar_id) = tablet.court_official_ids(Some(m));
+        let (sr_id, ar_id) = tablet.wartende_official_ids(m);
         open_queue.push(TlOpenMatch {
             match_id: m.id,
             match_num: m.match_num,
@@ -5622,6 +5612,26 @@ mod tests {
     }
 
     #[test]
+    fn wartende_zeilen_zeigen_hand_vor_btp_laufende_felder_btp() {
+        // ADR 0080: An einer wartenden Zeile ist eine Umteilung sofort
+        // sichtbar; ein laufendes Feld bleibt bei der wirksamen Sicht (R2).
+        let tablet = sr_turnier();
+        let mut snap = tablet.snapshot_clone().unwrap();
+        let m = snap.matches.iter_mut().find(|m| m.id == 7).unwrap();
+        m.official1_id = Some(1);
+        let m = m.clone();
+        tablet.set_snapshot(snap.clone());
+        use crate::tablet::officials::OfficialRole as R;
+        tablet.officials_store().assign(7, R::Sr, 2);
+        assert_eq!(tablet.wartende_official_ids(&m), (2, 0));
+        assert_eq!(tablet.court_official_ids(Some(&m)), (1, 0));
+        // „ohne" zeigt an der wartenden Zeile niemanden.
+        tablet.officials_store().clear_assignment(7, R::Sr);
+        assert_eq!(tablet.wartende_official_ids(&m), (0, 0));
+        assert!(tablet.wartende_officials(&m, &snap).0.is_empty());
+    }
+
+    #[test]
     fn die_warnung_nennt_nie_eine_andere_person_als_die_marke() {
         // BTP führt 1 an Spiel 7, die TL hat 2 eingeteilt (noch nicht
         // bestätigt); 2 ist außerdem an Spiel 8 eingeteilt und pausiert.
@@ -5639,8 +5649,14 @@ mod tests {
         tablet.officials_store().set_paused(2, true);
         let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
         let zeile = s.queue.iter().find(|q| q.match_id == 7).unwrap();
-        assert_eq!(zeile.sr_id, 1, "die Marke zeigt BTP (R2)");
-        assert_eq!(zeile.official_warn, None, "keine Warnung über Person 2");
+        // Wartende Zeilen zeigen „Hand vor BTP" (ADR 0080): Marke und
+        // Warnung meinen beide Person 2, nie Person 1.
+        assert_eq!(zeile.sr_id, 2, "die Marke zeigt die frische Einteilung");
+        assert_eq!(
+            zeile.official_warn.as_deref(),
+            Some("SR doppelt · SR in Pause"),
+            "die Warnung meint dieselbe Person wie die Marke"
+        );
         let acht = s.queue.iter().find(|q| q.match_id == 8).unwrap();
         assert_eq!(
             acht.official_warn.as_deref(),
