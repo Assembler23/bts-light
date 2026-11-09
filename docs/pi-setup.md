@@ -27,7 +27,9 @@ Das Feature selbst ist in [court-monitor.md](court-monitor.md) beschrieben.
 - **microSD-Karte**, mind. 16 GB (für das Master-Image-Konzept empfohlen
   32 GB+ einer Marken-Karte wie SanDisk Ultra A1/A2 — Class-10 / A1 / A2
   ist auf Random-IO optimiert und für Pi-Betrieb deutlich angenehmer).
-- **Netzteil** für den Pi.
+- **Eigenes Netzteil** für den Pi — **nicht** die USB-Buchse des TVs
+  (siehe [„Strom und Einschalten"](#strom-und-einschalten)). Pi Zero 2 W
+  und Pi 3B+: offizielles Micro-USB-Netzteil 5,1 V / 2,5 A.
 - **HDMI-Kabel** zum TV. ⚠️ Pi 4 und Pi 5 haben **micro-HDMI**-Buchsen,
   Pi Zero / Pi Zero 2 W haben **mini-HDMI** (anderer Stecker!) — dann
   brauchst du ein passendes Adapter-Kabel.
@@ -177,11 +179,119 @@ Sie zeigen im Ansage-Modus unten links „Ton gesperrt …" und sprechen nicht.
 Abhilfe: das aktuelle `setup-monitor.sh` einmal neu herunterladen und
 ausführen (Schritt 3) — Achtung, es fragt die Adresse neu ab und überschreibt
 `bts-monitor-url.txt`; gib dort gleich die Adresse mit `?ansage=…` ein. Oder
-die Karte mit einem neuen Master-Image bespielen. Pis mit dem gemeinsamen Startskript
-(`shared-startbrowser.sh`) bekommen die neue Fassung des Skripts.
+die Karte mit einem neuen Master-Image bespielen.
 
 **Kein Ton am TV?** Im Pi-Desktop über das Lautsprecher-Symbol bzw. mit
 `sudo raspi-config` → *System Options* → *Audio* den HDMI-Ausgang wählen.
+
+## Strom und Einschalten
+
+Ziel: **Steckdosenleiste an → TV zeigt die Anzeige**, ohne Fernbedienung,
+ohne Umstecken.
+
+**Eigenes Netzteil, nicht der USB-Anschluss am TV.** Die USB-Buchse eines
+Fernsehers liefert meist nur 0,5–0,9 A und schaltet im Standby oft ab. Ein
+Pi 3B+ braucht mit Chromium über 1 A, ein Pi Zero 2 W beim Hochfahren
+ebenfalls mehr, als die Buchse hergibt. Folgen: Der Pi startet nicht, hängt
+oder läuft erst nach Aus- und Einstecken des Kabels. Netzteil und TV am besten
+an **dieselbe Steckdosenleiste** — dann starten beide gemeinsam.
+
+Ob ein Pi zu wenig Strom bekommen hat, zeigt im Terminal
+`vcgencmd get_throttled`: `throttled=0x0` heißt in Ordnung, jeder andere
+Wert (z. B. `0x50005`) heißt, die Spannung ist eingebrochen.
+
+**Der Pi schaltet den TV selbst ein (HDMI-CEC).** Das Einrichtungsskript
+installiert einen kleinen Dienst, der nach dem Start den TV weckt und ihn auf
+den Eingang des Pi schaltet. Er wiederholt das bis zu drei Minuten, bis der
+TV „an" meldet — Fernseher sind nach dem Einstecken unterschiedlich schnell
+bereit. Kommt der TV später aus dem Standby (Fernbedienung), meldet sich der
+Pi noch einmal als aktiver Eingang. Wer bewusst auf einen anderen Eingang
+schaltet, wird **nicht** zurückgeholt.
+<!-- pruef: "bts-cec.service" in pi/setup-monitor.sh -->
+
+Dafür muss CEC **am TV eingeschaltet** sein. Der Menüpunkt heißt je Marke
+anders: Samsung **Anynet+**, LG **SimpLink**, Sony **Bravia Sync**,
+Philips **EasyLink**, Panasonic **VIERA Link**, sonst meist „HDMI-CEC" oder
+„HDMI-Gerätesteuerung".
+
+- **Abschalten** für eine Karte (z. B. ein TV, der damit Unsinn macht): auf
+  dem Karten-Laufwerk eine leere Datei `bts-cec-aus.txt` anlegen. Wirkt
+  ab dem nächsten Start des Pi.
+  <!-- pruef: "bts-cec-aus.txt" in pi/setup-monitor.sh -->
+- **Was tut der Dienst gerade?** `journalctl -u bts-cec` im Terminal.
+
+Das Skript setzt außerdem `vc4.force_hotplug=1` in `cmdline.txt`: Der Pi gibt
+auch dann ein Bild aus, wenn der TV beim Booten noch dunkel war. (Das ältere
+`hdmi_force_hotplug=1` in `config.txt` wirkt auf aktuellem Pi OS nicht mehr,
+bleibt aber für alte Images stehen.)
+<!-- pruef: "vc4.force_hotplug=1" in pi/setup-monitor.sh -->
+
+**Ein Image für Pi Zero 2 W und Pi 3B+:** Beide laufen mit demselben
+aktuellen **Raspberry Pi OS (64-bit)**. Karte für einen der beiden
+einrichten, als Master-Image klonen ([pi-master-image.md](pi-master-image.md))
+und auf alle Pis spielen.
+
+## Nur-Lese-Modus: Strom einfach abziehen
+
+Nach dem Turnier wird das Set einfach vom Strom genommen. Damit die SD-Karte
+das auf Dauer übersteht, läuft der Pi im **Nur-Lese-Modus**: Alles, was er
+während des Betriebs schreibt, liegt nur im Arbeitsspeicher und ist nach dem
+Neustart weg — die Karte selbst wird nicht verändert. Die Feldzuweisung bleibt
+trotzdem erhalten, denn der Pi meldet sich immer mit seiner
+Hardware-Seriennummer.
+
+Geschaltet wird über eine Datei auf dem **Karten-Laufwerk** (die Partition,
+die auch ein Windows-PC sieht, dort liegt auch `bts-monitor-url.txt`):
+
+| Datei `bts-schreiben-erlaubt.txt` | Zustand nach dem nächsten Start |
+|---|---|
+| liegt dort | Karte **beschreibbar** (zum Einrichten, für Updates) |
+| fehlt | Karte **schreibgeschützt** (Turnierbetrieb) |
+<!-- pruef: "bts-schreiben-erlaubt.txt" in pi/setup-monitor.sh -->
+
+Das Umschalten erledigt ein kleiner Dienst (`bts-nur-lesen.service`) beim
+Start: Er stellt den Modus um und **startet den Pi dafür einmal von selbst
+neu** — das dauert etwa zwei Minuten länger als sonst. Danach ist Ruhe.
+<!-- pruef: "bts-nur-lesen.service" in pi/setup-monitor.sh -->
+
+- **Nach `setup-monitor.sh`** liegt die Datei dort — ein frisch
+  eingerichteter Pi bleibt also beschreibbar, bis du sie löschst (am
+  Computer oder mit `sudo rm /boot/firmware/bts-schreiben-erlaubt.txt`).
+- **Beim Master-Image** löscht `build-master-image.sh` die Datei selbst:
+  Jede damit bespielte Karte richtet beim ersten Start WLAN/Hostname aus dem
+  Raspberry Pi Imager ein und schaltet sich danach schreibgeschützt.
+- **Etwas ändern** (Update, anderes WLAN, Skript neu ausführen): Datei
+  anlegen, Pi starten, warten, bis er sich ein zweites Mal neu gestartet
+  hat — dann ist die Karte beschreibbar. Danach Datei wieder löschen.
+  `setup-monitor.sh` verweigert im Nur-Lese-Modus den Dienst, damit keine
+  Änderung still verloren geht.
+- **Klappt das Umschalten zweimal nicht,** gibt der Dienst auf (sonst würde
+  der Pi endlos neu starten). Ansehen mit `journalctl -u bts-nur-lesen`;
+  neuer Versuch: Datei `bts-nur-lesen-versuche.txt` auf dem Karten-Laufwerk
+  löschen.
+
+## Wie der Pi den Turnier-PC findet
+
+Das Kiosk-Skript sucht den Turnier-PC **selbst** und gibt nicht auf: zuerst
+die zuletzt gefundene Adresse, dann alle Geräte im eigenen Netz auf
+`:8088/health`, zuletzt den Namen `bts-light.local`. Ist der PC noch nicht da,
+sucht es laufend weiter (eine Suchrunde dauert etwa 20–30 Sekunden); stürzt
+Chromium ab, startet es ihn neu; ist der PC drei Runden lang (gut eine Minute)
+weg, schließt es den Kiosk und sucht weiter. Kurze WLAN-Aussetzer lassen die
+Anzeige also stehen. Die Reihenfolge beim Einschalten ist also egal.
+
+Steht in `bts-monitor-url.txt` die Standardadresse mit `bts-light.local`,
+übernimmt das Skript daraus nur Pfad und Zusätze (etwa `?ansage=Halle%20A`)
+und setzt die gefundene IP ein. Eine andere Adresse (feste IP, Cloud) wird
+genau so verwendet, wie sie dort steht.
+
+Das Verbindungsprotokoll geht alle fünf Minuten an den Turnier-PC, der es an
+die Cloud weiterreicht ([logging.md](logging.md)). Gerätekennung ist
+`pi-<Seriennummer>` — dieselbe wie beim früheren gemeinsamen Image, die
+Feldzuweisung bleibt beim Neubespielen also erhalten. Nur Pis, die vorher mit
+einem älteren `setup-monitor.sh` eingerichtet waren (Kennung = letzte acht
+Stellen der Seriennummer), erscheinen einmal mit neuem Code und müssen neu
+zugewiesen werden.
 
 ## Tipps & Problemlösung
 
@@ -195,6 +305,17 @@ die Karte mit einem neuen Master-Image bespielen. Pis mit dem gemeinsamen Starts
 - **TV bleibt schwarz / „kein Signal":** anderen HDMI-Eingang am TV
   wählen; bei Pi 4/5 prüfen, ob das Kabel im **linken** micro-HDMI-Port
   (näher am USB-C-Strom) steckt.
+- **TV schaltet nicht von selbst auf den Pi:** CEC im TV-Menü einschalten
+  (siehe [„Strom und Einschalten"](#strom-und-einschalten)); dann
+  `journalctl -u bts-cec` ansehen. Steht dort „Eingang: nicht gesendet
+  (Adresse unbekannt)", erkennt
+  der Pi den TV über HDMI nicht — anderes Kabel oder anderen Eingang probieren.
+- **Pi startet nur nach Aus- und Einstecken:** fast immer zu wenig Strom —
+  eigenes Netzteil statt TV-USB.
+- **Pi startet beim Einschalten zweimal:** normal, wenn der Nur-Lese-Modus
+  gerade umgeschaltet wird (siehe oben).
+- **Änderungen am Pi sind nach dem Neustart weg:** Der Nur-Lese-Modus ist an
+  — erst `bts-schreiben-erlaubt.txt` anlegen.
 - **Kiosk beenden** (zum Konfigurieren): Tastatur anschließen, **Alt+F4**.
   Danach bist du wieder auf dem Desktop.
 - **Monitor hängt:** in bts-light unter „Court-Monitore" auf **„Neu
@@ -202,7 +323,8 @@ die Karte mit einem neuen Master-Image bespielen. Pis mit dem gemeinsamen Starts
 - **Falsches WLAN / kein Netz:** SD-Karte erneut mit dem Imager
   bespielen und im Einstellungs-Dialog die WLAN-Daten korrigieren.
 - **Pi aktualisieren:** gelegentlich `sudo apt update && sudo apt
-  full-upgrade` im Terminal — hält das System sicher.
+  full-upgrade` im Terminal — hält das System sicher. Vorher den
+  Nur-Lese-Modus ausschalten, sonst ist das Update nach dem Neustart weg.
 
 Die Anzeige selbst (Layout, Werbung, Timer) wird **nicht** am Pi
 eingestellt, sondern zentral in bts-light — siehe

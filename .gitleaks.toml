@@ -67,6 +67,9 @@ regexes = ['''password:\s*"[^"]+"''']
 description = """
 pi/shared-startbrowser.sh — PILOG_TOKEN fuer den Log-Upload der Pi-Monitore.
 
+Die Datei ist seit November 2026 entfernt (BTS-Unterstuetzung ausgebaut); die
+Ausnahme bleibt fuer den Voll-Scan ueber die Git-Historie stehen.
+
 BEWUSST AKZEPTIERT: Das Token muss auf den Pis lesbar sein, sonst koennen sie
 ihre Logs nicht abliefern. Ein Geheimnis, das auf hunderten Endgeraeten liegt,
 ist keines — der Endpunkt in badhub rechnet ausdruecklich damit und ist

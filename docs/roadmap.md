@@ -1176,7 +1176,7 @@ verliehen):
   DHCP-Reservierung am Verleih-Router ist nicht notwendig (kann als
   Worst-Case-Rückfall jederzeit nachgezogen werden).
 - **Server-Suche über badhub als weiterer Rückfall** (Idee 04.09.2026).
-  Heute findet das Master-Image (`pi/shared-startbrowser.sh`) den
+  Heute findet das Master-Image (Kiosk-Skript aus `pi/setup-monitor.sh`) den
   Turnier-PC in dieser Reihenfolge: gemerkte IP → Subnetz-Scan des
   eigenen /24 auf `:8088/health` (1–9 s) → mDNS mit Timeout. Idee: bts-light
   hinterlegt beim Liveticker-Push seine **lokale IP** bei badhub; der Pi
@@ -1192,7 +1192,7 @@ verliehen):
   Carrier-Grade-NAT bei Mobilfunk-Hotspots macht die Zuordnung unscharf;
   HTTPS am Pi ohne Echtzeituhr scheitert bis zum NTP-Abgleich still →
   Wiederholung nach Zeitabgleich nötig. Betroffen: badhub-Endpoint,
-  Push-Payload, beide Pi-Launcher. Vor der Umsetzung `/idee`.
+  Push-Payload, Pi-Kiosk-Skript. Vor der Umsetzung `/idee`.
 - **Master-Image erstellen + hosten.** Den „Golden Master"-Pi einmal auf
   echter Hardware bauen, die Karte als `bts-monitor.img.xz` sichern und in
   den Download-Bereich auf badhub.de legen. Ablauf: [pi-master-image.md](pi-master-image.md).
@@ -1210,15 +1210,14 @@ verliehen):
   „kernel image not found"). Empfehlung für Verleih-Set-Hardware:
   Pi Zero 2 W (klein, günstig, ausreichend für den Kiosk) oder Pi 4
   (deutlich kraftvoller).
-- **Gemeinsames Pi-Image startet nicht auf dem Pi 3 B+ Rev. 1.4** (09.10.2026,
-  Status: **auf dem 3 B+ bestätigt (10.10.2026), Zero-2-W-Gegenprobe offen**,
-  Priorität hoch — der
-  Zero 2 W ist nicht mehr lieferbar). Die Start-Firmware im Image ist vom
-  25.11.2020, Rev. 1.4 braucht eine ab September 2021.
-  `pi/update-boot-firmware.sh` tauscht nur die Firmware auf der Boot-Partition.
-  **Auslöser für den nächsten Schritt:** dieselbe Karte startet auch im
-  Zero 2 W → `bts-light-pi-v2.img.xz` auf badhub.de zum Standard machen.
-  Details: [pi-dual-image.md](pi-dual-image.md).
+- **Neues Pi-Image für Zero 2 W und 3 B+** (09.11.2026, löst das gemeinsame
+  BTS-Image ab — die BTS-Unterstützung ist ausgebaut, damit entfällt auch der
+  Firmware-Tausch für den Pi 3 B+ Rev. 1.4). Offen: Master-Pi mit aktuellem
+  Raspberry Pi OS (64-bit) und `pi/setup-monitor.sh` einrichten, Image bauen,
+  als `pi-image/bts-light-pi.img.xz` hochladen; danach auf der Release-Seite
+  (`scripts/build-release-page.mjs` + `scripts/test-release-notes.mjs`) den
+  BTS-Text und das Test-Image `bts-light-pi-v2.img.xz` entfernen. Feldtest:
+  CEC-Einschalten je TV-Marke, Nur-Lese-Modus nach hartem Abschalten.
 - **Info-Monitor: Routen + HTML ausgeliefert** (v0.9.17, 2026-05-25), **UI-
   Zuweisung offen.** Der Tablet-Server liefert jetzt zwei Hallen-Displays
   unter dedizierten URLs: `/info/overview` (Court-Übersicht, Hallen ×
