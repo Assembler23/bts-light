@@ -224,7 +224,12 @@ export interface OfficialsConfig {
   rotation_sr: boolean;
   /** Automatische Rotation für Aufschlagrichter? */
   rotation_ar: boolean;
+  /** Einteilungsprinzip (ADR 0079); fehlt bei älteren Turnier-PCs. */
+  rotation_mode?: RotationMode;
 }
+
+/** Einteilungsprinzip der Rotation (Rust: config::RotationMode). */
+export type RotationMode = "getrennt" | "abwechselnd" | "rollenwechsel";
 
 /** Einstellungen der automatischen Feldvergabe (Rust: config::AutoAssignConfig). */
 export interface AutoAssignConfig {

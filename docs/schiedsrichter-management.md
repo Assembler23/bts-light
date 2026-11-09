@@ -22,6 +22,7 @@ BTP-Draht: [btp_protocol.md](btp_protocol.md) („Officials: Struktur & Schreibw
 | `enabled` | `false` | Mit Schiedsrichtern spielen. Aus ⇒ keine SR/AR-Elemente in Client, TL-Web, Tablet und Ansagen (Bestandsverhalten). |
 | `rotation_sr` | `false` | Automatische Rotation für Schiedsrichter (Official1). |
 | `rotation_ar` | `false` | Automatische Rotation für Aufschlagrichter (Official2). |
+| `rotation_mode` | `abwechselnd` | Einteilungsprinzip (seit v0.9.356, ADR 0079): `getrennt` (A), `abwechselnd` (B), `rollenwechsel` (C). Ein unbekannter Wert lädt als `abwechselnd`. Bis zum Wahl-Kern (Spec `sr-rotationsmodus`, PR 2) wirkt der Wert noch nicht; eine Auswahl im Setup kommt mit PR 3. |
 
 Alle Felder tragen `#[serde(default)]` — ältere `config.json` bleiben lesbar,
 Bestandsinstallationen verhalten sich nach dem Auto-Update unverändert
@@ -58,10 +59,15 @@ Official-IDs.
 
 | Inhalt | Form | Zweck |
 |---|---|---|
-| Rotationsreihenfolge | `order: Vec<i64>` | Reihenfolge der Auto-Rotation, manuell umsortierbar (`set_order`) |
-| Zusatzdaten je Official | `OfficialExtra { paused, club, blocked_clubs, blocked_players }` | Pause, Stammverein (BTP liefert keinen), Sperrlisten |
+| Rotationsreihenfolge | `order: Vec<i64>` | Reihenfolge der Auto-Rotation, manuell umsortierbar (`set_order`, `reorder`); in Modus A die SR-Liste |
+| AR-Liste (seit v0.9.356) | `order_ar: Option<Vec<i64>>` | Eigene AR-Reihenfolge für Modus A (ADR 0079). `None` ⇒ gelesen wird eine Kopie von `order` (`order_ar()`, legt nichts an). Angelegt erst beim ersten Schreibbedarf (`reorder_in(Reihenfolge::Ar, …)`); IDs, die nur in `order` stehen, werden beim Lesen hinten ergänzt. Neue BTP-Officials kommen an beide Listen. |
+| Zusatzdaten je Official | `OfficialExtra { paused, club, blocked_clubs, blocked_players, role }` | Pause, Stammverein (BTP liefert keinen), Sperrlisten, **Einsatzrolle** (seit v0.9.356: `beides`/`sr`/`ar`, `Einsatzrolle`, gilt in allen Modi; „beides" wird nicht geschrieben) |
 | Lokale Zuweisungen | `assignments: Match-ID → MatchOfficials { sr, ar }` | Overlay für Spiele, an denen BTP nichts stehen hat |
 | Feldweise Schalter | `courts: CourtID → CourtSwitches { sr, ar, operator }` | SR-Rotation, AR-Rotation, Tabletbediener-Vergabe je Feld |
+
+**Rückweg auf eine ältere Version:** Eine App vor v0.9.356 liest die Datei
+weiter, verliert aber `role` und `order_ar` beim nächsten Speichern, ohne
+Rückmeldung (bewusst hingenommen, ADR 0079).
 
 **Zuweisungen hängen am Match, nicht am Feld.** Nach Spielende bleiben sie
 liegen — sie sind die Grundlage der Einsatz-Ableitung (Spec Nr. 11: keine
@@ -351,9 +357,9 @@ TL-Web über die authentifizierte Leseroute nutzt.
 
 ### Globale Schalter zur Laufzeit
 
-`officials.enabled`, `rotation_sr` und `rotation_ar` stehen zwar in der
-`config.json`, werden aber zusätzlich im Roster-Speicher gespiegelt
-(`set_enabled`/`set_rotation`, gesetzt beim App-Start und beim Speichern der
+`officials.enabled`, `rotation_sr`, `rotation_ar` und `rotation_mode` stehen
+zwar in der `config.json`, werden aber zusätzlich im Roster-Speicher gespiegelt
+(`set_enabled`/`set_rotation`/`set_rotation_mode`, gesetzt beim App-Start und beim Speichern der
 Einstellungen). Grund: Der Sync-Lauf liest seine Konfiguration nur beim Start
 — ohne diesen Spiegel bliebe ein frisch gesetztes Häkchen bis zum nächsten
 Stoppen/Starten der Übertragung wirkungslos.

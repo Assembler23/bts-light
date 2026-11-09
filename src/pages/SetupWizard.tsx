@@ -886,6 +886,9 @@ export function SetupWizard({
         enabled: offEnabled,
         rotation_sr: offRotationSr,
         rotation_ar: offRotationAr,
+        // Noch ohne Auswahl im Setup (kommt mit PR 3): den geladenen Wert
+        // mitschicken, sonst setzte jedes Speichern auf „Abwechselnd" zurück.
+        rotation_mode: off?.rotation_mode ?? "abwechselnd",
       },
       meetingpoint: (() => {
         // Leere/ungültige Eingaben fallen auf den Standard zurück.

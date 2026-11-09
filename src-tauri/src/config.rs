@@ -681,6 +681,28 @@ pub struct OfficialsConfig {
     pub rotation_sr: bool,
     /// Automatische Rotation für Aufschlagrichter (Official2)?
     pub rotation_ar: bool,
+    /// Einteilungsprinzip der Rotation (Spec `sr-rotationsmodus`, ADR 0079).
+    /// Fehlt das Feld (ältere config.json), gilt „Abwechselnd".
+    pub rotation_mode: RotationMode,
+}
+
+/// Einteilungsprinzip der automatischen Officials-Rotation (ADR 0079).
+///
+/// Gespeichert als Kleinbuchstaben-String. Ein unbekannter Wert (etwa aus
+/// einer neueren Version) bricht das Laden nicht, sondern fällt auf den
+/// Standard zurück — eine kaputte config.json kostet sonst alle Einstellungen.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RotationMode {
+    /// A: eigene SR- und AR-Reihenfolge.
+    Getrennt,
+    /// C: eine Liste, jeder bekommt den Dienst, den er zuletzt nicht hatte.
+    Rollenwechsel,
+    /// B: eine Liste, erster Freier SR, nächster AR (Standard). Steht als
+    /// letzte Variante, weil `serde(other)` nur dort erlaubt ist.
+    #[default]
+    #[serde(other)]
+    Abwechselnd,
 }
 
 /// Einstellungen des Hallen-Check-Ins (ADR 0009). Opt-in — standardmäßig aus,
@@ -2243,6 +2265,31 @@ mod tests {
         assert_eq!(cfg.officials, OfficialsConfig::default());
     }
 
+    /// Rotationsmodus (ADR 0079): fehlt das Feld, gilt „Abwechselnd"; ein
+    /// unbekannter Wert lädt ebenfalls als „Abwechselnd", statt die ganze
+    /// config.json unlesbar zu machen. Die drei Werte reisen als
+    /// Kleinbuchstaben.
+    #[test]
+    fn rotation_mode_default_abwechselnd_und_unbekannt_faellt_zurueck() {
+        assert_eq!(
+            OfficialsConfig::default().rotation_mode,
+            RotationMode::Abwechselnd
+        );
+        let alt: OfficialsConfig =
+            serde_json::from_str(r#"{"enabled":true,"rotation_sr":true}"#).unwrap();
+        assert_eq!(alt.rotation_mode, RotationMode::Abwechselnd);
+        let fremd: OfficialsConfig = serde_json::from_str(r#"{"rotation_mode":"zufall"}"#).unwrap();
+        assert_eq!(fremd.rotation_mode, RotationMode::Abwechselnd);
+        for (modus, text) in [
+            (RotationMode::Getrennt, "\"getrennt\""),
+            (RotationMode::Abwechselnd, "\"abwechselnd\""),
+            (RotationMode::Rollenwechsel, "\"rollenwechsel\""),
+        ] {
+            assert_eq!(serde_json::to_string(&modus).unwrap(), text);
+            assert_eq!(serde_json::from_str::<RotationMode>(text).unwrap(), modus);
+        }
+    }
+
     /// Teilbefüllter officials-Block (z. B. von Hand editiert oder aus einer
     /// künftigen Version mit weniger Feldern): fehlende Schalter fallen auf
     /// ihren Default (aus) statt das Laden scheitern zu lassen.
@@ -2645,6 +2692,7 @@ mod tests {
                 enabled: true,
                 rotation_sr: true,
                 rotation_ar: false,
+                rotation_mode: RotationMode::Rollenwechsel,
             },
             meetingpoint: MeetingpointConfig {
                 enabled: true,
