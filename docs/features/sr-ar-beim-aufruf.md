@@ -1,6 +1,6 @@
 # Schiedsrichter und Aufschlagrichter schon beim Aufruf zuteilen — Spezifikation
 
-> Status: **Entwurf 2026-11-09** (via /idee: Brief → Grill → How-To → Review).
+> Status: **abgestimmt 2026-11-09** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Idee der Turnierleitung vom 09.11.2026. Betroffene Crates: src-tauri, src, relay-proto, relay (nur Deploy + Text-Deckel).
 > ADR: [0080 — Feste Rotations-Zuteilung beim Aufruf mit Herkunfts-Merker](../adr/0080-rotation-teilt-beim-aufruf-zu.md) (löst [0072](../adr/0072-sr-vorab-zuteilung-vorlaeufig.md) ab).
 > Voraussetzungen: #457 (Wartelisten-Dialog) gemergt; Spec [`sr-rotationsmodus`](sr-rotationsmodus.md) (#460, ADR 0079) PR 1+2 gemergt.

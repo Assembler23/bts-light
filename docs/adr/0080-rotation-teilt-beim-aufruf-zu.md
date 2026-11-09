@@ -1,6 +1,6 @@
 # 0080 — Feste Rotations-Zuteilung beim Aufruf mit Herkunfts-Merker
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-11-09
 - Löst [ADR 0072](0072-sr-vorab-zuteilung-vorlaeufig.md) ab. Ergänzt ADR 0021/0022, 0040, 0064,
   0077, 0078; nutzt die Wahl-Funktion aus ADR 0079.
