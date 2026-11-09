@@ -1634,6 +1634,10 @@ pub struct TlDisplaySettings {
     /// `setzplaetze-anzeigen`). Invertiert aus demselben Grund wie
     /// `hide_open_matches`: Bestandsprofile ohne das Feld zeigen sie.
     pub hide_seeds: bool,
+    /// Suchfeld der Spielersuche **ausblenden** (Spec `tl-spielersuche`).
+    /// Invertiert wie `hide_open_matches`: Bestandsprofile zeigen die Suche.
+    /// Nur Anzeige, kein Zugriffsschutz (ADR 0081).
+    pub hide_search: bool,
     /// Vier Verschiebe-Knöpfe (⤒ ↑ ↓ ⤓) an JEDER umsortierbaren Zeile der
     /// Warteliste statt nur „↑ an den Anfang" (Wunsch 06.09.2026: Ziehen ist
     /// auf manchen Geräten nicht praktikabel). Default aus — die Zeile wird
@@ -2375,6 +2379,7 @@ mod tests {
                 list_position: TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
                 hide_seeds: false,
+                hide_search: false,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],

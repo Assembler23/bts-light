@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.368
+## v0.9.369
 
 - **Gelbe Aufrufmarke bleibt stehen.** Gerufene Spiele verloren ihre gelbe
   Farbe in BTP, sobald ihnen Schiedsrichter zugeteilt wurden. Eine Messung
@@ -16,6 +16,17 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - **Farbe setzen nimmt kein Feld mehr weg.** Aus demselben Grund nahm eine
   Zeilenfarbe aus der Turnierleitungs-Seite einem laufenden Spiel Feld und
   Schiedsrichter und einem wartenden Spiel seine Besetzung. Behoben.
+
+## v0.9.368
+
+- **Spielersuche in der Turnierleitungs-Seite.** Oben in der Kopfleiste
+  steht ein Suchfeld „Spieler oder SR suchen". Es findet alle Spiele einer
+  Person im ganzen Turnier — am Feld, in der Warteliste (mit erwarteter
+  Startzeit) und beendet (mit Ergebnis), auch vom Vortag. Ein Tipp springt
+  zur Zeile. Schiedsrichter werden mit eingeschaltetem
+  Schiedsrichter-Betrieb gefunden. Im Profil abschaltbar
+  („Spielersuche zeigen"). Die Suche läuft am Turnier-PC; über die Cloud
+  reicht der Relay sie nur durch.
 
 ## v0.9.367
 

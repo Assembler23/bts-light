@@ -817,7 +817,7 @@ Knoten — ein **fehlendes Element heißt 0**. Gemessen:
 
 Im Betrieb hieß das: Gerufene Spiele verloren ihr Gelb, sobald die Rotation
 ihnen SR/AR schrieb (Feldbefund 09.11.2026), und ein Farb-Tipp im TL-Web an
-einem laufenden Spiel nahm diesem Feld und Schiedsrichter. **Seit v0.9.368**
+einem laufenden Spiel nahm diesem Feld und Schiedsrichter. **Seit v0.9.369**
 trägt deshalb
 
 - der **Farb-Write** `CourtID` und `Official1ID/2ID`

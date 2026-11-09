@@ -27,6 +27,7 @@ pub mod sheet;
 pub mod slave_bridge;
 pub mod spielfolge;
 pub mod state;
+pub mod suche;
 pub mod timeline;
 pub mod tl;
 pub mod tls;

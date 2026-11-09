@@ -40,7 +40,7 @@ nicht und kann sie nicht setzen; er muss dafür an den BTP-PC.
   P1): Setzen, Löschen und Zurücksetzen halten beim Nachlesen; keine
   Nebenwirkung am Check-in-`Status`. **Nachtrag 09.11.2026:** Diese
   Schreibform löschte `CourtID` und `Official1ID/2ID` — BTP übernimmt sie aus
-  jedem Match-Write, ein fehlendes Element heißt 0. Seit v0.9.368 trägt der
+  jedem Match-Write, ein fehlendes Element heißt 0. Seit v0.9.369 trägt der
   Farb-Write beide aus einem frisch gelesenen Stand mit (Details
   `docs/btp_protocol.md`, Abschnitt `Match.Highlight`). Der Planer **zeichnet die Farbe sofort**
   und behält sie auch, wenn danach im BTP an anderen Zeilen gearbeitet wird

@@ -304,7 +304,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   `CourtID` — stand das Spiel doch auf einem Feld, ist der Spielort in BTP
   danach weg. Folge gering (Spiel ist beendet); Abhilfe: CourtID aus dem
   Snapshot bzw. frisch gelesen mitschicken. Nachtrag (Messung 09.11.2026,
-  v0.9.368): Dasselbe gilt für `Highlight` — jeder Match-Write ohne das
+  v0.9.369): Dasselbe gilt für `Highlight` — jeder Match-Write ohne das
   Element setzt die Farbe auf 0.
 - **Handfarbe überlebt den Ruf aufs Feld nicht.** Feldvergabe und Freigabe
   (`court_assign_request` mit `Courts`-Block) tragen kein `Highlight`, BTP
@@ -349,6 +349,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   `productName` kann separat und mit Bedacht wechseln.
 
 ## Umgesetzt, aber noch nicht abgenommen
+
+- **Spielersuche im TL-Web** — Spec:
+  [features/tl-spielersuche.md](features/tl-spielersuche.md) (freigegeben
+  09.11.2026), ADR 0081 — **v0.9.368,
+  Feldtest offen**: Suchfeld in der Kopfleiste findet Spieler und SR/AR am
+  Feld, in der ganzen Warteliste und in allen beendeten Spielen. Zu prüfen:
+  Bildschirmtastatur auf Fire-Tablets, Sprung bei zugeklapptem Panel.
 
 - **Ansage in Teilen vertonen** — Spec:
   [features/ansage-in-teilen.md](features/ansage-in-teilen.md) (freigegeben
