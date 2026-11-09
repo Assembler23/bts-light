@@ -547,6 +547,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **SR und AR schon beim Aufruf in Vorbereitung zuteilen** — Spec:
+  [features/sr-ar-beim-aufruf.md](features/sr-ar-beim-aufruf.md) (freigegeben 09.11.2026),
+  ADR 0080 (löst 0072 ab) — Rotation teilt beim Aufruf fest zu (auch ohne Meetingpoint),
+  Ansage nennt SR/AR, Nachrücken still, Freigabe bei Rücknahme. Nach `sr-rotationsmodus`
+  PR 1+2. Folgeidee: Erkennen, dass ein Official selbst in einem laufenden oder gerufenen
+  Spiel steht.
+
 - **Rotationsmodus Schiedsrichter/Aufschlagrichter** — Spec:
   [features/sr-rotationsmodus.md](features/sr-rotationsmodus.md)
   (freigegeben 09.11.2026, ADR 0079). Drei Einteilungsprinzipien im Setup: A getrennte
