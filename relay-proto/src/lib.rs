@@ -2282,6 +2282,20 @@ pub enum TlAction {
             default
         )]
         before_official_id: Option<i64>,
+        /// Welche Liste (ADR 0079): `Ar` = AR-Liste in Modus „getrennt";
+        /// fehlt das Feld, die Hauptliste. Ein Relay vor diesem Feld
+        /// verwirft es still — der Zug landete dann in der SR-Liste,
+        /// deshalb deployt der Relay vor dem Client-Release.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        list: Option<TlOfficialRole>,
+    },
+    /// Einsatzrolle eines Officials setzen (ADR 0079): `"beides"`, `"sr"`
+    /// (nur Schiedsrichter) oder `"ar"` (nur Aufschlagrichter). Der Host
+    /// prüft den Wert.
+    OfficialSetRole {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        role: String,
     },
     /// Stammverein pflegen (BTP überträgt am Official keinen).
     OfficialSetClub {
@@ -5044,6 +5058,16 @@ mod tests {
             TlAction::OfficialReorder {
                 official_id: 3,
                 before_official_id: Some(7),
+                list: None,
+            },
+            TlAction::OfficialReorder {
+                official_id: 3,
+                before_official_id: None,
+                list: Some(TlOfficialRole::Ar),
+            },
+            TlAction::OfficialSetRole {
+                official_id: 3,
+                role: "ar".to_string(),
             },
             TlAction::OfficialSetClub {
                 official_id: 3,

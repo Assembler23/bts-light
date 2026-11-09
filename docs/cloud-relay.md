@@ -642,6 +642,20 @@ Neue `TlAction`-Varianten (geschlossener Satz, ADR 0011):
 `announce_officials`. Die Rolle reist als `"sr"`/`"ar"`
 (`relay_proto::TlOfficialRole`).
 
+Seit v0.9.365 (Spec `sr-rotationsmodus`, ADR 0079):
+- `official_reorder` trägt optional `list: "ar"` (AR-Liste in Modus
+  „getrennt"); fehlt das Feld, gilt die Hauptliste.
+- Neu `official_set_role { officialId, role }` mit `role` = `"beides"`,
+  `"sr"` oder `"ar"`; der Host prüft den Wert.
+- `TlState` trägt `officials_ar_order` (nur IDs, nur in Modus „getrennt"),
+  `officials_rotation_mode`, `can_set_official_role` und je Official
+  `role`/`next_role`/`next_rank` — alles optional, opak durchgereicht.
+- **Deploy-Reihenfolge:** Der Relay liest `TlAction` typisiert. Ein alter
+  Relay verwirft `list` still (der Zug landete in der SR-Liste) und lehnt
+  `official_set_role` ab. Der Relay deployt deshalb beim Merge, **vor**
+  dem Client-Release. Die Seite zeigt Rollenwahl und AR-Liste nur, wenn der
+  Host `can_set_official_role` bzw. `officials_ar_order` liefert.
+
 Dazu ein Frame-Paar für den **gezielten** Detail-Abruf, Muster Punktverlauf:
 `RelayFrame::OfficialDetailRequest { req_id, official_id }` →
 `HostFrame::OfficialDetail { req_id, json }`, ausgeliefert über

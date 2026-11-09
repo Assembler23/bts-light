@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.365
+
+- **TL-Web: AR-Reihenfolge und Rolle.** Bei „Getrennte Listen" zeigt die
+  Turnierleitungs-Seite auch die AR-Reihenfolge, ziehbar wie die SR-Liste.
+  Im Dialog einer Person lässt sich die Rolle wählen (SR und AR / nur SR /
+  nur AR).
+- Cloud: Der Relay kommt mit dem Deploy beim Merge — vor dem App-Update.
+
 ## v0.9.364
 
 - **Vorschau „als Nächstes SR/AR".** Die Schiedsrichter-Liste am Turnier-PC

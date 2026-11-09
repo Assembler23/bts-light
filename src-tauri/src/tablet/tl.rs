@@ -676,11 +676,29 @@ pub(crate) fn apply_state_action(
         A::OfficialReorder {
             official_id,
             before_official_id,
+            list,
         } => {
             officials_an(tablet)?;
+            // AR-Liste (Modus A, ADR 0079); sonst die Hauptliste.
+            let liste = match list {
+                Some(relay_proto::TlOfficialRole::Ar) => crate::tablet::officials::Reihenfolge::Ar,
+                _ => crate::tablet::officials::Reihenfolge::Haupt,
+            };
             tablet
                 .officials_store()
-                .reorder(*official_id, *before_official_id);
+                .reorder_in(liste, *official_id, *before_official_id);
+            Ok(TlResponse::ok(0))
+        }
+        A::OfficialSetRole { official_id, role } => {
+            officials_an(tablet)?;
+            use crate::tablet::officials::Einsatzrolle as E;
+            let rolle = match role.as_str() {
+                "beides" => E::Beides,
+                "sr" => E::NurSr,
+                "ar" => E::NurAr,
+                _ => return Err(TlResponse::err(C::NotAllowed, "Unbekannte Rolle.")),
+            };
+            tablet.officials_store().set_role(*official_id, rolle);
             Ok(TlResponse::ok(0))
         }
         A::OfficialSetClub { official_id, club } => {
@@ -2433,9 +2451,23 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::OfficialReorder {
             official_id,
             before_official_id,
+            list,
         } => format!(
-            "off-order:{official_id}:{}",
-            before_official_id.unwrap_or(0)
+            "off-order:{official_id}:{}:{}",
+            before_official_id.unwrap_or(0),
+            if matches!(list, Some(relay_proto::TlOfficialRole::Ar)) {
+                "ar"
+            } else {
+                "haupt"
+            }
+        ),
+        // Nur der geprüfte Wert, nie der rohe Text vom Gerät (Security-Review).
+        A::OfficialSetRole { official_id, role } => format!(
+            "off-role:{official_id}:{}",
+            match role.as_str() {
+                r @ ("beides" | "sr" | "ar") => r,
+                _ => "?",
+            }
         ),
         // Ohne Inhalt: Der Fingerabdruck landet im Protokoll, und
         // Vereinsnamen bzw. Sperrlisten haben dort nichts zu suchen.
@@ -2602,6 +2634,7 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         A::OfficialReorder { .. } => "Schiedsrichter-Reihenfolge geändert".to_string(),
         // Bewusst ohne Inhalt (siehe `action_fingerprint`).
         A::OfficialSetClub { .. } => "Schiedsrichter-Verein gepflegt".to_string(),
+        A::OfficialSetRole { .. } => "Schiedsrichter-Rolle geändert".to_string(),
         A::OfficialBlocklistSet { .. } => "Schiedsrichter-Sperren gepflegt".to_string(),
         A::OfficialsCourtToggle { court_id, .. } => {
             format!("Feld-Schalter von Feld {court_id}")
@@ -3020,6 +3053,15 @@ pub struct TlState {
     /// Seite beschriftet ihre Liste in Modus A als „SR-Reihenfolge".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub officials_rotation_mode: Option<String>,
+    /// AR-Reihenfolge (nur IDs, nur in Modus „getrennt", ADR 0079) — die
+    /// Seite zeigt damit eine zweite, eigene ziehbare Liste.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub officials_ar_order: Vec<i64>,
+    /// Dieser Host kennt `official_set_role` und `OfficialReorder.list`
+    /// (ADR 0079). Eine neue Seite am alten Host zeigt die Rollenwahl dann
+    /// nicht — sonst lehnte der Host die unbekannte Aktion ab.
+    #[serde(default)]
+    pub can_set_official_role: bool,
     /// Der Panel-Profil-Katalog (Spec tl-web-panelsystem, ADR 0025) —
     /// geteilt, klein, unkritisch, Muster `layouts_view`/`layouts`.
     /// Wiederverwendet direkt den `relay-proto`-Wire-Typ statt eines
@@ -3982,6 +4024,8 @@ pub(crate) fn build_state_limited(
             officials_managed: tablet.officials_store().enabled(),
             officials: Vec::new(),
             officials_rotation_mode: None,
+            officials_ar_order: Vec::new(),
+            can_set_official_role: true,
             // Der Profil-Katalog ist Host-Konfiguration, kein Turnierstand
             // — er gilt auch, solange BTP noch nichts geliefert hat
             // (dieselbe Begründung wie bei `layouts` oben).
@@ -4566,6 +4610,21 @@ pub(crate) fn build_state_limited(
             crate::config::RotationMode::Getrennt => Some("getrennt".into()),
             crate::config::RotationMode::Rollenwechsel => Some("rollenwechsel".into()),
         },
+        officials_ar_order: {
+            let store = tablet.officials_store();
+            if store.enabled() && store.rotation_mode() == crate::config::RotationMode::Getrennt {
+                let bekannt: std::collections::HashSet<i64> =
+                    snap.officials.iter().map(|o| o.id).collect();
+                store
+                    .order_ar()
+                    .into_iter()
+                    .filter(|id| bekannt.contains(id))
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        },
+        can_set_official_role: true,
         scorekeeper_managed,
         scorekeepers,
         finished,
@@ -5656,6 +5715,47 @@ mod tests {
         let store = tablet.officials_store();
         assert_eq!(store.assignment(4711), Default::default());
         assert_eq!(store.assignment(11), Default::default());
+    }
+
+    #[test]
+    fn tl_web_pflegt_rolle_und_ar_liste() {
+        // ADR 0079, PR 5: Rolle setzen, AR-Liste umsortieren, unbekannte
+        // Rolle abgelehnt; die AR-Reihenfolge reist nur in Modus A.
+        use crate::tablet::officials::Einsatzrolle;
+        use relay_proto::{TlAction as A, TlOfficialRole as Rolle};
+        let tablet = sr_turnier();
+        let config = AppConfig::default();
+        let store = tablet.officials_store();
+        store.sync_roster(&[1, 2, 3]);
+        let tue = |a: A| apply_state_action(&tablet, &config, 1_000, &a);
+        assert!(tue(A::OfficialSetRole {
+            official_id: 2,
+            role: "ar".into()
+        })
+        .is_ok());
+        assert_eq!(store.extra(2).role, Einsatzrolle::NurAr);
+        assert!(tue(A::OfficialSetRole {
+            official_id: 2,
+            role: "chef".into()
+        })
+        .is_err());
+        assert_eq!(store.extra(2).role, Einsatzrolle::NurAr, "unverändert");
+
+        assert!(tue(A::OfficialReorder {
+            official_id: 3,
+            before_official_id: Some(1),
+            list: Some(Rolle::Ar),
+        })
+        .is_ok());
+        assert_eq!(store.order_ar(), vec![3, 1, 2]);
+        assert_eq!(store.order(), vec![1, 2, 3], "Hauptliste unberührt");
+
+        let s = build_state(&tablet, &config, 1_000_000, 1);
+        assert!(s.officials_ar_order.is_empty(), "nicht in Modus B");
+        assert!(s.can_set_official_role);
+        store.set_rotation_mode(crate::config::RotationMode::Getrennt);
+        let s = build_state(&tablet, &config, 1_000_000, 1);
+        assert_eq!(s.officials_ar_order, vec![3, 1, 2]);
     }
 
     #[test]
@@ -11117,6 +11217,13 @@ mod tests {
             // Bool „dieser Turnier-PC prüft und reserviert die Einteilung an
             // wartenden Spielen".
             "can_assign_waiting_officials",
+            // Fähigkeitsmerkmal (Spec sr-rotationsmodus, ADR 0079): reines
+            // Bool „dieser Turnier-PC kennt Rollenwahl und AR-Liste".
+            "can_set_official_role",
+            // Einteilungsprinzip und AR-Reihenfolge (nur IDs der ohnehin
+            // gezeigten Schiedsrichter) — Einsatzplanung ohne Personenbezug.
+            "officials_rotation_mode",
+            "officials_ar_order",
             // Spec tl-zeilenfarbe: BTPs Zeilenfarbe 1–6 — eine Notiz der
             // Turnierleitung AM SPIEL, ohne Bedeutung über Personen; die
             // Bedeutung der Farbe vereinbart das Team, sie steht nirgends.
@@ -11335,6 +11442,12 @@ mod tests {
             // Personenbezug über den ohnehin gezeigten Namen hinaus.
             "reserved",
             "reserved_match_num",
+            // Einsatzrolle (beides/nur SR/nur AR) und Vorschau „als Nächstes"
+            // (ADR 0079): Einsatzplanung, keine Beziehung wie die
+            // Sperrlisten — freigegeben in CLAUDE.md „Datenschutz".
+            "role",
+            "next_role",
+            "next_rank",
             // SR/AR je Feld + Konflikt-KATEGORIE (nie der Grund) und die
             // drei Feld-Schalter, die die Seite auch setzen kann.
             "sr",
