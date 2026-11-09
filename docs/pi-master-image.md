@@ -9,7 +9,10 @@ in [pi-setup.md](pi-setup.md), das Feature selbst in
 ## Das Set
 
 - **Router** (z. B. TP-Link TL-MR6400 — LTE-Router, kräftiges WLAN).
-- Je TV: ein **Raspberry Pi** + SD-Karte + Netzteil + (micro-)HDMI-Kabel.
+- Je TV: ein **Raspberry Pi** + SD-Karte + **eigenes Netzteil** (nicht die
+  USB-Buchse des TVs) + (micro-)HDMI-Kabel. Pi und TV an dieselbe
+  Steckdosenleiste — der Pi weckt den TV dann per HDMI-CEC selbst (siehe
+  [pi-setup.md](pi-setup.md) „Strom und Einschalten").
 - Die **TVs**.
 - Tablets sind optional — Schiedsrichter nutzen oft eigene Geräte (QR-Code).
 
@@ -93,11 +96,17 @@ Ein Pi wird einmal sauber eingerichtet; seine SD-Karte wird zum „Golden
 Master", den du beliebig oft klonst.
 
 1. **Einen Pi einrichten** nach [pi-setup.md](pi-setup.md):
-   - Raspberry Pi OS (Desktop) flashen; im Imager WLAN **`Turnier`** +
-     Passwort eintragen.
+   - Aktuelles Raspberry Pi OS (64-bit) flashen — dasselbe Image läuft auf
+     Pi Zero 2 W und Pi 3 B+; im Imager WLAN **`Turnier`** + Passwort
+     eintragen.
    - `setup-monitor.sh` ausführen; bei der Adresse **Enter** drücken →
      Standard `http://bts-light.local:8088/monitor`.
-   - Neu starten und prüfen: am TV erscheint die Kopplungs-Seite. ✓
+   - Neu starten und prüfen: am TV erscheint die Kopplungs-Seite, und der
+     TV schaltet sich beim Einschalten auf den Pi (CEC). ✓
+   - `sudo bash build-master-image.sh` ausführen, dann
+     `sudo shutdown -h now` — **nicht** neu starten: Das Skript schaltet
+     den Nur-Lese-Modus für die Klone scharf, ein Neustart würde den Master
+     selbst schreibgeschützt machen.
 2. **Karte als Image sichern.** Die fertige Karte in den Computer stecken
    und in eine `.img`-Datei zurücklesen:
    - Windows: *Win32 Disk Imager* → „Read".
@@ -158,6 +167,12 @@ läuft unverändert. Für Hallen mit Ansage am TV das Master-Image neu bauen (au
 das aktuelle `setup-monitor.sh` ausführen, dann `pi/build-master-image.sh`)
 oder auf den betroffenen Pis `setup-monitor.sh` erneut ausführen.
 <!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/setup-monitor.sh -->
+
+**Ebenso der CEC-Dienst (November 2026):** Der Pi schaltet den TV beim Start
+per HDMI-CEC ein und auf seinen Eingang (`bts-cec.service`). Ältere Images
+haben ihn nicht — Master-Pi mit aktuellem `setup-monitor.sh` neu einrichten,
+neues Image bauen, auf alle Karten spielen.
+<!-- pruef: "bts-cec.service" in pi/setup-monitor.sh -->
 
 ---
 

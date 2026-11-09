@@ -12,8 +12,8 @@
 //! 1. **`GUELTIG_AB` liegt bewusst weit in der Vergangenheit.** Die
 //!    Court-Monitor-Pis haben keine Echtzeituhr; bootet einer ohne NTP, steht
 //!    seine Uhr falsch und er verwirft ein frisch ausgestelltes Zertifikat
-//!    **still** als „noch nicht gültig" (`pi/shared-startbrowser.sh:46-48`
-//!    hält genau diesen Vorfall fest).
+//!    **still** als „noch nicht gültig" (das frühere
+//!    `pi/shared-startbrowser.sh` hielt genau diesen Vorfall fest).
 //! 2. **ALPN bietet ausschließlich `http/1.1` an.** Käme `h2` zustande, bräche
 //!    der WebSocket-Upgrade und damit `/ws`, `/monitor-ws` und `/tl-ws`.
 //!
