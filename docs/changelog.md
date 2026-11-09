@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.362
+
+- **Einteilungsprinzip im Setup wählbar.** Unter „Schiedsrichter":
+  Abwechselnd (Standard), Rollenwechsel (jeder macht abwechselnd SR und AR)
+  oder getrennte Listen für SR und AR.
+- **Rolle je Schiedsrichter:** In der Schiedsrichter-Liste „SR und AR",
+  „nur SR" oder „nur AR". Die Automatik hält sich daran; wer von Hand gegen
+  die Rolle einteilt, sieht die Warnung „SR: nur AR" bzw. „AR: nur SR".
+- Der veraltete Hinweis „wird gerade schrittweise ausgebaut" im Setup ist weg.
+
 ## v0.9.361
 
 - **Meetingpoint-Seite zeigt den Aufschlagrichter.** Unter dem

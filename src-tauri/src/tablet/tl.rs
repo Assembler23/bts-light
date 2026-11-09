@@ -5382,6 +5382,56 @@ mod tests {
     }
 
     #[test]
+    fn eine_besetzung_gegen_die_rolle_warnt_an_feld_und_warteliste() {
+        // AK25/AK27 (ADR 0079): „nur AR" als SR ⇒ Warnung, aber eingeteilt —
+        // an der Warteliste (Hand) wie am laufenden Feld (BTP).
+        use crate::tablet::officials::{Einsatzrolle, OfficialRole as R};
+        let tablet = sr_turnier();
+        let store = tablet.officials_store();
+        store.set_role(1, Einsatzrolle::NurAr);
+        let snap = tablet.snapshot_clone().unwrap();
+        assert!(
+            crate::tablet::officials::pruefe_einteilung(store, Some(&snap), 7, R::Sr, Some(1))
+                .is_ok(),
+            "die Rolle sperrt nicht"
+        );
+        store.assign(7, R::Sr, 1);
+        let mut snap = snap;
+        snap.matches
+            .iter_mut()
+            .find(|m| m.id == 10)
+            .unwrap()
+            .official2_id = Some(1);
+        tablet.set_snapshot(snap);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let zeile = s.queue.iter().find(|q| q.match_id == 7).unwrap();
+        assert_eq!(zeile.official_warn.as_deref(), Some("SR: nur AR"));
+        let feld = s.courts.iter().find(|c| c.court_id == 1).unwrap();
+        assert_eq!(
+            feld.official_warn.as_deref(),
+            None,
+            "AR darf „nur AR\" sein"
+        );
+        store.set_role(1, Einsatzrolle::NurSr);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let feld = s.courts.iter().find(|c| c.court_id == 1).unwrap();
+        assert_eq!(
+            feld.official_warn.as_deref(),
+            Some("AR: nur SR"),
+            "BTP-Besetzung warnt ebenso"
+        );
+        // Mit Pause: Rolle und Wartelisten-Warnung stehen zusammen.
+        store.set_role(1, Einsatzrolle::NurAr);
+        store.set_paused(1, true);
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        let zeile = s.queue.iter().find(|q| q.match_id == 7).unwrap();
+        assert_eq!(
+            zeile.official_warn.as_deref(),
+            Some("SR: nur AR · SR in Pause")
+        );
+    }
+
+    #[test]
     fn der_host_meldet_die_wartelisten_einteilung_auch_ohne_turnier() {
         let leer = build_state(&TabletState::default(), &AppConfig::default(), 1_000, 1);
         assert!(leer.can_assign_waiting_officials);

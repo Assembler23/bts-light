@@ -1034,6 +1034,25 @@ impl OfficialsStore {
         self.mit_extra(official_id, |e| e.club = club);
     }
 
+    /// Warnungen, wenn eine Besetzung der Rolle widerspricht (ADR 0079):
+    /// „SR: nur AR" bzw. „AR: nur SR". Nur Warnung — eine Einteilung von
+    /// Hand oder in BTP bleibt erlaubt (der SR⇄AR-Tausch muss gehen, und BTP
+    /// gewinnt ohnehin, R2).
+    pub fn rollen_warnung(&self, sr: Option<i64>, ar: Option<i64>) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(id) = sr.filter(|v| *v > 0) {
+            if !self.extra(id).role.erlaubt(OfficialRole::Sr) {
+                out.push("SR: nur AR".to_string());
+            }
+        }
+        if let Some(id) = ar.filter(|v| *v > 0) {
+            if !self.extra(id).role.erlaubt(OfficialRole::Ar) {
+                out.push("AR: nur SR".to_string());
+            }
+        }
+        out
+    }
+
     /// Rolle setzen (beides / nur SR / nur AR, ADR 0079).
     pub fn set_role(&self, official_id: i64, role: Einsatzrolle) {
         self.mit_extra(official_id, |e| e.role = role);
@@ -2543,6 +2562,26 @@ mod tests {
             "leere Zusatzdaten werden nicht aufbewahrt"
         );
         assert!(!datei_text(dir.path()).contains("\"role\""));
+    }
+
+    #[test]
+    fn rollen_warnung_nennt_jeden_widerspruch() {
+        let store = OfficialsStore::default();
+        store.set_role(1, Einsatzrolle::NurAr);
+        store.set_role(2, Einsatzrolle::NurSr);
+        assert_eq!(
+            store.rollen_warnung(Some(1), Some(2)),
+            vec!["SR: nur AR", "AR: nur SR"]
+        );
+        assert!(
+            store.rollen_warnung(Some(2), Some(1)).is_empty(),
+            "passt beides"
+        );
+        assert!(
+            store.rollen_warnung(Some(3), Some(0)).is_empty(),
+            "beides / ohne"
+        );
+        assert!(store.rollen_warnung(None, None).is_empty());
     }
 
     #[test]
