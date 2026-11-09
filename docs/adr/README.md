@@ -89,3 +89,4 @@ hier eintragen.
 | [0078](0078-besetzung-wartender-spiele-reserviert.md) | Die Besetzung wartender Spiele reserviert ihre Schiedsrichter | accepted |
 | [0079](0079-rotationsmodi-schiedsrichter.md) | Rotationsmodi: zwei Reihenfolgen in A, abgeleitete Vorrolle, eine Wahl-Funktion | accepted |
 | [0080](0080-rotation-teilt-beim-aufruf-zu.md) | Feste Rotations-Zuteilung beim Aufruf mit Herkunfts-Merker (löst 0072 ab) | accepted |
+| [0081](0081-tl-spielersuche-am-turnier-pc.md) | Personensuche der Turnierleitung läuft am Turnier-PC (Positivliste, Fähigkeits-Flag) | accepted |
