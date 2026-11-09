@@ -2613,6 +2613,12 @@ pub struct MpPartie {
         skip_serializing_if = "Option::is_none"
     )]
     pub aufgerufen_feld: Option<String>,
+    /// Name des Aufschlagrichters — **nur Anzeige**, kein Check-in-Platz
+    /// (Spec `sr-ar-beim-aufruf`, ADR 0080). Dieselbe Kategorie wie der
+    /// schon gezeigte SR-Name, ohne Verein und ohne Lizenznummer. `None` =
+    /// keiner (oder älterer Turnier-PC).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ar: Option<String>,
 }
 
 /// So lange bleibt eine aufs Feld gerufene Partie auf der Meetingpoint-Seite
@@ -6627,6 +6633,22 @@ mod meetingpoint_tests {
     }
 
     #[test]
+    fn mp_partie_ar_roundtrip_und_weggelassen_wenn_leer() {
+        // ADR 0080: Altform ohne `ar` lesbar, ohne AR nichts serialisiert,
+        // mit AR Roundtrip.
+        let p: MpPartie = serde_json::from_str(r#"{"matchId":7}"#).unwrap();
+        assert_eq!(p.ar, None);
+        assert!(!serde_json::to_string(&p).unwrap().contains("\"ar\""));
+        let mit = MpPartie {
+            ar: Some("Bob Meier".into()),
+            ..p
+        };
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""ar":"Bob Meier""#), "{json}");
+        assert_eq!(serde_json::from_str::<MpPartie>(&json).unwrap(), mit);
+    }
+
+    #[test]
     fn fuer_halle_schneidet_zu_und_verlangt_die_wahl() {
         let p = |id: i64, h: &str| MpPartie {
             match_id: id,
@@ -6640,6 +6662,7 @@ mod meetingpoint_tests {
             feld_frei_ms: None,
             feld_frei_unsicher: false,
             aufgerufen_feld: None,
+            ar: None,
         };
         let eins = MeetingpointView {
             enabled: true,

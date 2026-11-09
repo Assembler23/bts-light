@@ -1235,6 +1235,10 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   `MP_AUFGERUFEN_ANZEIGE_MS` (2 min) als „Aufgerufen – Feld N". Ein alter
   Relay lässt das Feld fallen, dann erscheint eine leere Karte ohne Hinweis.
   Der Relay deployt beim Merge aber vor jeder App.
+- `MpPartie.ar` (seit v0.9.361, ADR 0080, `serde(default)`, ohne Wert nicht
+  serialisiert): Name des Aufschlagrichters, **nur Anzeige** (kein
+  Check-in-Platz). Der Relay deckelt ihn wie alle Texte auf `MAX_MP_TEXT`.
+  Ein alter Host schickt das Feld nicht, dann zeigt die Seite keinen AR.
 - `TlAction::CalledReorder { matchId, beforeMatchId? }` (JSON
   `called_reorder`, seit v0.9.347, ADR 0077): ein gerufenes Spiel in der
   Aufruf-Reihenfolge verschieben, nur innerhalb derselben Aufruf-Halle.

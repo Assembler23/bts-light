@@ -290,6 +290,13 @@ function zeichne() {
     } else if (partie.ohneSr) {
       karte.appendChild(el("div", "sr-zeile rolle", "ohne Schiedsrichter"));
     }
+    // Aufschlagrichter: nur Anzeige, kein Einchecken (ADR 0080).
+    if (partie.ar) {
+      var ar = el("div", "sr-zeile");
+      ar.appendChild(el("div", "rolle", "Aufschlagrichter"));
+      ar.appendChild(el("div", "namen-still", partie.ar));
+      karte.appendChild(ar);
+    }
     liste.appendChild(karte);
   });
 }

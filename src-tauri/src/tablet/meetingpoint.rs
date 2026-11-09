@@ -1265,9 +1265,26 @@ pub fn view(
             feld_frei_ms: prognose.map(|(ms, _)| ms),
             feld_frei_unsicher: prognose.is_some_and(|(_, u)| u),
             aufgerufen_feld: None,
+            ar: ar_name(tablet, m, snap),
         });
     }
     v
+}
+
+/// Name des Aufschlagrichters einer gerufenen Partie für die Seite (Sicht
+/// „Hand vor BTP", ADR 0080) — nur Anzeige. Ohne Schiedsrichter-Betrieb
+/// oder ohne AR `None`.
+fn ar_name(tablet: &TabletState, m: &BtpMatch, snap: &BtpSnapshot) -> Option<String> {
+    let store = tablet.officials_store();
+    if !store.enabled() {
+        return None;
+    }
+    store
+        .fuer_schreiben(m.id, m.official1_id, m.official2_id)
+        .ar
+        .filter(|v| *v > 0)
+        .and_then(|id| snap.official(id))
+        .map(|o| o.display_name())
 }
 
 /// Gesamtstand für den Relay (alle Hallen; der Relay filtert je Seite).
@@ -3094,6 +3111,31 @@ mod tests {
         t.officials_store().assign(11, Rolle::Sr, 101);
         t.apply_preparation_calls(&mut snap.clone());
         assert!(!sr_da(&t), "der alte SR-Check-in ist verfallen");
+    }
+
+    #[test]
+    fn die_seite_zeigt_den_ar_nur_als_namen() {
+        // AK26 (ADR 0080): AR als reine Anzeige, kein Check-in-Platz.
+        let t = zustand(turnier(false));
+        let snap = mit_sr(&t, &[100, 101]);
+        let store = t.officials_store();
+        store.assign(11, crate::tablet::officials::OfficialRole::Sr, 100);
+        store.assign(11, crate::tablet::officials::OfficialRole::Ar, 101);
+        rufe(&t, 11, None);
+        let v = view(&t, Some(&snap), &mp_an(), "");
+        let p = v.partien.iter().find(|p| p.match_id == 11).unwrap();
+        assert_eq!(p.ar.as_deref(), Some("SR101"));
+        assert!(
+            p.plaetze.iter().all(|pl| pl.name != "SR101"),
+            "der AR ist kein Check-in-Platz"
+        );
+        // Ohne Schiedsrichter-Betrieb kein Name.
+        store.set_enabled(false);
+        let v = view(&t, Some(&snap), &mp_an(), "");
+        assert_eq!(
+            v.partien.iter().find(|p| p.match_id == 11).unwrap().ar,
+            None
+        );
     }
 
     #[test]
