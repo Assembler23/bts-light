@@ -297,6 +297,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Als Nächstes
 
+- **Ergebnis-Write ohne CourtID löscht den Spielort.** Messung 09.11.2026
+  (`docs/btp_protocol.md`): BTP übernimmt die CourtID aus jedem Write mit
+  `Official*`. `update_request` mit `free_court_id: None` (kampflos aus
+  TL-Web/Desktop, Wiederholungspfad in `sync.rs`) trägt `Official*` ohne
+  `CourtID` — stand das Spiel doch auf einem Feld, ist der Spielort in BTP
+  danach weg. Folge gering (Spiel ist beendet); Abhilfe: CourtID aus dem
+  Snapshot bzw. frisch gelesen mitschicken.
 - **Tablet-Kiosk-App: Kiosk-Verhalten ohne Gerätebesitzer (Fire OS 8).**
   Befund 08.09.2026: Auf Fire OS 8 ist der Gerätebesitzer nie erreichbar —
   Amazons Kindersicherung ist auch direkt nach einem Werksreset Profile

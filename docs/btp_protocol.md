@@ -358,15 +358,38 @@ gepflegten Schiedsrichtern; ADR
   **übernommen** — eigenständig (V1) genauso wie eingebettet in die
   Feldzuweisungs-Form mit `CourtID` + `Courts`-Block (V2). Löschen per
   Wert `0`. Keine Nebenwirkungen an `CourtID`/`Sets`/`Winner`/`Status`;
-  Restores verifiziert.
-- **Offen (Messwerkzeug seit v0.9.358):** `tests/btp_officials_ohne_feld_probe.rs`
-  prüft, ob ein Officials-Write mit `CourtID 0` (Form von `officials_entries`)
-  an einem wartenden Spiel eine **frische Feldzuweisung** desselben Spiels
-  löscht, wenn er unmittelbar danach eintrifft — einmal mit `CourtID 0`,
-  einmal ohne `CourtID`-Element — und ob Löschen mit `0` ohne Feld geht.
-  Grundlage der Zuteilung beim Aufruf (Spec `sr-ar-beim-aufruf`, ADR 0080):
-  Sie geht nur in ein Release, wenn das Feld in beiden Wettläufen bleibt.
-  Ergebnis hier nachtragen.
+  Restores verifiziert. **Gilt nur für Spiele ohne Feld** — an einem Spiel
+  mit Feld löscht ein Officials-Write ohne bzw. mit falscher `CourtID` das
+  Feld (Messung 09.11.2026, nächster Punkt).
+- **CourtID im Officials-Write ist verbindlich (Messung 09.11.2026,
+  `tests/btp_officials_ohne_feld_probe.rs`, Testturnier, BTP lokal):**
+
+  | Fall | Ergebnis |
+  |---|---|
+  | 1 `CourtID 0` an einem Spiel ohne Feld | Officials übernommen, Feld bleibt leer |
+  | 2 Feld vergeben, sofort danach `CourtID 0` | **Feld gelöscht** |
+  | 3 Feld vergeben, sofort danach ohne `CourtID`-Element | **Feld gelöscht** |
+  | 4 Löschen mit `0`, Spiel ohne Feld | gelöscht |
+  | K1 nur Feld vergeben | Feld steht |
+  | K2 Feld steht bestätigt, dann `CourtID 0` | **Feld gelöscht** |
+  | K3 Feld steht bestätigt, dann ohne `CourtID` | **Feld gelöscht** |
+  | K4 Feld steht, dann mit der richtigen `CourtID` | Feld bleibt |
+
+  Es ist **kein Wettlauf**: BTP setzt bei jedem Officials-Write die
+  CourtID auf den Wert im Write, ein fehlendes Element zählt wie `0`. Ein
+  Write darf deshalb nur eine CourtID tragen, die BTP **jetzt** zeigt.
+  `write_officials_to_btp` liest seit v0.9.367 unmittelbar vor dem Write
+  frisch und setzt die CourtID daraus ein (`sync::feld_aus_frischem_stand`);
+  Spiele mit gerade laufender eigener Feldvergabe (`reserved_courts`,
+  **nach** dem Lesen genommen) und in BTP inzwischen umgeteilte Spiele
+  bleiben bis zum nächsten Zyklus liegen. Restfenster: eine Hand-Vergabe in
+  BTP, die BTP beim frischen Lesen noch nicht zeigt (asynchrone Übernahme,
+  siehe unten).
+- **Gleiche Form, offener Pfad:** Ergebnis-Writes ohne Feldfreigabe
+  (`update_request` mit `free_court_id: None`, z. B. kampflos aus TL-Web
+  und Desktop sowie der Wiederholungspfad in `sync.rs`) tragen `Official*`,
+  aber keine `CourtID`. Stand das Spiel doch auf einem Feld, verliert BTP
+  danach den Spielort. Folge gering (Spiel ist beendet), Roadmap-Punkt.
 - **Asynchrone Übernahme:** Die Antwort ist sofort `Result=1`, aber ein
   unmittelbar folgender `SENDTOURNAMENTINFO` zeigt noch den alten Stand;
   nach ≤1 s steht der neue Wert. Schreibpfade müssen also tolerant

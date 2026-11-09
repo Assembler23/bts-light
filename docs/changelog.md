@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.367
+
+- **Schiedsrichter-Write löscht kein Feld mehr.** Eine Messung an BTP
+  ergab: Jeder Schiedsrichter-Write setzt das Feld des Spiels auf den Wert
+  im Write. Vergab die Turnierleitung in BTP von Hand ein Feld, während
+  bts-light gerade SR/AR für dasselbe Spiel schrieb, war das Feld wieder
+  weg. bts-light liest den BTP-Stand jetzt unmittelbar vor jedem
+  Schiedsrichter-Write neu und schreibt das Feld von diesem Moment mit.
+
 ## v0.9.366
 
 - **Cloud-Ansage in Teilen (spart Zeichen).** Neues Häkchen „Ansage in Teilen

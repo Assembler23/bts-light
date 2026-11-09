@@ -626,6 +626,26 @@ deutlich enger als das behobene Problem (das bei **jeder** frischen
 Feldzuweisung mit Schiedsrichter-Rotation auftrat). Keine weitere
 Mitigation vorgesehen, solange kein Turnier-Befund das Gegenteil zeigt.
 
+**Nachtrag 09.11.2026 (v0.9.367): frisch lesen vor dem Write.** Die
+Messung `tests/btp_officials_ohne_feld_probe.rs` zeigte: BTP übernimmt
+die CourtID aus **jedem** Officials-Write, auch Sekunden nach einer
+bestätigten Feldvergabe (Tabelle in `docs/btp_protocol.md`). Seit die
+Rotation SR/AR schon beim Aufruf zuteilt (ADR 0080), schreibt sie viel
+öfter an wartende Spiele, und das Fenster oben wäre ein Feld-Verlust
+gewesen, sobald die Turnierleitung in BTP von Hand ein Feld vergibt.
+`write_officials_to_btp` liest deshalb unmittelbar vor dem Write den
+BTP-Stand neu und setzt jede CourtID (und `DrawID`/`PlanningID`) daraus ein
+(`sync::feld_aus_frischem_stand`). Zurückgestellt bis zum nächsten Zyklus
+werden: Spiele, die BTP nicht mehr kennt; Spiele mit **gerade laufender
+eigener Feldvergabe** — `reserved_courts` wird erst **nach** dem Lesen
+genommen, denn eine TL-Web-Vergabe kann nach dem Bauen der Einträge
+starten, und BTP zeigt ihr Feld womöglich noch nicht (Code-Review
+09.11.2026); Spiele, deren SR/AR in BTP seit dem Zyklus-Snapshot geändert
+wurden (R2: BTP gewinnt). Scheitert das Lesen, geht nichts raus. Gemerkt
+(`officials_written`) wird nur, was tatsächlich gesendet wurde. Rest:
+Eine Hand-Vergabe, die BTP beim Lesen noch nicht zeigt (Übernahme ≤ 1 s),
+kann weiterhin verloren gehen.
+
 ### Ergebnis-Write löschte die Besetzung (Live-Befund 14.08.2026, Fortsetzung)
 
 Der `CourtID`-Fix oben deckte nur die **Feldzuweisung** ab. Am selben
