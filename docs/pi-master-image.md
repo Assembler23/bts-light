@@ -125,7 +125,12 @@ Master", den du beliebig oft klonst.
 
 Auf `badhub.de/download/bts-light/` liegt ein fertig gebautes Image
 (`pi-image/bts-light-pi.img.xz`), das du ohne Teil B direkt auf alle Karten
-schreiben kannst. Es ist so gebaut wie in Teil B beschrieben, auf
+schreiben kannst. **Der Ordner `pi-image/` ist per HTTP-Basic-Auth
+geschützt** (nginx auf dem badhub-Server, seit 09.11.2026): Das Image enthält
+das WLAN-Passwort des Verleih-Routers im Klartext
+(`/etc/NetworkManager/system-connections/btsaccess.nmconnection`), und wer die
+`.img.xz` entpackt, kann es lesen. Zugangsdaten nur auf Anfrage weitergeben.
+Es ist so gebaut wie in Teil B beschrieben, auf
 Raspberry Pi OS Lite (64-bit, Bookworm), und läuft auf Pi Zero 2 W und Pi 3 B+.
 
 | Eingebaut | Wert |

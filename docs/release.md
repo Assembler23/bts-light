@@ -122,7 +122,8 @@ Download-Link, Datum und den Kompakt-Änderungen aus
 [changelog.md](changelog.md); die neueste Version steht prominent oben
 (plus der stabile Link). Direkt darunter steht der Block
 **„Court-Monitore: Raspberry-Pi-Image für die SD-Karten“** mit Link auf
-`pi-image/bts-light-pi.img.xz`, Prüfsumme und Kurzanleitung (seit November
+`pi-image/bts-light-pi.img.xz` (passwortgeschützt, weil das Image das
+WLAN-Passwort des Verleih-Routers enthält), Prüfsumme und Kurzanleitung (seit November
 2026 ein Image für Pi Zero 2 W und Pi 3 B+; das frühere Test-Image
 `bts-light-pi-v2.img.xz` ist entfallen) — die Karten werden
 beim Hallenaufbau beschrieben, oft ohne Zugriff auf dieses Repo. Der Block ist

@@ -457,6 +457,8 @@ const html = `<!DOCTYPE html>
        mit dem WLAN <code>btsaccess</code>, findet den Turnier-PC von selbst, schaltet den
        Fernseher per HDMI-CEC ein und läuft schreibgeschützt — den Strom einfach abziehen
        schadet der Karte nicht. Jede Karte ab 8&nbsp;GB.</p>
+    <p><strong>Der Download ist passwortgeschützt</strong>, weil das Image die Zugangsdaten
+       des Verleih-WLANs enthält. Benutzername und Passwort gibt es auf Anfrage bei badhub.</p>
     <ol>
       <li>Im <strong>Raspberry Pi Imager</strong> „Eigenes Image verwenden“ wählen und die
           <code>.img.xz</code> angeben — nicht vorher entpacken.</li>
