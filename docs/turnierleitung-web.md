@@ -847,7 +847,7 @@ zeigt die Seite zusätzlich:
 - **In der Schiedsrichter-Liste** (seit v0.9.355) trägt eine reservierte
   Person die Marke **„reserviert Sp. N"**. Die Vorschau „nächster: …"
   überspringt reservierte Personen, weil die Rotation sie nicht einsetzt.
-- **Vorschau als Nächstes** (seit v0.9.363): Der Turnier-PC rechnet aus,
+- **Vorschau als Nächstes** (seit v0.9.364): Der Turnier-PC rechnet aus,
   wen die Automatik als Nächstes einsetzen würde — nach Einteilungsprinzip
   und Rolle. Der Kopf der Liste zeigt dann **„nächster SR: … · AR: …"**, jede
   Zeile ihren voraussichtlichen Dienst („als Nächstes SR", sonst „→ AR").

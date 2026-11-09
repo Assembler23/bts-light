@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.363
+## v0.9.364
 
 - **Vorschau „als Nächstes SR/AR".** Die Schiedsrichter-Liste am Turnier-PC
   und im TL-Web zeigt, wen die Automatik als Nächstes einsetzen würde —
@@ -13,6 +13,15 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - **Getrennte Listen am Turnier-PC:** In diesem Modus zeigt das
   Schiedsrichter-Panel eine SR- und eine AR-Liste, jede einzeln umsortierbar.
 - TL-Web: Marke „nur SR"/„nur AR" in der Liste und im Einteilungsdialog.
+
+## v0.9.363
+
+- **Tablet als Meetingpoint auslegen.** Die Feldwahl der Tablets (`/felder`)
+  zeigt bei eingeschaltetem Meetingpoint eine Kachel **Meetingpoint**. Nach
+  der PIN zeigt das Tablet die Meetingpoint-Seite, ohne ein Feld zu belegen.
+  Fällt es nach einem WLAN-Aussetzer auf die Feldwahl zurück, bringt der
+  Knopf **Zurück zum Meetingpoint** es ohne PIN wieder hin. Im Zahnrad der
+  Anzeige führt **Zur Feldwahl** zurück zum Zählen. Nur im Hallennetz.
 
 ## v0.9.362
 

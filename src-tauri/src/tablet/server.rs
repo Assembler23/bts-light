@@ -1018,10 +1018,18 @@ async fn courts_list(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
 /// Felder-Lobby (`/felder`): Start-Seite fürs Zähltablett. Listet alle Felder
 /// (Live-Belegung via `/courts`-Poll), Tippen auf ein Feld führt auf
 /// `/court/{id}` (zählen bzw. – bei Belegung – die bestehende Übernahme-Abfrage).
-async fn lobby_page() -> impl IntoResponse {
+/// Rendert `lobby.html` mit der Bedien-PIN — sie schützt den Eintrag
+/// „Meetingpoint" (Spec meetingpoint-am-kiosk-tablet; Bedienschutz, keine
+/// Sicherheitsgrenze, wie am Zahnrad).
+fn render_lobby_html(pin: &str) -> String {
+    assets::LOBBY_HTML.replace("__TABLET_PIN__", pin)
+}
+
+async fn lobby_page(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
+    let pin = bedien_pin(&ctx.app_config_arc().tablet_settings_pin);
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Html(assets::LOBBY_HTML),
+        Html(render_lobby_html(&pin)),
     )
 }
 
@@ -7812,6 +7820,40 @@ mod tests {
         assert_eq!(bedien_pin(""), "0000");
         assert_eq!(bedien_pin("abc"), "0000");
         assert_eq!(bedien_pin("1234567890"), "12345678", "max acht Ziffern");
+    }
+
+    #[test]
+    fn feldwahl_traegt_die_bedien_pin() {
+        // Spec meetingpoint-am-kiosk-tablet: Der Eintrag „Meetingpoint" fragt
+        // dieselbe PIN ab wie das Zahnrad.
+        let html = render_lobby_html("4711");
+        assert!(html.contains(r#"var PIN = "4711";"#));
+        assert!(!html.contains("__TABLET_PIN__"));
+    }
+
+    #[tokio::test]
+    async fn meetingpoint_zustand_ohne_halle_meldet_an_und_aus() {
+        // Vertrag, auf dem die Feldwahl ihren Eintrag ein- und ausblendet:
+        // ohne `halle` 404 bei aus, 200 bei an.
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = make_ctx(1);
+        ctx.config_path = dir.path().join("config.json");
+        let ctx = Arc::new(ctx);
+        for (an, erwartet) in [(false, StatusCode::NOT_FOUND), (true, StatusCode::OK)] {
+            let mut cfg = AppConfig::default();
+            cfg.meetingpoint.enabled = an;
+            std::fs::write(&ctx.config_path, serde_json::to_string(&cfg).unwrap()).unwrap();
+            // Gleiche Größe + Zeitstempel-Auflösung → Config-Cache leeren.
+            ctx.config_cache.lock().unwrap().take();
+            let resp = meetingpoint_state(
+                State(ctx.clone()),
+                Query(MeetingpointQuery {
+                    halle: String::new(),
+                }),
+            )
+            .await;
+            assert_eq!(resp.status(), erwartet, "enabled={an}");
+        }
     }
 
     #[test]

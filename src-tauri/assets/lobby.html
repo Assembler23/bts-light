@@ -9,6 +9,13 @@
   Tippen führt auf /court/<id> (zählen). Belegte Felder (ein Tablet zählt sie
   schon) sind als „belegt" markiert und führen auf die bestehende Übernahme-
   Abfrage — Doppelbelegung bleibt serverseitig ausgeschlossen. Pollt /courts.
+
+  Meetingpoint (Spec meetingpoint-am-kiosk-tablet): Ist der Meetingpoint an
+  (eigener Takt auf /meetingpoint/state, 404 = aus), steht unter den Feldern
+  ein Eintrag „Meetingpoint" hinter der Tablet-PIN — er öffnet die
+  Anzeige-Hülle, ohne ein Feld zu belegen. War das Gerät zuletzt Meetingpoint
+  (Merker der Hülle), bringt ein Knopf oben ohne PIN dorthin zurück; die
+  Kiosk-App lädt nach jedem WLAN-Aussetzer diese Seite. Umgeleitet wird nie.
 -->
 <style>
   * { box-sizing: border-box; }
@@ -54,6 +61,31 @@
   }
   .tile.free .state { color: #4ade80; }
   .tile.busy .state { color: #fbbf24; }
+  /* Meetingpoint: abgesetzt von den Feldern (violett statt grün/gelb). */
+  #mp-zurueck {
+    display: block; width: 100%; margin: 0 0 1rem; padding: 1.4rem 1rem;
+    border: 2px solid #a78bfa; border-radius: 1rem; background: #2e1065;
+    color: #f5f3ff; font: inherit; font-size: 1.4rem; font-weight: 900; cursor: pointer;
+    appearance: none; -webkit-appearance: none;
+  }
+  #mp-zurueck:active { transform: scale(.98); }
+  #mp-zurueck[hidden] { display: none; }
+  #mp-bereich { margin-top: 1.4rem; }
+  #mp-kachel { width: 100%; max-width: 22rem; border-color: #a78bfa; background: #1e1338; }
+  #mp-kachel .state { color: #c4b5fd; }
+  #pin-modal {
+    position: fixed; inset: 0; background: rgba(2, 6, 23, .92); display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 1rem; z-index: 10;
+  }
+  #pin-modal[hidden] { display: none; }
+  #pin-modal .titel { font-size: 1.3rem; font-weight: 800; }
+  #pin-modal .unter { font-size: .9rem; color: #94a3b8; }
+  .pin-display { font-size: 2rem; letter-spacing: .6rem; min-height: 2.4rem; font-weight: 700; }
+  .pin-pad { display: grid; grid-template-columns: repeat(3, 5rem); gap: .75rem; }
+  .pin-pad button { width: 5rem; height: 4rem; font-size: 1.5rem; font-weight: 700;
+    border-radius: .75rem; border: 1px solid #334155; background: #111c33; color: #f8fafc; }
+  .pin-pad button:active { background: #1e293b; }
+  .pin-pad button.pin-aux { font-size: 1.2rem; color: #94a3b8; }
   #empty, #offline { text-align: center; color: #94a3b8; padding: 2rem; }
   #offline { color: #fda4af; display: none; }
   #offline.show { display: block; }
@@ -67,9 +99,36 @@
 </header>
 <main>
   <div id="offline">Keine Verbindung zum Turnier-PC …</div>
+  <button type="button" id="mp-zurueck" hidden>Zurück zum Meetingpoint</button>
   <div id="grid"></div>
   <div id="empty" style="display:none">Noch keine Felder vorhanden.</div>
+  <div id="mp-bereich" hidden>
+    <button type="button" class="tile" id="mp-kachel">
+      <div class="court">Meetingpoint</div>
+      <div class="sub">Anzeige für Spieler · belegt kein Feld</div>
+      <div class="state">PIN — antippen</div>
+    </button>
+  </div>
 </main>
+<div id="pin-modal" hidden>
+  <div class="titel">Meetingpoint</div>
+  <div class="unter">PIN eingeben</div>
+  <div class="pin-display" id="pin-display"></div>
+  <div class="pin-pad" id="pin-pad">
+    <button type="button" data-k="1">1</button>
+    <button type="button" data-k="2">2</button>
+    <button type="button" data-k="3">3</button>
+    <button type="button" data-k="4">4</button>
+    <button type="button" data-k="5">5</button>
+    <button type="button" data-k="6">6</button>
+    <button type="button" data-k="7">7</button>
+    <button type="button" data-k="8">8</button>
+    <button type="button" data-k="9">9</button>
+    <button type="button" data-k="del" class="pin-aux">⌫</button>
+    <button type="button" data-k="0">0</button>
+    <button type="button" data-k="cancel" class="pin-aux">✕</button>
+  </div>
+</div>
 <script>
 (function () {
   'use strict';
@@ -155,7 +214,106 @@
     akkuEl.classList.toggle('kritisch', stufe === 'kritisch');
   });
 
-  function go(id) { location.href = '/court/' + encodeURIComponent(id); }
+  // ── Meetingpoint: Inline-Kopie von src/io/lobbyMeetingpoint.mjs (Drift-Test
+  //    scripts/test-inline-kopien.mjs) — Änderungen dort und hier gemeinsam ──
+  var ZULETZT_KEY = "badhub.anzeige.zuletzt";
+  function meetingpointZiel() {
+    return "/anzeige?layout=meetingpoint";
+  }
+  function mpAusStatus(status, bisher) {
+    if (status === 200) return true;
+    if (status === 404) return false;
+    return !!bisher;
+  }
+  function merkerLesen(roh) {
+    if (typeof roh !== "string" || roh === "") return null;
+    var o;
+    try { o = JSON.parse(roh); } catch (e) { return null; }
+    return o && typeof o === "object" && !Array.isArray(o) ? o : null;
+  }
+  function warZuletztMeetingpoint(roh) {
+    var o = merkerLesen(roh);
+    return !!o && o.layout === "meetingpoint";
+  }
+  function ohneMeetingpointMarke(roh) {
+    var o = merkerLesen(roh);
+    if (!o || o.layout !== "meetingpoint") return null;
+    return JSON.stringify({ layout: "tafel", court: o.court === undefined ? null : o.court, halle: o.halle === undefined ? null : o.halle });
+  }
+  // ── Ende Inline-Kopie ──
+
+  // ── PIN-Freigabe: Inline-Kopie von src/io/pinFreigabe.mjs (Drift-Test
+  //    scripts/test-inline-kopien.mjs). Derselbe Schlüssel wie Zähl-Tablet
+  //    und Hülle (gleicher Origin) — wer am Zahnrad gerade die PIN eingab,
+  //    kommt ohne zweite Eingabe zum Meetingpoint. ──
+  var PIN_FREIGABE_KEY = "badhub.tablet.pinFreigabeBis";
+  var FREIGABE_MS = 5 * 60 * 1000;
+  function neueFreigabe(jetztMs) { return jetztMs + FREIGABE_MS; }
+  function freigabeGueltig(bisMs, jetztMs) {
+    if (typeof bisMs !== "number" || !Number.isFinite(bisMs) || bisMs <= 0) return false;
+    if (bisMs <= jetztMs) return false;
+    return bisMs - jetztMs <= FREIGABE_MS;
+  }
+  function freigabeLesen(roh) {
+    if (typeof roh !== "string" || !/^\d{1,16}$/.test(roh)) return null;
+    var n = Number(roh);
+    return n > 0 ? n : null;
+  }
+  // ── Ende Inline-Kopie ──
+
+  // Bedien-PIN (Bedienschutz, keine Sicherheitsgrenze). Gestückelt, damit
+  // der Server den Vergleichswert nicht mitersetzt; unersetzt → „0000".
+  var PIN = "__TABLET_PIN__";
+  var SETTINGS_PIN = (!PIN || PIN === "__TABLET" + "_PIN__") ? "0000" : PIN;
+  function lies(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  function pinFreigabeAktiv() { return freigabeGueltig(freigabeLesen(lies(PIN_FREIGABE_KEY)), Date.now()); }
+  function pinFreigabeMerken() {
+    try { localStorage.setItem(PIN_FREIGABE_KEY, String(neueFreigabe(Date.now()))); } catch (e) {}
+  }
+  // Marke „zuletzt Meetingpoint" löschen — nur `layout`, die Halle bleibt.
+  function markeLoeschen() {
+    var neu = ohneMeetingpointMarke(lies(ZULETZT_KEY));
+    if (neu !== null) { try { localStorage.setItem(ZULETZT_KEY, neu); } catch (e) {} }
+  }
+
+  var mpAn = false;
+  var mpZurueck = document.getElementById('mp-zurueck');
+  var mpBereich = document.getElementById('mp-bereich');
+  var pinModal = document.getElementById('pin-modal');
+  var pinDisplay = document.getElementById('pin-display');
+  var pinEntry = '';
+  function zeigeMeetingpoint() {
+    mpBereich.hidden = !mpAn;
+    mpZurueck.hidden = !(mpAn && warZuletztMeetingpoint(lies(ZULETZT_KEY)));
+  }
+  function zumMeetingpoint() { location.href = meetingpointZiel(); }
+  function renderPin() {
+    var total = Math.max(SETTINGS_PIN.length, 4);
+    pinDisplay.textContent = '•'.repeat(pinEntry.length) + '–'.repeat(Math.max(0, total - pinEntry.length));
+  }
+  function pinKey(k) {
+    if (k === 'cancel') { pinModal.hidden = true; pinEntry = ''; return; }
+    if (k === 'del') { pinEntry = pinEntry.slice(0, -1); renderPin(); return; }
+    if (pinEntry.length >= Math.max(SETTINGS_PIN.length, 8)) return;
+    pinEntry += k; renderPin();
+    if (pinEntry.length >= SETTINGS_PIN.length) {
+      if (pinEntry === SETTINGS_PIN) { pinFreigabeMerken(); zumMeetingpoint(); }
+      else { pinDisplay.textContent = 'PIN falsch'; pinEntry = ''; setTimeout(renderPin, 800); }
+    }
+  }
+  document.getElementById('mp-kachel').addEventListener('click', function () {
+    if (pinFreigabeAktiv()) { zumMeetingpoint(); return; }
+    pinEntry = ''; renderPin(); pinModal.hidden = false;
+  });
+  document.getElementById('pin-pad').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-k]');
+    if (btn) pinKey(btn.dataset.k);
+  });
+  // Ohne PIN: Das Tablet lag schon als Meetingpoint aus und ist nur auf die
+  // Feldwahl zurückgefallen — jeder Spieler soll es zurückholen können.
+  mpZurueck.addEventListener('click', zumMeetingpoint);
+
+  function go(id) { markeLoeschen(); location.href = '/court/' + encodeURIComponent(id); }
 
   function render(courts) {
     offline.classList.remove('show');
@@ -243,6 +401,16 @@
       });
   }
   tick();
+
+  // Meetingpoint an/aus: eigener, langsamer Takt — der Status ändert sich
+  // selten, und ein Aussetzer lässt den bisherigen Stand stehen.
+  var MP_TAKT_MS = 15000;
+  function mpTick() {
+    abrufMitFrist('/meetingpoint/state', { cache: 'no-store' }, function (r) { return r.status; })
+      .then(function (status) { mpAn = mpAusStatus(status, mpAn); }, function () { /* Stand bleibt */ })
+      .then(function () { zeigeMeetingpoint(); setTimeout(mpTick, MP_TAKT_MS); });
+  }
+  mpTick();
 })();
 </script>
 </body>
