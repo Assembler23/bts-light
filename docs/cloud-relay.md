@@ -513,6 +513,15 @@ statt an einem die ganze Charge zu verlieren (siehe
 [announcements.md](announcements.md)). In einer per Relay angebundenen
 **fernen** Halle erklingt die Ansage weiterhin gar nicht — dort holt der
 Slave bewusst keine Aufträge ab.
+**Komplett-Ansage** (v0.9.370): eine neue `TlAction`-Variante
+`announce_court_full { courtId, matchId }`. Der Relay parst Aktionen
+**typisiert** — ein alter Relay antwortet **422**, also **Relay-Deploy vor
+dem Client-Release** (geschieht automatisch beim main-Merge). Der Host legt
+einen gewöhnlichen `court_call`-Auftrag mit Stufe 4 ab (= vollständige
+Ansage ohne Stufenwort, beide Parteien), ohne den Aufruf-Zähler anzufassen —
+kein neuer Auftragstyp, alle Ansage-Geräte können ihn schon. Der Zustand
+trägt das Fähigkeitsmerkmal `can_announce_court_full`; fehlt es (älterer
+Host, der die Aktion still verwürfe), zeigt die Seite den Eintrag nicht.
 **Nachruf an die Zähltafelbedienung** (Spec `tl-sicht-feinschliff` Punkt 2,
 v0.9.232): eine neue `TlAction`-Variante `announce_scorekeeper { courtId }`.
 Der Relay parst Aktionen **typisiert** — ein alter Relay antwortet **422**.
@@ -642,6 +651,20 @@ Neue `TlAction`-Varianten (geschlossener Satz, ADR 0011):
 `announce_officials`. Die Rolle reist als `"sr"`/`"ar"`
 (`relay_proto::TlOfficialRole`).
 
+Seit v0.9.365 (Spec `sr-rotationsmodus`, ADR 0079):
+- `official_reorder` trägt optional `list: "ar"` (AR-Liste in Modus
+  „getrennt"); fehlt das Feld, gilt die Hauptliste.
+- Neu `official_set_role { officialId, role }` mit `role` = `"beides"`,
+  `"sr"` oder `"ar"`; der Host prüft den Wert.
+- `TlState` trägt `officials_ar_order` (nur IDs, nur in Modus „getrennt"),
+  `officials_rotation_mode`, `can_set_official_role` und je Official
+  `role`/`next_role`/`next_rank` — alles optional, opak durchgereicht.
+- **Deploy-Reihenfolge:** Der Relay liest `TlAction` typisiert. Ein alter
+  Relay verwirft `list` still (der Zug landete in der SR-Liste) und lehnt
+  `official_set_role` ab. Der Relay deployt deshalb beim Merge, **vor**
+  dem Client-Release. Die Seite zeigt Rollenwahl und AR-Liste nur, wenn der
+  Host `can_set_official_role` bzw. `officials_ar_order` liefert.
+
 Dazu ein Frame-Paar für den **gezielten** Detail-Abruf, Muster Punktverlauf:
 `RelayFrame::OfficialDetailRequest { req_id, official_id }` →
 `HostFrame::OfficialDetail { req_id, json }`, ausgeliefert über
@@ -685,6 +708,42 @@ beliebige `matchId` ankommen, deshalb prüft der Host vor dem Speichern.
 das neue `tl.html` mit dem Menüpunkt (v0.9.355). An einem älteren Host fehlt das Flag, der
 Menüpunkt bleibt verborgen. Sonst landete die Einteilung ungeprüft und ohne
 Reservierung im alten Host.
+
+### Spielersuche (seit v0.9.368, Spec [tl-spielersuche](features/tl-spielersuche.md), ADR [0081](adr/0081-tl-spielersuche-am-turnier-pc.md))
+
+Die Suche läuft **am Turnier-PC** über den ganzen BTP-Bestand; der Relay ist
+nur Briefträger. Frame-Paar nach dem Muster der Schiedsrichter-Details:
+`RelayFrame::TlSearchRequest { reqId, query, candidates }` →
+`HostFrame::TlSearchResult { reqId, json }` (opakes JSON, leer = Fehler).
+
+- Route `POST /tl/api/search` (LAN und Relay gleich), Geräte-Token im
+  `Authorization`-Header, Rumpf `{"q":"…","candidates":true}` höchstens
+  1 KiB (sonst 413). Der Begriff steht **nie in der URL** — er ist ein
+  Personenname und gehörte sonst ins nginx-Access-Log. Weder Relay noch
+  Turnier-PC protokollieren ihn.
+- Der Relay prüft grob vor (2–64 Zeichen, höchstens 6 Wörter, Konstanten
+  `TL_SEARCH_*` in `relay-proto`) und schickt Ungültiges gar nicht erst zum
+  Host (400). Eigene Pending-Map `search_pending` (Deckel
+  `MAX_PENDING_PER_NS`, sonst 429), beim Host-Abriss verworfen.
+- Ungültige Begriffe, die erst nach der Faltung am Host auffallen (z. B.
+  „ue" = ein Zeichen), kommen als `{"error":"invalid"}` zurück → 400; laufen
+  am Host schon zwei Suchen (`MAX_GLEICHZEITIG`, LAN und Cloud zusammen),
+  als `{"error":"busy"}` → 429. Am LAN antwortet der Host direkt so.
+- Antwort ≤ `MAX_TL_SEARCH_LEN` (256 KiB); der Host kürzt selbst darunter
+  (Deckel 50 Treffer je Gruppe, notfalls halbiert), Größeres macht der Relay
+  zu 503. `Cache-Control: no-store`.
+- Fähigkeit: `TlState.can_search`. Die Seite zeigt das Suchfeld nur damit —
+  ein älterer Turnier-PC verwirft den unbekannten Frame still, und jede
+  Suche hinge sonst 20 s am `TL_TIMEOUT`.
+- Profil-Schalter `hideSearch` in `TlDisplaySettingsWire` (invertiert,
+  fehlt = sichtbar). Nur Anzeige, kein Zugriffsschutz.
+- Positivliste der Antwort und Datenschutz: siehe Spec, Wächter
+  `search_answer_*` in `tablet/suche_tests.rs`. Neu gegenüber `TlState`:
+  SR-/AR-Namen an beendeten Spielen (nur mit Schiedsrichter-Betrieb).
+
+**Deploy-Reihenfolge:** Der Relay deployt beim Merge und kennt die Route
+dann; der Turnier-PC meldet `can_search` erst ab v0.9.368. Bis dahin bleibt
+das Suchfeld verborgen.
 
 ### Setzplätze (seit v0.9.298, Spec [setzplaetze-anzeigen](features/setzplaetze-anzeigen.md), ADR [0059](adr/0059-setzplatz-als-text-aus-dem-parser.md))
 
@@ -1235,6 +1294,10 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   `MP_AUFGERUFEN_ANZEIGE_MS` (2 min) als „Aufgerufen – Feld N". Ein alter
   Relay lässt das Feld fallen, dann erscheint eine leere Karte ohne Hinweis.
   Der Relay deployt beim Merge aber vor jeder App.
+- `MpPartie.ar` (seit v0.9.361, ADR 0080, `serde(default)`, ohne Wert nicht
+  serialisiert): Name des Aufschlagrichters, **nur Anzeige** (kein
+  Check-in-Platz). Der Relay deckelt ihn wie alle Texte auf `MAX_MP_TEXT`.
+  Ein alter Host schickt das Feld nicht, dann zeigt die Seite keinen AR.
 - `TlAction::CalledReorder { matchId, beforeMatchId? }` (JSON
   `called_reorder`, seit v0.9.347, ADR 0077): ein gerufenes Spiel in der
   Aufruf-Reihenfolge verschieben, nur innerhalb derselben Aufruf-Halle.

@@ -764,8 +764,23 @@ wiederholt sie ([preparation.md](preparation.md)). Format:
 
 > Gong → **„In Vorbereitung."** → Disziplin → Paarung („… gegen …") →
 > **„Bitte in *Halle X*."** (entfällt bei Ein-Hallen-Turnieren) →
-> Meetingpoint-Zusatz (nur bei eingeschaltetem Meetingpoint, Standard
-> „Bitte zum Meetingpoint gehen.", siehe [meetingpoint.md](meetingpoint.md))
+> **„Schiedsrichter: *Name*. Aufschlagrichter: *Name*."** (seit v0.9.360,
+> siehe unten) → Meetingpoint-Zusatz (nur bei eingeschaltetem Meetingpoint,
+> Standard „Bitte zum Meetingpoint gehen.", siehe [meetingpoint.md](meetingpoint.md))
+
+**Besetzung im Aufruf (seit v0.9.360).** Mit Schiedsrichtern teilt die
+Rotation SR und AR schon beim Aufruf zu (siehe
+[Schiedsrichter verwalten](schiedsrichter-management.md#zuteilung-schon-beim-aufruf-seit-v09359-adr-0080)).
+Der erste Aufruf nennt sie dann gleich mit — so wissen beide, dass sie dran
+sind. Es gilt das Häkchen für die Besetzungs-Ansage in den
+Ansage-Einstellungen dieses Geräts; ist es aus, fehlen die Namen. Der zweite
+und dritte Aufruf nennen keine Besetzung, ebenso wenig wird angesagt, wenn
+jemand später nachrückt. Auch der Knopf „Ansage" im Vorbereitungs-Tab nennt
+die Besetzung. Die Namen kommen fertig vom Turnier-PC im Ansage-Auftrag
+mit (`meetingpoint_call` mit `sr`/`ar`), weil ein Slave-Rechner keine
+Schiedsrichter-Daten hat; ein älteres Ansage-Gerät sagt den Aufruf ohne
+Besetzung an.
+<!-- pruef: "Aufschlagrichter" in src/io/prepBesetzung.mjs -->
 
 Der Zusatz steht auch am Ende des zweiten/dritten Aufrufs. Er reist in der
 Vorbereitungs-Sicht des Turnier-PCs mit (`PreparationView.meetingpoint_ansage`,
@@ -1034,6 +1049,25 @@ Einrichten nicht ihre Stimme.
   „Cloud-Stimme: Zeichen verbraucht" mit dem Tagesstand.
   <!-- pruef: "Verbrauch der Cloud-Stimme" in src/components/AnnounceSettings.tsx -->
   <!-- pruef: "tts-zeichen.json" in src-tauri/src/tts_verbrauch.rs -->
+- **Ansage in Teilen vertonen (seit v0.9.366, Standard aus):** Häkchen
+  **„Ansage in Teilen vertonen (spart Zeichen)"** im Cloud-Stimmen-Block,
+  wirkt sofort wie die Dienstwahl und gilt für jeden Dienst. Die Ansage wird
+  an ihren Blockpausen geschnitten („Feld 3." · „Herrendoppel." ·
+  „Viertelfinale." · Namen · „gegen" · Namen), jeder Teil einzeln vertont und
+  gecacht — Feld, Disziplin und Runde kosten dann nur beim ersten Mal, danach
+  nur noch die neuen Namen. Geschätzt **50–60 % weniger Zeichen** je
+  Turniertag. Die Teile werden zu einer WAV zusammengesetzt, Randstille
+  gekürzt, dazwischen genau 350 ms Pause. Grenzen: Die Stimme kann zwischen
+  den Teilen leicht anders klingen (vor allem ElevenLabs v3) — darum vorher
+  anhören; beim ersten Mal bis zu acht gleichzeitige Anfragen je Ansage (die
+  Gemini-Gratisstufe reicht dafür nicht). Scheitert ein Teil, wird die
+  Ansage als Ganzes vertont, nie halb gespielt. Ein Ansage-Slave mit geerbter
+  Stimme übernimmt den Schalter vom Master. Ansage-Seiten cachen die Teile
+  weiterhin nur im Arbeitsspeicher. Der Verbrauchszähler bucht nur die neu
+  vertonten Teile; eine Ansage zählt „aus Cache", wenn alle Teile von dort
+  kamen. Spec: [features/ansage-in-teilen.md](features/ansage-in-teilen.md).
+  <!-- pruef: "Ansage in Teilen vertonen (spart Zeichen)" in src/components/AnnounceSettings.tsx -->
+  <!-- pruef: "teile: false" in src-tauri/src/config.rs -->
 - **Datenschutz:** Bei Auswahl eines dieser Dienste gehen die Namen der
   gerufenen Paarung an den Anbieter (alle drei USA) — nur nach aktiver
   Auswahl, Hinweis im Block.
@@ -1054,6 +1088,13 @@ rohes PCM würde zu WAV). Der Command heißt aus Kompatibilität weiter
 `*_key`/`*_voice`. Messwerkzeuge gegen die echten Dienste (kosten Kontingent):
 `ELEVENLABS_TEST_KEY=… cargo test --lib elevenlabs_echt -- --ignored`, ebenso
 `OPENAI_TEST_KEY` + `openai_echt` und `GEMINI_TEST_KEY` + `gemini_echt`.
+Geteilte Ansage: [`tts_teile.rs`](../src-tauri/src/tts_teile.rs) schneidet das
+SSML an `<break time="350ms"/>` (offenes `<prosody>` wird je Teil ergänzt) und
+setzt PCM 24 kHz mono 16 bit wieder zusammen; `in_teilen_vertonen`
+(`commands.rs`) fragt fehlende Teile gleichzeitig im Format `Format::Wav24`
+an (eigene Cache-Einträge, nie mit MP3 vermischt). Schalter
+`azure_tts.teile`, in der Share `AzureTtsShare.teile` (serde-Default aus).
+Messwerkzeug: `ELEVENLABS_TEST_KEY=… cargo test --lib elevenlabs_teile_echt -- --ignored`.
 
 ## Schiedsrichter und Aufschlagrichter
 
@@ -1101,6 +1142,7 @@ Zwei Auftragsarten aus dem Kern (`AnnounceJobKind`, Ältere Geräte schweigen
 
 - `meetingpoint_call` — die Aufruf-Automatik hat ein Spiel gerufen;
   gesprochen wie ein erster Vorbereitungs-Aufruf („In Vorbereitung …").
+  Trägt seit v0.9.360 optional `sr`/`ar` (Namen der Besetzung).
 - `meetingpoint_missing` — Fehlende einer gerufenen Partie nach der
   eingestellten Zeit, **mit Namen** (nur der Turnier-PC weiß, wer fehlt):
   „<Namen>. Bitte zum Meetingpoint in <Halle>." (`prepareMeetingpointMissing`

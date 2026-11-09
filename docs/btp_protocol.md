@@ -358,7 +358,38 @@ gepflegten Schiedsrichtern; ADR
   **übernommen** — eigenständig (V1) genauso wie eingebettet in die
   Feldzuweisungs-Form mit `CourtID` + `Courts`-Block (V2). Löschen per
   Wert `0`. Keine Nebenwirkungen an `CourtID`/`Sets`/`Winner`/`Status`;
-  Restores verifiziert.
+  Restores verifiziert. **Gilt nur für Spiele ohne Feld** — an einem Spiel
+  mit Feld löscht ein Officials-Write ohne bzw. mit falscher `CourtID` das
+  Feld (Messung 09.11.2026, nächster Punkt).
+- **CourtID im Officials-Write ist verbindlich (Messung 09.11.2026,
+  `tests/btp_officials_ohne_feld_probe.rs`, Testturnier, BTP lokal):**
+
+  | Fall | Ergebnis |
+  |---|---|
+  | 1 `CourtID 0` an einem Spiel ohne Feld | Officials übernommen, Feld bleibt leer |
+  | 2 Feld vergeben, sofort danach `CourtID 0` | **Feld gelöscht** |
+  | 3 Feld vergeben, sofort danach ohne `CourtID`-Element | **Feld gelöscht** |
+  | 4 Löschen mit `0`, Spiel ohne Feld | gelöscht |
+  | K1 nur Feld vergeben | Feld steht |
+  | K2 Feld steht bestätigt, dann `CourtID 0` | **Feld gelöscht** |
+  | K3 Feld steht bestätigt, dann ohne `CourtID` | **Feld gelöscht** |
+  | K4 Feld steht, dann mit der richtigen `CourtID` | Feld bleibt |
+
+  Es ist **kein Wettlauf**: BTP setzt bei jedem Officials-Write die
+  CourtID auf den Wert im Write, ein fehlendes Element zählt wie `0`. Ein
+  Write darf deshalb nur eine CourtID tragen, die BTP **jetzt** zeigt.
+  `write_officials_to_btp` liest seit v0.9.367 unmittelbar vor dem Write
+  frisch und setzt die CourtID daraus ein (`sync::feld_aus_frischem_stand`);
+  Spiele mit gerade laufender eigener Feldvergabe (`reserved_courts`,
+  **nach** dem Lesen genommen) und in BTP inzwischen umgeteilte Spiele
+  bleiben bis zum nächsten Zyklus liegen. Restfenster: eine Hand-Vergabe in
+  BTP, die BTP beim frischen Lesen noch nicht zeigt (asynchrone Übernahme,
+  siehe unten).
+- **Gleiche Form, offener Pfad:** Ergebnis-Writes ohne Feldfreigabe
+  (`update_request` mit `free_court_id: None`, z. B. kampflos aus TL-Web
+  und Desktop sowie der Wiederholungspfad in `sync.rs`) tragen `Official*`,
+  aber keine `CourtID`. Stand das Spiel doch auf einem Feld, verliert BTP
+  danach den Spielort. Folge gering (Spiel ist beendet), Roadmap-Punkt.
 - **Asynchrone Übernahme:** Die Antwort ist sofort `Result=1`, aber ein
   unmittelbar folgender `SENDTOURNAMENTINFO` zeigt noch den alten Stand;
   nach ≤1 s steht der neue Wert. Schreibpfade müssen also tolerant
@@ -765,13 +796,62 @@ bts-light liest den Wert (`BtpMatch::highlight`, Werte außerhalb 0–6 gelten
 als 0) und zeigt ihn in der Turnierleitungs-Sicht (Spec
 [`features/tl-zeilenfarbe.md`](features/tl-zeilenfarbe.md)).
 
-**Schreiben:** `highlight_request` (proto.rs) schreibt ausschließlich
-`Match.Highlight` mit einem Wert 0–6, Match-Knoten NUR mit Identität
-(`ID`/`DrawID`/`PlanningID`) — **kein** `Status` (dieselbe Check-in-Falle wie
-oben) und keine Ergebnisfelder. Gemessen: BTP antwortet `Result=1`, der Wert
-hält beim Nachlesen (Setzen, Löschen, Zurücksetzen), der Planer **zeichnet
-die Farbe sofort** und behält sie über eigene Bedienschritte hinweg; keine
-Nebenwirkung am Check-in-`Status`. Zwei Schreiber nutzen den Request:
+**Schreiben:** `highlight_request` (proto.rs) schreibt `Match.Highlight` mit
+einem Wert 0–6 plus Identität (`ID`/`DrawID`/`PlanningID`) — **kein**
+`Status` (dieselbe Check-in-Falle wie oben) und keine Ergebnisfelder.
+Gemessen: BTP antwortet `Result=1`, der Wert hält beim Nachlesen (Setzen,
+Löschen, Zurücksetzen), der Planer **zeichnet die Farbe sofort** und behält
+sie über eigene Bedienschritte hinweg; keine Nebenwirkung am
+Check-in-`Status`.
+
+**BTP setzt bei jedem Match-Write alle vier Planungsfelder** (Messung
+09.11.2026, `tests/btp_highlight_sr_write_probe.rs`, Testturnier):
+`CourtID`, `Official1ID`, `Official2ID` und `Highlight` übernimmt BTP aus dem
+Knoten — ein **fehlendes Element heißt 0**. Gemessen:
+
+| Write | ohne das Feld | mit dem Feld |
+|---|---|---|
+| Schiedsrichter-Write, Farbe 3 vorher | Farbe → 0 | Farbe bleibt 3 |
+| Farb-Write an wartendem Spiel mit SR/AR | Besetzung → leer | Besetzung bleibt |
+| Farb-Write an laufendem Spiel | Feld **und** SR → leer | Feld und SR bleiben |
+
+Im Betrieb hieß das: Gerufene Spiele verloren ihr Gelb, sobald die Rotation
+ihnen SR/AR schrieb (Feldbefund 09.11.2026), und ein Farb-Tipp im TL-Web an
+einem laufenden Spiel nahm diesem Feld und Schiedsrichter. **Seit v0.9.369**
+trägt deshalb
+
+- der **Farb-Write** `CourtID` und `Official1ID/2ID`
+  (`HighlightEntry.court_id`/`officials`), unmittelbar vorher frisch gelesen
+  (`server.rs::write_highlight_to_btp` → `sync::planung_aus_frischem_stand`);
+- der **eigenständige Schiedsrichter-Write** die Farbe
+  (`MatchCourt.highlight = Some(..)`, frisch gelesen in
+  `sync::feld_aus_frischem_stand`).
+
+**Frisch gelesen heißt nicht übernommen.** BTP zeigt einen eigenen Write
+beim Nachlesen erst nach **350–840 ms** (gemessen 09.11.2026, je drei
+Durchgänge für Farbe und Besetzung, `how_fast_does_btp_show_own_writes`).
+Im selben Sync-Lauf schreibt bts-light aber das Aufruf-Gelb und
+Millisekunden später SR/AR; ein TL-Farb-Tipp kann neben einem
+Schiedsrichter-Write liegen. Der zweite Write läse dann den alten Wert und
+löschte den ersten. Deshalb merkt sich jeder Match-Write **vor dem Senden**
+die vier Werte, die er setzt (`btp::eigene_writes`, 5 s Haltezeit, bei Fehler
+zurückgenommen); beide Frisch-Lese-Helfer legen diesen Merkstand über den
+gelesenen Stand. Zeigt BTP den gemerkten Stand schon, wird er sofort
+verworfen; ein Ergebnis-Write verwirft ihn ebenfalls. Weil das Schreib-Gate
+Writes parallel laufen lässt, reiht ein eigener Mutex
+(`eigene_writes::SERIELL`) alle Match-Writes vom frischen Lesen bis zur
+BTP-Antwort hintereinander — sonst lasen zwei parallele Writes (TL-Farb-Tipp
+neben dem Sync-Lauf) beide den alten Stand, und der später ankommende setzte
+den anderen zurück. Restfenster: Ändert jemand in BTP von Hand dasselbe
+Spiel, bevor BTP unseren Write zeigt, schreibt ein folgender eigener Write
+den eigenen Wert zurück.
+
+Feldvergabe und Freigabe (`court_assign_request` mit `Courts`-Block) lassen
+`Highlight` bewusst weg (`None`): Dort ist das Löschen der Aufrufmarke
+gewollt. Eine **Handfarbe** geht beim Ruf aufs Feld damit ebenfalls verloren
+— bekannte Grenze, siehe Roadmap.
+
+Zwei Schreiber nutzen den Request:
 
 - **Zeilenfarbe der Turnierleitungs-Seite** (`TlAction::SetHighlight`,
   `tl.rs::execute_highlight_action`): ein Write je Tipp, ohne
@@ -794,11 +874,12 @@ Nebenwirkung am Check-in-`Status`. Zwei Schreiber nutzen den Request:
   danach weiter als Aufrufmarke geführt und beim Ruf aufs Feld gelöscht —
   vorher blieb es nach einem Neustart verwaist stehen.
 
-Ein Einzelfall bleibt unerklärt: Ein Spiel, das bts-light kurz zuvor
+Ein früher unerklärter Einzelfall — ein Spiel, das bts-light kurz zuvor
 automatisch aufs Feld gelegt hatte, stand beim Lesen auf `1`, wurde im
-Planer weiß gezeichnet und lag eine halbe Stunde später ohne Write von
-bts-light auf `0`. Deshalb gilt nirgends die Annahme, eine Farbe halte
-ewig — BTP ist die Wahrheit (R2).
+Planer weiß gezeichnet und lag später ohne Farb-Write auf `0` — passt zur
+Messung vom 09.11.2026: Der Zuweisungs-Write trägt kein `Highlight`, BTP
+setzt es also auf 0. Unabhängig davon gilt nirgends die Annahme, eine Farbe
+halte ewig — BTP ist die Wahrheit (R2).
 
 **Voraussetzungen / Caveats:**
 

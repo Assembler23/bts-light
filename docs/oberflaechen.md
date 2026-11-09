@@ -27,7 +27,7 @@ zeigen.
 | **Tablets** | Drei Reiter: **Übersicht** (welches Tablet hängt an welchem Feld, mit Akkustand), **In Vorbereitung** (gerufene Spiele), **QR-Codes** zum Einrichten der Geräte — die Adresse daneben ist ein Link und öffnet den Spielzettel im Browser des Turnier-PCs; bei eingeschaltetem Meetingpoint steht dort auch die Adresse der [Meetingpoint-Seite](meetingpoint.md) je Halle. | nie |
 | **Turnierleitung** | Hier entstehen die Zugänge für die Turnierleitungs-Oberfläche: Gerät koppeln, QR-Code zeigen, Zugang wieder entziehen. | nie — hier schaltet man sie schließlich ein |
 | **Check-In** | Wer ist da, wer fehlt — je Klasse, gesetzte Meldungen mit ihrem Setzplatz (`[1]`). Von Hand einchecken oder zurücksetzen, Fehlende ausrufen lassen, Hallen-Ansicht, Zeitplan, Check-In-Seite und QR-Aushang öffnen. | Check-In aus **oder** Turnier-Kennung fehlt |
-| **Schiedsrichter** | Einsatzplanung: Reihenfolge, Pausen, Sperrlisten, feldweise Schalter. Die Stammliste kommt aus BTP. | „Mit Schiedsrichtern spielen" aus |
+| **Schiedsrichter** | Einsatzplanung: Reihenfolge (bei „Getrennte Listen" je eine für SR und AR), Rolle je Person („SR und AR", „nur SR", „nur AR"), Vorschau „als Nächstes SR/AR", Pausen, Sperrlisten, feldweise Schalter. Die Stammliste kommt aus BTP. | „Mit Schiedsrichtern spielen" aus |
 | **Ansagen** | Feld von Hand ansagen, Freitext sprechen, gespeicherte Ansagen, Verlauf mit „Erneut abspielen" — und alle Detail-Einstellungen zu Stimme und Tempo. Unter dem Test-Knopf steht, worüber die Ansage läuft („Ausgabe: Windows-Standard (…)"), und **Ansage über:** wählt ein festes Gerät für diesen PC, siehe [Ausgabegerät](announcements.md#ausgabegerät-seit-v09318). | Ansagen aus |
 | **Monitore** | Die Geräteverwaltung für Fernseher und Pis: **welches Gerät zeigt was**. Siehe unten. | Court-Monitor aus |
 | **Siegerehrung** | Steuert, welche Disziplin der Sieger-Monitor gerade zeigt. Bewusst ohne Rotation, damit das Publikum das Podium fotografieren kann. | Court-Monitor aus |
@@ -59,7 +59,7 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 
 | Seite | Gerät | Was drauf ist |
 |---|---|---|
-| **Felder-Lobby** `/felder` | Zähl-Tablet | Die Startseite eines Tablets: eine Kachel je Feld mit Paarung und Zustand. Antippen führt zum Feld. |
+| **Felder-Lobby** `/felder` | Zähl-Tablet | Die Startseite eines Tablets: eine Kachel je Feld mit Paarung und Zustand. Antippen führt zum Feld. Ist der Meetingpoint an, steht darunter die Kachel **Meetingpoint** (mit PIN), die das Tablet zur Meetingpoint-Anzeige macht. |
 | **Spielzettel** `/court/<Feld>` | Zähl-Tablet | Der eigentliche Zählbildschirm. Siehe [Das Zähltablett bedienen](tablet-bedienen.md). |
 | **Zähltafel** `/court/<Feld>/tafel` | Tablet am Netz oder TV | Nur zwei große Punktzahlen und der Satzstand — wie eine klassische Tafel, ohne Namen. |
 | **Anzeige-Hülle** `/anzeige` | Tablet, das nur anzeigen soll | Zeigt eine der Anzeigen bildschirmfüllend, mit Zahnrad zum Umschalten. Praktisch, wenn ein Tablet nicht zählt, sondern nur zeigen soll. |
@@ -93,7 +93,7 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 
 | Seite | Gerät | Was drauf ist |
 |---|---|---|
-| **Turnierleitungs-Oberfläche** `/tl` | Tablet oder Telefon | Dieselben Entscheidungen wie am PC, aber unterwegs in der Halle: Felder, Aufgaben, Zähltafel-Warteschlange, Schiedsrichter, Spiele, beendete Spiele, Spielzeiten, Anfangszeiten. Welche dieser Panels ein Gerät zeigt, lässt sich je Gerät einstellen. Siehe [Turnierleitungs-Oberfläche im Browser](turnierleitung-web.md). |
+| **Turnierleitungs-Oberfläche** `/tl` | Tablet oder Telefon | Dieselben Entscheidungen wie am PC, aber unterwegs in der Halle: Felder, Aufgaben, Zähltafel-Warteschlange, Schiedsrichter, Spiele, beendete Spiele, Spielzeiten, Anfangszeiten — dazu oben ein Suchfeld, das Spieler und Schiedsrichter im ganzen Turnier findet. Welche dieser Panels ein Gerät zeigt, lässt sich je Gerät einstellen. Siehe [Turnierleitungs-Oberfläche im Browser](turnierleitung-web.md). |
 
 ### Zum Ansagen
 

@@ -1095,6 +1095,14 @@ pub enum AnnounceJobKind {
     MeetingpointCall {
         #[serde(rename = "matchId")]
         match_id: i64,
+        /// Namen von Schiedsrichter und Aufschlagrichter, **fertig vom
+        /// Turnier-PC** (ADR 0080): Das Abspielgerät — etwa ein LAN-Slave —
+        /// hat keine Schiedsrichter-Daten. Leer = niemand (oder älterer
+        /// Turnier-PC); ältere Abspielgeräte ignorieren die Felder.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sr: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ar: Vec<String>,
     },
     /// Nachruf an die Fehlenden einer gerufenen Partie („<Name>, bitte zum
     /// Meetingpoint"). Ausnahmsweise **mit Namen**: Wer fehlt, weiß nur der
@@ -2029,14 +2037,60 @@ impl TabletState {
         m: Option<&BtpMatch>,
         snap: &BtpSnapshot,
     ) -> (Vec<String>, Vec<String>, Option<String>) {
+        self.officials_anzeige(m, snap, false)
+    }
+
+    /// Wie [`court_officials`](Self::court_officials), aber für **wartende**
+    /// Zeilen (Warteliste, offene Paarungen) in der Sicht „Hand vor BTP"
+    /// (`fuer_schreiben`, ADR 0080): Eine Umteilung ist sofort sichtbar,
+    /// auch bevor BTP sie spiegelt. Laufende Felder bleiben bei `effective`
+    /// (R2).
+    pub fn wartende_officials(
+        &self,
+        m: &BtpMatch,
+        snap: &BtpSnapshot,
+    ) -> (Vec<String>, Vec<String>, Option<String>) {
+        self.officials_anzeige(Some(m), snap, true)
+    }
+
+    /// IDs zu [`wartende_officials`](Self::wartende_officials) (0 = keiner).
+    pub fn wartende_official_ids(&self, m: &BtpMatch) -> (i64, i64) {
+        if !self.officials.enabled() {
+            return (0, 0);
+        }
+        let w = self
+            .officials
+            .fuer_schreiben(m.id, m.official1_id, m.official2_id);
+        (
+            w.sr.filter(|v| *v > 0).unwrap_or(0),
+            w.ar.filter(|v| *v > 0).unwrap_or(0),
+        )
+    }
+
+    fn officials_anzeige(
+        &self,
+        m: Option<&BtpMatch>,
+        snap: &BtpSnapshot,
+        hand_vor_btp: bool,
+    ) -> (Vec<String>, Vec<String>, Option<String>) {
         let leer = (Vec::new(), Vec::new(), None);
         if !self.officials.enabled() {
             return leer;
         }
         let Some(m) = m else { return leer };
-        let wirksam = self
-            .officials
-            .effective(m.id, m.official1_id, m.official2_id);
+        let wirksam = if hand_vor_btp {
+            let w = self
+                .officials
+                .fuer_schreiben(m.id, m.official1_id, m.official2_id);
+            // `Some(0)` = ausdrücklich keiner.
+            crate::tablet::officials::MatchOfficials {
+                sr: w.sr.filter(|v| *v > 0),
+                ar: w.ar.filter(|v| *v > 0),
+            }
+        } else {
+            self.officials
+                .effective(m.id, m.official1_id, m.official2_id)
+        };
         let name = |id: Option<i64>| -> Vec<String> {
             id.and_then(|id| snap.official(id))
                 .map(|o| vec![o.display_name()])
@@ -2046,13 +2100,18 @@ impl TabletState {
         // Kategorie. Beide Dienste werden geprüft, der erste Treffer zählt.
         let spieler: Vec<crate::btp::model::BtpPlayer> =
             m.team1.iter().chain(m.team2.iter()).cloned().collect();
-        let warn = [wirksam.sr, wirksam.ar]
+        let konflikt = [wirksam.sr, wirksam.ar]
             .into_iter()
             .flatten()
             .find_map(|id| {
                 crate::tablet::officials::official_conflict(&self.officials.extra(id), &spieler)
             })
             .map(|k| k.label().to_string());
+        // Dazu „SR: nur AR"/„AR: nur SR" (ADR 0079) — Kachel, TL-Feld,
+        // Übersicht und Warteliste lesen alle hier.
+        let mut teile: Vec<String> = konflikt.into_iter().collect();
+        teile.extend(self.officials.rollen_warnung(wirksam.sr, wirksam.ar));
+        let warn = (!teile.is_empty()).then(|| teile.join(" · "));
         (name(wirksam.sr), name(wirksam.ar), warn)
     }
 
@@ -4236,6 +4295,18 @@ impl TabletState {
     /// Entfernt den Aufruf eines Matches (zurückgenommen).
     pub fn remove_preparation_call(&self, match_id: i64) {
         self.preparation_calls.retract(match_id);
+        // Rotations-Zuteilungen des Aufrufs sofort freigeben (ADR 0080);
+        // Hand- und BTP-Einteilungen bleiben. Das Nachrücken der frei
+        // gewordenen Person geschieht im nächsten Sync-Takt.
+        if let Some(m) = self.snapshot_match(match_id) {
+            if m.status == crate::btp::model::MatchStatus::Scheduled {
+                use crate::tablet::officials::OfficialRole;
+                self.officials
+                    .rotation_freigeben(match_id, OfficialRole::Sr, m.official1_id);
+                self.officials
+                    .rotation_freigeben(match_id, OfficialRole::Ar, m.official2_id);
+            }
+        }
     }
 
     /// Der Meetingpoint-Speicher (Tests, Sync-Frühbindung).
@@ -4280,7 +4351,9 @@ impl TabletState {
         // Wer anderswo auf dem Feld steht, ist hier ausgecheckt; wen BTP
         // ersetzt hat, ebenso (Spec `meetingpoint-spielbereit`, Nr. 4).
         let feld = crate::tablet::meetingpoint::auf_dem_feld(self, snapshot);
-        self.preparation_calls.bereinige_checkins(snapshot, &feld);
+        let sr = crate::tablet::meetingpoint::sr_fingerabdruecke(self, snapshot);
+        self.preparation_calls
+            .bereinige_checkins(snapshot, &feld, &sr);
         for (rang, call) in self.preparation_calls.active_calls().iter().enumerate() {
             // Hallenname aus der LocationID auflösen (None → kein Halleneintrag).
             let hall = call.location_id.and_then(|lid| {
@@ -7986,6 +8059,45 @@ pub(crate) mod tests {
         assert_eq!(jobs.len(), 2, "die beiden bekannten Auftraege ueberleben");
         assert_eq!(jobs[0].id, 1);
         assert_eq!(jobs[1].id, 3);
+    }
+
+    #[test]
+    fn der_aufruf_auftrag_mit_besetzung_bleibt_abwaertskompatibel() {
+        // ADR 0080: alter Auftrag ohne `sr`/`ar` lesbar (Default leer), neuer
+        // mit Namen im Roundtrip; ohne Namen fehlen die Felder ganz.
+        let json = r#"[
+          {"id":1,"hall":"","createdAtMs":1000,"kind":"meetingpoint_call","matchId":7},
+          {"id":2,"hall":"","createdAtMs":1001,"kind":"meetingpoint_call","matchId":8,
+           "sr":["Anna Schulz"],"ar":["Bob Meier"]}
+        ]"#;
+        let jobs = announce_jobs_aus_json(json);
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(
+            jobs[0].kind,
+            AnnounceJobKind::MeetingpointCall {
+                match_id: 7,
+                sr: vec![],
+                ar: vec![]
+            }
+        );
+        assert_eq!(
+            jobs[1].kind,
+            AnnounceJobKind::MeetingpointCall {
+                match_id: 8,
+                sr: vec!["Anna Schulz".into()],
+                ar: vec!["Bob Meier".into()],
+            }
+        );
+        let ohne = serde_json::to_string(&AnnounceJobKind::MeetingpointCall {
+            match_id: 7,
+            sr: vec![],
+            ar: vec![],
+        })
+        .unwrap();
+        assert!(
+            !ohne.contains("\"sr\"") && !ohne.contains("\"ar\""),
+            "{ohne}"
+        );
     }
 
     #[test]

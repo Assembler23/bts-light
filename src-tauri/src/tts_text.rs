@@ -11,6 +11,16 @@
 /// Pausen (die 120 ms um Namen) entfallen dann ganz.
 const SATZPAUSE_MS: u32 = 300;
 
+/// Welches Audio ein Dienst liefern soll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// Ganze Ansage: kompakt (MP3; Gemini liefert immer WAV).
+    Mp3,
+    /// Teil einer geteilten Ansage (Spec `ansage-in-teilen`): WAV, 24 kHz,
+    /// mono, 16 bit — so lassen sich die Teile ohne Decoder zusammensetzen.
+    Wav24,
+}
+
 /// Wie ein Dienst Pausen versteht.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pausen {

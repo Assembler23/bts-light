@@ -68,6 +68,16 @@ LAN+Cloud voraus.
   Stufenwort — „Zweiter Aufruf" mitten ins Spiel wäre absurd. Der dritte
   Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
   Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
+- **Spiel komplett ansagen** (seit v0.9.370): Im ⋯-Menü jeder belegten
+  Feld-Kachel steht **immer** „📣 Spiel komplett ansagen" — egal, ob das
+  Spiel schon läuft, ob der letzte Aufruf gesprochen ist oder die
+  Aufruf-Knöpfe gerade fehlen. Es erklingt noch einmal die vollständige
+  Ansage wie beim ersten Aufruf (Feld, Disziplin, Paarung und — je nach
+  Ansage-Einstellungen — Schiedsrichter und Bedienung), ohne „Zweiter" oder
+  „Letzter Aufruf". Das ist **kein** Aufruf: Die Aufruf-Zählung bleibt
+  stehen, und du kannst beliebig oft wiederholen. Ein älterer Turnier-PC
+  kennt die Ansage noch nicht, dann fehlt der Eintrag.
+  <!-- pruef: "Spiel komplett ansagen" in src-tauri/assets/tl.html -->
 - **Bitte anfangen:** Steht ein Spiel auf dem Feld, ohne dass ein Punkt
   fällt, löst „Bitte anfangen" im ⋯-Menü der Kachel die Ansage
   **„Feld X. Bitte mit dem Spielen beginnen."** aus. Das ist **kein**
@@ -733,6 +743,67 @@ stehen, obwohl badhub eines hatte). Fehlt ein Logo bei badhub tatsächlich,
 bleibt es beim Namen. Der **Verein** ist wie die Nationalität ein bewusst
 zuschaltbares, standardmäßig ausgeschaltetes Anzeige-Feld (Datenschutz).
 
+### Spieler und Schiedsrichter suchen (seit v0.9.368)
+
+Oben in der Kopfleiste steht ein Suchfeld **„Spieler oder SR suchen"**. Ab
+zwei Buchstaben erscheint nach einer kurzen Tipp-Pause unter der Kopfleiste
+eine Trefferliste mit allen Spielen dieser Person, in drei Gruppen:
+**Am Feld**, **Warteliste** und **Beendet**.
+<!-- pruef: "Spieler oder SR suchen" in src-tauri/assets/tl.html -->
+<!-- pruef: "Am Feld" in src-tauri/assets/tl.html -->
+<!-- pruef: /TL_SEARCH_MIN_LEN: usize = 2;/ in relay-proto/src/lib.rs -->
+
+- **Gesucht wird übers ganze Turnier** — anders als die Panels, die nur die
+  vorderen Wartespiele und die letzten 30 beendeten Spiele zeigen, findet die
+  Suche auch ein Spiel vom Vormittag oder vom Vortag. Der Turnier-PC sucht
+  selbst; die Seite fragt ihn nur.
+  <!-- pruef: /const FINISHED_LIMIT: usize = 30;/ in src-tauri/src/tablet/tl.rs -->
+- **Schreibweise ist egal**: „mueller", „muller" und „Müller" finden dasselbe,
+  ebenso „jose" und „José". Mehrere Wörter müssen im Namen **einer** Person
+  stehen, die Reihenfolge ist egal — „max mül" findet Max Müller, „Müller
+  Schmidt" findet **nicht** das Doppel Müller/Schmidt.
+- **Schiedsrichter** (SR und AR) findet die Suche nur, wenn der
+  Schiedsrichter-Betrieb eingeschaltet ist. Sonst steht oben „Schiedsrichter-
+  Betrieb aus". Ein kampflos gewertetes Spiel zählt nicht als Einsatz.
+  <!-- pruef: "Schiedsrichter-Betrieb aus" in src-tauri/assets/tl.html -->
+- Jeder Treffer zeigt Spielnummer, Klasse, Runde und die **Rolle** der
+  gesuchten Person (Spieler, SR, AR oder „möglicher Teilnehmer" bei einem
+  Spiel, dessen Paarung noch aus dem Vorspiel kommt). Wartende Spiele tragen
+  die erwartete Startzeit („ca. 14:20") oder, weiter hinten in der Liste,
+  „Platz N in der Warteliste". Beendete Spiele zeigen das Ergebnis — eine
+  Uhrzeit nur, wenn bts-light das Spiel selbst laufen sah.
+  <!-- pruef: "möglicher Teilnehmer" in src-tauri/assets/tl.html -->
+- Je Gruppe stehen höchstens 50 Treffer da; darüber hinaus heißt es
+  **„weitere N – bitte genauer suchen"**.
+  <!-- pruef: /TL_SEARCH_HITS_PER_GROUP: usize = 50;/ in relay-proto/src/lib.rs -->
+  <!-- pruef: "bitte genauer suchen" in src-tauri/assets/tl.html -->
+- Die Liste ist ein **Standbild**: Oben steht „Stand hh:mm", der Knopf
+  **„neu suchen"** holt den aktuellen Stand.
+  <!-- pruef: "neu suchen" in src-tauri/assets/tl.html -->
+
+**Ein Tipp auf einen Treffer** springt zur Zeile im Panel und lässt sie kurz
+aufleuchten. Ist das Panel zugeklappt, klappt es auf (wie mit dem Pfeil — das
+gilt für alle Geräte mit diesem Profil). Steht die Zeile gerade nicht in der
+Liste, sagt der Treffer, warum:
+
+- **„Liegt in Halle X – Filter umstellen?"** — der Hallenfilter zeigt eine
+  andere Halle. Er wird erst mit dem Knopf umgestellt, nie von selbst.
+- **„Der Filter ‚nur spielbereite' verbirgt dieses Spiel"** mit Knopf
+  „Filter aus".
+- **„nicht in der Liste sichtbar (Platz N)"** — das Spiel steht hinter dem
+  Ende der Liste oder das Panel ist im Profil ausgeblendet. Bei beendeten
+  Spielen lassen sich **Punktverlauf** und **Zettel** dann direkt am Treffer
+  öffnen.
+  <!-- pruef: "nicht in der Liste sichtbar" in src-tauri/assets/tl.html -->
+
+Das Suchfeld lässt sich je Profil ausblenden (**Profile → Spielliste →
+„Spielersuche zeigen"**). Das ist nur eine Anzeige-Einstellung, keine
+Sperre. Der Suchbegriff wird nirgends gespeichert. Es erscheint erst, wenn
+der Turnier-PC die Suche kennt (ab v0.9.368).
+<!-- pruef: "Spielersuche zeigen" in src-tauri/assets/tl.html -->
+
+Details: [features/tl-spielersuche.md](features/tl-spielersuche.md).
+
 ### Punktverlauf ansehen
 
 Der **📈-Knopf** im ⋮-Menü einer belegten Feldkachel (seit 17.08.2026
@@ -823,7 +894,10 @@ zeigt die Seite zusätzlich:
   zwei wartenden Spielen eingeteilt ist (**„SR doppelt"** bzw. „AR doppelt")
   oder gerade pausiert (**„SR in Pause"** bzw. „AR in Pause"). Dienst auf
   einem laufenden Feld zählt nicht als doppelt. Die Einteilung bleibt in
-  beiden Fällen bestehen; die Turnierleitung entscheidet.
+  beiden Fällen bestehen; die Turnierleitung entscheidet. Seit v0.9.358
+  zeigt die Marke eine Umteilung sofort, auch bevor BTP sie übernommen hat.
+  Steht ein Spiel auf **Ohne Schiedsrichter**, bleibt das so, bis jemand von
+  Hand oder in BTP wieder einteilt.
   <!-- pruef: "doppelt" in src-tauri/src/tablet/tl.rs -->
   <!-- pruef: "in Pause" in src-tauri/src/tablet/tl.rs -->
 - **Einteilen in der Warteliste** (seit v0.9.355): Im **⋮-Menü** jeder
@@ -844,6 +918,24 @@ zeigt die Seite zusätzlich:
 - **In der Schiedsrichter-Liste** (seit v0.9.355) trägt eine reservierte
   Person die Marke **„reserviert Sp. N"**. Die Vorschau „nächster: …"
   überspringt reservierte Personen, weil die Rotation sie nicht einsetzt.
+- **Vorschau als Nächstes** (seit v0.9.364): Der Turnier-PC rechnet aus,
+  wen die Automatik als Nächstes einsetzen würde — nach Einteilungsprinzip
+  und Rolle. Der Kopf der Liste zeigt dann **„nächster SR: … · AR: …"**, jede
+  Zeile ihren voraussichtlichen Dienst („als Nächstes SR", sonst „→ AR").
+  Personen mit fester Rolle tragen die Marke **„nur SR"** bzw. **„nur AR"**;
+  im Einteilungsdialog steht der Hinweis schon vor der Wahl. In Modus
+  „Getrennte Listen" zeigt die Seite die **SR-Reihenfolge**; die
+  AR-Reihenfolge steht seit v0.9.365 darunter (siehe unten). Ein älterer Turnier-PC liefert
+  keine Vorschau, dann bleibt es bei „nächster: …".
+- **AR-Reihenfolge und Rolle im TL-Web** (seit v0.9.365): In Modus
+  „Getrennte Listen" steht unter der SR-Reihenfolge eine zweite, eigene
+  **AR-Reihenfolge**, ebenso ziehbar. Im Dialog einer Person (Klick auf die
+  Einsatz-Zahl) lässt sich die **Rolle** wählen: „SR und AR", „nur
+  Schiedsrichter" oder „nur Aufschlagrichter" — sie gilt sofort.
+  <!-- pruef: "AR-Reihenfolge" in src-tauri/assets/tl.html -->
+  <!-- pruef: "nur Aufschlagrichter" in src-tauri/assets/tl.html -->
+  <!-- pruef: "als Nächstes " in src-tauri/assets/tl.html -->
+  <!-- pruef: "SR-Reihenfolge" in src-tauri/assets/tl.html -->
 
 Eine Zuweisung mit Konflikt wird **ausgeführt** und nur gekennzeichnet; die
 Turnierleitung entscheidet. **Abgelehnt** wird sie dagegen (seit v0.9.354),

@@ -491,6 +491,10 @@ pub fn save_config(
         .tablet
         .officials_store()
         .set_rotation(config.officials.rotation_sr, config.officials.rotation_ar);
+    state
+        .tablet
+        .officials_store()
+        .set_rotation_mode(config.officials.rotation_mode);
     *state.config.lock().expect("Config-Mutex nicht vergiftet") = config;
     // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
     // (Hallen-Farben, Aufruf-Timer) — nach dem Speichern ist er überholt
@@ -1008,15 +1012,180 @@ pub async fn azure_tts_speak(
         .lock()
         .expect("inherited_azure-Mutex nicht vergiftet")
         .clone();
-    let Some(ziel) = effective_tts(&cfg.azure_tts, inherited.as_ref()) else {
+    let Some((ziel, teilen)) = effective_tts_mit_teilen(&cfg.azure_tts, inherited.as_ref()) else {
         return Err("Cloud-Stimme nicht konfiguriert".to_string());
     };
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let v = ziel
-        .vertonen(&ssml, Some(&app_dir.join("tts-cache")))
-        .await?;
+    let cache_dir = app_dir.join("tts-cache");
+    // Spec `ansage-in-teilen`: Teile einzeln über den Plattencache; scheitert
+    // das, geht die Ansage als Ganzes (wie ohne Schalter).
+    if let Some(teile) = teilen
+        .then(|| crate::tts_teile::teile_aus_ssml(&ssml))
+        .flatten()
+    {
+        match in_teilen_vertonen(&ziel, &teile, TeileCache::Platte(&cache_dir)).await {
+            Ok(e) => {
+                verbrauch_buchen_zeichen(&app_dir, &ziel, e.zeichen_neu, e.alle_aus_cache);
+                return Ok(base64::engine::general_purpose::STANDARD.encode(e.wav));
+            }
+            Err(e) => {
+                if e.zeichen_neu > 0 {
+                    verbrauch_buchen_zeichen(&app_dir, &ziel, e.zeichen_neu, false);
+                }
+                tracing::warn!(
+                    "Ansage in Teilen gescheitert, vertone als Ganzes: {}",
+                    e.meldung
+                );
+            }
+        }
+    }
+    let v = ziel.vertonen(&ssml, Some(&cache_dir)).await?;
     verbrauch_buchen(&app_dir, &ziel, &ssml, v.aus_cache);
     Ok(base64::engine::general_purpose::STANDARD.encode(v.bytes))
+}
+
+/// Wo die Teile einer geteilten Ansage zwischengespeichert werden (T5): am
+/// PC auf der Platte wie bisher, für die Ansage-Seiten nur im Arbeitsspeicher.
+enum TeileCache<'a> {
+    Platte(&'a std::path::Path),
+    Ram(&'a Mutex<crate::tts_verbrauch::SeitenCache>),
+}
+
+/// Ergebnis einer geteilten Vertonung.
+struct TeileErgebnis {
+    wav: Vec<u8>,
+    /// Zeichen der neu vertonten Teile (nur die kosten).
+    zeichen_neu: u64,
+    alle_aus_cache: bool,
+}
+
+/// Gescheiterte geteilte Vertonung; `zeichen_neu` = schon bezahlte Teile,
+/// die trotzdem in den Zähler gehören (danach kommt die ganze Ansage).
+#[derive(Debug)]
+struct TeileFehler {
+    meldung: String,
+    zeichen_neu: u64,
+}
+
+/// Wie viele Teile einer Ansage höchstens gleichzeitig beim Anbieter liegen.
+const TEILE_GLEICHZEITIG: usize = 3;
+
+/// Vertont die Teile (fehlende gleichzeitig), cacht jeden Teil und setzt sie
+/// zu einer WAV zusammen (Spec `ansage-in-teilen`, T4–T7). Scheitert ein
+/// Teil, scheitert das Ganze — nie eine halbe Ansage.
+async fn in_teilen_vertonen(
+    ziel: &TtsZiel,
+    teile: &[String],
+    cache: TeileCache<'_>,
+) -> Result<TeileErgebnis, TeileFehler> {
+    let ram_schluessel: Vec<String> = teile
+        .iter()
+        .map(|t| ziel.seiten_cache_schluessel(&format!("teil-wav24|{t}")))
+        .collect();
+    teile_zusammenbauen(teile, &ram_schluessel, cache, |teil, dir| {
+        ziel.vertonen_fmt(teil, dir, crate::tts_text::Format::Wav24)
+    })
+    .await
+}
+
+/// Kern von [`in_teilen_vertonen`] ohne Netz: `vertone(teil, plattencache)`
+/// liefert einen Teil — im Test ein Zähler-Mock.
+async fn teile_zusammenbauen<'a, F, Fut>(
+    teile: &'a [String],
+    ram_schluessel: &[String],
+    cache: TeileCache<'a>,
+    vertone: F,
+) -> Result<TeileErgebnis, TeileFehler>
+where
+    F: Fn(&'a str, Option<&'a std::path::Path>) -> Fut,
+    Fut: std::future::Future<Output = Result<Vertont, String>>,
+{
+    let mut audio: Vec<Option<Vec<u8>>> = vec![None; teile.len()];
+    let mut aus_cache = vec![false; teile.len()];
+    if let TeileCache::Ram(c) = &cache {
+        let mut c = c.lock().expect("seiten_cache-Mutex nicht vergiftet");
+        for (i, k) in ram_schluessel.iter().enumerate() {
+            if let Some((_, bytes)) = c.holen(k, now_ms()) {
+                audio[i] = Some(bytes);
+                aus_cache[i] = true;
+            }
+        }
+    }
+    let dir = match &cache {
+        TeileCache::Platte(d) => Some(*d),
+        TeileCache::Ram(_) => None,
+    };
+    // Gleiche Teile („Feld 3." vorn und hinten) nur einmal anfragen und zahlen.
+    let mut fehlend: Vec<usize> = Vec::new();
+    for i in (0..teile.len()).filter(|i| audio[*i].is_none()) {
+        if !fehlend.iter().any(|&j| teile[j] == teile[i]) {
+            fehlend.push(i);
+        }
+    }
+    // Höchstens drei Anfragen gleichzeitig: kleine Tarife (ElevenLabs
+    // Free/Starter) lehnen mehr parallele Anfragen mit 429 ab.
+    use futures_util::StreamExt;
+    // Futures vorab als Vec: eine Closure im Stream-Typ bricht die
+    // `Send`-Prüfung der Tauri-Commands (höherrangige Lebensdauer).
+    let anfragen: Vec<Fut> = fehlend
+        .iter()
+        .copied()
+        .map(|i| vertone(teile[i].as_str(), dir))
+        .collect();
+    let ergebnisse: Vec<Result<Vertont, String>> = futures_util::stream::iter(anfragen)
+        .buffered(TEILE_GLEICHZEITIG)
+        .collect()
+        .await;
+    // Erst alles Erfolgreiche ablegen und zählen, dann einen Fehler melden —
+    // sonst wären schon bezahlte Teile weder gecacht noch gebucht.
+    let mut zeichen_neu = 0;
+    let mut fehler = None;
+    for (&i, erg) in fehlend.iter().zip(ergebnisse) {
+        let v = match erg {
+            Ok(v) => v,
+            Err(e) => {
+                fehler.get_or_insert(format!("Teil {}: {e}", i + 1));
+                continue;
+            }
+        };
+        if !v.aus_cache {
+            zeichen_neu += ansage_zeichen(&teile[i]);
+        }
+        if let TeileCache::Ram(c) = &cache {
+            c.lock()
+                .expect("seiten_cache-Mutex nicht vergiftet")
+                .ablegen(
+                    ram_schluessel[i].clone(),
+                    "audio/wav".to_string(),
+                    v.bytes.clone(),
+                    now_ms(),
+                );
+        }
+        let gleiche: Vec<usize> = (0..teile.len())
+            .filter(|&j| audio[j].is_none() && teile[j] == teile[i])
+            .collect();
+        for j in gleiche {
+            audio[j] = Some(v.bytes.clone());
+            aus_cache[j] = v.aus_cache;
+        }
+    }
+    if let Some(meldung) = fehler {
+        return Err(TeileFehler {
+            meldung,
+            zeichen_neu,
+        });
+    }
+    let alle_aus_cache = aus_cache.iter().all(|c| *c);
+    let wavs: Vec<Vec<u8>> = audio.into_iter().flatten().collect();
+    let wav = crate::tts_teile::zusammensetzen(&wavs).map_err(|meldung| TeileFehler {
+        meldung,
+        zeichen_neu,
+    })?;
+    Ok(TeileErgebnis {
+        wav,
+        zeichen_neu,
+        alle_aus_cache,
+    })
 }
 
 /// Ergebnis einer Vertonung.
@@ -1040,7 +1209,18 @@ fn ansage_zeichen(ssml: &str) -> u64 {
 /// Bucht eine Vertonung in den Zeichenzähler (`tts-zeichen.json`, E8) und
 /// schreibt bei neuer Vertonung eine Logzeile — nur Zahlen, nie Text.
 fn verbrauch_buchen(app_dir: &std::path::Path, ziel: &TtsZiel, ssml: &str, aus_cache: bool) {
-    let zeichen = ansage_zeichen(ssml);
+    let zeichen = if aus_cache { 0 } else { ansage_zeichen(ssml) };
+    verbrauch_buchen_zeichen(app_dir, ziel, zeichen, aus_cache);
+}
+
+/// Wie [`verbrauch_buchen`], mit schon gezählten Zeichen (geteilte Ansage:
+/// nur die neu vertonten Teile, T7).
+fn verbrauch_buchen_zeichen(
+    app_dir: &std::path::Path,
+    ziel: &TtsZiel,
+    zeichen: u64,
+    aus_cache: bool,
+) {
     let dienst = ziel.dienst_wert();
     let tag = crate::tts_verbrauch::heute();
     let p = crate::tts_verbrauch::buchen_in_datei(
@@ -1105,28 +1285,47 @@ impl TtsZiel {
         ssml: &str,
         cache_dir: Option<&std::path::Path>,
     ) -> Result<Vertont, String> {
+        self.vertonen_fmt(ssml, cache_dir, crate::tts_text::Format::Mp3)
+            .await
+    }
+
+    /// Wie [`Self::vertonen`], im gewünschten Format (WAV für Teile).
+    async fn vertonen_fmt(
+        &self,
+        ssml: &str,
+        cache_dir: Option<&std::path::Path>,
+        format: crate::tts_text::Format,
+    ) -> Result<Vertont, String> {
+        use crate::tts_text::Format;
+        let mp3_oder_wav = match format {
+            Format::Mp3 => "audio/mpeg",
+            Format::Wav24 => "audio/wav",
+        };
         let (mime, (bytes, aus_cache)) = match self {
             Self::Azure { region, key } => (
-                "audio/mpeg",
+                mp3_oder_wav,
                 match cache_dir {
-                    Some(dir) => crate::azure_tts::synthesize(region, key, ssml, dir).await?,
+                    Some(dir) => {
+                        crate::azure_tts::synthesize(region, key, ssml, dir, format).await?
+                    }
                     None => (
-                        crate::azure_tts::synthesize_ohne_cache(region, key, ssml).await?,
+                        crate::azure_tts::synthesize_ohne_cache(region, key, ssml, format).await?,
                         false,
                     ),
                 },
             ),
             Self::ElevenLabs { key, voice, modell } => (
-                "audio/mpeg",
-                crate::elevenlabs_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+                mp3_oder_wav,
+                crate::elevenlabs_tts::vertonen(key, voice, modell, ssml, cache_dir, format)
+                    .await?,
             ),
             Self::OpenAi { key, voice, modell } => (
-                "audio/mpeg",
-                crate::openai_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+                mp3_oder_wav,
+                crate::openai_tts::vertonen(key, voice, modell, ssml, cache_dir, format).await?,
             ),
             Self::Gemini { key, voice, modell } => (
                 "audio/wav",
-                crate::gemini_tts::vertonen(key, voice, modell, ssml, cache_dir).await?,
+                crate::gemini_tts::vertonen(key, voice, modell, ssml, cache_dir, format).await?,
             ),
         };
         Ok(Vertont {
@@ -1346,11 +1545,23 @@ fn xml_attr(s: &str) -> String {
 
 /// Vorrangregel (ADR 0003): vollständige lokale Config gewinnt, sonst die vom
 /// Master geerbte. `None`, wenn keine von beiden nutzbar ist.
+#[cfg(test)]
 fn effective_tts(
     local: &crate::config::AzureTtsConfig,
     inherited: Option<&relay_proto::AzureTtsShare>,
 ) -> Option<TtsZiel> {
-    tts_ziel_lokal(local).or_else(|| inherited.and_then(tts_ziel_geerbt))
+    effective_tts_mit_teilen(local, inherited).map(|(z, _)| z)
+}
+
+/// Wie [`effective_tts`], dazu der Schalter „Ansage in Teilen" aus derselben
+/// Quelle wie das Ziel (lokal oder vom Master geerbt, T8).
+fn effective_tts_mit_teilen(
+    local: &crate::config::AzureTtsConfig,
+    inherited: Option<&relay_proto::AzureTtsShare>,
+) -> Option<(TtsZiel, bool)> {
+    tts_ziel_lokal(local)
+        .map(|z| (z, local.teile))
+        .or_else(|| inherited.and_then(|a| tts_ziel_geerbt(a).map(|z| (z, a.teile))))
 }
 
 /// Was vor dem Start der Übertragung stimmen muss. Reine Funktion, damit die
@@ -2085,6 +2296,9 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     tablet
         .officials_store()
         .set_rotation(config.officials.rotation_sr, config.officials.rotation_ar);
+    tablet
+        .officials_store()
+        .set_rotation_mode(config.officials.rotation_mode);
     // Ausnahmeliste der automatischen Feldvergabe (Spec
     // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
     // kommt mit dem ersten Snapshot.
@@ -3572,10 +3786,16 @@ pub async fn assign_court(
             court_id,
             // Beim Ruf aufs Feld wandert die Besetzung mit (ADR 0021) —
             // ein Request statt zwei.
-            officials: state
-                .tablet
-                .snapshot_match(match_id)
-                .and_then(|m| state.tablet.officials_for_write(&m)),
+            officials: state.tablet.snapshot_match(match_id).and_then(|m| {
+                // Rotations-Zuteilung einer Rolle, die das Feld nicht will,
+                // vorher lösen (ADR 0080).
+                state
+                    .tablet
+                    .officials_store()
+                    .rotation_loesen_am_feld(&m, court_id);
+                state.tablet.officials_for_write(&m)
+            }),
+            highlight: None,
         }],
         None => Vec::new(),
     };
@@ -3621,6 +3841,7 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
             // Beim Freigeben die Besetzung nicht anfassen: Das Spiel ist
             // nicht zu Ende, es wird nur vom Feld genommen.
             officials: None,
+            highlight: None,
         }],
         None => Vec::new(),
     };
@@ -3731,6 +3952,13 @@ pub struct PreparationCandidate {
     /// gerufenen Spielen und bei eingeschaltetem Meetingpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meetingpoint: Option<relay_proto::TlMeetingpoint>,
+    /// Schiedsrichter und Aufschlagrichter eines **gerufenen** Spiels
+    /// (Sicht „Hand vor BTP", ADR 0080) — Marke in der Liste und Namen für
+    /// den Knopf „Ansage". Leer an nicht gerufenen Spielen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sr: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ar: Vec<String>,
 }
 
 /// Rückgabe von [`preparation_candidates`]: die Kandidaten-Spiele und die
@@ -3888,6 +4116,11 @@ pub fn preparation_candidates_for(
                 }
             });
             let manual = tablet.queue_order_store().rank(m.id).is_some();
+            let (sr, ar) = if call.is_some() {
+                crate::tablet::meetingpoint::besetzung_namen(tablet, &snapshot, m.id)
+            } else {
+                (Vec::new(), Vec::new())
+            };
             PreparationCandidate {
                 match_id: m.id,
                 label: format!("{} {}", m.draw_name, m.round_name)
@@ -3916,6 +4149,8 @@ pub fn preparation_candidates_for(
                 excluded: tablet.auto_assign_excluded(m.id),
                 hall,
                 manual,
+                sr,
+                ar,
             }
         })
         .collect();
@@ -4459,7 +4694,9 @@ pub async fn ansage_vertonen(
     // Nur die eigene Config: Der Vertoner läuft nie am Slave, geerbte
     // Zugangsdaten spielen hier keine Rolle.
     let audio = match (ssml, tts_ziel_lokal(&cfg.azure_tts)) {
-        (Some(ssml), Some(ziel)) => seiten_cloud_audio(&app, &state, &ziel, &ssml).await,
+        (Some(ssml), Some(ziel)) => {
+            seiten_cloud_audio(&app, &state, &ziel, &ssml, cfg.azure_tts.teile).await
+        }
         _ => None,
     };
     // Ohne Azure (oder wenn Azure scheitert) die Windows-Stimme des PCs
@@ -4485,8 +4722,32 @@ async fn seiten_cloud_audio(
     state: &State<'_, AppState>,
     ziel: &TtsZiel,
     ssml: &str,
+    teilen: bool,
 ) -> Option<(String, Vec<u8>)> {
     let app_dir = app.path().app_data_dir().ok();
+    // Spec `ansage-in-teilen`: Teile nur im Arbeitsspeicher (T5, Kriterium 5).
+    if let Some(teile) = teilen
+        .then(|| crate::tts_teile::teile_aus_ssml(ssml))
+        .flatten()
+    {
+        match in_teilen_vertonen(ziel, &teile, TeileCache::Ram(&state.seiten_cache)).await {
+            Ok(e) => {
+                if let Some(dir) = &app_dir {
+                    verbrauch_buchen_zeichen(dir, ziel, e.zeichen_neu, e.alle_aus_cache);
+                }
+                return Some(("audio/wav".to_string(), e.wav));
+            }
+            Err(e) => {
+                if let (Some(dir), true) = (&app_dir, e.zeichen_neu > 0) {
+                    verbrauch_buchen_zeichen(dir, ziel, e.zeichen_neu, false);
+                }
+                tracing::warn!(
+                    "Ansage-Seite: Teile gescheitert, vertone als Ganzes: {}",
+                    e.meldung
+                );
+            }
+        }
+    }
     let schluessel = ziel.seiten_cache_schluessel(ssml);
     let treffer = state
         .seiten_cache
@@ -5786,6 +6047,16 @@ pub struct OfficialView {
     pub reserved: bool,
     /// Spielnummer der Reservierung, bei mehreren die kleinste.
     pub reserved_match_num: Option<i64>,
+    /// Was die Person übernehmen darf (ADR 0079): „beides", „sr", „ar".
+    pub role: String,
+    /// Position in der AR-Liste (Modus A; sonst wie `position`).
+    pub position_ar: usize,
+    /// Vorschau: welchen Dienst die Automatik dieser Person als Nächstes
+    /// gäbe („sr"/„ar") und in welcher Runde (0 = nächste Besetzung).
+    /// `None` = keine Vorschau (pausiert, im Dienst, reserviert, Rolle passt
+    /// zu keinem rotierten Dienst, Rotation aus).
+    pub next_role: Option<String>,
+    pub next_rank: Option<u32>,
 }
 
 /// Ein abgeleiteter Einsatz für das Detail-Overlay.
@@ -5843,6 +6114,26 @@ fn parse_role(role: &str) -> Result<crate::tablet::officials::OfficialRole, Stri
     }
 }
 
+/// Einsatzrolle als Draht-Text (ADR 0079).
+fn rolle_str(r: crate::tablet::officials::Einsatzrolle) -> &'static str {
+    use crate::tablet::officials::Einsatzrolle as E;
+    match r {
+        E::Beides => "beides",
+        E::NurSr => "sr",
+        E::NurAr => "ar",
+    }
+}
+
+fn parse_rolle(r: &str) -> Result<crate::tablet::officials::Einsatzrolle, String> {
+    use crate::tablet::officials::Einsatzrolle as E;
+    match r {
+        "beides" => Ok(E::Beides),
+        "sr" => Ok(E::NurSr),
+        "ar" => Ok(E::NurAr),
+        _ => Err(format!("unbekannte Einsatzrolle: {r}")),
+    }
+}
+
 fn role_str(role: crate::tablet::officials::OfficialRole) -> String {
     match role {
         crate::tablet::officials::OfficialRole::Sr => "sr".to_string(),
@@ -5897,6 +6188,8 @@ pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
         crate::tablet::tl::heutiges_datum(now_ms()),
     );
     let reihenfolge = store.order();
+    let reihenfolge_ar = store.order_ar();
+    let vorschau = store.prognose_aus(&snap, &belegung);
     let mut out: Vec<OfficialView> = snap
         .officials
         .iter()
@@ -5918,6 +6211,13 @@ pub fn officials_roster(state: State<'_, AppState>) -> Vec<OfficialView> {
                 appearances: einsaetze.get(&o.id).map(Vec::len).unwrap_or(0),
                 reserved: !belegung.reserviert_fuer(o.id).is_empty(),
                 reserved_match_num: belegung.reserviert_spielnummer(o.id, &snap),
+                role: rolle_str(extra.role).to_string(),
+                position_ar: reihenfolge_ar
+                    .iter()
+                    .position(|id| *id == o.id)
+                    .unwrap_or(usize::MAX),
+                next_role: vorschau.get(&o.id).map(|(r, _)| role_str(*r)),
+                next_rank: vorschau.get(&o.id).map(|(_, n)| *n),
             }
         })
         .collect();
@@ -5949,14 +6249,20 @@ pub fn official_assign(
         Some(official_id),
     )?;
     store.assign(match_id, role, official_id);
-    let warnung = state.tablet.snapshot_clone().and_then(|snap| {
+    let konflikt = state.tablet.snapshot_clone().and_then(|snap| {
         let m = snap.matches.iter().find(|m| m.id == match_id)?;
         let spieler: Vec<crate::btp::model::BtpPlayer> =
             m.team1.iter().chain(m.team2.iter()).cloned().collect();
         crate::tablet::officials::official_conflict(&store.extra(official_id), &spieler)
             .map(|k| k.label().to_string())
     });
-    Ok(warnung)
+    // Rolle gegen Dienst: nur Warnung, ausgeführt wird trotzdem (ADR 0079).
+    let rolle = match role {
+        crate::tablet::officials::OfficialRole::Sr => store.rollen_warnung(Some(official_id), None),
+        crate::tablet::officials::OfficialRole::Ar => store.rollen_warnung(None, Some(official_id)),
+    };
+    let teile: Vec<String> = konflikt.into_iter().chain(rolle).collect();
+    Ok((!teile.is_empty()).then(|| teile.join(" · ")))
 }
 
 /// Eine Zuweisung lösen.
@@ -6068,12 +6374,33 @@ pub fn official_reorder(
     state: State<'_, AppState>,
     official_id: i64,
     before_official_id: Option<i64>,
+    list: Option<String>,
 ) -> Result<(), String> {
     officials_an(&state)?;
+    // „ar" = AR-Liste (Modus A, ADR 0079); sonst die Hauptliste.
+    let liste = match list.as_deref() {
+        Some("ar") => crate::tablet::officials::Reihenfolge::Ar,
+        _ => crate::tablet::officials::Reihenfolge::Haupt,
+    };
     state
         .tablet
         .officials_store()
-        .reorder(official_id, before_official_id);
+        .reorder_in(liste, official_id, before_official_id);
+    Ok(())
+}
+
+/// Rolle eines Officials setzen: „beides", „sr" (nur Schiedsrichter) oder
+/// „ar" (nur Aufschlagrichter), ADR 0079. Die Automatik setzt niemanden
+/// gegen seine Rolle ein; von Hand bleibt es möglich (mit Warnung).
+#[tauri::command]
+pub fn official_set_role(
+    state: State<'_, AppState>,
+    official_id: i64,
+    role: String,
+) -> Result<(), String> {
+    officials_an(&state)?;
+    let rolle = parse_rolle(&role)?;
+    state.tablet.officials_store().set_role(official_id, rolle);
     Ok(())
 }
 
@@ -6756,6 +7083,16 @@ pub fn monitor_command(
 mod tests {
     use super::*;
 
+    #[test]
+    fn einsatzrolle_hin_und_zurueck_und_unbekannt_abgelehnt() {
+        use crate::tablet::officials::Einsatzrolle as E;
+        for (r, t) in [(E::Beides, "beides"), (E::NurSr, "sr"), (E::NurAr, "ar")] {
+            assert_eq!(rolle_str(r), t);
+            assert_eq!(parse_rolle(t), Ok(r));
+        }
+        assert!(parse_rolle("chef").is_err());
+    }
+
     // ─── Ansage-Ton aus dem Kern (Spec `ansage-ausgabegeraet`) ───────────
 
     #[test]
@@ -7013,6 +7350,7 @@ mod tests {
                 "openai_key",
                 "openai_voice",
                 "region",
+                "teile",
                 "voice"
             ]
         );
@@ -9007,5 +9345,218 @@ mod tp_upload_tests {
             assert!(v.get(k).is_some(), "Schlüssel {k}");
         }
         assert!(v.get("takt").is_none() && v.get("merker").is_none());
+    }
+}
+
+/// Spec `ansage-in-teilen`: Teile-Kern mit Zähler-Mock statt Netz.
+#[cfg(test)]
+mod teile_tests {
+    use super::*;
+
+    fn teil_wav(n: usize) -> Vec<u8> {
+        let roh: Vec<u8> = (0..n)
+            .flat_map(|i| (((i % 50) as i16 - 25) * 400).to_le_bytes())
+            .collect();
+        crate::tts_teile::wav_aus_pcm16(&roh, 24_000)
+    }
+
+    fn ssml_teil(text: &str) -> String {
+        format!("<speak><voice name=\"v\">{text}</voice></speak>")
+    }
+
+    /// Vertont zwei Ansagen über den RAM-Weg und merkt sich jede Anfrage.
+    #[tokio::test]
+    async fn teile_zweite_ansage_fragt_nur_die_neuen_namen_an() {
+        let cache = Mutex::new(crate::tts_verbrauch::SeitenCache::default());
+        let anfragen: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
+        let ansage = |namen1: &str, namen2: &str| -> Vec<String> {
+            [
+                "Feld 3.",
+                "Herrendoppel.",
+                "Viertelfinale.",
+                namen1,
+                "gegen",
+                namen2,
+            ]
+            .iter()
+            .map(|t| ssml_teil(t))
+            .collect()
+        };
+        let lauf = |teile: Vec<String>| {
+            let cache = &cache;
+            let anfragen = &anfragen;
+            async move {
+                let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+                teile_zusammenbauen(&teile, &schluessel, TeileCache::Ram(cache), |teil, dir| {
+                    // Kriterium 5: der RAM-Weg reicht nie ein Plattenverzeichnis durch.
+                    anfragen
+                        .lock()
+                        .unwrap()
+                        .push((teil.to_string(), dir.is_some()));
+                    async move {
+                        Ok(Vertont {
+                            mime: "audio/wav",
+                            bytes: teil_wav(2_400),
+                            aus_cache: false,
+                        })
+                    }
+                })
+                .await
+                .unwrap()
+            }
+        };
+
+        let erste = ansage("Anna Muster und Ben Beispiel", "Cem Test und Dana Probe");
+        let e1 = lauf(erste.clone()).await;
+        assert_eq!(anfragen.lock().unwrap().len(), 6);
+        assert!(!e1.alle_aus_cache);
+        // Kriterium 6: es zählen genau die neu vertonten Teile.
+        let summe: u64 = erste.iter().map(|t| ansage_zeichen(t)).sum();
+        assert_eq!(e1.zeichen_neu, summe);
+        assert!(crate::tts_teile::pcm_aus_wav(&e1.wav).is_some());
+
+        anfragen.lock().unwrap().clear();
+        let zweite = ansage("Eva Neu und Finn Neu", "Gina Neu und Hans Neu");
+        let e2 = lauf(zweite.clone()).await;
+        let a = anfragen.lock().unwrap().clone();
+        // Kriterium 2: nur die beiden Namen-Teile gehen an den Anbieter.
+        assert_eq!(
+            a.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
+            vec![zweite[3].clone(), zweite[5].clone()]
+        );
+        assert!(a.iter().all(|(_, platte)| !platte));
+        assert_eq!(
+            e2.zeichen_neu,
+            ansage_zeichen(&zweite[3]) + ansage_zeichen(&zweite[5])
+        );
+
+        anfragen.lock().unwrap().clear();
+        let e3 = lauf(zweite).await;
+        assert!(anfragen.lock().unwrap().is_empty());
+        assert!(e3.alle_aus_cache);
+        assert_eq!(e3.zeichen_neu, 0);
+    }
+
+    #[tokio::test]
+    async fn teile_scheitert_ganz_wenn_ein_teil_scheitert() {
+        let dir = std::env::temp_dir();
+        let teile: Vec<String> = ["Feld 1.", "kaputt"].iter().map(|t| ssml_teil(t)).collect();
+        let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+        let erg = teile_zusammenbauen(&teile, &schluessel, TeileCache::Platte(&dir), |teil, d| {
+            assert!(d.is_some(), "PC-Weg nutzt den Plattencache");
+            let kaputt = teil.contains("kaputt");
+            async move {
+                if kaputt {
+                    Err("Anbieter 500".to_string())
+                } else {
+                    Ok(Vertont {
+                        mime: "audio/wav",
+                        bytes: teil_wav(2_400),
+                        aus_cache: true,
+                    })
+                }
+            }
+        })
+        .await;
+        let fehler = erg.err().expect("halbe Ansage darf nicht entstehen");
+        assert!(fehler.meldung.contains("Teil 2"), "{}", fehler.meldung);
+    }
+
+    #[tokio::test]
+    async fn teile_aus_dem_plattencache_kosten_nichts() {
+        let dir = std::env::temp_dir();
+        let teile: Vec<String> = ["Feld 1.", "Neu"].iter().map(|t| ssml_teil(t)).collect();
+        let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+        let e = teile_zusammenbauen(&teile, &schluessel, TeileCache::Platte(&dir), |teil, _| {
+            let neu = teil.contains("Neu");
+            async move {
+                Ok(Vertont {
+                    mime: "audio/wav",
+                    bytes: teil_wav(2_400),
+                    aus_cache: !neu,
+                })
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!e.alle_aus_cache);
+        assert_eq!(e.zeichen_neu, ansage_zeichen(&teile[1]));
+    }
+
+    #[tokio::test]
+    async fn teile_gleiche_teile_nur_einmal_und_hoechstens_drei_gleichzeitig() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let cache = Mutex::new(crate::tts_verbrauch::SeitenCache::default());
+        let teile: Vec<String> = ["Feld 3.", "A", "B", "C", "D", "E", "Feld 3."]
+            .iter()
+            .map(|t| ssml_teil(t))
+            .collect();
+        let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+        let anfragen = AtomicUsize::new(0);
+        let laufend = AtomicUsize::new(0);
+        let spitze = AtomicUsize::new(0);
+        let e = teile_zusammenbauen(&teile, &schluessel, TeileCache::Ram(&cache), |_, _| {
+            anfragen.fetch_add(1, Ordering::SeqCst);
+            let (laufend, spitze) = (&laufend, &spitze);
+            async move {
+                let jetzt = laufend.fetch_add(1, Ordering::SeqCst) + 1;
+                spitze.fetch_max(jetzt, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                laufend.fetch_sub(1, Ordering::SeqCst);
+                Ok(Vertont {
+                    mime: "audio/wav",
+                    bytes: teil_wav(2_400),
+                    aus_cache: false,
+                })
+            }
+        })
+        .await
+        .unwrap();
+        // „Feld 3." vorn und hinten: eine Anfrage, einmal gezählt.
+        assert_eq!(anfragen.load(Ordering::SeqCst), 6);
+        let einmal: u64 = teile[..6].iter().map(|t| ansage_zeichen(t)).sum();
+        assert_eq!(e.zeichen_neu, einmal);
+        assert!(spitze.load(Ordering::SeqCst) <= TEILE_GLEICHZEITIG);
+        // Beide Vorkommen klingen im Ergebnis mit: sieben Teile, sechs Pausen.
+        let (pcm, _) = crate::tts_teile::pcm_aus_wav(&e.wav).unwrap();
+        let (eins, _) = crate::tts_teile::pcm_aus_wav(&teil_wav(2_400)).unwrap();
+        let teil = crate::tts_teile::randstille_kuerzen(&eins, 24_000).len();
+        assert_eq!(pcm.len(), 7 * teil + 6 * 24_000 * 350 / 1000);
+    }
+
+    #[tokio::test]
+    async fn teile_fehler_bucht_und_cacht_die_schon_bezahlten_teile() {
+        let cache = Mutex::new(crate::tts_verbrauch::SeitenCache::default());
+        let teile: Vec<String> = ["kaputt", "Feld 1.", "Halbfinale."]
+            .iter()
+            .map(|t| ssml_teil(t))
+            .collect();
+        let schluessel: Vec<String> = teile.iter().map(|t| format!("k|{t}")).collect();
+        let fehler = teile_zusammenbauen(&teile, &schluessel, TeileCache::Ram(&cache), |t, _| {
+            let kaputt = t.contains("kaputt");
+            async move {
+                if kaputt {
+                    Err("429".to_string())
+                } else {
+                    Ok(Vertont {
+                        mime: "audio/wav",
+                        bytes: teil_wav(2_400),
+                        aus_cache: false,
+                    })
+                }
+            }
+        })
+        .await
+        .err()
+        .unwrap();
+        assert!(fehler.meldung.contains("Teil 1"), "{}", fehler.meldung);
+        assert_eq!(
+            fehler.zeichen_neu,
+            ansage_zeichen(&teile[1]) + ansage_zeichen(&teile[2])
+        );
+        // Auch die Teile hinter dem gescheiterten liegen im Cache.
+        let mut c = cache.lock().unwrap();
+        assert!(c.holen(&schluessel[1], now_ms()).is_some());
+        assert!(c.holen(&schluessel[2], now_ms()).is_some());
     }
 }

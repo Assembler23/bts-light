@@ -512,6 +512,7 @@ function App() {
         return (
           <OfficialsPanel
             enabled={config.officials?.enabled ?? false}
+            rotationMode={config.officials?.rotation_mode}
             announce={config.announce}
             azureTts={config.azure_tts}
           />

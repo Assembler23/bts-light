@@ -72,6 +72,11 @@ jobs:
       - name: Ansage-Baseline (JS)
         run: node scripts/test-announce-baseline.mjs
 
+      # Besetzung im Vorbereitungs-Aufruf (Spec sr-ar-beim-aufruf, ADR 0080):
+      # Satzbau, Besetzungs-Schalter, Nachrufe ohne Namen.
+      - name: Besetzung im Aufruf (JS)
+        run: node scripts/test-vorbereitung-besetzung.mjs
+
       # BWF-Aufschlag-Positionierung des Tablets (Plan 12b) — reiner
       # Node-Test der sicherheitskritischen Positionslogik.
       - name: Tablet-Aufschlagpositionen (JS)
@@ -198,6 +203,12 @@ jobs:
       - name: Zuletzt gespielt (JS)
         run: node scripts/test-zuletzt-gespielt.mjs
 
+      # Spielersuche: Sprungziel eines Treffers (Filter nie still umstellen,
+      # nichts versprechen, was hinter dem Deckel liegt) und Gleichlauf der
+      # Inline-Kopie in tl.html.
+      - name: Spielersuche (JS)
+        run: node scripts/test-spielersuche.mjs
+
       # Ziel beim Umsortieren der gerufenen Spiele (Aufruf-Reihenfolge) und
       # Gleichlauf der Inline-Kopie in tl.html. Ein falsches Ziel brächte
       # die falsche Partie zuerst aufs Feld.
@@ -243,6 +254,12 @@ jobs:
       # verhalten sich wie die Module — sonst friert ein TV still ein.
       - name: Inline-Kopien der Anzeige-Seiten (JS)
         run: node scripts/test-inline-kopien.mjs
+
+      # Meetingpoint-Eintrag der Kiosk-Feldwahl: An/Aus aus dem HTTP-Status
+      # (Aussetzer halten den Stand), Knopf „Zurück zum Meetingpoint" nur bei
+      # gemerktem Meetingpoint, Marke löschen ohne die Halle zu verlieren.
+      - name: Meetingpoint in der Feldwahl (JS)
+        run: node scripts/test-lobby-meetingpoint.mjs
 
       # Akkustand am Tablet: Quellen-Reihenfolge (Kiosk-Brücke vor Web-API),
       # Schwellen, „kein Wert" darf nie als 0 % erscheinen — ein Tablet, das

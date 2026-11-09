@@ -8,6 +8,7 @@
 // Der Auftrag trägt bewusst keine Namen (Struktur statt Text) — sie kommen
 // frisch aus dem aktuellen Feld-Stand bzw. der Kandidatenliste. Steht dort
 // inzwischen ein anderes Spiel, wäre der Aufruf falsch: dann `null`.
+import { besetzungAusAuftrag } from "./prepBesetzung.mjs";
 import { preparationCandidates, tabletOverview } from "../api";
 import {
   courtAnsage,
@@ -179,6 +180,9 @@ export async function jobZuAnsage(
       // („In Vorbereitung …"), kein Nachruf.
       callStage: job.kind === "meetingpoint_call" ? 1 : job.stage >= 3 ? 3 : 2,
       meetingpointText: mpAnsageZusatz(view, lang),
+      // Besetzung fertig vom Turnier-PC (ADR 0080) — nur beim Erst-Aufruf
+      // und nach dem Besetzungs-Schalter dieses Geräts.
+      ...besetzungAusAuftrag(job, cfg.announce_umpire !== false),
     },
     lang,
     ansageOptionen(cfg, lang, azureTts),

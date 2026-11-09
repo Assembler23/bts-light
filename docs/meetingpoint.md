@@ -88,6 +88,20 @@ Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
   **Meetingpoint**; die gewählte Halle merkt sich die Hülle. Ein Tipp auf die
   Seite schaltet dort die Ansicht **nicht** weiter — er checkt ein.
 <!-- pruef: /meetingpoint: .Meetingpoint./ in src-tauri/assets/anzeige.html -->
+- **Kiosk-Tablet am Meetingpoint auslegen** (seit v0.9.363): In der
+  Feldwahl des Tablets (`/felder`, dort startet die Kiosk-App) steht unter
+  den Feldern die Kachel **Meetingpoint** — nur, solange der Meetingpoint
+  eingeschaltet ist. Antippen, PIN eingeben (dieselbe wie am Zahnrad), fertig:
+  Das Tablet zeigt den Meetingpoint und belegt **kein** Feld.
+<!-- pruef: "Anzeige für Spieler · belegt kein Feld" in src-tauri/assets/lobby.html -->
+  Verliert das Tablet kurz das WLAN, lädt die Kiosk-App wieder die Feldwahl.
+  Dann steht oben ein großer Knopf **Zurück zum Meetingpoint** — den darf
+  jeder antippen, ohne PIN. Von selbst springt das Tablet nicht zurück.
+<!-- pruef: "Zurück zum Meetingpoint" in src-tauri/assets/lobby.html -->
+  Zurück zum Zählen: Zahnrad → PIN → **Zur Feldwahl**. Danach verschwindet
+  der Zurück-Knopf auf diesem Tablet. Das gilt nur im Hallennetz und nur am
+  Turnier-PC — eine Feldwahl am Slave-PC hat die Kachel nicht.
+<!-- pruef: "Zur Feldwahl" in src-tauri/assets/anzeige.html -->
 - Ferne Halle mit Slave-PC: Die Adresse am Slave (`:8088/meetingpoint`)
   funktioniert ebenso; der Slave reicht alles an den Turnier-PC weiter.
 
@@ -125,20 +139,25 @@ Turnier-PCs.
 ## Schiedsrichter schon beim Aufruf
 
 Mit Schiedsrichtern und eingeschalteter Schiedsrichter-Rotation bekommt eine
-gerufene Partie gleich beim Aufruf **vorläufig** den nächsten freien
-Schiedsrichter (nicht im Einsatz, nicht pausiert, nicht für ein anderes
-wartendes Spiel eingeteilt). Wird ein Schiedsrichter
-frei, geht er an die älteste gerufene Partie ohne Schiedsrichter. In BTP
-steht er erst, wenn die Partie aufs Feld kommt; vorher kann die Turnierleitung
-in BTP oder von Hand jemand anderen einteilen — das hat Vorrang. Fehlen
-Schiedsrichter, setzt die Turnierleitung einzelne Partien im ⋮-Menü auf
-**Ohne Schiedsrichter**.
+gerufene Partie gleich beim Aufruf **fest** ihren Schiedsrichter und, wenn die
+Aufschlagrichter-Rotation an ist, ihren Aufschlagrichter (seit v0.9.359; das
+gilt auch ohne Meetingpoint). Die Einteilung steht sofort in BTP. Wird jemand
+frei, geht er an die vorderste gerufene Partie, der noch jemand fehlt. Eine
+Einteilung von Hand oder in BTP hat Vorrang. Fehlen Schiedsrichter, setzt die
+Turnierleitung einzelne Partien im ⋮-Menü auf **Ohne Schiedsrichter** — das
+bleibt dann so. Nimmt die Turnierleitung den Aufruf zurück, wird die
+Einteilung der Rotation wieder frei.
 
+Gewählt wird nach denselben Regeln wie am Feld (siehe
+[Schiedsrichter verwalten](schiedsrichter-management.md#zuteilung-schon-beim-aufruf-seit-v09359-adr-0080)).
 Wer für ein anderes wartendes Spiel fest eingeteilt ist (in BTP vorab oder von
-Hand, siehe [Schiedsrichter verwalten](schiedsrichter-management.md)), wird
-übersprungen. Wird ein vorläufig zugeteilter Schiedsrichter nachträglich für
-ein anderes Spiel eingeteilt, verliert die gerufene Partie ihn und bekommt den
-nächsten freien.
+Hand), wird übersprungen. Wechselt der Schiedsrichter einer Partie, muss er
+sich am Meetingpoint neu melden.
+
+Auf der Meetingpoint-Seite steht unter dem Schiedsrichter seit v0.9.361 auch
+der **Aufschlagrichter**. Er wird nur angezeigt; einchecken muss er sich nicht,
+und für „spielbereit" zählt weiterhin nur der Schiedsrichter.
+<!-- pruef: "Aufschlagrichter" in src-tauri/assets/meetingpoint.html -->
 
 ## Sicht der Turnierleitung
 

@@ -93,6 +93,9 @@ export interface AzureTtsConfig {
   /** Gemini-Schlüssel aus Google AI Studio (Secret) und Stimme (z. B. „Kore"). */
   gemini_key?: string;
   gemini_voice?: string;
+  /** Ansage in Teilen vertonen und je Teil cachen (Spec `ansage-in-teilen`,
+   *  spart Zeichen); Standard aus. */
+  teile?: boolean;
 }
 
 /** Ergebnis von „Dienste prüfen" je Sprachdienst (Rust: commands::DienstPruefung). */
@@ -224,7 +227,12 @@ export interface OfficialsConfig {
   rotation_sr: boolean;
   /** Automatische Rotation für Aufschlagrichter? */
   rotation_ar: boolean;
+  /** Einteilungsprinzip (ADR 0079); fehlt bei älteren Turnier-PCs. */
+  rotation_mode?: RotationMode;
 }
+
+/** Einteilungsprinzip der Rotation (Rust: config::RotationMode). */
+export type RotationMode = "getrennt" | "abwechselnd" | "rollenwechsel";
 
 /** Einstellungen der automatischen Feldvergabe (Rust: config::AutoAssignConfig). */
 export interface AutoAssignConfig {
@@ -724,6 +732,9 @@ export type AnnounceJob = {
       /** Die Aufruf-Automatik des Meetingpoints hat ein Spiel gerufen —
        *  gesprochen wie ein Vorbereitungs-Aufruf. */
       kind: "meetingpoint_call";
+      /** Besetzung fertig vom Turnier-PC (ADR 0080); fehlt bei älteren. */
+      sr?: string[];
+      ar?: string[];
       matchId: number;
     }
   | {
@@ -1151,6 +1162,9 @@ export interface PreparationCandidate {
   manual: boolean;
   /** Meetingpoint-Stand (nur gerufen + Meetingpoint an). */
   meetingpoint?: MeetingpointStand;
+  /** SR/AR eines gerufenen Spiels (ADR 0080); fehlt, wenn niemand. */
+  sr?: string[];
+  ar?: string[];
 }
 
 /** Ein einzucheckender Platz (Rust: relay_proto::MpPlatz). */
@@ -1284,7 +1298,17 @@ export interface OfficialView {
   reserved: boolean;
   /** Spielnummer der Reservierung (bei mehreren die kleinste), sonst null. */
   reserved_match_num: number | null;
+  /** Was die Person übernehmen darf (ADR 0079); fehlt bei älteren. */
+  role?: EinsatzRolle;
+  /** Position in der AR-Liste (Modus A). */
+  position_ar?: number;
+  /** Vorschau: nächster Dienst „sr"/„ar" und Runde (0 = als Nächstes). */
+  next_role?: "sr" | "ar" | null;
+  next_rank?: number | null;
 }
+
+/** Einsatzrolle je Official (Rust: officials::Einsatzrolle). */
+export type EinsatzRolle = "beides" | "sr" | "ar";
 
 /** Ein abgeleiteter Einsatz fürs Detail-Overlay (Rust: AppearanceView). */
 export interface AppearanceView {

@@ -393,9 +393,111 @@ fn officials_entries(
             planning_id: m.planning_id,
             court_id: m.court_id.unwrap_or(0),
             officials: Some((sr, ar)),
+            highlight: None,
         });
     }
     out
+}
+
+/// Gleicht Schiedsrichter-Einträge mit einem **frisch** gelesenen BTP-Stand
+/// ab, unmittelbar vor dem Write (`tablet::server::write_officials_to_btp`).
+///
+/// Warum: BTP übernimmt bei jedem Schiedsrichter-Write die CourtID aus dem
+/// Write — `0` oder ein fehlendes Element löscht ein Feld, auch wenn BTP es
+/// schon seit Sekunden zeigt (Messung 09.11.2026,
+/// `btp_officials_ohne_feld_probe` K2/K3). Der Snapshot des Sync-Zyklus
+/// (`alt`) ist dafür zu alt, sobald jemand das Feld zwischendurch in BTP von
+/// Hand vergibt. Deshalb:
+///
+/// - `CourtID`, `DrawID`, `PlanningID` kommen aus `frisch`;
+/// - Spiele, die `frisch` nicht kennt, fallen heraus;
+/// - Spiele mit **jetzt** laufender eigener Feldvergabe (`reserviert`) fallen
+///   heraus — BTP zeigt deren Feld womöglich noch nicht (Übernahme ≤ 1 s),
+///   die Besetzung reist ohnehin im Zuweisungs-Write mit (ADR 0021);
+/// - Spiele, deren SR/AR in BTP seit `alt` geändert wurden, fallen heraus —
+///   sonst überschriebe der Write die Hand-Umteilung in BTP (R2); der
+///   nächste Zyklus entscheidet auf dem neuen Stand.
+///
+/// `CourtID` und Farbe nimmt der Write aus dem **eigenen** Merkstand
+/// (`eigen`, `btp::eigene_writes`), solange ein eigener Write desselben
+/// Spiels noch nicht sicher in BTP sichtbar ist (gemessen bis 840 ms) — sonst
+/// löschte ein SR-Write im selben Lauf das eben geschriebene Aufruf-Gelb.
+pub(crate) fn feld_aus_frischem_stand(
+    entries: &[crate::btp::proto::MatchCourt],
+    alt: &[crate::btp::model::BtpMatch],
+    frisch: &[crate::btp::model::BtpMatch],
+    reserviert: &HashSet<i64>,
+    eigen: &dyn Fn(i64) -> Option<crate::btp::eigene_writes::Planung>,
+) -> Vec<crate::btp::proto::MatchCourt> {
+    let besetzung = |m: &crate::btp::model::BtpMatch| {
+        (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0))
+    };
+    entries
+        .iter()
+        .filter(|e| !reserviert.contains(&e.match_id))
+        .filter_map(|e| {
+            let m = frisch.iter().find(|m| m.id == e.match_id)?;
+            if let Some(vorher) = alt.iter().find(|a| a.id == e.match_id) {
+                if besetzung(vorher) != besetzung(m) {
+                    return None;
+                }
+            }
+            let eigen = eigen(m.id);
+            Some(crate::btp::proto::MatchCourt {
+                match_id: m.id,
+                draw_id: m.draw_id,
+                planning_id: m.planning_id,
+                court_id: eigen.map_or(m.court_id.unwrap_or(0), |p| p.court_id),
+                officials: e.officials,
+                // BTP übernimmt auch die Farbe aus dem Write, ein fehlendes
+                // Element heißt 0 (Messung 09.11.2026) — sonst verlöre ein
+                // gerufenes Spiel sein Gelb mit der Besetzung.
+                highlight: Some(eigen.map_or(m.highlight, |p| p.highlight)),
+            })
+        })
+        .collect()
+}
+
+/// Setzt Feld und Besetzung eines Farb-Writes aus dem **unmittelbar
+/// vorher** gelesenen BTP-Stand (Gegenstück zu [`feld_aus_frischem_stand`]).
+///
+/// BTP übernimmt `CourtID`, `Official1ID` und `Official2ID` aus jedem
+/// Match-Write; ein fehlendes Element löscht sie (Messung 09.11.2026,
+/// `tests/btp_highlight_sr_write_probe.rs`). Ein Farb-Write muss sie also mit
+/// dem Wert tragen, den BTP gerade zeigt — sonst verliert ein laufendes Spiel
+/// sein Feld und ein wartendes seine Besetzung. Die Identität kommt ebenfalls
+/// aus dem frischen Stand; Spiele, die BTP nicht mehr kennt, fallen heraus.
+///
+/// Feld und Besetzung aus dem **eigenen** Merkstand (`eigen`) haben Vorrang,
+/// solange ein eigener Write desselben Spiels noch nicht sicher in BTP
+/// sichtbar ist — sonst nähme der Farb-Write eine eben geschriebene
+/// Feldvergabe oder SR/AR-Besetzung wieder weg. Rein.
+pub(crate) fn planung_aus_frischem_stand(
+    entries: &[crate::btp::proto::HighlightEntry],
+    frisch: &[crate::btp::model::BtpMatch],
+    eigen: &dyn Fn(i64) -> Option<crate::btp::eigene_writes::Planung>,
+) -> Vec<crate::btp::proto::HighlightEntry> {
+    entries
+        .iter()
+        .filter_map(|e| {
+            let m = frisch.iter().find(|m| m.id == e.match_id)?;
+            let (court_id, officials) = match eigen(m.id) {
+                Some(p) => (p.court_id, p.officials),
+                None => (
+                    m.court_id.unwrap_or(0),
+                    (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
+                ),
+            };
+            Some(crate::btp::proto::HighlightEntry {
+                match_id: m.id,
+                draw_id: m.draw_id,
+                planning_id: m.planning_id,
+                highlight: e.highlight,
+                court_id,
+                officials,
+            })
+        })
+        .collect()
 }
 
 /// Gewünschter Highlight-Stand (P1): Match-IDs, die gerufen sind UND im
@@ -478,6 +580,10 @@ fn highlight_entries(
                 draw_id: m.draw_id,
                 planning_id: m.planning_id,
                 highlight: if want { HIGHLIGHT_PREP_CALL } else { 0 },
+                // Vorläufig aus dem Zyklus-Snapshot; `write_highlight_to_btp`
+                // setzt beide unmittelbar vor dem Senden frisch.
+                court_id: m.court_id.unwrap_or(0),
+                officials: (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
             })
         })
         .collect()
@@ -781,7 +887,7 @@ impl SyncEngine {
             return;
         }
         match crate::tablet::server::write_highlight_to_btp(config, &entries).await {
-            Ok(()) => {
+            Ok(_) => {
                 tracing::info!(
                     "BTP-Highlight aktualisiert: {} Änderung(en) ({} gerufen)",
                     entries.len(),
@@ -815,8 +921,15 @@ impl SyncEngine {
         if entries.is_empty() {
             return;
         }
-        match crate::tablet::server::write_officials_to_btp(config, &entries).await {
-            Ok(()) => {
+        match crate::tablet::server::write_officials_to_btp(config, &entries, snapshot, tablet)
+            .await
+        {
+            // `gesendet` trägt die CourtID aus dem frisch gelesenen Stand und
+            // nur die Spiele, die BTP noch kennt — gemerkt wird nur, was
+            // wirklich rausging.
+            Ok(gesendet) if gesendet.is_empty() => {}
+            Ok(gesendet) => {
+                let entries = gesendet;
                 tracing::info!(
                     "BTP-Schiedsrichter aktualisiert: {} Änderung(en): {}",
                     entries.len(),
@@ -1756,6 +1869,7 @@ impl SyncEngine {
         // sehen). Siehe `officials_oncourt_prev`.
         let ausgangslage = self.officials_oncourt_prev.is_none();
         let prev = self.officials_oncourt_prev.take().unwrap_or_default();
+        let modus = store.rotation_mode();
 
         // Verlassene Felder: War das vorige Spiel beendet, rücken seine
         // Officials ans Ende der Reihenfolge — nach CourtID sortiert, damit
@@ -1790,8 +1904,24 @@ impl SyncEngine {
                     fertig
                 );
             }
-            store.move_to_end(&fertig);
+            store.nach_spielende(wirksam.sr, wirksam.ar, modus);
         }
+
+        // Vorrolle je Official (nur Modus C, ADR 0079): einmal je Takt aus
+        // den beendeten Spielen — nach dem Ende-Rücken, damit das gerade
+        // beendete Spiel schon zählt; Besetzungen dieses Takts ändern sie
+        // nicht.
+        let vorrolle = if modus == crate::config::RotationMode::Rollenwechsel {
+            let fertige: Vec<crate::tablet::officials::FinishedMatch> = snapshot
+                .matches
+                .iter()
+                .filter(|m| m.status == MatchStatus::Finished)
+                .map(crate::tablet::officials::FinishedMatch::aus_btp)
+                .collect();
+            store.vorrollen(&fertige)
+        } else {
+            HashMap::new()
+        };
 
         // Wer ist gebunden? Dienst auf einem laufenden Feld UND Reservierung
         // für ein wartendes Spiel (ADR 0078) — aus der einen Quelle
@@ -1803,32 +1933,11 @@ impl SyncEngine {
             snapshot,
             crate::tablet::tl::heutiges_datum(now_ms()),
         );
-        // In diesem Lauf zusätzlich Gebundene: übernommene und vorläufige
-        // Meetingpoint-SR, frisch Zugewiesene.
+        // In diesem Lauf zusätzlich Gebundene: frisch Zugewiesene.
         let mut zusaetzlich: HashSet<i64> = HashSet::new();
-
-        // Vorläufige Meetingpoint-SR (ADR 0072) übernehmen — zustandsbasiert
-        // für JEDES laufende Spiel, nicht nur neu belegte Felder: Sonst
-        // verschluckte die Ausgangslage nach einem Sync-Neustart die
-        // Übernahme. Vor der Rotation, damit diese nicht jemand anderen holt.
-        // Nach CourtID sortiert: Bei zwei Feldern entscheidet sonst die
-        // HashMap-Reihenfolge.
-        let mut belegte: Vec<(i64, i64)> = oncourt_now.iter().map(|(&c, &m)| (c, m)).collect();
-        belegte.sort_by_key(|&(c, _)| c);
-        for &(court_id, match_id) in &belegte {
-            if let Some(m) = snapshot.matches.iter().find(|m| m.id == match_id) {
-                let mut belegt = belegung.belegt_ausser(match_id);
-                belegt.extend(&zusaetzlich);
-                if let Some(id) =
-                    crate::tablet::meetingpoint::uebernimm_vorab_sr(tablet, m, court_id, &belegt)
-                {
-                    zusaetzlich.insert(id);
-                }
-            }
-        }
-        // Vorläufig für gerufene Partien reservierte SR stehen der Feld-
-        // Rotation nicht zur Verfügung.
-        zusaetzlich.extend(tablet.meetingpoint_store().alle_vorab_sr().into_values());
+        // Vergabe-Sperre (ADR 0080): Ein Hand-Aufruf außerhalb des Takts darf
+        // nicht dieselbe Person vergeben wie diese Feld-Rotation.
+        let _sperre = store.vergabe_sperre();
 
         // Neu belegte Felder bestücken — nach CourtID sortiert, damit die
         // Verteilung bei mehreren gleichzeitig deterministisch ist.
@@ -1860,6 +1969,9 @@ impl SyncEngine {
                 belegt: &belegt,
                 sr: rotation_sr && schalter.sr,
                 ar: rotation_ar && schalter.ar,
+                modus,
+                vorrolle: &vorrolle,
+                herkunft: crate::tablet::officials::Herkunft::Feld,
             });
             // Frisch Zugewiesene zählen sofort als im Dienst — sonst bekäme
             // das nächste Feld im selben Zyklus dieselbe Person.
@@ -2046,8 +2158,6 @@ impl SyncEngine {
             .filter(|m| pending_matches.contains(&m.id))
             .flat_map(&besetzung_von)
             .collect();
-        // Übernommene Vorab-SR dieses Laufs (ADR 0072).
-        let mut vorab_uebernommen: HashSet<i64> = HashSet::new();
         // Feld frei, aber keine spielbereite Partie — für die Warnung.
         let mut feld_ohne_bereite = false;
         let calls = tablet.preparation_calls();
@@ -2336,18 +2446,12 @@ impl SyncEngine {
                 court_id: court.id,
                 match_id: Some(m.id),
             });
-            // Vorläufiger Meetingpoint-SR wird jetzt echt (ADR 0072) und
-            // reist im selben Write mit.
-            let mut belegt = belegung.belegt_ausser(m.id);
-            belegt.extend(&vorab_uebernommen);
-            belegt.extend(&used_officials);
-            if let Some(id) =
-                crate::tablet::meetingpoint::uebernimm_vorab_sr(tablet, m, court.id, &belegt)
-            {
-                vorab_uebernommen.insert(id);
-            }
-            // Die Besetzung dieses Felds ist für den Rest des Laufs vergeben
-            // (nach der Übernahme, damit der Vorab-SR mitzählt).
+            // Rotations-Zuteilung einer Rolle, die dieses Feld nicht will,
+            // vorher lösen (ADR 0080) — sie reist dann nicht mit.
+            tablet
+                .officials_store()
+                .rotation_loesen_am_feld(m, court.id);
+            // Die Besetzung dieses Felds ist für den Rest des Laufs vergeben.
             used_officials.extend(besetzung_von(m));
             match_courts.push(crate::btp::proto::MatchCourt {
                 match_id: m.id,
@@ -2357,6 +2461,7 @@ impl SyncEngine {
                 // Die Besetzung wandert mit ins Zuweisungs-Update
                 // (ADR 0021) — ein Request statt zwei.
                 officials: tablet.officials_for_write(m),
+                highlight: None,
             });
             // Feld gilt jetzt als belegt – Wartezeit zurücksetzen und die
             // Zuweisung als „unterwegs" merken, damit weder Feld noch Match bis
@@ -2567,33 +2672,36 @@ impl SyncEngine {
         // gebunden und um neue BTP-Officials ergänzt. Master-only: der
         // Ansage-Slave ist oben schon zurückgekehrt.
         self.track_officials(&snapshot, tablet);
-        // Meetingpoint: gerufenen Partien vorläufig einen freien SR geben
-        // (ADR 0072) — nach der Feld-Rotation, die Vorrang hat.
-        crate::tablet::meetingpoint::vorab_sr_verteilen(
-            tablet,
-            &snapshot,
-            &config.meetingpoint,
-            crate::tablet::tl::heutiges_datum(now_ms()),
-        );
         // Aufruf-Automatik (ADR 0075): ruft über denselben Weg wie ein
-        // Hand-Aufruf; der Aufruf räumt die Auto-Halle (E3).
-        for (match_id, location_id) in
-            crate::tablet::meetingpoint::auto_aufrufe(tablet, &snapshot, config, now_ms())
-        {
+        // Hand-Aufruf; der Aufruf räumt die Auto-Halle (E3). Erst alle
+        // eintragen, dann SR/AR zuteilen, dann ansagen (ADR 0080) — so trägt
+        // der Ansage-Auftrag schon die Besetzung desselben Laufs.
+        let auto_gerufen =
+            crate::tablet::meetingpoint::auto_aufrufe(tablet, &snapshot, config, now_ms());
+        for (match_id, location_id) in &auto_gerufen {
             tablet.add_preparation_call_mit(
                 crate::tablet::state::PreparationCall {
-                    match_id,
-                    location_id,
+                    match_id: *match_id,
+                    location_id: *location_id,
                     called_at_ms: now_ms(),
                 },
                 true,
             );
-            tablet.auto_hall_store().remove(match_id);
+            tablet.auto_hall_store().remove(*match_id);
             tracing::info!("Meetingpoint: Spiel {match_id} automatisch gerufen");
+        }
+        // Gerufene Partien besetzen (ADR 0080) — nach der Feld-Rotation, die
+        // Vorrang hat; auch ohne neue Aufrufe (Nachrücken, Freigaben).
+        crate::tablet::meetingpoint::gerufene_besetzen(
+            tablet,
+            &snapshot,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
+        for (match_id, location_id) in auto_gerufen {
             // Angesagt wie ein Hand-Aufruf (`meetingpoint::hand_aufruf`).
             tablet.publish_announce_job(
                 crate::tablet::meetingpoint::hallen_name(&snapshot, location_id),
-                crate::tablet::state::AnnounceJobKind::MeetingpointCall { match_id },
+                crate::tablet::meetingpoint::aufruf_auftrag(tablet, &snapshot, match_id),
                 now_ms(),
             );
         }
@@ -4323,8 +4431,9 @@ mod tests {
     }
 
     #[test]
-    fn der_vorlaeufige_sr_reist_im_selben_zuweisungs_write_mit() {
-        // ADR 0072: Übernahme in `auto_assign` vor `officials_for_write`.
+    fn die_zuteilung_beim_aufruf_reist_im_selben_zuweisungs_write_mit() {
+        // ADR 0080: Die feste Zuteilung steht schon vor dem Feld fest und
+        // reist mit der Feldzuweisung.
         let mut engine = SyncEngine::new();
         let tablet = TabletState::default();
         let mut snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
@@ -4350,13 +4459,12 @@ mod tests {
             location_id: None,
             called_at_ms: 0,
         });
-        crate::tablet::meetingpoint::vorab_sr_verteilen(
+        crate::tablet::meetingpoint::gerufene_besetzen(
             &tablet,
             &snap,
-            &cfg.meetingpoint,
             crate::tablet::tl::heutiges_datum(now_ms()),
         );
-        assert_eq!(tablet.meetingpoint_store().vorab_sr(7), Some(100));
+        assert_eq!(store.assignment(7).sr, Some(100));
         let (_, matches) = engine.auto_assign(&cfg, &snap, &tablet);
         assert_eq!(matches[0].officials, Some((100, 0)));
     }
@@ -5592,6 +5700,191 @@ mod tests {
     }
 
     #[test]
+    fn feld_aus_frischem_stand_uebernimmt_die_courtid_von_jetzt() {
+        // Messung 09.11.2026 (btp_officials_ohne_feld_probe, K2/K3): BTP
+        // setzt bei JEDEM Schiedsrichter-Write die CourtID auf den Wert im
+        // Write — 0 oder ein fehlendes Element löscht ein Feld, das BTP schon
+        // seit Sekunden zeigt. Unmittelbar vor dem Write gilt deshalb die
+        // CourtID aus dem frisch gelesenen Stand.
+        use crate::btp::proto::MatchCourt;
+        let eintrag = |id, court_id| MatchCourt {
+            match_id: id,
+            // Identität wie in `ready_match` — sie kommt aus dem frischen Stand.
+            draw_id: 1,
+            planning_id: 1000 + id,
+            court_id,
+            officials: Some((1, 2)),
+            // Farbe kommt wie die CourtID aus dem frischen Stand (hier 0).
+            highlight: Some(0),
+        };
+        let alt_stand = vec![
+            ready_named(10, None, "A", "B"),
+            oncourt_named(11, 4, "C", "D"),
+            ready_named(12, None, "E", "F"),
+        ];
+        let alt = vec![eintrag(10, 0), eintrag(11, 4), eintrag(12, 0)];
+        // Frisch: 10 inzwischen in BTP von Hand auf Feld 7, 11 wieder ohne
+        // Feld, 12 gibt es nicht mehr.
+        let frisch = vec![
+            oncourt_named(10, 7, "A", "B"),
+            ready_named(11, None, "C", "D"),
+        ];
+        let neu = feld_aus_frischem_stand(&alt, &alt_stand, &frisch, &HashSet::new(), &|_| None);
+        assert_eq!(neu, vec![eintrag(10, 7), eintrag(11, 0)]);
+    }
+
+    #[test]
+    fn feld_aus_frischem_stand_laesst_eigene_laufende_vergaben_aus() {
+        // Review 09.11.2026: Eine TL-Web-Vergabe kann NACH dem Bauen der
+        // Einträge starten. BTP zeigt ihr Feld beim frischen Lesen womöglich
+        // noch nicht (Übernahme ≤ 1 s) — ein Write mit CourtID 0 löschte sie.
+        use crate::btp::proto::MatchCourt;
+        let e = MatchCourt {
+            match_id: 10,
+            draw_id: 10,
+            planning_id: 10,
+            court_id: 0,
+            officials: Some((1, 2)),
+            highlight: None,
+        };
+        let stand = vec![ready_named(10, None, "A", "B")];
+        let reserviert: HashSet<i64> = [10].into_iter().collect();
+        assert!(feld_aus_frischem_stand(&[e], &stand, &stand, &reserviert, &|_| None).is_empty());
+    }
+
+    #[test]
+    fn feld_aus_frischem_stand_ueberschreibt_keine_umteilung_in_btp() {
+        // R2: Teilt jemand zwischen Zyklus-Snapshot und Write in BTP um,
+        // gewinnt BTP — der Eintrag fällt heraus, der nächste Zyklus
+        // entscheidet auf dem neuen Stand.
+        use crate::btp::proto::MatchCourt;
+        let e = MatchCourt {
+            match_id: 10,
+            draw_id: 10,
+            planning_id: 10,
+            court_id: 0,
+            officials: Some((1, 2)),
+            highlight: None,
+        };
+        let alt = vec![ready_named(10, None, "A", "B")];
+        let mut umgeteilt = ready_named(10, None, "A", "B");
+        umgeteilt.official1_id = Some(5);
+        assert!(
+            feld_aus_frischem_stand(&[e], &alt, &[umgeteilt], &HashSet::new(), &|_| None)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn feld_aus_frischem_stand_traegt_die_zeilenfarbe_von_jetzt() {
+        // Messung 09.11.2026 (btp_highlight_sr_write_probe, K1/K2): Ein
+        // Schiedsrichter-Write ohne `Highlight` setzte die Farbe auf 0 — das
+        // Gelb gerufener Spiele verschwand, sobald die Rotation SR/AR
+        // schrieb. Der Write trägt deshalb die Farbe aus dem frischen Stand.
+        use crate::btp::proto::MatchCourt;
+        let e = MatchCourt {
+            match_id: 10,
+            draw_id: 10,
+            planning_id: 10,
+            court_id: 0,
+            officials: Some((1, 2)),
+            highlight: None,
+        };
+        let alt = vec![ready_named(10, None, "A", "B")];
+        let mut gelb = ready_named(10, None, "A", "B");
+        gelb.highlight = crate::btp::proto::HIGHLIGHT_PREP_CALL;
+        let neu = feld_aus_frischem_stand(&[e], &alt, &[gelb], &HashSet::new(), &|_| None);
+        assert_eq!(neu.len(), 1);
+        assert_eq!(
+            neu[0].highlight,
+            Some(crate::btp::proto::HIGHLIGHT_PREP_CALL)
+        );
+    }
+
+    #[test]
+    fn planung_aus_frischem_stand_haelt_feld_und_besetzung_beim_farb_write() {
+        // Messung 09.11.2026 (btp_highlight_sr_write_probe, K3/K4): Ein
+        // Farb-Write ohne `CourtID`/`Official1ID`/`Official2ID` nahm einem
+        // laufenden Spiel Feld und Schiedsrichter und einem wartenden seine
+        // Besetzung. Unmittelbar vor dem Write gelten beide aus dem frisch
+        // gelesenen Stand; Spiele, die BTP nicht mehr kennt, fallen heraus.
+        use crate::btp::proto::HighlightEntry;
+        let eintrag = |id| HighlightEntry {
+            match_id: id,
+            draw_id: 0,
+            planning_id: 0,
+            highlight: 3,
+            court_id: 0,
+            officials: (0, 0),
+        };
+        let mut laufend = oncourt_named(10, 4, "A", "B");
+        laufend.official1_id = Some(7);
+        let mut wartend = ready_named(11, None, "C", "D");
+        wartend.official1_id = Some(1);
+        wartend.official2_id = Some(2);
+        let neu = planung_aus_frischem_stand(
+            &[eintrag(10), eintrag(11), eintrag(12)],
+            &[laufend.clone(), wartend.clone()],
+            &|_| None,
+        );
+        assert_eq!(neu.len(), 2, "12 kennt BTP nicht mehr");
+        assert_eq!(
+            (neu[0].court_id, neu[0].officials, neu[0].highlight),
+            (4, (7, 0), 3)
+        );
+        assert_eq!(
+            (neu[0].draw_id, neu[0].planning_id),
+            (laufend.draw_id, laufend.planning_id)
+        );
+        assert_eq!((neu[1].court_id, neu[1].officials), (0, (1, 2)));
+    }
+
+    #[test]
+    fn eigene_writes_gehen_vor_einem_noch_nicht_uebernommenen_frischen_stand() {
+        // Messung 09.11.2026: BTP zeigt einen eigenen Write erst nach
+        // 350–840 ms. Im selben Sync-Lauf schreibt `reconcile_highlights` das
+        // Aufruf-Gelb und Millisekunden später `reconcile_officials` SR/AR —
+        // das frische Lesen des zweiten Writes sähe noch Farbe 0 und löschte
+        // das Gelb (Review-Fund). Umgekehrt nähme ein Farb-Write eine eben
+        // geschriebene Feldvergabe oder Besetzung weg. Der eigene Merkstand
+        // hat deshalb Vorrang.
+        use crate::btp::eigene_writes::Planung;
+        use crate::btp::proto::{HighlightEntry, MatchCourt, HIGHLIGHT_PREP_CALL};
+        let frisch = vec![ready_named(10, None, "A", "B")]; // BTP: noch alles 0
+        let eigen = |id: i64| {
+            (id == 10).then_some(Planung {
+                court_id: 4,
+                officials: (7, 8),
+                highlight: HIGHLIGHT_PREP_CALL,
+            })
+        };
+
+        let sr = MatchCourt {
+            match_id: 10,
+            draw_id: 0,
+            planning_id: 0,
+            court_id: 0,
+            officials: Some((7, 8)),
+            highlight: None,
+        };
+        let neu = feld_aus_frischem_stand(&[sr], &frisch, &frisch, &HashSet::new(), &eigen);
+        assert_eq!(neu[0].highlight, Some(HIGHLIGHT_PREP_CALL), "Gelb bleibt");
+        assert_eq!(neu[0].court_id, 4, "eben vergebenes Feld bleibt");
+
+        let farbe = HighlightEntry {
+            match_id: 10,
+            draw_id: 0,
+            planning_id: 0,
+            highlight: 0,
+            court_id: 0,
+            officials: (0, 0),
+        };
+        let neu = planung_aus_frischem_stand(&[farbe], &frisch, &eigen);
+        assert_eq!((neu[0].court_id, neu[0].officials), (4, (7, 8)));
+        assert_eq!(neu[0].highlight, 0, "die eigene neue Farbe zählt");
+    }
+
+    #[test]
     fn officials_entries_always_reasserts_the_current_court_id() {
         // Live-Befund 14.08.2026 (Zwei-Hallen-Turnier, Match 1216/Feld 8,
         // erneut beobachtet nach einer testweise eingeführten 10s-Karenzzeit
@@ -6003,14 +6296,75 @@ mod tests {
         engine.track_officials(&snap2, &tablet);
         assert_eq!(
             tablet.officials_store().order(),
-            vec![3, 1, 2],
-            "SR und AR des beendeten Spiels rücken ans Ende"
+            vec![3, 2, 1],
+            "AR (2) und SR (1) des beendeten Spiels rücken ans Ende — in der Folge \
+             AR, SR, damit das Paar beim nächsten Mal getauscht hochkommt (ADR 0079)"
         );
         assert_eq!(
             tablet.officials_store().assignment(10).sr,
             Some(1),
             "Zuweisung bleibt dem beendeten Spiel erhalten"
         );
+    }
+
+    #[test]
+    fn track_officials_rollenwechsel_nimmt_die_vorrolle_aus_beendeten_spielen() {
+        // AK19 (ADR 0079): Zwei Felder im selben Takt, Modus C. Die Vorrolle
+        // kommt aus dem beendeten Spiel 9 (SR 1, AR 2); die Besetzung von
+        // Feld 3 ändert die Wahl auf Feld 7 nur über die Belegung.
+        let (mut engine, tablet) = officials_setup(true, true);
+        tablet
+            .officials_store()
+            .set_rotation_mode(crate::config::RotationMode::Rollenwechsel);
+        let mut fertig = finished_named(9, 1, "X", "Y");
+        fertig.official1_id = Some(1);
+        fertig.official2_id = Some(2);
+        let snap = snap_officials(
+            vec![
+                fertig,
+                oncourt_named(10, 3, "A", "B"),
+                oncourt_named(11, 7, "C", "D"),
+            ],
+            &[1, 2, 3, 4],
+        );
+        tablet.set_snapshot(snap.clone());
+        engine.track_officials(&snap, &tablet);
+        let store = tablet.officials_store();
+        assert_eq!(store.assignment(10).sr, Some(2), "zuletzt AR ⇒ jetzt SR");
+        assert_eq!(store.assignment(10).ar, Some(1), "zuletzt SR ⇒ jetzt AR");
+        assert_eq!(
+            store.assignment(11).sr,
+            Some(3),
+            "ohne Vorgeschichte: SR zuerst"
+        );
+        assert_eq!(store.assignment(11).ar, Some(4));
+    }
+
+    #[test]
+    fn track_officials_getrennt_rueckt_sr_und_ar_je_liste() {
+        // AK8 auf Takt-Ebene: SR nur in der SR-Liste, AR nur in der AR-Liste.
+        let (mut engine, tablet) = officials_setup(true, true);
+        let store = tablet.officials_store();
+        store.set_rotation_mode(crate::config::RotationMode::Getrennt);
+        let snap1 = snap_officials(vec![oncourt_named(10, 5, "A", "B")], &[1, 2, 3]);
+        // Turnier vorab binden — sonst verwirft der erste Takt den Stand.
+        store.set_tournament(&snap1.tournament_name);
+        store.sync_roster(&[1, 2, 3]);
+        store.reorder_in(crate::tablet::officials::Reihenfolge::Ar, 3, Some(1));
+        tablet.set_snapshot(snap1.clone());
+        engine.track_officials(&snap1, &tablet);
+        assert_eq!(store.assignment(10).sr, Some(1));
+        assert_eq!(
+            store.assignment(10).ar,
+            Some(3),
+            "AR kommt aus der AR-Liste"
+        );
+
+        let snap2 = snap_officials(vec![finished_named(10, 42, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap2.clone());
+        engine.track_officials(&snap2, &tablet);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        assert_eq!(store.order_ar(), vec![1, 2, 3]);
     }
 
     #[test]
@@ -6044,9 +6398,9 @@ mod tests {
         engine.track_officials(&snap2, &tablet);
         assert_eq!(
             tablet.officials_store().order(),
-            vec![1, 2, 3, 4],
-            "Feld 3 (kleinere CourtID) rückt zuerst ans Ende (1,2), danach Feld 7 (3,4) — \
-             deterministisch nach CourtID, nicht nach HashMap-Reihenfolge"
+            vec![2, 1, 4, 3],
+            "Feld 3 (kleinere CourtID) rückt zuerst ans Ende (AR 2, SR 1), danach Feld 7 \
+             (AR 4, SR 3) — deterministisch nach CourtID, nicht nach HashMap-Reihenfolge"
         );
     }
 
@@ -6299,46 +6653,142 @@ mod tests {
     }
 
     #[test]
-    fn ein_vorab_sr_der_fuer_ein_anderes_spiel_reserviert_ist_geht_nicht_mit_aufs_feld() {
-        // Grill-Testfall: Vorab 100 an der gerufenen Partie 7, die TL teilt
-        // 100 für Spiel 8 ein ⇒ 7 kommt ohne 100 aufs Feld.
-        let mut engine = SyncEngine::new();
+    fn auto_aufruf_hat_sr_vor_dem_ansage_auftrag_im_selben_lauf() {
+        // AK2 (ADR 0080): Die Automatik ruft, der Lauf teilt im selben Takt
+        // zu — der Auftrag entsteht erst danach.
+        let tablet = TabletState::default();
+        let mut snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        snap.officials = vec![official_named(100)];
+        tablet.set_snapshot(snap.clone());
+        let store = tablet.officials_store();
+        store.set_enabled(true);
+        store.set_rotation(true, false);
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        });
+        let geaendert = crate::tablet::meetingpoint::gerufene_besetzen(
+            &tablet,
+            &snap,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
+        assert_eq!(geaendert, vec![7]);
+        assert_eq!(store.assignment(7).sr, Some(100));
+    }
+
+    #[test]
+    fn aufruf_und_takt_gleichzeitig_vergeben_niemanden_doppelt() {
+        // AK30: Vergabe-Sperre — zwei gerufene Partien, ein Official, zwei
+        // Threads besetzen gleichzeitig.
+        for _ in 0..20 {
+            let tablet = std::sync::Arc::new(TabletState::default());
+            let mut snap = snap_with(
+                vec![court(1, None)],
+                vec![ready_match(7, 1), ready_named(8, None, "C", "D")],
+                Vec::new(),
+            );
+            snap.officials = vec![official_named(100)];
+            tablet.set_snapshot(snap.clone());
+            let store = tablet.officials_store();
+            store.set_enabled(true);
+            store.set_rotation(true, false);
+            for id in [7, 8] {
+                tablet.add_preparation_call(PreparationCall {
+                    match_id: id,
+                    location_id: None,
+                    called_at_ms: 0,
+                });
+            }
+            let heute = crate::tablet::tl::heutiges_datum(now_ms());
+            let griffe: Vec<_> = (0..2)
+                .map(|_| {
+                    let t = tablet.clone();
+                    let s = snap.clone();
+                    std::thread::spawn(move || {
+                        crate::tablet::meetingpoint::gerufene_besetzen(&t, &s, heute)
+                    })
+                })
+                .collect();
+            for g in griffe {
+                g.join().unwrap();
+            }
+            let n = [7, 8]
+                .iter()
+                .filter(|id| store.assignment(**id).sr == Some(100))
+                .count();
+            assert_eq!(n, 1, "100 steht an genau einer Partie");
+        }
+    }
+
+    #[test]
+    fn nach_einem_sync_neustart_bleibt_die_zuteilung_und_luecken_fuellen_sich() {
+        // AK10: Der Lauf ist zustandsbasiert — eine neue Engine (Speichern der
+        // Einstellungen) ändert nichts Bestehendes.
         let tablet = TabletState::default();
         let mut snap = snap_with(
             vec![court(1, None)],
             vec![ready_match(7, 1), ready_named(8, None, "C", "D")],
             Vec::new(),
         );
-        snap.officials = vec![official_named(100)];
+        snap.officials = vec![official_named(100), official_named(101)];
         tablet.set_snapshot(snap.clone());
         let store = tablet.officials_store();
         store.set_enabled(true);
         store.set_rotation(true, false);
-        let mut cfg = cfg_auto(true, 0.0);
-        cfg.meetingpoint.enabled = true;
         tablet.add_preparation_call(PreparationCall {
             match_id: 7,
             location_id: None,
             called_at_ms: 0,
         });
-        crate::tablet::meetingpoint::vorab_sr_verteilen(
+        let heute = crate::tablet::tl::heutiges_datum(now_ms());
+        crate::tablet::meetingpoint::gerufene_besetzen(&tablet, &snap, heute);
+        let vorher = store.assignment(7).sr;
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 8,
+            location_id: None,
+            called_at_ms: 1,
+        });
+        // „Neue Engine": derselbe Store, erster Lauf.
+        crate::tablet::meetingpoint::gerufene_besetzen(&tablet, &snap, heute);
+        assert_eq!(store.assignment(7).sr, vorher);
+        assert!(store.assignment(8).sr.is_some(), "Lücke gefüllt");
+    }
+
+    #[test]
+    fn ein_feld_ohne_sr_schalter_loest_die_rotations_zuteilung_im_write() {
+        // AK18 (ADR 0080): Kommt die gerufene Partie auf ein Feld ohne
+        // SR-Rotation, reist der Rotations-SR nicht mit.
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        snap.officials = vec![official_named(100)];
+        tablet.set_snapshot(snap.clone());
+        let store = tablet.officials_store();
+        store.set_enabled(true);
+        store.set_rotation(true, false);
+        let cfg = cfg_auto(true, 0.0);
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        });
+        crate::tablet::meetingpoint::gerufene_besetzen(
             &tablet,
             &snap,
-            &cfg.meetingpoint,
             crate::tablet::tl::heutiges_datum(now_ms()),
         );
-        assert_eq!(tablet.meetingpoint_store().vorab_sr(7), Some(100));
-        store.assign(8, crate::tablet::officials::OfficialRole::Sr, 100);
-        tablet.set_auto_assign_excluded(8, true);
+        assert_eq!(store.assignment(7).sr, Some(100));
+        let mut sw = store.court_switches(1);
+        sw.sr = false;
+        store.set_court_switches(1, sw);
         let (courts, matches) = engine.auto_assign(&cfg, &snap, &tablet);
         assert_eq!(courts[0].match_id, Some(7));
-        assert_eq!(matches[0].officials, None, "100 bleibt für Spiel 8");
-        assert_eq!(store.assignment(7).sr, None);
         assert_eq!(
-            tablet.meetingpoint_store().vorab_sr(7),
-            None,
-            "Vorab verfallen"
+            matches[0].officials, None,
+            "kein Rotations-SR im Write (nichts Lokales mehr ⇒ Officials unangetastet)"
         );
+        assert_eq!(store.assignment(7).sr, None);
     }
 
     #[test]

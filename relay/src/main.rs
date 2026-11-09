@@ -452,6 +452,11 @@ struct Namespace {
     /// `req_id` → wartender HTTP-Handler. Wie beim Punktverlauf reicht der
     /// Relay nur durch — diese Personendaten hält er **nie** vor.
     official_pending: HashMap<u64, oneshot::Sender<String>>,
+    /// Offene Spielersuchen (Spec `tl-spielersuche`, ADR 0081): eigene
+    /// Map, damit eine Suchflut keinen Zettel- oder Verlaufsabruf
+    /// verdrängt. Der Relay reicht Begriff und Treffer nur durch und hält
+    /// beides **nie** vor.
+    search_pending: HashMap<u64, oneshot::Sender<String>>,
     /// Belegte Geräteplätze: Zugang → letzter Zugriff (Unix-ms). Begrenzt,
     /// damit nicht Dutzende Browser denselben Turnier-PC abfragen.
     tl_devices: HashMap<String, u64>,
@@ -558,6 +563,7 @@ impl Namespace {
             timeline_pending: HashMap::new(),
             sheet_pending: HashMap::new(),
             official_pending: HashMap::new(),
+            search_pending: HashMap::new(),
             tl_devices: HashMap::new(),
             tl_gen: 0,
             monitor_subs: HashMap::new(),
@@ -826,6 +832,13 @@ async fn main() {
             .route(
                 "/tl/api/officials/{official_id}",
                 get(tl_official_detail_route),
+            )
+            // Spielersuche (Spec tl-spielersuche): POST, damit der
+            // Suchbegriff — ein Personenname — nie im nginx-Access-Log
+            // steht.
+            .route(
+                "/tl/api/search",
+                post(tl_search_route).layer(DefaultBodyLimit::max(TL_SEARCH_BODY_MAX)),
             )
             // TL-Push (Spec tl-web-push): Anstoß-Kanal `{"rev":n}`, damit
             // die Seite nicht mehr alle zwei Sekunden fragen muss. Ohne
@@ -4427,6 +4440,7 @@ fn forget_tl_access(namespace: &mut Namespace) {
     // Pflege-Ansicht beim Reconnect kurz leere Sperrlisten und überschriebe
     // sie beim Speichern.
     namespace.official_pending.clear();
+    namespace.search_pending.clear();
 }
 
 /// Der abgelegte Anzeige-Zustand (Revision + JSON), falls einer da ist.
@@ -4924,6 +4938,163 @@ async fn tl_timeline_route(
     }
 }
 
+/// Höchstgröße des Rumpfs einer Suchanfrage.
+const TL_SEARCH_BODY_MAX: usize = 1024;
+
+/// Rumpf einer Suchanfrage.
+#[derive(serde::Deserialize)]
+struct TlSearchBody {
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    candidates: bool,
+}
+
+/// Grobe Vorprüfung des Suchbegriffs — die genaue (nach der Faltung) macht
+/// der Turnier-PC. Hier geht es nur darum, offensichtlich Ungültiges gar
+/// nicht erst durchzureichen.
+fn suchbegriff_ok(q: &str) -> bool {
+    // Trennzeichen wie der Turnier-PC beim Falten als Leerraum zählen —
+    // sonst ginge „a-b-c-d-e-f-g" als ein Wort durch und käme vom Host als
+    // Fehler zurück (Security-Review 09.11.2026).
+    let trenner = |c: char| c.is_whitespace() || matches!(c, '-' | ',' | '\'' | '.' | '/' | '’');
+    let zeichen = q.chars().filter(|c| !trenner(*c)).count();
+    q.chars().count() <= relay_proto::TL_SEARCH_MAX_LEN
+        && zeichen >= relay_proto::TL_SEARCH_MIN_LEN
+        && q.split(trenner).filter(|w| !w.is_empty()).count() <= relay_proto::TL_SEARCH_MAX_WORDS
+}
+
+/// Erkennt eine Fehler-Antwort des Hosts (`{"error":"invalid"|"busy"}`).
+/// Nur kurze Antworten werden geprüft — Treffer-JSON bleibt opak.
+fn such_fehler(json: &str) -> Option<StatusCode> {
+    if json.len() > 64 {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    match v.get("error")?.as_str()? {
+        relay_proto::TL_SEARCH_ERR_BUSY => Some(StatusCode::TOO_MANY_REQUESTS),
+        _ => Some(StatusCode::BAD_REQUEST),
+    }
+}
+
+/// Spielersuche (Spec `tl-spielersuche`, ADR 0081) — Muster
+/// [`tl_official_detail_route`]. Der Relay reicht Begriff und Treffer nur
+/// durch, protokolliert den Begriff nie und hält die Antwort nicht vor.
+async fn tl_search_route(
+    State(broker): State<Broker>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let token = bearer(&headers);
+    let now = now_ms();
+    let ns = match tl_access_state(&broker, &token).await {
+        TlAccess::Ok { ns, .. } => ns,
+        TlAccess::HostOffline => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [(header::CACHE_CONTROL, "no-store")],
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response()
+        }
+        TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
+    };
+    if body.len() > TL_SEARCH_BODY_MAX {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Anfrage zu groß.").into_response();
+    }
+    let Ok(anfrage) = serde_json::from_slice::<TlSearchBody>(&body) else {
+        return (StatusCode::BAD_REQUEST, "Ungültige Anfrage.").into_response();
+    };
+    if !suchbegriff_ok(&anfrage.q) {
+        return (StatusCode::BAD_REQUEST, "Bitte 2 bis 64 Zeichen eingeben.").into_response();
+    }
+    let (ack_rx, req_id) = {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(&ns) else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        if !claim_tl_slot(namespace, &token, now) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
+            )
+                .into_response();
+        }
+        let Some(host) = namespace.host.clone() else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+            )
+                .into_response();
+        };
+        if namespace.search_pending.len() >= MAX_PENDING_PER_NS {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele offene Anfragen — bitte kurz warten.",
+            )
+                .into_response();
+        }
+        let (ack_tx, ack_rx) = oneshot::channel();
+        let req_id = namespace.next_req;
+        namespace.next_req += 1;
+        namespace.search_pending.insert(req_id, ack_tx);
+        if host
+            .send(text(&RelayFrame::TlSearchRequest {
+                req_id,
+                query: anfrage.q,
+                candidates: anfrage.candidates,
+            }))
+            .is_err()
+        {
+            namespace.search_pending.remove(&req_id);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC ist nicht erreichbar.",
+            )
+                .into_response();
+        }
+        (ack_rx, req_id)
+    };
+    match tokio::time::timeout(TL_TIMEOUT, ack_rx).await {
+        Ok(Ok(json)) if !json.is_empty() => match such_fehler(&json) {
+            Some(status) => {
+                let text = if status == StatusCode::TOO_MANY_REQUESTS {
+                    "Zu viele Suchen gleichzeitig — bitte kurz warten."
+                } else {
+                    "Bitte anders suchen."
+                };
+                (status, text).into_response()
+            }
+            None => (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, "application/json"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                json,
+            )
+                .into_response(),
+        },
+        _ => {
+            let mut map = broker.namespaces.lock().await;
+            if let Some(namespace) = map.get_mut(&ns) {
+                namespace.search_pending.remove(&req_id);
+            }
+            // Auch der Versions-Schiefstand landet hier — die Seite fragt
+            // aber nur, wenn der Turnier-PC `can_search` meldet.
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Der Turnier-PC hat nicht geantwortet.",
+            )
+                .into_response()
+        }
+    }
+}
+
 /// Sperrlisten und Einsätze eines Schiedsrichters — Muster
 /// [`tl_timeline_route`]. Der Relay reicht die Anfrage an den Turnier-PC
 /// durch und die Antwort unverändert zurück; diese Personendaten liegen
@@ -5362,6 +5533,12 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 kurz(&mut p.halle);
                 kurz(&mut p.label);
                 p.plaetze.iter_mut().for_each(|pl| kurz(&mut pl.name));
+                if let Some(ar) = p.ar.as_mut() {
+                    kurz(ar);
+                }
+                if let Some(feld) = p.aufgerufen_feld.as_mut() {
+                    kurz(feld);
+                }
             }
             namespace.meetingpoint = view;
         }
@@ -5486,6 +5663,17 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
         HostFrame::TlAck { req_id, response } => {
             if let Some(pending) = namespace.tl_pending.remove(&req_id) {
                 let _ = pending.send(response);
+            }
+        }
+        HostFrame::TlSearchResult { req_id, json } => {
+            if let Some(pending) = namespace.search_pending.remove(&req_id) {
+                // Eigener Deckel — der Host kürzt selbst darunter; was
+                // trotzdem größer ist, wird zur ehrlichen Fehlanzeige.
+                let _ = pending.send(if json.len() > relay_proto::MAX_TL_SEARCH_LEN {
+                    String::new()
+                } else {
+                    json
+                });
             }
         }
         HostFrame::OfficialDetail { req_id, json } => {
@@ -8766,6 +8954,186 @@ mod tests {
         assert!(String::from_utf8_lossy(&body).contains("SC Nachbar"));
     }
 
+    fn such_headers(token: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        headers
+    }
+
+    fn such_body(q: &str) -> axum::body::Bytes {
+        axum::body::Bytes::from(serde_json::json!({ "q": q, "candidates": true }).to_string())
+    }
+
+    /// Wartet auf die Suchanfrage beim Host und liefert ihre `req_id`.
+    async fn suchanfrage_beim_host(
+        host_rx: &mut mpsc::UnboundedReceiver<Message>,
+    ) -> (u64, String, bool) {
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("keine Anfrage beim Host")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let RelayFrame::TlSearchRequest {
+            req_id,
+            query,
+            candidates,
+        } = serde_json::from_str::<RelayFrame>(t.as_str()).unwrap()
+        else {
+            panic!("TlSearchRequest erwartet")
+        };
+        (req_id, query, candidates)
+    }
+
+    #[tokio::test]
+    async fn search_passes_through_and_rejects_foreign_tokens() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+
+        let antwort = tl_search_route(
+            State(broker.clone()),
+            such_headers("falsch"),
+            such_body("müller"),
+        )
+        .await;
+        assert_ne!(antwort.status(), StatusCode::OK);
+        assert!(host_rx.try_recv().is_err(), "kein Frame beim Host");
+
+        let broker2 = broker.clone();
+        let warten = tokio::spawn(async move {
+            tl_search_route(State(broker2), such_headers("token"), such_body("müller")).await
+        });
+        let (req_id, query, candidates) = suchanfrage_beim_host(&mut host_rx).await;
+        assert_eq!(query, "müller");
+        assert!(candidates);
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlSearchResult {
+                req_id,
+                json: r#"{"has_data":true,"treffer":"Max Müller"}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+        let antwort = warten.await.unwrap();
+        assert_eq!(antwort.status(), StatusCode::OK);
+        assert_eq!(
+            antwort.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        let body = axum::body::to_bytes(antwort.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("Max Müller"));
+        assert!(broker.namespaces.lock().await["ns1"]
+            .search_pending
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_invalid_search_term_never_reaches_the_host() {
+        let (broker, mut host_rx, _host) = broker_with_tl_device("token").await;
+        for q in [
+            "a".to_string(),
+            "x".repeat(65),
+            "a b c d e f g".to_string(),
+            "a-b-c-d-e-f-g".to_string(),
+            "..".to_string(),
+        ] {
+            let antwort =
+                tl_search_route(State(broker.clone()), such_headers("token"), such_body(&q)).await;
+            assert_eq!(antwort.status(), StatusCode::BAD_REQUEST, "{q}");
+        }
+        let gross = axum::body::Bytes::from(format!(r#"{{"q":"{}"}}"#, "x".repeat(2000)));
+        let antwort = tl_search_route(State(broker.clone()), such_headers("token"), gross).await;
+        assert_eq!(antwort.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(host_rx.try_recv().is_err(), "kein Frame beim Host");
+    }
+
+    #[tokio::test]
+    async fn a_host_side_validation_error_becomes_400_or_429() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+        for (code, status) in [
+            (relay_proto::TL_SEARCH_ERR_INVALID, StatusCode::BAD_REQUEST),
+            (
+                relay_proto::TL_SEARCH_ERR_BUSY,
+                StatusCode::TOO_MANY_REQUESTS,
+            ),
+        ] {
+            let broker2 = broker.clone();
+            let warten = tokio::spawn(async move {
+                tl_search_route(State(broker2), such_headers("token"), such_body("ue")).await
+            });
+            let (req_id, _, _) = suchanfrage_beim_host(&mut host_rx).await;
+            handle_host_frame(
+                &broker,
+                "ns1",
+                HostFrame::TlSearchResult {
+                    req_id,
+                    json: serde_json::json!({ "error": code }).to_string(),
+                },
+                &host,
+            )
+            .await;
+            assert_eq!(warten.await.unwrap().status(), status, "{code}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_old_host_times_out_and_leaves_no_pending_search() {
+        let (broker, mut host_rx, _host) = broker_with_tl_device("token").await;
+        let broker2 = broker.clone();
+        let warten = tokio::spawn(async move {
+            tl_search_route(State(broker2), such_headers("token"), such_body("müller")).await
+        });
+        let _ = suchanfrage_beim_host(&mut host_rx).await;
+        // Ein älterer Turnier-PC verwirft den Frame still und antwortet nie.
+        tokio::time::pause();
+        tokio::time::advance(TL_TIMEOUT + Duration::from_secs(1)).await;
+        let antwort = warten.await.unwrap();
+        assert_eq!(antwort.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(broker.namespaces.lock().await["ns1"]
+            .search_pending
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_oversized_search_answer_becomes_an_honest_error() {
+        let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
+        let broker2 = broker.clone();
+        let warten = tokio::spawn(async move {
+            tl_search_route(State(broker2), such_headers("token"), such_body("müller")).await
+        });
+        let (req_id, _, _) = suchanfrage_beim_host(&mut host_rx).await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlSearchResult {
+                req_id,
+                json: "x".repeat(relay_proto::MAX_TL_SEARCH_LEN + 1),
+            },
+            &host,
+        )
+        .await;
+        assert_eq!(
+            warten.await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn a_disconnecting_host_drops_pending_searches() {
+        let mut ns = Namespace::new();
+        let (tx, _rx) = oneshot::channel();
+        ns.search_pending.insert(1, tx);
+        forget_tl_access(&mut ns);
+        assert!(ns.search_pending.is_empty());
+    }
+
     #[tokio::test]
     async fn without_a_tournament_pc_the_page_gets_a_clear_answer() {
         // Kein Warten ins Leere: Die Seite soll sagen können, woran es liegt.
@@ -9384,6 +9752,7 @@ mod tests {
             feld_frei_ms: None,
             feld_frei_unsicher: false,
             aufgerufen_feld: None,
+            ar: None,
         };
         handle_host_frame(
             &broker,
@@ -9405,6 +9774,27 @@ mod tests {
             assert_eq!(a.partien.len(), 1);
             assert_eq!(a.partien[0].match_id, 1);
             assert!(map["ns1"].meetingpoint.fuer_halle("").halle_waehlen);
+        }
+        // Der AR-Name wird wie alle Texte gedeckelt (ADR 0080, Security M4).
+        let mut lang = partie(3, "Halle A");
+        lang.ar = Some("x".repeat(MAX_MP_TEXT + 50));
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::Meetingpoint {
+                view: MeetingpointView {
+                    enabled: true,
+                    partien: vec![lang],
+                    ..Default::default()
+                },
+            },
+            &host,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            let ar = map["ns1"].meetingpoint.partien[0].ar.clone().unwrap();
+            assert_eq!(ar.chars().count(), MAX_MP_TEXT);
         }
         let (ack_tx, ack_rx) = oneshot::channel();
         {

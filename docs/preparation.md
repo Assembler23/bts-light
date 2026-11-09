@@ -276,10 +276,13 @@ Frontend-Spiegel:
 
 `src/io/announcer.ts`:
 
-- `AnnouncePreparationInput { discipline, teamANames, teamBNames, hall? }`.
+- `AnnouncePreparationInput { discipline, teamANames, teamBNames, hall?,
+  umpireNames?, serviceJudgeNames? }`.
 - `buildPreparationSegments(input, lang)` — Segmente: „In Vorbereitung."
   → Disziplin → Team A → „gegen …" → „Bitte in *hall*." (Letzteres
-  entfällt bei Ein-Hallen-Turnieren).
+  entfällt bei Ein-Hallen-Turnieren) → seit v0.9.360 „Schiedsrichter: …"
+  / „Aufschlagrichter: …" (nur Erst-Aufruf, Sätze aus
+  `src/io/prepBesetzung.mjs`, Test `scripts/test-vorbereitung-besetzung.mjs`).
 - `playPreparationAnnouncement(input, lang, opts)` — gleiche Gong-/TTS-
   Pipeline wie die Feld-Ansage.
 - `resolveAnnouncementLanguage(nationalities, mode)` — geteilte Helper-
@@ -289,7 +292,9 @@ Frontend-Spiegel:
 `src/pages/PreparationPanel.tsx`:
 
 - „Ansage"-Knopf je gerufenem Spiel (nur sichtbar, wenn
-  `AnnounceConfig.enabled === true`).
+  `AnnounceConfig.enabled === true`); nennt seit v0.9.360 auch SR/AR.
+- Marke „SR: … · AR: …" unter der Paarung eines gerufenen Spiels
+  (`PreparationCandidate.sr`/`ar`, Sicht „Hand vor BTP", ADR 0080).
 - Der Knopf-Klick selbst ist die User-Geste, die WebView2 zum Entsperren
   des AudioContexts braucht — ein separater `unlockAudio()`-Aufruf ist
   hier nicht nötig.
@@ -392,7 +397,8 @@ Wunsch selbst. Bedienung: [meetingpoint.md](meetingpoint.md), Spec
 [features/meetingpoint-spielbereit.md](features/meetingpoint-spielbereit.md).
 
 Für die Aufrufe selbst ändert sich dadurch:
-- Ein Aufruf trägt im Store seine Check-ins, den vorläufigen SR, ob er von
+- Ein Aufruf trägt im Store seine Check-ins (der vorläufige SR entfiel mit
+  v0.9.359, ADR 0080 — SR/AR werden beim Aufruf fest zugeteilt), ob er von
   der Automatik kam und ob Fehlende schon angesagt wurden
   (`tablet/meetingpoint.rs`, ADR 0071).
 - `call_mit(…, auto)` markiert Aufrufe der Automatik; ein Hand-Aufruf

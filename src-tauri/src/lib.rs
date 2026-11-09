@@ -14,6 +14,7 @@ pub mod openai_tts;
 pub mod print;
 pub mod sync;
 pub mod tablet;
+pub mod tts_teile;
 pub mod tts_text;
 pub mod tts_verbrauch;
 pub mod update;
@@ -188,6 +189,7 @@ pub fn run() {
             commands::queue_order_reset,
             commands::official_reorder,
             commands::official_set_club,
+            commands::official_set_role,
             commands::official_blocklists,
             commands::official_set_blocklists,
             commands::official_appearances,

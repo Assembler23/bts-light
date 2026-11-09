@@ -22,6 +22,7 @@ BTP-Draht: [btp_protocol.md](btp_protocol.md) („Officials: Struktur & Schreibw
 | `enabled` | `false` | Mit Schiedsrichtern spielen. Aus ⇒ keine SR/AR-Elemente in Client, TL-Web, Tablet und Ansagen (Bestandsverhalten). |
 | `rotation_sr` | `false` | Automatische Rotation für Schiedsrichter (Official1). |
 | `rotation_ar` | `false` | Automatische Rotation für Aufschlagrichter (Official2). |
+| `rotation_mode` | `abwechselnd` | Einteilungsprinzip (seit v0.9.356, ADR 0079): `getrennt` (A), `abwechselnd` (B), `rollenwechsel` (C). Ein unbekannter Wert lädt als `abwechselnd`. Wirkt seit v0.9.357; Auswahl „Einteilungsprinzip" im Setup seit v0.9.362. |
 
 Alle Felder tragen `#[serde(default)]` — ältere `config.json` bleiben lesbar,
 Bestandsinstallationen verhalten sich nach dem Auto-Update unverändert
@@ -58,10 +59,15 @@ Official-IDs.
 
 | Inhalt | Form | Zweck |
 |---|---|---|
-| Rotationsreihenfolge | `order: Vec<i64>` | Reihenfolge der Auto-Rotation, manuell umsortierbar (`set_order`) |
-| Zusatzdaten je Official | `OfficialExtra { paused, club, blocked_clubs, blocked_players }` | Pause, Stammverein (BTP liefert keinen), Sperrlisten |
+| Rotationsreihenfolge | `order: Vec<i64>` | Reihenfolge der Auto-Rotation, manuell umsortierbar (`set_order`, `reorder`); in Modus A die SR-Liste |
+| AR-Liste (seit v0.9.356) | `order_ar: Option<Vec<i64>>` | Eigene AR-Reihenfolge für Modus A (ADR 0079). `None` ⇒ gelesen wird eine Kopie von `order` (`order_ar()`, legt nichts an). Angelegt erst beim ersten Schreibbedarf (`reorder_in(Reihenfolge::Ar, …)`); IDs, die nur in `order` stehen, werden beim Lesen hinten ergänzt. Neue BTP-Officials kommen an beide Listen. |
+| Zusatzdaten je Official | `OfficialExtra { paused, club, blocked_clubs, blocked_players, role }` | Pause, Stammverein (BTP liefert keinen), Sperrlisten, **Einsatzrolle** (seit v0.9.356: `beides`/`sr`/`ar`, `Einsatzrolle`, gilt in allen Modi; „beides" wird nicht geschrieben) |
 | Lokale Zuweisungen | `assignments: Match-ID → MatchOfficials { sr, ar }` | Overlay für Spiele, an denen BTP nichts stehen hat |
 | Feldweise Schalter | `courts: CourtID → CourtSwitches { sr, ar, operator }` | SR-Rotation, AR-Rotation, Tabletbediener-Vergabe je Feld |
+
+**Rückweg auf eine ältere Version:** Eine App vor v0.9.356 liest die Datei
+weiter, verliert aber `role` und `order_ar` beim nächsten Speichern, ohne
+Rückmeldung (bewusst hingenommen, ADR 0079).
 
 **Zuweisungen hängen am Match, nicht am Feld.** Nach Spielende bleiben sie
 liegen — sie sind die Grundlage der Einsatz-Ableitung (Spec Nr. 11: keine
@@ -148,11 +154,47 @@ dem Turnier-PC.
 Felds; orchestriert wird sie vom Master-Hook `sync.rs::track_officials`
 (nach `set_snapshot`, damit der Roster gebunden und aktuell ist).
 
-Ein Official wird genommen, wenn er **alle** Bedingungen erfüllt: BTP kennt
+Ein Official kommt in Frage, wenn er **alle** Bedingungen erfüllt: BTP kennt
 ihn noch, er ist nicht pausiert, er tut nirgends sonst Dienst (SR *oder* AR),
 er hat keinen Konflikt mit diesem Spiel und er ist nicht schon der andere
 Dienst desselben Spiels. Konflikte werden dabei **still** übersprungen —
 gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
+
+**Wer welchen Dienst bekommt** (seit v0.9.357, ADR 0079), entscheidet die
+reine Funktion `officials.rs::waehle_besetzung` — der einzige Wahlweg; Feld-
+Rotation und Meetingpoint-Vorab-SR rufen sie über `OfficialsStore::waehle`
+auf. Sie beachtet die Rolle je Person (`nur SR`/`nur AR` nie im anderen Dienst)
+und das Einteilungsprinzip `rotation_mode`:
+
+| Modus | Regel |
+|---|---|
+| A `getrennt` | SR = erste passende Person der SR-Liste (`order`), AR = erste passende der AR-Liste (`order_ar`), die nicht schon SR ist. |
+| B `abwechselnd` (Standard) | Beide aus `order`: erster Freier SR, nächster AR. |
+| C `rollenwechsel` | Personenweise von oben: Jeder bekommt den offenen Dienst, den er im zuletzt beendeten Spiel **nicht** hatte (feste Rolle schlägt die Vorrolle, ohne Vorgeschichte SR vor AR). Ist der Wunsch vergeben, wird die Person übersprungen. Was offen bleibt, bekommt die erste passende freie Person (Rückfall). |
+
+**Rolle je Person** (seit v0.9.362 im Schiedsrichter-Panel wählbar: „SR und
+AR", „nur SR", „nur AR"; Command `official_set_role`). Eine Besetzung gegen
+die Rolle — von Hand oder in BTP — ist erlaubt, warnt aber mit „SR: nur AR"
+bzw. „AR: nur SR" an Feldkachel, TL-Feld, Übersicht und Warteliste und in der
+Rückmeldung der Einteilung (`OfficialsStore::rollen_warnung`, eingehängt in
+`TabletState::court_officials` und `official_assign`). Sie ist **kein**
+Konflikt und keine Ablehnung — der SR⇄AR-Tausch muss weiter gehen.
+
+**Vorschau „als Nächstes"** (seit v0.9.364): `OfficialsStore::prognose`
+simuliert die Wahl Runde für Runde auf einem geklonten Stand, ohne etwas zu
+speichern oder eine AR-Liste anzulegen, und liefert je Person Dienst und Runde
+(0 = nächste Besetzung). Kandidaten sind die Freien laut `Belegung` (ohne
+Konfliktprüfung, es gibt noch kein Spiel); offene Dienste nach den globalen
+Schaltern; beide aus ⇒ keine Vorschau. `prognose_aus` ist die eine Rechnung
+für das Panel am Turnier-PC (`OfficialView.next_role/next_rank`) und das
+TL-Web (`TlOfficial.next_role/next_rank`, dazu `TlOfficial.role` und
+`TlState.officials_rotation_mode`). Im Panel zeigt Modus A zwei Listen, jede
+einzeln ziehbar (`official_reorder(…, list: "ar")`).
+
+Die **Vorrolle** (`OfficialsStore::vorrollen`) wird je Takt aus den beendeten
+Spielen abgeleitet, nicht gespeichert: Sicht `effective`, Walkover zählt
+nicht, maßgeblich ist `(finished_at oder 0, match_id)`. Besetzungen desselben
+Takts ändern sie nicht.
 
 - **Nur beim Neu-Belegen:** Bestückt wird ein Feld in dem Zyklus, in dem ein
   anderes Spiel darauf kommt (Merker `officials_oncourt_prev`). Wer eine
@@ -171,7 +213,12 @@ gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
 - **BTP gewinnt:** Trägt das Match `Official1ID`/`Official2ID`, gilt dieser
   Wert (`store.effective(...)`); die Rotation füllt dort nichts nach.
 - **Nach Spielende** rücken die Officials des beendeten Spiels ans Ende der
-  Reihenfolge; ihre Zuweisung bleibt am Match stehen (Einsatz-Ableitung).
+  Reihenfolge (`nach_spielende`); ihre Zuweisung bleibt am Match stehen
+  (Einsatz-Ableitung). Seit v0.9.357 in der Folge **erst AR, dann SR**: Bleibt
+  das Paar in der Liste zusammen, tauscht es beim nächsten Mal die Dienste
+  (bis v0.9.356 `[SR, AR]` — dann bekamen dieselben Leute immer wieder
+  dieselben Dienste). In Modus A rückt jeder nur in seiner eigenen Liste.
+  <!-- pruef: "let folge: Vec<i64> = ar.into_iter().chain(sr).collect();" in src-tauri/src/tablet/officials.rs -->
   Werden mehrere Felder im selben Zyklus fertig, rücken ihre Officials **nach
   CourtID sortiert** ans Ende — dieselbe Deterministik wie bei der Zuteilung
   unten (bis v0.9.201 hing die Reihenfolge von der zufälligen
@@ -234,8 +281,12 @@ am Spiel eingetragen sind. Spec:
   Person, warnt die Zeile mit „SR in Pause" bzw. „AR in Pause". Dienst auf
   einem laufenden Feld ist keine Doppel-Einteilung. Mehrere Warnungen stehen
   in fester Reihenfolge: Konflikt (Verein/Person) · doppelt · Pause.
-  Gewarnt wird nur über die Person, die die Marke zeigt: Ist eine Umteilung
-  gegen BTP noch nicht bestätigt, warnt die Zeile erst nach der Bestätigung.
+  Gewarnt wird nur über die Person, die die Marke zeigt. Seit v0.9.358 zeigt
+  die Marke einer wartenden Zeile die frische Einteilung („Hand vor BTP"):
+  Wer eben umgeteilt wurde, steht sofort an der Zeile, samt Warnung —
+  nicht erst nach der Bestätigung durch BTP. Laufende Felder zeigen weiter
+  den bestätigten Stand.
+  <!-- pruef: "pub fn wartende_officials" in src-tauri/src/tablet/state.rs -->
 
 ### Einteilung wird geprüft (seit v0.9.354)
 
@@ -281,7 +332,7 @@ rechnet Dienst (laufende Spiele, Sicht `effective`) und Reservierung
 (wartende Spiele, Sicht `fuer_schreiben` = Hand vor BTP). Verbraucher sind
 `track_officials` (`belegt_ausser` je Feld), `auto_assign` (Wartesperre,
 auch bei der Wunschfeld-Reservierung, vor dem strikten Meetingpoint-Gate),
-`uebernimm_vorab_sr` und `vorab_sr_verteilen`. `officials_for_write` baut
+`meetingpoint::gerufene_besetzen` (seit v0.9.359, ADR 0080). `officials_for_write` baut
 auf `fuer_schreiben` auf.
 
 ## Feldweise Schalter (Schritt 6)
@@ -337,7 +388,7 @@ Zusätzlich zeigt die **Spielübersicht** an jeder belegten Feld-Kachel
 
 | Command | Zweck |
 |---|---|
-| `officials_roster` | Liste in Rotationsreihenfolge: Name, Position, Pause, Verein, **Anzahl** Sperren, aktueller Dienst, Einsatz-Zähler, Reservierung (`reserved`, `reserved_match_num`, seit v0.9.354) |
+| `officials_roster` | Liste in Rotationsreihenfolge: Name, Position, Pause, Verein, **Anzahl** Sperren, aktueller Dienst, Einsatz-Zähler, Reservierung (`reserved`, `reserved_match_num`, seit v0.9.354), Rolle (`role`, seit v0.9.362), Position in der AR-Liste und Vorschau (`position_ar`, `next_role`, `next_rank`, seit v0.9.364) |
 | `official_assign` / `official_clear` | Zuweisung setzen/lösen; `assign` liefert die Konflikt-Kategorie zurück. Seit v0.9.354 vorher geprüft (`pruefe_einteilung`), Ablehnung als `Err(String)` |
 | `official_pause`, `official_reorder`, `official_set_club` | Pause, Reihenfolge, Stammverein |
 | `official_blocklists` / `official_set_blocklists` | Sperrlisten **gezielt** lesen/schreiben |
@@ -351,9 +402,9 @@ TL-Web über die authentifizierte Leseroute nutzt.
 
 ### Globale Schalter zur Laufzeit
 
-`officials.enabled`, `rotation_sr` und `rotation_ar` stehen zwar in der
-`config.json`, werden aber zusätzlich im Roster-Speicher gespiegelt
-(`set_enabled`/`set_rotation`, gesetzt beim App-Start und beim Speichern der
+`officials.enabled`, `rotation_sr`, `rotation_ar` und `rotation_mode` stehen
+zwar in der `config.json`, werden aber zusätzlich im Roster-Speicher gespiegelt
+(`set_enabled`/`set_rotation`/`set_rotation_mode`, gesetzt beim App-Start und beim Speichern der
 Einstellungen). Grund: Der Sync-Lauf liest seine Konfiguration nur beim Start
 — ohne diesen Spiegel bliebe ein frisch gesetztes Häkchen bis zum nächsten
 Stoppen/Starten der Übertragung wirkungslos.
@@ -385,6 +436,14 @@ Wire-Ebene und Bedienung sind in [cloud-relay.md](cloud-relay.md) bzw.
   `tl.rs` prüfen das mit einem Officials-Fixture: Der **Name** ist bewusst
   freigegeben (Gegenprobe im Test), Sperrlisten und Stammverein stehen auf
   der Verbotsliste.
+- **Spielersuche** (seit v0.9.368, Spec
+  [tl-spielersuche](features/tl-spielersuche.md), ADR 0081): Die Suche im
+  TL-Web findet SR und AR am Feld (`court_officials`), an wartenden Spielen
+  (`wartende_officials`) und an **beendeten** Spielen — dort mit derselben
+  Regel wie die Einsatz-Zählung: wirksame Besetzung (`effective`), ein
+  Walkover trägt keinen SR. SR-Namen an beendeten Spielen stehen nur in der
+  Suchantwort, nie im `TlState`; ohne Schiedsrichter-Betrieb gibt es keine
+  SR-Treffer.
 - **Aktionen** (geschlossener Satz): `official_assign`, `official_clear`,
   `official_pause`, `official_reorder`, `official_set_club`,
   `official_blocklist_set`, `officials_court_toggle`, `announce_officials`.
@@ -494,9 +553,19 @@ nicht wörtlich gilt:
   **erledigt**, nicht als offen — sonst bekäme ein bewusst ohne
   Schiedsrichter spielendes Feld nach einem App-Neustart wieder einen
   zugeteilt (dort sieht jedes belegte Feld wie neu belegt aus).
+- **„Ohne Schiedsrichter" bleibt stehen** (seit v0.9.358, ADR 0080): Ein
+  ausdrückliches „keiner" (`Some(0)`) wird **nicht** losgelassen, wenn BTP
+  ebenfalls niemanden führt — auch nicht, wenn die 0 unser eigener Write war,
+  nachdem BTP vorher jemanden trug. Bis v0.9.357 fiel es dann weg, und ein
+  Lauf über wartende Spiele (der vorläufige Meetingpoint-SR, künftig die
+  Zuteilung beim Aufruf) besetzte das Spiel im nächsten Takt wieder. Der
+  Ausgangswert steht danach auf 0: Trägt jemand in BTP eine Person ein,
+  gewinnt BTP weiterhin. Solche Einträge bleiben in `officials-state.json` bis zum
+  Turnierwechsel stehen, auch an beendeten Spielen — höchstens einer je
+  Spiel, ohne zusätzlichen Schreibzugriff je Takt.
 - **Loslassen nach Bestätigung** (`OfficialsStore::confirm`, im Sync-Loop vor
   dem Diff): Ein lokaler Dienst wird entfernt, sobald der Snapshot **genau
-  den lokalen Wert** zeigt (beim ausdrücklichen „keiner": niemanden) — oder
+  den lokalen Wert** zeigt (außer beim ausdrücklichen „keiner", siehe oben) — oder
   sobald BTP etwas **anderes führt als beim Einteilen** (dann hat jemand in
   BTP umgeteilt, und BTP gewinnt, R2). Führt BTP noch den alten Wert, bleibt
   die Absicht stehen und geht nach BTP: So ersetzt eine Umteilung von Y auf
@@ -564,6 +633,26 @@ ein, wenn zufällig zeitgleich ein Schiedsrichter-Unterschied ansteht —
 deutlich enger als das behobene Problem (das bei **jeder** frischen
 Feldzuweisung mit Schiedsrichter-Rotation auftrat). Keine weitere
 Mitigation vorgesehen, solange kein Turnier-Befund das Gegenteil zeigt.
+
+**Nachtrag 09.11.2026 (v0.9.367): frisch lesen vor dem Write.** Die
+Messung `tests/btp_officials_ohne_feld_probe.rs` zeigte: BTP übernimmt
+die CourtID aus **jedem** Officials-Write, auch Sekunden nach einer
+bestätigten Feldvergabe (Tabelle in `docs/btp_protocol.md`). Seit die
+Rotation SR/AR schon beim Aufruf zuteilt (ADR 0080), schreibt sie viel
+öfter an wartende Spiele, und das Fenster oben wäre ein Feld-Verlust
+gewesen, sobald die Turnierleitung in BTP von Hand ein Feld vergibt.
+`write_officials_to_btp` liest deshalb unmittelbar vor dem Write den
+BTP-Stand neu und setzt jede CourtID (und `DrawID`/`PlanningID`) daraus ein
+(`sync::feld_aus_frischem_stand`). Zurückgestellt bis zum nächsten Zyklus
+werden: Spiele, die BTP nicht mehr kennt; Spiele mit **gerade laufender
+eigener Feldvergabe** — `reserved_courts` wird erst **nach** dem Lesen
+genommen, denn eine TL-Web-Vergabe kann nach dem Bauen der Einträge
+starten, und BTP zeigt ihr Feld womöglich noch nicht (Code-Review
+09.11.2026); Spiele, deren SR/AR in BTP seit dem Zyklus-Snapshot geändert
+wurden (R2: BTP gewinnt). Scheitert das Lesen, geht nichts raus. Gemerkt
+(`officials_written`) wird nur, was tatsächlich gesendet wurde. Rest:
+Eine Hand-Vergabe, die BTP beim Lesen noch nicht zeigt (Übernahme ≤ 1 s),
+kann weiterhin verloren gehen.
 
 ### Ergebnis-Write löschte die Besetzung (Live-Befund 14.08.2026, Fortsetzung)
 
@@ -683,23 +772,60 @@ verwaltung ganz aus, kennt der Host nie einen SR, und die Automatik bleibt
 bauartbedingt stumm. Die Zuordnung darf dabei **nach** der Feldvergabe kommen
 (Rotation oder von Hand): Geprüft wird ein Zustand, nicht ein Augenblick.
 
-## Vorläufige Zuteilung beim Meetingpoint-Aufruf (seit v0.9.330, ADR 0072)
+## Zuteilung schon beim Aufruf (seit v0.9.359, ADR 0080)
 
-Mit eingeschaltetem Meetingpoint und SR-Rotation bekommt jede gerufene Partie
-ohne wirksamen SR (und ohne „ohne Schiedsrichter" = `Some(0)`) **vorläufig**
-den nächsten freien SR (`meetingpoint::vorab_sr_verteilen`, je Sync-Lauf nach
-`track_officials`, zustandsbasiert). Belegt sind SR/AR laufender Spiele und
-alle schon vorläufig Zugeteilten; freiwerdende SR gehen an die älteste
-gerufene Partie.
+Wird ein Spiel **in Vorbereitung gerufen** (Turnier-PC, TL-Web oder
+Aufruf-Automatik), teilt die Rotation Schiedsrichter und Aufschlagrichter
+**fest** zu — auch ohne Meetingpoint, sobald die Schiedsrichter-Verwaltung und
+die jeweilige Rotation an sind. Die beiden stehen sofort an der gerufenen
+Zeile und können sich vor dem Feldaufruf treffen. Es wird nach denselben
+Regeln gewählt wie am Feld (Einteilungsprinzip, Rolle, Pausen, Konflikte,
+Reservierungen).
+<!-- pruef: "pub fn gerufene_besetzen" in src-tauri/src/tablet/meetingpoint.rs -->
 
-Der vorläufige SR liegt im Meetingpoint-Store, **nicht** in
-`OfficialsStore.assignments` — sonst schriebe `officials_entries` ihn sofort
-nach BTP, und eine Rücknahme hinterließe `Some(0)`. Übernommen wird er beim
-Aufs-Feld-Kommen (`uebernimm_vorab_sr`): in `auto_assign` vor
-`officials_for_write` (reist im selben Write mit) bzw. zustandsbasiert in
-`track_officials` für Hand-/BTP-Vergaben, vor der Feld-Rotation. Ist der
-Feldschalter `sr` aus, BTP/Hand schon belegt oder der SR inzwischen im
-Dienst, verfällt er. Die Feld-Rotation überspringt vorläufig Zugeteilte.
-Seit v0.9.352 überspringt die Verteilung auch **Reservierte** (ADR 0078);
-ein vorläufiger SR, der inzwischen für ein anderes wartendes Spiel
-eingeteilt ist, verfällt, und die Partie bekommt den nächsten freien.
+- **Fest:** Die Zuteilung ist eine echte Einteilung, geht sofort nach BTP und
+  reserviert die Person (auch, wenn das Spiel an einem späteren Tag angesetzt
+  ist). Eine Einteilung von Hand oder in BTP wird nie ersetzt;
+  **Ohne Schiedsrichter** bleibt stehen.
+- **Engpass:** Ist niemand frei, wird das Spiel mit Lücke gerufen. Wer frei
+  wird, geht zuerst an ein Feld, das gerade ein neues Spiel bekommen hat, dann
+  an die gerufenen Spiele in ihrer Vergabe-Reihenfolge. Das Nachrücken wird
+  nicht angesagt.
+- **Halle:** Zugeteilt wird ein Dienst nur, wenn mindestens ein Feld der
+  Aufruf-Halle ihn will (Feldschalter). Kommt das Spiel auf ein Feld ohne
+  diesen Dienst, wird die Rotations-Zuteilung dort wieder gelöst.
+- **Rotation abschalten:** Bestehende Zuteilungen bleiben stehen, es kommt nur
+  nichts Neues hinzu.
+- **Zurücknehmen:** Wird ein Aufruf zurückgenommen oder gelöscht, werden nur
+  die Zuteilungen der Rotation frei; eine Einteilung von Hand bleibt stehen.
+  Wird ein Spiel vom Feld genommen und der Aufruf lebt wieder auf, bleibt die
+  Zuteilung.
+- **Nur am Turnier-PC:** Ein Aufruf an einem Slave-Rechner teilt nichts zu.
+
+Technik: `meetingpoint::gerufene_besetzen` läuft synchron im Aufruf
+(`hand_aufruf`, vor dem Ansage-Auftrag) und in jedem Sync-Takt nach
+`track_officials` (Feld hat Vorrang), beides unter
+`OfficialsStore::vergabe_sperre`. Gewählt wird über
+`rotate_court(…, Herkunft::Aufruf)` → `waehle_besetzung`. Der
+Herkunfts-Merker `vorab_rotation` in `officials-state.json` (Match → je Dienst
+`{id, frei}`) unterscheidet Rotation von Hand/BTP; er gilt nur, solange die
+Sicht „Hand vor BTP" seine Person trägt (`pflege_vorab_rotation`). Die
+Freigabe (`rotation_freigeben`) hinterlässt kein bleibendes `Some(0)`: ohne
+BTP-Gegenstück lokal weg, mit Gegenstück `Some(0)` + `frei` (gilt für die
+Rotation als offen, `confirm` räumt nach der Bestätigung der 0). Lösen am Feld
+ohne Dienst: `rotation_loesen_am_feld` vor jedem Feld-Write (Auto-Vergabe,
+TL-Web, Turnier-PC) und zustandsbasiert für laufende Spiele. Endet ein Spiel
+ohne Feld, verschwindet eine nie nach BTP gelangte Zuteilung (kein Einsatz ohne
+Dienst).
+
+**Ablösung des vorläufigen SR (ADR 0072):** `vorab_sr_verteilen`,
+`uebernimm_vorab_sr` und der Merker `vorab_sr` am Aufruf entfallen. Noch
+gespeicherte `vorab_sr` übernimmt der erste Lauf einmalig als feste Zuteilung
+(`nimm_vorab_sr`), wenn die Person frei ist und die Rolle passt; sonst
+verfallen sie. Ein SR-Check-in am Meetingpoint verfällt, wenn der SR der
+Partie wechselt.
+
+**BTP:** Dass der Officials-Write an Spielen ohne Feld eine frische
+Feldzuweisung nicht löscht, ist eine Annahme; sie wird vor dem Release mit
+`tests/btp_officials_ohne_feld_probe.rs` gemessen (siehe
+[btp_protocol.md](btp_protocol.md)).

@@ -28,6 +28,7 @@ use std::sync::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 
 use crate::btp::model::{BtpMatch, BtpPlayer, BtpSnapshot, MatchStatus};
+use crate::config::RotationMode;
 
 /// Warum ein Official nicht zu einem Spiel passt. Mehr Kategorien braucht
 /// die Anzeige nicht — der *Grund* (welcher Verein, welcher Spieler) bleibt
@@ -200,6 +201,157 @@ pub struct RotationInput<'a> {
     pub sr: bool,
     /// AR-Rotation für dieses Feld aktiv?
     pub ar: bool,
+    /// Einteilungsprinzip (ADR 0079), vom Aufrufer aus
+    /// [`OfficialsStore::rotation_mode`] gelesen.
+    pub modus: RotationMode,
+    /// Vorrolle je Official ([`OfficialsStore::vorrollen`]); nur in Modus C
+    /// gelesen. Einmal je Takt gerechnet — Besetzungen desselben Takts
+    /// ändern sie nicht.
+    pub vorrolle: &'a HashMap<i64, OfficialRole>,
+    /// Wer besetzt: die Feld-Rotation oder die Zuteilung beim Aufruf
+    /// (ADR 0080). Nur Letztere setzt den Herkunfts-Merker.
+    pub herkunft: Herkunft,
+}
+
+/// Anlass einer automatischen Besetzung (ADR 0080).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Herkunft {
+    /// Neu belegtes Feld (`track_officials`).
+    Feld,
+    /// Aufruf in Vorbereitung (`meetingpoint::gerufene_besetzen`).
+    Aufruf,
+}
+
+/// Eingabe der reinen Wahl-Funktion [`waehle_besetzung`] (ADR 0079).
+pub struct Wahleingabe<'a> {
+    pub modus: RotationMode,
+    /// Gemeinsame Liste (B/C) bzw. SR-Liste (A).
+    pub order: &'a [i64],
+    /// AR-Liste — nur in Modus A gelesen.
+    pub order_ar: &'a [i64],
+    /// Darf diese Person überhaupt eingesetzt werden? (BTP kennt sie, nicht
+    /// pausiert, nicht belegt oder reserviert, kein Konflikt.)
+    pub frei: &'a dyn Fn(i64) -> bool,
+    /// Rolle je Person.
+    pub rolle: &'a dyn Fn(i64) -> Einsatzrolle,
+    /// Dienst im zuletzt beendeten Spiel (nur Modus C).
+    pub vorrolle: &'a HashMap<i64, OfficialRole>,
+    pub sr_offen: bool,
+    pub ar_offen: bool,
+}
+
+/// Der jeweils andere Dienst.
+fn gegenteil(d: OfficialRole) -> OfficialRole {
+    match d {
+        OfficialRole::Sr => OfficialRole::Ar,
+        OfficialRole::Ar => OfficialRole::Sr,
+    }
+}
+
+/// Besetzt die offenen Dienste eines Spiels gemeinsam (ADR 0079) — der
+/// **einzige** Weg, auf dem Officials automatisch gewählt werden. Liefert
+/// `(sr, ar)`; `None` = niemand Passendes frei (der Dienst bleibt leer).
+///
+/// - **A (getrennt):** SR = erste passende Person der SR-Liste, AR = erste
+///   passende der AR-Liste, die nicht schon SR ist.
+/// - **B (abwechselnd):** wie A, beide aus der gemeinsamen Liste.
+/// - **C (Rollenwechsel):** personenweise von oben: Jede freie Person
+///   bekommt den offenen Dienst, den sie zuletzt nicht hatte (feste Rolle
+///   schlägt die Vorrolle; ohne Vorrolle SR vor AR). Ist ihr Wunsch
+///   vergeben oder nicht offen, wird sie übersprungen. Was danach offen
+///   bleibt, bekommt die erste freie Person mit passender Rolle
+///   (Rückfall) — so bleibt kein Dienst leer, solange jemand passt.
+pub fn waehle_besetzung(e: &Wahleingabe) -> (Option<i64>, Option<i64>) {
+    let kann = |id: i64, d: OfficialRole| (e.frei)(id) && (e.rolle)(id).erlaubt(d);
+    match e.modus {
+        RotationMode::Getrennt | RotationMode::Abwechselnd => {
+            let liste_ar = if e.modus == RotationMode::Getrennt {
+                e.order_ar
+            } else {
+                e.order
+            };
+            let sr = if e.sr_offen {
+                e.order
+                    .iter()
+                    .copied()
+                    .find(|&id| kann(id, OfficialRole::Sr))
+            } else {
+                None
+            };
+            let ar = if e.ar_offen {
+                liste_ar
+                    .iter()
+                    .copied()
+                    .find(|&id| Some(id) != sr && kann(id, OfficialRole::Ar))
+            } else {
+                None
+            };
+            (sr, ar)
+        }
+        RotationMode::Rollenwechsel => {
+            let mut offen: Vec<OfficialRole> = Vec::new();
+            if e.sr_offen {
+                offen.push(OfficialRole::Sr);
+            }
+            if e.ar_offen {
+                offen.push(OfficialRole::Ar);
+            }
+            let mut sr = None;
+            let mut ar = None;
+            // Durchgang 1: Rollenwechsel je Person.
+            for &id in e.order {
+                if offen.is_empty() {
+                    break;
+                }
+                if !(e.frei)(id) {
+                    continue;
+                }
+                let rolle = (e.rolle)(id);
+                let erlaubt: Vec<OfficialRole> = offen
+                    .iter()
+                    .copied()
+                    .filter(|d| rolle.erlaubt(*d))
+                    .collect();
+                let Some(&erster) = erlaubt.first() else {
+                    continue;
+                };
+                let dienst = if !rolle.ist_beides() {
+                    // Feste Rolle: nur ein Dienst ist überhaupt möglich.
+                    erster
+                } else {
+                    match e.vorrolle.get(&id) {
+                        // Ohne Vorgeschichte: SR, falls offen, sonst AR.
+                        None => erster,
+                        Some(&v) => {
+                            let wunsch = gegenteil(v);
+                            if !erlaubt.contains(&wunsch) {
+                                continue; // nur die Vorrolle wäre frei
+                            }
+                            wunsch
+                        }
+                    }
+                };
+                offen.retain(|d| *d != dienst);
+                match dienst {
+                    OfficialRole::Sr => sr = Some(id),
+                    OfficialRole::Ar => ar = Some(id),
+                }
+            }
+            // Durchgang 2: Rückfall auf die erste passende freie Person.
+            for d in offen {
+                let gewaehlt = e
+                    .order
+                    .iter()
+                    .copied()
+                    .find(|&id| Some(id) != sr && Some(id) != ar && kann(id, d));
+                match d {
+                    OfficialRole::Sr => sr = gewaehlt,
+                    OfficialRole::Ar => ar = gewaehlt,
+                }
+            }
+            (sr, ar)
+        }
+    }
 }
 
 /// Dienst eines Officials an einem Spiel. BTP: `Official1ID` = SR,
@@ -210,6 +362,53 @@ pub enum OfficialRole {
     /// Schiedsrichter (`Official1ID`).
     Sr,
     /// Aufschlagrichter (`Official2ID`).
+    Ar,
+}
+
+/// Was eine Person übernehmen darf (Spec `sr-rotationsmodus`, ADR 0079).
+/// Gilt in allen Rotationsmodi: Die Automatik setzt niemanden in einen
+/// Dienst, den seine Rolle nicht erlaubt. Eine Handeinteilung dagegen bleibt
+/// möglich (nur Warnung).
+///
+/// Bewusst nicht `OfficialRole` genannt — das ist im Code schon der Dienst.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Einsatzrolle {
+    /// SR und AR (Standard).
+    #[default]
+    #[serde(rename = "beides")]
+    Beides,
+    /// Nur Schiedsrichter.
+    #[serde(rename = "sr")]
+    NurSr,
+    /// Nur Aufschlagrichter.
+    #[serde(rename = "ar")]
+    NurAr,
+}
+
+impl Einsatzrolle {
+    /// Darf die Person diesen Dienst übernehmen?
+    pub fn erlaubt(self, dienst: OfficialRole) -> bool {
+        match self {
+            Einsatzrolle::Beides => true,
+            Einsatzrolle::NurSr => dienst == OfficialRole::Sr,
+            Einsatzrolle::NurAr => dienst == OfficialRole::Ar,
+        }
+    }
+
+    /// Standardrolle? (Für `skip_serializing_if` — „beides" steht nicht in
+    /// der Datei, damit leere Zusatzdaten leer bleiben.)
+    pub fn ist_beides(&self) -> bool {
+        *self == Einsatzrolle::Beides
+    }
+}
+
+/// Welche Rotationsliste gemeint ist. In Modus A (getrennt) gibt es eine
+/// eigene AR-Liste; sonst wirkt alles auf die gemeinsame Hauptliste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reihenfolge {
+    /// Gemeinsame Liste (B/C) bzw. SR-Liste (A).
+    Haupt,
+    /// AR-Liste (nur Modus A).
     Ar,
 }
 
@@ -228,6 +427,10 @@ pub struct OfficialExtra {
     pub blocked_clubs: Vec<String>,
     /// Gesperrte Spieler (BTP-`PlayerID`; Personendaten).
     pub blocked_players: Vec<i64>,
+    /// Was die Person übernehmen darf (ADR 0079). Fehlt in älteren Dateien
+    /// ⇒ „beides"; „beides" wird nicht geschrieben.
+    #[serde(skip_serializing_if = "Einsatzrolle::ist_beides")]
+    pub role: Einsatzrolle,
 }
 
 impl OfficialExtra {
@@ -238,6 +441,7 @@ impl OfficialExtra {
             && self.club.is_empty()
             && self.blocked_clubs.is_empty()
             && self.blocked_players.is_empty()
+            && self.role.ist_beides()
     }
 }
 
@@ -283,7 +487,9 @@ struct Ausgangswert {
 
 /// Einen Dienst gegen den BTP-Stand prüfen (siehe
 /// [`OfficialsStore::confirm`]): loslassen, wenn BTP den lokalen Wert trägt
-/// oder vom Ausgangswert abweicht; sonst den Ausgangswert erfassen.
+/// oder vom Ausgangswert abweicht; sonst den Ausgangswert erfassen. Ein
+/// bestätigtes „ohne" (`Some(0)`, BTP führt niemanden) bleibt stehen
+/// (ADR 0080).
 fn pruefe_dienst(
     lokal: &mut Option<i64>,
     ausgang: &mut Option<i64>,
@@ -297,7 +503,18 @@ fn pruefe_dienst(
     };
     let btp = dienst(btp).unwrap_or(0);
     let in_btp_umgeteilt = ausgang.is_some_and(|b| b != btp) && *vorher != Some(btp);
-    if btp == wert || in_btp_umgeteilt {
+    if wert == 0 && btp == 0 {
+        // „Ohne" bleibt dauerhaft stehen (ADR 0080): BTP führt ebenfalls
+        // niemanden, also ist es bestätigt — auch wenn BTP vorher jemanden
+        // trug (dann ist die 0 unser eigener Write, keine Umteilung in BTP).
+        // Loslassen hieße, dass ein Lauf, der offene Dienste auffüllt, das
+        // Spiel im nächsten Takt wieder besetzt. Der Ausgangswert 0 sorgt
+        // dafür, dass eine spätere Einteilung in BTP trotzdem gewinnt.
+        // Solche Einträge bleiben bis zum Turnierwechsel liegen — höchstens
+        // einer je Spiel.
+        *ausgang = Some(0);
+        *vorher = None;
+    } else if btp == wert || in_btp_umgeteilt {
         *lokal = None;
         *ausgang = None;
         *vorher = None;
@@ -362,10 +579,15 @@ impl Belegung {
             return out;
         }
         let bekannt: HashSet<i64> = snap.officials.iter().map(|o| o.id).collect();
+        // Eine gerufene Partie mit Rotations-Zuteilung reserviert unabhängig
+        // vom Tag (ADR 0080) — sonst vergäbe die Rotation ihre Leute doppelt.
+        let mit_merker: HashSet<i64> = store.vorab_rotation_spiele().into_iter().collect();
         for m in &snap.matches {
             let besetzung = match m.status {
                 MatchStatus::OnCourt => store.effective(m.id, m.official1_id, m.official2_id),
-                MatchStatus::Scheduled if ist_reservierend(m, heute) => {
+                MatchStatus::Scheduled
+                    if ist_reservierend(m, heute) || mit_merker.contains(&m.id) =>
+                {
                     store.fuer_schreiben(m.id, m.official1_id, m.official2_id)
                 }
                 _ => continue,
@@ -566,9 +788,16 @@ struct OfficialsFile {
     /// BTP-Turniername (Setting 1001) — der Schlüssel des Stands.
     #[serde(default)]
     tournament: String,
-    /// Rotationsreihenfolge (Official-IDs).
+    /// Rotationsreihenfolge (Official-IDs). In Modus A die SR-Liste, sonst
+    /// die gemeinsame Liste.
     #[serde(default)]
     order: Vec<i64>,
+    /// Eigene AR-Liste für Modus A (ADR 0079). `None` = noch nie gebraucht;
+    /// gelesen wird dann eine Kopie von `order`. Angelegt wird sie erst beim
+    /// ersten Schreibbedarf — so entsteht keine Migration, und eine ältere
+    /// App liest die Datei weiter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    order_ar: Option<Vec<i64>>,
     /// Official-ID → Zusatzdaten.
     #[serde(default)]
     extras: HashMap<i64, OfficialExtra>,
@@ -583,6 +812,53 @@ struct OfficialsFile {
     /// CourtID → feldweise Schalter (fehlt = Default „alles aktiv").
     #[serde(default)]
     courts: HashMap<i64, CourtSwitches>,
+    /// Match-ID → Herkunfts-Merker der Zuteilung beim Aufruf (ADR 0080).
+    /// Unterscheidet Rotations-Zuteilungen von Hand- und BTP-Einteilungen:
+    /// Nur sie werden frei, wenn der Aufruf ohne Feld endet. Überlebt
+    /// `confirm` und Neustart.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    vorab_rotation: HashMap<i64, VorabRotation>,
+}
+
+/// Herkunfts-Merker je Dienst eines Spiels (ADR 0080).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+struct VorabRotation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sr: Option<VorabDienst>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ar: Option<VorabDienst>,
+}
+
+impl VorabRotation {
+    fn rolle(&mut self, role: OfficialRole) -> &mut Option<VorabDienst> {
+        match role {
+            OfficialRole::Sr => &mut self.sr,
+            OfficialRole::Ar => &mut self.ar,
+        }
+    }
+    fn leer(&self) -> bool {
+        self.sr.is_none() && self.ar.is_none()
+    }
+}
+
+/// Die von der Rotation beim Aufruf gesetzte Person.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct VorabDienst {
+    id: i64,
+    /// Freigabe angestoßen: lokal steht `Some(0)`, die 0 ist unterwegs
+    /// nach BTP. Bis zur Bestätigung gilt der Dienst als offen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    frei: bool,
+}
+
+/// Was eine Zuweisung mit dem Herkunfts-Merker der Rolle macht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Merker {
+    /// Hand, „ohne", Tausch oder Feld-Rotation: Merker der Rolle weg.
+    Entfernen,
+    /// Zuteilung beim Aufruf: Merker auf diese Person.
+    Setzen,
 }
 
 /// Ergebnis eines Ladeversuchs. Der Unterschied zwischen „gibt es nicht"
@@ -617,9 +893,17 @@ pub struct OfficialsStore {
     enabled: RwLock<bool>,
     /// Automatische Rotation (SR, AR) — ebenfalls Spiegel der Konfiguration.
     rotation: RwLock<(bool, bool)>,
+    /// Einteilungsprinzip (ADR 0079) — Spiegel der Konfiguration, aus
+    /// demselben Grund wie `rotation`: Der Sync-Lauf liest seine Config nie
+    /// neu.
+    rotation_mode: RwLock<RotationMode>,
     inner: Mutex<Inner>,
     /// Serialisiert die Dateizugriffe (Muster `scores_persist_lock`).
     persist_lock: Mutex<()>,
+    /// Vergabe-Sperre (ADR 0080): Ein Hand-Aufruf läuft außerhalb des
+    /// Sync-Laufs. Ohne sie könnten Aufruf und Feld-Rotation dieselbe Person
+    /// zweimal vergeben. Nie über ein `await` halten.
+    vergabe: Mutex<()>,
 }
 
 impl OfficialsStore {
@@ -707,6 +991,18 @@ impl OfficialsStore {
         *self.rotation.write().unwrap() = (sr, ar);
     }
 
+    /// Einteilungsprinzip der Rotation (ADR 0079).
+    pub fn rotation_mode(&self) -> RotationMode {
+        *self.rotation_mode.read().unwrap()
+    }
+
+    /// Einteilungsprinzip setzen (beim Start und beim Speichern der
+    /// Einstellungen). Wirkt ab der nächsten Besetzung; es werden keine
+    /// Daten umgebaut.
+    pub fn set_rotation_mode(&self, mode: RotationMode) {
+        *self.rotation_mode.write().unwrap() = mode;
+    }
+
     /// Turnier, zu dem der aktuelle Stand gehört (leer = noch keins).
     pub fn tournament(&self) -> String {
         self.inner.lock().unwrap().file.tournament.clone()
@@ -736,6 +1032,30 @@ impl OfficialsStore {
     pub fn set_club(&self, official_id: i64, club: &str) {
         let club = club.trim().to_string();
         self.mit_extra(official_id, |e| e.club = club);
+    }
+
+    /// Warnungen, wenn eine Besetzung der Rolle widerspricht (ADR 0079):
+    /// „SR: nur AR" bzw. „AR: nur SR". Nur Warnung — eine Einteilung von
+    /// Hand oder in BTP bleibt erlaubt (der SR⇄AR-Tausch muss gehen, und BTP
+    /// gewinnt ohnehin, R2).
+    pub fn rollen_warnung(&self, sr: Option<i64>, ar: Option<i64>) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(id) = sr.filter(|v| *v > 0) {
+            if !self.extra(id).role.erlaubt(OfficialRole::Sr) {
+                out.push("SR: nur AR".to_string());
+            }
+        }
+        if let Some(id) = ar.filter(|v| *v > 0) {
+            if !self.extra(id).role.erlaubt(OfficialRole::Ar) {
+                out.push("AR: nur SR".to_string());
+            }
+        }
+        out
+    }
+
+    /// Rolle setzen (beides / nur SR / nur AR, ADR 0079).
+    pub fn set_role(&self, official_id: i64, role: Einsatzrolle) {
+        self.mit_extra(official_id, |e| e.role = role);
     }
 
     /// Sperrlisten setzen (ersetzen beide Listen).
@@ -772,6 +1092,12 @@ impl OfficialsStore {
         self.inner.lock().unwrap().file.order.clone()
     }
 
+    /// Die AR-Liste (Modus A). Gibt es sie noch nicht, gilt eine Kopie der
+    /// Hauptliste. Lesen legt nichts an und speichert nichts.
+    pub fn order_ar(&self) -> Vec<i64> {
+        ar_liste(&self.inner.lock().unwrap().file)
+    }
+
     /// Reihenfolge komplett setzen (manuelles Umsortieren).
     pub fn set_order(&self, order: Vec<i64>) {
         {
@@ -798,6 +1124,16 @@ impl OfficialsStore {
             }
             if neu.is_empty() {
                 return;
+            }
+            // Eine schon angelegte AR-Liste bekommt die Neuen ebenfalls
+            // hinten (ohne Doppel) — sonst fehlten sie dort bis zur
+            // Selbstheilung beim Lesen.
+            if let Some(ar) = inner.file.order_ar.as_mut() {
+                for id in &neu {
+                    if !ar.contains(id) {
+                        ar.push(*id);
+                    }
+                }
             }
             inner.file.order.extend(neu);
         }
@@ -828,7 +1164,7 @@ impl OfficialsStore {
         if match_id <= 0 || official_id <= 0 {
             return;
         }
-        self.mit_zuweisung(match_id, role, official_id);
+        self.mit_zuweisung(match_id, role, official_id, Merker::Entfernen);
     }
 
     /// Zuweisung eines Spiels lösen.
@@ -840,7 +1176,7 @@ impl OfficialsStore {
         if match_id <= 0 {
             return;
         }
-        self.mit_zuweisung(match_id, role, 0);
+        self.mit_zuweisung(match_id, role, 0, Merker::Entfernen);
     }
 
     /// Alle Zuweisungen räumen — beim Abschalten von `officials.enabled`
@@ -848,11 +1184,12 @@ impl OfficialsStore {
     pub fn clear_assignments(&self) {
         {
             let mut inner = self.inner.lock().unwrap();
-            if inner.file.assignments.is_empty() {
+            if inner.file.assignments.is_empty() && inner.file.vorab_rotation.is_empty() {
                 return;
             }
             inner.file.assignments.clear();
             inner.file.ausgang.clear();
+            inner.file.vorab_rotation.clear();
         }
         self.persist();
     }
@@ -864,10 +1201,23 @@ impl OfficialsStore {
     /// (ihr Write womöglich unterwegs), bleibt der Ausgangswert, und die
     /// bisherige Einteilung wird als „eigene" gemerkt — sonst hielte der
     /// Abgleich ihre verspätete Übernahme für eine Umteilung in BTP.
-    fn mit_zuweisung(&self, match_id: i64, role: OfficialRole, wert: i64) {
+    fn mit_zuweisung(&self, match_id: i64, role: OfficialRole, wert: i64, merker: Merker) {
         {
             let mut inner = self.inner.lock().unwrap();
             let file = &mut inner.file;
+            // Herkunft im selben Lock wie der Wert — sonst sähe ein
+            // gleichzeitiger Leser eine Rotations-Zuteilung ohne Merker.
+            let v = file.vorab_rotation.entry(match_id).or_default();
+            *v.rolle(role) = match merker {
+                Merker::Setzen if wert > 0 => Some(VorabDienst {
+                    id: wert,
+                    frei: false,
+                }),
+                _ => None,
+            };
+            if v.leer() {
+                file.vorab_rotation.remove(&match_id);
+            }
             let a = file.assignments.entry(match_id).or_default();
             let b = file.ausgang.entry(match_id).or_default();
             let (lokal, ausgang, vorher) = match role {
@@ -930,20 +1280,26 @@ impl OfficialsStore {
     /// Freie Dienste eines neu belegten Felds aus der Reihenfolge besetzen
     /// (Spec Nr. 4). Belegte Dienste bleiben unangetastet — auch deshalb ist
     /// der Aufruf idempotent.
-    pub fn rotate_court(&self, input: RotationInput<'_>) {
+    ///
+    /// Liefert die neu gesetzten Personen `(sr, ar)`.
+    pub fn rotate_court(&self, input: RotationInput<'_>) -> (Option<i64>, Option<i64>) {
         if input.match_id <= 0 {
-            return;
+            return (None, None);
         }
         let wirksam = self.effective(input.match_id, input.btp_sr, input.btp_ar);
         // Ein ausdrücklich gelöster Dienst (`Some(0)`) ist **kein** offener
         // Dienst: Wer von Hand ohne Schiedsrichter spielen lässt, soll ihn
         // auch nach einem Neustart nicht zurückbekommen — dort sieht jedes
-        // belegte Feld wie neu belegt aus.
+        // belegte Feld wie neu belegt aus. Ausnahme: eine freigegebene
+        // Rotations-Zuteilung (`frei`, ADR 0080) — ihr `Some(0)` ist nur die
+        // unterwegs befindliche Löschung, BTP zeigt womöglich noch die alte
+        // Person.
         let lokal = self.assignment(input.match_id);
-        let sr_offen = input.sr && wirksam.sr.is_none() && lokal.sr.is_none();
-        let ar_offen = input.ar && wirksam.ar.is_none() && lokal.ar.is_none();
+        let (frei_sr, frei_ar) = self.frei_merker(input.match_id);
+        let sr_offen = input.sr && (frei_sr || (wirksam.sr.is_none() && lokal.sr.is_none()));
+        let ar_offen = input.ar && (frei_ar || (wirksam.ar.is_none() && lokal.ar.is_none()));
         if !sr_offen && !ar_offen {
-            return;
+            return (None, None);
         }
         // Wer an DIESEM Spiel schon Dienst tut, kommt für den zweiten Dienst
         // nicht in Frage — dieselbe Person ist nie SR und AR zugleich.
@@ -951,65 +1307,417 @@ impl OfficialsStore {
         vergeben.extend(wirksam.sr);
         vergeben.extend(wirksam.ar);
 
-        for (offen, role) in [(sr_offen, OfficialRole::Sr), (ar_offen, OfficialRole::Ar)] {
-            if !offen {
-                continue;
-            }
-            let Some(id) = self.next_free(input.bekannt, &vergeben, input.players) else {
-                continue; // niemand frei ⇒ Feld bleibt ohne diesen Dienst
+        let (sr, ar) = self.waehle(
+            input.modus,
+            input.bekannt,
+            &vergeben,
+            input.players,
+            input.vorrolle,
+            sr_offen,
+            ar_offen,
+        );
+        // Niemand frei ⇒ das Feld bleibt ohne diesen Dienst.
+        let merker = match input.herkunft {
+            Herkunft::Aufruf => Merker::Setzen,
+            Herkunft::Feld => Merker::Entfernen,
+        };
+        if let Some(id) = sr {
+            self.mit_zuweisung(input.match_id, OfficialRole::Sr, id, merker);
+        }
+        if let Some(id) = ar {
+            self.mit_zuweisung(input.match_id, OfficialRole::Ar, id, merker);
+        }
+        (sr, ar)
+    }
+
+    // ── Zuteilung beim Aufruf: Herkunft und Freigabe (ADR 0080) ───────
+
+    /// Vergabe-Sperre nehmen (siehe Feld `vergabe`).
+    pub fn vergabe_sperre(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.vergabe.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Eine Person als Zuteilung beim Aufruf eintragen (mit Merker) — für
+    /// die einmalige Übernahme alter vorläufiger SR (ADR 0080).
+    pub fn uebernimm_als_aufruf(&self, match_id: i64, role: OfficialRole, official_id: i64) {
+        if match_id <= 0 || official_id <= 0 {
+            return;
+        }
+        self.mit_zuweisung(match_id, role, official_id, Merker::Setzen);
+    }
+
+    /// Steht für dieses Spiel ein Herkunfts-Merker (irgendeine Rolle)?
+    pub fn hat_vorab_rotation(&self, match_id: i64) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .file
+            .vorab_rotation
+            .contains_key(&match_id)
+    }
+
+    /// Die von der Rotation beim Aufruf gesetzte Person je Rolle (ohne
+    /// freigegebene) — für Tests und Anzeige.
+    pub fn vorab_rotation(&self, match_id: i64) -> (Option<i64>, Option<i64>) {
+        let inner = self.inner.lock().unwrap();
+        let v = inner
+            .file
+            .vorab_rotation
+            .get(&match_id)
+            .copied()
+            .unwrap_or_default();
+        let id = |d: Option<VorabDienst>| d.filter(|d| !d.frei).map(|d| d.id);
+        (id(v.sr), id(v.ar))
+    }
+
+    /// Match-IDs mit Herkunfts-Merker.
+    pub fn vorab_rotation_spiele(&self) -> Vec<i64> {
+        let mut ids: Vec<i64> = self
+            .inner
+            .lock()
+            .unwrap()
+            .file
+            .vorab_rotation
+            .keys()
+            .copied()
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    fn frei_merker(&self, match_id: i64) -> (bool, bool) {
+        let inner = self.inner.lock().unwrap();
+        let v = inner
+            .file
+            .vorab_rotation
+            .get(&match_id)
+            .copied()
+            .unwrap_or_default();
+        (v.sr.is_some_and(|d| d.frei), v.ar.is_some_and(|d| d.frei))
+    }
+
+    /// Eine Rotations-Zuteilung freigeben (Aufruf endet ohne Feld, Feld ohne
+    /// diesen Dienst). Nur mit gültigem Merker; Hand- und BTP-Einteilungen
+    /// bleiben. Hinterlässt **kein** bleibendes `Some(0)`:
+    /// - BTP trägt die Person nicht ⇒ lokal weg.
+    /// - BTP trägt sie (unser Write kam schon an) ⇒ lokal `Some(0)` mit
+    ///   `frei`; die 0 geht nach BTP, `confirm` räumt nach der Bestätigung.
+    ///
+    /// Liefert `true`, wenn etwas freigegeben wurde.
+    pub fn rotation_freigeben(&self, match_id: i64, role: OfficialRole, btp: Option<i64>) -> bool {
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let file = &mut inner.file;
+            let Some(v) = file.vorab_rotation.get_mut(&match_id) else {
+                return false;
             };
-            vergeben.insert(id);
-            self.assign(input.match_id, role, id);
+            let Some(d) = *v.rolle(role) else {
+                return false;
+            };
+            if d.frei {
+                return false;
+            }
+            let a = file.assignments.entry(match_id).or_default();
+            let lokal = match role {
+                OfficialRole::Sr => &mut a.sr,
+                OfficialRole::Ar => &mut a.ar,
+            };
+            // Gültig nur, solange die Sicht „Hand vor BTP" noch genau diese
+            // Person trägt — sonst hat jemand anders entschieden.
+            if lokal.or(btp).filter(|x| *x > 0) != Some(d.id) {
+                *v.rolle(role) = None;
+            } else if dienst(btp) == Some(d.id) {
+                *lokal = Some(0);
+                *v.rolle(role) = Some(VorabDienst {
+                    id: d.id,
+                    frei: true,
+                });
+            } else {
+                *lokal = None;
+                *v.rolle(role) = None;
+                if let Some(b) = file.ausgang.get_mut(&match_id) {
+                    match role {
+                        OfficialRole::Sr => {
+                            b.sr = None;
+                            b.sr_vorher = None;
+                        }
+                        OfficialRole::Ar => {
+                            b.ar = None;
+                            b.ar_vorher = None;
+                        }
+                    }
+                }
+            }
+            if v.leer() {
+                file.vorab_rotation.remove(&match_id);
+            }
+            if file
+                .assignments
+                .get(&match_id)
+                .is_some_and(|a| a.is_empty())
+            {
+                file.assignments.remove(&match_id);
+                file.ausgang.remove(&match_id);
+            }
+        }
+        self.persist();
+        true
+    }
+
+    /// Kommt ein Spiel auf ein Feld, dessen Schalter einen Dienst nicht
+    /// will, wird **nur** die Rotations-Zuteilung dieser Rolle gelöst
+    /// (ADR 0080). Vor jedem Feld-Write aufrufen und zustandsbasiert für
+    /// laufende Spiele.
+    ///
+    /// Bewusst nur der **Feldschalter**, nicht der globale
+    /// `rotation_sr`/`rotation_ar`: Schaltet die Turnierleitung die Rotation
+    /// mitten im Turnier ab, bleiben bestehende Zuteilungen stehen — es kommt
+    /// nur nichts Neues hinzu (Spec R-D.6).
+    pub fn rotation_loesen_am_feld(&self, m: &BtpMatch, court_id: i64) {
+        if !self.hat_vorab_rotation(m.id) {
+            return;
+        }
+        let sw = self.court_switches(court_id);
+        if !sw.sr {
+            self.rotation_freigeben(m.id, OfficialRole::Sr, m.official1_id);
+        }
+        if !sw.ar {
+            self.rotation_freigeben(m.id, OfficialRole::Ar, m.official2_id);
         }
     }
 
-    /// Der nächste Official der Reihenfolge, der zugewiesen werden darf:
-    /// BTP kennt ihn, er ist nicht pausiert, hat keinen Dienst und keinen
-    /// Konflikt. Konflikte werden hier **still** übersprungen — gewarnt wird
-    /// nur bei manueller Zuweisung (Spec Nr. 4).
-    pub fn next_free(
+    /// Merker gegen den Turnierstand pflegen (je Takt, vor dem Besetzen):
+    /// - Spiel beendet ⇒ Merker weg; trägt BTP die Person nicht, auch die
+    ///   nie geschriebene lokale Zuteilung (kein Einsatz ohne Dienst).
+    /// - Merker ohne `frei` gilt nur, solange „Hand vor BTP" seine Person
+    ///   trägt; ein freigegebener nur, solange lokal `Some(0)` steht.
+    /// - Spiel fehlt im Snapshot ⇒ nichts (kurz leerer Abruf).
+    pub fn pflege_vorab_rotation(&self, snap: &BtpSnapshot) {
+        let geaendert = {
+            let mut inner = self.inner.lock().unwrap();
+            let file = &mut inner.file;
+            let mut geaendert = false;
+            let ids: Vec<i64> = file.vorab_rotation.keys().copied().collect();
+            for mid in ids {
+                let Some(m) = snap.matches.iter().find(|m| m.id == mid) else {
+                    continue;
+                };
+                let lokal = file.assignments.get(&mid).copied().unwrap_or_default();
+                let v = file
+                    .vorab_rotation
+                    .get_mut(&mid)
+                    .expect("Schlüssel eben gelesen");
+                for (role, l, btp) in [
+                    (OfficialRole::Sr, lokal.sr, m.official1_id),
+                    (OfficialRole::Ar, lokal.ar, m.official2_id),
+                ] {
+                    let Some(d) = *v.rolle(role) else { continue };
+                    let gueltig = if m.status == MatchStatus::Finished {
+                        false
+                    } else if d.frei {
+                        l == Some(0)
+                    } else {
+                        l.or(btp).filter(|x| *x > 0) == Some(d.id)
+                    };
+                    if gueltig {
+                        continue;
+                    }
+                    *v.rolle(role) = None;
+                    geaendert = true;
+                    if m.status == MatchStatus::Finished && dienst(btp) != Some(d.id) {
+                        if let Some(a) = file.assignments.get_mut(&mid) {
+                            let feld = match role {
+                                OfficialRole::Sr => &mut a.sr,
+                                OfficialRole::Ar => &mut a.ar,
+                            };
+                            if *feld == Some(d.id) || (d.frei && *feld == Some(0)) {
+                                *feld = None;
+                            }
+                        }
+                    }
+                }
+                if v.leer() {
+                    file.vorab_rotation.remove(&mid);
+                }
+                if file.assignments.get(&mid).is_some_and(|a| a.is_empty()) {
+                    file.assignments.remove(&mid);
+                    file.ausgang.remove(&mid);
+                }
+            }
+            geaendert
+        };
+        if geaendert {
+            self.persist();
+        }
+    }
+
+    /// Wählt über [`waehle_besetzung`] auf einem einmal geklonten Stand
+    /// (Listen, Zusatzdaten) — ein Lock statt einem je Kandidat. Frei ist,
+    /// wen BTP kennt, wer nicht pausiert ist, nicht in `vergeben` steht und
+    /// keinen Konflikt mit den Spielern hat. Konflikte werden **still**
+    /// übersprungen — gewarnt wird nur bei manueller Zuweisung (Spec Nr. 4).
+    #[allow(clippy::too_many_arguments)]
+    pub fn waehle(
         &self,
+        modus: RotationMode,
         bekannt: &[i64],
         vergeben: &HashSet<i64>,
         players: &[BtpPlayer],
-    ) -> Option<i64> {
-        for id in self.order() {
-            if !bekannt.contains(&id) || vergeben.contains(&id) {
-                continue;
-            }
-            let extra = self.extra(id);
-            if extra.paused || official_conflict(&extra, players).is_some() {
-                continue;
-            }
-            return Some(id);
-        }
-        None
+        vorrolle: &HashMap<i64, OfficialRole>,
+        sr_offen: bool,
+        ar_offen: bool,
+    ) -> (Option<i64>, Option<i64>) {
+        let (order, order_ar, extras) = {
+            let inner = self.inner.lock().unwrap();
+            (
+                inner.file.order.clone(),
+                ar_liste(&inner.file),
+                inner.file.extras.clone(),
+            )
+        };
+        let leer = OfficialExtra::default();
+        let extra = |id: i64| extras.get(&id).unwrap_or(&leer);
+        let frei = |id: i64| {
+            bekannt.contains(&id)
+                && !vergeben.contains(&id)
+                && !extra(id).paused
+                && official_conflict(extra(id), players).is_none()
+        };
+        let rolle = |id: i64| extra(id).role;
+        waehle_besetzung(&Wahleingabe {
+            modus,
+            order: &order,
+            order_ar: &order_ar,
+            frei: &frei,
+            rolle: &rolle,
+            vorrolle,
+            sr_offen,
+            ar_offen,
+        })
     }
 
-    /// Einen Official in der Reihenfolge vor einen anderen ziehen
+    /// Vorschau „als Nächstes" (ADR 0079): simuliert die Wahl Runde für Runde
+    /// auf einem geklonten Stand, **ohne etwas zu verändern** (keine
+    /// AR-Liste angelegt, nichts gespeichert). Liefert je Person den Dienst
+    /// und die Runde (0 = nächste Besetzung). Kandidaten: frei laut
+    /// `belegt`, ohne Konfliktprüfung (es gibt noch kein konkretes Spiel).
+    /// Beide Rotationen aus ⇒ leer.
+    pub fn prognose(
+        &self,
+        bekannt: &[i64],
+        belegt: &HashSet<i64>,
+        vorrolle: &HashMap<i64, OfficialRole>,
+        rot_sr: bool,
+        rot_ar: bool,
+    ) -> HashMap<i64, (OfficialRole, u32)> {
+        let mut out = HashMap::new();
+        if !rot_sr && !rot_ar {
+            return out;
+        }
+        let modus = self.rotation_mode();
+        let mut vergeben = belegt.clone();
+        let mut runde: u32 = 0;
+        // Höchstens so viele Runden wie Personen — jede Runde vergibt
+        // mindestens eine, sonst endet die Schleife.
+        while runde as usize <= bekannt.len() {
+            let (sr, ar) = self.waehle(modus, bekannt, &vergeben, &[], vorrolle, rot_sr, rot_ar);
+            if sr.is_none() && ar.is_none() {
+                break;
+            }
+            for (id, rolle) in [(sr, OfficialRole::Sr), (ar, OfficialRole::Ar)] {
+                if let Some(id) = id {
+                    out.insert(id, (rolle, runde));
+                    vergeben.insert(id);
+                }
+            }
+            runde += 1;
+        }
+        out
+    }
+
+    /// Vorschau aus dem Turnierstand: Belegung (Dienst + Reservierung) und
+    /// Vorrolle wie beim echten Besetzen — eine Rechnung für Desktop und
+    /// TL-Web.
+    pub fn prognose_aus(
+        &self,
+        snap: &BtpSnapshot,
+        belegung: &Belegung,
+    ) -> HashMap<i64, (OfficialRole, u32)> {
+        if !self.enabled() {
+            return HashMap::new();
+        }
+        let (rot_sr, rot_ar) = self.rotation();
+        let bekannt: Vec<i64> = snap.officials.iter().map(|o| o.id).collect();
+        let vorrolle = if self.rotation_mode() == RotationMode::Rollenwechsel {
+            let fertige: Vec<FinishedMatch> = snap
+                .matches
+                .iter()
+                .filter(|m| m.status == MatchStatus::Finished)
+                .map(FinishedMatch::aus_btp)
+                .collect();
+            self.vorrollen(&fertige)
+        } else {
+            HashMap::new()
+        };
+        self.prognose(&bekannt, &belegung.alle(), &vorrolle, rot_sr, rot_ar)
+    }
+
+    /// Vorrolle je Official: der Dienst im zuletzt beendeten Spiel (ADR
+    /// 0079). Dieselbe Sicht wie die Einsatz-Ableitung (`effective`, Hand,
+    /// BTP und Automatik gleich); ein Walkover zählt nicht. Maßgeblich ist
+    /// `(finished_at oder 0, match_id)` — gleiche Endezeit entscheidet die
+    /// höhere Match-ID, ein Spiel ohne Endezeit ist älter als jedes
+    /// gestempelte.
+    pub fn vorrollen(&self, finished: &[FinishedMatch]) -> HashMap<i64, OfficialRole> {
+        let assignments = self.assignments();
+        let mut zuletzt: HashMap<i64, ((u64, i64), OfficialRole)> = HashMap::new();
+        for f in finished.iter().filter(|f| !f.walkover) {
+            let lokal = assignments.get(&f.match_id).copied().unwrap_or_default();
+            let sr = dienst(f.btp_sr).or(dienst(lokal.sr));
+            let ar = dienst(f.btp_ar).or(dienst(lokal.ar));
+            let schluessel = (f.finished_at.unwrap_or(0), f.match_id);
+            for (id, rolle) in [(sr, OfficialRole::Sr), (ar, OfficialRole::Ar)] {
+                let Some(id) = id else { continue };
+                let neuer = zuletzt
+                    .get(&id)
+                    .map(|(k, _)| schluessel > *k)
+                    .unwrap_or(true);
+                if neuer {
+                    zuletzt.insert(id, (schluessel, rolle));
+                }
+            }
+        }
+        zuletzt.into_iter().map(|(id, (_, r))| (id, r)).collect()
+    }
+
+    /// Einen Official in der Hauptliste vor einen anderen ziehen
     /// (`before = None` ⇒ ans Ende). Unbekannte IDs ändern nichts.
     pub fn reorder(&self, official_id: i64, before: Option<i64>) {
+        self.reorder_in(Reihenfolge::Haupt, official_id, before);
+    }
+
+    /// Wie [`reorder`](Self::reorder), aber in der gewählten Liste. Die
+    /// AR-Liste wird dabei bei Bedarf als Kopie der Hauptliste angelegt; die
+    /// jeweils andere Liste bleibt unberührt.
+    pub fn reorder_in(&self, liste: Reihenfolge, official_id: i64, before: Option<i64>) {
         {
             let mut inner = self.inner.lock().unwrap();
-            let order = &mut inner.file.order;
-            let Some(von) = order.iter().position(|id| *id == official_id) else {
-                return;
+            let file = &mut inner.file;
+            if liste == Reihenfolge::Ar {
+                // Eine unbekannte ID darf keine AR-Liste anlegen.
+                if !ar_liste(file).contains(&official_id) {
+                    return;
+                }
+                let geheilt = ar_liste(file);
+                file.order_ar = Some(geheilt);
+            }
+            let order = match liste {
+                Reihenfolge::Haupt => &mut file.order,
+                Reihenfolge::Ar => file.order_ar.as_mut().expect("eben angelegt"),
             };
-            // Vor sich selbst ziehen ist keine Bewegung.
-            if before == Some(official_id) {
+            if !verschiebe(order, official_id, before) {
                 return;
             }
-            let ziel = match before {
-                Some(b) => match order.iter().position(|id| *id == b) {
-                    Some(p) => p,
-                    None => return, // unbekanntes Ziel ⇒ lieber nichts tun
-                },
-                None => order.len(),
-            };
-            let id = order.remove(von);
-            // Nach dem Entfernen rutscht alles hinter `von` eine Stelle vor.
-            let ziel = if ziel > von { ziel - 1 } else { ziel };
-            order.insert(ziel, id);
         }
         self.persist();
     }
@@ -1042,6 +1750,9 @@ impl OfficialsStore {
         }
         for liste in out.values_mut() {
             // Ohne Endezeit (Altbestand) ans Ende, sonst chronologisch.
+            // Achtung: `vorrollen` behandelt dieselben Spiele umgekehrt (als
+            // ältestes, ADR 0079) — hier geht es um die Anzeige-Reihenfolge,
+            // dort darum, dass ein ungestempeltes Spiel keine Vorrolle prägt.
             liste.sort_by_key(|a| (a.finished_at.unwrap_or(u64::MAX), a.match_id));
         }
         out
@@ -1056,8 +1767,8 @@ impl OfficialsStore {
     /// Änderung in BTP selbst, für den Rest des Turniers. Deshalb wird ein
     /// Dienst losgelassen, wenn
     ///
-    /// - BTP genau den lokalen Wert trägt (bestätigt; bei „keiner": BTP
-    ///   trägt niemanden), oder
+    /// - BTP genau den lokalen Wert trägt (bestätigt) — außer beim
+    ///   ausdrücklichen „keiner", das stehen bleibt (ADR 0080), oder
     /// - BTP etwas **anderes** führt als beim Einteilen (Ausgangswert):
     ///   Dann hat jemand in BTP entschieden, und BTP gewinnt.
     ///
@@ -1078,6 +1789,29 @@ impl OfficialsStore {
                 return;
             };
             let vorher = (*a, file.ausgang.get(&match_id).copied());
+            let merker_vorher = file.vorab_rotation.get(&match_id).copied();
+            // Freigabe abschließen (ADR 0080): BTP hat die 0 übernommen ⇒ das
+            // `Some(0)` verschwindet samt Merker — sonst bliebe es als „ohne"
+            // stehen und sperrte die spätere Feld-Rotation.
+            if let Some(v) = file.vorab_rotation.get_mut(&match_id) {
+                for (role, btp) in [(OfficialRole::Sr, btp_sr), (OfficialRole::Ar, btp_ar)] {
+                    let feld = match role {
+                        OfficialRole::Sr => &mut a.sr,
+                        OfficialRole::Ar => &mut a.ar,
+                    };
+                    if v.rolle(role).is_some_and(|d| d.frei)
+                        && *feld == Some(0)
+                        && dienst(btp).is_none()
+                    {
+                        *feld = None;
+                        *v.rolle(role) = None;
+                    }
+                }
+                if v.leer() {
+                    file.vorab_rotation.remove(&match_id);
+                }
+            }
+            let merker_geaendert = merker_vorher != file.vorab_rotation.get(&match_id).copied();
             let b = file.ausgang.entry(match_id).or_default();
             pruefe_dienst(&mut a.sr, &mut b.sr, &mut b.sr_vorher, btp_sr);
             pruefe_dienst(&mut a.ar, &mut b.ar, &mut b.ar_vorher, btp_ar);
@@ -1092,14 +1826,50 @@ impl OfficialsStore {
                 file.assignments.get(&match_id).copied().unwrap_or_default(),
                 file.ausgang.get(&match_id).copied(),
             );
-            if vorher == nachher {
+            if vorher == nachher && !merker_geaendert {
                 return; // der Normalfall jedes Sync-Takts — nicht schreiben
             }
         }
         self.persist();
     }
 
-    /// Officials ans Ende der Reihenfolge rücken (nach Spielende, Spec Nr. 4).
+    /// Nach Spielende rücken SR und AR ans Ende (ADR 0079):
+    /// - B/C: in der gemeinsamen Liste erst der AR, dann der SR — das Paar
+    ///   kommt getauscht wieder hoch (früher `[SR, AR]`: Die Dienste blieben
+    ///   an den Personen kleben).
+    /// - A: der SR nur in der SR-Liste, der AR nur in der AR-Liste (die bei
+    ///   Bedarf angelegt wird).
+    pub fn nach_spielende(&self, sr: Option<i64>, ar: Option<i64>, modus: RotationMode) {
+        if modus != RotationMode::Getrennt {
+            let folge: Vec<i64> = ar.into_iter().chain(sr).collect();
+            self.move_to_end(&folge);
+            return;
+        }
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let file = &mut inner.file;
+            // AR-Liste VOR dem SR-Rücken ziehen: Gibt es sie noch nicht, ist
+            // sie eine Kopie der Hauptliste — und zwar der unveränderten.
+            let mut liste = ar_liste(file);
+            let mut geaendert = false;
+            if let Some(id) = sr {
+                geaendert |= ans_ende(&mut file.order, &[id]);
+            }
+            if let Some(id) = ar {
+                geaendert |= ans_ende(&mut liste, &[id]);
+            }
+            if !geaendert {
+                return;
+            }
+            // Auch wenn nur der SR rückte: Ab jetzt ist die AR-Liste eigen —
+            // sonst machte ihre Kopie das SR-Rücken mit.
+            file.order_ar = Some(liste);
+        }
+        self.persist();
+    }
+
+    /// Officials ans Ende der Hauptliste rücken (Baustein von
+    /// [`nach_spielende`](Self::nach_spielende)).
     pub fn move_to_end(&self, official_ids: &[i64]) {
         {
             let mut inner = self.inner.lock().unwrap();
@@ -1201,6 +1971,64 @@ impl OfficialsStore {
     }
 }
 
+/// Die AR-Liste in ihrer wirksamen Form: die angelegte Liste, ergänzt um
+/// IDs der Hauptliste, die dort fehlen (etwa weil eine ältere App sie nicht
+/// pflegte) — oder, solange es keine gibt, eine Kopie der Hauptliste.
+fn ar_liste(file: &OfficialsFile) -> Vec<i64> {
+    match &file.order_ar {
+        None => file.order.clone(),
+        Some(ar) => {
+            let mut out = ar.clone();
+            for id in &file.order {
+                if !out.contains(id) {
+                    out.push(*id);
+                }
+            }
+            out
+        }
+    }
+}
+
+/// Rückt die bekannten unter `ids` in dieser Folge ans Ende. `false`, wenn
+/// keine davon in der Liste steht.
+fn ans_ende(order: &mut Vec<i64>, ids: &[i64]) -> bool {
+    let betroffen: Vec<i64> = ids
+        .iter()
+        .copied()
+        .filter(|id| order.contains(id))
+        .collect();
+    if betroffen.is_empty() {
+        return false;
+    }
+    order.retain(|id| !betroffen.contains(id));
+    order.extend(betroffen);
+    true
+}
+
+/// Verschiebt `id` vor `before` (`None` ⇒ ans Ende). `false`, wenn sich
+/// nichts geändert hat (unbekannte ID, unbekanntes Ziel, vor sich selbst).
+fn verschiebe(order: &mut Vec<i64>, id: i64, before: Option<i64>) -> bool {
+    let Some(von) = order.iter().position(|x| *x == id) else {
+        return false;
+    };
+    // Vor sich selbst ziehen ist keine Bewegung.
+    if before == Some(id) {
+        return false;
+    }
+    let ziel = match before {
+        Some(b) => match order.iter().position(|x| *x == b) {
+            Some(p) => p,
+            None => return false, // unbekanntes Ziel ⇒ lieber nichts tun
+        },
+        None => order.len(),
+    };
+    let id = order.remove(von);
+    // Nach dem Entfernen rutscht alles hinter `von` eine Stelle vor.
+    let ziel = if ziel > von { ziel - 1 } else { ziel };
+    order.insert(ziel, id);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1260,6 +2088,9 @@ mod tests {
             belegt,
             sr: true,
             ar: true,
+            modus: RotationMode::Abwechselnd,
+            vorrolle: Box::leak(Box::new(HashMap::new())),
+            herkunft: Herkunft::Feld,
         }
     }
 
@@ -1579,10 +2410,56 @@ mod tests {
         store.confirm(501, None, Some(11));
         assert_eq!(store.assignment(501), MatchOfficials::default());
 
-        // Ausdrückliches „keiner" gilt als erfüllt, sobald BTP auch nichts
-        // mehr trägt.
+        // Ausdrückliches „keiner" bleibt stehen, auch wenn BTP nichts trägt
+        // (ADR 0080) — sonst füllte ein Lauf über wartende Spiele es wieder
+        // auf.
         store.confirm(502, None, None);
-        assert_eq!(store.assignment(502), MatchOfficials::default());
+        assert_eq!(store.assignment(502).sr, Some(0));
+    }
+
+    #[test]
+    fn ohne_bleibt_stehen_solange_btp_niemanden_fuehrt() {
+        // ADR 0080 (Spec sr-ar-beim-aufruf AK6): Über beliebig viele Läufe.
+        let store = OfficialsStore::default();
+        store.clear_assignment(700, OfficialRole::Sr);
+        for _ in 0..5 {
+            store.confirm(700, None, None);
+            assert_eq!(store.assignment(700).sr, Some(0));
+        }
+        // Die wirksame Sicht kennt keinen Dienst, die Schreib-Sicht „keiner".
+        assert_eq!(store.effective(700, None, None).sr, None);
+        assert_eq!(store.fuer_schreiben(700, None, None).sr, Some(0));
+    }
+
+    #[test]
+    fn ohne_weicht_einer_einteilung_in_btp() {
+        let store = OfficialsStore::default();
+        store.clear_assignment(701, OfficialRole::Ar);
+        store.confirm(701, None, None);
+        assert_eq!(store.assignment(701).ar, Some(0));
+        // Jemand trägt in BTP eine Person ein ⇒ BTP gewinnt (R2).
+        store.confirm(701, None, Some(5));
+        assert_eq!(store.assignment(701), MatchOfficials::default());
+        assert_eq!(store.effective(701, None, Some(5)).ar, Some(5));
+    }
+
+    #[test]
+    fn ohne_gegen_einen_btp_wert_bleibt_nach_der_bestaetigung_stehen() {
+        // BTP führt 9, die TL löst ⇒ die 0 geht nach BTP; danach bleibt das
+        // „ohne" stehen, statt losgelassen zu werden.
+        let store = OfficialsStore::default();
+        store.confirm(702, Some(9), None);
+        store.clear_assignment(702, OfficialRole::Sr);
+        store.confirm(702, Some(9), None);
+        assert_eq!(
+            store.fuer_schreiben(702, Some(9), None).sr,
+            Some(0),
+            "0 geht nach BTP"
+        );
+        store.confirm(702, None, None);
+        assert_eq!(store.assignment(702).sr, Some(0));
+        store.confirm(702, None, None);
+        assert_eq!(store.assignment(702).sr, Some(0));
     }
 
     #[test]
@@ -1717,6 +2594,728 @@ mod tests {
         // Unbekannte IDs ändern nichts.
         store.move_to_end(&[99]);
         assert_eq!(store.order(), vec![1, 2, 3]);
+    }
+
+    // ── Rotationsmodus: Datenmodell (ADR 0079, PR 1) ──────────────────
+
+    fn datei_text(dir: &Path) -> String {
+        std::fs::read_to_string(dir.join("officials-state.json")).unwrap_or_default()
+    }
+
+    #[test]
+    fn rolle_erlaubt_nur_passende_dienste() {
+        use Einsatzrolle::*;
+        assert!(Beides.erlaubt(OfficialRole::Sr) && Beides.erlaubt(OfficialRole::Ar));
+        assert!(NurSr.erlaubt(OfficialRole::Sr) && !NurSr.erlaubt(OfficialRole::Ar));
+        assert!(NurAr.erlaubt(OfficialRole::Ar) && !NurAr.erlaubt(OfficialRole::Sr));
+        assert_eq!(serde_json::to_string(&NurSr).unwrap(), "\"sr\"");
+        assert_eq!(serde_json::to_string(&NurAr).unwrap(), "\"ar\"");
+        assert_eq!(serde_json::to_string(&Beides).unwrap(), "\"beides\"");
+    }
+
+    #[test]
+    fn rolle_ueberlebt_neustart_und_beides_hinterlaesst_keinen_eintrag() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.set_role(7, Einsatzrolle::NurAr);
+        let neu = store_mit_datei(dir.path());
+        assert_eq!(neu.extra(7).role, Einsatzrolle::NurAr);
+
+        // Zurück auf „beides" ohne weitere Zusatzdaten ⇒ Eintrag weg.
+        neu.set_role(7, Einsatzrolle::Beides);
+        assert!(
+            !datei_text(dir.path()).contains("\"7\""),
+            "leere Zusatzdaten werden nicht aufbewahrt"
+        );
+        assert!(!datei_text(dir.path()).contains("\"role\""));
+    }
+
+    #[test]
+    fn rollen_warnung_nennt_jeden_widerspruch() {
+        let store = OfficialsStore::default();
+        store.set_role(1, Einsatzrolle::NurAr);
+        store.set_role(2, Einsatzrolle::NurSr);
+        assert_eq!(
+            store.rollen_warnung(Some(1), Some(2)),
+            vec!["SR: nur AR", "AR: nur SR"]
+        );
+        assert!(
+            store.rollen_warnung(Some(2), Some(1)).is_empty(),
+            "passt beides"
+        );
+        assert!(
+            store.rollen_warnung(Some(3), Some(0)).is_empty(),
+            "beides / ohne"
+        );
+        assert!(store.rollen_warnung(None, None).is_empty());
+    }
+
+    #[test]
+    fn rolle_allein_haelt_den_eintrag_am_leben() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.set_paused(7, true);
+        store.set_role(7, Einsatzrolle::NurSr);
+        store.set_paused(7, false);
+        assert_eq!(store.extra(7).role, Einsatzrolle::NurSr);
+    }
+
+    #[test]
+    fn alte_datei_ohne_rolle_und_ar_liste_laedt_unveraendert() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("officials-state.json"),
+            r#"{"tournament":"Test BTS Light","order":[3,1,2],
+                "extras":{"1":{"paused":true,"blocked_clubs":["SC X"]}}}"#,
+        )
+        .unwrap();
+        let store = store_mit_datei(dir.path());
+        assert_eq!(store.order(), vec![3, 1, 2]);
+        assert_eq!(
+            store.order_ar(),
+            vec![3, 1, 2],
+            "ohne AR-Liste gilt die Kopie"
+        );
+        let e = store.extra(1);
+        assert!(e.paused);
+        assert_eq!(e.blocked_clubs, vec!["SC X".to_string()]);
+        assert_eq!(e.role, Einsatzrolle::Beides);
+    }
+
+    #[test]
+    fn ar_liste_lesen_legt_nichts_an() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        let vorher = datei_text(dir.path());
+        assert_eq!(store.order_ar(), vec![1, 2, 3]);
+        assert_eq!(datei_text(dir.path()), vorher);
+        assert!(!vorher.contains("order_ar"));
+    }
+
+    #[test]
+    fn ar_umsortieren_legt_kopie_an_und_laesst_hauptliste_stehen() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.reorder_in(Reihenfolge::Ar, 3, Some(1));
+        assert_eq!(store.order_ar(), vec![3, 1, 2]);
+        assert_eq!(store.order(), vec![1, 2, 3], "Hauptliste unberührt");
+        assert!(datei_text(dir.path()).contains("order_ar"));
+
+        // Umgekehrt: Hauptliste umsortieren lässt die AR-Liste stehen.
+        store.reorder_in(Reihenfolge::Haupt, 1, None);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        assert_eq!(store.order_ar(), vec![3, 1, 2]);
+
+        // Überlebt einen Neustart.
+        let neu = store_mit_datei(dir.path());
+        assert_eq!(neu.order_ar(), vec![3, 1, 2]);
+        assert_eq!(neu.order(), vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn ar_umsortieren_mit_unbekannter_id_oder_ziel_aendert_nichts() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.reorder_in(Reihenfolge::Ar, 99, Some(1));
+        store.reorder_in(Reihenfolge::Ar, 1, Some(99));
+        assert_eq!(store.order_ar(), vec![1, 2, 3]);
+        assert!(!datei_text(dir.path()).contains("order_ar"));
+    }
+
+    #[test]
+    fn neue_officials_kommen_an_beide_listen_ohne_doppel() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2]);
+        store.reorder_in(Reihenfolge::Ar, 2, Some(1));
+        store.sync_roster(&[1, 2, 3, 3]);
+        assert_eq!(store.order(), vec![1, 2, 3]);
+        assert_eq!(store.order_ar(), vec![2, 1, 3]);
+    }
+
+    #[test]
+    fn ar_liste_heilt_fehlende_ids_beim_lesen() {
+        let dir = tempfile::tempdir().unwrap();
+        // Eine ältere App hat `order` erweitert, `order_ar` aber nicht.
+        std::fs::write(
+            dir.path().join("officials-state.json"),
+            r#"{"tournament":"Test BTS Light","order":[1,2,3],"order_ar":[2,1]}"#,
+        )
+        .unwrap();
+        let store = store_mit_datei(dir.path());
+        assert_eq!(store.order_ar(), vec![2, 1, 3]);
+    }
+
+    #[test]
+    fn turnierwechsel_verwirft_die_ar_liste() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2]);
+        store.reorder_in(Reihenfolge::Ar, 2, Some(1));
+        store.set_tournament("Anderes Turnier");
+        assert!(store.order_ar().is_empty());
+        assert!(!datei_text(dir.path()).contains("order_ar"));
+    }
+
+    #[test]
+    fn rotationsmodus_ist_ein_laufzeit_spiegel() {
+        let store = OfficialsStore::default();
+        assert_eq!(store.rotation_mode(), RotationMode::Abwechselnd);
+        store.set_rotation_mode(RotationMode::Getrennt);
+        assert_eq!(store.rotation_mode(), RotationMode::Getrennt);
+    }
+
+    // ── Rotationsmodus: Wahl-Kern (ADR 0079, PR 2) ────────────────────
+
+    /// Wahl mit allen frei, Rollen und Vorrollen aus Tabellen.
+    fn wahl(
+        modus: RotationMode,
+        order: &[i64],
+        order_ar: &[i64],
+        rollen: &[(i64, Einsatzrolle)],
+        vor: &[(i64, OfficialRole)],
+        sr_offen: bool,
+        ar_offen: bool,
+    ) -> (Option<i64>, Option<i64>) {
+        wahl_mit(modus, order, order_ar, rollen, vor, &[], sr_offen, ar_offen)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn wahl_mit(
+        modus: RotationMode,
+        order: &[i64],
+        order_ar: &[i64],
+        rollen: &[(i64, Einsatzrolle)],
+        vor: &[(i64, OfficialRole)],
+        nicht_frei: &[i64],
+        sr_offen: bool,
+        ar_offen: bool,
+    ) -> (Option<i64>, Option<i64>) {
+        let rollen: HashMap<i64, Einsatzrolle> = rollen.iter().copied().collect();
+        let vorrolle: HashMap<i64, OfficialRole> = vor.iter().copied().collect();
+        let frei = |id: i64| !nicht_frei.contains(&id);
+        let rolle = |id: i64| rollen.get(&id).copied().unwrap_or_default();
+        waehle_besetzung(&Wahleingabe {
+            modus,
+            order,
+            order_ar,
+            frei: &frei,
+            rolle: &rolle,
+            vorrolle: &vorrolle,
+            sr_offen,
+            ar_offen,
+        })
+    }
+
+    use OfficialRole::{Ar as AR, Sr as SR};
+    use RotationMode::{Abwechselnd as B, Getrennt as A, Rollenwechsel as C};
+
+    #[test]
+    fn a_waehlt_aus_getrennten_listen() {
+        // AK7: SR aus der SR-Liste, AR aus der AR-Liste.
+        assert_eq!(
+            wahl(A, &[1, 2], &[3, 4], &[], &[], true, true),
+            (Some(1), Some(3))
+        );
+        // „beides" oben in beiden Listen ⇒ SR; der AR kommt vom Nächsten der
+        // AR-Liste.
+        assert_eq!(
+            wahl(A, &[1, 2], &[1, 3], &[], &[], true, true),
+            (Some(1), Some(3))
+        );
+        // Rollen filtern je Liste.
+        assert_eq!(
+            wahl(
+                A,
+                &[1, 2],
+                &[3, 4],
+                &[(1, Einsatzrolle::NurAr), (3, Einsatzrolle::NurSr)],
+                &[],
+                true,
+                true
+            ),
+            (Some(2), Some(4))
+        );
+    }
+
+    #[test]
+    fn b_erster_sr_naechster_ar_mit_rollenfilter() {
+        assert_eq!(
+            wahl(B, &[1, 2, 3], &[9], &[], &[], true, true),
+            (Some(1), Some(2))
+        );
+        // AK11: „nur AR" oben wird nie SR, bekommt aber den AR.
+        assert_eq!(
+            wahl(
+                B,
+                &[1, 2, 3],
+                &[],
+                &[(1, Einsatzrolle::NurAr)],
+                &[],
+                true,
+                true
+            ),
+            (Some(2), Some(1))
+        );
+        // Die Vorrolle spielt in B keine Rolle.
+        assert_eq!(
+            wahl(B, &[1, 2], &[], &[], &[(1, SR)], true, true),
+            (Some(1), Some(2))
+        );
+    }
+
+    #[test]
+    fn c_wechselt_je_person() {
+        // AK12: P1 zuletzt SR, P2 zuletzt AR ⇒ getauscht.
+        assert_eq!(
+            wahl(C, &[1, 2], &[], &[], &[(1, SR), (2, AR)], true, true),
+            (Some(2), Some(1))
+        );
+        // AK13: P2 will auch AR, das hat schon P1 ⇒ P2 übersprungen, P3 SR.
+        assert_eq!(
+            wahl(
+                C,
+                &[1, 2, 3],
+                &[],
+                &[],
+                &[(1, SR), (2, SR), (3, AR)],
+                true,
+                true
+            ),
+            (Some(3), Some(1))
+        );
+    }
+
+    #[test]
+    fn c_ohne_vorgeschichte_sr_vor_ar() {
+        // AK14
+        assert_eq!(
+            wahl(C, &[1, 2], &[], &[], &[], true, true),
+            (Some(1), Some(2))
+        );
+        assert_eq!(
+            wahl(C, &[1, 2], &[], &[], &[], false, true),
+            (None, Some(1))
+        );
+    }
+
+    #[test]
+    fn c_faellt_zurueck_wenn_niemand_wechseln_kann() {
+        // AK15: nur SR offen, alle zuletzt SR ⇒ erste freie SR-fähige Person.
+        assert_eq!(
+            wahl(C, &[1, 2], &[], &[], &[(1, SR), (2, SR)], true, false),
+            (Some(1), None)
+        );
+        // Rückfall beachtet die Rolle.
+        assert_eq!(
+            wahl(
+                C,
+                &[1, 2],
+                &[],
+                &[(1, Einsatzrolle::NurAr)],
+                &[(1, AR), (2, SR)],
+                true,
+                false
+            ),
+            (Some(2), None)
+        );
+    }
+
+    #[test]
+    fn c_feste_rolle_schlaegt_die_vorrolle() {
+        // AK16
+        assert_eq!(
+            wahl(
+                C,
+                &[1, 2],
+                &[],
+                &[(1, Einsatzrolle::NurSr)],
+                &[(1, SR), (2, SR)],
+                true,
+                true
+            ),
+            (Some(1), Some(2))
+        );
+    }
+
+    #[test]
+    fn niemand_passendes_frei_laesst_den_dienst_leer() {
+        // AK20, in allen Modi.
+        for m in [A, B, C] {
+            assert_eq!(
+                wahl(m, &[1], &[1], &[(1, Einsatzrolle::NurAr)], &[], true, false),
+                (None, None),
+                "{m:?}"
+            );
+            assert_eq!(
+                wahl_mit(m, &[1, 2], &[1, 2], &[], &[], &[1, 2], true, true),
+                (None, None),
+                "{m:?}: niemand frei"
+            );
+        }
+        // Belegte werden übersprungen.
+        assert_eq!(
+            wahl_mit(C, &[1, 2, 3], &[], &[], &[], &[1], true, true),
+            (Some(2), Some(3))
+        );
+    }
+
+    fn fertig(match_id: i64, sr: i64, ar: i64, ende: Option<u64>, walkover: bool) -> FinishedMatch {
+        FinishedMatch {
+            match_id,
+            btp_sr: Some(sr),
+            btp_ar: Some(ar),
+            court_id: None,
+            finished_at: ende,
+            walkover,
+        }
+    }
+
+    #[test]
+    fn vorrolle_kommt_aus_dem_zuletzt_beendeten_spiel() {
+        let store = OfficialsStore::default();
+        let v = store.vorrollen(&[
+            fertig(1, 10, 20, Some(100), false),
+            fertig(2, 20, 10, Some(200), false),
+        ]);
+        assert_eq!(v.get(&10), Some(&AR));
+        assert_eq!(v.get(&20), Some(&SR));
+    }
+
+    #[test]
+    fn vorrolle_ignoriert_walkover() {
+        // AK17
+        let store = OfficialsStore::default();
+        let v = store.vorrollen(&[
+            fertig(1, 10, 20, Some(100), false),
+            fertig(2, 20, 10, Some(200), true),
+        ]);
+        assert_eq!(v.get(&10), Some(&SR));
+        assert_eq!(v.get(&20), Some(&AR));
+    }
+
+    #[test]
+    fn vorrolle_gleichstand_hoehere_match_id_ohne_endezeit_aelter() {
+        // AK18
+        let store = OfficialsStore::default();
+        let v = store.vorrollen(&[
+            fertig(7, 10, 20, Some(100), false),
+            fertig(5, 20, 10, Some(100), false),
+        ]);
+        assert_eq!(
+            v.get(&10),
+            Some(&SR),
+            "Match 7 ist bei gleicher Zeit das spätere"
+        );
+        let v = store.vorrollen(&[
+            fertig(9, 10, 20, None, false),
+            fertig(3, 20, 10, Some(1), false),
+        ]);
+        assert_eq!(
+            v.get(&10),
+            Some(&AR),
+            "ohne Endezeit älter als jedes gestempelte"
+        );
+    }
+
+    #[test]
+    fn vorrolle_liest_auch_lokale_zuweisungen() {
+        let store = OfficialsStore::default();
+        store.assign(1, OfficialRole::Sr, 10);
+        let f = FinishedMatch {
+            btp_sr: None,
+            btp_ar: None,
+            ..fertig(1, 0, 0, Some(5), false)
+        };
+        assert_eq!(store.vorrollen(&[f]).get(&10), Some(&SR));
+    }
+
+    #[test]
+    fn nach_spielende_b_und_c_ruecken_ar_vor_sr_ans_ende() {
+        // AK10
+        for m in [B, C] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = store_mit_datei(dir.path());
+            store.sync_roster(&[1, 2, 3]);
+            store.nach_spielende(Some(1), Some(2), m);
+            assert_eq!(store.order(), vec![3, 2, 1], "{m:?}");
+            assert!(!datei_text(dir.path()).contains("order_ar"));
+        }
+    }
+
+    #[test]
+    fn nach_spielende_a_rueckt_je_liste() {
+        // AK8
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.nach_spielende(Some(1), Some(2), A);
+        assert_eq!(store.order(), vec![2, 3, 1], "SR rückt nur in der SR-Liste");
+        assert_eq!(
+            store.order_ar(),
+            vec![1, 3, 2],
+            "AR rückt nur in der AR-Liste"
+        );
+        // Nur einer besetzt.
+        store.nach_spielende(None, Some(3), A);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        assert_eq!(store.order_ar(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn nach_spielende_a_nur_sr_laesst_die_ar_reihenfolge_stehen() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.nach_spielende(Some(1), None, A);
+        assert_eq!(store.order(), vec![2, 3, 1]);
+        assert_eq!(
+            store.order_ar(),
+            vec![1, 2, 3],
+            "AR-Liste macht das SR-Rücken nicht mit"
+        );
+    }
+
+    #[test]
+    fn rotation_folgt_dem_modus_und_der_rolle() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3]);
+        store.set_role(1, Einsatzrolle::NurAr);
+        let players = vec![spieler(10, "")];
+        let bekannt = [1, 2, 3];
+        let dienst = HashSet::new();
+        store.rotate_court(eingabe(500, &players, &bekannt, &dienst));
+        assert_eq!(store.assignment(500).sr, Some(2), "„nur AR\" wird nicht SR");
+        assert_eq!(store.assignment(500).ar, Some(1));
+
+        // Modus C mit Vorrolle.
+        let vor: HashMap<i64, OfficialRole> = [(2, SR), (3, AR)].into_iter().collect();
+        let mut e = eingabe(501, &players, &bekannt, &dienst);
+        e.modus = C;
+        e.vorrolle = &vor;
+        store.set_role(1, Einsatzrolle::Beides);
+        let belegt: HashSet<i64> = [1].into_iter().collect();
+        e.belegt = &belegt;
+        store.rotate_court(e);
+        assert_eq!(store.assignment(501).sr, Some(3));
+        assert_eq!(store.assignment(501).ar, Some(2));
+    }
+
+    // ── Zuteilung beim Aufruf: Merker und Freigabe (ADR 0080, PR 2) ───
+
+    fn aufruf_eingabe<'a>(
+        match_id: i64,
+        players: &'a [BtpPlayer],
+        bekannt: &'a [i64],
+        belegt: &'a HashSet<i64>,
+    ) -> RotationInput<'a> {
+        let mut e = eingabe(match_id, players, bekannt, belegt);
+        e.herkunft = Herkunft::Aufruf;
+        e.ar = false;
+        e
+    }
+
+    #[test]
+    fn merker_ueberlebt_bestaetigung_und_neustart() {
+        // AK11
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        assert_eq!(
+            store.rotate_court(aufruf_eingabe(500, &players, &[1, 2], &dienst)),
+            (Some(1), None)
+        );
+        store.confirm(500, Some(1), None);
+        assert_eq!(store.assignment(500).sr, None, "lokal losgelassen");
+        assert_eq!(store.vorab_rotation(500), (Some(1), None), "Merker bleibt");
+        let neu = store_mit_datei(dir.path());
+        assert_eq!(neu.vorab_rotation(500), (Some(1), None));
+    }
+
+    #[test]
+    fn feld_rotation_setzt_keinen_merker() {
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(eingabe(500, &players, &[1], &dienst));
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn umteilung_in_btp_loescht_den_merker() {
+        // AK13
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1, 2], &dienst));
+        store.confirm(500, Some(1), None);
+        let mut m = crate::tablet::state::tests::match_on(500, None, MatchStatus::Scheduled);
+        m.official1_id = Some(2);
+        let snap = crate::tablet::state::tests::snapshot(vec![m], vec![]);
+        store.pflege_vorab_rotation(&snap);
+        assert!(!store.hat_vorab_rotation(500));
+        assert!(
+            !store.rotation_freigeben(500, OfficialRole::Sr, Some(2)),
+            "nichts frei"
+        );
+    }
+
+    #[test]
+    fn freigabe_ohne_btp_gegenstueck_hinterlaesst_kein_ohne() {
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1], &dienst));
+        assert!(store.rotation_freigeben(500, OfficialRole::Sr, None));
+        assert_eq!(store.assignment(500), MatchOfficials::default());
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn freigabe_mit_btp_gegenstueck_laeuft_ueber_ein_freies_null() {
+        // AK14 + AK15: BTP trägt die Person schon ⇒ 0 geht nach BTP, der
+        // Dienst gilt sofort als offen, nach der Bestätigung bleibt nichts.
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1, 2], &dienst));
+        store.confirm(500, Some(1), None);
+        assert!(store.rotation_freigeben(500, OfficialRole::Sr, Some(1)));
+        assert_eq!(
+            store.fuer_schreiben(500, Some(1), None).sr,
+            Some(0),
+            "0 geht nach BTP"
+        );
+        // Der Dienst ist offen: Die Feld-Rotation besetzt ihn, obwohl BTP noch
+        // die alte Person zeigt.
+        let mut e = eingabe(500, &players, &[1, 2], &dienst);
+        e.btp_sr = Some(1);
+        e.ar = false;
+        let belegt: HashSet<i64> = [1].into_iter().collect();
+        e.belegt = &belegt;
+        assert_eq!(store.rotate_court(e), (Some(2), None));
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn freigabe_wird_nach_der_bestaetigung_der_null_geraeumt() {
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1], &dienst));
+        store.confirm(500, Some(1), None);
+        store.rotation_freigeben(500, OfficialRole::Sr, Some(1));
+        store.confirm(500, Some(1), None); // 0 noch unterwegs
+        assert_eq!(store.assignment(500).sr, Some(0));
+        store.confirm(500, None, None); // BTP hat die 0
+        assert_eq!(
+            store.assignment(500),
+            MatchOfficials::default(),
+            "kein „ohne\""
+        );
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn rotation_aus_raeumt_auch_die_merker() {
+        // AK19
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        store.rotate_court(aufruf_eingabe(500, &players, &[1], &dienst));
+        store.clear_assignments();
+        assert!(!store.hat_vorab_rotation(500));
+    }
+
+    #[test]
+    fn loesen_am_feld_nur_fuer_rollen_ohne_schalter() {
+        let store = OfficialsStore::default();
+        store.set_enabled(true);
+        store.set_rotation(true, true);
+        store.sync_roster(&[1, 2]);
+        let players = vec![spieler(10, "")];
+        let dienst = HashSet::new();
+        let mut e = aufruf_eingabe(500, &players, &[1, 2], &dienst);
+        e.ar = true;
+        store.rotate_court(e);
+        let mut sw = store.court_switches(7);
+        sw.ar = false;
+        store.set_court_switches(7, sw);
+        let m = crate::tablet::state::tests::match_on(500, Some(7), MatchStatus::OnCourt);
+        store.rotation_loesen_am_feld(&m, 7);
+        assert_eq!(store.assignment(500).sr, Some(1), "SR bleibt");
+        assert_eq!(store.assignment(500).ar, None, "Rotations-AR gelöst");
+    }
+
+    // ── Vorschau „als Nächstes" (ADR 0079, PR 4) ─────────────────────
+
+    #[test]
+    fn prognose_ohne_seiteneffekte_und_b_abwechselnd() {
+        // AK28/AK30
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_datei(dir.path());
+        store.sync_roster(&[1, 2, 3, 4]);
+        let vorher = datei_text(dir.path());
+        let p = store.prognose(&[1, 2, 3, 4], &HashSet::new(), &HashMap::new(), true, true);
+        assert_eq!(p.get(&1), Some(&(SR, 0)));
+        assert_eq!(p.get(&2), Some(&(AR, 0)));
+        assert_eq!(p.get(&3), Some(&(SR, 1)));
+        assert_eq!(p.get(&4), Some(&(AR, 1)));
+        assert_eq!(datei_text(dir.path()), vorher, "nichts gespeichert");
+        assert!(!vorher.contains("order_ar"));
+    }
+
+    #[test]
+    fn prognose_c_folgt_der_vorrolle_und_a_den_listen() {
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1, 2]);
+        store.set_rotation_mode(C);
+        let vor: HashMap<i64, OfficialRole> = [(1, SR), (2, AR)].into_iter().collect();
+        let p = store.prognose(&[1, 2], &HashSet::new(), &vor, true, true);
+        assert_eq!(p.get(&1), Some(&(AR, 0)));
+        assert_eq!(p.get(&2), Some(&(SR, 0)));
+
+        store.set_rotation_mode(A);
+        store.reorder_in(Reihenfolge::Ar, 2, Some(1));
+        let p = store.prognose(&[1, 2], &HashSet::new(), &HashMap::new(), true, true);
+        assert_eq!(p.get(&1), Some(&(SR, 0)), "SR-Liste: 1 oben");
+        assert_eq!(p.get(&2), Some(&(AR, 0)), "AR-Liste: 2 oben");
+    }
+
+    #[test]
+    fn prognose_markiert_keine_gebundenen_und_unpassenden() {
+        // AK29
+        let store = OfficialsStore::default();
+        store.sync_roster(&[1, 2, 3, 4]);
+        store.set_paused(1, true);
+        store.set_role(4, Einsatzrolle::NurAr);
+        let belegt: HashSet<i64> = [2].into_iter().collect();
+        let p = store.prognose(&[1, 2, 3, 4], &belegt, &HashMap::new(), true, false);
+        assert_eq!(p.get(&3), Some(&(SR, 0)));
+        assert!(!p.contains_key(&1), "pausiert");
+        assert!(!p.contains_key(&2), "im Dienst/reserviert");
+        assert!(!p.contains_key(&4), "nur AR bei abgeschalteter AR-Rotation");
+        assert!(store
+            .prognose(
+                &[1, 2, 3, 4],
+                &HashSet::new(),
+                &HashMap::new(),
+                false,
+                false
+            )
+            .is_empty());
     }
 
     fn store_mit_datei(dir: &Path) -> OfficialsStore {

@@ -275,6 +275,13 @@ Cloud-Stimme dort zwischen **Azure**, **ElevenLabs**, **OpenAI** und
 **Gemini** umschalten (Auswahl **Sprachdienst**, wirkt sofort, sobald der
 Dienst eingerichtet ist); Details:
 [Weitere Sprachdienste](announcements.md#weitere-sprachdienste-elevenlabs-openai-gemini-seit-v09336).
+Darunter steht seit v0.9.366 das Häkchen **Ansage in Teilen vertonen (spart
+Zeichen)** — **voreingestellt aus**, wirkt sofort. Es vertont Feld,
+Disziplin, Runde und Namen einzeln, sodass Wiederholungen nichts mehr kosten;
+die Stimme kann zwischen den Teilen leicht anders klingen, deshalb vorher
+anhören.
+<!-- pruef: "Ansage in Teilen vertonen (spart Zeichen)" in src/components/AnnounceSettings.tsx -->
+<!-- pruef: "teile: false" in src-tauri/src/config.rs -->
 
 Der Schalter wirkt **sofort**, ohne Neustart; eine laufende Ansage wird beim
 Ausschalten abgebrochen.
@@ -329,7 +336,7 @@ Bedienung in [meetingpoint.md](meetingpoint.md). Alles ist ab Werk aus.
 | Einstellung | Standard | Wirkung |
 |---|---|---|
 | **Meetingpoint verwenden** | aus | Seite `/meetingpoint`, Check-in, Anzeige in TL-Web und Spielübersicht |
-| **Schiedsrichter muss für „spielbereit“ eingecheckt sein** | aus | SR zählt mit; vorläufige SR-Zuteilung schon beim Aufruf |
+| **Schiedsrichter muss für „spielbereit“ eingecheckt sein** | aus | SR zählt mit (die SR-Zuteilung beim Aufruf gilt seit v0.9.359 auch ohne diesen Schalter) |
 | **Automatische Feldvergabe nur für spielbereite Partien** | aus | Strikter Modus: nicht gerufene/nicht eingecheckte Spiele bekommen automatisch kein Feld |
 | **Partien automatisch zum Meetingpoint rufen** | aus | feste Anzahl je Halle (2) oder nach Restzeit (10 Min., Puffer 1), höchstens 4 je Halle |
 | **Warnung, wenn eine Partie nicht vollständig erscheint** | aus, 5 Min. | Marke an der Partie im TL-Web wird orange, nennt die Fehlenden |
@@ -350,12 +357,33 @@ Bedienung in [meetingpoint.md](meetingpoint.md). Alles ist ab Werk aus.
 | **Mit Schiedsrichtern spielen** | aus | Schaltet die Schiedsrichter-Verwaltung frei. |
 | **Schiedsrichter automatisch rotieren** | aus | Nächster Einsatz wird selbst vorgeschlagen. |
 | **Aufschlagrichter automatisch rotieren** | aus | Dasselbe für Aufschlagrichter. |
+| **Einteilungsprinzip** | Abwechselnd | Wie die Automatik SR und AR verteilt (seit v0.9.362, siehe unten). |
+<!-- pruef: "abwechselnd" in src-tauri/src/config.rs -->
 
-Die beiden Rotations-Schalter sind nur sichtbar, wenn der erste an ist. Bei der
-Rotation werden übersprungen: wer pausiert, wer gerade im Einsatz ist, und wer
-einen Vereins- oder Personenkonflikt mit dem Spiel hat.
+Die Rotations-Schalter und das Einteilungsprinzip sind nur sichtbar, wenn der
+erste Schalter an ist. Bei der Rotation werden übersprungen: wer pausiert, wer
+gerade im Einsatz ist, und wer einen Vereins- oder Personenkonflikt mit dem
+Spiel hat.
 
-Diese drei Häkchen wirken **sofort**, nicht erst beim nächsten Neustart.
+**Einteilungsprinzip:**
+
+- **Abwechselnd** — eine Liste. Der erste Freie wird Schiedsrichter, der
+  nächste Aufschlagrichter. Nach dem Spiel rücken beide ans Ende, sodass ein
+  Paar beim nächsten Mal meist die Dienste tauscht.
+  <!-- pruef: /"Abwechselnd",/ in src/pages/SetupWizard.tsx -->
+- **Rollenwechsel** — eine Liste. Jeder bekommt den Dienst, den er im letzten
+  Spiel nicht hatte; wer zuletzt Schiedsrichter war, wird Aufschlagrichter.
+  <!-- pruef: /"Rollenwechsel",/ in src/pages/SetupWizard.tsx -->
+- **Getrennte Listen** — eine eigene Reihenfolge für Schiedsrichter und eine
+  für Aufschlagrichter.
+  <!-- pruef: /"Getrennte Listen",/ in src/pages/SetupWizard.tsx -->
+
+Wer nur Schiedsrichter oder nur Aufschlagrichter machen darf, stellt man in
+der Schiedsrichter-Liste ein („SR und AR", „nur SR", „nur AR"). Die Automatik
+hält sich in jedem Prinzip daran; von Hand lässt sich trotzdem einteilen, dann
+erscheint eine Warnung („SR: nur AR").
+
+Diese Einstellungen wirken **sofort**, nicht erst beim nächsten Neustart.
 Sperrlisten und Reihenfolge gehören zum Turnier, nicht zur Einrichtung, und
 stehen deshalb nicht hier. Details:
 [Schiedsrichter verwalten](schiedsrichter-management.md).

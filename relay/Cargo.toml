@@ -19,3 +19,9 @@ base64 = "0.23"
 # OS-Zufall für Telefon-Kopplungscodes (ADR 0004); ohnehin schon transitiv
 # im Workspace-Dependency-Baum.
 getrandom = "0.4"
+
+[dev-dependencies]
+# Nur die Test-Uhr (`tokio::time::pause`/`advance`) — keine neue Crate,
+# dasselbe tokio mit einem Feature mehr, damit der 20-s-Timeout eines alten
+# Turnier-PCs im Test nicht real abgewartet werden muss.
+tokio = { version = "1", features = ["test-util"] }

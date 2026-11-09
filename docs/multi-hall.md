@@ -469,7 +469,9 @@ Architektur: Die Besetzung hängt am Spiel (nicht am Feld), die Anzeige geht
 über `MatchBrief` an LAN- **und** Cloud-Tablets — die ferne Halle
 eingeschlossen —, und die Ansage wird in der Halle des Felds gesprochen
 (`AnnounceJobKind::Officials`). Die feldweisen Schalter sind an der CourtID
-geschlüsselt und damit hallenübergreifend eindeutig.
+geschlüsselt und damit hallenübergreifend eindeutig. Die Zuteilung beim
+Aufruf (ADR 0080) nutzt einen Pool über alle Hallen, teilt einen Dienst aber
+nur zu, wenn mindestens ein Feld der Aufruf-Halle ihn will.
 
 ## Automatische Hallen-Vorverteilung
 

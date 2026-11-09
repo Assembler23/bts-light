@@ -1145,6 +1145,28 @@ pub const MAX_START_SCORE: i64 = 120;
 /// Geteilt, damit Host und Relay dieselbe Grenze durchsetzen.
 pub const MAX_TIMELINE_LEN: usize = 8 * 1024;
 
+/// Spielersuche im TL-Web (Spec `tl-spielersuche`, ADR 0081): kürzester
+/// Suchbegriff in Zeichen (ohne Leerraum, nach der Faltung). Darunter
+/// trifft fast jeder Name — die Seite fragt gar nicht erst.
+pub const TL_SEARCH_MIN_LEN: usize = 2;
+/// Längster Suchbegriff in Zeichen. Relay und Host weisen Längeres ab.
+pub const TL_SEARCH_MAX_LEN: usize = 64;
+/// Höchstzahl Wörter eines Suchbegriffs.
+pub const TL_SEARCH_MAX_WORDS: usize = 6;
+/// Höchstzahl Treffer je Gruppe (Am Feld · Warteliste · Beendet); der
+/// Rest wird nur gezählt („weitere N – bitte genauer suchen").
+pub const TL_SEARCH_HITS_PER_GROUP: usize = 50;
+/// Größendeckel einer Suchantwort in Bytes. Der Host kürzt selbst darunter,
+/// der Relay verwirft Größeres — eigene Grenze, **nicht**
+/// [`MAX_TIMELINE_LEN`] (8 KiB reichen für 150 Treffer bei weitem nicht).
+pub const MAX_TL_SEARCH_LEN: usize = 256 * 1024;
+/// Fehlercode einer Suchantwort (`{"error":"invalid"}`): Der Begriff ist
+/// nach der Faltung am Host ungültig — der Relay antwortet 400.
+pub const TL_SEARCH_ERR_INVALID: &str = "invalid";
+/// Fehlercode einer Suchantwort (`{"error":"busy"}`): Am Host laufen schon
+/// genug Suchen — der Relay antwortet 429.
+pub const TL_SEARCH_ERR_BUSY: &str = "busy";
+
 /// Punktverlauf eines Matches: je Satz die Ballwechsel-Folge.
 ///
 /// **Bewusst ohne Namen** (Datenschutz, ADR 0015): nur Kennungen und
@@ -1873,6 +1895,12 @@ pub struct TlDisplaySettingsWire {
     /// `hideOpenMatches`: fehlt das Feld, werden sie angezeigt.
     #[serde(rename = "hideSeeds", default)]
     pub hide_seeds: bool,
+    /// Suchfeld der Spielersuche ausblenden (Spec `tl-spielersuche`).
+    /// Invertiert wie `hideOpenMatches`: fehlt das Feld (Bestandsprofil,
+    /// älterer Browser-Stand), ist die Suche sichtbar. Nur kosmetisch, kein
+    /// Zugriffsschutz (ADR 0081).
+    #[serde(rename = "hideSearch", default)]
+    pub hide_search: bool,
     /// Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile (Wunsch
     /// 06.09.2026). `#[serde(default)]` wie die Häkchen darüber: fehlt das
     /// Feld (älterer Browser-Stand), bleibt es aus — das bisherige Bild.
@@ -2282,6 +2310,20 @@ pub enum TlAction {
             default
         )]
         before_official_id: Option<i64>,
+        /// Welche Liste (ADR 0079): `Ar` = AR-Liste in Modus „getrennt";
+        /// fehlt das Feld, die Hauptliste. Ein Relay vor diesem Feld
+        /// verwirft es still — der Zug landete dann in der SR-Liste,
+        /// deshalb deployt der Relay vor dem Client-Release.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        list: Option<TlOfficialRole>,
+    },
+    /// Einsatzrolle eines Officials setzen (ADR 0079): `"beides"`, `"sr"`
+    /// (nur Schiedsrichter) oder `"ar"` (nur Aufschlagrichter). Der Host
+    /// prüft den Wert.
+    OfficialSetRole {
+        #[serde(rename = "officialId")]
+        official_id: i64,
+        role: String,
     },
     /// Stammverein pflegen (BTP überträgt am Official keinen).
     OfficialSetClub {
@@ -2339,6 +2381,21 @@ pub enum TlAction {
     /// `match_id` reist mit, damit die Ansage nicht mehr erklingt, wenn
     /// inzwischen ein anderes Spiel auf dem Feld steht.
     AnnounceStartPlay {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+        #[serde(rename = "matchId")]
+        match_id: i64,
+    },
+    /// Das Spiel auf dem Feld noch einmal **vollständig** ansagen — Feld,
+    /// Disziplin, Paarung und (nach den Ansage-Schaltern) Besetzung, also
+    /// dieselbe Ansage wie beim ersten Aufruf, ohne Stufenwort.
+    ///
+    /// **Ausdrücklich kein Aufruf**, wie [`TlAction::AnnounceStartPlay`]:
+    /// Der Host lässt `call_stages` unberührt, die Ansage ist beliebig oft
+    /// und in jedem Zustand des Spiels auslösbar (auch wenn es läuft oder
+    /// der letzte Aufruf schon gesprochen ist). Nur senden, wenn der Host
+    /// `can_announce_court_full` meldet — ältere Hosts kennen sie nicht.
+    AnnounceCourtFull {
         #[serde(rename = "courtId")]
         court_id: i64,
         #[serde(rename = "matchId")]
@@ -2613,6 +2670,12 @@ pub struct MpPartie {
         skip_serializing_if = "Option::is_none"
     )]
     pub aufgerufen_feld: Option<String>,
+    /// Name des Aufschlagrichters — **nur Anzeige**, kein Check-in-Platz
+    /// (Spec `sr-ar-beim-aufruf`, ADR 0080). Dieselbe Kategorie wie der
+    /// schon gezeigte SR-Name, ohne Verein und ohne Lizenznummer. `None` =
+    /// keiner (oder älterer Turnier-PC).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ar: Option<String>,
 }
 
 /// So lange bleibt eine aufs Feld gerufene Partie auf der Meetingpoint-Seite
@@ -2918,6 +2981,16 @@ pub enum HostFrame {
         #[serde(default)]
         json: String,
     },
+    /// Antwort auf einen [`RelayFrame::TlSearchRequest`]: die Trefferliste
+    /// der Spielersuche als **opaker** JSON-String (Spec `tl-spielersuche`).
+    /// Leer heißt „Suche gescheitert" (der Relay antwortet dann 503).
+    /// Größe gedeckelt durch [`MAX_TL_SEARCH_LEN`].
+    TlSearchResult {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(default)]
+        json: String,
+    },
     /// Antwort auf einen [`RelayFrame::ScoresheetRequest`]: der fertige
     /// Schiedsrichterzettel als **opakes HTML-Dokument** (Muster
     /// [`HostFrame::TimelineData`]) — der Relay liefert es unverändert
@@ -3032,6 +3105,10 @@ pub struct AzureTtsShare {
     pub gemini_key: String,
     #[serde(default)]
     pub gemini_voice: String,
+    /// Ansage in Teilen vertonen (Spec `ansage-in-teilen`); fehlt bei einem
+    /// älteren Master → aus.
+    #[serde(default)]
+    pub teile: bool,
 }
 
 /// Eine Freitext-Ansage (Relay-Zwischenspeicher; Quelle = Master). `id`
@@ -3458,6 +3535,17 @@ pub enum RelayFrame {
         req_id: u64,
         #[serde(rename = "officialId")]
         official_id: i64,
+    },
+    /// Spielersuche eines TL-Geräts (Spec `tl-spielersuche`, ADR 0081).
+    /// Der Relay reicht den Begriff nur durch, protokolliert ihn nie und
+    /// hält die Antwort nicht vor. `candidates`: Kandidaten offener
+    /// Paarungen mit durchsuchen (= Profil blendet sie nicht aus).
+    TlSearchRequest {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        query: String,
+        #[serde(default)]
+        candidates: bool,
     },
     /// Ein Zettel-Ereignis von einem Tablet (ADR 0037) — vom Relay 1:1
     /// durchgereicht, Interpretation allein beim Host.
@@ -4138,6 +4226,7 @@ mod tests {
             dienst: "gemini_flash".into(),
             gemini_key: "gm".into(),
             gemini_voice: "Kore".into(),
+            teile: true,
             ..Default::default()
         };
         let json = serde_json::to_string(&neu).unwrap();
@@ -4146,6 +4235,8 @@ mod tests {
             serde_json::from_str(r#"{"region":"we","key":"k","voice":"v"}"#).unwrap();
         assert_eq!(alt.dienst, "");
         assert!(alt.elevenlabs_key.is_empty() && alt.openai_key.is_empty());
+        // Spec `ansage-in-teilen` (Kriterium 7): älterer Master ohne Feld → aus.
+        assert!(!alt.teile);
     }
 
     #[test]
@@ -5038,6 +5129,16 @@ mod tests {
             TlAction::OfficialReorder {
                 official_id: 3,
                 before_official_id: Some(7),
+                list: None,
+            },
+            TlAction::OfficialReorder {
+                official_id: 3,
+                before_official_id: None,
+                list: Some(TlOfficialRole::Ar),
+            },
+            TlAction::OfficialSetRole {
+                official_id: 3,
+                role: "ar".to_string(),
             },
             TlAction::OfficialSetClub {
                 official_id: 3,
@@ -5057,6 +5158,10 @@ mod tests {
             TlAction::AnnounceOfficials { court_id: 5 },
             TlAction::AnnounceScorekeeper { court_id: 5 },
             TlAction::AnnounceStartPlay {
+                court_id: 5,
+                match_id: 77,
+            },
+            TlAction::AnnounceCourtFull {
                 court_id: 5,
                 match_id: 77,
             },
@@ -5384,6 +5489,7 @@ mod tests {
                 list_position: TlListPositionWire::Bottom,
                 time_stats_axis: TlTimeStatsAxisWire::Group,
                 hide_seeds: false,
+                hide_search: false,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],
@@ -5413,6 +5519,25 @@ mod tests {
         assert!(json.contains(r#""hideOpenMatches":true"#), "{json}");
         let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
         assert!(zurueck.hide_open_matches);
+    }
+
+    #[test]
+    fn ein_profil_ohne_hide_search_zeigt_die_suche() {
+        // Spec `tl-spielersuche`: invertiert wie `hideOpenMatches` —
+        // Bestandsprofile zeigen das Suchfeld.
+        let ohne = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,
+            "showClubLogos":false,"showDiscipline":true,"showRound":true,
+            "showGroup":true,"listPosition":"bottom"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(ohne).expect("lesbar");
+        assert!(!alt.hide_search, "ohne das Feld ist die Suche sichtbar");
+        let mit = TlDisplaySettingsWire {
+            hide_search: true,
+            ..alt
+        };
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""hideSearch":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert!(zurueck.hide_search);
     }
 
     #[test]
@@ -5767,6 +5892,15 @@ mod tests {
         roundtrip(&HostFrame::OfficialDetail {
             req_id: 8,
             json: r#"{"blocked_clubs":[]}"#.to_string(),
+        });
+        roundtrip(&RelayFrame::TlSearchRequest {
+            req_id: 11,
+            query: "müll".to_string(),
+            candidates: true,
+        });
+        roundtrip(&HostFrame::TlSearchResult {
+            req_id: 11,
+            json: r#"{"has_data":true}"#.to_string(),
         });
         roundtrip(&RelayFrame::TimelineRequest {
             req_id: 9,
@@ -6627,6 +6761,22 @@ mod meetingpoint_tests {
     }
 
     #[test]
+    fn mp_partie_ar_roundtrip_und_weggelassen_wenn_leer() {
+        // ADR 0080: Altform ohne `ar` lesbar, ohne AR nichts serialisiert,
+        // mit AR Roundtrip.
+        let p: MpPartie = serde_json::from_str(r#"{"matchId":7}"#).unwrap();
+        assert_eq!(p.ar, None);
+        assert!(!serde_json::to_string(&p).unwrap().contains("\"ar\""));
+        let mit = MpPartie {
+            ar: Some("Bob Meier".into()),
+            ..p
+        };
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""ar":"Bob Meier""#), "{json}");
+        assert_eq!(serde_json::from_str::<MpPartie>(&json).unwrap(), mit);
+    }
+
+    #[test]
     fn fuer_halle_schneidet_zu_und_verlangt_die_wahl() {
         let p = |id: i64, h: &str| MpPartie {
             match_id: id,
@@ -6640,6 +6790,7 @@ mod meetingpoint_tests {
             feld_frei_ms: None,
             feld_frei_unsicher: false,
             aufgerufen_feld: None,
+            ar: None,
         };
         let eins = MeetingpointView {
             enabled: true,

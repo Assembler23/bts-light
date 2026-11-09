@@ -4,6 +4,152 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.370
+
+- **TL-Web: „Spiel komplett ansagen".** Im ⋯-Menü jeder belegten Feldkachel
+  lässt sich das Spiel jetzt jederzeit noch einmal vollständig ansagen —
+  auch wenn es schon läuft oder der letzte Aufruf gesprochen ist. Es zählt
+  nicht als Aufruf. Braucht den Relay-Stand dieses Merges.
+
+## v0.9.369
+
+- **Gelbe Aufrufmarke bleibt stehen.** Gerufene Spiele verloren ihre gelbe
+  Farbe in BTP, sobald ihnen Schiedsrichter zugeteilt wurden. Eine Messung
+  ergab: BTP setzt bei jedem Spiel-Write Feld, Schiedsrichter,
+  Aufschlagrichter und Farbe neu, und was im Write fehlt, wird gelöscht.
+  Schiedsrichter- und Farb-Writes schicken die übrigen Felder jetzt so mit,
+  wie BTP sie gerade zeigt — oder wie bts-light sie eben selbst geschrieben
+  hat, denn BTP zeigt einen Write erst nach bis zu einer Sekunde.
+- **Farbe setzen nimmt kein Feld mehr weg.** Aus demselben Grund nahm eine
+  Zeilenfarbe aus der Turnierleitungs-Seite einem laufenden Spiel Feld und
+  Schiedsrichter und einem wartenden Spiel seine Besetzung. Behoben.
+
+## v0.9.368
+
+- **Spielersuche in der Turnierleitungs-Seite.** Oben in der Kopfleiste
+  steht ein Suchfeld „Spieler oder SR suchen". Es findet alle Spiele einer
+  Person im ganzen Turnier — am Feld, in der Warteliste (mit erwarteter
+  Startzeit) und beendet (mit Ergebnis), auch vom Vortag. Ein Tipp springt
+  zur Zeile. Schiedsrichter werden mit eingeschaltetem
+  Schiedsrichter-Betrieb gefunden. Im Profil abschaltbar
+  („Spielersuche zeigen"). Die Suche läuft am Turnier-PC; über die Cloud
+  reicht der Relay sie nur durch.
+
+## v0.9.367
+
+- **Schiedsrichter-Write löscht kein Feld mehr.** Eine Messung an BTP
+  ergab: Jeder Schiedsrichter-Write setzt das Feld des Spiels auf den Wert
+  im Write. Vergab die Turnierleitung in BTP von Hand ein Feld, während
+  bts-light gerade SR/AR für dasselbe Spiel schrieb, war das Feld wieder
+  weg. bts-light liest den BTP-Stand jetzt unmittelbar vor jedem
+  Schiedsrichter-Write neu und schreibt das Feld von diesem Moment mit.
+
+## v0.9.366
+
+- **Cloud-Ansage in Teilen (spart Zeichen).** Neues Häkchen „Ansage in Teilen
+  vertonen" auf der Seite „Ansagen", voreingestellt aus. Feld, Disziplin,
+  Runde und Namen werden einzeln vertont und gemerkt — wiederkehrende Teile
+  kosten beim Anbieter nur einmal, geschätzt 50–60 % weniger Zeichen. Die
+  Stimme kann zwischen den Teilen leicht anders klingen; bitte vor dem
+  Turnier anhören.
+
+## v0.9.365
+
+- **TL-Web: AR-Reihenfolge und Rolle.** Bei „Getrennte Listen" zeigt die
+  Turnierleitungs-Seite auch die AR-Reihenfolge, ziehbar wie die SR-Liste.
+  Im Dialog einer Person lässt sich die Rolle wählen (SR und AR / nur SR /
+  nur AR).
+- Cloud: Der Relay kommt mit dem Deploy beim Merge — vor dem App-Update.
+
+## v0.9.364
+
+- **Vorschau „als Nächstes SR/AR".** Die Schiedsrichter-Liste am Turnier-PC
+  und im TL-Web zeigt, wen die Automatik als Nächstes einsetzen würde —
+  passend zum Einteilungsprinzip und zur Rolle. Im TL-Web steht oben
+  „nächster SR: … · AR: …".
+- **Getrennte Listen am Turnier-PC:** In diesem Modus zeigt das
+  Schiedsrichter-Panel eine SR- und eine AR-Liste, jede einzeln umsortierbar.
+- TL-Web: Marke „nur SR"/„nur AR" in der Liste und im Einteilungsdialog.
+
+## v0.9.363
+
+- **Tablet als Meetingpoint auslegen.** Die Feldwahl der Tablets (`/felder`)
+  zeigt bei eingeschaltetem Meetingpoint eine Kachel **Meetingpoint**. Nach
+  der PIN zeigt das Tablet die Meetingpoint-Seite, ohne ein Feld zu belegen.
+  Fällt es nach einem WLAN-Aussetzer auf die Feldwahl zurück, bringt der
+  Knopf **Zurück zum Meetingpoint** es ohne PIN wieder hin. Im Zahnrad der
+  Anzeige führt **Zur Feldwahl** zurück zum Zählen. Nur im Hallennetz.
+
+## v0.9.362
+
+- **Einteilungsprinzip im Setup wählbar.** Unter „Schiedsrichter":
+  Abwechselnd (Standard), Rollenwechsel (jeder macht abwechselnd SR und AR)
+  oder getrennte Listen für SR und AR.
+- **Rolle je Schiedsrichter:** In der Schiedsrichter-Liste „SR und AR",
+  „nur SR" oder „nur AR". Die Automatik hält sich daran; wer von Hand gegen
+  die Rolle einteilt, sieht die Warnung „SR: nur AR" bzw. „AR: nur SR".
+- Der veraltete Hinweis „wird gerade schrittweise ausgebaut" im Setup ist weg.
+
+## v0.9.361
+
+- **Meetingpoint-Seite zeigt den Aufschlagrichter.** Unter dem
+  Schiedsrichter einer gerufenen Partie steht jetzt auch der
+  Aufschlagrichter — nur zur Information, einchecken muss er sich nicht.
+- Cloud: Die Seite und der Relay kommen mit dem Relay-Deploy beim Merge.
+
+## v0.9.360
+
+- **Die Aufruf-Ansage nennt Schiedsrichter und Aufschlagrichter.** „In
+  Vorbereitung … Bitte in Halle A. Schiedsrichter: … Aufschlagrichter: …" —
+  nur beim ersten Aufruf, nach dem Häkchen für die Besetzungs-Ansage. Auch
+  der Knopf „Ansage" im Vorbereitungs-Tab nennt sie.
+- **Vorbereitungs-Tab:** Unter einem gerufenen Spiel steht „SR: … · AR: …".
+  Der Zusatz „vorläufig" am Meetingpoint-Schiedsrichter entfällt — seit
+  v0.9.359 ist die Zuteilung beim Aufruf fest.
+
+## v0.9.359
+
+- **Schiedsrichter und Aufschlagrichter schon beim Aufruf.** Wird ein Spiel
+  in Vorbereitung gerufen, teilt die Rotation SR und AR fest zu — auch ohne
+  Meetingpoint. Die beiden stehen sofort an der gerufenen Zeile und in BTP und
+  können sich vor dem Feldaufruf treffen. Wer frei wird, rückt an die
+  vorderste gerufene Partie mit Lücke nach. Rücknahme des Aufrufs gibt die
+  Zuteilung wieder frei; Einteilungen von Hand bleiben.
+- Der bisherige „vorläufige" Meetingpoint-Schiedsrichter entfällt; ein noch
+  gespeicherter wird einmalig übernommen.
+
+## v0.9.358
+
+- **„Ohne Schiedsrichter" bleibt stehen.** Setzt die Turnierleitung ein
+  wartendes Spiel auf „Ohne Schiedsrichter", bekommt es auch später keinen
+  vorläufigen Schiedsrichter mehr zugeteilt. Bisher konnte der
+  Meetingpoint die Lücke im nächsten Takt wieder füllen.
+- **TL-Web-Warteliste zeigt Umteilungen sofort.** Die Marke „SR: … · AR: …"
+  an wartenden Spielen zeigt die frische Einteilung, nicht mehr erst den von
+  BTP bestätigten Stand.
+- Messwerkzeug für BTP (Schiedsrichter an Spielen ohne Feld) als Vorbereitung
+  der Zuteilung beim Aufruf.
+
+## v0.9.357
+
+- **Schiedsrichter-Paare tauschen die Dienste.** Nach Spielende rücken
+  Aufschlagrichter und Schiedsrichter in dieser Folge ans Ende der Rotation.
+  Kommt das Paar wieder dran, wird der bisherige Aufschlagrichter
+  Schiedsrichter und umgekehrt. Bisher bekamen dieselben Leute immer wieder
+  denselben Dienst.
+- **Rotationsmodus wirkt** (noch ohne Auswahl im Setup, kommt mit der
+  nächsten Version): getrennte SR-/AR-Listen, abwechselnd (Standard) oder
+  Rollenwechsel je Person; die Rolle „nur SR"/„nur AR" wird beachtet, auch
+  beim vorläufigen Meetingpoint-Schiedsrichter.
+
+## v0.9.356
+
+- **Vorbereitung Rotationsmodus (Schiedsrichter).** Unsichtbarer Unterbau für
+  die drei Einteilungsprinzipien (getrennte Listen, abwechselnd,
+  Rollenwechsel; ADR 0079): Einstellung `officials.rotation_mode` (Standard
+  „Abwechselnd"), Einsatzrolle je Official und eine eigene AR-Liste. Am
+  Verhalten der Rotation ändert sich in dieser Version noch nichts.
+
 ## v0.9.355
 
 - **Schiedsrichter in der TL-Web-Warteliste einteilen.** Im ⋮-Menü jeder

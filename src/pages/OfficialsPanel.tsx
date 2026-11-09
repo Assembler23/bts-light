@@ -13,7 +13,7 @@ import {
   Play,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useMemo, useCallback, useEffect, useState } from "react";
 import {
   officialAssign,
   officialClear,
@@ -23,6 +23,7 @@ import {
   officialReorder,
   officialSetBlocklists,
   officialSetClub,
+  officialSetRole,
   officialsCourtSwitches,
   officialsRoster,
   officialsSetCourtSwitches,
@@ -31,6 +32,8 @@ import {
 import { announceOfficials } from "../io/announceCourt";
 import { useDragReorder } from "../state/useDragReorder";
 import type {
+  RotationMode,
+  EinsatzRolle,
   AnnounceConfig,
   AppearanceView,
   AzureTtsConfig,
@@ -49,12 +52,18 @@ function timeOf(ms: number | null): string {
   });
 }
 
+/** Stabile leere Liste (siehe `arListe`). */
+const KEINE_OFFICIALS: OfficialView[] = [];
+
 export function OfficialsPanel({
   enabled,
+  rotationMode,
   announce,
   azureTts,
 }: {
   enabled: boolean;
+  /** Einteilungsprinzip (ADR 0079) — in „getrennt" zwei Listen. */
+  rotationMode?: RotationMode;
   announce: AnnounceConfig;
   azureTts?: AzureTtsConfig;
 }) {
@@ -145,8 +154,34 @@ export function OfficialsPanel({
       .catch(() => {});
   };
 
-  const { order, registerRow, dragHandleProps, draggingId } = useDragReorder(
-    roster,
+  // In Modus A (getrennte Listen) gibt es zwei Reihenfolgen (ADR 0079):
+  // die SR-Liste (alle außer „nur AR") und die AR-Liste (alle außer
+  // „nur SR", sortiert nach `position_ar`). Beide Hooks laufen immer
+  // (Hook-Regeln); die zweite Liste wird nur in A gezeigt.
+  //
+  // Stabile Referenzen sind Pflicht: `useDragReorder` setzt seinen Stand bei
+  // jeder neuen `items`-Referenz neu — ein in jedem Render frisch gebautes
+  // Array löste eine Endlosschleife aus (Review-Fund).
+  const getrennt = rotationMode === "getrennt";
+  const srListe = useMemo(
+    () => (getrennt ? roster.filter((o) => o.role !== "ar") : roster),
+    [roster, getrennt],
+  );
+  const arListe = useMemo(
+    () =>
+      getrennt
+        ? roster
+            .filter((o) => o.role !== "sr")
+            .slice()
+            .sort(
+              (a, b) =>
+                (a.position_ar ?? a.position) - (b.position_ar ?? b.position) || a.id - b.id,
+            )
+        : KEINE_OFFICIALS,
+    [roster, getrennt],
+  );
+  const dragSr = useDragReorder(
+    srListe,
     (o) => o.id,
     (id, beforeId) => {
       officialReorder(id, beforeId)
@@ -154,8 +189,145 @@ export function OfficialsPanel({
         .catch(() => {});
     },
   );
+  const dragAr = useDragReorder(
+    arListe,
+    (o) => o.id,
+    (id, beforeId) => {
+      officialReorder(id, beforeId, "ar")
+        .then(laden)
+        .catch(() => {});
+    },
+  );
+  const order = dragSr.order;
 
   const belegte = felder.filter((c) => c.match_id > 0);
+
+  const zeile = (o: OfficialView, i: number, d: typeof dragSr) => (
+              <div
+                key={o.id}
+                ref={(el) => d.registerRow(o.id, el)}
+                className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                  d.draggingId === o.id ? "border-sky-400 bg-sky-50 shadow-md" :
+                  o.paused
+                    ? "border-slate-200 bg-slate-50 text-slate-400"
+                    : "border-slate-200 bg-white text-slate-700"
+                }`}
+              >
+                <span
+                  {...d.dragHandleProps(o.id)}
+                  tabIndex={0}
+                  role="button"
+                  title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
+                  aria-label={`${o.name} in der Reihenfolge verschieben — ziehen oder Pfeiltasten`}
+                  className="cursor-grab touch-none rounded text-slate-400 outline-none focus-visible:ring-2 focus-visible:ring-sky-400 active:cursor-grabbing"
+                >
+                  <GripVertical size={16} />
+                </span>
+                <span className="w-6 text-right text-xs text-slate-400">
+                  {i + 1}.
+                </span>
+                <span className="min-w-40 flex-1 font-medium">{o.name}</span>
+
+                {o.next_role && (
+                  <span
+                    title="Vorschau: diesen Dienst gäbe die Automatik als Nächstes"
+                    className={
+                      o.next_rank === 0
+                        ? "rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800"
+                        : "rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500"
+                    }
+                  >
+                    {o.next_rank === 0 ? "als Nächstes " : ""}
+                    {o.next_role === "ar" ? "AR" : "SR"}
+                  </span>
+                )}
+
+                {o.on_duty_court_id != null && (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                    im Dienst ({o.on_duty_role === "ar" ? "AR" : "SR"})
+                  </span>
+                )}
+                {o.reserved && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    {o.reserved_match_num != null
+                      ? `reserviert Sp. ${o.reserved_match_num}`
+                      : "reserviert"}
+                  </span>
+                )}
+                {o.paused && (
+                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                    Pause
+                  </span>
+                )}
+
+                <select
+                  value={o.role ?? "beides"}
+                  onChange={(e) =>
+                    officialSetRole(o.id, e.target.value as EinsatzRolle)
+                      .then(laden)
+                      .catch(() => {})
+                  }
+                  title="Welche Dienste die Automatik dieser Person gibt"
+                  className="rounded border border-slate-200 px-1.5 py-1 text-xs text-slate-600"
+                >
+                  <option value="beides">SR und AR</option>
+                  <option value="sr">nur SR</option>
+                  <option value="ar">nur AR</option>
+                </select>
+
+                <input
+                  type="text"
+                  defaultValue={o.club}
+                  placeholder="Verein"
+                  onBlur={(e) => {
+                    if (e.target.value.trim() !== o.club) {
+                      officialSetClub(o.id, e.target.value)
+                        .then(laden)
+                        .catch(() => {});
+                    }
+                  }}
+                  className="w-40 rounded border border-slate-200 px-2 py-1 text-xs"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => oeffneSperrlisten(o)}
+                  title="Gesperrte Vereine und Spieler pflegen"
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  <Ban size={13} />
+                  Sperren
+                  {o.blocked_count > 0 && (
+                    <span className="rounded-full bg-slate-200 px-1.5 text-[10px]">
+                      {o.blocked_count}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => oeffneEinsaetze(o)}
+                  title="Bisherige Einsätze anzeigen"
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  <ListChecks size={13} />
+                  {o.appearances} Einsätze
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    officialPause(o.id, !o.paused)
+                      .then(laden)
+                      .catch(() => {})
+                  }
+                  title={o.paused ? "Wieder einteilen" : "Pausieren"}
+                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  {o.paused ? <Play size={13} /> : <Pause size={13} />}
+                </button>
+              </div>
+  );
 
   if (!enabled) {
     return (
@@ -215,103 +387,20 @@ export function OfficialsPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {order.map((o, i) => (
-              <div
-                key={o.id}
-                ref={(el) => registerRow(o.id, el)}
-                className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                  draggingId === o.id ? "border-sky-400 bg-sky-50 shadow-md" :
-                  o.paused
-                    ? "border-slate-200 bg-slate-50 text-slate-400"
-                    : "border-slate-200 bg-white text-slate-700"
-                }`}
-              >
-                <span
-                  {...dragHandleProps(o.id)}
-                  tabIndex={0}
-                  role="button"
-                  title="Zum Umsortieren greifen oder mit Pfeiltasten verschieben"
-                  aria-label={`${o.name} in der Reihenfolge verschieben — ziehen oder Pfeiltasten`}
-                  className="cursor-grab touch-none rounded text-slate-400 outline-none focus-visible:ring-2 focus-visible:ring-sky-400 active:cursor-grabbing"
-                >
-                  <GripVertical size={16} />
-                </span>
-                <span className="w-6 text-right text-xs text-slate-400">
-                  {i + 1}.
-                </span>
-                <span className="min-w-40 flex-1 font-medium">{o.name}</span>
-
-                {o.on_duty_court_id != null && (
-                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                    im Dienst ({o.on_duty_role === "ar" ? "AR" : "SR"})
-                  </span>
-                )}
-                {o.reserved && (
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                    {o.reserved_match_num != null
-                      ? `reserviert Sp. ${o.reserved_match_num}`
-                      : "reserviert"}
-                  </span>
-                )}
-                {o.paused && (
-                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
-                    Pause
-                  </span>
-                )}
-
-                <input
-                  type="text"
-                  defaultValue={o.club}
-                  placeholder="Verein"
-                  onBlur={(e) => {
-                    if (e.target.value.trim() !== o.club) {
-                      officialSetClub(o.id, e.target.value)
-                        .then(laden)
-                        .catch(() => {});
-                    }
-                  }}
-                  className="w-40 rounded border border-slate-200 px-2 py-1 text-xs"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => oeffneSperrlisten(o)}
-                  title="Gesperrte Vereine und Spieler pflegen"
-                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-                >
-                  <Ban size={13} />
-                  Sperren
-                  {o.blocked_count > 0 && (
-                    <span className="rounded-full bg-slate-200 px-1.5 text-[10px]">
-                      {o.blocked_count}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => oeffneEinsaetze(o)}
-                  title="Bisherige Einsätze anzeigen"
-                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-                >
-                  <ListChecks size={13} />
-                  {o.appearances} Einsätze
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    officialPause(o.id, !o.paused)
-                      .then(laden)
-                      .catch(() => {})
-                  }
-                  title={o.paused ? "Wieder einteilen" : "Pausieren"}
-                  className="inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
-                >
-                  {o.paused ? <Play size={13} /> : <Pause size={13} />}
-                </button>
-              </div>
-            ))}
+            {getrennt && (
+              <h3 className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Schiedsrichter-Liste
+              </h3>
+            )}
+            {order.map((o, i) => zeile(o, i, dragSr))}
+            {getrennt && (
+              <>
+                <h3 className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Aufschlagrichter-Liste
+                </h3>
+                {dragAr.order.map((o, i) => zeile(o, i, dragAr))}
+              </>
+            )}
           </div>
         )}
       </section>
