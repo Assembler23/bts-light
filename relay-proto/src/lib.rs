@@ -1145,6 +1145,28 @@ pub const MAX_START_SCORE: i64 = 120;
 /// Geteilt, damit Host und Relay dieselbe Grenze durchsetzen.
 pub const MAX_TIMELINE_LEN: usize = 8 * 1024;
 
+/// Spielersuche im TL-Web (Spec `tl-spielersuche`, ADR 0081): kürzester
+/// Suchbegriff in Zeichen (ohne Leerraum, nach der Faltung). Darunter
+/// trifft fast jeder Name — die Seite fragt gar nicht erst.
+pub const TL_SEARCH_MIN_LEN: usize = 2;
+/// Längster Suchbegriff in Zeichen. Relay und Host weisen Längeres ab.
+pub const TL_SEARCH_MAX_LEN: usize = 64;
+/// Höchstzahl Wörter eines Suchbegriffs.
+pub const TL_SEARCH_MAX_WORDS: usize = 6;
+/// Höchstzahl Treffer je Gruppe (Am Feld · Warteliste · Beendet); der
+/// Rest wird nur gezählt („weitere N – bitte genauer suchen").
+pub const TL_SEARCH_HITS_PER_GROUP: usize = 50;
+/// Größendeckel einer Suchantwort in Bytes. Der Host kürzt selbst darunter,
+/// der Relay verwirft Größeres — eigene Grenze, **nicht**
+/// [`MAX_TIMELINE_LEN`] (8 KiB reichen für 150 Treffer bei weitem nicht).
+pub const MAX_TL_SEARCH_LEN: usize = 256 * 1024;
+/// Fehlercode einer Suchantwort (`{"error":"invalid"}`): Der Begriff ist
+/// nach der Faltung am Host ungültig — der Relay antwortet 400.
+pub const TL_SEARCH_ERR_INVALID: &str = "invalid";
+/// Fehlercode einer Suchantwort (`{"error":"busy"}`): Am Host laufen schon
+/// genug Suchen — der Relay antwortet 429.
+pub const TL_SEARCH_ERR_BUSY: &str = "busy";
+
 /// Punktverlauf eines Matches: je Satz die Ballwechsel-Folge.
 ///
 /// **Bewusst ohne Namen** (Datenschutz, ADR 0015): nur Kennungen und
@@ -1873,6 +1895,12 @@ pub struct TlDisplaySettingsWire {
     /// `hideOpenMatches`: fehlt das Feld, werden sie angezeigt.
     #[serde(rename = "hideSeeds", default)]
     pub hide_seeds: bool,
+    /// Suchfeld der Spielersuche ausblenden (Spec `tl-spielersuche`).
+    /// Invertiert wie `hideOpenMatches`: fehlt das Feld (Bestandsprofil,
+    /// älterer Browser-Stand), ist die Suche sichtbar. Nur kosmetisch, kein
+    /// Zugriffsschutz (ADR 0081).
+    #[serde(rename = "hideSearch", default)]
+    pub hide_search: bool,
     /// Vier Verschiebe-Knöpfe an jeder Wartelisten-Zeile (Wunsch
     /// 06.09.2026). `#[serde(default)]` wie die Häkchen darüber: fehlt das
     /// Feld (älterer Browser-Stand), bleibt es aus — das bisherige Bild.
@@ -2938,6 +2966,16 @@ pub enum HostFrame {
         #[serde(default)]
         json: String,
     },
+    /// Antwort auf einen [`RelayFrame::TlSearchRequest`]: die Trefferliste
+    /// der Spielersuche als **opaker** JSON-String (Spec `tl-spielersuche`).
+    /// Leer heißt „Suche gescheitert" (der Relay antwortet dann 503).
+    /// Größe gedeckelt durch [`MAX_TL_SEARCH_LEN`].
+    TlSearchResult {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        #[serde(default)]
+        json: String,
+    },
     /// Antwort auf einen [`RelayFrame::ScoresheetRequest`]: der fertige
     /// Schiedsrichterzettel als **opakes HTML-Dokument** (Muster
     /// [`HostFrame::TimelineData`]) — der Relay liefert es unverändert
@@ -3482,6 +3520,17 @@ pub enum RelayFrame {
         req_id: u64,
         #[serde(rename = "officialId")]
         official_id: i64,
+    },
+    /// Spielersuche eines TL-Geräts (Spec `tl-spielersuche`, ADR 0081).
+    /// Der Relay reicht den Begriff nur durch, protokolliert ihn nie und
+    /// hält die Antwort nicht vor. `candidates`: Kandidaten offener
+    /// Paarungen mit durchsuchen (= Profil blendet sie nicht aus).
+    TlSearchRequest {
+        #[serde(rename = "reqId")]
+        req_id: u64,
+        query: String,
+        #[serde(default)]
+        candidates: bool,
     },
     /// Ein Zettel-Ereignis von einem Tablet (ADR 0037) — vom Relay 1:1
     /// durchgereicht, Interpretation allein beim Host.
@@ -5421,6 +5470,7 @@ mod tests {
                 list_position: TlListPositionWire::Bottom,
                 time_stats_axis: TlTimeStatsAxisWire::Group,
                 hide_seeds: false,
+                hide_search: false,
             },
             columns: 3,
             column_widths: vec![2.0, 1.0, 1.5],
@@ -5450,6 +5500,25 @@ mod tests {
         assert!(json.contains(r#""hideOpenMatches":true"#), "{json}");
         let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
         assert!(zurueck.hide_open_matches);
+    }
+
+    #[test]
+    fn ein_profil_ohne_hide_search_zeigt_die_suche() {
+        // Spec `tl-spielersuche`: invertiert wie `hideOpenMatches` —
+        // Bestandsprofile zeigen das Suchfeld.
+        let ohne = r#"{"showNumbers":true,"showNations":false,"showClubNames":false,
+            "showClubLogos":false,"showDiscipline":true,"showRound":true,
+            "showGroup":true,"listPosition":"bottom"}"#;
+        let alt: TlDisplaySettingsWire = serde_json::from_str(ohne).expect("lesbar");
+        assert!(!alt.hide_search, "ohne das Feld ist die Suche sichtbar");
+        let mit = TlDisplaySettingsWire {
+            hide_search: true,
+            ..alt
+        };
+        let json = serde_json::to_string(&mit).unwrap();
+        assert!(json.contains(r#""hideSearch":true"#), "{json}");
+        let zurueck: TlDisplaySettingsWire = serde_json::from_str(&json).unwrap();
+        assert!(zurueck.hide_search);
     }
 
     #[test]
@@ -5804,6 +5873,15 @@ mod tests {
         roundtrip(&HostFrame::OfficialDetail {
             req_id: 8,
             json: r#"{"blocked_clubs":[]}"#.to_string(),
+        });
+        roundtrip(&RelayFrame::TlSearchRequest {
+            req_id: 11,
+            query: "müll".to_string(),
+            candidates: true,
+        });
+        roundtrip(&HostFrame::TlSearchResult {
+            req_id: 11,
+            json: r#"{"has_data":true}"#.to_string(),
         });
         roundtrip(&RelayFrame::TimelineRequest {
             req_id: 9,
