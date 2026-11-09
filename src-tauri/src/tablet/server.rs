@@ -3707,17 +3707,54 @@ pub(crate) async fn write_courts_to_btp(
 /// jeder Eintrag trägt seine aktuelle `CourtID` mit (siehe
 /// [`proto::MatchCourt::court_id`]), damit dieser eigenständige Write nie
 /// eine gerade erst angekommene Feldzuweisung überschreiben kann.
+///
+/// „Aktuell" heißt: **unmittelbar vorher frisch gelesen**. BTP setzt bei
+/// jedem Schiedsrichter-Write die CourtID aus dem Write (Messung
+/// 09.11.2026) — eine CourtID aus dem Snapshot des Zyklus löschte ein Feld,
+/// das jemand inzwischen in BTP von Hand vergeben hat. Scheitert das Lesen,
+/// geht nichts raus (Wiederholung im nächsten Zyklus). Liefert die
+/// tatsächlich gesendeten Einträge; Spiele, die BTP nicht mehr kennt,
+/// fehlen darin.
 pub(crate) async fn write_officials_to_btp(
     config: &AppConfig,
     entries: &[proto::MatchCourt],
-) -> Result<(), String> {
+    zyklus: &crate::btp::model::BtpSnapshot,
+    tablet: &TabletState,
+) -> Result<Vec<proto::MatchCourt>, String> {
     if entries.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let _schreibt = crate::btp::write_gate::GATE.schreiben().await; // ADR 0060
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
+
+    let frisch = client::fetch_snapshot(host, port, pw)
+        .await
+        .map_err(|e| format!("BTP-Stand vor dem Schiedsrichter-Write nicht lesbar: {e}"))?;
+    // Reservierungen erst NACH dem Lesen nehmen: Eine Vergabe, die während
+    // des Lesens startete, ist dann sicher dabei.
+    let reserviert: std::collections::HashSet<i64> = tablet
+        .reserved_courts(crate::tablet::monitor::now_ms())
+        .into_iter()
+        .map(|(_, match_id)| match_id)
+        .collect();
+    let vorher = entries.len();
+    let entries = crate::sync::feld_aus_frischem_stand(
+        entries,
+        &zyklus.matches,
+        &frisch.matches,
+        &reserviert,
+    );
+    if entries.len() < vorher {
+        tracing::debug!(
+            "BTP-Schiedsrichter: {} von {vorher} Einträgen nach frischem Lesen zurückgestellt              (Feld gerade in Vergabe, in BTP umgeteilt oder Spiel weg)",
+            vorher - entries.len()
+        );
+    }
+    if entries.is_empty() {
+        return Ok(entries);
+    }
 
     let login_raw = client::send_request(host, port, &proto::login_request(pw))
         .await
@@ -3730,12 +3767,13 @@ pub(crate) async fn write_officials_to_btp(
     let upd_raw = client::send_request(
         host,
         port,
-        &proto::court_assign_request(&[], entries, &session, pw),
+        &proto::court_assign_request(&[], &entries, &session, pw),
     )
     .await
     .map_err(|e| format!("BTP nicht erreichbar: {e}"))?;
     proto::parse_update_response(&proto::decode_response(&upd_raw).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(entries)
 }
 
 /// Schreibt `Match.Highlight`-Flags nach BTP (P1): macht „in Vorbereitung"-
@@ -5384,12 +5422,65 @@ mod tests {
             let gate = koerper
                 .find("write_gate::GATE.schreiben().await")
                 .unwrap_or(usize::MAX);
-            let btp = koerper.find("client::send_request").unwrap_or(usize::MAX);
+            // Erster BTP-Kontakt: ein Request oder das frische Lesen
+            // (`write_officials_to_btp` liest vor dem Write, Messung 09.11.2026).
+            let btp = koerper
+                .find("client::send_request")
+                .unwrap_or(usize::MAX)
+                .min(koerper.find("client::fetch_snapshot").unwrap_or(usize::MAX));
             assert!(
                 gate < btp,
                 "{name}: Gate-Zeile fehlt oder steht nach dem ersten BTP-Kontakt"
             );
         }
+    }
+
+    /// Messung 09.11.2026: Ohne frisch gelesenen Stand kennt der
+    /// Schiedsrichter-Write die aktuelle CourtID nicht — dann geht nichts
+    /// raus, und nichts gilt als geschrieben. Der Mock beantwortet
+    /// SENDTOURNAMENTINFO ohne Turnierdaten.
+    #[tokio::test]
+    async fn officials_write_ohne_frischen_stand_sendet_kein_update() {
+        let (port, recorded) = spawn_mock_btp().await;
+        let mut config = AppConfig::default();
+        config.btp.host = "127.0.0.1".into();
+        config.btp.port = port;
+        let eintrag = proto::MatchCourt {
+            match_id: 42,
+            draw_id: 7,
+            planning_id: 1001,
+            court_id: 101,
+            officials: Some((1, 2)),
+        };
+        let zyklus = BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![match_on_court()],
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        };
+        let gesendet =
+            write_officials_to_btp(&config, &[eintrag], &zyklus, &TabletState::default()).await;
+        assert!(
+            gesendet.as_ref().map_or(true, |v| v.is_empty()),
+            "{gesendet:?}"
+        );
+        let reqs = recorded.lock().unwrap();
+        let ids: Vec<String> = reqs
+            .iter()
+            .filter_map(|n| {
+                let action = xml::find(n, "Action")?;
+                xml::find(action.children(), "ID")
+                    .and_then(Node::value)
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect();
+        assert!(!ids.iter().any(|i| i == "SENDUPDATE"), "{ids:?}");
     }
 
     /// ADR 0060 (TP-Upload): `write_result_to_btp` hält die Lesesperre des

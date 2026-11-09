@@ -398,6 +398,54 @@ fn officials_entries(
     out
 }
 
+/// Gleicht Schiedsrichter-Einträge mit einem **frisch** gelesenen BTP-Stand
+/// ab, unmittelbar vor dem Write (`tablet::server::write_officials_to_btp`).
+///
+/// Warum: BTP übernimmt bei jedem Schiedsrichter-Write die CourtID aus dem
+/// Write — `0` oder ein fehlendes Element löscht ein Feld, auch wenn BTP es
+/// schon seit Sekunden zeigt (Messung 09.11.2026,
+/// `btp_officials_ohne_feld_probe` K2/K3). Der Snapshot des Sync-Zyklus
+/// (`alt`) ist dafür zu alt, sobald jemand das Feld zwischendurch in BTP von
+/// Hand vergibt. Deshalb:
+///
+/// - `CourtID`, `DrawID`, `PlanningID` kommen aus `frisch`;
+/// - Spiele, die `frisch` nicht kennt, fallen heraus;
+/// - Spiele mit **jetzt** laufender eigener Feldvergabe (`reserviert`) fallen
+///   heraus — BTP zeigt deren Feld womöglich noch nicht (Übernahme ≤ 1 s),
+///   die Besetzung reist ohnehin im Zuweisungs-Write mit (ADR 0021);
+/// - Spiele, deren SR/AR in BTP seit `alt` geändert wurden, fallen heraus —
+///   sonst überschriebe der Write die Hand-Umteilung in BTP (R2); der
+///   nächste Zyklus entscheidet auf dem neuen Stand.
+pub(crate) fn feld_aus_frischem_stand(
+    entries: &[crate::btp::proto::MatchCourt],
+    alt: &[crate::btp::model::BtpMatch],
+    frisch: &[crate::btp::model::BtpMatch],
+    reserviert: &HashSet<i64>,
+) -> Vec<crate::btp::proto::MatchCourt> {
+    let besetzung = |m: &crate::btp::model::BtpMatch| {
+        (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0))
+    };
+    entries
+        .iter()
+        .filter(|e| !reserviert.contains(&e.match_id))
+        .filter_map(|e| {
+            let m = frisch.iter().find(|m| m.id == e.match_id)?;
+            if let Some(vorher) = alt.iter().find(|a| a.id == e.match_id) {
+                if besetzung(vorher) != besetzung(m) {
+                    return None;
+                }
+            }
+            Some(crate::btp::proto::MatchCourt {
+                match_id: m.id,
+                draw_id: m.draw_id,
+                planning_id: m.planning_id,
+                court_id: m.court_id.unwrap_or(0),
+                officials: e.officials,
+            })
+        })
+        .collect()
+}
+
 /// Gewünschter Highlight-Stand (P1): Match-IDs, die gerufen sind UND im
 /// Snapshot noch ruf-bar (Scheduled, beide Mannschaften stehen). Aufs Feld
 /// gerufene/beendete Spiele fallen so automatisch heraus → Highlight:0.
@@ -815,8 +863,15 @@ impl SyncEngine {
         if entries.is_empty() {
             return;
         }
-        match crate::tablet::server::write_officials_to_btp(config, &entries).await {
-            Ok(()) => {
+        match crate::tablet::server::write_officials_to_btp(config, &entries, snapshot, tablet)
+            .await
+        {
+            // `gesendet` trägt die CourtID aus dem frisch gelesenen Stand und
+            // nur die Spiele, die BTP noch kennt — gemerkt wird nur, was
+            // wirklich rausging.
+            Ok(gesendet) if gesendet.is_empty() => {}
+            Ok(gesendet) => {
+                let entries = gesendet;
                 tracing::info!(
                     "BTP-Schiedsrichter aktualisiert: {} Änderung(en): {}",
                     entries.len(),
@@ -5583,6 +5638,75 @@ mod tests {
             "das ausdrückliche Lösen geht als 0 nach BTP — sonst bliebe der \
              Schiedsrichter dort für immer stehen"
         );
+    }
+
+    #[test]
+    fn feld_aus_frischem_stand_uebernimmt_die_courtid_von_jetzt() {
+        // Messung 09.11.2026 (btp_officials_ohne_feld_probe, K2/K3): BTP
+        // setzt bei JEDEM Schiedsrichter-Write die CourtID auf den Wert im
+        // Write — 0 oder ein fehlendes Element löscht ein Feld, das BTP schon
+        // seit Sekunden zeigt. Unmittelbar vor dem Write gilt deshalb die
+        // CourtID aus dem frisch gelesenen Stand.
+        use crate::btp::proto::MatchCourt;
+        let eintrag = |id, court_id| MatchCourt {
+            match_id: id,
+            // Identität wie in `ready_match` — sie kommt aus dem frischen Stand.
+            draw_id: 1,
+            planning_id: 1000 + id,
+            court_id,
+            officials: Some((1, 2)),
+        };
+        let alt_stand = vec![
+            ready_named(10, None, "A", "B"),
+            oncourt_named(11, 4, "C", "D"),
+            ready_named(12, None, "E", "F"),
+        ];
+        let alt = vec![eintrag(10, 0), eintrag(11, 4), eintrag(12, 0)];
+        // Frisch: 10 inzwischen in BTP von Hand auf Feld 7, 11 wieder ohne
+        // Feld, 12 gibt es nicht mehr.
+        let frisch = vec![
+            oncourt_named(10, 7, "A", "B"),
+            ready_named(11, None, "C", "D"),
+        ];
+        let neu = feld_aus_frischem_stand(&alt, &alt_stand, &frisch, &HashSet::new());
+        assert_eq!(neu, vec![eintrag(10, 7), eintrag(11, 0)]);
+    }
+
+    #[test]
+    fn feld_aus_frischem_stand_laesst_eigene_laufende_vergaben_aus() {
+        // Review 09.11.2026: Eine TL-Web-Vergabe kann NACH dem Bauen der
+        // Einträge starten. BTP zeigt ihr Feld beim frischen Lesen womöglich
+        // noch nicht (Übernahme ≤ 1 s) — ein Write mit CourtID 0 löschte sie.
+        use crate::btp::proto::MatchCourt;
+        let e = MatchCourt {
+            match_id: 10,
+            draw_id: 10,
+            planning_id: 10,
+            court_id: 0,
+            officials: Some((1, 2)),
+        };
+        let stand = vec![ready_named(10, None, "A", "B")];
+        let reserviert: HashSet<i64> = [10].into_iter().collect();
+        assert!(feld_aus_frischem_stand(&[e], &stand, &stand, &reserviert).is_empty());
+    }
+
+    #[test]
+    fn feld_aus_frischem_stand_ueberschreibt_keine_umteilung_in_btp() {
+        // R2: Teilt jemand zwischen Zyklus-Snapshot und Write in BTP um,
+        // gewinnt BTP — der Eintrag fällt heraus, der nächste Zyklus
+        // entscheidet auf dem neuen Stand.
+        use crate::btp::proto::MatchCourt;
+        let e = MatchCourt {
+            match_id: 10,
+            draw_id: 10,
+            planning_id: 10,
+            court_id: 0,
+            officials: Some((1, 2)),
+        };
+        let alt = vec![ready_named(10, None, "A", "B")];
+        let mut umgeteilt = ready_named(10, None, "A", "B");
+        umgeteilt.official1_id = Some(5);
+        assert!(feld_aus_frischem_stand(&[e], &alt, &[umgeteilt], &HashSet::new()).is_empty());
     }
 
     #[test]

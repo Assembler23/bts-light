@@ -59,6 +59,17 @@ dass es funktioniert.
 - **Weiche als Config-Feld:** erlaubt einen Feldtest ohne Release, kostet aber Handbuch, Anker und
   Sync-Neustart. Verworfen.
 
+## Nachtrag 09.11.2026: Messergebnis und Absicherung
+
+Die Messung fiel **negativ** aus: BTP übernimmt die CourtID aus jedem Officials-Write, `0` oder
+ein fehlendes Element löscht ein Feld auch Sekunden nach der bestätigten Vergabe (Tabelle in
+`docs/btp_protocol.md`). `reserved_courts` in `officials_entries` schützte eigene Vergaben nur
+zum Zeitpunkt des Snapshots; offen blieben eine Hand-Vergabe in BTP und eine eigene Vergabe, die
+erst danach startet. Statt der Weiche entschied die Turnierleitung: **Stand unmittelbar vor dem
+Write neu lesen**, die CourtID daraus einsetzen und `reserved_courts` nach dem Lesen erneut
+prüfen (`write_officials_to_btp`, v0.9.367). Die Zuteilung beim Aufruf bleibt sofort, die Hand-Einteilung
+aus #456 auch. Restfenster: eine Hand-Vergabe, die BTP beim Lesen noch nicht zeigt (≤ 1 s).
+
 ## Konsequenzen
 
 - Bestehende Installationen ändern ihr Verhalten mit dem Update: Gerufene binden SR/AR früher.

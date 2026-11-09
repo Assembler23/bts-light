@@ -261,7 +261,14 @@ async fn do_official_writes_without_court_keep_court_assignments() {
         println!("ABBRUCH: kein wartendes Spiel ohne Feld und ohne Officials.");
         return;
     };
-    let belegt: Vec<i64> = vorher.matches.iter().filter_map(|m| m.court_id).collect();
+    // Beendete Spiele behalten in BTP ihre CourtID, belegen das Feld aber
+    // nicht mehr (Messung 09.11.2026: sonst fand sich kein freies Feld).
+    let belegt: Vec<i64> = vorher
+        .matches
+        .iter()
+        .filter(|m| m.status != MatchStatus::Finished)
+        .filter_map(|m| m.court_id)
+        .collect();
     let Some(feld) = vorher
         .court_infos
         .iter()
@@ -366,4 +373,124 @@ async fn do_official_writes_without_court_keep_court_assignments() {
         "RESTORE UNVOLLSTÄNDIG: Spiel {} steht bei {ist:?} — in BTP von Hand bereinigen",
         m.id
     );
+}
+
+/// Gegenprobe zu Messung 2/3 (09.11.2026): Kommt die Feldvergabe allein an
+/// (K1), und löscht ein Officials-Write das Feld auch dann, wenn BTP es
+/// schon **bestätigt** hat (K2: CourtID 0, K3: ohne CourtID)? K4: mit der
+/// richtigen CourtID. Ergebnis damals: K1 ✔, K2 ✘, K3 ✘, K4 ✔ — kein
+/// Wettlauf, BTP übernimmt schlicht die CourtID aus jedem Write.
+///
+/// ```text
+/// cargo test -p bts-light --test btp_officials_ohne_feld_probe kontrolle -- --ignored --nocapture
+/// ```
+#[tokio::test]
+#[ignore]
+async fn kontrolle_feld_allein_und_verzoegert() {
+    let pw = password();
+    let pw = pw.as_deref();
+    let (_, vorher) = snapshot(pw).await;
+    let ids: Vec<i64> = vorher.officials.iter().map(|o| o.id).collect();
+    assert!(
+        ids.len() >= 2,
+        "brauche mindestens zwei Schiedsrichter in BTP"
+    );
+    let (sr, ar) = (ids[0], ids[1]);
+    let m = vorher
+        .matches
+        .iter()
+        .find(|m| {
+            m.status == MatchStatus::Scheduled
+                && !m.team1.is_empty()
+                && !m.team2.is_empty()
+                && m.court_id.is_none()
+                && m.official1_id.unwrap_or(0) == 0
+                && m.official2_id.unwrap_or(0) == 0
+        })
+        .cloned()
+        .expect("wartendes Spiel");
+    let belegt: Vec<i64> = vorher
+        .matches
+        .iter()
+        .filter(|m| m.status != MatchStatus::Finished)
+        .filter_map(|m| m.court_id)
+        .collect();
+    let feld = vorher
+        .court_infos
+        .iter()
+        .map(|c| c.id)
+        .find(|c| !belegt.contains(c))
+        .expect("freies Feld");
+    println!(
+        "\nKONTROLLE: Spiel {} (Nr. {:?}), Feld {feld}, SR {sr}, AR {ar}",
+        m.id, m.match_num
+    );
+    let mut erg = Vec::new();
+
+    // K1: nur Feld
+    sende(feld_write(&m, feld, true, &login(pw).await, pw)).await;
+    let (ok, ist) = warte(pw, m.id, |s| s.0 == Some(feld)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let ist2 = stand(pw, m.id).await;
+    erg.push(format!(
+        "K1 Feld allein: übernommen={ok} {ist:?}, nach 2 s {ist2:?}"
+    ));
+
+    // K2: Feld steht, dann Officials mit CourtID 0
+    if ok {
+        sende(officials_write(&m, 0, sr, ar, &login(pw).await, pw)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let (_, ist) = warte(pw, m.id, |s| s.1 == Some(sr) && s.2 == Some(ar)).await;
+        erg.push(format!(
+            "K2 verzögert CourtID 0: Feld {} {ist:?}",
+            if ist.0 == Some(feld) {
+                "BLEIBT"
+            } else {
+                "VERLOREN"
+            }
+        ));
+        // Feld wieder setzen, falls weg
+        if ist.0 != Some(feld) {
+            sende(feld_write(&m, feld, true, &login(pw).await, pw)).await;
+            warte(pw, m.id, |s| s.0 == Some(feld)).await;
+        }
+        // K3: Officials ohne CourtID
+        sende(officials_write_ohne_court(&m, ar, sr, &login(pw).await, pw)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let (_, ist) = warte(pw, m.id, |s| s.1 == Some(ar) && s.2 == Some(sr)).await;
+        erg.push(format!(
+            "K3 verzögert ohne CourtID: Feld {} {ist:?}",
+            if ist.0 == Some(feld) {
+                "BLEIBT"
+            } else {
+                "VERLOREN"
+            }
+        ));
+        // K4: Officials mit der RICHTIGEN CourtID
+        sende(officials_write(&m, feld, sr, ar, &login(pw).await, pw)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let (_, ist) = warte(pw, m.id, |s| s.1 == Some(sr) && s.2 == Some(ar)).await;
+        erg.push(format!(
+            "K4 mit richtiger CourtID {feld}: Feld {} {ist:?}",
+            if ist.0 == Some(feld) {
+                "BLEIBT"
+            } else {
+                "VERLOREN"
+            }
+        ));
+    }
+
+    // Aufräumen
+    sende(feld_write(&m, feld, false, &login(pw).await, pw)).await;
+    warte(pw, m.id, |s| s.0.is_none()).await;
+    sende(officials_write(&m, 0, 0, 0, &login(pw).await, pw)).await;
+    let (_, ende) = warte(pw, m.id, |s| {
+        s.1.is_none() && s.2.is_none() && s.0.is_none()
+    })
+    .await;
+    println!("\n=== Kontrolle ===");
+    for e in erg {
+        println!("  {e}");
+    }
+    println!("  Aufgeräumt: {ende:?}");
 }

@@ -119,6 +119,9 @@ gewinnt BTP.
    Feldzuweisung unmittelbar danach, Löschen mit 0. Das Ergebnis kommt in `docs/btp_protocol.md`.
    Ist es negativ, wird nicht released. Die Spec bekommt dann eine Weiche „kein Officials-Write an
    Spielen ohne Feld" (Konstante in `officials_entries`, gilt für alle solchen Writes).
+   **Ergebnis 09.11.2026: negativ** (CourtID aus jedem Write verbindlich). Statt der Weiche
+   entschied die Turnierleitung, den BTP-Stand unmittelbar vor jedem Officials-Write neu zu lesen
+   (v0.9.367, Nachtrag in ADR 0080).
 3. **Wartende** Zeilen in TL-Web und Desktop zeigen die Sicht „Hand vor BTP" (`fuer_schreiben`).
    Damit ist eine Umteilung sofort sichtbar, auch bevor BTP sie spiegelt. Laufende Felder bleiben
    bei `effective`.
