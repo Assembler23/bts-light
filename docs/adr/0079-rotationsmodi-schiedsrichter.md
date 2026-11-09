@@ -1,6 +1,6 @@
 # 0079 — Rotationsmodi: zwei Reihenfolgen in A, abgeleitete Vorrolle, eine Wahl-Funktion
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-11-09
 
 ## Kontext

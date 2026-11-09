@@ -271,6 +271,19 @@ offener Paarungen auf einem Hallen-TV. Positivliste in `tablet/spielfolge.rs`:
 keine Lizenznummer, kein Geburtsjahr, Nation/Verein nur nach Monitor-Schaltern,
 kein Setzplatz an Kandidaten.
 
+**Einsatzrolle der Schiedsrichter** (seit 09.11.2026, Spec `sr-rotationsmodus`,
+ADR 0079): Die Rolle je Official (beides / nur SR / nur AR) ist eine
+Einsatzplanung, keine Beziehungs-Angabe wie die Sperrlisten. Sie reist im
+TL-Zustand hinter dem Gerätezugang (`TlOfficial.role`), aber **nie** in
+Monitor-/Overview-States, Tablet-`MatchBrief` oder badhub-Payloads. Der Wächter
+`the_state_never_carries_personal_data_beyond_its_purpose` prüft die Rolle
+positiv, Sperrlisten und Stammverein weiterhin negativ.
+
+**AR-Name am Meetingpoint** (seit 09.11.2026, Spec `sr-ar-beim-aufruf`, ADR
+0080): Die offene Meetingpoint-Seite zeigt neben dem SR auch den
+Aufschlagrichter einer gerufenen Partie (`MpPartie.ar`) — dieselbe Kategorie wie
+der dort schon gezeigte SR-Name, ohne Verein, ohne Lizenznummer.
+
 **Setzplätze** (seit 12.10.2026, Spec `setzplaetze-anzeigen`): Der Setzplatz
 („1", „3/4") steht öffentlich auf dem Auslosungsbogen und sagt über eine Person
 nichts, was über den Namen hinausgeht — deshalb **standardmäßig sichtbar**, auf

@@ -1,6 +1,6 @@
 # Rotationsmodus für Schiedsrichter und Aufschlagrichter — Spezifikation
 
-> Status: **Entwurf** (via /idee: Brief → Grill → How-To → Review, 09.11.2026).
+> Status: **abgestimmt 2026-11-09** (via /idee: Brief → Grill → How-To → Review).
 > Quelle: Idee der Turnierleitung (09.11.2026). Betroffene Crates: src-tauri, src, später relay-proto/relay (PR 5).
 > ADR: [0079](../adr/0079-rotationsmodi-schiedsrichter.md). Basis: v0.9.355 (#457, Wartelisten-Einteilung).
 
@@ -309,7 +309,7 @@ Pflicht ist TDD: Rust-Unit-Tests zuerst. `cargo test`, `cargo clippy --workspace
 
 ## Offene Fragen / Annahmen
 
-- **Annahme:** Die Rolle ist kein schutzbedürftiges Personendatum im Sinne der Sperrlisten (Datenschutz-Abschnitt). Bei Freigabe der Spec wird das in CLAUDE.md „Datenschutz" vermerkt.
+- **Entschieden (Freigabe 09.11.2026):** Die Rolle ist kein schutzbedürftiges Personendatum im Sinne der Sperrlisten; vermerkt in CLAUDE.md „Datenschutz".
 - **Annahme:** Weniger als 100 Officials je Turnier, deshalb ist die Runden-Simulation mit O(n²) unkritisch.
 
 ## Betroffene Doku-Dateien

@@ -549,7 +549,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 - **Rotationsmodus Schiedsrichter/Aufschlagrichter** — Spec:
   [features/sr-rotationsmodus.md](features/sr-rotationsmodus.md)
-  (Entwurf 09.11.2026, ADR 0079). Drei Einteilungsprinzipien im Setup: A getrennte
+  (freigegeben 09.11.2026, ADR 0079). Drei Einteilungsprinzipien im Setup: A getrennte
   SR-/AR-Listen, B abwechselnd (Standard, behebt das Kleben der Paar-Rollen), C Rollenwechsel
   je Person nach dem zuletzt beendeten Spiel. Rolle je Person (beides / nur SR / nur AR),
   Meetingpoint-Vorab-SR folgt demselben Modus, Vorschau „als Nächstes SR/AR". Fünf PRs, nur
