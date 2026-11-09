@@ -893,6 +893,9 @@ pub struct AzureTtsConfig {
     pub gemini_key: String,
     /// Gemini-Stimme, z. B. „Kore".
     pub gemini_voice: String,
+    /// Ansage in Teilen vertonen und je Teil cachen (Spec `ansage-in-teilen`,
+    /// spart Zeichen). Standard aus.
+    pub teile: bool,
 }
 
 /// Voreingestellte ElevenLabs-Stimme: „Sarah", eine der mehrsprachigen
@@ -991,6 +994,7 @@ impl Default for AzureTtsConfig {
             openai_voice: OPENAI_STANDARD_STIMME.to_string(),
             gemini_key: String::new(),
             gemini_voice: GEMINI_STANDARD_STIMME.to_string(),
+            teile: false,
         }
     }
 }
@@ -2637,6 +2641,7 @@ mod tests {
                 openai_voice: "nova".to_string(),
                 gemini_key: "gm-secret".to_string(),
                 gemini_voice: "Puck".to_string(),
+                teile: true,
             },
             court_monitor: CourtMonitorConfig {
                 enabled: true,

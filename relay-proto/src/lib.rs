@@ -3052,6 +3052,10 @@ pub struct AzureTtsShare {
     pub gemini_key: String,
     #[serde(default)]
     pub gemini_voice: String,
+    /// Ansage in Teilen vertonen (Spec `ansage-in-teilen`); fehlt bei einem
+    /// älteren Master → aus.
+    #[serde(default)]
+    pub teile: bool,
 }
 
 /// Eine Freitext-Ansage (Relay-Zwischenspeicher; Quelle = Master). `id`
@@ -4158,6 +4162,7 @@ mod tests {
             dienst: "gemini_flash".into(),
             gemini_key: "gm".into(),
             gemini_voice: "Kore".into(),
+            teile: true,
             ..Default::default()
         };
         let json = serde_json::to_string(&neu).unwrap();
@@ -4166,6 +4171,8 @@ mod tests {
             serde_json::from_str(r#"{"region":"we","key":"k","voice":"v"}"#).unwrap();
         assert_eq!(alt.dienst, "");
         assert!(alt.elevenlabs_key.is_empty() && alt.openai_key.is_empty());
+        // Spec `ansage-in-teilen` (Kriterium 7): älterer Master ohne Feld → aus.
+        assert!(!alt.teile);
     }
 
     #[test]

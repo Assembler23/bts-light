@@ -1280,6 +1280,7 @@ fn azure_share_aus(az: &crate::config::AzureTtsConfig) -> Option<relay_proto::Az
     }
     let mut s = relay_proto::AzureTtsShare {
         dienst: az.dienst.clone(),
+        teile: az.teile,
         ..Default::default()
     };
     match dienst_art(&az.dienst) {

@@ -170,6 +170,9 @@ export function AnnounceSettings({
     setZugang((z) => ({ ...z, [a]: { ...z[a], [feld]: wert } }));
   const [dienstMeldung, setDienstMeldung] = useState("");
   const [wechselLaeuft, setWechselLaeuft] = useState(false);
+  // Ansage in Teilen vertonen (Spec `ansage-in-teilen`, T1): wirkt sofort.
+  const [azTeile, setAzTeile] = useState(az?.teile ?? false);
+  const [teileMeldung, setTeileMeldung] = useState("");
   // „Dienste prüfen": null = noch nicht geprüft.
   const [pruefung, setPruefung] = useState<DienstPruefung[] | null>(null);
   const [prueftGerade, setPrueftGerade] = useState(false);
@@ -264,6 +267,28 @@ export function AnnounceSettings({
     }
   }
 
+  // Wie die Dienstwahl: nur dieses Feld sofort speichern, damit man in der
+  // Halle direkt vergleichen kann. Halb ausgefüllte Felder bleiben unberührt.
+  async function teileUmschalten(teile: boolean) {
+    setAzTeile(teile);
+    setTeileMeldung("");
+    const next: AppConfig = {
+      ...config,
+      azure_tts: { ...config.azure_tts, teile },
+    };
+    setWechselLaeuft(true);
+    try {
+      await saveConfig(next);
+      onSaved(next);
+      setTeileMeldung("Gilt ab der nächsten Ansage.");
+    } catch (e) {
+      setAzTeile(!teile);
+      setTeileMeldung(`Nicht gespeichert: ${String(e)}`);
+    } finally {
+      setWechselLaeuft(false);
+    }
+  }
+
   async function save() {
     setSaving(true);
     setErr("");
@@ -312,6 +337,7 @@ export function AnnounceSettings({
         openai_voice: zugang.openai.voice.trim(),
         gemini_key: zugang.gemini.key.trim(),
         gemini_voice: zugang.gemini.voice.trim(),
+        teile: azTeile,
       },
     };
     try {
@@ -753,6 +779,25 @@ export function AnnounceSettings({
               {dienstMeldung && <strong>{dienstMeldung}</strong>}
             </span>
           </label>
+        )}
+        {azEnabled && (
+          <div className="flex flex-col gap-0.5">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={azTeile}
+                disabled={wechselLaeuft || saving}
+                onChange={(e) => void teileUmschalten(e.currentTarget.checked)}
+              />
+              Ansage in Teilen vertonen (spart Zeichen)
+            </label>
+            <span className="text-xs text-slate-500">
+              Feld, Disziplin, Runde und Namen werden einzeln vertont und
+              gemerkt – Wiederholungen kosten nichts mehr. Die Stimme kann
+              zwischen den Teilen leicht anders klingen; vorher anhören.{" "}
+              {teileMeldung && <strong>{teileMeldung}</strong>}
+            </span>
+          </div>
         )}
         {azEnabled && (
           <div className="flex flex-col gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5">

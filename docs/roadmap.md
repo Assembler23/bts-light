@@ -321,6 +321,12 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Ansage in Teilen vertonen** — Spec:
+  [features/ansage-in-teilen.md](features/ansage-in-teilen.md) (freigegeben
+  09.11.2026) — **umgesetzt v0.9.366, Hörtest offen**: klingt die
+  Klebestelle in der Halle unauffällig, schwankt die Stimme je Dienst
+  zwischen den Teilen, wie viel Zeichen spart es an einem echten Turniertag.
+
 - **Kiosk-App: Akku auf der Wartekarte + Drei-Finger-Geste** — Spec:
   [features/kiosk-akku-und-ausgang.md](features/kiosk-akku-und-ausgang.md)
   (freigegeben 06.11.2026) — **v0.9.343, Feldtest auf Fire HD offen.**

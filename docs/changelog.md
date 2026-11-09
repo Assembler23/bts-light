@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.366
+
+- **Cloud-Ansage in Teilen (spart Zeichen).** Neues Häkchen „Ansage in Teilen
+  vertonen" auf der Seite „Ansagen", voreingestellt aus. Feld, Disziplin,
+  Runde und Namen werden einzeln vertont und gemerkt — wiederkehrende Teile
+  kosten beim Anbieter nur einmal, geschätzt 50–60 % weniger Zeichen. Die
+  Stimme kann zwischen den Teilen leicht anders klingen; bitte vor dem
+  Turnier anhören.
+
 ## v0.9.365
 
 - **TL-Web: AR-Reihenfolge und Rolle.** Bei „Getrennte Listen" zeigt die

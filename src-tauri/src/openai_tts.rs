@@ -5,7 +5,7 @@
 // `speed`-Parameter, nimmt aber eine Sprechanweisung (`instructions`) — dort
 // stehen Ton und Tempo.
 
-use crate::tts_text::{netz, ssml_zu_text, Pausen, TtsText};
+use crate::tts_text::{netz, ssml_zu_text, Format, Pausen, TtsText};
 use std::path::Path;
 
 /// Sprechanweisung je Ansagesprache; das Tempo wird angehängt.
@@ -34,9 +34,13 @@ fn anweisung(t: &TtsText) -> String {
     s
 }
 
-fn cache_schluessel(voice: &str, modell: &str, t: &TtsText) -> String {
+fn cache_schluessel(voice: &str, modell: &str, t: &TtsText, format: Format) -> String {
+    let f = match format {
+        Format::Mp3 => "",
+        Format::Wav24 => "|wav24",
+    };
     format!(
-        "openai|{modell}|{voice}|{}|{}|{}",
+        "openai|{modell}|{voice}|{}|{}|{}{f}",
         t.sprache,
         anweisung(t),
         t.text
@@ -50,9 +54,10 @@ pub async fn vertonen(
     modell: &str,
     ssml: &str,
     cache_dir: Option<&Path>,
+    format: Format,
 ) -> Result<(Vec<u8>, bool), String> {
     let t = ssml_zu_text(ssml, Pausen::Satzzeichen);
-    let schluessel = cache_schluessel(voice, modell, &t);
+    let schluessel = cache_schluessel(voice, modell, &t, format);
     if let Some(bytes) = cache_dir.and_then(|d| netz::cache_holen(d, &schluessel)) {
         return Ok((bytes, true));
     }
@@ -67,7 +72,11 @@ pub async fn vertonen(
         "voice": voice,
         "input": t.text,
         "instructions": anweisung(&t),
-        "response_format": "mp3",
+        // `pcm` = rohes 24-kHz-PCM; wird unten zu WAV.
+        "response_format": match format {
+            Format::Mp3 => "mp3",
+            Format::Wav24 => "pcm",
+        },
     });
     let resp = netz::client(10)?
         .post("https://api.openai.com/v1/audio/speech")
@@ -88,6 +97,10 @@ pub async fn vertonen(
     if bytes.is_empty() {
         return Err("OpenAI lieferte leeres Audio".to_string());
     }
+    let bytes = match format {
+        Format::Mp3 => bytes,
+        Format::Wav24 => crate::tts_teile::wav_aus_pcm16(&bytes, crate::tts_teile::RATE),
+    };
     if let Some(d) = cache_dir {
         netz::cache_ablegen(d, &schluessel, &bytes);
     }
@@ -116,9 +129,16 @@ mod tests {
 
     #[test]
     fn cache_schluessel_kennt_tempo_und_stimme() {
-        let a = cache_schluessel("coral", "m", &t(0.8, "de"));
-        assert_ne!(a, cache_schluessel("coral", "m", &t(1.0, "de")));
-        assert_ne!(a, cache_schluessel("nova", "m", &t(0.8, "de")));
+        let a = cache_schluessel("coral", "m", &t(0.8, "de"), Format::Mp3);
+        assert_ne!(
+            a,
+            cache_schluessel("coral", "m", &t(1.0, "de"), Format::Mp3)
+        );
+        assert_ne!(a, cache_schluessel("nova", "m", &t(0.8, "de"), Format::Mp3));
+        assert_ne!(
+            a,
+            cache_schluessel("coral", "m", &t(0.8, "de"), Format::Wav24)
+        );
     }
 }
 
@@ -136,6 +156,7 @@ mod echt {
             "gpt-4o-mini-tts",
             ssml,
             None,
+            crate::tts_text::Format::Mp3,
         )
         .await
         .unwrap()
