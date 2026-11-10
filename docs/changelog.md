@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.371
+
+- **Suche in der Turnierleitungs-Seite mit der Tastatur.** Die Pfeiltasten
+  wählen einen Treffer, Enter springt hin. Enter ohne Auswahl springt gleich
+  zum ersten Treffer — auch direkt nach dem Tippen, ohne auf die Liste zu
+  warten. Escape im Suchfeld leert den Begriff.
+
 ## v0.9.370
 
 - **TL-Web: „Spiel komplett ansagen".** Im ⋯-Menü jeder belegten Feldkachel
