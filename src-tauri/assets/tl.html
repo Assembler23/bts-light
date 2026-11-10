@@ -186,6 +186,8 @@ header {
   border-top: 1px solid var(--line); padding: 8px 12px;
 }
 .such-treffer:hover, .such-treffer:focus-visible { background: var(--bg); }
+/* Per Pfeiltaste gewählter Treffer — der Fokus bleibt dabei im Suchfeld. */
+.such-treffer.such-aktiv { background: var(--bg); box-shadow: inset 3px 0 0 var(--accent); }
 .such-treffer .such-paar { font-weight: 600; }
 .such-treffer .such-meta { font-size: .8rem; color: var(--ink-soft); }
 .such-rolle {
@@ -9088,6 +9090,11 @@ let suchVorgemerkt = null;
 let suchTimer = null;
 /** Hinweis an einem Treffer („liegt in Halle B …") — Schlüssel des Treffers. */
 let suchLage = null;
+/** Per Pfeiltaste gewählter Treffer (Index in DOM-Reihenfolge), -1 = keiner. */
+let suchAktiv = -1;
+/** Enter vor dem Eintreffen der Antwort: Begriff, zu dem nach dem Zeichnen
+ *  gleich zum ersten Treffer gesprungen wird. */
+let suchEnterSprung = null;
 
 function suchenErlaubt() {
   return !!(state && state.can_search) && !activeDisplay().hideSearch;
@@ -9114,14 +9121,40 @@ function schliesseSuche() {
   suchErgebnis = null;
   suchFehler = "";
   suchLage = null;
+  suchAktiv = -1;
+  suchEnterSprung = null;
   const o = $("such-overlay");
   if (o) o.hidden = true;
+}
+
+/** Treffer-Knöpfe der offenen Liste in Anzeige-Reihenfolge. */
+function suchTrefferKnoepfe() {
+  const o = $("such-overlay");
+  if (!o || o.hidden) return [];
+  return Array.from($("such-body").querySelectorAll(".such-treffer"));
+}
+
+/** Markiert den gewählten Treffer und rollt ihn in Sicht. */
+function markiereSuchAktiv() {
+  const knoepfe = suchTrefferKnoepfe();
+  if (suchAktiv >= knoepfe.length) suchAktiv = knoepfe.length - 1;
+  knoepfe.forEach((b, i) => {
+    const an = i === suchAktiv;
+    b.classList.toggle("such-aktiv", an);
+    if (an) b.scrollIntoView({ block: "nearest" });
+  });
+}
+
+/** Steht für den Feldinhalt schon eine (fehlerfreie) Antwort da? */
+function suchErgebnisAktuell(feld) {
+  return !!suchErgebnis && feld.value === suchBegriff;
 }
 
 function verdrahteSuche() {
   const feld = $("tl-search");
   feld.addEventListener("input", () => {
     clearTimeout(suchTimer);
+    suchEnterSprung = null;
     const q = feld.value;
     if (!suchbereit(q)) {
       schliesseSuche();
@@ -9135,9 +9168,44 @@ function verdrahteSuche() {
     if (suchErgebnis && feld.value === suchBegriff) zeichneSuche();
   });
   feld.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && suchbereit(feld.value)) {
+    // Pfeiltasten wählen einen Treffer; der Fokus bleibt im Feld, damit
+    // man weitertippen kann.
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      if (!suchErgebnisAktuell(feld)) return;
+      ev.preventDefault();
+      if ($("such-overlay").hidden) zeichneSuche();
+      const n = suchTrefferKnoepfe().length;
+      if (!n) return;
+      if (ev.key === "ArrowDown") suchAktiv = suchAktiv < 0 ? 0 : Math.min(suchAktiv + 1, n - 1);
+      else suchAktiv = Math.max(suchAktiv - 1, 0);
+      markiereSuchAktiv();
+      return;
+    }
+    // Escape im Feld fängt neu an: Begriff weg, Liste zu (das globale
+    // Escape schließt nur die Liste).
+    if (ev.key === "Escape") {
+      feld.value = "";
+      schliesseSuche();
+      return;
+    }
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    // Gewählter Treffer — oder ohne Wahl gleich der erste.
+    if (suchErgebnisAktuell(feld)) {
+      if ($("such-overlay").hidden) zeichneSuche();
+      const knoepfe = suchTrefferKnoepfe();
+      if (knoepfe.length) {
+        (knoepfe[suchAktiv] || knoepfe[0]).click();
+        return;
+      }
+    }
+    // Antwort steht noch aus (Tipp-Pause läuft) oder war ein Fehler:
+    // jetzt suchen und nach dem Eintreffen zum ersten Treffer springen.
+    if (suchbereit(feld.value)) {
       clearTimeout(suchTimer);
-      sucheStarten(feld.value);
+      suchEnterSprung = feld.value;
+      if (suchLaeuft) suchVorgemerkt = feld.value;
+      else sucheStarten(feld.value);
     }
   });
   $("such-neu").addEventListener("click", () => {
@@ -9176,6 +9244,7 @@ async function sucheStarten(q) {
     if ($("tl-search").value !== q) return;
     suchBegriff = q;
     suchLage = null;
+    suchAktiv = -1;
     if (daten && typeof daten === "object") {
       suchErgebnis = daten;
       suchFehler = "";
@@ -9184,6 +9253,11 @@ async function sucheStarten(q) {
       suchFehler = fehlerText(status);
     }
     zeichneSuche();
+    if (suchEnterSprung === q) {
+      suchEnterSprung = null;
+      const erster = suchTrefferKnoepfe()[0];
+      if (erster) erster.click();
+    }
   } finally {
     suchLaeuft = false;
     // Nachgeschickt wird, was JETZT im Feld steht — nicht der vorgemerkte
@@ -9191,7 +9265,7 @@ async function sucheStarten(q) {
     const vorgemerkt = suchVorgemerkt !== null;
     suchVorgemerkt = null;
     const jetzt = $("tl-search").value;
-    if (vorgemerkt && jetzt !== suchBegriff && suchbereit(jetzt)) {
+    if (vorgemerkt && (jetzt !== suchBegriff || suchEnterSprung === jetzt) && suchbereit(jetzt)) {
       sucheStarten(jetzt);
     }
   }
@@ -9321,6 +9395,7 @@ function zeichneSuche() {
   }
   if (leer) teile.push(`<p class="such-hinweis">Keine Treffer.</p>`);
   body.innerHTML = teile.join("");
+  markiereSuchAktiv();
   body.querySelectorAll("[data-such-i]").forEach((b) => b.addEventListener("click", () => {
     if (!state) return;
     const gruppe = b.dataset.suchGruppe;

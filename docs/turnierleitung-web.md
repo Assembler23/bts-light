@@ -796,6 +796,15 @@ Liste, sagt der Treffer, warum:
   öffnen.
   <!-- pruef: "nicht in der Liste sichtbar" in src-tauri/assets/tl.html -->
 
+**Mit der Tastatur:** Die Pfeiltasten **↑/↓** im Suchfeld wählen einen
+Treffer (er bekommt einen farbigen Rand links), **Enter** löst ihn aus wie ein
+Tipp. Ist keiner gewählt, springt **Enter** gleich zum **ersten** Treffer —
+auch dann, wenn die Trefferliste noch gar nicht da war: Die Suche läuft sofort
+los und springt, sobald die Antwort kommt. Der Cursor bleibt dabei im
+Suchfeld, man kann also weitertippen. **Escape** im Suchfeld leert es und
+schließt die Liste.
+<!-- pruef: "ArrowDown" in src-tauri/assets/tl.html -->
+
 Das Suchfeld lässt sich je Profil ausblenden (**Profile → Spielliste →
 „Spielersuche zeigen"**). Das ist nur eine Anzeige-Einstellung, keine
 Sperre. Der Suchbegriff wird nirgends gespeichert. Es erscheint erst, wenn

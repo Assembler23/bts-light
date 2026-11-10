@@ -146,6 +146,13 @@ Erfolgskriterien:
 - Kopf: **„Stand hh:mm"** (aus `server_now_ms`) und Knopf **„neu suchen"**. Kein Live-Nachführen.
 - Hinweis **„Schiedsrichter-Betrieb aus"**, wenn `officials_managed == false`.
 - Schließen per ✕, Escape oder Leeren des Feldes.
+- Tastatur (Nachtrag v0.9.371): ↑/↓ im Suchfeld wählen einen Treffer
+  (`.such-aktiv`, Fokus bleibt im Feld), Enter löst den gewählten aus. Ohne
+  Wahl springt Enter zum ersten Treffer (Reihenfolge Am Feld → Warteliste →
+  Beendet); steht die Antwort noch aus, startet Enter die Suche sofort und
+  springt nach dem Eintreffen (`suchEnterSprung`). Stehen Treffer da, lädt
+  Enter nicht mehr neu — dafür gibt es „neu suchen". Escape im Suchfeld
+  leert zusätzlich den Begriff (globales Escape schließt nur die Liste).
 
 ### Hinspringen
 Ein Tipp auf einen Treffer wird zur Klickzeit gegen den aktuellen TL-Zustand aufgelöst; die
