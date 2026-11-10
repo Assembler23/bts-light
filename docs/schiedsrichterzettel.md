@@ -141,6 +141,20 @@ gefülltem Kopf — Turnier, Disziplin, Spielnummer, Namen, Verein, dazu Feld, H
 und Besetzung, **sofern sie schon feststehen** — und leerem Raster. Er wird von
 Hand geführt.
 
+**Steht das Spiel noch auf keinem Feld** (es wartet oder ist in Vorbereitung
+gerufen), gilt für den Kopf seit v0.9.372 (ADR 0082):
+
+- **Schiedsrichter und Aufschlagrichter** sind dieselben, die die Warteliste im
+  TL-Web und der Meetingpoint zeigen. Hat die Turnierleitung umgeteilt und BTP
+  das noch nicht übernommen, steht schon die neue Person auf dem Blatt. Ist
+  ausdrücklich „ohne" eingeteilt, bleibt die Zeile leer.
+- **Feld** bleibt leer — es steht ja noch nicht fest.
+- **Halle**: die Halle aus BTP, sonst die Halle, für die das Spiel gerufen wurde.
+- **Datum**: das Druckdatum. Eine Uhrzeit wird nicht eingetragen.
+
+Steht das Spiel schon auf dem Feld, gilt wie bisher die Besetzung aus BTP und
+das Datum des Spiels.
+
 Technisch ist das ein eigener Modus, **keine** Änderung des Archivabrufs: Ein
 Spiel ohne Aufzeichnung liefert normal weiterhin nichts (404), vorab dagegen ein
 vollständiges Blatt. An der Route hängt dafür `?vorab=1`.
