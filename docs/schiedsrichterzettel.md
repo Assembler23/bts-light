@@ -173,8 +173,13 @@ vollständiges Blatt. An der Route hängt dafür `?vorab=1`.
 
 ## Automatisch drucken
 
-Ist im Setup **„Zettel bei der Feldvergabe automatisch drucken"** eingeschaltet,
-geht das Blatt von selbst an den eingestellten Drucker, sobald ein Spiel
+Ist im Setup **„Zettel automatisch drucken"** eingeschaltet, geht das Blatt von
+selbst an den eingestellten Drucker. **Wann**, legt die Auswahl **„Drucken:"**
+darunter fest — **„bei der Feldvergabe"** (Voreinstellung, dieser Abschnitt)
+oder **„schon beim Aufruf in die Vorbereitung"** (nächster Abschnitt).
+<!-- pruef: "Zettel automatisch drucken" in src/pages/SetupWizard.tsx -->
+
+Bei der Feldvergabe druckt bts-light, sobald ein Spiel
 
 - **auf einem Feld steht** (gleich ob von Hand, über TL-Web oder durch die
   automatische Feldvergabe zugewiesen) **und**
@@ -204,9 +209,54 @@ Schiedsrichtern spielen" aus, kennt bts-light nie einen SR — dann gibt es
 bauartbedingt nichts zu drucken. Der Einstellungstext sagt das an Ort und Stelle.
 
 **Wenn der Drucker schweigt**, erscheint app-weit ein gelber Hinweis („Zettel für
-Feld 3 …") und der Vorgang steht im Log. Der Druck **wiederholt sich nicht** —
+Feld 3 …" bzw. „Zettel für Spiel-Nr. 12 …") und der Vorgang steht im Log. Der Druck **wiederholt sich nicht** —
 sonst liefe er im Sekundentakt gegen einen ausgeschalteten Drucker. Nach dem
 Beheben druckt man den Zettel von Hand nach.
+
+## Schon beim Aufruf drucken
+
+Mit **„Drucken: schon beim Aufruf in die Vorbereitung"** (seit v0.9.373, Spec
+[zettel-druck-bei-aufruf](features/zettel-druck-bei-aufruf.md), ADR 0082) kommt
+der Zettel, sobald ein Spiel **gerufen** ist — so gehen Spieler und
+Schiedsrichter mit dem Blatt zum Feld.
+<!-- pruef: "schon beim Aufruf in die Vorbereitung" in src/pages/SetupWizard.tsx -->
+
+- **Gerufen** heißt: über „In Vorbereitung" am Turnier-PC, im TL-Web oder von
+  der Meetingpoint-Automatik. Eine gelbe Markierung in BTP, die
+  Hallen-Vorverteilung oder ein Wunschfeld zählen nicht; ein Aufruf am Slave-PC
+  auch nicht.
+- Gedruckt wird nur, wenn die **Paarung vollständig** ist und ein
+  **Schiedsrichter** feststeht. Fehlt er beim Aufruf, kommt der Zettel, sobald er
+  zugeteilt wird — in der Vorbereitung oder erst am Feld.
+- Auf dem Blatt steht der Schiedsrichter, den auch Warteliste und Meetingpoint
+  zeigen. Das **Feld bleibt leer**, es stehen Halle und Druckdatum drauf.
+- Ein Spiel, das **ohne Aufruf** direkt aufs Feld kommt, druckt dort wie bei der
+  Feldvergabe.
+
+**Wenn sich der Schiedsrichter ändert**, bevor das Spiel auf dem Feld steht:
+
+- Steht der neue Schiedsrichter **20 Sekunden** unverändert fest, kommt ein
+  **neuer Zettel**. Wird schnell hin- und hergeteilt, kommt nur der letzte; geht
+  es zurück auf den gedruckten, kommt keiner.
+- Kommt das Spiel aufs Feld und pfeift dort ein anderer Schiedsrichter als auf
+  dem Blatt, kommt **sofort** ein neuer Zettel, dann mit Feldnummer. bts-light
+  wartet dafür ab, bis BTP die Besetzung bestätigt hat.
+- Wird der Schiedsrichter **entfernt** (das Spiel kommt auf ein Feld ohne
+  Schiedsrichter, der Aufruf wird zurückgenommen, die Turnierleitung nimmt ihn
+  heraus), kommt **kein** Zettel, sondern der gelbe Hinweis **„Zettel für
+  Spiel-Nr. N ungültig – Schiedsrichter entfernt"**. Den alten Zettel einsammeln.
+- Steht das Spiel auf dem Feld, kommt kein weiterer Zettel mehr.
+
+Es gibt nur **einen** gelben Hinweis; kommen mehrere kurz nacheinander, steht
+der letzte da, alle anderen im Log. Darum nennt jeder die Spiel-Nr.
+
+**Umschalten mitten im Turnier** erzeugt keinen Schwall: Spiele, die in diesem
+Moment schon gerufen sind und einen Schiedsrichter haben, gelten als erledigt
+und bekommen auch am Feld keinen Zettel (bei Bedarf von Hand drucken). Gerufene
+Spiele ohne Schiedsrichter drucken, sobald einer kommt. Dasselbe gilt, wenn der
+Haken eingeschaltet wird, während „schon beim Aufruf" gewählt ist. Zurück auf
+„bei der Feldvergabe": Vorab gedruckte Spiele bekommen am Feld keinen zweiten
+Zettel.
 
 ## Drucker einstellen
 

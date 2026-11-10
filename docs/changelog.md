@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.373
+
+- **Schiedsrichterzettel schon beim Aufruf drucken.** Unter „Zettel
+  automatisch drucken" gibt es die Auswahl „Drucken: bei der Feldvergabe /
+  schon beim Aufruf in die Vorbereitung". Beim Aufruf kommt der Zettel,
+  sobald das gerufene Spiel einen Schiedsrichter hat — sonst, sobald einer
+  zugeteilt wird. Wechselt der Schiedsrichter vor der Feldvergabe, kommt nach
+  20 Sekunden ein neuer Zettel, bei der Feldvergabe sofort; wird er entfernt,
+  gibt es eine Warnung. Umschalten mitten im Turnier druckt keinen Schwall.
+  Voreinstellung bleibt die Feldvergabe.
+
 ## v0.9.372
 
 - **Vorabzettel nennt den richtigen Schiedsrichter.** Der leere

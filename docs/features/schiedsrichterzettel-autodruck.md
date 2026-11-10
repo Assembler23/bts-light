@@ -54,10 +54,14 @@ Erfolgskriterien:
 ## Nicht-Ziele
 
 - **Kein Autodruck beim Aufruf „in Vorbereitung"** — allein die Feldvergabe löst aus.
+  *Aufgehoben als Wahlmöglichkeit durch [zettel-druck-bei-aufruf](zettel-druck-bei-aufruf.md)
+  (ADR 0082, v0.9.373); die Voreinstellung bleibt die Feldvergabe.*
 - **Kein Stapeldruck der ganzen Warteliste** auf einen Schlag.
 - **Kein Druck auf einem Slave-PC.** Nur der Master (der BTP-Verbindung und Feldvergabe hält)
   druckt; eine zweite Halle hängt bei Bedarf einen Netzwerkdrucker in die Einstellung.
 - **Kein zweiter Zettel** zu einem Spiel, auch nicht nach Feld- oder Schiedsrichterwechsel.
+  *Gilt weiter für „bei der Feldvergabe"; im Modus „beim Aufruf" gibt es einen Nachdruck
+  bei Schiedsrichterwechsel vor der Feldvergabe (ADR 0082).*
 - Keine Änderung an Ereigniserfassung, Punktverlauf, `process_result` oder am BTP-Schreibpfad.
 - Kein Druck aus TL-Web heraus auf den Host-Drucker — der TL-Web-Knopf druckt über das Gerät,
   auf dem TL-Web läuft.

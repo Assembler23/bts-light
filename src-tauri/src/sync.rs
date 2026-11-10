@@ -14,7 +14,7 @@ use crate::badhub::payload::{build_checkin_roster, CheckinRosterMessage};
 use crate::badhub::push;
 use crate::btp::client;
 use crate::btp::model::{BtpSnapshot, MatchResult, MatchStatus};
-use crate::config::AppConfig;
+use crate::config::{AppConfig, PrintTrigger};
 use crate::tablet::state::TabletState;
 
 /// Abstand der Heartbeats: Hat sich am Turnierstand >60 s nichts geändert,
@@ -595,6 +595,168 @@ impl Default for SyncEngine {
     }
 }
 
+/// Ein beanspruchter Zettel-Druck (Spec `schiedsrichterzettel-autodruck`,
+/// erweitert durch `zettel-druck-bei-aufruf`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Druckauftrag {
+    pub match_id: i64,
+    pub bezug: Bezug,
+    /// Stand vor dem Anspruch im Aufruf-Modus — zum Zurücknehmen, wenn
+    /// kein Blatt entsteht. `None` = Feldvergabe-Modus (`vergessen`).
+    pub vorher: Option<crate::tablet::print_log::Vorher>,
+}
+
+/// Worauf sich der Zettel bezieht — für Druckauftrag, Log und Warnung.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Bezug {
+    /// Das Spiel steht auf diesem Feld.
+    Feld(String),
+    /// Das Spiel steht noch auf keinem Feld: Spiel-Nr. (sonst Match-ID).
+    Spiel(i64),
+}
+
+impl Druckauftrag {
+    fn feld(match_id: i64, feld: &str) -> Self {
+        Self {
+            match_id,
+            bezug: Bezug::Feld(feld.to_string()),
+            vorher: None,
+        }
+    }
+
+    /// „Feld 5" bzw. „Spiel-Nr. 12".
+    fn bezug_text(&self) -> String {
+        match &self.bezug {
+            Bezug::Feld(f) => format!("Feld {f}"),
+            Bezug::Spiel(n) => format!("Spiel-Nr. {n}"),
+        }
+    }
+}
+
+/// Text der Warnung, wenn der Schiedsrichter eines vorab gedruckten
+/// Zettels entfernt wurde (ADR 0082).
+fn ungueltig_text(nr: i64) -> String {
+    format!("Zettel für Spiel-Nr. {nr} ungültig – Schiedsrichter entfernt")
+}
+
+/// Modus „bei der Feldvergabe" (Spec `schiedsrichterzettel-autodruck`):
+/// Spiel auf dem Feld mit Schiedsrichter, höchstens ein Blatt.
+fn beanspruche_bei_feldvergabe(snapshot: &BtpSnapshot, tablet: &TabletState) -> Vec<Druckauftrag> {
+    let mut auftraege = Vec::new();
+    for m in snapshot.matches.iter() {
+        if m.status != MatchStatus::OnCourt || m.id <= 0 {
+            continue;
+        }
+        let Some(feld) = m.court.clone().filter(|c| !c.trim().is_empty()) else {
+            continue;
+        };
+        if tablet.print_log().ist_gedruckt(m.id) {
+            continue;
+        }
+        // Ein Aufschlagrichter allein genügt nicht: Der Zettel gehört
+        // dem Schiedsrichter, der ihn führt.
+        let (sr, _ar, _warn) = tablet.court_officials(Some(m), snapshot);
+        if sr.is_empty() {
+            continue;
+        }
+        // Ab hier ist es unser Auftrag — und nur unserer.
+        if tablet.print_log().merken(m.id) {
+            auftraege.push(Druckauftrag::feld(m.id, &feld));
+        }
+    }
+    auftraege
+}
+
+/// Gerufene, vollständige Spiele, die schon einen Schiedsrichter haben —
+/// sie gelten beim Wirksamwerden des Aufruf-Modus als erledigt (ADR 0082).
+/// Ohne Schiedsrichter bleiben sie offen und drucken, sobald einer kommt.
+fn vormerken_beim_umschalten(snapshot: &BtpSnapshot, tablet: &TabletState) -> Vec<i64> {
+    let gerufen: HashSet<i64> = tablet
+        .preparation_calls()
+        .iter()
+        .map(|c| c.match_id)
+        .collect();
+    snapshot
+        .matches
+        .iter()
+        .filter(|m| m.status == MatchStatus::Scheduled && gerufen.contains(&m.id))
+        .filter(|m| !m.team1.is_empty() && !m.team2.is_empty())
+        .filter(|m| tablet.wartende_official_ids(m).0 > 0)
+        .map(|m| m.id)
+        .collect()
+}
+
+/// Modus „schon beim Aufruf in die Vorbereitung" (Spec
+/// `zettel-druck-bei-aufruf`, ADR 0082): je Spiel ein Schritt des
+/// Zustandsautomaten in [`PrintLogStore::aufruf_schritt`](crate::tablet::print_log::PrintLogStore::aufruf_schritt).
+///
+/// Entschieden wird zuerst nach dem **Status** des Spiels, nicht nach dem
+/// Aufruf: Der Autodruck läuft vor `apply_preparation_calls`, ein frisch
+/// aufs Feld gekommenes Spiel kann hier also noch als gerufen gelten.
+fn beanspruche_beim_aufruf(
+    snapshot: &BtpSnapshot,
+    tablet: &TabletState,
+    jetzt_ms: u64,
+) -> Vec<Druckauftrag> {
+    use crate::tablet::print_log::{AufrufAktion, AufrufLage};
+    // Ohne Schiedsrichter-Betrieb gibt es keinen SR — und damit auch keine
+    // „ungültig"-Warnungen für schon gedruckte Zettel.
+    if !tablet.officials_store().enabled() {
+        return Vec::new();
+    }
+    let gerufen: HashSet<i64> = tablet
+        .preparation_calls()
+        .iter()
+        .map(|c| c.match_id)
+        .collect();
+    let mut auftraege = Vec::new();
+    for m in snapshot.matches.iter().filter(|m| m.id > 0) {
+        let nr = m.match_num.unwrap_or(m.id);
+        let lage = match m.status {
+            MatchStatus::Scheduled => AufrufLage::Wartend {
+                gerufen: gerufen.contains(&m.id),
+                voll: !m.team1.is_empty() && !m.team2.is_empty(),
+                sr: tablet.wartende_official_ids(m).0,
+            },
+            MatchStatus::OnCourt => {
+                if m.court.as_deref().is_none_or(|c| c.trim().is_empty()) {
+                    continue;
+                }
+                let sr = tablet.court_official_ids(Some(m)).0.max(0);
+                let geschrieben = tablet
+                    .officials_store()
+                    .fuer_schreiben(m.id, m.official1_id, m.official2_id)
+                    .sr
+                    .filter(|v| *v > 0)
+                    .unwrap_or(0);
+                AufrufLage::AmFeld {
+                    sr,
+                    bestaetigt: sr == geschrieben,
+                }
+            }
+            _ => continue,
+        };
+        match tablet.print_log().aufruf_schritt(m.id, lage, jetzt_ms) {
+            AufrufAktion::Nichts => {}
+            AufrufAktion::Ungueltig => crate::tablet::state::melde_druckwarnung(
+                &tablet.print_warning_slot(),
+                ungueltig_text(nr),
+            ),
+            AufrufAktion::DruckVorab { vorher } => auftraege.push(Druckauftrag {
+                match_id: m.id,
+                bezug: Bezug::Spiel(nr),
+                vorher: Some(vorher),
+            }),
+            AufrufAktion::DruckFeld { vorher } => auftraege.push(Druckauftrag {
+                match_id: m.id,
+                bezug: Bezug::Feld(m.court.clone().unwrap_or_default()),
+                vorher: Some(vorher),
+            }),
+        }
+    }
+    auftraege
+}
+
 impl SyncEngine {
     pub fn new() -> Self {
         Self {
@@ -963,46 +1125,43 @@ impl SyncEngine {
     /// Anspruch in einem Zug — ohne Drucker, ohne Runtime, vollständig
     /// prüfbar.
     ///
-    /// Liefert `(match_id, feld)` je beanspruchtem Auftrag. „Beansprucht"
-    /// heißt: Der Vermerk im Druck-Gedächtnis steht bereits. Wer hier
-    /// etwas zurückbekommt, ist allein zuständig — auch wenn der Druck
-    /// danach scheitert.
+    /// Liefert je beanspruchtem Auftrag Spiel und Bezug (Feld oder
+    /// Spiel-Nr.). „Beansprucht" heißt: Der Vermerk im Druck-Gedächtnis
+    /// steht bereits. Wer hier etwas zurückbekommt, ist allein zuständig —
+    /// auch wenn der Druck danach scheitert.
     fn beanspruche_druckauftraege(
         &self,
         config: &AppConfig,
         snapshot: &BtpSnapshot,
         tablet: &TabletState,
-    ) -> Vec<(i64, String)> {
+        jetzt_ms: u64,
+    ) -> Vec<Druckauftrag> {
         // `slave_mode` ist hier ein zweiter Riegel: Der Aufruf steht
         // ohnehin hinter der Slave-Rückkehr in `run_once`. Beides
         // zusammen macht die Zusage „nur der Master druckt" unabhängig
         // davon, wo der Aufruf eines Tages steht.
-        if !config.print.auto_enabled || config.slave_mode {
+        if config.slave_mode {
             return Vec::new();
         }
-        let mut auftraege = Vec::new();
-        for m in snapshot.matches.iter() {
-            if m.status != MatchStatus::OnCourt || m.id <= 0 {
-                continue;
-            }
-            let Some(feld) = m.court.clone().filter(|c| !c.trim().is_empty()) else {
-                continue;
-            };
-            if tablet.print_log().ist_gedruckt(m.id) {
-                continue;
-            }
-            // Ein Aufschlagrichter allein genügt nicht: Der Zettel gehört
-            // dem Schiedsrichter, der ihn führt.
-            let (sr, _ar, _warn) = tablet.court_officials(Some(m), snapshot);
-            if sr.is_empty() {
-                continue;
-            }
-            // Ab hier ist es unser Auftrag — und nur unserer.
-            if tablet.print_log().merken(m.id) {
-                auftraege.push((m.id, feld));
-            }
+        // Der wirksame Druckzeitpunkt wird auch bei ausgeschaltetem
+        // Autodruck abgeglichen: Erst so gilt das Einschalten im
+        // Aufruf-Modus als Umschalten (kein Druckstoß, ADR 0082). Ohne
+        // Schiedsrichter-Betrieb ist der Aufruf-Modus ebenfalls nicht
+        // wirksam — sonst druckte das spätere Einschalten des Betriebs alle
+        // schon gerufenen Spiele auf einmal (Review-Befund).
+        let wirksam = config
+            .print
+            .auto_enabled
+            .then_some(config.print.trigger)
+            .filter(|t| *t != PrintTrigger::Aufruf || tablet.officials_store().enabled());
+        tablet
+            .print_log()
+            .modus_angleichen(wirksam, || vormerken_beim_umschalten(snapshot, tablet));
+        match wirksam {
+            None => Vec::new(),
+            Some(PrintTrigger::Aufruf) => beanspruche_beim_aufruf(snapshot, tablet, jetzt_ms),
+            Some(PrintTrigger::Feldvergabe) => beanspruche_bei_feldvergabe(snapshot, tablet),
         }
-        auftraege
     }
 
     /// Erst-Ansage im Kern (Spec `ansage-im-browser`, E2, ADR 0064): Je
@@ -1043,8 +1202,9 @@ impl SyncEngine {
     ///   nie auf den Drucker** — ein Spooler, der hängt, darf weder
     ///   Liveticker noch Feldvergabe anhalten.
     fn autodruck(&self, config: &AppConfig, snapshot: &BtpSnapshot, tablet: &TabletState) {
-        for (match_id, feld) in self.beanspruche_druckauftraege(config, snapshot, tablet) {
-            let m_id = match_id;
+        for auftrag in self.beanspruche_druckauftraege(config, snapshot, tablet, now_ms()) {
+            let m_id = auftrag.match_id;
+            let bezug = auftrag.bezug_text();
             let logo = crate::tablet::scoresheet::logo_data_uri(&config.tournament_logo);
             let seiten = crate::tablet::scoresheet::seiten_fuer(
                 tablet,
@@ -1055,18 +1215,21 @@ impl SyncEngine {
             let Some(seiten) = seiten else {
                 // Kein Blatt zu erzeugen — dann war es auch kein
                 // Druckversuch, und der Vermerk darf nicht stehen bleiben.
-                tablet.print_log().vergessen(m_id);
+                match auftrag.vorher {
+                    Some(vorher) => tablet.print_log().zuruecksetzen(m_id, vorher),
+                    None => tablet.print_log().vergessen(m_id),
+                }
                 continue;
             };
             let drucker = config.print.printer_name.clone();
-            let titel = format!("Schiedsrichterzettel Feld {feld}");
+            let titel = format!("Schiedsrichterzettel {bezug}");
             let warnung = tablet.print_warning_slot();
             tokio::task::spawn_blocking(move || {
                 match crate::print::drucke(&seiten, &titel, &drucker) {
-                    Ok(()) => tracing::info!("Zettel für Feld {feld} gedruckt"),
+                    Ok(()) => tracing::info!("Zettel für {bezug} gedruckt"),
                     Err(e) => crate::tablet::state::melde_druckwarnung(
                         &warnung,
-                        format!("Zettel für Feld {feld}: {e}"),
+                        format!("Zettel für {bezug}: {e}"),
                     ),
                 }
             });
@@ -6007,6 +6170,7 @@ mod tests {
             print: crate::config::PrintConfig {
                 auto_enabled: an,
                 printer_name: String::new(),
+                trigger: PrintTrigger::Feldvergabe,
             },
             ..AppConfig::default()
         }
@@ -6015,6 +6179,361 @@ mod tests {
     /// Engine + Tablet mit Schiedsrichterbetrieb und SR-Rotation.
     fn druck_setup() -> (SyncEngine, TabletState) {
         officials_setup(true, false)
+    }
+
+    // ── Druck beim Aufruf (Spec `zettel-druck-bei-aufruf`, ADR 0082) ──
+
+    fn cfg_aufruf(an: bool) -> AppConfig {
+        let mut c = cfg_druck(an);
+        c.print.trigger = PrintTrigger::Aufruf;
+        c
+    }
+
+    /// Ohne Rotation: Schiedsrichter kommen in diesen Tests von Hand.
+    /// Spiel 7 wartet (Paarung A/B), Officials 1–3. Der Aufruf-Modus ist
+    /// schon wirksam (ein erster Lauf ohne Aufrufe) — sonst merkte der
+    /// erste Lauf im Test die Gerufenen als „beim Umschalten" vor.
+    fn aufruf_setup() -> (SyncEngine, TabletState, BtpSnapshot) {
+        let (engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![ready_named(7, None, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_aufruf(true), &snap, &tablet, 0)
+            .is_empty());
+        (engine, tablet, snap)
+    }
+
+    fn rufe(tablet: &TabletState, match_id: i64) {
+        tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+            match_id,
+            location_id: None,
+            called_at_ms: 1,
+        });
+    }
+
+    fn sr(tablet: &TabletState, match_id: i64, id: i64) {
+        tablet
+            .officials_store()
+            .assign(match_id, crate::tablet::officials::OfficialRole::Sr, id);
+    }
+
+    fn lauf(engine: &SyncEngine, tablet: &TabletState, snap: &BtpSnapshot, t: u64) -> Vec<Bezug> {
+        engine
+            .beanspruche_druckauftraege(&cfg_aufruf(true), snap, tablet, t)
+            .into_iter()
+            .map(|a| a.bezug)
+            .collect()
+    }
+
+    /// Spiel 7 auf Feld 5; BTP führt `btp_sr` (0 = keiner).
+    fn aufs_feld(btp_sr: i64) -> BtpMatch {
+        let mut m = oncourt_named(7, 5, "A", "B");
+        m.official1_id = (btp_sr > 0).then_some(btp_sr);
+        m
+    }
+
+    #[test]
+    fn aufruf_modus_druckt_gerufenes_spiel_ohne_feld() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        assert!(lauf(&engine, &tablet, &snap, 0).is_empty(), "nicht gerufen");
+        rufe(&tablet, 7);
+        assert_eq!(lauf(&engine, &tablet, &snap, 0), vec![Bezug::Spiel(7)]);
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty(), "nur einmal");
+    }
+
+    #[test]
+    fn feldvergabe_modus_druckt_beim_aufruf_nicht() {
+        let (engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![ready_named(7, None, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
+            .is_empty());
+    }
+
+    #[test]
+    fn aufruf_modus_offene_paarung_druckt_nicht() {
+        let (engine, tablet, mut snap) = aufruf_setup();
+        snap.matches[0].team2.clear();
+        tablet.set_snapshot(snap.clone());
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        assert!(lauf(&engine, &tablet, &snap, 0).is_empty());
+    }
+
+    #[test]
+    fn aufruf_modus_sr_kommt_spaeter_druckt_dann() {
+        let (engine, tablet, snap) = aufruf_setup();
+        rufe(&tablet, 7);
+        assert!(
+            lauf(&engine, &tablet, &snap, 0).is_empty(),
+            "ohne SR nichts"
+        );
+        sr(&tablet, 7, 2);
+        assert_eq!(lauf(&engine, &tablet, &snap, 1), vec![Bezug::Spiel(7)]);
+    }
+
+    #[test]
+    fn aufruf_modus_ohne_aufruf_direkt_aufs_feld_druckt_mit_feld() {
+        let (engine, tablet, _) = aufruf_setup();
+        let snap = snap_officials(vec![aufs_feld(1)], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+        assert_eq!(
+            lauf(&engine, &tablet, &snap, 0),
+            vec![Bezug::Feld("5".into())]
+        );
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty());
+    }
+
+    #[test]
+    fn sr_wechsel_druckt_erst_nach_20_s_stabil() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        assert_eq!(lauf(&engine, &tablet, &snap, 0).len(), 1);
+        sr(&tablet, 7, 2);
+        assert!(lauf(&engine, &tablet, &snap, 1_000).is_empty());
+        assert!(lauf(&engine, &tablet, &snap, 20_999).is_empty());
+        assert_eq!(lauf(&engine, &tablet, &snap, 21_000), vec![Bezug::Spiel(7)]);
+    }
+
+    #[test]
+    fn sync_neustart_verliert_frist_nicht() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        lauf(&engine, &tablet, &snap, 0);
+        sr(&tablet, 7, 2);
+        lauf(&engine, &tablet, &snap, 1_000);
+        // Speichern der Einstellungen baut die Engine neu — der Store lebt
+        // im TabletState und behält die Frist.
+        let neu = SyncEngine::new();
+        assert_eq!(lauf(&neu, &tablet, &snap, 21_000), vec![Bezug::Spiel(7)]);
+    }
+
+    #[test]
+    fn sr_entfernt_warnt_einmal_und_druckt_nicht() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        lauf(&engine, &tablet, &snap, 0);
+        tablet
+            .officials_store()
+            .clear_assignment(7, crate::tablet::officials::OfficialRole::Sr);
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty());
+        assert_eq!(
+            tablet.print_warning().as_deref(),
+            Some("Zettel für Spiel-Nr. 7 ungültig – Schiedsrichter entfernt")
+        );
+        tablet.clear_print_warning();
+        assert!(lauf(&engine, &tablet, &snap, 2).is_empty());
+        assert_eq!(tablet.print_warning(), None, "nur einmal");
+    }
+
+    #[test]
+    fn hand_sr_bleibt_nach_ruecknahme_keine_warnung() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        lauf(&engine, &tablet, &snap, 0);
+        tablet.remove_preparation_call(7);
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty());
+        assert_eq!(tablet.print_warning(), None);
+        // Erneut gerufen, derselbe SR: kein zweites Blatt.
+        rufe(&tablet, 7);
+        assert!(lauf(&engine, &tablet, &snap, 60_000).is_empty());
+    }
+
+    #[test]
+    fn ruecknahme_gibt_rotations_sr_frei_und_warnt() {
+        let (engine, tablet, snap) = aufruf_setup();
+        let store = tablet.officials_store();
+        store.set_rotation(true, false);
+        store.set_tournament(&snap.tournament_name);
+        store.sync_roster(&[1, 2, 3]);
+        rufe(&tablet, 7);
+        crate::tablet::meetingpoint::gerufene_besetzen(
+            &tablet,
+            &snap,
+            chrono::NaiveDate::from_ymd_opt(2026, 11, 10).unwrap(),
+        );
+        let (gedruckt_mit, _) = tablet.wartende_official_ids(&snap.matches[0]);
+        assert!(gedruckt_mit > 0, "Rotation hat beim Aufruf zugeteilt");
+        assert_eq!(lauf(&engine, &tablet, &snap, 0), vec![Bezug::Spiel(7)]);
+
+        tablet.remove_preparation_call(7);
+        assert_eq!(tablet.wartende_official_ids(&snap.matches[0]).0, 0);
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty());
+        assert!(tablet.print_warning().is_some(), "Zettel ist hinfällig");
+    }
+
+    #[test]
+    fn feldvergabe_mit_abweichendem_sr_druckt_sofort_mit_feld() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        lauf(&engine, &tablet, &snap, 0);
+        // Kurz vor der Vergabe auf 2 umgeteilt, BTP hat es übernommen.
+        sr(&tablet, 7, 2);
+        let am_feld = snap_officials(vec![aufs_feld(2)], &[1, 2, 3]);
+        tablet.set_snapshot(am_feld.clone());
+        assert_eq!(
+            lauf(&engine, &tablet, &am_feld, 1),
+            vec![Bezug::Feld("5".into())],
+            "ohne 20 s, mit Feldnummer"
+        );
+        assert!(lauf(&engine, &tablet, &am_feld, 60_000).is_empty());
+    }
+
+    #[test]
+    fn feldvergabe_mit_gedrucktem_sr_druckt_nichts() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        lauf(&engine, &tablet, &snap, 0);
+        let am_feld = snap_officials(vec![aufs_feld(1)], &[1, 2, 3]);
+        tablet.set_snapshot(am_feld.clone());
+        assert!(lauf(&engine, &tablet, &am_feld, 1).is_empty());
+        assert!(tablet.print_log().zettel(7).is_none(), "fertig");
+    }
+
+    #[test]
+    fn feldvergabe_wartet_bis_btp_bestaetigt() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        lauf(&engine, &tablet, &snap, 0);
+        // Lokal schon 2, BTP führt noch 1.
+        sr(&tablet, 7, 2);
+        let am_feld = snap_officials(vec![aufs_feld(1)], &[1, 2, 3]);
+        tablet.set_snapshot(am_feld.clone());
+        assert!(lauf(&engine, &tablet, &am_feld, 1).is_empty());
+        assert!(tablet.print_log().zettel(7).is_some(), "noch offen");
+        // BTP spiegelt die Umteilung.
+        let bestaetigt = snap_officials(vec![aufs_feld(2)], &[1, 2, 3]);
+        tablet.set_snapshot(bestaetigt.clone());
+        assert_eq!(
+            lauf(&engine, &tablet, &bestaetigt, 2),
+            vec![Bezug::Feld("5".into())]
+        );
+    }
+
+    #[test]
+    fn umschalten_auf_aufruf_merkt_gerufene_vor_kein_stoss() {
+        let (engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
+            &[1, 2, 3],
+        );
+        tablet.set_snapshot(snap.clone());
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        rufe(&tablet, 8); // ohne SR
+                          // Bisher Feldvergabe …
+        engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0);
+        // … jetzt umgeschaltet: 7 ist vorgemerkt, 8 nicht.
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty(), "kein Stoß");
+        sr(&tablet, 8, 2);
+        assert_eq!(lauf(&engine, &tablet, &snap, 2), vec![Bezug::Spiel(8)]);
+        // Das vorgemerkte Spiel druckt auch am Feld nicht.
+        let mut am_feld = snap.clone();
+        am_feld.matches[0] = aufs_feld(1);
+        tablet.set_snapshot(am_feld.clone());
+        assert!(lauf(&engine, &tablet, &am_feld, 3).is_empty());
+    }
+
+    #[test]
+    fn einschalten_im_aufruf_modus_merkt_vor() {
+        let (engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![ready_named(7, None, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_aufruf(false), &snap, &tablet, 0)
+            .is_empty());
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty(), "kein Stoß");
+    }
+
+    #[test]
+    fn umschalten_zurueck_auf_feldvergabe_druckt_vorab_gedruckte_nicht_am_feld() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        lauf(&engine, &tablet, &snap, 0);
+        let am_feld = snap_officials(vec![aufs_feld(2)], &[1, 2, 3]);
+        tablet.set_snapshot(am_feld.clone());
+        assert!(engine
+            .beanspruche_druckauftraege(&cfg_druck(true), &am_feld, &tablet, 1)
+            .is_empty());
+    }
+
+    #[test]
+    fn sr_betrieb_aus_keine_warnungen() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        lauf(&engine, &tablet, &snap, 0);
+        tablet.officials_store().set_enabled(false);
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty());
+        assert_eq!(tablet.print_warning(), None);
+    }
+
+    /// Review-Befund: Aufruf-Modus gewählt, Schiedsrichter-Betrieb aus,
+    /// später eingeschaltet — das darf keinen Schwall drucken.
+    #[test]
+    fn sr_betrieb_einschalten_im_aufruf_modus_merkt_vor() {
+        let (engine, tablet) = officials_setup(false, false);
+        let snap = snap_officials(vec![ready_named(7, None, "A", "B")], &[1, 2, 3]);
+        tablet.set_snapshot(snap.clone());
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        tablet.officials_store().set_enabled(false);
+        assert!(lauf(&engine, &tablet, &snap, 0).is_empty());
+        tablet.officials_store().set_enabled(true);
+        assert!(lauf(&engine, &tablet, &snap, 1).is_empty(), "kein Stoß");
+        // Ein neuer Aufruf danach druckt wie gewohnt.
+        let mit_8 = snap_officials(
+            vec![
+                ready_named(7, None, "A", "B"),
+                ready_named(8, None, "C", "D"),
+            ],
+            &[1, 2, 3],
+        );
+        tablet.set_snapshot(mit_8.clone());
+        sr(&tablet, 8, 2);
+        rufe(&tablet, 8);
+        assert_eq!(lauf(&engine, &tablet, &mit_8, 2), vec![Bezug::Spiel(8)]);
+    }
+
+    #[test]
+    fn aufruf_modus_slave_druckt_nie() {
+        let (engine, tablet, snap) = aufruf_setup();
+        sr(&tablet, 7, 1);
+        rufe(&tablet, 7);
+        let mut slave = cfg_aufruf(true);
+        slave.slave_mode = true;
+        assert!(engine
+            .beanspruche_druckauftraege(&slave, &snap, &tablet, 0)
+            .is_empty());
+    }
+
+    #[test]
+    fn druckwarnung_nennt_spielnummer_ohne_feld() {
+        let vorab = Druckauftrag {
+            match_id: 7,
+            bezug: Bezug::Spiel(12),
+            vorher: None,
+        };
+        assert_eq!(vorab.bezug_text(), "Spiel-Nr. 12");
+        assert_eq!(Druckauftrag::feld(7, "5").bezug_text(), "Feld 5");
+        assert!(ungueltig_text(12).contains("Spiel-Nr. 12"));
     }
 
     /// Der Regelfall: Spiel steht auf dem Feld, ein Schiedsrichter ist
@@ -6026,11 +6545,11 @@ mod tests {
         tablet.set_snapshot(snap.clone());
         engine.track_officials(&snap, &tablet);
 
-        let auftraege = engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet);
-        assert_eq!(auftraege, vec![(10, "5".to_string())]);
+        let auftraege = engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0);
+        assert_eq!(auftraege, vec![Druckauftrag::feld(10, "5")]);
         // Der zweite Lauf sieht dasselbe Feld — und schweigt.
         assert!(engine
-            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
             .is_empty());
     }
 
@@ -6047,7 +6566,7 @@ mod tests {
 
         assert!(
             engine
-                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
                 .is_empty(),
             "ohne Schiedsrichter kein Blatt"
         );
@@ -6058,8 +6577,8 @@ mod tests {
             .assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
 
         assert_eq!(
-            engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet),
-            vec![(10, "5".to_string())],
+            engine.beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0),
+            vec![Druckauftrag::feld(10, "5")],
             "sobald der Schiedsrichter steht, geht das Blatt raus"
         );
     }
@@ -6074,7 +6593,7 @@ mod tests {
         engine.track_officials(&snap, &tablet);
         for _ in 0..5 {
             assert!(engine
-                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
                 .is_empty());
         }
     }
@@ -6091,7 +6610,7 @@ mod tests {
             .officials_store()
             .assign(10, crate::tablet::officials::OfficialRole::Ar, 2);
         assert!(engine
-            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
             .is_empty());
     }
 
@@ -6105,7 +6624,7 @@ mod tests {
         engine.track_officials(&snap, &tablet);
         assert_eq!(
             engine
-                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
                 .len(),
             1
         );
@@ -6114,7 +6633,7 @@ mod tests {
         let umgesetzt = snap_officials(vec![oncourt_named(10, 7, "A", "B")], &[1, 2]);
         tablet.set_snapshot(umgesetzt.clone());
         assert!(engine
-            .beanspruche_druckauftraege(&cfg_druck(true), &umgesetzt, &tablet)
+            .beanspruche_druckauftraege(&cfg_druck(true), &umgesetzt, &tablet, 0)
             .is_empty());
     }
 
@@ -6128,20 +6647,20 @@ mod tests {
         engine.track_officials(&snap, &tablet);
 
         assert!(engine
-            .beanspruche_druckauftraege(&cfg_druck(false), &snap, &tablet)
+            .beanspruche_druckauftraege(&cfg_druck(false), &snap, &tablet, 0)
             .is_empty());
 
         let mut slave = cfg_druck(true);
         slave.slave_mode = true;
         assert!(engine
-            .beanspruche_druckauftraege(&slave, &snap, &tablet)
+            .beanspruche_druckauftraege(&slave, &snap, &tablet, 0)
             .is_empty());
 
         // Und nichts davon hat einen Vermerk hinterlassen: Sobald der
         // Schalter angeht, ist das Blatt fällig.
         assert_eq!(
             engine
-                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
                 .len(),
             1
         );
@@ -6157,7 +6676,7 @@ mod tests {
         tablet.set_snapshot(snap.clone());
         engine.track_officials(&snap, &tablet);
         assert!(engine
-            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+            .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
             .is_empty());
     }
 
@@ -6179,7 +6698,7 @@ mod tests {
             engine.track_officials(&snap, &tablet);
             assert_eq!(
                 engine
-                    .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                    .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
                     .len(),
                 20
             );
@@ -6192,7 +6711,7 @@ mod tests {
         engine.track_officials(&snap, &tablet);
         assert!(
             engine
-                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet)
+                .beanspruche_druckauftraege(&cfg_druck(true), &snap, &tablet, 0)
                 .is_empty(),
             "nach dem Neustart darf kein einziges Blatt nachkommen"
         );

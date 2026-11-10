@@ -771,6 +771,9 @@ ist — ein Aufschlagrichter allein genügt nicht. Ist die Schiedsrichter-
 verwaltung ganz aus, kennt der Host nie einen SR, und die Automatik bleibt
 bauartbedingt stumm. Die Zuordnung darf dabei **nach** der Feldvergabe kommen
 (Rotation oder von Hand): Geprüft wird ein Zustand, nicht ein Augenblick.
+Im Modus „schon beim Aufruf" (ADR 0082) zählt für wartende Spiele die
+Zuteilung aus Warteliste und Meetingpoint; ein Wechsel vor der Feldvergabe
+druckt nach, ein entfernter SR meldet „ungültig".
 
 ## Zuteilung schon beim Aufruf (seit v0.9.359, ADR 0080)
 

@@ -350,6 +350,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Zettel-Druck schon beim Aufruf in die Vorbereitung** — Spec:
+  [features/zettel-druck-bei-aufruf.md](features/zettel-druck-bei-aufruf.md) (freigegeben
+  10.11.2026), ADR 0082 — neue Auswahl „Drucken: bei der Feldvergabe / schon beim Aufruf";
+  nur mit SR, Nachdruck bei SR-Wechsel bis zur Feldvergabe (20 s stabil), Warnung bei
+  entferntem SR, kein Schwall beim Umschalten. **umgesetzt v0.9.372 + v0.9.373, Feldtest offen**: Nachdruck-Frist und
+  „ungültig"-Hinweis an echtem Drucker prüfen.
+
 - **Spielersuche im TL-Web** — Spec:
   [features/tl-spielersuche.md](features/tl-spielersuche.md) (freigegeben
   09.11.2026), ADR 0081 — **v0.9.368,
@@ -588,12 +595,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   5. **Sichtprüfung der Geräteverwaltung** im laufenden Fenster.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
-
-- **Zettel-Druck schon beim Aufruf in die Vorbereitung** — Spec:
-  [features/zettel-druck-bei-aufruf.md](features/zettel-druck-bei-aufruf.md) (freigegeben
-  10.11.2026), ADR 0082 — neue Auswahl „Drucken: bei der Feldvergabe / schon beim Aufruf";
-  nur mit SR, Nachdruck bei SR-Wechsel bis zur Feldvergabe (20 s stabil), Warnung bei
-  entferntem SR, kein Schwall beim Umschalten. Zwei PRs (Vorabzettel-Sicht, dann Modus).
 
 - **Meetingpoint am Kiosk-Tablet** — Spec:
   [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)

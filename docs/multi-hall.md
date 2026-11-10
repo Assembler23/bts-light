@@ -278,7 +278,9 @@ dass die Zusage nicht an der Position eines Aufrufs hängt.
 
 Für eine zweite Halle richtet man dort einen **Netzwerkdrucker** ein und wählt
 ihn am Master in den Einstellungen aus — die Zettel gehen dann quer durchs Netz
-in die richtige Halle.
+in die richtige Halle. Es bleibt **ein** Drucker für alle Hallen; im Modus
+„schon beim Aufruf" (ADR 0082) gilt das genauso — auch ein Aufruf am Slave
+löst keinen Druck aus. Der Vorabzettel nennt die Halle des Aufrufs.
 
 ## Turnierdatei an badhub: nur der Master lädt hoch
 

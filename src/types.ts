@@ -171,7 +171,13 @@ export interface ScorekeeperConfig {
 export interface PrintConfig {
   auto_enabled: boolean;
   printer_name: string;
+  /** Druckzeitpunkt (Spec zettel-druck-bei-aufruf); fehlt in alten
+   *  Configs → "feldvergabe". */
+  trigger?: PrintTrigger;
 }
+
+/** Wann der Autodruck druckt (Rust: `config::PrintTrigger`). */
+export type PrintTrigger = "feldvergabe" | "aufruf";
 
 /** TP-Datei an badhub (Rust: `config::TpUploadConfig`, Spec tp-datei-upload).
  *  `path` = offene Turnierdatei von BTP, `tournament_uuid` = Turnier-GUID zum

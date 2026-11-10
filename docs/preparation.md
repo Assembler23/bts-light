@@ -81,6 +81,9 @@ druckt für die **ausgewählten** Spiele je einen leeren Schiedsrichterzettel
 (Vorabzettel): Kopf und Namen vorgedruckt, Raster leer, von Hand zu führen.
 Auf dem Blatt stehen dieselben Schiedsrichter wie in Warteliste und Meetingpoint,
 dazu die Halle des Aufrufs und das Druckdatum; das Feld bleibt leer.
+Mit „Drucken: schon beim Aufruf in die Vorbereitung" kommt dieser Zettel beim
+Aufruf von allein (nur mit Schiedsrichter) — siehe
+[schiedsrichterzettel.md](schiedsrichterzettel.md#schon-beim-aufruf-drucken).
 Bewusst an der Auswahl statt als „alles drucken" — wer eine ganze Runde
 braucht, hakt sie an; mehr als 40 Blatt je Auftrag nimmt der Kern ohnehin
 nicht. Details: [schiedsrichterzettel.md](schiedsrichterzettel.md).
