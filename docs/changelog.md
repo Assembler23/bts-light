@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.372
+
+- **Vorabzettel nennt den richtigen Schiedsrichter.** Der leere
+  Schiedsrichterzettel eines Spiels, das noch auf kein Feld gegangen ist,
+  zeigt jetzt dieselben Schiedsrichter wie Warteliste und Meetingpoint —
+  auch direkt nach einer Umteilung, die BTP noch nicht übernommen hat.
+  Dazu trägt er die Halle des Aufrufs und das Druckdatum. Erster Schritt
+  zum Zettel-Druck beim Aufruf (Spec `zettel-druck-bei-aufruf`, ADR 0082).
+
 ## v0.9.371
 
 - **Suche in der Turnierleitungs-Seite mit der Tastatur.** Die Pfeiltasten

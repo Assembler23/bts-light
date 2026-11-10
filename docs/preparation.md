@@ -79,6 +79,8 @@ Eingeführt in v0.9.14; Hallen-Filter auf `display=next` mit v0.9.14
 **Zettel zum Mitgeben:** Neben „Aufrufen" steht der Knopf **🖨 Zettel**. Er
 druckt für die **ausgewählten** Spiele je einen leeren Schiedsrichterzettel
 (Vorabzettel): Kopf und Namen vorgedruckt, Raster leer, von Hand zu führen.
+Auf dem Blatt stehen dieselben Schiedsrichter wie in Warteliste und Meetingpoint,
+dazu die Halle des Aufrufs und das Druckdatum; das Feld bleibt leer.
 Bewusst an der Auswahl statt als „alles drucken" — wer eine ganze Runde
 braucht, hakt sie an; mehr als 40 Blatt je Auftrag nimmt der Kern ohnehin
 nicht. Details: [schiedsrichterzettel.md](schiedsrichterzettel.md).

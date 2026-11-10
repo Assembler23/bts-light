@@ -432,6 +432,31 @@ pub fn dokumente(
     modus: Modus,
     match_ids: &[i64],
 ) -> Vec<SheetDoc> {
+    dokumente_zum(state, logo_uri, modus, match_ids, super::monitor::now_ms())
+}
+
+/// Wie [`dokumente`], mit der Uhr als Parameter (Tests).
+///
+/// **Vorabzettel eines wartenden Spiels** (Spec `zettel-druck-bei-aufruf`,
+/// ADR 0082, Punkt 1): Das Spiel steht noch auf keinem Feld, der Zettel
+/// geht mit Spielern und Schiedsrichter erst dorthin. Darum
+/// - nennt er den Schiedsrichter so, wie Warteliste und Meetingpoint ihn
+///   zeigen (Sicht „Hand vor BTP"). Sonst stünde nach einer Umteilung, die
+///   BTP noch nicht gespiegelt hat, eine andere Person auf dem Papier als
+///   in der Liste.
+/// - nimmt er die Halle des Aufrufs, wenn BTP dem Spiel keine zuordnet.
+/// - trägt er das Druckdatum, solange das Spiel keinen Zeitstempel hat:
+///   Ein Leerzettel, der heute in die Halle geht, gehört zu heute.
+///
+/// Laufende und beendete Spiele bleiben bei der wirksamen Sicht (BTP
+/// gewinnt, R2) und dem Datum aus dem Spiel.
+pub(crate) fn dokumente_zum(
+    state: &super::state::TabletState,
+    logo_uri: Option<&str>,
+    modus: Modus,
+    match_ids: &[i64],
+    jetzt_ms: u64,
+) -> Vec<SheetDoc> {
     let Some(snap) = state.snapshot_clone() else {
         return Vec::new();
     };
@@ -469,9 +494,23 @@ pub fn dokumente(
             };
 
             let zeiten = state.match_times_store().entry(id);
-            let (schiedsrichter, service_richter, _) = state.court_officials(Some(m), &snap);
-            let halle = m
-                .location_id
+            let wartend =
+                modus == Modus::Vorab && m.status == crate::btp::model::MatchStatus::Scheduled;
+            let (schiedsrichter, service_richter, _) = if wartend {
+                state.wartende_officials(m, &snap)
+            } else {
+                state.court_officials(Some(m), &snap)
+            };
+            // Rückfall auf die Halle des Aufrufs — auch eines geparkten:
+            // Sie ist nur ein Hinweis, aber besser als ein leeres Feld.
+            let halle_id = m.location_id.or_else(|| {
+                if wartend {
+                    state.meetingpoint_store().location_of(id)
+                } else {
+                    None
+                }
+            });
+            let halle = halle_id
                 .and_then(|lid| snap.locations.iter().find(|l| l.id == lid))
                 .map(|l| l.name.clone())
                 .unwrap_or_default();
@@ -505,8 +544,12 @@ pub fn dokumente(
                 // Turnier nachgedruckt wird, trüge sonst ein falsches
                 // Datum — auf einem Archivbeleg ein echter Fehler
                 // (Review-Befund E5). Ohne Zeitstempel bleibt das Feld
-                // leer statt zu raten.
-                datum: start_ms.map(datum).unwrap_or_default(),
+                // leer statt zu raten. Ausnahme: der Vorabzettel eines
+                // wartenden Spiels — er ist ein Leerzettel für heute.
+                datum: start_ms
+                    .or(wartend.then_some(jetzt_ms))
+                    .map(datum)
+                    .unwrap_or_default(),
                 beginn,
                 ende,
                 dauer_min: dauer,
@@ -1141,6 +1184,143 @@ mod tests {
         // Unplausibel → leer statt Unsinn (das Feld verschwindet dann
         // aus dem Kopf, statt eine Lüge zu drucken).
         assert_eq!(datum(u64::MAX), "");
+    }
+
+    // ── Vorabzettel wartender Spiele (Spec `zettel-druck-bei-aufruf`,
+    //    ADR 0082, Punkt 1) ──────────────────────────────────────────
+
+    /// 10.11.2026, 14:00 Ortszeit — der „Druckzeitpunkt" der Tests.
+    fn druckzeit() -> u64 {
+        use chrono::TimeZone;
+        chrono::Local
+            .with_ymd_and_hms(2026, 11, 10, 14, 0, 0)
+            .unwrap()
+            .timestamp() as u64
+            * 1000
+    }
+
+    fn official(id: i64, first: &str, name: &str) -> crate::btp::model::BtpOfficial {
+        crate::btp::model::BtpOfficial {
+            id,
+            name: name.into(),
+            first: first.into(),
+            nationality: None,
+        }
+    }
+
+    /// Turnier mit SR-Betrieb: Spiel 7 wartet, Spiel 10 steht auf Feld 101.
+    /// BTP führt an beiden Official 1; zwei Hallen.
+    fn vorab_turnier() -> crate::tablet::state::TabletState {
+        use crate::btp::model::{BtpLocation, MatchStatus};
+        use crate::tablet::state::tests::{match_on, snapshot};
+        let mut wartend = match_on(7, None, MatchStatus::Scheduled);
+        wartend.official1_id = Some(1);
+        let mut laufend = match_on(10, Some(101), MatchStatus::OnCourt);
+        laufend.official1_id = Some(1);
+        let mut snap = snapshot(vec![wartend, laufend], vec![(101, "1")]);
+        snap.officials = vec![
+            official(1, "Sabine", "Schmidt"),
+            official(2, "Max", "Meier"),
+        ];
+        snap.locations = vec![
+            BtpLocation {
+                id: 1,
+                name: "Halle Nord".into(),
+            },
+            BtpLocation {
+                id: 2,
+                name: "Halle Süd".into(),
+            },
+        ];
+        let tablet = crate::tablet::state::TabletState::default();
+        tablet.set_snapshot(snap);
+        tablet.officials_store().set_enabled(true);
+        tablet
+    }
+
+    fn vorab(tablet: &crate::tablet::state::TabletState, id: i64) -> SheetDoc {
+        dokumente_zum(tablet, None, Modus::Vorab, &[id], druckzeit())
+            .pop()
+            .expect("Vorabzettel")
+    }
+
+    #[test]
+    fn vorabzettel_wartend_zeigt_handzuteilung_vor_btp() {
+        let tablet = vorab_turnier();
+        use crate::tablet::officials::OfficialRole as R;
+        // BTP führt noch Sabine, die TL hat Max eingeteilt.
+        tablet.officials_store().assign(7, R::Sr, 2);
+        assert_eq!(
+            vorab(&tablet, 7).schiedsrichter,
+            vec!["Max Meier".to_string()]
+        );
+    }
+
+    #[test]
+    fn vorabzettel_laufend_bleibt_bei_btp_sicht() {
+        let tablet = vorab_turnier();
+        use crate::tablet::officials::OfficialRole as R;
+        tablet.officials_store().assign(10, R::Sr, 2);
+        // Am Feld gewinnt BTP (R2), bis der Rücksync die Umteilung spiegelt.
+        assert_eq!(
+            vorab(&tablet, 10).schiedsrichter,
+            vec!["Sabine Schmidt".to_string()]
+        );
+    }
+
+    #[test]
+    fn vorabzettel_sr_explizit_entfernt_bleibt_leer() {
+        let tablet = vorab_turnier();
+        use crate::tablet::officials::OfficialRole as R;
+        // „ohne" (`Some(0)`) schlägt den BTP-Wert an der wartenden Zeile.
+        tablet.officials_store().clear_assignment(7, R::Sr);
+        assert!(vorab(&tablet, 7).schiedsrichter.is_empty());
+    }
+
+    #[test]
+    fn vorabzettel_wartend_nimmt_aufruf_halle_wenn_btp_keine_kennt() {
+        let tablet = vorab_turnier();
+        assert_eq!(vorab(&tablet, 7).halle, "", "ohne Aufruf keine Halle");
+        tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+            match_id: 7,
+            location_id: Some(2),
+            called_at_ms: druckzeit(),
+        });
+        assert_eq!(vorab(&tablet, 7).halle, "Halle Süd");
+
+        // Kennt BTP eine Halle, gilt die.
+        let mut snap = tablet.snapshot_clone().unwrap();
+        snap.matches
+            .iter_mut()
+            .find(|m| m.id == 7)
+            .unwrap()
+            .location_id = Some(1);
+        tablet.set_snapshot(snap);
+        assert_eq!(vorab(&tablet, 7).halle, "Halle Nord");
+    }
+
+    #[test]
+    fn vorabzettel_wartend_traegt_druckdatum() {
+        let tablet = vorab_turnier();
+        let doc = vorab(&tablet, 7);
+        assert_eq!(doc.datum, "10.11.2026");
+        assert_eq!(doc.feld, "", "wartend: kein Feld");
+        assert_eq!(doc.beginn, "", "eine Uhrzeit wird nicht erfunden");
+    }
+
+    #[test]
+    fn normalzettel_datum_bleibt_spieldatum() {
+        let tablet = vorab_turnier();
+        // Laufendes Spiel ohne Zeitstempel: kein Druckdatum.
+        assert_eq!(vorab(&tablet, 10).datum, "");
+        // Normalmodus an einem wartenden Spiel ebenso. Es braucht eine
+        // Aufzeichnung, sonst gäbe es gar keinen Zettel.
+        assert!(tablet
+            .timeline_store()
+            .apply_sync(7, tl(vec![satz(0, 0, "AB")])));
+        let docs = dokumente_zum(&tablet, None, Modus::Normal, &[7], druckzeit());
+        assert_eq!(docs.len(), 1, "mit Aufzeichnung gibt es einen Zettel");
+        assert_eq!(docs[0].datum, "", "Normalzettel nimmt nie das Druckdatum");
     }
 
     /// Zurückgenommenes verschwindet nicht spurlos (ADR 0038): Es steht im
