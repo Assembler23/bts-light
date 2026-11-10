@@ -470,10 +470,31 @@ impl Default for PredictionConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct PrintConfig {
-    /// Zettel bei der Feldvergabe selbsttätig drucken?
+    /// Zettel selbsttätig drucken? Wann, sagt [`PrintConfig::trigger`].
     pub auto_enabled: bool,
     /// Zieldrucker; leer = Windows-Standarddrucker.
     pub printer_name: String,
+    /// Druckzeitpunkt des Autodrucks (Spec `zettel-druck-bei-aufruf`,
+    /// ADR 0082). Fehlt das Feld (alte Config), gilt die Feldvergabe —
+    /// bestehende Installationen merken vom Update nichts.
+    pub trigger: PrintTrigger,
+}
+
+/// Wann der Autodruck den Zettel druckt.
+///
+/// Ein unbekannter Wert (etwa aus einer neueren Version nach einem
+/// Rollback) wird zur Feldvergabe — dem Verhalten, das jede Version kennt.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrintTrigger {
+    /// Schon beim Aufruf in die Vorbereitung; Nachdruck, wenn sich der
+    /// Schiedsrichter vor der Feldvergabe ändert.
+    Aufruf,
+    /// Wenn das Spiel auf ein Feld kommt (Verhalten bis v0.9.372). Steht
+    /// zuletzt, weil `#[serde(other)]` nur am letzten Wert erlaubt ist.
+    #[default]
+    #[serde(other)]
+    Feldvergabe,
 }
 
 /// TP-Datei an badhub (Spec `docs/features/tp-datei-upload.md`, ADR 0060).
@@ -2002,6 +2023,36 @@ mod sprachdienst_tests {
 mod tests {
     use super::*;
 
+    // ── Druckzeitpunkt des Autodrucks (Spec `zettel-druck-bei-aufruf`) ──
+
+    #[test]
+    fn print_trigger_fehlt_ergibt_feldvergabe() {
+        let alt: PrintConfig =
+            serde_json::from_str(r#"{"auto_enabled":true,"printer_name":"X"}"#).unwrap();
+        assert_eq!(alt.trigger, PrintTrigger::Feldvergabe);
+        assert_eq!(PrintConfig::default().trigger, PrintTrigger::Feldvergabe);
+    }
+
+    #[test]
+    fn print_trigger_unbekannt_ergibt_feldvergabe() {
+        let c: PrintConfig = serde_json::from_str(r#"{"trigger":"beim_mond"}"#).unwrap();
+        assert_eq!(c.trigger, PrintTrigger::Feldvergabe);
+    }
+
+    #[test]
+    fn print_trigger_roundtrip_snake_case() {
+        let c = PrintConfig {
+            trigger: PrintTrigger::Aufruf,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains(r#""trigger":"aufruf""#), "{json}");
+        assert_eq!(serde_json::from_str::<PrintConfig>(&json).unwrap(), c);
+        assert!(serde_json::to_string(&PrintTrigger::Feldvergabe)
+            .unwrap()
+            .contains("feldvergabe"));
+    }
+
     // ── Takt-Upload (Spec tp-takt-upload, L2, AK 1) ────────────────────
     #[test]
     fn tp_upload_takt_alte_config_aus_klemmung_und_standard() {
@@ -2682,6 +2733,7 @@ mod tests {
             print: PrintConfig {
                 auto_enabled: true,
                 printer_name: "Drucker im Turnierbüro".to_string(),
+                trigger: PrintTrigger::Aufruf,
             },
             scorekeeper: ScorekeeperConfig {
                 enabled: true,

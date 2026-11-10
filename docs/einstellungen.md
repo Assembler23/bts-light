@@ -399,8 +399,14 @@ kommt der Verlierer eines regulär beendeten Spiels in die Warteschlange.
 
 | Feld | Voreinstellung | Bedeutung |
 |---|---|---|
-| **Zettel bei der Feldvergabe automatisch drucken** | aus | Druckt beim Belegen eines Feldes von allein. |
+| **Zettel automatisch drucken** | aus | Druckt den Zettel von allein. |
+| **Drucken:** | bei der Feldvergabe | **bei der Feldvergabe**: sobald das Spiel auf einem Feld steht. **schon beim Aufruf in die Vorbereitung**: sobald das Spiel gerufen ist. Ausgegraut, solange der Haken darüber oder „Mit Schiedsrichtern spielen" aus ist. |
 | **Drucker** | leer = Windows-Standarddrucker | Zieldrucker für den Zettel. |
+
+<!-- pruef: "Zettel automatisch drucken" in src/pages/SetupWizard.tsx -->
+<!-- pruef: "bei der Feldvergabe" in src/pages/SetupWizard.tsx -->
+<!-- pruef: "schon beim Aufruf in die Vorbereitung" in src/pages/SetupWizard.tsx -->
+<!-- pruef: /#\[default\]\s*#\[serde\(other\)\]\s*Feldvergabe/ in src-tauri/src/config.rs -->
 
 > **Autodruck braucht Schiedsrichter.** Gedruckt wird nur für Spiele, denen ein
 > **Schiedsrichter** zugeordnet ist. Ist oben „Mit Schiedsrichtern spielen"
@@ -411,8 +417,9 @@ Die Drucker-Liste ist **zunächst leer** — sie füllt sich erst, wenn du
 wählbar, wenn Windows ihn gerade nicht meldet.
 
 Gedruckt wird **A4 quer**, ohne Dialog, auf dem Rechner, auf dem BTS Light
-läuft. Jedes Spiel wird **genau einmal** gedruckt; ein Neustart druckt nichts
-nach. Details: [Schiedsrichterzettel drucken](schiedsrichterzettel.md).
+läuft. Bei der Feldvergabe wird jedes Spiel **genau einmal** gedruckt. Beim
+Aufruf kann ein zweiter Zettel kommen: wenn der Schiedsrichter vor der
+Feldvergabe wechselt. Ein Neustart druckt nichts nach. Details: [Schiedsrichterzettel drucken](schiedsrichterzettel.md).
 
 ## Bereich: Anzeigen & Check-In
 

@@ -66,6 +66,7 @@ import type {
   DrawInfo,
   NamenDarunter,
   NamenDavor,
+  PrintTrigger,
   TpFileInfo,
 } from "../types";
 
@@ -600,6 +601,10 @@ export function SetupWizard({
   const [printAuto, setPrintAuto] = useState(
     initialConfig.print?.auto_enabled ?? false,
   );
+  // Druckzeitpunkt (Spec zettel-druck-bei-aufruf): ohne Angabe Feldvergabe.
+  const [printTrigger, setPrintTrigger] = useState<PrintTrigger>(
+    initialConfig.print?.trigger === "aufruf" ? "aufruf" : "feldvergabe",
+  );
   const [printerName, setPrinterName] = useState(
     initialConfig.print?.printer_name ?? "",
   );
@@ -885,6 +890,7 @@ export function SetupWizard({
       print: {
         auto_enabled: printAuto,
         printer_name: printerName.trim(),
+        trigger: printTrigger,
       },
       officials: {
         enabled: offEnabled,
@@ -2450,7 +2456,8 @@ export function SetupWizard({
           <p className="text-xs text-slate-500">
             Zettel lassen sich jederzeit von Hand drucken — in der Spielübersicht
             und im Tab „In Vorbereitung". Zusätzlich kann BTS Light den Zettel
-            selbsttätig ausdrucken, sobald ein Spiel auf ein Feld kommt.
+            selbsttätig ausdrucken — wenn ein Spiel auf ein Feld kommt oder
+            schon beim Aufruf in die Vorbereitung.
           </p>
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input
@@ -2458,8 +2465,41 @@ export function SetupWizard({
               checked={printAuto}
               onChange={(e) => setPrintAuto(e.currentTarget.checked)}
             />
-            Zettel bei der Feldvergabe automatisch drucken
+            Zettel automatisch drucken
           </label>
+          {/* Druckzeitpunkt (Spec zettel-druck-bei-aufruf, ADR 0082). Ohne
+              Schiedsrichter-Betrieb gibt es nichts zu wählen. */}
+          <fieldset
+            disabled={!printAuto || !offEnabled}
+            className="ml-6 flex flex-col gap-1 text-sm text-slate-600 disabled:opacity-50"
+          >
+            <legend className="mb-1">Drucken:</legend>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="print-trigger"
+                checked={printTrigger === "feldvergabe"}
+                onChange={() => setPrintTrigger("feldvergabe")}
+              />
+              bei der Feldvergabe
+            </label>
+            <label className="flex items-start gap-2">
+              <input
+                type="radio"
+                name="print-trigger"
+                className="mt-1"
+                checked={printTrigger === "aufruf"}
+                onChange={() => setPrintTrigger("aufruf")}
+              />
+              <span>
+                schon beim Aufruf in die Vorbereitung
+                <span className="block text-xs text-slate-500">
+                  Nachdruck, wenn sich der Schiedsrichter vor der Feldvergabe
+                  ändert. Wird er entfernt, gibt es eine Warnung.
+                </span>
+              </span>
+            </label>
+          </fieldset>
           {printAuto && !offEnabled && (
             <p className="flex items-start gap-1.5 text-xs text-amber-700">
               <Info size={14} className="mt-0.5 shrink-0" />
