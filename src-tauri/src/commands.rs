@@ -3215,6 +3215,10 @@ pub struct TabletInfo {
     pub cloud_enabled: bool,
     /// Alle Courts mit aktuellem Match, Live-Stand und Tablet-Status.
     pub courts: Vec<crate::tablet::state::CourtOverview>,
+    /// Hinweis zur Cloud-Verbindung fürs Dashboard — gesetzt, wenn der
+    /// Relay diesen PC seit über 30 s abweist, weil ein anderer PC dasselbe
+    /// Turnier hält (Spec relay-haerten, PR 9).
+    pub cloud_hinweis: Option<String>,
 }
 
 /// Liefert Verbindungsart, Tablet-Adressen-Basis und die Felder-Übersicht.
@@ -3269,6 +3273,10 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
         lan_enabled,
         cloud_enabled,
         courts,
+        cloud_hinweis: cloud_enabled
+            .then(|| state.tablet.cloud_hinweis())
+            .flatten()
+            .map(str::to_string),
     }
 }
 

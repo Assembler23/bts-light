@@ -465,6 +465,30 @@ const RESULT_BODY_MAX: usize = 16 * 1024;
 /// fehlender Namespace als „kommt gleich wieder".
 const HOST_KARENZ_MS: u64 = 20_000;
 
+/// So lange hält der Relay die Daten eines Turniers ohne Turnier-PC (Spec
+/// relay-haerten, PR 8; ADR 0089). Lang genug für jede Störung eines
+/// Turniertags (Neustart des PCs, Router-Ausfall, Mittagspause mit
+/// zugeklapptem Laptop) — danach liegen keine Namen, Bilder und Listen
+/// eines beendeten Turniers mehr im Speicher.
+const DATEN_FRIST_MS: u64 = 60 * 60 * 1000;
+
+/// Ein Brief ohne Personen: nur die Spielkennung und „beendet". Bleibt nach
+/// dem Leeren an einem Feld stehen, an dem noch ein Tablet hängt — ohne
+/// Eintrag verwürfe der Stale-Filter jeden weiteren Punkt des Tablets, und
+/// bei der Rückkehr des Turnier-PCs gälte „anderes Spiel" (Stand auf 0:0).
+fn anonymer_brief(match_id: i64, finalized: bool) -> MatchBrief {
+    serde_json::from_value(serde_json::json!({
+        "matchId": match_id,
+        "teamA": [],
+        "teamB": [],
+        "eventLabel": "",
+        "bestOfSets": 0,
+        "targetScore": 0,
+        "finalized": finalized,
+    }))
+    .expect("anonymer Brief ist lesbar")
+}
+
 /// Takt des Aufräum-Tasks ([`fegen`]).
 const FEGEN_TAKT: Duration = Duration::from_secs(5);
 
@@ -564,6 +588,13 @@ async fn fegen(broker: &Broker, jetzt: u64) {
         if namespace.karenz_abgelaufen(jetzt) && !namespace.karenz_gemeldet {
             namespace.karenz_gemeldet = true;
             alle_monitore_anstossen(namespace);
+        }
+        if namespace.daten_frist_abgelaufen(jetzt) && !namespace.geleert {
+            namespace.leeren();
+            tracing::info!(
+                "Namespace '{kennung}': seit 60 min ohne Turnier-PC — Turnierdaten geleert",
+                kennung = kurz(ns)
+            );
         }
         if namespace.is_empty_um(jetzt) {
             leer.push(ns.clone());
@@ -929,6 +960,9 @@ struct Namespace {
     host_weg_seit: Option<u64>,
     /// Das Karenz-Ende ist den Anzeigen schon gemeldet ([`fegen`]).
     karenz_gemeldet: bool,
+    /// Die Turnierdaten sind nach [`DATEN_FRIST_MS`] ohne Turnier-PC
+    /// geleert ([`Namespace::leeren`]).
+    geleert: bool,
     /// CourtID → Sende-Ende zur Tablet-WebSocket.
     tablets: HashMap<i64, Tx>,
     /// CourtID → Geräte-Kennung des aktiven Tablets (leer bei alten
@@ -1278,6 +1312,7 @@ impl Namespace {
             host_last_seen: 0,
             host_weg_seit: Some(now_ms()),
             karenz_gemeldet: false,
+            geleert: false,
             tablets: HashMap::new(),
             tablet_devices: HashMap::new(),
             court_state: HashMap::new(),
@@ -1371,7 +1406,53 @@ impl Namespace {
             // sonst ließe sich mit kurzen Verbindungen zu erfundenen
             // Kennungen das Namespace-Limit füllen, ohne eine Verbindung
             // offen zu halten (Code-Review).
-            && (self.host_last_seen == 0 || self.karenz_abgelaufen(jetzt))
+            //
+            // Seit PR 8 bleibt so ein Namespace die ganze Daten-Frist stehen:
+            // Die Anzeigen sehen 503 und kennen ihre Zuweisung weiter; kehrt
+            // der Turnier-PC zurück, ist alles noch da.
+            && (self.host_last_seen == 0 || self.daten_frist_abgelaufen(jetzt))
+    }
+
+    /// Ist der Turnier-PC schon länger als die Daten-Frist weg?
+    fn daten_frist_abgelaufen(&self, jetzt: u64) -> bool {
+        self.host_weg_seit
+            .is_some_and(|seit| jetzt.saturating_sub(seit) >= DATEN_FRIST_MS)
+    }
+
+    /// Leert die Turnierdaten (nach [`DATEN_FRIST_MS`] ohne Turnier-PC).
+    /// Was ein noch verbundenes Tablet zum Weiterzählen braucht, bleibt:
+    /// sein Stand, seine Sätze und ein Brief ohne Personen.
+    fn leeren(&mut self) {
+        let mit_tablet: HashSet<i64> = self.tablets.keys().copied().collect();
+        self.court_matches = std::mem::take(&mut self.court_matches)
+            .into_iter()
+            .filter(|(feld, _)| mit_tablet.contains(feld))
+            .map(|(feld, b)| (feld, anonymer_brief(b.match_id, b.finalized)))
+            .collect();
+        self.court_scores.retain(|f, _| mit_tablet.contains(f));
+        self.court_state.retain(|f, _| mit_tablet.contains(f));
+        self.display_court_state
+            .retain(|f, _| mit_tablet.contains(f));
+        self.state_deckel_gemeldet
+            .retain(|f, _| mit_tablet.contains(f));
+        self.monitor_seq.retain(|f, _| mit_tablet.contains(f));
+        self.court_on_court_since.clear();
+        self.vor_match.clear();
+        self.court_labels.clear();
+        self.court_hall.clear();
+        self.courts.clear();
+        self.prepared.clear();
+        self.freetext.clear();
+        self.meetingpoint = relay_proto::MeetingpointView::default();
+        // Bilder und Logo geben dabei ihren Anteil am Bilder-Budget zurück.
+        self.monitor = None;
+        self.monitor_control = MonitorControl::default();
+        self.monitor_seen.clear();
+        self.slaves.clear();
+        self.azure_tts = None;
+        self.overview_cache = None;
+        self.bump_overview_rev();
+        self.geleert = true;
     }
 
     /// Ist der Turnier-PC schon länger als die Karenz weg?
@@ -3498,6 +3579,12 @@ async fn monitor_upload(
         })
     });
     let mut map = broker.namespaces.lock().await;
+    // Wird das Budget knapp, weichen zuerst die Bilder von Turnieren OHNE
+    // Turnier-PC (am längsten verwaist zuerst). Sie blieben sonst die ganze
+    // Daten-Frist gebucht — auch die eines erfundenen Turniers, das nur kurz
+    // verbunden war. Ihr Turnier-PC lädt beim Wiederverbinden neu hoch.
+    let neu_bytes: usize = ads.iter().chain(logo.iter()).map(|b| b.bytes.len()).sum();
+    hostlose_bilder_freigeben(&mut map, &broker, neu_bytes);
     let Some(namespace) = map.get_mut(&ns) else {
         return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
     };
@@ -3580,6 +3667,50 @@ async fn monitor_upload(
         kennung = kurz(&ns)
     );
     antwort
+}
+
+/// Gibt Bilder hostloser Namespaces frei, bis `neu_bytes` ins Budget passen
+/// (oder keine mehr da sind). Am längsten ohne Turnier-PC zuerst.
+fn hostlose_bilder_freigeben(
+    map: &mut HashMap<String, Namespace>,
+    broker: &Broker,
+    neu_bytes: usize,
+) {
+    use std::sync::atomic::Ordering;
+    let passt = || {
+        broker
+            .bilder_bytes
+            .load(Ordering::SeqCst)
+            .saturating_add(neu_bytes)
+            <= broker.bilder_budget
+    };
+    if passt() {
+        return;
+    }
+    let mut verwaist: Vec<(u64, String)> = map
+        .iter()
+        .filter(|(_, n)| {
+            n.host.is_none()
+                && n.monitor
+                    .as_ref()
+                    .is_some_and(|m| !m.ads.is_empty() || m.logo.is_some())
+        })
+        .map(|(ns, n)| (n.host_weg_seit.unwrap_or(0), ns.clone()))
+        .collect();
+    verwaist.sort();
+    for (_, ns) in verwaist {
+        if passt() {
+            break;
+        }
+        if let Some(m) = map.get_mut(&ns).and_then(|n| n.monitor.as_mut()) {
+            m.ads.clear();
+            m.logo = None;
+            tracing::info!(
+                "Namespace '{kennung}': Bilder freigegeben (Budget knapp, kein Turnier-PC)",
+                kennung = kurz(&ns)
+            );
+        }
+    }
 }
 
 /// Lässt nur die erwarteten Bild-MIME-Typen durch (der Header kommt vom
@@ -5500,6 +5631,7 @@ fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
             // Der Turnier-PC ist (wieder) da. Hatten die Anzeigen schon die
             // Sperre gesehen, einmal anstoßen — sie holen sofort den Stand.
             namespace.host_weg_seit = None;
+            namespace.geleert = false;
             if std::mem::take(&mut namespace.karenz_gemeldet) {
                 alle_monitore_anstossen(namespace);
             }
@@ -5522,6 +5654,11 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
 
     {
         let mut map = broker.namespaces.lock().await;
+        // Tabelle voll: Gehaltene Daten dürfen nie einen neuen Turnier-PC
+        // aussperren — der am längsten hostlose Namespace ohne Tablet weicht.
+        if !map.contains_key(&ns) && map.len() >= MAX_NAMESPACES {
+            verdraenge_hostlosen(&mut map);
+        }
         if !map.contains_key(&ns) && map.len() >= MAX_NAMESPACES {
             tracing::warn!(
                 "Namespace-Limit erreicht – Host für '{kennung}' abgewiesen",
@@ -5665,6 +5802,37 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     );
 }
 
+/// Entfernt den am längsten hostlosen Namespace, an dem kein Tablet und
+/// kein offenes Ergebnis hängt. Seine Monitor- und TL-Verbindungen werden
+/// verabschiedet. Liefert `false`, wenn es keinen gibt.
+fn verdraenge_hostlosen(map: &mut HashMap<String, Namespace>) -> bool {
+    let Some(ns) = map
+        .iter()
+        .filter(|(_, n)| n.host.is_none() && n.tablets.is_empty() && n.pending.is_empty())
+        .min_by_key(|(_, n)| n.host_weg_seit.unwrap_or(0))
+        .map(|(ns, _)| ns.clone())
+    else {
+        return false;
+    };
+    if let Some(n) = map.remove(&ns) {
+        let tschuess = Message::Close(None);
+        for tx in n
+            .monitor_subs
+            .values()
+            .flatten()
+            .chain(n.monitor_subs_all.iter())
+            .chain(n.tl_subs.iter())
+        {
+            let _ = tx.send(tschuess.clone());
+        }
+        tracing::warn!(
+            "Namespace-Limit erreicht – hostlosen Namespace '{kennung}' verdrängt",
+            kennung = kurz(&ns)
+        );
+    }
+    true
+}
+
 /// Ein Close-Frame mit Code und Grund (4000er-Bereich: anwendungseigen).
 fn close_mit_grund(code: u16, grund: &'static str) -> Message {
     Message::Close(Some(axum::extract::ws::CloseFrame {
@@ -5688,6 +5856,10 @@ fn release_host_slot(namespace: &mut Namespace, tx: &Tx) -> bool {
         // Die Uhr läuft ab dem letzten Lebenszeichen, nicht ab jetzt.
         namespace.host_weg_seit = Some(namespace.host_last_seen);
         namespace.karenz_gemeldet = false;
+        // Der Zugang zum Sprachdienst gehört dem Turnier-PC — ohne ihn hat
+        // er im Speicher des Relays nichts zu suchen (die Ansage-Route
+        // sperrt ohnehin sofort).
+        namespace.azure_tts = None;
         // Die Turnierleitungs-Seiten verabschieden: Sie fallen auf ihren
         // Poll und sehen 503. Ein vergessener TL-Tab hält so auch den
         // Namespace nicht mehr am Leben.
@@ -8686,11 +8858,14 @@ mod tests {
         let r = stand_routen(&broker, &ns, Default::default()).await;
         assert_eq!(r[0].1, StatusCode::OK);
         assert!(r[0].2.contains("\"courtLabel\":\"Feld 5\""));
-        // Der Aufräum-Lauf lässt ihn in der Karenz stehen und entfernt ihn
-        // danach.
+        // Der Aufräum-Lauf lässt ihn stehen — auch nach der Karenz (die
+        // Anzeigen sehen dann 503 und kennen ihre Zuweisung weiter) — und
+        // entfernt ihn erst nach der Daten-Frist.
         fegen(&broker, now_ms()).await;
         assert!(broker.namespaces.lock().await.contains_key(&ns));
         fegen(&broker, now_ms() + HOST_KARENZ_MS).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
         assert!(!broker.namespaces.lock().await.contains_key(&ns));
     }
 
@@ -8957,6 +9132,362 @@ mod tests {
         // /health nennt die Zahl der Turnier-PCs.
         let h = health(State(broker.clone())).await.0;
         assert_eq!(h["hosts"], serde_json::json!(1));
+    }
+
+    // ───────────── Daten-Verfall (Spec relay-haerten, PR 8) ─────────────
+
+    /// Ein Turnier mit allem, was der Relay je hält: zwei Felder mit Spiel,
+    /// Stand und Zustand (Feld 5 mit Tablet, Feld 6 ohne), Listen, Bilder.
+    async fn volles_turnier(broker: &Broker, ns: &str) -> (Tx, Tx) {
+        let (host_tx, _host_rx) = turnier_mit_stand(broker, ns).await;
+        let (tablet_tx, _trx) = kanal_test();
+        monitor_upload(
+            State(broker.clone()),
+            Path(ns.to_string()),
+            Json(bild_upload(&[b"bild"], Some(b"logo"))),
+        )
+        .await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(ns).unwrap();
+        n.tablets.insert(5, tablet_tx.clone());
+        for feld in [5, 6] {
+            n.court_matches.insert(feld, brief(100 + feld));
+            n.court_scores
+                .insert(feld, vec![relay_proto::SetAb { a: 11, b: 7 }]);
+            n.court_state.insert(feld, "{\"rev\":3}".into());
+            n.monitor_seq.insert(feld, 9);
+            n.court_labels.insert(feld, format!("Feld {feld}"));
+            n.court_hall.insert(feld, "Halle A".into());
+        }
+        n.courts.push(relay_proto::CourtBrief {
+            id: 5,
+            label: "Feld 5".into(),
+            hall: "Halle A".into(),
+            hall_color: None,
+        });
+        n.freetext.push(relay_proto::FreetextItem {
+            id: 1,
+            text: "Bitte Herrn Mustermann zur Turnierleitung".into(),
+            hall: String::new(),
+        });
+        n.slaves.insert("s1".into(), ("Halle B".into(), now_ms()));
+        n.monitor_seen.insert("tv-1".into(), now_ms());
+        n.azure_tts = Some(
+            serde_json::from_value(serde_json::json!({
+                "key": "geheim", "region": "westeurope", "voice": "de-DE-KatjaNeural"
+            }))
+            .unwrap(),
+        );
+        drop(map);
+        (host_tx, tablet_tx)
+    }
+
+    #[test]
+    fn anonymer_brief_traegt_keine_person() {
+        let b = anonymer_brief(42, true);
+        assert_eq!((b.match_id, b.finalized), (42, true));
+        assert!(b.team_a.is_empty() && b.team_b.is_empty());
+        assert!(b.sr_names.is_empty() && b.scorekeeper.is_empty());
+        assert!(b.event_label.is_empty() && b.class_label.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sprachschluessel_ist_sofort_weg() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(&ns).unwrap();
+        assert!(n.azure_tts.is_some());
+        assert!(release_host_slot(n, &host_tx));
+        assert!(
+            n.azure_tts.is_none(),
+            "mit dem Abgang, nicht erst nach 60 min"
+        );
+        // Alles andere ist noch da.
+        assert!(!n.prepared.is_empty() || n.monitor.is_some());
+    }
+
+    #[tokio::test]
+    async fn nach_sechzig_minuten_sind_turnierdaten_weg() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        assert!(gebucht(&broker) > 0);
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        // Kurz vor Ablauf: nichts geleert.
+        fegen(&broker, now_ms() + DATEN_FRIST_MS - 60_000).await;
+        assert!(broker
+            .namespaces
+            .lock()
+            .await
+            .get(&ns)
+            .unwrap()
+            .monitor
+            .is_some());
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("das Tablet hält den Namespace");
+        assert!(n.geleert);
+        assert!(n.monitor.is_none() && n.courts.is_empty() && n.freetext.is_empty());
+        assert!(n.court_labels.is_empty() && n.court_hall.is_empty());
+        assert!(n.slaves.is_empty() && n.monitor_seen.is_empty());
+        assert!(n.monitor_control.targets.is_empty());
+        assert!(!n.meetingpoint.enabled && n.prepared.is_empty());
+        // Feld ohne Tablet: alles weg.
+        assert!(!n.court_matches.contains_key(&6));
+        assert!(!n.court_scores.contains_key(&6) && !n.court_state.contains_key(&6));
+        // Die Bilder haben ihren Anteil am Budget zurückgegeben.
+        assert_eq!(gebucht(&broker), 0);
+        // Was bleibt, gehört dem Feld mit Tablet: sein gespiegelter Zustand
+        // (der die Namen SEINES Spiels enthalten kann — er bleibt, solange
+        // das Tablet am Feld hängt) und ein Brief ohne Personen.
+        assert_eq!(n.court_matches.len(), 1);
+        assert_eq!(n.court_state.len(), 1);
+        assert!(n
+            .court_matches
+            .values()
+            .all(|b| b.team_a.is_empty() && b.team_b.is_empty() && b.sr_names.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn knappes_budget_gibt_bilder_hostloser_turniere_frei() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.bilder_budget = 10;
+        let (alt, neu) = (test_ns(), "b1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        let (alt_host, _a) = kanal_test();
+        register_host(&broker, &alt, &alt_host).await;
+        let lade = |ns: &str, bild: &'static [u8]| {
+            let (broker, ns) = (broker.clone(), ns.to_string());
+            async move {
+                monitor_upload(State(broker), Path(ns), Json(bild_upload(&[bild], None)))
+                    .await
+                    .0
+            }
+        };
+        assert_eq!(lade(&alt, b"12345678").await, StatusCode::OK);
+        let (neu_host, _n) = kanal_test();
+        register_host(&broker, neu, &neu_host).await;
+        // Solange das alte Turnier seinen Turnier-PC hat, behält es seine
+        // Bilder — das neue bekommt 507.
+        assert_eq!(lade(neu, b"abcdef").await, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(bilder_von(&broker, &alt).await.0, 1);
+        // Ist der alte Turnier-PC weg, weichen seine Bilder dem neuen Turnier.
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&alt).unwrap(), &alt_host));
+        }
+        assert_eq!(lade(neu, b"abcdef").await, StatusCode::OK);
+        assert_eq!(bilder_von(&broker, &alt).await.0, 0);
+        assert_eq!(bilder_von(&broker, neu).await.0, 1);
+        assert_eq!(gebucht(&broker), 6);
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_mit_anderem_spiel_raeumt_den_alten_stand() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            try_claim_host(map.get_mut(&ns).unwrap(), &neu_tx, now_ms());
+        }
+        // Am Feld steht inzwischen ein anderes Spiel: Der Stand des Stummels
+        // gehört nicht dazu.
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(777),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &neu_tx,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert!(!n.court_scores.contains_key(&5), "alter Stand geräumt");
+        assert_eq!(n.court_matches.get(&5), Some(&brief(777)));
+    }
+
+    #[tokio::test]
+    async fn feld_mit_tablet_behaelt_stand_und_stummel() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert_eq!(n.court_scores.get(&5).map(Vec::len), Some(1));
+        assert_eq!(
+            n.court_state.get(&5).map(String::as_str),
+            Some("{\"rev\":3}")
+        );
+        let stummel = n.court_matches.get(&5).expect("Brief ohne Personen");
+        assert_eq!(stummel, &anonymer_brief(105, false));
+    }
+
+    #[tokio::test]
+    async fn tablet_zaehlt_nach_dem_leeren_weiter() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, tablet_tx) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        // Der nächste Punkt des Tablets (es nennt sein Spiel) wird angenommen
+        // — ohne den Stummel verwürfe ihn der Stale-Filter.
+        forward_score(&broker, &ns, 5, 12, 7, Vec::new(), 105, &tablet_tx).await;
+        let map = broker.namespaces.lock().await;
+        assert_eq!(
+            map.get(&ns).unwrap().court_scores.get(&5),
+            Some(&vec![relay_proto::SetAb { a: 12, b: 7 }])
+        );
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_nach_leeren_raeumt_stand_nicht() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        // Der Turnier-PC kommt zurück und weist dasselbe Spiel wieder zu.
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+            assert!(!n.geleert);
+        }
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(105),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &neu_tx,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert_eq!(n.court_scores.get(&5).map(Vec::len), Some(1), "kein 0:0");
+        assert!(n.court_state.contains_key(&5));
+        // Und der Brief trägt wieder die Namen.
+        assert_eq!(n.court_matches.get(&5), Some(&brief(105)));
+    }
+
+    #[tokio::test]
+    async fn namespace_verschwindet_wenn_letztes_tablet_geht() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, tablet_tx) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        let spaeter = now_ms() + DATEN_FRIST_MS;
+        fegen(&broker, spaeter).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            n.tablets.retain(|_, t| !t.same_channel(&tablet_tx));
+        }
+        fegen(&broker, spaeter).await;
+        assert!(!broker.namespaces.lock().await.contains_key(&ns));
+    }
+
+    #[tokio::test]
+    async fn voller_relay_verdraengt_den_aeltesten_hostlosen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host_tx, _host_rx) = kanal_test();
+        let (tablet_tx, _trx) = kanal_test();
+        let mut map = broker.namespaces.lock().await;
+        let neu = |host: bool, tablet: bool, weg: u64| {
+            let mut n = Namespace::new();
+            n.host_last_seen = 1;
+            if host {
+                n.host = Some(host_tx.clone());
+                n.host_weg_seit = None;
+            } else {
+                n.host_weg_seit = Some(weg);
+            }
+            if tablet {
+                n.tablets.insert(1, tablet_tx.clone());
+            }
+            n
+        };
+        map.insert("mit-host".into(), neu(true, false, 0));
+        map.insert("mit-tablet".into(), neu(false, true, 10));
+        map.insert("juenger".into(), neu(false, false, 500));
+        map.insert("aeltester".into(), neu(false, false, 100));
+        // Der am längsten hostlose ohne Tablet weicht — nie einer mit
+        // Turnier-PC oder Tablet, auch wenn er länger verwaist ist.
+        assert!(verdraenge_hostlosen(&mut map));
+        assert!(!map.contains_key("aeltester"));
+        assert!(verdraenge_hostlosen(&mut map));
+        assert!(!map.contains_key("juenger"));
+        // Keiner mehr übrig → der neue Turnier-PC wird abgewiesen.
+        assert!(!verdraenge_hostlosen(&mut map));
+        assert!(map.contains_key("mit-host") && map.contains_key("mit-tablet"));
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_vor_ablauf_bricht_verfall_ab() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS - 60_000).await;
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+        }
+        // Mit Turnier-PC verfällt nichts — auch viel später nicht.
+        fegen(&broker, now_ms() + 10 * DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert!(!n.geleert && n.monitor.is_some() && !n.courts.is_empty());
+        assert_eq!(n.court_matches.get(&6), Some(&brief(106)));
     }
 
     // ─────── Bilder-Tor, Budget, Log (Spec relay-haerten, PR 6) ───────
@@ -15859,7 +16390,7 @@ mod load {
 
         // Der Namespace überlebt den Abgang für die Karenz; danach entfernt
         // ihn der Aufräum-Lauf.
-        fegen(&broker, now_ms() + HOST_KARENZ_MS).await;
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
         let map = broker.namespaces.lock().await;
         for ns in &ns_list {
             assert!(
