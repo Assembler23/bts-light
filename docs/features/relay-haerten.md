@@ -986,6 +986,27 @@ mit echtem WebSocket: `nachricht_ueber_transportdeckel_trennt`,
 **Prüfpunkt nach dem Deploy:** Die Log-Zeile „Kanal voll" darf im Normalbetrieb nicht
 auftreten.
 
+**Aus der Umsetzung (v0.9.386):** `Tx` ist ein kleiner Typ um `mpsc::Sender` mit einem
+geteilten Überlauf-Merkmal; die Wache (`UeberlaufWache`) ist ein eigener Griff neben dem
+Empfänger (sonst kollidierten `recv` und `warten` im selben `select!`). Der Meldekanal
+„Substrom tot" des Trägers (`tot_tx`, trägt nur Kennungen) bleibt unbegrenzt. „Einmal
+melden" ergibt sich daraus, dass die Schleife nach der Meldung endet. Der Test mit echtem
+WebSocket füllt den Kanal aus dem Test heraus (am Empfänger vorbei), weil sich ein echter
+Stau über die Puffer des Betriebssystems nicht zuverlässig herstellen lässt.
+
+Aus den Reviews:
+- **Reserve am Kanal des Turnier-PCs** (`Tx::send_nachrangig`): Tablet-Frames belegen
+  höchstens drei Viertel und lösen nie die Trennung aus. Sonst hätte dieser PR einen neuen
+  Hebel geschaffen — mit der Turnier-Kennung den Turnier-PC trennen lassen und seinen Platz
+  besetzen (Sicherheits-Review, bedingt hoch). Das weicht von „nichts wird still verworfen"
+  ab: Über der Marke werden Tablet-Frames verworfen (einmal gemeldet); sie heilen über den
+  nächsten Frame bzw. Abgleich.
+- `POST /{ns}/result`: Body 16 KiB, höchstens zehn Sätze, Feldname gekürzt.
+- „Getrennt" gilt, sobald die Schleife wieder läuft; eine Schreibfrist am Relay bleibt
+  Nicht-Ziel. Die Angabe „100 s Spitzenverkehr" war nicht belegt und ist ersetzt.
+- Offen: Anstöße an Monitore je Feld zusammenfassen; Takt für `identify`/`take_over`;
+  Close-Frame beim Trennen; Tests mit echtem WebSocket für Turnier-PC, Monitor und Träger.
+
 ### PR 6 — Bilder-Tor, Gesamt-Budget, Log, Dienst-Datei, nginx-Vorlage
 
 **Erfüllt:** AK42–AK45. **Lösung:** g), h).

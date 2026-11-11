@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.386
+
+- **Ein hängendes Gerät kann den Cloud-Relay nicht mehr volllaufen lassen**
+  (wirkt mit dem Relay sofort). Nahm ein Tablet, ein Monitor oder der
+  Turnier-PC seine Nachrichten nicht ab — etwa bei einer sehr schlechten
+  Leitung —, sammelte der Relay sie bisher unbegrenzt. Jetzt hat jede
+  Verbindung einen festen Vorrat. Ist er voll, trennt der Relay dieses eine
+  Gerät; es verbindet sich neu und bekommt den aktuellen Stand. Im normalen
+  Betrieb kommt das nicht vor. Tablet-Nachrichten können den Turnier-PC dabei
+  nie aus der Cloud werfen. Fünfter Schritt der Spec `relay-haerten`
+  (ADR 0090).
+
 ## v0.9.385
 
 - **Der Cloud-Relay nimmt nichts Übergroßes und nichts im Dauerfeuer mehr

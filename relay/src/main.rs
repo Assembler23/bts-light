@@ -425,7 +425,142 @@ const MAX_SCORESHEET_HTML_LEN: usize = relay_proto::MAX_SHEETS_PER_DOC * 128 * 1
 /// — dieselbe Konstante wie am Turnier-PC.
 const MAX_STATE_LEN: usize = relay_proto::MAX_STATE_LEN;
 
-type Tx = mpsc::UnboundedSender<Message>;
+// ── Begrenzte Kanäle (Spec relay-haerten, PR 5; ADR 0090) ───────────────
+//
+// Bis v0.9.385 waren alle Kanäle unbegrenzt: Nahm ein Empfänger nicht ab
+// (träge Leitung, hängendes Gerät, ein Host, der gerade auf BTP wartet),
+// wuchs sein Kanal ohne Grenze — im Speicher des Relays, der alle Turniere
+// trägt. Jetzt hat jeder Kanal eine feste Größe. Ist er voll, wird der
+// EMPFÄNGER getrennt (er verbindet neu und bekommt den frischen Stand);
+// nichts wird still verworfen, während die Verbindung weiterläuft.
+
+/// Kanal zum Turnier-PC. Eine Halle mit 20 Feldern erzeugt im üblichen
+/// Betrieb 3–4 Nachrichten je Sekunde; ein Turnier-PC, der nichts mehr
+/// sendet, wird ohnehin nach `HOST_STALE` (15 s) getrennt. Das letzte
+/// Viertel bleibt den Nachrichten vorbehalten, die kein Tablet auslösen
+/// kann (siehe [`Tx::send_nachrangig`]).
+const KANAL_HOST: usize = 1024;
+/// Kanal zu einem Tablet bzw. einem Substrom des Trägers.
+const KANAL_TABLET: usize = 64;
+/// Kanal zu einem Monitor oder einer Turnierleitungs-Seite (nur Anstöße).
+const KANAL_ANZEIGE: usize = 32;
+/// Sammelkanal eines Trägers (alle Substrome einer fernen Halle).
+const KANAL_TRAEGER: usize = 1024;
+
+/// Body-Deckel der Ergebnis-Route. Ein echtes Ergebnis ist wenige hundert
+/// Bytes groß; ohne Deckel galt der Standard von 2 MiB — je Nachricht im
+/// Kanal des Turnier-PCs.
+const RESULT_BODY_MAX: usize = 16 * 1024;
+
+/// Warum eine Nachricht nicht in den Kanal ging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KanalFehler {
+    /// Der Empfänger nimmt nicht schnell genug ab.
+    Voll,
+    /// Der Empfänger ist weg.
+    Zu,
+}
+
+/// Überlauf-Merkmal eines Kanals, geteilt zwischen Sender und Empfänger.
+#[derive(Default)]
+struct Ueberlauf {
+    gesetzt: std::sync::atomic::AtomicBool,
+    wecker: tokio::sync::Notify,
+    /// „Kanal knapp" schon gemeldet (siehe [`Tx::send_nachrangig`]).
+    knapp_gemeldet: std::sync::atomic::AtomicBool,
+}
+
+/// Sende-Ende eines begrenzten Kanals. `send` wartet nie: Ist der Kanal
+/// voll, setzt es das Überlauf-Merkmal — die Verbindungsschleife des
+/// Empfängers sieht es ([`UeberlaufWache::warten`]) und beendet sich.
+#[derive(Clone)]
+struct Tx {
+    sender: mpsc::Sender<Message>,
+    ueberlauf: Arc<Ueberlauf>,
+}
+
+impl Tx {
+    fn send(&self, msg: Message) -> Result<(), KanalFehler> {
+        match self.sender.try_send(msg) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(KanalFehler::Zu),
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                use std::sync::atomic::Ordering;
+                if !self.ueberlauf.gesetzt.swap(true, Ordering::SeqCst) {
+                    // `notify_one` merkt sich das Signal, falls gerade
+                    // niemand wartet.
+                    self.ueberlauf.wecker.notify_one();
+                }
+                Err(KanalFehler::Voll)
+            }
+        }
+    }
+
+    /// Sendet eine NACHRANGIGE Nachricht: Sie darf das letzte Viertel des
+    /// Kanals nicht belegen und löst nie eine Trennung aus. Ist der Kanal
+    /// so weit gefüllt, wird sie verworfen (einmal gemeldet).
+    ///
+    /// Dafür da: alles, was ein Tablet in den Kanal des Turnier-PCs legt.
+    /// Wer die Turnier-Kennung hat, kann beliebig viele Tablet-Frames
+    /// erzeugen. Dürften sie den Kanal füllen, ließe sich der Turnier-PC
+    /// gezielt trennen — und sein Platz danach besetzen (`host-ws` hat
+    /// keine Anmeldung). Die Lücke heilt: Punkt und Zustand durch den
+    /// nächsten Frame, der Verlauf durch den kompletten Abgleich, die
+    /// Anmeldung eines Tablets beim Wiederverbinden des Turnier-PCs.
+    fn send_nachrangig(&self, msg: Message) -> Result<(), KanalFehler> {
+        if self.sender.capacity() < self.sender.max_capacity() / 4 {
+            use std::sync::atomic::Ordering;
+            if !self.ueberlauf.knapp_gemeldet.swap(true, Ordering::Relaxed) {
+                tracing::warn!(
+                    "Kanal knapp – nachrangige Nachrichten an den Turnier-PC werden verworfen"
+                );
+            }
+            return Err(KanalFehler::Voll);
+        }
+        self.send(msg)
+    }
+
+    /// Gehören beide Enden zum selben Kanal? Darüber unterscheidet der
+    /// Relay Geräte (Halter eines Felds, Host eines Namespace).
+    fn same_channel(&self, other: &Tx) -> bool {
+        self.sender.same_channel(&other.sender)
+    }
+}
+
+/// Wartet darauf, dass der Kanal einmal voll war.
+struct UeberlaufWache(Arc<Ueberlauf>);
+
+impl UeberlaufWache {
+    async fn warten(&self) {
+        loop {
+            if self.0.gesetzt.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            self.0.wecker.notified().await;
+        }
+    }
+}
+
+/// Legt einen begrenzten Kanal an.
+fn kanal(groesse: usize) -> (Tx, mpsc::Receiver<Message>, UeberlaufWache) {
+    let (sender, rx) = mpsc::channel(groesse);
+    let ueberlauf = Arc::new(Ueberlauf::default());
+    (
+        Tx {
+            sender,
+            ueberlauf: ueberlauf.clone(),
+        },
+        rx,
+        UeberlaufWache(ueberlauf),
+    )
+}
+
+/// Kanal für Tests: groß genug, dass er nie überläuft; ohne Wache.
+#[cfg(test)]
+fn kanal_test() -> (Tx, mpsc::Receiver<Message>) {
+    let (tx, rx, _wache) = kanal(8192);
+    (tx, rx)
+}
 
 /// Ein hochgeladenes Werbebild im Speicher (Content-Type + Rohbytes).
 struct AdImage {
@@ -1222,7 +1357,10 @@ fn router(broker: Broker, tl_an: bool) -> Router {
         // Namespace") bleibt unberührt.
         .route("/{ns}/carrier-ws", get(carrier_ws))
         .route("/{ns}/host-ws", get(host_ws))
-        .route("/{ns}/result", post(result));
+        .route(
+            "/{ns}/result",
+            post(result).layer(DefaultBodyLimit::max(RESULT_BODY_MAX)),
+        );
 
     // Not-Aus für die Turnierleitungs-Oberfläche: `BTS_RELAY_TL=off` lässt
     // die Routen gar nicht erst entstehen. Der Relay ist ein **globales**
@@ -3023,11 +3161,16 @@ fn sanitize_content_type(ct: &str) -> String {
 async fn result(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
-    Json(body): Json<ResultBody>,
+    Json(mut body): Json<ResultBody>,
 ) -> Json<ResultResponse> {
     if !valid_namespace(&ns) {
         return Json(ResultResponse::err("Unbekannter Namespace."));
     }
+    // Wie am WebSocket: höchstens zehn Sätze, Feldname gekürzt.
+    if body.sets.len() > MAX_SAETZE {
+        return Json(ResultResponse::err("Ungültiges Ergebnis."));
+    }
+    kuerze(&mut body.court_label, MAX_FELD_TEXT);
     let (ack_tx, ack_rx) = oneshot::channel();
     let req_id;
     {
@@ -3378,7 +3521,7 @@ impl TabletSitzung {
 /// Diese Funktion ist der **Transport**; das Fachliche steht in
 /// [`TabletSitzung`].
 async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx, voll) = kanal(KANAL_TABLET);
     let mut sitzung = TabletSitzung::neu(ns.clone());
     // Enger Ping-Takt + Empfangs-Stale wie bei `host_conn`: Der Relay pingt
     // aktiv, der Browser auto-pongt auf Protokoll-Ebene. Bleibt jedes
@@ -3389,6 +3532,13 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
 
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Tablet (Namespace '{ns}') wird getrennt");
+                break;
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 // VOR dem inneren `match` stempeln: gilt für Text/Pong/Close/
@@ -3486,7 +3636,7 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     use relay_proto::{CarrierMsg, CarrierServerMsg, StreamKind};
 
     // Sammelkanal: alles, was auf den Träger hinausgeht.
-    let (aus_tx, mut aus_rx) = mpsc::unbounded_channel::<Message>();
+    let (aus_tx, mut aus_rx, voll) = kanal(KANAL_TRAEGER);
     // Meldekanal der Fan-in-Tasks: Ein Substrom, dessen Kanal geschlossen
     // wurde, muss hier gemeldet werden. Wichtig für `namespace_aufraeumen`,
     // das den Anzeigen ein `Close` schickt, damit sie sich neu verbinden —
@@ -3509,6 +3659,13 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
 
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Träger (Namespace '{ns}') wird getrennt");
+                break;
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 last_incoming = tokio::time::Instant::now();
@@ -3553,11 +3710,23 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                             continue;
                         }
                         // Eigener Kanal je Substrom (siehe `Substrom::tx`).
-                        let (sub_tx, mut sub_rx) = mpsc::unbounded_channel::<Message>();
+                        let (sub_tx, mut sub_rx, sub_voll) = kanal(KANAL_TABLET);
                         let hinaus = aus_tx.clone();
                         let melde_tot = tot_tx.clone();
                         let pumpe = tokio::spawn(async move {
-                            while let Some(m) = sub_rx.recv().await {
+                            loop {
+                                let m = tokio::select! {
+                                    // Kanal dieses Geräts voll: Substrom
+                                    // schließen, wie bei einem direkten
+                                    // Gerät die Verbindung.
+                                    _ = sub_voll.warten() => {
+                                        tracing::warn!("Kanal voll – Substrom {stream} des Trägers wird geschlossen");
+                                        let _ = melde_tot.send(stream);
+                                        break;
+                                    }
+                                    m = sub_rx.recv() => m,
+                                };
+                                let Some(m) = m else { break };
                                 match m {
                                     Message::Text(t) => {
                                         let verpackt = CarrierServerMsg::Frame {
@@ -3761,7 +3930,7 @@ async fn monitor_ws(
 /// der Zwischenstand steht — aber nur bei einem echten Wechsel, damit ein
 /// Tablet-Reconnect die Anzeigen nicht ohne Anlass holen lässt.
 async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: Option<i64>) {
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx, voll) = kanal(KANAL_ANZEIGE);
     // Nicht eingetragen (kein Host / Deckel erreicht) → Verbindung sofort
     // schließen, wie es der LAN-Server tut. Offen gehalten, würde sie durch
     // den Herzschlag als gesund gelten, ohne je einen Anstoß zu bekommen.
@@ -3781,6 +3950,13 @@ async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: 
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Monitor (Namespace '{ns}') wird getrennt");
+                break;
+            }
             outgoing = rx.recv() => {
                 match outgoing {
                     Some(m) => { if socket.send(m).await.is_err() { break } }
@@ -4003,7 +4179,7 @@ async fn tl_ws_conn(mut socket: WebSocket, broker: Broker) {
     };
     // Ab hier ist der Zugang geprüft — der Vor-Auth-Platz wird frei.
     drop(platz);
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx, voll) = kanal(KANAL_ANZEIGE);
     // Abo eintragen; über dem Deckel bleibt die Verbindung ungenutzt und
     // die Seite bedient sich aus ihrem Poll-Fallback.
     {
@@ -4032,6 +4208,13 @@ async fn tl_ws_conn(mut socket: WebSocket, broker: Broker) {
     let mut ping = tokio::time::interval(HEARTBEAT);
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Turnierleitungs-Seite wird getrennt");
+                break;
+            }
             outgoing = rx.recv() => {
                 match outgoing {
                     Some(m) => { if socket.send(m).await.is_err() { break } }
@@ -4235,7 +4418,7 @@ async fn attach_tablet(
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
-        let _ = host.send(text(&RelayFrame::TabletConnected {
+        let _ = host.send_nachrangig(text(&RelayFrame::TabletConnected {
             court_id,
             court_label,
         }));
@@ -4299,7 +4482,7 @@ async fn take_over_court(
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
-        let _ = host.send(text(&RelayFrame::TabletConnected {
+        let _ = host.send_nachrangig(text(&RelayFrame::TabletConnected {
             court_id,
             court_label,
         }));
@@ -4371,7 +4554,7 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
                 .get(&court_id)
                 .map_or(0, |m| m.match_id);
             if let Some(host) = namespace.host.as_ref() {
-                let _ = host.send(text(&RelayFrame::StateSync {
+                let _ = host.send_nachrangig(text(&RelayFrame::StateSync {
                     court_id,
                     match_id,
                     state: state.clone(),
@@ -4418,7 +4601,7 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> boo
         namespace.feld_raeumen_wenn_unbekannt(court_id);
         let court_label = label_of(namespace, court_id);
         if let Some(host) = &namespace.host {
-            let _ = host.send(text(&RelayFrame::TabletDisconnected {
+            let _ = host.send_nachrangig(text(&RelayFrame::TabletDisconnected {
                 court_id,
                 court_label,
             }));
@@ -4580,7 +4763,7 @@ async fn forward_score(
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
-        let _ = host.send(text(&RelayFrame::ScoreUpdate {
+        let _ = host.send_nachrangig(text(&RelayFrame::ScoreUpdate {
             court_id,
             court_label,
             score_a,
@@ -4609,7 +4792,7 @@ async fn forward_battery(
         }
         let court_label = label_of(namespace, court_id);
         if let Some(host) = namespace.host.as_ref() {
-            let _ = host.send(text(&RelayFrame::Battery {
+            let _ = host.send_nachrangig(text(&RelayFrame::Battery {
                 court_id,
                 court_label,
                 percent,
@@ -4651,7 +4834,7 @@ async fn forward_rally(
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::Rally {
+        let _ = host.send_nachrangig(text(&RelayFrame::Rally {
             court_id,
             match_id,
             set,
@@ -4690,7 +4873,7 @@ async fn forward_match_event(
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::MatchEvent {
+        let _ = host.send_nachrangig(text(&RelayFrame::MatchEvent {
             court_id,
             match_id,
             event,
@@ -4733,7 +4916,7 @@ async fn forward_match_event_sync(
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::MatchEventSync {
+        let _ = host.send_nachrangig(text(&RelayFrame::MatchEventSync {
             court_id,
             match_id,
             events,
@@ -4772,7 +4955,7 @@ async fn forward_rally_sync(
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::RallySync {
+        let _ = host.send_nachrangig(text(&RelayFrame::RallySync {
             court_id,
             match_id,
             timeline,
@@ -4797,7 +4980,7 @@ async fn forward_alert(
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::Alert {
+        let _ = host.send_nachrangig(text(&RelayFrame::Alert {
             court_id,
             court_label,
             injury,
@@ -4865,7 +5048,7 @@ fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
 /// eine zweite wird abgewiesen — außer der bisherige Host ist nachweislich
 /// stumm ([`try_claim_host`]), dann ersetzt ihn die neue Verbindung.
 async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx, voll) = kanal(KANAL_HOST);
 
     {
         let mut map = broker.namespaces.lock().await;
@@ -4911,6 +5094,13 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     let mut last_incoming = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Turnier-PC (Namespace '{ns}') wird getrennt");
+                break;
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 last_incoming = tokio::time::Instant::now();
@@ -6624,9 +6814,9 @@ mod tests {
         // belegten Feld — auch im Cloud-Pfad braucht die Liste dafür `occupied`.
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
-        let (tab, _trx) = mpsc::unbounded_channel();
+        let (tab, _trx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let n = map.get_mut(NS).unwrap();
@@ -6705,10 +6895,10 @@ mod tests {
 
     /// Legt einen Namespace mit registriertem Host und einem Tablet (an
     /// Feld `court_id`) an; liefert Tablet-Empfangsende + Host-Sender.
-    async fn broker_with_tablet(court_id: i64) -> (Broker, mpsc::UnboundedReceiver<Message>, Tx) {
+    async fn broker_with_tablet(court_id: i64) -> (Broker, mpsc::Receiver<Message>, Tx) {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (tx, rx) = mpsc::unbounded_channel();
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (tx, rx) = kanal_test();
+        let (host_tx, _host_rx) = kanal_test();
         let mut map = broker.namespaces.lock().await;
         let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
         ns.tablets.insert(court_id, tx);
@@ -6734,7 +6924,7 @@ mod tests {
     async fn sitzung_belegt_feld_und_gibt_es_beim_abraeumen_frei() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut sitzung = TabletSitzung::neu(ns.clone());
 
         let identify =
@@ -6771,7 +6961,7 @@ mod tests {
     async fn sitzung_reicht_die_geraete_kennung_unveraendert_durch() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut sitzung = TabletSitzung::neu(ns.clone());
 
         let identify =
@@ -6796,8 +6986,8 @@ mod tests {
     async fn zwei_sitzungen_autorisieren_nur_ihr_eigenes_feld() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, _rx_b) = kanal_test();
 
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
@@ -6828,8 +7018,8 @@ mod tests {
     async fn belegtes_feld_laesst_die_zweite_sitzung_warten() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
 
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
@@ -6863,7 +7053,7 @@ mod tests {
     }
 
     /// Alle bisher angekommenen Text-Frames eines Kanals.
-    fn texte(rx: &mut mpsc::UnboundedReceiver<Message>) -> Vec<String> {
+    fn texte(rx: &mut mpsc::Receiver<Message>) -> Vec<String> {
         let mut aus = Vec::new();
         while let Ok(m) = rx.try_recv() {
             if let Message::Text(t) = m {
@@ -6881,7 +7071,7 @@ mod tests {
     async fn zweites_identify_fuer_anderes_feld_wird_verworfen() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut s = TabletSitzung::neu(ns.clone());
         s.verarbeite(&broker, &ident(1, "a"), &tx).await;
         assert_eq!(
@@ -6903,7 +7093,7 @@ mod tests {
         // Relay-Neustart stehen.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut s = TabletSitzung::neu(ns.clone());
         for feld in [1, 2, 3, 4] {
             s.verarbeite(&broker, &ident(feld, "a"), &tx).await;
@@ -6921,9 +7111,9 @@ mod tests {
         // Früher verdrängte der Relay dabei die EIGENE Sitzung.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = kanal_test();
         let mut s = TabletSitzung::neu(ns.clone());
         s.verarbeite(&broker, &ident(5, "a"), &tx).await;
         assert_eq!(texte(&mut host_rx).len(), 1, "ein TabletConnected");
@@ -6947,8 +7137,8 @@ mod tests {
     async fn belegt_retry_greift_nach_freigabe() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
         a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
@@ -6969,10 +7159,10 @@ mod tests {
         // Relay warf ihre Punkte weg.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
-        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let (tx_a, mut rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
         a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
@@ -7008,10 +7198,10 @@ mod tests {
     async fn akku_nur_vom_halter() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, _rx_b) = kanal_test();
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
         a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
@@ -7034,8 +7224,8 @@ mod tests {
         // hinterlässt für sein (dem Host unbekanntes) Feld Stand und Sätze.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, _rx_b) = kanal_test();
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
         a.verarbeite(&broker, &ident(1, "a"), &tx_a).await;
@@ -7071,7 +7261,7 @@ mod tests {
         // Ausfall des Tablets bekommt — er darf beim Abgang NICHT gehen.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
         handle_host_frame(
             &broker,
@@ -7087,7 +7277,7 @@ mod tests {
             &host_tx,
         )
         .await;
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut s = TabletSitzung::neu(ns.clone());
         s.verarbeite(&broker, &ident(5, "a"), &tx).await;
         s.verarbeite(
@@ -7099,7 +7289,7 @@ mod tests {
         s.abraeumen(&broker, &tx).await;
 
         // Ein Ersatzgerät bekommt den Stand.
-        let (tx_neu, mut rx_neu) = mpsc::unbounded_channel();
+        let (tx_neu, mut rx_neu) = kanal_test();
         let mut ersatz = TabletSitzung::neu(ns.clone());
         ersatz
             .verarbeite(&broker, &ident(5, "ersatz"), &tx_neu)
@@ -7116,7 +7306,7 @@ mod tests {
     async fn feld_schluessel_deckel_gilt_ohne_feldliste() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
         let zuweisen = async |feld: i64, spiel: i64| {
             handle_host_frame(
@@ -7152,7 +7342,7 @@ mod tests {
         assert_eq!(map.get(&ns).unwrap().court_matches[&3].match_id, 4242);
         // Auch ein Tablet legt über dem Deckel kein neues Feld an.
         drop(map);
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut s = TabletSitzung::neu(ns.clone());
         assert_eq!(
             s.verarbeite(&broker, &ident(8888, "a"), &tx).await,
@@ -7170,7 +7360,7 @@ mod tests {
             }
         }
         let ns = test_ns();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         // Eine Sitzung, die ihr Feld kennt, deren Namespace es aber nicht
         // (mehr) gibt.
         let mut s = TabletSitzung::neu(ns.clone());
@@ -7189,10 +7379,10 @@ mod tests {
         // mit keinem Frame.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, _rx_b) = kanal_test();
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
         a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
@@ -7219,7 +7409,7 @@ mod tests {
         // freie Feld samt gesichertem Stand.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
         handle_host_frame(
             &broker,
@@ -7235,8 +7425,8 @@ mod tests {
             &host_tx,
         )
         .await;
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
         a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
@@ -7269,8 +7459,8 @@ mod tests {
         // darf die Seite nicht glauben, sie zähle — die Verbindung endet.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let (fremd, _fremd_rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
+        let (fremd, _fremd_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let n = map.entry(ns.clone()).or_insert_with(Namespace::new);
@@ -7294,7 +7484,7 @@ mod tests {
         // und Hallen der alten Felder dürfen nicht auf den Deckel zählen.
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
         for feld in 1..=100 {
             handle_host_frame(
@@ -7345,9 +7535,9 @@ mod tests {
     async fn elf_saetze_werden_verworfen_verbindung_bleibt() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut s = TabletSitzung::neu(ns.clone());
         s.verarbeite(&broker, &ident(5, "a"), &tx).await;
         texte(&mut host_rx);
@@ -7684,7 +7874,7 @@ mod tests {
     async fn monitor_steuerung_ueber_dem_deckel_wird_abgelehnt() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
         let mut gross = MonitorControl::default();
         for i in 0..=MAX_CONTROL_EINTRAEGE {
@@ -7709,6 +7899,211 @@ mod tests {
             .await
             .into_response();
         assert_eq!(antwort.status(), StatusCode::OK);
+    }
+
+    // ───────────── Begrenzte Kanäle (Spec relay-haerten, PR 5) ─────────────
+
+    #[tokio::test]
+    async fn ueberlauf_wird_einmal_gemeldet() {
+        let (tx, mut rx, wache) = kanal(3);
+        for _ in 0..3 {
+            assert_eq!(tx.send(Message::Text("a".into())), Ok(()));
+        }
+        // Voll: Die Nachricht geht NICHT in den Kanal, das Merkmal steht.
+        for _ in 0..10 {
+            assert_eq!(tx.send(Message::Text("b".into())), Err(KanalFehler::Voll));
+        }
+        // Die Wache meldet — auch wenn sie erst jetzt gefragt wird, und auch
+        // ein zweites Mal (das Merkmal bleibt stehen).
+        tokio::time::timeout(Duration::from_secs(1), wache.warten())
+            .await
+            .expect("Überlauf gemeldet");
+        tokio::time::timeout(Duration::from_secs(1), wache.warten())
+            .await
+            .expect("bleibt gemeldet");
+        // Im Kanal liegen genau die drei ersten Nachrichten.
+        let mut gelesen = 0;
+        while rx.try_recv().is_ok() {
+            gelesen += 1;
+        }
+        assert_eq!(gelesen, 3);
+        // Ein geschlossener Kanal ist etwas anderes als ein voller.
+        drop(rx);
+        assert_eq!(tx.send(Message::Text("c".into())), Err(KanalFehler::Zu));
+    }
+
+    #[tokio::test]
+    async fn ohne_ueberlauf_wartet_die_wache() {
+        let (tx, _rx, wache) = kanal(8);
+        tx.send(Message::Text("a".into())).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), wache.warten())
+                .await
+                .is_err(),
+            "kein Überlauf, kein Signal"
+        );
+    }
+
+    #[test]
+    fn same_channel_unterscheidet_weiter() {
+        // Die Halter- und Host-Prüfung hängt daran.
+        let (a, _ra) = kanal_test();
+        let (b, _rb) = kanal_test();
+        assert!(a.same_channel(&a.clone()));
+        assert!(!a.same_channel(&b));
+    }
+
+    #[tokio::test]
+    async fn neuanmeldung_meldet_das_tablet_wieder_beim_host() {
+        // Der Weg, auf dem ein getrenntes Tablet seine Zuweisung zurückbekommt
+        // (der Überlauf selbst: `voller_kanal_trennt_den_empfaenger`): Es
+        // meldet sich neu an. Der Relay schickt dem Host `tablet_connected` — der schiebt
+        // die Zuweisung nach. So geht ein `MatchAssigned` nicht verloren.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx_alt, _rx_alt) = kanal_test();
+        let mut alt = TabletSitzung::neu(ns.clone());
+        alt.verarbeite(&broker, &ident(5, "geraet"), &tx_alt).await;
+        alt.abraeumen(&broker, &tx_alt).await;
+        texte(&mut host_rx);
+
+        let (tx_neu, _rx_neu) = kanal_test();
+        let mut neu = TabletSitzung::neu(ns.clone());
+        neu.verarbeite(&broker, &ident(5, "geraet"), &tx_neu).await;
+        assert!(texte(&mut host_rx)
+            .iter()
+            .any(|t| t.contains("tablet_connected")));
+    }
+
+    #[tokio::test]
+    async fn tablet_frames_koennen_den_host_nicht_trennen() {
+        // Wer die Turnier-Kennung hat, kann beliebig viele Tablet-Frames
+        // erzeugen. Sie füllen den Kanal des Turnier-PCs höchstens zu drei
+        // Vierteln und lösen nie den Überlauf aus.
+        let (tx, mut rx, wache) = kanal(16);
+        let mut angenommen = 0;
+        for _ in 0..100 {
+            if tx.send_nachrangig(Message::Text("p".into())).is_ok() {
+                angenommen += 1;
+            }
+        }
+        assert_eq!(angenommen, 13, "ein Viertel bleibt frei");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), wache.warten())
+                .await
+                .is_err(),
+            "kein Überlauf → der Turnier-PC bleibt verbunden"
+        );
+        // Was kein Tablet auslösen kann (Ergebnis, Befehl der Turnierleitung),
+        // hat die Reserve.
+        for _ in 0..3 {
+            assert_eq!(tx.send(Message::Text("ergebnis".into())), Ok(()));
+        }
+        // Nimmt der Turnier-PC wieder ab, gehen auch Tablet-Frames wieder.
+        while rx.try_recv().is_ok() {}
+        assert_eq!(tx.send_nachrangig(Message::Text("p".into())), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn punkte_im_dauerfeuer_lassen_den_host_verbunden() {
+        // Dasselbe über den echten Weg: Ein Tablet zählt, der Turnier-PC
+        // nimmt nichts ab.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx, wache) = kanal(KANAL_HOST);
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx, _rx) = kanal_test();
+        let mut sitzung = TabletSitzung::neu(ns.clone());
+        sitzung.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        for i in 0..(KANAL_HOST * 2) {
+            // Am Mengen-Takt vorbei: Hier geht es um den Kanal.
+            forward_score(&broker, &ns, 5, (i % 20) as i64, 0, Vec::new(), 0, &tx).await;
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), wache.warten())
+                .await
+                .is_err()
+        );
+        assert!(host_tx.sender.capacity() >= KANAL_HOST / 4);
+        // Nicht leer bestanden: Die Punkte kamen im Kanal an, bis zur Reserve.
+        assert!(host_tx.sender.capacity() <= KANAL_HOST / 4 + 1);
+    }
+
+    #[tokio::test]
+    async fn ergebnis_mit_zu_vielen_saetzen_wird_abgelehnt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        texte(&mut host_rx);
+        let body: ResultBody = serde_json::from_value(serde_json::json!({
+            "matchId": 1, "courtId": 5,
+            "sets": (0..11).map(|_| serde_json::json!({"a": 21, "b": 3})).collect::<Vec<_>>(),
+        }))
+        .unwrap();
+        let antwort = result(State(broker.clone()), Path(ns.clone()), Json(body)).await;
+        assert!(!antwort.0.ok);
+        assert!(
+            texte(&mut host_rx).is_empty(),
+            "nichts ging an den Turnier-PC"
+        );
+    }
+
+    #[tokio::test]
+    async fn voller_kanal_trennt_den_empfaenger() {
+        // Echter WebSocket: Ein Tablet ist verbunden. Der Relay hat mehr für
+        // es, als sein Kanal fasst — die Verbindung wird getrennt (und nicht
+        // endlos gepuffert).
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as Ws;
+        let (broker, basis) = relay_starten().await;
+        let ns = test_ns();
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("{basis}/{ns}/ws"))
+            .await
+            .expect("verbunden");
+        ws.send(Ws::Text(ident(5, "a").into())).await.unwrap();
+        // Warten, bis der Relay das Tablet eingetragen hat.
+        let tablet_tx = loop {
+            if let Some(tx) = broker
+                .namespaces
+                .lock()
+                .await
+                .get(&ns)
+                .and_then(|n| n.tablets.get(&5).cloned())
+            {
+                break tx;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        // Ohne dazwischen abzugeben (der Test läuft auf einem Thread): mehr
+        // Nachrichten, als der Kanal fasst.
+        let mut voll = 0;
+        for _ in 0..(KANAL_TABLET + 10) {
+            if tablet_tx.send(Message::Text("{}".into())) == Err(KanalFehler::Voll) {
+                voll += 1;
+            }
+        }
+        assert!(voll >= 10, "der Kanal ist begrenzt: {voll}");
+        let getrennt = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Ws::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await;
+        assert!(getrennt.is_ok(), "der Empfänger wurde nicht getrennt");
+        // Und der normale Aufräumweg lief: Das Feld ist wieder frei.
+        for _ in 0..200 {
+            if !broker.namespaces.lock().await.contains_key(&ns) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("das Feld wurde nicht freigegeben");
     }
 
     // ── Mit echtem WebSocket: Transport-Deckel wirken erst am Upgrade ──
@@ -7809,7 +8204,7 @@ mod tests {
         let mut kanaele = Vec::new();
         let mut sitzungen = Vec::new();
         for (i, feld) in [11i64, 12, 13].iter().enumerate() {
-            let (tx, rx) = mpsc::unbounded_channel();
+            let (tx, rx) = kanal_test();
             let mut s = TabletSitzung::neu(ns.clone());
             let ident = format!(
                 r#"{{"type":"identify","courtId":{feld},"courtLabel":"F{feld}","deviceId":"geraet-{i}"}}"#
@@ -7861,7 +8256,7 @@ mod tests {
     #[tokio::test]
     async fn kaputter_frame_beendet_die_sitzung_nicht() {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut sitzung = TabletSitzung::neu(test_ns());
         assert_eq!(
             sitzung.verarbeite(&broker, "{kein json", &tx).await,
@@ -7886,9 +8281,9 @@ mod tests {
         // Broker-Routing: `notify_monitor(5)` weckt GENAU die Court-5-Anzeige
         // und die „alle Felder"-Übersicht — Feld 3 bleibt still.
         let mut ns = Namespace::new();
-        let (tx5, mut rx5) = mpsc::unbounded_channel();
-        let (tx3, mut rx3) = mpsc::unbounded_channel();
-        let (tx_all, mut rx_all) = mpsc::unbounded_channel();
+        let (tx5, mut rx5) = kanal_test();
+        let (tx3, mut rx3) = kanal_test();
+        let (tx_all, mut rx_all) = kanal_test();
         ns.monitor_subs.entry(5).or_default().push(tx5);
         ns.monitor_subs.entry(3).or_default().push(tx3);
         ns.monitor_subs_all.push(tx_all);
@@ -7912,8 +8307,8 @@ mod tests {
         // Uhrzeit statt bei 1, damit sie über Relay-Neustarts monoton bleibt.
         // Geprüft wird deshalb der Abstand, nicht der absolute Wert.
         let mut ns = Namespace::new();
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx1, mut rx1) = kanal_test();
+        let (tx2, mut rx2) = kanal_test();
         ns.monitor_subs.entry(1).or_default().push(tx1);
         ns.monitor_subs.entry(2).or_default().push(tx2);
 
@@ -7947,8 +8342,8 @@ mod tests {
         // nie Turnierdaten; die holt die Seite über ihre Poll-Route. Tote
         // Abonnenten (Tab zu) siebt der nächste Nudge aus.
         let mut ns = Namespace::new();
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
-        let (tx2, rx2) = mpsc::unbounded_channel();
+        let (tx1, mut rx1) = kanal_test();
+        let (tx2, rx2) = kanal_test();
         ns.tl_subs.push(tx1);
         ns.tl_subs.push(tx2);
         drop(rx2);
@@ -7968,7 +8363,7 @@ mod tests {
         // die Geräte NICHT zu einem Abruf schicken (sonst wäre der Push
         // nur ein zweiter Poll-Auslöser).
         let mut ns = Namespace::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = kanal_test();
         ns.tl_subs.push(tx);
 
         // Erste Ablage: neue Revision → Nudge.
@@ -7988,7 +8383,7 @@ mod tests {
         // Fällt die Anzeige weg (Rx fallengelassen), siebt der nächste Nudge
         // den toten Sender aus und entfernt die leere Feld-Liste.
         let mut ns = Namespace::new();
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = kanal_test();
         ns.monitor_subs.entry(4).or_default().push(tx);
         drop(rx);
 
@@ -8005,12 +8400,12 @@ mod tests {
         // Namespace-Isolation: Ein Nudge in ns-a erreicht KEINEN Abonnenten
         // in ns-b — die Trennung der Turniere ist strikt.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (h_a, _ra) = mpsc::unbounded_channel();
-        let (h_b, _rb) = mpsc::unbounded_channel();
+        let (h_a, _ra) = kanal_test();
+        let (h_b, _rb) = kanal_test();
         register_host(&broker, "ns-a", &h_a).await;
         register_host(&broker, "ns-b", &h_b).await;
-        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let (tx_a, mut rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
         subscribe_monitor(&broker, "ns-a", Some(5), &tx_a).await;
         subscribe_monitor(&broker, "ns-b", Some(5), &tx_b).await;
 
@@ -8031,9 +8426,9 @@ mod tests {
         // Der Abonnent wird eingetragen und beim Verbindungsende wieder
         // ausgetragen; der Namespace bleibt, solange der Host verbunden ist.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (h, _rh) = mpsc::unbounded_channel();
+        let (h, _rh) = kanal_test();
         register_host(&broker, "ns1", &h).await;
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
 
         subscribe_monitor(&broker, "ns1", Some(9), &tx).await;
         {
@@ -8056,10 +8451,10 @@ mod tests {
         // Fan-out-Deckel (N5): Bis exakt `MAX_MONITOR_SUBS` werden Abos
         // eingetragen; das (N+1)-te wird abgelehnt (Zuschauer-DoS-Schutz).
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (h, _rh) = mpsc::unbounded_channel();
+        let (h, _rh) = kanal_test();
         register_host(&broker, "ns1", &h).await;
         for _ in 0..MAX_MONITOR_SUBS {
-            let (tx, _rx) = mpsc::unbounded_channel();
+            let (tx, _rx) = kanal_test();
             subscribe_monitor(&broker, "ns1", Some(1), &tx).await;
         }
         {
@@ -8074,7 +8469,7 @@ mod tests {
             assert_eq!(total, MAX_MONITOR_SUBS, "genau der Deckel ist eingetragen");
         }
         // Das (N+1)-te Abo wird abgelehnt — der Gesamtstand bleibt am Deckel.
-        let (tx_over, _rx_over) = mpsc::unbounded_channel();
+        let (tx_over, _rx_over) = kanal_test();
         subscribe_monitor(&broker, "ns1", Some(1), &tx_over).await;
         {
             let map = broker.namespaces.lock().await;
@@ -8094,7 +8489,7 @@ mod tests {
         // Ohne Host wird KEIN Namespace angelegt (kein Zuschauer-TV soll durch
         // bloßes Verbinden Speicher belegen — es gäbe keinen Aufräum-Pfad).
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         subscribe_monitor(&broker, "ns-ghost", None, &tx).await;
         assert!(broker.namespaces.lock().await.get("ns-ghost").is_none());
     }
@@ -8113,7 +8508,7 @@ mod tests {
         // schließen — der Reconnect-Wächter der Anzeige verbindet dann mit
         // Backoff neu, so wie es der LAN-Server längst tut.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
 
         // Kein Namespace (Host noch nicht da).
         assert!(
@@ -8122,15 +8517,15 @@ mod tests {
         );
 
         // Und über dem Fan-out-Deckel ebenso.
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, "ns-voll", &host_tx).await;
         let mut halter = Vec::new();
         for _ in 0..MAX_MONITOR_SUBS {
-            let (t, r) = mpsc::unbounded_channel();
+            let (t, r) = kanal_test();
             assert!(subscribe_monitor(&broker, "ns-voll", Some(1), &t).await);
             halter.push((t, r));
         }
-        let (tx_over, _rx_over) = mpsc::unbounded_channel();
+        let (tx_over, _rx_over) = kanal_test();
         assert!(
             !subscribe_monitor(&broker, "ns-voll", Some(1), &tx_over).await,
             "über dem Deckel keine Zusage"
@@ -8152,10 +8547,10 @@ mod tests {
         // aufräumen **und** verabschieden — das Close bringt die Anzeige über
         // ihren Reconnect-Wächter zurück, sobald der Host wieder da ist.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, "ns1", &host_tx).await;
-        let (tx_all, mut rx_all) = mpsc::unbounded_channel();
-        let (tx_feld, mut rx_feld) = mpsc::unbounded_channel();
+        let (tx_all, mut rx_all) = kanal_test();
+        let (tx_feld, mut rx_feld) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", None, &tx_all).await);
         assert!(subscribe_monitor(&broker, "ns1", Some(3), &tx_feld).await);
 
@@ -8186,9 +8581,9 @@ mod tests {
         // sonst risse jeder Tablet-Abgang die Anzeigen einer ganzen Halle
         // aus der Leitung.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, "ns1", &host_tx).await;
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", None, &tx).await);
 
         {
@@ -8209,9 +8604,9 @@ mod tests {
     // kommt die Antwort zurück.
 
     /// Namespace mit Host und einem eingetragenen Zugang.
-    async fn broker_with_tl_device(token: &str) -> (Broker, mpsc::UnboundedReceiver<Message>, Tx) {
+    async fn broker_with_tl_device(token: &str) -> (Broker, mpsc::Receiver<Message>, Tx) {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_tx, host_rx) = mpsc::unbounded_channel();
+        let (host_tx, host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -8387,7 +8782,7 @@ mod tests {
         {
             let mut map = broker.namespaces.lock().await;
             let ns2 = map.entry("ns2".into()).or_insert_with(Namespace::new);
-            let (tx, _rx) = mpsc::unbounded_channel();
+            let (tx, _rx) = kanal_test();
             ns2.host = Some(tx);
             ns2.tl_tokens
                 .insert("token-b".to_string(), "tl-b".to_string());
@@ -8760,7 +9155,7 @@ mod tests {
         // auftauchen, auch nicht in Teilen. Deshalb reist die Kennung mit dem
         // Zugang mit, statt aus ihm abgeleitet zu werden.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -8929,7 +9324,7 @@ mod tests {
         const NS2: &str = "b1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
 
         let upload = relay_proto::MonitorUpload {
@@ -9027,7 +9422,7 @@ mod tests {
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
 
         let hochladen = |daten: &'static [u8]| {
@@ -9096,7 +9491,7 @@ mod tests {
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
 
         let upload = || relay_proto::MonitorUpload {
@@ -9144,7 +9539,7 @@ mod tests {
         // keinen Redirect (nur CourtID reiste) → blieben „unzugewiesen" (Logo).
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
 
         let mut targets = std::collections::HashMap::new();
@@ -9473,7 +9868,7 @@ mod tests {
         // pusht (Feldliste, Match, Satzstand, 1.-Aufruf-Zeit).
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -9631,7 +10026,7 @@ mod tests {
         // damit ein Court-Monitor in beiden Betriebsarten gleich arbeitet.
         const NS: &str = "11111111-1111-1111-1111-111111111111";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -9709,7 +10104,7 @@ mod tests {
         // unbekanntes Feld — sonst ließen sich Feldnummern durchprobieren.
         const NS: &str = "22222222-2222-2222-2222-222222222222";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -9751,7 +10146,7 @@ mod tests {
         // fahren) blieb die größte Einsparung der Reihe damit ungenutzt.
         const NS: &str = "66666666-6666-6666-6666-666666666666";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -9830,7 +10225,7 @@ mod tests {
         // steht und nicht in die Marke eingeht.
         const NS: &str = "77777777-7777-7777-7777-777777777777";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -9885,7 +10280,7 @@ mod tests {
         // ganzen Halle — und umgekehrt.
         const NS: &str = "88888888-8888-8888-8888-888888888888";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -9953,9 +10348,9 @@ mod tests {
     // ── Antwortcache der Cloud-Übersicht (Spec monitor-livestand-push, S9) ──
 
     /// Namespace mit Host, zwei Feldern und einem Monitor-Datensatz.
-    async fn broker_mit_uebersicht(ns: &str) -> (Broker, Tx, mpsc::UnboundedReceiver<Message>) {
+    async fn broker_mit_uebersicht(ns: &str) -> (Broker, Tx, mpsc::Receiver<Message>) {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, host_rx) = mpsc::unbounded_channel();
+        let (host, host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let n = map.entry(ns.into()).or_insert_with(Namespace::new);
@@ -10214,7 +10609,7 @@ mod tests {
         // Gewinn aus S9 gezielt aushebeln (Sicherheits-Review 20.08.2026).
         let (broker, _tablet_rx, _host) = broker_with_tablet(101).await;
         // Eigener Host mit Empfänger — der Helfer verwirft seinen.
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         let tx = {
             let mut map = broker.namespaces.lock().await;
             let n = map.get_mut("ns1").unwrap();
@@ -10222,7 +10617,7 @@ mod tests {
             n.tablets.get(&101).unwrap().clone()
         };
         // Abonnent, der die Anstöße mitzählt.
-        let (mon, mut mon_rx) = mpsc::unbounded_channel();
+        let (mon, mut mon_rx) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", Some(101), &mon).await);
 
         forward_score(&broker, "ns1", 101, 5, 3, Vec::new(), 0, &tx).await;
@@ -10346,7 +10741,7 @@ mod tests {
         // er reist im `callTimer`-Umschlag mit.
         const NS: &str = "bbbbbbbb-9999-9999-9999-999999999999";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -10455,7 +10850,7 @@ mod tests {
         const LEER: &str = "99999999-9999-9999-9999-999999999999";
         const FEHLT: &str = "aaaaaaaa-9999-9999-9999-999999999999";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         register_host(&broker, LEER, &host).await;
 
         let a = overview_health(
@@ -10495,7 +10890,7 @@ mod tests {
         // ausschließen soll.
         const NS: &str = "55555555-5555-5555-5555-555555555555";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -10557,8 +10952,8 @@ mod tests {
         const NS_A: &str = "33333333-3333-3333-3333-333333333333";
         const NS_B: &str = "44444444-4444-4444-4444-444444444444";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_a, _rx_a) = mpsc::unbounded_channel();
-        let (host_b, _rx_b) = mpsc::unbounded_channel();
+        let (host_a, _rx_a) = kanal_test();
+        let (host_b, _rx_b) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let a = map.entry(NS_A.into()).or_insert_with(Namespace::new);
@@ -10708,9 +11103,7 @@ mod tests {
     }
 
     /// Wartet auf die Suchanfrage beim Host und liefert ihre `req_id`.
-    async fn suchanfrage_beim_host(
-        host_rx: &mut mpsc::UnboundedReceiver<Message>,
-    ) -> (u64, String, bool) {
+    async fn suchanfrage_beim_host(host_rx: &mut mpsc::Receiver<Message>) -> (u64, String, bool) {
         let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
             .await
             .expect("keine Anfrage beim Host")
@@ -10901,7 +11294,7 @@ mod tests {
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
-            let (tx, _rx) = mpsc::unbounded_channel();
+            let (tx, _rx) = kanal_test();
             ns.host = Some(tx);
             for i in 0..9 {
                 ns.tl_tokens.insert(format!("token-{i}"), format!("tl-{i}"));
@@ -10929,7 +11322,7 @@ mod tests {
         // andere Tablet-Frame, das einen Empfänger adressiert.
         let (broker, mut rx1, host) = broker_with_tablet(101).await;
         let mut rx2 = {
-            let (tx, rx) = mpsc::unbounded_channel();
+            let (tx, rx) = kanal_test();
             let mut map = broker.namespaces.lock().await;
             let ns = map.get_mut("ns1").expect("Namespace steht");
             ns.tablets.insert(202, tx);
@@ -11010,9 +11403,9 @@ mod tests {
     #[tokio::test]
     async fn host_frame_routes_by_court_id_not_name() {
         let broker = Broker::new("x".into());
-        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (tx_a, mut rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11043,8 +11436,8 @@ mod tests {
 
     /// Meldet eine Übersichts-Anzeige an (alle Felder) und gibt ihr
     /// Empfangs-Ende zurück.
-    async fn uebersicht_anmelden(broker: &Broker, ns: &str) -> mpsc::UnboundedReceiver<Message> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    async fn uebersicht_anmelden(broker: &Broker, ns: &str) -> mpsc::Receiver<Message> {
+        let (tx, rx) = kanal_test();
         subscribe_monitor(broker, ns, None, &tx).await;
         rx
     }
@@ -11054,7 +11447,7 @@ mod tests {
         // Bis S3 stieß der Relay eine Zuweisung nicht an — die Anzeige
         // erfuhr davon erst über ihren Poll (TODO(A1) an `monitor_conn`).
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         register_host(&broker, "ns1", &host).await;
         let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;
 
@@ -11083,8 +11476,8 @@ mod tests {
     #[tokio::test]
     async fn relay_reicht_hostsets_durch_ohne_sie_zu_cachen() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, mut tablet_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
+        let (tablet_tx, mut tablet_rx) = kanal_test();
         register_host(&broker, "ns1", &host).await;
         broker
             .namespaces
@@ -11154,7 +11547,7 @@ mod tests {
     #[tokio::test]
     async fn match_cleared_nudgt_die_anzeigen() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11185,7 +11578,7 @@ mod tests {
         // Match aus. Für die Anzeigen ändert sich dabei nichts — sie zu
         // wecken hieße, sie den vollen Stand ohne Anlass zu holen.
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11232,7 +11625,7 @@ mod tests {
         // Frames verworfen — die Änderung erschiene auf den Cloud-Monitoren
         // erst mit dem Fallback-Poll.
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11280,9 +11673,9 @@ mod tests {
     #[tokio::test]
     async fn store_court_state_reicht_an_host_weiter() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
-        let (fremd_tx, _fremd_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
+        let (fremd_tx, _fremd_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11429,8 +11822,8 @@ mod tests {
     #[tokio::test]
     async fn state_weitergabe_an_den_host_ist_gebremst() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11514,7 +11907,7 @@ mod tests {
         }
 
         // Ein Fremder ohne das Feld erzeugt keine Meldung (und keine Logzeile).
-        let (fremd, _rx) = mpsc::unbounded_channel();
+        let (fremd, _rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             map.get_mut("ns1").unwrap().state_deckel_gemeldet.clear();
@@ -11605,7 +11998,7 @@ mod tests {
             let map = broker.namespaces.lock().await;
             map.get("ns1").unwrap().tablets.get(&101).unwrap().clone()
         };
-        let (mon, mut mon_rx) = mpsc::unbounded_channel();
+        let (mon, mut mon_rx) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", Some(101), &mon).await);
 
         store_court_state(&broker, "ns1", 101, "{\"pause\":true}".into(), &tx).await;
@@ -11630,7 +12023,7 @@ mod tests {
         // und ohne diesen Test bliebe die Suite grün, wenn jemand die
         // Vergleichszeile wieder entfernt (Review-Fund 20.08.2026).
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11669,7 +12062,7 @@ mod tests {
     #[tokio::test]
     async fn reassign_same_match_keeps_the_score() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11733,8 +12126,8 @@ mod tests {
     #[tokio::test]
     async fn host_score_mirror_fills_the_display_cache_and_nudges() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
-        let (mon_tx, mut mon_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
+        let (mon_tx, mut mon_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11810,7 +12203,7 @@ mod tests {
     #[tokio::test]
     async fn host_score_mirror_guards_against_empty_and_stale_payloads() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11878,7 +12271,7 @@ mod tests {
         // wartende Anfrage unverändert.
         use relay_proto::{MeetingpointView, MpPartie};
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         register_host(&broker, "ns1", &host).await;
         let partie = |id: i64, halle: &str| MpPartie {
             match_id: id,
@@ -11961,7 +12354,7 @@ mod tests {
     async fn result_ack_resolves_the_pending_request() {
         let broker = Broker::new("x".into());
         let (ack_tx, ack_rx) = oneshot::channel();
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11987,10 +12380,10 @@ mod tests {
     #[tokio::test]
     async fn score_from_tablet_is_forwarded_to_the_host() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         // Der Sender muss als aktives Tablet des Felds eingetragen sein —
         // nur der aktuelle Halter darf Scores liefern (is_holder).
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12237,8 +12630,8 @@ mod tests {
         // Gültigkeit, Halter, Stale und die EIGENEN Deckel des Zettels,
         // deutet aber nichts und hält nichts vor.
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12341,9 +12734,9 @@ mod tests {
         // Sanktionsdaten dürfen erst recht nicht von einem verdrängten
         // Tablet kommen: Der Halter-Filter ist derselbe wie beim Rally.
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (halter_tx, _halter_rx) = mpsc::unbounded_channel();
-        let (fremd_tx, _fremd_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (halter_tx, _halter_rx) = kanal_test();
+        let (fremd_tx, _fremd_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12382,8 +12775,8 @@ mod tests {
         // des aktiven Halters mit passender matchId geht 1:1 an den Host;
         // ein Sync jenseits der geteilten Deckel wird verworfen.
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12446,8 +12839,8 @@ mod tests {
     #[tokio::test]
     async fn relay_reicht_sync_fuers_vormatch_im_fenster_durch() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12595,7 +12988,7 @@ mod tests {
     #[tokio::test]
     async fn gleiches_match_erneut_zugewiesen_laesst_vormatch_stehen() {
         let broker = Broker::new("x".into());
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12634,8 +13027,8 @@ mod tests {
         // weder gecacht noch an den Host weitergereicht. Mit passender
         // (oder ohne) matchId fließt er normal.
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12664,7 +13057,7 @@ mod tests {
         // Stale-Filter (A4): Ein state_sync des ALTEN Matches darf den
         // beim Match-Wechsel geleerten court_state nicht wieder befüllen.
         let broker = Broker::new("x".into());
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12693,7 +13086,7 @@ mod tests {
         // alten Spiels — er darf den geleerten Cache nicht neu befüllen.
         // Nur matchId 0 (alte Tablet-Seite) läuft weiter durch.
         let broker = Broker::new("x".into());
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -12714,8 +13107,8 @@ mod tests {
         // Verbindungsversuch (z. B. versehentlich zweiter Master mit
         // derselben install_id) wird abgewiesen.
         let mut ns = Namespace::new();
-        let (tx1, _rx1) = mpsc::unbounded_channel();
-        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let (tx1, _rx1) = kanal_test();
+        let (tx2, _rx2) = kanal_test();
         assert!(matches!(
             try_claim_host(&mut ns, &tx1, 1_000_000),
             HostClaim::Accepted { superseded: false }
@@ -12735,8 +13128,8 @@ mod tests {
         // hielt den Slot 17 Minuten): Ist der Inhaber ≥ HOST_STALE stumm,
         // übernimmt die neue Verbindung.
         let mut ns = Namespace::new();
-        let (tx1, _rx1) = mpsc::unbounded_channel();
-        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let (tx1, _rx1) = kanal_test();
+        let (tx2, _rx2) = kanal_test();
         try_claim_host(&mut ns, &tx1, 1_000_000);
         let stale_ms = HOST_STALE.as_millis() as u64;
         // 1 ms UNTER der Schwelle: noch abgewiesen (Grenze ist `>=`).
@@ -12761,8 +13154,8 @@ mod tests {
         // verdrängte Alt-Verbindung SPÄTER, darf ihr Aufräumen den Slot
         // des neuen Hosts nicht leeren.
         let mut ns = Namespace::new();
-        let (old_tx, _old_rx) = mpsc::unbounded_channel();
-        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let (old_tx, _old_rx) = kanal_test();
+        let (new_tx, _new_rx) = kanal_test();
         try_claim_host(&mut ns, &old_tx, 0);
         let stale_ms = HOST_STALE.as_millis() as u64;
         try_claim_host(&mut ns, &new_tx, stale_ms);
@@ -12779,7 +13172,7 @@ mod tests {
         // Eine verdrängte Alt-Verbindung, die wieder erwacht, darf den
         // Namespace-Zustand nicht mehr verändern (Sender-Guard).
         let (broker, _rx, host) = broker_with_tablet(101).await;
-        let (old_host, _old_rx) = mpsc::unbounded_channel();
+        let (old_host, _old_rx) = kanal_test();
         let accepted = handle_host_frame(
             &broker,
             "ns1",
@@ -12858,7 +13251,7 @@ mod tests {
             let ns = map.get_mut("ns1").unwrap();
             ns.tablet_devices.insert(101, "dev-x".into());
         }
-        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let (new_tx, _new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
         assert!(
             matches!(res, AttachResult::Active),
@@ -12886,7 +13279,7 @@ mod tests {
                 .tablet_devices
                 .insert(101, "dev-x".into());
         }
-        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let (new_tx, _new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "dev-anders", &new_tx).await;
         assert!(
             matches!(res, AttachResult::Occupied),
@@ -12946,7 +13339,7 @@ mod tests {
             ns.tablet_devices.insert(101, "dev-x".into());
             ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
         }
-        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        let (new_tx, mut new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
         assert!(matches!(res, AttachResult::Active));
         // Unter den gesendeten Frames muss das StateRestore mit
@@ -12977,7 +13370,7 @@ mod tests {
             ns.tablet_devices.insert(101, "dev-x".into());
             ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
         }
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = kanal_test();
         attach_tablet(&broker, "ns1", 101, "dev-x", &tx).await;
         let mut saw = false;
         while let Ok(Message::Text(t)) = rx.try_recv() {
@@ -13000,7 +13393,7 @@ mod tests {
             ns.tablet_devices.insert(101, "dev-x".into());
             ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
         }
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = kanal_test();
         attach_tablet(&broker2, "ns1", 101, "dev-x", &tx2).await;
         let mut saw2 = false;
         while let Ok(Message::Text(t)) = rx2.try_recv() {
@@ -13056,7 +13449,7 @@ mod tests {
             finalized.finalized = true;
             ns.court_matches.insert(101, finalized);
         }
-        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        let (new_tx, mut new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
         assert!(matches!(res, AttachResult::Active));
         let mut saw_restore = false;
@@ -13085,7 +13478,7 @@ mod tests {
             let ns = map.get_mut("ns1").unwrap();
             ns.court_state.insert(101, "{\"score\":\"9:9\"}".into());
         }
-        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        let (new_tx, mut new_rx) = kanal_test();
         take_over_court(&broker, "ns1", 101, "dev-neu", &new_tx).await;
         let mut saw_restore = false;
         while let Ok(Message::Text(t)) = new_rx.try_recv() {
@@ -13105,9 +13498,9 @@ mod tests {
     #[tokio::test]
     async fn superseded_session_frames_are_dropped() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (holder_tx, _holder_rx) = mpsc::unbounded_channel();
-        let (old_tx, _old_rx) = mpsc::unbounded_channel::<Message>();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (holder_tx, _holder_rx) = kanal_test();
+        let (old_tx, _old_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -13159,7 +13552,7 @@ mod tests {
     #[tokio::test]
     async fn prepared_frame_replaces_and_clears_list() {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, "ns1", &host).await;
 
         handle_host_frame(
@@ -13212,7 +13605,7 @@ mod tests {
         // sie im Cloud-Modus rendern kann.
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
         // Spiel 42 trägt eine Hallen-Farbe (Spec hallen-farben), 43 kommt
         // wie von einem alten Host ohne — beide müssen sauber durchreisen.
@@ -13583,7 +13976,7 @@ mod tests {
                 .tablet_devices
                 .insert(101, String::new());
         }
-        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let (new_tx, _new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "", &new_tx).await;
         assert!(
             matches!(res, AttachResult::Occupied),
@@ -13617,7 +14010,7 @@ mod tests {
 #[cfg(test)]
 mod load {
     use super::*;
-    use tokio::sync::mpsc::UnboundedReceiver;
+    use tokio::sync::mpsc::Receiver;
     use tokio::task::JoinSet;
 
     /// Größe eines Lastszenarios. Leichte (CI) und schwere (Soak) Variante
@@ -13734,14 +14127,14 @@ mod load {
         let subs = p.subs_per_ns;
 
         // rx im Hauptscope halten — nur tx-Klone wandern in die Tasks.
-        let mut rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
-        let mut host_rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut rxs: Vec<Receiver<Message>> = Vec::new();
+        let mut host_rxs: Vec<Receiver<Message>> = Vec::new();
         let mut ns_list: Vec<String> = Vec::new();
         let mut set = JoinSet::new();
 
         for i in 0..p.namespaces {
             let ns = fresh_ns(i);
-            let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+            let (host_tx, host_rx) = kanal_test();
             register_host(&broker, &ns, &host_tx).await;
             host_rxs.push(host_rx);
 
@@ -13750,7 +14143,7 @@ mod load {
             // solange F <= MAX_TABLETS_PER_NS.
             for c in 0..courts {
                 for t in 0..tablets {
-                    let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                    let (tx, rx) = kanal_test();
                     rxs.push(rx);
                     let b = broker.clone();
                     let ns_c = ns.clone();
@@ -13764,7 +14157,7 @@ mod load {
             // S Subs, gemischt court-spezifisch/„alle" — Deckel greift auf die
             // Summe.
             for s in 0..subs {
-                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                let (tx, rx) = kanal_test();
                 rxs.push(rx);
                 let b = broker.clone();
                 let ns_c = ns.clone();
@@ -13823,7 +14216,7 @@ mod load {
     async fn run_reconnect_storm(broker: Broker, p: &LoadParams) {
         let t = p.tablets_per_court;
         // Je (NS, Feld) alle rx sammeln, um die Superseded-Frames zu zählen.
-        let mut groups: Vec<(String, i64, Vec<UnboundedReceiver<Message>>)> = Vec::new();
+        let mut groups: Vec<(String, i64, Vec<Receiver<Message>>)> = Vec::new();
         let mut set = JoinSet::new();
 
         for i in 0..p.namespaces {
@@ -13832,7 +14225,7 @@ mod load {
                 let court = c as i64;
                 let mut court_rx = Vec::with_capacity(t);
                 for k in 0..t {
-                    let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                    let (tx, rx) = kanal_test();
                     court_rx.push(rx);
                     let b = broker.clone();
                     let ns_c = ns.clone();
@@ -13880,21 +14273,21 @@ mod load {
 
         // Hosts, damit `subscribe_monitor` die Namespaces bespielt. Die Host-rx
         // bleiben bis Funktionsende gebunden (nicht `let _ = …`, das dropt).
-        let (ha, _rha) = mpsc::unbounded_channel::<Message>();
-        let (hb, _rhb) = mpsc::unbounded_channel::<Message>();
+        let (ha, _rha) = kanal_test();
+        let (hb, _rhb) = kanal_test();
         register_host(&broker, &nsa, &ha).await;
         register_host(&broker, &nsb, &hb).await;
 
         // court-spezifische Subs (Index == Feld), „alle"-Sub, Fremd-NS-Sub.
-        let mut court_rx: Vec<UnboundedReceiver<Message>> = Vec::with_capacity(courts);
+        let mut court_rx: Vec<Receiver<Message>> = Vec::with_capacity(courts);
         for c in 0..courts {
-            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            let (tx, rx) = kanal_test();
             subscribe_monitor(&broker, &nsa, Some(c as i64), &tx).await;
             court_rx.push(rx);
         }
-        let (tx_all, mut all_rx) = mpsc::unbounded_channel::<Message>();
+        let (tx_all, mut all_rx) = kanal_test();
         subscribe_monitor(&broker, &nsa, None, &tx_all).await;
-        let (tx_f, mut foreign_rx) = mpsc::unbounded_channel::<Message>();
+        let (tx_f, mut foreign_rx) = kanal_test();
         subscribe_monitor(&broker, &nsb, Some(0), &tx_f).await;
 
         let mut set = JoinSet::new();
@@ -13949,7 +14342,7 @@ mod load {
 
         for i in 0..p.namespaces {
             let ns = fresh_ns(i);
-            let (host_tx, mut host_rx) = mpsc::unbounded_channel::<Message>();
+            let (host_tx, mut host_rx) = kanal_test();
             register_host(&broker, &ns, &host_tx).await;
             // Schlanke Acker-Task: Frame lesen → `reqId` ziehen → sofort acken.
             // So schlägt das 8-s-`RESULT_TIMEOUT` nie zu. `host_tx` wandert mit
@@ -14046,17 +14439,17 @@ mod load {
         let mut per_ns_tablets: Vec<Vec<(i64, Tx)>> = Vec::new();
         let mut per_ns_subs: Vec<Vec<(Option<i64>, Tx)>> = Vec::new();
         let mut host_txs: Vec<Tx> = Vec::new();
-        let mut keep_rx: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut keep_rx: Vec<Receiver<Message>> = Vec::new();
 
         for i in 0..p.namespaces {
             let ns = fresh_ns(i);
-            let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+            let (host_tx, host_rx) = kanal_test();
             register_host(&broker, &ns, &host_tx).await;
             keep_rx.push(host_rx);
 
             let mut tablets = Vec::with_capacity(courts);
             for c in 0..courts {
-                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                let (tx, rx) = kanal_test();
                 keep_rx.push(rx);
                 let dev = format!("dev-{i}-{c}");
                 attach_tablet(&broker, &ns, c as i64, &dev, &tx).await;
@@ -14064,7 +14457,7 @@ mod load {
             }
             let mut sub_list = Vec::with_capacity(subs);
             for s in 0..subs {
-                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                let (tx, rx) = kanal_test();
                 keep_rx.push(rx);
                 let court = if s % 2 == 0 {
                     Some((s % courts.max(1)) as i64)
@@ -14151,15 +14544,15 @@ mod load {
     /// Deckel. Alle Abos/Attaches laufen nebenläufig gegen den Namespace-Mutex.
     async fn run_cap_boundary(broker: Broker, over: usize) {
         let ns = fresh_ns(0);
-        let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+        let (host_tx, host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
 
-        let mut rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut rxs: Vec<Receiver<Message>> = Vec::new();
         let mut set = JoinSet::new();
 
         // Monitor-Subs: MAX_MONITOR_SUBS + over Abos (alle in die „alle"-Liste).
         for _ in 0..(MAX_MONITOR_SUBS + over) {
-            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            let (tx, rx) = kanal_test();
             rxs.push(rx);
             let b = broker.clone();
             let ns_c = ns.clone();
@@ -14170,7 +14563,7 @@ mod load {
         // Tablets: MAX_TABLETS_PER_NS + over DISTINKTE Felder (je ein Tablet) —
         // jenseits des Deckels wird ein neues Feld abgewiesen.
         for c in 0..(MAX_TABLETS_PER_NS + over) {
-            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            let (tx, rx) = kanal_test();
             rxs.push(rx);
             let b = broker.clone();
             let ns_c = ns.clone();

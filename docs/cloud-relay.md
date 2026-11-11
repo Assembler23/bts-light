@@ -1334,6 +1334,70 @@ Der Takt schützt vor einem fehlerhaften Gerät, nicht vor einem Angreifer:
 Eine neue Verbindung beginnt mit vollem Kontingent. Die feste Grenze bleibt
 die Zahl der Halter (64 je Namespace).
 
+## Begrenzte Kanäle (seit v0.9.386)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 5 ·
+ADR [0090](adr/0090-ueberlast-am-relay-und-mindestschutz.md).
+
+Jede Verbindung hat im Relay einen Kanal für das, was an sie hinausgeht. Bis
+v0.9.385 war er unbegrenzt: Nahm der Empfänger nicht ab, wuchs er im Speicher
+des Relays — der alle Turniere trägt.
+
+| Kanal zu | Größe (Nachrichten) |
+|---|---|
+| Turnier-PC | 1024 |
+| Tablet, Substrom des Trägers | 64 |
+| Monitor, Turnierleitungs-Seite | 32 |
+| Träger (Sammelkanal aller Substrome) | 1024 |
+
+**Voller Kanal = der Empfänger wird getrennt**, sobald seine
+Verbindungsschleife wieder läuft. Hängt sie gerade beim Schreiben in den
+Socket fest (Gerät nimmt gar nichts mehr ab), bleibt der Speicher trotzdem
+begrenzt; getrennt wird dann erst, wenn das Schreiben zurückkehrt oder der
+Stale-Wächter greift (Tablet, Turnier-PC, Träger: 15 s). Eine Schreibfrist am
+Relay gibt es nicht. Das Senden wartet nie
+(`Tx::send` nutzt `try_send`); ist der Kanal voll, setzt es ein Merkmal, und
+die Verbindungsschleife **des Empfängers** beendet sich über ihren normalen
+Aufräumweg (Feld freigeben, Abo austragen). Nichts wird still verworfen,
+während die Verbindung weiterläuft. Das getrennte Gerät verbindet neu und
+bekommt den frischen Stand: Ein Tablet meldet sich wieder an, der Relay
+schickt dem Host `tablet_connected`, der Host schiebt die Zuweisung nach —
+ein `MatchAssigned` geht so nicht verloren.
+
+**Turnier-PC — Reserve gegen gezieltes Trennen.** Eine Halle mit 20 Feldern
+erzeugt im üblichen Betrieb 3–4 Nachrichten je Sekunde an den Turnier-PC;
+1024 reichen dafür mehrere Minuten (zählten alle Felder gleichzeitig im
+schnellsten Takt, rund 9 s). Ein Turnier-PC, der nichts mehr sendet, wird
+ohnehin nach 15 s getrennt.
+
+Alles, was ein **Tablet** in diesen Kanal legt (Punkt, Ballwechsel, Abgleiche,
+Zustand, Akku, Ruf, An- und Abmeldung), ist **nachrangig**
+(`Tx::send_nachrangig`): Es darf das letzte Viertel nicht belegen und löst
+nie eine Trennung aus — über der Marke wird es verworfen und einmal gemeldet
+(`Kanal knapp – …`). Grund: Wer die Turnier-Kennung hat, kann beliebig viele
+Tablet-Frames erzeugen. Könnten sie den Kanal füllen, ließe sich der
+Turnier-PC gezielt trennen und sein Platz besetzen (`host-ws` hat keine
+Anmeldung). Die Reserve gehört dem, was kein Tablet auslösen kann: Ergebnisse
+(höchstens 16 gleichzeitig offen), Befehle der Turnierleitung, Abrufe.
+
+Verworfene Tablet-Frames heilen: Punkt und Zustand durch den nächsten Frame,
+der Punktverlauf durch den nächsten kompletten Abgleich (spätestens am
+Spielende), die Anmeldung eines Tablets, sobald der Turnier-PC neu verbindet
+(der Relay nennt ihm dann alle verbundenen Tablets).
+
+`POST /{ns}/result` nimmt höchstens 16 KiB und zehn Sätze an (vorher 2 MiB
+je Ergebnis).
+
+**Bleibt offen:** Ein Monitor kann getrennt werden, wenn mehr als 32 Anstöße
+auflaufen, bevor seine Schleife sie abholt (er verbindet neu und holt den
+Stand). `identify`/`take_over` sind nicht getaktet. Es gibt kein Limit für
+die Zahl der Verbindungen (PR 6).
+
+**Im Relay-Log:** `Kanal voll – Tablet (Namespace '…') wird getrennt` (bzw.
+Monitor, Turnierleitungs-Seite, Turnier-PC, Träger, Substrom). Im
+Normalbetrieb darf die Zeile nicht auftreten; tritt sie (oder `Kanal knapp`)
+beim Turnier-PC auf, hängt dessen Leitung oder sein Rechner.
+
 ## Sicherheit
 
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die
