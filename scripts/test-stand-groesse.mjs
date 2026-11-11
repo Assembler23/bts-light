@@ -44,6 +44,8 @@ assert.ok(SPIEGEL_BUDGET <= MAX_STATE_LEN - 8000, "Budget (Bytes) lässt Reserve
 // ── Die echten Funktionen der Seite ───────────────────────────────────
 const bau = new Function(
   "STATE",
+  // Eine Geräte-Kennung in üblicher Länge — sie reist im Zustand mit.
+  "const SCHREIBER = 'dev-k3j9x2ab-m1n2o3p4';\n" +
   "function computeServing() { return { team: 'a', index: 0 }; }\n" +
     "function computeReceiving() { return { team: 'b', index: 1 }; }\n" +
     ["verlaufGueltig", "verlaufSchnitt", "snapshot", "standFuerSpiegel"].map((n) => funktion(seite, n)).join("\n") +
@@ -155,6 +157,7 @@ for (const [name, saetze, zusatz, grenze] of FAELLE) {
   const persistState = new Function(
     "STATE", "ws", "WebSocket", "localStorage", "tlog", "PERSIST_KEY", "performance",
     "function computeServing() { return null; }\nfunction computeReceiving() { return null; }\n" +
+      "const SCHREIBER = 'dev-k3j9x2ab-m1n2o3p4';\n" +
       "const SPIEGEL_BUDGET = " + SPIEGEL_BUDGET + ";\n" +
       "const standWarnung = { speicher: undefined, gekuerzt: undefined, langsam: undefined };\n" +
       ["utf8Laenge", "verlaufGueltig", "verlaufSchnitt", "spiegelKuerzen", "standFuerSpiegel", "persistState"]

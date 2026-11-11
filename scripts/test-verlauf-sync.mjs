@@ -57,6 +57,8 @@ function umgebung({ state, fetchAntwort, echtesLoadMatch = false }) {
     geparktAntwort: () => false,
     planeGeparktPruefung: () => {},
     geparktBeiFinalisierungAufloesen: merk("geparktAufloesen"),
+    einstiegMitSaetzen: merk("einstieg"),
+    uebernimmStand: merk("uebernimm"),
     naechsterSchritt: (data) => (data && data.ok ? { art: "ok" } : { art: "wiederholen", grund: "nein" }),
     fetch: async () => { ruf.push("fetch"); return fetchAntwort(); },
     COURT_ID: 101, COURT_LABEL: "Feld 1", BASE_PATH: "", RESULT_ABORT_MS: 1000, RESULT_RETRY_MS: 60_000,
@@ -77,7 +79,10 @@ function umgebung({ state, fetchAntwort, echtesLoadMatch = false }) {
   const bau = new Function(
     ...namen,
     "let healthNachfragenRest = 0;\nlet resultRetryTimer = null;\n" +
-      ["beiMatchAssigned", "submit", "trySubmitPending"].map(funktion).join("\n") +
+      "const MELDE_RING_MAX = 8; let MELDE_RING = null, VORGEMERKT = null;\n" +
+      ["beiMatchAssigned", "submit", "trySubmitPending",
+        // Stand-Wahl (Regel A) — hier ohne Host-Sätze, also ohne Wirkung.
+        "fortschritt", "punkte", "vergleiche", "satzEntschieden", "hostSaetzeLesen", "hostSaetzeTeilen", "saetzeSchluessel", "ringMerken", "imRing", "wahlBeiRestore", "wahlBeiZuweisung"].map(funktion).join("\n") +
       "\nreturn { beiMatchAssigned, submit, trySubmitPending };",
   );
   return { ruf, ...bau(...namen.map((n) => attrappen[n])) };

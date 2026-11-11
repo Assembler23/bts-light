@@ -313,6 +313,12 @@ jobs:
       - name: Geparkte Ergebnisse am Tablet (JS)
         run: node scripts/test-geparkt.mjs
 
+      # Wessen Spielstand gilt nach einer Wieder-Anmeldung? Ein Fehler hier
+      # laesst ein Ersatz-Tablet bei 0:0 beginnen und den gesicherten Stand
+      # ueberschreiben.
+      - name: Stand-Wahl am Tablet (JS)
+        run: node scripts/test-stand-wahl.mjs
+
       # Schlankes Undo-Format des Tablets (Spec tablet-stand-robust,
       # ADR 0084) — ein falscher Schnitt stellte nach „zurueck" einen
       # falschen Punktverlauf wieder her; faellt erst beim Geraetewechsel auf.

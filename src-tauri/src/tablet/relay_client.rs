@@ -847,6 +847,13 @@ fn push_court(
                 // Autoritativer 1.-Aufruf-Zeitstempel vom Host (gleiche Quelle
                 // wie die Spielübersicht) – auch bei Reconnect identisch.
                 on_court_since_ms: ctx.tablet.on_court_since_ms(court_id, m.id),
+                // Wie im LAN (`server::push_match`): die Sätze des Hosts,
+                // leer beim Legacy-Schalter.
+                host_sets: ctx.tablet.host_sets(
+                    court_id,
+                    m.id,
+                    !crate::tablet::server::ownership_active(&ctx.app_config()),
+                ),
             }
         }
         None => {

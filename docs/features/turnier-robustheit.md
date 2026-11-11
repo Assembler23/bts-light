@@ -166,6 +166,14 @@ Nebenhallen-TVs).
 
 ## Offene Fragen / Annahmen
 
+> **Nachtrag 11.11.2026:** Die Reconnect-Regel „Slot-Halter gewinnt" (A2,
+> ADR 0017) ließ ein Ersatz-Tablet an einem freien Feld bei 0:0 beginnen und
+> den gesicherten Stand überschreiben. Die Spec
+> [tablet-stand-robust](tablet-stand-robust.md) (Regel A, ADR 0083, umgesetzt
+> in v0.9.377) entscheidet deshalb am Tablet nach Fortschritt und lässt es mit
+> den Sätzen des Hosts einsteigen. Der Schalter `reconnect_legacy_rev` bleibt
+> der Rollback.
+
 - **Feldname/Polarität des A2-Flags** (z. B. `reconnect_ownership` mit Default
   „neu aktiv" vs. `reconnect_legacy`) — final im ADR 0017. Prinzip steht: ein
   bool, `serde(default)`, runtime-umschaltbar, Default = neues Verhalten.

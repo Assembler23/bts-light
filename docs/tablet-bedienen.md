@@ -319,6 +319,18 @@ Feld und tippt **Court übernehmen**. Es setzt **mit dem aktuellen Spielstand** 
 das alte Gerät wird gesperrt. Es geht nichts verloren, weil das zählende Tablet
 seinen Stand laufend an den Turnier-PC spiegelt.
 
+**Das alte Gerät ist einfach aus?** Dann ist das Feld frei, und das
+Ersatzgerät öffnet es ohne Dialog. Es übernimmt den gesicherten Spielstand
+trotzdem — samt den letzten „zurück"-Schritten (seit v0.9.377; vorher begann
+es bei 0:0).
+
+**Nach einem Neustart des Turnier-PCs** kennt er nur noch die Sätze, nicht
+mehr die Aufstellung. Das Ersatzgerät steigt dann mit diesem Satzstand ein
+und fragt wie beim Spielbeginn: welches Team links steht und wer gerade
+aufschlägt. Der Pfeil „letzten Punkt zurück" reicht in diesem Fall nicht
+hinter den Einstieg.
+<!-- pruef: "Wer schlägt gerade auf?" in src-tauri/assets/tablet.html -->
+
 **Kurze Netzaussetzer sind keine Übernahme.** Verliert dasselbe Tablet
 kurzzeitig das WLAN und meldet sich zurück, macht es nahtlos weiter — ohne
 Dialog und ohne Tippen. Den Übernahme-Dialog sieht nur ein **fremdes** Gerät.

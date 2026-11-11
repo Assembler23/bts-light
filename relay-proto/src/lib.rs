@@ -1005,6 +1005,10 @@ pub fn schlanker_anzeige_stand(state: &str) -> String {
     obj.remove("history");
     obj.remove("rallyLog");
     obj.remove("events");
+    // Kennung des schreibenden Tablets (ADR 0083): Sie dient allein der
+    // Stand-Wahl zwischen Tablets desselben Felds und hat auf einer Anzeige,
+    // die jeder im Netz abrufen kann, nichts verloren.
+    obj.remove("schreiber");
     serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
 }
 
@@ -1520,6 +1524,16 @@ pub enum ServerMsg {
     MatchAssigned {
         #[serde(rename = "match")]
         match_brief: MatchBrief,
+        /// Die Sätze, die der Turnier-PC für dieses Spiel selbst kennt —
+        /// abgeschlossene plus laufender, in Team-Koordinaten (Spec
+        /// tablet-stand-robust, Regel A; ADR 0083). Ein Ersatz-Tablet ohne
+        /// eigenen Stand steigt damit ein statt bei 0:0. Auf **Frame**-Ebene,
+        /// nicht im `MatchBrief`: Der Brief wird zwischengespeichert und
+        /// verglichen, die Sätze ändern sich mit jedem Punkt. Leer = nichts
+        /// bekannt, Legacy-Schalter oder älterer Host; bleibt dann von der
+        /// Leitung.
+        #[serde(rename = "hostSets", default, skip_serializing_if = "Vec::is_empty")]
+        host_sets: Vec<SetAb>,
     },
     /// Der Court hat aktuell kein Match.
     #[serde(rename = "match_cleared")]
@@ -2875,6 +2889,11 @@ pub enum HostFrame {
             default
         )]
         on_court_since_ms: Option<u64>,
+        /// Sätze des Hosts für dieses Spiel — siehe
+        /// [`ServerMsg::MatchAssigned`]. Der Relay reicht sie ans Tablet
+        /// durch und **speichert sie nicht**.
+        #[serde(rename = "hostSets", default, skip_serializing_if = "Vec::is_empty")]
+        host_sets: Vec<SetAb>,
     },
     /// Court-Match aufgehoben.
     MatchCleared {
@@ -4017,9 +4036,9 @@ mod tests {
         let voll = r#"{"fmt":2,"serving":{"team":"a"},"pause":null,"startedAt":7,
             "history":[{"rl":[[3],false]}],"rallyLog":{"sets":[]},
             "events":[{"kind":"card_red","player":1002}],"eventSeq":4,
-            "finished":false,"teamOnSide":{"a":"left"}}"#;
+            "finished":false,"teamOnSide":{"a":"left"},"schreiber":"s-abc123"}"#;
         let v: serde_json::Value = serde_json::from_str(&schlanker_anzeige_stand(voll)).unwrap();
-        for weg in ["history", "rallyLog", "events"] {
+        for weg in ["history", "rallyLog", "events", "schreiber"] {
             assert!(v.get(weg).is_none(), "{weg} fällt weg");
         }
         assert_eq!(v["serving"]["team"], "a", "Aufschlag bleibt");
@@ -4048,9 +4067,67 @@ mod tests {
         assert_eq!(state_sync_match_id("kein json"), None);
     }
 
+    /// Spec tablet-stand-robust, Regel A: `hostSets` reist auf Frame-Ebene,
+    /// bleibt leer von der Leitung, und ein Frame ohne das Feld (älterer
+    /// Host) liest sich als „nichts bekannt".
     #[test]
-    fn server_msg_match_assigned_uses_match_key() {
-        let msg = ServerMsg::MatchAssigned {
+    fn match_assigned_hostsets_roundtrip_und_alt_lesbar() {
+        // Ein Frame, wie ihn ein Host vor dieser Fassung schickt: der Brief
+        // aus dem Nachbartest, ohne `hostSets`.
+        let ServerMsg::MatchAssigned { match_brief, .. } = beispiel_match_assigned() else {
+            panic!("match_assigned erwartet");
+        };
+        let alt = serde_json::json!({ "type": "match_assigned", "match": match_brief }).to_string();
+        assert!(!alt.contains("hostSets"));
+        let ServerMsg::MatchAssigned { host_sets, .. } =
+            serde_json::from_str::<ServerMsg>(&alt).expect("alter Frame bleibt lesbar")
+        else {
+            panic!("match_assigned erwartet");
+        };
+        assert!(host_sets.is_empty());
+
+        let leer = ServerMsg::MatchAssigned {
+            match_brief: match_brief.clone(),
+            host_sets: Vec::new(),
+        };
+        let json = serde_json::to_string(&leer).unwrap();
+        assert!(
+            !json.contains("hostSets"),
+            "leer bleibt von der Leitung: {json}"
+        );
+
+        let voll = ServerMsg::MatchAssigned {
+            match_brief: match_brief.clone(),
+            host_sets: vec![SetAb { a: 21, b: 10 }, SetAb { a: 5, b: 3 }],
+        };
+        let json = serde_json::to_string(&voll).unwrap();
+        assert!(
+            json.contains(r#""hostSets":[{"a":21,"b":10},{"a":5,"b":3}]"#),
+            "{json}"
+        );
+        roundtrip(&voll);
+
+        // Derselbe Vertrag auf der Strecke Host → Relay.
+        let frame = HostFrame::MatchAssigned {
+            court_id: 101,
+            court_label: "Feld 1".into(),
+            hall: String::new(),
+            match_brief,
+            on_court_since_ms: None,
+            host_sets: vec![SetAb { a: 21, b: 10 }],
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains(r#""hostSets":[{"a":21,"b":10}]"#), "{json}");
+        roundtrip(&frame);
+        let ohne = json.replace(r#","hostSets":[{"a":21,"b":10}]"#, "");
+        assert!(matches!(
+            serde_json::from_str::<HostFrame>(&ohne).unwrap(),
+            HostFrame::MatchAssigned { host_sets, .. } if host_sets.is_empty()
+        ));
+    }
+
+    fn beispiel_match_assigned() -> ServerMsg {
+        ServerMsg::MatchAssigned {
             match_brief: MatchBrief {
                 match_id: 7,
                 team_a: vec![PlayerBrief {
@@ -4085,7 +4162,13 @@ mod tests {
                 seed_a: None,
                 seed_b: None,
             },
-        };
+            host_sets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn server_msg_match_assigned_uses_match_key() {
+        let msg = beispiel_match_assigned();
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"match_assigned""#));
         assert!(json.contains(r#""match":{"#));

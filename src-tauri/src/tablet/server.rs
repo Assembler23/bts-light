@@ -4017,7 +4017,7 @@ pub(crate) async fn write_highlight_to_btp(
 /// `ownership_active = false`, worauf das Tablet die bestehende rev-Logik nutzt
 /// — das hält den Laufzeit-Rollback sauber (das Tablet befolgt `authoritative`
 /// eben NICHT blind, siehe ADR 0017). Reine Funktion → unit-testbar.
-fn ownership_active(config: &AppConfig) -> bool {
+pub(crate) fn ownership_active(config: &AppConfig) -> bool {
     !config.reconnect_legacy_rev
 }
 
@@ -4645,6 +4645,14 @@ async fn push_match(
                 m.id
             );
             ServerMsg::MatchAssigned {
+                // Die Sätze, die der Host selbst kennt (Regel A der Spec
+                // tablet-stand-robust). Ein finalisiertes Spiel liegt nicht
+                // mehr auf dem Feld → leer.
+                host_sets: ctx.tablet.host_sets(
+                    court_id,
+                    m.id,
+                    !ownership_active(&ctx.app_config_arc()),
+                ),
                 match_brief: {
                     let (sk, ska) = ctx.tablet.scorekeeper_display(court_id);
                     let cfg = ctx.app_config_arc();
