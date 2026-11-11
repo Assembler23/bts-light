@@ -5043,7 +5043,52 @@ impl TabletState {
     /// `connected`-Prüfung), aber ohne das Klonen des vollen `BtpMatch`: Der
     /// Spiegel läuft bei jedem Nudge und im 2-s-Sweep über alle Felder.
     /// `None` = kein Match auf dem Feld, nichts zu spiegeln.
-    pub fn score_mirror_of(&self, court_id: i64) -> Option<ScoreMirror> {
+    /// Die Sätze, die der Host für `match_id` auf diesem Feld selbst kennt —
+    /// abgeschlossene plus laufender (Spec tablet-stand-robust, Regel A;
+    /// ADR 0083). Sie reisen im `match_assigned` ans Tablet: Ein Ersatzgerät
+    /// ohne eigenen Stand steigt damit ein statt bei 0:0. Quelle ist der
+    /// Live-Stand ([`Self::score_mirror_of`]), nach einem Neustart also
+    /// `live-scores.json`.
+    ///
+    /// Leer, wenn das Spiel nicht (mehr) auf dem Feld liegt, wenn nichts
+    /// gezählt ist oder der Legacy-Schalter gilt (`legacy` — dann verhält
+    /// sich das Tablet wie vor ADR 0083). Ein abschließender 0:0-Satz fällt
+    /// weg: Er trägt keine Auskunft, und „nichts gezählt" soll leer sein.
+    pub fn host_sets(&self, court_id: i64, match_id: i64, legacy: bool) -> Vec<relay_proto::SetAb> {
+        if legacy {
+            return Vec::new();
+        }
+        // Nur der vom Tablet gemeldete Live-Stand — NICHT der Rückfall auf
+        // die BTP-Sätze, den die Anzeige nutzt: Ein Spiel, das mit alten
+        // Sätzen in BTP neu aufs Feld kommt, soll bei 0:0 beginnen und
+        // nicht „einsteigen" (Review-Fund 11.11.2026). Nach einem Neustart
+        // steht der Live-Stand aus `live-scores.json` wieder in `courts`.
+        if !self
+            .match_for_court(court_id)
+            .is_some_and(|m| m.id == match_id)
+        {
+            return Vec::new();
+        }
+        let sets = {
+            let courts = self.courts.read().unwrap();
+            match courts.get(&court_id) {
+                Some(s) if s.match_id == match_id && s.sets.len() <= 9 => s.sets.clone(),
+                _ => return Vec::new(),
+            }
+        };
+        let mut sets = sets;
+        while sets.last() == Some(&(0, 0)) {
+            sets.pop();
+        }
+        sets.into_iter()
+            .map(|(a, b)| relay_proto::SetAb { a, b })
+            .collect()
+    }
+
+    /// Match-ID und effektiver Satzstand des Felds (Tablet-Stand vor
+    /// BTP-Stand) — der Teil von [`Self::score_mirror_of`] ohne den
+    /// gespiegelten Zustand, den niemand klonen muss, der nur Sätze will.
+    fn live_sets_of(&self, court_id: i64) -> Option<(i64, Vec<(i64, i64)>)> {
         let (match_id, btp_sets) = {
             let guard = self.snapshot.read().unwrap();
             let m = guard.as_ref().and_then(|snap| {
@@ -5053,13 +5098,16 @@ impl TabletState {
             })?;
             (m.id, m.sets.clone())
         };
-        let sets = {
-            let courts = self.courts.read().unwrap();
-            match courts.get(&court_id) {
-                Some(s) if s.match_id == match_id && !s.sets.is_empty() => s.sets.clone(),
-                _ => btp_sets,
-            }
+        let courts = self.courts.read().unwrap();
+        let sets = match courts.get(&court_id) {
+            Some(s) if s.match_id == match_id && !s.sets.is_empty() => s.sets.clone(),
+            _ => btp_sets,
         };
+        Some((match_id, sets))
+    }
+
+    pub fn score_mirror_of(&self, court_id: i64) -> Option<ScoreMirror> {
+        let (match_id, sets) = self.live_sets_of(court_id)?;
         Some(ScoreMirror {
             match_id,
             sets,
@@ -5784,6 +5832,81 @@ pub(crate) mod tests {
         );
         // Das Komposit-Label kombiniert Halle und Feldname.
         assert_eq!(st.court_display_label(401), "Halle 2 · 1");
+    }
+
+    /// Spec tablet-stand-robust, Regel A: Die Host-Sätze im `match_assigned`
+    /// kommen aus dem Live-Stand — nur fürs Spiel auf dem Feld, ohne
+    /// abschließendes 0:0, und gar nicht beim Legacy-Schalter (AK10).
+    #[test]
+    fn push_match_traegt_hostsets_aus_live_scores() {
+        let st = TabletState::default();
+        let mut m = match_on(1, Some(101), MatchStatus::OnCourt);
+        m.sets = Vec::new();
+        st.set_snapshot(snapshot(vec![m], vec![(101, "Court 1")]));
+        assert!(st.host_sets(101, 1, false).is_empty(), "nichts gezählt");
+
+        st.record_score(101, 1, vec![(21, 10), (5, 3)]);
+        let ab = |a, b| relay_proto::SetAb { a, b };
+        assert_eq!(st.host_sets(101, 1, false), vec![ab(21, 10), ab(5, 3)]);
+        assert!(
+            st.host_sets(101, 1, true).is_empty(),
+            "Legacy: keine Host-Sätze"
+        );
+        assert!(st.host_sets(101, 2, false).is_empty(), "anderes Spiel");
+        assert!(st.host_sets(102, 1, false).is_empty(), "anderes Feld");
+
+        // Zwischen den Sätzen führt der Host ein 0:0 — das reist nicht mit.
+        st.record_score(101, 1, vec![(21, 10), (0, 0)]);
+        assert_eq!(st.host_sets(101, 1, false), vec![ab(21, 10)]);
+        st.record_score(101, 1, vec![(0, 0)]);
+        assert!(
+            st.host_sets(101, 1, false).is_empty(),
+            "0:0 ist „nichts bekannt“"
+        );
+    }
+
+    /// AK10: Mit `reconnect_legacy_rev` trägt `match_assigned` keine
+    /// Host-Sätze — der Schalter bleibt der vollständige Laufzeit-Rollback.
+    #[test]
+    fn hostsets_leer_bei_legacy_schalter() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        st.record_score(101, 1, vec![(21, 10), (5, 3)]);
+        assert!(!st.host_sets(101, 1, false).is_empty());
+        assert!(st.host_sets(101, 1, true).is_empty());
+    }
+
+    /// Die BTP-Sätze eines Spiels zählen NICHT als Host-Sätze: Kommt ein
+    /// Spiel mit alten Sätzen in BTP neu aufs Feld, beginnt das Tablet bei
+    /// 0:0. Nach einem Neustart kommt der Live-Stand aus `live-scores.json`.
+    #[test]
+    fn hostsets_ohne_btp_rueckfall_aber_aus_live_scores_json() {
+        let st = TabletState::default();
+        // `match_on` setzt in BTP sets = [(5, 3)]; kein Tablet hat gemeldet.
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        assert!(st.host_sets(101, 1, false).is_empty());
+
+        // Neustart: Der Live-Stand wird aus der Datei geladen.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("live-scores.json");
+        let vorher = TabletState::default();
+        vorher.set_scores_path(path.clone());
+        vorher.record_score(101, 1, vec![(21, 10), (5, 3)]);
+        vorher.flush_scores();
+        st.load_scores(&path);
+        assert_eq!(
+            st.host_sets(101, 1, false),
+            vec![
+                relay_proto::SetAb { a: 21, b: 10 },
+                relay_proto::SetAb { a: 5, b: 3 }
+            ]
+        );
     }
 
     /// Schlanker Spiegel-Blick fürs Relay (v0.9.200): dieselbe effektive

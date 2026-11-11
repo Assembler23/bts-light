@@ -5396,6 +5396,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             hall,
             match_brief,
             on_court_since_ms,
+            host_sets,
         } => {
             // Anzeige-Stand vor der Übernahme merken (Spec
             // monitor-livestand-push, S3): Der Nudge unten hängt daran, ob
@@ -5472,7 +5473,13 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                     != namespace.court_hall.get(&court_id).map(|s| s.as_str())
                 || vorher_since != namespace.court_on_court_since.get(&court_id).copied();
             if let Some(t) = namespace.tablets.get(&court_id) {
-                let _ = t.send(text(&ServerMsg::MatchAssigned { match_brief }));
+                // `host_sets` nur durchreichen (Spec tablet-stand-robust,
+                // Regel A): Sie gelten für diesen Augenblick. Der Relay
+                // behält sie nicht — in `court_matches` liegt nur der Brief.
+                let _ = t.send(text(&ServerMsg::MatchAssigned {
+                    match_brief,
+                    host_sets,
+                }));
             }
             // Anzeigen anstoßen (Spec monitor-livestand-push, S3) — schließt
             // das TODO(A1) an `monitor_conn`. **Nach** dem Eintrag in
@@ -9353,6 +9360,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: brief(7),
                 on_court_since_ms: None,
+                host_sets: Vec::new(),
             },
             &host,
         )
@@ -9365,7 +9373,8 @@ mod tests {
         assert_eq!(
             parsed,
             ServerMsg::MatchAssigned {
-                match_brief: brief(7)
+                match_brief: brief(7),
+                host_sets: Vec::new(),
             }
         );
     }
@@ -9412,6 +9421,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: brief(7),
                 on_court_since_ms: None,
+                host_sets: Vec::new(),
             },
             &host,
         )
@@ -9449,6 +9459,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: brief(7),
                 on_court_since_ms: None,
+                host_sets: Vec::new(),
             },
             &host,
         )
@@ -9457,6 +9468,79 @@ mod tests {
         let (court, seq) = nudge_of(anzeige.try_recv().expect("Anstoß nach Zuweisung"));
         assert_eq!(court, 101);
         assert!(seq > 0);
+    }
+
+    /// Spec tablet-stand-robust, Regel A: Die Host-Sätze gehen ans Tablet,
+    /// der Relay behält sie nicht — im Zwischenspeicher liegt nur der Brief.
+    #[tokio::test]
+    async fn relay_reicht_hostsets_durch_ohne_sie_zu_cachen() {
+        let broker = Broker::new("x".into());
+        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, mut tablet_rx) = mpsc::unbounded_channel();
+        register_host(&broker, "ns1", &host).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut("ns1")
+            .unwrap()
+            .tablets
+            .insert(101, tablet_tx);
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+                match_brief: brief(7),
+                on_court_since_ms: None,
+                host_sets: vec![SetAb { a: 21, b: 10 }, SetAb { a: 5, b: 3 }],
+            },
+            &host,
+        )
+        .await;
+
+        let Message::Text(json) = tablet_rx.try_recv().expect("match_assigned ans Tablet") else {
+            panic!("Text-Frame erwartet");
+        };
+        assert!(
+            json.contains(r#""hostSets":[{"a":21,"b":10},{"a":5,"b":3}]"#),
+            "{json}"
+        );
+        let map = broker.namespaces.lock().await;
+        let ns = &map["ns1"];
+        assert_eq!(
+            ns.court_matches[&101],
+            brief(7),
+            "gespeichert ist nur der Brief"
+        );
+        assert!(
+            !ns.court_scores.contains_key(&101),
+            "die Sätze werden nicht zum Anzeige-Stand"
+        );
+
+        // Ohne Host-Sätze (Legacy, älterer Host) bleibt das Feld von der Leitung.
+        drop(map);
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+                match_brief: brief(8),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &host,
+        )
+        .await;
+        let Message::Text(json) = tablet_rx.try_recv().expect("zweites match_assigned") else {
+            panic!("Text-Frame erwartet");
+        };
+        assert!(!json.contains("hostSets"), "{json}");
     }
 
     #[tokio::test]
@@ -9520,6 +9604,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: brief(7),
                 on_court_since_ms: Some(1000),
+                host_sets: Vec::new(),
             },
             &host,
         )
@@ -9562,6 +9647,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: mit_sr,
                 on_court_since_ms: Some(1000),
+                host_sets: Vec::new(),
             },
             &host,
         )
@@ -9754,6 +9840,7 @@ mod tests {
                 match_brief: brief(7),
                 // Alles gleich — nur der Aufruf-Zeitpunkt ist korrigiert.
                 on_court_since_ms: Some(2000),
+                host_sets: Vec::new(),
             },
             &host,
         )
@@ -9789,6 +9876,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: brief(7),
                 on_court_since_ms: Some(1000),
+                host_sets: Vec::new(),
             },
             &host,
         )
@@ -9814,6 +9902,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: brief(9),
                 on_court_since_ms: Some(2000),
+                host_sets: Vec::new(),
             },
             &host,
         )
@@ -10639,6 +10728,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: brief(9),
                 on_court_since_ms: None,
+                host_sets: Vec::new(),
             },
             &host_tx,
         )
@@ -10658,6 +10748,7 @@ mod tests {
                 hall: String::new(),
                 match_brief: brief(10),
                 on_court_since_ms: None,
+                host_sets: Vec::new(),
             },
             &host_tx,
         )
@@ -10709,6 +10800,7 @@ mod tests {
                     hall: String::new(),
                     match_brief: brief(id),
                     on_court_since_ms: None,
+                    host_sets: Vec::new(),
                 },
                 &host_tx,
             )

@@ -1325,6 +1325,162 @@ const DEVICE_ID = (() => {
 // nicht; der Fernbefehl muss dort warten wie der stille Abgleich
 // (Review-Fund 24.08.2026).
 const SPEICHER_GEHT = DEVICE_ID !== '';
+// Wer hat einen gespiegelten Stand geschrieben? (Spec tablet-stand-robust,
+// Regel A; ADR 0083.) Eine EIGENE Zufallskennung, bewusst NICHT die
+// `DEVICE_ID`: Die Kennung reist im gespiegelten Zustand an den Turnier-PC
+// und an jedes Tablet, das dieses Feld später öffnet. An der `DEVICE_ID`
+// erkennt der Server dagegen „dasselbe Gerät kommt zurück" und löst dessen
+// alte Sitzung ohne Übernahme-Dialog ab — wer sie mitläse, könnte ein
+// zählendes Tablet still verdrängen (Security-Review 11.11.2026). Ohne
+// nutzbaren Speicher gilt sie je Seitenaufruf: Innerhalb der Sitzung erkennt
+// das Tablet seinen Stand wieder, nach einem Neuladen hat es ohnehin keinen.
+const SCHREIBER = (() => {
+  const neu = () => 's-' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+  const KEY = 'badhub.tablet.schreiber';
+  try {
+    let id = localStorage.getItem(KEY);
+    if (!id || typeof id !== 'string' || id.length > 40) {
+      id = neu();
+      localStorage.setItem(KEY, id);
+    }
+    return id;
+  } catch { return neu(); }
+})();
+
+// ── Stand-Wahl (Spec tablet-stand-robust, Regel A; ADR 0083) ──────────
+// Inline-Kopie von `src/io/standWahl.mjs` (dort die Begründung; Verhalten
+// verglichen in `scripts/test-inline-kopien.mjs`). Änderungen hier und dort
+// gemeinsam.
+const MELDE_RING_MAX = 8;
+function fortschritt(stand) {
+  var saetze = stand && Array.isArray(stand.setsCompleted) ? stand.setsCompleted : [];
+  var summe = 0;
+  for (var i = 0; i < saetze.length; i++) summe += punkte(saetze[i], 'left', 'right');
+  if (stand && stand.currentSet) summe += punkte(stand.currentSet, 'left', 'right');
+  return [saetze.length, summe];
+}
+function punkte(satz, x, y) {
+  if (!satz || typeof satz !== 'object') return 0;
+  var a = typeof satz[x] === 'number' && satz[x] > 0 ? satz[x] : 0;
+  var b = typeof satz[y] === 'number' && satz[y] > 0 ? satz[y] : 0;
+  return a + b;
+}
+function vergleiche(f, g) {
+  if (f[0] !== g[0]) return f[0] < g[0] ? -1 : 1;
+  if (f[1] !== g[1]) return f[1] < g[1] ? -1 : 1;
+  return 0;
+}
+function satzEntschieden(satz, ziel, deckel) {
+  if (!(ziel > 0) || ziel >= 99) return false;
+  // Fehlt der Deckel (alter Server), dieselbe Ableitung wie `capForTarget`.
+  var cap = deckel >= ziel ? deckel
+    : ziel === 21 ? 30 : ziel === 15 ? 21 : ziel === 11 ? 15 : ziel + 5;
+  var a = satz.a, b = satz.b;
+  if (a >= cap || b >= cap) return true;
+  return (a >= ziel && a - b >= 2) || (b >= ziel && b - a >= 2);
+}
+function hostSaetzeLesen(sets) {
+  if (!Array.isArray(sets) || sets.length > 9) return [];
+  var aus = [];
+  for (var i = 0; i < sets.length; i++) {
+    var s = sets[i];
+    if (!s || typeof s.a !== 'number' || typeof s.b !== 'number') return [];
+    if (!(s.a >= 0) || !(s.b >= 0) || s.a % 1 !== 0 || s.b % 1 !== 0 || s.a > 99 || s.b > 99) return [];
+    aus.push({ a: s.a, b: s.b });
+  }
+  while (aus.length && aus[aus.length - 1].a === 0 && aus[aus.length - 1].b === 0) aus.pop();
+  return aus;
+}
+function hostSaetzeTeilen(sets, ziel, deckel, bestOf) {
+  var liste = hostSaetzeLesen(sets);
+  var fertig = liste.slice();
+  var laufend = { a: 0, b: 0 };
+  if (liste.length && !satzEntschieden(liste[liste.length - 1], ziel, deckel)) {
+    laufend = fertig.pop();
+  }
+  var a = 0, b = 0, summe = laufend.a + laufend.b;
+  for (var i = 0; i < fertig.length; i++) {
+    if (fertig[i].a > fertig[i].b) a++; else if (fertig[i].b > fertig[i].a) b++;
+    summe += fertig[i].a + fertig[i].b;
+  }
+  var noetig = Math.ceil((bestOf > 0 ? bestOf : 3) / 2);
+  return {
+    fertig: fertig,
+    laufend: laufend,
+    entschieden: a >= noetig || b >= noetig,
+    fortschritt: [fertig.length, summe],
+  };
+}
+function saetzeSchluessel(sets) {
+  var liste = hostSaetzeLesen(sets);
+  var teile = [];
+  for (var i = 0; i < liste.length; i++) teile.push(liste[i].a + ':' + liste[i].b);
+  return teile.join(',');
+}
+function ringMerken(ring, matchId, sets) {
+  var k = saetzeSchluessel(sets);
+  var alt = ring && ring.matchId === matchId && Array.isArray(ring.saetze) ? ring.saetze : [];
+  if (alt.length && alt[alt.length - 1] === k) return { matchId: matchId, saetze: alt };
+  var neu = alt.concat([k]);
+  return { matchId: matchId, saetze: neu.slice(-MELDE_RING_MAX) };
+}
+function imRing(ring, matchId, sets) {
+  if (!ring || ring.matchId !== matchId || !Array.isArray(ring.saetze)) return false;
+  return ring.saetze.indexOf(saetzeSchluessel(sets)) >= 0;
+}
+function wahlBeiRestore(e) {
+  // Legacy-Schalter oder alter Server: die alte rev-Logik, wortgleich.
+  if (!e.ownershipActive) return 'legacy';
+  // 1. Übernahme oder finalisiert — der Server hat entschieden.
+  if (!e.authoritative) return 'adoptieren';
+  // 2. Kein eigener Stand → nichts, was man durchsetzen könnte (Kernfix).
+  if (!e.lokal) return 'adoptieren';
+  // 3. Anderes Spiel → erst `match_assigned` sagt, welches gilt.
+  if (e.lokal.matchId !== e.kandidat.matchId) return 'vormerken';
+  // 4. Eigener Stand kommt zurück → die Revision ordnet (Undo, „Wieder
+  //    öffnen': der jüngere eigene Stand gilt, auch wenn er weniger zeigt).
+  if (e.kandidat.schreiber && e.kandidat.schreiber === e.eigeneKennung) {
+    return e.lokal.rev >= e.kandidat.rev ? 'lokal' : 'adoptieren';
+  }
+  // 5. Fremder (oder unbekannter) Schreiber → wer weiter ist, gilt.
+  return vergleiche(e.kandidat.fortschritt, e.lokal.fortschritt) > 0 ? 'adoptieren' : 'lokal';
+}
+function wahlBeiZuweisung(e) {
+  // Der vorgemerkte Stand gehört genau zu diesem Spiel → übernehmen.
+  if (e.vorgemerkt && e.vorgemerkt.matchId === e.matchId) return 'adoptieren';
+  var leer = hostSaetzeLesen(e.hostSets).length === 0;
+  if (e.lokalMatchId !== e.matchId) {
+    // Kein Stand zu diesem Spiel: Kennt der Server Sätze, wird dort
+    // eingestiegen — nie bei 0:0.
+    return leer ? 'neu' : 'einstieg';
+  }
+  // Der Server ist weiter, und es ist nicht das Echo eines eigenen Stands.
+  if (!leer && vergleiche(e.hostFortschritt, e.lokalFortschritt) > 0
+      && !imRing(e.ring, e.matchId, e.hostSets)) {
+    return 'einstieg';
+  }
+  return 'behalten';
+}
+
+// Melde-Ring: die letzten selbst gemeldeten Satzlisten des laufenden Spiels.
+// Daran erkennt das Tablet, dass die Sätze des Servers nur das Echo eines
+// eigenen, inzwischen zurückgenommenen Stands sind. Eigener Schlüssel je
+// Feld; reist nicht im Spiegel.
+const RING_KEY = `badhub.tablet.ring.${COURT_ID}`;
+let MELDE_RING = (() => {
+  try {
+    const r = JSON.parse(localStorage.getItem(RING_KEY));
+    if (!r || typeof r !== 'object' || typeof r.matchId !== 'number' || !Array.isArray(r.saetze)) return null;
+    // Nur Text, nur die jüngsten — der Speicher kann beschädigt sein.
+    return { matchId: r.matchId, saetze: r.saetze.filter((x) => typeof x === 'string').slice(-MELDE_RING_MAX) };
+  } catch { return null; }
+})();
+function ringSichern() {
+  try { localStorage.setItem(RING_KEY, JSON.stringify(MELDE_RING)); } catch { /* ohne Speicher lebt er in der Sitzung */ }
+}
+// Stand des Servers aus `state_restore`, der zu einem ANDEREN Spiel gehört
+// als dem geladenen. Ob er gilt, entscheidet das folgende `match_assigned`.
+let VORGEMERKT = null;
 // PIN fürs Einstellungs-Menü (Feldwechsel ohne QR). Vom Server getemplatet
 // (Live-Config, Default „0000"). Reiner Bedien-Schutz, KEINE Sicherheitsgrenze.
 // Defensiv: wird der Platzhalter mal nicht ersetzt (z. B. älterer Relay) oder
@@ -1867,71 +2023,7 @@ function connect() {
     }
     else if (msg.type === 'session_superseded') { tlog('warn', 'session_superseded'); clearReidentify(); STATE.locked = true; STATE.occupied = false; render(); }
     else if (msg.type === 'state_restore') {
-      try {
-        const p = JSON.parse(msg.state);
-        if (p) {
-          // A2 / ADR 0017 (Reconnect-Wahrheit): Wer entscheidet, wessen Stand
-          // gilt? Das hängt am Modus des Servers.
-          if (msg.ownership_active) {
-            // OWNERSHIP-Modus: Server/Relay HABEN die Autorität berechnet
-            // (Slot-Halter gewinnt). Das Tablet FOLGT `authoritative` statt
-            // selbst per rev zu entscheiden. owner_epoch/owner_device sind rein
-            // diagnostisch.
-            if (msg.authoritative) {
-              // Wir sind der Slot-Halter/Reclaimer → lokale Wahrheit
-              // durchsetzen (wie im bisherigen kept-local-Zweig): den
-              // Server-Cache mit unserem Stand reparieren und TV/Liveticker/
-              // Punktverlauf nachziehen.
-              tlog('info', 'state_restore_authoritative', { ownerEpoch: msg.owner_epoch, ownerDevice: msg.owner_device });
-              persistState(true);
-              sendScoreUpdate();
-              sendRallySync();
-              sendMatchEventSync();
-              render();
-            } else {
-              // Ein anderer Halter hat legitim weitergezählt ODER das Match ist
-              // finalisiert → ADOPTIEREN: den mitgeschickten Stand übernehmen,
-              // nicht überschreiben.
-              tlog('info', 'state_restore_adopt', { ownerEpoch: msg.owner_epoch, ownerDevice: msg.owner_device });
-              applyPersistedState(p);
-              persistState(true);
-              sendRallySync();
-              sendMatchEventSync();
-              render();
-            }
-          } else {
-            // LEGACY-Modus (Config `reconnect_legacy_rev`) ODER altes
-            // Server-Frame ohne `ownership_active` → bestehende rev-Logik
-            // UNVERÄNDERT: „Neuer gewinnt" — hat DIESES Tablet zum SELBEN Match
-            // einen gleich neuen oder neueren Stand (rev), bleibt der lokale
-            // Stand stehen und wird zurückgespiegelt, statt offline gezählte
-            // Punkte zu überbügeln. So bleibt „Legacy" wirklich das alte
-            // Verhalten (und öffnet den Reconnect-Bug nicht durch blindes
-            // Befolgen von `authoritative`).
-            const sameMatch = STATE.match && p.match
-              && STATE.match.matchId === p.match.matchId;
-            const localRev = STATE.rev || 0;
-            const incomingRev = typeof p.rev === 'number' ? p.rev : 0;
-            if (sameMatch && localRev >= incomingRev) {
-              tlog('info', 'state_restore_kept_local', { localRev, incomingRev });
-              persistState(true); // repariert den Server-Cache mit unserem Stand
-              sendScoreUpdate();  // Liveticker/TV ziehen nach
-              sendRallySync();    // … und der Punktverlauf ebenso
-              sendMatchEventSync();
-              render();
-            } else {
-              tlog('info', 'state_restore_applied', { localRev, incomingRev });
-              applyPersistedState(p);
-              persistState(true);
-              // Übernahme/Restore: der geerbte Verlauf wird die Wahrheit des
-              // Hosts — das übernehmende Gerät zeichnet nahtlos weiter (AK-10).
-              sendRallySync();
-              sendMatchEventSync();
-              render();
-            }
-          }
-        }
-      } catch (e) { tlog('warn', 'state_restore_failed', String(e)); }
+      beiStateRestore(msg);
     }
   };
   ws.onclose = (ev) => {
@@ -2110,6 +2202,12 @@ function sendScoreUpdate() {
     setsHistory,
     servingTeam,
   }));
+  // Was gemeldet wurde, merken (Melde-Ring) — nur bei einer Änderung.
+  const ring = ringMerken(MELDE_RING, STATE.match.matchId, setsHistory.concat([current]));
+  if (!MELDE_RING || ring.matchId !== MELDE_RING.matchId || ring.saetze !== MELDE_RING.saetze) {
+    MELDE_RING = ring;
+    ringSichern();
+  }
 }
 
 // ─────────────────────────────── Akkustand ────────────────────────────
@@ -3205,6 +3303,12 @@ function standFuerSpiegel() {
     // Aufschläger-Liste statt nur des Gewinnerteams.
     serveSetupTeam: STATE.serveSetupTeam,
     midGameSetup: STATE.midGameSetup,
+    // Sätze des Turnier-PCs in TEAM-Koordinaten, solange die Aufstellung nach
+    // einem Einstieg mit Host-Sätzen noch nicht steht — muss ein Neuladen
+    // mitten in der Seitenwahl überleben.
+    einstiegAB: STATE.einstiegAB || null,
+    // Wer diesen Stand geschrieben hat (Regel A der Spec tablet-stand-robust).
+    schreiber: SCHREIBER,
     berichtigtAbfrage: STATE.berichtigtAbfrage,
     finished: STATE.finished,
     midGameSwitchDone: STATE.midGameSwitchDone,
@@ -3235,6 +3339,163 @@ function standFuerSpiegel() {
   };
 }
 
+/** Der Server schickt seinen gesicherten Stand (`state_restore`). Wessen
+ *  Stand gilt, entscheidet `wahlBeiRestore` (Stufe 1 der Spec
+ *  tablet-stand-robust, Regel A) — nicht mehr blind das Bit
+ *  `authoritative`. Eigene Funktion, damit `scripts/test-stand-wahl.mjs`
+ *  den echten Code prüfen kann. */
+function beiStateRestore(msg) {
+  let p;
+  try { p = JSON.parse(msg.state); } catch (e) { tlog('warn', 'state_restore_failed', String(e)); return; }
+  if (!p || typeof p !== 'object') return;
+  VORGEMERKT = null;
+  const lokal = STATE.match
+    ? { matchId: STATE.match.matchId, rev: STATE.rev || 0, fortschritt: fortschritt(STATE) }
+    : null;
+  const kandidat = {
+    matchId: p.match && typeof p.match === 'object' ? p.match.matchId : null,
+    rev: typeof p.rev === 'number' ? p.rev : 0,
+    schreiber: typeof p.schreiber === 'string' ? p.schreiber : '',
+    fortschritt: fortschritt(p),
+  };
+  const wahl = wahlBeiRestore({
+    ownershipActive: !!msg.ownership_active,
+    authoritative: !!msg.authoritative,
+    lokal, kandidat, eigeneKennung: SCHREIBER,
+  });
+  // Nur Kennzahlen ins Log — keine Namen, keine Sätze.
+  const spur = {
+    wahl, authoritative: !!msg.authoritative, ownerEpoch: msg.owner_epoch, ownerDevice: msg.owner_device,
+    lokalRev: lokal ? lokal.rev : null, lokalFortschritt: lokal ? lokal.fortschritt : null,
+    serverRev: kandidat.rev, serverFortschritt: kandidat.fortschritt,
+    eigen: !!kandidat.schreiber && kandidat.schreiber === SCHREIBER,
+  };
+  try {
+    if (wahl === 'legacy') {
+      // LEGACY-Modus (Config `reconnect_legacy_rev`) ODER altes Server-Frame
+      // ohne `ownership_active` → die rev-Logik von vor ADR 0017, UNVERÄNDERT:
+      // „Neuer gewinnt" — hat DIESES Tablet zum SELBEN Match einen gleich
+      // neuen oder neueren Stand (rev), bleibt der lokale Stand stehen und
+      // wird zurückgespiegelt. So bleibt „Legacy" wirklich das alte Verhalten.
+      const sameMatch = STATE.match && p.match
+        && STATE.match.matchId === p.match.matchId;
+      const localRev = STATE.rev || 0;
+      const incomingRev = typeof p.rev === 'number' ? p.rev : 0;
+      if (sameMatch && localRev >= incomingRev) {
+        tlog('info', 'state_restore_kept_local', { localRev, incomingRev });
+        persistState(true); // repariert den Server-Cache mit unserem Stand
+        sendScoreUpdate();  // Liveticker/TV ziehen nach
+        sendRallySync();    // … und der Punktverlauf ebenso
+        sendMatchEventSync();
+        render();
+      } else {
+        tlog('info', 'state_restore_applied', { localRev, incomingRev });
+        applyPersistedState(p);
+        persistState(true);
+        // Übernahme/Restore: der geerbte Verlauf wird die Wahrheit des
+        // Hosts — das übernehmende Gerät zeichnet nahtlos weiter (AK-10).
+        sendRallySync();
+        sendMatchEventSync();
+        render();
+      }
+    } else if (wahl === 'lokal') {
+      // Der eigene Stand gilt: den Server-Cache damit reparieren und
+      // TV/Liveticker/Punktverlauf nachziehen.
+      tlog('info', 'state_restore_authoritative', spur);
+      persistState(true);
+      sendScoreUpdate();
+      sendRallySync();
+      sendMatchEventSync();
+      render();
+    } else if (wahl === 'adoptieren') {
+      // Der Stand des Servers gilt — Übernahme, finalisiert, kein eigener
+      // Stand, oder ein fremdes Gerät hat weitergezählt. Übernehmen, nicht
+      // überschreiben.
+      tlog('info', 'state_restore_adopt', spur);
+      // Hatte dieses Tablet selbst einen Stand zu diesem Spiel und weicht
+      // der übernommene ab, soll der Bediener das SEHEN — sonst zählte er
+      // auf einem Stand weiter, den er nicht kennt.
+      const ersetzt = !!lokal && lokal.matchId === kandidat.matchId
+        && vergleiche(lokal.fortschritt, kandidat.fortschritt) !== 0;
+      uebernimmStand(p);
+      if (ersetzt) zeigeGeparktMeldung('Spielstand vom Turnier-PC übernommen — bitte prüfen.');
+      render();
+    } else {
+      // Anderes Spiel als das geladene: Erst `match_assigned` sagt, welches
+      // auf dem Feld liegt. Bis dahin nichts überschreiben, nichts spiegeln.
+      tlog('info', 'state_restore_vorgemerkt', spur);
+      VORGEMERKT = p;
+    }
+  } catch (e) { tlog('warn', 'state_restore_failed', String(e)); }
+}
+
+/** Übernimmt einen Stand des Servers samt seinen Sende-Feldern. Ein offener
+ *  Sendeauftrag des ausgefallenen Geräts wird sofort weiter zugestellt —
+ *  sonst bliebe er liegen, bis jemand die Seite neu lädt (AK7). */
+function uebernimmStand(p) {
+  applyPersistedState(p);
+  persistState(true);
+  sendRallySync();
+  sendMatchEventSync();
+  if (STATE.pendingResult) trySubmitPending();
+}
+
+/** Zwischenstand setzen und die Aufstellung neu abfragen — gemeinsamer Kern
+ *  von „Weiterzählen" (`submitEnterScore`) und dem Einstieg mit den Sätzen
+ *  des Servers (`einstiegMitSaetzen`). `sets`/`cur` in Seiten-Koordinaten. */
+function zwischenstandSetzen(sets, cur) {
+  STATE.setsCompleted = sets;
+  STATE.currentSet = cur;
+  // Intervall-/Decider-Flags aus dem Stand ableiten: hat ein Team die
+  // Intervall-Schwelle schon erreicht, ist die 60-s-Pause dieses Satzes
+  // gelaufen; im Entscheidungssatz ggf. auch der Mid-Game-Seitenwechsel.
+  const interval = intervalThreshold();
+  const reached = interval != null && (cur.left >= interval || cur.right >= interval);
+  STATE.intervalDoneThisGame = reached;
+  const need = requiredSetsToWin(STATE.match.bestOfSets);
+  const sL = sets.filter(s => s.left > s.right).length;
+  const sR = sets.filter(s => s.right > s.left).length;
+  const isDecider = STATE.match.bestOfSets > 1 && sL === need - 1 && sR === need - 1;
+  STATE.midGameSwitchDone = isDecider && reached;
+  // Aufstellung neu wählen (Seiten, Aufschläger, im Doppel Annehmer) —
+  // finalizeSetup platziert die Positionen paritätsrichtig zum Stand.
+  STATE.finished = false;
+  STATE.teamOnSide = null;
+  STATE.positions = null;
+  STATE.servingSide = null;
+  STATE.pendingServer = null;
+  STATE.serveSetupTeam = null;
+  STATE.midGameSetup = true;
+  STATE.setup = 'choose-side';
+  STATE.lastEvent = null;
+}
+
+/** Einstieg mit den Sätzen des Servers (Regel A, Stufe 2): Dieses Tablet
+ *  hat keinen brauchbaren Stand zum Spiel, der Turnier-PC kennt aber Sätze —
+ *  aus dem Live-Stand, nach einem Neustart aus `live-scores.json`. Der
+ *  Satzstand wird übernommen, die Aufstellung neu abgefragt; Undo und
+ *  Punktverlauf beginnen hier neu (dahinter liegt nichts, was dieses Gerät
+ *  kennt). `teil` ist das Ergebnis von `hostSaetzeTeilen`. */
+function einstiegMitSaetzen(teil) {
+  STATE.history = [];
+  STATE.rallyLog = null;
+  STATE.pause = null;
+  if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+  // Die Sätze kommen in TEAM-Koordinaten; welche Mannschaft links steht,
+  // sagt erst die Seitenwahl. Sie bleiben deshalb als `einstiegAB` liegen,
+  // und `chooseSide` rechnet sie bei JEDER Wahl neu auf die Seiten um — auch
+  // nach „zurück" in der Seitenwahl (ein einmaliges Drehen bliebe dort
+  // verdreht stehen). Bis zur ersten Wahl gilt A = links.
+  zwischenstandSetzen(
+    teil.fertig.map(s => ({ left: s.a, right: s.b })),
+    { left: teil.laufend.a, right: teil.laufend.b });
+  STATE.einstiegAB = { fertig: teil.fertig, laufend: teil.laufend };
+  // Nur Kennzahlen ins Log.
+  tlog('warn', 'einstieg_mit_host_saetzen', { matchId: STATE.match.matchId, fortschritt: teil.fortschritt, entschieden: teil.entschieden });
+  persistState();
+  render();
+}
+
 function clearPersistedState() {
   try { localStorage.removeItem(PERSIST_KEY); } catch { /* ignore */ }
 }
@@ -3262,6 +3523,12 @@ function applyPersistedState(p) {
   STATE.servingSide = p.servingSide ?? null;
   STATE.setup = p.setup ?? 'playing';
   STATE.midGameSetup = !!p.midGameSetup;
+  // Nur in der erwarteten Form übernehmen — der Stand kann fremd sein.
+  const eab = p.einstiegAB;
+  STATE.einstiegAB = eab && typeof eab === 'object' && hostSaetzeLesen(eab.fertig).length === (Array.isArray(eab.fertig) ? eab.fertig.length : -1)
+    && eab.laufend && typeof eab.laufend.a === 'number' && typeof eab.laufend.b === 'number'
+    ? { fertig: hostSaetzeLesen(eab.fertig), laufend: { a: eab.laufend.a, b: eab.laufend.b } }
+    : null;
   STATE.berichtigtAbfrage = !!p.berichtigtAbfrage;
   STATE.serveSetupTeam = (p.serveSetupTeam === 'a' || p.serveSetupTeam === 'b')
     ? p.serveSetupTeam : null;
@@ -3353,7 +3620,34 @@ function beiMatchAssigned(msg) {
     sendRallySync();
     sendMatchEventSync();
   }
+  // Stufe 2 der Stand-Wahl (Regel A der Spec tablet-stand-robust): Gilt ein
+  // vorgemerkter Stand des Servers, steigt das Tablet mit dessen Sätzen ein,
+  // oder bleibt alles, wie es ist? Ein finalisiertes Spiel fragt nicht — es
+  // tritt unten zurück.
+  const teil = hostSaetzeTeilen(msg.hostSets, msg.match && msg.match.targetScore,
+    msg.match && msg.match.capScore, msg.match && msg.match.bestOfSets);
+  const vorgemerkt = VORGEMERKT;
+  VORGEMERKT = null;
+  const wahl = incomingFinalized || !msg.match ? 'behalten' : wahlBeiZuweisung({
+    matchId: msg.match.matchId,
+    lokalMatchId: STATE.match ? STATE.match.matchId : null,
+    lokalFortschritt: fortschritt(STATE),
+    vorgemerkt: vorgemerkt ? { matchId: vorgemerkt.match && typeof vorgemerkt.match === 'object' ? vorgemerkt.match.matchId : null } : null,
+    hostSets: msg.hostSets,
+    hostFortschritt: teil.fortschritt,
+    ring: MELDE_RING,
+  });
+  if (wahl === 'adoptieren') {
+    tlog('info', 'zuweisung_adoptiert_vorgemerkten_stand', { matchId: msg.match.matchId });
+    uebernimmStand(vorgemerkt);
+  }
   loadMatch(msg.match);
+  // Fürs SELBE Spiel behält `loadMatch` das geladene Match-Objekt — das kann
+  // aus einem übernommenen Stand stammen, also von einem fremden Gerät.
+  // Zählweise, Namen und Besetzung kommen aber vom Turnier-PC (R2): den
+  // Brief dieser Zuweisung einsetzen.
+  if (msg.match && STATE.match && STATE.match.matchId === msg.match.matchId) STATE.match = msg.match;
+  if (wahl === 'einstieg') einstiegMitSaetzen(teil);
   // Fähigkeit des Hosts frisch aus jedem Frame — auch bei demselben
   // Match, sonst bliebe nach einem App-Update der alte Wert stehen.
   STATE.hostKannBerichtigung = !!(msg.match && msg.match.teamsCorrection);
@@ -3413,6 +3707,7 @@ function loadMatch(match) {
   // VOR dem Überschreiben von STATE.match — die Spielnummer kommt von dort.
   parkeFremdenAuftrag(match.matchId);
   STATE.ueberholt = false;
+  STATE.einstiegAB = null;
   // Neues Spiel → eigener Zettel. Die Ereignisse hängen am Match, nicht
   // am Gerät.
   STATE.events = [];
@@ -3463,6 +3758,28 @@ function chooseSide(teamKeyOnLeft) {
   STATE.teamOnSide = teamKeyOnLeft === 'a'
     ? { a: 'left', b: 'right' }
     : { a: 'right', b: 'left' };
+  // Einstieg mit den Sätzen des Servers: Sie stehen bis hierher als
+  // „A = links". Steht A rechts, alle Sätze drehen.
+  if (STATE.einstiegAB) {
+    // Bei jeder Wahl aus den Team-Koordinaten neu umrechnen (idempotent).
+    const aufSeite = teamKeyOnLeft === 'a'
+      ? (s) => ({ left: s.a, right: s.b })
+      : (s) => ({ left: s.b, right: s.a });
+    STATE.setsCompleted = STATE.einstiegAB.fertig.map(aufSeite);
+    STATE.currentSet = aufSeite(STATE.einstiegAB.laufend);
+    // Die Sätze des Servers entscheiden das Spiel schon (das Gerät fiel
+    // nach dem letzten Punkt aus, vor dem Übermitteln): gleich in die
+    // Beendet-Ansicht, ohne Aufschlagwahl für einen Satz, den es nicht gibt.
+    if (matchWinnerSide()) {
+      STATE.einstiegAB = null;
+      STATE.finished = true;
+      STATE.midGameSetup = false;
+      STATE.setup = 'playing';
+      persistState();
+      render();
+      return;
+    }
+  }
   STATE.setup = 'choose-server';
   persistState();
   render();
@@ -3473,6 +3790,7 @@ function clearMatch() {
   // dann unter eigenem Schlüssel und überlebt `clearPersistedState`.
   parkeFremdenAuftrag(null);
   STATE.ueberholt = false;
+  STATE.einstiegAB = null;
   STATE.match = null;
   STATE.setsCompleted = [];
   STATE.currentSet = { left: 0, right: 0 };
@@ -3603,6 +3921,8 @@ function finalizeSetup(server, serverTeamKey, receiver, receiverTeamKey) {
   // Per-Satz-Aufschlagwahl abgeschlossen → Constraint aufheben.
   STATE.serveSetupTeam = null;
   STATE.midGameSetup = false;
+  // Aufstellung steht — die Sätze liegen jetzt endgültig auf den Seiten.
+  STATE.einstiegAB = null;
   // Spieldauer ab jetzt zählen (nur beim ersten Setup setzen).
   if (!STATE.startedAt) STATE.startedAt = Date.now();
   // Aufschlagfolge als EREIGNIS festhalten (ADR 0037) — nicht als Feld in
@@ -4869,30 +5189,8 @@ function submitEnterScore() {
     }
     closeEnterScore();
     STATE.history.push(snapshot());
-    STATE.setsCompleted = sets;
-    STATE.currentSet = cur;
-    // Intervall-/Decider-Flags aus dem Stand ableiten: hat ein Team die
-    // Intervall-Schwelle schon erreicht, ist die 60-s-Pause dieses Satzes
-    // gelaufen; im Entscheidungssatz ggf. auch der Mid-Game-Seitenwechsel.
-    const interval = intervalThreshold();
-    const reached = interval != null && (cur.left >= interval || cur.right >= interval);
-    STATE.intervalDoneThisGame = reached;
-    const need = requiredSetsToWin(STATE.match.bestOfSets);
-    const sL = sets.filter(s => s.left > s.right).length;
-    const sR = sets.filter(s => s.right > s.left).length;
-    const isDecider = STATE.match.bestOfSets > 1 && sL === need - 1 && sR === need - 1;
-    STATE.midGameSwitchDone = isDecider && reached;
-    // Aufstellung neu wählen (Seiten, Aufschläger, im Doppel Annehmer) —
-    // finalizeSetup platziert die Positionen paritätsrichtig zum Stand.
-    STATE.finished = false;
-    STATE.teamOnSide = null;
-    STATE.positions = null;
-    STATE.servingSide = null;
-    STATE.pendingServer = null;
-    STATE.serveSetupTeam = null;
-    STATE.midGameSetup = true;
-    STATE.setup = 'choose-side';
-    STATE.lastEvent = null;
+    STATE.einstiegAB = null; // von Hand eingetragen — in Seiten-Koordinaten
+    zwischenstandSetzen(sets, cur);
     tlog('info', 'enter_score_midgame', { sets, current: cur });
     persistState();
     render(); // → Setup-Assistent (Seite → Aufschlag → Annahme)

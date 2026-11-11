@@ -641,6 +641,19 @@ Relay setzt daraus `ownership_active`. Ältere Tablets/Relays ohne die Felder
 fallen per `serde(default)` auf das alte `rev`-Verhalten zurück. Details:
 [tablet.md](tablet.md).
 
+**Host-Sätze (seit v0.9.377, ADR 0083):** `HostFrame::MatchAssigned` und
+`ServerMsg::MatchAssigned` tragen auf **Frame**-Ebene `hostSets` — die Sätze,
+die der Host für das Spiel selbst kennt (abgeschlossene plus laufender,
+Team-Koordinaten). Der Relay reicht sie an das Tablet durch und **speichert
+sie nicht**: In `court_matches` liegt weiter nur der `MatchBrief`, und zum
+Anzeige-Stand (`court_scores`) werden sie nicht. Leer = nichts bekannt,
+Legacy-Schalter oder älterer Host; das Feld bleibt dann von der Leitung. Ein
+älterer Relay lässt es fallen — das Tablet lädt dann wie bisher bei 0:0.
+Deshalb Relay vor App (der main-Merge deployt ihn sofort). Was das Tablet
+damit tut: [tablet.md](tablet.md) („der weitere Stand gilt"). Der Relay
+selbst rechnet `authoritative` unverändert; das Tablet folgt dem Bit nur
+noch, wo es keinen eigenen Stand zum Vergleichen hat.
+
 ### Erneute Aufrufe — je Partei
 
 Beide Aufruf-Aktionen können auf **eine Partei** eingegrenzt werden; die

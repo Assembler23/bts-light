@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.377
+
+- **Ein Ersatz-Tablet beginnt nicht mehr bei 0:0.** Fiel ein Zähl-Tablet
+  mitten im Spiel aus und meldete sich ein anderes Gerät am selben Feld an,
+  startete es bisher bei 0:0 und überschrieb damit den gesicherten Stand.
+  Jetzt übernimmt es den Stand des ausgefallenen Geräts samt den letzten
+  „zurück"-Schritten. Gibt es keinen gesicherten Stand mehr — etwa nach einem
+  Neustart des Turnier-PCs —, steigt es mit den Sätzen ein, die der
+  Turnier-PC kennt, und fragt nur die Aufstellung neu ab. Kommt das alte
+  Gerät später zurück, gilt der Stand, der weiter ist. Wer am selben Gerät
+  offline einen Punkt zurückgenommen hat, bekommt ihn nicht wieder. Ein noch
+  offenes Ergebnis des ausgefallenen Geräts stellt das Ersatzgerät gleich
+  weiter zu. Vierter Schritt der Spec `tablet-stand-robust` (ADR 0083).
+
 ## v0.9.376
 
 - **Ein altes Ergebnis blockiert nicht mehr das nächste Spiel.** Konnte ein

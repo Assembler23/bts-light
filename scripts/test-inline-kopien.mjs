@@ -17,6 +17,7 @@ import * as lm from "../src/io/lobbyMeetingpoint.mjs";
 import * as pf from "../src/io/pinFreigabe.mjs";
 import * as us from "../src/io/undoStand.mjs";
 import * as gp from "../src/io/geparkt.mjs";
+import * as sw from "../src/io/standWahl.mjs";
 import * as rr from "../src/io/resultRetry.mjs";
 import * as aa from "../src/io/abschlussAnsicht.mjs";
 
@@ -289,6 +290,59 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
     const LAGEN = [null, undefined].concat(B.flatMap((fi) => B.flatMap((ue) => B.flatMap((so) => [null, "Satz 13:8"].flatMap(
       (rj) => B.flatMap((pr) => B.map((nw) => ({ finalized: fi, ueberholt: ue, submittedOk: so, resultRejected: rj, pendingResult: pr, needWinner: nw }))))))));
     ok("tablet.html: abschlussLage wie Modul", LAGEN.map(kopie), LAGEN.map(aa.abschlussLage));
+  }
+}
+
+// ── Stand-Wahl (src/io/standWahl.mjs, ADR 0083) ──
+// Eine abweichende Kopie ließe ein Ersatz-Tablet wieder bei 0:0 beginnen oder
+// einen zurückgenommenen Punkt wiederkehren — beides fiele erst in der Halle auf.
+{
+  const text = seite("tablet.html");
+  const namen = ["fortschritt", "punkte", "vergleiche", "satzEntschieden", "hostSaetzeLesen", "hostSaetzeTeilen",
+    "saetzeSchluessel", "ringMerken", "imRing", "wahlBeiRestore", "wahlBeiZuweisung"];
+  const quellen = namen.map((n) => funktion(text, n));
+  ok("tablet.html: Stand-Wahl-Kopien vorhanden", quellen.every(Boolean), true);
+  const ringMax = text.match(/const MELDE_RING_MAX = (\d+);/);
+  ok("tablet.html: MELDE_RING_MAX wie Modul", ringMax ? Number(ringMax[1]) : null, sw.MELDE_RING_MAX);
+  if (quellen.every(Boolean) && ringMax) {
+    // eslint-disable-next-line no-new-func
+    const f = new Function("const MELDE_RING_MAX = " + ringMax[1] + ";\n" + quellen.join("\n") + "\nreturn { " + namen.join(", ") + " };")();
+    const gleich = (name, faelle, ruf) =>
+      ok("tablet.html: " + name + " wie Modul", faelle.map((x) => ruf(f, x)), faelle.map((x) => ruf(sw, x)));
+    const ST = (s, l) => ({ setsCompleted: s.map(([a, b]) => ({ left: a, right: b })), currentSet: { left: l[0], right: l[1] } });
+    const STAENDE = [null, undefined, 7, {}, ST([], [0, 0]), ST([[21, 10]], [5, 3]), ST([[10, 21], [21, 19]], [0, 0]),
+      { setsCompleted: [null, { left: "x", right: -3 }], currentSet: 7 }, { setsCompleted: "x" }];
+    gleich("fortschritt", STAENDE, (m, x) => m.fortschritt(x));
+    const F = [[0, 0], [0, 5], [1, 0], [1, 39], [2, 3]];
+    gleich("vergleiche", F.flatMap((x) => F.map((y) => [x, y])), (m, [x, y]) => m.vergleiche(x, y));
+    const AB = (...p) => p.map(([a, b]) => ({ a, b }));
+    const SATZ = [[21, 19], [21, 20], [30, 29], [29, 30], [15, 8], [15, 14], [21, 14], [11, 9], [0, 0], [40, 38], [22, 20]].map(([a, b]) => ({ a, b }));
+    const ZIEL = [[21, 30], [21, 0], [15, 21], [15, 0], [11, 15], [11, 0], [99, 0], [0, 0], [7, 0]];
+    gleich("satzEntschieden", SATZ.flatMap((s) => ZIEL.map((z) => [s, z])), (m, [s, z]) => m.satzEntschieden(s, z[0], z[1]));
+    const LISTEN = [undefined, null, 3, [], AB([0, 0]), AB([21, 10]), AB([21, 10], [5, 3]), AB([21, 10], [0, 0]), AB([21, 10], [21, 12]),
+      AB([21, 19], [19, 21], [3, 3]), AB([21, 19], [19, 21], [21, 5]), AB([30, 29]), AB([21, 20]), [{ a: "21", b: 1 }], [{ a: -1, b: 1 }],
+      [{ a: 1.5, b: 1 }], [{ a: 100, b: 1 }], [null], Array(10).fill({ a: 1, b: 0 }), AB([0, 0], [0, 0])];
+    gleich("hostSaetzeLesen", LISTEN, (m, x) => m.hostSaetzeLesen(x));
+    gleich("saetzeSchluessel", LISTEN, (m, x) => m.saetzeSchluessel(x));
+    const FORMAT = [[21, 30, 3], [21, 0, 3], [15, 21, 3], [21, 30, 1], [21, 30, 5], [99, 0, 1], [21, 30, undefined], [undefined, undefined, undefined]];
+    gleich("hostSaetzeTeilen", LISTEN.flatMap((l) => FORMAT.map((z) => [l, z])), (m, [l, z]) => m.hostSaetzeTeilen(l, z[0], z[1], z[2]));
+    const RINGE = [null, undefined, {}, { matchId: 7 }, { matchId: 7, saetze: [] }, { matchId: 7, saetze: ["21:10,5:3"] },
+      { matchId: 8, saetze: ["21:10"] }, { matchId: 7, saetze: ["1:0", "2:0", "3:0", "4:0", "5:0", "6:0", "7:0", "8:0"] }];
+    const rl = RINGE.flatMap((r) => [7, 8].flatMap((id) => LISTEN.slice(3, 9).map((l) => [r, id, l])));
+    gleich("ringMerken", rl, (m, [r, id, l]) => m.ringMerken(r, id, l));
+    gleich("imRing", rl, (m, [r, id, l]) => m.imRing(r, id, l));
+    const B = [true, false];
+    const LOKAL = [null, { matchId: 7, rev: 5, fortschritt: [1, 30] }, { matchId: 7, rev: 50, fortschritt: [1, 39] }, { matchId: 6, rev: 5, fortschritt: [2, 60] }];
+    const KAND = [{ matchId: 7, rev: 40, schreiber: "A", fortschritt: [1, 39] }, { matchId: 7, rev: 40, schreiber: "B", fortschritt: [1, 39] },
+      { matchId: 7, rev: 40, schreiber: "", fortschritt: [1, 35] }, { matchId: null, rev: 0, schreiber: "", fortschritt: [0, 0] },
+      { matchId: 7, rev: 50, schreiber: "A", fortschritt: [0, 3] }];
+    const RESTORE = B.flatMap((o) => B.flatMap((au) => LOKAL.flatMap((l) => KAND.flatMap((k) => ["A", ""].map(
+      (e) => ({ ownershipActive: o, authoritative: au, lokal: l, kandidat: k, eigeneKennung: e }))))));
+    gleich("wahlBeiRestore", RESTORE, (m, x) => m.wahlBeiRestore(x));
+    const ZUW = [null, 6, 7].flatMap((lm) => [[0, 0], [1, 38], [1, 39], [1, 45]].flatMap((lf) => [null, { matchId: 7 }, { matchId: 5 }, { matchId: null }].flatMap(
+      (v) => [undefined, [], AB([0, 0]), AB([21, 10], [5, 3])].flatMap((hs) => [null, { matchId: 7, saetze: ["21:10,5:3"] }, { matchId: 6, saetze: ["21:10,5:3"] }].map(
+        (r) => ({ matchId: 7, lokalMatchId: lm, lokalFortschritt: lf, vorgemerkt: v, hostSets: hs, hostFortschritt: [1, 39], ring: r }))))));
+    gleich("wahlBeiZuweisung", ZUW, (m, x) => m.wahlBeiZuweisung(x));
   }
 }
 

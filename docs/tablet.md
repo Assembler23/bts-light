@@ -844,6 +844,97 @@ beim Reconnect explizit im `state_restore` mit (`authoritative`,
   aktuelle Slot-Halter **deterministisch** — der andere Stand geht bewusst
   **still** verloren (Determinismus statt manueller Auflösung).
 
+#### Seit v0.9.377: der weitere Stand gilt (ADR 0083)
+
+Der Slot-Halter allein war zu grob: An einem **freien** Feld ist
+`authoritative` immer gesetzt — auch für ein Ersatzgerät, das nie gezählt
+hat. Es startete bei 0:0 und überschrieb den gesicherten Stand des
+ausgefallenen Geräts. Die Entscheidung fällt deshalb jetzt **am Tablet**,
+in zwei Stufen (Spec [tablet-stand-robust](features/tablet-stand-robust.md),
+Regel A; Regeln in `src/io/standWahl.mjs`, Inline-Kopie in `tablet.html`).
+Server und Relay deuten den Zustand weiter nicht.
+
+**Fortschritt** eines Stands = (abgeschlossene Sätze, Punktsumme samt
+laufendem Satz), in dieser Reihenfolge verglichen. `finished`, `retired` und
+`walkover` zählen nicht mit — sonst schlüge ein veralteter beendeter Stand
+einen wiedereröffneten.
+
+**Stufe 1 — `state_restore`** (`beiStateRestore` → `wahlBeiRestore`), nur im
+Ownership-Modus:
+
+| Lage | Ergebnis |
+|---|---|
+| `authoritative=false` (Übernahme, finalisiert) | Server-Stand übernehmen (wie bisher) |
+| kein eigener Stand | Server-Stand übernehmen — der Kernfix |
+| eigener Stand gehört zu einem anderen Spiel | vormerken; Stufe 2 entscheidet |
+| selbes Spiel, Server-Stand stammt vom eigenen Gerät (`schreiber`) | die Revision ordnet; bei lokal ≥ gilt lokal (Offline-Undo, „Wieder öffnen") |
+| selbes Spiel, fremder oder fehlender `schreiber` | der höhere Fortschritt gilt; bei Gleichstand lokal |
+
+`schreiber` reist im gespiegelten Zustand: eine **eigene** Zufallskennung
+des Geräts (`badhub.tablet.schreiber`), ohne nutzbaren Speicher je
+Seitenaufruf neu. Bewusst nicht die `DEVICE_ID` — an der erkennt der Server
+„dasselbe Gerät kommt zurück" und löst die alte Sitzung ohne Dialog ab.
+Monitore bekommen `schreiber` nicht (`schlanker_anzeige_stand`). Ersetzt
+ein übernommener Stand einen eigenen, abweichenden, zeigt das Tablet kurz
+„Spielstand vom Turnier-PC übernommen — bitte prüfen".
+
+**Bewusst hingenommen:** „Der weitere Stand gilt" heißt auch, dass ein
+Gerät, das ein freies Feld belegt und einen erfundenen, weiter
+fortgeschrittenen Stand hinterlegt, sich gegen das zurückkehrende Tablet
+durchsetzt. Wer das kann, kann am Feld ohnehin Punkte und ein Ergebnis
+senden; der Turnier-PC prüft Ergebnisse weiter (R5).
+
+**Stufe 2 — `match_assigned`** (`beiMatchAssigned` → `wahlBeiZuweisung`),
+nicht für ein finalisiertes Spiel:
+
+1. Ein vorgemerkter Server-Stand passt zum zugewiesenen Spiel → übernehmen.
+2. Kein Stand zum Spiel und keine Host-Sätze → bei 0:0 laden (wie bisher).
+3. Die Host-Sätze sind weiter als der eigene Stand **und** stehen nicht im
+   eigenen Melde-Ring → **Einstieg mit Host-Sätzen** (`einstiegMitSaetzen`):
+   Satzstand übernehmen, Aufstellung neu abfragen, Undo und Punktverlauf
+   beginnen dort neu. Entscheiden die Host-Sätze das Spiel schon, landet das
+   Tablet nach der Seitenwahl direkt in der Beendet-Ansicht.
+4. Sonst den eigenen Stand behalten und melden.
+
+**Host-Sätze** (`hostSets`): `match_assigned` trägt auf Frame-Ebene die
+Sätze, die der Turnier-PC selbst kennt — abgeschlossene plus laufender, aus
+dem von einem Tablet gemeldeten Live-Stand (`TabletState::host_sets`), nach
+einem Neustart also aus `live-scores.json`. Die Sätze, die BTP selbst für das
+Spiel führt, zählen **nicht**: Ein Spiel, das mit alten Sätzen neu aufs Feld
+kommt, beginnt bei 0:0. Die Host-Sätze reisen nur bei Anmeldung und
+Zuweisung, nicht je Punkt. Am Tablet bleiben sie in Team-Koordinaten liegen
+(`einstiegAB`), bis die Aufstellung steht; `chooseSide` rechnet sie bei jeder
+Seitenwahl neu um — auch nach „zurück". Solange keine Seite gewählt ist,
+meldet das Tablet keinen Stand; die Host-Sätze bleiben stehen. Fürs selbe
+Spiel setzt jede Zuweisung außerdem den Match-Brief des Turnier-PCs ein
+(Zählweise, Namen) — ein übernommener Stand bringt sonst den seines
+Vorgängers mit.
+
+**Melde-Ring:** Das Tablet merkt sich die letzten acht selbst gemeldeten
+Satzlisten des Spiels (eigener Speicher-Schlüssel je Feld, nicht im Spiegel).
+Nennt der Turnier-PC genau eine davon, ist das nur das Echo eines eigenen,
+inzwischen zurückgenommenen Stands — kein fremder Fortschritt. Grenze: Geht
+eine Meldung verloren und nimmt der Bediener offline weiter zurück, als der
+Ring reicht, steigt das Tablet mit den Host-Sätzen ein. Selten, sichtbar,
+per Korrektur heilbar.
+
+**Sende-Felder:** Übernimmt das Tablet einen fremden Stand, übernimmt es
+auch `pendingResult`, `submittedOk` und `resultRejected` — und stellt einen
+offenen Auftrag sofort weiter zu (`uebernimmStand`).
+
+**Legacy-Schalter:** Mit `reconnect_legacy_rev` bleibt das Tablet-Verhalten
+wortgleich das alte, und der Turnier-PC schickt keine Host-Sätze — der
+Schalter ist der vollständige Laufzeit-Rollback. **Mischversionen:** alte
+Seite + neuer Host/Relay verhält sich wie bisher; neue Seite + alter Host
+wendet Stufe 1 an, bekommt aber keine Host-Sätze.
+
+Tests: `scripts/test-stand-wahl.mjs` (Modul und echter Seiten-Code), Drift in
+`scripts/test-inline-kopien.mjs`; Rust
+`push_match_traegt_hostsets_aus_live_scores`,
+`hostsets_leer_bei_legacy_schalter`,
+`match_assigned_hostsets_roundtrip_und_alt_lesbar`,
+`relay_reicht_hostsets_durch_ohne_sie_zu_cachen`.
+
 **Finalisiert-Schutz:** Wird ein Match in BTP **per Hand fertig eingegeben**
 (finalisiert, `MatchStatus::Finished`), reist ein `finalized`-Flag im
 Match-Frame zum Tablet. Das Tablet **tritt dann zurück**: es pusht keinen Score
