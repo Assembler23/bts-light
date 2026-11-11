@@ -298,12 +298,10 @@ sofort (statt erst nach dem zweiten Fehlversuch).
 - Bei „Turnier-PC weg" lädt das Gerät kein Diagnose-Log hoch (es ist nicht
   sein Fehler); der Wechsel steht nur in seinem Log-Puffer. Auch der
   Stillstands-Wächter schweigt dann.
-- **Hält kein Tablet das Turnier in der Cloud** (LAN+Cloud ohne
-  Cloud-Tablets), vergisst der Relay kurz nach der Sperre auch die
-  Zuweisungen: Die Geräte fallen dann auf die Kopplungs-Seite mit ihrem Code
-  und dem Hinweis zurück — und kehren von selbst zu ihrer Anzeige zurück,
-  sobald der Turnier-PC wieder da ist. Das endet mit dem nächsten Schritt
-  der Spec (Daten 60 Minuten halten).
+- Die Geräte behalten ihre Zuweisung, solange der Relay die Turnierdaten
+  hält (60 Minuten ohne Turnier-PC). Danach zeigen sie die Kopplungs-Seite
+  mit ihrem Code und dem Hinweis — und kehren von selbst zu ihrer Anzeige
+  zurück, sobald der Turnier-PC wieder da ist.
 - Im Hallennetz (LAN) gibt es diese Meldung nicht: Dort ist der Turnier-PC
   selbst der Server.
 - Die Stream-Einblendung zeigt nie einen Fehlertext; sie wird rund 80 s nach

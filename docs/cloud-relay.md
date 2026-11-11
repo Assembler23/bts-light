@@ -1379,11 +1379,9 @@ Entfernt wird er vom Aufräum-Lauf (`fegen`, alle 5 s). Ein Namespace, den
 nur ein Tablet angelegt hat und der nie einen Turnier-PC sah, verschwindet
 weiter sofort mit dem Tablet.
 
-**Bis zum Daten-Verfall (PR 8) gilt:** Hält nach der Karenz weder ein Tablet
-noch eine Turnierleitungs-Seite den Namespace, wird er entfernt — samt
-Zuweisungen. Ein zugewiesenes Gerät sieht dann nur wenige Sekunden `503` und
-danach die Kopplungs-Seite mit `hostOffline`; Seiten mit eigener Rückkehr-
-Logik (Übersicht, Werbung, „In Vorbereitung") wechseln auf `/monitor`.
+Seit v0.9.389 bleibt ein Namespace, der je einen Turnier-PC hatte, die ganze
+Daten-Frist stehen (nächster Abschnitt): Zugewiesene Geräte sehen so lange
+`503` und behalten ihre Zuweisung.
 
 Die Seiten fragen bei `503` im selben schnellen Takt weiter wie bei jedem
 Fehler (Monitor und Tafel alle 250 ms); `Retry-After` beachten sie nicht. Derselbe Lauf stößt am
@@ -1398,6 +1396,49 @@ Namespace-Limit mit `4429` und `voll`.
 
 `GET /health` (prozessweit) nennt zusätzlich `hosts` — die Zahl verbundener
 Turnier-PCs. Das ist der Prüfpunkt vor jedem Relay-Deploy.
+
+## Lebensdauer der Turnierdaten (seit v0.9.389)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 8 ·
+ADR [0089](adr/0089-lebensdauer-des-namespace-zustands-ohne-host.md).
+
+Bis v0.9.388 hing die Lebensdauer aller Daten am Namespace — und der blieb,
+solange irgendein Tablet verbunden war. Ein vergessenes Tablet hielt Namen,
+Bilder und Listen eines beendeten Turniers beliebig lange im Speicher.
+
+| Zeitpunkt | Was geht |
+|---|---|
+| **sofort** beim Abgang des Turnier-PCs | Zugang zum Sprachdienst (`azure_tts`); TL-Zugänge, TL-Zustand, wartende Abrufe; TL-Verbindungen geschlossen |
+| **nach 20 s** | Anzeigen gesperrt (`503`) |
+| **nach 60 min** | Briefe (Namen) der Felder ohne Tablet, Aufruf-Liste, Meetingpoint, Feldliste, Feldnamen, Hallen, Freitext, Werbebilder, Logo, Monitor-Konfiguration, Geräte-Zuweisungen, Geräte- und Slave-Präsenz; für Felder ohne Tablet auch Sätze und Zustand |
+| **solange ein Tablet am Feld hängt** | seine Verbindung, sein gespiegelter Zustand (enthält die Namen seines Spiels), seine Sätze und ein **Brief ohne Personen** (nur Spielkennung und „beendet") |
+| **danach** | der Namespace verschwindet, sobald kein Tablet und kein offenes Ergebnis mehr hängt |
+
+- **Der Brief ohne Personen** ist nötig, damit das Tablet weiterzählen kann
+  (ohne Eintrag verwürfe der Relay jeden Punkt als Nachzügler) und damit bei
+  der Rückkehr des Turnier-PCs „gleiches Spiel" gilt — sonst stünde das Feld
+  auf 0:0.
+- **Rückkehr vor Ablauf:** nichts ist geleert, es ist der gewöhnliche
+  Reconnect.
+- **Rückkehr danach:** wie nach einem Relay-Neustart — der Turnier-PC liefert
+  Feldliste, Zuweisungen und Bilder neu.
+- **Namespace-Limit (2000):** Ist die Tabelle voll, weicht einem neuen
+  Turnier-PC der am längsten hostlose Namespace ohne Tablet. Gehaltene Daten
+  können so nie ein neues Turnier aussperren; gibt es keinen solchen, wird
+  der neue Turnier-PC mit `4429 voll` abgewiesen.
+- Ein Namespace, den nur ein Tablet angelegt hat (nie ein Turnier-PC),
+  verschwindet weiter sofort mit dem Tablet.
+- **Bilder weichen früher, wenn das Bilder-Budget knapp wird:** Vor einem
+  `507` gibt der Relay die Bilder von Turnieren ohne Turnier-PC frei (am
+  längsten verwaist zuerst). Ihr Turnier-PC lädt beim Wiederverbinden neu
+  hoch.
+- Die Verdrängung am Namespace-Limit kann auch ein echtes Turnier treffen,
+  dessen Turnier-PC gerade getrennt ist und das kein Cloud-Tablet hat — es
+  beginnt beim Wiederverbinden wie nach einem Relay-Neustart. Vorher wäre in
+  derselben Lage der neue Turnier-PC abgewiesen worden.
+
+Im Relay-Log: `Namespace '…': seit 60 min ohne Turnier-PC — Turnierdaten
+geleert`.
 
 ## Begrenzte Kanäle (seit v0.9.386)
 
@@ -1532,6 +1573,15 @@ am Server bereits, dort ist nichts zu ändern.
 
 ## Sicherheit
 
+- **Datenschutz — was der Relay wie lange hält (seit v0.9.389):** Spielernamen,
+  Schiedsrichternamen, Freitext-Durchsagen und Bilder liegen nur im
+  Arbeitsspeicher, nie auf der Platte. Ohne Turnier-PC sind sie nach
+  spätestens 60 Minuten gelöscht, der Zugang zum Sprachdienst sofort
+  (Abschnitt „Lebensdauer der Turnierdaten"). **Ausnahme:** Der gespiegelte
+  Zustand eines Tablets, das noch am Feld verbunden ist, bleibt, solange es
+  verbunden ist — und er enthält die Namen und Karten **seines** Spiels. Ein
+  vergessenes, eingeschaltetes Tablet hält also die Daten eines Spiels, nicht
+  mehr die des Turniers. Ein Relay-Neustart leert alles.
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die
   heutige LAN-URL. Der Relay weist Namespaces ab, die nicht wie eine
   kanonische UUID aussehen.

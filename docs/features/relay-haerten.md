@@ -1091,6 +1091,20 @@ Host"-Warnung, `:1136–1137`, berichtigen; Routen-Tabelle), `docs/court-monitor
 **Doku:** `docs/cloud-relay.md` (Lebensdauer, Datenschutz im Abschnitt „Sicherheit"),
 `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.389):** Ein Namespace, der je einen Turnier-PC hatte, bleibt
+jetzt die ganze Daten-Frist stehen (auch ohne Tablet) — damit gilt AK27 ohne die
+Einschränkung aus PR 7. Zusätzlich geleert: die schlanke Anzeige-Fassung des Zustands und
+der Sprachdienst-Zugang (falls er nach dem Abgang noch stünde). Verdrängt wird nur beim
+Verbinden eines Turnier-PCs, nicht beim Verbinden eines Tablets. `tablet_state_seit` und
+`state_weitergabe` (Zeitstempel ohne Inhalt) bleiben stehen.
+
+Aus dem Review: Der gespiegelte Zustand eines verbundenen Tablets enthält den vollen Brief
+seines Spiels (Namen, Karten) und bleibt, solange es verbunden ist — AK38 ist insoweit nur
+für die Turnierdaten erfüllt, nicht für dieses eine Spiel; die Doku sagt das jetzt so. Bei
+knappem Bilder-Budget weichen die Bilder hostloser Namespaces vor einem 507. Offen: eine
+zweite, längere Frist für Tablet-Felder; Test für die Wiederverbindung eines Tablets nach
+dem Leeren.
+
 ### PR 9 — Dashboard-Meldung, `Courts` immer, Wiederholung bei 409
 
 **Erfüllt:** AK25, AK26. **Lösung:** Dashboard aus d), neuer Host aus g).
