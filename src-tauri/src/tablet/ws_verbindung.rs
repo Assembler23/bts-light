@@ -145,6 +145,67 @@ pub fn zufall() -> f64 {
     (wert >> 11) as f64 / (1u64 << 53) as f64
 }
 
+// ── Dashboard-Meldung „anderer PC" (Spec relay-haerten, PR 9) ──────────
+
+/// Erst nach so langer Abweisung erscheint die Meldung. Nach einem
+/// Netzwechsel ist die EIGENE tote Verbindung bis zu 15 s lang der „andere
+/// PC" (so lange hält der Relay einen stummen Turnier-PC) — das soll
+/// niemanden erschrecken.
+pub const ABWEISUNG_MELDEN_NACH_MS: u64 = 30_000;
+
+/// Der Text der Meldung.
+pub const ANDERER_PC_TEXT: &str = "Ein anderer PC ist mit diesem Turnier verbunden";
+
+/// Lage der Cloud-Verbindung, soweit das Dashboard sie braucht. Reiner
+/// Wert; die Uhr kommt von außen.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CloudLage {
+    /// Seit wann der Relay diesen PC mit „Host belegt" abweist (Unix-ms).
+    abgewiesen_seit_ms: Option<u64>,
+    /// Seit wann die laufende Verbindung steht (Unix-ms).
+    verbunden_seit_ms: Option<u64>,
+}
+
+impl CloudLage {
+    /// Eine Verbindung ist aufgebaut. Das löscht die Abweisung noch NICHT:
+    /// Auch eine abgewiesene Verbindung ist erst einmal aufgebaut, bevor
+    /// der Relay sie mit Grund schließt.
+    pub fn verbunden(&mut self, jetzt_ms: u64) {
+        self.verbunden_seit_ms = Some(jetzt_ms);
+    }
+
+    /// Eine Sitzung ist zu Ende.
+    pub fn sitzung_ende(&mut self, ende: SitzungsEnde, jetzt_ms: u64) {
+        self.verbunden_seit_ms = None;
+        match ende {
+            SitzungsEnde::Abgewiesen => {
+                self.abgewiesen_seit_ms.get_or_insert(jetzt_ms);
+            }
+            // Ein Close ohne Grund oder ein gescheiterter Aufbau sagt nichts
+            // über den Platz: Der Close-Frame einer Abweisung kann verloren
+            // gehen, nginx kann einmal 502 liefern. Eine laufende Abweisung
+            // bleibt deshalb stehen — sonst begänne ihre Frist bei jedem
+            // solchen Aussetzer von vorn. (Ein älterer Relay nennt nie einen
+            // Grund; mit ihm beginnt nie eine Abweisung.)
+            SitzungsEnde::CloseOhneGrund | SitzungsEnde::AufbauGescheitert => {}
+            // Die Verbindung stand: Dieser PC hatte den Platz.
+            SitzungsEnde::Stabil | SitzungsEnde::Abriss => self.abgewiesen_seit_ms = None,
+        }
+    }
+
+    /// Die Meldung fürs Dashboard, wenn die Abweisung lange genug anhält.
+    pub fn meldung(&self, jetzt_ms: u64) -> Option<&'static str> {
+        let seit = self.abgewiesen_seit_ms?;
+        // Steht die laufende Verbindung länger, als eine Abweisung dauert,
+        // hat dieser PC den Platz bekommen.
+        let steht = self
+            .verbunden_seit_ms
+            .is_some_and(|v| jetzt_ms.saturating_sub(v) >= SOFORT_ABRISS.as_millis() as u64);
+        (!steht && jetzt_ms.saturating_sub(seit) >= ABWEISUNG_MELDEN_NACH_MS)
+            .then_some(ANDERER_PC_TEXT)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,5 +334,85 @@ mod tests {
             let p = mit_jitter(pause, z);
             assert!(p >= Duration::from_secs(8) && p <= Duration::from_secs(12));
         }
+    }
+
+    #[test]
+    fn abweisung_wird_erst_nach_dreissig_sekunden_gemeldet() {
+        let mut lage = CloudLage::default();
+        assert_eq!(lage.meldung(0), None);
+        // Der Relay weist ab — immer wieder (jeder Versuch baut erst auf).
+        let mut t = 1_000;
+        lage.verbunden(t);
+        lage.sitzung_ende(SitzungsEnde::Abgewiesen, t + 50);
+        assert_eq!(lage.meldung(t + 50), None, "nicht sofort");
+        for _ in 0..5 {
+            t += 5_000;
+            lage.verbunden(t);
+            lage.sitzung_ende(SitzungsEnde::Abgewiesen, t + 50);
+        }
+        // 25 s nach der ersten Abweisung: noch still.
+        assert_eq!(lage.meldung(t + 50), None);
+        // Ab 30 s: Meldung — gezählt ab der ERSTEN Abweisung.
+        assert_eq!(lage.meldung(1_050 + ABWEISUNG_MELDEN_NACH_MS - 1), None);
+        assert_eq!(
+            lage.meldung(1_050 + ABWEISUNG_MELDEN_NACH_MS),
+            Some(ANDERER_PC_TEXT)
+        );
+    }
+
+    #[test]
+    fn meldung_verschwindet_nach_verbindung() {
+        let mut lage = CloudLage::default();
+        lage.sitzung_ende(SitzungsEnde::Abgewiesen, 0);
+        let spaet = ABWEISUNG_MELDEN_NACH_MS + 10_000;
+        assert_eq!(lage.meldung(spaet), Some(ANDERER_PC_TEXT));
+        // Ein neuer Versuch ist aufgebaut: Das allein beweist nichts — auch
+        // eine Abweisung beginnt so.
+        lage.verbunden(spaet);
+        assert_eq!(lage.meldung(spaet + 1_000), Some(ANDERER_PC_TEXT));
+        // Steht die Verbindung länger, als eine Abweisung dauert, ist die
+        // Meldung weg — ohne dass die Sitzung enden müsste.
+        assert_eq!(lage.meldung(spaet + 5_000), None);
+        // Und nach ihrem Ende bleibt sie weg.
+        lage.sitzung_ende(SitzungsEnde::Stabil, spaet + 600_000);
+        assert_eq!(lage.meldung(spaet + 600_000), None);
+    }
+
+    #[test]
+    fn alter_relay_ohne_grund_meldet_nie() {
+        let mut lage = CloudLage::default();
+        for t in 0..100 {
+            lage.verbunden(t * 5_000);
+            lage.sitzung_ende(SitzungsEnde::CloseOhneGrund, t * 5_000 + 10);
+        }
+        assert_eq!(lage.meldung(10_000_000), None);
+    }
+
+    #[test]
+    fn verlorener_close_grund_setzt_die_frist_nicht_zurueck() {
+        // Dauer-Abweisung, bei der jeder zweite Close-Frame verloren geht
+        // (dann sieht die App nur einen Close ohne Grund) und nginx einmal
+        // 502 liefert.
+        let mut lage = CloudLage::default();
+        lage.sitzung_ende(SitzungsEnde::Abgewiesen, 0);
+        lage.sitzung_ende(SitzungsEnde::CloseOhneGrund, 5_000);
+        lage.sitzung_ende(SitzungsEnde::AufbauGescheitert, 10_000);
+        lage.sitzung_ende(SitzungsEnde::Abgewiesen, 15_000);
+        lage.sitzung_ende(SitzungsEnde::CloseOhneGrund, 20_000);
+        assert_eq!(
+            lage.meldung(ABWEISUNG_MELDEN_NACH_MS),
+            Some(ANDERER_PC_TEXT),
+            "gezählt ab der ersten Abweisung"
+        );
+        // Stand die Verbindung dagegen (Abriss nach mehr als 5 s), hatte
+        // dieser PC den Platz: Eine neue Abweisung beginnt eine neue Frist.
+        lage.sitzung_ende(SitzungsEnde::Abriss, 40_000);
+        assert_eq!(lage.meldung(50_000), None);
+        lage.sitzung_ende(SitzungsEnde::Abgewiesen, 50_000);
+        assert_eq!(lage.meldung(50_000 + ABWEISUNG_MELDEN_NACH_MS - 1), None);
+        assert_eq!(
+            lage.meldung(50_000 + ABWEISUNG_MELDEN_NACH_MS),
+            Some(ANDERER_PC_TEXT)
+        );
     }
 }
