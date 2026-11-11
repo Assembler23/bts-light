@@ -9,7 +9,7 @@
 // dem Schirm. Was hier geprüft wird: Ein festes Ergebnis sperrt BEIDE Knöpfe
 // und sagt, wohin man sich wenden muss; alle anderen Lagen bleiben, wie sie
 // waren.
-import { abschlussLage, sendeauftragErledigt } from "../src/io/abschlussAnsicht.mjs";
+import { abschlussLage, sendeauftragErledigt, STAND_SCHON_IN_BTP } from "../src/io/abschlussAnsicht.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -81,6 +81,15 @@ ok(
   lage({}),
   { sendenGesperrt: false, korrekturGesperrt: false, status: "" },
 );
+
+// ── Überholt (Spec tablet-stand-robust, Regel C) ────────────────────────
+ok(
+  "überholt sperrt Senden und Korrektur",
+  abschlussLage({ ueberholt: true }),
+  { sendenGesperrt: true, korrekturGesperrt: true, status: STAND_SCHON_IN_BTP },
+);
+ok("fest in BTP schlägt überholt", abschlussLage({ ueberholt: true, finalized: true }).status.includes("steht in BTP fest"), true);
+ok("überholt schlägt eine alte Absage", abschlussLage({ ueberholt: true, resultRejected: "x" }).status, STAND_SCHON_IN_BTP);
 
 // ── Unsinnige Eingaben ───────────────────────────────────────────────────
 ok("kein Zustand = bereit", abschlussLage(null), { sendenGesperrt: false, korrekturGesperrt: false, status: "" });

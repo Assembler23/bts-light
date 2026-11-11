@@ -308,6 +308,11 @@ jobs:
       - name: Verlaufs-Abgleich am Tablet (JS)
         run: node scripts/test-verlauf-sync.mjs
 
+      # Ein Ergebnis, das der Turnier-PC nicht annimmt, darf weder verloren
+      # gehen noch das Folgespiel blockieren. Geprueft am echten Seiten-Code.
+      - name: Geparkte Ergebnisse am Tablet (JS)
+        run: node scripts/test-geparkt.mjs
+
       # Schlankes Undo-Format des Tablets (Spec tablet-stand-robust,
       # ADR 0084) — ein falscher Schnitt stellte nach „zurueck" einen
       # falschen Punktverlauf wieder her; faellt erst beim Geraetewechsel auf.

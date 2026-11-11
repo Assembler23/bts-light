@@ -1686,6 +1686,20 @@ pub struct ResultResponse {
     /// antwort ist damit Byte für Byte dieselbe wie vorher.
     #[serde(default, skip_serializing_if = "is_false")]
     pub permanent: bool,
+    /// **Überholt** (Spec tablet-stand-robust, Regel C; ADR 0085): Das Spiel
+    /// liegt nicht (mehr) auf dem Feld **und** ist in BTP beendet, mit
+    /// Sieger. Das gesendete Ergebnis wird nie mehr gebraucht — es steht
+    /// schon eines da (von Hand eingetragen oder von einem anderen Gerät).
+    /// Das Tablet lässt den Auftrag los, statt ihn ewig zu wiederholen.
+    ///
+    /// Bewusst **weder `ok` noch `permanent`**: `ok` hieße „dein Ergebnis
+    /// steht in BTP" (falsch — es steht ein anderes da), `permanent` hieße
+    /// „dein Ergebnis ist unspielbar" (auch falsch). Ein Tablet, das das
+    /// Feld nicht kennt, liest eine gewöhnliche wiederholbare Absage und
+    /// verhält sich wie bisher. Der Normalfall `false` bleibt von der
+    /// Leitung.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub superseded: bool,
 }
 
 impl ResultResponse {
@@ -1695,6 +1709,7 @@ impl ResultResponse {
             ok: true,
             error: None,
             permanent: false,
+            superseded: false,
         }
     }
 
@@ -1705,6 +1720,18 @@ impl ResultResponse {
             ok: false,
             error: Some(message.into()),
             permanent: false,
+            superseded: false,
+        }
+    }
+
+    /// Absage „überholt": In BTP steht für dieses Spiel schon ein Ergebnis,
+    /// und es liegt nicht mehr auf dem Feld. Siehe [`Self::superseded`].
+    pub fn ueberholt(message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            error: Some(message.into()),
+            permanent: false,
+            superseded: true,
         }
     }
 
@@ -1716,6 +1743,7 @@ impl ResultResponse {
             ok: false,
             error: Some(message.into()),
             permanent: true,
+            superseded: false,
         }
     }
 }
@@ -2936,6 +2964,12 @@ pub enum HostFrame {
         /// Normalfall `false` bleibt von der Leitung.
         #[serde(default, skip_serializing_if = "is_false")]
         permanent: bool,
+        /// „Überholt" muss wie `permanent` über den Cloud-Weg mitreisen —
+        /// siehe [`ResultResponse::superseded`]. Ein alter Relay lässt das
+        /// Feld fallen; das Tablet parkt den Auftrag dann nur (sicherer
+        /// Rückfall).
+        #[serde(default, skip_serializing_if = "is_false")]
+        superseded: bool,
     },
     /// Vollständige Feld-Liste des Turniers – Grundlage des Feldwechsels im
     /// PIN-Menü des Tablets im Cloud-Modus. Periodisch vom Host gepusht.
@@ -4167,6 +4201,7 @@ mod tests {
             ok: false,
             error: Some("BTP abgelehnt".into()),
             permanent: true,
+            superseded: false,
         });
         roundtrip(&RelayFrame::TabletConnected {
             court_id: 3,
@@ -4983,6 +5018,54 @@ mod tests {
         roundtrip(&ResultResponse::err("Zeitüberschreitung"));
     }
 
+    /// Spec tablet-stand-robust, Regel C: „überholt" reist über beide Wege
+    /// (LAN-Antwort und Cloud-`ResultAck`) und ist nie `ok`, nie `permanent`.
+    #[test]
+    fn result_ack_superseded_roundtrip() {
+        let frame = HostFrame::ResultAck {
+            req_id: 7,
+            ok: false,
+            error: Some("In BTP steht schon ein Ergebnis.".into()),
+            permanent: false,
+            superseded: true,
+        };
+        roundtrip(&frame);
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains(r#""superseded":true"#), "{json}");
+        // Ein alter Host schickt das Feld nicht — das liest sich als „nein".
+        let alt: HostFrame =
+            serde_json::from_str(r#"{"type":"result_ack","reqId":7,"ok":false}"#).unwrap();
+        assert!(matches!(
+            alt,
+            HostFrame::ResultAck {
+                superseded: false,
+                permanent: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn result_response_superseded_bleibt_im_normalfall_von_der_leitung() {
+        for antwort in [
+            ResultResponse::ok(),
+            ResultResponse::err("später nochmal"),
+            ResultResponse::dauerhaft("Satz 13:8 passt nicht"),
+        ] {
+            let json = serde_json::to_string(&antwort).unwrap();
+            assert!(!json.contains("superseded"), "{json}");
+        }
+        let u = ResultResponse::ueberholt("In BTP steht schon ein Ergebnis.");
+        assert!(!u.ok && !u.permanent && u.superseded);
+        let json = serde_json::to_string(&u).unwrap();
+        assert!(json.contains(r#""superseded":true"#), "{json}");
+        assert!(!json.contains("permanent"), "{json}");
+        roundtrip(&u);
+        // Alte Antwort ohne das Feld bleibt lesbar.
+        let alt: ResultResponse = serde_json::from_str(r#"{"ok":false,"error":"x"}"#).unwrap();
+        assert!(!alt.superseded);
+    }
+
     #[test]
     fn nur_die_dauerhafte_ablehnung_traegt_permanent() {
         // Der Normalfall bleibt von der Leitung: eine wiederholbare Absage
@@ -5011,6 +5094,7 @@ mod tests {
             ok: false,
             error: Some("Satz 13:8 ist nicht regulär zu Ende gespielt.".into()),
             permanent: true,
+            superseded: false,
         });
     }
 

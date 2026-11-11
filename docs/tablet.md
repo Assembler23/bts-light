@@ -256,6 +256,69 @@ Ergebnis verliert und den Schiri nicht blockiert:
   gelten unverändert als wiederholbar. Die Regel steht in
   `src/io/resultRetry.mjs` (Test: `scripts/test-result-retry.mjs`), das Tablet
   trägt eine Inline-Kopie.
+- **Überholt und geparkt** (seit v0.9.376, Spec
+  [tablet-stand-robust](features/tablet-stand-robust.md), Regel C; ADR 0085).
+  Zwei Lücken blieben: Ein Auftrag für ein Spiel, das BTP längst beendet
+  hatte, wurde ewig wiederholt („kein Match auf diesem Feld" ist
+  wiederholbar) — und weil `pendingResult` den Spielwechsel überlebte, lehnte
+  `submit()` am Folgespiel still ab.
+  - **Überholt:** Liegt das Spiel nicht (mehr) auf dem Feld **und** ist es in
+    BTP beendet, mit Sieger, antwortet der Host mit `superseded: true`
+    (`absage_fuer_altes_spiel` in `server.rs`). Das ist **nie `ok`** (kein
+    Annahme-Weg, R5) und **nie `permanent`** (keine Aussage über den
+    Payload). In jedem anderen Fall — BTP noch nicht geladen, Spiel ohne
+    Ergebnis vom Feld genommen, Spiel unbekannt — bleibt es bei der
+    wiederholbaren Absage. Das Tablet lässt bei „überholt" los und zeigt
+    „✓ In BTP steht für dieses Spiel schon ein Ergebnis". Der Wortlaut ist
+    bewusst neutral: Auch eine **Korrektur** des Tablets für ein schon
+    geschriebenes, vom Feld geräumtes Spiel bekommt „überholt" (ein
+    identischer Wiederholungs-POST bleibt über die Idempotenz `ok`). Solche
+    Korrekturen laufen damit nur noch über die Turnierleitung — vorher hing
+    der Auftrag, bis das Spiel wieder auf dem Feld lag.
+  - **Geparkt:** Wechselt das Spiel oder wird das Feld geleert, während ein
+    Auftrag offen ist, wandert er in eine eigene Liste (`parkeFremdenAuftrag`
+    in `loadMatch`/`clearMatch`/`submit`/`applyPersistedState`; Regeln in
+    `src/io/geparkt.mjs`). Eigener Schlüssel `badhub.tablet.geparkt.<Feld>` —
+    die Liste überlebt `clearPersistedState`, reist **nicht** im gespiegelten
+    Zustand und trägt nur Match-ID, Feld, Sätze und Spielnummer. Höchstens
+    fünf Einträge.
+  - **Hintergrund-Prüfung** (`pruefeGeparkte`): nach 15 s, dann alle 60 s und
+    bei jeder Neuverbindung geht das geparkte Ergebnis erneut an `/result`.
+    `ok` und „überholt" lösen den Eintrag auf. Das Spiel, das gerade auf dem
+    Feld liegt, wird dabei **ausgelassen** — dafür fragt das Tablet („Jetzt
+    senden" / „Verwerfen"), weil es womöglich neu gespielt wird. „Jetzt
+    senden" **gibt den Eintrag frei** (`freigeben`), statt ihn in
+    `pendingResult` zu legen: Er bleibt geparkt und sichtbar, bis der Host
+    annimmt, und sperrt nicht das Ergebnis des neu gespielten Spiels. Nach
+    einer Neuverbindung wartet die Prüfung 3 s (bis `match_assigned` sagt,
+    was auf dem Feld liegt) und läuft höchstens alle 10 s. Restfenster:
+    Liegt das Spiel beim Host schon wieder auf diesem Feld, das Tablet weiß
+    es aber noch nicht, nimmt der Host die Hintergrund-Zustellung an.
+  - **Karenz von 4 s:** Nach jedem normalen Spielende überholt das
+    `match_cleared` (WebSocket) oft die Antwort auf das Ergebnis (HTTP). Der
+    Auftrag wird dann für Augenblicke geparkt; die späte Antwort löst ihn auf
+    (`geparktAntwort` im veralteten Zweig von `trySubmitPending`). In der
+    Karenz zeigt das Band nichts — sonst blitzte nach jedem Spiel „nicht
+    zugestellt" auf.
+  - **Band und Abfragen:** eigene Zeile unter der Fußleiste (`#geparkt-band`,
+    verdeckt keinen Knopf), auf Warte-, Setup- und Zählansicht. Verwerfen ist
+    auf beiden Wegen (Band und Rückkehr-Frage) zweistufig und ohne PIN. Fällt
+    am Deckel ein Eintrag heraus, steht das im Tablet-Log (`geparkt_deckel`).
+    Übernimmt das Tablet einen fremden Stand (`applyPersistedState`), wird ein
+    eigener offener Auftrag geparkt oder — beim selben Spiel — behalten. Ein in BTP festes Spiel löst seinen geparkten
+    Eintrag auf (`geparktBeiFinalisierungAufloesen`).
+  - **Versionsabgleich:** Ein geparktes Ergebnis zählt wie ein offenes — ohne
+    nutzbaren Speicher lädt die Seite nicht von selbst neu.
+  - **Bewusst hingenommen:** „Überholt" verrät je Match-ID ein Bit (in BTP
+    beendet oder nicht) an jeden, der `/result` erreicht. Es trägt weder
+    Namen noch Sätze noch den Sieger, und dasselbe steht im Liveticker.
+  - **Alter Host/Relay:** kennt `superseded` nicht und antwortet
+    wiederholbar; das Tablet parkt dann nur (sicherer Rückfall).
+  - Tests: `scripts/test-geparkt.mjs` (Modul und echter Seiten-Code),
+    `scripts/test-result-retry.mjs`, `scripts/test-abschluss-ansicht.mjs`,
+    Drift in `scripts/test-inline-kopien.mjs`; Rust `process_result_ueberholt_*`,
+    `process_result_nicht_ueberholt_*`,
+    `process_result_wiedereroeffnetes_match_nimmt_korrektur_an`.
 - **Idempotenz (kein Endlos-Retry / Doppel-Write):** Nach einem erfolgreichen
   Write räumt der Server das Feld. Ein Wiederholungs-POST für dasselbe Match mit
   **identischem** Ergebnis (`sets`, Sieger, ScoreStatus) quittiert

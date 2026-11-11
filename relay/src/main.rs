@@ -5594,6 +5594,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             ok,
             error,
             permanent,
+            superseded,
         } => {
             if let Some(pending) = namespace.pending.remove(&req_id) {
                 // Unverändert durchreichen: Der Relay urteilt nicht über
@@ -5603,6 +5604,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                     ok,
                     error,
                     permanent,
+                    superseded,
                 });
             }
         }
@@ -5671,6 +5673,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                     ok,
                     error,
                     permanent: false,
+                    superseded: false,
                 });
             }
         }
@@ -10072,6 +10075,7 @@ mod tests {
                 ok: true,
                 error: None,
                 permanent: false,
+                superseded: false,
             },
             &host,
         )
@@ -12064,6 +12068,7 @@ mod load {
                                 ok: true,
                                 error: None,
                                 permanent: false,
+                                superseded: false,
                             },
                             &host_tx,
                         )

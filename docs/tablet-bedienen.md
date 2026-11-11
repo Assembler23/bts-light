@@ -224,7 +224,7 @@ Nach dem letzten Punkt zeigt das Tablet das Spielende.
 > und in den Tournament Planner.
 <!-- pruef: "Ergebnis übermitteln" in src-tauri/assets/tablet.html -->
 
-Danach siehst du eines von drei Dingen:
+Danach siehst du eines von vier Dingen:
 
 | Anzeige | Bedeutung |
 |---|---|
@@ -232,8 +232,39 @@ Danach siehst du eines von drei Dingen:
 | **✓ Übermittelt** | angekommen — das Feld ist fertig |
 | **✗ Nicht angenommen: …** | abgelehnt, mit Begründung. Der Knopf wird wieder frei: **Stand prüfen** und erneut übermitteln |
 
-Bleib am Feld, bis eines der beiden Endergebnisse dasteht. Ein „✗ Nicht
+| **✓ In BTP steht für dieses Spiel schon ein Ergebnis** | die Turnierleitung hat bereits eines eingetragen — nichts mehr zu tun. Weicht deins ab, sag es ihr |
+<!-- pruef: "In BTP steht für dieses Spiel schon ein Ergebnis" in src-tauri/assets/tablet.html -->
+
+Bleib am Feld, bis eines dieser Endergebnisse dasteht. Ein „✗ Nicht
 angenommen", das niemand liest, ist ein verlorenes Ergebnis.
+
+### Das orange Band: ein Ergebnis ist nicht angekommen
+
+Kommt das nächste Spiel aufs Feld (oder wird das Feld geleert), **bevor** das
+Ergebnis des alten Spiels zugestellt ist, geht es nicht verloren und blockiert
+auch nichts (seit v0.9.376). Das Tablet zeigt dann ganz unten ein oranges Band:
+
+> Ergebnis von Spiel Nr. 12 (21:10, 21:15) nicht zugestellt — Turnierleitung informieren
+<!-- pruef: "nicht zugestellt — Turnierleitung informieren" in src-tauri/assets/tablet.html -->
+
+- **Sag der Turnierleitung Bescheid** und nenne Spielnummer und Sätze — sie
+  stehen im Band. Das neue Spiel kannst du ganz normal zählen und übermitteln.
+- Das Tablet versucht es im Hintergrund weiter. Kommt das Ergebnis doch noch
+  an, oder hat die Turnierleitung es inzwischen von Hand eingetragen, wird das
+  Band kurz grün („… ist zugestellt" bzw. „… nicht mehr nötig — in BTP steht
+  schon eines") und verschwindet.
+- Das Band übersteht ein Neuladen der Seite.
+- **Verwerfen** entfernt das Band. Das Tablet fragt vorher noch einmal nach
+  und zeigt das Ergebnis — verwirf nur, wenn die Turnierleitung es hat.
+<!-- pruef: "Ja, verwerfen" in src-tauri/assets/tablet.html -->
+
+Kommt **dasselbe Spiel** später wieder auf dieses Feld, sendet das Tablet
+nichts von allein. Es fragt: *„Für dieses Spiel liegt ein nicht zugestelltes
+Ergebnis vor"* — **Jetzt senden** oder **Verwerfen** (auch hier mit
+Nachfrage). Wird das Spiel neu gespielt, verwirf; soll das alte Ergebnis
+gelten, sende. Nach „Jetzt senden" bleibt das Band stehen, bis der Turnier-PC
+das Ergebnis angenommen hat.
+<!-- pruef: "Jetzt senden" in src-tauri/assets/tablet.html -->
 
 > **Steht das Ergebnis in BTP fest, ist am Tablet Schluss** (seit v0.9.291).
 > Die Beendet-Ansicht sperrt dann „Korrektur — Match wieder öffnen" **und** den
@@ -370,6 +401,10 @@ Kurz warten und normal weitertippen — es ist nichts verloren.
 **„Ergebnis übermitteln" bleibt gesperrt.**
 Bei Aufgabe und kampfloser Wertung muss zuerst der **Sieger** gewählt werden.
 Der Hinweis dazu steht direkt am Knopf.
+
+**„Ergebnis übermitteln" tat am neuen Spiel nichts.**
+Das lag bis v0.9.375 an einem alten, nie zugestellten Ergebnis. Seit v0.9.376
+wird es geparkt (oranges Band unten) und sperrt den Knopf nicht mehr.
 
 **Ein Hinweis auf eine neue Fassung erscheint mitten im Spiel.**
 Das Tablet lädt sich **nicht** von allein neu, solange gezählt wird. Den

@@ -161,6 +161,12 @@ jedem Commit.
 
 ## Offene Fragen / Annahmen
 
+> **Nachtrag 11.11.2026:** Zwei Lücken dieser Spec — der ewig wiederholte
+> Auftrag für ein in BTP längst beendetes Spiel und der Auftrag, der das
+> Folgespiel blockiert — schließt die Spec
+> [tablet-stand-robust](tablet-stand-robust.md) (Regel C: Antwort „überholt",
+> geparkte Ergebnisse; ADR 0085, umgesetzt in v0.9.376).
+
 - **Timeout-Werte** (Client-Abort ~12 s Backstop, Relay 8 s) sind nachjustierbar —
   keine harte p95-Messung nötig, weil (c) Duplikate harmlos macht. Der Client-
   Abort ist ein Backstop; im Normalfall antwortet der Relay bei ~8 s mit

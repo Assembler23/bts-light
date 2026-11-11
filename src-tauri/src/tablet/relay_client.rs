@@ -556,6 +556,7 @@ async fn handle_frame(
                 ok: resp.ok,
                 error: resp.error,
                 permanent: resp.permanent,
+                superseded: resp.superseded,
             }));
         }
         // Meetingpoint-Check-in aus der Cloud: dieselbe Prüfung wie im
