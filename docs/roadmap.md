@@ -606,7 +606,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   **alle umgesetzt** (v0.9.374–378, 11.11.2026); offen sind die Release-Tags
   und der Feldtest (Ersatzgerät mitten im Satz, Neustart des Turnier-PCs,
   Ergebnis bei getrenntem WLAN, Karte bei getrenntem Internet).
-- **badhub-Push entkoppeln** — Spec **im Entwurf**:
+- **badhub-Push entkoppeln** — Spec:
   [features/badhub-push-entkoppeln.md](features/badhub-push-entkoppeln.md)
   (freigegeben 11.11.2026; ADR 0086/0087). Paket 2 des
   Kommunikations-Audits: ein geordneter Sender-Task für alles an badhub (der Sync-Zyklus
@@ -616,7 +616,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Log-Flanken für BTP und Strecke. PRs 1, 2a, 2b, 3, 4 (PR 5 nur nach Messung) — **noch
   nichts umgesetzt**; kein badhub-Deploy nötig. badhub-Folgearbeit (gzip, Sperre im
   `tupdate_match`-Zweig, Reihenfolge-Prüfung) steht beim Kommunikations-Audit, Paket 2.
-- **Relay härten** — Spec **im Entwurf**:
+- **Relay härten** — Spec:
   [features/relay-haerten.md](features/relay-haerten.md)
   (freigegeben 11.11.2026; ADR 0088–0091). Paket 3 des
   Kommunikations-Audits: keine toten Feld-Slots, Größen- und Mengendeckel auf allen
