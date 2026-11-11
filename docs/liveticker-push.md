@@ -6,11 +6,51 @@ davon im Dashboard und im Log steht. Spec:
 ADR [0086](adr/0086-ein-geordneter-sender-fuer-die-badhub-strecke.md) ·
 [0087](adr/0087-voller-tset-nur-bei-strukturaenderung.md).
 
-> **Stand:** v0.9.381 setzt den ersten Schritt um (Fristen, Fehlerklassen,
-> Halt, Drossel, Backoff ohne Logo, Log-Flanken). Der Sync-Zyklus wartet
-> weiterhin auf die Antwort von badhub — höchstens eine Frist je Versuch.
-> Die volle Entkopplung (eigener Sender-Task) folgt mit den nächsten Schritten
-> der Spec.
+> **Stand:** v0.9.381 brachte Fristen, Fehlerklassen, Halt, Drossel, Backoff
+> ohne Logo und Log-Flanken; seit v0.9.382 sendet ein eigener Sender-Task,
+> und der Sync-Zyklus wartet nicht mehr auf badhub; seit v0.9.383 wertet der
+> Punktverlauf badhubs Antwort aus ([punktverlauf.md](punktverlauf.md)). Noch
+> offen aus der Spec: Tablet-Punkte durch denselben Sender (heute je Feld ein
+> eigener Arbeiter) und weniger Vollstände — beides nach einer Messung im Feld.
+
+## Wer sendet (seit v0.9.382)
+
+```
+Sync-Zyklus (alle 5 s)          Sender-Task                      badhub
+  BTP lesen, Feldvergabe,   ──►  Postfach: neuester Stand   ──►  tset / tupdate_match
+  Rotation, Druck, Ansage        (ein Platz, „neuester           centry_list, sched,
+  Stand ablegen, fertig           gewinnt")                      tverlauf — nacheinander
+```
+
+- **Der Zyklus** (`sync.rs` `run_once`) legt seinen Stand ins Postfach
+  (`badhub/sender.rs` `Griff::stand_abliefern`) und kehrt sofort zurück. Er
+  wartet nie auf badhub — die Feldvergabe läuft im 5-s-Takt, egal wie die
+  Internet-Strecke aussieht.
+- **Der Sender** (`badhub/sender.rs` `lauf`) holt den Stand, legt die
+  Tablet-Stände noch einmal darüber und sendet: erst den Liveticker, dann
+  Meldeliste, Spielplan, Punktverlauf — streng nacheinander. Was gesendet
+  wird, entscheidet unverändert `PushTeil::an_badhub_senden` (`sync.rs`).
+- **Neuester gewinnt:** Hängt eine Anfrage, sammeln sich keine alten Stände.
+  Danach geht der aktuelle hinaus.
+- **Lebensdauer:** Der Sender läuft unter einem Wächter des Sync-Loops.
+  Stoppen oder Speichern der Einstellungen beendet ihn; eine laufende Anfrage
+  wird verworfen. Am Slave gibt es keinen Sender.
+- **Ausfall:** Stirbt der Sender an einer Panik, meldet er das selbst —
+  die Statuszeile wird rot („Übertragung an badhub ausgefallen"), statt für
+  immer „aktuell" zu zeigen. Jeder Start bekommt einen eigenen Platz für
+  die Lage; ein alter Sender, der nach dem Speichern gerade erst endet,
+  schreibt nicht mehr in die Zeile des neuen.
+- **Restrisiko beim Speichern:** Eine Anfrage, die im Augenblick des
+  Speicherns schon unterwegs ist, geht noch mit dem alten Passwort hinaus
+  (höchstens eine; war vorher ebenso).
+- **Wann probiert wird:** Der Sender wacht mit jedem abgelieferten Stand auf.
+  Ein Versuch nach einer Störung kommt also bis zu einen Zyklus (5 s) nach
+  Ablauf der Frist.
+- **Punktverlauf nur mit bestätigtem Stand:** Scheitert der `tset` eines
+  Durchgangs, geht kein `tverlauf` — badhub verwürfe ihn still.
+- Die Tablet-Punkte gehen weiter über einen Arbeiter je Feld
+  (`tablet/server.rs` `queue_score_push`); er teilt sich mit dem Sender die
+  Strecke (Halt, Störung, Drossel).
 
 ## Die fünf Kanäle
 
@@ -46,7 +86,7 @@ so antwortet badhub immer (`answer`, `ok`, `error`).
 
 | Ausgang | `tset` | `tupdate_match` | Meldeliste | `sched` | `tverlauf` |
 |---|---|---|---|---|---|
-| 200 mit badhub-Antwort | ok | ok | ok | ok | ok |
+| 200 mit badhub-Antwort | ok | ok | ok | ok | ok — bei `verworfen > 0` nicht angenommen |
 | 200 ohne badhub-Antwort | Strecke gestört | ← | ← | ← | ← |
 | keine Antwort (Netz, Frist, DNS, TLS) | Strecke gestört | ← | ← | ← | ← |
 | 3xx, 408 | Strecke gestört | ← | ← | ← | ← |
@@ -104,8 +144,10 @@ kann ein zu großes Logo also einmal wieder mitgehen.
 
 ## Im Dashboard
 
-Eine Statuszeile; ein BTP-Fehler hat Vorrang. Die Texte der Strecke stehen in
-[Oberflächen](oberflaechen.md). Orange heißt: es geht von selbst weiter. Rot
+Eine Statuszeile aus zwei Quellen: Der Zyklus meldet BTP-Fehler, der Sender
+die Lage der Strecke (`AppState.push_lage`). Ein BTP-Fehler hat Vorrang.
+`get_status` rechnet den Text beim Abruf, deshalb zählt „nächster Versuch in
+N s" herunter. Die Texte der Strecke stehen in [Oberflächen](oberflaechen.md). Orange heißt: es geht von selbst weiter. Rot
 heißt: die Turnierleitung muss handeln (Passwort).
 
 ## Im Log

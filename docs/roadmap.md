@@ -613,8 +613,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   wartet nie auf das Internet), Fehlerklassen je Kanal mit Backoff 5–60 s ohne Logo, Halt bei
   401/403 bis zum Speichern, 429 nach `Retry-After`, voller `tset` nur bei Strukturänderung
   und alle 60 s, Tablet-Punkte genau einmal, Punktverlauf wertet `verworfen` aus,
-  Log-Flanken für BTP und Strecke. PRs 1, 2a, 2b, 3, 4 (PR 5 nur nach Messung) — **PR 1
-  umgesetzt** (v0.9.381: Fristen, Fehlerklassen, Halt, Drossel, Backoff ohne Logo, Log-Flanken); kein badhub-Deploy nötig. badhub-Folgearbeit (gzip, Sperre im
+  Log-Flanken für BTP und Strecke. PRs 1, 2a, 2b, 3, 4 (PR 5 nur nach Messung) — **PR 1 und 2a
+  umgesetzt** (v0.9.381: Fristen, Fehlerklassen, Halt, Drossel, Backoff ohne Logo, Log-Flanken;
+  v0.9.382: eigener Sender-Task, der Zyklus wartet nicht mehr auf badhub) sowie **PR 4**
+  (v0.9.383: Punktverlauf wertet `verworfen` aus, Änderungsmarken); offen PR 2b und 3 — beide
+  nach einer Messung im Feld; kein badhub-Deploy nötig. badhub-Folgearbeit (gzip, Sperre im
   `tupdate_match`-Zweig, Reihenfolge-Prüfung) steht beim Kommunikations-Audit, Paket 2.
 - **Relay härten** — Spec:
   [features/relay-haerten.md](features/relay-haerten.md)
@@ -627,7 +630,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   60 min (Sprachdienst-Schlüssel sofort), Mindestschutz gegen Schein-Turniere
   (`MemoryMax`, Bilder-Tor, Gesamt-Budget), neue Dashboard-Meldung „Ein anderer PC ist mit
   diesem Turnier verbunden". Neun PRs (1, 2, 9 Host ohne Relay-Deploy; 3–8 Relay in zwei
-  Merge-Fenstern) — **PR 1 und 2 umgesetzt** (v0.9.379: Host-Schleife entkoppelt; v0.9.380: Verbindungsaufbau mit Frist und Backoff-Automat), PR 3–9 offen. Ausgelagerte Punkte stehen beim
+  Merge-Fenstern) — **alle neun PRs umgesetzt** (v0.9.379: Host-Schleife entkoppelt; v0.9.380: Verbindungsaufbau mit Frist und Backoff-Automat; v0.9.384: ein Feld je Tablet-Verbindung, Halterschaft, Feld-Deckel; v0.9.385: Größendeckel und Mengen-Takt; v0.9.386: begrenzte Kanäle; v0.9.387: Bilder-Tor, Bilder-Budget, Log; v0.9.388: Host-Verlust auf den Anzeigen, Close-Grund; v0.9.389: Daten-Verfall nach 60 min; v0.9.390: Dashboard-Meldung „anderer PC"). Offen: Merges in zwei Fenstern, Handgriff `ops/bts-relay.service` am Server, Feldtest; aus den Reviews vermerkte Restpunkte stehen je PR in der Spec. Offen dazu: Handgriff `ops/bts-relay.service` am Server. Ausgelagerte Punkte stehen beim
   Kommunikations-Audit, Paket 3.
 - **Meetingpoint am Kiosk-Tablet** — Spec:
   [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)

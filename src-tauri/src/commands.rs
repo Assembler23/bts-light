@@ -47,6 +47,12 @@ pub struct SyncStatus {
     pub message: String,
     /// Zeitpunkt des letzten Zyklus (Unix-Millisekunden).
     pub updated_at_ms: u64,
+    /// Der letzte Zyklus lief durch und hat seinen Stand beim badhub-Sender
+    /// abgeliefert. Dann sagt beim Abruf die Lage des Senders, was in der
+    /// Zeile steht (siehe `get_status`) — sonst der Zyklus selbst (BTP-Fehler
+    /// hat Vorrang). Nicht fürs Frontend.
+    #[serde(skip)]
+    pub abgeliefert: bool,
 }
 
 impl Default for SyncStatus {
@@ -56,6 +62,7 @@ impl Default for SyncStatus {
             kind: "idle".to_string(),
             message: "Nicht verbunden".to_string(),
             updated_at_ms: 0,
+            abgeliefert: false,
         }
     }
 }
@@ -115,6 +122,14 @@ pub struct AppState {
     /// Drossel-Frist. Nur im Speicher — die `SyncEngine` wird bei jedem
     /// Speichern neu gebaut, die App-Laufzeit nicht.
     pub push_merker: Arc<Mutex<crate::badhub::strecke::PushMerker>>,
+    /// Was der badhub-Sender zuletzt über die Strecke gemeldet hat — die
+    /// zweite Hälfte der Statuszeile (die erste schreibt der Sync-Zyklus).
+    ///
+    /// Je Start ein NEUER Schlitz (deshalb der äußere Mutex): Ein alter
+    /// Sender, der nach dem Speichern der Einstellungen gerade erst endet,
+    /// schreibt dann nur noch in seinen eigenen, verwaisten Schlitz — und
+    /// nicht „Passwort prüfen" in die Zeile, obwohl das Passwort neu ist.
+    pub push_lage: Mutex<crate::badhub::sender::LageSchlitz>,
     /// Das vom Updater-Plugin geprüfte Update — nur damit lässt sich das
     /// Paket über den Plugin-Weg (Installer mit Neustart) einbauen.
     pub update_handle: Mutex<Option<tauri_plugin_updater::Update>>,
@@ -133,9 +148,15 @@ fn now_ms() -> u64 {
 /// Übersetzt das Ergebnis eines Sync-Zyklus in einen Anzeige-Status.
 fn status_from(outcome: &SyncOutcome) -> SyncStatus {
     let (kind, message) = match outcome {
+        // Die drei folgenden Ergebnisse liefert nur noch ein Durchgang des
+        // Senders (für Tests); in der Statuszeile erscheinen sie nicht mehr —
+        // dort steht „Liveticker aktuell".
         SyncOutcome::PushedFull => ("ok", "Verbunden – kompletter Stand gesendet".to_string()),
         SyncOutcome::PushedUpdate => ("ok", "Verbunden – Punktestand aktualisiert".to_string()),
         SyncOutcome::Idle => ("ok", "Verbunden – keine Änderung".to_string()),
+        // Der Zyklus wartet nicht mehr auf badhub; ob die Übertragung
+        // steht, sagt die Lage des Senders (`status_zeile`).
+        SyncOutcome::Abgeliefert => ("ok", "Verbunden – Liveticker aktuell".to_string()),
         SyncOutcome::SlaveActive => ("ok", "Ansage-Slave aktiv – nur Ansagen".to_string()),
         SyncOutcome::BtpError(e) => ("btp_error", format!("BTP nicht erreichbar: {e}")),
         // Bewusst "warn" (orange), nicht "btp_error" (rot): Der Guard
@@ -171,6 +192,10 @@ fn status_from(outcome: &SyncOutcome) -> SyncStatus {
             "Übertragung an badhub angehalten: Der Server verlangt eine eigene Anmeldung"
                 .to_string(),
         ),
+        SyncOutcome::PushAusgefallen => (
+            "push_error",
+            "Übertragung an badhub ausgefallen — bitte stoppen und neu starten".to_string(),
+        ),
         SyncOutcome::PushAbgelehnt { status, sekunden } => (
             "warn",
             format!(
@@ -183,7 +208,51 @@ fn status_from(outcome: &SyncOutcome) -> SyncStatus {
         kind: kind.to_string(),
         message,
         updated_at_ms: now_ms(),
+        abgeliefert: matches!(outcome, SyncOutcome::Abgeliefert),
     }
+}
+
+/// Die eine Statuszeile, wenn der Zyklus selbst nichts zu melden hat: der
+/// Zustand der badhub-Strecke, gerechnet zum Zeitpunkt des Abrufs — so zählt
+/// „nächster Versuch in N s" herunter, obwohl der Sender die Lage nur nach
+/// einer Sendung schreibt.
+fn status_zeile(
+    lage: &crate::badhub::sender::PushLage,
+    jetzt: std::time::Instant,
+) -> (String, String) {
+    use crate::badhub::sender::{sekunden_bis, PushLage};
+    let ergebnis = match lage {
+        // Noch nichts ausgewertet (gerade gestartet): kein Grund zur Sorge.
+        PushLage::Unbekannt | PushLage::Ok => SyncOutcome::Abgeliefert,
+        PushLage::Gestoert { naechster } => SyncOutcome::PushGestoert {
+            sekunden: sekunden_bis(*naechster, jetzt),
+        },
+        PushLage::Gedrosselt { uhrzeit } => SyncOutcome::PushGedrosselt {
+            uhrzeit: uhrzeit.clone(),
+        },
+        PushLage::Angehalten { wand } => SyncOutcome::PushAngehalten { wand: *wand },
+        PushLage::Ausgefallen => SyncOutcome::PushAusgefallen,
+        PushLage::Abgelehnt { status, naechster } => SyncOutcome::PushAbgelehnt {
+            status: *status,
+            sekunden: sekunden_bis(*naechster, jetzt),
+        },
+    };
+    let s = status_from(&ergebnis);
+    (s.kind, s.message)
+}
+
+/// Legt die Lage der badhub-Strecke über den gemerkten Status — nur wenn der
+/// letzte Zyklus sauber durchlief (ein BTP-Fehler hat Vorrang) und die
+/// Übertragung läuft.
+fn status_mit_push_lage(
+    mut status: SyncStatus,
+    lage: &crate::badhub::sender::PushLage,
+    jetzt: std::time::Instant,
+) -> SyncStatus {
+    if status.running && status.abgeliefert {
+        (status.kind, status.message) = status_zeile(lage, jetzt);
+    }
+    status
 }
 
 /// Kennung des badhub-Ziels, an die Logo-Stempel und „war gestört" gebunden
@@ -2449,9 +2518,35 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     )
     .als_tor();
     let sync_tor = push_tor.clone();
+    // Postfach des badhub-Senders: Der Zyklus legt seinen Stand ab und läuft
+    // weiter; der Sender (unten, unter einem Wächter) holt ihn. Am Slave
+    // gibt es beides nicht — dort pusht niemand.
+    let postfach = (!slave_mode).then(crate::badhub::sender::Griff::neu);
+    let push_lage = crate::badhub::sender::LageSchlitz::default();
+    *state
+        .push_lage
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = push_lage.clone();
     let handle = tauri::async_runtime::spawn(async move {
-        let http = push::build_client();
-        let mut engine = SyncEngine::mit_tor(sync_tor);
+        let mut engine = match &postfach {
+            Some(p) => SyncEngine::mit_postfach(p.clone()),
+            None => SyncEngine::new(),
+        };
+        // Der Sender endet mit dieser Schleife (Stoppen, Speichern) — eine
+        // laufende Anfrage wird dabei verworfen. Sonst sendete nach dem
+        // Speichern ein alter Sender mit dem alten Passwort weiter.
+        let _sender = postfach.map(|postfach| {
+            TaktWaechter(tauri::async_runtime::spawn(crate::badhub::sender::lauf(
+                crate::badhub::sender::SenderTeile {
+                    postfach,
+                    teil: crate::sync::PushTeil::mit_tor(sync_tor),
+                    config: sync_config.clone(),
+                    transport: Arc::new(push::build_client()),
+                    tablet: sync_tablet.clone(),
+                    lage: push_lage,
+                },
+            )))
+        });
         // BTP-Fehler flankengesteuert ins Diagnose-Log: bisher standen sie
         // nur in der Statuszeile und waren nach dem Turnier nicht mehr
         // nachzuvollziehen.
@@ -2504,7 +2599,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
                     crate::sync::checkin_lese_tick(&lese, &cfg, &tab).await;
                 });
             }
-            let outcome = engine.run_once(&sync_config, &http, &sync_tablet).await;
+            let outcome = engine.run_once(&sync_config, &sync_tablet).await;
             // Ereignis-Auslöser des TP-Uploads (ADR 0062): Auslosung oder
             // Paarung erkannt → Takt-Termin vorziehen. Schalter und Drossel
             // aus der GETEILTEN Config (nicht der Wertkopie `sync_config`):
@@ -2713,6 +2808,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         kind: "idle".to_string(),
         message: "Verbindung wird aufgebaut …".to_string(),
         updated_at_ms: now_ms(),
+        abgeliefert: false,
     };
     Ok(())
 }
@@ -3024,6 +3120,13 @@ pub fn stop_sync(state: State<'_, AppState>) {
     // damit dieser Aufruf erst zurückkehrt, wenn die Datei steht.
     state.tablet.flush_scores();
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus::default();
+    // Auch die Lage des (eben beendeten) Senders: Sonst stünde nach dem
+    // nächsten Start kurz die Störung von vorhin in der Zeile.
+    *state
+        .push_lage
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        crate::badhub::sender::LageSchlitz::default();
 }
 
 /// Ein Werbebild mit optionalem Anzeige-Label. `label` ist leer, wenn
@@ -3112,6 +3215,10 @@ pub struct TabletInfo {
     pub cloud_enabled: bool,
     /// Alle Courts mit aktuellem Match, Live-Stand und Tablet-Status.
     pub courts: Vec<crate::tablet::state::CourtOverview>,
+    /// Hinweis zur Cloud-Verbindung fürs Dashboard — gesetzt, wenn der
+    /// Relay diesen PC seit über 30 s abweist, weil ein anderer PC dasselbe
+    /// Turnier hält (Spec relay-haerten, PR 9).
+    pub cloud_hinweis: Option<String>,
 }
 
 /// Liefert Verbindungsart, Tablet-Adressen-Basis und die Felder-Übersicht.
@@ -3166,17 +3273,31 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
         lan_enabled,
         cloud_enabled,
         courts,
+        cloud_hinweis: cloud_enabled
+            .then(|| state.tablet.cloud_hinweis())
+            .flatten()
+            .map(str::to_string),
     }
 }
 
 /// Liefert den aktuellen Sync-Status für das Dashboard.
 #[tauri::command]
 pub fn get_status(state: State<'_, AppState>) -> SyncStatus {
-    state
+    let status = state
         .status
         .lock()
         .expect("Status-Mutex nicht vergiftet")
-        .clone()
+        .clone();
+    let schlitz = state
+        .push_lage
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let lage = schlitz
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    status_mit_push_lage(status, &lage, std::time::Instant::now())
 }
 
 /// Erwartetes lokales BTS-Netz (Verleih-Set): WLAN `btsaccess` bzw. Subnetz
@@ -9721,5 +9842,133 @@ mod teile_tests {
         // Ein anderes Passwort ist ein anderes Ziel.
         cfg.badhub.password = "anders".into();
         assert_ne!(a, push_ziel(&cfg));
+    }
+
+    // ── Spec `badhub-push-entkoppeln`, PR 2a: eine Statuszeile aus zwei Quellen ──
+
+    fn laufend(outcome: &SyncOutcome) -> SyncStatus {
+        let mut s = status_from(outcome);
+        s.running = true;
+        s
+    }
+
+    #[test]
+    fn btp_fehler_hat_vorrang_vor_der_push_lage() {
+        use crate::badhub::sender::PushLage;
+        let jetzt = std::time::Instant::now();
+        let halt = PushLage::Angehalten { wand: false };
+        // BTP weg UND badhub angehalten: die Zeile nennt BTP.
+        let s = status_mit_push_lage(
+            laufend(&SyncOutcome::BtpError("Zeitüberschreitung".into())),
+            &halt,
+            jetzt,
+        );
+        assert_eq!(s.kind, "btp_error");
+        // Auch der verworfene leere Snapshot und der Slave bleiben stehen.
+        let s = status_mit_push_lage(laufend(&SyncOutcome::SnapshotDiscarded), &halt, jetzt);
+        assert_eq!(s.kind, "warn");
+        assert!(s.message.contains("leeren Turnier-Stand"));
+        let s = status_mit_push_lage(laufend(&SyncOutcome::SlaveActive), &halt, jetzt);
+        assert!(s.message.contains("Ansage-Slave"));
+        // Läuft der Zyklus sauber, spricht die Lage des Senders.
+        let s = status_mit_push_lage(laufend(&SyncOutcome::Abgeliefert), &halt, jetzt);
+        assert_eq!(s.kind, "push_error");
+        assert_eq!(
+            s.message,
+            "Übertragung an badhub angehalten: Passwort prüfen"
+        );
+        // Ein ausgefallener Sender wird rot gemeldet — nie „aktuell".
+        let s = status_mit_push_lage(
+            laufend(&SyncOutcome::Abgeliefert),
+            &PushLage::Ausgefallen,
+            jetzt,
+        );
+        assert_eq!(
+            (s.kind.as_str(), s.message.as_str()),
+            (
+                "push_error",
+                "Übertragung an badhub ausgefallen — bitte stoppen und neu starten"
+            )
+        );
+        // Drossel und Ablehnung kommen ebenfalls über die Lage.
+        let s = status_mit_push_lage(
+            laufend(&SyncOutcome::Abgeliefert),
+            &PushLage::Gedrosselt {
+                uhrzeit: "14:35".into(),
+            },
+            jetzt,
+        );
+        assert!(
+            s.message.ends_with("nächster Versuch um 14:35"),
+            "{}",
+            s.message
+        );
+        let s = status_mit_push_lage(
+            laufend(&SyncOutcome::Abgeliefert),
+            &PushLage::Abgelehnt {
+                status: 400,
+                naechster: jetzt + Duration::from_secs(60),
+            },
+            jetzt,
+        );
+        assert_eq!(
+            s.message,
+            "badhub lehnt den Turnierstand ab (HTTP 400) — nächster Versuch in 60 s"
+        );
+        // Und im Gutfall (oder bevor der Sender etwas weiß) der Ok-Text.
+        for lage in [PushLage::Ok, PushLage::Unbekannt] {
+            let s = status_mit_push_lage(laufend(&SyncOutcome::Abgeliefert), &lage, jetzt);
+            assert_eq!(
+                (s.kind.as_str(), s.message.as_str()),
+                ("ok", "Verbunden – Liveticker aktuell")
+            );
+        }
+    }
+
+    #[test]
+    fn countdown_rechnet_zum_abrufzeitpunkt() {
+        use crate::badhub::sender::PushLage;
+        let jetzt = std::time::Instant::now();
+        let lage = PushLage::Gestoert {
+            naechster: jetzt + Duration::from_secs(40),
+        };
+        let zeile = |spaeter: u64| {
+            status_mit_push_lage(
+                laufend(&SyncOutcome::Abgeliefert),
+                &lage,
+                jetzt + Duration::from_secs(spaeter),
+            )
+            .message
+        };
+        assert!(
+            zeile(0).ends_with("nächster Versuch in 40 s"),
+            "{}",
+            zeile(0)
+        );
+        assert!(
+            zeile(14).ends_with("nächster Versuch in 26 s"),
+            "{}",
+            zeile(14)
+        );
+        // Nach Ablauf steht nie „in 0 s" da — der Sender probiert mit dem
+        // nächsten Zyklus.
+        assert!(
+            zeile(55).ends_with("nächster Versuch in 1 s"),
+            "{}",
+            zeile(55)
+        );
+    }
+
+    #[test]
+    fn gestoppte_uebertragung_zeigt_keine_push_lage() {
+        use crate::badhub::sender::PushLage;
+        // Nach dem Stoppen ist `running` falsch — eine alte Störung darf
+        // nicht in der Zeile stehen bleiben.
+        let s = status_mit_push_lage(
+            SyncStatus::default(),
+            &PushLage::Angehalten { wand: false },
+            std::time::Instant::now(),
+        );
+        assert_eq!(s.message, "Nicht verbunden");
     }
 }

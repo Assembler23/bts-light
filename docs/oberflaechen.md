@@ -42,6 +42,9 @@ Statusanzeigen:
 - **Internet** beziehungsweise Cloud-Verbindung
 - **Ferne Halle** — nur, wenn eine gekoppelt ist
 
+Läuft alles, steht dort **„Verbunden – Liveticker aktuell"** (seit v0.9.382).
+<!-- pruef: "Verbunden – Liveticker aktuell" in src-tauri/src/commands.rs -->
+
 Stockt die Übertragung an badhub, sagt die Liveticker-Anzeige, woran es liegt
 (seit v0.9.381). Die Halle läuft in allen Fällen weiter — Tablets, Monitore
 und die Feldvergabe hängen nicht am Internet.
@@ -54,7 +57,19 @@ und die Feldvergabe hängen nicht am Internet.
 | rot: **„Übertragung an badhub angehalten: Der Server verlangt eine eigene Anmeldung"** | Vor dem Server liegt eine zusätzliche Anmeldung; das Liveticker-Passwort ist nicht die Ursache. | den Betreiber des Servers ansprechen |
 | orange: **„badhub lehnt den Turnierstand ab (HTTP …) — nächster Versuch in … s"** | badhub nimmt den Stand nicht an. | wenn es anhält: Diagnose-Log senden |
 
+| rot: **„Übertragung an badhub ausgefallen — bitte stoppen und neu starten"** | Der Teil der App, der an badhub sendet, ist abgestürzt (seit v0.9.382). Die Halle läuft weiter. | Übertragung stoppen und neu starten; Diagnose-Log senden |
+
+<!-- pruef: "Übertragung an badhub ausgefallen" in src-tauri/src/commands.rs -->
 <!-- pruef: "Internet-Strecke gestört — Halle läuft weiter" in src-tauri/src/commands.rs -->
+
+Steht oben in der App ein roter Balken mit **Ein anderer PC ist mit diesem
+Turnier verbunden**, läuft die Übertragung desselben Turniers gerade auf
+einem zweiten PC. Die Cloud lässt nur einen zu: Tablets und Monitore, die
+über die Cloud laufen, erreichen dann den anderen PC, nicht diesen. Die
+Übertragung am anderen PC stoppen — der Balken verschwindet nach wenigen
+Sekunden von selbst. Er erscheint erst, wenn die Lage länger als 30 Sekunden
+anhält.
+<!-- pruef: "Ein anderer PC ist mit diesem Turnier verbunden" in src-tauri/src/tablet/ws_verbindung.rs -->
 <!-- pruef: "badhub hat die Anmeldung vorübergehend gesperrt" in src-tauri/src/commands.rs -->
 <!-- pruef: "Übertragung an badhub angehalten: Passwort prüfen" in src-tauri/src/commands.rs -->
 <!-- pruef: "Der Server verlangt eine eigene Anmeldung" in src-tauri/src/commands.rs -->
@@ -128,6 +143,15 @@ Tablet oder Touch-Bildschirm am Meetingpoint einer Halle:
 `/meetingpoint?halle=<Halle>` (LAN, Cloud, Slave-PC; auch als Ansicht der
 Anzeige-Hülle). Gerufene Partien, Namen antippen = einchecken. Siehe
 [meetingpoint.md](meetingpoint.md).
+
+**Wenn der Turnier-PC weg ist (Cloud):** Monitore und Zähltafeln, die über
+die Cloud laufen, zeigen 20 Sekunden lang weiter den letzten Stand und danach
+**Keine Verbindung zum Turnier-PC** — der Stand wird abgedunkelt. Sobald der
+Turnier-PC wieder verbunden ist, läuft die Anzeige von selbst weiter. Steht
+dort **Verbindung unterbrochen**, liegt es an der Leitung des Geräts selbst.
+<!-- pruef: "Keine Verbindung zum Turnier-PC" in src-tauri/assets/monitor.html -->
+<!-- pruef: "Keine Verbindung zum Turnier-PC" in src-tauri/assets/tafel.html -->
+<!-- pruef: "Verbindung unterbrochen" in src-tauri/assets/tafel.html -->
 
 ## Wie ein Gerät zu seiner Anzeige kommt
 

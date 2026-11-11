@@ -157,6 +157,7 @@ pub async fn sende(
                 wand,
                 retry_after,
                 echte_antwort: strecke::ist_badhub_antwort(&koerper),
+                verworfen: strecke::verworfen_lesen(&koerper),
                 ..Default::default()
             }
         }
@@ -173,6 +174,32 @@ pub async fn sende(
         "badhub-Sendung"
     );
     ausgang
+}
+
+/// Der Weg zum Liveticker-Endpunkt, als schmale Schnittstelle: Im Betrieb
+/// der HTTP-Client, in den Tests des Senders eine Attrappe ohne Netz (echtes
+/// HTTP verträgt sich nicht mit angehaltener Test-Uhr — die Fristen feuerten,
+/// während auf den Socket gewartet wird).
+pub trait Transport: Send + Sync {
+    fn sende<'a>(
+        &'a self,
+        url: &'a str,
+        password: &'a str,
+        kanal: Kanal,
+        body: Vec<u8>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Ausgang> + Send + 'a>>;
+}
+
+impl Transport for reqwest::Client {
+    fn sende<'a>(
+        &'a self,
+        url: &'a str,
+        password: &'a str,
+        kanal: Kanal,
+        body: Vec<u8>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Ausgang> + Send + 'a>> {
+        Box::pin(sende(self, url, password, kanal, body))
+    }
 }
 
 /// Antwortkörper gedeckelt lesen; mehr als [`MAX_ANTWORT_BYTES`] wird

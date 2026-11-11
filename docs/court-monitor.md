@@ -278,6 +278,37 @@ Score-Daten. Der Client löst daraufhin seinen **bestehenden** `…/state`- bzw.
 - **Grenzen:** Der Nudge ist reine Anzeige-Beschleunigung; er ändert keine
   Ownership und keine Zählung.
 
+
+### Cloud: „Keine Verbindung zum Turnier-PC" (seit v0.9.388)
+
+Verliert der Turnier-PC die Verbindung zur Cloud, halten die Cloud-Anzeigen
+den letzten Stand 20 Sekunden lang. Danach zeigen Monitor und Zähltafel
+**Keine Verbindung zum Turnier-PC** und dunkeln den Stand ab; Feld-Übersicht,
+Kombi und „In Vorbereitung" zeigen ihr rotes Banner mit demselben Text
+sofort (statt erst nach dem zweiten Fehlversuch).
+<!-- pruef: "Keine Verbindung zum Turnier-PC" in src-tauri/assets/monitor.html -->
+<!-- pruef: "Keine Verbindung zum Turnier-PC" in src-tauri/assets/tafel.html -->
+
+- Kommt der Turnier-PC zurück, läuft die Anzeige von selbst weiter.
+- Ein Gerät **ohne Zuweisung** behält die Kopplungs-Seite mit seinem Code und
+  zeigt den Hinweis dazu.
+- Jede andere Störung heißt weiter **Verbindung unterbrochen** — dann liegt es
+  an der Leitung dieses Geräts.
+<!-- pruef: "Verbindung unterbrochen" in src-tauri/assets/monitor.html -->
+- Bei „Turnier-PC weg" lädt das Gerät kein Diagnose-Log hoch (es ist nicht
+  sein Fehler); der Wechsel steht nur in seinem Log-Puffer. Auch der
+  Stillstands-Wächter schweigt dann.
+- Die Geräte behalten ihre Zuweisung, solange der Relay die Turnierdaten
+  hält (60 Minuten ohne Turnier-PC). Danach zeigen sie die Kopplungs-Seite
+  mit ihrem Code und dem Hinweis — und kehren von selbst zu ihrer Anzeige
+  zurück, sobald der Turnier-PC wieder da ist.
+- Im Hallennetz (LAN) gibt es diese Meldung nicht: Dort ist der Turnier-PC
+  selbst der Server.
+- Die Stream-Einblendung zeigt nie einen Fehlertext; sie wird rund 80 s nach
+  dem Verlust durchsichtig.
+
+Technik: [cloud-relay.md](cloud-relay.md), Abschnitt „Ohne Turnier-PC".
+
 ## Datenfluss
 
 Der Monitor braucht **keinen neuen Datenweg** — alle Daten liegen schon
