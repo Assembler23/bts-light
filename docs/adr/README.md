@@ -90,3 +90,7 @@ hier eintragen.
 | [0079](0079-rotationsmodi-schiedsrichter.md) | Rotationsmodi: zwei Reihenfolgen in A, abgeleitete Vorrolle, eine Wahl-Funktion | accepted |
 | [0080](0080-rotation-teilt-beim-aufruf-zu.md) | Feste Rotations-Zuteilung beim Aufruf mit Herkunfts-Merker (löst 0072 ab) | accepted |
 | [0081](0081-tl-spielersuche-am-turnier-pc.md) | Personensuche der Turnierleitung läuft am Turnier-PC (Positivliste, Fähigkeits-Flag) | accepted |
+| [0082](0082-zettel-druck-beim-aufruf.md) | Zettel-Druck beim Aufruf: SR-Sicht, Nachdruck und Druck-Gedächtnis | accepted |
+| [0083](0083-stand-autoritaet-nach-fortschritt.md) | Tablet-Stand: Autorität nach Fortschritt, Host-Sätze, Quellen-Regel (ergänzt 0017) | accepted |
+| [0084](0084-undo-stand-format-v2.md) | Tablet-Zustand: Undo-Format v2, Mischversionen und Deckel | accepted |
+| [0085](0085-spielende-ueberholt-parken-nachzuegler.md) | Spielende: „überholt“, geparktes Ergebnis und Nachzügler-Fenster (ergänzt 0018/0014/0038) | accepted |
