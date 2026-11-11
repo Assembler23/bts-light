@@ -204,7 +204,15 @@ Turnier-PC in der Haupthalle, und hat dieser Rechner Internet?</p>\
 /// die durchgereichte Antwort erfüllt das ebenso.
 async fn health(State(cfg): State<Arc<BridgeConfig>>, RawQuery(query): RawQuery) -> Response {
     if cfg.traegt().is_some() {
-        return durchreichen(&cfg, "/health", query.as_deref(), None).await;
+        let antwort = durchreichen(&cfg, "/health", query.as_deref(), None).await;
+        // Ohne Turnier-PC antwortet der Relay 503 (seit v0.9.388). Die
+        // Gerätesuche der Kiosk-App fragt `/health` OHNE Parameter und
+        // verlangt 200 — sie soll die Brücke auch dann finden. Abrufe mit
+        // Parametern (Uhr des Tablets, Feld-Übersicht) bekommen die ehrliche
+        // Antwort des Relays.
+        if antwort.status() != StatusCode::SERVICE_UNAVAILABLE || query.is_some() {
+            return antwort;
+        }
     }
     (
         [(header::CACHE_CONTROL, "no-store")],

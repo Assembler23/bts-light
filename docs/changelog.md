@@ -4,6 +4,86 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.390
+
+- **Das Dashboard sagt, wenn ein anderer PC dasselbe Turnier in der Cloud
+  hält.** Läuft die Übertragung desselben Turniers versehentlich auf zwei
+  PCs, bekam der zweite bisher keine Cloud-Verbindung — und nichts wies
+  darauf hin. Jetzt erscheint oben in der App **„Ein anderer PC ist mit
+  diesem Turnier verbunden"**, sobald das länger als 30 Sekunden so ist.
+  Braucht den Relay ab v0.9.388.
+- Lehnt der Relay den Upload der Werbebilder kurz ab (er ist beschäftigt
+  oder hat den Turnier-PC noch nicht eingetragen), versucht die App es nach
+  3 Sekunden erneut statt erst nach rund einer Minute.
+- Damit ist die Spec `relay-haerten` umgesetzt (neunter und letzter
+  Schritt).
+
+## v0.9.389
+
+- **Der Cloud-Relay vergisst ein Turnier, wenn der Turnier-PC lange weg
+  ist** (wirkt mit dem Relay sofort). Bisher blieben Namen, Werbebilder und
+  Listen im Speicher, solange irgendein Tablet verbunden war — notfalls
+  tagelang. Jetzt gilt: Nach **60 Minuten** ohne Turnier-PC löscht der Relay
+  die Turnierdaten. Ein Tablet, das noch am Feld hängt, behält seinen Stand
+  (samt den Namen seines Spiels) und kann weiterzählen; kommt der Turnier-PC zurück, steht das Spiel nicht
+  auf 0:0. Kommt er früher zurück, ist nichts verloren. Der Zugang zum
+  Sprachdienst wird schon im Moment der Trennung vergessen. Außerdem behalten
+  Cloud-Anzeigen ihre Zuweisung jetzt die ganze Zeit: Sie zeigen „Keine
+  Verbindung zum Turnier-PC" statt nach wenigen Sekunden auf die
+  Kopplungs-Seite zu fallen. Achter Schritt der Spec `relay-haerten`
+  (ADR 0089).
+
+## v0.9.388
+
+- **Cloud-Anzeigen sagen ehrlich, wenn der Turnier-PC weg ist.** Verliert
+  der Turnier-PC die Verbindung zur Cloud, zeigen Monitore, Zähltafel,
+  Feld-Übersicht und „In Vorbereitung" 20 Sekunden lang weiter den letzten
+  Stand — ein kurzer Wackler bleibt unsichtbar. Danach steht **„Keine
+  Verbindung zum Turnier-PC"** auf dem Bildschirm, und der Stand wird
+  abgedunkelt. Bisher blieb dort der alte Stand stehen oder eine leere Seite,
+  beides sah aus wie „alles in Ordnung". Ist der Turnier-PC zurück, läuft die
+  Anzeige von selbst weiter. Anzeigen im Hallennetz (LAN) sind nicht
+  betroffen. Wirkt für Monitor, Tafel, Übersicht und „In Vorbereitung" mit
+  dem Relay sofort, für die Kombi-Ansicht mit diesem App-Update. Siebter
+  Schritt der Spec `relay-haerten` (ADR 0088).
+- Ein zweiter Turnier-PC am selben Turnier bekommt vom Relay jetzt den Grund
+  der Abweisung genannt (Vorbereitung für eine Meldung im Dashboard).
+
+## v0.9.387
+
+- **Der Cloud-Relay schützt sich gegen erfundene Turniere** (wirkt mit dem
+  Relay sofort). Werbebilder und Logo nimmt er nur noch von einem Turnier
+  an, dessen Turnier-PC verbunden ist; für alle Turniere zusammen gilt eine
+  Obergrenze von 256 MiB. Im Relay-Log steht nur noch der Anfang der
+  Turnier-Kennung, und Logdateien verfallen nach 30 Tagen. Für die Halle
+  ändert sich nichts.
+  Sechster Schritt der Spec `relay-haerten` (ADR 0090).
+
+## v0.9.386
+
+- **Ein hängendes Gerät kann den Cloud-Relay nicht mehr volllaufen lassen**
+  (wirkt mit dem Relay sofort). Nahm ein Tablet, ein Monitor oder der
+  Turnier-PC seine Nachrichten nicht ab — etwa bei einer sehr schlechten
+  Leitung —, sammelte der Relay sie bisher unbegrenzt. Jetzt hat jede
+  Verbindung einen festen Vorrat. Ist er voll, trennt der Relay dieses eine
+  Gerät; es verbindet sich neu und bekommt den aktuellen Stand. Im normalen
+  Betrieb kommt das nicht vor. Tablet-Nachrichten können den Turnier-PC dabei
+  nie aus der Cloud werfen. Fünfter Schritt der Spec `relay-haerten`
+  (ADR 0090).
+
+## v0.9.385
+
+- **Der Cloud-Relay nimmt nichts Übergroßes und nichts im Dauerfeuer mehr
+  an** (wirkt mit dem Relay sofort). Bisher durfte eine einzelne Nachricht
+  bis zu 64 MB groß sein, und ein Gerät konnte beliebig schnell senden. Jetzt
+  gelten feste Obergrenzen je Verbindung — weit über allem, was ein Tablet,
+  ein Monitor oder der Turnier-PC je sendet (auch 50 „zurück"-Schritte in
+  schnellster Folge kommen durch). Zu große oder zu viele Angaben
+  werden gekürzt oder verworfen und einmal im Relay-Log vermerkt; die
+  Verbindung bleibt dabei bestehen. Getrennt wird nur bei offenkundigem
+  Missbrauch. Für den Turnierbetrieb ändert sich nichts. Vierter Schritt der
+  Spec `relay-haerten` (ADR 0090).
+
 ## v0.9.384
 
 - **Cloud-Tablets: Zurück-Übernehmen funktioniert, und ein Tablet sperrt sich
