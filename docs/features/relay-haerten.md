@@ -1020,6 +1020,29 @@ Dienst-Datei), `docs/logging.md` (Verfall, gekürzte Kennung, Such-Rezept),
 `docs/changelog.md`.
 **Handgriff:** Dienst-Datei am Server, im selben Fenster (siehe „Deploy-Regeln").
 
+**Aus der Umsetzung (v0.9.387):**
+- **Die zweite Stufe des Tors („Bilder erst nach dem ersten `Courts`-Frame") ist nicht
+  gebaut** — AK42 ist insoweit nicht erfüllt. Der Code-Review fand: Die App sendet `Courts`
+  nur, wenn die Feldliste nicht leer ist oder ein Sprachdienst geteilt wird
+  (`relay_client.rs` `push_courts`). Ohne geladenes BTP-Turnier wäre das Tor nie
+  aufgegangen, die Cloud hätte dauerhaft keine Werbung und kein Logo gezeigt. Der
+  Sicherheits-Review stufte die Stufe zudem als Formalie ein (ein Frame mehr für den
+  Angreifer). Das Tor verlangt nur einen verbundenen Turnier-PC; die Aussagen der Spec zum
+  „alten Host" (30 s ohne Werbung) entfallen damit.
+- Das Budget ist als `Buchung` mit `Drop` gebaut: Der Zähler sinkt auf jedem Weg, auf dem
+  ein Bild verschwindet. Gebucht wird je Upload **ganz oder gar nicht**.
+- **Bei 507 bleiben die bisherigen Bilder des Turniers** (Sicherheits-Review: Sonst
+  verlöre gerade das laufende Turnier seine Werbung, wenn andere das Budget belegen).
+- Zusätzlich aus dem Sicherheits-Review: höchstens zwei Uploads gleichzeitig (`503`),
+  Texte der Monitor-Konfiguration auf 32 Zeichen gekürzt.
+- Die erste Stufe des Tors liest den Rumpf nicht (eigener Handler vor dem JSON-Lesen); der
+  Test hält das mit einem Rumpf fest, der sich das Lesen merkt.
+- **Offen:** Base64 wird vor der Budget-Prüfung dekodiert; Bilder eines Turniers ohne
+  Turnier-PC bleiben bis zum Daten-Verfall (PR 8) gebucht; kein Limit für Verbindungen je
+  Adresse; `LimitNOFILE`/`TasksMax` und Härtungsoptionen der Dienst-Datei.
+- **Nicht ausgeführt:** der Handgriff am Server. Die Datei liegt im Repo; ausrollen muss
+  sie jemand mit Zugang, in einem Fenster ohne Turnier.
+
 ### PR 7 — Host-Verlust auf den Anzeigen, Close-Grund
 
 **Erfüllt:** AK27–AK36. **Lösung:** e), Close-Grund aus d).
@@ -1040,6 +1063,21 @@ Host"-Warnung, `:1136–1137`, berichtigen; Routen-Tabelle), `docs/court-monitor
 `monitor.html` und `tafel.html`, `docs/multi-hall.md` (ferne Halle, LAN zählt weiter),
 `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.388):**
+- Die Karenz hält nur Namespaces, die je einen Turnier-PC hatten (`host_last_seen != 0`).
+  Die Spec wollte „ein Namespace, den ein Tablet anlegt, startet mit weg seit jetzt" auch
+  fürs Aufräumen; das hätte erlaubt, das Namespace-Limit mit kurzen Verbindungen zu füllen
+  (Code-Review). Die Uhr selbst startet weiter so.
+- **AK27 gilt bis PR 8 nur, solange ein Tablet oder eine TL-Seite den Namespace hält.**
+  Sonst entfernt der Aufräum-Lauf ihn am Karenz-Ende samt Zuweisungen; die Geräte sehen
+  dann die Kopplungs-Seite mit Hinweis statt 503.
+- Der Stillstands-Wächter der Seiten bekommt bei `host_weg` ein Lebenszeichen, sonst lüde
+  er nach 60 s doch ein Log hoch (AK35).
+- Die Slave-Brücke beantwortet `/health` ohne Parameter bei 503 weiter mit ihrem Stummel —
+  die Gerätesuche der Kiosk-App verlangt 200.
+- Offen: `Retry-After` wird von den Seiten nicht beachtet (Monitor/Tafel fragen bei 503
+  alle 250 ms); Verhaltenstest für `poll()` im Ganzen.
+
 ### PR 8 — Daten-Verfall
 
 **Erfüllt:** AK37–AK41. **Lösung:** f).
@@ -1053,6 +1091,20 @@ Host"-Warnung, `:1136–1137`, berichtigen; Routen-Tabelle), `docs/court-monitor
 **Doku:** `docs/cloud-relay.md` (Lebensdauer, Datenschutz im Abschnitt „Sicherheit"),
 `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.389):** Ein Namespace, der je einen Turnier-PC hatte, bleibt
+jetzt die ganze Daten-Frist stehen (auch ohne Tablet) — damit gilt AK27 ohne die
+Einschränkung aus PR 7. Zusätzlich geleert: die schlanke Anzeige-Fassung des Zustands und
+der Sprachdienst-Zugang (falls er nach dem Abgang noch stünde). Verdrängt wird nur beim
+Verbinden eines Turnier-PCs, nicht beim Verbinden eines Tablets. `tablet_state_seit` und
+`state_weitergabe` (Zeitstempel ohne Inhalt) bleiben stehen.
+
+Aus dem Review: Der gespiegelte Zustand eines verbundenen Tablets enthält den vollen Brief
+seines Spiels (Namen, Karten) und bleibt, solange es verbunden ist — AK38 ist insoweit nur
+für die Turnierdaten erfüllt, nicht für dieses eine Spiel; die Doku sagt das jetzt so. Bei
+knappem Bilder-Budget weichen die Bilder hostloser Namespaces vor einem 507. Offen: eine
+zweite, längere Frist für Tablet-Felder; Test für die Wiederverbindung eines Tablets nach
+dem Leeren.
+
 ### PR 9 — Dashboard-Meldung, `Courts` immer, Wiederholung bei 409
 
 **Erfüllt:** AK25, AK26. **Lösung:** Dashboard aus d), neuer Host aus g).
@@ -1065,6 +1117,17 @@ beim Host an (Annahme 1).
 **Doku:** `docs/oberflaechen.md` mit `pruef:`-Anker für „Ein anderer PC ist mit diesem
 Turnier verbunden", `docs/cloud-relay.md`, `docs/changelog.md`, `docs/roadmap.md`
 (Abschluss des Pakets).
+
+**Aus der Umsetzung (v0.9.390):**
+- **AK26 ist nur zur Hälfte gebaut.** „Der Host sendet nach jedem Verbinden ein
+  `Courts`-Frame, auch ein leeres" entfällt: Das sollte das Bilder-Tor öffnen, und das Tor
+  hängt seit PR 6 nicht mehr an der Feldliste. Die Wiederholung des Werbe-Uploads gilt für
+  409 **und** 503, bis zu dreimal im Abstand von 3 s.
+- Die Meldung verschwindet, sobald eine Verbindung 5 s steht (nicht erst am Ende der
+  Sitzung), und beim Stoppen der Übertragung.
+- **Annahme 1 ist ungeprüft:** Ob der Close-Code 4409 durch nginx und Cloudflare bei der
+  App ankommt, lässt sich nur am echten Relay sehen. Kommt er nicht an, erscheint die
+  Meldung nie; sonst ändert sich nichts.
 
 ### Reihenfolge
 

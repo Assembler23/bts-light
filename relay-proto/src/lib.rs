@@ -703,6 +703,16 @@ pub struct MonitorState {
     /// zeigt die Kopplungs-Seite statt einer Match-/Werbe-Ansicht.
     #[serde(default)]
     pub unassigned: bool,
+    /// `true`, wenn der Relay gerade keinen Turnier-PC hat (Spec
+    /// relay-haerten, PR 7). Nur auf der Kopplungs-Seite gesetzt: Ein Gerät
+    /// ohne Zuweisung bekommt weiter 200 und zeigt den Hinweis; zugewiesene
+    /// Geräte bekommen stattdessen 503. Der LAN-Server setzt es nie.
+    #[serde(
+        rename = "hostOffline",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub host_offline: bool,
     /// Pfad, zu dem die Monitor-Seite navigieren soll. Wird gesetzt, wenn
     /// das Gerät neuerdings als Info-Monitor (`/info/overview` oder
     /// `/info/preparation`) zugewiesen wurde, der TV aber noch die
@@ -4700,6 +4710,7 @@ mod tests {
             command: None,
             device_code: String::new(),
             unassigned: false,
+            host_offline: false,
             redirect_to: None,
             server_now_ms: 0,
             on_court_since_ms: None,
@@ -4741,6 +4752,7 @@ mod tests {
             command: None,
             device_code: String::new(),
             unassigned: false,
+            host_offline: false,
             redirect_to: None,
             server_now_ms: 0,
             on_court_since_ms: None,
@@ -4836,6 +4848,7 @@ mod tests {
             }),
             device_code: "4F2A".into(),
             unassigned: false,
+            host_offline: false,
             redirect_to: None,
             server_now_ms: 0,
             on_court_since_ms: Some(1_700_000_000_000),
