@@ -590,16 +590,34 @@ body.vertical .vset.current { color: #fbbf24; }
     );
   }
 
+  // „Turnier-PC weg" (Spec relay-haerten, PR 7): Der Cloud-Relay antwortet
+  // dann 503 mit dem Rumpf {"grund":"host_weg"}. Das Banner erscheint dann
+  // schon beim ersten solchen Abruf — der Relay hat selbst 20 s gewartet.
+  // Jeder andere Fehler (und das LAN) braucht weiter zwei Fehlversuche.
+  function istHostWeg(status, text) {
+    if (status !== 503) return false;
+    try { return JSON.parse(text).grund === 'host_weg'; } catch (e) { return false; }
+  }
+  function wirf503(r) {
+    return r.text().then(function (t) {
+      var f = new Error('HTTP 503'); f.hostWeg = istHostWeg(503, t); throw f;
+    });
+  }
+
   function tick() {
-    abrufMitFrist(stateUrl(), { cache: 'no-store' }, function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    abrufMitFrist(stateUrl(), { cache: 'no-store' }, function (r) {
+        if (r.status === 503) return wirf503(r);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function (data) {
         errorCount = 0; showOffline(false);
         render(data);
         setTimeout(tick, POLL_OK_MS);
       })
-      .catch(function () {
+      .catch(function (fehler) {
         errorCount++;
-        if (errorCount >= 2) showOffline(true);
+        if (errorCount >= 2 || (fehler && fehler.hostWeg)) showOffline(true);
         setTimeout(tick, POLL_FAIL_MS);
       });
   }
