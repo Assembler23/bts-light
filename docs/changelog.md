@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.387
+
+- **Der Cloud-Relay schützt sich gegen erfundene Turniere** (wirkt mit dem
+  Relay sofort). Werbebilder und Logo nimmt er nur noch von einem Turnier
+  an, dessen Turnier-PC verbunden ist; für alle Turniere zusammen gilt eine
+  Obergrenze von 256 MiB. Im Relay-Log steht nur noch der Anfang der
+  Turnier-Kennung, und Logdateien verfallen nach 30 Tagen. Für die Halle
+  ändert sich nichts.
+  Sechster Schritt der Spec `relay-haerten` (ADR 0090).
+
 ## v0.9.386
 
 - **Ein hängendes Gerät kann den Cloud-Relay nicht mehr volllaufen lassen**

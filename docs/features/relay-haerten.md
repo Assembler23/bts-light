@@ -1020,6 +1020,29 @@ Dienst-Datei), `docs/logging.md` (Verfall, gekürzte Kennung, Such-Rezept),
 `docs/changelog.md`.
 **Handgriff:** Dienst-Datei am Server, im selben Fenster (siehe „Deploy-Regeln").
 
+**Aus der Umsetzung (v0.9.387):**
+- **Die zweite Stufe des Tors („Bilder erst nach dem ersten `Courts`-Frame") ist nicht
+  gebaut** — AK42 ist insoweit nicht erfüllt. Der Code-Review fand: Die App sendet `Courts`
+  nur, wenn die Feldliste nicht leer ist oder ein Sprachdienst geteilt wird
+  (`relay_client.rs` `push_courts`). Ohne geladenes BTP-Turnier wäre das Tor nie
+  aufgegangen, die Cloud hätte dauerhaft keine Werbung und kein Logo gezeigt. Der
+  Sicherheits-Review stufte die Stufe zudem als Formalie ein (ein Frame mehr für den
+  Angreifer). Das Tor verlangt nur einen verbundenen Turnier-PC; die Aussagen der Spec zum
+  „alten Host" (30 s ohne Werbung) entfallen damit.
+- Das Budget ist als `Buchung` mit `Drop` gebaut: Der Zähler sinkt auf jedem Weg, auf dem
+  ein Bild verschwindet. Gebucht wird je Upload **ganz oder gar nicht**.
+- **Bei 507 bleiben die bisherigen Bilder des Turniers** (Sicherheits-Review: Sonst
+  verlöre gerade das laufende Turnier seine Werbung, wenn andere das Budget belegen).
+- Zusätzlich aus dem Sicherheits-Review: höchstens zwei Uploads gleichzeitig (`503`),
+  Texte der Monitor-Konfiguration auf 32 Zeichen gekürzt.
+- Die erste Stufe des Tors liest den Rumpf nicht (eigener Handler vor dem JSON-Lesen); der
+  Test hält das mit einem Rumpf fest, der sich das Lesen merkt.
+- **Offen:** Base64 wird vor der Budget-Prüfung dekodiert; Bilder eines Turniers ohne
+  Turnier-PC bleiben bis zum Daten-Verfall (PR 8) gebucht; kein Limit für Verbindungen je
+  Adresse; `LimitNOFILE`/`TasksMax` und Härtungsoptionen der Dienst-Datei.
+- **Nicht ausgeführt:** der Handgriff am Server. Die Datei liegt im Repo; ausrollen muss
+  sie jemand mit Zugang, in einem Fenster ohne Turnier.
+
 ### PR 7 — Host-Verlust auf den Anzeigen, Close-Grund
 
 **Erfüllt:** AK27–AK36. **Lösung:** e), Close-Grund aus d).

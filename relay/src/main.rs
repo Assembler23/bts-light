@@ -562,8 +562,68 @@ fn kanal_test() -> (Tx, mpsc::Receiver<Message>) {
     (tx, rx)
 }
 
+/// Gesamt-Budget für Werbe- und Logo-Bytes ALLER Turniere (Spec
+/// relay-haerten, PR 6; ADR 0090). Je Turnier gilt weiter `MAX_ADS_TOTAL`;
+/// ohne Gesamtgrenze ließen sich mit erfundenen Turnieren beliebig viele
+/// Bilder im Speicher des Relays ablegen.
+const BILDER_BUDGET: usize = 256 * 1024 * 1024;
+
+/// So viele Bilder-Uploads verarbeitet der Relay gleichzeitig. Jeder hält
+/// vorübergehend rund 50 MiB (Rumpf, geparste Texte, dekodierte Bilder);
+/// ohne Grenze ließe sich der Dienst mit parallelen Uploads über seine
+/// Speicher-Obergrenze treiben. Ein Turnier-PC lädt selten hoch (beim
+/// Verbinden und bei Änderungen) — zwei Plätze reichen.
+const UPLOADS_GLEICHZEITIG: usize = 2;
+
+/// Längster Text eines Schalters der Monitor-Konfiguration (`layout`,
+/// Plätze vor/unter dem Namen) und einer Farbe im Bild-Stil. Echte Werte
+/// sind Schlüsselwörter und `#rrggbb`.
+const MAX_CONFIG_TEXT: usize = 32;
+
+/// Ein gebuchter Anteil am Bilder-Budget. Gibt ihn beim Verwerfen von selbst
+/// zurück — so sinkt der Zähler auf jedem Weg, auf dem ein Bild verschwindet
+/// (Ersetzen, Aufräumen eines Turniers), ohne dass eine Stelle daran denken
+/// muss.
+struct Buchung {
+    zaehler: Arc<std::sync::atomic::AtomicUsize>,
+    bytes: usize,
+}
+
+impl Buchung {
+    /// Bucht `bytes`, wenn das Budget reicht.
+    fn versuchen(
+        zaehler: &Arc<std::sync::atomic::AtomicUsize>,
+        bytes: usize,
+        grenze: usize,
+    ) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        let mut jetzt = zaehler.load(Ordering::SeqCst);
+        loop {
+            let neu = jetzt.checked_add(bytes).filter(|neu| *neu <= grenze)?;
+            match zaehler.compare_exchange(jetzt, neu, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break,
+                Err(stand) => jetzt = stand,
+            }
+        }
+        Some(Self {
+            zaehler: zaehler.clone(),
+            bytes,
+        })
+    }
+}
+
+impl Drop for Buchung {
+    fn drop(&mut self) {
+        self.zaehler
+            .fetch_sub(self.bytes, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Ein hochgeladenes Werbebild im Speicher (Content-Type + Rohbytes).
 struct AdImage {
+    /// Anteil am Gesamt-Budget; `None` nur, solange das Bild noch nicht
+    /// im Turnier abgelegt ist.
+    buchung: Option<Buchung>,
     content_type: String,
     bytes: Vec<u8>,
     /// `true`, wenn das Bild zusätzlich klein in der oberen Leiste erscheinen
@@ -1017,8 +1077,7 @@ impl Namespace {
         if !self.feld_deckel_gemeldet {
             self.feld_deckel_gemeldet = true;
             tracing::warn!(
-                "Namespace '{ns}': mehr als {MAX_FELD_SCHLUESSEL_JE_NS} verschiedene Felder — Feld {court_id} und weitere werden verworfen"
-            );
+                "Namespace '{kennung}': mehr als {MAX_FELD_SCHLUESSEL_JE_NS} verschiedene Felder — Feld {court_id} und weitere werden verworfen", kennung = kurz(ns));
         }
         false
     }
@@ -1075,8 +1134,9 @@ impl Namespace {
         if erstmals {
             tracing::warn!(
                 "Tablet-Stand von Feld {court_id} verworfen ({quelle}): {len} Bytes \
-                 (Grenze {MAX_STATE_LEN}), Match {match_id}, Namespace '{ns}' — \
-                 der vorige Stand bleibt"
+                 (Grenze {MAX_STATE_LEN}), Match {match_id}, Namespace '{kennung}' — \
+                 der vorige Stand bleibt",
+                kennung = kurz(ns)
             );
         }
         erstmals
@@ -1191,6 +1251,12 @@ struct Broker {
     /// Bildschirm hat, könnte sich damit jeder als Tablet ausgeben (ADR 0012).
     /// Der Zugang findet sein Turnier deshalb selbst.
     tl_index: Arc<Mutex<HashMap<String, String>>>,
+    /// Bytes aller Werbe- und Logo-Bilder im Speicher (siehe [`Buchung`]).
+    bilder_bytes: Arc<std::sync::atomic::AtomicUsize>,
+    /// Grenze dazu — [`BILDER_BUDGET`]; Tests setzen sie klein.
+    bilder_budget: usize,
+    /// Plätze für gleichzeitige Bilder-Uploads ([`UPLOADS_GLEICHZEITIG`]).
+    upload_plaetze: Arc<tokio::sync::Semaphore>,
     /// Öffentliche Basis-URL für QR-Codes, z. B. `https://badhub.de/bts-relay`.
     public_base: String,
 }
@@ -1216,6 +1282,9 @@ impl Broker {
             pairings: Arc::new(Mutex::new(HashMap::new())),
             pair_fails: Arc::new(Mutex::new((0, 0))),
             tl_index: Arc::new(Mutex::new(HashMap::new())),
+            bilder_bytes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            bilder_budget: BILDER_BUDGET,
+            upload_plaetze: Arc::new(tokio::sync::Semaphore::new(UPLOADS_GLEICHZEITIG)),
             public_base,
         }
     }
@@ -1245,6 +1314,14 @@ fn text<T: Serialize>(value: &T) -> Message {
 /// nur Hex und Bindestriche). Die `install_id` ist immer eine
 /// `crypto.randomUUID()` – frei erfundene oder überlange Namespaces
 /// werden so abgewiesen, bevor sie Speicher belegen.
+/// Die Kennung fürs Log: nur die ersten 8 Zeichen. Die volle Kennung ist
+/// der Zugang der Tablets und Monitore — sie gehört nicht in eine Datei,
+/// die 30 Tage liegt. Zum Wiederfinden reicht der Anfang (siehe
+/// `docs/logging.md`).
+fn kurz(ns: &str) -> &str {
+    ns.get(..8).unwrap_or(ns)
+}
+
 fn valid_namespace(ns: &str) -> bool {
     let bytes = ns.as_bytes();
     bytes.len() == 36
@@ -1271,18 +1348,26 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     // Verbindungsspam von axum/hyper wird gefiltert → lesbare, kompakte Datei.
     let level = LevelFilter::INFO;
     let stdout_layer = tracing_subscriber::fmt::layer().with_ansi(false);
-    match std::env::var("RELAY_LOG_DIR") {
-        Ok(dir) if !dir.is_empty() => {
-            // Relay läuft als `badhub` und darf in storage/ schreiben. Scheitert
-            // das (falsche Rechte/Quota), warnen wir nach stdout/journald — sonst
-            // bliebe die erwartete Datei stumm leer (im Ernstfall der falsche
-            // Moment, das zu merken). Der stdout-Fallback greift weiterhin.
+    let datei = std::env::var("RELAY_LOG_DIR")
+        .ok()
+        .filter(|dir| !dir.is_empty())
+        .and_then(|dir| {
+            // Scheitert das Anlegen (falsche Rechte/Quota), warnen wir nach
+            // stdout/journald — sonst bliebe die erwartete Datei stumm leer.
             if let Err(e) = std::fs::create_dir_all(&dir) {
                 eprintln!("WARN: RELAY_LOG_DIR '{dir}' nicht anlegbar: {e} — nur stdout");
             }
-            let (non_blocking, guard) = tracing_appender::non_blocking(
-                tracing_appender::rolling::daily(&dir, "bts-relay.log"),
-            );
+            match log_datei(&dir) {
+                Ok(datei) => Some(datei),
+                Err(e) => {
+                    eprintln!("WARN: Relay-Logdatei in '{dir}' nicht anlegbar: {e} — nur stdout");
+                    None
+                }
+            }
+        });
+    match datei {
+        Some(datei) => {
+            let (non_blocking, guard) = tracing_appender::non_blocking(datei);
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 .with_writer(non_blocking);
@@ -1293,7 +1378,7 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
                 .init();
             Some(guard)
         }
-        _ => {
+        None => {
             tracing_subscriber::registry()
                 .with(level)
                 .with(stdout_layer)
@@ -1301,6 +1386,22 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
             None
         }
     }
+}
+
+/// So viele Tagesdateien des Relay-Logs bleiben liegen.
+const LOG_DATEIEN_MAX: usize = 30;
+
+/// Die täglich rotierende Logdatei `bts-relay.log.YYYY-MM-DD` — mit Verfall:
+/// Ältere als die jüngsten [`LOG_DATEIEN_MAX`] löscht der Appender selbst.
+/// Vorher wuchs das Verzeichnis ohne Grenze.
+fn log_datei(
+    dir: &str,
+) -> Result<tracing_appender::rolling::RollingFileAppender, tracing_appender::rolling::InitError> {
+    tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("bts-relay.log")
+        .max_log_files(LOG_DATEIEN_MAX)
+        .build(dir)
 }
 
 /// Alle Routen des Relays. Aus `main` herausgelöst, damit Tests den
@@ -1345,7 +1446,7 @@ fn router(broker: Broker, tl_an: bool) -> Router {
         .route("/{ns}/ads/{idx}", get(ad_image))
         .route(
             "/{ns}/monitor",
-            post(monitor_upload).layer(DefaultBodyLimit::max(MONITOR_UPLOAD_LIMIT)),
+            post(monitor_upload_route).layer(DefaultBodyLimit::max(MONITOR_UPLOAD_LIMIT)),
         )
         .route("/{ns}/ws", get(tablet_ws))
         // Court-Monitor-Nudge (A1, ADR 0016): niedrig-latente Anzeige über die
@@ -1831,6 +1932,11 @@ async fn monitor_control_upload(
     let Some(namespace) = map.get_mut(&ns) else {
         return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
     };
+    // Wie beim Bilder-Upload: Steuerung nur von einem Turnier mit
+    // verbundenem Turnier-PC.
+    if namespace.host.is_none() {
+        return (StatusCode::CONFLICT, "bts-light ist nicht verbunden.");
+    }
     // Fachlicher Deckel: 128 Geräte sind die Obergrenze der Geräteliste —
     // 256 Einträge je Karte und 64 Zeichen je Kennung sind reichlich. Erst
     // NACH der Namespace-Prüfung: Die Warnung soll sich nicht für erfundene
@@ -1843,7 +1949,10 @@ async fn monitor_control_upload(
         || !control.targets.keys().all(schluessel_ok)
         || !control.commands.keys().all(schluessel_ok)
     {
-        tracing::warn!("Namespace '{ns}': Monitor-Steuerung über dem Deckel — abgelehnt");
+        tracing::warn!(
+            "Namespace '{kennung}': Monitor-Steuerung über dem Deckel — abgelehnt",
+            kennung = kurz(&ns)
+        );
         return (StatusCode::PAYLOAD_TOO_LARGE, "Monitor-Steuerung zu groß.");
     }
     namespace.monitor_control = control;
@@ -3078,13 +3187,56 @@ async fn preparation_state(
 /// darf hochladen – dasselbe Vertrauensmodell wie für die übrigen
 /// Namespace-Routen. Worst Case ist das Überschreiben der Werbebilder
 /// eines bekannten Turniers; kein Code, keine Ergebnis-Schreibrechte.
+async fn monitor_upload_route(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    request: axum::extract::Request,
+) -> (StatusCode, &'static str) {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace");
+    }
+    // Bilder-Tor, erste Stufe — VOR dem Lesen des Rumpfs: Ohne verbundenen
+    // Turnier-PC nimmt der Relay keine 20 MiB entgegen.
+    {
+        let map = broker.namespaces.lock().await;
+        if !map.get(&ns).is_some_and(|n| n.host.is_some()) {
+            return (StatusCode::CONFLICT, "bts-light ist nicht verbunden.");
+        }
+    }
+    // Höchstens zwei Uploads gleichzeitig — der Platz gilt, bis der Upload
+    // verarbeitet ist.
+    let Ok(_platz) = broker.upload_plaetze.clone().try_acquire_owned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Der Relay ist beschäftigt – bitte erneut senden.",
+        );
+    };
+    let Ok(rumpf) = axum::body::to_bytes(request.into_body(), MONITOR_UPLOAD_LIMIT).await else {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Upload zu groß.");
+    };
+    let Ok(upload) = serde_json::from_slice::<MonitorUpload>(&rumpf) else {
+        return (StatusCode::UNPROCESSABLE_ENTITY, "Upload nicht lesbar.");
+    };
+    drop(rumpf);
+    monitor_upload(State(broker), Path(ns), Json(upload)).await
+}
+
 async fn monitor_upload(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
-    Json(upload): Json<MonitorUpload>,
-) -> impl IntoResponse {
+    Json(mut upload): Json<MonitorUpload>,
+) -> (StatusCode, &'static str) {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace");
+    }
+    // Texte der Konfiguration deckeln: Sie zählen nicht ins Bilder-Budget
+    // und gelten auch bei geschlossenem Tor.
+    kuerze(&mut upload.config.layout, MAX_CONFIG_TEXT);
+    kuerze(&mut upload.config.name_davor, MAX_CONFIG_TEXT);
+    kuerze(&mut upload.config.name_darunter, MAX_CONFIG_TEXT);
+    for ad in upload.ads.iter_mut() {
+        kuerze(&mut ad.style.bg, MAX_CONFIG_TEXT);
+        kuerze(&mut ad.style.fg, MAX_CONFIG_TEXT);
     }
     let mut ads = Vec::new();
     let mut total = 0usize;
@@ -3097,6 +3249,7 @@ async fn monitor_upload(
             break;
         }
         ads.push(AdImage {
+            buchung: None,
             content_type: sanitize_content_type(&ad.content_type),
             etag: bild_marke(&bytes),
             bytes,
@@ -3107,7 +3260,7 @@ async fn monitor_upload(
     // Turnierlogo (falls mitgeschickt) – MIME wie bei den Ads gewhitelistet,
     // Größe gegen den eigenen knappen `MAX_LOGO_BYTES`-Cap; ein kaputtes Base64
     // oder ein zu großes Logo verwirft nur das Logo, nicht den Upload.
-    let logo = upload.logo.and_then(|l| {
+    let mut logo = upload.logo.and_then(|l| {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(l.data.as_bytes())
             .ok()?;
@@ -3115,6 +3268,7 @@ async fn monitor_upload(
             return None;
         }
         Some(AdImage {
+            buchung: None,
             content_type: sanitize_content_type(&l.content_type),
             etag: bild_marke(&bytes),
             bytes,
@@ -3128,6 +3282,66 @@ async fn monitor_upload(
     let Some(namespace) = map.get_mut(&ns) else {
         return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
     };
+    if namespace.host.is_none() {
+        return (StatusCode::CONFLICT, "bts-light ist nicht verbunden.");
+    }
+    let (alte_ads, altes_logo) = namespace
+        .monitor
+        .take()
+        .map(|m| (m.ads, m.logo))
+        .unwrap_or_default();
+    let mut antwort = (StatusCode::OK, "ok");
+    {
+        // Gesamt-Budget. Passen die neuen Bilder hinein, sobald die alten
+        // dieses Turniers losgelassen sind (Ersetzen kostet nichts doppelt)?
+        // Wenn nicht, BLEIBEN die alten: Ein laufendes Turnier soll seine
+        // Werbung nicht verlieren, weil andere das Budget belegt haben.
+        use std::sync::atomic::Ordering;
+        let groesse = |b: &AdImage| b.bytes.len();
+        let alt: usize = alte_ads.iter().chain(altes_logo.iter()).map(groesse).sum();
+        let neu: usize = ads.iter().chain(logo.iter()).map(groesse).sum();
+        let belegt_ohne_alt = broker
+            .bilder_bytes
+            .load(Ordering::SeqCst)
+            .saturating_sub(alt);
+        let mut gebucht = belegt_ohne_alt.saturating_add(neu) <= broker.bilder_budget;
+        if gebucht {
+            drop((alte_ads, altes_logo));
+            // Ganz oder gar nicht — ein halber Bildersatz verschöbe die
+            // Indizes der Sponsor-Leiste. (Scheitert es hier doch noch, hat
+            // ein paralleler Upload den Platz genommen.)
+            for bild in ads.iter_mut().chain(logo.iter_mut()) {
+                match Buchung::versuchen(
+                    &broker.bilder_bytes,
+                    bild.bytes.len(),
+                    broker.bilder_budget,
+                ) {
+                    Some(b) => bild.buchung = Some(b),
+                    None => {
+                        gebucht = false;
+                        break;
+                    }
+                }
+            }
+            if !gebucht {
+                ads.clear();
+                logo = None;
+            }
+        } else {
+            ads = alte_ads;
+            logo = altes_logo;
+        }
+        if !gebucht {
+            tracing::warn!(
+                "Namespace '{kennung}': Bilder-Budget des Relays erschöpft — neue Bilder verworfen",
+                kennung = kurz(&ns)
+            );
+            antwort = (
+                StatusCode::INSUFFICIENT_STORAGE,
+                "Der Relay nimmt gerade keine Bilder an.",
+            );
+        }
+    }
     namespace.monitor = Some(MonitorBundle {
         config: upload.config,
         tournament_name: {
@@ -3142,8 +3356,11 @@ async fn monitor_upload(
     // Aufruf-Timer und Fallback-Schalter reisen im Umschlag der Übersicht mit
     // und gehen in ihre Marke ein — dieser Weg stößt aber nicht an (Spec S9).
     namespace.bump_overview_rev();
-    tracing::info!("Namespace '{ns}': Court-Monitor-Datensatz aktualisiert");
-    (StatusCode::OK, "ok")
+    tracing::info!(
+        "Namespace '{kennung}': Court-Monitor-Datensatz aktualisiert",
+        kennung = kurz(&ns)
+    );
+    antwort
 }
 
 /// Lässt nur die erwarteten Bild-MIME-Typen durch (der Header kommt vom
@@ -3332,8 +3549,7 @@ impl TabletSitzung {
                         if !self.fremdes_feld_gemeldet {
                             self.fremdes_feld_gemeldet = true;
                             tracing::warn!(
-                                "Tablet an Feld {bisher} (Namespace '{ns}') meldet sich für Feld {court_id} an — verworfen, ein Feld je Verbindung"
-                            );
+                                "Tablet an Feld {bisher} (Namespace '{kennung}') meldet sich für Feld {court_id} an — verworfen, ein Feld je Verbindung", kennung = kurz(&ns));
                         }
                         return SitzungsSchritt::Weiter;
                     }
@@ -3349,7 +3565,10 @@ impl TabletSitzung {
                 self.my_device = kuerze_kennung(device_id);
                 match attach_tablet(broker, &ns, court_id, &self.my_device, tx).await {
                     AttachResult::Active => {
-                        tracing::info!("Tablet verbunden: Namespace '{ns}', Feld {court_id}");
+                        tracing::info!(
+                            "Tablet verbunden: Namespace '{kennung}', Feld {court_id}",
+                            kennung = kurz(&ns)
+                        );
                         self.court = Some(court_id);
                     }
                     AttachResult::Occupied => {
@@ -3369,7 +3588,10 @@ impl TabletSitzung {
                             self.my_device = kuerze_kennung(device_id);
                         }
                         if take_over_court(broker, &ns, c, &self.my_device, tx).await {
-                            tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
+                            tracing::info!(
+                                "Tablet übernimmt Feld {c} (Namespace '{kennung}')",
+                                kennung = kurz(&ns)
+                            );
                         } else {
                             // Abgewiesen (ein Deckel greift): Die Seite hielte
                             // sich sonst für den Halter und zählte ins Leere.
@@ -3392,8 +3614,9 @@ impl TabletSitzung {
                     if !self.saetze_gemeldet {
                         self.saetze_gemeldet = true;
                         tracing::warn!(
-                            "Tablet (Namespace '{ns}') meldet {} Sätze — verworfen",
-                            sets_history.len()
+                            "Tablet (Namespace '{kennung}') meldet {} Sätze — verworfen",
+                            sets_history.len(),
+                            kennung = kurz(&ns)
                         );
                     }
                     return SitzungsSchritt::Weiter;
@@ -3495,7 +3718,7 @@ impl TabletSitzung {
             self.takt_gemeldet = true;
             tracing::warn!(
                 "Tablet (Namespace '{}', Feld {:?}) sendet schneller als jedes Zähl-Tablet — Frames werden verworfen",
-                self.ns,
+                kurz(&self.ns),
                 self.court
             );
         }
@@ -3509,7 +3732,7 @@ impl TabletSitzung {
     async fn abraeumen(&self, broker: &Broker, tx: &Tx) {
         if let Some(c) = self.court {
             if detach_tablet(broker, &self.ns, c, tx).await {
-                tracing::info!("Tablet getrennt: Namespace '{}', Feld {c}", self.ns);
+                tracing::info!("Tablet getrennt: Namespace '{}', Feld {c}", kurz(&self.ns));
             }
         }
     }
@@ -3536,7 +3759,7 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
             // frischen Stand.
             _ = voll.warten() => {
-                tracing::warn!("Kanal voll – Tablet (Namespace '{ns}') wird getrennt");
+                tracing::warn!("Kanal voll – Tablet (Namespace '{kennung}') wird getrennt", kennung = kurz(&ns));
                 break;
             }
             incoming = socket.recv() => {
@@ -3571,9 +3794,8 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             _ = ping.tick() => {
                 if is_stale(last_incoming, tokio::time::Instant::now(), TABLET_STALE) {
                     tracing::warn!(
-                        "Tablet (Namespace '{ns}') seit {}s stumm – Verbindung als tot verworfen",
-                        last_incoming.elapsed().as_secs()
-                    );
+                        "Tablet (Namespace '{kennung}') seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs(), kennung = kurz(&ns));
                     break;
                 }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
@@ -3663,7 +3885,7 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
             // frischen Stand.
             _ = voll.warten() => {
-                tracing::warn!("Kanal voll – Träger (Namespace '{ns}') wird getrennt");
+                tracing::warn!("Kanal voll – Träger (Namespace '{kennung}') wird getrennt", kennung = kurz(&ns));
                 break;
             }
             incoming = socket.recv() => {
@@ -3681,14 +3903,14 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                             // Sauber ablehnen statt schweigen: Der Slave fällt
                             // dann auf die heutigen Weiterleitungen zurück,
                             // statt die Halle blind zu lassen.
-                            tracing::warn!("Träger (Namespace '{ns}') mit Fassung {proto} abgelehnt");
+                            tracing::warn!("Träger (Namespace '{kennung}') mit Fassung {proto} abgelehnt", kennung = kurz(&ns));
                             let _ = socket
                                 .send(text(&CarrierServerMsg::Unsupported { proto }))
                                 .await;
                             break;
                         }
                         begruesst = true;
-                        tracing::info!("Träger verbunden: Namespace '{ns}', Fassung {proto}");
+                        tracing::info!("Träger verbunden: Namespace '{kennung}', Fassung {proto}", kennung = kurz(&ns));
                         let _ = socket.send(text(&CarrierServerMsg::Ready { proto })).await;
                     }
                     // Alles Weitere erst nach der Begrüßung — aber NICHT
@@ -3705,7 +3927,7 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                     CarrierMsg::StreamOpen { stream, kind, court } => {
                         if stroeme.contains_key(&stream) { continue }
                         if stroeme.len() >= relay_proto::MAX_STREAMS_PER_CARRIER {
-                            tracing::warn!("Träger (Namespace '{ns}') am Substrom-Limit – {stream} abgewiesen");
+                            tracing::warn!("Träger (Namespace '{kennung}') am Substrom-Limit – {stream} abgewiesen", kennung = kurz(&ns));
                             let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
                             continue;
                         }
@@ -3831,9 +4053,8 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             _ = ping.tick() => {
                 if is_stale(last_incoming, tokio::time::Instant::now(), HOST_STALE) {
                     tracing::warn!(
-                        "Träger (Namespace '{ns}') seit {}s stumm – Verbindung als tot verworfen",
-                        last_incoming.elapsed().as_secs()
-                    );
+                        "Träger (Namespace '{kennung}') seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs(), kennung = kurz(&ns));
                     break;
                 }
                 // Rückfallebene je Substrom: Zuständig für die Slot-Freigabe
@@ -3852,8 +4073,7 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                     .collect();
                 for stream in tote {
                     tracing::warn!(
-                        "Substrom {stream} (Namespace '{ns}') stumm – Court-Slot freigegeben"
-                    );
+                        "Substrom {stream} (Namespace '{kennung}') stumm – Court-Slot freigegeben", kennung = kurz(&ns));
                     if let Some(s) = stroeme.remove(&stream) {
                         schliesse_substrom(&broker, &ns, s).await;
                         let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
@@ -3871,7 +4091,10 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
         schliesse_substrom(&broker, &ns, s).await;
     }
     if anzahl > 0 {
-        tracing::info!("Träger getrennt: Namespace '{ns}', {anzahl} Substrom(e) abgeräumt");
+        tracing::info!(
+            "Träger getrennt: Namespace '{kennung}', {anzahl} Substrom(e) abgeräumt",
+            kennung = kurz(&ns)
+        );
     }
     // Kein eigenes `namespace_aufraeumen` nötig: `detach_tablet` und
     // `unsubscribe_monitor` rufen es bereits, und ein Träger ohne Substrome
@@ -3954,7 +4177,7 @@ async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: 
             // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
             // frischen Stand.
             _ = voll.warten() => {
-                tracing::warn!("Kanal voll – Monitor (Namespace '{ns}') wird getrennt");
+                tracing::warn!("Kanal voll – Monitor (Namespace '{kennung}') wird getrennt", kennung = kurz(&ns));
                 break;
             }
             outgoing = rx.recv() => {
@@ -4325,7 +4548,10 @@ async fn attach_tablet(
 ) -> AttachResult {
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = namespace_holen_oder_anlegen(&mut map, ns) else {
-        tracing::warn!("Namespace-Limit erreicht – Tablet für '{ns}' abgewiesen");
+        tracing::warn!(
+            "Namespace-Limit erreicht – Tablet für '{kennung}' abgewiesen",
+            kennung = kurz(ns)
+        );
         return AttachResult::Rejected;
     };
     if !namespace.feld_erlaubt(ns, court_id) {
@@ -4347,10 +4573,16 @@ async fn attach_tablet(
         if let Some(old) = namespace.tablets.remove(&court_id) {
             let _ = old.send(text(&ServerMsg::SessionSuperseded));
         }
-        tracing::info!("Feld {court_id} (Namespace '{ns}'): Reconnect desselben Geräts");
+        tracing::info!(
+            "Feld {court_id} (Namespace '{kennung}'): Reconnect desselben Geräts",
+            kennung = kurz(ns)
+        );
     }
     if namespace.tablets.len() >= MAX_TABLETS_PER_NS {
-        tracing::warn!("Namespace '{ns}' am Tablet-Limit – Feld {court_id} abgewiesen");
+        tracing::warn!(
+            "Namespace '{kennung}' am Tablet-Limit – Feld {court_id} abgewiesen",
+            kennung = kurz(ns)
+        );
         return AttachResult::Rejected;
     }
     // A2 / ADR 0017: Den Slot-Halter VOR dem Überschreiben festhalten — die
@@ -4410,11 +4642,13 @@ async fn attach_tablet(
             owner_epoch: 0,
             owner_device: device_id.to_string(),
         }));
-        tracing::info!("Feld {court_id} (Namespace '{ns}'): StateRestore gesendet ({len} Bytes)");
+        tracing::info!(
+            "Feld {court_id} (Namespace '{kennung}'): StateRestore gesendet ({len} Bytes)",
+            kennung = kurz(ns)
+        );
     } else {
         tracing::info!(
-            "Feld {court_id} (Namespace '{ns}'): kein gespeicherter Stand – Tablet startet bei 0:0"
-        );
+            "Feld {court_id} (Namespace '{kennung}'): kein gespeicherter Stand – Tablet startet bei 0:0", kennung = kurz(ns));
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
@@ -4440,7 +4674,10 @@ async fn take_over_court(
 ) -> bool {
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = namespace_holen_oder_anlegen(&mut map, ns) else {
-        tracing::warn!("Namespace-Limit erreicht – Übernahme für '{ns}' abgewiesen");
+        tracing::warn!(
+            "Namespace-Limit erreicht – Übernahme für '{kennung}' abgewiesen",
+            kennung = kurz(ns)
+        );
         return false;
     };
     let neu_belegt = !namespace.tablets.contains_key(&court_id);
@@ -4475,10 +4712,12 @@ async fn take_over_court(
             owner_device: device_id.to_string(),
         }));
         tracing::info!(
-            "Feld {court_id} (Namespace '{ns}'): Übernahme – StateRestore gesendet ({len} Bytes)"
-        );
+            "Feld {court_id} (Namespace '{kennung}'): Übernahme – StateRestore gesendet ({len} Bytes)", kennung = kurz(ns));
     } else {
-        tracing::info!("Feld {court_id} (Namespace '{ns}'): Übernahme ohne gespeicherten Stand");
+        tracing::info!(
+            "Feld {court_id} (Namespace '{kennung}'): Übernahme ohne gespeicherten Stand",
+            kennung = kurz(ns)
+        );
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
@@ -4524,7 +4763,8 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
             if !match_id_matches_court(namespace, court_id, state_match) {
                 tracing::info!(
                     "State von Feld {court_id} verworfen: Tablet-State trägt Match \
-                     {state_match}, Feld hat ein anderes (Namespace '{ns}')"
+                     {state_match}, Feld hat ein anderes (Namespace '{kennung}')",
+                    kennung = kurz(ns)
                 );
                 return;
             }
@@ -4734,7 +4974,8 @@ async fn forward_score(
     if !match_id_matches_court(namespace, court_id, match_id) {
         tracing::info!(
             "Score von Feld {court_id} verworfen: Tablet zählt Match {match_id}, \
-             Feld hat ein anderes (Namespace '{ns}')"
+             Feld hat ein anderes (Namespace '{kennung}')",
+            kennung = kurz(ns)
         );
         return;
     }
@@ -5053,21 +5294,28 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     {
         let mut map = broker.namespaces.lock().await;
         if !map.contains_key(&ns) && map.len() >= MAX_NAMESPACES {
-            tracing::warn!("Namespace-Limit erreicht – Host für '{ns}' abgewiesen");
+            tracing::warn!(
+                "Namespace-Limit erreicht – Host für '{kennung}' abgewiesen",
+                kennung = kurz(&ns)
+            );
             let _ = socket.send(Message::Close(None)).await;
             return;
         }
         let namespace = map.entry(ns.clone()).or_insert_with(Namespace::new);
         match try_claim_host(namespace, &tx, now_ms()) {
             HostClaim::Refused => {
-                tracing::warn!("Zweiter Host für Namespace '{ns}' abgewiesen");
+                tracing::warn!(
+                    "Zweiter Host für Namespace '{kennung}' abgewiesen",
+                    kennung = kurz(&ns)
+                );
                 let _ = socket.send(Message::Close(None)).await;
                 return;
             }
             HostClaim::Accepted { superseded } => {
                 if superseded {
                     tracing::warn!(
-                        "Stummen alten Host für Namespace '{ns}' ersetzt (Zombie-Ablösung)"
+                        "Stummen alten Host für Namespace '{kennung}' ersetzt (Zombie-Ablösung)",
+                        kennung = kurz(&ns)
                     );
                 }
             }
@@ -5083,7 +5331,10 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             }));
         }
     }
-    tracing::info!("Host verbunden für Namespace '{ns}'");
+    tracing::info!(
+        "Host verbunden für Namespace '{kennung}'",
+        kennung = kurz(&ns)
+    );
 
     // Enger Ping-Takt + Stale-Abbruch: Eine tote TCP-Verbindung fällt beim
     // `send` u. U. minutenlang nicht auf (Kernel puffert) — deshalb zählt
@@ -5098,7 +5349,7 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
             // frischen Stand.
             _ = voll.warten() => {
-                tracing::warn!("Kanal voll – Turnier-PC (Namespace '{ns}') wird getrennt");
+                tracing::warn!("Kanal voll – Turnier-PC (Namespace '{kennung}') wird getrennt", kennung = kurz(&ns));
                 break;
             }
             incoming = socket.recv() => {
@@ -5113,8 +5364,7 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                 // Ablösung) → sauber beenden; bts-light
                                 // verbindet sich neu und sieht die Lage.
                                 tracing::warn!(
-                                    "Abgelöste Host-Verbindung für '{ns}' meldet sich zurück – getrennt"
-                                );
+                                    "Abgelöste Host-Verbindung für '{kennung}' meldet sich zurück – getrennt", kennung = kurz(&ns));
                                 break;
                             }
                         }
@@ -5144,9 +5394,8 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             _ = ping.tick() => {
                 if last_incoming.elapsed() >= HOST_STALE {
                     tracing::warn!(
-                        "Host für Namespace '{ns}' seit {}s stumm – Verbindung als tot verworfen",
-                        last_incoming.elapsed().as_secs()
-                    );
+                        "Host für Namespace '{kennung}' seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs(), kennung = kurz(&ns));
                     break;
                 }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
@@ -5177,7 +5426,10 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             namespace_aufraeumen(&mut map, &ns);
         }
     }
-    tracing::info!("Host getrennt für Namespace '{ns}'");
+    tracing::info!(
+        "Host getrennt für Namespace '{kennung}'",
+        kennung = kurz(&ns)
+    );
 }
 
 /// Gibt den Host-Slot frei — aber nur, wenn `tx` noch der eingetragene
@@ -6210,7 +6462,10 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
     let (frame, hinweis) = host_frame_deckeln(frame);
     if let Some(hinweis) = hinweis {
         if namespace.host_deckel_gemeldet.insert(hinweis) {
-            tracing::warn!("Namespace '{ns}': Host-Frame über dem Deckel — {hinweis}");
+            tracing::warn!(
+                "Namespace '{kennung}': Host-Frame über dem Deckel — {hinweis}",
+                kennung = kurz(ns)
+            );
         }
     }
     let Some(frame) = frame else {
@@ -6572,8 +6827,9 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // gleichzeitig laufenden Turniere.
             if devices.len() > MAX_TL_TOKENS {
                 tracing::warn!(
-                    "TlAuth für '{ns}' verworfen: {} Geräte (Grenze {MAX_TL_TOKENS})",
-                    devices.len()
+                    "TlAuth für '{kennung}' verworfen: {} Geräte (Grenze {MAX_TL_TOKENS})",
+                    devices.len(),
+                    kennung = kurz(ns)
                 );
                 return true;
             }
@@ -6612,7 +6868,9 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 match index.get(token) {
                     Some(vorhanden) if vorhanden != ns => {
                         tracing::warn!(
-                            "TL-Zugang von '{ns}' kollidiert mit '{vorhanden}' — ignoriert"
+                            "TL-Zugang von '{kennung}' kollidiert mit '{anderes}' — ignoriert",
+                            kennung = kurz(ns),
+                            anderes = kurz(vorhanden)
                         );
                     }
                     _ => {
@@ -6636,9 +6894,10 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 // ehrliche Fehlanzeige ist besser als ein falscher Plan, auf
                 // den jemand ein Spiel setzt.
                 tracing::warn!(
-                    "TL-Zustand für '{ns}' verworfen: {} Bytes (Grenze {MAX_STATE_LEN}) \
+                    "TL-Zustand für '{kennung}' verworfen: {} Bytes (Grenze {MAX_STATE_LEN}) \
                      — die Oberfläche meldet sich als nicht verbunden",
-                    json.len()
+                    json.len(),
+                    kennung = kurz(ns)
                 );
                 namespace.tl_state = None;
             } else {
@@ -7899,6 +8158,261 @@ mod tests {
             .await
             .into_response();
         assert_eq!(antwort.status(), StatusCode::OK);
+    }
+
+    // ─────── Bilder-Tor, Budget, Log (Spec relay-haerten, PR 6) ───────
+
+    fn bild_upload(bilder: &[&[u8]], logo: Option<&[u8]>) -> relay_proto::MonitorUpload {
+        use base64::Engine;
+        let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+        relay_proto::MonitorUpload {
+            config: relay_proto::MonitorConfig::default(),
+            tournament_name: "Test-Cup".into(),
+            ads: bilder
+                .iter()
+                .map(|b| relay_proto::AdUpload {
+                    content_type: "image/png".into(),
+                    data: b64(b),
+                    in_bar: false,
+                    style: relay_proto::AdStyleWire::default(),
+                })
+                .collect(),
+            call_timer: relay_proto::CallTimerView::default(),
+            logo: logo.map(|b| relay_proto::LogoUpload {
+                content_type: "image/png".into(),
+                data: b64(b),
+            }),
+        }
+    }
+
+    async fn bilder_von(broker: &Broker, ns: &str) -> (usize, bool, String) {
+        let map = broker.namespaces.lock().await;
+        let m = map.get(ns).and_then(|n| n.monitor.as_ref());
+        (
+            m.map_or(0, |m| m.ads.len()),
+            m.is_some_and(|m| m.logo.is_some()),
+            m.map_or(String::new(), |m| m.tournament_name.clone()),
+        )
+    }
+
+    fn gebucht(broker: &Broker) -> usize {
+        broker
+            .bilder_bytes
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn upload_ohne_host_wird_vor_dem_rumpf_abgewiesen() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        // Rumpf, der sich merkt, ob jemand ihn gelesen hat.
+        let rumpf_fuer = |gelesen: Arc<AtomicBool>| {
+            let json = serde_json::to_vec(&bild_upload(&[b"bild"], None)).unwrap();
+            axum::body::Body::from_stream(futures_util::stream::once(async move {
+                gelesen.store(true, Ordering::SeqCst);
+                Ok::<_, std::io::Error>(json)
+            }))
+        };
+        let anfrage = |rumpf| {
+            axum::extract::Request::builder()
+                .method("POST")
+                .body(rumpf)
+                .unwrap()
+        };
+
+        // Kein Namespace, kein Host: 409, der Rumpf bleibt ungelesen.
+        let gelesen = Arc::new(AtomicBool::new(false));
+        let (status, _) = monitor_upload_route(
+            State(broker.clone()),
+            Path(ns.clone()),
+            anfrage(rumpf_fuer(gelesen.clone())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(!gelesen.load(Ordering::SeqCst), "Rumpf wurde gelesen");
+        assert!(broker.namespaces.lock().await.is_empty(), "nichts angelegt");
+
+        // Mit Host geht derselbe Upload durch.
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let gelesen = Arc::new(AtomicBool::new(false));
+        let (status, _) = monitor_upload_route(
+            State(broker.clone()),
+            Path(ns.clone()),
+            anfrage(rumpf_fuer(gelesen.clone())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(gelesen.load(Ordering::SeqCst));
+        assert_eq!(bilder_von(&broker, &ns).await.0, 1);
+    }
+
+    #[tokio::test]
+    async fn gesamt_budget_weist_bilder_ab() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.bilder_budget = 10;
+        let ns = test_ns();
+        let anderes = "b1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        register_host(&broker, anderes, &host_tx).await;
+
+        let (status, _) = monitor_upload(
+            State(broker.clone()),
+            Path(ns.clone()),
+            Json(bild_upload(&[b"12345678"], None)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 8);
+
+        // Das zweite Turnier passt nicht mehr hinein: 507, Bilder verworfen,
+        // die Konfiguration gilt.
+        let (status, _) = monitor_upload(
+            State(broker.clone()),
+            Path(anderes.to_string()),
+            Json(bild_upload(&[b"abc"], Some(b"logo"))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(
+            bilder_von(&broker, anderes).await,
+            (0, false, "Test-Cup".to_string())
+        );
+        // Alles oder nichts: Die halbe Buchung ist zurückgegeben.
+        assert_eq!(gebucht(&broker), 8);
+
+        // Ein laufendes Turnier behält bei 507 seine bisherigen Bilder.
+        let (status, _) = monitor_upload(
+            State(broker.clone()),
+            Path(ns.clone()),
+            Json(bild_upload(&[b"zu-gross-fuer-das-budget"], None)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(bilder_von(&broker, &ns).await.0, 1);
+        assert_eq!(gebucht(&broker), 8);
+    }
+
+    #[tokio::test]
+    async fn hoechstens_zwei_uploads_gleichzeitig() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let anfrage = || {
+            axum::extract::Request::builder()
+                .method("POST")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&bild_upload(&[b"bild"], None)).unwrap(),
+                ))
+                .unwrap()
+        };
+        // Zwei Uploads laufen gerade.
+        let a = broker.upload_plaetze.clone().try_acquire_owned().unwrap();
+        let _b = broker.upload_plaetze.clone().try_acquire_owned().unwrap();
+        let (status, _) =
+            monitor_upload_route(State(broker.clone()), Path(ns.clone()), anfrage()).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        // Ist einer fertig, geht der nächste durch — und gibt seinen Platz
+        // danach wieder frei.
+        drop(a);
+        let (status, _) =
+            monitor_upload_route(State(broker.clone()), Path(ns.clone()), anfrage()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(broker.upload_plaetze.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn texte_der_konfiguration_sind_gedeckelt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let mut upload = bild_upload(&[b"bild"], None);
+        upload.config.layout = "x".repeat(100_000);
+        upload.ads[0].style.bg = "y".repeat(100_000);
+        monitor_upload(State(broker.clone()), Path(ns.clone()), Json(upload)).await;
+        let map = broker.namespaces.lock().await;
+        let m = map.get(&ns).unwrap().monitor.as_ref().unwrap();
+        assert_eq!(m.config.layout.chars().count(), MAX_CONFIG_TEXT);
+        assert_eq!(m.ads[0].style.bg.chars().count(), MAX_CONFIG_TEXT);
+    }
+
+    #[tokio::test]
+    async fn budget_sinkt_beim_ersetzen_und_entfernen() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.bilder_budget = 10;
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let lade = |bilder: Vec<&'static [u8]>| {
+            let (broker, ns) = (broker.clone(), ns.clone());
+            async move {
+                monitor_upload(State(broker), Path(ns), Json(bild_upload(&bilder, None)))
+                    .await
+                    .0
+            }
+        };
+        assert_eq!(lade(vec![b"12345678"]).await, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 8);
+        // Ersetzen: Die alten 8 Bytes zählen nicht mehr mit — sonst passten
+        // die neuen 9 nicht ins Budget von 10.
+        assert_eq!(lade(vec![b"123456789"]).await, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 9);
+        // Entfernen (Upload ohne Bilder).
+        assert_eq!(lade(vec![]).await, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 0);
+        // Verschwindet das Turnier, sinkt der Zähler ebenfalls.
+        assert_eq!(lade(vec![b"1234"]).await, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 4);
+        broker.namespaces.lock().await.remove(&ns);
+        assert_eq!(gebucht(&broker), 0);
+    }
+
+    #[tokio::test]
+    async fn monitor_steuerung_ohne_host_wird_abgewiesen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        broker.namespaces.lock().await.get_mut(&ns).unwrap().host = None;
+        let antwort =
+            monitor_control_upload(State(broker), Path(ns), Json(MonitorControl::default()))
+                .await
+                .into_response();
+        assert_eq!(antwort.status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn kennung_im_log_hat_acht_zeichen() {
+        assert_eq!(kurz("a1b2c3d4-e5f6-7890-abcd-ef1234567890"), "a1b2c3d4");
+        assert_eq!(kurz("kurz"), "kurz");
+        // Wächter: Keine Log-Zeile schreibt die volle Kennung. (Die Nadel ist
+        // zusammengesetzt, damit dieser Test sich nicht selbst findet.)
+        let nadel = ["'{", "ns}'"].concat();
+        let quelle = include_str!("main.rs");
+        assert!(
+            !quelle.contains(&nadel),
+            "Im Quelltext steht wieder die volle Kennung — `kurz(..)` verwenden"
+        );
+        // Dasselbe für die Schreibweise mit Platzhalter: Auf jede Log-Zeile
+        // mit „Namespace '{}'" muss ein `kurz(` folgen.
+        let platzhalter = ["Namespace '{", "}'"].concat();
+        for (stelle, _) in quelle.match_indices(&platzhalter) {
+            let danach: String = quelle[stelle..].chars().take(200).collect();
+            assert!(danach.contains("kurz("), "volle Kennung im Log: {danach}");
+        }
+    }
+
+    #[test]
+    fn logdatei_laesst_sich_mit_verfall_anlegen() {
+        let dir = std::env::temp_dir().join(format!("bts-relay-log-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(log_datei(dir.to_str().unwrap()).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(LOG_DATEIEN_MAX, 30);
     }
 
     // ───────────── Begrenzte Kanäle (Spec relay-haerten, PR 5) ─────────────

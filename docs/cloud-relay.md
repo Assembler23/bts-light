@@ -1398,6 +1398,73 @@ Monitor, Turnierleitungs-Seite, Turnier-PC, Träger, Substrom). Im
 Normalbetrieb darf die Zeile nicht auftreten; tritt sie (oder `Kanal knapp`)
 beim Turnier-PC auf, hängt dessen Leitung oder sein Rechner.
 
+## Bilder-Tor und Bilder-Budget (seit v0.9.387)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 6 ·
+ADR [0090](adr/0090-ueberlast-am-relay-und-mindestschutz.md).
+
+Werbebilder und Logo sind das Größte, was der Relay je Turnier hält (bis
+12 MiB + 2 MiB). Wer nur eine Turnier-Kennung erfindet, soll sie nicht
+ablegen können.
+
+| Lage bei `POST /{ns}/monitor` | Antwort | Wirkung |
+|---|---|---|
+| Kein Turnier-PC verbunden | `409` | der Rumpf wird **nicht gelesen** |
+| Schon zwei Uploads in Arbeit | `503` | der Rumpf wird nicht gelesen; die App versucht es erneut |
+| Turnier-PC verbunden | `200` | alles gilt |
+| Gesamt-Budget erschöpft | `507` | Konfiguration gilt, die neuen Bilder werden verworfen, **die bisherigen Bilder dieses Turniers bleiben**; Log-Zeile |
+
+- **Gesamt-Budget:** 256 MiB über alle Turniere. Der Zähler sinkt von selbst,
+  sobald ein Bild verschwindet (Ersetzen, Entfernen, Aufräumen des Turniers).
+  Gebucht wird je Upload ganz oder gar nicht; beim Ersetzen zählen die alten
+  Bilder des Turniers nicht mit.
+- **Höchstens zwei Uploads gleichzeitig:** Jeder hält vorübergehend rund
+  50 MiB. Die App wiederholt einen abgelehnten Upload von selbst (erste
+  Wiederholung nach etwa einer Minute, danach mit wachsender Pause).
+- **Texte der Konfiguration** (`layout`, Plätze vor/unter dem Namen, Farben
+  im Bild-Stil) sind auf 32 Zeichen gekürzt.
+- `POST /{ns}/monitor/control` antwortet ohne verbundenen Turnier-PC ebenfalls
+  `409`.
+
+**Was das Tor leistet — und was nicht.** Es hält Uploads ab, hinter denen gar
+kein Turnier-PC steht. Wer `host-ws` für eine erfundene Kennung öffnet (ohne
+Anmeldung möglich), kommt hindurch; rund 19 solcher Schein-Turniere füllen das
+Budget. Dann bekommen **neue** Turniere keine Bilder mehr (`507`) — laufende
+behalten ihre. Vorher traf derselbe Angriff den Speicher des ganzen Servers.
+Bilder eines Turniers ohne Turnier-PC verfallen erst mit dem Daten-Verfall
+(PR 8 der Spec).
+
+**Nicht gebaut:** die in der Spec vorgesehene zweite Stufe „Bilder erst nach
+der ersten Feldliste". Die App schickt ihre Feldliste nur, wenn BTP Felder
+liefert — ohne geladenes Turnier hätte die Cloud nie Werbung gezeigt.
+
+### Speicher-Obergrenze des Dienstes
+
+`ops/bts-relay.service` trägt `MemoryHigh=512M`, `MemoryMax=768M`,
+`MemorySwapMax=0`. Erreicht der Relay die Grenze, beendet ihn der Kernel und
+systemd startet ihn nach 3 s neu — das wirkt wie ein Deploy auf alle
+Turniere, schützt aber badhub.de auf demselben Server.
+
+**Die Dienst-Datei wird nicht automatisch ausgerollt.** Handgriff, einmalig
+und in einem Fenster ohne Turnier (der Neustart trennt alle Verbindungen):
+
+```
+# 1. Heutigen Verbrauch ablesen. Liegt er über 256 MiB, die Werte erst neu herleiten.
+systemctl status bts-relay
+# 2. Unit aus dem Repo auf den Server bringen und einsetzen.
+sudo cp ops/bts-relay.service /etc/systemd/system/
+# 3. Neu laden und neu starten.
+sudo systemctl daemon-reload && sudo systemctl restart bts-relay
+# 4. Prüfen.
+systemctl show bts-relay -p MemoryMax
+curl -s https://badhub.de/bts-relay/health
+```
+
+Zurück: die drei Zeilen entfernen, `daemon-reload`, Neustart.
+
+`ops/nginx-bts-relay.conf` nennt jetzt `client_max_body_size 25m;` — das gilt
+am Server bereits, dort ist nichts zu ändern.
+
 ## Sicherheit
 
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die
