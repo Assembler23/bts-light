@@ -596,6 +596,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Tablet-Stand robust** — Spec:
+  [features/tablet-stand-robust.md](features/tablet-stand-robust.md)
+  (freigegeben 11.11.2026; ADR 0083–0085). Paket 1 des
+  Kommunikations-Audits: Ersatz-Tablet übernimmt den gesicherten Stand statt 0:0 (Autorität
+  nach Fortschritt, Einstieg mit Host-Sätzen, LAN+Cloud über Kreuz), Undo-Format v2 (≤ 40 KB,
+  nie still verworfen), geparktes statt blockierendes Alt-Ergebnis (Host-Antwort „überholt"),
+  Voll-Sync + 120-s-Nachzügler-Fenster für Verlauf und Zettel. Fünf PRs.
 - **Meetingpoint am Kiosk-Tablet** — Spec:
   [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)
   (freigegeben 09.11.2026). Eintrag „Meetingpoint" in der Feldwahl `/felder` (nur wenn an, hinter der
@@ -1044,6 +1051,187 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   die `fully`-JS-Brücke, sobald sie „Verbindung verloren" erkennt, wäre die
   saubere Lösung, bräuchte aber eine Änderung an `tablet.html` — bewusst aus
   der ersten Fassung ausgeklammert.
+
+## Kommunikations-Audit (Befunde 10.11.2026)
+
+Durchsicht aller Strecken — Tablet ↔ Host, Anzeige-Geräte ↔ Host/Relay,
+Host ↔ BTP/badhub, Relay + TL-Web — auf Robustheit, Performance und
+Datensparsamkeit. **Reine Code-Lektüre, nichts ausgeführt oder gemessen**;
+Größen- und Bandbreitenangaben sind gerechnet. Die Kernstrecken
+(Ergebnis-Übermittlung mit Idempotenz und Platten-Queue, Monitor-Push S0–S9,
+TL-Web-Zugang, TP-Upload) waren ohne Befund. Zeilennummern: Stand main
+`536d8b2`.
+
+Drei Arbeitspakete, in dieser Reihenfolge; dazu Einzelpunkte.
+
+### Paket 1 — Tablet-Stand
+
+**Spec:** [features/tablet-stand-robust.md](features/tablet-stand-robust.md)
+(freigegeben 11.11.2026; ADR 0083–0085). Der Grill hat die Befunde
+nachgeprüft und teils korrigiert — maßgeblich ist die Spec, die Stichpunkte hier sind der
+Audit-Stand.
+
+- **Ersatz-Tablet an freiem Feld startet bei 0:0 und überschreibt den
+  gesicherten Stand.** Fällt ein Tablet mitten im Spiel aus, gibt der Server
+  den Slot nach 10 s (LAN) bzw. 15 s (Relay) frei. Ein frisches Gerät bekommt
+  dann `authoritative=true` (`state.rs` `reconnect_decision`, Regel „Halter
+  vorher leer") und setzt im Ownership-Zweig seinen leeren Stand durch
+  (`tablet.html:1857`); das folgende `match_assigned` lädt 0:0, und der
+  `state_sync` überschreibt den Cache. Verlauf, Aufschlag, Positionen und
+  Ereignisse sind weg. ADR 0017 beschreibt „frisches Gerät übernimmt
+  Server-Stand" nur für den Legacy-Zweig. **Vorschlag:** lokal nur
+  durchsetzen, wenn ein lokaler Stand zum selben Match existiert, sonst
+  adoptieren; Test „frisches Gerät, freier Slot".
+- **`state_sync` schickt je Punkt den vollen Zustand; in der Cloud wird er ab
+  etwa dem dritten Satz still verworfen.** Der Snapshot trägt `history` (50
+  Undo-Stände), jeder davon eine Vollkopie von `rallyLog` und `events`
+  (`tablet.html:3180`). Nachgemessen (11.11.): 61–66 KB am Ende eines normalen
+  Dreisätzers, im Schiri-Modus 81 KB ab Mitte Satz 2 und bis 590 KB.
+  Über `MAX_STATE_LEN` (64 KB) verwirft das Relay kommentarlos
+  (`relay/src/main.rs:3736`): Cloud-Monitore zeigen alten Aufschlag/alte
+  Pause, eine Übernahme bekommt einen viele Punkte alten Stand. Im LAN
+  30–70 KB je Punkt über das Hallen-WLAN plus derselbe String ins
+  `localStorage`; `set_court_state` hat dort gar keinen Deckel. Unterhalb der
+  Grenze reicht das Relay den vollen Zustand an jeden Cloud-Monitor (der Host
+  verschlankt im LAN, das Relay nicht). **Vorschlag:** `rallyLog`/`events`
+  nicht in jeden Undo-Stand kopieren (Schnittposition reicht) oder `history`
+  nicht spiegeln; Verwerfen loggen; im Relay verschlanken.
+- **Ein nicht mehr zustellbares `pendingResult` überlebt den Matchwechsel und
+  blockiert das nächste Ergebnis.** `submit` bricht bei gesetztem Auftrag ab
+  (`tablet.html:4387`); weder `loadMatch` noch `clearMatch` räumen ihn, und
+  losgelassen wird er nur bei `finalized` desselben Matches. Trägt die TL das
+  Ergebnis von Hand ein und kommt das Tablet erst nach Ablauf der 5-min-Netze
+  (`RESULT_IDEMPOTENCY_TTL`, `FINALIZED_TTL`) zurück, läuft der Retry endlos,
+  und am Ende des Folgespiels ist „Ergebnis übermitteln" gesperrt — auch nach
+  Reload. **Vorschlag:** fremden Auftrag in `loadMatch`/`clearMatch`
+  loslassen und loggen; Host antwortet `permanent`, wenn das Match schon
+  einen Sieger hat.
+- **Cloud: nach einem Abriss Host↔Relay friert der Punktverlauf des laufenden
+  Spiels ein.** Ballwechsel und Zettel-Ereignisse aus der Lücke verwirft das
+  Relay (kein Puffer, `relay/src/main.rs:3930 ff.`); danach lehnt der Host
+  jedes weitere `rally`-Frame ab (`timeline.rs`, Lückenprüfung), bis zufällig
+  ein Voll-Sync kommt. Graph, badhub-Verlauf und Zettel werden abgeschnitten
+  finalisiert; eine Karte aus der Lücke erreicht den Host nie. **Vorschlag:**
+  im `match_assigned`-Zweig für dasselbe Match `sendRallySync()` +
+  `sendMatchEventSync()`; Voll-Sync vor `submit`.
+
+### Paket 2 — badhub-Push entkoppeln
+
+- **Hängendes badhub streckt den Sync-Zyklus von 5 s auf bis zu ~75 s.** Vier
+  Pushes (`tset`, Meldeliste, `sched`, `tverlauf`) laufen nacheinander in
+  `run_once` (`sync.rs:2937–2957`), jeder mit 15 s Gesamt-Timeout und ohne
+  `connect_timeout` (`badhub/push.rs:67`). Bei totem Uplink leiden
+  Feldvergabe, SR-Rotation, Autodruck, Erst-Ansage und `set_snapshot` — also
+  der reine LAN-Betrieb. **Vorschlag:** Pushes in einen eigenen Task („neuester
+  Stand gewinnt"); mindestens `connect_timeout` 3–5 s und Additives
+  überspringen, wenn der `tset` am Transport scheiterte.
+- **Der Fehlerpfad sendet die teuerste Nutzlast im schnellsten Takt.**
+  `on_failure` setzt `last_pushed = None` (`sync.rs:2997`) → alle 5 s voller
+  `tset`, samt Logo (bis ~2,7 MB Base64), solange es nicht gestempelt ist.
+  Kein Backoff, auch nicht bei 401. Auf schmalem Uplink passt das nie in die
+  15 s. **Vorschlag:** exponentieller Backoff, lange Pause bei 401/403,
+  Wiederholung ohne Logo, Timeout an die Körpergröße koppeln.
+- **Im Normalbetrieb geht fast jeder Zyklus als unkomprimierter Vollstand
+  hinaus.** Mehr als ein geändertes Match ergibt einen vollen `tset`
+  (`badhub/diff.rs:73`), kein gzip — grob 100–400 KB alle 5 s, obwohl die
+  Punkte schon einzeln als `tupdate_match` gingen. `sched` geht minütlich
+  voll und ohne Diff. **Vorschlag:** N kleine Updates statt Vollstand; gzip;
+  Hash-Vergleich für `sched`.
+- **BTP- und Push-Fehler des Sync-Loops stehen nie im Diagnose-Log**
+  (`SyncOutcome` landet nur im Dashboard-Status). **Vorschlag:**
+  flankengesteuerte Zeile bei ok → Fehler → ok.
+- **Veralteter Stand kann einen frischeren Tablet-Punkt kurz überholen**
+  (BTP-Rückschreibungen zwischen `apply_tablet_scores` und Push); heilt im
+  nächsten Diff.
+- **Punktverlauf:** `badhub/verlauf.rs` klont und hasht alle 5 s die
+  Timelines aller Matches; eine von badhub mit anderem Status als 400/404
+  abgelehnte `tverlauf`-Nachricht wird endlos wiederholt und blockiert die
+  übrigen.
+
+### Paket 3 — Relay härten (Relay-Deploy vor Client)
+
+- **Mehrfaches `identify` hinterlässt tote Feld-Slots; der Namespace verfällt
+  nie.** Jedes weitere `identify` mit anderer `courtId` belegt ein Feld mehr
+  (`relay/src/main.rs:2699`), `abraeumen` löst nur das letzte (`:2809`). Ein
+  Fremder kann so `MAX_NAMESPACES` dauerhaft füllen; neue Hosts werden bis
+  zum Relay-Neustart abgewiesen. **Vorschlag:** altes Feld vor neuem
+  `identify` lösen oder ablehnen; geschlossene Sender ausfegen; Namespaces
+  ohne Host kurzlebig.
+- **Keine Größengrenzen auf den WebSocket-Wegen.** Nirgends
+  `max_message_size`; `forward_score` speichert `sets_history` ungekappt
+  (`:3850`), `MatchAssigned` legt Felder ohne Zahl- und Längendeckel an; alle
+  Kanäle sind `unbounded`. **Vorschlag:** Deckel je Route, Satzliste ≤ 10,
+  Felder je Namespace deckeln, `limit_conn`/`limit_req` in nginx.
+- **Host-Schleife wartet Ergebnis-Write und Uploads inline ab.**
+  `RelayFrame::Result` → `process_result(...).await`
+  (`relay_client.rs:553`); bei trägem BTP liest die Schleife >15 s nichts,
+  das Relay wirft den Host ab (`HOST_STALE`) — trifft alle Cloud-Felder. Auch
+  Werbe-Upload und Control-Sync laufen inline; `monitor_fp` ist je Sitzung
+  lokal (Neu-Upload nach jedem Reconnect). **Vorschlag:** `tokio::spawn` wie
+  bei `TlCommand`.
+- **Verbindungsaufbau des Hosts ohne Frist, Backoff ohne Jitter**
+  (`relay_client.rs:116–118`): `connect_async` kann hinter einem Captive
+  Portal ewig hängen; der Backoff wird schon beim Handshake zurückgesetzt
+  (Dauer-Reconnect im 1–2-s-Takt bei Abweisung); nach jedem Relay-Deploy
+  kommen alle Hosts gleichzeitig.
+- **Anzeigen zeigen ohne Hinweis einen eingefrorenen Stand, wenn der Host weg
+  ist, aber noch ein Tablet oder eine TL-Seite am Relay hängt.**
+  `overview_health`, `build_monitor_state`, `meetingpoint_state`,
+  `preparation_state` prüfen `host` nicht. **Vorschlag:** `503` bei
+  fehlendem Host — die Offline-Blende der Seiten greift dann von selbst.
+- **Nach Host-Abgang bleiben Turnierdaten im RAM und abrufbar** (Namen,
+  Azure-Schlüssel, Bilder), solange ein Tablet oder TL-Tab verbunden ist.
+  **Vorschlag:** `azure_tts` sofort verwerfen, `tl_subs` schließen, nach
+  Karenz leeren.
+- **Kleiner:** ein globales Schloss für alle Turniere mit Kopien darunter;
+  Relay-Log mit `install_id` im Klartext und ohne `max_log_files`;
+  `MAX_TL_WS_VORAUTH` prozessweit statt je IP; Host baut den TL-Zustand alle
+  2 s, auch wenn kein Cloud-Gerät zusieht.
+
+### Einzelpunkte — Datensparsamkeit
+
+- **LAN-`/health` und `/combo/state` liefern die komplette `CourtOverview`**
+  (`server.rs:1416`, `state.rs:131`) an jeden im Hallen-WLAN: `sr`/`ar`,
+  `sr_id`/`ar_id`, `official_warn` (Ableitung aus den Sperrlisten),
+  `scorekeeper`, `battery`, `locked`. Übersicht und Kombi nutzen keines
+  davon; das Relay baut hier schon eine Positivliste. **Vorschlag:** eigene
+  Projektion + Wächter-Test.
+- **Verein und Nation gehen immer ans Tablet** (`match_brief`), unabhängig
+  von den Schaltern; die Nation nutzt das Tablet nie. Der Brief liegt damit
+  auch im `state_sync`, im Relay-Cache und im `localStorage`.
+- **Badhub-URL ohne HTTPS-Zwang:** Freitextfeld, weder Schema noch Host
+  geprüft — betrifft Bearer-Passwort, Pushes und den TP-Upload. Der
+  Push-Client folgt außerdem Redirects.
+- **Mögliche Namen im Log:** `state.rs` schreibt bei unlesbarer
+  Ansage-Auftragsliste die ersten 120 Zeichen der Antwort (können SR-/AR-
+  Namen enthalten).
+
+### Einzelpunkte — Anzeigen und Sonstiges
+
+- **Meetingpoint friert nach hängendem Check-in ein:** POST ohne Frist
+  (`meetingpoint.html:339`), solange sperrt `unterwegs` das Neuzeichnen der
+  ganzen Seite (`:377`), der Status bleibt „aktuell".
+- **Slave-Brücke verschluckt `If-None-Match` auf `/health`**
+  (`slave_bridge.rs:207`) — die ferne Halle bekommt nie ein `304`; der
+  `reqwest`-Client dort hat kein Timeout.
+- **Kombi-Anzeige läuft an allen S-Etappen vorbei:** Sekundentakt ohne ETag
+  und Nudge, voller DOM-Neuaufbau, `combo_state` baut je Abruf die ganze
+  Übersicht (die Spec `monitor-livestand-push` behauptet das Gegenteil).
+- **`/monitor/state` liest die Zuweisungsdatei bei jedem Abruf von der
+  Platte;** `preparation`/`spielfolge`/`winners`/`ad` springen schon beim
+  ersten Leer-Lesen weg (keine Entprellung wie `DEASSIGN_AFTER`).
+- **Vorbereitung und Meetingpoint klonen je Abruf den ganzen BTP-Snapshot;**
+  die Vorbereitungsliste ist ungedeckelt (Seite zeigt 10); die Feldwahl holt
+  alle 15 s den vollen Meetingpoint-Rumpf nur für den Statuscode.
+- **Rest-Abrufe ohne Frist:** `anzeige.html` (`ladeFelder`, „Zum Zählen"),
+  Sponsor-Leiste in vier Seiten.
+- **Sieger-Monitor** rechnet alle 2 s alle Podien, zeigt nur die gewählte
+  Disziplin.
+- **Log-Upload** verliert die letzten bis zu 10 Minuten vor dem Beenden und
+  den Rest der Vortagsdatei; ohne gzip und Größendeckel, blockierendes Lesen.
+- **Sprachdienste:** kein `connect_timeout`, Client je Anfrage neu; bei
+  „Ansage in Teilen" und totem Netz 30–60 s bis zur Ersatzstimme.
+- **BTP-Lesen** ohne Größendeckel (`btp/client.rs`, `read_to_end` + gzip).
 
 ## Datenverlust-Pfade in der Konfiguration (Befunde 07.08.2026)
 
