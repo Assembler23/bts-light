@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.379
+
+- **Ein träges BTP wirft den Turnier-PC nicht mehr aus der Cloud.** Kam ein
+  Ergebnis von einem Cloud-Tablet, wartete die Verbindung zum Relay bisher,
+  bis es in BTP stand. Dauerte das länger als 15 Sekunden — etwa während die
+  Turnierdatei für badhub kopiert wurde —, hielt der Relay den Turnier-PC für
+  tot und trennte ihn; alle Cloud-Tablets und -Monitore hingen dann kurz in
+  der Luft. Ergebnisse werden jetzt je Feld nacheinander im Hintergrund
+  geschrieben, die Verbindung bleibt dabei ansprechbar. Auch das Hochladen
+  der Werbebilder und der Abgleich der Monitor-Zuweisungen halten sie nicht
+  mehr auf; der Bilder-Upload hat zwei Minuten Zeit statt 15 Sekunden und
+  wartet nach einem Fehlschlag länger, bevor er es wieder versucht. Erster
+  Schritt der Spec `relay-haerten` (ADR 0091).
+
 ## v0.9.378
 
 - **Gerätewechsel zwischen Hallennetz und Cloud ohne Verlust.** Zählte ein

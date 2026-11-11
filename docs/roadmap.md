@@ -627,7 +627,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   60 min (Sprachdienst-Schlüssel sofort), Mindestschutz gegen Schein-Turniere
   (`MemoryMax`, Bilder-Tor, Gesamt-Budget), neue Dashboard-Meldung „Ein anderer PC ist mit
   diesem Turnier verbunden". Neun PRs (1, 2, 9 Host ohne Relay-Deploy; 3–8 Relay in zwei
-  Merge-Fenstern) — **noch nichts umgesetzt**. Ausgelagerte Punkte stehen beim
+  Merge-Fenstern) — **PR 1 umgesetzt** (v0.9.379: Host-Schleife entkoppelt), PR 2–9 offen. Ausgelagerte Punkte stehen beim
   Kommunikations-Audit, Paket 3.
 - **Meetingpoint am Kiosk-Tablet** — Spec:
   [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)

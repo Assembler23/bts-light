@@ -879,8 +879,16 @@ Grün sein müssen `cargo test` (Workspace),
 `quittung_geht_nie_in_eine_neue_sitzung` · `volle_feld_schlange_sagt_wiederholbar_ab` ·
 `zweiter_upload_startet_nicht_solange_einer_laeuft` ·
 `fehlgeschlagener_upload_wartet_laenger` ·
-`idle_waechter_schlaegt_nach_langem_ergebnis_nicht_an` (zuerst rot) ·
-`groesster_zettel_frame_bleibt_unter_dem_transportdeckel` (Messung für PR 4).
+`sitzung_ueberlebt_pausen_mit_lebenszeichen_im_puffer` (ersetzt den geplanten
+`idle_waechter_schlaegt_nach_langem_ergebnis_nicht_an`; hält nur fest, dass die Sitzung
+16-s-Pausen mit Lebenszeichen im Puffer übersteht — der Wettlauf selbst lässt sich mit
+angehaltener Uhr nicht nachstellen, der Test wurde deshalb nie rot; die feste Reihenfolge
+im `select!` ist per Überlegung abgesichert) ·
+`groesster_zettel_frame_bleibt_unter_dem_transportdeckel` (Messung für PR 4) ·
+aus dem Review: `toter_arbeiter_wird_ersetzt` · `hintergrund_aufgaben_enden_mit_den_diensten` ·
+`neue_sitzung_vergisst_die_upload_pause` · `haengender_schreiber_beendet_sich_nach_der_frist` ·
+`unbekannte_felder_teilen_sich_einen_arbeiter`. AK21 (Upload blockiert weder Punkte noch
+Pings) ist nur über die Wächter-Tests und den Aufbau belegt, nicht mit einem langsamen Upload.
 **Doku:** `docs/cloud-relay.md` (Host-Schleife, Ergebnis-Reihenfolge), `docs/roadmap.md`,
 `docs/changelog.md`; neue Zeile „Relay härten" in der Doku-Tabelle von `CLAUDE.md`
 (angelegt hier, ergänzt in PR 2–9).

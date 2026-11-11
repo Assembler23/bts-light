@@ -11,13 +11,17 @@
 //! [`process_result`]-Logik wie im LAN-Modus nach BTP geschrieben.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
+use tokio_tungstenite::WebSocketStream;
 
 use relay_proto::{
     AdUpload, AnnounceState, CourtBrief, HostFrame, MonitorControl, MonitorDeviceInfo,
@@ -74,6 +78,339 @@ fn is_stale(last: tokio::time::Instant, now: tokio::time::Instant, threshold: Du
 const MAX_UPLOAD_ADS: usize = 24;
 const MAX_UPLOAD_TOTAL: usize = 12 * 1024 * 1024;
 
+/// Frist je Nachricht im Schreiber-Task. Hängt das Senden länger, gilt die
+/// Verbindung als tot (der Relay hätte den Host nach 15 s Stille ohnehin
+/// verworfen) — die Sitzung endet und `run` verbindet neu.
+const SENDE_FRIST: Duration = Duration::from_secs(20);
+
+/// Wartende Ergebnisse je Feld (zusätzlich zu dem einen in Arbeit). Ein
+/// Feld hat ein laufendes Spiel; mehr als der 8-s-Retry desselben
+/// Ergebnisses staut sich im Normalfall nie.
+const ERGEBNIS_SCHLANGE: usize = 4;
+
+/// Sammel-Schlüssel für Ergebnisse an ein Feld, das dieser Turnier-PC gar
+/// nicht kennt. Die CourtID kommt vom Tablet über den Relay und ist damit
+/// fremdbestimmt — ohne den Sammler könnte ein Fremder beliebig viele
+/// Arbeiter-Tasks anlegen. `process_result` lehnt solche Ergebnisse ohnehin
+/// ab (R5); sie laufen nur nacheinander statt nebeneinander.
+const SAMMEL_FELD: i64 = i64::MIN;
+
+/// Frist für den Werbe-Upload. Bis zu 12 MB Bilder über einen Handy-Hotspot
+/// passen nicht in die 15 s des gemeinsamen HTTP-Clients — der Upload
+/// scheiterte dann alle 30 s neu.
+const UPLOAD_FRIST: Duration = Duration::from_secs(120);
+
+/// Was mit einem Ergebnis geschieht — im Betrieb [`process_result`], im Test
+/// eine Attrappe (die Sitzung soll ohne BTP prüfbar sein).
+type ErgebnisFuture = Pin<Box<dyn Future<Output = relay_proto::ResultResponse> + Send>>;
+type ErgebnisVerarbeiter = Arc<dyn Fn(Arc<ServerCtx>, ResultBody) -> ErgebnisFuture + Send + Sync>;
+
+/// Der echte Weg: dieselbe Prüfung und derselbe BTP-Write wie im
+/// Hallennetz (R5) — unverändert, nur nicht mehr in der Lese-Schleife.
+fn ergebnis_ueber_process_result() -> ErgebnisVerarbeiter {
+    Arc::new(|ctx, body| Box::pin(async move { process_result(&ctx, &body).await }))
+}
+
+/// Ein Ergebnis auf dem Weg zum Arbeiter seines Felds.
+struct ErgebnisAuftrag {
+    req_id: u64,
+    body: ResultBody,
+    /// Ausgangskanal der Sitzung, aus der der Auftrag kam. Die Quittung
+    /// geht **nur** dorthin: Der Relay zählt `req_id` je Namespace ab 1 —
+    /// nach seinem Neustart könnte eine alte Nummer über eine neue Sitzung
+    /// ein fremdes Ergebnis mit „ok" quittieren. Ist die Sitzung beendet,
+    /// verpufft die Quittung; das Tablet wiederholt und trifft die
+    /// Idempotenz (ADR 0018).
+    antwort: mpsc::UnboundedSender<WsMessage>,
+}
+
+/// Ergebnis-Arbeiter je Feld (ADR 0091): Ergebnisse eines Felds laufen
+/// strikt nacheinander, Felder untereinander nebeneinander. Gehört `run`,
+/// nicht der Sitzung — ein BTP-Write läuft auch dann zu Ende, wenn die
+/// Verbindung mittendrin abreißt.
+///
+/// Warum kein blankes `tokio::spawn` je Ergebnis: Der 8-s-Retry des Tablets
+/// liefe dann **neben** dem ersten Versuch. Beide sähen das Spiel noch auf
+/// dem Feld und schrieben beide nach BTP.
+struct ErgebnisArbeiter {
+    verarbeiter: ErgebnisVerarbeiter,
+    felder: Mutex<HashMap<i64, mpsc::Sender<ErgebnisAuftrag>>>,
+    tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+}
+
+impl ErgebnisArbeiter {
+    fn new(verarbeiter: ErgebnisVerarbeiter) -> Self {
+        Self {
+            verarbeiter,
+            felder: Mutex::new(HashMap::new()),
+            tasks: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Reiht ein Ergebnis hinter die schon wartenden seines Felds. Ist die
+    /// Schlange voll, kommt sofort eine **wiederholbare** Absage — das
+    /// Tablet behält sein Ergebnis und versucht es erneut.
+    fn einreihen(&self, ctx: &Arc<ServerCtx>, auftrag: ErgebnisAuftrag) {
+        let court = auftrag.body.court_id;
+        let schluessel = if ctx.tablet.courts().iter().any(|c| c.id == court) {
+            court
+        } else {
+            SAMMEL_FELD
+        };
+        let mut auftrag = auftrag;
+        for versuch in 0..2 {
+            let sender = {
+                let mut felder = self.felder.lock().unwrap();
+                felder
+                    .entry(schluessel)
+                    .or_insert_with(|| {
+                        let (tx, rx) = mpsc::channel(ERGEBNIS_SCHLANGE);
+                        let task =
+                            tokio::spawn(feld_arbeiter(ctx.clone(), self.verarbeiter.clone(), rx));
+                        let mut tasks = self.tasks.lock().unwrap();
+                        tasks.retain(|t| !t.is_finished());
+                        tasks.push(task);
+                        tx
+                    })
+                    .clone()
+            };
+            match sender.try_send(auftrag) {
+                Ok(()) => return,
+                // Der Arbeiter dieses Felds lebt nicht mehr (Panik im
+                // Ergebnis-Weg). Ohne Ersatz bekäme das Feld bis zum Neustart
+                // der Übertragung nur noch Absagen.
+                Err(mpsc::error::TrySendError::Closed(a)) if versuch == 0 => {
+                    tracing::error!(
+                        "Ergebnis-Arbeiter für Feld {court} war beendet — neu gestartet"
+                    );
+                    self.felder.lock().unwrap().remove(&schluessel);
+                    auftrag = a;
+                }
+                Err(mpsc::error::TrySendError::Full(a) | mpsc::error::TrySendError::Closed(a)) => {
+                    tracing::warn!(
+                        "Ergebnis für Feld {court} abgewiesen: Es warten schon {ERGEBNIS_SCHLANGE} Ergebnisse"
+                    );
+                    quittieren(
+                        &a.antwort,
+                        a.req_id,
+                        relay_proto::ResultResponse::err(
+                            "Der Turnier-PC verarbeitet gerade ein Ergebnis für dieses Feld. Bitte gleich noch einmal senden.",
+                        ),
+                    );
+                    return;
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ErgebnisArbeiter {
+    fn drop(&mut self) {
+        // `run` endet nur durch Abbruch (`stop_sync`) — dann sollen auch die
+        // Arbeiter nicht weiterleben.
+        for task in self.tasks.lock().unwrap().drain(..) {
+            task.abort();
+        }
+    }
+}
+
+/// Der Arbeiter eines Felds: ein Ergebnis nach dem anderen.
+async fn feld_arbeiter(
+    ctx: Arc<ServerCtx>,
+    verarbeiter: ErgebnisVerarbeiter,
+    mut rx: mpsc::Receiver<ErgebnisAuftrag>,
+) {
+    while let Some(auftrag) = rx.recv().await {
+        let antwort = verarbeiter(ctx.clone(), auftrag.body).await;
+        quittieren(&auftrag.antwort, auftrag.req_id, antwort);
+    }
+}
+
+/// Schickt die Quittung an die Sitzung des Auftrags (oder ins Leere, wenn
+/// es sie nicht mehr gibt).
+fn quittieren(
+    antwort: &mpsc::UnboundedSender<WsMessage>,
+    req_id: u64,
+    resp: relay_proto::ResultResponse,
+) {
+    let _ = antwort.send(text(&HostFrame::ResultAck {
+        req_id,
+        ok: resp.ok,
+        error: resp.error,
+        permanent: resp.permanent,
+        superseded: resp.superseded,
+    }));
+}
+
+/// Pause nach dem n-ten Fehlversuch in Folge: 30 s, 60 s, 120 s, 240 s,
+/// dann 5 min.
+fn pause_nach_fehlversuch(fehlversuche: u32) -> Duration {
+    let stufe = fehlversuche.saturating_sub(1).min(4);
+    Duration::from_secs((30u64 << stufe).min(300))
+}
+
+/// „Läuft schon"-Wächter für eine Hintergrund-Aufgabe (Werbe-Upload,
+/// Steuerungs-Abgleich): höchstens ein Lauf zugleich — auch über die
+/// Sitzungen eines `run` hinweg (Reconnects), deshalb gehört er `run`. Ein
+/// Neustart der Übertragung beginnt mit frischen Wächtern; die alten Tasks
+/// bricht [`Dienste`] dabei ab. Mit `mit_pausen` wartet er nach einem
+/// Fehlschlag wachsend länger, statt im Takt neu anzurennen.
+struct LaufWacht {
+    mit_pausen: bool,
+    stand: Mutex<LaufStand>,
+}
+
+#[derive(Default)]
+struct LaufStand {
+    laeuft: bool,
+    fehlversuche: u32,
+    fruehestens: Option<tokio::time::Instant>,
+}
+
+impl LaufWacht {
+    fn new(mit_pausen: bool) -> Arc<Self> {
+        Arc::new(Self {
+            mit_pausen,
+            stand: Mutex::new(LaufStand::default()),
+        })
+    }
+
+    /// Beansprucht den Lauf. `None`, solange einer läuft oder die Pause
+    /// nach einem Fehlschlag noch nicht um ist.
+    fn beginnen(self: &Arc<Self>, jetzt: tokio::time::Instant) -> Option<Lauf> {
+        let mut stand = self.stand.lock().unwrap();
+        if stand.laeuft || stand.fruehestens.is_some_and(|t| jetzt < t) {
+            return None;
+        }
+        stand.laeuft = true;
+        Some(Lauf {
+            wacht: self.clone(),
+            gemeldet: false,
+        })
+    }
+}
+
+impl LaufWacht {
+    /// Vergisst die Pause nach Fehlschlägen — zu Beginn einer Sitzung: Ein
+    /// frisch gestarteter Relay hat keine Bilder mehr, und die Monitore
+    /// sollen nicht bis zu fünf Minuten ohne Werbung bleiben, nur weil der
+    /// letzte Versuch der alten Verbindung scheiterte.
+    fn pause_vergessen(&self) {
+        let mut stand = self.stand.lock().unwrap();
+        stand.fehlversuche = 0;
+        stand.fruehestens = None;
+    }
+}
+
+/// Ein laufender Durchgang. Gibt den Wächter beim Fallenlassen wieder frei
+/// — auch wenn der Task abgebrochen wird, bleibt nichts hängen.
+struct Lauf {
+    wacht: Arc<LaufWacht>,
+    gemeldet: bool,
+}
+
+impl Lauf {
+    /// Meldet das Ende des Durchgangs.
+    fn fertig(mut self, ok: bool, jetzt: tokio::time::Instant) {
+        self.gemeldet = true;
+        let mut stand = self.wacht.stand.lock().unwrap();
+        stand.laeuft = false;
+        if ok || !self.wacht.mit_pausen {
+            stand.fehlversuche = 0;
+            stand.fruehestens = None;
+        } else {
+            stand.fehlversuche = stand.fehlversuche.saturating_add(1);
+            stand.fruehestens = Some(jetzt + pause_nach_fehlversuch(stand.fehlversuche));
+        }
+    }
+}
+
+impl Drop for Lauf {
+    fn drop(&mut self) {
+        if !self.gemeldet {
+            self.wacht.stand.lock().unwrap().laeuft = false;
+        }
+    }
+}
+
+/// Was über alle Sitzungen hinweg lebt (gehört `run`).
+struct Dienste {
+    ergebnisse: ErgebnisArbeiter,
+    upload: Arc<LaufWacht>,
+    steuerung: Arc<LaufWacht>,
+    /// Laufende Upload-/Abgleich-Tasks. Sie enden mit `run` (siehe `Drop`):
+    /// Sonst liefe nach dem Stoppen oder dem Speichern der Einstellungen ein
+    /// Upload bis zu zwei Minuten mit dem alten Stand weiter, und ein alter
+    /// Abgleich könnte die Geräteliste der neuen Übertragung überschreiben.
+    hintergrund: Mutex<Vec<tokio::task::AbortHandle>>,
+}
+
+impl Dienste {
+    fn new(verarbeiter: ErgebnisVerarbeiter) -> Self {
+        Self {
+            ergebnisse: ErgebnisArbeiter::new(verarbeiter),
+            upload: LaufWacht::new(true),
+            steuerung: LaufWacht::new(false),
+            hintergrund: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Startet eine Hintergrund-Aufgabe, die spätestens mit `run` endet.
+    fn im_hintergrund(&self, aufgabe: impl Future<Output = ()> + Send + 'static) {
+        let mut laufende = self.hintergrund.lock().unwrap();
+        laufende.retain(|t| !t.is_finished());
+        laufende.push(tokio::spawn(aufgabe).abort_handle());
+    }
+}
+
+impl Drop for Dienste {
+    fn drop(&mut self) {
+        for task in self.hintergrund.lock().unwrap().drain(..) {
+            task.abort();
+        }
+    }
+}
+
+/// Bricht einen Task ab, sobald der Besitzer endet — auch wenn dessen
+/// Future nur fallengelassen wird.
+struct Abbrecher(tokio::task::AbortHandle);
+
+impl Drop for Abbrecher {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Schreiber-Task: besitzt die Sende-Hälfte und leert den Ausgangskanal.
+/// Getrennt von der Lese-Schleife, damit eine große oder zäh abfließende
+/// Nachricht das Lesen (und damit das Lebenszeichen) nicht aufhält. Endet
+/// mit dem Grund, sobald das Senden scheitert oder länger als
+/// [`SENDE_FRIST`] hängt.
+fn schreiber_starten<K>(
+    mut sink: K,
+    mut rx: mpsc::UnboundedReceiver<WsMessage>,
+) -> tokio::task::JoinHandle<String>
+where
+    K: futures_util::Sink<WsMessage> + Unpin + Send + 'static,
+    K::Error: std::fmt::Display,
+{
+    tokio::spawn(async move {
+        while let Some(m) = rx.recv().await {
+            match tokio::time::timeout(SENDE_FRIST, sink.send(m)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return e.to_string(),
+                Err(_) => {
+                    return format!(
+                        "Senden an den Relay hing länger als {} s",
+                        SENDE_FRIST.as_secs()
+                    )
+                }
+            }
+        }
+        "Ausgangskanal geschlossen".to_string()
+    })
+}
+
 /// Verbindet bts-light dauerhaft zum Cloud-Relay – mit Reconnect-Backoff
 /// (1 s → 30 s). Läuft, bis der Task abgebrochen wird (`stop_sync`).
 pub async fn run(ctx: Arc<ServerCtx>, install_id: String) {
@@ -94,8 +431,20 @@ pub async fn run(ctx: Arc<ServerCtx>, install_id: String) {
     // nichts aus (der Stand ist unverändert), ein Befehl während des Abrisses
     // wird beim Wiederverbinden nachgeholt.
     let mut reload_wacht = crate::tablet::state::ReloadWacht::beim_verbinden(&ctx.tablet);
+    // Ergebnis-Arbeiter und „läuft schon"-Wächter leben über die Sitzungen
+    // hinweg: Ein BTP-Write oder Upload endet nicht mit der Verbindung.
+    let dienste = Dienste::new(ergebnis_ueber_process_result());
     loop {
-        if let Err(e) = serve(&ctx, &url, &install_id, &mut backoff, &mut reload_wacht).await {
+        if let Err(e) = serve(
+            &ctx,
+            &url,
+            &install_id,
+            &mut backoff,
+            &mut reload_wacht,
+            &dienste,
+        )
+        .await
+        {
             tracing::warn!("Relay-Verbindung beendet: {e}");
         }
         tracing::info!("Relay-Reconnect in {backoff}s");
@@ -112,15 +461,41 @@ async fn serve(
     install_id: &str,
     backoff: &mut u64,
     reload_wacht: &mut crate::tablet::state::ReloadWacht,
+    dienste: &Dienste,
 ) -> Result<(), String> {
     let (stream, _) = tokio_tungstenite::connect_async(url)
         .await
         .map_err(|e| e.to_string())?;
     *backoff = 1;
     tracing::info!("Mit Cloud-Relay verbunden");
+    sitzung_fahren(ctx, stream, install_id, reload_wacht, dienste).await
+}
 
-    let (mut sink, mut read) = stream.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
+/// Der Kern einer Sitzung, ohne den Verbindungsaufbau — generisch über den
+/// Strom, damit Tests ihn über `tokio::io::duplex` mit echtem
+/// WebSocket-Rahmen fahren können.
+///
+/// Die Schleife liest, verteilt und tickt; sie wartet auf nichts Langes:
+/// Gesendet wird im Schreiber-Task, Ergebnisse laufen über die Arbeiter je
+/// Feld, Upload und Steuerungs-Abgleich in eigenen Tasks. Solange sie
+/// früher inline warteten (BTP bis 15 s und mehr, Upload bis 15 s), kam aus
+/// dieser Schleife nichts heraus — nicht einmal das Pong —, und der Relay
+/// warf den Turnier-PC nach 15 s Stille ab (trifft alle Cloud-Felder).
+async fn sitzung_fahren<S>(
+    ctx: &Arc<ServerCtx>,
+    stream: WebSocketStream<S>,
+    install_id: &str,
+    reload_wacht: &mut crate::tablet::state::ReloadWacht,
+    dienste: &Dienste,
+) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (sink, mut read) = stream.split();
+    let (tx, rx) = mpsc::unbounded_channel::<WsMessage>();
+    let mut schreiber = schreiber_starten(sink, rx);
+    dienste.upload.pause_vergessen();
+    let _schreiber_ende = Abbrecher(schreiber.abort_handle());
     // CourtID → zuletzt ans Tablet gemeldete Match-ID. Verhindert, dass der
     // 2-s-Ticker unverändert dasselbe Match immer wieder pusht.
     let mut last_match: HashMap<i64, Option<CourtPushKey>> = HashMap::new();
@@ -139,7 +514,9 @@ async fn serve(
     // direkt nach dem Verbinden hochladen, danach nur bei Änderung.
     let mut monitor_ticker = tokio::time::interval(MONITOR_TICK);
     monitor_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut monitor_fp: Option<String> = None;
+    // Fingerabdruck je Sitzung (nach einem Relay-Neustart hat der Relay die
+    // Bilder nicht mehr); der Upload-Task setzt ihn bei Erfolg.
+    let monitor_fp: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     // Fingerabdruck der zuletzt gesendeten „aufgerufene Spiele"-Liste
     // (Cluster C Stufe 2) — `None` erzwingt das erste Senden nach dem
     // Verbinden (auch für die Wiederbefüllung nach einem Reconnect).
@@ -150,7 +527,7 @@ async fn serve(
     // Geräte-Steuerung: Feld-Zuweisungen/Befehle pushen, Geräteliste holen.
     let mut control_ticker = tokio::time::interval(CONTROL_TICK);
     control_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut control_fp = String::new();
+    let control_fp: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     // Read-Idle-Wächter (Hebel D): erkennt eine half-open Host-Verbindung an
     // ausbleibendem Empfang. Der Ticker feuert dichter als die Schwelle
     // (~5 s bei RELAY_READ_IDLE = 15 s), damit die Stille spätestens ~15 s
@@ -188,6 +565,12 @@ async fn serve(
 
     loop {
         tokio::select! {
+            // Feste Reihenfolge, Lesen zuerst: Liegt ein Frame bereit, wird
+            // er gelesen, BEVOR der Idle-Wächter urteilt. Bei zufälliger
+            // Wahl beendete der Wächter die Sitzung nach jeder längeren
+            // Pause der Schleife selbst — obwohl das Lebenszeichen des
+            // Relays schon im Puffer lag.
+            biased;
             incoming = read.next() => {
                 let Some(msg) = incoming else { break };
                 let msg = msg.map_err(|e| e.to_string())?;
@@ -198,7 +581,7 @@ async fn serve(
                 match msg {
                     WsMessage::Text(t) => {
                         if let Ok(frame) = serde_json::from_str::<RelayFrame>(t.as_str()) {
-                            handle_frame(ctx, frame, &tx, &mut last_match, &mut score_fp).await;
+                            handle_frame(ctx, frame, &tx, &mut last_match, &mut score_fp, dienste).await;
                         }
                     }
                     WsMessage::Ping(p) => { let _ = tx.send(WsMessage::Pong(p)); }
@@ -206,11 +589,8 @@ async fn serve(
                     _ => {}
                 }
             }
-            outgoing = rx.recv() => {
-                match outgoing {
-                    Some(m) => sink.send(m).await.map_err(|e| e.to_string())?,
-                    None => break,
-                }
+            grund = &mut schreiber => {
+                return Err(grund.unwrap_or_else(|e| format!("Schreiber-Task beendet: {e}")));
             }
             _ = ticker.tick() => {
                 // Fernbefehl an die Cloud-Tablets weiterreichen (Spec
@@ -242,7 +622,7 @@ async fn serve(
                 push_meetingpoint(ctx, &tx, &mut meetingpoint_fp);
             }
             _ = monitor_ticker.tick() => {
-                maybe_upload_monitor(ctx, install_id, &mut monitor_fp).await;
+                upload_anstossen(ctx, install_id, &monitor_fp, dienste);
                 // Feld-Liste fürs Cloud-Feldwechsel-Menü mitschicken (selten
                 // veränderlich; erster Tick feuert sofort nach dem Verbinden).
                 push_courts(ctx, &tx);
@@ -251,7 +631,7 @@ async fn serve(
                 push_prepared(ctx, &tx, &mut prepared_fp);
             }
             _ = control_ticker.tick() => {
-                sync_monitor_control(ctx, install_id, &mut control_fp).await;
+                steuerung_anstossen(ctx, install_id, &control_fp, dienste);
             }
             nudge = nudge_rx.recv() => {
                 // Feld hat sich geändert (Punkt, Zustand, Match): Stand
@@ -278,22 +658,63 @@ async fn serve(
     Ok(())
 }
 
-/// Lädt den Court-Monitor-Datensatz (Werbung + Anzeige-Konfiguration) zum
-/// Relay hoch, falls er sich seit dem letzten erfolgreichen Upload geändert
-/// hat. Ein Fingerabdruck (Konfiguration + Werbebild-Namen/Größen/Zeiten)
-/// erspart unnötige Uploads der Bilddaten.
-async fn maybe_upload_monitor(ctx: &ServerCtx, install_id: &str, last_fp: &mut Option<String>) {
+/// Stößt den Upload des Court-Monitor-Datensatzes (Werbung +
+/// Anzeige-Konfiguration) an, falls er sich seit dem letzten erfolgreichen
+/// Upload dieser Sitzung geändert hat. Ein Fingerabdruck (Konfiguration +
+/// Werbebild-Namen/Größen/Zeiten) erspart unnötige Uploads der Bilddaten.
+///
+/// Der Upload läuft in einem eigenen Task: Bis zu 12 MB über einen
+/// schmalen Uplink dürfen weder Punkte noch Pings aufhalten. Der Wächter
+/// lässt höchstens einen zugleich zu und bremst nach Fehlschlägen.
+fn upload_anstossen(
+    ctx: &Arc<ServerCtx>,
+    install_id: &str,
+    zuletzt: &Arc<Mutex<Option<String>>>,
+    dienste: &Dienste,
+) {
     let fp = monitor_fingerprint(ctx);
-    if last_fp.as_deref() == Some(fp.as_str()) {
+    if zuletzt.lock().unwrap().as_deref() == Some(fp.as_str()) {
         return;
     }
-    match upload_monitor(ctx, install_id).await {
-        Ok(()) => {
-            tracing::info!("Court-Monitor-Datensatz zum Relay hochgeladen");
-            *last_fp = Some(fp);
+    let Some(lauf) = dienste.upload.beginnen(tokio::time::Instant::now()) else {
+        return;
+    };
+    let ctx = ctx.clone();
+    let install_id = install_id.to_string();
+    let zuletzt = zuletzt.clone();
+    dienste.im_hintergrund(async move {
+        let ergebnis = upload_monitor(&ctx, &install_id).await;
+        let ok = ergebnis.is_ok();
+        match ergebnis {
+            Ok(()) => {
+                tracing::info!("Court-Monitor-Datensatz zum Relay hochgeladen");
+                *zuletzt.lock().unwrap() = Some(fp);
+            }
+            Err(e) => tracing::warn!("Court-Monitor-Upload fehlgeschlagen: {e}"),
         }
-        Err(e) => tracing::warn!("Court-Monitor-Upload fehlgeschlagen: {e}"),
-    }
+        lauf.fertig(ok, tokio::time::Instant::now());
+    });
+}
+
+/// Stößt den Abgleich der Monitor-Geräte-Steuerung an — in einem eigenen
+/// Task, höchstens einer zugleich (zwei HTTP-Anfragen nacheinander, die bei
+/// zähem Netz je bis zur Frist des Clients dauern).
+fn steuerung_anstossen(
+    ctx: &Arc<ServerCtx>,
+    install_id: &str,
+    zuletzt: &Arc<Mutex<String>>,
+    dienste: &Dienste,
+) {
+    let Some(lauf) = dienste.steuerung.beginnen(tokio::time::Instant::now()) else {
+        return;
+    };
+    let ctx = ctx.clone();
+    let install_id = install_id.to_string();
+    let zuletzt = zuletzt.clone();
+    dienste.im_hintergrund(async move {
+        sync_monitor_control(&ctx, &install_id, &zuletzt).await;
+        lauf.fertig(true, tokio::time::Instant::now());
+    });
 }
 
 /// Fingerabdruck der Court-Monitor-Daten – ändert sich, sobald die
@@ -424,6 +845,7 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
     let resp = ctx
         .http
         .post(&url)
+        .timeout(UPLOAD_FRIST)
         .json(&upload)
         .send()
         .await
@@ -449,7 +871,7 @@ fn ohne_nur_lan_ziele(
 /// Gleicht die Monitor-Geräte-Steuerung mit dem Relay ab: pusht die
 /// Feld-Zuweisungen + Fernbefehle (nur bei Änderung) und holt die
 /// aktuelle Geräteliste für die „Court-Monitore"-Seite.
-async fn sync_monitor_control(ctx: &ServerCtx, install_id: &str, last_fp: &mut String) {
+async fn sync_monitor_control(ctx: &ServerCtx, install_id: &str, last_fp: &Mutex<String>) {
     // Volle Anzeige-Ziele in `targets` (Court, Info-Übersicht/Vorbereitung/
     // Sieger, Werbung, Kombi) — so kann der Cloud-Monitor auch Nicht-Court-
     // Sichten umleiten. `assignments` (nur CourtID) bleibt zusätzlich befüllt,
@@ -465,10 +887,11 @@ async fn sync_monitor_control(ctx: &ServerCtx, install_id: &str, last_fp: &mut S
         commands: ctx.tablet.monitor_commands(),
     };
     let fp = serde_json::to_string(&control).unwrap_or_default();
-    if fp != *last_fp {
+    let geaendert = fp != *last_fp.lock().unwrap();
+    if geaendert {
         let url = format!("{}/{install_id}/monitor/control", relay_http());
         match ctx.http.post(&url).json(&control).send().await {
-            Ok(r) if r.status().is_success() => *last_fp = fp,
+            Ok(r) if r.status().is_success() => *last_fp.lock().unwrap() = fp,
             Ok(r) => tracing::warn!("Monitor-Steuerung: HTTP {}", r.status()),
             Err(e) => tracing::warn!("Monitor-Steuerung fehlgeschlagen: {e}"),
         }
@@ -489,6 +912,7 @@ async fn handle_frame(
     tx: &mpsc::UnboundedSender<WsMessage>,
     last_match: &mut HashMap<i64, Option<CourtPushKey>>,
     score_fp: &mut HashMap<i64, HostFrame>,
+    dienste: &Dienste,
 ) {
     match frame {
         RelayFrame::TabletConnected { court_id, .. } => {
@@ -555,14 +979,17 @@ async fn handle_frame(
                 winner,
                 cascade_walkover,
             };
-            let resp = process_result(ctx, &body).await;
-            let _ = tx.send(text(&HostFrame::ResultAck {
-                req_id,
-                ok: resp.ok,
-                error: resp.error,
-                permanent: resp.permanent,
-                superseded: resp.superseded,
-            }));
+            // Nicht hier abwarten: Der Write nach BTP dauert bei trägem BTP
+            // oder laufender TP-Kopie 15 s und mehr. Der Arbeiter des Felds
+            // schreibt und quittiert an DIESE Sitzung (ADR 0091).
+            dienste.ergebnisse.einreihen(
+                ctx,
+                ErgebnisAuftrag {
+                    req_id,
+                    body,
+                    antwort: tx.clone(),
+                },
+            );
         }
         // Meetingpoint-Check-in aus der Cloud: dieselbe Prüfung wie im
         // Hallennetz (ADR 0074, R5-Analogie). Rein lokal, kein BTP-Write.
@@ -707,31 +1134,35 @@ async fn handle_frame(
                 .ereignis_sync_annehmen(court_id, match_id, events);
         }
         // Zettel-Abruf eines TL-Geräts (ADR 0039): Antwort direkt aus den
-        // Stores. Wie beim Punktverlauf ohne eigenen Task — der Join ist
-        // reine Rechenarbeit, kein BTP-Zugriff.
+        // Stores, kein BTP-Zugriff — aber bis zu 40 Blätter sind spürbare
+        // Rechenarbeit, deshalb abseits der Frame-Schleife.
         RelayFrame::ScoresheetRequest {
             req_id,
             match_ids,
             vorab,
         } => {
-            let logo =
-                crate::tablet::scoresheet::logo_data_uri(&ctx.app_config_arc().tournament_logo);
-            let modus = if vorab {
-                crate::tablet::scoresheet::Modus::Vorab
-            } else {
-                crate::tablet::scoresheet::Modus::Normal
-            };
-            let html = crate::tablet::scoresheet::html_fuer(
-                &ctx.tablet,
-                logo.as_deref(),
-                modus,
-                &match_ids,
-            );
-            let _ = tx.send(text(&HostFrame::ScoresheetData {
-                req_id,
-                found: html.is_some(),
-                html: html.unwrap_or_default(),
-            }));
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let logo =
+                    crate::tablet::scoresheet::logo_data_uri(&ctx.app_config_arc().tournament_logo);
+                let modus = if vorab {
+                    crate::tablet::scoresheet::Modus::Vorab
+                } else {
+                    crate::tablet::scoresheet::Modus::Normal
+                };
+                let html = crate::tablet::scoresheet::html_fuer(
+                    &ctx.tablet,
+                    logo.as_deref(),
+                    modus,
+                    &match_ids,
+                );
+                let _ = tx.send(text(&HostFrame::ScoresheetData {
+                    req_id,
+                    found: html.is_some(),
+                    html: html.unwrap_or_default(),
+                }));
+            });
         }
         RelayFrame::TimelineRequest { req_id, match_id } => {
             let json = ctx.tablet.timeline_store().timeline_json(match_id);
@@ -1937,5 +2368,477 @@ mod tests {
         let json = serde_json::to_string(&prepared[0]).unwrap();
         assert!(json.contains("\"seedB\":\"5/8\""), "{json}");
         assert!(!json.contains("seedA"), "{json}");
+    }
+
+    // ── Host-Schleife entkoppelt (Spec relay-haerten, PR 1, ADR 0091) ──────
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Kontext mit zwei bekannten Feldern (CourtID 1 und 2).
+    fn ctx_zwei_felder() -> Arc<ServerCtx> {
+        let ctx = ctx_with(vec![]);
+        let mut snap = snapshot(vec![]);
+        snap.court_infos = vec![
+            crate::btp::model::BtpCourt {
+                id: 1,
+                name: "1".into(),
+                location_id: None,
+                sort_order: 1,
+            },
+            crate::btp::model::BtpCourt {
+                id: 2,
+                name: "2".into(),
+                location_id: None,
+                sort_order: 2,
+            },
+        ];
+        ctx.tablet.set_snapshot(snap);
+        Arc::new(ctx)
+    }
+
+    fn ergebnis(court_id: i64, match_id: i64) -> ResultBody {
+        serde_json::from_value(serde_json::json!({
+            "matchId": match_id, "courtId": court_id, "sets": []
+        }))
+        .unwrap()
+    }
+
+    /// Was die Attrappe des Ergebnis-Verarbeiters gesehen hat.
+    #[derive(Default)]
+    struct Mess {
+        laufend: AtomicUsize,
+        hoechstens: AtomicUsize,
+        folge: Mutex<Vec<i64>>,
+        fertig: Mutex<Vec<i64>>,
+    }
+
+    /// Verarbeiter, der `dauer` lang „nach BTP schreibt".
+    fn attrappe(mess: Arc<Mess>, dauer: Duration) -> ErgebnisVerarbeiter {
+        Arc::new(move |_ctx, body| {
+            let mess = mess.clone();
+            Box::pin(async move {
+                let n = mess.laufend.fetch_add(1, Ordering::SeqCst) + 1;
+                mess.hoechstens.fetch_max(n, Ordering::SeqCst);
+                mess.folge.lock().unwrap().push(body.match_id);
+                tokio::time::sleep(dauer).await;
+                mess.laufend.fetch_sub(1, Ordering::SeqCst);
+                mess.fertig.lock().unwrap().push(body.match_id);
+                relay_proto::ResultResponse::ok()
+            })
+        })
+    }
+
+    fn auftrag(
+        req_id: u64,
+        court: i64,
+        match_id: i64,
+        antwort: &mpsc::UnboundedSender<WsMessage>,
+    ) -> ErgebnisAuftrag {
+        ErgebnisAuftrag {
+            req_id,
+            body: ergebnis(court, match_id),
+            antwort: antwort.clone(),
+        }
+    }
+
+    /// Liest die nächste Quittung: (req_id, ok, permanent).
+    async fn naechste_quittung(rx: &mut mpsc::UnboundedReceiver<WsMessage>) -> (u64, bool, bool) {
+        let msg = rx.recv().await.expect("Quittung");
+        match serde_json::from_str::<HostFrame>(&text_of(&msg)).unwrap() {
+            HostFrame::ResultAck {
+                req_id,
+                ok,
+                permanent,
+                ..
+            } => (req_id, ok, permanent),
+            anderes => panic!("keine Quittung: {anderes:?}"),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ergebnisse_eines_felds_laufen_nacheinander() {
+        let ctx = ctx_zwei_felder();
+        let mess = Arc::new(Mess::default());
+        let arbeiter = ErgebnisArbeiter::new(attrappe(mess.clone(), Duration::from_secs(10)));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        arbeiter.einreihen(&ctx, auftrag(1, 1, 100, &tx));
+        arbeiter.einreihen(&ctx, auftrag(2, 1, 101, &tx));
+        assert_eq!(naechste_quittung(&mut rx).await, (1, true, false));
+        assert_eq!(naechste_quittung(&mut rx).await, (2, true, false));
+        assert_eq!(
+            mess.hoechstens.load(Ordering::SeqCst),
+            1,
+            "nie zwei zugleich"
+        );
+        assert_eq!(*mess.folge.lock().unwrap(), vec![100, 101]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn felder_laufen_nebeneinander() {
+        let ctx = ctx_zwei_felder();
+        let mess = Arc::new(Mess::default());
+        let arbeiter = ErgebnisArbeiter::new(attrappe(mess.clone(), Duration::from_secs(10)));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let start = tokio::time::Instant::now();
+        arbeiter.einreihen(&ctx, auftrag(1, 1, 100, &tx));
+        arbeiter.einreihen(&ctx, auftrag(2, 2, 200, &tx));
+        naechste_quittung(&mut rx).await;
+        naechste_quittung(&mut rx).await;
+        assert_eq!(mess.hoechstens.load(Ordering::SeqCst), 2);
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "zwei Felder brauchen nicht die doppelte Zeit"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unbekannte_felder_teilen_sich_einen_arbeiter() {
+        // Die CourtID kommt vom Tablet — ein Fremder darf damit nicht
+        // beliebig viele Arbeiter-Tasks anlegen.
+        let ctx = ctx_zwei_felder();
+        let mess = Arc::new(Mess::default());
+        let arbeiter = ErgebnisArbeiter::new(attrappe(mess.clone(), Duration::from_secs(1)));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        for (i, court) in [9001, 9002, 9003].into_iter().enumerate() {
+            arbeiter.einreihen(&ctx, auftrag(i as u64, court, 1, &tx));
+        }
+        for _ in 0..3 {
+            naechste_quittung(&mut rx).await;
+        }
+        assert_eq!(mess.hoechstens.load(Ordering::SeqCst), 1);
+        assert_eq!(arbeiter.tasks.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_hinter_dem_ersten_versuch_wird_quittiert() {
+        // Der 8-s-Retry des Tablets trifft ein, während der erste Versuch
+        // noch schreibt: Er läuft DANACH (und trifft dann in
+        // `process_result` die Idempotenz), nicht daneben.
+        let ctx = ctx_zwei_felder();
+        let mess = Arc::new(Mess::default());
+        let arbeiter = ErgebnisArbeiter::new(attrappe(mess.clone(), Duration::from_secs(20)));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        arbeiter.einreihen(&ctx, auftrag(7, 1, 100, &tx));
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        arbeiter.einreihen(&ctx, auftrag(8, 1, 100, &tx));
+        assert_eq!(naechste_quittung(&mut rx).await.0, 7);
+        assert_eq!(
+            *mess.fertig.lock().unwrap(),
+            vec![100],
+            "der Retry beginnt erst nach dem Ende des ersten Versuchs"
+        );
+        assert_eq!(naechste_quittung(&mut rx).await.0, 8);
+        assert_eq!(mess.hoechstens.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quittung_geht_nie_in_eine_neue_sitzung() {
+        let ctx = ctx_zwei_felder();
+        let mess = Arc::new(Mess::default());
+        let arbeiter = ErgebnisArbeiter::new(attrappe(mess.clone(), Duration::from_secs(10)));
+        let (tx_alt, rx_alt) = mpsc::unbounded_channel();
+        arbeiter.einreihen(&ctx, auftrag(1, 1, 100, &tx_alt));
+        // Verbindung reißt mitten im Write ab; eine neue Sitzung entsteht und
+        // schickt demselben Arbeiter ein weiteres Ergebnis — mit derselben
+        // Nummer, wie nach einem Relay-Neustart.
+        drop(rx_alt);
+        drop(tx_alt);
+        let (tx_neu, mut rx_neu) = mpsc::unbounded_channel::<WsMessage>();
+        arbeiter.einreihen(&ctx, auftrag(1, 1, 101, &tx_neu));
+        assert_eq!(naechste_quittung(&mut rx_neu).await.0, 1);
+        assert_eq!(
+            *mess.fertig.lock().unwrap(),
+            vec![100, 101],
+            "der abgerissene Write lief zu Ende, dann der neue"
+        );
+        assert!(
+            rx_neu.try_recv().is_err(),
+            "die neue Sitzung bekommt genau EINE Quittung — die alte verpufft"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn toter_arbeiter_wird_ersetzt() {
+        // Eine Panik im Ergebnis-Weg darf das Feld nicht bis zum Neustart
+        // der Übertragung lahmlegen.
+        let ctx = ctx_zwei_felder();
+        let mess = Arc::new(Mess::default());
+        let innen = attrappe(mess.clone(), Duration::from_secs(1));
+        let verarbeiter: ErgebnisVerarbeiter = Arc::new(move |ctx, body| {
+            if body.match_id == 666 {
+                Box::pin(async { panic!("Testpanik im Ergebnis-Weg") })
+            } else {
+                innen(ctx, body)
+            }
+        });
+        let arbeiter = ErgebnisArbeiter::new(verarbeiter);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        arbeiter.einreihen(&ctx, auftrag(1, 1, 666, &tx));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        arbeiter.einreihen(&ctx, auftrag(2, 1, 100, &tx));
+        assert_eq!(naechste_quittung(&mut rx).await, (2, true, false));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn hintergrund_aufgaben_enden_mit_den_diensten() {
+        let dienste = Dienste::new(attrappe(Arc::new(Mess::default()), Duration::ZERO));
+        let lebt = Arc::new(());
+        let halter = lebt.clone();
+        dienste.im_hintergrund(async move {
+            let _halter = halter;
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(Arc::strong_count(&lebt), 2);
+        drop(dienste);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(Arc::strong_count(&lebt), 1, "der Task wurde abgebrochen");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn neue_sitzung_vergisst_die_upload_pause() {
+        let wacht = LaufWacht::new(true);
+        let jetzt = tokio::time::Instant::now();
+        wacht.beginnen(jetzt).expect("Lauf").fertig(false, jetzt);
+        assert!(wacht.beginnen(jetzt).is_none());
+        wacht.pause_vergessen();
+        assert!(wacht.beginnen(jetzt).is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn haengender_schreiber_beendet_sich_nach_der_frist() {
+        // Die Gegenseite liest nicht: Das Senden einer großen Nachricht
+        // bleibt im (kleinen) Puffer stecken.
+        let (a, b) = tokio::io::duplex(256);
+        let (client, server) = tokio::join!(
+            tokio_tungstenite::client_async("ws://test/host-ws", a),
+            tokio_tungstenite::accept_async(b)
+        );
+        let (client, _server_haelt_offen) = (client.unwrap().0, server.unwrap());
+        let (sink, _read) = client.split();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let start = tokio::time::Instant::now();
+        let schreiber = schreiber_starten(sink, rx);
+        tx.send(WsMessage::Text("x".repeat(1 << 20).into()))
+            .unwrap();
+        let grund = schreiber.await.unwrap();
+        assert!(grund.contains("hing länger"), "{grund}");
+        assert_eq!(start.elapsed(), SENDE_FRIST);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn volle_feld_schlange_sagt_wiederholbar_ab() {
+        let ctx = ctx_zwei_felder();
+        let mess = Arc::new(Mess::default());
+        // Der Write hängt praktisch ewig.
+        let arbeiter = ErgebnisArbeiter::new(attrappe(mess.clone(), Duration::from_secs(3600)));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        arbeiter.einreihen(&ctx, auftrag(1, 1, 100, &tx));
+        // Den Arbeiter den ersten Auftrag aus der Schlange nehmen lassen.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        for req in 2..=5 {
+            arbeiter.einreihen(&ctx, auftrag(req, 1, 100, &tx));
+        }
+        assert!(rx.try_recv().is_err(), "vier dürfen warten");
+        arbeiter.einreihen(&ctx, auftrag(6, 1, 100, &tx));
+        let (req_id, ok, permanent) = naechste_quittung(&mut rx).await;
+        assert_eq!((req_id, ok), (6, false));
+        assert!(!permanent, "das Tablet soll es wieder versuchen");
+        // Ein anderes Feld ist davon unberührt.
+        arbeiter.einreihen(&ctx, auftrag(7, 2, 200, &tx));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(mess.laufend.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn zweiter_upload_startet_nicht_solange_einer_laeuft() {
+        let wacht = LaufWacht::new(true);
+        let jetzt = tokio::time::Instant::now();
+        let lauf = wacht.beginnen(jetzt).expect("erster Lauf");
+        assert!(wacht.beginnen(jetzt).is_none());
+        lauf.fertig(true, jetzt);
+        assert!(wacht.beginnen(jetzt).is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn abgebrochener_lauf_gibt_den_waechter_frei() {
+        let wacht = LaufWacht::new(true);
+        let jetzt = tokio::time::Instant::now();
+        drop(wacht.beginnen(jetzt));
+        assert!(wacht.beginnen(jetzt).is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fehlgeschlagener_upload_wartet_laenger() {
+        let wacht = LaufWacht::new(true);
+        let mut jetzt = tokio::time::Instant::now();
+        for sekunden in [30u64, 60, 120, 240, 300, 300] {
+            wacht.beginnen(jetzt).expect("Lauf").fertig(false, jetzt);
+            let knapp_davor = jetzt + Duration::from_secs(sekunden - 1);
+            assert!(wacht.beginnen(knapp_davor).is_none(), "{sekunden} s Pause");
+            jetzt += Duration::from_secs(sekunden);
+        }
+        // Ein Erfolg setzt die Pause zurück.
+        wacht.beginnen(jetzt).expect("Lauf").fertig(true, jetzt);
+        wacht.beginnen(jetzt).expect("Lauf").fertig(false, jetzt);
+        assert!(wacht.beginnen(jetzt + Duration::from_secs(30)).is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn steuerungs_abgleich_pausiert_nach_fehlern_nicht() {
+        let wacht = LaufWacht::new(false);
+        let jetzt = tokio::time::Instant::now();
+        wacht.beginnen(jetzt).expect("Lauf").fertig(false, jetzt);
+        assert!(wacht.beginnen(jetzt).is_some());
+    }
+
+    type TestStrom = WebSocketStream<tokio::io::DuplexStream>;
+
+    /// Ein WebSocket-Paar mit echtem Rahmen, ohne Netz.
+    async fn ws_paar() -> (TestStrom, TestStrom) {
+        let (a, b) = tokio::io::duplex(1 << 20);
+        let (client, server) = tokio::join!(
+            tokio_tungstenite::client_async("ws://test/host-ws", a),
+            tokio_tungstenite::accept_async(b)
+        );
+        (client.unwrap().0, server.unwrap())
+    }
+
+    /// Dienste für Sitzungs-Tests: Upload und Steuerungs-Abgleich sind
+    /// „belegt", damit kein Test ins Netz geht.
+    fn dienste_ohne_netz(verarbeiter: ErgebnisVerarbeiter) -> (Arc<Dienste>, (Lauf, Lauf)) {
+        let dienste = Arc::new(Dienste::new(verarbeiter));
+        let jetzt = tokio::time::Instant::now();
+        let belegt = (
+            dienste.upload.beginnen(jetzt).unwrap(),
+            dienste.steuerung.beginnen(jetzt).unwrap(),
+        );
+        (dienste, belegt)
+    }
+
+    fn sitzung_starten(
+        ctx: Arc<ServerCtx>,
+        client: TestStrom,
+        dienste: Arc<Dienste>,
+    ) -> tokio::task::JoinHandle<Result<(), String>> {
+        tokio::spawn(async move {
+            let mut wacht = crate::tablet::state::ReloadWacht::beim_verbinden(&ctx.tablet);
+            sitzung_fahren(&ctx, client, "ns", &mut wacht, &dienste).await
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ping_wird_beantwortet_waehrend_ein_ergebnis_haengt() {
+        let ctx = ctx_zwei_felder();
+        let mess = Arc::new(Mess::default());
+        let (dienste, _belegt) = dienste_ohne_netz(attrappe(mess.clone(), Duration::from_secs(20)));
+        let (client, mut server) = ws_paar().await;
+        let sitzung = sitzung_starten(ctx, client, dienste);
+
+        let frame = RelayFrame::Result {
+            req_id: 5,
+            court_id: 1,
+            court_label: "1".into(),
+            match_id: 100,
+            sets: vec![],
+            retired: false,
+            walkover: false,
+            winner: None,
+            cascade_walkover: false,
+        };
+        server
+            .send(WsMessage::Text(
+                serde_json::to_string(&frame).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+
+        // Der Relay pingt alle 5 s; der Write hängt 20 s.
+        let mut ping = tokio::time::interval(Duration::from_secs(5));
+        let mut pongs_vor_der_quittung = 0;
+        loop {
+            tokio::select! {
+                msg = server.next() => match msg.expect("Sitzung lebt").unwrap() {
+                    WsMessage::Pong(_) => pongs_vor_der_quittung += 1,
+                    WsMessage::Text(t) => {
+                        if let Ok(HostFrame::ResultAck { req_id, ok, .. }) =
+                            serde_json::from_str::<HostFrame>(t.as_str())
+                        {
+                            assert_eq!((req_id, ok), (5, true));
+                            break;
+                        }
+                    }
+                    _ => {}
+                },
+                _ = ping.tick() => {
+                    server.send(WsMessage::Ping(vec![1].into())).await.unwrap();
+                }
+            }
+        }
+        assert!(
+            pongs_vor_der_quittung >= 3,
+            "während des Writes kamen nur {pongs_vor_der_quittung} Pongs"
+        );
+        assert!(!sitzung.is_finished(), "die Sitzung hat den Write überlebt");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sitzung_ueberlebt_pausen_mit_lebenszeichen_im_puffer() {
+        // Nach einer langen Pause der Schleife sind „Frame liegt bereit" und
+        // „Idle-Ticker fällig" gleichzeitig wahr. Der Wächter darf dann
+        // nicht vor dem Lesen urteilen — sonst trennt sich der Turnier-PC
+        // selbst, obwohl der Relay ihn noch hält.
+        //
+        // Ehrlich: Dieser Test hält nur fest, dass eine Sitzung Pausen von
+        // 16 s übersteht, wenn das Lebenszeichen im Puffer liegt. Den
+        // eigentlichen Wettlauf stellt er NICHT nach — mit angehaltener Uhr
+        // feuern die Timer erst, wenn die Laufzeit parkt, also nach dem
+        // Lesen. Rot wird er ohne `biased` deshalb nicht; die feste
+        // Reihenfolge im `select!` ist per Überlegung abgesichert, und die
+        // langen Inline-Wartezeiten, die den Wettlauf auslösten, gibt es
+        // nicht mehr (siehe die Tests darüber).
+        let ctx = ctx_zwei_felder();
+        let (dienste, _belegt) =
+            dienste_ohne_netz(attrappe(Arc::new(Mess::default()), Duration::ZERO));
+        let (client, mut server) = ws_paar().await;
+        let sitzung = sitzung_starten(ctx, client, dienste);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        for runde in 0..40 {
+            // Lebenszeichen liegt im Puffer, die Schleife kommt aber erst
+            // 16 s später wieder dran.
+            server.send(WsMessage::Ping(vec![1].into())).await.unwrap();
+            tokio::time::advance(Duration::from_secs(16)).await;
+            for _ in 0..20 {
+                tokio::task::yield_now().await;
+            }
+            assert!(
+                !sitzung.is_finished(),
+                "Runde {runde}: der Idle-Wächter hat die Sitzung beendet"
+            );
+        }
+    }
+
+    #[test]
+    fn groesster_zettel_frame_bleibt_unter_dem_transportdeckel() {
+        // Messung für den Transport-Deckel des Relays (Spec relay-haerten,
+        // PR 4): Der Relay lässt höchstens so viel Zettel-HTML durch
+        // (`MAX_SCORESHEET_HTML_LEN` in `relay/src/main.rs`). JSON verdoppelt
+        // im ungünstigsten realistischen Fall jedes Zeichen (Anführungs-
+        // zeichen, Zeilenumbrüche) — der Deckel muss das samt Umschlag fassen.
+        const HTML_DECKEL: usize = relay_proto::MAX_SHEETS_PER_DOC * 128 * 1024 + 64 * 1024;
+        const TRANSPORT_DECKEL: usize = 2 * HTML_DECKEL + 64 * 1024;
+        let frame = HostFrame::ScoresheetData {
+            req_id: u64::MAX,
+            found: true,
+            html: "\"".repeat(HTML_DECKEL),
+        };
+        let laenge = serde_json::to_string(&frame).unwrap().len();
+        assert!(laenge > 2 * HTML_DECKEL, "Escaping verdoppelt: {laenge}");
+        assert!(
+            laenge <= TRANSPORT_DECKEL,
+            "{laenge} Bytes passen nicht in {TRANSPORT_DECKEL}"
+        );
+        assert_eq!(TRANSPORT_DECKEL, 10_432 * 1024);
     }
 }

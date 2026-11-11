@@ -1043,6 +1043,70 @@ Rückfall: Ein Relay-Rollback lässt `/{ns}/stream` mit 404 antworten; OBS zeigt
 dann eine **nicht durchsichtige** Fehlerseite im Bild. Die feste Route fällt
 auf Antworten ohne Marke zurück, was nur Last kostet.
 
+## Host-Schleife: lesen, schreiben, arbeiten getrennt (seit v0.9.379)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 1 ·
+ADR [0091](adr/0091-ergebnisse-im-host-ein-arbeiter-je-feld.md).
+
+Der Turnier-PC hält **eine** Verbindung zum Relay für alle Cloud-Tablets und
+-Monitore. Der Relay verwirft sie, wenn 15 s lang nichts von ihr kommt. Bis
+v0.9.378 wartete die Schleife dieser Verbindung an drei Stellen selbst: auf
+den BTP-Write eines Ergebnisses, auf den Werbe-Upload und auf den Abgleich der
+Monitor-Steuerung. Solange kam nichts heraus — auch kein Pong. Ein träges BTP
+oder eine laufende TP-Kopie (Schreib-Gate, bis etwa 20 s) trennte so die ganze
+Cloud-Halle.
+
+Seit v0.9.379 (`tablet/relay_client.rs`, `sitzung_fahren`):
+
+| Teil | Aufgabe |
+|---|---|
+| **Schleife** | liest, verteilt, tickt. Wartet auf nichts Langes. Im `select!` wird zuerst gelesen — liegt ein Lebenszeichen bereit, urteilt der Idle-Wächter nicht davor. |
+| **Schreiber-Task** | besitzt die Sende-Hälfte, 20 s Frist je Nachricht. Scheitert oder hängt das Senden, endet die Sitzung und der Turnier-PC verbindet neu. |
+| **Ergebnis-Arbeiter je Feld** | schreibt nach BTP (`process_result`, unverändert — R5) und quittiert. |
+| **Upload-Task, Steuerungs-Task** | je höchstens einer zugleich („läuft schon"-Wächter). |
+| **Zettel, Spielersuche** | `spawn_blocking`. |
+
+**Reihenfolge der Ergebnisse.** Ergebnisse *eines* Felds laufen strikt in der
+Reihenfolge ihres Eingangs, verschiedene Felder nebeneinander. Der 8-s-Retry
+des Tablets reiht sich hinter den ersten Versuch und trifft danach die
+Idempotenz (ADR 0018) — es gibt keinen zweiten BTP-Write. Je Feld warten
+höchstens vier Ergebnisse; ein weiteres bekommt sofort eine wiederholbare
+Absage („Der Turnier-PC verarbeitet gerade ein Ergebnis für dieses Feld").
+Ergebnisse für eine CourtID, die der Turnier-PC nicht kennt, teilen sich einen
+Sammel-Arbeiter: Die CourtID kommt vom Tablet, und ein Fremder soll damit
+nicht beliebig viele Tasks anlegen können.
+
+**Quittung nur an die eigene Sitzung.** Die Arbeiter leben über die
+Sitzungen hinweg: Reißt die Verbindung mitten im Write ab, läuft er zu Ende.
+Die Quittung geht aber nur an die Sitzung, aus der der Auftrag kam — gibt es
+sie nicht mehr, verpufft sie, und das Tablet wiederholt. Über eine neue
+Sitzung ginge sie nie: Der Relay zählt `req_id` je Namespace ab 1, nach
+seinem Neustart könnte eine alte Nummer ein fremdes Ergebnis quittieren.
+
+**Was sich an der Reihenfolge ändert.** Solange der Write inline lief, konnte
+der 2-s-Takt erst danach ein `MatchCleared` oder das Folgespiel melden. Jetzt
+kann beides **vor** der Quittung beim Tablet ankommen — wie im Hallennetz schon
+immer (dort läuft der Write im HTTP-Handler, die Zuweisung über den Socket).
+Das Tablet verträgt das seit v0.9.376 (geparktes Ergebnis, Spec
+`tablet-stand-robust`). Ebenso kann ein Punkt desselben Spiels, der während
+des Writes eintrifft, noch aufgenommen werden; vorher lag er hinter der
+Finalisierung. Wartet der Relay nicht mehr auf eine Quittung (8 s), läuft ein
+schon eingereihter Retry trotzdem noch und endet an der Idempotenz.
+
+**Lebensdauer.** Arbeiter und Hintergrund-Tasks (Upload, Abgleich) gehören
+einem Lauf der Übertragung. Sie überleben Reconnects, enden aber mit dem
+Stoppen oder dem Speichern der Einstellungen. Stirbt ein Arbeiter an einer
+Panik, wird er beim nächsten Ergebnis des Felds ersetzt. Zu Beginn jeder
+Sitzung vergisst der Upload seine Pause — ein frisch gestarteter Relay hat
+keine Bilder mehr.
+
+**Werbe-Upload.** 120 s Frist statt der 15 s des gemeinsamen HTTP-Clients;
+nach einem Fehlschlag wachsende Pausen (30 s, 60 s, 120 s, 240 s, dann 5 min).
+Der Fingerabdruck „schon hochgeladen" gilt weiter je Sitzung.
+
+Nicht gelöst: Ein sehr großer Zettel-Abruf über einen schmalen Uplink kann
+das Senden länger als 15 s belegen (Roadmap).
+
 ## Trägerverbindung der fernen Halle (`/{ns}/carrier-ws`)
 
 Vorbereitet für die **Transport-Bündelung** der fernen Halle
