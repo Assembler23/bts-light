@@ -58,6 +58,22 @@ struct Inner {
     slug: String,
     dirty: bool,
     last_write: Option<Instant>,
+    /// Änderungsmarke je Spiel: steigt bei jedem Schreiben. Der badhub-Push
+    /// (`tverlauf`) erkennt daran, welche Spiele sich geändert haben — ohne
+    /// alle 5 s jeden Verlauf zu klonen und zu serialisieren. Nur im RAM;
+    /// der Zähler läuft über Turnierwechsel hinweg weiter, damit eine Marke
+    /// nie zweimal vergeben wird.
+    marken: HashMap<i64, u64>,
+    zaehler: u64,
+}
+
+impl Inner {
+    /// Vermerkt, dass sich dieses Spiel geändert hat.
+    fn beruehrt(&mut self, match_id: i64) {
+        self.zaehler += 1;
+        self.marken.insert(match_id, self.zaehler);
+        self.dirty = true;
+    }
 }
 
 /// Der Punktverlauf-Speicher. Lebt im [`TabletState`](super::state::TabletState)
@@ -117,6 +133,9 @@ impl TimelineStore {
         inner.slug = slug;
         inner.dirty = false;
         inner.last_write = None;
+        // Die Marken gehören zu den Spielen des alten Turniers (Match-IDs
+        // beginnen je Turnierdatei von vorn). Der Zähler läuft weiter.
+        inner.marken.clear();
         inner.file = loaded.unwrap_or_else(|| TimelineFile {
             tournament: name.to_string(),
             first_seen: today(),
@@ -182,7 +201,7 @@ impl TimelineStore {
             return false;
         }
         s.points.push(w);
-        inner.dirty = true;
+        inner.beruehrt(match_id);
         drop(inner);
         self.persist(false);
         true
@@ -278,7 +297,7 @@ impl TimelineStore {
             return true;
         }
         inner.file.matches.insert(match_id, timeline);
-        inner.dirty = true;
+        inner.beruehrt(match_id);
         drop(inner);
         self.persist(true);
         true
@@ -296,7 +315,7 @@ impl TimelineStore {
         if retired {
             tl.retired = true;
         }
-        inner.dirty = true;
+        inner.beruehrt(match_id);
         drop(inner);
         self.persist(true);
     }
@@ -318,6 +337,18 @@ impl TimelineStore {
         let inner = self.inner.lock().unwrap();
         let tl = inner.file.matches.get(&match_id)?;
         serde_json::to_string(tl).ok()
+    }
+
+    /// Änderungsmarke des Spiels — `None`, wenn es keinen Verlauf gibt.
+    /// Ein aus der Datei geladener, seither unberührter Verlauf hat die
+    /// Marke 0 (er zählt als „vorhanden", nicht als „geändert").
+    pub fn marke(&self, match_id: i64) -> Option<u64> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .file
+            .matches
+            .contains_key(&match_id)
+            .then(|| inner.marken.get(&match_id).copied().unwrap_or(0))
     }
 
     /// Verlauf typisiert (fürs Desktop-Command).

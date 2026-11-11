@@ -615,7 +615,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   und alle 60 s, Tablet-Punkte genau einmal, Punktverlauf wertet `verworfen` aus,
   Log-Flanken für BTP und Strecke. PRs 1, 2a, 2b, 3, 4 (PR 5 nur nach Messung) — **PR 1 und 2a
   umgesetzt** (v0.9.381: Fristen, Fehlerklassen, Halt, Drossel, Backoff ohne Logo, Log-Flanken;
-  v0.9.382: eigener Sender-Task, der Zyklus wartet nicht mehr auf badhub); kein badhub-Deploy nötig. badhub-Folgearbeit (gzip, Sperre im
+  v0.9.382: eigener Sender-Task, der Zyklus wartet nicht mehr auf badhub) sowie **PR 4**
+  (v0.9.383: Punktverlauf wertet `verworfen` aus, Änderungsmarken); offen PR 2b und 3 — beide
+  nach einer Messung im Feld; kein badhub-Deploy nötig. badhub-Folgearbeit (gzip, Sperre im
   `tupdate_match`-Zweig, Reihenfolge-Prüfung) steht beim Kommunikations-Audit, Paket 2.
 - **Relay härten** — Spec:
   [features/relay-haerten.md](features/relay-haerten.md)

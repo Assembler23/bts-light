@@ -2930,13 +2930,40 @@ impl PushTeil {
             .into_iter()
             .filter_map(|c| c.pause.map(|p| (c.match_id, p)))
             .collect();
-        let alle = verlauf::eintraege(
+        // Erst die Marken (billig), dann nur für die geänderten Spiele den
+        // Eintrag bauen — nicht mehr alle 5 s jeden Verlauf klonen.
+        let kandidaten = verlauf::kandidaten(
             snapshot,
-            |id| tablet.timeline_store().timeline(id),
-            |id| tablet.sheet_store().sheet(id),
+            |id| tablet.timeline_store().marke(id),
+            |id| tablet.sheet_store().marke(id),
             &pausen,
         );
-        let neu = self.verlauf_stand.geaendert(alle);
+        let wahl = self.verlauf_stand.auswahl(&kandidaten);
+        let mut neu = Vec::with_capacity(wahl.len());
+        let mut gesendet = Vec::with_capacity(wahl.len());
+        for k in wahl {
+            let eintrag = snapshot
+                .matches
+                .iter()
+                .find(|m| m.id == k.match_id)
+                .and_then(|m| {
+                    verlauf::eintrag_fuer(
+                        m,
+                        |id| tablet.timeline_store().timeline(id),
+                        |id| tablet.sheet_store().sheet(id),
+                        &pausen,
+                    )
+                });
+            match eintrag {
+                Some(e) => {
+                    neu.push(e);
+                    gesendet.push(k);
+                }
+                // Zettel ohne Aufschlagereignis und ohne Verlauf: nichts zu
+                // senden — gilt als erledigt, bis sich das Spiel ändert.
+                None => self.verlauf_stand.angenommen(std::slice::from_ref(&k)),
+            }
+        }
         if neu.is_empty() {
             return;
         }
@@ -2954,12 +2981,31 @@ impl PushTeil {
                 body,
             )
             .await;
-        if self.tor_melden(Kanal::Verlauf, &ausgang, None) == Klasse::Ok {
-            tracing::debug!(
-                spiele = msg.matches.len(),
-                "Punktverlauf an badhub gesendet"
-            );
-            self.verlauf_stand.angenommen(&msg.matches);
+        match self.tor_melden(Kanal::Verlauf, &ausgang, None) {
+            // badhub antwortet auch dann mit 200, wenn es Einträge verworfen
+            // hat (unbekanntes Spiel, ungültiger Inhalt) — und nennt nur ihre
+            // Zahl. Bis v0.9.382 galt das Paket trotzdem als angenommen: Der
+            // Verlauf fehlte bei badhub und kam nie wieder.
+            Klasse::Ok if ausgang.verworfen.unwrap_or(0) > 0 => {
+                let geparkt = self.verlauf_stand.verworfen(&gesendet);
+                if geparkt > 0 {
+                    tracing::warn!(
+                        spiele = gesendet.len(),
+                        verworfen = ausgang.verworfen.unwrap_or(0),
+                        geparkt,
+                        "badhub verwirft Punktverlauf-Eintraege — nach {} Versuchen geparkt bis zur naechsten Aenderung oder zum naechsten vollen Stand",
+                        verlauf::MAX_VERSUCHE
+                    );
+                }
+            }
+            Klasse::Ok => {
+                tracing::debug!(spiele = gesendet.len(), "Punktverlauf an badhub gesendet");
+                self.verlauf_stand.angenommen(&gesendet);
+            }
+            // Ganz-Ablehnung (5xx, 413, 409): beim nächsten Mal eine andere
+            // Auswahl — sonst blockierte ein Eintrag alle übrigen.
+            Klasse::KanalBackoff => self.verlauf_stand.rotieren(gesendet.len()),
+            _ => {}
         }
     }
 
@@ -3084,7 +3130,11 @@ impl PushTeil {
         if !matches!(self.strecken_ergebnis(), SyncOutcome::Idle) {
             self.last_pushed = None;
         }
-        let mut update = match self.plan(&snapshot, &queue_ctx) {
+        let geplant = self.plan(&snapshot, &queue_ctx);
+        // Ein voller `tset`, der nur als Lebenszeichen hinausgeht (sonst
+        // wäre nichts zu senden gewesen).
+        let lebenszeichen = matches!(geplant, Update::None);
+        let mut update = match geplant {
             Update::None if self.heartbeat_due() => diff(None, &snapshot, self.rid, &queue_ctx),
             other => other,
         };
@@ -3117,6 +3167,12 @@ impl PushTeil {
                     // Erst jetzt: badhub hat das Logo nachweislich bekommen.
                     self.logo_stempeln(logo_marke);
                     self.last_push_at = Some(Instant::now());
+                    // Ein voller Stand ist bestätigt: Verworfene Verläufe
+                    // dürfen es wieder versuchen (badhub kennt die Spiele
+                    // jetzt womöglich).
+                    if matches!(update, Update::Full(_)) {
+                        self.verlauf_stand.entparken(!lebenszeichen, Instant::now());
+                    }
                 }
                 liveticker = Some(klasse);
                 abgelehnt_status = status;
@@ -8584,5 +8640,65 @@ mod tests {
             .an_badhub_senden(&cfg, &http, &tablet, snap.clone())
             .await;
         assert_eq!(anzahl(&mock, "tverlauf"), 1, "{:?}", arten(&mock));
+    }
+
+    // ── Punktverlauf (Spec `badhub-push-entkoppeln`, PR 4) ─────────────────
+
+    #[tokio::test]
+    async fn verworfener_verlauf_gilt_nicht_als_angenommen() {
+        // badhub nimmt `tset` und `sched` an, verwirft aber den Verlauf —
+        // mit Status 200. Früher galt er damit als gesendet und kam nie
+        // wieder.
+        let verwirft = Antwort::http("200 OK", r#"{"type":"ok","rows":0,"verworfen":1}"#);
+        let mock = testhilfe::starten(vec![
+            Antwort::ok(),    // tset
+            Antwort::ok(),    // sched
+            verwirft.clone(), // tverlauf, Versuch 1
+            verwirft.clone(), // Versuch 2
+            verwirft,         // Versuch 3
+            Antwort::ok(),    // danach alles ok
+        ])
+        .await;
+        let cfg = strecken_config(&mock.url);
+        let http = crate::badhub::push::build_client();
+        let tablet = TabletState::default();
+        let snap = snapshot();
+        assert!(tablet
+            .timeline_store()
+            .apply_rally(snap.matches[0].id, 1, 1, "A", 1, 0));
+        let mut engine = PushTeil::new();
+        let zyklus = async |engine: &mut PushTeil| {
+            engine
+                .an_badhub_senden(&cfg, &http, &tablet, snap.clone())
+                .await;
+        };
+
+        // Drei Durchgänge, drei Versuche — dann ist der Eintrag geparkt.
+        for erwartet in 1..=3 {
+            zyklus(&mut engine).await;
+            assert_eq!(anzahl(&mock, "tverlauf"), erwartet);
+        }
+        zyklus(&mut engine).await;
+        zyklus(&mut engine).await;
+        assert_eq!(
+            anzahl(&mock, "tverlauf"),
+            3,
+            "geparkt: kein vierter Versuch"
+        );
+
+        // Ein neuer voller Stand ist bestätigt → der Eintrag darf wieder, und
+        // diesmal nimmt badhub ihn an.
+        engine.last_push_at = None;
+        zyklus(&mut engine).await;
+        assert_eq!(anzahl(&mock, "tverlauf"), 4);
+        zyklus(&mut engine).await;
+        assert_eq!(anzahl(&mock, "tverlauf"), 4, "angenommen: kein weiterer");
+
+        // Ein neuer Ballwechsel geht sofort wieder hinaus.
+        assert!(tablet
+            .timeline_store()
+            .apply_rally(snap.matches[0].id, 1, 2, "B", 1, 1));
+        zyklus(&mut engine).await;
+        assert_eq!(anzahl(&mock, "tverlauf"), 5);
     }
 }

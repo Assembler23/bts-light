@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.383
+
+- **Der Punktverlauf geht bei badhub nicht mehr still verloren.** badhub
+  verwirft den Verlauf eines Spiels, das es noch nicht kennt, und meldet
+  trotzdem Erfolg — bts-light hielt ihn dann für übertragen und schickte ihn
+  nie wieder. Jetzt wertet bts-light die Antwort aus und versucht es erneut,
+  bis zu dreimal; danach wartet es auf die nächste Änderung oder den nächsten
+  vollen Turnierstand. Lehnt badhub ein ganzes Paket ab, kommt beim nächsten
+  Mal eine andere Auswahl dran, statt dass dieselben Spiele alle übrigen
+  aufhalten. Außerdem baut bts-light den Verlauf nur noch für Spiele, die
+  sich geändert haben, statt alle fünf Sekunden für alle. Spec
+  `badhub-push-entkoppeln`, Schritt 4.
+
 ## v0.9.382
 
 - **Der Hallenbetrieb wartet nicht mehr auf das Internet.** Bisher schickte

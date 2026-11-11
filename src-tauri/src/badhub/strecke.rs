@@ -65,6 +65,10 @@ pub struct Ausgang {
     pub dauer: Duration,
     /// Transportfehler als Text (ohne Körper, ohne Passwort).
     pub fehler: Option<String>,
+    /// Wie viele Einträge badhub verworfen hat (`tverlauf`: Feld
+    /// `verworfen` der Antwort). badhub antwortet darauf mit 200 — ohne
+    /// diese Zahl gälte ein verworfener Verlauf als angenommen.
+    pub verworfen: Option<u64>,
 }
 
 /// Warum die Strecke angehalten ist.
@@ -202,6 +206,14 @@ pub fn ist_badhub_antwort(koerper: &[u8]) -> bool {
         .ok()
         .and_then(|v| v.get("type").map(|t| t.is_string()))
         .unwrap_or(false)
+}
+
+/// Liest `verworfen` aus badhubs Antwort (`{"type":"ok","rows":n,"verworfen":n}`).
+pub fn verworfen_lesen(koerper: &[u8]) -> Option<u64> {
+    serde_json::from_slice::<serde_json::Value>(koerper)
+        .ok()?
+        .get("verworfen")?
+        .as_u64()
 }
 
 /// Zustand der Strecke als Ganzes.

@@ -157,6 +157,7 @@ pub async fn sende(
                 wand,
                 retry_after,
                 echte_antwort: strecke::ist_badhub_antwort(&koerper),
+                verworfen: strecke::verworfen_lesen(&koerper),
                 ..Default::default()
             }
         }
