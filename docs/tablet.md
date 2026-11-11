@@ -401,6 +401,8 @@ Knopf, weil deren Overlays die Kopfzeile verdecken) öffnet zwei Eingriffe:
   Ergebnis-Ansicht vor dem Abschicken zählt dazu.
 - **Eigener Undo-Schritt:** Der Eingriff legt einen Snapshot mit Marker
   `korrektur: {art, eventId, folgeIds, serveSetupTeamVorher}` auf `history`.
+  Bei „Mannschaften tauschen" trägt er — als einziger Undo-Stand — eine
+  Vollkopie des Punktverlaufs (siehe „Gespiegelter Zustand: Format 2").
   `undo()`, `reopen()`, `setupBack()` und „Korrektur" in der Pause nehmen ihn
   zuerst zurück (`korrekturZuruecknehmen`): Snapshot zurück, Ereignisse per
   `retract` am selben Anker, Karten zurückkippen.
@@ -831,6 +833,44 @@ die weitergezählten Punkte (Turnier-Befund 18.07.2026). Ein frisches Gerät
 (Reload ohne Stand, Ersatz-Tablet, echte Übernahme) übernimmt den
 Server-Stand unverändert. Dieser Pfad greift, wenn `ownership_active=false`
 (Legacy-Schalter an oder alte App/altes Relay).
+
+### Gespiegelter Zustand: Format 2 und Deckel (seit v0.9.374)
+
+Das Tablet spiegelt bei jedem Punkt seinen ganzen Zustand (`state_sync`) —
+daraus bekommt ein übernehmendes Gerät das laufende Spiel samt
+Rückgängig-Gedächtnis. 96 % davon waren die 50 Undo-Stände, weil jeder eine
+Vollkopie des Punktverlaufs und der Zettel-Ereignisse trug: 61–66 KB am Ende
+eines normalen Dreisätzers, im Schiri-Modus bis 590 KB. Über 64 KB verwarf das
+Relay den Zustand **kommentarlos**; der LAN-Server hatte gar keinen Deckel
+(Spec [`tablet-stand-robust`](features/tablet-stand-robust.md), ADR 0084).
+
+- **Format 2** (`fmt: 2`): Ein Undo-Stand trägt statt der Vollkopie die
+  **Längen** des Verlaufs je Satz (`rl`); Wiederherstellen kürzt den aktuellen
+  Verlauf. Die Ereignis-Kopie entfällt — sie hatte keinen Leser (`undo()` nimmt
+  Ereignisse ausdrücklich zurück, ADR 0038). Der Schritt „Mannschaften
+  tauschen" behält die Vollkopie, weil er den Verlauf kippt (ADR 0067). Logik:
+  `src/io/undoStand.mjs`, Inline-Kopie in `tablet.html`.
+- **Größe:** rund 24 KB im Normalspiel, rund 36 KB im schlimmsten Fall (Doppel,
+  3 × 30:29, 63 Ereignisse). `scripts/test-stand-groesse.mjs` misst die echte
+  `snapshot()`/`standFuerSpiegel()` der Seite gegen 28 bzw. 40 KB.
+- **Alte Stände** (alter `localStorage` nach einem Update mitten im Spiel,
+  Übernahme von einem Gerät mit alter Seite) wandelt `historyNormalisieren`
+  beim Laden um — die volle Rückgängig-Tiefe bleibt. Verlauf und Undo-Liste
+  werden aufbereitet, **bevor** `applyPersistedState` den Spielstand anfasst;
+  ein unlesbarer Verlauf (fremdes Gerät, beschädigter Speicher) wird
+  verworfen statt mitten im Laden zu scheitern.
+- **Alte Seite liest neuen Stand** (Übernahme vor dem Nachladen, Rollback): Die
+  Punkte stimmen; nach einem „zurück" beginnt der Punktverlauf des laufenden
+  Satzes neu „ab Zwischenstand". Bewusst hingenommen.
+- **Deckel:** Über 56 000 Bytes kürzt das Tablet **nur im Spiegel** die
+  ältesten Undo-Stände (`spiegelKuerzen`); lokal bleibt alles. Gemessen wird
+  in UTF-8-Bytes wie am Turnier-PC und am Relay, nicht in Zeichen. Turnier-PC und
+  Relay verwerfen über `relay_proto::MAX_STATE_LEN` (64 KiB), behalten den
+  vorigen Stand und schreiben **eine** Warnung je Feld und Spiel — nur mit Feld,
+  Match und Länge, nie mit Inhalt.
+- **Tablet-Log:** `spiegel_gekuerzt`, `persist_speicher_fehler` (Schreiben in
+  den `localStorage` gescheitert) und `persist_langsam` (über 30 ms) — je
+  höchstens einmal je Spiel.
 
 ## Anzeige-Hülle (`/anzeige`, seit v0.9.275)
 

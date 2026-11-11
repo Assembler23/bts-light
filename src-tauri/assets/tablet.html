@@ -2792,7 +2792,57 @@ function persistState(fromRestore) {
   // überbügelt. NICHT hochzählen, wenn wir gerade einen empfangenen Stand
   // spiegeln (fromRestore) — sonst wäre der Vergleich verfälscht.
   if (!fromRestore) STATE.rev = (STATE.rev || 0) + 1;
-  const snap = {
+  const t0 = performance.now();
+  const snap = standFuerSpiegel();
+  const json = JSON.stringify(snap);
+  const matchId = STATE.match ? STATE.match.matchId : null;
+  try { localStorage.setItem(PERSIST_KEY, json); } catch (e) {
+    // QuotaExceeded o. ä.: Ein Reload verlöre den Stand. Einmal je Spiel
+    // melden — gespiegelt wird trotzdem.
+    if (standWarnung.speicher !== matchId) {
+      standWarnung.speicher = matchId;
+      tlog('warn', 'persist_speicher_fehler', { matchId, len: json.length, fehler: String(e && e.name) });
+    }
+  }
+  // Stand an den Server spiegeln, damit ein übernehmendes Gerät das
+  // laufende Spiel bekommt (nur als aktives Tablet sinnvoll). A2 / ADR 0017,
+  // Regel b: Bei finalisiertem Match KEIN state_sync-Push — der lokale
+  // Snapshot (localStorage) bleibt für einen Reload erhalten, aber der
+  // Server-Cache wird nicht mehr überschrieben (Hand-Ergebnis gewinnt).
+  if (ws && ws.readyState === WebSocket.OPEN
+      && STATE.match && !STATE.locked && !STATE.occupied && !STATE.finalized) {
+    // Host und Relay verwerfen einen Zustand über 64 KiB. Damit das nie
+    // still geschieht, hält das Tablet den Deckel selbst ein: Über dem
+    // Budget fallen NUR IM SPIEGEL die ältesten Undo-Stände weg; lokal
+    // bleibt alles (ADR 0084). Gemessen in Bytes, wie dort.
+    const spiegel = spiegelKuerzen(snap, json, SPIEGEL_BUDGET);
+    if (spiegel !== json && standWarnung.gekuerzt !== matchId) {
+      standWarnung.gekuerzt = matchId;
+      tlog('warn', 'spiegel_gekuerzt', { matchId, len: json.length, gespiegelt: spiegel.length });
+    }
+    ws.send(JSON.stringify({ type: 'state_sync', state: spiegel }));
+  }
+  // Der Stand wird bei jedem Punkt serialisiert und geschrieben. Wird das
+  // auf einem schwachen Tablet spürbar, soll es im Log stehen — einmal je
+  // Spiel, nicht je Punkt.
+  const dauer = performance.now() - t0;
+  if (dauer > 30 && standWarnung.langsam !== matchId) {
+    standWarnung.langsam = matchId;
+    tlog('warn', 'persist_langsam', { matchId, ms: Math.round(dauer), len: json.length });
+  }
+}
+
+/** Je Spiel höchstens eine Warnung je Art (Wert = matchId der letzten). */
+const standWarnung = { speicher: undefined, gekuerzt: undefined, langsam: undefined };
+
+/** Der Zustand, wie er in den `localStorage` und (ggf. gekürzt) an den
+ *  Server geht. Eigene Funktion, damit `scripts/test-stand-groesse.mjs`
+ *  die echte Feldliste misst statt eine nachgestellte. */
+function standFuerSpiegel() {
+  return {
+    // Format-Marke (ADR 0084): 2 = Undo-Stände mit Längen-Schnitt statt
+    // Vollkopie des Verlaufs, ohne Ereignis-Kopie.
+    fmt: 2,
     rev: STATE.rev || 0,
     match: STATE.match,
     setsCompleted: STATE.setsCompleted,
@@ -2830,7 +2880,8 @@ function persistState(fromRestore) {
     // history MIT sichern: nur so kann „Match wieder öffnen" nach einem
     // Tablet-Reload/Reconnect den echten Stand (und korrekte Seiten)
     // wiederherstellen, statt einen leeren currentSet (0:0) zu zeigen.
-    // Auf 50 Snapshots gecappt (siehe addPointOnSide) → unkritisch klein.
+    // Auf 50 Stände gecappt (siehe addPointOnSide); seit Format 2 trägt
+    // jeder nur noch den Längen-Schnitt des Verlaufs.
     history: STATE.history,
     // Punktverlauf: überlebt Reload und wandert bei einer Geräte-Übernahme
     // mit (state_sync → state_restore) — das neue Gerät zeichnet nahtlos
@@ -2839,17 +2890,6 @@ function persistState(fromRestore) {
     events: STATE.events,
     eventSeq: STATE.eventSeq,
   };
-  const json = JSON.stringify(snap);
-  try { localStorage.setItem(PERSIST_KEY, json); } catch { /* QuotaExceeded o.ä. */ }
-  // Stand an den Server spiegeln, damit ein übernehmendes Gerät das
-  // laufende Spiel bekommt (nur als aktives Tablet sinnvoll). A2 / ADR 0017,
-  // Regel b: Bei finalisiertem Match KEIN state_sync-Push — der lokale
-  // Snapshot (localStorage) bleibt für einen Reload erhalten, aber der
-  // Server-Cache wird nicht mehr überschrieben (Hand-Ergebnis gewinnt).
-  if (ws && ws.readyState === WebSocket.OPEN
-      && STATE.match && !STATE.locked && !STATE.occupied && !STATE.finalized) {
-    ws.send(JSON.stringify({ type: 'state_sync', state: json }));
-  }
 }
 
 function clearPersistedState() {
@@ -2858,6 +2898,18 @@ function clearPersistedState() {
 
 // Übernimmt einen gespeicherten oder per Übernahme empfangenen Zustand.
 function applyPersistedState(p) {
+  // Verlauf und Undo-Liste ZUERST und ohne Seiteneffekt aufbereiten: Der
+  // Zustand kann von einem fremden Gerät stammen. Scheiterte das mitten in
+  // den Zuweisungen unten, bliebe ein halb überschriebener Spielstand
+  // zurück (Sicherheits-Review 11.11.2026). Ein unlesbarer Verlauf wird
+  // verworfen — die Aufzeichnung beginnt dann ehrlich „ab Zwischenstand".
+  const verlaufNeu = verlaufGueltig(p.rallyLog) ? p.rallyLog : null;
+  // Undo-Stände ins Format 2 bringen (ADR 0084). Ein Stand aus der Zeit
+  // davor — alter `localStorage` nach einem Update mitten im Spiel, oder
+  // die Übernahme von einem Gerät mit alter Seite — trägt Vollkopien von
+  // Verlauf und Ereignissen; sie würden sonst noch 50 Punkte lang
+  // mitgespiegelt.
+  const historyNeu = historyNormalisieren(p.history, verlaufNeu);
   STATE.rev = typeof p.rev === 'number' ? p.rev : 0;
   STATE.match = p.match ?? null;
   STATE.setsCompleted = Array.isArray(p.setsCompleted) ? p.setsCompleted : [];
@@ -2901,10 +2953,10 @@ function applyPersistedState(p) {
   STATE.retiredWinner = p.retiredWinner ?? null;
   // Undo-/Reopen-History wiederherstellen (seit Persistenz mitgesichert).
   // Fehlt sie in alten gespeicherten Ständen, bleibt sie leer.
-  STATE.history = Array.isArray(p.history) ? p.history : [];
   // Punktverlauf: fehlt er (alter Stand), beginnt die Aufzeichnung beim
   // nächsten Ballwechsel ehrlich „ab Zwischenstand" statt zu raten.
-  STATE.rallyLog = p.rallyLog ?? null;
+  STATE.rallyLog = verlaufNeu;
+  STATE.history = historyNeu;
   // Zettel-Ereignisse VEREINIGEN, nicht ersetzen (ADR 0038): Übernimmt
   // dieses Gerät ein laufendes Spiel, bringt es womöglich eigene
   // Ereignisse mit — und der übernommene Stand darf sie nicht
@@ -3175,13 +3227,16 @@ function snapshot() {
     // Damit das 11-Punkte-Intervall nach undo nicht doppelt/gar nicht
     // triggert, das Flag ebenfalls sichern.
     intervalDoneThisGame: STATE.intervalDoneThisGame,
-    // Punktverlauf mitsichern: undo/reopen über eine Satzgrenze muss auch
-    // den Verlauf exakt zurückdrehen (klein: ≤5 Sätze, ≤120 Zeichen je Satz).
-    rallyLog: STATE.rallyLog ? JSON.parse(JSON.stringify(STATE.rallyLog)) : null,
-    // Zettel-Ereignisse mitsichern (ADR 0038, Muster rallyLog). Ohne das
-    // nähme ein Undo nach einer roten Karte den Punkt zurück und ließe
-    // die Karte stehen — genau der Fehler, den STATE.cards heute hat.
-    events: STATE.events ? JSON.parse(JSON.stringify(STATE.events)) : [],
+    // Punktverlauf: undo/reopen über eine Satzgrenze muss auch den Verlauf
+    // exakt zurückdrehen. Dafür reichen die LÄNGEN je Satz (Format 2,
+    // ADR 0084) — der Verlauf wächst zwischen zwei Undo-Ständen nur. Die
+    // Vollkopie je Stand machte 96 % des gespiegelten Zustands aus. Wer den
+    // Verlauf UMSCHREIBT, muss die Vollkopie selbst ablegen (siehe
+    // `fuehreKorrekturAus`).
+    rl: verlaufSchnitt(STATE.rallyLog),
+    // Zettel-Ereignisse werden NICHT kopiert: Der Bestand ist append-only,
+    // `undo()` nimmt Ereignisse jenseits des Schnitts ausdrücklich zurück
+    // (ADR 0038). Nur der Zähler reist mit.
     eventSeq: STATE.eventSeq || 0,
   };
 }
@@ -3213,12 +3268,12 @@ function restoreSnapshot(snap) {
   if (typeof snap.intervalDoneThisGame === 'boolean') {
     STATE.intervalDoneThisGame = snap.intervalDoneThisGame;
   }
-  // Punktverlauf zurückdrehen. Alte Snapshots (vor diesem Feature) tragen
-  // das Feld nicht → Verlauf verwerfen statt einen zu langen stehen zu
-  // lassen; der nächste Ballwechsel beginnt dann ehrlich „ab Zwischenstand".
-  STATE.rallyLog = snap.rallyLog
-    ? JSON.parse(JSON.stringify(snap.rallyLog))
-    : null;
+  // Punktverlauf zurückdrehen: Vollkopie (altes Format, Korrektur-Schritt)
+  // oder Längen-Schnitt (Format 2). Trägt der Stand keins von beiden oder
+  // passt der Schnitt nicht → Verlauf verwerfen statt einen zu langen
+  // stehen zu lassen; der nächste Ballwechsel beginnt dann ehrlich „ab
+  // Zwischenstand".
+  STATE.rallyLog = verlaufAusStand(snap, STATE.rallyLog);
   // Zettel-Ereignisse NICHT zurückrollen: Der Bestand ist append-only
   // (ADR 0038). Was jenseits des Schnitts liegt, nimmt `undo()`
   // ausdrücklich zurück — der Zettel zeigt die Korrektur, statt sie
@@ -3592,6 +3647,142 @@ function swapSides() {
 
 function flip(side) { return side === 'left' ? 'right' : 'left'; }
 
+// ─── Schlankes Undo-Format (Spec tablet-stand-robust, ADR 0084) ────────
+/* INLINE-KOPIE von `src/io/undoStand.mjs` — dort steht die kanonische
+ * Fassung samt Begründung und Test (`scripts/test-undo-stand.mjs`); die
+ * Kopie hier vergleicht `scripts/test-inline-kopien.mjs` im Verhalten.
+ * Änderungen hier und dort gemeinsam. */
+/** Ab dieser Länge (**Bytes**, UTF-8) kürzt das Tablet den Spiegel selbst.
+ *  Der Deckel bei Host und Relay ist 64 KiB Bytes; gemessen wird deshalb
+ *  auch hier in Bytes (`utf8Laenge`), nicht in Zeichen — sonst läge ein
+ *  Zustand mit vielen Mehrbyte-Zeichen in den Namen unter dem Budget und
+ *  trotzdem über dem Deckel. Die Reserve gilt dem Frame-Rahmen. */
+const SPIEGEL_BUDGET = 56000;
+
+/** Länge von `s` in UTF-8-Bytes, ohne den Text zu kodieren. Ein
+ *  Ersatzzeichen-Paar zählt 4 (je Hälfte 2). */
+function utf8Laenge(s) {
+  var n = 0;
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    n += c < 0x80 ? 1 : c < 0x800 ? 2 : c >= 0xd800 && c <= 0xdfff ? 2 : 3;
+  }
+  return n;
+}
+
+/** Hat `log` die Form eines Punktverlaufs? Der Zustand kann von einem
+ *  fremden Gerät stammen (Übernahme über Server/Relay) oder aus einem
+ *  beschädigten `localStorage` — ein Wurf beim Laden hinterließe einen halb
+ *  überschriebenen Spielstand. */
+function verlaufGueltig(log) {
+  if (!log || typeof log !== "object" || !Array.isArray(log.sets)) return false;
+  for (var i = 0; i < log.sets.length; i++) {
+    var s = log.sets[i];
+    if (!s || typeof s !== "object" || typeof s.points !== "string") return false;
+  }
+  return true;
+}
+
+/** Längen-Schnitt eines Verlaufs: `[[Punkte je Satz …], midGame]`, oder
+ *  `null`, wenn nie etwas aufgezeichnet wurde (oder er unlesbar ist). */
+function verlaufSchnitt(log) {
+  if (!verlaufGueltig(log)) return null;
+  return [log.sets.map(function (s) { return s.points.length; }), !!log.midGame];
+}
+
+/** Kürzt `log` auf den Schnitt `rl`. Passt der Schnitt nicht zum Verlauf
+ *  (er ist kürzer als verlangt), gibt es `null` — der nächste Ballwechsel
+ *  beginnt dann ehrlich „ab Zwischenstand", statt einen falschen Verlauf
+ *  stehen zu lassen. */
+function verlaufAufSchnitt(log, rl) {
+  if (!Array.isArray(rl) || !Array.isArray(rl[0]) || !verlaufGueltig(log)) return null;
+  var laengen = rl[0];
+  if (log.sets.length < laengen.length) return null;
+  var sets = [];
+  for (var i = 0; i < laengen.length; i++) {
+    var s = log.sets[i];
+    var len = laengen[i];
+    if (typeof len !== "number" || !(len >= 0) || len % 1 !== 0 || s.points.length < len) return null;
+    sets.push({ startA: s.startA, startB: s.startB, points: s.points.slice(0, laengen[i]) });
+  }
+  return Object.assign({}, log, { sets: sets, midGame: !!rl[1] });
+}
+
+/** Der Verlauf, den ein Undo-Stand wiederherstellt. Vollkopie (altes Format
+ *  oder Korrektur-Schritt) hat Vorrang; sonst der Schnitt; sonst `null`. */
+function verlaufAusStand(snap, aktuell) {
+  if (verlaufGueltig(snap.rallyLog)) return JSON.parse(JSON.stringify(snap.rallyLog));
+  if (snap.rl) return verlaufAufSchnitt(aktuell, snap.rl);
+  return null;
+}
+
+/** Ist `alt` genau das, was beim Kürzen von `bezug` auf die Längen von
+ *  `alt` herauskommt? Nur dann darf eine Vollkopie zum Schnitt werden. */
+function verlaufIstPraefix(alt, bezug) {
+  var gekuerzt = verlaufAufSchnitt(bezug, verlaufSchnitt(alt));
+  return !!gekuerzt && JSON.stringify(gekuerzt) === JSON.stringify(alt);
+}
+
+/** Bringt eine geladene Undo-Liste (beliebiges Format) ins Format 2:
+ *  Ereignis-Kopien fallen weg (niemand liest sie, ADR 0038), Vollkopien des
+ *  Verlaufs werden zum Schnitt — aber nur, wo sie nachweislich ein Präfix
+ *  des Bezugs sind. Der Bezug ist der Verlauf, der beim Wiederherstellen
+ *  des jeweils jüngeren Stands gilt; er wandert von oben nach unten mit.
+ *  Gibt eine neue Liste zurück, die Eingabe bleibt unberührt. */
+function historyNormalisieren(history, rallyLog) {
+  var aus = [];
+  if (!Array.isArray(history)) return aus;
+  var bezug = verlaufGueltig(rallyLog) ? rallyLog : null;
+  for (var i = history.length - 1; i >= 0; i--) {
+    var roh = history[i];
+    // Kein Undo-Stand (fremder/beschädigter Zustand) → weglassen statt
+    // später beim „zurück" daran zu scheitern.
+    if (!roh || typeof roh !== "object" || Array.isArray(roh)) continue;
+    var s = {};
+    for (var k in roh) {
+      // `__proto__` aus JSON ist ein gewöhnlicher Schlüssel — beim Kopieren
+      // würde er zum Prototyp der Kopie.
+      if (Object.prototype.hasOwnProperty.call(roh, k) && k !== "__proto__" && k !== "events") s[k] = roh[k];
+    }
+    if (verlaufGueltig(s.rallyLog)) {
+      var kippt = !!(s.korrektur && s.korrektur.art === "ab");
+      if (!kippt && verlaufIstPraefix(s.rallyLog, bezug)) {
+        bezug = s.rallyLog;
+        s.rl = verlaufSchnitt(s.rallyLog);
+        delete s.rallyLog;
+      } else {
+        bezug = s.rallyLog;
+        delete s.rl;
+      }
+    } else {
+      // Schnitt (Format 2) oder gar kein Verlauf (null / uralter Stand).
+      bezug = s.rl ? verlaufAufSchnitt(bezug, s.rl) : null;
+      delete s.rallyLog;
+      if (s.rl === undefined) s.rl = null;
+    }
+    aus.unshift(s);
+  }
+  return aus;
+}
+
+/** Der JSON-Text für den Spiegel. Passt `json` ins Budget, bleibt er
+ *  unverändert. Sonst fallen die ÄLTESTEN Undo-Stände weg, bis er passt —
+ *  nur im Spiegel; der lokale Stand behält alles. So verwirft niemand den
+ *  Zustand still (Spec tablet-stand-robust, Regel B). */
+function spiegelKuerzen(snap, json, budget) {
+  var gesamt = utf8Laenge(json);
+  if (gesamt <= budget) return json;
+  var h = Array.isArray(snap.history) ? snap.history : [];
+  var ueber = gesamt - budget;
+  var weg = 0;
+  while (weg < h.length && ueber > 0) {
+    ueber -= utf8Laenge(JSON.stringify(h[weg])) + 1;
+    weg++;
+  }
+  return JSON.stringify(Object.assign({}, snap, { history: h.slice(weg) }));
+}
+/* Ende der Inline-Kopie. */
+
 // ─── Seiten/Mannschaften korrigieren (Spec tablet-seiten-korrigieren) ──
 /** INLINE-KOPIE von `src/io/seitenKorrektur.mjs` — dort steht die
  *  kanonische Fassung samt Test (`scripts/test-seiten-korrektur.mjs`,
@@ -3874,6 +4065,14 @@ function fuehreKorrekturAus(art) {
   ensureCardsLoaded();
   const snap = snapshot();
   snap.korrektur = { art, eventId: null, folgeIds: [], serveSetupTeamVorher: STATE.serveSetupTeam };
+  if (art === 'ab') {
+    // „Mannschaften tauschen" KIPPT den ganzen Verlauf — ein Längen-Schnitt
+    // könnte das nicht zurückdrehen. Dieser Schritt behält die Vollkopie
+    // (ADR 0084); die Schnitte der Stände darunter beziehen sich nach der
+    // Rücknahme wieder auf den ungekippten Verlauf.
+    snap.rallyLog = STATE.rallyLog ? JSON.parse(JSON.stringify(STATE.rallyLog)) : null;
+    delete snap.rl;
+  }
   if (art === 'seiten') {
     const t = seitenGetauscht(STATE);
     if (!t) return;
