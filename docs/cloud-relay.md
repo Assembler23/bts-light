@@ -1334,6 +1334,71 @@ Der Takt schützt vor einem fehlerhaften Gerät, nicht vor einem Angreifer:
 Eine neue Verbindung beginnt mit vollem Kontingent. Die feste Grenze bleibt
 die Zahl der Halter (64 je Namespace).
 
+## Ohne Turnier-PC: 20 s Karenz, dann 503 (seit v0.9.388)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 7 ·
+ADR [0088](adr/0088-anzeigen-bei-host-verlust-karenz-dann-503.md).
+
+Bis v0.9.387 zeigte eine Cloud-Anzeige ohne Turnier-PC entweder den
+eingefrorenen Stand (solange ein Tablet den Namespace hielt) oder eine leere
+Leerlauf-Seite. Jetzt führt jeder Namespace **eine Uhr** (`host_weg_seit`):
+
+- gesetzt beim Freigeben des Host-Slots, und zwar auf das **letzte
+  Lebenszeichen** — ein stumm gestorbener Turnier-PC ist rund 20 s nach
+  seinem letzten Lebenszeichen gesperrt, nicht nach 15 + 20 s;
+- gelöscht, sobald ein Turnier-PC den Slot übernimmt;
+- ein von einem Tablet angelegter Namespace beginnt mit „weg seit jetzt".
+
+| Lage | Antwort der Stand-Routen |
+|---|---|
+| Turnier-PC verbunden | normal |
+| weg, unter 20 s | `200` mit dem gehaltenen Stand |
+| weg, ab 20 s | `503`, `Cache-Control: no-store`, `Retry-After: 2`, Rumpf `{"grund":"host_weg"}` |
+| Namespace unbekannt | `503` — in den ersten 20 s nach dem Start des Relays `304`, wenn der Abruf eine Marke (`If-None-Match`) trägt |
+
+Der Grund steht im **Rumpf**, weil die Slave-Brücke der fernen Halle eigene
+Köpfe nicht durchreicht. Gesperrt gibt es weder `304` noch einen
+Cache-Treffer — die Lage wird unter dem Schloss vor allem anderen
+entschieden. Die **Start-Karenz** macht einen Relay-Neustart auf laufenden
+Fernsehern unsichtbar, wenn der Turnier-PC binnen 20 s zurück ist (üblich:
+1–4 s): Der Relay hat dann keinen Stand mehr, die Seite schon.
+
+| Route | ohne Turnier-PC |
+|---|---|
+| `GET /{ns}/court/{id}/state` (auch `?zweck=stream`) | `503` nach der Karenz |
+| `GET /{ns}/monitor/state?device=` | `503` nach der Karenz, wenn das Gerät ein Ziel hat; sonst `200` Kopplungs-Seite mit `hostOffline: true` |
+| `GET /{ns}/health` (voll und `?court=`) | `503` nach der Karenz |
+| `GET /{ns}/info/preparation/state` | `503` nach der Karenz |
+| `GET /{ns}/meetingpoint/state` | `503` nach der Karenz (vorher `404`) |
+| `GET /{ns}/info/announce/state` | **`503` sofort** — ein `200` ohne Sprachdienst-Schlüssel läse der Ansage-Slave als „abgeschaltet" |
+| `/courts`, `/info/ad/state`, Bilder, Logo, HTML-Seiten, Gerätelisten | unverändert |
+
+**Der Namespace überlebt den Abgang des Turnier-PCs** für die Karenz, auch
+ohne Tablets (sonst gäbe es im LAN+Cloud-Betrieb nichts weiterzuzeigen).
+Entfernt wird er vom Aufräum-Lauf (`fegen`, alle 5 s). Ein Namespace, den
+nur ein Tablet angelegt hat und der nie einen Turnier-PC sah, verschwindet
+weiter sofort mit dem Tablet.
+
+**Bis zum Daten-Verfall (PR 8) gilt:** Hält nach der Karenz weder ein Tablet
+noch eine Turnierleitungs-Seite den Namespace, wird er entfernt — samt
+Zuweisungen. Ein zugewiesenes Gerät sieht dann nur wenige Sekunden `503` und
+danach die Kopplungs-Seite mit `hostOffline`; Seiten mit eigener Rückkehr-
+Logik (Übersicht, Werbung, „In Vorbereitung") wechseln auf `/monitor`.
+
+Die Seiten fragen bei `503` im selben schnellen Takt weiter wie bei jedem
+Fehler (Monitor und Tafel alle 250 ms); `Retry-After` beachten sie nicht. Derselbe Lauf stößt am
+Karenz-Ende einmal alle Monitor-Verbindungen an, damit die Meldung sofort
+erscheint; kehrt der Turnier-PC danach zurück, werden sie noch einmal
+angestoßen. Beim Abgang schließt der Relay die Verbindungen der
+Turnierleitungs-Seiten (sie fallen auf ihren Abruf und sehen `503`).
+
+**Close-Grund für den Turnier-PC:** Ein zweiter Turnier-PC am selben
+Namespace wird mit Code `4409` und dem Text `host_belegt` geschlossen, am
+Namespace-Limit mit `4429` und `voll`.
+
+`GET /health` (prozessweit) nennt zusätzlich `hosts` — die Zahl verbundener
+Turnier-PCs. Das ist der Prüfpunkt vor jedem Relay-Deploy.
+
 ## Begrenzte Kanäle (seit v0.9.386)
 
 Spec [relay-haerten](features/relay-haerten.md), PR 5 ·
@@ -1486,8 +1551,12 @@ am Server bereits, dort ist nichts zu ändern.
   Slot nur bei komplett geschlossener Master-Verbindung besetzen — jetzt
   reichen 15 s Master-Stille. Das ist der Preis des Zombie-Fixes und
   akzeptiert, weil (a) ein gesunder Master alle 5 s pongt und im Betrieb
-  praktisch nie 15 s stumm ist, (b) der echte Master beim Reconnect die
-  „Zweiter Host"-Warnung sieht (Übernahme fällt auf) und (c) bei
+  praktisch nie 15 s stumm ist, (b) der Relay die Abweisung des echten
+  Masters als „Zweiter Host … abgewiesen" protokolliert und ihm seit
+  v0.9.388 den Close-Grund `4409 host_belegt` nennt — **am Bildschirm des
+  Masters steht davon bis zum letzten Schritt der Spec `relay-haerten`
+  nichts** (die frühere Aussage „der Master sieht die Warnung" war falsch:
+  Sie stand nur im Relay-Log) — und (c) bei
   geleakter ID der Namespace ohnehin als kompromittiert gilt →
   Roadmap-Feature „Master-Identität umziehen" ist die eigentliche
   Gegenmaßnahme.

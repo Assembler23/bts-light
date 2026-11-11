@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.388
+
+- **Cloud-Anzeigen sagen ehrlich, wenn der Turnier-PC weg ist.** Verliert
+  der Turnier-PC die Verbindung zur Cloud, zeigen Monitore, Zähltafel,
+  Feld-Übersicht und „In Vorbereitung" 20 Sekunden lang weiter den letzten
+  Stand — ein kurzer Wackler bleibt unsichtbar. Danach steht **„Keine
+  Verbindung zum Turnier-PC"** auf dem Bildschirm, und der Stand wird
+  abgedunkelt. Bisher blieb dort der alte Stand stehen oder eine leere Seite,
+  beides sah aus wie „alles in Ordnung". Ist der Turnier-PC zurück, läuft die
+  Anzeige von selbst weiter. Anzeigen im Hallennetz (LAN) sind nicht
+  betroffen. Wirkt für Monitor, Tafel, Übersicht und „In Vorbereitung" mit
+  dem Relay sofort, für die Kombi-Ansicht mit diesem App-Update. Siebter
+  Schritt der Spec `relay-haerten` (ADR 0088).
+- Ein zweiter Turnier-PC am selben Turnier bekommt vom Relay jetzt den Grund
+  der Abweisung genannt (Vorbereitung für eine Meldung im Dashboard).
+
 ## v0.9.387
 
 - **Der Cloud-Relay schützt sich gegen erfundene Turniere** (wirkt mit dem

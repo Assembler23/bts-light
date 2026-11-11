@@ -1063,6 +1063,21 @@ Host"-Warnung, `:1136–1137`, berichtigen; Routen-Tabelle), `docs/court-monitor
 `monitor.html` und `tafel.html`, `docs/multi-hall.md` (ferne Halle, LAN zählt weiter),
 `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.388):**
+- Die Karenz hält nur Namespaces, die je einen Turnier-PC hatten (`host_last_seen != 0`).
+  Die Spec wollte „ein Namespace, den ein Tablet anlegt, startet mit weg seit jetzt" auch
+  fürs Aufräumen; das hätte erlaubt, das Namespace-Limit mit kurzen Verbindungen zu füllen
+  (Code-Review). Die Uhr selbst startet weiter so.
+- **AK27 gilt bis PR 8 nur, solange ein Tablet oder eine TL-Seite den Namespace hält.**
+  Sonst entfernt der Aufräum-Lauf ihn am Karenz-Ende samt Zuweisungen; die Geräte sehen
+  dann die Kopplungs-Seite mit Hinweis statt 503.
+- Der Stillstands-Wächter der Seiten bekommt bei `host_weg` ein Lebenszeichen, sonst lüde
+  er nach 60 s doch ein Log hoch (AK35).
+- Die Slave-Brücke beantwortet `/health` ohne Parameter bei 503 weiter mit ihrem Stummel —
+  die Gerätesuche der Kiosk-App verlangt 200.
+- Offen: `Retry-After` wird von den Seiten nicht beachtet (Monitor/Tafel fragen bei 503
+  alle 250 ms); Verhaltenstest für `poll()` im Ganzen.
+
 ### PR 8 — Daten-Verfall
 
 **Erfüllt:** AK37–AK41. **Lösung:** f).

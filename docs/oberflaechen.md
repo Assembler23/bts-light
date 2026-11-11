@@ -135,6 +135,15 @@ Tablet oder Touch-Bildschirm am Meetingpoint einer Halle:
 Anzeige-Hülle). Gerufene Partien, Namen antippen = einchecken. Siehe
 [meetingpoint.md](meetingpoint.md).
 
+**Wenn der Turnier-PC weg ist (Cloud):** Monitore und Zähltafeln, die über
+die Cloud laufen, zeigen 20 Sekunden lang weiter den letzten Stand und danach
+**Keine Verbindung zum Turnier-PC** — der Stand wird abgedunkelt. Sobald der
+Turnier-PC wieder verbunden ist, läuft die Anzeige von selbst weiter. Steht
+dort **Verbindung unterbrochen**, liegt es an der Leitung des Geräts selbst.
+<!-- pruef: "Keine Verbindung zum Turnier-PC" in src-tauri/assets/monitor.html -->
+<!-- pruef: "Keine Verbindung zum Turnier-PC" in src-tauri/assets/tafel.html -->
+<!-- pruef: "Verbindung unterbrochen" in src-tauri/assets/tafel.html -->
+
 ## Wie ein Gerät zu seiner Anzeige kommt
 
 Ein frisch aufgestellter Fernseher zeigt **nicht** sofort ein Feld, sondern
