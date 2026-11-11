@@ -606,6 +606,29 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   **alle umgesetzt** (v0.9.374–378, 11.11.2026); offen sind die Release-Tags
   und der Feldtest (Ersatzgerät mitten im Satz, Neustart des Turnier-PCs,
   Ergebnis bei getrenntem WLAN, Karte bei getrenntem Internet).
+- **badhub-Push entkoppeln** — Spec **im Entwurf**:
+  [features/badhub-push-entkoppeln.md](features/badhub-push-entkoppeln.md)
+  (freigegeben 11.11.2026; ADR 0086/0087). Paket 2 des
+  Kommunikations-Audits: ein geordneter Sender-Task für alles an badhub (der Sync-Zyklus
+  wartet nie auf das Internet), Fehlerklassen je Kanal mit Backoff 5–60 s ohne Logo, Halt bei
+  401/403 bis zum Speichern, 429 nach `Retry-After`, voller `tset` nur bei Strukturänderung
+  und alle 60 s, Tablet-Punkte genau einmal, Punktverlauf wertet `verworfen` aus,
+  Log-Flanken für BTP und Strecke. PRs 1, 2a, 2b, 3, 4 (PR 5 nur nach Messung) — **noch
+  nichts umgesetzt**; kein badhub-Deploy nötig. badhub-Folgearbeit (gzip, Sperre im
+  `tupdate_match`-Zweig, Reihenfolge-Prüfung) steht beim Kommunikations-Audit, Paket 2.
+- **Relay härten** — Spec **im Entwurf**:
+  [features/relay-haerten.md](features/relay-haerten.md)
+  (freigegeben 11.11.2026; ADR 0088–0091). Paket 3 des
+  Kommunikations-Audits: keine toten Feld-Slots, Größen- und Mengendeckel auf allen
+  WebSocket-Wegen, begrenzte Kanäle (ein voller Kanal trennt den Empfänger), Host-Schleife
+  mit einem Ergebnis-Arbeiter je Feld (träges BTP wirft den Turnier-PC nicht mehr ab),
+  Verbindungsaufbau mit 10-s-Frist und Backoff-Automat, Anzeigen zeigen nach Host-Verlust
+  20 s weiter und dann „Keine Verbindung zum Turnier-PC", Turnierdaten verfallen nach
+  60 min (Sprachdienst-Schlüssel sofort), Mindestschutz gegen Schein-Turniere
+  (`MemoryMax`, Bilder-Tor, Gesamt-Budget), neue Dashboard-Meldung „Ein anderer PC ist mit
+  diesem Turnier verbunden". Neun PRs (1, 2, 9 Host ohne Relay-Deploy; 3–8 Relay in zwei
+  Merge-Fenstern) — **noch nichts umgesetzt**. Ausgelagerte Punkte stehen beim
+  Kommunikations-Audit, Paket 3.
 - **Meetingpoint am Kiosk-Tablet** — Spec:
   [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)
   (freigegeben 09.11.2026). Eintrag „Meetingpoint" in der Feldwahl `/felder` (nur wenn an, hinter der
@@ -1120,6 +1143,20 @@ Audit-Stand.
 
 ### Paket 2 — badhub-Push entkoppeln
 
+**Spec:** [features/badhub-push-entkoppeln.md](features/badhub-push-entkoppeln.md)
+(freigegeben 11.11.2026; ADR 0086/0087). Der Grill hat die Befunde
+nachgeprüft und teils korrigiert — maßgeblich ist die Spec, die Stichpunkte hier sind der
+Audit-Stand. Korrigiert sind vor allem: verzögert wird der *nächste* Zyklus (die Halle läuft
+im Zyklus vor den Pushes), das Überholen kommt von zwei unabhängigen Sendern, der
+Punktverlauf verliert still statt zu blockieren, und gzip fällt aus (siehe unten).
+
+**badhub-Folgearbeit** (eigenes Repo, nicht Teil der Spec): badhub nimmt am
+Liveticker-Endpunkt kein gzip an (roh an `json_decode`); im `tupdate_match`-Zweig fehlt eine
+Sperre bzw. Transaktion (parallele Punkte verschiedener Felder können sich wegschreiben);
+es gibt keine Reihenfolge-Prüfung (`rid` wird nur zurückgespiegelt). bts-light entschärft
+die beiden letzten Punkte clientseitig durch die serielle Strecke; komprimieren kann es
+erst, wenn badhub gzip annimmt.
+
 - **Hängendes badhub streckt den Sync-Zyklus von 5 s auf bis zu ~75 s.** Vier
   Pushes (`tset`, Meldeliste, `sched`, `tverlauf`) laufen nacheinander in
   `run_once` (`sync.rs:2937–2957`), jeder mit 15 s Gesamt-Timeout und ohne
@@ -1152,6 +1189,42 @@ Audit-Stand.
   übrigen.
 
 ### Paket 3 — Relay härten (Relay-Deploy vor Client)
+
+**Spec:** [features/relay-haerten.md](features/relay-haerten.md)
+(freigegeben 11.11.2026; ADR 0088–0091). Grill und How-To haben die
+Befunde nachgeprüft und teils korrigiert — maßgeblich ist die Spec, die Stichpunkte hier
+sind der Audit-Stand. Korrigiert sind vor allem: Der Namespace verfällt heute schon
+ereignisgetrieben (es fehlt nur ein Zeit-Verfall); ein sofortiges `503` ließe bei jedem
+Wackler des Turnier-PCs alle Fernseher blinken (deshalb 20 s Karenz); ein blankes
+`tokio::spawn` bräche die Reihenfolge der Ergebnisse (deshalb ein Arbeiter je Feld);
+`max_message_size` allein trennt, statt zu verwerfen (deshalb fachliche und
+Transport-Deckel getrennt); nginx-Limits kommen nicht.
+
+**Aus dem Paket ausgelagert — offene Punkte** (nicht Teil der Spec):
+
+- **Host-Authentifizierung am Relay.** `host-ws` ist ohne Anmeldung; mit Kenntnis der
+  `install_id` bleibt der Host-Slot nach 15 s Stille übernehmbar, und Schein-Hosts können
+  die Namespace-Tabelle füllen. Die eigentliche Gegenmaßnahme, braucht ein eigenes
+  Auth-Modell samt Schlüsselverteilung an bestehende Installationen → `/idee`.
+- **nginx-Limits als Ops-Schritt.** `limit_conn`/`limit_req` je IP träfen eine ganze Halle
+  im Störfall; wenn überhaupt, dann sehr großzügig und getrennt von einem Code-PR. Dazu
+  gehört die Frage, ob das nginx-Zugriffslog für `/bts-relay/` die volle `install_id`
+  weiter nennen soll (das Relay-Log kürzt sie mit der Spec auf 8 Zeichen).
+- **`MAX_TL_WS_VORAUTH` je IP statt prozessweit.** Der Relay müsste erstmals der
+  weitergereichten Client-Adresse vertrauen und eine IP-Tabelle mit Verfall führen; alle
+  TL-Geräte einer Halle teilen eine Adresse.
+- **TL-Zustand nur bauen, wenn ein Cloud-Gerät zusieht.** Braucht ein neues Signal
+  Relay → Host mit Deploy-Reihenfolge, Rollback-Verhalten und Wartezeit beim ersten Blick.
+- **Zettel über langsamen Uplink.** Ein 5-MB-Zettel über eine Leitung unter etwa
+  2,8 Mbit/s wirft den Host weiter ab (gerechnet): Der Relay stempelt nur vollständige
+  Nachrichten, ein Pong kann die laufende nicht überholen. Wege: große Host-Nachrichten in
+  WebSocket-Fragmente teilen (ohne Protokoll-Änderung, per Test zu belegen) oder Stückelung
+  im Protokoll.
+- **Host-Verlust am Tablet anzeigen.** Die Tablet-Seite ignoriert einen fehlenden
+  Turnier-PC bis zum Ergebnis; die Anzeigen zeigen ihn mit der Spec nach 20 s.
+- **Kleiner:** Feld-Schloss für den LAN-Ergebnisweg (im Cloud-Pfad ordnet die Spec je
+  Feld); Budget für Tablet-Zustände über alle Namespaces; Größen-Deckel am lokalen
+  WebSocket der Slave-Brücke.
 
 - **Mehrfaches `identify` hinterlässt tote Feld-Slots; der Namespace verfällt
   nie.** Jedes weitere `identify` mit anderer `courtId` belegt ein Feld mehr

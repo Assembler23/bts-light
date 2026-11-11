@@ -94,3 +94,9 @@ hier eintragen.
 | [0083](0083-stand-autoritaet-nach-fortschritt.md) | Tablet-Stand: Autorität nach Fortschritt, Host-Sätze, Quellen-Regel (ergänzt 0017) | accepted |
 | [0084](0084-undo-stand-format-v2.md) | Tablet-Zustand: Undo-Format v2, Mischversionen und Deckel | accepted |
 | [0085](0085-spielende-ueberholt-parken-nachzuegler.md) | Spielende: „überholt“, geparktes Ergebnis und Nachzügler-Fenster (ergänzt 0018/0014/0038) | accepted |
+| [0086](0086-ein-geordneter-sender-fuer-die-badhub-strecke.md) | Ein geordneter Sender für die badhub-Strecke: Snapshot-Ablieferung, Fehlerklassen, Backoff, Halt | accepted |
+| [0087](0087-voller-tset-nur-bei-strukturaenderung.md) | Voller `tset` nur bei Strukturänderung; Lebenszeichen = letzter voller `tset`; Tablet-Punkte nur über den Punktweg | accepted |
+| [0088](0088-anzeigen-bei-host-verlust-karenz-dann-503.md) | Anzeigen bei Host-Verlust: 20 s Karenz ab dem letzten Lebenszeichen, dann 503; Start-Karenz, Kopplungsseite bleibt | accepted |
+| [0089](0089-lebensdauer-des-namespace-zustands-ohne-host.md) | Lebensdauer des Namespace-Zustands ohne Host: Schlüssel sofort, Turnierdaten 60 min, Tablet-Stand solange ein Tablet hängt | accepted |
+| [0090](0090-ueberlast-am-relay-und-mindestschutz.md) | Überlast am Relay: fachliche vs. Transport-Deckel, Mengen-Takt, volle Kanäle trennen; Mindestschutz ohne Host-Anmeldung | accepted |
+| [0091](0091-ergebnisse-im-host-ein-arbeiter-je-feld.md) | Ergebnisse im Host: ein Arbeiter je Feld, Quittung nur an die Sitzung des Auftrags (berührt R5, ADR 0018) | accepted |
