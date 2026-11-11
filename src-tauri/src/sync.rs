@@ -89,6 +89,10 @@ pub enum SyncOutcome {
     /// Verdächtig leerer BTP-Snapshot verworfen (Leer-Snapshot-Guard);
     /// der Zyklus hat keinerlei Zustand verändert.
     SnapshotDiscarded,
+    /// Der Zyklus ist durch; der Stand liegt im Postfach des badhub-Senders
+    /// (oder es gibt keinen Sender). Was aus der Übertragung wird, sagt die
+    /// Lage des Senders — nicht mehr das Ergebnis des Zyklus.
+    Abgeliefert,
     /// Die Internet-Strecke zu badhub ist gestört; der nächste Versuch folgt
     /// in `sekunden`. Die Halle läuft davon unberührt weiter.
     PushGestoert { sekunden: u64 },
@@ -99,24 +103,13 @@ pub enum SyncOutcome {
     PushAngehalten { wand: bool },
     /// badhub lehnt den Turnierstand ab; nächster Versuch in `sekunden`.
     PushAbgelehnt { status: u16, sekunden: u64 },
+    /// Der badhub-Sender ist ausgefallen (Panik) — bis zum Neustart der
+    /// Übertragung geht nichts mehr an badhub.
+    PushAusgefallen,
 }
 
 /// Hält den Zustand zwischen den Zyklen.
 pub struct SyncEngine {
-    /// Zuletzt erfolgreich gesendeter Stand; `None` erzwingt einen vollen
-    /// `tset` (erster Lauf oder nach einem Push-Fehler).
-    last_pushed: Option<BtpSnapshot>,
-    /// Fortlaufende Request-ID für Badhub.
-    rid: u64,
-    /// Zeitpunkt des letzten tatsächlich gesendeten Pushes (echtes Update
-    /// oder Heartbeat). Steuert, wann das nächste Lebenszeichen fällig ist.
-    last_push_at: Option<Instant>,
-    /// Wann das Turnierlogo zuletzt **erfolgreich** an badhub ging, und mit
-    /// welcher Marke ([`logo_marke`]). Solange die Marke stimmt und die
-    /// Frist läuft, bleiben die Logo-Felder aus dem `tset` — badhub behält
-    /// dann seinen Stand. Erst nach einem geglückten Push gestempelt: Sonst
-    /// hielte bts-light das Logo für übertragen, obwohl es nie ankam.
-    logo_gesendet: Option<(Instant, String)>,
     /// Zuletzt geloggte Turnier-Topologie (Hallen, Felder, Matches) –
     /// das Diagnose-Log nennt sie nur bei Änderung, nicht jeden Zyklus.
     last_topology: Option<(usize, usize, usize)>,
@@ -177,30 +170,17 @@ pub struct SyncEngine {
     /// (P1). Grundlage der Highlight-Reconciliation: nur der Diff zum
     /// aktuellen Aufruf-Stand wird nach BTP geschrieben.
     highlight_written: HashSet<i64>,
-    /// Zuletzt erfolgreich gesendete Meldeliste (Hallen-Check-In, ADR 0009).
-    /// `None` = in dieser Sitzung noch nichts gesendet → der nächste Zyklus
-    /// schickt sie vollständig. Getrennt von `last_pushed`, weil Meldeliste
-    /// und Liveticker unabhängig voneinander scheitern dürfen.
-    last_roster: Option<CheckinRosterMessage>,
     /// Ab welcher Position der nächste Nachschub-Durchlauf beginnt —
     /// rotiert, damit das Zeitfenster nicht immer dieselben hinteren
     /// Einträge abschneidet (siehe `flush_btp_retries`).
     btp_retry_start: usize,
-    /// Taktgeber für den `sched`-Versand (vollständiger Spielplan).
-    sched_takt: SchedTakt,
     /// Wann die Meetingpoint-Prognose zuletzt gerechnet wurde (Unix-ms,
     /// 0 = nie). Geht beim Speichern der Einstellungen verloren — dann wird
     /// eben sofort neu gerechnet, das ist gewollt.
     mp_prognose_ms: u64,
-    /// Was badhub vom Punktverlauf zuletzt angenommen hat (`tverlauf`).
-    verlauf_stand: crate::badhub::verlauf::VerlaufStand,
-    /// Turnier, zu dem `verlauf_stand` gehört — ein neues sendet alles neu
-    /// (BTP-Match-IDs beginnen je Turnierdatei von vorn).
-    verlauf_turnier: String,
-    /// Die Strecke zu badhub (Fehlerklassen, Backoff, Halt, Kanal-Pausen,
-    /// Logo-Regel) — geteilt mit den Punkt-Arbeitern der Tablets, damit
-    /// nach einem abgelehnten Passwort wirklich NICHTS mehr hinausgeht.
-    tor: Tor,
+    /// Postfach des badhub-Senders — `None` am Slave und in Tests: Dann
+    /// liefert der Zyklus nichts ab.
+    postfach: Option<crate::badhub::sender::Griff>,
 }
 
 /// Wie lange eine offene Auto-Zuweisung als „unterwegs" gilt, bevor sie als
@@ -758,24 +738,10 @@ fn beanspruche_beim_aufruf(
 }
 
 impl SyncEngine {
-    /// Engine mit einer eigenen, frischen Strecke (Tests).
+    /// Engine ohne Postfach: Der Zyklus läuft, liefert aber nichts an badhub
+    /// ab (Slave, Tests).
     pub fn new() -> Self {
-        Self::mit_tor(Strecke::frisch().als_tor())
-    }
-
-    /// Engine an einer geteilten Strecke. Der Logo-Stempel kommt aus dem
-    /// Merker der Strecke: Er überlebt das Speichern der Einstellungen —
-    /// sonst ginge das Logo nach jedem Speichern sofort wieder hinaus.
-    pub fn mit_tor(tor: Tor) -> Self {
-        let logo_gesendet = tor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .logo_stempel();
         Self {
-            last_pushed: None,
-            rid: 1,
-            last_push_at: None,
-            logo_gesendet,
             last_topology: None,
             tp_kern: None,
             tp_ereignis: None,
@@ -789,73 +755,18 @@ impl SyncEngine {
             seen_matches: false,
             suspect_empty_polls: 0,
             highlight_written: HashSet::new(),
-            last_roster: None,
             btp_retry_start: 0,
-            sched_takt: SchedTakt::neu(),
             mp_prognose_ms: 0,
-            verlauf_stand: Default::default(),
-            verlauf_turnier: String::new(),
-            tor,
+            postfach: None,
         }
     }
 
-    /// Darf dieser Kanal jetzt senden (Lage der Strecke, Pause des Kanals)?
-    fn tor_darf(&self, kanal: Kanal) -> bool {
-        self.tor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .darf(kanal, Instant::now())
-    }
-
-    /// Wie [`Self::tor_darf`], unmittelbar vor dem Senden — reserviert den
-    /// Platz (siehe [`Strecke::beginnen`]).
-    fn tor_beginnen(&self, kanal: Kanal) -> bool {
-        self.tor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .beginnen(kanal, Instant::now())
-    }
-
-    /// Meldet den Ausgang einer Sendung an die Strecke.
-    fn tor_melden(
-        &self,
-        kanal: Kanal,
-        ausgang: &crate::badhub::strecke::Ausgang,
-        logo: Option<&str>,
-    ) -> Klasse {
-        self.tor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .melden(kanal, ausgang, logo, Instant::now())
-    }
-
-    /// Der Zustand der Strecke als Zyklus-Ergebnis für die Statuszeile.
-    fn strecken_ergebnis(&self) -> SyncOutcome {
-        let anzeige = self
-            .tor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .anzeige(Instant::now());
-        // Aufgerundet: „in 0 s" stünde sonst bis zum nächsten Zyklus da.
-        let sekunden = |rest: Duration| rest.as_secs() + u64::from(rest.subsec_nanos() > 0);
-        match anzeige {
-            Anzeige::Frei => SyncOutcome::Idle,
-            Anzeige::Gestoert { rest } => SyncOutcome::PushGestoert {
-                sekunden: sekunden(rest),
-            },
-            Anzeige::Gedrosselt { rest } => SyncOutcome::PushGedrosselt {
-                uhrzeit: (chrono::Local::now()
-                    + chrono::Duration::from_std(rest).unwrap_or_default())
-                .format("%H:%M")
-                .to_string(),
-            },
-            Anzeige::Angehalten { grund } => SyncOutcome::PushAngehalten {
-                wand: grund == HaltGrund::Wand,
-            },
-            Anzeige::Abgelehnt { status, rest } => SyncOutcome::PushAbgelehnt {
-                status,
-                sekunden: sekunden(rest),
-            },
+    /// Engine, die ihren Stand je Zyklus im Postfach des badhub-Senders
+    /// ablegt (Spec `badhub-push-entkoppeln`, PR 2a).
+    pub fn mit_postfach(postfach: crate::badhub::sender::Griff) -> Self {
+        Self {
+            postfach: Some(postfach),
+            ..Self::new()
         }
     }
 
@@ -863,66 +774,6 @@ impl SyncEngine {
     /// Sync-Loop reicht es an den Takt-Zustand weiter (ADR 0062).
     pub fn tp_ereignis_nehmen(&mut self) -> Option<&'static str> {
         self.tp_ereignis.take()
-    }
-
-    /// Entscheidet, ob in diesem Zyklus eine Meldeliste zu senden ist, und
-    /// baut sie — ohne Netzwerkzugriff.
-    ///
-    /// Getrennt vom Senden, weil der Snapshot dafür gebraucht wird, der
-    /// eigentliche Versand aber erst **nach** dem Liveticker-Push laufen darf.
-    fn plan_checkin_roster(
-        &self,
-        config: &AppConfig,
-        snapshot: &BtpSnapshot,
-    ) -> Option<CheckinRosterMessage> {
-        if !config.checkin.is_ready() || !self.tor_darf(Kanal::Meldeliste) {
-            return None;
-        }
-        let roster = build_checkin_roster(snapshot, &config.checkin.tournament_uuid, self.rid);
-        // Nur bei echter Änderung senden — die Meldeliste sind Stammdaten,
-        // kein Live-Stand (kein Heartbeat).
-        roster_update(self.last_roster.as_ref(), roster)
-    }
-
-    /// Sendet die vorbereitete Meldeliste (ADR 0009).
-    ///
-    /// Bewusst mit **eigenem Fehlerpfad**: Der Check-In ist additiv — geht er
-    /// schief, muss der Liveticker trotzdem laufen. Fehler werden deshalb nur
-    /// geloggt und ändern den [`SyncOutcome`] nicht.
-    async fn send_checkin_roster(
-        &mut self,
-        config: &AppConfig,
-        http: &reqwest::Client,
-        roster: CheckinRosterMessage,
-    ) {
-        // Zwischen Planen und Senden lag der Liveticker-Push: Ist die Strecke
-        // dabei gestört worden, entfällt das Additive in diesem Zyklus.
-        if !self.tor_beginnen(Kanal::Meldeliste) {
-            return;
-        }
-        let body = serde_json::to_vec(&roster)
-            .expect("centry_list-Serialisierung kann nicht fehlschlagen");
-        let ausgang = push::sende(
-            http,
-            &config.badhub.url,
-            &config.badhub.password,
-            Kanal::Meldeliste,
-            body,
-        )
-        .await;
-        // Alles außer „ok" merkt sich die Strecke (Pause des Kanals, Störung,
-        // Halt) — auch der 409 „gehört einem anderen Verband", der bisher
-        // alle 5 s mit der vollen Liste wiederholt wurde. `last_roster`
-        // bleibt dann unverändert: Der nächste erlaubte Versuch schickt die
-        // vollständige Liste.
-        if self.tor_melden(Kanal::Meldeliste, &ausgang, None) == Klasse::Ok {
-            tracing::debug!(
-                klassen = roster.classes.len(),
-                meldungen = roster.entries.len(),
-                "Meldeliste an badhub gesendet"
-            );
-            self.last_roster = Some(roster);
-        }
     }
 
     /// Prognose „Feld frei" für die Meetingpoint-Seite frisch rechnen —
@@ -947,119 +798,6 @@ impl SyncEngine {
         let werte = crate::tablet::tl::prognose_mit_unsicherheit(tablet, config, jetzt_ms);
         tablet.set_mp_prognose(jetzt_ms, werte);
         self.mp_prognose_ms = jetzt_ms;
-    }
-
-    /// Sendet den vollständigen Spielplan (`sched`), höchstens minütlich.
-    ///
-    /// Wie der Check-In-Roster **additiv mit eigenem Fehlerpfad**: Der
-    /// Spielplan ist eine Zusatzinformation für die Spielerseite — geht er
-    /// schief, muss der Liveticker trotzdem laufen. Fehler ändern den
-    /// [`SyncOutcome`] deshalb nicht.
-    async fn send_sched(
-        &mut self,
-        config: &AppConfig,
-        http: &reqwest::Client,
-        snapshot: &BtpSnapshot,
-        ctx: &crate::badhub::payload::LivetickerContext<'_>,
-        tablet: &TabletState,
-        jetzt_ms: u64,
-    ) {
-        if !self.tor_darf(Kanal::Sched) {
-            return;
-        }
-        if !self.sched_takt.faellig(jetzt_ms) {
-            return;
-        }
-
-        // Prognose erst jetzt rechnen, also nur, wenn der Spielplan wirklich
-        // hinausgeht — sonst stünde ohne offene Turnierleitungs-Ansicht nie
-        // ein `predicted_start_ts` darin (oder ein veralteter). Nur die frisch
-        // gerechneten Werte, nicht der gemergte Speicher (siehe dort).
-        let predicted = crate::tablet::tl::prognose_auffrischen(tablet, config, jetzt_ms);
-        let sched = crate::badhub::payload::build_sched(snapshot, ctx, &predicted, self.rid);
-        let anzahl = sched.event.matches.len();
-
-        // Ein leerer Spielplan geht gar nicht hinaus: badhub antwortet darauf
-        // mit 400 („sched ohne matches"), und das hieße hier „Kanal
-        // unbekannt" — 30 Minuten Pause ohne Grund.
-        if anzahl == 0 || !self.tor_beginnen(Kanal::Sched) {
-            return;
-        }
-        let body =
-            serde_json::to_vec(&sched).expect("sched-Serialisierung kann nicht fehlschlagen");
-        let ausgang = push::sende(
-            http,
-            &config.badhub.url,
-            &config.badhub.password,
-            Kanal::Sched,
-            body,
-        )
-        .await;
-        if self.tor_melden(Kanal::Sched, &ausgang, None) == Klasse::Ok {
-            tracing::debug!(spiele = anzahl, "Spielplan an badhub gesendet");
-        }
-    }
-
-    /// Punktverlauf und Aufschlag an badhub (`tverlauf`, badhub ADR-0060).
-    ///
-    /// Im selben 5-s-Takt wie der Score-Push, aber danach und mit eigenem
-    /// Fehlerpfad: der Liveticker-Stand ist die zeitkritische Funktion. Nur
-    /// Matches, deren Eintrag sich seit dem letzten angenommenen Push
-    /// geändert hat; ohne Änderung kein Request.
-    async fn send_verlauf(
-        &mut self,
-        config: &AppConfig,
-        http: &reqwest::Client,
-        snapshot: &BtpSnapshot,
-        tablet: &TabletState,
-    ) {
-        use crate::badhub::verlauf;
-
-        if !self.tor_darf(Kanal::Verlauf) {
-            return;
-        }
-        if self.verlauf_turnier != snapshot.tournament_name {
-            self.verlauf_stand.leeren();
-            self.verlauf_turnier = snapshot.tournament_name.clone();
-        }
-        // Derselbe Stand wie der Verlauf (`overview_from`, nicht ein zweites
-        // Lesen des Tablet-Snapshots).
-        let pausen: HashMap<i64, serde_json::Value> = tablet
-            .overview_from(snapshot)
-            .into_iter()
-            .filter_map(|c| c.pause.map(|p| (c.match_id, p)))
-            .collect();
-        let alle = verlauf::eintraege(
-            snapshot,
-            |id| tablet.timeline_store().timeline(id),
-            |id| tablet.sheet_store().sheet(id),
-            &pausen,
-        );
-        let neu = self.verlauf_stand.geaendert(alle);
-        if neu.is_empty() {
-            return;
-        }
-        if !self.tor_beginnen(Kanal::Verlauf) {
-            return;
-        }
-        let msg = verlauf::build_verlauf(neu, self.rid, config.tournament_uuid_kanonisch());
-        let body =
-            serde_json::to_vec(&msg).expect("tverlauf-Serialisierung kann nicht fehlschlagen");
-        let ausgang = push::sende(
-            http,
-            &config.badhub.url,
-            &config.badhub.password,
-            Kanal::Verlauf,
-            body,
-        )
-        .await;
-        if self.tor_melden(Kanal::Verlauf, &ausgang, None) == Klasse::Ok {
-            tracing::debug!(
-                spiele = msg.matches.len(),
-                "Punktverlauf an badhub gesendet"
-            );
-            self.verlauf_stand.angenommen(&msg.matches);
-        }
     }
 
     /// Highlight-Reconciliation (P1): macht „in Vorbereitung"-Aufrufe in BTP
@@ -1832,92 +1570,6 @@ impl SyncEngine {
             return false;
         }
         true
-    }
-
-    /// Legt das Turnierlogo in einen vollen `tset` — **nur wenn nötig**.
-    ///
-    /// Nur `tset` trägt den Event-Block; ein `tupdate_match` braucht das
-    /// Logo nicht, weil badhub dort allein das Match-Element patcht.
-    ///
-    /// Mitgegeben wird es, wenn es sich geändert hat, das Turnier gewechselt
-    /// hat, noch nie erfolgreich hinausging — oder die Auffrischungsfrist
-    /// abgelaufen ist ([`LOGO_AUFFRISCHUNG`]). Sonst bleiben die Felder
-    /// **weg**, was für badhub „unverändert" heißt und den Löwenanteil der
-    /// Nutzlast spart (bis zu 2,7 MB je vollem `tset`).
-    ///
-    /// Beim Löschen gehen **alle drei** Felder leer hinaus, auch die
-    /// Hintergrundfarbe: Sie steht in der Konfiguration noch, weil „Logo
-    /// entfernen" im Setup sie nicht mit abräumt. Ginge sie so hinaus,
-    /// verstünde badhub „Logo löschen, Farbe setzen" — ein halb gelöschter
-    /// Zustand (Review-Fund 18.08.2026).
-    ///
-    /// Gibt die Marke zurück, die nach einem geglückten Push zu stempeln
-    /// ist (siehe [`Self::logo_stempeln`]) — oder `None`, wenn nichts
-    /// mitgegeben wurde.
-    fn logo_in_tset_legen(&self, update: &mut Update, config: &AppConfig) -> Option<String> {
-        let Update::Full(msg) = update else {
-            return None;
-        };
-        let logo = &config.tournament_logo;
-        let marke = logo_marke(&msg.event.tournament_name, logo);
-        let noetig = match &self.logo_gesendet {
-            Some((zeit, gemerkt)) => *gemerkt != marke || zeit.elapsed() >= LOGO_AUFFRISCHUNG,
-            None => true,
-        };
-        if !noetig {
-            return None;
-        }
-        // Im Fehlerfall nie die teuerste Nutzlast (bis ~2,7 MB): nur bei
-        // freier Strecke, nicht nach einem gescheiterten `tset`, nicht in
-        // der Logo-Sperre (Spec `badhub-push-entkoppeln`, L7).
-        let erlaubt = self
-            .tor
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .logo_erlaubt(&marke, Instant::now());
-        if !erlaubt {
-            return None;
-        }
-        if logo.data.is_empty() {
-            msg.event.tournament_logo = Some(String::new());
-            msg.event.tournament_logo_mime = Some(String::new());
-            msg.event.tournament_logo_background_color = Some(String::new());
-        } else {
-            msg.event.tournament_logo = Some(logo.data.clone());
-            msg.event.tournament_logo_mime = Some(logo.mime.clone());
-            msg.event.tournament_logo_background_color = Some(logo.background_color.clone());
-        }
-        Some(marke)
-    }
-
-    /// Stempelt die Logo-Marke nach einem **geglückten** Push.
-    fn logo_stempeln(&mut self, marke: Option<String>) {
-        if let Some(marke) = marke {
-            let jetzt = Instant::now();
-            self.tor
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .logo_stempeln(marke.clone(), jetzt);
-            self.logo_gesendet = Some((jetzt, marke));
-        }
-    }
-
-    /// Nimmt das Logo wieder aus einem vollen `tset` — für den einen
-    /// sofortigen Versuch ohne Logo, nachdem badhub ihn als zu groß abgelehnt
-    /// hat. Fehlende Felder heißen für badhub „unverändert".
-    fn logo_aus_tset_nehmen(update: &mut Update) {
-        if let Update::Full(msg) = update {
-            msg.event.tournament_logo = None;
-            msg.event.tournament_logo_mime = None;
-            msg.event.tournament_logo_background_color = None;
-        }
-    }
-
-    /// Ist ein Heartbeat fällig? `true`, wenn noch nie gepusht wurde oder
-    /// der letzte Push länger als [`HEARTBEAT_AFTER`] zurückliegt.
-    fn heartbeat_due(&self) -> bool {
-        self.last_push_at
-            .is_none_or(|t| t.elapsed() >= HEARTBEAT_AFTER)
     }
 
     /// Stempelt beendete Matches: Beim ersten Erkennen eines Siegers wird
@@ -2728,12 +2380,7 @@ impl SyncEngine {
     /// `tablet` bekommt den frischen BTP-Snapshot (Court→Match-Auflösung für
     /// den Tablet-Server); Courts mit aktivem Tablet treiben anschließend
     /// ihren Live-Score selbst – ihr Satzstand überschreibt den BTP-Poll.
-    pub async fn run_once(
-        &mut self,
-        config: &AppConfig,
-        http: &reqwest::Client,
-        tablet: &TabletState,
-    ) -> SyncOutcome {
+    pub async fn run_once(&mut self, config: &AppConfig, tablet: &TabletState) -> SyncOutcome {
         // Perf-Zeile der Anzeige-Strecke (Spec monitor-livestand-push, S0).
         //
         // **Ganz vorn, vor jedem Frühausstieg.** Steht BTP still, laufen die
@@ -2991,17 +2638,426 @@ impl SyncEngine {
         // `spielliste-manuelle-reihenfolge`) — direkt danach, gleiche
         // Bedingungen (lokal, kein Slave nötig).
         self.reconcile_queue_order(tablet, &snapshot);
-        self.an_badhub_senden(config, http, tablet, snapshot).await
+        // Der Stand geht ins Postfach des Senders — der Zyklus wartet nie auf
+        // badhub. Liegt dort noch ein älterer, ungesendeter Stand, ersetzt
+        // ihn dieser (neuester gewinnt).
+        if let Some(postfach) = &self.postfach {
+            postfach.stand_abliefern(snapshot);
+        }
+        SyncOutcome::Abgeliefert
+    }
+}
+
+/// Der badhub-Teil: alles, was der Sender zwischen zwei Sendungen behalten
+/// muss. Bis v0.9.381 lebte das in der [`SyncEngine`] und lief im Zyklus —
+/// ein hängendes badhub streckte ihn damit um bis zu eine Frist je Versuch.
+/// Jetzt gehört es dem Sender-Task ([`crate::badhub::sender`]); der Zyklus
+/// legt nur noch seinen Stand ins Postfach.
+pub struct PushTeil {
+    /// Zuletzt erfolgreich gesendeter Stand; `None` erzwingt einen vollen
+    /// `tset` (erster Lauf oder nach einem Push-Fehler).
+    last_pushed: Option<BtpSnapshot>,
+    /// Fortlaufende Request-ID für Badhub.
+    rid: u64,
+    /// Zeitpunkt des letzten tatsächlich gesendeten Pushes (echtes Update
+    /// oder Heartbeat). Steuert, wann das nächste Lebenszeichen fällig ist.
+    last_push_at: Option<Instant>,
+    /// Wann das Turnierlogo zuletzt **erfolgreich** an badhub ging, und mit
+    /// welcher Marke ([`logo_marke`]). Solange die Marke stimmt und die
+    /// Frist läuft, bleiben die Logo-Felder aus dem `tset` — badhub behält
+    /// dann seinen Stand. Erst nach einem geglückten Push gestempelt: Sonst
+    /// hielte bts-light das Logo für übertragen, obwohl es nie ankam.
+    logo_gesendet: Option<(Instant, String)>,
+    /// Zuletzt erfolgreich gesendete Meldeliste (Hallen-Check-In, ADR 0009).
+    /// `None` = in dieser Sitzung noch nichts gesendet → der nächste Zyklus
+    /// schickt sie vollständig. Getrennt von `last_pushed`, weil Meldeliste
+    /// und Liveticker unabhängig voneinander scheitern dürfen.
+    last_roster: Option<CheckinRosterMessage>,
+    /// Taktgeber für den `sched`-Versand (vollständiger Spielplan).
+    sched_takt: SchedTakt,
+    /// Was badhub vom Punktverlauf zuletzt angenommen hat (`tverlauf`).
+    verlauf_stand: crate::badhub::verlauf::VerlaufStand,
+    /// Turnier, zu dem `verlauf_stand` gehört — ein neues sendet alles neu
+    /// (BTP-Match-IDs beginnen je Turnierdatei von vorn).
+    verlauf_turnier: String,
+    /// Die Strecke zu badhub (Fehlerklassen, Backoff, Halt, Kanal-Pausen,
+    /// Logo-Regel) — geteilt mit den Punkt-Arbeitern der Tablets, damit
+    /// nach einem abgelehnten Passwort wirklich NICHTS mehr hinausgeht.
+    tor: Tor,
+}
+
+impl Default for PushTeil {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PushTeil {
+    /// Push-Teil mit einer eigenen, frischen Strecke (Tests).
+    pub fn new() -> Self {
+        Self::mit_tor(Strecke::frisch().als_tor())
     }
 
-    /// Der badhub-Teil eines Zyklus: Liveticker, dann Meldeliste, Spielplan
-    /// und Punktverlauf. Von `run_once` getrennt, damit er ohne BTP prüfbar
-    /// ist — alles davor (Feldvergabe, Rotation, Druck, Ansage) ist zu
-    /// diesem Zeitpunkt schon gelaufen.
-    async fn an_badhub_senden(
+    /// Push-Teil an einer geteilten Strecke. Der Logo-Stempel kommt aus dem
+    /// Merker der Strecke: Er überlebt das Speichern der Einstellungen —
+    /// sonst ginge das Logo nach jedem Speichern sofort wieder hinaus.
+    pub fn mit_tor(tor: Tor) -> Self {
+        let logo_gesendet = tor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .logo_stempel();
+        Self {
+            last_pushed: None,
+            rid: 1,
+            last_push_at: None,
+            logo_gesendet,
+            last_roster: None,
+            sched_takt: SchedTakt::neu(),
+            verlauf_stand: Default::default(),
+            verlauf_turnier: String::new(),
+            tor,
+        }
+    }
+
+    /// Was die Statuszeile über die Strecke sagen soll.
+    pub fn anzeige(&self) -> Anzeige {
+        self.tor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .anzeige(Instant::now())
+    }
+
+    /// Darf dieser Kanal jetzt senden (Lage der Strecke, Pause des Kanals)?
+    fn tor_darf(&self, kanal: Kanal) -> bool {
+        self.tor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .darf(kanal, Instant::now())
+    }
+
+    /// Wie [`Self::tor_darf`], unmittelbar vor dem Senden — reserviert den
+    /// Platz (siehe [`Strecke::beginnen`]).
+    fn tor_beginnen(&self, kanal: Kanal) -> bool {
+        self.tor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .beginnen(kanal, Instant::now())
+    }
+
+    /// Meldet den Ausgang einer Sendung an die Strecke.
+    fn tor_melden(
+        &self,
+        kanal: Kanal,
+        ausgang: &crate::badhub::strecke::Ausgang,
+        logo: Option<&str>,
+    ) -> Klasse {
+        self.tor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .melden(kanal, ausgang, logo, Instant::now())
+    }
+
+    /// Der Zustand der Strecke als Ergebnis eines Durchgangs. Die Statuszeile
+    /// liest ihn seit dem eigenen Sender-Task NICHT mehr hier (sondern über
+    /// `PushLage`); geblieben ist die Prüfung „ist die Strecke frei?" und der
+    /// Rückgabewert von [`Self::an_badhub_senden`] für die Tests.
+    fn strecken_ergebnis(&self) -> SyncOutcome {
+        let anzeige = self
+            .tor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .anzeige(Instant::now());
+        // Aufgerundet: „in 0 s" stünde sonst bis zum nächsten Zyklus da.
+        let sekunden = |rest: Duration| rest.as_secs() + u64::from(rest.subsec_nanos() > 0);
+        match anzeige {
+            Anzeige::Frei => SyncOutcome::Idle,
+            Anzeige::Gestoert { rest } => SyncOutcome::PushGestoert {
+                sekunden: sekunden(rest),
+            },
+            Anzeige::Gedrosselt { rest } => SyncOutcome::PushGedrosselt {
+                uhrzeit: (chrono::Local::now()
+                    + chrono::Duration::from_std(rest).unwrap_or_default())
+                .format("%H:%M")
+                .to_string(),
+            },
+            Anzeige::Angehalten { grund } => SyncOutcome::PushAngehalten {
+                wand: grund == HaltGrund::Wand,
+            },
+            Anzeige::Abgelehnt { status, rest } => SyncOutcome::PushAbgelehnt {
+                status,
+                sekunden: sekunden(rest),
+            },
+        }
+    }
+
+    /// Entscheidet, ob in diesem Zyklus eine Meldeliste zu senden ist, und
+    /// baut sie — ohne Netzwerkzugriff.
+    ///
+    /// Getrennt vom Senden, weil der Snapshot dafür gebraucht wird, der
+    /// eigentliche Versand aber erst **nach** dem Liveticker-Push laufen darf.
+    fn plan_checkin_roster(
+        &self,
+        config: &AppConfig,
+        snapshot: &BtpSnapshot,
+    ) -> Option<CheckinRosterMessage> {
+        if !config.checkin.is_ready() || !self.tor_darf(Kanal::Meldeliste) {
+            return None;
+        }
+        let roster = build_checkin_roster(snapshot, &config.checkin.tournament_uuid, self.rid);
+        // Nur bei echter Änderung senden — die Meldeliste sind Stammdaten,
+        // kein Live-Stand (kein Heartbeat).
+        roster_update(self.last_roster.as_ref(), roster)
+    }
+
+    /// Sendet die vorbereitete Meldeliste (ADR 0009).
+    ///
+    /// Bewusst mit **eigenem Fehlerpfad**: Der Check-In ist additiv — geht er
+    /// schief, muss der Liveticker trotzdem laufen. Fehler werden deshalb nur
+    /// geloggt und ändern den [`SyncOutcome`] nicht.
+    async fn send_checkin_roster(
         &mut self,
         config: &AppConfig,
-        http: &reqwest::Client,
+        http: &dyn push::Transport,
+        roster: CheckinRosterMessage,
+    ) {
+        // Zwischen Planen und Senden lag der Liveticker-Push: Ist die Strecke
+        // dabei gestört worden, entfällt das Additive in diesem Zyklus.
+        if !self.tor_beginnen(Kanal::Meldeliste) {
+            return;
+        }
+        let body = serde_json::to_vec(&roster)
+            .expect("centry_list-Serialisierung kann nicht fehlschlagen");
+        let ausgang = http
+            .sende(
+                &config.badhub.url,
+                &config.badhub.password,
+                Kanal::Meldeliste,
+                body,
+            )
+            .await;
+        // Alles außer „ok" merkt sich die Strecke (Pause des Kanals, Störung,
+        // Halt) — auch der 409 „gehört einem anderen Verband", der bisher
+        // alle 5 s mit der vollen Liste wiederholt wurde. `last_roster`
+        // bleibt dann unverändert: Der nächste erlaubte Versuch schickt die
+        // vollständige Liste.
+        if self.tor_melden(Kanal::Meldeliste, &ausgang, None) == Klasse::Ok {
+            tracing::debug!(
+                klassen = roster.classes.len(),
+                meldungen = roster.entries.len(),
+                "Meldeliste an badhub gesendet"
+            );
+            self.last_roster = Some(roster);
+        }
+    }
+
+    /// Sendet den vollständigen Spielplan (`sched`), höchstens minütlich.
+    ///
+    /// Wie der Check-In-Roster **additiv mit eigenem Fehlerpfad**: Der
+    /// Spielplan ist eine Zusatzinformation für die Spielerseite — geht er
+    /// schief, muss der Liveticker trotzdem laufen. Fehler ändern den
+    /// [`SyncOutcome`] deshalb nicht.
+    async fn send_sched(
+        &mut self,
+        config: &AppConfig,
+        http: &dyn push::Transport,
+        snapshot: &BtpSnapshot,
+        ctx: &crate::badhub::payload::LivetickerContext<'_>,
+        tablet: &TabletState,
+        jetzt_ms: u64,
+    ) {
+        if !self.tor_darf(Kanal::Sched) {
+            return;
+        }
+        if !self.sched_takt.faellig(jetzt_ms) {
+            return;
+        }
+
+        // Prognose erst jetzt rechnen, also nur, wenn der Spielplan wirklich
+        // hinausgeht — sonst stünde ohne offene Turnierleitungs-Ansicht nie
+        // ein `predicted_start_ts` darin (oder ein veralteter). Nur die frisch
+        // gerechneten Werte, nicht der gemergte Speicher (siehe dort).
+        let predicted = crate::tablet::tl::prognose_auffrischen(tablet, config, jetzt_ms);
+        let sched = crate::badhub::payload::build_sched(snapshot, ctx, &predicted, self.rid);
+        let anzahl = sched.event.matches.len();
+
+        // Ein leerer Spielplan geht gar nicht hinaus: badhub antwortet darauf
+        // mit 400 („sched ohne matches"), und das hieße hier „Kanal
+        // unbekannt" — 30 Minuten Pause ohne Grund.
+        if anzahl == 0 || !self.tor_beginnen(Kanal::Sched) {
+            return;
+        }
+        let body =
+            serde_json::to_vec(&sched).expect("sched-Serialisierung kann nicht fehlschlagen");
+        let ausgang = http
+            .sende(
+                &config.badhub.url,
+                &config.badhub.password,
+                Kanal::Sched,
+                body,
+            )
+            .await;
+        if self.tor_melden(Kanal::Sched, &ausgang, None) == Klasse::Ok {
+            tracing::debug!(spiele = anzahl, "Spielplan an badhub gesendet");
+        }
+    }
+
+    /// Punktverlauf und Aufschlag an badhub (`tverlauf`, badhub ADR-0060).
+    ///
+    /// Im selben 5-s-Takt wie der Score-Push, aber danach und mit eigenem
+    /// Fehlerpfad: der Liveticker-Stand ist die zeitkritische Funktion. Nur
+    /// Matches, deren Eintrag sich seit dem letzten angenommenen Push
+    /// geändert hat; ohne Änderung kein Request.
+    async fn send_verlauf(
+        &mut self,
+        config: &AppConfig,
+        http: &dyn push::Transport,
+        snapshot: &BtpSnapshot,
+        tablet: &TabletState,
+    ) {
+        use crate::badhub::verlauf;
+
+        if !self.tor_darf(Kanal::Verlauf) {
+            return;
+        }
+        if self.verlauf_turnier != snapshot.tournament_name {
+            self.verlauf_stand.leeren();
+            self.verlauf_turnier = snapshot.tournament_name.clone();
+        }
+        // Derselbe Stand wie der Verlauf (`overview_from`, nicht ein zweites
+        // Lesen des Tablet-Snapshots).
+        let pausen: HashMap<i64, serde_json::Value> = tablet
+            .overview_from(snapshot)
+            .into_iter()
+            .filter_map(|c| c.pause.map(|p| (c.match_id, p)))
+            .collect();
+        let alle = verlauf::eintraege(
+            snapshot,
+            |id| tablet.timeline_store().timeline(id),
+            |id| tablet.sheet_store().sheet(id),
+            &pausen,
+        );
+        let neu = self.verlauf_stand.geaendert(alle);
+        if neu.is_empty() {
+            return;
+        }
+        if !self.tor_beginnen(Kanal::Verlauf) {
+            return;
+        }
+        let msg = verlauf::build_verlauf(neu, self.rid, config.tournament_uuid_kanonisch());
+        let body =
+            serde_json::to_vec(&msg).expect("tverlauf-Serialisierung kann nicht fehlschlagen");
+        let ausgang = http
+            .sende(
+                &config.badhub.url,
+                &config.badhub.password,
+                Kanal::Verlauf,
+                body,
+            )
+            .await;
+        if self.tor_melden(Kanal::Verlauf, &ausgang, None) == Klasse::Ok {
+            tracing::debug!(
+                spiele = msg.matches.len(),
+                "Punktverlauf an badhub gesendet"
+            );
+            self.verlauf_stand.angenommen(&msg.matches);
+        }
+    }
+
+    /// Legt das Turnierlogo in einen vollen `tset` — **nur wenn nötig**.
+    ///
+    /// Nur `tset` trägt den Event-Block; ein `tupdate_match` braucht das
+    /// Logo nicht, weil badhub dort allein das Match-Element patcht.
+    ///
+    /// Mitgegeben wird es, wenn es sich geändert hat, das Turnier gewechselt
+    /// hat, noch nie erfolgreich hinausging — oder die Auffrischungsfrist
+    /// abgelaufen ist ([`LOGO_AUFFRISCHUNG`]). Sonst bleiben die Felder
+    /// **weg**, was für badhub „unverändert" heißt und den Löwenanteil der
+    /// Nutzlast spart (bis zu 2,7 MB je vollem `tset`).
+    ///
+    /// Beim Löschen gehen **alle drei** Felder leer hinaus, auch die
+    /// Hintergrundfarbe: Sie steht in der Konfiguration noch, weil „Logo
+    /// entfernen" im Setup sie nicht mit abräumt. Ginge sie so hinaus,
+    /// verstünde badhub „Logo löschen, Farbe setzen" — ein halb gelöschter
+    /// Zustand (Review-Fund 18.08.2026).
+    ///
+    /// Gibt die Marke zurück, die nach einem geglückten Push zu stempeln
+    /// ist (siehe [`Self::logo_stempeln`]) — oder `None`, wenn nichts
+    /// mitgegeben wurde.
+    fn logo_in_tset_legen(&self, update: &mut Update, config: &AppConfig) -> Option<String> {
+        let Update::Full(msg) = update else {
+            return None;
+        };
+        let logo = &config.tournament_logo;
+        let marke = logo_marke(&msg.event.tournament_name, logo);
+        let noetig = match &self.logo_gesendet {
+            Some((zeit, gemerkt)) => *gemerkt != marke || zeit.elapsed() >= LOGO_AUFFRISCHUNG,
+            None => true,
+        };
+        if !noetig {
+            return None;
+        }
+        // Im Fehlerfall nie die teuerste Nutzlast (bis ~2,7 MB): nur bei
+        // freier Strecke, nicht nach einem gescheiterten `tset`, nicht in
+        // der Logo-Sperre (Spec `badhub-push-entkoppeln`, L7).
+        let erlaubt = self
+            .tor
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .logo_erlaubt(&marke, Instant::now());
+        if !erlaubt {
+            return None;
+        }
+        if logo.data.is_empty() {
+            msg.event.tournament_logo = Some(String::new());
+            msg.event.tournament_logo_mime = Some(String::new());
+            msg.event.tournament_logo_background_color = Some(String::new());
+        } else {
+            msg.event.tournament_logo = Some(logo.data.clone());
+            msg.event.tournament_logo_mime = Some(logo.mime.clone());
+            msg.event.tournament_logo_background_color = Some(logo.background_color.clone());
+        }
+        Some(marke)
+    }
+
+    /// Stempelt die Logo-Marke nach einem **geglückten** Push.
+    fn logo_stempeln(&mut self, marke: Option<String>) {
+        if let Some(marke) = marke {
+            let jetzt = Instant::now();
+            self.tor
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .logo_stempeln(marke.clone(), jetzt);
+            self.logo_gesendet = Some((jetzt, marke));
+        }
+    }
+
+    /// Nimmt das Logo wieder aus einem vollen `tset` — für den einen
+    /// sofortigen Versuch ohne Logo, nachdem badhub ihn als zu groß abgelehnt
+    /// hat. Fehlende Felder heißen für badhub „unverändert".
+    fn logo_aus_tset_nehmen(update: &mut Update) {
+        if let Update::Full(msg) = update {
+            msg.event.tournament_logo = None;
+            msg.event.tournament_logo_mime = None;
+            msg.event.tournament_logo_background_color = None;
+        }
+    }
+
+    /// Ist ein Heartbeat fällig? `true`, wenn noch nie gepusht wurde oder
+    /// der letzte Push länger als [`HEARTBEAT_AFTER`] zurückliegt.
+    fn heartbeat_due(&self) -> bool {
+        self.last_push_at
+            .is_none_or(|t| t.elapsed() >= HEARTBEAT_AFTER)
+    }
+
+    /// Ein Durchgang des badhub-Teils: Liveticker, dann Meldeliste,
+    /// Spielplan und Punktverlauf. Aufrufer ist der Sender-Task
+    /// ([`crate::badhub::sender::lauf`]), je abgeholtem Stand einmal — der
+    /// Sync-Zyklus wartet darauf nicht. Der Rückgabewert dient nur noch den
+    /// Tests; die Statuszeile liest die Lage der Strecke.
+    pub async fn an_badhub_senden(
+        &mut self,
+        config: &AppConfig,
+        http: &dyn push::Transport,
         tablet: &TabletState,
         snapshot: BtpSnapshot,
     ) -> SyncOutcome {
@@ -3081,8 +3137,12 @@ impl SyncEngine {
         let jetzt_ms = chrono::Local::now().timestamp_millis().max(0) as u64;
         self.send_sched(config, http, &snapshot, &queue_ctx, tablet, jetzt_ms)
             .await;
-        // Punktverlauf und Aufschlag (badhub ADR-0060).
-        self.send_verlauf(config, http, &snapshot, tablet).await;
+        // Punktverlauf und Aufschlag (badhub ADR-0060) — nur mit bestätigtem
+        // Stand: badhub verwirft den Verlauf eines Spiels, das es noch nicht
+        // aus einem `tset` kennt, still, und hier gälte er als angenommen.
+        if matches!(liveticker, None | Some(Klasse::Ok)) {
+            self.send_verlauf(config, http, &snapshot, tablet).await;
+        }
         match liveticker {
             None => {
                 self.on_success(snapshot);
@@ -3115,7 +3175,7 @@ impl SyncEngine {
     async fn sende_liveticker(
         &self,
         config: &AppConfig,
-        http: &reqwest::Client,
+        http: &dyn push::Transport,
         kanal: Kanal,
         update: &Update,
         logo: Option<&str>,
@@ -3123,14 +3183,9 @@ impl SyncEngine {
         let Some((_, body)) = push::update_koerper(update) else {
             return (Klasse::Ok, 200);
         };
-        let ausgang = push::sende(
-            http,
-            &config.badhub.url,
-            &config.badhub.password,
-            kanal,
-            body,
-        )
-        .await;
+        let ausgang = http
+            .sende(&config.badhub.url, &config.badhub.password, kanal, body)
+            .await;
         (
             self.tor_melden(kanal, &ausgang, logo),
             ausgang.status.unwrap_or(0),
@@ -3374,7 +3429,7 @@ mod tests {
     /// Liefert den Event-Block und die Marke zurück, die der Zyklus nach
     /// einem geglückten Push stempeln würde.
     fn tset_zyklus(
-        engine: &mut SyncEngine,
+        engine: &mut PushTeil,
         logo: crate::config::LogoConfig,
         turnier: &str,
     ) -> (crate::badhub::payload::TsetEvent, Option<String>) {
@@ -3395,7 +3450,7 @@ mod tests {
 
     /// Ein Zyklus, dessen Push geglückt ist (Marke wird gestempelt).
     fn tset_zyklus_mit_erfolg(
-        engine: &mut SyncEngine,
+        engine: &mut PushTeil,
         logo: crate::config::LogoConfig,
         turnier: &str,
     ) -> crate::badhub::payload::TsetEvent {
@@ -3415,7 +3470,7 @@ mod tests {
     #[test]
     fn ein_gesetztes_turnierlogo_landet_im_ersten_tset() {
         // Der Gegenfall — den es bisher nirgends gab.
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let event = tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
         assert_eq!(event.tournament_logo.as_deref(), Some("AAAA"));
         assert_eq!(event.tournament_logo_mime.as_deref(), Some("image/png"));
@@ -3430,7 +3485,7 @@ mod tests {
         // Der Kern der Ersparnis: Bis zu 2,7 MB Base64 in jedem vollen
         // `tset` — mindestens minütlich, bei vielen Feldern alle paar
         // Sekunden. badhub behält den Stand, wenn das Feld FEHLT.
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
         let (event, marke) = tset_zyklus(&mut engine, logo("AAAA"), "T");
         assert!(
@@ -3444,7 +3499,7 @@ mod tests {
 
     #[test]
     fn ein_geaendertes_logo_reist_wieder_mit() {
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
         let (event, _) = tset_zyklus(&mut engine, logo("BBBB"), "T");
         assert_eq!(event.tournament_logo.as_deref(), Some("BBBB"));
@@ -3455,7 +3510,7 @@ mod tests {
         // Löschen muss ausdrücklich gesagt werden: `""`. Und zwar in allen
         // drei Feldern — „Logo entfernen" im Setup räumt die Hintergrundfarbe
         // nicht mit ab, sie stünde sonst als „Farbe ohne Logo" bei badhub.
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
         let (event, _) = tset_zyklus(
             &mut engine,
@@ -3475,7 +3530,7 @@ mod tests {
     fn ein_neues_turnier_bekommt_das_logo_erneut() {
         // badhub hält den Snapshot je `tournament_key`. Ein Turnierwechsel
         // heißt: dort liegt noch kein Logo, das „unverändert" bleiben könnte.
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "Frühjahrs-Cup");
         let (event, _) = tset_zyklus(&mut engine, logo("AAAA"), "Herbst-Cup");
         assert_eq!(
@@ -3490,7 +3545,7 @@ mod tests {
         // Sicherheitsnetz: Geht badhubs Snapshot verloren (Datenbank
         // zurückgesetzt, Turnier neu angelegt), stünde der Liveticker sonst
         // bis zum Neustart der App ohne Logo da.
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         tset_zyklus_mit_erfolg(&mut engine, logo("AAAA"), "T");
         let (event, _) = tset_zyklus(&mut engine, logo("AAAA"), "T");
         assert!(event.tournament_logo.is_none(), "frisch gestempelt");
@@ -3513,7 +3568,7 @@ mod tests {
     fn ein_fehlgeschlagener_push_stempelt_die_marke_nicht() {
         // Sonst hielte bts-light das Logo für übertragen, obwohl badhub es
         // nie bekommen hat — und ließe es ab dann weg.
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let (event, _marke) = tset_zyklus(&mut engine, logo("AAAA"), "T");
         assert_eq!(event.tournament_logo.as_deref(), Some("AAAA"));
         // Kein `logo_stempeln` — der Push ist fehlgeschlagen.
@@ -3529,7 +3584,7 @@ mod tests {
     fn ein_tupdate_traegt_nie_ein_logo() {
         // Nur der volle `tset` hat einen Event-Block; ein `tupdate_match`
         // patcht bei badhub allein das Match-Element.
-        let engine = SyncEngine::new();
+        let engine = PushTeil::new();
         let config = AppConfig {
             tournament_logo: logo("AAAA"),
             ..Default::default()
@@ -3605,7 +3660,7 @@ mod tests {
 
     #[test]
     fn first_plan_is_always_full() {
-        let engine = SyncEngine::new();
+        let engine = PushTeil::new();
         assert!(matches!(
             engine.plan(
                 &snapshot(),
@@ -3617,7 +3672,7 @@ mod tests {
 
     #[test]
     fn unchanged_snapshot_after_success_plans_nothing() {
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         engine.on_success(snapshot());
         assert!(matches!(
             engine.plan(
@@ -3630,7 +3685,7 @@ mod tests {
 
     #[test]
     fn after_failure_next_plan_is_full_again() {
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         engine.on_success(snapshot());
         // Ohne Fehler wäre ein unveränderter Snapshot ein No-op …
         assert!(matches!(
@@ -3653,7 +3708,7 @@ mod tests {
 
     #[test]
     fn heartbeat_due_until_a_push_happened() {
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         // Noch nie gepusht → Heartbeat fällig.
         assert!(engine.heartbeat_due());
         // Direkt nach einem Push → noch kein Heartbeat fällig.
@@ -7726,7 +7781,7 @@ mod tests {
         s
     }
 
-    impl SyncEngine {
+    impl PushTeil {
         /// Plant und sendet die Meldeliste in einem Schritt — im Produktivcode
         /// liegt der Liveticker-Push dazwischen.
         async fn push_roster_for_test(
@@ -7755,7 +7810,7 @@ mod tests {
         let (url, seen) = spawn_checkin_mock("200 OK").await;
         let cfg = checkin_config(url, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", true);
         let http = crate::badhub::push::build_client();
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = roster_snapshot();
 
         engine.push_roster_for_test(&cfg, &http, &snap).await;
@@ -7778,7 +7833,7 @@ mod tests {
         let (url, seen) = spawn_checkin_mock("200 OK").await;
         let cfg = checkin_config(url, "", true);
         let http = crate::badhub::push::build_client();
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
 
         engine
             .push_roster_for_test(&cfg, &http, &roster_snapshot())
@@ -7791,7 +7846,7 @@ mod tests {
         let (url, seen) = spawn_checkin_mock("200 OK").await;
         let cfg = checkin_config(url, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", false);
         let http = crate::badhub::push::build_client();
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
 
         engine
             .push_roster_for_test(&cfg, &http, &roster_snapshot())
@@ -7807,7 +7862,7 @@ mod tests {
         let (url, seen) = spawn_checkin_mock("404 Not Found").await;
         let cfg = checkin_config(url, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", true);
         let http = crate::badhub::push::build_client();
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = roster_snapshot();
 
         engine.push_roster_for_test(&cfg, &http, &snap).await;
@@ -7830,7 +7885,7 @@ mod tests {
         let (url, seen) = spawn_checkin_mock("500 Internal Server Error").await;
         let cfg = checkin_config(url, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", true);
         let http = crate::badhub::push::build_client();
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = roster_snapshot();
 
         engine.push_roster_for_test(&cfg, &http, &snap).await;
@@ -8128,7 +8183,7 @@ mod tests {
     }
 
     /// Ein Zyklus des badhub-Teils, ohne BTP.
-    async fn zyklus(engine: &mut SyncEngine, cfg: &AppConfig, snap: &BtpSnapshot) -> SyncOutcome {
+    async fn zyklus(engine: &mut PushTeil, cfg: &AppConfig, snap: &BtpSnapshot) -> SyncOutcome {
         let http = crate::badhub::push::build_client_mit_fristen(
             Duration::from_millis(500),
             Duration::from_millis(800),
@@ -8139,7 +8194,7 @@ mod tests {
             .await
     }
 
-    fn vorspulen(engine: &SyncEngine, d: Duration) {
+    fn vorspulen(engine: &PushTeil, d: Duration) {
         engine.tor.lock().unwrap().vorspulen(d);
     }
 
@@ -8148,7 +8203,7 @@ mod tests {
         // Der Server nimmt an und antwortet nie (schwarzes Loch).
         let mock = testhilfe::starten(vec![Antwort::Haengt]).await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = snapshot();
 
         let erstes = zyklus(&mut engine, &cfg, &snap).await;
@@ -8187,7 +8242,7 @@ mod tests {
         };
         // Gegenprobe zuerst: Im Gutfall gehen Meldeliste und Spielplan mit.
         let gut = testhilfe::starten(vec![Antwort::ok()]).await;
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         zyklus(&mut engine, &cfg_fuer(&gut.url), &roster_snapshot()).await;
         assert_eq!(arten(&gut)[0], "tset");
         assert_eq!(anzahl(&gut, "centry_list"), 1);
@@ -8195,7 +8250,7 @@ mod tests {
 
         // 500 auf dem `tset`: eine Störung der Strecke — nichts Additives.
         let kaputt = testhilfe::starten(vec![Antwort::status("500 Internal Server Error")]).await;
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         zyklus(&mut engine, &cfg_fuer(&kaputt.url), &roster_snapshot()).await;
         assert_eq!(arten(&kaputt), vec!["tset"]);
     }
@@ -8204,7 +8259,7 @@ mod tests {
     async fn nach_401_geht_kein_request_mehr_hinaus() {
         let mock = testhilfe::starten(vec![Antwort::status("401 Unauthorized")]).await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = snapshot();
 
         let erstes = zyklus(&mut engine, &cfg, &snap).await;
@@ -8241,7 +8296,7 @@ mod tests {
             true,
         );
         cfg.badhub.password = "pw".to_string();
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = roster_snapshot();
 
         for _ in 0..4 {
@@ -8259,7 +8314,7 @@ mod tests {
     async fn leerer_spielplan_wird_nicht_gesendet() {
         let mock = testhilfe::starten(vec![Antwort::ok()]).await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let mut leer = snapshot();
         leer.matches.clear();
 
@@ -8278,7 +8333,7 @@ mod tests {
         ])
         .await;
         let cfg = mit_logo(strecken_config(&mock.url));
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = snapshot();
         let hat_logo = |nr: usize| mock.anfragen()[nr].koerper.contains("tournament_logo");
 
@@ -8317,7 +8372,7 @@ mod tests {
         let cfg = mit_logo(strecken_config(&mock.url));
         let merker = std::sync::Arc::new(std::sync::Mutex::new(PushMerker::default()));
         let neue_engine = || {
-            SyncEngine::mit_tor(
+            PushTeil::mit_tor(
                 Strecke::neu(merker.clone(), &cfg.badhub.url, "ziel", Instant::now()).als_tor(),
             )
         };
@@ -8344,7 +8399,7 @@ mod tests {
         ])
         .await;
         let cfg = mit_logo(strecken_config(&mock.url));
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let ergebnis = zyklus(&mut engine, &cfg, &snapshot()).await;
         assert!(matches!(ergebnis, SyncOutcome::PushedFull), "{ergebnis:?}");
         let anfragen = mock.anfragen();
@@ -8360,7 +8415,7 @@ mod tests {
     async fn abgelehnter_tset_wird_nicht_im_takt_wiederholt() {
         let mock = testhilfe::starten(vec![Antwort::status("400 Bad Request")]).await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = snapshot();
         let erstes = zyklus(&mut engine, &cfg, &snap).await;
         assert!(
@@ -8383,7 +8438,7 @@ mod tests {
         ])
         .await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = snapshot();
         let ergebnis = zyklus(&mut engine, &cfg, &snap).await;
         let SyncOutcome::PushGedrosselt { uhrzeit } = ergebnis else {
@@ -8405,7 +8460,7 @@ mod tests {
             .mit_kopf("WWW-Authenticate: Basic realm=\"x\"")])
         .await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let ergebnis = zyklus(&mut engine, &cfg, &snapshot()).await;
         assert!(
             matches!(ergebnis, SyncOutcome::PushAngehalten { wand: true }),
@@ -8423,7 +8478,7 @@ mod tests {
         )])
         .await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let ergebnis = zyklus(&mut engine, &cfg, &snapshot()).await;
         assert!(
             matches!(ergebnis, SyncOutcome::PushGestoert { .. }),
@@ -8446,7 +8501,7 @@ mod tests {
         ])
         .await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let mut snap = snapshot();
         snap.matches[0].status = MatchStatus::OnCourt;
         snap.matches[0].court = Some("1".to_string());
@@ -8471,7 +8526,7 @@ mod tests {
     async fn stoerung_durch_einen_tablet_punkt_fuehrt_zum_vollen_stand() {
         let mock = testhilfe::starten(vec![Antwort::ok()]).await;
         let cfg = strecken_config(&mock.url);
-        let mut engine = SyncEngine::new();
+        let mut engine = PushTeil::new();
         let snap = snapshot();
         zyklus(&mut engine, &cfg, &snap).await;
         assert_eq!(arten(&mock), vec!["tset", "sched"]);
@@ -8492,5 +8547,42 @@ mod tests {
         assert!(matches!(probe, SyncOutcome::PushedFull), "{probe:?}");
         assert_eq!(anzahl(&mock, "tset"), 2);
         assert!(engine.tor_darf(Kanal::Tupdate), "Punkte gehen wieder");
+    }
+
+    #[tokio::test]
+    async fn verlauf_erst_mit_bestaetigtem_stand() {
+        // Scheitert der `tset`, geht kein Punktverlauf: badhub verwürfe den
+        // Verlauf eines Spiels, das es noch nicht kennt, still — und hier
+        // gälte er als angenommen und käme nie wieder.
+        let mock = testhilfe::starten(vec![
+            Antwort::status("503 Service Unavailable"),
+            Antwort::ok(),
+        ])
+        .await;
+        let cfg = strecken_config(&mock.url);
+        let http = crate::badhub::push::build_client_mit_fristen(
+            Duration::from_millis(500),
+            Duration::from_millis(800),
+        );
+        let tablet = TabletState::default();
+        let snap = snapshot();
+        assert!(
+            tablet
+                .timeline_store()
+                .apply_rally(snap.matches[0].id, 1, 1, "A", 1, 0),
+            "der Test braucht einen Verlauf"
+        );
+        let mut engine = PushTeil::new();
+
+        engine
+            .an_badhub_senden(&cfg, &http, &tablet, snap.clone())
+            .await;
+        assert_eq!(arten(&mock), vec!["tset"]);
+
+        vorspulen(&engine, Duration::from_secs(5));
+        engine
+            .an_badhub_senden(&cfg, &http, &tablet, snap.clone())
+            .await;
+        assert_eq!(anzahl(&mock, "tverlauf"), 1, "{:?}", arten(&mock));
     }
 }

@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.382
+
+- **Der Hallenbetrieb wartet nicht mehr auf das Internet.** Bisher schickte
+  der Abgleich mit BTP den Turnierstand selbst an badhub und wartete auf die
+  Antwort. Antwortete badhub zäh oder gar nicht, kamen Feldvergabe,
+  Schiedsrichter-Rotation, Zetteldruck und Ansagen entsprechend später dran.
+  Jetzt übernimmt ein eigener Sender die Übertragung: Der Abgleich legt
+  seinen Stand nur noch ab und läuft im gewohnten Fünf-Sekunden-Takt weiter.
+  Liegt beim Sender noch ein älterer Stand, ersetzt ihn der neue.
+- Die Statuszeile zählt „nächster Versuch in … s" jetzt herunter und zeigt im
+  Gutfall „Verbunden – Liveticker aktuell". Ein BTP-Fehler hat weiter
+  Vorrang. Zweiter Schritt der Spec `badhub-push-entkoppeln` (ADR 0086).
+
 ## v0.9.381
 
 - **Störungen der Internet-Strecke kosten die Halle weniger.** Antwortete

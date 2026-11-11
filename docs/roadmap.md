@@ -613,8 +613,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   wartet nie auf das Internet), Fehlerklassen je Kanal mit Backoff 5–60 s ohne Logo, Halt bei
   401/403 bis zum Speichern, 429 nach `Retry-After`, voller `tset` nur bei Strukturänderung
   und alle 60 s, Tablet-Punkte genau einmal, Punktverlauf wertet `verworfen` aus,
-  Log-Flanken für BTP und Strecke. PRs 1, 2a, 2b, 3, 4 (PR 5 nur nach Messung) — **PR 1
-  umgesetzt** (v0.9.381: Fristen, Fehlerklassen, Halt, Drossel, Backoff ohne Logo, Log-Flanken); kein badhub-Deploy nötig. badhub-Folgearbeit (gzip, Sperre im
+  Log-Flanken für BTP und Strecke. PRs 1, 2a, 2b, 3, 4 (PR 5 nur nach Messung) — **PR 1 und 2a
+  umgesetzt** (v0.9.381: Fristen, Fehlerklassen, Halt, Drossel, Backoff ohne Logo, Log-Flanken;
+  v0.9.382: eigener Sender-Task, der Zyklus wartet nicht mehr auf badhub); kein badhub-Deploy nötig. badhub-Folgearbeit (gzip, Sperre im
   `tupdate_match`-Zweig, Reihenfolge-Prüfung) steht beim Kommunikations-Audit, Paket 2.
 - **Relay härten** — Spec:
   [features/relay-haerten.md](features/relay-haerten.md)

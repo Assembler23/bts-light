@@ -673,6 +673,31 @@ Queue bleibt noch bestehen und teilt den Streckenzustand über das Tor aus PR 1.
 **Mock.** Die Attrappe. Echtes HTTP mit pausierter Uhr vermeiden — die Uhr springt vor,
 während auf den Socket gewartet wird, und Fristen feuern zu früh.
 
+**Aus der Umsetzung (v0.9.382) — Abweichungen:**
+
+- Das Postfach hat in PR 2a **einen** Schlitz (den Stand). Den Spielplan-Auftrag gibt es
+  noch nicht: `sched`-Takt und Prognose rechnet der Sender selbst, wie vorher der Zyklus
+  (`PushTeil::send_sched`). Der Test `spielplan_auftrag_bleibt_bis_gesendet` entfällt damit.
+- Die Auftragswahl ist noch keine eigene reine Funktion — die Reihenfolge steckt
+  unverändert in `PushTeil::an_badhub_senden` und ist dort getestet (Zyklus-Tests aus PR 1).
+  Die vier Auftragswahl-Tests kommen mit den Feld-Marken in PR 2b. Neu ist nur die Regel
+  „Punktverlauf erst mit bestätigtem Stand".
+- `run_once_wartet_nie_auf_badhub` und `slave_liefert_nichts_ab` gibt es nicht: `run_once`
+  braucht ein BTP. Belegt ist stattdessen, dass die Ablieferung synchron ist
+  (`ablieferung_kehrt_sofort_zurueck`) und dass ein hängender Upload nichts staut
+  (`neuester_stand_gewinnt_waehrend_der_upload_haengt`).
+- Der Sender wacht nur mit einem abgelieferten Stand auf, nicht zum Ablauf einer Frist —
+  ein Probe-Versuch kommt bis zu 5 s später. Die Statuszeile zeigt deshalb nie „in 0 s".
+- `stop_setzt_die_push_lage_zurueck` heißt `gestoppte_uebertragung_zeigt_keine_push_lage`
+  und prüft die Wirkung über `running` (der Befehl selbst braucht die Tauri-Laufzeit).
+- Vor der ersten Sendung zeigt die Zeile den Ok-Text (Lage „unbekannt").
+- Aus den Reviews: neue Lage „ausgefallen" (Panik im Sender) mit eigenem roten Text; der
+  Schlitz für die Lage entsteht je Start neu; der Test `verlauf_erst_mit_bestaetigtem_stand`
+  kam doch dazu. Ein einzelner abgelehnter Punkt (`tupdate_match` mit 400) erscheint nicht
+  mehr in der Statuszeile — nur noch im Log; die Daten trägt der nächste volle Stand.
+- Der Rückgabewert von `an_badhub_senden` (`PushedFull`/`PushedUpdate`/`Idle`/`Push*`) dient
+  nur noch den Tests; aufgeräumt wird er mit PR 2b.
+
 **Doku:** `docs/liveticker-push.md` (Architektur) · `docs/oberflaechen.md` (Anker ziehen
 mit dem Text um; neuer Ok-Text) · `CLAUDE.md`-Zeile · `docs/changelog.md`.
 
