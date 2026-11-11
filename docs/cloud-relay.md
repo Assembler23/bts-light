@@ -1270,6 +1270,70 @@ Bewusst in Kauf genommen: Zählt ein Cloud-Tablet nach einem Relay-Neustart
 **ohne Host** und fällt dann aus, bekommt das Ersatzgerät vom Relay keinen
 Stand. Sobald der Host zurück ist, greifen Host-Sätze und Rückspiegel.
 
+## Deckel und Mengen-Takt (seit v0.9.385)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 4 ·
+ADR [0090](adr/0090-ueberlast-am-relay-und-mindestschutz.md). Zwei Arten:
+
+- **Fachliche Deckel** kürzen oder verwerfen und melden einmal (je
+  Tablet-Sitzung bzw. je Host-Sitzung) — **die Verbindung bleibt**.
+- **Transport-Deckel** sind reiner Speicherschutz am WebSocket und
+  **trennen**. Sie liegen weit über jedem echten Frame. Bis v0.9.384 galt der
+  Standard der Bibliothek: 64 MiB je Nachricht.
+
+**Transport-Deckel** (`max_message_size`/`max_frame_size` am Upgrade):
+
+| Verbindung | Deckel | Warum so |
+|---|---|---|
+| Tablet (`/{ns}/ws`) | 1 MiB | größter zulässiger Frame: 64 KiB Zustand. Auch der Zustand einer alten Format-1-Seite (bis 590 KB) bleibt darunter — er wird fachlich verworfen, ohne die Verbindung zu kosten |
+| Monitor (`/{ns}/monitor-ws`), TL (`/tl-ws`) | 64 KiB | die Seiten senden nichts bzw. einen Zugangs-Frame |
+| Träger (`/{ns}/carrier-ws`) | 4 MiB | ein alter 590-KB-Zustand wird im Umschlag zweimal escaped (rund 1 MiB) |
+| Host (`/{ns}/host-ws`) | 2 × Zettel-Deckel + 64 KiB ≈ 10 MiB | der Relay verwirft einen zu großen Zettel erst **nach** dem Empfang; der Deckel muss den größten zulässigen Zettel samt JSON-Escaping fassen, sonst würfe ein Sammeldruck den Turnier-PC ab |
+
+**Fachliche Deckel:**
+
+| Frame / Route | Deckel | Verhalten |
+|---|---|---|
+| Tablet `score_update` | 10 Sätze | Frame verworfen |
+| Tablet `identify`/`take_over` | Geräte-Kennung 128 Zeichen | gekürzt |
+| Tablet `state_sync` | 64 KiB | verworfen (seit v0.9.374) |
+| Host `MatchAssigned` | Spiel-Beschreibung 16 KiB · Feldname/Halle 128 Zeichen · 10 Host-Sätze | Beschreibung zu groß: Frame verworfen · Texte gekürzt · zu viele Sätze: ohne Sätze durchgereicht |
+| Host `MatchCleared` | Feldname/Halle 128 Zeichen | gekürzt; das Räumen wirkt immer |
+| Host `Courts` | 512 Einträge · Name/Halle 128 · Farbe 16 · Sprachdienst-Block 8 KiB | gekürzt; ein zu großer Block wird nicht übernommen |
+| Host `Prepared` | 200 Einträge · 256 KiB | Liste geleert (ehrliche Fehlanzeige) |
+| Host `TlAuth` | Kennung/Zugang/Profil 256 Zeichen | Eintrag mit überlangem Zugang ausgelassen, Kennung/Profil gekürzt — die übrige Liste gilt (ein Widerruf im selben Push greift) |
+| Host `TlState` | 64 KiB (`MAX_TL_STATE_LEN`) | wie bisher |
+| `POST /{ns}/monitor` | Turniername 256 Zeichen | gekürzt |
+| `POST /{ns}/monitor/control` | 256 Einträge je Karte · Kennung 64 Zeichen | `413` |
+
+Ein echter Brief (Doppel mit langen Namen, Schiedsrichter, Aufschlagrichter)
+bleibt unter 2 KiB.
+
+**Mengen-Takt je Tablet-Sitzung** (und je Substrom des Trägers),
+Eimer-Verfahren:
+
+| Frames | Schwung | Nachwuchs |
+|---|---|---|
+| Punkt, Ballwechsel, Akku, Ruf, Einzel-Ereignis | 60 | 20 je Sekunde |
+| `rally_sync` | 30 | 2 je Sekunde |
+| `match_event_sync` | 30 | 2 je Sekunde |
+| `state_sync` | 30 | 3 je Sekunde |
+| Weitergabe von `state_sync` an den Host (je Feld) | 6 | 2 je Sekunde |
+
+Ein zählendes Tablet sendet höchstens rund sechs kleine Frames je Sekunde.
+Die kompletten Abgleiche und der Zustand haben je einen eigenen, bewusst
+großen Takt: Jedes „zurück" am Tablet schickt alle drei, ohne Punkt-Sperre
+(250 ms Entprellung), und es gibt 50 Rücknahme-Schritte. Ein verworfener
+`rally_sync` wird nie wiederholt — der Host behielte zurückgenommene
+Ballwechsel. 30 auf einmal plus Nachwuchs tragen alle 50 Schritte in
+schnellster Folge, auch direkt nach einem Wiederverbinden (das selbst drei
+Abgleich-Paare schickt). Was über dem Takt liegt, wird verworfen und einmal
+je Sitzung gemeldet. `identify`, `take_over` und `ping` zählen nicht.
+
+Der Takt schützt vor einem fehlerhaften Gerät, nicht vor einem Angreifer:
+Eine neue Verbindung beginnt mit vollem Kontingent. Die feste Grenze bleibt
+die Zahl der Halter (64 je Namespace).
+
 ## Sicherheit
 
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die

@@ -554,6 +554,11 @@ er hält die echte Verbindung dorthin. Versagt er dabei, räumt der Relay den
 Substrom nach 15 s selbst ab, damit ein Ersatzgerät das Feld bekommt. Bricht
 der Träger weg, räumt der Relay alle seine Substrome.
 
+Seit v0.9.385 nimmt der Relay am Träger höchstens 4 MiB je Nachricht an
+(vorher 64 MiB); der Umschlag einer älteren Tablet-Seite der fernen Halle mit
+großem Zustand passt mit Abstand. Der Mengen-Takt gilt je Gerät (Substrom),
+nicht für den Träger als Ganzes.
+
 Seit v0.9.380 baut der Slave den Träger mit **10 s Frist** auf und nutzt
 denselben Backoff wie der Turnier-PC (Details:
 [cloud-relay.md](cloud-relay.md), „Verbindungsaufbau"). Hängt das Senden an den

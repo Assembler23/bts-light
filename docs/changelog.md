@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.385
+
+- **Der Cloud-Relay nimmt nichts Übergroßes und nichts im Dauerfeuer mehr
+  an** (wirkt mit dem Relay sofort). Bisher durfte eine einzelne Nachricht
+  bis zu 64 MB groß sein, und ein Gerät konnte beliebig schnell senden. Jetzt
+  gelten feste Obergrenzen je Verbindung — weit über allem, was ein Tablet,
+  ein Monitor oder der Turnier-PC je sendet (auch 50 „zurück"-Schritte in
+  schnellster Folge kommen durch). Zu große oder zu viele Angaben
+  werden gekürzt oder verworfen und einmal im Relay-Log vermerkt; die
+  Verbindung bleibt dabei bestehen. Getrennt wird nur bei offenkundigem
+  Missbrauch. Für den Turnierbetrieb ändert sich nichts. Vierter Schritt der
+  Spec `relay-haerten` (ADR 0090).
+
 ## v0.9.384
 
 - **Cloud-Tablets: Zurück-Übernehmen funktioniert, und ein Tablet sperrt sich

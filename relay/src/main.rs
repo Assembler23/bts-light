@@ -118,6 +118,239 @@ const MAX_TABLETS_PER_NS: usize = 64;
 /// größte bekannte Turnier hat 26 Felder.
 const MAX_FELD_SCHLUESSEL_JE_NS: usize = 128;
 
+// ── Deckel (Spec relay-haerten, PR 4; ADR 0090) ─────────────────────────
+//
+// Zwei Arten: FACHLICHE Deckel verwerfen oder kürzen und melden einmal —
+// die Verbindung bleibt. TRANSPORT-Deckel sind reiner Speicherschutz am
+// WebSocket und trennen; sie liegen weit über allem, was ein echtes Gerät
+// sendet.
+
+/// Höchstzahl Sätze in einem Punktestand (abgeschlossene Sätze).
+const MAX_SAETZE: usize = 10;
+/// Größte Spiel-Beschreibung (`MatchBrief`), serialisiert. Ein echter Brief
+/// mit Doppel, Schiedsrichtern und Zähltafelbediener bleibt unter 2 KiB
+/// (Test `echter_brief_bleibt_weit_unter_dem_deckel`).
+const MAX_BRIEF_LEN: usize = 16 * 1024;
+/// Längster Feldname bzw. Hallenname vom Host, in Zeichen.
+const MAX_FELD_TEXT: usize = 128;
+/// Längste Hallenfarbe (`#rrggbb`).
+const MAX_FARBE: usize = 16;
+/// Größter Sprachdienst-Block (`AzureTtsShare`), serialisiert.
+const MAX_AZURE_LEN: usize = 8 * 1024;
+/// Höchstzahl aufgerufener Spiele in der Liste.
+const MAX_PREPARED: usize = 200;
+/// Größte Liste der aufgerufenen Spiele, serialisiert.
+const MAX_PREPARED_LEN: usize = 256 * 1024;
+/// Längste Kennung, längster Zugang und längstes Profil eines TL-Geräts.
+const MAX_TL_TEXT: usize = 256;
+/// Monitor-Steuerung: Einträge je Karte und Länge einer Geräte-Kennung.
+const MAX_CONTROL_EINTRAEGE: usize = 256;
+const MAX_CONTROL_SCHLUESSEL: usize = 64;
+/// Längster Turniername im Monitor-Upload.
+const MAX_TURNIERNAME: usize = 256;
+
+/// Transport-Deckel der Tablet-Verbindung. Der größte fachlich zulässige
+/// Frame ist ein Zustand von 64 KiB; selbst der Zustand einer alten
+/// Format-1-Seite (bis 590 KB) bleibt darunter und wird fachlich verworfen
+/// statt die Verbindung zu kosten.
+const WS_MAX_TABLET: usize = 1024 * 1024;
+/// Monitor- und TL-Verbindung: Die Seiten senden nichts bzw. einen
+/// Zugangs-Frame.
+const WS_MAX_ANZEIGE: usize = 64 * 1024;
+/// Träger der fernen Halle: Ein 590-KB-Zustand einer alten Seite wird im
+/// Umschlag zweimal escaped und landet bei rund 1 MiB — mit 1 MiB würde die
+/// ferne Halle bei jedem Punkt getrennt.
+const WS_MAX_TRAEGER: usize = 4 * 1024 * 1024;
+/// Host: Der Relay verwirft einen zu großen Zettel erst NACH dem Empfang.
+/// Der Deckel muss also über dem größten fachlich zulässigen Frame samt
+/// JSON-Escaping (bis zum Doppelten) liegen — sonst würfe ein Sammeldruck
+/// den Turnier-PC ab.
+const WS_MAX_HOST: usize = 2 * MAX_SCORESHEET_HTML_LEN + 64 * 1024;
+
+const _: () = assert!(WS_MAX_HOST >= 2 * MAX_SCORESHEET_HTML_LEN);
+const _: () = assert!(WS_MAX_TABLET > 8 * MAX_STATE_LEN);
+const _: () = assert!(WS_MAX_TRAEGER > 4 * relay_proto::MAX_CARRIER_PAYLOAD_LEN);
+const _: () = assert!(WS_MAX_ANZEIGE >= 16 * 1024);
+
+/// Mengen-Takt je Tablet-Sitzung, kleine Frames (Punkt, Ballwechsel, Akku,
+/// Ruf, Einzel-Ereignis): Die Seite sperrt 0,7 s je Punkt, je Punkt gehen
+/// etwa vier Frames — höchstens rund sechs je Sekunde.
+const TAKT_SCHWUNG: f64 = 60.0;
+const TAKT_JE_SEKUNDE: f64 = 20.0;
+/// Mengen-Takt der kompletten Abgleiche — je ein eigener Eimer für
+/// `rally_sync` und `match_event_sync`. Weit großzügiger als die vier der
+/// Spec, und das mit Absicht: Jedes „zurück" am Tablet schickt BEIDE
+/// Abgleiche, ohne Punkt-Sperre (nur 250 ms Entprellung), und es gibt 50
+/// Rücknahme-Schritte. Ein verworfener `rally_sync` wird nie wiederholt —
+/// der Host behielte zurückgenommene Ballwechsel im Punktverlauf. 30 auf
+/// einmal plus 2 je Sekunde tragen alle 50 Schritte in schnellster Folge;
+/// die Nutzlast ist je Frame auf wenige KiB gedeckelt.
+const TAKT_SYNC_SCHWUNG: f64 = 30.0;
+const TAKT_SYNC_JE_SEKUNDE: f64 = 2.0;
+/// Mengen-Takt des gespiegelten Zustands (`state_sync`). Die Seite spiegelt
+/// je Punkt und je „zurück" einmal — auch hier tragen 30 + 3 je Sekunde eine
+/// volle Rücknahme-Serie. Ohne Takt ließe sich mit 64-KiB-Zuständen im
+/// Dauerfeuer das eine Schloss aller Turniere belegen (jeder wird geparst
+/// und verglichen).
+const TAKT_ZUSTAND_SCHWUNG: f64 = 30.0;
+const TAKT_ZUSTAND_JE_SEKUNDE: f64 = 3.0;
+
+/// Eimer-Verfahren als reiner Zustand: `schwung` Einheiten auf einmal,
+/// danach wächst das Kontingent mit `je_sekunde` nach.
+#[derive(Debug, Clone, Copy)]
+struct Eimer {
+    stand: f64,
+    seit: std::time::Instant,
+}
+
+impl Eimer {
+    fn voll(schwung: f64, jetzt: std::time::Instant) -> Self {
+        Self {
+            stand: schwung,
+            seit: jetzt,
+        }
+    }
+
+    /// Nimmt eine Einheit, falls eine da ist.
+    fn nimm(&mut self, schwung: f64, je_sekunde: f64, jetzt: std::time::Instant) -> bool {
+        let gewachsen = jetzt.saturating_duration_since(self.seit).as_secs_f64() * je_sekunde;
+        self.stand = (self.stand + gewachsen).min(schwung);
+        self.seit = jetzt;
+        if self.stand >= 1.0 {
+            self.stand -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Kürzt einen Text auf `max` Zeichen (an einer Zeichengrenze).
+fn kuerze(text: &mut String, max: usize) {
+    if text.chars().count() > max {
+        *text = text.chars().take(max).collect();
+    }
+}
+
+/// Wendet die fachlichen Deckel auf ein Host-Frame an: kürzt, leert oder
+/// verwirft (`None`). Der zweite Wert ist ein Hinweis fürs Log — der
+/// Aufrufer meldet jeden nur einmal je Host-Sitzung.
+fn host_frame_deckeln(frame: HostFrame) -> (Option<HostFrame>, Option<&'static str>) {
+    let groesse = |v: &dyn Fn() -> serde_json::Result<Vec<u8>>| v().map_or(usize::MAX, |b| b.len());
+    match frame {
+        HostFrame::MatchAssigned {
+            court_id,
+            mut court_label,
+            mut hall,
+            match_brief,
+            on_court_since_ms,
+            mut host_sets,
+        } => {
+            if groesse(&|| serde_json::to_vec(&match_brief)) > MAX_BRIEF_LEN {
+                return (
+                    None,
+                    Some("Spiel-Beschreibung über 16 KiB — Zuweisung verworfen"),
+                );
+            }
+            kuerze(&mut court_label, MAX_FELD_TEXT);
+            kuerze(&mut hall, MAX_FELD_TEXT);
+            let mut hinweis = None;
+            if host_sets.len() > MAX_SAETZE {
+                // Ohne Host-Sätze steigt ein Ersatz-Tablet eben bei 0:0 ein
+                // — besser als die Zuweisung zu verlieren.
+                host_sets.clear();
+                hinweis = Some("mehr als zehn Host-Sätze — ohne Sätze durchgereicht");
+            }
+            (
+                Some(HostFrame::MatchAssigned {
+                    court_id,
+                    court_label,
+                    hall,
+                    match_brief,
+                    on_court_since_ms,
+                    host_sets,
+                }),
+                hinweis,
+            )
+        }
+        HostFrame::MatchCleared {
+            court_id,
+            mut court_label,
+            mut hall,
+        } => {
+            // Das Räumen wirkt immer; nur die Texte werden gekürzt.
+            kuerze(&mut court_label, MAX_FELD_TEXT);
+            kuerze(&mut hall, MAX_FELD_TEXT);
+            (
+                Some(HostFrame::MatchCleared {
+                    court_id,
+                    court_label,
+                    hall,
+                }),
+                None,
+            )
+        }
+        HostFrame::Courts {
+            mut courts,
+            mut azure_tts,
+            reconnect_legacy_rev,
+        } => {
+            for c in &mut courts {
+                kuerze(&mut c.label, MAX_FELD_TEXT);
+                kuerze(&mut c.hall, MAX_FELD_TEXT);
+                if let Some(farbe) = &mut c.hall_color {
+                    kuerze(farbe, MAX_FARBE);
+                }
+            }
+            let mut hinweis = None;
+            if azure_tts
+                .as_ref()
+                .is_some_and(|a| groesse(&|| serde_json::to_vec(a)) > MAX_AZURE_LEN)
+            {
+                azure_tts = None;
+                hinweis = Some("Sprachdienst-Block über 8 KiB — nicht übernommen");
+            }
+            (
+                Some(HostFrame::Courts {
+                    courts,
+                    azure_tts,
+                    reconnect_legacy_rev,
+                }),
+                hinweis,
+            )
+        }
+        HostFrame::Prepared { mut prepared } => {
+            let mut hinweis = None;
+            // Erst die Zahl kappen (wie bisher im Arm), dann messen — sonst
+            // serialisierte ein überlanger Push unnötig viel unter dem Schloss.
+            prepared.truncate(MAX_PREPARED);
+            if groesse(&|| serde_json::to_vec(&prepared)) > MAX_PREPARED_LEN {
+                // Ehrliche Fehlanzeige statt einer abgeschnittenen Liste
+                // (wie beim TL-Zustand).
+                prepared.clear();
+                hinweis = Some("Liste der aufgerufenen Spiele über 256 KiB — geleert");
+            }
+            (Some(HostFrame::Prepared { prepared }), hinweis)
+        }
+        HostFrame::TlAuth { mut devices } => {
+            // Nur den einzelnen Eintrag auslassen bzw. kürzen — NICHT die
+            // ganze Liste verwerfen: Sonst bliebe die alte Zugangsliste
+            // gültig, und ein Widerruf im selben Push griffe nicht. Ein
+            // Zugang über 256 Zeichen kann ohnehin nie passen.
+            let vorher = devices.len();
+            devices.retain(|d| d.token.chars().count() <= MAX_TL_TEXT);
+            for d in &mut devices {
+                kuerze(&mut d.id, MAX_TL_TEXT);
+                kuerze(&mut d.profile_id, MAX_TL_TEXT);
+            }
+            let hinweis = (devices.len() != vorher)
+                .then_some("TL-Zugang über 256 Zeichen — dieser Eintrag ausgelassen");
+            (Some(HostFrame::TlAuth { devices }), hinweis)
+        }
+        andere => (Some(andere), None),
+    }
+}
+
 /// Längste Geräte-Kennung eines Tablets, die der Relay sich merkt. Die
 /// Seite schickt eine UUID; alles darüber ist kein Tablet.
 const MAX_GERAETE_KENNUNG: usize = 128;
@@ -410,7 +643,7 @@ struct Namespace {
     tablet_state_seit: HashMap<i64, std::time::Instant>,
     /// CourtID → Eimer für das Weiterreichen von Zuständen an den Host
     /// ([`host_weitergabe_erlaubt`]).
-    state_weitergabe: HashMap<i64, (f64, std::time::Instant)>,
+    state_weitergabe: HashMap<i64, Eimer>,
     /// CourtID → Feldname (Anzeige) – vom Host mit jedem `MatchAssigned`/
     /// `MatchCleared`-Frame mitgeliefert, für die Monitor-Anzeige.
     court_labels: HashMap<i64, String>,
@@ -428,6 +661,8 @@ struct Namespace {
     /// Wurde die Überschreitung des Feld-Deckels in dieser Host-Sitzung
     /// schon gemeldet?
     feld_deckel_gemeldet: bool,
+    /// Welche Deckel-Hinweise in dieser Host-Sitzung schon im Log stehen.
+    host_deckel_gemeldet: std::collections::HashSet<&'static str>,
     /// Aufgerufene (in Vorbereitung gerufene) Spiele der fernen Hallen – für
     /// die Slave-Spielübersicht + den Nachruf am Slave (Cluster C Stufe 2).
     /// Vom Host via `HostFrame::Prepared` gepusht; ersetzt jeweils die Liste.
@@ -735,6 +970,7 @@ impl Namespace {
             slaves: HashMap::new(),
             courts: Vec::new(),
             feld_deckel_gemeldet: false,
+            host_deckel_gemeldet: std::collections::HashSet::new(),
             azure_tts: None,
             monitor: None,
             monitor_control: MonitorControl::default(),
@@ -932,20 +1168,10 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    // Guard bis Programmende halten → der Datei-Writer flusht zuverlässig.
-    let _log_guard = init_tracing();
-
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8090);
-    let public_base =
-        std::env::var("PUBLIC_BASE").unwrap_or_else(|_| "https://badhub.de/bts-relay".to_string());
-
-    let broker = Broker::new(public_base.clone());
-
+/// Alle Routen des Relays. Aus `main` herausgelöst, damit Tests den
+/// echten Router über einen echten WebSocket fahren können (Transport-
+/// Deckel wirken erst dort).
+fn router(broker: Broker, tl_an: bool) -> Router {
     let app = Router::new()
         .route("/health", get(health))
         .route("/{ns}/court/{id}", get(court_page))
@@ -1003,7 +1229,6 @@ async fn main() {
     // Binary für alle Installationen; träte im neuen Schreibweg ein Fehler
     // auf, muss er sich ohne Rebuild und ohne Rückbau der übrigen Dienste
     // abschalten lassen — mitten im Turnierbetrieb anderer.
-    let tl_an = tl_enabled(std::env::var("BTS_RELAY_TL").ok().as_deref());
     // **Ohne Namespace in der Adresse**: Der wäre die `install_id` und damit
     // zugleich der Zugang der Zähltablets. Der Zugang des Geräts findet sein
     // Turnier über den Wegweiser selbst (ADR 0012).
@@ -1041,7 +1266,25 @@ async fn main() {
         tracing::warn!("Turnierleitungs-Oberfläche per BTS_RELAY_TL=off abgeschaltet");
         app
     };
-    let app = app.with_state(broker);
+    app.with_state(broker)
+}
+
+#[tokio::main]
+async fn main() {
+    // Guard bis Programmende halten → der Datei-Writer flusht zuverlässig.
+    let _log_guard = init_tracing();
+
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8090);
+    let public_base =
+        std::env::var("PUBLIC_BASE").unwrap_or_else(|_| "https://badhub.de/bts-relay".to_string());
+
+    let broker = Broker::new(public_base.clone());
+
+    let tl_an = tl_enabled(std::env::var("BTS_RELAY_TL").ok().as_deref());
+    let app = router(broker, tl_an);
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
@@ -1450,6 +1693,21 @@ async fn monitor_control_upload(
     let Some(namespace) = map.get_mut(&ns) else {
         return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
     };
+    // Fachlicher Deckel: 128 Geräte sind die Obergrenze der Geräteliste —
+    // 256 Einträge je Karte und 64 Zeichen je Kennung sind reichlich. Erst
+    // NACH der Namespace-Prüfung: Die Warnung soll sich nicht für erfundene
+    // Namespaces auslösen lassen.
+    let schluessel_ok = |k: &String| k.chars().count() <= MAX_CONTROL_SCHLUESSEL;
+    if control.assignments.len() > MAX_CONTROL_EINTRAEGE
+        || control.targets.len() > MAX_CONTROL_EINTRAEGE
+        || control.commands.len() > MAX_CONTROL_EINTRAEGE
+        || !control.assignments.keys().all(schluessel_ok)
+        || !control.targets.keys().all(schluessel_ok)
+        || !control.commands.keys().all(schluessel_ok)
+    {
+        tracing::warn!("Namespace '{ns}': Monitor-Steuerung über dem Deckel — abgelehnt");
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Monitor-Steuerung zu groß.");
+    }
     namespace.monitor_control = control;
     (StatusCode::OK, "ok")
 }
@@ -2734,7 +2992,11 @@ async fn monitor_upload(
     };
     namespace.monitor = Some(MonitorBundle {
         config: upload.config,
-        tournament_name: upload.tournament_name,
+        tournament_name: {
+            let mut name = upload.tournament_name;
+            kuerze(&mut name, MAX_TURNIERNAME);
+            name
+        },
         ads,
         call_timer: upload.call_timer,
         logo,
@@ -2830,7 +3092,9 @@ async fn tablet_ws(
     if !valid_namespace(&ns) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    ws.on_upgrade(move |socket| tablet_conn(socket, broker, ns))
+    ws.max_message_size(WS_MAX_TABLET)
+        .max_frame_size(WS_MAX_TABLET)
+        .on_upgrade(move |socket| tablet_conn(socket, broker, ns))
         .into_response()
 }
 
@@ -2859,6 +3123,15 @@ struct TabletSitzung {
     court: Option<i64>,
     /// Wurde ein `identify` für ein ANDERES Feld schon gemeldet?
     fremdes_feld_gemeldet: bool,
+    /// Mengen-Takt der kleinen Frames und der kompletten Abgleiche.
+    takt: Eimer,
+    takt_verlauf: Eimer,
+    takt_zettel: Eimer,
+    takt_zustand: Eimer,
+    /// Wurde das Überschreiten des Takts bzw. des Satz-Deckels in dieser
+    /// Sitzung schon gemeldet?
+    takt_gemeldet: bool,
+    saetze_gemeldet: bool,
     /// Persistente Geräte-Kennung (aus identify/take_over) — leer bei
     /// alten Tablet-Seiten. Für die Reconnect-Erkennung je Feld.
     my_device: String,
@@ -2879,6 +3152,12 @@ impl TabletSitzung {
             ns,
             court: None,
             fremdes_feld_gemeldet: false,
+            takt: Eimer::voll(TAKT_SCHWUNG, std::time::Instant::now()),
+            takt_verlauf: Eimer::voll(TAKT_SYNC_SCHWUNG, std::time::Instant::now()),
+            takt_zettel: Eimer::voll(TAKT_SYNC_SCHWUNG, std::time::Instant::now()),
+            takt_zustand: Eimer::voll(TAKT_ZUSTAND_SCHWUNG, std::time::Instant::now()),
+            takt_gemeldet: false,
+            saetze_gemeldet: false,
             my_device: String::new(),
         }
     }
@@ -2888,7 +3167,13 @@ impl TabletSitzung {
     /// Unlesbare Frames werden still verworfen — wie bisher.
     async fn verarbeite(&mut self, broker: &Broker, roh: &str, tx: &Tx) -> SitzungsSchritt {
         let ns = self.ns.clone();
-        match serde_json::from_str::<TabletMsg>(roh) {
+        let geparst = serde_json::from_str::<TabletMsg>(roh);
+        if let Ok(msg) = &geparst {
+            if !self.takt_erlaubt(msg, std::time::Instant::now()) {
+                return SitzungsSchritt::Weiter;
+            }
+        }
+        match geparst {
             Ok(TabletMsg::Identify {
                 court_id,
                 device_id,
@@ -2958,6 +3243,18 @@ impl TabletSitzung {
                 sets_history,
                 match_id,
             }) => {
+                // Kein Badmintonspiel hat mehr als zehn Sätze; die Liste wird
+                // gespeichert und an den Host gereicht.
+                if sets_history.len() > MAX_SAETZE {
+                    if !self.saetze_gemeldet {
+                        self.saetze_gemeldet = true;
+                        tracing::warn!(
+                            "Tablet (Namespace '{ns}') meldet {} Sätze — verworfen",
+                            sets_history.len()
+                        );
+                    }
+                    return SitzungsSchritt::Weiter;
+                }
                 if let Some(c) = self.court {
                     forward_score(broker, &ns, c, score_a, score_b, sets_history, match_id, tx)
                         .await;
@@ -3026,6 +3323,40 @@ impl TabletSitzung {
             Err(_) => {}
         }
         SitzungsSchritt::Weiter
+    }
+
+    /// Mengen-Takt: Passt dieser Frame noch ins Kontingent der Sitzung?
+    /// `identify`, `take_over` und `ping` zählen nicht.
+    fn takt_erlaubt(&mut self, msg: &TabletMsg, jetzt: std::time::Instant) -> bool {
+        let erlaubt = match msg {
+            TabletMsg::ScoreUpdate { .. }
+            | TabletMsg::Rally { .. }
+            | TabletMsg::Battery { .. }
+            | TabletMsg::Alert { .. }
+            | TabletMsg::MatchEvent { .. } => self.takt.nimm(TAKT_SCHWUNG, TAKT_JE_SEKUNDE, jetzt),
+            TabletMsg::RallySync { .. } => {
+                self.takt_verlauf
+                    .nimm(TAKT_SYNC_SCHWUNG, TAKT_SYNC_JE_SEKUNDE, jetzt)
+            }
+            TabletMsg::MatchEventSync { .. } => {
+                self.takt_zettel
+                    .nimm(TAKT_SYNC_SCHWUNG, TAKT_SYNC_JE_SEKUNDE, jetzt)
+            }
+            TabletMsg::StateSync { .. } => {
+                self.takt_zustand
+                    .nimm(TAKT_ZUSTAND_SCHWUNG, TAKT_ZUSTAND_JE_SEKUNDE, jetzt)
+            }
+            _ => true,
+        };
+        if !erlaubt && !self.takt_gemeldet {
+            self.takt_gemeldet = true;
+            tracing::warn!(
+                "Tablet (Namespace '{}', Feld {:?}) sendet schneller als jedes Zähl-Tablet — Frames werden verworfen",
+                self.ns,
+                self.court
+            );
+        }
+        erlaubt
     }
 
     /// Gibt den Court-Slot frei, wenn diese Sitzung ihn hielt.
@@ -3140,7 +3471,9 @@ async fn carrier_ws(
     if !valid_namespace(&ns) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    ws.on_upgrade(move |socket| carrier_conn(socket, broker, ns))
+    ws.max_message_size(WS_MAX_TRAEGER)
+        .max_frame_size(WS_MAX_TRAEGER)
+        .on_upgrade(move |socket| carrier_conn(socket, broker, ns))
         .into_response()
 }
 
@@ -3410,7 +3743,9 @@ async fn monitor_ws(
         return StatusCode::NOT_FOUND.into_response();
     }
     let court = q.court;
-    ws.on_upgrade(move |socket| monitor_conn(socket, broker, ns, court))
+    ws.max_message_size(WS_MAX_ANZEIGE)
+        .max_frame_size(WS_MAX_ANZEIGE)
+        .on_upgrade(move |socket| monitor_conn(socket, broker, ns, court))
         .into_response()
 }
 
@@ -3608,7 +3943,9 @@ struct TlWsAuth {
 /// nginx-Zugriffsprotokollen. Vor erfolgreicher Prüfung sendet der Relay
 /// nichts — auch keinen Grund.
 async fn tl_ws_route(ws: WebSocketUpgrade, State(broker): State<Broker>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| tl_ws_conn(socket, broker))
+    ws.max_message_size(WS_MAX_ANZEIGE)
+        .max_frame_size(WS_MAX_ANZEIGE)
+        .on_upgrade(move |socket| tl_ws_conn(socket, broker))
 }
 
 /// Wie viele Verbindungen gerade auf ihren Zugangs-Frame warten. Der
@@ -4149,18 +4486,11 @@ const STATE_WEITERGABE_JE_SEKUNDE: f64 = 2.0;
 /// verbraucht bei „ja" eine Einheit.
 fn host_weitergabe_erlaubt(namespace: &mut Namespace, court_id: i64) -> bool {
     let jetzt = std::time::Instant::now();
-    let (stand, seit) = namespace
-        .state_weitergabe
-        .get(&court_id)
-        .copied()
-        .unwrap_or((STATE_WEITERGABE_SCHWUNG, jetzt));
-    let stand = (stand + jetzt.duration_since(seit).as_secs_f64() * STATE_WEITERGABE_JE_SEKUNDE)
-        .min(STATE_WEITERGABE_SCHWUNG);
-    let erlaubt = stand >= 1.0;
     namespace
         .state_weitergabe
-        .insert(court_id, (if erlaubt { stand - 1.0 } else { stand }, jetzt));
-    erlaubt
+        .entry(court_id)
+        .or_insert_with(|| Eimer::voll(STATE_WEITERGABE_SCHWUNG, jetzt))
+        .nimm(STATE_WEITERGABE_SCHWUNG, STATE_WEITERGABE_JE_SEKUNDE, jetzt)
 }
 
 /// Wie lange der Relay einen kompletten Abgleich für das Spiel durchreicht,
@@ -4486,7 +4816,9 @@ async fn host_ws(
     if !valid_namespace(&ns) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    ws.on_upgrade(move |socket| host_conn(socket, broker, ns))
+    ws.max_message_size(WS_MAX_HOST)
+        .max_frame_size(WS_MAX_HOST)
+        .on_upgrade(move |socket| host_conn(socket, broker, ns))
         .into_response()
 }
 
@@ -4516,6 +4848,7 @@ fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
             namespace.host = Some(tx.clone());
             // Neue Host-Sitzung: Der Feld-Deckel darf wieder einmal melden.
             namespace.feld_deckel_gemeldet = false;
+            namespace.host_deckel_gemeldet.clear();
             namespace.host_last_seen = now;
             // Neue Host-Verbindung = neue Generation. Sie steckt im ETag des
             // Anzeige-Zustands, weil die Revision beim Neustart des
@@ -5682,6 +6015,17 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
     }
     // Jedes Host-Frame ist ein Lebenszeichen für die Zombie-Erkennung.
     namespace.host_last_seen = now_ms();
+    // Fachliche Deckel: kürzen, leeren oder verwerfen — die Verbindung
+    // bleibt, jeder Hinweis steht einmal je Host-Sitzung im Log.
+    let (frame, hinweis) = host_frame_deckeln(frame);
+    if let Some(hinweis) = hinweis {
+        if namespace.host_deckel_gemeldet.insert(hinweis) {
+            tracing::warn!("Namespace '{ns}': Host-Frame über dem Deckel — {hinweis}");
+        }
+    }
+    let Some(frame) = frame else {
+        return true;
+    };
     // Feld-Deckel: Ein Frame, das ein NEUES Feld anlegen würde, wird über
     // dem Deckel verworfen (und einmal gemeldet) — die Verbindung bleibt.
     let feld = match &frame {
@@ -6011,7 +6355,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // + den Nachruf merken (Cluster C Stufe 2). Jeder Push ersetzt die
             // Liste vollständig — ein leerer Push (kein Aufruf offen) leert sie
             // bewusst. Cap gegen pathologische Frames.
-            prepared.truncate(200);
+            prepared.truncate(MAX_PREPARED);
             namespace.prepared = prepared;
         }
         // TL-Web (Turnierleitungs-Oberfläche): Die Wire-Typen stehen, der
@@ -6093,7 +6437,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // dem Ablegen gesendet: Ein Nudge auf einen verworfenen Stand
             // schickte die Seiten nur in ein 503 statt in einen Abruf.
             let neue_rev = namespace.tl_state.as_ref().map(|(r, _)| *r) != Some(rev);
-            if json.len() > MAX_STATE_LEN {
+            if json.len() > relay_proto::MAX_TL_STATE_LEN {
                 // Zu groß: nicht ablegen — der Relay trägt viele Turniere,
                 // und ein Zustand, der aus dem Ruder läuft, darf sie nicht
                 // mitnehmen. **Und den alten mit wegwerfen:** Bliebe er
@@ -6982,6 +7326,463 @@ mod tests {
         let n = map.get(&ns).unwrap();
         assert!(n.court_labels.is_empty() && n.court_hall.is_empty());
         assert_eq!(n.feld_schluessel_anzahl(), 20);
+    }
+
+    // ───────── Deckel und Mengen-Takt (Spec relay-haerten, PR 4) ─────────
+
+    fn zuweisung(feld: i64, label: &str, host_sets: usize) -> HostFrame {
+        HostFrame::MatchAssigned {
+            court_id: feld,
+            court_label: label.to_string(),
+            hall: "H".repeat(500),
+            match_brief: brief(7),
+            on_court_since_ms: None,
+            host_sets: vec![SetAb { a: 21, b: 19 }; host_sets],
+        }
+    }
+
+    #[tokio::test]
+    async fn elf_saetze_werden_verworfen_verbindung_bleibt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        texte(&mut host_rx);
+
+        let saetze = |n: usize| {
+            let liste = vec![r#"{"a":21,"b":19}"#; n].join(",");
+            format!(r#"{{"type":"score_update","scoreA":1,"scoreB":0,"setsHistory":[{liste}]}}"#)
+        };
+        assert_eq!(
+            s.verarbeite(&broker, &saetze(11), &tx).await,
+            SitzungsSchritt::Weiter,
+            "die Verbindung bleibt"
+        );
+        assert!(
+            texte(&mut host_rx).is_empty(),
+            "elf Sätze gehen nicht weiter"
+        );
+        assert!(s.saetze_gemeldet);
+        // Zehn Sätze sind in Ordnung.
+        s.verarbeite(&broker, &saetze(10), &tx).await;
+        assert!(texte(&mut host_rx)
+            .iter()
+            .any(|t| t.contains("score_update")));
+    }
+
+    #[test]
+    fn zu_grosser_brief_wird_einmal_gemeldet() {
+        let mut gross = brief(7);
+        gross.team_a[0].name = "x".repeat(MAX_BRIEF_LEN);
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::MatchAssigned {
+            court_id: 1,
+            court_label: "1".into(),
+            hall: String::new(),
+            match_brief: gross,
+            on_court_since_ms: None,
+            host_sets: Vec::new(),
+        });
+        assert!(frame.is_none(), "die Zuweisung wird verworfen");
+        let hinweis = hinweis.expect("Hinweis fürs Log");
+        // „Einmal": derselbe Hinweis landet nur einmal in der Merkliste.
+        let mut gemeldet = std::collections::HashSet::new();
+        assert!(gemeldet.insert(hinweis));
+        assert!(!gemeldet.insert(hinweis));
+    }
+
+    #[test]
+    fn echter_brief_bleibt_weit_unter_dem_deckel() {
+        // Messung für den Brief-Deckel: ein Doppel mit langen Namen, Verein,
+        // Schiedsrichter und Aufschlagrichter.
+        let mut b = brief(7);
+        let vorlage = b.team_a[0].clone();
+        let spieler = |n: i64| {
+            let mut p = vorlage.clone();
+            p.id = n;
+            p.name = "Maximilian-Alexander von Hohenzollern-Sigmaringen".into();
+            p
+        };
+        b.team_a = vec![spieler(1), spieler(2)];
+        b.team_b = vec![spieler(3), spieler(4)];
+        b.sr_names = vec!["Schiedsrichterin Mit Langem Namen".into()];
+        b.ar_names = vec!["Aufschlagrichter Mit Langem Namen".into()];
+        let laenge = serde_json::to_vec(&b).unwrap().len();
+        assert!(laenge < 2 * 1024, "{laenge} Bytes");
+        assert!(laenge * 8 < MAX_BRIEF_LEN, "achtfache Reserve");
+    }
+
+    #[test]
+    fn lange_labels_werden_gekuerzt() {
+        let (frame, hinweis) = host_frame_deckeln(zuweisung(1, &"ä".repeat(999), 0));
+        assert!(hinweis.is_none(), "Kürzen ist keine Meldung wert");
+        let Some(HostFrame::MatchAssigned {
+            court_label, hall, ..
+        }) = frame
+        else {
+            panic!("die Zuweisung bleibt");
+        };
+        assert_eq!(court_label.chars().count(), MAX_FELD_TEXT);
+        assert_eq!(hall.chars().count(), MAX_FELD_TEXT);
+
+        // `MatchCleared`: Das Räumen wirkt immer, nur der Text wird kürzer.
+        let (frame, _) = host_frame_deckeln(HostFrame::MatchCleared {
+            court_id: 1,
+            court_label: "x".repeat(999),
+            hall: "y".repeat(999),
+        });
+        assert!(matches!(
+            frame,
+            Some(HostFrame::MatchCleared { court_label, .. }) if court_label.len() == MAX_FELD_TEXT
+        ));
+
+        // Feldliste: Name, Halle, Farbe.
+        let (frame, _) = host_frame_deckeln(HostFrame::Courts {
+            courts: vec![relay_proto::CourtBrief {
+                id: 1,
+                label: "l".repeat(999),
+                hall: "h".repeat(999),
+                hall_color: Some("f".repeat(999)),
+            }],
+            azure_tts: None,
+            reconnect_legacy_rev: false,
+        });
+        let Some(HostFrame::Courts { courts, .. }) = frame else {
+            panic!("die Feldliste bleibt");
+        };
+        assert_eq!(courts[0].label.len(), MAX_FELD_TEXT);
+        assert_eq!(courts[0].hall_color.as_ref().unwrap().len(), MAX_FARBE);
+    }
+
+    #[test]
+    fn zu_viele_host_saetze_gehen_leer_durch() {
+        let (frame, hinweis) = host_frame_deckeln(zuweisung(1, "1", 11));
+        assert!(hinweis.is_some());
+        assert!(matches!(
+            frame,
+            Some(HostFrame::MatchAssigned { host_sets, .. }) if host_sets.is_empty()
+        ));
+        let (frame, hinweis) = host_frame_deckeln(zuweisung(1, "1", 10));
+        assert!(hinweis.is_none());
+        assert!(matches!(
+            frame,
+            Some(HostFrame::MatchAssigned { host_sets, .. }) if host_sets.len() == 10
+        ));
+    }
+
+    /// Ein aufgerufenes Spiel, über den Draht gebaut (so sieht es der Relay).
+    fn aufruf(match_id: i64, name: &str) -> relay_proto::PreparedMatch {
+        let mut b = serde_json::to_value(brief(match_id)).unwrap();
+        b["teamA"][0]["name"] = serde_json::Value::String(name.to_string());
+        let team = b["teamA"].clone();
+        serde_json::from_value(serde_json::json!({
+            "matchId": match_id, "hall": "Halle", "discipline": "mens_singles",
+            "classLabel": "A", "roundName": "G1", "teamA": team, "teamB": b["teamB"],
+            "match_id": match_id, "class_label": "A", "round_name": "G1",
+            "team_a": b["teamA"], "team_b": b["teamB"],
+        }))
+        .expect("PreparedMatch")
+    }
+
+    #[test]
+    fn prepared_ueber_deckel_leert_die_liste() {
+        // Knapp darunter bleibt die Liste, wie sie ist.
+        let klein: Vec<_> = (0..50).map(|i| aufruf(i, "Anna Weber")).collect();
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::Prepared {
+            prepared: klein.clone(),
+        });
+        assert!(hinweis.is_none());
+        assert!(matches!(frame, Some(HostFrame::Prepared { prepared }) if prepared == klein));
+
+        // Eine Liste, die aus dem Ruder läuft, wird zur ehrlichen
+        // Fehlanzeige — nicht zu einer still abgeschnittenen Liste.
+        let riesig: Vec<_> = (0..100).map(|i| aufruf(i, &"x".repeat(4096))).collect();
+        assert!(serde_json::to_vec(&riesig).unwrap().len() > MAX_PREPARED_LEN);
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::Prepared { prepared: riesig });
+        assert!(hinweis.is_some());
+        assert!(matches!(frame, Some(HostFrame::Prepared { prepared }) if prepared.is_empty()));
+
+        // Mehr als 200 kleine Einträge werden nur gekappt, nicht geleert.
+        let viele: Vec<_> = (0..300).map(|i| aufruf(i, "Anna Weber")).collect();
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::Prepared { prepared: viele });
+        assert!(hinweis.is_none());
+        assert!(
+            matches!(frame, Some(HostFrame::Prepared { prepared }) if prepared.len() == MAX_PREPARED)
+        );
+    }
+
+    #[test]
+    fn ueberlanger_tl_zugang_kostet_nicht_den_widerruf() {
+        // Ein Push nennt Gerät 1 (in Ordnung) und Gerät 2 mit überlangem
+        // Zugang; Gerät 3 fehlt (widerrufen). Die Liste wird übernommen —
+        // ohne Gerät 2. Würde sie verworfen, bliebe Gerät 3 zugelassen.
+        let geraet = |id: &str, token: String| relay_proto::TlAuthDevice {
+            id: id.into(),
+            token,
+            profile_id: "p".repeat(999),
+        };
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::TlAuth {
+            devices: vec![
+                geraet("tl-1", "gut".into()),
+                geraet("tl-2", "t".repeat(MAX_TL_TEXT + 1)),
+            ],
+        });
+        assert!(hinweis.is_some());
+        let Some(HostFrame::TlAuth { devices }) = frame else {
+            panic!("die Zugangsliste wird übernommen");
+        };
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "tl-1");
+        assert_eq!(devices[0].profile_id.len(), MAX_TL_TEXT, "Profil gekürzt");
+    }
+
+    #[test]
+    fn eimer_laesst_schwung_durch_und_bremst_dann() {
+        let jetzt = std::time::Instant::now();
+        let mut e = Eimer::voll(TAKT_SCHWUNG, jetzt);
+        let durch = (0..200)
+            .filter(|_| e.nimm(TAKT_SCHWUNG, TAKT_JE_SEKUNDE, jetzt))
+            .count();
+        assert_eq!(durch, TAKT_SCHWUNG as usize, "der Schwung, dann Schluss");
+        // Nach einer Sekunde ist das Kontingent um 20 nachgewachsen.
+        let spaeter = jetzt + Duration::from_secs(1);
+        let durch = (0..200)
+            .filter(|_| e.nimm(TAKT_SCHWUNG, TAKT_JE_SEKUNDE, spaeter))
+            .count();
+        assert_eq!(durch, TAKT_JE_SEKUNDE as usize);
+        // Es wächst nie über den Schwung hinaus.
+        let viel_spaeter = jetzt + Duration::from_secs(3600);
+        let durch = (0..200)
+            .filter(|_| e.nimm(TAKT_SCHWUNG, TAKT_JE_SEKUNDE, viel_spaeter))
+            .count();
+        assert_eq!(durch, TAKT_SCHWUNG as usize);
+    }
+
+    #[test]
+    fn zaehlendes_tablet_kommt_nie_an_den_takt() {
+        // Schnellstes echtes Zählen: ein Punkt alle 0,7 s, je Punkt vier
+        // kleine Frames — eine Stunde lang.
+        let mut s = TabletSitzung::neu(test_ns());
+        let punkt: TabletMsg =
+            serde_json::from_str(r#"{"type":"score_update","scoreA":1,"scoreB":0}"#).unwrap();
+        let mut jetzt = std::time::Instant::now();
+        for _ in 0..5000 {
+            for _ in 0..4 {
+                assert!(s.takt_erlaubt(&punkt, jetzt));
+            }
+            jetzt += Duration::from_millis(700);
+        }
+        assert!(!s.takt_gemeldet);
+    }
+
+    fn abgleiche() -> (TabletMsg, TabletMsg, TabletMsg) {
+        (
+            serde_json::from_str(r#"{"type":"rally_sync","matchId":7,"timeline":{"sets":[]}}"#)
+                .unwrap(),
+            serde_json::from_str(r#"{"type":"match_event_sync","matchId":7,"events":[]}"#).unwrap(),
+            serde_json::from_str(r#"{"type":"state_sync","state":"{}"}"#).unwrap(),
+        )
+    }
+
+    #[test]
+    fn voll_sync_nach_abriss_passt_in_den_takt() {
+        // Wiederverbinden schickt die kompletten Abgleiche gleich dreimal
+        // (beim Öffnen, bei der Zuweisung, bei der Übernahme des Stands) —
+        // und am Spielende noch einmal dreimal.
+        let mut s = TabletSitzung::neu(test_ns());
+        let (verlauf, zettel, zustand) = abgleiche();
+        let mut jetzt = std::time::Instant::now();
+        for _ in 0..6 {
+            assert!(s.takt_erlaubt(&verlauf, jetzt));
+            assert!(s.takt_erlaubt(&zettel, jetzt));
+            assert!(s.takt_erlaubt(&zustand, jetzt));
+            jetzt += Duration::from_millis(300);
+        }
+        assert!(!s.takt_gemeldet);
+        // `identify` und `ping` zählen nicht mit.
+        let ping: TabletMsg = serde_json::from_str(r#"{"type":"ping"}"#).unwrap();
+        assert!((0..1000).all(|_| s.takt_erlaubt(&ping, jetzt)));
+    }
+
+    #[test]
+    fn fuenfzig_ruecknahmen_in_schnellster_folge_kommen_durch() {
+        // Jedes „zurück" schickt Punktverlauf-, Zettel-Abgleich und Zustand,
+        // ohne Punkt-Sperre (250 ms Entprellung), und es gibt 50 Schritte.
+        // Fiele einer der Bremse zum Opfer, behielte der Host zurückgenommene
+        // Ballwechsel — ein verworfener Abgleich wird nie wiederholt. Und das
+        // auch direkt nach einem Wiederverbinden (drei Abgleich-Paare vorab).
+        let mut s = TabletSitzung::neu(test_ns());
+        let (verlauf, zettel, zustand) = abgleiche();
+        let mut jetzt = std::time::Instant::now();
+        for _ in 0..3 {
+            assert!(s.takt_erlaubt(&verlauf, jetzt) && s.takt_erlaubt(&zettel, jetzt));
+        }
+        for schritt in 1..=50 {
+            jetzt += Duration::from_millis(250);
+            assert!(
+                s.takt_erlaubt(&verlauf, jetzt),
+                "Verlauf, Schritt {schritt}"
+            );
+            assert!(s.takt_erlaubt(&zettel, jetzt), "Zettel, Schritt {schritt}");
+            assert!(
+                s.takt_erlaubt(&zustand, jetzt),
+                "Zustand, Schritt {schritt}"
+            );
+        }
+        assert!(!s.takt_gemeldet);
+    }
+
+    #[test]
+    fn dauerfeuer_wird_gebremst() {
+        let mut s = TabletSitzung::neu(test_ns());
+        let (verlauf, zettel, zustand) = abgleiche();
+        let jetzt = std::time::Instant::now();
+        for (name, frame, schwung) in [
+            ("Verlauf", &verlauf, TAKT_SYNC_SCHWUNG),
+            ("Zettel", &zettel, TAKT_SYNC_SCHWUNG),
+            ("Zustand", &zustand, TAKT_ZUSTAND_SCHWUNG),
+        ] {
+            let durch = (0..1000).filter(|_| s.takt_erlaubt(frame, jetzt)).count();
+            assert_eq!(durch, schwung as usize, "{name}");
+        }
+        assert!(s.takt_gemeldet);
+    }
+
+    #[test]
+    fn transport_deckel_liegen_ueber_fachlichen() {
+        // Tablet: der größte fachlich zulässige Frame (Zustand am Deckel)
+        // passt mit Abstand — auch als JSON-Zeichenkette escaped.
+        let zustand = "\"".repeat(MAX_STATE_LEN);
+        let frame = serde_json::json!({ "type": "state_sync", "state": zustand }).to_string();
+        assert!(frame.len() < WS_MAX_TABLET);
+        // Auch der Zustand einer alten Format-1-Seite (590 KB) trennt nicht.
+        let alt = serde_json::json!({ "type": "state_sync", "state": "x".repeat(590 * 1024) })
+            .to_string();
+        assert!(alt.len() < WS_MAX_TABLET);
+        // Träger: derselbe alte Zustand, im Umschlag noch einmal escaped.
+        let umschlag = serde_json::json!({
+            "type": "frame", "stream": 1,
+            "payload": serde_json::json!({ "type": "state_sync", "state": "\"".repeat(590 * 1024) }).to_string()
+        })
+        .to_string();
+        assert!(umschlag.len() < WS_MAX_TRAEGER, "{}", umschlag.len());
+        // Host: der größte Zettel, ungünstig escaped.
+        let zettel = text(&HostFrame::ScoresheetData {
+            req_id: u64::MAX,
+            found: true,
+            html: "\"".repeat(MAX_SCORESHEET_HTML_LEN),
+        });
+        let Message::Text(t) = zettel else {
+            panic!("Text-Frame erwartet")
+        };
+        assert!(t.len() <= WS_MAX_HOST, "{}", t.len());
+    }
+
+    #[tokio::test]
+    async fn monitor_steuerung_ueber_dem_deckel_wird_abgelehnt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        let mut gross = MonitorControl::default();
+        for i in 0..=MAX_CONTROL_EINTRAEGE {
+            gross.assignments.insert(format!("g{i}"), 1);
+        }
+        let antwort = monitor_control_upload(State(broker.clone()), Path(ns.clone()), Json(gross))
+            .await
+            .into_response();
+        assert_eq!(antwort.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let mut lang = MonitorControl::default();
+        lang.assignments
+            .insert("k".repeat(MAX_CONTROL_SCHLUESSEL + 1), 1);
+        let antwort = monitor_control_upload(State(broker.clone()), Path(ns.clone()), Json(lang))
+            .await
+            .into_response();
+        assert_eq!(antwort.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let mut gut = MonitorControl::default();
+        gut.assignments.insert("geraet-1".into(), 1);
+        let antwort = monitor_control_upload(State(broker), Path(ns), Json(gut))
+            .await
+            .into_response();
+        assert_eq!(antwort.status(), StatusCode::OK);
+    }
+
+    // ── Mit echtem WebSocket: Transport-Deckel wirken erst am Upgrade ──
+
+    /// Startet den echten Router auf einem freien Port.
+    async fn relay_starten() -> (Broker, String) {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let adresse = listener.local_addr().unwrap();
+        let app = router(broker.clone(), true);
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (broker, format!("ws://{adresse}"))
+    }
+
+    #[tokio::test]
+    async fn nachricht_ueber_transportdeckel_trennt() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as Ws;
+        let (_broker, basis) = relay_starten().await;
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("{basis}/{}/ws", test_ns()))
+            .await
+            .expect("verbunden");
+        // Über dem Deckel: reiner Speicherschutz, die Verbindung endet.
+        let _ = ws
+            .send(Ws::Text("x".repeat(WS_MAX_TABLET + 1024).into()))
+            .await;
+        let ende = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Ws::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await;
+        assert!(ende.is_ok(), "die Verbindung wurde nicht getrennt");
+    }
+
+    #[tokio::test]
+    async fn zustand_ueber_64k_trennt_nicht() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as Ws;
+        let (broker, basis) = relay_starten().await;
+        let ns = test_ns();
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("{basis}/{ns}/ws"))
+            .await
+            .expect("verbunden");
+        ws.send(Ws::Text(ident(5, "a").into())).await.unwrap();
+        // Ein Zustand über dem FACHLICHEN Deckel (64 KiB), wie ihn eine alte
+        // Format-1-Seite schickt: verworfen, aber die Verbindung bleibt.
+        let zustand = serde_json::json!({ "type": "state_sync", "state": "x".repeat(590 * 1024) })
+            .to_string();
+        ws.send(Ws::Text(zustand.into())).await.unwrap();
+        ws.send(Ws::Text(r#"{"type":"ping"}"#.into()))
+            .await
+            .unwrap();
+        let pong = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.next().await {
+                    Some(Ok(Ws::Text(t))) if t.contains("pong") => break true,
+                    Some(Ok(_)) => {}
+                    _ => break false,
+                }
+            }
+        })
+        .await;
+        assert_eq!(pong, Ok(true), "die Verbindung lebt und antwortet");
+        let map = broker.namespaces.lock().await;
+        assert!(
+            !map.get(&ns).unwrap().court_state.contains_key(&5),
+            "der zu große Zustand wurde nicht gespeichert"
+        );
     }
 
     #[test]
@@ -10664,10 +11465,13 @@ mod tests {
             let frueher = std::time::Instant::now()
                 .checked_sub(Duration::from_secs(5))
                 .expect("Instant weit genug in der Vergangenheit");
-            map.get_mut("ns1")
-                .unwrap()
-                .state_weitergabe
-                .insert(101, (0.0, frueher));
+            map.get_mut("ns1").unwrap().state_weitergabe.insert(
+                101,
+                Eimer {
+                    stand: 0.0,
+                    seit: frueher,
+                },
+            );
         }
         let spaeter = r#"{"match":{"matchId":7},"rev":99}"#.to_string();
         store_court_state(&broker, "ns1", 101, spaeter, &tablet_tx).await;

@@ -946,6 +946,34 @@ mit echtem WebSocket: `nachricht_ueber_transportdeckel_trennt`,
 **Doku:** `docs/cloud-relay.md` (Deckel-Tabelle, Sicherheit), `docs/multi-hall.md`
 (Träger-Umschlag), `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.385) — Abweichungen:**
+
+- Takt der kompletten Abgleiche: **je ein eigener Eimer** für `rally_sync` und
+  `match_event_sync`, Schwung **30, 2 je Sekunde** (statt gemeinsam 4 / 0,5). Jedes „zurück"
+  schickt beide ohne Punkt-Sperre, es gibt 50 Schritte, und ein verworfener `rally_sync`
+  wird nie wiederholt (Befund des Code-Reviews; ein erster Versuch mit Schwung 8 riss ab dem
+  fünften schnellen „zurück").
+- `state_sync` zählt **doch** im Takt (eigener Eimer, 30 / 3 je Sekunde): Sonst ließe sich
+  mit 64-KiB-Zuständen im Dauerfeuer das eine Schloss aller Turniere belegen
+  (Sicherheits-Review).
+- `TlAuth`: Ein Eintrag mit überlangem Zugang wird **ausgelassen**, Kennung und Profil
+  gekürzt — die übrige Liste gilt. „Frame verwerfen" hätte die alte Liste gültig gelassen und
+  einen Widerruf im selben Push verschluckt.
+- Offen (späterer PR): Werte der Monitor-Steuerung (`hall`, `file`, `court_ids`) und die
+  Texte der Monitor-Konfiguration sind nur über das Body-Limit begrenzt; das Parsen des
+  Zustands geschieht weiter unter dem Schloss.
+- Nicht gebaut: das zusätzliche „einmal melden" für `rally_sync`/`match_event_sync` über
+  ihren bestehenden Größendeckeln und für die Träger-Nutzlast über 160 KiB (beide werden wie
+  bisher still verworfen); `Close(1009)` beim Überschreiten eines Transport-Deckels (die
+  Verbindung endet ohne Close-Code); der Deckel für die Monitor-Konfiguration im Upload
+  (nur der Turniername wird gekürzt).
+- Die fachlichen Deckel der Host-Frames sitzen in einer reinen Funktion
+  (`host_frame_deckeln`) vor den Armen, nicht in den Armen selbst.
+- Messung: Ein echter Brief (Doppel, lange Namen, SR/AR) bleibt unter 2 KiB
+  (`echter_brief_bleibt_weit_unter_dem_deckel`); der Zettel-Frame wurde in PR 1 gemessen.
+- Statt `tokio-tungstenite` 0.29 als dev-dependency die 0.30 (liegt über die App ohnehin im
+  Baum), dazu `futures-util`.
+
 ### PR 5 — Begrenzte Kanäle
 
 **Erfüllt:** AK16. **Lösung:** b), Kanäle.
