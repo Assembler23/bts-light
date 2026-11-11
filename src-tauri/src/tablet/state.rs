@@ -638,6 +638,10 @@ pub struct TabletState {
     /// Aufgabe, die den ganzen `TabletState` nicht braucht — sie soll nur
     /// ihr Scheitern melden können.
     print_warning: std::sync::Arc<RwLock<Option<String>>>,
+    /// Lage der Cloud-Verbindung fürs Dashboard (Spec relay-haerten, PR 9):
+    /// Weist der Relay diesen PC ab, weil ein anderer dasselbe Turnier
+    /// hält? Gesetzt vom Relay-Client.
+    cloud_lage: std::sync::Mutex<crate::tablet::ws_verbindung::CloudLage>,
     /// Erfolgte Aufrufe je Feld:
     /// `court_id → (match_id, Stufe, bereits gerufene Parteien)`.
     ///
@@ -3840,6 +3844,17 @@ impl TabletState {
     /// Letzte Warnung des Autodrucks, falls eine offen ist.
     pub fn print_warning(&self) -> Option<String> {
         self.print_warning.read().unwrap().clone()
+    }
+
+    /// Ändert die Lage der Cloud-Verbindung (nur der Relay-Client).
+    pub fn cloud_lage_aendern(&self, f: impl FnOnce(&mut crate::tablet::ws_verbindung::CloudLage)) {
+        f(&mut self.cloud_lage.lock().unwrap());
+    }
+
+    /// Hinweis fürs Dashboard, wenn ein anderer PC dieses Turnier in der
+    /// Cloud hält.
+    pub fn cloud_hinweis(&self) -> Option<&'static str> {
+        self.cloud_lage.lock().unwrap().meldung(now_ms())
     }
 
     /// Warnung wegklicken (aus dem Dashboard).

@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "bts-light"
-version = "0.9.378"
+version = "0.9.390"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -523,6 +523,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "futures-util",
  "getrandom 0.4.3",
  "include_dir",
  "qrcode",
@@ -530,6 +531,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite 0.30.0",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

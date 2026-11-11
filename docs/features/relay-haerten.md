@@ -372,6 +372,7 @@ Die Verbindung wird in Leser und Schreiber geteilt.
 | Close-Grund „Host belegt" | verdoppeln, höchstens 5 s |
 | sauberer Close binnen 30 s ohne Grund | verdoppeln, höchstens 5 s |
 | Abriss binnen 30 s | verdoppeln bis 30 s |
+| Abriss in den ersten 5 s (aus dem Review von PR 2) | wie Close ohne Grund — der Close-Frame einer Abweisung kann verloren gehen |
 
 Die vierte Zeile deckt den alten Relay, der ohne Grund schließt. Jede Pause bekommt
 ± 20 % Jitter.
@@ -879,8 +880,16 @@ Grün sein müssen `cargo test` (Workspace),
 `quittung_geht_nie_in_eine_neue_sitzung` · `volle_feld_schlange_sagt_wiederholbar_ab` ·
 `zweiter_upload_startet_nicht_solange_einer_laeuft` ·
 `fehlgeschlagener_upload_wartet_laenger` ·
-`idle_waechter_schlaegt_nach_langem_ergebnis_nicht_an` (zuerst rot) ·
-`groesster_zettel_frame_bleibt_unter_dem_transportdeckel` (Messung für PR 4).
+`sitzung_ueberlebt_pausen_mit_lebenszeichen_im_puffer` (ersetzt den geplanten
+`idle_waechter_schlaegt_nach_langem_ergebnis_nicht_an`; hält nur fest, dass die Sitzung
+16-s-Pausen mit Lebenszeichen im Puffer übersteht — der Wettlauf selbst lässt sich mit
+angehaltener Uhr nicht nachstellen, der Test wurde deshalb nie rot; die feste Reihenfolge
+im `select!` ist per Überlegung abgesichert) ·
+`groesster_zettel_frame_bleibt_unter_dem_transportdeckel` (Messung für PR 4) ·
+aus dem Review: `toter_arbeiter_wird_ersetzt` · `hintergrund_aufgaben_enden_mit_den_diensten` ·
+`neue_sitzung_vergisst_die_upload_pause` · `haengender_schreiber_beendet_sich_nach_der_frist` ·
+`unbekannte_felder_teilen_sich_einen_arbeiter`. AK21 (Upload blockiert weder Punkte noch
+Pings) ist nur über die Wächter-Tests und den Aufbau belegt, nicht mit einem langsamen Upload.
 **Doku:** `docs/cloud-relay.md` (Host-Schleife, Ergebnis-Reihenfolge), `docs/roadmap.md`,
 `docs/changelog.md`; neue Zeile „Relay härten" in der Doku-Tabelle von `CLAUDE.md`
 (angelegt hier, ergänzt in PR 2–9).
@@ -911,6 +920,16 @@ Ein gemeinsamer Release-Tag für PR 1 und 2 ist möglich.
 `uebernahme_legt_keinen_namespace_ueber_dem_limit_an`.
 **Doku:** `docs/cloud-relay.md` (Deckel-Tabelle, Sicherheit), `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.384):** Die beiden als „zuerst rot" geplanten Tests
+(`identify_des_halters_ist_folgenlos`, `uebernahme_hin_und_zurueck`) wurden nicht gegen den
+alten Code laufen gelassen — sie nutzen den neuen Helfer `haelt_feld` und kompilieren dort
+nicht. Die Fehler sind am alten Code nur gelesen, nicht nachgestellt. Der Feld-Deckel zählt
+auch `court_hall`, `court_on_court_since` und die Monitor-Folge; `detach_tablet` räumt für
+host-unbekannte Felder zusätzlich `court_hall` und `court_on_court_since`. Aus den Reviews:
+eine abgewiesene Übernahme schließt die Verbindung; eine neue Feldliste räumt alte Feldnamen
+und Hallen (sonst zählten sie auf den Deckel); `court_hall` zählt zu „host-bekannt". Offen
+bleibt (späterer PR): eine Log-Zeile je Verbindung bei `identify` für ein fremdes Feld.
+
 ### PR 4 — Deckel und Mengen-Takt
 
 **Erfüllt:** AK9–AK15. **Lösung:** b) ohne Kanäle.
@@ -927,6 +946,34 @@ mit echtem WebSocket: `nachricht_ueber_transportdeckel_trennt`,
 **Doku:** `docs/cloud-relay.md` (Deckel-Tabelle, Sicherheit), `docs/multi-hall.md`
 (Träger-Umschlag), `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.385) — Abweichungen:**
+
+- Takt der kompletten Abgleiche: **je ein eigener Eimer** für `rally_sync` und
+  `match_event_sync`, Schwung **30, 2 je Sekunde** (statt gemeinsam 4 / 0,5). Jedes „zurück"
+  schickt beide ohne Punkt-Sperre, es gibt 50 Schritte, und ein verworfener `rally_sync`
+  wird nie wiederholt (Befund des Code-Reviews; ein erster Versuch mit Schwung 8 riss ab dem
+  fünften schnellen „zurück").
+- `state_sync` zählt **doch** im Takt (eigener Eimer, 30 / 3 je Sekunde): Sonst ließe sich
+  mit 64-KiB-Zuständen im Dauerfeuer das eine Schloss aller Turniere belegen
+  (Sicherheits-Review).
+- `TlAuth`: Ein Eintrag mit überlangem Zugang wird **ausgelassen**, Kennung und Profil
+  gekürzt — die übrige Liste gilt. „Frame verwerfen" hätte die alte Liste gültig gelassen und
+  einen Widerruf im selben Push verschluckt.
+- Offen (späterer PR): Werte der Monitor-Steuerung (`hall`, `file`, `court_ids`) und die
+  Texte der Monitor-Konfiguration sind nur über das Body-Limit begrenzt; das Parsen des
+  Zustands geschieht weiter unter dem Schloss.
+- Nicht gebaut: das zusätzliche „einmal melden" für `rally_sync`/`match_event_sync` über
+  ihren bestehenden Größendeckeln und für die Träger-Nutzlast über 160 KiB (beide werden wie
+  bisher still verworfen); `Close(1009)` beim Überschreiten eines Transport-Deckels (die
+  Verbindung endet ohne Close-Code); der Deckel für die Monitor-Konfiguration im Upload
+  (nur der Turniername wird gekürzt).
+- Die fachlichen Deckel der Host-Frames sitzen in einer reinen Funktion
+  (`host_frame_deckeln`) vor den Armen, nicht in den Armen selbst.
+- Messung: Ein echter Brief (Doppel, lange Namen, SR/AR) bleibt unter 2 KiB
+  (`echter_brief_bleibt_weit_unter_dem_deckel`); der Zettel-Frame wurde in PR 1 gemessen.
+- Statt `tokio-tungstenite` 0.29 als dev-dependency die 0.30 (liegt über die App ohnehin im
+  Baum), dazu `futures-util`.
+
 ### PR 5 — Begrenzte Kanäle
 
 **Erfüllt:** AK16. **Lösung:** b), Kanäle.
@@ -938,6 +985,27 @@ mit echtem WebSocket: `nachricht_ueber_transportdeckel_trennt`,
 `docs/changelog.md`.
 **Prüfpunkt nach dem Deploy:** Die Log-Zeile „Kanal voll" darf im Normalbetrieb nicht
 auftreten.
+
+**Aus der Umsetzung (v0.9.386):** `Tx` ist ein kleiner Typ um `mpsc::Sender` mit einem
+geteilten Überlauf-Merkmal; die Wache (`UeberlaufWache`) ist ein eigener Griff neben dem
+Empfänger (sonst kollidierten `recv` und `warten` im selben `select!`). Der Meldekanal
+„Substrom tot" des Trägers (`tot_tx`, trägt nur Kennungen) bleibt unbegrenzt. „Einmal
+melden" ergibt sich daraus, dass die Schleife nach der Meldung endet. Der Test mit echtem
+WebSocket füllt den Kanal aus dem Test heraus (am Empfänger vorbei), weil sich ein echter
+Stau über die Puffer des Betriebssystems nicht zuverlässig herstellen lässt.
+
+Aus den Reviews:
+- **Reserve am Kanal des Turnier-PCs** (`Tx::send_nachrangig`): Tablet-Frames belegen
+  höchstens drei Viertel und lösen nie die Trennung aus. Sonst hätte dieser PR einen neuen
+  Hebel geschaffen — mit der Turnier-Kennung den Turnier-PC trennen lassen und seinen Platz
+  besetzen (Sicherheits-Review, bedingt hoch). Das weicht von „nichts wird still verworfen"
+  ab: Über der Marke werden Tablet-Frames verworfen (einmal gemeldet); sie heilen über den
+  nächsten Frame bzw. Abgleich.
+- `POST /{ns}/result`: Body 16 KiB, höchstens zehn Sätze, Feldname gekürzt.
+- „Getrennt" gilt, sobald die Schleife wieder läuft; eine Schreibfrist am Relay bleibt
+  Nicht-Ziel. Die Angabe „100 s Spitzenverkehr" war nicht belegt und ist ersetzt.
+- Offen: Anstöße an Monitore je Feld zusammenfassen; Takt für `identify`/`take_over`;
+  Close-Frame beim Trennen; Tests mit echtem WebSocket für Turnier-PC, Monitor und Träger.
 
 ### PR 6 — Bilder-Tor, Gesamt-Budget, Log, Dienst-Datei, nginx-Vorlage
 
@@ -951,6 +1019,29 @@ auftreten.
 Dienst-Datei), `docs/logging.md` (Verfall, gekürzte Kennung, Such-Rezept),
 `docs/changelog.md`.
 **Handgriff:** Dienst-Datei am Server, im selben Fenster (siehe „Deploy-Regeln").
+
+**Aus der Umsetzung (v0.9.387):**
+- **Die zweite Stufe des Tors („Bilder erst nach dem ersten `Courts`-Frame") ist nicht
+  gebaut** — AK42 ist insoweit nicht erfüllt. Der Code-Review fand: Die App sendet `Courts`
+  nur, wenn die Feldliste nicht leer ist oder ein Sprachdienst geteilt wird
+  (`relay_client.rs` `push_courts`). Ohne geladenes BTP-Turnier wäre das Tor nie
+  aufgegangen, die Cloud hätte dauerhaft keine Werbung und kein Logo gezeigt. Der
+  Sicherheits-Review stufte die Stufe zudem als Formalie ein (ein Frame mehr für den
+  Angreifer). Das Tor verlangt nur einen verbundenen Turnier-PC; die Aussagen der Spec zum
+  „alten Host" (30 s ohne Werbung) entfallen damit.
+- Das Budget ist als `Buchung` mit `Drop` gebaut: Der Zähler sinkt auf jedem Weg, auf dem
+  ein Bild verschwindet. Gebucht wird je Upload **ganz oder gar nicht**.
+- **Bei 507 bleiben die bisherigen Bilder des Turniers** (Sicherheits-Review: Sonst
+  verlöre gerade das laufende Turnier seine Werbung, wenn andere das Budget belegen).
+- Zusätzlich aus dem Sicherheits-Review: höchstens zwei Uploads gleichzeitig (`503`),
+  Texte der Monitor-Konfiguration auf 32 Zeichen gekürzt.
+- Die erste Stufe des Tors liest den Rumpf nicht (eigener Handler vor dem JSON-Lesen); der
+  Test hält das mit einem Rumpf fest, der sich das Lesen merkt.
+- **Offen:** Base64 wird vor der Budget-Prüfung dekodiert; Bilder eines Turniers ohne
+  Turnier-PC bleiben bis zum Daten-Verfall (PR 8) gebucht; kein Limit für Verbindungen je
+  Adresse; `LimitNOFILE`/`TasksMax` und Härtungsoptionen der Dienst-Datei.
+- **Nicht ausgeführt:** der Handgriff am Server. Die Datei liegt im Repo; ausrollen muss
+  sie jemand mit Zugang, in einem Fenster ohne Turnier.
 
 ### PR 7 — Host-Verlust auf den Anzeigen, Close-Grund
 
@@ -972,6 +1063,21 @@ Host"-Warnung, `:1136–1137`, berichtigen; Routen-Tabelle), `docs/court-monitor
 `monitor.html` und `tafel.html`, `docs/multi-hall.md` (ferne Halle, LAN zählt weiter),
 `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.388):**
+- Die Karenz hält nur Namespaces, die je einen Turnier-PC hatten (`host_last_seen != 0`).
+  Die Spec wollte „ein Namespace, den ein Tablet anlegt, startet mit weg seit jetzt" auch
+  fürs Aufräumen; das hätte erlaubt, das Namespace-Limit mit kurzen Verbindungen zu füllen
+  (Code-Review). Die Uhr selbst startet weiter so.
+- **AK27 gilt bis PR 8 nur, solange ein Tablet oder eine TL-Seite den Namespace hält.**
+  Sonst entfernt der Aufräum-Lauf ihn am Karenz-Ende samt Zuweisungen; die Geräte sehen
+  dann die Kopplungs-Seite mit Hinweis statt 503.
+- Der Stillstands-Wächter der Seiten bekommt bei `host_weg` ein Lebenszeichen, sonst lüde
+  er nach 60 s doch ein Log hoch (AK35).
+- Die Slave-Brücke beantwortet `/health` ohne Parameter bei 503 weiter mit ihrem Stummel —
+  die Gerätesuche der Kiosk-App verlangt 200.
+- Offen: `Retry-After` wird von den Seiten nicht beachtet (Monitor/Tafel fragen bei 503
+  alle 250 ms); Verhaltenstest für `poll()` im Ganzen.
+
 ### PR 8 — Daten-Verfall
 
 **Erfüllt:** AK37–AK41. **Lösung:** f).
@@ -985,6 +1091,20 @@ Host"-Warnung, `:1136–1137`, berichtigen; Routen-Tabelle), `docs/court-monitor
 **Doku:** `docs/cloud-relay.md` (Lebensdauer, Datenschutz im Abschnitt „Sicherheit"),
 `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.389):** Ein Namespace, der je einen Turnier-PC hatte, bleibt
+jetzt die ganze Daten-Frist stehen (auch ohne Tablet) — damit gilt AK27 ohne die
+Einschränkung aus PR 7. Zusätzlich geleert: die schlanke Anzeige-Fassung des Zustands und
+der Sprachdienst-Zugang (falls er nach dem Abgang noch stünde). Verdrängt wird nur beim
+Verbinden eines Turnier-PCs, nicht beim Verbinden eines Tablets. `tablet_state_seit` und
+`state_weitergabe` (Zeitstempel ohne Inhalt) bleiben stehen.
+
+Aus dem Review: Der gespiegelte Zustand eines verbundenen Tablets enthält den vollen Brief
+seines Spiels (Namen, Karten) und bleibt, solange es verbunden ist — AK38 ist insoweit nur
+für die Turnierdaten erfüllt, nicht für dieses eine Spiel; die Doku sagt das jetzt so. Bei
+knappem Bilder-Budget weichen die Bilder hostloser Namespaces vor einem 507. Offen: eine
+zweite, längere Frist für Tablet-Felder; Test für die Wiederverbindung eines Tablets nach
+dem Leeren.
+
 ### PR 9 — Dashboard-Meldung, `Courts` immer, Wiederholung bei 409
 
 **Erfüllt:** AK25, AK26. **Lösung:** Dashboard aus d), neuer Host aus g).
@@ -997,6 +1117,17 @@ beim Host an (Annahme 1).
 **Doku:** `docs/oberflaechen.md` mit `pruef:`-Anker für „Ein anderer PC ist mit diesem
 Turnier verbunden", `docs/cloud-relay.md`, `docs/changelog.md`, `docs/roadmap.md`
 (Abschluss des Pakets).
+
+**Aus der Umsetzung (v0.9.390):**
+- **AK26 ist nur zur Hälfte gebaut.** „Der Host sendet nach jedem Verbinden ein
+  `Courts`-Frame, auch ein leeres" entfällt: Das sollte das Bilder-Tor öffnen, und das Tor
+  hängt seit PR 6 nicht mehr an der Feldliste. Die Wiederholung des Werbe-Uploads gilt für
+  409 **und** 503, bis zu dreimal im Abstand von 3 s.
+- Die Meldung verschwindet, sobald eine Verbindung 5 s steht (nicht erst am Ende der
+  Sitzung), und beim Stoppen der Übertragung.
+- **Annahme 1 ist ungeprüft:** Ob der Close-Code 4409 durch nginx und Cloudflare bei der
+  App ankommt, lässt sich nur am echten Relay sehen. Kommt er nicht an, erscheint die
+  Meldung nie; sonst ändert sich nichts.
 
 ### Reihenfolge
 

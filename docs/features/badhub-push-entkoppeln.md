@@ -277,7 +277,8 @@ Der **Halt** lebt bewusst nur im Sender (in PR 1: im Tor). `start_sync` baut bei
 | 5xx | Strecke: Störung | Strecke: Störung | Kanal: Backoff | Kanal: Backoff | Kanal: Backoff + Auswahl rotieren |
 | 429 | Strecke: gedrosselt | ← | ← | ← | ← |
 | 401 mit `WWW-Authenticate: Basic` | Strecke: Halt (Wand) | ← | ← | ← | ← |
-| 401 / 403 | Strecke: Halt (Passwort) | ← | ← | ← | ← |
+| 401 / 403 mit badhub-Antwort | Strecke: Halt (Passwort) | ← | ← | ← | ← |
+| 401 / 403 ohne badhub-Antwort (aus dem Sicherheits-Review von PR 1: Filter oder Proxy im Hallen-WLAN) | Strecke: Störung | ← | ← | ← | ← |
 | 400 | Kanal: abgelehnt | Punkt verwerfen | Kanal: 30 min | Kanal: 30 min | Kanal: 30 min |
 | 404 | Strecke: Störung (falsche URL) | ← | Kanal: 30 min | Kanal: 30 min | Kanal: 30 min |
 | 409 | Kanal: abgelehnt | Punkt verwerfen | Kanal: 30 min, eine Log-Zeile | Kanal: 30 min | Kanal: Backoff + rotieren |
@@ -672,6 +673,31 @@ Queue bleibt noch bestehen und teilt den Streckenzustand über das Tor aus PR 1.
 **Mock.** Die Attrappe. Echtes HTTP mit pausierter Uhr vermeiden — die Uhr springt vor,
 während auf den Socket gewartet wird, und Fristen feuern zu früh.
 
+**Aus der Umsetzung (v0.9.382) — Abweichungen:**
+
+- Das Postfach hat in PR 2a **einen** Schlitz (den Stand). Den Spielplan-Auftrag gibt es
+  noch nicht: `sched`-Takt und Prognose rechnet der Sender selbst, wie vorher der Zyklus
+  (`PushTeil::send_sched`). Der Test `spielplan_auftrag_bleibt_bis_gesendet` entfällt damit.
+- Die Auftragswahl ist noch keine eigene reine Funktion — die Reihenfolge steckt
+  unverändert in `PushTeil::an_badhub_senden` und ist dort getestet (Zyklus-Tests aus PR 1).
+  Die vier Auftragswahl-Tests kommen mit den Feld-Marken in PR 2b. Neu ist nur die Regel
+  „Punktverlauf erst mit bestätigtem Stand".
+- `run_once_wartet_nie_auf_badhub` und `slave_liefert_nichts_ab` gibt es nicht: `run_once`
+  braucht ein BTP. Belegt ist stattdessen, dass die Ablieferung synchron ist
+  (`ablieferung_kehrt_sofort_zurueck`) und dass ein hängender Upload nichts staut
+  (`neuester_stand_gewinnt_waehrend_der_upload_haengt`).
+- Der Sender wacht nur mit einem abgelieferten Stand auf, nicht zum Ablauf einer Frist —
+  ein Probe-Versuch kommt bis zu 5 s später. Die Statuszeile zeigt deshalb nie „in 0 s".
+- `stop_setzt_die_push_lage_zurueck` heißt `gestoppte_uebertragung_zeigt_keine_push_lage`
+  und prüft die Wirkung über `running` (der Befehl selbst braucht die Tauri-Laufzeit).
+- Vor der ersten Sendung zeigt die Zeile den Ok-Text (Lage „unbekannt").
+- Aus den Reviews: neue Lage „ausgefallen" (Panik im Sender) mit eigenem roten Text; der
+  Schlitz für die Lage entsteht je Start neu; der Test `verlauf_erst_mit_bestaetigtem_stand`
+  kam doch dazu. Ein einzelner abgelehnter Punkt (`tupdate_match` mit 400) erscheint nicht
+  mehr in der Statuszeile — nur noch im Log; die Daten trägt der nächste volle Stand.
+- Der Rückgabewert von `an_badhub_senden` (`PushedFull`/`PushedUpdate`/`Idle`/`Push*`) dient
+  nur noch den Tests; aufgeräumt wird er mit PR 2b.
+
 **Doku:** `docs/liveticker-push.md` (Architektur) · `docs/oberflaechen.md` (Anker ziehen
 mit dem Text um; neuer Ok-Text) · `CLAUDE.md`-Zeile · `docs/changelog.md`.
 
@@ -746,6 +772,19 @@ die Aufrufe) · `marke_steigt_bei_rally_sync_ereignis_und_pause` ·
 **Doku:** `docs/punktverlauf.md` · `docs/liveticker-push.md` · `docs/changelog.md`.
 
 **Reviews:** `code-reviewer`.
+
+**Aus der Umsetzung (v0.9.383):** PR 4 kam vor PR 2b und 3 (beide warten auf die Messung im
+Feld); er hängt nur an PR 2a. „Geparkt bis … ein neuer voller `tset` oder `sched` bestätigt
+wurde" ist als „neuer voller `tset`" umgesetzt (das Lebenszeichen kommt ohnehin alle 60 s);
+`sched` hebt das Parken nicht auf. Aus dem Review: Ein bloßes Lebenszeichen entparkt
+höchstens alle zehn Minuten (sonst dreimal je Minute für einen dauerhaft verworfenen
+Eintrag); Zählweise und Einzel/Doppel stecken mit in der Marke; die Marken werden beim
+Turnierwechsel geleert. Die Marke ist ein fortlaufender Zähler je Speicher (läuft
+über Turnierwechsel weiter), kein Zähler je Spiel; ein aus der Datei geladener Verlauf hat
+die Marke 0 und wird beim ersten Mal gesendet. `ohne_bestaetigten_tset_kein_verlauf` heißt
+`verlauf_erst_mit_bestaetigtem_stand` (seit PR 2a); dazu `verworfener_verlauf_gilt_nicht_als_angenommen`
+als Durchgangs-Test gegen die HTTP-Attrappe. `badhub/sender.rs` blieb unberührt — die Regeln
+leben in `PushTeil::send_verlauf`.
 
 ### PR 5 (nur nach Messung) — Spielplan nur bei Änderung
 

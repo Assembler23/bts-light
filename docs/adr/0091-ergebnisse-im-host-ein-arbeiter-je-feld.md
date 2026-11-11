@@ -68,3 +68,13 @@ bestätigen — das Tablet löschte dann ein Ergebnis, das nie geschrieben wurde
   (Roadmap).
 - Die Schleife bekommt einen testbaren Kern (`sitzung_fahren`) mit injizierbarem
   Ergebnis-Verarbeiter.
+
+## Nachtrag aus der Umsetzung (PR 1, v0.9.379)
+
+- Die Quittung kann jetzt **nach** einem `MatchCleared`/`MatchAssigned` des 2-s-Takts beim
+  Tablet ankommen (vorher garantierte der Inline-Write die umgekehrte Reihenfolge). Im
+  Hallennetz war das immer so; das Tablet verträgt es seit v0.9.376.
+- Ein Punkt desselben Spiels, der während des Writes eintrifft, wird noch aufgenommen.
+- Ergebnisse für eine CourtID, die der Turnier-PC nicht kennt, teilen sich einen
+  Sammel-Arbeiter — die CourtID ist fremdbestimmt.
+- Ein an einer Panik gestorbener Arbeiter wird beim nächsten Ergebnis des Felds ersetzt.

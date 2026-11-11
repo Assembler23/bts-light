@@ -554,6 +554,28 @@ er hält die echte Verbindung dorthin. Versagt er dabei, räumt der Relay den
 Substrom nach 15 s selbst ab, damit ein Ersatzgerät das Feld bekommt. Bricht
 der Träger weg, räumt der Relay alle seine Substrome.
 
+Seit v0.9.385 nimmt der Relay am Träger höchstens 4 MiB je Nachricht an
+(vorher 64 MiB); der Umschlag einer älteren Tablet-Seite der fernen Halle mit
+großem Zustand passt mit Abstand. Der Mengen-Takt gilt je Gerät (Substrom),
+nicht für den Träger als Ganzes.
+
+Seit v0.9.380 baut der Slave den Träger mit **10 s Frist** auf und nutzt
+denselben Backoff wie der Turnier-PC (Details:
+[cloud-relay.md](cloud-relay.md), „Verbindungsaufbau"). Hängt das Senden an den
+Relay länger als 20 s, gilt der Träger als tot und wird neu aufgebaut. Solange
+er nicht bereit ist, verwirft der Slave die Nachrichten der Geräte, statt sie
+zu stauen.
+
+## Turnier-PC weg: was die ferne Halle sieht (seit v0.9.388)
+
+Geräte der fernen Halle hängen an der Cloud (direkt oder über den
+Slave-PC). Verliert der Turnier-PC der Haupthalle seine Cloud-Verbindung,
+zeigen sie 20 Sekunden lang den letzten Stand und danach „Keine Verbindung
+zum Turnier-PC" — auch hinter der Slave-Brücke, die Status und Rumpf des
+Relays durchreicht. **Anzeigen im Hallennetz der Haupthalle zählen weiter:**
+Sie fragen den Turnier-PC direkt und merken von der Cloud nichts.
+Einzelheiten: [cloud-relay.md](cloud-relay.md), „Ohne Turnier-PC".
+
 ## Meetingpoint je Halle (seit v0.9.330)
 
 Jede Halle hat ihren eigenen Meetingpoint (`/meetingpoint?halle=<Name>`); die
