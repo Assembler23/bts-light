@@ -1334,8 +1334,271 @@ Der Takt schützt vor einem fehlerhaften Gerät, nicht vor einem Angreifer:
 Eine neue Verbindung beginnt mit vollem Kontingent. Die feste Grenze bleibt
 die Zahl der Halter (64 je Namespace).
 
+## Ohne Turnier-PC: 20 s Karenz, dann 503 (seit v0.9.388)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 7 ·
+ADR [0088](adr/0088-anzeigen-bei-host-verlust-karenz-dann-503.md).
+
+Bis v0.9.387 zeigte eine Cloud-Anzeige ohne Turnier-PC entweder den
+eingefrorenen Stand (solange ein Tablet den Namespace hielt) oder eine leere
+Leerlauf-Seite. Jetzt führt jeder Namespace **eine Uhr** (`host_weg_seit`):
+
+- gesetzt beim Freigeben des Host-Slots, und zwar auf das **letzte
+  Lebenszeichen** — ein stumm gestorbener Turnier-PC ist rund 20 s nach
+  seinem letzten Lebenszeichen gesperrt, nicht nach 15 + 20 s;
+- gelöscht, sobald ein Turnier-PC den Slot übernimmt;
+- ein von einem Tablet angelegter Namespace beginnt mit „weg seit jetzt".
+
+| Lage | Antwort der Stand-Routen |
+|---|---|
+| Turnier-PC verbunden | normal |
+| weg, unter 20 s | `200` mit dem gehaltenen Stand |
+| weg, ab 20 s | `503`, `Cache-Control: no-store`, `Retry-After: 2`, Rumpf `{"grund":"host_weg"}` |
+| Namespace unbekannt | `503` — in den ersten 20 s nach dem Start des Relays `304`, wenn der Abruf eine Marke (`If-None-Match`) trägt |
+
+Der Grund steht im **Rumpf**, weil die Slave-Brücke der fernen Halle eigene
+Köpfe nicht durchreicht. Gesperrt gibt es weder `304` noch einen
+Cache-Treffer — die Lage wird unter dem Schloss vor allem anderen
+entschieden. Die **Start-Karenz** macht einen Relay-Neustart auf laufenden
+Fernsehern unsichtbar, wenn der Turnier-PC binnen 20 s zurück ist (üblich:
+1–4 s): Der Relay hat dann keinen Stand mehr, die Seite schon.
+
+| Route | ohne Turnier-PC |
+|---|---|
+| `GET /{ns}/court/{id}/state` (auch `?zweck=stream`) | `503` nach der Karenz |
+| `GET /{ns}/monitor/state?device=` | `503` nach der Karenz, wenn das Gerät ein Ziel hat; sonst `200` Kopplungs-Seite mit `hostOffline: true` |
+| `GET /{ns}/health` (voll und `?court=`) | `503` nach der Karenz |
+| `GET /{ns}/info/preparation/state` | `503` nach der Karenz |
+| `GET /{ns}/meetingpoint/state` | `503` nach der Karenz (vorher `404`) |
+| `GET /{ns}/info/announce/state` | **`503` sofort** — ein `200` ohne Sprachdienst-Schlüssel läse der Ansage-Slave als „abgeschaltet" |
+| `/courts`, `/info/ad/state`, Bilder, Logo, HTML-Seiten, Gerätelisten | unverändert |
+
+**Der Namespace überlebt den Abgang des Turnier-PCs** für die Karenz, auch
+ohne Tablets (sonst gäbe es im LAN+Cloud-Betrieb nichts weiterzuzeigen).
+Entfernt wird er vom Aufräum-Lauf (`fegen`, alle 5 s). Ein Namespace, den
+nur ein Tablet angelegt hat und der nie einen Turnier-PC sah, verschwindet
+weiter sofort mit dem Tablet.
+
+Seit v0.9.389 bleibt ein Namespace, der je einen Turnier-PC hatte, die ganze
+Daten-Frist stehen (nächster Abschnitt): Zugewiesene Geräte sehen so lange
+`503` und behalten ihre Zuweisung.
+
+Die Seiten fragen bei `503` im selben schnellen Takt weiter wie bei jedem
+Fehler (Monitor und Tafel alle 250 ms); `Retry-After` beachten sie nicht. Derselbe Lauf stößt am
+Karenz-Ende einmal alle Monitor-Verbindungen an, damit die Meldung sofort
+erscheint; kehrt der Turnier-PC danach zurück, werden sie noch einmal
+angestoßen. Beim Abgang schließt der Relay die Verbindungen der
+Turnierleitungs-Seiten (sie fallen auf ihren Abruf und sehen `503`).
+
+**Close-Grund für den Turnier-PC:** Ein zweiter Turnier-PC am selben
+Namespace wird mit Code `4409` und dem Text `host_belegt` geschlossen, am
+Namespace-Limit mit `4429` und `voll`.
+
+**Meldung im Dashboard (App ab v0.9.390):** Hält die Abweisung mit `4409`
+länger als 30 s an, zeigt die App „Ein anderer PC ist mit diesem Turnier
+verbunden" (`ws_verbindung::CloudLage`, über `TabletInfo.cloud_hinweis` in
+`AlertBanner.tsx`). Die 30 s decken den Fall, dass nach einem Netzwechsel
+die EIGENE tote Verbindung noch bis zu 15 s den Platz hält. Die Meldung
+verschwindet, sobald eine Verbindung 5 s steht, und beim Stoppen der
+Übertragung. Ein einzelner Close ohne Grund oder ein gescheiterter Aufbau
+zwischen zwei Abweisungen setzt die 30 s nicht zurück (der Close-Frame kann
+verloren gehen). Kommt der Close-Grund nicht bis zur App durch (älterer Relay,
+ein Proxy, der Close-Codes verschluckt), erscheint sie nie — die Verbindung
+verhält sich dann wie bisher.
+
+**Werbe-Upload:** Auf `409` (Turnier-PC am Relay noch nicht eingetragen) und
+`503` (zwei Uploads in Arbeit) wiederholt die App den Upload bis zu dreimal
+im Abstand von 3 s; erst danach greift die gewöhnliche Pause (30 s und
+länger).
+
+`GET /health` (prozessweit) nennt zusätzlich `hosts` — die Zahl verbundener
+Turnier-PCs. Das ist der Prüfpunkt vor jedem Relay-Deploy.
+
+## Lebensdauer der Turnierdaten (seit v0.9.389)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 8 ·
+ADR [0089](adr/0089-lebensdauer-des-namespace-zustands-ohne-host.md).
+
+Bis v0.9.388 hing die Lebensdauer aller Daten am Namespace — und der blieb,
+solange irgendein Tablet verbunden war. Ein vergessenes Tablet hielt Namen,
+Bilder und Listen eines beendeten Turniers beliebig lange im Speicher.
+
+| Zeitpunkt | Was geht |
+|---|---|
+| **sofort** beim Abgang des Turnier-PCs | Zugang zum Sprachdienst (`azure_tts`); TL-Zugänge, TL-Zustand, wartende Abrufe; TL-Verbindungen geschlossen |
+| **nach 20 s** | Anzeigen gesperrt (`503`) |
+| **nach 60 min** | Briefe (Namen) der Felder ohne Tablet, Aufruf-Liste, Meetingpoint, Feldliste, Feldnamen, Hallen, Freitext, Werbebilder, Logo, Monitor-Konfiguration, Geräte-Zuweisungen, Geräte- und Slave-Präsenz; für Felder ohne Tablet auch Sätze und Zustand |
+| **solange ein Tablet am Feld hängt** | seine Verbindung, sein gespiegelter Zustand (enthält die Namen seines Spiels), seine Sätze und ein **Brief ohne Personen** (nur Spielkennung und „beendet") |
+| **danach** | der Namespace verschwindet, sobald kein Tablet und kein offenes Ergebnis mehr hängt |
+
+- **Der Brief ohne Personen** ist nötig, damit das Tablet weiterzählen kann
+  (ohne Eintrag verwürfe der Relay jeden Punkt als Nachzügler) und damit bei
+  der Rückkehr des Turnier-PCs „gleiches Spiel" gilt — sonst stünde das Feld
+  auf 0:0.
+- **Rückkehr vor Ablauf:** nichts ist geleert, es ist der gewöhnliche
+  Reconnect.
+- **Rückkehr danach:** wie nach einem Relay-Neustart — der Turnier-PC liefert
+  Feldliste, Zuweisungen und Bilder neu.
+- **Namespace-Limit (2000):** Ist die Tabelle voll, weicht einem neuen
+  Turnier-PC der am längsten hostlose Namespace ohne Tablet. Gehaltene Daten
+  können so nie ein neues Turnier aussperren; gibt es keinen solchen, wird
+  der neue Turnier-PC mit `4429 voll` abgewiesen.
+- Ein Namespace, den nur ein Tablet angelegt hat (nie ein Turnier-PC),
+  verschwindet weiter sofort mit dem Tablet.
+- **Bilder weichen früher, wenn das Bilder-Budget knapp wird:** Vor einem
+  `507` gibt der Relay die Bilder von Turnieren ohne Turnier-PC frei (am
+  längsten verwaist zuerst). Ihr Turnier-PC lädt beim Wiederverbinden neu
+  hoch.
+- Die Verdrängung am Namespace-Limit kann auch ein echtes Turnier treffen,
+  dessen Turnier-PC gerade getrennt ist und das kein Cloud-Tablet hat — es
+  beginnt beim Wiederverbinden wie nach einem Relay-Neustart. Vorher wäre in
+  derselben Lage der neue Turnier-PC abgewiesen worden.
+
+Im Relay-Log: `Namespace '…': seit 60 min ohne Turnier-PC — Turnierdaten
+geleert`.
+
+## Begrenzte Kanäle (seit v0.9.386)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 5 ·
+ADR [0090](adr/0090-ueberlast-am-relay-und-mindestschutz.md).
+
+Jede Verbindung hat im Relay einen Kanal für das, was an sie hinausgeht. Bis
+v0.9.385 war er unbegrenzt: Nahm der Empfänger nicht ab, wuchs er im Speicher
+des Relays — der alle Turniere trägt.
+
+| Kanal zu | Größe (Nachrichten) |
+|---|---|
+| Turnier-PC | 1024 |
+| Tablet, Substrom des Trägers | 64 |
+| Monitor, Turnierleitungs-Seite | 32 |
+| Träger (Sammelkanal aller Substrome) | 1024 |
+
+**Voller Kanal = der Empfänger wird getrennt**, sobald seine
+Verbindungsschleife wieder läuft. Hängt sie gerade beim Schreiben in den
+Socket fest (Gerät nimmt gar nichts mehr ab), bleibt der Speicher trotzdem
+begrenzt; getrennt wird dann erst, wenn das Schreiben zurückkehrt oder der
+Stale-Wächter greift (Tablet, Turnier-PC, Träger: 15 s). Eine Schreibfrist am
+Relay gibt es nicht. Das Senden wartet nie
+(`Tx::send` nutzt `try_send`); ist der Kanal voll, setzt es ein Merkmal, und
+die Verbindungsschleife **des Empfängers** beendet sich über ihren normalen
+Aufräumweg (Feld freigeben, Abo austragen). Nichts wird still verworfen,
+während die Verbindung weiterläuft. Das getrennte Gerät verbindet neu und
+bekommt den frischen Stand: Ein Tablet meldet sich wieder an, der Relay
+schickt dem Host `tablet_connected`, der Host schiebt die Zuweisung nach —
+ein `MatchAssigned` geht so nicht verloren.
+
+**Turnier-PC — Reserve gegen gezieltes Trennen.** Eine Halle mit 20 Feldern
+erzeugt im üblichen Betrieb 3–4 Nachrichten je Sekunde an den Turnier-PC;
+1024 reichen dafür mehrere Minuten (zählten alle Felder gleichzeitig im
+schnellsten Takt, rund 9 s). Ein Turnier-PC, der nichts mehr sendet, wird
+ohnehin nach 15 s getrennt.
+
+Alles, was ein **Tablet** in diesen Kanal legt (Punkt, Ballwechsel, Abgleiche,
+Zustand, Akku, Ruf, An- und Abmeldung), ist **nachrangig**
+(`Tx::send_nachrangig`): Es darf das letzte Viertel nicht belegen und löst
+nie eine Trennung aus — über der Marke wird es verworfen und einmal gemeldet
+(`Kanal knapp – …`). Grund: Wer die Turnier-Kennung hat, kann beliebig viele
+Tablet-Frames erzeugen. Könnten sie den Kanal füllen, ließe sich der
+Turnier-PC gezielt trennen und sein Platz besetzen (`host-ws` hat keine
+Anmeldung). Die Reserve gehört dem, was kein Tablet auslösen kann: Ergebnisse
+(höchstens 16 gleichzeitig offen), Befehle der Turnierleitung, Abrufe.
+
+Verworfene Tablet-Frames heilen: Punkt und Zustand durch den nächsten Frame,
+der Punktverlauf durch den nächsten kompletten Abgleich (spätestens am
+Spielende), die Anmeldung eines Tablets, sobald der Turnier-PC neu verbindet
+(der Relay nennt ihm dann alle verbundenen Tablets).
+
+`POST /{ns}/result` nimmt höchstens 16 KiB und zehn Sätze an (vorher 2 MiB
+je Ergebnis).
+
+**Bleibt offen:** Ein Monitor kann getrennt werden, wenn mehr als 32 Anstöße
+auflaufen, bevor seine Schleife sie abholt (er verbindet neu und holt den
+Stand). `identify`/`take_over` sind nicht getaktet. Es gibt kein Limit für
+die Zahl der Verbindungen (PR 6).
+
+**Im Relay-Log:** `Kanal voll – Tablet (Namespace '…') wird getrennt` (bzw.
+Monitor, Turnierleitungs-Seite, Turnier-PC, Träger, Substrom). Im
+Normalbetrieb darf die Zeile nicht auftreten; tritt sie (oder `Kanal knapp`)
+beim Turnier-PC auf, hängt dessen Leitung oder sein Rechner.
+
+## Bilder-Tor und Bilder-Budget (seit v0.9.387)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 6 ·
+ADR [0090](adr/0090-ueberlast-am-relay-und-mindestschutz.md).
+
+Werbebilder und Logo sind das Größte, was der Relay je Turnier hält (bis
+12 MiB + 2 MiB). Wer nur eine Turnier-Kennung erfindet, soll sie nicht
+ablegen können.
+
+| Lage bei `POST /{ns}/monitor` | Antwort | Wirkung |
+|---|---|---|
+| Kein Turnier-PC verbunden | `409` | der Rumpf wird **nicht gelesen** |
+| Schon zwei Uploads in Arbeit | `503` | der Rumpf wird nicht gelesen; die App versucht es erneut |
+| Turnier-PC verbunden | `200` | alles gilt |
+| Gesamt-Budget erschöpft | `507` | Konfiguration gilt, die neuen Bilder werden verworfen, **die bisherigen Bilder dieses Turniers bleiben**; Log-Zeile |
+
+- **Gesamt-Budget:** 256 MiB über alle Turniere. Der Zähler sinkt von selbst,
+  sobald ein Bild verschwindet (Ersetzen, Entfernen, Aufräumen des Turniers).
+  Gebucht wird je Upload ganz oder gar nicht; beim Ersetzen zählen die alten
+  Bilder des Turniers nicht mit.
+- **Höchstens zwei Uploads gleichzeitig:** Jeder hält vorübergehend rund
+  50 MiB. Die App wiederholt einen abgelehnten Upload von selbst (erste
+  Wiederholung nach etwa einer Minute, danach mit wachsender Pause).
+- **Texte der Konfiguration** (`layout`, Plätze vor/unter dem Namen, Farben
+  im Bild-Stil) sind auf 32 Zeichen gekürzt.
+- `POST /{ns}/monitor/control` antwortet ohne verbundenen Turnier-PC ebenfalls
+  `409`.
+
+**Was das Tor leistet — und was nicht.** Es hält Uploads ab, hinter denen gar
+kein Turnier-PC steht. Wer `host-ws` für eine erfundene Kennung öffnet (ohne
+Anmeldung möglich), kommt hindurch; rund 19 solcher Schein-Turniere füllen das
+Budget. Dann bekommen **neue** Turniere keine Bilder mehr (`507`) — laufende
+behalten ihre. Vorher traf derselbe Angriff den Speicher des ganzen Servers.
+Bilder eines Turniers ohne Turnier-PC verfallen erst mit dem Daten-Verfall
+(PR 8 der Spec).
+
+**Nicht gebaut:** die in der Spec vorgesehene zweite Stufe „Bilder erst nach
+der ersten Feldliste". Die App schickt ihre Feldliste nur, wenn BTP Felder
+liefert — ohne geladenes Turnier hätte die Cloud nie Werbung gezeigt.
+
+### Speicher-Obergrenze des Dienstes
+
+`ops/bts-relay.service` trägt `MemoryHigh=512M`, `MemoryMax=768M`,
+`MemorySwapMax=0`. Erreicht der Relay die Grenze, beendet ihn der Kernel und
+systemd startet ihn nach 3 s neu — das wirkt wie ein Deploy auf alle
+Turniere, schützt aber badhub.de auf demselben Server.
+
+**Die Dienst-Datei wird nicht automatisch ausgerollt.** Handgriff, einmalig
+und in einem Fenster ohne Turnier (der Neustart trennt alle Verbindungen):
+
+```
+# 1. Heutigen Verbrauch ablesen. Liegt er über 256 MiB, die Werte erst neu herleiten.
+systemctl status bts-relay
+# 2. Unit aus dem Repo auf den Server bringen und einsetzen.
+sudo cp ops/bts-relay.service /etc/systemd/system/
+# 3. Neu laden und neu starten.
+sudo systemctl daemon-reload && sudo systemctl restart bts-relay
+# 4. Prüfen.
+systemctl show bts-relay -p MemoryMax
+curl -s https://badhub.de/bts-relay/health
+```
+
+Zurück: die drei Zeilen entfernen, `daemon-reload`, Neustart.
+
+`ops/nginx-bts-relay.conf` nennt jetzt `client_max_body_size 25m;` — das gilt
+am Server bereits, dort ist nichts zu ändern.
+
 ## Sicherheit
 
+- **Datenschutz — was der Relay wie lange hält (seit v0.9.389):** Spielernamen,
+  Schiedsrichternamen, Freitext-Durchsagen und Bilder liegen nur im
+  Arbeitsspeicher, nie auf der Platte. Ohne Turnier-PC sind sie nach
+  spätestens 60 Minuten gelöscht, der Zugang zum Sprachdienst sofort
+  (Abschnitt „Lebensdauer der Turnierdaten"). **Ausnahme:** Der gespiegelte
+  Zustand eines Tablets, das noch am Feld verbunden ist, bleibt, solange es
+  verbunden ist — und er enthält die Namen und Karten **seines** Spiels. Ein
+  vergessenes, eingeschaltetes Tablet hält also die Daten eines Spiels, nicht
+  mehr die des Turniers. Ein Relay-Neustart leert alles.
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die
   heutige LAN-URL. Der Relay weist Namespaces ab, die nicht wie eine
   kanonische UUID aussehen.
@@ -1355,8 +1618,12 @@ die Zahl der Halter (64 je Namespace).
   Slot nur bei komplett geschlossener Master-Verbindung besetzen — jetzt
   reichen 15 s Master-Stille. Das ist der Preis des Zombie-Fixes und
   akzeptiert, weil (a) ein gesunder Master alle 5 s pongt und im Betrieb
-  praktisch nie 15 s stumm ist, (b) der echte Master beim Reconnect die
-  „Zweiter Host"-Warnung sieht (Übernahme fällt auf) und (c) bei
+  praktisch nie 15 s stumm ist, (b) der Relay die Abweisung des echten
+  Masters als „Zweiter Host … abgewiesen" protokolliert und ihm seit
+  v0.9.388 den Close-Grund `4409 host_belegt` nennt — **am Bildschirm des
+  Masters steht davon bis zum letzten Schritt der Spec `relay-haerten`
+  nichts** (die frühere Aussage „der Master sieht die Warnung" war falsch:
+  Sie stand nur im Relay-Log) — und (c) bei
   geleakter ID der Namespace ohnehin als kompromittiert gilt →
   Roadmap-Feature „Master-Identität umziehen" ist die eigentliche
   Gegenmaßnahme.
