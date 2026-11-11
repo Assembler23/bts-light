@@ -75,6 +75,18 @@ verloren**. Der Turnier-PC hält die Wahrheit; das neue Gerät kann nichts
 wegnehmen, was es nicht kennt. Ein Tablet, das offline war, bringt seinen
 Rückstand beim Wiederverbinden nach.
 
+### Verbindung weg, während eine Karte gezeigt wird
+
+Fällt die Verbindung zum Turnier-PC aus (auch nur die zwischen Turnier-PC und
+Internet, im Cloud-Betrieb), erfasst das Tablet weiter. Die Karte kommt nach,
+sobald die Verbindung wieder steht — spätestens mit dem Ergebnis: Das Tablet
+gleicht Zettel-Ereignisse und Punktverlauf unmittelbar vor dem Übermitteln und
+einmal danach komplett ab, und der Turnier-PC nimmt diesen Abgleich noch **zwei
+Minuten nach dem Spielende** an, selbst wenn auf dem Feld schon das nächste
+Spiel liegt (seit v0.9.375). Wer den Zettel in dieser Zeit schon gedruckt hat
+und eine Karte vermisst: noch einmal drucken. Technik:
+[punktverlauf.md](punktverlauf.md) („Nachzügler nach dem Spielende").
+
 ## Drucken
 
 **Am Turnier-PC:** In der Feldübersicht am belegten Feld und in der Liste der

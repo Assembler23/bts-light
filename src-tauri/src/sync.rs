@@ -1973,8 +1973,14 @@ impl SyncEngine {
         // matchId auf dasselbe Feld zurück); sonst verwürfe `handle_score` dessen
         // Punkte still bis zum TTL-Ablauf. Die TTL fängt nur Felder ab, die kein
         // neues Match bekommen (Tablet zeigt noch das fertige Spiel).
-        for &court_id in oncourt_now.keys() {
+        for (&court_id, &match_id) in &oncourt_now {
             tablet.clear_finalized(court_id);
+            // Dasselbe fürs Nachzügler-Fenster (Spec tablet-stand-robust,
+            // Regel D): Liegt das „eben beendete" Spiel laut BTP weiter
+            // oder wieder auf dem Feld, ist das Tablet wieder die Wahrheit.
+            // Die Karenz gegen den Poll, der das frische Ergebnis noch
+            // nicht kennt, sitzt in der Methode.
+            tablet.spiel_wieder_auf_dem_feld(court_id, match_id);
         }
         // Zuweisung beim Feld-Aufruf (ADR 0007, Scheibe 2): jedem belegten Feld
         // einen Bediener aus der Warteschlange zuordnen (idempotent je Spiel);

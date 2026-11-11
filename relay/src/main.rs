@@ -385,6 +385,13 @@ struct Namespace {
     /// steht (1. Aufruf). Wird beim ersten `MatchAssigned` eines neuen Matches
     /// gestempelt – Grundlage der Aufruf-Uhr am Cloud-Monitor.
     court_on_court_since: HashMap<i64, u64>,
+    /// CourtID → (Match-ID, Zeitpunkt) des Spiels, das zuletzt von diesem
+    /// Feld gegangen ist. Für [`VOR_MATCH_FENSTER`] reicht der Relay einen
+    /// **kompletten** Abgleich von Punktverlauf und Zettel-Ereignissen für
+    /// dieses Spiel noch an den Host durch (Spec tablet-stand-robust,
+    /// Regel D) — ob er ihn annimmt, entscheidet der Host. Nur die Match-ID,
+    /// kein Inhalt.
+    vor_match: HashMap<i64, (i64, std::time::Instant)>,
     /// CourtID → Feldname (Anzeige) – vom Host mit jedem `MatchAssigned`/
     /// `MatchCleared`-Frame mitgeliefert, für die Monitor-Anzeige.
     court_labels: HashMap<i64, String>,
@@ -604,6 +611,7 @@ impl Namespace {
             court_matches: HashMap::new(),
             court_scores: HashMap::new(),
             court_on_court_since: HashMap::new(),
+            vor_match: HashMap::new(),
             court_labels: HashMap::new(),
             court_hall: HashMap::new(),
             prepared: Vec::new(),
@@ -3876,6 +3884,28 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
 /// geleerten Cache nicht wieder befüllen (A4-Review-Befund). Gefahrlos,
 /// weil `MatchAssigned` den Cache füllt, BEVOR das Tablet die Zuweisung
 /// sieht — ein legitimes neues Match ist hier immer schon bekannt.
+/// Wie lange der Relay einen kompletten Abgleich für das Spiel durchreicht,
+/// das gerade vom Feld gegangen ist. Gleich lang wie das Fenster des Hosts
+/// (`NACHZUEGLER_FENSTER` in `tablet/state.rs`) — der Host prüft selbst
+/// noch einmal, der Relay bleibt Briefträger.
+const VOR_MATCH_FENSTER: Duration = Duration::from_secs(120);
+
+/// Darf ein **kompletter** Abgleich (`rally_sync`, `match_event_sync`) für
+/// `match_id` an den Host? Ja fürs Spiel auf dem Feld — und für das Spiel,
+/// das eben erst von diesem Feld gegangen ist: Der Abgleich reist über den
+/// WebSocket, das Ergebnis über HTTP, und nach einem Abriss kommt der
+/// Abgleich oft erst an, wenn der Host das Feld schon geräumt hat.
+/// Einzelne Ballwechsel und Einzel-Ereignisse fragen hier **nicht**.
+fn sync_darf_durch(namespace: &Namespace, court_id: i64, match_id: i64) -> bool {
+    if match_id_matches_court(namespace, court_id, match_id) {
+        return true;
+    }
+    matches!(
+        namespace.vor_match.get(&court_id),
+        Some((mid, seit)) if *mid == match_id && seit.elapsed() < VOR_MATCH_FENSTER
+    )
+}
+
 fn match_id_matches_court(namespace: &Namespace, court_id: i64, match_id: i64) -> bool {
     if match_id == 0 {
         return true;
@@ -4078,7 +4108,7 @@ async fn forward_match_event_sync(
     if !is_holder(namespace, court_id, tx) {
         return;
     }
-    if !match_id_matches_court(namespace, court_id, match_id) {
+    if !sync_darf_durch(namespace, court_id, match_id) {
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
@@ -4117,7 +4147,7 @@ async fn forward_rally_sync(
     if !is_holder(namespace, court_id, tx) {
         return;
     }
-    if !match_id_matches_court(namespace, court_id, match_id) {
+    if !sync_darf_durch(namespace, court_id, match_id) {
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
@@ -5389,6 +5419,16 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // zurücksetzen. Ein erneutes `MatchAssigned` fürs selbe Match
             // (z. B. nach einem kurzen Tablet-Reconnect) darf den Monitor
             // nicht auf 0:0 zurückwerfen.
+            // Geht hier ein anderes Spiel vom Feld, bekommt es das
+            // Nachzügler-Fenster (Regel D der Spec tablet-stand-robust).
+            if let Some(alt) = vorher_brief
+                .as_ref()
+                .filter(|b| b.match_id != match_brief.match_id)
+            {
+                namespace
+                    .vor_match
+                    .insert(court_id, (alt.match_id, std::time::Instant::now()));
+            }
             let same_match = namespace
                 .court_matches
                 .get(&court_id)
@@ -5468,7 +5508,14 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 namespace.court_labels.insert(court_id, court_label);
             }
             namespace.court_hall.insert(court_id, hall);
-            let war_belegt = namespace.court_matches.remove(&court_id).is_some();
+            let geraeumt = namespace.court_matches.remove(&court_id);
+            // Das geräumte Spiel bekommt das Nachzügler-Fenster (Regel D).
+            if let Some(alt) = geraeumt.as_ref() {
+                namespace
+                    .vor_match
+                    .insert(court_id, (alt.match_id, std::time::Instant::now()));
+            }
+            let war_belegt = geraeumt.is_some();
             namespace.court_scores.remove(&court_id);
             namespace.clear_court_state(court_id);
             namespace.court_on_court_since.remove(&court_id);
@@ -10485,6 +10532,191 @@ mod tests {
         };
         forward_rally_sync(&broker, "ns1", 101, 9, zu_lang, &tablet_tx).await;
         assert!(host_rx.try_recv().is_err(), "überlanger Sync verworfen");
+    }
+
+    /// Spec tablet-stand-robust, Regel D: Der komplette Abgleich für das
+    /// Spiel, das eben vom Feld ging, kommt noch durch — auch wenn das Feld
+    /// schon neu belegt ist. Einzelne Ballwechsel und Einzel-Ereignisse
+    /// nicht, ein fremdes Spiel nicht, und nach dem Fenster nichts mehr.
+    #[tokio::test]
+    async fn relay_reicht_sync_fuers_vormatch_im_fenster_durch() {
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx.clone());
+            ns.tablets.insert(101, tablet_tx.clone());
+            ns.court_matches.insert(101, brief(7));
+        }
+        let verlauf = || relay_proto::MatchTimeline {
+            sets: vec![relay_proto::TimelineSet {
+                start_a: 0,
+                start_b: 0,
+                points: "AAB".into(),
+            }],
+            finished: true,
+            ..Default::default()
+        };
+        let karte = || relay_proto::MatchEvent {
+            id: "ff01".into(),
+            seq: 1,
+            set: 1,
+            after_n: 2,
+            score_a: 2,
+            score_b: 0,
+            ts_ms: 1_755_600_000_000,
+            kind: relay_proto::EventKind::CardYellow,
+            team: 1,
+            player: 0,
+            receiver_team: 0,
+            receiver_player: 0,
+            phase: relay_proto::Phase::Play,
+            retracts: String::new(),
+        };
+
+        // Der Host räumt das Feld (Ergebnis ist da).
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchCleared {
+                court_id: 101,
+                court_label: String::new(),
+                hall: String::new(),
+            },
+            &host_tx,
+        )
+        .await;
+        while host_rx.try_recv().is_ok() {}
+        let frame = |m: Message| -> RelayFrame {
+            match m {
+                Message::Text(s) => serde_json::from_str(&s).expect("RelayFrame"),
+                anderes => panic!("kein Text-Frame: {anderes:?}"),
+            }
+        };
+
+        forward_rally_sync(&broker, "ns1", 101, 7, verlauf(), &tablet_tx).await;
+        assert!(
+            matches!(
+                frame(host_rx.try_recv().expect("Verlauf des Vor-Spiels")),
+                RelayFrame::RallySync { match_id: 7, .. }
+            ),
+            "kompletter Verlauf kommt durch"
+        );
+        forward_match_event_sync(&broker, "ns1", 101, 7, vec![karte()], &tablet_tx).await;
+        assert!(
+            matches!(
+                frame(host_rx.try_recv().expect("Ereignisse des Vor-Spiels")),
+                RelayFrame::MatchEventSync { match_id: 7, .. }
+            ),
+            "kompletter Ereignis-Abgleich kommt durch"
+        );
+
+        // Einzel-Frames bekommen das Fenster nicht.
+        forward_rally(&broker, "ns1", 101, 7, 1, 4, "A".into(), 3, 1, &tablet_tx).await;
+        forward_match_event(&broker, "ns1", 101, 7, karte(), &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_err(),
+            "Einzel-Frames bleiben verworfen"
+        );
+
+        // Ein fremdes Spiel auch nicht.
+        forward_rally_sync(&broker, "ns1", 101, 8, verlauf(), &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "fremdes Spiel verworfen");
+
+        // Neu belegtes Feld: Das Fenster des Vor-Spiels bleibt offen.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+                match_brief: brief(9),
+                on_court_since_ms: None,
+            },
+            &host_tx,
+        )
+        .await;
+        while host_rx.try_recv().is_ok() {}
+        forward_rally_sync(&broker, "ns1", 101, 7, verlauf(), &tablet_tx).await;
+        assert!(host_rx.try_recv().is_ok(), "auch bei neu belegtem Feld");
+
+        // Wechselt das Feld direkt von 9 auf 10, ist 9 das Vor-Spiel —
+        // und 7 ist draußen.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::MatchAssigned {
+                court_id: 101,
+                court_label: "Feld 1".into(),
+                hall: String::new(),
+                match_brief: brief(10),
+                on_court_since_ms: None,
+            },
+            &host_tx,
+        )
+        .await;
+        while host_rx.try_recv().is_ok() {}
+        forward_rally_sync(&broker, "ns1", 101, 9, verlauf(), &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_ok(),
+            "direkter Wechsel merkt das Vor-Spiel"
+        );
+        forward_rally_sync(&broker, "ns1", 101, 7, verlauf(), &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_err(),
+            "das vorletzte Spiel ist draußen"
+        );
+
+        // Fenster abgelaufen → verworfen.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let alt = std::time::Instant::now()
+                .checked_sub(VOR_MATCH_FENSTER + Duration::from_secs(1))
+                .expect("Instant weit genug in der Vergangenheit");
+            map.get_mut("ns1").unwrap().vor_match.insert(101, (9, alt));
+        }
+        forward_rally_sync(&broker, "ns1", 101, 9, verlauf(), &tablet_tx).await;
+        forward_match_event_sync(&broker, "ns1", 101, 9, vec![karte()], &tablet_tx).await;
+        assert!(host_rx.try_recv().is_err(), "nach dem Fenster verworfen");
+    }
+
+    /// Ein erneutes `MatchAssigned` fürs SELBE Spiel (Reconnect,
+    /// SR-Umbesetzung) verschiebt das Vor-Spiel nicht.
+    #[tokio::test]
+    async fn gleiches_match_erneut_zugewiesen_laesst_vormatch_stehen() {
+        let broker = Broker::new("x".into());
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx.clone());
+            ns.court_matches.insert(101, brief(7));
+        }
+        for id in [9, 9] {
+            handle_host_frame(
+                &broker,
+                "ns1",
+                HostFrame::MatchAssigned {
+                    court_id: 101,
+                    court_label: "Feld 1".into(),
+                    hall: String::new(),
+                    match_brief: brief(id),
+                    on_court_since_ms: None,
+                },
+                &host_tx,
+            )
+            .await;
+        }
+        assert_eq!(
+            broker.namespaces.lock().await["ns1"]
+                .vor_match
+                .get(&101)
+                .map(|v| v.0),
+            Some(7)
+        );
     }
 
     #[tokio::test]

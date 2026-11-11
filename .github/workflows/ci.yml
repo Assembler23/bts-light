@@ -302,6 +302,12 @@ jobs:
       - name: Ergebnis-Retry-Regel (JS)
         run: node scripts/test-result-retry.mjs
 
+      # Wann schickt das Tablet Verlauf und Zettel-Ereignisse komplett?
+      # Rutscht ein Abgleich hinter das Ergebnis oder hinter den
+      # Finalisiert-Ruecksprung, fehlt spaeter eine Karte auf dem Zettel.
+      - name: Verlaufs-Abgleich am Tablet (JS)
+        run: node scripts/test-verlauf-sync.mjs
+
       # Schlankes Undo-Format des Tablets (Spec tablet-stand-robust,
       # ADR 0084) — ein falscher Schnitt stellte nach „zurueck" einen
       # falschen Punktverlauf wieder her; faellt erst beim Geraetewechsel auf.

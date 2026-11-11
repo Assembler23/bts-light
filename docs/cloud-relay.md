@@ -183,6 +183,21 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    läuft als `scoresheet_request`/`scoresheet_data` über die host-ws; der
    Relay hält auch **keine Zettel** vor.
 
+   **Vor-Match-Fenster** (seit v0.9.375, Spec
+   [tablet-stand-robust](features/tablet-stand-robust.md), Regel D): Die
+   beiden **kompletten** Abgleiche `rally_sync` und `match_event_sync`
+   reicht der Relay nicht nur fürs Spiel auf dem Feld durch, sondern noch
+   **120 s** lang auch für das Spiel, das zuletzt von diesem Feld gegangen
+   ist (`MatchCleared` oder `MatchAssigned` mit anderer Match-ID;
+   `Namespace.vor_match`, `sync_darf_durch`). Grund: Der Abgleich reist
+   über den WebSocket, das Ergebnis über HTTP — nach einem Abriss kommt
+   der Abgleich oft erst an, wenn der Host das Feld schon geräumt hat.
+   Gemerkt wird nur die Match-ID, kein Inhalt; ob der Abgleich gilt,
+   entscheidet weiter allein der Host (eigenes 120-s-Fenster, nur
+   ergänzend). Einzelne `rally`- und `match_event`-Frames bekommen das
+   Fenster **nicht**. Ein alter Relay verwirft den Nachzügler wie bisher —
+   deshalb Relay vor App (der main-Merge deployt ihn sofort).
+
    Der Relay prüft dabei **eigene** Deckel, nicht die des Punktverlaufs:
    `match_events_valid` (Zahl, `MAX_EVENTS_PER_MATCH`) und `MAX_SHEET_LEN`
    (Größe). Halter- und Stale-Filter sind dieselben wie beim Rally — bei

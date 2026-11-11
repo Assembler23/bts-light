@@ -1774,44 +1774,7 @@ function connect() {
       return;
     }
     if (msg.type === 'match_assigned') {
-      const incomingFinalized = !!(msg.match && msg.match.finalized);
-      tlog('info', 'match_assigned', { matchId: msg.match?.matchId, finalized: incomingFinalized });
-      // Feld erfolgreich (zurück-)belegt → etwaigen Retry stoppen.
-      clearReidentify();
-      STATE.occupied = false;
-      loadMatch(msg.match);
-      // Fähigkeit des Hosts frisch aus jedem Frame — auch bei demselben
-      // Match, sonst bliebe nach einem App-Update der alte Wert stehen.
-      STATE.hostKannBerichtigung = !!(msg.match && msg.match.teamsCorrection);
-      // Aufruf-Stempel sofort holen, statt bis zu 30 s auf den nächsten
-      // Uhr-Abgleich zu warten — die Aufruf-Uhr soll mit der Seitenwahl
-      // da sein, nicht erst mittendrin. Bis zu fünf Nachfragen im 3-s-
-      // Abstand, falls der Server das neue Spiel noch nicht meldet.
-      healthNachfragenRest = 5;
-      syncServerClock();
-      // A2 / ADR 0017, Regel b (Finalisiert-Gate): Der MatchBrief trägt die
-      // BTP-Wahrheit. Ist das Match finalisiert, tritt das Tablet zurück und
-      // pusht nichts mehr (unten in sendScoreUpdate/persistState/submit
-      // gegated). `loadMatch` hat bei einem NEUEN Match STATE.finalized bereits
-      // zurückgesetzt — hier setzen wir es autoritativ aus dem Frame, so dass
-      // auch der Übergang OnCourt→Finished (gleiche matchId) greift und ein
-      // neues, nicht-finalisiertes Match das Gate wieder aufhebt.
-      STATE.finalized = incomingFinalized;
-      if (STATE.finalized) {
-        tlog('info', 'match_finalized_stand_down', { matchId: msg.match?.matchId });
-        // Ein noch offener Auftrag für dieses Match ist damit erledigt —
-        // BTP hat ein Ergebnis, egal ob unseres oder ein von Hand
-        // eingetragenes. Stehen bliebe er sonst bis zum nächsten Match.
-        sendeauftragBeiFinalisierungLoslassen();
-        render();
-        return;
-      }
-      // Nach einer Wieder-Anmeldung den lokalen Stand re-pushen: Bei
-      // demselben Match ist loadMatch ein No-Op (Stand bleibt), der Server
-      // hat nach einem Reconnect aber evtl. nur 0:0 – sendScoreUpdate bringt
-      // ihn (und damit TV + Liveticker) sofort auf den Tablet-Stand.
-      sendScoreUpdate();
-      persistState();
+      beiMatchAssigned(msg);
     }
     else if (msg.type === 'reload') {
       // Fernbefehl aus der Turnierleitung. Anders als der stille Abgleich
@@ -2979,6 +2942,75 @@ function restorePersistedState() {
     applyPersistedState(p);
     return true;
   } catch { return false; }
+}
+
+/** Der Turnier-PC weist diesem Feld ein Spiel zu (oder bestätigt es nach
+ *  einer Wieder-Anmeldung). Eigene Funktion, damit
+ *  `scripts/test-verlauf-sync.mjs` die Reihenfolge der Meldungen am echten
+ *  Code prüfen kann. */
+function beiMatchAssigned(msg) {
+  const incomingFinalized = !!(msg.match && msg.match.finalized);
+  tlog('info', 'match_assigned', { matchId: msg.match?.matchId, finalized: incomingFinalized });
+  // Feld erfolgreich (zurück-)belegt → etwaigen Retry stoppen.
+  clearReidentify();
+  STATE.occupied = false;
+  // Liegt genau dieses Spiel hier schon geladen? Dann trägt das Tablet
+  // womöglich Verlauf und Karten, die der Host nicht hat (siehe unten).
+  const selbesSpiel = !!(STATE.match && msg.match && STATE.match.matchId === msg.match.matchId);
+  // Kommt ein ANDERES Spiel, wirft `loadMatch` den Stand des alten weg.
+  // Vorher ein letzter Abgleich unter der ALTEN Kennung: Ein Tablet, das
+  // das Spielende verschlafen hat (Doze, Funkloch), trägt womöglich
+  // Ballwechsel und Karten, die der Host nie bekam. Er nimmt sie nur im
+  // 120-s-Fenster und nur als Ergänzung an; sonst verfällt der Abgleich.
+  if (!selbesSpiel && STATE.match) {
+    sendRallySync();
+    sendMatchEventSync();
+  }
+  loadMatch(msg.match);
+  // Fähigkeit des Hosts frisch aus jedem Frame — auch bei demselben
+  // Match, sonst bliebe nach einem App-Update der alte Wert stehen.
+  STATE.hostKannBerichtigung = !!(msg.match && msg.match.teamsCorrection);
+  // Aufruf-Stempel sofort holen, statt bis zu 30 s auf den nächsten
+  // Uhr-Abgleich zu warten — die Aufruf-Uhr soll mit der Seitenwahl
+  // da sein, nicht erst mittendrin. Bis zu fünf Nachfragen im 3-s-
+  // Abstand, falls der Server das neue Spiel noch nicht meldet.
+  healthNachfragenRest = 5;
+  syncServerClock();
+  // A2 / ADR 0017, Regel b (Finalisiert-Gate): Der MatchBrief trägt die
+  // BTP-Wahrheit. Ist das Match finalisiert, tritt das Tablet zurück und
+  // pusht nichts mehr (unten in sendScoreUpdate/persistState/submit
+  // gegated). `loadMatch` hat bei einem NEUEN Match STATE.finalized bereits
+  // zurückgesetzt — hier setzen wir es autoritativ aus dem Frame, so dass
+  // auch der Übergang OnCourt→Finished (gleiche matchId) greift und ein
+  // neues, nicht-finalisiertes Match das Gate wieder aufhebt.
+  STATE.finalized = incomingFinalized;
+  // Verlauf und Zettel-Ereignisse komplett nachziehen (Spec
+  // tablet-stand-robust, Regel D). `match_assigned` ist der Moment, in dem
+  // der Host das Spiel sicher kennt: Nach einem Neustart des Turnier-PCs
+  // verwirft er den Abgleich aus `onopen` (er hat noch keinen BTP-Stand),
+  // und nach einem Abriss Turnier-PC↔Relay schickt er das Spiel neu, ohne
+  // dass dieses Tablet je getrennt war. BEWUSST vor dem Finalisiert-
+  // Rücksprung: Auch ein von Hand beendetes Spiel soll seinen Verlauf
+  // behalten — der Host nimmt den Abgleich dann als Nachzügler.
+  if (selbesSpiel) {
+    sendRallySync();
+    sendMatchEventSync();
+  }
+  if (STATE.finalized) {
+    tlog('info', 'match_finalized_stand_down', { matchId: msg.match?.matchId });
+    // Ein noch offener Auftrag für dieses Match ist damit erledigt —
+    // BTP hat ein Ergebnis, egal ob unseres oder ein von Hand
+    // eingetragenes. Stehen bliebe er sonst bis zum nächsten Match.
+    sendeauftragBeiFinalisierungLoslassen();
+    render();
+    return;
+  }
+  // Nach einer Wieder-Anmeldung den lokalen Stand re-pushen: Bei
+  // demselben Match ist loadMatch ein No-Op (Stand bleibt), der Server
+  // hat nach einem Reconnect aber evtl. nur 0:0 – sendScoreUpdate bringt
+  // ihn (und damit TV + Liveticker) sofort auf den Tablet-Stand.
+  sendScoreUpdate();
+  persistState();
 }
 
 function loadMatch(match) {
@@ -4609,6 +4641,13 @@ function submit() {
   tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets, retired: STATE.retired, walkover: STATE.walkover, cascade: STATE.cascadeWalkover });
   persistState();
   render();
+  // Verlauf und Zettel-Ereignisse VOR dem Ergebnis komplett abgleichen
+  // (Spec tablet-stand-robust, Regel D): Der Zettel wird aus dem gebaut,
+  // was der Host beim Ergebnis kennt. Der Abgleich reist über den
+  // WebSocket, das Ergebnis über HTTP — überholt es ihn, nimmt der Host
+  // den Abgleich noch 120 s lang als Nachzügler an.
+  sendRallySync();
+  sendMatchEventSync();
   trySubmitPending();
 }
 
@@ -4782,6 +4821,14 @@ async function trySubmitPending() {
     tlog('info', 'submit_ok', { matchId: pr.matchId });
     persistState();
     render();
+    // Einmal hinterher (Regel D): War der WebSocket beim Tipp auf
+    // „übermitteln" gerade getrennt, ging der Abgleich davor ins Leere —
+    // das Ergebnis kam trotzdem an (HTTP, wiederholt). Der Host nimmt den
+    // Nachzügler an, ohne den Abschluss aufzuheben.
+    if (STATE.match && STATE.match.matchId === pr.matchId) {
+      sendRallySync();
+      sendMatchEventSync();
+    }
   } catch (err) {
     // Losgelassener oder ersetzter Auftrag: nichts neu planen — der neue
     // Auftrag hat seinen eigenen Lauf, der alte ist erledigt.

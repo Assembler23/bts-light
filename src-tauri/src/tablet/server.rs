@@ -3594,6 +3594,10 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
     match write_result_settled(&ctx.config, &ctx.tablet, &update).await {
         Ok(()) => {
             ctx.tablet.clear_court(body.court_id);
+            // Ab jetzt läuft das Nachzügler-Fenster: Der Abgleich von Verlauf
+            // und Zettel reist über den WebSocket und kann hinter diesem
+            // Ergebnis ankommen (Spec tablet-stand-robust, Regel D).
+            ctx.tablet.merke_beendet(body.court_id, m.id);
             tracing::info!("BTP-Schreiben OK: Match {} (Feld freigegeben)", m.id);
             // Nach einer Aufgabe NUR dann einen Walkover-Vorschlag für die
             // restlichen Spiele der Disziplin hinterlegen, wenn das Tablet das
@@ -4461,10 +4465,12 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             }
                             Ok(TabletMsg::RallySync { match_id, timeline }) => {
                                 if let (Some(c), Some(t)) = (court, my_token) {
-                                    if ctx.tablet.is_court_active(c, t)
-                                        && ctx.tablet.match_for_court(c).is_some_and(|m| m.id == match_id)
-                                    {
-                                        ctx.tablet.timeline_store().apply_sync(match_id, timeline);
+                                    // Komplette Abgleiche gelten auch noch kurz
+                                    // nach dem Spielende (Regel D der Spec
+                                    // tablet-stand-robust) — das entscheidet
+                                    // `verlauf_sync_annehmen`.
+                                    if ctx.tablet.is_court_active(c, t) {
+                                        ctx.tablet.verlauf_sync_annehmen(c, match_id, timeline);
                                     }
                                 }
                             }
@@ -4486,10 +4492,8 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             }
                             Ok(TabletMsg::MatchEventSync { match_id, events }) => {
                                 if let (Some(c), Some(t)) = (court, my_token) {
-                                    if ctx.tablet.is_court_active(c, t)
-                                        && ctx.tablet.match_for_court(c).is_some_and(|m| m.id == match_id)
-                                    {
-                                        ctx.tablet.sheet_store().apply_event_sync(match_id, events);
+                                    if ctx.tablet.is_court_active(c, t) {
+                                        ctx.tablet.ereignis_sync_annehmen(c, match_id, events);
                                     }
                                 }
                             }

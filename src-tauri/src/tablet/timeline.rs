@@ -205,7 +205,32 @@ impl TimelineStore {
     /// Detail erhalten — Ersetzen hieße, echte Ballwechsel gegen
     /// Platzhalter zu tauschen. Der letzte (laufende) Satz wird nie
     /// gemischt, sonst risse die Rally-Nummerierung des Tablets ab.
-    pub fn apply_sync(&self, match_id: i64, mut timeline: MatchTimeline) -> bool {
+    pub fn apply_sync(&self, match_id: i64, timeline: MatchTimeline) -> bool {
+        self.ersetze(match_id, timeline, false)
+    }
+
+    /// Kompletter Resync für ein **gerade beendetes** Spiel (Spec
+    /// tablet-stand-robust, Regel D; ADR 0085): Der Abgleich des Tablets
+    /// kam hinter dem Ergebnis an. Er darf den Verlauf **ergänzen**, mehr
+    /// nicht:
+    ///
+    /// - `finished` bleibt gesetzt, `retired` bleibt erhalten — das
+    ///   Ergebnis steht in BTP.
+    /// - Angenommen wird nur eine **Ergänzung** ([`ergaenzt`]): Was der
+    ///   Host schon hat, muss unverändert der Anfang bleiben. So kommt
+    ///   „Wieder öffnen" am Tablet (ein Punkt zurück, `finished` weg) hier
+    ///   nicht durch, und ein anders gezählter oder gedrehter Verlauf auch
+    ///   nicht: Das Ergebnis steht in BTP, der Verlauf darf ihm nicht
+    ///   nachträglich widersprechen.
+    /// - `retired` kommt aus dem Bestand, nicht aus dem Abgleich.
+    ///
+    /// Ob das Fenster noch offen ist, entscheidet der Aufrufer
+    /// (`TabletState::sync_ziel`).
+    pub fn apply_nachzuegler(&self, match_id: i64, timeline: MatchTimeline) -> bool {
+        self.ersetze(match_id, timeline, true)
+    }
+
+    fn ersetze(&self, match_id: i64, mut timeline: MatchTimeline, nachzuegler: bool) -> bool {
         if match_id <= 0 || !timeline.is_valid() {
             return false;
         }
@@ -231,6 +256,26 @@ impl TimelineStore {
                     timeline.sets[i] = alt_set.clone();
                 }
             }
+            if nachzuegler {
+                // Erst NACH dem Mischen vergleichen — sonst scheiterte ein
+                // Ersatzgerät, das frühere Sätze nur als Endstand kennt.
+                if !ergaenzt(alt, &timeline) {
+                    return false;
+                }
+                // Die Aufgabe steht mit dem Ergebnis fest — der Nachzügler
+                // kann sie weder aufheben noch nachträglich setzen.
+                timeline.retired = alt.retired;
+            }
+        }
+        if nachzuegler {
+            timeline.finished = true;
+        }
+        // Nichts Neues → kein Schreibvorgang. Seit Regel D kommt derselbe
+        // Stand mehrfach (vor und nach dem Ergebnis, bei jedem
+        // `match_assigned`); ohne diese Abkürzung schriebe jeder davon die
+        // Datei sofort neu — und ein Gerät im Dauerfeuer ebenso.
+        if inner.file.matches.get(&match_id) == Some(&timeline) {
+            return true;
         }
         inner.file.matches.insert(match_id, timeline);
         inner.dirty = true;
@@ -409,6 +454,27 @@ pub(super) fn today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// Ist `neu` eine reine **Ergänzung** von `alt`? Maßstab der Nachzügler
+/// ([`TimelineStore::apply_nachzuegler`]): Jeder vorhandene Satz muss in
+/// `neu` wiederkehren — mit demselben Startstand und der vorhandenen
+/// Punktfolge als Anfang. Kürzer, gedreht (Mannschaften getauscht) oder
+/// anders gezählt ist keine Ergänzung. Einzige Ausnahme: Ein Satz, den der
+/// Bestand nur als Endstand kennt (leere Punktfolge), darf durch seine
+/// Ballwechsel ersetzt werden, wenn sie auf genau diesen Endstand führen.
+fn ergaenzt(alt: &MatchTimeline, neu: &MatchTimeline) -> bool {
+    if neu.sets.len() < alt.sets.len() {
+        return false;
+    }
+    alt.sets.iter().zip(&neu.sets).all(|(a, n)| {
+        let gleicher_anfang =
+            a.start_a == n.start_a && a.start_b == n.start_b && n.points.starts_with(&a.points);
+        let end_a = n.start_a + n.points.chars().filter(|&c| c == 'A').count() as i64;
+        let end_b = n.start_b + n.points.chars().filter(|&c| c == 'B').count() as i64;
+        let nur_endstand = a.points.is_empty() && a.start_a == end_a && a.start_b == end_b;
+        gleicher_anfang || nur_endstand
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,6 +550,129 @@ mod tests {
         assert_eq!(store.timeline(5).unwrap().sets[0].points, "AA");
         // Danach zählt es lückenlos weiter (n = 3).
         assert!(store.apply_rally(5, 1, 3, "B", 2, 1));
+    }
+
+    /// Regel D: Der Abgleich hinter dem Ergebnis ergänzt den Verlauf, hebt
+    /// aber weder den Abschluss noch die Aufgabe auf.
+    #[test]
+    fn nachzuegler_haelt_finished_und_retired() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_dir(dir.path());
+        // Der Host kennt nur zwei Punkte — der dritte fiel in die Lücke.
+        let mut luecke = sync_beispiel();
+        luecke.sets[0].points = "AA".to_string();
+        assert!(store.apply_sync(5, luecke));
+        store.finalize(5, true);
+
+        // Das Tablet schickt den vollen Verlauf, ohne die Marken.
+        assert!(store.apply_nachzuegler(5, sync_beispiel()));
+        let tl = store.timeline(5).unwrap();
+        assert_eq!(tl.sets[0].points, "AAB", "die Lücke ist geheilt");
+        assert!(tl.finished && tl.retired, "Abschluss und Aufgabe bleiben");
+        assert!(
+            !store.apply_rally(5, 1, 4, "A", 3, 1),
+            "weiter abgeschlossen"
+        );
+    }
+
+    /// „Wieder öffnen" nach dem Ergebnis schickt einen Punkt weniger —
+    /// als Nachzügler darf das den abgeschlossenen Verlauf nicht kürzen.
+    #[test]
+    fn nachzuegler_kuerzt_nie() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_dir(dir.path());
+        assert!(store.apply_sync(5, sync_beispiel()));
+        store.finalize(5, false);
+        let mut kurz = sync_beispiel();
+        kurz.sets[0].points = "AA".to_string();
+        assert!(!store.apply_nachzuegler(5, kurz));
+        let tl = store.timeline(5).unwrap();
+        assert_eq!(tl.sets[0].points, "AAB");
+        assert!(tl.finished);
+        // Derselbe Stand noch einmal ist dagegen in Ordnung (idempotent).
+        assert!(store.apply_nachzuegler(5, sync_beispiel()));
+        // Eine Aufgabe lässt sich nicht nachträglich hineinschreiben.
+        let mut aufgabe = sync_beispiel();
+        aufgabe.retired = true;
+        assert!(store.apply_nachzuegler(5, aufgabe));
+        assert!(!store.timeline(5).unwrap().retired);
+    }
+
+    /// Gleich lang, aber anders (Mannschaften getauscht, anderer Punkt nach
+    /// „Wieder öffnen") ist keine Ergänzung.
+    #[test]
+    fn nachzuegler_schreibt_nie_um() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_dir(dir.path());
+        assert!(store.apply_sync(5, sync_beispiel()));
+        store.finalize(5, false);
+        for punkte in ["BBA", "AAA", "ABAB"] {
+            let mut anders = sync_beispiel();
+            anders.sets[0].points = punkte.to_string();
+            assert!(!store.apply_nachzuegler(5, anders), "{punkte}");
+        }
+        let mut versetzt = sync_beispiel();
+        versetzt.sets[0].start_a = 1;
+        assert!(!store.apply_nachzuegler(5, versetzt), "anderer Startstand");
+        assert_eq!(store.timeline(5).unwrap().sets[0].points, "AAB");
+        // Ein Satz, den der Bestand nur als Endstand kennt, darf seine
+        // Ballwechsel bekommen — wenn sie auf diesen Endstand führen.
+        let endstand = |a: i64, b: i64| MatchTimeline {
+            sets: vec![TimelineSet {
+                start_a: a,
+                start_b: b,
+                points: String::new(),
+            }],
+            ..MatchTimeline::default()
+        };
+        assert!(store.apply_sync(6, endstand(2, 1)));
+        store.finalize(6, false);
+        let mut falsch = sync_beispiel();
+        falsch.sets[0].points = "ABB".to_string();
+        assert!(
+            !store.apply_nachzuegler(6, falsch),
+            "führt auf 1:2, nicht 2:1"
+        );
+        assert!(store.apply_nachzuegler(6, sync_beispiel()));
+        assert_eq!(store.timeline(6).unwrap().sets[0].points, "AAB");
+    }
+
+    /// Ein Ersatzgerät kennt frühere Sätze nur als Endstand. Sein
+    /// Nachzügler verliert deshalb nicht gegen den detaillierten Stand —
+    /// verglichen wird erst nach dem Mischen (AK-12 bleibt gewahrt).
+    #[test]
+    fn nachzuegler_mit_platzhalter_satz_behaelt_detail() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_dir(dir.path());
+        let satz = |a: i64, b: i64, p: &str| TimelineSet {
+            start_a: a,
+            start_b: b,
+            points: p.to_string(),
+        };
+        let alt = MatchTimeline {
+            sets: vec![satz(0, 0, "AAB"), satz(0, 0, "A")],
+            ..MatchTimeline::default()
+        };
+        assert!(store.apply_sync(5, alt));
+        store.finalize(5, false);
+        let neu = MatchTimeline {
+            sets: vec![satz(2, 1, ""), satz(0, 0, "AB")],
+            ..MatchTimeline::default()
+        };
+        assert!(store.apply_nachzuegler(5, neu));
+        let tl = store.timeline(5).unwrap();
+        assert_eq!(tl.sets[0].points, "AAB", "Detail des ersten Satzes bleibt");
+        assert_eq!(tl.sets[1].points, "AB");
+    }
+
+    /// Ohne jeden Verlauf beim Host (alles fiel in die Lücke) entsteht der
+    /// Eintrag aus dem Nachzügler — gleich als abgeschlossen.
+    #[test]
+    fn nachzuegler_ohne_bestand_legt_abgeschlossen_an() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store_mit_dir(dir.path());
+        assert!(store.apply_nachzuegler(5, sync_beispiel()));
+        assert!(store.timeline(5).unwrap().finished);
     }
 
     #[test]
