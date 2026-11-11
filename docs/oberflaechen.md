@@ -61,6 +61,15 @@ und die Feldvergabe hängen nicht am Internet.
 
 <!-- pruef: "Übertragung an badhub ausgefallen" in src-tauri/src/commands.rs -->
 <!-- pruef: "Internet-Strecke gestört — Halle läuft weiter" in src-tauri/src/commands.rs -->
+
+Steht oben in der App ein roter Balken mit **Ein anderer PC ist mit diesem
+Turnier verbunden**, läuft die Übertragung desselben Turniers gerade auf
+einem zweiten PC. Die Cloud lässt nur einen zu: Tablets und Monitore, die
+über die Cloud laufen, erreichen dann den anderen PC, nicht diesen. Die
+Übertragung am anderen PC stoppen — der Balken verschwindet nach wenigen
+Sekunden von selbst. Er erscheint erst, wenn die Lage länger als 30 Sekunden
+anhält.
+<!-- pruef: "Ein anderer PC ist mit diesem Turnier verbunden" in src-tauri/src/tablet/ws_verbindung.rs -->
 <!-- pruef: "badhub hat die Anmeldung vorübergehend gesperrt" in src-tauri/src/commands.rs -->
 <!-- pruef: "Übertragung an badhub angehalten: Passwort prüfen" in src-tauri/src/commands.rs -->
 <!-- pruef: "Der Server verlangt eine eigene Anmeldung" in src-tauri/src/commands.rs -->

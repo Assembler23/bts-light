@@ -1087,6 +1087,11 @@ export interface TabletInfo {
   /** Ist der Cloud-Pfad aktiv? */
   cloud_enabled: boolean;
   courts: CourtOverview[];
+  /**
+   * Hinweis zur Cloud-Verbindung: gesetzt, wenn der Relay diesen PC seit
+   * über 30 s abweist, weil ein anderer PC dasselbe Turnier hält.
+   */
+  cloud_hinweis?: string | null;
 }
 
 /** Ein kampflos wertbares Spiel (Rust: tablet::state::WalkoverCandidate). */

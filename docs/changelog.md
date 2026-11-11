@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.390
+
+- **Das Dashboard sagt, wenn ein anderer PC dasselbe Turnier in der Cloud
+  hält.** Läuft die Übertragung desselben Turniers versehentlich auf zwei
+  PCs, bekam der zweite bisher keine Cloud-Verbindung — und nichts wies
+  darauf hin. Jetzt erscheint oben in der App **„Ein anderer PC ist mit
+  diesem Turnier verbunden"**, sobald das länger als 30 Sekunden so ist.
+  Braucht den Relay ab v0.9.388.
+- Lehnt der Relay den Upload der Werbebilder kurz ab (er ist beschäftigt
+  oder hat den Turnier-PC noch nicht eingetragen), versucht die App es nach
+  3 Sekunden erneut statt erst nach rund einer Minute.
+- Damit ist die Spec `relay-haerten` umgesetzt (neunter und letzter
+  Schritt).
+
 ## v0.9.389
 
 - **Der Cloud-Relay vergisst ein Turnier, wenn der Turnier-PC lange weg

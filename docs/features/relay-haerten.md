@@ -1118,6 +1118,17 @@ beim Host an (Annahme 1).
 Turnier verbunden", `docs/cloud-relay.md`, `docs/changelog.md`, `docs/roadmap.md`
 (Abschluss des Pakets).
 
+**Aus der Umsetzung (v0.9.390):**
+- **AK26 ist nur zur Hälfte gebaut.** „Der Host sendet nach jedem Verbinden ein
+  `Courts`-Frame, auch ein leeres" entfällt: Das sollte das Bilder-Tor öffnen, und das Tor
+  hängt seit PR 6 nicht mehr an der Feldliste. Die Wiederholung des Werbe-Uploads gilt für
+  409 **und** 503, bis zu dreimal im Abstand von 3 s.
+- Die Meldung verschwindet, sobald eine Verbindung 5 s steht (nicht erst am Ende der
+  Sitzung), und beim Stoppen der Übertragung.
+- **Annahme 1 ist ungeprüft:** Ob der Close-Code 4409 durch nginx und Cloudflare bei der
+  App ankommt, lässt sich nur am echten Relay sehen. Kommt er nicht an, erscheint die
+  Meldung nie; sonst ändert sich nichts.
+
 ### Reihenfolge
 
 1. **PR 1 zuerst:** stärkster Code-Beleg (Schreib-Gate, 15-s-Frist, falscher Idle), kein

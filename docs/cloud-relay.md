@@ -1394,6 +1394,23 @@ Turnierleitungs-Seiten (sie fallen auf ihren Abruf und sehen `503`).
 Namespace wird mit Code `4409` und dem Text `host_belegt` geschlossen, am
 Namespace-Limit mit `4429` und `voll`.
 
+**Meldung im Dashboard (App ab v0.9.390):** Hält die Abweisung mit `4409`
+länger als 30 s an, zeigt die App „Ein anderer PC ist mit diesem Turnier
+verbunden" (`ws_verbindung::CloudLage`, über `TabletInfo.cloud_hinweis` in
+`AlertBanner.tsx`). Die 30 s decken den Fall, dass nach einem Netzwechsel
+die EIGENE tote Verbindung noch bis zu 15 s den Platz hält. Die Meldung
+verschwindet, sobald eine Verbindung 5 s steht, und beim Stoppen der
+Übertragung. Ein einzelner Close ohne Grund oder ein gescheiterter Aufbau
+zwischen zwei Abweisungen setzt die 30 s nicht zurück (der Close-Frame kann
+verloren gehen). Kommt der Close-Grund nicht bis zur App durch (älterer Relay,
+ein Proxy, der Close-Codes verschluckt), erscheint sie nie — die Verbindung
+verhält sich dann wie bisher.
+
+**Werbe-Upload:** Auf `409` (Turnier-PC am Relay noch nicht eingetragen) und
+`503` (zwei Uploads in Arbeit) wiederholt die App den Upload bis zu dreimal
+im Abstand von 3 s; erst danach greift die gewöhnliche Pause (30 s und
+länger).
+
 `GET /health` (prozessweit) nennt zusätzlich `hosts` — die Zahl verbundener
 Turnier-PCs. Das ist der Prüfpunkt vor jedem Relay-Deploy.
 
