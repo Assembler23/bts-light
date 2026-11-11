@@ -4,6 +4,150 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.390
+
+- **Das Dashboard sagt, wenn ein anderer PC dasselbe Turnier in der Cloud
+  hält.** Läuft die Übertragung desselben Turniers versehentlich auf zwei
+  PCs, bekam der zweite bisher keine Cloud-Verbindung — und nichts wies
+  darauf hin. Jetzt erscheint oben in der App **„Ein anderer PC ist mit
+  diesem Turnier verbunden"**, sobald das länger als 30 Sekunden so ist.
+  Braucht den Relay ab v0.9.388.
+- Lehnt der Relay den Upload der Werbebilder kurz ab (er ist beschäftigt
+  oder hat den Turnier-PC noch nicht eingetragen), versucht die App es nach
+  3 Sekunden erneut statt erst nach rund einer Minute.
+- Damit ist die Spec `relay-haerten` umgesetzt (neunter und letzter
+  Schritt).
+
+## v0.9.389
+
+- **Der Cloud-Relay vergisst ein Turnier, wenn der Turnier-PC lange weg
+  ist** (wirkt mit dem Relay sofort). Bisher blieben Namen, Werbebilder und
+  Listen im Speicher, solange irgendein Tablet verbunden war — notfalls
+  tagelang. Jetzt gilt: Nach **60 Minuten** ohne Turnier-PC löscht der Relay
+  die Turnierdaten. Ein Tablet, das noch am Feld hängt, behält seinen Stand
+  (samt den Namen seines Spiels) und kann weiterzählen; kommt der Turnier-PC zurück, steht das Spiel nicht
+  auf 0:0. Kommt er früher zurück, ist nichts verloren. Der Zugang zum
+  Sprachdienst wird schon im Moment der Trennung vergessen. Außerdem behalten
+  Cloud-Anzeigen ihre Zuweisung jetzt die ganze Zeit: Sie zeigen „Keine
+  Verbindung zum Turnier-PC" statt nach wenigen Sekunden auf die
+  Kopplungs-Seite zu fallen. Achter Schritt der Spec `relay-haerten`
+  (ADR 0089).
+
+## v0.9.388
+
+- **Cloud-Anzeigen sagen ehrlich, wenn der Turnier-PC weg ist.** Verliert
+  der Turnier-PC die Verbindung zur Cloud, zeigen Monitore, Zähltafel,
+  Feld-Übersicht und „In Vorbereitung" 20 Sekunden lang weiter den letzten
+  Stand — ein kurzer Wackler bleibt unsichtbar. Danach steht **„Keine
+  Verbindung zum Turnier-PC"** auf dem Bildschirm, und der Stand wird
+  abgedunkelt. Bisher blieb dort der alte Stand stehen oder eine leere Seite,
+  beides sah aus wie „alles in Ordnung". Ist der Turnier-PC zurück, läuft die
+  Anzeige von selbst weiter. Anzeigen im Hallennetz (LAN) sind nicht
+  betroffen. Wirkt für Monitor, Tafel, Übersicht und „In Vorbereitung" mit
+  dem Relay sofort, für die Kombi-Ansicht mit diesem App-Update. Siebter
+  Schritt der Spec `relay-haerten` (ADR 0088).
+- Ein zweiter Turnier-PC am selben Turnier bekommt vom Relay jetzt den Grund
+  der Abweisung genannt (Vorbereitung für eine Meldung im Dashboard).
+
+## v0.9.387
+
+- **Der Cloud-Relay schützt sich gegen erfundene Turniere** (wirkt mit dem
+  Relay sofort). Werbebilder und Logo nimmt er nur noch von einem Turnier
+  an, dessen Turnier-PC verbunden ist; für alle Turniere zusammen gilt eine
+  Obergrenze von 256 MiB. Im Relay-Log steht nur noch der Anfang der
+  Turnier-Kennung, und Logdateien verfallen nach 30 Tagen. Für die Halle
+  ändert sich nichts.
+  Sechster Schritt der Spec `relay-haerten` (ADR 0090).
+
+## v0.9.386
+
+- **Ein hängendes Gerät kann den Cloud-Relay nicht mehr volllaufen lassen**
+  (wirkt mit dem Relay sofort). Nahm ein Tablet, ein Monitor oder der
+  Turnier-PC seine Nachrichten nicht ab — etwa bei einer sehr schlechten
+  Leitung —, sammelte der Relay sie bisher unbegrenzt. Jetzt hat jede
+  Verbindung einen festen Vorrat. Ist er voll, trennt der Relay dieses eine
+  Gerät; es verbindet sich neu und bekommt den aktuellen Stand. Im normalen
+  Betrieb kommt das nicht vor. Tablet-Nachrichten können den Turnier-PC dabei
+  nie aus der Cloud werfen. Fünfter Schritt der Spec `relay-haerten`
+  (ADR 0090).
+
+## v0.9.385
+
+- **Der Cloud-Relay nimmt nichts Übergroßes und nichts im Dauerfeuer mehr
+  an** (wirkt mit dem Relay sofort). Bisher durfte eine einzelne Nachricht
+  bis zu 64 MB groß sein, und ein Gerät konnte beliebig schnell senden. Jetzt
+  gelten feste Obergrenzen je Verbindung — weit über allem, was ein Tablet,
+  ein Monitor oder der Turnier-PC je sendet (auch 50 „zurück"-Schritte in
+  schnellster Folge kommen durch). Zu große oder zu viele Angaben
+  werden gekürzt oder verworfen und einmal im Relay-Log vermerkt; die
+  Verbindung bleibt dabei bestehen. Getrennt wird nur bei offenkundigem
+  Missbrauch. Für den Turnierbetrieb ändert sich nichts. Vierter Schritt der
+  Spec `relay-haerten` (ADR 0090).
+
+## v0.9.384
+
+- **Cloud-Tablets: Zurück-Übernehmen funktioniert, und ein Tablet sperrt sich
+  nicht mehr selbst aus** (wirkt mit dem Relay sofort). Übernahm ein zweites
+  Tablet ein Feld und das erste holte es sich zurück, zählte das erste zwar
+  weiter, seine Punkte kamen aber nicht an. Und ein Tablet, das an einem Feld
+  ohne Spiel wartete, konnte sich bei seiner eigenen wiederholten Anmeldung
+  aussperren, wenn der Turnier-PC gerade nicht verbunden war. Beides ist
+  behoben.
+- Der Relay räumt jetzt auf, was ein Tablet für ein Feld hinterlässt, das der
+  Turnier-PC gar nicht kennt, und führt je Turnier höchstens 128 Felder. Eine
+  Verbindung kann nur noch ein Feld belegen — vorher blieben bei mehreren
+  Anmeldungen tote Feld-Einträge stehen, die das Turnier bis zum Neustart des
+  Relays festhielten. Der Akkustand kommt nur noch vom zählenden Tablet.
+  Dritter Schritt der Spec `relay-haerten`.
+
+## v0.9.383
+
+- **Der Punktverlauf geht bei badhub nicht mehr still verloren.** badhub
+  verwirft den Verlauf eines Spiels, das es noch nicht kennt, und meldet
+  trotzdem Erfolg — bts-light hielt ihn dann für übertragen und schickte ihn
+  nie wieder. Jetzt wertet bts-light die Antwort aus und versucht es erneut,
+  bis zu dreimal; danach wartet es auf die nächste Änderung oder den nächsten
+  vollen Turnierstand. Lehnt badhub ein ganzes Paket ab, kommt beim nächsten
+  Mal eine andere Auswahl dran, statt dass dieselben Spiele alle übrigen
+  aufhalten. Außerdem baut bts-light den Verlauf nur noch für Spiele, die
+  sich geändert haben, statt alle fünf Sekunden für alle. Spec
+  `badhub-push-entkoppeln`, Schritt 4.
+
+## v0.9.382
+
+- **Der Hallenbetrieb wartet nicht mehr auf das Internet.** Bisher schickte
+  der Abgleich mit BTP den Turnierstand selbst an badhub und wartete auf die
+  Antwort. Antwortete badhub zäh oder gar nicht, kamen Feldvergabe,
+  Schiedsrichter-Rotation, Zetteldruck und Ansagen entsprechend später dran.
+  Jetzt übernimmt ein eigener Sender die Übertragung: Der Abgleich legt
+  seinen Stand nur noch ab und läuft im gewohnten Fünf-Sekunden-Takt weiter.
+  Liegt beim Sender noch ein älterer Stand, ersetzt ihn der neue.
+- Die Statuszeile zählt „nächster Versuch in … s" jetzt herunter und zeigt im
+  Gutfall „Verbunden – Liveticker aktuell". Ein BTP-Fehler hat weiter
+  Vorrang. Zweiter Schritt der Spec `badhub-push-entkoppeln` (ADR 0086).
+
+## v0.9.381
+
+- **Störungen der Internet-Strecke kosten die Halle weniger.** Antwortete
+  badhub nicht, versuchte bts-light es bisher alle fünf Sekunden mit dem
+  vollen Turnierstand samt Logo, und jeder Versuch hielt den Abgleich mit BTP
+  auf. Jetzt wächst der Abstand zwischen den Versuchen (5, 10, 20, 40, dann
+  60 Sekunden), sie gehen ohne Logo hinaus, und Meldeliste, Spielplan und
+  Punktverlauf warten, bis die Strecke wieder steht. In der Statuszeile steht
+  dann „Internet-Strecke gestört — Halle läuft weiter".
+- **Ein falsches Passwort sperrt die Halle nicht mehr aus.** Lehnt badhub das
+  Passwort ab, hält die Übertragung an, bis die Einstellungen gespeichert
+  werden — vorher lief sie weiter, und badhub sperrte die Hallen-Adresse nach
+  wenigen Sekunden für eine Viertelstunde, bei längerem Betrieb für einen Tag.
+  Sperrt badhub trotzdem, wartet bts-light die genannte Zeit ab (höchstens
+  eine Stunde) und nennt in der Statuszeile die Uhrzeit des nächsten Versuchs.
+- **Eine Anmeldeseite im WLAN gilt nicht mehr als Erfolg.** Antwortet statt
+  badhub die Anmeldeseite eines Hotel- oder Hallen-WLANs, hielt bts-light die
+  Daten bisher für übertragen.
+- BTP- und Übertragungsfehler stehen jetzt im Diagnose-Log: je Wechsel eine
+  Zeile statt keiner oder einer alle fünf Sekunden. Erster Schritt der Spec
+  `badhub-push-entkoppeln` (ADR 0086).
+
 ## v0.9.380
 
 - **Der Verbindungsaufbau zur Cloud hängt nicht mehr fest.** Hinter einem

@@ -408,8 +408,13 @@ ausgerufen: er soll gerade nicht zur Turnierleitung.
   **404/400**, kennt es den Check-In noch nicht → der Push pausiert 30 Minuten
   und wird dann erneut versucht. Bewusst **keine** dauerhafte Stilllegung:
   derselbe Status kann von einem kurzen Aussetzer während eines
-  badhub-Deploys stammen, und ein Turnier läuft über mehrere Tage. Ein **5xx**
-  pausiert gar nicht — der nächste Zyklus sendet die vollständige Liste erneut.
+  badhub-Deploys stammen, und ein Turnier läuft über mehrere Tage. Seit
+  v0.9.381 gilt die 30-Minuten-Pause auch für jede andere Ablehnung der
+  Meldeliste — vor allem **409** („die Kennung gehört einem anderen
+  Verband"), bei dem bisher die volle Liste alle 5 s erneut hinausging. Ein
+  **5xx** wiederholt mit wachsendem Abstand (5 bis 60 s). Ist die Strecke zu
+  badhub insgesamt gestört oder angehalten, wartet die Meldeliste mit. Die
+  ganze Tabelle steht in [liveticker-push.md](liveticker-push.md).
 - **Unvollständige Doppel-Meldung.** Nennt BTP zwei Spieler, ist aber einer
   nicht auflösbar, bleibt die Meldung erhalten (der anwesende Partner soll
   einchecken können) und erscheint als Einzel-Meldung. Das ist ein Datenfehler

@@ -436,13 +436,40 @@ pub async fn run(ctx: Arc<ServerCtx>, install_id: String) {
     // Ergebnis-Arbeiter und „läuft schon"-Wächter leben über die Sitzungen
     // hinweg: Ein BTP-Write oder Upload endet nicht mit der Verbindung.
     let dienste = Dienste::new(ergebnis_ueber_process_result());
+    // Endet die Übertragung (Stoppen, Speichern), verschwindet auch der
+    // Hinweis „anderer PC" — er gehört zu dieser Verbindung.
+    let _lage = LageWacht(ctx.tablet.clone());
     loop {
         let ende = serve(&ctx, &url, &install_id, &mut reload_wacht, &dienste).await;
+        ctx.tablet
+            .cloud_lage_aendern(|l| l.sitzung_ende(ende, monitor::now_ms()));
         let pause = ws_verbindung::mit_jitter(backoff.pause_nach(ende), ws_verbindung::zufall());
         tracing::info!("Relay-Reconnect in {:.1} s ({ende:?})", pause.as_secs_f32());
         tokio::time::sleep(pause).await;
     }
 }
+
+/// Setzt die Cloud-Lage zurück, wenn `run` endet.
+struct LageWacht(Arc<TabletState>);
+
+impl Drop for LageWacht {
+    fn drop(&mut self) {
+        self.0.cloud_lage_aendern(|l| *l = Default::default());
+    }
+}
+
+/// Lohnt es, den Werbe-Upload gleich noch einmal zu versuchen? Der Relay
+/// antwortet 409, solange er diesen Turnier-PC noch nicht eingetragen hat
+/// (der Upload kann die eigene Anmeldung überholen), und 503, wenn er
+/// gerade zwei andere Uploads verarbeitet. Beides ist in Sekunden vorbei.
+fn upload_gleich_wieder(fehler: &str) -> bool {
+    fehler.starts_with("HTTP 409") || fehler.starts_with("HTTP 503")
+}
+
+/// So oft und in diesem Abstand wird der Upload dann wiederholt, bevor die
+/// gewöhnliche Pause (30 s und länger) greift.
+const UPLOAD_KURZ_VERSUCHE: u32 = 3;
+const UPLOAD_KURZ_PAUSE: Duration = Duration::from_secs(3);
 
 /// Eine Relay-Sitzung: verbinden (mit Frist), Frames austauschen, bis die
 /// Verbindung endet. Liefert, wie sie ausging — daraus rechnet `run` die
@@ -462,6 +489,8 @@ async fn serve(
         }
     };
     tracing::info!("Mit Cloud-Relay verbunden");
+    ctx.tablet
+        .cloud_lage_aendern(|l| l.verbunden(monitor::now_ms()));
     let beginn = tokio::time::Instant::now();
     let schluss = match sitzung_fahren(ctx, stream, install_id, reload_wacht, dienste).await {
         Ok(schluss) => {
@@ -693,7 +722,17 @@ fn upload_anstossen(
     let install_id = install_id.to_string();
     let zuletzt = zuletzt.clone();
     dienste.im_hintergrund(async move {
-        let ergebnis = upload_monitor(&ctx, &install_id).await;
+        let mut kurz = 0;
+        let ergebnis = loop {
+            match upload_monitor(&ctx, &install_id).await {
+                Err(e) if upload_gleich_wieder(&e) && kurz < UPLOAD_KURZ_VERSUCHE => {
+                    kurz += 1;
+                    tracing::info!("Court-Monitor-Upload: {e} – neuer Versuch in 3 s");
+                    tokio::time::sleep(UPLOAD_KURZ_PAUSE).await;
+                }
+                ergebnis => break ergebnis,
+            }
+        };
         let ok = ergebnis.is_ok();
         match ergebnis {
             Ok(()) => {
@@ -1911,6 +1950,41 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn hinweis_anderer_pc_verschwindet_mit_der_uebertragung() {
+        // Die Verdrahtung: Der Merker lebt im `TabletState` (über Start und
+        // Stopp hinweg) — endet `run`, setzt die Wacht ihn zurück.
+        let tablet = Arc::new(TabletState::default());
+        assert_eq!(tablet.cloud_hinweis(), None);
+        {
+            let _wacht = LageWacht(tablet.clone());
+            // Seit einer Minute abgewiesen.
+            let vor_einer_minute = monitor::now_ms() - 60_000;
+            tablet
+                .cloud_lage_aendern(|l| l.sitzung_ende(SitzungsEnde::Abgewiesen, vor_einer_minute));
+            assert_eq!(tablet.cloud_hinweis(), Some(ws_verbindung::ANDERER_PC_TEXT));
+        }
+        assert_eq!(tablet.cloud_hinweis(), None, "nach dem Stoppen weg");
+    }
+
+    #[test]
+    fn upload_wird_nur_bei_409_und_503_gleich_wiederholt() {
+        // So meldet `upload_monitor` einen abgelehnten Upload.
+        let text = |code: u16| format!("HTTP {}", reqwest::StatusCode::from_u16(code).unwrap());
+        assert!(
+            upload_gleich_wieder(&text(409)),
+            "Turnier-PC noch nicht eingetragen"
+        );
+        assert!(upload_gleich_wieder(&text(503)), "Relay beschäftigt");
+        // Alles andere wartet die gewöhnliche Pause: Bilder-Budget voll,
+        // Upload zu groß, Netzfehler.
+        assert!(!upload_gleich_wieder(&text(507)));
+        assert!(!upload_gleich_wieder(&text(413)));
+        assert!(!upload_gleich_wieder(&text(500)));
+        assert!(!upload_gleich_wieder("error sending request"));
+    }
+
     use crate::btp::model::{
         BtpMatch, BtpPlayer, BtpSnapshot, Discipline, MatchResult, MatchStatus, ScoringFormat,
     };
