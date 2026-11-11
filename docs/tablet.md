@@ -967,6 +967,27 @@ die Karten seines Vorgängers nicht und dürfte sie deshalb nie überschreiben.
 Daraus folgt: Der Abgleich ist unschädlich und wird bei jeder Gelegenheit
 mitgeschickt, an der auch `rally_sync` geht.
 
+### Wann das Tablet komplett abgleicht
+
+`rally_sync` und `match_event_sync` gehen immer als Paar. Die Stellen:
+
+| Anlass | Warum |
+|---|---|
+| WebSocket (wieder) offen | offline Gezähltes nachziehen |
+| `state_restore` (behalten oder übernommen) | der Host soll den Stand des zählenden Geräts tragen |
+| Undo, „Wieder öffnen", Korrektur, Satzbeginn mit Zwischenstand | ein einzelner `rally`-Frame könnte das nicht ausdrücken |
+| **`match_assigned` für das schon geladene Spiel** (seit v0.9.375) | Nach einem Neustart des Turnier-PCs verwirft er den Abgleich vom Verbindungsaufbau (noch kein BTP-Stand); nach einem Abriss Turnier-PC↔Relay war das Tablet selbst nie getrennt. Geht **vor** dem Finalisiert-Rücksprung raus — auch ein von Hand beendetes Spiel behält so seinen Verlauf. |
+| **`match_assigned` für ein anderes Spiel** (seit v0.9.375) | Ein letzter Abgleich des **alten** Spiels unter dessen Kennung, bevor der Stand verworfen wird — für ein Tablet, das das Spielende verschlafen hat. Der Host nimmt ihn nur im 120-s-Fenster und nur als Ergänzung. |
+| **unmittelbar vor dem Ergebnis** (seit v0.9.375) | der Zettel wird aus dem gebaut, was der Host beim Ergebnis kennt |
+| **einmal nach der Annahme des Ergebnisses** (seit v0.9.375) | war der WebSocket beim Tipp gerade getrennt, ging der Abgleich davor ins Leere |
+
+Die Wiederholungen eines offenen Ergebnisses (alle 5 s) gleichen **nicht**
+erneut ab. Der Host nimmt den Abgleich nach dem Spielende noch 120 s an und
+lässt ihn dabei nur ergänzen — Einzelheiten in
+[punktverlauf.md](punktverlauf.md) („Nachzügler nach dem Spielende"), Spec
+[tablet-stand-robust](features/tablet-stand-robust.md) (Regel D), ADR 0085.
+Geprüft am echten Seiten-Code: `scripts/test-verlauf-sync.mjs`.
+
 ## Anwesenheit am Feld (Meetingpoint)
 
 Seit v0.9.330 (Spec `meetingpoint-spielbereit`, Nr. 11): Trägt der

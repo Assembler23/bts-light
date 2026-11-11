@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.375
+
+- **Punktverlauf und Schiedsrichterzettel sind nach einem Verbindungsabriss
+  wieder vollständig.** Fehlten bisher Ballwechsel oder eine Karte, weil das
+  Internet oder der Turnier-PC kurz weg war, blieb die Lücke oft für immer —
+  vor allem, wenn das Ergebnis schon übermittelt war. Das Tablet schickt
+  Verlauf und Zettel-Ereignisse jetzt zusätzlich komplett, sobald der
+  Turnier-PC das Spiel (wieder) meldet, unmittelbar vor dem Ergebnis und
+  einmal danach. Der Turnier-PC nimmt diesen Abgleich noch zwei Minuten nach
+  dem Spielende an, auch wenn auf dem Feld schon das nächste Spiel liegt; er
+  kann den abgeschlossenen Verlauf dabei nur ergänzen, nicht kürzen oder
+  umschreiben. Zweiter
+  Schritt der Spec `tablet-stand-robust` (ADR 0085).
+
 ## v0.9.373
 
 - **Schiedsrichterzettel schon beim Aufruf drucken.** Unter „Zettel

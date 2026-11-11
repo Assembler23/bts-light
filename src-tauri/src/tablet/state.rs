@@ -63,6 +63,32 @@ const MAX_TL_PUSH_SUBS: usize = 16;
 /// Ein neues Match auf dem Feld räumt den Merker unabhängig davon sofort.
 const FINALIZED_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// Wie lange der Host nach dem Ende eines Spiels noch einen **kompletten**
+/// Abgleich von Punktverlauf und Zettel-Ereignissen dafür annimmt (Spec
+/// tablet-stand-robust, Regel D; ADR 0085). Der Abgleich reist über den
+/// WebSocket, das Ergebnis über HTTP — die beiden haben keine Ordnung, und
+/// nach einem Verbindungsabriss kommt der Abgleich oft erst hinter dem
+/// Ergebnis an. Ohne das Fenster fehlten dem Verlauf die letzten Punkte und
+/// dem Zettel die Karten aus der Lücke.
+const NACHZUEGLER_FENSTER: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Frühestens so lange nach einem Spielende glaubt der Host dem BTP-Stand,
+/// dass das Spiel (wieder) auf dem Feld liegt
+/// ([`TabletState::spiel_wieder_auf_dem_feld`]). Drei Poll-Takte: Ein Stand,
+/// der vor dem Ergebnis gelesen wurde, ist bis dahin sicher ersetzt.
+const RUECKKEHR_KARENZ: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Wohin ein kompletter Abgleich eines Tablets gehört
+/// ([`TabletState::sync_ziel`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncZiel {
+    /// Das Spiel liegt auf dem Feld — der Halter ist die Wahrheit.
+    Aktuell,
+    /// Das Spiel ist gerade erst beendet — der Abgleich darf ergänzen,
+    /// aber weder kürzen noch den Abschluss aufheben.
+    Nachzuegler,
+}
+
 /// Wie lange eine frisch nach BTP geschriebene Feldzuweisung als belegt gilt,
 /// bevor BTP sie bestätigt hat.
 ///
@@ -440,6 +466,13 @@ pub struct TabletState {
     /// OnCourt-Match räumt ihn ohnehin bedingungslos (`clear_finalized`). Vom
     /// Sync-Loop beim Übergang OnCourt→Finished gesetzt.
     recently_finalized: RwLock<HashMap<i64, (i64, std::time::Instant)>>,
+    /// CourtID → (Match-ID, Zeitpunkt) des zuletzt auf diesem Feld beendeten
+    /// Spiels — Grundlage des Nachzügler-Fensters ([`NACHZUEGLER_FENSTER`]).
+    /// Anders als `recently_finalized` räumt ein neues Spiel auf dem Feld den
+    /// Merker **nicht**: Der Abgleich des alten Spiels kommt gerade dann, wenn
+    /// das Feld schon wieder belegt ist. Nur im RAM; nach einem Neustart des
+    /// Turnier-PCs gibt es kein Fenster.
+    kuerzlich_beendet: Mutex<HashMap<i64, (i64, std::time::Instant)>>,
     /// CourtID → gespiegelter Spielzustand (JSON) des aktiven Tablets –
     /// wird einem übernehmenden Gerät übergeben.
     court_state: RwLock<HashMap<i64, String>>,
@@ -3436,6 +3469,108 @@ impl TabletState {
             .write()
             .unwrap()
             .insert(court_id, (match_id, std::time::Instant::now()));
+        // Ein von Hand in BTP beendetes Spiel bekommt dasselbe
+        // Nachzügler-Fenster wie eines mit Tablet-Ergebnis.
+        self.merke_beendet(court_id, match_id);
+    }
+
+    /// Dieses Spiel ist auf diesem Feld eben zu Ende gegangen — ab jetzt
+    /// läuft das Nachzügler-Fenster. Ein zweiter Aufruf fürs selbe Spiel
+    /// (Ergebnisweg **und** Sync-Loop melden es beide) verlängert es nicht:
+    /// Das Fenster zählt ab dem ersten Ende.
+    pub fn merke_beendet(&self, court_id: i64, match_id: i64) {
+        if match_id <= 0 {
+            return;
+        }
+        let mut map = self.kuerzlich_beendet.lock().unwrap();
+        match map.get(&court_id) {
+            Some((mid, at)) if *mid == match_id && at.elapsed() < NACHZUEGLER_FENSTER => {}
+            _ => {
+                map.insert(court_id, (match_id, std::time::Instant::now()));
+            }
+        }
+    }
+
+    /// Ist `match_id` das zuletzt auf diesem Feld beendete Spiel, und läuft
+    /// sein Nachzügler-Fenster noch? Räumt einen abgelaufenen Merker weg.
+    fn im_nachzuegler_fenster(&self, court_id: i64, match_id: i64) -> bool {
+        let mut map = self.kuerzlich_beendet.lock().unwrap();
+        match map.get(&court_id) {
+            Some((mid, at)) if at.elapsed() < NACHZUEGLER_FENSTER => *mid == match_id,
+            Some(_) => {
+                map.remove(&court_id);
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Darf ein **kompletter** Abgleich für `match_id` von diesem Feld
+    /// angenommen werden, und als was? `None` = verwerfen (fremdes Spiel,
+    /// Fenster abgelaufen). Einzelne Ballwechsel und Einzel-Ereignisse
+    /// fragen hier **nicht** — sie gelten weiter nur fürs Spiel auf dem Feld.
+    pub fn sync_ziel(&self, court_id: i64, match_id: i64) -> Option<SyncZiel> {
+        if match_id <= 0 {
+            return None;
+        }
+        // Das Fenster ZUERST: Nach dem Ergebnis führt der BTP-Stand das
+        // Spiel noch bis zum nächsten Poll (bis zu 5 s) auf dem Feld. In
+        // dieser Zeit gälte ein Abgleich sonst als „aktuell" und dürfte den
+        // eben abgeschlossenen Verlauf kürzen (Review-Fund 11.11.2026).
+        if self.im_nachzuegler_fenster(court_id, match_id) {
+            return Some(SyncZiel::Nachzuegler);
+        }
+        self.match_for_court(court_id)
+            .is_some_and(|m| m.id == match_id)
+            .then_some(SyncZiel::Aktuell)
+    }
+
+    /// Das Spiel liegt laut BTP (wieder) auf diesem Feld — etwa nach einer
+    /// Ergebniskorrektur der Turnierleitung. Dann ist es nicht „eben
+    /// beendet": Der Merker fällt, und das Tablet ist wieder die Wahrheit.
+    /// Vom Sync-Loop je Zyklus für jedes belegte Feld gerufen. Greift erst
+    /// nach [`RUECKKEHR_KARENZ`]: Der Poll unmittelbar nach dem Ergebnis
+    /// kennt es womöglich noch nicht und zeigt das Spiel weiter auf dem
+    /// Feld — er darf das frische Fenster nicht gleich wieder abräumen.
+    pub fn spiel_wieder_auf_dem_feld(&self, court_id: i64, match_id: i64) {
+        let mut map = self.kuerzlich_beendet.lock().unwrap();
+        if map
+            .get(&court_id)
+            .is_some_and(|(mid, seit)| *mid == match_id && seit.elapsed() >= RUECKKEHR_KARENZ)
+        {
+            map.remove(&court_id);
+        }
+    }
+
+    /// Kompletter Verlaufs-Abgleich eines Tablets (LAN und Cloud teilen
+    /// sich diesen Weg; die Halter-Prüfung macht der Aufrufer). `true` =
+    /// übernommen.
+    pub fn verlauf_sync_annehmen(
+        &self,
+        court_id: i64,
+        match_id: i64,
+        timeline: relay_proto::MatchTimeline,
+    ) -> bool {
+        match self.sync_ziel(court_id, match_id) {
+            Some(SyncZiel::Aktuell) => self.timeline_store().apply_sync(match_id, timeline),
+            Some(SyncZiel::Nachzuegler) => {
+                self.timeline_store().apply_nachzuegler(match_id, timeline)
+            }
+            None => false,
+        }
+    }
+
+    /// Kompletter Ereignis-Abgleich eines Tablets. Der Zettel **vereinigt**
+    /// (ADR 0038) — ein Nachzügler kann dort nichts wegnehmen, deshalb
+    /// braucht er keinen eigenen Weg im Store.
+    pub fn ereignis_sync_annehmen(
+        &self,
+        court_id: i64,
+        match_id: i64,
+        events: Vec<relay_proto::MatchEvent>,
+    ) -> bool {
+        self.sync_ziel(court_id, match_id).is_some()
+            && self.sheet_store().apply_event_sync(match_id, events)
     }
 
     /// Match-ID des zuletzt finalisierten Matches dieses Felds, falls der Merker
@@ -6977,6 +7112,210 @@ pub(crate) mod tests {
         assert!(st.is_match_finalized(5, 42));
         assert!(!st.is_match_finalized(5, 43), "andere Match-ID → nein");
         assert!(!st.is_match_finalized(6, 42), "anderes Feld → nein");
+    }
+
+    // ───────── Nachzügler: Verlauf und Zettel hinter dem Ergebnis ─────────
+    // Spec tablet-stand-robust, Regel D / AK23.
+
+    fn verlauf(punkte: &str) -> relay_proto::MatchTimeline {
+        relay_proto::MatchTimeline {
+            sets: vec![relay_proto::TimelineSet {
+                start_a: 0,
+                start_b: 0,
+                points: punkte.to_string(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn karte(id: &str) -> relay_proto::MatchEvent {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "seq": 1, "set": 1, "afterN": 2, "scoreA": 2, "scoreB": 0,
+            "tsMs": 1_760_000_000_000_i64, "kind": "card_yellow", "team": 1,
+            "player": 0, "phase": "play",
+        }))
+        .expect("gültiges Ereignis")
+    }
+
+    /// Feld 101 mit Spiel 1; der Host kennt zwei Punkte, dann geht das
+    /// Ergebnis ein (Feld geräumt, Verlauf abgeschlossen, Fenster läuft).
+    fn feld_nach_ergebnis() -> TabletState {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        assert!(st.verlauf_sync_annehmen(101, 1, verlauf("AA")));
+        // Wie `process_result`: Verlauf abschließen, Fenster öffnen. Der
+        // BTP-Stand führt das Spiel bis zum nächsten Poll WEITER auf dem
+        // Feld — genau so sieht es in den ersten Sekunden aus.
+        st.timeline_store().finalize(1, false);
+        st.merke_beendet(101, 1);
+        st
+    }
+
+    /// In den Sekunden zwischen Ergebnis und nächstem BTP-Poll steht das
+    /// Spiel noch als „auf dem Feld" im Stand. Auch dann ist ein Abgleich
+    /// ein Nachzügler — „Wieder öffnen" darf den Verlauf nicht kürzen.
+    #[test]
+    fn nachzuegler_schon_vor_dem_naechsten_poll() {
+        let st = feld_nach_ergebnis();
+        assert_eq!(st.match_for_court(101).map(|m| m.id), Some(1));
+        assert_eq!(st.sync_ziel(101, 1), Some(SyncZiel::Nachzuegler));
+        assert!(
+            !st.verlauf_sync_annehmen(101, 1, verlauf("A")),
+            "kürzen verworfen"
+        );
+        let tl = st.timeline_store().timeline(1).unwrap();
+        assert_eq!(tl.sets[0].points, "AA");
+        assert!(tl.finished);
+    }
+
+    /// Kehrt das Spiel nach einer Ergebniskorrektur aufs Feld zurück, ist
+    /// das Tablet wieder die Wahrheit — auch innerhalb der 120 s.
+    #[test]
+    fn zurueckgekehrtes_spiel_ist_wieder_aktuell() {
+        let st = feld_nach_ergebnis();
+        // Der Poll gleich nach dem Ergebnis zeigt das Spiel noch auf dem
+        // Feld — das frische Fenster bleibt.
+        st.spiel_wieder_auf_dem_feld(101, 1);
+        assert_eq!(st.sync_ziel(101, 1), Some(SyncZiel::Nachzuegler));
+        let frueher = std::time::Instant::now()
+            .checked_sub(RUECKKEHR_KARENZ + std::time::Duration::from_secs(1))
+            .expect("Instant weit genug in der Vergangenheit");
+        st.kuerzlich_beendet
+            .lock()
+            .unwrap()
+            .insert(101, (1, frueher));
+        st.spiel_wieder_auf_dem_feld(101, 2); // anderes Spiel: Merker bleibt
+        assert_eq!(st.sync_ziel(101, 1), Some(SyncZiel::Nachzuegler));
+        st.spiel_wieder_auf_dem_feld(101, 1);
+        assert_eq!(st.sync_ziel(101, 1), Some(SyncZiel::Aktuell));
+        assert!(st.verlauf_sync_annehmen(101, 1, verlauf("A")));
+        assert!(!st.timeline_store().timeline(1).unwrap().finished);
+    }
+
+    #[test]
+    fn nachzuegler_sync_nach_ergebnis_wird_angenommen() {
+        let st = feld_nach_ergebnis();
+        assert_eq!(st.sync_ziel(101, 1), Some(SyncZiel::Nachzuegler));
+        assert!(st.verlauf_sync_annehmen(101, 1, verlauf("AAB")));
+        let tl = st.timeline_store().timeline(1).unwrap();
+        assert_eq!(tl.sets[0].points, "AAB");
+        assert!(tl.finished, "der Abschluss bleibt");
+        // Die Karte aus der Lücke kommt mit dem Ereignis-Abgleich nach.
+        assert!(st.ereignis_sync_annehmen(101, 1, vec![karte("ff01")]));
+        assert_eq!(st.sheet_store().sheet(1).unwrap().events.len(), 1);
+    }
+
+    #[test]
+    fn nachzuegler_nach_fensterablauf_verworfen() {
+        let st = feld_nach_ergebnis();
+        // Zwei Minuten später hat BTP das Spiel längst vom Feld genommen.
+        st.set_snapshot(snapshot(
+            vec![match_on(1, None, MatchStatus::Finished)],
+            vec![(101, "Court 1")],
+        ));
+        let alt = std::time::Instant::now()
+            .checked_sub(NACHZUEGLER_FENSTER + std::time::Duration::from_secs(1))
+            .expect("Instant weit genug in der Vergangenheit");
+        st.kuerzlich_beendet.lock().unwrap().insert(101, (1, alt));
+        assert_eq!(st.sync_ziel(101, 1), None);
+        assert!(!st.verlauf_sync_annehmen(101, 1, verlauf("AAB")));
+        assert!(!st.ereignis_sync_annehmen(101, 1, vec![karte("ff01")]));
+        assert_eq!(
+            st.timeline_store().timeline(1).unwrap().sets[0].points,
+            "AA"
+        );
+        assert!(st.sheet_store().sheet(1).is_none());
+        assert!(
+            !st.kuerzlich_beendet.lock().unwrap().contains_key(&101),
+            "abgelaufener Merker wird geräumt"
+        );
+    }
+
+    #[test]
+    fn nachzuegler_fremdes_match_verworfen() {
+        let st = feld_nach_ergebnis();
+        // Ein anderes Spiel …
+        assert!(!st.verlauf_sync_annehmen(101, 2, verlauf("AAB")));
+        assert!(st.timeline_store().timeline(2).is_none());
+        // … und dasselbe Spiel von einem anderen Feld.
+        assert!(!st.verlauf_sync_annehmen(102, 1, verlauf("AAB")));
+        assert!(!st.ereignis_sync_annehmen(102, 1, vec![karte("ff01")]));
+        assert_eq!(
+            st.timeline_store().timeline(1).unwrap().sets[0].points,
+            "AA"
+        );
+        // Match-ID 0 hat nie ein Fenster.
+        st.merke_beendet(101, 0);
+        assert_eq!(st.sync_ziel(101, 0), None);
+    }
+
+    #[test]
+    fn nachzuegler_bei_neu_belegtem_feld_angenommen() {
+        let st = feld_nach_ergebnis();
+        // Das Folgespiel liegt schon auf dem Feld.
+        st.set_snapshot(snapshot(
+            vec![
+                match_on(1, None, MatchStatus::Finished),
+                match_on(2, Some(101), MatchStatus::OnCourt),
+            ],
+            vec![(101, "Court 1")],
+        ));
+        st.clear_finalized(101);
+        assert_eq!(st.sync_ziel(101, 2), Some(SyncZiel::Aktuell));
+        assert_eq!(st.sync_ziel(101, 1), Some(SyncZiel::Nachzuegler));
+        assert!(st.verlauf_sync_annehmen(101, 1, verlauf("AAB")));
+        assert_eq!(
+            st.timeline_store().timeline(1).unwrap().sets[0].points,
+            "AAB"
+        );
+        assert!(
+            st.timeline_store().timeline(2).is_none(),
+            "das neue Spiel bleibt unberührt"
+        );
+    }
+
+    /// Nur KOMPLETTE Abgleiche bekommen das Fenster. Ein einzelner
+    /// Ballwechsel hinter dem Ergebnis scheitert am abgeschlossenen Verlauf.
+    #[test]
+    fn einzel_rally_nach_ergebnis_bleibt_verworfen() {
+        let st = feld_nach_ergebnis();
+        assert!(!st.timeline_store().apply_rally(1, 1, 3, "B", 2, 1));
+        assert!(st.verlauf_sync_annehmen(101, 1, verlauf("AAB")));
+        assert!(!st.timeline_store().apply_rally(1, 1, 4, "A", 3, 1));
+    }
+
+    /// Das Fenster zählt ab dem ERSTEN Ende: Ergebnisweg und Sync-Loop
+    /// melden dasselbe Spiel beide, der zweite verlängert nicht.
+    #[test]
+    fn nachzuegler_fenster_wird_nicht_verlaengert() {
+        let st = TabletState::default();
+        let frueh = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(100))
+            .expect("Instant weit genug in der Vergangenheit");
+        st.kuerzlich_beendet.lock().unwrap().insert(101, (1, frueh));
+        st.mark_finalized(101, 1);
+        assert_eq!(
+            st.kuerzlich_beendet.lock().unwrap().get(&101).unwrap().1,
+            frueh
+        );
+        // Ein anderes Spiel ersetzt den Merker.
+        st.merke_beendet(101, 2);
+        assert_eq!(st.kuerzlich_beendet.lock().unwrap().get(&101).unwrap().0, 2);
+    }
+
+    /// Ein von Hand in BTP beendetes Spiel bekommt dasselbe Fenster.
+    #[test]
+    fn hand_ergebnis_oeffnet_das_nachzuegler_fenster() {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, None, MatchStatus::Finished)],
+            vec![(101, "Court 1")],
+        ));
+        st.mark_finalized(101, 1);
+        assert_eq!(st.sync_ziel(101, 1), Some(SyncZiel::Nachzuegler));
     }
 
     /// TTL-Ablauf: ein Merker älter als [`FINALIZED_TTL`] gilt als abgelaufen

@@ -43,6 +43,34 @@ Tablet ──rally (je Ballwechsel)──▶ Host (TimelineStore) ──punktver
   aktuellen Court-Match gehört (HM-03-Muster), wird verworfen; der
   nächste Sync ersetzt. Harte Deckel (`MAX_RALLIES_PER_SET` u. a.)
   verteidigen den Cloud-Weg.
+- **Nachzügler nach dem Spielende** (seit v0.9.375, Spec
+  [tablet-stand-robust](features/tablet-stand-robust.md), Regel D; ADR 0085):
+  Der `rally_sync` reist über den WebSocket, das Ergebnis über HTTP — die
+  beiden haben keine Ordnung. Das Tablet schickt den kompletten Verlauf
+  deshalb an drei weiteren Stellen: bei jedem `match_assigned` für das
+  schon geladene Spiel (heilt Host-Neustart und Abriss Turnier-PC↔Relay),
+  unmittelbar vor dem Ergebnis und einmal nach dessen Annahme. Der Host
+  nimmt einen **kompletten** Abgleich für das zuletzt auf dem Feld beendete
+  Spiel noch **120 s** an — auch wenn das Feld schon neu belegt ist
+  (`TabletState::sync_ziel`, `NACHZUEGLER_FENSTER`). Ein solcher Nachzügler
+  darf nur **ergänzen** (`TimelineStore::apply_nachzuegler`, `ergaenzt`):
+  Was der Host schon hat, muss unverändert der Anfang bleiben — je Satz
+  derselbe Startstand und die vorhandene Punktfolge als Präfix. Kürzer
+  („Wieder öffnen" am Tablet), gedreht (Mannschaften getauscht) oder anders
+  gezählt wird verworfen; einzige Ausnahme ist ein Satz, den der Host nur
+  als Endstand kennt und dessen Ballwechsel genau auf diesen Endstand
+  führen. `finished` bleibt gesetzt, `retired` kommt aus dem Bestand.
+  Das Fenster gilt **ab dem Ergebnis**, auch in den Sekunden, in denen BTP
+  das Spiel noch auf dem Feld führt (`sync_ziel` prüft es zuerst). Kehrt
+  das Spiel nach einer Ergebniskorrektur aufs Feld zurück, fällt der Merker
+  nach 15 s Karenz (`spiel_wieder_auf_dem_feld`), und das Tablet ist wieder
+  die Wahrheit. Wechselt das Spiel am Tablet, schickt es vor dem Laden des
+  neuen einen letzten Abgleich des alten. Einzelne `rally`-Frames bleiben
+  nach dem Ergebnis verworfen. Ein Abgleich ohne Neues schreibt nichts auf
+  die Platte. Das Fenster liegt nur im RAM: Startet der Turnier-PC
+  innerhalb der zwei Minuten neu, ist es weg.
+  Der badhub-Push (`tverlauf`) schiebt den ergänzten Verlauf über seinen
+  Diff von selbst nach.
 - **On-Demand statt Push:** TL-Web/Desktop laden den Verlauf erst beim
   Öffnen des Overlays und ziehen ihn dann im 2-s-Takt nach. Er ist NIE
   Teil des `TlState`-Pushes (Mobilfunk-Budget); der Relay hält keine
@@ -145,10 +173,13 @@ Match der **ganze** Punktverlauf an `live_update.php`:
 
 ## Tests
 
-`relay-proto` (Serde/Deckel) · `tablet/timeline.rs` (13 Kern-Tests:
+`relay-proto` (Serde/Deckel) · `tablet/timeline.rs` (Kern-Tests:
 Lücken, Undo-Sync, Fremd-Match, Neustart-Reload, Turnierwechsel,
-Zwischenstand, Aufgabe, Nachzügler, Slug) · `tablet/server.rs`
-(Finalisierung) · `tablet/tl.rs` (`has_timeline`-Wahrheit) · `relay/`
+Zwischenstand, Aufgabe, Nachzügler, Slug; `nachzuegler_*` für den Abgleich
+hinter dem Ergebnis) · `tablet/state.rs` (`nachzuegler_*`,
+`einzel_rally_nach_ergebnis_bleibt_verworfen`: Fenster, fremdes Spiel, neu
+belegtes Feld) · `scripts/test-verlauf-sync.mjs` (die drei Sende-Stellen am
+echten Tablet-Code) · `tablet/server.rs` (Finalisierung) · `tablet/tl.rs` (`has_timeline`-Wahrheit) · `relay/`
 (Durchleitung, Deckel, Anfrage↔Antwort, 404/503).
 
 ## Zwei Projektionen, eine Erfassung

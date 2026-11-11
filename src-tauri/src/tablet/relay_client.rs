@@ -656,13 +656,10 @@ async fn handle_frame(
             match_id,
             timeline,
         } => {
-            if ctx
-                .tablet
-                .match_for_court(court_id)
-                .is_some_and(|m| m.id == match_id)
-            {
-                ctx.tablet.timeline_store().apply_sync(match_id, timeline);
-            }
+            // Kompletter Abgleich: auch noch kurz nach dem Spielende
+            // (Regel D der Spec tablet-stand-robust).
+            ctx.tablet
+                .verlauf_sync_annehmen(court_id, match_id, timeline);
         }
         // On-Demand-Abruf der TL-Oberfläche (AK-5): Antwort direkt aus dem
         // Store — winzige Payload, kein BTP-Zugriff, deshalb anders als
@@ -689,13 +686,8 @@ async fn handle_frame(
             match_id,
             events,
         } => {
-            if ctx
-                .tablet
-                .match_for_court(court_id)
-                .is_some_and(|m| m.id == match_id)
-            {
-                ctx.tablet.sheet_store().apply_event_sync(match_id, events);
-            }
+            ctx.tablet
+                .ereignis_sync_annehmen(court_id, match_id, events);
         }
         // Zettel-Abruf eines TL-Geräts (ADR 0039): Antwort direkt aus den
         // Stores. Wie beim Punktverlauf ohne eigenen Task — der Join ist
