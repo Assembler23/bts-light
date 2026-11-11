@@ -8,9 +8,10 @@ ADR [0086](adr/0086-ein-geordneter-sender-fuer-die-badhub-strecke.md) ·
 
 > **Stand:** v0.9.381 brachte Fristen, Fehlerklassen, Halt, Drossel, Backoff
 > ohne Logo und Log-Flanken; seit v0.9.382 sendet ein eigener Sender-Task,
-> und der Sync-Zyklus wartet nicht mehr auf badhub. Noch offen aus der Spec:
-> Tablet-Punkte durch denselben Sender (heute je Feld ein eigener Arbeiter),
-> weniger Vollstände, Auswertung der Punktverlauf-Antwort.
+> und der Sync-Zyklus wartet nicht mehr auf badhub; seit v0.9.383 wertet der
+> Punktverlauf badhubs Antwort aus ([punktverlauf.md](punktverlauf.md)). Noch
+> offen aus der Spec: Tablet-Punkte durch denselben Sender (heute je Feld ein
+> eigener Arbeiter) und weniger Vollstände — beides nach einer Messung im Feld.
 
 ## Wer sendet (seit v0.9.382)
 
@@ -85,7 +86,7 @@ so antwortet badhub immer (`answer`, `ok`, `error`).
 
 | Ausgang | `tset` | `tupdate_match` | Meldeliste | `sched` | `tverlauf` |
 |---|---|---|---|---|---|
-| 200 mit badhub-Antwort | ok | ok | ok | ok | ok |
+| 200 mit badhub-Antwort | ok | ok | ok | ok | ok — bei `verworfen > 0` nicht angenommen |
 | 200 ohne badhub-Antwort | Strecke gestört | ← | ← | ← | ← |
 | keine Antwort (Netz, Frist, DNS, TLS) | Strecke gestört | ← | ← | ← | ← |
 | 3xx, 408 | Strecke gestört | ← | ← | ← | ← |

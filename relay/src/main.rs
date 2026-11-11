@@ -110,6 +110,251 @@ const MONITOR_UPLOAD_LIMIT: usize = 20 * 1024 * 1024;
 /// Schutz – ein reales Turnier hat höchstens ~30 Felder).
 const MAX_TABLETS_PER_NS: usize = 64;
 
+/// Höchstzahl verschiedener Felder (CourtIDs), für die ein Namespace
+/// überhaupt Einträge führt — über alle Feld-Karten zusammen. Der Deckel
+/// hängt bewusst NICHT an der Feldliste des Hosts: Die ist nach einem
+/// Relay-Neustart leer, und ein Host (oder wer sich dafür ausgibt) könnte
+/// sonst mit immer neuen CourtIDs beliebig viele Einträge anlegen. Das
+/// größte bekannte Turnier hat 26 Felder.
+const MAX_FELD_SCHLUESSEL_JE_NS: usize = 128;
+
+// ── Deckel (Spec relay-haerten, PR 4; ADR 0090) ─────────────────────────
+//
+// Zwei Arten: FACHLICHE Deckel verwerfen oder kürzen und melden einmal —
+// die Verbindung bleibt. TRANSPORT-Deckel sind reiner Speicherschutz am
+// WebSocket und trennen; sie liegen weit über allem, was ein echtes Gerät
+// sendet.
+
+/// Höchstzahl Sätze in einem Punktestand (abgeschlossene Sätze).
+const MAX_SAETZE: usize = 10;
+/// Größte Spiel-Beschreibung (`MatchBrief`), serialisiert. Ein echter Brief
+/// mit Doppel, Schiedsrichtern und Zähltafelbediener bleibt unter 2 KiB
+/// (Test `echter_brief_bleibt_weit_unter_dem_deckel`).
+const MAX_BRIEF_LEN: usize = 16 * 1024;
+/// Längster Feldname bzw. Hallenname vom Host, in Zeichen.
+const MAX_FELD_TEXT: usize = 128;
+/// Längste Hallenfarbe (`#rrggbb`).
+const MAX_FARBE: usize = 16;
+/// Größter Sprachdienst-Block (`AzureTtsShare`), serialisiert.
+const MAX_AZURE_LEN: usize = 8 * 1024;
+/// Höchstzahl aufgerufener Spiele in der Liste.
+const MAX_PREPARED: usize = 200;
+/// Größte Liste der aufgerufenen Spiele, serialisiert.
+const MAX_PREPARED_LEN: usize = 256 * 1024;
+/// Längste Kennung, längster Zugang und längstes Profil eines TL-Geräts.
+const MAX_TL_TEXT: usize = 256;
+/// Monitor-Steuerung: Einträge je Karte und Länge einer Geräte-Kennung.
+const MAX_CONTROL_EINTRAEGE: usize = 256;
+const MAX_CONTROL_SCHLUESSEL: usize = 64;
+/// Längster Turniername im Monitor-Upload.
+const MAX_TURNIERNAME: usize = 256;
+
+/// Transport-Deckel der Tablet-Verbindung. Der größte fachlich zulässige
+/// Frame ist ein Zustand von 64 KiB; selbst der Zustand einer alten
+/// Format-1-Seite (bis 590 KB) bleibt darunter und wird fachlich verworfen
+/// statt die Verbindung zu kosten.
+const WS_MAX_TABLET: usize = 1024 * 1024;
+/// Monitor- und TL-Verbindung: Die Seiten senden nichts bzw. einen
+/// Zugangs-Frame.
+const WS_MAX_ANZEIGE: usize = 64 * 1024;
+/// Träger der fernen Halle: Ein 590-KB-Zustand einer alten Seite wird im
+/// Umschlag zweimal escaped und landet bei rund 1 MiB — mit 1 MiB würde die
+/// ferne Halle bei jedem Punkt getrennt.
+const WS_MAX_TRAEGER: usize = 4 * 1024 * 1024;
+/// Host: Der Relay verwirft einen zu großen Zettel erst NACH dem Empfang.
+/// Der Deckel muss also über dem größten fachlich zulässigen Frame samt
+/// JSON-Escaping (bis zum Doppelten) liegen — sonst würfe ein Sammeldruck
+/// den Turnier-PC ab.
+const WS_MAX_HOST: usize = 2 * MAX_SCORESHEET_HTML_LEN + 64 * 1024;
+
+const _: () = assert!(WS_MAX_HOST >= 2 * MAX_SCORESHEET_HTML_LEN);
+const _: () = assert!(WS_MAX_TABLET > 8 * MAX_STATE_LEN);
+const _: () = assert!(WS_MAX_TRAEGER > 4 * relay_proto::MAX_CARRIER_PAYLOAD_LEN);
+const _: () = assert!(WS_MAX_ANZEIGE >= 16 * 1024);
+
+/// Mengen-Takt je Tablet-Sitzung, kleine Frames (Punkt, Ballwechsel, Akku,
+/// Ruf, Einzel-Ereignis): Die Seite sperrt 0,7 s je Punkt, je Punkt gehen
+/// etwa vier Frames — höchstens rund sechs je Sekunde.
+const TAKT_SCHWUNG: f64 = 60.0;
+const TAKT_JE_SEKUNDE: f64 = 20.0;
+/// Mengen-Takt der kompletten Abgleiche — je ein eigener Eimer für
+/// `rally_sync` und `match_event_sync`. Weit großzügiger als die vier der
+/// Spec, und das mit Absicht: Jedes „zurück" am Tablet schickt BEIDE
+/// Abgleiche, ohne Punkt-Sperre (nur 250 ms Entprellung), und es gibt 50
+/// Rücknahme-Schritte. Ein verworfener `rally_sync` wird nie wiederholt —
+/// der Host behielte zurückgenommene Ballwechsel im Punktverlauf. 30 auf
+/// einmal plus 2 je Sekunde tragen alle 50 Schritte in schnellster Folge;
+/// die Nutzlast ist je Frame auf wenige KiB gedeckelt.
+const TAKT_SYNC_SCHWUNG: f64 = 30.0;
+const TAKT_SYNC_JE_SEKUNDE: f64 = 2.0;
+/// Mengen-Takt des gespiegelten Zustands (`state_sync`). Die Seite spiegelt
+/// je Punkt und je „zurück" einmal — auch hier tragen 30 + 3 je Sekunde eine
+/// volle Rücknahme-Serie. Ohne Takt ließe sich mit 64-KiB-Zuständen im
+/// Dauerfeuer das eine Schloss aller Turniere belegen (jeder wird geparst
+/// und verglichen).
+const TAKT_ZUSTAND_SCHWUNG: f64 = 30.0;
+const TAKT_ZUSTAND_JE_SEKUNDE: f64 = 3.0;
+
+/// Eimer-Verfahren als reiner Zustand: `schwung` Einheiten auf einmal,
+/// danach wächst das Kontingent mit `je_sekunde` nach.
+#[derive(Debug, Clone, Copy)]
+struct Eimer {
+    stand: f64,
+    seit: std::time::Instant,
+}
+
+impl Eimer {
+    fn voll(schwung: f64, jetzt: std::time::Instant) -> Self {
+        Self {
+            stand: schwung,
+            seit: jetzt,
+        }
+    }
+
+    /// Nimmt eine Einheit, falls eine da ist.
+    fn nimm(&mut self, schwung: f64, je_sekunde: f64, jetzt: std::time::Instant) -> bool {
+        let gewachsen = jetzt.saturating_duration_since(self.seit).as_secs_f64() * je_sekunde;
+        self.stand = (self.stand + gewachsen).min(schwung);
+        self.seit = jetzt;
+        if self.stand >= 1.0 {
+            self.stand -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Kürzt einen Text auf `max` Zeichen (an einer Zeichengrenze).
+fn kuerze(text: &mut String, max: usize) {
+    if text.chars().count() > max {
+        *text = text.chars().take(max).collect();
+    }
+}
+
+/// Wendet die fachlichen Deckel auf ein Host-Frame an: kürzt, leert oder
+/// verwirft (`None`). Der zweite Wert ist ein Hinweis fürs Log — der
+/// Aufrufer meldet jeden nur einmal je Host-Sitzung.
+fn host_frame_deckeln(frame: HostFrame) -> (Option<HostFrame>, Option<&'static str>) {
+    let groesse = |v: &dyn Fn() -> serde_json::Result<Vec<u8>>| v().map_or(usize::MAX, |b| b.len());
+    match frame {
+        HostFrame::MatchAssigned {
+            court_id,
+            mut court_label,
+            mut hall,
+            match_brief,
+            on_court_since_ms,
+            mut host_sets,
+        } => {
+            if groesse(&|| serde_json::to_vec(&match_brief)) > MAX_BRIEF_LEN {
+                return (
+                    None,
+                    Some("Spiel-Beschreibung über 16 KiB — Zuweisung verworfen"),
+                );
+            }
+            kuerze(&mut court_label, MAX_FELD_TEXT);
+            kuerze(&mut hall, MAX_FELD_TEXT);
+            let mut hinweis = None;
+            if host_sets.len() > MAX_SAETZE {
+                // Ohne Host-Sätze steigt ein Ersatz-Tablet eben bei 0:0 ein
+                // — besser als die Zuweisung zu verlieren.
+                host_sets.clear();
+                hinweis = Some("mehr als zehn Host-Sätze — ohne Sätze durchgereicht");
+            }
+            (
+                Some(HostFrame::MatchAssigned {
+                    court_id,
+                    court_label,
+                    hall,
+                    match_brief,
+                    on_court_since_ms,
+                    host_sets,
+                }),
+                hinweis,
+            )
+        }
+        HostFrame::MatchCleared {
+            court_id,
+            mut court_label,
+            mut hall,
+        } => {
+            // Das Räumen wirkt immer; nur die Texte werden gekürzt.
+            kuerze(&mut court_label, MAX_FELD_TEXT);
+            kuerze(&mut hall, MAX_FELD_TEXT);
+            (
+                Some(HostFrame::MatchCleared {
+                    court_id,
+                    court_label,
+                    hall,
+                }),
+                None,
+            )
+        }
+        HostFrame::Courts {
+            mut courts,
+            mut azure_tts,
+            reconnect_legacy_rev,
+        } => {
+            for c in &mut courts {
+                kuerze(&mut c.label, MAX_FELD_TEXT);
+                kuerze(&mut c.hall, MAX_FELD_TEXT);
+                if let Some(farbe) = &mut c.hall_color {
+                    kuerze(farbe, MAX_FARBE);
+                }
+            }
+            let mut hinweis = None;
+            if azure_tts
+                .as_ref()
+                .is_some_and(|a| groesse(&|| serde_json::to_vec(a)) > MAX_AZURE_LEN)
+            {
+                azure_tts = None;
+                hinweis = Some("Sprachdienst-Block über 8 KiB — nicht übernommen");
+            }
+            (
+                Some(HostFrame::Courts {
+                    courts,
+                    azure_tts,
+                    reconnect_legacy_rev,
+                }),
+                hinweis,
+            )
+        }
+        HostFrame::Prepared { mut prepared } => {
+            let mut hinweis = None;
+            // Erst die Zahl kappen (wie bisher im Arm), dann messen — sonst
+            // serialisierte ein überlanger Push unnötig viel unter dem Schloss.
+            prepared.truncate(MAX_PREPARED);
+            if groesse(&|| serde_json::to_vec(&prepared)) > MAX_PREPARED_LEN {
+                // Ehrliche Fehlanzeige statt einer abgeschnittenen Liste
+                // (wie beim TL-Zustand).
+                prepared.clear();
+                hinweis = Some("Liste der aufgerufenen Spiele über 256 KiB — geleert");
+            }
+            (Some(HostFrame::Prepared { prepared }), hinweis)
+        }
+        HostFrame::TlAuth { mut devices } => {
+            // Nur den einzelnen Eintrag auslassen bzw. kürzen — NICHT die
+            // ganze Liste verwerfen: Sonst bliebe die alte Zugangsliste
+            // gültig, und ein Widerruf im selben Push griffe nicht. Ein
+            // Zugang über 256 Zeichen kann ohnehin nie passen.
+            let vorher = devices.len();
+            devices.retain(|d| d.token.chars().count() <= MAX_TL_TEXT);
+            for d in &mut devices {
+                kuerze(&mut d.id, MAX_TL_TEXT);
+                kuerze(&mut d.profile_id, MAX_TL_TEXT);
+            }
+            let hinweis = (devices.len() != vorher)
+                .then_some("TL-Zugang über 256 Zeichen — dieser Eintrag ausgelassen");
+            (Some(HostFrame::TlAuth { devices }), hinweis)
+        }
+        andere => (Some(andere), None),
+    }
+}
+
+/// Längste Geräte-Kennung eines Tablets, die der Relay sich merkt. Die
+/// Seite schickt eine UUID; alles darüber ist kein Tablet.
+const MAX_GERAETE_KENNUNG: usize = 128;
+
 /// WebSocket-Ping-Intervall – hält Verbindungen über NAT/LB offen.
 const HEARTBEAT: Duration = Duration::from_secs(30);
 
@@ -180,10 +425,358 @@ const MAX_SCORESHEET_HTML_LEN: usize = relay_proto::MAX_SHEETS_PER_DOC * 128 * 1
 /// — dieselbe Konstante wie am Turnier-PC.
 const MAX_STATE_LEN: usize = relay_proto::MAX_STATE_LEN;
 
-type Tx = mpsc::UnboundedSender<Message>;
+// ── Begrenzte Kanäle (Spec relay-haerten, PR 5; ADR 0090) ───────────────
+//
+// Bis v0.9.385 waren alle Kanäle unbegrenzt: Nahm ein Empfänger nicht ab
+// (träge Leitung, hängendes Gerät, ein Host, der gerade auf BTP wartet),
+// wuchs sein Kanal ohne Grenze — im Speicher des Relays, der alle Turniere
+// trägt. Jetzt hat jeder Kanal eine feste Größe. Ist er voll, wird der
+// EMPFÄNGER getrennt (er verbindet neu und bekommt den frischen Stand);
+// nichts wird still verworfen, während die Verbindung weiterläuft.
+
+/// Kanal zum Turnier-PC. Eine Halle mit 20 Feldern erzeugt im üblichen
+/// Betrieb 3–4 Nachrichten je Sekunde; ein Turnier-PC, der nichts mehr
+/// sendet, wird ohnehin nach `HOST_STALE` (15 s) getrennt. Das letzte
+/// Viertel bleibt den Nachrichten vorbehalten, die kein Tablet auslösen
+/// kann (siehe [`Tx::send_nachrangig`]).
+const KANAL_HOST: usize = 1024;
+/// Kanal zu einem Tablet bzw. einem Substrom des Trägers.
+const KANAL_TABLET: usize = 64;
+/// Kanal zu einem Monitor oder einer Turnierleitungs-Seite (nur Anstöße).
+const KANAL_ANZEIGE: usize = 32;
+/// Sammelkanal eines Trägers (alle Substrome einer fernen Halle).
+const KANAL_TRAEGER: usize = 1024;
+
+/// Body-Deckel der Ergebnis-Route. Ein echtes Ergebnis ist wenige hundert
+/// Bytes groß; ohne Deckel galt der Standard von 2 MiB — je Nachricht im
+/// Kanal des Turnier-PCs.
+const RESULT_BODY_MAX: usize = 16 * 1024;
+
+// ── Host-Verlust auf den Anzeigen (Spec relay-haerten, PR 7; ADR 0088) ──
+//
+// Bis v0.9.387 zeigte eine Anzeige ohne Turnier-PC entweder den
+// eingefrorenen Stand (solange ein Tablet den Namespace hielt) oder eine
+// leere Leerlauf-Seite — beides sah aus wie „alles in Ordnung". Jetzt
+// gilt: 20 s lang den letzten Stand halten (ein Wackler bleibt
+// unsichtbar), danach ehrlich 503.
+
+/// So lange zeigen die Anzeigen nach dem Verlust des Turnier-PCs noch den
+/// letzten Stand — und so lange nach dem Start des Relays gilt ein
+/// fehlender Namespace als „kommt gleich wieder".
+const HOST_KARENZ_MS: u64 = 20_000;
+
+/// So lange hält der Relay die Daten eines Turniers ohne Turnier-PC (Spec
+/// relay-haerten, PR 8; ADR 0089). Lang genug für jede Störung eines
+/// Turniertags (Neustart des PCs, Router-Ausfall, Mittagspause mit
+/// zugeklapptem Laptop) — danach liegen keine Namen, Bilder und Listen
+/// eines beendeten Turniers mehr im Speicher.
+const DATEN_FRIST_MS: u64 = 60 * 60 * 1000;
+
+/// Ein Brief ohne Personen: nur die Spielkennung und „beendet". Bleibt nach
+/// dem Leeren an einem Feld stehen, an dem noch ein Tablet hängt — ohne
+/// Eintrag verwürfe der Stale-Filter jeden weiteren Punkt des Tablets, und
+/// bei der Rückkehr des Turnier-PCs gälte „anderes Spiel" (Stand auf 0:0).
+fn anonymer_brief(match_id: i64, finalized: bool) -> MatchBrief {
+    serde_json::from_value(serde_json::json!({
+        "matchId": match_id,
+        "teamA": [],
+        "teamB": [],
+        "eventLabel": "",
+        "bestOfSets": 0,
+        "targetScore": 0,
+        "finalized": finalized,
+    }))
+    .expect("anonymer Brief ist lesbar")
+}
+
+/// Takt des Aufräum-Tasks ([`fegen`]).
+const FEGEN_TAKT: Duration = Duration::from_secs(5);
+
+/// Close-Code für einen zweiten Turnier-PC am selben Namespace.
+const CLOSE_HOST_BELEGT: u16 = 4409;
+/// Close-Code am Namespace-Limit.
+const CLOSE_VOLL: u16 = 4429;
+
+/// Was eine Stand-Route gerade antworten darf.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lage {
+    /// Turnier-PC verbunden — oder erst so kurz weg, dass der gehaltene
+    /// Stand noch gilt.
+    Offen,
+    /// Kein Turnier-PC: 503.
+    Gesperrt,
+    /// Der Relay läuft erst seit Sekunden und kennt den Namespace (noch)
+    /// nicht: Wer eine Marke mitbringt, bekommt „unverändert" — die Seite
+    /// hat ihren Stand noch, der Relay nach dem Neustart nicht.
+    StartKarenz,
+}
+
+/// Die Lage eines Namespace — reine Funktion von Zustand und Uhr.
+fn anzeige_lage(namespace: Option<&Namespace>, jetzt: u64, start_ms: u64) -> Lage {
+    match namespace {
+        Some(n) if n.host.is_some() => Lage::Offen,
+        Some(n) if !n.karenz_abgelaufen(jetzt) => Lage::Offen,
+        Some(_) => Lage::Gesperrt,
+        None if jetzt.saturating_sub(start_ms) < HOST_KARENZ_MS => Lage::StartKarenz,
+        None => Lage::Gesperrt,
+    }
+}
+
+/// Die Antwort „kein Turnier-PC". Der Grund steht im RUMPF, nicht in einem
+/// Kopf: Die Slave-Brücke der fernen Halle reicht eigene Köpfe nicht durch.
+fn host_weg_antwort() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::RETRY_AFTER, "2"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        r#"{"grund":"host_weg"}"#,
+    )
+        .into_response()
+}
+
+/// Entscheidet für eine Stand-Route, ob sie gesperrt antwortet. Muss unter
+/// dem Schloss und VOR Cache-Blick, Bau und Markenvergleich stehen:
+/// Gesperrt gibt es weder 304 noch Cache-Treffer.
+fn sperre(lage: Lage, headers: &axum::http::HeaderMap) -> Option<Response> {
+    match lage {
+        Lage::Offen => None,
+        Lage::Gesperrt => Some(host_weg_antwort()),
+        Lage::StartKarenz if headers.contains_key(header::IF_NONE_MATCH) => Some(
+            (
+                StatusCode::NOT_MODIFIED,
+                [(header::CACHE_CONTROL, "no-store")],
+            )
+                .into_response(),
+        ),
+        Lage::StartKarenz => Some(host_weg_antwort()),
+    }
+}
+
+/// Stößt jede Monitor-Verbindung des Namespace einmal an (Karenz-Ende und
+/// Rückkehr des Turnier-PCs): Die Anzeigen holen sofort ab und sehen die
+/// neue Lage, statt auf ihren Sicherheitsabruf zu warten.
+fn alle_monitore_anstossen(namespace: &mut Namespace) {
+    let mut felder: Vec<i64> = namespace
+        .monitor_subs
+        .keys()
+        .chain(namespace.monitor_seq.keys())
+        .copied()
+        .collect();
+    felder.sort_unstable();
+    felder.dedup();
+    if felder.is_empty() && !namespace.monitor_subs_all.is_empty() {
+        felder.push(0);
+    }
+    for feld in felder {
+        notify_monitor(namespace, feld);
+    }
+}
+
+/// Der Aufräum-Lauf: meldet das Karenz-Ende einmal an die Anzeigen und
+/// entfernt Namespaces, die niemand mehr braucht. Läuft alle
+/// [`FEGEN_TAKT`] aus `main`.
+async fn fegen(broker: &Broker, jetzt: u64) {
+    let mut map = broker.namespaces.lock().await;
+    let mut leer = Vec::new();
+    for (ns, namespace) in map.iter_mut() {
+        if namespace.host.is_some() {
+            continue;
+        }
+        if namespace.karenz_abgelaufen(jetzt) && !namespace.karenz_gemeldet {
+            namespace.karenz_gemeldet = true;
+            alle_monitore_anstossen(namespace);
+        }
+        if namespace.daten_frist_abgelaufen(jetzt) && !namespace.geleert {
+            namespace.leeren();
+            tracing::info!(
+                "Namespace '{kennung}': seit 60 min ohne Turnier-PC — Turnierdaten geleert",
+                kennung = kurz(ns)
+            );
+        }
+        if namespace.is_empty_um(jetzt) {
+            leer.push(ns.clone());
+        }
+    }
+    for ns in leer {
+        namespace_aufraeumen_um(&mut map, &ns, jetzt);
+    }
+}
+
+/// Warum eine Nachricht nicht in den Kanal ging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KanalFehler {
+    /// Der Empfänger nimmt nicht schnell genug ab.
+    Voll,
+    /// Der Empfänger ist weg.
+    Zu,
+}
+
+/// Überlauf-Merkmal eines Kanals, geteilt zwischen Sender und Empfänger.
+#[derive(Default)]
+struct Ueberlauf {
+    gesetzt: std::sync::atomic::AtomicBool,
+    wecker: tokio::sync::Notify,
+    /// „Kanal knapp" schon gemeldet (siehe [`Tx::send_nachrangig`]).
+    knapp_gemeldet: std::sync::atomic::AtomicBool,
+}
+
+/// Sende-Ende eines begrenzten Kanals. `send` wartet nie: Ist der Kanal
+/// voll, setzt es das Überlauf-Merkmal — die Verbindungsschleife des
+/// Empfängers sieht es ([`UeberlaufWache::warten`]) und beendet sich.
+#[derive(Clone)]
+struct Tx {
+    sender: mpsc::Sender<Message>,
+    ueberlauf: Arc<Ueberlauf>,
+}
+
+impl Tx {
+    fn send(&self, msg: Message) -> Result<(), KanalFehler> {
+        match self.sender.try_send(msg) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(KanalFehler::Zu),
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                use std::sync::atomic::Ordering;
+                if !self.ueberlauf.gesetzt.swap(true, Ordering::SeqCst) {
+                    // `notify_one` merkt sich das Signal, falls gerade
+                    // niemand wartet.
+                    self.ueberlauf.wecker.notify_one();
+                }
+                Err(KanalFehler::Voll)
+            }
+        }
+    }
+
+    /// Sendet eine NACHRANGIGE Nachricht: Sie darf das letzte Viertel des
+    /// Kanals nicht belegen und löst nie eine Trennung aus. Ist der Kanal
+    /// so weit gefüllt, wird sie verworfen (einmal gemeldet).
+    ///
+    /// Dafür da: alles, was ein Tablet in den Kanal des Turnier-PCs legt.
+    /// Wer die Turnier-Kennung hat, kann beliebig viele Tablet-Frames
+    /// erzeugen. Dürften sie den Kanal füllen, ließe sich der Turnier-PC
+    /// gezielt trennen — und sein Platz danach besetzen (`host-ws` hat
+    /// keine Anmeldung). Die Lücke heilt: Punkt und Zustand durch den
+    /// nächsten Frame, der Verlauf durch den kompletten Abgleich, die
+    /// Anmeldung eines Tablets beim Wiederverbinden des Turnier-PCs.
+    fn send_nachrangig(&self, msg: Message) -> Result<(), KanalFehler> {
+        if self.sender.capacity() <= self.sender.max_capacity() / 4 {
+            use std::sync::atomic::Ordering;
+            if !self.ueberlauf.knapp_gemeldet.swap(true, Ordering::Relaxed) {
+                tracing::warn!(
+                    "Kanal knapp – nachrangige Nachrichten an den Turnier-PC werden verworfen"
+                );
+            }
+            return Err(KanalFehler::Voll);
+        }
+        self.send(msg)
+    }
+
+    /// Gehören beide Enden zum selben Kanal? Darüber unterscheidet der
+    /// Relay Geräte (Halter eines Felds, Host eines Namespace).
+    fn same_channel(&self, other: &Tx) -> bool {
+        self.sender.same_channel(&other.sender)
+    }
+}
+
+/// Wartet darauf, dass der Kanal einmal voll war.
+struct UeberlaufWache(Arc<Ueberlauf>);
+
+impl UeberlaufWache {
+    async fn warten(&self) {
+        loop {
+            if self.0.gesetzt.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            self.0.wecker.notified().await;
+        }
+    }
+}
+
+/// Legt einen begrenzten Kanal an.
+fn kanal(groesse: usize) -> (Tx, mpsc::Receiver<Message>, UeberlaufWache) {
+    let (sender, rx) = mpsc::channel(groesse);
+    let ueberlauf = Arc::new(Ueberlauf::default());
+    (
+        Tx {
+            sender,
+            ueberlauf: ueberlauf.clone(),
+        },
+        rx,
+        UeberlaufWache(ueberlauf),
+    )
+}
+
+/// Kanal für Tests: groß genug, dass er nie überläuft; ohne Wache.
+#[cfg(test)]
+fn kanal_test() -> (Tx, mpsc::Receiver<Message>) {
+    let (tx, rx, _wache) = kanal(8192);
+    (tx, rx)
+}
+
+/// Gesamt-Budget für Werbe- und Logo-Bytes ALLER Turniere (Spec
+/// relay-haerten, PR 6; ADR 0090). Je Turnier gilt weiter `MAX_ADS_TOTAL`;
+/// ohne Gesamtgrenze ließen sich mit erfundenen Turnieren beliebig viele
+/// Bilder im Speicher des Relays ablegen.
+const BILDER_BUDGET: usize = 256 * 1024 * 1024;
+
+/// So viele Bilder-Uploads verarbeitet der Relay gleichzeitig. Jeder hält
+/// vorübergehend rund 50 MiB (Rumpf, geparste Texte, dekodierte Bilder);
+/// ohne Grenze ließe sich der Dienst mit parallelen Uploads über seine
+/// Speicher-Obergrenze treiben. Ein Turnier-PC lädt selten hoch (beim
+/// Verbinden und bei Änderungen) — zwei Plätze reichen.
+const UPLOADS_GLEICHZEITIG: usize = 2;
+
+/// Längster Text eines Schalters der Monitor-Konfiguration (`layout`,
+/// Plätze vor/unter dem Namen) und einer Farbe im Bild-Stil. Echte Werte
+/// sind Schlüsselwörter und `#rrggbb`.
+const MAX_CONFIG_TEXT: usize = 32;
+
+/// Ein gebuchter Anteil am Bilder-Budget. Gibt ihn beim Verwerfen von selbst
+/// zurück — so sinkt der Zähler auf jedem Weg, auf dem ein Bild verschwindet
+/// (Ersetzen, Aufräumen eines Turniers), ohne dass eine Stelle daran denken
+/// muss.
+struct Buchung {
+    zaehler: Arc<std::sync::atomic::AtomicUsize>,
+    bytes: usize,
+}
+
+impl Buchung {
+    /// Bucht `bytes`, wenn das Budget reicht.
+    fn versuchen(
+        zaehler: &Arc<std::sync::atomic::AtomicUsize>,
+        bytes: usize,
+        grenze: usize,
+    ) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        let mut jetzt = zaehler.load(Ordering::SeqCst);
+        loop {
+            let neu = jetzt.checked_add(bytes).filter(|neu| *neu <= grenze)?;
+            match zaehler.compare_exchange(jetzt, neu, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break,
+                Err(stand) => jetzt = stand,
+            }
+        }
+        Some(Self {
+            zaehler: zaehler.clone(),
+            bytes,
+        })
+    }
+}
+
+impl Drop for Buchung {
+    fn drop(&mut self) {
+        self.zaehler
+            .fetch_sub(self.bytes, std::sync::atomic::Ordering::SeqCst);
+    }
+}
 
 /// Ein hochgeladenes Werbebild im Speicher (Content-Type + Rohbytes).
 struct AdImage {
+    /// Anteil am Gesamt-Budget; `None` nur, solange das Bild noch nicht
+    /// im Turnier abgelegt ist.
+    buchung: Option<Buchung>,
     content_type: String,
     bytes: Vec<u8>,
     /// `true`, wenn das Bild zusätzlich klein in der oberen Leiste erscheinen
@@ -359,6 +952,17 @@ struct Namespace {
     /// (Turnier-Befund 19.07.: tote TCP-Verbindung nach Netzwechsel hielt
     /// den Slot 17 Minuten — der Master war so lange ausgesperrt).
     host_last_seen: u64,
+    /// Seit wann dieser Namespace ohne Turnier-PC ist (Unix-ms); `None`,
+    /// solange einer verbunden ist. Beim Freigeben des Slots auf das LETZTE
+    /// LEBENSZEICHEN gesetzt — ein stumm gestorbener Host ist so rund 20 s
+    /// nach seinem letzten Lebenszeichen gesperrt, nicht nach 15 + 20 s. Ein
+    /// von einem Tablet angelegter Namespace beginnt mit „weg seit jetzt".
+    host_weg_seit: Option<u64>,
+    /// Das Karenz-Ende ist den Anzeigen schon gemeldet ([`fegen`]).
+    karenz_gemeldet: bool,
+    /// Die Turnierdaten sind nach [`DATEN_FRIST_MS`] ohne Turnier-PC
+    /// geleert ([`Namespace::leeren`]).
+    geleert: bool,
     /// CourtID → Sende-Ende zur Tablet-WebSocket.
     tablets: HashMap<i64, Tx>,
     /// CourtID → Geräte-Kennung des aktiven Tablets (leer bei alten
@@ -398,7 +1002,7 @@ struct Namespace {
     tablet_state_seit: HashMap<i64, std::time::Instant>,
     /// CourtID → Eimer für das Weiterreichen von Zuständen an den Host
     /// ([`host_weitergabe_erlaubt`]).
-    state_weitergabe: HashMap<i64, (f64, std::time::Instant)>,
+    state_weitergabe: HashMap<i64, Eimer>,
     /// CourtID → Feldname (Anzeige) – vom Host mit jedem `MatchAssigned`/
     /// `MatchCleared`-Frame mitgeliefert, für die Monitor-Anzeige.
     court_labels: HashMap<i64, String>,
@@ -413,6 +1017,11 @@ struct Namespace {
     /// Vollständige Feld-Liste (vom Host via `HostFrame::Courts` gepusht) für
     /// das Cloud-Feldwechsel-Menü des Tablets (`/{ns}/courts`).
     courts: Vec<CourtBrief>,
+    /// Wurde die Überschreitung des Feld-Deckels in dieser Host-Sitzung
+    /// schon gemeldet?
+    feld_deckel_gemeldet: bool,
+    /// Welche Deckel-Hinweise in dieser Host-Sitzung schon im Log stehen.
+    host_deckel_gemeldet: std::collections::HashSet<&'static str>,
     /// Aufgerufene (in Vorbereitung gerufene) Spiele der fernen Hallen – für
     /// die Slave-Spielübersicht + den Nachruf am Slave (Cluster C Stufe 2).
     /// Vom Host via `HostFrame::Prepared` gepusht; ersetzt jeweils die Liste.
@@ -563,6 +1172,96 @@ impl Namespace {
         self.court_state.insert(court_id, state);
     }
 
+    /// Kennt der HOST dieses Feld (Feldliste, Zuweisung oder Name)? Nur für
+    /// solche Felder bleibt der gesicherte Stand über den Abgang des
+    /// Tablets hinaus liegen — er gehört dem Ersatzgerät.
+    fn feld_host_bekannt(&self, court_id: i64) -> bool {
+        // Feldname und Halle setzt nur der Host (`MatchAssigned`,
+        // `MatchCleared`).
+        self.court_matches.contains_key(&court_id)
+            || self.court_labels.contains_key(&court_id)
+            || self.court_hall.contains_key(&court_id)
+            || self.courts.iter().any(|c| c.id == court_id)
+    }
+
+    /// Verwirft Feldnamen und Hallen von Feldern, die der Host nicht mehr
+    /// führt: nicht in der neuen Feldliste, ohne Spiel und ohne Tablet.
+    /// Beide Karten wuchsen sonst nur — bleibt ein Turnier-PC über mehrere
+    /// Turniere verbunden, zählten ihre Altlasten auf den Feld-Deckel, bis
+    /// er ein NEUES Feld still verwürfe.
+    fn feld_altlasten_raeumen(&mut self) {
+        let bleibt: std::collections::HashSet<i64> = self
+            .courts
+            .iter()
+            .map(|c| c.id)
+            .chain(self.court_matches.keys().copied())
+            .chain(self.tablets.keys().copied())
+            .collect();
+        self.court_labels.retain(|c, _| bleibt.contains(c));
+        self.court_hall.retain(|c, _| bleibt.contains(c));
+        self.court_on_court_since.retain(|c, _| bleibt.contains(c));
+    }
+
+    /// Führt der Namespace schon irgendeinen Eintrag für dieses Feld?
+    fn feld_gefuehrt(&self, court_id: i64) -> bool {
+        self.feld_host_bekannt(court_id)
+            || self.tablets.contains_key(&court_id)
+            || self.court_state.contains_key(&court_id)
+            || self.court_scores.contains_key(&court_id)
+            || self.court_hall.contains_key(&court_id)
+            || self.court_on_court_since.contains_key(&court_id)
+            || self.vor_match.contains_key(&court_id)
+            || self.monitor_seq.contains_key(&court_id)
+    }
+
+    /// Zahl der verschiedenen Felder über alle Feld-Karten.
+    fn feld_schluessel_anzahl(&self) -> usize {
+        let mut alle: std::collections::HashSet<i64> = self.courts.iter().map(|c| c.id).collect();
+        alle.extend(self.court_matches.keys());
+        alle.extend(self.court_labels.keys());
+        alle.extend(self.tablets.keys());
+        alle.extend(self.court_state.keys());
+        alle.extend(self.court_scores.keys());
+        alle.extend(self.court_hall.keys());
+        alle.extend(self.court_on_court_since.keys());
+        alle.extend(self.vor_match.keys());
+        alle.extend(self.monitor_seq.keys());
+        alle.len()
+    }
+
+    /// Darf für dieses Feld ein Eintrag entstehen? Ein schon geführtes Feld
+    /// immer; ein neues nur unter dem Deckel
+    /// [`MAX_FELD_SCHLUESSEL_JE_NS`]. Die Überschreitung wird einmal je
+    /// Host-Sitzung gemeldet (das Merkmal fällt mit dem Host-Wechsel).
+    fn feld_erlaubt(&mut self, ns: &str, court_id: i64) -> bool {
+        if self.feld_gefuehrt(court_id) || self.feld_schluessel_anzahl() < MAX_FELD_SCHLUESSEL_JE_NS
+        {
+            return true;
+        }
+        if !self.feld_deckel_gemeldet {
+            self.feld_deckel_gemeldet = true;
+            tracing::warn!(
+                "Namespace '{kennung}': mehr als {MAX_FELD_SCHLUESSEL_JE_NS} verschiedene Felder — Feld {court_id} und weitere werden verworfen", kennung = kurz(ns));
+        }
+        false
+    }
+
+    /// Räumt, was ein Tablet für ein Feld hinterlassen hat, das der Host
+    /// gar nicht kennt. Ohne das wüchse der Namespace mit jeder CourtID, die
+    /// sich ein Tablet ausdenkt (ein Tablet hält ihn, weitere wechseln die
+    /// Feldnummern durch). Für host-bekannte Felder bleibt alles liegen.
+    fn feld_raeumen_wenn_unbekannt(&mut self, court_id: i64) {
+        if self.feld_host_bekannt(court_id) {
+            return;
+        }
+        self.clear_court_state(court_id);
+        self.court_scores.remove(&court_id);
+        self.court_hall.remove(&court_id);
+        self.court_on_court_since.remove(&court_id);
+        self.vor_match.remove(&court_id);
+        self.monitor_seq.remove(&court_id);
+    }
+
     /// Räumt beide Fassungen (Match-Wechsel, Feld geleert).
     fn clear_court_state(&mut self, court_id: i64) {
         self.court_state.remove(&court_id);
@@ -599,8 +1298,9 @@ impl Namespace {
         if erstmals {
             tracing::warn!(
                 "Tablet-Stand von Feld {court_id} verworfen ({quelle}): {len} Bytes \
-                 (Grenze {MAX_STATE_LEN}), Match {match_id}, Namespace '{ns}' — \
-                 der vorige Stand bleibt"
+                 (Grenze {MAX_STATE_LEN}), Match {match_id}, Namespace '{kennung}' — \
+                 der vorige Stand bleibt",
+                kennung = kurz(ns)
             );
         }
         erstmals
@@ -610,6 +1310,9 @@ impl Namespace {
         Self {
             host: None,
             host_last_seen: 0,
+            host_weg_seit: Some(now_ms()),
+            karenz_gemeldet: false,
+            geleert: false,
             tablets: HashMap::new(),
             tablet_devices: HashMap::new(),
             court_state: HashMap::new(),
@@ -628,6 +1331,8 @@ impl Namespace {
             freetext: Vec::new(),
             slaves: HashMap::new(),
             courts: Vec::new(),
+            feld_deckel_gemeldet: false,
+            host_deckel_gemeldet: std::collections::HashSet::new(),
             azure_tts: None,
             monitor: None,
             monitor_control: MonitorControl::default(),
@@ -687,11 +1392,73 @@ impl Namespace {
     /// die Offline-Blende zu fallen (Review-Fund 19.08.2026). Damit sie
     /// dabei nicht **still** verwaisen, verabschiedet
     /// [`namespace_aufraeumen`] sie mit einem Close.
-    fn is_empty(&self) -> bool {
+    ///
+    /// **Solange die Karenz läuft, ist der Namespace nicht leer** (PR 7):
+    /// Sonst gäbe es im LAN+Cloud-Betrieb ohne Cloud-Tablets nichts, was
+    /// 20 s weitergezeigt werden könnte. Das Entfernen übernimmt [`fegen`].
+    fn is_empty_um(&self, jetzt: u64) -> bool {
         self.host.is_none()
             && self.tablets.is_empty()
             && self.pending.is_empty()
             && self.tl_subs.is_empty()
+            // Die Karenz hält nur Namespaces, die je einen Turnier-PC hatten.
+            // Einer, den bloß ein Tablet angelegt hat, verschwindet mit ihm —
+            // sonst ließe sich mit kurzen Verbindungen zu erfundenen
+            // Kennungen das Namespace-Limit füllen, ohne eine Verbindung
+            // offen zu halten (Code-Review).
+            //
+            // Seit PR 8 bleibt so ein Namespace die ganze Daten-Frist stehen:
+            // Die Anzeigen sehen 503 und kennen ihre Zuweisung weiter; kehrt
+            // der Turnier-PC zurück, ist alles noch da.
+            && (self.host_last_seen == 0 || self.daten_frist_abgelaufen(jetzt))
+    }
+
+    /// Ist der Turnier-PC schon länger als die Daten-Frist weg?
+    fn daten_frist_abgelaufen(&self, jetzt: u64) -> bool {
+        self.host_weg_seit
+            .is_some_and(|seit| jetzt.saturating_sub(seit) >= DATEN_FRIST_MS)
+    }
+
+    /// Leert die Turnierdaten (nach [`DATEN_FRIST_MS`] ohne Turnier-PC).
+    /// Was ein noch verbundenes Tablet zum Weiterzählen braucht, bleibt:
+    /// sein Stand, seine Sätze und ein Brief ohne Personen.
+    fn leeren(&mut self) {
+        let mit_tablet: HashSet<i64> = self.tablets.keys().copied().collect();
+        self.court_matches = std::mem::take(&mut self.court_matches)
+            .into_iter()
+            .filter(|(feld, _)| mit_tablet.contains(feld))
+            .map(|(feld, b)| (feld, anonymer_brief(b.match_id, b.finalized)))
+            .collect();
+        self.court_scores.retain(|f, _| mit_tablet.contains(f));
+        self.court_state.retain(|f, _| mit_tablet.contains(f));
+        self.display_court_state
+            .retain(|f, _| mit_tablet.contains(f));
+        self.state_deckel_gemeldet
+            .retain(|f, _| mit_tablet.contains(f));
+        self.monitor_seq.retain(|f, _| mit_tablet.contains(f));
+        self.court_on_court_since.clear();
+        self.vor_match.clear();
+        self.court_labels.clear();
+        self.court_hall.clear();
+        self.courts.clear();
+        self.prepared.clear();
+        self.freetext.clear();
+        self.meetingpoint = relay_proto::MeetingpointView::default();
+        // Bilder und Logo geben dabei ihren Anteil am Bilder-Budget zurück.
+        self.monitor = None;
+        self.monitor_control = MonitorControl::default();
+        self.monitor_seen.clear();
+        self.slaves.clear();
+        self.azure_tts = None;
+        self.overview_cache = None;
+        self.bump_overview_rev();
+        self.geleert = true;
+    }
+
+    /// Ist der Turnier-PC schon länger als die Karenz weg?
+    fn karenz_abgelaufen(&self, jetzt: u64) -> bool {
+        self.host_weg_seit
+            .is_some_and(|seit| jetzt.saturating_sub(seit) >= HOST_KARENZ_MS)
     }
 }
 
@@ -713,6 +1480,14 @@ struct Broker {
     /// Bildschirm hat, könnte sich damit jeder als Tablet ausgeben (ADR 0012).
     /// Der Zugang findet sein Turnier deshalb selbst.
     tl_index: Arc<Mutex<HashMap<String, String>>>,
+    /// Bytes aller Werbe- und Logo-Bilder im Speicher (siehe [`Buchung`]).
+    bilder_bytes: Arc<std::sync::atomic::AtomicUsize>,
+    /// Grenze dazu — [`BILDER_BUDGET`]; Tests setzen sie klein.
+    bilder_budget: usize,
+    /// Plätze für gleichzeitige Bilder-Uploads ([`UPLOADS_GLEICHZEITIG`]).
+    upload_plaetze: Arc<tokio::sync::Semaphore>,
+    /// Start des Prozesses (Unix-ms) — für die Start-Karenz ([`Lage`]).
+    start_ms: u64,
     /// Öffentliche Basis-URL für QR-Codes, z. B. `https://badhub.de/bts-relay`.
     public_base: String,
 }
@@ -738,6 +1513,10 @@ impl Broker {
             pairings: Arc::new(Mutex::new(HashMap::new())),
             pair_fails: Arc::new(Mutex::new((0, 0))),
             tl_index: Arc::new(Mutex::new(HashMap::new())),
+            bilder_bytes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            bilder_budget: BILDER_BUDGET,
+            upload_plaetze: Arc::new(tokio::sync::Semaphore::new(UPLOADS_GLEICHZEITIG)),
+            start_ms: now_ms(),
             public_base,
         }
     }
@@ -767,6 +1546,14 @@ fn text<T: Serialize>(value: &T) -> Message {
 /// nur Hex und Bindestriche). Die `install_id` ist immer eine
 /// `crypto.randomUUID()` – frei erfundene oder überlange Namespaces
 /// werden so abgewiesen, bevor sie Speicher belegen.
+/// Die Kennung fürs Log: nur die ersten 8 Zeichen. Die volle Kennung ist
+/// der Zugang der Tablets und Monitore — sie gehört nicht in eine Datei,
+/// die 30 Tage liegt. Zum Wiederfinden reicht der Anfang (siehe
+/// `docs/logging.md`).
+fn kurz(ns: &str) -> &str {
+    ns.get(..8).unwrap_or(ns)
+}
+
 fn valid_namespace(ns: &str) -> bool {
     let bytes = ns.as_bytes();
     bytes.len() == 36
@@ -793,18 +1580,26 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     // Verbindungsspam von axum/hyper wird gefiltert → lesbare, kompakte Datei.
     let level = LevelFilter::INFO;
     let stdout_layer = tracing_subscriber::fmt::layer().with_ansi(false);
-    match std::env::var("RELAY_LOG_DIR") {
-        Ok(dir) if !dir.is_empty() => {
-            // Relay läuft als `badhub` und darf in storage/ schreiben. Scheitert
-            // das (falsche Rechte/Quota), warnen wir nach stdout/journald — sonst
-            // bliebe die erwartete Datei stumm leer (im Ernstfall der falsche
-            // Moment, das zu merken). Der stdout-Fallback greift weiterhin.
+    let datei = std::env::var("RELAY_LOG_DIR")
+        .ok()
+        .filter(|dir| !dir.is_empty())
+        .and_then(|dir| {
+            // Scheitert das Anlegen (falsche Rechte/Quota), warnen wir nach
+            // stdout/journald — sonst bliebe die erwartete Datei stumm leer.
             if let Err(e) = std::fs::create_dir_all(&dir) {
                 eprintln!("WARN: RELAY_LOG_DIR '{dir}' nicht anlegbar: {e} — nur stdout");
             }
-            let (non_blocking, guard) = tracing_appender::non_blocking(
-                tracing_appender::rolling::daily(&dir, "bts-relay.log"),
-            );
+            match log_datei(&dir) {
+                Ok(datei) => Some(datei),
+                Err(e) => {
+                    eprintln!("WARN: Relay-Logdatei in '{dir}' nicht anlegbar: {e} — nur stdout");
+                    None
+                }
+            }
+        });
+    match datei {
+        Some(datei) => {
+            let (non_blocking, guard) = tracing_appender::non_blocking(datei);
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 .with_writer(non_blocking);
@@ -815,7 +1610,7 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
                 .init();
             Some(guard)
         }
-        _ => {
+        None => {
             tracing_subscriber::registry()
                 .with(level)
                 .with(stdout_layer)
@@ -825,20 +1620,26 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    // Guard bis Programmende halten → der Datei-Writer flusht zuverlässig.
-    let _log_guard = init_tracing();
+/// So viele Tagesdateien des Relay-Logs bleiben liegen.
+const LOG_DATEIEN_MAX: usize = 30;
 
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8090);
-    let public_base =
-        std::env::var("PUBLIC_BASE").unwrap_or_else(|_| "https://badhub.de/bts-relay".to_string());
+/// Die täglich rotierende Logdatei `bts-relay.log.YYYY-MM-DD` — mit Verfall:
+/// Ältere als die jüngsten [`LOG_DATEIEN_MAX`] löscht der Appender selbst.
+/// Vorher wuchs das Verzeichnis ohne Grenze.
+fn log_datei(
+    dir: &str,
+) -> Result<tracing_appender::rolling::RollingFileAppender, tracing_appender::rolling::InitError> {
+    tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("bts-relay.log")
+        .max_log_files(LOG_DATEIEN_MAX)
+        .build(dir)
+}
 
-    let broker = Broker::new(public_base.clone());
-
+/// Alle Routen des Relays. Aus `main` herausgelöst, damit Tests den
+/// echten Router über einen echten WebSocket fahren können (Transport-
+/// Deckel wirken erst dort).
+fn router(broker: Broker, tl_an: bool) -> Router {
     let app = Router::new()
         .route("/health", get(health))
         .route("/{ns}/court/{id}", get(court_page))
@@ -877,7 +1678,7 @@ async fn main() {
         .route("/{ns}/ads/{idx}", get(ad_image))
         .route(
             "/{ns}/monitor",
-            post(monitor_upload).layer(DefaultBodyLimit::max(MONITOR_UPLOAD_LIMIT)),
+            post(monitor_upload_route).layer(DefaultBodyLimit::max(MONITOR_UPLOAD_LIMIT)),
         )
         .route("/{ns}/ws", get(tablet_ws))
         // Court-Monitor-Nudge (A1, ADR 0016): niedrig-latente Anzeige über die
@@ -889,14 +1690,16 @@ async fn main() {
         // Namespace") bleibt unberührt.
         .route("/{ns}/carrier-ws", get(carrier_ws))
         .route("/{ns}/host-ws", get(host_ws))
-        .route("/{ns}/result", post(result));
+        .route(
+            "/{ns}/result",
+            post(result).layer(DefaultBodyLimit::max(RESULT_BODY_MAX)),
+        );
 
     // Not-Aus für die Turnierleitungs-Oberfläche: `BTS_RELAY_TL=off` lässt
     // die Routen gar nicht erst entstehen. Der Relay ist ein **globales**
     // Binary für alle Installationen; träte im neuen Schreibweg ein Fehler
     // auf, muss er sich ohne Rebuild und ohne Rückbau der übrigen Dienste
     // abschalten lassen — mitten im Turnierbetrieb anderer.
-    let tl_an = tl_enabled(std::env::var("BTS_RELAY_TL").ok().as_deref());
     // **Ohne Namespace in der Adresse**: Der wäre die `install_id` und damit
     // zugleich der Zugang der Zähltablets. Der Zugang des Geräts findet sein
     // Turnier über den Wegweiser selbst (ADR 0012).
@@ -934,7 +1737,37 @@ async fn main() {
         tracing::warn!("Turnierleitungs-Oberfläche per BTS_RELAY_TL=off abgeschaltet");
         app
     };
-    let app = app.with_state(broker);
+    app.with_state(broker)
+}
+
+#[tokio::main]
+async fn main() {
+    // Guard bis Programmende halten → der Datei-Writer flusht zuverlässig.
+    let _log_guard = init_tracing();
+
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8090);
+    let public_base =
+        std::env::var("PUBLIC_BASE").unwrap_or_else(|_| "https://badhub.de/bts-relay".to_string());
+
+    let broker = Broker::new(public_base.clone());
+
+    let tl_an = tl_enabled(std::env::var("BTS_RELAY_TL").ok().as_deref());
+    // Aufräum-Task: Karenz-Ende melden, verwaiste Namespaces entfernen.
+    {
+        let broker = broker.clone();
+        tokio::spawn(async move {
+            let mut takt = tokio::time::interval(FEGEN_TAKT);
+            takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                takt.tick().await;
+                fegen(&broker, now_ms()).await;
+            }
+        });
+    }
+    let app = router(broker, tl_an);
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
@@ -954,6 +1787,8 @@ async fn health(State(broker): State<Broker>) -> Json<serde_json::Value> {
         "ok": true,
         "namespaces": map.len(),
         "tablets": map.values().map(|n| n.tablets.len()).sum::<usize>(),
+        // Prüfpunkt vor jedem Merge: Läuft gerade ein Turnier über die Cloud?
+        "hosts": map.values().filter(|n| n.host.is_some()).count(),
     }))
 }
 
@@ -1209,10 +2044,17 @@ async fn monitor_state(
     let stream = q.zweck.as_deref() == Some("stream");
     let state = {
         let map = broker.namespaces.lock().await;
+        if let Some(antwort) = sperre(
+            anzeige_lage(map.get(&ns), now_ms(), broker.start_ms),
+            &headers,
+        ) {
+            return antwort;
+        }
         match map.get(&ns) {
             Some(namespace) if stream => build_stream_state(namespace, court_id),
             Some(namespace) => build_monitor_state(namespace, court_id),
-            // Kein Host verbunden: leerer Zustand → neutrale Leerlauf-Seite.
+            // Nach `sperre` nicht mehr erreichbar (fehlender Namespace ist
+            // gesperrt oder in der Start-Karenz).
             None => empty_monitor_state(court_id, String::new()),
         }
     };
@@ -1242,11 +2084,16 @@ async fn monitor_device_state(
         return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
     }
     let mut map = broker.namespaces.lock().await;
+    let lage = anzeige_lage(map.get(&ns), now_ms(), broker.start_ms);
     let Some(namespace) = map.get_mut(&ns) else {
-        // Host nicht verbunden – das Gerät zeigt die Leerlauf-Seite. Auch
-        // dieser Pfad durchläuft denselben ETag/304-Punkt (U10) — keine
-        // 200-Antwort umgeht den Cache-Zweig, gerade im häufigsten Störfall.
-        let state = empty_monitor_state(0, String::new());
+        // Der Relay kennt dieses Turnier nicht — also auch keine Zuweisung.
+        // In der Start-Karenz gilt „kommt gleich wieder" (304 mit Marke);
+        // danach sieht jedes Gerät die Kopplungs-Seite mit dem Hinweis.
+        if lage == Lage::StartKarenz {
+            return sperre(lage, &headers).unwrap_or_else(host_weg_antwort);
+        }
+        let mut state = unassigned_state(&q.device);
+        state.host_offline = true;
         return monitor_state_response(&headers, state);
     };
     // Poll registrieren. Bei erreichter Obergrenze das am längsten nicht
@@ -1280,6 +2127,18 @@ async fn monitor_device_state(
                 .get(&q.device)
                 .map(|&id| relay_proto::MonitorTarget::court(id))
         });
+    // Kein Turnier-PC (nach der Karenz): Ein zugewiesenes Gerät bekommt 503,
+    // ein unzugewiesenes behält die Kopplungs-Seite — mit Hinweis. Das
+    // Lebenszeichen des Geräts ist oben schon gestempelt.
+    if lage == Lage::Gesperrt {
+        if target.is_some() {
+            return host_weg_antwort();
+        }
+        let mut state = unassigned_state(&q.device);
+        state.host_offline = true;
+        state.command = command;
+        return monitor_state_response(&headers, state);
+    }
     let ist_tafel = matches!(target, Some(relay_proto::MonitorTarget::CourtTafel { .. }));
     // Darstellung aus der Zuweisung (ADR 0068) — Tafel und Nicht-Feld-Ziele
     // liefern Standard, ein unbekannter Stil ebenso.
@@ -1343,6 +2202,29 @@ async fn monitor_control_upload(
     let Some(namespace) = map.get_mut(&ns) else {
         return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
     };
+    // Wie beim Bilder-Upload: Steuerung nur von einem Turnier mit
+    // verbundenem Turnier-PC.
+    if namespace.host.is_none() {
+        return (StatusCode::CONFLICT, "bts-light ist nicht verbunden.");
+    }
+    // Fachlicher Deckel: 128 Geräte sind die Obergrenze der Geräteliste —
+    // 256 Einträge je Karte und 64 Zeichen je Kennung sind reichlich. Erst
+    // NACH der Namespace-Prüfung: Die Warnung soll sich nicht für erfundene
+    // Namespaces auslösen lassen.
+    let schluessel_ok = |k: &String| k.chars().count() <= MAX_CONTROL_SCHLUESSEL;
+    if control.assignments.len() > MAX_CONTROL_EINTRAEGE
+        || control.targets.len() > MAX_CONTROL_EINTRAEGE
+        || control.commands.len() > MAX_CONTROL_EINTRAEGE
+        || !control.assignments.keys().all(schluessel_ok)
+        || !control.targets.keys().all(schluessel_ok)
+        || !control.commands.keys().all(schluessel_ok)
+    {
+        tracing::warn!(
+            "Namespace '{kennung}': Monitor-Steuerung über dem Deckel — abgelehnt",
+            kennung = kurz(&ns)
+        );
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Monitor-Steuerung zu groß.");
+    }
     namespace.monitor_control = control;
     (StatusCode::OK, "ok")
 }
@@ -1418,6 +2300,13 @@ async fn announce_state(
                     n.slaves.insert(id, (hall, now));
                 }
             }
+            // Ohne Turnier-PC SOFORT 503, ohne Karenz: Ein 200 ohne
+            // Sprachdienst-Schlüssel läse der Ansage-Slave als „der
+            // Turnier-PC hat den Dienst abgeschaltet" und verwürfe seine
+            // geerbte Stimme; einen Fehler übergeht er.
+            if n.host.is_none() {
+                return host_weg_antwort();
+            }
             let courts: Vec<relay_proto::AnnounceCourt> = n
                 .court_matches
                 .iter()
@@ -1456,7 +2345,7 @@ async fn announce_state(
                 azure_tts: n.azure_tts.clone(),
             }
         }
-        None => relay_proto::AnnounceState::default(),
+        None => return host_weg_antwort(),
     };
     ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
 }
@@ -1604,6 +2493,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         command: None,
         device_code: String::new(),
         unassigned: false,
+        host_offline: false,
         redirect_to: None,
         server_now_ms: now_ms(),
         // Aufruf-Timer am Monitor: im Cloud-Pfad noch nicht durchgereicht
@@ -1618,6 +2508,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
 fn unassigned_state(device_id: &str) -> MonitorState {
     MonitorState {
         unassigned: true,
+        host_offline: false,
         device_code: device_code(device_id),
         ..empty_monitor_state(0, String::new())
     }
@@ -1717,6 +2608,7 @@ fn build_monitor_state_mit(
         command: None,
         device_code: String::new(),
         unassigned: false,
+        host_offline: false,
         redirect_to: None,
         server_now_ms: now_ms(),
         // 1.-Aufruf-Zeitpunkt (relay-seitig gestempelt) + Aufruf-Timer-Schwellen
@@ -2078,6 +2970,12 @@ async fn overview_health(
         // und der Fehler wächst mit der Last, also ausgerechnet dort, wo die
         // Frist gebraucht wird (Sicherheits-Review 20.08.2026).
         let jetzt = now_ms();
+        // Die Lage VOR Cache-Blick, Bau und Markenvergleich: Gesperrt gibt
+        // es weder 304 noch Cache-Treffer.
+        if let Some(antwort) = sperre(anzeige_lage(map.get(&ns), jetzt, broker.start_ms), &headers)
+        {
+            return antwort;
+        }
         if wunsch.is_none() {
             if let Some(n) = map.get(&ns) {
                 if let Some(c) = &n.overview_cache {
@@ -2394,12 +3292,19 @@ async fn meetingpoint_state(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
     Query(q): Query<MpQuery>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
     let view = {
         let map = broker.namespaces.lock().await;
+        if let Some(antwort) = sperre(
+            anzeige_lage(map.get(&ns), now_ms(), broker.start_ms),
+            &headers,
+        ) {
+            return antwort;
+        }
         map.get(&ns).map(|n| n.meetingpoint.fuer_halle(&q.halle))
     };
     match view {
@@ -2527,12 +3432,19 @@ async fn preparation_page(Path(ns): Path<String>) -> impl IntoResponse {
 async fn preparation_state(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
     let candidates: Vec<serde_json::Value> = {
         let map = broker.namespaces.lock().await;
+        if let Some(antwort) = sperre(
+            anzeige_lage(map.get(&ns), now_ms(), broker.start_ms),
+            &headers,
+        ) {
+            return antwort;
+        }
         map.get(&ns)
             .map(|n| {
                 n.prepared
@@ -2575,13 +3487,56 @@ async fn preparation_state(
 /// darf hochladen – dasselbe Vertrauensmodell wie für die übrigen
 /// Namespace-Routen. Worst Case ist das Überschreiben der Werbebilder
 /// eines bekannten Turniers; kein Code, keine Ergebnis-Schreibrechte.
+async fn monitor_upload_route(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    request: axum::extract::Request,
+) -> (StatusCode, &'static str) {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace");
+    }
+    // Bilder-Tor, erste Stufe — VOR dem Lesen des Rumpfs: Ohne verbundenen
+    // Turnier-PC nimmt der Relay keine 20 MiB entgegen.
+    {
+        let map = broker.namespaces.lock().await;
+        if !map.get(&ns).is_some_and(|n| n.host.is_some()) {
+            return (StatusCode::CONFLICT, "bts-light ist nicht verbunden.");
+        }
+    }
+    // Höchstens zwei Uploads gleichzeitig — der Platz gilt, bis der Upload
+    // verarbeitet ist.
+    let Ok(_platz) = broker.upload_plaetze.clone().try_acquire_owned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Der Relay ist beschäftigt – bitte erneut senden.",
+        );
+    };
+    let Ok(rumpf) = axum::body::to_bytes(request.into_body(), MONITOR_UPLOAD_LIMIT).await else {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Upload zu groß.");
+    };
+    let Ok(upload) = serde_json::from_slice::<MonitorUpload>(&rumpf) else {
+        return (StatusCode::UNPROCESSABLE_ENTITY, "Upload nicht lesbar.");
+    };
+    drop(rumpf);
+    monitor_upload(State(broker), Path(ns), Json(upload)).await
+}
+
 async fn monitor_upload(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
-    Json(upload): Json<MonitorUpload>,
-) -> impl IntoResponse {
+    Json(mut upload): Json<MonitorUpload>,
+) -> (StatusCode, &'static str) {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace");
+    }
+    // Texte der Konfiguration deckeln: Sie zählen nicht ins Bilder-Budget
+    // und gelten auch bei geschlossenem Tor.
+    kuerze(&mut upload.config.layout, MAX_CONFIG_TEXT);
+    kuerze(&mut upload.config.name_davor, MAX_CONFIG_TEXT);
+    kuerze(&mut upload.config.name_darunter, MAX_CONFIG_TEXT);
+    for ad in upload.ads.iter_mut() {
+        kuerze(&mut ad.style.bg, MAX_CONFIG_TEXT);
+        kuerze(&mut ad.style.fg, MAX_CONFIG_TEXT);
     }
     let mut ads = Vec::new();
     let mut total = 0usize;
@@ -2594,6 +3549,7 @@ async fn monitor_upload(
             break;
         }
         ads.push(AdImage {
+            buchung: None,
             content_type: sanitize_content_type(&ad.content_type),
             etag: bild_marke(&bytes),
             bytes,
@@ -2604,7 +3560,7 @@ async fn monitor_upload(
     // Turnierlogo (falls mitgeschickt) – MIME wie bei den Ads gewhitelistet,
     // Größe gegen den eigenen knappen `MAX_LOGO_BYTES`-Cap; ein kaputtes Base64
     // oder ein zu großes Logo verwirft nur das Logo, nicht den Upload.
-    let logo = upload.logo.and_then(|l| {
+    let mut logo = upload.logo.and_then(|l| {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(l.data.as_bytes())
             .ok()?;
@@ -2612,6 +3568,7 @@ async fn monitor_upload(
             return None;
         }
         Some(AdImage {
+            buchung: None,
             content_type: sanitize_content_type(&l.content_type),
             etag: bild_marke(&bytes),
             bytes,
@@ -2622,12 +3579,82 @@ async fn monitor_upload(
         })
     });
     let mut map = broker.namespaces.lock().await;
+    // Wird das Budget knapp, weichen zuerst die Bilder von Turnieren OHNE
+    // Turnier-PC (am längsten verwaist zuerst). Sie blieben sonst die ganze
+    // Daten-Frist gebucht — auch die eines erfundenen Turniers, das nur kurz
+    // verbunden war. Ihr Turnier-PC lädt beim Wiederverbinden neu hoch.
+    let neu_bytes: usize = ads.iter().chain(logo.iter()).map(|b| b.bytes.len()).sum();
+    hostlose_bilder_freigeben(&mut map, &broker, neu_bytes);
     let Some(namespace) = map.get_mut(&ns) else {
         return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
     };
+    if namespace.host.is_none() {
+        return (StatusCode::CONFLICT, "bts-light ist nicht verbunden.");
+    }
+    let (alte_ads, altes_logo) = namespace
+        .monitor
+        .take()
+        .map(|m| (m.ads, m.logo))
+        .unwrap_or_default();
+    let mut antwort = (StatusCode::OK, "ok");
+    {
+        // Gesamt-Budget. Passen die neuen Bilder hinein, sobald die alten
+        // dieses Turniers losgelassen sind (Ersetzen kostet nichts doppelt)?
+        // Wenn nicht, BLEIBEN die alten: Ein laufendes Turnier soll seine
+        // Werbung nicht verlieren, weil andere das Budget belegt haben.
+        use std::sync::atomic::Ordering;
+        let groesse = |b: &AdImage| b.bytes.len();
+        let alt: usize = alte_ads.iter().chain(altes_logo.iter()).map(groesse).sum();
+        let neu: usize = ads.iter().chain(logo.iter()).map(groesse).sum();
+        let belegt_ohne_alt = broker
+            .bilder_bytes
+            .load(Ordering::SeqCst)
+            .saturating_sub(alt);
+        let mut gebucht = belegt_ohne_alt.saturating_add(neu) <= broker.bilder_budget;
+        if gebucht {
+            drop((alte_ads, altes_logo));
+            // Ganz oder gar nicht — ein halber Bildersatz verschöbe die
+            // Indizes der Sponsor-Leiste. (Scheitert es hier doch noch, hat
+            // ein paralleler Upload den Platz genommen.)
+            for bild in ads.iter_mut().chain(logo.iter_mut()) {
+                match Buchung::versuchen(
+                    &broker.bilder_bytes,
+                    bild.bytes.len(),
+                    broker.bilder_budget,
+                ) {
+                    Some(b) => bild.buchung = Some(b),
+                    None => {
+                        gebucht = false;
+                        break;
+                    }
+                }
+            }
+            if !gebucht {
+                ads.clear();
+                logo = None;
+            }
+        } else {
+            ads = alte_ads;
+            logo = altes_logo;
+        }
+        if !gebucht {
+            tracing::warn!(
+                "Namespace '{kennung}': Bilder-Budget des Relays erschöpft — neue Bilder verworfen",
+                kennung = kurz(&ns)
+            );
+            antwort = (
+                StatusCode::INSUFFICIENT_STORAGE,
+                "Der Relay nimmt gerade keine Bilder an.",
+            );
+        }
+    }
     namespace.monitor = Some(MonitorBundle {
         config: upload.config,
-        tournament_name: upload.tournament_name,
+        tournament_name: {
+            let mut name = upload.tournament_name;
+            kuerze(&mut name, MAX_TURNIERNAME);
+            name
+        },
         ads,
         call_timer: upload.call_timer,
         logo,
@@ -2635,8 +3662,55 @@ async fn monitor_upload(
     // Aufruf-Timer und Fallback-Schalter reisen im Umschlag der Übersicht mit
     // und gehen in ihre Marke ein — dieser Weg stößt aber nicht an (Spec S9).
     namespace.bump_overview_rev();
-    tracing::info!("Namespace '{ns}': Court-Monitor-Datensatz aktualisiert");
-    (StatusCode::OK, "ok")
+    tracing::info!(
+        "Namespace '{kennung}': Court-Monitor-Datensatz aktualisiert",
+        kennung = kurz(&ns)
+    );
+    antwort
+}
+
+/// Gibt Bilder hostloser Namespaces frei, bis `neu_bytes` ins Budget passen
+/// (oder keine mehr da sind). Am längsten ohne Turnier-PC zuerst.
+fn hostlose_bilder_freigeben(
+    map: &mut HashMap<String, Namespace>,
+    broker: &Broker,
+    neu_bytes: usize,
+) {
+    use std::sync::atomic::Ordering;
+    let passt = || {
+        broker
+            .bilder_bytes
+            .load(Ordering::SeqCst)
+            .saturating_add(neu_bytes)
+            <= broker.bilder_budget
+    };
+    if passt() {
+        return;
+    }
+    let mut verwaist: Vec<(u64, String)> = map
+        .iter()
+        .filter(|(_, n)| {
+            n.host.is_none()
+                && n.monitor
+                    .as_ref()
+                    .is_some_and(|m| !m.ads.is_empty() || m.logo.is_some())
+        })
+        .map(|(ns, n)| (n.host_weg_seit.unwrap_or(0), ns.clone()))
+        .collect();
+    verwaist.sort();
+    for (_, ns) in verwaist {
+        if passt() {
+            break;
+        }
+        if let Some(m) = map.get_mut(&ns).and_then(|n| n.monitor.as_mut()) {
+            m.ads.clear();
+            m.logo = None;
+            tracing::info!(
+                "Namespace '{kennung}': Bilder freigegeben (Budget knapp, kein Turnier-PC)",
+                kennung = kurz(&ns)
+            );
+        }
+    }
 }
 
 /// Lässt nur die erwarteten Bild-MIME-Typen durch (der Header kommt vom
@@ -2654,11 +3728,16 @@ fn sanitize_content_type(ct: &str) -> String {
 async fn result(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
-    Json(body): Json<ResultBody>,
+    Json(mut body): Json<ResultBody>,
 ) -> Json<ResultResponse> {
     if !valid_namespace(&ns) {
         return Json(ResultResponse::err("Unbekannter Namespace."));
     }
+    // Wie am WebSocket: höchstens zehn Sätze, Feldname gekürzt.
+    if body.sets.len() > MAX_SAETZE {
+        return Json(ResultResponse::err("Ungültiges Ergebnis."));
+    }
+    kuerze(&mut body.court_label, MAX_FELD_TEXT);
     let (ack_tx, ack_rx) = oneshot::channel();
     let req_id;
     {
@@ -2723,7 +3802,9 @@ async fn tablet_ws(
     if !valid_namespace(&ns) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    ws.on_upgrade(move |socket| tablet_conn(socket, broker, ns))
+    ws.max_message_size(WS_MAX_TABLET)
+        .max_frame_size(WS_MAX_TABLET)
+        .on_upgrade(move |socket| tablet_conn(socket, broker, ns))
         .into_response()
 }
 
@@ -2742,10 +3823,25 @@ async fn tablet_ws(
 struct TabletSitzung {
     ns: String,
     /// Feld-Identität dieser Sitzung: die CourtID, sobald `identify` kam.
+    ///
+    /// **Ein Feld je Sitzung.** Ein Feldwechsel ist immer ein Neuladen der
+    /// Seite mit neuer Verbindung. Ob die Sitzung das Feld gerade *hält*,
+    /// steht nicht hier, sondern allein in `Namespace.tablets`
+    /// ([`is_holder`]) — ein eigener Merker in der Sitzung lief davon weg:
+    /// Wurde das Tablet verdrängt, blieb er wahr, ein späteres „Übernehmen"
+    /// wurde still verworfen und die Seite zählte ins Leere.
     court: Option<i64>,
-    /// Schiedst dieses Tablet das Feld aktiv? Passive Tablets warten auf
-    /// „Übernehmen"; ihre Score-/Alert-Frames werden nicht weitergeleitet.
-    active: bool,
+    /// Wurde ein `identify` für ein ANDERES Feld schon gemeldet?
+    fremdes_feld_gemeldet: bool,
+    /// Mengen-Takt der kleinen Frames und der kompletten Abgleiche.
+    takt: Eimer,
+    takt_verlauf: Eimer,
+    takt_zettel: Eimer,
+    takt_zustand: Eimer,
+    /// Wurde das Überschreiten des Takts bzw. des Satz-Deckels in dieser
+    /// Sitzung schon gemeldet?
+    takt_gemeldet: bool,
+    saetze_gemeldet: bool,
     /// Persistente Geräte-Kennung (aus identify/take_over) — leer bei
     /// alten Tablet-Seiten. Für die Reconnect-Erkennung je Feld.
     my_device: String,
@@ -2765,7 +3861,13 @@ impl TabletSitzung {
         Self {
             ns,
             court: None,
-            active: false,
+            fremdes_feld_gemeldet: false,
+            takt: Eimer::voll(TAKT_SCHWUNG, std::time::Instant::now()),
+            takt_verlauf: Eimer::voll(TAKT_SYNC_SCHWUNG, std::time::Instant::now()),
+            takt_zettel: Eimer::voll(TAKT_SYNC_SCHWUNG, std::time::Instant::now()),
+            takt_zustand: Eimer::voll(TAKT_ZUSTAND_SCHWUNG, std::time::Instant::now()),
+            takt_gemeldet: false,
+            saetze_gemeldet: false,
             my_device: String::new(),
         }
     }
@@ -2775,17 +3877,48 @@ impl TabletSitzung {
     /// Unlesbare Frames werden still verworfen — wie bisher.
     async fn verarbeite(&mut self, broker: &Broker, roh: &str, tx: &Tx) -> SitzungsSchritt {
         let ns = self.ns.clone();
-        match serde_json::from_str::<TabletMsg>(roh) {
+        let geparst = serde_json::from_str::<TabletMsg>(roh);
+        if let Ok(msg) = &geparst {
+            if !self.takt_erlaubt(msg, std::time::Instant::now()) {
+                return SitzungsSchritt::Weiter;
+            }
+        }
+        match geparst {
             Ok(TabletMsg::Identify {
                 court_id,
                 device_id,
                 ..
             }) => {
-                self.my_device = device_id;
+                match self.court {
+                    // Anderes Feld auf derselben Verbindung: verwerfen. Sonst
+                    // belegte jedes weitere `identify` ein Feld mehr, beim
+                    // Trennen würde nur das letzte gelöst — die übrigen
+                    // blieben als tote Slots stehen und hielten den
+                    // Namespace bis zum Relay-Neustart am Leben.
+                    Some(bisher) if bisher != court_id => {
+                        if !self.fremdes_feld_gemeldet {
+                            self.fremdes_feld_gemeldet = true;
+                            tracing::warn!(
+                                "Tablet an Feld {bisher} (Namespace '{kennung}') meldet sich für Feld {court_id} an — verworfen, ein Feld je Verbindung", kennung = kurz(&ns));
+                        }
+                        return SitzungsSchritt::Weiter;
+                    }
+                    // Dasselbe Feld, und die Sitzung hält es schon: nichts
+                    // tun. Die Seite wiederholt `identify`, solange sie kein
+                    // Spiel bekommt — der Relay verdrängte dabei bisher die
+                    // eigene Sitzung (`SessionSuperseded` an sich selbst).
+                    Some(_) if haelt_feld(broker, &ns, court_id, tx).await => {
+                        return SitzungsSchritt::Weiter;
+                    }
+                    _ => {}
+                }
+                self.my_device = kuerze_kennung(device_id);
                 match attach_tablet(broker, &ns, court_id, &self.my_device, tx).await {
                     AttachResult::Active => {
-                        tracing::info!("Tablet verbunden: Namespace '{ns}', Feld {court_id}");
-                        self.active = true;
+                        tracing::info!(
+                            "Tablet verbunden: Namespace '{kennung}', Feld {court_id}",
+                            kennung = kurz(&ns)
+                        );
                         self.court = Some(court_id);
                     }
                     AttachResult::Occupied => {
@@ -2797,13 +3930,26 @@ impl TabletSitzung {
                 }
             }
             Ok(TabletMsg::TakeOver { device_id }) => {
-                if let (Some(c), false) = (self.court, self.active) {
-                    if !device_id.is_empty() {
-                        self.my_device = device_id;
+                // Übernehmen darf, wer ein Feld hat und es gerade NICHT hält —
+                // auch ein Tablet, das selbst verdrängt wurde (Rück-Übernahme).
+                if let Some(c) = self.court {
+                    if !haelt_feld(broker, &ns, c, tx).await {
+                        if !device_id.is_empty() {
+                            self.my_device = kuerze_kennung(device_id);
+                        }
+                        if take_over_court(broker, &ns, c, &self.my_device, tx).await {
+                            tracing::info!(
+                                "Tablet übernimmt Feld {c} (Namespace '{kennung}')",
+                                kennung = kurz(&ns)
+                            );
+                        } else {
+                            // Abgewiesen (ein Deckel greift): Die Seite hielte
+                            // sich sonst für den Halter und zählte ins Leere.
+                            // Schließen wie bei einer abgewiesenen Anmeldung —
+                            // das Tablet zeigt die getrennte Verbindung.
+                            return SitzungsSchritt::Schliessen;
+                        }
                     }
-                    take_over_court(broker, &ns, c, &self.my_device, tx).await;
-                    self.active = true;
-                    tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
                 }
             }
             Ok(TabletMsg::ScoreUpdate {
@@ -2812,7 +3958,20 @@ impl TabletSitzung {
                 sets_history,
                 match_id,
             }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                // Kein Badmintonspiel hat mehr als zehn Sätze; die Liste wird
+                // gespeichert und an den Host gereicht.
+                if sets_history.len() > MAX_SAETZE {
+                    if !self.saetze_gemeldet {
+                        self.saetze_gemeldet = true;
+                        tracing::warn!(
+                            "Tablet (Namespace '{kennung}') meldet {} Sätze — verworfen",
+                            sets_history.len(),
+                            kennung = kurz(&ns)
+                        );
+                    }
+                    return SitzungsSchritt::Weiter;
+                }
+                if let Some(c) = self.court {
                     forward_score(broker, &ns, c, score_a, score_b, sets_history, match_id, tx)
                         .await;
                 }
@@ -2828,7 +3987,7 @@ impl TabletSitzung {
                 score_a,
                 score_b,
             }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_rally(
                         broker, &ns, c, match_id, set, n, winner, score_a, score_b, tx,
                     )
@@ -2836,22 +3995,22 @@ impl TabletSitzung {
                 }
             }
             Ok(TabletMsg::RallySync { match_id, timeline }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_rally_sync(broker, &ns, c, match_id, timeline, tx).await;
                 }
             }
             Ok(TabletMsg::Battery { percent, charging }) => {
-                if let (Some(c), true) = (self.court, self.active) {
-                    forward_battery(broker, &ns, c, percent, charging).await;
+                if let Some(c) = self.court {
+                    forward_battery(broker, &ns, c, percent, charging, tx).await;
                 }
             }
             Ok(TabletMsg::Alert { injury, official }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_alert(broker, &ns, c, injury, official, tx).await;
                 }
             }
             Ok(TabletMsg::StateSync { state }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     store_court_state(broker, &ns, c, state, tx).await;
                 }
             }
@@ -2868,12 +4027,12 @@ impl TabletSitzung {
             // Punktverlauf — Briefträger, nur Halter-, Stale- und
             // Größen-Prüfung, keine Deutung und keine Vorhaltung.
             Ok(TabletMsg::MatchEvent { match_id, event }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_match_event(broker, &ns, c, match_id, event, tx).await;
                 }
             }
             Ok(TabletMsg::MatchEventSync { match_id, events }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_match_event_sync(broker, &ns, c, match_id, events, tx).await;
                 }
             }
@@ -2882,14 +4041,49 @@ impl TabletSitzung {
         SitzungsSchritt::Weiter
     }
 
+    /// Mengen-Takt: Passt dieser Frame noch ins Kontingent der Sitzung?
+    /// `identify`, `take_over` und `ping` zählen nicht.
+    fn takt_erlaubt(&mut self, msg: &TabletMsg, jetzt: std::time::Instant) -> bool {
+        let erlaubt = match msg {
+            TabletMsg::ScoreUpdate { .. }
+            | TabletMsg::Rally { .. }
+            | TabletMsg::Battery { .. }
+            | TabletMsg::Alert { .. }
+            | TabletMsg::MatchEvent { .. } => self.takt.nimm(TAKT_SCHWUNG, TAKT_JE_SEKUNDE, jetzt),
+            TabletMsg::RallySync { .. } => {
+                self.takt_verlauf
+                    .nimm(TAKT_SYNC_SCHWUNG, TAKT_SYNC_JE_SEKUNDE, jetzt)
+            }
+            TabletMsg::MatchEventSync { .. } => {
+                self.takt_zettel
+                    .nimm(TAKT_SYNC_SCHWUNG, TAKT_SYNC_JE_SEKUNDE, jetzt)
+            }
+            TabletMsg::StateSync { .. } => {
+                self.takt_zustand
+                    .nimm(TAKT_ZUSTAND_SCHWUNG, TAKT_ZUSTAND_JE_SEKUNDE, jetzt)
+            }
+            _ => true,
+        };
+        if !erlaubt && !self.takt_gemeldet {
+            self.takt_gemeldet = true;
+            tracing::warn!(
+                "Tablet (Namespace '{}', Feld {:?}) sendet schneller als jedes Zähl-Tablet — Frames werden verworfen",
+                kurz(&self.ns),
+                self.court
+            );
+        }
+        erlaubt
+    }
+
     /// Gibt den Court-Slot frei, wenn diese Sitzung ihn hielt.
     ///
-    /// **Nur das aktive Tablet räumt ab** — `detach_tablet` prüft zusätzlich
-    /// über `same_channel`, dass der Eintrag wirklich dieser Sitzung gehört.
+    /// **Nur der Halter räumt ab** — `detach_tablet` prüft über
+    /// `same_channel`, dass der Eintrag wirklich dieser Sitzung gehört.
     async fn abraeumen(&self, broker: &Broker, tx: &Tx) {
-        if let (Some(c), true) = (self.court, self.active) {
-            detach_tablet(broker, &self.ns, c, tx).await;
-            tracing::info!("Tablet getrennt: Namespace '{}', Feld {c}", self.ns);
+        if let Some(c) = self.court {
+            if detach_tablet(broker, &self.ns, c, tx).await {
+                tracing::info!("Tablet getrennt: Namespace '{}', Feld {c}", kurz(&self.ns));
+            }
         }
     }
 }
@@ -2900,7 +4094,7 @@ impl TabletSitzung {
 /// Diese Funktion ist der **Transport**; das Fachliche steht in
 /// [`TabletSitzung`].
 async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx, voll) = kanal(KANAL_TABLET);
     let mut sitzung = TabletSitzung::neu(ns.clone());
     // Enger Ping-Takt + Empfangs-Stale wie bei `host_conn`: Der Relay pingt
     // aktiv, der Browser auto-pongt auf Protokoll-Ebene. Bleibt jedes
@@ -2911,6 +4105,13 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
 
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Tablet (Namespace '{kennung}') wird getrennt", kennung = kurz(&ns));
+                break;
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 // VOR dem inneren `match` stempeln: gilt für Text/Pong/Close/
@@ -2943,9 +4144,8 @@ async fn tablet_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             _ = ping.tick() => {
                 if is_stale(last_incoming, tokio::time::Instant::now(), TABLET_STALE) {
                     tracing::warn!(
-                        "Tablet (Namespace '{ns}') seit {}s stumm – Verbindung als tot verworfen",
-                        last_incoming.elapsed().as_secs()
-                    );
+                        "Tablet (Namespace '{kennung}') seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs(), kennung = kurz(&ns));
                     break;
                 }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
@@ -2993,7 +4193,9 @@ async fn carrier_ws(
     if !valid_namespace(&ns) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    ws.on_upgrade(move |socket| carrier_conn(socket, broker, ns))
+    ws.max_message_size(WS_MAX_TRAEGER)
+        .max_frame_size(WS_MAX_TRAEGER)
+        .on_upgrade(move |socket| carrier_conn(socket, broker, ns))
         .into_response()
 }
 
@@ -3006,7 +4208,7 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     use relay_proto::{CarrierMsg, CarrierServerMsg, StreamKind};
 
     // Sammelkanal: alles, was auf den Träger hinausgeht.
-    let (aus_tx, mut aus_rx) = mpsc::unbounded_channel::<Message>();
+    let (aus_tx, mut aus_rx, voll) = kanal(KANAL_TRAEGER);
     // Meldekanal der Fan-in-Tasks: Ein Substrom, dessen Kanal geschlossen
     // wurde, muss hier gemeldet werden. Wichtig für `namespace_aufraeumen`,
     // das den Anzeigen ein `Close` schickt, damit sie sich neu verbinden —
@@ -3029,6 +4231,13 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
 
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Träger (Namespace '{kennung}') wird getrennt", kennung = kurz(&ns));
+                break;
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 last_incoming = tokio::time::Instant::now();
@@ -3044,14 +4253,14 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                             // Sauber ablehnen statt schweigen: Der Slave fällt
                             // dann auf die heutigen Weiterleitungen zurück,
                             // statt die Halle blind zu lassen.
-                            tracing::warn!("Träger (Namespace '{ns}') mit Fassung {proto} abgelehnt");
+                            tracing::warn!("Träger (Namespace '{kennung}') mit Fassung {proto} abgelehnt", kennung = kurz(&ns));
                             let _ = socket
                                 .send(text(&CarrierServerMsg::Unsupported { proto }))
                                 .await;
                             break;
                         }
                         begruesst = true;
-                        tracing::info!("Träger verbunden: Namespace '{ns}', Fassung {proto}");
+                        tracing::info!("Träger verbunden: Namespace '{kennung}', Fassung {proto}", kennung = kurz(&ns));
                         let _ = socket.send(text(&CarrierServerMsg::Ready { proto })).await;
                     }
                     // Alles Weitere erst nach der Begrüßung — aber NICHT
@@ -3068,16 +4277,28 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                     CarrierMsg::StreamOpen { stream, kind, court } => {
                         if stroeme.contains_key(&stream) { continue }
                         if stroeme.len() >= relay_proto::MAX_STREAMS_PER_CARRIER {
-                            tracing::warn!("Träger (Namespace '{ns}') am Substrom-Limit – {stream} abgewiesen");
+                            tracing::warn!("Träger (Namespace '{kennung}') am Substrom-Limit – {stream} abgewiesen", kennung = kurz(&ns));
                             let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
                             continue;
                         }
                         // Eigener Kanal je Substrom (siehe `Substrom::tx`).
-                        let (sub_tx, mut sub_rx) = mpsc::unbounded_channel::<Message>();
+                        let (sub_tx, mut sub_rx, sub_voll) = kanal(KANAL_TABLET);
                         let hinaus = aus_tx.clone();
                         let melde_tot = tot_tx.clone();
                         let pumpe = tokio::spawn(async move {
-                            while let Some(m) = sub_rx.recv().await {
+                            loop {
+                                let m = tokio::select! {
+                                    // Kanal dieses Geräts voll: Substrom
+                                    // schließen, wie bei einem direkten
+                                    // Gerät die Verbindung.
+                                    _ = sub_voll.warten() => {
+                                        tracing::warn!("Kanal voll – Substrom {stream} des Trägers wird geschlossen");
+                                        let _ = melde_tot.send(stream);
+                                        break;
+                                    }
+                                    m = sub_rx.recv() => m,
+                                };
+                                let Some(m) = m else { break };
                                 match m {
                                     Message::Text(t) => {
                                         let verpackt = CarrierServerMsg::Frame {
@@ -3182,9 +4403,8 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             _ = ping.tick() => {
                 if is_stale(last_incoming, tokio::time::Instant::now(), HOST_STALE) {
                     tracing::warn!(
-                        "Träger (Namespace '{ns}') seit {}s stumm – Verbindung als tot verworfen",
-                        last_incoming.elapsed().as_secs()
-                    );
+                        "Träger (Namespace '{kennung}') seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs(), kennung = kurz(&ns));
                     break;
                 }
                 // Rückfallebene je Substrom: Zuständig für die Slot-Freigabe
@@ -3203,8 +4423,7 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                     .collect();
                 for stream in tote {
                     tracing::warn!(
-                        "Substrom {stream} (Namespace '{ns}') stumm – Court-Slot freigegeben"
-                    );
+                        "Substrom {stream} (Namespace '{kennung}') stumm – Court-Slot freigegeben", kennung = kurz(&ns));
                     if let Some(s) = stroeme.remove(&stream) {
                         schliesse_substrom(&broker, &ns, s).await;
                         let _ = aus_tx.send(text(&CarrierServerMsg::StreamClose { stream }));
@@ -3222,7 +4441,10 @@ async fn carrier_conn(mut socket: WebSocket, broker: Broker, ns: String) {
         schliesse_substrom(&broker, &ns, s).await;
     }
     if anzahl > 0 {
-        tracing::info!("Träger getrennt: Namespace '{ns}', {anzahl} Substrom(e) abgeräumt");
+        tracing::info!(
+            "Träger getrennt: Namespace '{kennung}', {anzahl} Substrom(e) abgeräumt",
+            kennung = kurz(&ns)
+        );
     }
     // Kein eigenes `namespace_aufraeumen` nötig: `detach_tablet` und
     // `unsubscribe_monitor` rufen es bereits, und ein Träger ohne Substrome
@@ -3263,7 +4485,9 @@ async fn monitor_ws(
         return StatusCode::NOT_FOUND.into_response();
     }
     let court = q.court;
-    ws.on_upgrade(move |socket| monitor_conn(socket, broker, ns, court))
+    ws.max_message_size(WS_MAX_ANZEIGE)
+        .max_frame_size(WS_MAX_ANZEIGE)
+        .on_upgrade(move |socket| monitor_conn(socket, broker, ns, court))
         .into_response()
 }
 
@@ -3279,7 +4503,7 @@ async fn monitor_ws(
 /// der Zwischenstand steht — aber nur bei einem echten Wechsel, damit ein
 /// Tablet-Reconnect die Anzeigen nicht ohne Anlass holen lässt.
 async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: Option<i64>) {
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx, voll) = kanal(KANAL_ANZEIGE);
     // Nicht eingetragen (kein Host / Deckel erreicht) → Verbindung sofort
     // schließen, wie es der LAN-Server tut. Offen gehalten, würde sie durch
     // den Herzschlag als gesund gelten, ohne je einen Anstoß zu bekommen.
@@ -3299,6 +4523,13 @@ async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: 
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Monitor (Namespace '{kennung}') wird getrennt", kennung = kurz(&ns));
+                break;
+            }
             outgoing = rx.recv() => {
                 match outgoing {
                     Some(m) => { if socket.send(m).await.is_err() { break } }
@@ -3339,10 +4570,14 @@ async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: 
 /// Das Close bringt sie über ihren Reconnect-Wächter zurück, sobald der Host
 /// wieder da ist; bis dahin pollt sie und zeigt die Offline-Blende.
 fn namespace_aufraeumen(map: &mut HashMap<String, Namespace>, ns: &str) {
+    namespace_aufraeumen_um(map, ns, now_ms());
+}
+
+fn namespace_aufraeumen_um(map: &mut HashMap<String, Namespace>, ns: &str, jetzt: u64) {
     let Some(namespace) = map.get(ns) else {
         return;
     };
-    if !namespace.is_empty() {
+    if !namespace.is_empty_um(jetzt) {
         return;
     }
     let tschuess = Message::Close(None);
@@ -3461,7 +4696,9 @@ struct TlWsAuth {
 /// nginx-Zugriffsprotokollen. Vor erfolgreicher Prüfung sendet der Relay
 /// nichts — auch keinen Grund.
 async fn tl_ws_route(ws: WebSocketUpgrade, State(broker): State<Broker>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| tl_ws_conn(socket, broker))
+    ws.max_message_size(WS_MAX_ANZEIGE)
+        .max_frame_size(WS_MAX_ANZEIGE)
+        .on_upgrade(move |socket| tl_ws_conn(socket, broker))
 }
 
 /// Wie viele Verbindungen gerade auf ihren Zugangs-Frame warten. Der
@@ -3519,7 +4756,7 @@ async fn tl_ws_conn(mut socket: WebSocket, broker: Broker) {
     };
     // Ab hier ist der Zugang geprüft — der Vor-Auth-Platz wird frei.
     drop(platz);
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx, voll) = kanal(KANAL_ANZEIGE);
     // Abo eintragen; über dem Deckel bleibt die Verbindung ungenutzt und
     // die Seite bedient sich aus ihrem Poll-Fallback.
     {
@@ -3548,6 +4785,13 @@ async fn tl_ws_conn(mut socket: WebSocket, broker: Broker) {
     let mut ping = tokio::time::interval(HEARTBEAT);
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Turnierleitungs-Seite wird getrennt");
+                break;
+            }
             outgoing = rx.recv() => {
                 match outgoing {
                     Some(m) => { if socket.send(m).await.is_err() { break } }
@@ -3657,11 +4901,19 @@ async fn attach_tablet(
     tx: &Tx,
 ) -> AttachResult {
     let mut map = broker.namespaces.lock().await;
-    if !map.contains_key(ns) && map.len() >= MAX_NAMESPACES {
-        tracing::warn!("Namespace-Limit erreicht – Tablet für '{ns}' abgewiesen");
+    let Some(namespace) = namespace_holen_oder_anlegen(&mut map, ns) else {
+        tracing::warn!(
+            "Namespace-Limit erreicht – Tablet für '{kennung}' abgewiesen",
+            kennung = kurz(ns)
+        );
+        return AttachResult::Rejected;
+    };
+    if !namespace.feld_erlaubt(ns, court_id) {
+        // Kein Eintrag entstanden — ein eben angelegter leerer Namespace
+        // darf nicht stehen bleiben.
+        namespace_aufraeumen(&mut map, ns);
         return AttachResult::Rejected;
     }
-    let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
     if namespace.tablets.contains_key(&court_id) {
         // Reconnect-Erkennung: Meldet sich DASSELBE Gerät erneut (tote
         // Vorgänger-Session nach Netz-Abriss), löst es seine alte Session
@@ -3675,10 +4927,16 @@ async fn attach_tablet(
         if let Some(old) = namespace.tablets.remove(&court_id) {
             let _ = old.send(text(&ServerMsg::SessionSuperseded));
         }
-        tracing::info!("Feld {court_id} (Namespace '{ns}'): Reconnect desselben Geräts");
+        tracing::info!(
+            "Feld {court_id} (Namespace '{kennung}'): Reconnect desselben Geräts",
+            kennung = kurz(ns)
+        );
     }
     if namespace.tablets.len() >= MAX_TABLETS_PER_NS {
-        tracing::warn!("Namespace '{ns}' am Tablet-Limit – Feld {court_id} abgewiesen");
+        tracing::warn!(
+            "Namespace '{kennung}' am Tablet-Limit – Feld {court_id} abgewiesen",
+            kennung = kurz(ns)
+        );
         return AttachResult::Rejected;
     }
     // A2 / ADR 0017: Den Slot-Halter VOR dem Überschreiben festhalten — die
@@ -3738,15 +4996,17 @@ async fn attach_tablet(
             owner_epoch: 0,
             owner_device: device_id.to_string(),
         }));
-        tracing::info!("Feld {court_id} (Namespace '{ns}'): StateRestore gesendet ({len} Bytes)");
+        tracing::info!(
+            "Feld {court_id} (Namespace '{kennung}'): StateRestore gesendet ({len} Bytes)",
+            kennung = kurz(ns)
+        );
     } else {
         tracing::info!(
-            "Feld {court_id} (Namespace '{ns}'): kein gespeicherter Stand – Tablet startet bei 0:0"
-        );
+            "Feld {court_id} (Namespace '{kennung}'): kein gespeicherter Stand – Tablet startet bei 0:0", kennung = kurz(ns));
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
-        let _ = host.send(text(&RelayFrame::TabletConnected {
+        let _ = host.send_nachrangig(text(&RelayFrame::TabletConnected {
             court_id,
             court_label,
         }));
@@ -3756,9 +5016,31 @@ async fn attach_tablet(
 
 /// Übernimmt ein belegtes Feld für ein bisher passives Tablet – das
 /// zuvor aktive Tablet wird mit `SessionSuperseded` gesperrt.
-async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, device_id: &str, tx: &Tx) {
+///
+/// `false`, wenn die Übernahme nicht stattfand (Namespace-, Tablet- oder
+/// Feld-Deckel). Bisher legte sie den Namespace ohne jede Prüfung an.
+async fn take_over_court(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    device_id: &str,
+    tx: &Tx,
+) -> bool {
     let mut map = broker.namespaces.lock().await;
-    let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
+    let Some(namespace) = namespace_holen_oder_anlegen(&mut map, ns) else {
+        tracing::warn!(
+            "Namespace-Limit erreicht – Übernahme für '{kennung}' abgewiesen",
+            kennung = kurz(ns)
+        );
+        return false;
+    };
+    let neu_belegt = !namespace.tablets.contains_key(&court_id);
+    if !namespace.feld_erlaubt(ns, court_id)
+        || (neu_belegt && namespace.tablets.len() >= MAX_TABLETS_PER_NS)
+    {
+        namespace_aufraeumen(&mut map, ns);
+        return false;
+    }
     if let Some(old) = namespace.tablets.insert(court_id, tx.clone()) {
         let _ = old.send(text(&ServerMsg::SessionSuperseded));
     }
@@ -3784,18 +5066,21 @@ async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, device_id: &s
             owner_device: device_id.to_string(),
         }));
         tracing::info!(
-            "Feld {court_id} (Namespace '{ns}'): Übernahme – StateRestore gesendet ({len} Bytes)"
-        );
+            "Feld {court_id} (Namespace '{kennung}'): Übernahme – StateRestore gesendet ({len} Bytes)", kennung = kurz(ns));
     } else {
-        tracing::info!("Feld {court_id} (Namespace '{ns}'): Übernahme ohne gespeicherten Stand");
+        tracing::info!(
+            "Feld {court_id} (Namespace '{kennung}'): Übernahme ohne gespeicherten Stand",
+            kennung = kurz(ns)
+        );
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
-        let _ = host.send(text(&RelayFrame::TabletConnected {
+        let _ = host.send_nachrangig(text(&RelayFrame::TabletConnected {
             court_id,
             court_label,
         }));
     }
+    true
 }
 
 /// Ist `tx` noch das am Feld eingetragene (aktive) Tablet? Nach einem
@@ -3832,7 +5117,8 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
             if !match_id_matches_court(namespace, court_id, state_match) {
                 tracing::info!(
                     "State von Feld {court_id} verworfen: Tablet-State trägt Match \
-                     {state_match}, Feld hat ein anderes (Namespace '{ns}')"
+                     {state_match}, Feld hat ein anderes (Namespace '{kennung}')",
+                    kennung = kurz(ns)
                 );
                 return;
             }
@@ -3862,7 +5148,7 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
                 .get(&court_id)
                 .map_or(0, |m| m.match_id);
             if let Some(host) = namespace.host.as_ref() {
-                let _ = host.send(text(&RelayFrame::StateSync {
+                let _ = host.send_nachrangig(text(&RelayFrame::StateSync {
                     court_id,
                     match_id,
                     state: state.clone(),
@@ -3881,10 +5167,12 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
 
 /// Entfernt das Tablet wieder – nur, wenn der eingetragene Sender noch
 /// unserer ist (ein Reconnect auf dasselbe Feld darf nichts wegräumen).
-async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
+///
+/// Liefert, ob diese Sitzung das Feld hielt (und also etwas gelöst wurde).
+async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> bool {
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(ns) else {
-        return;
+        return false;
     };
     let still_ours = namespace
         .tablets
@@ -3900,15 +5188,47 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
         namespace.state_deckel_gemeldet.remove(&court_id);
         namespace.tablet_state_seit.remove(&court_id);
         namespace.state_weitergabe.remove(&court_id);
+        // Stand, Sätze und Zähler eines Felds, das der Host nicht kennt,
+        // gehen mit dem Tablet. Für host-bekannte Felder bleibt alles
+        // liegen: Der gesicherte Stand ist genau das, was ein Ersatzgerät
+        // nach dem Ausfall dieses Tablets bekommt.
+        namespace.feld_raeumen_wenn_unbekannt(court_id);
         let court_label = label_of(namespace, court_id);
         if let Some(host) = &namespace.host {
-            let _ = host.send(text(&RelayFrame::TabletDisconnected {
+            let _ = host.send_nachrangig(text(&RelayFrame::TabletDisconnected {
                 court_id,
                 court_label,
             }));
         }
     }
     namespace_aufraeumen(&mut map, ns);
+    still_ours
+}
+
+/// Hält die Verbindung `tx` dieses Feld gerade?
+async fn haelt_feld(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> bool {
+    let map = broker.namespaces.lock().await;
+    map.get(ns).is_some_and(|n| is_holder(n, court_id, tx))
+}
+
+/// Holt den Namespace oder legt ihn an — nie über [`MAX_NAMESPACES`] hinaus.
+fn namespace_holen_oder_anlegen<'a>(
+    map: &'a mut HashMap<String, Namespace>,
+    ns: &str,
+) -> Option<&'a mut Namespace> {
+    if !map.contains_key(ns) && map.len() >= MAX_NAMESPACES {
+        return None;
+    }
+    Some(map.entry(ns.to_string()).or_insert_with(Namespace::new))
+}
+
+/// Kürzt die Geräte-Kennung eines Tablets auf [`MAX_GERAETE_KENNUNG`]
+/// Zeichen (an einer Zeichengrenze).
+fn kuerze_kennung(kennung: String) -> String {
+    if kennung.chars().count() <= MAX_GERAETE_KENNUNG {
+        return kennung;
+    }
+    kennung.chars().take(MAX_GERAETE_KENNUNG).collect()
 }
 
 /// Passt die vom Tablet gemeldete Match-ID zum aktuellen Court-Match?
@@ -3943,18 +5263,11 @@ const STATE_WEITERGABE_JE_SEKUNDE: f64 = 2.0;
 /// verbraucht bei „ja" eine Einheit.
 fn host_weitergabe_erlaubt(namespace: &mut Namespace, court_id: i64) -> bool {
     let jetzt = std::time::Instant::now();
-    let (stand, seit) = namespace
-        .state_weitergabe
-        .get(&court_id)
-        .copied()
-        .unwrap_or((STATE_WEITERGABE_SCHWUNG, jetzt));
-    let stand = (stand + jetzt.duration_since(seit).as_secs_f64() * STATE_WEITERGABE_JE_SEKUNDE)
-        .min(STATE_WEITERGABE_SCHWUNG);
-    let erlaubt = stand >= 1.0;
     namespace
         .state_weitergabe
-        .insert(court_id, (if erlaubt { stand - 1.0 } else { stand }, jetzt));
-    erlaubt
+        .entry(court_id)
+        .or_insert_with(|| Eimer::voll(STATE_WEITERGABE_SCHWUNG, jetzt))
+        .nimm(STATE_WEITERGABE_SCHWUNG, STATE_WEITERGABE_JE_SEKUNDE, jetzt)
 }
 
 /// Wie lange der Relay einen kompletten Abgleich für das Spiel durchreicht,
@@ -4015,7 +5328,8 @@ async fn forward_score(
     if !match_id_matches_court(namespace, court_id, match_id) {
         tracing::info!(
             "Score von Feld {court_id} verworfen: Tablet zählt Match {match_id}, \
-             Feld hat ein anderes (Namespace '{ns}')"
+             Feld hat ein anderes (Namespace '{kennung}')",
+            kennung = kurz(ns)
         );
         return;
     }
@@ -4044,7 +5358,7 @@ async fn forward_score(
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = &namespace.host {
-        let _ = host.send(text(&RelayFrame::ScoreUpdate {
+        let _ = host.send_nachrangig(text(&RelayFrame::ScoreUpdate {
             court_id,
             court_label,
             score_a,
@@ -4056,12 +5370,24 @@ async fn forward_score(
 }
 
 /// Leitet den Akkustand eines Tablets an den Host weiter.
-async fn forward_battery(broker: &Broker, ns: &str, court_id: i64, percent: i64, charging: bool) {
+async fn forward_battery(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    percent: i64,
+    charging: bool,
+    tx: &Tx,
+) {
     let map = broker.namespaces.lock().await;
     if let Some(namespace) = map.get(ns) {
+        // Nur der Halter: Ein wartendes oder verdrängtes Tablet meldete sonst
+        // seinen Akku als den des zählenden Geräts.
+        if !is_holder(namespace, court_id, tx) {
+            return;
+        }
         let court_label = label_of(namespace, court_id);
         if let Some(host) = namespace.host.as_ref() {
-            let _ = host.send(text(&RelayFrame::Battery {
+            let _ = host.send_nachrangig(text(&RelayFrame::Battery {
                 court_id,
                 court_label,
                 percent,
@@ -4103,7 +5429,7 @@ async fn forward_rally(
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::Rally {
+        let _ = host.send_nachrangig(text(&RelayFrame::Rally {
             court_id,
             match_id,
             set,
@@ -4142,7 +5468,7 @@ async fn forward_match_event(
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::MatchEvent {
+        let _ = host.send_nachrangig(text(&RelayFrame::MatchEvent {
             court_id,
             match_id,
             event,
@@ -4185,7 +5511,7 @@ async fn forward_match_event_sync(
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::MatchEventSync {
+        let _ = host.send_nachrangig(text(&RelayFrame::MatchEventSync {
             court_id,
             match_id,
             events,
@@ -4224,7 +5550,7 @@ async fn forward_rally_sync(
         return;
     }
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::RallySync {
+        let _ = host.send_nachrangig(text(&RelayFrame::RallySync {
             court_id,
             match_id,
             timeline,
@@ -4249,7 +5575,7 @@ async fn forward_alert(
     }
     let court_label = label_of(namespace, court_id);
     if let Some(host) = namespace.host.as_ref() {
-        let _ = host.send(text(&RelayFrame::Alert {
+        let _ = host.send_nachrangig(text(&RelayFrame::Alert {
             court_id,
             court_label,
             injury,
@@ -4268,7 +5594,9 @@ async fn host_ws(
     if !valid_namespace(&ns) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    ws.on_upgrade(move |socket| host_conn(socket, broker, ns))
+    ws.max_message_size(WS_MAX_HOST)
+        .max_frame_size(WS_MAX_HOST)
+        .on_upgrade(move |socket| host_conn(socket, broker, ns))
         .into_response()
 }
 
@@ -4296,7 +5624,17 @@ fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
         (old, _) => {
             let superseded = old.is_some();
             namespace.host = Some(tx.clone());
+            // Neue Host-Sitzung: Der Feld-Deckel darf wieder einmal melden.
+            namespace.feld_deckel_gemeldet = false;
+            namespace.host_deckel_gemeldet.clear();
             namespace.host_last_seen = now;
+            // Der Turnier-PC ist (wieder) da. Hatten die Anzeigen schon die
+            // Sperre gesehen, einmal anstoßen — sie holen sofort den Stand.
+            namespace.host_weg_seit = None;
+            namespace.geleert = false;
+            if std::mem::take(&mut namespace.karenz_gemeldet) {
+                alle_monitore_anstossen(namespace);
+            }
             // Neue Host-Verbindung = neue Generation. Sie steckt im ETag des
             // Anzeige-Zustands, weil die Revision beim Neustart des
             // Turnier-PCs wieder klein beginnt: Ein Gerät mit gemerkter
@@ -4312,26 +5650,42 @@ fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
 /// eine zweite wird abgewiesen — außer der bisherige Host ist nachweislich
 /// stumm ([`try_claim_host`]), dann ersetzt ihn die neue Verbindung.
 async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx, voll) = kanal(KANAL_HOST);
 
     {
         let mut map = broker.namespaces.lock().await;
+        // Tabelle voll: Gehaltene Daten dürfen nie einen neuen Turnier-PC
+        // aussperren — der am längsten hostlose Namespace ohne Tablet weicht.
         if !map.contains_key(&ns) && map.len() >= MAX_NAMESPACES {
-            tracing::warn!("Namespace-Limit erreicht – Host für '{ns}' abgewiesen");
-            let _ = socket.send(Message::Close(None)).await;
+            verdraenge_hostlosen(&mut map);
+        }
+        if !map.contains_key(&ns) && map.len() >= MAX_NAMESPACES {
+            tracing::warn!(
+                "Namespace-Limit erreicht – Host für '{kennung}' abgewiesen",
+                kennung = kurz(&ns)
+            );
+            let _ = socket.send(close_mit_grund(CLOSE_VOLL, "voll")).await;
             return;
         }
         let namespace = map.entry(ns.clone()).or_insert_with(Namespace::new);
         match try_claim_host(namespace, &tx, now_ms()) {
             HostClaim::Refused => {
-                tracing::warn!("Zweiter Host für Namespace '{ns}' abgewiesen");
-                let _ = socket.send(Message::Close(None)).await;
+                tracing::warn!(
+                    "Zweiter Host für Namespace '{kennung}' abgewiesen",
+                    kennung = kurz(&ns)
+                );
+                // Mit Grund: Der abgewiesene Turnier-PC kann seinem Bediener
+                // sagen, dass ein anderer PC dasselbe Turnier hält.
+                let _ = socket
+                    .send(close_mit_grund(CLOSE_HOST_BELEGT, "host_belegt"))
+                    .await;
                 return;
             }
             HostClaim::Accepted { superseded } => {
                 if superseded {
                     tracing::warn!(
-                        "Stummen alten Host für Namespace '{ns}' ersetzt (Zombie-Ablösung)"
+                        "Stummen alten Host für Namespace '{kennung}' ersetzt (Zombie-Ablösung)",
+                        kennung = kurz(&ns)
                     );
                 }
             }
@@ -4347,7 +5701,10 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             }));
         }
     }
-    tracing::info!("Host verbunden für Namespace '{ns}'");
+    tracing::info!(
+        "Host verbunden für Namespace '{kennung}'",
+        kennung = kurz(&ns)
+    );
 
     // Enger Ping-Takt + Stale-Abbruch: Eine tote TCP-Verbindung fällt beim
     // `send` u. U. minutenlang nicht auf (Kernel puffert) — deshalb zählt
@@ -4358,6 +5715,13 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     let mut last_incoming = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            // Kanal voll: Der Empfänger nimmt nicht schnell genug ab. Trennen
+            // statt unbegrenzt zu puffern — er verbindet neu und bekommt den
+            // frischen Stand.
+            _ = voll.warten() => {
+                tracing::warn!("Kanal voll – Turnier-PC (Namespace '{kennung}') wird getrennt", kennung = kurz(&ns));
+                break;
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 last_incoming = tokio::time::Instant::now();
@@ -4370,8 +5734,7 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                                 // Ablösung) → sauber beenden; bts-light
                                 // verbindet sich neu und sieht die Lage.
                                 tracing::warn!(
-                                    "Abgelöste Host-Verbindung für '{ns}' meldet sich zurück – getrennt"
-                                );
+                                    "Abgelöste Host-Verbindung für '{kennung}' meldet sich zurück – getrennt", kennung = kurz(&ns));
                                 break;
                             }
                         }
@@ -4401,9 +5764,8 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             _ = ping.tick() => {
                 if last_incoming.elapsed() >= HOST_STALE {
                     tracing::warn!(
-                        "Host für Namespace '{ns}' seit {}s stumm – Verbindung als tot verworfen",
-                        last_incoming.elapsed().as_secs()
-                    );
+                        "Host für Namespace '{kennung}' seit {}s stumm – Verbindung als tot verworfen",
+                        last_incoming.elapsed().as_secs(), kennung = kurz(&ns));
                     break;
                 }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { break }
@@ -4434,7 +5796,49 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
             namespace_aufraeumen(&mut map, &ns);
         }
     }
-    tracing::info!("Host getrennt für Namespace '{ns}'");
+    tracing::info!(
+        "Host getrennt für Namespace '{kennung}'",
+        kennung = kurz(&ns)
+    );
+}
+
+/// Entfernt den am längsten hostlosen Namespace, an dem kein Tablet und
+/// kein offenes Ergebnis hängt. Seine Monitor- und TL-Verbindungen werden
+/// verabschiedet. Liefert `false`, wenn es keinen gibt.
+fn verdraenge_hostlosen(map: &mut HashMap<String, Namespace>) -> bool {
+    let Some(ns) = map
+        .iter()
+        .filter(|(_, n)| n.host.is_none() && n.tablets.is_empty() && n.pending.is_empty())
+        .min_by_key(|(_, n)| n.host_weg_seit.unwrap_or(0))
+        .map(|(ns, _)| ns.clone())
+    else {
+        return false;
+    };
+    if let Some(n) = map.remove(&ns) {
+        let tschuess = Message::Close(None);
+        for tx in n
+            .monitor_subs
+            .values()
+            .flatten()
+            .chain(n.monitor_subs_all.iter())
+            .chain(n.tl_subs.iter())
+        {
+            let _ = tx.send(tschuess.clone());
+        }
+        tracing::warn!(
+            "Namespace-Limit erreicht – hostlosen Namespace '{kennung}' verdrängt",
+            kennung = kurz(&ns)
+        );
+    }
+    true
+}
+
+/// Ein Close-Frame mit Code und Grund (4000er-Bereich: anwendungseigen).
+fn close_mit_grund(code: u16, grund: &'static str) -> Message {
+    Message::Close(Some(axum::extract::ws::CloseFrame {
+        code,
+        reason: grund.into(),
+    }))
 }
 
 /// Gibt den Host-Slot frei — aber nur, wenn `tx` noch der eingetragene
@@ -4449,6 +5853,19 @@ fn release_host_slot(namespace: &mut Namespace, tx: &Tx) -> bool {
         .unwrap_or(false)
     {
         namespace.host = None;
+        // Die Uhr läuft ab dem letzten Lebenszeichen, nicht ab jetzt.
+        namespace.host_weg_seit = Some(namespace.host_last_seen);
+        namespace.karenz_gemeldet = false;
+        // Der Zugang zum Sprachdienst gehört dem Turnier-PC — ohne ihn hat
+        // er im Speicher des Relays nichts zu suchen (die Ansage-Route
+        // sperrt ohnehin sofort).
+        namespace.azure_tts = None;
+        // Die Turnierleitungs-Seiten verabschieden: Sie fallen auf ihren
+        // Poll und sehen 503. Ein vergessener TL-Tab hält so auch den
+        // Namespace nicht mehr am Leben.
+        for tl in namespace.tl_subs.drain(..) {
+            let _ = tl.send(Message::Close(None));
+        }
         return true;
     }
     false
@@ -5462,6 +6879,33 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
     }
     // Jedes Host-Frame ist ein Lebenszeichen für die Zombie-Erkennung.
     namespace.host_last_seen = now_ms();
+    // Fachliche Deckel: kürzen, leeren oder verwerfen — die Verbindung
+    // bleibt, jeder Hinweis steht einmal je Host-Sitzung im Log.
+    let (frame, hinweis) = host_frame_deckeln(frame);
+    if let Some(hinweis) = hinweis {
+        if namespace.host_deckel_gemeldet.insert(hinweis) {
+            tracing::warn!(
+                "Namespace '{kennung}': Host-Frame über dem Deckel — {hinweis}",
+                kennung = kurz(ns)
+            );
+        }
+    }
+    let Some(frame) = frame else {
+        return true;
+    };
+    // Feld-Deckel: Ein Frame, das ein NEUES Feld anlegen würde, wird über
+    // dem Deckel verworfen (und einmal gemeldet) — die Verbindung bleibt.
+    let feld = match &frame {
+        HostFrame::MatchAssigned { court_id, .. }
+        | HostFrame::MatchCleared { court_id, .. }
+        | HostFrame::ScoreUpdate { court_id, .. } => Some(*court_id),
+        _ => None,
+    };
+    if let Some(court_id) = feld {
+        if !namespace.feld_erlaubt(ns, court_id) {
+            return true;
+        }
+    }
     match frame {
         HostFrame::MatchAssigned {
             court_id,
@@ -5717,8 +7161,12 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 // (Sicherheits-Review 20.08.2026). Kein echtes Turnier kommt
                 // auch nur in die Nähe.
                 let mut courts = courts;
+                // `MAX_COURTS_PER_NS` (512) ist bewusst weiter als der
+                // Feld-Deckel (128): Die Liste ist ein Menü, kein Zustand je
+                // Feld. Felder der Liste gelten immer als geführt.
                 courts.truncate(MAX_COURTS_PER_NS);
                 namespace.courts = courts;
+                namespace.feld_altlasten_raeumen();
                 // Neue Feldliste = neue Übersicht; auch dieser Weg stößt nicht
                 // an (Spec S9). Nach dem Schreiben gemeldet, nie davor.
                 namespace.bump_overview_rev();
@@ -5774,7 +7222,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // + den Nachruf merken (Cluster C Stufe 2). Jeder Push ersetzt die
             // Liste vollständig — ein leerer Push (kein Aufruf offen) leert sie
             // bewusst. Cap gegen pathologische Frames.
-            prepared.truncate(200);
+            prepared.truncate(MAX_PREPARED);
             namespace.prepared = prepared;
         }
         // TL-Web (Turnierleitungs-Oberfläche): Die Wire-Typen stehen, der
@@ -5801,8 +7249,9 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // gleichzeitig laufenden Turniere.
             if devices.len() > MAX_TL_TOKENS {
                 tracing::warn!(
-                    "TlAuth für '{ns}' verworfen: {} Geräte (Grenze {MAX_TL_TOKENS})",
-                    devices.len()
+                    "TlAuth für '{kennung}' verworfen: {} Geräte (Grenze {MAX_TL_TOKENS})",
+                    devices.len(),
+                    kennung = kurz(ns)
                 );
                 return true;
             }
@@ -5841,7 +7290,9 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 match index.get(token) {
                     Some(vorhanden) if vorhanden != ns => {
                         tracing::warn!(
-                            "TL-Zugang von '{ns}' kollidiert mit '{vorhanden}' — ignoriert"
+                            "TL-Zugang von '{kennung}' kollidiert mit '{anderes}' — ignoriert",
+                            kennung = kurz(ns),
+                            anderes = kurz(vorhanden)
                         );
                     }
                     _ => {
@@ -5856,7 +7307,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             // dem Ablegen gesendet: Ein Nudge auf einen verworfenen Stand
             // schickte die Seiten nur in ein 503 statt in einen Abruf.
             let neue_rev = namespace.tl_state.as_ref().map(|(r, _)| *r) != Some(rev);
-            if json.len() > MAX_STATE_LEN {
+            if json.len() > relay_proto::MAX_TL_STATE_LEN {
                 // Zu groß: nicht ablegen — der Relay trägt viele Turniere,
                 // und ein Zustand, der aus dem Ruder läuft, darf sie nicht
                 // mitnehmen. **Und den alten mit wegwerfen:** Bliebe er
@@ -5865,9 +7316,10 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 // ehrliche Fehlanzeige ist besser als ein falscher Plan, auf
                 // den jemand ein Spiel setzt.
                 tracing::warn!(
-                    "TL-Zustand für '{ns}' verworfen: {} Bytes (Grenze {MAX_STATE_LEN}) \
+                    "TL-Zustand für '{kennung}' verworfen: {} Bytes (Grenze {MAX_STATE_LEN}) \
                      — die Oberfläche meldet sich als nicht verbunden",
-                    json.len()
+                    json.len(),
+                    kennung = kurz(ns)
                 );
                 namespace.tl_state = None;
             } else {
@@ -6043,9 +7495,9 @@ mod tests {
         // belegten Feld — auch im Cloud-Pfad braucht die Liste dafür `occupied`.
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
-        let (tab, _trx) = mpsc::unbounded_channel();
+        let (tab, _trx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let n = map.get_mut(NS).unwrap();
@@ -6120,14 +7572,15 @@ mod tests {
         let namespace = map.entry(ns.into()).or_insert_with(Namespace::new);
         namespace.host = Some(tx.clone());
         namespace.host_last_seen = now_ms();
+        namespace.host_weg_seit = None;
     }
 
     /// Legt einen Namespace mit registriertem Host und einem Tablet (an
     /// Feld `court_id`) an; liefert Tablet-Empfangsende + Host-Sender.
-    async fn broker_with_tablet(court_id: i64) -> (Broker, mpsc::UnboundedReceiver<Message>, Tx) {
+    async fn broker_with_tablet(court_id: i64) -> (Broker, mpsc::Receiver<Message>, Tx) {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (tx, rx) = mpsc::unbounded_channel();
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (tx, rx) = kanal_test();
+        let (host_tx, _host_rx) = kanal_test();
         let mut map = broker.namespaces.lock().await;
         let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
         ns.tablets.insert(court_id, tx);
@@ -6153,7 +7606,7 @@ mod tests {
     async fn sitzung_belegt_feld_und_gibt_es_beim_abraeumen_frei() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut sitzung = TabletSitzung::neu(ns.clone());
 
         let identify =
@@ -6190,7 +7643,7 @@ mod tests {
     async fn sitzung_reicht_die_geraete_kennung_unveraendert_durch() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut sitzung = TabletSitzung::neu(ns.clone());
 
         let identify =
@@ -6215,8 +7668,8 @@ mod tests {
     async fn zwei_sitzungen_autorisieren_nur_ihr_eigenes_feld() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, _rx_b) = kanal_test();
 
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
@@ -6247,8 +7700,8 @@ mod tests {
     async fn belegtes_feld_laesst_die_zweite_sitzung_warten() {
         let broker = Broker::new("https://example.test/bts-relay".into());
         let ns = test_ns();
-        let (tx_a, _rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
 
         let mut a = TabletSitzung::neu(ns.clone());
         let mut b = TabletSitzung::neu(ns.clone());
@@ -6257,8 +7710,12 @@ mod tests {
         a.verarbeite(&broker, ident_a, &tx_a).await;
         b.verarbeite(&broker, ident_b, &tx_b).await;
 
-        assert!(a.active, "die erste Sitzung schiedst");
-        assert!(!b.active, "die zweite wartet");
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).expect("Namespace");
+            assert!(is_holder(n, 5, &tx_a), "die erste Sitzung schiedst");
+            assert!(!is_holder(n, 5, &tx_b), "die zweite wartet");
+        }
         let antwort = rx_b.recv().await.expect("CourtOccupied erwartet");
         match antwort {
             Message::Text(t) => assert!(
@@ -6267,6 +7724,2317 @@ mod tests {
             ),
             anderes => panic!("unerwarteter Frame: {anderes:?}"),
         }
+    }
+
+    // ───── Tote Slots, Halterschaft, Feld-Schlüssel (Spec relay-haerten, PR 3) ─────
+
+    fn ident(feld: i64, geraet: &str) -> String {
+        format!(
+            r#"{{"type":"identify","courtId":{feld},"courtLabel":"F{feld}","deviceId":"{geraet}"}}"#
+        )
+    }
+
+    /// Alle bisher angekommenen Text-Frames eines Kanals.
+    fn texte(rx: &mut mpsc::Receiver<Message>) -> Vec<String> {
+        let mut aus = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            if let Message::Text(t) = m {
+                aus.push(t.to_string());
+            }
+        }
+        aus
+    }
+
+    async fn haelt(broker: &Broker, ns: &str, feld: i64, tx: &Tx) -> bool {
+        haelt_feld(broker, ns, feld, tx).await
+    }
+
+    #[tokio::test]
+    async fn zweites_identify_fuer_anderes_feld_wird_verworfen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = kanal_test();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(1, "a"), &tx).await;
+        assert_eq!(
+            s.verarbeite(&broker, &ident(2, "a"), &tx).await,
+            SitzungsSchritt::Weiter,
+            "die Verbindung bleibt"
+        );
+        assert_eq!(s.court, Some(1));
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("Namespace");
+        assert_eq!(n.tablets.keys().copied().collect::<Vec<_>>(), vec![1]);
+        assert!(!n.tablet_devices.contains_key(&2));
+    }
+
+    #[tokio::test]
+    async fn namespace_ist_nach_feldwechsel_und_trennen_weg() {
+        // Früher belegte jedes weitere `identify` ein Feld mehr, beim Trennen
+        // wurde nur das letzte gelöst — der Namespace blieb bis zum
+        // Relay-Neustart stehen.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = kanal_test();
+        let mut s = TabletSitzung::neu(ns.clone());
+        for feld in [1, 2, 3, 4] {
+            s.verarbeite(&broker, &ident(feld, "a"), &tx).await;
+        }
+        s.abraeumen(&broker, &tx).await;
+        // (Nach der Karenz — bis dahin bleibt der Namespace stehen.)
+        fegen(&broker, now_ms() + HOST_KARENZ_MS).await;
+        assert!(
+            !broker.namespaces.lock().await.contains_key(&ns),
+            "kein toter Slot hält den Namespace"
+        );
+    }
+
+    #[tokio::test]
+    async fn identify_des_halters_ist_folgenlos() {
+        // Die Seite wiederholt `identify`, solange sie kein Spiel bekommt.
+        // Früher verdrängte der Relay dabei die EIGENE Sitzung.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx, mut rx) = kanal_test();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        assert_eq!(texte(&mut host_rx).len(), 1, "ein TabletConnected");
+        texte(&mut rx);
+
+        for _ in 0..3 {
+            s.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        }
+        assert!(
+            texte(&mut rx).is_empty(),
+            "kein SessionSuperseded an sich selbst, kein zweites StateRestore"
+        );
+        assert!(
+            texte(&mut host_rx).is_empty(),
+            "kein zweites TabletConnected"
+        );
+        assert!(haelt(&broker, &ns, 5, &tx).await);
+    }
+
+    #[tokio::test]
+    async fn belegt_retry_greift_nach_freigabe() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        assert!(texte(&mut rx_b).iter().any(|t| t.contains("occupied")));
+        assert!(!haelt(&broker, &ns, 5, &tx_b).await);
+
+        // A geht; Bs nächster Versuch (der 4-s-Retry der Seite) bekommt das Feld.
+        a.abraeumen(&broker, &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        assert!(haelt(&broker, &ns, 5, &tx_b).await);
+    }
+
+    #[tokio::test]
+    async fn uebernahme_hin_und_zurueck() {
+        // A zählt, B übernimmt, A übernimmt zurück. Früher wurde As
+        // Rück-Übernahme still verworfen — die Seite zählte weiter, der
+        // Relay warf ihre Punkte weg.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx_a, mut rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+
+        let uebernehmen = |geraet: &str| format!(r#"{{"type":"take_over","deviceId":"{geraet}"}}"#);
+        b.verarbeite(&broker, &uebernehmen("b"), &tx_b).await;
+        assert!(haelt(&broker, &ns, 5, &tx_b).await);
+        assert!(texte(&mut rx_a).iter().any(|t| t.contains("superseded")));
+
+        a.verarbeite(&broker, &uebernehmen("a"), &tx_a).await;
+        assert!(haelt(&broker, &ns, 5, &tx_a).await, "A hält wieder");
+        assert!(texte(&mut rx_b).iter().any(|t| t.contains("superseded")));
+
+        // As Punkt erreicht den Host, Bs nicht mehr.
+        texte(&mut host_rx);
+        let punkt = r#"{"type":"score_update","scoreA":3,"scoreB":1}"#;
+        b.verarbeite(&broker, punkt, &tx_b).await;
+        assert!(texte(&mut host_rx).is_empty(), "B ist verdrängt");
+        a.verarbeite(&broker, punkt, &tx_a).await;
+        assert!(
+            texte(&mut host_rx)
+                .iter()
+                .any(|t| t.contains("score_update")),
+            "As Punkte kommen an"
+        );
+        // Wer das Feld hält, kann nicht noch einmal „übernehmen".
+        a.verarbeite(&broker, &uebernehmen("a"), &tx_a).await;
+        assert!(texte(&mut rx_a).is_empty(), "keine Selbst-Verdrängung");
+    }
+
+    #[tokio::test]
+    async fn akku_nur_vom_halter() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, _rx_b) = kanal_test();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        texte(&mut host_rx);
+
+        let akku = r#"{"type":"battery","percent":12,"charging":false}"#;
+        b.verarbeite(&broker, akku, &tx_b).await;
+        assert!(
+            texte(&mut host_rx).is_empty(),
+            "das wartende Tablet zählt nicht"
+        );
+        a.verarbeite(&broker, akku, &tx_a).await;
+        assert!(texte(&mut host_rx).iter().any(|t| t.contains("battery")));
+    }
+
+    #[tokio::test]
+    async fn host_unbekanntes_feld_wird_beim_abgang_geraeumt() {
+        // Zwei Tablets ohne Host: eines hält den Namespace, das andere
+        // hinterlässt für sein (dem Host unbekanntes) Feld Stand und Sätze.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, _rx_b) = kanal_test();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(1, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(77, "b"), &tx_b).await;
+        b.verarbeite(
+            &broker,
+            r#"{"type":"score_update","scoreA":3,"scoreB":1}"#,
+            &tx_b,
+        )
+        .await;
+        b.verarbeite(
+            &broker,
+            r#"{"type":"state_sync","state":"{\"x\":1}"}"#,
+            &tx_b,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).expect("Namespace");
+            assert!(n.court_scores.contains_key(&77) && n.court_state.contains_key(&77));
+        }
+
+        b.abraeumen(&broker, &tx_b).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("A hält den Namespace");
+        assert!(!n.feld_gefuehrt(77), "nichts bleibt für Feld 77");
+        assert_eq!(n.feld_schluessel_anzahl(), 1);
+    }
+
+    #[tokio::test]
+    async fn host_bekanntes_feld_behaelt_den_stand() {
+        // Der gesicherte Stand ist genau das, was ein Ersatzgerät nach dem
+        // Ausfall des Tablets bekommt — er darf beim Abgang NICHT gehen.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(7),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &host_tx,
+        )
+        .await;
+        let (tx, _rx) = kanal_test();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        s.verarbeite(
+            &broker,
+            r#"{"type":"state_sync","state":"{\"match\":{\"id\":7}}"}"#,
+            &tx,
+        )
+        .await;
+        s.abraeumen(&broker, &tx).await;
+
+        // Ein Ersatzgerät bekommt den Stand.
+        let (tx_neu, mut rx_neu) = kanal_test();
+        let mut ersatz = TabletSitzung::neu(ns.clone());
+        ersatz
+            .verarbeite(&broker, &ident(5, "ersatz"), &tx_neu)
+            .await;
+        assert!(
+            texte(&mut rx_neu)
+                .iter()
+                .any(|t| t.contains("state_restore")),
+            "StateRestore für das Ersatzgerät"
+        );
+    }
+
+    #[tokio::test]
+    async fn feld_schluessel_deckel_gilt_ohne_feldliste() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let zuweisen = async |feld: i64, spiel: i64| {
+            handle_host_frame(
+                &broker,
+                &ns,
+                HostFrame::MatchAssigned {
+                    court_id: feld,
+                    court_label: format!("F{feld}"),
+                    hall: String::new(),
+                    match_brief: brief(spiel),
+                    on_court_since_ms: None,
+                    host_sets: Vec::new(),
+                },
+                &host_tx,
+            )
+            .await
+        };
+        for feld in 1..=MAX_FELD_SCHLUESSEL_JE_NS as i64 {
+            assert!(zuweisen(feld, feld).await);
+        }
+        // Das 129. Feld wird verworfen — die Verbindung bleibt (`true`).
+        assert!(zuweisen(9999, 1).await, "der Host wird nicht getrennt");
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).unwrap();
+            assert_eq!(n.court_matches.len(), MAX_FELD_SCHLUESSEL_JE_NS);
+            assert!(!n.feld_gefuehrt(9999));
+            assert!(n.feld_deckel_gemeldet);
+        }
+        // Ein schon geführtes Feld nimmt weiter Änderungen an.
+        assert!(zuweisen(3, 4242).await);
+        let map = broker.namespaces.lock().await;
+        assert_eq!(map.get(&ns).unwrap().court_matches[&3].match_id, 4242);
+        // Auch ein Tablet legt über dem Deckel kein neues Feld an.
+        drop(map);
+        let (tx, _rx) = kanal_test();
+        let mut s = TabletSitzung::neu(ns.clone());
+        assert_eq!(
+            s.verarbeite(&broker, &ident(8888, "a"), &tx).await,
+            SitzungsSchritt::Schliessen
+        );
+    }
+
+    #[tokio::test]
+    async fn uebernahme_legt_keinen_namespace_ueber_dem_limit_an() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        {
+            let mut map = broker.namespaces.lock().await;
+            for i in 0..MAX_NAMESPACES {
+                map.insert(format!("voll-{i}"), Namespace::new());
+            }
+        }
+        let ns = test_ns();
+        let (tx, _rx) = kanal_test();
+        // Eine Sitzung, die ihr Feld kennt, deren Namespace es aber nicht
+        // (mehr) gibt.
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.court = Some(1);
+        s.verarbeite(&broker, r#"{"type":"take_over","deviceId":"a"}"#, &tx)
+            .await;
+        let map = broker.namespaces.lock().await;
+        assert_eq!(map.len(), MAX_NAMESPACES);
+        assert!(!map.contains_key(&ns));
+    }
+
+    #[tokio::test]
+    async fn verdraengtes_tablet_zaehlt_nicht_mehr() {
+        // Ohne den Sitzungs-Merker `active` hängt alles an `is_holder`: Ein
+        // verdrängtes Tablet, das einfach weiterzählt, erreicht den Host
+        // mit keinem Frame.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, _rx_b) = kanal_test();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        b.verarbeite(&broker, r#"{"type":"take_over","deviceId":"b"}"#, &tx_b)
+            .await;
+        texte(&mut host_rx);
+        for frame in [
+            r#"{"type":"score_update","scoreA":3,"scoreB":1}"#,
+            r#"{"type":"state_sync","state":"{}"}"#,
+            r#"{"type":"battery","percent":50,"charging":true}"#,
+            r#"{"type":"alert","injury":true,"official":false}"#,
+        ] {
+            a.verarbeite(&broker, frame, &tx_a).await;
+        }
+        assert!(texte(&mut host_rx).is_empty());
+        let map = broker.namespaces.lock().await;
+        assert!(!map.get(&ns).unwrap().court_state.contains_key(&5));
+    }
+
+    #[tokio::test]
+    async fn uebernahme_an_inzwischen_freiem_feld() {
+        // A zählte, B wartete; A ist gegangen. Bs „Übernehmen" bekommt das
+        // freie Feld samt gesichertem Stand.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(7),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &host_tx,
+        )
+        .await;
+        let (tx_a, _rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        a.verarbeite(
+            &broker,
+            r#"{"type":"state_sync","state":"{\"match\":{\"id\":7}}"}"#,
+            &tx_a,
+        )
+        .await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        a.abraeumen(&broker, &tx_a).await;
+        texte(&mut rx_b);
+        texte(&mut host_rx);
+
+        assert_eq!(
+            b.verarbeite(&broker, r#"{"type":"take_over","deviceId":"b"}"#, &tx_b)
+                .await,
+            SitzungsSchritt::Weiter
+        );
+        assert!(haelt(&broker, &ns, 5, &tx_b).await);
+        assert!(texte(&mut rx_b).iter().any(|t| t.contains("state_restore")));
+        assert!(texte(&mut host_rx)
+            .iter()
+            .any(|t| t.contains("tablet_connected")));
+    }
+
+    #[tokio::test]
+    async fn abgewiesene_uebernahme_schliesst_die_verbindung() {
+        // Greift bei der Übernahme ein Deckel (hier: das Tablet-Limit),
+        // darf die Seite nicht glauben, sie zähle — die Verbindung endet.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = kanal_test();
+        let (fremd, _fremd_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.entry(ns.clone()).or_insert_with(Namespace::new);
+            for feld in 0..MAX_TABLETS_PER_NS as i64 {
+                n.tablets.insert(1000 + feld, fremd.clone());
+            }
+        }
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.court = Some(5);
+        assert_eq!(
+            s.verarbeite(&broker, r#"{"type":"take_over","deviceId":"a"}"#, &tx)
+                .await,
+            SitzungsSchritt::Schliessen
+        );
+        assert!(!haelt(&broker, &ns, 5, &tx).await);
+    }
+
+    #[tokio::test]
+    async fn neue_feldliste_raeumt_alte_feldnamen() {
+        // Ein Turnier-PC bleibt über mehrere Turniere verbunden: Die Namen
+        // und Hallen der alten Felder dürfen nicht auf den Deckel zählen.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        for feld in 1..=100 {
+            handle_host_frame(
+                &broker,
+                &ns,
+                HostFrame::MatchCleared {
+                    court_id: feld,
+                    court_label: format!("alt {feld}"),
+                    hall: "Halle".into(),
+                },
+                &host_tx,
+            )
+            .await;
+        }
+        let liste = |ids: std::ops::RangeInclusive<i64>| HostFrame::Courts {
+            courts: ids
+                .map(|id| relay_proto::CourtBrief {
+                    id,
+                    label: format!("neu {id}"),
+                    hall: String::new(),
+                    hall_color: None,
+                })
+                .collect(),
+            azure_tts: None,
+            reconnect_legacy_rev: false,
+        };
+        handle_host_frame(&broker, &ns, liste(201..=220), &host_tx).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert!(n.court_labels.is_empty() && n.court_hall.is_empty());
+        assert_eq!(n.feld_schluessel_anzahl(), 20);
+    }
+
+    // ───────── Deckel und Mengen-Takt (Spec relay-haerten, PR 4) ─────────
+
+    fn zuweisung(feld: i64, label: &str, host_sets: usize) -> HostFrame {
+        HostFrame::MatchAssigned {
+            court_id: feld,
+            court_label: label.to_string(),
+            hall: "H".repeat(500),
+            match_brief: brief(7),
+            on_court_since_ms: None,
+            host_sets: vec![SetAb { a: 21, b: 19 }; host_sets],
+        }
+    }
+
+    #[tokio::test]
+    async fn elf_saetze_werden_verworfen_verbindung_bleibt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx, _rx) = kanal_test();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        texte(&mut host_rx);
+
+        let saetze = |n: usize| {
+            let liste = vec![r#"{"a":21,"b":19}"#; n].join(",");
+            format!(r#"{{"type":"score_update","scoreA":1,"scoreB":0,"setsHistory":[{liste}]}}"#)
+        };
+        assert_eq!(
+            s.verarbeite(&broker, &saetze(11), &tx).await,
+            SitzungsSchritt::Weiter,
+            "die Verbindung bleibt"
+        );
+        assert!(
+            texte(&mut host_rx).is_empty(),
+            "elf Sätze gehen nicht weiter"
+        );
+        assert!(s.saetze_gemeldet);
+        // Zehn Sätze sind in Ordnung.
+        s.verarbeite(&broker, &saetze(10), &tx).await;
+        assert!(texte(&mut host_rx)
+            .iter()
+            .any(|t| t.contains("score_update")));
+    }
+
+    #[test]
+    fn zu_grosser_brief_wird_einmal_gemeldet() {
+        let mut gross = brief(7);
+        gross.team_a[0].name = "x".repeat(MAX_BRIEF_LEN);
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::MatchAssigned {
+            court_id: 1,
+            court_label: "1".into(),
+            hall: String::new(),
+            match_brief: gross,
+            on_court_since_ms: None,
+            host_sets: Vec::new(),
+        });
+        assert!(frame.is_none(), "die Zuweisung wird verworfen");
+        let hinweis = hinweis.expect("Hinweis fürs Log");
+        // „Einmal": derselbe Hinweis landet nur einmal in der Merkliste.
+        let mut gemeldet = std::collections::HashSet::new();
+        assert!(gemeldet.insert(hinweis));
+        assert!(!gemeldet.insert(hinweis));
+    }
+
+    #[test]
+    fn echter_brief_bleibt_weit_unter_dem_deckel() {
+        // Messung für den Brief-Deckel: ein Doppel mit langen Namen, Verein,
+        // Schiedsrichter und Aufschlagrichter.
+        let mut b = brief(7);
+        let vorlage = b.team_a[0].clone();
+        let spieler = |n: i64| {
+            let mut p = vorlage.clone();
+            p.id = n;
+            p.name = "Maximilian-Alexander von Hohenzollern-Sigmaringen".into();
+            p
+        };
+        b.team_a = vec![spieler(1), spieler(2)];
+        b.team_b = vec![spieler(3), spieler(4)];
+        b.sr_names = vec!["Schiedsrichterin Mit Langem Namen".into()];
+        b.ar_names = vec!["Aufschlagrichter Mit Langem Namen".into()];
+        let laenge = serde_json::to_vec(&b).unwrap().len();
+        assert!(laenge < 2 * 1024, "{laenge} Bytes");
+        assert!(laenge * 8 < MAX_BRIEF_LEN, "achtfache Reserve");
+    }
+
+    #[test]
+    fn lange_labels_werden_gekuerzt() {
+        let (frame, hinweis) = host_frame_deckeln(zuweisung(1, &"ä".repeat(999), 0));
+        assert!(hinweis.is_none(), "Kürzen ist keine Meldung wert");
+        let Some(HostFrame::MatchAssigned {
+            court_label, hall, ..
+        }) = frame
+        else {
+            panic!("die Zuweisung bleibt");
+        };
+        assert_eq!(court_label.chars().count(), MAX_FELD_TEXT);
+        assert_eq!(hall.chars().count(), MAX_FELD_TEXT);
+
+        // `MatchCleared`: Das Räumen wirkt immer, nur der Text wird kürzer.
+        let (frame, _) = host_frame_deckeln(HostFrame::MatchCleared {
+            court_id: 1,
+            court_label: "x".repeat(999),
+            hall: "y".repeat(999),
+        });
+        assert!(matches!(
+            frame,
+            Some(HostFrame::MatchCleared { court_label, .. }) if court_label.len() == MAX_FELD_TEXT
+        ));
+
+        // Feldliste: Name, Halle, Farbe.
+        let (frame, _) = host_frame_deckeln(HostFrame::Courts {
+            courts: vec![relay_proto::CourtBrief {
+                id: 1,
+                label: "l".repeat(999),
+                hall: "h".repeat(999),
+                hall_color: Some("f".repeat(999)),
+            }],
+            azure_tts: None,
+            reconnect_legacy_rev: false,
+        });
+        let Some(HostFrame::Courts { courts, .. }) = frame else {
+            panic!("die Feldliste bleibt");
+        };
+        assert_eq!(courts[0].label.len(), MAX_FELD_TEXT);
+        assert_eq!(courts[0].hall_color.as_ref().unwrap().len(), MAX_FARBE);
+    }
+
+    #[test]
+    fn zu_viele_host_saetze_gehen_leer_durch() {
+        let (frame, hinweis) = host_frame_deckeln(zuweisung(1, "1", 11));
+        assert!(hinweis.is_some());
+        assert!(matches!(
+            frame,
+            Some(HostFrame::MatchAssigned { host_sets, .. }) if host_sets.is_empty()
+        ));
+        let (frame, hinweis) = host_frame_deckeln(zuweisung(1, "1", 10));
+        assert!(hinweis.is_none());
+        assert!(matches!(
+            frame,
+            Some(HostFrame::MatchAssigned { host_sets, .. }) if host_sets.len() == 10
+        ));
+    }
+
+    /// Ein aufgerufenes Spiel, über den Draht gebaut (so sieht es der Relay).
+    fn aufruf(match_id: i64, name: &str) -> relay_proto::PreparedMatch {
+        let mut b = serde_json::to_value(brief(match_id)).unwrap();
+        b["teamA"][0]["name"] = serde_json::Value::String(name.to_string());
+        let team = b["teamA"].clone();
+        serde_json::from_value(serde_json::json!({
+            "matchId": match_id, "hall": "Halle", "discipline": "mens_singles",
+            "classLabel": "A", "roundName": "G1", "teamA": team, "teamB": b["teamB"],
+            "match_id": match_id, "class_label": "A", "round_name": "G1",
+            "team_a": b["teamA"], "team_b": b["teamB"],
+        }))
+        .expect("PreparedMatch")
+    }
+
+    #[test]
+    fn prepared_ueber_deckel_leert_die_liste() {
+        // Knapp darunter bleibt die Liste, wie sie ist.
+        let klein: Vec<_> = (0..50).map(|i| aufruf(i, "Anna Weber")).collect();
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::Prepared {
+            prepared: klein.clone(),
+        });
+        assert!(hinweis.is_none());
+        assert!(matches!(frame, Some(HostFrame::Prepared { prepared }) if prepared == klein));
+
+        // Eine Liste, die aus dem Ruder läuft, wird zur ehrlichen
+        // Fehlanzeige — nicht zu einer still abgeschnittenen Liste.
+        let riesig: Vec<_> = (0..100).map(|i| aufruf(i, &"x".repeat(4096))).collect();
+        assert!(serde_json::to_vec(&riesig).unwrap().len() > MAX_PREPARED_LEN);
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::Prepared { prepared: riesig });
+        assert!(hinweis.is_some());
+        assert!(matches!(frame, Some(HostFrame::Prepared { prepared }) if prepared.is_empty()));
+
+        // Mehr als 200 kleine Einträge werden nur gekappt, nicht geleert.
+        let viele: Vec<_> = (0..300).map(|i| aufruf(i, "Anna Weber")).collect();
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::Prepared { prepared: viele });
+        assert!(hinweis.is_none());
+        assert!(
+            matches!(frame, Some(HostFrame::Prepared { prepared }) if prepared.len() == MAX_PREPARED)
+        );
+    }
+
+    #[test]
+    fn ueberlanger_tl_zugang_kostet_nicht_den_widerruf() {
+        // Ein Push nennt Gerät 1 (in Ordnung) und Gerät 2 mit überlangem
+        // Zugang; Gerät 3 fehlt (widerrufen). Die Liste wird übernommen —
+        // ohne Gerät 2. Würde sie verworfen, bliebe Gerät 3 zugelassen.
+        let geraet = |id: &str, token: String| relay_proto::TlAuthDevice {
+            id: id.into(),
+            token,
+            profile_id: "p".repeat(999),
+        };
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::TlAuth {
+            devices: vec![
+                geraet("tl-1", "gut".into()),
+                geraet("tl-2", "t".repeat(MAX_TL_TEXT + 1)),
+            ],
+        });
+        assert!(hinweis.is_some());
+        let Some(HostFrame::TlAuth { devices }) = frame else {
+            panic!("die Zugangsliste wird übernommen");
+        };
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "tl-1");
+        assert_eq!(devices[0].profile_id.len(), MAX_TL_TEXT, "Profil gekürzt");
+    }
+
+    #[test]
+    fn eimer_laesst_schwung_durch_und_bremst_dann() {
+        let jetzt = std::time::Instant::now();
+        let mut e = Eimer::voll(TAKT_SCHWUNG, jetzt);
+        let durch = (0..200)
+            .filter(|_| e.nimm(TAKT_SCHWUNG, TAKT_JE_SEKUNDE, jetzt))
+            .count();
+        assert_eq!(durch, TAKT_SCHWUNG as usize, "der Schwung, dann Schluss");
+        // Nach einer Sekunde ist das Kontingent um 20 nachgewachsen.
+        let spaeter = jetzt + Duration::from_secs(1);
+        let durch = (0..200)
+            .filter(|_| e.nimm(TAKT_SCHWUNG, TAKT_JE_SEKUNDE, spaeter))
+            .count();
+        assert_eq!(durch, TAKT_JE_SEKUNDE as usize);
+        // Es wächst nie über den Schwung hinaus.
+        let viel_spaeter = jetzt + Duration::from_secs(3600);
+        let durch = (0..200)
+            .filter(|_| e.nimm(TAKT_SCHWUNG, TAKT_JE_SEKUNDE, viel_spaeter))
+            .count();
+        assert_eq!(durch, TAKT_SCHWUNG as usize);
+    }
+
+    #[test]
+    fn zaehlendes_tablet_kommt_nie_an_den_takt() {
+        // Schnellstes echtes Zählen: ein Punkt alle 0,7 s, je Punkt vier
+        // kleine Frames — eine Stunde lang.
+        let mut s = TabletSitzung::neu(test_ns());
+        let punkt: TabletMsg =
+            serde_json::from_str(r#"{"type":"score_update","scoreA":1,"scoreB":0}"#).unwrap();
+        let mut jetzt = std::time::Instant::now();
+        for _ in 0..5000 {
+            for _ in 0..4 {
+                assert!(s.takt_erlaubt(&punkt, jetzt));
+            }
+            jetzt += Duration::from_millis(700);
+        }
+        assert!(!s.takt_gemeldet);
+    }
+
+    fn abgleiche() -> (TabletMsg, TabletMsg, TabletMsg) {
+        (
+            serde_json::from_str(r#"{"type":"rally_sync","matchId":7,"timeline":{"sets":[]}}"#)
+                .unwrap(),
+            serde_json::from_str(r#"{"type":"match_event_sync","matchId":7,"events":[]}"#).unwrap(),
+            serde_json::from_str(r#"{"type":"state_sync","state":"{}"}"#).unwrap(),
+        )
+    }
+
+    #[test]
+    fn voll_sync_nach_abriss_passt_in_den_takt() {
+        // Wiederverbinden schickt die kompletten Abgleiche gleich dreimal
+        // (beim Öffnen, bei der Zuweisung, bei der Übernahme des Stands) —
+        // und am Spielende noch einmal dreimal.
+        let mut s = TabletSitzung::neu(test_ns());
+        let (verlauf, zettel, zustand) = abgleiche();
+        let mut jetzt = std::time::Instant::now();
+        for _ in 0..6 {
+            assert!(s.takt_erlaubt(&verlauf, jetzt));
+            assert!(s.takt_erlaubt(&zettel, jetzt));
+            assert!(s.takt_erlaubt(&zustand, jetzt));
+            jetzt += Duration::from_millis(300);
+        }
+        assert!(!s.takt_gemeldet);
+        // `identify` und `ping` zählen nicht mit.
+        let ping: TabletMsg = serde_json::from_str(r#"{"type":"ping"}"#).unwrap();
+        assert!((0..1000).all(|_| s.takt_erlaubt(&ping, jetzt)));
+    }
+
+    #[test]
+    fn fuenfzig_ruecknahmen_in_schnellster_folge_kommen_durch() {
+        // Jedes „zurück" schickt Punktverlauf-, Zettel-Abgleich und Zustand,
+        // ohne Punkt-Sperre (250 ms Entprellung), und es gibt 50 Schritte.
+        // Fiele einer der Bremse zum Opfer, behielte der Host zurückgenommene
+        // Ballwechsel — ein verworfener Abgleich wird nie wiederholt. Und das
+        // auch direkt nach einem Wiederverbinden (drei Abgleich-Paare vorab).
+        let mut s = TabletSitzung::neu(test_ns());
+        let (verlauf, zettel, zustand) = abgleiche();
+        let mut jetzt = std::time::Instant::now();
+        for _ in 0..3 {
+            assert!(s.takt_erlaubt(&verlauf, jetzt) && s.takt_erlaubt(&zettel, jetzt));
+        }
+        for schritt in 1..=50 {
+            jetzt += Duration::from_millis(250);
+            assert!(
+                s.takt_erlaubt(&verlauf, jetzt),
+                "Verlauf, Schritt {schritt}"
+            );
+            assert!(s.takt_erlaubt(&zettel, jetzt), "Zettel, Schritt {schritt}");
+            assert!(
+                s.takt_erlaubt(&zustand, jetzt),
+                "Zustand, Schritt {schritt}"
+            );
+        }
+        assert!(!s.takt_gemeldet);
+    }
+
+    #[test]
+    fn dauerfeuer_wird_gebremst() {
+        let mut s = TabletSitzung::neu(test_ns());
+        let (verlauf, zettel, zustand) = abgleiche();
+        let jetzt = std::time::Instant::now();
+        for (name, frame, schwung) in [
+            ("Verlauf", &verlauf, TAKT_SYNC_SCHWUNG),
+            ("Zettel", &zettel, TAKT_SYNC_SCHWUNG),
+            ("Zustand", &zustand, TAKT_ZUSTAND_SCHWUNG),
+        ] {
+            let durch = (0..1000).filter(|_| s.takt_erlaubt(frame, jetzt)).count();
+            assert_eq!(durch, schwung as usize, "{name}");
+        }
+        assert!(s.takt_gemeldet);
+    }
+
+    #[test]
+    fn transport_deckel_liegen_ueber_fachlichen() {
+        // Tablet: der größte fachlich zulässige Frame (Zustand am Deckel)
+        // passt mit Abstand — auch als JSON-Zeichenkette escaped.
+        let zustand = "\"".repeat(MAX_STATE_LEN);
+        let frame = serde_json::json!({ "type": "state_sync", "state": zustand }).to_string();
+        assert!(frame.len() < WS_MAX_TABLET);
+        // Auch der Zustand einer alten Format-1-Seite (590 KB) trennt nicht.
+        let alt = serde_json::json!({ "type": "state_sync", "state": "x".repeat(590 * 1024) })
+            .to_string();
+        assert!(alt.len() < WS_MAX_TABLET);
+        // Träger: derselbe alte Zustand, im Umschlag noch einmal escaped.
+        let umschlag = serde_json::json!({
+            "type": "frame", "stream": 1,
+            "payload": serde_json::json!({ "type": "state_sync", "state": "\"".repeat(590 * 1024) }).to_string()
+        })
+        .to_string();
+        assert!(umschlag.len() < WS_MAX_TRAEGER, "{}", umschlag.len());
+        // Host: der größte Zettel, ungünstig escaped.
+        let zettel = text(&HostFrame::ScoresheetData {
+            req_id: u64::MAX,
+            found: true,
+            html: "\"".repeat(MAX_SCORESHEET_HTML_LEN),
+        });
+        let Message::Text(t) = zettel else {
+            panic!("Text-Frame erwartet")
+        };
+        assert!(t.len() <= WS_MAX_HOST, "{}", t.len());
+    }
+
+    #[tokio::test]
+    async fn monitor_steuerung_ueber_dem_deckel_wird_abgelehnt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let mut gross = MonitorControl::default();
+        for i in 0..=MAX_CONTROL_EINTRAEGE {
+            gross.assignments.insert(format!("g{i}"), 1);
+        }
+        let antwort = monitor_control_upload(State(broker.clone()), Path(ns.clone()), Json(gross))
+            .await
+            .into_response();
+        assert_eq!(antwort.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let mut lang = MonitorControl::default();
+        lang.assignments
+            .insert("k".repeat(MAX_CONTROL_SCHLUESSEL + 1), 1);
+        let antwort = monitor_control_upload(State(broker.clone()), Path(ns.clone()), Json(lang))
+            .await
+            .into_response();
+        assert_eq!(antwort.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let mut gut = MonitorControl::default();
+        gut.assignments.insert("geraet-1".into(), 1);
+        let antwort = monitor_control_upload(State(broker), Path(ns), Json(gut))
+            .await
+            .into_response();
+        assert_eq!(antwort.status(), StatusCode::OK);
+    }
+
+    // ───── Host-Verlust auf den Anzeigen (Spec relay-haerten, PR 7) ─────
+
+    /// Legt ein Turnier an: Turnier-PC verbunden, Feld 5 mit Spiel,
+    /// Meetingpoint an, Gerät „tv-1" auf Feld 5.
+    async fn turnier_mit_stand(broker: &Broker, ns: &str) -> (Tx, mpsc::Receiver<Message>) {
+        let (host_tx, host_rx) = kanal_test();
+        register_host(broker, ns, &host_tx).await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(ns).unwrap();
+        n.court_labels.insert(5, "Feld 5".into());
+        n.meetingpoint.enabled = true;
+        n.monitor_control
+            .targets
+            .insert("tv-1".into(), relay_proto::MonitorTarget::court(5));
+        drop(map);
+        (host_tx, host_rx)
+    }
+
+    /// Der Turnier-PC ist seit `ms` Millisekunden weg.
+    async fn host_weg_seit(broker: &Broker, ns: &str, ms: u64) {
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(ns).unwrap();
+        n.host = None;
+        n.host_weg_seit = Some(now_ms() - ms);
+    }
+
+    /// Ruft die fünf Stand-Routen ab; liefert je Route Status und Rumpf.
+    async fn stand_routen(
+        broker: &Broker,
+        ns: &str,
+        headers: axum::http::HeaderMap,
+    ) -> Vec<(&'static str, StatusCode, String, axum::http::HeaderMap)> {
+        let mut aus = Vec::new();
+        let antworten: Vec<(&'static str, Response)> = vec![
+            (
+                "court/state",
+                monitor_state(
+                    State(broker.clone()),
+                    Path((ns.to_string(), 5)),
+                    Query(ZweckQuery { zweck: None }),
+                    headers.clone(),
+                )
+                .await
+                .into_response(),
+            ),
+            (
+                "monitor/state",
+                monitor_device_state(
+                    State(broker.clone()),
+                    Path(ns.to_string()),
+                    Query(DeviceQuery {
+                        device: "tv-1".into(),
+                    }),
+                    headers.clone(),
+                )
+                .await,
+            ),
+            (
+                "health",
+                overview_health(
+                    State(broker.clone()),
+                    Path(ns.to_string()),
+                    leer_query(),
+                    headers.clone(),
+                )
+                .await
+                .into_response(),
+            ),
+            (
+                "preparation/state",
+                preparation_state(State(broker.clone()), Path(ns.to_string()), headers.clone())
+                    .await,
+            ),
+            (
+                "meetingpoint/state",
+                meetingpoint_state(
+                    State(broker.clone()),
+                    Path(ns.to_string()),
+                    Query(MpQuery {
+                        halle: String::new(),
+                    }),
+                    headers.clone(),
+                )
+                .await,
+            ),
+        ];
+        for (name, r) in antworten {
+            let status = r.status();
+            let kopf = r.headers().clone();
+            let rumpf = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            aus.push((
+                name,
+                status,
+                String::from_utf8_lossy(&rumpf).into_owned(),
+                kopf,
+            ));
+        }
+        aus
+    }
+
+    fn ist_host_weg(status: StatusCode, rumpf: &str, kopf: &axum::http::HeaderMap) -> bool {
+        status == StatusCode::SERVICE_UNAVAILABLE
+            && rumpf == r#"{"grund":"host_weg"}"#
+            && kopf.get(header::CACHE_CONTROL).unwrap() == "no-store"
+            && kopf.get(header::RETRY_AFTER).unwrap() == "2"
+            && kopf.get(header::ETAG).is_none()
+    }
+
+    #[tokio::test]
+    async fn namespace_nur_vom_tablet_verschwindet_sofort() {
+        // Die Karenz hält nur Namespaces, die je einen Turnier-PC hatten.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = kanal_test();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(1, "a"), &tx).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        s.abraeumen(&broker, &tx).await;
+        assert!(
+            !broker.namespaces.lock().await.contains_key(&ns),
+            "ohne je einen Turnier-PC gibt es nichts weiterzuzeigen"
+        );
+    }
+
+    #[test]
+    fn anzeige_lage_grenzen() {
+        let start = 1_000_000;
+        let mut n = Namespace::new();
+        let (tx, _rx) = kanal_test();
+        // Turnier-PC verbunden.
+        n.host = Some(tx);
+        n.host_weg_seit = None;
+        assert_eq!(anzeige_lage(Some(&n), start + 999_999, start), Lage::Offen);
+        // Weg: bis knapp unter 20 s offen, ab 20 s gesperrt.
+        n.host = None;
+        n.host_weg_seit = Some(start);
+        assert_eq!(anzeige_lage(Some(&n), start, start), Lage::Offen);
+        assert_eq!(
+            anzeige_lage(Some(&n), start + HOST_KARENZ_MS - 1, start),
+            Lage::Offen
+        );
+        assert_eq!(
+            anzeige_lage(Some(&n), start + HOST_KARENZ_MS, start),
+            Lage::Gesperrt
+        );
+        // Namespace fehlt: Start-Karenz, danach gesperrt.
+        assert_eq!(
+            anzeige_lage(None, start + HOST_KARENZ_MS - 1, start),
+            Lage::StartKarenz
+        );
+        assert_eq!(
+            anzeige_lage(None, start + HOST_KARENZ_MS, start),
+            Lage::Gesperrt
+        );
+    }
+
+    #[tokio::test]
+    async fn host_weg_zeigt_karenz_lang_200_dann_503() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        // Ein Tablet hält den Namespace über die Karenz hinaus.
+        let (tablet, _trx) = kanal_test();
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, tablet);
+
+        for (name, status, ..) in stand_routen(&broker, &ns, Default::default()).await {
+            assert_eq!(status, StatusCode::OK, "{name} mit Turnier-PC");
+        }
+        // Weg, noch in der Karenz: der letzte Stand.
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS - 2_000).await;
+        for (name, status, rumpf, _) in stand_routen(&broker, &ns, Default::default()).await {
+            assert_eq!(status, StatusCode::OK, "{name} in der Karenz");
+            if name == "court/state" {
+                assert!(
+                    rumpf.contains("\"courtLabel\":\"Feld 5\""),
+                    "der gehaltene Stand: {rumpf}"
+                );
+            }
+        }
+        // Nach der Karenz: 503 mit Grund.
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS + 1).await;
+        for (name, status, rumpf, kopf) in stand_routen(&broker, &ns, Default::default()).await {
+            assert!(
+                ist_host_weg(status, &rumpf, &kopf),
+                "{name}: {status} {rumpf}"
+            );
+        }
+        // Auch die Stream-Fassung der Feld-Route.
+        let r = monitor_state(
+            State(broker.clone()),
+            Path((ns.clone(), 5)),
+            Query(ZweckQuery {
+                zweck: Some("stream".into()),
+            }),
+            Default::default(),
+        )
+        .await
+        .into_response();
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn gesperrt_schlaegt_cache_und_304() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        // Cache wärmen und Marken einsammeln.
+        let mut marken = Vec::new();
+        for (name, status, _, kopf) in stand_routen(&broker, &ns, Default::default()).await {
+            assert_eq!(status, StatusCode::OK, "{name}");
+            marken.push(kopf.get(header::ETAG).cloned());
+        }
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS + 1).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+        // Mit jeder der Marken: trotzdem 503, nie 304.
+        for marke in marken.into_iter().flatten() {
+            let mut h = axum::http::HeaderMap::new();
+            h.insert(header::IF_NONE_MATCH, marke);
+            for (name, status, rumpf, kopf) in stand_routen(&broker, &ns, h.clone()).await {
+                assert!(ist_host_weg(status, &rumpf, &kopf), "{name}: {status}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn stummer_host_zaehlt_ab_letztem_lebenszeichen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = turnier_mit_stand(&broker, &ns).await;
+        let letztes = now_ms() - 15_000;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(&ns).unwrap();
+        // Der Turnier-PC ist vor 15 s verstummt; jetzt erst fällt die
+        // Verbindung (Stale-Wächter).
+        n.host_last_seen = letztes;
+        assert!(release_host_slot(n, &host_tx));
+        assert_eq!(n.host_weg_seit, Some(letztes));
+        // 5 s später ist gesperrt — nicht erst nach 15 + 20 s.
+        assert_eq!(
+            anzeige_lage(Some(n), now_ms() + 5_000, broker.start_ms),
+            Lage::Gesperrt
+        );
+    }
+
+    #[tokio::test]
+    async fn namespace_ueberlebt_host_abgang_ohne_tablets() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = turnier_mit_stand(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+            namespace_aufraeumen(&mut map, &ns);
+            assert!(map.contains_key(&ns), "in der Karenz bleibt der Namespace");
+        }
+        // In der Karenz: der letzte Stand.
+        let r = stand_routen(&broker, &ns, Default::default()).await;
+        assert_eq!(r[0].1, StatusCode::OK);
+        assert!(r[0].2.contains("\"courtLabel\":\"Feld 5\""));
+        // Der Aufräum-Lauf lässt ihn stehen — auch nach der Karenz (die
+        // Anzeigen sehen dann 503 und kennen ihre Zuweisung weiter) — und
+        // entfernt ihn erst nach der Daten-Frist.
+        fegen(&broker, now_ms()).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        fegen(&broker, now_ms() + HOST_KARENZ_MS).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        assert!(!broker.namespaces.lock().await.contains_key(&ns));
+    }
+
+    #[tokio::test]
+    async fn fehlender_namespace_ist_gesperrt() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.start_ms = 0;
+        let ns = test_ns();
+        for (name, status, rumpf, kopf) in stand_routen(&broker, &ns, Default::default()).await {
+            if name == "monitor/state" {
+                // Ohne Namespace kennt der Relay keine Zuweisung:
+                // Kopplungs-Seite mit Hinweis.
+                assert_eq!(status, StatusCode::OK);
+                assert!(rumpf.contains("\"hostOffline\":true"), "{rumpf}");
+            } else {
+                assert!(ist_host_weg(status, &rumpf, &kopf), "{name}: {status}");
+            }
+        }
+        assert!(broker.namespaces.lock().await.is_empty(), "nichts angelegt");
+    }
+
+    #[tokio::test]
+    async fn start_karenz_bestaetigt_mit_marke() {
+        // Frisch gestarteter Relay, der Turnier-PC ist noch nicht zurück.
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let mut mit_marke = axum::http::HeaderMap::new();
+        mit_marke.insert(header::IF_NONE_MATCH, "\"alt\"".parse().unwrap());
+        for (name, status, ..) in stand_routen(&broker, &ns, mit_marke.clone()).await {
+            assert_eq!(status, StatusCode::NOT_MODIFIED, "{name} mit Marke");
+        }
+        for (name, status, rumpf, kopf) in stand_routen(&broker, &ns, Default::default()).await {
+            assert!(ist_host_weg(status, &rumpf, &kopf), "{name} ohne Marke");
+        }
+        // Nach der Start-Karenz hilft die Marke nicht mehr.
+        broker.start_ms = now_ms() - HOST_KARENZ_MS;
+        for (name, status, ..) in stand_routen(&broker, &ns, mit_marke).await {
+            if name != "monitor/state" {
+                assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{name}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unzugewiesenes_geraet_behaelt_kopplungsseite() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        let (s, _, body) = hole_monitor(&broker, &ns, "neu", &[]).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(body["unassigned"], serde_json::json!(true));
+        assert!(
+            body.get("hostOffline").is_none(),
+            "mit Turnier-PC kein Hinweis"
+        );
+
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS + 1).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+        // Unzugewiesen: Kopplungs-Seite mit Hinweis.
+        let (s, _, body) = hole_monitor(&broker, &ns, "neu", &[]).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(body["unassigned"], serde_json::json!(true));
+        assert_eq!(body["hostOffline"], serde_json::json!(true));
+        // Zugewiesen: 503 — und das Lebenszeichen ist trotzdem gestempelt.
+        let (s, ..) = hole_monitor(&broker, &ns, "tv-1", &[]).await;
+        assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(broker
+            .namespaces
+            .lock()
+            .await
+            .get(&ns)
+            .unwrap()
+            .monitor_seen
+            .contains_key("tv-1"));
+    }
+
+    #[tokio::test]
+    async fn ansage_route_sperrt_sofort() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let abruf = || async {
+            announce_state(
+                State(broker.clone()),
+                Path(ns.clone()),
+                Query(AnnounceStateQuery {
+                    hall: String::new(),
+                    since: 0,
+                    slave: "s1".into(),
+                }),
+            )
+            .await
+            .into_response()
+            .status()
+        };
+        // Start-Karenz gilt hier nicht: ohne Namespace sofort 503.
+        assert_eq!(abruf().await, StatusCode::SERVICE_UNAVAILABLE);
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        assert_eq!(abruf().await, StatusCode::OK);
+        // Turnier-PC gerade erst weg (in der Karenz): trotzdem sofort 503.
+        host_weg_seit(&broker, &ns, 0).await;
+        assert_eq!(abruf().await, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn feldliste_bleibt_abrufbar() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS + 1).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+        // Das Tablet braucht die Feldliste für den Feldwechsel.
+        let r = courts_list(State(broker.clone()), Path(ns.clone()))
+            .await
+            .into_response();
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn karenz_ende_stoesst_alle_abos_an() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        let (tx_all, mut rx_all) = kanal_test();
+        let (tx_feld, mut rx_feld) = kanal_test();
+        assert!(subscribe_monitor(&broker, &ns, None, &tx_all).await);
+        assert!(subscribe_monitor(&broker, &ns, Some(5), &tx_feld).await);
+        host_weg_seit(&broker, &ns, 1_000).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+
+        // In der Karenz: nichts.
+        fegen(&broker, now_ms()).await;
+        assert!(texte(&mut rx_all).is_empty() && texte(&mut rx_feld).is_empty());
+        // Am Karenz-Ende: genau einmal.
+        let spaeter = now_ms() + HOST_KARENZ_MS;
+        fegen(&broker, spaeter).await;
+        assert!(!texte(&mut rx_all).is_empty());
+        assert_eq!(texte(&mut rx_feld).len(), 1);
+        fegen(&broker, spaeter + 5_000).await;
+        assert!(texte(&mut rx_all).is_empty() && texte(&mut rx_feld).is_empty());
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_stoesst_an() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        let (tx_feld, mut rx_feld) = kanal_test();
+        assert!(subscribe_monitor(&broker, &ns, Some(5), &tx_feld).await);
+        host_weg_seit(&broker, &ns, 1_000).await;
+        let (neu_tx, _neu_rx) = kanal_test();
+
+        // Rückkehr IN der Karenz: Keine Anzeige hat je 503 gesehen — kein Anstoß.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+            assert_eq!(n.host_weg_seit, None);
+        }
+        assert!(texte(&mut rx_feld).is_empty());
+
+        // Rückkehr NACH dem gemeldeten Karenz-Ende: einmal anstoßen.
+        host_weg_seit(&broker, &ns, 1_000).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+        fegen(&broker, now_ms() + HOST_KARENZ_MS).await;
+        texte(&mut rx_feld);
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+        }
+        assert_eq!(texte(&mut rx_feld).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tl_abos_werden_beim_abgang_geschlossen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = turnier_mit_stand(&broker, &ns).await;
+        let (tl_tx, mut tl_rx) = kanal_test();
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(&ns).unwrap();
+        n.tl_subs.push(tl_tx);
+        assert!(release_host_slot(n, &host_tx));
+        assert!(n.tl_subs.is_empty());
+        assert!(matches!(tl_rx.try_recv(), Ok(Message::Close(_))));
+        // Eine verdrängte Alt-Verbindung schließt nichts.
+        let (fremd, _f) = kanal_test();
+        assert!(!release_host_slot(n, &fremd));
+    }
+
+    #[tokio::test]
+    async fn zweiter_host_bekommt_close_grund() {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message as Ws;
+        let (broker, basis) = relay_starten().await;
+        let ns = test_ns();
+        let (_erster, _) = tokio_tungstenite::connect_async(format!("{basis}/{ns}/host-ws"))
+            .await
+            .expect("erster Host");
+        // Warten, bis der erste eingetragen ist.
+        for _ in 0..200 {
+            if broker
+                .namespaces
+                .lock()
+                .await
+                .get(&ns)
+                .is_some_and(|n| n.host.is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let (mut zweiter, _) = tokio_tungstenite::connect_async(format!("{basis}/{ns}/host-ws"))
+            .await
+            .expect("zweiter Host verbindet");
+        let grund = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match zweiter.next().await {
+                    Some(Ok(Ws::Close(Some(f)))) => {
+                        break Some((u16::from(f.code), f.reason.to_string()))
+                    }
+                    Some(Ok(_)) => {}
+                    _ => break None,
+                }
+            }
+        })
+        .await
+        .expect("Close kam");
+        assert_eq!(grund, Some((CLOSE_HOST_BELEGT, "host_belegt".to_string())));
+        // /health nennt die Zahl der Turnier-PCs.
+        let h = health(State(broker.clone())).await.0;
+        assert_eq!(h["hosts"], serde_json::json!(1));
+    }
+
+    // ───────────── Daten-Verfall (Spec relay-haerten, PR 8) ─────────────
+
+    /// Ein Turnier mit allem, was der Relay je hält: zwei Felder mit Spiel,
+    /// Stand und Zustand (Feld 5 mit Tablet, Feld 6 ohne), Listen, Bilder.
+    async fn volles_turnier(broker: &Broker, ns: &str) -> (Tx, Tx) {
+        let (host_tx, _host_rx) = turnier_mit_stand(broker, ns).await;
+        let (tablet_tx, _trx) = kanal_test();
+        monitor_upload(
+            State(broker.clone()),
+            Path(ns.to_string()),
+            Json(bild_upload(&[b"bild"], Some(b"logo"))),
+        )
+        .await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(ns).unwrap();
+        n.tablets.insert(5, tablet_tx.clone());
+        for feld in [5, 6] {
+            n.court_matches.insert(feld, brief(100 + feld));
+            n.court_scores
+                .insert(feld, vec![relay_proto::SetAb { a: 11, b: 7 }]);
+            n.court_state.insert(feld, "{\"rev\":3}".into());
+            n.monitor_seq.insert(feld, 9);
+            n.court_labels.insert(feld, format!("Feld {feld}"));
+            n.court_hall.insert(feld, "Halle A".into());
+        }
+        n.courts.push(relay_proto::CourtBrief {
+            id: 5,
+            label: "Feld 5".into(),
+            hall: "Halle A".into(),
+            hall_color: None,
+        });
+        n.freetext.push(relay_proto::FreetextItem {
+            id: 1,
+            text: "Bitte Herrn Mustermann zur Turnierleitung".into(),
+            hall: String::new(),
+        });
+        n.slaves.insert("s1".into(), ("Halle B".into(), now_ms()));
+        n.monitor_seen.insert("tv-1".into(), now_ms());
+        n.azure_tts = Some(
+            serde_json::from_value(serde_json::json!({
+                "key": "geheim", "region": "westeurope", "voice": "de-DE-KatjaNeural"
+            }))
+            .unwrap(),
+        );
+        drop(map);
+        (host_tx, tablet_tx)
+    }
+
+    #[test]
+    fn anonymer_brief_traegt_keine_person() {
+        let b = anonymer_brief(42, true);
+        assert_eq!((b.match_id, b.finalized), (42, true));
+        assert!(b.team_a.is_empty() && b.team_b.is_empty());
+        assert!(b.sr_names.is_empty() && b.scorekeeper.is_empty());
+        assert!(b.event_label.is_empty() && b.class_label.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sprachschluessel_ist_sofort_weg() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(&ns).unwrap();
+        assert!(n.azure_tts.is_some());
+        assert!(release_host_slot(n, &host_tx));
+        assert!(
+            n.azure_tts.is_none(),
+            "mit dem Abgang, nicht erst nach 60 min"
+        );
+        // Alles andere ist noch da.
+        assert!(!n.prepared.is_empty() || n.monitor.is_some());
+    }
+
+    #[tokio::test]
+    async fn nach_sechzig_minuten_sind_turnierdaten_weg() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        assert!(gebucht(&broker) > 0);
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        // Kurz vor Ablauf: nichts geleert.
+        fegen(&broker, now_ms() + DATEN_FRIST_MS - 60_000).await;
+        assert!(broker
+            .namespaces
+            .lock()
+            .await
+            .get(&ns)
+            .unwrap()
+            .monitor
+            .is_some());
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("das Tablet hält den Namespace");
+        assert!(n.geleert);
+        assert!(n.monitor.is_none() && n.courts.is_empty() && n.freetext.is_empty());
+        assert!(n.court_labels.is_empty() && n.court_hall.is_empty());
+        assert!(n.slaves.is_empty() && n.monitor_seen.is_empty());
+        assert!(n.monitor_control.targets.is_empty());
+        assert!(!n.meetingpoint.enabled && n.prepared.is_empty());
+        // Feld ohne Tablet: alles weg.
+        assert!(!n.court_matches.contains_key(&6));
+        assert!(!n.court_scores.contains_key(&6) && !n.court_state.contains_key(&6));
+        // Die Bilder haben ihren Anteil am Budget zurückgegeben.
+        assert_eq!(gebucht(&broker), 0);
+        // Was bleibt, gehört dem Feld mit Tablet: sein gespiegelter Zustand
+        // (der die Namen SEINES Spiels enthalten kann — er bleibt, solange
+        // das Tablet am Feld hängt) und ein Brief ohne Personen.
+        assert_eq!(n.court_matches.len(), 1);
+        assert_eq!(n.court_state.len(), 1);
+        assert!(n
+            .court_matches
+            .values()
+            .all(|b| b.team_a.is_empty() && b.team_b.is_empty() && b.sr_names.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn knappes_budget_gibt_bilder_hostloser_turniere_frei() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.bilder_budget = 10;
+        let (alt, neu) = (test_ns(), "b1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        let (alt_host, _a) = kanal_test();
+        register_host(&broker, &alt, &alt_host).await;
+        let lade = |ns: &str, bild: &'static [u8]| {
+            let (broker, ns) = (broker.clone(), ns.to_string());
+            async move {
+                monitor_upload(State(broker), Path(ns), Json(bild_upload(&[bild], None)))
+                    .await
+                    .0
+            }
+        };
+        assert_eq!(lade(&alt, b"12345678").await, StatusCode::OK);
+        let (neu_host, _n) = kanal_test();
+        register_host(&broker, neu, &neu_host).await;
+        // Solange das alte Turnier seinen Turnier-PC hat, behält es seine
+        // Bilder — das neue bekommt 507.
+        assert_eq!(lade(neu, b"abcdef").await, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(bilder_von(&broker, &alt).await.0, 1);
+        // Ist der alte Turnier-PC weg, weichen seine Bilder dem neuen Turnier.
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&alt).unwrap(), &alt_host));
+        }
+        assert_eq!(lade(neu, b"abcdef").await, StatusCode::OK);
+        assert_eq!(bilder_von(&broker, &alt).await.0, 0);
+        assert_eq!(bilder_von(&broker, neu).await.0, 1);
+        assert_eq!(gebucht(&broker), 6);
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_mit_anderem_spiel_raeumt_den_alten_stand() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            try_claim_host(map.get_mut(&ns).unwrap(), &neu_tx, now_ms());
+        }
+        // Am Feld steht inzwischen ein anderes Spiel: Der Stand des Stummels
+        // gehört nicht dazu.
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(777),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &neu_tx,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert!(!n.court_scores.contains_key(&5), "alter Stand geräumt");
+        assert_eq!(n.court_matches.get(&5), Some(&brief(777)));
+    }
+
+    #[tokio::test]
+    async fn feld_mit_tablet_behaelt_stand_und_stummel() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert_eq!(n.court_scores.get(&5).map(Vec::len), Some(1));
+        assert_eq!(
+            n.court_state.get(&5).map(String::as_str),
+            Some("{\"rev\":3}")
+        );
+        let stummel = n.court_matches.get(&5).expect("Brief ohne Personen");
+        assert_eq!(stummel, &anonymer_brief(105, false));
+    }
+
+    #[tokio::test]
+    async fn tablet_zaehlt_nach_dem_leeren_weiter() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, tablet_tx) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        // Der nächste Punkt des Tablets (es nennt sein Spiel) wird angenommen
+        // — ohne den Stummel verwürfe ihn der Stale-Filter.
+        forward_score(&broker, &ns, 5, 12, 7, Vec::new(), 105, &tablet_tx).await;
+        let map = broker.namespaces.lock().await;
+        assert_eq!(
+            map.get(&ns).unwrap().court_scores.get(&5),
+            Some(&vec![relay_proto::SetAb { a: 12, b: 7 }])
+        );
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_nach_leeren_raeumt_stand_nicht() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        // Der Turnier-PC kommt zurück und weist dasselbe Spiel wieder zu.
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+            assert!(!n.geleert);
+        }
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(105),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &neu_tx,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert_eq!(n.court_scores.get(&5).map(Vec::len), Some(1), "kein 0:0");
+        assert!(n.court_state.contains_key(&5));
+        // Und der Brief trägt wieder die Namen.
+        assert_eq!(n.court_matches.get(&5), Some(&brief(105)));
+    }
+
+    #[tokio::test]
+    async fn namespace_verschwindet_wenn_letztes_tablet_geht() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, tablet_tx) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        let spaeter = now_ms() + DATEN_FRIST_MS;
+        fegen(&broker, spaeter).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            n.tablets.retain(|_, t| !t.same_channel(&tablet_tx));
+        }
+        fegen(&broker, spaeter).await;
+        assert!(!broker.namespaces.lock().await.contains_key(&ns));
+    }
+
+    #[tokio::test]
+    async fn voller_relay_verdraengt_den_aeltesten_hostlosen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host_tx, _host_rx) = kanal_test();
+        let (tablet_tx, _trx) = kanal_test();
+        let mut map = broker.namespaces.lock().await;
+        let neu = |host: bool, tablet: bool, weg: u64| {
+            let mut n = Namespace::new();
+            n.host_last_seen = 1;
+            if host {
+                n.host = Some(host_tx.clone());
+                n.host_weg_seit = None;
+            } else {
+                n.host_weg_seit = Some(weg);
+            }
+            if tablet {
+                n.tablets.insert(1, tablet_tx.clone());
+            }
+            n
+        };
+        map.insert("mit-host".into(), neu(true, false, 0));
+        map.insert("mit-tablet".into(), neu(false, true, 10));
+        map.insert("juenger".into(), neu(false, false, 500));
+        map.insert("aeltester".into(), neu(false, false, 100));
+        // Der am längsten hostlose ohne Tablet weicht — nie einer mit
+        // Turnier-PC oder Tablet, auch wenn er länger verwaist ist.
+        assert!(verdraenge_hostlosen(&mut map));
+        assert!(!map.contains_key("aeltester"));
+        assert!(verdraenge_hostlosen(&mut map));
+        assert!(!map.contains_key("juenger"));
+        // Keiner mehr übrig → der neue Turnier-PC wird abgewiesen.
+        assert!(!verdraenge_hostlosen(&mut map));
+        assert!(map.contains_key("mit-host") && map.contains_key("mit-tablet"));
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_vor_ablauf_bricht_verfall_ab() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS - 60_000).await;
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+        }
+        // Mit Turnier-PC verfällt nichts — auch viel später nicht.
+        fegen(&broker, now_ms() + 10 * DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert!(!n.geleert && n.monitor.is_some() && !n.courts.is_empty());
+        assert_eq!(n.court_matches.get(&6), Some(&brief(106)));
+    }
+
+    // ─────── Bilder-Tor, Budget, Log (Spec relay-haerten, PR 6) ───────
+
+    fn bild_upload(bilder: &[&[u8]], logo: Option<&[u8]>) -> relay_proto::MonitorUpload {
+        use base64::Engine;
+        let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+        relay_proto::MonitorUpload {
+            config: relay_proto::MonitorConfig::default(),
+            tournament_name: "Test-Cup".into(),
+            ads: bilder
+                .iter()
+                .map(|b| relay_proto::AdUpload {
+                    content_type: "image/png".into(),
+                    data: b64(b),
+                    in_bar: false,
+                    style: relay_proto::AdStyleWire::default(),
+                })
+                .collect(),
+            call_timer: relay_proto::CallTimerView::default(),
+            logo: logo.map(|b| relay_proto::LogoUpload {
+                content_type: "image/png".into(),
+                data: b64(b),
+            }),
+        }
+    }
+
+    async fn bilder_von(broker: &Broker, ns: &str) -> (usize, bool, String) {
+        let map = broker.namespaces.lock().await;
+        let m = map.get(ns).and_then(|n| n.monitor.as_ref());
+        (
+            m.map_or(0, |m| m.ads.len()),
+            m.is_some_and(|m| m.logo.is_some()),
+            m.map_or(String::new(), |m| m.tournament_name.clone()),
+        )
+    }
+
+    fn gebucht(broker: &Broker) -> usize {
+        broker
+            .bilder_bytes
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn upload_ohne_host_wird_vor_dem_rumpf_abgewiesen() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        // Rumpf, der sich merkt, ob jemand ihn gelesen hat.
+        let rumpf_fuer = |gelesen: Arc<AtomicBool>| {
+            let json = serde_json::to_vec(&bild_upload(&[b"bild"], None)).unwrap();
+            axum::body::Body::from_stream(futures_util::stream::once(async move {
+                gelesen.store(true, Ordering::SeqCst);
+                Ok::<_, std::io::Error>(json)
+            }))
+        };
+        let anfrage = |rumpf| {
+            axum::extract::Request::builder()
+                .method("POST")
+                .body(rumpf)
+                .unwrap()
+        };
+
+        // Kein Namespace, kein Host: 409, der Rumpf bleibt ungelesen.
+        let gelesen = Arc::new(AtomicBool::new(false));
+        let (status, _) = monitor_upload_route(
+            State(broker.clone()),
+            Path(ns.clone()),
+            anfrage(rumpf_fuer(gelesen.clone())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(!gelesen.load(Ordering::SeqCst), "Rumpf wurde gelesen");
+        assert!(broker.namespaces.lock().await.is_empty(), "nichts angelegt");
+
+        // Mit Host geht derselbe Upload durch.
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let gelesen = Arc::new(AtomicBool::new(false));
+        let (status, _) = monitor_upload_route(
+            State(broker.clone()),
+            Path(ns.clone()),
+            anfrage(rumpf_fuer(gelesen.clone())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(gelesen.load(Ordering::SeqCst));
+        assert_eq!(bilder_von(&broker, &ns).await.0, 1);
+    }
+
+    #[tokio::test]
+    async fn gesamt_budget_weist_bilder_ab() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.bilder_budget = 10;
+        let ns = test_ns();
+        let anderes = "b1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        register_host(&broker, anderes, &host_tx).await;
+
+        let (status, _) = monitor_upload(
+            State(broker.clone()),
+            Path(ns.clone()),
+            Json(bild_upload(&[b"12345678"], None)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 8);
+
+        // Das zweite Turnier passt nicht mehr hinein: 507, Bilder verworfen,
+        // die Konfiguration gilt.
+        let (status, _) = monitor_upload(
+            State(broker.clone()),
+            Path(anderes.to_string()),
+            Json(bild_upload(&[b"abc"], Some(b"logo"))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(
+            bilder_von(&broker, anderes).await,
+            (0, false, "Test-Cup".to_string())
+        );
+        // Alles oder nichts: Die halbe Buchung ist zurückgegeben.
+        assert_eq!(gebucht(&broker), 8);
+
+        // Ein laufendes Turnier behält bei 507 seine bisherigen Bilder.
+        let (status, _) = monitor_upload(
+            State(broker.clone()),
+            Path(ns.clone()),
+            Json(bild_upload(&[b"zu-gross-fuer-das-budget"], None)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(bilder_von(&broker, &ns).await.0, 1);
+        assert_eq!(gebucht(&broker), 8);
+    }
+
+    #[tokio::test]
+    async fn hoechstens_zwei_uploads_gleichzeitig() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let anfrage = || {
+            axum::extract::Request::builder()
+                .method("POST")
+                .body(axum::body::Body::from(
+                    serde_json::to_vec(&bild_upload(&[b"bild"], None)).unwrap(),
+                ))
+                .unwrap()
+        };
+        // Zwei Uploads laufen gerade.
+        let a = broker.upload_plaetze.clone().try_acquire_owned().unwrap();
+        let _b = broker.upload_plaetze.clone().try_acquire_owned().unwrap();
+        let (status, _) =
+            monitor_upload_route(State(broker.clone()), Path(ns.clone()), anfrage()).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        // Ist einer fertig, geht der nächste durch — und gibt seinen Platz
+        // danach wieder frei.
+        drop(a);
+        let (status, _) =
+            monitor_upload_route(State(broker.clone()), Path(ns.clone()), anfrage()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(broker.upload_plaetze.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn texte_der_konfiguration_sind_gedeckelt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let mut upload = bild_upload(&[b"bild"], None);
+        upload.config.layout = "x".repeat(100_000);
+        upload.ads[0].style.bg = "y".repeat(100_000);
+        monitor_upload(State(broker.clone()), Path(ns.clone()), Json(upload)).await;
+        let map = broker.namespaces.lock().await;
+        let m = map.get(&ns).unwrap().monitor.as_ref().unwrap();
+        assert_eq!(m.config.layout.chars().count(), MAX_CONFIG_TEXT);
+        assert_eq!(m.ads[0].style.bg.chars().count(), MAX_CONFIG_TEXT);
+    }
+
+    #[tokio::test]
+    async fn budget_sinkt_beim_ersetzen_und_entfernen() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.bilder_budget = 10;
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let lade = |bilder: Vec<&'static [u8]>| {
+            let (broker, ns) = (broker.clone(), ns.clone());
+            async move {
+                monitor_upload(State(broker), Path(ns), Json(bild_upload(&bilder, None)))
+                    .await
+                    .0
+            }
+        };
+        assert_eq!(lade(vec![b"12345678"]).await, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 8);
+        // Ersetzen: Die alten 8 Bytes zählen nicht mehr mit — sonst passten
+        // die neuen 9 nicht ins Budget von 10.
+        assert_eq!(lade(vec![b"123456789"]).await, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 9);
+        // Entfernen (Upload ohne Bilder).
+        assert_eq!(lade(vec![]).await, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 0);
+        // Verschwindet das Turnier, sinkt der Zähler ebenfalls.
+        assert_eq!(lade(vec![b"1234"]).await, StatusCode::OK);
+        assert_eq!(gebucht(&broker), 4);
+        broker.namespaces.lock().await.remove(&ns);
+        assert_eq!(gebucht(&broker), 0);
+    }
+
+    #[tokio::test]
+    async fn monitor_steuerung_ohne_host_wird_abgewiesen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        broker.namespaces.lock().await.get_mut(&ns).unwrap().host = None;
+        let antwort =
+            monitor_control_upload(State(broker), Path(ns), Json(MonitorControl::default()))
+                .await
+                .into_response();
+        assert_eq!(antwort.status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn kennung_im_log_hat_acht_zeichen() {
+        assert_eq!(kurz("a1b2c3d4-e5f6-7890-abcd-ef1234567890"), "a1b2c3d4");
+        assert_eq!(kurz("kurz"), "kurz");
+        // Wächter: Keine Log-Zeile schreibt die volle Kennung. (Die Nadel ist
+        // zusammengesetzt, damit dieser Test sich nicht selbst findet.)
+        let nadel = ["'{", "ns}'"].concat();
+        let quelle = include_str!("main.rs");
+        assert!(
+            !quelle.contains(&nadel),
+            "Im Quelltext steht wieder die volle Kennung — `kurz(..)` verwenden"
+        );
+        // Dasselbe für die Schreibweise mit Platzhalter: Auf jede Log-Zeile
+        // mit „Namespace '{}'" muss ein `kurz(` folgen.
+        let platzhalter = ["Namespace '{", "}'"].concat();
+        for (stelle, _) in quelle.match_indices(&platzhalter) {
+            let danach: String = quelle[stelle..].chars().take(200).collect();
+            assert!(danach.contains("kurz("), "volle Kennung im Log: {danach}");
+        }
+    }
+
+    #[test]
+    fn logdatei_laesst_sich_mit_verfall_anlegen() {
+        let dir = std::env::temp_dir().join(format!("bts-relay-log-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(log_datei(dir.to_str().unwrap()).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(LOG_DATEIEN_MAX, 30);
+    }
+
+    // ───────────── Begrenzte Kanäle (Spec relay-haerten, PR 5) ─────────────
+
+    #[tokio::test]
+    async fn ueberlauf_wird_einmal_gemeldet() {
+        let (tx, mut rx, wache) = kanal(3);
+        for _ in 0..3 {
+            assert_eq!(tx.send(Message::Text("a".into())), Ok(()));
+        }
+        // Voll: Die Nachricht geht NICHT in den Kanal, das Merkmal steht.
+        for _ in 0..10 {
+            assert_eq!(tx.send(Message::Text("b".into())), Err(KanalFehler::Voll));
+        }
+        // Die Wache meldet — auch wenn sie erst jetzt gefragt wird, und auch
+        // ein zweites Mal (das Merkmal bleibt stehen).
+        tokio::time::timeout(Duration::from_secs(1), wache.warten())
+            .await
+            .expect("Überlauf gemeldet");
+        tokio::time::timeout(Duration::from_secs(1), wache.warten())
+            .await
+            .expect("bleibt gemeldet");
+        // Im Kanal liegen genau die drei ersten Nachrichten.
+        let mut gelesen = 0;
+        while rx.try_recv().is_ok() {
+            gelesen += 1;
+        }
+        assert_eq!(gelesen, 3);
+        // Ein geschlossener Kanal ist etwas anderes als ein voller.
+        drop(rx);
+        assert_eq!(tx.send(Message::Text("c".into())), Err(KanalFehler::Zu));
+    }
+
+    #[tokio::test]
+    async fn ohne_ueberlauf_wartet_die_wache() {
+        let (tx, _rx, wache) = kanal(8);
+        tx.send(Message::Text("a".into())).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), wache.warten())
+                .await
+                .is_err(),
+            "kein Überlauf, kein Signal"
+        );
+    }
+
+    #[test]
+    fn same_channel_unterscheidet_weiter() {
+        // Die Halter- und Host-Prüfung hängt daran.
+        let (a, _ra) = kanal_test();
+        let (b, _rb) = kanal_test();
+        assert!(a.same_channel(&a.clone()));
+        assert!(!a.same_channel(&b));
+    }
+
+    #[tokio::test]
+    async fn neuanmeldung_meldet_das_tablet_wieder_beim_host() {
+        // Der Weg, auf dem ein getrenntes Tablet seine Zuweisung zurückbekommt
+        // (der Überlauf selbst: `voller_kanal_trennt_den_empfaenger`): Es
+        // meldet sich neu an. Der Relay schickt dem Host `tablet_connected` — der schiebt
+        // die Zuweisung nach. So geht ein `MatchAssigned` nicht verloren.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx_alt, _rx_alt) = kanal_test();
+        let mut alt = TabletSitzung::neu(ns.clone());
+        alt.verarbeite(&broker, &ident(5, "geraet"), &tx_alt).await;
+        alt.abraeumen(&broker, &tx_alt).await;
+        texte(&mut host_rx);
+
+        let (tx_neu, _rx_neu) = kanal_test();
+        let mut neu = TabletSitzung::neu(ns.clone());
+        neu.verarbeite(&broker, &ident(5, "geraet"), &tx_neu).await;
+        assert!(texte(&mut host_rx)
+            .iter()
+            .any(|t| t.contains("tablet_connected")));
+    }
+
+    #[tokio::test]
+    async fn tablet_frames_koennen_den_host_nicht_trennen() {
+        // Wer die Turnier-Kennung hat, kann beliebig viele Tablet-Frames
+        // erzeugen. Sie füllen den Kanal des Turnier-PCs höchstens zu drei
+        // Vierteln und lösen nie den Überlauf aus.
+        let (tx, mut rx, wache) = kanal(16);
+        let mut angenommen = 0;
+        for _ in 0..100 {
+            if tx.send_nachrangig(Message::Text("p".into())).is_ok() {
+                angenommen += 1;
+            }
+        }
+        assert_eq!(angenommen, 12, "ein Viertel bleibt frei");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), wache.warten())
+                .await
+                .is_err(),
+            "kein Überlauf → der Turnier-PC bleibt verbunden"
+        );
+        // Was kein Tablet auslösen kann (Ergebnis, Befehl der Turnierleitung),
+        // hat die Reserve.
+        for _ in 0..4 {
+            assert_eq!(tx.send(Message::Text("ergebnis".into())), Ok(()));
+        }
+        // Nimmt der Turnier-PC wieder ab, gehen auch Tablet-Frames wieder.
+        while rx.try_recv().is_ok() {}
+        assert_eq!(tx.send_nachrangig(Message::Text("p".into())), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn punkte_im_dauerfeuer_lassen_den_host_verbunden() {
+        // Dasselbe über den echten Weg: Ein Tablet zählt, der Turnier-PC
+        // nimmt nichts ab.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx, wache) = kanal(KANAL_HOST);
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx, _rx) = kanal_test();
+        let mut sitzung = TabletSitzung::neu(ns.clone());
+        sitzung.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        for i in 0..(KANAL_HOST * 2) {
+            // Am Mengen-Takt vorbei: Hier geht es um den Kanal.
+            forward_score(&broker, &ns, 5, (i % 20) as i64, 0, Vec::new(), 0, &tx).await;
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), wache.warten())
+                .await
+                .is_err()
+        );
+        assert!(host_tx.sender.capacity() >= KANAL_HOST / 4);
+        // Nicht leer bestanden: Die Punkte kamen im Kanal an, bis zur Reserve.
+        assert_eq!(host_tx.sender.capacity(), KANAL_HOST / 4);
+    }
+
+    #[tokio::test]
+    async fn ergebnis_mit_zu_vielen_saetzen_wird_abgelehnt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = kanal_test();
+        register_host(&broker, &ns, &host_tx).await;
+        texte(&mut host_rx);
+        let body: ResultBody = serde_json::from_value(serde_json::json!({
+            "matchId": 1, "courtId": 5,
+            "sets": (0..11).map(|_| serde_json::json!({"a": 21, "b": 3})).collect::<Vec<_>>(),
+        }))
+        .unwrap();
+        let antwort = result(State(broker.clone()), Path(ns.clone()), Json(body)).await;
+        assert!(!antwort.0.ok);
+        assert!(
+            texte(&mut host_rx).is_empty(),
+            "nichts ging an den Turnier-PC"
+        );
+    }
+
+    #[tokio::test]
+    async fn voller_kanal_trennt_den_empfaenger() {
+        // Echter WebSocket: Ein Tablet ist verbunden. Der Relay hat mehr für
+        // es, als sein Kanal fasst — die Verbindung wird getrennt (und nicht
+        // endlos gepuffert).
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as Ws;
+        let (broker, basis) = relay_starten().await;
+        let ns = test_ns();
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("{basis}/{ns}/ws"))
+            .await
+            .expect("verbunden");
+        ws.send(Ws::Text(ident(5, "a").into())).await.unwrap();
+        // Warten, bis der Relay das Tablet eingetragen hat.
+        let tablet_tx = loop {
+            if let Some(tx) = broker
+                .namespaces
+                .lock()
+                .await
+                .get(&ns)
+                .and_then(|n| n.tablets.get(&5).cloned())
+            {
+                break tx;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        // Ohne dazwischen abzugeben (der Test läuft auf einem Thread): mehr
+        // Nachrichten, als der Kanal fasst.
+        let mut voll = 0;
+        for _ in 0..(KANAL_TABLET + 10) {
+            if tablet_tx.send(Message::Text("{}".into())) == Err(KanalFehler::Voll) {
+                voll += 1;
+            }
+        }
+        assert!(voll >= 10, "der Kanal ist begrenzt: {voll}");
+        let getrennt = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Ws::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await;
+        assert!(getrennt.is_ok(), "der Empfänger wurde nicht getrennt");
+        // Und der normale Aufräumweg lief: Das Feld ist wieder frei.
+        for _ in 0..200 {
+            let frei = broker
+                .namespaces
+                .lock()
+                .await
+                .get(&ns)
+                .is_none_or(|n| !n.tablets.contains_key(&5));
+            if frei {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("das Feld wurde nicht freigegeben");
+    }
+
+    // ── Mit echtem WebSocket: Transport-Deckel wirken erst am Upgrade ──
+
+    /// Startet den echten Router auf einem freien Port.
+    async fn relay_starten() -> (Broker, String) {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let adresse = listener.local_addr().unwrap();
+        let app = router(broker.clone(), true);
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (broker, format!("ws://{adresse}"))
+    }
+
+    #[tokio::test]
+    async fn nachricht_ueber_transportdeckel_trennt() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as Ws;
+        let (_broker, basis) = relay_starten().await;
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("{basis}/{}/ws", test_ns()))
+            .await
+            .expect("verbunden");
+        // Über dem Deckel: reiner Speicherschutz, die Verbindung endet.
+        let _ = ws
+            .send(Ws::Text("x".repeat(WS_MAX_TABLET + 1024).into()))
+            .await;
+        let ende = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(Ws::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        })
+        .await;
+        assert!(ende.is_ok(), "die Verbindung wurde nicht getrennt");
+    }
+
+    #[tokio::test]
+    async fn zustand_ueber_64k_trennt_nicht() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as Ws;
+        let (broker, basis) = relay_starten().await;
+        let ns = test_ns();
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("{basis}/{ns}/ws"))
+            .await
+            .expect("verbunden");
+        ws.send(Ws::Text(ident(5, "a").into())).await.unwrap();
+        // Ein Zustand über dem FACHLICHEN Deckel (64 KiB), wie ihn eine alte
+        // Format-1-Seite schickt: verworfen, aber die Verbindung bleibt.
+        let zustand = serde_json::json!({ "type": "state_sync", "state": "x".repeat(590 * 1024) })
+            .to_string();
+        ws.send(Ws::Text(zustand.into())).await.unwrap();
+        ws.send(Ws::Text(r#"{"type":"ping"}"#.into()))
+            .await
+            .unwrap();
+        let pong = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ws.next().await {
+                    Some(Ok(Ws::Text(t))) if t.contains("pong") => break true,
+                    Some(Ok(_)) => {}
+                    _ => break false,
+                }
+            }
+        })
+        .await;
+        assert_eq!(pong, Ok(true), "die Verbindung lebt und antwortet");
+        let map = broker.namespaces.lock().await;
+        assert!(
+            !map.get(&ns).unwrap().court_state.contains_key(&5),
+            "der zu große Zustand wurde nicht gespeichert"
+        );
+    }
+
+    #[test]
+    fn geraete_kennung_wird_gekuerzt() {
+        assert_eq!(kuerze_kennung("kurz".into()), "kurz");
+        let lang = "ä".repeat(500);
+        assert_eq!(kuerze_kennung(lang).chars().count(), MAX_GERAETE_KENNUNG);
     }
 
     /// **Die tragende Invariante des Trägers** (ADR 0048): N Substrome
@@ -6286,7 +10054,7 @@ mod tests {
         let mut kanaele = Vec::new();
         let mut sitzungen = Vec::new();
         for (i, feld) in [11i64, 12, 13].iter().enumerate() {
-            let (tx, rx) = mpsc::unbounded_channel();
+            let (tx, rx) = kanal_test();
             let mut s = TabletSitzung::neu(ns.clone());
             let ident = format!(
                 r#"{{"type":"identify","courtId":{feld},"courtLabel":"F{feld}","deviceId":"geraet-{i}"}}"#
@@ -6338,7 +10106,7 @@ mod tests {
     #[tokio::test]
     async fn kaputter_frame_beendet_die_sitzung_nicht() {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         let mut sitzung = TabletSitzung::neu(test_ns());
         assert_eq!(
             sitzung.verarbeite(&broker, "{kein json", &tx).await,
@@ -6363,9 +10131,9 @@ mod tests {
         // Broker-Routing: `notify_monitor(5)` weckt GENAU die Court-5-Anzeige
         // und die „alle Felder"-Übersicht — Feld 3 bleibt still.
         let mut ns = Namespace::new();
-        let (tx5, mut rx5) = mpsc::unbounded_channel();
-        let (tx3, mut rx3) = mpsc::unbounded_channel();
-        let (tx_all, mut rx_all) = mpsc::unbounded_channel();
+        let (tx5, mut rx5) = kanal_test();
+        let (tx3, mut rx3) = kanal_test();
+        let (tx_all, mut rx_all) = kanal_test();
         ns.monitor_subs.entry(5).or_default().push(tx5);
         ns.monitor_subs.entry(3).or_default().push(tx3);
         ns.monitor_subs_all.push(tx_all);
@@ -6389,8 +10157,8 @@ mod tests {
         // Uhrzeit statt bei 1, damit sie über Relay-Neustarts monoton bleibt.
         // Geprüft wird deshalb der Abstand, nicht der absolute Wert.
         let mut ns = Namespace::new();
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx1, mut rx1) = kanal_test();
+        let (tx2, mut rx2) = kanal_test();
         ns.monitor_subs.entry(1).or_default().push(tx1);
         ns.monitor_subs.entry(2).or_default().push(tx2);
 
@@ -6424,8 +10192,8 @@ mod tests {
         // nie Turnierdaten; die holt die Seite über ihre Poll-Route. Tote
         // Abonnenten (Tab zu) siebt der nächste Nudge aus.
         let mut ns = Namespace::new();
-        let (tx1, mut rx1) = mpsc::unbounded_channel();
-        let (tx2, rx2) = mpsc::unbounded_channel();
+        let (tx1, mut rx1) = kanal_test();
+        let (tx2, rx2) = kanal_test();
         ns.tl_subs.push(tx1);
         ns.tl_subs.push(tx2);
         drop(rx2);
@@ -6445,7 +10213,7 @@ mod tests {
         // die Geräte NICHT zu einem Abruf schicken (sonst wäre der Push
         // nur ein zweiter Poll-Auslöser).
         let mut ns = Namespace::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = kanal_test();
         ns.tl_subs.push(tx);
 
         // Erste Ablage: neue Revision → Nudge.
@@ -6465,7 +10233,7 @@ mod tests {
         // Fällt die Anzeige weg (Rx fallengelassen), siebt der nächste Nudge
         // den toten Sender aus und entfernt die leere Feld-Liste.
         let mut ns = Namespace::new();
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = kanal_test();
         ns.monitor_subs.entry(4).or_default().push(tx);
         drop(rx);
 
@@ -6482,12 +10250,12 @@ mod tests {
         // Namespace-Isolation: Ein Nudge in ns-a erreicht KEINEN Abonnenten
         // in ns-b — die Trennung der Turniere ist strikt.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (h_a, _ra) = mpsc::unbounded_channel();
-        let (h_b, _rb) = mpsc::unbounded_channel();
+        let (h_a, _ra) = kanal_test();
+        let (h_b, _rb) = kanal_test();
         register_host(&broker, "ns-a", &h_a).await;
         register_host(&broker, "ns-b", &h_b).await;
-        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let (tx_a, mut rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
         subscribe_monitor(&broker, "ns-a", Some(5), &tx_a).await;
         subscribe_monitor(&broker, "ns-b", Some(5), &tx_b).await;
 
@@ -6508,9 +10276,9 @@ mod tests {
         // Der Abonnent wird eingetragen und beim Verbindungsende wieder
         // ausgetragen; der Namespace bleibt, solange der Host verbunden ist.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (h, _rh) = mpsc::unbounded_channel();
+        let (h, _rh) = kanal_test();
         register_host(&broker, "ns1", &h).await;
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
 
         subscribe_monitor(&broker, "ns1", Some(9), &tx).await;
         {
@@ -6533,10 +10301,10 @@ mod tests {
         // Fan-out-Deckel (N5): Bis exakt `MAX_MONITOR_SUBS` werden Abos
         // eingetragen; das (N+1)-te wird abgelehnt (Zuschauer-DoS-Schutz).
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (h, _rh) = mpsc::unbounded_channel();
+        let (h, _rh) = kanal_test();
         register_host(&broker, "ns1", &h).await;
         for _ in 0..MAX_MONITOR_SUBS {
-            let (tx, _rx) = mpsc::unbounded_channel();
+            let (tx, _rx) = kanal_test();
             subscribe_monitor(&broker, "ns1", Some(1), &tx).await;
         }
         {
@@ -6551,7 +10319,7 @@ mod tests {
             assert_eq!(total, MAX_MONITOR_SUBS, "genau der Deckel ist eingetragen");
         }
         // Das (N+1)-te Abo wird abgelehnt — der Gesamtstand bleibt am Deckel.
-        let (tx_over, _rx_over) = mpsc::unbounded_channel();
+        let (tx_over, _rx_over) = kanal_test();
         subscribe_monitor(&broker, "ns1", Some(1), &tx_over).await;
         {
             let map = broker.namespaces.lock().await;
@@ -6571,7 +10339,7 @@ mod tests {
         // Ohne Host wird KEIN Namespace angelegt (kein Zuschauer-TV soll durch
         // bloßes Verbinden Speicher belegen — es gäbe keinen Aufräum-Pfad).
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
         subscribe_monitor(&broker, "ns-ghost", None, &tx).await;
         assert!(broker.namespaces.lock().await.get("ns-ghost").is_none());
     }
@@ -6590,7 +10358,7 @@ mod tests {
         // schließen — der Reconnect-Wächter der Anzeige verbindet dann mit
         // Backoff neu, so wie es der LAN-Server längst tut.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = kanal_test();
 
         // Kein Namespace (Host noch nicht da).
         assert!(
@@ -6599,15 +10367,15 @@ mod tests {
         );
 
         // Und über dem Fan-out-Deckel ebenso.
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, "ns-voll", &host_tx).await;
         let mut halter = Vec::new();
         for _ in 0..MAX_MONITOR_SUBS {
-            let (t, r) = mpsc::unbounded_channel();
+            let (t, r) = kanal_test();
             assert!(subscribe_monitor(&broker, "ns-voll", Some(1), &t).await);
             halter.push((t, r));
         }
-        let (tx_over, _rx_over) = mpsc::unbounded_channel();
+        let (tx_over, _rx_over) = kanal_test();
         assert!(
             !subscribe_monitor(&broker, "ns-voll", Some(1), &tx_over).await,
             "über dem Deckel keine Zusage"
@@ -6629,17 +10397,21 @@ mod tests {
         // aufräumen **und** verabschieden — das Close bringt die Anzeige über
         // ihren Reconnect-Wächter zurück, sobald der Host wieder da ist.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, "ns1", &host_tx).await;
-        let (tx_all, mut rx_all) = mpsc::unbounded_channel();
-        let (tx_feld, mut rx_feld) = mpsc::unbounded_channel();
+        let (tx_all, mut rx_all) = kanal_test();
+        let (tx_feld, mut rx_feld) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", None, &tx_all).await);
         assert!(subscribe_monitor(&broker, "ns1", Some(3), &tx_feld).await);
 
         // Host fällt weg.
         {
             let mut map = broker.namespaces.lock().await;
-            map.get_mut("ns1").expect("Namespace da").host = None;
+            let n = map.get_mut("ns1").expect("Namespace da");
+            n.host = None;
+            // … und zwar länger als die Karenz (PR 7 der Spec relay-haerten:
+            // 20 s lang bleibt der Namespace mit dem letzten Stand stehen).
+            n.host_weg_seit = Some(0);
             namespace_aufraeumen(&mut map, "ns1");
         }
 
@@ -6663,9 +10435,9 @@ mod tests {
         // sonst risse jeder Tablet-Abgang die Anzeigen einer ganzen Halle
         // aus der Leitung.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         register_host(&broker, "ns1", &host_tx).await;
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", None, &tx).await);
 
         {
@@ -6686,9 +10458,9 @@ mod tests {
     // kommt die Antwort zurück.
 
     /// Namespace mit Host und einem eingetragenen Zugang.
-    async fn broker_with_tl_device(token: &str) -> (Broker, mpsc::UnboundedReceiver<Message>, Tx) {
+    async fn broker_with_tl_device(token: &str) -> (Broker, mpsc::Receiver<Message>, Tx) {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_tx, host_rx) = mpsc::unbounded_channel();
+        let (host_tx, host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -6864,7 +10636,7 @@ mod tests {
         {
             let mut map = broker.namespaces.lock().await;
             let ns2 = map.entry("ns2".into()).or_insert_with(Namespace::new);
-            let (tx, _rx) = mpsc::unbounded_channel();
+            let (tx, _rx) = kanal_test();
             ns2.host = Some(tx);
             ns2.tl_tokens
                 .insert("token-b".to_string(), "tl-b".to_string());
@@ -7237,7 +11009,7 @@ mod tests {
         // auftauchen, auch nicht in Teilen. Deshalb reist die Kennung mit dem
         // Zugang mit, statt aus ihm abgeleitet zu werden.
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -7406,7 +11178,7 @@ mod tests {
         const NS2: &str = "b1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
 
         let upload = relay_proto::MonitorUpload {
@@ -7504,7 +11276,7 @@ mod tests {
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
 
         let hochladen = |daten: &'static [u8]| {
@@ -7573,7 +11345,7 @@ mod tests {
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
 
         let upload = || relay_proto::MonitorUpload {
@@ -7621,7 +11393,7 @@ mod tests {
         // keinen Redirect (nur CourtID reiste) → blieben „unzugewiesen" (Logo).
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
 
         let mut targets = std::collections::HashMap::new();
@@ -7867,15 +11639,18 @@ mod tests {
     #[tokio::test]
     async fn monitor_etag_ohne_host_liefert_marke_und_304() {
         // U10: Der Host-down-Early-Return durchläuft DENSELBEN ETag/304-Punkt.
-        // Genau dort, wo kein Host verbunden ist, zählt die Ersparnis am
-        // meisten — ein zweiter, ungeschützter 200-Pfad wäre die Kern-Audit-
-        // Lücke (Risiko A1).
+        // Seit PR 7 der Spec relay-haerten ist das die Kopplungs-Seite mit
+        // dem Hinweis `hostOffline` (der Relay kennt ohne Namespace keine
+        // Zuweisung) — nach der Start-Karenz.
         const NS: &str = "c0000000-0000-0000-0000-000000000010";
-        let broker = Broker::new("https://example.test/bts-relay".into());
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.start_ms = 0;
         let (s1, e1, body) = hole_monitor(&broker, NS, "pi-court", &[]).await;
         assert_eq!(s1, StatusCode::OK);
         let e1 = e1.expect("Host-down-Antwort trägt ETag");
         assert_eq!(body["courtId"], serde_json::json!(0));
+        assert_eq!(body["unassigned"], serde_json::json!(true));
+        assert_eq!(body["hostOffline"], serde_json::json!(true));
         let (s2, e2, _) =
             hole_monitor(&broker, NS, "pi-court", &[("If-None-Match", e1.as_str())]).await;
         assert_eq!(
@@ -7950,7 +11725,7 @@ mod tests {
         // pusht (Feldliste, Match, Satzstand, 1.-Aufruf-Zeit).
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -8108,7 +11883,7 @@ mod tests {
         // damit ein Court-Monitor in beiden Betriebsarten gleich arbeitet.
         const NS: &str = "11111111-1111-1111-1111-111111111111";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -8186,7 +11961,7 @@ mod tests {
         // unbekanntes Feld — sonst ließen sich Feldnummern durchprobieren.
         const NS: &str = "22222222-2222-2222-2222-222222222222";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -8228,7 +12003,7 @@ mod tests {
         // fahren) blieb die größte Einsparung der Reihe damit ungenutzt.
         const NS: &str = "66666666-6666-6666-6666-666666666666";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -8307,7 +12082,7 @@ mod tests {
         // steht und nicht in die Marke eingeht.
         const NS: &str = "77777777-7777-7777-7777-777777777777";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -8362,7 +12137,7 @@ mod tests {
         // ganzen Halle — und umgekehrt.
         const NS: &str = "88888888-8888-8888-8888-888888888888";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -8430,9 +12205,9 @@ mod tests {
     // ── Antwortcache der Cloud-Übersicht (Spec monitor-livestand-push, S9) ──
 
     /// Namespace mit Host, zwei Feldern und einem Monitor-Datensatz.
-    async fn broker_mit_uebersicht(ns: &str) -> (Broker, Tx, mpsc::UnboundedReceiver<Message>) {
+    async fn broker_mit_uebersicht(ns: &str) -> (Broker, Tx, mpsc::Receiver<Message>) {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, host_rx) = mpsc::unbounded_channel();
+        let (host, host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let n = map.entry(ns.into()).or_insert_with(Namespace::new);
@@ -8691,7 +12466,7 @@ mod tests {
         // Gewinn aus S9 gezielt aushebeln (Sicherheits-Review 20.08.2026).
         let (broker, _tablet_rx, _host) = broker_with_tablet(101).await;
         // Eigener Host mit Empfänger — der Helfer verwirft seinen.
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         let tx = {
             let mut map = broker.namespaces.lock().await;
             let n = map.get_mut("ns1").unwrap();
@@ -8699,7 +12474,7 @@ mod tests {
             n.tablets.get(&101).unwrap().clone()
         };
         // Abonnent, der die Anstöße mitzählt.
-        let (mon, mut mon_rx) = mpsc::unbounded_channel();
+        let (mon, mut mon_rx) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", Some(101), &mon).await);
 
         forward_score(&broker, "ns1", 101, 5, 3, Vec::new(), 0, &tx).await;
@@ -8823,7 +12598,7 @@ mod tests {
         // er reist im `callTimer`-Umschlag mit.
         const NS: &str = "bbbbbbbb-9999-9999-9999-999999999999";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -8916,48 +12691,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn die_marke_verraet_nicht_ob_es_den_namespace_gibt() {
-        // Wächter (Sicherheits-Review 19.08.2026): Der `None`-Arm speist
-        // dieselben Eingaben in die Marke wie ein registrierter, aber leerer
-        // Namespace — leere Feld-Liste, Standard-Aufruf-Timer, Schalter aus.
-        // Beide müssen deshalb dieselbe Marke tragen.
-        //
-        // Der Test steht hier, damit eine spätere „Härtung" — etwa den
-        // Namespace mit in die Marke zu streuen — nicht versehentlich ein
-        // Existenz-Orakel daraus macht: Wer eine UUID durchprobiert, könnte
-        // sonst an der Marke ablesen, ob dahinter ein Turnier läuft.
-        //
-        // Beide Namespaces sind wohlgeformt; `valid_namespace` greift also
-        // nicht, und der 404-Pfad für Unfug bleibt davon unberührt.
-        const LEER: &str = "99999999-9999-9999-9999-999999999999";
+    async fn die_antwort_verraet_nicht_ob_es_den_namespace_gibt() {
+        // Wächter (Sicherheits-Review 19.08.2026, angepasst mit PR 7 der Spec
+        // relay-haerten): Wer eine UUID durchprobiert, darf an der Antwort
+        // nicht ablesen, ob dahinter ein Turnier OHNE Turnier-PC liegt. Ein
+        // Namespace, den es nie gab, und einer, dessen Turnier-PC länger als
+        // die Karenz weg ist, antworten gleich: 503, derselbe Rumpf, keine
+        // Marke. (Ein Turnier MIT verbundenem Turnier-PC antwortet 200 — das
+        // ist der Zweck der Route und bei 122 Bit Zufall kein Orakel.)
+        const VERWAIST: &str = "99999999-9999-9999-9999-999999999999";
         const FEHLT: &str = "aaaaaaaa-9999-9999-9999-999999999999";
-        let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
-        register_host(&broker, LEER, &host).await;
-
-        let a = overview_health(
-            State(broker.clone()),
-            Path(LEER.into()),
-            leer_query(),
-            axum::http::HeaderMap::new(),
-        )
-        .await
-        .into_response();
-        let b = overview_health(
-            State(broker.clone()),
-            Path(FEHLT.into()),
-            leer_query(),
-            axum::http::HeaderMap::new(),
-        )
-        .await
-        .into_response();
-
-        assert_eq!(a.status(), b.status());
-        assert_eq!(
-            a.headers().get(header::ETAG),
-            b.headers().get(header::ETAG),
-            "gleiche Marke — sonst verriete sie die Existenz des Turniers"
-        );
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.start_ms = 0;
+        let (host, _host_rx) = kanal_test();
+        register_host(&broker, VERWAIST, &host).await;
+        {
+            // Ein Tablet hält den Namespace; der Turnier-PC ist lange weg.
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(VERWAIST).unwrap();
+            n.tablets.insert(1, host.clone());
+            n.host = None;
+            n.host_weg_seit = Some(0);
+        }
+        let mut antworten = Vec::new();
+        for ns in [VERWAIST, FEHLT] {
+            let r = overview_health(
+                State(broker.clone()),
+                Path(ns.into()),
+                leer_query(),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response();
+            let status = r.status();
+            let marke = r.headers().get(header::ETAG).cloned();
+            let rumpf = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+            antworten.push((status, marke, rumpf));
+        }
+        assert_eq!(antworten[0], antworten[1]);
+        assert_eq!(antworten[0].0, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
@@ -8972,7 +12744,7 @@ mod tests {
         // ausschließen soll.
         const NS: &str = "55555555-5555-5555-5555-555555555555";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry(NS.into()).or_insert_with(Namespace::new);
@@ -9034,8 +12806,8 @@ mod tests {
         const NS_A: &str = "33333333-3333-3333-3333-333333333333";
         const NS_B: &str = "44444444-4444-4444-4444-444444444444";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host_a, _rx_a) = mpsc::unbounded_channel();
-        let (host_b, _rx_b) = mpsc::unbounded_channel();
+        let (host_a, _rx_a) = kanal_test();
+        let (host_b, _rx_b) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let a = map.entry(NS_A.into()).or_insert_with(Namespace::new);
@@ -9185,9 +12957,7 @@ mod tests {
     }
 
     /// Wartet auf die Suchanfrage beim Host und liefert ihre `req_id`.
-    async fn suchanfrage_beim_host(
-        host_rx: &mut mpsc::UnboundedReceiver<Message>,
-    ) -> (u64, String, bool) {
+    async fn suchanfrage_beim_host(host_rx: &mut mpsc::Receiver<Message>) -> (u64, String, bool) {
         let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
             .await
             .expect("keine Anfrage beim Host")
@@ -9378,7 +13148,7 @@ mod tests {
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
-            let (tx, _rx) = mpsc::unbounded_channel();
+            let (tx, _rx) = kanal_test();
             ns.host = Some(tx);
             for i in 0..9 {
                 ns.tl_tokens.insert(format!("token-{i}"), format!("tl-{i}"));
@@ -9406,7 +13176,7 @@ mod tests {
         // andere Tablet-Frame, das einen Empfänger adressiert.
         let (broker, mut rx1, host) = broker_with_tablet(101).await;
         let mut rx2 = {
-            let (tx, rx) = mpsc::unbounded_channel();
+            let (tx, rx) = kanal_test();
             let mut map = broker.namespaces.lock().await;
             let ns = map.get_mut("ns1").expect("Namespace steht");
             ns.tablets.insert(202, tx);
@@ -9487,9 +13257,9 @@ mod tests {
     #[tokio::test]
     async fn host_frame_routes_by_court_id_not_name() {
         let broker = Broker::new("x".into());
-        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
-        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (tx_a, mut rx_a) = kanal_test();
+        let (tx_b, mut rx_b) = kanal_test();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -9520,8 +13290,8 @@ mod tests {
 
     /// Meldet eine Übersichts-Anzeige an (alle Felder) und gibt ihr
     /// Empfangs-Ende zurück.
-    async fn uebersicht_anmelden(broker: &Broker, ns: &str) -> mpsc::UnboundedReceiver<Message> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    async fn uebersicht_anmelden(broker: &Broker, ns: &str) -> mpsc::Receiver<Message> {
+        let (tx, rx) = kanal_test();
         subscribe_monitor(broker, ns, None, &tx).await;
         rx
     }
@@ -9531,7 +13301,7 @@ mod tests {
         // Bis S3 stieß der Relay eine Zuweisung nicht an — die Anzeige
         // erfuhr davon erst über ihren Poll (TODO(A1) an `monitor_conn`).
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         register_host(&broker, "ns1", &host).await;
         let mut anzeige = uebersicht_anmelden(&broker, "ns1").await;
 
@@ -9560,8 +13330,8 @@ mod tests {
     #[tokio::test]
     async fn relay_reicht_hostsets_durch_ohne_sie_zu_cachen() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, mut tablet_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
+        let (tablet_tx, mut tablet_rx) = kanal_test();
         register_host(&broker, "ns1", &host).await;
         broker
             .namespaces
@@ -9631,7 +13401,7 @@ mod tests {
     #[tokio::test]
     async fn match_cleared_nudgt_die_anzeigen() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -9662,7 +13432,7 @@ mod tests {
         // Match aus. Für die Anzeigen ändert sich dabei nichts — sie zu
         // wecken hieße, sie den vollen Stand ohne Anlass zu holen.
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -9709,7 +13479,7 @@ mod tests {
         // Frames verworfen — die Änderung erschiene auf den Cloud-Monitoren
         // erst mit dem Fallback-Poll.
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -9757,9 +13527,9 @@ mod tests {
     #[tokio::test]
     async fn store_court_state_reicht_an_host_weiter() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
-        let (fremd_tx, _fremd_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
+        let (fremd_tx, _fremd_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -9906,8 +13676,8 @@ mod tests {
     #[tokio::test]
     async fn state_weitergabe_an_den_host_ist_gebremst() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -9942,10 +13712,13 @@ mod tests {
             let frueher = std::time::Instant::now()
                 .checked_sub(Duration::from_secs(5))
                 .expect("Instant weit genug in der Vergangenheit");
-            map.get_mut("ns1")
-                .unwrap()
-                .state_weitergabe
-                .insert(101, (0.0, frueher));
+            map.get_mut("ns1").unwrap().state_weitergabe.insert(
+                101,
+                Eimer {
+                    stand: 0.0,
+                    seit: frueher,
+                },
+            );
         }
         let spaeter = r#"{"match":{"matchId":7},"rev":99}"#.to_string();
         store_court_state(&broker, "ns1", 101, spaeter, &tablet_tx).await;
@@ -9988,7 +13761,7 @@ mod tests {
         }
 
         // Ein Fremder ohne das Feld erzeugt keine Meldung (und keine Logzeile).
-        let (fremd, _rx) = mpsc::unbounded_channel();
+        let (fremd, _rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             map.get_mut("ns1").unwrap().state_deckel_gemeldet.clear();
@@ -10079,7 +13852,7 @@ mod tests {
             let map = broker.namespaces.lock().await;
             map.get("ns1").unwrap().tablets.get(&101).unwrap().clone()
         };
-        let (mon, mut mon_rx) = mpsc::unbounded_channel();
+        let (mon, mut mon_rx) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", Some(101), &mon).await);
 
         store_court_state(&broker, "ns1", 101, "{\"pause\":true}".into(), &tx).await;
@@ -10104,7 +13877,7 @@ mod tests {
         // und ohne diesen Test bliebe die Suite grün, wenn jemand die
         // Vergleichszeile wieder entfernt (Review-Fund 20.08.2026).
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10143,7 +13916,7 @@ mod tests {
     #[tokio::test]
     async fn reassign_same_match_keeps_the_score() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10207,8 +13980,8 @@ mod tests {
     #[tokio::test]
     async fn host_score_mirror_fills_the_display_cache_and_nudges() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
-        let (mon_tx, mut mon_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
+        let (mon_tx, mut mon_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10284,7 +14057,7 @@ mod tests {
     #[tokio::test]
     async fn host_score_mirror_guards_against_empty_and_stale_payloads() {
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10352,7 +14125,7 @@ mod tests {
         // wartende Anfrage unverändert.
         use relay_proto::{MeetingpointView, MpPartie};
         let broker = Broker::new("x".into());
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         register_host(&broker, "ns1", &host).await;
         let partie = |id: i64, halle: &str| MpPartie {
             match_id: id,
@@ -10435,7 +14208,7 @@ mod tests {
     async fn result_ack_resolves_the_pending_request() {
         let broker = Broker::new("x".into());
         let (ack_tx, ack_rx) = oneshot::channel();
-        let (host, _host_rx) = mpsc::unbounded_channel();
+        let (host, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10461,10 +14234,10 @@ mod tests {
     #[tokio::test]
     async fn score_from_tablet_is_forwarded_to_the_host() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
         // Der Sender muss als aktives Tablet des Felds eingetragen sein —
         // nur der aktuelle Halter darf Scores liefern (is_holder).
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10711,8 +14484,8 @@ mod tests {
         // Gültigkeit, Halter, Stale und die EIGENEN Deckel des Zettels,
         // deutet aber nichts und hält nichts vor.
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10815,9 +14588,9 @@ mod tests {
         // Sanktionsdaten dürfen erst recht nicht von einem verdrängten
         // Tablet kommen: Der Halter-Filter ist derselbe wie beim Rally.
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (halter_tx, _halter_rx) = mpsc::unbounded_channel();
-        let (fremd_tx, _fremd_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (halter_tx, _halter_rx) = kanal_test();
+        let (fremd_tx, _fremd_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10856,8 +14629,8 @@ mod tests {
         // des aktiven Halters mit passender matchId geht 1:1 an den Host;
         // ein Sync jenseits der geteilten Deckel wird verworfen.
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -10920,8 +14693,8 @@ mod tests {
     #[tokio::test]
     async fn relay_reicht_sync_fuers_vormatch_im_fenster_durch() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11069,7 +14842,7 @@ mod tests {
     #[tokio::test]
     async fn gleiches_match_erneut_zugewiesen_laesst_vormatch_stehen() {
         let broker = Broker::new("x".into());
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11108,8 +14881,8 @@ mod tests {
         // weder gecacht noch an den Host weitergereicht. Mit passender
         // (oder ohne) matchId fließt er normal.
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11138,7 +14911,7 @@ mod tests {
         // Stale-Filter (A4): Ein state_sync des ALTEN Matches darf den
         // beim Match-Wechsel geleerten court_state nicht wieder befüllen.
         let broker = Broker::new("x".into());
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11167,7 +14940,7 @@ mod tests {
         // alten Spiels — er darf den geleerten Cache nicht neu befüllen.
         // Nur matchId 0 (alte Tablet-Seite) läuft weiter durch.
         let broker = Broker::new("x".into());
-        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11188,8 +14961,8 @@ mod tests {
         // Verbindungsversuch (z. B. versehentlich zweiter Master mit
         // derselben install_id) wird abgewiesen.
         let mut ns = Namespace::new();
-        let (tx1, _rx1) = mpsc::unbounded_channel();
-        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let (tx1, _rx1) = kanal_test();
+        let (tx2, _rx2) = kanal_test();
         assert!(matches!(
             try_claim_host(&mut ns, &tx1, 1_000_000),
             HostClaim::Accepted { superseded: false }
@@ -11209,8 +14982,8 @@ mod tests {
         // hielt den Slot 17 Minuten): Ist der Inhaber ≥ HOST_STALE stumm,
         // übernimmt die neue Verbindung.
         let mut ns = Namespace::new();
-        let (tx1, _rx1) = mpsc::unbounded_channel();
-        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let (tx1, _rx1) = kanal_test();
+        let (tx2, _rx2) = kanal_test();
         try_claim_host(&mut ns, &tx1, 1_000_000);
         let stale_ms = HOST_STALE.as_millis() as u64;
         // 1 ms UNTER der Schwelle: noch abgewiesen (Grenze ist `>=`).
@@ -11235,8 +15008,8 @@ mod tests {
         // verdrängte Alt-Verbindung SPÄTER, darf ihr Aufräumen den Slot
         // des neuen Hosts nicht leeren.
         let mut ns = Namespace::new();
-        let (old_tx, _old_rx) = mpsc::unbounded_channel();
-        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let (old_tx, _old_rx) = kanal_test();
+        let (new_tx, _new_rx) = kanal_test();
         try_claim_host(&mut ns, &old_tx, 0);
         let stale_ms = HOST_STALE.as_millis() as u64;
         try_claim_host(&mut ns, &new_tx, stale_ms);
@@ -11253,7 +15026,7 @@ mod tests {
         // Eine verdrängte Alt-Verbindung, die wieder erwacht, darf den
         // Namespace-Zustand nicht mehr verändern (Sender-Guard).
         let (broker, _rx, host) = broker_with_tablet(101).await;
-        let (old_host, _old_rx) = mpsc::unbounded_channel();
+        let (old_host, _old_rx) = kanal_test();
         let accepted = handle_host_frame(
             &broker,
             "ns1",
@@ -11332,7 +15105,7 @@ mod tests {
             let ns = map.get_mut("ns1").unwrap();
             ns.tablet_devices.insert(101, "dev-x".into());
         }
-        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let (new_tx, _new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
         assert!(
             matches!(res, AttachResult::Active),
@@ -11360,7 +15133,7 @@ mod tests {
                 .tablet_devices
                 .insert(101, "dev-x".into());
         }
-        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let (new_tx, _new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "dev-anders", &new_tx).await;
         assert!(
             matches!(res, AttachResult::Occupied),
@@ -11420,7 +15193,7 @@ mod tests {
             ns.tablet_devices.insert(101, "dev-x".into());
             ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
         }
-        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        let (new_tx, mut new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
         assert!(matches!(res, AttachResult::Active));
         // Unter den gesendeten Frames muss das StateRestore mit
@@ -11451,7 +15224,7 @@ mod tests {
             ns.tablet_devices.insert(101, "dev-x".into());
             ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
         }
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = kanal_test();
         attach_tablet(&broker, "ns1", 101, "dev-x", &tx).await;
         let mut saw = false;
         while let Ok(Message::Text(t)) = rx.try_recv() {
@@ -11474,7 +15247,7 @@ mod tests {
             ns.tablet_devices.insert(101, "dev-x".into());
             ns.court_state.insert(101, "{\"score\":\"7:5\"}".into());
         }
-        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = kanal_test();
         attach_tablet(&broker2, "ns1", 101, "dev-x", &tx2).await;
         let mut saw2 = false;
         while let Ok(Message::Text(t)) = rx2.try_recv() {
@@ -11530,7 +15303,7 @@ mod tests {
             finalized.finalized = true;
             ns.court_matches.insert(101, finalized);
         }
-        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        let (new_tx, mut new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "dev-x", &new_tx).await;
         assert!(matches!(res, AttachResult::Active));
         let mut saw_restore = false;
@@ -11559,7 +15332,7 @@ mod tests {
             let ns = map.get_mut("ns1").unwrap();
             ns.court_state.insert(101, "{\"score\":\"9:9\"}".into());
         }
-        let (new_tx, mut new_rx) = mpsc::unbounded_channel();
+        let (new_tx, mut new_rx) = kanal_test();
         take_over_court(&broker, "ns1", 101, "dev-neu", &new_tx).await;
         let mut saw_restore = false;
         while let Ok(Message::Text(t)) = new_rx.try_recv() {
@@ -11579,9 +15352,9 @@ mod tests {
     #[tokio::test]
     async fn superseded_session_frames_are_dropped() {
         let broker = Broker::new("x".into());
-        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
-        let (holder_tx, _holder_rx) = mpsc::unbounded_channel();
-        let (old_tx, _old_rx) = mpsc::unbounded_channel::<Message>();
+        let (host_tx, mut host_rx) = kanal_test();
+        let (holder_tx, _holder_rx) = kanal_test();
+        let (old_tx, _old_rx) = kanal_test();
         {
             let mut map = broker.namespaces.lock().await;
             let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
@@ -11633,7 +15406,7 @@ mod tests {
     #[tokio::test]
     async fn prepared_frame_replaces_and_clears_list() {
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, "ns1", &host).await;
 
         handle_host_frame(
@@ -11686,7 +15459,7 @@ mod tests {
         // sie im Cloud-Modus rendern kann.
         const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         let broker = Broker::new("https://example.test/bts-relay".into());
-        let (host, _hrx) = mpsc::unbounded_channel();
+        let (host, _hrx) = kanal_test();
         register_host(&broker, NS, &host).await;
         // Spiel 42 trägt eine Hallen-Farbe (Spec hallen-farben), 43 kommt
         // wie von einem alten Host ohne — beide müssen sauber durchreisen.
@@ -11704,9 +15477,13 @@ mod tests {
         )
         .await;
 
-        let resp = preparation_state(State(broker.clone()), Path(NS.into()))
-            .await
-            .into_response();
+        let resp = preparation_state(
+            State(broker.clone()),
+            Path(NS.into()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = axum::body::to_bytes(resp.into_body(), 16 * 1024)
             .await
@@ -11726,9 +15503,13 @@ mod tests {
         assert!(cands[1]["team1_seed"].is_null());
 
         // Unbekannter Namespace → 404 (die Seite zeigt dann „keine Verbindung").
-        let miss = preparation_state(State(broker.clone()), Path("nope".into()))
-            .await
-            .into_response();
+        let miss = preparation_state(
+            State(broker.clone()),
+            Path("nope".into()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(miss.status(), StatusCode::NOT_FOUND);
     }
 
@@ -12057,7 +15838,7 @@ mod tests {
                 .tablet_devices
                 .insert(101, String::new());
         }
-        let (new_tx, _new_rx) = mpsc::unbounded_channel();
+        let (new_tx, _new_rx) = kanal_test();
         let res = attach_tablet(&broker, "ns1", 101, "", &new_tx).await;
         assert!(
             matches!(res, AttachResult::Occupied),
@@ -12091,7 +15872,7 @@ mod tests {
 #[cfg(test)]
 mod load {
     use super::*;
-    use tokio::sync::mpsc::UnboundedReceiver;
+    use tokio::sync::mpsc::Receiver;
     use tokio::task::JoinSet;
 
     /// Größe eines Lastszenarios. Leichte (CI) und schwere (Soak) Variante
@@ -12162,6 +15943,7 @@ mod load {
         let namespace = map.entry(ns.into()).or_insert_with(Namespace::new);
         namespace.host = Some(tx.clone());
         namespace.host_last_seen = now_ms();
+        namespace.host_weg_seit = None;
     }
 
     /// Liest `court`/`seq` aus einem Nudge-Text-Frame (wie in `mod tests`).
@@ -12208,14 +15990,14 @@ mod load {
         let subs = p.subs_per_ns;
 
         // rx im Hauptscope halten — nur tx-Klone wandern in die Tasks.
-        let mut rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
-        let mut host_rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut rxs: Vec<Receiver<Message>> = Vec::new();
+        let mut host_rxs: Vec<Receiver<Message>> = Vec::new();
         let mut ns_list: Vec<String> = Vec::new();
         let mut set = JoinSet::new();
 
         for i in 0..p.namespaces {
             let ns = fresh_ns(i);
-            let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+            let (host_tx, host_rx) = kanal_test();
             register_host(&broker, &ns, &host_tx).await;
             host_rxs.push(host_rx);
 
@@ -12224,7 +16006,7 @@ mod load {
             // solange F <= MAX_TABLETS_PER_NS.
             for c in 0..courts {
                 for t in 0..tablets {
-                    let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                    let (tx, rx) = kanal_test();
                     rxs.push(rx);
                     let b = broker.clone();
                     let ns_c = ns.clone();
@@ -12238,7 +16020,7 @@ mod load {
             // S Subs, gemischt court-spezifisch/„alle" — Deckel greift auf die
             // Summe.
             for s in 0..subs {
-                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                let (tx, rx) = kanal_test();
                 rxs.push(rx);
                 let b = broker.clone();
                 let ns_c = ns.clone();
@@ -12297,7 +16079,7 @@ mod load {
     async fn run_reconnect_storm(broker: Broker, p: &LoadParams) {
         let t = p.tablets_per_court;
         // Je (NS, Feld) alle rx sammeln, um die Superseded-Frames zu zählen.
-        let mut groups: Vec<(String, i64, Vec<UnboundedReceiver<Message>>)> = Vec::new();
+        let mut groups: Vec<(String, i64, Vec<Receiver<Message>>)> = Vec::new();
         let mut set = JoinSet::new();
 
         for i in 0..p.namespaces {
@@ -12306,7 +16088,7 @@ mod load {
                 let court = c as i64;
                 let mut court_rx = Vec::with_capacity(t);
                 for k in 0..t {
-                    let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                    let (tx, rx) = kanal_test();
                     court_rx.push(rx);
                     let b = broker.clone();
                     let ns_c = ns.clone();
@@ -12354,21 +16136,21 @@ mod load {
 
         // Hosts, damit `subscribe_monitor` die Namespaces bespielt. Die Host-rx
         // bleiben bis Funktionsende gebunden (nicht `let _ = …`, das dropt).
-        let (ha, _rha) = mpsc::unbounded_channel::<Message>();
-        let (hb, _rhb) = mpsc::unbounded_channel::<Message>();
+        let (ha, _rha) = kanal_test();
+        let (hb, _rhb) = kanal_test();
         register_host(&broker, &nsa, &ha).await;
         register_host(&broker, &nsb, &hb).await;
 
         // court-spezifische Subs (Index == Feld), „alle"-Sub, Fremd-NS-Sub.
-        let mut court_rx: Vec<UnboundedReceiver<Message>> = Vec::with_capacity(courts);
+        let mut court_rx: Vec<Receiver<Message>> = Vec::with_capacity(courts);
         for c in 0..courts {
-            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            let (tx, rx) = kanal_test();
             subscribe_monitor(&broker, &nsa, Some(c as i64), &tx).await;
             court_rx.push(rx);
         }
-        let (tx_all, mut all_rx) = mpsc::unbounded_channel::<Message>();
+        let (tx_all, mut all_rx) = kanal_test();
         subscribe_monitor(&broker, &nsa, None, &tx_all).await;
-        let (tx_f, mut foreign_rx) = mpsc::unbounded_channel::<Message>();
+        let (tx_f, mut foreign_rx) = kanal_test();
         subscribe_monitor(&broker, &nsb, Some(0), &tx_f).await;
 
         let mut set = JoinSet::new();
@@ -12423,7 +16205,7 @@ mod load {
 
         for i in 0..p.namespaces {
             let ns = fresh_ns(i);
-            let (host_tx, mut host_rx) = mpsc::unbounded_channel::<Message>();
+            let (host_tx, mut host_rx) = kanal_test();
             register_host(&broker, &ns, &host_tx).await;
             // Schlanke Acker-Task: Frame lesen → `reqId` ziehen → sofort acken.
             // So schlägt das 8-s-`RESULT_TIMEOUT` nie zu. `host_tx` wandert mit
@@ -12520,17 +16302,17 @@ mod load {
         let mut per_ns_tablets: Vec<Vec<(i64, Tx)>> = Vec::new();
         let mut per_ns_subs: Vec<Vec<(Option<i64>, Tx)>> = Vec::new();
         let mut host_txs: Vec<Tx> = Vec::new();
-        let mut keep_rx: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut keep_rx: Vec<Receiver<Message>> = Vec::new();
 
         for i in 0..p.namespaces {
             let ns = fresh_ns(i);
-            let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+            let (host_tx, host_rx) = kanal_test();
             register_host(&broker, &ns, &host_tx).await;
             keep_rx.push(host_rx);
 
             let mut tablets = Vec::with_capacity(courts);
             for c in 0..courts {
-                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                let (tx, rx) = kanal_test();
                 keep_rx.push(rx);
                 let dev = format!("dev-{i}-{c}");
                 attach_tablet(&broker, &ns, c as i64, &dev, &tx).await;
@@ -12538,7 +16320,7 @@ mod load {
             }
             let mut sub_list = Vec::with_capacity(subs);
             for s in 0..subs {
-                let (tx, rx) = mpsc::unbounded_channel::<Message>();
+                let (tx, rx) = kanal_test();
                 keep_rx.push(rx);
                 let court = if s % 2 == 0 {
                     Some((s % courts.max(1)) as i64)
@@ -12606,6 +16388,9 @@ mod load {
             r.expect("Task-Panik beim Tablet-Detach");
         }
 
+        // Der Namespace überlebt den Abgang für die Karenz; danach entfernt
+        // ihn der Aufräum-Lauf.
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
         let map = broker.namespaces.lock().await;
         for ns in &ns_list {
             assert!(
@@ -12625,15 +16410,15 @@ mod load {
     /// Deckel. Alle Abos/Attaches laufen nebenläufig gegen den Namespace-Mutex.
     async fn run_cap_boundary(broker: Broker, over: usize) {
         let ns = fresh_ns(0);
-        let (host_tx, host_rx) = mpsc::unbounded_channel::<Message>();
+        let (host_tx, host_rx) = kanal_test();
         register_host(&broker, &ns, &host_tx).await;
 
-        let mut rxs: Vec<UnboundedReceiver<Message>> = Vec::new();
+        let mut rxs: Vec<Receiver<Message>> = Vec::new();
         let mut set = JoinSet::new();
 
         // Monitor-Subs: MAX_MONITOR_SUBS + over Abos (alle in die „alle"-Liste).
         for _ in 0..(MAX_MONITOR_SUBS + over) {
-            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            let (tx, rx) = kanal_test();
             rxs.push(rx);
             let b = broker.clone();
             let ns_c = ns.clone();
@@ -12644,7 +16429,7 @@ mod load {
         // Tablets: MAX_TABLETS_PER_NS + over DISTINKTE Felder (je ein Tablet) —
         // jenseits des Deckels wird ein neues Feld abgewiesen.
         for c in 0..(MAX_TABLETS_PER_NS + over) {
-            let (tx, rx) = mpsc::unbounded_channel::<Message>();
+            let (tx, rx) = kanal_test();
             rxs.push(rx);
             let b = broker.clone();
             let ns_c = ns.clone();

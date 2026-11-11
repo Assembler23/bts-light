@@ -773,6 +773,19 @@ die Aufrufe) · `marke_steigt_bei_rally_sync_ereignis_und_pause` ·
 
 **Reviews:** `code-reviewer`.
 
+**Aus der Umsetzung (v0.9.383):** PR 4 kam vor PR 2b und 3 (beide warten auf die Messung im
+Feld); er hängt nur an PR 2a. „Geparkt bis … ein neuer voller `tset` oder `sched` bestätigt
+wurde" ist als „neuer voller `tset`" umgesetzt (das Lebenszeichen kommt ohnehin alle 60 s);
+`sched` hebt das Parken nicht auf. Aus dem Review: Ein bloßes Lebenszeichen entparkt
+höchstens alle zehn Minuten (sonst dreimal je Minute für einen dauerhaft verworfenen
+Eintrag); Zählweise und Einzel/Doppel stecken mit in der Marke; die Marken werden beim
+Turnierwechsel geleert. Die Marke ist ein fortlaufender Zähler je Speicher (läuft
+über Turnierwechsel weiter), kein Zähler je Spiel; ein aus der Datei geladener Verlauf hat
+die Marke 0 und wird beim ersten Mal gesendet. `ohne_bestaetigten_tset_kein_verlauf` heißt
+`verlauf_erst_mit_bestaetigtem_stand` (seit PR 2a); dazu `verworfener_verlauf_gilt_nicht_als_angenommen`
+als Durchgangs-Test gegen die HTTP-Attrappe. `badhub/sender.rs` blieb unberührt — die Regeln
+leben in `PushTeil::send_verlauf`.
+
 ### PR 5 (nur nach Messung) — Spielplan nur bei Änderung
 
 Inhaltsmarke ohne `rid`; trotzdem mindestens alle 10 min. Test:

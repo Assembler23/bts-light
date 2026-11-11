@@ -223,6 +223,22 @@ Im lan+cloud-Betrieb laufen Tablet-Verbindung/Übernahme/State über den
 (Pfad aus `RELAY_LOG_DIR` in der systemd-Unit). Der `badhub`-User liest die
 Datei direkt per SFTP/SSH — **ohne** `systemd-journal`-Recht. Loglevel INFO.
 
+**Verfall (seit v0.9.387):** Es bleiben die jüngsten **30** Tagesdateien;
+ältere löscht der Relay selbst — beim Start und bei jedem Tageswechsel, und
+zwar **alle** Dateien, deren Name mit `bts-relay.log` beginnt (auch eine
+Handkopie wie `bts-relay.log.bak`; Sicherungen also anders nennen). Lässt sich die Datei nicht anlegen, schreibt
+er nur nach stdout/journald.
+
+**Gekürzte Kennung (seit v0.9.387):** Das Relay-Log nennt von der
+Turnier-Kennung (`install_id`) nur die **ersten 8 Zeichen** — die volle
+Kennung ist der Zugang der Tablets und Monitore und gehört nicht in eine
+Datei, die 30 Tage liegt. Ein Turnier im Relay-Log finden: die `install_id`
+aus dem Diagnose-Log der App nehmen und nach ihrem Anfang suchen, etwa
+`grep "'a1b2c3d4'" bts-relay.log.2026-11-14`. Dass zwei Turniere denselben
+Anfang haben, ist bei 2000 Kennungen mit rund 0,05 % zu erwarten — im Zweifel
+über die Uhrzeit trennen. Dateien von vor v0.9.387 nennen noch die volle
+Kennung, bis sie verfallen.
+
 Protokolliert u. a.: Tablet verbunden/getrennt, Feld belegt, Übernahme **und
 ob beim Verbinden ein gespeicherter Spielstand wiederhergestellt wurde** (oder
 das Feld bei 0:0 startet — die Diagnose-Zeile für den 14.06.-Vorfall).

@@ -10,9 +10,11 @@
 //! - **Ersetzen statt anhängen**: jeder Eintrag ersetzt bei badhub den
 //!   gespeicherten Verlauf (wie `rally_sync` zwischen Tablet und Host). Ein
 //!   Undo, ein Host-Neustart oder ein verlorener Push heilt sich damit.
-//! - **Nur Geändertes**: [`VerlaufStand`] merkt sich je Match den Hash des
-//!   zuletzt **angenommenen** Eintrags. Ein abgelehnter Push wird im nächsten
-//!   Takt erneut versucht.
+//! - **Nur Geändertes**: [`VerlaufStand`] merkt sich je Match die
+//!   Änderungsmarke des zuletzt **angenommenen** Eintrags; gebaut wird nur,
+//!   was sich geändert hat ([`kandidaten`]). badhub verwirft einzelne
+//!   Einträge mit Status 200 und nennt nur ihre Zahl — dann gilt das Paket
+//!   nicht als angenommen, und nach [`MAX_VERSUCHE`] Versuchen wird geparkt.
 //! - **Datenschutz**: keine Namen (nur Team 0/1 und Spielerindex). Vom Zettel
 //!   gehen **ausschließlich** `serve_start` mit — keine Sanktionen
 //!   ([`EventKind::is_sanction`]), keine Verletzungen. Pausen nur als
@@ -26,7 +28,7 @@ use std::hash::{Hash, Hasher};
 use relay_proto::{EventKind, MatchEvent, MatchTimeline};
 use serde::Serialize;
 
-use crate::btp::model::BtpSnapshot;
+use crate::btp::model::{BtpMatch, BtpSnapshot};
 use crate::tablet::sheet::MatchSheet;
 
 /// Höchstzahl Matches je Nachricht — badhub nimmt nicht mehr an.
@@ -147,64 +149,212 @@ pub fn eintraege(
     sheet: impl Fn(i64) -> Option<MatchSheet>,
     pausen: &HashMap<i64, serde_json::Value>,
 ) -> Vec<VerlaufEintrag> {
-    let mut out = Vec::new();
-    for m in &snapshot.matches {
-        let tl = timeline(m.id);
-        let serve = sheet(m.id).map(|s| aufschlaege(&s)).unwrap_or_default();
-        if tl.is_none() && serve.is_empty() {
-            continue;
-        }
-        out.push(VerlaufEintrag {
-            id: format!("btp_{}", m.id),
-            doubles: m.team1.len() >= 2 || m.team2.len() >= 2,
-            fmt: VerlaufFormat {
-                target: m.scoring.target_score,
-                cap: m.scoring.cap_score,
-                best_of: m.scoring.best_of,
-                interval_at: m.scoring.interval_at,
-            },
-            timeline: tl.unwrap_or_default(),
-            serve,
-            pause: pause_aus_tablet(pausen.get(&m.id)),
-        });
-    }
-    out
+    snapshot
+        .matches
+        .iter()
+        .filter_map(|m| eintrag_fuer(m, &timeline, &sheet, pausen))
+        .collect()
 }
 
-/// Merkt sich je Match, was badhub zuletzt angenommen hat.
+/// Der Eintrag eines Spiels — `None`, wenn es weder Punktverlauf noch
+/// Aufschlagereignis gibt.
+pub fn eintrag_fuer(
+    m: &BtpMatch,
+    timeline: impl Fn(i64) -> Option<MatchTimeline>,
+    sheet: impl Fn(i64) -> Option<MatchSheet>,
+    pausen: &HashMap<i64, serde_json::Value>,
+) -> Option<VerlaufEintrag> {
+    let tl = timeline(m.id);
+    let serve = sheet(m.id).map(|s| aufschlaege(&s)).unwrap_or_default();
+    if tl.is_none() && serve.is_empty() {
+        return None;
+    }
+    Some(VerlaufEintrag {
+        id: format!("btp_{}", m.id),
+        doubles: m.team1.len() >= 2 || m.team2.len() >= 2,
+        fmt: VerlaufFormat {
+            target: m.scoring.target_score,
+            cap: m.scoring.cap_score,
+            best_of: m.scoring.best_of,
+            interval_at: m.scoring.interval_at,
+        },
+        timeline: tl.unwrap_or_default(),
+        serve,
+        pause: pause_aus_tablet(pausen.get(&m.id)),
+    })
+}
+
+/// Änderungsmarke eines Spiels: (Verlauf, Zettel, Rest). Die ersten beiden
+/// kommen aus den Speichern (`0` = kein Eintrag, sonst Marke + 1); die
+/// dritte ist ein Hash über alles, was sonst noch im Eintrag steht und sich
+/// ohne ein Schreiben in den Speichern ändern kann: Pausenzustand, Zählweise
+/// und Einzel/Doppel aus dem BTP-Snapshot.
+pub type Marke = (u64, u64, u64);
+
+/// Ein Spiel, zu dem es etwas zu senden geben könnte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Kandidat {
+    pub match_id: i64,
+    /// Kennung bei badhub (`btp_<id>`).
+    pub id: String,
+    pub marke: Marke,
+}
+
+/// Die Spiele des Snapshots mit Verlauf oder Zettel, samt ihrer
+/// Änderungsmarke — **ohne** einen Verlauf zu klonen oder zu serialisieren.
+/// Bis v0.9.382 baute und hashte jeder 5-s-Takt alle Einträge aller Spiele.
+pub fn kandidaten(
+    snapshot: &BtpSnapshot,
+    verlauf_marke: impl Fn(i64) -> Option<u64>,
+    zettel_marke: impl Fn(i64) -> Option<u64>,
+    pausen: &HashMap<i64, serde_json::Value>,
+) -> Vec<Kandidat> {
+    let mit_eintrag = |m: Option<u64>| m.map(|x| x + 1).unwrap_or(0);
+    snapshot
+        .matches
+        .iter()
+        .filter_map(|m| {
+            let (v, z) = (verlauf_marke(m.id), zettel_marke(m.id));
+            if v.is_none() && z.is_none() {
+                return None;
+            }
+            let mut h = DefaultHasher::new();
+            pause_aus_tablet(pausen.get(&m.id))
+                .map(|p| (p.kind, p.ends_at))
+                .hash(&mut h);
+            // Zählweise und Einzel/Doppel: Eine Korrektur in BTP an einem
+            // schon beendeten Spiel schriebe sonst nie mehr in einen Speicher
+            // — und bliebe bei badhub für immer falsch.
+            (
+                m.scoring.target_score,
+                m.scoring.cap_score,
+                m.scoring.best_of,
+                m.scoring.interval_at,
+                m.team1.len() >= 2 || m.team2.len() >= 2,
+            )
+                .hash(&mut h);
+            Some(Kandidat {
+                match_id: m.id,
+                id: format!("btp_{}", m.id),
+                marke: (mit_eintrag(v), mit_eintrag(z), h.finish()),
+            })
+        })
+        .collect()
+}
+
+/// So oft wird ein von badhub verworfener Eintrag versucht, bevor er
+/// geparkt wird.
+pub const MAX_VERSUCHE: u8 = 3;
+
+/// Merkt sich je Match, was badhub zuletzt angenommen hat — und was es
+/// verworfen hat.
 #[derive(Debug, Default)]
 pub struct VerlaufStand {
-    gesendet: HashMap<String, u64>,
+    /// Angenommene Marke je Spiel.
+    gesendet: HashMap<String, Marke>,
+    /// Verworfene Versuche je Spiel, zur Marke dieser Versuche. badhub
+    /// nennt nur die ANZAHL der verworfenen Einträge eines Pakets, nicht
+    /// welche — deshalb zählt jeder Eintrag des Pakets einen Versuch.
+    versuche: HashMap<String, (Marke, u8)>,
+    /// Verschiebung der Auswahl nach einer Ganz-Ablehnung.
+    start: usize,
+    /// Wann zuletzt entparkt wurde.
+    entparkt: Option<std::time::Instant>,
 }
 
+/// Mindestabstand zwischen zwei Entparken bei einem bloßen Lebenszeichen.
+/// Der volle `tset` kommt mindestens jede Minute — entparkte er jedes Mal,
+/// ginge ein Verlauf, den badhub auf Dauer verwirft (ein Spiel außerhalb
+/// seines Turniers), dreimal je Minute hinaus, für immer.
+pub const ENTPARK_ABSTAND: std::time::Duration = std::time::Duration::from_secs(600);
+
 impl VerlaufStand {
-    /// Die geänderten Einträge, höchstens [`MAX_SPIELE_JE_NACHRICHT`]. Der
-    /// Rest kommt im nächsten Takt — nach einem Neustart also gestaffelt.
-    pub fn geaendert(&self, eintraege: Vec<VerlaufEintrag>) -> Vec<VerlaufEintrag> {
-        eintraege
-            .into_iter()
-            .filter(|e| self.gesendet.get(&e.id) != Some(&hash(e)))
-            .take(MAX_SPIELE_JE_NACHRICHT)
+    /// Die Spiele, die jetzt zu senden sind: geändert und nicht geparkt,
+    /// höchstens [`MAX_SPIELE_JE_NACHRICHT`]. Der Rest kommt im nächsten
+    /// Takt — nach einem Neustart also gestaffelt.
+    pub fn auswahl(&self, kandidaten: &[Kandidat]) -> Vec<Kandidat> {
+        let offen: Vec<&Kandidat> = kandidaten
+            .iter()
+            .filter(|k| self.gesendet.get(&k.id) != Some(&k.marke))
+            .filter(|k| !self.geparkt(k))
+            .collect();
+        if offen.is_empty() {
+            return Vec::new();
+        }
+        // Nach einer Ganz-Ablehnung beginnt die Auswahl woanders: Sonst
+        // blockierte ein Eintrag, an dem badhub scheitert, auf Dauer
+        // dieselben ersten 64 — und alle dahinter kämen nie dran.
+        let ab = self.start % offen.len();
+        offen
+            .iter()
+            .cycle()
+            .skip(ab)
+            .take(offen.len().min(MAX_SPIELE_JE_NACHRICHT))
+            .map(|k| (*k).clone())
             .collect()
     }
 
-    /// Nach einem angenommenen Push: diese Stände gelten als gesendet.
-    pub fn angenommen(&mut self, eintraege: &[VerlaufEintrag]) {
-        for e in eintraege {
-            self.gesendet.insert(e.id.clone(), hash(e));
+    /// Geparkt = mit dieser Marke schon [`MAX_VERSUCHE`]-mal verworfen. Eine
+    /// neue Marke (das Spiel hat sich geändert) zählt von vorn.
+    fn geparkt(&self, k: &Kandidat) -> bool {
+        self.versuche
+            .get(&k.id)
+            .is_some_and(|(marke, n)| *marke == k.marke && *n >= MAX_VERSUCHE)
+    }
+
+    /// Nach einem angenommenen Push (badhub hat nichts verworfen): diese
+    /// Stände gelten als gesendet.
+    pub fn angenommen(&mut self, wahl: &[Kandidat]) {
+        for k in wahl {
+            self.gesendet.insert(k.id.clone(), k.marke);
+            self.versuche.remove(&k.id);
+        }
+    }
+
+    /// badhub hat mit 200 geantwortet, aber Einträge verworfen: Nichts gilt
+    /// als gesendet, jeder Eintrag des Pakets zählt einen Versuch. Liefert
+    /// die Zahl der dadurch NEU geparkten Einträge (fürs Log).
+    pub fn verworfen(&mut self, wahl: &[Kandidat]) -> usize {
+        let mut neu_geparkt = 0;
+        for k in wahl {
+            let n = match self.versuche.get(&k.id) {
+                Some((marke, n)) if *marke == k.marke => n.saturating_add(1),
+                _ => 1,
+            };
+            self.versuche.insert(k.id.clone(), (k.marke, n));
+            if n == MAX_VERSUCHE {
+                neu_geparkt += 1;
+            }
+        }
+        neu_geparkt
+    }
+
+    /// Nach einer Ganz-Ablehnung (5xx, 413, 409): Die nächste Auswahl
+    /// beginnt hinter dieser.
+    pub fn rotieren(&mut self, um: usize) {
+        self.start = self.start.wrapping_add(um.max(1));
+    }
+
+    /// Ein neuer voller `tset` ist bestätigt: badhub kennt jetzt womöglich
+    /// Spiele, deren Verlauf es vorher verwarf — Geparktes darf wieder.
+    ///
+    /// `struktur` = der `tset` ging wegen einer Änderung hinaus (Feld,
+    /// Aufruf, mehrere Spiele) oder nach einer Störung: Dann sofort. Bei
+    /// einem bloßen Lebenszeichen höchstens alle [`ENTPARK_ABSTAND`].
+    pub fn entparken(&mut self, struktur: bool, jetzt: std::time::Instant) {
+        let faellig = self
+            .entparkt
+            .is_none_or(|t| jetzt.saturating_duration_since(t) >= ENTPARK_ABSTAND);
+        if struktur || faellig {
+            self.versuche.clear();
+            self.entparkt = Some(jetzt);
         }
     }
 
     /// Neues Turnier → alles neu senden.
     pub fn leeren(&mut self) {
-        self.gesendet.clear();
+        *self = Self::default();
     }
-}
-
-fn hash(e: &VerlaufEintrag) -> u64 {
-    let mut h = DefaultHasher::new();
-    serde_json::to_string(e).unwrap_or_default().hash(&mut h);
-    h.finish()
 }
 
 pub fn build_verlauf(
@@ -435,45 +585,312 @@ mod tests {
         assert_eq!(m["tournament_uuid"], "GUID");
     }
 
+    /// Kandidaten für die Spiele 1..=n, alle mit derselben Verlaufs-Marke.
+    fn kand(n: i64, marke: u64) -> Vec<Kandidat> {
+        (1..=n)
+            .map(|id| Kandidat {
+                match_id: id,
+                id: format!("btp_{id}"),
+                marke: (marke, 0, 0),
+            })
+            .collect()
+    }
+
+    fn ids(wahl: &[Kandidat]) -> Vec<i64> {
+        wahl.iter().map(|k| k.match_id).collect()
+    }
+
     #[test]
     fn stand_sendet_nur_geaendertes_und_wiederholt_abgelehntes() {
-        let snap = snapshot(vec![spiel(7, true), spiel(8, true)]);
-        let mit = |p7: &'static str| {
-            eintraege(
-                &snap,
-                move |id| Some(verlauf(if id == 7 { p7 } else { "A" })),
-                |_| None,
-                &HashMap::new(),
-            )
-        };
         let mut stand = VerlaufStand::default();
-        let erst = stand.geaendert(mit("AB"));
+        let erst = stand.auswahl(&kand(2, 1));
         assert_eq!(erst.len(), 2, "beim ersten Mal alles");
         // Abgelehnt → nichts angenommen → nächster Takt schickt wieder beide.
-        assert_eq!(stand.geaendert(mit("AB")).len(), 2);
+        assert_eq!(stand.auswahl(&kand(2, 1)).len(), 2);
         stand.angenommen(&erst);
         assert!(
-            stand.geaendert(mit("AB")).is_empty(),
+            stand.auswahl(&kand(2, 1)).is_empty(),
             "unverändert → kein Push"
         );
-        let neu = stand.geaendert(mit("ABA"));
-        assert_eq!(neu.len(), 1);
-        assert_eq!(neu[0].id, "btp_7");
+        // Spiel 2 ändert sich.
+        let mut k = kand(2, 1);
+        k[1].marke = (2, 0, 0);
+        assert_eq!(ids(&stand.auswahl(&k)), vec![2]);
+    }
+
+    #[test]
+    fn turnierwechsel_leert_den_stand() {
+        let mut stand = VerlaufStand::default();
+        let alle = stand.auswahl(&kand(3, 1));
+        stand.angenommen(&alle);
+        stand.verworfen(&kand(1, 9));
+        stand.rotieren(5);
         stand.leeren();
         assert_eq!(
-            stand.geaendert(mit("ABA")).len(),
-            2,
-            "neues Turnier → alles neu"
+            ids(&stand.auswahl(&kand(3, 1))),
+            vec![1, 2, 3],
+            "neues Turnier → alles neu, von vorn"
         );
     }
 
     #[test]
     fn hoechstens_64_spiele_je_nachricht() {
-        let snap = snapshot((1..=70).map(|i| spiel(i, false)).collect());
-        let e = eintraege(&snap, |_| Some(verlauf("A")), |_| None, &HashMap::new());
         assert_eq!(
-            VerlaufStand::default().geaendert(e).len(),
+            VerlaufStand::default().auswahl(&kand(70, 1)).len(),
             MAX_SPIELE_JE_NACHRICHT
         );
+    }
+
+    #[test]
+    fn verworfen_groesser_null_stempelt_nichts() {
+        // badhub antwortet mit 200, hat aber Einträge verworfen: Nichts gilt
+        // als gesendet — der nächste Takt versucht es wieder.
+        let mut stand = VerlaufStand::default();
+        let wahl = stand.auswahl(&kand(2, 1));
+        assert_eq!(stand.verworfen(&wahl), 0);
+        assert_eq!(stand.auswahl(&kand(2, 1)).len(), 2);
+    }
+
+    #[test]
+    fn nach_drei_versuchen_wird_geparkt() {
+        let mut stand = VerlaufStand::default();
+        for versuch in 1..=MAX_VERSUCHE {
+            let wahl = stand.auswahl(&kand(2, 1));
+            assert_eq!(wahl.len(), 2, "Versuch {versuch}");
+            let neu_geparkt = stand.verworfen(&wahl);
+            assert_eq!(neu_geparkt, if versuch == MAX_VERSUCHE { 2 } else { 0 });
+        }
+        assert!(stand.auswahl(&kand(2, 1)).is_empty(), "geparkt");
+        // Ändert sich ein Spiel, zählt es von vorn — das andere bleibt
+        // geparkt.
+        let mut k = kand(2, 1);
+        k[0].marke = (2, 0, 0);
+        assert_eq!(ids(&stand.auswahl(&k)), vec![1]);
+        // Ein dritter, unbeteiligter Eintrag ist nie betroffen.
+        assert_eq!(ids(&stand.auswahl(&kand(3, 1))), vec![3]);
+    }
+
+    #[test]
+    fn geparkter_eintrag_kommt_nach_neuem_tset_wieder() {
+        let mut stand = VerlaufStand::default();
+        for _ in 0..MAX_VERSUCHE {
+            let wahl = stand.auswahl(&kand(1, 1));
+            stand.verworfen(&wahl);
+        }
+        assert!(stand.auswahl(&kand(1, 1)).is_empty());
+        // Ein neuer voller Stand ist bestätigt: badhub kennt das Spiel jetzt
+        // womöglich.
+        let jetzt = std::time::Instant::now();
+        stand.entparken(true, jetzt);
+        let wahl = stand.auswahl(&kand(1, 1));
+        assert_eq!(ids(&wahl), vec![1]);
+        stand.angenommen(&wahl);
+        assert!(stand.auswahl(&kand(1, 1)).is_empty());
+    }
+
+    #[test]
+    fn lebenszeichen_entparkt_hoechstens_alle_zehn_minuten() {
+        // Ein Verlauf, den badhub auf Dauer verwirft, darf nicht mit jedem
+        // minütlichen Lebenszeichen wieder dreimal hinausgehen.
+        let mut stand = VerlaufStand::default();
+        let parken = |stand: &mut VerlaufStand| {
+            for _ in 0..MAX_VERSUCHE {
+                let wahl = stand.auswahl(&kand(1, 1));
+                stand.verworfen(&wahl);
+            }
+            assert!(stand.auswahl(&kand(1, 1)).is_empty());
+        };
+        let jetzt = std::time::Instant::now();
+        parken(&mut stand);
+        // Das erste Lebenszeichen entparkt (noch nie entparkt) …
+        stand.entparken(false, jetzt);
+        assert_eq!(stand.auswahl(&kand(1, 1)).len(), 1);
+        parken(&mut stand);
+        // … die folgenden neun Minuten lang keines mehr …
+        stand.entparken(
+            false,
+            jetzt + ENTPARK_ABSTAND - std::time::Duration::from_secs(1),
+        );
+        assert!(stand.auswahl(&kand(1, 1)).is_empty());
+        // … eine Strukturänderung aber sofort.
+        stand.entparken(true, jetzt + std::time::Duration::from_secs(60));
+        assert_eq!(stand.auswahl(&kand(1, 1)).len(), 1);
+    }
+
+    #[test]
+    fn ein_verworfener_eintrag_haelt_die_guten_nicht_auf() {
+        // badhub nennt nur die ZAHL der verworfenen Einträge. Ein Paket mit
+        // einem schlechten und zwei guten Spielen wird deshalb als Ganzes
+        // gezählt — die guten bekommen spätere Änderungen trotzdem hinaus.
+        let mut stand = VerlaufStand::default();
+        for _ in 0..MAX_VERSUCHE {
+            let wahl = stand.auswahl(&kand(3, 1));
+            stand.verworfen(&wahl);
+        }
+        assert!(stand.auswahl(&kand(3, 1)).is_empty(), "alle drei geparkt");
+        // Spiel 2 bekommt einen Ballwechsel: Es geht allein hinaus und wird
+        // angenommen.
+        let mut k = kand(3, 1);
+        k[1].marke = (2, 0, 0);
+        let wahl = stand.auswahl(&k);
+        assert_eq!(ids(&wahl), vec![2]);
+        stand.angenommen(&wahl);
+        assert!(stand.auswahl(&k).is_empty());
+    }
+
+    #[test]
+    fn zaehlweise_und_doppel_stecken_in_der_marke() {
+        let marke = |m: BtpMatch| {
+            kandidaten(&snapshot(vec![m]), |_| Some(1), |_| None, &HashMap::new())[0].marke
+        };
+        let einzel = marke(spiel(7, false));
+        assert_ne!(einzel, marke(spiel(7, true)), "Einzel/Doppel");
+        let mut anders = spiel(7, false);
+        anders.scoring.target_score += 4;
+        assert_ne!(einzel, marke(anders), "Zählweise");
+        assert_eq!(einzel, marke(spiel(7, false)), "unverändert bleibt gleich");
+    }
+
+    #[test]
+    fn ganz_ablehnung_rotiert_die_auswahl() {
+        // 100 offene Spiele, badhub lehnt das ganze Paket ab (5xx): Der
+        // nächste Versuch trägt andere Spiele — sonst kämen 65..100 nie dran.
+        let mut stand = VerlaufStand::default();
+        let erste = stand.auswahl(&kand(100, 1));
+        assert_eq!(ids(&erste)[..3], [1, 2, 3]);
+        stand.rotieren(erste.len());
+        let zweite = stand.auswahl(&kand(100, 1));
+        assert_eq!(zweite.len(), MAX_SPIELE_JE_NACHRICHT);
+        assert_eq!(ids(&zweite)[..3], [65, 66, 67]);
+        assert_eq!(ids(&zweite)[36..39], [1, 2, 3], "läuft im Kreis weiter");
+        // Bei nur einem offenen Spiel bleibt es dieses.
+        let mut einzel = VerlaufStand::default();
+        einzel.rotieren(1);
+        assert_eq!(ids(&einzel.auswahl(&kand(1, 1))), vec![1]);
+    }
+
+    #[test]
+    fn unveraenderte_spiele_werden_nicht_gebaut() {
+        // Der Takt fragt nur die Marken ab. Gebaut (Verlauf geklont und
+        // serialisiert) wird allein, was die Auswahl verlangt.
+        let snap = snapshot((1..=5).map(|i| spiel(i, false)).collect());
+        let gebaut = std::cell::Cell::new(0);
+        let durchgang = |stand: &mut VerlaufStand, marke_von_3: u64| {
+            let kandidaten = kandidaten(
+                &snap,
+                |id| Some(if id == 3 { marke_von_3 } else { 1 }),
+                |_| None,
+                &HashMap::new(),
+            );
+            let wahl = stand.auswahl(&kandidaten);
+            for k in &wahl {
+                let m = snap.matches.iter().find(|m| m.id == k.match_id).unwrap();
+                let eintrag = eintrag_fuer(
+                    m,
+                    |_| {
+                        gebaut.set(gebaut.get() + 1);
+                        Some(verlauf("A"))
+                    },
+                    |_| None,
+                    &HashMap::new(),
+                );
+                assert!(eintrag.is_some());
+            }
+            stand.angenommen(&wahl);
+        };
+        let mut stand = VerlaufStand::default();
+        durchgang(&mut stand, 1);
+        assert_eq!(gebaut.get(), 5, "beim ersten Mal alle");
+        durchgang(&mut stand, 1);
+        durchgang(&mut stand, 1);
+        assert_eq!(gebaut.get(), 5, "ohne Änderung wird nichts gebaut");
+        durchgang(&mut stand, 2);
+        assert_eq!(gebaut.get(), 6, "nur das geänderte Spiel");
+    }
+
+    #[test]
+    fn marke_steigt_bei_rally_sync_ereignis_und_pause() {
+        let verlaeufe = crate::tablet::timeline::TimelineStore::default();
+        let zettel = crate::tablet::sheet::SheetStore::default();
+        assert_eq!(verlaeufe.marke(7), None, "ohne Verlauf keine Marke");
+        assert_eq!(zettel.marke(7), None);
+
+        // Ballwechsel, Voll-Abgleich und Spielende heben die Marke.
+        assert!(verlaeufe.apply_rally(7, 1, 1, "A", 1, 0));
+        let nach_rally = verlaeufe.marke(7).unwrap();
+        assert!(verlaeufe.apply_sync(7, verlauf("AB")));
+        let nach_sync = verlaeufe.marke(7).unwrap();
+        assert!(nach_sync > nach_rally);
+        verlaeufe.finalize(7, false);
+        let nach_ende = verlaeufe.marke(7).unwrap();
+        assert!(nach_ende > nach_sync);
+        // Auch ein Nachzügler nach dem Spielende, der etwas ergänzt.
+        assert!(verlaeufe.apply_nachzuegler(7, verlauf("ABA")));
+        assert!(verlaeufe.marke(7).unwrap() > nach_ende);
+        // Ein anderes Spiel bleibt unberührt.
+        assert_eq!(verlaeufe.marke(8), None);
+
+        // Ein Zettel-Ereignis hebt die Marke des Zettels.
+        assert!(zettel.apply_event(7, ereignis("e1", EventKind::ServeStart)));
+        let nach_ereignis = zettel.marke(7).unwrap();
+        assert!(zettel.apply_event(7, ereignis("e2", EventKind::ServeStart)));
+        let nach_zweitem = zettel.marke(7).unwrap();
+        assert!(nach_zweitem > nach_ereignis);
+        // Der Voll-Abgleich des Zettels ebenso.
+        assert!(zettel.apply_event_sync(
+            7,
+            vec![
+                ereignis("e1", EventKind::ServeStart),
+                ereignis("e2", EventKind::ServeStart),
+                ereignis("e3", EventKind::ServeStart),
+            ]
+        ));
+        assert!(zettel.marke(7).unwrap() > nach_zweitem);
+
+        // Ein Turnierwechsel verwirft die Marken (Match-IDs beginnen neu).
+        verlaeufe.set_tournament("Anderes Turnier");
+        assert_eq!(verlaeufe.marke(7), None);
+
+        // Und eine Pause ändert die Marke des Kandidaten, ohne dass ein
+        // Speicher geschrieben hätte.
+        let snap = snapshot(vec![spiel(7, false)]);
+        let marke = |pause: Option<serde_json::Value>| {
+            let pausen: HashMap<i64, serde_json::Value> =
+                pause.into_iter().map(|p| (7, p)).collect();
+            kandidaten(
+                &snap,
+                |id| verlaeufe.marke(id),
+                |id| zettel.marke(id),
+                &pausen,
+            )[0]
+            .marke
+        };
+        let ohne = marke(None);
+        let mit = marke(Some(serde_json::json!({"kind": "eleven", "endsAt": 1000})));
+        assert_ne!(ohne, mit);
+        assert_ne!(
+            mit,
+            marke(Some(serde_json::json!({"kind": "game", "endsAt": 1000})))
+        );
+        // Eine Behandlungspause geht nicht an badhub — also auch keine Änderung.
+        assert_eq!(
+            ohne,
+            marke(Some(serde_json::json!({"kind": "medical", "endsAt": 1000})))
+        );
+    }
+
+    #[test]
+    fn spiele_ohne_verlauf_und_zettel_sind_keine_kandidaten() {
+        let snap = snapshot(vec![spiel(1, false), spiel(2, false)]);
+        let k = kandidaten(
+            &snap,
+            |id| (id == 2).then_some(0),
+            |_| None,
+            &HashMap::new(),
+        );
+        assert_eq!(ids(&k), vec![2]);
+        // Marke 0 des Speichers (aus der Datei geladen, unberührt) heißt
+        // „vorhanden" — und wird beim ersten Mal gesendet.
+        assert_eq!(VerlaufStand::default().auswahl(&k).len(), 1);
     }
 }

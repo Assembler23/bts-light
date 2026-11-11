@@ -27,6 +27,15 @@ Environment=PUBLIC_BASE=https://badhub.de/bts-relay
 # sudo systemctl daemon-reload.
 Environment=RELAY_LOG_DIR=/var/www/badhub/storage/relay-logs
 ExecStart=/opt/bts-relay/bts-relay
+# Speicher-Obergrenze (Spec relay-haerten, PR 6): Der Relay teilt sich den
+# Server mit badhub.de. Herleitung: 20 gleichzeitige Turniere mit Bildern bis
+# zum Gesamt-Budget (256 MiB), Zustaenden, zwei laufenden Uploads und Grundlast
+# ergeben knapp 480 MiB. Ab MemoryHigh bremst der Kernel, bei MemoryMax beendet
+# er den Dienst; systemd startet ihn nach 3 s neu (wirkt wie ein Deploy).
+# Diese Datei wird NICHT automatisch ausgerollt — Handgriff: docs/cloud-relay.md.
+MemoryHigh=512M
+MemoryMax=768M
+MemorySwapMax=0
 Restart=always
 RestartSec=3
 
