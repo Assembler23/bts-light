@@ -1163,6 +1163,7 @@ main {
         // jeder Antwort den Fehlerzähler zurück, bevor er geworfen wird —
         // die Schwelle für die Offline-Blende wäre nie erreicht und der TV
         // zeigte endlos den eingefrorenen Stand (Review-Fund 19.08.2026).
+        if (r.status === 503) return wirf503(r);
         if (r.status !== 304 && !r.ok) throw new Error('HTTP ' + r.status);
         // Der Leser bleibt frei von Nebenwirkungen (Review-Fund 08.09.2026):
         // Ein Rumpf, der erst nach der Frist eintrifft, darf weder entwarnen
@@ -1231,8 +1232,14 @@ main {
         // erstmal leer lassen, kein Drama für die Funktionalität.
         pollDone();
       })
-      .catch(function () {
+      .catch(function (fehler) {
         errorCount++;
+        if (fehler && fehler.hostWeg) {
+          showOffline(true);
+          // Der Relay hat geantwortet — kein Stillstand dieses Geräts, also
+          // auch kein Log-Upload des Wächters.
+          letzterAbrufOkMs = Date.now(); letzterStandMs = Date.now();
+        }
         // Ein EINZIGER Fehlversuch macht den Kanal ungesund und schaltet
         // sofort auf den schnellen Takt zurück (Spec
         // monitor-livestand-push, S6). Lieber ein paar überflüssige Abrufe
@@ -1242,6 +1249,19 @@ main {
         backoffUntil = Date.now() + FAIL_MS; // moderat: nach Fehler kurz warten
         pollDone();
       });
+  }
+  // „Turnier-PC weg" (Spec relay-haerten, PR 7): Der Cloud-Relay antwortet
+  // dann 503 mit dem Rumpf {"grund":"host_weg"}. Das Banner erscheint dann
+  // schon beim ersten solchen Abruf — der Relay hat selbst 20 s gewartet.
+  // Jeder andere Fehler (und das LAN) braucht weiter zwei Fehlversuche.
+  function istHostWeg(status, text) {
+    if (status !== 503) return false;
+    try { return JSON.parse(text).grund === 'host_weg'; } catch (e) { return false; }
+  }
+  function wirf503(r) {
+    return r.text().then(function (t) {
+      var f = new Error('HTTP 503'); f.hostWeg = istHostWeg(503, t); throw f;
+    });
   }
   function pollDone() {
     fetching = false;

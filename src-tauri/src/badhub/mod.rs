@@ -5,6 +5,10 @@ pub mod checkin_state;
 pub mod diff;
 pub mod payload;
 pub mod push;
+pub mod sender;
+pub mod strecke;
+#[cfg(test)]
+pub mod testhilfe;
 pub mod tp_ereignis;
 pub mod tp_guid;
 pub mod tp_takt;

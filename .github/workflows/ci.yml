@@ -313,6 +313,11 @@ jobs:
       - name: Geparkte Ergebnisse am Tablet (JS)
         run: node scripts/test-geparkt.mjs
 
+      # Ohne Turnier-PC antwortet der Cloud-Relay 503 mit Grund. Die Anzeigen
+      # muessen das von einer Leitungsstoerung unterscheiden.
+      - name: Anzeigen ohne Turnier-PC (JS)
+        run: node scripts/test-host-weg.mjs
+
       # Wessen Spielstand gilt nach einer Wieder-Anmeldung? Ein Fehler hier
       # laesst ein Ersatz-Tablet bei 0:0 beginnen und den gesicherten Stand
       # ueberschreiben.

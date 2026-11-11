@@ -81,6 +81,22 @@ struct Inner {
     slug: String,
     dirty: bool,
     last_write: Option<Instant>,
+    /// Änderungsmarke je Spiel: steigt bei jedem Schreiben. Der badhub-Push
+    /// (`tverlauf`) erkennt daran, welche Spiele sich geändert haben — ohne
+    /// alle 5 s jeden Zettel zu klonen und zu serialisieren. Nur im RAM;
+    /// der Zähler läuft über Turnierwechsel hinweg weiter, damit eine Marke
+    /// nie zweimal vergeben wird.
+    marken: HashMap<i64, u64>,
+    zaehler: u64,
+}
+
+impl Inner {
+    /// Vermerkt, dass sich dieses Spiel geändert hat.
+    fn beruehrt(&mut self, match_id: i64) {
+        self.zaehler += 1;
+        self.marken.insert(match_id, self.zaehler);
+        self.dirty = true;
+    }
 }
 
 /// Der Zettel-Ereignis-Speicher. Lebt im
@@ -138,6 +154,8 @@ impl SheetStore {
         inner.slug = slug;
         inner.dirty = false;
         inner.last_write = None;
+        // Wie im Punktverlauf: Die Marken gehören zum alten Turnier.
+        inner.marken.clear();
         inner.file = loaded.unwrap_or_else(|| SheetFile {
             tournament: name.to_string(),
             first_seen: today(),
@@ -182,7 +200,7 @@ impl SheetStore {
             return false;
         }
         sheet.events = kandidat;
-        inner.dirty = true;
+        inner.beruehrt(match_id);
         drop(inner);
         self.persist(false);
         true
@@ -259,7 +277,7 @@ impl SheetStore {
             return false;
         }
         sheet.events = kandidat;
-        inner.dirty = true;
+        inner.beruehrt(match_id);
         drop(inner);
         self.persist(true);
         !gekappt
@@ -282,7 +300,7 @@ impl SheetStore {
         if retired {
             sheet.retired = true;
         }
-        inner.dirty = true;
+        inner.beruehrt(match_id);
         drop(inner);
         // **Ohne Mindestabstand**, anders als bei jedem anderen Schreiber:
         // Der Abschluss kommt genau einmal je Match und taugt nicht zum
@@ -303,6 +321,17 @@ impl SheetStore {
             .matches
             .get(&match_id)
             .is_some_and(|s| !s.events.is_empty())
+    }
+
+    /// Änderungsmarke des Spiels — `None`, wenn es keinen Zettel gibt (wie
+    /// [`super::timeline::TimelineStore::marke`]).
+    pub fn marke(&self, match_id: i64) -> Option<u64> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .file
+            .matches
+            .contains_key(&match_id)
+            .then(|| inner.marken.get(&match_id).copied().unwrap_or(0))
     }
 
     /// Der Zettel-Stand eines Matches (für Projektion und Renderer).
