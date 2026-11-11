@@ -22,6 +22,13 @@
  *    hängt — eine unstimmige Satzliste, ein Satz, der nicht zur Zählweise des
  *    Spiels passt.
  *
+ *  Seit der Spec `tablet-stand-robust` (Regel C, ADR 0085) gibt es eine dritte
+ *  Antwort: **überholt** (`superseded: true`). Das Spiel liegt nicht mehr auf
+ *  dem Feld und ist in BTP beendet — das Ergebnis wird nie mehr gebraucht.
+ *  Das Tablet lässt den Auftrag los. „Überholt" ist keine Annahme (`ok`) und
+ *  keine Aussage über den Payload (`permanent`); ein Host ohne das Feld
+ *  antwortet wie bisher wiederholbar, und das Tablet parkt den Auftrag dann.
+ *
  *  **Im Zweifel wird wiederholt.** Ein zu Unrecht abgebrochener Versuch kostet
  *  ein Ergebnis; eine überflüssige Wiederholung kostet einen HTTP-Request.
  *  Deshalb gilt „dauerhaft" nur, wenn der Host es ausdrücklich sagt — ältere
@@ -41,7 +48,7 @@ export const OHNE_GRUND = "Der Turnier-PC hat das Ergebnis abgelehnt.";
  * @param {object|null} antwort Der geparste Antwort-Body (`{ok, error, permanent}`),
  *   oder `null`/`undefined`, wenn gar keine verwertbare Antwort ankam
  *   (Netzfehler, Abbruch, HTTP-Fehler, kaputtes JSON).
- * @returns {{art: "ok"|"wiederholen"|"dauerhaft", grund: string}}
+ * @returns {{art: "ok"|"wiederholen"|"dauerhaft"|"ueberholt", grund: string}}
  *   `art` sagt, was zu tun ist; `grund` ist der anzuzeigende Text (leer bei "ok").
  */
 export function naechsterSchritt(antwort) {
@@ -54,6 +61,8 @@ export function naechsterSchritt(antwort) {
   const grund = typeof antwort.error === "string" && antwort.error.trim()
     ? antwort.error.trim()
     : OHNE_GRUND;
+  // In BTP steht schon ein Ergebnis, das Spiel ist vom Feld — loslassen.
+  if (antwort.superseded === true) return { art: "ueberholt", grund };
   // Nur das ausdrückliche Ja des Hosts beendet die Wiederholung.
   return antwort.permanent === true
     ? { art: "dauerhaft", grund }

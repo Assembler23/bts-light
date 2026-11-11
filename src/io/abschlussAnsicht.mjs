@@ -49,11 +49,17 @@ export function sendeauftragErledigt(pendingResult, matchId, finalized) {
 export const FEST_IN_BTP =
   "✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung.";
 
+/** Text, wenn der Turnier-PC das Ergebnis als überholt gemeldet hat: In BTP
+ *  stand für dieses Spiel schon eines (Spec tablet-stand-robust, Regel C). */
+export const STAND_SCHON_IN_BTP =
+  "✓ In BTP steht für dieses Spiel schon ein Ergebnis — Korrektur nur über die Turnierleitung.";
+
 /**
  * Sperren und Statuszeile der Beendet-Ansicht.
  *
  * @param {object} z
  * @param {boolean} z.finalized   Match ist in BTP finalisiert (Frame vom Host).
+ * @param {boolean} z.ueberholt   Der Turnier-PC hat das Ergebnis als überholt gemeldet.
  * @param {boolean} z.submittedOk Ergebnis wurde vom Turnier-PC angenommen.
  * @param {string|null} z.resultRejected Dauerhafte Ablehnung mit Grund.
  * @param {boolean} z.pendingResult Ergebnis ist unterwegs / wird wiederholt.
@@ -66,6 +72,11 @@ export function abschlussLage(z) {
   // der Host nimmt es nicht mehr an — also gar nicht erst anbieten.
   if (s.finalized) {
     return { sendenGesperrt: true, korrekturGesperrt: true, status: FEST_IN_BTP };
+  }
+  // Überholt: BTP hat für dieses Spiel schon ein Ergebnis, und es liegt nicht
+  // mehr auf dem Feld. Erneut senden bekäme dieselbe Antwort.
+  if (s.ueberholt) {
+    return { sendenGesperrt: true, korrekturGesperrt: true, status: STAND_SCHON_IN_BTP };
   }
   if (s.submittedOk) {
     return {

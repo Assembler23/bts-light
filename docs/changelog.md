@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.376
+
+- **Ein altes Ergebnis blockiert nicht mehr das nächste Spiel.** Konnte ein
+  Tablet sein Ergebnis nicht zustellen und kam schon das nächste Spiel aufs
+  Feld, blieb „Ergebnis übermitteln" dort gesperrt. Jetzt wird das alte
+  Ergebnis **geparkt**: Es steht als oranges Band unten am Tablet
+  („Ergebnis von Spiel Nr. … nicht zugestellt — Turnierleitung informieren"),
+  wird im Hintergrund weiter zugestellt und überlebt Neuladen und Leeren des
+  Felds. Steht für das Spiel in BTP schon ein Ergebnis, meldet der Turnier-PC
+  das neu als „überholt" — das Band verschwindet dann von selbst („… stand
+  schon in BTP"). Kommt das Spiel auf dasselbe Feld zurück, fragt das Tablet:
+  „Jetzt senden" oder „Verwerfen". Dritter Schritt der Spec
+  `tablet-stand-robust` (ADR 0085).
+
 ## v0.9.375
 
 - **Punktverlauf und Schiedsrichterzettel sind nach einem Verbindungsabriss

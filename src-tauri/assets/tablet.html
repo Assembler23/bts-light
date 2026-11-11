@@ -929,6 +929,27 @@
     <button id="enter-score-btn" class="subtle" disabled>Ergebnis eintragen …</button>
     <button id="finish-btn" class="subtle" disabled>Match beenden …</button>
   </footer>
+  <!-- Geparktes Ergebnis (Spec `tablet-stand-robust`, Regel C): Ein Ergebnis,
+       das der Turnier-PC nicht angenommen hat, bleibt sichtbar — auf Warte-,
+       Setup- und Zählansicht. Eigene Zeile UNTER der Fußleiste statt einer
+       schwebenden Marke: So verdeckt es keinen Knopf, die Zählfläche wird
+       nur etwas niedriger. `z-index` hebt es über das abgedunkelte
+       Setup-Fenster. -->
+  <div id="geparkt-band" style="
+    position: relative; z-index: 19; flex-shrink: 0;
+    background: #f59e0b; color: #1c1300; padding: .45rem .8rem;
+    padding-bottom: max(.45rem, env(safe-area-inset-bottom));
+    font-size: .95rem; font-weight: 700;
+    display: none; align-items: center; justify-content: center; gap: .75rem;
+  ">
+    <span id="geparkt-text"></span>
+    <button type="button" id="geparkt-verwerfen" style="
+      flex: 0 0 auto; min-height: 0;
+      background:#1c1300; color:#fde68a; border:0; border-radius:.5rem;
+      padding:.4rem .9rem; font-weight:800; font-size:.95rem; cursor:pointer;
+      white-space: nowrap
+    ">Verwerfen</button>
+  </div>
 </div>
 
 <!-- Endstand direkt eintragen (Plan 12a): wenn niemand live gezählt hat,
@@ -1004,6 +1025,19 @@
     background:#04263a; color:#e0f2fe; border:0; border-radius:.5rem;
     padding:.4rem .9rem; font-weight:800; font-size:.95rem; cursor:pointer
   ">Jetzt laden</button>
+</div>
+
+<!-- Abfrage zum geparkten Ergebnis: Rückkehr des Spiels („Jetzt senden"?)
+     oder zweite Abfrage vor dem Verwerfen. Deckend und über dem Setup-Fenster:
+     Die Rückkehr-Frage erscheint zusammen mit der Seitenwahl, und die schiene
+     sonst durch. -->
+<div class="modal" id="geparkt-modal" style="z-index: 18; background: #0f172a">
+  <div class="title" id="geparkt-titel"></div>
+  <div class="subtitle" id="geparkt-frage"></div>
+  <div class="options">
+    <div class="opt" id="geparkt-ja"></div>
+    <div class="opt" id="geparkt-nein"></div>
+  </div>
 </div>
 
 <!-- Diagnose-Modal (5× Tap auf den Connection-Dot öffnet das) -->
@@ -1431,6 +1465,12 @@ const STATE = {
   // baut den Body ohnehin frisch aus dem aktuellen Stand, und das ist auch
   // richtig so, wenn der Bediener ihn zwischenzeitlich korrigiert hat.
   resultRejected: /** @type {null | string} */ (null),
+  // Der Turnier-PC hat das Ergebnis als ÜBERHOLT gemeldet: In BTP stand für
+  // dieses Spiel schon eines, und es liegt nicht mehr auf dem Feld. Sperrt
+  // Senden und Korrektur (erneut senden bekäme dieselbe Antwort). Nicht
+  // gespeichert — nach einem Reload fragt ein neuer Versuch einfach noch
+  // einmal nach.
+  ueberholt: /** @type {boolean} */ (false),
   // Aufgabe (Retired): Match wurde abgebrochen, Sieger manuell gewählt.
   retired: /** @type {boolean} */ (false),
   // Kampflos (Walkover): Match wurde nicht ausgespielt (z. B. Nichtantritt).
@@ -1651,6 +1691,14 @@ const els = {
   megaphoneBtn: document.getElementById('megaphone-btn'),
   updateHinweis: document.getElementById('update-hinweis'),
   updateJetzt: document.getElementById('update-jetzt'),
+  geparktBand: document.getElementById('geparkt-band'),
+  geparktText: document.getElementById('geparkt-text'),
+  geparktVerwerfen: document.getElementById('geparkt-verwerfen'),
+  geparktModal: document.getElementById('geparkt-modal'),
+  geparktTitel: document.getElementById('geparkt-titel'),
+  geparktFrage: document.getElementById('geparkt-frage'),
+  geparktJa: document.getElementById('geparkt-ja'),
+  geparktNein: document.getElementById('geparkt-nein'),
   megaphoneModal: document.getElementById('megaphone-modal'),
   megaphoneTitle: document.getElementById('megaphone-title'),
   megaphoneSubtitle: document.getElementById('megaphone-subtitle'),
@@ -1743,6 +1791,16 @@ function connect() {
     // Greift nur, wenn ein Match läuft (sonst No-Op).
     sendScoreUpdate();
     persistState();
+    // Geparkte Ergebnisse bei jeder Neuverbindung sofort erneut zustellen —
+    // mit Mindestabstand, damit eine flatternde Verbindung den Turnier-PC
+    // nicht mit Wiederholungen eindeckt.
+    // Drei Sekunden später: Bis dahin hat `match_assigned` gesagt, welches
+    // Spiel auf dem Feld liegt — für dessen Ergebnis wird gefragt, nicht
+    // still gesendet.
+    if (GEPARKT.length && Date.now() - geparktZuletztMs >= 10000) {
+      geparktZuletztMs = Date.now();
+      setTimeout(pruefeGeparkte, 3000);
+    }
     // Verlauf komplett nachziehen: Offline gezählte Ballwechsel haben den
     // Host nie erreicht — der Resync ersetzt seinen Stand (AK-2/AK-14).
     sendRallySync();
@@ -1765,7 +1823,9 @@ function connect() {
         // Geräte zwischen zwei Spielen, und niemand muss etwas tun. Läuft ein
         // Spiel, wird nur der Hinweis gezeigt: Ein Neuladen mitten im Zählen
         // wäre störend, auch wenn der Stand gesichert ist.
-        if (!STATE.match && !STATE.pendingResult) {
+        // Ein geparktes Ergebnis zählt wie ein offenes: Ohne nutzbaren
+        // Speicher überlebte es das Neuladen nicht.
+        if (!STATE.match && !STATE.pendingResult && (!GEPARKT.length || SPEICHER_GEHT)) {
           neuLaden(msg.marke);
           return;
         }
@@ -1786,7 +1846,7 @@ function connect() {
       // Spielstand noch die Geräte-Kennung das Neuladen. Dann gilt die
       // Zusage „der Stand geht nicht verloren" nicht — also nur der Hinweis,
       // und die Entscheidung fällt jemand am Gerät.
-      if ((STATE.match || STATE.pendingResult) && !SPEICHER_GEHT) {
+      if ((STATE.match || STATE.pendingResult || GEPARKT.length) && !SPEICHER_GEHT) {
         tlog('warn', 'reload_befehl_vertagt', { grund: 'kein_speicher' });
         neueFassungMarke = msg.marke || '';
         render();
@@ -2697,6 +2757,326 @@ function renderEinspielzeit() {
 // der User-Tap auf den Setup-Modal eh interaktiv läuft.
 const PERSIST_KEY = `badhub.tablet.state.${COURT_ID}`;
 
+// ── Geparkte Ergebnisse (Spec tablet-stand-robust, Regel C; ADR 0085) ──
+// Inline-Kopie von `src/io/geparkt.mjs` (dort die Begründung; Verhalten
+// verglichen in `scripts/test-inline-kopien.mjs`). Änderungen hier und dort
+// gemeinsam.
+const GEPARKT_MAX = 5;
+const GEPARKT_MAX_SAETZE = 7;
+const GEPARKT_ERSTE_PRUEFUNG_MS = 15000;
+const GEPARKT_TAKT_MS = 60000;
+const GEPARKT_KARENZ_MS = 4000;
+function geparktGueltig(e) {
+  return !!e && typeof e === 'object' && !Array.isArray(e)
+    && !!e.auftrag && typeof e.auftrag === 'object' && !Array.isArray(e.auftrag)
+    && typeof e.auftrag.matchId === 'number' && isFinite(e.auftrag.matchId)
+    && Array.isArray(e.auftrag.sets) && e.auftrag.sets.length <= GEPARKT_MAX_SAETZE;
+}
+function geparktLaden(roh) {
+  var liste;
+  try { liste = JSON.parse(roh); } catch (e) { return []; }
+  if (!Array.isArray(liste)) return [];
+  var aus = [];
+  for (var i = 0; i < liste.length; i++) {
+    if (!geparktGueltig(liste[i])) continue;
+    aus = aufloesen(aus, liste[i].auftrag.matchId);
+    aus.push(liste[i]);
+  }
+  return aus.slice(-GEPARKT_MAX);
+}
+function mussParken(auftrag, matchId) {
+  return !!auftrag && typeof auftrag === 'object' && auftrag.matchId !== matchId;
+}
+function parken(liste, auftrag, matchNr, jetztMs) {
+  var aus = aufloesen(liste, auftrag.matchId);
+  aus.push({
+    auftrag: auftrag,
+    matchNr: typeof matchNr === 'number' || typeof matchNr === 'string' ? matchNr : null,
+    seitMs: jetztMs,
+  });
+  return aus.slice(-GEPARKT_MAX);
+}
+function aufloesen(liste, matchId) {
+  var aus = [];
+  for (var i = 0; i < liste.length; i++) {
+    if (liste[i].auftrag.matchId !== matchId) aus.push(liste[i]);
+  }
+  return aus;
+}
+function geparktFuer(liste, matchId) {
+  if (matchId == null) return null;
+  for (var i = 0; i < liste.length; i++) {
+    if (liste[i].auftrag.matchId === matchId) return liste[i];
+  }
+  return null;
+}
+function zuPruefen(liste, aktuellesMatchId) {
+  var aus = [];
+  for (var i = 0; i < liste.length; i++) {
+    var e = liste[i];
+    if (e.freigegeben === true || aktuellesMatchId == null || e.auftrag.matchId !== aktuellesMatchId) aus.push(e);
+  }
+  return aus;
+}
+function freigeben(liste, matchId) {
+  var aus = [];
+  for (var i = 0; i < liste.length; i++) {
+    var e = liste[i];
+    aus.push(e.auftrag.matchId === matchId
+      ? { auftrag: e.auftrag, matchNr: e.matchNr, seitMs: e.seitMs, freigegeben: true }
+      : e);
+  }
+  return aus;
+}
+function geparktSichtbar(liste, jetztMs) {
+  var aus = [];
+  for (var i = 0; i < liste.length; i++) {
+    var seit = liste[i].seitMs;
+    if (typeof seit !== 'number' || seit <= jetztMs - GEPARKT_KARENZ_MS) aus.push(liste[i]);
+  }
+  return aus;
+}
+function naechstePruefungMs(schonGeprueft) {
+  return schonGeprueft ? GEPARKT_TAKT_MS : GEPARKT_ERSTE_PRUEFUNG_MS;
+}
+function saetzeText(auftrag) {
+  var teile = [];
+  var sets = auftrag && Array.isArray(auftrag.sets) ? auftrag.sets : [];
+  for (var i = 0; i < sets.length; i++) {
+    var s = sets[i];
+    if (s && typeof s.a === 'number' && typeof s.b === 'number') teile.push(s.a + ':' + s.b);
+  }
+  if (auftrag && auftrag.walkover) return 'kampflos';
+  if (auftrag && auftrag.retired) teile.push('Aufgabe');
+  return teile.length ? teile.join(', ') : 'ohne Sätze';
+}
+function spielName(e) {
+  return e.matchNr != null && e.matchNr !== '' ? 'Spiel Nr. ' + e.matchNr : 'einem früheren Spiel';
+}
+function bandText(liste) {
+  if (!liste.length) return '';
+  var e = liste[0];
+  var mehr = liste.length > 1 ? ' (+' + (liste.length - 1) + ' weitere)' : '';
+  return 'Ergebnis von ' + spielName(e) + ' (' + saetzeText(e.auftrag)
+    + ') nicht zugestellt — Turnierleitung informieren' + mehr;
+}
+function frageText(e) {
+  return 'Für dieses Spiel liegt ein nicht zugestelltes Ergebnis vor (' + saetzeText(e.auftrag) + ').';
+}
+function verwerfenText(e) {
+  return 'Ergebnis von ' + spielName(e) + ' (' + saetzeText(e.auftrag)
+    + ') wirklich verwerfen? Es steht dann nicht in BTP.';
+}
+
+// Eigener Schlüssel je Feld: Die Liste überlebt das Leeren des Spielstands
+// (`clearPersistedState`) und reist NICHT im gespiegelten Zustand.
+const GEPARKT_KEY = `badhub.tablet.geparkt.${COURT_ID}`;
+let GEPARKT = geparktLesen();
+let geparktTimer = null;
+let geparktGeprueft = false;
+let geparktLaeuft = false;
+// Beginn des letzten Prüf-Durchgangs (Mindestabstand bei Neuverbindung).
+let geparktZuletztMs = 0;
+// Kurze Entwarnung im Band („… ist zugestellt").
+let geparktMeldung = '';
+let geparktMeldungTimer = null;
+// Zweite Abfrage vor dem Verwerfen: Match-ID des Eintrags, sonst null.
+let geparktVerwerfenFrage = null;
+let geparktKarenzTimer = null;
+
+function geparktLesen() {
+  try { return geparktLaden(localStorage.getItem(GEPARKT_KEY)); } catch { return []; }
+}
+
+function geparktSichern() {
+  try {
+    if (GEPARKT.length) localStorage.setItem(GEPARKT_KEY, JSON.stringify(GEPARKT));
+    else localStorage.removeItem(GEPARKT_KEY);
+  } catch (e) {
+    // Ohne Speicher lebt die Liste nur bis zum Neuladen — deshalb lädt die
+    // Seite dann nicht von selbst neu (siehe Versionsabgleich).
+    tlog('warn', 'geparkt_speicher_fehler', { fehler: String(e) });
+  }
+}
+
+/** Parkt den offenen Sendeauftrag, wenn er NICHT zum Spiel `neuMatchId`
+ *  gehört (`null` = Feld wird leer). Danach ist `pendingResult` frei — das
+ *  Folgespiel kann sein Ergebnis senden. Liefert true, wenn geparkt wurde. */
+function parkeFremdenAuftrag(neuMatchId) {
+  const pr = STATE.pendingResult;
+  if (!mussParken(pr, neuMatchId)) return false;
+  if (resultRetryTimer) { clearTimeout(resultRetryTimer); resultRetryTimer = null; }
+  const nr = STATE.match && STATE.match.matchId === pr.matchId ? STATE.match.matchNr : null;
+  const vorher = GEPARKT;
+  GEPARKT = parken(GEPARKT, pr, nr, Date.now());
+  // Am Deckel fällt der älteste Eintrag heraus — nie still.
+  const verdraengt = vorher.filter((e) => e.auftrag.matchId !== pr.matchId && !geparktFuer(GEPARKT, e.auftrag.matchId));
+  if (verdraengt.length) tlog('error', 'geparkt_deckel', { matchIds: verdraengt.map((e) => e.auftrag.matchId) });
+  STATE.pendingResult = null;
+  geparktSichern();
+  // Nur Kennzahlen ins Log — keine Sätze.
+  tlog('warn', 'ergebnis_geparkt', { matchId: pr.matchId, anzahl: GEPARKT.length });
+  geparktGeprueft = false;
+  planeGeparktPruefung(neuMatchId);
+  // Nach der Karenz neu zeichnen — erst dann darf das Band erscheinen.
+  if (geparktKarenzTimer) clearTimeout(geparktKarenzTimer);
+  geparktKarenzTimer = setTimeout(() => { geparktKarenzTimer = null; render(); }, GEPARKT_KARENZ_MS + 50);
+  return true;
+}
+
+function geparktEntfernen(matchId, grund) {
+  if (!geparktFuer(GEPARKT, matchId)) return false;
+  GEPARKT = aufloesen(GEPARKT, matchId);
+  geparktSichern();
+  tlog('info', 'geparkt_aufgeloest', { matchId, grund });
+  if (geparktVerwerfenFrage === matchId) geparktVerwerfenFrage = null;
+  return true;
+}
+
+function zeigeGeparktMeldung(text) {
+  geparktMeldung = text;
+  if (geparktMeldungTimer) clearTimeout(geparktMeldungTimer);
+  geparktMeldungTimer = setTimeout(() => { geparktMeldung = ''; geparktMeldungTimer = null; render(); }, 8000);
+}
+
+/** Antwort des Turnier-PCs auf ein geparktes Ergebnis verbuchen. `ok` und
+ *  „überholt" lösen den Eintrag auf; alles andere lässt ihn stehen. */
+function geparktAntwort(eintrag, schritt) {
+  if (schritt.art !== 'ok' && schritt.art !== 'ueberholt') return false;
+  // Nur den Eintrag auflösen, der gefragt hat — inzwischen kann für
+  // dasselbe Spiel ein neuerer geparkt sein.
+  const jetzt = geparktFuer(GEPARKT, eintrag.auftrag.matchId);
+  if (!jetzt || jetzt.auftrag !== eintrag.auftrag) return false;
+  const warSichtbar = geparktSichtbar([jetzt], Date.now()).length > 0;
+  geparktEntfernen(eintrag.auftrag.matchId, schritt.art);
+  // Was nie zu sehen war (Karenz), braucht auch keine Entwarnung.
+  if (warSichtbar) {
+    zeigeGeparktMeldung('Ergebnis von ' + spielName(eintrag)
+      + (schritt.art === 'ok' ? ' ist zugestellt.' : ' nicht mehr nötig — in BTP steht schon eines.'));
+  }
+  return true;
+}
+
+/** Plant die nächste Hintergrund-Prüfung. `aufDemFeld` nennt das Spiel, das
+ *  gleich auf dem Feld liegt — beim Spielwechsel ist `STATE.match` noch das
+ *  alte, und dessen Ergebnis soll ja gerade geprüft werden. */
+function planeGeparktPruefung(aufDemFeld) {
+  if (geparktTimer) { clearTimeout(geparktTimer); geparktTimer = null; }
+  const feld = aufDemFeld !== undefined ? aufDemFeld : (STATE.match ? STATE.match.matchId : null);
+  if (!zuPruefen(GEPARKT, feld).length) return;
+  geparktTimer = setTimeout(pruefeGeparkte, naechstePruefungMs(geparktGeprueft));
+}
+
+/** Schickt EIN geparktes Ergebnis an den Turnier-PC und liefert dessen
+ *  Urteil (`naechsterSchritt`); ohne verwertbare Antwort „wiederholen". */
+async function sendeGeparktes(auftrag) {
+  const ac = new AbortController();
+  const abortTimer = setTimeout(() => ac.abort(), RESULT_ABORT_MS);
+  try {
+    const res = await fetch(BASE_PATH + '/result', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(auftrag),
+      signal: ac.signal,
+    });
+    if (!res.ok) return naechsterSchritt(null);
+    return naechsterSchritt(await res.json().catch(() => null));
+  } catch {
+    return naechsterSchritt(null);
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
+
+/** Hintergrund-Prüfung: stellt jedes geparkte Ergebnis erneut zu — AUSSER
+ *  dem des Spiels, das gerade auf dem Feld liegt (dafür wird gefragt). */
+async function pruefeGeparkte() {
+  if (geparktTimer) { clearTimeout(geparktTimer); geparktTimer = null; }
+  if (geparktLaeuft) return;
+  geparktLaeuft = true;
+  geparktZuletztMs = Date.now();
+  try {
+    const liste = zuPruefen(GEPARKT, STATE.match ? STATE.match.matchId : null);
+    for (const eintrag of liste) {
+      const schritt = await sendeGeparktes(eintrag.auftrag);
+      // Während des Wartens kann das Spiel aufs Feld zurückgekommen sein —
+      // dann entscheidet der Bediener, nicht diese Antwort … außer sie
+      // löst den Eintrag ohnehin auf.
+      geparktAntwort(eintrag, schritt);
+    }
+  } finally {
+    geparktLaeuft = false;
+    geparktGeprueft = true;
+    planeGeparktPruefung();
+    render();
+  }
+}
+
+/** Das Spiel dieses Felds ist in BTP fest — ein dafür geparktes Ergebnis
+ *  ist erledigt (wie `sendeauftragBeiFinalisierungLoslassen`). */
+function geparktBeiFinalisierungAufloesen() {
+  if (!STATE.finalized || !STATE.match) return false;
+  return geparktEntfernen(STATE.match.matchId, 'finalisiert');
+}
+
+/** Der Eintrag, zu dem das Tablet gerade FRAGEN muss: Das geparkte Spiel
+ *  liegt wieder auf diesem Feld. Sonst null. */
+function geparktRueckkehr() {
+  if (!STATE.match || STATE.finalized || STATE.locked || STATE.occupied) return null;
+  const eintrag = geparktFuer(GEPARKT, STATE.match.matchId);
+  // Schon mit „Jetzt senden" beantwortet → nicht noch einmal fragen.
+  return eintrag && !eintrag.freigegeben ? eintrag : null;
+}
+
+/** „Jetzt senden" in der Rückkehr-Abfrage. */
+function geparktJetztSenden() {
+  const eintrag = geparktRueckkehr();
+  if (!eintrag) return;
+  // Der Eintrag bleibt geparkt und wird nur FREIGEGEBEN: Im Sendeauftrag
+  // des laufenden Spiels (`pendingResult`) sperrte er dessen eigenes
+  // Ergebnis, und eine Absage bliebe außerhalb der Beendet-Ansicht
+  // unsichtbar. So steht das Band, bis der Turnier-PC annimmt.
+  GEPARKT = freigeben(GEPARKT, eintrag.auftrag.matchId);
+  geparktSichern();
+  tlog('info', 'geparkt_jetzt_senden', { matchId: eintrag.auftrag.matchId });
+  render();
+  planeGeparktPruefung();
+  pruefeGeparkte();
+}
+
+function geparktVerwerfen(matchId) {
+  geparktEntfernen(matchId, 'verworfen');
+  planeGeparktPruefung();
+  render();
+  uploadTabletLog();
+}
+
+function renderGeparkt() {
+  if (!els.geparktBand) return;
+  const sichtbar = geparktSichtbar(GEPARKT, Date.now());
+  const text = geparktMeldung || bandText(sichtbar);
+  els.geparktBand.style.display = text ? 'flex' : 'none';
+  els.geparktText.textContent = text;
+  // Die Entwarnung ist grün und hat keinen Knopf.
+  els.geparktBand.style.background = geparktMeldung ? '#22c55e' : '#f59e0b';
+  els.geparktVerwerfen.style.display = geparktMeldung || !sichtbar.length ? 'none' : '';
+  // Abfrage: Verwerfen (zweite Stufe) hat Vorrang vor der Rückkehr-Frage.
+  const zuVerwerfen = geparktVerwerfenFrage != null ? geparktFuer(GEPARKT, geparktVerwerfenFrage) : null;
+  const rueckkehr = zuVerwerfen ? null : geparktRueckkehr();
+  if (zuVerwerfen) {
+    els.geparktTitel.textContent = 'Ergebnis verwerfen?';
+    els.geparktFrage.textContent = verwerfenText(zuVerwerfen);
+    els.geparktJa.textContent = 'Ja, verwerfen';
+    els.geparktNein.textContent = 'Abbrechen';
+  } else if (rueckkehr) {
+    els.geparktTitel.textContent = 'Nicht zugestelltes Ergebnis';
+    els.geparktFrage.textContent = frageText(rueckkehr);
+    els.geparktJa.textContent = 'Jetzt senden';
+    els.geparktNein.textContent = 'Verwerfen';
+  }
+  els.geparktModal.classList.toggle('visible', !!(zuVerwerfen || rueckkehr));
+}
+
 // Welcher Spieler schlägt gerade auf? BWF-Doppelregel: Beim geraden
 // Punktestand des aufschlagenden Teams schlägt der Spieler im rechten
 // Aufschlagfeld auf, bei ungeradem der im linken. `positions` hält pro
@@ -2903,7 +3283,11 @@ function applyPersistedState(p) {
     STATE.pause = null;
   }
   STATE.submittedOk = !!p.submittedOk;
-  STATE.pendingResult = p.pendingResult ?? null;
+  // Ein eigener offener Auftrag darf beim Übernehmen nicht verschwinden:
+  // Gehört er zu einem anderen Spiel als dem übernommenen, wird er geparkt;
+  // gehört er zum selben und bringt der fremde Stand keinen mit, bleibt er.
+  parkeFremdenAuftrag(p.match ? p.match.matchId : null);
+  STATE.pendingResult = p.pendingResult ?? STATE.pendingResult ?? null;
   // Eine dauerhafte Ablehnung überlebt den Neustart der Seite: Sie ist der
   // einzige Hinweis darauf, dass hier noch etwas zu tun ist.
   STATE.resultRejected = typeof p.resultRejected === 'string' ? p.resultRejected : null;
@@ -2929,6 +3313,9 @@ function applyPersistedState(p) {
   // Lief die Satzpause während eines Reloads/einer Übernahme ab, wird endBreak
   // nie durchlaufen → die fällige Per-Satz-Aufschlagwahl hier nachholen.
   maybeOpenServeReprompt();
+  // Ein geerbter Auftrag für ein ANDERES Spiel (alter Speicherstand, fremdes
+  // Gerät) darf dieses Spiel nicht blockieren.
+  parkeFremdenAuftrag(STATE.match ? STATE.match.matchId : null);
 }
 
 function restorePersistedState() {
@@ -3002,6 +3389,8 @@ function beiMatchAssigned(msg) {
     // BTP hat ein Ergebnis, egal ob unseres oder ein von Hand
     // eingetragenes. Stehen bliebe er sonst bis zum nächsten Match.
     sendeauftragBeiFinalisierungLoslassen();
+    // Dasselbe für ein geparktes Ergebnis dieses Spiels.
+    geparktBeiFinalisierungAufloesen();
     render();
     return;
   }
@@ -3018,6 +3407,12 @@ function loadMatch(match) {
   // mit derselben matchId schickt, behalten wir unseren bestehenden Stand
   // (sonst würde nach jedem WS-Drop der Zähl-Stand auf 0:0 zurückspringen).
   if (STATE.match && STATE.match.matchId === match.matchId) return;
+  // Ein noch offenes Ergebnis des ALTEN Spiels parken (Regel C der Spec
+  // tablet-stand-robust): Es wird im Hintergrund weiter zugestellt und
+  // bleibt sichtbar, blockiert aber nicht das Ergebnis dieses Spiels.
+  // VOR dem Überschreiben von STATE.match — die Spielnummer kommt von dort.
+  parkeFremdenAuftrag(match.matchId);
+  STATE.ueberholt = false;
   // Neues Spiel → eigener Zettel. Die Ereignisse hängen am Match, nicht
   // am Gerät.
   STATE.events = [];
@@ -3056,6 +3451,9 @@ function loadMatch(match) {
   STATE.rallyLog = null; // neues Match = neuer Verlauf
   sendAlert();
   persistState();
+  // Welche geparkten Ergebnisse geprüft werden dürfen, hängt am Spiel auf
+  // dem Feld — nach jedem Wechsel neu planen.
+  planeGeparktPruefung();
   render();
 }
 
@@ -3071,6 +3469,10 @@ function chooseSide(teamKeyOnLeft) {
 }
 
 function clearMatch() {
+  // Offenes Ergebnis parken, bevor der Spielstand verschwindet — es liegt
+  // dann unter eigenem Schlüssel und überlebt `clearPersistedState`.
+  parkeFremdenAuftrag(null);
+  STATE.ueberholt = false;
   STATE.match = null;
   STATE.setsCompleted = [];
   STATE.currentSet = { left: 0, right: 0 };
@@ -3107,6 +3509,7 @@ function clearMatch() {
   STATE.rallyLog = null;
   sendAlert();
   clearPersistedState();
+  planeGeparktPruefung();
   render();
 }
 
@@ -4578,6 +4981,7 @@ function reopen() {
   STATE.submittedOk = false;
   STATE.pendingResult = null;
   STATE.resultRejected = null;
+  STATE.ueberholt = false;
   STATE.retired = false;
   STATE.walkover = false;
   STATE.cascadeWalkover = false;
@@ -4615,7 +5019,11 @@ function submit() {
   // finalisiert (per Hand fertig eingegeben), sendet das Tablet KEIN Ergebnis
   // — es überbügelt das Hand-Ergebnis nicht.
   if (STATE.finalized) { tlog('info', 'submit_suppressed_finalized', { matchId: STATE.match?.matchId }); return; }
-  if (!STATE.match || !STATE.teamOnSide || STATE.pendingResult) return;
+  if (!STATE.match || !STATE.teamOnSide) return;
+  // Geprüft wird nur der Auftrag DIESES Spiels: Ein Auftrag eines anderen
+  // (alter Speicherstand) wird geparkt statt den Knopf still zu sperren.
+  parkeFremdenAuftrag(STATE.match.matchId);
+  if (STATE.pendingResult) return;
   // Bei Aufgabe (retired) UND Kampflos (walkover) muss der Sieger feststehen.
   if ((STATE.retired || STATE.walkover) && !STATE.retiredWinner) return;
   // Sets in Team-A/B-Koordinaten umrechnen (Director-DB kennt nur A/B).
@@ -4638,6 +5046,7 @@ function submit() {
   STATE.submittedOk = false;
   // Neuer Versuch, neue Lage — die alte Absage darf nicht stehen bleiben.
   STATE.resultRejected = null;
+  STATE.ueberholt = false;
   tlog('info', 'submit_start', { matchId: STATE.match.matchId, sets, retired: STATE.retired, walkover: STATE.walkover, cascade: STATE.cascadeWalkover });
   persistState();
   render();
@@ -4702,6 +5111,12 @@ function abschlussLage(z) {
       status: '✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung.',
     };
   }
+  if (s.ueberholt) {
+    return {
+      sendenGesperrt: true, korrekturGesperrt: true,
+      status: '✓ In BTP steht für dieses Spiel schon ein Ergebnis — Korrektur nur über die Turnierleitung.',
+    };
+  }
   if (s.submittedOk) {
     return {
       sendenGesperrt: true, korrekturGesperrt: false,
@@ -4751,6 +5166,7 @@ function naechsterSchritt(antwort) {
   const grund = typeof antwort.error === 'string' && antwort.error.trim()
     ? antwort.error.trim()
     : RESULT_OHNE_GRUND;
+  if (antwort.superseded === true) return { art: 'ueberholt', grund };
   return antwort.permanent === true
     ? { art: 'dauerhaft', grund }
     : { art: 'wiederholen', grund };
@@ -4795,8 +5211,31 @@ async function trySubmitPending() {
     // anderen gesetzt haben. Eine späte Antwort dürfte dann weder
     // `submittedOk` aufs falsche Spiel setzen noch eine alte Absage zeigen
     // (Review-Fund 15.09.2026).
-    if (STATE.pendingResult !== pr) { tlog('info', 'submit_reply_stale', { matchId: pr.matchId }); return; }
     const schritt = naechsterSchritt(data);
+    if (STATE.pendingResult !== pr) {
+      tlog('info', 'submit_reply_stale', { matchId: pr.matchId });
+      // Wurde der Auftrag inzwischen GEPARKT (das `match_cleared` war
+      // schneller als diese Antwort — der Normalfall nach jedem Spiel),
+      // gilt die Antwort dem geparkten Eintrag.
+      const eintrag = geparktFuer(GEPARKT, pr.matchId);
+      if (eintrag && eintrag.auftrag === pr && geparktAntwort(eintrag, schritt)) {
+        planeGeparktPruefung();
+        render();
+      }
+      return;
+    }
+    if (schritt.art === 'ueberholt') {
+      // In BTP steht für dieses Spiel schon ein Ergebnis, und es liegt
+      // nicht mehr auf dem Feld (Regel C). Loslassen — Wiederholen brächte
+      // dieselbe Antwort, und verloren geht nichts, was noch gebraucht wird.
+      STATE.pendingResult = null;
+      STATE.resultRejected = null;
+      STATE.ueberholt = true;
+      tlog('info', 'submit_ueberholt', { matchId: pr.matchId });
+      persistState();
+      render();
+      return;
+    }
     if (schritt.art === 'dauerhaft') {
       // Aufhören. Weitere Versuche mit demselben Payload werden genauso
       // abgelehnt, und die bisherige Meldung („wird wiederholt, bis es
@@ -5190,6 +5629,7 @@ function setPlayerClub(cell, p) {
 
 function render() {
   anordnungAnwenden();
+  renderGeparkt();
   // Setup-Modal hat Priorität
   renderSetupModal();
   renderBreak();
@@ -5313,6 +5753,7 @@ function render() {
     // Sendeversuch still (Feld 11, 12.09.2026: 23-mal).
     const lage = abschlussLage({
       finalized: STATE.finalized,
+      ueberholt: STATE.ueberholt,
       submittedOk: STATE.submittedOk,
       resultRejected: STATE.resultRejected,
       pendingResult: !!STATE.pendingResult,
@@ -6190,6 +6631,28 @@ els.breakAufschlag.addEventListener('click', oeffneAufschlagInPause);
 if (els.updateJetzt) {
   els.updateJetzt.addEventListener('click', () => neuLaden(neueFassungMarke));
 }
+// Geparktes Ergebnis: Verwerfen ist zweistufig — die zweite Abfrage zeigt
+// das Ergebnis. Jeder Bediener darf das (keine PIN): Sonst stünde das Band,
+// bis jemand mit PIN vorbeikommt.
+if (els.geparktVerwerfen) {
+  els.geparktVerwerfen.addEventListener('click', () => {
+    const sichtbar = geparktSichtbar(GEPARKT, Date.now());
+    if (!sichtbar.length) return;
+    geparktVerwerfenFrage = sichtbar[0].auftrag.matchId;
+    render();
+  });
+  els.geparktJa.addEventListener('click', () => {
+    if (geparktVerwerfenFrage != null) { geparktVerwerfen(geparktVerwerfenFrage); return; }
+    geparktJetztSenden();
+  });
+  els.geparktNein.addEventListener('click', () => {
+    if (geparktVerwerfenFrage != null) { geparktVerwerfenFrage = null; render(); return; }
+    // Auch aus der Rückkehr-Frage erst die zweite Abfrage — ein Fehltipp
+    // neben „Jetzt senden" wäre sonst unwiderruflich.
+    const eintrag = geparktRueckkehr();
+    if (eintrag) { geparktVerwerfenFrage = eintrag.auftrag.matchId; render(); }
+  });
+}
 // Korrektur aus der Pause: letzten Punkt zurücknehmen + Pause abbrechen.
 // undo() stellt den Snapshot vor dem auslösenden Punkt wieder her und
 // pusht den Stand an Server/TV (sendScoreUpdate steckt in undo()).
@@ -6336,6 +6799,8 @@ startConnectionWatchdog();
 setupBattery();
 // Hing beim letzten Mal noch ein Ergebnis in der Übermittlung? Weiter damit.
 if (STATE.pendingResult) trySubmitPending();
+// Lag beim letzten Mal noch ein Ergebnis geparkt? Weiter zustellen.
+planeGeparktPruefung();
 
 // Sponsor-Leiste im Kopf (Turnierlogo + als „in Leiste" markierte Werbebilder).
 // BASE_PATH-relativ: LAN vom Host, im Cloud-Modus greift der onerror-Rückfall

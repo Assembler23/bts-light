@@ -3428,6 +3428,34 @@ fn settled_ok(ctx: &ServerCtx, body: &ResultBody, now: u64) -> bool {
         })
 }
 
+/// Text der Absage „überholt" — steht auch am Tablet.
+const UEBERHOLT_TEXT: &str = "Für dieses Spiel steht in BTP schon ein Ergebnis.";
+
+/// Die Absage für ein Ergebnis, dessen Spiel **nicht (mehr) auf dem Feld
+/// liegt** (Spec tablet-stand-robust, Regel C; ADR 0085).
+///
+/// Ist das Spiel in BTP **beendet und hat einen Sieger**, ist das Ergebnis
+/// des Tablets überholt: Es wird nie mehr gebraucht, und kein späterer Poll
+/// kann das ändern. Das Tablet lässt den Auftrag dann los. In jedem anderen
+/// Fall — BTP noch nicht geladen, Spiel ohne Ergebnis vom Feld genommen,
+/// Spiel unbekannt — bleibt es bei der wiederholbaren Absage `sonst`: Dort
+/// kann der nächste Poll die Lage noch auflösen, und ein Ergebnis darf nicht
+/// verloren gehen, nur weil der Turnier-PC gerade wenig weiß.
+///
+/// R5 bleibt gewahrt: Dies ist kein Annahme-Weg. „Überholt" ist nie `ok`.
+fn absage_fuer_altes_spiel(ctx: &ServerCtx, match_id: i64, sonst: &str) -> ResultResponse {
+    let beendet = ctx
+        .tablet
+        .snapshot_match(match_id)
+        .is_some_and(|m| m.status == MatchStatus::Finished && m.winner.is_some());
+    if beendet {
+        tracing::info!("Ergebnis vom Tablet für Match {match_id} ist überholt (BTP hat eines)");
+        ResultResponse::ueberholt(UEBERHOLT_TEXT)
+    } else {
+        ResultResponse::err(sonst)
+    }
+}
+
 pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> ResultResponse {
     // Zeitquelle wie im ganzen Modul (Unix-ms), einmal für den
     // Idempotenz-Check ermittelt.
@@ -3451,7 +3479,7 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
                 body.court_id,
                 body.match_id
             );
-            ResultResponse::err("Kein Match auf diesem Court.")
+            absage_fuer_altes_spiel(ctx, body.match_id, "Kein Match auf diesem Court.")
         };
     };
     if m.id != body.match_id {
@@ -3468,7 +3496,11 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
                 m.id,
                 body.match_id
             );
-            ResultResponse::err("Das Match auf dem Court hat inzwischen gewechselt.")
+            absage_fuer_altes_spiel(
+                ctx,
+                body.match_id,
+                "Das Match auf dem Court hat inzwischen gewechselt.",
+            )
         };
     }
 
@@ -5957,6 +5989,114 @@ mod tests {
         );
     }
 
+    // ── „Überholt" (Spec tablet-stand-robust, Regel C; AK18–AK21) ──────
+
+    /// Stand: Match 42 ist in BTP beendet (Sieger steht) und liegt nicht
+    /// mehr auf Feld 101; dort liegt `auf_dem_feld` (oder nichts).
+    fn ctx_beendet(auf_dem_feld: Option<i64>, sieger: Option<u8>) -> ServerCtx {
+        let ctx = make_ctx(1);
+        let mut alt = match_on_court();
+        alt.status = MatchStatus::Finished;
+        alt.court = None;
+        alt.court_id = None;
+        alt.winner = sieger;
+        let mut matches = vec![alt];
+        if let Some(id) = auf_dem_feld {
+            let mut neu = match_on_court();
+            neu.id = id;
+            matches.push(neu);
+        }
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches,
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        ctx
+    }
+
+    #[tokio::test]
+    async fn process_result_ueberholt_wenn_match_beendet_und_nicht_auf_dem_feld() {
+        // AK18: Hand-Ergebnis in BTP, das Feld ist leer oder trägt schon
+        // das nächste Spiel — in beiden Fällen ist der alte Auftrag überholt.
+        for auf_dem_feld in [None, Some(43)] {
+            let ctx = ctx_beendet(auf_dem_feld, Some(1));
+            let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+            assert!(resp.superseded, "Feld: {auf_dem_feld:?}, {:?}", resp.error);
+            assert_eq!(resp.error.as_deref(), Some(UEBERHOLT_TEXT));
+            assert!(ctx.tablet.btp_retries().is_empty(), "nichts eingereiht");
+        }
+    }
+
+    #[tokio::test]
+    async fn process_result_ueberholt_ist_nie_ok() {
+        let ctx = ctx_beendet(Some(43), Some(2));
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.superseded);
+        assert!(!resp.ok, "kein Annahme-Weg (R5)");
+        assert!(!resp.permanent, "und keine Aussage über den Payload");
+        // Auch ein unspielbarer Payload fürs alte Spiel ist nur überholt —
+        // geprüft wird er gar nicht mehr.
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (13, 8)])).await;
+        assert!(resp.superseded && !resp.ok && !resp.permanent);
+    }
+
+    #[tokio::test]
+    async fn process_result_nicht_ueberholt_wenn_match_ohne_ergebnis_vom_feld() {
+        // AK19: Das Spiel wurde ohne Ergebnis vom Feld genommen (zurück in
+        // die Warteliste) — das Ergebnis des Tablets wird noch gebraucht.
+        let ctx = ctx_beendet(Some(43), Some(1));
+        let mut snap_matches = vec![match_on_court(), match_on_court()];
+        snap_matches[0].status = MatchStatus::Scheduled;
+        snap_matches[0].court = None;
+        snap_matches[0].court_id = None;
+        snap_matches[1].id = 43;
+        ctx.tablet.set_snapshot(BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: snap_matches,
+            courts: vec!["1".into()],
+            locations: vec![],
+            court_infos: vec![],
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        });
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(!resp.ok && !resp.superseded && !resp.permanent);
+
+        // „Beendet" ohne Sieger (BTP mitten in der Eingabe) reicht nicht.
+        let ctx = ctx_beendet(None, None);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(!resp.ok && !resp.superseded && !resp.permanent);
+
+        // Ein Spiel, das BTP gar nicht kennt, ebenso.
+        let ctx = ctx_beendet(None, Some(1));
+        let mut fremd = body_with(&[(21, 10), (21, 15)]);
+        fremd.match_id = 999;
+        let resp = process_result(&ctx, &fremd).await;
+        assert!(!resp.ok && !resp.superseded && !resp.permanent);
+    }
+
+    #[tokio::test]
+    async fn process_result_wiedereroeffnetes_match_nimmt_korrektur_an() {
+        // AK21: Liegt das Spiel (wieder) auf dem Feld, greift „überholt"
+        // nie — auch wenn BTP noch einen Sieger aus dem ersten Ergebnis
+        // führt. Die Korrektur läuft den normalen Weg.
+        let (port, _recorded) = spawn_mock_btp().await;
+        let mut m = match_on_court();
+        m.winner = Some(1);
+        let ctx = make_ctx_with(port, m);
+        let resp = process_result(&ctx, &body_with(&[(21, 10), (21, 15)])).await;
+        assert!(resp.ok, "{:?}", resp.error);
+        assert!(!resp.superseded);
+    }
+
     #[tokio::test]
     async fn ein_fehlender_snapshot_bleibt_wiederholbar() {
         // Gegenstück: „Kein Match auf diesem Court" hängt am Zustand des
@@ -5981,6 +6121,9 @@ mod tests {
             !resp.permanent,
             "zustandsabhängige Ablehnung bleibt wiederholbar"
         );
+        // AK20: … und auch nicht „überholt" — ein leerer Snapshot weiß
+        // nichts über das Spiel.
+        assert!(!resp.superseded);
     }
 
     /// Nach einem Ergebnis gibt `process_result` das Feld in BTP frei — seit

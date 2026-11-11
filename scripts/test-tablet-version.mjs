@@ -57,14 +57,15 @@ p("Platzhalter für die Seiten-Marke vorhanden", tablet.includes("'__SEITEN_MARK
   );
 
   /** Fährt den Pong-Zweig einmal und meldet, was er getan hat. */
-  function lauf(marke, eigene, state, schonGemerkt = "") {
+  function lauf(marke, eigene, state, schonGemerkt = "", geparkt = [], speicherGeht = true) {
     const wirkung = { geladen: [], gerendert: 0 };
     const f = new Function(
       "msg", "SEITEN_MARKE", "neueFassungMarke", "STATE", "tlog", "neuLaden", "render",
+      "GEPARKT", "SPEICHER_GEHT",
       src,
     );
     f({ type: "pong", marke }, eigene, schonGemerkt, state,
-      () => {}, (m) => wirkung.geladen.push(m), () => { wirkung.gerendert++; });
+      () => {}, (m) => wirkung.geladen.push(m), () => { wirkung.gerendert++; }, geparkt, speicherGeht);
     return wirkung;
   }
 
@@ -84,6 +85,15 @@ p("Platzhalter für die Seiten-Marke vorhanden", tablet.includes("'__SEITEN_MARK
 
   r = lauf("bbb", "aaa", { match: null, pendingResult: { matchId: 1 } });
   p("A4 offenes Ergebnis: lädt NICHT", r.geladen, []);
+
+  // Ein geparktes Ergebnis (Spec tablet-stand-robust, Regel C) überlebt das
+  // Neuladen nur mit nutzbarem Speicher — ohne zählt es wie ein offenes.
+  const geparkt = [{ auftrag: { matchId: 1, sets: [] } }];
+  r = lauf("bbb", "aaa", frei, "", geparkt, true);
+  p("A4b geparktes Ergebnis mit Speicher: lädt (es liegt sicher)", r.geladen, ["bbb"]);
+  r = lauf("bbb", "aaa", frei, "", geparkt, false);
+  p("A4c geparktes Ergebnis ohne Speicher: lädt NICHT", r.geladen, []);
+  p("A4c … und zeigt den Hinweis", r.gerendert, 1);
 
   r = lauf("", "aaa", frei);
   p("A5 alter Server ohne Marke: nichts", r.geladen, []);
@@ -125,13 +135,13 @@ p("Platzhalter für die Seiten-Marke vorhanden", tablet.includes("'__SEITEN_MARK
   );
   const src = roh.replace(/^\s*else /, "");
 
-  function lauf(msg, state, speicherGeht = true) {
+  function lauf(msg, state, speicherGeht = true, geparkt = []) {
     const w = { geladen: [], gerendert: 0 };
     const f = new Function(
       "msg", "STATE", "SPEICHER_GEHT", "neueFassungMarke",
-      "tlog", "neuLaden", "render", src + "\nreturn 'durchgefallen';");
+      "tlog", "neuLaden", "render", "GEPARKT", src + "\nreturn 'durchgefallen';");
     w.durchgefallen = f(msg, state, speicherGeht, "", () => {},
-      (m) => w.geladen.push(m), () => { w.gerendert++; }) === "durchgefallen";
+      (m) => w.geladen.push(m), () => { w.gerendert++; }, geparkt) === "durchgefallen";
     return w;
   }
 
@@ -153,6 +163,13 @@ p("Platzhalter für die Seiten-Marke vorhanden", tablet.includes("'__SEITEN_MARK
 
   r = lauf({ type: "reload", marke: "neu1" }, { match: null, pendingResult: null }, false);
   p("B8 ohne Speicher, aber nichts zu verlieren: lädt", r.geladen, ["neu1"]);
+
+  // Ein geparktes Ergebnis ist ohne Speicher ebenfalls etwas zu Verlierendes.
+  const geparkt = [{ auftrag: { matchId: 1, sets: [] } }];
+  r = lauf({ type: "reload", marke: "neu1" }, { match: null, pendingResult: null }, false, geparkt);
+  p("B9 ohne Speicher + geparktes Ergebnis: lädt NICHT", r.geladen, []);
+  r = lauf({ type: "reload", marke: "neu1" }, { match: null, pendingResult: null }, true, geparkt);
+  p("B9 mit Speicher + geparktes Ergebnis: lädt", r.geladen, ["neu1"]);
 
   r = lauf({ type: "pong", marke: "x" }, spielt);
   p("fremde Nachricht: unberührt", r.geladen, []);

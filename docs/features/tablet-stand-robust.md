@@ -191,8 +191,9 @@ Drei Riegel gegen Rück-Überschreiben:
   mit `superseded=true` („überholt"), wenn das Spiel in BTP beendet ist und einen Sieger
   hat. Die Antwort ist nie `ok` und nie `permanent`. In allen anderen Fällen bleibt die
   bisherige wiederholbare Absage.
-- Das Tablet lässt bei „überholt" den Auftrag los und zeigt kurz „Ergebnis stand schon in
-  BTP".
+- Das Tablet lässt bei „überholt" den Auftrag los und zeigt „In BTP steht für dieses Spiel
+  schon ein Ergebnis" (Wortlaut bei der Umsetzung neutral gefasst: Auch eine abweichende
+  Korrektur für ein geräumtes Spiel bekommt diese Antwort).
 - Wechselt das Spiel auf dem Feld oder wird das Feld geleert, während ein Auftrag offen
   ist, wird er **geparkt**: eigene Liste, eigener Speicher-Schlüssel je Feld (überlebt das
   Leeren des Spielstands, reist nicht im Spiegel). „Ergebnis übermitteln" prüft nur noch den

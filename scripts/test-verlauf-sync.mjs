@@ -50,6 +50,13 @@ function umgebung({ state, fetchAntwort, echtesLoadMatch = false }) {
     sendRallySync: merk("sendRallySync"),
     sendMatchEventSync: merk("sendMatchEventSync"),
     uploadTabletLog: merk("uploadTabletLog"),
+    // Parken (Regel C) ist hier nicht Thema — eigene Prüfung in test-geparkt.mjs.
+    GEPARKT: [],
+    parkeFremdenAuftrag: () => false,
+    geparktFuer: () => null,
+    geparktAntwort: () => false,
+    planeGeparktPruefung: () => {},
+    geparktBeiFinalisierungAufloesen: merk("geparktAufloesen"),
     naechsterSchritt: (data) => (data && data.ok ? { art: "ok" } : { art: "wiederholen", grund: "nein" }),
     fetch: async () => { ruf.push("fetch"); return fetchAntwort(); },
     COURT_ID: 101, COURT_LABEL: "Feld 1", BASE_PATH: "", RESULT_ABORT_MS: 1000, RESULT_RETRY_MS: 60_000,

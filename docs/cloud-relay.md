@@ -229,6 +229,16 @@ wirkungslos. Einzelheiten: [court-monitor.md](court-monitor.md).
    ein Relay-Timeout bleibt weiterhin **wiederholbar** — er sagt nichts über
    das Ergebnis aus.
 
+   Seit v0.9.376 trägt sie außerdem **`superseded`** („überholt", Spec
+   [tablet-stand-robust](features/tablet-stand-robust.md), Regel C): Das
+   Spiel liegt nicht mehr auf dem Feld und ist in BTP beendet. Wie
+   `permanent` reicht der Relay das Feld nur durch; es ist nie `ok` und nie
+   `permanent`, und der Normalfall `false` bleibt von der Leitung. Ein alter
+   Relay lässt das Feld fallen — das Tablet liest dann eine wiederholbare
+   Absage und parkt den Auftrag (sicherer Rückfall). Deshalb Relay vor App
+   (der main-Merge deployt ihn sofort). Bedeutung am Tablet:
+   [tablet.md](tablet.md) („Überholt und geparkt").
+
 **Aufgerufene Spiele in die ferne Halle (Cluster C Stufe 2, v0.9.154):**
 Der Host pusht seine in Vorbereitung gerufenen Spiele als
 `HostFrame::Prepared` (nur bei Änderung, Fingerabdruck) an den Relay; der

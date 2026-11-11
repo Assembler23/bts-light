@@ -90,6 +90,24 @@ ok(
   "wiederholen",
 );
 
+// ── Überholt (Spec tablet-stand-robust, Regel C) ────────────────────────
+ok(
+  "überholt: loslassen",
+  art({ ok: false, superseded: true, error: "Für dieses Spiel steht in BTP schon ein Ergebnis." }),
+  "ueberholt",
+);
+ok(
+  "überholt trägt den Grund",
+  grund({ ok: false, superseded: true, error: "steht schon da" }),
+  "steht schon da",
+);
+ok("überholt ohne Grund", grund({ ok: false, superseded: true }), OHNE_GRUND);
+ok("angenommen schlägt überholt", art({ ok: true, superseded: true }), "ok");
+ok("überholt schlägt dauerhaft", art({ ok: false, superseded: true, permanent: true }), "ueberholt");
+ok("superseded:false ist nichts Besonderes", art({ ok: false, superseded: false }), "wiederholen");
+ok("superseded als 1 zählt nicht als Ja", art({ ok: false, superseded: 1 }), "wiederholen");
+ok("alter Host ohne das Feld: weiter wiederholen (das Tablet parkt)", art({ ok: false, error: "Kein Match auf diesem Court." }), "wiederholen");
+
 if (failures) {
   console.error(`\n${failures} Test(s) fehlgeschlagen.`);
   process.exit(1);

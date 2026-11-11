@@ -16,6 +16,9 @@ import * as ph from "../src/io/pushHealth.mjs";
 import * as lm from "../src/io/lobbyMeetingpoint.mjs";
 import * as pf from "../src/io/pinFreigabe.mjs";
 import * as us from "../src/io/undoStand.mjs";
+import * as gp from "../src/io/geparkt.mjs";
+import * as rr from "../src/io/resultRetry.mjs";
+import * as aa from "../src/io/abschlussAnsicht.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -212,6 +215,81 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
   const ersteZuweisung = app.search(/\n\s*STATE\.\w+ = /);
   ok("tablet.html: geladene Stände werden normalisiert — vor der ersten Zuweisung",
     hn > 0 && ersteZuweisung > hn && app.includes("STATE.history = historyNeu;") && app.includes("STATE.rallyLog = verlaufNeu;"), true);
+}
+
+// ── Geparkte Ergebnisse, Retry-Regel, Beendet-Ansicht (Spec tablet-stand-robust, Regel C) ──
+// Eine abweichende Kopie parkte nicht (das Folgespiel bliebe blockiert), löste
+// zu früh auf (ein Ergebnis ginge verloren) oder läse „überholt" als Annahme.
+{
+  const text = seite("tablet.html");
+  const namen = ["geparktGueltig", "geparktLaden", "mussParken", "parken", "aufloesen", "geparktFuer", "zuPruefen", "freigeben",
+    "geparktSichtbar", "naechstePruefungMs", "saetzeText", "spielName", "bandText", "frageText", "verwerfenText"];
+  const quellen = namen.map((n) => funktion(text, n));
+  ok("tablet.html: Park-Kopien vorhanden", quellen.every(Boolean), true);
+  const KONST = ["GEPARKT_MAX", "GEPARKT_MAX_SAETZE", "GEPARKT_ERSTE_PRUEFUNG_MS", "GEPARKT_TAKT_MS", "GEPARKT_KARENZ_MS"];
+  const werte = KONST.map((k) => { const m = text.match(new RegExp("const " + k + " = (\\d+);")); return m ? Number(m[1]) : null; });
+  ok("tablet.html: Park-Konstanten wie Modul", werte, KONST.map((k) => gp[k]));
+  if (quellen.every(Boolean) && werte.every((w) => w != null)) {
+    // eslint-disable-next-line no-new-func
+    const f = new Function(KONST.map((k, i) => `const ${k} = ${werte[i]};`).join("\n") + "\n" + quellen.join("\n")
+      + "\nreturn { " + namen.join(", ") + " };")();
+    const A = (id, extra) => ({ matchId: id, sets: [{ a: 21, b: 10 }, { a: 5, b: 2 }], ...extra });
+    const AUFTRAEGE = [A(7), A(8, { retired: true }), A(9, { walkover: true, sets: [] }), { matchId: 3, sets: [null, { a: "x" }] }];
+    const EINTRAEGE = AUFTRAEGE.map((a, i) => ({ auftrag: a, matchNr: i % 2 ? null : 10 + i, seitMs: 1000 * i }));
+    const LISTEN = [[], EINTRAEGE.slice(0, 1), EINTRAEGE.slice(0, 2), EINTRAEGE,
+      Array.from({ length: 8 }, (_, i) => ({ auftrag: A(100 + i), matchNr: i, seitMs: i }))];
+    const SCHMUTZ = [null, 3, "x", {}, [], { auftrag: null }, { auftrag: [] }, { auftrag: { matchId: "7", sets: [] } },
+      { auftrag: { matchId: 7 } }, { auftrag: { matchId: NaN, sets: [] } }, EINTRAEGE[0],
+      { auftrag: { matchId: 7, sets: Array(7).fill(null) } }, { auftrag: { matchId: 7, sets: Array(8).fill(null) } }];
+    const ROH = [null, undefined, "", "kaputt{", "3", '{"a":1}', JSON.stringify(SCHMUTZ), JSON.stringify(EINTRAEGE),
+      JSON.stringify([...EINTRAEGE, ...EINTRAEGE]), JSON.stringify(LISTEN[4])];
+    const IDS = [7, 8, 99, null, undefined, 100];
+    const gleich = (name, faelle, ruf) =>
+      ok("tablet.html: " + name + " wie Modul", faelle.map((x) => ruf(f, x)), faelle.map((x) => ruf(gp, x)));
+    gleich("geparktGueltig", SCHMUTZ, (m, x) => m.geparktGueltig(x));
+    gleich("geparktLaden", ROH, (m, x) => m.geparktLaden(x));
+    gleich("mussParken", [null, undefined, 3, ...AUFTRAEGE].flatMap((a) => IDS.map((i) => [a, i])), (m, [a, i]) => m.mussParken(a, i));
+    gleich("parken", LISTEN.flatMap((l) => AUFTRAEGE.map((a) => [l, a])).flatMap((x) => [[...x, 12], [...x, "A3"], [...x, undefined], [...x, {}]]),
+      (m, [l, a, nr]) => m.parken(l, a, nr, 5000));
+    const li = LISTEN.flatMap((l) => IDS.map((i) => [l, i]));
+    gleich("aufloesen", li, (m, [l, i]) => m.aufloesen(l, i));
+    gleich("geparktFuer", li, (m, [l, i]) => m.geparktFuer(l, i));
+    gleich("zuPruefen", li, (m, [l, i]) => m.zuPruefen(l, i));
+    gleich("freigeben", li, (m, [l, i]) => m.freigeben(l, i));
+    gleich("zuPruefen nach Freigabe", li, (m, [l, i]) => m.zuPruefen(m.freigeben(l, i), i));
+    gleich("geparktSichtbar", LISTEN.flatMap((l) => [0, 3999, 4000, 5500, 1e9].map((j) => [l, j])).concat([[[{ auftrag: A(1) }], 0]]),
+      (m, [l, j]) => m.geparktSichtbar(l, j));
+    gleich("naechstePruefungMs", [true, false, 0, 1, undefined], (m, x) => m.naechstePruefungMs(x));
+    gleich("saetzeText", [...AUFTRAEGE, {}, null, { sets: 3 }], (m, x) => m.saetzeText(x));
+    gleich("spielName", [...EINTRAEGE, { matchNr: "" }, { matchNr: 0 }, {}], (m, x) => m.spielName(x));
+    gleich("bandText", LISTEN, (m, x) => m.bandText(x));
+    gleich("frageText", EINTRAEGE, (m, x) => m.frageText(x));
+    gleich("verwerfenText", EINTRAEGE, (m, x) => m.verwerfenText(x));
+  }
+
+  // Retry-Regel: jede Kombination der drei Felder plus Unsinn.
+  const ns = funktion(text, "naechsterSchritt");
+  ok("tablet.html: naechsterSchritt vorhanden", !!ns, true);
+  if (ns) {
+    // eslint-disable-next-line no-new-func
+    const kopie = new Function("RESULT_OHNE_GRUND", ns + "\nreturn naechsterSchritt;")(rr.OHNE_GRUND);
+    const W = [true, false, 1, undefined];
+    const ANTW = [null, undefined, "x", 0, {}, { error: "  " }, { error: 42 }]
+      .concat(W.flatMap((o) => W.flatMap((p) => W.map((s) => ({ ok: o, permanent: p, superseded: s, error: " Grund " })))));
+    ok("tablet.html: naechsterSchritt wie Modul", ANTW.map(kopie), ANTW.map(rr.naechsterSchritt));
+  }
+
+  // Beendet-Ansicht: alle Lagen.
+  const al = funktion(text, "abschlussLage");
+  ok("tablet.html: abschlussLage vorhanden", !!al, true);
+  if (al) {
+    // eslint-disable-next-line no-new-func
+    const kopie = new Function(al + "\nreturn abschlussLage;")();
+    const B = [false, true];
+    const LAGEN = [null, undefined].concat(B.flatMap((fi) => B.flatMap((ue) => B.flatMap((so) => [null, "Satz 13:8"].flatMap(
+      (rj) => B.flatMap((pr) => B.map((nw) => ({ finalized: fi, ueberholt: ue, submittedOk: so, resultRejected: rj, pendingResult: pr, needWinner: nw }))))))));
+    ok("tablet.html: abschlussLage wie Modul", LAGEN.map(kopie), LAGEN.map(aa.abschlussLage));
+  }
 }
 
 if (failures) {
