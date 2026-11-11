@@ -472,6 +472,10 @@ billig:
   Abruf. Die Anzeigen lesen daraus ohnehin nur Aufschlag, Pause, Aufgabe
   und Startzeit; das Tablet selbst bekommt beim Wiederverbinden
   weiterhin den vollen Stand (sein Rückgängig-Gedächtnis).
+  Seit v0.9.374 fallen auch die **Zettel-Ereignisse** (`events`, also
+  Karten) weg, und das **Relay** verschlankt genauso: Vorher reichte es den
+  vollen Stand eines Cloud-Tablets an jeden Cloud-Monitor
+  (`relay_proto::schlanker_anzeige_stand`, geteilt von Turnier-PC und Relay).
 
 ## Antwortcache der Übersicht (seit v0.9.236)
 
