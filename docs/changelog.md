@@ -18,6 +18,19 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   umschreiben. Zweiter
   Schritt der Spec `tablet-stand-robust` (ADR 0085).
 
+## v0.9.374
+
+- **Tablet-Stand: kleiner und nie mehr still verworfen.** Das Zähl-Tablet
+  sichert seinen Spielstand bei jedem Punkt beim Turnier-PC bzw. in der Cloud,
+  damit ein Ersatzgerät das Spiel übernehmen kann. Dieser Stand ist jetzt
+  rund 24 KB groß statt 61–590 KB — bei unverändert 50 Schritten „zurück". In
+  der Cloud ging er vorher ab 64 KB kommentarlos verloren (im Schiri-Modus mit
+  Karten schon ab Mitte des zweiten Satzes); Monitore zeigten dann einen alten
+  Aufschlag, und ein Ersatzgerät bekam einen alten Stand. Wird ein Stand doch
+  einmal zu groß, steht das jetzt im Protokoll. Hallen-Monitore in der Cloud
+  bekommen außerdem keine Karten-Ereignisse mehr mitgeschickt. Erster Schritt
+  der Spec `tablet-stand-robust` (ADR 0084).
+
 ## v0.9.373
 
 - **Schiedsrichterzettel schon beim Aufruf drucken.** Unter „Zettel

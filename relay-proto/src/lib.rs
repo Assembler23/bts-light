@@ -968,6 +968,46 @@ pub fn state_sync_match_id(state: &str) -> Option<i64> {
     v.get("match")?.get("matchId")?.as_i64()
 }
 
+/// Höchstlänge (Bytes) eines gespiegelten Tablet-Spielzustands.
+///
+/// **Eine** Konstante für Turnier-PC (LAN) und Relay (Cloud): Vorher hatte
+/// nur das Relay einen Deckel — und verwarf darüber kommentarlos. Das
+/// Tablet hält ihn seit Format 2 selbst ein (`SPIEGEL_BUDGET` in
+/// `src/io/undoStand.mjs`, mit Reserve darunter; `scripts/test-stand-
+/// groesse.mjs` prüft den Abstand). Wer hier trotzdem ankommt, ist ein
+/// altes, defektes oder fremdes Gerät: verwerfen und **melden**
+/// (Spec tablet-stand-robust, ADR 0084).
+pub const MAX_STATE_LEN: usize = 64 * 1024;
+
+/// Streicht aus einem Tablet-Stand, was keine Anzeige liest: die
+/// Wiedergabe-Felder `history` und `rallyLog` und die Zettel-Ereignisse
+/// `events` — alles Übrige bleibt.
+///
+/// `events` sind Sanktionsdaten (Karten); sie gehören auf den Zettel der
+/// Turnierleitung, nicht in den Zustand eines Hallen-Monitors (ADR 0037).
+///
+/// **Bewusst eine Streichliste, keine Positivliste:** Welche Felder eine
+/// Anzeige liest, wächst mit jedem Feature (Aufschlag, Pause, Aufgabe,
+/// Startzeit …). Eine Positivliste hätte dem nächsten neuen Feld
+/// stillschweigend den Boden weggezogen; hier fällt nur weg, was
+/// nachweislich niemand anzeigt. Unparsbares bleibt unverändert — lieber
+/// zu viel schicken als einen Stand verlieren.
+///
+/// Geteilt zwischen Turnier-PC und Relay, damit LAN- und Cloud-Monitore
+/// dieselbe Fassung sehen.
+pub fn schlanker_anzeige_stand(state: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(state) else {
+        return state.to_string();
+    };
+    let Some(obj) = v.as_object_mut() else {
+        return state.to_string();
+    };
+    obj.remove("history");
+    obj.remove("rallyLog");
+    obj.remove("events");
+    serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
+}
+
 pub fn merge_device_lists(
     lan: &[MonitorDeviceInfo],
     cloud: &[MonitorDeviceInfo],
@@ -3657,7 +3697,7 @@ pub const MAX_CARRIER_PAYLOAD_LEN: usize = 160 * 1024;
 /// Relay). Faktor 2 deckt auch einen Zustand ab, der fast vollständig aus
 /// escapten Zeichen besteht. Wer den Deckel senkt, bricht hier den Bau —
 /// nicht erst im Turnier, wo ein großer Spielstand stumm verschwände.
-const _: () = assert!(MAX_CARRIER_PAYLOAD_LEN >= 2 * 64 * 1024);
+const _: () = assert!(MAX_CARRIER_PAYLOAD_LEN >= 2 * MAX_STATE_LEN);
 
 /// Protokollfassung des Trägers.
 ///
@@ -3933,6 +3973,33 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"matchId\":4711"));
         assert_eq!(serde_json::from_str::<TabletMsg>(&json).unwrap(), msg);
+    }
+
+    #[test]
+    fn schlanker_anzeige_stand_streicht_events() {
+        // Keine Anzeige liest Undo-Verlauf, Ballwechsel-Protokoll oder
+        // Zettel-Ereignisse. Die Ereignisse sind Sanktionsdaten (Karten) und
+        // gingen vorher an jeden Monitor mit (Spec tablet-stand-robust).
+        let voll = r#"{"fmt":2,"serving":{"team":"a"},"pause":null,"startedAt":7,
+            "history":[{"rl":[[3],false]}],"rallyLog":{"sets":[]},
+            "events":[{"kind":"card_red","player":1002}],"eventSeq":4,
+            "finished":false,"teamOnSide":{"a":"left"}}"#;
+        let v: serde_json::Value = serde_json::from_str(&schlanker_anzeige_stand(voll)).unwrap();
+        for weg in ["history", "rallyLog", "events"] {
+            assert!(v.get(weg).is_none(), "{weg} fällt weg");
+        }
+        assert_eq!(v["serving"]["team"], "a", "Aufschlag bleibt");
+        assert_eq!(v["startedAt"], 7, "Startzeit bleibt");
+        assert_eq!(v["finished"], false);
+        assert!(
+            v.get("pause").is_some(),
+            "auch ein leeres Pausenfeld bleibt"
+        );
+        assert!(v.get("teamOnSide").is_some());
+        assert_eq!(v["eventSeq"], 4, "der Zähler ist kein Ereignis");
+        // Unparsbares und Nicht-Objekte bleiben unangetastet.
+        assert_eq!(schlanker_anzeige_stand("kein json"), "kein json");
+        assert_eq!(schlanker_anzeige_stand("[1,2]"), "[1,2]");
     }
 
     #[test]

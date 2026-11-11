@@ -480,6 +480,10 @@ pub struct TabletState {
     /// Anzeigen geht (siehe [`TabletState::display_court_state`]).
     /// Einmal beim Eingang gerechnet statt bei jedem Abruf.
     display_court_state: RwLock<HashMap<i64, String>>,
+    /// CourtID → Match, für das ein zu großer Tablet-Stand schon gemeldet
+    /// wurde. Hält die Warnung auf **eine je Feld und Spiel** — sonst
+    /// schriebe ein Gerät über dem Deckel bei jedem Punkt eine Zeile.
+    state_deckel_gemeldet: Mutex<HashMap<i64, i64>>,
     /// Offene Walkover-Vorschläge nach Aufgaben (je EntryID höchstens einer).
     walkovers: RwLock<Vec<WalkoverProposal>>,
     /// „In Vorbereitung" gerufene Spiele (je Match-ID höchstens einer).
@@ -902,27 +906,6 @@ pub struct MonitorNudge {
 /// reicht ihn 1:1 auf seinen Socket. Unbounded, weil `notify_monitor` NIE
 /// blockieren darf (es läuft unter dem `record_score`-Lock).
 pub type MonitorNudgeTx = tokio::sync::mpsc::UnboundedSender<String>;
-
-/// Streicht aus einem Tablet-Stand die beiden schweren Wiedergabe-Felder
-/// (`history`, `rallyLog`) — alles Übrige bleibt.
-///
-/// **Bewusst eine Streichliste, keine Positivliste:** Welche Felder eine
-/// Anzeige liest, wächst mit jedem Feature (Aufschlag, Pause, Aufgabe,
-/// Startzeit …). Eine Positivliste hätte dem nächsten neuen Feld
-/// stillschweigend den Boden weggezogen; hier fällt nur weg, was
-/// nachweislich niemand anzeigt. Unparsbares bleibt unverändert — lieber
-/// zu viel schicken als einen Stand verlieren.
-fn schlanker_anzeige_stand(state: &str) -> String {
-    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(state) else {
-        return state.to_string();
-    };
-    let Some(obj) = v.as_object_mut() else {
-        return state.to_string();
-    };
-    obj.remove("history");
-    obj.remove("rallyLog");
-    serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
-}
 
 /// Belegung eines Felds, wie die Anzeigen sie sehen: Match-ID plus
 /// Satzstand aus BTP (Spec monitor-livestand-push, S3).
@@ -3654,16 +3637,46 @@ impl TabletState {
     /// sich wieder verbindet oder das Feld übernimmt — es braucht seinen
     /// Wiedergabe-Verlauf) und einen **schlanken** für alle Anzeigen
     /// (siehe [`Self::display_court_state`]).
+    ///
+    /// Ein Stand über [`relay_proto::MAX_STATE_LEN`] wird **verworfen und
+    /// gemeldet**; der vorige bleibt stehen. Das Tablet hält den Deckel seit
+    /// Format 2 selbst ein — wer hier ankommt, ist ein altes oder defektes
+    /// Gerät, und ein stiller Verlust wäre erst bei der nächsten Übernahme
+    /// aufgefallen (Spec tablet-stand-robust, ADR 0084). Geloggt werden nur
+    /// Feld, Match und Länge — nie der Inhalt.
     pub fn set_court_state(&self, court_id: i64, state: String) {
+        if state.len() > relay_proto::MAX_STATE_LEN {
+            let match_id = self.match_for_court(court_id).map_or(0, |m| m.id);
+            if self.deckel_erstmals(court_id, match_id) {
+                tracing::warn!(
+                    "Tablet-Stand von Feld {court_id} verworfen: {} Bytes (Grenze {}), \
+                     Match {match_id} — der vorige Stand bleibt",
+                    state.len(),
+                    relay_proto::MAX_STATE_LEN
+                );
+            }
+            return;
+        }
         self.display_court_state
             .write()
             .unwrap()
-            .insert(court_id, schlanker_anzeige_stand(&state));
+            .insert(court_id, relay_proto::schlanker_anzeige_stand(&state));
         self.court_state.write().unwrap().insert(court_id, state);
         // Aufschlag/Pause (`court_state`) ist am Court-Monitor sichtbar →
         // Anzeige anstoßen (A1, ADR 0016). Der Schreib-Guard ist mit dem
         // Semikolon oben schon gefallen; kein Lock über den Broadcast.
         self.notify_monitor(court_id);
+    }
+
+    /// `true` genau beim ersten zu großen Stand je Feld **und Spiel** —
+    /// hält die Warnung in [`Self::set_court_state`] auf eine Zeile, statt
+    /// bei jedem Punkt eine zu schreiben.
+    fn deckel_erstmals(&self, court_id: i64, match_id: i64) -> bool {
+        self.state_deckel_gemeldet
+            .lock()
+            .unwrap()
+            .insert(court_id, match_id)
+            != Some(match_id)
     }
 
     /// Liefert den gespiegelten Spielzustand eines Felds (für die Übernahme).
@@ -5976,6 +5989,47 @@ pub(crate) mod tests {
         // Unparsbares bleibt unangetastet (lieber unverändert als leer).
         st.set_court_state(2, "kein json".into());
         assert_eq!(st.display_court_state(2).as_deref(), Some("kein json"));
+    }
+
+    #[test]
+    fn set_court_state_verwirft_ueber_deckel_und_laesst_alten_stand() {
+        // Vor Format 2 hatte der LAN-Server keinen Deckel, das Relay einen
+        // stillen. Jetzt gilt überall derselbe — und ein zu großer Stand
+        // darf den guten vorigen nicht verdrängen (Spec tablet-stand-robust,
+        // AK13): Ein übernehmendes Tablet bekommt lieber den letzten
+        // passenden Stand als gar keinen.
+        let st = TabletState::default();
+        st.set_court_state(1, r#"{"serving":{"team":"a"},"history":[]}"#.into());
+        let gut = st.court_state(1).expect("gerade gesetzt");
+        let anzeige = st.display_court_state(1).expect("gerade gesetzt");
+
+        let zu_gross = format!(r#"{{"blob":"{}"}}"#, "x".repeat(relay_proto::MAX_STATE_LEN));
+        st.set_court_state(1, zu_gross);
+        assert_eq!(st.court_state(1).as_deref(), Some(gut.as_str()));
+        assert_eq!(st.display_court_state(1).as_deref(), Some(anzeige.as_str()));
+
+        // Genau an der Grenze wird noch angenommen.
+        let rand = "y".repeat(relay_proto::MAX_STATE_LEN);
+        st.set_court_state(1, rand.clone());
+        assert_eq!(st.court_state(1), Some(rand));
+
+        // Ein Feld ohne vorigen Stand bleibt ohne Stand.
+        st.set_court_state(2, "z".repeat(relay_proto::MAX_STATE_LEN + 1));
+        assert!(st.court_state(2).is_none());
+        assert!(st.display_court_state(2).is_none());
+    }
+
+    #[test]
+    fn deckel_log_nur_einmal_je_match() {
+        // Ein Gerät über dem Deckel meldet bei JEDEM Punkt einen zu großen
+        // Stand. Eine Zeile je Punkt flutete das Diagnose-Log; eine je Feld
+        // und Spiel reicht, um den Fall zu finden.
+        let st = TabletState::default();
+        assert!(st.deckel_erstmals(1, 7), "erster Fall wird gemeldet");
+        assert!(!st.deckel_erstmals(1, 7), "derselbe nicht noch einmal");
+        assert!(st.deckel_erstmals(2, 7), "ein anderes Feld schon");
+        assert!(st.deckel_erstmals(1, 8), "das nächste Spiel am Feld auch");
+        assert!(!st.deckel_erstmals(1, 8));
     }
 
     #[test]

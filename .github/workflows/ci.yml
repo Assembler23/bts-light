@@ -308,6 +308,18 @@ jobs:
       - name: Verlaufs-Abgleich am Tablet (JS)
         run: node scripts/test-verlauf-sync.mjs
 
+      # Schlankes Undo-Format des Tablets (Spec tablet-stand-robust,
+      # ADR 0084) — ein falscher Schnitt stellte nach „zurueck" einen
+      # falschen Punktverlauf wieder her; faellt erst beim Geraetewechsel auf.
+      - name: Tablet-Undo-Stand (JS)
+        run: node scripts/test-undo-stand.mjs
+
+      # Groessen-Regression gegen die ECHTE snapshot()/standFuerSpiegel() der
+      # Seite. Ueber 64 KiB verwerfen Turnier-PC und Relay den Zustand —
+      # kommt ein Feld dazu, das je Undo-Stand kopiert wird, wird es hier rot.
+      - name: Tablet-Stand-Groesse (JS)
+        run: node scripts/test-stand-groesse.mjs
+
       # Was sperrt die Beendet-Ansicht, und was sagt sie? Ein in BTP festes
       # Ergebnis muss Senden UND Korrektur zumachen — sonst drueckt jemand
       # 23-mal einen Knopf, der still nichts tut (Feld 11, 12.09.2026).

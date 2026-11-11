@@ -1087,6 +1087,17 @@ Relay die ganze Halle blind.
   Anzeige-Zustand. Ohne Opt-in am Turnier-PC (`tl_web.enabled`, Default aus)
   kennt der Relay **kein** Token, und jede Anfrage endet abgewiesen, bevor
   sie Zustand berührt.
+- **Tablet-Zustand: Deckel und Monitor-Fassung (seit v0.9.374):** Der per
+  `state_sync` gespiegelte Zustand ist auf `relay_proto::MAX_STATE_LEN`
+  (64 KiB) begrenzt — dieselbe Konstante gilt jetzt am Turnier-PC. Ein
+  größerer Zustand wird verworfen, der vorige bleibt, und der Relay schreibt
+  **eine Warnung je Feld und Spiel** (Feld, Match, Länge — nie Inhalt; erst
+  nach der Halter-Prüfung, damit ein Fremder keine Zeilen erzeugt). Dasselbe
+  gilt für den Zustand im `ScoreUpdate`-Spiegel des Hosts. Vorher geschah das
+  still. Das Tablet bleibt seit Format 2 von sich aus darunter
+  ([tablet.md](tablet.md), „Gespiegelter Zustand"). Monitore bekommen aus dem
+  Zustand nur die schlanke Fassung ohne `history`, `rallyLog` und `events`
+  (`display_court_state`); ein übernehmendes Tablet weiterhin den vollen.
 - **Stale-Filter (Cluster A4):** `score_update`/`state_sync` tragen die
   Match-ID des gezählten Spiels; Relay UND Host verwerfen Frames, deren
   Match nicht (mehr) zum Feld passt — ein nach Doze/Reconnect im alten

@@ -176,8 +176,9 @@ const MAX_PENDING_PER_NS: usize = 16;
 /// Speicherfresser, wie bei `MAX_TIMELINE_LEN`.
 const MAX_SCORESHEET_HTML_LEN: usize = relay_proto::MAX_SHEETS_PER_DOC * 128 * 1024 + 64 * 1024;
 
-/// Maximale Größe eines gespiegelten Spielzustands (Schutz gegen Missbrauch).
-const MAX_STATE_LEN: usize = 64 * 1024;
+/// Maximale Größe eines gespiegelten Spielzustands (Schutz gegen Missbrauch)
+/// — dieselbe Konstante wie am Turnier-PC.
+const MAX_STATE_LEN: usize = relay_proto::MAX_STATE_LEN;
 
 type Tx = mpsc::UnboundedSender<Message>;
 
@@ -367,6 +368,15 @@ struct Namespace {
     /// CourtID → zuletzt gespiegelter Spielzustand (JSON) des aktiven
     /// Tablets – wird einem übernehmenden Gerät übergeben.
     court_state: HashMap<i64, String>,
+    /// Derselbe Stand ohne `history`/`rallyLog`/`events` — die Fassung für
+    /// Monitore (wie am Turnier-PC, `relay_proto::schlanker_anzeige_stand`).
+    /// Einmal beim Eingang gerechnet statt bei jedem Abruf. Vorher ging der
+    /// volle Stand samt Undo-Verlauf und Karten-Ereignissen an jeden
+    /// Cloud-Monitor (Spec tablet-stand-robust, ADR 0084).
+    display_court_state: HashMap<i64, String>,
+    /// CourtID → Match, für das ein zu großer Zustand schon gemeldet wurde
+    /// (eine Warnung je Feld und Spiel, nicht je Punkt).
+    state_deckel_gemeldet: HashMap<i64, i64>,
     /// CourtID → aktuelles Match (für die Court-Monitor-Anzeige).
     court_matches: HashMap<i64, MatchBrief>,
     /// CourtID → Satzstand in Team-Koordinaten (für die Monitor-Anzeige).
@@ -538,6 +548,57 @@ const MAX_COURTS_PER_NS: usize = 512;
 const MAX_TL_SUBS: usize = 16;
 
 impl Namespace {
+    /// Legt den Tablet-Stand eines Felds in beiden Fassungen ab: voll (für
+    /// ein übernehmendes Tablet) und schlank (für Monitore).
+    fn set_court_state(&mut self, court_id: i64, state: String) {
+        self.display_court_state
+            .insert(court_id, relay_proto::schlanker_anzeige_stand(&state));
+        self.court_state.insert(court_id, state);
+    }
+
+    /// Räumt beide Fassungen (Match-Wechsel, Feld geleert).
+    fn clear_court_state(&mut self, court_id: i64) {
+        self.court_state.remove(&court_id);
+        self.display_court_state.remove(&court_id);
+    }
+
+    /// Die Fassung für Monitore. Der Rückfall auf den vollen Stand deckt
+    /// nur Tests, die `court_state` direkt füllen — auch dann geht nie mehr
+    /// als die schlanke Fassung hinaus.
+    fn anzeige_stand(&self, court_id: i64) -> Option<String> {
+        self.display_court_state
+            .get(&court_id)
+            .cloned()
+            .or_else(|| {
+                self.court_state
+                    .get(&court_id)
+                    .map(|s| relay_proto::schlanker_anzeige_stand(s))
+            })
+    }
+
+    /// Meldet einen verworfenen, zu großen Zustand — **einmal je Feld und
+    /// Spiel**, nur mit Feld, Match und Länge, nie mit Inhalt.
+    ///
+    /// Gibt zurück, ob gemeldet wurde.
+    fn melde_state_ueber_deckel(
+        &mut self,
+        ns: &str,
+        court_id: i64,
+        len: usize,
+        quelle: &str,
+    ) -> bool {
+        let match_id = self.court_matches.get(&court_id).map_or(0, |m| m.match_id);
+        let erstmals = self.state_deckel_gemeldet.insert(court_id, match_id) != Some(match_id);
+        if erstmals {
+            tracing::warn!(
+                "Tablet-Stand von Feld {court_id} verworfen ({quelle}): {len} Bytes \
+                 (Grenze {MAX_STATE_LEN}), Match {match_id}, Namespace '{ns}' — \
+                 der vorige Stand bleibt"
+            );
+        }
+        erstmals
+    }
+
     fn new() -> Self {
         Self {
             host: None,
@@ -545,6 +606,8 @@ impl Namespace {
             tablets: HashMap::new(),
             tablet_devices: HashMap::new(),
             court_state: HashMap::new(),
+            display_court_state: HashMap::new(),
+            state_deckel_gemeldet: HashMap::new(),
             court_matches: HashMap::new(),
             court_scores: HashMap::new(),
             court_on_court_since: HashMap::new(),
@@ -1633,7 +1696,7 @@ fn build_monitor_state_mit(
             .map(|m| m.tournament_name.clone())
             .unwrap_or_default(),
         match_info,
-        court_state: namespace.court_state.get(&court_id).cloned(),
+        court_state: namespace.anzeige_stand(court_id),
         config,
         ads: monitor
             .map(|m| (0..m.ads.len()).map(|i| i.to_string()).collect())
@@ -3741,12 +3804,16 @@ fn is_holder(namespace: &Namespace, court_id: i64, tx: &Tx) -> bool {
 
 /// Speichert den gespiegelten Spielzustand des aktiven Tablets am Feld.
 async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: String, tx: &Tx) {
-    if state.len() > MAX_STATE_LEN {
-        return;
-    }
     let mut map = broker.namespaces.lock().await;
     if let Some(namespace) = map.get_mut(ns) {
         if !is_holder(namespace, court_id, tx) {
+            return;
+        }
+        // Zu groß: verwerfen — aber nicht mehr still (Spec tablet-stand-
+        // robust). Erst NACH der Halter-Prüfung, damit ein Fremder ohne Feld
+        // keine Logzeilen erzeugen kann.
+        if state.len() > MAX_STATE_LEN {
+            namespace.melde_state_ueber_deckel(ns, court_id, state.len(), "Tablet");
             return;
         }
         // Stale-Filter (A4): Ein State des ALTEN Matches darf den beim
@@ -3771,7 +3838,7 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
         // selbst. Eine begonnene Pause erscheint damit sofort statt erst beim
         // nächsten Sicherheits-Abruf, der im Push-Betrieb bewusst langsam ist.
         let neu = namespace.court_state.get(&court_id) != Some(&state);
-        namespace.court_state.insert(court_id, state);
+        namespace.set_court_state(court_id, state);
         if neu {
             notify_monitor(namespace, court_id);
         }
@@ -3793,6 +3860,10 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
     if still_ours {
         namespace.tablets.remove(&court_id);
         namespace.tablet_devices.remove(&court_id);
+        // Der Merker „zu großer Stand schon gemeldet" gilt der Sitzung
+        // dieses Tablets — sonst sammelte er über Reconnects mit immer neuen
+        // Feld-Kennungen Einträge an (Sicherheits-Review 11.11.2026).
+        namespace.state_deckel_gemeldet.remove(&court_id);
         let court_label = label_of(namespace, court_id);
         if let Some(host) = &namespace.host {
             let _ = host.send(text(&RelayFrame::TabletDisconnected {
@@ -5365,7 +5436,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 .unwrap_or(false);
             if !same_match {
                 namespace.court_scores.remove(&court_id);
-                namespace.court_state.remove(&court_id);
+                namespace.clear_court_state(court_id);
             }
             // 1.-Aufruf-Zeitpunkt: den autoritativen Host-Stempel übernehmen
             // (gleicher Wert auch bei Reconnect, frisch je Turnier → kein
@@ -5446,7 +5517,7 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             }
             let war_belegt = geraeumt.is_some();
             namespace.court_scores.remove(&court_id);
-            namespace.court_state.remove(&court_id);
+            namespace.clear_court_state(court_id);
             namespace.court_on_court_since.remove(&court_id);
             if let Some(t) = namespace.tablets.get(&court_id) {
                 let _ = t.send(text(&ServerMsg::MatchCleared));
@@ -5491,8 +5562,12 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
             if let Some(state) = state {
                 let embedded_ok =
                     relay_proto::state_sync_match_id(&state).is_none_or(|m| m == match_id);
-                if state.len() <= MAX_STATE_LEN && embedded_ok {
-                    namespace.court_state.insert(court_id, state);
+                // Ein Stand des ALTEN Spiels fällt wie bisher still weg —
+                // gemeldet wird nur, was zum Feld-Match gehört und zu groß ist.
+                if embedded_ok && state.len() > MAX_STATE_LEN {
+                    namespace.melde_state_ueber_deckel(ns, court_id, state.len(), "Host-Spiegel");
+                } else if embedded_ok {
+                    namespace.set_court_state(court_id, state);
                 }
             }
             notify_monitor(namespace, court_id);
@@ -9500,6 +9575,120 @@ mod tests {
             !ns.court_scores.contains_key(&101) || ns.court_scores[&101].is_empty(),
             "hier war ohnehin kein Stand gesetzt — die Prüfung hält die Absicht fest"
         );
+    }
+
+    #[tokio::test]
+    async fn store_court_state_ueber_deckel_wird_geloggt_nicht_gespeichert() {
+        // Vorher: `return` ohne ein Wort. Cloud-Monitore zeigten dann einen
+        // alten Aufschlag, und eine Übernahme bekam einen viele Punkte alten
+        // Stand — ohne dass irgendwo stand, warum (Spec tablet-stand-robust,
+        // AK13).
+        let (broker, _tablet_rx, _host) = broker_with_tablet(101).await;
+        let tx = {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.court_matches.insert(101, brief(7));
+            ns.tablets.get(&101).unwrap().clone()
+        };
+        store_court_state(&broker, "ns1", 101, r#"{"pause":true}"#.into(), &tx).await;
+        let zu_gross = format!(r#"{{"blob":"{}"}}"#, "x".repeat(MAX_STATE_LEN));
+        store_court_state(&broker, "ns1", 101, zu_gross.clone(), &tx).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            assert_eq!(
+                ns.court_state.get(&101).map(String::as_str),
+                Some(r#"{"pause":true}"#),
+                "der vorige Stand bleibt"
+            );
+            assert_eq!(
+                ns.state_deckel_gemeldet.get(&101),
+                Some(&7),
+                "gemeldet für das Spiel am Feld"
+            );
+            // Je Feld und Spiel nur einmal — nicht bei jedem Punkt.
+            assert!(!ns.melde_state_ueber_deckel("ns1", 101, 1, "Test"));
+            ns.court_matches.insert(101, brief(8));
+            assert!(ns.melde_state_ueber_deckel("ns1", 101, 1, "Test"));
+        }
+
+        // Ein Fremder ohne das Feld erzeugt keine Meldung (und keine Logzeile).
+        let (fremd, _rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut("ns1").unwrap().state_deckel_gemeldet.clear();
+        }
+        store_court_state(&broker, "ns1", 101, zu_gross, &fremd).await;
+        let map = broker.namespaces.lock().await;
+        assert!(map["ns1"].state_deckel_gemeldet.is_empty());
+    }
+
+    #[tokio::test]
+    async fn host_spiegel_ueber_deckel_wird_geloggt() {
+        // Derselbe Deckel gilt für den Spiegel des Turnier-PCs (LAN-Tablets
+        // im Betrieb LAN+Cloud) — auch dort nicht mehr still.
+        let (broker, _tablet_rx, host) = broker_with_tablet(101).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.court_matches.insert(101, brief(7));
+            ns.set_court_state(101, r#"{"pause":true}"#.into());
+        }
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoreUpdate {
+                court_id: 101,
+                match_id: 7,
+                sets: vec![SetAb { a: 3, b: 1 }],
+                state: Some("x".repeat(MAX_STATE_LEN + 1)),
+            },
+            &host,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let ns = &map["ns1"];
+        assert_eq!(
+            ns.court_state.get(&101).map(String::as_str),
+            Some(r#"{"pause":true}"#)
+        );
+        assert_eq!(ns.state_deckel_gemeldet.get(&101), Some(&7));
+        // Der Satzstand kommt trotzdem an — nur der Zustand fällt weg.
+        assert_eq!(ns.court_scores.get(&101), Some(&vec![SetAb { a: 3, b: 1 }]));
+    }
+
+    #[tokio::test]
+    async fn monitor_state_traegt_schlanken_stand() {
+        // Vorher reichte das Relay den vollen Tablet-Stand an jeden
+        // Cloud-Monitor: 50 Undo-Stände, das Ballwechsel-Protokoll und die
+        // Karten-Ereignisse. Der Turnier-PC verschlankt im LAN längst
+        // (Spec tablet-stand-robust, AK14).
+        let (broker, _tablet_rx, _host) = broker_with_tablet(101).await;
+        let tx = {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.court_matches.insert(101, brief(7));
+            ns.tablets.get(&101).unwrap().clone()
+        };
+        let voll = r#"{"match":{"matchId":7},"serving":{"team":"a"},"history":[{"rl":[[3],false]}],"rallyLog":{"sets":[]},"events":[{"kind":"card_red"}]}"#;
+        store_court_state(&broker, "ns1", 101, voll.into(), &tx).await;
+
+        let mut map = broker.namespaces.lock().await;
+        let ns = map.get_mut("ns1").unwrap();
+        let anzeige = build_monitor_state(ns, 101)
+            .court_state
+            .expect("Stand am Feld");
+        let v: serde_json::Value = serde_json::from_str(&anzeige).unwrap();
+        for weg in ["history", "rallyLog", "events"] {
+            assert!(v.get(weg).is_none(), "{weg} geht nicht an Monitore");
+        }
+        assert_eq!(v["serving"]["team"], "a", "der Aufschlag schon");
+        // Ein übernehmendes Tablet bekommt weiterhin ALLES.
+        assert_eq!(ns.court_state.get(&101).map(String::as_str), Some(voll));
+
+        // Beim Match-Wechsel fallen beide Fassungen.
+        ns.clear_court_state(101);
+        assert!(build_monitor_state(ns, 101).court_state.is_none());
     }
 
     #[tokio::test]
