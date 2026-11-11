@@ -941,7 +941,12 @@ export interface UpdateInfo {
 
 export interface SyncStatus {
   running: boolean;
-  /** "idle" | "ok" | "warn" | "btp_error" | "push_error" */
+  /**
+   * "idle" | "ok" | "warn" | "btp_error" | "push_error".
+   * Seit v0.9.381: "warn" auch für eine gestörte oder gedrosselte
+   * badhub-Strecke (heilt von selbst), "push_error" nur noch für den Halt
+   * (Passwort oder Anmeldewand) — siehe `status_from` in commands.rs.
+   */
   kind: string;
   message: string;
   updated_at_ms: number;

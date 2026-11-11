@@ -277,7 +277,8 @@ Der **Halt** lebt bewusst nur im Sender (in PR 1: im Tor). `start_sync` baut bei
 | 5xx | Strecke: Störung | Strecke: Störung | Kanal: Backoff | Kanal: Backoff | Kanal: Backoff + Auswahl rotieren |
 | 429 | Strecke: gedrosselt | ← | ← | ← | ← |
 | 401 mit `WWW-Authenticate: Basic` | Strecke: Halt (Wand) | ← | ← | ← | ← |
-| 401 / 403 | Strecke: Halt (Passwort) | ← | ← | ← | ← |
+| 401 / 403 mit badhub-Antwort | Strecke: Halt (Passwort) | ← | ← | ← | ← |
+| 401 / 403 ohne badhub-Antwort (aus dem Sicherheits-Review von PR 1: Filter oder Proxy im Hallen-WLAN) | Strecke: Störung | ← | ← | ← | ← |
 | 400 | Kanal: abgelehnt | Punkt verwerfen | Kanal: 30 min | Kanal: 30 min | Kanal: 30 min |
 | 404 | Strecke: Störung (falsche URL) | ← | Kanal: 30 min | Kanal: 30 min | Kanal: 30 min |
 | 409 | Kanal: abgelehnt | Punkt verwerfen | Kanal: 30 min, eine Log-Zeile | Kanal: 30 min | Kanal: Backoff + rotieren |

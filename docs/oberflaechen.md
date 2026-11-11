@@ -42,6 +42,24 @@ Statusanzeigen:
 - **Internet** beziehungsweise Cloud-Verbindung
 - **Ferne Halle** — nur, wenn eine gekoppelt ist
 
+Stockt die Übertragung an badhub, sagt die Liveticker-Anzeige, woran es liegt
+(seit v0.9.381). Die Halle läuft in allen Fällen weiter — Tablets, Monitore
+und die Feldvergabe hängen nicht am Internet.
+
+| Anzeige | Bedeutung | Was tun |
+|---|---|---|
+| orange: **„Internet-Strecke gestört — Halle läuft weiter, nächster Versuch in … s"** | badhub ist gerade nicht erreichbar. bts-light versucht es in wachsenden Abständen (5 bis 60 Sekunden) erneut. | nichts; Internet der Halle prüfen, wenn es anhält |
+| orange: **„badhub hat die Anmeldung vorübergehend gesperrt — nächster Versuch um …"** | badhub hat nach mehreren Fehlversuchen eine Sperre verhängt. | abwarten |
+| rot: **„Übertragung an badhub angehalten: Passwort prüfen"** | badhub lehnt das Passwort ab. bts-light sendet nichts mehr, damit badhub die Halle nicht sperrt. | Passwort in den Einstellungen berichtigen und speichern |
+| rot: **„Übertragung an badhub angehalten: Der Server verlangt eine eigene Anmeldung"** | Vor dem Server liegt eine zusätzliche Anmeldung; das Liveticker-Passwort ist nicht die Ursache. | den Betreiber des Servers ansprechen |
+| orange: **„badhub lehnt den Turnierstand ab (HTTP …) — nächster Versuch in … s"** | badhub nimmt den Stand nicht an. | wenn es anhält: Diagnose-Log senden |
+
+<!-- pruef: "Internet-Strecke gestört — Halle läuft weiter" in src-tauri/src/commands.rs -->
+<!-- pruef: "badhub hat die Anmeldung vorübergehend gesperrt" in src-tauri/src/commands.rs -->
+<!-- pruef: "Übertragung an badhub angehalten: Passwort prüfen" in src-tauri/src/commands.rs -->
+<!-- pruef: "Der Server verlangt eine eigene Anmeldung" in src-tauri/src/commands.rs -->
+<!-- pruef: "badhub lehnt den Turnierstand ab" in src-tauri/src/commands.rs -->
+
 Ist die automatische Feldvergabe eingeschaltet, aber in der
 [Turnierleitungs-Oberfläche](turnierleitung-web.md) pausiert, steht oben im
 Fenster, auf jeder Seite, ein orangefarbener Balken **„Automatik pausiert"** mit dem

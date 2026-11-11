@@ -81,6 +81,9 @@ pub struct ServerCtx {
     /// Warteschlange der Live-Score-Pushes an badhub, je Feld serialisiert
     /// und gebündelt — siehe [`ScorePushQueue`].
     score_push: Arc<ScorePushQueue>,
+    /// Die Strecke zu badhub, geteilt mit dem Sync-Zyklus: Ist sie nicht
+    /// frei, gehen auch keine Tablet-Punkte hinaus.
+    push_tor: crate::badhub::strecke::Tor,
     /// Zwischenstand des Config-Lesens: `(Änderungszeit, Größe, geparst)`.
     ///
     /// `app_config()` läuft auf den heißesten Pfaden — jede TL-Anfrage
@@ -225,6 +228,7 @@ impl ServerCtx {
         let http = self.http.clone();
         let url = self.config.badhub.url.clone();
         let password = self.config.badhub.password.clone();
+        let tor = self.push_tor.clone();
         tokio::spawn(async move {
             while let Some((match_id, update)) = queue.naechster(court_id) {
                 // Veraltet-Prüfung DIREKT vor dem Senden (Review-Fund
@@ -247,9 +251,28 @@ impl ServerCtx {
                         continue;
                     }
                 }
-                if let Err(e) = push::push_update(&http, &url, &password, &update).await {
-                    tracing::warn!("Live-Score-Push fehlgeschlagen: {e}");
+                let Some((kanal, body)) = push::update_koerper(&update) else {
+                    continue;
+                };
+                // Ist die Strecke nicht frei (gestört, gedrosselt, angehalten,
+                // `tset` abgelehnt), wird der Punkt verworfen statt gesendet:
+                // Der nächste Versuch des Sync-Zyklus ist ohnehin ein voller
+                // `tset`, der den Stand trägt. Früher ging nach einem
+                // abgelehnten Passwort je Punkt eine weitere Anfrage hinaus —
+                // und badhub sperrt die IP nach fünf Fehlversuchen.
+                let darf = tor
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .beginnen(kanal, std::time::Instant::now());
+                if !darf {
+                    continue;
                 }
+                let ausgang = push::sende(&http, &url, &password, kanal, body).await;
+                // Die Strecke schreibt die Log-Zeile (eine je Zustandswechsel,
+                // nicht eine je Punkt).
+                tor.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .melden(kanal, &ausgang, None, std::time::Instant::now());
             }
         });
     }
@@ -283,7 +306,15 @@ impl ServerCtx {
             combo_dir_cache: std::sync::Mutex::new(None),
             spielfolge_cache: std::sync::Mutex::new(None),
             score_push: Arc::new(ScorePushQueue::default()),
+            push_tor: crate::badhub::strecke::Strecke::frisch().als_tor(),
         }
+    }
+
+    /// Hängt die Punkt-Sendungen an die geteilte Strecke des Sync-Zyklus
+    /// (Spec `badhub-push-entkoppeln`, PR 1).
+    pub fn mit_push_tor(mut self, tor: crate::badhub::strecke::Tor) -> Self {
+        self.push_tor = tor;
+        self
     }
 
     fn next_rid(&self) -> u64 {
@@ -5510,6 +5541,83 @@ mod tests {
             vec![(10, 8)],
             "Stand des aktuellen Matches bleibt unangetastet"
         );
+    }
+
+    // ── badhub-Strecke (Spec `badhub-push-entkoppeln`, PR 1) ───────────────
+
+    /// Wartet (höchstens 3 s), bis die Attrappe `n` Anfragen gesehen hat.
+    async fn warte_auf_anfragen(mock: &crate::badhub::testhilfe::Mock, n: usize) {
+        for _ in 0..150 {
+            if mock.anzahl() >= n {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("nur {} von {n} Anfragen gesehen", mock.anzahl());
+    }
+
+    #[tokio::test]
+    async fn score_push_respektiert_das_tor() {
+        use crate::badhub::strecke::{Ausgang, Kanal, Strecke};
+        use crate::badhub::testhilfe::{self, Antwort};
+        let mock = testhilfe::starten(vec![Antwort::ok()]).await;
+        let mut ctx = make_ctx(1);
+        ctx.config.badhub.url = mock.url.clone();
+        let tor = Strecke::frisch().als_tor();
+        let ctx = ctx.mit_push_tor(tor.clone());
+        let jetzt = std::time::Instant::now();
+
+        // Strecke gestört (ein Transportfehler des Sync-Zyklus): Der Punkt
+        // wird verworfen, nicht gesendet.
+        tor.lock()
+            .unwrap()
+            .melden(Kanal::Tset, &Ausgang::default(), None, jetzt);
+        handle_score(101, 1, 0, &[], 42, &ctx).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(mock.anzahl(), 0);
+
+        // Strecke wieder frei: Der nächste Punkt geht hinaus.
+        let ok = Ausgang {
+            status: Some(200),
+            echte_antwort: true,
+            ..Default::default()
+        };
+        tor.lock().unwrap().melden(Kanal::Tset, &ok, None, jetzt);
+        handle_score(101, 2, 0, &[], 42, &ctx).await;
+        warte_auf_anfragen(&mock, 1).await;
+    }
+
+    #[tokio::test]
+    async fn score_push_meldet_401_als_halt() {
+        use crate::badhub::strecke::{HaltGrund, Lage, Strecke};
+        use crate::badhub::testhilfe::{self, Antwort};
+        let mock = testhilfe::starten(vec![Antwort::status("401 Unauthorized")]).await;
+        let mut ctx = make_ctx(1);
+        ctx.config.badhub.url = mock.url.clone();
+        let tor = Strecke::frisch().als_tor();
+        let ctx = ctx.mit_push_tor(tor.clone());
+
+        handle_score(101, 1, 0, &[], 42, &ctx).await;
+        warte_auf_anfragen(&mock, 1).await;
+        for _ in 0..100 {
+            if tor.lock().unwrap().lage() != Lage::Frei {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            tor.lock().unwrap().lage(),
+            Lage::Angehalten {
+                grund: HaltGrund::Passwort
+            }
+        );
+        // Weitere Punkte gehen nicht mehr hinaus — badhub sperrt die IP nach
+        // fünf Fehlversuchen.
+        for punkt in 2..6 {
+            handle_score(101, punkt, 0, &[], 42, &ctx).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(mock.anzahl(), 1);
     }
 
     /// Spec `spielzeiten-prognose` (E2): Der Host stempelt den Nettostart

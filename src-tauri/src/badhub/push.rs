@@ -7,9 +7,19 @@
 use std::time::Duration;
 
 use crate::badhub::diff::Update;
-use crate::badhub::payload::{CheckinBrandingMessage, CheckinRosterMessage, SchedMessage};
+use crate::badhub::payload::CheckinBrandingMessage;
+use crate::badhub::strecke::{self, Ausgang, Kanal};
 
+/// Gesamtfrist einer Anfrage.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Frist für den Verbindungsaufbau allein. Ohne sie wartete eine Anfrage in
+/// ein „schwarzes Loch" (Pakete versickern) die volle Gesamtfrist ab.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// So viel vom Antwortkörper wird höchstens gelesen. badhubs Antworten sind
+/// wenige Dutzend Bytes; alles darüber ist nicht badhub.
+const MAX_ANTWORT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PushError {
@@ -38,11 +48,21 @@ pub enum PushError {
 /// `Authorization`-Header, und den beansprucht der Bearer-Token.
 fn abgelehnt(response: &reqwest::Response) -> PushError {
     let status = response.status().as_u16();
+    match status {
+        401 if ist_wand(response) => PushError::BasicAuthWall,
+        401 | 403 => PushError::Unauthorized,
+        other => PushError::Status(other),
+    }
+}
+
+/// Verlangt ein vorgelagerter Webserver eine HTTP-Anmeldung
+/// (`WWW-Authenticate: Basic`)?
+fn ist_wand(response: &reqwest::Response) -> bool {
     // Bewusst über die Bytes und nicht über `to_str()`: Der echte Header
     // lautet `Basic realm="test.badhub.de — Staging"` — mit einem Gedankenstrich
     // außerhalb von ASCII. `to_str()` liefert dafür `Err`, und die Erkennung
     // finge ausgerechnet am Ernstfall ins Leere.
-    let wand = response
+    response
         .headers()
         .get(reqwest::header::WWW_AUTHENTICATE)
         .map(|v| {
@@ -55,134 +75,118 @@ fn abgelehnt(response: &reqwest::Response) -> PushError {
                 .collect();
             anfang.eq_ignore_ascii_case(b"basic")
         })
-        .unwrap_or(false);
-    match status {
-        401 if wand => PushError::BasicAuthWall,
-        401 | 403 => PushError::Unauthorized,
-        other => PushError::Status(other),
-    }
+        .unwrap_or(false)
 }
 
-/// Baut einen wiederverwendbaren HTTP-Client mit angemessenem Timeout.
+/// Baut einen wiederverwendbaren HTTP-Client mit den Fristen des Betriebs.
 pub fn build_client() -> reqwest::Client {
+    build_client_mit_fristen(CONNECT_TIMEOUT, REQUEST_TIMEOUT)
+}
+
+/// Wie [`build_client`], mit eigenen Fristen (Tests).
+pub fn build_client_mit_fristen(verbindung: Duration, gesamt: Duration) -> reqwest::Client {
     reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(verbindung)
+        .timeout(gesamt)
         .build()
         .expect("HTTP-Client-Erzeugung kann nicht fehlschlagen")
 }
 
-/// Sendet ein Update an den Badhub-Liveticker-Endpunkt.
-///
-/// `Update::None` wird übersprungen – es gibt nichts zu senden.
-pub async fn push_update(
-    client: &reqwest::Client,
-    url: &str,
-    password: &str,
-    update: &Update,
-) -> Result<(), PushError> {
-    let body = match update {
-        Update::Full(msg) => serde_json::to_vec(msg),
-        Update::Single(msg) => serde_json::to_vec(msg),
-        Update::None => return Ok(()),
+/// Kanal und Körper eines Liveticker-Updates; `None`, wenn nichts zu senden
+/// ist.
+pub fn update_koerper(update: &Update) -> Option<(Kanal, Vec<u8>)> {
+    match update {
+        Update::Full(msg) => Some((Kanal::Tset, serde_json::to_vec(msg))),
+        Update::Single(msg) => Some((Kanal::Tupdate, serde_json::to_vec(msg))),
+        Update::None => None,
     }
-    .expect("tset/tupdate-Serialisierung kann nicht fehlschlagen");
-
-    let response = client
-        .post(url)
-        .bearer_auth(password)
-        .header("Content-Type", "application/json")
-        .body(body)
-        .send()
-        .await?;
-
-    match response.status().as_u16() {
-        200 => Ok(()),
-        _ => Err(abgelehnt(&response)),
-    }
+    .map(|(k, body)| {
+        (
+            k,
+            body.expect("tset/tupdate-Serialisierung kann nicht fehlschlagen"),
+        )
+    })
 }
 
-/// Sendet die Meldeliste für den Hallen-Check-In (ADR 0009).
+/// Sendet eine Nachricht an den Liveticker-Endpunkt und beschreibt, was
+/// dabei herauskam — für alle fünf Kanäle (`tset`, `tupdate_match`,
+/// `centry_list`, `sched`, `tverlauf`): gleicher Endpunkt, gleiche
+/// Bearer-Anmeldung.
 ///
-/// Gleicher Endpunkt und gleiche Bearer-Authentifizierung wie beim
-/// Liveticker-Push — nur ein anderer Nachrichtentyp. **HTTP 404 und 400
-/// bedeuten hier nicht „kaputt", sondern „badhub kennt den Check-In noch
-/// nicht"**: bts-light kommt per Auto-Update auf alle Installationen,
-/// während badhub unabhängig deployt wird. Der Aufrufer behandelt
-/// [`PushError::Status`] mit 404/400 deshalb als „Feature nicht verfügbar"
-/// und blendet den Bereich aus, statt einen Fehler zu zeigen.
-pub async fn push_checkin_roster(
+/// Bewertet wird hier nichts; das tut [`strecke::klassifiziere`]. Ein
+/// Status 200 allein genügt nicht als Erfolg: Ein Captive Portal antwortet
+/// mit 200 und einer Anmeldeseite — deshalb wird der Körper (begrenzt)
+/// gelesen und geprüft, ob er nach badhub aussieht.
+pub async fn sende(
     client: &reqwest::Client,
     url: &str,
     password: &str,
-    roster: &CheckinRosterMessage,
-) -> Result<(), PushError> {
-    let body =
-        serde_json::to_vec(roster).expect("centry_list-Serialisierung kann nicht fehlschlagen");
-
-    let response = client
+    kanal: Kanal,
+    body: Vec<u8>,
+) -> Ausgang {
+    let bytes = body.len();
+    let beginn = std::time::Instant::now();
+    let antwort = client
         .post(url)
         .bearer_auth(password)
         .header("Content-Type", "application/json")
         .body(body)
         .send()
-        .await?;
-
-    match response.status().as_u16() {
-        200 => Ok(()),
-        _ => Err(abgelehnt(&response)),
-    }
+        .await;
+    let mut ausgang = match antwort {
+        // Ohne die Adresse: Sie ist ein Freitextfeld der Einstellungen und
+        // könnte ein Geheimnis tragen (`?key=…`) — und diese Zeile geht mit
+        // dem Diagnose-Log hinaus. Das Bearer-Passwort steht nur im Kopf und
+        // nie im Fehlertext.
+        Err(e) => Ausgang {
+            fehler: Some(e.without_url().to_string()),
+            ..Default::default()
+        },
+        Ok(response) => {
+            let status = response.status().as_u16();
+            let wand = status == 401 && ist_wand(&response);
+            let retry_after = strecke::retry_after_lesen(
+                response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok()),
+            );
+            let koerper = koerper_begrenzt(response).await;
+            Ausgang {
+                status: Some(status),
+                wand,
+                retry_after,
+                echte_antwort: strecke::ist_badhub_antwort(&koerper),
+                ..Default::default()
+            }
+        }
+    };
+    ausgang.bytes = bytes;
+    ausgang.dauer = beginn.elapsed();
+    // Messzeile je Sendung (Spec `badhub-push-entkoppeln`, Messschritt B):
+    // nur Kanal, Status, Größe, Dauer.
+    tracing::debug!(
+        kanal = kanal.name(),
+        status = ausgang.status.unwrap_or(0),
+        bytes,
+        dauer_ms = ausgang.dauer.as_millis() as u64,
+        "badhub-Sendung"
+    );
+    ausgang
 }
 
-/// Sendet den vollständigen Spielplan (`sched`) an badhub.
-///
-/// Gleicher Endpunkt, gleiche Bearer-Auth wie `tset`/`centry_list` — ein
-/// zweiter Endpunkt wäre eine zweite Fehlerquelle.
-pub async fn push_sched(
-    client: &reqwest::Client,
-    url: &str,
-    password: &str,
-    sched: &SchedMessage,
-) -> Result<(), PushError> {
-    let body = serde_json::to_vec(sched).expect("sched-Serialisierung kann nicht fehlschlagen");
-
-    let response = client
-        .post(url)
-        .bearer_auth(password)
-        .header("Content-Type", "application/json")
-        .body(body)
-        .send()
-        .await?;
-
-    match response.status().as_u16() {
-        200 => Ok(()),
-        _ => Err(abgelehnt(&response)),
+/// Antwortkörper gedeckelt lesen; mehr als [`MAX_ANTWORT_BYTES`] wird
+/// verworfen (dann ist es keine badhub-Antwort).
+async fn koerper_begrenzt(mut antwort: reqwest::Response) -> Vec<u8> {
+    let mut out = Vec::new();
+    while let Ok(Some(chunk)) = antwort.chunk().await {
+        if out.len() + chunk.len() > MAX_ANTWORT_BYTES {
+            out.clear();
+            break;
+        }
+        out.extend_from_slice(&chunk);
     }
-}
-
-/// Sendet Punktverlauf und Aufschlag (`tverlauf`, badhub ADR-0060).
-///
-/// Gleicher Endpunkt und gleiche Auth wie `tset`/`sched`. Ein altes badhub
-/// antwortet mit 400 (unbekannter Typ) — der Aufrufer pausiert dann.
-pub async fn push_verlauf(
-    client: &reqwest::Client,
-    url: &str,
-    password: &str,
-    msg: &crate::badhub::verlauf::VerlaufMessage,
-) -> Result<(), PushError> {
-    let body = serde_json::to_vec(msg).expect("tverlauf-Serialisierung kann nicht fehlschlagen");
-
-    let response = client
-        .post(url)
-        .bearer_auth(password)
-        .header("Content-Type", "application/json")
-        .body(body)
-        .send()
-        .await?;
-
-    match response.status().as_u16() {
-        200 => Ok(()),
-        _ => Err(abgelehnt(&response)),
-    }
+    out
 }
 
 /// Leitet die Branding-Endpunkt-URL aus der konfigurierten Liveticker-URL ab.
@@ -277,6 +281,8 @@ mod tests {
         format!("http://{addr}/api/live_update.php")
     }
 
+    use crate::badhub::testhilfe::{self, Antwort};
+
     fn sample_update() -> Update {
         Update::Single(TupdateMessage {
             kind: "tupdate_match",
@@ -289,18 +295,32 @@ mod tests {
         })
     }
 
+    async fn sende_probe(url: &str) -> Ausgang {
+        let (kanal, body) = update_koerper(&sample_update()).unwrap();
+        sende(&build_client(), url, "pw", kanal, body).await
+    }
+
     #[tokio::test]
     async fn push_succeeds_on_http_200() {
         let url = spawn_http_mock("200 OK").await;
-        let result = push_update(&build_client(), &url, "pw", &sample_update()).await;
-        assert!(result.is_ok(), "erwartet Ok, war {result:?}");
+        let a = sende_probe(&url).await;
+        assert_eq!(a.status, Some(200));
+        assert!(a.echte_antwort);
+        assert_eq!(
+            strecke::klassifiziere(Kanal::Tupdate, &a, false),
+            strecke::Klasse::Ok
+        );
+        assert!(a.bytes > 0);
     }
 
     #[tokio::test]
     async fn push_reports_unauthorized_on_401() {
         let url = spawn_http_mock("401 Unauthorized").await;
-        let result = push_update(&build_client(), &url, "falsch", &sample_update()).await;
-        assert!(matches!(result, Err(PushError::Unauthorized)));
+        let a = sende_probe(&url).await;
+        assert_eq!(
+            strecke::klassifiziere(Kanal::Tupdate, &a, false),
+            strecke::Klasse::Halt(strecke::HaltGrund::Passwort)
+        );
     }
 
     #[tokio::test]
@@ -318,15 +338,14 @@ mod tests {
             "WWW-Authenticate: Basic realm=\"test.badhub.de — Staging\"",
         )
         .await;
-        let err = push_update(&build_client(), &url, "pw", &sample_update())
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, PushError::BasicAuthWall),
-            "als Passwortfehler durchgegangen: {err:?}"
+        let a = sende_probe(&url).await;
+        assert!(a.wand, "als Passwortfehler durchgegangen: {a:?}");
+        assert_eq!(
+            strecke::klassifiziere(Kanal::Tset, &a, false),
+            strecke::Klasse::Halt(strecke::HaltGrund::Wand)
         );
-        // Die Meldung muss die Ursache benennen, sonst hilft die Trennung nicht.
-        let text = err.to_string();
+        // Die Meldung fürs Log muss die Ursache benennen.
+        let text = PushError::BasicAuthWall.to_string();
         assert!(text.contains("Basic Auth"), "unklare Meldung: {text}");
         assert!(
             text.contains("NICHT die Ursache"),
@@ -339,10 +358,8 @@ mod tests {
         // Gegenprobe: Ohne `WWW-Authenticate: Basic` ist der 401 die Antwort
         // von badhub selbst — dann stimmt das Liveticker-Passwort wirklich nicht.
         let url = spawn_http_mock_mit_kopfzeile("401 Unauthorized", "X-Egal: 1").await;
-        let err = push_update(&build_client(), &url, "pw", &sample_update())
-            .await
-            .unwrap_err();
-        assert!(matches!(err, PushError::Unauthorized), "war: {err:?}");
+        let a = sende_probe(&url).await;
+        assert!(!a.wand, "war: {a:?}");
     }
 
     #[tokio::test]
@@ -352,23 +369,84 @@ mod tests {
         let url =
             spawn_http_mock_mit_kopfzeile("401 Unauthorized", "WWW-Authenticate: Bearer realm=x")
                 .await;
-        let err = push_update(&build_client(), &url, "pw", &sample_update())
-            .await
-            .unwrap_err();
-        assert!(matches!(err, PushError::Unauthorized), "war: {err:?}");
+        let a = sende_probe(&url).await;
+        assert!(!a.wand, "war: {a:?}");
+    }
+
+    #[test]
+    fn push_none_sends_nothing() {
+        assert!(update_koerper(&Update::None).is_none());
+    }
+
+    // ── Spec badhub-push-entkoppeln, PR 1 ────────────────────────────────
+
+    #[tokio::test]
+    async fn haengender_server_laeuft_in_die_gesamtfrist() {
+        let mock = testhilfe::starten(vec![Antwort::Haengt]).await;
+        let client =
+            build_client_mit_fristen(Duration::from_millis(200), Duration::from_millis(300));
+        let (kanal, body) = update_koerper(&sample_update()).unwrap();
+        let beginn = std::time::Instant::now();
+        let a = sende(&client, &mock.url, "pw", kanal, body).await;
+        assert_eq!(a.status, None);
+        assert!(a.fehler.is_some());
+        assert!(beginn.elapsed() < Duration::from_secs(5));
+        assert_eq!(
+            strecke::klassifiziere(kanal, &a, false),
+            strecke::Klasse::Stoerung
+        );
     }
 
     #[tokio::test]
-    async fn push_none_sends_nothing() {
-        // Ungültige URL – darf nicht kontaktiert werden, da nichts zu senden ist.
-        let result = push_update(
-            &build_client(),
-            "http://127.0.0.1:1/never",
-            "pw",
-            &Update::None,
-        )
+    async fn captive_portal_200_html_ist_stoerung() {
+        let mock = testhilfe::starten(vec![Antwort::http(
+            "200 OK",
+            "<html><body>Bitte im WLAN anmelden</body></html>",
+        )])
         .await;
-        assert!(result.is_ok());
+        let a = sende_probe(&mock.url).await;
+        assert_eq!(a.status, Some(200));
+        assert!(!a.echte_antwort);
+        assert_eq!(
+            strecke::klassifiziere(Kanal::Tset, &a, false),
+            strecke::Klasse::Stoerung
+        );
+    }
+
+    #[tokio::test]
+    async fn status_429_liefert_retry_after() {
+        let mock = testhilfe::starten(vec![
+            Antwort::status("429 Too Many Requests").mit_kopf("Retry-After: 900")
+        ])
+        .await;
+        let a = sende_probe(&mock.url).await;
+        assert_eq!(a.retry_after, Some(900));
+        assert_eq!(
+            strecke::klassifiziere(Kanal::Tupdate, &a, false),
+            strecke::Klasse::Gedrosselt(Duration::from_secs(900))
+        );
+    }
+
+    #[tokio::test]
+    async fn antwortkoerper_wird_begrenzt_gelesen() {
+        // Ein riesiger „Erfolg" ist nicht badhub — und wird nicht ganz in
+        // den Speicher geholt.
+        let riesig = format!(r#"{{"type":"answer","x":"{}"}}"#, "a".repeat(200 * 1024));
+        let mock = testhilfe::starten(vec![Antwort::http("200 OK", &riesig)]).await;
+        let a = sende_probe(&mock.url).await;
+        assert_eq!(a.status, Some(200));
+        assert!(!a.echte_antwort);
+    }
+
+    #[tokio::test]
+    async fn grosser_koerper_kommt_vollstaendig_an() {
+        let mock = testhilfe::starten(vec![Antwort::ok()]).await;
+        let body = vec![b'x'; 3 * 1024 * 1024];
+        let a = sende(&build_client(), &mock.url, "pw", Kanal::Tset, body).await;
+        assert_eq!(a.status, Some(200));
+        assert_eq!(a.bytes, 3 * 1024 * 1024);
+        assert_eq!(mock.anfragen()[0].koerper.len(), 3 * 1024 * 1024);
+        assert_eq!(mock.anzahl(), 1);
     }
 
     #[test]

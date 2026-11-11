@@ -110,6 +110,11 @@ pub struct AppState {
     /// jedem Speichern neu gebaut). Geht beim Neustart verloren — der Server
     /// kennt den Stand. `Arc`, weil der Upload-Task ihn fortschreibt.
     pub tp_upload: Arc<Mutex<TpUploadStatus>>,
+    /// Was die badhub-Strecke über den Neustart der Übertragung hinweg
+    /// behält (Spec `badhub-push-entkoppeln`): Logo-Stempel, „war gestört",
+    /// Drossel-Frist. Nur im Speicher — die `SyncEngine` wird bei jedem
+    /// Speichern neu gebaut, die App-Laufzeit nicht.
+    pub push_merker: Arc<Mutex<crate::badhub::strecke::PushMerker>>,
     /// Das vom Updater-Plugin geprüfte Update — nur damit lässt sich das
     /// Paket über den Plugin-Weg (Installer mit Neustart) einbauen.
     pub update_handle: Mutex<Option<tauri_plugin_updater::Update>>,
@@ -141,13 +146,86 @@ fn status_from(outcome: &SyncOutcome) -> SyncStatus {
             "BTP lieferte einen leeren Turnier-Stand – verworfen, warte auf Bestätigung"
                 .to_string(),
         ),
-        SyncOutcome::PushError(e) => ("push_error", format!("Push fehlgeschlagen: {e}")),
+        // Die Texte der gestörten Strecke sind verbindlich (Spec
+        // `badhub-push-entkoppeln`, L8) und stehen wortgleich im Handbuch.
+        // Orange, solange es von selbst weitergeht; rot nur, wenn die
+        // Turnierleitung handeln muss.
+        SyncOutcome::PushGestoert { sekunden } => (
+            "warn",
+            format!(
+                "Internet-Strecke gestört — Halle läuft weiter, nächster Versuch in {sekunden} s"
+            ),
+        ),
+        SyncOutcome::PushGedrosselt { uhrzeit } => (
+            "warn",
+            format!(
+                "badhub hat die Anmeldung vorübergehend gesperrt — nächster Versuch um {uhrzeit}"
+            ),
+        ),
+        SyncOutcome::PushAngehalten { wand: false } => (
+            "push_error",
+            "Übertragung an badhub angehalten: Passwort prüfen".to_string(),
+        ),
+        SyncOutcome::PushAngehalten { wand: true } => (
+            "push_error",
+            "Übertragung an badhub angehalten: Der Server verlangt eine eigene Anmeldung"
+                .to_string(),
+        ),
+        SyncOutcome::PushAbgelehnt { status, sekunden } => (
+            "warn",
+            format!(
+                "badhub lehnt den Turnierstand ab (HTTP {status}) — nächster Versuch in {sekunden} s"
+            ),
+        ),
     };
     SyncStatus {
         running: true,
         kind: kind.to_string(),
         message,
         updated_at_ms: now_ms(),
+    }
+}
+
+/// Kennung des badhub-Ziels, an die Logo-Stempel und „war gestört" gebunden
+/// sind: Adresse, Passwort und Turnier. Das Passwort geht nur als Hash-Marke
+/// ein — die Kennung bleibt im Arbeitsspeicher, aber sie soll auch dort
+/// nicht das Passwort selbst sein.
+fn push_ziel(config: &AppConfig) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    config.badhub.password.hash(&mut h);
+    format!(
+        "{}|{:x}|{}",
+        config.badhub.url,
+        h.finish(),
+        config.tournament_uuid_kanonisch().unwrap_or_default()
+    )
+}
+
+/// Schreibt BTP-Fehler des Sync-Zyklus flankengesteuert ins Log: eine Zeile
+/// beim Beginn, höchstens alle zehn Minuten eine Erinnerung, eine Zeile bei
+/// der Rückkehr — statt einer je 5-s-Zyklus oder (wie bisher) gar keiner.
+fn btp_fehler_loggen(flanke: &mut crate::badhub::strecke::Flanke, outcome: &SyncOutcome) {
+    use crate::badhub::strecke::FlankenZeile;
+    let fehler = match outcome {
+        SyncOutcome::BtpError(e) => Some(e.as_str()),
+        _ => None,
+    };
+    let zustand = fehler.map(|_| "BTP nicht erreichbar");
+    match flanke.melden(zustand, std::time::Instant::now()) {
+        Some(FlankenZeile::Beginn | FlankenZeile::Wechsel) => {
+            tracing::warn!("BTP nicht erreichbar: {}", fehler.unwrap_or_default())
+        }
+        Some(FlankenZeile::Erinnerung { seit, versuche }) => tracing::warn!(
+            "BTP weiter nicht erreichbar: seit {} min, {versuche} Versuche ({})",
+            seit.as_secs() / 60,
+            fehler.unwrap_or_default()
+        ),
+        Some(FlankenZeile::Ende { dauer, versuche }) => tracing::info!(
+            "BTP wieder erreichbar nach {} s und {versuche} Versuchen",
+            dauer.as_secs()
+        ),
+        None => {}
     }
 }
 
@@ -2360,9 +2438,24 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     let app_handle = app.clone();
     let sync_config = config.clone();
     let sync_tablet = tablet.clone();
+    // Die Strecke zu badhub entsteht je Start neu — ein Halt (abgelehntes
+    // Passwort) endet damit beim Speichern der Einstellungen. Geteilt
+    // zwischen Sync-Zyklus und den Punkt-Arbeitern der Tablets.
+    let push_tor = crate::badhub::strecke::Strecke::neu(
+        state.push_merker.clone(),
+        &config.badhub.url,
+        &push_ziel(&config),
+        std::time::Instant::now(),
+    )
+    .als_tor();
+    let sync_tor = push_tor.clone();
     let handle = tauri::async_runtime::spawn(async move {
         let http = push::build_client();
-        let mut engine = SyncEngine::new();
+        let mut engine = SyncEngine::mit_tor(sync_tor);
+        // BTP-Fehler flankengesteuert ins Diagnose-Log: bisher standen sie
+        // nur in der Statuszeile und waren nach dem Turnier nicht mehr
+        // nachzuvollziehen.
+        let mut btp_flanke = crate::badhub::strecke::Flanke::default();
         // Check-In-Lese-Weg fürs TL-Panel „Anfangszeiten": als eigener,
         // je Zyklus gespawnter Tick statt Teil von `run_once` — er drosselt
         // sich selbst auf höchstens minütlich, hängt nicht hinter den
@@ -2438,6 +2531,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
                     );
                 }
             }
+            btp_fehler_loggen(&mut btp_flanke, &outcome);
             let mut status = status_from(&outcome);
             status.running = true;
             *app_handle
@@ -2461,20 +2555,23 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
         .path()
         .app_log_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let ctx = Arc::new(crate::tablet::server::ServerCtx::new(
-        tablet,
-        config,
-        push::build_client(),
-        monitor_dir,
-        cfg_path,
-        assignments_path,
-        log_dir,
-        // Dasselbe Arc wie `AppState.config` — siehe Feld-Kommentar dort:
-        // `ServerCtx::mutate_app_config` (Panel-Profile) und `mutate_config`
-        // (Tauri-Commands) mutieren so einen einzigen In-Memory-Stand statt
-        // zweier gegeneinander driftender Kopien.
-        state.config.clone(),
-    ));
+    let ctx = Arc::new(
+        crate::tablet::server::ServerCtx::new(
+            tablet,
+            config,
+            push::build_client(),
+            monitor_dir,
+            cfg_path,
+            assignments_path,
+            log_dir,
+            // Dasselbe Arc wie `AppState.config` — siehe Feld-Kommentar dort:
+            // `ServerCtx::mutate_app_config` (Panel-Profile) und `mutate_config`
+            // (Tauri-Commands) mutieren so einen einzigen In-Memory-Stand statt
+            // zweier gegeneinander driftender Kopien.
+            state.config.clone(),
+        )
+        .mit_push_tor(push_tor),
+    );
     // LAN und Cloud sind unabhängig voneinander schaltbar – im
     // Doppelmodus (`LanAndCloud`) laufen beide Wege für dieselbe
     // Turnierinstanz parallel. `lan_enabled()`/`cloud_enabled()` liefern
@@ -9558,5 +9655,71 @@ mod teile_tests {
         let mut c = cache.lock().unwrap();
         assert!(c.holen(&schluessel[1], now_ms()).is_some());
         assert!(c.holen(&schluessel[2], now_ms()).is_some());
+    }
+
+    // Spec `badhub-push-entkoppeln`, L8: Diese Texte sind verbindlich und
+    // stehen wortgleich im Handbuch (`docs/oberflaechen.md`).
+    #[test]
+    fn status_texte_fuer_gestoert_gedrosselt_angehalten() {
+        let zeile = |o: SyncOutcome| {
+            let s = status_from(&o);
+            (s.kind, s.message)
+        };
+        assert_eq!(
+            zeile(SyncOutcome::PushGestoert { sekunden: 20 }),
+            (
+                "warn".to_string(),
+                "Internet-Strecke gestört — Halle läuft weiter, nächster Versuch in 20 s"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            zeile(SyncOutcome::PushGedrosselt {
+                uhrzeit: "14:35".into()
+            }),
+            (
+                "warn".to_string(),
+                "badhub hat die Anmeldung vorübergehend gesperrt — nächster Versuch um 14:35"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            zeile(SyncOutcome::PushAngehalten { wand: false }),
+            (
+                "push_error".to_string(),
+                "Übertragung an badhub angehalten: Passwort prüfen".to_string()
+            )
+        );
+        assert_eq!(
+            zeile(SyncOutcome::PushAngehalten { wand: true }),
+            (
+                "push_error".to_string(),
+                "Übertragung an badhub angehalten: Der Server verlangt eine eigene Anmeldung"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            zeile(SyncOutcome::PushAbgelehnt {
+                status: 413,
+                sekunden: 60
+            }),
+            (
+                "warn".to_string(),
+                "badhub lehnt den Turnierstand ab (HTTP 413) — nächster Versuch in 60 s"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn push_ziel_traegt_das_passwort_nicht_im_klartext() {
+        let mut cfg = AppConfig::default();
+        cfg.badhub.url = "https://badhub.de/api/live_update.php".into();
+        cfg.badhub.password = "geheim-1234".into();
+        let a = push_ziel(&cfg);
+        assert!(!a.contains("geheim"), "{a}");
+        // Ein anderes Passwort ist ein anderes Ziel.
+        cfg.badhub.password = "anders".into();
+        assert_ne!(a, push_ziel(&cfg));
     }
 }

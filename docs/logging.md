@@ -23,7 +23,16 @@ Protokolliert werden u. a.:
   nicht abschließen konnte, hinterließ auf dem Turnier-PC keine Spur, und die
   Ursache ließ sich nur am Gerät selbst finden (Feldtest 22.08.2026). Der
   Grund steht zusätzlich im Tablet-Log unter `submit_rejected`.
-- fehlgeschlagene Liveticker-Pushes
+- **Störungen der badhub-Strecke und BTP-Fehler** (seit v0.9.381) —
+  flankengesteuert: je Zustandswechsel eine Zeile (`badhub-Strecke: gestoert`,
+  `… gedrosselt`, `… angehalten (Passwort)`, `… tset abgelehnt`,
+  `BTP nicht erreichbar`), solange der Zustand anhält höchstens alle zehn
+  Minuten eine Erinnerung mit der Zahl der Versuche, bei der Rückkehr eine
+  Zeile mit der Dauer. Die Zeilen nennen Kanal, Klasse, HTTP-Status, Größe
+  und Dauer — keinen Körper, keinen Namen, kein Passwort. Bis v0.9.380 stand
+  ein gescheiterter `tset` und ein BTP-Fehler **gar nicht** im Log (nur in der
+  Statuszeile), die additiven Kanäle dagegen in jedem 5-s-Zyklus. Details:
+  [liveticker-push.md](liveticker-push.md).
 - **Perf-Zeile der Anzeige-Strecke** (seit v0.9.235, siehe unten)
 
 ### Stillstands-Wächter der Anzeigen (seit v0.9.255)

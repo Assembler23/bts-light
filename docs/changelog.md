@@ -4,6 +4,28 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.381
+
+- **Störungen der Internet-Strecke kosten die Halle weniger.** Antwortete
+  badhub nicht, versuchte bts-light es bisher alle fünf Sekunden mit dem
+  vollen Turnierstand samt Logo, und jeder Versuch hielt den Abgleich mit BTP
+  auf. Jetzt wächst der Abstand zwischen den Versuchen (5, 10, 20, 40, dann
+  60 Sekunden), sie gehen ohne Logo hinaus, und Meldeliste, Spielplan und
+  Punktverlauf warten, bis die Strecke wieder steht. In der Statuszeile steht
+  dann „Internet-Strecke gestört — Halle läuft weiter".
+- **Ein falsches Passwort sperrt die Halle nicht mehr aus.** Lehnt badhub das
+  Passwort ab, hält die Übertragung an, bis die Einstellungen gespeichert
+  werden — vorher lief sie weiter, und badhub sperrte die Hallen-Adresse nach
+  wenigen Sekunden für eine Viertelstunde, bei längerem Betrieb für einen Tag.
+  Sperrt badhub trotzdem, wartet bts-light die genannte Zeit ab (höchstens
+  eine Stunde) und nennt in der Statuszeile die Uhrzeit des nächsten Versuchs.
+- **Eine Anmeldeseite im WLAN gilt nicht mehr als Erfolg.** Antwortet statt
+  badhub die Anmeldeseite eines Hotel- oder Hallen-WLANs, hielt bts-light die
+  Daten bisher für übertragen.
+- BTP- und Übertragungsfehler stehen jetzt im Diagnose-Log: je Wechsel eine
+  Zeile statt keiner oder einer alle fünf Sekunden. Erster Schritt der Spec
+  `badhub-push-entkoppeln` (ADR 0086).
+
 ## v0.9.380
 
 - **Der Verbindungsaufbau zur Cloud hängt nicht mehr fest.** Hinter einem
