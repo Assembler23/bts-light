@@ -508,7 +508,7 @@ impl Tx {
     /// nächsten Frame, der Verlauf durch den kompletten Abgleich, die
     /// Anmeldung eines Tablets beim Wiederverbinden des Turnier-PCs.
     fn send_nachrangig(&self, msg: Message) -> Result<(), KanalFehler> {
-        if self.sender.capacity() < self.sender.max_capacity() / 4 {
+        if self.sender.capacity() <= self.sender.max_capacity() / 4 {
             use std::sync::atomic::Ordering;
             if !self.ueberlauf.knapp_gemeldet.swap(true, Ordering::Relaxed) {
                 tracing::warn!(
@@ -7989,7 +7989,7 @@ mod tests {
                 angenommen += 1;
             }
         }
-        assert_eq!(angenommen, 13, "ein Viertel bleibt frei");
+        assert_eq!(angenommen, 12, "ein Viertel bleibt frei");
         assert!(
             tokio::time::timeout(Duration::from_millis(50), wache.warten())
                 .await
@@ -7998,7 +7998,7 @@ mod tests {
         );
         // Was kein Tablet auslösen kann (Ergebnis, Befehl der Turnierleitung),
         // hat die Reserve.
-        for _ in 0..3 {
+        for _ in 0..4 {
             assert_eq!(tx.send(Message::Text("ergebnis".into())), Ok(()));
         }
         // Nimmt der Turnier-PC wieder ab, gehen auch Tablet-Frames wieder.
@@ -8028,7 +8028,7 @@ mod tests {
         );
         assert!(host_tx.sender.capacity() >= KANAL_HOST / 4);
         // Nicht leer bestanden: Die Punkte kamen im Kanal an, bis zur Reserve.
-        assert!(host_tx.sender.capacity() <= KANAL_HOST / 4 + 1);
+        assert_eq!(host_tx.sender.capacity(), KANAL_HOST / 4);
     }
 
     #[tokio::test]
