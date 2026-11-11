@@ -31,6 +31,7 @@ use relay_proto::{
 use crate::tablet::monitor;
 use crate::tablet::server::{handle_score, match_brief, process_result, ServerCtx};
 use crate::tablet::state::{MonitorNudge, MonitorNudgeTx, TabletState};
+use crate::tablet::ws_verbindung::{self, Backoff, Schluss, SitzungsEnde};
 
 /// Öffentliche Relay-Basis – der Host-Pfad hängt die `install_id` an.
 /// Produktiv- oder Testsystem, abgeleitet aus der Push-URL der
@@ -57,7 +58,7 @@ const CONTROL_TICK: Duration = Duration::from_secs(3);
 
 /// Read-Idle-Schwelle (Hebel D / ADR 0020, Option A): Bleibt jedes
 /// Lebenszeichen des Relays (Frame **oder** Relay-Ping) länger aus, gilt die
-/// Verbindung als half-open tot → `serve` gibt `Err` zurück, `run`
+/// Verbindung als half-open tot → die Sitzung endet als Abriss, `run`
 /// reconnectet (frischer Socket, Backoff-Reset). **Kein eigener Client-Ping.**
 ///
 /// **Kopplungs-Vertrag:** Diese Schwelle setzt voraus, dass der Relay
@@ -412,10 +413,11 @@ where
 }
 
 /// Verbindet bts-light dauerhaft zum Cloud-Relay – mit Reconnect-Backoff
-/// (1 s → 30 s). Läuft, bis der Task abgebrochen wird (`stop_sync`).
+/// (siehe [`ws_verbindung::Backoff`]). Läuft, bis der Task abgebrochen wird
+/// (`stop_sync`).
 pub async fn run(ctx: Arc<ServerCtx>, install_id: String) {
     let url = format!("{}/{install_id}/host-ws", relay_host());
-    let mut backoff = 1u64;
+    let mut backoff = Backoff::default();
     // Fernbefehl-Wächter über ALLE Sitzungen hinweg (Spec
     // `tablet-version-abgleich`, Review-Fund 24.08.2026).
     //
@@ -435,40 +437,43 @@ pub async fn run(ctx: Arc<ServerCtx>, install_id: String) {
     // hinweg: Ein BTP-Write oder Upload endet nicht mit der Verbindung.
     let dienste = Dienste::new(ergebnis_ueber_process_result());
     loop {
-        if let Err(e) = serve(
-            &ctx,
-            &url,
-            &install_id,
-            &mut backoff,
-            &mut reload_wacht,
-            &dienste,
-        )
-        .await
-        {
-            tracing::warn!("Relay-Verbindung beendet: {e}");
-        }
-        tracing::info!("Relay-Reconnect in {backoff}s");
-        tokio::time::sleep(Duration::from_secs(backoff)).await;
-        backoff = (backoff * 2).min(30);
+        let ende = serve(&ctx, &url, &install_id, &mut reload_wacht, &dienste).await;
+        let pause = ws_verbindung::mit_jitter(backoff.pause_nach(ende), ws_verbindung::zufall());
+        tracing::info!("Relay-Reconnect in {:.1} s ({ende:?})", pause.as_secs_f32());
+        tokio::time::sleep(pause).await;
     }
 }
 
-/// Eine Relay-Sitzung: verbinden, Frames austauschen, bis die Verbindung
-/// endet. `backoff` wird bei erfolgreichem Verbindungsaufbau zurückgesetzt.
+/// Eine Relay-Sitzung: verbinden (mit Frist), Frames austauschen, bis die
+/// Verbindung endet. Liefert, wie sie ausging — daraus rechnet `run` die
+/// Pause bis zum nächsten Versuch.
 async fn serve(
     ctx: &Arc<ServerCtx>,
     url: &str,
     install_id: &str,
-    backoff: &mut u64,
     reload_wacht: &mut crate::tablet::state::ReloadWacht,
     dienste: &Dienste,
-) -> Result<(), String> {
-    let (stream, _) = tokio_tungstenite::connect_async(url)
-        .await
-        .map_err(|e| e.to_string())?;
-    *backoff = 1;
+) -> SitzungsEnde {
+    let stream = match ws_verbindung::verbinden(url, ws_verbindung::VERBINDUNGS_FRIST).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            tracing::warn!("Relay nicht erreichbar: {e}");
+            return SitzungsEnde::AufbauGescheitert;
+        }
+    };
     tracing::info!("Mit Cloud-Relay verbunden");
-    sitzung_fahren(ctx, stream, install_id, reload_wacht, dienste).await
+    let beginn = tokio::time::Instant::now();
+    let schluss = match sitzung_fahren(ctx, stream, install_id, reload_wacht, dienste).await {
+        Ok(schluss) => {
+            tracing::info!("Relay-Verbindung beendet ({schluss:?})");
+            schluss
+        }
+        Err(e) => {
+            tracing::warn!("Relay-Verbindung beendet: {e}");
+            Schluss::Abriss
+        }
+    };
+    ws_verbindung::einordnen(beginn.elapsed(), schluss)
 }
 
 /// Der Kern einer Sitzung, ohne den Verbindungsaufbau — generisch über den
@@ -487,7 +492,7 @@ async fn sitzung_fahren<S>(
     install_id: &str,
     reload_wacht: &mut crate::tablet::state::ReloadWacht,
     dienste: &Dienste,
-) -> Result<(), String>
+) -> Result<Schluss, String>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -572,7 +577,8 @@ where
             // Relays schon im Puffer lag.
             biased;
             incoming = read.next() => {
-                let Some(msg) = incoming else { break };
+                // Strom ohne Close-Frame zu Ende: ein Abriss.
+                let Some(msg) = incoming else { return Ok(Schluss::Abriss) };
                 let msg = msg.map_err(|e| e.to_string())?;
                 // Lebenszeichen des Relays: deckt Text-Frame + Ping (+ alle
                 // übrigen Frames) ab — der Read-Idle-Wächter braucht keinen
@@ -585,7 +591,11 @@ where
                         }
                     }
                     WsMessage::Ping(p) => { let _ = tx.send(WsMessage::Pong(p)); }
-                    WsMessage::Close(_) => break,
+                    // Der Close-Code sagt, WARUM der Relay schließt (belegter
+                    // Platz) — der Backoff unterscheidet danach.
+                    WsMessage::Close(rahmen) => {
+                        return Ok(Schluss::Close(rahmen.map(|r| u16::from(r.code))));
+                    }
                     _ => {}
                 }
             }
@@ -647,15 +657,15 @@ where
             }
             _ = idle_ticker.tick() => {
                 // Half-open erkannt: seit RELAY_READ_IDLE kein Frame/Ping.
-                // `Err` beendet `serve` → `run` öffnet einen frischen Socket
-                // (Backoff resettet bei Erfolg auf ~1 s). Kein Client-Ping.
+                // `Err` beendet die Sitzung → `run` öffnet einen frischen
+                // Socket (nach einer stabilen Sitzung nach rund 1 s). Kein
+                // Client-Ping.
                 if is_stale(last_incoming, tokio::time::Instant::now(), RELAY_READ_IDLE) {
                     return Err("Relay-Read-Idle: 15 s ohne Antwort → reconnect".into());
                 }
             }
         }
     }
-    Ok(())
 }
 
 /// Stößt den Upload des Court-Monitor-Datensatzes (Werbung +
@@ -2720,7 +2730,7 @@ mod tests {
         ctx: Arc<ServerCtx>,
         client: TestStrom,
         dienste: Arc<Dienste>,
-    ) -> tokio::task::JoinHandle<Result<(), String>> {
+    ) -> tokio::task::JoinHandle<Result<Schluss, String>> {
         tokio::spawn(async move {
             let mut wacht = crate::tablet::state::ReloadWacht::beim_verbinden(&ctx.tablet);
             sitzung_fahren(&ctx, client, "ns", &mut wacht, &dienste).await

@@ -1107,6 +1107,45 @@ Der Fingerabdruck „schon hochgeladen" gilt weiter je Sitzung.
 Nicht gelöst: Ein sehr großer Zettel-Abruf über einen schmalen Uplink kann
 das Senden länger als 15 s belegen (Roadmap).
 
+## Verbindungsaufbau: Frist und Backoff (seit v0.9.380)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 2. Gemeinsamer Helfer
+`tablet/ws_verbindung.rs` für den Host (`relay_client.rs`) und den Träger der
+fernen Halle (`carrier.rs`).
+
+**Frist:** 10 s für DNS, TCP, TLS und Upgrade zusammen. Vorher hing
+`connect_async` hinter einem Captive Portal unbegrenzt.
+
+**Backoff** (reiner Automat, `Backoff::pause_nach`):
+
+| Ausgang des Versuchs | Nächste Pause |
+|---|---|
+| Sitzung stand mindestens 30 s | zurück auf 1 s |
+| Aufbau gescheitert (Netz, Frist, 502) | verdoppeln bis 30 s |
+| Abriss binnen 30 s | verdoppeln bis 30 s |
+| Close mit Code 4409 („Host belegt") | verdoppeln, höchstens 5 s |
+| sauberer Close binnen 30 s ohne Grund | verdoppeln, höchstens 5 s |
+| Abriss in den ersten 5 s nach dem Aufbau | wie Close ohne Grund — der Close-Frame einer Abweisung kann unterwegs verloren gehen |
+
+Jede Pause wird um ± 20 % gestreut, damit nach einem Relay-Neustart nicht
+alle Turnier-PCs im selben Augenblick kommen.
+
+Bis v0.9.379 sprang die Pause schon nach dem bloßen Handshake auf 1 s zurück.
+Schloss der Relay gleich wieder (belegter Platz), entstand ein
+Dauer-Reconnect im Sekundentakt. Die kurze Obergrenze bei Abweisung ist
+Absicht: Nach einem Netzwechsel ist die eigene tote Verbindung bis zu 15 s
+lang der „andere" Host; wer dicht nachfragt, übernimmt nach rund 20 s.
+
+Den Close-Code 4409 sendet der Relay erst mit PR 7 der Spec. Bis dahin (und
+gegenüber einem älteren Relay) schließt er ohne Grund — die letzte Zeile der
+Tabelle behandelt das gleich.
+
+**Träger der fernen Halle:** dieselbe Frist, derselbe Automat. „Stabil" zählt
+dort erst ab dem `Ready` des Relays. Zusätzlich: 20 s Frist je gesendeter
+Nachricht; Frames ohne bereiten Träger und Nutzlast über 160 KiB werden schon
+im Slave verworfen (Letzteres einmal im Log gemeldet); Reste der alten Sitzung
+im Ausgang werden vor dem `Hello` geleert.
+
 ## Trägerverbindung der fernen Halle (`/{ns}/carrier-ws`)
 
 Vorbereitet für die **Transport-Bündelung** der fernen Halle

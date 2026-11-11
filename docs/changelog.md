@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.380
+
+- **Der Verbindungsaufbau zur Cloud hängt nicht mehr fest.** Hinter einem
+  Hotel- oder Hallen-WLAN mit Anmeldeseite konnte der Versuch, den Relay zu
+  erreichen, unbegrenzt stehen bleiben. Jetzt gibt der Turnier-PC nach zehn
+  Sekunden auf und versucht es erneut. Die Pause zwischen den Versuchen
+  wächst wie bisher bis 30 Sekunden, springt aber erst zurück, wenn die
+  Verbindung eine halbe Minute gehalten hat — vorher genügte der bloße
+  Aufbau, und eine sofort wieder geschlossene Verbindung wurde im
+  Sekundentakt neu versucht. Ist der Platz des Turnier-PCs am Relay noch
+  belegt (etwa nach einem Netzwechsel), fragt er höchstens alle fünf Sekunden
+  nach. Dasselbe gilt für die Verbindung der fernen Halle. Zweiter Schritt
+  der Spec `relay-haerten`.
+
 ## v0.9.379
 
 - **Ein träges BTP wirft den Turnier-PC nicht mehr aus der Cloud.** Kam ein

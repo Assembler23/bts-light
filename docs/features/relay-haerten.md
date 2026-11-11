@@ -372,6 +372,7 @@ Die Verbindung wird in Leser und Schreiber geteilt.
 | Close-Grund „Host belegt" | verdoppeln, höchstens 5 s |
 | sauberer Close binnen 30 s ohne Grund | verdoppeln, höchstens 5 s |
 | Abriss binnen 30 s | verdoppeln bis 30 s |
+| Abriss in den ersten 5 s (aus dem Review von PR 2) | wie Close ohne Grund — der Close-Frame einer Abweisung kann verloren gehen |
 
 Die vierte Zeile deckt den alten Relay, der ohne Grund schließt. Jede Pause bekommt
 ± 20 % Jitter.
