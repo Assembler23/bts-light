@@ -452,6 +452,159 @@ const KANAL_TRAEGER: usize = 1024;
 /// Kanal des Turnier-PCs.
 const RESULT_BODY_MAX: usize = 16 * 1024;
 
+// ── Host-Verlust auf den Anzeigen (Spec relay-haerten, PR 7; ADR 0088) ──
+//
+// Bis v0.9.387 zeigte eine Anzeige ohne Turnier-PC entweder den
+// eingefrorenen Stand (solange ein Tablet den Namespace hielt) oder eine
+// leere Leerlauf-Seite — beides sah aus wie „alles in Ordnung". Jetzt
+// gilt: 20 s lang den letzten Stand halten (ein Wackler bleibt
+// unsichtbar), danach ehrlich 503.
+
+/// So lange zeigen die Anzeigen nach dem Verlust des Turnier-PCs noch den
+/// letzten Stand — und so lange nach dem Start des Relays gilt ein
+/// fehlender Namespace als „kommt gleich wieder".
+const HOST_KARENZ_MS: u64 = 20_000;
+
+/// So lange hält der Relay die Daten eines Turniers ohne Turnier-PC (Spec
+/// relay-haerten, PR 8; ADR 0089). Lang genug für jede Störung eines
+/// Turniertags (Neustart des PCs, Router-Ausfall, Mittagspause mit
+/// zugeklapptem Laptop) — danach liegen keine Namen, Bilder und Listen
+/// eines beendeten Turniers mehr im Speicher.
+const DATEN_FRIST_MS: u64 = 60 * 60 * 1000;
+
+/// Ein Brief ohne Personen: nur die Spielkennung und „beendet". Bleibt nach
+/// dem Leeren an einem Feld stehen, an dem noch ein Tablet hängt — ohne
+/// Eintrag verwürfe der Stale-Filter jeden weiteren Punkt des Tablets, und
+/// bei der Rückkehr des Turnier-PCs gälte „anderes Spiel" (Stand auf 0:0).
+fn anonymer_brief(match_id: i64, finalized: bool) -> MatchBrief {
+    serde_json::from_value(serde_json::json!({
+        "matchId": match_id,
+        "teamA": [],
+        "teamB": [],
+        "eventLabel": "",
+        "bestOfSets": 0,
+        "targetScore": 0,
+        "finalized": finalized,
+    }))
+    .expect("anonymer Brief ist lesbar")
+}
+
+/// Takt des Aufräum-Tasks ([`fegen`]).
+const FEGEN_TAKT: Duration = Duration::from_secs(5);
+
+/// Close-Code für einen zweiten Turnier-PC am selben Namespace.
+const CLOSE_HOST_BELEGT: u16 = 4409;
+/// Close-Code am Namespace-Limit.
+const CLOSE_VOLL: u16 = 4429;
+
+/// Was eine Stand-Route gerade antworten darf.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lage {
+    /// Turnier-PC verbunden — oder erst so kurz weg, dass der gehaltene
+    /// Stand noch gilt.
+    Offen,
+    /// Kein Turnier-PC: 503.
+    Gesperrt,
+    /// Der Relay läuft erst seit Sekunden und kennt den Namespace (noch)
+    /// nicht: Wer eine Marke mitbringt, bekommt „unverändert" — die Seite
+    /// hat ihren Stand noch, der Relay nach dem Neustart nicht.
+    StartKarenz,
+}
+
+/// Die Lage eines Namespace — reine Funktion von Zustand und Uhr.
+fn anzeige_lage(namespace: Option<&Namespace>, jetzt: u64, start_ms: u64) -> Lage {
+    match namespace {
+        Some(n) if n.host.is_some() => Lage::Offen,
+        Some(n) if !n.karenz_abgelaufen(jetzt) => Lage::Offen,
+        Some(_) => Lage::Gesperrt,
+        None if jetzt.saturating_sub(start_ms) < HOST_KARENZ_MS => Lage::StartKarenz,
+        None => Lage::Gesperrt,
+    }
+}
+
+/// Die Antwort „kein Turnier-PC". Der Grund steht im RUMPF, nicht in einem
+/// Kopf: Die Slave-Brücke der fernen Halle reicht eigene Köpfe nicht durch.
+fn host_weg_antwort() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::RETRY_AFTER, "2"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        r#"{"grund":"host_weg"}"#,
+    )
+        .into_response()
+}
+
+/// Entscheidet für eine Stand-Route, ob sie gesperrt antwortet. Muss unter
+/// dem Schloss und VOR Cache-Blick, Bau und Markenvergleich stehen:
+/// Gesperrt gibt es weder 304 noch Cache-Treffer.
+fn sperre(lage: Lage, headers: &axum::http::HeaderMap) -> Option<Response> {
+    match lage {
+        Lage::Offen => None,
+        Lage::Gesperrt => Some(host_weg_antwort()),
+        Lage::StartKarenz if headers.contains_key(header::IF_NONE_MATCH) => Some(
+            (
+                StatusCode::NOT_MODIFIED,
+                [(header::CACHE_CONTROL, "no-store")],
+            )
+                .into_response(),
+        ),
+        Lage::StartKarenz => Some(host_weg_antwort()),
+    }
+}
+
+/// Stößt jede Monitor-Verbindung des Namespace einmal an (Karenz-Ende und
+/// Rückkehr des Turnier-PCs): Die Anzeigen holen sofort ab und sehen die
+/// neue Lage, statt auf ihren Sicherheitsabruf zu warten.
+fn alle_monitore_anstossen(namespace: &mut Namespace) {
+    let mut felder: Vec<i64> = namespace
+        .monitor_subs
+        .keys()
+        .chain(namespace.monitor_seq.keys())
+        .copied()
+        .collect();
+    felder.sort_unstable();
+    felder.dedup();
+    if felder.is_empty() && !namespace.monitor_subs_all.is_empty() {
+        felder.push(0);
+    }
+    for feld in felder {
+        notify_monitor(namespace, feld);
+    }
+}
+
+/// Der Aufräum-Lauf: meldet das Karenz-Ende einmal an die Anzeigen und
+/// entfernt Namespaces, die niemand mehr braucht. Läuft alle
+/// [`FEGEN_TAKT`] aus `main`.
+async fn fegen(broker: &Broker, jetzt: u64) {
+    let mut map = broker.namespaces.lock().await;
+    let mut leer = Vec::new();
+    for (ns, namespace) in map.iter_mut() {
+        if namespace.host.is_some() {
+            continue;
+        }
+        if namespace.karenz_abgelaufen(jetzt) && !namespace.karenz_gemeldet {
+            namespace.karenz_gemeldet = true;
+            alle_monitore_anstossen(namespace);
+        }
+        if namespace.daten_frist_abgelaufen(jetzt) && !namespace.geleert {
+            namespace.leeren();
+            tracing::info!(
+                "Namespace '{kennung}': seit 60 min ohne Turnier-PC — Turnierdaten geleert",
+                kennung = kurz(ns)
+            );
+        }
+        if namespace.is_empty_um(jetzt) {
+            leer.push(ns.clone());
+        }
+    }
+    for ns in leer {
+        namespace_aufraeumen_um(&mut map, &ns, jetzt);
+    }
+}
+
 /// Warum eine Nachricht nicht in den Kanal ging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KanalFehler {
@@ -799,6 +952,17 @@ struct Namespace {
     /// (Turnier-Befund 19.07.: tote TCP-Verbindung nach Netzwechsel hielt
     /// den Slot 17 Minuten — der Master war so lange ausgesperrt).
     host_last_seen: u64,
+    /// Seit wann dieser Namespace ohne Turnier-PC ist (Unix-ms); `None`,
+    /// solange einer verbunden ist. Beim Freigeben des Slots auf das LETZTE
+    /// LEBENSZEICHEN gesetzt — ein stumm gestorbener Host ist so rund 20 s
+    /// nach seinem letzten Lebenszeichen gesperrt, nicht nach 15 + 20 s. Ein
+    /// von einem Tablet angelegter Namespace beginnt mit „weg seit jetzt".
+    host_weg_seit: Option<u64>,
+    /// Das Karenz-Ende ist den Anzeigen schon gemeldet ([`fegen`]).
+    karenz_gemeldet: bool,
+    /// Die Turnierdaten sind nach [`DATEN_FRIST_MS`] ohne Turnier-PC
+    /// geleert ([`Namespace::leeren`]).
+    geleert: bool,
     /// CourtID → Sende-Ende zur Tablet-WebSocket.
     tablets: HashMap<i64, Tx>,
     /// CourtID → Geräte-Kennung des aktiven Tablets (leer bei alten
@@ -1146,6 +1310,9 @@ impl Namespace {
         Self {
             host: None,
             host_last_seen: 0,
+            host_weg_seit: Some(now_ms()),
+            karenz_gemeldet: false,
+            geleert: false,
             tablets: HashMap::new(),
             tablet_devices: HashMap::new(),
             court_state: HashMap::new(),
@@ -1225,11 +1392,73 @@ impl Namespace {
     /// die Offline-Blende zu fallen (Review-Fund 19.08.2026). Damit sie
     /// dabei nicht **still** verwaisen, verabschiedet
     /// [`namespace_aufraeumen`] sie mit einem Close.
-    fn is_empty(&self) -> bool {
+    ///
+    /// **Solange die Karenz läuft, ist der Namespace nicht leer** (PR 7):
+    /// Sonst gäbe es im LAN+Cloud-Betrieb ohne Cloud-Tablets nichts, was
+    /// 20 s weitergezeigt werden könnte. Das Entfernen übernimmt [`fegen`].
+    fn is_empty_um(&self, jetzt: u64) -> bool {
         self.host.is_none()
             && self.tablets.is_empty()
             && self.pending.is_empty()
             && self.tl_subs.is_empty()
+            // Die Karenz hält nur Namespaces, die je einen Turnier-PC hatten.
+            // Einer, den bloß ein Tablet angelegt hat, verschwindet mit ihm —
+            // sonst ließe sich mit kurzen Verbindungen zu erfundenen
+            // Kennungen das Namespace-Limit füllen, ohne eine Verbindung
+            // offen zu halten (Code-Review).
+            //
+            // Seit PR 8 bleibt so ein Namespace die ganze Daten-Frist stehen:
+            // Die Anzeigen sehen 503 und kennen ihre Zuweisung weiter; kehrt
+            // der Turnier-PC zurück, ist alles noch da.
+            && (self.host_last_seen == 0 || self.daten_frist_abgelaufen(jetzt))
+    }
+
+    /// Ist der Turnier-PC schon länger als die Daten-Frist weg?
+    fn daten_frist_abgelaufen(&self, jetzt: u64) -> bool {
+        self.host_weg_seit
+            .is_some_and(|seit| jetzt.saturating_sub(seit) >= DATEN_FRIST_MS)
+    }
+
+    /// Leert die Turnierdaten (nach [`DATEN_FRIST_MS`] ohne Turnier-PC).
+    /// Was ein noch verbundenes Tablet zum Weiterzählen braucht, bleibt:
+    /// sein Stand, seine Sätze und ein Brief ohne Personen.
+    fn leeren(&mut self) {
+        let mit_tablet: HashSet<i64> = self.tablets.keys().copied().collect();
+        self.court_matches = std::mem::take(&mut self.court_matches)
+            .into_iter()
+            .filter(|(feld, _)| mit_tablet.contains(feld))
+            .map(|(feld, b)| (feld, anonymer_brief(b.match_id, b.finalized)))
+            .collect();
+        self.court_scores.retain(|f, _| mit_tablet.contains(f));
+        self.court_state.retain(|f, _| mit_tablet.contains(f));
+        self.display_court_state
+            .retain(|f, _| mit_tablet.contains(f));
+        self.state_deckel_gemeldet
+            .retain(|f, _| mit_tablet.contains(f));
+        self.monitor_seq.retain(|f, _| mit_tablet.contains(f));
+        self.court_on_court_since.clear();
+        self.vor_match.clear();
+        self.court_labels.clear();
+        self.court_hall.clear();
+        self.courts.clear();
+        self.prepared.clear();
+        self.freetext.clear();
+        self.meetingpoint = relay_proto::MeetingpointView::default();
+        // Bilder und Logo geben dabei ihren Anteil am Bilder-Budget zurück.
+        self.monitor = None;
+        self.monitor_control = MonitorControl::default();
+        self.monitor_seen.clear();
+        self.slaves.clear();
+        self.azure_tts = None;
+        self.overview_cache = None;
+        self.bump_overview_rev();
+        self.geleert = true;
+    }
+
+    /// Ist der Turnier-PC schon länger als die Karenz weg?
+    fn karenz_abgelaufen(&self, jetzt: u64) -> bool {
+        self.host_weg_seit
+            .is_some_and(|seit| jetzt.saturating_sub(seit) >= HOST_KARENZ_MS)
     }
 }
 
@@ -1257,6 +1486,8 @@ struct Broker {
     bilder_budget: usize,
     /// Plätze für gleichzeitige Bilder-Uploads ([`UPLOADS_GLEICHZEITIG`]).
     upload_plaetze: Arc<tokio::sync::Semaphore>,
+    /// Start des Prozesses (Unix-ms) — für die Start-Karenz ([`Lage`]).
+    start_ms: u64,
     /// Öffentliche Basis-URL für QR-Codes, z. B. `https://badhub.de/bts-relay`.
     public_base: String,
 }
@@ -1285,6 +1516,7 @@ impl Broker {
             bilder_bytes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             bilder_budget: BILDER_BUDGET,
             upload_plaetze: Arc::new(tokio::sync::Semaphore::new(UPLOADS_GLEICHZEITIG)),
+            start_ms: now_ms(),
             public_base,
         }
     }
@@ -1523,6 +1755,18 @@ async fn main() {
     let broker = Broker::new(public_base.clone());
 
     let tl_an = tl_enabled(std::env::var("BTS_RELAY_TL").ok().as_deref());
+    // Aufräum-Task: Karenz-Ende melden, verwaiste Namespaces entfernen.
+    {
+        let broker = broker.clone();
+        tokio::spawn(async move {
+            let mut takt = tokio::time::interval(FEGEN_TAKT);
+            takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                takt.tick().await;
+                fegen(&broker, now_ms()).await;
+            }
+        });
+    }
     let app = router(broker, tl_an);
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
@@ -1543,6 +1787,8 @@ async fn health(State(broker): State<Broker>) -> Json<serde_json::Value> {
         "ok": true,
         "namespaces": map.len(),
         "tablets": map.values().map(|n| n.tablets.len()).sum::<usize>(),
+        // Prüfpunkt vor jedem Merge: Läuft gerade ein Turnier über die Cloud?
+        "hosts": map.values().filter(|n| n.host.is_some()).count(),
     }))
 }
 
@@ -1798,10 +2044,17 @@ async fn monitor_state(
     let stream = q.zweck.as_deref() == Some("stream");
     let state = {
         let map = broker.namespaces.lock().await;
+        if let Some(antwort) = sperre(
+            anzeige_lage(map.get(&ns), now_ms(), broker.start_ms),
+            &headers,
+        ) {
+            return antwort;
+        }
         match map.get(&ns) {
             Some(namespace) if stream => build_stream_state(namespace, court_id),
             Some(namespace) => build_monitor_state(namespace, court_id),
-            // Kein Host verbunden: leerer Zustand → neutrale Leerlauf-Seite.
+            // Nach `sperre` nicht mehr erreichbar (fehlender Namespace ist
+            // gesperrt oder in der Start-Karenz).
             None => empty_monitor_state(court_id, String::new()),
         }
     };
@@ -1831,11 +2084,16 @@ async fn monitor_device_state(
         return (StatusCode::BAD_REQUEST, "Ungültige Geräte-ID").into_response();
     }
     let mut map = broker.namespaces.lock().await;
+    let lage = anzeige_lage(map.get(&ns), now_ms(), broker.start_ms);
     let Some(namespace) = map.get_mut(&ns) else {
-        // Host nicht verbunden – das Gerät zeigt die Leerlauf-Seite. Auch
-        // dieser Pfad durchläuft denselben ETag/304-Punkt (U10) — keine
-        // 200-Antwort umgeht den Cache-Zweig, gerade im häufigsten Störfall.
-        let state = empty_monitor_state(0, String::new());
+        // Der Relay kennt dieses Turnier nicht — also auch keine Zuweisung.
+        // In der Start-Karenz gilt „kommt gleich wieder" (304 mit Marke);
+        // danach sieht jedes Gerät die Kopplungs-Seite mit dem Hinweis.
+        if lage == Lage::StartKarenz {
+            return sperre(lage, &headers).unwrap_or_else(host_weg_antwort);
+        }
+        let mut state = unassigned_state(&q.device);
+        state.host_offline = true;
         return monitor_state_response(&headers, state);
     };
     // Poll registrieren. Bei erreichter Obergrenze das am längsten nicht
@@ -1869,6 +2127,18 @@ async fn monitor_device_state(
                 .get(&q.device)
                 .map(|&id| relay_proto::MonitorTarget::court(id))
         });
+    // Kein Turnier-PC (nach der Karenz): Ein zugewiesenes Gerät bekommt 503,
+    // ein unzugewiesenes behält die Kopplungs-Seite — mit Hinweis. Das
+    // Lebenszeichen des Geräts ist oben schon gestempelt.
+    if lage == Lage::Gesperrt {
+        if target.is_some() {
+            return host_weg_antwort();
+        }
+        let mut state = unassigned_state(&q.device);
+        state.host_offline = true;
+        state.command = command;
+        return monitor_state_response(&headers, state);
+    }
     let ist_tafel = matches!(target, Some(relay_proto::MonitorTarget::CourtTafel { .. }));
     // Darstellung aus der Zuweisung (ADR 0068) — Tafel und Nicht-Feld-Ziele
     // liefern Standard, ein unbekannter Stil ebenso.
@@ -2030,6 +2300,13 @@ async fn announce_state(
                     n.slaves.insert(id, (hall, now));
                 }
             }
+            // Ohne Turnier-PC SOFORT 503, ohne Karenz: Ein 200 ohne
+            // Sprachdienst-Schlüssel läse der Ansage-Slave als „der
+            // Turnier-PC hat den Dienst abgeschaltet" und verwürfe seine
+            // geerbte Stimme; einen Fehler übergeht er.
+            if n.host.is_none() {
+                return host_weg_antwort();
+            }
             let courts: Vec<relay_proto::AnnounceCourt> = n
                 .court_matches
                 .iter()
@@ -2068,7 +2345,7 @@ async fn announce_state(
                 azure_tts: n.azure_tts.clone(),
             }
         }
-        None => relay_proto::AnnounceState::default(),
+        None => return host_weg_antwort(),
     };
     ([(header::CACHE_CONTROL, "no-store")], Json(state)).into_response()
 }
@@ -2216,6 +2493,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         command: None,
         device_code: String::new(),
         unassigned: false,
+        host_offline: false,
         redirect_to: None,
         server_now_ms: now_ms(),
         // Aufruf-Timer am Monitor: im Cloud-Pfad noch nicht durchgereicht
@@ -2230,6 +2508,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
 fn unassigned_state(device_id: &str) -> MonitorState {
     MonitorState {
         unassigned: true,
+        host_offline: false,
         device_code: device_code(device_id),
         ..empty_monitor_state(0, String::new())
     }
@@ -2329,6 +2608,7 @@ fn build_monitor_state_mit(
         command: None,
         device_code: String::new(),
         unassigned: false,
+        host_offline: false,
         redirect_to: None,
         server_now_ms: now_ms(),
         // 1.-Aufruf-Zeitpunkt (relay-seitig gestempelt) + Aufruf-Timer-Schwellen
@@ -2690,6 +2970,12 @@ async fn overview_health(
         // und der Fehler wächst mit der Last, also ausgerechnet dort, wo die
         // Frist gebraucht wird (Sicherheits-Review 20.08.2026).
         let jetzt = now_ms();
+        // Die Lage VOR Cache-Blick, Bau und Markenvergleich: Gesperrt gibt
+        // es weder 304 noch Cache-Treffer.
+        if let Some(antwort) = sperre(anzeige_lage(map.get(&ns), jetzt, broker.start_ms), &headers)
+        {
+            return antwort;
+        }
         if wunsch.is_none() {
             if let Some(n) = map.get(&ns) {
                 if let Some(c) = &n.overview_cache {
@@ -3006,12 +3292,19 @@ async fn meetingpoint_state(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
     Query(q): Query<MpQuery>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
     let view = {
         let map = broker.namespaces.lock().await;
+        if let Some(antwort) = sperre(
+            anzeige_lage(map.get(&ns), now_ms(), broker.start_ms),
+            &headers,
+        ) {
+            return antwort;
+        }
         map.get(&ns).map(|n| n.meetingpoint.fuer_halle(&q.halle))
     };
     match view {
@@ -3139,12 +3432,19 @@ async fn preparation_page(Path(ns): Path<String>) -> impl IntoResponse {
 async fn preparation_state(
     State(broker): State<Broker>,
     Path(ns): Path<String>,
-) -> impl IntoResponse {
+    headers: axum::http::HeaderMap,
+) -> Response {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
     let candidates: Vec<serde_json::Value> = {
         let map = broker.namespaces.lock().await;
+        if let Some(antwort) = sperre(
+            anzeige_lage(map.get(&ns), now_ms(), broker.start_ms),
+            &headers,
+        ) {
+            return antwort;
+        }
         map.get(&ns)
             .map(|n| {
                 n.prepared
@@ -3279,6 +3579,12 @@ async fn monitor_upload(
         })
     });
     let mut map = broker.namespaces.lock().await;
+    // Wird das Budget knapp, weichen zuerst die Bilder von Turnieren OHNE
+    // Turnier-PC (am längsten verwaist zuerst). Sie blieben sonst die ganze
+    // Daten-Frist gebucht — auch die eines erfundenen Turniers, das nur kurz
+    // verbunden war. Ihr Turnier-PC lädt beim Wiederverbinden neu hoch.
+    let neu_bytes: usize = ads.iter().chain(logo.iter()).map(|b| b.bytes.len()).sum();
+    hostlose_bilder_freigeben(&mut map, &broker, neu_bytes);
     let Some(namespace) = map.get_mut(&ns) else {
         return (StatusCode::NOT_FOUND, "bts-light ist nicht verbunden.");
     };
@@ -3361,6 +3667,50 @@ async fn monitor_upload(
         kennung = kurz(&ns)
     );
     antwort
+}
+
+/// Gibt Bilder hostloser Namespaces frei, bis `neu_bytes` ins Budget passen
+/// (oder keine mehr da sind). Am längsten ohne Turnier-PC zuerst.
+fn hostlose_bilder_freigeben(
+    map: &mut HashMap<String, Namespace>,
+    broker: &Broker,
+    neu_bytes: usize,
+) {
+    use std::sync::atomic::Ordering;
+    let passt = || {
+        broker
+            .bilder_bytes
+            .load(Ordering::SeqCst)
+            .saturating_add(neu_bytes)
+            <= broker.bilder_budget
+    };
+    if passt() {
+        return;
+    }
+    let mut verwaist: Vec<(u64, String)> = map
+        .iter()
+        .filter(|(_, n)| {
+            n.host.is_none()
+                && n.monitor
+                    .as_ref()
+                    .is_some_and(|m| !m.ads.is_empty() || m.logo.is_some())
+        })
+        .map(|(ns, n)| (n.host_weg_seit.unwrap_or(0), ns.clone()))
+        .collect();
+    verwaist.sort();
+    for (_, ns) in verwaist {
+        if passt() {
+            break;
+        }
+        if let Some(m) = map.get_mut(&ns).and_then(|n| n.monitor.as_mut()) {
+            m.ads.clear();
+            m.logo = None;
+            tracing::info!(
+                "Namespace '{kennung}': Bilder freigegeben (Budget knapp, kein Turnier-PC)",
+                kennung = kurz(&ns)
+            );
+        }
+    }
 }
 
 /// Lässt nur die erwarteten Bild-MIME-Typen durch (der Header kommt vom
@@ -4220,10 +4570,14 @@ async fn monitor_conn(mut socket: WebSocket, broker: Broker, ns: String, court: 
 /// Das Close bringt sie über ihren Reconnect-Wächter zurück, sobald der Host
 /// wieder da ist; bis dahin pollt sie und zeigt die Offline-Blende.
 fn namespace_aufraeumen(map: &mut HashMap<String, Namespace>, ns: &str) {
+    namespace_aufraeumen_um(map, ns, now_ms());
+}
+
+fn namespace_aufraeumen_um(map: &mut HashMap<String, Namespace>, ns: &str, jetzt: u64) {
     let Some(namespace) = map.get(ns) else {
         return;
     };
-    if !namespace.is_empty() {
+    if !namespace.is_empty_um(jetzt) {
         return;
     }
     let tschuess = Message::Close(None);
@@ -5274,6 +5628,13 @@ fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
             namespace.feld_deckel_gemeldet = false;
             namespace.host_deckel_gemeldet.clear();
             namespace.host_last_seen = now;
+            // Der Turnier-PC ist (wieder) da. Hatten die Anzeigen schon die
+            // Sperre gesehen, einmal anstoßen — sie holen sofort den Stand.
+            namespace.host_weg_seit = None;
+            namespace.geleert = false;
+            if std::mem::take(&mut namespace.karenz_gemeldet) {
+                alle_monitore_anstossen(namespace);
+            }
             // Neue Host-Verbindung = neue Generation. Sie steckt im ETag des
             // Anzeige-Zustands, weil die Revision beim Neustart des
             // Turnier-PCs wieder klein beginnt: Ein Gerät mit gemerkter
@@ -5293,12 +5654,17 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
 
     {
         let mut map = broker.namespaces.lock().await;
+        // Tabelle voll: Gehaltene Daten dürfen nie einen neuen Turnier-PC
+        // aussperren — der am längsten hostlose Namespace ohne Tablet weicht.
+        if !map.contains_key(&ns) && map.len() >= MAX_NAMESPACES {
+            verdraenge_hostlosen(&mut map);
+        }
         if !map.contains_key(&ns) && map.len() >= MAX_NAMESPACES {
             tracing::warn!(
                 "Namespace-Limit erreicht – Host für '{kennung}' abgewiesen",
                 kennung = kurz(&ns)
             );
-            let _ = socket.send(Message::Close(None)).await;
+            let _ = socket.send(close_mit_grund(CLOSE_VOLL, "voll")).await;
             return;
         }
         let namespace = map.entry(ns.clone()).or_insert_with(Namespace::new);
@@ -5308,7 +5674,11 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
                     "Zweiter Host für Namespace '{kennung}' abgewiesen",
                     kennung = kurz(&ns)
                 );
-                let _ = socket.send(Message::Close(None)).await;
+                // Mit Grund: Der abgewiesene Turnier-PC kann seinem Bediener
+                // sagen, dass ein anderer PC dasselbe Turnier hält.
+                let _ = socket
+                    .send(close_mit_grund(CLOSE_HOST_BELEGT, "host_belegt"))
+                    .await;
                 return;
             }
             HostClaim::Accepted { superseded } => {
@@ -5432,6 +5802,45 @@ async fn host_conn(mut socket: WebSocket, broker: Broker, ns: String) {
     );
 }
 
+/// Entfernt den am längsten hostlosen Namespace, an dem kein Tablet und
+/// kein offenes Ergebnis hängt. Seine Monitor- und TL-Verbindungen werden
+/// verabschiedet. Liefert `false`, wenn es keinen gibt.
+fn verdraenge_hostlosen(map: &mut HashMap<String, Namespace>) -> bool {
+    let Some(ns) = map
+        .iter()
+        .filter(|(_, n)| n.host.is_none() && n.tablets.is_empty() && n.pending.is_empty())
+        .min_by_key(|(_, n)| n.host_weg_seit.unwrap_or(0))
+        .map(|(ns, _)| ns.clone())
+    else {
+        return false;
+    };
+    if let Some(n) = map.remove(&ns) {
+        let tschuess = Message::Close(None);
+        for tx in n
+            .monitor_subs
+            .values()
+            .flatten()
+            .chain(n.monitor_subs_all.iter())
+            .chain(n.tl_subs.iter())
+        {
+            let _ = tx.send(tschuess.clone());
+        }
+        tracing::warn!(
+            "Namespace-Limit erreicht – hostlosen Namespace '{kennung}' verdrängt",
+            kennung = kurz(&ns)
+        );
+    }
+    true
+}
+
+/// Ein Close-Frame mit Code und Grund (4000er-Bereich: anwendungseigen).
+fn close_mit_grund(code: u16, grund: &'static str) -> Message {
+    Message::Close(Some(axum::extract::ws::CloseFrame {
+        code,
+        reason: grund.into(),
+    }))
+}
+
 /// Gibt den Host-Slot frei — aber nur, wenn `tx` noch der eingetragene
 /// Host ist. Eine per Zombie-Ablösung verdrängte Alt-Verbindung, die
 /// später stirbt, darf den Slot des NEUEN Hosts nicht abräumen. Liefert
@@ -5444,6 +5853,19 @@ fn release_host_slot(namespace: &mut Namespace, tx: &Tx) -> bool {
         .unwrap_or(false)
     {
         namespace.host = None;
+        // Die Uhr läuft ab dem letzten Lebenszeichen, nicht ab jetzt.
+        namespace.host_weg_seit = Some(namespace.host_last_seen);
+        namespace.karenz_gemeldet = false;
+        // Der Zugang zum Sprachdienst gehört dem Turnier-PC — ohne ihn hat
+        // er im Speicher des Relays nichts zu suchen (die Ansage-Route
+        // sperrt ohnehin sofort).
+        namespace.azure_tts = None;
+        // Die Turnierleitungs-Seiten verabschieden: Sie fallen auf ihren
+        // Poll und sehen 503. Ein vergessener TL-Tab hält so auch den
+        // Namespace nicht mehr am Leben.
+        for tl in namespace.tl_subs.drain(..) {
+            let _ = tl.send(Message::Close(None));
+        }
         return true;
     }
     false
@@ -7150,6 +7572,7 @@ mod tests {
         let namespace = map.entry(ns.into()).or_insert_with(Namespace::new);
         namespace.host = Some(tx.clone());
         namespace.host_last_seen = now_ms();
+        namespace.host_weg_seit = None;
     }
 
     /// Legt einen Namespace mit registriertem Host und einem Tablet (an
@@ -7358,6 +7781,8 @@ mod tests {
             s.verarbeite(&broker, &ident(feld, "a"), &tx).await;
         }
         s.abraeumen(&broker, &tx).await;
+        // (Nach der Karenz — bis dahin bleibt der Namespace stehen.)
+        fegen(&broker, now_ms() + HOST_KARENZ_MS).await;
         assert!(
             !broker.namespaces.lock().await.contains_key(&ns),
             "kein toter Slot hält den Namespace"
@@ -8160,6 +8585,911 @@ mod tests {
         assert_eq!(antwort.status(), StatusCode::OK);
     }
 
+    // ───── Host-Verlust auf den Anzeigen (Spec relay-haerten, PR 7) ─────
+
+    /// Legt ein Turnier an: Turnier-PC verbunden, Feld 5 mit Spiel,
+    /// Meetingpoint an, Gerät „tv-1" auf Feld 5.
+    async fn turnier_mit_stand(broker: &Broker, ns: &str) -> (Tx, mpsc::Receiver<Message>) {
+        let (host_tx, host_rx) = kanal_test();
+        register_host(broker, ns, &host_tx).await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(ns).unwrap();
+        n.court_labels.insert(5, "Feld 5".into());
+        n.meetingpoint.enabled = true;
+        n.monitor_control
+            .targets
+            .insert("tv-1".into(), relay_proto::MonitorTarget::court(5));
+        drop(map);
+        (host_tx, host_rx)
+    }
+
+    /// Der Turnier-PC ist seit `ms` Millisekunden weg.
+    async fn host_weg_seit(broker: &Broker, ns: &str, ms: u64) {
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(ns).unwrap();
+        n.host = None;
+        n.host_weg_seit = Some(now_ms() - ms);
+    }
+
+    /// Ruft die fünf Stand-Routen ab; liefert je Route Status und Rumpf.
+    async fn stand_routen(
+        broker: &Broker,
+        ns: &str,
+        headers: axum::http::HeaderMap,
+    ) -> Vec<(&'static str, StatusCode, String, axum::http::HeaderMap)> {
+        let mut aus = Vec::new();
+        let antworten: Vec<(&'static str, Response)> = vec![
+            (
+                "court/state",
+                monitor_state(
+                    State(broker.clone()),
+                    Path((ns.to_string(), 5)),
+                    Query(ZweckQuery { zweck: None }),
+                    headers.clone(),
+                )
+                .await
+                .into_response(),
+            ),
+            (
+                "monitor/state",
+                monitor_device_state(
+                    State(broker.clone()),
+                    Path(ns.to_string()),
+                    Query(DeviceQuery {
+                        device: "tv-1".into(),
+                    }),
+                    headers.clone(),
+                )
+                .await,
+            ),
+            (
+                "health",
+                overview_health(
+                    State(broker.clone()),
+                    Path(ns.to_string()),
+                    leer_query(),
+                    headers.clone(),
+                )
+                .await
+                .into_response(),
+            ),
+            (
+                "preparation/state",
+                preparation_state(State(broker.clone()), Path(ns.to_string()), headers.clone())
+                    .await,
+            ),
+            (
+                "meetingpoint/state",
+                meetingpoint_state(
+                    State(broker.clone()),
+                    Path(ns.to_string()),
+                    Query(MpQuery {
+                        halle: String::new(),
+                    }),
+                    headers.clone(),
+                )
+                .await,
+            ),
+        ];
+        for (name, r) in antworten {
+            let status = r.status();
+            let kopf = r.headers().clone();
+            let rumpf = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+            aus.push((
+                name,
+                status,
+                String::from_utf8_lossy(&rumpf).into_owned(),
+                kopf,
+            ));
+        }
+        aus
+    }
+
+    fn ist_host_weg(status: StatusCode, rumpf: &str, kopf: &axum::http::HeaderMap) -> bool {
+        status == StatusCode::SERVICE_UNAVAILABLE
+            && rumpf == r#"{"grund":"host_weg"}"#
+            && kopf.get(header::CACHE_CONTROL).unwrap() == "no-store"
+            && kopf.get(header::RETRY_AFTER).unwrap() == "2"
+            && kopf.get(header::ETAG).is_none()
+    }
+
+    #[tokio::test]
+    async fn namespace_nur_vom_tablet_verschwindet_sofort() {
+        // Die Karenz hält nur Namespaces, die je einen Turnier-PC hatten.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = kanal_test();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(1, "a"), &tx).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        s.abraeumen(&broker, &tx).await;
+        assert!(
+            !broker.namespaces.lock().await.contains_key(&ns),
+            "ohne je einen Turnier-PC gibt es nichts weiterzuzeigen"
+        );
+    }
+
+    #[test]
+    fn anzeige_lage_grenzen() {
+        let start = 1_000_000;
+        let mut n = Namespace::new();
+        let (tx, _rx) = kanal_test();
+        // Turnier-PC verbunden.
+        n.host = Some(tx);
+        n.host_weg_seit = None;
+        assert_eq!(anzeige_lage(Some(&n), start + 999_999, start), Lage::Offen);
+        // Weg: bis knapp unter 20 s offen, ab 20 s gesperrt.
+        n.host = None;
+        n.host_weg_seit = Some(start);
+        assert_eq!(anzeige_lage(Some(&n), start, start), Lage::Offen);
+        assert_eq!(
+            anzeige_lage(Some(&n), start + HOST_KARENZ_MS - 1, start),
+            Lage::Offen
+        );
+        assert_eq!(
+            anzeige_lage(Some(&n), start + HOST_KARENZ_MS, start),
+            Lage::Gesperrt
+        );
+        // Namespace fehlt: Start-Karenz, danach gesperrt.
+        assert_eq!(
+            anzeige_lage(None, start + HOST_KARENZ_MS - 1, start),
+            Lage::StartKarenz
+        );
+        assert_eq!(
+            anzeige_lage(None, start + HOST_KARENZ_MS, start),
+            Lage::Gesperrt
+        );
+    }
+
+    #[tokio::test]
+    async fn host_weg_zeigt_karenz_lang_200_dann_503() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        // Ein Tablet hält den Namespace über die Karenz hinaus.
+        let (tablet, _trx) = kanal_test();
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, tablet);
+
+        for (name, status, ..) in stand_routen(&broker, &ns, Default::default()).await {
+            assert_eq!(status, StatusCode::OK, "{name} mit Turnier-PC");
+        }
+        // Weg, noch in der Karenz: der letzte Stand.
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS - 2_000).await;
+        for (name, status, rumpf, _) in stand_routen(&broker, &ns, Default::default()).await {
+            assert_eq!(status, StatusCode::OK, "{name} in der Karenz");
+            if name == "court/state" {
+                assert!(
+                    rumpf.contains("\"courtLabel\":\"Feld 5\""),
+                    "der gehaltene Stand: {rumpf}"
+                );
+            }
+        }
+        // Nach der Karenz: 503 mit Grund.
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS + 1).await;
+        for (name, status, rumpf, kopf) in stand_routen(&broker, &ns, Default::default()).await {
+            assert!(
+                ist_host_weg(status, &rumpf, &kopf),
+                "{name}: {status} {rumpf}"
+            );
+        }
+        // Auch die Stream-Fassung der Feld-Route.
+        let r = monitor_state(
+            State(broker.clone()),
+            Path((ns.clone(), 5)),
+            Query(ZweckQuery {
+                zweck: Some("stream".into()),
+            }),
+            Default::default(),
+        )
+        .await
+        .into_response();
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn gesperrt_schlaegt_cache_und_304() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        // Cache wärmen und Marken einsammeln.
+        let mut marken = Vec::new();
+        for (name, status, _, kopf) in stand_routen(&broker, &ns, Default::default()).await {
+            assert_eq!(status, StatusCode::OK, "{name}");
+            marken.push(kopf.get(header::ETAG).cloned());
+        }
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS + 1).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+        // Mit jeder der Marken: trotzdem 503, nie 304.
+        for marke in marken.into_iter().flatten() {
+            let mut h = axum::http::HeaderMap::new();
+            h.insert(header::IF_NONE_MATCH, marke);
+            for (name, status, rumpf, kopf) in stand_routen(&broker, &ns, h.clone()).await {
+                assert!(ist_host_weg(status, &rumpf, &kopf), "{name}: {status}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn stummer_host_zaehlt_ab_letztem_lebenszeichen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = turnier_mit_stand(&broker, &ns).await;
+        let letztes = now_ms() - 15_000;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(&ns).unwrap();
+        // Der Turnier-PC ist vor 15 s verstummt; jetzt erst fällt die
+        // Verbindung (Stale-Wächter).
+        n.host_last_seen = letztes;
+        assert!(release_host_slot(n, &host_tx));
+        assert_eq!(n.host_weg_seit, Some(letztes));
+        // 5 s später ist gesperrt — nicht erst nach 15 + 20 s.
+        assert_eq!(
+            anzeige_lage(Some(n), now_ms() + 5_000, broker.start_ms),
+            Lage::Gesperrt
+        );
+    }
+
+    #[tokio::test]
+    async fn namespace_ueberlebt_host_abgang_ohne_tablets() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = turnier_mit_stand(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+            namespace_aufraeumen(&mut map, &ns);
+            assert!(map.contains_key(&ns), "in der Karenz bleibt der Namespace");
+        }
+        // In der Karenz: der letzte Stand.
+        let r = stand_routen(&broker, &ns, Default::default()).await;
+        assert_eq!(r[0].1, StatusCode::OK);
+        assert!(r[0].2.contains("\"courtLabel\":\"Feld 5\""));
+        // Der Aufräum-Lauf lässt ihn stehen — auch nach der Karenz (die
+        // Anzeigen sehen dann 503 und kennen ihre Zuweisung weiter) — und
+        // entfernt ihn erst nach der Daten-Frist.
+        fegen(&broker, now_ms()).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        fegen(&broker, now_ms() + HOST_KARENZ_MS).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        assert!(!broker.namespaces.lock().await.contains_key(&ns));
+    }
+
+    #[tokio::test]
+    async fn fehlender_namespace_ist_gesperrt() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.start_ms = 0;
+        let ns = test_ns();
+        for (name, status, rumpf, kopf) in stand_routen(&broker, &ns, Default::default()).await {
+            if name == "monitor/state" {
+                // Ohne Namespace kennt der Relay keine Zuweisung:
+                // Kopplungs-Seite mit Hinweis.
+                assert_eq!(status, StatusCode::OK);
+                assert!(rumpf.contains("\"hostOffline\":true"), "{rumpf}");
+            } else {
+                assert!(ist_host_weg(status, &rumpf, &kopf), "{name}: {status}");
+            }
+        }
+        assert!(broker.namespaces.lock().await.is_empty(), "nichts angelegt");
+    }
+
+    #[tokio::test]
+    async fn start_karenz_bestaetigt_mit_marke() {
+        // Frisch gestarteter Relay, der Turnier-PC ist noch nicht zurück.
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let mut mit_marke = axum::http::HeaderMap::new();
+        mit_marke.insert(header::IF_NONE_MATCH, "\"alt\"".parse().unwrap());
+        for (name, status, ..) in stand_routen(&broker, &ns, mit_marke.clone()).await {
+            assert_eq!(status, StatusCode::NOT_MODIFIED, "{name} mit Marke");
+        }
+        for (name, status, rumpf, kopf) in stand_routen(&broker, &ns, Default::default()).await {
+            assert!(ist_host_weg(status, &rumpf, &kopf), "{name} ohne Marke");
+        }
+        // Nach der Start-Karenz hilft die Marke nicht mehr.
+        broker.start_ms = now_ms() - HOST_KARENZ_MS;
+        for (name, status, ..) in stand_routen(&broker, &ns, mit_marke).await {
+            if name != "monitor/state" {
+                assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{name}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unzugewiesenes_geraet_behaelt_kopplungsseite() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        let (s, _, body) = hole_monitor(&broker, &ns, "neu", &[]).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(body["unassigned"], serde_json::json!(true));
+        assert!(
+            body.get("hostOffline").is_none(),
+            "mit Turnier-PC kein Hinweis"
+        );
+
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS + 1).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+        // Unzugewiesen: Kopplungs-Seite mit Hinweis.
+        let (s, _, body) = hole_monitor(&broker, &ns, "neu", &[]).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(body["unassigned"], serde_json::json!(true));
+        assert_eq!(body["hostOffline"], serde_json::json!(true));
+        // Zugewiesen: 503 — und das Lebenszeichen ist trotzdem gestempelt.
+        let (s, ..) = hole_monitor(&broker, &ns, "tv-1", &[]).await;
+        assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(broker
+            .namespaces
+            .lock()
+            .await
+            .get(&ns)
+            .unwrap()
+            .monitor_seen
+            .contains_key("tv-1"));
+    }
+
+    #[tokio::test]
+    async fn ansage_route_sperrt_sofort() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let abruf = || async {
+            announce_state(
+                State(broker.clone()),
+                Path(ns.clone()),
+                Query(AnnounceStateQuery {
+                    hall: String::new(),
+                    since: 0,
+                    slave: "s1".into(),
+                }),
+            )
+            .await
+            .into_response()
+            .status()
+        };
+        // Start-Karenz gilt hier nicht: ohne Namespace sofort 503.
+        assert_eq!(abruf().await, StatusCode::SERVICE_UNAVAILABLE);
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        assert_eq!(abruf().await, StatusCode::OK);
+        // Turnier-PC gerade erst weg (in der Karenz): trotzdem sofort 503.
+        host_weg_seit(&broker, &ns, 0).await;
+        assert_eq!(abruf().await, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn feldliste_bleibt_abrufbar() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        host_weg_seit(&broker, &ns, HOST_KARENZ_MS + 1).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+        // Das Tablet braucht die Feldliste für den Feldwechsel.
+        let r = courts_list(State(broker.clone()), Path(ns.clone()))
+            .await
+            .into_response();
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn karenz_ende_stoesst_alle_abos_an() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        let (tx_all, mut rx_all) = kanal_test();
+        let (tx_feld, mut rx_feld) = kanal_test();
+        assert!(subscribe_monitor(&broker, &ns, None, &tx_all).await);
+        assert!(subscribe_monitor(&broker, &ns, Some(5), &tx_feld).await);
+        host_weg_seit(&broker, &ns, 1_000).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+
+        // In der Karenz: nichts.
+        fegen(&broker, now_ms()).await;
+        assert!(texte(&mut rx_all).is_empty() && texte(&mut rx_feld).is_empty());
+        // Am Karenz-Ende: genau einmal.
+        let spaeter = now_ms() + HOST_KARENZ_MS;
+        fegen(&broker, spaeter).await;
+        assert!(!texte(&mut rx_all).is_empty());
+        assert_eq!(texte(&mut rx_feld).len(), 1);
+        fegen(&broker, spaeter + 5_000).await;
+        assert!(texte(&mut rx_all).is_empty() && texte(&mut rx_feld).is_empty());
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_stoesst_an() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let _host = turnier_mit_stand(&broker, &ns).await;
+        let (tx_feld, mut rx_feld) = kanal_test();
+        assert!(subscribe_monitor(&broker, &ns, Some(5), &tx_feld).await);
+        host_weg_seit(&broker, &ns, 1_000).await;
+        let (neu_tx, _neu_rx) = kanal_test();
+
+        // Rückkehr IN der Karenz: Keine Anzeige hat je 503 gesehen — kein Anstoß.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+            assert_eq!(n.host_weg_seit, None);
+        }
+        assert!(texte(&mut rx_feld).is_empty());
+
+        // Rückkehr NACH dem gemeldeten Karenz-Ende: einmal anstoßen.
+        host_weg_seit(&broker, &ns, 1_000).await;
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .tablets
+            .insert(5, kanal_test().0);
+        fegen(&broker, now_ms() + HOST_KARENZ_MS).await;
+        texte(&mut rx_feld);
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+        }
+        assert_eq!(texte(&mut rx_feld).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tl_abos_werden_beim_abgang_geschlossen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = turnier_mit_stand(&broker, &ns).await;
+        let (tl_tx, mut tl_rx) = kanal_test();
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(&ns).unwrap();
+        n.tl_subs.push(tl_tx);
+        assert!(release_host_slot(n, &host_tx));
+        assert!(n.tl_subs.is_empty());
+        assert!(matches!(tl_rx.try_recv(), Ok(Message::Close(_))));
+        // Eine verdrängte Alt-Verbindung schließt nichts.
+        let (fremd, _f) = kanal_test();
+        assert!(!release_host_slot(n, &fremd));
+    }
+
+    #[tokio::test]
+    async fn zweiter_host_bekommt_close_grund() {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message as Ws;
+        let (broker, basis) = relay_starten().await;
+        let ns = test_ns();
+        let (_erster, _) = tokio_tungstenite::connect_async(format!("{basis}/{ns}/host-ws"))
+            .await
+            .expect("erster Host");
+        // Warten, bis der erste eingetragen ist.
+        for _ in 0..200 {
+            if broker
+                .namespaces
+                .lock()
+                .await
+                .get(&ns)
+                .is_some_and(|n| n.host.is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let (mut zweiter, _) = tokio_tungstenite::connect_async(format!("{basis}/{ns}/host-ws"))
+            .await
+            .expect("zweiter Host verbindet");
+        let grund = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match zweiter.next().await {
+                    Some(Ok(Ws::Close(Some(f)))) => {
+                        break Some((u16::from(f.code), f.reason.to_string()))
+                    }
+                    Some(Ok(_)) => {}
+                    _ => break None,
+                }
+            }
+        })
+        .await
+        .expect("Close kam");
+        assert_eq!(grund, Some((CLOSE_HOST_BELEGT, "host_belegt".to_string())));
+        // /health nennt die Zahl der Turnier-PCs.
+        let h = health(State(broker.clone())).await.0;
+        assert_eq!(h["hosts"], serde_json::json!(1));
+    }
+
+    // ───────────── Daten-Verfall (Spec relay-haerten, PR 8) ─────────────
+
+    /// Ein Turnier mit allem, was der Relay je hält: zwei Felder mit Spiel,
+    /// Stand und Zustand (Feld 5 mit Tablet, Feld 6 ohne), Listen, Bilder.
+    async fn volles_turnier(broker: &Broker, ns: &str) -> (Tx, Tx) {
+        let (host_tx, _host_rx) = turnier_mit_stand(broker, ns).await;
+        let (tablet_tx, _trx) = kanal_test();
+        monitor_upload(
+            State(broker.clone()),
+            Path(ns.to_string()),
+            Json(bild_upload(&[b"bild"], Some(b"logo"))),
+        )
+        .await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(ns).unwrap();
+        n.tablets.insert(5, tablet_tx.clone());
+        for feld in [5, 6] {
+            n.court_matches.insert(feld, brief(100 + feld));
+            n.court_scores
+                .insert(feld, vec![relay_proto::SetAb { a: 11, b: 7 }]);
+            n.court_state.insert(feld, "{\"rev\":3}".into());
+            n.monitor_seq.insert(feld, 9);
+            n.court_labels.insert(feld, format!("Feld {feld}"));
+            n.court_hall.insert(feld, "Halle A".into());
+        }
+        n.courts.push(relay_proto::CourtBrief {
+            id: 5,
+            label: "Feld 5".into(),
+            hall: "Halle A".into(),
+            hall_color: None,
+        });
+        n.freetext.push(relay_proto::FreetextItem {
+            id: 1,
+            text: "Bitte Herrn Mustermann zur Turnierleitung".into(),
+            hall: String::new(),
+        });
+        n.slaves.insert("s1".into(), ("Halle B".into(), now_ms()));
+        n.monitor_seen.insert("tv-1".into(), now_ms());
+        n.azure_tts = Some(
+            serde_json::from_value(serde_json::json!({
+                "key": "geheim", "region": "westeurope", "voice": "de-DE-KatjaNeural"
+            }))
+            .unwrap(),
+        );
+        drop(map);
+        (host_tx, tablet_tx)
+    }
+
+    #[test]
+    fn anonymer_brief_traegt_keine_person() {
+        let b = anonymer_brief(42, true);
+        assert_eq!((b.match_id, b.finalized), (42, true));
+        assert!(b.team_a.is_empty() && b.team_b.is_empty());
+        assert!(b.sr_names.is_empty() && b.scorekeeper.is_empty());
+        assert!(b.event_label.is_empty() && b.class_label.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sprachschluessel_ist_sofort_weg() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(&ns).unwrap();
+        assert!(n.azure_tts.is_some());
+        assert!(release_host_slot(n, &host_tx));
+        assert!(
+            n.azure_tts.is_none(),
+            "mit dem Abgang, nicht erst nach 60 min"
+        );
+        // Alles andere ist noch da.
+        assert!(!n.prepared.is_empty() || n.monitor.is_some());
+    }
+
+    #[tokio::test]
+    async fn nach_sechzig_minuten_sind_turnierdaten_weg() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        assert!(gebucht(&broker) > 0);
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        // Kurz vor Ablauf: nichts geleert.
+        fegen(&broker, now_ms() + DATEN_FRIST_MS - 60_000).await;
+        assert!(broker
+            .namespaces
+            .lock()
+            .await
+            .get(&ns)
+            .unwrap()
+            .monitor
+            .is_some());
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("das Tablet hält den Namespace");
+        assert!(n.geleert);
+        assert!(n.monitor.is_none() && n.courts.is_empty() && n.freetext.is_empty());
+        assert!(n.court_labels.is_empty() && n.court_hall.is_empty());
+        assert!(n.slaves.is_empty() && n.monitor_seen.is_empty());
+        assert!(n.monitor_control.targets.is_empty());
+        assert!(!n.meetingpoint.enabled && n.prepared.is_empty());
+        // Feld ohne Tablet: alles weg.
+        assert!(!n.court_matches.contains_key(&6));
+        assert!(!n.court_scores.contains_key(&6) && !n.court_state.contains_key(&6));
+        // Die Bilder haben ihren Anteil am Budget zurückgegeben.
+        assert_eq!(gebucht(&broker), 0);
+        // Was bleibt, gehört dem Feld mit Tablet: sein gespiegelter Zustand
+        // (der die Namen SEINES Spiels enthalten kann — er bleibt, solange
+        // das Tablet am Feld hängt) und ein Brief ohne Personen.
+        assert_eq!(n.court_matches.len(), 1);
+        assert_eq!(n.court_state.len(), 1);
+        assert!(n
+            .court_matches
+            .values()
+            .all(|b| b.team_a.is_empty() && b.team_b.is_empty() && b.sr_names.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn knappes_budget_gibt_bilder_hostloser_turniere_frei() {
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.bilder_budget = 10;
+        let (alt, neu) = (test_ns(), "b1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        let (alt_host, _a) = kanal_test();
+        register_host(&broker, &alt, &alt_host).await;
+        let lade = |ns: &str, bild: &'static [u8]| {
+            let (broker, ns) = (broker.clone(), ns.to_string());
+            async move {
+                monitor_upload(State(broker), Path(ns), Json(bild_upload(&[bild], None)))
+                    .await
+                    .0
+            }
+        };
+        assert_eq!(lade(&alt, b"12345678").await, StatusCode::OK);
+        let (neu_host, _n) = kanal_test();
+        register_host(&broker, neu, &neu_host).await;
+        // Solange das alte Turnier seinen Turnier-PC hat, behält es seine
+        // Bilder — das neue bekommt 507.
+        assert_eq!(lade(neu, b"abcdef").await, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(bilder_von(&broker, &alt).await.0, 1);
+        // Ist der alte Turnier-PC weg, weichen seine Bilder dem neuen Turnier.
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&alt).unwrap(), &alt_host));
+        }
+        assert_eq!(lade(neu, b"abcdef").await, StatusCode::OK);
+        assert_eq!(bilder_von(&broker, &alt).await.0, 0);
+        assert_eq!(bilder_von(&broker, neu).await.0, 1);
+        assert_eq!(gebucht(&broker), 6);
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_mit_anderem_spiel_raeumt_den_alten_stand() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            try_claim_host(map.get_mut(&ns).unwrap(), &neu_tx, now_ms());
+        }
+        // Am Feld steht inzwischen ein anderes Spiel: Der Stand des Stummels
+        // gehört nicht dazu.
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(777),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &neu_tx,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert!(!n.court_scores.contains_key(&5), "alter Stand geräumt");
+        assert_eq!(n.court_matches.get(&5), Some(&brief(777)));
+    }
+
+    #[tokio::test]
+    async fn feld_mit_tablet_behaelt_stand_und_stummel() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert_eq!(n.court_scores.get(&5).map(Vec::len), Some(1));
+        assert_eq!(
+            n.court_state.get(&5).map(String::as_str),
+            Some("{\"rev\":3}")
+        );
+        let stummel = n.court_matches.get(&5).expect("Brief ohne Personen");
+        assert_eq!(stummel, &anonymer_brief(105, false));
+    }
+
+    #[tokio::test]
+    async fn tablet_zaehlt_nach_dem_leeren_weiter() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, tablet_tx) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        // Der nächste Punkt des Tablets (es nennt sein Spiel) wird angenommen
+        // — ohne den Stummel verwürfe ihn der Stale-Filter.
+        forward_score(&broker, &ns, 5, 12, 7, Vec::new(), 105, &tablet_tx).await;
+        let map = broker.namespaces.lock().await;
+        assert_eq!(
+            map.get(&ns).unwrap().court_scores.get(&5),
+            Some(&vec![relay_proto::SetAb { a: 12, b: 7 }])
+        );
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_nach_leeren_raeumt_stand_nicht() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
+        // Der Turnier-PC kommt zurück und weist dasselbe Spiel wieder zu.
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+            assert!(!n.geleert);
+        }
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(105),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &neu_tx,
+        )
+        .await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert_eq!(n.court_scores.get(&5).map(Vec::len), Some(1), "kein 0:0");
+        assert!(n.court_state.contains_key(&5));
+        // Und der Brief trägt wieder die Namen.
+        assert_eq!(n.court_matches.get(&5), Some(&brief(105)));
+    }
+
+    #[tokio::test]
+    async fn namespace_verschwindet_wenn_letztes_tablet_geht() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, tablet_tx) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        let spaeter = now_ms() + DATEN_FRIST_MS;
+        fegen(&broker, spaeter).await;
+        assert!(broker.namespaces.lock().await.contains_key(&ns));
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            n.tablets.retain(|_, t| !t.same_channel(&tablet_tx));
+        }
+        fegen(&broker, spaeter).await;
+        assert!(!broker.namespaces.lock().await.contains_key(&ns));
+    }
+
+    #[tokio::test]
+    async fn voller_relay_verdraengt_den_aeltesten_hostlosen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host_tx, _host_rx) = kanal_test();
+        let (tablet_tx, _trx) = kanal_test();
+        let mut map = broker.namespaces.lock().await;
+        let neu = |host: bool, tablet: bool, weg: u64| {
+            let mut n = Namespace::new();
+            n.host_last_seen = 1;
+            if host {
+                n.host = Some(host_tx.clone());
+                n.host_weg_seit = None;
+            } else {
+                n.host_weg_seit = Some(weg);
+            }
+            if tablet {
+                n.tablets.insert(1, tablet_tx.clone());
+            }
+            n
+        };
+        map.insert("mit-host".into(), neu(true, false, 0));
+        map.insert("mit-tablet".into(), neu(false, true, 10));
+        map.insert("juenger".into(), neu(false, false, 500));
+        map.insert("aeltester".into(), neu(false, false, 100));
+        // Der am längsten hostlose ohne Tablet weicht — nie einer mit
+        // Turnier-PC oder Tablet, auch wenn er länger verwaist ist.
+        assert!(verdraenge_hostlosen(&mut map));
+        assert!(!map.contains_key("aeltester"));
+        assert!(verdraenge_hostlosen(&mut map));
+        assert!(!map.contains_key("juenger"));
+        // Keiner mehr übrig → der neue Turnier-PC wird abgewiesen.
+        assert!(!verdraenge_hostlosen(&mut map));
+        assert!(map.contains_key("mit-host") && map.contains_key("mit-tablet"));
+    }
+
+    #[tokio::test]
+    async fn rueckkehr_vor_ablauf_bricht_verfall_ab() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _t) = volles_turnier(&broker, &ns).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            assert!(release_host_slot(map.get_mut(&ns).unwrap(), &host_tx));
+        }
+        fegen(&broker, now_ms() + DATEN_FRIST_MS - 60_000).await;
+        let (neu_tx, _neu_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            assert!(matches!(
+                try_claim_host(n, &neu_tx, now_ms()),
+                HostClaim::Accepted { .. }
+            ));
+        }
+        // Mit Turnier-PC verfällt nichts — auch viel später nicht.
+        fegen(&broker, now_ms() + 10 * DATEN_FRIST_MS).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert!(!n.geleert && n.monitor.is_some() && !n.courts.is_empty());
+        assert_eq!(n.court_matches.get(&6), Some(&brief(106)));
+    }
+
     // ─────── Bilder-Tor, Budget, Log (Spec relay-haerten, PR 6) ───────
 
     fn bild_upload(bilder: &[&[u8]], logo: Option<&[u8]>) -> relay_proto::MonitorUpload {
@@ -8612,7 +9942,13 @@ mod tests {
         assert!(getrennt.is_ok(), "der Empfänger wurde nicht getrennt");
         // Und der normale Aufräumweg lief: Das Feld ist wieder frei.
         for _ in 0..200 {
-            if !broker.namespaces.lock().await.contains_key(&ns) {
+            let frei = broker
+                .namespaces
+                .lock()
+                .await
+                .get(&ns)
+                .is_none_or(|n| !n.tablets.contains_key(&5));
+            if frei {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -9071,7 +10407,11 @@ mod tests {
         // Host fällt weg.
         {
             let mut map = broker.namespaces.lock().await;
-            map.get_mut("ns1").expect("Namespace da").host = None;
+            let n = map.get_mut("ns1").expect("Namespace da");
+            n.host = None;
+            // … und zwar länger als die Karenz (PR 7 der Spec relay-haerten:
+            // 20 s lang bleibt der Namespace mit dem letzten Stand stehen).
+            n.host_weg_seit = Some(0);
             namespace_aufraeumen(&mut map, "ns1");
         }
 
@@ -10299,15 +11639,18 @@ mod tests {
     #[tokio::test]
     async fn monitor_etag_ohne_host_liefert_marke_und_304() {
         // U10: Der Host-down-Early-Return durchläuft DENSELBEN ETag/304-Punkt.
-        // Genau dort, wo kein Host verbunden ist, zählt die Ersparnis am
-        // meisten — ein zweiter, ungeschützter 200-Pfad wäre die Kern-Audit-
-        // Lücke (Risiko A1).
+        // Seit PR 7 der Spec relay-haerten ist das die Kopplungs-Seite mit
+        // dem Hinweis `hostOffline` (der Relay kennt ohne Namespace keine
+        // Zuweisung) — nach der Start-Karenz.
         const NS: &str = "c0000000-0000-0000-0000-000000000010";
-        let broker = Broker::new("https://example.test/bts-relay".into());
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.start_ms = 0;
         let (s1, e1, body) = hole_monitor(&broker, NS, "pi-court", &[]).await;
         assert_eq!(s1, StatusCode::OK);
         let e1 = e1.expect("Host-down-Antwort trägt ETag");
         assert_eq!(body["courtId"], serde_json::json!(0));
+        assert_eq!(body["unassigned"], serde_json::json!(true));
+        assert_eq!(body["hostOffline"], serde_json::json!(true));
         let (s2, e2, _) =
             hole_monitor(&broker, NS, "pi-court", &[("If-None-Match", e1.as_str())]).await;
         assert_eq!(
@@ -11348,48 +12691,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn die_marke_verraet_nicht_ob_es_den_namespace_gibt() {
-        // Wächter (Sicherheits-Review 19.08.2026): Der `None`-Arm speist
-        // dieselben Eingaben in die Marke wie ein registrierter, aber leerer
-        // Namespace — leere Feld-Liste, Standard-Aufruf-Timer, Schalter aus.
-        // Beide müssen deshalb dieselbe Marke tragen.
-        //
-        // Der Test steht hier, damit eine spätere „Härtung" — etwa den
-        // Namespace mit in die Marke zu streuen — nicht versehentlich ein
-        // Existenz-Orakel daraus macht: Wer eine UUID durchprobiert, könnte
-        // sonst an der Marke ablesen, ob dahinter ein Turnier läuft.
-        //
-        // Beide Namespaces sind wohlgeformt; `valid_namespace` greift also
-        // nicht, und der 404-Pfad für Unfug bleibt davon unberührt.
-        const LEER: &str = "99999999-9999-9999-9999-999999999999";
+    async fn die_antwort_verraet_nicht_ob_es_den_namespace_gibt() {
+        // Wächter (Sicherheits-Review 19.08.2026, angepasst mit PR 7 der Spec
+        // relay-haerten): Wer eine UUID durchprobiert, darf an der Antwort
+        // nicht ablesen, ob dahinter ein Turnier OHNE Turnier-PC liegt. Ein
+        // Namespace, den es nie gab, und einer, dessen Turnier-PC länger als
+        // die Karenz weg ist, antworten gleich: 503, derselbe Rumpf, keine
+        // Marke. (Ein Turnier MIT verbundenem Turnier-PC antwortet 200 — das
+        // ist der Zweck der Route und bei 122 Bit Zufall kein Orakel.)
+        const VERWAIST: &str = "99999999-9999-9999-9999-999999999999";
         const FEHLT: &str = "aaaaaaaa-9999-9999-9999-999999999999";
-        let broker = Broker::new("https://example.test/bts-relay".into());
+        let mut broker = Broker::new("https://example.test/bts-relay".into());
+        broker.start_ms = 0;
         let (host, _host_rx) = kanal_test();
-        register_host(&broker, LEER, &host).await;
-
-        let a = overview_health(
-            State(broker.clone()),
-            Path(LEER.into()),
-            leer_query(),
-            axum::http::HeaderMap::new(),
-        )
-        .await
-        .into_response();
-        let b = overview_health(
-            State(broker.clone()),
-            Path(FEHLT.into()),
-            leer_query(),
-            axum::http::HeaderMap::new(),
-        )
-        .await
-        .into_response();
-
-        assert_eq!(a.status(), b.status());
-        assert_eq!(
-            a.headers().get(header::ETAG),
-            b.headers().get(header::ETAG),
-            "gleiche Marke — sonst verriete sie die Existenz des Turniers"
-        );
+        register_host(&broker, VERWAIST, &host).await;
+        {
+            // Ein Tablet hält den Namespace; der Turnier-PC ist lange weg.
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(VERWAIST).unwrap();
+            n.tablets.insert(1, host.clone());
+            n.host = None;
+            n.host_weg_seit = Some(0);
+        }
+        let mut antworten = Vec::new();
+        for ns in [VERWAIST, FEHLT] {
+            let r = overview_health(
+                State(broker.clone()),
+                Path(ns.into()),
+                leer_query(),
+                axum::http::HeaderMap::new(),
+            )
+            .await
+            .into_response();
+            let status = r.status();
+            let marke = r.headers().get(header::ETAG).cloned();
+            let rumpf = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+            antworten.push((status, marke, rumpf));
+        }
+        assert_eq!(antworten[0], antworten[1]);
+        assert_eq!(antworten[0].0, StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[tokio::test]
@@ -14137,9 +15477,13 @@ mod tests {
         )
         .await;
 
-        let resp = preparation_state(State(broker.clone()), Path(NS.into()))
-            .await
-            .into_response();
+        let resp = preparation_state(
+            State(broker.clone()),
+            Path(NS.into()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = axum::body::to_bytes(resp.into_body(), 16 * 1024)
             .await
@@ -14159,9 +15503,13 @@ mod tests {
         assert!(cands[1]["team1_seed"].is_null());
 
         // Unbekannter Namespace → 404 (die Seite zeigt dann „keine Verbindung").
-        let miss = preparation_state(State(broker.clone()), Path("nope".into()))
-            .await
-            .into_response();
+        let miss = preparation_state(
+            State(broker.clone()),
+            Path("nope".into()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(miss.status(), StatusCode::NOT_FOUND);
     }
 
@@ -14595,6 +15943,7 @@ mod load {
         let namespace = map.entry(ns.into()).or_insert_with(Namespace::new);
         namespace.host = Some(tx.clone());
         namespace.host_last_seen = now_ms();
+        namespace.host_weg_seit = None;
     }
 
     /// Liest `court`/`seq` aus einem Nudge-Text-Frame (wie in `mod tests`).
@@ -15039,6 +16388,9 @@ mod load {
             r.expect("Task-Panik beim Tablet-Detach");
         }
 
+        // Der Namespace überlebt den Abgang für die Karenz; danach entfernt
+        // ihn der Aufräum-Lauf.
+        fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
         let map = broker.namespaces.lock().await;
         for ns in &ns_list {
             assert!(

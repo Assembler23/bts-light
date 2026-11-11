@@ -630,7 +630,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   60 min (Sprachdienst-Schlüssel sofort), Mindestschutz gegen Schein-Turniere
   (`MemoryMax`, Bilder-Tor, Gesamt-Budget), neue Dashboard-Meldung „Ein anderer PC ist mit
   diesem Turnier verbunden". Neun PRs (1, 2, 9 Host ohne Relay-Deploy; 3–8 Relay in zwei
-  Merge-Fenstern) — **PR 1 bis 6 umgesetzt** (v0.9.379: Host-Schleife entkoppelt; v0.9.380: Verbindungsaufbau mit Frist und Backoff-Automat; v0.9.384: ein Feld je Tablet-Verbindung, Halterschaft, Feld-Deckel; v0.9.385: Größendeckel und Mengen-Takt; v0.9.386: begrenzte Kanäle; v0.9.387: Bilder-Tor, Bilder-Budget, Log), PR 7–9 offen. Offen dazu: Handgriff `ops/bts-relay.service` am Server. Ausgelagerte Punkte stehen beim
+  Merge-Fenstern) — **alle neun PRs umgesetzt** (v0.9.379: Host-Schleife entkoppelt; v0.9.380: Verbindungsaufbau mit Frist und Backoff-Automat; v0.9.384: ein Feld je Tablet-Verbindung, Halterschaft, Feld-Deckel; v0.9.385: Größendeckel und Mengen-Takt; v0.9.386: begrenzte Kanäle; v0.9.387: Bilder-Tor, Bilder-Budget, Log; v0.9.388: Host-Verlust auf den Anzeigen, Close-Grund; v0.9.389: Daten-Verfall nach 60 min; v0.9.390: Dashboard-Meldung „anderer PC"). Offen: Merges in zwei Fenstern, Handgriff `ops/bts-relay.service` am Server, Feldtest; aus den Reviews vermerkte Restpunkte stehen je PR in der Spec. Offen dazu: Handgriff `ops/bts-relay.service` am Server. Ausgelagerte Punkte stehen beim
   Kommunikations-Audit, Paket 3.
 - **Meetingpoint am Kiosk-Tablet** — Spec:
   [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)

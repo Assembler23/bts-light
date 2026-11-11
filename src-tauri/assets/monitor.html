@@ -298,6 +298,12 @@
       font-size: 2.2vmin; color: #ef4444; opacity: 0; transition: opacity .3s;
     }
     #offline.show { opacity: .8; }
+    /* „Turnier-PC weg": Stand abdunkeln, Hinweis groß und mittig. */
+    body.host-weg #offline {
+      left: 0; right: 0; bottom: 6vh; text-align: center;
+      font-size: 4.5vmin; font-weight: 700; opacity: 1;
+    }
+    body.host-weg #match-view, body.host-weg #ad-view { opacity: .25; }
 
     /* ─── Default-Seite: Badhub-Logo (Gerät noch keinem Target zugewiesen) ─
        Klar/aufgeraeumt: nur das Logo zentriert, gross. Subtiler
@@ -1455,8 +1461,13 @@ function namenPlaetze(cfg) {
 
     if (state.unassigned) {
       showPairing(state);
+      // Kopplungs-Seite ohne Turnier-PC (Cloud): Hinweis zeigen, damit
+      // niemand auf eine Zuweisung wartet, die nicht kommen kann.
+      hinweisOhneHost = !!state.hostOffline;
+      if (hinweisOhneHost) zeigeStoerung(true); else stoerungVorbei();
       return;
     }
+    if (hinweisOhneHost) { hinweisOhneHost = false; stoerungVorbei(); }
     els.pairingView.classList.remove("show");
 
     if (state.match) {
@@ -1731,6 +1742,7 @@ function namenPlaetze(cfg) {
           // den Abruf selbst und ist damit auch hier frisch.
           return null;
         }
+        if (r.status === 503) return wirf503(r);
         if (!r.ok) throw new Error("HTTP " + r.status);
         // Der Leser bleibt frei von Nebenwirkungen und reicht Stand und Marke
         // nur durch. Die Buchführung steht in der äußeren Kette — und die
@@ -1769,13 +1781,12 @@ function namenPlaetze(cfg) {
         clockFeed(state.serverNowMs);
         pollDone();
       })
-      .catch(function () {
+      .catch(function (fehler) {
         // Aussetzer tolerieren: letzten Stand halten, nur Hinweis zeigen.
         // Ein EINZIGER Fehlversuch macht den Kanal ungesund und schaltet
         // sofort auf den schnellen Takt zurück (S6).
         lastFetchOk = false; fetchFehler++;
-        if (!wasOffline) { wasOffline = true; mlog("warn", "offline"); uploadMonitorLog(); }
-        els.offline.classList.add("show");
+        abrufFehlgeschlagen(fehler);
         pollDone();
       });
   }
@@ -1784,16 +1795,69 @@ function namenPlaetze(cfg) {
     if (refetchQueued) { refetchQueued = false; requestFetch(); }
   }
   var wasOffline = false; // Offline-Wechsel nur einmal loggen (nicht je Poll)
+  var stoerungHostWeg = false; // die laufende Störung heißt „Turnier-PC weg"
+  function zeigeStoerung(hostWeg) {
+    els.offline.textContent = hostWeg ? "Keine Verbindung zum Turnier-PC" : "Verbindung unterbrochen";
+    els.offline.classList.add("show");
+    document.body.classList.toggle("host-weg", hostWeg);
+  }
+  // Die Kopplungs-Seite trägt den Hinweis, solange der Relay „kein
+  // Turnier-PC" meldet — auch über „unverändert"-Antworten (304) hinweg,
+  // die den Stand nicht neu anwenden.
+  var hinweisOhneHost = false;
+  function stoerungVorbei() {
+    if (hinweisOhneHost) { zeigeStoerung(true); return; }
+    els.offline.classList.remove("show");
+    document.body.classList.remove("host-weg");
+  }
+  // Ein Abruf schlug fehl. Der Wechsel wird einmal geloggt; ein Log-Upload
+  // geht nur bei einer echten Störung hinaus, nicht bei „Turnier-PC weg".
+  function abrufFehlgeschlagen(fehler) {
+    var hostWeg = !!(fehler && fehler.hostWeg);
+    // Der Relay hat geantwortet — die Leitung dieses Geräts lebt. Für den
+    // Stillstands-Wächter zählt das wie ein Lebenszeichen: Er soll bei
+    // „Turnier-PC weg" weder melden noch ein Log hochladen.
+    if (hostWeg) { letzterAbrufOkMs = Date.now(); letzterStandMs = Date.now(); }
+    if (!wasOffline || stoerungHostWeg !== hostWeg) {
+      mlog("warn", hostWeg ? "turnier_pc_weg" : "offline");
+      if (!hostWeg) uploadMonitorLog();
+    }
+    wasOffline = true; stoerungHostWeg = hostWeg;
+    zeigeStoerung(hostWeg);
+  }
+  // Die Störung ist vorbei (ein Abruf ist geglückt).
+  function wiederOnline() {
+    if (wasOffline) {
+      wasOffline = false; mlog("info", "online");
+      if (!stoerungHostWeg) uploadMonitorLog();
+      stoerungHostWeg = false;
+    }
+    stoerungVorbei();
+  }
+  // „Turnier-PC weg" (Spec relay-haerten, PR 7): Der Cloud-Relay antwortet
+  // dann 503 mit dem Rumpf {"grund":"host_weg"}. Das ist keine Störung der
+  // Leitung und kein Fehler dieses Geräts — es bekommt einen eigenen Text,
+  // der Stand wird abgedunkelt, und es geht kein Log hinaus. Jeder andere
+  // Fehler (und das LAN, das diesen Rumpf nie schickt) bleibt wie bisher.
+  function istHostWeg(status, text) {
+    if (status !== 503) return false;
+    try { return JSON.parse(text).grund === "host_weg"; } catch (e) { return false; }
+  }
+  // 503 lesen und als Fehler weiterreichen, der den Grund kennt.
+  function wirf503(r) {
+    return r.text().then(function (t) {
+      var f = new Error("HTTP 503"); f.hostWeg = istHostWeg(503, t); throw f;
+    });
+  }
 
   // Ein Abruf ist geglückt — Kopfzeilen UND Rumpf. Ein Ort für beide Zweige
   // (304 und voller Stand), damit die Entwarnung nirgends vor dem Rumpf steht
   // und der Stillstands-Wächter beide als Lebenszeichen zählt. Gleiche
   // Funktion wie in `overview.html`.
   function abrufGeglueckt() {
-    if (wasOffline) { wasOffline = false; mlog("info", "online"); uploadMonitorLog(); }
+    wiederOnline();
     lastFetchOk = true; fetchFehler = 0;
     letzterAbrufOkMs = Date.now();
-    els.offline.classList.remove("show");
   }
 
   // Fetch coalescen: höchstens ~1 Fetch je COALESCE_MS, egal wie viele Nudges

@@ -4,6 +4,51 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.390
+
+- **Das Dashboard sagt, wenn ein anderer PC dasselbe Turnier in der Cloud
+  hält.** Läuft die Übertragung desselben Turniers versehentlich auf zwei
+  PCs, bekam der zweite bisher keine Cloud-Verbindung — und nichts wies
+  darauf hin. Jetzt erscheint oben in der App **„Ein anderer PC ist mit
+  diesem Turnier verbunden"**, sobald das länger als 30 Sekunden so ist.
+  Braucht den Relay ab v0.9.388.
+- Lehnt der Relay den Upload der Werbebilder kurz ab (er ist beschäftigt
+  oder hat den Turnier-PC noch nicht eingetragen), versucht die App es nach
+  3 Sekunden erneut statt erst nach rund einer Minute.
+- Damit ist die Spec `relay-haerten` umgesetzt (neunter und letzter
+  Schritt).
+
+## v0.9.389
+
+- **Der Cloud-Relay vergisst ein Turnier, wenn der Turnier-PC lange weg
+  ist** (wirkt mit dem Relay sofort). Bisher blieben Namen, Werbebilder und
+  Listen im Speicher, solange irgendein Tablet verbunden war — notfalls
+  tagelang. Jetzt gilt: Nach **60 Minuten** ohne Turnier-PC löscht der Relay
+  die Turnierdaten. Ein Tablet, das noch am Feld hängt, behält seinen Stand
+  (samt den Namen seines Spiels) und kann weiterzählen; kommt der Turnier-PC zurück, steht das Spiel nicht
+  auf 0:0. Kommt er früher zurück, ist nichts verloren. Der Zugang zum
+  Sprachdienst wird schon im Moment der Trennung vergessen. Außerdem behalten
+  Cloud-Anzeigen ihre Zuweisung jetzt die ganze Zeit: Sie zeigen „Keine
+  Verbindung zum Turnier-PC" statt nach wenigen Sekunden auf die
+  Kopplungs-Seite zu fallen. Achter Schritt der Spec `relay-haerten`
+  (ADR 0089).
+
+## v0.9.388
+
+- **Cloud-Anzeigen sagen ehrlich, wenn der Turnier-PC weg ist.** Verliert
+  der Turnier-PC die Verbindung zur Cloud, zeigen Monitore, Zähltafel,
+  Feld-Übersicht und „In Vorbereitung" 20 Sekunden lang weiter den letzten
+  Stand — ein kurzer Wackler bleibt unsichtbar. Danach steht **„Keine
+  Verbindung zum Turnier-PC"** auf dem Bildschirm, und der Stand wird
+  abgedunkelt. Bisher blieb dort der alte Stand stehen oder eine leere Seite,
+  beides sah aus wie „alles in Ordnung". Ist der Turnier-PC zurück, läuft die
+  Anzeige von selbst weiter. Anzeigen im Hallennetz (LAN) sind nicht
+  betroffen. Wirkt für Monitor, Tafel, Übersicht und „In Vorbereitung" mit
+  dem Relay sofort, für die Kombi-Ansicht mit diesem App-Update. Siebter
+  Schritt der Spec `relay-haerten` (ADR 0088).
+- Ein zweiter Turnier-PC am selben Turnier bekommt vom Relay jetzt den Grund
+  der Abweisung genannt (Vorbereitung für eine Meldung im Dashboard).
+
 ## v0.9.387
 
 - **Der Cloud-Relay schützt sich gegen erfundene Turniere** (wirkt mit dem
