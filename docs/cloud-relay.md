@@ -1215,6 +1215,61 @@ Abo stehen und bekäme nie wieder einen Anstoß.
 Weiterleitungen zurück — ohne das machte ein neuer Slave gegen einen älteren
 Relay die ganze Halle blind.
 
+## Ein Feld je Tablet-Verbindung, Halterschaft, Feld-Deckel (seit v0.9.384)
+
+Spec [relay-haerten](features/relay-haerten.md), PR 3 (`relay/src/main.rs`,
+`TabletSitzung`).
+
+**`identify` auf einer Verbindung:**
+
+| Lage | Verhalten |
+|---|---|
+| noch kein Feld | Anmeldung wie bisher (frei → zählt; belegt → wartet auf „Übernehmen") |
+| dasselbe Feld, die Verbindung hält es | nichts — kein `session_superseded`, kein zweites `TabletConnected` an den Host |
+| dasselbe Feld, die Verbindung hält es nicht | normaler Versuch (der 4-s-Retry der Seite bei „belegt") |
+| ein **anderes** Feld | verworfen, einmal je Verbindung im Relay-Log; die Verbindung bleibt |
+
+Ein Feldwechsel ist immer ein Neuladen der Seite mit neuer Verbindung; eine
+echte Tablet-Seite trifft die letzte Zeile nie. Bis v0.9.383 belegte jedes
+weitere `identify` ein Feld mehr, beim Trennen wurde nur das letzte gelöst —
+die übrigen blieben als tote Slots stehen und hielten den Namespace bis zum
+Relay-Neustart.
+
+**Halter ist, wer in der Tablet-Liste des Felds steht** (`is_holder`). Den
+Merker „diese Sitzung zählt" gibt es nicht mehr: Er blieb wahr, wenn das
+Tablet verdrängt wurde — ein späteres „Übernehmen" wurde dann still
+verworfen, die Seite zählte weiter, und der Relay warf ihre Punkte weg.
+`take_over` gilt jetzt, wenn die Verbindung ein Feld hat und es gerade nicht
+hält. Alle Tablet-Frames — auch der Akkustand — gehen nur vom Halter weiter.
+
+**Feld-Schlüssel:**
+
+- Ein Feld ist *host-bekannt*, wenn es in der Feldliste, einer Zuweisung oder
+  den Feldnamen des Hosts steht.
+- Geht ein Tablet, räumt der Relay für ein **host-unbekanntes** Feld Stand,
+  Sätze, Monitor-Folge und Vor-Match-Fenster. Für ein host-bekanntes Feld
+  bleibt alles liegen: Der gesicherte Stand gehört dem Ersatzgerät.
+- `MAX_FELD_SCHLUESSEL_JE_NS` = 128 verschiedene Felder je Namespace, über
+  alle Feld-Karten. Ein Host-Frame (`MatchAssigned`, `MatchCleared`,
+  `ScoreUpdate`) oder ein Tablet, das ein weiteres Feld anlegen würde, wird
+  verworfen und einmal je Host-Sitzung gemeldet; die Host-Verbindung bleibt.
+  Der Deckel hängt nicht an der Feldliste (die ist nach einem Relay-Neustart
+  leer).
+- `take_over` legt keinen Namespace mehr ohne Prüfung an; die Geräte-Kennung
+  wird auf 128 Zeichen gekürzt. Wird eine Übernahme abgewiesen (ein Deckel
+  greift), schließt der Relay die Verbindung — die Seite hielte sich sonst
+  für den Halter und zählte ins Leere.
+- Mit jeder neuen Feldliste (`Courts`) verwirft der Relay Feldnamen und
+  Hallen von Feldern, die weder in der Liste stehen noch ein Spiel oder ein
+  Tablet haben. Sonst zählten die Altlasten eines Turnier-PCs, der über
+  mehrere Turniere verbunden bleibt, auf den Deckel.
+- Die Feldliste selbst darf länger sein (`MAX_COURTS_PER_NS` = 512): Sie ist
+  ein Menü, kein Zustand je Feld; ihre Felder gelten immer als geführt.
+
+Bewusst in Kauf genommen: Zählt ein Cloud-Tablet nach einem Relay-Neustart
+**ohne Host** und fällt dann aus, bekommt das Ersatzgerät vom Relay keinen
+Stand. Sobald der Host zurück ist, greifen Host-Sätze und Rückspiegel.
+
 ## Sicherheit
 
 - Die `install_id`-UUID ist der Zugangs-Token – dasselbe Modell wie die

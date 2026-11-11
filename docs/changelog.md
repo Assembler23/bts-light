@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.384
+
+- **Cloud-Tablets: Zurück-Übernehmen funktioniert, und ein Tablet sperrt sich
+  nicht mehr selbst aus** (wirkt mit dem Relay sofort). Übernahm ein zweites
+  Tablet ein Feld und das erste holte es sich zurück, zählte das erste zwar
+  weiter, seine Punkte kamen aber nicht an. Und ein Tablet, das an einem Feld
+  ohne Spiel wartete, konnte sich bei seiner eigenen wiederholten Anmeldung
+  aussperren, wenn der Turnier-PC gerade nicht verbunden war. Beides ist
+  behoben.
+- Der Relay räumt jetzt auf, was ein Tablet für ein Feld hinterlässt, das der
+  Turnier-PC gar nicht kennt, und führt je Turnier höchstens 128 Felder. Eine
+  Verbindung kann nur noch ein Feld belegen — vorher blieben bei mehreren
+  Anmeldungen tote Feld-Einträge stehen, die das Turnier bis zum Neustart des
+  Relays festhielten. Der Akkustand kommt nur noch vom zählenden Tablet.
+  Dritter Schritt der Spec `relay-haerten`.
+
 ## v0.9.383
 
 - **Der Punktverlauf geht bei badhub nicht mehr still verloren.** badhub

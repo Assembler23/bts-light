@@ -110,6 +110,18 @@ const MONITOR_UPLOAD_LIMIT: usize = 20 * 1024 * 1024;
 /// Schutz – ein reales Turnier hat höchstens ~30 Felder).
 const MAX_TABLETS_PER_NS: usize = 64;
 
+/// Höchstzahl verschiedener Felder (CourtIDs), für die ein Namespace
+/// überhaupt Einträge führt — über alle Feld-Karten zusammen. Der Deckel
+/// hängt bewusst NICHT an der Feldliste des Hosts: Die ist nach einem
+/// Relay-Neustart leer, und ein Host (oder wer sich dafür ausgibt) könnte
+/// sonst mit immer neuen CourtIDs beliebig viele Einträge anlegen. Das
+/// größte bekannte Turnier hat 26 Felder.
+const MAX_FELD_SCHLUESSEL_JE_NS: usize = 128;
+
+/// Längste Geräte-Kennung eines Tablets, die der Relay sich merkt. Die
+/// Seite schickt eine UUID; alles darüber ist kein Tablet.
+const MAX_GERAETE_KENNUNG: usize = 128;
+
 /// WebSocket-Ping-Intervall – hält Verbindungen über NAT/LB offen.
 const HEARTBEAT: Duration = Duration::from_secs(30);
 
@@ -413,6 +425,9 @@ struct Namespace {
     /// Vollständige Feld-Liste (vom Host via `HostFrame::Courts` gepusht) für
     /// das Cloud-Feldwechsel-Menü des Tablets (`/{ns}/courts`).
     courts: Vec<CourtBrief>,
+    /// Wurde die Überschreitung des Feld-Deckels in dieser Host-Sitzung
+    /// schon gemeldet?
+    feld_deckel_gemeldet: bool,
     /// Aufgerufene (in Vorbereitung gerufene) Spiele der fernen Hallen – für
     /// die Slave-Spielübersicht + den Nachruf am Slave (Cluster C Stufe 2).
     /// Vom Host via `HostFrame::Prepared` gepusht; ersetzt jeweils die Liste.
@@ -563,6 +578,97 @@ impl Namespace {
         self.court_state.insert(court_id, state);
     }
 
+    /// Kennt der HOST dieses Feld (Feldliste, Zuweisung oder Name)? Nur für
+    /// solche Felder bleibt der gesicherte Stand über den Abgang des
+    /// Tablets hinaus liegen — er gehört dem Ersatzgerät.
+    fn feld_host_bekannt(&self, court_id: i64) -> bool {
+        // Feldname und Halle setzt nur der Host (`MatchAssigned`,
+        // `MatchCleared`).
+        self.court_matches.contains_key(&court_id)
+            || self.court_labels.contains_key(&court_id)
+            || self.court_hall.contains_key(&court_id)
+            || self.courts.iter().any(|c| c.id == court_id)
+    }
+
+    /// Verwirft Feldnamen und Hallen von Feldern, die der Host nicht mehr
+    /// führt: nicht in der neuen Feldliste, ohne Spiel und ohne Tablet.
+    /// Beide Karten wuchsen sonst nur — bleibt ein Turnier-PC über mehrere
+    /// Turniere verbunden, zählten ihre Altlasten auf den Feld-Deckel, bis
+    /// er ein NEUES Feld still verwürfe.
+    fn feld_altlasten_raeumen(&mut self) {
+        let bleibt: std::collections::HashSet<i64> = self
+            .courts
+            .iter()
+            .map(|c| c.id)
+            .chain(self.court_matches.keys().copied())
+            .chain(self.tablets.keys().copied())
+            .collect();
+        self.court_labels.retain(|c, _| bleibt.contains(c));
+        self.court_hall.retain(|c, _| bleibt.contains(c));
+        self.court_on_court_since.retain(|c, _| bleibt.contains(c));
+    }
+
+    /// Führt der Namespace schon irgendeinen Eintrag für dieses Feld?
+    fn feld_gefuehrt(&self, court_id: i64) -> bool {
+        self.feld_host_bekannt(court_id)
+            || self.tablets.contains_key(&court_id)
+            || self.court_state.contains_key(&court_id)
+            || self.court_scores.contains_key(&court_id)
+            || self.court_hall.contains_key(&court_id)
+            || self.court_on_court_since.contains_key(&court_id)
+            || self.vor_match.contains_key(&court_id)
+            || self.monitor_seq.contains_key(&court_id)
+    }
+
+    /// Zahl der verschiedenen Felder über alle Feld-Karten.
+    fn feld_schluessel_anzahl(&self) -> usize {
+        let mut alle: std::collections::HashSet<i64> = self.courts.iter().map(|c| c.id).collect();
+        alle.extend(self.court_matches.keys());
+        alle.extend(self.court_labels.keys());
+        alle.extend(self.tablets.keys());
+        alle.extend(self.court_state.keys());
+        alle.extend(self.court_scores.keys());
+        alle.extend(self.court_hall.keys());
+        alle.extend(self.court_on_court_since.keys());
+        alle.extend(self.vor_match.keys());
+        alle.extend(self.monitor_seq.keys());
+        alle.len()
+    }
+
+    /// Darf für dieses Feld ein Eintrag entstehen? Ein schon geführtes Feld
+    /// immer; ein neues nur unter dem Deckel
+    /// [`MAX_FELD_SCHLUESSEL_JE_NS`]. Die Überschreitung wird einmal je
+    /// Host-Sitzung gemeldet (das Merkmal fällt mit dem Host-Wechsel).
+    fn feld_erlaubt(&mut self, ns: &str, court_id: i64) -> bool {
+        if self.feld_gefuehrt(court_id) || self.feld_schluessel_anzahl() < MAX_FELD_SCHLUESSEL_JE_NS
+        {
+            return true;
+        }
+        if !self.feld_deckel_gemeldet {
+            self.feld_deckel_gemeldet = true;
+            tracing::warn!(
+                "Namespace '{ns}': mehr als {MAX_FELD_SCHLUESSEL_JE_NS} verschiedene Felder — Feld {court_id} und weitere werden verworfen"
+            );
+        }
+        false
+    }
+
+    /// Räumt, was ein Tablet für ein Feld hinterlassen hat, das der Host
+    /// gar nicht kennt. Ohne das wüchse der Namespace mit jeder CourtID, die
+    /// sich ein Tablet ausdenkt (ein Tablet hält ihn, weitere wechseln die
+    /// Feldnummern durch). Für host-bekannte Felder bleibt alles liegen.
+    fn feld_raeumen_wenn_unbekannt(&mut self, court_id: i64) {
+        if self.feld_host_bekannt(court_id) {
+            return;
+        }
+        self.clear_court_state(court_id);
+        self.court_scores.remove(&court_id);
+        self.court_hall.remove(&court_id);
+        self.court_on_court_since.remove(&court_id);
+        self.vor_match.remove(&court_id);
+        self.monitor_seq.remove(&court_id);
+    }
+
     /// Räumt beide Fassungen (Match-Wechsel, Feld geleert).
     fn clear_court_state(&mut self, court_id: i64) {
         self.court_state.remove(&court_id);
@@ -628,6 +734,7 @@ impl Namespace {
             freetext: Vec::new(),
             slaves: HashMap::new(),
             courts: Vec::new(),
+            feld_deckel_gemeldet: false,
             azure_tts: None,
             monitor: None,
             monitor_control: MonitorControl::default(),
@@ -2742,10 +2849,16 @@ async fn tablet_ws(
 struct TabletSitzung {
     ns: String,
     /// Feld-Identität dieser Sitzung: die CourtID, sobald `identify` kam.
+    ///
+    /// **Ein Feld je Sitzung.** Ein Feldwechsel ist immer ein Neuladen der
+    /// Seite mit neuer Verbindung. Ob die Sitzung das Feld gerade *hält*,
+    /// steht nicht hier, sondern allein in `Namespace.tablets`
+    /// ([`is_holder`]) — ein eigener Merker in der Sitzung lief davon weg:
+    /// Wurde das Tablet verdrängt, blieb er wahr, ein späteres „Übernehmen"
+    /// wurde still verworfen und die Seite zählte ins Leere.
     court: Option<i64>,
-    /// Schiedst dieses Tablet das Feld aktiv? Passive Tablets warten auf
-    /// „Übernehmen"; ihre Score-/Alert-Frames werden nicht weitergeleitet.
-    active: bool,
+    /// Wurde ein `identify` für ein ANDERES Feld schon gemeldet?
+    fremdes_feld_gemeldet: bool,
     /// Persistente Geräte-Kennung (aus identify/take_over) — leer bei
     /// alten Tablet-Seiten. Für die Reconnect-Erkennung je Feld.
     my_device: String,
@@ -2765,7 +2878,7 @@ impl TabletSitzung {
         Self {
             ns,
             court: None,
-            active: false,
+            fremdes_feld_gemeldet: false,
             my_device: String::new(),
         }
     }
@@ -2781,11 +2894,34 @@ impl TabletSitzung {
                 device_id,
                 ..
             }) => {
-                self.my_device = device_id;
+                match self.court {
+                    // Anderes Feld auf derselben Verbindung: verwerfen. Sonst
+                    // belegte jedes weitere `identify` ein Feld mehr, beim
+                    // Trennen würde nur das letzte gelöst — die übrigen
+                    // blieben als tote Slots stehen und hielten den
+                    // Namespace bis zum Relay-Neustart am Leben.
+                    Some(bisher) if bisher != court_id => {
+                        if !self.fremdes_feld_gemeldet {
+                            self.fremdes_feld_gemeldet = true;
+                            tracing::warn!(
+                                "Tablet an Feld {bisher} (Namespace '{ns}') meldet sich für Feld {court_id} an — verworfen, ein Feld je Verbindung"
+                            );
+                        }
+                        return SitzungsSchritt::Weiter;
+                    }
+                    // Dasselbe Feld, und die Sitzung hält es schon: nichts
+                    // tun. Die Seite wiederholt `identify`, solange sie kein
+                    // Spiel bekommt — der Relay verdrängte dabei bisher die
+                    // eigene Sitzung (`SessionSuperseded` an sich selbst).
+                    Some(_) if haelt_feld(broker, &ns, court_id, tx).await => {
+                        return SitzungsSchritt::Weiter;
+                    }
+                    _ => {}
+                }
+                self.my_device = kuerze_kennung(device_id);
                 match attach_tablet(broker, &ns, court_id, &self.my_device, tx).await {
                     AttachResult::Active => {
                         tracing::info!("Tablet verbunden: Namespace '{ns}', Feld {court_id}");
-                        self.active = true;
                         self.court = Some(court_id);
                     }
                     AttachResult::Occupied => {
@@ -2797,13 +2933,23 @@ impl TabletSitzung {
                 }
             }
             Ok(TabletMsg::TakeOver { device_id }) => {
-                if let (Some(c), false) = (self.court, self.active) {
-                    if !device_id.is_empty() {
-                        self.my_device = device_id;
+                // Übernehmen darf, wer ein Feld hat und es gerade NICHT hält —
+                // auch ein Tablet, das selbst verdrängt wurde (Rück-Übernahme).
+                if let Some(c) = self.court {
+                    if !haelt_feld(broker, &ns, c, tx).await {
+                        if !device_id.is_empty() {
+                            self.my_device = kuerze_kennung(device_id);
+                        }
+                        if take_over_court(broker, &ns, c, &self.my_device, tx).await {
+                            tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
+                        } else {
+                            // Abgewiesen (ein Deckel greift): Die Seite hielte
+                            // sich sonst für den Halter und zählte ins Leere.
+                            // Schließen wie bei einer abgewiesenen Anmeldung —
+                            // das Tablet zeigt die getrennte Verbindung.
+                            return SitzungsSchritt::Schliessen;
+                        }
                     }
-                    take_over_court(broker, &ns, c, &self.my_device, tx).await;
-                    self.active = true;
-                    tracing::info!("Tablet übernimmt Feld {c} (Namespace '{ns}')");
                 }
             }
             Ok(TabletMsg::ScoreUpdate {
@@ -2812,7 +2958,7 @@ impl TabletSitzung {
                 sets_history,
                 match_id,
             }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_score(broker, &ns, c, score_a, score_b, sets_history, match_id, tx)
                         .await;
                 }
@@ -2828,7 +2974,7 @@ impl TabletSitzung {
                 score_a,
                 score_b,
             }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_rally(
                         broker, &ns, c, match_id, set, n, winner, score_a, score_b, tx,
                     )
@@ -2836,22 +2982,22 @@ impl TabletSitzung {
                 }
             }
             Ok(TabletMsg::RallySync { match_id, timeline }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_rally_sync(broker, &ns, c, match_id, timeline, tx).await;
                 }
             }
             Ok(TabletMsg::Battery { percent, charging }) => {
-                if let (Some(c), true) = (self.court, self.active) {
-                    forward_battery(broker, &ns, c, percent, charging).await;
+                if let Some(c) = self.court {
+                    forward_battery(broker, &ns, c, percent, charging, tx).await;
                 }
             }
             Ok(TabletMsg::Alert { injury, official }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_alert(broker, &ns, c, injury, official, tx).await;
                 }
             }
             Ok(TabletMsg::StateSync { state }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     store_court_state(broker, &ns, c, state, tx).await;
                 }
             }
@@ -2868,12 +3014,12 @@ impl TabletSitzung {
             // Punktverlauf — Briefträger, nur Halter-, Stale- und
             // Größen-Prüfung, keine Deutung und keine Vorhaltung.
             Ok(TabletMsg::MatchEvent { match_id, event }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_match_event(broker, &ns, c, match_id, event, tx).await;
                 }
             }
             Ok(TabletMsg::MatchEventSync { match_id, events }) => {
-                if let (Some(c), true) = (self.court, self.active) {
+                if let Some(c) = self.court {
                     forward_match_event_sync(broker, &ns, c, match_id, events, tx).await;
                 }
             }
@@ -2884,12 +3030,13 @@ impl TabletSitzung {
 
     /// Gibt den Court-Slot frei, wenn diese Sitzung ihn hielt.
     ///
-    /// **Nur das aktive Tablet räumt ab** — `detach_tablet` prüft zusätzlich
-    /// über `same_channel`, dass der Eintrag wirklich dieser Sitzung gehört.
+    /// **Nur der Halter räumt ab** — `detach_tablet` prüft über
+    /// `same_channel`, dass der Eintrag wirklich dieser Sitzung gehört.
     async fn abraeumen(&self, broker: &Broker, tx: &Tx) {
-        if let (Some(c), true) = (self.court, self.active) {
-            detach_tablet(broker, &self.ns, c, tx).await;
-            tracing::info!("Tablet getrennt: Namespace '{}', Feld {c}", self.ns);
+        if let Some(c) = self.court {
+            if detach_tablet(broker, &self.ns, c, tx).await {
+                tracing::info!("Tablet getrennt: Namespace '{}', Feld {c}", self.ns);
+            }
         }
     }
 }
@@ -3657,11 +3804,16 @@ async fn attach_tablet(
     tx: &Tx,
 ) -> AttachResult {
     let mut map = broker.namespaces.lock().await;
-    if !map.contains_key(ns) && map.len() >= MAX_NAMESPACES {
+    let Some(namespace) = namespace_holen_oder_anlegen(&mut map, ns) else {
         tracing::warn!("Namespace-Limit erreicht – Tablet für '{ns}' abgewiesen");
         return AttachResult::Rejected;
+    };
+    if !namespace.feld_erlaubt(ns, court_id) {
+        // Kein Eintrag entstanden — ein eben angelegter leerer Namespace
+        // darf nicht stehen bleiben.
+        namespace_aufraeumen(&mut map, ns);
+        return AttachResult::Rejected;
     }
-    let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
     if namespace.tablets.contains_key(&court_id) {
         // Reconnect-Erkennung: Meldet sich DASSELBE Gerät erneut (tote
         // Vorgänger-Session nach Netz-Abriss), löst es seine alte Session
@@ -3756,9 +3908,28 @@ async fn attach_tablet(
 
 /// Übernimmt ein belegtes Feld für ein bisher passives Tablet – das
 /// zuvor aktive Tablet wird mit `SessionSuperseded` gesperrt.
-async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, device_id: &str, tx: &Tx) {
+///
+/// `false`, wenn die Übernahme nicht stattfand (Namespace-, Tablet- oder
+/// Feld-Deckel). Bisher legte sie den Namespace ohne jede Prüfung an.
+async fn take_over_court(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    device_id: &str,
+    tx: &Tx,
+) -> bool {
     let mut map = broker.namespaces.lock().await;
-    let namespace = map.entry(ns.to_string()).or_insert_with(Namespace::new);
+    let Some(namespace) = namespace_holen_oder_anlegen(&mut map, ns) else {
+        tracing::warn!("Namespace-Limit erreicht – Übernahme für '{ns}' abgewiesen");
+        return false;
+    };
+    let neu_belegt = !namespace.tablets.contains_key(&court_id);
+    if !namespace.feld_erlaubt(ns, court_id)
+        || (neu_belegt && namespace.tablets.len() >= MAX_TABLETS_PER_NS)
+    {
+        namespace_aufraeumen(&mut map, ns);
+        return false;
+    }
     if let Some(old) = namespace.tablets.insert(court_id, tx.clone()) {
         let _ = old.send(text(&ServerMsg::SessionSuperseded));
     }
@@ -3796,6 +3967,7 @@ async fn take_over_court(broker: &Broker, ns: &str, court_id: i64, device_id: &s
             court_label,
         }));
     }
+    true
 }
 
 /// Ist `tx` noch das am Feld eingetragene (aktive) Tablet? Nach einem
@@ -3881,10 +4053,12 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
 
 /// Entfernt das Tablet wieder – nur, wenn der eingetragene Sender noch
 /// unserer ist (ein Reconnect auf dasselbe Feld darf nichts wegräumen).
-async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
+///
+/// Liefert, ob diese Sitzung das Feld hielt (und also etwas gelöst wurde).
+async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> bool {
     let mut map = broker.namespaces.lock().await;
     let Some(namespace) = map.get_mut(ns) else {
-        return;
+        return false;
     };
     let still_ours = namespace
         .tablets
@@ -3900,6 +4074,11 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
         namespace.state_deckel_gemeldet.remove(&court_id);
         namespace.tablet_state_seit.remove(&court_id);
         namespace.state_weitergabe.remove(&court_id);
+        // Stand, Sätze und Zähler eines Felds, das der Host nicht kennt,
+        // gehen mit dem Tablet. Für host-bekannte Felder bleibt alles
+        // liegen: Der gesicherte Stand ist genau das, was ein Ersatzgerät
+        // nach dem Ausfall dieses Tablets bekommt.
+        namespace.feld_raeumen_wenn_unbekannt(court_id);
         let court_label = label_of(namespace, court_id);
         if let Some(host) = &namespace.host {
             let _ = host.send(text(&RelayFrame::TabletDisconnected {
@@ -3909,6 +4088,33 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
         }
     }
     namespace_aufraeumen(&mut map, ns);
+    still_ours
+}
+
+/// Hält die Verbindung `tx` dieses Feld gerade?
+async fn haelt_feld(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) -> bool {
+    let map = broker.namespaces.lock().await;
+    map.get(ns).is_some_and(|n| is_holder(n, court_id, tx))
+}
+
+/// Holt den Namespace oder legt ihn an — nie über [`MAX_NAMESPACES`] hinaus.
+fn namespace_holen_oder_anlegen<'a>(
+    map: &'a mut HashMap<String, Namespace>,
+    ns: &str,
+) -> Option<&'a mut Namespace> {
+    if !map.contains_key(ns) && map.len() >= MAX_NAMESPACES {
+        return None;
+    }
+    Some(map.entry(ns.to_string()).or_insert_with(Namespace::new))
+}
+
+/// Kürzt die Geräte-Kennung eines Tablets auf [`MAX_GERAETE_KENNUNG`]
+/// Zeichen (an einer Zeichengrenze).
+fn kuerze_kennung(kennung: String) -> String {
+    if kennung.chars().count() <= MAX_GERAETE_KENNUNG {
+        return kennung;
+    }
+    kennung.chars().take(MAX_GERAETE_KENNUNG).collect()
 }
 
 /// Passt die vom Tablet gemeldete Match-ID zum aktuellen Court-Match?
@@ -4056,9 +4262,21 @@ async fn forward_score(
 }
 
 /// Leitet den Akkustand eines Tablets an den Host weiter.
-async fn forward_battery(broker: &Broker, ns: &str, court_id: i64, percent: i64, charging: bool) {
+async fn forward_battery(
+    broker: &Broker,
+    ns: &str,
+    court_id: i64,
+    percent: i64,
+    charging: bool,
+    tx: &Tx,
+) {
     let map = broker.namespaces.lock().await;
     if let Some(namespace) = map.get(ns) {
+        // Nur der Halter: Ein wartendes oder verdrängtes Tablet meldete sonst
+        // seinen Akku als den des zählenden Geräts.
+        if !is_holder(namespace, court_id, tx) {
+            return;
+        }
         let court_label = label_of(namespace, court_id);
         if let Some(host) = namespace.host.as_ref() {
             let _ = host.send(text(&RelayFrame::Battery {
@@ -4296,6 +4514,8 @@ fn try_claim_host(namespace: &mut Namespace, tx: &Tx, now: u64) -> HostClaim {
         (old, _) => {
             let superseded = old.is_some();
             namespace.host = Some(tx.clone());
+            // Neue Host-Sitzung: Der Feld-Deckel darf wieder einmal melden.
+            namespace.feld_deckel_gemeldet = false;
             namespace.host_last_seen = now;
             // Neue Host-Verbindung = neue Generation. Sie steckt im ETag des
             // Anzeige-Zustands, weil die Revision beim Neustart des
@@ -5462,6 +5682,19 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
     }
     // Jedes Host-Frame ist ein Lebenszeichen für die Zombie-Erkennung.
     namespace.host_last_seen = now_ms();
+    // Feld-Deckel: Ein Frame, das ein NEUES Feld anlegen würde, wird über
+    // dem Deckel verworfen (und einmal gemeldet) — die Verbindung bleibt.
+    let feld = match &frame {
+        HostFrame::MatchAssigned { court_id, .. }
+        | HostFrame::MatchCleared { court_id, .. }
+        | HostFrame::ScoreUpdate { court_id, .. } => Some(*court_id),
+        _ => None,
+    };
+    if let Some(court_id) = feld {
+        if !namespace.feld_erlaubt(ns, court_id) {
+            return true;
+        }
+    }
     match frame {
         HostFrame::MatchAssigned {
             court_id,
@@ -5717,8 +5950,12 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 // (Sicherheits-Review 20.08.2026). Kein echtes Turnier kommt
                 // auch nur in die Nähe.
                 let mut courts = courts;
+                // `MAX_COURTS_PER_NS` (512) ist bewusst weiter als der
+                // Feld-Deckel (128): Die Liste ist ein Menü, kein Zustand je
+                // Feld. Felder der Liste gelten immer als geführt.
                 courts.truncate(MAX_COURTS_PER_NS);
                 namespace.courts = courts;
+                namespace.feld_altlasten_raeumen();
                 // Neue Feldliste = neue Übersicht; auch dieser Weg stößt nicht
                 // an (Spec S9). Nach dem Schreiben gemeldet, nie davor.
                 namespace.bump_overview_rev();
@@ -6257,8 +6494,12 @@ mod tests {
         a.verarbeite(&broker, ident_a, &tx_a).await;
         b.verarbeite(&broker, ident_b, &tx_b).await;
 
-        assert!(a.active, "die erste Sitzung schiedst");
-        assert!(!b.active, "die zweite wartet");
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).expect("Namespace");
+            assert!(is_holder(n, 5, &tx_a), "die erste Sitzung schiedst");
+            assert!(!is_holder(n, 5, &tx_b), "die zweite wartet");
+        }
         let antwort = rx_b.recv().await.expect("CourtOccupied erwartet");
         match antwort {
             Message::Text(t) => assert!(
@@ -6267,6 +6508,487 @@ mod tests {
             ),
             anderes => panic!("unerwarteter Frame: {anderes:?}"),
         }
+    }
+
+    // ───── Tote Slots, Halterschaft, Feld-Schlüssel (Spec relay-haerten, PR 3) ─────
+
+    fn ident(feld: i64, geraet: &str) -> String {
+        format!(
+            r#"{{"type":"identify","courtId":{feld},"courtLabel":"F{feld}","deviceId":"{geraet}"}}"#
+        )
+    }
+
+    /// Alle bisher angekommenen Text-Frames eines Kanals.
+    fn texte(rx: &mut mpsc::UnboundedReceiver<Message>) -> Vec<String> {
+        let mut aus = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            if let Message::Text(t) = m {
+                aus.push(t.to_string());
+            }
+        }
+        aus
+    }
+
+    async fn haelt(broker: &Broker, ns: &str, feld: i64, tx: &Tx) -> bool {
+        haelt_feld(broker, ns, feld, tx).await
+    }
+
+    #[tokio::test]
+    async fn zweites_identify_fuer_anderes_feld_wird_verworfen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(1, "a"), &tx).await;
+        assert_eq!(
+            s.verarbeite(&broker, &ident(2, "a"), &tx).await,
+            SitzungsSchritt::Weiter,
+            "die Verbindung bleibt"
+        );
+        assert_eq!(s.court, Some(1));
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("Namespace");
+        assert_eq!(n.tablets.keys().copied().collect::<Vec<_>>(), vec![1]);
+        assert!(!n.tablet_devices.contains_key(&2));
+    }
+
+    #[tokio::test]
+    async fn namespace_ist_nach_feldwechsel_und_trennen_weg() {
+        // Früher belegte jedes weitere `identify` ein Feld mehr, beim Trennen
+        // wurde nur das letzte gelöst — der Namespace blieb bis zum
+        // Relay-Neustart stehen.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut s = TabletSitzung::neu(ns.clone());
+        for feld in [1, 2, 3, 4] {
+            s.verarbeite(&broker, &ident(feld, "a"), &tx).await;
+        }
+        s.abraeumen(&broker, &tx).await;
+        assert!(
+            !broker.namespaces.lock().await.contains_key(&ns),
+            "kein toter Slot hält den Namespace"
+        );
+    }
+
+    #[tokio::test]
+    async fn identify_des_halters_ist_folgenlos() {
+        // Die Seite wiederholt `identify`, solange sie kein Spiel bekommt.
+        // Früher verdrängte der Relay dabei die EIGENE Sitzung.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        assert_eq!(texte(&mut host_rx).len(), 1, "ein TabletConnected");
+        texte(&mut rx);
+
+        for _ in 0..3 {
+            s.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        }
+        assert!(
+            texte(&mut rx).is_empty(),
+            "kein SessionSuperseded an sich selbst, kein zweites StateRestore"
+        );
+        assert!(
+            texte(&mut host_rx).is_empty(),
+            "kein zweites TabletConnected"
+        );
+        assert!(haelt(&broker, &ns, 5, &tx).await);
+    }
+
+    #[tokio::test]
+    async fn belegt_retry_greift_nach_freigabe() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx_a, _rx_a) = mpsc::unbounded_channel();
+        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        assert!(texte(&mut rx_b).iter().any(|t| t.contains("occupied")));
+        assert!(!haelt(&broker, &ns, 5, &tx_b).await);
+
+        // A geht; Bs nächster Versuch (der 4-s-Retry der Seite) bekommt das Feld.
+        a.abraeumen(&broker, &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        assert!(haelt(&broker, &ns, 5, &tx_b).await);
+    }
+
+    #[tokio::test]
+    async fn uebernahme_hin_und_zurueck() {
+        // A zählt, B übernimmt, A übernimmt zurück. Früher wurde As
+        // Rück-Übernahme still verworfen — die Seite zählte weiter, der
+        // Relay warf ihre Punkte weg.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx_a, mut rx_a) = mpsc::unbounded_channel();
+        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+
+        let uebernehmen = |geraet: &str| format!(r#"{{"type":"take_over","deviceId":"{geraet}"}}"#);
+        b.verarbeite(&broker, &uebernehmen("b"), &tx_b).await;
+        assert!(haelt(&broker, &ns, 5, &tx_b).await);
+        assert!(texte(&mut rx_a).iter().any(|t| t.contains("superseded")));
+
+        a.verarbeite(&broker, &uebernehmen("a"), &tx_a).await;
+        assert!(haelt(&broker, &ns, 5, &tx_a).await, "A hält wieder");
+        assert!(texte(&mut rx_b).iter().any(|t| t.contains("superseded")));
+
+        // As Punkt erreicht den Host, Bs nicht mehr.
+        texte(&mut host_rx);
+        let punkt = r#"{"type":"score_update","scoreA":3,"scoreB":1}"#;
+        b.verarbeite(&broker, punkt, &tx_b).await;
+        assert!(texte(&mut host_rx).is_empty(), "B ist verdrängt");
+        a.verarbeite(&broker, punkt, &tx_a).await;
+        assert!(
+            texte(&mut host_rx)
+                .iter()
+                .any(|t| t.contains("score_update")),
+            "As Punkte kommen an"
+        );
+        // Wer das Feld hält, kann nicht noch einmal „übernehmen".
+        a.verarbeite(&broker, &uebernehmen("a"), &tx_a).await;
+        assert!(texte(&mut rx_a).is_empty(), "keine Selbst-Verdrängung");
+    }
+
+    #[tokio::test]
+    async fn akku_nur_vom_halter() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx_a, _rx_a) = mpsc::unbounded_channel();
+        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        texte(&mut host_rx);
+
+        let akku = r#"{"type":"battery","percent":12,"charging":false}"#;
+        b.verarbeite(&broker, akku, &tx_b).await;
+        assert!(
+            texte(&mut host_rx).is_empty(),
+            "das wartende Tablet zählt nicht"
+        );
+        a.verarbeite(&broker, akku, &tx_a).await;
+        assert!(texte(&mut host_rx).iter().any(|t| t.contains("battery")));
+    }
+
+    #[tokio::test]
+    async fn host_unbekanntes_feld_wird_beim_abgang_geraeumt() {
+        // Zwei Tablets ohne Host: eines hält den Namespace, das andere
+        // hinterlässt für sein (dem Host unbekanntes) Feld Stand und Sätze.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx_a, _rx_a) = mpsc::unbounded_channel();
+        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(1, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(77, "b"), &tx_b).await;
+        b.verarbeite(
+            &broker,
+            r#"{"type":"score_update","scoreA":3,"scoreB":1}"#,
+            &tx_b,
+        )
+        .await;
+        b.verarbeite(
+            &broker,
+            r#"{"type":"state_sync","state":"{\"x\":1}"}"#,
+            &tx_b,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).expect("Namespace");
+            assert!(n.court_scores.contains_key(&77) && n.court_state.contains_key(&77));
+        }
+
+        b.abraeumen(&broker, &tx_b).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).expect("A hält den Namespace");
+        assert!(!n.feld_gefuehrt(77), "nichts bleibt für Feld 77");
+        assert_eq!(n.feld_schluessel_anzahl(), 1);
+    }
+
+    #[tokio::test]
+    async fn host_bekanntes_feld_behaelt_den_stand() {
+        // Der gesicherte Stand ist genau das, was ein Ersatzgerät nach dem
+        // Ausfall des Tablets bekommt — er darf beim Abgang NICHT gehen.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(7),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &host_tx,
+        )
+        .await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.verarbeite(&broker, &ident(5, "a"), &tx).await;
+        s.verarbeite(
+            &broker,
+            r#"{"type":"state_sync","state":"{\"match\":{\"id\":7}}"}"#,
+            &tx,
+        )
+        .await;
+        s.abraeumen(&broker, &tx).await;
+
+        // Ein Ersatzgerät bekommt den Stand.
+        let (tx_neu, mut rx_neu) = mpsc::unbounded_channel();
+        let mut ersatz = TabletSitzung::neu(ns.clone());
+        ersatz
+            .verarbeite(&broker, &ident(5, "ersatz"), &tx_neu)
+            .await;
+        assert!(
+            texte(&mut rx_neu)
+                .iter()
+                .any(|t| t.contains("state_restore")),
+            "StateRestore für das Ersatzgerät"
+        );
+    }
+
+    #[tokio::test]
+    async fn feld_schluessel_deckel_gilt_ohne_feldliste() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        let zuweisen = async |feld: i64, spiel: i64| {
+            handle_host_frame(
+                &broker,
+                &ns,
+                HostFrame::MatchAssigned {
+                    court_id: feld,
+                    court_label: format!("F{feld}"),
+                    hall: String::new(),
+                    match_brief: brief(spiel),
+                    on_court_since_ms: None,
+                    host_sets: Vec::new(),
+                },
+                &host_tx,
+            )
+            .await
+        };
+        for feld in 1..=MAX_FELD_SCHLUESSEL_JE_NS as i64 {
+            assert!(zuweisen(feld, feld).await);
+        }
+        // Das 129. Feld wird verworfen — die Verbindung bleibt (`true`).
+        assert!(zuweisen(9999, 1).await, "der Host wird nicht getrennt");
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).unwrap();
+            assert_eq!(n.court_matches.len(), MAX_FELD_SCHLUESSEL_JE_NS);
+            assert!(!n.feld_gefuehrt(9999));
+            assert!(n.feld_deckel_gemeldet);
+        }
+        // Ein schon geführtes Feld nimmt weiter Änderungen an.
+        assert!(zuweisen(3, 4242).await);
+        let map = broker.namespaces.lock().await;
+        assert_eq!(map.get(&ns).unwrap().court_matches[&3].match_id, 4242);
+        // Auch ein Tablet legt über dem Deckel kein neues Feld an.
+        drop(map);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut s = TabletSitzung::neu(ns.clone());
+        assert_eq!(
+            s.verarbeite(&broker, &ident(8888, "a"), &tx).await,
+            SitzungsSchritt::Schliessen
+        );
+    }
+
+    #[tokio::test]
+    async fn uebernahme_legt_keinen_namespace_ueber_dem_limit_an() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        {
+            let mut map = broker.namespaces.lock().await;
+            for i in 0..MAX_NAMESPACES {
+                map.insert(format!("voll-{i}"), Namespace::new());
+            }
+        }
+        let ns = test_ns();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        // Eine Sitzung, die ihr Feld kennt, deren Namespace es aber nicht
+        // (mehr) gibt.
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.court = Some(1);
+        s.verarbeite(&broker, r#"{"type":"take_over","deviceId":"a"}"#, &tx)
+            .await;
+        let map = broker.namespaces.lock().await;
+        assert_eq!(map.len(), MAX_NAMESPACES);
+        assert!(!map.contains_key(&ns));
+    }
+
+    #[tokio::test]
+    async fn verdraengtes_tablet_zaehlt_nicht_mehr() {
+        // Ohne den Sitzungs-Merker `active` hängt alles an `is_holder`: Ein
+        // verdrängtes Tablet, das einfach weiterzählt, erreicht den Host
+        // mit keinem Frame.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        let (tx_a, _rx_a) = mpsc::unbounded_channel();
+        let (tx_b, _rx_b) = mpsc::unbounded_channel();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        b.verarbeite(&broker, r#"{"type":"take_over","deviceId":"b"}"#, &tx_b)
+            .await;
+        texte(&mut host_rx);
+        for frame in [
+            r#"{"type":"score_update","scoreA":3,"scoreB":1}"#,
+            r#"{"type":"state_sync","state":"{}"}"#,
+            r#"{"type":"battery","percent":50,"charging":true}"#,
+            r#"{"type":"alert","injury":true,"official":false}"#,
+        ] {
+            a.verarbeite(&broker, frame, &tx_a).await;
+        }
+        assert!(texte(&mut host_rx).is_empty());
+        let map = broker.namespaces.lock().await;
+        assert!(!map.get(&ns).unwrap().court_state.contains_key(&5));
+    }
+
+    #[tokio::test]
+    async fn uebernahme_an_inzwischen_freiem_feld() {
+        // A zählte, B wartete; A ist gegangen. Bs „Übernehmen" bekommt das
+        // freie Feld samt gesichertem Stand.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::MatchAssigned {
+                court_id: 5,
+                court_label: "Feld 5".into(),
+                hall: String::new(),
+                match_brief: brief(7),
+                on_court_since_ms: None,
+                host_sets: Vec::new(),
+            },
+            &host_tx,
+        )
+        .await;
+        let (tx_a, _rx_a) = mpsc::unbounded_channel();
+        let (tx_b, mut rx_b) = mpsc::unbounded_channel();
+        let mut a = TabletSitzung::neu(ns.clone());
+        let mut b = TabletSitzung::neu(ns.clone());
+        a.verarbeite(&broker, &ident(5, "a"), &tx_a).await;
+        a.verarbeite(
+            &broker,
+            r#"{"type":"state_sync","state":"{\"match\":{\"id\":7}}"}"#,
+            &tx_a,
+        )
+        .await;
+        b.verarbeite(&broker, &ident(5, "b"), &tx_b).await;
+        a.abraeumen(&broker, &tx_a).await;
+        texte(&mut rx_b);
+        texte(&mut host_rx);
+
+        assert_eq!(
+            b.verarbeite(&broker, r#"{"type":"take_over","deviceId":"b"}"#, &tx_b)
+                .await,
+            SitzungsSchritt::Weiter
+        );
+        assert!(haelt(&broker, &ns, 5, &tx_b).await);
+        assert!(texte(&mut rx_b).iter().any(|t| t.contains("state_restore")));
+        assert!(texte(&mut host_rx)
+            .iter()
+            .any(|t| t.contains("tablet_connected")));
+    }
+
+    #[tokio::test]
+    async fn abgewiesene_uebernahme_schliesst_die_verbindung() {
+        // Greift bei der Übernahme ein Deckel (hier: das Tablet-Limit),
+        // darf die Seite nicht glauben, sie zähle — die Verbindung endet.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let (fremd, _fremd_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.entry(ns.clone()).or_insert_with(Namespace::new);
+            for feld in 0..MAX_TABLETS_PER_NS as i64 {
+                n.tablets.insert(1000 + feld, fremd.clone());
+            }
+        }
+        let mut s = TabletSitzung::neu(ns.clone());
+        s.court = Some(5);
+        assert_eq!(
+            s.verarbeite(&broker, r#"{"type":"take_over","deviceId":"a"}"#, &tx)
+                .await,
+            SitzungsSchritt::Schliessen
+        );
+        assert!(!haelt(&broker, &ns, 5, &tx).await);
+    }
+
+    #[tokio::test]
+    async fn neue_feldliste_raeumt_alte_feldnamen() {
+        // Ein Turnier-PC bleibt über mehrere Turniere verbunden: Die Namen
+        // und Hallen der alten Felder dürfen nicht auf den Deckel zählen.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        register_host(&broker, &ns, &host_tx).await;
+        for feld in 1..=100 {
+            handle_host_frame(
+                &broker,
+                &ns,
+                HostFrame::MatchCleared {
+                    court_id: feld,
+                    court_label: format!("alt {feld}"),
+                    hall: "Halle".into(),
+                },
+                &host_tx,
+            )
+            .await;
+        }
+        let liste = |ids: std::ops::RangeInclusive<i64>| HostFrame::Courts {
+            courts: ids
+                .map(|id| relay_proto::CourtBrief {
+                    id,
+                    label: format!("neu {id}"),
+                    hall: String::new(),
+                    hall_color: None,
+                })
+                .collect(),
+            azure_tts: None,
+            reconnect_legacy_rev: false,
+        };
+        handle_host_frame(&broker, &ns, liste(201..=220), &host_tx).await;
+        let map = broker.namespaces.lock().await;
+        let n = map.get(&ns).unwrap();
+        assert!(n.court_labels.is_empty() && n.court_hall.is_empty());
+        assert_eq!(n.feld_schluessel_anzahl(), 20);
+    }
+
+    #[test]
+    fn geraete_kennung_wird_gekuerzt() {
+        assert_eq!(kuerze_kennung("kurz".into()), "kurz");
+        let lang = "ä".repeat(500);
+        assert_eq!(kuerze_kennung(lang).chars().count(), MAX_GERAETE_KENNUNG);
     }
 
     /// **Die tragende Invariante des Trägers** (ADR 0048): N Substrome

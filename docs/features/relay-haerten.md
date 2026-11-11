@@ -920,6 +920,16 @@ Ein gemeinsamer Release-Tag für PR 1 und 2 ist möglich.
 `uebernahme_legt_keinen_namespace_ueber_dem_limit_an`.
 **Doku:** `docs/cloud-relay.md` (Deckel-Tabelle, Sicherheit), `docs/changelog.md`.
 
+**Aus der Umsetzung (v0.9.384):** Die beiden als „zuerst rot" geplanten Tests
+(`identify_des_halters_ist_folgenlos`, `uebernahme_hin_und_zurueck`) wurden nicht gegen den
+alten Code laufen gelassen — sie nutzen den neuen Helfer `haelt_feld` und kompilieren dort
+nicht. Die Fehler sind am alten Code nur gelesen, nicht nachgestellt. Der Feld-Deckel zählt
+auch `court_hall`, `court_on_court_since` und die Monitor-Folge; `detach_tablet` räumt für
+host-unbekannte Felder zusätzlich `court_hall` und `court_on_court_since`. Aus den Reviews:
+eine abgewiesene Übernahme schließt die Verbindung; eine neue Feldliste räumt alte Feldnamen
+und Hallen (sonst zählten sie auf den Deckel); `court_hall` zählt zu „host-bekannt". Offen
+bleibt (späterer PR): eine Log-Zeile je Verbindung bei `identify` für ein fremdes Feld.
+
 ### PR 4 — Deckel und Mengen-Takt
 
 **Erfüllt:** AK9–AK15. **Lösung:** b) ohne Kanäle.
