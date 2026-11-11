@@ -388,6 +388,17 @@ der Master jeden Feld-Stand als `HostFrame::ScoreUpdate` an den Relay;
 Details in [court-monitor.md](court-monitor.md) („Score-Spiegel des Hosts")
 und [cloud-relay.md](cloud-relay.md).
 
+**Gerätewechsel zwischen LAN und Cloud (v0.9.378):** Der Spiegel lief nur vom
+Master zum Relay. Den vollen Zustand eines per **Cloud** gezählten Felds
+(Undo-Schritte, Punktverlauf, Aufstellung) kannte nur der Relay — übernahm in
+der Master-Halle ein LAN-Tablet so ein Feld, begann es ohne ihn. Seit
+v0.9.378 reicht der Relay jeden Zustand eines Cloud-Tablets an den Master
+weiter (`RelayFrame::StateSync`), und der Master gibt ihn nach einem
+Relay-Neustart einmal zurück. Drei Riegel verhindern, dass die beiden Wege
+sich einen älteren Stand unterschieben; zählen ein LAN- und ein Cloud-Tablet
+**gleichzeitig** dasselbe Feld, bleibt das ungelöst (Warnung im Log des
+Masters). Wire-Ebene: [cloud-relay.md](cloud-relay.md) („Über Kreuz").
+
 ### Hallen-Auswahl auf dem Cloud-Slave — warum eigens
 
 `announce_hall` ist die eine Einstellung, die **sowohl** die Ansage (welche

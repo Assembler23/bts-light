@@ -3609,6 +3609,25 @@ pub enum RelayFrame {
         #[serde(default)]
         timeline: MatchTimeline,
     },
+    /// Der gespiegelte Spielzustand eines **Cloud-Tablets** (Spec
+    /// tablet-stand-robust, Regel A „über Kreuz"; ADR 0083). Bisher kannte
+    /// den vollen Zustand eines per Cloud gezählten Felds nur der Relay —
+    /// ein LAN-Tablet, das dasselbe Feld übernahm, begann ohne ihn. Der
+    /// Relay reicht jeden angenommenen Zustand (Halter-, Stale- und
+    /// Größenprüfung bestanden) hierüber an den Host weiter.
+    ///
+    /// `state` ist wie überall der opake JSON-Text des Tablets, höchstens
+    /// [`MAX_STATE_LEN`] lang. `match_id` ist das Spiel, das der Relay auf
+    /// dem Feld führt — der Host prüft es gegen seinen eigenen Stand. Ein
+    /// älterer Host kennt das Frame nicht und überliest es.
+    StateSync {
+        #[serde(rename = "courtId", default)]
+        court_id: i64,
+        #[serde(rename = "matchId", default)]
+        match_id: i64,
+        #[serde(default)]
+        state: String,
+    },
     /// Ein TL-Gerät möchte den Punktverlauf eines Matches sehen —
     /// Request/Response wie beim TL-Kommando (`req_id` korreliert die
     /// [`HostFrame::TimelineData`]). Der Relay bleibt Briefträger: er
@@ -4070,6 +4089,24 @@ mod tests {
     /// Spec tablet-stand-robust, Regel A: `hostSets` reist auf Frame-Ebene,
     /// bleibt leer von der Leitung, und ein Frame ohne das Feld (älterer
     /// Host) liest sich als „nichts bekannt".
+    #[test]
+    fn relay_frame_state_sync_roundtrip() {
+        let frame = RelayFrame::StateSync {
+            court_id: 101,
+            match_id: 7,
+            state: r#"{"match":{"matchId":7},"rev":12}"#.to_string(),
+        };
+        roundtrip(&frame);
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(
+            json.starts_with(r#"{"type":"state_sync","courtId":101,"matchId":7,"#),
+            "{json}"
+        );
+        // Der Zustand reist als TEXT, nicht als eingebettetes Objekt — der
+        // Host deutet ihn so wenig wie der Relay.
+        assert!(json.contains(r#""state":"{\"match\":"#), "{json}");
+    }
+
     #[test]
     fn match_assigned_hostsets_roundtrip_und_alt_lesbar() {
         // Ein Frame, wie ihn ein Host vor dieser Fassung schickt: der Brief

@@ -602,7 +602,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Kommunikations-Audits: Ersatz-Tablet übernimmt den gesicherten Stand statt 0:0 (Autorität
   nach Fortschritt, Einstieg mit Host-Sätzen, LAN+Cloud über Kreuz), Undo-Format v2 (≤ 40 KB,
   nie still verworfen), geparktes statt blockierendes Alt-Ergebnis (Host-Antwort „überholt"),
-  Voll-Sync + 120-s-Nachzügler-Fenster für Verlauf und Zettel. Fünf PRs.
+  Voll-Sync + 120-s-Nachzügler-Fenster für Verlauf und Zettel. Fünf PRs —
+  **alle umgesetzt** (v0.9.374–378, 11.11.2026); offen sind die Release-Tags
+  und der Feldtest (Ersatzgerät mitten im Satz, Neustart des Turnier-PCs,
+  Ergebnis bei getrenntem WLAN, Karte bei getrenntem Internet).
 - **Meetingpoint am Kiosk-Tablet** — Spec:
   [features/meetingpoint-am-kiosk-tablet.md](features/meetingpoint-am-kiosk-tablet.md)
   (freigegeben 09.11.2026). Eintrag „Meetingpoint" in der Feldwahl `/felder` (nur wenn an, hinter der

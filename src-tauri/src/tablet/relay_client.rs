@@ -10,7 +10,7 @@
 //! bleibt lokal: ein eingehendes Ergebnis wird mit derselben
 //! [`process_result`]-Logik wie im LAN-Modus nach BTP geschrieben.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -180,6 +180,11 @@ async fn serve(
     // (Review-Befund). Der erste `ticker`-Tick feuert sofort und schickt
     // MatchAssigned + Spiegel in der richtigen Reihenfolge.
     let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
+    // Felder, deren Cloud-Zustand in DIESER Verbindung schon einmal an den
+    // Relay zurückging (die eine Ausnahme von Riegel 1, siehe
+    // `score_mirror_frame`). Lebt je Verbindung — nach einem Relay-Neustart
+    // beginnt es leer.
+    let mut rueckgespiegelt: HashSet<i64> = HashSet::new();
 
     loop {
         tokio::select! {
@@ -225,7 +230,7 @@ async fn serve(
                 // (Handeingabe in BTP nudgt nicht). Dank Fingerabdruck sendet
                 // ein Tick ohne Änderung nichts.
                 for court in ctx.tablet.courts() {
-                    if let Some(frame) = score_mirror_frame(&ctx.tablet, court.id, &mut score_fp) {
+                    if let Some(frame) = score_mirror_frame(&ctx.tablet, court.id, &mut score_fp, &mut rueckgespiegelt) {
                         let _ = tx.send(text(&frame));
                     }
                 }
@@ -255,7 +260,7 @@ async fn serve(
                     .and_then(|n| serde_json::from_str::<MonitorNudge>(&n).ok())
                     .map(|n| n.court);
                 if let Some(court_id) = court_id {
-                    if let Some(frame) = score_mirror_frame(&ctx.tablet, court_id, &mut score_fp) {
+                    if let Some(frame) = score_mirror_frame(&ctx.tablet, court_id, &mut score_fp, &mut rueckgespiegelt) {
                         let _ = tx.send(text(&frame));
                     }
                 }
@@ -681,6 +686,17 @@ async fn handle_frame(
             {
                 ctx.tablet.sheet_store().apply_event(match_id, event);
             }
+        }
+        // Zustand eines Cloud-Tablets (Spec tablet-stand-robust, „über
+        // Kreuz"): mit Stale-Filter und Riegel 3 in `uebernimm_cloud_stand`.
+        // Die Halter-Prüfung hat der Relay gemacht (R4), wie bei den
+        // übrigen Tablet-Frames.
+        RelayFrame::StateSync {
+            court_id,
+            match_id,
+            state,
+        } => {
+            ctx.tablet.uebernimm_cloud_stand(court_id, match_id, state);
         }
         RelayFrame::MatchEventSync {
             court_id,
@@ -1357,12 +1373,28 @@ impl Drop for NudgeGuard<'_> {
 /// unverändert wiederholtes Frame würde die Cloud-Monitore grundlos wecken.
 /// `push_court` verwirft den Eintrag eines Felds bei jedem Zuweisungs-Push —
 /// der Sweep spiegelt dann erneut, NACHDEM der Relay das Match kennt.
+///
+/// **Über Kreuz** (Spec tablet-stand-robust, ADR 0083): Ein Zustand, der
+/// selbst vom Relay kam, reist nicht zurück (Riegel 1 in
+/// `score_mirror_of`) — mit einer Ausnahme: **einmal je Feld und
+/// Relay-Verbindung**. Nach einem Relay-Neustart ist dessen Kopie weg; der
+/// Host gibt sie so zurück, und ein Ersatzgerät bekommt Undo und Verlauf
+/// statt nur der Sätze. Hält dort ein Cloud-Tablet das Feld, verwirft der
+/// Relay sie (Riegel 2). `rueckgespiegelt` merkt, für welche Felder das in
+/// dieser Verbindung schon geschehen ist.
 fn score_mirror_frame(
     tablet: &TabletState,
     court_id: i64,
     last: &mut HashMap<i64, HostFrame>,
+    rueckgespiegelt: &mut HashSet<i64>,
 ) -> Option<HostFrame> {
-    let mirror = tablet.score_mirror_of(court_id)?;
+    let mut mirror = tablet.score_mirror_of(court_id)?;
+    if mirror.state.is_none()
+        && tablet.court_state_quelle(court_id) == Some(crate::tablet::state::StandQuelle::Cloud)
+        && rueckgespiegelt.insert(court_id)
+    {
+        mirror.state = tablet.court_state(court_id);
+    }
     let frame = HostFrame::ScoreUpdate {
         court_id,
         match_id: mirror.match_id,
@@ -1510,9 +1542,12 @@ mod tests {
         let tablet = TabletState::default();
         tablet.set_snapshot(snapshot(vec![match_on_court(7, 101)]));
         let mut last = HashMap::new();
+        let mut rueck = HashSet::new();
 
         // Erster Stand (noch kein Tablet): Match bekannt, Sätze leer.
-        match score_mirror_frame(&tablet, 101, &mut last).expect("erster Stand wird gemeldet") {
+        match score_mirror_frame(&tablet, 101, &mut last, &mut rueck)
+            .expect("erster Stand wird gemeldet")
+        {
             HostFrame::ScoreUpdate {
                 court_id,
                 match_id,
@@ -1526,20 +1561,77 @@ mod tests {
             f => panic!("unerwartetes Frame: {f:?}"),
         }
         // Unverändert → nichts zu senden.
-        assert!(score_mirror_frame(&tablet, 101, &mut last).is_none());
+        assert!(score_mirror_frame(&tablet, 101, &mut last, &mut rueck).is_none());
 
         // Das Tablet zählt → der neue Stand wird genau einmal gemeldet.
         tablet.record_score(101, 7, vec![(11, 9)]);
-        match score_mirror_frame(&tablet, 101, &mut last).expect("Änderung wird gemeldet") {
+        match score_mirror_frame(&tablet, 101, &mut last, &mut rueck)
+            .expect("Änderung wird gemeldet")
+        {
             HostFrame::ScoreUpdate { sets, .. } => {
                 assert_eq!(sets, vec![relay_proto::SetAb { a: 11, b: 9 }]);
             }
             f => panic!("unerwartetes Frame: {f:?}"),
         }
-        assert!(score_mirror_frame(&tablet, 101, &mut last).is_none());
+        assert!(score_mirror_frame(&tablet, 101, &mut last, &mut rueck).is_none());
 
         // Feld ohne Match → nichts zu senden.
-        assert!(score_mirror_frame(&tablet, 999, &mut last).is_none());
+        assert!(score_mirror_frame(&tablet, 999, &mut last, &mut rueck).is_none());
+    }
+
+    /// Spec tablet-stand-robust, „über Kreuz" (AK3): Ein Zustand, der aus
+    /// der Cloud kam, geht genau EINMAL je Feld und Relay-Verbindung zurück
+    /// — nach einem Relay-Neustart ist dessen Kopie weg. Danach gilt Riegel 1.
+    #[test]
+    fn erster_spiegel_nach_relay_neustart_traegt_stand() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snapshot(vec![match_on_court(7, 101)]));
+        tablet.record_score(101, 7, vec![(3, 2)]);
+        let stand = r#"{"match":{"matchId":7},"rev":9,"history":[1]}"#;
+        assert!(tablet.uebernimm_cloud_stand(101, 7, stand.to_string()));
+        let zustand = |f: Option<HostFrame>| match f {
+            Some(HostFrame::ScoreUpdate { state, .. }) => state,
+            anderes => panic!("ScoreUpdate erwartet: {anderes:?}"),
+        };
+
+        // Neue Verbindung: der erste Spiegel trägt den vollen Stand.
+        let mut last = HashMap::new();
+        let mut rueck = HashSet::new();
+        assert_eq!(
+            zustand(score_mirror_frame(&tablet, 101, &mut last, &mut rueck)).as_deref(),
+            Some(stand)
+        );
+        // Der nächste Punkt: nur noch die Sätze — kein Echo.
+        tablet.record_score(101, 7, vec![(4, 2)]);
+        assert_eq!(
+            zustand(score_mirror_frame(&tablet, 101, &mut last, &mut rueck)),
+            None
+        );
+        tablet.record_score(101, 7, vec![(5, 2)]);
+        assert_eq!(
+            zustand(score_mirror_frame(&tablet, 101, &mut last, &mut rueck)),
+            None
+        );
+
+        // Relay-Neustart = neue Verbindung, frische Merker: wieder einmal.
+        let mut last = HashMap::new();
+        let mut rueck = HashSet::new();
+        assert_eq!(
+            zustand(score_mirror_frame(&tablet, 101, &mut last, &mut rueck)).as_deref(),
+            Some(stand)
+        );
+        tablet.record_score(101, 7, vec![(6, 2)]);
+        assert_eq!(
+            zustand(score_mirror_frame(&tablet, 101, &mut last, &mut rueck)),
+            None
+        );
+
+        // Ein LAN-Zustand reist wie eh und je bei jeder Änderung mit.
+        tablet.set_court_state(101, r#"{"rev":10}"#.to_string());
+        assert_eq!(
+            zustand(score_mirror_frame(&tablet, 101, &mut last, &mut rueck)).as_deref(),
+            Some(r#"{"rev":10}"#)
+        );
     }
 
     fn player(n: &str) -> BtpPlayer {

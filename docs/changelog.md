@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.378
+
+- **Gerätewechsel zwischen Hallennetz und Cloud ohne Verlust.** Zählte ein
+  Tablet über die Cloud und übernahm ein Tablet im Hallennetz dasselbe Feld,
+  bekam es bisher nur den Satzstand, nicht die „zurück"-Schritte und den
+  Punktverlauf. Der Relay reicht den vollen Stand eines Cloud-Tablets jetzt
+  an den Turnier-PC weiter. Nach einem Neustart des Relays gibt der
+  Turnier-PC ihn einmal zurück, sodass auch ein Ersatzgerät in der Cloud ihn
+  wieder bekommt. Drei Sperren verhindern, dass sich die beiden Wege
+  gegenseitig einen älteren Stand unterschieben. Letzter Schritt der Spec
+  `tablet-stand-robust` (ADR 0083).
+
 ## v0.9.377
 
 - **Ein Ersatz-Tablet beginnt nicht mehr bei 0:0.** Fiel ein Zähl-Tablet

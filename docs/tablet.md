@@ -922,6 +922,13 @@ per Korrektur heilbar.
 auch `pendingResult`, `submittedOk` und `resultRejected` — und stellt einen
 offenen Auftrag sofort weiter zu (`uebernimmStand`).
 
+**LAN und Cloud über Kreuz (seit v0.9.378):** Der Turnier-PC kennt jetzt
+auch den vollen Zustand eines per Cloud gezählten Felds (der Relay reicht ihn
+weiter) und gibt ihn einem übernehmenden LAN-Tablet per `state_restore`.
+Umgekehrt bekommt der Relay den Zustand eines LAN-Tablets wie bisher über
+den Score-Spiegel. Regeln und Riegel:
+[cloud-relay.md](cloud-relay.md) („Über Kreuz").
+
 **Legacy-Schalter:** Mit `reconnect_legacy_rev` bleibt das Tablet-Verhalten
 wortgleich das alte, und der Turnier-PC schickt keine Host-Sätze — der
 Schalter ist der vollständige Laufzeit-Rollback. **Mischversionen:** alte

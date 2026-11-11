@@ -641,6 +641,66 @@ Relay setzt daraus `ownership_active`. Ältere Tablets/Relays ohne die Felder
 fallen per `serde(default)` auf das alte `rev`-Verhalten zurück. Details:
 [tablet.md](tablet.md).
 
+**Über Kreuz: der Zustand eines Cloud-Tablets beim Host (seit v0.9.378,
+ADR 0083).** Bisher lief der gespiegelte Zustand nur in eine Richtung: Der
+Host spiegelt LAN-Zustände an den Relay (`HostFrame::ScoreUpdate.state`),
+aber den Zustand eines **Cloud**-Tablets kannte allein der Relay. Ein
+LAN-Tablet, das so ein Feld übernahm, bekam ihn nicht, und ein
+Relay-Neustart löschte die einzige Kopie. Neu:
+
+- `RelayFrame::StateSync { courtId, matchId, state }`: Der Relay reicht
+  jeden **angenommenen** Zustand eines Cloud-Tablets (Halter-, Stale- und
+  Größenprüfung in `store_court_state` bestanden) an den Host weiter — nur
+  bei echter Änderung, nur wenn ein Host verbunden ist. `matchId` ist das
+  Spiel, das der Relay auf dem Feld führt. Die Weitergabe ist **gebremst**
+  (`host_weitergabe_erlaubt`: je Feld ein Schwung von sechs, danach zwei je
+  Sekunde): Ein Zähl-Tablet spiegelt einmal je Punkt und kommt nie an die
+  Grenze; ein Gerät im Dauerfeuer träfe sonst mit jedem Frame den
+  Turnier-PC. Der Relay selbst nimmt weiter jeden Zustand an.
+- Der Host legt ihn mit der Herkunft „Cloud" ab
+  (`TabletState::uebernimm_cloud_stand`, `StandQuelle`), nach demselben
+  Stale-Filter wie im LAN (Match-ID des Relays **und** die im Zustand). Der
+  Text muss ein JSON-Objekt sein. Ein LAN-Tablet, das übernimmt, bekommt ihn
+  per `state_restore`; LAN-Monitore sehen Aufschlag und Pause (in der
+  gekürzten Fassung, wie bei LAN-Zuständen).
+
+Drei Riegel gegen gegenseitiges Überschreiben:
+
+1. **Kein Echo:** Ein Zustand der Herkunft „Cloud" geht nicht im
+   Score-Spiegel zurück (`score_mirror_of` liefert `state: None`) — außer
+   **einmal je Feld und Relay-Verbindung** (`score_mirror_frame`,
+   `rueckgespiegelt`). So kommt der Zustand nach einem Relay-Neustart
+   zurück; die Sätze reisen wie bisher bei jeder Änderung.
+2. **Cloud-Tablet spiegelt gerade:** Der Relay überschreibt `court_state` im
+   `ScoreUpdate`-Arm nicht, wenn für das Feld ein Tablet angemeldet ist
+   **und** es in den letzten 15 s selbst einen Zustand geschickt hat
+   (`RIEGEL2_FENSTER`, `tablet_state_seit`). Der Satzstand des Spiegels gilt
+   weiter. Die Frist ist Absicht: Ein Cloud-Tablet, das nur noch verbunden
+   herumliegt, während ein LAN-Tablet das Feld übernommen hat, fröre sonst
+   den Zustand im Relay ein, und Cloud-Monitore zeigten den alten Aufschlag.
+3. **LAN-Tablet hält das Feld:** Der Host verwirft den Cloud-Zustand
+   (`court_occupied`) — und noch 15 s nach dem letzten LAN-Zustand
+   (`LAN_VORRANG`), damit ein kurz weggebrochenes LAN-Tablet bei seiner
+   Rückkehr den eigenen Stand vorfindet. Zählen ein LAN- und ein Cloud-Tablet
+   gleichzeitig dasselbe Feld, bleibt das ungelöst — es gibt eine Warnung je
+   Feld und Spiel im Log des Turnier-PCs.
+
+Die Herkunft zieht bei einem Feldwechsel mit um.
+
+Kosten: Jeder Cloud-Zustand (≤ 40 KB je Punkt, gemessen 24–36 KB) geht
+zusätzlich vom Relay zum Host — gerechnet einige KB/s bei zehn Feldern,
+nicht gemessen. Ein älterer Host kennt das Frame nicht und überliest es;
+ein älterer Relay schickt es nicht. Tests:
+`store_court_state_reicht_an_host_weiter`,
+`host_spiegel_ueberschreibt_aktives_cloud_tablet_nicht`,
+`host_uebernimmt_cloud_stand_mit_stale_filter`,
+`score_mirror_ohne_echo_bei_cloud_quelle`,
+`cloud_stand_verworfen_bei_aktivem_lan_halter`,
+`erster_spiegel_nach_relay_neustart_traegt_stand`,
+`state_weitergabe_an_den_host_ist_gebremst`,
+`cloud_stand_muss_ein_json_objekt_sein`,
+`relay_frame_state_sync_roundtrip`.
+
 **Host-Sätze (seit v0.9.377, ADR 0083):** `HostFrame::MatchAssigned` und
 `ServerMsg::MatchAssigned` tragen auf **Frame**-Ebene `hostSets` — die Sätze,
 die der Host für das Spiel selbst kennt (abgeschlossene plus laufender,
