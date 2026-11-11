@@ -392,6 +392,13 @@ struct Namespace {
     /// Regel D) — ob er ihn annimmt, entscheidet der Host. Nur die Match-ID,
     /// kein Inhalt.
     vor_match: HashMap<i64, (i64, std::time::Instant)>,
+    /// CourtID → wann zuletzt ein Zustand des **Cloud-Tablets** angenommen
+    /// wurde. Grundlage von Riegel 2 ([`RIEGEL2_FENSTER`]): Nur ein eben
+    /// noch spiegelndes Tablet schützt seinen Zustand vor dem Host-Spiegel.
+    tablet_state_seit: HashMap<i64, std::time::Instant>,
+    /// CourtID → Eimer für das Weiterreichen von Zuständen an den Host
+    /// ([`host_weitergabe_erlaubt`]).
+    state_weitergabe: HashMap<i64, (f64, std::time::Instant)>,
     /// CourtID → Feldname (Anzeige) – vom Host mit jedem `MatchAssigned`/
     /// `MatchCleared`-Frame mitgeliefert, für die Monitor-Anzeige.
     court_labels: HashMap<i64, String>,
@@ -612,6 +619,8 @@ impl Namespace {
             court_scores: HashMap::new(),
             court_on_court_since: HashMap::new(),
             vor_match: HashMap::new(),
+            tablet_state_seit: HashMap::new(),
+            state_weitergabe: HashMap::new(),
             court_labels: HashMap::new(),
             court_hall: HashMap::new(),
             prepared: Vec::new(),
@@ -3838,6 +3847,31 @@ async fn store_court_state(broker: &Broker, ns: &str, court_id: i64, state: Stri
         // selbst. Eine begonnene Pause erscheint damit sofort statt erst beim
         // nächsten Sicherheits-Abruf, der im Push-Betrieb bewusst langsam ist.
         let neu = namespace.court_state.get(&court_id) != Some(&state);
+        // Über Kreuz (Spec tablet-stand-robust, Regel A; ADR 0083): Der Host
+        // bekommt jeden angenommenen Zustand eines Cloud-Tablets. Sonst
+        // kennte ihn nur der Relay — ein LAN-Tablet, das dieses Feld
+        // übernimmt, begänne ohne Undo und Verlauf, und ein Relay-Neustart
+        // löschte die einzige Kopie. Nur bei echter Änderung; ohne Host
+        // entfällt es (er holt nichts nach — dafür gibt es die Host-Sätze).
+        // Gebremst (`host_weitergabe_erlaubt`): Fällt ein Zustand der Bremse
+        // zum Opfer, bringt ihn der nächste Punkt nach — der Host hält bis
+        // dahin den vorigen.
+        if neu && namespace.host.is_some() && host_weitergabe_erlaubt(namespace, court_id) {
+            let match_id = namespace
+                .court_matches
+                .get(&court_id)
+                .map_or(0, |m| m.match_id);
+            if let Some(host) = namespace.host.as_ref() {
+                let _ = host.send(text(&RelayFrame::StateSync {
+                    court_id,
+                    match_id,
+                    state: state.clone(),
+                }));
+            }
+        }
+        namespace
+            .tablet_state_seit
+            .insert(court_id, std::time::Instant::now());
         namespace.set_court_state(court_id, state);
         if neu {
             notify_monitor(namespace, court_id);
@@ -3864,6 +3898,8 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
         // dieses Tablets — sonst sammelte er über Reconnects mit immer neuen
         // Feld-Kennungen Einträge an (Sicherheits-Review 11.11.2026).
         namespace.state_deckel_gemeldet.remove(&court_id);
+        namespace.tablet_state_seit.remove(&court_id);
+        namespace.state_weitergabe.remove(&court_id);
         let court_label = label_of(namespace, court_id);
         if let Some(host) = &namespace.host {
             let _ = host.send(text(&RelayFrame::TabletDisconnected {
@@ -3884,6 +3920,43 @@ async fn detach_tablet(broker: &Broker, ns: &str, court_id: i64, tx: &Tx) {
 /// geleerten Cache nicht wieder befüllen (A4-Review-Befund). Gefahrlos,
 /// weil `MatchAssigned` den Cache füllt, BEVOR das Tablet die Zuweisung
 /// sieht — ein legitimes neues Match ist hier immer schon bekannt.
+/// Riegel 2 (Spec tablet-stand-robust, „über Kreuz"): So lange nach dem
+/// letzten Zustand eines Cloud-Tablets überschreibt der Spiegel des Hosts
+/// ihn nicht. Bewusst **zeitlich begrenzt** statt „solange das Tablet
+/// angemeldet ist": Ein Cloud-Tablet, das nur noch verbunden herumliegt,
+/// während ein LAN-Tablet das Feld übernommen hat, fröre sonst den Zustand
+/// im Relay ein — Cloud-Monitore zeigten dann dauerhaft den alten Aufschlag
+/// (Review-Fund 11.11.2026). Das Echo des Hosts kommt binnen Sekunden; ein
+/// Spiegel nach dieser Frist ist ein neuer Zustand aus dem Hallennetz.
+const RIEGEL2_FENSTER: Duration = Duration::from_secs(15);
+
+/// Wie viele Zustände je Feld der Relay in einem Schwung an den Host
+/// weiterreicht, und wie schnell das Kontingent nachwächst. Ein Zähl-Tablet
+/// spiegelt einmal je Punkt (gesperrt für 0,7 s) — es kommt nie an die
+/// Grenze. Ein Gerät, das Zustände im Dauerfeuer schickt, belastete vorher
+/// nur den Relay; ohne Bremse träfe jedes davon mit bis zu 64 KiB den
+/// Turnier-PC (Sicherheits-Review 11.11.2026).
+const STATE_WEITERGABE_SCHWUNG: f64 = 6.0;
+const STATE_WEITERGABE_JE_SEKUNDE: f64 = 2.0;
+
+/// Darf jetzt ein Zustand dieses Felds an den Host? Eimer-Verfahren je Feld;
+/// verbraucht bei „ja" eine Einheit.
+fn host_weitergabe_erlaubt(namespace: &mut Namespace, court_id: i64) -> bool {
+    let jetzt = std::time::Instant::now();
+    let (stand, seit) = namespace
+        .state_weitergabe
+        .get(&court_id)
+        .copied()
+        .unwrap_or((STATE_WEITERGABE_SCHWUNG, jetzt));
+    let stand = (stand + jetzt.duration_since(seit).as_secs_f64() * STATE_WEITERGABE_JE_SEKUNDE)
+        .min(STATE_WEITERGABE_SCHWUNG);
+    let erlaubt = stand >= 1.0;
+    namespace
+        .state_weitergabe
+        .insert(court_id, (if erlaubt { stand - 1.0 } else { stand }, jetzt));
+    erlaubt
+}
+
 /// Wie lange der Relay einen kompletten Abgleich für das Spiel durchreicht,
 /// das gerade vom Feld gegangen ist. Gleich lang wie das Fenster des Hosts
 /// (`NACHZUEGLER_FENSTER` in `tablet/state.rs`) — der Host prüft selbst
@@ -5573,6 +5646,18 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 // gemeldet wird nur, was zum Feld-Match gehört und zu groß ist.
                 if embedded_ok && state.len() > MAX_STATE_LEN {
                     namespace.melde_state_ueber_deckel(ns, court_id, state.len(), "Host-Spiegel");
+                } else if embedded_ok
+                    && namespace.tablets.contains_key(&court_id)
+                    && namespace
+                        .tablet_state_seit
+                        .get(&court_id)
+                        .is_some_and(|seit| seit.elapsed() < RIEGEL2_FENSTER)
+                {
+                    // Riegel 2 (Spec tablet-stand-robust, „über Kreuz"): Hat
+                    // das Cloud-Tablet dieses Felds EBEN NOCH selbst
+                    // gespiegelt, ist sein Zustand der aktuelle — der
+                    // Spiegel des Hosts ist dann höchstens dessen Echo und
+                    // darf ihn nicht zurückdrehen. Siehe `RIEGEL2_FENSTER`.
                 } else if embedded_ok {
                     namespace.set_court_state(court_id, state);
                 }
@@ -9664,6 +9749,207 @@ mod tests {
             !ns.court_scores.contains_key(&101) || ns.court_scores[&101].is_empty(),
             "hier war ohnehin kein Stand gesetzt — die Prüfung hält die Absicht fest"
         );
+    }
+
+    /// Spec tablet-stand-robust, „über Kreuz" (AK24): Jeder angenommene
+    /// Zustand eines Cloud-Tablets geht an den Host — verworfene nicht, und
+    /// ein unveränderter nicht noch einmal.
+    #[tokio::test]
+    async fn store_court_state_reicht_an_host_weiter() {
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        let (fremd_tx, _fremd_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, tablet_tx.clone());
+            ns.court_matches.insert(101, brief(7));
+        }
+        let stand = r#"{"match":{"matchId":7},"rev":3}"#.to_string();
+        store_court_state(&broker, "ns1", 101, stand.clone(), &tablet_tx).await;
+        let Message::Text(json) = host_rx.try_recv().expect("StateSync an den Host") else {
+            panic!("Text-Frame erwartet");
+        };
+        assert_eq!(
+            serde_json::from_str::<RelayFrame>(&json).unwrap(),
+            RelayFrame::StateSync {
+                court_id: 101,
+                match_id: 7,
+                state: stand.clone(),
+            }
+        );
+        // Unverändert → kein zweites Frame.
+        store_court_state(&broker, "ns1", 101, stand, &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_err(),
+            "derselbe Zustand reist nicht doppelt"
+        );
+        // Nicht der Halter, altes Spiel, zu groß → nichts.
+        store_court_state(&broker, "ns1", 101, r#"{"rev":4}"#.into(), &fremd_tx).await;
+        store_court_state(
+            &broker,
+            "ns1",
+            101,
+            r#"{"match":{"matchId":6},"rev":5}"#.into(),
+            &tablet_tx,
+        )
+        .await;
+        let zu_gross = format!(r#"{{"blob":"{}"}}"#, "x".repeat(MAX_STATE_LEN));
+        store_court_state(&broker, "ns1", 101, zu_gross, &tablet_tx).await;
+        assert!(
+            host_rx.try_recv().is_err(),
+            "verworfene Zustände erreichen den Host nicht"
+        );
+    }
+
+    /// Riegel 2: Der Spiegel des Hosts überschreibt den Zustand nicht,
+    /// solange ein Cloud-Tablet das Feld hält — ohne Tablet schon (so kommt
+    /// der Stand nach einem Relay-Neustart zurück).
+    #[tokio::test]
+    async fn host_spiegel_ueberschreibt_aktives_cloud_tablet_nicht() {
+        let (broker, _tablet_rx, host) = broker_with_tablet(101).await;
+        let tx = {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            ns.court_matches.insert(101, brief(7));
+            ns.tablets.get(&101).unwrap().clone()
+        };
+        let vom_tablet = r#"{"match":{"matchId":7},"rev":9}"#.to_string();
+        store_court_state(&broker, "ns1", 101, vom_tablet.clone(), &tx).await;
+        let spiegel = |state: &str| HostFrame::ScoreUpdate {
+            court_id: 101,
+            match_id: 7,
+            sets: vec![SetAb { a: 3, b: 2 }],
+            state: Some(state.to_string()),
+        };
+        handle_host_frame(
+            &broker,
+            "ns1",
+            spiegel(r#"{"match":{"matchId":7},"rev":8}"#),
+            &host,
+        )
+        .await;
+        {
+            let map = broker.namespaces.lock().await;
+            let ns = &map["ns1"];
+            assert_eq!(
+                ns.court_state.get(&101),
+                Some(&vom_tablet),
+                "der Tablet-Zustand bleibt"
+            );
+            assert_eq!(
+                ns.court_scores.get(&101),
+                Some(&vec![SetAb { a: 3, b: 2 }]),
+                "der Satzstand des Spiegels gilt weiter"
+            );
+        }
+        // Ein Spiegel OHNE Zustand (Riegel 1 des Hosts) löscht nichts.
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::ScoreUpdate {
+                court_id: 101,
+                match_id: 7,
+                sets: vec![SetAb { a: 4, b: 2 }],
+                state: None,
+            },
+            &host,
+        )
+        .await;
+        assert_eq!(
+            broker.namespaces.lock().await["ns1"].court_state.get(&101),
+            Some(&vom_tablet)
+        );
+
+        // Das Cloud-Tablet bleibt ANGEMELDET, spiegelt aber nicht mehr — ein
+        // LAN-Tablet hat das Feld übernommen. Nach der Frist gilt der
+        // Zustand aus dem Hallennetz; sonst fröre der Relay ein.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let alt = std::time::Instant::now()
+                .checked_sub(RIEGEL2_FENSTER + Duration::from_secs(1))
+                .expect("Instant weit genug in der Vergangenheit");
+            map.get_mut("ns1")
+                .unwrap()
+                .tablet_state_seit
+                .insert(101, alt);
+        }
+        let vom_lan = r#"{"match":{"matchId":7},"rev":30}"#;
+        handle_host_frame(&broker, "ns1", spiegel(vom_lan), &host).await;
+        assert_eq!(
+            broker.namespaces.lock().await["ns1"]
+                .court_state
+                .get(&101)
+                .map(String::as_str),
+            Some(vom_lan),
+            "ein nur noch angemeldetes Cloud-Tablet sperrt den Host-Spiegel nicht"
+        );
+
+        // Das Tablet ist weg → der Spiegel des Hosts füllt den Zustand sofort.
+        store_court_state(&broker, "ns1", 101, vom_tablet.clone(), &tx).await;
+        detach_tablet(&broker, "ns1", 101, &tx).await;
+        let vom_host = r#"{"match":{"matchId":7},"rev":10}"#;
+        handle_host_frame(&broker, "ns1", spiegel(vom_host), &host).await;
+        assert_eq!(
+            broker.namespaces.lock().await["ns1"]
+                .court_state
+                .get(&101)
+                .map(String::as_str),
+            Some(vom_host)
+        );
+    }
+
+    /// Ein Gerät im Dauerfeuer trifft den Turnier-PC nur gebremst; der
+    /// Relay selbst nimmt jeden Zustand weiter an.
+    #[tokio::test]
+    async fn state_weitergabe_an_den_host_ist_gebremst() {
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = mpsc::unbounded_channel();
+        let (tablet_tx, _tablet_rx) = mpsc::unbounded_channel();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, tablet_tx.clone());
+            ns.court_matches.insert(101, brief(7));
+        }
+        for i in 0..50 {
+            let stand = format!(r#"{{"match":{{"matchId":7}},"rev":{i}}}"#);
+            store_court_state(&broker, "ns1", 101, stand, &tablet_tx).await;
+        }
+        let mut angekommen = 0;
+        while host_rx.try_recv().is_ok() {
+            angekommen += 1;
+        }
+        let schwung = STATE_WEITERGABE_SCHWUNG as usize;
+        assert!(
+            (schwung..=schwung + 1).contains(&angekommen),
+            "nur der erste Schwung erreicht den Host: {angekommen}"
+        );
+        assert_eq!(
+            broker.namespaces.lock().await["ns1"]
+                .court_state
+                .get(&101)
+                .map(String::as_str),
+            Some(r#"{"match":{"matchId":7},"rev":49}"#),
+            "der Relay hält trotzdem den jüngsten Zustand"
+        );
+        // Das Kontingent wächst nach: später kommt wieder etwas durch.
+        {
+            let mut map = broker.namespaces.lock().await;
+            let frueher = std::time::Instant::now()
+                .checked_sub(Duration::from_secs(5))
+                .expect("Instant weit genug in der Vergangenheit");
+            map.get_mut("ns1")
+                .unwrap()
+                .state_weitergabe
+                .insert(101, (0.0, frueher));
+        }
+        let spaeter = r#"{"match":{"matchId":7},"rev":99}"#.to_string();
+        store_court_state(&broker, "ns1", 101, spaeter, &tablet_tx).await;
+        assert!(host_rx.try_recv().is_ok());
     }
 
     #[tokio::test]

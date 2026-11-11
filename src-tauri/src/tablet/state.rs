@@ -78,6 +78,24 @@ const NACHZUEGLER_FENSTER: std::time::Duration = std::time::Duration::from_secs(
 /// der vor dem Ergebnis gelesen wurde, ist bis dahin sicher ersetzt.
 const RUECKKEHR_KARENZ: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// So lange hat ein eben von einem LAN-Tablet geschriebener Zustand Vorrang
+/// vor einem aus der Cloud ([`TabletState::uebernimm_cloud_stand`]). Bricht
+/// das LAN-Tablet nur kurz weg (WLAN, Doze), gibt `court_occupied` das Feld
+/// frei — ohne diese Frist dürfte dann jeder Cloud-Zustand den frischen
+/// LAN-Zustand ersetzen, den das Tablet bei seiner Rückkehr braucht. Der
+/// Gegenriegel im Relay läuft gleich lang (`RIEGEL2_FENSTER`).
+const LAN_VORRANG: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Woher der gespiegelte Zustand eines Felds stammt (Spec
+/// tablet-stand-robust, „über Kreuz"; ADR 0083).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandQuelle {
+    /// Von einem Tablet am eingebetteten Server (Hallennetz).
+    Lan,
+    /// Von einem Cloud-Tablet, weitergereicht vom Relay.
+    Cloud,
+}
+
 /// Wohin ein kompletter Abgleich eines Tablets gehört
 /// ([`TabletState::sync_ziel`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,6 +494,13 @@ pub struct TabletState {
     /// CourtID → gespiegelter Spielzustand (JSON) des aktiven Tablets –
     /// wird einem übernehmenden Gerät übergeben.
     court_state: RwLock<HashMap<i64, String>>,
+    /// CourtID → Herkunft des Eintrags in `court_state`. Ein Zustand aus der
+    /// Cloud wird nicht an den Relay zurückgespiegelt (er käme dort als
+    /// veraltetes Echo an) — siehe [`TabletState::score_mirror_of`].
+    court_state_quelle: RwLock<HashMap<i64, (StandQuelle, std::time::Instant)>>,
+    /// CourtID → Match, für das „LAN- und Cloud-Tablet zählen dasselbe
+    /// Feld" schon gemeldet wurde (eine Warnung je Feld und Spiel).
+    doppelbetrieb_gemeldet: Mutex<HashMap<i64, i64>>,
     /// Derselbe Stand ohne `history`/`rallyLog` — die Fassung, die an
     /// Anzeigen geht (siehe [`TabletState::display_court_state`]).
     /// Einmal beim Eingang gerechnet statt bei jedem Abruf.
@@ -3645,6 +3670,71 @@ impl TabletState {
     /// aufgefallen (Spec tablet-stand-robust, ADR 0084). Geloggt werden nur
     /// Feld, Match und Länge — nie der Inhalt.
     pub fn set_court_state(&self, court_id: i64, state: String) {
+        self.set_court_state_von(court_id, state, StandQuelle::Lan);
+    }
+
+    /// Übernimmt den Zustand eines **Cloud-Tablets**, den der Relay
+    /// weiterreicht (`RelayFrame::StateSync`; Spec tablet-stand-robust,
+    /// „über Kreuz"). So kennt der Turnier-PC auch den vollen Stand eines per
+    /// Cloud gezählten Felds: Ein LAN-Tablet, das es übernimmt, bekommt Undo
+    /// und Verlauf, und nach einem Relay-Neustart ist die Kopie nicht weg.
+    ///
+    /// `false` = verworfen:
+    /// - das Spiel liegt nicht (mehr) auf dem Feld (Stale-Filter wie im LAN,
+    ///   gegen die Match-ID des Relays **und** die im Zustand);
+    /// - **Riegel 3:** ein LAN-Tablet hält das Feld — dann ist dessen
+    ///   Zustand der aktuelle. Dass zwei Tablets über verschiedene Wege
+    ///   dasselbe Feld zählen, löst diese Spec nicht; es gibt eine Warnung.
+    ///   Dasselbe gilt noch [`LAN_VORRANG`] nach dem letzten LAN-Zustand;
+    /// - der Text ist kein JSON-Objekt (der Absender ist ein Gerät aus dem
+    ///   Internet — was ins Hallennetz weitergeht, soll wenigstens die
+    ///   Form eines Zustands haben).
+    pub fn uebernimm_cloud_stand(&self, court_id: i64, match_id: i64, state: String) -> bool {
+        if !state.trim_start().starts_with('{') {
+            return false;
+        }
+        let Some(m) = self.match_for_court(court_id) else {
+            return false;
+        };
+        if match_id != m.id || relay_proto::state_sync_match_id(&state).is_some_and(|sm| sm != m.id)
+        {
+            return false;
+        }
+        let lan_frisch = self
+            .court_state_quelle
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .is_some_and(|(q, seit)| *q == StandQuelle::Lan && seit.elapsed() < LAN_VORRANG);
+        if self.court_occupied(court_id) || lan_frisch {
+            let erstmals = self
+                .doppelbetrieb_gemeldet
+                .lock()
+                .unwrap()
+                .insert(court_id, m.id)
+                != Some(m.id);
+            if erstmals {
+                tracing::warn!(
+                    "Feld {court_id}: ein LAN- und ein Cloud-Tablet zählen dasselbe Spiel \
+                     (Match {}) — der Zustand des LAN-Tablets gilt",
+                    m.id
+                );
+            }
+            return false;
+        }
+        self.set_court_state_von(court_id, state, StandQuelle::Cloud)
+    }
+
+    /// Herkunft des gespiegelten Zustands, `None` ohne Zustand.
+    pub fn court_state_quelle(&self, court_id: i64) -> Option<StandQuelle> {
+        self.court_state_quelle
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .map(|(q, _)| *q)
+    }
+
+    fn set_court_state_von(&self, court_id: i64, state: String, quelle: StandQuelle) -> bool {
         if state.len() > relay_proto::MAX_STATE_LEN {
             let match_id = self.match_for_court(court_id).map_or(0, |m| m.id);
             if self.deckel_erstmals(court_id, match_id) {
@@ -3655,17 +3745,22 @@ impl TabletState {
                     relay_proto::MAX_STATE_LEN
                 );
             }
-            return;
+            return false;
         }
         self.display_court_state
             .write()
             .unwrap()
             .insert(court_id, relay_proto::schlanker_anzeige_stand(&state));
         self.court_state.write().unwrap().insert(court_id, state);
+        self.court_state_quelle
+            .write()
+            .unwrap()
+            .insert(court_id, (quelle, std::time::Instant::now()));
         // Aufschlag/Pause (`court_state`) ist am Court-Monitor sichtbar →
         // Anzeige anstoßen (A1, ADR 0016). Der Schreib-Guard ist mit dem
         // Semikolon oben schon gefallen; kein Lock über den Broadcast.
         self.notify_monitor(court_id);
+        true
     }
 
     /// `true` genau beim ersten zu großen Stand je Feld **und Spiel** —
@@ -4269,6 +4364,19 @@ impl TabletState {
         if let Some(state) = mirrored {
             self.court_state.write().unwrap().insert(to_court_id, state);
         }
+        // Die Herkunft zieht mit um — sonst gälte ein Cloud-Zustand am
+        // Zielfeld als LAN-Zustand und ginge als Echo an den Relay zurück.
+        let quelle = self
+            .court_state_quelle
+            .write()
+            .unwrap()
+            .remove(&from_court_id);
+        if let Some(q) = quelle {
+            self.court_state_quelle
+                .write()
+                .unwrap()
+                .insert(to_court_id, q);
+        }
         // Die Anzeige-Fassung zieht mit um — sonst zeigte das Zielfeld
         // Aufschlag und Pause des Vorgängers (bzw. gar nichts).
         let schlank = self
@@ -4305,6 +4413,7 @@ impl TabletState {
         // der Crash-Restore eines laufenden Spiels unberührt.
         self.court_state.write().unwrap().remove(&court_id);
         self.display_court_state.write().unwrap().remove(&court_id);
+        self.court_state_quelle.write().unwrap().remove(&court_id);
         // Eine noch offene Vormerkung gehört zum Spiel, das hier gerade
         // beendet wurde. Bliebe sie stehen, wies die nächste Zuweisung auf
         // dieses Feld mit „hat gerade jemand anderes belegt" ab — obwohl es
@@ -5121,7 +5230,16 @@ impl TabletState {
             // (Review-Fund 18.08.2026). Die Anzeige-Ersparnis holt der
             // LAN-Weg (`monitor_court`); hier wiegt die Wiederherstellung
             // schwerer als die Übertragungsgröße.
-            state: self.court_state(court_id),
+            // **Riegel 1** (Spec tablet-stand-robust, „über Kreuz"): Ein
+            // Zustand, der selbst aus der Cloud kam, geht nicht zurück —
+            // beim Relay träfe er als Echo von eben ein und drehte den
+            // Stand des zählenden Cloud-Tablets zurück. Die eine Ausnahme
+            // (erster Spiegel je neuer Relay-Verbindung) macht der
+            // Relay-Client selbst.
+            state: match self.court_state_quelle(court_id) {
+                Some(StandQuelle::Cloud) => None,
+                _ => self.court_state(court_id),
+            },
         })
     }
 
@@ -5863,6 +5981,117 @@ pub(crate) mod tests {
             st.host_sets(101, 1, false).is_empty(),
             "0:0 ist „nichts bekannt“"
         );
+    }
+
+    // ── Über Kreuz (Spec tablet-stand-robust, Regel A; AK24) ───────────
+
+    fn feld_mit_spiel() -> TabletState {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1")],
+        ));
+        st
+    }
+
+    #[test]
+    fn host_uebernimmt_cloud_stand_mit_stale_filter() {
+        let st = feld_mit_spiel();
+        let stand = r#"{"match":{"matchId":1},"rev":7,"history":[1,2]}"#;
+        assert!(st.uebernimm_cloud_stand(101, 1, stand.to_string()));
+        assert_eq!(
+            st.court_state(101).as_deref(),
+            Some(stand),
+            "voller Stand samt Undo"
+        );
+        assert_eq!(st.court_state_quelle(101), Some(StandQuelle::Cloud));
+        // Ein LAN-Tablet, das übernimmt, bekommt genau diesen Stand
+        // (`state_restore` liest `court_state`).
+
+        // Stale: anderes Spiel laut Relay, anderes Spiel im Zustand,
+        // Feld ohne Spiel, zu groß.
+        assert!(!st.uebernimm_cloud_stand(101, 2, stand.to_string()));
+        assert!(!st.uebernimm_cloud_stand(101, 1, r#"{"match":{"matchId":2}}"#.to_string()));
+        assert!(!st.uebernimm_cloud_stand(102, 1, stand.to_string()));
+        assert!(!st.uebernimm_cloud_stand(101, 0, stand.to_string()));
+        let zu_gross = format!(r#"{{"blob":"{}"}}"#, "x".repeat(relay_proto::MAX_STATE_LEN));
+        assert!(!st.uebernimm_cloud_stand(101, 1, zu_gross));
+        assert_eq!(
+            st.court_state(101).as_deref(),
+            Some(stand),
+            "der vorige Stand bleibt"
+        );
+        // Mit dem Ergebnis verschwindet auch die Herkunft.
+        st.clear_court(101);
+        assert_eq!(st.court_state_quelle(101), None);
+    }
+
+    /// Riegel 1: Ein Zustand aus der Cloud wird nicht an den Relay
+    /// zurückgespiegelt — die Sätze schon.
+    #[test]
+    fn score_mirror_ohne_echo_bei_cloud_quelle() {
+        let st = feld_mit_spiel();
+        st.record_score(101, 1, vec![(3, 2)]);
+        assert!(st.uebernimm_cloud_stand(101, 1, r#"{"rev":7}"#.to_string()));
+        let spiegel = st.score_mirror_of(101).unwrap();
+        assert_eq!(spiegel.sets, vec![(3, 2)]);
+        assert_eq!(spiegel.state, None, "kein Echo");
+        // Ein LAN-Zustand reist wie bisher mit.
+        st.set_court_state(101, r#"{"rev":8}"#.to_string());
+        assert_eq!(st.court_state_quelle(101), Some(StandQuelle::Lan));
+        assert_eq!(
+            st.score_mirror_of(101).unwrap().state.as_deref(),
+            Some(r#"{"rev":8}"#)
+        );
+    }
+
+    /// Riegel 3: Hält ein LAN-Tablet das Feld, gilt dessen Zustand.
+    #[test]
+    fn cloud_stand_verworfen_bei_aktivem_lan_halter() {
+        let st = feld_mit_spiel();
+        let token = st.claim_court(101, "dev-lan");
+        st.set_court_state(101, r#"{"rev":8}"#.to_string());
+        assert!(!st.uebernimm_cloud_stand(101, 1, r#"{"rev":99}"#.to_string()));
+        assert_eq!(st.court_state(101).as_deref(), Some(r#"{"rev":8}"#));
+        assert_eq!(st.court_state_quelle(101), Some(StandQuelle::Lan));
+        assert_eq!(
+            st.doppelbetrieb_gemeldet.lock().unwrap().get(&101),
+            Some(&1),
+            "einmal je Feld und Spiel gemeldet"
+        );
+
+        // Das LAN-Tablet bricht kurz weg (WLAN): Sein frischer Zustand hat
+        // noch Vorrang — bei der Rückkehr braucht es ihn.
+        st.release_court(101, token);
+        assert!(!st.court_occupied(101));
+        assert!(!st.uebernimm_cloud_stand(101, 1, r#"{"rev":99}"#.to_string()));
+        assert_eq!(st.court_state(101).as_deref(), Some(r#"{"rev":8}"#));
+
+        // Bleibt es weg, übernimmt nach der Frist das Cloud-Tablet.
+        let alt = std::time::Instant::now()
+            .checked_sub(LAN_VORRANG + std::time::Duration::from_secs(1))
+            .expect("Instant weit genug in der Vergangenheit");
+        st.court_state_quelle
+            .write()
+            .unwrap()
+            .insert(101, (StandQuelle::Lan, alt));
+        assert!(st.uebernimm_cloud_stand(101, 1, r#"{"rev":99}"#.to_string()));
+        assert_eq!(st.court_state_quelle(101), Some(StandQuelle::Cloud));
+    }
+
+    /// Was aus dem Internet ins Hallennetz weitergeht, muss wenigstens die
+    /// Form eines Zustands haben.
+    #[test]
+    fn cloud_stand_muss_ein_json_objekt_sein() {
+        let st = feld_mit_spiel();
+        for kaputt in ["", "kein json", "[1,2]", "7", "\"text\"", "null"] {
+            assert!(
+                !st.uebernimm_cloud_stand(101, 1, kaputt.to_string()),
+                "{kaputt}"
+            );
+        }
+        assert!(st.court_state(101).is_none());
+        assert!(st.uebernimm_cloud_stand(101, 1, r#"  {"rev":1}"#.to_string()));
     }
 
     /// AK10: Mit `reconnect_legacy_rev` trägt `match_assigned` keine
