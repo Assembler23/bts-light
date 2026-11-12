@@ -639,6 +639,40 @@ function namenPlaetze(cfg) {
   return { davor: davor, darunter: darunter };
 }
 /* </monitorStil.mjs> */
+
+/* Ein Nachname, der nicht in seine Zeile passt, wird erst kleiner gesetzt
+   und erst danach gekürzt. Vorher blieb von einem langen Namen bei drei
+   Sätzen nur „Tap…" übrig — besonders an Fernsehern, an denen der Pi ein
+   4:3-Bild ausgibt (Feldfoto 12.11.2026). Unter die Hälfte der Sollgröße
+   geht es nicht: aus der Distanz ist ein gekürzter großer Name besser
+   lesbar als ein vollständiger winziger. */
+var NAME_MIN_ANTEIL = 0.5;
+
+/** Größte Schrift (ganze Pixel) zwischen der halben und der vollen
+ *  Sollgröße `basisPx`, bei der der Text von `el` in seine Breite passt.
+ *  Liefert `basisPx`, wenn nichts zu tun ist (passt, unsichtbar), sonst die
+ *  gefundene Größe — die Untergrenze auch dann, wenn selbst sie nicht reicht
+ *  (dann kürzt die Ellipsis). Setzt `el.style.fontSize` nur zum Messen und
+ *  räumt es wieder ab; angewandt wird die Größe vom Aufrufer. */
+function namenGroesse(el, basisPx) {
+  el.style.fontSize = "";
+  if (!(basisPx > 0) || !(el.clientWidth > 0) || el.scrollWidth <= el.clientWidth) return basisPx;
+  var unten = Math.max(1, Math.floor(basisPx * NAME_MIN_ANTEIL));
+  var oben = Math.floor(basisPx);
+  function passt(px) {
+    el.style.fontSize = px + "px";
+    return el.scrollWidth <= el.clientWidth;
+  }
+  if (passt(unten)) {
+    while (oben - unten > 1) {
+      var mitte = Math.floor((unten + oben) / 2);
+      if (passt(mitte)) unten = mitte; else oben = mitte;
+    }
+  }
+  el.style.fontSize = "";
+  return unten;
+}
+/* Ende Namen einpassen */
   // `?stil=` gilt nur für feste URLs; im Geräte-Modus entscheidet die
   // Zuweisung im Panel (wirksamerStil).
   var URL_STIL = (function () {
@@ -1141,6 +1175,7 @@ function namenPlaetze(cfg) {
                current ? current.b : null, serving === 2, winnerTeam === 2,
                serving === 2 ? servePlayerIdx : null,
                recvInfo && recvInfo.team === 2 ? recvInfo.playerIdx : null, plaetze);
+    namenEinpassen();
 
     // Fußzeile: Runde + Spielnummer (je nach Konfiguration).
     els.footer.textContent = "";
@@ -1161,6 +1196,27 @@ function namenPlaetze(cfg) {
       els.footer.appendChild(span);
     });
   }
+
+  // Lange Nachnamen kleiner setzen statt abschneiden. Je Hälfte EINE Größe:
+  // zwei Doppelpartner in verschiedener Schrift sähen aus wie ein Fehler.
+  // Die beiden Hälften dürfen sich unterscheiden — ein kurzer Name soll
+  // nicht schrumpfen, weil der Gegner einen langen hat.
+  function namenEinpassen() {
+    [els.half1, els.half2].forEach(function (half) {
+      var namen = Array.prototype.slice.call(half.querySelectorAll(".name .family"));
+      var basis = 0, kleinste = Infinity;
+      namen.forEach(function (el) {
+        el.style.fontSize = "";
+        basis = parseFloat(getComputedStyle(el).fontSize) || 0;
+        kleinste = Math.min(kleinste, namenGroesse(el, basis));
+      });
+      if (kleinste < Math.floor(basis)) {
+        namen.forEach(function (el) { el.style.fontSize = kleinste + "px"; });
+      }
+    });
+  }
+  // Andere Bildgröße (TV schaltet den Modus um, Fenster am PC) → neu messen.
+  window.addEventListener("resize", namenEinpassen);
 
   // Riesen-Stand (ADR 0068): läuft das Spiel, steht der laufende Satz groß
   // und darüber klein der Satzstand; steht es fest, groß die gewonnenen

@@ -46,7 +46,8 @@ Bildschirm waagerecht geteilt: oben Mannschaft 1, unten Mannschaft 2.
   12.08.2026 „noch größer, Fläche füllen"): Nachname **15vmin**
   (Doppel **11.5**), Vorname **5vmin** (Doppel 4.4), laufender Satz
   **19vmin**, abgeschlossene Sätze 9.5vmin (Endstand 15). Lange Namen
-  kürzen weiterhin per Ellipsis statt umzubrechen.
+  werden kleiner gesetzt und erst ab der halben Größe per Ellipsis gekürzt
+  (seit v0.9.393, siehe „Spielernamen").
 - **Knappe Ränder** (12.08.2026): schmale Kopf-/Fußleisten
   (`padding .9vh/.7vh`) und schmales Seitenpolster der Hälften
   (`0 1.8vw`) füllen möglichst viel der TV-Fläche; die zwei Namen je
@@ -787,7 +788,23 @@ groß darunter — wie in Sport-Übertragungen. Der letzte Namensteil gilt
 als Nachname. So bleibt der Nachname auch bei langen Doppel-Namen aus der
 Distanz gut lesbar, der Vorname geht nicht verloren, und das Bild ist für
 alle Spieler:innen einheitlich. Ein einteiliger Name steht ohne Vornamen-
-Zeile; ein sehr langer Einzelteil wird mit „…" abgeschnitten.
+Zeile.
+
+**Lange Nachnamen (seit v0.9.393):** Passt ein Nachname nicht neben den
+Satzstand, setzt die Seite ihn kleiner — so weit, bis er passt, höchstens
+bis zur halben Größe. Erst ein Name, der selbst dann nicht passt, wird mit
+„…" abgeschnitten. Die beiden Partner eines Doppels bekommen dieselbe
+Größe; die beiden Seiten dürfen sich unterscheiden. Vorher blieb von
+einem langen Namen im dritten Satz mitunter nur „Tap…" übrig.
+
+**Breitgezogenes Bild am HD-Ready-TV:** Sind Kreise oval und die Schrift
+auffällig breit, gibt der Pi ein 4:3-Bild aus (z. B. 1024×768), das der
+Fernseher auf 16:9 zieht. Die Namen haben dann rund ein Viertel weniger
+Platz. Manche HD-Ready-Fernseher (1366×768) melden dem Pi 1024×768 als
+Wunschmodus. Die Anpassung oben fängt das auf. Ein Pi, der mit dem
+Einrichtungsskript ab v0.9.393 aufgesetzt wurde, stellt beim Start
+zusätzlich selbst auf den größten 16:9-Modus um, den der TV anbietet
+(Details: [pi-setup.md](pi-setup.md)).
 
 ## Setzplatz (seit v0.9.298)
 

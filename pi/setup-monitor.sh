@@ -485,6 +485,43 @@ starten() {
   BROWSER_PID=$!
 }
 
+# Bild im 16:9-Modus. Manche HD-Ready-Fernseher (1366×768) melden dem Pi
+# 1024×768 als Wunschmodus; der TV zieht das 4:3-Bild dann breit — Kreise
+# werden oval, und die Namen haben ein Viertel weniger Platz (Feldfoto
+# 12.11.2026). Bietet der TV einen 16:9-Modus an, nehmen wir den größten.
+# Rührt nichts an, wenn das Bild schon breit ist, der TV keinen solchen
+# Modus meldet oder kein X läuft (Desktop-Variante mit Wayland).
+# Liest die Ausgabe von `xrandr --current` und gibt „<Ausgang> <Modus>" aus.
+breitbild_modus() {
+  awk '
+    /^[^ ]+ connected/ {
+      aus = ""; if (gefunden) next
+      for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+\+/) {
+        split($i, t, /[x+]/)
+        if (t[1] * 9 < t[2] * 16 * 0.95) { aus = $1; gefunden = 1 }
+      }
+      next
+    }
+    /^[^ ]/ { aus = "" ; next }
+    aus != "" && $1 ~ /^[0-9]+x[0-9]+$/ {
+      split($1, m, "x"); v = m[1] / m[2]
+      if (v > 1.7 && v < 1.8 && m[1] * m[2] > beste) { beste = m[1] * m[2]; modus = $1; ziel = aus }
+    }
+    END { if (modus != "") print ziel, modus }
+  '
+}
+if [ -z "${WAYLAND_DISPLAY:-}" ] && command -v xrandr >/dev/null; then
+  WAHL="$(xrandr --current 2>/dev/null | breitbild_modus)"
+  if [ -n "$WAHL" ]; then
+    # shellcheck disable=SC2086
+    set -- $WAHL
+    xrandr --output "$1" --mode "$2" 2>/dev/null \
+      && log "Bildmodus auf $2 gestellt (TV meldete 4:3)" \
+      || log "Bildmodus $2 ließ sich nicht setzen"
+    set --
+  fi
+fi
+
 command -v unclutter >/dev/null && unclutter -idle 0.5 -root &
 log "Kiosk gestartet (Gerät $DEVICE_ID, Adresse ${URL:-keine})"
 
