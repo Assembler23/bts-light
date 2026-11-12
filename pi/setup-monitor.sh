@@ -275,6 +275,18 @@ command -v cloud-init >/dev/null && cloud-init status --wait >/dev/null 2>&1
 sleep 30
 
 if [ -e "$SCHALTER" ]; then soll="schreiben"; else soll="nur-lesen"; fi
+# Pi Zero 2 W (512 MB): Chromium, X und das RAM-Overlay passen zusammen nicht
+# in den Speicher – die Karte blieb schwarz (Feldtest 12.11.2026, mit
+# abgeschaltetem Overlay lief sie). Dort bleibt die Karte beschreibbar; ein
+# schon im Nur-Lese-Modus gestarteter Zero schaltet sich damit von selbst
+# zurück. Ab ~1 GB (Pi 3, 4, 5) bleibt es beim Schreibschutz.
+# BTS_MEMINFO nur für den Test des Skripts.
+ram_kb=$(awk '/^MemTotal:/ {print $2; exit}' "${BTS_MEMINFO:-/proc/meminfo}" 2>/dev/null)
+case "$ram_kb" in ''|*[!0-9]*) ram_kb=0 ;; esac
+if [ "$ram_kb" -gt 0 ] && [ "$ram_kb" -lt 700000 ]; then
+  [ "$soll" = "nur-lesen" ] && log "nur ${ram_kb} kB Arbeitsspeicher – Karte bleibt beschreibbar"
+  soll="schreiben"
+fi
 if aktiv; then ist="nur-lesen"; else ist="schreiben"; fi
 if [ "$soll" = "$ist" ]; then
   rm -f "$ZAEHLER"
@@ -293,7 +305,7 @@ if [ "$soll" = "nur-lesen" ]; then
   log "schalte Nur-Lese-Modus ein und starte neu"
   raspi-config nonint enable_overlayfs || { log "Einschalten fehlgeschlagen"; exit 0; }
 else
-  log "Schalterdatei gefunden – schalte Nur-Lese-Modus aus und starte neu"
+  log "schalte Nur-Lese-Modus aus (Schalterdatei oder wenig Arbeitsspeicher) und starte neu"
   # Selbst ausschalten statt nur raspi-config: Dessen Änderung könnte im
   # RAM-Overlay landen und wäre nach dem Neustart weg. cmdline.txt liegt auf
   # der (nicht überlagerten) Boot-Partition; overlayroot.conf ändert

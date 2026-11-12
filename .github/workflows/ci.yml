@@ -326,6 +326,11 @@ jobs:
       - name: Namen am Monitor einpassen (JS)
         run: node scripts/test-namen-einpassen.mjs
 
+      # Pi Zero 2 W (512 MB) bleibt mit dem RAM-Overlay schwarz: unter ~700 MB
+      # bleibt die Karte beschreibbar.
+      - name: Pi Nur-Lese-Modus nach Arbeitsspeicher (JS)
+        run: node scripts/test-pi-nur-lesen-ram.mjs
+
       # Wessen Spielstand gilt nach einer Wieder-Anmeldung? Ein Fehler hier
       # laesst ein Ersatz-Tablet bei 0:0 beginnen und den gesicherten Stand
       # ueberschreiben.

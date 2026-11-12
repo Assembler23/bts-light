@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.394
+
+- **Pi Zero 2 W: Bild statt schwarzem Bildschirm.** Das neue Pi-Image
+  schaltete den Schreibschutz (Nur-Lese-Modus) auch am Zero 2 W ein. Mit
+  seinen 512 MB Arbeitsspeicher blieb der Bildschirm dann schwarz — mit
+  abgeschaltetem Schreibschutz lief dieselbe Karte sofort. Jetzt lässt der
+  Pi die Karte bei weniger als etwa 700 MB Arbeitsspeicher beschreibbar. Pi 3 B+
+  und neuer behalten den Schreibschutz. Ein Zero mit dem älteren Image
+  braucht das neue Image oder einmal von Hand am PC: auf dem Karten-Laufwerk
+  `bts-schreiben-erlaubt.txt` anlegen und in `cmdline.txt` den Eintrag
+  `overlayroot=tmpfs` löschen.
+
 ## v0.9.393
 
 - **Court-Monitor: lange Namen werden kleiner statt abgeschnitten.** Passte
