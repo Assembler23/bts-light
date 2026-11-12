@@ -222,6 +222,7 @@ pub fn run() {
             commands::list_court_ads,
             commands::set_court_ad_label,
             commands::set_court_ad_bar,
+            commands::set_court_ad_stream,
             commands::set_court_ad_style,
             commands::read_tournament_logo,
             commands::tp_file_check,

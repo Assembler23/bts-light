@@ -369,6 +369,12 @@ pub struct AdUpload {
     /// lesbar.
     #[serde(rename = "inBar", default)]
     pub in_bar: bool,
+    /// `true`, wenn das Bild in der Stream-Werbung (OBS) erscheinen darf
+    /// (Spec `stream-werbung`, ADR 0092). Positionell wie `in_bar`;
+    /// `#[serde(default)]` (= aus) hält Uploads älterer Apps lesbar — dort
+    /// bleibt die Stream-Ebene leer.
+    #[serde(rename = "inStream", default)]
+    pub in_stream: bool,
     /// Anzeige-Stil im Leerlauf-Vollbild (Spec `werbung-hintergrund-und-feld`,
     /// ADR 0041). **Positionell**: Der Stil gehört zu dem Bild, an dem er
     /// hängt, und wandert mit dessen Index. Leere Farbstrings bedeuten „nicht
@@ -4878,6 +4884,7 @@ mod tests {
                 content_type: "image/png".into(),
                 data: "AAAA".into(),
                 in_bar: true,
+                in_stream: false,
                 style: AdStyleWire::default(),
             }],
             call_timer: CallTimerView {
@@ -4902,6 +4909,30 @@ mod tests {
     }
 
     #[test]
+    fn ad_upload_in_stream_default_aus() {
+        // Upload einer älteren App ohne `inStream`: lesbar, Stream-Ebene leer.
+        let old = r#"{"config":{"adIntervalS":8,"showDiscipline":true,"showRound":true,"showMatchNumber":true,"showTimer":true},"tournamentName":"T","ads":[{"contentType":"image/png","data":"AAAA","inBar":true}]}"#;
+        let up: MonitorUpload = serde_json::from_str(old).unwrap();
+        assert!(up.ads[0].in_bar);
+        assert!(!up.ads[0].in_stream);
+    }
+
+    #[test]
+    fn ad_upload_in_stream_roundtrip() {
+        let mit = AdUpload {
+            content_type: "image/png".into(),
+            data: "AAAA".into(),
+            in_bar: false,
+            in_stream: true,
+            style: AdStyleWire::default(),
+        };
+        let j = serde_json::to_string(&mit).unwrap();
+        assert!(j.contains(r#""inStream":true"#), "{j}");
+        let zurueck: AdUpload = serde_json::from_str(&j).unwrap();
+        assert_eq!(zurueck, mit);
+    }
+
+    #[test]
     fn ad_style_defaults_to_black_and_off() {
         // Upload einer älteren App: kein `style` am Bild, kein `adStyles` im
         // Zustand. Beides muss lesbar bleiben und auf „nichts eingestellt"
@@ -4919,6 +4950,7 @@ mod tests {
             content_type: "image/png".into(),
             data: "AAAA".into(),
             in_bar: false,
+            in_stream: false,
             style: AdStyleWire::default(),
         };
         let j = serde_json::to_string(&ohne).unwrap();
@@ -4929,6 +4961,7 @@ mod tests {
             content_type: "image/png".into(),
             data: "AAAA".into(),
             in_bar: false,
+            in_stream: false,
             style: AdStyleWire {
                 bg: "#ffffff".into(),
                 fg: "#111111".into(),

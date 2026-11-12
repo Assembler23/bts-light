@@ -29,6 +29,7 @@ import {
   readTournamentLogo,
   removeCourtAd,
   setCourtAdBar,
+  setCourtAdStream,
   setCourtAdStyle,
   setCourtAdLabel,
   saveConfig,
@@ -2659,6 +2660,25 @@ export function SetupWizard({
                             }}
                           />
                           Leiste
+                        </label>
+                        <label
+                          className="flex flex-shrink-0 items-center gap-1 text-xs text-slate-500"
+                          title="In der Stream-Werbung (OBS) zeigen — ohne Häkchen erscheint das Bild nicht im Stream"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={ad.in_stream}
+                            onChange={(e) => {
+                              const on = e.currentTarget.checked;
+                              setAds((prev) =>
+                                prev.map((a) =>
+                                  a.file === ad.file ? { ...a, in_stream: on } : a,
+                                ),
+                              );
+                              void setCourtAdStream(ad.file, on);
+                            }}
+                          />
+                          Stream
                         </label>
                         <button
                           onClick={() => void deleteAd(ad.file)}

@@ -118,6 +118,11 @@ pub struct ServerCtx {
     /// des `ads_cache` zu verlassen, wäre falsch: Ein Stil-Wechsel fasst kein
     /// Bild an.
     style_cache: std::sync::Mutex<StyleCache>,
+    /// Zwischenstand der Stream-Markierungen (Spec `stream-werbung`), am
+    /// **Inhalt** der Datei gemerkt: Ein Umhaken zwischen zwei Bildern mit
+    /// gleich langem Namen (`ad-<ms>.png`) ist längenerhaltend — derselbe
+    /// Grund wie beim Werbe-Stil.
+    stream_cache: std::sync::Mutex<StreamCache>,
     /// Zwischenstand der Kombi-Ausrichtung je Gerät, ebenfalls am **Inhalt**
     /// der Datei gemerkt (ADR 0049). Aus demselben Grund wie beim Werbe-Stil:
     /// Zwei Geräte gegenläufig umzustellen ist längenerhaltend und wäre an
@@ -145,6 +150,10 @@ type BarCache = Option<((std::time::SystemTime, u64), Arc<HashSet<String>>)>;
 /// Der Werbe-Stil je Bilddatei, geschlüsselt nach dem **Dateiinhalt** — siehe
 /// [`ServerCtx::ad_style`], warum hier nicht `(Änderungszeit, Größe)` reicht.
 type StyleCache = Option<(String, Arc<HashMap<String, monitor::AdStyle>>)>;
+
+/// Die Stream-Markierungen, geschlüsselt nach dem **Dateiinhalt** — siehe
+/// [`ServerCtx::ad_stream`].
+type StreamCache = Option<(String, Arc<HashSet<String>>)>;
 
 /// Die Kombi-Ausrichtung je Gerät, geschlüsselt nach dem **Dateiinhalt** —
 /// siehe [`ServerCtx::combo_dirs`].
@@ -303,6 +312,7 @@ impl ServerCtx {
             logo_cache: std::sync::Mutex::new(None),
             bar_cache: std::sync::Mutex::new(None),
             style_cache: std::sync::Mutex::new(None),
+            stream_cache: std::sync::Mutex::new(None),
             combo_dir_cache: std::sync::Mutex::new(None),
             spielfolge_cache: std::sync::Mutex::new(None),
             score_push: Arc::new(ScorePushQueue::default()),
@@ -481,6 +491,36 @@ impl ServerCtx {
         let stile = Arc::new(monitor::parse_ad_style(&roh));
         *self.style_cache.lock().expect("Stil-Cache nicht vergiftet") = Some((roh, stile.clone()));
         stile
+    }
+
+    /// Die für die Stream-Werbung freigegebenen Dateinamen — aus dem
+    /// Zwischenstand, solange der Inhalt der Datei unverändert ist. Fehlt sie
+    /// (Normalfall), ist die Menge leer: Ohne Häkchen steht nichts im Stream.
+    fn ad_stream(&self) -> Arc<HashSet<String>> {
+        let pfad = self.monitor_dir.join(monitor::AD_STREAM_FILE);
+        let Ok(roh) = std::fs::read_to_string(&pfad) else {
+            return Arc::new(HashSet::new());
+        };
+        {
+            let cache = self
+                .stream_cache
+                .lock()
+                .expect("Stream-Cache nicht vergiftet");
+            if let Some((gemerkt, namen)) = cache.as_ref() {
+                if *gemerkt == roh {
+                    return namen.clone();
+                }
+            }
+        }
+        let namen: HashSet<String> = serde_json::from_str::<Vec<String>>(&roh)
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default();
+        let namen = Arc::new(namen);
+        *self
+            .stream_cache
+            .lock()
+            .expect("Stream-Cache nicht vergiftet") = Some((roh, namen.clone()));
+        namen
     }
 
     /// Die Kombi-Ausrichtung je Gerät (ADR 0049), gemerkt am **Inhalt** der
@@ -1249,7 +1289,9 @@ async fn qr_svg(Path(court_id): Path<i64>, Query(q): Query<QrQuery>) -> impl Int
 struct DeviceHeartbeat {
     #[serde(default)]
     device: Option<String>,
-    /// `stream` → Stream-Filter für Nation/Verein (nur feste Feld-Route).
+    /// `stream` → Stream-Filter für Nation/Verein (feste Feld-Route) bzw.
+    /// 503 statt „leer" bei einem Lesefehler (`/info/ad/state`, Spec
+    /// `stream-werbung`).
     #[serde(default)]
     zweck: Option<String>,
     /// Was den Abruf ausgelöst hat: `push` (ein Nudge kam) oder `poll`
@@ -2170,7 +2212,7 @@ async fn info_ad_page() -> impl IntoResponse {
 async fn info_ad_state(
     State(ctx): State<Arc<ServerCtx>>,
     Query(q): Query<DeviceHeartbeat>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     note_heartbeat(&ctx, &q);
     let ads = ctx.ads();
     // Die als „Leisten-Sponsor" markierten Bilder gesondert ausweisen — die
@@ -2178,6 +2220,14 @@ async fn info_ad_state(
     // Vollbild-Rotation (`ads`) anzufassen. Nur existierende Dateien.
     let bar = ctx.ad_bar();
     let bar_ads: Vec<&String> = ads.iter().filter(|f| bar.contains(*f)).collect();
+    // Für die Stream-Werbung freigegebene Bilder (Spec `stream-werbung`),
+    // gefiltert gegen die vorhandenen Dateien, in Setup-Reihenfolge.
+    // `show_ads` gilt hier bewusst nicht: Einzige Schaltstelle ist das Häkchen.
+    let stream = ctx.ad_stream();
+    if let Some(antwort) = stream_lesefehler(q.zweck.as_deref(), &stream, &ads, &ctx.monitor_dir) {
+        return antwort;
+    }
+    let stream_ads: Vec<&String> = ads.iter().filter(|f| stream.contains(*f)).collect();
     // Config nur EINMAL laden — sowohl Intervall als auch das Logo-Flag
     // daraus. Ohne Kopie: Hier wird nur gelesen, und die Fassung trägt
     // das Base64-Logo mit.
@@ -2185,6 +2235,7 @@ async fn info_ad_state(
     let payload = serde_json::json!({
         "ads": ads,
         "barAds": bar_ads,
+        "streamAds": stream_ads,
         "hasLogo": !config.tournament_logo.data.is_empty(),
         "intervalS": config.court_monitor.ad_interval_s.max(1),
         // Anzeige-Stil index-parallel zu `ads`. Die reine Werbe-Seite nutzt
@@ -2192,7 +2243,40 @@ async fn info_ad_state(
         // nicht, sie hängt an keinem Feld (Spec werbung-hintergrund-und-feld).
         "adStyles": monitor::ad_styles_fuer(&ads, &ctx.ad_style()),
     });
-    ([(header::CACHE_CONTROL, "no-store")], Json(payload))
+    ([(header::CACHE_CONTROL, "no-store")], Json(payload)).into_response()
+}
+
+/// Stream-Abruf (`?zweck=stream`): Die Bildliste ist leer, obwohl ein
+/// angehaktes Bild **auf der Platte liegt** — dann schlug das Lesen des
+/// Werbe-Verzeichnisses fehl (Virenscanner, kurze Sperre), und die Auswahl
+/// ist nicht wirklich leer. Antwort 503, damit die Stream-Seite die zuletzt
+/// gezeigten Bilder stehen lässt (ADR 0092).
+///
+/// Verwaiste Markierungen (Bild im Explorer gelöscht, Datei schon weg)
+/// zählen bewusst **nicht**: Sie hielten den Stream sonst für immer bei den
+/// alten Sponsoren fest, ohne dass das Setup sie zeigen könnte (Review
+/// 12.11.2026). Andere Abrufer (Werbe-Seite, Sponsor-Leiste) bleiben
+/// unberührt.
+fn stream_lesefehler(
+    zweck: Option<&str>,
+    stream: &HashSet<String>,
+    ads: &[String],
+    dir: &std::path::Path,
+) -> Option<axum::response::Response> {
+    if zweck != Some("stream") || stream.is_empty() || !ads.is_empty() {
+        return None;
+    }
+    if !stream.iter().any(|f| dir.join(f).is_file()) {
+        return None;
+    }
+    Some(
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(serde_json::json!({ "grund": "keine_daten" })),
+        )
+            .into_response(),
+    )
 }
 
 /// Liefert das **Turnierlogo** als Bild (für die obere Leiste der
@@ -7607,6 +7691,104 @@ mod tests {
             leiste.contains("ad-2.png") && !leiste.contains("ad-1.png"),
             "Ein umgehaktes Bild muss sofort in der Leiste stehen, das alte weg"
         );
+    }
+
+    #[test]
+    fn der_gemerkte_stream_marker_folgt_der_datei() {
+        // Umhaken bei gleich langem Namen: Der Zwischenstand darf die alte
+        // Auswahl nicht festhalten (Schlüssel ist der Inhalt).
+        let (ctx, dir) = make_bild_ctx();
+        let pfad = dir.path().join(monitor::AD_STREAM_FILE);
+        std::fs::write(&pfad, br#"["ad-1.png"]"#).unwrap();
+        assert!(ctx.ad_stream().contains("ad-1.png"));
+        std::fs::write(&pfad, br#"["ad-2.png"]"#).unwrap();
+        let stream = ctx.ad_stream();
+        assert!(stream.contains("ad-2.png") && !stream.contains("ad-1.png"));
+    }
+
+    /// `/info/ad/state` abrufen; liefert Status und JSON.
+    async fn ad_state_abruf(
+        ctx: Arc<ServerCtx>,
+        zweck: Option<&str>,
+    ) -> (StatusCode, serde_json::Value) {
+        let q = DeviceHeartbeat {
+            zweck: zweck.map(str::to_string),
+            ..Default::default()
+        };
+        let r = info_ad_state(State(ctx), Query(q)).await;
+        let status = r.status();
+        let bytes = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn stream_ads_nur_vorhandene_dateien_in_setup_reihenfolge() {
+        let (ctx, dir) = make_bild_ctx();
+        for name in ["ad-1.png", "ad-2.png", "ad-3.png"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        // ad-9 ist eine Leiche ohne Datei, ad-2 nicht angehakt.
+        std::fs::write(
+            dir.path().join(monitor::AD_STREAM_FILE),
+            br#"["ad-3.png","ad-9.png","ad-1.png"]"#,
+        )
+        .unwrap();
+        let (status, v) = ad_state_abruf(ctx, Some("stream")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["streamAds"], serde_json::json!(["ad-1.png", "ad-3.png"]));
+        assert_eq!(v["ads"].as_array().unwrap().len(), 3, "ads unverändert");
+    }
+
+    #[tokio::test]
+    async fn ad_state_ohne_stream_marken_liefert_leere_stream_liste() {
+        let (ctx, dir) = make_bild_ctx();
+        std::fs::write(dir.path().join("ad-1.png"), b"x").unwrap();
+        let (status, v) = ad_state_abruf(ctx, Some("stream")).await;
+        assert_eq!(status, StatusCode::OK, "leere Auswahl ist 200, nicht 503");
+        assert_eq!(v["streamAds"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn stream_lesefehler_nur_wenn_ein_angehaktes_bild_existiert() {
+        let dir = tempfile::tempdir().unwrap();
+        let marken: HashSet<String> = ["ad-1.png".to_string()].into_iter().collect();
+        // Bild liegt da, Liste trotzdem leer → Lesefehler → 503.
+        std::fs::write(dir.path().join("ad-1.png"), b"x").unwrap();
+        let r = stream_lesefehler(Some("stream"), &marken, &[], dir.path()).unwrap();
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // Ohne `zweck` nie.
+        assert!(stream_lesefehler(None, &marken, &[], dir.path()).is_none());
+        // Bilder vorhanden → kein Lesefehler.
+        assert!(
+            stream_lesefehler(Some("stream"), &marken, &["ad-1.png".into()], dir.path()).is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn verwaiste_stream_marken_leeren_den_stream_statt_ihn_festzuhalten() {
+        // Markierung zeigt auf ein Bild, das es nicht mehr gibt (im Explorer
+        // gelöscht): echte leere Auswahl, 200 — nicht für immer 503.
+        let (ctx, dir) = make_bild_ctx();
+        std::fs::write(dir.path().join(monitor::AD_STREAM_FILE), br#"["ad-1.png"]"#).unwrap();
+        let (status, v) = ad_state_abruf(ctx.clone(), Some("stream")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["streamAds"], serde_json::json!([]));
+        let (status, _) = ad_state_abruf(ctx, None).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn stream_ads_unabhaengig_von_show_ads() {
+        let (ctx, dir) = make_bild_ctx();
+        std::fs::write(dir.path().join("ad-1.png"), b"x").unwrap();
+        std::fs::write(dir.path().join(monitor::AD_STREAM_FILE), br#"["ad-1.png"]"#).unwrap();
+        ctx.mutate_app_config(|c| {
+            c.court_monitor.show_ads = false;
+            Ok(())
+        })
+        .unwrap();
+        let (_, v) = ad_state_abruf(ctx, Some("stream")).await;
+        assert_eq!(v["streamAds"], serde_json::json!(["ad-1.png"]));
     }
 
     #[tokio::test]

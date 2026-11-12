@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.395
+
+- **Werbebilder: neues Häkchen „Stream".** Im Setup lässt sich je Werbebild
+  festlegen, ob es in der kommenden Stream-Werbung für OBS erscheinen darf
+  (voreingestellt aus). Die Auswahl reist auch in die Cloud. Die zugehörige
+  OBS-Ebene mit rotierenden, nebeneinander stehenden oder durchlaufenden
+  Sponsoren folgt mit der nächsten Version (Spec `stream-werbung`).
+
 ## v0.9.394
 
 - **Pi Zero 2 W: Bild statt schwarzem Bildschirm.** Das neue Pi-Image

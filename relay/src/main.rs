@@ -783,6 +783,9 @@ struct AdImage {
     /// soll (Sponsor-Leiste). Bestimmt, welche Indizes `/{ns}/info/ad/state`
     /// als `barAds` ausweist.
     in_bar: bool,
+    /// `true`, wenn das Bild in der Stream-Werbung (OBS) erscheinen darf
+    /// (Spec `stream-werbung`, ADR 0092). Bestimmt `streamAds`.
+    in_stream: bool,
     /// Anzeige-Stil im Leerlauf-Vollbild (Hintergrundfarbe, Kontrastschrift,
     /// Feldbezeichnung — Spec `werbung-hintergrund-und-feld`). Der Relay
     /// **rechnet hier nichts**, er reicht durch, was der Host geschickt hat:
@@ -2844,24 +2847,66 @@ async fn tournament_logo(
 /// **Indizes** in die Leiste gehören (`barAds`) und ob ein Logo vorliegt
 /// (`hasLogo`). Gegenstück zum LAN-`/info/ad/state` (dort Dateinamen, hier
 /// Indizes – genau wie `MonitorState.ads`). `intervalS` für die Vollständigkeit.
-async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> impl IntoResponse {
+async fn ad_bar_state(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    Query(q): Query<ZweckQuery>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    let (ads, bar_ads, has_logo, interval_s, ad_styles) = {
+    // Die Stream-Werbung fragt mit `?zweck=stream` (ADR 0092): Für sie heißt
+    // „200 mit leerer Liste" *Ebene leeren*. Weiß der Relay nichts — nach
+    // einem Neustart (jeder Merge deployt!), nach der Daten-Frist oder
+    // solange der Turnier-PC fehlt —, darf er deshalb nicht „leer" sagen,
+    // sondern 503: Die Seite lässt dann die zuletzt gezeigten Sponsoren
+    // stehen. Alle anderen Abrufer (Werbe-Seite, Sponsor-Leiste) bekommen
+    // unverändert 200.
+    let fuer_stream = q.zweck.as_deref() == Some("stream");
+    let (ads, bar_ads, stream_ads, stream_ver, has_logo, interval_s, ad_styles) = {
         let map = broker.namespaces.lock().await;
-        match map.get(&ns).and_then(|n| n.monitor.as_ref()) {
+        if fuer_stream {
+            if let Some(antwort) = sperre(
+                anzeige_lage(map.get(&ns), now_ms(), broker.start_ms),
+                &headers,
+            ) {
+                return antwort;
+            }
+        }
+        let n = map.get(&ns);
+        match n.and_then(|n| n.monitor.as_ref()) {
+            // Ohne Host und ohne Bilder: Das Budget hat die Bilder eines
+            // verwaisten Turniers freigegeben (`hostlose_bilder_freigeben`),
+            // auch noch innerhalb der Karenz. Für den Stream ist das „keine
+            // Daten", nicht „keine Auswahl".
+            Some(m) if fuer_stream && n.is_some_and(|n| n.host.is_none()) && m.ads.is_empty() => {
+                return keine_daten_antwort();
+            }
             Some(m) => {
                 // Cloud adressiert die Werbebilder per Index (`/{ns}/ads/0`);
                 // `ads` ist die volle Rotationsliste (für ad.html), `barAds`
-                // nur die als „in Leiste" markierten (für die Sponsor-Leiste).
+                // nur die als „in Leiste" markierten (für die Sponsor-Leiste),
+                // `streamAds` die für den Stream freigegebenen.
                 let all: Vec<String> = (0..m.ads.len()).map(|i| i.to_string()).collect();
-                let bar: Vec<String> = m
+                let indizes = |f: fn(&AdImage) -> bool| -> Vec<String> {
+                    m.ads
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, a)| f(a))
+                        .map(|(i, _)| i.to_string())
+                        .collect()
+                };
+                let bar = indizes(|a| a.in_bar);
+                let stream = indizes(|a| a.in_stream);
+                // Inhaltsmarke je Stream-Bild als Cache-Brecher: Rücken nach
+                // einem Löschen die Indizes nach, bekäme OBS sonst bis zu
+                // `max-age` lang das falsche Motiv aus dem Cache.
+                let ver: Vec<String> = m
                     .ads
                     .iter()
-                    .enumerate()
-                    .filter(|(_, a)| a.in_bar)
-                    .map(|(i, _)| i.to_string())
+                    .filter(|a| a.in_stream)
+                    .map(|a| a.etag.trim_matches('"').to_string())
                     .collect();
                 // Anzeige-Stil index-parallel zu `ads` — der Relay reicht
                 // durch, was der Host geschickt hat (ADR 0041).
@@ -2870,12 +2915,23 @@ async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> i
                 (
                     all,
                     bar,
+                    stream,
+                    ver,
                     m.logo.is_some(),
                     m.config.ad_interval_s.max(1),
                     stile,
                 )
             }
-            None => (Vec::new(), Vec::new(), false, 1, Vec::new()),
+            None if fuer_stream => return keine_daten_antwort(),
+            None => (
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                false,
+                1,
+                Vec::new(),
+            ),
         }
     };
     (
@@ -2883,10 +2939,28 @@ async fn ad_bar_state(State(broker): State<Broker>, Path(ns): Path<String>) -> i
         Json(serde_json::json!({
             "ads": ads,
             "barAds": bar_ads,
+            "streamAds": stream_ads,
+            "streamVer": stream_ver,
             "hasLogo": has_logo,
             "intervalS": interval_s,
             "adStyles": ad_styles,
         })),
+    )
+        .into_response()
+}
+
+/// „Der Relay kennt die Werbebilder (noch) nicht" — für die Stream-Werbung,
+/// die daraufhin die zuletzt gezeigten Bilder stehen lässt (ADR 0092). Der
+/// Grund steht im Rumpf wie bei [`host_weg_antwort`].
+fn keine_daten_antwort() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::RETRY_AFTER, "20"),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        r#"{"grund":"keine_daten"}"#,
     )
         .into_response()
 }
@@ -3554,6 +3628,7 @@ async fn monitor_upload(
             etag: bild_marke(&bytes),
             bytes,
             in_bar: ad.in_bar,
+            in_stream: ad.in_stream,
             style: ad.style,
         });
     }
@@ -3573,6 +3648,7 @@ async fn monitor_upload(
             etag: bild_marke(&bytes),
             bytes,
             in_bar: false,
+            in_stream: false,
             // Das Turnierlogo ist kein Werbebild im Leerlauf-Vollbild — es
             // hat keinen Stil und bekommt auch keinen.
             style: relay_proto::AdStyleWire::default(),
@@ -9504,6 +9580,7 @@ mod tests {
                     content_type: "image/png".into(),
                     data: b64(b),
                     in_bar: false,
+                    in_stream: false,
                     style: relay_proto::AdStyleWire::default(),
                 })
                 .collect(),
@@ -11171,6 +11248,147 @@ mod tests {
         assert_eq!(&body[..], br#"{"sets":[]}"#);
     }
 
+    /// Upload mit drei Bildern; Index 0 und 2 sind für den Stream angehakt.
+    async fn stream_upload(broker: &Broker, ns: &str) {
+        let b64 = |s: &[u8]| base64::engine::general_purpose::STANDARD.encode(s);
+        let bild = |daten: &[u8], in_stream: bool| relay_proto::AdUpload {
+            content_type: "image/png".into(),
+            data: b64(daten),
+            in_bar: false,
+            in_stream,
+            style: relay_proto::AdStyleWire::default(),
+        };
+        let upload = relay_proto::MonitorUpload {
+            config: relay_proto::MonitorConfig::default(),
+            tournament_name: "Test-Cup".into(),
+            ads: vec![
+                bild(b"stream-a", true),
+                bild(b"nur-halle", false),
+                bild(b"stream-c", true),
+            ],
+            call_timer: relay_proto::CallTimerView::default(),
+            logo: None,
+        };
+        let r = monitor_upload(State(broker.clone()), Path(ns.into()), axum::Json(upload))
+            .await
+            .into_response();
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    /// `/{ns}/info/ad/state` mit oder ohne `zweck=stream`.
+    async fn ad_state_abruf(
+        broker: &Broker,
+        ns: &str,
+        stream: bool,
+    ) -> (StatusCode, serde_json::Value) {
+        let q = ZweckQuery {
+            zweck: stream.then(|| "stream".to_string()),
+        };
+        let r = ad_bar_state(
+            State(broker.clone()),
+            Path(ns.into()),
+            Query(q),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let status = r.status();
+        let bytes = axum::body::to_bytes(r.into_body(), 1 << 16).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or_default())
+    }
+
+    #[tokio::test]
+    async fn monitor_upload_exposes_stream_ads_und_version() {
+        const NS: &str = "c1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = kanal_test();
+        register_host(&broker, NS, &host).await;
+        stream_upload(&broker, NS).await;
+        let (status, v) = ad_state_abruf(&broker, NS, true).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["streamAds"], serde_json::json!(["0", "2"]));
+        let ver = v["streamVer"].as_array().unwrap();
+        assert_eq!(ver.len(), 2, "streamVer parallel zu streamAds");
+        for marke in ver {
+            let m = marke.as_str().unwrap();
+            assert!(
+                !m.is_empty() && !m.contains('"'),
+                "Marke ohne Anführungszeichen: {m}"
+            );
+        }
+        assert_ne!(ver[0], ver[1], "verschiedene Bilder, verschiedene Marken");
+        assert_eq!(v["ads"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn stream_ad_state_503_ohne_upload() {
+        const NS: &str = "c2b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = kanal_test();
+        register_host(&broker, NS, &host).await;
+        // Host verbunden, aber noch nichts hochgeladen.
+        let (status, v) = ad_state_abruf(&broker, NS, true).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(v["grund"], "keine_daten");
+    }
+
+    #[tokio::test]
+    async fn stream_ad_state_503_nach_relay_neustart() {
+        // Frischer Relay: Der Namespace ist unbekannt (Start-Karenz).
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (status, _) =
+            ad_state_abruf(&broker, "c3b2c3d4-e5f6-7890-abcd-ef1234567890", true).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn stream_ad_state_503_wenn_host_weg() {
+        const NS: &str = "c4b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = kanal_test();
+        register_host(&broker, NS, &host).await;
+        stream_upload(&broker, NS).await;
+        host_weg_seit(&broker, NS, HOST_KARENZ_MS + 1).await;
+        let (status, v) = ad_state_abruf(&broker, NS, true).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(v["grund"], "host_weg");
+    }
+
+    #[tokio::test]
+    async fn stream_ad_state_503_wenn_bilder_freigegeben_ohne_host() {
+        const NS: &str = "c5b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = kanal_test();
+        register_host(&broker, NS, &host).await;
+        stream_upload(&broker, NS).await;
+        // Noch in der Karenz, aber das Budget hat die Bilder freigegeben.
+        host_weg_seit(&broker, NS, 1_000).await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut(NS)
+                .unwrap()
+                .monitor
+                .as_mut()
+                .unwrap()
+                .ads
+                .clear();
+        }
+        let (status, v) = ad_state_abruf(&broker, NS, true).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(v["grund"], "keine_daten");
+    }
+
+    #[tokio::test]
+    async fn ad_state_ohne_zweck_bleibt_200_leer() {
+        // Werbe-Seite und Sponsor-Leiste merken nichts vom Stream-Verhalten.
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (status, v) =
+            ad_state_abruf(&broker, "c6b2c3d4-e5f6-7890-abcd-ef1234567890", false).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["ads"], serde_json::json!([]));
+        assert_eq!(v["streamAds"], serde_json::json!([]));
+    }
+
     #[tokio::test]
     async fn monitor_upload_exposes_bar_ads_and_logo() {
         use base64::Engine;
@@ -11190,12 +11408,14 @@ mod tests {
                     content_type: "image/png".into(),
                     data: b64(b"bar-bild"),
                     in_bar: true,
+                    in_stream: false,
                     style: relay_proto::AdStyleWire::default(),
                 },
                 relay_proto::AdUpload {
                     content_type: "image/jpeg".into(),
                     data: b64(b"voll-bild"),
                     in_bar: false,
+                    in_stream: false,
                     style: relay_proto::AdStyleWire::default(),
                 },
             ],
@@ -11211,9 +11431,14 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
 
         // /{ns}/info/ad/state: nur der in_bar-Index, hasLogo true.
-        let state = ad_bar_state(State(broker.clone()), Path(NS.into()))
-            .await
-            .into_response();
+        let state = ad_bar_state(
+            State(broker.clone()),
+            Path(NS.into()),
+            Query(ZweckQuery::default()),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
         assert_eq!(state.status(), StatusCode::OK);
         let bytes = axum::body::to_bytes(state.into_body(), 4096).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -11289,6 +11514,7 @@ mod tests {
                         content_type: "image/png".into(),
                         data: b64(daten),
                         in_bar: false,
+                        in_stream: false,
                         style: relay_proto::AdStyleWire::default(),
                     }],
                     call_timer: relay_proto::CallTimerView::default(),
@@ -11355,6 +11581,7 @@ mod tests {
                 content_type: "image/png".into(),
                 data: b64(b"unveraendertes-bild"),
                 in_bar: false,
+                in_stream: false,
                 style: relay_proto::AdStyleWire::default(),
             }],
             call_timer: relay_proto::CallTimerView::default(),
