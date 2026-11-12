@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.391
+
+- **Messzeile für die Strecke zu badhub.** Im Diagnose-Log steht jetzt je
+  Minute eine Zeile `badhub-Messung`: wie viele Nachrichten je Art
+  hinausgingen, wie lange sie brauchten (Median, Maximum), wie groß die
+  größte war und wie oft der Spielplan unverändert gesendet wurde. Nur
+  Zahlen, keine Namen. Damit lässt sich nach dem nächsten Turnier
+  entscheiden, wie die Strecke weiter entlastet wird. Die bisherige Messzeile
+  je Sendung kam im Log nie an.
+
 ## v0.9.390
 
 - **Das Dashboard sagt, wenn ein anderer PC dasselbe Turnier in der Cloud

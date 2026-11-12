@@ -817,6 +817,26 @@ Aufruf: `cargo test -p bts-light --lib messung_ -- --ignored --nocapture`.
 **Schritt B — im Feld, mit PR 1.** Eine Debug-Zeile je Sendung (Kanal, Bytes, Dauer) und je
 `sched` „Inhalt geändert ja/nein". Auswertung aus dem Diagnose-Log des nächsten Turniers.
 
+**Aus der Umsetzung (v0.9.391):** Die Debug-Zeile aus PR 1 erreichte das Diagnose-Log nie —
+die App protokolliert fest auf Info-Stufe, und „Inhalt geändert" war nicht gebaut. Schritt B
+ist deshalb erst ab v0.9.391 messbar: eine Sammelzeile je Minute auf Info-Stufe
+(`badhub-Messung`, `badhub/messung.rs`) mit Anzahl, Median, Maximum, größtem Körper und
+Fehlschlägen je Kanal, dazu `spielplan geaendert=… gleich=…`.
+
+**Schritt A gemessen (12.11.2026)**, zwei Mitschnitte:
+
+| | 104 Spiele, 12 auf dem Feld | 1039 Spiele, Turnier nicht gestartet |
+|---|---|---|
+| `sched` | 32 191 B (80 Spiele) | 458 256 B (1039 Spiele) |
+| `centry_list` | 19 589 B (81 Meldungen) | 121 702 B (481 Meldungen) |
+| `tset` ohne Logo | 15 756 B | 162 B (leer) |
+| `tupdate_match` | 64 B | 77 B |
+
+Folgerung: Ein großer Spielplan kostet im Minutentakt rund 27 MB je Stunde — PR 5 lohnt bei
+großen Turnieren, wenn der Anteil unveränderter Minuten stimmt. Der Abstand zur 5-MiB-Grenze
+ist beim Spielplan knapp Faktor 11. Ein `tset` eines großen Turniers **im Betrieb** ist noch
+nicht gemessen.
+
 | Messwert | Entscheidung | Vor welchem PR |
 |---|---|---|
 | Dauer eines `tupdate_match` gegen Produktion | Trägt die serielle Strecke 20 Felder? Richtwert: Median ≤ 400 ms genügt für rund 2 Punkte/s. Darüber kommt in PR 2b ein Sicherheitsventil dazu (ab K wartenden Feldern ein Sammel-`tset`; K wird aus dem Messwert festgelegt und vor dem Merge in dieser Spec nachgetragen) | PR 2b |
