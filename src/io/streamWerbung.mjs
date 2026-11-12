@@ -71,9 +71,10 @@ export function streamBilder(state, base) {
 }
 
 /** Schlüssel einer Bildliste: Ändert er sich, wird neu aufgebaut — sonst
- *  liefe das Band nach jedem Abruf von vorn. */
-export function listenSchluessel(bilder) {
-  return bilder.map(function (b) { return b.url + "|" + b.bg; }).join("\n");
+ *  liefe das Band nach jedem Abruf von vorn. Die Farbe zählt nur mit Kachel;
+ *  transparent ist sie unsichtbar und darf nichts neu starten. */
+export function listenSchluessel(bilder, mitFarbe) {
+  return bilder.map(function (b) { return mitFarbe ? b.url + "|" + b.bg : b.url; }).join("\n");
 }
 
 /** „nebeneinander": gemeinsam verkleinern, bis die Reihe passt; nie größer. */

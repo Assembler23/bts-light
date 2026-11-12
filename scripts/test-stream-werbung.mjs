@@ -65,11 +65,12 @@ ok("Stream-Bilder in Reihenfolge mit Farbe und Version", streamBilder(zustand, "
 ok("ohne streamVer (LAN)", streamBilder({ ads: ["x.png"], streamAds: ["x.png"] }, "/")[0].url, "/ads/x.png");
 ok("leerer Zustand", streamBilder({}, "/"), []);
 const a = streamBilder(zustand, "/");
-ok("gleiche Liste, gleicher Schlüssel", listenSchluessel(a), listenSchluessel(streamBilder(zustand, "/")));
-ok("neue Version → neuer Schlüssel", listenSchluessel(a) === listenSchluessel(
-  streamBilder({ ...zustand, streamVer: ["v0", "neu"] }, "/")), false);
-ok("neue Farbe → neuer Schlüssel", listenSchluessel(a) === listenSchluessel(
-  streamBilder({ ...zustand, adStyles: [{ bg: "#111111" }, {}, {}] }, "/")), false);
+ok("gleiche Liste, gleicher Schlüssel", listenSchluessel(a, true), listenSchluessel(streamBilder(zustand, "/"), true));
+ok("neue Version → neuer Schlüssel", listenSchluessel(a, false) === listenSchluessel(
+  streamBilder({ ...zustand, streamVer: ["v0", "neu"] }, "/"), false), false);
+const andereFarbe = streamBilder({ ...zustand, adStyles: [{ bg: "#111111" }, {}, {}] }, "/");
+ok("neue Farbe mit Kachel → neuer Schlüssel", listenSchluessel(a, true) === listenSchluessel(andereFarbe, true), false);
+ok("neue Farbe transparent → gleicher Schlüssel", listenSchluessel(a, false) === listenSchluessel(andereFarbe, false), true);
 
 // ── Maße ─────────────────────────────────────────────────────────────────
 ok("Reihe passt → 1", reiheMassstab(800, 1920), 1);

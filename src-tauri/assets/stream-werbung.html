@@ -136,9 +136,10 @@ function streamBilder(state, base) {
 }
 
 /** Schlüssel einer Bildliste: Ändert er sich, wird neu aufgebaut — sonst
- *  liefe das Band nach jedem Abruf von vorn. */
-function listenSchluessel(bilder) {
-  return bilder.map(function (b) { return b.url + "|" + b.bg; }).join("\n");
+ *  liefe das Band nach jedem Abruf von vorn. Die Farbe zählt nur mit Kachel;
+ *  transparent ist sie unsichtbar und darf nichts neu starten. */
+function listenSchluessel(bilder, mitFarbe) {
+  return bilder.map(function (b) { return mitFarbe ? b.url + "|" + b.bg : b.url; }).join("\n");
 }
 
 /** „nebeneinander": gemeinsam verkleinern, bis die Reihe passt; nie größer. */
@@ -208,6 +209,8 @@ function rotationIntervallMs(intervalS) {
   var bilder = [];
   var rotTimer = null;
   var layout = null;          // Neu-Messen bei Größenänderung (reihe/band)
+  var fehlerSeitAufbau = false; // ein Bild scheiterte → beim nächsten Abruf neu
+  var abrufLaeuft = false;
 
   // Ein Bild-Element samt Kachel. Farben nur über style, nie als HTML.
   function bildElement(b) {
@@ -230,7 +233,7 @@ function rotationIntervallMs(intervalS) {
       var img = h.firstChild;
       var erledigt = function () { offen -= 1; if (offen === 0) fertig(); };
       img.onload = erledigt;
-      img.onerror = function () { h.classList.add("fehlt"); erledigt(); };
+      img.onerror = function () { h.classList.add("fehlt"); fehlerSeitAufbau = true; erledigt(); };
       img.src = liste[i].url;
     });
   }
@@ -252,20 +255,30 @@ function rotationIntervallMs(intervalS) {
     var b = bildElement(bilder[0]);
     ebene.appendChild(a);
     ebene.appendChild(b);
-    var sichtbar = a, verdeckt = b, idx = 0;
+    var sichtbar = a, verdeckt = b, idx = 0, laedt = false;
     var zeige = function (i) {
       var bild = bilder[i];
       if (OPT.hintergrund === "kachel") verdeckt.style.backgroundColor = bild.bg;
       var img = verdeckt.firstChild;
       var ziel = verdeckt;
+      laedt = true;
       img.onload = function () {
-        ziel.classList.remove("fehlt");
+        laedt = false;
+        if (ziel.classList.contains("fehlt")) {
+          // Erst sichtbar machen, dann einblenden — sonst ploppt das Bild.
+          ziel.classList.remove("fehlt");
+          void ziel.offsetWidth;
+        }
         ziel.classList.add("zeigt");
         if (sichtbar !== ziel) sichtbar.classList.remove("zeigt");
         verdeckt = sichtbar;
         sichtbar = ziel;
       };
-      img.onerror = function () { ziel.classList.add("fehlt"); };
+      img.onerror = function () {
+        laedt = false;
+        ziel.classList.add("fehlt");
+        fehlerSeitAufbau = true;
+      };
       img.src = bild.url;
     };
     // Erstes Bild direkt in die sichtbare Ebene.
@@ -273,6 +286,10 @@ function rotationIntervallMs(intervalS) {
     zeige(0);
     if (bilder.length > 1) {
       rotTimer = setInterval(function () {
+        // Lädt das nächste Bild noch, diesen Takt auslassen: Ein neues `src`
+        // bräche den Ladevorgang ab, und ein großes Bild käme bei kurzem
+        // Intervall nie an.
+        if (laedt) return;
         idx = (idx + 1) % bilder.length;
         zeige(idx);
       }, intervallMs);
@@ -320,10 +337,14 @@ function rotationIntervallMs(intervalS) {
   }
 
   function anwenden(neu, iv) {
-    var s = listenSchluessel(neu);
-    if (s === schluessel && iv === intervallMs) return;
+    var s = listenSchluessel(neu, OPT.hintergrund === "kachel");
+    // Das Intervall zählt nur für die Rotation; Band und Reihe starten bei
+    // einer Intervall-Änderung nicht neu.
+    var ivRelevant = OPT.modus === "rotation";
+    if (s === schluessel && (!ivRelevant || iv === intervallMs) && !fehlerSeitAufbau) return;
     schluessel = s;
     intervallMs = iv;
+    fehlerSeitAufbau = false;
     bilder = neu;
     leeren();
     if (bilder.length === 0) return;
@@ -333,13 +354,17 @@ function rotationIntervallMs(intervalS) {
   }
 
   function abrufen() {
+    // Nie zwei Abrufe zugleich: Eine späte alte Antwort überschriebe sonst
+    // eine neuere.
+    if (abrufLaeuft) return;
+    abrufLaeuft = true;
     abrufMitFrist(BASE + "info/ad/state?zweck=stream", { cache: "no-store" }, function (r) {
       if (r.status !== 200) return { status: r.status, json: null };
       return r.json().then(function (j) { return { status: 200, json: j }; });
     }).then(function (e) {
       if (entscheidung(e.status, e.json) !== "anwenden") return;
       anwenden(streamBilder(e.json, BASE), rotationIntervallMs(e.json.intervalS));
-    }).catch(function () { /* stehen lassen */ });
+    }).catch(function () { /* stehen lassen */ }).then(function () { abrufLaeuft = false; });
   }
 
   var groesseTimer = null;
