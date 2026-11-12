@@ -596,6 +596,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Stream-Werbung (zweite OBS-Ebene)** — Spec:
+  [features/stream-werbung.md](features/stream-werbung.md)
+  (freigegeben 12.11.2026, ADR 0092). Transparente Sponsoren-Ebene für OBS unter
+  `/stream/werbung`: rotierend, nebeneinander oder als Band (Tempo in drei Stufen),
+  Hintergrund transparent oder Kachel in Bildfarbe. Auswahl per Häkchen „Stream“ je
+  Werbebild im Setup. Relay-Neustart lässt die Bilder stehen (503 statt leer). Zwei PRs,
+  PR 1 mit Relay-Deploy vorab.
+
 - **Tablet-Stand robust** — Spec:
   [features/tablet-stand-robust.md](features/tablet-stand-robust.md)
   (freigegeben 11.11.2026; ADR 0083–0085). Paket 1 des
