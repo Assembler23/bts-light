@@ -89,6 +89,18 @@ BROWSER="$(command -v chromium-browser || command -v chromium || true)"
 [ -z "$BROWSER" ] && { echo "FEHLER: Chromium konnte nicht installiert werden."; exit 1; }
 echo "→ Browser: $BROWSER"
 
+# ─── 2b) Übersetzen-Leiste abschalten ────────────────────────────────────
+# Chromium hält die Monitor-Seite wegen der vielen Namen gern für englisch
+# und blendet oben „Deutsch / Englisch" ein. Die Startschalter
+# (--disable-features=Translate) wirken je nach Chromium-Version nicht mehr;
+# eine verwaltete Richtlinie gilt immer. Beide Verzeichnisse, weil Bookworm
+# (chromium-browser) und Trixie (chromium) verschieden suchen.
+for POLICY_DIR in /etc/chromium/policies/managed /etc/chromium-browser/policies/managed; do
+  sudo mkdir -p "$POLICY_DIR"
+  echo '{ "TranslateEnabled": false }' | sudo tee "$POLICY_DIR/bts-monitor.json" >/dev/null
+done
+echo "→ Übersetzen-Leiste per Richtlinie abgeschaltet"
+
 # ─── 3) Bildschirm-Abschaltung deaktivieren ──────────────────────────────
 sudo raspi-config nonint do_blanking 1 || true
 
@@ -322,7 +334,8 @@ echo "  beschreibbar, solange $BOOT_DIR/bts-schreiben-erlaubt.txt existiert"
 ASSET_DIR="$HOME/.local/share/bts-monitor"
 mkdir -p "$ASSET_DIR"
 cat > "$ASSET_DIR/no-url.html" <<'HTML'
-<!doctype html><html lang="de"><head><meta charset="utf-8">
+<!doctype html><html lang="de" translate="no"><head><meta charset="utf-8">
+<meta name="google" content="notranslate">
 <title>Court-Monitor</title><style>
 html,body{margin:0;height:100%;background:#0b1120;color:#f8fafc;cursor:none;
 font-family:system-ui,sans-serif}

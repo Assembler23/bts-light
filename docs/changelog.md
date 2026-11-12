@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.392
+
+- **Keine „Deutsch / Englisch"-Leiste mehr auf den Pi-Monitoren.** Chromium
+  hielt die Anzeige wegen der vielen Namen für englisch und blendete oben
+  das Angebot zum Übersetzen ein. Die Schalter beim Browser-Start haben das
+  nicht mehr verhindert. Jetzt lehnen alle Seiten (Monitor, Übersicht,
+  Kombi, Tafel, Tablet, Turnierleitung …) die Übersetzung selbst ab — das
+  wirkt nach dem App-Update auch auf schon eingerichteten Pis, ohne sie neu
+  aufzusetzen; im Cloud-Modus sofort. Neu eingerichtete Pis schalten das
+  Übersetzen zusätzlich per Browser-Richtlinie ab.
+
 ## v0.9.391
 
 - **Messzeile für die Strecke zu badhub.** Im Diagnose-Log steht jetzt je

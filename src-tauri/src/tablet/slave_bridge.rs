@@ -128,7 +128,7 @@ fn felder_page_html(master_ns: &str, courts: &[CourtBrief], hall: &str, lokal: b
         );
     }
     format!(
-        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
+        "<!doctype html><html lang=\"de\" translate=\"no\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <title>Feld wählen</title><style>\
 html,body{{margin:0;height:100%;background:#0b1120;color:#f8fafc;\
@@ -164,7 +164,7 @@ font-size:1.3rem;font-weight:700;border:2px solid #334155}}\
 /// „Weiter"-Knopf lüde nur dazu ein, die Herkunft doch zu wechseln.
 fn warteseite_html(was: &str) -> String {
     format!(
-        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
+        "<!doctype html><html lang=\"de\" translate=\"no\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <meta http-equiv=\"refresh\" content=\"3\">\
 <title>Verbindung wird aufgebaut</title><style>\
