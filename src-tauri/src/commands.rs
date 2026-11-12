@@ -330,6 +330,12 @@ fn monitor_ad_bar_path(app: &AppHandle) -> std::path::PathBuf {
     monitor_ad_dir(app).join(crate::tablet::monitor::AD_BAR_FILE)
 }
 
+/// Pfad zur Datei mit den Stream-Markierungen (Spec `stream-werbung`). Wie
+/// die Leisten-Markierung im `court-ads/`-Verzeichnis.
+fn monitor_ad_stream_path(app: &AppHandle) -> std::path::PathBuf {
+    monitor_ad_dir(app).join(crate::tablet::monitor::AD_STREAM_FILE)
+}
+
 /// Pfad zur Datei mit dem Anzeige-Stil je Werbebild (Hintergrundfarbe +
 /// Feldbezeichnung). Wie die Leisten-Markierung im `court-ads/`-Verzeichnis,
 /// damit der Monitor-Server sie über sein `monitor_dir` erreicht.
@@ -3139,6 +3145,8 @@ pub struct CourtAd {
     /// `true`, wenn das Bild zusätzlich klein in der oberen Leiste der
     /// Anzeigeseiten (neben dem Turnierlogo) erscheinen soll.
     pub in_bar: bool,
+    /// `true`, wenn das Bild in der Stream-Werbung (OBS) erscheinen darf.
+    pub in_stream: bool,
     /// Hintergrundfarbe `#rrggbb` des Leerlauf-Vollbilds hinter diesem Bild
     /// (Spec `werbung-hintergrund-und-feld`). Vorgabe: Schwarz.
     pub bg: String,
@@ -6870,8 +6878,14 @@ pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
     if !crate::tablet::monitor::is_safe_image_name(&file) {
         return Err("Ungültiger Dateiname.".to_string());
     }
-    std::fs::remove_file(monitor_ad_dir(&app).join(&file))
-        .map_err(|e| format!("Löschen fehlgeschlagen: {e}"))?;
+    // Ist die Datei schon weg (im Explorer gelöscht), trotzdem weiter
+    // aufräumen — sonst blieben Label, Leisten- und Stream-Markierung als
+    // Leichen stehen, die das Setup nicht mehr anzeigen kann.
+    match std::fs::remove_file(monitor_ad_dir(&app).join(&file)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("Löschen fehlgeschlagen: {e}")),
+    }
     let labels_path = monitor_ad_labels_path(&app);
     let mut labels = crate::tablet::monitor::read_ad_labels(&labels_path);
     if labels.remove(&file).is_some() {
@@ -6883,6 +6897,13 @@ pub fn remove_court_ad(app: AppHandle, file: String) -> Result<(), String> {
     let mut bar = crate::tablet::monitor::read_ad_bar(&bar_path);
     if bar.remove(&file) {
         let _ = crate::tablet::monitor::write_ad_bar(&bar_path, &bar);
+    }
+    // Die Stream-Markierung ebenso. Wichtig über die Ordnung hinaus: Der
+    // Stream-Abruf wertet „Markierung da, aber keine Bilder" als Lesefehler
+    // (503) — eine Leiche hielte sonst nach dem Löschen des letzten Bildes die
+    // alten Sponsoren im Stream fest.
+    if let Err(e) = stream_markierung_setzen(&monitor_ad_stream_path(&app), &file, false) {
+        tracing::warn!("Court-Monitor: Stream-Markierung für '{file}' nicht geräumt: {e}");
     }
     // Und den Anzeige-Stil (Hintergrundfarbe, Feldbezeichnung) — aus demselben
     // Grund wie Label und Leisten-Markierung: keine Karteileichen.
@@ -6903,6 +6924,7 @@ pub fn list_court_ads(app: AppHandle) -> Vec<CourtAd> {
     let files = crate::tablet::monitor::list_ads(&monitor_ad_dir(&app));
     let labels = crate::tablet::monitor::read_ad_labels(&monitor_ad_labels_path(&app));
     let bar = crate::tablet::monitor::read_ad_bar(&monitor_ad_bar_path(&app));
+    let stream = crate::tablet::monitor::read_ad_stream(&monitor_ad_stream_path(&app));
     let styles = crate::tablet::monitor::read_ad_style(&monitor_ad_style_path(&app));
     files
         .into_iter()
@@ -6911,6 +6933,7 @@ pub fn list_court_ads(app: AppHandle) -> Vec<CourtAd> {
             CourtAd {
                 label: labels.get(&file).cloned().unwrap_or_default(),
                 in_bar: bar.contains(&file),
+                in_stream: stream.contains(&file),
                 bg: stil.bg,
                 show_court: stil.show_court,
                 file,
@@ -7051,6 +7074,41 @@ pub fn set_court_ad_bar(
     crate::tablet::monitor::write_ad_bar(&bar_path, &bar)
         .map_err(|e| format!("Leisten-Markierung speichern fehlgeschlagen: {e}"))?;
     push_bar_sponsors_to_badhub(&app, &state);
+    Ok(())
+}
+
+/// Gibt ein Werbebild für die Stream-Werbung (OBS-Ebene `/stream/werbung`)
+/// frei oder nimmt es heraus (Spec `stream-werbung`, ADR 0092).
+///
+/// Anders als [`set_court_ad_bar`] **kein** badhub-Push: Die Auswahl betrifft
+/// nur die Stream-Ebene dieser Installation. In die Cloud kommt sie über den
+/// Fingerabdruck des Monitor-Uploads (`relay_client::ad_abdruck_zeile`).
+#[tauri::command]
+pub fn set_court_ad_stream(app: AppHandle, file: String, in_stream: bool) -> Result<(), String> {
+    stream_markierung_setzen(&monitor_ad_stream_path(&app), &file, in_stream)
+        .map_err(|e| format!("Stream-Markierung speichern fehlgeschlagen: {e}"))
+}
+
+/// Kern von [`set_court_ad_stream`], ohne `AppHandle` prüfbar. Schreibt nur,
+/// wenn sich die Menge ändert — `remove_court_ad` ruft das für jedes Bild,
+/// auch für nie markierte.
+fn stream_markierung_setzen(
+    path: &std::path::Path,
+    file: &str,
+    in_stream: bool,
+) -> Result<(), String> {
+    if !crate::tablet::monitor::is_safe_image_name(file) {
+        return Err("Ungültiger Dateiname.".to_string());
+    }
+    let mut menge = crate::tablet::monitor::read_ad_stream(path);
+    let geaendert = if in_stream {
+        menge.insert(file.to_string())
+    } else {
+        menge.remove(file)
+    };
+    if geaendert {
+        crate::tablet::monitor::write_ad_stream(path, &menge).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -8705,6 +8763,38 @@ mod tests {
         let empty: std::collections::HashSet<String> = std::collections::HashSet::new();
         crate::tablet::monitor::write_ad_bar(&bar_path, &empty).unwrap();
         assert!(collect_bar_sponsors_b64(ad_dir, &bar_path).is_empty());
+    }
+
+    #[test]
+    fn stream_markierung_wird_gesetzt_und_beim_loeschen_mitgeraeumt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::tablet::monitor::AD_STREAM_FILE);
+        stream_markierung_setzen(&path, "ad-1.png", true).unwrap();
+        stream_markierung_setzen(&path, "ad-2.png", true).unwrap();
+        let menge = crate::tablet::monitor::read_ad_stream(&path);
+        assert!(menge.contains("ad-1.png") && menge.contains("ad-2.png"));
+        // So ruft remove_court_ad: herausnehmen.
+        stream_markierung_setzen(&path, "ad-1.png", false).unwrap();
+        let menge = crate::tablet::monitor::read_ad_stream(&path);
+        assert!(!menge.contains("ad-1.png"));
+        assert!(menge.contains("ad-2.png"));
+        // Ein nie markiertes Bild herauszunehmen legt keine Datei an.
+        let leer = dir.path().join("andere.json");
+        stream_markierung_setzen(&leer, "ad-9.png", false).unwrap();
+        assert!(!leer.exists());
+    }
+
+    #[test]
+    fn set_court_ad_stream_lehnt_unsichere_namen_ab() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::tablet::monitor::AD_STREAM_FILE);
+        for name in ["../x.png", "a/b.png", "ad.json", ""] {
+            assert!(
+                stream_markierung_setzen(&path, name, true).is_err(),
+                "{name}"
+            );
+        }
+        assert!(!path.exists(), "nichts geschrieben");
     }
 }
 

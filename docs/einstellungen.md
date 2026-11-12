@@ -442,10 +442,16 @@ Alles Folgende ist nur sichtbar, wenn der Schalter an ist.
 - Je Bild: ein **Anzeigename** (höchstens 80 Zeichen; bleibt er leer, trägt das
   Bild keinen Namen — „Werbebild 1", „Werbebild 2" … ist nur der graue
   Platzhalter im Eingabefeld),
-  ein Häkchen **Leiste** (kleine Sponsorenleiste neben dem Turnierlogo), eine
+  ein Häkchen **Leiste** (kleine Sponsorenleiste neben dem Turnierlogo), ein
+  Häkchen **Stream** (das Bild erscheint in der Stream-Werbung für OBS,
+  *voreingestellt aus* — ohne Häkchen kommt kein Bild in den Stream), eine
   **Hintergrundfarbe** und ein Häkchen **Feld zeigen** (die Feldbezeichnung
   steht dann auf dem Bild). Eine Vorschau zeigt sofort, wie die Beschriftung
   auf der gewählten Farbe wirkt.
+  <!-- pruef: "In der Stream-Werbung (OBS) zeigen" in src/pages/SetupWizard.tsx -->
+  Das Häkchen **Stream** hängt nicht am Schalter „Werbung im Leerlauf
+  anzeigen". Über die Cloud kommt eine Änderung nach spätestens rund einer
+  Minute im Stream an.
 - Das Papierkorb-Symbol entfernt ein Bild samt seiner Einstellungen.
 
 > Diese Angaben werden **beim Klick beziehungsweise beim Verlassen des Feldes

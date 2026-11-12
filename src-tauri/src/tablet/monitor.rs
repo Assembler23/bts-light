@@ -137,6 +137,42 @@ pub const AD_BAR_FILE: &str = "court-ad-bar.json";
 /// Liest die Menge der als „Leisten-Sponsor" markierten Dateinamen. Fehlende
 /// oder kaputte Datei → leere Menge (kein Fehler — die Markierung ist optional).
 pub fn read_ad_bar(path: &Path) -> std::collections::HashSet<String> {
+    read_namen_menge(path)
+}
+
+/// Schreibt die „Leisten-Sponsor"-Markierungen (atomar, sortiert für stabile
+/// Diffs).
+pub fn write_ad_bar(
+    path: &Path,
+    marked: &std::collections::HashSet<String>,
+) -> std::io::Result<()> {
+    write_namen_menge(path, marked)
+}
+
+/// Datei mit den Werbebildern, die in der **Stream-Werbung** (OBS-Ebene
+/// `/stream/werbung`) erscheinen dürfen (Spec `stream-werbung`, ADR 0092).
+/// Eigene Datei im selben Format wie [`AD_BAR_FILE`] statt eines Felds im
+/// Werbe-Stil: Eine ältere Version ignoriert sie, Update und Rollback bleiben
+/// folgenlos. Fehlt sie, steht kein Bild im Stream — gewollt, ohne Häkchen
+/// soll nichts in die Übertragung.
+pub const AD_STREAM_FILE: &str = "court-ad-stream.json";
+
+/// Liest die Menge der für den Stream freigegebenen Dateinamen. Fehlende oder
+/// kaputte Datei → leere Menge.
+pub fn read_ad_stream(path: &Path) -> std::collections::HashSet<String> {
+    read_namen_menge(path)
+}
+
+/// Schreibt die Stream-Markierungen (atomar, sortiert).
+pub fn write_ad_stream(
+    path: &Path,
+    marked: &std::collections::HashSet<String>,
+) -> std::io::Result<()> {
+    write_namen_menge(path, marked)
+}
+
+/// Gemeinsames Lesen der Markierungs-Dateien (reines String-Array).
+fn read_namen_menge(path: &Path) -> std::collections::HashSet<String> {
     let Ok(j) = std::fs::read_to_string(path) else {
         return std::collections::HashSet::new();
     };
@@ -145,9 +181,9 @@ pub fn read_ad_bar(path: &Path) -> std::collections::HashSet<String> {
         .unwrap_or_default()
 }
 
-/// Schreibt die „Leisten-Sponsor"-Markierungen (atomar, sortiert für stabile
-/// Diffs).
-pub fn write_ad_bar(
+/// Gemeinsames Schreiben der Markierungs-Dateien — sortiert, damit derselbe
+/// Inhalt dieselben Bytes ergibt (der LAN-Zwischenstand schlüsselt daran).
+fn write_namen_menge(
     path: &Path,
     marked: &std::collections::HashSet<String>,
 ) -> std::io::Result<()> {
@@ -954,6 +990,23 @@ mod tests {
         // Leere Menge schreibt ein leeres Array, das wieder leer liest.
         write_ad_bar(&path, &std::collections::HashSet::new()).unwrap();
         assert!(read_ad_bar(&path).is_empty());
+    }
+
+    #[test]
+    fn read_write_ad_stream_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AD_STREAM_FILE);
+        // Fehlende Datei → leere Menge: ohne Häkchen nichts im Stream.
+        assert!(read_ad_stream(&path).is_empty());
+        let mut set = std::collections::HashSet::new();
+        set.insert("ad-1.png".to_string());
+        set.insert("ad-3.webp".to_string());
+        write_ad_stream(&path, &set).unwrap();
+        assert_eq!(read_ad_stream(&path), set);
+        // Getrennt von der Leiste: Die Leisten-Datei bleibt unberührt.
+        assert!(read_ad_bar(&dir.path().join(AD_BAR_FILE)).is_empty());
+        std::fs::write(&path, "{ kaputt").unwrap();
+        assert!(read_ad_stream(&path).is_empty());
     }
 
     #[test]

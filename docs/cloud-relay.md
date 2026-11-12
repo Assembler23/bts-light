@@ -93,7 +93,7 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /{ns}/info/logo` | Hochgeladenes Turnierlogo |
 | `GET /{ns}/stream?courts=` | Stream-Einblendung für OBS (seit v0.9.328, ADR 0069); holt je Feld `/{ns}/court/{id}/state` |
 | `GET /{ns}/info/club-logo?name=` | Vereinslogo der Anzeigen: relativer 302 auf den badhub-Resolver `/api/v1/club-logo?name=` (seit v0.9.327, ADR 0070) |
-| `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `hasLogo`, `intervalS`, `adStyles`) |
+| `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `streamAds`, `streamVer`, `hasLogo`, `intervalS`, `adStyles`); mit `?zweck=stream` 503 statt „leer", wenn der Relay nichts weiß (ADR 0092) |
 | `GET /health` | Status-Schnappschuss |
 
 Die Anzeige-Hülle bettet die Anzeige-Seiten in ein iframe derselben Herkunft
@@ -993,6 +993,38 @@ Zwei Eigenheiten, die man kennen muss (ADR 0041):
 Der Fingerabdruck in `relay_client.rs` führt Farbe und Häkchen mit
 (`ad_abdruck_zeile`) — ohne das löste eine reine Farbänderung nie einen Upload
 aus, weil sie weder Datei noch Verzeichnis anfasst.
+
+## Stream-Werbung: `inStream` und `?zweck=stream` (seit v0.9.395)
+
+Spec [stream-werbung](features/stream-werbung.md),
+ADR [0092](adr/0092-stream-werbung-markierung-und-abriss.md).
+
+- **Wire:** `AdUpload.inStream` (bool, `serde default` = aus), positionell wie
+  `inBar`. Der Host setzt es aus `court-ad-stream.json` im Werbe-Verzeichnis.
+  Ein Upload einer älteren App liest sich als `false` — die Stream-Ebene bleibt
+  leer. Ein älterer Relay verwirft das Feld.
+- **Fingerabdruck:** `ad_abdruck_zeile` führt das Flag
+  (`|name:len:mtime:in_bar:in_stream:bg:zeigt_feld`). Ohne das käme ein reines
+  Umhaken nie in die Cloud.
+- **Zustand:** `/{ns}/info/ad/state` liefert zusätzlich `streamAds` (Indizes der
+  angehakten Bilder) und `streamVer` (je Eintrag die Inhaltsmarke des Bildes,
+  `AdImage.etag` ohne Anführungszeichen). Die Stream-Seite hängt sie als `?v=`
+  an `/{ns}/ads/{i}` — so liefert der 60-s-Bild-Cache nach einem Löschen mit
+  nachrückenden Indizes kein falsches Motiv.
+- **503 statt leer, nur mit `?zweck=stream`:**
+  - Anzeige-Lage gesperrt (Start-Karenz, Host weg, ADR 0088) → `{"grund":"host_weg"}`;
+  - kein Monitor-Upload (Relay-Neustart, Daten-Frist ADR 0089, Host noch nicht
+    hochgeladen) → `{"grund":"keine_daten"}`;
+  - kein Host und keine Bilder (vom Budget freigegeben) → `keine_daten`.
+
+  Ohne `zweck` antwortet die Route unverändert mit 200 — `ad.html` und die
+  Sponsor-Leiste merken nichts. Die Stream-Seite wertet nur „200 mit Liste
+  `streamAds`" aus, alles andere heißt „stehen lassen".
+- **LAN-Gegenstück:** `/info/ad/state` liefert `streamAds` als Dateinamen (ohne
+  `streamVer`, die Namen sind eindeutig) und antwortet mit `?zweck=stream` mit
+  503, wenn die Bildliste leer ist, obwohl ein angehaktes Bild auf der Platte
+  liegt (Lesefehler im Werbe-Verzeichnis). Verwaiste Markierungen ohne Datei
+  zählen als leere Auswahl (200).
 
 ## Monitor-Stile und Nation/Verein (seit v0.9.327)
 

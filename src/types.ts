@@ -411,6 +411,9 @@ export interface CourtAd {
   /** true, wenn das Bild zusätzlich klein in der oberen Leiste der
    *  Anzeigeseiten (neben dem Turnierlogo) erscheinen soll. */
   in_bar: boolean;
+  /** true, wenn das Bild in der Stream-Werbung (OBS) erscheinen darf
+   *  (Spec stream-werbung). */
+  in_stream: boolean;
 }
 
 /** Was ein Court-Monitor-Gerät anzeigen soll – Feld, Info-Anzeige oder

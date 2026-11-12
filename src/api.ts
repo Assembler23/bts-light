@@ -593,6 +593,11 @@ export const setCourtAdLabel = (file: string, label: string): Promise<void> =>
 export const setCourtAdBar = (file: string, inBar: boolean): Promise<void> =>
   invoke("set_court_ad_bar", { file, inBar });
 
+/** Gibt ein Werbebild für die Stream-Werbung (OBS-Ebene `/stream/werbung`)
+ *  frei oder nimmt es heraus. Kein badhub-Push (Spec stream-werbung). */
+export const setCourtAdStream = (file: string, inStream: boolean): Promise<void> =>
+  invoke("set_court_ad_stream", { file, inStream });
+
 /** Setzt den Anzeige-Stil eines Werbebilds für das Leerlauf-Vollbild:
  *  Hintergrundfarbe (`#rrggbb`) und ob die Feldbezeichnung mit erscheint.
  *  Löst — anders als `setCourtAdBar` — keinen badhub-Push aus. */
