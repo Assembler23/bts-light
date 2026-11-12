@@ -306,6 +306,15 @@ zugewiesen werden.
   dem Turnier-PC auf v0.9.392 oder neuer aktualisieren und den Pi einmal
   neu starten — die Seiten lehnen die Übersetzung seitdem selbst ab. Am Pi
   ist dafür nichts neu einzurichten.
+- **Bild ist breitgezogen (Kreise oval, Schrift auffällig breit):** Der
+  TV hat dem Pi ein 4:3-Bild (meist 1024×768) als Wunschmodus gemeldet —
+  typisch für HD-Ready-Fernseher. Das Startskript stellt seit v0.9.393
+  beim Kiosk-Start auf den größten 16:9-Modus um, den der TV anbietet
+  (nur Lite-Variante mit X; im Log steht dann „Bildmodus auf … gestellt").
+  Ein älter eingerichteter Pi bekommt das erst, wenn `setup-monitor.sh`
+  dort noch einmal läuft oder er das neue Image erhält. Bis dahin sorgt
+  die Monitor-Seite dafür, dass lange Namen kleiner statt abgeschnitten
+  erscheinen.
 - **TV bleibt schwarz / „kein Signal":** anderen HDMI-Eingang am TV
   wählen; bei Pi 4/5 prüfen, ob das Kabel im **linken** micro-HDMI-Port
   (näher am USB-C-Strom) steckt.

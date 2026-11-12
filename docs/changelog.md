@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.393
+
+- **Court-Monitor: lange Namen werden kleiner statt abgeschnitten.** Passte
+  ein Nachname nicht neben den Satzstand, blieb im dritten Satz mitunter
+  nur „Tap…" stehen — besonders an HD-Ready-Fernsehern, an denen der Pi ein
+  4:3-Bild ausgibt. Jetzt setzt die Anzeige den Namen so weit kleiner, bis
+  er passt (höchstens bis zur halben Größe), und kürzt erst danach. Kurze
+  Namen bleiben so groß wie bisher.
+- **Pi: 16:9-Bild auch an HD-Ready-Fernsehern.** Meldet der TV dem Pi
+  1024×768 als Wunschmodus, stellt ein neu eingerichteter Pi beim Start auf
+  den größten 16:9-Modus um, den der TV anbietet — das Bild ist dann nicht
+  mehr breitgezogen. Schon eingerichtete Pis brauchen dafür das
+  Einrichtungsskript noch einmal oder das neue Image.
+
 ## v0.9.392
 
 - **Keine „Deutsch / Englisch"-Leiste mehr auf den Pi-Monitoren.** Chromium

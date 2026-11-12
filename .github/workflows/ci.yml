@@ -322,6 +322,10 @@ jobs:
       - name: Keine Uebersetzen-Leiste auf den Seiten (JS)
         run: node scripts/test-nicht-uebersetzen.mjs
 
+      # Lange Nachnamen am Court-Monitor schrumpfen, bevor sie gekuerzt werden.
+      - name: Namen am Monitor einpassen (JS)
+        run: node scripts/test-namen-einpassen.mjs
+
       # Wessen Spielstand gilt nach einer Wieder-Anmeldung? Ein Fehler hier
       # laesst ein Ersatz-Tablet bei 0:0 beginnen und den gesicherten Stand
       # ueberschreiben.
