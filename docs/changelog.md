@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.396
+
+- **Stream-Werbung für OBS.** Neben der Score-Leiste gibt es eine zweite
+  durchsichtige Ebene für den Livestream: die Sponsoren mit dem Häkchen
+  „Stream" — rotierend, nebeneinander oder als Laufband (Tempo langsam,
+  mittel, schnell), auf Wunsch jedes Bild als Kachel in seiner Setup-Farbe.
+  Die Adresse baut der neue Abschnitt „Stream-Werbung (OBS)" im Panel
+  Monitore zusammen, fürs Hallennetz (`/stream/werbung`) und die Cloud.
+  Startet das Relay neu oder bricht die Verbindung ab, bleiben die
+  Sponsoren stehen.
+
 ## v0.9.395
 
 - **Werbebilder: neues Häkchen „Stream".** Im Setup lässt sich je Werbebild

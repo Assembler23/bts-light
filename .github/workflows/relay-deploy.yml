@@ -34,6 +34,7 @@ on:
       - "src-tauri/assets/ad.html"
       - "src-tauri/assets/tafel.html"
       - "src-tauri/assets/stream.html"
+      - "src-tauri/assets/stream-werbung.html"
       - "src-tauri/assets/anzeige.html"
       - "src-tauri/assets/meetingpoint.html"
       # Flaggen-Verzeichnis, per `include_dir!` eingebettet.

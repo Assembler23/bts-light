@@ -30,7 +30,11 @@ import { HallFilter } from "../components/HallFilter";
 import { linkMitGuid } from "../io/liveLink.mjs";
 import { stilAusWert, zielMitStil, type Stil } from "../io/monitorStil.mjs";
 import { MAX_FELDER } from "../io/streamAnsicht.mjs";
-import { streamLink } from "../io/streamLink.mjs";
+import {
+  streamLink,
+  streamWerbungLink,
+  type StreamWerbungOptionen,
+} from "../io/streamLink.mjs";
 import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
 import type {
   AppConfig,
@@ -509,6 +513,11 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
 
       <StreamBaukasten
         courts={courts}
+        lanEnabled={lanEnabled}
+        cloudEnabled={cloudEnabled}
+        relayBase={info?.relay_base ?? ""}
+      />
+      <StreamWerbungBaukasten
         lanEnabled={lanEnabled}
         cloudEnabled={cloudEnabled}
         relayBase={info?.relay_base ?? ""}
@@ -1344,6 +1353,113 @@ function StreamBaukasten({
         PC, geht auch <code>localhost</code> statt <code>bts-light.local</code>.
       </p>
     </section>
+  );
+}
+
+/**
+ * Baukasten der Stream-Werbung (Spec stream-werbung, ADR 0092): Darstellung,
+ * Hintergrund und — beim Band — Tempo wählen, Adresse kopieren. Welche Bilder
+ * erscheinen, steuert allein das Häkchen „Stream" je Werbebild im Setup.
+ */
+function StreamWerbungBaukasten({
+  lanEnabled,
+  cloudEnabled,
+  relayBase,
+}: {
+  lanEnabled: boolean;
+  cloudEnabled: boolean;
+  relayBase: string;
+}) {
+  const [modus, setModus] = useState<NonNullable<StreamWerbungOptionen["modus"]>>("rotation");
+  const [hintergrund, setHintergrund] =
+    useState<NonNullable<StreamWerbungOptionen["hintergrund"]>>("transparent");
+  const [tempo, setTempo] = useState<NonNullable<StreamWerbungOptionen["tempo"]>>("mittel");
+  const opt = { modus, hintergrund, tempo };
+  const lan = streamWerbungLink("http://bts-light.local:8088", opt);
+  const vorschau = streamWerbungLink("http://localhost:8088", opt);
+  const cloud = relayBase ? streamWerbungLink(relayBase, opt) : "";
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold text-slate-700">Stream-Werbung (OBS)</h2>
+      <p className="text-xs text-slate-500">
+        Sponsoren ohne Hintergrund für eine eigene OBS-Browserquelle. Es
+        erscheinen nur Werbebilder mit dem Häkchen „Stream" im Setup. Größe
+        und Lage legt man in OBS fest.
+      </p>
+      <Segmente
+        titel="Darstellung"
+        wert={modus}
+        setzen={setModus}
+        optionen={[
+          ["rotation", "Rotierend"],
+          ["reihe", "Nebeneinander"],
+          ["band", "Laufband"],
+        ]}
+      />
+      <Segmente
+        titel="Hintergrund"
+        wert={hintergrund}
+        setzen={setHintergrund}
+        optionen={[
+          ["transparent", "Transparent"],
+          ["kachel", "Kachel in Bildfarbe"],
+        ]}
+      />
+      {modus === "band" && (
+        <Segmente
+          titel="Tempo"
+          wert={tempo}
+          setzen={setTempo}
+          optionen={[
+            ["langsam", "Langsam"],
+            ["mittel", "Mittel"],
+            ["schnell", "Schnell"],
+          ]}
+        />
+      )}
+      {lanEnabled && (
+        <OverviewLinkRow label="Hallennetz (LAN)" kind="local" url={lan} openUrl={vorschau} />
+      )}
+      {cloudEnabled && cloud && (
+        <OverviewLinkRow label="Über die Cloud" kind="online" url={cloud} openUrl={cloud} />
+      )}
+      <p className="text-xs text-slate-400">
+        Ohne angehakte Bilder bleibt die Ebene leer. Über die Cloud kommt ein
+        neues Häkchen nach rund einer Minute im Stream an.
+      </p>
+    </section>
+  );
+}
+
+/** Eine Reihe Segment-Knöpfe mit Beschriftung (Stream-Werbung). */
+function Segmente<T extends string>({
+  titel,
+  wert,
+  setzen,
+  optionen,
+}: {
+  titel: string;
+  wert: T;
+  setzen: (w: T) => void;
+  optionen: [T, string][];
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-sm">
+      <span className="w-24 text-xs text-slate-500">{titel}</span>
+      {optionen.map(([w, text]) => (
+        <button
+          key={w}
+          onClick={() => setzen(w)}
+          className={`rounded-md border px-2.5 py-1 transition-colors ${
+            w === wert
+              ? "border-amber-400 bg-amber-100 font-semibold text-amber-900"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
   );
 }
 

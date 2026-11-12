@@ -87,7 +87,7 @@ das betroffene Kapitel in denselben PR:
 |---|---|
 | `config.rs` (**Standardwerte!**), `SetupWizard.tsx` | `docs/einstellungen.md` · `docs/erste-schritte.md` |
 | `assets/tablet.html` | `docs/tablet-bedienen.md` · `docs/tablet.md` |
-| `assets/{monitor,combo,overview,winners,ad,tafel,anzeige,lobby,tv,stream}.html` | `docs/court-monitor.md` · `docs/oberflaechen.md` |
+| `assets/{monitor,combo,overview,winners,ad,tafel,anzeige,lobby,tv,stream,stream-werbung}.html` | `docs/court-monitor.md` · `docs/oberflaechen.md` |
 | `SideNav.tsx`, `src/pages/*`, Routen in `tablet/server.rs` | `docs/oberflaechen.md` |
 | `installer/*`, `update.rs` | `docs/erste-schritte.md` |
 

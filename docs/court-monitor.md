@@ -638,6 +638,7 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | **Turnierlogo**        | `/info/logo`                   | `/{ns}/info/logo`              |
 | Vereinslogo            | `/info/club-logo?name=`        | `/{ns}/info/club-logo?name=` (302 auf badhub) |
 | **Stream-Einblendung** | `/stream?courts=`              | `/{ns}/stream?courts=`         |
+| **Stream-Werbung**     | `/stream/werbung`              | `/{ns}/stream/werbung`         |
 | Werbe-Upload           | —                              | `POST /{ns}/monitor`           |
 | Geräte-Steuerung       | —                              | `POST /{ns}/monitor/control`   |
 | Geräteliste            | —                              | `GET /{ns}/monitor-devices`    |
@@ -919,6 +920,59 @@ Hallennetz bzw. die Cloud.
 
 Über einen Slave-PC einer fernen Halle gibt es die Einblendung nicht — dort
 nimmt man die Cloud-Adresse.
+
+## Stream-Werbung (OBS)
+
+Seit v0.9.396 gibt es eine zweite Ebene für den Livestream: die **Sponsoren**
+ohne Hintergrund. Man bindet sie in OBS als eigene **Browserquelle** ein, z. B.
+als schmalen Streifen am unteren Rand (Quelle 1920 × 120). Die Seite füllt die
+Quelle; Größe und Lage legt man in OBS fest.
+
+**Welche Bilder:** Nur Werbebilder mit dem Häkchen **Stream** (Setup →
+*Court-Monitor → Werbebilder*, neben „Leiste") erscheinen im Stream. Ohne
+Häkchen bleibt die Ebene leer — ein Hallen-Sponsor kommt also nicht von
+allein in die Übertragung. Der Schalter „Werbung im Leerlauf anzeigen" wirkt
+hier nicht. Die Reihenfolge ist die der Werbebilder im Setup.
+<!-- pruef: "In der Stream-Werbung (OBS) zeigen" in src/pages/SetupWizard.tsx -->
+
+**Adresse zusammenbauen:** Im Court-Monitor-Panel (**Monitore**) steht unter
+der Stream-Einblendung der Abschnitt **Stream-Werbung (OBS)**. Dort wählt man
+die Darstellung, den Hintergrund und beim Laufband das Tempo und kopiert die
+Adresse fürs Hallennetz bzw. die Cloud.
+<!-- pruef: "Stream-Werbung (OBS)" in src/pages/CourtMonitorPanel.tsx -->
+
+- Adresse im Hallennetz: `http://<Turnier-PC>:8088/stream/werbung`
+  <!-- pruef: "/stream/werbung" in src-tauri/src/tablet/server.rs -->
+- über die Cloud: `https://badhub.de/bts-relay/<Kennung>/stream/werbung`
+  <!-- pruef: "/{ns}/stream/werbung" in relay/src/main.rs -->
+- **Darstellung** (`modus=`):
+  - **Rotierend** (`rotation`, Vorgabe): ein Bild, weiche Überblendung im
+    Wechsel-Intervall der Monitore. Bei nur einem Bild steht es fest.
+  - **Nebeneinander** (`reihe`): alle Bilder gleichzeitig in einer Reihe.
+    Passt die Reihe nicht in die Breite, werden alle gemeinsam kleiner;
+    abgeschnitten wird nichts.
+  - **Laufband** (`band`): die Bilder laufen endlos von rechts nach links,
+    auch mit nur einem Bild ohne Lücke.
+  <!-- pruef: /MODI = \["rotation", "reihe", "band"\]/ in src/io/streamWerbung.mjs -->
+- **Tempo** des Laufbands (`tempo=`): langsam, mittel (Vorgabe) oder schnell
+  — 40, 80 bzw. 140 Bildpunkte je Sekunde.
+  <!-- pruef: /langsam: 40, mittel: 80, schnell: 140/ in src/io/streamWerbung.mjs -->
+- **Hintergrund** (`hintergrund=`): transparent (Vorgabe) oder **Kachel in
+  Bildfarbe** — jedes Bild steht dann auf der im Setup gewählten
+  Hintergrundfarbe, ohne gesetzte Farbe auf Schwarz. Hilft bei Logos, die vor
+  dem Kamerabild schlecht lesbar sind.
+- Nie im Bild: Text, Fehlermeldungen. Bricht die Verbindung ab oder startet
+  das Relay neu, **bleiben die zuletzt gezeigten Sponsoren stehen**. Die
+  Seite fragt alle 20 Sekunden nach.
+- Ein neues Häkchen erscheint im Hallennetz nach spätestens 20 Sekunden,
+  über die Cloud nach rund einer Minute.
+- Über die Cloud kommen höchstens 24 Werbebilder mit zusammen 12 MB an — ein
+  angehaktes Bild jenseits davon fehlt nur in der Cloud-Fassung.
+
+Wie bei der Score-Leiste gilt: Die Cloud-Adresse enthält die Kennung des
+Turniers, also nur ans eigene Stream-Team geben. Über einen Slave-PC einer
+fernen Halle gibt es die Seite nicht — dort die Cloud-Adresse nehmen.
+Hintergrund: [ADR 0092](adr/0092-stream-werbung-markierung-und-abriss.md).
 
 ## Nation und Verein
 

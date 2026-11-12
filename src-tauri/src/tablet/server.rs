@@ -662,6 +662,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/court/{id}/state", get(monitor_state))
         .route("/court/{id}/tafel", get(tafel_page))
         .route("/stream", get(stream_page))
+        .route("/stream/werbung", get(stream_werbung_page))
         .route("/monitor", get(monitor_device_page))
         .route("/monitor/state", get(monitor_device_state))
         .route("/qr/{id}", get(qr_svg))
@@ -1674,6 +1675,15 @@ async fn stream_page() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
         Html(render_stream_html("/")),
+    )
+}
+
+/// Stream-Werbung für OBS (`/stream/werbung`, ADR 0092). Kein Gerät; die
+/// Seite holt `/info/ad/state?zweck=stream` und zeigt die angehakten Bilder.
+async fn stream_werbung_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::STREAM_WERBUNG_HTML.replace("__BASE__", "/")),
     )
 }
 
@@ -8614,6 +8624,18 @@ mod tests {
         let html = String::from_utf8_lossy(&b);
         assert!(html.contains(r#"var BASE = "/";"#));
         assert!(!html.contains("__BASE__"));
+    }
+
+    #[tokio::test]
+    async fn stream_werbung_seite_ersetzt_basis_und_wird_nicht_gecacht() {
+        let r = stream_werbung_page().await.into_response();
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(r.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+        let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        let html = String::from_utf8_lossy(&b);
+        assert!(html.contains(r#"var BASE = "/";"#));
+        assert!(!html.contains("__BASE__"));
+        assert!(html.contains("info/ad/state?zweck=stream"));
     }
 
     #[test]
