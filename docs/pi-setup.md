@@ -229,7 +229,9 @@ bleibt aber für alte Images stehen.)
 **Ein Image für Pi Zero 2 W und Pi 3B+:** Beide laufen mit demselben
 aktuellen **Raspberry Pi OS (64-bit)**. Karte für einen der beiden
 einrichten, als Master-Image klonen ([pi-master-image.md](pi-master-image.md))
-und auf alle Pis spielen.
+und auf alle Pis spielen. Einziger Unterschied: Der Pi Zero 2 W hat nur
+512 MB Arbeitsspeicher und läuft **ohne Schreibschutz**
+(siehe [Nur-Lese-Modus](#nur-lese-modus-strom-einfach-abziehen)).
 
 ## Nur-Lese-Modus: Strom einfach abziehen
 
@@ -254,6 +256,20 @@ Start: Er stellt den Modus um und **startet den Pi dafür einmal von selbst
 neu** — das dauert etwa zwei Minuten länger als sonst. Danach ist Ruhe.
 <!-- pruef: "bts-nur-lesen.service" in pi/setup-monitor.sh -->
 
+- **Pi Zero 2 W: kein Schreibschutz.** Mit nur 512 MB Arbeitsspeicher
+  reicht der Platz für Browser und Schreibschutz zusammen nicht — der
+  Bildschirm blieb schwarz (Feldtest 12.11.2026). Der Dienst erkennt das
+  am Arbeitsspeicher (unter etwa 700 MB) und lässt die Karte beschreibbar;
+  er meldet das in `journalctl -u bts-nur-lesen`. Ein Zero mit dem
+  **älteren** Image kennt diese Regel nicht und bleibt schwarz: Neues Image
+  aufspielen, oder die Karte einmal am PC retten — Datei
+  `bts-schreiben-erlaubt.txt` auf dem Karten-Laufwerk anlegen **und** in
+  `cmdline.txt` den Eintrag `overlayroot=tmpfs` löschen (die Datei bleibt
+  eine Zeile).
+  Der Preis: Wird ein Zero mitten im Schreiben vom Strom genommen, kann die
+  SD-Karte Schaden nehmen — wenige Schreibzugriffe (nur Logs) machen das
+  unwahrscheinlich, ausgeschlossen ist es nicht.
+<!-- pruef: "MemTotal" in pi/setup-monitor.sh -->
 - **Nach `setup-monitor.sh`** liegt die Datei dort — ein frisch
   eingerichteter Pi bleibt also beschreibbar, bis du sie löschst (am
   Computer oder mit `sudo rm /boot/firmware/bts-schreiben-erlaubt.txt`).
