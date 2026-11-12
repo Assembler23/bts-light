@@ -153,9 +153,11 @@ weg und setzt `tempo` nur bei `modus=band`.
     hostlosen Turnier freigegeben).
   - **Ohne `zweck`** antwortet der Relay genau wie heute (200, leere Listen, wenn nichts da
     ist).
-- **LAN mit `?zweck=stream`:** 503, wenn die Markierungsmenge nicht leer ist, die Bildliste
-  aber leer. Das ist ein Lesefehler im Werbe-Verzeichnis, nicht die echte leere Auswahl;
-  die echte Leere entsteht nie so, weil `remove_court_ad` die Markierung mit aufräumt.
+- **LAN mit `?zweck=stream`:** 503, wenn die Bildliste leer ist, obwohl ein angehaktes Bild
+  auf der Platte liegt. Das ist ein Lesefehler im Werbe-Verzeichnis, nicht die echte leere
+  Auswahl. Verwaiste Markierungen ohne Datei (Bild im Explorer gelöscht) zählen als leere
+  Auswahl (200), sonst hielte der Stream die alten Sponsoren für immer fest.
+  `remove_court_ad` räumt die Markierungen auch dann auf, wenn die Bilddatei schon fehlt.
 
 ### Häkchen im Setup
 
@@ -206,8 +208,9 @@ weg und setzt `tempo` nur bei `modus=band`.
       leeren Listen; `ad.html` und die Sponsor-Leiste merken keinen Unterschied.
 - [ ] Ein Netzfehler oder eine Zeitüberschreitung beim Abruf lässt die Bilder stehen.
 - [ ] Eine Antwort ohne `streamAds` (alter Relay) lässt die Bilder stehen.
-- [ ] LAN: Ist die Markierung gesetzt, das Werbe-Verzeichnis aber nicht lesbar, antwortet der
-      Abruf mit 503.
+- [ ] LAN: Liegt ein angehaktes Bild auf der Platte, ist die Bildliste aber leer (Lesefehler),
+      antwortet der Abruf mit 503. Eine verwaiste Markierung ohne Datei ergibt 200 mit leerer
+      Liste.
 - [ ] Ein Häkchen „Stream" ändert den Fingerabdruck des Monitor-Uploads; die Cloud zeigt die
       neue Auswahl nach dem nächsten Takt.
 - [ ] Ein Häkchen „Stream" löst keinen badhub-Push aus.
