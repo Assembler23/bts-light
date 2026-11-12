@@ -302,6 +302,10 @@ zugewiesen werden.
   *Falls* der Name in einem Netz ausnahmsweise nicht auflöst, zeigt
   bts-light unter „Court-Monitore" zusätzlich die IP-Adresse als
   Rückfall an.
+- **Oben steht „Deutsch / Englisch" (Übersetzen-Leiste):** bts-light auf
+  dem Turnier-PC auf v0.9.392 oder neuer aktualisieren und den Pi einmal
+  neu starten — die Seiten lehnen die Übersetzung seitdem selbst ab. Am Pi
+  ist dafür nichts neu einzurichten.
 - **TV bleibt schwarz / „kein Signal":** anderen HDMI-Eingang am TV
   wählen; bei Pi 4/5 prüfen, ob das Kabel im **linken** micro-HDMI-Port
   (näher am USB-C-Strom) steckt.

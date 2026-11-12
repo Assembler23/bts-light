@@ -318,6 +318,10 @@ jobs:
       - name: Anzeigen ohne Turnier-PC (JS)
         run: node scripts/test-host-weg.mjs
 
+      # Chromium bietet am Hallen-TV sonst die Uebersetzung der Seite an.
+      - name: Keine Uebersetzen-Leiste auf den Seiten (JS)
+        run: node scripts/test-nicht-uebersetzen.mjs
+
       # Wessen Spielstand gilt nach einer Wieder-Anmeldung? Ein Fehler hier
       # laesst ein Ersatz-Tablet bei 0:0 beginnen und den gesicherten Stand
       # ueberschreiben.
