@@ -33,6 +33,20 @@ Protokolliert werden u. a.:
   ein gescheiterter `tset` und ein BTP-Fehler **gar nicht** im Log (nur in der
   Statuszeile), die additiven Kanäle dagegen in jedem 5-s-Zyklus. Details:
   [liveticker-push.md](liveticker-push.md).
+- **Sammelzeile der badhub-Strecke** (seit v0.9.391) — solange gesendet
+  wird, je Minute **eine** Zeile `badhub-Messung (60 s): …`. Sie nennt je
+  Kanal die Zahl der Sendungen, Median und Maximum der Dauer, den größten
+  Körper in Bytes und die Fehlschläge (keine Antwort oder kein 2xx), dazu
+  `spielplan geaendert=… gleich=…`: wie oft der Spielplan gegenüber dem
+  vorigen derselben Sitzung anders bzw. unverändert hinausging (der erste Spielplan nach dem Starten
+  oder nach dem Speichern der Einstellungen zählt als geändert). Beispiel:
+  `badhub-Messung (60 s): tupdate_match n=118 median=85ms max=420ms
+  groesste=77B fehler=0; sched n=1 median=900ms max=900ms groesste=458256B
+  fehler=0; spielplan geaendert=0 gleich=1`. Nur Kanalnamen und Zahlen. Die
+  Zeile entsteht mit der ersten Sendung nach Ablauf der Minute; die letzte
+  angefangene Minute vor dem Stoppen fehlt. Zweck: die Feldmessung der Spec
+  `badhub-push-entkoppeln` — die Zeile `badhub-Sendung` je Sendung steht auf
+  Debug-Stufe und erreicht das Log (Info-Stufe) nicht.
 - **Perf-Zeile der Anzeige-Strecke** (seit v0.9.235, siehe unten)
 
 ### Stillstands-Wächter der Anzeigen (seit v0.9.255)

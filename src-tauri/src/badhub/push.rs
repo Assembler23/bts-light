@@ -173,6 +173,9 @@ pub async fn sende(
         dauer_ms = ausgang.dauer.as_millis() as u64,
         "badhub-Sendung"
     );
+    // Dieselben Zahlen, gesammelt: eine Zeile je Minute auf Info-Stufe — die
+    // Debug-Zeile oben erreicht das Diagnose-Log nicht.
+    super::messung::sendung_vermerken(kanal, &ausgang);
     ausgang
 }
 

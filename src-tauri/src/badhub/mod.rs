@@ -3,6 +3,7 @@
 
 pub mod checkin_state;
 pub mod diff;
+pub mod messung;
 pub mod payload;
 pub mod push;
 pub mod sender;

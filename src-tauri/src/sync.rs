@@ -41,6 +41,18 @@ const POLL_SEKUNDEN: u64 = 5;
 /// höchstens sechsmal je Stunde hinaus.
 const LOGO_AUFFRISCHUNG: Duration = Duration::from_secs(600);
 
+/// Fingerabdruck eines Spielplan-Inhalts für die Feldmessung: gleicher
+/// Inhalt, gleiche Marke. Nur zum Vergleich mit dem vorigen Spielplan
+/// derselben Sitzung — kein kryptografischer Wert, nichts davon wird
+/// gespeichert oder gesendet.
+fn sched_marke(event: &crate::badhub::payload::SchedEvent) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let bytes = serde_json::to_vec(event).expect("sched-Serialisierung kann nicht fehlschlagen");
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
 /// Erkennungsmarke des Logo-Stands: Turnier **und** Bildinhalt.
 ///
 /// Der Turniername gehört hinein, weil badhub den Snapshot je Turnier
@@ -2675,6 +2687,9 @@ pub struct PushTeil {
     last_roster: Option<CheckinRosterMessage>,
     /// Taktgeber für den `sched`-Versand (vollständiger Spielplan).
     sched_takt: SchedTakt,
+    /// Fingerabdruck des zuletzt von badhub angenommenen Spielplans (ohne `rid`) —
+    /// nur für die Feldmessung „wie oft ändert er sich überhaupt?".
+    sched_marke: Option<u64>,
     /// Was badhub vom Punktverlauf zuletzt angenommen hat (`tverlauf`).
     verlauf_stand: crate::badhub::verlauf::VerlaufStand,
     /// Turnier, zu dem `verlauf_stand` gehört — ein neues sendet alles neu
@@ -2713,6 +2728,7 @@ impl PushTeil {
             logo_gesendet,
             last_roster: None,
             sched_takt: SchedTakt::neu(),
+            sched_marke: None,
             verlauf_stand: Default::default(),
             verlauf_turnier: String::new(),
             tor,
@@ -2888,6 +2904,13 @@ impl PushTeil {
         }
         let body =
             serde_json::to_vec(&sched).expect("sched-Serialisierung kann nicht fehlschlagen");
+        // Feldmessung (Spec `badhub-push-entkoppeln`, Messschritt B): Hat
+        // sich der Inhalt gegenüber dem vorigen Spielplan geändert? Über das
+        // Ereignis allein — die `rid` zählt bei jeder Sendung weiter.
+        // Verglichen wird mit dem zuletzt **angenommenen** Spielplan: Die
+        // Marke rückt erst nach einer geglückten Sendung nach (unten).
+        let marke = sched_marke(&sched.event);
+        crate::badhub::messung::spielplan_vermerken(self.sched_marke != Some(marke));
         let ausgang = http
             .sende(
                 &config.badhub.url,
@@ -2897,6 +2920,7 @@ impl PushTeil {
             )
             .await;
         if self.tor_melden(Kanal::Sched, &ausgang, None) == Klasse::Ok {
+            self.sched_marke = Some(marke);
             tracing::debug!(spiele = anzahl, "Spielplan an badhub gesendet");
         }
     }
@@ -3415,6 +3439,36 @@ pub async fn checkin_lese_tick(
 mod tests {
 
     // ── sched-Takt ──────────────────────────────────────────────────────────
+
+    /// Feldmessung: Die Marke des Spielplans hängt am Inhalt, nicht an der
+    /// fortlaufenden `rid` — sonst gälte jeder Spielplan als „geändert".
+    #[test]
+    fn sched_marke_haengt_am_inhalt_nicht_an_der_rid() {
+        use crate::badhub::payload::{build_sched, LivetickerContext};
+        let roh = include_bytes!("../tests/fixtures/btp-tournament-2halls.bin");
+        let knoten = crate::btp::proto::decode_response(roh).expect("dekodierbar");
+        let snapshot = crate::btp::model::parse_snapshot(&knoten).expect("Snapshot");
+        let config = AppConfig::default();
+        let ctx = LivetickerContext::bare(&config);
+
+        let a = build_sched(&snapshot, &ctx, &HashMap::new(), 1);
+        let b = build_sched(&snapshot, &ctx, &HashMap::new(), 2);
+        assert_eq!(super::sched_marke(&a.event), super::sched_marke(&b.event));
+
+        // Eine Prognose an einem wartenden Spiel ändert den Inhalt.
+        let prognosen: HashMap<i64, u64> = snapshot
+            .matches
+            .iter()
+            .map(|m| (m.id, 1_800_000_000_000))
+            .collect();
+        let c = build_sched(&snapshot, &ctx, &prognosen, 3);
+        assert_ne!(
+            serde_json::to_string(&a.event).unwrap(),
+            serde_json::to_string(&c.event).unwrap(),
+            "Fixture muss ein Spiel mit Prognose-Feld haben"
+        );
+        assert_ne!(super::sched_marke(&a.event), super::sched_marke(&c.event));
+    }
 
     #[test]
     fn sched_wird_hoechstens_minuetlich_gesendet() {

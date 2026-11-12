@@ -157,7 +157,12 @@ der Zustand anhält höchstens alle 10 Minuten eine Erinnerung, bei der Rückkeh
 eine Zeile mit Dauer und Zahl der Versuche. Dasselbe gilt für
 „BTP nicht erreichbar". Die Zeilen nennen Kanal, Klasse, HTTP-Status, Größe
 und Dauer — nie einen Körper, nie einen Namen, nie das Passwort. Auf
-Debug-Stufe steht je Sendung eine Messzeile (`badhub-Sendung`).
+Debug-Stufe steht je Sendung eine Messzeile (`badhub-Sendung`); das
+Diagnose-Log läuft aber auf Info-Stufe und zeigt sie nicht. Dafür gibt es seit
+v0.9.391 je Minute **eine** Sammelzeile `badhub-Messung (60 s): …` mit Anzahl,
+Median und Maximum der Dauer, größtem Körper und Fehlschlägen je Kanal sowie
+der Angabe, ob der Spielplan sich geändert hat (`badhub/messung.rs`,
+Aufbau der Zeile: [logging.md](logging.md)).
 
 ## Was bewusst nicht dabei ist
 
