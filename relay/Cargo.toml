@@ -25,3 +25,8 @@ getrandom = "0.4"
 # dasselbe tokio mit einem Feature mehr, damit der 20-s-Timeout eines alten
 # Turnier-PCs im Test nicht real abgewartet werden muss.
 tokio = { version = "1", features = ["test-util"] }
+# Echter WebSocket-Client für die Transport-Deckel (Spec relay-haerten, PR 4):
+# Sie wirken erst am Upgrade und lassen sich ohne echte Verbindung nicht
+# prüfen. Beide Crates liegen schon im Workspace-Baum (App bzw. axum).
+tokio-tungstenite = "0.30"
+futures-util = "0.3"

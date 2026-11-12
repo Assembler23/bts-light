@@ -98,7 +98,7 @@ Dokument für den badhub-Push (`tverlauf`, siehe unten).
 ## badhub-Push: `tverlauf` (seit v0.9.309, badhub ADR-0060)
 
 Im selben 5-s-Takt wie der Score-Push, aber danach und mit eigenem
-Fehlerpfad (`Sync::send_verlauf`, `src-tauri/src/badhub/verlauf.rs`), geht je
+Fehlerpfad (`PushTeil::send_verlauf` in `sync.rs`, `src-tauri/src/badhub/verlauf.rs`), geht je
 Match der **ganze** Punktverlauf an `live_update.php`:
 
 ```json
@@ -112,17 +112,39 @@ Match der **ganze** Punktverlauf an `live_update.php`:
 
 - **Ersetzen statt anhängen**: badhub ersetzt je Match den gespeicherten
   Verlauf — Undo, Host-Neustart und verlorene Pushes heilen sich.
-- **Nur Geändertes**: `VerlaufStand` hält je Match den Hash des zuletzt
-  **angenommenen** Eintrags; abgelehnte gehen im nächsten Takt erneut, höchstens
-  64 Matches je Nachricht (der Rest folgt gestaffelt). Neues Turnier → alles neu.
+- **Nur Geändertes** (seit v0.9.383 über Änderungsmarken): `TimelineStore`
+  und `SheetStore` führen je Match eine Marke, die bei jedem Schreiben steigt
+  (`marke()`); dazu kommt ein Hash über Pausenzustand, Zählweise und
+  Einzel/Doppel (die ändern sich, ohne dass ein Speicher schreibt). `VerlaufStand` hält je Match die
+  Marke des zuletzt **angenommenen** Eintrags. Gebaut — also geklont und
+  serialisiert — wird nur, was sich geändert hat (`verlauf::kandidaten` →
+  `VerlaufStand::auswahl` → `eintrag_fuer`). Bis v0.9.382 baute und hashte
+  jeder 5-s-Takt alle Einträge aller Spiele. Höchstens 64 Matches je
+  Nachricht (der Rest folgt gestaffelt). Neues Turnier → alles neu.
+- **badhubs Antwort zählt** (seit v0.9.383): badhub verwirft einzelne
+  Einträge mit Status 200 — etwa den Verlauf eines Spiels, das es noch nicht
+  aus `tset` oder `sched` kennt — und nennt nur ihre **Zahl**
+  (`{"type":"ok","rows":n,"verworfen":n}`). Bei `verworfen > 0` gilt das
+  Paket nicht als angenommen; jeder Eintrag des Pakets zählt einen Versuch.
+  Nach **drei** Versuchen wird ein Eintrag geparkt, bis er sich ändert oder
+  ein neuer voller `tset` bestätigt ist: sofort, wenn der `tset` wegen einer
+  Änderung oder nach einer Störung hinausging; bei einem bloßen
+  Lebenszeichen höchstens alle zehn Minuten (sonst ginge ein Verlauf, den
+  badhub auf Dauer verwirft, dreimal je Minute hinaus). Bis v0.9.382 galt ein
+  verworfener Verlauf als gesendet und kam nie wieder.
+- **Ganz-Ablehnung** (5xx, 413, 409): Die nächste Auswahl beginnt hinter der
+  abgelehnten — sonst hielten dieselben ersten 64 alle übrigen auf.
+- **Nur mit bestätigtem Stand** (seit v0.9.382): Scheitert der `tset` eines
+  Durchgangs, geht kein `tverlauf`.
 - **Vom Zettel nur `serve_start`** (nicht zurückgenommene) — keine Karten,
   keine Disqualifikation, keine Verletzung (`is_sanction`-Regel). Pausen nur
   `eleven`/`game` aus dem Tablet-Zustand. Keine Namen.
 - Aufschläger, Aufschlagfeld und Annehmer je Ballwechsel rechnet badhub aus
   `serve_start` + Punktfolge nach; deshalb gehen keine Aufstellungen je
   Ballwechsel mit.
-- Altes badhub (400/404 auf den Typ): Pause wie beim `sched`
-  (`CHECKIN_UNSUPPORTED_RETRY`), danach erneut.
+- Altes badhub (400/404 auf den Typ): 30 Minuten Pause des Kanals wie beim
+  `sched` (`strecke::KANAL_PAUSE`), danach erneut. Alle Fehlerklassen:
+  [liveticker-push.md](liveticker-push.md).
 - **Mannschaften berichtigt** (seit v0.9.319, ADR 0067): badhub kennt nur
   `serve_start`. `aufschlaege()` liefert sie deshalb schon in Endkoordinaten
   (`tablet/berichtigung.rs` `in_endkoordinaten`); die Punktfolge kippt das

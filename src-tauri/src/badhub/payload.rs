@@ -2039,4 +2039,70 @@ mod tests {
         }
         assert_eq!(m.len(), erwartet.len(), "unbekanntes Feld im sched-Payload");
     }
+
+    /// Messung der Nutzlast-Größen (Spec `badhub-push-entkoppeln`,
+    /// Messschritt A). Kein Test im üblichen Sinn — er druckt Zahlen:
+    ///
+    /// ```text
+    /// BTS_MESS_CAPTURE=/pfad/zum/mitschnitt.bin \
+    ///   cargo test -p bts-light --lib messung_ -- --ignored --nocapture
+    /// ```
+    ///
+    /// Der Mitschnitt ist eine rohe `SENDTOURNAMENTINFO`-Antwort
+    /// (`tools/capture-btp.ps1`). Ohne die Variable nimmt er den kleinen
+    /// Zwei-Hallen-Mitschnitt aus dem Repo — der ist KEIN realistischer
+    /// Turnierstand und taugt nur zum Prüfen, dass die Messung läuft.
+    /// `tverlauf` fehlt: Der Verlauf lebt nicht im Snapshot.
+    #[test]
+    #[ignore = "Messung, kein Test — siehe Kommentar"]
+    fn messung_der_nutzlast_groessen() {
+        let roh = match std::env::var("BTS_MESS_CAPTURE") {
+            Ok(pfad) => std::fs::read(&pfad).unwrap_or_else(|e| panic!("{pfad}: {e}")),
+            Err(_) => include_bytes!("../../tests/fixtures/btp-tournament-2halls.bin").to_vec(),
+        };
+        let knoten = crate::btp::proto::decode_response(&roh).expect("dekodierbar");
+        let snapshot = crate::btp::model::parse_snapshot(&knoten).expect("Snapshot");
+        let config = AppConfig::default();
+        let ctx = LivetickerContext::bare(&config);
+        fn groesse<T: serde::Serialize>(v: &T) -> usize {
+            serde_json::to_vec(v).map(|b| b.len()).unwrap_or(0)
+        }
+
+        let tset = build_tset(&snapshot, 1, &ctx);
+        let sched = build_sched(&snapshot, &ctx, &HashMap::new(), 1);
+        let roster = build_checkin_roster(&snapshot, "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA", 1);
+        let laufend = snapshot
+            .matches
+            .iter()
+            .filter(|m| m.status == MatchStatus::OnCourt)
+            .count();
+        println!("Spiele gesamt: {}", snapshot.matches.len());
+        println!("  davon auf dem Feld: {laufend}");
+        println!("tset (ohne Logo): {} Bytes", groesse(&tset));
+        println!(
+            "sched: {} Bytes, {} Spiele",
+            groesse(&sched),
+            sched.event.matches.len()
+        );
+        println!(
+            "centry_list: {} Bytes, {} Meldungen",
+            groesse(&roster),
+            roster.entries.len()
+        );
+        if let Some(m) = snapshot.matches.first() {
+            println!(
+                "tupdate_match: {} Bytes",
+                groesse(&build_tupdate(m, 1, None))
+            );
+        }
+        // Ändert sich der Spielplan ohne Prognose von Bau zu Bau? (Grundlage
+        // für die Entscheidung „sched nur bei Änderung", PR 5.)
+        let nochmal = build_sched(&snapshot, &ctx, &HashMap::new(), 1);
+        println!(
+            "sched zweimal gebaut identisch: {}",
+            groesse(&sched) == groesse(&nochmal)
+                && serde_json::to_string(&sched).unwrap()
+                    == serde_json::to_string(&nochmal).unwrap()
+        );
+    }
 }

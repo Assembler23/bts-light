@@ -941,7 +941,12 @@ export interface UpdateInfo {
 
 export interface SyncStatus {
   running: boolean;
-  /** "idle" | "ok" | "warn" | "btp_error" | "push_error" */
+  /**
+   * "idle" | "ok" | "warn" | "btp_error" | "push_error".
+   * Seit v0.9.381: "warn" auch für eine gestörte oder gedrosselte
+   * badhub-Strecke (heilt von selbst), "push_error" nur noch für den Halt
+   * (Passwort oder Anmeldewand) — siehe `status_from` in commands.rs.
+   */
   kind: string;
   message: string;
   updated_at_ms: number;
@@ -1082,6 +1087,11 @@ export interface TabletInfo {
   /** Ist der Cloud-Pfad aktiv? */
   cloud_enabled: boolean;
   courts: CourtOverview[];
+  /**
+   * Hinweis zur Cloud-Verbindung: gesetzt, wenn der Relay diesen PC seit
+   * über 30 s abweist, weil ein anderer PC dasselbe Turnier hält.
+   */
+  cloud_hinweis?: string | null;
 }
 
 /** Ein kampflos wertbares Spiel (Rust: tablet::state::WalkoverCandidate). */

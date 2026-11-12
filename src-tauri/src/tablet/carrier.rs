@@ -22,6 +22,8 @@ use relay_proto::{CarrierMsg, CarrierServerMsg, StreamKind, CARRIER_PROTO_VERSIO
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
+use crate::tablet::ws_verbindung::{self, Backoff, Schluss, SitzungsEnde};
+
 /// HTTPS/WSS-Basis des Cloud-Relays (identisch zum Relay-Client) –
 /// Produktiv- oder Testsystem, siehe [`crate::badhub_host`]. Die ferne
 /// Halle muss denselben Relay wählen wie der Master; sonst wird der Träger
@@ -41,6 +43,11 @@ const TRAEGER_READ_IDLE: Duration = Duration::from_secs(15);
 /// Deckungsgleich mit `TABLET_STALE` im Relay — dieselbe Zusage wie am
 /// direkten Weg, nur eben hier gemessen.
 const GERAET_STALE: Duration = Duration::from_secs(15);
+
+/// Frist je Nachricht an den Relay. Hängt das Senden länger, gilt der
+/// Träger als tot — ohne sie stünde die Schleife (und damit das Lesen)
+/// unbegrenzt.
+const SENDE_FRIST: Duration = Duration::from_secs(20);
 
 /// Was der Träger einem lokalen Substrom zustellt.
 pub enum AnGeraet {
@@ -63,6 +70,9 @@ pub struct Traeger {
     /// Solange nicht, nimmt der Slave keine Geräte an — sie liefen sonst ins
     /// Leere. Der Aufrufer weicht dann auf die Weiterleitung aus.
     bereit: AtomicBool,
+    /// Wurde eine zu große Nutzlast schon gemeldet? (Eine Zeile genügt —
+    /// ein Gerät mit zu großem Zustand schickt ihn bei jedem Punkt.)
+    deckel_gemeldet: AtomicBool,
 }
 
 impl Traeger {
@@ -72,6 +82,7 @@ impl Traeger {
             naechste: AtomicU32::new(1),
             stroeme: Mutex::new(HashMap::new()),
             bereit: AtomicBool::new(false),
+            deckel_gemeldet: AtomicBool::new(false),
         }
     }
 
@@ -115,7 +126,25 @@ impl Traeger {
     }
 
     /// Reicht einen Fachframe des Geräts an den Relay durch.
+    ///
+    /// Verworfen wird, was nie ankäme: Frames ohne bereiten Träger (sie
+    /// stauten sich sonst im Ausgang und gingen nach dem Wiederverbinden an
+    /// Substrom-Kennungen, die der Relay nicht mehr kennt) und Nutzlast über
+    /// dem Deckel des Relays (er verwürfe sie ohnehin, still).
     pub fn frame(&self, stream: u32, payload: String) {
+        if !self.bereit() {
+            return;
+        }
+        if payload.len() > relay_proto::MAX_CARRIER_PAYLOAD_LEN {
+            if !self.deckel_gemeldet.swap(true, Ordering::Relaxed) {
+                tracing::warn!(
+                    "Träger: Nachricht eines Geräts mit {} Bytes verworfen (Deckel {} Bytes) — weitere werden nicht mehr gemeldet",
+                    payload.len(),
+                    relay_proto::MAX_CARRIER_PAYLOAD_LEN
+                );
+            }
+            return;
+        }
         let _ = self.hinaus.send(CarrierMsg::Frame { stream, payload });
     }
 
@@ -177,23 +206,28 @@ pub fn starten(namespace: String) -> (Arc<Traeger>, impl std::future::Future<Out
     (traeger, schleife)
 }
 
-/// Verbindungsschleife mit Backoff — dasselbe Muster wie `relay_client::run`.
+/// Verbindungsschleife mit Backoff — derselbe Automat wie `relay_client::run`
+/// ([`ws_verbindung::Backoff`]).
 async fn lauf(
     traeger: Arc<Traeger>,
     namespace: String,
     mut hinaus_rx: mpsc::UnboundedReceiver<CarrierMsg>,
 ) {
     let url = format!("{}/{namespace}/carrier-ws", relay_ws());
-    let mut backoff = 1u64;
+    let mut backoff = Backoff::default();
     loop {
-        let ergebnis = sitzung(&traeger, &url, &mut hinaus_rx, &mut backoff).await;
+        let mut bereit_seit = None;
+        let ergebnis = sitzung(&traeger, &url, &mut hinaus_rx, &mut bereit_seit).await;
         // Die Geräte hängen an dieser Verbindung; ohne Abbruch warteten sie
         // auf Antworten, die nie kommen.
         traeger.bereit.store(false, Ordering::Relaxed);
         traeger.alle_abbrechen();
 
-        match ergebnis {
-            Ok(()) => tracing::info!("Träger beendet – neuer Versuch"),
+        let ende = match ergebnis {
+            Ok(()) => {
+                tracing::info!("Träger beendet – neuer Versuch");
+                traeger_ende(bereit_seit, Schluss::Close(None))
+            }
             // Ein Relay, der unsere Fassung nicht kennt, wird sie auch beim
             // hundertsten Versuch nicht kennen. Aufgeben ist hier das
             // Richtige: Die Brücke fällt Route für Route auf die
@@ -204,10 +238,30 @@ async fn lauf(
                 tracing::warn!("Träger aufgegeben – Geräte laufen direkt über die Cloud");
                 return;
             }
-            Err(TraegerEnde::Abbruch(e)) => tracing::warn!("Träger-Verbindung: {e}"),
-        }
-        tokio::time::sleep(Duration::from_secs(backoff)).await;
-        backoff = (backoff * 2).min(30);
+            Err(TraegerEnde::Aufbau(e)) => {
+                tracing::warn!("Träger-Verbindung: {e}");
+                SitzungsEnde::AufbauGescheitert
+            }
+            Err(TraegerEnde::Abbruch(e)) => {
+                tracing::warn!("Träger-Verbindung: {e}");
+                traeger_ende(bereit_seit, Schluss::Abriss)
+            }
+        };
+        let pause = ws_verbindung::mit_jitter(backoff.pause_nach(ende), ws_verbindung::zufall());
+        tokio::time::sleep(pause).await;
+    }
+}
+
+/// Ordnet das Ende einer Träger-Sitzung ein. „Stabil" zählt erst ab dem
+/// `Ready` des Relays: Eine Verbindung, die nie bereit wurde, hat der Halle
+/// nichts genützt — egal wie lange sie offen war.
+fn traeger_ende(bereit_seit: Option<tokio::time::Instant>, schluss: Schluss) -> SitzungsEnde {
+    match (bereit_seit, schluss) {
+        (Some(seit), schluss) => ws_verbindung::einordnen(seit.elapsed(), schluss),
+        (None, Schluss::Close(_)) => SitzungsEnde::CloseOhneGrund,
+        // Nie bereit und abgerissen: der Relay antwortet nicht richtig —
+        // nicht im Fünf-Sekunden-Takt nachfragen.
+        (None, Schluss::Abriss) => SitzungsEnde::Abriss,
     }
 }
 
@@ -215,6 +269,8 @@ async fn lauf(
 enum TraegerEnde {
     /// Der Relay kennt unsere Protokollfassung nicht — nicht wiederholen.
     FassungAbgelehnt,
+    /// Die Verbindung kam gar nicht zustande (Netz, Frist).
+    Aufbau(String),
     /// Alles andere: Netz weg, Relay neu gestartet, Lesefehler.
     Abbruch(String),
 }
@@ -223,19 +279,24 @@ async fn sitzung(
     traeger: &Arc<Traeger>,
     url: &str,
     hinaus_rx: &mut mpsc::UnboundedReceiver<CarrierMsg>,
-    backoff: &mut u64,
+    bereit_seit: &mut Option<tokio::time::Instant>,
 ) -> Result<(), TraegerEnde> {
-    let (stream, _) = tokio_tungstenite::connect_async(url)
+    let stream = ws_verbindung::verbinden(url, ws_verbindung::VERBINDUNGS_FRIST)
         .await
-        .map_err(|e| TraegerEnde::Abbruch(format!("Verbindung zu {url}: {e}")))?;
+        .map_err(|e| TraegerEnde::Aufbau(format!("Verbindung zu {url}: {e}")))?;
     let (mut sink, mut read) = stream.split();
+
+    // Reste der alten Sitzung verwerfen: Ihre Substrom-Kennungen kennt der
+    // Relay nach dem Wiederverbinden nicht mehr (die Geräte wurden beim
+    // Abriss ohnehin getrennt und melden sich neu an).
+    while hinaus_rx.try_recv().is_ok() {}
 
     // Fassung aushandeln, bevor irgendein Gerät angenommen wird.
     let hallo = serde_json::to_string(&CarrierMsg::Hello {
         proto: CARRIER_PROTO_VERSION,
     })
     .map_err(|e| TraegerEnde::Abbruch(e.to_string()))?;
-    sink.send(WsMessage::Text(hallo.into()))
+    senden_mit_frist(&mut sink, WsMessage::Text(hallo.into()))
         .await
         .map_err(|e| TraegerEnde::Abbruch(format!("Begruessung: {e}")))?;
 
@@ -246,7 +307,10 @@ async fn sitzung(
     loop {
         tokio::select! {
             eingang = read.next() => {
-                let Some(nachricht) = eingang else { return Ok(()) };
+                // Strom ohne Close-Frame zu Ende: ein Abriss, wie beim Host.
+                let Some(nachricht) = eingang else {
+                    return Err(TraegerEnde::Abbruch("Verbindung ohne Close beendet".into()));
+                };
                 let nachricht = nachricht.map_err(|e| TraegerEnde::Abbruch(format!("Lesen: {e}")))?;
                 letztes = tokio::time::Instant::now();
                 match nachricht {
@@ -256,11 +320,12 @@ async fn sitzung(
                             CarrierServerMsg::Ready { proto } => {
                                 tracing::info!("Träger bereit (Fassung {proto})");
                                 traeger.bereit.store(true, Ordering::Relaxed);
-                                // Verbindung steht: Wartezeit zuruecksetzen,
+                                // Ab hier zählt die Sitzung: Hält sie
+                                // 30 s, springt die Wartezeit zurück —
                                 // sonst bliebe sie nach ein paar Aussetzern
-                                // dauerhaft bei 30 s — und jeder spaetere
-                                // Abriss liesse die Halle so lange dunkel.
-                                *backoff = 1;
+                                // dauerhaft bei 30 s, und jeder spätere
+                                // Abriss ließe die Halle so lange dunkel.
+                                bereit_seit.get_or_insert_with(tokio::time::Instant::now);
                             }
                             CarrierServerMsg::Unsupported { proto } => {
                                 // Der Relay ist älter als wir. Nicht endlos
@@ -289,7 +354,7 @@ async fn sitzung(
             ausgang = hinaus_rx.recv() => {
                 let Some(msg) = ausgang else { return Ok(()) };
                 let roh = serde_json::to_string(&msg).map_err(|e| TraegerEnde::Abbruch(e.to_string()))?;
-                sink.send(WsMessage::Text(roh.into()))
+                senden_mit_frist(&mut sink, WsMessage::Text(roh.into()))
                     .await
                     .map_err(|e| TraegerEnde::Abbruch(format!("Senden: {e}")))?;
             }
@@ -302,6 +367,19 @@ async fn sitzung(
                 }
             }
         }
+    }
+}
+
+/// Sendet eine Nachricht an den Relay, höchstens [`SENDE_FRIST`] lang.
+async fn senden_mit_frist<K>(sink: &mut K, nachricht: WsMessage) -> Result<(), String>
+where
+    K: futures_util::Sink<WsMessage> + Unpin,
+    K::Error: std::fmt::Display,
+{
+    match tokio::time::timeout(SENDE_FRIST, sink.send(nachricht)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err(format!("hing länger als {} s", SENDE_FRIST.as_secs())),
     }
 }
 
@@ -427,6 +505,53 @@ mod tests {
             geraet_stale(),
             Duration::from_secs(15),
             "TABLET_STALE im Relay — dieselbe Zusage, nur hier gemessen"
+        );
+    }
+
+    // ── Spec relay-haerten, PR 2 ─────────────────────────────────────────
+
+    #[test]
+    fn traeger_verwirft_frames_ohne_bereitschaft() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let t = Traeger::neu(tx);
+        t.frame(1, "{}".into());
+        assert!(
+            rx.try_recv().is_err(),
+            "ohne Bereitschaft staut sich nichts"
+        );
+        t.bereit.store(true, Ordering::Relaxed);
+        t.frame(1, "{}".into());
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(CarrierMsg::Frame { stream: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn traeger_sendet_keine_nutzlast_ueber_dem_deckel() {
+        let (t, mut rx) = traeger_bereit();
+        t.frame(1, "x".repeat(relay_proto::MAX_CARRIER_PAYLOAD_LEN + 1));
+        assert!(rx.try_recv().is_err());
+        assert!(t.deckel_gemeldet.load(Ordering::Relaxed));
+        // Genau am Deckel geht sie durch.
+        t.frame(1, "x".repeat(relay_proto::MAX_CARRIER_PAYLOAD_LEN));
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn traeger_gilt_erst_ab_ready_als_stabil() {
+        // Nie bereit geworden: nicht stabil, egal wie lange offen.
+        assert_eq!(traeger_ende(None, Schluss::Abriss), SitzungsEnde::Abriss);
+        let bereit = tokio::time::Instant::now();
+        tokio::time::advance(Duration::from_secs(29)).await;
+        assert_eq!(
+            traeger_ende(Some(bereit), Schluss::Close(None)),
+            SitzungsEnde::CloseOhneGrund
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert_eq!(
+            traeger_ende(Some(bereit), Schluss::Abriss),
+            SitzungsEnde::Stabil
         );
     }
 }
