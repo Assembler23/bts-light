@@ -256,8 +256,7 @@ impl TimelineStore {
         let mut inner = self.inner.lock().unwrap();
         if let Some(alt) = inner.file.matches.get(&match_id) {
             let letzter = timeline.sets.len().saturating_sub(1);
-            for i in 0..letzter {
-                let neu = &timeline.sets[i];
+            for (i, neu) in timeline.sets.iter_mut().enumerate().take(letzter) {
                 if !neu.points.is_empty() {
                     continue;
                 }
@@ -272,7 +271,7 @@ impl TimelineStore {
                 let final_b =
                     alt_set.start_b + alt_set.points.chars().filter(|&c| c == 'B').count() as i64;
                 if final_a == neu.start_a && final_b == neu.start_b {
-                    timeline.sets[i] = alt_set.clone();
+                    *neu = alt_set.clone();
                 }
             }
             if nachzuegler {
