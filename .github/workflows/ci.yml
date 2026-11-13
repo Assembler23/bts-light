@@ -249,6 +249,10 @@ jobs:
       # Optionen ABschalten; nach 60 s ohne Daten wird die Leiste durchsichtig.
       - name: Stream-Einblendung (JS)
         run: node scripts/test-stream-ansicht.mjs
+      # Stream-Werbung (ADR 0092): nur „200 mit Liste" leert die Ebene, alles
+      # andere lässt die Sponsoren stehen; Inline-Kopie wortgleich.
+      - name: Stream-Werbung (JS)
+        run: node scripts/test-stream-werbung.mjs
 
       # Push-Kopien (monitorSeq, pushHealth) in monitor/tafel/overview/stream
       # verhalten sich wie die Module — sonst friert ein TV still ein.

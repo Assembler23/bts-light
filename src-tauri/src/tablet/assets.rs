@@ -43,6 +43,11 @@ pub const TAFEL_HTML: &str = include_str!("../../assets/tafel.html");
 /// Platzhalter `__BASE__`; die Felder kommen aus der Adresse.
 pub const STREAM_HTML: &str = include_str!("../../assets/stream.html");
 
+/// Stream-Werbung (Spec stream-werbung, ADR 0092): transparente Ebene mit den
+/// für den Stream angehakten Werbebildern unter `/stream/werbung`. Einziger
+/// Platzhalter `__BASE__`; Darstellung und Hintergrund aus der Adresse.
+pub const STREAM_WERBUNG_HTML: &str = include_str!("../../assets/stream-werbung.html");
+
 /// TV-Launcher (`/` und `/tv`): Vollbild-Menü zum Auswählen einer Anzeige per
 /// Fernbedienung (Pfeiltasten + OK) — man muss nur einmal die kurze Adresse
 /// tippen, statt lange `?halle=`-URLs. Holt die Hallen aus `/health`.

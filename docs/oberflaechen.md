@@ -121,6 +121,8 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 | **Siegerehrung** `/info/winners` | TV am Podest | Das Podium der gewählten Disziplin. Ein Bildschirm kann auch **nur einen Platz** zeigen — gedacht für je einen Monitor vor jeder Podeststufe. **Achtung beim dritten Platz:** Im Badminton gibt es **zwei** Dritte, und der Platz-3-Bildschirm zeigt beide untereinander — im Doppel also bis zu vier Namen. |
 | **Werbung** `/info/ad` | Werbe-TV | Sponsorenbilder, rotierend oder als Einzelbild. |
 | **Stream-Einblendung** `/stream?courts=3` | OBS-Browserquelle beim Livestream | Durchsichtige Score-Leiste für ein bis drei Felder. Adresse nur ans eigene Stream-Team geben — sie enthält in der Cloud die Kennung des Turniers. |
+| **Stream-Werbung** `/stream/werbung` | OBS-Browserquelle beim Livestream | Durchsichtige Sponsoren-Ebene: rotierend, nebeneinander oder als Laufband. Zeigt nur Werbebilder mit dem Häkchen „Stream". Adresse aus dem Abschnitt „Stream-Werbung (OBS)" im Panel Monitore. |
+<!-- pruef: "/stream/werbung" in src-tauri/src/tablet/server.rs -->
 
 ### Zum Steuern
 

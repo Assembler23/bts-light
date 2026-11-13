@@ -68,6 +68,8 @@ const MONITOR_HTML: &str = include_str!("../../src-tauri/assets/monitor.html");
 const TAFEL_HTML: &str = include_str!("../../src-tauri/assets/tafel.html");
 /// Die Stream-Einblendung für OBS (ADR 0069) — dieselbe Datei wie im LAN.
 const STREAM_HTML: &str = include_str!("../../src-tauri/assets/stream.html");
+/// Stream-Werbung (ADR 0092): dieselbe Datei wie im LAN.
+const STREAM_WERBUNG_HTML: &str = include_str!("../../src-tauri/assets/stream-werbung.html");
 
 /// Der „In Vorbereitung"-Info-Monitor – dieselbe Datei wie im LAN. Leitet
 /// seinen Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/…` ohne
@@ -1652,6 +1654,7 @@ fn router(broker: Broker, tl_an: bool) -> Router {
         .route("/{ns}/court/{id}/state", get(monitor_state))
         .route("/{ns}/court/{id}/tafel", get(tafel_page))
         .route("/{ns}/stream", get(stream_page))
+        .route("/{ns}/stream/werbung", get(stream_werbung_page))
         .route("/{ns}/monitor", get(monitor_device_page))
         .route("/{ns}/monitor/state", get(monitor_device_state))
         .route("/{ns}/monitor/control", post(monitor_control_upload))
@@ -1974,6 +1977,16 @@ async fn stream_page(State(broker): State<Broker>, Path(ns): Path<String>) -> Re
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
     let body = STREAM_HTML.replace("__BASE__", &monitor_base(&broker.public_base, &ns));
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
+/// Liefert die Stream-Werbung (`/{ns}/stream/werbung`, ADR 0092). Wie bei
+/// der Score-Leiste enthält die Adresse den Namespace.
+async fn stream_werbung_page(State(broker): State<Broker>, Path(ns): Path<String>) -> Response {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let body = STREAM_WERBUNG_HTML.replace("__BASE__", &monitor_base(&broker.public_base, &ns));
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
@@ -15977,6 +15990,21 @@ mod tests {
             "{html}"
         );
         let falsch = stream_page(State(broker), Path("kein-namespace".to_string())).await;
+        assert_eq!(falsch.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn stream_werbung_seite_traegt_mount_basis_und_prueft_namespace() {
+        const NS: &str = "d1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let r = stream_werbung_page(State(broker.clone()), Path(NS.to_string())).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(r.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+        let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        let html = String::from_utf8_lossy(&b);
+        assert!(html.contains(&format!(r#"var BASE = "/bts-relay/{NS}/";"#)));
+        assert!(!html.contains("__BASE__"));
+        let falsch = stream_werbung_page(State(broker), Path("kein-namespace".to_string())).await;
         assert_eq!(falsch.status(), StatusCode::NOT_FOUND);
     }
 

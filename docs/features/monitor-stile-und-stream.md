@@ -196,6 +196,10 @@ Tafel, Übersicht, Kombi und Stream, in LAN und Cloud.
   - Der letzte Stand bleibt stehen. Nach **60 s** ohne Daten wird die Seite durchsichtig, ohne
     Fehlertext. Kommen wieder Daten, erscheint die Leiste wieder.
 
+> **Nachtrag 12.11.2026:** Eine zweite OBS-Ebene mit den Sponsoren
+> (`/stream/werbung`) hat eine eigene Spec:
+> [stream-werbung](stream-werbung.md), ADR 0092.
+
 ## Akzeptanzkriterien
 
 **E1**

@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="de" translate="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="google" content="notranslate" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Stream-Werbung</title>
+  <style>
+    /*
+     * Stream-Werbung (Spec stream-werbung, ADR 0092): transparente Ebene mit
+     * den für den Stream angehakten Werbebildern, als OBS-Browserquelle.
+     * Größe und Lage legt man in OBS fest; die Seite füllt die Quelle.
+     *
+     * Nie im Bild: Text, Fehler- oder Offline-Hinweise. Weiß der Server
+     * nichts (503, Netzfehler), bleibt stehen, was steht.
+     */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; background: transparent; overflow: hidden;
+      width: 100vw; height: 100vh;
+    }
+    #buehne {
+      position: relative; width: 100vw; height: 100vh; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+    }
+    /* Ein Bild samt optionaler Kachel. Der Innenrand gilt nur mit Kachel. */
+    .bild {
+      flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+    }
+    /* Abgerundet nur als Kachel — transparent schnitte es Logo-Ecken an. */
+    body.kachel .bild { padding: 8px; border-radius: 10px; overflow: hidden; }
+    .bild img { display: block; }
+    .bild.fehlt { display: none; }
+
+    /* rotierend: zwei gestapelte Ebenen, weiche Überblendung wie ad.html. */
+    .rotation .bild {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      max-width: 100vw; max-height: 100vh;
+      opacity: 0; transition: opacity .6s ease;
+    }
+    .rotation .bild.zeigt { opacity: 1; }
+    .rotation .bild img { max-width: 100vw; max-height: 100vh; object-fit: contain; }
+    body.kachel .rotation .bild img { max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+
+    /* nebeneinander: eine Reihe in voller Höhe, gemeinsam verkleinert. */
+    /* flex: 0 0 auto — eine zu breite Reihe darf nicht auf die Quelle
+       schrumpfen, sonst skalierte sie nicht um ihre Mitte. */
+    .reihe {
+      flex: 0 0 auto;
+      display: flex; align-items: center; gap: 24px; height: 100vh;
+      transform-origin: center center;
+    }
+    .reihe .bild, .band .bild { height: 100vh; }
+    .reihe .bild img, .band .bild img { height: 100%; width: auto; }
+
+    /* Band: Bahn aus 2 × k Kopien der Bildfolge, läuft um eine Hälfte. */
+    #buehne.mit-band { justify-content: flex-start; }
+    .band { flex: 0 0 auto; display: flex; align-items: center; height: 100vh; will-change: transform; }
+    .band .kopie { display: flex; align-items: center; height: 100vh; flex: 0 0 auto; }
+    .band .bild { margin-right: 24px; }
+    .band.laeuft { animation: lauf linear infinite; }
+    @keyframes lauf {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+  </style>
+</head>
+<body>
+  <div id="buehne"></div>
+  <script>
+(function () {
+  var BASE = "__BASE__";
+
+  // Inline-Kopie von src/io/streamWerbung.mjs, wortgleich gehalten von
+  // scripts/test-stream-werbung.mjs.
+/* <streamWerbung.mjs> */
+var MODI = ["rotation", "reihe", "band"];
+var HINTERGRUENDE = ["transparent", "kachel"];
+var TEMPO_PX_S = { langsam: 40, mittel: 80, schnell: 140 };
+var VORGABE = { modus: "rotation", hintergrund: "transparent", tempo: "mittel" };
+var ABSTAND_PX = 24;
+var INNENRAND_PX = 8;
+var ABRUF_MS = 20000;
+var KACHEL_ERSATZ = "#000000";
+
+/** Optionen aus der Adresse; Unbekanntes → Vorgabe. */
+function optionenAusQuery(modus, hintergrund, tempo) {
+  return {
+    modus: MODI.indexOf(modus) >= 0 ? modus : VORGABE.modus,
+    hintergrund: HINTERGRUENDE.indexOf(hintergrund) >= 0 ? hintergrund : VORGABE.hintergrund,
+    tempo: Object.prototype.hasOwnProperty.call(TEMPO_PX_S, tempo) ? tempo : VORGABE.tempo,
+  };
+}
+
+/** Was tun mit einer Antwort? Nur „200 mit Liste `streamAds`" wird
+ *  angewandt (auch eine leere Liste — dann leert sich die Ebene). Alles
+ *  andere — 503 „keine Daten", Fehler, alter Relay ohne Feld — heißt:
+ *  stehen lassen, was steht (ADR 0092). */
+function entscheidung(status, json) {
+  if (status === 200 && json && Array.isArray(json.streamAds)) return "anwenden";
+  return "behalten";
+}
+
+/** Kachelfarbe eines Bildes: die Setup-Farbe, sonst Schwarz. Index über
+ *  `ads` — passt für LAN-Dateinamen und Cloud-Indizes gleichermaßen. Nur
+ *  `#rrggbb` geht in ein `style`. */
+function stilFarbe(ads, adStyles, id) {
+  var i = Array.isArray(ads) ? ads.indexOf(id) : -1;
+  var stil = i >= 0 && Array.isArray(adStyles) ? adStyles[i] : null;
+  var bg = stil && typeof stil.bg === "string" ? stil.bg : "";
+  return /^#[0-9a-f]{6}$/.test(bg) ? bg : KACHEL_ERSATZ;
+}
+
+/** Bild-Adresse; `ver` (nur Cloud) bricht den Bild-Cache, wenn Indizes
+ *  nachrücken. */
+function bildUrl(base, id, ver) {
+  return base + "ads/" + encodeURIComponent(id) + (ver ? "?v=" + encodeURIComponent(ver) : "");
+}
+
+/** Die Stream-Bilder aus dem Zustand, in Setup-Reihenfolge. */
+function streamBilder(state, base) {
+  var ids = state && Array.isArray(state.streamAds) ? state.streamAds : [];
+  var ver = state && Array.isArray(state.streamVer) ? state.streamVer : [];
+  var bilder = [];
+  for (var i = 0; i < ids.length; i++) {
+    var id = String(ids[i]);
+    var v = typeof ver[i] === "string" ? ver[i] : "";
+    bilder.push({
+      id: id,
+      url: bildUrl(base, id, v),
+      bg: stilFarbe(state.ads, state.adStyles, ids[i]),
+    });
+  }
+  return bilder;
+}
+
+/** Schlüssel einer Bildliste: Ändert er sich, wird neu aufgebaut — sonst
+ *  liefe das Band nach jedem Abruf von vorn. Die Farbe zählt nur mit Kachel;
+ *  transparent ist sie unsichtbar und darf nichts neu starten. */
+function listenSchluessel(bilder, mitFarbe) {
+  return bilder.map(function (b) { return mitFarbe ? b.url + "|" + b.bg : b.url; }).join("\n");
+}
+
+/** „nebeneinander": gemeinsam verkleinern, bis die Reihe passt; nie größer. */
+function reiheMassstab(gesamtBreite, verfuegbar) {
+  if (!(gesamtBreite > 0) || !(verfuegbar > 0)) return 1;
+  return Math.min(1, verfuegbar / gesamtBreite);
+}
+
+/** Band: wie oft die Bildfolge hintereinander stehen muss, damit eine Hälfte
+ *  der Bahn die Quelle füllt — sonst klafft bei wenigen Bildern eine Lücke. */
+function bandWiederholungen(kopieBreite, sichtBreite) {
+  if (!(kopieBreite > 0)) return 1;
+  return Math.max(1, Math.ceil(sichtBreite / kopieBreite));
+}
+
+/** Dauer eines Umlaufs (eine Hälfte der Bahn) in Sekunden. */
+function bandDauerS(kopieBreite, wiederholungen, pxS) {
+  if (!(pxS > 0)) return 0;
+  return (kopieBreite * wiederholungen) / pxS;
+}
+
+/** Wechsel-Intervall der Rotation; mindestens 1 s. */
+function rotationIntervallMs(intervalS) {
+  var s = typeof intervalS === "number" && intervalS > 0 ? Math.max(1, intervalS) : 10;
+  return Math.round(s * 1000);
+}
+/* </streamWerbung.mjs> */
+
+  // Frist des Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s. **Inline-Kopie von
+  // `src/io/abrufFrist.mjs`** — kanonische Fassung samt Test dort
+  // (`scripts/test-abruf-frist.mjs` prüft auch diese Kopie).
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error('Abruf-Frist überschritten (' + was + ')'));
+      };
+      timer = setTimeout(function () { abbrechen('Kopfzeilen ' + KOPF_FRIST_MS + ' ms'); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error('Antwort nach Ablauf der Frist verworfen');
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen('Rumpf ' + RUMPF_FRIST_MS + ' ms'); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
+  var params = new URLSearchParams(location.search);
+  var OPT = optionenAusQuery(params.get("modus"), params.get("hintergrund"), params.get("tempo"));
+  if (OPT.hintergrund === "kachel") document.body.classList.add("kachel");
+  var buehne = document.getElementById("buehne");
+
+  var schluessel = null;      // Schlüssel der gezeigten Liste
+  var intervallMs = 0;        // Rotations-Intervall der gezeigten Liste
+  var bilder = [];
+  var rotTimer = null;
+  var layout = null;          // Neu-Messen bei Größenänderung (reihe/band)
+  var fehlerSeitAufbau = false; // ein Bild scheiterte → beim nächsten Abruf neu
+  var abrufLaeuft = false;
+
+  // Ein Bild-Element samt Kachel. Farben nur über style, nie als HTML.
+  function bildElement(b) {
+    var huelle = document.createElement("div");
+    huelle.className = "bild";
+    if (OPT.hintergrund === "kachel") huelle.style.backgroundColor = b.bg;
+    var img = document.createElement("img");
+    img.alt = "";
+    img.decoding = "async";
+    huelle.appendChild(img);
+    return huelle;
+  }
+
+  // Lädt alle Bilder in `huellen`; ruft `fertig`, wenn jedes geladen oder
+  // gescheitert ist. Ein gescheitertes Bild wird ausgeblendet.
+  function ladeAlle(huellen, liste, fertig) {
+    var offen = huellen.length;
+    if (offen === 0) { fertig(); return; }
+    huellen.forEach(function (h, i) {
+      var img = h.firstChild;
+      var erledigt = function () { offen -= 1; if (offen === 0) fertig(); };
+      img.onload = erledigt;
+      img.onerror = function () { h.classList.add("fehlt"); fehlerSeitAufbau = true; erledigt(); };
+      img.src = liste[i].url;
+    });
+  }
+
+  function leeren() {
+    if (rotTimer) { clearInterval(rotTimer); rotTimer = null; }
+    layout = null;
+    while (buehne.firstChild) buehne.removeChild(buehne.firstChild);
+    buehne.className = "";
+  }
+
+  function baueRotation() {
+    var ebene = document.createElement("div");
+    ebene.className = "rotation";
+    ebene.style.position = "absolute";
+    ebene.style.inset = "0";
+    buehne.appendChild(ebene);
+    var a = bildElement(bilder[0]);
+    var b = bildElement(bilder[0]);
+    ebene.appendChild(a);
+    ebene.appendChild(b);
+    var sichtbar = a, verdeckt = b, idx = 0, laedt = false;
+    var zeige = function (i) {
+      var bild = bilder[i];
+      if (OPT.hintergrund === "kachel") verdeckt.style.backgroundColor = bild.bg;
+      var img = verdeckt.firstChild;
+      var ziel = verdeckt;
+      laedt = true;
+      img.onload = function () {
+        laedt = false;
+        if (ziel.classList.contains("fehlt")) {
+          // Erst sichtbar machen, dann einblenden — sonst ploppt das Bild.
+          ziel.classList.remove("fehlt");
+          void ziel.offsetWidth;
+        }
+        ziel.classList.add("zeigt");
+        if (sichtbar !== ziel) sichtbar.classList.remove("zeigt");
+        verdeckt = sichtbar;
+        sichtbar = ziel;
+      };
+      img.onerror = function () {
+        laedt = false;
+        ziel.classList.add("fehlt");
+        fehlerSeitAufbau = true;
+      };
+      img.src = bild.url;
+    };
+    // Erstes Bild direkt in die sichtbare Ebene.
+    verdeckt = a; sichtbar = b;
+    zeige(0);
+    if (bilder.length > 1) {
+      rotTimer = setInterval(function () {
+        // Lädt das nächste Bild noch, diesen Takt auslassen: Ein neues `src`
+        // bräche den Ladevorgang ab, und ein großes Bild käme bei kurzem
+        // Intervall nie an.
+        if (laedt) return;
+        idx = (idx + 1) % bilder.length;
+        zeige(idx);
+      }, intervallMs);
+    }
+  }
+
+  function baueReihe() {
+    var reihe = document.createElement("div");
+    reihe.className = "reihe";
+    var huellen = bilder.map(bildElement);
+    huellen.forEach(function (h) { reihe.appendChild(h); });
+    buehne.appendChild(reihe);
+    layout = function () {
+      reihe.style.transform = "none";
+      var s = reiheMassstab(reihe.scrollWidth, buehne.clientWidth);
+      reihe.style.transform = s < 1 ? "scale(" + s + ")" : "none";
+    };
+    ladeAlle(huellen, bilder, layout);
+  }
+
+  function baueBand() {
+    buehne.className = "mit-band";
+    var bahn = document.createElement("div");
+    bahn.className = "band";
+    var kopie = document.createElement("div");
+    kopie.className = "kopie";
+    var huellen = bilder.map(bildElement);
+    huellen.forEach(function (h) { kopie.appendChild(h); });
+    bahn.appendChild(kopie);
+    buehne.appendChild(bahn);
+    layout = function () {
+      // Auf die eine Vorlage zurückbauen, messen, dann 2 × k Kopien legen.
+      bahn.classList.remove("laeuft");
+      while (bahn.childNodes.length > 1) bahn.removeChild(bahn.lastChild);
+      var breite = kopie.getBoundingClientRect().width;
+      if (!(breite > 0)) return;
+      var k = bandWiederholungen(breite, buehne.clientWidth);
+      for (var i = 1; i < 2 * k; i++) bahn.appendChild(kopie.cloneNode(true));
+      bahn.style.animationDuration = bandDauerS(breite, k, TEMPO_PX_S[OPT.tempo]) + "s";
+      // Neustart der Animation erzwingen (Liste oder Größe hat sich geändert).
+      void bahn.offsetWidth;
+      bahn.classList.add("laeuft");
+    };
+    ladeAlle(huellen, bilder, layout);
+  }
+
+  function anwenden(neu, iv) {
+    var s = listenSchluessel(neu, OPT.hintergrund === "kachel");
+    // Das Intervall zählt nur für die Rotation; Band und Reihe starten bei
+    // einer Intervall-Änderung nicht neu.
+    var ivRelevant = OPT.modus === "rotation";
+    if (s === schluessel && (!ivRelevant || iv === intervallMs) && !fehlerSeitAufbau) return;
+    schluessel = s;
+    intervallMs = iv;
+    fehlerSeitAufbau = false;
+    bilder = neu;
+    leeren();
+    if (bilder.length === 0) return;
+    if (OPT.modus === "reihe") baueReihe();
+    else if (OPT.modus === "band") baueBand();
+    else baueRotation();
+  }
+
+  function abrufen() {
+    // Nie zwei Abrufe zugleich: Eine späte alte Antwort überschriebe sonst
+    // eine neuere.
+    if (abrufLaeuft) return;
+    abrufLaeuft = true;
+    abrufMitFrist(BASE + "info/ad/state?zweck=stream", { cache: "no-store" }, function (r) {
+      if (r.status !== 200) return { status: r.status, json: null };
+      return r.json().then(function (j) { return { status: 200, json: j }; });
+    }).then(function (e) {
+      if (entscheidung(e.status, e.json) !== "anwenden") return;
+      anwenden(streamBilder(e.json, BASE), rotationIntervallMs(e.json.intervalS));
+    }).catch(function () { /* stehen lassen */ }).then(function () { abrufLaeuft = false; });
+  }
+
+  var groesseTimer = null;
+  window.addEventListener("resize", function () {
+    if (groesseTimer) clearTimeout(groesseTimer);
+    groesseTimer = setTimeout(function () { if (layout) layout(); }, 200);
+  });
+
+  abrufen();
+  setInterval(abrufen, ABRUF_MS);
+})();
+  </script>
+</body>
+</html>

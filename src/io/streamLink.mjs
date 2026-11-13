@@ -8,6 +8,7 @@
  */
 
 import { MAX_FELDER } from "./streamAnsicht.mjs";
+import { optionenAusQuery, VORGABE } from "./streamWerbung.mjs";
 
 /** `base` = Wurzel ohne Schrägstrich am Ende (`http://bts-light.local:8088`
  *  oder `https://badhub.de/bts-relay/<Kennung>`). Ohne Feld → "". */
@@ -25,4 +26,17 @@ export function streamLink(base, courtIds, opt) {
   if (o.verein === false) url += "&verein=0";
   if (o.logo === false) url += "&logo=0";
   return url;
+}
+
+/** Adresse der Stream-Werbung (Spec `stream-werbung`, ADR 0092). Vorgaben
+ *  bleiben weg; `tempo` nur beim Band. Gegenstück zu `optionenAusQuery` in
+ *  `streamWerbung.mjs`. `base` wie bei {@link streamLink}; ohne Basis → "". */
+export function streamWerbungLink(base, opt) {
+  if (!base) return "";
+  var o = optionenAusQuery(opt && opt.modus, opt && opt.hintergrund, opt && opt.tempo);
+  var teile = [];
+  if (o.modus !== VORGABE.modus) teile.push("modus=" + o.modus);
+  if (o.hintergrund !== VORGABE.hintergrund) teile.push("hintergrund=" + o.hintergrund);
+  if (o.modus === "band" && o.tempo !== VORGABE.tempo) teile.push("tempo=" + o.tempo);
+  return base.replace(/\/+$/, "") + "/stream/werbung" + (teile.length ? "?" + teile.join("&") : "");
 }
