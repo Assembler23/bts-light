@@ -350,6 +350,15 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Ballzähler am Tablet** — Spec:
+  [features/tablet-ballzaehler.md](features/tablet-ballzaehler.md)
+  (freigegeben 13.11.2026, ADR 0093; BTP-Messung mit
+  `tests/btp_shuttles_probe.rs` am 13.11.2026: **Zweig B** — jeder Match-Write
+  muss `Shuttles` mittragen; **umgesetzt in v0.9.398–400**; offen: Feldtest am Turnier-PC mit BTP). Bälle am Zähl-Tablet
+  hochzählen; die Zahl geht mit dem Ergebnis als `Match.Shuttles` nach BTP,
+  das TL-Web zeigt sie, die Turnierleitung kann sie beim Eintragen/Korrigieren
+  angeben. Schalter im Setup, Standard aus. Vier PRs: Messwerkzeug (gebaut), dann
+  PR 1 mit Relay-Deploy vorab.
 - **Zettel-Druck schon beim Aufruf in die Vorbereitung** — Spec:
   [features/zettel-druck-bei-aufruf.md](features/zettel-druck-bei-aufruf.md) (freigegeben
   10.11.2026), ADR 0082 — neue Auswahl „Drucken: bei der Feldvergabe / schon beim Aufruf";
@@ -596,16 +605,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Ballzähler am Tablet** — Spec:
-  [features/tablet-ballzaehler.md](features/tablet-ballzaehler.md)
-  (freigegeben 13.11.2026, ADR 0093; BTP-Messung mit
-  `tests/btp_shuttles_probe.rs` am 13.11.2026: **Zweig B** — jeder Match-Write
-  muss `Shuttles` mittragen; **PR 1 (Kern + Wire) in v0.9.398, PR 2 (Tablet-Zähler) in v0.9.399**,
-  Turnierleitung folgt). Bälle am Zähl-Tablet
-  hochzählen; die Zahl geht mit dem Ergebnis als `Match.Shuttles` nach BTP,
-  das TL-Web zeigt sie, die Turnierleitung kann sie beim Eintragen/Korrigieren
-  angeben. Schalter im Setup, Standard aus. Vier PRs: Messwerkzeug (gebaut), dann
-  PR 1 mit Relay-Deploy vorab.
 - **Stream-Werbung (zweite OBS-Ebene)** — Spec:
   [features/stream-werbung.md](features/stream-werbung.md)
   (freigegeben 12.11.2026, ADR 0092). Transparente Sponsoren-Ebene für OBS unter

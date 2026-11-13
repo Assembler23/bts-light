@@ -502,6 +502,20 @@ Beides gilt **turnierweit für alle Geräte**, nicht je Gerät. Die Tablets
 übernehmen die Änderung beim nächsten Neuladen. Ist für einen Verein kein Logo
 hinterlegt, bleibt die Zeile schlicht ohne Wappen.
 
+### Ballzähler
+
+| Feld | Voreinstellung | Bedeutung |
+|---|---|---|
+| **Bälle am Tablet zählen** | aus | Zähler für die verbrauchten Bälle in der Kopfzeile des Zähl-Tablets. Die Zahl geht mit dem Ergebnis nach BTP. |
+<!-- pruef: "Bälle am Tablet zählen" in src/pages/SetupWizard.tsx -->
+<!-- pruef: /pub shuttle_counter: bool/ in src-tauri/src/config.rs -->
+
+Die Tablets übernehmen die Änderung mit der **nächsten Spielzuweisung**. Ist
+der Schalter an, zeigt die Turnierleitungssicht die Zahl an laufenden und
+beendeten Spielen, und der Dialog „Ergebnis eintragen" bzw. „Ergebnis
+korrigieren" hat ein Feld **Bälle**. Wie am Tablet gezählt wird, steht in
+[Das Zähl-Tablet bedienen](tablet-bedienen.md).
+
 ### Hallen-Check-In
 
 | Feld | Voreinstellung | Bedeutung |

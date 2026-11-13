@@ -673,6 +673,10 @@ export function SetupWizard({
   };
   const [showClubNames, setShowClubNames] = useState(disp.show_club_names);
   const [showClubLogos, setShowClubLogos] = useState(disp.show_club_logos);
+  // Ballzähler am Zähl-Tablet (Spec tablet-ballzaehler). Standard aus.
+  const [shuttleCounter, setShuttleCounter] = useState(
+    initialConfig.shuttle_counter ?? false,
+  );
   const [ads, setAds] = useState<CourtAd[]>([]);
   const [adError, setAdError] = useState("");
   const [test, setTest] = useState<TestState>({ kind: "idle" });
@@ -972,6 +976,9 @@ export function SetupWizard({
         show_club_names: showClubNames,
         show_club_logos: showClubLogos,
       },
+      // Muss hier stehen: Was im gesendeten JSON fehlt, fällt beim Speichern
+      // auf den Rust-Default zurück — der Zähler ginge still wieder aus.
+      shuttle_counter: shuttleCounter,
     };
   }
 
@@ -2935,6 +2942,30 @@ export function SetupWizard({
             Die Logos kommen aus dem badhub-Bestand (wie auf der Siegerliste). Zu
             einem Verein ohne hinterlegtes Logo bleibt die Zeile ohne Wappen.
           </p>
+        </section>
+
+        {/* Ballzähler am Zähl-Tablet (Spec tablet-ballzaehler) */}
+        <section
+          id="section-ballzaehler"
+          className="flex flex-col gap-2 scroll-mt-24"
+        >
+          <SectionHeader icon={Target}>Ballzähler</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Am <strong>Zähl-Tablet</strong> erscheint in der Kopfzeile ein
+            Zähler für die verbrauchten Bälle. Die Zahl geht mit dem Ergebnis
+            nach <strong>BTP</strong>; die Turnierleitungssicht zeigt sie und
+            lässt sie beim Eintragen oder Korrigieren eines Ergebnisses
+            angeben. Standardmäßig aus. Die Tablets übernehmen die Änderung
+            mit der nächsten Spielzuweisung.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={shuttleCounter}
+              onChange={(e) => setShuttleCounter(e.currentTarget.checked)}
+            />
+            Bälle am Tablet zählen
+          </label>
         </section>
 
         {/* Hallen-Check-In (ADR 0009). Die id ist der Sprungpunkt aus dem

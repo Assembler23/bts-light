@@ -272,11 +272,16 @@ export const confirmWalkover = (
  * Finalisierung): `sets` als [[team1, team2], …]. Reguläres Ergebnis;
  * serverseitig R5-validiert. Steht das Spiel noch auf einem Feld, wird es
  * im selben Zug freigegeben.
+ *
+ * `shuttles` (optional, 0–99): verbrauchte Bälle. Ohne Angabe bleibt der
+ * Wert, den BTP hat; bei ausgeschaltetem Ballzähler zählt die Angabe nicht.
  */
 export const enterResult = (
   matchId: number,
   sets: [number, number][],
-): Promise<void> => invoke("enter_result", { matchId, sets });
+  shuttles?: number,
+): Promise<void> =>
+  invoke("enter_result", { matchId, sets, shuttles: shuttles ?? null });
 
 /**
  * Disqualifikation aus der Turnierleitung (P3, BTP-ScoreStatus 3): `loserTeam`

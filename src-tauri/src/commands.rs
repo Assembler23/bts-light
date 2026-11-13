@@ -3808,6 +3808,41 @@ mod walkover_finalize_tests {
     }
 }
 
+/// Die Ballzahl, die die Turnierleitung in der Desktop-App angibt: bei
+/// ausgeschaltetem Zähler zählt sie nicht, über dem Deckel ist sie ein
+/// Tippfehler, den die Oberfläche zeigen soll (wie im TL-Web).
+fn ballzahl_der_turnierleitung(
+    schalter: bool,
+    shuttles: Option<u32>,
+) -> Result<Option<u32>, String> {
+    if !schalter {
+        return Ok(None);
+    }
+    match shuttles {
+        Some(n) if n > relay_proto::MAX_SHUTTLES => Err(format!(
+            "Die Ballzahl muss zwischen 0 und {} liegen.",
+            relay_proto::MAX_SHUTTLES
+        )),
+        andere => Ok(andere),
+    }
+}
+
+#[cfg(test)]
+mod ballzahl_tests {
+    use super::ballzahl_der_turnierleitung as zahl;
+
+    #[test]
+    fn die_desktop_wertung_nimmt_die_ballzahl_nur_bei_schalter_und_im_bereich() {
+        assert_eq!(zahl(true, Some(7)), Ok(Some(7)));
+        assert_eq!(zahl(true, Some(0)), Ok(Some(0)), "0 ist eine Angabe");
+        assert_eq!(zahl(true, None), Ok(None), "keine Angabe → BTP-Wert bleibt");
+        assert!(zahl(true, Some(100)).is_err(), "Tippfehler wird gemeldet");
+        // Schalter aus: Die Angabe zählt nicht — auch eine unsinnige nicht.
+        assert_eq!(zahl(false, Some(7)), Ok(None));
+        assert_eq!(zahl(false, Some(100)), Ok(None));
+    }
+}
+
 /// Ergebnis eines Spiels aus der **Turnierleitung** eintragen (Plan 12,
 /// Backend-Finalisierung, Tilo 20.07.: „ein Spiel aus dem Backend beenden,
 /// wenn das Finalisieren vergessen wurde oder z. B. durch einen
@@ -3823,6 +3858,9 @@ pub async fn enter_result(
     state: State<'_, AppState>,
     match_id: i64,
     sets: Vec<(i64, i64)>,
+    // Verbrauchte Bälle (Spec `tablet-ballzaehler`); `None` = keine Angabe,
+    // dann bleibt der Wert in BTP.
+    shuttles: Option<u32>,
 ) -> Result<(), String> {
     let config = state
         .config
@@ -3832,6 +3870,7 @@ pub async fn enter_result(
     if config.slave_mode {
         return Err("Ansage-Slave-Modus: Wertungen nur am Master-PC.".to_string());
     }
+    let shuttles = ballzahl_der_turnierleitung(config.shuttle_counter, shuttles)?;
     let tablet = state.tablet.clone();
     let snapshot = tablet
         .snapshot_clone()
@@ -3854,11 +3893,13 @@ pub async fn enter_result(
     let on_court_since = tablet.brutto_start_ms(m.id, m.court_id);
     let btp_end_ms = tablet.result_end_ms(m.id, end_ms);
     let officials = tablet.officials_for_result(m.id);
-    let update = crate::tablet::server::build_manual_result_update(
+    let update = crate::tablet::server::build_manual_result_update_opt(
         m,
         sets,
         on_court_since,
         btp_end_ms,
+        false,
+        shuttles,
         officials,
     )?;
     let mid = update.btp_match_id;

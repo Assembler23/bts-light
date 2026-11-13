@@ -510,6 +510,12 @@ pub struct TabletState {
     /// Anzeigen geht (siehe [`TabletState::display_court_state`]).
     /// Einmal beim Eingang gerechnet statt bei jedem Abruf.
     display_court_state: RwLock<HashMap<i64, String>>,
+    /// CourtID → Ballzahl aus dem gespiegelten Tablet-Stand (Spec
+    /// `tablet-ballzaehler`). Eigene Tabelle statt Feld im Anzeige-Stand:
+    /// Die Zahl gehört nur der Turnierleitung, nie einer Anzeige. Mit der
+    /// Match-ID aus demselben Stand: Die Zahl gilt nur für dieses Spiel —
+    /// steht inzwischen ein anderes auf dem Feld, zählt sie nicht.
+    court_shuttles: RwLock<HashMap<i64, (i64, u32)>>,
     /// CourtID → Match, für das ein zu großer Tablet-Stand schon gemeldet
     /// wurde. Hält die Warnung auf **eine je Feld und Spiel** — sonst
     /// schriebe ein Gerät über dem Deckel bei jedem Punkt eine Zeile.
@@ -1301,6 +1307,32 @@ struct PersistedBtpQueue {
     /// bei Mismatch verworfen (BTP-`match_id` sind nur pro Turnier eindeutig).
     tournament: String,
     entries: Vec<PersistedBtpEntry>,
+}
+
+/// Liest die Ballzahl aus einem gespiegelten Tablet-Stand — nur dieses eine
+/// Feld, der Rest (Undo-Verlauf, Ballwechsel) wird übersprungen statt
+/// aufgebaut. Der Stand kommt vom Tablet: Alles außer einer ganzen Zahl im
+/// erlaubten Bereich zählt als „keine Angabe".
+///
+/// Liefert `(Match-ID, Ballzahl)`; ohne Match im Stand gibt es keine Zahl,
+/// weil sie sich dann keinem Spiel zuordnen ließe.
+fn ballzahl_im_stand(state: &str) -> Option<(i64, u32)> {
+    #[derive(Deserialize)]
+    struct Spiel {
+        #[serde(rename = "matchId", default)]
+        match_id: Option<serde_json::Value>,
+    }
+    #[derive(Deserialize)]
+    struct Nur {
+        #[serde(default)]
+        shuttles: Option<serde_json::Value>,
+        #[serde(rename = "match", default)]
+        spiel: Option<Spiel>,
+    }
+    let nur: Nur = serde_json::from_str(state).ok()?;
+    let match_id = nur.spiel?.match_id?.as_i64()?;
+    let n = u32::try_from(nur.shuttles?.as_u64()?).ok()?;
+    Some((match_id, relay_proto::ballzahl_geprueft(Some(n))?))
 }
 
 /// Ein persistierter Nachschub-Eintrag (Platten-Spiegel von `PendingBtpWrite`).
@@ -3766,6 +3798,10 @@ impl TabletState {
             .write()
             .unwrap()
             .insert(court_id, relay_proto::schlanker_anzeige_stand(&state));
+        match ballzahl_im_stand(&state) {
+            Some(n) => self.court_shuttles.write().unwrap().insert(court_id, n),
+            None => self.court_shuttles.write().unwrap().remove(&court_id),
+        };
         self.court_state.write().unwrap().insert(court_id, state);
         self.court_state_quelle
             .write()
@@ -3787,6 +3823,24 @@ impl TabletState {
             .unwrap()
             .insert(court_id, match_id)
             != Some(match_id)
+    }
+
+    /// Die am Tablet gezählten Bälle des Felds, soweit ein Stand gespiegelt
+    /// wurde (Spec `tablet-ballzaehler`). Nur für die Turnierleitung und
+    /// „bestmöglich": ohne gespiegelten Stand (altes Relay, Tablet offline)
+    /// `None`. Verbindlich ist erst die Zahl im Ergebnis.
+    ///
+    /// `match_id` ist das Spiel, das der Aufrufer auf dem Feld sieht: Die
+    /// Zahl kommt nur zurück, wenn der gespiegelte Stand zu **diesem** Spiel
+    /// gehört. Sonst trüge ein neues Spiel die Bälle seines Vorgängers — und
+    /// der Ergebnis-Dialog schriebe sie vorbelegt nach BTP.
+    pub fn court_shuttles(&self, court_id: i64, match_id: i64) -> Option<u32> {
+        self.court_shuttles
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .filter(|(spiel, _)| *spiel == match_id)
+            .map(|(_, n)| *n)
     }
 
     /// Liefert den gespiegelten Spielzustand eines Felds (für die Übernahme).
@@ -4390,6 +4444,12 @@ impl TabletState {
         if let Some(state) = mirrored {
             self.court_state.write().unwrap().insert(to_court_id, state);
         }
+        // Die Ballzahl gehört zum Spiel und zieht mit ihm um.
+        let baelle = self.court_shuttles.write().unwrap().remove(&from_court_id);
+        match baelle {
+            Some(b) => self.court_shuttles.write().unwrap().insert(to_court_id, b),
+            None => self.court_shuttles.write().unwrap().remove(&to_court_id),
+        };
         // Die Herkunft zieht mit um — sonst gälte ein Cloud-Zustand am
         // Zielfeld als LAN-Zustand und ginge als Echo an den Relay zurück.
         let quelle = self
@@ -4439,6 +4499,7 @@ impl TabletState {
         // der Crash-Restore eines laufenden Spiels unberührt.
         self.court_state.write().unwrap().remove(&court_id);
         self.display_court_state.write().unwrap().remove(&court_id);
+        self.court_shuttles.write().unwrap().remove(&court_id);
         self.court_state_quelle.write().unwrap().remove(&court_id);
         // Eine noch offene Vormerkung gehört zum Spiel, das hier gerade
         // beendet wurde. Bliebe sie stehen, wies die nächste Zuweisung auf
@@ -8413,6 +8474,58 @@ pub(crate) mod tests {
         assert_eq!(q[0].update.player_ids, vec![55, 66]);
         assert_eq!(q[0].update.end_ts_ms, Some(1_700_000_000_000));
         assert_eq!(q[0].enqueued_ms, 4_242, "Bezugszeitpunkt bleibt erhalten");
+    }
+
+    #[test]
+    fn die_ballzahl_des_tablets_kommt_aus_dem_gespiegelten_stand() {
+        // Spec tablet-ballzaehler: Die Turnierleitung sieht die Zahl am
+        // laufenden Spiel — aus dem Stand, den das Tablet ohnehin spiegelt.
+        let stand =
+            |extra: &str| format!(r#"{{"fmt":2,"match":{{"matchId":7}},{extra}"history":[]}}"#);
+        let st = TabletState::default();
+        assert_eq!(st.court_shuttles(5, 7), None, "ohne Stand keine Zahl");
+        st.set_court_state(5, stand(r#""shuttles":3,"#));
+        assert_eq!(st.court_shuttles(5, 7), Some(3));
+        // Die Zahl gehört zu Spiel 7: Steht inzwischen ein anderes auf dem
+        // Feld, trägt es nicht die Bälle des Vorgängers.
+        assert_eq!(st.court_shuttles(5, 8), None);
+        // Der Anzeige-Stand trägt sie nie.
+        assert!(!st.display_court_state(5).unwrap().contains("shuttles"));
+        // Unsinn vom Tablet zählt als „keine Angabe".
+        for kaputt in [
+            r#""shuttles":100,"#,
+            r#""shuttles":-1,"#,
+            r#""shuttles":"7","#,
+            r#""shuttles":2.5,"#,
+            "",
+        ] {
+            st.set_court_state(5, stand(kaputt));
+            assert_eq!(st.court_shuttles(5, 7), None, "{kaputt}");
+        }
+        st.set_court_state(5, "kein json".into());
+        assert_eq!(st.court_shuttles(5, 7), None);
+        // Ohne Spiel im Stand ließe sich die Zahl nicht zuordnen.
+        st.set_court_state(5, r#"{"shuttles":4}"#.into());
+        assert_eq!(st.court_shuttles(5, 7), None);
+        st.set_court_state(5, stand(r#""shuttles":0,"#));
+        assert_eq!(st.court_shuttles(5, 7), Some(0));
+        // Spielende räumt die Zahl mit dem Stand ab.
+        st.set_court_state(5, stand(r#""shuttles":4,"#));
+        st.clear_court(5);
+        assert_eq!(st.court_shuttles(5, 7), None);
+    }
+
+    #[test]
+    fn die_ballzahl_zieht_beim_umhaengen_mit_dem_spiel_um() {
+        let st = TabletState::default();
+        st.record_score(1, 7, vec![(5, 3)]);
+        st.set_court_state(1, r#"{"match":{"matchId":7},"shuttles":5}"#.into());
+        // Am Zielfeld liegt noch die Zahl eines früheren Spiels.
+        st.set_court_state(2, r#"{"match":{"matchId":3},"shuttles":9}"#.into());
+        st.move_match_score(1, 2, 7);
+        assert_eq!(st.court_shuttles(2, 7), Some(5), "zieht mit dem Spiel um");
+        assert_eq!(st.court_shuttles(1, 7), None, "das alte Feld gibt sie ab");
+        assert_eq!(st.court_shuttles(2, 3), None);
     }
 
     #[test]

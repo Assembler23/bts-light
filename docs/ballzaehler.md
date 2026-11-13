@@ -10,10 +10,8 @@ ADR [0093](adr/0093-ballzahl-reist-mit-dem-ergebnis.md) · BTP-Messung:
 
 ## Einschalten
 
-Der Schalter heißt in der Konfiguration `shuttle_counter` und steht
-standardmäßig auf **aus**. Ein Setup-Schalter in der App folgt mit dem
-Turnierleitungs-Teil (PR 3 der Spec); bis dahin lässt er sich nur in der
-`config.json` setzen (App vorher beenden).
+Im Setup, Abschnitt **Ballzähler**: Häkchen **Bälle am Tablet zählen**.
+Standard ist **aus** (`AppConfig.shuttle_counter`).
 
 Der Schalter erreicht das Tablet über `MatchBrief.shuttleCounter` — mit der
 nächsten Spielzuweisung. Ein Tablet an einem älteren Turnier-PC zeigt keinen
@@ -66,6 +64,23 @@ Nachschub-Queue sendet die Zahl unverändert nach.
 Unabhängig vom Schalter trägt **jeder** Schreibvorgang an ein Spiel die
 Ballzahl mit, die BTP hat — BTP liest ein fehlendes Feld als 0 und löschte
 sonst eine von Hand eingetragene Zahl.
+
+## In der Turnierleitungssicht
+
+Bei eingeschaltetem Zähler (`TlState.shuttle_counter`):
+
+- **Feldkachel:** `TlCourt.shuttles` — die Zahl aus dem gespiegelten
+  Tablet-Stand (`TabletState::court_shuttles`). „Bestmöglich": Sie fehlt ohne
+  gespiegelten Stand (Tablet offline, altes Relay) und bei 0. Die Zahl hängt
+  an der Match-ID aus demselben Stand: Sie zieht beim Umhängen mit dem Spiel
+  um und erscheint nie an einem anderen Spiel auf demselben Feld.
+- **Beendet-Liste:** `TlFinished.shuttles` — der Wert aus BTP; bei 0 nichts.
+- **Ergebnis eintragen / korrigieren:** Feld **Bälle** (0–99, darf leer
+  bleiben), vorbelegt mit der Tablet-Zahl bzw. dem BTP-Wert. Leer = keine
+  Angabe, in BTP bleibt der vorhandene Wert. Eine Zahl über 99 lehnt der
+  Turnier-PC mit einer Meldung ab. Die Korrektur läuft als vollständiger
+  Ergebnis-Rewrite mit ihren bestehenden Sperren (`correction_blocker`).
+- Der Desktop-Command `enter_result` nimmt dieselbe Angabe (`shuttles`).
 
 ## Grenzen
 
