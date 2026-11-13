@@ -798,19 +798,11 @@
     <div class="call-timer" id="call-timer"></div>
     <div class="match-clock" id="match-clock"></div>
     <div class="sponsor-bar" id="sponsor-bar"></div>
-    <!-- Seiten oder Mannschaften korrigieren (Spec tablet-seiten-korrigieren):
-         ohne PIN, mit Rückfrage. -->
-    <button
-      type="button"
-      id="korrektur-btn"
-      class="header-btn neutral"
-      disabled
-      aria-label="Seiten oder Mannschaften korrigieren"
-      title="Seiten oder Mannschaften korrigieren"
-    >⇄</button>
     <!-- Ballzähler (Spec tablet-ballzaehler): verbrauchte Bälle, gehen mit
          dem Ergebnis an die Turnierleitung. Ohne PIN; nur sichtbar, wenn der
-         Turnier-PC den Zähler anbietet. -->
+         Turnier-PC den Zähler anbietet. Bewusst LINKS von ⇄: „+" wird bei
+         jedem Ball getippt und darf nicht neben ✚ liegen — die
+         Verletzungstaste löst ohne Rückfrage aus, ⇄ fragt nach. -->
     <div class="ball-zaehler" id="ball-zaehler" hidden>
       <button
         type="button"
@@ -828,6 +820,16 @@
         title="Ein Ball mehr"
       >+</button>
     </div>
+    <!-- Seiten oder Mannschaften korrigieren (Spec tablet-seiten-korrigieren):
+         ohne PIN, mit Rückfrage. -->
+    <button
+      type="button"
+      id="korrektur-btn"
+      class="header-btn neutral"
+      disabled
+      aria-label="Seiten oder Mannschaften korrigieren"
+      title="Seiten oder Mannschaften korrigieren"
+    >⇄</button>
     <button
       type="button"
       id="injury-btn"
@@ -1677,6 +1679,9 @@ const STATE = {
   // AUSSERHALB des Undo-Stapels (`snapshot`): „Punkt zurück" nimmt keinen
   // Ball zurück. Reist im gespiegelten Stand und im Ergebnis mit.
   shuttles: /** @type {number} */ (0),
+  // Bietet der Turnier-PC den Ballzähler an? Frisch aus jedem
+  // `match_assigned`; `null` = seit dem Laden der Seite noch keine Zuweisung.
+  hostZaehlt: /** @type {boolean|null} */ (null),
 
   // Schiri-Modus: immer sichtbare Ansage zum Vorlesen. Opt-in pro Tablet
   // (lokal gespeichert). `lastEvent` beschreibt, was zuletzt passierte, damit
@@ -2254,14 +2259,7 @@ function sendScoreUpdate() {
   }
 }
 
-// ─────────────────────────────── Akkustand ────────────────────────────
-// Zwei Quellen (Reihenfolge in `akkuBeobachten`): 1) Brücke der Kiosk-App
-// (`window.fully`, funktioniert über http — der eigentliche Weg auf den
-// Fire-Tablets), 2) Web Battery Status API (nur Android/Chrome im Secure
-// Context). Jeder Stand geht an ZWEI Stellen: in die eigene Kopfzeile (seit
-// 13.09.2026 — im Kiosk fehlt die Android-Statusleiste) und als
-// `battery`-Frame an den Host (TabletPanel). Eine Quelle, ein Takt.
-//
+// ───────────────────────────── Ballzähler ─────────────────────────────
 // ── Inline-Kopie von src/io/ballzaehler.mjs (Test
 //    scripts/test-ballzaehler.mjs, Drift scripts/test-inline-kopien.mjs) —
 //    Änderungen dort und hier gemeinsam ──
@@ -2296,6 +2294,11 @@ function ballzahlFuerErgebnis(hostZaehlt, zahl) {
  *  Brief gelesen statt eigens gemerkt: So stimmt es auch nach einem
  *  Neuladen, bevor die Verbindung wieder steht. */
 function hostZaehltBaelle() {
+  // Was der Turnier-PC in der letzten Zuweisung gesagt hat, geht vor: Der
+  // Brief in `STATE.match` kann aus einem übernommenen Stand stammen, also
+  // von einem fremden Gerät. Vor der ersten Zuweisung (Neuladen ohne
+  // Verbindung) gilt der gespeicherte Brief.
+  if (STATE.hostZaehlt !== null) return STATE.hostZaehlt;
   return !!(STATE.match && STATE.match.shuttleCounter);
 }
 
@@ -2332,6 +2335,14 @@ function renderBallzaehler() {
   els.ballPlus.disabled = !frei || ballzahlAus(STATE.shuttles) >= BALL_MAX;
 }
 
+// ─────────────────────────────── Akkustand ────────────────────────────
+// Zwei Quellen (Reihenfolge in `akkuBeobachten`): 1) Brücke der Kiosk-App
+// (`window.fully`, funktioniert über http — der eigentliche Weg auf den
+// Fire-Tablets), 2) Web Battery Status API (nur Android/Chrome im Secure
+// Context). Jeder Stand geht an ZWEI Stellen: in die eigene Kopfzeile (seit
+// 13.09.2026 — im Kiosk fehlt die Android-Statusleiste) und als
+// `battery`-Frame an den Host (TabletPanel). Eine Quelle, ein Takt.
+//
 // ── Inline-Kopie von src/io/akku.mjs (Test scripts/test-akku.mjs) —
 //    Änderungen dort und hier gemeinsam ──
 const AKKU_NIEDRIG = 20;
@@ -3771,6 +3782,7 @@ function beiMatchAssigned(msg) {
   // Fähigkeit des Hosts frisch aus jedem Frame — auch bei demselben
   // Match, sonst bliebe nach einem App-Update der alte Wert stehen.
   STATE.hostKannBerichtigung = !!(msg.match && msg.match.teamsCorrection);
+  STATE.hostZaehlt = !!(msg.match && msg.match.shuttleCounter);
   // Aufruf-Stempel sofort holen, statt bis zu 30 s auf den nächsten
   // Uhr-Abgleich zu warten — die Aufruf-Uhr soll mit der Seitenwahl
   // da sein, nicht erst mittendrin. Bis zu fünf Nachfragen im 3-s-

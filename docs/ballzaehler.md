@@ -21,7 +21,10 @@ Zähler.
 
 ## Am Tablet
 
-In der Kopfzeile steht während des Spiels **− 🏸 Zahl +**.
+In der Kopfzeile steht **− 🏸 Zahl +**, sobald dem Feld ein Spiel zugewiesen
+ist — also schon bei der Seitenwahl (Einspielbälle) und noch in der
+Beendet-Ansicht, bis das Ergebnis übermittelt ist. Die Gruppe steht links vom
+Knopf ⇄, bewusst nicht neben der Verletzungstaste.
 
 - Start bei **0**; jeder Ball wird mit **+** getippt, auch der erste.
 - **−** nimmt einen versehentlichen Tipp zurück. Bereich 0–99.
@@ -32,7 +35,9 @@ In der Kopfzeile steht während des Spiels **− 🏸 Zahl +**.
   Ersatz-Tablet ohne übernommenen Stand beginnt bei 0.
 - Mit dem **Übermitteln** des Ergebnisses ist die Zahl eingefroren, bis das
   Ergebnis am Tablet wieder geöffnet wird. Auch ein gepuffertes oder
-  geparktes Ergebnis trägt die Zahl vom Zeitpunkt des Übermittelns.
+  geparktes Ergebnis trägt die Zahl vom Zeitpunkt des Übermittelns. Lehnt der
+  Turnier-PC das Ergebnis endgültig ab, ist der Zähler wieder frei — der
+  nächste Versuch nimmt die dann aktuelle Zahl.
 - An einem Spiel, das die Turnierleitung schon von Hand gewertet hat, ist der
   Zähler gesperrt.
 
