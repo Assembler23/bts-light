@@ -596,6 +596,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Ballzähler am Tablet** — Spec:
+  [features/tablet-ballzaehler.md](features/tablet-ballzaehler.md)
+  (Entwurf 13.11.2026, **Freigabe offen**, ADR 0093). Bälle am Zähl-Tablet
+  hochzählen; die Zahl geht mit dem Ergebnis als `Match.Shuttles` nach BTP,
+  das TL-Web zeigt sie, die Turnierleitung kann sie beim Eintragen/Korrigieren
+  angeben. Schalter im Setup, Standard aus. Erster Schritt: BTP-Messung am
+  Windows-PC (bleibt `Shuttles` bei Folge-Writes erhalten?). Vier PRs, PR 1 mit
+  Relay-Deploy vorab.
 - **Stream-Werbung (zweite OBS-Ebene)** — Spec:
   [features/stream-werbung.md](features/stream-werbung.md)
   (freigegeben 12.11.2026, ADR 0092). Transparente Sponsoren-Ebene für OBS unter
