@@ -274,6 +274,17 @@ LAN+Cloud voraus.
   ggf. gekürzt. Jede Zeile hat seit v0.9.246 ein **⋮-Menü** mit
   „Ergebnis korrigieren", „Punktverlauf" und „Zettel" — dieselbe
   Zusammenstellung wie im ⋮-Menü der Feldkachel.
+- **Ballzahl (seit v0.9.400):** Ist im Setup **Bälle am Tablet zählen**
+  eingeschaltet, zeigt die Feldkachel neben dem Satzstand die am Tablet
+  gezählten Bälle (🏸 3) und die Beendet-Zeile die Zahl aus BTP. Bei 0 steht
+  nichts. Der Dialog „Ergebnis eintragen" bzw. „Ergebnis korrigieren" hat dann
+  ein Feld **Bälle** (0–99): beim Eintragen mit der Tablet-Zahl vorbelegt, beim
+  Korrigieren mit dem Wert aus BTP. Ein leeres Feld heißt „keine Angabe" — in
+  BTP bleibt dann, was dort steht. Eine Korrektur, die nur die Ballzahl
+  ändert, ist erlaubt; es gelten dieselben Sperren wie für jede Korrektur. Die
+  Zahl am laufenden Spiel ist ein Zwischenstand vom Tablet und fehlt, solange
+  das Tablet keinen Stand gespiegelt hat. Mehr: [ballzaehler.md](ballzaehler.md).
+  <!-- pruef: "leer = keine Angabe" in src-tauri/assets/tl.html -->
 - **Was zu sehen ist, bestimmst du:** Jeder Abschnitt der Seite ist ein
   **Panel**, das sich einzeln ausblenden, umsortieren und in der Höhe
   verteilen lässt — gespeichert in einem **Profil** je Gerät. Siehe

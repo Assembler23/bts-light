@@ -510,6 +510,10 @@ pub struct TabletState {
     /// Anzeigen geht (siehe [`TabletState::display_court_state`]).
     /// Einmal beim Eingang gerechnet statt bei jedem Abruf.
     display_court_state: RwLock<HashMap<i64, String>>,
+    /// CourtID → Ballzahl aus dem gespiegelten Tablet-Stand (Spec
+    /// `tablet-ballzaehler`). Eigene Tabelle statt Feld im Anzeige-Stand:
+    /// Die Zahl gehört nur der Turnierleitung, nie einer Anzeige.
+    court_shuttles: RwLock<HashMap<i64, u32>>,
     /// CourtID → Match, für das ein zu großer Tablet-Stand schon gemeldet
     /// wurde. Hält die Warnung auf **eine je Feld und Spiel** — sonst
     /// schriebe ein Gerät über dem Deckel bei jedem Punkt eine Zeile.
@@ -1301,6 +1305,21 @@ struct PersistedBtpQueue {
     /// bei Mismatch verworfen (BTP-`match_id` sind nur pro Turnier eindeutig).
     tournament: String,
     entries: Vec<PersistedBtpEntry>,
+}
+
+/// Liest die Ballzahl aus einem gespiegelten Tablet-Stand — nur dieses eine
+/// Feld, der Rest (Undo-Verlauf, Ballwechsel) wird übersprungen statt
+/// aufgebaut. Der Stand kommt vom Tablet: Alles außer einer ganzen Zahl im
+/// erlaubten Bereich zählt als „keine Angabe".
+fn ballzahl_im_stand(state: &str) -> Option<u32> {
+    #[derive(Deserialize)]
+    struct Nur {
+        #[serde(default)]
+        shuttles: Option<serde_json::Value>,
+    }
+    let nur: Nur = serde_json::from_str(state).ok()?;
+    let n = u32::try_from(nur.shuttles?.as_u64()?).ok()?;
+    relay_proto::ballzahl_geprueft(Some(n))
 }
 
 /// Ein persistierter Nachschub-Eintrag (Platten-Spiegel von `PendingBtpWrite`).
@@ -3766,6 +3785,10 @@ impl TabletState {
             .write()
             .unwrap()
             .insert(court_id, relay_proto::schlanker_anzeige_stand(&state));
+        match ballzahl_im_stand(&state) {
+            Some(n) => self.court_shuttles.write().unwrap().insert(court_id, n),
+            None => self.court_shuttles.write().unwrap().remove(&court_id),
+        };
         self.court_state.write().unwrap().insert(court_id, state);
         self.court_state_quelle
             .write()
@@ -3787,6 +3810,14 @@ impl TabletState {
             .unwrap()
             .insert(court_id, match_id)
             != Some(match_id)
+    }
+
+    /// Die am Tablet gezählten Bälle des Felds, soweit ein Stand gespiegelt
+    /// wurde (Spec `tablet-ballzaehler`). Nur für die Turnierleitung und
+    /// „bestmöglich": ohne gespiegelten Stand (altes Relay, Tablet offline)
+    /// `None`. Verbindlich ist erst die Zahl im Ergebnis.
+    pub fn court_shuttles(&self, court_id: i64) -> Option<u32> {
+        self.court_shuttles.read().unwrap().get(&court_id).copied()
     }
 
     /// Liefert den gespiegelten Spielzustand eines Felds (für die Übernahme).
@@ -4439,6 +4470,7 @@ impl TabletState {
         // der Crash-Restore eines laufenden Spiels unberührt.
         self.court_state.write().unwrap().remove(&court_id);
         self.display_court_state.write().unwrap().remove(&court_id);
+        self.court_shuttles.write().unwrap().remove(&court_id);
         self.court_state_quelle.write().unwrap().remove(&court_id);
         // Eine noch offene Vormerkung gehört zum Spiel, das hier gerade
         // beendet wurde. Bliebe sie stehen, wies die nächste Zuweisung auf
@@ -8413,6 +8445,36 @@ pub(crate) mod tests {
         assert_eq!(q[0].update.player_ids, vec![55, 66]);
         assert_eq!(q[0].update.end_ts_ms, Some(1_700_000_000_000));
         assert_eq!(q[0].enqueued_ms, 4_242, "Bezugszeitpunkt bleibt erhalten");
+    }
+
+    #[test]
+    fn die_ballzahl_des_tablets_kommt_aus_dem_gespiegelten_stand() {
+        // Spec tablet-ballzaehler: Die Turnierleitung sieht die Zahl am
+        // laufenden Spiel — aus dem Stand, den das Tablet ohnehin spiegelt.
+        let st = TabletState::default();
+        assert_eq!(st.court_shuttles(5), None, "ohne Stand keine Zahl");
+        st.set_court_state(5, r#"{"fmt":2,"shuttles":3,"history":[]}"#.into());
+        assert_eq!(st.court_shuttles(5), Some(3));
+        // Der Anzeige-Stand trägt sie nie.
+        assert!(!st.display_court_state(5).unwrap().contains("shuttles"));
+        // Unsinn vom Tablet zählt als „keine Angabe".
+        for kaputt in [
+            r#"{"shuttles":100}"#,
+            r#"{"shuttles":-1}"#,
+            r#"{"shuttles":"7"}"#,
+            r#"{"shuttles":2.5}"#,
+            r#"{"fmt":2}"#,
+            "kein json",
+        ] {
+            st.set_court_state(5, kaputt.into());
+            assert_eq!(st.court_shuttles(5), None, "{kaputt}");
+        }
+        st.set_court_state(5, r#"{"shuttles":0}"#.into());
+        assert_eq!(st.court_shuttles(5), Some(0));
+        // Spielende räumt die Zahl mit dem Stand ab.
+        st.set_court_state(5, r#"{"shuttles":4}"#.into());
+        st.clear_court(5);
+        assert_eq!(st.court_shuttles(5), None);
     }
 
     #[test]

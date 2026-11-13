@@ -3366,6 +3366,7 @@ pub(crate) fn derive_result(
 /// ([`set_is_complete`]). Steht das Spiel auf einem Feld (`court_id`), wird
 /// es im selben Update freigegeben und die Spieler ausgecheckt;
 /// `on_court_since` (Aufruf-Stempel) liefert die Spieldauer.
+#[cfg(test)]
 pub(crate) fn build_manual_result_update(
     m: &BtpMatch,
     sets: Vec<(i64, i64)>,

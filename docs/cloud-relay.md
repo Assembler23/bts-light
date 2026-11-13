@@ -1945,7 +1945,8 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   `TlAction::EnterResult.shuttles` (optional) nimmt die Zahl der
   Turnierleitung auf; fehlt es, bleibt der Wert in BTP. `shuttles` im
   gespiegelten Tablet-Stand streicht `schlanker_anzeige_stand` aus allen
-  Anzeige-Zuständen. **Deploy-Reihenfolge: Relay vor App** — ein alter Relay
+  Anzeige-Zuständen. Im TL-Zustand (opak für den Relay) reisen seit v0.9.400
+  `shuttle_counter`, `TlCourt.shuttles` und `TlFinished.shuttles`. **Deploy-Reihenfolge: Relay vor App** — ein alter Relay
   wirft die Zahl still weg und lehnt eine `EnterResult`-Aktion mit dem
   unbekannten Feld nicht ab, reicht sie aber ohne Zahl weiter.
 - Neu: `TlAction::MeetingpointSet`, `MatchBrief.feldCheck` (`serde(default)`).

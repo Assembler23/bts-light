@@ -1322,6 +1322,11 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 }
 #res-sets { display: flex; flex-direction: column; gap: 8px; }
 .res-row { display: flex; align-items: center; gap: 10px; }
+.res-row[hidden] { display: none; }
+.res-baelle { margin-top: 10px; }
+/* Ballzahl an Feld-Kachel und Beendet-Zeile: eine Zahl unter vielen, darum
+   ohne eigene Farbe. */
+.baelle { white-space: nowrap; font-weight: 600; }
 .res-row label { flex: 0 0 4.2rem; font-weight: 600; font-size: .9rem; color: var(--ink-soft); }
 .res-row input {
   width: 4.4rem; font: inherit; font-variant-numeric: tabular-nums; text-align: center;
@@ -1610,6 +1615,14 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
     </div>
     <div id="res-sets"></div>
     <button type="button" id="res-add-set">+ Satz</button>
+    <!-- Verbrauchte Bälle (Spec tablet-ballzaehler): nur bei eingeschaltetem
+         Ballzähler. Leer heißt „keine Angabe" — dann bleibt, was BTP hat. -->
+    <div class="res-row res-baelle" id="res-baelle-zeile" hidden>
+      <label for="res-baelle">Bälle</label>
+      <input type="number" min="0" max="99" inputmode="numeric" id="res-baelle"
+             aria-describedby="res-baelle-hinweis" />
+      <span class="meta" id="res-baelle-hinweis">leer = keine Angabe</span>
+    </div>
     <p class="fehler" id="res-error" hidden></p>
     <div class="dlg-foot">
       <button type="button" id="res-cancel">Abbrechen</button>
@@ -2736,6 +2749,33 @@ function hallMarke(name) {
 let resCtx = null;   // { matchId, label, sets, bestOf, overwrite, team1?, team2? }
 let resBusy = false; // ein Schreibvorgang ist unterwegs — kein zweiter, solange er läuft
 
+/** Ist der Ballzähler am Turnier-PC eingeschaltet (Spec tablet-ballzaehler)?
+ *  Ein älterer Turnier-PC meldet nichts — dann gibt es weder Zahl noch Feld. */
+function ballzaehlerAn() {
+  return !!(state && state.shuttle_counter);
+}
+
+/** Ballzahl als kleine Marke; leer bei ausgeschaltetem Zähler, 0 oder „fehlt". */
+function baelleMarke(n) {
+  const zahl = Number(n);
+  if (!ballzaehlerAn() || !Number.isInteger(zahl) || zahl <= 0) return "";
+  return `<span class="baelle num" title="Verbrauchte Bälle">🏸 ${zahl}</span>`;
+}
+
+/**
+ * Das Feld „Bälle" des Ergebnis-Dialogs lesen.
+ * @returns {{ok: true, wert: number|undefined}|{ok: false}} `wert` fehlt bei
+ *   leerem Feld oder ausgeschaltetem Zähler (= keine Angabe).
+ */
+function baelleAusDialog() {
+  if (!ballzaehlerAn()) return { ok: true, wert: undefined };
+  const roh = $("res-baelle").value.trim();
+  if (roh === "") return { ok: true, wert: undefined };
+  const zahl = Number(roh);
+  if (!Number.isInteger(zahl) || zahl < 0 || zahl > 99) return { ok: false };
+  return { ok: true, wert: zahl };
+}
+
 function openResultDialog(ctx) {
   resCtx = ctx;
   resBusy = false;
@@ -2752,6 +2792,12 @@ function openResultDialog(ctx) {
   // Mindestens zwei Zeilen, auch bei einem noch leeren Spiel — ein Satz
   // allein wäre der Regelfall selten. Steht schon mehr auf dem Zettel (ein
   // laufendes Best-of-5 zum Beispiel), zeigt der Dialog genau so viele.
+  // Ballzahl: nur bei eingeschaltetem Zähler. Vorbelegt mit der Tablet-Zahl
+  // (laufendes Spiel) bzw. dem BTP-Wert (Korrektur); 0 und „fehlt" lassen
+  // das Feld leer.
+  const mitBaellen = ballzaehlerAn();
+  $("res-baelle-zeile").hidden = !mitBaellen;
+  $("res-baelle").value = mitBaellen && Number(ctx.shuttles) > 0 ? String(Number(ctx.shuttles)) : "";
   const rows = Math.max(ctx.sets.length, Math.min(ctx.bestOf || 3, 2));
   $("res-sets").innerHTML = Array.from({ length: rows }, (_, i) => resSetRow(i, ctx.sets[i])).join("");
   $("res-dlg").showModal();
@@ -2804,6 +2850,12 @@ async function sendResult() {
     sets.push({ a: Number(a || 0), b: Number(b || 0) });
   }
   if (!sets.length) { showResError("Mindestens ein Satz."); return; }
+  const baelle = baelleAusDialog();
+  if (!baelle.ok) { showResError("Bälle: eine ganze Zahl von 0 bis 99, oder leer lassen."); return; }
+  const aktion = { action: "enter_result", matchId: resCtx.matchId, sets, retired: false, overwrite: resCtx.overwrite };
+  // Ohne Angabe bleibt das Feld ganz weg — der Turnier-PC lässt dann
+  // stehen, was BTP hat.
+  if (baelle.wert !== undefined) aktion.shuttles = baelle.wert;
   resBusy = true;
   $("res-save").disabled = true;
   const ok = await send(
@@ -2811,7 +2863,7 @@ async function sendResult() {
     // Doppeltipp auf „Speichern" (oder zweimal Enter) schreibt nicht
     // zweimal nach BTP.
     `res-${resCtx.matchId}-${Math.floor(Date.now() / OP_WINDOW_MS)}`,
-    { action: "enter_result", matchId: resCtx.matchId, sets, retired: false, overwrite: resCtx.overwrite },
+    aktion,
     `Ergebnis für ${resCtx.label} eingetragen.`,
     { onError: showResError },
   );
@@ -3787,6 +3839,7 @@ function courtCard(c, cellStyle) {
            title="Am Feld bestätigt (Zähl-Tablet) — nur ein Hinweis, kein Nachweis">✓ ${fc[0]}/${fc[1]} am Feld</span>`
       : "";
     foot = `<span class="score num" title="Satzstand">${esc(sets)}</span>
+            ${baelleMarke(c.shuttles)}
             ${rest}
             ${feldCheck}
             <span class="clock num stage${stage}" data-since="${c.on_court_since_ms || ""}" data-court="${c.court_id}"
@@ -4210,6 +4263,7 @@ function wireCourts(box) {
         sets: court.sets || [],
         bestOf: court.best_of,
         overwrite: false,
+        shuttles: court.shuttles,
         team1: t1, team2: t2,
       });
     });
@@ -8897,7 +8951,7 @@ function finRow(f) {
       : "";
     return `<div class="fin-row" data-fin="${f.match_id}">
       <span class="fin-pair">${siegerZuerstHtml(f)}</span>
-      <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}</span>
+      <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}${baelleMarke(f.shuttles) ? " · " + baelleMarke(f.shuttles) : ""}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
       ${kebab}
     </div>`;
@@ -8976,6 +9030,7 @@ function wireFinRow(box) {
         sets: f.sets || [],
         bestOf: 3,
         overwrite: true,
+        shuttles: f.shuttles,
         // Spalten-Beschriftung: bewusst ROH in Team1:Team2, nicht die
         // Sieger-Reihenfolge von `label` — sie muss zu den Satzfeldern
         // passen, die ebenfalls roh sind. Sonst wäre die Vertauschungs-
@@ -9784,6 +9839,7 @@ function start() {
         sets: court.sets || [],
         bestOf: court.best_of,
         overwrite: false,
+        shuttles: court.shuttles,
         team1: t1, team2: t2,
       });
       return;

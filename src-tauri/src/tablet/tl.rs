@@ -3075,6 +3075,11 @@ pub struct TlState {
     /// damit gegen [`TlCourt::decided_since_ms`].
     #[serde(default)]
     pub finished_warning_seconds: u32,
+    /// Ist der Ballzähler eingeschaltet (Spec `tablet-ballzaehler`)? Die
+    /// Seite zeigt nur dann Ballzahlen und das Feld „Bälle" im
+    /// Ergebnis-Dialog. `#[serde(default)]`: ein alter Host kennt ihn nicht.
+    #[serde(default)]
+    pub shuttle_counter: bool,
     /// Alle Hallen des Turniers, alphabetisch nach Namen.
     ///
     /// Mit Kennung, nicht nur mit Namen: Ein Vorbereitungs-Aufruf braucht sie,
@@ -3298,6 +3303,11 @@ pub struct TlCourt {
     /// Marke — ihr Vollton gehört schon der Halle und dem Zustand.
     #[serde(default, skip_serializing_if = "highlight_leer")]
     pub highlight: u8,
+    /// Am Tablet gezählte Bälle des laufenden Spiels (Spec
+    /// `tablet-ballzaehler`), aus dem gespiegelten Tablet-Stand. Fehlt bei
+    /// ausgeschaltetem Zähler, ohne gespiegelten Stand und bei 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shuttles: Option<u32>,
     /// 0 = kein Spiel auf dem Feld.
     pub match_id: i64,
     pub match_name: String,
@@ -3895,6 +3905,10 @@ pub struct TlFinished {
     /// Ein-Hallen-Turnieren. Serde-Default hält alte Hosts lesbar.
     #[serde(default)]
     pub hall: String,
+    /// Verbrauchte Bälle laut BTP (`Match.Shuttles`, Spec
+    /// `tablet-ballzaehler`). Fehlt bei ausgeschaltetem Zähler und bei 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shuttles: Option<u32>,
 }
 
 /// Auswertung der gemessenen Spielzeiten (Spec `spielzeiten-prognose`):
@@ -4079,7 +4093,14 @@ pub(crate) fn felder_bauen(
             let fertig_seit = (c.match_id != 0)
                 .then(|| tablet.match_times_store().decided_seen_ms(c.match_id))
                 .flatten();
+            // Ballzahl nur am belegten Feld, bei eingeschaltetem Zähler und
+            // über 0 — sonst zeigt die Kachel nichts.
+            let baelle = (config.shuttle_counter && c.match_id != 0)
+                .then(|| tablet.court_shuttles(c.court_id))
+                .flatten()
+                .filter(|n| *n > 0);
             let mut view = court_view(c, clearing, schalter, spiel, fertig_seit);
+            view.shuttles = baelle;
             if config.meetingpoint.enabled && config.meetingpoint.field_check_enabled {
                 if let Some(m) = spiel {
                     view.feld_check = Some(crate::tablet::meetingpoint::feld_check_zaehlung(
@@ -4393,6 +4414,7 @@ pub(crate) fn build_state_limited(
             can_assign_waiting_officials: true,
             meetingpoint: meetingpoint_lage(tablet, config),
             finished_warning_seconds: config.finished_warning_seconds,
+            shuttle_counter: config.shuttle_counter,
             // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
             // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
             // lehnt die Aktion ohnehin ab (E7).
@@ -4738,6 +4760,11 @@ pub(crate) fn build_state_limited(
                     .court_id
                     .map(|cid| snap.court_location_name(cid))
                     .unwrap_or_default(),
+                shuttles: config
+                    .shuttle_counter
+                    .then(|| u32::try_from(m.shuttles).ok())
+                    .flatten()
+                    .filter(|n| *n > 0),
             }
         })
         .collect();
@@ -4755,6 +4782,7 @@ pub(crate) fn build_state_limited(
         can_reload_tablets: true,
         can_search: true,
         finished_warning_seconds: config.finished_warning_seconds,
+        shuttle_counter: config.shuttle_counter,
         rev,
         server_now_ms: now_ms,
         tournament: snap.tournament_name.clone(),
@@ -5491,6 +5519,8 @@ fn court_view(
         court: c.court,
         location: c.location,
         highlight: spiel.map(|m| m.highlight).unwrap_or(0),
+        // Setzt der Aufrufer, der Config und Tablet-Stand kennt.
+        shuttles: None,
         match_id: c.match_id,
         match_name: c.match_name,
         round_name: c.round_name,
@@ -11513,6 +11543,69 @@ mod tests {
     }
 
     #[test]
+    fn die_ballzahl_erscheint_nur_bei_eingeschaltetem_zaehler() {
+        // Spec tablet-ballzaehler: laufendes Spiel → Zahl aus dem
+        // gespiegelten Tablet-Stand; beendetes Spiel → Zahl aus BTP; bei 0,
+        // ohne Stand oder bei ausgeschaltetem Zähler nichts.
+        let tablet = TabletState::default();
+        let mut laeuft = a_match(7);
+        laeuft.status = MatchStatus::OnCourt;
+        laeuft.court_id = Some(1);
+        let mut ohne_stand = a_match(8);
+        ohne_stand.status = MatchStatus::OnCourt;
+        ohne_stand.court_id = Some(2);
+        let mut fertig = a_match(9);
+        fertig.status = MatchStatus::Finished;
+        fertig.winner = Some(1);
+        fertig.shuttles = 5;
+        let mut fertig_ohne = a_match(10);
+        fertig_ohne.status = MatchStatus::Finished;
+        fertig_ohne.winner = Some(2);
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![laeuft, ohne_stand, fertig, fertig_ohne],
+            Vec::new(),
+        ));
+        tablet.attach_tablet(1);
+        tablet.set_court_state(1, r#"{"shuttles":3}"#.to_string());
+
+        let an = AppConfig {
+            shuttle_counter: true,
+            ..AppConfig::default()
+        };
+        let s = build_state(&tablet, &an, 1_000_000, 1);
+        assert!(s.shuttle_counter);
+        let feld = |id: i64| s.courts.iter().find(|c| c.court_id == id).unwrap().shuttles;
+        assert_eq!(feld(1), Some(3));
+        assert_eq!(feld(2), None, "ohne gespiegelten Stand fehlt das Feld");
+        let beendet = |id: i64| {
+            s.finished
+                .iter()
+                .find(|f| f.match_id == id)
+                .unwrap()
+                .shuttles
+        };
+        assert_eq!(beendet(9), Some(5));
+        assert_eq!(beendet(10), None, "0 zeigt nichts");
+
+        let aus = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        assert!(!aus.shuttle_counter);
+        let json = serde_json::to_string(&aus).unwrap();
+        assert!(
+            !json.contains("\"shuttles\""),
+            "Zähler aus → keine Zahl: {json}"
+        );
+
+        // Tablet zeigt 0 → nichts.
+        tablet.set_court_state(1, r#"{"shuttles":0}"#.to_string());
+        let s = build_state(&tablet, &an, 1_000_000, 1);
+        assert_eq!(
+            s.courts.iter().find(|c| c.court_id == 1).unwrap().shuttles,
+            None
+        );
+    }
+
+    #[test]
     fn the_pause_is_republished_as_known_fields_only() {
         // Der Pausen-Block kommt roh vom Zähltablett. Würde er unverändert
         // weitergereicht, könnte ein Tablett beliebigen Inhalt an alle
@@ -11630,6 +11723,8 @@ mod tests {
             // Fähigkeitsmerkmal (Spec tl-zeilenfarbe): reines Bool „dieser
             // Turnier-PC kennt die Zeilenfarbe".
             "can_set_highlight",
+            // Schalter „Bälle am Tablet zählen": reines Bool aus der Config.
+            "shuttle_counter",
             // Fähigkeitsmerkmal: reines Bool „dieser Turnier-PC kennt
             // ‚Erste Ansage wiederholen'".
             "can_repeat_prep_call",
@@ -11653,6 +11748,9 @@ mod tests {
             // Turnierleitung AM SPIEL, ohne Bedeutung über Personen; die
             // Bedeutung der Farbe vereinbart das Team, sie steht nirgends.
             "highlight",
+            // Am Tablet gezählte Bälle (Spec tablet-ballzaehler): eine Zahl
+            // ohne Personenbezug, nur bei eingeschaltetem Zähler.
+            "shuttles",
             // Fähigkeitsmerkmal (Spec tl-web-felder-sperren, E13): reines
             // Bool „dieser Turnier-PC kennt das Sperren". Sagt nichts über
             // Personen, nur über die Programmversion — und ohne es zeigte
@@ -11821,6 +11919,9 @@ mod tests {
             "planned_time",
             "draw_name",
             "hall",
+            // Ballzahl laut BTP (Spec tablet-ballzaehler): Abrechnungsgröße
+            // ohne Personenbezug, nur bei eingeschaltetem Zähler.
+            "shuttles",
             "hall_source",
             "prep_call",
             "called_at_ms",

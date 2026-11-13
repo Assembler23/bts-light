@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.400
+
+- **Ballzähler: Schalter im Setup und Anzeige für die Turnierleitung.** Der
+  neue Abschnitt „Ballzähler" im Setup schaltet das Zählen am Tablet ein
+  (Standard aus). Die Turnierleitungssicht zeigt dann die gezählten Bälle an
+  der Feldkachel und an beendeten Spielen. Beim Eintragen oder Korrigieren
+  eines Ergebnisses lässt sich die Ballzahl angeben; ein leeres Feld lässt den
+  Wert in BTP unverändert.
+
 ## v0.9.399
 
 - **Bälle am Tablet zählen.** Ist der Ballzähler eingeschaltet, steht in der
