@@ -914,7 +914,7 @@ BTP (Windows-PC, **Testturnier**), in dieser Reihenfolge:
 |---|---|---|
 | `does_btp_deliver_shuttles` | nein | Kommt `Shuttles` in `SENDTOURNAMENTINFO` an, mit welchem Typ, fehlt es bei 0? Vorher in BTP an einem Spiel von Hand eine Ballzahl eintragen. Nennt außerdem die Spiele auf einem Feld. |
 | `does_a_waiting_match_keep_shuttles` | ja, stellt zurück | Nimmt BTP `Shuttles` in einem Match-Write an? Bleibt der Wert nach einem Farb- und einem Schiedsrichter-Write ohne `Shuttles`? Latenz bis zum Nachlesen. |
-| `does_a_result_write_carry_shuttles` | **ja, wertet ein Spiel — nicht umkehrbar** | Dasselbe am laufenden Spiel, dann Ergebnis-Write mit `Shuttles`, danach Farb- und Schiedsrichter-Write am **gewerteten** Spiel und ein zweiter Ergebnis-Write ohne `Shuttles`. Läuft nur mit `BTP_SHUTTLES_MATCH=<DrawID>:<Match-ID>` eines Spiels, das auf einem Feld steht (die `Match.ID` zählt BTP je Auslosung, sie allein ist nicht eindeutig). |
+| `does_a_result_write_carry_shuttles` | **ja, wertet ein Spiel — nicht umkehrbar** | Dasselbe am laufenden Spiel, dann Ergebnis-Write mit `Shuttles`, danach Farb- und Schiedsrichter-Write am **gewerteten** Spiel und ein zweiter Ergebnis-Write ohne `Shuttles`. Läuft nur mit `BTP_SHUTTLES_MATCH=<DrawID>:<Match-ID>` eines Spiels, das auf einem Feld steht (dieselbe Adressierung wie im `SENDUPDATE`). |
 
 ```text
 cargo test -p bts-light --test btp_shuttles_probe does_btp_deliver_shuttles -- --ignored --nocapture

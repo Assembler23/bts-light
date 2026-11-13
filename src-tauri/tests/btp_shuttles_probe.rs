@@ -61,7 +61,7 @@
 //! cargo test -p bts-light --test btp_shuttles_probe does_a_result_write_carry_shuttles -- --ignored --nocapture
 //! ```
 //!
-//! Die Match-ID für Messung 3 nennt Messung 1 („Spiele auf einem Feld").
+//! Den Wert für Messung 3 nennt Messung 1 („Spiele auf einem Feld").
 
 use bts_light_lib::btp::model::{BtpMatch, BtpSnapshot, MatchStatus};
 use bts_light_lib::btp::xml::Node;
@@ -125,9 +125,10 @@ fn zahl(n: &Node) -> Option<i64> {
     n.value().and_then(|v| v.as_int())
 }
 
-/// Adresse eines Matches. Die `Match.ID` allein reicht nicht: BTP zählt sie
-/// **je Auslosung** — dieselbe Nummer kommt im Turnier mehrfach vor
-/// (gemessen 13.11.2026: 245 Matches, IDs ab 1 in jeder Auslosung).
+/// Adresse eines Matches: Auslosung + ID, so wie BTP ein Match im
+/// `SENDUPDATE` selbst adressiert. Ob die `Match.ID` allein im Turnier
+/// eindeutig ist, zählt `does_btp_deliver_shuttles` nach (laut Messung vom
+/// 26.10.2026 ist sie der Primärschlüssel der TP-Datei).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Ziel {
     draw: i64,
@@ -423,11 +424,32 @@ async fn does_btp_deliver_shuttles() {
     );
     for m in mit.iter().take(10) {
         println!(
-            "  Match {:?}: {:?}",
+            "  Match {:?}:{:?}: {:?}",
+            kind(m, "DrawID").and_then(zahl),
             kind(m, "ID").and_then(zahl),
             kind(m, "Shuttles")
         );
     }
+    // Eindeutigkeit der Match-ID: roh über alle Knoten und über die
+    // geparsten Spiele (nur `IsMatch=true`).
+    let doppelt = |ids: Vec<i64>| {
+        let gesamt = ids.len();
+        let verschieden = ids
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        gesamt - verschieden
+    };
+    println!(
+        "Match-IDs doppelt: {} unter den rohen Knoten, {} unter den {} geparsten Spielen",
+        doppelt(
+            alle.iter()
+                .filter_map(|m| kind(m, "ID").and_then(zahl))
+                .collect()
+        ),
+        doppelt(snap.matches.iter().map(|m| m.id).collect()),
+        snap.matches.len()
+    );
     if mit.is_empty() {
         println!(
             "Kein Spiel trägt eine Ballzahl. In BTP an einem Spiel von Hand eine \
@@ -535,7 +557,7 @@ async fn does_a_result_write_carry_shuttles() {
     else {
         println!(
             "\nBTP_SHUTTLES_MATCH fehlt oder hat nicht die Form <DrawID>:<Match-ID> — nichts geschrieben. Die Messung \
-             wertet das genannte Spiel und ist nicht umkehrbar; Match-ID aus \
+             wertet das genannte Spiel und ist nicht umkehrbar; den Wert aus \
              `does_btp_deliver_shuttles` nehmen."
         );
         return;
@@ -552,7 +574,13 @@ async fn does_a_result_write_carry_shuttles() {
         .expect("BTP_SHUTTLES_MATCH nennt ein Match dieses Turniers");
     assert!(
         m.status == MatchStatus::OnCourt && m.court_id.is_some() && m.winner.is_none(),
-        "Match {id} muss auf einem Feld stehen und darf kein Ergebnis haben"
+        "Match {id} muss auf einem Feld stehen und darf kein Ergebnis haben \
+         (gelesen: Status {:?}, Feld {:?}, Sieger {:?}, {} {})",
+        m.status,
+        m.court_id,
+        m.winner,
+        m.class_label,
+        m.round_name
     );
     println!("Ziel: laufendes Match {id} auf Feld-ID {:?}", m.court_id);
     let session = login(pw).await;
