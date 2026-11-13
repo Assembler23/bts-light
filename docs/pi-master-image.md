@@ -104,9 +104,8 @@ Master", den du beliebig oft klonst.
    - Neu starten und prüfen: am TV erscheint die Kopplungs-Seite, und der
      TV schaltet sich beim Einschalten auf den Pi (CEC). ✓
    - `sudo bash build-master-image.sh` ausführen, dann
-     `sudo shutdown -h now` — **nicht** neu starten: Das Skript schaltet
-     den Nur-Lese-Modus für die Klone scharf, ein Neustart würde den Master
-     selbst schreibgeschützt machen.
+     `sudo shutdown -h now` — **nicht** neu starten, sonst wäre das
+     Aufräumen für die Klone umsonst.
 2. **Karte als Image sichern.** Die fertige Karte in den Computer stecken
    und in eine `.img`-Datei zurücklesen:
    - Windows: *Win32 Disk Imager* → „Read".
@@ -138,14 +137,12 @@ Raspberry Pi OS Lite (64-bit, Bookworm), und läuft auf Pi Zero 2 W und Pi 3 B+.
 | WLAN | `btsaccess` (das WLAN des Verleih-Routers, versteckte SSID erlaubt) |
 | Benutzer | `badhub`, Passwort `bts-light` — nur an Tastatur und Bildschirm, SSH ist aus |
 | Monitor-Adresse | `http://bts-light.local:8088/monitor` (Turnier-PC wird selbst gesucht) |
-| Schreibschutz | schaltet sich nach dem ersten Start von selbst ein (**nicht** am Pi Zero 2 W mit 512 MB — dort bleibt die Karte beschreibbar) |
+| Schreibschutz | keiner — die Karte bleibt beschreibbar (der Nur-Lese-Modus ist seit v0.9.397 ausgebaut) |
 
 Im Raspberry Pi Imager **keine** Anpassungen setzen. Beim ersten Start
-vergrößert der Pi die Karte, startet neu, schaltet den Schreibschutz ein und
-startet noch einmal — danach erscheint der Kopplungs-Code. Ein anderes WLAN
-oder ein anderes Passwort: Karte beschreibbar schalten
-([pi-setup.md](pi-setup.md) „Nur-Lese-Modus"), am Pi ändern, Schalterdatei
-wieder löschen.
+vergrößert der Pi die Karte und startet einmal neu — danach erscheint der
+Kopplungs-Code. Ein anderes WLAN oder ein anderes Passwort lässt sich direkt
+am Pi ändern (Tastatur anschließen).
 
 Das Image wird **emuliert** gebaut (Docker, ARM-Emulation) mit
 `pi/build-image-docker.sh` — dieselben Schritte wie am echten Pi:

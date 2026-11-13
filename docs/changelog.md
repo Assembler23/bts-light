@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.397
+
+- **Pi-Monitore: Nur-Lese-Modus ausgebaut.** Der Schreibschutz der SD-Karte
+  machte nach dem Pi Zero 2 W auch am Pi 3 Ärger. Das Pi-Image lässt die
+  Karte jetzt immer beschreibbar; der zweite Neustart nach dem Einschalten
+  entfällt. Strom abziehen geht weiterhin — der Pi schreibt im Betrieb nur
+  sein kurzes Log. Karten mit dem bisherigen Image neu bespielen oder am PC
+  die Datei `bts-schreiben-erlaubt.txt` auf dem Karten-Laufwerk anlegen.
+
 ## v0.9.396
 
 - **Stream-Werbung für OBS.** Neben der Score-Leiste gibt es eine zweite

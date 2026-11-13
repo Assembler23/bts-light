@@ -33,12 +33,12 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-# Im Nur-Lese-Modus gingen alle Aufräumarbeiten beim Neustart verloren –
-# das Image wäre der unveränderte Stand von vorher.
+# Eine Karte mit dem Image vom November 2026 kann noch im Nur-Lese-Modus
+# laufen: Alle Aufräumarbeiten gingen beim Neustart verloren.
 if [ "$(findmnt -n -o FSTYPE /)" = "overlay" ]; then
-  echo "Die Karte läuft im Nur-Lese-Modus. Erst bts-schreiben-erlaubt.txt auf" >&2
+  echo "Die Karte läuft noch im Nur-Lese-Modus. Erst bts-schreiben-erlaubt.txt auf" >&2
   echo "der Boot-Partition anlegen, neu starten (der Pi startet ein zweites Mal" >&2
-  echo "von selbst), dann dieses Skript erneut aufrufen." >&2
+  echo "von selbst), dann setup-monitor.sh und dieses Skript erneut aufrufen." >&2
   exit 1
 fi
 
@@ -133,13 +133,6 @@ if command -v cloud-init >/dev/null 2>&1; then
   echo "  ✓ cloud-init clean"
 fi
 
-# ─── 3b) Nur-Lese-Modus für die Klone scharf schalten ───────────────────
-# Ohne Schalterdatei schaltet bts-nur-lesen.service jeden Klon nach seinem
-# ersten Start (Imager-Einrichtung) in den Nur-Lese-Modus. Der Master selbst
-# wird jetzt nur noch heruntergefahren, nicht mehr gestartet.
-rm -f "$BOOT_DIR/bts-schreiben-erlaubt.txt" "$BOOT_DIR/bts-nur-lesen-versuche.txt"
-echo "  ✓ Nur-Lese-Modus für die Klone aktiviert (Schalterdatei entfernt)"
-
 # ─── 4) Sync + Hinweis ──────────────────────────────────────────────────
 sync
 sleep 2
@@ -151,7 +144,7 @@ cat <<EOM
 
 Jetzt:
   sudo shutdown -h now
-  (NICHT neu starten – sonst schaltet sich der Master selbst schreibgeschützt.)
+  (NICHT neu starten – sonst war das Aufräumen umsonst.)
 
 Wenn die grüne LED dauerhaft aus ist:
   → SD-Karte raus, in einen Host-Computer (Mac/Linux).

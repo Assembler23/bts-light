@@ -57,8 +57,8 @@ Einstellung. Die Einstellung bleibt in BTP gespeichert.
   der Tablet-Server-Port).
 - **Court-Monitor (Raspberry Pi)** – ein Pi im Hallen-WLAN zeigt
   Live-Score bzw. Feldnummer als Kiosk auf einem TV. Der Pi findet den
-  Turnier-PC selbst (Subnetz-Scan), schaltet den TV per HDMI-CEC ein und
-  läuft im Nur-Lese-Modus (verträgt hartes Abschalten). Einrichtung:
+  Turnier-PC selbst (Subnetz-Scan), und schaltet den TV per HDMI-CEC ein.
+  Einrichtung:
   [docs/pi-setup.md](docs/pi-setup.md) · Master-Image:
   [docs/pi-master-image.md](docs/pi-master-image.md) · Download:
   <https://badhub.de/download/bts-light/pi-image/bts-light-pi.img.xz>.

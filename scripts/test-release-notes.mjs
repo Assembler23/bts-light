@@ -201,7 +201,7 @@ pruefe(
 );
 // Seit November 2026 gilt EIN Image fuer beide Pi-Modelle. Das alte
 // Test-Image (Firmware-Tausch fuer den 3 B+) darf nicht wieder auftauchen —
-// es ist das BTS-Image ohne CEC und Schreibschutz.
+// es ist das BTS-Image ohne CEC.
 pruefe(
   !seite.includes("bts-light-pi-v2.img.xz"),
   "Release-Seite verlinkt das alte Test-Image fuer den Pi 3 B+ nicht mehr"
