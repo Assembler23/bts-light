@@ -1,7 +1,8 @@
 # Ballzähler am Tablet — Spezifikation
 
 > Status: **freigegeben 13.11.2026** (via /idee: Brief → Grill → How-To → Review).
-> Umsetzung: PR 0 (Messwerkzeug) gebaut; BTP-Messung steht aus.
+> Umsetzung: PR 0 (Messwerkzeug) gebaut; BTP-Messung vom 13.11.2026 ergibt
+> **Zweig B** (jeder Match-Write trägt `Shuttles`).
 > Quelle: Idee vom 13.11.2026. Betroffene Crates: src-tauri / relay / relay-proto / src.
 > ADR: [0093](../adr/0093-ballzahl-reist-mit-dem-ergebnis.md).
 
@@ -110,10 +111,16 @@ es; in bts-light war der Punkt „bewusst zurückgestellt"
 
 ### Zwei Zweige — die Messung entscheidet
 
+> **Entschieden 13.11.2026: Zweig B.** BTP liefert `Shuttles` an jedem Spiel
+> aus, nimmt es im Ergebnis-Write an und setzt es bei jedem Match-Write ohne
+> das Feld auf 0 — am wartenden, laufenden und gewerteten Spiel. Zweig A
+> entfällt. Messwerte:
+> [btp_protocol.md](../btp_protocol.md) („Ballzahl `Match.Shuttles`").
+
 Ob BTP `Shuttles` behält, wenn ein späterer Schreibvorgang am selben Spiel das
-Feld weglässt, ist nicht gemessen. Bei `CourtID`, `Official1ID`/`Official2ID`
-und `Highlight` liest BTP „fehlt" als 0; `Sets`/`Winner` bleiben dagegen
-erhalten. Der erste Umsetzungsschritt ist deshalb ein Messwerkzeug.
+Feld weglässt, war bei der Freigabe nicht gemessen. Bei `CourtID`,
+`Official1ID`/`Official2ID` und `Highlight` liest BTP „fehlt" als 0. Der erste
+Umsetzungsschritt war deshalb ein Messwerkzeug.
 
 - **Zweig A — „fehlt = bleibt":** `Shuttles` steht nur im Ergebnis-Write und
   nur, wenn eine Zahl vorliegt. Alle anderen Schreibvorgänge bleiben
@@ -262,9 +269,11 @@ Turnierleitung
 
 ## Offene Fragen / Annahmen
 
-- **Offen:** Ergebnis der BTP-Messung (Zweig A oder B).
-- **Offen, nur für Zweig B:** ob bts-light nach Spielende noch Officials-Writes
-  auf beendete Spiele sendet; wird in PR 1 geprüft und abgedeckt.
+- **Geklärt 13.11.2026:** Die BTP-Messung ergibt Zweig B.
+- **Offen:** ob bts-light nach Spielende noch Officials-Writes auf beendete
+  Spiele sendet; wird in PR 1 geprüft und abgedeckt. Die Messung zeigt
+  zusätzlich, dass ein solcher Write dem beendeten Spiel den Sieger nimmt —
+  unabhängig von der Ballzahl.
 - **Annahmen** (Grill-Empfehlungen, vom Nutzer nicht einzeln bestätigt):
   - Zähler unabhängig vom Undo; eingefroren ab dem Übermitteln.
   - Überholtes Tablet-Ergebnis → Zahl verfällt.

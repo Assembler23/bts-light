@@ -60,6 +60,8 @@ mehrere tragfähige Antworten:
 
 - Vor der Umsetzung steht ein Messwerkzeug am echten BTP; sein Ergebnis wählt
   zwischen „nur im Ergebnis-Write" und „überall reasserten".
+  **Nachtrag 13.11.2026:** Gemessen — BTP liest „fehlt" als 0, also reasserten
+  alle Match-Writes (`docs/btp_protocol.md`, „Ballzahl `Match.Shuttles`").
 - BTP zeigt die Zahl erst nach Spielende.
 - Die Anzeige am laufenden Spiel ist nur so gut wie der Zustands-Spiegel (fehlt
   bei altem Relay oder Tablet ohne Verbindung).

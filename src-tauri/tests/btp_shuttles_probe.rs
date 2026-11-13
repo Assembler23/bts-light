@@ -49,8 +49,17 @@
 //! einer Fehlermeldung ab, kann am Zielspiel eine Ballzahl (2, 3 oder 5) und
 //! die Marker-Farbe stehen bleiben; beides dann in BTP von Hand löschen.
 //!
-//! **Ergebnis:** noch nicht gemessen. Nach dem Lauf hier und in
-//! `docs/btp_protocol.md` („Ballzahl `Match.Shuttles`") eintragen.
+//! **Ergebnis (13.11.2026, Testturnier, 245 Match-Knoten): Zweig B.**
+//! - BTP liefert `Shuttles` an jedem Match-Knoten als `Integer`, auch bei 0.
+//! - Ein Match-Write mit `Shuttles` wird angenommen (wartend nach 420 ms
+//!   sichtbar), ebenso der Ergebnis-Write (349 ms).
+//! - Jeder Write ohne `Shuttles` setzt die Ballzahl auf 0: Farb- und
+//!   Schiedsrichter-Write am wartenden, laufenden und gewerteten Spiel
+//!   (317–682 ms), auch ein zweiter Ergebnis-Write.
+//! - Nebenbefund: Farb- und Schiedsrichter-Write am **gewerteten** Spiel
+//!   nahmen ihm den Sieger; der zweite Ergebnis-Write stellte ihn wieder her.
+//!
+//! Einzelheiten in `docs/btp_protocol.md` („Ballzahl `Match.Shuttles`").
 //!
 //! Standardmäßig übersprungen:
 //!
