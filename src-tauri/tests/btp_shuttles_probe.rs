@@ -24,7 +24,7 @@
 //!    der eigene Write beim Nachlesen sichtbar ist.
 //! 3. `does_a_result_write_carry_shuttles` — **schreibt ein Ergebnis, nicht
 //!    umkehrbar.** Nur an einem Testturnier. Läuft nur, wenn
-//!    `BTP_SHUTTLES_MATCH=<Match-ID>` ein Spiel nennt, das gerade **auf
+//!    `BTP_SHUTTLES_MATCH=<DrawID>:<Match-ID>` ein Spiel nennt, das gerade **auf
 //!    einem Feld** steht und noch kein Ergebnis hat. Misst am laufenden
 //!    Spiel dasselbe wie 2, dann den Ergebnis-Write mit `Shuttles`, danach
 //!    Farb- und Schiedsrichter-Write am **gewerteten** Spiel und einen
@@ -57,7 +57,7 @@
 //! ```text
 //! cargo test -p bts-light --test btp_shuttles_probe does_btp_deliver_shuttles -- --ignored --nocapture
 //! cargo test -p bts-light --test btp_shuttles_probe does_a_waiting_match_keep_shuttles -- --ignored --nocapture
-//! $env:BTP_SHUTTLES_MATCH = "<Match-ID>"
+//! $env:BTP_SHUTTLES_MATCH = "<DrawID>:<Match-ID>"
 //! cargo test -p bts-light --test btp_shuttles_probe does_a_result_write_carry_shuttles -- --ignored --nocapture
 //! ```
 //!
@@ -125,18 +125,54 @@ fn zahl(n: &Node) -> Option<i64> {
     n.value().and_then(|v| v.as_int())
 }
 
+/// Adresse eines Matches. Die `Match.ID` allein reicht nicht: BTP zählt sie
+/// **je Auslosung** — dieselbe Nummer kommt im Turnier mehrfach vor
+/// (gemessen 13.11.2026: 245 Matches, IDs ab 1 in jeder Auslosung).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Ziel {
+    draw: i64,
+    id: i64,
+}
+
+impl Ziel {
+    fn von(m: &BtpMatch) -> Self {
+        Ziel {
+            draw: m.draw_id,
+            id: m.id,
+        }
+    }
+
+    /// Liest `<DrawID>:<Match-ID>`, wie `does_btp_deliver_shuttles` es ausgibt.
+    fn aus_text(text: &str) -> Option<Self> {
+        let (draw, id) = text.trim().split_once(':')?;
+        Some(Ziel {
+            draw: draw.trim().parse().ok()?,
+            id: id.trim().parse().ok()?,
+        })
+    }
+}
+
+impl std::fmt::Display for Ziel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.draw, self.id)
+    }
+}
+
 /// Der rohe `Shuttles`-Knoten eines Matches, `None` = Element fehlt.
-fn shuttles_knoten(nodes: &[Node], match_id: i64) -> Option<Node> {
+fn shuttles_knoten(nodes: &[Node], ziel: Ziel) -> Option<Node> {
     let mut alle = Vec::new();
     alle_matches(nodes, &mut alle);
     alle.into_iter()
-        .find(|m| kind(m, "ID").and_then(zahl) == Some(match_id))
+        .find(|m| {
+            kind(m, "ID").and_then(zahl) == Some(ziel.id)
+                && kind(m, "DrawID").and_then(zahl) == Some(ziel.draw)
+        })
         .and_then(|m| kind(m, "Shuttles").cloned())
 }
 
 /// Ballzahl als Zahl; ein fehlendes Element zählt als 0.
-fn shuttles(nodes: &[Node], match_id: i64) -> i64 {
-    shuttles_knoten(nodes, match_id)
+fn shuttles(nodes: &[Node], ziel: Ziel) -> i64 {
+    shuttles_knoten(nodes, ziel)
         .as_ref()
         .and_then(zahl)
         .unwrap_or(0)
@@ -227,12 +263,12 @@ async fn sende(bytes: Vec<u8>) -> bool {
 }
 
 /// Frischer Stand eines Matches (Roh-Ballzahl + geparstes Match).
-async fn frisch(pw: Option<&str>, id: i64) -> (i64, BtpMatch) {
+async fn frisch(pw: Option<&str>, id: Ziel) -> (i64, BtpMatch) {
     let (nodes, snap) = lese(pw).await;
     let m = snap
         .matches
         .iter()
-        .find(|m| m.id == id)
+        .find(|m| Ziel::von(m) == id)
         .cloned()
         .expect("Match da");
     (shuttles(&nodes, id), m)
@@ -249,7 +285,7 @@ fn zeige(s: i64, m: &BtpMatch) {
 /// Stand und die Wartezeit; `None` = die Bedingung trat nie ein.
 async fn warte(
     pw: Option<&str>,
-    id: i64,
+    id: Ziel,
     ok: impl Fn(i64, &BtpMatch) -> bool,
 ) -> Option<(i64, BtpMatch, u128)> {
     let t0 = Instant::now();
@@ -265,7 +301,7 @@ async fn warte(
 
 /// Setzt die Ballzahl über einen Farb-Write mit unveränderter Farbe und
 /// wartet, bis sie beim Nachlesen steht. `None` = nie sichtbar.
-async fn setze_shuttles(pw: Option<&str>, id: i64, wert: i64, session: &str) -> Option<u128> {
+async fn setze_shuttles(pw: Option<&str>, id: Ziel, wert: i64, session: &str) -> Option<u128> {
     let (_, m) = frisch(pw, id).await;
     let bytes = mit_shuttles(&schreibe(&m, Form::Farbe, m.highlight, session, pw), wert);
     if !sende(bytes).await {
@@ -287,7 +323,7 @@ async fn setze_shuttles(pw: Option<&str>, id: i64, wert: i64, session: &str) -> 
 /// nächste Messung von einem definierten Stand ausgeht.
 async fn folge_write(
     pw: Option<&str>,
-    id: i64,
+    id: Ziel,
     form: Form,
     wert: i64,
     session: &str,
@@ -400,7 +436,9 @@ async fn does_btp_deliver_shuttles() {
         );
     }
 
-    println!("\nSpiele auf einem Feld (Kandidaten für BTP_SHUTTLES_MATCH):");
+    println!(
+        "\nSpiele auf einem Feld (Kandidaten für BTP_SHUTTLES_MATCH, Form <DrawID>:<Match-ID>):"
+    );
     let laufend: Vec<&BtpMatch> = snap
         .matches
         .iter()
@@ -411,8 +449,11 @@ async fn does_btp_deliver_shuttles() {
     }
     for m in laufend {
         println!(
-            "  Match-ID {} · Feld-ID {:?} · {} {}",
-            m.id, m.court_id, m.class_label, m.round_name
+            "  {} · Feld-ID {:?} · {} {}",
+            Ziel::von(m),
+            m.court_id,
+            m.class_label,
+            m.round_name
         );
     }
 }
@@ -436,9 +477,9 @@ async fn does_a_waiting_match_keep_shuttles() {
                 && m.winner.is_none()
                 && !m.team1.is_empty()
                 && !m.team2.is_empty()
-                && shuttles(&nodes, m.id) == 0
+                && shuttles(&nodes, Ziel::von(m)) == 0
         })
-        .map(|m| m.id)
+        .map(Ziel::von)
         .expect("wartendes Spiel ohne Feld und ohne Ballzahl");
     println!("Ziel: wartendes Match {id}");
     let session = login(pw).await;
@@ -490,10 +531,10 @@ async fn does_a_waiting_match_keep_shuttles() {
 async fn does_a_result_write_carry_shuttles() {
     let Some(id) = std::env::var("BTP_SHUTTLES_MATCH")
         .ok()
-        .and_then(|v| v.trim().parse::<i64>().ok())
+        .and_then(|v| Ziel::aus_text(&v))
     else {
         println!(
-            "\nBTP_SHUTTLES_MATCH nicht gesetzt — nichts geschrieben. Die Messung \
+            "\nBTP_SHUTTLES_MATCH fehlt oder hat nicht die Form <DrawID>:<Match-ID> — nichts geschrieben. Die Messung \
              wertet das genannte Spiel und ist nicht umkehrbar; Match-ID aus \
              `does_btp_deliver_shuttles` nehmen."
         );
@@ -506,7 +547,7 @@ async fn does_a_result_write_carry_shuttles() {
     let m = snap
         .matches
         .iter()
-        .find(|m| m.id == id)
+        .find(|m| Ziel::von(m) == id)
         .cloned()
         .expect("BTP_SHUTTLES_MATCH nennt ein Match dieses Turniers");
     assert!(
@@ -658,6 +699,7 @@ async fn does_a_result_write_carry_shuttles() {
 /// Requests unverändert bleibt.
 #[test]
 fn shuttles_lands_in_the_match_node_of_real_requests() {
+    const ZIEL: Ziel = Ziel { draw: 2, id: 7 };
     let update = proto::MatchUpdate {
         btp_match_id: 7,
         draw_id: 2,
@@ -704,10 +746,14 @@ fn shuttles_lands_in_the_match_node_of_real_requests() {
         let vorher = proto::decode_response(&original).expect("dekodierbar");
         // Dekodieren und neu kodieren verändert kein Byte.
         assert_eq!(wire::encode_message(&xml::encode(&vorher)), original);
-        assert_eq!(shuttles_knoten(&vorher, 7), None, "Original ohne Shuttles");
+        assert_eq!(
+            shuttles_knoten(&vorher, ZIEL),
+            None,
+            "Original ohne Shuttles"
+        );
 
         let nachher = proto::decode_response(&mit_shuttles(&original, 5)).expect("dekodierbar");
-        assert_eq!(shuttles(&nachher, 7), 5);
+        assert_eq!(shuttles(&nachher, ZIEL), 5);
 
         // Bis auf das angehängte Element ist der Request derselbe.
         let mut erwartet = vorher;
