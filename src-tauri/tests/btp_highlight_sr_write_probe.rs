@@ -93,6 +93,7 @@ fn farbe(m: &BtpMatch, wert: u8, session: &str, pw: Option<&str>) -> Vec<u8> {
             draw_id: m.draw_id,
             planning_id: m.planning_id,
             highlight: wert,
+            shuttles: 0,
             court_id: m.court_id.unwrap_or(0),
             officials: (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
         }],

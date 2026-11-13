@@ -149,6 +149,12 @@ pub struct MatchBrief {
     /// Zählsperre. `#[serde(default)]`: ein alter Host bietet nichts an.
     #[serde(rename = "feldCheck", default)]
     pub feld_check: bool,
+    /// Zählt das Tablet die verbrauchten Bälle (Spec `tablet-ballzaehler`,
+    /// ADR 0093)? Schalter **und** Fähigkeitsmeldung in einem: Nur ein Host,
+    /// der die Zahl auch nach BTP schreibt, setzt das Feld.
+    /// `#[serde(default)]`: ein alter Host bietet den Zähler nicht an.
+    #[serde(rename = "shuttleCounter", default)]
+    pub shuttle_counter: bool,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -1025,6 +1031,9 @@ pub fn schlanker_anzeige_stand(state: &str) -> String {
     // Stand-Wahl zwischen Tablets desselben Felds und hat auf einer Anzeige,
     // die jeder im Netz abrufen kann, nichts verloren.
     obj.remove("schreiber");
+    // Ballzahl (Spec `tablet-ballzaehler`): Abrechnungsgröße der
+    // Turnierleitung, keine Anzeige liest sie.
+    obj.remove("shuttles");
     serde_json::to_string(&v).unwrap_or_else(|_| state.to_string())
 }
 
@@ -1663,6 +1672,41 @@ pub struct ResultBody {
     /// Tablets kompatibel.
     #[serde(rename = "cascadeWalkover", default)]
     pub cascade_walkover: bool,
+    /// Verbrauchte Bälle laut Tablet-Zähler (Spec `tablet-ballzaehler`).
+    /// Fehlt bei älteren Tablets und bei ausgeschaltetem Zähler. Bewusst
+    /// breiter als der erlaubte Bereich: Ein Wert über [`MAX_SHUTTLES`]
+    /// soll die Zahl kippen, nicht das ganze Ergebnis (`ballzahl_geprueft`).
+    /// Dasselbe gilt für Unsinn (negativ, Text, Bruch): Er liest sich als
+    /// „keine Angabe" ([`ballzahl_tolerant`]).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ballzahl_tolerant"
+    )]
+    pub shuttles: Option<u32>,
+}
+
+/// Liest die Ballzahl, ohne dass ein kaputter Wert das Ergebnis mitreißt:
+/// eine nichtnegative ganze Zahl bleibt (übergroße werden auf `u32::MAX`
+/// gesetzt und fallen später am Deckel), alles andere ist `None`.
+fn ballzahl_tolerant<'de, D>(d: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let wert = serde_json::Value::deserialize(d)?;
+    Ok(wert.as_u64().map(|n| u32::try_from(n).unwrap_or(u32::MAX)))
+}
+
+/// Höchste Ballzahl, die ein Tablet oder die Turnierleitung melden darf
+/// (Spec `tablet-ballzaehler`). Host, Relay und Seiten prüfen gegen
+/// denselben Deckel.
+pub const MAX_SHUTTLES: u32 = 99;
+
+/// Die Ballzahl, wenn sie im erlaubten Bereich liegt — sonst `None`
+/// („keine Angabe"). Geteilt zwischen Relay (Deckel) und Host
+/// (`process_result`), damit beide dieselbe Grenze ziehen.
+pub fn ballzahl_geprueft(shuttles: Option<u32>) -> Option<u32> {
+    shuttles.filter(|&n| n <= MAX_SHUTTLES)
 }
 
 /// Serde-Hilfe: `false` ist der Normalfall und muss nicht über die Leitung
@@ -2336,6 +2380,14 @@ pub enum TlAction {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         winner: Option<i64>,
         overwrite: bool,
+        /// Verbrauchte Bälle (Spec `tablet-ballzaehler`). **Ausnahme von
+        /// der „kein `#[serde(default)]`"-Regel dieses Enums**, dieselbe
+        /// Abwägung wie bei `winner`: `None` heißt „keine Angabe" — der
+        /// Host schreibt dann den Wert zurück, den BTP schon hat. Ein
+        /// älterer Browser ohne das Feld löst genau das bisherige
+        /// Verhalten aus.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        shuttles: Option<u32>,
     },
     /// Einen Walkover-Vorschlag für die gewählten Spiele werten.
     ConfirmWalkover {
@@ -3549,6 +3601,15 @@ pub enum RelayFrame {
         /// [`ResultBody::cascade_walkover`].
         #[serde(rename = "cascadeWalkover", default)]
         cascade_walkover: bool,
+        /// Ballzahl des Tablets – siehe [`ResultBody::shuttles`]. Der Relay
+        /// baut diesen Frame Feld für Feld; ein Relay ohne das Feld wirft
+        /// die Zahl still weg (deshalb Relay-Deploy vor dem Client).
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "ballzahl_tolerant"
+        )]
+        shuttles: Option<u32>,
     },
     /// Akkustand eines Tablets.
     Battery {
@@ -4064,6 +4125,86 @@ mod tests {
     }
 
     #[test]
+    fn ballzahl_reist_optional_und_abwaertskompatibel() {
+        // Spec tablet-ballzaehler. Ergebnis eines älteren Tablets: kein Feld.
+        let alt: ResultBody =
+            serde_json::from_str(r#"{"matchId":1,"sets":[{"a":21,"b":3}]}"#).unwrap();
+        assert_eq!(alt.shuttles, None);
+        // Ohne Zahl bleibt der Body wie bisher (kein `null` auf der Leitung).
+        assert!(!serde_json::to_string(&alt).unwrap().contains("shuttles"));
+
+        let neu: ResultBody =
+            serde_json::from_str(r#"{"matchId":1,"sets":[],"shuttles":7}"#).unwrap();
+        assert_eq!(neu.shuttles, Some(7));
+        roundtrip(&neu);
+        // Ein Wert über dem Deckel darf das Ergebnis nicht unlesbar machen —
+        // er wird später verworfen, das Ergebnis bleibt.
+        let gross: ResultBody =
+            serde_json::from_str(r#"{"matchId":1,"sets":[],"shuttles":4000}"#).unwrap();
+        assert_eq!(gross.shuttles, Some(4000));
+        assert_eq!(ballzahl_geprueft(gross.shuttles), None);
+        // Unsinn im Feld kippt nur die Zahl, nie das Ergebnis.
+        for kaputt in ["-1", "1.5", "\"7\"", "5000000000", "null", "[3]"] {
+            let json = format!(r#"{{"matchId":1,"sets":[],"shuttles":{kaputt}}}"#);
+            let b: ResultBody = serde_json::from_str(&json).expect(kaputt);
+            assert_eq!(ballzahl_geprueft(b.shuttles), None, "{kaputt}");
+        }
+        assert_eq!(ballzahl_geprueft(Some(MAX_SHUTTLES)), Some(99));
+        assert_eq!(ballzahl_geprueft(Some(0)), Some(0));
+        assert_eq!(ballzahl_geprueft(None), None);
+
+        // Relay → Host: Der Frame trägt die Zahl; ein Frame eines alten
+        // Relays (ohne Feld) liest sich als „keine Angabe".
+        let frame = RelayFrame::Result {
+            req_id: 9,
+            court_id: 1,
+            court_label: "Feld 1".into(),
+            match_id: 18,
+            sets: vec![SetAb { a: 21, b: 15 }],
+            retired: false,
+            walkover: false,
+            winner: None,
+            cascade_walkover: false,
+            shuttles: Some(5),
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains(r#""shuttles":5"#), "{json}");
+        roundtrip(&frame);
+        let ohne = json.replace(r#","shuttles":5"#, "");
+        assert!(matches!(
+            serde_json::from_str::<RelayFrame>(&ohne).unwrap(),
+            RelayFrame::Result { shuttles: None, .. }
+        ));
+
+        // Turnierleitung: Ein älterer Browser sendet das Feld nicht.
+        let aktion: TlAction = serde_json::from_str(
+            r#"{"action":"enter_result","matchId":7,"sets":[],"retired":false,"overwrite":false}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            aktion,
+            TlAction::EnterResult { shuttles: None, .. }
+        ));
+        let mit = TlAction::EnterResult {
+            match_id: 7,
+            sets: Vec::new(),
+            retired: false,
+            winner: None,
+            overwrite: true,
+            shuttles: Some(3),
+        };
+        roundtrip(&mit);
+
+        // Tablet: Ein Host ohne Ballzähler sendet `shuttleCounter` nicht.
+        let brief = serde_json::to_value(beispiel_match_assigned()).unwrap();
+        let mut kurz = brief["match"].clone();
+        kurz.as_object_mut().unwrap().remove("shuttleCounter");
+        let gelesen: MatchBrief = serde_json::from_value(kurz).unwrap();
+        assert!(!gelesen.shuttle_counter, "fehlend → kein Zähler");
+        assert!(brief["match"].get("shuttleCounter").is_some());
+    }
+
+    #[test]
     fn schlanker_anzeige_stand_streicht_events() {
         // Keine Anzeige liest Undo-Verlauf, Ballwechsel-Protokoll oder
         // Zettel-Ereignisse. Die Ereignisse sind Sanktionsdaten (Karten) und
@@ -4071,9 +4212,10 @@ mod tests {
         let voll = r#"{"fmt":2,"serving":{"team":"a"},"pause":null,"startedAt":7,
             "history":[{"rl":[[3],false]}],"rallyLog":{"sets":[]},
             "events":[{"kind":"card_red","player":1002}],"eventSeq":4,
-            "finished":false,"teamOnSide":{"a":"left"},"schreiber":"s-abc123"}"#;
+            "finished":false,"teamOnSide":{"a":"left"},"schreiber":"s-abc123",
+            "shuttles":4}"#;
         let v: serde_json::Value = serde_json::from_str(&schlanker_anzeige_stand(voll)).unwrap();
-        for weg in ["history", "rallyLog", "events", "schreiber"] {
+        for weg in ["history", "rallyLog", "events", "schreiber", "shuttles"] {
             assert!(v.get(weg).is_none(), "{weg} fällt weg");
         }
         assert_eq!(v["serving"]["team"], "a", "Aufschlag bleibt");
@@ -4212,6 +4354,7 @@ mod tests {
                 ar_names: Vec::new(),
                 teams_correction: false,
                 feld_check: false,
+                shuttle_counter: false,
                 seed_a: None,
                 seed_b: None,
             },
@@ -4265,6 +4408,7 @@ mod tests {
             ar_names: vec!["Alex Aufschlag".into()],
             teams_correction: true,
             feld_check: false,
+            shuttle_counter: false,
             seed_a: None,
             seed_b: None,
         };
@@ -4353,6 +4497,7 @@ mod tests {
             walkover: false,
             winner: None,
             cascade_walkover: false,
+            shuttles: None,
         });
         roundtrip(&RelayFrame::Result {
             req_id: 10,
@@ -4364,6 +4509,7 @@ mod tests {
             walkover: false,
             winner: Some(1),
             cascade_walkover: true,
+            shuttles: None,
         });
         roundtrip(&RelayFrame::Result {
             req_id: 11,
@@ -4375,6 +4521,7 @@ mod tests {
             walkover: true,
             winner: Some(2),
             cascade_walkover: false,
+            shuttles: None,
         });
     }
 
@@ -5409,6 +5556,7 @@ mod tests {
                 retired: false,
                 winner: None,
                 overwrite: false,
+                shuttles: None,
             },
             TlAction::ConfirmWalkover {
                 proposal_id: "p-1".to_string(),
@@ -6067,6 +6215,7 @@ mod tests {
             retired: true,
             winner: Some(1),
             overwrite: false,
+            shuttles: None,
         };
         roundtrip(&action);
     }

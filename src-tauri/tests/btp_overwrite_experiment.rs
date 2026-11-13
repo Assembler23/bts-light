@@ -156,6 +156,7 @@ async fn filling_a_bracket_then_overwriting_shows_what_btp_recomputes() {
         player_ids: Vec::new(),
         end_ts_ms: None,
         officials: None,
+        shuttles: 0,
     };
 
     bericht(&snap, v1.id, folge.id, "SCHRITT 0 — Ausgangslage");
@@ -268,6 +269,7 @@ async fn overwriting_a_ko_result_changes_the_bracket_or_not() {
         player_ids: Vec::new(),
         end_ts_ms: None,
         officials: None,
+        shuttles: 0,
     };
 
     // **Die eigentliche Frage:** dieselbe Paarung mit dem anderen Sieger

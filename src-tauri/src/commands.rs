@@ -3727,6 +3727,8 @@ pub async fn confirm_walkover(
             player_ids: Vec::new(),
             end_ts_ms: None,
             officials: tablet.officials_for_result(cand.match_id),
+            // Kampflos trägt nie eine gezählte Zahl — nur, was BTP schon hat.
+            shuttles: cand.shuttles,
         };
         match crate::tablet::server::write_result_settled(&config, &tablet, &update).await {
             Ok(()) => {
@@ -4022,6 +4024,10 @@ pub async fn assign_court(
                 state.tablet.officials_for_write(&m)
             }),
             highlight: None,
+            shuttles: state
+                .tablet
+                .snapshot_match(match_id)
+                .map_or(0, |m| m.shuttles),
         }],
         None => Vec::new(),
     };
@@ -4058,7 +4064,14 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
         return Err("Ansage-Slave-Modus: Feldvergabe nur am Master-PC.".to_string());
     }
     // Das aktuell auf dem Feld stehende Match auflösen, um dessen CourtID zu löschen.
-    let match_courts = match state.tablet.match_for_court(court_id) {
+    // Ein schon gewertetes Spiel bekommt keinen Match-Knoten: Ein Match-Write
+    // ohne Ergebnis-Felder nimmt ihm in BTP den Sieger (Messung 13.11.2026).
+    // Das Feld räumt der Courts-Block allein.
+    let match_courts = match state
+        .tablet
+        .match_for_court(court_id)
+        .filter(|m| m.winner.is_none())
+    {
         Some(m) => vec![crate::btp::proto::MatchCourt {
             match_id: m.id,
             draw_id: m.draw_id,
@@ -4068,6 +4081,7 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
             // nicht zu Ende, es wird nur vom Feld genommen.
             officials: None,
             highlight: None,
+            shuttles: m.shuttles,
         }],
         None => Vec::new(),
     };
@@ -8686,6 +8700,7 @@ mod tests {
             ar_names: vec!["A. Aufschlag".into()],
             teams_correction: true,
             feld_check: false,
+            shuttle_counter: false,
             event_label: "Herreneinzel A Viertelfinale".into(),
             best_of_sets: 3,
             target_score: 21,

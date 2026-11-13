@@ -974,6 +974,7 @@ async fn does_assign_then_free_leave_the_location_behind() {
                 court_id: feld.id,
                 officials: None,
                 highlight: None,
+                shuttles: 0,
             }],
         )
     };
@@ -990,6 +991,7 @@ async fn does_assign_then_free_leave_the_location_behind() {
                 court_id: 0,
                 officials: None,
                 highlight: None,
+                shuttles: 0,
             }],
         )
     };

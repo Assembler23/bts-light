@@ -1238,6 +1238,13 @@ pub struct AppConfig {
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub display: DisplayConfig,
+    /// „Bälle am Tablet zählen" (Spec `tablet-ballzaehler`, ADR 0093):
+    /// Zähler am Zähl-Tablet, Zahl mit dem Ergebnis als `Match.Shuttles`
+    /// nach BTP. Standard **aus**; `#[serde(default)]` hält ältere
+    /// Konfigurationsdateien lesbar. Unabhängig vom Schalter tragen alle
+    /// Match-Writes die Ballzahl mit, die BTP schon hat.
+    #[serde(default)]
+    pub shuttle_counter: bool,
     /// Einstellungen des Aufruf-Timers (1./2./3. Aufruf). `#[serde(default)]`
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -2303,6 +2310,25 @@ mod tests {
         assert!(zurueck.reconnect_legacy_rev);
     }
 
+    /// Ballzähler (Spec `tablet-ballzaehler`): Standard AUS, eine ältere
+    /// `config.json` ohne das Feld bleibt lesbar, ein gesetzter Schalter
+    /// überlebt Speichern + Laden.
+    #[test]
+    fn ballzaehler_ist_standardmaessig_aus_und_alte_config_bleibt_lesbar() {
+        assert!(!AppConfig::default().shuttle_counter);
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Config ohne Ballzähler-Feld lädt");
+        assert!(!cfg.shuttle_counter);
+        let mut cfg = cfg;
+        cfg.shuttle_counter = true;
+        let json = serde_json::to_string(&cfg).expect("serialisiert");
+        let zurueck: AppConfig = serde_json::from_str(&json).expect("lädt");
+        assert!(zurueck.shuttle_counter);
+    }
+
     /// Schiedsrichtermanagement (Spec Schritt 3): Die globalen Schalter sind
     /// standardmäßig AUS — Bestandsinstallationen verhalten sich nach dem
     /// Auto-Update unverändert — und eine ältere config.json ohne das Feld
@@ -2847,6 +2873,7 @@ mod tests {
                 show_club_logos: true,
             },
             reconnect_legacy_rev: true,
+            shuttle_counter: false,
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);

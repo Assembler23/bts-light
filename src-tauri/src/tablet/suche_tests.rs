@@ -24,6 +24,7 @@ fn spiel(id: i64, t1: &[&str], t2: &[&str]) -> BtpMatch {
         planning_id: id,
         display_order: None,
         highlight: 0,
+        shuttles: 0,
         from1: None,
         from2: None,
         draw_name: "HE A".to_string(),

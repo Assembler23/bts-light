@@ -31,7 +31,11 @@ zurück, und was davon lohnt die Übernahme?
 3. **`ScoreStatus = 3` (Disqualifikation)** — Tilo kennt 0/2/3, wir 0/1/2.
 4. **Officials `Official1ID`/`Official2ID`** — bts-light hat kein
    Schiedsrichter-Konzept.
-5. **`Shuttles`** (Federballverbrauch je Match).
+5. **`Shuttles`** (Federballverbrauch je Match). **Seit v0.9.398
+   umgesetzt:** Jeder Match-Write trägt den Wert mit, den BTP hat; der
+   Ergebnis-Write kann eine am Tablet gezählte Zahl tragen (Spec
+   [tablet-ballzaehler](features/tablet-ballzaehler.md),
+   [btp_protocol.md](btp_protocol.md) „Ballzahl `Match.Shuttles`").
 6. **`MatchOrder`** (immer mitgespiegelt; geringer Wert).
 7. **Eigenständige Spieler-Updates** (`update_players_request`): Check-in
    auch außerhalb des Spielendes (Pausenende → wieder einchecken,

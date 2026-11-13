@@ -3861,6 +3861,9 @@ async fn result(
             walkover: body.walkover,
             winner: body.winner,
             cascade_walkover: body.cascade_walkover,
+            // Deckel schon hier: Ein Wert außerhalb des Bereichs reist gar
+            // nicht erst zum Host; das Ergebnis selbst geht weiter.
+            shuttles: relay_proto::ballzahl_geprueft(body.shuttles),
         };
         if host.send(text(&frame)).is_err() {
             namespace.pending.remove(&req_id);
@@ -7649,6 +7652,7 @@ mod tests {
             ar_names: Vec::new(),
             teams_correction: false,
             feld_check: false,
+            shuttle_counter: false,
             seed_a: None,
             seed_b: None,
         }
@@ -9983,6 +9987,53 @@ mod tests {
             texte(&mut host_rx).is_empty(),
             "nichts ging an den Turnier-PC"
         );
+    }
+
+    #[tokio::test]
+    async fn ergebnis_reicht_die_ballzahl_durch_und_deckelt_sie() {
+        // Spec tablet-ballzaehler: Der Relay baut den `Result`-Frame Feld für
+        // Feld — ohne diese Durchleitung fiele die Zahl still weg. Ein Wert
+        // über dem Deckel reist nicht mit, das Ergebnis schon.
+        for (gemeldet, erwartet) in [
+            (serde_json::json!(7), Some(7)),
+            (serde_json::json!(0), Some(0)),
+            (serde_json::json!(100), None),
+            (serde_json::Value::Null, None),
+        ] {
+            let broker = Broker::new("https://example.test/bts-relay".into());
+            let ns = test_ns();
+            let (host_tx, mut host_rx) = kanal_test();
+            register_host(&broker, &ns, &host_tx).await;
+            texte(&mut host_rx);
+            let body: ResultBody = serde_json::from_value(serde_json::json!({
+                "matchId": 1, "courtId": 5,
+                "sets": [{"a": 21, "b": 3}, {"a": 21, "b": 9}],
+                "shuttles": gemeldet,
+            }))
+            .unwrap();
+            let (b, n) = (broker.clone(), ns.clone());
+            // Die Route wartet auf die Quittung des Turnier-PCs; hier zählt
+            // nur, was bei ihm ankommt.
+            let lauf = tokio::spawn(async move { result(State(b), Path(n), Json(body)).await });
+            let mut angekommen = None;
+            for _ in 0..50 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                angekommen = texte(&mut host_rx)
+                    .iter()
+                    .filter_map(|t| serde_json::from_str::<RelayFrame>(t).ok())
+                    .find_map(|f| match f {
+                        RelayFrame::Result {
+                            match_id, shuttles, ..
+                        } => Some((match_id, shuttles)),
+                        _ => None,
+                    });
+                if angekommen.is_some() {
+                    break;
+                }
+            }
+            lauf.abort();
+            assert_eq!(angekommen, Some((1, erwartet)), "gemeldet: {gemeldet}");
+        }
     }
 
     #[tokio::test]
@@ -16514,6 +16565,7 @@ mod load {
                         walkover: false,
                         winner: None,
                         cascade_walkover: false,
+                        shuttles: None,
                     };
                     result(State(b), Path(ns_c), Json(body)).await.0
                 });

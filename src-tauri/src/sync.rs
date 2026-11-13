@@ -372,6 +372,12 @@ fn officials_entries(
         if unterwegs.contains(&m.id) {
             continue;
         }
+        // Ein gewertetes Spiel fasst der Rücksync nicht mehr an: Ein
+        // Match-Write ohne Ergebnis-Felder nähme ihm in BTP den Sieger
+        // (Messung 13.11.2026). Die Besetzung reist im Ergebnis-Write mit.
+        if m.winner.is_some() {
+            continue;
+        }
         let Some((sr, ar)) = tablet.officials_for_write(m) else {
             continue;
         };
@@ -386,6 +392,7 @@ fn officials_entries(
             court_id: m.court_id.unwrap_or(0),
             officials: Some((sr, ar)),
             highlight: None,
+            shuttles: m.shuttles,
         });
     }
     out
@@ -445,6 +452,7 @@ pub(crate) fn feld_aus_frischem_stand(
                 // Element heißt 0 (Messung 09.11.2026) — sonst verlöre ein
                 // gerufenes Spiel sein Gelb mit der Besetzung.
                 highlight: Some(eigen.map_or(m.highlight, |p| p.highlight)),
+                shuttles: eigen.map_or(m.shuttles, |p| p.shuttles),
             })
         })
         .collect()
@@ -473,11 +481,12 @@ pub(crate) fn planung_aus_frischem_stand(
         .iter()
         .filter_map(|e| {
             let m = frisch.iter().find(|m| m.id == e.match_id)?;
-            let (court_id, officials) = match eigen(m.id) {
-                Some(p) => (p.court_id, p.officials),
+            let (court_id, officials, shuttles) = match eigen(m.id) {
+                Some(p) => (p.court_id, p.officials, p.shuttles),
                 None => (
                     m.court_id.unwrap_or(0),
                     (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
+                    m.shuttles,
                 ),
             };
             Some(crate::btp::proto::HighlightEntry {
@@ -485,6 +494,9 @@ pub(crate) fn planung_aus_frischem_stand(
                 draw_id: m.draw_id,
                 planning_id: m.planning_id,
                 highlight: e.highlight,
+                // Die Ballzahl reist unverändert mit — fehlte sie, setzte BTP
+                // sie auf 0 (Messung 13.11.2026).
+                shuttles,
                 court_id,
                 officials,
             })
@@ -572,6 +584,7 @@ fn highlight_entries(
                 draw_id: m.draw_id,
                 planning_id: m.planning_id,
                 highlight: if want { HIGHLIGHT_PREP_CALL } else { 0 },
+                shuttles: m.shuttles,
                 // Vorläufig aus dem Zyklus-Snapshot; `write_highlight_to_btp`
                 // setzt beide unmittelbar vor dem Senden frisch.
                 court_id: m.court_id.unwrap_or(0),
@@ -2371,6 +2384,7 @@ impl SyncEngine {
                 // (ADR 0021) — ein Request statt zwei.
                 officials: tablet.officials_for_write(m),
                 highlight: None,
+                shuttles: m.shuttles,
             });
             // Feld gilt jetzt als belegt – Wartezeit zurücksetzen und die
             // Zuweisung als „unterwegs" merken, damit weder Feld noch Match bis
@@ -3716,6 +3730,7 @@ mod tests {
             matches: vec![BtpMatch {
                 display_order: None,
                 highlight: 0,
+                shuttles: 0,
                 from1: None,
                 from2: None,
                 id: 1,
@@ -3849,6 +3864,7 @@ mod tests {
         BtpMatch {
             display_order: None,
             highlight: 0,
+            shuttles: 0,
             from1: None,
             from2: None,
             id,
@@ -5751,6 +5767,7 @@ mod tests {
             player_ids: vec![11, 12],
             end_ts_ms: Some(500_000),
             officials: None,
+            shuttles: 0,
         }
     }
 
@@ -5955,6 +5972,7 @@ mod tests {
                 player_ids: Vec::new(),
                 end_ts_ms: Some(5_000),
                 officials: None,
+                shuttles: 0,
             },
             5_000,
         );
@@ -6204,6 +6222,7 @@ mod tests {
             officials: Some((1, 2)),
             // Farbe kommt wie die CourtID aus dem frischen Stand (hier 0).
             highlight: Some(0),
+            shuttles: 0,
         };
         let alt_stand = vec![
             ready_named(10, None, "A", "B"),
@@ -6234,6 +6253,7 @@ mod tests {
             court_id: 0,
             officials: Some((1, 2)),
             highlight: None,
+            shuttles: 0,
         };
         let stand = vec![ready_named(10, None, "A", "B")];
         let reserviert: HashSet<i64> = [10].into_iter().collect();
@@ -6253,6 +6273,7 @@ mod tests {
             court_id: 0,
             officials: Some((1, 2)),
             highlight: None,
+            shuttles: 0,
         };
         let alt = vec![ready_named(10, None, "A", "B")];
         let mut umgeteilt = ready_named(10, None, "A", "B");
@@ -6277,6 +6298,7 @@ mod tests {
             court_id: 0,
             officials: Some((1, 2)),
             highlight: None,
+            shuttles: 0,
         };
         let alt = vec![ready_named(10, None, "A", "B")];
         let mut gelb = ready_named(10, None, "A", "B");
@@ -6302,6 +6324,7 @@ mod tests {
             draw_id: 0,
             planning_id: 0,
             highlight: 3,
+            shuttles: 0,
             court_id: 0,
             officials: (0, 0),
         };
@@ -6344,6 +6367,7 @@ mod tests {
                 court_id: 4,
                 officials: (7, 8),
                 highlight: HIGHLIGHT_PREP_CALL,
+                shuttles: 0,
             })
         };
 
@@ -6354,6 +6378,7 @@ mod tests {
             court_id: 0,
             officials: Some((7, 8)),
             highlight: None,
+            shuttles: 0,
         };
         let neu = feld_aus_frischem_stand(&[sr], &frisch, &frisch, &HashSet::new(), &eigen);
         assert_eq!(neu[0].highlight, Some(HIGHLIGHT_PREP_CALL), "Gelb bleibt");
@@ -6364,6 +6389,7 @@ mod tests {
             draw_id: 0,
             planning_id: 0,
             highlight: 0,
+            shuttles: 0,
             court_id: 0,
             officials: (0, 0),
         };
@@ -6417,6 +6443,83 @@ mod tests {
         let offen2 = officials_entries(&tablet, &snap2, &HashMap::new(), now_ms());
         assert_eq!(offen2.len(), 1);
         assert_eq!(offen2[0].court_id, 0);
+    }
+
+    #[test]
+    fn officials_entries_fasst_gewertete_spiele_nicht_an() {
+        // Messung 13.11.2026 (btp_shuttles_probe): Ein Schiedsrichter-Write
+        // an ein gewertetes Spiel nahm ihm in BTP den Sieger.
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut m = oncourt_named(10, 8, "A", "B");
+        m.winner = Some(1);
+        m.status = MatchStatus::Finished;
+        let snap = snap_officials(vec![m], &[1, 2]);
+        tablet.set_snapshot(snap.clone());
+        tablet
+            .officials_store()
+            .assign(10, crate::tablet::officials::OfficialRole::Sr, 1);
+        assert!(officials_entries(&tablet, &snap, &HashMap::new(), now_ms()).is_empty());
+    }
+
+    #[test]
+    fn match_writes_tragen_die_ballzahl_aus_dem_frischen_stand() {
+        // Messung 13.11.2026: BTP setzt `Shuttles` bei jedem Match-Write auf
+        // den Wert im Knoten, „fehlt" heißt 0. Farb- und Schiedsrichter-Write
+        // tragen sie deshalb mit dem frisch gelesenen Wert — oder mit dem
+        // eigenen Merkstand, solange BTP einen eigenen Write noch nicht zeigt.
+        use crate::btp::eigene_writes::Planung;
+        use crate::btp::proto::{HighlightEntry, MatchCourt};
+        let mut frisch = oncourt_named(10, 4, "A", "B");
+        frisch.shuttles = 3;
+        let sr = MatchCourt {
+            match_id: 10,
+            draw_id: 0,
+            planning_id: 0,
+            court_id: 4,
+            officials: Some((1, 2)),
+            highlight: None,
+            shuttles: 0,
+        };
+        let farbe = HighlightEntry {
+            match_id: 10,
+            draw_id: 0,
+            planning_id: 0,
+            highlight: 2,
+            shuttles: 0,
+            court_id: 0,
+            officials: (0, 0),
+        };
+        let kein = |_| None;
+        let neu = feld_aus_frischem_stand(
+            &[sr],
+            &[frisch.clone()],
+            &[frisch.clone()],
+            &HashSet::new(),
+            &kein,
+        );
+        assert_eq!(neu[0].shuttles, 3);
+        let neu = planung_aus_frischem_stand(&[farbe], &[frisch.clone()], &kein);
+        assert_eq!(neu[0].shuttles, 3);
+
+        let eigen = |_| {
+            Some(Planung {
+                court_id: 4,
+                officials: (0, 0),
+                highlight: 0,
+                shuttles: 9,
+            })
+        };
+        let neu = feld_aus_frischem_stand(
+            &[sr],
+            &[frisch.clone()],
+            &[frisch.clone()],
+            &HashSet::new(),
+            &eigen,
+        );
+        assert_eq!(neu[0].shuttles, 9, "eigener Merkstand geht vor");
+        let neu = planung_aus_frischem_stand(&[farbe], &[frisch], &eigen);
+        assert_eq!(neu[0].shuttles, 9);
     }
 
     #[test]

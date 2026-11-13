@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.398
+
+- **Ballzahl in BTP bleibt erhalten.** Wer in BTP an einem Spiel von Hand die
+  verbrauchten Bälle eingetragen hat, verlor die Zahl bisher, sobald bts-light
+  dasselbe Spiel anfasste — beim Ruf aufs Feld, bei einer Zeilenfarbe, bei
+  einer Schiedsrichter-Zuweisung oder beim Ergebnis. bts-light schreibt die
+  Zahl jetzt bei jedem dieser Schritte unverändert zurück (gemessen am
+  13.11.2026).
+- **Wertung bleibt stehen.** Eine Zeilenfarbe oder eine Schiedsrichter-Änderung
+  an einem bereits gewerteten Spiel konnte ihm in BTP den Sieger nehmen. Beides
+  geht nicht mehr an gewertete Spiele; das TL-Web meldet es bei der Farbe.
+  Auch „Feld freigeben" fasst ein schon gewertetes Spiel nicht mehr an, es
+  räumt nur das Feld.
+- **Vorarbeit für den Ballzähler am Tablet.** Übertragung und Prüfung der
+  gezählten Bälle (0–99) sind eingebaut, Zähler und Schalter folgen mit den
+  nächsten Versionen. Bis dahin ändert sich an Tablet und TL-Web nichts.
+
 ## v0.9.397
 
 - **Pi-Monitore: Nur-Lese-Modus ausgebaut.** Der Schreibschutz der SD-Karte

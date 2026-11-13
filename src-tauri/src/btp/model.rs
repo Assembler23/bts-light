@@ -373,6 +373,11 @@ pub struct BtpMatch {
     /// Dasselbe Feld trägt auch die Aufrufmarke des Vorbereitungs-Aufrufs
     /// (P1, `sync.rs::reconcile_highlights`, ADR 0056).
     pub highlight: u8,
+    /// Verbrauchte Bälle (`Match.Shuttles`, Spec `tablet-ballzaehler`).
+    /// BTP liefert das Feld an jedem Spiel, `0` = keine Angabe (gemessen
+    /// 13.11.2026). Jeder Match-Write muss den Wert mittragen — ein
+    /// fehlendes Element liest BTP als 0 (`btp::eigene_writes`).
+    pub shuttles: i64,
     /// Die beiden Planungspositionen, aus denen die Teilnehmer kommen
     /// (`Match.From1`/`From2`) — die **Kante im Turnierbaum**, roh und
     /// ungedeutet. In einem KO-Draw zeigt sie auf die vorangehenden Spiele
@@ -1419,6 +1424,8 @@ fn parse_matches(
             // sortierte sich ein ungepflegtes Turnier nach lauter Nullen.
             display_order: child_int(m, "DisplayOrder").filter(|d| *d > 0),
             highlight: highlight_from(child_int(m, "Highlight")),
+            // Negatives gibt es nicht; ein kaputter Wert gilt als „keine".
+            shuttles: child_int(m, "Shuttles").unwrap_or(0).max(0),
             draw_name: draw_id
                 .and_then(|id| draws.get(&id).cloned())
                 .unwrap_or_default(),
@@ -3074,6 +3081,30 @@ mod tests {
 
     /// Zeilenfarbe (Spec `tl-zeilenfarbe`): `Highlight` 1–6 kommt durch,
     /// alles andere (fehlend, 0, 7, negativ) ist „keine".
+    #[test]
+    fn parse_liest_die_ballzahl_und_verkraftet_ihr_fehlen() {
+        let spiel = |id: i64, extra: Vec<Node>| {
+            let mut kinder = vec![Node::integer("ID", id), Node::boolean("IsMatch", true)];
+            kinder.extend(extra);
+            Node::group("Match", kinder)
+        };
+        let tree = tournament_with(vec![Node::group(
+            "Matches",
+            vec![
+                spiel(1, vec![Node::integer("Shuttles", 5)]),
+                spiel(2, vec![Node::integer("Shuttles", 0)]),
+                spiel(3, Vec::new()),
+                spiel(4, vec![Node::integer("Shuttles", -2)]),
+            ],
+        )]);
+        let snap = parse_snapshot(&tree).expect("Snapshot");
+        let zahl = |id: i64| snap.matches.iter().find(|m| m.id == id).unwrap().shuttles;
+        assert_eq!(zahl(1), 5);
+        assert_eq!(zahl(2), 0);
+        assert_eq!(zahl(3), 0, "fehlendes Feld = keine Angabe");
+        assert_eq!(zahl(4), 0, "ein negativer Wert gilt als keine");
+    }
+
     #[test]
     fn parse_reads_highlight_and_clamps_unknown_values_to_none() {
         let spiel = |id: i64, extra: Vec<Node>| {

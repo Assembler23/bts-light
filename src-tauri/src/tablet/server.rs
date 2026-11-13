@@ -3373,7 +3373,7 @@ pub(crate) fn build_manual_result_update(
     now: u64,
     officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
-    build_manual_result_update_opt(m, sets, on_court_since, now, false, officials)
+    build_manual_result_update_opt(m, sets, on_court_since, now, false, None, officials)
 }
 
 /// Wie [`build_manual_result_update`], aber mit ausdrücklicher
@@ -3389,6 +3389,7 @@ pub(crate) fn build_manual_result_update_opt(
     on_court_since: Option<u64>,
     now: u64,
     overwrite: bool,
+    shuttles: Option<u32>,
     officials: Option<(i64, i64)>,
 ) -> Result<proto::MatchUpdate, String> {
     if m.winner.is_some() && !overwrite {
@@ -3413,7 +3414,22 @@ pub(crate) fn build_manual_result_update_opt(
         player_ids,
         end_ts_ms,
         officials,
+        shuttles: ballzahl_fuer_write(true, shuttles, m.shuttles),
     })
+}
+
+/// Die Ballzahl, die ein Ergebnis-Write nach BTP trägt (Spec
+/// `tablet-ballzaehler`, ADR 0093).
+///
+/// Eine gemeldete Zahl gilt nur bei eingeschaltetem Zähler und im erlaubten
+/// Bereich ([`relay_proto::MAX_SHUTTLES`]). Sonst trägt der Write den Wert,
+/// den BTP schon hat — BTP liest ein fehlendes Element als 0 (Messung
+/// 13.11.2026), ein Write ohne die Zahl löschte also eine von Hand
+/// eingetragene. Eine zu große Zahl kippt nur die Zahl, nie das Ergebnis.
+pub(crate) fn ballzahl_fuer_write(schalter: bool, gemeldet: Option<u32>, in_btp: i64) -> i64 {
+    relay_proto::ballzahl_geprueft(gemeldet)
+        .filter(|_| schalter)
+        .map_or(in_btp, i64::from)
 }
 
 /// Feld-Abschlussfelder eines manuell (Turnierleitung) gewerteten Spiels:
@@ -3495,6 +3511,8 @@ pub(crate) fn build_manual_dq_update(
         player_ids,
         end_ts_ms,
         officials,
+        // Eine Disqualifikation trägt nie eine gezählte Zahl.
+        shuttles: m.shuttles,
     })
 }
 
@@ -3726,7 +3744,21 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         player_ids,
         end_ts_ms: Some(end_ms),
         officials: ctx.tablet.officials_for_result(m.id),
+        // Kampflos zählt niemand Bälle; sonst gilt die Zahl des Tablets,
+        // wenn der Zähler an ist und sie im Bereich liegt (R5).
+        shuttles: ballzahl_fuer_write(
+            ctx.app_config_arc().shuttle_counter && score_status != 1,
+            body.shuttles,
+            m.shuttles,
+        ),
     };
+    if body.shuttles.is_some_and(|n| n > relay_proto::MAX_SHUTTLES) {
+        tracing::warn!(
+            "Ballzahl vom Tablet außerhalb des Bereichs verworfen (Match {}, Feld-ID {})",
+            m.id,
+            body.court_id
+        );
+    }
 
     // Log-Label: Das Tablet liefert sein courtLabel nicht auf jedem Pfad
     // (Turnier-Log 19.07.: 7× „Feld 38 ('')") — dann den Feldnamen aus
@@ -3853,6 +3885,13 @@ pub(crate) async fn write_result_to_btp(
                                                                     // Das Ergebnis setzt Feld und Besetzung neu, ohne dass wir sie kennen
                                                                     // (`free_court_id: None`) — ab jetzt gilt BTP, nicht der Merkstand.
     crate::btp::eigene_writes::EIGENE.loeschen(update.btp_match_id);
+    // Farb- und Schiedsrichter-Writes an dieses Spiel ab jetzt zurückhalten:
+    // Sie nähmen ihm die Wertung (`ist_gewertet`). Der Merker bleibt auch
+    // nach einem Fehler stehen: Ein Write, der in eine Zeitüberschreitung
+    // lief, kann trotzdem angekommen sein — 5 s Zurückhaltung kosten nichts,
+    // der nächste Sync-Lauf holt Farbe und Besetzung nach.
+    crate::btp::eigene_writes::EIGENE
+        .wertung_merken(update.btp_match_id, crate::tablet::monitor::now_ms());
     let host = &config.btp.host;
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
@@ -3912,6 +3951,20 @@ pub(crate) async fn write_courts_to_btp(
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
 
+    // Ein Spiel, an das gerade ein Ergebnis ging, bekommt keinen
+    // Match-Knoten: BTP zeigt die Wertung womöglich noch nicht, und der
+    // Knoten nähme sie wieder weg ([`ist_gewertet`]). Der Courts-Block
+    // bleibt — das Feld wird trotzdem geräumt bzw. vergeben.
+    let jetzt = crate::tablet::monitor::now_ms();
+    let match_courts: Vec<proto::MatchCourt> = match_courts
+        .iter()
+        .filter(|m| !crate::btp::eigene_writes::EIGENE.kuerzlich_gewertet(m.match_id, jetzt))
+        .copied()
+        .collect();
+    let match_courts = match_courts.as_slice();
+    if courts.is_empty() && match_courts.is_empty() {
+        return Ok(());
+    }
     let gemerkt = merke_eigene(match_courts.iter().map(|m| (m.match_id, m.planung())));
     let ergebnis = async {
         let login_raw = client::send_request(host, port, &proto::login_request(pw))
@@ -3972,9 +4025,26 @@ fn abgleichen_mit(frisch: &crate::btp::model::BtpSnapshot) {
                 court_id: m.court_id.unwrap_or(0),
                 officials: (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
                 highlight: m.highlight,
+                shuttles: m.shuttles,
             },
         );
     }
+}
+
+/// Ist das Spiel gewertet — laut frisch gelesenem Stand oder durch einen
+/// eigenen Ergebnis-Write der letzten Sekunden, den BTP noch nicht zeigt?
+///
+/// Ein Match-Write ohne Ergebnis-Felder nimmt einem gewerteten Spiel in BTP
+/// den Sieger (Messung 13.11.2026, `tests/btp_shuttles_probe.rs`: Farb- und
+/// Schiedsrichter-Write). Farbe und Besetzung eines beendeten Spiels sind
+/// das nicht wert — solche Einträge gehen deshalb gar nicht erst raus.
+fn ist_gewertet(frisch: &crate::btp::model::BtpSnapshot, match_id: i64) -> bool {
+    frisch
+        .matches
+        .iter()
+        .any(|m| m.id == match_id && m.winner.is_some())
+        || crate::btp::eigene_writes::EIGENE
+            .kuerzlich_gewertet(match_id, crate::tablet::monitor::now_ms())
 }
 
 /// Der eigene Merkstand eines Spiels — Vorrang vor dem frisch gelesenen.
@@ -3998,7 +4068,7 @@ fn eigener_stand(match_id: i64) -> Option<crate::btp::eigene_writes::Planung> {
 /// das jemand inzwischen in BTP von Hand vergeben hat. Scheitert das Lesen,
 /// geht nichts raus (Wiederholung im nächsten Zyklus). Liefert die
 /// tatsächlich gesendeten Einträge; Spiele, die BTP nicht mehr kennt,
-/// fehlen darin.
+/// fehlen darin — ebenso gewertete Spiele ([`ist_gewertet`]).
 pub(crate) async fn write_officials_to_btp(
     config: &AppConfig,
     entries: &[proto::MatchCourt],
@@ -4026,16 +4096,17 @@ pub(crate) async fn write_officials_to_btp(
         .map(|(_, match_id)| match_id)
         .collect();
     let vorher = entries.len();
-    let entries = crate::sync::feld_aus_frischem_stand(
+    let mut entries = crate::sync::feld_aus_frischem_stand(
         entries,
         &zyklus.matches,
         &frisch.matches,
         &reserviert,
         &eigener_stand,
     );
+    entries.retain(|e| !ist_gewertet(&frisch, e.match_id));
     if entries.len() < vorher {
         tracing::debug!(
-            "BTP-Schiedsrichter: {} von {vorher} Einträgen nach frischem Lesen zurückgestellt              (Feld gerade in Vergabe, in BTP umgeteilt oder Spiel weg)",
+            "BTP-Schiedsrichter: {} von {vorher} Einträgen nach frischem Lesen zurückgestellt              (Feld gerade in Vergabe, in BTP umgeteilt, Spiel gewertet oder weg)",
             vorher - entries.len()
         );
     }
@@ -4083,7 +4154,8 @@ pub(crate) async fn write_officials_to_btp(
 /// inzwischen vergebenes Feld wieder weg. Ein eigener Write desselben
 /// Spiels, den BTP noch nicht zeigt, geht dem frischen Stand vor
 /// (`btp::eigene_writes`). Scheitert das Lesen, geht nichts raus. Liefert die
-/// Zahl der gesendeten Einträge — Spiele, die BTP nicht mehr kennt, fehlen.
+/// Zahl der gesendeten Einträge — Spiele, die BTP nicht mehr kennt, und
+/// gewertete Spiele ([`ist_gewertet`]) fehlen.
 pub(crate) async fn write_highlight_to_btp(
     config: &AppConfig,
     entries: &[proto::HighlightEntry],
@@ -4101,7 +4173,9 @@ pub(crate) async fn write_highlight_to_btp(
         .await
         .map_err(|e| format!("BTP-Stand vor dem Farb-Write nicht lesbar: {e}"))?;
     abgleichen_mit(&frisch);
-    let entries = crate::sync::planung_aus_frischem_stand(entries, &frisch.matches, &eigener_stand);
+    let mut entries =
+        crate::sync::planung_aus_frischem_stand(entries, &frisch.matches, &eigener_stand);
+    entries.retain(|e| !ist_gewertet(&frisch, e.match_id));
     if entries.is_empty() {
         return Ok(0);
     }
@@ -4192,8 +4266,9 @@ pub(crate) fn match_brief(
         // Dieser Host deutet `teams_corrected` (ADR 0067) → das Tablet darf
         // „Mannschaften tauschen" anbieten.
         teams_correction: true,
-        // Wird am Aufrufer aus der Meetingpoint-Config gesetzt.
+        // Beide setzt der Aufrufer aus der Config.
         feld_check: false,
+        shuttle_counter: false,
         seed_a: m.team1_seed.clone(),
         seed_b: m.team2_seed.clone(),
     }
@@ -4791,6 +4866,7 @@ async fn push_match(
                     );
                     brief.feld_check =
                         cfg.meetingpoint.enabled && cfg.meetingpoint.field_check_enabled;
+                    brief.shuttle_counter = cfg.shuttle_counter;
                     brief
                 },
             }
@@ -5016,6 +5092,7 @@ mod tests {
         BtpMatch {
             display_order: None,
             highlight: 0,
+            shuttles: 0,
             from1: None,
             from2: None,
             id: 42,
@@ -5229,6 +5306,7 @@ mod tests {
             walkover: false,
             winner: None,
             cascade_walkover: false,
+            shuttles: None,
         }
     }
 
@@ -5444,6 +5522,104 @@ mod tests {
         assert!(derive_result(vec![], false, false, true, None).is_err());
         assert!(derive_result(vec![(1, 0)], false, true, true, Some(1)).is_err());
         // retired+dq
+    }
+
+    // ─────────────── Ballzahl (Spec tablet-ballzaehler) ───────────────
+
+    #[test]
+    fn ist_gewertet_kennt_den_frischen_stand_und_den_eigenen_ergebnis_write() {
+        // Messung 13.11.2026: Ein Farb- oder Schiedsrichter-Write an ein
+        // gewertetes Spiel nimmt ihm in BTP den Sieger. Der Filter vor dem
+        // Senden muss beides erkennen: die Wertung, die BTP schon zeigt, und
+        // den eigenen Ergebnis-Write, den BTP noch nicht zeigt.
+        let stand = |m: BtpMatch| BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![m],
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        };
+        // Eigene IDs — der Merker ist prozessweit, andere Tests nutzen 42.
+        let mut offen = match_on_court();
+        offen.id = 990_001;
+        assert!(!ist_gewertet(&stand(offen.clone()), 990_001));
+        let mut fertig = offen.clone();
+        fertig.winner = Some(2);
+        assert!(
+            ist_gewertet(&stand(fertig), 990_001),
+            "BTP zeigt den Sieger"
+        );
+        assert!(
+            !ist_gewertet(&stand(offen.clone()), 990_002),
+            "fremdes Spiel"
+        );
+
+        // BTP zeigt die Wertung noch nicht, aber wir haben sie eben gesendet.
+        crate::btp::eigene_writes::EIGENE.wertung_merken(990_001, crate::tablet::monitor::now_ms());
+        assert!(ist_gewertet(&stand(offen), 990_001));
+    }
+
+    #[test]
+    fn ballzahl_fuer_write_nimmt_die_meldung_nur_im_bereich_und_bei_schalter_an() {
+        // R5: gültig → übernommen.
+        assert_eq!(ballzahl_fuer_write(true, Some(7), 2), 7);
+        assert_eq!(
+            ballzahl_fuer_write(true, Some(0), 2),
+            0,
+            "0 ist eine Angabe"
+        );
+        assert_eq!(ballzahl_fuer_write(true, Some(99), 2), 99);
+        // Zu groß → Zahl verworfen, es bleibt der BTP-Wert (das Ergebnis
+        // selbst geht trotzdem raus).
+        assert_eq!(ballzahl_fuer_write(true, Some(100), 2), 2);
+        // Keine Meldung → BTP-Wert: BTP läse „fehlt" als 0 und löschte eine
+        // von Hand eingetragene Zahl (Messung 13.11.2026).
+        assert_eq!(ballzahl_fuer_write(true, None, 2), 2);
+        // Schalter aus → die Meldung zählt nicht.
+        assert_eq!(ballzahl_fuer_write(false, Some(7), 2), 2);
+        assert_eq!(ballzahl_fuer_write(false, None, 0), 0);
+    }
+
+    #[test]
+    fn manuelle_wertung_und_disqualifikation_tragen_die_ballzahl_aus_btp() {
+        let mut m = match_on_court();
+        m.shuttles = 5;
+        let u = build_manual_result_update(&m, vec![(21, 10), (21, 15)], Some(1_000), 61_000, None)
+            .unwrap();
+        assert_eq!(u.shuttles, 5, "ohne Angabe bleibt der BTP-Wert");
+        let u = build_manual_result_update_opt(
+            &m,
+            vec![(21, 10), (21, 15)],
+            Some(1_000),
+            61_000,
+            false,
+            Some(8),
+            None,
+        )
+        .unwrap();
+        assert_eq!(u.shuttles, 8);
+        let dq = build_manual_dq_update(&m, 1, Vec::new(), Some(1_000), 61_000, None).unwrap();
+        assert_eq!(dq.shuttles, 5, "eine Disqualifikation zählt keine Bälle");
+    }
+
+    #[test]
+    fn match_brief_bietet_den_ballzaehler_nicht_von_selbst_an() {
+        // Schalter + Fähigkeit in einem Feld: Der Aufrufer setzt es aus der
+        // Config; ohne das bleibt der Zähler am Tablet aus.
+        let m = match_on_court();
+        let brief = match_brief(
+            &m,
+            Vec::new(),
+            false,
+            &crate::config::DisplayConfig::default(),
+            false,
+            (Vec::new(), Vec::new()),
+        );
+        assert!(!brief.shuttle_counter);
     }
 
     // ─────────────── Turnierleitungs-Ergebnis (build_manual_result_update) ───────────────
@@ -5861,6 +6037,7 @@ mod tests {
             court_id: 101,
             officials: Some((1, 2)),
             highlight: None,
+            shuttles: 0,
         };
         let zyklus = BtpSnapshot {
             tournament_name: "T".into(),
@@ -5909,6 +6086,7 @@ mod tests {
             draw_id: 7,
             planning_id: 1001,
             highlight: 3,
+            shuttles: 0,
             court_id: 101,
             officials: (1, 2),
         };
@@ -6176,6 +6354,41 @@ mod tests {
         assert_eq!(q[0].update.btp_match_id, 42);
         assert_eq!(q[0].update.sets, vec![(21, 10), (21, 15)]);
         assert!(q[0].enqueued_ms > 0, "Bezugszeitpunkt = Spielende gesetzt");
+    }
+
+    #[tokio::test]
+    async fn process_result_prueft_die_ballzahl_des_tablets() {
+        // Spec tablet-ballzaehler, R5. Port 1 weist ab → der fertige
+        // MatchUpdate landet in der Nachschub-Queue und ist dort ablesbar.
+        // In BTP steht am Spiel schon die Handzahl 2.
+        let lauf = |schalter: bool, gemeldet: Option<u32>, walkover: bool| async move {
+            let dir = tempfile::tempdir().unwrap();
+            let mut m = match_on_court();
+            m.shuttles = 2;
+            let mut ctx = make_ctx_with(1, m);
+            ctx.config_path = dir.path().join("config.json");
+            let cfg = AppConfig {
+                shuttle_counter: schalter,
+                ..AppConfig::default()
+            };
+            std::fs::write(&ctx.config_path, serde_json::to_string(&cfg).unwrap()).unwrap();
+            let mut body = body_with(&[(21, 10), (21, 15)]);
+            body.shuttles = gemeldet;
+            if walkover {
+                body.sets.clear();
+                body.walkover = true;
+                body.winner = Some(1);
+            }
+            let resp = process_result(&ctx, &body).await;
+            assert!(resp.ok, "das Ergebnis selbst wird immer angenommen");
+            ctx.tablet.btp_retries()[0].update.shuttles
+        };
+        assert_eq!(lauf(true, Some(7), false).await, 7, "gültig → übernommen");
+        assert_eq!(lauf(true, Some(0), false).await, 0, "0 ist eine Angabe");
+        assert_eq!(lauf(true, Some(100), false).await, 2, "zu groß → BTP-Wert");
+        assert_eq!(lauf(true, None, false).await, 2, "altes Tablet → BTP-Wert");
+        assert_eq!(lauf(false, Some(7), false).await, 2, "Schalter aus");
+        assert_eq!(lauf(true, Some(7), true).await, 2, "kampflos zählt nicht");
     }
 
     #[tokio::test]
@@ -6734,6 +6947,7 @@ mod tests {
             player_ids: vec![],
             end_ts_ms: None,
             officials: None,
+            shuttles: 0,
         }
     }
 

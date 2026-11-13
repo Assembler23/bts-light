@@ -295,7 +295,10 @@ speichert, im TL-Web (LAN und Cloud) wie in der Desktop-App
 (`officials::pruefe_einteilung`). Abgelehnt wird:
 
 - ein Spiel, das der aktuelle Turnierstand nicht kennt,
-- ein beendetes Spiel, auch beim Lösen,
+- ein beendetes Spiel, auch beim Lösen (seit v0.9.398 schreibt auch der
+  Rücksync nichts mehr an ein gewertetes Spiel: Ein Schiedsrichter-Write
+  nähme ihm in BTP den Sieger, gemessen 13.11.2026 —
+  [btp_protocol.md](btp_protocol.md) „Ballzahl `Match.Shuttles`"),
 - eine Person, die nicht in der Schiedsrichter-Liste aus BTP steht,
 - dieselbe Person als Schiedsrichter **und** Aufschlagrichter desselben
   Spiels. Geprüft wird gegen die Besetzung, die nach BTP ginge (eigene

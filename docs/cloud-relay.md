@@ -1934,6 +1934,20 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   Fehler kommen als `NotAllowed` mit Text zurück. Der Relay leitet die Aktion
   typisiert weiter, ohne eigene Logik. Die Seite zeigt Griffe nur bei
   `TlState.can_reorder_called`.
+- **Ballzahl (seit v0.9.398, Spec
+  [tablet-ballzaehler](features/tablet-ballzaehler.md), ADR 0093):**
+  `ResultBody.shuttles` und `RelayFrame::Result.shuttles` (optional, 0–99)
+  tragen die am Tablet gezählten Bälle zum Host. Der Relay baut den
+  `Result`-Frame Feld für Feld und reicht die Zahl durch; ein Wert über
+  `MAX_SHUTTLES` fällt dort schon weg (`ballzahl_geprueft`), das Ergebnis geht
+  weiter. `MatchBrief.shuttleCounter` (`serde(default)`) ist Schalter und
+  Fähigkeitsmeldung in einem — ohne das Feld zeigt das Tablet keinen Zähler.
+  `TlAction::EnterResult.shuttles` (optional) nimmt die Zahl der
+  Turnierleitung auf; fehlt es, bleibt der Wert in BTP. `shuttles` im
+  gespiegelten Tablet-Stand streicht `schlanker_anzeige_stand` aus allen
+  Anzeige-Zuständen. **Deploy-Reihenfolge: Relay vor App** — ein alter Relay
+  wirft die Zahl still weg und lehnt eine `EnterResult`-Aktion mit dem
+  unbekannten Feld nicht ab, reicht sie aber ohne Zahl weiter.
 - Neu: `TlAction::MeetingpointSet`, `MatchBrief.feldCheck` (`serde(default)`).
   Neue Enums `MpPlatz`/`MpOrt` haben einen `serde(other)`-Auffang.
   **Deploy-Reihenfolge: Relay vor App** (der Relay parst `TlAction`; ein alter

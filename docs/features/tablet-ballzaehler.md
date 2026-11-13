@@ -2,7 +2,8 @@
 
 > Status: **freigegeben 13.11.2026** (via /idee: Brief → Grill → How-To → Review).
 > Umsetzung: PR 0 (Messwerkzeug) gebaut; BTP-Messung vom 13.11.2026 ergibt
-> **Zweig B** (jeder Match-Write trägt `Shuttles`).
+> **Zweig B** (jeder Match-Write trägt `Shuttles`). PR 1 (Kern + Wire) in
+> v0.9.398; PR 2 (Tablet) und PR 3 (Turnierleitung) stehen aus.
 > Quelle: Idee vom 13.11.2026. Betroffene Crates: src-tauri / relay / relay-proto / src.
 > ADR: [0093](../adr/0093-ballzahl-reist-mit-dem-ergebnis.md).
 
@@ -270,10 +271,18 @@ Turnierleitung
 ## Offene Fragen / Annahmen
 
 - **Geklärt 13.11.2026:** Die BTP-Messung ergibt Zweig B.
-- **Offen:** ob bts-light nach Spielende noch Officials-Writes auf beendete
-  Spiele sendet; wird in PR 1 geprüft und abgedeckt. Die Messung zeigt
-  zusätzlich, dass ein solcher Write dem beendeten Spiel den Sieger nimmt —
-  unabhängig von der Ballzahl.
+- **Geklärt in PR 1:** bts-light konnte nach Spielende noch einen
+  Officials-Write an ein beendetes Spiel senden (lokale Einteilung weicht von
+  BTP ab); die Messung zeigt, dass ein solcher Write dem Spiel den Sieger
+  nimmt. Seit v0.9.398 gehen Farb- und Schiedsrichter-Writes nicht mehr an
+  gewertete Spiele.
+- **Abweichungen von dieser Spec in PR 1** (Verhalten gleich, Form anders):
+  `BtpMatch.shuttles` ist ein `i64` mit 0 = keine Angabe statt `Option` (BTP
+  liefert das Feld immer); bei 0 lässt der Write das Element weg statt `0` zu
+  schreiben (für BTP gleichwertig, Requests ohne Ballzahl bleiben
+  unverändert); eine Ballzahl über 99 **aus dem TL-Web** wird mit einer
+  Meldung abgelehnt statt still verworfen (am Tablet bleibt es beim
+  Verwerfen).
 - **Annahmen** (Grill-Empfehlungen, vom Nutzer nicht einzeln bestätigt):
   - Zähler unabhängig vom Undo; eingefroren ab dem Übermitteln.
   - Überholtes Tablet-Ergebnis → Zahl verfällt.
