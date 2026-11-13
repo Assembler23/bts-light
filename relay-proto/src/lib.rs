@@ -1676,8 +1676,25 @@ pub struct ResultBody {
     /// Fehlt bei älteren Tablets und bei ausgeschaltetem Zähler. Bewusst
     /// breiter als der erlaubte Bereich: Ein Wert über [`MAX_SHUTTLES`]
     /// soll die Zahl kippen, nicht das ganze Ergebnis (`ballzahl_geprueft`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Dasselbe gilt für Unsinn (negativ, Text, Bruch): Er liest sich als
+    /// „keine Angabe" ([`ballzahl_tolerant`]).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ballzahl_tolerant"
+    )]
     pub shuttles: Option<u32>,
+}
+
+/// Liest die Ballzahl, ohne dass ein kaputter Wert das Ergebnis mitreißt:
+/// eine nichtnegative ganze Zahl bleibt (übergroße werden auf `u32::MAX`
+/// gesetzt und fallen später am Deckel), alles andere ist `None`.
+fn ballzahl_tolerant<'de, D>(d: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let wert = serde_json::Value::deserialize(d)?;
+    Ok(wert.as_u64().map(|n| u32::try_from(n).unwrap_or(u32::MAX)))
 }
 
 /// Höchste Ballzahl, die ein Tablet oder die Turnierleitung melden darf
@@ -3587,7 +3604,11 @@ pub enum RelayFrame {
         /// Ballzahl des Tablets – siehe [`ResultBody::shuttles`]. Der Relay
         /// baut diesen Frame Feld für Feld; ein Relay ohne das Feld wirft
         /// die Zahl still weg (deshalb Relay-Deploy vor dem Client).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "ballzahl_tolerant"
+        )]
         shuttles: Option<u32>,
     },
     /// Akkustand eines Tablets.
@@ -4122,6 +4143,12 @@ mod tests {
             serde_json::from_str(r#"{"matchId":1,"sets":[],"shuttles":4000}"#).unwrap();
         assert_eq!(gross.shuttles, Some(4000));
         assert_eq!(ballzahl_geprueft(gross.shuttles), None);
+        // Unsinn im Feld kippt nur die Zahl, nie das Ergebnis.
+        for kaputt in ["-1", "1.5", "\"7\"", "5000000000", "null", "[3]"] {
+            let json = format!(r#"{{"matchId":1,"sets":[],"shuttles":{kaputt}}}"#);
+            let b: ResultBody = serde_json::from_str(&json).expect(kaputt);
+            assert_eq!(ballzahl_geprueft(b.shuttles), None, "{kaputt}");
+        }
         assert_eq!(ballzahl_geprueft(Some(MAX_SHUTTLES)), Some(99));
         assert_eq!(ballzahl_geprueft(Some(0)), Some(0));
         assert_eq!(ballzahl_geprueft(None), None);

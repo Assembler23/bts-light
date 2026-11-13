@@ -15,6 +15,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - **Wertung bleibt stehen.** Eine Zeilenfarbe oder eine Schiedsrichter-Änderung
   an einem bereits gewerteten Spiel konnte ihm in BTP den Sieger nehmen. Beides
   geht nicht mehr an gewertete Spiele; das TL-Web meldet es bei der Farbe.
+  Auch „Feld freigeben" fasst ein schon gewertetes Spiel nicht mehr an, es
+  räumt nur das Feld.
 - **Vorarbeit für den Ballzähler am Tablet.** Übertragung und Prüfung der
   gezählten Bälle (0–99) sind eingebaut, Zähler und Schalter folgen mit den
   nächsten Versionen. Bis dahin ändert sich an Tablet und TL-Web nichts.

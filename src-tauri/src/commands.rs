@@ -4064,7 +4064,14 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
         return Err("Ansage-Slave-Modus: Feldvergabe nur am Master-PC.".to_string());
     }
     // Das aktuell auf dem Feld stehende Match auflösen, um dessen CourtID zu löschen.
-    let match_courts = match state.tablet.match_for_court(court_id) {
+    // Ein schon gewertetes Spiel bekommt keinen Match-Knoten: Ein Match-Write
+    // ohne Ergebnis-Felder nimmt ihm in BTP den Sieger (Messung 13.11.2026).
+    // Das Feld räumt der Courts-Block allein.
+    let match_courts = match state
+        .tablet
+        .match_for_court(court_id)
+        .filter(|m| m.winner.is_none())
+    {
         Some(m) => vec![crate::btp::proto::MatchCourt {
             match_id: m.id,
             draw_id: m.draw_id,

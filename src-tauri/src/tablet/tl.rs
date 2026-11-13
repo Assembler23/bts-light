@@ -155,6 +155,11 @@ pub(crate) fn plan_court_action(
         snap.matches
             .iter()
             .find(|m| m.id == match_id)
+            // Ein gewertetes Spiel bekommt keinen Match-Knoten mehr: Ein
+            // Match-Write ohne Ergebnis-Felder nimmt ihm in BTP den Sieger
+            // (Messung 13.11.2026 für Farb- und Schiedsrichter-Write; der
+            // Feld-Write hat dieselbe Form). Das Feld räumt der Courts-Block.
+            .filter(|m| m.winner.is_none())
             .map(|m| {
                 vec![MatchCourt {
                     match_id: m.id,

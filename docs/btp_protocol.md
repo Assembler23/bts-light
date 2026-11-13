@@ -949,6 +949,19 @@ den frisch gelesenen Stand und gegen einen eigenen Ergebnis-Write der letzten
 eines beendeten Spiels reist im Ergebnis-Write mit; eine Farbe an einem
 gewerteten Spiel lehnt das TL-Web mit einer Meldung ab.
 
+Der Feld-Write (`court_assign_request`) hat dieselbe Form wie der
+Schiedsrichter-Write. Dass auch er den Sieger nimmt, ist **nicht gemessen**,
+aber anzunehmen. Deshalb lässt bts-light beim Freigeben oder Umhängen eines
+schon gewerteten Spiels den Match-Knoten weg und schickt nur den
+`Courts`-Block (`commands.rs::free_court`, `tl.rs::plan_court_action`,
+`write_courts_to_btp` für die 5 s nach einem eigenen Ergebnis).
+
+**Bekannte Grenze:** Feldvergabe, Freigabe, kampflose Wertung und
+Disqualifikation nehmen die Ballzahl aus dem Snapshot des letzten Polls, ein
+Nachschub-Eintrag den Wert vom Einreihen. Ändert jemand die Zahl in BTP von
+Hand genau dazwischen, schreibt bts-light den älteren Wert zurück — dasselbe
+Fenster wie bei `CourtID`.
+
 Das Messwerkzeug `src-tauri/tests/btp_shuttles_probe.rs` hat das am echten
 BTP (Windows-PC, **Testturnier**) gemessen, in dieser Reihenfolge:
 

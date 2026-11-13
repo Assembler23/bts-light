@@ -3886,7 +3886,10 @@ pub(crate) async fn write_result_to_btp(
                                                                     // (`free_court_id: None`) — ab jetzt gilt BTP, nicht der Merkstand.
     crate::btp::eigene_writes::EIGENE.loeschen(update.btp_match_id);
     // Farb- und Schiedsrichter-Writes an dieses Spiel ab jetzt zurückhalten:
-    // Sie nähmen ihm die Wertung (`ohne_gewertete`).
+    // Sie nähmen ihm die Wertung (`ist_gewertet`). Der Merker bleibt auch
+    // nach einem Fehler stehen: Ein Write, der in eine Zeitüberschreitung
+    // lief, kann trotzdem angekommen sein — 5 s Zurückhaltung kosten nichts,
+    // der nächste Sync-Lauf holt Farbe und Besetzung nach.
     crate::btp::eigene_writes::EIGENE
         .wertung_merken(update.btp_match_id, crate::tablet::monitor::now_ms());
     let host = &config.btp.host;
@@ -3948,6 +3951,20 @@ pub(crate) async fn write_courts_to_btp(
     let port = config.btp.port;
     let pw = config.btp.password.as_deref();
 
+    // Ein Spiel, an das gerade ein Ergebnis ging, bekommt keinen
+    // Match-Knoten: BTP zeigt die Wertung womöglich noch nicht, und der
+    // Knoten nähme sie wieder weg ([`ist_gewertet`]). Der Courts-Block
+    // bleibt — das Feld wird trotzdem geräumt bzw. vergeben.
+    let jetzt = crate::tablet::monitor::now_ms();
+    let match_courts: Vec<proto::MatchCourt> = match_courts
+        .iter()
+        .filter(|m| !crate::btp::eigene_writes::EIGENE.kuerzlich_gewertet(m.match_id, jetzt))
+        .copied()
+        .collect();
+    let match_courts = match_courts.as_slice();
+    if courts.is_empty() && match_courts.is_empty() {
+        return Ok(());
+    }
     let gemerkt = merke_eigene(match_courts.iter().map(|m| (m.match_id, m.planung())));
     let ergebnis = async {
         let login_raw = client::send_request(host, port, &proto::login_request(pw))
@@ -5508,6 +5525,43 @@ mod tests {
     }
 
     // ─────────────── Ballzahl (Spec tablet-ballzaehler) ───────────────
+
+    #[test]
+    fn ist_gewertet_kennt_den_frischen_stand_und_den_eigenen_ergebnis_write() {
+        // Messung 13.11.2026: Ein Farb- oder Schiedsrichter-Write an ein
+        // gewertetes Spiel nimmt ihm in BTP den Sieger. Der Filter vor dem
+        // Senden muss beides erkennen: die Wertung, die BTP schon zeigt, und
+        // den eigenen Ergebnis-Write, den BTP noch nicht zeigt.
+        let stand = |m: BtpMatch| BtpSnapshot {
+            tournament_name: "T".into(),
+            rest_minutes: None,
+            matches: vec![m],
+            courts: Vec::new(),
+            locations: Vec::new(),
+            court_infos: Vec::new(),
+            events: Vec::new(),
+            entries: Vec::new(),
+            officials: Vec::new(),
+        };
+        // Eigene IDs — der Merker ist prozessweit, andere Tests nutzen 42.
+        let mut offen = match_on_court();
+        offen.id = 990_001;
+        assert!(!ist_gewertet(&stand(offen.clone()), 990_001));
+        let mut fertig = offen.clone();
+        fertig.winner = Some(2);
+        assert!(
+            ist_gewertet(&stand(fertig), 990_001),
+            "BTP zeigt den Sieger"
+        );
+        assert!(
+            !ist_gewertet(&stand(offen.clone()), 990_002),
+            "fremdes Spiel"
+        );
+
+        // BTP zeigt die Wertung noch nicht, aber wir haben sie eben gesendet.
+        crate::btp::eigene_writes::EIGENE.wertung_merken(990_001, crate::tablet::monitor::now_ms());
+        assert!(ist_gewertet(&stand(offen), 990_001));
+    }
 
     #[test]
     fn ballzahl_fuer_write_nimmt_die_meldung_nur_im_bereich_und_bei_schalter_an() {
