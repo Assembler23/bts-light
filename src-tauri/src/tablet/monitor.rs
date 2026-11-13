@@ -714,6 +714,7 @@ mod tests {
             from2: None,
             display_order: None,
             highlight: 0,
+            shuttles: 0,
             draw_name: "HE".into(),
             discipline: crate::btp::model::Discipline::MensSingles,
             class_label: String::new(),

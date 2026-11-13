@@ -57,6 +57,7 @@ fn a_match(id: i64, match_num: i64, planned_time: i64) -> BtpMatch {
         planning_id: id,
         display_order: None,
         highlight: 0,
+        shuttles: 0,
         from1: None,
         from2: None,
         draw_name: "HE A".to_string(),

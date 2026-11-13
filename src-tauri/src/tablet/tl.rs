@@ -166,6 +166,7 @@ pub(crate) fn plan_court_action(
                     // den Roster kennt (ADR 0021).
                     officials: None,
                     highlight: None,
+                    shuttles: m.shuttles,
                 }]
             })
             .unwrap_or_default()
@@ -1508,6 +1509,15 @@ fn mannschaft_text(spieler: &[crate::btp::model::BtpPlayer]) -> String {
         .join("/")
 }
 
+/// Dieselbe Ergebnis-Aktion ohne Ballzahl; andere Aktionen unverändert.
+fn ohne_ballzahl(action: &relay_proto::TlAction) -> relay_proto::TlAction {
+    let mut kopie = action.clone();
+    if let relay_proto::TlAction::EnterResult { shuttles, .. } = &mut kopie {
+        *shuttles = None;
+    }
+    kopie
+}
+
 /// Übersetzt eine Ergebnis-Aktion in die BTP-Schreibvorgänge.
 ///
 /// Rein und ohne Netz. Die eigentliche Prüfung (Satz-Vollständigkeit,
@@ -1530,6 +1540,7 @@ pub(crate) fn plan_result_action(
             sets,
             retired,
             overwrite,
+            shuttles,
             ..
         } => {
             if *retired {
@@ -1588,6 +1599,18 @@ pub(crate) fn plan_result_action(
                         "Das Spiel gibt es im aktuellen Turnierstand nicht mehr.",
                     )
                 })?;
+            // Anders als am Tablet ist eine zu große Ballzahl hier ein
+            // Tippfehler, den die Turnierleitung sehen soll — still den
+            // BTP-Wert zu schreiben, ließe sie im Glauben, es habe geklappt.
+            if shuttles.is_some_and(|n| n > relay_proto::MAX_SHUTTLES) {
+                return Err(TlResponse::err(
+                    C::NotAllowed,
+                    format!(
+                        "Die Ballzahl muss zwischen 0 und {} liegen.",
+                        relay_proto::MAX_SHUTTLES
+                    ),
+                ));
+            }
             let pairs: Vec<(i64, i64)> = sets.iter().map(|s| (s.a, s.b)).collect();
             let update = crate::tablet::server::build_manual_result_update_opt(
                 m,
@@ -1595,6 +1618,7 @@ pub(crate) fn plan_result_action(
                 on_court_since,
                 now_ms,
                 *overwrite,
+                *shuttles,
                 officials,
             )
             .map_err(|e| {
@@ -1651,6 +1675,8 @@ pub(crate) fn walkover_updates(
             // reasserted dieselbe Regel wie bei jedem Ergebnis-Write die
             // bekannte Besetzung mit (Live-Befund 14.08.2026).
             officials: officials.get(&c.match_id).copied(),
+            // Kampflos trägt nie eine gezählte Zahl — nur, was BTP schon hat.
+            shuttles: c.shuttles,
         })
         .collect()
 }
@@ -2265,6 +2291,16 @@ async fn execute_result_action(
             let on_court_since = ctx.tablet.brutto_start_ms(*match_id, court_id);
             let btp_end_ms = ctx.tablet.result_end_ms(*match_id, now_ms);
             let officials = ctx.tablet.officials_for_result(*match_id);
+            // Bei ausgeschaltetem Ballzähler zählt eine mitgeschickte Zahl
+            // nicht (Spec `tablet-ballzaehler`) — der Write trägt dann den
+            // Wert, den BTP schon hat.
+            let ohne_zahl;
+            let action = if config.shuttle_counter {
+                action
+            } else {
+                ohne_zahl = ohne_ballzahl(action);
+                &ohne_zahl
+            };
             match plan_result_action(&snap, on_court_since, btp_end_ms, action, officials) {
                 Ok(u) => {
                     // Spielende stempeln (E3): Eingangszeitpunkt der
@@ -2467,13 +2503,17 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
             retired,
             winner,
             overwrite,
+            shuttles,
         } => format!(
-            "result:{match_id}:{}:{retired}:{}:{overwrite}",
+            // Die Ballzahl gehört dazu: Eine Korrektur, die nur sie ändert,
+            // ist eine andere Absicht als der Doppeltipp derselben Wertung.
+            "result:{match_id}:{}:{retired}:{}:{overwrite}:{}",
             sets.iter()
                 .map(|s| format!("{}-{}", s.a, s.b))
                 .collect::<Vec<_>>()
                 .join(","),
-            winner.unwrap_or(0)
+            winner.unwrap_or(0),
+            shuttles.map_or_else(|| "-".to_string(), |n| n.to_string())
         ),
         A::ConfirmWalkover {
             proposal_id,
@@ -2776,6 +2816,7 @@ fn highlight_entry_fuer(
         // unmittelbar vor dem Senden frisch (Messung 09.11.2026).
         court_id: m.court_id.unwrap_or(0),
         officials: (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0)),
+        shuttles: 0,
     })
 }
 
@@ -2810,7 +2851,7 @@ async fn execute_highlight_action(
         // also auch kein Echo und keine Erfolgsmeldung.
         Ok(0) => Some(TlResponse::err(
             C::NotAllowed,
-            format!("Spiel {match_id} gibt es in BTP nicht mehr."),
+            format!("Spiel {match_id} gibt es in BTP nicht mehr, oder es ist bereits gewertet."),
         )),
         Ok(_) => {
             // Erst nach dem Erfolg merken: Ein Echo für einen Write, den BTP
@@ -5532,6 +5573,7 @@ mod tests {
             planning_id: id,
             display_order: None,
             highlight: 0,
+            shuttles: 0,
             from1: None,
             from2: None,
             draw_name: "HE A".to_string(),
@@ -7971,6 +8013,7 @@ mod tests {
                 retired: false,
                 winner: None,
                 overwrite: false,
+                shuttles: None,
             },
             None,
         )
@@ -8006,6 +8049,7 @@ mod tests {
                 retired: false,
                 winner: None,
                 overwrite: false,
+                shuttles: None,
             },
             None,
         )
@@ -8043,6 +8087,7 @@ mod tests {
                 retired: false,
                 winner: None,
                 overwrite: false,
+                shuttles: None,
             },
             None,
         )
@@ -8067,6 +8112,7 @@ mod tests {
                 retired: true,
                 winner: Some(1),
                 overwrite: false,
+                shuttles: None,
             },
             None,
         )
@@ -8095,6 +8141,7 @@ mod tests {
             retired: false,
             winner: None,
             overwrite,
+            shuttles: None,
         };
 
         // Ohne ausdrücklichen Wunsch bleibt es bei „schon gewertet" — so
@@ -8106,6 +8153,70 @@ mod tests {
         let updates = plan_result_action(&s, None, 9_000, &aktion(true), None).unwrap();
         assert_eq!(updates.len(), 1);
         assert!(updates[0].team1_won);
+    }
+
+    #[test]
+    fn die_ballzahl_der_turnierleitung_geht_in_den_ergebnis_write() {
+        // Spec tablet-ballzaehler: Die Turnierleitung gibt die Zahl beim
+        // Eintragen oder Korrigieren an. Ohne Angabe bleibt, was BTP hat —
+        // BTP läse ein fehlendes Element als 0 (Messung 13.11.2026).
+        let mut done = a_match(7);
+        done.status = MatchStatus::Finished;
+        done.winner = Some(1);
+        done.shuttles = 4;
+        let s = snap(vec![a_court(1, None)], vec![done], Vec::new());
+        let aktion = |shuttles| relay_proto::TlAction::EnterResult {
+            match_id: 7,
+            sets: vec![
+                relay_proto::SetAb { a: 21, b: 15 },
+                relay_proto::SetAb { a: 21, b: 10 },
+            ],
+            retired: false,
+            winner: None,
+            overwrite: true,
+            shuttles,
+        };
+        let zahl = |shuttles| {
+            plan_result_action(&s, None, 9_000, &aktion(shuttles), None).unwrap()[0].shuttles
+        };
+        assert_eq!(zahl(Some(6)), 6, "angegebene Zahl");
+        assert_eq!(zahl(Some(0)), 0, "ausdrücklich 0 löscht die Zahl");
+        assert_eq!(zahl(None), 4, "keine Angabe → BTP-Wert bleibt");
+
+        // Zu groß ist ein Tippfehler, kein stiller Rückfall.
+        let err = plan_result_action(&s, None, 9_000, &aktion(Some(100)), None).unwrap_err();
+        assert_eq!(err.code, Some(relay_proto::TlErrorCode::NotAllowed));
+
+        // Bei ausgeschaltetem Zähler zählt die Zahl nicht.
+        let ohne = ohne_ballzahl(&aktion(Some(6)));
+        assert_eq!(
+            plan_result_action(&s, None, 9_000, &ohne, None).unwrap()[0].shuttles,
+            4
+        );
+        // Und der Fingerabdruck unterscheidet zwei Zahlen: Eine Korrektur
+        // nur der Ballzahl ist kein Doppeltipp.
+        assert_ne!(
+            action_fingerprint(&aktion(Some(6))),
+            action_fingerprint(&aktion(Some(7)))
+        );
+    }
+
+    #[test]
+    fn eine_kampflose_wertung_traegt_die_ballzahl_aus_btp() {
+        let kandidat = crate::tablet::state::WalkoverCandidate {
+            match_id: 11,
+            draw_id: 1,
+            planning_id: 111,
+            round_name: "VF".to_string(),
+            opponent: "Meier".to_string(),
+            retired_is_team1: true,
+            shuttles: 3,
+        };
+        let updates = walkover_updates(std::slice::from_ref(&kandidat), &[11], &Default::default());
+        assert_eq!(updates[0].shuttles, 3);
+        // Die Zahl ist Schreib-Beiwerk und reist nicht in die Oberflächen.
+        let json = serde_json::to_string(&kandidat).unwrap();
+        assert!(!json.contains("shuttles"), "{json}");
     }
 
     #[test]
@@ -8130,6 +8241,7 @@ mod tests {
                 retired: false,
                 winner: None,
                 overwrite: true,
+                shuttles: None,
             },
             None,
         )
@@ -8151,6 +8263,7 @@ mod tests {
                 round_name: "VF".to_string(),
                 opponent: "Meier".to_string(),
                 retired_is_team1: true,
+                shuttles: 0,
             },
             crate::tablet::state::WalkoverCandidate {
                 match_id: 12,
@@ -8159,6 +8272,7 @@ mod tests {
                 round_name: "HF".to_string(),
                 opponent: "Kraus".to_string(),
                 retired_is_team1: false,
+                shuttles: 0,
             },
         ];
         let updates = walkover_updates(&candidates, &[11, 12], &std::collections::HashMap::new());
@@ -10741,6 +10855,7 @@ mod tests {
             retired: false,
             winner: None,
             overwrite: false,
+            shuttles: None,
         };
         let corrected = relay_proto::TlAction::EnterResult {
             match_id: 7,
@@ -10748,6 +10863,7 @@ mod tests {
             retired: false,
             winner: None,
             overwrite: false,
+            shuttles: None,
         };
         assert_ne!(
             action_fingerprint(&first),
@@ -10897,6 +11013,7 @@ mod tests {
             round_name: "VF".to_string(),
             opponent: "Meier".to_string(),
             retired_is_team1: true,
+            shuttles: 0,
         }];
         let err = plan_walkover_action(&candidates, &[99], &std::collections::HashMap::new())
             .unwrap_err();

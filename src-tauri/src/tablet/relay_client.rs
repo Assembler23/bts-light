@@ -1023,6 +1023,7 @@ async fn handle_frame(
             walkover,
             winner,
             cascade_walkover,
+            shuttles,
         } => {
             let body = ResultBody {
                 match_id,
@@ -1033,6 +1034,7 @@ async fn handle_frame(
                 walkover,
                 winner,
                 cascade_walkover,
+                shuttles,
             };
             // Nicht hier abwarten: Der Write nach BTP dauert bei trägem BTP
             // oder laufender TP-Kopie 15 s und mehr. Der Arbeiter des Felds
@@ -1344,6 +1346,7 @@ fn push_court(
                     );
                     brief.feld_check =
                         cfg.meetingpoint.enabled && cfg.meetingpoint.field_check_enabled;
+                    brief.shuttle_counter = cfg.shuttle_counter;
                     brief
                 },
                 // Autoritativer 1.-Aufruf-Zeitstempel vom Host (gleiche Quelle
@@ -2184,6 +2187,7 @@ mod tests {
         BtpMatch {
             display_order: None,
             highlight: 0,
+            shuttles: 0,
             from1: None,
             from2: None,
             id,
@@ -2848,6 +2852,7 @@ mod tests {
             walkover: false,
             winner: None,
             cascade_walkover: false,
+            shuttles: None,
         };
         server
             .send(WsMessage::Text(

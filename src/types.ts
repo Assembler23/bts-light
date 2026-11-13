@@ -822,6 +822,9 @@ export interface AppConfig {
   /** Turnierweite Anzeige-Optionen (Vereinsname/-logo in TL-Web + Tablet).
    *  Zentral, nicht je Gerät. */
   display: DisplayConfig;
+  /** „Bälle am Tablet zählen" (Spec tablet-ballzaehler): Zähler am
+   *  Zähl-Tablet, Zahl mit dem Ergebnis nach BTP. Standard aus. */
+  shuttle_counter?: boolean;
 }
 
 /** Turnierweite Anzeige-Schalter für Spielernamen (Rust: config::DisplayConfig).

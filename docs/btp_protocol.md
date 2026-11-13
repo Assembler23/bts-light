@@ -915,10 +915,22 @@ Match-Write und liest ein fehlendes Element als 0.
 | Ergebnis-Write mit `Shuttles = 5` | Angenommen; Wertung und Ballzahl nach 349 ms sichtbar. |
 | Zweiter Ergebnis-Write ohne `Shuttles` | Ballzahl danach **0** (ohne Marker gemessen, 3 s Wartezeit). |
 
-**Schreibregel daraus (Zweig B der Spec):** Jeder Match-Write von bts-light
-muss `Shuttles` mit dem zuletzt gelesenen Wert mittragen — auch bei
-ausgeschaltetem Ballzähler. Sonst löscht schon eine Feldvergabe, ein Farb-
-oder Schiedsrichter-Write eine in BTP von Hand eingetragene Zahl.
+**Schreibregel daraus (Zweig B der Spec), umgesetzt seit v0.9.398:** Jeder
+Match-Write von bts-light trägt `Shuttles` mit dem zuletzt gelesenen Wert —
+auch bei ausgeschaltetem Ballzähler. Vorher löschte schon eine Feldvergabe,
+ein Farb- oder Schiedsrichter-Write eine in BTP von Hand eingetragene Zahl.
+
+- `Shuttles` ist das fünfte Planungsfeld neben `CourtID`, `Official1ID`,
+  `Official2ID` und `Highlight` (`btp::eigene_writes::Planung`): Farb- und
+  Schiedsrichter-Write nehmen den Wert aus dem unmittelbar vorher frisch
+  gelesenen Stand bzw. aus dem eigenen Merkstand; Feldvergabe und -freigabe
+  aus dem Snapshot.
+- Der Ergebnis-Write (`MatchUpdate.shuttles`) trägt die Zahl des Tablets oder
+  der Turnierleitung, sonst den BTP-Wert des Spiels
+  (`server::ballzahl_fuer_write`).
+- Bei **0** bleibt das Element weg (`proto::push_shuttles_node`). Das ist für
+  BTP gleichwertig, und die Requests eines Turniers ohne Ballzahlen bleiben
+  Byte für Byte wie zuvor.
 
 **Nebenbefund am gewerteten Spiel:** Nach dem Farb- und nach dem
 Schiedsrichter-Write las das Werkzeug das gewertete Spiel **ohne Sieger**
@@ -928,6 +940,14 @@ die Wertung — dieselbe Fehlerklasse wie der „nackte" Match-Knoten oben. Ob
 dabei auch die Sätze fallen, ist nicht gemessen. Unmittelbar nach dem
 Ergebnis-Write mit Feldfreigabe stand am Match noch die alte `CourtID`; nach
 dem zweiten Ergebnis-Write (ohne Freigabe-Block) war sie leer.
+
+**Folge, seit v0.9.398:** Farb- und Schiedsrichter-Writes gehen nicht mehr an
+gewertete Spiele. `sync::officials_entries` überspringt sie, und
+`server::ist_gewertet` filtert unmittelbar vor dem Senden noch einmal — gegen
+den frisch gelesenen Stand und gegen einen eigenen Ergebnis-Write der letzten
+5 s, den BTP noch nicht zeigt (`EigeneWrites::wertung_merken`). Die Besetzung
+eines beendeten Spiels reist im Ergebnis-Write mit; eine Farbe an einem
+gewerteten Spiel lehnt das TL-Web mit einer Meldung ab.
 
 Das Messwerkzeug `src-tauri/tests/btp_shuttles_probe.rs` hat das am echten
 BTP (Windows-PC, **Testturnier**) gemessen, in dieser Reihenfolge:

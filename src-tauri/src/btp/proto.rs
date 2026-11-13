@@ -115,6 +115,22 @@ pub struct MatchUpdate {
     /// (`officials.rs::move_to_end`) und Einsatz-Zähler
     /// (`officials.rs::appearances`).
     pub officials: Option<(i64, i64)>,
+    /// Verbrauchte Bälle (`Match.Shuttles`). **Immer der Wert, der danach in
+    /// BTP stehen soll** — die Zahl des Tablets bzw. der Turnierleitung oder,
+    /// ohne eigene Angabe, der zuletzt aus BTP gelesene Wert. BTP liest ein
+    /// fehlendes Element als 0 (Messung 13.11.2026): Ein Ergebnis-Write ohne
+    /// die Zahl löschte eine von Hand eingetragene.
+    pub shuttles: i64,
+}
+
+/// `Shuttles` an einen Match-Knoten hängen — nur bei einem Wert über 0.
+/// BTP liest „fehlt" als 0 (Messung 13.11.2026), das Weglassen ist also
+/// gleichwertig; so bleiben die Requests eines Turniers ohne Ballzahlen
+/// Byte für Byte wie vor dem Ballzähler.
+fn push_shuttles_node(children: &mut Vec<Node>, shuttles: i64) {
+    if shuttles > 0 {
+        children.push(Node::integer("Shuttles", shuttles));
+    }
 }
 
 /// Unix-Millisekunden → BTP-`DateTime` in **lokaler** Zeit (BTP zeigt
@@ -193,6 +209,7 @@ pub fn update_request(update: &MatchUpdate, session_key: &str, password: Option<
     match_children.push(Node::integer("DrawID", update.draw_id));
     match_children.push(Node::integer("PlanningID", update.planning_id));
     push_officials_nodes(&mut match_children, update.officials);
+    push_shuttles_node(&mut match_children, update.shuttles);
     let match_node = Node::group("Match", match_children);
 
     let mut tournament_children = Vec::new();
@@ -300,6 +317,10 @@ pub struct MatchCourt {
     /// dem frischen Stand), `None` = weglassen — beim Ruf aufs Feld und
     /// beim Freigeben ist das Löschen der Aufrufmarke gewollt.
     pub highlight: Option<u8>,
+    /// Ballzahl (`Match.Shuttles`), die der Write **unverändert mitträgt** —
+    /// immer, auch beim Ruf aufs Feld und beim Freigeben: BTP setzt sie bei
+    /// jedem Match-Write auf den Wert im Knoten (Messung 13.11.2026).
+    pub shuttles: i64,
 }
 
 /// Ein Match, dessen Zeilenfarbe `Match.Highlight` in BTP gesetzt werden
@@ -322,6 +343,8 @@ pub struct HighlightEntry {
     /// Senden aus einem frisch gelesenen Stand.
     pub court_id: i64,
     pub officials: (i64, i64),
+    /// Ballzahl, die der Write unverändert mitträgt (wie `court_id`).
+    pub shuttles: i64,
 }
 
 impl HighlightEntry {
@@ -331,6 +354,7 @@ impl HighlightEntry {
             court_id: self.court_id,
             officials: self.officials,
             highlight: self.highlight,
+            shuttles: self.shuttles,
         }
     }
 }
@@ -343,6 +367,7 @@ impl MatchCourt {
             court_id: self.court_id,
             officials: self.officials.unwrap_or((0, 0)),
             highlight: self.highlight.unwrap_or(0),
+            shuttles: self.shuttles,
         }
     }
 }
@@ -366,18 +391,17 @@ pub fn highlight_request(
     let match_nodes: Vec<Node> = entries
         .iter()
         .map(|h| {
-            Node::group(
-                "Match",
-                vec![
-                    Node::integer("ID", h.match_id),
-                    Node::integer("DrawID", h.draw_id),
-                    Node::integer("PlanningID", h.planning_id),
-                    Node::integer("Highlight", i64::from(h.highlight)),
-                    Node::integer("CourtID", h.court_id),
-                    Node::integer("Official1ID", h.officials.0),
-                    Node::integer("Official2ID", h.officials.1),
-                ],
-            )
+            let mut children = vec![
+                Node::integer("ID", h.match_id),
+                Node::integer("DrawID", h.draw_id),
+                Node::integer("PlanningID", h.planning_id),
+                Node::integer("Highlight", i64::from(h.highlight)),
+                Node::integer("CourtID", h.court_id),
+                Node::integer("Official1ID", h.officials.0),
+                Node::integer("Official2ID", h.officials.1),
+            ];
+            push_shuttles_node(&mut children, h.shuttles);
+            Node::group("Match", children)
         })
         .collect();
     let mut nodes = base_request("SENDUPDATE", password, Some(session_key));
@@ -445,6 +469,7 @@ pub fn court_assign_request(
                 if let Some(h) = mc.highlight {
                     children.push(Node::integer("Highlight", i64::from(h)));
                 }
+                push_shuttles_node(&mut children, mc.shuttles);
                 Node::group("Match", children)
             })
             .collect();
@@ -632,6 +657,7 @@ mod tests {
             player_ids: Vec::new(),
             end_ts_ms: None,
             officials: None,
+            shuttles: 0,
         }
     }
 
@@ -653,6 +679,75 @@ mod tests {
         assert_eq!(child_str(&action, "ID"), Some("SENDUPDATE"));
         assert_eq!(child_str(&action, "Unicode"), Some("SESSION-9"));
         assert!(xml::find(&action, "Password").is_none());
+    }
+
+    #[test]
+    fn shuttles_reist_in_jedem_match_write_aber_nur_ueber_null() {
+        // Messung 13.11.2026 (`tests/btp_shuttles_probe.rs`): BTP setzt die
+        // Ballzahl bei jedem Match-Write auf den Wert im Knoten, ein
+        // fehlendes Element heißt 0. Jeder Write trägt sie deshalb mit; bei 0
+        // bleibt das Element weg — gleichwertig, und die Requests eines
+        // Turniers ohne Ballzahlen bleiben Byte für Byte wie zuvor.
+        let ergebnis = |shuttles| {
+            match_node(&update_request(
+                &MatchUpdate {
+                    shuttles,
+                    ..sample_update()
+                },
+                "S",
+                None,
+            ))
+        };
+        assert_eq!(child_int(&ergebnis(7), "Shuttles"), Some(7));
+        assert!(xml::find(&ergebnis(0), "Shuttles").is_none());
+        assert_eq!(
+            update_request(&sample_update(), "S", None),
+            update_request(
+                &MatchUpdate {
+                    shuttles: 0,
+                    ..sample_update()
+                },
+                "S",
+                None
+            )
+        );
+
+        let feld = |shuttles| {
+            match_node(&court_assign_request(
+                &[],
+                &[MatchCourt {
+                    match_id: 42,
+                    draw_id: 7,
+                    planning_id: 1003,
+                    court_id: 3,
+                    officials: None,
+                    highlight: None,
+                    shuttles,
+                }],
+                "S",
+                None,
+            ))
+        };
+        assert_eq!(child_int(&feld(4), "Shuttles"), Some(4));
+        assert!(xml::find(&feld(0), "Shuttles").is_none());
+
+        let farbe = |shuttles| {
+            match_node(&highlight_request(
+                &[HighlightEntry {
+                    match_id: 42,
+                    draw_id: 7,
+                    planning_id: 1003,
+                    highlight: 1,
+                    court_id: 3,
+                    officials: (0, 0),
+                    shuttles,
+                }],
+                "S",
+                None,
+            ))
+        };
+        assert_eq!(child_int(&farbe(2), "Shuttles"), Some(2));
+        assert!(xml::find(&farbe(0), "Shuttles").is_none());
     }
 
     #[test]
@@ -916,6 +1011,7 @@ mod tests {
                 court_id: 0,
                 officials: None,
                 highlight: None,
+                shuttles: 0,
             }],
             "S",
             None,
@@ -951,6 +1047,7 @@ mod tests {
                 court_id: 7,
                 officials: Some((5, 0)),
                 highlight: None,
+                shuttles: 0,
             }],
             "S",
             None,
@@ -972,6 +1069,7 @@ mod tests {
                 court_id: 7,
                 officials: None,
                 highlight: None,
+                shuttles: 0,
             }],
             "S",
             None,
@@ -990,6 +1088,7 @@ mod tests {
                 draw_id: 7,
                 planning_id: 1001,
                 highlight: HIGHLIGHT_PREP_CALL,
+                shuttles: 0,
                 court_id: 0,
                 officials: (0, 0),
             }],
@@ -1024,6 +1123,7 @@ mod tests {
                 draw_id: 2,
                 planning_id: 3,
                 highlight: 4,
+                shuttles: 0,
                 court_id: 4,
                 officials: (7, 9),
             }],
@@ -1050,6 +1150,7 @@ mod tests {
             court_id: 0,
             officials: Some((5, 0)),
             highlight,
+            shuttles: 0,
         };
         let mit = court_assign_request(&[], &[eintrag(Some(1))], "S", None);
         assert_eq!(child_int(&match_node(&mit), "Highlight"), Some(1));
@@ -1066,6 +1167,7 @@ mod tests {
                 draw_id: 2,
                 planning_id: 3,
                 highlight: 0,
+                shuttles: 0,
                 court_id: 0,
                 officials: (0, 0),
             }],
@@ -1086,6 +1188,7 @@ mod tests {
                 draw_id: 2,
                 planning_id: 3,
                 highlight: 6,
+                shuttles: 0,
                 court_id: 0,
                 officials: (0, 0),
             }],

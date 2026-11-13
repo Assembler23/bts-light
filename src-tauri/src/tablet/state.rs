@@ -302,6 +302,11 @@ pub struct WalkoverCandidate {
     /// Steht die aufgebende Mannschaft auf Seite 1 des Matches? Bestimmt
     /// den Sieger des Walkovers (immer die jeweils andere Seite).
     pub retired_is_team1: bool,
+    /// Ballzahl des Spiels laut BTP — die kampflose Wertung trägt sie
+    /// unverändert mit, sonst setzte BTP sie auf 0 (Messung 13.11.2026).
+    /// Nicht für die Oberflächen: bleibt aus dem JSON heraus.
+    #[serde(skip)]
+    pub shuttles: i64,
 }
 
 /// Vorschlag, nach einer Aufgabe die restlichen Spiele derselben
@@ -1326,6 +1331,10 @@ struct PersistedMatchUpdate {
     /// Feld persistierte Queue-Datei beim App-Neustart weiter lesbar bleibt.
     #[serde(default)]
     officials: Option<(i64, i64)>,
+    /// Ballzahl (Spec `tablet-ballzaehler`). `#[serde(default)]`: Ein
+    /// Eintrag aus einer älteren Version lädt mit 0 = keine Angabe.
+    #[serde(default)]
+    shuttles: i64,
 }
 
 impl From<&crate::btp::proto::MatchUpdate> for PersistedMatchUpdate {
@@ -1342,6 +1351,7 @@ impl From<&crate::btp::proto::MatchUpdate> for PersistedMatchUpdate {
             player_ids: u.player_ids.clone(),
             end_ts_ms: u.end_ts_ms,
             officials: u.officials,
+            shuttles: u.shuttles,
         }
     }
 }
@@ -1360,6 +1370,7 @@ impl From<PersistedMatchUpdate> for crate::btp::proto::MatchUpdate {
             player_ids: p.player_ids,
             end_ts_ms: p.end_ts_ms,
             officials: p.officials,
+            shuttles: p.shuttles,
         }
     }
 }
@@ -4509,6 +4520,7 @@ impl TabletState {
                         .collect::<Vec<_>>()
                         .join(" / "),
                     retired_is_team1,
+                    shuttles: m.shuttles,
                 })
             })
             .collect()
@@ -5464,6 +5476,7 @@ pub(crate) mod tests {
         BtpMatch {
             display_order: None,
             highlight: 0,
+            shuttles: 0,
             from1: None,
             from2: None,
             id,
@@ -7807,6 +7820,7 @@ pub(crate) mod tests {
             player_ids: Vec::new(),
             end_ts_ms: None,
             officials: None,
+            shuttles: 0,
         }
     }
 
@@ -8399,6 +8413,38 @@ pub(crate) mod tests {
         assert_eq!(q[0].update.player_ids, vec![55, 66]);
         assert_eq!(q[0].update.end_ts_ms, Some(1_700_000_000_000));
         assert_eq!(q[0].enqueued_ms, 4_242, "Bezugszeitpunkt bleibt erhalten");
+    }
+
+    #[test]
+    fn btp_retry_traegt_die_ballzahl_ueber_den_neustart() {
+        // Spec tablet-ballzaehler: Die Nachschub-Queue sendet die Zahl
+        // unverändert nach.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("btp-retry.json");
+        let st = TabletState::default();
+        st.set_btp_retry_path(path.clone());
+        st.set_snapshot(snap_named("Cup A"));
+        let mut u = upd(7, 42);
+        u.shuttles = 6;
+        st.queue_btp_retry(u, 4_242);
+
+        let st2 = TabletState::default();
+        st2.set_btp_retry_path(path);
+        st2.set_snapshot(snap_named("Cup A"));
+        assert_eq!(st2.btp_retries()[0].update.shuttles, 6);
+    }
+
+    #[test]
+    fn ein_queue_eintrag_ohne_ballzahl_laedt_mit_null() {
+        // Eintrag aus einer Version vor dem Ballzähler: Das Feld fehlt.
+        let alt = r#"{"btp_match_id":7,"draw_id":1,"planning_id":1007,
+            "sets":[[21,10]],"team1_won":true,"duration_mins":42,
+            "score_status":0,"free_court_id":null,"player_ids":[],
+            "end_ts_ms":null}"#;
+        let p: PersistedMatchUpdate = serde_json::from_str(alt).expect("Altformat lädt");
+        let u: crate::btp::proto::MatchUpdate = p.into();
+        assert_eq!(u.shuttles, 0);
+        assert_eq!(u.officials, None);
     }
 
     #[test]

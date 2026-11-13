@@ -1,9 +1,10 @@
 //! Merkstand der eigenen Match-Writes (Messung 09.11.2026,
 //! `tests/btp_highlight_sr_write_probe.rs`).
 //!
-//! BTP übernimmt bei **jedem** Match-Write die vier Planungsfelder `CourtID`,
-//! `Official1ID`, `Official2ID` und `Highlight` aus dem Knoten; ein fehlendes
-//! Element heißt 0. Wer nur eines davon ändern will, muss die anderen drei
+//! BTP übernimmt bei **jedem** Match-Write die Planungsfelder `CourtID`,
+//! `Official1ID`, `Official2ID`, `Highlight` und — gemessen 13.11.2026,
+//! `tests/btp_shuttles_probe.rs` — die Ballzahl `Shuttles` aus dem Knoten;
+//! ein fehlendes Element heißt 0. Wer nur eines davon ändern will, muss die anderen drei
 //! deshalb mit dem Wert mitschicken, den BTP gerade hat — die Write-Funktionen
 //! lesen dafür unmittelbar vorher frisch.
 //!
@@ -34,12 +35,17 @@ pub struct Planung {
     pub court_id: i64,
     pub officials: (i64, i64),
     pub highlight: u8,
+    /// Ballzahl `Match.Shuttles` — gehört seit der Messung vom 13.11.2026
+    /// in dieselbe Klasse: fehlt das Element, setzt BTP die Zahl auf 0.
+    pub shuttles: i64,
 }
 
 /// Merkstand je Match-ID: was zuletzt geschrieben wurde und wann (Unix-ms).
 #[derive(Debug, Default)]
 pub struct EigeneWrites {
     eintraege: Mutex<HashMap<i64, (Planung, u64)>>,
+    /// Spiele, an die gerade ein Ergebnis ging, mit Zeitpunkt (Unix-ms).
+    gewertet: Mutex<HashMap<i64, u64>>,
 }
 
 impl EigeneWrites {
@@ -84,6 +90,27 @@ impl EigeneWrites {
     pub fn loeschen(&self, match_id: i64) {
         self.eintraege.lock().unwrap().remove(&match_id);
     }
+
+    /// Vor dem Senden eines Ergebnisses: Dieses Spiel ist gleich gewertet.
+    ///
+    /// Ein Farb- oder Schiedsrichter-Write an ein gewertetes Spiel nimmt ihm
+    /// in BTP den Sieger (Messung 13.11.2026, `tests/btp_shuttles_probe.rs`)
+    /// — und BTP zeigt die Wertung erst nach einigen hundert Millisekunden.
+    /// Bis dahin hält dieser Merker solche Writes zurück.
+    pub fn wertung_merken(&self, match_id: i64, jetzt_ms: u64) {
+        let mut g = self.gewertet.lock().unwrap();
+        g.retain(|_, seit| frisch_genug(*seit, jetzt_ms));
+        g.insert(match_id, jetzt_ms);
+    }
+
+    /// Ging in den letzten [`HALTE_MS`] ein Ergebnis an dieses Spiel?
+    pub fn kuerzlich_gewertet(&self, match_id: i64, jetzt_ms: u64) -> bool {
+        self.gewertet
+            .lock()
+            .unwrap()
+            .get(&match_id)
+            .is_some_and(|seit| frisch_genug(*seit, jetzt_ms))
+    }
 }
 
 /// Jünger als [`HALTE_MS`]? Ein Zeitpunkt in der Zukunft (Systemuhr
@@ -108,12 +135,29 @@ pub static SERIELL: LazyLock<tokio::sync::Mutex<()>> =
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn eine_wertung_haelt_folge_writes_nur_kurz_zurueck() {
+        // Messung 13.11.2026: Ein Farb- oder Schiedsrichter-Write an ein
+        // gewertetes Spiel nimmt ihm den Sieger. BTP zeigt die Wertung erst
+        // nach einigen hundert ms — bis dahin gilt der Merker.
+        let e = super::EigeneWrites::default();
+        assert!(!e.kuerzlich_gewertet(10, 1_000));
+        e.wertung_merken(10, 1_000);
+        assert!(e.kuerzlich_gewertet(10, 1_000));
+        assert!(e.kuerzlich_gewertet(10, 1_000 + super::HALTE_MS - 1));
+        assert!(!e.kuerzlich_gewertet(10, 1_000 + super::HALTE_MS));
+        assert!(!e.kuerzlich_gewertet(11, 1_000), "nur dieses Spiel");
+        // Uhr zurückgestellt: gilt als abgelaufen, nicht als ewig frisch.
+        assert!(!e.kuerzlich_gewertet(10, 500));
+    }
+
     use super::*;
 
     const P: Planung = Planung {
         court_id: 4,
         officials: (7, 0),
         highlight: 1,
+        shuttles: 0,
     };
 
     #[test]

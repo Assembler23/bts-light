@@ -258,6 +258,7 @@ mod tests {
         BtpMatch {
             display_order: None,
             highlight: 0,
+            shuttles: 0,
             from1: None,
             from2: None,
             id: 0,

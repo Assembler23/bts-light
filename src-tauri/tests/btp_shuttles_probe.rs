@@ -240,6 +240,7 @@ fn schreibe(m: &BtpMatch, form: Form, farbe: u8, session: &str, pw: Option<&str>
                 draw_id: m.draw_id,
                 planning_id: m.planning_id,
                 highlight: farbe,
+                shuttles: 0,
                 court_id,
                 officials,
             }],
@@ -255,6 +256,7 @@ fn schreibe(m: &BtpMatch, form: Form, farbe: u8, session: &str, pw: Option<&str>
                 court_id,
                 officials: Some(officials),
                 highlight: Some(farbe),
+                shuttles: 0,
             }],
             session,
             pw,
@@ -628,6 +630,7 @@ async fn does_a_result_write_carry_shuttles() {
         end_ts_ms: None,
         officials: (m.official1_id.is_some() || m.official2_id.is_some())
             .then(|| (m.official1_id.unwrap_or(0), m.official2_id.unwrap_or(0))),
+        shuttles: 0,
     };
 
     println!("\n3) Ergebnis-Write MIT Shuttles=5 (21:15 21:10, Feld wird frei)");
@@ -749,6 +752,7 @@ fn shuttles_lands_in_the_match_node_of_real_requests() {
         player_ids: Vec::new(),
         end_ts_ms: None,
         officials: Some((11, 12)),
+        shuttles: 0,
     };
     let farbe = proto::highlight_request(
         &[proto::HighlightEntry {
@@ -756,6 +760,7 @@ fn shuttles_lands_in_the_match_node_of_real_requests() {
             draw_id: 2,
             planning_id: 3,
             highlight: 0,
+            shuttles: 0,
             court_id: 0,
             officials: (0, 0),
         }],
@@ -771,6 +776,7 @@ fn shuttles_lands_in_the_match_node_of_real_requests() {
             court_id: 0,
             officials: Some((0, 0)),
             highlight: Some(0),
+            shuttles: 0,
         }],
         "sitzung",
         None,
