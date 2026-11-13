@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.399
+
+- **Bälle am Tablet zählen.** Ist der Ballzähler eingeschaltet, steht in der
+  Kopfzeile des Zähl-Tablets **− 🏸 Zahl +**. Jeder neue Ball wird mit **+**
+  getippt; die Zahl geht mit dem Ergebnis nach BTP. „Punkt zurück" ändert sie
+  nicht, nach dem Übermitteln ist sie eingefroren. Der Schalter ist
+  standardmäßig aus; der Setup-Schalter in der App folgt mit der nächsten
+  Version.
+
 ## v0.9.398
 
 - **Ballzahl in BTP bleibt erhalten.** Wer in BTP an einem Spiel von Hand die

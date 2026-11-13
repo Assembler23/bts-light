@@ -3,7 +3,7 @@
 > Status: **freigegeben 13.11.2026** (via /idee: Brief → Grill → How-To → Review).
 > Umsetzung: PR 0 (Messwerkzeug) gebaut; BTP-Messung vom 13.11.2026 ergibt
 > **Zweig B** (jeder Match-Write trägt `Shuttles`). PR 1 (Kern + Wire) in
-> v0.9.398; PR 2 (Tablet) und PR 3 (Turnierleitung) stehen aus.
+> v0.9.398, PR 2 (Tablet) in v0.9.399; PR 3 (Turnierleitung) steht aus.
 > Quelle: Idee vom 13.11.2026. Betroffene Crates: src-tauri / relay / relay-proto / src.
 > ADR: [0093](../adr/0093-ballzahl-reist-mit-dem-ergebnis.md).
 

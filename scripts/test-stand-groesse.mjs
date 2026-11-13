@@ -80,7 +80,7 @@ function neuerZustand() {
     finished: false, midGameSwitchDone: false, pause: null, intervalDoneThisGame: false,
     submittedOk: false, pendingResult: null, resultRejected: null, startedAt: 1_760_000_000_000,
     alertInjury: false, alertOfficial: false, retired: false, walkover: false, cascadeWalkover: false,
-    retiredWinner: null, history: [], rallyLog: null, events: [], eventSeq: 0,
+    retiredWinner: null, shuttles: 99, history: [], rallyLog: null, events: [], eventSeq: 0,
   };
 }
 

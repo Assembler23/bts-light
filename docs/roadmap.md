@@ -600,8 +600,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   [features/tablet-ballzaehler.md](features/tablet-ballzaehler.md)
   (freigegeben 13.11.2026, ADR 0093; BTP-Messung mit
   `tests/btp_shuttles_probe.rs` am 13.11.2026: **Zweig B** — jeder Match-Write
-  muss `Shuttles` mittragen; **PR 1 (Kern + Wire) in v0.9.398**, Tablet-Zähler
-  und Turnierleitung folgen). Bälle am Zähl-Tablet
+  muss `Shuttles` mittragen; **PR 1 (Kern + Wire) in v0.9.398, PR 2 (Tablet-Zähler) in v0.9.399**,
+  Turnierleitung folgt). Bälle am Zähl-Tablet
   hochzählen; die Zahl geht mit dem Ergebnis als `Match.Shuttles` nach BTP,
   das TL-Web zeigt sie, die Turnierleitung kann sie beim Eintragen/Korrigieren
   angeben. Schalter im Setup, Standard aus. Vier PRs: Messwerkzeug (gebaut), dann

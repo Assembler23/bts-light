@@ -271,6 +271,12 @@ jobs:
       - name: Akkustand am Tablet (JS)
         run: node scripts/test-akku.mjs
 
+      # Ballzähler am Tablet (Spec tablet-ballzaehler): Bereich 0–99, kaputte
+      # Werte aus fremdem Stand, Einfrieren ab dem Übermitteln, Zahl nur im
+      # Body, wenn der Turnier-PC den Zähler anbietet.
+      - name: Ballzähler am Tablet (JS)
+        run: node scripts/test-ballzaehler.mjs
+
       # Meetingpoint-Seite (Spec meetingpoint-spielbereit): Gruppierung,
       # Reihenfolge, Check-in-Form — und die Inline-Kopie in der Seite muss
       # sich verhalten wie das Modul.

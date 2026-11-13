@@ -20,6 +20,7 @@ import * as gp from "../src/io/geparkt.mjs";
 import * as sw from "../src/io/standWahl.mjs";
 import * as rr from "../src/io/resultRetry.mjs";
 import * as aa from "../src/io/abschlussAnsicht.mjs";
+import * as bz from "../src/io/ballzaehler.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -344,6 +345,41 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
         (r) => ({ matchId: 7, lokalMatchId: lm, lokalFortschritt: lf, vorgemerkt: v, hostSets: hs, hostFortschritt: [1, 39], ring: r }))))));
     gleich("wahlBeiZuweisung", ZUW, (m, x) => m.wahlBeiZuweisung(x));
   }
+}
+
+// ── Ballzähler (Spec tablet-ballzaehler) ──
+// Eine abweichende Kopie zählte über 99 hinaus (der Turnier-PC verwürfe die
+// Zahl), ließe nach dem Übermitteln weiterzählen (die Änderung käme nie an)
+// oder schickte die Zahl an einen Turnier-PC, der den Zähler nicht anbietet.
+{
+  const text = seite("tablet.html");
+  const namen = ["ballzahlAus", "ballMehr", "ballWeniger", "zaehlerSichtbar", "zaehlerGesperrt", "ballzahlFuerErgebnis"];
+  const quellen = namen.map((n) => funktion(text, n));
+  ok("tablet.html: Ballzähler-Kopien vorhanden", quellen.every(Boolean), true);
+  const m = text.match(/const BALL_MAX = (\d+);/);
+  ok("tablet.html: BALL_MAX wie Modul", m ? Number(m[1]) : null, bz.BALL_MAX);
+  if (quellen.every(Boolean) && m) {
+    // eslint-disable-next-line no-new-func
+    const f = new Function(`const BALL_MAX = ${Number(m[1])};\n` + quellen.join("\n") + "\nreturn { " + namen.join(", ") + " };")();
+    const ZAHLEN = [undefined, null, "5", NaN, Infinity, -Infinity, -3, -0.5, 0, 0.9, 1, 3.9, 98, 99, 99.5, 100, 250, {}, [], true];
+    const gleich = (name, faelle, ruf) =>
+      ok("tablet.html: " + name + " wie Modul", faelle.map((x) => ruf(f, x)), faelle.map((x) => ruf(bz, x)));
+    gleich("ballzahlAus", ZAHLEN, (mod, x) => mod.ballzahlAus(x));
+    gleich("ballMehr", ZAHLEN, (mod, x) => mod.ballMehr(x));
+    gleich("ballWeniger", ZAHLEN, (mod, x) => mod.ballWeniger(x));
+    const B = [true, false, undefined];
+    const SICHT = [null, undefined, {}].concat(B.flatMap((h) => B.map((sp) => ({ hostZaehlt: h, hatSpiel: sp }))));
+    gleich("zaehlerSichtbar", SICHT, (mod, x) => mod.zaehlerSichtbar(x));
+    const SPERRE = [null, undefined, {}].concat(
+      B.flatMap((u) => B.flatMap((a) => B.map((fi) => ({ unterwegs: u, angenommen: a, finalisiert: fi })))));
+    gleich("zaehlerGesperrt", SPERRE, (mod, x) => mod.zaehlerGesperrt(x));
+    gleich("ballzahlFuerErgebnis", B.flatMap((h) => ZAHLEN.map((z) => [h, z])), (mod, [h, z]) => mod.ballzahlFuerErgebnis(h, z));
+  }
+  // Der Zähler liegt außerhalb des Undo-Stapels, aber im gespiegelten Stand.
+  const snap = funktion(text, "snapshot") || "";
+  const spiegel = funktion(text, "standFuerSpiegel") || "";
+  ok("tablet.html: Ballzahl nicht im Undo-Stand", /shuttles/.test(snap), false);
+  ok("tablet.html: Ballzahl im gespiegelten Stand", /shuttles: STATE\.shuttles/.test(spiegel), true);
 }
 
 if (failures) {

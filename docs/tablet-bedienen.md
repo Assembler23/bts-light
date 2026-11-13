@@ -119,6 +119,24 @@ Gut zu wissen:
 - „Mannschaften tauschen" fehlt, solange der Turnier-PC noch eine ältere
   Version hat.
 
+## Bälle zählen
+
+Hat die Turnierleitung den Ballzähler eingeschaltet, steht in der Kopfzeile
+eine kleine Gruppe **− 🏸 0 +**. Tippe bei jedem neuen Ball auf **+**, auch
+beim ersten. Hast du dich vertippt, nimmt **−** einen Ball zurück.
+<!-- pruef: "Ein Ball mehr" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Ein Ball weniger" in src-tauri/assets/tablet.html -->
+
+- Eine PIN brauchst du dafür nicht.
+- „Punkt zurück" (↩) ändert die Ballzahl nicht.
+- Die Zahl bleibt auch nach einer Pause, nach dem Neuladen und nach einem
+  Tablet-Wechsel stehen. Höchstens 99.
+  <!-- pruef: "const BALL_MAX = 99;" in src-tauri/assets/tablet.html -->
+- Sobald du das Ergebnis übermittelst, geht die Zahl mit an die
+  Turnierleitung. Danach lässt sie sich am Tablet nicht mehr ändern, außer du
+  öffnest das Ergebnis wieder.
+- Siehst du die Gruppe nicht, zählt dieses Turnier die Bälle nicht am Tablet.
+
 ## Einspielzeit
 
 Ist die Seiten- und Aufschlagwahl abgeschlossen, zeigt das Tablet bis zum
