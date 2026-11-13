@@ -229,62 +229,37 @@ bleibt aber für alte Images stehen.)
 **Ein Image für Pi Zero 2 W und Pi 3B+:** Beide laufen mit demselben
 aktuellen **Raspberry Pi OS (64-bit)**. Karte für einen der beiden
 einrichten, als Master-Image klonen ([pi-master-image.md](pi-master-image.md))
-und auf alle Pis spielen. Einziger Unterschied: Der Pi Zero 2 W hat nur
-512 MB Arbeitsspeicher und läuft **ohne Schreibschutz**
-(siehe [Nur-Lese-Modus](#nur-lese-modus-strom-einfach-abziehen)).
+und auf alle Pis spielen.
 
-## Nur-Lese-Modus: Strom einfach abziehen
+## Strom einfach abziehen — ohne Schreibschutz
 
-Nach dem Turnier wird das Set einfach vom Strom genommen. Damit die SD-Karte
-das auf Dauer übersteht, läuft der Pi im **Nur-Lese-Modus**: Alles, was er
-während des Betriebs schreibt, liegt nur im Arbeitsspeicher und ist nach dem
-Neustart weg — die Karte selbst wird nicht verändert. Die Feldzuweisung bleibt
-trotzdem erhalten, denn der Pi meldet sich immer mit seiner
-Hardware-Seriennummer.
+Nach dem Turnier wird das Set einfach vom Strom genommen. Die SD-Karte ist
+dabei **nicht** schreibgeschützt: Der Pi schreibt im Betrieb nur wenig (sein
+kurzes Log), ein Schaden an der Karte ist damit unwahrscheinlich, aber nicht
+ausgeschlossen. Startet ein Pi nach hartem Abschalten nicht mehr, die Karte
+neu bespielen — die Feldzuweisung bleibt erhalten, denn der Pi meldet sich
+immer mit seiner Hardware-Seriennummer.
 
-Geschaltet wird über eine Datei auf dem **Karten-Laufwerk** (die Partition,
-die auch ein Windows-PC sieht, dort liegt auch `bts-monitor-url.txt`):
+**Der Nur-Lese-Modus ist ausgebaut** (seit v0.9.397). Das Image vom
+November 2026 hielt die Karte schreibgeschützt und alle Änderungen nur im
+Arbeitsspeicher. Im Feld blieb damit erst der Pi Zero 2 W schwarz, dann
+machte auch der Pi 3 Ärger. Seitdem bleibt die Karte immer beschreibbar,
+und der Pi startet nach dem Einschalten nicht mehr von selbst ein zweites
+Mal.
 
-| Datei `bts-schreiben-erlaubt.txt` | Zustand nach dem nächsten Start |
-|---|---|
-| liegt dort | Karte **beschreibbar** (zum Einrichten, für Updates) |
-| fehlt | Karte **schreibgeschützt** (Turnierbetrieb) |
+**Karten mit dem älteren Image** laufen weiter im Nur-Lese-Modus. Am
+einfachsten das neue Image aufspielen. Ohne Neubespielen: Karte in den
+Computer stecken und auf dem Karten-Laufwerk (dort liegt auch
+`bts-monitor-url.txt`) eine leere Datei `bts-schreiben-erlaubt.txt` anlegen.
+Beim nächsten Start schaltet der Pi den Schreibschutz ab und startet dafür
+einmal von selbst neu (etwa zwei Minuten). Bleibt das Bild trotzdem schwarz
+oder die Karte schreibgeschützt, zusätzlich die Datei
+`bts-nur-lesen-versuche.txt` löschen (falls vorhanden — nach zwei
+Fehlversuchen gibt der alte Dienst sonst auf) und in `cmdline.txt` den
+Eintrag `overlayroot=tmpfs` löschen (die Datei bleibt eine Zeile). Wer danach `setup-monitor.sh` erneut ausführt,
+räumt den alten Dienst ganz weg.
 <!-- pruef: "bts-schreiben-erlaubt.txt" in pi/setup-monitor.sh -->
-
-Das Umschalten erledigt ein kleiner Dienst (`bts-nur-lesen.service`) beim
-Start: Er stellt den Modus um und **startet den Pi dafür einmal von selbst
-neu** — das dauert etwa zwei Minuten länger als sonst. Danach ist Ruhe.
 <!-- pruef: "bts-nur-lesen.service" in pi/setup-monitor.sh -->
-
-- **Pi Zero 2 W: kein Schreibschutz.** Mit nur 512 MB Arbeitsspeicher
-  reicht der Platz für Browser und Schreibschutz zusammen nicht — der
-  Bildschirm blieb schwarz (Feldtest 12.11.2026). Der Dienst erkennt das
-  am Arbeitsspeicher (unter etwa 700 MB) und lässt die Karte beschreibbar;
-  er meldet das in `journalctl -u bts-nur-lesen`. Ein Zero mit dem
-  **älteren** Image kennt diese Regel nicht und bleibt schwarz: Neues Image
-  aufspielen, oder die Karte einmal am PC retten — Datei
-  `bts-schreiben-erlaubt.txt` auf dem Karten-Laufwerk anlegen **und** in
-  `cmdline.txt` den Eintrag `overlayroot=tmpfs` löschen (die Datei bleibt
-  eine Zeile).
-  Der Preis: Wird ein Zero mitten im Schreiben vom Strom genommen, kann die
-  SD-Karte Schaden nehmen — wenige Schreibzugriffe (nur Logs) machen das
-  unwahrscheinlich, ausgeschlossen ist es nicht.
-<!-- pruef: "MemTotal" in pi/setup-monitor.sh -->
-- **Nach `setup-monitor.sh`** liegt die Datei dort — ein frisch
-  eingerichteter Pi bleibt also beschreibbar, bis du sie löschst (am
-  Computer oder mit `sudo rm /boot/firmware/bts-schreiben-erlaubt.txt`).
-- **Beim Master-Image** löscht `build-master-image.sh` die Datei selbst:
-  Jede damit bespielte Karte richtet beim ersten Start WLAN/Hostname aus dem
-  Raspberry Pi Imager ein und schaltet sich danach schreibgeschützt.
-- **Etwas ändern** (Update, anderes WLAN, Skript neu ausführen): Datei
-  anlegen, Pi starten, warten, bis er sich ein zweites Mal neu gestartet
-  hat — dann ist die Karte beschreibbar. Danach Datei wieder löschen.
-  `setup-monitor.sh` verweigert im Nur-Lese-Modus den Dienst, damit keine
-  Änderung still verloren geht.
-- **Klappt das Umschalten zweimal nicht,** gibt der Dienst auf (sonst würde
-  der Pi endlos neu starten). Ansehen mit `journalctl -u bts-nur-lesen`;
-  neuer Versuch: Datei `bts-nur-lesen-versuche.txt` auf dem Karten-Laufwerk
-  löschen.
 
 ## Wie der Pi den Turnier-PC findet
 
@@ -341,10 +316,9 @@ zugewiesen werden.
   der Pi den TV über HDMI nicht — anderes Kabel oder anderen Eingang probieren.
 - **Pi startet nur nach Aus- und Einstecken:** fast immer zu wenig Strom —
   eigenes Netzteil statt TV-USB.
-- **Pi startet beim Einschalten zweimal:** normal, wenn der Nur-Lese-Modus
-  gerade umgeschaltet wird (siehe oben).
-- **Änderungen am Pi sind nach dem Neustart weg:** Der Nur-Lese-Modus ist an
-  — erst `bts-schreiben-erlaubt.txt` anlegen.
+- **Änderungen am Pi sind nach dem Neustart weg:** Die Karte trägt noch das
+  ältere Image mit Nur-Lese-Modus — neu bespielen oder
+  `bts-schreiben-erlaubt.txt` anlegen (siehe oben).
 - **Kiosk beenden** (zum Konfigurieren): Tastatur anschließen, **Alt+F4**.
   Danach bist du wieder auf dem Desktop.
 - **Monitor hängt:** in bts-light unter „Court-Monitore" auf **„Neu
@@ -352,8 +326,7 @@ zugewiesen werden.
 - **Falsches WLAN / kein Netz:** SD-Karte erneut mit dem Imager
   bespielen und im Einstellungs-Dialog die WLAN-Daten korrigieren.
 - **Pi aktualisieren:** gelegentlich `sudo apt update && sudo apt
-  full-upgrade` im Terminal — hält das System sicher. Vorher den
-  Nur-Lese-Modus ausschalten, sonst ist das Update nach dem Neustart weg.
+  full-upgrade` im Terminal — hält das System sicher.
 
 Die Anzeige selbst (Layout, Werbung, Timer) wird **nicht** am Pi
 eingestellt, sondern zentral in bts-light — siehe

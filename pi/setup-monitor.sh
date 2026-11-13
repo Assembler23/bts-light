@@ -33,9 +33,11 @@ else
 fi
 echo "→ Pi OS Variante: $VARIANT"
 
-# Im Nur-Lese-Modus wären alle Änderungen nach dem Neustart weg.
+# Karten mit dem Image vom November 2026 können noch im Nur-Lese-Modus
+# laufen (inzwischen ausgebaut): Dort wären alle Änderungen nach dem
+# Neustart weg.
 if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]; then
-  echo "FEHLER: Die Karte läuft im Nur-Lese-Modus – Änderungen gingen verloren."
+  echo "FEHLER: Die Karte läuft noch im Nur-Lese-Modus – Änderungen gingen verloren."
   echo "  Datei bts-schreiben-erlaubt.txt auf der Boot-Partition anlegen"
   echo "  (sudo touch /boot/firmware/bts-schreiben-erlaubt.txt), neu starten,"
   echo "  ca. 2 Minuten warten (der Pi startet von selbst ein zweites Mal),"
@@ -73,7 +75,7 @@ echo
 echo "→ Pakete installieren (auf Lite dauert das ein paar Minuten)…"
 sudo apt-get update -qq
 # v4l-utils bringt cec-ctl mit (TV per HDMI-CEC einschalten, Abschnitt 3c).
-COMMON_PKGS="unclutter fonts-noto-color-emoji v4l-utils curl overlayroot initramfs-tools"
+COMMON_PKGS="unclutter fonts-noto-color-emoji v4l-utils curl"
 LITE_PKGS="xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils matchbox-window-manager chromium avahi-utils xdotool"
 
 if [ "$VARIANT" = "lite" ]; then
@@ -241,106 +243,21 @@ sudo systemctl daemon-reload
 sudo systemctl enable bts-cec.service >/dev/null 2>&1 || true
 echo "→ CEC-Dienst eingerichtet (bts-cec.service): TV wird beim Start geweckt"
 
-# ─── 3d) Nur-Lese-Modus für die SD-Karte ─────────────────────────────────
-# Die Sets werden nach dem Turnier einfach vom Strom genommen. Ein Pi, der
-# dabei gerade schreibt, kann seine SD-Karte beschädigen. Im Nur-Lese-Modus
-# (overlayfs) landet jede Änderung im Arbeitsspeicher und ist nach dem
-# Neustart weg – die Karte bleibt unberührt. Die Feldzuweisung überlebt,
-# weil die Geräte-Kennung aus der Seriennummer kommt.
-#
-# Gesteuert über eine Schalterdatei auf der Boot-Partition (am Computer
-# anlegbar): Liegt bts-schreiben-erlaubt.txt dort, bleibt bzw. wird die
-# Karte beschreibbar (für Updates, Master-Image); fehlt sie, schaltet der
-# Dienst beim nächsten Start den Nur-Lese-Modus ein. Das Einrichten legt
-# die Datei an, damit Master-Pi und Einrichtung beschreibbar bleiben;
-# build-master-image.sh entfernt sie als letzten Schritt.
-sudo tee /usr/local/bin/bts-nur-lesen.sh >/dev/null <<'NURLESEN'
-#!/usr/bin/env bash
-# bts-light Court-Monitor: Nur-Lese-Modus der SD-Karte nach Schalterdatei.
-set -u
-BOOT_DIR="/boot/firmware"; [ -d "$BOOT_DIR" ] || BOOT_DIR="/boot"
-SCHALTER="$BOOT_DIR/bts-schreiben-erlaubt.txt"
-ZAEHLER="$BOOT_DIR/bts-nur-lesen-versuche.txt"
-MAX_VERSUCHE=2
-log() { echo "bts-nur-lesen: $*"; }
-
-aktiv() { [ "$(findmnt -n -o FSTYPE /)" = "overlay" ]; }
-
-# Erststart einer frisch beschriebenen Karte abwarten: Raspberry Pi Imager
-# richtet WLAN/Hostname beim ersten Start ein – das muss noch auf die Karte.
-if grep -q "firstrun" "$BOOT_DIR/cmdline.txt" 2>/dev/null; then
-  log "Erststart-Einrichtung steht noch aus – nichts zu tun"; exit 0
-fi
-command -v cloud-init >/dev/null && cloud-init status --wait >/dev/null 2>&1
-sleep 30
-
-if [ -e "$SCHALTER" ]; then soll="schreiben"; else soll="nur-lesen"; fi
-# Pi Zero 2 W (512 MB): Chromium, X und das RAM-Overlay passen zusammen nicht
-# in den Speicher – die Karte blieb schwarz (Feldtest 12.11.2026, mit
-# abgeschaltetem Overlay lief sie). Dort bleibt die Karte beschreibbar; ein
-# schon im Nur-Lese-Modus gestarteter Zero schaltet sich damit von selbst
-# zurück. Ab ~1 GB (Pi 3, 4, 5) bleibt es beim Schreibschutz.
-# BTS_MEMINFO nur für den Test des Skripts.
-ram_kb=$(awk '/^MemTotal:/ {print $2; exit}' "${BTS_MEMINFO:-/proc/meminfo}" 2>/dev/null)
-case "$ram_kb" in ''|*[!0-9]*) ram_kb=0 ;; esac
-if [ "$ram_kb" -gt 0 ] && [ "$ram_kb" -lt 700000 ]; then
-  [ "$soll" = "nur-lesen" ] && log "nur ${ram_kb} kB Arbeitsspeicher – Karte bleibt beschreibbar"
-  soll="schreiben"
-fi
-if aktiv; then ist="nur-lesen"; else ist="schreiben"; fi
-if [ "$soll" = "$ist" ]; then
-  rm -f "$ZAEHLER"
-  log "Karte ist im gewünschten Zustand: $ist"; exit 0
-fi
-
-# Schutz gegen eine Neustart-Schleife, falls das Umschalten nicht greift.
-versuche=$(cat "$ZAEHLER" 2>/dev/null || echo 0)
-case "$versuche" in ''|*[!0-9]*) versuche=0 ;; esac
-if [ "$versuche" -ge $MAX_VERSUCHE ]; then
-  log "Umschalten auf $soll nach $versuche Versuchen erfolglos – gebe auf"; exit 0
-fi
-echo $((versuche + 1)) > "$ZAEHLER"
-
-if [ "$soll" = "nur-lesen" ]; then
-  log "schalte Nur-Lese-Modus ein und starte neu"
-  raspi-config nonint enable_overlayfs || { log "Einschalten fehlgeschlagen"; exit 0; }
-else
-  log "schalte Nur-Lese-Modus aus (Schalterdatei oder wenig Arbeitsspeicher) und starte neu"
-  # Selbst ausschalten statt nur raspi-config: Dessen Änderung könnte im
-  # RAM-Overlay landen und wäre nach dem Neustart weg. cmdline.txt liegt auf
-  # der (nicht überlagerten) Boot-Partition; overlayroot.conf ändert
-  # overlayroot-chroot direkt auf der Karte.
-  sed -i -E '1 s/[[:space:]]+(overlayroot=[^[:space:]]*|boot=overlay)//g' "$BOOT_DIR/cmdline.txt"
-  if command -v overlayroot-chroot >/dev/null && [ -f /etc/overlayroot.conf ]; then
-    overlayroot-chroot sed -i -E 's/^overlayroot=.*/overlayroot=""/' /etc/overlayroot.conf >/dev/null 2>&1
-  fi
-  raspi-config nonint disable_overlayfs >/dev/null 2>&1 || true
-fi
-sync
-systemctl reboot
-NURLESEN
-sudo chmod 755 /usr/local/bin/bts-nur-lesen.sh
-
-sudo tee /etc/systemd/system/bts-nur-lesen.service >/dev/null <<'UNIT'
-[Unit]
-Description=bts-light: SD-Karte im Nur-Lese-Modus betreiben (Schalterdatei auf der Boot-Partition)
-Documentation=https://github.com/Assembler23/bts-light/blob/main/docs/pi-setup.md
-After=local-fs.target
-
-[Service]
-# simple, nicht oneshot: das Warten im Skript darf den Start des Kiosks
-# nicht aufhalten.
-Type=simple
-ExecStart=/usr/local/bin/bts-nur-lesen.sh
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+# ─── 3d) Nur-Lese-Modus: ausgebaut ───────────────────────────────────────
+# Der Schreibschutz der SD-Karte (overlayfs im Arbeitsspeicher) machte im
+# Feld Ärger – erst am Pi Zero 2 W (schwarzes Bild, 12.11.2026), dann auch
+# am Pi 3. Die Karte bleibt deshalb immer beschreibbar. Hier nur noch die
+# Reste einer älteren Einrichtung wegräumen.
+sudo systemctl disable --now bts-nur-lesen.service >/dev/null 2>&1 || true
+sudo rm -f /etc/systemd/system/bts-nur-lesen.service /usr/local/bin/bts-nur-lesen.sh \
+  "$BOOT_DIR/bts-schreiben-erlaubt.txt" "$BOOT_DIR/bts-nur-lesen-versuche.txt"
 sudo systemctl daemon-reload
-sudo systemctl enable bts-nur-lesen.service >/dev/null 2>&1 || true
-sudo touch "$BOOT_DIR/bts-schreiben-erlaubt.txt"
-echo "→ Nur-Lese-Dienst eingerichtet (bts-nur-lesen.service); Karte bleibt"
-echo "  beschreibbar, solange $BOOT_DIR/bts-schreiben-erlaubt.txt existiert"
+# Ein schon vorgemerkter Schreibschutz (Eintrag gesetzt, Neustart stand noch
+# aus) darf nicht mit ins Master-Image wandern.
+sudo sed -i -E '1 s/[[:space:]]+(overlayroot=[^[:space:]]*|boot=overlay)//g; 1 s/^(overlayroot=[^[:space:]]*|boot=overlay)[[:space:]]+//' "$BOOT_DIR/cmdline.txt" 2>/dev/null || true
+if [ -f /etc/overlayroot.conf ]; then
+  sudo sed -i -E 's/^overlayroot=.*/overlayroot=""/' /etc/overlayroot.conf || true
+fi
 
 # ─── 4) Hinweisseite „noch keine Adresse" ────────────────────────────────
 ASSET_DIR="$HOME/.local/share/bts-monitor"
@@ -581,7 +498,7 @@ while true; do
   # Log gleich beim ersten Durchlauf und danach alle ~5 min an den PC.
   if [ $(( (TAKT - 1) % 30 )) -eq 0 ]; then
     log_senden &
-    # Log im RAM kurz halten (Nur-Lese-Modus: alles liegt im Arbeitsspeicher).
+    # Log kurz halten, damit es die Karte nicht füllt.
     tail -n 2000 "$LOG" > "$LOG.neu" 2>/dev/null && mv "$LOG.neu" "$LOG"
   fi
   sleep 10
@@ -645,9 +562,6 @@ echo "✓ Fertig eingerichtet (Variante: $VARIANT)."
 echo
 echo "  Adresse setzen/ändern: $URL_FILE bearbeiten"
 echo "  (geht auch am Computer – die Datei liegt auf dem Karten-Laufwerk)."
-echo
-echo "  Nur-Lese-Modus:     startet, sobald $BOOT_DIR/bts-schreiben-erlaubt.txt"
-echo "                      gelöscht ist (build-master-image.sh tut das selbst)."
 echo
 echo "  Jetzt neu starten:  sudo reboot"
 if [ "$VARIANT" = "lite" ]; then

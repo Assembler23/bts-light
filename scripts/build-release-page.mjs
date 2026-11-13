@@ -454,9 +454,8 @@ const html = `<!DOCTYPE html>
       <a class="dl" href="${PI_IMAGE_URL}">Image herunterladen</a>
     </div>
     <p>Ein Image für <strong>Pi Zero 2&nbsp;W und Pi 3&nbsp;B+</strong>. Der Pi verbindet sich
-       mit dem WLAN <code>btsaccess</code>, findet den Turnier-PC von selbst, schaltet den
-       Fernseher per HDMI-CEC ein und läuft schreibgeschützt — den Strom einfach abziehen
-       schadet der Karte nicht. Jede Karte ab 8&nbsp;GB.</p>
+       mit dem WLAN <code>btsaccess</code>, findet den Turnier-PC von selbst und schaltet den
+       Fernseher per HDMI-CEC ein. Jede Karte ab 8&nbsp;GB.</p>
     <p><strong>Der Download ist passwortgeschützt</strong>, weil das Image die Zugangsdaten
        des Verleih-WLANs enthält. Benutzername und Passwort gibt es auf Anfrage bei badhub.</p>
     <ol>
@@ -468,8 +467,8 @@ const html = `<!DOCTYPE html>
       <li>Pi mit <strong>eigenem Netzteil</strong> versorgen, nicht über die USB-Buchse des
           Fernsehers. Am Fernseher einmal HDMI-CEC einschalten (Anynet+, SimpLink,
           Bravia Sync, EasyLink …).</li>
-      <li>Karte in den Pi, einschalten. Beim allerersten Start startet der Pi zweimal
-          von selbst neu (Karte vergrößern, Schreibschutz einschalten) — danach zeigt der
+      <li>Karte in den Pi, einschalten. Beim allerersten Start startet der Pi einmal
+          von selbst neu (Karte vergrößern) — danach zeigt der
           Fernseher den Kopplungs-Code.</li>
     </ol>
     <p class="sha">Prüfsumme: <a href="${PI_IMAGE_SHA_URL}">bts-light-pi.img.xz.sha256</a></p>
