@@ -71,7 +71,9 @@ Bei eingeschaltetem Zähler (`TlState.shuttle_counter`):
 
 - **Feldkachel:** `TlCourt.shuttles` — die Zahl aus dem gespiegelten
   Tablet-Stand (`TabletState::court_shuttles`). „Bestmöglich": Sie fehlt ohne
-  gespiegelten Stand (Tablet offline, altes Relay) und bei 0.
+  gespiegelten Stand (Tablet offline, altes Relay) und bei 0. Die Zahl hängt
+  an der Match-ID aus demselben Stand: Sie zieht beim Umhängen mit dem Spiel
+  um und erscheint nie an einem anderen Spiel auf demselben Feld.
 - **Beendet-Liste:** `TlFinished.shuttles` — der Wert aus BTP; bei 0 nichts.
 - **Ergebnis eintragen / korrigieren:** Feld **Bälle** (0–99, darf leer
   bleiben), vorbelegt mit der Tablet-Zahl bzw. dem BTP-Wert. Leer = keine

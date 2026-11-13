@@ -4096,7 +4096,7 @@ pub(crate) fn felder_bauen(
             // Ballzahl nur am belegten Feld, bei eingeschaltetem Zähler und
             // über 0 — sonst zeigt die Kachel nichts.
             let baelle = (config.shuttle_counter && c.match_id != 0)
-                .then(|| tablet.court_shuttles(c.court_id))
+                .then(|| tablet.court_shuttles(c.court_id, c.match_id))
                 .flatten()
                 .filter(|n| *n > 0);
             let mut view = court_view(c, clearing, schalter, spiel, fertig_seit);
@@ -11567,7 +11567,7 @@ mod tests {
             Vec::new(),
         ));
         tablet.attach_tablet(1);
-        tablet.set_court_state(1, r#"{"shuttles":3}"#.to_string());
+        tablet.set_court_state(1, r#"{"match":{"matchId":7},"shuttles":3}"#.to_string());
 
         let an = AppConfig {
             shuttle_counter: true,
@@ -11578,6 +11578,14 @@ mod tests {
         let feld = |id: i64| s.courts.iter().find(|c| c.court_id == id).unwrap().shuttles;
         assert_eq!(feld(1), Some(3));
         assert_eq!(feld(2), None, "ohne gespiegelten Stand fehlt das Feld");
+        // Stand eines anderen Spiels am selben Feld: Die Zahl gilt nicht.
+        tablet.set_court_state(2, r#"{"match":{"matchId":99},"shuttles":6}"#.to_string());
+        let s2 = build_state(&tablet, &an, 1_000_000, 1);
+        assert_eq!(
+            s2.courts.iter().find(|c| c.court_id == 2).unwrap().shuttles,
+            None,
+            "die Bälle eines anderen Spiels gehören nicht an dieses"
+        );
         let beendet = |id: i64| {
             s.finished
                 .iter()
@@ -11597,7 +11605,7 @@ mod tests {
         );
 
         // Tablet zeigt 0 → nichts.
-        tablet.set_court_state(1, r#"{"shuttles":0}"#.to_string());
+        tablet.set_court_state(1, r#"{"match":{"matchId":7},"shuttles":0}"#.to_string());
         let s = build_state(&tablet, &an, 1_000_000, 1);
         assert_eq!(
             s.courts.iter().find(|c| c.court_id == 1).unwrap().shuttles,
