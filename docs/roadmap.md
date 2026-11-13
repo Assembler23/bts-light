@@ -598,7 +598,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 - **Ballzähler am Tablet** — Spec:
   [features/tablet-ballzaehler.md](features/tablet-ballzaehler.md)
-  (Entwurf 13.11.2026, **Freigabe offen**, ADR 0093). Bälle am Zähl-Tablet
+  (freigegeben 13.11.2026, ADR 0093; Messwerkzeug
+  `tests/btp_shuttles_probe.rs` gebaut, **BTP-Messung steht aus**). Bälle am Zähl-Tablet
   hochzählen; die Zahl geht mit dem Ergebnis als `Match.Shuttles` nach BTP,
   das TL-Web zeigt sie, die Turnierleitung kann sie beim Eintragen/Korrigieren
   angeben. Schalter im Setup, Standard aus. Erster Schritt: BTP-Messung am

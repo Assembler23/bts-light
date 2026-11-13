@@ -1,7 +1,7 @@
 # Ballzähler am Tablet — Spezifikation
 
-> Status: **Entwurf, Review-Checkliste bestanden 13.11.2026 — Freigabe offen**
-> (via /idee: Brief → Grill → How-To → Review).
+> Status: **freigegeben 13.11.2026** (via /idee: Brief → Grill → How-To → Review).
+> Umsetzung: PR 0 (Messwerkzeug) gebaut; BTP-Messung steht aus.
 > Quelle: Idee vom 13.11.2026. Betroffene Crates: src-tauri / relay / relay-proto / src.
 > ADR: [0093](../adr/0093-ballzahl-reist-mit-dem-ergebnis.md).
 

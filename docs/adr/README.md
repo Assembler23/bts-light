@@ -101,4 +101,4 @@ hier eintragen.
 | [0090](0090-ueberlast-am-relay-und-mindestschutz.md) | Überlast am Relay: fachliche vs. Transport-Deckel, Mengen-Takt, volle Kanäle trennen; Mindestschutz ohne Host-Anmeldung | accepted |
 | [0091](0091-ergebnisse-im-host-ein-arbeiter-je-feld.md) | Ergebnisse im Host: ein Arbeiter je Feld, Quittung nur an die Sitzung des Auftrags (berührt R5, ADR 0018) | accepted |
 | [0092](0092-stream-werbung-markierung-und-abriss.md) | Stream-Werbung: Markierung als eigene Datei, `inStream` im Fingerabdruck, `streamAds` additiv, `?zweck=stream` → 503 statt leer, eigene Seite | accepted |
-| [0093](0093-ballzahl-reist-mit-dem-ergebnis.md) | Ballzahl: reist mit dem Ergebnis, lebt im Tablet-Stand, BTP-Wert gilt | proposed |
+| [0093](0093-ballzahl-reist-mit-dem-ergebnis.md) | Ballzahl: reist mit dem Ergebnis, lebt im Tablet-Stand, BTP-Wert gilt | accepted |

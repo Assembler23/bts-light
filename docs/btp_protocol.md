@@ -205,7 +205,8 @@ Struktur: `VISUALXML > Result > Tournament`. Top-Level-Container unter
 **Match:** `ID`, `DrawID`, `PlanningID`, `MatchNr`, `RoundName`, `IsMatch`
 (Bool), `IsPlayable` (Bool), `From1`/`From2` (Feeder-PlanningIDs), `EntryID`,
 `Winner` (1 oder 2), `Sets`, `PlannedTime` (DateTime), `CourtID`,
-`Official1ID`, `Official2ID`, `Shuttles`, `DisplayOrder`. Liga-`PlayerMatch`
+`Official1ID`, `Official2ID`, `Shuttles` (Auslieferung nicht gemessen, siehe
+„Ballzahl `Match.Shuttles`"), `DisplayOrder`. Liga-`PlayerMatch`
 zusätzlich: `TeamMatchID`, `MatchTypeID`, `MatchTypeNo`, `MatchOrder`,
 `Team1Player1ID`, `Team1Player2ID`, `Team2Player1ID`, `Team2Player2ID`.
 
@@ -892,6 +893,56 @@ halte ewig — BTP ist die Wahrheit (R2).
   `MatchTypeID`, `Team1Player1ID` usw.
 - Implementierung: [src-tauri/src/btp/proto.rs](../src-tauri/src/btp/proto.rs)
   (`update_request`, `parse_update_response`, `MatchUpdate`).
+
+### Ballzahl `Match.Shuttles` — Messung offen (Werkzeug seit 13.11.2026)
+
+BTP führt je Spiel die Zahl der verbrauchten Bälle im Feld `Shuttles`.
+bts-light liest und schreibt es **noch nicht**. Geplant ist der Ballzähler am
+Tablet (Spec [features/tablet-ballzaehler.md](features/tablet-ballzaehler.md),
+ADR 0093): Die Zahl soll mit dem Ergebnis nach BTP gehen.
+
+**Nicht gemessen** ist, ob `Shuttles` zu den Feldern gehört, die BTP aus
+jedem Match-Write übernimmt und bei fehlendem Element auf 0 setzt (wie
+`CourtID`, `Official1ID`/`Official2ID`, `Highlight`, siehe oben), oder ob der
+Wert wie `Sets`/`Winner` stehen bleibt. Davon hängt ab, ob nur der
+Ergebnis-Write die Zahl trägt oder alle Schreibwege sie mitführen müssen.
+
+Das Messwerkzeug `src-tauri/tests/btp_shuttles_probe.rs` klärt das am echten
+BTP (Windows-PC, **Testturnier**), in dieser Reihenfolge:
+
+| Messung | Schreibt? | Frage |
+|---|---|---|
+| `does_btp_deliver_shuttles` | nein | Kommt `Shuttles` in `SENDTOURNAMENTINFO` an, mit welchem Typ, fehlt es bei 0? Vorher in BTP an einem Spiel von Hand eine Ballzahl eintragen. Nennt außerdem die Spiele auf einem Feld. |
+| `does_a_waiting_match_keep_shuttles` | ja, stellt zurück | Nimmt BTP `Shuttles` in einem Match-Write an? Bleibt der Wert nach einem Farb- und einem Schiedsrichter-Write ohne `Shuttles`? Latenz bis zum Nachlesen. |
+| `does_a_result_write_carry_shuttles` | **ja, wertet ein Spiel — nicht umkehrbar** | Dasselbe am laufenden Spiel, dann Ergebnis-Write mit `Shuttles`, danach Farb- und Schiedsrichter-Write am **gewerteten** Spiel und ein zweiter Ergebnis-Write ohne `Shuttles`. Läuft nur mit `BTP_SHUTTLES_MATCH=<Match-ID>` eines Spiels, das auf einem Feld steht. |
+
+```text
+cargo test -p bts-light --test btp_shuttles_probe does_btp_deliver_shuttles -- --ignored --nocapture
+cargo test -p bts-light --test btp_shuttles_probe does_a_waiting_match_keep_shuttles -- --ignored --nocapture
+$env:BTP_SHUTTLES_MATCH = "<Match-ID>"
+cargo test -p bts-light --test btp_shuttles_probe does_a_result_write_carry_shuttles -- --ignored --nocapture
+```
+
+`BTP_HOST`, `BTP_PORT` und `BTP_PASSWORD` wie bei den anderen Messwerkzeugen.
+Die Writes entstehen aus den echten Schreibfunktionen (`highlight_request`,
+`court_assign_request`, `update_request`); `Shuttles` wird nachträglich in den
+Match-Knoten gehängt.
+
+- Jeder Folge-Write ohne `Shuttles` ändert die Zeilenfarbe auf einen Marker und
+  stellt sie danach zurück. Erst wenn der Marker beim Nachlesen steht, zählt
+  der Write als verarbeitet; sonst meldet das Werkzeug „nicht belegt" statt
+  „bleibt".
+- Während der Messung darf bts-light **nicht** gegen dasselbe BTP laufen, und
+  in BTP fasst niemand das Zielspiel an.
+- Bricht ein Lauf mit einer Fehlermeldung ab, können am Zielspiel eine Ballzahl
+  (2, 3 oder 5) und die Marker-Farbe stehen bleiben — von Hand löschen.
+- Messung 3 schreibt an ein **gewertetes** Spiel. Das ist in BTP selbst nicht
+  vermessen (siehe „Was macht BTP beim Überschreiben einer Wertung?"): Die
+  Wertung kann berührt werden, und das Feld am beendeten Spiel kann auf 0
+  fallen. Jeder Stand im Protokoll zeigt deshalb auch den Sieger.
+
+**Ergebnis:** steht aus. Nach dem Lauf hier eintragen und in der Spec den
+Zweig (A: nur Ergebnis-Write · B: alle Writes tragen `Shuttles`) festhalten.
 
 ## Offen: Was macht BTP beim Überschreiben einer Wertung?
 

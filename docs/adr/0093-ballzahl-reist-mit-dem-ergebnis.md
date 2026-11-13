@@ -1,6 +1,6 @@
 # 0093 — Ballzahl: reist mit dem Ergebnis, lebt im Tablet-Stand, BTP-Wert gilt
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-11-13
 
 ## Kontext
