@@ -489,6 +489,15 @@ Knopf, weil deren Overlays die Kopfzeile verdecken) öffnet zwei Eingriffe:
   [schiedsrichterzettel.md](schiedsrichterzettel.md) und
   [punktverlauf.md](punktverlauf.md).
 
+## Ballzähler in der Kopfzeile (seit v0.9.399)
+
+Trägt der `MatchBrief` `shuttleCounter: true`, zeigt die Kopfzeile
+**− 🏸 Zahl +** (`#ball-zaehler`). Die Zahl (`STATE.shuttles`, 0–99) liegt im
+gespiegelten Stand, aber außerhalb des Undo-Stapels; `submit` legt sie als
+`shuttles` in den Ergebnis-Body. Ab dem Übermitteln ist sie eingefroren. Ein
+älterer Turnier-PC sendet das Feld nicht — dann gibt es keinen Zähler und kein
+`shuttles` im Body. Alles Weitere: [ballzaehler.md](ballzaehler.md).
+
 ## Zählen hinter dem Feld: Anordnung vorn/hinten (seit v0.9.283)
 
 Der Bediener sitzt oft nicht seitlich am Netz, sondern **hinter dem Feld** an

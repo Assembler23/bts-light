@@ -93,6 +93,21 @@
     .header-btn.megaphone:active { background: #92400e; }
     .header-btn.megaphone.on { background: #f59e0b; color: #1f2937; box-shadow: 0 0 0 3px rgba(245,158,11,.4); }
     .header-btn:disabled { opacity: .35; cursor: not-allowed; color: #fff; }
+    /* Ballzähler (Spec tablet-ballzaehler): − Zahl + als eine Gruppe, damit
+       die beiden Knöpfe nicht für Kopfzeilen-Knöpfe anderer Art gehalten
+       werden. Die Zahl hat feste Breite — sie darf beim Sprung 9 → 10 die
+       Kopfzeile nicht verschieben. */
+    .ball-zaehler {
+      flex: 0 0 auto; display: inline-flex; align-items: center; gap: .25rem;
+      padding: .15rem; border: 1px solid var(--line); border-radius: .6rem;
+    }
+    .ball-zaehler[hidden] { display: none; }
+    .ball-zaehler .header-btn { width: 2.4rem; height: 2.4rem; font-weight: 800; }
+    .ball-zahl {
+      min-width: 3.4rem; text-align: center; white-space: nowrap;
+      font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums;
+    }
+    .ball-zaehler.gesperrt .ball-zahl { color: var(--muted); }
     .match-clock {
       flex: 0 0 auto; font-variant-numeric: tabular-nums;
       font-size: 1.1rem; font-weight: 700; color: var(--muted);
@@ -783,6 +798,28 @@
     <div class="call-timer" id="call-timer"></div>
     <div class="match-clock" id="match-clock"></div>
     <div class="sponsor-bar" id="sponsor-bar"></div>
+    <!-- Ballzähler (Spec tablet-ballzaehler): verbrauchte Bälle, gehen mit
+         dem Ergebnis an die Turnierleitung. Ohne PIN; nur sichtbar, wenn der
+         Turnier-PC den Zähler anbietet. Bewusst LINKS von ⇄: „+" wird bei
+         jedem Ball getippt und darf nicht neben ✚ liegen — die
+         Verletzungstaste löst ohne Rückfrage aus, ⇄ fragt nach. -->
+    <div class="ball-zaehler" id="ball-zaehler" hidden>
+      <button
+        type="button"
+        id="ball-minus"
+        class="header-btn neutral"
+        aria-label="Ein Ball weniger"
+        title="Ein Ball weniger"
+      >−</button>
+      <span class="ball-zahl" id="ball-zahl" aria-live="polite" title="Verbrauchte Bälle">🏸 0</span>
+      <button
+        type="button"
+        id="ball-plus"
+        class="header-btn neutral"
+        aria-label="Ein Ball mehr"
+        title="Ein Ball mehr"
+      >+</button>
+    </div>
     <!-- Seiten oder Mannschaften korrigieren (Spec tablet-seiten-korrigieren):
          ohne PIN, mit Rückfrage. -->
     <button
@@ -1638,6 +1675,13 @@ const STATE = {
   // Spiel.
   cascadeWalkover: /** @type {boolean} */ (false),
   retiredWinner: /** @type {'a'|'b'|null} */ (null),
+  // Verbrauchte Bälle dieses Spiels (Spec tablet-ballzaehler). Bewusst
+  // AUSSERHALB des Undo-Stapels (`snapshot`): „Punkt zurück" nimmt keinen
+  // Ball zurück. Reist im gespiegelten Stand und im Ergebnis mit.
+  shuttles: /** @type {number} */ (0),
+  // Bietet der Turnier-PC den Ballzähler an? Frisch aus jedem
+  // `match_assigned`; `null` = seit dem Laden der Seite noch keine Zuweisung.
+  hostZaehlt: /** @type {boolean|null} */ (null),
 
   // Schiri-Modus: immer sichtbare Ansage zum Vorlesen. Opt-in pro Tablet
   // (lokal gespeichert). `lastEvent` beschreibt, was zuletzt passierte, damit
@@ -1830,6 +1874,10 @@ const els = {
   callTimer: document.getElementById('call-timer'),
   injuryBtn: document.getElementById('injury-btn'),
   korrekturBtn: document.getElementById('korrektur-btn'),
+  ballZaehler: document.getElementById('ball-zaehler'),
+  ballZahl: document.getElementById('ball-zahl'),
+  ballMinus: document.getElementById('ball-minus'),
+  ballPlus: document.getElementById('ball-plus'),
   finishedKorrektur: document.getElementById('finished-korrektur'),
   breakKorrektur: document.getElementById('break-korrektur'),
   korrekturModal: document.getElementById('korrektur-modal'),
@@ -2209,6 +2257,82 @@ function sendScoreUpdate() {
     MELDE_RING = ring;
     ringSichern();
   }
+}
+
+// ───────────────────────────── Ballzähler ─────────────────────────────
+// ── Inline-Kopie von src/io/ballzaehler.mjs (Test
+//    scripts/test-ballzaehler.mjs, Drift scripts/test-inline-kopien.mjs) —
+//    Änderungen dort und hier gemeinsam ──
+const BALL_MAX = 99;
+function ballzahlAus(wert) {
+  if (typeof wert !== 'number' || !Number.isFinite(wert)) return 0;
+  const n = Math.floor(wert);
+  if (n < 0) return 0;
+  return n > BALL_MAX ? BALL_MAX : n;
+}
+function ballMehr(zahl) {
+  const n = ballzahlAus(zahl);
+  return n >= BALL_MAX ? BALL_MAX : n + 1;
+}
+function ballWeniger(zahl) {
+  const n = ballzahlAus(zahl);
+  return n <= 0 ? 0 : n - 1;
+}
+function zaehlerSichtbar(lage) {
+  return !!(lage && lage.hostZaehlt && lage.hatSpiel);
+}
+function zaehlerGesperrt(lage) {
+  return !!(lage && (lage.unterwegs || lage.angenommen || lage.finalisiert));
+}
+function ballzahlFuerErgebnis(hostZaehlt, zahl) {
+  return hostZaehlt ? ballzahlAus(zahl) : undefined;
+}
+// ── Ende Inline-Kopie ballzaehler.mjs ──
+
+/** Bietet der Turnier-PC den Ballzähler an? Schalter und Fähigkeit in einem
+ *  Feld des Match-Briefs — ein älterer Turnier-PC sendet es nicht. Aus dem
+ *  Brief gelesen statt eigens gemerkt: So stimmt es auch nach einem
+ *  Neuladen, bevor die Verbindung wieder steht. */
+function hostZaehltBaelle() {
+  // Was der Turnier-PC in der letzten Zuweisung gesagt hat, geht vor: Der
+  // Brief in `STATE.match` kann aus einem übernommenen Stand stammen, also
+  // von einem fremden Gerät. Vor der ersten Zuweisung (Neuladen ohne
+  // Verbindung) gilt der gespeicherte Brief.
+  if (STATE.hostZaehlt !== null) return STATE.hostZaehlt;
+  return !!(STATE.match && STATE.match.shuttleCounter);
+}
+
+/** Dürfen **+** und **−** gerade zählen? Nicht am passiven oder gesperrten
+ *  Tablet und nicht ab dem Übermitteln (die Zahl ist dann eingefroren). */
+function ballzaehlerFrei() {
+  return zaehlerSichtbar({ hostZaehlt: hostZaehltBaelle(), hatSpiel: !!STATE.match })
+    && !STATE.locked && !STATE.occupied
+    && !zaehlerGesperrt({
+      unterwegs: !!STATE.pendingResult,
+      angenommen: !!STATE.submittedOk,
+      finalisiert: !!STATE.finalized,
+    });
+}
+
+function ballTippen(mehr) {
+  if (!ballzaehlerFrei()) return;
+  const neu = mehr ? ballMehr(STATE.shuttles) : ballWeniger(STATE.shuttles);
+  if (neu === STATE.shuttles) return;
+  STATE.shuttles = neu;
+  tlog('info', 'ball_gezaehlt', { matchId: STATE.match.matchId, zahl: neu });
+  persistState();
+  renderBallzaehler();
+}
+
+function renderBallzaehler() {
+  const sichtbar = zaehlerSichtbar({ hostZaehlt: hostZaehltBaelle(), hatSpiel: !!STATE.match });
+  els.ballZaehler.hidden = !sichtbar;
+  if (!sichtbar) return;
+  const frei = ballzaehlerFrei();
+  els.ballZaehler.classList.toggle('gesperrt', !frei);
+  els.ballZahl.textContent = '🏸 ' + ballzahlAus(STATE.shuttles);
+  els.ballMinus.disabled = !frei || ballzahlAus(STATE.shuttles) <= 0;
+  els.ballPlus.disabled = !frei || ballzahlAus(STATE.shuttles) >= BALL_MAX;
 }
 
 // ─────────────────────────────── Akkustand ────────────────────────────
@@ -3325,6 +3449,9 @@ function standFuerSpiegel() {
     walkover: STATE.walkover,
     cascadeWalkover: STATE.cascadeWalkover,
     retiredWinner: STATE.retiredWinner,
+    // Ballzahl: überlebt Neuladen und wandert bei einer Geräte-Übernahme
+    // mit. Für die Wahl, welcher Stand „weiter" ist, zählt sie nicht.
+    shuttles: STATE.shuttles,
     // history MIT sichern: nur so kann „Match wieder öffnen" nach einem
     // Tablet-Reload/Reconnect den echten Stand (und korrekte Seiten)
     // wiederherstellen, statt einen leeren currentSet (0:0) zu zeigen.
@@ -3566,6 +3693,9 @@ function applyPersistedState(p) {
   STATE.walkover = !!p.walkover;
   STATE.cascadeWalkover = !!p.cascadeWalkover;
   STATE.retiredWinner = p.retiredWinner ?? null;
+  // Fehlt die Zahl (Stand von einer älteren Seite) oder ist sie Unsinn,
+  // beginnt der Zähler bei 0.
+  STATE.shuttles = ballzahlAus(p.shuttles);
   // Undo-/Reopen-History wiederherstellen (seit Persistenz mitgesichert).
   // Fehlt sie in alten gespeicherten Ständen, bleibt sie leer.
   // Punktverlauf: fehlt er (alter Stand), beginnt die Aufzeichnung beim
@@ -3652,6 +3782,7 @@ function beiMatchAssigned(msg) {
   // Fähigkeit des Hosts frisch aus jedem Frame — auch bei demselben
   // Match, sonst bliebe nach einem App-Update der alte Wert stehen.
   STATE.hostKannBerichtigung = !!(msg.match && msg.match.teamsCorrection);
+  STATE.hostZaehlt = !!(msg.match && msg.match.shuttleCounter);
   // Aufruf-Stempel sofort holen, statt bis zu 30 s auf den nächsten
   // Uhr-Abgleich zu warten — die Aufruf-Uhr soll mit der Seitenwahl
   // da sein, nicht erst mittendrin. Bis zu fünf Nachfragen im 3-s-
@@ -3713,6 +3844,8 @@ function loadMatch(match) {
   // am Gerät.
   STATE.events = [];
   STATE.eventSeq = 0;
+  // Neues Spiel → der Ballzähler beginnt bei 0.
+  STATE.shuttles = 0;
   STATE.match = match;
   STATE.setsCompleted = [];
   STATE.currentSet = { left: 0, right: 0 };
@@ -3793,6 +3926,7 @@ function clearMatch() {
   STATE.ueberholt = false;
   STATE.einstiegAB = null;
   STATE.match = null;
+  STATE.shuttles = 0;
   STATE.setsCompleted = [];
   STATE.currentSet = { left: 0, right: 0 };
   STATE.history = [];
@@ -5341,6 +5475,12 @@ function submit() {
     if (STATE.walkover) body.walkover = true;
     body.winner = STATE.retiredWinner === 'a' ? 1 : 2;
   }
+  // Ballzahl nur, wenn der Turnier-PC den Zähler anbietet — sonst bleibt
+  // das Feld weg und er lässt stehen, was BTP hat. Ab hier ist die Zahl
+  // eingefroren: Sie steht im Auftrag, der auch gepuffert oder geparkt
+  // unverändert zugestellt wird.
+  const baelle = ballzahlFuerErgebnis(hostZaehltBaelle(), STATE.shuttles);
+  if (baelle !== undefined) body.shuttles = baelle;
   STATE.pendingResult = body;
   STATE.submittedOk = false;
   // Neuer Versuch, neue Lage — die alte Absage darf nicht stehen bleiben.
@@ -5946,6 +6086,7 @@ function render() {
     && !STATE.locked && !STATE.occupied;
   els.injuryBtn.disabled = !canSignal;
   els.megaphoneBtn.disabled = !canSignal;
+  renderBallzaehler();
   const kannKorrigieren = korrekturMoeglich();
   els.korrekturBtn.disabled = !kannKorrigieren || STATE.finished;
   els.finishedKorrektur.style.display = kannKorrigieren && STATE.finished ? '' : 'none';
@@ -6966,6 +7107,8 @@ els.breakCorrect.addEventListener('click', () => {
   endBreak();
 });
 els.korrekturBtn.addEventListener('click', oeffneKorrektur);
+els.ballMinus.addEventListener('click', () => ballTippen(false));
+els.ballPlus.addEventListener('click', () => ballTippen(true));
 els.finishedKorrektur.addEventListener('click', oeffneKorrektur);
 els.breakKorrektur.addEventListener('click', oeffneKorrektur);
 els.korrekturSeiten.addEventListener('click', () => zeigeKorrekturFrage('seiten'));

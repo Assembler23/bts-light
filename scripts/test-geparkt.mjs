@@ -118,6 +118,8 @@ const FUNKTIONEN = [
   "geparktBeiFinalisierungAufloesen", "geparktRueckkehr", "geparktJetztSenden", "geparktVerwerfen",
   "naechsterSchritt", "sendeauftragErledigt", "sendeauftragBeiFinalisierungLoslassen",
   "beiMatchAssigned", "loadMatch", "clearMatch", "submit", "trySubmitPending",
+  // Ballzähler (Spec tablet-ballzaehler): `submit` legt die Zahl in den Body.
+  "ballzahlAus", "ballzahlFuerErgebnis", "hostZaehltBaelle",
   // Stand-Wahl (Regel A) — `beiMatchAssigned` fragt sie; hier ohne Host-Sätze.
   "fortschritt", "punkte", "vergleiche", "satzEntschieden", "hostSaetzeLesen", "hostSaetzeTeilen", "saetzeSchluessel", "ringMerken", "imRing", "wahlBeiRestore", "wahlBeiZuweisung",
 ];
@@ -168,7 +170,7 @@ function tablet(speicher = {}) {
     ["GEPARKT_MAX", "GEPARKT_MAX_SAETZE", "GEPARKT_ERSTE_PRUEFUNG_MS", "GEPARKT_TAKT_MS", "GEPARKT_KARENZ_MS"].map(quelle).join("\n") +
       "\nconst GEPARKT_KEY = `badhub.tablet.geparkt.${COURT_ID}`;\n" +
       "let resultRetryTimer = null, breakTimer = null, cardsMatchId = null, healthNachfragenRest = 0;\n" +
-      "const MELDE_RING_MAX = 8; let MELDE_RING = null, VORGEMERKT = null;\n" +
+      "const MELDE_RING_MAX = 8; let MELDE_RING = null, VORGEMERKT = null;\nconst BALL_MAX = 99;\n" +
       "let geparktTimer = null, geparktGeprueft = false, geparktLaeuft = false, geparktZuletztMs = 0;\n" +
       "let geparktMeldung = '', geparktMeldungTimer = null, geparktVerwerfenFrage = null, geparktKarenzTimer = null;\n" +
       FUNKTIONEN.map(funktion).join("\n") +

@@ -79,10 +79,12 @@ function umgebung({ state, fetchAntwort, echtesLoadMatch = false }) {
   const bau = new Function(
     ...namen,
     "let healthNachfragenRest = 0;\nlet resultRetryTimer = null;\n" +
-      "const MELDE_RING_MAX = 8; let MELDE_RING = null, VORGEMERKT = null;\n" +
+      "const MELDE_RING_MAX = 8; let MELDE_RING = null, VORGEMERKT = null;\nconst BALL_MAX = 99;\n" +
       ["beiMatchAssigned", "submit", "trySubmitPending",
         // Stand-Wahl (Regel A) — hier ohne Host-Sätze, also ohne Wirkung.
-        "fortschritt", "punkte", "vergleiche", "satzEntschieden", "hostSaetzeLesen", "hostSaetzeTeilen", "saetzeSchluessel", "ringMerken", "imRing", "wahlBeiRestore", "wahlBeiZuweisung"].map(funktion).join("\n") +
+        "fortschritt", "punkte", "vergleiche", "satzEntschieden", "hostSaetzeLesen", "hostSaetzeTeilen", "saetzeSchluessel", "ringMerken", "imRing", "wahlBeiRestore", "wahlBeiZuweisung",
+        // Ballzähler (Spec tablet-ballzaehler): `submit` legt die Zahl in den Body.
+        "ballzahlAus", "ballzahlFuerErgebnis", "hostZaehltBaelle"].map(funktion).join("\n") +
       "\nreturn { beiMatchAssigned, submit, trySubmitPending };",
   );
   return { ruf, ...bau(...namen.map((n) => attrappen[n])) };
