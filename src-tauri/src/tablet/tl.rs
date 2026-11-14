@@ -1178,7 +1178,20 @@ fn state_fingerprint(state: &mut TlState) -> String {
     for c in state.courts.iter_mut() {
         c.remaining_min = None;
     }
+    // Der Bezugswert des Zeitplan-Panels (Spec `tl-zeitplan`) ist dieselbe
+    // Prognose — gleiche Regel. Fenster und Lage bleiben drin: Die ändern
+    // sich nur mit dem Brett.
+    let zeitplan = state.schedule.as_mut().map(|s| {
+        (
+            s.predicted_start_ms.take(),
+            std::mem::take(&mut s.predicted_uncertain),
+        )
+    });
     let fp = serde_json::to_string(&state).unwrap_or_default();
+    if let (Some(s), Some((ms, unsicher))) = (state.schedule.as_mut(), zeitplan) {
+        s.predicted_start_ms = ms;
+        s.predicted_uncertain = unsicher;
+    }
     for (c, r) in state.courts.iter_mut().zip(restzeiten) {
         c.remaining_min = r;
     }
@@ -3020,6 +3033,11 @@ pub struct TlState {
     /// Revision genau einmal, und das soll er. 0 = unbekannt (älterer Host).
     #[serde(default)]
     pub today: u32,
+    /// Zeitplan-Stand für das Panel „Zeitplan" (Spec `tl-zeitplan`, ADR
+    /// 0094). `None` nur ohne Turnierdaten — und bei einem älteren Host:
+    /// Daran erkennt die Seite, ob sie das Panel anbieten darf.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<crate::tablet::zeitplan::TlSchedule>,
     pub tournament: String,
     /// Mehr-Hallen-Turnier? Nur dann bietet die Seite einen Hallenfilter an.
     pub multi_hall: bool,
@@ -4213,6 +4231,64 @@ pub(crate) fn wartelisten_ordnung<'a>(
     (spielbereit, offene)
 }
 
+/// Zeitplan-Stand aus Snapshot, Aufrufen und Prognose (Spec `tl-zeitplan`).
+/// Übersetzt nur in die Form von [`crate::tablet::zeitplan::lage`]; die
+/// Regeln stehen dort.
+fn zeitplan_stand(
+    snap: &crate::btp::model::BtpSnapshot,
+    calls: &[crate::tablet::state::PreparationCall],
+    ordered: &[OrderedMatch<'_>],
+    predictions: &std::collections::HashMap<i64, predict::Prediction>,
+    prognose_an: bool,
+    now_ms: u64,
+) -> crate::tablet::zeitplan::TlSchedule {
+    use crate::btp::model::{MatchResult, MatchStatus};
+    use crate::tablet::zeitplan::{SpielLage, ZpSpiel};
+
+    // Platz in der Warteliste — bei gleicher Prognose gewinnt das erste.
+    let platz: std::collections::HashMap<i64, usize> = ordered
+        .iter()
+        .enumerate()
+        .map(|(i, (_, m, _, _))| (m.id, i))
+        .collect();
+    let gerufen: std::collections::HashSet<i64> = calls.iter().map(|c| c.match_id).collect();
+
+    let mut spiele: Vec<(usize, ZpSpiel)> = snap
+        .matches
+        .iter()
+        .map(|m| {
+            let lage = match m.status {
+                MatchStatus::Scheduled if gerufen.contains(&m.id) => SpielLage::Gerufen,
+                MatchStatus::Scheduled => SpielLage::Wartend,
+                MatchStatus::OnCourt => SpielLage::AufFeld,
+                MatchStatus::Finished if m.result == MatchResult::Walkover => SpielLage::Kampflos,
+                MatchStatus::Finished => SpielLage::Beendet,
+            };
+            let prognose = (lage == SpielLage::Wartend)
+                .then(|| predictions.get(&m.id))
+                .flatten()
+                .map(|p| (p.start_min * 60_000, p.uncertain));
+            (
+                platz.get(&m.id).copied().unwrap_or(usize::MAX),
+                ZpSpiel {
+                    planned_time: m.planned_time,
+                    lage,
+                    prognose,
+                },
+            )
+        })
+        .collect();
+    spiele.sort_by_key(|(i, _)| *i);
+    let spiele: Vec<ZpSpiel> = spiele.into_iter().map(|(_, s)| s).collect();
+
+    crate::tablet::zeitplan::lage(
+        &spiele,
+        heute_ymd(now_ms),
+        prognose_an,
+        crate::btp::model::planned_time_unix_ms,
+    )
+}
+
 /// Startzeit-Prognose der ersten `queue_limit` spielbereiten Spiele (Spec
 /// `spielzeiten-prognose`) — **ohne** Seiteneffekt: Das Merken für die
 /// Prognose-Kontrolle (`merge_predicted_starts`) bleibt beim Aufrufer, damit
@@ -4435,6 +4511,7 @@ pub(crate) fn build_state_limited(
             rev,
             server_now_ms: now_ms,
             today: heute_ymd(now_ms),
+            schedule: None,
             tournament: String::new(),
             multi_hall: false,
             can_set_wish_court: true,
@@ -4549,6 +4626,17 @@ pub(crate) fn build_state_limited(
                 .collect(),
         );
     }
+    // Zeitplan-Stand (Spec `tl-zeitplan`): hier, aus der VOLLEN Ordnung und
+    // vor jeder Kürzung — die Cloud schneidet die Warteliste auf 40 Zeilen,
+    // die Seite könnte das Bezugsfenster dort nicht mehr selbst finden (R3).
+    let schedule = zeitplan_stand(
+        &snap,
+        &calls,
+        &ordered,
+        &predictions,
+        stats.is_some(),
+        now_ms,
+    );
     // Einmal aus dem Store holen, beide Felder (Zeilen + Stale-Marke)
     // bedienen — nicht zweimal klonen (Review 17.08.2026).
     let checkin = tablet.checkin_classes();
@@ -4824,6 +4912,7 @@ pub(crate) fn build_state_limited(
         rev,
         server_now_ms: now_ms,
         today: heute_ymd(now_ms),
+        schedule: Some(schedule),
         tournament: snap.tournament_name.clone(),
         multi_hall: snap.is_multi_hall(),
         halls,
@@ -7692,6 +7781,193 @@ mod tests {
         let json = serde_json::to_string(&s.finished[0]).unwrap();
         assert!(!json.contains("planned_time"), "{json}");
         assert!(!json.contains("start_delay_mins"), "{json}");
+    }
+
+    /// Fester Zeitpunkt für die Zeitplan-Tests: 2027-01-15 13:00 UTC. Auf
+    /// der vollen Stunde, damit „+2 Minuten" in keiner Zeitzone über
+    /// Mitternacht läuft (Zonen-Versätze sind Vielfache von 15 Minuten).
+    const ZP_JETZT: u64 = 1_800_018_000_000;
+
+    /// Planzeit „heute HH:MM" in der Zone des Testrechners.
+    fn zp_heute(hhmm: i64) -> i64 {
+        i64::from(heute_ymd(ZP_JETZT)) * 10_000 + hhmm
+    }
+
+    fn zp_wartend(id: i64, hhmm: i64) -> BtpMatch {
+        let mut m = a_match(id);
+        m.planned_time = Some(zp_heute(hhmm));
+        m
+    }
+
+    /// Spec `tl-zeitplan`: Der Zustand trägt Bezugsfenster und Bezugswert
+    /// für das Panel „Zeitplan".
+    #[test]
+    fn der_zustand_traegt_den_zeitplan() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![zp_wartend(1, 2300), zp_wartend(2, 2300)],
+            Vec::new(),
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), ZP_JETZT, 7);
+
+        assert_eq!(s.today, heute_ymd(ZP_JETZT));
+        let plan = s.schedule.expect("mit Turnierdaten immer da");
+        assert_eq!(plan.kind, "ok");
+        assert!(!plan.started);
+        assert_eq!(plan.planned_time, Some(zp_heute(2300)));
+        assert_eq!(
+            plan.planned_ms,
+            crate::btp::model::planned_time_unix_ms(zp_heute(2300))
+        );
+        // Derselbe Wert, den die früheste Zeile der Warteliste trägt.
+        let frueheste = s.queue.iter().filter_map(|m| m.predicted_start_ms).min();
+        assert!(frueheste.is_some(), "Fixture: ein freies Feld ⇒ Prognose");
+        assert_eq!(plan.predicted_start_ms, frueheste);
+
+        // Ohne Prognose bleibt das Fenster, der Wert fehlt.
+        let mut ohne = AppConfig::default();
+        ohne.prediction.enabled = false;
+        let plan = build_state(&tablet, &ohne, ZP_JETZT, 7).schedule.unwrap();
+        assert_eq!(plan.kind, "off");
+        assert_eq!(plan.planned_time, Some(zp_heute(2300)));
+        assert_eq!(plan.predicted_start_ms, None);
+    }
+
+    /// Die Übersetzung der Spiel-Lage: Ein Aufruf zählt als Beginn, ein
+    /// kampflos gewertetes Spiel nicht.
+    #[test]
+    fn aufruf_beginnt_ein_fenster_walkover_nicht() {
+        let fenster_mit = |zweites: BtpMatch| {
+            let tablet = TabletState::default();
+            let mut laeuft = zp_wartend(10, 2200);
+            laeuft.status = MatchStatus::OnCourt;
+            laeuft.court_id = Some(1);
+            tablet.set_snapshot(snap(
+                vec![a_court(1, None), a_court(2, None)],
+                vec![laeuft, zweites, zp_wartend(12, 2200), zp_wartend(20, 2300)],
+                Vec::new(),
+            ));
+            tablet
+        };
+
+        // Ein laufendes und ein gerufenes Spiel: 22:00 ist begonnen.
+        let tablet = fenster_mit(zp_wartend(11, 2200));
+        tablet.add_preparation_call(crate::tablet::state::PreparationCall {
+            match_id: 11,
+            location_id: None,
+            called_at_ms: ZP_JETZT,
+        });
+        let plan = build_state(&tablet, &AppConfig::default(), ZP_JETZT, 7)
+            .schedule
+            .unwrap();
+        assert_eq!(plan.planned_time, Some(zp_heute(2300)));
+
+        // Ein laufendes und ein kampflos gewertetes: noch nicht begonnen.
+        let mut kampflos = zp_wartend(11, 2200);
+        kampflos.status = MatchStatus::Finished;
+        kampflos.winner = Some(1);
+        kampflos.result = crate::btp::model::MatchResult::Walkover;
+        let tablet = fenster_mit(kampflos);
+        let plan = build_state(&tablet, &AppConfig::default(), ZP_JETZT, 7)
+            .schedule
+            .unwrap();
+        assert_eq!(plan.planned_time, Some(zp_heute(2200)));
+        assert!(plan.started);
+    }
+
+    /// Ohne Turnierdaten gibt es keinen Zeitplan-Stand — daran erkennt die
+    /// Seite auch einen älteren Host.
+    #[test]
+    fn ohne_snapshot_kein_zeitplan() {
+        let s = build_state(&TabletState::default(), &AppConfig::default(), ZP_JETZT, 7);
+        assert_eq!(s.schedule, None);
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("\"schedule\""), "{json}");
+    }
+
+    /// R3: Die Cloud kürzt die Warteliste auf 40 Zeilen. Liegt das
+    /// Bezugsfenster dahinter, muss der Zeitplan-Stand trotzdem derselbe
+    /// sein wie im Hallennetz — er entsteht vor der Kürzung.
+    #[test]
+    fn zeitplan_ist_im_lan_und_relay_stand_gleich() {
+        let tablet = TabletState::default();
+        let mut spiele: Vec<BtpMatch> = (1..=45).map(|id| zp_wartend(id, 2200)).collect();
+        // Zwei beendete Spiele beginnen das 22:00-Fenster.
+        for id in [101, 102] {
+            let mut fertig = zp_wartend(id, 2200);
+            fertig.status = MatchStatus::Finished;
+            fertig.winner = Some(1);
+            spiele.push(fertig);
+        }
+        spiele.extend((46..=60).map(|id| zp_wartend(id, 2300)));
+        tablet.set_snapshot(snap(vec![a_court(1, None)], spiele, Vec::new()));
+        let cfg = AppConfig::default();
+
+        let lan = build_state(&tablet, &cfg, ZP_JETZT, 7);
+        let (json, _rev) = state_for_relay(&tablet, &cfg, ZP_JETZT);
+        let relay: TlState = serde_json::from_str(&json).unwrap();
+
+        assert!(relay.queue.len() <= 40, "Fixture: die Cloud kürzt wirklich");
+        assert!(lan.queue.len() > 40);
+        let plan = lan.schedule.clone().unwrap();
+        assert_eq!(
+            plan.planned_time,
+            Some(zp_heute(2300)),
+            "22:00 ist begonnen"
+        );
+        assert!(plan.started);
+        assert_eq!(relay.schedule, lan.schedule);
+        assert_eq!(relay.today, lan.today);
+    }
+
+    /// Rev-Churn-Wächter: Der Bezugswert ist zeitabgeleitet wie die Prognose
+    /// der Zeilen und darf die Revision nicht im Minutentakt bewegen.
+    #[test]
+    fn der_zeitplan_bewegt_den_fingerprint_nicht() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![zp_wartend(1, 2300), zp_wartend(2, 2300)],
+            Vec::new(),
+        ));
+        let cfg = AppConfig::default();
+        let mut a = build_state(&tablet, &cfg, ZP_JETZT, 7);
+        let mut b = build_state(&tablet, &cfg, ZP_JETZT + 2 * 60_000, 7);
+        assert_ne!(
+            a.schedule.as_ref().unwrap().predicted_start_ms,
+            b.schedule.as_ref().unwrap().predicted_start_ms,
+            "Fixture-Check: der Bezugswert wandert über die zwei Minuten wirklich"
+        );
+        let vorher = a.schedule.clone();
+        assert_eq!(state_fingerprint(&mut a), state_fingerprint(&mut b));
+        assert_eq!(
+            a.schedule, vorher,
+            "der Fingerabdruck stellt den Wert wieder her"
+        );
+    }
+
+    /// Der Tageswechsel dagegen soll die Revision bewegen — einmal: Danach
+    /// gelten andere Spiele als „heute".
+    #[test]
+    fn tageswechsel_bewegt_die_revision_einmal() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![zp_wartend(1, 2300)],
+            Vec::new(),
+        ));
+        let cfg = AppConfig::default();
+        let tag = 24 * 3_600_000;
+        let mut heute = build_state(&tablet, &cfg, ZP_JETZT, 7);
+        let mut morgen = build_state(&tablet, &cfg, ZP_JETZT + tag, 7);
+        let mut morgen_spaeter = build_state(&tablet, &cfg, ZP_JETZT + tag + 60_000, 7);
+
+        assert_eq!(heute.schedule.as_ref().unwrap().kind, "ok");
+        assert_eq!(morgen.schedule.as_ref().unwrap().kind, "done_today");
+        let fp_morgen = state_fingerprint(&mut morgen);
+        assert_ne!(state_fingerprint(&mut heute), fp_morgen);
+        assert_eq!(fp_morgen, state_fingerprint(&mut morgen_spaeter));
     }
 
     /// Spec `tl-zeitplan`: Der Profil-Schalter übersteht den Weg Config →
@@ -11904,6 +12180,13 @@ mod tests {
             "server_now_ms",
             // Tagesdatum des Turnier-PCs (Spec tl-zeitplan), keine Person.
             "today",
+            // Zeitplan-Stand (Spec tl-zeitplan): Lage-Kennung, Planzeit des
+            // Bezugsfensters und dessen früheste Prognose — reine Zeiten
+            // ohne Match-ID und ohne Personenbezug.
+            "schedule",
+            "kind",
+            "started",
+            "planned_ms",
             "tournament",
             "multi_hall",
             "halls",

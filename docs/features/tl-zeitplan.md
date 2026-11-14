@@ -241,6 +241,11 @@ JavaScript (`scripts/test-zeitplan.mjs`, eigener CI-Schritt nach dem Muster von
 - **bts-light mitten im Turniertag eingerichtet:** Für die dann laufenden Spiele gilt der
   Moment der Einrichtung als Start; ihre Abweichung an der Beendet-Zeile ist zu groß. Nicht
   erkennbar, im Handbuch benannt.
+- **Liegengebliebenes Spiel:** Wartet ein Spiel eines frühen, noch nicht begonnenen Fensters
+  dauerhaft (Spieler fehlt, von der Vergabe ausgenommen), misst die Kachel weiter an diesem
+  Fenster und der Rückstand wächst, bis das Spiel entschieden oder umgesetzt ist. Im Handbuch
+  benannt.
+- **Turnier über Mitternacht:** Spiele mit Planzeit von gestern zählen nicht mehr als „heute".
 - **Endphase:** häufig „Noch keine Prognose", weil die Paarungen des nächsten Fensters offen sind.
 - **Bezugsfenster hinter Platz 120 der spielbereiten Liste:** ebenfalls „Noch keine Prognose".
 - **Vertrauen:** Eine große Kachel mit falschem Wert schadet der ganzen Oberfläche — deshalb

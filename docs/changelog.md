@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.412
+
+- **Turnierleitung im Browser: Panel „Zeitplan".** Ein neues Panel zeigt
+  groß, ob das Turnier im Zeitplan liegt: **„Im Zeitplan"**, **„18 min
+  dahinter"** oder **„12 min davor"**. Gemessen wird am nächsten
+  Zeitfenster, das noch nicht begonnen hat: voraussichtlicher Start gegen
+  die in BTP geplante Zeit. Das Panel ist zunächst ausgeblendet —
+  einschalten im Profil-Editor. Es braucht die eingeschaltete
+  Startzeit-Prognose.
+
 ## v0.9.411
 
 - **Turnierleitung im Browser: geplante Zeiten anzeigen.** Neues Häkchen

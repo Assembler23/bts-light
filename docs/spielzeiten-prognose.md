@@ -74,6 +74,13 @@ Spieler-Mindestpausen und 2 Minuten Übergangszeit je Feldwechsel.
 Einstellungen: SetupWizard → **„Startzeit-Prognose"** (Anzeige an/aus,
 Startwert in Minuten; Standard: an, 25 min).
 
+Eine Prognose bekommen nur **spielbereite** Spiele — nicht Spiele mit noch
+offener Paarung, ausgenommene Spiele, Spiele mit Wunschfeld und alles
+hinter Platz 120 der Liste. Darauf baut das TL-Web-Panel **„Zeitplan"**
+auf (Spec [features/tl-zeitplan.md](features/tl-zeitplan.md)): Es
+vergleicht die früheste Prognose des nächsten unbegonnenen Zeitfensters mit
+dessen Planzeit und bleibt ohne Prognose neutral („Noch keine Prognose").
+
 ## Live-Restzeit laufender Spiele (Etappe D)
 
 Sobald ein Feld **live zählt** (Tablet oder Zähltafel verbunden bzw. schon

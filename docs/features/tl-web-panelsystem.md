@@ -454,3 +454,15 @@ Entscheidung: [ADR 0026](../adr/0026-spielliste-eine-globale-reihenfolge-eine-li
 Hinweis: ein langer Präfix aus einer Halle kann alle 15
 `display=next`-Plätze belegen), `docs/announcements.md` (Aufruf je Partei
 am Feld), `docs/adr/0023-…md` (Status auf „superseded by ADR-0026").
+
+## Nachtrag 14.11.2026 — Panels, die standardmäßig ausgeblendet sind
+
+Bis v0.9.411 ergänzte die Seite jeden Panel-Schlüssel, der in einem Profil
+fehlt, als **sichtbar** (letzte Spalte). Seit dem Panel „Zeitplan" (Spec
+[tl-zeitplan](tl-zeitplan.md), ADR 0094) gibt es die Ausnahme
+`PANEL_STANDARD_AUS` in `tl.html`: Schlüssel dieser Menge werden als
+**unsichtbar** ergänzt — auch im eingebauten Standardprofil. So taucht ein
+neues Panel nach dem Update in keiner bestehenden Ansicht ungefragt auf.
+Der Host kennt weiterhin keine Panel-Schlüssel; eine Migration gibt es
+nicht. Kanonische Regel und Test: `src/io/zeitplan.mjs`
+(`panelStandardSichtbar`), `scripts/test-zeitplan.mjs`.

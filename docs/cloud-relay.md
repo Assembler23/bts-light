@@ -897,7 +897,13 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   `TlMatch`/`TlOpenMatch`/`TlFinished.planned_time`,
   `TlFinished.start_delay_mins` und `TlState.today`. **Relay vor Client:**
   Das Relay reicht `TlAction::ProfileSave` typisiert durch; ein Relay ohne
-  das Feld verliert das Häkchen beim Speichern)
+  das Feld verliert das Häkchen beim Speichern. Seit v0.9.412 trägt der
+  Zustand zusätzlich `schedule` (`TlSchedule`: `kind`, `started`,
+  `planned_time`, `planned_ms`, `predicted_start_ms`,
+  `predicted_uncertain`) für das Panel „Zeitplan". Der Host rechnet es
+  **vor** der Kürzung der Warteliste, damit LAN und Cloud denselben Stand
+  zeigen; der Panel-Schlüssel `zeitplan` reist wie alle Panel-Schlüssel
+  unbesehen im Profil. Dafür ist kein Relay-Neubau nötig)
   (`#[serde(default)]` — alte Browser-Profile ohne das Feld lesen sich als
   „aus"); das zugehörige Anzeigedatum reist als `TlCourt.remaining_min`
   im opaken `TlState`-JSON mit (Serde-Default, alte Gegenstellen
