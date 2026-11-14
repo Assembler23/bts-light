@@ -395,6 +395,17 @@ Aufstellung:
   `--kopf-hoehe`, die ein `ResizeObserver` aus der Kopfzeile misst; die
   anderen Overlays (Pause, Karten, Einstellungen) decken weiterhin alles.
 
+### „Spiel beginnt" (seit v0.9.415)
+
+Nach der Aufstellung zeigt die Leiste die Einspielzeit und darunter den
+Knopf **Spiel beginnt**. Der Tipp setzt `STATE.spielBegonnen` (überlebt
+Neuladen und Übernahme, zurückgesetzt bei Matchwechsel und „Zurück zur
+Seitenwahl"), blendet die Einspielzeit aus und schickt sofort einen
+`score_update` mit `playStarted: true` — ab dann jeder Stand dieses Spiels.
+Der Host stempelt damit den Nettostart (`handle_score`, Spec
+`spielzeiten-prognose`); ohne Tipp stempelt wie bisher der erste Punkt.
+<!-- pruef: "Spiel beginnt" in src-tauri/assets/tablet.html -->
+
 ### Aufruf-Uhr in der Kopfzeile (seit v0.9.278)
 
 Dieselbe Uhr „Zeit seit Aufruf" wie am Court-Monitor

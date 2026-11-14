@@ -22,10 +22,17 @@ eine Pause überzogen wird.
 ## Begriffe
 
 - **Bruttozeit** = erste Feldzuweisung durch BTP → Beendigung des Spiels.
-- **Nettozeit** = erster gespielter Punkt → Beendigung; durchgehende Uhr,
+- **Nettozeit** = erster Aufschlag → Beendigung; durchgehende Uhr,
   Satz-/Zwischenpausen zählen mit (nicht pausenbereinigt).
 - **Differenz** = Brutto − Netto = Anlaufzeit (Weg zum Feld, Einspielen,
   Anschreiben) — eine Feld-Logistik-Metrik, keine Spieler-Bewertung.
+- **Erster Aufschlag** (Erweiterung 14.11.2026): meldet das Tablet über den
+  Knopf „Spiel beginnt" in der Einspielzeit-Leiste — ab dann trägt jeder
+  `score_update` `playStarted: true`, der Host stempelt beim ersten Eingang.
+  Ohne Tipp gilt wie bisher der erste Punkt (Ende des ersten Ballwechsels).
+  Bewusste Grenze: Ein Fehltipp ist nicht rücknehmbar — der Host stempelt
+  „nur wenn leer", auch „Zurück zur Seitenwahl" am Tablet ändert den Stempel
+  nicht (gleiche Regel wie das Undo auf 0:0 beim ersten Punkt).
 - **Gruppe** = Klasse (`class_label`) × Disziplin; Statistik-Fallback-Kette
   Gruppe → Klasse → Turnier → konfigurierter Default.
 

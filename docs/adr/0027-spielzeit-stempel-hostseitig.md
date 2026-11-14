@@ -26,6 +26,12 @@ persistiert in `match-times.json` nach dem ADR-0022-Muster):
 - **Nettostart** beim ersten beim Host eingehenden Punktestand > 0
   (`handle_score`, hinter Finalisiert-Gate und Stale-Filter — der
   gemeinsame Trichter von LAN und Cloud, deckt auch Zähltafeln ab).
+  **Nachtrag 14.11.2026:** Die Nettozeit soll mit dem ersten Aufschlag
+  beginnen, nicht mit dem Ende des ersten Ballwechsels. Das Tablet meldet
+  ihn per Knopf „Spiel beginnt" als Flag `playStarted` im `score_update` —
+  bewusst ein Flag ohne Zeitstempel: Der Host stempelt weiter mit seiner
+  Uhr beim Eingang, die Entscheidung dieser ADR bleibt unberührt. Ohne
+  Flag gilt der erste Punkt als Ersatz.
 - **Spielende** beim Host-Eingang des Ergebnisses (alle Pfade: Tablet,
   Desktop-Backend, TL-Web) — „nur wenn leer": Korrekturen und
   Wiederholungs-POSTs ändern weder Zeit noch Einstufung.

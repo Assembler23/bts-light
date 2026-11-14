@@ -990,12 +990,22 @@ async fn handle_frame(
             score_b,
             sets_history,
             match_id,
+            play_started,
             ..
         } => {
             // handle_score filtert Nachzügler alter Matches selbst
             // (Stale-Filter A4) — wirkt so auch hinter einem ALTEN Relay,
             // das die matchId noch nicht prüft (0 = kein Filter).
-            handle_score(court_id, score_a, score_b, &sets_history, match_id, ctx).await;
+            handle_score(
+                court_id,
+                score_a,
+                score_b,
+                &sets_history,
+                match_id,
+                play_started,
+                ctx,
+            )
+            .await;
         }
         RelayFrame::Battery {
             court_id,

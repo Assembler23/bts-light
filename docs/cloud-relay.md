@@ -1720,6 +1720,11 @@ am Server bereits, dort ist nichts zu ändern.
   Score-Cache nicht wieder mit dem alten Stand befüllen (Turnier-Befund
   HM-03; dasselbe Prinzip wie Tilos „stale panel rejected"). Alte
   Tablet-Seiten ohne das Feld (matchId 0) laufen ungefiltert wie bisher.
+- **Spielbeginn (`playStarted`, v0.9.415):** `score_update` trägt nach
+  dem Tipp auf „Spiel beginnt" `"playStarted": true`; der Relay reicht es
+  im `RelayFrame::ScoreUpdate` unverändert an den Host (Nettostart, Spec
+  `spielzeiten-prognose`). `false` wird nicht serialisiert. Ein alter Relay
+  verschluckt das Feld → der Host stempelt wie bisher beim ersten Punkt.
 - Broker-Limits gegen Überlast: maximale Anzahl Namespaces, Tablets je
   Namespace und gleichzeitig offener Ergebnis-Übermittlungen.
 - **Telefon-Kopplungscode** ([ADR 0004](adr/0004-telefon-kopplungscode.md),
