@@ -23,7 +23,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::btp::model::{BtpMatch, BtpPlayer, BtpSnapshot, MatchStatus};
+use crate::btp::model::{BtpMatch, BtpPlayer, BtpSnapshot, MatchResult, MatchStatus};
 use crate::config::AppConfig;
 use crate::tablet::queue_order::QueueOrderStore;
 use relay_proto::CourtExpectation;
@@ -465,6 +465,20 @@ pub fn pflichtpause_ms(snap: &BtpSnapshot, config: &AppConfig) -> u64 {
     }
 }
 
+/// Hat in diesem (beendeten) Spiel wirklich jemand auf dem Feld gestanden?
+///
+/// Nein bei einem **kampflosen** Sieg und bei einem **Freilos** (eine Seite
+/// leer). Beides kostet keine Kraft und darf deshalb weder eine Pflichtpause
+/// auslösen noch als „zuletzt gespielt" zählen. Beim Freilos kommt dazu: BTP
+/// trägt den Sieger schon beim Auslosen ein, und weil BTP keine Endzeit
+/// liefert, stempelt die Sync-Engine den Zeitpunkt des ersten Sehens — eine
+/// frische Auslosung schickte sonst jeden Freilos-Spieler sofort in eine volle
+/// Pause, auch mitten in der Warteliste einer anderen Disziplin (Feldbericht
+/// 14.11.2026).
+pub fn wurde_gespielt(m: &BtpMatch) -> bool {
+    m.result != MatchResult::Walkover && !m.team1.is_empty() && !m.team2.is_empty()
+}
+
 impl PlayerAvailability {
     pub fn from_snapshot(snap: &BtpSnapshot, config: &AppConfig) -> Self {
         let busy: HashMap<String, i64> = snap
@@ -488,7 +502,7 @@ impl PlayerAvailability {
         for m in snap
             .matches
             .iter()
-            .filter(|m| m.status == MatchStatus::Finished)
+            .filter(|m| m.status == MatchStatus::Finished && wurde_gespielt(m))
         {
             let Some(end) = m.finished_at else { continue };
             let pause = m.pause_ms.unwrap_or(jetzt_gueltig);
@@ -2101,6 +2115,75 @@ mod tests {
         match av2.blocked(&wanted, 60_000) {
             Some(Blocked::Pause { until_ms, .. }) => assert_eq!(until_ms, 1_800_000),
             other => panic!("erwartet: 30-Minuten-Pause aus BTP, war: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ein_freilos_loest_keine_pause_aus() {
+        // Feldbericht 14.11.2026: Eine frische Auslosung in einer anderen
+        // Disziplin schickte den Freilos-Spieler sofort in die Pause — BTP
+        // trägt beim Freilos den Sieger schon beim Auslosen ein, und die
+        // Sync-Engine stempelt „jetzt beendet".
+        let mut freilos = a_match(1);
+        freilos.status = MatchStatus::Finished;
+        freilos.winner = Some(1);
+        freilos.finished_at = Some(100_000);
+        freilos.team1 = vec![player("Müller")];
+        freilos.team2 = Vec::new();
+        let mut wanted = a_match(2);
+        wanted.team1 = vec![player("Müller")];
+
+        let mut cfg = AppConfig::default();
+        cfg.auto_assign.pause_minutes = 10.0;
+        let s = snap(Vec::new(), vec![freilos, wanted.clone()], Vec::new());
+        let av = PlayerAvailability::from_snapshot(&s, &cfg);
+        assert_eq!(av.blocked(&wanted, 200_000), None, "Freilos ist kein Spiel");
+    }
+
+    #[test]
+    fn ein_kampfloser_sieg_loest_keine_pause_aus() {
+        // Kampflos hat niemand auf dem Feld gestanden — weder Sieger noch
+        // Verlierer brauchen eine Erholungspause.
+        let mut wo = a_match(1);
+        wo.status = MatchStatus::Finished;
+        wo.winner = Some(1);
+        wo.result = MatchResult::Walkover;
+        wo.finished_at = Some(100_000);
+        wo.team1 = vec![player("Müller")];
+        wo.team2 = vec![player("Gegner")];
+        let mut wanted = a_match(2);
+        wanted.team1 = vec![player("Müller")];
+        wanted.team2 = vec![player("Gegner")];
+
+        let mut cfg = AppConfig::default();
+        cfg.auto_assign.pause_minutes = 10.0;
+        let s = snap(Vec::new(), vec![wo, wanted.clone()], Vec::new());
+        let av = PlayerAvailability::from_snapshot(&s, &cfg);
+        assert_eq!(av.blocked(&wanted, 200_000), None);
+    }
+
+    #[test]
+    fn aufgabe_und_disqualifikation_loesen_weiter_eine_pause_aus() {
+        // Gegenprobe: Bei Aufgabe/Disqualifikation wurde gespielt.
+        for result in [MatchResult::Retired, MatchResult::Disqualified] {
+            let mut done = a_match(1);
+            done.status = MatchStatus::Finished;
+            done.winner = Some(2);
+            done.result = result;
+            done.finished_at = Some(100_000);
+            done.team1 = vec![player("Müller")];
+            done.team2 = vec![player("Gegner")];
+            let mut wanted = a_match(2);
+            wanted.team1 = vec![player("Müller")];
+
+            let mut cfg = AppConfig::default();
+            cfg.auto_assign.pause_minutes = 10.0;
+            let s = snap(Vec::new(), vec![done, wanted.clone()], Vec::new());
+            let av = PlayerAvailability::from_snapshot(&s, &cfg);
+            assert!(
+                matches!(av.blocked(&wanted, 200_000), Some(Blocked::Pause { .. })),
+                "{result:?} muss weiter pausieren"
+            );
         }
     }
 
