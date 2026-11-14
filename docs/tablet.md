@@ -492,7 +492,7 @@ Knopf, weil deren Overlays die Kopfzeile verdecken) öffnet zwei Eingriffe:
 ## Ballzähler in der Kopfzeile (seit v0.9.399)
 
 Trägt der `MatchBrief` `shuttleCounter: true`, zeigt die Kopfzeile
-**− 🏸 Zahl +** (`#ball-zaehler`). Die Zahl (`STATE.shuttles`, 0–99) liegt im
+**−**, Federball-Symbol (Inline-SVG `.federball`) mit Zahl, **+** (`#ball-zaehler`). Die Zahl (`STATE.shuttles`, 0–99) liegt im
 gespiegelten Stand, aber außerhalb des Undo-Stapels; `submit` legt sie als
 `shuttles` in den Ergebnis-Body. Ab dem Übermitteln ist sie eingefroren. Ein
 älterer Turnier-PC sendet das Feld nicht — dann gibt es keinen Zähler und kein
