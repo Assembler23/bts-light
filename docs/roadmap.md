@@ -297,6 +297,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Als Nächstes
 
+- **Demofeld: weitere Übungsszenarien** (Spec `tablet-demofeld`, v0.9.416).
+  Szenarien sind ein Eintrag in `DEMO_SZENARIEN` (`tablet.html`). Denkbar
+  sind ein Satz bis 15 bzw. 11, eine Aufgabe in der Behandlungspause, ein
+  Fehlaufschlag mit Karte oder ein Seitenfehler zum Korrigieren.
+
 - **Ergebnis-Write ohne CourtID löscht den Spielort.** Messung 09.11.2026
   (`docs/btp_protocol.md`): BTP übernimmt die CourtID aus jedem Write mit
   `Official*`. `update_request` mit `free_court_id: None` (kampflos aus

@@ -34,6 +34,39 @@ und belegt kein Feld. Sie erscheint nur, wenn die Turnierleitung den
 Meetingpoint eingeschaltet hat. Siehe [Meetingpoint](meetingpoint.md).
 <!-- pruef: "PIN — antippen" in src-tauri/assets/lobby.html -->
 
+## Üben am Demofeld
+
+Wer das Tablet erst einmal ausprobieren möchte — etwa ein Schiedsrichter
+vor seinem ersten Einsatz —, nimmt das **Demofeld** (seit v0.9.416). Es
+geht **mitten im laufenden Turnier**, an jedem Turnier-Tablet:
+
+- in der Feldwahl die Kachel **Demofeld** ganz unten (ohne PIN), oder
+- im Zahnrad-Menü unter **Feld wechseln** den Eintrag
+  **Demofeld · Übungsspiel**.
+<!-- pruef: "Demofeld · Übungsspiel" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Ausprobieren — antippen" in src-tauri/assets/lobby.html -->
+
+Dann wählst du ein **Übungsspiel**: Einzel, Doppel oder Mixed ab 0:0, oder
+einen Zwischenstand zum gezielten Üben — Entscheidungssatz (Seitenwechsel
+bei 11), Verlängerung ab 19:19 oder ein Spielpunkt bei 20:18 bis zum
+Übermitteln des Ergebnisses. Alles läuft wie im echten Spiel: Seitenwahl,
+Aufschlag, Pausen, Karten, Korrektur, Schiri-Modus.
+<!-- pruef: "Übungsspiel wählen" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Doppel · Verlängerung" in src-tauri/assets/tablet.html -->
+
+**Am Turnier ändert das nichts.** Die Namen sind ausgedacht, kein echtes
+Spiel wird genommen, kein Feld belegt. Nichts geht an die Turnierleitung,
+an BTP, an die Monitore oder den Liveticker — auch „Ergebnis übermitteln"
+und die Knöpfe ✚ und 📣 bleiben auf dem Tablet. Ein großes **ÜBUNG** im
+Hintergrund und „Übung · nichts wird übertragen" oben rechts erinnern daran.
+<!-- pruef: "Übung · nichts wird übertragen" in src-tauri/assets/tablet.html -->
+
+Auf dem Demofeld öffnet das Zahnrad **ohne PIN**: So lassen sich
+Schiri-Modus und Große Schrift frei ausprobieren, und **Neues Übungsspiel
+wählen** führt zurück zur Auswahl. Zurück an ein echtes Feld geht es über
+die Feldliste im selben Menü.
+<!-- pruef: "Neues Übungsspiel wählen" in src-tauri/assets/tablet.html -->
+
 ## Ein Spiel aufsetzen
 
 Liegt ein Spiel auf dem Feld, zeigt die Kopfzeile eine **Aufruf-Uhr**:
