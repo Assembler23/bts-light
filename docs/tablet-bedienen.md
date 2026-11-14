@@ -210,6 +210,10 @@ aus Versehen antippen soll. Es ist durch eine **PIN** geschützt (voreingestellt
   Punktzahlen**, ohne PIN; ein kurzes Etikett nennt die neue Ansicht.
 <!-- pruef: "Ansicht:" in src-tauri/assets/tablet.html -->
 - **Schiri-Modus ein- und ausschalten**,
+- **Große Schrift: an/aus** (seit v0.9.414) — für alle, die schlecht sehen:
+  größere Ansagetexte, Schwarz auf Weiß, kräftigere Spielernamen. Die
+  Einstellung bleibt auf diesem Tablet gespeichert,
+<!-- pruef: "Große Schrift: " in src-tauri/assets/tablet.html -->
 - **Vollbild**.
 
 > **Die PIN wird fünf Minuten gemerkt** (seit v0.9.284). Nach einer richtigen
@@ -228,6 +232,10 @@ schwarz — samt der vorzulesenden Ansagen.
 
 > **Der Schiri-Modus muss erst eingeschaltet werden**, im Zahnrad-Menü. Ohne
 > ihn erscheinen die Karten gar nicht.
+
+Die Ansage zum Vorlesen steht so groß da, wie der Platz es zulässt — kurze
+Ansagen größer als lange. Reicht das nicht, hilft **Große Schrift** im
+Zahnrad-Menü.
 
 Details: [Schiri-Modus am Zähltablett](umpire-mode.md).
 
