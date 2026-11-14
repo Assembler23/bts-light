@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.409
+
+- **Turnierleitung im Browser: geplante Zeiten anzeigen.** Neues Häkchen
+  **„Geplante Zeiten anzeigen"** im Profil (Standard aus): In der Warteliste
+  steht an jedem Spiel die Zeit, zu der es in BTP angesetzt ist („geplant
+  10:20"). An beendeten Spielen steht zusätzlich, wie viel später oder
+  früher es tatsächlich aufs Feld ging („geplant 10:20 · +18 min"). So sieht
+  man, ob das Turnier im Zeitplan liegt.
+
 ## v0.9.408
 
 - **Meetingpoint: Spielbereite Partien werden grün.** Sind alle nötigen

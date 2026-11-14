@@ -203,6 +203,12 @@ jobs:
       - name: Zuletzt gespielt (JS)
         run: node scripts/test-zuletzt-gespielt.mjs
 
+      # Texte zur geplanten Zeit (Spec tl-zeitplan) und Gleichlauf der
+      # Inline-Kopie in tl.html. Eine falsche Planzeit führt die
+      # Turnierleitung über den Stand des Zeitplans in die Irre.
+      - name: Zeitplan (JS)
+        run: node scripts/test-zeitplan.mjs
+
       # Spielersuche: Sprungziel eines Treffers (Filter nie still umstellen,
       # nichts versprechen, was hinter dem Deckel liegt) und Gleichlauf der
       # Inline-Kopie in tl.html.

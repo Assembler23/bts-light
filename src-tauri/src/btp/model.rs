@@ -1536,6 +1536,39 @@ fn parse_planned_time(m: &Node) -> Option<i64> {
     Some(year * 100_000_000 + month * 1_000_000 + day * 10_000 + hour * 100 + minute)
 }
 
+/// BTP `PlannedTime` (`YYYYMMDDHHMM`) → Unix-ms.
+///
+/// Die Zahl ist **lokale Wandzeit**, keine UTC — sie kommt aus einem
+/// Turnierplan, den jemand in einer Halle aufgestellt hat, und der Rechner
+/// steht am selben Ort (dasselbe `Local`-Muster wie `btp/proto.rs`). Ohne die
+/// Zonen-Zuordnung läge im Sommer jede Anwurfzeit zwei Stunden daneben.
+///
+/// `None` bei unplausibler Zahl und bei mehrdeutiger Wandzeit (Zeitumstellung):
+/// dann lieber keine Zeit als eine falsche — badhub zeigt das Feld einfach
+/// nicht an, die Zeitplan-Kachel im TL-Web bleibt neutral.
+///
+/// Steht hier und nicht beim Liveticker, weil zwei Abnehmer sie teilen: der
+/// `sched`-Push und der TL-Zustand (Spec `tl-zeitplan`).
+pub(crate) fn planned_time_unix_ms(pt: i64) -> Option<u64> {
+    use chrono::{Local, NaiveDate, TimeZone};
+
+    let minute = (pt % 100) as u32;
+    let rest = pt / 100;
+    let stunde = (rest % 100) as u32;
+    let rest = rest / 100;
+    let tag = (rest % 100) as u32;
+    let rest = rest / 100;
+    let monat = (rest % 100) as u32;
+    let jahr = (rest / 100) as i32;
+
+    let naiv = NaiveDate::from_ymd_opt(jahr, monat, tag)?.and_hms_opt(stunde, minute, 0)?;
+
+    Local
+        .from_local_datetime(&naiv)
+        .single()
+        .map(|dt| dt.timestamp_millis() as u64)
+}
+
 // --- Kleine Knoten-Zugriffshelfer -----------------------------------------
 
 fn child_int(node: &Node, id: &str) -> Option<i64> {

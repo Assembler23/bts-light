@@ -1791,6 +1791,51 @@ function zuletztText(sinceMs, nowMs) {
   return `vor ${h} h ${String(min % 60).padStart(2, "0")}`;
 }
 
+// ── Inline-Kopie von src/io/zeitplan.mjs ────────────────────────────────
+// Kanonische Fassung samt Tests im Modul; `scripts/test-zeitplan.mjs`
+// vergleicht das Verhalten.
+/**
+ * Planzeit aus BTP (`YYYYMMDDHHMM`, Wandzeit des Turnier-PCs) als Text:
+ * „10:20", an einem anderen Tag als `heute` (`YYYYMMDD` vom Turnier-PC) mit
+ * Wochentag: „So 09:00".
+ *
+ * Gelesen werden nur die Ziffern — nie ein `Date` in der Zone des Geräts.
+ * Ein Turnierleitungs-Gerät mit anderer Zeitzone zeigt deshalb dieselbe
+ * Uhrzeit wie der Turnier-PC. Der Wochentag kommt aus einer UTC-Rechnung
+ * über Jahr/Monat/Tag und hängt ebenfalls an keiner Zone. Kennt der Host
+ * `heute` nicht (0, fehlt), steht nur die Uhrzeit. Unsinn ergibt "".
+ */
+function planZeitText(plannedTime, heute) {
+  const n = Number(plannedTime);
+  if (!Number.isFinite(n) || n < 100000000000 || n > 999912312359) return "";
+  const minute = n % 100;
+  const stunde = Math.floor(n / 100) % 100;
+  const datum = Math.floor(n / 10000);
+  const tag = datum % 100;
+  const monat = Math.floor(datum / 100) % 100;
+  const jahr = Math.floor(datum / 10000);
+  if (minute > 59 || stunde > 23 || monat < 1 || monat > 12 || tag < 1 || tag > 31) return "";
+  const uhr = `${String(stunde).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const h = Number(heute);
+  if (!Number.isFinite(h) || h <= 0 || h === datum) return uhr;
+  const wochentag = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"][
+    new Date(Date.UTC(jahr, monat - 1, tag)).getUTCDay()
+  ];
+  return `${wochentag} ${uhr}`;
+}
+
+/**
+ * Abstand des tatsächlichen Starts zur Planzeit: „+18 min", „−4 min",
+ * „±0 min". Fehlt die Messung (Walkover, kein Stempel), "".
+ */
+function startAbweichungText(mins) {
+  if (mins === null || mins === undefined || mins === "") return "";
+  const m = Math.trunc(Number(mins));
+  if (!Number.isFinite(m)) return "";
+  if (m === 0) return "±0 min";
+  return `${m > 0 ? "+" : "−"}${Math.abs(m)} min`;
+}
+
 /** Sind auf diesem Feld schon Punkte gefallen? Dann läuft das Spiel. */
 const isPlaying = (court) =>
   court.match_id > 0 && (court.sets || []).some(([a, b]) => a > 0 || b > 0);
@@ -1980,6 +2025,9 @@ function builtInProfile() {
       showMoveButtons: false,
       // „Zuletzt gespielt" je Seite (Spec `tl-zuletzt-gespielt`): aus.
       showLastPlayed: false,
+      // Geplante Zeit aus BTP an Warteliste und beendeten Spielen (Spec
+      // `tl-zeitplan`): aus.
+      showPlannedTimes: false,
       // Abgelöst durch `columns`/`column` (Plan tl-liste-vereinfachen F),
       // aber weiter mitgeführt: Ein Profil, das eine ältere App-Version
       // wieder liest, soll dort unverändert aussehen.
@@ -2204,6 +2252,23 @@ function hostKenntZuletztGespielt() {
   const profile = (state && state.profiles) || [];
   if (!profile.length) return true;
   return profile.some((p) => p.display && "showLastPlayed" in p.display);
+}
+/** Geplante Zeit aus BTP an Wartelisten-Zeilen und beendeten Spielen (Spec
+ *  `tl-zeitplan`). Profil-Schalter, Standard aus. */
+function zeigeGeplanteZeiten() { return !!activeDisplay().showPlannedTimes; }
+/** Kennt der Turnier-PC `showPlannedTimes`? Regel wie
+ *  `hostKenntZuletztGespielt`: Ein alter Host verwürfe das Häkchen still. */
+function hostKenntGeplanteZeiten() {
+  const profile = (state && state.profiles) || [];
+  if (!profile.length) return !!(state && state.today);
+  return profile.some((p) => p.display && "showPlannedTimes" in p.display);
+}
+/** „geplant 10:20" bzw. „geplant So 09:00" — leer ohne Planzeit oder bei
+ *  ausgeschaltetem Schalter. */
+function geplantText(plannedTime) {
+  if (!zeigeGeplanteZeiten()) return "";
+  const t = planZeitText(plannedTime, state && state.today);
+  return t ? `geplant ${t}` : "";
 }
 /** Kennt dieser Turnier-PC offene Paarungen überhaupt?
  *
@@ -4970,6 +5035,10 @@ function queueRow(m, topMatchId) {
   if (zeigeDisziplinAktiv()) metaHaeppchen.push(klasse(m.discipline, m.class_label));
   if (zeigeGruppeAktiv()) metaHaeppchen.push(m.draw_name);
   if (zeigeRundeAktiv()) metaHaeppchen.push(m.round_name);
+  // Planzeit aus BTP (Spec `tl-zeitplan`): an wartenden, gerufenen und
+  // offenen Zeilen. Beschriftet, damit sie niemand mit der Prognose-Marke
+  // rechts verwechselt.
+  metaHaeppchen.push(geplantText(m.planned_time));
   // Bereitschaftslage als Farbe am NAMEN statt als Hinweistext (Nutzer-
   // Befund 17.08.2026: Die Begründungstexte machten die Liste
   // unübersichtlich). Rot = steht gerade auf einem Feld, Orange = noch in
@@ -8388,6 +8457,10 @@ function uebernehmeEditorFelder() {
     showLastPlayed: $("prof-show-last-played")
       ? $("prof-show-last-played").checked
       : !!kopie.display.showLastPlayed,
+    // Fehlt das Häkchen (älterer Turnier-PC), bleibt der gespeicherte Wert.
+    showPlannedTimes: $("prof-show-planned")
+      ? $("prof-show-planned").checked
+      : !!kopie.display.showPlannedTimes,
     // Achse des Panels „Spielzeiten": Auswahlfeld statt Häkchen — es sind
     // vier Werte, kein An/Aus. Ein unbekannter Wert (Profil aus einer
     // neueren Version) fiele beim Lesen ohnehin auf „group" zurück.
@@ -8476,6 +8549,7 @@ function renderProfileEditor() {
       hostKenntZuletztGespielt() ? haken("prof-show-last-played", d.showLastPlayed, "Zuletzt gespielt zeigen", "Wie lange das letzte Spiel jeder Seite her ist") : "",
     ].join(""))}
     ${gruppe("Spielliste", [
+      hostKenntGeplanteZeiten() ? haken("prof-show-planned", d.showPlannedTimes, "Geplante Zeiten anzeigen", "Planzeit aus BTP in der Warteliste und an beendeten Spielen") : "",
       hostKenntOffeneSpiele() ? haken("prof-show-open", !d.hideOpenMatches, "Spiele mit noch offener Paarung zeigen", "z. B. Halbfinale, solange die Vorrunde läuft") : "",
       state && state.can_search ? haken("prof-show-search", !d.hideSearch, "Spielersuche zeigen", "Suchfeld oben in der Kopfleiste") : "",
       hostKenntVerschiebeKnoepfe() ? haken("prof-show-move", d.showMoveButtons, "Verschiebe-Knöpfe an jeder Zeile", "⤒ ↑ ↓ ⤓ statt nur ↑") : "",
@@ -8950,6 +9024,12 @@ function finRow(f) {
     const zeiten = f.brutto_mins != null
       ? `${f.brutto_mins} min${f.netto_mins != null ? ` (netto ${f.netto_mins})` : ""}`
       : "";
+    // Planzeit und Abstand des tatsächlichen Starts dazu (Spec
+    // `tl-zeitplan`): „geplant 10:20 · +18 min". Die Abweichung fehlt bei
+    // Walkover und ungemessenem Start — dann steht nur die Planzeit.
+    const planText = geplantText(f.planned_time);
+    const geplant = [planText, planText ? startAbweichungText(f.start_delay_mins) : ""]
+      .filter(Boolean).join(" · ");
     // Hallen-Kürzel + Farbmarke (Spec hallen-farben): nur wenn der Host
     // die Halle liefert (Mehr-Hallen-Turnier, Spiel lief auf einem Feld).
     const halle = f.hall
@@ -8957,7 +9037,7 @@ function finRow(f) {
       : "";
     return `<div class="fin-row" data-fin="${f.match_id}">
       <span class="fin-pair">${siegerZuerstHtml(f)}</span>
-      <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten].filter(Boolean).join(" · "))}${baelleMarke(f.shuttles) ? " · " + baelleMarke(f.shuttles) : ""}</span>
+      <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten, geplant].filter(Boolean).join(" · "))}${baelleMarke(f.shuttles) ? " · " + baelleMarke(f.shuttles) : ""}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
       ${kebab}
     </div>`;

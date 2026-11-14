@@ -667,7 +667,7 @@ Der Profil-Editor ist in Gruppen geordnet (seit v0.9.344):
 | **Aufbau der Seite** | Spaltenzahl, Panels (sichtbar, Reihenfolge, Spalte) |
 | **Spielangaben** | Spielnummer, Disziplin/Klasse, Runde, Gruppe, Setzplätze |
 | **Spieler** | Nationen, Vereinsnamen, Vereinslogos, Zuletzt gespielt |
-| **Spielliste** | Spiele mit offener Paarung, Verschiebe-Knöpfe |
+| **Spielliste** | Geplante Zeiten, Spiele mit offener Paarung, Verschiebe-Knöpfe |
 | **Felder** | Restzeit laufender Spiele, Aufrufe unbegrenzt |
 | **Spielzeiten** | Gruppierung des Panels „Spielzeiten" |
 <!-- pruef: "Aufbau der Seite" in src-tauri/assets/tl.html -->
@@ -711,6 +711,25 @@ Die Anzeige-Häkchen im Profil-Editor:
   beendet. Erfordert einen Host ab v0.9.342; ältere Hosts zeigen das
   Häkchen nicht.
   <!-- pruef: "Zuletzt gespielt zeigen" in src-tauri/assets/tl.html -->
+- **Geplante Zeiten anzeigen** (Standard: **aus**) — die Zeit, zu der ein
+  Spiel in BTP angesetzt ist. In der Warteliste steht sie in der Meta-Zeile
+  jedes wartenden, gerufenen oder noch offenen Spiels als **„geplant
+  10:20"**; liegt das Spiel an einem anderen Tag, mit Wochentag („geplant So
+  09:00"). An beendeten Spielen steht zusätzlich, wie weit der tatsächliche
+  Start davon abwich: **„geplant 10:20 · +18 min"** heißt 18 Minuten später
+  als geplant aufs Feld gegangen, „−4 min" vier Minuten früher, „±0 min"
+  pünktlich. Als Start zählt die erste Feldzuweisung. Die Abweichung fehlt
+  bei kampflosen Spielen und bei Spielen, deren Start bts-light nicht
+  gemessen hat (etwa direkt in BTP gewertet) — dann steht nur die Planzeit.
+  Wird bts-light erst mitten im Turniertag gestartet, gilt für die gerade
+  laufenden Spiele dieser Moment als Start; ihre Abweichung ist dann zu groß.
+  Hat ein Spiel in BTP keine geplante Zeit, steht nichts. An den
+  Feldkacheln erscheint die Planzeit nicht. Beachte: BTP setzt meist eine
+  ganze Runde auf dieselbe Zeit — die Planzeit ist ein Zeitfenster, keine
+  Minutenvorgabe für das einzelne Spiel. Die Uhrzeiten sind die des
+  Turnier-PCs, auch auf einem Gerät mit anderer Zeitzone. Erfordert einen
+  Host ab v0.9.409; ältere Hosts zeigen das Häkchen nicht.
+  <!-- pruef: "Geplante Zeiten anzeigen" in src-tauri/assets/tl.html -->
 
 Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**
 an- und abschalten — der Schalter oben rechts. Er zeigt **„Automatik läuft"**
