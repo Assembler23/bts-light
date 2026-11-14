@@ -4,7 +4,7 @@
 //
 // Ausfuehren: node scripts/test-vorbereitung-besetzung.mjs
 
-import { besetzungSegmente, besetzungAusAuftrag } from "../src/io/prepBesetzung.mjs";
+import { besetzungSegmente, besetzungAusAuftrag, besetzungMitFeld } from "../src/io/prepBesetzung.mjs";
 
 let fehler = 0;
 function pruefe(label, bedingung) {
@@ -26,6 +26,24 @@ pruefe(
   gleich(besetzungSegmente(["Anna Schulz"], [], "en"), ["Umpire: Anna Schulz."]),
 );
 pruefe("leere und Leerzeichen-Namen fallen weg", gleich(besetzungSegmente([" ", ""], undefined, "de"), []));
+
+console.log("=== Feld-Ansage endet mit dem Feld ===");
+pruefe(
+  "mit SR+AR folgt das Feld als Letztes",
+  gleich(besetzungMitFeld(["Anna Schulz"], ["Bob Meier"], "de", "Feld 3"), [
+    "Schiedsrichter: Anna Schulz.",
+    "Aufschlagrichter: Bob Meier.",
+    "Feld 3.",
+  ]),
+);
+pruefe(
+  "nur AR auf Englisch: Feld trotzdem am Ende",
+  gleich(besetzungMitFeld([], ["Bob Meier"], "en", "Court 3"), [
+    "Service judge: Bob Meier.",
+    "Court 3.",
+  ]),
+);
+pruefe("ohne Besetzung kein zusätzliches Feld", gleich(besetzungMitFeld([" "], undefined, "de", "Feld 3"), []));
 
 console.log("=== Auftrag → Ansage ===");
 const job = { kind: "meetingpoint_call", sr: ["Anna Schulz"], ar: ["Bob Meier"] };

@@ -31,6 +31,24 @@ export function besetzungSegmente(sr, ar, lang) {
 }
 
 /**
+ * Besetzung für die FELD-Ansage: die SR/AR-Sätze und danach noch einmal
+ * das Feld, damit die Ansage immer mit dem Feld endet (Nutzerwunsch
+ * 14.11.2026 — nach den Namen hörte man sonst zuletzt einen Schiedsrichter,
+ * nicht wohin es geht). Ohne Besetzung bleibt es leer; das Feld steht dann
+ * ohnehin schon am Ende.
+ * @param {string[] | undefined} sr
+ * @param {string[] | undefined} ar
+ * @param {"de" | "en"} lang
+ * @param {string} feld rohe Feld-Phrase, z. B. „Feld 3"
+ * @returns {string[]}
+ */
+export function besetzungMitFeld(sr, ar, lang, feld) {
+  const out = besetzungSegmente(sr, ar, lang);
+  if (out.length > 0 && feld.trim()) out.push(`${feld.trim()}.`);
+  return out;
+}
+
+/**
  * Namen aus einem Aufruf-Auftrag für die Ansage — gefiltert über den
  * Besetzungs-Schalter dieses Geräts. Nachrufe (Stufe 2/3) nennen nie eine
  * Besetzung.
