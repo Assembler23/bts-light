@@ -9,6 +9,7 @@ import {
   Globe,
   Info,
   LayoutGrid,
+  Power,
   RefreshCw,
   Search,
   Tv,
@@ -22,9 +23,12 @@ import {
   monitorCommand,
   monitorComboDirs,
   monitorDevices,
+  monitorTvSet,
+  monitorTvStatus,
   openExternal,
   setMonitorHall,
   tabletOverview,
+  type TvSicht,
 } from "../api";
 import { HallFilter } from "../components/HallFilter";
 import { linkMitGuid } from "../io/liveLink.mjs";
@@ -248,6 +252,17 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
   const [hallFilter, setHallFilter] = useState<string | null>(null);
   // Offline-Geräte ausblenden (nur aus der Ansicht – Zuweisungen bleiben).
   const [hideOffline, setHideOffline] = useState(false);
+  // Fernseher der Pi-Monitore (HDMI-CEC): Geräte-ID → Zustand. Nur Pis, deren
+  // CEC-Dienst sich gerade meldet — sonst gibt es nichts zu schalten.
+  const [tvs, setTvs] = useState<Record<string, TvSicht>>({});
+  // Rückfrage vor „Alle TVs aus" (in der Seite, kein natives Fenster).
+  const [alleAusFragt, setAlleAusFragt] = useState(false);
+  // Eben geschaltete Fernseher: Geräte-ID → gewünschter Zustand + Frist. Der
+  // Pi holt den Befehl erst bei seiner nächsten Abfrage; bis der Fernseher
+  // ihn meldet (oder die Frist abläuft), zeigt der Knopf „wird geschaltet".
+  const [tvUnterwegs, setTvUnterwegs] = useState<
+    Record<string, { an: boolean; bis: number }>
+  >({});
   // Kombi-Ausrichtung je Gerät + zuletzt gewählte als Vorbelegung (ADR 0049).
   const [comboDirs, setComboDirs] = useState<ComboDirView>({
     devices: {},
@@ -260,6 +275,11 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
       monitorDevices()
         .then((d) => {
           if (active) setDevices(d);
+        })
+        .catch(() => {});
+      monitorTvStatus()
+        .then((t) => {
+          if (active) setTvs(t);
         })
         .catch(() => {});
       tabletOverview()
@@ -343,6 +363,29 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
     hallFilter === null ? groups : groups.filter((g) => g.hall === hallFilter);
   const showOnline = byFilter(grouped.online);
   const showOffline = byFilter(grouped.offline);
+
+  // Schaltbare Fernseher der gerade gezeigten Geräte (Hallen-Filter gilt).
+  // Mit „Offline ausblenden" zählen die versteckten Geräte nicht mit – „alle"
+  // heißt: alle, die man gerade sieht.
+  const schaltbareTvs = (hideOffline ? showOnline : [...showOnline, ...showOffline])
+    .flatMap((g) => g.devices)
+    .map((d) => d.id)
+    .filter((id) => tvs[id] !== undefined);
+
+  async function schalteTvs(ids: string[], an: boolean) {
+    try {
+      await monitorTvSet(ids, an);
+      const bis = Date.now() + 20_000;
+      setTvUnterwegs((alt) => {
+        const neu = { ...alt };
+        for (const id of ids) neu[id] = { an, bis };
+        return neu;
+      });
+      setTvs(await monitorTvStatus());
+    } catch {
+      // Der nächste Takt zeigt den wahren Stand.
+    }
+  }
 
   async function refresh() {
     try {
@@ -535,6 +578,52 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
             />
             {/* Offline-TVs aus der Ansicht nehmen – Zuweisungen bleiben, ein
                 wieder pollendes Gerät taucht automatisch erneut auf. */}
+            {/* Fernseher schalten (HDMI-CEC über den Pi) – nur sichtbar, wenn
+                sich mindestens ein Pi mit CEC-Abfrage meldet. */}
+            {schaltbareTvs.length > 0 &&
+              (alleAusFragt ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-sm text-rose-700">
+                  {schaltbareTvs.length === 1
+                    ? "1 Fernseher ausschalten?"
+                    : `${schaltbareTvs.length} Fernseher ausschalten?`}
+                  <button
+                    onClick={() => {
+                      setAlleAusFragt(false);
+                      void schalteTvs(schaltbareTvs, false);
+                    }}
+                    className="rounded-full bg-rose-600 px-2.5 py-0.5 font-medium text-white hover:bg-rose-700"
+                  >
+                    Ausschalten
+                  </button>
+                  <button
+                    onClick={() => setAlleAusFragt(false)}
+                    className="rounded-full px-2 py-0.5 font-medium hover:bg-rose-100"
+                  >
+                    Abbrechen
+                  </button>
+                </span>
+              ) : (
+                <>
+                  <button
+                    onClick={() => void schalteTvs(schaltbareTvs, true)}
+                    title="Alle Fernseher der gezeigten Monitore einschalten"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1
+                               text-sm font-medium text-slate-600 transition-colors hover:bg-slate-200"
+                  >
+                    <Power size={14} />
+                    Alle TVs an
+                  </button>
+                  <button
+                    onClick={() => setAlleAusFragt(true)}
+                    title="Alle Fernseher der gezeigten Monitore ausschalten"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1
+                               text-sm font-medium text-slate-600 transition-colors hover:bg-slate-200"
+                  >
+                    <Power size={14} />
+                    Alle TVs aus
+                  </button>
+                </>
+              ))}
             <button
               onClick={() => setHideOffline((v) => !v)}
               aria-pressed={hideOffline}
@@ -582,6 +671,14 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
                       void assign(d.id, target, comboVertical)
                     }
                     onSetHall={(hall) => void setHall(d.id, hall)}
+                    tv={tvs[d.id]}
+                    tvUnterwegs={
+                      tvUnterwegs[d.id] !== undefined &&
+                      tvUnterwegs[d.id].bis > Date.now() &&
+                      tvs[d.id] !== undefined &&
+                      (tvs[d.id].zustand === "an") !== tvUnterwegs[d.id].an
+                    }
+                    onTv={(an) => void schalteTvs([d.id], an)}
                     onIdentify={() => void monitorCommand(d.id, "identify")}
                     onReload={() => void monitorCommand(d.id, "reload")}
                   />
@@ -621,6 +718,14 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
                       void assign(d.id, target, comboVertical)
                     }
                     onSetHall={(hall) => void setHall(d.id, hall)}
+                    tv={tvs[d.id]}
+                    tvUnterwegs={
+                      tvUnterwegs[d.id] !== undefined &&
+                      tvUnterwegs[d.id].bis > Date.now() &&
+                      tvs[d.id] !== undefined &&
+                      (tvs[d.id].zustand === "an") !== tvUnterwegs[d.id].an
+                    }
+                    onTv={(an) => void schalteTvs([d.id], an)}
                     onIdentify={() => void monitorCommand(d.id, "identify")}
                     onReload={() => void monitorCommand(d.id, "reload")}
                     onForget={() => void forget(d.id)}
@@ -666,6 +771,9 @@ function DeviceRow({
   onIdentify,
   onReload,
   onForget,
+  tv,
+  tvUnterwegs,
+  onTv,
 }: {
   device: MonitorDeviceInfo;
   courts: CourtOverview[];
@@ -684,6 +792,12 @@ function DeviceRow({
   onReload: () => void;
   /** Nur für offline Geräte gesetzt — entfernt das Gerät aus der Liste. */
   onForget?: () => void;
+  /** Fernseher an diesem Pi (HDMI-CEC). `undefined` = nicht schaltbar
+   *  (kein Pi, ältere SD-Karte, Monitor über die Cloud). */
+  tv: TvSicht | undefined;
+  /** Ein Schaltbefehl ist unterwegs und noch nicht am Fernseher angekommen. */
+  tvUnterwegs: boolean;
+  onTv: (an: boolean) => void;
 }) {
   // Optionen des <select>: value = String-Schlüssel ("" = keine,
   // "court:<id>", "info_overview", "info_preparation"), Text = Anzeige.
@@ -1014,6 +1128,39 @@ function DeviceRow({
         </select>
       )}
 
+      {/* Fernseher schalten: Der Knopf bietet das Gegenteil des gemeldeten
+          Zustands an. Antwortet der TV nicht (ohne Strom, CEC am TV aus),
+          bleibt nur „einschalten" sinnvoll. */}
+      {tv && (
+        <button
+          onClick={() => onTv(tv.zustand !== "an")}
+          disabled={tvUnterwegs}
+          title={
+            tvUnterwegs
+              ? "Befehl ist unterwegs – der Pi holt ihn in wenigen Sekunden ab"
+              : tv.zustand === "an"
+              ? "Fernseher ist an – ausschalten"
+              : tv.zustand === "standby"
+                ? "Fernseher ist im Standby – einschalten"
+                : "Fernseher antwortet nicht (ohne Strom oder HDMI-CEC am TV aus) – einschalten versuchen"
+          }
+          className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium
+                      transition-colors disabled:cursor-wait disabled:opacity-60 ${
+                        tv.zustand === "an"
+                          ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                          : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                      }`}
+        >
+          <Power size={15} />
+          {tvUnterwegs
+            ? "TV …"
+            : tv.zustand === "an"
+            ? "TV an"
+            : tv.zustand === "standby"
+              ? "TV aus"
+              : "TV ?"}
+        </button>
+      )}
       <button
         onClick={onIdentify}
         title="Code + Feld groß am Monitor einblenden"

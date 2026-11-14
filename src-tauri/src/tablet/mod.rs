@@ -31,6 +31,7 @@ pub mod suche;
 pub mod timeline;
 pub mod tl;
 pub mod tls;
+pub mod tv;
 pub mod winners;
 pub mod wish_court;
 pub mod ws_verbindung;

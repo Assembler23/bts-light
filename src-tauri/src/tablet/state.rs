@@ -928,6 +928,9 @@ pub struct TabletState {
     /// die Anzeigen kosten. Ohne diese Vorher-Zahlen wird laut Spec keine
     /// der folgenden Etappen begonnen.
     perf: perf::PerfCounters,
+    /// Fernseher der Court-Monitore: gemeldeter Zustand und Schaltbefehle
+    /// (`tablet/tv.rs`). Nur im Arbeitsspeicher.
+    tv: crate::tablet::tv::TvStore,
 }
 
 /// Der Monitor-Nudge auf der Wire: `{"court":<id>,"seq":<n>}` (A1, ADR 0016).
@@ -3447,6 +3450,11 @@ impl TabletState {
     /// die Log-Zeile.
     pub fn perf(&self) -> &perf::PerfCounters {
         &self.perf
+    }
+
+    /// Zustand und Schaltbefehle der Fernseher an den Pi-Monitoren.
+    pub fn tv(&self) -> &crate::tablet::tv::TvStore {
+        &self.tv
     }
 
     /// Hält fest, dass gerade ein TL-Gerät den Zustand abgerufen hat

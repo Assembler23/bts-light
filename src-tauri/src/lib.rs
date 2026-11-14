@@ -233,6 +233,8 @@ pub fn run() {
             commands::monitor_combo_dirs,
             commands::set_monitor_hall,
             commands::monitor_command,
+            commands::monitor_tv_status,
+            commands::monitor_tv_set,
             commands::forget_monitor_device,
             open_log_dir,
         ])

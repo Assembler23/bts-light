@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.404
+
+- **Fernseher der Court-Monitore an- und ausschalten.** Auf der Seite
+  „Court-Monitore" hat jeder Monitor an einem Raspberry Pi jetzt einen Knopf
+  **TV an** / **TV aus**, dazu **Alle TVs an** und **Alle TVs aus** über der
+  Liste (mit Hallen-Filter nur die einer Halle). Der Pi schaltet den
+  Fernseher über das HDMI-Kabel (CEC). Voraussetzung: SD-Karte mit dem neuen
+  Pi-Image (oder `setup-monitor.sh` erneut ausführen), HDMI-CEC am Fernseher
+  eingeschaltet, Monitor im Hallennetz (nicht über die Cloud-Adresse). Nach
+  einem Neustart des Pi geht der Fernseher wie bisher von selbst an.
+
 ## v0.9.403
 
 - **Tablet: Pausen-Ansicht aufgeräumt.** Die Knöpfe der Satz- und

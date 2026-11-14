@@ -186,6 +186,57 @@ holen() {
   log "Grund: $1 · Wecken: $wecken · Eingang: $eingang (Adresse ${pa:-unbekannt})"
 }
 
+# ─── Fernschalten durch die Turnierleitung ───────────────────────────────
+# bts-light kann den TV an- und ausschalten (Seite „Court-Monitore"). Der
+# Browser kann kein CEC, deshalb fragt dieser Dienst selbst beim Turnier-PC
+# nach: Er meldet den Zustand des TVs und bekommt „an <Marke>", „aus <Marke>"
+# oder „-" zurück. Ausgeführt wird ein Befehl genau einmal, wenn sich die
+# Marke ändert – wer danach zur Fernbedienung greift, wird nicht überstimmt.
+# Die Adresse des PCs legt das Kiosk-Skript ab (nur im Hallennetz; bei einer
+# Cloud-Adresse gibt es die Datei nicht, dann wird nichts abgefragt).
+SERIAL="$(awk -F': ' '/^Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')"
+[ -z "$SERIAL" ] && SERIAL="$(tr -d '\0' 2>/dev/null < /sys/firmware/devicetree/base/serial-number || true)"
+[ -z "$SERIAL" ] && SERIAL="$(hostname | tr -d '[:space:]')"
+GERAET="pi-${SERIAL}"
+# Nur eine echte Datei lesen (kein Verweis, keine Pipe): Dieser Dienst läuft
+# als root, die Datei schreibt der Kiosk-Benutzer – eine dort abgelegte Pipe
+# würde das Lesen sonst für immer anhalten.
+pc_basis() {
+  local f
+  for f in /run/user/*/bts-monitor-pc /tmp/bts-monitor-pc; do
+    if [ -f "$f" ] && [ ! -L "$f" ]; then
+      head -c 200 "$f" 2>/dev/null | head -1
+      return 0
+    fi
+  done
+}
+ERSTE_ABFRAGE=1    # bis zur ersten Antwort: „frisch gestartet" mitmelden
+LETZTE_MARKE=""
+BEFEHL=""
+# $1 = Zustand des TVs. Setzt BEFEHL auf an|aus, wenn ein neuer Befehl da ist.
+befehl_holen() {
+  BEFEHL=""
+  local basis antwort soll marke
+  basis="$(pc_basis)"
+  printf '%s' "$basis" | grep -Eq '^http://[0-9A-Za-z.:-]+$' || return 0
+  antwort=$(curl -fs --connect-timeout 1 --max-time 2 --max-filesize 64 \
+    "${basis}/pi-tv?device=${GERAET}&tv=${1:-unknown}&start=${ERSTE_ABFRAGE}" 2>/dev/null) || return 0
+  ERSTE_ABFRAGE=0
+  read -r soll marke <<<"$antwort"
+  case "$soll" in an|aus) ;; *) return 0 ;; esac
+  case "$marke" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$marke" = "$LETZTE_MARKE" ] && return 0
+  LETZTE_MARKE="$marke"
+  BEFEHL="$soll"
+}
+ausschalten() {
+  if cec-ctl -d "$DEV" -s --to 0 --standby >/dev/null 2>&1; then
+    log "Grund: $1 · Ausschalten: ok"
+  else
+    log "Grund: $1 · Ausschalten: fehlgeschlagen"
+  fi
+}
+
 # Ab so vielen Sekunden ohne Antwort gilt der TV als aus (manche TVs
 # schweigen im Standby). Einzelne verlorene Antworten lösen nichts aus –
 # sonst würde ein bewusst umgeschalteter Eingang zurückgeholt.
@@ -195,6 +246,8 @@ beginn=$(date +%s)
 startphase=1
 war_aus=0          # TV seit dem letzten „an" im Standby oder lange stumm
 zuletzt_antwort=$beginn
+grund="Start"      # wer das Wecken ausgelöst hat (fürs Protokoll)
+aus_rest=0         # so oft wird „aus" noch wiederholt, solange der TV „an" meldet
 while true; do
   jetzt=$(date +%s)
   zustand="$(tv_zustand)"
@@ -205,8 +258,35 @@ while true; do
   fi
   case "$zustand" in standby|to-standby) war_aus=1 ;; esac
 
+  befehl_holen "$zustand"
+  if [ "$BEFEHL" = "aus" ]; then
+    ausschalten "Turnierleitung"
+    # Kein Wecken mehr, und der noch „an" meldende TV darf nicht als
+    # „eben eingeschaltet" gelten – sonst holte ihn die Regel unten zurück.
+    startphase=0
+    war_aus=0
+    aus_rest=3
+    sleep "$TAKT_S"
+    continue
+  elif [ "$BEFEHL" = "an" ]; then
+    # Wie beim Start: wecken und wiederholen, bis der TV „an" meldet.
+    aus_rest=0
+    startphase=1
+    beginn=$jetzt
+    grund="Turnierleitung"
+  elif [ "$aus_rest" -gt 0 ]; then
+    # Manche TVs überhören den ersten Standby-Befehl.
+    if [ "$zustand" = "on" ]; then
+      aus_rest=$((aus_rest - 1))
+      ausschalten "Turnierleitung (Wiederholung)"
+      sleep "$TAKT_S"
+      continue
+    fi
+    aus_rest=0
+  fi
+
   if [ "$startphase" = 1 ]; then
-    holen "Start, TV: ${zustand:-keine Antwort}"
+    holen "$grund, TV: ${zustand:-keine Antwort}"
     # Startphase endet erst bei echtem „on" (dabei eben geholt) – ein TV im
     # Hochfahren („to-on") verwirft Befehle oft noch – oder nach dem Fenster.
     if [ "$zustand" = "on" ] || [ $(( jetzt - beginn )) -ge $START_FENSTER_S ]; then
@@ -241,7 +321,7 @@ WantedBy=multi-user.target
 UNIT
 sudo systemctl daemon-reload
 sudo systemctl enable bts-cec.service >/dev/null 2>&1 || true
-echo "→ CEC-Dienst eingerichtet (bts-cec.service): TV wird beim Start geweckt"
+echo "→ CEC-Dienst eingerichtet (bts-cec.service): TV wird beim Start geweckt, bts-light kann ihn schalten"
 
 # ─── 3d) Nur-Lese-Modus: ausgebaut ───────────────────────────────────────
 # Der Schreibschutz der SD-Karte (overlayfs im Arbeitsspeicher) machte im
@@ -299,6 +379,9 @@ cat >> "$HOME/.local/bin/bts-monitor.sh" <<'EOF'
 set -u
 LOG="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor.log"
 CACHE="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor-ip"
+# Adresse des Turnier-PCs für den CEC-Dienst (bts-cec.sh fragt dort nach, ob
+# der TV an- oder ausgeschaltet werden soll). Nur im Hallennetz.
+PCDATEI="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor-pc"
 PORT_STANDARD=8088
 log() { echo "$(date '+%F %T') - $*" >> "$LOG"; }
 
@@ -374,10 +457,17 @@ ziel() {
     # aus der Datei übernehmen.
     port="${PORT:-$PORT_STANDARD}"
     ip=$(pc_ip "$port") || return 1
+    echo "http://$ip:$port" > "$PCDATEI"
     echo "http://$ip:$port${PFAD}${sep}device=${DEVICE_ID}"
   else
     # Feste Adresse (IP oder Cloud): so nehmen, wie sie in der Datei steht.
     erreichbar "$URL" || return 1
+    # Feste Adresse im Hallennetz → der CEC-Dienst darf dort nachfragen;
+    # eine Cloud-Adresse (https) kennt die Abfrage nicht.
+    case "$URL" in
+      http://*) echo "http://$HOSTPORT" > "$PCDATEI" ;;
+      *) rm -f "$PCDATEI" ;;
+    esac
     echo "${URL}${sep}device=${DEVICE_ID}"
   fi
 }
