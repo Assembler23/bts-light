@@ -209,6 +209,15 @@ Pi noch einmal als aktiver Eingang. Wer bewusst auf einen anderen Eingang
 schaltet, wird **nicht** zurückgeholt.
 <!-- pruef: "bts-cec.service" in pi/setup-monitor.sh -->
 
+**bts-light kann den TV schalten.** Derselbe Dienst fragt alle 5 Sekunden
+beim Turnier-PC nach, ob die Turnierleitung den Fernseher an- oder
+ausschalten will (Seite „Court-Monitore", Knöpfe **TV an** / **TV aus**).
+Das geht nur im Hallennetz — mit einer Cloud-Adresse in
+`bts-monitor-url.txt` fragt der Pi nicht nach. Karten, die vor v0.9.406
+bespielt wurden, können das noch nicht: neu bespielen oder
+`setup-monitor.sh` noch einmal laufen lassen.
+<!-- pruef: "pi-tv" in pi/setup-monitor.sh -->
+
 Dafür muss CEC **am TV eingeschaltet** sein. Der Menüpunkt heißt je Marke
 anders: Samsung **Anynet+**, LG **SimpLink**, Sony **Bravia Sync**,
 Philips **EasyLink**, Panasonic **VIERA Link**, sonst meist „HDMI-CEC" oder

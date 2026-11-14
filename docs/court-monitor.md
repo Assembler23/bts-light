@@ -134,6 +134,10 @@ alle Geräte auf, die sich gemeldet haben:
   `304` „nichts Neues" nicht als Lebenszeichen zählte — Details in
   logging.md.)
 
+- **TV an / TV aus** — schaltet den Fernseher am Pi über HDMI-CEC (seit
+  v0.9.406, siehe „Fernseher an- und ausschalten" unten). Der Knopf
+  erscheint nur bei Pis, die das können.
+
 Die Zuweisungen liegen in `monitor-assignments.json` im
 App-Config-Verzeichnis und überstehen einen bts-light-Neustart.
 Fernbefehle reiten auf dem normalen `…/state`-Poll mit — es gibt keinen
@@ -141,6 +145,57 @@ zusätzlichen Verbindungsweg zum Pi, daher funktioniert die Steuerung in
 LAN **und** Cloud. Jeder Befehl trägt eine je Gerät hochzählende `id`;
 der Monitor führt ihn genau einmal aus (auch nach „Neu laden" kein
 Endlos-Reload).
+
+### Fernseher an- und ausschalten
+
+Hängt der Monitor an einem Raspberry Pi mit aktueller SD-Karte, lässt sich
+der Fernseher von der Seite **Court-Monitore** aus schalten — der Pi gibt den
+Befehl über das HDMI-Kabel (CEC) an den Fernseher weiter.
+
+- Je Gerät zeigt ein Knopf den Zustand des Fernsehers: **TV an**, **TV aus**
+  (Standby) oder **TV ?** (der Fernseher antwortet nicht — ohne Strom, oder
+  HDMI-CEC ist am Fernseher abgeschaltet). Ein Klick schaltet sofort um,
+  ohne Rückfrage; bis der Fernseher reagiert hat, steht dort **TV …**.
+  <!-- pruef: "TV ?" in src/pages/CourtMonitorPanel.tsx -->
+- Über der Geräteliste schalten **Alle TVs an** und **Alle TVs aus** alle
+  gerade gezeigten Fernseher auf einmal; mit dem Hallen-Filter nur die einer
+  Halle. Vor „Alle TVs aus" fragt die Seite nach.
+  <!-- pruef: "Alle TVs aus" in src/pages/CourtMonitorPanel.tsx -->
+- Der Fernseher reagiert nach wenigen Sekunden: Der Pi fragt alle 5 Sekunden
+  nach, ob es einen Befehl gibt.
+- Ein Befehl wirkt **einmal**. Wer den Fernseher danach mit der Fernbedienung
+  schaltet, wird nicht überstimmt.
+- **Strom an heißt Fernseher an:** Startet der Pi neu (Steckdosenleiste aus
+  und wieder an), weckt er den Fernseher wie bisher — ein früheres „aus"
+  gilt dann nicht mehr.
+- Ein ausgeschalteter Fernseher lässt den Pi weiterlaufen; nach dem
+  Einschalten steht die Anzeige wieder da.
+
+Der Knopf **fehlt**, wenn der Pi nichts meldet: ältere SD-Karte (neu
+bespielen oder `setup-monitor.sh` erneut ausführen), CEC für die Karte
+abgeschaltet (`bts-cec-aus.txt`), kein Pi (Smart-TV-Browser, Laptop) oder ein
+Monitor, der über die **Cloud-Adresse** läuft — geschaltet wird nur im
+Hallennetz, direkt am Turnier-PC. Monitore an einem Hallen-PC im
+Slave-Betrieb sind ebenfalls nicht schaltbar.
+
+Ob ein Fernseher auf „aus" hört, hängt vom Gerät ab: HDMI-CEC muss am
+Fernseher eingeschaltet sein (Namen je Marke in
+[pi-setup.md](pi-setup.md)), und einzelne Modelle ignorieren den
+Standby-Befehl. Der Pi wiederholt ihn deshalb bis zu dreimal.
+
+<!-- handbuch:aus -->
+**Technik.** Der Browser auf dem Pi kann kein CEC. Deshalb fragt der
+CEC-Dienst (`bts-cec.sh`) selbst: `GET /pi-tv?device=pi-<Serial>&tv=<Zustand>&start=<0|1>`
+am Turnier-PC (nur LAN, ohne Auth wie `/pi-log`). Antwort ist eine
+Textzeile: `an <Marke>`, `aus <Marke>` oder `-`. Der Pi führt einen Befehl
+aus, wenn sich die Marke ändert; `start=1` (erste Abfrage nach dem
+Hochfahren) verwirft das alte Soll. Zustand und Befehle liegen nur im
+Arbeitsspeicher (`tablet/tv.rs`, `TvStore`) — nach einem Neustart von
+bts-light gibt es keinen Befehl. Die Adresse des Turnier-PCs legt das
+Kiosk-Skript für den Dienst in `bts-monitor-pc` ab.
+<!-- pruef: "/pi-tv" in src-tauri/src/tablet/server.rs -->
+<!-- pruef: "bts-monitor-pc" in pi/setup-monitor.sh -->
+<!-- handbuch:an -->
 
 **Direkt-Variante:** Wer einen Monitor fest auf ein Feld nageln will,
 nutzt weiterhin `…/court/<Feld>/display` — ohne Zuweisungs-Schritt.

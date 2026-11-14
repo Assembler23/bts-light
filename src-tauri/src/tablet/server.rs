@@ -729,6 +729,7 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/result", post(result))
         .route("/tablet-log", post(tablet_log))
         .route("/pi-log", post(pi_log))
+        .route("/pi-tv", get(pi_tv))
         .route("/ws", get(ws_upgrade))
         // Court-Monitor-Nudge (A1, ADR 0016): niedrig-latente Anzeige. `court`
         // gesetzt → nur dieses Feld (Court-Monitor), fehlt es → alle Felder
@@ -1232,6 +1233,39 @@ async fn pi_log(
             .await;
     });
     StatusCode::OK
+}
+
+#[derive(serde::Deserialize)]
+struct PiTvQuery {
+    /// Geräte-ID des Pi-Monitors (= `pi-<CPU-Serial>`), dieselbe wie in der
+    /// Monitor-Adresse — so findet die Verwaltungsseite den Fernseher zum Gerät.
+    #[serde(default)]
+    device: String,
+    /// Zustand des Fernsehers, wie `cec-ctl` ihn nennt (`on`, `standby`, …).
+    #[serde(default)]
+    tv: String,
+    /// `1` bei der ersten Abfrage nach dem Hochfahren des Pi.
+    #[serde(default)]
+    start: String,
+}
+
+/// Abfrage des CEC-Dienstes auf dem Pi (alle paar Sekunden, nur LAN, ohne
+/// Auth wie die anderen Hallen-Routen): meldet den Zustand des Fernsehers
+/// und bekommt den offenen Schaltbefehl als eine Textzeile zurück. Rein aus
+/// dem Arbeitsspeicher beantwortet. Siehe `tablet/tv.rs`.
+async fn pi_tv(State(ctx): State<Arc<ServerCtx>>, Query(q): Query<PiTvQuery>) -> impl IntoResponse {
+    use crate::tablet::tv;
+    let id = tv::geraet_bereinigt(&q.device);
+    if id.is_empty() {
+        return (StatusCode::BAD_REQUEST, String::new());
+    }
+    let soll = ctx.tablet.tv().melden(
+        &id,
+        tv::TvZustand::aus_meldung(&q.tv),
+        q.start == "1",
+        now_ms(),
+    );
+    (StatusCode::OK, tv::antwort_zeile(soll))
 }
 
 /// Löst die CourtID auf ihre Anzeige-Bezeichnung auf. Bei Mehr-Hallen-

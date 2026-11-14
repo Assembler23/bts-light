@@ -654,6 +654,25 @@ export const monitorCommand = (
   kind: "reload" | "identify",
 ): Promise<void> => invoke("monitor_command", { deviceId, kind });
 
+/** Fernseher an einem Pi-Monitor, wie der Pi ihn über HDMI-CEC meldet. */
+export interface TvSicht {
+  zustand: "an" | "standby" | "unbekannt";
+  /** Zuletzt gegebener Schaltbefehl (verfällt beim Neustart des Pi). */
+  soll: "an" | "aus" | null;
+}
+
+/** Fernseher aller Pi-Monitore, die sich gerade melden (Geräte-ID → Sicht).
+ *  Leer bei älteren SD-Karten und bei Monitoren über die Cloud. */
+export const monitorTvStatus = (): Promise<Record<string, TvSicht>> =>
+  invoke("monitor_tv_status");
+
+/** Schaltet die Fernseher der genannten Monitore an oder aus. Liefert, wie
+ *  viele Geräte den Befehl bekommen haben. */
+export const monitorTvSet = (
+  deviceIds: string[],
+  on: boolean,
+): Promise<number> => invoke("monitor_tv_set", { deviceIds, on });
+
 /** Entfernt ein offline Monitor-Gerät aus der Liste (Online wird vom
  *  Backend abgelehnt). */
 export const forgetMonitorDevice = (deviceId: string): Promise<void> =>

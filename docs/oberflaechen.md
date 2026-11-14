@@ -181,6 +181,13 @@ Adresse kopieren. Details: [Stream-Einblendung](court-monitor.md).
 die Funktion **Identifizieren**: Der angeklickte Bildschirm blendet daraufhin
 seinen Gerätecode ein, sodass du ihn in der Liste sicher zuordnen kannst.
 
+**Fernseher schalten.** Hängt ein Monitor an einem Raspberry Pi mit aktueller
+SD-Karte, zeigt seine Zeile einen Knopf **TV an** / **TV aus**; über der
+Liste stehen **Alle TVs an** und **Alle TVs aus**. So gehen abends alle
+Fernseher mit einem Klick aus. Details:
+[Fernseher an- und ausschalten](court-monitor.md).
+<!-- pruef: "Alle TVs an" in src/pages/CourtMonitorPanel.tsx -->
+
 ## Die öffentlichen Seiten auf badhub.de
 
 Diese Seiten gehören nicht zu BTS Light, sondern zu badhub — BTS Light füttert
