@@ -475,8 +475,17 @@ pub fn pflichtpause_ms(snap: &BtpSnapshot, config: &AppConfig) -> u64 {
 /// frische Auslosung schickte sonst jeden Freilos-Spieler sofort in eine volle
 /// Pause, auch mitten in der Warteliste einer anderen Disziplin (Feldbericht
 /// 14.11.2026).
+///
+/// Freilos heißt hier: Seite leer **und** ohne Eintrag (`entry_id == 0`).
+/// Eine Seite mit Eintrag, deren Spieler nur gerade nicht auflösbar sind,
+/// gilt weiter als gespielt — sonst verlöre der Gegner eine echte Pause
+/// (Review-Fund 14.11.2026). Ob BTP ein Freilos genau so liefert, ist nicht
+/// gemessen; die Mitschnitte enthalten keins.
 pub fn wurde_gespielt(m: &BtpMatch) -> bool {
-    m.result != MatchResult::Walkover && !m.team1.is_empty() && !m.team2.is_empty()
+    let freilos = |team: &[BtpPlayer], entry_id: i64| team.is_empty() && entry_id == 0;
+    m.result != MatchResult::Walkover
+        && !freilos(&m.team1, m.entry1_id)
+        && !freilos(&m.team2, m.entry2_id)
 }
 
 impl PlayerAvailability {
@@ -2138,6 +2147,30 @@ mod tests {
         let s = snap(Vec::new(), vec![freilos, wanted.clone()], Vec::new());
         let av = PlayerAvailability::from_snapshot(&s, &cfg);
         assert_eq!(av.blocked(&wanted, 200_000), None, "Freilos ist kein Spiel");
+    }
+
+    #[test]
+    fn eine_seite_mit_eintrag_aber_ohne_aufloesbare_spieler_ist_kein_freilos() {
+        // Der Eintrag steht, nur die Spieler fehlen im Stand — gespielt
+        // wurde trotzdem, der Gegner behält seine Pause.
+        let mut done = a_match(1);
+        done.status = MatchStatus::Finished;
+        done.winner = Some(1);
+        done.finished_at = Some(100_000);
+        done.team1 = vec![player("Müller")];
+        done.team2 = Vec::new();
+        done.entry2_id = 42;
+        let mut wanted = a_match(2);
+        wanted.team1 = vec![player("Müller")];
+
+        let mut cfg = AppConfig::default();
+        cfg.auto_assign.pause_minutes = 10.0;
+        let s = snap(Vec::new(), vec![done, wanted.clone()], Vec::new());
+        let av = PlayerAvailability::from_snapshot(&s, &cfg);
+        assert!(matches!(
+            av.blocked(&wanted, 200_000),
+            Some(Blocked::Pause { .. })
+        ));
     }
 
     #[test]
