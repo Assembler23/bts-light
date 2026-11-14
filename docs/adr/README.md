@@ -103,3 +103,4 @@ hier eintragen.
 | [0092](0092-stream-werbung-markierung-und-abriss.md) | Stream-Werbung: Markierung als eigene Datei, `inStream` im Fingerabdruck, `streamAds` additiv, `?zweck=stream` → 503 statt leer, eigene Seite | accepted |
 | [0093](0093-ballzahl-reist-mit-dem-ergebnis.md) | Ballzahl: reist mit dem Ergebnis, lebt im Tablet-Stand, BTP-Wert gilt | accepted |
 | [0094](0094-zeitplan-stand-prognose-gegen-plan.md) | Zeitplan-Stand: Prognose gegen Plan je Zeitfenster (ab zwei Spielen begonnen), gerechnet am Host, Panel standardmäßig unsichtbar | accepted |
+| [0095](0095-behandlung-als-ereignispaar.md) | Behandlung als Ereignispaar aus der Pause: Paarung im Renderer, Undo verankert neu, Server-Zeit, Fähigkeit über `injuryGuideSecs`, Marke „B“ | accepted |
