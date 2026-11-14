@@ -289,6 +289,11 @@ jobs:
       - name: Satzpunkt-Ansage (JS)
         run: node scripts/test-satzpunkt.mjs
 
+      # Schriftgröße der Ansage im Schiri-Modus: größte Stufe, die passt —
+      # nie kleiner als früher, außer die Ansage liefe sonst aus dem Bild.
+      - name: Ansage-Schriftgröße (JS)
+        run: node scripts/test-ansage-schrift.mjs
+
       # Meetingpoint-Seite (Spec meetingpoint-spielbereit): Gruppierung,
       # Reihenfolge, Check-in-Form — und die Inline-Kopie in der Seite muss
       # sich verhalten wie das Modul.
