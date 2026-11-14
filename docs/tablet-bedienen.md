@@ -210,7 +210,7 @@ aus Versehen antippen soll. Es ist durch eine **PIN** geschützt (voreingestellt
   Punktzahlen**, ohne PIN; ein kurzes Etikett nennt die neue Ansicht.
 <!-- pruef: "Ansicht:" in src-tauri/assets/tablet.html -->
 - **Schiri-Modus ein- und ausschalten**,
-- **Große Schrift: an/aus** (seit v0.9.413) — für alle, die schlecht sehen:
+- **Große Schrift: an/aus** (seit v0.9.414) — für alle, die schlecht sehen:
   größere Ansagetexte, Schwarz auf Weiß, kräftigere Spielernamen. Die
   Einstellung bleibt auf diesem Tablet gespeichert,
 <!-- pruef: "Große Schrift: " in src-tauri/assets/tablet.html -->

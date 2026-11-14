@@ -168,7 +168,10 @@ LAN+Cloud voraus.
   „ohne Halle") machten die Liste unübersichtlich und sind weg. Stattdessen:
   Ein Name mit **rotem** Hintergrund steht gerade auf einem Feld, einer mit
   **orangem** Hintergrund ist noch in seiner Mindestpause — daneben zählt
-  eine **Eieruhr** die verbleibende Wartezeit sekündlich herunter. Wer es
+  eine **Eieruhr** die verbleibende Wartezeit sekündlich herunter. Eine
+  Pause löst nur ein gespielt beendetes Spiel aus — ein **kampfloser** Sieg
+  und ein **Freilos** nicht (seit v0.9.413; vorher bekam ein Freilos-Spieler
+  schon beim Auslosen einer Disziplin eine volle Pause). Wer es
   in Worten will: Der Mauszeiger (bzw. langes Tippen) auf dem Namen zeigt
   „spielt gerade" bzw. „pausiert noch bis …". Ein Spiel ohne
   Hallenzuordnung erkennst du schlicht am **fehlenden Hallen-Kürzel**.
@@ -701,8 +704,8 @@ Die Anzeige-Häkchen im Profil-Editor:
   wie lange das letzte Spiel dieser Seite her ist. Im Doppel zählt der
   Partner, der zuletzt gespielt hat (die kürzere Pause). Die Marke steht
   unabhängig von der Pflichtpause — läuft die noch, stehen Eieruhr und Marke
-  nebeneinander. Kampflose Spiele (Walkover) zählen nicht, Aufgabe und
-  Disqualifikation schon. Keine Marke erscheint, wenn die Seite heute noch
+  nebeneinander. Kampflose Spiele (Walkover) und Freilose zählen nicht,
+  Aufgabe und Disqualifikation schon. Keine Marke erscheint, wenn die Seite heute noch
   nicht gespielt hat (ein Spiel, das länger als zwölf Stunden her ist, zählt
   nicht — etwa vom Vortag) oder einer ihrer Spieler gerade auf einem anderen Feld
   steht (dann ist sein Name rot). Der Tooltip nennt die Uhrzeit des

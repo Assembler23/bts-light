@@ -25,7 +25,7 @@ Fünf-Minuten-Freigabe nach einer Eingabe entfällt sie) → **„Schiri-Modus: 
 Opt-in pro Tablet, lokal gespeichert (`localStorage`). Es erscheint eine **immer
 sichtbare Ansage-Leiste**.
 
-## Schriftgröße und „Große Schrift" (seit v0.9.413)
+## Schriftgröße und „Große Schrift" (seit v0.9.414)
 
 Rückmeldung 14.11.2026: Schiedsrichter mit schwächerem Sehvermögen wünschten
 sich größere Ansagetexte und mehr Kontrast. Eine Messung im Headless-Browser
