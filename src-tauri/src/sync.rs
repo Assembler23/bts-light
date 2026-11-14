@@ -2381,8 +2381,9 @@ impl SyncEngine {
                 planning_id: m.planning_id,
                 court_id: court.id,
                 // Die Besetzung wandert mit ins Zuweisungs-Update
-                // (ADR 0021) — ein Request statt zwei.
-                officials: tablet.officials_for_write(m),
+                // (ADR 0021) — ein Request statt zwei. Immer mit: Ein
+                // fehlendes Element löscht sie in BTP.
+                officials: Some(tablet.officials_fuer_feld_write(m)),
                 highlight: None,
                 shuttles: m.shuttles,
             });
@@ -7703,6 +7704,59 @@ mod tests {
     }
 
     #[test]
+    fn der_feld_write_traegt_die_von_btp_bestaetigte_aufruf_besetzung_mit() {
+        // Feldbefund 14.11.2026: Gerufene Partie hatte SR/AR vom Aufruf, BTP
+        // hatte sie bestätigt (lokal also nichts mehr). Der Feld-Write ließ
+        // `Official1ID/2ID` weg — BTP liest das als 0 und löschte die
+        // Besetzung; die Feld-Rotation sah danach ein Feld ohne SR und nahm
+        // den Obersten der Liste. Fiel nur auf, wenn sich die Liste
+        // inzwischen geändert hatte (Rückkehr aus der Pause).
+        let mut engine = SyncEngine::new();
+        let tablet = TabletState::default();
+        let mut snap = snap_with(vec![court(1, None)], vec![ready_match(7, 1)], Vec::new());
+        snap.officials = vec![official_named(100), official_named(101)];
+        tablet.set_snapshot(snap.clone());
+        let store = tablet.officials_store();
+        store.set_enabled(true);
+        store.set_rotation(true, true);
+        tablet.add_preparation_call(PreparationCall {
+            match_id: 7,
+            location_id: None,
+            called_at_ms: 0,
+        });
+        crate::tablet::meetingpoint::gerufene_besetzen(
+            &tablet,
+            &snap,
+            crate::tablet::tl::heutiges_datum(now_ms()),
+        );
+        let (sr, ar) = (store.assignment(7).sr, store.assignment(7).ar);
+        assert!(sr.is_some() && ar.is_some());
+
+        // BTP bestätigt die Besetzung ⇒ lokal wird losgelassen.
+        for m in &mut snap.matches {
+            if m.id == 7 {
+                m.official1_id = sr;
+                m.official2_id = ar;
+            }
+        }
+        tablet.set_snapshot(snap.clone());
+        officials_loslassen(&tablet, &snap);
+        assert_eq!(
+            store.assignment(7).sr,
+            None,
+            "Vorbedingung: nur noch in BTP"
+        );
+
+        let (courts, matches) = engine.auto_assign(&cfg_auto(true, 0.0), &snap, &tablet);
+        assert_eq!(courts[0].match_id, Some(7));
+        assert_eq!(
+            matches[0].officials,
+            Some((sr.unwrap(), ar.unwrap())),
+            "der Feld-Write reassertiert die Besetzung, sonst setzt BTP sie auf 0"
+        );
+    }
+
+    #[test]
     fn ein_feld_ohne_sr_schalter_loest_die_rotations_zuteilung_im_write() {
         // AK18 (ADR 0080): Kommt die gerufene Partie auf ein Feld ohne
         // SR-Rotation, reist der Rotations-SR nicht mit.
@@ -7732,8 +7786,10 @@ mod tests {
         let (courts, matches) = engine.auto_assign(&cfg, &snap, &tablet);
         assert_eq!(courts[0].match_id, Some(7));
         assert_eq!(
-            matches[0].officials, None,
-            "kein Rotations-SR im Write (nichts Lokales mehr ⇒ Officials unangetastet)"
+            matches[0].officials,
+            Some((0, 0)),
+            "kein Rotations-SR im Write — ausdrücklich 0 (ein fehlendes Element \
+             hieße für BTP ohnehin 0)"
         );
         assert_eq!(store.assignment(7).sr, None);
     }

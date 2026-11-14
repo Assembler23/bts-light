@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.405
+
+- **Schiedsrichter: Die beim Aufruf zugeteilte Besetzung bleibt auf dem
+  Feld.** Bisher konnte ein gerufenes Spiel beim Ruf aufs Feld einen anderen
+  Schiedsrichter bekommen als den, der am Meetingpoint stand — sichtbar
+  wurde das, wenn sich die Schiedsrichter-Liste inzwischen geändert hatte
+  (z. B. jemand kam aus der Pause zurück). Ursache: Die Feldvergabe schrieb
+  SR/AR nicht mit, und BTP wertet das als „keiner". Auch „Vom Feld nehmen"
+  lässt die Besetzung jetzt stehen.
+
 ## v0.9.404
 
 - **Ballzähler: Federball statt Schläger.** Am Zähl-Tablet und in der

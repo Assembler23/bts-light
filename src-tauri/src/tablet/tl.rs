@@ -133,6 +133,30 @@ pub(crate) struct CourtWrite {
     pub match_courts: Vec<crate::btp::proto::MatchCourt>,
 }
 
+/// Trägt die Schiedsrichter-Besetzung in **jeden** Match-Knoten eines
+/// Feld-Writes ein (ADR 0021) — auch beim Freigeben: Ein fehlendes Element
+/// löscht sie in BTP (Messung 09.11.2026, Feldbefund 14.11.2026).
+/// [`plan_court_action`] bleibt rein und kennt den Roster nicht — deshalb
+/// hier, wo der Zustand vorliegt.
+pub(crate) fn besetzung_eintragen(
+    plan: &mut CourtWrite,
+    snap: &crate::btp::model::BtpSnapshot,
+    tablet: &TabletState,
+) {
+    for mc in &mut plan.match_courts {
+        mc.officials = snap.matches.iter().find(|m| m.id == mc.match_id).map(|m| {
+            // Rotations-Zuteilung einer Rolle, die das Feld nicht will,
+            // vorher lösen (ADR 0080) — nur beim Ruf aufs Feld.
+            if mc.court_id != 0 {
+                tablet
+                    .officials_store()
+                    .rotation_loesen_am_feld(m, mc.court_id);
+            }
+            tablet.officials_fuer_feld_write(m)
+        });
+    }
+}
+
 /// Prüft eine feldbezogene Aktion und übersetzt sie in den BTP-Schreibvorgang.
 ///
 /// Rein: kein Netz, kein Zustand. Lehnt die Prüfung ab, entsteht **kein**
@@ -1959,26 +1983,7 @@ pub(crate) async fn execute(
 
     let plan = match plan_court_action(&snap, &config, &locked, &reserved, &action) {
         Ok(mut plan) => {
-            // Beim Ruf aufs Feld die Schiedsrichter-Besetzung mitschreiben
-            // (ADR 0021). `plan_court_action` bleibt rein und kennt den
-            // Roster nicht — deshalb hier, wo der Zustand vorliegt.
-            for mc in &mut plan.match_courts {
-                if mc.court_id == 0 {
-                    continue; // Freigeben lässt die Besetzung unangetastet
-                }
-                mc.officials = snap
-                    .matches
-                    .iter()
-                    .find(|m| m.id == mc.match_id)
-                    .and_then(|m| {
-                        // Rotations-Zuteilung einer Rolle, die das Feld
-                        // nicht will, vorher lösen (ADR 0080).
-                        ctx.tablet
-                            .officials_store()
-                            .rotation_loesen_am_feld(m, mc.court_id);
-                        ctx.tablet.officials_for_write(m)
-                    });
-            }
+            besetzung_eintragen(&mut plan, &snap, &ctx.tablet);
             plan
         }
         Err(response) => {
@@ -7888,6 +7893,62 @@ mod tests {
             write.match_courts[0].court_id, 0,
             "und das Spiel verliert seine Feldzuordnung"
         );
+    }
+
+    #[test]
+    fn freigeben_und_zuweisen_tragen_die_besetzung_mit() {
+        // Feldbefund 14.11.2026: Ein Match-Knoten ohne Official1ID/2ID
+        // löscht die Besetzung in BTP — beim Ruf aufs Feld wie beim
+        // „Vom Feld nehmen".
+        let tablet = TabletState::default();
+        tablet.officials_store().set_enabled(true);
+        let mut running = a_match(7);
+        running.status = MatchStatus::OnCourt;
+        running.court_id = Some(1);
+        running.official1_id = Some(100);
+        running.official2_id = Some(101);
+        let mut waiting = a_match(8);
+        waiting.official1_id = Some(102);
+        let s = snap(
+            vec![a_court(1, None), a_court(2, None)],
+            vec![running, waiting],
+            Vec::new(),
+        );
+        let mut frei = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::FreeCourt {
+                court_id: 1,
+                expect: relay_proto::CourtExpectation::Match { match_id: 7 },
+            },
+        )
+        .expect("erlaubt");
+        besetzung_eintragen(&mut frei, &s, &tablet);
+        assert_eq!(frei.match_courts[0].officials, Some((100, 101)));
+
+        // Zuweisen an einem eigenen Stand (dieselben Spieler stünden sonst
+        // schon auf Feld 1).
+        let s = snap(
+            vec![a_court(2, None)],
+            vec![s.matches[1].clone()],
+            Vec::new(),
+        );
+        let mut ruf = plan_court_action(
+            &s,
+            &AppConfig::default(),
+            &[],
+            &[],
+            &relay_proto::TlAction::AssignCourt {
+                court_id: 2,
+                match_id: 8,
+                expect: relay_proto::CourtExpectation::Free,
+            },
+        )
+        .expect("erlaubt");
+        besetzung_eintragen(&mut ruf, &s, &tablet);
+        assert_eq!(ruf.match_courts[0].officials, Some((102, 0)));
     }
 
     #[test]
