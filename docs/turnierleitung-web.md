@@ -728,7 +728,7 @@ Die Anzeige-Häkchen im Profil-Editor:
   ganze Runde auf dieselbe Zeit — die Planzeit ist ein Zeitfenster, keine
   Minutenvorgabe für das einzelne Spiel. Die Uhrzeiten sind die des
   Turnier-PCs, auch auf einem Gerät mit anderer Zeitzone. Erfordert einen
-  Host ab v0.9.409; ältere Hosts zeigen das Häkchen nicht.
+  Host ab v0.9.411; ältere Hosts zeigen das Häkchen nicht.
   <!-- pruef: "Geplante Zeiten anzeigen" in src-tauri/assets/tl.html -->
 
 Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**

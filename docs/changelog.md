@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.409
+## v0.9.411
 
 - **Turnierleitung im Browser: geplante Zeiten anzeigen.** Neues Häkchen
   **„Geplante Zeiten anzeigen"** im Profil (Standard aus): In der Warteliste
@@ -12,6 +12,12 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   10:20"). An beendeten Spielen steht zusätzlich, wie viel später oder
   früher es tatsächlich aufs Feld ging („geplant 10:20 · +18 min"). So sieht
   man, ob das Turnier im Zeitplan liegt.
+
+## v0.9.410
+
+- **Meetingpoint: Größerer Titel.** „Meetingpoint" und der Hallenname oben
+  auf der Seite wachsen auf großen Bildschirmen mit — so erkennt man auch von
+  Weitem, wo der Meetingpoint ist. Auf Handys bleibt die Schrift wie bisher.
 
 ## v0.9.408
 

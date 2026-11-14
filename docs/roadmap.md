@@ -372,7 +372,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   (Warteliste, beendete Spiele mit Abweichung zum Start) und Panel „Zeitplan"
   („Im Zeitplan" / „N min dahinter/davor", Prognose gegen Plan am nächsten
   unbegonnenen Zeitfenster). Zwei PRs — **PR 1 (Planzeiten an den Zeilen)
-  umgesetzt v0.9.409, Feldtest offen**; PR 2 (Panel) folgt. Später denkbar: Prognose für offene
+  umgesetzt v0.9.411, Feldtest offen**; PR 2 (Panel) folgt. Später denkbar: Prognose für offene
   Paarungen, Wert je Halle.
 
 - **Spielersuche im TL-Web** — Spec:
