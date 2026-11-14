@@ -546,6 +546,10 @@
     .umpire-einspiel.vorbei { background: #b91c1c; }
     .umpire-einspiel .lbl { font-size: 1.2rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
     .umpire-einspiel .zeit { font-size: 3.2rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .spiel-beginnt-btn {
+      margin-top: .5rem; padding: .6rem 1.4rem; font-size: 1.2rem; font-weight: 800;
+      background: #fff; color: #111; border: 0; border-radius: .6rem; cursor: pointer;
+    }
     /* overflow-wrap: in der schmalen Seitenspalte (übereinander) dürfen lange
        Einzelwörter/Doppelnamen nicht über den Rand ragen. */
     .umpire-say { font-size: 1.6rem; font-weight: 800; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
@@ -931,6 +935,10 @@
                gespielt ist (Schiri-Feedback 08.11.2026). -->
           <div class="umpire-einspiel" id="umpire-einspiel" hidden>
             <span class="lbl">Einspielzeit</span><span class="zeit" id="umpire-einspiel-zeit"></span>
+            <!-- Erster Aufschlag: beendet die Einspielzeit und startet beim
+                 Turnier-PC die Nettozeit (Spec `spielzeiten-prognose`). Wer
+                 nicht tippt, bekommt den ersten Punkt als Start. -->
+            <button type="button" id="spiel-beginnt-btn" class="spiel-beginnt-btn">Spiel beginnt</button>
           </div>
           <div class="umpire-say" id="umpire-say"></div>
           <div class="umpire-cards" id="umpire-cards"></div>
@@ -1772,6 +1780,10 @@ const STATE = {
   intervalDoneThisGame: /** @type {boolean} */ (false),
   // Matchstart (ms) für die Spieldauer-Anzeige.
   startedAt: /** @type {number|null} */ (null),
+  // „Spiel beginnt" getippt: Der erste Aufschlag ist erfolgt, die
+  // Einspielzeit vorbei. Reist als `playStarted` mit jedem Stand zum Host,
+  // der damit den Nettostart stempelt (Spec `spielzeiten-prognose`).
+  spielBegonnen: false,
   // Aufruf-Uhr in der Kopfzeile: Zeitpunkt des 1. Feld-Aufrufs (Server-
   // Zeit, aus `/health` `on_court_since_ms`) und die Timer-Schwellen aus der
   // App-Einstellung (`callTimer`). Beides kommt vom Server, nie vom Tablet —
@@ -1950,6 +1962,7 @@ const els = {
   plusRightLabel: document.getElementById('plus-right-label'),
   umpireBar: document.getElementById('umpire-bar'),
   umpireEinspiel: document.getElementById('umpire-einspiel'),
+  spielBeginntBtn: document.getElementById('spiel-beginnt-btn'),
   umpireEinspielZeit: document.getElementById('umpire-einspiel-zeit'),
   umpireBadge: document.getElementById('umpire-badge'),
   umpireSay: document.getElementById('umpire-say'),
@@ -2274,6 +2287,9 @@ function sendScoreUpdate() {
     setsA, setsB,
     setsHistory,
     servingTeam,
+    // Erster Aufschlag erfolgt → Nettostart beim Host. Nur wenn wahr, damit
+    // der Frame alter Spiele gleich bleibt.
+    ...(STATE.spielBegonnen ? { playStarted: true } : {}),
   }));
   // Was gemeldet wurde, merken (Melde-Ring) — nur bei einer Änderung.
   const ring = ringMerken(MELDE_RING, STATE.match.matchId, setsHistory.concat([current]));
@@ -3471,6 +3487,7 @@ function standFuerSpiegel() {
     pendingResult: STATE.pendingResult,
     resultRejected: STATE.resultRejected,
     startedAt: STATE.startedAt,
+    spielBegonnen: STATE.spielBegonnen,
     alertInjury: STATE.alertInjury,
     alertOfficial: STATE.alertOfficial,
     retired: STATE.retired,
@@ -3715,6 +3732,7 @@ function applyPersistedState(p) {
   // einzige Hinweis darauf, dass hier noch etwas zu tun ist.
   STATE.resultRejected = typeof p.resultRejected === 'string' ? p.resultRejected : null;
   STATE.startedAt = typeof p.startedAt === 'number' ? p.startedAt : null;
+  STATE.spielBegonnen = p.spielBegonnen === true;
   STATE.alertInjury = !!p.alertInjury;
   STATE.alertOfficial = !!p.alertOfficial;
   STATE.retired = !!p.retired;
@@ -3895,6 +3913,7 @@ function loadMatch(match) {
   STATE.pause = null;
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   STATE.startedAt = null;
+  STATE.spielBegonnen = false;
   // Aufruf-Uhr: Stempel des Vorgängerspiels nicht bis zum nächsten
   // `/health`-Abruf stehen lassen; `match_assigned` holt ihn sofort neu.
   STATE.aufrufSeitMs = null;
@@ -3974,6 +3993,7 @@ function clearMatch() {
   STATE.pause = null;
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   STATE.startedAt = null;
+  STATE.spielBegonnen = false;
   // Aufruf-Uhr: Der Stempel gehört zum Spiel, das gerade vom Feld geht.
   // Die Timer-Schwellen bleiben — sie sind Einstellung, nicht Spielstand.
   STATE.aufrufSeitMs = null;
@@ -5080,6 +5100,7 @@ function backToSetup() {
   STATE.pendingServer = null;
   STATE.serveSetupTeam = null;
   STATE.startedAt = null; // Spieldauer war ein Fehlstart → zurücksetzen
+  STATE.spielBegonnen = false;
   persistState();
   render();
 }
@@ -6592,7 +6613,20 @@ function satzpunktAnsagen(jetzt, vorher) {
  *  Spiel. */
 function einspielPhase() {
   return !!STATE.match && !STATE.finished && !STATE.pause && !STATE.midGameSetup
-    && !!STATE.startedAt && isFreshAfterSetup();
+    && !!STATE.startedAt && !STATE.spielBegonnen && isFreshAfterSetup();
+}
+
+/** „Spiel beginnt": Der erste Aufschlag ist erfolgt. Beendet die
+ *  Einspielzeit und meldet den Spielbeginn sofort an den Turnier-PC — der
+ *  stempelt mit seiner Uhr den Nettostart (Spec `spielzeiten-prognose`).
+ *  Ohne Verbindung reist das Flag mit dem nächsten Stand nach. */
+function spielBeginnt() {
+  if (!einspielPhase()) return;
+  STATE.spielBegonnen = true;
+  tlog('info', 'spiel_beginnt', { matchId: STATE.match.matchId });
+  persistState();
+  sendScoreUpdate();
+  render();
 }
 function einspielZeitText() {
   const s = Math.max(0, Math.floor((Date.now() - STATE.startedAt) / 1000));
@@ -7029,6 +7063,7 @@ document.addEventListener('keydown', (ev) => {
 });
 
 els.umpireCardBtn.addEventListener('click', openCardModal);
+els.spielBeginntBtn.addEventListener('click', spielBeginnt);
 els.cardCancel.addEventListener('click', closeCardModal);
 els.cardKindCancel.addEventListener('click', closeCardModal);
 els.cardKindView.querySelectorAll('[data-kind]').forEach(opt => {

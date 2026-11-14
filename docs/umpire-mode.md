@@ -63,8 +63,14 @@ Vokabular"), Fassung 06/2026** — abgeglichen am 14.11.2026.
 **Einspielzeit.** Ist die Wahl abgeschlossen (Aufstellung bestätigt), aber noch
 kein Ballwechsel gespielt, steht über der Eröffnungsansage groß
 „**Einspielzeit** M:SS" — gezählt ab der Bestätigung. Nach **2 Minuten** wird
-sie rot. Mit dem ersten Punkt verschwindet sie; danach läuft die Spieldauer
-klein in der Kopfzeile weiter. Die Einspielzeit erscheint **auch ohne
+sie rot. Der Knopf **Spiel beginnt** unter der Zeit beendet sie beim ersten
+Aufschlag und meldet dem Turnier-PC den Nettostart
+([spielzeiten-prognose.md](spielzeiten-prognose.md)); ohne Tipp verschwindet
+sie mit dem ersten Punkt. Danach läuft die Spieldauer klein in der Kopfzeile
+weiter.
+<!-- pruef: "Spiel beginnt" in src-tauri/assets/tablet.html -->
+
+Die Einspielzeit erscheint **auch ohne
 Schiri-Modus** — dann allein in der Leiste, ohne Ansage und Karten.
 <!-- pruef: "Einspielzeit" in src-tauri/assets/tablet.html -->
 <!-- pruef: /EINSPIEL_SEKUNDEN = 120;/ in src-tauri/assets/tablet.html -->

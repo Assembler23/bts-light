@@ -4662,10 +4662,10 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             // weiter (Ticker erkennt das erst nach bis zu 2 s) —
                             // ihre nachlaufenden Frames würden sonst den Cache/
                             // Liveticker wieder mit dem ALTEN Stand füllen.
-                            Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history, match_id }) => {
+                            Ok(TabletMsg::ScoreUpdate { score_a, score_b, sets_history, match_id, play_started }) => {
                                 if let (Some(c), Some(t)) = (court, my_token) {
                                     if ctx.tablet.is_court_active(c, t) {
-                                        handle_score(c, score_a, score_b, &sets_history, match_id, &ctx).await;
+                                        handle_score(c, score_a, score_b, &sets_history, match_id, play_started, &ctx).await;
                                     }
                                 }
                             }
@@ -4942,6 +4942,7 @@ pub(crate) async fn handle_score(
     score_b: i64,
     history: &[SetAb],
     match_id: i64,
+    play_started: bool,
     ctx: &ServerCtx,
 ) {
     // A2 / ADR 0017, Regel b (Finalisiert-Gate): Ein Score fürs bereits in BTP
@@ -4990,16 +4991,20 @@ pub(crate) async fn handle_score(
         sets.push((score_a, score_b));
     }
     ctx.tablet.record_score(court_id, m.id, sets.clone());
-    // Nettostart (Spec `spielzeiten-prognose`, E2/ADR 0027): der erste beim
-    // Host eingehende Stand > 0 stempelt — host-seitig, eine Uhr für LAN,
-    // Cloud und Zähltafel. Steht hinter Finalisiert-Gate und Stale-Filter:
-    // ein verworfener Score stempelt nicht. Ein Undo zurück auf 0:0 löscht
-    // den Stempel bewusst nicht (der erste Punkt ist gefallen).
+    // Nettostart (Spec `spielzeiten-prognose`, E2/ADR 0027): Die Nettozeit
+    // beginnt mit dem ersten Aufschlag. Den meldet das Tablet mit
+    // `play_started` („Spiel beginnt" getippt, Einspielzeit vorbei); wer
+    // den Knopf nicht tippt oder eine alte Tablet-Seite hat, bekommt den
+    // ersten beim Host eingehenden Stand > 0 als Ersatz — dann zählt der
+    // erste Ballwechsel nicht mit. Host-seitig gestempelt, eine Uhr für
+    // LAN, Cloud und Zähltafel. Steht hinter Finalisiert-Gate und
+    // Stale-Filter: ein verworfener Score stempelt nicht. Ein Undo zurück
+    // auf 0:0 löscht den Stempel bewusst nicht (der Aufschlag ist erfolgt).
     // `match_id != 0`: Legacy-Scores alter Tablet-Seiten passieren beide
     // Gates ungeprüft — ein Nachzügler des Vorspiels dürfte sonst dem
     // neuen Feld-Match den Nettostart stempeln (Review 2026-08-16, F2).
     // Solche Seiten liefern dann eben keinen Netto-Messwert.
-    if match_id != 0 && sets.iter().any(|&(a, b)| a > 0 || b > 0) {
+    if match_id != 0 && (play_started || sets.iter().any(|&(a, b)| a > 0 || b > 0)) {
         ctx.tablet
             .match_times_store()
             .stamp_first_point(m.id, now_ms());
@@ -5840,7 +5845,7 @@ mod tests {
         ctx.tablet.record_score(101, 42, vec![(10, 8)]);
         // Nachzügler des alten Matches 7 → verworfen (kein Netz-Push, da
         // die Funktion vor dem record_score/Push zurückkehrt).
-        handle_score(101, 14, 16, &[], 7, &ctx).await;
+        handle_score(101, 14, 16, &[], 7, false, &ctx).await;
         assert_eq!(
             ctx.tablet.monitor_court(101).sets,
             vec![(10, 8)],
@@ -5877,7 +5882,7 @@ mod tests {
         tor.lock()
             .unwrap()
             .melden(Kanal::Tset, &Ausgang::default(), None, jetzt);
-        handle_score(101, 1, 0, &[], 42, &ctx).await;
+        handle_score(101, 1, 0, &[], 42, false, &ctx).await;
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         assert_eq!(mock.anzahl(), 0);
 
@@ -5888,7 +5893,7 @@ mod tests {
             ..Default::default()
         };
         tor.lock().unwrap().melden(Kanal::Tset, &ok, None, jetzt);
-        handle_score(101, 2, 0, &[], 42, &ctx).await;
+        handle_score(101, 2, 0, &[], 42, false, &ctx).await;
         warte_auf_anfragen(&mock, 1).await;
     }
 
@@ -5902,7 +5907,7 @@ mod tests {
         let tor = Strecke::frisch().als_tor();
         let ctx = ctx.mit_push_tor(tor.clone());
 
-        handle_score(101, 1, 0, &[], 42, &ctx).await;
+        handle_score(101, 1, 0, &[], 42, false, &ctx).await;
         warte_auf_anfragen(&mock, 1).await;
         for _ in 0..100 {
             if tor.lock().unwrap().lage() != Lage::Frei {
@@ -5919,7 +5924,7 @@ mod tests {
         // Weitere Punkte gehen nicht mehr hinaus — badhub sperrt die IP nach
         // fünf Fehlversuchen.
         for punkt in 2..6 {
-            handle_score(101, punkt, 0, &[], 42, &ctx).await;
+            handle_score(101, punkt, 0, &[], 42, false, &ctx).await;
         }
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert_eq!(mock.anzahl(), 1);
@@ -5931,14 +5936,14 @@ mod tests {
     #[tokio::test]
     async fn handle_score_stempelt_den_ersten_punkt_genau_einmal() {
         let ctx = make_ctx(1); // tote Ports — kein BTP, kein badhub
-        handle_score(101, 0, 0, &[], 42, &ctx).await; // 0:0 stempelt nicht
+        handle_score(101, 0, 0, &[], 42, false, &ctx).await; // 0:0 stempelt nicht
         assert!(ctx
             .tablet
             .match_times_store()
             .entry(42)
             .is_none_or(|e| e.first_point_ms.is_none()));
 
-        handle_score(101, 1, 0, &[], 42, &ctx).await; // erster Punkt
+        handle_score(101, 1, 0, &[], 42, false, &ctx).await; // erster Punkt
         let first = ctx
             .tablet
             .match_times_store()
@@ -5946,7 +5951,7 @@ mod tests {
             .and_then(|e| e.first_point_ms);
         assert!(first.is_some(), "erster Stand > 0 stempelt");
 
-        handle_score(101, 5, 3, &[], 42, &ctx).await; // Folgestand
+        handle_score(101, 5, 3, &[], 42, false, &ctx).await; // Folgestand
         assert_eq!(
             ctx.tablet
                 .match_times_store()
@@ -5957,19 +5962,56 @@ mod tests {
         );
     }
 
+    /// Nettostart beim ersten Aufschlag: Meldet das Tablet „Spiel beginnt"
+    /// (`play_started`), stempelt schon der 0:0-Stand — der spätere erste
+    /// Punkt verschiebt den Stempel nicht mehr.
+    #[tokio::test]
+    async fn spiel_beginnt_stempelt_den_nettostart_schon_bei_null_null() {
+        let ctx = make_ctx(1);
+        handle_score(101, 0, 0, &[], 42, true, &ctx).await;
+        let start = ctx
+            .tablet
+            .match_times_store()
+            .entry(42)
+            .and_then(|e| e.first_point_ms);
+        assert!(start.is_some(), "Spielbeginn stempelt ohne Punkt");
+
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        handle_score(101, 1, 0, &[], 42, true, &ctx).await;
+        assert_eq!(
+            ctx.tablet
+                .match_times_store()
+                .entry(42)
+                .and_then(|e| e.first_point_ms),
+            start,
+            "der erste Punkt ändert den Nettostart nicht mehr"
+        );
+    }
+
+    /// Auch der Spielbeginn läuft hinter Stale-Filter und Legacy-Schutz:
+    /// ein fremdes Match oder matchId 0 stempelt nichts.
+    #[tokio::test]
+    async fn ein_verworfener_spielbeginn_stempelt_nicht() {
+        let ctx = make_ctx(1);
+        handle_score(101, 0, 0, &[], 7, true, &ctx).await;
+        handle_score(101, 0, 0, &[], 0, true, &ctx).await;
+        assert!(ctx.tablet.match_times_store().entry(42).is_none());
+        assert!(ctx.tablet.match_times_store().entry(7).is_none());
+    }
+
     /// Spec `spielzeiten-prognose` (E2): Verworfene Scores (Stale-Filter,
     /// Finalisiert-Gate) stempeln keinen ersten Punkt.
     #[tokio::test]
     async fn ein_verworfener_score_stempelt_keinen_ersten_punkt() {
         let ctx = make_ctx(1);
         // Stale: Tablet zählt Match 7, Feld hat Match 42.
-        handle_score(101, 5, 3, &[], 7, &ctx).await;
+        handle_score(101, 5, 3, &[], 7, false, &ctx).await;
         assert!(ctx.tablet.match_times_store().entry(42).is_none());
         assert!(ctx.tablet.match_times_store().entry(7).is_none());
 
         // Finalisiert-Gate: Match 42 ist in BTP fertig eingegeben.
         ctx.tablet.mark_finalized(101, 42);
-        handle_score(101, 5, 3, &[], 42, &ctx).await;
+        handle_score(101, 5, 3, &[], 42, false, &ctx).await;
         assert!(ctx.tablet.match_times_store().entry(42).is_none());
     }
 
@@ -5981,7 +6023,7 @@ mod tests {
     #[tokio::test]
     async fn ein_legacy_score_ohne_match_id_stempelt_keinen_ersten_punkt() {
         let ctx = make_ctx(1);
-        handle_score(101, 15, 12, &[], 0, &ctx).await;
+        handle_score(101, 15, 12, &[], 0, false, &ctx).await;
         assert!(
             ctx.tablet.match_times_store().entry(42).is_none(),
             "matchId 0 ist nicht zuordenbar — kein Stempel"
@@ -6362,7 +6404,7 @@ mod tests {
         ctx.tablet.mark_finalized(101, 42);
         // Nachzügler fürs finalisierte Match 42 → verworfen (kein Push, kein
         // Überschreiben des Hand-Ergebnisses).
-        handle_score(101, 21, 15, &[], 42, &ctx).await;
+        handle_score(101, 21, 15, &[], 42, false, &ctx).await;
         assert_eq!(
             ctx.tablet.monitor_court(101).sets,
             vec![(21, 10)],

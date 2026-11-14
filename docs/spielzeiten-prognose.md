@@ -26,15 +26,16 @@ Wichtig für das Verständnis der Zahlen:
 
 ## Was gemessen wird
 
-bts-light misst je Spiel drei Zeitpunkte — automatisch, ohne Bedienschritt:
+bts-light misst je Spiel drei Zeitpunkte — automatisch; nur der Nettostart
+wird genauer, wenn am Tablet **Spiel beginnt** getippt wird:
 
 | Zeitpunkt | Bedeutung |
 |---|---|
 | **Bruttostart** | Erste Feldzuweisung durch BTP (Feldwechsel und App-Neustart ändern nichts; nimmt BTP das Spiel wieder ganz vom Feld, wird neu gemessen) |
-| **Nettostart** | Der erste beim Turnier-PC eingehende Punkt |
+| **Nettostart** | Der erste Aufschlag: Tipp auf **Spiel beginnt** am Tablet (Einspielzeit-Leiste). Ohne Tipp — oder mit einer alten Tablet-Seite — der erste beim Turnier-PC eingehende Punkt; dann fehlt der erste Ballwechsel in der Nettozeit |
 | **Ende** | Eingang des Ergebnisses (eine spätere Korrektur ändert die Messung nicht) |
 
-Daraus entstehen **Brutto** (Zuweisung → Ende), **Netto** (1. Punkt → Ende,
+Daraus entstehen **Brutto** (Zuweisung → Ende), **Netto** (1. Aufschlag → Ende,
 Satzpausen zählen mit) und die **Anlaufzeit** (Brutto − Netto: Weg zum Feld,
 Einspielen, Anschreiben). Gespeichert wird turniergebunden in
 `match-times.json` — ein App-Neustart verliert nichts, ein Turnierwechsel

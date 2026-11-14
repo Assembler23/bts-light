@@ -141,9 +141,16 @@ beim ersten. Hast du dich vertippt, nimmt **−** einen Ball zurück.
 
 Ist die Seiten- und Aufschlagwahl abgeschlossen, zeigt das Tablet bis zum
 ersten Ballwechsel groß die **Einspielzeit** — die Zeit seit der Wahl. Nach
-**2 Minuten** wird sie rot. Mit dem ersten Punkt verschwindet sie.
+**2 Minuten** wird sie rot.
 <!-- pruef: "Einspielzeit" in src-tauri/assets/tablet.html -->
 <!-- pruef: /EINSPIEL_SEKUNDEN = 120;/ in src-tauri/assets/tablet.html -->
+
+Darunter steht der Knopf **Spiel beginnt**. Tippe ihn, sobald der erste
+Aufschlag gespielt wird: Die Einspielzeit verschwindet, und die
+Turnierleitung misst die reine Spielzeit ab diesem Moment. Vergisst du den
+Knopf, ist das nicht schlimm — dann verschwindet die Einspielzeit mit dem
+ersten Punkt, und die Spielzeit zählt ab dem Ende des ersten Ballwechsels.
+<!-- pruef: "Spiel beginnt" in src-tauri/assets/tablet.html -->
 
 ## Pausen
 

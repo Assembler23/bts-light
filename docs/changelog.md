@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.415
+
+- **Nettozeit ab dem ersten Aufschlag.** Die gemessene reine Spielzeit
+  begann bisher erst mit dem ersten gezählten Punkt — der erste Ballwechsel
+  fehlte also. In der Einspielzeit-Leiste am Tablet gibt es jetzt den Knopf
+  **„Spiel beginnt"**: Ein Tipp beim ersten Aufschlag beendet die
+  Einspielzeit, und die Nettozeit zählt ab diesem Moment. Ohne Tipp bleibt
+  es beim ersten Punkt.
+
 ## v0.9.413
 
 - **Keine falsche Pause mehr nach Freilos oder kampflosem Sieg.** Wurde

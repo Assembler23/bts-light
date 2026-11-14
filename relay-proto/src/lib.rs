@@ -1099,6 +1099,18 @@ pub enum TabletMsg {
         /// 0 bei alten Tablet-Seiten (`#[serde(default)]`) → wie bisher.
         #[serde(rename = "matchId", default)]
         match_id: i64,
+        /// Der erste Aufschlag ist erfolgt: Die Bedienerin hat am Tablet
+        /// „Spiel beginnt" getippt (Einspielzeit vorbei). Ab dann trägt jede
+        /// Meldung dieses Spiels `true`; der Host stempelt beim ersten
+        /// Eingang den Nettostart (Spec `spielzeiten-prognose`, ADR 0027 —
+        /// mit Host-Uhr, das Tablet schickt keine Zeit). `false` bei alten
+        /// Tablet-Seiten → Nettostart wie bisher beim ersten Punkt.
+        #[serde(
+            rename = "playStarted",
+            default,
+            skip_serializing_if = "std::ops::Not::not"
+        )]
+        play_started: bool,
     },
     /// Akkustand des Tablets (nur Android/Chrome – iPads liefern ihn nicht).
     #[serde(rename = "battery")]
@@ -3577,6 +3589,15 @@ pub enum RelayFrame {
         /// (alte Tablet-Seite/alter Relay) → Verhalten wie bisher.
         #[serde(rename = "matchId", default)]
         match_id: i64,
+        /// Durchgereicht aus [`TabletMsg::ScoreUpdate`]: erster Aufschlag
+        /// erfolgt. `false` hinter einem alten Relay → Nettostart beim
+        /// ersten Punkt.
+        #[serde(
+            rename = "playStarted",
+            default,
+            skip_serializing_if = "std::ops::Not::not"
+        )]
+        play_started: bool,
     },
     /// Check-in von der Meetingpoint-Seite bzw. dem Zähl-Tablet in der
     /// Cloud — `req_id` korreliert das `MeetingpointAck`.
@@ -4111,6 +4132,7 @@ mod tests {
                 score_b: 19,
                 sets_history: vec![SetAb { a: 21, b: 15 }],
                 match_id: 0,
+                play_started: false,
             }
         );
     }
@@ -4124,10 +4146,54 @@ mod tests {
             score_b: 3,
             sets_history: vec![],
             match_id: 4711,
+            play_started: false,
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"matchId\":4711"));
         assert_eq!(serde_json::from_str::<TabletMsg>(&json).unwrap(), msg);
+    }
+
+    #[test]
+    fn spielbeginn_reist_optional_und_abwaertskompatibel() {
+        // Spec spielzeiten-prognose (Nettostart beim ersten Aufschlag):
+        // Ohne Feld (alte Tablet-Seite) gilt `false`, und `false` bleibt
+        // auf der Leitung unsichtbar — alte Relays/Hosts sehen nichts Neues.
+        let alt: TabletMsg =
+            serde_json::from_str(r#"{"type":"score_update","scoreA":0,"scoreB":0,"matchId":7}"#)
+                .unwrap();
+        assert!(matches!(
+            alt,
+            TabletMsg::ScoreUpdate {
+                play_started: false,
+                ..
+            }
+        ));
+        assert!(!serde_json::to_string(&alt).unwrap().contains("playStarted"));
+
+        let neu: TabletMsg = serde_json::from_str(
+            r#"{"type":"score_update","scoreA":0,"scoreB":0,"matchId":7,"playStarted":true}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            neu,
+            TabletMsg::ScoreUpdate {
+                play_started: true,
+                ..
+            }
+        ));
+
+        let frame = RelayFrame::ScoreUpdate {
+            court_id: 1,
+            court_label: String::new(),
+            score_a: 0,
+            score_b: 0,
+            sets_history: vec![],
+            match_id: 7,
+            play_started: true,
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains("\"playStarted\":true"));
+        assert_eq!(serde_json::from_str::<RelayFrame>(&json).unwrap(), frame);
     }
 
     #[test]

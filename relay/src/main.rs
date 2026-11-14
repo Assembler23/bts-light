@@ -4049,6 +4049,7 @@ impl TabletSitzung {
                 score_b,
                 sets_history,
                 match_id,
+                play_started,
             }) => {
                 // Kein Badmintonspiel hat mehr als zehn Sätze; die Liste wird
                 // gespeichert und an den Host gereicht.
@@ -4064,8 +4065,18 @@ impl TabletSitzung {
                     return SitzungsSchritt::Weiter;
                 }
                 if let Some(c) = self.court {
-                    forward_score(broker, &ns, c, score_a, score_b, sets_history, match_id, tx)
-                        .await;
+                    forward_score(
+                        broker,
+                        &ns,
+                        c,
+                        score_a,
+                        score_b,
+                        sets_history,
+                        match_id,
+                        play_started,
+                        tx,
+                    )
+                    .await;
                 }
             }
             // Punktverlauf (ADR 0014): 1:1 an den Host durchreichen —
@@ -5405,6 +5416,7 @@ async fn forward_score(
     score_b: i64,
     sets_history: Vec<SetAb>,
     match_id: i64,
+    play_started: bool,
     tx: &Tx,
 ) {
     let mut map = broker.namespaces.lock().await;
@@ -5457,6 +5469,7 @@ async fn forward_score(
             score_b,
             sets_history,
             match_id,
+            play_started,
         }));
     }
 }
@@ -9449,7 +9462,7 @@ mod tests {
         fegen(&broker, now_ms() + DATEN_FRIST_MS).await;
         // Der nächste Punkt des Tablets (es nennt sein Spiel) wird angenommen
         // — ohne den Stummel verwürfe ihn der Stale-Filter.
-        forward_score(&broker, &ns, 5, 12, 7, Vec::new(), 105, &tablet_tx).await;
+        forward_score(&broker, &ns, 5, 12, 7, Vec::new(), 105, false, &tablet_tx).await;
         let map = broker.namespaces.lock().await;
         assert_eq!(
             map.get(&ns).unwrap().court_scores.get(&5),
@@ -9957,7 +9970,18 @@ mod tests {
         sitzung.verarbeite(&broker, &ident(5, "a"), &tx).await;
         for i in 0..(KANAL_HOST * 2) {
             // Am Mengen-Takt vorbei: Hier geht es um den Kanal.
-            forward_score(&broker, &ns, 5, (i % 20) as i64, 0, Vec::new(), 0, &tx).await;
+            forward_score(
+                &broker,
+                &ns,
+                5,
+                (i % 20) as i64,
+                0,
+                Vec::new(),
+                0,
+                false,
+                &tx,
+            )
+            .await;
         }
         assert!(
             tokio::time::timeout(Duration::from_millis(50), wache.warten())
@@ -12768,16 +12792,16 @@ mod tests {
         let (mon, mut mon_rx) = kanal_test();
         assert!(subscribe_monitor(&broker, "ns1", Some(101), &mon).await);
 
-        forward_score(&broker, "ns1", 101, 5, 3, Vec::new(), 0, &tx).await;
+        forward_score(&broker, "ns1", 101, 5, 3, Vec::new(), 0, false, &tx).await;
         assert!(mon_rx.try_recv().is_ok(), "der erste Stand stößt an");
 
-        forward_score(&broker, "ns1", 101, 5, 3, Vec::new(), 0, &tx).await;
+        forward_score(&broker, "ns1", 101, 5, 3, Vec::new(), 0, false, &tx).await;
         assert!(
             mon_rx.try_recv().is_err(),
             "derselbe Stand noch einmal: kein Anstoß"
         );
 
-        forward_score(&broker, "ns1", 101, 6, 3, Vec::new(), 0, &tx).await;
+        forward_score(&broker, "ns1", 101, 6, 3, Vec::new(), 0, false, &tx).await;
         assert!(
             mon_rx.try_recv().is_ok(),
             "ein echter Punkt stößt wieder an"
@@ -14522,6 +14546,35 @@ mod tests {
         assert_eq!(ack_rx.await.unwrap(), ResultResponse::ok());
     }
 
+    /// Nettostart beim ersten Aufschlag: Der Relay reicht `playStarted`
+    /// unverändert an den Host — auch beim Stand 0:0, der für die Anzeige
+    /// nichts Neues ist.
+    #[tokio::test]
+    async fn spielbeginn_reist_zum_host() {
+        let broker = Broker::new("x".into());
+        let (host_tx, mut host_rx) = kanal_test();
+        let (tablet_tx, _tablet_rx) = kanal_test();
+        {
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.entry("ns1".into()).or_insert_with(Namespace::new);
+            ns.host = Some(host_tx);
+            ns.tablets.insert(101, tablet_tx.clone());
+        }
+        forward_score(&broker, "ns1", 101, 0, 0, vec![], 0, true, &tablet_tx).await;
+        let msg = host_rx.try_recv().expect("Score an den Host");
+        let Message::Text(t) = msg else {
+            panic!("Text-Frame erwartet")
+        };
+        let parsed: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        assert!(matches!(
+            parsed,
+            RelayFrame::ScoreUpdate {
+                play_started: true,
+                ..
+            }
+        ));
+    }
+
     #[tokio::test]
     async fn score_from_tablet_is_forwarded_to_the_host() {
         let broker = Broker::new("x".into());
@@ -14535,7 +14588,7 @@ mod tests {
             ns.host = Some(host_tx);
             ns.tablets.insert(101, tablet_tx.clone());
         }
-        forward_score(&broker, "ns1", 101, 11, 9, vec![], 0, &tablet_tx).await;
+        forward_score(&broker, "ns1", 101, 11, 9, vec![], 0, false, &tablet_tx).await;
         let msg = host_rx.try_recv().expect("Host bekommt den Score");
         let Message::Text(t) = msg else {
             panic!("Text-Frame erwartet")
@@ -14550,6 +14603,7 @@ mod tests {
                 score_b: 9,
                 sets_history: vec![],
                 match_id: 0,
+                play_started: false,
             }
         );
     }
@@ -15181,7 +15235,7 @@ mod tests {
             ns.tablets.insert(101, tablet_tx.clone());
             ns.court_matches.insert(101, brief(9));
         }
-        forward_score(&broker, "ns1", 101, 14, 16, vec![], 7, &tablet_tx).await;
+        forward_score(&broker, "ns1", 101, 14, 16, vec![], 7, false, &tablet_tx).await;
         assert!(host_rx.try_recv().is_err(), "fremder Match-Score verworfen");
         assert!(
             !broker.namespaces.lock().await["ns1"]
@@ -15190,7 +15244,7 @@ mod tests {
             "Cache bleibt leer"
         );
         // Passende matchId → normal verarbeitet.
-        forward_score(&broker, "ns1", 101, 1, 0, vec![], 9, &tablet_tx).await;
+        forward_score(&broker, "ns1", 101, 1, 0, vec![], 9, false, &tablet_tx).await;
         assert!(host_rx.try_recv().is_ok(), "passender Score fließt");
         assert!(broker.namespaces.lock().await["ns1"]
             .court_scores
@@ -15238,7 +15292,7 @@ mod tests {
             ns.tablets.insert(101, tablet_tx.clone());
             // KEIN court_matches-Eintrag — wie nach MatchCleared.
         }
-        forward_score(&broker, "ns1", 101, 21, 15, vec![], 7, &tablet_tx).await;
+        forward_score(&broker, "ns1", 101, 21, 15, vec![], 7, false, &tablet_tx).await;
         let stale = r#"{"match":{"matchId":7}}"#.to_string();
         store_court_state(&broker, "ns1", 101, stale, &tablet_tx).await;
         let map = broker.namespaces.lock().await;
@@ -15652,7 +15706,7 @@ mod tests {
             ns.host = Some(host_tx);
             ns.tablets.insert(101, holder_tx); // aktueller Halter ist ein ANDERER
         }
-        forward_score(&broker, "ns1", 101, 3, 1, vec![], 0, &old_tx).await;
+        forward_score(&broker, "ns1", 101, 3, 1, vec![], 0, false, &old_tx).await;
         store_court_state(&broker, "ns1", 101, "{\"alt\":true}".into(), &old_tx).await;
         assert!(
             host_rx.try_recv().is_err(),
