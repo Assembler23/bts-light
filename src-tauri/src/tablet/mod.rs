@@ -35,3 +35,4 @@ pub mod tv;
 pub mod winners;
 pub mod wish_court;
 pub mod ws_verbindung;
+pub mod zeitplan;

@@ -443,6 +443,13 @@ ausgewertet:
   die Auslosung (`DrawID`) vor, dann die Spielnummer. Ohne einen der beiden
   Schlüssel läuft die reine Spielnummer quer: Aus der gedruckten Liste
   (Nr 2, 6, 2, 6 …) wird „erst alle Nummer 2, dann alle Nummer 6".
+- **`PlannedTime` ist Wandzeit des Turnier-PCs, keine UTC.** Die eine
+  Umrechnung nach Unix-ms ist `btp/model.rs` `planned_time_unix_ms`
+  (lokale Zone des Rechners, `None` bei mehrdeutiger Zeit in der
+  Zeitumstellung). Zwei Abnehmer teilen sie: der Liveticker-Spielplan
+  (`planned_ts`) und der TL-Zustand (Abweichung des Starts an beendeten
+  Spielen, Spec `tl-zeitplan`). Für die Anzeige der Uhrzeit rechnet niemand
+  um — die Seite liest die Ziffern.
 - **Bis 09.08.2026 stand hier `DisplayOrder`** statt `DrawID`. Gemessen an
   einem echten Turnier trugen aber nur rund 10 % der Spiele einen Wert — die
   ohne landeten hinter allen anderen, das erste Spiel des Tages stand

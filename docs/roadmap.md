@@ -366,6 +366,15 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   entferntem SR, kein Schwall beim Umschalten. **umgesetzt v0.9.372 + v0.9.373, Feldtest offen**: Nachdruck-Frist und
   „ungültig"-Hinweis an echtem Drucker prüfen.
 
+- **Zeitplan im TL-Web** — Spec:
+  [features/tl-zeitplan.md](features/tl-zeitplan.md) (freigegeben 14.11.2026),
+  ADR 0094 — Profil-Schalter „Geplante Zeiten anzeigen"
+  (Warteliste, beendete Spiele mit Abweichung zum Start) und Panel „Zeitplan"
+  („Im Zeitplan" / „N min dahinter/davor", Prognose gegen Plan am nächsten
+  unbegonnenen Zeitfenster). Zwei PRs — **PR 1 (Planzeiten an den Zeilen)
+  umgesetzt v0.9.411, Feldtest offen**; PR 2 (Panel) folgt. Später denkbar: Prognose für offene
+  Paarungen, Wert je Halle.
+
 - **Spielersuche im TL-Web** — Spec:
   [features/tl-spielersuche.md](features/tl-spielersuche.md) (freigegeben
   09.11.2026), ADR 0081 — **v0.9.368,

@@ -428,36 +428,6 @@ pub struct SchedMatch {
     pub outcome: Option<&'static str>,
 }
 
-/// BTP `PlannedTime` (`YYYYMMDDHHMM`) → Unix-ms.
-///
-/// Die Zahl ist **lokale Wandzeit**, keine UTC — sie kommt aus einem
-/// Turnierplan, den jemand in einer Halle aufgestellt hat, und der Rechner
-/// steht am selben Ort (dasselbe `Local`-Muster wie `btp/proto.rs`). Ohne die
-/// Zonen-Zuordnung läge im Sommer jede Anwurfzeit zwei Stunden daneben.
-///
-/// `None` bei unplausibler Zahl und bei mehrdeutiger Wandzeit (Zeitumstellung):
-/// dann lieber keine Zeit senden als eine falsche — badhub zeigt das Feld
-/// einfach nicht an.
-fn planned_time_to_unix_ms(pt: i64) -> Option<u64> {
-    use chrono::{Local, NaiveDate, TimeZone};
-
-    let minute = (pt % 100) as u32;
-    let rest = pt / 100;
-    let stunde = (rest % 100) as u32;
-    let rest = rest / 100;
-    let tag = (rest % 100) as u32;
-    let rest = rest / 100;
-    let monat = (rest % 100) as u32;
-    let jahr = (rest / 100) as i32;
-
-    let naiv = NaiveDate::from_ymd_opt(jahr, monat, tag)?.and_hms_opt(stunde, minute, 0)?;
-
-    Local
-        .from_local_datetime(&naiv)
-        .single()
-        .map(|dt| dt.timestamp_millis() as u64)
-}
-
 /// Baut die `sched`-Nachricht: **alle** Spiele mit Teilnehmern, ohne Kappung.
 ///
 /// `predicted` kommt aus `TabletState::predicted_starts_snapshot()` und wird
@@ -524,7 +494,9 @@ pub fn build_sched(
                 p0_member_ids: m.team1.iter().map(|p| p.member_id.clone()).collect(),
                 p1: m.team2.iter().map(|p| p.name.clone()).collect(),
                 p1_member_ids: m.team2.iter().map(|p| p.member_id.clone()).collect(),
-                planned_ts: m.planned_time.and_then(planned_time_to_unix_ms),
+                planned_ts: m
+                    .planned_time
+                    .and_then(crate::btp::model::planned_time_unix_ms),
                 predicted_start_ts: if wartend {
                     predicted.get(&m.id).copied()
                 } else {

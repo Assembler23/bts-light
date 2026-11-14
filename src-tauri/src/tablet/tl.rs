@@ -1278,6 +1278,14 @@ pub(crate) fn heutiges_datum(now_ms: u64) -> chrono::NaiveDate {
         .unwrap_or_else(|| chrono::Local::now().date_naive())
 }
 
+/// [`heutiges_datum`] als `YYYYMMDD` — dieselbe Form wie der Datumsteil
+/// einer BTP-Planzeit (`planned_time / 10_000`).
+pub(crate) fn heute_ymd(now_ms: u64) -> u32 {
+    use chrono::Datelike;
+    let d = heutiges_datum(now_ms);
+    u32::try_from(d.year()).unwrap_or(0) * 10_000 + d.month() * 100 + d.day()
+}
+
 /// Führt irgendein Panel-Profil „Aufrufe unbegrenzt"?
 ///
 /// Der Aufruf-Zähler ist turnier-global (ein Feld, eine Zahl) — die Option
@@ -3005,6 +3013,13 @@ pub struct TlState {
     /// aus und zeigen dieselbe verstrichene Zeit, egal wie falsch ihre eigene
     /// Uhr geht.
     pub server_now_ms: u64,
+    /// Das heutige Datum des Turnier-PCs als `YYYYMMDD` (Spec `tl-zeitplan`).
+    /// Die Seite vergleicht damit den Datumsteil einer Planzeit („heute" →
+    /// nur Uhrzeit, sonst mit Wochentag), ohne die Zeitzone des Turnier-PCs
+    /// zu kennen. Bleibt im Fingerabdruck: Der Tageswechsel bewegt die
+    /// Revision genau einmal, und das soll er. 0 = unbekannt (älterer Host).
+    #[serde(default)]
+    pub today: u32,
     pub tournament: String,
     /// Mehr-Hallen-Turnier? Nur dann bietet die Seite einen Hallenfilter an.
     pub multi_hall: bool,
@@ -3914,6 +3929,16 @@ pub struct TlFinished {
     /// `tablet-ballzaehler`). Fehlt bei ausgeschaltetem Zähler und bei 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shuttles: Option<u32>,
+    /// Geplante Zeit aus BTP, roh als `YYYYMMDDHHMM` (Spec `tl-zeitplan`) —
+    /// Wandzeit des Turnier-PCs; die Seite bildet den Text aus den Ziffern
+    /// und braucht dafür keine Zeitzone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_time: Option<i64>,
+    /// Abstand des tatsächlichen Starts zur Planzeit in Minuten, positiv =
+    /// später. Fehlt bei Walkover und ohne gemessenen Start
+    /// ([`crate::tablet::zeitplan::start_abweichung_min`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_delay_mins: Option<i64>,
 }
 
 /// Auswertung der gemessenen Spielzeiten (Spec `spielzeiten-prognose`):
@@ -4409,6 +4434,7 @@ pub(crate) fn build_state_limited(
         return TlState {
             rev,
             server_now_ms: now_ms,
+            today: heute_ymd(now_ms),
             tournament: String::new(),
             multi_hall: false,
             can_set_wish_court: true,
@@ -4770,6 +4796,13 @@ pub(crate) fn build_state_limited(
                     .then(|| u32::try_from(m.shuttles).ok())
                     .flatten()
                     .filter(|n| *n > 0),
+                planned_time: m.planned_time,
+                start_delay_mins: crate::tablet::zeitplan::start_abweichung_min(
+                    m.planned_time
+                        .and_then(crate::btp::model::planned_time_unix_ms),
+                    tablet.match_times_store().first_assigned_ms(m.id),
+                    m.result == crate::btp::model::MatchResult::Walkover,
+                ),
             }
         })
         .collect();
@@ -4790,6 +4823,7 @@ pub(crate) fn build_state_limited(
         shuttle_counter: config.shuttle_counter,
         rev,
         server_now_ms: now_ms,
+        today: heute_ymd(now_ms),
         tournament: snap.tournament_name.clone(),
         multi_hall: snap.is_multi_hall(),
         halls,
@@ -4960,6 +4994,7 @@ fn profile_to_wire(p: &crate::config::TlPanelProfile) -> relay_proto::TlPanelPro
             hide_search: p.display.hide_search,
             show_move_buttons: p.display.show_move_buttons,
             show_last_played: p.display.show_last_played,
+            show_planned_times: p.display.show_planned_times,
             unlimited_court_calls: p.display.unlimited_court_calls,
             list_position: match p.display.list_position {
                 crate::config::TlListPosition::Right => relay_proto::TlListPositionWire::Right,
@@ -5016,6 +5051,7 @@ fn display_settings_from_wire(
         hide_search: d.hide_search,
         show_move_buttons: d.show_move_buttons,
         show_last_played: d.show_last_played,
+        show_planned_times: d.show_planned_times,
         unlimited_court_calls: d.unlimited_court_calls,
         list_position: match d.list_position {
             relay_proto::TlListPositionWire::Right => crate::config::TlListPosition::Right,
@@ -7589,6 +7625,96 @@ mod tests {
         let s = build_state(&tablet, &AppConfig::default(), 3_000_000, 7);
         let json = serde_json::to_string(&s.queue[0]).unwrap();
         assert!(!json.contains("last_played"), "{json}");
+    }
+
+    /// Spec `tl-zeitplan`: Die Beendet-Zeile trägt die Planzeit roh und den
+    /// Abstand des tatsächlichen Starts (erste Feldzuweisung) dazu.
+    #[test]
+    fn beendetes_spiel_traegt_planzeit_und_abweichung() {
+        let plan = 202_608_161_430; // 16.08.2026 14:30, Wandzeit
+        let plan_ms = crate::btp::model::planned_time_unix_ms(plan).expect("eindeutige Wandzeit");
+        let tablet = TabletState::default();
+        let mut done = a_match(3);
+        done.status = MatchStatus::Finished;
+        done.winner = Some(1);
+        done.planned_time = Some(plan);
+        let mut kampflos = a_match(4);
+        kampflos.status = MatchStatus::Finished;
+        kampflos.winner = Some(1);
+        kampflos.result = crate::btp::model::MatchResult::Walkover;
+        kampflos.planned_time = Some(plan);
+        let mut ungemessen = a_match(5);
+        ungemessen.status = MatchStatus::Finished;
+        ungemessen.winner = Some(2);
+        ungemessen.planned_time = Some(plan);
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![done, kampflos, ungemessen],
+            Vec::new(),
+        ));
+        for id in [3, 4] {
+            tablet.match_times_store().reconcile(
+                &[(id, "A", "mens_singles", "")],
+                &std::collections::HashSet::new(),
+                plan_ms + 18 * 60_000,
+            );
+        }
+
+        let s = build_state(&tablet, &AppConfig::default(), plan_ms + 3_600_000, 7);
+        let zeile = |id: i64| s.finished.iter().find(|f| f.match_id == id).unwrap();
+
+        assert_eq!(zeile(3).planned_time, Some(plan));
+        assert_eq!(zeile(3).start_delay_mins, Some(18));
+        assert_eq!(zeile(4).planned_time, Some(plan));
+        assert_eq!(zeile(4).start_delay_mins, None, "Walkover hat keinen Start");
+        assert_eq!(zeile(5).planned_time, Some(plan));
+        assert_eq!(zeile(5).start_delay_mins, None, "kein Stempel, keine Zahl");
+    }
+
+    #[test]
+    fn beendetes_spiel_ohne_planzeit_traegt_nichts() {
+        let tablet = TabletState::default();
+        let mut done = a_match(3);
+        done.status = MatchStatus::Finished;
+        done.winner = Some(1);
+        done.planned_time = None;
+        tablet.set_snapshot(snap(vec![a_court(1, None)], vec![done], Vec::new()));
+        tablet.match_times_store().reconcile(
+            &[(3, "A", "mens_singles", "")],
+            &std::collections::HashSet::new(),
+            1_000_000,
+        );
+
+        let s = build_state(&tablet, &AppConfig::default(), 3_600_000, 7);
+
+        assert_eq!(s.finished[0].planned_time, None);
+        assert_eq!(s.finished[0].start_delay_mins, None);
+        let json = serde_json::to_string(&s.finished[0]).unwrap();
+        assert!(!json.contains("planned_time"), "{json}");
+        assert!(!json.contains("start_delay_mins"), "{json}");
+    }
+
+    /// Spec `tl-zeitplan`: Der Profil-Schalter übersteht den Weg Config →
+    /// Draht → Config.
+    #[test]
+    fn profil_schalter_geplante_zeiten_reist_in_beide_richtungen() {
+        let mut config = AppConfig::default();
+        config.tl_web.profiles.push(crate::config::TlPanelProfile {
+            id: "p".into(),
+            name: "Plan".into(),
+            display: crate::config::TlDisplaySettings {
+                show_planned_times: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let draht = profiles_view(&config);
+        let wire = &draht.iter().find(|p| p.id == "p").unwrap().display;
+        assert!(wire.show_planned_times);
+        assert!(display_settings_from_wire(wire).show_planned_times);
+
+        let aus = relay_proto::TlDisplaySettingsWire::default();
+        assert!(!display_settings_from_wire(&aus).show_planned_times);
     }
 
     #[test]
@@ -11776,6 +11902,8 @@ mod tests {
             // Rahmen
             "rev",
             "server_now_ms",
+            // Tagesdatum des Turnier-PCs (Spec tl-zeitplan), keine Person.
+            "today",
             "tournament",
             "multi_hall",
             "halls",
@@ -12072,6 +12200,9 @@ mod tests {
             "predicted_uncertain",
             "brutto_mins",
             "netto_mins",
+            // Abstand tatsächlicher Start ↔ Planzeit an beendeten Spielen
+            // (Spec tl-zeitplan): eine Minutenzahl je MATCH.
+            "start_delay_mins",
             "time_stats",
             "rows",
             // Die drei zusätzlichen Achsen der Spielzeiten-Auswertung
@@ -12152,6 +12283,9 @@ mod tests {
             "showMoveButtons",
             // Profil-Schalter „Zuletzt gespielt" (Spec tl-zuletzt-gespielt).
             "showLastPlayed",
+            // „Geplante Zeiten anzeigen" (Spec tl-zeitplan): reiner
+            // Anzeige-Schalter im Profil.
+            "showPlannedTimes",
             "listPosition",
             // Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`)
             // — reine Anzeige-Präferenz wie die Häkchen daneben, ein Wort
@@ -12278,6 +12412,7 @@ mod tests {
                 hide_open_matches: false,
                 show_move_buttons: false,
                 show_last_played: false,
+                show_planned_times: false,
                 list_position: crate::config::TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
                 hide_seeds: false,

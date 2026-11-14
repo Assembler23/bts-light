@@ -1676,6 +1676,10 @@ pub struct TlDisplaySettings {
     /// ist „fehlt = aus" ausnahmsweise genau der gewollte Standard, deshalb
     /// nicht invertiert wie `hide_seeds`.
     pub show_last_played: bool,
+    /// Geplante Zeit aus BTP an Wartelisten-Zeilen und beendeten Spielen
+    /// (Spec `tl-zeitplan`). Default aus wie `show_last_played` — „fehlt =
+    /// aus" ist der gewollte Standard, Bestandsprofile bleiben unverändert.
+    pub show_planned_times: bool,
     pub list_position: TlListPosition,
     /// Achse des Panels „Spielzeiten" (Spec `tl-sicht-feinschliff`).
     /// Gehört ins Profil und nicht ins Gerät: Sie beschreibt, WAS gezeigt
@@ -2452,6 +2456,7 @@ mod tests {
                 hide_open_matches: false,
                 show_move_buttons: false,
                 show_last_played: true,
+                show_planned_times: true,
                 unlimited_court_calls: true,
                 list_position: TlListPosition::Bottom,
                 time_stats_axis: Default::default(),
