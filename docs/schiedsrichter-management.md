@@ -686,6 +686,34 @@ mit, `#[serde(default)]` für ältere Queue-Dateien). `officials_for_result`
 liefert `None` nur, wenn ohne Schiedsrichter-Betrieb gespielt wird — dann
 bleibt der Request unverändert zum Bestand.
 
+### Ruf aufs Feld löschte die Aufruf-Besetzung (Feldbefund 14.11.2026, behoben v0.9.405)
+
+Dieselbe Fehlerklasse ein drittes Mal, jetzt am **Feld-Write**. Symptom:
+Gerufene Spiele bekamen beim Aufruf SR/AR (sichtbar am Meetingpoint); kam
+danach jemand aus der Pause zurück, stand beim Ruf aufs Feld plötzlich ein
+**anderer** Schiedsrichter am Spiel.
+
+Ursache: `TabletState::officials_for_write` liefert `None`, sobald lokal
+nichts mehr steht — und das ist der Normalfall, wenn BTP die
+Aufruf-Besetzung schon bestätigt hat (`confirm` lässt dann los). Der
+Feld-Write (Auto-Vergabe, TL-Web, Desktop) ließ `Official1ID`/`Official2ID`
+mit `None` weg, BTP las das als 0 (Messung 09.11.2026, siehe
+[btp_protocol.md](btp_protocol.md)) und löschte die Besetzung. Im nächsten
+Takt sah `track_officials` ein neu belegtes Feld **ohne** SR/AR und
+besetzte es aus der Liste. Meist traf das dieselbe Person — sie war ja
+gerade wieder frei geworden und stand oben —, deshalb fiel es nur auf, wenn
+sich die Liste inzwischen geändert hatte (Rückkehr aus der Pause,
+Umsortieren).
+
+**Fix:** `TabletState::officials_fuer_feld_write` liefert **immer** die
+Besetzung: mit Schiedsrichter-Betrieb die Sicht „Hand vor BTP", sonst den
+BTP-Wert unverändert (dann bleibt auch eine Einteilung stehen, die die
+Turnierleitung nur in BTP pflegt). Benutzt von allen Feld-Writes — Ruf aufs
+Feld **und** Freigeben („Vom Feld nehmen" nahm dem Spiel bisher ebenfalls
+die Besetzung). Tests: `der_feld_write_traegt_die_von_btp_bestaetigte_aufruf_besetzung_mit`
+(`sync.rs`), `der_feld_write_laesst_die_besetzung_nie_weg` (`state.rs`),
+`freigeben_und_zuweisen_tragen_die_besetzung_mit` (`tl.rs`).
+
 ### Was das Tablet erreicht
 
 Der Push-Schlüssel beider Wege (LAN und Cloud) enthält neben Match-ID und

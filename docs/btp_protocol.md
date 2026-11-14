@@ -1141,8 +1141,12 @@ Snapshot, nicht per Einmal-Check.
 - **eigenständig** (`sync.rs::reconcile_officials`) — leerer `Courts`-Block,
   nur `Matches`, `CourtID` immer aus dem aktuellen Snapshot mitgeschrieben
   (`m.court_id.unwrap_or(0)`).
-- **eingebettet** beim Ruf aufs Feld — zusätzlich der `Courts`-Block
-  (`MatchCourt::officials` additiv).
+- **eingebettet** beim Ruf aufs Feld und beim Freigeben — zusätzlich der
+  `Courts`-Block. Seit v0.9.405 **immer** mit `Official1ID`/`Official2ID`
+  (`TabletState::officials_fuer_feld_write`): Ein fehlendes Element heißt
+  für BTP 0, der Feld-Write löschte sonst eine schon bestätigte
+  Aufruf-Besetzung (Feldbefund 14.11.2026, siehe
+  [schiedsrichter-management.md](schiedsrichter-management.md)).
 
 **Race mit einer frischen Feldzuweisung, behoben (Live-Befund 14.08.2026,
 verschärft/bestätigt nach einem verworfenen Zwischenfix).** Ursprünglich
