@@ -533,6 +533,12 @@ Erweiterung 06.09.2026):
   Neuladen) · **nebeneinander (links–rechts)** · **übereinander
   (vorn–hinten)**. Die Wahl gilt je Gerät (`localStorage`), nicht je Feld —
   sie beschreibt, wo das Tablet steht.
+- **Schiri-Leiste** (seit v0.9.413): Im Querformat nimmt sie den Platz, den
+  der Court nicht braucht (ihm bleiben
+  26vh; vorher war bei 30vw Schluss — die Eröffnungsansage lief dort aus dem
+  Bild), im Hochformat bis 46vw (mit
+  „Große Schrift" 50vw). Die Ansage wird eingepasst, siehe
+  [Schiri-Modus](umpire-mode.md), Abschnitt „Schriftgröße".
 - **Nichts an der Zähllogik ändert sich:** intern bleibt alles links/rechts
   (Seitenwechsel, Aufschlagfolge, Ergebnis, Spiegel zum Host); „vorne" ist
   die Seite „links". Ein Wechsel der Anordnung mitten im Spiel dreht nur die

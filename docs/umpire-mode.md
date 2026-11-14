@@ -25,6 +25,48 @@ Fünf-Minuten-Freigabe nach einer Eingabe entfällt sie) → **„Schiri-Modus: 
 Opt-in pro Tablet, lokal gespeichert (`localStorage`). Es erscheint eine **immer
 sichtbare Ansage-Leiste**.
 
+## Schriftgröße und „Große Schrift" (seit v0.9.413)
+
+Rückmeldung 14.11.2026: Schiedsrichter mit schwächerem Sehvermögen wünschten
+sich größere Ansagetexte und mehr Kontrast. Eine Messung im Headless-Browser
+(nachgestellte Fenstergrößen von Fire HD 8 und HD 10, beide Anordnungen) zeigte: Der Kontrast der Ansage selbst war gut
+(16 : 1), aber die Schrift stand **fest auf 1,6 rem** — egal wie kurz der Text
+und wie groß das Tablet war.
+
+- **Die Ansage passt sich ein.** Ändern sich Text oder Platz, probiert
+  `ansageEinpassen` die Schriftstufen von groß nach klein (Schritte von
+  0,2 rem) und nimmt die erste, die passt. Die Regel steht in
+  `src/io/ansageSchrift.mjs` (`ansageSchriftWaehlen`, Test
+  `scripts/test-ansage-schrift.mjs`, Inline-Kopie im Tablet):
+
+  | | größte Stufe | Basis | kleinste Stufe | Feld behält mindestens |
+  |---|---|---|---|---|
+  | normal | 2,6 rem | 1,6 rem | 1,0 rem | 38 % |
+  | „Große Schrift" | 3,6 rem | 2,0 rem | 1,2 rem | 25 % |
+
+  Über der Basis gilt eine Stufe nur, wenn die Leiste nicht überläuft, kein
+  Wort mitten umbrochen wird **und** das Spielfeld darunter seinen
+  Mindestanteil an der Mittelspalte behält (steht das Feld neben der Leiste,
+  entfällt das). Bei der Basis reicht „läuft nicht über" — so war es schon
+  immer. Darunter geht es nur, um einen Überlauf zu heilen; passt selbst die
+  kleinste Stufe nicht, **scrollt die Leiste**, statt sich über Kopfzeile oder
+  Plus-Knöpfe zu legen (das tat die Eröffnungsansage in der Anordnung
+  „übereinander" vorher).
+- **„Große Schrift: an"** im Zahnrad-Menü, Abschnitt „Schiedsrichter". Gilt
+  **je Gerät** (`localStorage`, Schlüssel `badhub.tablet.grosseSchrift`), nicht
+  je Feld, und wirkt auch ohne Schiri-Modus. Setzt die Klasse `lesbar` am
+  `<body>`: Ansage Schwarz auf Weiß mit kräftigem Rahmen, Marke und
+  Karten-Hinweise größer, Pausen-Ansage größer auf Schwarz, Spielernamen fett
+  auf dunklerem Feldgrün (9 : 1 statt 4,8 : 1).
+- **Pause und Spielende decken jetzt praktisch ganz** (`--scrim-dicht`, 97 %
+  statt 92 %): Vorher schien die Ansage-Leiste hinter Countdown und Knöpfen
+  durch.
+- **Grenzen:** Auf einem 8-Zoll-Tablet in der Anordnung „übereinander" ist die
+  Spalte neben dem Feld schmal. Lange Ansagen (Eröffnung, Satzende mit
+  Doppelnamen) fallen dort auf die kleinste Stufe und scrollen notfalls. Wer
+  als Schiedsrichter vorliest, sitzt besser im Querformat „nebeneinander".
+  Gemessen wurde im Headless-Browser, nicht am Gerät — Feldtest steht aus.
+
 ## Ansagen (Deutsch/DBV)
 Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 

@@ -4,6 +4,25 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.413
+
+- **Zähl-Tablet: Ansagen besser lesbar.** Schiedsrichter mit schwächerem
+  Sehvermögen wünschten sich größere Ansagetexte und mehr Kontrast.
+  - Die **Ansage im Schiri-Modus wächst mit**: Sie nimmt die größte Schrift,
+    die in die Leiste passt. Kurze Ansagen („7 beide", „20 Satzpunkt 15")
+    stehen bis gut anderthalbmal so groß da wie bisher, lange bleiben wie
+    sie waren.
+  - Neuer Eintrag **„Große Schrift"** im Zahnrad-Menü (je Tablet, Standard
+    aus): noch größere Ansage, Schwarz auf Weiß, dunkleres Feldgrün unter
+    den Spielernamen, größere Marken und Karten-Hinweise.
+  - **Behoben:** In der Anordnung „übereinander" lief die Eröffnungsansage
+    über Kopfzeile und Plus-Knopf hinaus. Sie wird jetzt eingepasst; reicht
+    der Platz gar nicht, scrollt die Leiste.
+  - **Behoben:** In Pause und Spielende schien die Ansage-Leiste als
+    Geisterschrift hinter Countdown und Knöpfen durch.
+  - Marke („Satzpunkt", „Verwarnung") und Karten-Hinweise sind auch ohne
+    den Schalter etwas größer.
+
 ## v0.9.412
 
 - **Turnierleitung im Browser: Panel „Zeitplan".** Ein neues Panel zeigt

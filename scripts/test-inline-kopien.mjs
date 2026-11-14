@@ -22,6 +22,7 @@ import * as rr from "../src/io/resultRetry.mjs";
 import * as aa from "../src/io/abschlussAnsicht.mjs";
 import * as bz from "../src/io/ballzaehler.mjs";
 import * as sp from "../src/io/satzpunkt.mjs";
+import * as as from "../src/io/ansageSchrift.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -409,6 +410,30 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
     const T = [false, true].flatMap((a) => [false, true].map((b) => ({ a, b })));
     gleich("satzpunktAnsagen", T.flatMap((j) => [null, ...T].map((v) => [j, v])),
       (m, [j, v]) => m.satzpunktAnsagen(j, v));
+  }
+}
+
+// ── Schriftgröße der Ansage (Schiri-Modus) ──
+// Eine abweichende Kopie ließe die Ansage zu groß (über die Knöpfe) oder
+// stur klein — beides merkt erst, wer am Feld vorlesen muss.
+{
+  const text = seite("tablet.html");
+  const namen = ["ansageStufen", "ansageKandidaten", "ansageSchriftWaehlen", "grosseSchriftAus"];
+  const quellen = namen.map((n) => funktion(text, n));
+  ok("tablet.html: Ansage-Schrift-Kopien vorhanden", quellen.every(Boolean), true);
+  if (quellen.every(Boolean)) {
+    // eslint-disable-next-line no-new-func
+    const f = new Function(quellen.join("\n") + "\nreturn { " + namen.join(", ") + " };")();
+    const MODI = [false, true];
+    ok("tablet.html: ansageStufen wie Modul", MODI.map((g) => f.ansageStufen(g)), MODI.map((g) => as.ansageStufen(g)));
+    ok("tablet.html: ansageKandidaten wie Modul", MODI.map((g) => f.ansageKandidaten(g)), MODI.map((g) => as.ansageKandidaten(g)));
+    const FAELLE = [];
+    for (const g of MODI) for (const ueberAb of [0, 1.2, 1.6, 2, 2.4, 99]) for (const feld of [null, 0, 0.3, 0.5]) FAELLE.push([g, ueberAb, feld]);
+    const ruf = (m, [g, ueberAb, feld]) =>
+      m.ansageSchriftWaehlen(g, (rem) => ({ ueberlauf: rem >= ueberAb, feldAnteil: feld === null ? null : feld - rem / 20 }));
+    ok("tablet.html: ansageSchriftWaehlen wie Modul", FAELLE.map((x) => ruf(f, x)), FAELLE.map((x) => ruf(as, x)));
+    const ROH = ["1", "0", null, undefined, "", 1, true];
+    ok("tablet.html: grosseSchriftAus wie Modul", ROH.map((r) => f.grosseSchriftAus(r)), ROH.map((r) => as.grosseSchriftAus(r)));
   }
 }
 
