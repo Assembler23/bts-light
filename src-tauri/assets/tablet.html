@@ -600,6 +600,27 @@
       z-index: 15;
     }
     .break-overlay.visible { display: flex; }
+    /* Die Knöpfe stehen als EINE Spalte gleicher Breite untereinander. Ohne
+       diese Regel griff das allgemeine `button { flex: 1 }`: In der
+       Spalten-Anordnung wuchsen die Knöpfe in die HÖHE und waren nur so
+       breit wie ihr Text — jeder anders. Reicht die Höhe nicht (Querformat,
+       Schiri-Ansage + alle Knöpfe), scrollt das Overlay, statt zu stauchen.
+       Zentriert wird über automatische Ränder statt `safe center`: Das
+       kennen ältere WebViews (Fire OS) nicht, und mit bloßem `center` wäre
+       der obere Teil bei Überlauf nicht mehr erreichbar. */
+    .break-overlay { overflow-y: auto; justify-content: flex-start; }
+    .break-overlay > :first-child { margin-top: auto; }
+    .break-overlay > :last-child { margin-bottom: auto; }
+    .break-overlay > * { flex: 0 0 auto; }
+    #break-overlay > button {
+      width: min(26rem, 100%); margin-top: -.5rem;
+      padding: .85rem 1rem; font-size: 1.05rem; font-weight: 700;
+    }
+    /* „Weiterspielen" ist die Haupthandlung: deutlich größer, mit Abstand. */
+    #break-overlay > button.primary {
+      margin-top: 0; margin-bottom: .5rem;
+      padding: 1.3rem 1rem; font-size: 1.5rem; font-weight: 800;
+    }
     .break-title {
       font-size: 1.7rem; font-weight: 800; color: #7dd3fc;
       letter-spacing: .03em; text-transform: uppercase;
@@ -613,7 +634,7 @@
     /* Überzogene Pause (E9, ADR 0028): zählt rot hoch, bis weitergespielt
        wird — unmissverständlich auch aus einigen Metern Entfernung. */
     .break-countdown.overrun { color: #f87171; }
-    .break-hint { font-size: .95rem; color: #cbd5e1; max-width: 22rem; }
+    .break-hint { font-size: .9rem; line-height: 1.4; color: #cbd5e1; width: min(26rem, 100%); }
     /* Schiri-Ansage in der Pausen-Überlagerung (Satzende/„Bitte spielen" …). */
     .break-umpire {
       max-width: 42rem; font-size: 1.5rem; font-weight: 700; line-height: 1.3;
