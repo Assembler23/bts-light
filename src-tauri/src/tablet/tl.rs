@@ -4040,12 +4040,13 @@ fn last_played_by_player(
     snap: &crate::btp::model::BtpSnapshot,
     zeiten: &std::collections::HashMap<i64, crate::tablet::match_times::MatchTimeEntry>,
 ) -> std::collections::HashMap<String, u64> {
-    use crate::btp::model::{MatchResult, MatchStatus};
+    use crate::btp::model::MatchStatus;
     let mut zuletzt: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    // Dieselbe Regel wie die Pflichtpause: kampflos und Freilos zählen nicht.
     for m in snap
         .matches
         .iter()
-        .filter(|m| m.status == MatchStatus::Finished && m.result != MatchResult::Walkover)
+        .filter(|m| m.status == MatchStatus::Finished && assign::wurde_gespielt(m))
     {
         let ende = zeiten
             .get(&m.id)
@@ -7650,6 +7651,22 @@ mod tests {
             "der Walkover setzt die Uhr nicht zurück — das Spiel davor gilt"
         );
         assert_eq!(zeile(&s, 4).team2_last_played_ms, Some(800_000));
+    }
+
+    #[test]
+    fn ein_freilos_zaehlt_nicht_als_gespielt() {
+        // Gleiche Regel wie die Pflichtpause (Feldbericht 14.11.2026).
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(
+            vec![a_court(1, None)],
+            vec![
+                beendet(1, vec![player("A")], Vec::new(), 900_000),
+                wartend(2, vec![player("A")], vec![player("B")]),
+            ],
+            Vec::new(),
+        ));
+        let s = build_state(&tablet, &AppConfig::default(), 3_000_000, 7);
+        assert_eq!(zeile(&s, 2).team1_last_played_ms, None);
     }
 
     #[test]

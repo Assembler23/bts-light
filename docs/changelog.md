@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.413
+
+- **Keine falsche Pause mehr nach Freilos oder kampflosem Sieg.** Wurde
+  eine Disziplin ausgelost, während ein Spieler schon in der Warteliste
+  einer anderen Disziplin stand, bekam er wegen seines Freiloses sofort die
+  volle Mindestpause (Eieruhr) — obwohl er gar nicht gespielt hatte. Freilos
+  und kampflose Siege lösen jetzt keine Pause mehr aus und zählen auch bei
+  „Zuletzt gespielt" nicht. Aufgabe und Disqualifikation schon.
+
 ## v0.9.412
 
 - **Turnierleitung im Browser: Panel „Zeitplan".** Ein neues Panel zeigt
