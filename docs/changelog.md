@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.402
+
+- **Schiri-Modus: Ansagen wörtlich nach dem Vokabular (Anhang 4, 06/2026).**
+  Rückmeldung der Schiedsrichter: Im Doppel heißt es „X schlägt auf **zu** Y"
+  (das „zu" fehlte), im Einzel nur „X schlägt auf" (bisher wurde auch dort
+  ein Rückschläger genannt). Zwischen den Namen eines Doppels steht „und"
+  statt „/". Eröffnung und Satzbeginn folgen der Satzform des Vokabulars
+  („…, Null beide, bitte spielen.", „Zweiter Satz, null beide, bitte
+  spielen."). Bei Aufgabe: „{Name} aufgegeben. Das Spiel wurde gewonnen von
+  … mit …". In der Behandlungspause: „Das Spiel ist unterbrochen." Schwarze
+  Karte: „disqualifiziert wegen unsportlichem Verhalten."
+
 ## v0.9.401
 
 - **Schiri-Modus: „Satzpunkt" nur beim ersten Erreichen.** Die Ansage am
