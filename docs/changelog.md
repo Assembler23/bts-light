@@ -10,6 +10,14 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Personen eingecheckt, färbt sich die ganze Karte grün statt nur ihr Rand —
   gut zu sehen auch aus der Entfernung.
 
+## v0.9.407
+
+- **Ansage: Mit Schiedsrichter endet die Feld-Ansage wieder mit dem Feld.**
+  Wurden Schiedsrichter oder Aufschlagrichter mitangesagt, hörte man zuletzt
+  deren Namen. Jetzt folgt danach noch einmal das Feld („… Schiedsrichter:
+  Anna Schulz. Aufschlagrichter: Bob Meier. Feld 3."). Das gilt auch für den
+  Knopf „SR/AR ansagen". Ohne Schiedsrichter bleibt die Ansage unverändert.
+
 ## v0.9.406
 
 - **Fernseher der Court-Monitore an- und ausschalten.** Auf der Seite

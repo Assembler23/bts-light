@@ -31,7 +31,7 @@ import {
 import { GONG_BREATH_MS, gongResolveRace } from "./gongTiming.mjs";
 import { gongPlanen } from "./gongKlang.mjs";
 import { resolveNameCorrection } from "./nameCorrection.mjs";
-import { besetzungSegmente } from "./prepBesetzung.mjs";
+import { besetzungMitFeld, besetzungSegmente } from "./prepBesetzung.mjs";
 import { voiceForDiscipline } from "./disciplineVoice.mjs";
 import { disziplinName } from "./disziplinName.mjs";
 import { klasseSsml, klasseText } from "./klasseSprechen.mjs";
@@ -793,7 +793,7 @@ export function buildAnnouncementSegments(
   // nachträgliche Zuweisung soll nicht die ganze Paarung erneut aufrufen —
   // das Spiel läuft ja schon (Spec Nr. 8).
   if (input.officialsOnly) {
-    return segments.concat(officialSegments(input, lang));
+    return segments.concat(officialSegmentsMitFeld(input, lang, court));
   }
   if (disc) segments.push(`${disc}.`);
   // Runde ab Viertelfinale vor der Paarung ansagen (wertet die Ansage auf).
@@ -815,8 +815,11 @@ export function buildAnnouncementSegments(
   }
   // Schiedsrichter/Aufschlagrichter nach der Bedienung (Spec Nr. 8). Namen
   // ohne Aussprache-Korrektur, wie bei der Bedienung: Das ist eine
-  // Zuständigkeits-Ansage, keine Spieler-Vorstellung.
-  for (const seg of officialSegments(input, lang)) segments.push(seg);
+  // Zuständigkeits-Ansage, keine Spieler-Vorstellung. Mit Besetzung folgt
+  // das Feld noch einmal — die Ansage endet immer mit dem Feld.
+  for (const seg of officialSegmentsMitFeld(input, lang, court)) {
+    segments.push(seg);
+  }
   return segments;
 }
 
@@ -827,6 +830,21 @@ function officialSegments(
   lang: AnnounceLang,
 ): string[] {
   return besetzungSegmente(input.umpireNames, input.serviceJudgeNames, lang);
+}
+
+/** Wie `officialSegments`, aber für die Feld-Ansage: Mit Besetzung steht
+ *  danach noch einmal das Feld (`court` = rohe, unescapte Feld-Phrase). */
+function officialSegmentsMitFeld(
+  input: { umpireNames?: string[]; serviceJudgeNames?: string[] },
+  lang: AnnounceLang,
+  court: string,
+): string[] {
+  return besetzungMitFeld(
+    input.umpireNames,
+    input.serviceJudgeNames,
+    lang,
+    court,
+  );
 }
 
 // ─── Azure-SSML (hochwertige Ansage am Stück) ────────────────────────────
@@ -1067,8 +1085,13 @@ export function buildAnnouncementSsml(
     ).map(xmlEscape);
     return ssmlDokument(lang, voice, teile, rate);
   }
+  // Rohe Feld-Phrase für den Feld-Abschluss nach der Besetzung — `court`
+  // oben ist schon escapt, die Segmente werden unten einzeln escapt.
+  const courtRoh = resolveCourtPhrase(input.courtLabel, lang);
   if (input.officialsOnly) {
-    for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
+    for (const seg of officialSegmentsMitFeld(input, lang, courtRoh)) {
+      parts.push(xmlEscape(seg));
+    }
     return ssmlDokument(lang, voice, parts, rate);
   }
   if (disc) parts.push(`${disc}.`);
@@ -1086,8 +1109,10 @@ export function buildAnnouncementSsml(
     parts.push(`${xmlEscape(label)}: ${xmlEscape(sk.join(" / "))}.`);
   }
   // Dieselben Segmente wie im Web-Speech-Pfad (`officialSegments`), damit
-  // beide Wege Wort für Wort dasselbe ansagen.
-  for (const seg of officialSegments(input, lang)) parts.push(xmlEscape(seg));
+  // beide Wege Wort für Wort dasselbe ansagen — inklusive Feld am Schluss.
+  for (const seg of officialSegmentsMitFeld(input, lang, courtRoh)) {
+    parts.push(xmlEscape(seg));
+  }
 
   return ssmlDokument(lang, voice, parts, rate);
 }
