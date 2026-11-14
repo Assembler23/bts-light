@@ -33,7 +33,7 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 | Eröffnung | Einzel: „Meine Damen und Herren, zu meiner Rechten {rechts}, **und** zu meiner Linken {links}. {Aufschläger} schlägt auf, Null beide, bitte spielen." Doppel: „… {Aufschläger} schlägt auf **zu** {Rückschläger}, Null beide, bitte spielen." (Anhang 4, 2.1.1/2.1.3). Der Rückschläger wird **nur im Doppel** genannt. Zwischen den Namen eines Doppels steht „**und**" (6.7). Die Reihenfolge ist fest: **immer erst rechts**, unabhängig davon, wer aufschlägt. |
 | Punkt | „{Aufschläger}:{Rückschläger}" |
 | Gleichstand | „{n} beide" |
-| Satzpunkt / Spielpunkt | „{Aufschläger} **Satzpunkt** {Rückschläger}" — z. B. „20 Satzpunkt 6", bei Gleichstand „29 Satzpunkt beide". „**Spielpunkt**", wenn der Satz zugleich das Spiel entschiede. Das Wort steht immer zwischen Aufschläger- und Rückschlägerstand (DBV-Vokabular, Anhang 4, 3.1.10–3.1.13 und 7.1.3). Erkannt über die echte Satzregel samt Verlängerung und Obergrenze (21er: ab 20, bis 29:29; 11er: ab 10, bis 14:14). |
+| Satzpunkt / Spielpunkt | „{Aufschläger} **Satzpunkt** {Rückschläger}" — z. B. „20 Satzpunkt 6", bei Gleichstand „29 Satzpunkt beide". „**Spielpunkt**", wenn der Satz zugleich das Spiel entschiede. Das Wort steht immer zwischen Aufschläger- und Rückschlägerstand (DBV-Vokabular, Anhang 4, 3.1.10–3.1.13 und 7.1.3). Erkannt über die echte Satzregel samt Verlängerung und Obergrenze (21er: ab 20, bis 29:29; 15er: ab 14, bis 20:20; 11er: ab 10, bis 14:14). **Angesagt wird das Wort nur, wenn der Satzpunkt mit dem letzten Ballwechsel neu entsteht** (DBV Anhang 4, 7.1.1/7.1.2: „Sobald … erreicht"): 20:15 → „20 Satzpunkt 15", danach 20:16 → „20:16". Nach einem Gleichstand in der Verlängerung entsteht er neu (21:20, 22:21 …), an der Obergrenze für die zweite Mannschaft dazu („29 Satzpunkt beide"). Das gilt auch für die Freigabe nach einer Pause und die Ansage nach einer Karte. Fehlt der Stand davor (Einstieg mitten im Spiel), wird angesagt. Bis v0.9.400 stand das Wort bei **jedem** Ballwechsel mit Satzpunkt (Schiri-Rückmeldung 14.11.2026). |
 | Aufschlagwechsel | „Aufschlagwechsel, {Stand}" |
 | Nach jeder Pause | „{Stand}, bitte spielen." — die Freigabe gehört dazu; sie gilt bis zum nächsten Ballwechsel. |
 | Punktepause | „{Stand} – Pause." — mit „Aufschlagwechsel, " davor, wenn der Punkt zur Pause ein Aufschlagwechsel war. **Nur im Entscheidungssatz** folgt „**Feldseiten wechseln.**" — nur dort wechseln die Spieler bei der Punktepause die Seiten. Die **Überschrift** der Pause nennt die Schwelle der jeweiligen Zählweise („Pause bei 11 Punkten", bei 15ern „Pause bei 8 Punkten"). |
@@ -45,6 +45,10 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 
 Badges: **Satzpunkt** / **Spielpunkt** (bis v0.9.350 „Satzball"/„Matchball";
 Schiri-Feedback vom 08.11.2026 — das Vokabular sagt „Satzpunkt").
+Das Abzeichen steht, **solange** ein Satzpunkt besteht — auch an den
+Ständen, an denen die Ansage das Wort weglässt. Die Regel liegt in
+`src/io/satzpunkt.mjs` (Test `scripts/test-satzpunkt.mjs`, Inline-Kopie im
+Tablet).
 <!-- pruef: "Spielpunkt" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Feldseiten wechseln." in src-tauri/assets/tablet.html -->
 <!-- pruef: "schlägt auf zu" in src-tauri/assets/tablet.html -->
@@ -72,7 +76,7 @@ Button **„Karte / Verwarnung"** → Spieler wählen → Farbe:
 |---|---|---|
 | 🟨 Gelb | Verwarnung (kein Punkt) | „{Name}, Verwarnung wegen unsportlichen Verhaltens. {Stand}" |
 | 🟥 Rot | **Gegner bekommt +1** (regulärer Punkt) | „{Name}, Fehler wegen unsportlichen Verhaltens. {Stand}" |
-| ⬛ Schwarz | Disqualifikation (Anzeige/Protokoll) | „{Name}, disqualifiziert wegen unsportlichem Verhalten." — wörtlich nach Anhang 4, 3.10.9 (bis v0.9.400: „wegen grober Unsportlichkeit"). |
+| ⬛ Schwarz | Disqualifikation (Anzeige/Protokoll) | „{Name}, disqualifiziert wegen unsportlichem Verhalten." — wörtlich nach Anhang 4, 3.10.9 (bis v0.9.401: „wegen grober Unsportlichkeit"). |
 <!-- pruef: "disqualifiziert wegen unsportlichem Verhalten." in src-tauri/assets/tablet.html -->
 
 Vergebene Karten erscheinen als **Chips** in der Leiste; je `matchId`

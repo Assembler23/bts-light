@@ -21,6 +21,7 @@ import * as sw from "../src/io/standWahl.mjs";
 import * as rr from "../src/io/resultRetry.mjs";
 import * as aa from "../src/io/abschlussAnsicht.mjs";
 import * as bz from "../src/io/ballzaehler.mjs";
+import * as sp from "../src/io/satzpunkt.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -380,6 +381,35 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
   const spiegel = funktion(text, "standFuerSpiegel") || "";
   ok("tablet.html: Ballzahl nicht im Undo-Stand", /shuttles/.test(snap), false);
   ok("tablet.html: Ballzahl im gespiegelten Stand", /shuttles: STATE\.shuttles/.test(spiegel), true);
+}
+
+// ── Satzpunkt-Ansage (Schiri-Modus) ──
+// Eine abweichende Kopie sagte „Satzpunkt" bei jedem Ballwechsel an (oder
+// verschwiege einen neu entstandenen nach dem Gleichstand in der
+// Verlängerung) — das fällt erst dem Schiedsrichter am Feld auf.
+{
+  const text = seite("tablet.html");
+  const namen = ["satzSieger", "satzpunktSeiten", "satzpunktTeams", "satzpunktAnsagen"];
+  const quellen = namen.map((n) => funktion(text, n));
+  ok("tablet.html: Satzpunkt-Kopien vorhanden", quellen.every(Boolean), true);
+  if (quellen.every(Boolean)) {
+    // eslint-disable-next-line no-new-func
+    const f = new Function(quellen.join("\n") + "\nreturn { " + namen.join(", ") + " };")();
+    const FORMATE = [[21, 30], [15, 21], [11, 15], [99, 99], [0, 0]];
+    const STAENDE = [];
+    for (let l = 0; l <= 31; l++) for (let r = 0; r <= 31; r++) STAENDE.push({ left: l, right: r });
+    const SEITEN = [undefined, null, { a: "left" }, { a: "right" }];
+    const gleich = (name, faelle, ruf) =>
+      ok("tablet.html: " + name + " wie Modul", faelle.map((x) => ruf(f, x)), faelle.map((x) => ruf(sp, x)));
+    const ALLE = FORMATE.flatMap(([z, c]) => STAENDE.map((s) => [s, z, c]));
+    gleich("satzSieger", ALLE, (m, [s, z, c]) => m.satzSieger(s, z, c));
+    gleich("satzpunktSeiten", ALLE, (m, [s, z, c]) => m.satzpunktSeiten(s, z, c));
+    gleich("satzpunktTeams", ALLE.flatMap((x) => SEITEN.map((t) => [...x, t])),
+      (m, [s, z, c, t]) => m.satzpunktTeams(s, z, c, t));
+    const T = [false, true].flatMap((a) => [false, true].map((b) => ({ a, b })));
+    gleich("satzpunktAnsagen", T.flatMap((j) => [null, ...T].map((v) => [j, v])),
+      (m, [j, v]) => m.satzpunktAnsagen(j, v));
+  }
 }
 
 if (failures) {

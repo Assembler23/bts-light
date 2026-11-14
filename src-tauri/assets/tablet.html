@@ -2465,13 +2465,17 @@ function capForTarget(target) {
   return target + 5;
 }
 
+/** Obergrenze des Satzes aus der BTP-Zählweise (z. B. 21 bei 15er-Sätzen,
+ *  30 bei 21er). Fallback auf die klassische Ableitung, falls der Server
+ *  keinen (oder 0) Cap mitschickt – hält ältere Frames lesbar. */
+function satzObergrenze(target) {
+  const sent = STATE.match && STATE.match.capScore;
+  return (sent && sent >= target) ? sent : capForTarget(target);
+}
+
 function setWinnerSide(setScore, target) {
   if (target >= 99) return null;
-  // Cap aus der BTP-Zählweise (z. B. 21 bei 15er-Sätzen, 30 bei 21er).
-  // Fallback auf die klassische Ableitung, falls der Server keinen (oder 0)
-  // Cap mitschickt – hält ältere Frames lesbar.
-  const sent = STATE.match && STATE.match.capScore;
-  const cap = (sent && sent >= target) ? sent : capForTarget(target);
+  const cap = satzObergrenze(target);
   const { left, right } = setScore;
   if (left >= cap) return 'left';
   if (right >= cap) return 'right';
@@ -6390,7 +6394,9 @@ function umpReceiverName() {
 // Schiri-Feedback 08.11.2026: „Satzpunkt", nicht „Satzball".
 function umpScoreSpoken() {
   const lage = umpPunktLage();
-  const wort = lage ? ` ${lage.wort} ` : null;
+  // Das Wort nur beim NEUEN Satzpunkt (`satzpunktAnsagen`), sonst der
+  // reine Stand: „20 Satzpunkt 15", dann „20:16".
+  const wort = lage && lage.ansagen ? ` ${lage.wort} ` : null;
   let sv = STATE.currentSet.left, rv = STATE.currentSet.right;
   if (STATE.servingSide === 'right') [sv, rv] = [rv, sv];
   if (sv === rv) return wort ? `${sv}${wort}beide` : `${sv} beide`;
@@ -6488,24 +6494,72 @@ function umpMatchEndSpoken() {
  *  den Satz? Gerechnet über `setWinnerSide`, also mit Verlängerung und Cap
  *  (21er: 20:19, 21:20 … 29:29; 11er: 10, 14:14) statt der früheren
  *  Näherung „Führender bei Ziel − 1", die 29:29 nicht kannte.
- *  `null` = kein Satzpunkt; sonst { wort, beide }. Spielpunkt, wenn der
- *  Satz zugleich das Spiel entschiede (bei „beide" nur, wenn das für beide
- *  Seiten gilt — sonst „Satzpunkt beide"). */
+ *  `null` = kein Satzpunkt; sonst { wort, beide, ansagen }. Spielpunkt,
+ *  wenn der Satz zugleich das Spiel entschiede (bei „beide" nur, wenn das
+ *  für beide Seiten gilt — sonst „Satzpunkt beide"). `ansagen`: Der
+ *  Satzpunkt ist mit dem letzten Ballwechsel NEU entstanden — nur dann
+ *  gehört das Wort in die Ansage (DBV Anhang 4, 7.1.1/7.1.2; Regeln in
+ *  `src/io/satzpunkt.mjs`). Das Abzeichen zeigt ihn unabhängig davon,
+ *  solange er besteht. */
 function umpPunktLage() {
   if (!STATE.match || STATE.finished) return null;
   const target = STATE.match.targetScore;
   if (!target || target >= 99) return null;
-  const l = STATE.currentSet.left, r = STATE.currentSet.right;
-  const links = setWinnerSide({ left: l + 1, right: r }, target) === 'left';
-  const rechts = setWinnerSide({ left: l, right: r + 1 }, target) === 'right';
+  const cap = satzObergrenze(target);
+  const seiten = satzpunktSeiten(STATE.currentSet, target, cap);
+  const links = seiten.left, rechts = seiten.right;
   if (!links && !rechts) return null;
+  const ansagen = satzpunktAnsagen(
+    satzpunktTeams(STATE.currentSet, target, cap, STATE.teamOnSide),
+    umpVorigerSatzpunkt(target, cap));
   const need = requiredSetsToWin(STATE.match.bestOfSets);
   const spielFuer = side => STATE.setsCompleted.filter(s =>
     side === 'left' ? s.left > s.right : s.right > s.left).length === need - 1;
   const spiel = links && rechts
     ? spielFuer('left') && spielFuer('right')
     : spielFuer(links ? 'left' : 'right');
-  return { wort: spiel ? 'Spielpunkt' : 'Satzpunkt', beide: links && rechts };
+  return { wort: spiel ? 'Spielpunkt' : 'Satzpunkt', beide: links && rechts, ansagen };
+}
+
+/** Satzpunkt-Lage je Mannschaft im Stand VOR dem letzten Ballwechsel —
+ *  aus dem jüngsten Undo-Stand, solange er im selben Satz liegt. Sonst
+ *  `null` (unbekannt → `satzpunktAnsagen` sagt an). */
+function umpVorigerSatzpunkt(target, cap) {
+  const h = STATE.history;
+  const vor = h && h.length ? h[h.length - 1] : null;
+  if (!vor || !vor.currentSet || !Array.isArray(vor.setsCompleted)) return null;
+  if (vor.setsCompleted.length !== STATE.setsCompleted.length) return null;
+  return satzpunktTeams(vor.currentSet, target, cap, vor.teamOnSide);
+}
+
+// ─── Satzpunkt-Ansage ──────────────────────────────────────────────────
+/* INLINE-KOPIE von `src/io/satzpunkt.mjs` — dort steht die kanonische
+ * Fassung samt Begründung und Test (`scripts/test-satzpunkt.mjs`); die
+ * Kopie hier vergleicht `scripts/test-inline-kopien.mjs` im Verhalten.
+ * Änderungen hier und dort gemeinsam. */
+function satzSieger(stand, ziel, cap) {
+  if (!ziel || ziel >= 99) return null;
+  if (stand.left >= cap) return 'left';
+  if (stand.right >= cap) return 'right';
+  if (stand.left >= ziel && stand.left - stand.right >= 2) return 'left';
+  if (stand.right >= ziel && stand.right - stand.left >= 2) return 'right';
+  return null;
+}
+function satzpunktSeiten(stand, ziel, cap) {
+  return {
+    left: satzSieger({ left: stand.left + 1, right: stand.right }, ziel, cap) === 'left',
+    right: satzSieger({ left: stand.left, right: stand.right + 1 }, ziel, cap) === 'right',
+  };
+}
+function satzpunktTeams(stand, ziel, cap, teamOnSide) {
+  const s = satzpunktSeiten(stand, ziel, cap);
+  const aLinks = !teamOnSide || teamOnSide.a !== 'right';
+  return aLinks ? { a: s.left, b: s.right } : { a: s.right, b: s.left };
+}
+function satzpunktAnsagen(jetzt, vorher) {
+  if (!jetzt.a && !jetzt.b) return false;
+  if (!vorher) return true;
+  return (jetzt.a && !vorher.a) || (jetzt.b && !vorher.b);
 }
 
 /** Einspielphase: Aufstellung (Wahl) bestätigt, aber noch kein Ballwechsel
@@ -6927,7 +6981,7 @@ function applyCard(color) {
     : color === 'red'
       ? `${name}, Fehler wegen unsportlichen Verhaltens. ${stand}`
       // Wortlaut nach Anhang 4, 3.10.9 (Fassung 06/2026) — dort wörtlich
-      // im Dativ. Bis v0.9.400 stand hier „wegen grober Unsportlichkeit"
+      // im Dativ. Bis v0.9.401 stand hier „wegen grober Unsportlichkeit"
       // (aus dem älteren DBV-Ablauf); maßgeblich ist das Vokabular.
       : `${name}, disqualifiziert wegen unsportlichem Verhalten.`;
   STATE.cards.push({ team: teamKey, index, name, color, ts: Date.now(), score: stand });

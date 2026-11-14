@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.401
+## v0.9.402
 
 - **Schiri-Modus: Ansagen wörtlich nach dem Vokabular (Anhang 4, 06/2026).**
   Rückmeldung der Schiedsrichter: Im Doppel heißt es „X schlägt auf **zu** Y"
@@ -15,6 +15,16 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   spielen."). Bei Aufgabe: „{Name} aufgegeben. Das Spiel wurde gewonnen von
   … mit …". In der Behandlungspause: „Das Spiel ist unterbrochen." Schwarze
   Karte: „disqualifiziert wegen unsportlichem Verhalten."
+
+## v0.9.401
+
+- **Schiri-Modus: „Satzpunkt" nur beim ersten Erreichen.** Die Ansage am
+  Tablet nennt den Satz- bzw. Spielpunkt jetzt nur in dem Moment, in dem er
+  entsteht („20 Satzpunkt 15"), und danach wieder den reinen Stand („20:16"),
+  wie es das DBV-Vokabular vorsieht. Nach einem Gleichstand in der
+  Verlängerung und an der Obergrenze („29 Satzpunkt beide") wird er erneut
+  angesagt. Gilt für alle Zählweisen (21, 15, 11 Punkte). Das Abzeichen
+  „Satzpunkt" bleibt sichtbar, solange er besteht.
 
 ## v0.9.400
 
