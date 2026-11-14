@@ -1105,7 +1105,7 @@ Feld-Ansage nach der Tabletbedienung:
 - „Schiedsrichter: {Name}." / englisch „Umpire: {Name}."
 - „Aufschlagrichter: {Name}." / englisch „Service judge: {Name}."
 
-Danach folgt **noch einmal das Feld** (seit v0.9.406): Die Feld-Ansage endet
+Danach folgt **noch einmal das Feld** (seit v0.9.407): Die Feld-Ansage endet
 immer mit dem Feld, nicht mit einem Schiedsrichter-Namen — „… Schiedsrichter:
 Anna Schulz. Aufschlagrichter: Bob Meier. Feld 3." (`besetzungMitFeld` in
 `io/prepBesetzung.mjs`). Ohne Besetzung bleibt es beim Feld nach der Paarung

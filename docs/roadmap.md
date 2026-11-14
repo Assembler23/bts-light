@@ -1571,6 +1571,10 @@ verliehen):
   Firmware-Tausch für den Pi 3 B+ Rev. 1.4). Emuliert gebaut
   (`pi/build-image-docker.sh`, Bookworm Lite 2026-10-06) und als
   `pi-image/bts-light-pi.img.xz` hochgeladen; Release-Seite angepasst.
+  Seit v0.9.406 schaltet bts-light die Fernseher auch aus der Ferne
+  (`/pi-tv`, Knöpfe auf „Court-Monitore"); **offen:** Image mit dem neuen
+  Skript bauen und hochladen, Feldtest „aus" je TV-Marke, später ggf.
+  Schalten aus dem TL-Web und für Cloud-/Slave-Monitore.
   **Offen: Probestart auf echter Hardware** (das Image lief nie auf einem
   Pi) und Feldtest: CEC-Einschalten je TV-Marke. Der Nur-Lese-Modus ist seit
   v0.9.397 wieder ausgebaut (Ärger am Zero 2 W und am Pi 3). Das alte BTS-Image liegt auf dem Server als

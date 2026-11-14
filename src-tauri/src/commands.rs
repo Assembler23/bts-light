@@ -7411,6 +7411,26 @@ pub fn monitor_command(
     Ok(())
 }
 
+/// Fernseher an den Pi-Monitoren, deren Pi sich gerade meldet: Geräte-ID →
+/// Zustand und zuletzt gegebener Befehl. Leer, solange kein Pi mit
+/// CEC-Abfrage im Netz ist (ältere SD-Karten, Cloud-Monitore).
+#[tauri::command]
+pub fn monitor_tv_status(
+    state: State<'_, AppState>,
+) -> std::collections::HashMap<String, crate::tablet::tv::TvSicht> {
+    state.tablet.tv().sicht(now_ms())
+}
+
+/// Schaltet die Fernseher der genannten Monitor-Geräte an oder aus. Der Pi
+/// holt den Befehl bei seiner nächsten Abfrage ab (wenige Sekunden).
+/// Liefert, wie viele Geräte den Befehl bekommen haben.
+#[tauri::command]
+pub fn monitor_tv_set(state: State<'_, AppState>, device_ids: Vec<String>, on: bool) -> usize {
+    use crate::tablet::tv::TvSoll;
+    let soll = if on { TvSoll::An } else { TvSoll::Aus };
+    state.tablet.tv().setzen(&device_ids, soll, now_ms())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,13 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.406
+## v0.9.407
 
 - **Ansage: Mit Schiedsrichter endet die Feld-Ansage wieder mit dem Feld.**
   Wurden Schiedsrichter oder Aufschlagrichter mitangesagt, hörte man zuletzt
   deren Namen. Jetzt folgt danach noch einmal das Feld („… Schiedsrichter:
   Anna Schulz. Aufschlagrichter: Bob Meier. Feld 3."). Das gilt auch für den
   Knopf „SR/AR ansagen". Ohne Schiedsrichter bleibt die Ansage unverändert.
+
+## v0.9.406
+
+- **Fernseher der Court-Monitore an- und ausschalten.** Auf der Seite
+  „Court-Monitore" hat jeder Monitor an einem Raspberry Pi jetzt einen Knopf
+  **TV an** / **TV aus**, dazu **Alle TVs an** und **Alle TVs aus** über der
+  Liste (mit Hallen-Filter nur die einer Halle). Der Pi schaltet den
+  Fernseher über das HDMI-Kabel (CEC). Voraussetzung: SD-Karte mit dem neuen
+  Pi-Image (oder `setup-monitor.sh` erneut ausführen), HDMI-CEC am Fernseher
+  eingeschaltet, Monitor im Hallennetz (nicht über die Cloud-Adresse). Nach
+  einem Neustart des Pi geht der Fernseher wie bisher von selbst an.
 
 ## v0.9.405
 
