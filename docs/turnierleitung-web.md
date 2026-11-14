@@ -730,7 +730,7 @@ Die Anzeige-Häkchen im Profil-Editor:
   ganze Runde auf dieselbe Zeit — die Planzeit ist ein Zeitfenster, keine
   Minutenvorgabe für das einzelne Spiel. Die Uhrzeiten sind die des
   Turnier-PCs, auch auf einem Gerät mit anderer Zeitzone. Erfordert einen
-  Host ab v0.9.409; ältere Hosts zeigen das Häkchen nicht.
+  Host ab v0.9.411; ältere Hosts zeigen das Häkchen nicht.
   <!-- pruef: "Geplante Zeiten anzeigen" in src-tauri/assets/tl.html -->
 
 Daneben, nicht Teil der Profile, aber am selben Kopfbereich: **Automatik**
@@ -1166,7 +1166,7 @@ Die Kachel ist so gut wie die Zeitfenster in BTP und die Prognose. Maßgeblich
 sind Uhr und Datum des Turnier-PCs — ein Turnierleitungs-Gerät mit falscher
 Uhr zeigt trotzdem denselben Stand. Die geplante Zeit jedes einzelnen Spiels
 zeigt das Profil-Häkchen „Geplante Zeiten anzeigen". Erfordert einen Host ab
-v0.9.410; an einem älteren Turnier-PC wird das Panel nicht angeboten.
+v0.9.412; an einem älteren Turnier-PC wird das Panel nicht angeboten.
 
 ## Anfangszeiten (Check-In-Zeitplan, seit 17.08.2026)
 

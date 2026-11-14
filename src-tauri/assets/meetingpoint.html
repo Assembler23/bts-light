@@ -29,8 +29,11 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   main { box-sizing: border-box; padding: max(.6rem, env(safe-area-inset-top)) .9rem 1.2rem; }
   .kopf { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem 1rem; margin-bottom: .7rem; }
-  h1 { margin: 0; font-size: 1.5rem; }
-  .halle { font-size: 1.2rem; color: var(--muted); }
+  /* Titel wächst mit dem Bildschirm, damit man den Meetingpoint von Weitem
+     erkennt. Breite UND Höhe begrenzen: Auf dem Handy bleibt er klein, auf einem
+     flachen Querformat frisst er nicht die Karten weg. */
+  h1 { margin: 0; font-size: clamp(1.5rem, min(7vw, 10vh), 4.5rem); font-weight: 900; line-height: 1.1; }
+  .halle { font-size: clamp(1.2rem, min(3.6vw, 5vh), 2.4rem); color: var(--muted); }
   .hinweis { color: var(--muted); font-size: 1rem; margin: .4rem 0 .8rem; }
   .status { margin-left: auto; color: var(--muted); font-size: .9rem; }
   .status.fehler { color: #f87171; font-weight: 700; }

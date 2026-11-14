@@ -892,12 +892,12 @@ meins) sich nicht ohne Weiteres dort hineinschreiben lässt:
   `TlDisplaySettingsWire` zusätzlich `showCourtRemaining` (seit v0.9.342
   außerdem `showLastPlayed`, Spec `tl-zuletzt-gespielt`, `#[serde(default)]`
   = aus; das Anzeigedatum reist als `TlMatch.team1_last_played_ms`/
-  `team2_last_played_ms` im opaken `TlState`-JSON; seit v0.9.409 ebenso
+  `team2_last_played_ms` im opaken `TlState`-JSON; seit v0.9.411 ebenso
   `showPlannedTimes`, Spec `tl-zeitplan` — die Daten dazu sind
   `TlMatch`/`TlOpenMatch`/`TlFinished.planned_time`,
   `TlFinished.start_delay_mins` und `TlState.today`. **Relay vor Client:**
   Das Relay reicht `TlAction::ProfileSave` typisiert durch; ein Relay ohne
-  das Feld verliert das Häkchen beim Speichern. Seit v0.9.410 trägt der
+  das Feld verliert das Häkchen beim Speichern. Seit v0.9.412 trägt der
   Zustand zusätzlich `schedule` (`TlSchedule`: `kind`, `started`,
   `planned_time`, `planned_ms`, `predicted_start_ms`,
   `predicted_uncertain`) für das Panel „Zeitplan". Der Host rechnet es

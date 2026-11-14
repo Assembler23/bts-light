@@ -457,7 +457,7 @@ am Feld), `docs/adr/0023-…md` (Status auf „superseded by ADR-0026").
 
 ## Nachtrag 14.11.2026 — Panels, die standardmäßig ausgeblendet sind
 
-Bis v0.9.409 ergänzte die Seite jeden Panel-Schlüssel, der in einem Profil
+Bis v0.9.411 ergänzte die Seite jeden Panel-Schlüssel, der in einem Profil
 fehlt, als **sichtbar** (letzte Spalte). Seit dem Panel „Zeitplan" (Spec
 [tl-zeitplan](tl-zeitplan.md), ADR 0094) gibt es die Ausnahme
 `PANEL_STANDARD_AUS` in `tl.html`: Schlüssel dieser Menge werden als
