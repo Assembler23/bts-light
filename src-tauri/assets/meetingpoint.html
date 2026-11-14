@@ -36,7 +36,11 @@
   .status.fehler { color: #f87171; font-weight: 700; }
   #partien { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: .8rem; }
   .partie { background: var(--surface); border: 2px solid var(--line); border-radius: .9rem; padding: .7rem .8rem; }
-  .partie.bereit { border-color: var(--ok-hell); }
+  /* Spielbereit: ganze Karte grün, damit es auch aus der Entfernung auffällt.
+     Etwas dunkler als die eingecheckten Namen, damit die Knöpfe sichtbar bleiben. */
+  .partie.bereit { border-color: var(--ok-hell); background: #0d3b1f; }
+  .partie.bereit .p-zeit, .partie.bereit .gegen, .partie.bereit .sr-zeile .rolle { color: #bbf7d0; }
+  .partie.bereit .sr-zeile { border-top-color: #166534; }
   .partie.aufgerufen { border-color: #facc15; background: #3b2f06; }
   .p-aufgerufen { font-weight: 900; font-size: 1.6rem; color: #fde047; margin: .1rem 0 .5rem; }
   .partie.aufgerufen .namen-still { font-size: 1.15rem; padding: .25rem 0; }

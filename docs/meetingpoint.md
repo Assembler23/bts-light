@@ -61,7 +61,9 @@ Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
 <!-- pruef: "MP_AUFGERUFEN_ANZEIGE_MS: u64 = 120_000" in relay-proto/src/lib.rs -->
 - **Namen antippen = einchecken**, noch einmal antippen = auschecken (falls
   sich jemand vertippt hat). Eingecheckte Namen werden grün mit Haken.
-- Sind alle nötigen Personen da, trägt die Karte **spielbereit**.
+- Sind alle nötigen Personen da, trägt die Karte **spielbereit** und
+  wird **ganz grün** — so sieht man es auch von Weitem (seit v0.9.408).
+<!-- pruef: ".partie.bereit { border-color: var(--ok-hell); background: #0d3b1f; }" in src-tauri/assets/meetingpoint.html -->
 <!-- pruef: "spielbereit" in src-tauri/assets/meetingpoint.html -->
 - **Wann geht es los?** Unter dem Kopf jeder Karte steht, wann nach der
   [Prognose](spielzeiten-prognose.md) ein Feld für diese Partie frei wird,
