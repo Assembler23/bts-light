@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.403
+
+- **Tablet: Pausen-Ansicht aufgeräumt.** Die Knöpfe der Satz- und
+  Behandlungspause stehen jetzt als eine Spalte gleicher Breite
+  untereinander; „Weiterspielen" ist als Haupthandlung deutlich größer, die
+  Nebenwege (Aufschlag festlegen, Korrektur, Seiten korrigieren, Aufgabe)
+  sind einheitlich flach. Bisher war jeder Knopf nur so breit wie sein Text
+  und unterschiedlich hoch. Reicht die Bildschirmhöhe nicht, lässt sich die
+  Ansicht scrollen.
+
 ## v0.9.402
 
 - **Schiri-Modus: Ansagen wörtlich nach dem Vokabular (Anhang 4, 06/2026).**
