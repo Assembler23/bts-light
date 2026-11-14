@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.408
+
+- **Meetingpoint: Spielbereite Partien werden grün.** Sind alle nötigen
+  Personen eingecheckt, färbt sich die ganze Karte grün statt nur ihr Rand —
+  gut zu sehen auch aus der Entfernung.
+
 ## v0.9.406
 
 - **Fernseher der Court-Monitore an- und ausschalten.** Auf der Seite
