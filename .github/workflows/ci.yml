@@ -277,6 +277,12 @@ jobs:
       - name: Ballzähler am Tablet (JS)
         run: node scripts/test-ballzaehler.mjs
 
+      # Satzpunkt-Ansage im Schiri-Modus: das Wort nur beim NEU erreichten
+      # Satzpunkt (DBV Anhang 4, 7.1.1/7.1.2), für 21er-, 15er- und 11er-Sätze
+      # samt Verlängerung — Modul und echte Ansage-Funktionen aus tablet.html.
+      - name: Satzpunkt-Ansage (JS)
+        run: node scripts/test-satzpunkt.mjs
+
       # Meetingpoint-Seite (Spec meetingpoint-spielbereit): Gruppierung,
       # Reihenfolge, Check-in-Form — und die Inline-Kopie in der Seite muss
       # sich verhalten wie das Modul.

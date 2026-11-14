@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.401
+
+- **Schiri-Modus: „Satzpunkt" nur beim ersten Erreichen.** Die Ansage am
+  Tablet nennt den Satz- bzw. Spielpunkt jetzt nur in dem Moment, in dem er
+  entsteht („20 Satzpunkt 15"), und danach wieder den reinen Stand („20:16"),
+  wie es das DBV-Vokabular vorsieht. Nach einem Gleichstand in der
+  Verlängerung und an der Obergrenze („29 Satzpunkt beide") wird er erneut
+  angesagt. Gilt für alle Zählweisen (21, 15, 11 Punkte). Das Abzeichen
+  „Satzpunkt" bleibt sichtbar, solange er besteht.
+
 ## v0.9.400
 
 - **Ballzähler: Schalter im Setup und Anzeige für die Turnierleitung.** Der
