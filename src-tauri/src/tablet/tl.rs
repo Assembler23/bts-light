@@ -3118,6 +3118,13 @@ pub struct TlState {
     /// Ergebnis-Dialog. `#[serde(default)]`: ein alter Host kennt ihn nicht.
     #[serde(default)]
     pub shuttle_counter: bool,
+    /// Richtzeit der Behandlungspause in Sekunden (Spec
+    /// `verletzungsunterbrechung`): ab dann färbt die Seite das Badge
+    /// „Behandlung seit …" rot. Eine Frist aus der Config, ohne
+    /// Personenbezug. `#[serde(default)]`: fehlt bei einem alten Host — die
+    /// Seite rechnet dann mit 300 s.
+    #[serde(default)]
+    pub injury_guide_seconds: u32,
     /// Alle Hallen des Turniers, alphabetisch nach Namen.
     ///
     /// Mit Kennung, nicht nur mit Namen: Ein Vorbereitungs-Aufruf braucht sie,
@@ -4524,6 +4531,7 @@ pub(crate) fn build_state_limited(
             meetingpoint: meetingpoint_lage(tablet, config),
             finished_warning_seconds: config.finished_warning_seconds,
             shuttle_counter: config.shuttle_counter,
+            injury_guide_seconds: config.richtzeit_s(),
             // Der Host kann es — auch wenn hier noch kein Turnier steht. Das
             // Merkmal beschreibt die Fähigkeit, nicht die Lage; ohne Turnier
             // lehnt die Aktion ohnehin ab (E7).
@@ -4910,6 +4918,7 @@ pub(crate) fn build_state_limited(
         can_search: true,
         finished_warning_seconds: config.finished_warning_seconds,
         shuttle_counter: config.shuttle_counter,
+        injury_guide_seconds: config.richtzeit_s(),
         rev,
         server_now_ms: now_ms,
         today: heute_ymd(now_ms),
@@ -12094,6 +12103,22 @@ mod tests {
     }
 
     #[test]
+    fn tl_state_traegt_richtzeit() {
+        let tablet = TabletState::default();
+        tablet.set_snapshot(snap(vec![a_court(1, None)], Vec::new(), Vec::new()));
+        let s = build_state(&tablet, &AppConfig::default(), 1_000_000, 1);
+        assert_eq!(s.injury_guide_seconds, 300);
+        let cfg = AppConfig {
+            injury_guide_seconds: crate::config::RichtzeitS(99_999),
+            ..AppConfig::default()
+        };
+        let s = build_state(&tablet, &cfg, 1_000_000, 1);
+        assert_eq!(s.injury_guide_seconds, 1800, "geklemmt");
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"injury_guide_seconds\":1800"), "{json}");
+    }
+
+    #[test]
     fn the_pause_is_republished_as_known_fields_only() {
         // Der Pausen-Block kommt roh vom Zähltablett. Würde er unverändert
         // weitergereicht, könnte ein Tablett beliebigen Inhalt an alle
@@ -12222,6 +12247,9 @@ mod tests {
             "can_set_highlight",
             // Schalter „Bälle am Tablet zählen": reines Bool aus der Config.
             "shuttle_counter",
+            // Richtzeit der Behandlungspause (Spec verletzungsunterbrechung):
+            // eine Frist aus der Config in Sekunden, kein Personenbezug.
+            "injury_guide_seconds",
             // Fähigkeitsmerkmal: reines Bool „dieser Turnier-PC kennt
             // ‚Erste Ansage wiederholen'".
             "can_repeat_prep_call",

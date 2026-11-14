@@ -1022,7 +1022,12 @@ wechselt die Marke auf rotes **„überzogen +0:41"** und zählt hoch, bis am
 Tablet weitergespielt wird — das Tablet hält die Pause seit v0.9.207
 bewusst, statt sie automatisch zu beenden (ADR
 [0028](adr/0028-pause-haelt-bis-weiterspielen.md)). Eine Behandlungspause
-erscheint als **„Behandlung seit 3 min"** (ohne Countdown). Ein Tablet mit
+erscheint als **„Behandlung seit 3 min"** (ohne Countdown). Ab der
+**Richtzeit** (Einstellung „Behandlungspause", Standard 5 Minuten) wird diese
+Marke rot, ihr Hinweistext lautet dann „Richtzeit überschritten"; die Pause
+läuft trotzdem weiter, bis am Tablet weitergespielt wird.
+<!-- pruef: "Richtzeit überschritten" in src-tauri/assets/tl.html -->
+Ein Tablet mit
 älterer Seite beendet die Pause weiter automatisch bei 0 — dann verschwindet
 die Marke einfach, „überzogen" erscheint nie fälschlich.
 

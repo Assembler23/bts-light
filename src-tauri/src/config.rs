@@ -1245,6 +1245,12 @@ pub struct AppConfig {
     /// Match-Writes die Ballzahl mit, die BTP schon hat.
     #[serde(default)]
     pub shuttle_counter: bool,
+    /// Richtzeit der Behandlungspause (Spec `verletzungsunterbrechung`, ADR
+    /// 0095): nach so vielen Sekunden wird die Behandlungsuhr am Tablet rot
+    /// und zählt weiter. Turnier-Konvention, keine Regel — deshalb kein
+    /// „aus". Gelesen wird sie nur über [`AppConfig::richtzeit_s`] (klemmt).
+    #[serde(default)]
+    pub injury_guide_seconds: RichtzeitS,
     /// Einstellungen des Aufruf-Timers (1./2./3. Aufruf). `#[serde(default)]`
     /// hält ältere Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
@@ -1372,6 +1378,39 @@ pub struct AppConfig {
     /// Konfigurationsdateien ohne dieses Feld lesbar.
     #[serde(default)]
     pub reconnect_legacy_rev: bool,
+}
+
+/// Standard-Richtzeit der Behandlungspause: fünf Minuten.
+pub const RICHTZEIT_STANDARD_S: u32 = 300;
+/// Kürzeste einstellbare Richtzeit (1 min).
+pub const RICHTZEIT_MIN_S: u32 = 60;
+/// Längste einstellbare Richtzeit (30 min) — wer „rot" nicht will, stellt
+/// sie hierauf.
+pub const RICHTZEIT_MAX_S: u32 = 1800;
+
+/// Richtzeit in Sekunden, als eigener Typ nur wegen des Standardwerts:
+/// `AppConfig` leitet `Default` ab, ein blankes `u32` stünde dann bei einer
+/// frisch angelegten Config auf 0 (→ geklemmt 1 min statt 5 min).
+/// `transparent`: In `config.json` und im Frontend bleibt es eine Zahl.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct RichtzeitS(pub u32);
+
+impl Default for RichtzeitS {
+    fn default() -> Self {
+        RichtzeitS(RICHTZEIT_STANDARD_S)
+    }
+}
+
+impl AppConfig {
+    /// Wirksame Richtzeit in Sekunden, geklemmt auf
+    /// [`RICHTZEIT_MIN_S`]..=[`RICHTZEIT_MAX_S`] — eine von Hand verstellte
+    /// `config.json` (0, 10, 99999) erreicht das Tablet nie ungeprüft.
+    pub fn richtzeit_s(&self) -> u32 {
+        self.injury_guide_seconds
+            .0
+            .clamp(RICHTZEIT_MIN_S, RICHTZEIT_MAX_S)
+    }
 }
 
 /// Standard-Frist der „Spiel scheint fertig"-Warnung: eine Minute, wie vom
@@ -2333,6 +2372,43 @@ mod tests {
         assert!(zurueck.shuttle_counter);
     }
 
+    #[test]
+    fn richtzeit_standard_ist_300() {
+        assert_eq!(RICHTZEIT_STANDARD_S, 300);
+        assert_eq!(AppConfig::default().richtzeit_s(), 300);
+    }
+
+    #[test]
+    fn alte_config_ohne_richtzeit_liest_standard() {
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""}}"#,
+        )
+        .expect("Config ohne Richtzeit lädt");
+        assert_eq!(cfg.richtzeit_s(), 300);
+        // Eine gesetzte Richtzeit überlebt Speichern + Laden, als Zahl.
+        let mut cfg = cfg;
+        cfg.injury_guide_seconds = RichtzeitS(600);
+        let json = serde_json::to_string(&cfg).expect("serialisiert");
+        assert!(json.contains(r#""injury_guide_seconds":600"#), "{json}");
+        let zurueck: AppConfig = serde_json::from_str(&json).expect("lädt");
+        assert_eq!(zurueck.richtzeit_s(), 600);
+    }
+
+    #[test]
+    fn richtzeit_wird_auf_60_bis_1800_geklemmt() {
+        let mit = |s| AppConfig {
+            injury_guide_seconds: RichtzeitS(s),
+            ..AppConfig::default()
+        };
+        assert_eq!(mit(0).richtzeit_s(), 60);
+        assert_eq!(mit(10).richtzeit_s(), 60);
+        assert_eq!(mit(60).richtzeit_s(), 60);
+        assert_eq!(mit(1800).richtzeit_s(), 1800);
+        assert_eq!(mit(99_999).richtzeit_s(), 1800);
+        assert_eq!(mit(u32::MAX).richtzeit_s(), 1800);
+    }
+
     /// Schiedsrichtermanagement (Spec Schritt 3): Die globalen Schalter sind
     /// standardmäßig AUS — Bestandsinstallationen verhalten sich nach dem
     /// Auto-Update unverändert — und eine ältere config.json ohne das Feld
@@ -2879,6 +2955,7 @@ mod tests {
             },
             reconnect_legacy_rev: true,
             shuttle_counter: false,
+            injury_guide_seconds: RichtzeitS::default(),
         };
         config.save_to(&path).unwrap();
         assert_eq!(AppConfig::load_from(&path).unwrap(), config);
