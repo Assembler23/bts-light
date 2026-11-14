@@ -122,7 +122,7 @@ Gut zu wissen:
 ## Bälle zählen
 
 Hat die Turnierleitung den Ballzähler eingeschaltet, steht in der Kopfzeile
-eine kleine Gruppe **− 🏸 0 +**. Tippe bei jedem neuen Ball auf **+**, auch
+eine kleine Gruppe: **−**, ein Federball mit der Zahl (anfangs 0) und **+**. Tippe bei jedem neuen Ball auf **+**, auch
 beim ersten. Hast du dich vertippt, nimmt **−** einen Ball zurück.
 <!-- pruef: "Ein Ball mehr" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Ein Ball weniger" in src-tauri/assets/tablet.html -->

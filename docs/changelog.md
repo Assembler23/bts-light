@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.404
+
+- **Ballzähler: Federball statt Schläger.** Am Zähl-Tablet und in der
+  Turnierleitungssicht steht neben der Ballzahl jetzt ein Federball ohne
+  Schläger (dasselbe Symbol wie auf Monitor und Tafel). Das bisherige
+  🏸-Zeichen zeigte Schläger und Ball und las sich nicht eindeutig als
+  „Bälle".
+
 ## v0.9.403
 
 - **Tablet: Pausen-Ansicht aufgeräumt.** Die Knöpfe der Satz- und

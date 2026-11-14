@@ -1327,6 +1327,9 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 /* Ballzahl an Feld-Kachel und Beendet-Zeile: eine Zahl unter vielen, darum
    ohne eigene Farbe. */
 .baelle { white-space: nowrap; font-weight: 600; }
+/* Federball als Inline-SVG statt 🏸 (Schläger + Ball las sich nicht
+   eindeutig als „Bälle"). */
+.federball { width: 1em; height: 1.2em; vertical-align: -.2em; margin-right: .15em; }
 .res-row label { flex: 0 0 4.2rem; font-weight: 600; font-size: .9rem; color: var(--ink-soft); }
 .res-row input {
   width: 4.4rem; font: inherit; font-variant-numeric: tabular-nums; text-align: center;
@@ -2755,11 +2758,14 @@ function ballzaehlerAn() {
   return !!(state && state.shuttle_counter);
 }
 
+/** Federball ohne Schläger (wie auf Monitor/Tafel), Farbe vom Text. */
+const FEDERBALL_SVG = '<svg class="federball" viewBox="16 12 68 82" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M50 67 L22 30M50 67 L36 24M50 67 L50 20M50 67 L64 24M50 67 L78 30M22 30 Q50 14 78 30"/></g><path d="M41 65 Q50 92 59 65 Z" fill="#f59e0b" stroke="#f59e0b" stroke-width="3" stroke-linejoin="round"/></svg>';
+
 /** Ballzahl als kleine Marke; leer bei ausgeschaltetem Zähler, 0 oder „fehlt". */
 function baelleMarke(n) {
   const zahl = Number(n);
   if (!ballzaehlerAn() || !Number.isInteger(zahl) || zahl <= 0) return "";
-  return `<span class="baelle num" title="Verbrauchte Bälle">🏸 ${zahl}</span>`;
+  return `<span class="baelle num" title="Verbrauchte Bälle">${FEDERBALL_SVG}${zahl}</span>`;
 }
 
 /**

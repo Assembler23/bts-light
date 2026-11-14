@@ -19,7 +19,7 @@ Zähler.
 
 ## Am Tablet
 
-In der Kopfzeile steht **− 🏸 Zahl +**, sobald dem Feld ein Spiel zugewiesen
+In der Kopfzeile steht **−**, ein Federball-Symbol mit der Zahl und **+**, sobald dem Feld ein Spiel zugewiesen
 ist — also schon bei der Seitenwahl (Einspielbälle) und noch in der
 Beendet-Ansicht, bis das Ergebnis übermittelt ist. Die Gruppe steht links vom
 Knopf ⇄, bewusst nicht neben der Verletzungstaste.
