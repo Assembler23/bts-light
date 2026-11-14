@@ -4055,14 +4055,14 @@ pub async fn assign_court(
             court_id,
             // Beim Ruf aufs Feld wandert die Besetzung mit (ADR 0021) —
             // ein Request statt zwei.
-            officials: state.tablet.snapshot_match(match_id).and_then(|m| {
+            officials: state.tablet.snapshot_match(match_id).map(|m| {
                 // Rotations-Zuteilung einer Rolle, die das Feld nicht will,
                 // vorher lösen (ADR 0080).
                 state
                     .tablet
                     .officials_store()
                     .rotation_loesen_am_feld(&m, court_id);
-                state.tablet.officials_for_write(&m)
+                state.tablet.officials_fuer_feld_write(&m)
             }),
             highlight: None,
             shuttles: state
@@ -4118,9 +4118,10 @@ pub async fn free_court(state: State<'_, AppState>, court_id: i64) -> Result<(),
             draw_id: m.draw_id,
             planning_id: m.planning_id,
             court_id: 0, // 0 = Feldzuordnung am Match löschen
-            // Beim Freigeben die Besetzung nicht anfassen: Das Spiel ist
-            // nicht zu Ende, es wird nur vom Feld genommen.
-            officials: None,
+            // Beim Freigeben die Besetzung behalten: Das Spiel ist nicht zu
+            // Ende, es wird nur vom Feld genommen. Behalten heißt
+            // mitschreiben — ein fehlendes Element löscht sie in BTP.
+            officials: Some(state.tablet.officials_fuer_feld_write(&m)),
             highlight: None,
             shuttles: m.shuttles,
         }],

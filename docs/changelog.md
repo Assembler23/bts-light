@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.404
+## v0.9.406
 
 - **Fernseher der Court-Monitore an- und ausschalten.** Auf der Seite
   „Court-Monitore" hat jeder Monitor an einem Raspberry Pi jetzt einen Knopf
@@ -14,6 +14,24 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Pi-Image (oder `setup-monitor.sh` erneut ausführen), HDMI-CEC am Fernseher
   eingeschaltet, Monitor im Hallennetz (nicht über die Cloud-Adresse). Nach
   einem Neustart des Pi geht der Fernseher wie bisher von selbst an.
+
+## v0.9.405
+
+- **Schiedsrichter: Die beim Aufruf zugeteilte Besetzung bleibt auf dem
+  Feld.** Bisher konnte ein gerufenes Spiel beim Ruf aufs Feld einen anderen
+  Schiedsrichter bekommen als den, der am Meetingpoint stand — sichtbar
+  wurde das, wenn sich die Schiedsrichter-Liste inzwischen geändert hatte
+  (z. B. jemand kam aus der Pause zurück). Ursache: Die Feldvergabe schrieb
+  SR/AR nicht mit, und BTP wertet das als „keiner". Auch „Vom Feld nehmen"
+  lässt die Besetzung jetzt stehen.
+
+## v0.9.404
+
+- **Ballzähler: Federball statt Schläger.** Am Zähl-Tablet und in der
+  Turnierleitungssicht steht neben der Ballzahl jetzt ein Federball ohne
+  Schläger (dasselbe Symbol wie auf Monitor und Tafel). Das bisherige
+  🏸-Zeichen zeigte Schläger und Ball und las sich nicht eindeutig als
+  „Bälle".
 
 ## v0.9.403
 

@@ -2092,6 +2092,27 @@ impl TabletState {
         Some((w.sr.unwrap_or(0), w.ar.unwrap_or(0)))
     }
 
+    /// Die Besetzung, die ein **Feld-Write** (Ruf aufs Feld oder Freigeben)
+    /// mitträgt — nie „weglassen".
+    ///
+    /// BTP setzt `Official1ID`/`Official2ID` bei jedem Match-Write auf den
+    /// Wert im Knoten, ein fehlendes Element heißt 0 (Messung 09.11.2026,
+    /// `docs/btp_protocol.md`). „Weglassen" ist also kein „nicht anfassen",
+    /// sondern Löschen: Eine von BTP schon bestätigte Besetzung (lokal steht
+    /// dann nichts mehr) verschwand beim Ruf aufs Feld, und die
+    /// Feld-Rotation besetzte das Feld neu — mit wem gerade oben auf der
+    /// Liste stand (Feldbefund 14.11.2026). Deshalb: mit
+    /// Schiedsrichter-Betrieb die Sicht „Hand vor BTP"
+    /// ([`officials_for_write`](Self::officials_for_write), sonst BTP), ohne
+    /// ihn der BTP-Wert unverändert — dann bleibt eine Einteilung, die die
+    /// Turnierleitung in BTP selbst pflegt, ebenfalls stehen.
+    pub fn officials_fuer_feld_write(&self, m: &BtpMatch) -> (i64, i64) {
+        self.officials_for_write(m).unwrap_or((
+            m.official1_id.filter(|v| *v > 0).unwrap_or(0),
+            m.official2_id.filter(|v| *v > 0).unwrap_or(0),
+        ))
+    }
+
     /// Die wirksamen Official-IDs eines Spiels (0 = keiner) — für die
     /// Bedienung, die eine Person eindeutig treffen muss.
     pub fn court_official_ids(&self, m: Option<&BtpMatch>) -> (i64, i64) {
@@ -8080,6 +8101,34 @@ pub(crate) mod tests {
         assert_eq!(o[0].sr, vec!["Schiri1".to_string()]);
         assert!(o[0].ar.is_empty(), "kein AR zugewiesen");
         assert!(o[1].sr.is_empty(), "Feld ohne Spiel");
+    }
+
+    #[test]
+    fn der_feld_write_laesst_die_besetzung_nie_weg() {
+        // BTP liest ein fehlendes `Official1ID/2ID` als 0 (Messung
+        // 09.11.2026). Ein Feld-Write trägt die Besetzung deshalb immer.
+        use crate::tablet::officials::OfficialRole;
+        let st = TabletState::default();
+        let mut m = match_on(1, None, MatchStatus::Scheduled);
+        m.official1_id = Some(7);
+        m.official2_id = Some(8);
+        st.set_snapshot(snapshot(vec![m.clone()], vec![(5, "Feld 1")]));
+
+        // Ohne Schiedsrichter-Betrieb: was in BTP steht, bleibt stehen.
+        assert_eq!(st.officials_fuer_feld_write(&m), (7, 8));
+
+        // Mit Betrieb, lokal nichts (von BTP bestätigt): BTP-Wert.
+        st.officials_store().set_enabled(true);
+        assert_eq!(st.officials_fuer_feld_write(&m), (7, 8));
+
+        // Lokale Absicht schlägt BTP (Hand vor BTP), der andere Dienst
+        // bleibt.
+        st.officials_store().assign(1, OfficialRole::Sr, 9);
+        assert_eq!(st.officials_fuer_feld_write(&m), (9, 8));
+
+        // Ohne jede Besetzung ausdrücklich 0.
+        let leer = match_on(2, None, MatchStatus::Scheduled);
+        assert_eq!(st.officials_fuer_feld_write(&leer), (0, 0));
     }
 
     #[test]

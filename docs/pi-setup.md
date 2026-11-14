@@ -213,7 +213,7 @@ schaltet, wird **nicht** zurückgeholt.
 beim Turnier-PC nach, ob die Turnierleitung den Fernseher an- oder
 ausschalten will (Seite „Court-Monitore", Knöpfe **TV an** / **TV aus**).
 Das geht nur im Hallennetz — mit einer Cloud-Adresse in
-`bts-monitor-url.txt` fragt der Pi nicht nach. Karten, die vor v0.9.404
+`bts-monitor-url.txt` fragt der Pi nicht nach. Karten, die vor v0.9.406
 bespielt wurden, können das noch nicht: neu bespielen oder
 `setup-monitor.sh` noch einmal laufen lassen.
 <!-- pruef: "pi-tv" in pi/setup-monitor.sh -->

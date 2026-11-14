@@ -276,7 +276,7 @@ LAN+Cloud voraus.
   Zusammenstellung wie im ⋮-Menü der Feldkachel.
 - **Ballzahl (seit v0.9.400):** Ist im Setup **Bälle am Tablet zählen**
   eingeschaltet, zeigt die Feldkachel neben dem Satzstand die am Tablet
-  gezählten Bälle (🏸 3) und die Beendet-Zeile die Zahl aus BTP. Bei 0 steht
+  gezählten Bälle (Federball-Symbol mit Zahl) und die Beendet-Zeile die Zahl aus BTP. Bei 0 steht
   nichts. Der Dialog „Ergebnis eintragen" bzw. „Ergebnis korrigieren" hat dann
   ein Feld **Bälle** (0–99): beim Eintragen mit der Tablet-Zahl vorbelegt, beim
   Korrigieren mit dem Wert aus BTP. Ein leeres Feld heißt „keine Angabe" — in

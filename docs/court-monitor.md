@@ -135,7 +135,7 @@ alle Geräte auf, die sich gemeldet haben:
   logging.md.)
 
 - **TV an / TV aus** — schaltet den Fernseher am Pi über HDMI-CEC (seit
-  v0.9.404, siehe „Fernseher an- und ausschalten" unten). Der Knopf
+  v0.9.406, siehe „Fernseher an- und ausschalten" unten). Der Knopf
   erscheint nur bei Pis, die das können.
 
 Die Zuweisungen liegen in `monitor-assignments.json` im
