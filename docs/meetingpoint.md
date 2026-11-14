@@ -45,6 +45,10 @@ Kopier-Knopf. Auf den QR-Code tippen zeigt ihn groß.
 - **Ein Meetingpoint je Halle.** Im Mehr-Hallen-Turnier gehört der
   Hallenname in die Adresse. Fehlt er oder ist er unbekannt, zeigt die Seite
   zuerst eine Hallenwahl. Im Ein-Hallen-Turnier genügt `/meetingpoint`.
+- Oben steht groß **Meetingpoint** mit dem Hallennamen. Auf einem großen
+  Bildschirm wächst die Schrift mit, damit man auch von Weitem erkennt, wo der
+  Meetingpoint ist; auf einem Handy bleibt sie klein (seit v0.9.410).
+<!-- pruef: "h1 { margin: 0; font-size: clamp(1.5rem, min(7vw, 10vh), 4.5rem)" in src-tauri/assets/meetingpoint.html -->
 - Die Seite zeigt alle Partien, die **in diese Halle** zum Meetingpoint
   gerufen sind, mit der Uhrzeit des Aufrufs. **Wer zuerst gerufen wurde,
   steht oben und kommt zuerst aufs Feld.** Ein neu gerufenes Spiel stellt

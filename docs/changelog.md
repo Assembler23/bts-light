@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.410
+
+- **Meetingpoint: Größerer Titel.** „Meetingpoint" und der Hallenname oben
+  auf der Seite wachsen auf großen Bildschirmen mit — so erkennt man auch von
+  Weitem, wo der Meetingpoint ist. Auf Handys bleibt die Schrift wie bisher.
+
 ## v0.9.408
 
 - **Meetingpoint: Spielbereite Partien werden grün.** Sind alle nötigen
