@@ -6338,7 +6338,8 @@ function zurAnzeige() {
 function umpTeamNames(teamKey) {
   if (!STATE.match) return '';
   const arr = teamKey === 'a' ? STATE.match.teamA : STATE.match.teamB;
-  return arr.map(p => p.name).join(' / ');
+  // Anhang 4, 6.7: im Doppel steht „und" zwischen den Namen.
+  return arr.map(p => p.name).join(' und ');
 }
 // Welches Team ('a'/'b') steht auf der physischen Seite 'left'/'right'?
 function umpSideTeam(side) {
@@ -6407,10 +6408,10 @@ function umpIstEntscheidungssatz() {
   return links === need - 1 && rechts === need - 1;
 }
 
-/** Wie der beginnende Satz angesagt wird: „Zweiter Satz." — oder
- *  „Entscheidungssatz.", wenn beide Parteien einen Satz vor dem Sieg stehen. */
+/** Wie der beginnende Satz angesagt wird: „Zweiter Satz," — oder
+ *  „Entscheidungssatz,", wenn beide Parteien einen Satz vor dem Sieg stehen. */
 function umpSatzAnsage(n) {
-  return umpIstEntscheidungssatz() ? 'Entscheidungssatz.' : `${umpCap(umpOrdinal(n))} Satz.`;
+  return umpIstEntscheidungssatz() ? 'Entscheidungssatz,' : `${umpCap(umpOrdinal(n))} Satz,`;
 }
 
 function umpOpeningSpoken() {
@@ -6421,10 +6422,14 @@ function umpOpeningSpoken() {
   // „…, UND zu meiner Linken …" — so steht es im DBV-Ablauf. Die Reihenfolge
   // ist fest: immer erst rechts, dann links, unabhängig davon, wer aufschlägt
   // (recherchiert und belegt 24.08.2026).
-  let s = `Meine Damen und Herren: zu meiner Rechten ${right}, und zu meiner Linken ${left}. `;
-  if (server && recv) s += `${server} schlägt auf ${recv}. `;
-  else if (server) s += `${server} schlägt auf. `;
-  return s + 'Null beide – bitte spielen.';
+  let s = `Meine Damen und Herren, zu meiner Rechten ${right}, und zu meiner Linken ${left}. `;
+  // Anhang 4, 2.1.1/2.1.3 (Fassung 06/2026): im Einzel „X schlägt auf", im
+  // Doppel „X schlägt auf zu Y" — der Rückschläger wird nur im Doppel
+  // genannt, und dann mit „zu" (Schiri-Feedback 14.11.2026).
+  const doppel = STATE.match.teamA.length > 1 || STATE.match.teamB.length > 1;
+  if (server && recv && doppel) s += `${server} schlägt auf zu ${recv}, `;
+  else if (server) s += `${server} schlägt auf, `;
+  return s + 'Null beide, bitte spielen.';
 }
 
 function umpSetEndSpoken() {
@@ -6452,24 +6457,31 @@ function umpSetEndSpoken() {
 function umpMatchEndSpoken() {
   const winsLeft = STATE.setsCompleted.filter(s => s.left > s.right).length;
   const winsRight = STATE.setsCompleted.filter(s => s.right > s.left).length;
-  if (STATE.retired || STATE.walkover) {
-    const w = STATE.retiredWinner;
-    const name = w ? umpTeamNames(w) : '';
-    const grund = STATE.walkover ? 'kampflos' : 'durch Aufgabe';
-    return name ? `Spiel ${grund}. Das Spiel gewinnt ${name}.` : `Spiel ${grund}.`;
-  }
-  const winSide = winsLeft >= winsRight ? 'left' : 'right';
-  const winner = umpTeamNames(umpSideTeam(winSide));
   // Satzstände aus Sicht des Siegers (gewonnene Sätze zuerst je Satz).
-  const sets = STATE.setsCompleted
-    .map(s => winSide === 'left' ? `${s.left}:${s.right}` : `${s.right}:${s.left}`);
   // Wortlaut nach dem DBV-Ablauf: „Das Spiel wurde gewonnen von X mit 21:17,
   // 15:21 und 24:22." — die Satzbilanz („zwei Sätze zu eins") gehört nicht in
   // die Ansage, die Satzstände sagen sie ohnehin.
-  const stand = sets.length > 1
-    ? `${sets.slice(0, -1).join(', ')} und ${sets[sets.length - 1]}`
-    : sets.join('');
-  return `Spiel. Das Spiel wurde gewonnen von ${winner} mit ${stand}.`;
+  const standAus = winSide => {
+    const sets = STATE.setsCompleted
+      .map(s => winSide === 'left' ? `${s.left}:${s.right}` : `${s.right}:${s.left}`);
+    return sets.length > 1
+      ? `${sets.slice(0, -1).join(', ')} und ${sets[sets.length - 1]}`
+      : sets.join('');
+  };
+  if (STATE.retired || STATE.walkover) {
+    const w = STATE.retiredWinner;
+    if (!w) return STATE.walkover ? 'Spiel kampflos.' : 'Aufgegeben.';
+    const sieger = umpTeamNames(w);
+    if (STATE.walkover) return `Spiel kampflos. Das Spiel wurde gewonnen von ${sieger}.`;
+    // Anhang 4, 6.5: „{Name} aufgegeben." Danach die Ansage aus 6.4 — mit
+    // den gespielten Ständen, soweit es welche gibt.
+    const verlierer = umpTeamNames(w === 'a' ? 'b' : 'a');
+    const stand = standAus(umpSideTeam('left') === w ? 'left' : 'right');
+    return `${verlierer} aufgegeben. Das Spiel wurde gewonnen von ${sieger}${stand ? ` mit ${stand}` : ''}.`;
+  }
+  const winSide = winsLeft >= winsRight ? 'left' : 'right';
+  const winner = umpTeamNames(umpSideTeam(winSide));
+  return `Spiel. Das Spiel wurde gewonnen von ${winner} mit ${standAus(winSide)}.`;
 }
 
 /** Satzpunkt/Spielpunkt: Gewinnt eine Seite mit dem nächsten Ballwechsel
@@ -6515,7 +6527,8 @@ function umpAnnouncement() {
   if (STATE.finished) return { say: umpMatchEndSpoken(), badge: '' };
   if (STATE.setup !== 'playing') return { say: 'Aufstellung wählen …', badge: '' };
   if (STATE.pause) {
-    if (STATE.pause.kind === 'injury') return { say: 'Spielunterbrechung.', badge: 'Pause' };
+    // Anhang 4, 3.11.1.
+    if (STATE.pause.kind === 'injury') return { say: 'Das Spiel ist unterbrochen.', badge: 'Pause' };
     if (STATE.pause.kind === 'eleven') {
       // Anhang 4, 7.2: „Aufschlagwechsel" (sofern zutreffend), Stand,
       // „Pause" — und NUR im Entscheidungssatz „Feldseiten wechseln"
@@ -6541,7 +6554,8 @@ function umpAnnouncement() {
     // Schiedsrichter (Turnier-Befund 24.08.2026). Bei welcher Nummer das
     // eintritt, hängt an der Zählweise; die Bedingung dafür gibt es hier
     // schon für den Seitenwechsel.
-    return { say: `${umpSatzAnsage(n)} Null beide – bitte spielen.`, badge: '' };
+    // Anhang 4, 2.2/2.3: „Zweiter Satz, null beide, bitte spielen."
+    return { say: `${umpSatzAnsage(n)} null beide, bitte spielen.`, badge: '' };
   }
   if (STATE.resumeAnsage) {
     return { say: `${umpScoreSpoken()}, bitte spielen.`, badge: '' };
@@ -6912,12 +6926,10 @@ function applyCard(color) {
     ? `${name}, Verwarnung wegen unsportlichen Verhaltens. ${stand}`
     : color === 'red'
       ? `${name}, Fehler wegen unsportlichen Verhaltens. ${stand}`
-      // Der Grund ist bei Schwarz ein ANDERER als bei Gelb und Rot:
-      // „wegen grober Unsportlichkeit", nicht „wegen unsportlichen
-      // Verhaltens" (DBV-Ablauf, SHBV-Schiedsrichter-Infothek). Die
-      // Zwischenfassung von v0.9.263 hatte den Zusatz von Gelb/Rot
-      // übernommen — richtig war nur, dass überhaupt einer fehlte.
-      : `${name}, disqualifiziert wegen grober Unsportlichkeit.`;
+      // Wortlaut nach Anhang 4, 3.10.9 (Fassung 06/2026) — dort wörtlich
+      // im Dativ. Bis v0.9.400 stand hier „wegen grober Unsportlichkeit"
+      // (aus dem älteren DBV-Ablauf); maßgeblich ist das Vokabular.
+      : `${name}, disqualifiziert wegen unsportlichem Verhalten.`;
   STATE.cards.push({ team: teamKey, index, name, color, ts: Date.now(), score: stand });
   saveCards();
   STATE.lastEvent = { type: 'card', color, say: txt };
