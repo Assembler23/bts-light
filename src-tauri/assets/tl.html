@@ -1126,6 +1126,32 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
   flex: 1 1 8rem; min-width: 0; font-size: .82rem; color: var(--ink-soft);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* ── Panel „Zeitplan" (Spec tl-zeitplan) ───────────────────────────────
+   Eine Aussage, groß. Die Schrift wächst mit der Kachel — begrenzt von
+   Breite UND Höhe (Container-Abfrage über beide Achsen): Auf dem
+   Wandmonitor ist sie quer durch den Raum lesbar, in einer schmalen Spalte
+   bricht sie nicht um, und in einem niedrigen Panel wird sie nicht
+   abgeschnitten (ein Panel teilt sich die Spaltenhöhe mit seinen
+   Nachbarn). Farben aus dem bestehenden Drei-Stufen-System — kein eigener
+   Farbtopf. */
+#zeitplan-box { height: 100%; }
+.zp {
+  container-type: size; height: 100%; min-height: 3rem; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 2px 8px 4px; overflow: hidden;
+}
+.zp-text {
+  font-size: clamp(1.15rem, min(12cqi, 44cqb), 4.5rem); font-weight: 700; line-height: 1.1;
+  color: var(--ink-soft); white-space: nowrap;
+}
+.zp-ok .zp-text { color: var(--ok); }
+.zp-spaet .zp-text { color: var(--warn); }
+.zp-frueh .zp-text { color: var(--accent); }
+.zp-neutral .zp-text { font-size: clamp(1.05rem, min(8cqi, 36cqb), 3rem); }
+.zp-neben {
+  margin-top: 2px; font-size: clamp(.72rem, min(3.2cqi, 16cqb), .95rem); color: var(--ink-soft);
+  white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
 .note { font-size: .82rem; color: var(--ink-soft); margin: 6px 0 0; }
 .note.warn { color: var(--warn); font-weight: 600; }
 
@@ -1836,6 +1862,79 @@ function startAbweichungText(mins) {
   return `${m > 0 ? "+" : "−"}${Math.abs(m)} min`;
 }
 
+/**
+ * Was das Panel „Zeitplan" zeigt: `{ ton, text, neben }`.
+ *
+ * `schedule` ist das Objekt des Turnier-PCs (Bezugsfenster und dessen
+ * früheste Prognose), `nowMs` dessen Uhr (`serverNow()`), nie die des Geräts.
+ * `ton`: "ok" (im Zeitplan), "spaet", "frueh" oder "neutral".
+ *
+ * Abweichung = max(Prognose, jetzt) − Planzeit, zur Null hin auf ganze
+ * Minuten abgeschnitten. Die Klemme auf „jetzt" braucht es, weil die
+ * Prognose die Revision des Zustands bewusst nicht bewegt: Sie kann alt sein,
+ * und ein Start in der Vergangenheit hieße in Wahrheit „noch nicht
+ * gestartet". Bis ±5 Minuten gilt „Im Zeitplan".
+ */
+function zeitplanLage(schedule, nowMs) {
+  const neutral = (text, neben) => ({ ton: "neutral", text, neben: neben || "" });
+  if (!schedule || typeof schedule !== "object") return neutral("", "");
+  const kind = schedule.kind;
+  if (kind === "no_plan") return neutral("Keine geplanten Zeiten in BTP");
+  if (kind === "done_today") return neutral("Heute keine Spiele mehr");
+
+  const planMs = Number(schedule.planned_ms);
+  const hatPlan = Number.isFinite(planMs) && planMs > 0;
+  const jetzt = Number(nowMs);
+  // Die Uhrzeit des Fensters: nur aus den Ziffern, ohne Tag (es ist heute).
+  const fensterUhr = planZeitText(schedule.planned_time, 0);
+  const fenster = fensterUhr ? `Nächstes Zeitfenster ${fensterUhr}` : "";
+  const TOLERANZ_MS = 5 * 60000;
+
+  // Vor dem ersten Spiel des Tages gibt es noch keinen Rückstand und keinen
+  // Vorsprung — bis die Planzeit samt Toleranz verstrichen ist.
+  if (!schedule.started && hatPlan && fensterUhr
+      && Number.isFinite(jetzt) && jetzt <= planMs + TOLERANZ_MS) {
+    return neutral(`Beginn ${fensterUhr}`);
+  }
+  if (kind === "last_round") return neutral("Letzte Runde läuft");
+  if (kind === "off") return neutral("Prognose ist ausgeschaltet", fenster);
+
+  const prognose = Number(schedule.predicted_start_ms);
+  if (kind !== "ok" || !hatPlan || !Number.isFinite(prognose) || prognose <= 0
+      || !Number.isFinite(jetzt)) {
+    return neutral("Noch keine Prognose", fenster);
+  }
+  const start = Math.max(prognose, jetzt);
+  const m = Math.trunc((start - planMs) / 60000);
+  // Voraussichtliche Uhrzeit: Planzeit-Ziffern plus Abweichung — so bleibt
+  // auch sie von der Zeitzone des Geräts unabhängig.
+  let neben = fenster;
+  const pt = Number(schedule.planned_time);
+  if (fensterUhr && Number.isFinite(pt)) {
+    const planMin = (Math.floor(pt / 100) % 100) * 60 + (pt % 100);
+    const min = (((planMin + m) % 1440) + 1440) % 1440;
+    const uhr = `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+    neben = `${fenster} · voraussichtlich ${schedule.predicted_uncertain ? "ca. " : ""}${uhr}`;
+  }
+  if (Math.abs(m) <= 5) return { ton: "ok", text: "Im Zeitplan", neben };
+  return m > 0
+    ? { ton: "spaet", text: `${m} min dahinter`, neben }
+    : { ton: "frueh", text: `${-m} min davor`, neben };
+}
+
+/**
+ * Panels, die unsichtbar bleiben, bis man sie im Profil einschaltet (ADR
+ * 0094). Jedes andere Panel, das in einem Profil fehlt, wird sichtbar
+ * ergänzt — sonst bliebe ein neues Panel für alle unauffindbar. Dieses hier
+ * soll nach dem Update in keiner bestehenden Ansicht ungefragt auftauchen.
+ */
+const PANEL_STANDARD_AUS = ["zeitplan"];
+
+/** Sichtbarkeit eines Panels, das im Profil (noch) nicht vorkommt. */
+function panelStandardSichtbar(key) {
+  return !PANEL_STANDARD_AUS.includes(key);
+}
+
 /** Sind auf diesem Feld schon Punkte gefallen? Dann läuft das Spiel. */
 const isPlaying = (court) =>
   court.match_id > 0 && (court.sets || []).some(([a, b]) => a > 0 || b > 0);
@@ -1938,7 +2037,7 @@ const EIERUHR = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="tr
 // sichtbar am Ende (`queue` kommt so dazu).
 const PANEL_KEYS = [
   "courts", "walkovers", "scorekeepers", "officials", "queue", "finished",
-  "times", "checkin",
+  "times", "checkin", "zeitplan",
 ];
 const PANEL_TITLES = {
   courts: "Felder",
@@ -1949,6 +2048,7 @@ const PANEL_TITLES = {
   finished: "Beendete Spiele",
   times: "Spielzeiten",
   checkin: "Anfangszeiten",
+  zeitplan: "Zeitplan",
 };
 
 // Panel-Reorder-Griff: bewusst ein ANDERES Sinnbild als das ⠿-Zeichen der
@@ -2000,7 +2100,8 @@ function builtInProfile() {
     // `columns`; das eingebaute Standardprofil soll seine Aufteilung selbst
     // sagen, nicht aus einem Altfeld herleiten müssen.
     panels: PANEL_KEYS.map((key) => ({
-      key, visible: true, heightFr: 1, collapsed: false,
+      // „Zeitplan" bleibt aus, bis man es einschaltet (ADR 0094).
+      key, visible: panelStandardSichtbar(key), heightFr: 1, collapsed: false,
       column: key === "courts" ? 1 : 2,
     })),
     columns: 2,
@@ -2076,7 +2177,9 @@ function normalizedPanels(profile) {
   const letzteSpalte = Math.max(1, ...bekannt.map((p) => Number(p.column) || 1));
   for (const key of PANEL_KEYS) {
     if (!vorhanden.has(key)) {
-      bekannt.push({ key, visible: true, heightFr: 1, collapsed: false, column: letzteSpalte });
+      // Sichtbar — außer das Panel steht in `PANEL_STANDARD_AUS` (ADR 0094):
+      // Das soll nach dem Update in keinem Bestandsprofil ungefragt stehen.
+      bekannt.push({ key, visible: panelStandardSichtbar(key), heightFr: 1, collapsed: false, column: letzteSpalte });
     }
   }
   return bekannt;
@@ -6505,6 +6608,9 @@ function panelAvailable(key) {
   // neu genug. Eine leere Liste (heute keine Zeiten) zeigt das Panel mit
   // Hinweis, `null` versteckt es.
   if (key === "checkin") return !!(state && Array.isArray(state.checkin_times));
+  // Zeitplan-Stand (Spec tl-zeitplan): nur wenn der Host ihn liefert —
+  // ein älterer Turnier-PC schickt kein `schedule`.
+  if (key === "zeitplan") return !!(state && state.schedule);
   return true;
 }
 
@@ -6556,7 +6662,8 @@ function panelHeadHtml(key, visible, draggable, extra = "", collapsed = false) {
   // Vorschau nur, wo sie etwas Nützliches sagen kann, und nur zugeklappt.
   // Sie ersetzt dann den Abstandhalter: Zwei wachsende Elemente in einer
   // Zeile teilten sich den Platz und die Vorschau bekäme die Hälfte.
-  const mitVorschau = collapsed && (key === "officials" || key === "queue");
+  const mitVorschau = collapsed
+    && (key === "officials" || key === "queue" || key === "zeitplan");
   const vorschau = mitVorschau
     ? `<span class="panel-preview" id="panel-preview-${k}"></span>`
     : `<span class="panel-spacer"></span>`;
@@ -6621,6 +6728,8 @@ function panelBodySkeleton(key) {
       return `<div id="times-box"></div>`;
     case "checkin":
       return `<div id="checkin-box"></div>`;
+    case "zeitplan":
+      return `<div id="zeitplan-box"></div>`;
     default:
       return "";
   }
@@ -8933,6 +9042,24 @@ function checkinDurch(z) {
   return z.window_state === "closed" || z.window_state === "live";
 }
 
+/** Panel „Zeitplan" (Spec tl-zeitplan): groß, ob das Turnier im Zeitplan
+ *  liegt. Läuft bei jedem Zustand UND im Uhr-Takt — der Rückstand wächst
+ *  mit der Uhr, auch wenn der Turnier-PC nichts Neues schickt.
+ *  `setzeHtmlWennNeu` hält den Takt billig: geschrieben wird nur, wenn sich
+ *  der Text ändert, also höchstens einmal je Minute. */
+function renderZeitplan() {
+  if (!state || !state.schedule) return;
+  const lage = zeitplanLage(state.schedule, serverNow());
+  // Zugeklappt bleibt die eine Zeile, auf die es ankommt.
+  setPanelPreview("zeitplan", lage.text);
+  const box = $("zeitplan-box");
+  if (!box) return; // Panel gerade ausgeblendet oder zugeklappt.
+  setzeHtmlWennNeu(box, `<div class="zp zp-${lage.ton}" role="status">
+      <div class="zp-text num">${esc(lage.text)}</div>
+      ${lage.neben ? `<div class="zp-neben num">${esc(lage.neben)}</div>` : ""}
+    </div>`);
+}
+
 function renderCheckin() {
   const zeiten = state.checkin_times;
   if (!Array.isArray(zeiten)) return;
@@ -9790,6 +9917,7 @@ function render() {
   renderFinished();
   renderTimes();
   renderCheckin();
+  renderZeitplan();
   // Die Uhrfelder starten seit dem Keyed-Abgleich leer (eingebettete
   // Sekundenwerte machten jedes HTML „anders") — vor dem nächsten
   // Anstrich füllen, nicht erst beim nächsten Sekunden-Tick.
@@ -9863,6 +9991,8 @@ function tickClocks() {
   // „Zuletzt gespielt": Minutenauflösung, aber im selben Takt geschrieben —
   // ein eigener Timer lohnt nicht, und das Umschlagen auf „vor 1 min"
   // käme sonst bis zu einer Minute zu spät.
+  // Zeitplan-Kachel: rechnet gegen die Uhr, nicht nur gegen den Zustand.
+  renderZeitplan();
   document.querySelectorAll(".zuletzt[data-last-played]").forEach((el) => {
     const since = Number(el.dataset.lastPlayed);
     if (since) el.textContent = zuletztText(since, serverNow());

@@ -559,11 +559,13 @@ Details zum Datenmodell und zur Vergleichsregel für Hallennamen:
 
 ### Panels: was auf dieser Seite steht
 
-Die Seite besteht aus bis zu acht **Panels** — Felder, Aufgaben
+Die Seite besteht aus bis zu neun **Panels** — Felder, Aufgaben
 (Walkover), Zähltafel-Warteschlange, Schiedsrichter, Spiele, „Beendete
-Spiele", „Spielzeiten" (nur mit Prognose) und „Anfangszeiten" (nur mit
-eingerichtetem Check-In). Neue Panels erscheinen in Bestandsprofilen
-automatisch in der letzten Spalte.
+Spiele", „Spielzeiten" (nur mit Prognose), „Anfangszeiten" (nur mit
+eingerichtetem Check-In) und „Zeitplan". Neue Panels erscheinen in
+Bestandsprofilen automatisch in der letzten Spalte. Die Ausnahme ist
+**„Zeitplan"**: Es bleibt ausgeblendet, bis du es im Profil-Editor
+einschaltest (siehe [Zeitplan](#zeitplan-liegt-das-turnier-im-plan)).
 Jedes trägt dieselbe Kopfzeile: Titel, Anzahl, ein **Auge** zum Aus- und
 Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
 
@@ -1103,6 +1105,68 @@ Disziplin die Mediane von Brutto (Feldzuweisung → Ende), Netto (1. Punkt →
 Ende) und Anlaufzeit, dazu die Zahl der Messungen; beendete Spiele tragen
 ihre Ist-Zeiten in der Beendet-Zeile. Alles reine Anzeige — es geht nichts
 davon an Monitore oder den Liveticker.
+
+## Zeitplan: liegt das Turnier im Plan?
+
+Das Panel **„Zeitplan"** sagt in einer großen Zeile, ob das Turnier im
+Zeitplan liegt: **„Im Zeitplan"**, **„18 min dahinter"** oder **„12 min
+davor"**. Es ist standardmäßig ausgeblendet — einschalten im Profil-Editor
+(Knopf **Profile** → Profil bearbeiten → bei den Panels „Zeitplan"
+anhaken). Die Schrift wächst mit dem Panel; für den Wandmonitor zieh es
+größer. Zugeklappt steht der Stand in der Kopfzeile.
+<!-- pruef: "Zeitplan" in src-tauri/assets/tl.html -->
+<!-- pruef: "Im Zeitplan" in src-tauri/assets/tl.html -->
+
+Nicht zu verwechseln mit dem Panel „Anfangszeiten" darunter: Das zeigt die
+Anmeldeschlüsse des Check-Ins, nicht den Spielbetrieb.
+
+**Was gemessen wird.** BTP setzt meist eine ganze Runde auf dieselbe Zeit —
+ein **Zeitfenster**. Die Kachel schaut deshalb nicht auf das einzelne
+nächste Spiel, sondern auf das **nächste Zeitfenster von heute, das noch
+nicht begonnen hat**, und vergleicht: Wann startet dort voraussichtlich das
+erste Spiel (aus der Startzeit-Prognose, siehe „Startzeit-Prognose &
+Spielzeiten"),
+und wann war es geplant?
+
+- Bis **5 Minuten** Abweichung steht „Im Zeitplan" (grün), darüber die
+  Minutenzahl: „dahinter" (orange) oder „davor" (blau).
+- Darunter steht das Fenster: „Nächstes Zeitfenster 11:00 · voraussichtlich
+  11:18". „ca." vor der Uhrzeit heißt: Die Prognose beruht noch auf dem
+  Startwert, nicht auf gemessenen Spielzeiten.
+- Ein Zeitfenster gilt als **begonnen**, sobald zwei seiner Spiele gerufen,
+  auf dem Feld oder beendet sind (hat es nur ein Spiel, genügt dieses).
+  Ein einzelnes vorgezogenes Spiel verschiebt die Messung also nicht.
+  Kampflose Spiele zählen nicht.
+- „Davor" steht auch in einer Pause mit freien Feldern: „50 min davor"
+  heißt, die nächste Runde könnte jetzt schon beginnen.
+- Der Rückstand läuft mit der Uhr mit, auch wenn sich am Brett nichts tut.
+- Bleibt ein Spiel eines frühen Zeitfensters liegen (Spieler fehlt, Spiel
+  von der Feldvergabe ausgenommen) und hat dieses Fenster noch nicht
+  begonnen, misst die Kachel weiter daran — der Rückstand wächst, bis das
+  Spiel gespielt, kampflos gewertet oder in BTP umgesetzt ist.
+- Es gibt **einen** Wert für das ganze Turnier, nicht je Halle.
+
+**Wenn kein Wert da steht:**
+
+| Anzeige | Bedeutung |
+|---|---|
+| **Beginn 09:00** | Heute hat noch kein Spiel begonnen; bis fünf Minuten nach der Planzeit steht der Beginn, danach der Rückstand. |
+| **Letzte Runde läuft** | Es warten heute noch Spiele, aber jedes Zeitfenster ist schon begonnen. Steht auch lange da, wenn in BTP der ganze Tag auf einer einzigen Zeit steht. |
+| **Heute keine Spiele mehr** | Alle heutigen Spiele sind durch; Spiele späterer Tage zählen nicht. |
+| **Noch keine Prognose** | Für das nächste Zeitfenster gibt es keinen voraussichtlichen Start — typisch in der Endphase, wenn dessen Paarungen noch offen sind. |
+| **Prognose ist ausgeschaltet** | Die Kachel braucht die Startzeit-Prognose (Einstellungen → „Startzeit-Prognose"). |
+| **Keine geplanten Zeiten in BTP** | Kein Spiel des Turniers hat eine geplante Zeit. |
+<!-- pruef: "Letzte Runde läuft" in src-tauri/assets/tl.html -->
+<!-- pruef: "Heute keine Spiele mehr" in src-tauri/assets/tl.html -->
+<!-- pruef: "Noch keine Prognose" in src-tauri/assets/tl.html -->
+<!-- pruef: "Prognose ist ausgeschaltet" in src-tauri/assets/tl.html -->
+<!-- pruef: "Keine geplanten Zeiten in BTP" in src-tauri/assets/tl.html -->
+
+Die Kachel ist so gut wie die Zeitfenster in BTP und die Prognose. Maßgeblich
+sind Uhr und Datum des Turnier-PCs — ein Turnierleitungs-Gerät mit falscher
+Uhr zeigt trotzdem denselben Stand. Die geplante Zeit jedes einzelnen Spiels
+zeigt das Profil-Häkchen „Geplante Zeiten anzeigen". Erfordert einen Host ab
+v0.9.410; an einem älteren Turnier-PC wird das Panel nicht angeboten.
 
 ## Anfangszeiten (Check-In-Zeitplan, seit 17.08.2026)
 
