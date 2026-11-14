@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.406
+
+- **Ansage: Mit Schiedsrichter endet die Feld-Ansage wieder mit dem Feld.**
+  Wurden Schiedsrichter oder Aufschlagrichter mitangesagt, hörte man zuletzt
+  deren Namen. Jetzt folgt danach noch einmal das Feld („… Schiedsrichter:
+  Anna Schulz. Aufschlagrichter: Bob Meier. Feld 3."). Das gilt auch für den
+  Knopf „SR/AR ansagen". Ohne Schiedsrichter bleibt die Ansage unverändert.
+
 ## v0.9.405
 
 - **Schiedsrichter: Die beim Aufruf zugeteilte Besetzung bleibt auf dem

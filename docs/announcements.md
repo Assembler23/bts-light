@@ -1105,6 +1105,13 @@ Feld-Ansage nach der Tabletbedienung:
 - „Schiedsrichter: {Name}." / englisch „Umpire: {Name}."
 - „Aufschlagrichter: {Name}." / englisch „Service judge: {Name}."
 
+Danach folgt **noch einmal das Feld** (seit v0.9.406): Die Feld-Ansage endet
+immer mit dem Feld, nicht mit einem Schiedsrichter-Namen — „… Schiedsrichter:
+Anna Schulz. Aufschlagrichter: Bob Meier. Feld 3." (`besetzungMitFeld` in
+`io/prepBesetzung.mjs`). Ohne Besetzung bleibt es beim Feld nach der Paarung
+bzw. der Tabletbedienung; die Vorbereitungs-Ansage nennt kein Feld und bleibt
+unberührt.
+
 Angesagt wird nur, was auch zugewiesen ist; ohne Schiedsrichter-Betrieb
 entfällt beides ersatzlos. Der Schalter `announce_umpire` (Default an)
 schaltet die Nennung ganz ab.
@@ -1133,7 +1140,8 @@ Relay reicht den `MatchBrief` unverändert durch — nur die Umwandlung in
 **Nachträgliche Zuweisungen sagen nicht von selbst an.** Wer mitten im Spiel
 einen Schiedsrichter einteilt, löst die Ansage mit dem Knopf „ansagen" aus —
 in der Schiedsrichter-Seite des Clients oder an der Feld-Kachel in TL-Web.
-Diese Ansage nennt nur Feld und Besetzung, nicht noch einmal die Paarung.
+Diese Ansage nennt nur Feld und Besetzung, nicht noch einmal die Paarung —
+und schließt ebenfalls mit dem Feld („Feld 3. Schiedsrichter: … Feld 3.").
 
 ## Meetingpoint-Ansagen (seit v0.9.330)
 
