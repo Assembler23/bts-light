@@ -764,7 +764,15 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   - **Turnier-Kennung aus der Datei — ✅ umgesetzt in v0.9.302:** GUID per
     Byte-Muster `LinkCode` aus der TP-Datei (kein Jet-Parser); Übernahme im
     Setup, Ablehnung fremder Dateien vor dem Senden (Ergänzung in der
-    Takt-Spec). Offen: Datei über den BTP-Prozess selbst finden.
+    Takt-Spec).
+  - **TP-Datei selbst finden — Spec im Entwurf (15.11.2026):** Pfad aus den
+    offenen Datei-Handles von `btp.exe` (gemessen, Sonde
+    `tests/btp_tp_pfad_probe.rs`); Automatik mit Rückfrage bei abweichender
+    Kennung, Handwahl als Übersteuerung. Zwei PRs (Setup, dann laufender
+    Takt). Spec [features/tp-datei-finden.md](features/tp-datei-finden.md),
+    ADR [0096](adr/0096-tp-pfad-aus-den-handles-von-btp.md) ·
+    [0097](adr/0097-tp-automatik-kennung-nur-bei-gleichheit-oder-leer.md) ·
+    [0098](adr/0098-tp-automatik-schreibpfad-mit-schreibzaehler.md).
   - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1 — eingehalten.
   - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf.
     Lizenzfrage aus badhub-ADR 0047 **geprüft 28.10.2026** (badhub

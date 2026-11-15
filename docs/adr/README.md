@@ -104,3 +104,6 @@ hier eintragen.
 | [0093](0093-ballzahl-reist-mit-dem-ergebnis.md) | Ballzahl: reist mit dem Ergebnis, lebt im Tablet-Stand, BTP-Wert gilt | accepted |
 | [0094](0094-zeitplan-stand-prognose-gegen-plan.md) | Zeitplan-Stand: Prognose gegen Plan je Zeitfenster (ab zwei Spielen begonnen), gerechnet am Host, Panel standardmäßig unsichtbar | accepted |
 | [0095](0095-behandlung-als-ereignispaar.md) | Behandlung als Ereignispaar aus der Pause: Paarung im Renderer, Undo verankert neu, Server-Zeit, Fähigkeit über `injuryGuideSecs`, Marke „B“ | accepted |
+| [0096](0096-tp-pfad-aus-den-handles-von-btp.md) | TP-Pfad aus den Datei-Handles von `btp.exe`: Durchprobieren mit `DuplicateHandle`, read-only, Frist und Hänger-Deckel, nur lokaler BTP | proposed |
+| [0097](0097-tp-automatik-kennung-nur-bei-gleichheit-oder-leer.md) | TP-Automatik: Kennung still nur bei Gleichheit oder leerem Feld, sonst Rückfrage; Nein schaltet die Automatik ab (ändert „nie still“) | proposed |
+| [0098](0098-tp-automatik-schreibpfad-mit-schreibzaehler.md) | TP-Automatik schreibt außerhalb des Setups über `mutate_config`, Schreibzähler schützt vor veraltetem Formular, Pfad je PC | proposed |
