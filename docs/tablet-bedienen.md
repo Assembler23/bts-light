@@ -225,9 +225,19 @@ Ein Neuladen oder ein Gerätetausch behält die laufende Pause bei.
 Oben rechts sitzen zwei Knöpfe. Sie tragen **nur die Zeichen** ✚ und 📣 — die
 Beschriftung erscheint erst, wenn man darauf zeigt:
 
-- **✚ Verletzung/Behandlung** — unterbricht das Spiel. Es läuft eine
-  Behandlungspause **ohne Countdown**, bis **Weiterspielen** getippt wird. Das
-  Feld wird bei der Turnierleitung rot hervorgehoben.
+- **✚ Verletzung/Behandlung** — unterbricht das Spiel. Eine große Uhr zählt
+  die **Behandlungspause** hoch, darunter steht die Richtzeit des Turniers
+  (Standard 5 Minuten). Ist sie erreicht, wird die Uhr rot und der Titel lautet
+  **„Behandlungspause — Richtzeit überschritten"** — die Uhr zählt weiter, die
+  Pause endet erst mit **Weiterspielen**. Das Feld wird bei der Turnierleitung
+  rot hervorgehoben. Beginn, Ende und Dauer der Behandlung stehen automatisch
+  auf dem Schiedsrichterzettel.
+  <!-- pruef: "Richtzeit überschritten" in src-tauri/assets/tablet.html -->
+- **✚ auch in der Pause:** Passiert die Verletzung in der Pause bei 11 oder in
+  der Satzpause, verdeckt die Pausenanzeige die Kopfzeile. Dafür steht dort der
+  Knopf **„✚ Verletzung · Behandlung"**; er macht aus der Pause eine
+  Behandlungspause. Nach Spielende ist ✚ gesperrt.
+  <!-- pruef: "✚ Verletzung · Behandlung" in src-tauri/assets/tablet.html -->
 - **📣 Turnierleitung rufen** — meldet, dass jemand ans Feld kommen soll. Es
   erscheint eine Rückfrage, damit nichts aus Versehen ausgelöst wird.
 

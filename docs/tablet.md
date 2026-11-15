@@ -688,10 +688,40 @@ Schwellen (seit v0.9.343, `kern/AkkuAnzeige.kt`, Drift-Test
 
 In der Kopfzeile rechts gibt es zwei Melde-Buttons:
 
-- **✚ Verletzung/Behandlung** – unterbricht das Spiel (Behandlungspause
-  ohne Countdown, „Weiterspielen" hebt sie auf). Das Feld wird in der
-  bts-light-Felder-Übersicht rot hervorgehoben. In der Behandlungspause
-  gibt es zusätzlich **„Spiel abbrechen"** (siehe unten).
+- **✚ Verletzung/Behandlung** – unterbricht das Spiel; „Weiterspielen" hebt
+  die Behandlungspause auf. Das Feld wird in der bts-light-Felder-Übersicht rot
+  hervorgehoben. In der Behandlungspause gibt es zusätzlich **„Spiel
+  abbrechen"** (siehe unten). Details zur Uhr im nächsten Abschnitt.
+
+## Behandlungsuhr (Spec verletzungsunterbrechung, ADR 0095)
+
+- **Uhr:** Nach ✚ zählt eine große Uhr `m:ss` hoch (über 59 Minuten weiter,
+  z. B. „75:03"), darunter „Richtzeit 5:00 (Turnier-Vorgabe)". Ab der Richtzeit
+  wird sie rot, der Titel lautet „Behandlungspause — Richtzeit überschritten",
+  und das Tablet vermerkt einmal `injury_guide_exceeded` im Diagnose-Log. Die
+  Pause endet nie von selbst.
+- **Richtzeit** kommt aus dem Spiel-Brief (`injuryGuideSecs`, Einstellung
+  „Behandlungspause") und wird beim Beginn in `pause.richtSek` eingefroren —
+  eine Änderung im Setup gilt ab der nächsten Zuweisung, eine laufende
+  Behandlung behält ihre. Fehlt sie (alter Turnier-PC), gelten 300 s.
+- **Reload/Übernahme:** Die Uhr rechnet aus `pause.startedAt` (Server-Zeit)
+  weiter. Ein alter Stand ohne `startedAt` zeigt weiter nur „✚".
+- **✚ in der Pause:** Das Pausen-Overlay hat den Knopf „✚ Verletzung ·
+  Behandlung". Er **löst** die Punkte- bzw. Satzpause ab, ohne sie über
+  `endBreak()` zu beenden: keine „bitte spielen"-Ansage, und die
+  Aufschlagwahl im Doppel öffnet erst, wenn die Behandlung endet. Nach
+  Spielende ist ✚ gesperrt (das Megafon nicht).
+- **Zettel-Ereignisse** (nur wenn der Turnier-PC die Darstellung kennt, also
+  `injuryGuideSecs > 0`): ✚ erfasst `injury_start` mit Anker und Phase von
+  **vor** dem Pausenwechsel und demselben Zeitstempel wie die Uhr; jedes Ende
+  über `endBreak()` erfasst `injury_end`. „Spiel abbrechen" und „Match
+  beenden → Aufgabe" erfassen zusätzlich `retired`, „Wieder öffnen" nimmt es
+  zurück. Die Handeinträge „Behandlung beginnt/endet" im Schiri-Menü sind dann
+  ausgeblendet. Hinter einem älteren Turnier-PC läuft nur die Uhr; die
+  Handeinträge bleiben.
+- **Spiel vom Feld während der Behandlung:** Es wird kein Ende erfunden; der
+  Zettel zeigt „Dauer offen". Dasselbe gilt, wenn ein Ersatz-Tablet einen
+  älteren Stand desselben Spiels übernimmt.
 - **📣 Turnierleitung rufen** – Popup (deutsch/englisch) mit Bestätigung;
   meldet, dass ein Offizieller ans Feld soll.
 
@@ -706,6 +736,10 @@ in der Behandlungspause das Match. Der laufende Satz wird als Teilstand
 übernommen (z. B. 21:10, dann 5:5), danach wählt der Schiedsrichter im
 Match-Ende-Overlay manuell den Sieger. Das Ergebnis geht mit dem Status
 **Aufgabe** (`ScoreStatus = 2`, „retired") nach BTP.
+
+Der Abbruch ist ein eigener Undo-Schritt: **„Wieder öffnen"** nimmt nur den
+Abbruch zurück, der letzte Punkt bleibt stehen (früher ging er dabei
+mit verloren).
 
 ## „Match beenden" (Dialog: Aufgabe oder Kampflos)
 

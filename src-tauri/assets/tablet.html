@@ -686,6 +686,7 @@
     /* Überzogene Pause (E9, ADR 0028): zählt rot hoch, bis weitergespielt
        wird — unmissverständlich auch aus einigen Metern Entfernung. */
     .break-countdown.overrun { color: #f87171; }
+    .break-richtzeit { font-size: 1.1rem; color: #cbd5e1; }
     .break-hint { font-size: 1rem; line-height: 1.4; color: #cbd5e1; width: min(26rem, 100%); }
     /* Schiri-Ansage in der Pausen-Überlagerung (Satzende/„Bitte spielen" …). */
     .break-umpire {
@@ -1258,6 +1259,9 @@
   <!-- Schiri-Modus: Ansage zum Vorlesen, auch während der Pause sichtbar. -->
   <div class="break-umpire" id="break-umpire" hidden></div>
   <div class="break-countdown" id="break-countdown">1:00</div>
+  <!-- Behandlungsuhr: Richtzeit als Turnier-Vorgabe (Spec
+       verletzungsunterbrechung). -->
+  <div class="break-richtzeit" id="break-richtzeit" hidden></div>
   <button class="primary" id="break-skip">Weiterspielen</button>
   <!-- Doppel: Aufschläger/Annehmer des nächsten Satzes schon in der
        Satzpause festlegen (Schiri-Feedback 08.11.2026). -->
@@ -1270,10 +1274,13 @@
   <!-- Gerade in der Satzpause fällt auf, wenn die Spieler die Seiten nicht
        gewechselt haben — der Overlay verdeckt aber die Kopfzeile. -->
   <button id="break-korrektur" style="display:none">⇄ Seiten / Mannschaften korrigieren</button>
+  <!-- ✚ aus der Punkte-/Satzpause: das Overlay verdeckt die Kopfzeile mit
+       dem ✚-Knopf (Spec verletzungsunterbrechung). -->
+  <button id="break-injury" style="display:none">✚ Verletzung · Behandlung</button>
   <button class="danger" id="break-abort" style="display:none">
     Spiel abbrechen · Aufgabe
   </button>
-  <div class="break-hint">
+  <div class="break-hint" id="break-hint">
     Tippe „Weiterspielen", wenn die Spieler:innen bereit sind — nach Ablauf
     der Zeit zählt die Anzeige rot weiter, bis es weitergeht. „Korrektur"
     bricht die Pause ab und nimmt den letzten Punkt zurück (z. B. Ball
@@ -2171,6 +2178,9 @@ const els = {
   takeoverBtn: document.getElementById('takeover-btn'),
   lockedOverlay: document.getElementById('locked-overlay'),
   breakAbort: document.getElementById('break-abort'),
+  breakInjury: document.getElementById('break-injury'),
+  breakRichtzeit: document.getElementById('break-richtzeit'),
+  breakHint: document.getElementById('break-hint'),
   retirePick: document.getElementById('retire-pick'),
   retirePickLabel: document.getElementById('retire-pick-label'),
   retireWinnerA: document.getElementById('retire-winner-a'),
@@ -2954,7 +2964,10 @@ function startBreak(kind, skipCommit) {
   if (!skipCommit) { persistState(); render(); }
 }
 
-function endBreak() {
+// `ohneAufschlagwahl`: Endet mit der Pause auch das Spiel (Abbruch aus der
+// Behandlung), darf die Aufschlagwahl des nächsten Satzes nicht aufgehen —
+// sie stünde sonst über dem beendeten Spiel (Review-Befund PR 4).
+function endBreak(ohneAufschlagwahl) {
   if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
   // Selbstschluss (Spec): Ein Ereignis-Modal, das noch aus der Pause
   // offen steht, poppt sonst über das wieder laufende Spiel — und die
@@ -2963,6 +2976,12 @@ function endBreak() {
   if (els.cardModal && els.cardModal.classList.contains('visible')) closeCardModal();
   if (STATE.pause) {
     tlog('info', 'break_end', { kind: STATE.pause.kind });
+    // Ende der Behandlung → `injury_end` (ADR 0095). Eine Stelle für alle
+    // Wege („Weiterspielen", „Spiel abbrechen"); nur wenn der Beginn als
+    // Ereignis erfasst wurde — sonst stünde ein Ende ohne Beginn da.
+    if (STATE.pause.kind === 'injury' && STATE.pause.startId && hostKenntBehandlung(STATE.match)) {
+      erfasseEreignis('injury_end');
+    }
     // Behandlungspause beendet → Verletzungs-Meldung zurücknehmen.
     if (STATE.pause.kind === 'injury' && STATE.alertInjury) {
       STATE.alertInjury = false;
@@ -2983,7 +3002,7 @@ function endBreak() {
   // Satzpause. So bleibt `setup` während der Pause auf 'playing' (undo/
   // Korrektur funktioniert), und die Abfrage erscheint erst, wenn die Spieler
   // zurückkommen. undo() räumt serveSetupTeam vorher weg → kein Re-Prompt.
-  maybeOpenServeReprompt();
+  if (ohneAufschlagwahl !== true) maybeOpenServeReprompt();
   persistState();
   render();
 }
@@ -3006,6 +3025,18 @@ function maybeOpenServeReprompt() {
 // hoch, bis „Weiterspielen" gedrückt wird. So wird die Überziehung echt
 // gemessen und ist für die Turnierleitung sichtbar.
 function tickBreak() {
+  // Behandlung: Uhr zählt hoch; ab der Richtzeit einmal vermerken (Log +
+  // gespiegelter Stand), die Pause endet trotzdem nicht von selbst.
+  if (STATE.pause && STATE.pause.kind === 'injury' && STATE.pause.startedAt) {
+    const u = behandlungsUhr(serverNow(), STATE.pause.startedAt, behandlungsRichtzeit());
+    if (u && u.ueberschritten && !STATE.pause.overrun) {
+      STATE.pause.overrun = true;
+      tlog('warn', 'injury_guide_exceeded', { richtSek: behandlungsRichtzeit() });
+      persistState();
+    }
+    renderBreak();
+    return;
+  }
   if (!STATE.pause || !STATE.pause.endsAt) {
     if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
     return;
@@ -3067,10 +3098,26 @@ function renderBreak() {
     els.breakOverlay.classList.remove('visible');
     return;
   }
+  els.breakRichtzeit.hidden = true;
+  // Der Hinweis spricht von Korrektur und Pausenzeit — beides gibt es in der
+  // Behandlung nicht; dort ein eigener Text.
+  if (!els.breakHint.dataset.bwf) els.breakHint.dataset.bwf = els.breakHint.textContent.trim();
+  els.breakHint.textContent = STATE.pause.kind === 'injury'
+    ? 'Tippe „Weiterspielen", wenn die Behandlung beendet ist. Die Uhr wird nach der Richtzeit rot und zählt weiter — die Pause endet nur hier.'
+    : els.breakHint.dataset.bwf;
   if (STATE.pause.kind === 'injury') {
-    els.breakTitle.textContent = 'Behandlungspause';
-    els.breakCountdown.textContent = '✚';
-    els.breakCountdown.classList.remove('overrun');
+    // Hochzählende Uhr ab ✚ (Spec verletzungsunterbrechung); ein alter Stand
+    // ohne Startzeit zeigt weiter nur „✚".
+    const richt = behandlungsRichtzeit();
+    const u = behandlungsUhr(serverNow(), STATE.pause.startedAt, richt);
+    els.breakTitle.textContent = 'Behandlungspause'
+      + (u && u.ueberschritten ? ' — Richtzeit überschritten' : '');
+    els.breakCountdown.textContent = u ? u.text : '✚';
+    els.breakCountdown.classList.toggle('overrun', !!(u && u.ueberschritten));
+    if (u) {
+      els.breakRichtzeit.textContent = 'Richtzeit ' + uhrText(richt) + ' (Turnier-Vorgabe)';
+      els.breakRichtzeit.hidden = false;
+    }
   } else {
     // Nach Ablauf zählt die Anzeige ROT hoch („+0:37") statt zu enden —
     // die Pause hält, bis „Weiterspielen" gedrückt wird (E9, ADR 0028).
@@ -3093,6 +3140,8 @@ function renderBreak() {
   els.breakAufschlag.style.display = aufschlagInPauseMoeglich() ? '' : 'none';
   // „Spiel abbrechen" nur in der Behandlungspause anbieten.
   els.breakAbort.style.display = STATE.pause.kind === 'injury' ? '' : 'none';
+  // ✚ aus der Punkte-/Satzpause löst diese ab (Spec verletzungsunterbrechung).
+  els.breakInjury.style.display = verletzungMoeglich() && STATE.pause.kind !== 'injury' ? '' : 'none';
   // „Korrektur — letzter Punkt zurück" bei den BWF-Intervallen (11er-/
   // Satzpause), wenn ein Punkt zum Zurücknehmen da ist. Bricht die Pause
   // ab und nimmt den auslösenden Punkt zurück (z. B. Ball wiederholen).
@@ -3118,7 +3167,14 @@ function renderBreak() {
 // Match-Ende-Overlay manuell gewählt.
 function abortMatchRetired() {
   if (!STATE.match) return;
-  if (STATE.pause) endBreak(); // Behandlungspause + Verletzungs-Meldung beenden
+  // Eigener Undo-Schritt wie in finishAs: „Wieder öffnen" nimmt sonst den
+  // Abbruch UND den letzten Punkt zurück (Fehlerbehebung, Spec
+  // verletzungsunterbrechung).
+  STATE.history.push(snapshot());
+  // Anker und Phase VOR Pausenende und Satzabschluss — danach zeigte der
+  // Anker auf den nächsten, nie begonnenen Satz.
+  const aufgabe = { anker: eventAnker(), phase: eventPhase() };
+  if (STATE.pause) endBreak(true); // Behandlung + Meldung beenden, ohne Aufschlagwahl
   if (STATE.currentSet.left > 0 || STATE.currentSet.right > 0) {
     STATE.setsCompleted.push({ ...STATE.currentSet });
     STATE.currentSet = { left: 0, right: 0 };
@@ -3131,8 +3187,31 @@ function abortMatchRetired() {
   STATE.cascadeWalkover = false;
   STATE.retiredWinner = null;
   tlog('info', 'match_retired', { cascade: false });
+  erfasseAufgabe(aufgabe);
   persistState();
   render();
+}
+
+/** „Aufgabe" auf dem Zettel (ADR 0095) — nur wenn der Host die
+ *  Behandlungs-Darstellung kennt (sonst druckte er die Zeile bei „A1"). */
+function erfasseAufgabe(aufgabe) {
+  if (!hostKenntBehandlung(STATE.match)) return;
+  erfasseEreignis('retired', aufgabe);
+}
+
+/** Richtzeit der laufenden Behandlung: beim Beginn eingefroren; ein Stand
+ *  von vorher trägt keine → aus dem Brief bzw. 300 s. */
+function behandlungsRichtzeit() {
+  const r = STATE.pause && STATE.pause.richtSek;
+  return typeof r === 'number' && r > 0 ? r : richtzeitAusBrief(STATE.match);
+}
+
+/** Darf ✚ gerade eine Behandlung beginnen? Nicht nach Spielende, nicht am
+ *  gesperrten/belegten Tablet, nicht in einer laufenden Behandlung. */
+function verletzungMoeglich() {
+  return !!STATE.match && STATE.setup === 'playing' && !STATE.finished
+    && !STATE.locked && !STATE.occupied
+    && !(STATE.pause && STATE.pause.kind === 'injury');
 }
 
 // ─────────────────────── Meldungen an die Turnierleitung ───────────────
@@ -3150,10 +3229,29 @@ function sendAlert() {
 }
 
 function startInjury() {
-  if (STATE.pause || STATE.locked || STATE.occupied || !STATE.match) return;
+  if (!verletzungMoeglich()) return;
+  // Anker und Phase VOR dem Pausenwechsel — danach wäre die Phase immer
+  // `break_injury` (Spec verletzungsunterbrechung).
+  const anker = eventAnker();
+  const phase = eventPhase();
+  const abgeloest = STATE.pause ? STATE.pause.kind : null;
+  // Eine laufende Punkte-/Satzpause wird ABGELÖST, nicht über endBreak()
+  // beendet: keine „bitte spielen"-Ansage, und die Aufschlagwahl im Doppel
+  // öffnet erst, wenn die Behandlung mit „Weiterspielen" endet.
+  if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+  // Ein Stempel für Uhr und Ereignis (Server-Zeit).
+  const t = Math.round(serverNow());
   STATE.alertInjury = true;
   sendAlert();
-  startBreak('injury'); // ruft persistState + render
+  STATE.pause = { kind: 'injury', startedAt: t, endsAt: null, richtSek: richtzeitAusBrief(STATE.match) };
+  if (hostKenntBehandlung(STATE.match)) {
+    const e = erfasseEreignis('injury_start', { anker, phase, tsMs: t });
+    if (e) STATE.pause.startId = e.id;
+  }
+  breakTimer = setInterval(tickBreak, 250);
+  tlog('info', 'break_start', { kind: 'injury', abgeloest });
+  persistState();
+  render();
 }
 
 function openMegaphoneModal() {
@@ -3911,6 +4009,9 @@ function applyPersistedState(p) {
   // endete sie doch wieder automatisch.
   if (p.pause && p.pause.kind === 'injury') {
     STATE.pause = p.pause;
+    // Behandlungsuhr rechnet aus `startedAt` weiter (Reload/Übernahme).
+    if (breakTimer) { clearInterval(breakTimer); breakTimer = null; }
+    if (p.pause.startedAt) breakTimer = setInterval(tickBreak, 250);
   } else if (p.pause && typeof p.pause.endsAt === 'number') {
     STATE.pause = p.pause;
     if (breakTimer) clearInterval(breakTimer);
@@ -5624,6 +5725,8 @@ function finishAs(status, cascade) {
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing'
       || STATE.locked || STATE.occupied) return;
   STATE.history.push(snapshot());
+  // Anker/Phase für „Aufgabe" VOR dem Satzabschluss (wie abortMatchRetired).
+  const aufgabe = { anker: eventAnker(), phase: eventPhase() };
   if (status === 'walkover') {
     // Kampflos: nicht ausgespielt → keine Sätze werten.
     STATE.setsCompleted = [];
@@ -5645,6 +5748,7 @@ function finishAs(status, cascade) {
   STATE.retiredWinner = null;
   tlog('info', status === 'walkover' ? 'match_walkover' : 'match_retired',
     { cascade: STATE.cascadeWalkover });
+  if (status !== 'walkover') erfasseAufgabe(aufgabe);
   persistState();
   render();
   sendScoreUpdate();
@@ -5666,11 +5770,23 @@ function reopen() {
     korrekturZuruecknehmen();
     return;
   }
+  // Wurde in der Satzpause abgebrochen, steht die Aufschlagwahl des nächsten
+  // Satzes noch aus (Doppel). `restoreSnapshot` räumt sie weg — am
+  // Satzanfang (0:0) wird sie deshalb wiederhergestellt und gleich geöffnet.
+  const offeneWahl = STATE.serveSetupTeam;
   if (STATE.history.length > 0) {
     restoreSnapshot(STATE.history.pop());
   } else {
     STATE.finished = false;
   }
+  if (offeneWahl && STATE.currentSet.left === 0 && STATE.currentSet.right === 0) {
+    STATE.serveSetupTeam = offeneWahl;
+    maybeOpenServeReprompt();
+  }
+  // Das Spiel läuft weiter → eine erfasste „Aufgabe" gilt nicht mehr.
+  const aufgabe = (STATE.events || []).filter(e => e.kind === 'retired'
+    && !meIstZurueckgenommen(STATE.events, e.id)).pop();
+  if (aufgabe) nimmZurueck(aufgabe.id);
   STATE.submittedOk = false;
   STATE.pendingResult = null;
   STATE.resultRejected = null;
@@ -6344,7 +6460,8 @@ function render() {
   // Verletzungs-/Megafon-Button: nur bei laufendem Match, nicht gesperrt.
   const canSignal = !!STATE.match && STATE.setup === 'playing'
     && !STATE.locked && !STATE.occupied;
-  els.injuryBtn.disabled = !canSignal;
+  // ✚ nach Spielende gesperrt; das Megafon bleibt.
+  els.injuryBtn.disabled = !canSignal || !verletzungMoeglich();
   els.megaphoneBtn.disabled = !canSignal;
   renderBallzaehler();
   const kannKorrigieren = korrekturMoeglich();
@@ -7295,6 +7412,12 @@ function renderCards() {
 /** Erste Ansicht: Art des Vorgangs. */
 function openCardModal() {
   if (!STATE.match || STATE.finished) return;
+  // Kennt der Host die Behandlungs-Darstellung, erfasst ✚ Beginn und Ende
+  // selbst — die Handeinträge würden doppeln (Spec verletzungsunterbrechung,
+  // endgültig entfernt in einem späteren Aufräum-PR).
+  const auto = hostKenntBehandlung(STATE.match);
+  els.cardKindView.querySelectorAll('[data-kind="injury_start"],[data-kind="injury_end"]')
+    .forEach(opt => { opt.hidden = auto; });
   els.cardKindView.hidden = false;
   els.cardPlayerView.hidden = true;
   els.cardColorView.hidden = true;
@@ -7615,6 +7738,7 @@ els.megaphoneBtn.addEventListener('click', openMegaphoneModal);
 els.megaphoneConfirm.addEventListener('click', confirmMegaphone);
 els.megaphoneCancel.addEventListener('click', () => els.megaphoneModal.classList.remove('visible'));
 els.breakAbort.addEventListener('click', abortMatchRetired);
+els.breakInjury.addEventListener('click', startInjury);
 els.retireWinnerA.addEventListener('click', () => { STATE.retiredWinner = 'a'; persistState(); render(); });
 els.retireWinnerB.addEventListener('click', () => { STATE.retiredWinner = 'b'; persistState(); render(); });
 els.takeoverBtn.addEventListener('click', () => {
