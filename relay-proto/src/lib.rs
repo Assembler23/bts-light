@@ -1746,6 +1746,25 @@ pub fn seiten_marke(inhalt: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Anzeigename des Demofelds (Spec `tablet-demofeld`).
+pub const DEMO_FELD_NAME: &str = "Demofeld";
+
+/// Füllt die Platzhalter der Tablet-Seite fürs **Demofeld** (`/court/demo`,
+/// LAN wie Relay — eine Funktion, damit beide Wege dieselbe Seite liefern).
+///
+/// `__DEMO__` = `1` schaltet die Seite in den abgekapselten Übungsmodus: kein
+/// WebSocket, kein Ergebnis, eigener Speicher (siehe `tablet.html`). CourtID
+/// `0` gibt es in BTP nicht; sie berührt also kein echtes Feld. `marke` ist
+/// der Fingerabdruck der unersetzten Seite wie bei jedem Feld.
+pub fn demo_tablet_seite(tablet_html: &str, pin: &str, marke: &str) -> String {
+    tablet_html
+        .replace("__DEMO__", "1")
+        .replace("__COURT_ID__", "0")
+        .replace("__COURT_LABEL__", DEMO_FELD_NAME)
+        .replace("__TABLET_PIN__", pin)
+        .replace("__SEITEN_MARKE__", marke)
+}
+
 /// Antwort auf eine Ergebnis-Übermittlung.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResultResponse {
@@ -3938,6 +3957,32 @@ pub enum CarrierServerMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Demofeld (Spec tablet-demofeld) ─────────────────────────────────
+
+    /// Die echte Tablet-Seite: Das Demofeld schaltet den Übungsmodus ein,
+    /// lässt keinen Platzhalter stehen und adressiert kein echtes Feld.
+    #[test]
+    fn demo_seite_schaltet_uebungsmodus_ein_und_fuellt_alle_platzhalter() {
+        let html = include_str!("../../src-tauri/assets/tablet.html");
+        assert!(
+            html.contains("const DEMO = '__DEMO__' === '1';"),
+            "Schalter in tablet.html umbenannt? Dann hier mitziehen."
+        );
+        let seite = demo_tablet_seite(html, "1234", "abc");
+        assert!(seite.contains("const DEMO = '1' === '1';"));
+        assert!(seite.contains("Number('0')"));
+        assert!(seite.contains("Demofeld"));
+        for platzhalter in [
+            "__DEMO__",
+            "__COURT_ID__",
+            "__COURT_LABEL__",
+            "__TABLET_PIN__",
+            "__SEITEN_MARKE__",
+        ] {
+            assert!(!seite.contains(platzhalter), "{platzhalter} blieb stehen");
+        }
+    }
 
     // ─── Ansage-Seite (Spec ansage-im-browser) ───────────────────────────
 

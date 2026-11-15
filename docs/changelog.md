@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.416
+## v0.9.417
 
 - **Schiedsrichterzettel: Behandlungen mit Dauer.** Eine
   Verletzungsunterbrechung steht jetzt vollständig auf dem Zettel: Im Raster
@@ -20,6 +20,18 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
     Überstimmung und „Oberschiedsrichter gerufen" stehen ohne Spieler — eine
     Behandlung bei „A1" wäre eine Gesundheitsangabe an der womöglich falschen
     Person.
+
+## v0.9.416
+
+- **Demofeld zum Üben am Tablet.** Schiedsrichter und Helfer können das
+  Zähltablett jetzt ausprobieren, auch mitten im laufenden Turnier: In der
+  Feldwahl gibt es die Kachel **Demofeld**, im Zahnrad-Menü steht sie unter
+  „Feld wechseln". Zur Wahl stehen Übungsspiele mit ausgedachten Namen:
+  Einzel, Doppel und Mixed ab 0:0 sowie Entscheidungssatz, Verlängerung ab
+  19:19 und Spielpunkt bis zum Übermitteln. Das Demofeld belegt kein Feld
+  und überträgt nichts: nicht an die Turnierleitung, nicht an BTP, nicht an
+  die Monitore und nicht an den Liveticker. Im Cloud-Modus ist es nach dem
+  Relay-Deploy sofort da.
 
 ## v0.9.415
 
