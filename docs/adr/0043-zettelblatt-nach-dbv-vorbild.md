@@ -34,7 +34,9 @@ Drei Anpassungen gegenüber dem Vorbild und dem Bestand:
 1. **Keine Verbandsmarke.** Logo und Schriftzug des DBV sind geschützt; im Kopf steht das
    Turnierlogo und der Turniername.
 2. **Zeichenkonvention des Vorbilds:** `W` Warnung, `F` Fault, `R` Referee gerufen, dazu `D` für
-   Disqualifikation — statt der hausgemachten `V`/`F`/`D`.
+   Disqualifikation — statt der hausgemachten `V`/`F`/`D`. *Ergänzt durch
+   [ADR 0095](0095-behandlung-als-ereignispaar.md):* `B` für den Beginn einer Behandlung, und
+   eine Zelle trägt bis zu zwei Marken (Rangfolge `D > F > W > R > B`, zweite links oben).
 3. **Der Vermerk „Internes Turnier-Archiv — kein amtlicher Beleg" entfällt.** Er passt nicht auf
    ein Blatt, das während des Spiels geführt wird, und die Zusage wird damit ausdrücklich
    zurückgenommen — in dieser Spec, in `schiedsrichterzettel-druck.md` und in `umpire-mode.md`.

@@ -4,6 +4,44 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.419
+
+- **Schiedsrichterzettel: Korrektur löscht keine Behandlung mehr.** Wird nach
+  einer Behandlung ein Punkt zurückgenommen, verschiebt das Tablet Beginn und
+  Ende der Behandlung an die richtige Stelle, statt sie zu streichen — auf dem
+  Zettel steht sie einmal, mit dem „B" am richtigen Ballwechsel. (Wirkt mit
+  einem Turnier-PC ab v0.9.418.)
+- **Uhrzeiten auf dem Zettel** kommen jetzt einheitlich von der Uhr des
+  Turnier-PCs statt vom jeweiligen Tablet.
+
+## v0.9.418
+
+- **Richtzeit für die Behandlungspause.** Neuer Abschnitt
+  **„Behandlungspause"** in den Einstellungen: Nach wie vielen Minuten eine
+  Behandlung als zu lang gilt (Standard 5, einstellbar 1–30). In der
+  Turnierleitungssicht wird das Badge „Behandlung seit …" ab dieser Zeit rot
+  („Richtzeit überschritten"). Die Richtzeit ist eine Turnier-Vorgabe, keine
+  Regel — die Pause endet weiter nur am Tablet. Die Uhr am Tablet folgt mit
+  einer der nächsten Versionen; die Tablets übernehmen die Einstellung mit der
+  nächsten Spielzuweisung.
+
+## v0.9.417
+
+- **Schiedsrichterzettel: Behandlungen mit Dauer.** Eine
+  Verletzungsunterbrechung steht jetzt vollständig auf dem Zettel: Im Raster
+  markiert ein **„B"** den Ballwechsel, nach dem die Behandlung begann (auch
+  im Intervall bei 11), im Anhang stehen „Behandlung Beginn" und
+  „Behandlung Ende (Dauer 4:12)". Fehlt das Ende, heißt es „Dauer offen";
+  passen die Uhrzeiten nicht zusammen, „Dauer —". Gilt auch für Einträge, die
+  schon über das Schiri-Menü erfasst wurden.
+  - Eine Zelle trägt jetzt **bis zu zwei Marken** (die wichtigere rechts
+    oben, die zweite links oben).
+  - Die **Spieler-Spalte** im Anhang ist nur noch bei Aufschlagfolge, Karten
+    und Disqualifikation gefüllt. Behandlung, Aufgabe, Unterbrechung,
+    Überstimmung und „Oberschiedsrichter gerufen" stehen ohne Spieler — eine
+    Behandlung bei „A1" wäre eine Gesundheitsangabe an der womöglich falschen
+    Person.
+
 ## v0.9.416
 
 - **Demofeld zum Üben am Tablet.** Schiedsrichter und Helfer können das

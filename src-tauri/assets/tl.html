@@ -4210,6 +4210,12 @@ function pauseText(endsAt) {
   return rest < 0 ? `überzogen +${zeitspanne(-rest)}` : `Pause ${zeitspanne(rest)}`;
 }
 
+/** Richtzeit der Behandlungspause in ms — aus dem Zustand, sonst 300 s. */
+function richtzeitMs() {
+  const s = Number(state && state.injury_guide_seconds);
+  return (Number.isFinite(s) && s > 0 ? s : 300) * 1000;
+}
+
 /** Pausen-Abzeichen einer Feldkachel (Spec spielzeiten-prognose, E9/E10):
  *  BWF-Pause mit Countdown (Warn-Stufe) bzw. Überziehung (Alarm-Stufe);
  *  Behandlungspause als „Behandlung seit …" ohne Countdown. Ein altes
@@ -4224,7 +4230,10 @@ function pauseBadge(p) {
     const seit = p.started_at_ms
       ? ` seit <span class="zeit num" data-pause-started="${p.started_at_ms}"></span>`
       : "";
+    // Richtzeit (Spec verletzungsunterbrechung): ab dann färbt
+    // `tickClocks()` das Badge rot. Ein alter Host kennt sie nicht → 300 s.
     return `<span class="badge badge-warn pause-chip"
+      data-guide-ms="${richtzeitMs()}"
       title="Behandlungspause läuft">Behandlung${seit}</span>`;
   }
   if (!p.ends_at_ms) return '<span class="badge badge-warn">Pause</span>';
@@ -10017,6 +10026,14 @@ function tickClocks() {
   document.querySelectorAll(".pause-chip [data-pause-started]").forEach((el) => {
     const since = Number(el.dataset.pauseStarted);
     if (since) el.textContent = elapsed(since);
+    // Behandlung über der Richtzeit: rot, wie am Tablet. Die Pause endet
+    // trotzdem nur am Tablet mit „Weiterspielen".
+    const chip = el.closest(".pause-chip[data-guide-ms]");
+    if (!chip || !since) return;
+    const over = serverNow() - since >= Number(chip.dataset.guideMs);
+    chip.classList.toggle("badge-alarm", over);
+    chip.classList.toggle("badge-warn", !over);
+    chip.title = over ? "Richtzeit überschritten" : "Behandlungspause läuft";
   });
   // Der Sprung von „gerufen" auf „überfällig" hängt allein an der Uhr — er
   // käme sonst erst, wenn sich am Turnier sonst irgendetwas ändert. In einer

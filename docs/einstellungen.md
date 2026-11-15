@@ -516,6 +516,24 @@ beendeten Spielen, und der Dialog „Ergebnis eintragen" bzw. „Ergebnis
 korrigieren" hat ein Feld **Bälle**. Wie am Tablet gezählt wird, steht in
 [Das Zähl-Tablet bedienen](tablet-bedienen.md).
 
+### Behandlungspause
+
+| Feld | Voreinstellung | Bedeutung |
+|---|---|---|
+| **Richtzeit** | 5 Minuten | Nach so vielen Minuten wird die Behandlungsuhr am Zähl-Tablet rot und zeigt „Richtzeit überschritten"; in der Turnierleitungssicht wird das Badge „Behandlung seit …" rot. Einstellbar von 1 bis 30 Minuten. |
+<!-- pruef: "Behandlungspause" in src/pages/SetupWizard.tsx -->
+<!-- pruef: /RICHTZEIT_STANDARD_S: u32 = 300/ in src-tauri/src/config.rs -->
+<!-- pruef: /RICHTZEIT_MIN_S: u32 = 60/ in src-tauri/src/config.rs -->
+<!-- pruef: /RICHTZEIT_MAX_S: u32 = 1800/ in src-tauri/src/config.rs -->
+
+Die Richtzeit ist eine **Turnier-Vorgabe, keine Regel**: Die Uhr zählt
+weiter, und die Pause endet nur, wenn am Tablet „Weiterspielen" gedrückt wird.
+Ein „aus" gibt es nicht — wer die rote Uhr nicht will, stellt 30 Minuten ein.
+Die Tablets übernehmen eine Änderung mit der **nächsten Spielzuweisung**; eine
+schon laufende Behandlung behält ihre Richtzeit. Die Turnierleitungssicht
+rechnet sofort mit dem neuen Wert, deshalb kann ihr Badge in diesem Moment
+kurz anders gefärbt sein als die Uhr am Tablet.
+
 ### Hallen-Check-In
 
 | Feld | Voreinstellung | Bedeutung |
