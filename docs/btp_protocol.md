@@ -1237,7 +1237,12 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
     die Kommandozeile bleibt leer. Lesbar bleiben Fenstertitel und
     Handle-Zahl. Die Automatik erkennt den Fall also eindeutig und muss auf
     die Handauswahl verweisen — kein Hänger, kein halbes Ergebnis.
-  - Offen: Netzlaufwerk, zwei BTP-Fenster, Virenscanner.
+  - **Fall „zwei BTP-Fenster" entfällt (15.11.2026):** BTP lässt sich
+    nicht ein zweites Mal starten und meldet, dass es schon aktiv ist. Je
+    Windows-Sitzung gibt es also höchstens ein `btp.exe` und damit höchstens
+    eine offene `.tp` — eine Auswahl zwischen mehreren Treffern braucht die
+    Automatik nicht. (Ungeprüft: zwei Windows-Benutzer am selben PC.)
+  - Offen: Netzlaufwerk, Virenscanner.
   Aufruf am Windows-PC mit laufendem BTP:
   `cargo test -p bts-light --test btp_tp_pfad_probe -- --ignored --nocapture`.
 - `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst
