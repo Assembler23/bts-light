@@ -499,6 +499,9 @@ mod tests {
                 ereignis("aa05", EventKind::CardRed),
                 ereignis("aa06", EventKind::Disqualified),
                 ereignis("aa07", EventKind::InjuryStart),
+                // Behandlung und Aufgabe sind Gesundheitsangaben (ADR 0095).
+                ereignis("aa08", EventKind::InjuryEnd),
+                ereignis("aa09", EventKind::Retired),
             ],
             ..Default::default()
         };
@@ -507,6 +510,7 @@ mod tests {
         assert_eq!(a[0].player, 1);
         let json = serde_json::to_string(&a).unwrap();
         assert!(!json.contains("card") && !json.contains("injury") && !json.contains("ts"));
+        assert!(!json.contains("retired"));
     }
 
     /// Berichtigte Mannschaften (ADR 0067): badhub kennt nur `serve_start`,
@@ -543,6 +547,11 @@ mod tests {
             Some(1_755_600_060_000)
         );
         assert!(pause_aus_tablet(Some(&p("injury"))).is_none());
+        // Auch die Behandlungsuhr mit ihren Feldern (Richtzeit, Kennung des
+        // Beginns) erreicht badhub nicht (Spec verletzungsunterbrechung).
+        let beh = serde_json::json!({"kind": "injury", "startedAt": 1u64,
+            "richtSek": 300, "startId": "aa07", "overrun": true});
+        assert!(pause_aus_tablet(Some(&beh)).is_none());
         assert!(pause_aus_tablet(None).is_none());
     }
 

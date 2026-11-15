@@ -313,6 +313,16 @@ und wird nie protokolliert. Der Profil-Schalter blendet nur aus und ist
 **kein** Zugriffsschutz. Wächter: `search_answer_*` in
 `tablet/suche_tests.rs`.
 
+**Behandlungen auf dem Zettel** (seit 15.11.2026, Spec
+`verletzungsunterbrechung`, ADR 0095): Eine Verletzungsunterbrechung ist eine
+Gesundheitsangabe. Der Schiedsrichterzettel hält deshalb nur **Zeitpunkt und
+Dauer** fest, **nie eine Person**: Die Spieler-Spalte folgt der Positivliste
+`traegt_person` (Aufschlagfolge, Karten, Disqualifikation) — Behandlung und
+Aufgabe bleiben leer, auch bei alten Handeinträgen. Das Tablet fragt nach ✚ nicht
+nach dem Spieler. Behandlungsereignisse erscheinen nicht im badhub-Verlauf. Die
+Richtzeit im TL-Zustand (`injury_guide_seconds`) ist eine Frist ohne
+Personenbezug.
+
 **Setzplätze** (seit 12.10.2026, Spec `setzplaetze-anzeigen`): Der Setzplatz
 („1", „3/4") steht öffentlich auf dem Auslosungsbogen und sagt über eine Person
 nichts, was über den Namen hinausgeht — deshalb **standardmäßig sichtbar**, auf
