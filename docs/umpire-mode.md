@@ -183,4 +183,7 @@ Alle Texte stehen gebündelt in den `ump*`-Funktionen in `tablet.html`
   Warnung (gelb), **F** Fehler (rot), **D** Disqualifikation; dazu **R** für
   „Oberschiedsrichter gerufen".
 - Bewusst **nicht** gebaut: Übertragung an badhub, weitere Sprachen — bei
-  Bedarf später.
+  Bedarf später. Das gilt auch nach dem Sprachumschalter der
+  Bedienoberfläche (v0.9.423): Stellt jemand das Tablet auf English, werden
+  Knöpfe, Abzeichen („Warning", „Interval") und der Hinweis „Choose
+  positions …" englisch — die **Ansagetexte** bleiben deutsch.

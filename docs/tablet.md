@@ -251,6 +251,8 @@ Turnier** ausprobieren — deshalb ist er vollständig abgekapselt:
 - „⋯ Mehr → Feld wechseln · Anzeige …" öffnet ohne PIN (Große Schrift frei
   ausprobierbar; der Schiri-Modus ist seit v0.9.423 ohnehin PIN-frei);
   „Anzeige (nur Spielstand)" ist ausgeblendet.
+- Mit englischer Bedienoberfläche heißt das Feld „Practice court"
+  (siehe „Sprache der Bedienoberfläche").
 
 Spec: [`features/tablet-demofeld.md`](features/tablet-demofeld.md).
 
@@ -410,14 +412,15 @@ Aufstellung:
   die Wahl bleibt fällig und öffnet sonst wie bisher nach „Weiterspielen".
   Ist sie getroffen, kehrt das Overlay zurück; „Weiterspielen" fragt dann
   nicht noch einmal. Der Status an den Host bleibt `break_game`.
-- **Zurück-Schritt:** Ab Schritt 2 gibt es einen **„← Zurück · Back"**-
+- **Zurück-Schritt:** Ab Schritt 2 gibt es einen **„← Zurück"**-
   Button. Er verwirft die zuletzt getroffene Wahl und springt einen
   Schritt zurück – so lassen sich Fehleingaben korrigieren, ohne das
   Match neu zuweisen zu müssen. (Bei der Per-Satz-Aufschlagwahl entfällt
   das Zurück: das Gewinnerteam steht durch den Satzstand fest.)
-- **Zweisprachig:** Titel und Hinweise des Assistenten erscheinen
-  Deutsch **und** Englisch (internationale Spieler:innen). Das gilt auch
-  für das Megafon-Popup.
+- **Sprache (seit v0.9.423):** Die Seite spricht **eine** Sprache —
+  Deutsch oder Englisch, umschaltbar unter **⋯ Mehr** (Abschnitt
+  „Sprache der Bedienoberfläche"). Vorher standen Titel und Hinweise des
+  Assistenten und das Megafon-Popup in beiden Sprachen zugleich.
 - **Kopfzeile bleibt sichtbar (seit v0.9.278):** Der Assistent deckt nur
   noch den Bereich unter der Kopfzeile ab. Feldname, Aufruf-Uhr,
   Sponsor-Leiste, Verbindungspunkt und **⋯ Mehr** (bis v0.9.422 das
@@ -512,7 +515,7 @@ Eingriffe:
   `korrektur: {art, eventId, folgeIds, serveSetupTeamVorher}` auf `history`.
   Bei „Mannschaften tauschen" trägt er — als einziger Undo-Stand — eine
   Vollkopie des Punktverlaufs (siehe „Gespiegelter Zustand: Format 2").
-  `undo()`, `reopen()`, `setupBack()` und „Korrektur" in der Pause nehmen ihn
+  `undo()`, `reopen()`, `setupBack()` und der Rückgängig-Knopf in der Pause nehmen ihn
   zuerst zurück (`korrekturZuruecknehmen`): Snapshot zurück, Ereignisse per
   `retract` am selben Anker, Karten zurückkippen.
 - **Doppel:** Nach „Mannschaften tauschen" im laufenden Spiel setzt das Tablet
@@ -862,6 +865,38 @@ Sechster Teil (ebenfalls v0.9.423).
   Mannschaft — nach einem Seitenwechsel stünde sonst Rot neben der blauen
   +1-Fläche.
 
+### Sprache der Bedienoberfläche
+
+Siebter Teil (ebenfalls v0.9.423). Vorher standen einzelne Texte in beiden
+Sprachen zugleich („← Zurück · Back", „Spiel beenden? · End the match?"),
+die meisten nur deutsch. Jetzt spricht die Seite **eine** Sprache, und die
+wählt, wer zählt: **⋯ Mehr → Sprache · Language → Deutsch / English**, ohne
+PIN.
+
+- **Je Gerät.** Die Wahl liegt im `localStorage` (`badhub.tablet.sprache`),
+  nicht am Feld — sie überlebt Feldwechsel, Neuladen und das Demofeld. Der
+  Turnier-PC erfährt davon nichts; es gibt keinen Standard je Turnier.
+- **Ohne Neuladen.** `setzeSprache` zeichnet die Seite neu; ein laufendes
+  Spiel, eine Pause und offene Uhren bleiben, wie sie sind.
+- **Ein Wörterbuch, deutsch als Schlüssel** (`EN` in `tablet.html`):
+  `t('Spiel beenden?')` liefert den englischen Text oder — fehlt er — den
+  deutschen. Platzhalter stehen als `{name}`. Festes HTML trägt `data-t`
+  (bzw. `data-t-title`/`data-t-aria`) und wird von `statischUebersetzen`
+  umgeschrieben. Die Inline-Kopien aus `src/io/` bleiben unberührt; übersetzt
+  wird an der Anzeigestelle (`geparktBand`, `abschlussStatus`, …).
+- **Was deutsch bleibt — bewusst:**
+  - die **Ansagen des Schiri-Modus** samt Karten-Ansagen: Sie werden in der
+    Halle vorgelesen, und das Regelwerk gibt den Wortlaut vor,
+  - der **Ablehnungsgrund vom Turnier-PC** und alles, was aus BTP kommt
+    (Feldname, Klasse, Namen),
+  - die **Diagnose** (für die Turnierleitung und den Support).
+- **Demofeld:** Feldname („Practice court"), Wasserzeichen („PRACTICE", per
+  CSS an `html[lang]`) und die Übungsspiele folgen der Sprache.
+- **Vollständigkeit ist geprüft:** `scripts/test-tablet-sprache.mjs` (CI)
+  verlangt für jeden Text, der durch `t()` oder `data-t` läuft, einen
+  englischen Eintrag, lässt keine verwaisten Einträge zu und vergleicht die
+  Platzhalter. Ein neuer Text ohne Übersetzung macht die CI rot.
+
 ## Akkustand am Tablet (seit v0.9.293)
 
 Im Kiosk fehlt die Android-Statusleiste — den Akkustand eines Tablets
@@ -939,7 +974,7 @@ den Knopf „📣 Turnierleitung" in der Kopfzeile:
 - **Spiel vom Feld während der Behandlung:** Es wird kein Ende erfunden; der
   Zettel zeigt „Dauer offen". Dasselbe gilt, wenn ein Ersatz-Tablet einen
   älteren Stand desselben Spiels übernimmt.
-- **📣 Turnierleitung rufen** – Popup (deutsch/englisch) mit Bestätigung;
+- **📣 Turnierleitung rufen** – Popup mit Bestätigung;
   meldet, dass ein Offizieller ans Feld soll.
 
 Beide Meldungen erscheinen zusätzlich in einer **app-weiten Leiste** in
@@ -962,21 +997,21 @@ mit verloren).
 
 Der Eintrag **„Spiel beenden …"** im Mehr-Menü (bis v0.9.422 „Match beenden …"
 in der Fußzeile) ist **ab 0:0**
-verfügbar (vorher erst ab dem 2. Satz). Ein Tippen öffnet eine zweisprachige
-Rückfrage (**„Spiel beenden? · End the match?"**) mit den Optionen:
+verfügbar (vorher erst ab dem 2. Satz). Ein Tippen öffnet die Rückfrage
+**„Spiel beenden?"** (bis v0.9.422 zweisprachig beschriftet) mit den Optionen:
 
-- **Aufgabe – nur dieses Spiel · Retire (this match)** → Status **Aufgabe**
+- **Aufgabe – nur dieses Spiel** → Status **Aufgabe**
   (`ScoreStatus = 2`). Der laufende Teilstand wird als Satz übernommen. Es
   zählt **nur dieses Spiel**, keine Folgespiele.
-- **Verletzung – auch Folgespiele der Disziplin · Injury** → wie Aufgabe, aber
+- **Verletzung – auch Folgespiele der Disziplin** → wie Aufgabe, aber
   zusätzlich wird für die **restlichen Spiele der Disziplin** ein Walkover-
   Vorschlag hinterlegt (echte Verletzung, Spieler fällt aus). Siehe
   [walkover.md](walkover.md).
-- **Kampflos · Walkover** → Status **Kampflos** (`ScoreStatus = 1`). Das Spiel
+- **Kampflos** → Status **Kampflos** (`ScoreStatus = 1`). Das Spiel
   wird **ohne Sätze** gewertet (z. B. Nichtantritt), die Satzliste wird verworfen.
-- **Regulär beenden · Finish normally** → nur sichtbar, wenn schon Sätze
+- **Regulär beenden** → nur sichtbar, wenn schon Sätze
   gespielt wurden; beendet wie der frühere Button manuell anhand der Sätze.
-- **Abbrechen · Cancel**.
+- **Abbrechen**.
 
 Bei Aufgabe **und** Kampflos wählt der Schiedsrichter danach im Match-Ende-
 Overlay den Sieger; erst dann lässt sich das Ergebnis übermitteln. Der Status
@@ -1054,8 +1089,8 @@ Findet sich erst mitten im Spiel jemand zum Zählen, schaltet der Haken
 Intervall-Schwelle (z. B. 11), gilt die 60-s-Pause als bereits erledigt
 (Schutz gegen Doppel-Pause; im Grenzfall eine Annahme). Ein **Fehlgriff
 in der Aufstellung** (falsche Seite/Aufschläger) lässt sich am einfachsten
-korrigieren, indem man den kurzen Assistenten zu Ende führt und dann im
-Match-Ende- bzw. über „Korrektur" neu ansetzt — ein Rückschritt aus der
+korrigieren, indem man den kurzen Assistenten zu Ende führt und danach über
+⇄ „Seiten / Mannschaften korrigieren" neu ansetzt — ein Rückschritt aus der
 Seitenwahl heraus gibt es (wie beim normalen Spielstart) nicht.
 
 ## Kampflose Wertung nach Aufgabe

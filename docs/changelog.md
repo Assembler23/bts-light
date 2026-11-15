@@ -30,8 +30,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
     „📈 Verlauf" sitzt unten rechts.
   - **Spielende:** Der Endstand steht als kleine Tabelle – eine Zeile je
     Mannschaft, die Sätze als Spalten, der Sieger oben (vorher „16:21 · 18:21"
-    unter dem Siegernamen). „Ergebnis übermitteln" ist der große Knopf, „Match
-    wieder öffnen" nur noch rot umrandet statt ein riesiger roter Block.
+    unter dem Siegernamen). „Ergebnis übermitteln" ist der große Knopf, „Spiel
+    wieder öffnen" nur noch schmal umrandet statt ein riesiger roter Block.
   - **Ein Wort je Sache:** Am Tablet heißt es überall „Spiel" (nicht mehr mal
     „Match"). „Korrektur" meint nur noch das ⇄ Seiten/Mannschaften-Korrigieren:
     Aus „Korrektur — Match wieder öffnen" wurde „Spiel wieder öffnen", aus
@@ -62,6 +62,12 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   - **Satzpunkt und Spielpunkt am Stand:** „Satzpunkt links" (bzw. rechts,
     vorne, hinten, beide) steht über dem Stand — für alle, nicht nur im
     Schiri-Modus.
+  - **Deutsch oder English:** Unter „⋯ Mehr" lässt sich die Sprache des
+    Tablets umstellen — ohne PIN, auch mitten im Spiel, je Gerät gespeichert.
+    Die Seite spricht damit **eine** Sprache; Doppel-Beschriftungen wie
+    „Zurück · Back" oder „Spiel beenden? · End the match?" gibt es nicht
+    mehr. Deutsch bleiben die Ansagetexte des Schiri-Modus (zum Vorlesen),
+    die Diagnose, Namen aus BTP und ein Ablehnungsgrund der Turnierleitung.
   - **Fehlerbehebung:** „Ergebnis eintragen" zeigte „Aktueller Satz (läuft)"
     auch ohne Haken bei „Spiel läuft noch".
 

@@ -350,6 +350,11 @@ jobs:
       - name: Geparkte Ergebnisse am Tablet (JS)
         run: node scripts/test-geparkt.mjs
 
+      # Sprachumschalter: Jeder Text, der durch t() oder data-t laeuft,
+      # braucht eine englische Fassung; verwaiste Eintraege fallen auf.
+      - name: Sprachen am Tablet (JS)
+        run: node scripts/test-tablet-sprache.mjs
+
       # Ohne Turnier-PC antwortet der Cloud-Relay 503 mit Grund. Die Anzeigen
       # muessen das von einer Leitungsstoerung unterscheiden.
       - name: Anzeigen ohne Turnier-PC (JS)

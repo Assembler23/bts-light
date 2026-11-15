@@ -195,6 +195,8 @@
       color: rgba(124, 58, 237, .09); pointer-events: none; z-index: 30;
       white-space: nowrap;
     }
+    /* Sprachumschalter: CSS-Text kennt `t()` nicht — er hängt an `lang`. */
+    html[lang="en"] body.demo::after { content: 'PRACTICE'; font-size: clamp(3rem, 15vmin, 10rem); }
     body.demo .idle-wait, body.demo .idle-hint, body.demo .idle-court-cap { display: none; }
     /* Platz für die Szenario-Auswahl, auch im Hochformat. */
     body.demo .empty .idle-court { font-size: clamp(2.2rem, 9vmin, 4.5rem); color: #7c3aed; }
@@ -595,12 +597,10 @@
     .modal .setup-feld.hoch .seite { flex: 1 0 100%; }
     .modal .setup-feld.hoch .opt, .modal .setup-feld.hoch .fest { flex: 1 1 0; }
     .modal .opt .club { font-size: .8rem; color: var(--muted); margin-top: .25rem; font-weight: 400; }
-    /* Englische Übersetzung unter dem deutschen Text (zweisprachige Anzeige). */
-    .modal .title .t-en {
-      display: block; font-size: 1rem; font-weight: 600;
-      color: #cbd5e1; margin-top: .2rem;
-    }
-    .modal .subtitle .s-en { display: block; font-style: italic; color: #cbd5e1; }
+    /* Sprachwahl im Mehr-Menü: Die aktive Sprache trägt Rahmen und Haken —
+       ohne die Abblendung von `.court-current`, sie soll lesbar bleiben. */
+    .modal .opt.sprache-aktiv { border-color: var(--primary); font-weight: 800; }
+    .modal .opt.sprache-aktiv::before { content: "✓ "; }
     /* Zurück-Schritt im Setup-Assistenten. `flex: 0 0 auto` hebt das
        `flex: 1` der Basis-Button-Regel auf – im Modal (Flex-Spalte) würde
        der Button sonst die ganze Höhe füllen. */
@@ -1104,7 +1104,7 @@
     <!-- Kein ↩ in der Kopfzeile: Rückgängig gibt es genau einmal, in der
          Fußleiste (Usability-Durchgang 15.11.2026). -->
     <div class="header-info">
-      <div class="court-label">__COURT_LABEL__</div>
+      <div class="court-label" data-feldname>__COURT_LABEL__</div>
       <div class="event-label" id="event-label">— kein Spiel —</div>
     </div>
     <div class="call-timer" id="call-timer"></div>
@@ -1122,14 +1122,16 @@
         class="header-btn neutral"
         aria-label="Ein Ball weniger"
         title="Ein Ball weniger"
+        data-t-aria data-t-title
       >−</button>
-      <span class="ball-zahl" id="ball-zahl" aria-live="polite" title="Verbrauchte Bälle"><svg class="federball" viewBox="16 12 68 82" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M50 67 L22 30M50 67 L36 24M50 67 L50 20M50 67 L64 24M50 67 L78 30M22 30 Q50 14 78 30"/></g><path d="M41 65 Q50 92 59 65 Z" fill="#f59e0b" stroke="#f59e0b" stroke-width="3" stroke-linejoin="round"/></svg><span id="ball-zahl-wert">0</span></span>
+      <span class="ball-zahl" id="ball-zahl" aria-live="polite" title="Verbrauchte Bälle" data-t-title><svg class="federball" viewBox="16 12 68 82" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M50 67 L22 30M50 67 L36 24M50 67 L50 20M50 67 L64 24M50 67 L78 30M22 30 Q50 14 78 30"/></g><path d="M41 65 Q50 92 59 65 Z" fill="#f59e0b" stroke="#f59e0b" stroke-width="3" stroke-linejoin="round"/></svg><span id="ball-zahl-wert">0</span></span>
       <button
         type="button"
         id="ball-plus"
         class="header-btn neutral"
         aria-label="Ein Ball mehr"
         title="Ein Ball mehr"
+        data-t-aria data-t-title
       >+</button>
     </div>
     <!-- Turnierleitung rufen: das Einzige, was neben dem Zählen jederzeit
@@ -1142,7 +1144,8 @@
       hidden
       aria-label="Turnierleitung rufen"
       title="Turnierleitung ans Feld rufen"
-    ><span class="ico" aria-hidden="true">📣</span><span class="txt">Turnierleitung</span></button>
+      data-t-aria data-t-title
+    ><span class="ico" aria-hidden="true">📣</span><span class="txt" data-t>Turnierleitung</span></button>
     <!-- Mehr-Menü: alles Seltene (Ergebnis eintragen, Spiel beenden, Seiten
          korrigieren, Behandlung, Schiri-Modus) ohne PIN; nur „Gerät"
          (Feld wechseln, Anzeige) fragt dahinter nach der PIN. -->
@@ -1152,8 +1155,9 @@
       class="header-btn neutral mit-text"
       aria-label="Mehr"
       title="Mehr: Ergebnis eintragen, Spiel beenden, Korrektur, Gerät"
-    ><span class="ico" aria-hidden="true">⋯</span><span class="txt">Mehr</span></button>
-    <span class="akku" id="akku" hidden title="Akkustand des Tablets"></span>
+      data-t-aria data-t-title
+    ><span class="ico" aria-hidden="true">⋯</span><span class="txt" data-t>Mehr</span></button>
+    <span class="akku" id="akku" hidden title="Akkustand des Tablets" data-t-title></span>
     <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
   </header>
 
@@ -1162,8 +1166,8 @@
       <!-- Plan 20: Feldnummer GROSS, damit beim Verteilen der Tablets sofort
            erkennbar ist, welches Gerät an welchem Feld steht. __COURT_LABEL__
            wird serverseitig ersetzt (wie in der Kopfzeile). -->
-      <div class="idle-court-cap">Feld · Court</div>
-      <div class="idle-court">__COURT_LABEL__</div>
+      <div class="idle-court-cap" data-t>Feld</div>
+      <div class="idle-court" data-feldname>__COURT_LABEL__</div>
       <!-- Beide Zeilen setzt `renderWarten`: im Normalfall „Warte auf das
            nächste Spiel", bei anhaltend fehlender Verbindung der Hinweis
            darauf — sonst sähe ein Tablet ohne WLAN aus wie eines, das nur
@@ -1173,8 +1177,8 @@
       <!-- Demofeld (Spec tablet-demofeld): Auswahl des Übungsspiels. Die
            Knöpfe baut `demoAuswahlBauen` aus DEMO_SZENARIEN. -->
       <div class="demo-wahl" id="demo-wahl" hidden>
-        <div class="demo-titel">Übungsspiel wählen</div>
-        <div class="demo-unter">Beispielnamen · nichts geht an Turnierleitung, BTP, Monitore oder Liveticker</div>
+        <div class="demo-titel" data-t>Übungsspiel wählen</div>
+        <div class="demo-unter" data-t>Beispielnamen · nichts geht an Turnierleitung, BTP, Monitore oder Liveticker</div>
         <div class="demo-liste" id="demo-liste"></div>
       </div>
     </div>
@@ -1209,15 +1213,15 @@
           <!-- Einspielzeit: groß, solange nach der Wahl noch kein Ballwechsel
                gespielt ist (Schiri-Feedback 08.11.2026). -->
           <div class="umpire-einspiel" id="umpire-einspiel" hidden>
-            <span class="lbl">Einspielzeit</span><span class="zeit" id="umpire-einspiel-zeit"></span>
+            <span class="lbl" data-t>Einspielzeit</span><span class="zeit" id="umpire-einspiel-zeit"></span>
             <!-- Erster Aufschlag: beendet die Einspielzeit und startet beim
                  Turnier-PC die Nettozeit (Spec `spielzeiten-prognose`). Wer
                  nicht tippt, bekommt den ersten Punkt als Start. -->
-            <button type="button" id="spiel-beginnt-btn" class="spiel-beginnt-btn">Spiel beginnt</button>
+            <button type="button" id="spiel-beginnt-btn" class="spiel-beginnt-btn" data-t>Spiel beginnt</button>
           </div>
           <div class="umpire-say" id="umpire-say"></div>
           <div class="umpire-cards" id="umpire-cards"></div>
-          <button type="button" id="umpire-card-btn" class="umpire-card-btn">Karte / Verwarnung</button>
+          <button type="button" id="umpire-card-btn" class="umpire-card-btn" data-t>Karte / Verwarnung</button>
         </div>
 
         <div class="court-wrapper">
@@ -1277,7 +1281,8 @@
     <!-- Punktverlauf-Graph: erscheint, sobald Ballwechsel aufgezeichnet
          sind — rein lokal, funktioniert offline. -->
     <button type="button" id="rally-btn" class="subtle" hidden
-      aria-label="Punktverlauf anzeigen" title="Punktverlauf anzeigen">📈 Verlauf</button>
+      aria-label="Punktverlauf anzeigen" title="Punktverlauf anzeigen"
+      data-t data-t-aria data-t-title>📈 Verlauf</button>
   </footer>
   <!-- Geparktes Ergebnis (Spec `tablet-stand-robust`, Regel C): Ein Ergebnis,
        das der Turnier-PC nicht angenommen hat, bleibt sichtbar — auf Warte-,
@@ -1298,40 +1303,40 @@
       background:#1c1300; color:#fde68a; border:0; border-radius:.5rem;
       padding:.4rem .9rem; font-weight:800; font-size:.95rem; cursor:pointer;
       white-space: nowrap
-    ">Verwerfen</button>
+    " data-t>Verwerfen</button>
   </div>
 </div>
 
 <!-- Endstand direkt eintragen (Plan 12a): wenn niemand live gezählt hat,
      kann das Ergebnis hier per Satzstände eingegeben werden. Offen sichtbar
-     (ein Spieler muss es zur Not selbst bedienen können). Zweisprachig. -->
+     (ein Spieler muss es zur Not selbst bedienen können). -->
 <div class="modal" id="enter-score-modal">
-  <div class="title" id="enter-score-title">Ergebnis eintragen<span class="t-en">Enter result</span></div>
+  <div class="title" id="enter-score-title" data-t>Ergebnis eintragen</div>
   <div class="subtitle" id="enter-score-subtitle"></div>
   <!-- Umschalter: Endstand (aus) vs. mitten im Spiel einsteigen (an, Plan 12b). -->
   <label style="display:flex;align-items:center;gap:.6rem;color:#e2e8f0;font-size:1.05rem;cursor:pointer">
     <input type="checkbox" id="enter-score-live" style="width:1.4rem;height:1.4rem">
-    Spiel läuft noch · Game in progress
+    <span data-t>Spiel läuft noch</span>
   </label>
-  <div id="enter-score-completed-label" hidden style="color:#cbd5e1;font-size:.9rem">Abgeschlossene Sätze</div>
+  <div id="enter-score-completed-label" hidden style="color:#cbd5e1;font-size:.9rem" data-t>Abgeschlossene Sätze</div>
   <div class="options" id="enter-score-rows" style="flex-direction:column; max-width:26rem"></div>
-  <button type="button" id="enter-score-add" class="setup-back">+ Satz · Add set</button>
+  <button type="button" id="enter-score-add" class="setup-back" data-t>+ Satz</button>
   <!-- Laufender Satz (nur bei „Spiel läuft noch"). -->
   <!-- Anordnung über die Klasse statt `style="display:flex"`: Der Inline-Stil
        schlug `hidden`, und „Aktueller Satz (läuft)" stand auch ohne Haken da. -->
   <div id="enter-score-current-wrap" class="es-laufend" hidden>
-    <div style="color:#cbd5e1;font-size:.9rem">Aktueller Satz (läuft)</div>
+    <div style="color:#cbd5e1;font-size:.9rem" data-t>Aktueller Satz (läuft)</div>
     <div id="enter-score-current" style="display:flex;align-items:center;gap:.5rem"></div>
   </div>
   <div class="sk-hint" id="enter-score-error" hidden></div>
   <div class="options" style="max-width:26rem">
-    <button type="button" id="enter-score-cancel" class="opt abbrechen nebeneinander">Abbrechen · Cancel</button>
-    <button type="button" id="enter-score-ok" class="opt primaer">Übernehmen · Apply</button>
+    <button type="button" id="enter-score-cancel" class="opt abbrechen nebeneinander" data-t>Abbrechen</button>
+    <button type="button" id="enter-score-ok" class="opt primaer">Übernehmen</button>
   </div>
 </div>
 
-<!-- Setup-Modal: Seitenwahl, Aufschläger + (bei Doppel) Annehmer.
-     Zweisprachig (DE/EN) wegen internationaler Spieler:innen. -->
+<!-- Setup-Modal: Seitenwahl, Aufschläger + (bei Doppel) Annehmer. Die
+     Sprache folgt dem Umschalter im Mehr-Menü (Deutsch / English). -->
 <div class="modal" id="setup-modal">
   <div class="setup-schritt" id="setup-schritt" hidden></div>
   <div class="title" id="setup-title">Wer schlägt zuerst auf?</div>
@@ -1349,7 +1354,7 @@
        die Turnierleitung — zählen geht jederzeit, auch ohne Bestätigung. -->
   <div class="anwesend" id="setup-anwesend" hidden></div>
   <div class="options" id="setup-options"></div>
-  <button type="button" class="setup-back" id="setup-back">← Zurück · Back</button>
+  <button type="button" class="setup-back" id="setup-back">← Zurück</button>
 </div>
 
 <!-- Mid-Game-Seitenwechsel-Banner (Entscheidungssatz bei 11) -->
@@ -1360,7 +1365,7 @@
   box-shadow: 0 8px 30px rgba(0,0,0,.5); z-index: 20;
   display: none; text-align: center;
 ">
-  ↔ SEITENWECHSEL — Spieler die Hälften tauschen
+  <span data-t>↔ SEITENWECHSEL — Spieler die Hälften tauschen</span>
 </div>
 
 <!-- Neue Fassung verfügbar (Spec `tablet-version-abgleich`). Erscheint nur,
@@ -1373,11 +1378,11 @@
   box-shadow: 0 6px 20px rgba(0,0,0,.45); z-index: 19;
   display: none; align-items: center; gap: .75rem;
 ">
-  <span>Neue Fassung verfügbar</span>
+  <span data-t>Neue Fassung verfügbar</span>
   <button type="button" id="update-jetzt" style="
     background:#04263a; color:#e0f2fe; border:0; border-radius:.5rem;
     padding:.4rem .9rem; font-weight:800; font-size:.95rem; cursor:pointer
-  ">Jetzt laden</button>
+  " data-t>Jetzt laden</button>
 </div>
 
 <!-- Abfrage zum geparkten Ergebnis: Rückkehr des Spiels („Jetzt senden"?)
@@ -1432,13 +1437,13 @@
     </div>
   </div>
   <div class="submit-status" id="submit-status"></div>
-  <button class="primary" id="submit-btn">Ergebnis übermitteln</button>
+  <button class="primary" id="submit-btn" data-t>Ergebnis übermitteln</button>
   <!-- Demofeld: nach dem Abschluss gleich das nächste Übungsspiel. Steht
        bewusst NICHT am Ende: Das letzte Kind trägt `margin-bottom: auto`
        zum Zentrieren und muss immer sichtbar sein (`#reopen-btn`). -->
-  <button class="primary" id="demo-neu-fertig" hidden>Neues Übungsspiel</button>
+  <button class="primary" id="demo-neu-fertig" hidden data-t>Neues Übungsspiel</button>
   <!-- Die Ansicht verdeckt die Kopfzeile samt „⋯ Mehr" — deshalb hier ein eigener Knopf. -->
-  <button id="finished-korrektur">⇄ Seiten / Mannschaften korrigieren</button>
+  <button id="finished-korrektur" data-t>⇄ Seiten / Mannschaften korrigieren</button>
   <button id="reopen-btn">Spiel wieder öffnen</button>
 </div>
 
@@ -1447,17 +1452,17 @@
   <div class="break-title" id="break-title"></div>
   <!-- Seitenwechsel als Teil der Pause statt als Toast darüber: Der Toast
        lag über Hinweistext und Knöpfen (Usability-Durchgang 15.11.2026). -->
-  <div class="break-wechsel" id="break-wechsel" hidden>↔ Seitenwechsel — Spieler tauschen die Hälften</div>
+  <div class="break-wechsel" id="break-wechsel" hidden data-t>↔ Seitenwechsel — Spieler tauschen die Hälften</div>
   <!-- Schiri-Modus: Ansage zum Vorlesen, auch während der Pause sichtbar. -->
   <div class="break-umpire" id="break-umpire" hidden></div>
   <div class="break-countdown" id="break-countdown">1:00</div>
   <!-- Behandlungsuhr: Richtzeit als Turnier-Vorgabe (Spec
        verletzungsunterbrechung). -->
   <div class="break-richtzeit" id="break-richtzeit" hidden></div>
-  <button class="primary" id="break-skip">Weiterspielen</button>
+  <button class="primary" id="break-skip" data-t>Weiterspielen</button>
   <!-- Doppel: Aufschläger/Annehmer des nächsten Satzes schon in der
        Satzpause festlegen (Schiri-Feedback 08.11.2026). -->
-  <button id="break-aufschlag" style="display:none">
+  <button id="break-aufschlag" style="display:none" data-t>
     Aufschlag &amp; Annahme jetzt festlegen
   </button>
   <button id="break-correct" style="display:none">
@@ -1465,11 +1470,11 @@
   </button>
   <!-- Gerade in der Satzpause fällt auf, wenn die Spieler die Seiten nicht
        gewechselt haben — der Overlay verdeckt aber die Kopfzeile samt „⋯ Mehr". -->
-  <button id="break-korrektur" style="display:none">⇄ Seiten / Mannschaften korrigieren</button>
+  <button id="break-korrektur" style="display:none" data-t>⇄ Seiten / Mannschaften korrigieren</button>
   <!-- ✚ aus der Punkte-/Satzpause: das Overlay verdeckt die Kopfzeile und
        damit den Eintrag im Mehr-Menü (Spec verletzungsunterbrechung). -->
-  <button id="break-injury" style="display:none">✚ Verletzung · Behandlung</button>
-  <button class="danger" id="break-abort" style="display:none">
+  <button id="break-injury" style="display:none" data-t>✚ Verletzung · Behandlung</button>
+  <button class="danger" id="break-abort" style="display:none" data-t>
     Spiel abbrechen · Aufgabe
   </button>
   <div class="break-hint" id="break-hint">
@@ -1478,7 +1483,7 @@
   </div>
 </div>
 
-<!-- Match-beenden-Dialog: Rückfrage (DE/EN), dann Aufgabe (Retired) oder
+<!-- Match-beenden-Dialog: Rückfrage, dann Aufgabe (Retired) oder
      Kampflos (Walkover). Bei Aufgabe wird gefragt, ob nur dieses Spiel zählt
      oder (echte Verletzung) auch die Folgespiele der Disziplin kampflos
      gewertet werden. „Regulär beenden" nur, wenn schon Sätze gespielt wurden. -->
@@ -1489,7 +1494,7 @@
     <div class="opt" id="finish-retire-injury"></div>
     <div class="opt" id="finish-walkover"></div>
     <div class="opt" id="finish-regular" hidden></div>
-    <div class="opt abbrechen" id="finish-cancel">Abbrechen · Cancel</div>
+    <div class="opt abbrechen" id="finish-cancel" data-t>Abbrechen</div>
   </div>
 </div>
 
@@ -1499,25 +1504,24 @@
   <div class="title" id="korrektur-title">Seiten korrigieren</div>
   <div class="subtitle" id="korrektur-subtitle"></div>
   <div class="options" id="korrektur-wahl">
-    <div class="opt" id="korrektur-seiten">Seiten tauschen<span class="erklaerung" id="korrektur-seiten-erkl"></span></div>
-    <div class="opt" id="korrektur-ab">Mannschaften tauschen<span class="erklaerung" id="korrektur-ab-erkl"></span></div>
-    <div class="opt abbrechen" id="korrektur-abbrechen">Abbrechen</div>
+    <div class="opt" id="korrektur-seiten"><span data-t>Seiten tauschen</span><span class="erklaerung" id="korrektur-seiten-erkl"></span></div>
+    <div class="opt" id="korrektur-ab"><span data-t>Mannschaften tauschen</span><span class="erklaerung" id="korrektur-ab-erkl"></span></div>
+    <div class="opt abbrechen" id="korrektur-abbrechen" data-t>Abbrechen</div>
   </div>
   <div class="korrektur-vorschau" id="korrektur-vorschau" hidden></div>
   <div class="options" id="korrektur-frage" hidden>
-    <div class="opt" id="korrektur-ok">Ja, tauschen</div>
-    <div class="opt" id="korrektur-zurueck">Zurück</div>
+    <div class="opt" id="korrektur-ok" data-t>Ja, tauschen</div>
+    <div class="opt" id="korrektur-zurueck" data-t>Zurück</div>
   </div>
 </div>
 
 <!-- Megafon-Popup: Turnierleitung ans Feld rufen -->
 <div class="modal" id="megaphone-modal">
   <div class="title" id="megaphone-title"></div>
-  <div class="subtitle" id="megaphone-subtitle"></div>
   <div class="megaphone-text" id="megaphone-text"></div>
   <div class="options">
     <div class="opt" id="megaphone-confirm"></div>
-    <div class="opt abbrechen" id="megaphone-cancel">Abbrechen · Cancel</div>
+    <div class="opt abbrechen" id="megaphone-cancel" data-t>Abbrechen</div>
   </div>
 </div>
 
@@ -1530,25 +1534,31 @@
   <!-- 1) Mehr-Menü, ohne PIN. Was gerade nicht geht, blendet `renderMenue`
        aus — ausgegraute Einträge erklärten nie, warum sie nicht gehen. -->
   <div class="settings-view settings-liste" id="settings-menu-view">
-    <div class="title">Mehr</div>
-    <div class="settings-section" id="menu-spiel-cap">Spiel</div>
-    <div class="opt settings-wide" id="menu-ergebnis">Ergebnis eintragen …</div>
-    <div class="opt settings-wide" id="menu-beenden">Spiel beenden …</div>
-    <div class="opt settings-wide" id="menu-korrektur">⇄ Seiten / Mannschaften korrigieren</div>
-    <div class="opt settings-wide" id="menu-behandlung">✚ Verletzung · Behandlung</div>
+    <div class="title" data-t>Mehr</div>
+    <div class="settings-section" id="menu-spiel-cap" data-t>Spiel</div>
+    <div class="opt settings-wide" id="menu-ergebnis" data-t>Ergebnis eintragen …</div>
+    <div class="opt settings-wide" id="menu-beenden" data-t>Spiel beenden …</div>
+    <div class="opt settings-wide" id="menu-korrektur" data-t>⇄ Seiten / Mannschaften korrigieren</div>
+    <div class="opt settings-wide" id="menu-behandlung" data-t>✚ Verletzung · Behandlung</div>
     <!-- Demofeld: Übungsspiel neu wählen (nur im Demo-Modus sichtbar). -->
-    <div class="settings-section" id="settings-demo-cap" hidden>Übungsspiel</div>
-    <div class="opt settings-wide allein" id="settings-demo-neu" hidden>Neues Übungsspiel wählen</div>
-    <div class="settings-section">Schiedsrichter</div>
+    <div class="settings-section" id="settings-demo-cap" hidden data-t>Übungsspiel</div>
+    <div class="opt settings-wide allein" id="settings-demo-neu" hidden data-t>Neues Übungsspiel wählen</div>
+    <div class="settings-section" data-t>Schiedsrichter</div>
     <div class="opt settings-wide allein" id="settings-umpire">Schiri-Modus: aus</div>
-    <div class="settings-section">Gerät</div>
+    <!-- Sprache der Bedienoberfläche, je Gerät und ohne PIN: Wer zählt, soll
+         sie selbst wählen können. Die Überschrift bleibt in beiden Sprachen
+         stehen — sonst fände sie nicht wieder, wer die falsche erwischt hat. -->
+    <div class="settings-section">Sprache · Language</div>
+    <div class="opt settings-wide" id="sprache-de">Deutsch</div>
+    <div class="opt settings-wide" id="sprache-en">English</div>
+    <div class="settings-section" data-t>Gerät</div>
     <div class="opt settings-wide allein" id="menu-geraet">🔒 Feld wechseln · Anzeige …</div>
-    <div class="opt settings-wide abbrechen" id="menu-close">Schließen</div>
+    <div class="opt settings-wide abbrechen" id="menu-close" data-t>Schließen</div>
   </div>
   <!-- 2) PIN-Eingabe vor „Gerät" -->
   <div class="settings-view" id="settings-pin-view" hidden>
-    <div class="title">Gerät</div>
-    <div class="subtitle">PIN eingeben</div>
+    <div class="title" data-t>Gerät</div>
+    <div class="subtitle" data-t>PIN eingeben</div>
     <div class="pin-display" id="settings-pin-display"></div>
     <div class="pin-pad" id="settings-pin-pad">
       <button type="button" data-k="1">1</button>
@@ -1567,23 +1577,23 @@
   </div>
   <!-- 3) Gerät (nach korrekter PIN) -->
   <div class="settings-view settings-liste" id="settings-main-view" hidden>
-    <div class="title">Gerät</div>
+    <div class="title" data-t>Gerät</div>
     <!-- __COURT_LABEL__ wird serverseitig ersetzt (str::replace, alle Vorkommen). -->
-    <div class="subtitle">Aktuelles Feld: <b>__COURT_LABEL__</b></div>
-    <div class="settings-section">Feld wechseln</div>
+    <div class="subtitle"><span data-t>Aktuelles Feld:</span> <b data-feldname>__COURT_LABEL__</b></div>
+    <div class="settings-section" data-t>Feld wechseln</div>
     <div class="options" id="settings-court-list"></div>
-    <div class="settings-section">Anzeige</div>
+    <div class="settings-section" data-t>Anzeige</div>
     <!-- Öffnet die Anzeige-Hülle mit der Zähltafel dieses Felds — für ein
          zweites Tablet am Netz (Spec zaehltafel-anzeige-huelle). -->
-    <div class="opt settings-wide" id="settings-anzeige">Anzeige (nur Spielstand)</div>
+    <div class="opt settings-wide" id="settings-anzeige" data-t>Anzeige (nur Spielstand)</div>
     <!-- Anordnung der Zählansicht: nebeneinander (seitlich am Netz) oder
          übereinander (hinter dem Feld); automatisch = nach Ausrichtung. -->
     <div class="opt settings-wide" id="settings-anordnung">Anordnung: automatisch</div>
     <!-- Große Schrift und Vollbild stehen bei „Anzeige", nicht mehr unter
          „Schiedsrichter": Beides gilt für jeden am Tablet. -->
     <div class="opt settings-wide" id="settings-lesbar">Große Schrift: aus</div>
-    <div class="opt settings-wide" id="settings-fullscreen">Vollbild ein/aus</div>
-    <div class="opt settings-wide abbrechen" id="settings-close">Schließen</div>
+    <div class="opt settings-wide" id="settings-fullscreen" data-t>Vollbild ein/aus</div>
+    <div class="opt settings-wide abbrechen" id="settings-close" data-t>Schließen</div>
   </div>
 </div>
 
@@ -1593,57 +1603,57 @@
        Unterbrechungen und Überstimmungen nicht — deshalb die Verzweigung
        hier und nicht erst nach der Spielerwahl. -->
   <div class="settings-view" id="card-kind-view">
-    <div class="title">Vorgang festhalten</div>
+    <div class="title" data-t>Vorgang festhalten</div>
     <div class="options">
-      <div class="opt" data-kind="card">🟨🟥 Karte / Verwarnung</div>
-      <div class="opt" data-kind="injury_start">🩹 Behandlung beginnt</div>
-      <div class="opt" data-kind="injury_end">🩹 Behandlung endet</div>
-      <div class="opt" data-kind="suspension">⏸ Unterbrechung</div>
-      <div class="opt" data-kind="overrule">↩ Überstimmung</div>
-      <div class="opt" data-kind="referee_call">📣 Oberschiedsrichter gerufen</div>
+      <div class="opt" data-kind="card" data-t>🟨🟥 Karte / Verwarnung</div>
+      <div class="opt" data-kind="injury_start" data-t>🩹 Behandlung beginnt</div>
+      <div class="opt" data-kind="injury_end" data-t>🩹 Behandlung endet</div>
+      <div class="opt" data-kind="suspension" data-t>⏸ Unterbrechung</div>
+      <div class="opt" data-kind="overrule" data-t>↩ Überstimmung</div>
+      <div class="opt" data-kind="referee_call" data-t>📣 Oberschiedsrichter gerufen</div>
     </div>
-    <div class="opt settings-wide abbrechen" id="card-kind-cancel">Abbrechen</div>
+    <div class="opt settings-wide abbrechen" id="card-kind-cancel" data-t>Abbrechen</div>
   </div>
   <div class="settings-view" id="card-player-view" hidden>
-    <div class="title">Karte / Verwarnung</div>
-    <div class="subtitle">Spieler wählen</div>
+    <div class="title" data-t>Karte / Verwarnung</div>
+    <div class="subtitle" data-t>Spieler wählen</div>
     <div class="options" id="card-player-list"></div>
-    <div class="opt settings-wide abbrechen" id="card-cancel">Abbrechen</div>
+    <div class="opt settings-wide abbrechen" id="card-cancel" data-t>Abbrechen</div>
   </div>
   <div class="settings-view" id="card-color-view" hidden>
-    <div class="title">Karte für <span id="card-player-name"></span></div>
+    <div class="title"><span data-t>Karte für</span> <span id="card-player-name"></span></div>
     <div class="options">
-      <div class="opt card-yellow" id="card-yellow">🟨 Gelb – Verwarnung</div>
-      <div class="opt card-red" id="card-red">🟥 Rot – Fehler (Gegner +1)</div>
-      <div class="opt card-black" id="card-black">⬛ Schwarz – Disqualifikation</div>
+      <div class="opt card-yellow" id="card-yellow" data-t>🟨 Gelb – Verwarnung</div>
+      <div class="opt card-red" id="card-red" data-t>🟥 Rot – Fehler (Gegner +1)</div>
+      <div class="opt card-black" id="card-black" data-t>⬛ Schwarz – Disqualifikation</div>
     </div>
-    <div class="hinweis" id="card-red-hint" hidden>
+    <div class="hinweis" id="card-red-hint" hidden data-t>
       Rot ist gerade nicht möglich: Der Punkt ließe sich nicht buchen.
     </div>
-    <div class="opt settings-wide abbrechen" id="card-back">Zurück</div>
+    <div class="opt settings-wide abbrechen" id="card-back" data-t>Zurück</div>
   </div>
 </div>
 
 <!-- Belegt-Overlay: Court wird bereits von einem anderen Gerät geschiedst -->
 <div class="lock-overlay" id="occupied-overlay">
   <div class="lock-icon">🔒</div>
-  <div class="lock-title">Dieses Feld wird bereits geschiedst</div>
-  <div class="lock-text">
+  <div class="lock-title" data-t>Dieses Feld wird bereits geschiedst</div>
+  <div class="lock-text" data-t>
     Ein anderes Gerät zählt gerade auf diesem Court. Übernimm nur, wenn du
     sicher bist — z. B. wenn das andere Tablet ausgefallen ist. Danach kann
     das andere Gerät nicht mehr zählen.
   </div>
   <!-- Ohne PIN: Die Anzeige-Seiten sind ohnehin frei erreichbar; das Zählen
        bleibt durch dieses Overlay geschützt. Erst zeigen, dann übernehmen. -->
-  <button class="neutral" id="anzeige-btn">Nur Spielstand anzeigen</button>
-  <button class="danger" id="takeover-btn">Court übernehmen</button>
+  <button class="neutral" id="anzeige-btn" data-t>Nur Spielstand anzeigen</button>
+  <button class="danger" id="takeover-btn" data-t>Court übernehmen</button>
 </div>
 
 <!-- Gesperrt-Overlay: dieses Tablet wurde von einem anderen Gerät abgelöst -->
 <div class="lock-overlay" id="locked-overlay">
   <div class="lock-icon">🔒</div>
-  <div class="lock-title">Dieses Gerät ist gesperrt</div>
-  <div class="lock-text">
+  <div class="lock-title" data-t>Dieses Gerät ist gesperrt</div>
+  <div class="lock-text" data-t>
     Dieses Feld wird jetzt von einem anderen Gerät geschiedst. Zählen ist
     hier nicht mehr möglich.
   </div>
@@ -1654,8 +1664,8 @@
 <div class="rally-overlay" id="rally-overlay" hidden>
   <div class="rally-box">
     <div class="rally-head">
-      <span id="rally-title">Punktverlauf</span>
-      <button type="button" id="rally-close" aria-label="Verlauf schließen">×</button>
+      <span id="rally-title" data-t>Punktverlauf</span>
+      <button type="button" id="rally-close" aria-label="Verlauf schließen" data-t-aria>×</button>
     </div>
     <div class="rally-body" id="rally-body"></div>
   </div>
@@ -2194,6 +2204,337 @@ function grosseSchriftAus(roh) {
   return roh === '1';
 }
 /* Ende der Inline-Kopie. */
+// ── Sprache der Bedienoberfläche (Usability-Durchgang 16.11.2026) ───────
+// Ein Umschalter im Mehr-Menü (Deutsch / English) statt gemischter
+// Zweisprachigkeit: „Abbrechen · Cancel" machte jede Zeile doppelt so lang
+// und half keinem, der nur eine der beiden Sprachen liest. Gilt je Gerät
+// (localStorage), nicht je Feld — sie beschreibt, wer das Tablet bedient.
+//
+// Schlüssel ist der deutsche Text; fehlt ein englischer Eintrag, bleibt es
+// deutsch statt leer. Deutsch bleiben bewusst: die Ansagen des Schiri-Modus
+// (sie werden vorgelesen), die Diagnose, Ablehnungsgründe vom Turnier-PC und
+// alles, was aus BTP kommt (Namen, Klassen, Feldnamen).
+// `scripts/test-tablet-sprache.mjs` hält Wörterbuch und Aufrufe beisammen.
+const SPRACHE_KEY = 'badhub.tablet.sprache';
+let SPRACHE = 'de';
+try { if (localStorage.getItem(SPRACHE_KEY) === 'en') SPRACHE = 'en'; } catch { /* ignore */ }
+const EN = {
+  // Kopf- und Fußleiste
+  'Turnierleitung': 'Tournament desk',
+  'Mehr': 'More',
+  'Turnierleitung rufen': 'Call the tournament desk',
+  'Turnierleitung ans Feld rufen': 'Call the tournament desk to the court',
+  'Mehr: Ergebnis eintragen, Spiel beenden, Korrektur, Gerät': 'More: enter result, end match, correction, device',
+  'Akkustand des Tablets': 'Tablet battery level',
+  'Ein Ball weniger': 'One shuttle fewer',
+  'Ein Ball mehr': 'One more shuttle',
+  'Verbrauchte Bälle': 'Shuttles used',
+  'Einspielzeit': 'Warm-up',
+  'Spiel beginnt': 'Start match',
+  'Karte / Verwarnung': 'Card / warning',
+  '↩ Letzten Punkt zurück': '↩ Undo last point',
+  '↩ Punkt für {seite} zurück': '↩ Undo point for {seite}',
+  '↩ Aufstellung ändern': '↩ Change line-up',
+  '↩ Korrektur zurücknehmen': '↩ Undo correction',
+  '📈 Verlauf': '📈 History',
+  'Punktverlauf anzeigen': 'Show point history',
+  'Punktverlauf': 'Point history',
+  'Verlauf schließen': 'Close history',
+  'verbinde…': 'connecting…',
+  'verbunden': 'connected',
+  'getrennt — neuer Versuch…': 'disconnected — retrying…',
+  'Übung · nichts wird übertragen': 'Practice · nothing is transmitted',
+  'Links': 'Left', 'Rechts': 'Right', 'Vorne': 'Front', 'Hinten': 'Back',
+  'links': 'left', 'rechts': 'right', 'vorne': 'front', 'hinten': 'back',
+  'beide': 'both',
+  'Satz {n} · best of {b} · bis {z}': 'Game {n} · best of {b} · to {z}',
+  'Zeit': 'time',
+  '— kein Spiel —': '— no match —',
+  '1. Aufruf': '1st call',
+  '2. Aufruf': '2nd call',
+  'Letzter Aufruf': 'Final call',
+  'Spielpunkt': 'Match point',
+  'Satzpunkt': 'Game point',
+  // Warte-Ansicht und Demofeld
+  'Feld': 'Court',
+  'Keine Verbindung zum Turnier-PC': 'No connection to the tournament PC',
+  'Warte auf das nächste Spiel': 'Waiting for the next match',
+  'Das Tablet versucht es von selbst weiter. Dauert es länger: WLAN prüfen oder der Turnierleitung Bescheid geben.':
+    'The tablet keeps trying by itself. If it takes longer: check the Wi-Fi or tell the tournament desk.',
+  'Die Zähltafel startet von selbst, sobald die Turnierleitung ein Spiel zuweist.':
+    'The scoreboard starts by itself as soon as the tournament desk assigns a match.',
+  'Übungsspiel wählen': 'Choose a practice match',
+  'Beispielnamen · nichts geht an Turnierleitung, BTP, Monitore oder Liveticker':
+    'Sample names · nothing is sent to the tournament desk, BTP, monitors or live ticker',
+  'Übungsspiel': 'Practice match',
+  'Neues Übungsspiel': 'New practice match',
+  'Neues Übungsspiel wählen': 'Choose a new practice match',
+  'Demofeld (aktuell)': 'Practice court (current)',
+  'Demofeld · Übungsspiel': 'Practice court · practice match',
+  'Demofeld': 'Practice court',
+  'Demofeld – Übungsspiel': 'Practice court – practice match',
+  'Übung': 'Practice',
+  'Einzel': 'Singles',
+  'Damen-Einzel ab 0:0 — zwei Gewinnsätze bis 21': "Women's singles from 0:0 — best of three games to 21",
+  'Damen-Einzel': "Women's singles",
+  'Doppel': 'Doubles',
+  'Herren-Doppel ab 0:0 — Aufschlagfelder und Positionen üben': "Men's doubles from 0:0 — practise service courts and positions",
+  'Herren-Doppel': "Men's doubles",
+  'Mixed': 'Mixed',
+  'Mixed ab 0:0 — Aufschlag und Annahme im gemischten Doppel': 'Mixed from 0:0 — serving and receiving in mixed doubles',
+  'Einzel · Entscheidungssatz': 'Singles · deciding game',
+  'Sätze 21:17 und 18:21 — dritter Satz mit Seitenwechsel bei 11': 'Games 21:17 and 18:21 — third game with change of ends at 11',
+  'Herren-Einzel': "Men's singles",
+  'Doppel · Verlängerung': 'Doubles · extra points',
+  'Erster Satz steht 19:19 — Satzpunkt, 29 beide und Satzende': 'First game at 19:19 — game point, 29 all and end of game',
+  'Damen-Doppel': "Women's doubles",
+  'Mixed · Spielpunkt': 'Mixed · match point',
+  'Erster Satz 21:16, zweiter steht 20:18 — Spielende und Ergebnis übermitteln':
+    'First game 21:16, second at 20:18 — end of match and submitting the result',
+  // Ergebnis-Dialog
+  'Ergebnis eintragen': 'Enter result',
+  'Spiel läuft noch': 'Match still in progress',
+  'Abgeschlossene Sätze': 'Completed games',
+  '+ Satz': '+ Game',
+  'Aktueller Satz (läuft)': 'Current game (in progress)',
+  'Aktueller Satz': 'Current game',
+  'Abbrechen': 'Cancel',
+  'Übernehmen': 'Apply',
+  'Weiterzählen': 'Continue scoring',
+  'Satz {n}': 'Game {n}',
+  'Satz {n} ({stand}) ist unentschieden.': 'Game {n} ({stand}) is tied.',
+  'Satz {n} ({stand}) ist nicht regulär zu Ende gespielt.': 'Game {n} ({stand}) was not played to a regular finish.',
+  'Satz {n} ({stand}) geht über den Deckel — bis {ziel}, höchstens {deckel}.':
+    'Game {n} ({stand}) exceeds the cap — to {ziel}, at most {deckel}.',
+  'Kein eindeutiger Sieger — bitte Satzstände prüfen.': 'No clear winner — please check the game scores.',
+  'Zu viele Sätze — das Spiel war schon vorher entschieden.': 'Too many games — the match was already decided before.',
+  'Das Spiel ist mit diesen Sätzen schon entschieden — Haken „Spiel läuft noch" entfernen.':
+    'The match is already decided with these games — untick “Match still in progress”.',
+  'Der aktuelle Satz ist bereits entschieden — bitte oben als abgeschlossenen Satz eintragen.':
+    'The current game is already decided — please enter it above as a completed game.',
+  // Setup
+  'Welches Team steht vorne (unten)?': 'Which team is on the near side?',
+  'Tippe das Team an, das auf der Court-Hälfte vor dir spielt.': 'Tap the team playing on the half of the court nearest to you.',
+  'Welches Team steht links?': 'Which team is on the left?',
+  'Tippe das Team an, das auf der linken Court-Hälfte spielt.': 'Tap the team playing on the left half of the court.',
+  'Mannschaften getauscht — wer schlägt gerade auf?': 'Teams swapped — who is serving now?',
+  'Der Stand bleibt. Tippe den Spieler an, der gerade aufschlägt.': 'The score stays. Tap the player serving now.',
+  'Neuer Satz — wer schlägt auf?': 'New game — who serves?',
+  'Tippe den Aufschläger im Gewinnerteam des letzten Satzes an.': 'Tap the server in the team that won the previous game.',
+  'Wer schlägt gerade auf?': 'Who is serving now?',
+  'Tippe auf den Spieler, der beim aktuellen Stand aufschlägt.': 'Tap the player serving at the current score.',
+  'Wer schlägt zuerst auf?': 'Who serves first?',
+  'Tippe auf den Spieler, der das Spiel eröffnet.': 'Tap the player who starts the match.',
+  'Wer nimmt den Aufschlag an?': 'Who receives the serve?',
+  'Tippe auf den Annehmer im gegnerischen Team.': 'Tap the receiver in the opposing team.',
+  '← Zurück': '← Back',
+  '← Zurück zur Pause': '← Back to interval',
+  '← Korrektur zurücknehmen': '← Undo correction',
+  'Schritt {n} von {m}': 'Step {n} of {m}',
+  'schlägt auf': 'serving',
+  'Anwesenheit bestätigen (antippen)': 'Confirm presence (tap)',
+  'Zähltafel': 'Scoreboard',
+  'Schiedsrichter': 'Umpire',
+  'Aufschlagrichter': 'Service judge',
+  // Pausen
+  '↔ SEITENWECHSEL — Spieler die Hälften tauschen': '↔ CHANGE ENDS — players swap halves',
+  '↔ Seitenwechsel — Spieler tauschen die Hälften': '↔ Change ends — players swap halves',
+  'Neue Fassung verfügbar': 'New version available',
+  'Jetzt laden': 'Load now',
+  'Weiterspielen': 'Resume play',
+  'Aufschlag & Annahme jetzt festlegen': 'Set server & receiver now',
+  '✚ Verletzung · Behandlung': '✚ Injury · treatment',
+  'Spiel abbrechen · Aufgabe': 'Abandon match · retirement',
+  'Nach Ablauf zählt die Uhr rot weiter — die Pause endet erst mit „Weiterspielen".':
+    'After it runs out the clock keeps counting in red — the interval only ends with “Resume play”.',
+  'Nach der Richtzeit wird die Uhr rot und zählt weiter — die Pause endet erst mit „Weiterspielen".':
+    'After the guide time the clock turns red and keeps counting — the interval only ends with “Resume play”.',
+  'Satzpause läuft': 'Interval running',
+  'Satzpause überzogen': 'Interval overrun',
+  'Satzpause': 'Interval between games',
+  // Schiri-Leiste: Abzeichen und Hinweis. Die Ansagen selbst bleiben deutsch.
+  'Aufstellung wählen …': 'Choose positions …',
+  'Pause': 'Interval', 'Verwarnung': 'Warning', 'Rote Karte': 'Red card', 'Disqualifikation': 'Disqualification',
+  'Punktepause': 'Mid-game interval',
+  'Pause bei {n} Punkten': 'Interval at {n} points',
+  'überzogen': 'overrun',
+  'Behandlungspause': 'Treatment break',
+  'Richtzeit überschritten': 'guide time exceeded',
+  'Richtzeit {zeit} (Turnier-Vorgabe)': 'Guide time {zeit} (set by the tournament)',
+  // Abschluss
+  'Ergebnis übermitteln': 'Submit result',
+  '⇄ Seiten / Mannschaften korrigieren': '⇄ Correct sides / teams',
+  'Spiel wieder öffnen': 'Reopen match',
+  'Kampflos': 'Walkover',
+  'Aufgabe · Verletzung': 'Retirement · injury',
+  'Aufgabe': 'Retirement',
+  'Kampflos — Sieger wählen': 'Walkover — choose the winner',
+  'Spiel abgebrochen — Aufgabe': 'Match abandoned — retirement',
+  'Kampflos — wer gewinnt?': 'Walkover — who wins?',
+  'Aufgabe — wer gewinnt das Spiel?': 'Retirement — who wins the match?',
+  '— manueller Abschluss —': '— finished manually —',
+  'Spiel beendet': 'Match finished',
+  '✓ Übung beendet — im echten Spiel ginge das Ergebnis jetzt an die Turnierleitung.':
+    '✓ Practice finished — in a real match the result would now go to the tournament desk.',
+  '✓ Ergebnis steht in BTP fest — Änderung nur über die Turnierleitung.':
+    '✓ Result is final in BTP — changes only via the tournament desk.',
+  '✓ In BTP steht für dieses Spiel schon ein Ergebnis — Änderung nur über die Turnierleitung.':
+    '✓ BTP already has a result for this match — changes only via the tournament desk.',
+  '✓ Übermittelt — die Turnierleitung kann übernehmen.': '✓ Submitted — the tournament desk can accept it.',
+  '✗ Nicht angenommen: {grund} — bitte den Stand prüfen oder die Turnierleitung ansprechen.':
+    '✗ Not accepted: {grund} — please check the score or talk to the tournament desk.',
+  'Ergebnis wird übermittelt … wird automatisch wiederholt, bis es ankommt.':
+    'Submitting result … retried automatically until it arrives.',
+  'Bitte zuerst den Sieger wählen.': 'Please choose the winner first.',
+  'Der Turnier-PC hat das Ergebnis abgelehnt.': 'The tournament PC rejected the result.',
+  // Spiel beenden
+  'Spiel beenden?': 'End the match?',
+  'Aufgabe – nur dieses Spiel': 'Retirement – this match only',
+  'Verletzung – auch Folgespiele der Disziplin': 'Injury – also later matches in this discipline',
+  'Regulär beenden': 'Finish normally',
+  // Seiten / Mannschaften korrigieren
+  'Seiten korrigieren': 'Correct sides',
+  'Seiten tauschen': 'Swap sides',
+  'Mannschaften tauschen': 'Swap teams',
+  'Ja, tauschen': 'Yes, swap',
+  'Zurück': 'Back',
+  'Was stimmt am Tablet nicht?': 'What is wrong on the tablet?',
+  'Die Spieler stehen auf der anderen Hälfte als am Tablet. Namen und Punkte wandern gemeinsam, der Stand bleibt.':
+    'The players are on the other half than shown on the tablet. Names and points move together, the score stays.',
+  'Die Namen stehen auf der falschen Seite. Die Punkte bleiben, nur die Namen wechseln — der gemeldete Stand dreht sich.':
+    'The names are on the wrong side. The points stay, only the names switch — the reported score is reversed.',
+  'Korrektur nicht mehr möglich — bitte der Turnierleitung melden.':
+    'Correction no longer possible — please tell the tournament desk.',
+  'Seiten tauschen?': 'Swap sides?',
+  'Mannschaften tauschen?': 'Swap teams?',
+  'So sieht es danach aus:': 'This is how it will look afterwards:',
+  '{n} Punkte': '{n} points',
+  'Gemeldet ({name} zuerst):': 'Reported ({name} first):',
+  'Den Sieger wählst du danach neu.': 'You choose the winner again afterwards.',
+  'Sieger': 'Winner',
+  'Danach fragt das Tablet, wer gerade aufschlägt und wer annimmt.':
+    'Afterwards the tablet asks who is serving and who is receiving.',
+  'Bei {n} Punkten wechseln die Seiten trotzdem noch einmal.': 'At {n} points the sides will still change once more.',
+  // Turnierleitung rufen
+  'Turnierleitung wurde gerufen': 'The tournament desk has been called',
+  'Ist die Sache erledigt? Dann kannst du die Meldung zurücknehmen.': 'Resolved? Then you can cancel the call.',
+  'Meldung zurücknehmen': 'Cancel call',
+  'Turnierleitung rufen?': 'Call the tournament desk?',
+  'Es wird eine Meldung an die Turnierleitung gesendet, dass an diesem Feld ein Offizieller benötigt wird.':
+    'A message will be sent to the tournament desk that an official is needed at this court.',
+  // Mehr-Menü und Gerät
+  'Spiel': 'Match',
+  'Ergebnis eintragen …': 'Enter result …',
+  'Spiel beenden …': 'End match …',
+  'Schiri-Modus': 'Umpire mode',
+  'an': 'on',
+  'aus': 'off',
+  'Gerät': 'Device',
+  'Feld wechseln · Anzeige …': 'Change court · display …',
+  'Schließen': 'Close',
+  'PIN eingeben': 'Enter PIN',
+  'PIN falsch': 'Wrong PIN',
+  'Aktuelles Feld:': 'Current court:',
+  'Feld wechseln': 'Change court',
+  'Anzeige': 'Display',
+  'Anzeige (nur Spielstand)': 'Display (score only)',
+  'Anordnung': 'Layout',
+  'automatisch': 'automatic',
+  'nebeneinander (links–rechts)': 'side by side (left–right)',
+  'übereinander (vorn–hinten)': 'stacked (front–back)',
+  'Große Schrift': 'Large text',
+  'Vollbild ein/aus': 'Fullscreen on/off',
+  'Lade Felder…': 'Loading courts…',
+  'Keine Felder gefunden.': 'No courts found.',
+  'aktuell': 'current',
+  'Feldliste nicht erreichbar.': 'Court list not reachable.',
+  // Karten und Vorgänge
+  'Vorgang festhalten': 'Record an incident',
+  '🟨🟥 Karte / Verwarnung': '🟨🟥 Card / warning',
+  '🩹 Behandlung beginnt': '🩹 Treatment starts',
+  '🩹 Behandlung endet': '🩹 Treatment ends',
+  '⏸ Unterbrechung': '⏸ Suspension',
+  '↩ Überstimmung': '↩ Overrule',
+  '📣 Oberschiedsrichter gerufen': '📣 Referee called',
+  'Spieler wählen': 'Choose player',
+  'Karte für': 'Card for',
+  '🟨 Gelb – Verwarnung': '🟨 Yellow – warning',
+  '🟥 Rot – Fehler (Gegner +1)': '🟥 Red – fault (opponent +1)',
+  '⬛ Schwarz – Disqualifikation': '⬛ Black – disqualification',
+  'Rot ist gerade nicht möglich: Der Punkt ließe sich nicht buchen.':
+    'Red is not possible right now: the point could not be booked.',
+  // Belegt / gesperrt
+  'Dieses Feld wird bereits geschiedst': 'This court is already being scored',
+  'Ein anderes Gerät zählt gerade auf diesem Court. Übernimm nur, wenn du sicher bist — z. B. wenn das andere Tablet ausgefallen ist. Danach kann das andere Gerät nicht mehr zählen.':
+    'Another device is currently scoring on this court. Only take over if you are sure — e.g. if the other tablet has failed. After that the other device can no longer score.',
+  'Nur Spielstand anzeigen': 'Show score only',
+  'Court übernehmen': 'Take over court',
+  'Dieses Gerät ist gesperrt': 'This device is locked',
+  'Dieses Feld wird jetzt von einem anderen Gerät geschiedst. Zählen ist hier nicht mehr möglich.':
+    'This court is now being scored by another device. Scoring is no longer possible here.',
+  // Nicht zugestelltes Ergebnis
+  'Verwerfen': 'Discard',
+  'Ergebnis verwerfen?': 'Discard result?',
+  'Ja, verwerfen': 'Yes, discard',
+  'Nicht zugestelltes Ergebnis': 'Undelivered result',
+  'Jetzt senden': 'Send now',
+  'Spiel Nr. {nr}': 'match no. {nr}',
+  'einem früheren Spiel': 'an earlier match',
+  'kampflos': 'walkover',
+  'ohne Sätze': 'no games',
+  '(+{n} weitere)': '(+{n} more)',
+  'Ergebnis von {spiel} ({saetze}) nicht zugestellt — Turnierleitung informieren':
+    'Result of {spiel} ({saetze}) not delivered — tell the tournament desk',
+  'Für dieses Spiel liegt ein nicht zugestelltes Ergebnis vor ({saetze}).':
+    'There is an undelivered result for this match ({saetze}).',
+  'Ergebnis von {spiel} ({saetze}) wirklich verwerfen? Es steht dann nicht in BTP.':
+    'Really discard the result of {spiel} ({saetze})? It will then not be in BTP.',
+  'Ergebnis von {spiel} ist zugestellt.': 'Result of {spiel} has been delivered.',
+  'Ergebnis von {spiel} nicht mehr nötig — in BTP steht schon eines.':
+    'Result of {spiel} no longer needed — BTP already has one.',
+  'Spielstand vom Turnier-PC übernommen — bitte prüfen.': 'Score taken over from the tournament PC — please check.',
+  // Punktverlauf
+  'ab Zwischenstand aufgezeichnet': 'recorded from an intermediate score',
+  'Teilverlauf: Die Zähltafel übernahm mit eingetipptem Zwischenstand — frühere Ballwechsel liegen nicht vor.':
+    'Partial history: the scoreboard took over with a typed-in intermediate score — earlier rallies are not available.',
+  'Ballwechsel': 'rallies',
+};
+/** Übersetzt einen deutschen Text und setzt `{name}`-Platzhalter ein. */
+function t(de, werte) {
+  let s = SPRACHE === 'en' && Object.hasOwn(EN, de) ? EN[de] : de;
+  if (werte) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in werte ? String(werte[k]) : m));
+  return s;
+}
+/** Feste Texte des Blatts: Elemente mit `data-t` (Text) sowie `data-t-title`
+ *  und `data-t-aria` (Attribute). Der deutsche Ausgangstext wird beim ersten
+ *  Lauf am Element gemerkt — so führt der Weg zurück ins Deutsche ohne
+ *  Neuladen. Nur für Blätter, deren Text kein Skript setzt. */
+function statischUebersetzen() {
+  document.querySelectorAll('[data-t]').forEach((el) => {
+    if (!el.dataset.t) el.dataset.t = el.textContent.replace(/\s+/g, ' ').trim();
+    el.textContent = t(el.dataset.t);
+  });
+  document.querySelectorAll('[data-t-title]').forEach((el) => {
+    if (!el.dataset.tTitle) el.dataset.tTitle = el.title;
+    el.title = t(el.dataset.tTitle);
+  });
+  document.querySelectorAll('[data-t-aria]').forEach((el) => {
+    if (!el.dataset.tAria) el.dataset.tAria = el.getAttribute('aria-label');
+    el.setAttribute('aria-label', t(el.dataset.tAria));
+  });
+}
+
+// Verbindungstext der Kopfzeile: als Lage gemerkt, damit ein Sprachwechsel
+// ihn neu schreiben kann, ohne auf das nächste Socket-Ereignis zu warten.
+let connLage = 'verbinde';
+function setzeConn(lage) {
+  connLage = lage;
+  els.connText.textContent = lage === 'demo' ? t('Übung · nichts wird übertragen')
+    : lage === 'verbunden' ? t('verbunden')
+      : lage === 'getrennt' ? t('getrennt — neuer Versuch…')
+        : t('verbinde…');
+}
+
 // Geräteeinstellung (nicht je Feld): Sie beschreibt, wer das Tablet bedient,
 // nicht das Spiel — wie die Anordnung.
 const LESBAR_KEY = 'badhub.tablet.grosseSchrift';
@@ -2231,8 +2572,8 @@ function uebereinander() {
 }
 /** Wortwahl für eine Seite: links/rechts bzw. vorne/hinten (unten/oben). */
 function seiteWort(side) {
-  if (uebereinander()) return side === 'left' ? 'vorne' : 'hinten';
-  return side === 'left' ? 'links' : 'rechts';
+  if (uebereinander()) return side === 'left' ? t('vorne') : t('hinten');
+  return side === 'left' ? t('links') : t('rechts');
 }
 // Karten/Verwarnungen werden NUR lokal protokolliert (pro Feld, an die matchId
 // gebunden → bei neuem Match leer). Kein Versand an Server/badhub.
@@ -2334,7 +2675,8 @@ const els = {
   geparktNein: document.getElementById('geparkt-nein'),
   megaphoneModal: document.getElementById('megaphone-modal'),
   megaphoneTitle: document.getElementById('megaphone-title'),
-  megaphoneSubtitle: document.getElementById('megaphone-subtitle'),
+  spracheDe: document.getElementById('sprache-de'),
+  spracheEn: document.getElementById('sprache-en'),
   megaphoneText: document.getElementById('megaphone-text'),
   megaphoneConfirm: document.getElementById('megaphone-confirm'),
   megaphoneCancel: document.getElementById('megaphone-cancel'),
@@ -2430,19 +2772,19 @@ function connect() {
   if (DEMO) {
     els.connDot.classList.remove('ok', 'bad');
     els.connDot.classList.add('demo');
-    els.connText.textContent = 'Übung · nichts wird übertragen';
+    setzeConn('demo');
     return;
   }
   const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + BASE_PATH + '/ws';
   ws = new WebSocket(wsUrl);
   els.connDot.classList.remove('ok', 'bad');
-  els.connText.textContent = 'verbinde…';
+  setzeConn('verbinde');
 
   ws.onopen = () => {
     lastServerContact = Date.now();
     offlineSeit = null;
     els.connDot.classList.add('ok');
-    els.connText.textContent = 'verbunden';
+    setzeConn('verbunden');
     tlog('info', 'ws_open');
     // Übernahme-Status neu vom Server bestimmen lassen.
     STATE.locked = false;
@@ -2542,7 +2884,7 @@ function connect() {
   ws.onclose = (ev) => {
     els.connDot.classList.remove('ok');
     els.connDot.classList.add('bad');
-    els.connText.textContent = 'getrennt — neuer Versuch…';
+    setzeConn('getrennt');
     if (offlineSeit === null) offlineSeit = Date.now();
     // Retry läuft über den frischen Socket weiter (onopen meldet sich neu an).
     clearReidentify();
@@ -3159,7 +3501,7 @@ function renderAufrufUhr() {
   zeit.textContent = u.uhr;
   const lbl = document.createElement('span');
   lbl.className = 'lbl';
-  lbl.textContent = ' · ' + u.label;
+  lbl.textContent = ' · ' + t(u.label);
   el.appendChild(zeit);
   el.appendChild(lbl);
   el.className = 'call-timer ' + u.stufe;
@@ -3318,7 +3660,7 @@ function renderBreak() {
     els.setupPause.hidden = !imModal;
     if (imModal) {
       const u = pausenUhr();
-      els.setupPause.textContent = (u.ueberzogen ? 'Satzpause überzogen · ' : 'Satzpause läuft · ') + u.text;
+      els.setupPause.textContent = (u.ueberzogen ? t('Satzpause überzogen') : t('Satzpause läuft')) + ' · ' + u.text;
       els.setupPause.classList.toggle('overrun', u.ueberzogen);
     }
   }
@@ -3332,22 +3674,22 @@ function renderBreak() {
   els.breakWechsel.hidden = !(STATE.pause.kind === 'game'
     || (STATE.pause.kind === 'eleven' && STATE.midGameSwitchDone));
   // Der Hinweis spricht von Korrektur und Pausenzeit — beides gibt es in der
-  // Behandlung nicht; dort ein eigener Text.
-  if (!els.breakHint.dataset.bwf) els.breakHint.dataset.bwf = els.breakHint.textContent.trim();
+  // Behandlung nicht; dort ein eigener Text. Beide Fassungen setzt das
+  // Skript (nicht das Blatt), damit sie dem Sprachumschalter folgen.
   els.breakHint.textContent = STATE.pause.kind === 'injury'
-    ? 'Nach der Richtzeit wird die Uhr rot und zählt weiter — die Pause endet erst mit „Weiterspielen".'
-    : els.breakHint.dataset.bwf;
+    ? t('Nach der Richtzeit wird die Uhr rot und zählt weiter — die Pause endet erst mit „Weiterspielen".')
+    : t('Nach Ablauf zählt die Uhr rot weiter — die Pause endet erst mit „Weiterspielen".');
   if (STATE.pause.kind === 'injury') {
     // Hochzählende Uhr ab ✚ (Spec verletzungsunterbrechung); ein alter Stand
     // ohne Startzeit zeigt weiter nur „✚".
     const richt = behandlungsRichtzeit();
     const u = behandlungsUhr(serverNow(), STATE.pause.startedAt, richt);
-    els.breakTitle.textContent = 'Behandlungspause'
-      + (u && u.ueberschritten ? ' — Richtzeit überschritten' : '');
+    els.breakTitle.textContent = t('Behandlungspause')
+      + (u && u.ueberschritten ? ' — ' + t('Richtzeit überschritten') : '');
     els.breakCountdown.textContent = u ? u.text : '✚';
     els.breakCountdown.classList.toggle('overrun', !!(u && u.ueberschritten));
     if (u) {
-      els.breakRichtzeit.textContent = 'Richtzeit ' + uhrText(richt) + ' (Turnier-Vorgabe)';
+      els.breakRichtzeit.textContent = t('Richtzeit {zeit} (Turnier-Vorgabe)', { zeit: uhrText(richt) });
       els.breakRichtzeit.hidden = false;
     }
   } else {
@@ -3361,8 +3703,8 @@ function renderBreak() {
     // 15er-Turnier schlicht falsch (Turnier-Befund 24.08.2026).
     const schwelle = intervalThreshold();
     els.breakTitle.textContent = (STATE.pause.kind === 'eleven'
-      ? (schwelle ? `Pause bei ${schwelle} Punkten` : 'Punktepause')
-      : 'Satzpause') + (u.ueberzogen ? ' — überzogen' : '');
+      ? (schwelle ? t('Pause bei {n} Punkten', { n: schwelle }) : t('Punktepause'))
+      : t('Satzpause')) + (u.ueberzogen ? ' — ' + t('überzogen') : '');
   }
   // Neue Fassung verfügbar? Nur zeigen, solange ein Spiel läuft — ohne Spiel
   // hat die Seite sich längst selbst neu geladen.
@@ -3490,20 +3832,13 @@ function startInjury() {
 function openMegaphoneModal() {
   if (!STATE.match || STATE.locked || STATE.occupied) return;
   if (STATE.alertOfficial) {
-    els.megaphoneTitle.textContent = 'Turnierleitung wurde gerufen';
-    els.megaphoneSubtitle.textContent = 'An official has been called';
-    els.megaphoneText.textContent =
-      'Ist die Sache erledigt? Dann kannst du die Meldung zurücknehmen. · '
-      + 'Resolved? You can cancel the call.';
-    els.megaphoneConfirm.textContent = 'Meldung zurücknehmen · Cancel call';
+    els.megaphoneTitle.textContent = t('Turnierleitung wurde gerufen');
+    els.megaphoneText.textContent = t('Ist die Sache erledigt? Dann kannst du die Meldung zurücknehmen.');
+    els.megaphoneConfirm.textContent = t('Meldung zurücknehmen');
   } else {
-    els.megaphoneTitle.textContent = 'Turnierleitung rufen?';
-    els.megaphoneSubtitle.textContent = 'Call an official to the court?';
-    els.megaphoneText.textContent =
-      'Es wird eine Meldung an die Turnierleitung gesendet, dass an diesem '
-      + 'Feld ein Offizieller benötigt wird. · A message will be sent to the '
-      + 'tournament desk that an official is needed at this court.';
-    els.megaphoneConfirm.textContent = 'Turnierleitung rufen · Call official';
+    els.megaphoneTitle.textContent = t('Turnierleitung rufen?');
+    els.megaphoneText.textContent = t('Es wird eine Meldung an die Turnierleitung gesendet, dass an diesem Feld ein Offizieller benötigt wird.');
+    els.megaphoneConfirm.textContent = t('Turnierleitung rufen');
   }
   els.megaphoneModal.classList.add('visible');
 }
@@ -3662,6 +3997,30 @@ function verwerfenText(e) {
     + ') wirklich verwerfen? Es steht dann nicht in BTP.';
 }
 
+// Englische Fassung der Geparkt-Texte. Die vier Funktionen darüber sind die
+// Inline-Kopie von `src/io/geparkt.mjs` und bleiben unangetastet (Drift-Test);
+// im Deutschen liefern die Hüllen hier wortgleich deren Ergebnis.
+function geparktWerte(e) {
+  const s = saetzeText(e.auftrag);
+  return {
+    spiel: e.matchNr != null && e.matchNr !== '' ? t('Spiel Nr. {nr}', { nr: e.matchNr }) : t('einem früheren Spiel'),
+    saetze: s === 'kampflos' ? t('kampflos') : s === 'ohne Sätze' ? t('ohne Sätze') : s.replace('Aufgabe', t('Aufgabe')),
+  };
+}
+function geparktBand(liste) {
+  if (SPRACHE !== 'en' || !liste.length) return bandText(liste);
+  const mehr = liste.length > 1 ? ' ' + t('(+{n} weitere)', { n: liste.length - 1 }) : '';
+  return t('Ergebnis von {spiel} ({saetze}) nicht zugestellt — Turnierleitung informieren', geparktWerte(liste[0])) + mehr;
+}
+function geparktFrageText(e) {
+  return SPRACHE !== 'en' ? frageText(e)
+    : t('Für dieses Spiel liegt ein nicht zugestelltes Ergebnis vor ({saetze}).', geparktWerte(e));
+}
+function geparktVerwerfenText(e) {
+  return SPRACHE !== 'en' ? verwerfenText(e)
+    : t('Ergebnis von {spiel} ({saetze}) wirklich verwerfen? Es steht dann nicht in BTP.', geparktWerte(e));
+}
+
 // Eigener Schlüssel je Feld: Die Liste überlebt das Leeren des Spielstands
 // (`clearPersistedState`) und reist NICHT im gespiegelten Zustand.
 const GEPARKT_KEY = `badhub.tablet.geparkt.${SPEICHER_FELD}`;
@@ -3745,8 +4104,10 @@ function geparktAntwort(eintrag, schritt) {
   geparktEntfernen(eintrag.auftrag.matchId, schritt.art);
   // Was nie zu sehen war (Karenz), braucht auch keine Entwarnung.
   if (warSichtbar) {
-    zeigeGeparktMeldung('Ergebnis von ' + spielName(eintrag)
-      + (schritt.art === 'ok' ? ' ist zugestellt.' : ' nicht mehr nötig — in BTP steht schon eines.'));
+    const w = { spiel: geparktWerte(eintrag).spiel };
+    zeigeGeparktMeldung(schritt.art === 'ok'
+      ? t('Ergebnis von {spiel} ist zugestellt.', w)
+      : t('Ergebnis von {spiel} nicht mehr nötig — in BTP steht schon eines.', w));
   }
   return true;
 }
@@ -3848,7 +4209,7 @@ function geparktVerwerfen(matchId) {
 function renderGeparkt() {
   if (!els.geparktBand) return;
   const sichtbar = geparktSichtbar(GEPARKT, Date.now());
-  const text = geparktMeldung || bandText(sichtbar);
+  const text = geparktMeldung || geparktBand(sichtbar);
   els.geparktBand.style.display = text ? 'flex' : 'none';
   els.geparktText.textContent = text;
   // Die Entwarnung ist grün und hat keinen Knopf.
@@ -3858,15 +4219,15 @@ function renderGeparkt() {
   const zuVerwerfen = geparktVerwerfenFrage != null ? geparktFuer(GEPARKT, geparktVerwerfenFrage) : null;
   const rueckkehr = zuVerwerfen ? null : geparktRueckkehr();
   if (zuVerwerfen) {
-    els.geparktTitel.textContent = 'Ergebnis verwerfen?';
-    els.geparktFrage.textContent = verwerfenText(zuVerwerfen);
-    els.geparktJa.textContent = 'Ja, verwerfen';
-    els.geparktNein.textContent = 'Abbrechen';
+    els.geparktTitel.textContent = t('Ergebnis verwerfen?');
+    els.geparktFrage.textContent = geparktVerwerfenText(zuVerwerfen);
+    els.geparktJa.textContent = t('Ja, verwerfen');
+    els.geparktNein.textContent = t('Abbrechen');
   } else if (rueckkehr) {
-    els.geparktTitel.textContent = 'Nicht zugestelltes Ergebnis';
-    els.geparktFrage.textContent = frageText(rueckkehr);
-    els.geparktJa.textContent = 'Jetzt senden';
-    els.geparktNein.textContent = 'Verwerfen';
+    els.geparktTitel.textContent = t('Nicht zugestelltes Ergebnis');
+    els.geparktFrage.textContent = geparktFrageText(rueckkehr);
+    els.geparktJa.textContent = t('Jetzt senden');
+    els.geparktNein.textContent = t('Verwerfen');
   }
   els.geparktModal.classList.toggle('visible', !!(zuVerwerfen || rueckkehr));
 }
@@ -4118,7 +4479,7 @@ function beiStateRestore(msg) {
       const ersetzt = !!lokal && lokal.matchId === kandidat.matchId
         && vergleiche(lokal.fortschritt, kandidat.fortschritt) !== 0;
       uebernimmStand(p);
-      if (ersetzt) zeigeGeparktMeldung('Spielstand vom Turnier-PC übernommen — bitte prüfen.');
+      if (ersetzt) zeigeGeparktMeldung(t('Spielstand vom Turnier-PC übernommen — bitte prüfen.'));
       render();
     } else {
       // Anderes Spiel als das geladene: Erst `match_assigned` sagt, welches
@@ -5101,13 +5462,14 @@ function openRallyOverlay() {
   log.sets.forEach((s, i) => {
     const f = timelineSetFinal(s);
     const zwischenstand = (s.startA || s.startB)
-      ? ' · ab Zwischenstand aufgezeichnet' : '';
-    html += `<div class="rally-set-cap">Satz ${i + 1} — ${f.a}:${f.b}${zwischenstand}</div>`
-      + timelineSetSvg(s);
+      ? ' · ' + t('ab Zwischenstand aufgezeichnet') : '';
+    // `timelineSetSvg` ist mit dem TL-Web geteilt und bleibt unangetastet —
+    // das eine Wort darin wird an der Ausgabe übersetzt.
+    html += `<div class="rally-set-cap">${t('Satz {n}', { n: i + 1 })} — ${f.a}:${f.b}${zwischenstand}</div>`
+      + timelineSetSvg(s).replace(' Ballwechsel<', ' ' + t('Ballwechsel') + '<');
   });
   if (log.midGame) {
-    html += `<div class="rally-note">Teilverlauf: Die Zähltafel übernahm mit
-      eingetipptem Zwischenstand — frühere Ballwechsel liegen nicht vor.</div>`;
+    html += `<div class="rally-note">${t('Teilverlauf: Die Zähltafel übernahm mit eingetipptem Zwischenstand — frühere Ballwechsel liegen nicht vor.')}</div>`;
   }
   document.getElementById('rally-body').innerHTML = html;
   document.getElementById('rally-overlay').hidden = false;
@@ -5463,20 +5825,18 @@ let korrekturArt = null;
 function oeffneKorrektur() {
   if (!korrekturMoeglich()) return;
   korrekturArt = null;
-  els.korrekturTitle.textContent = 'Seiten korrigieren';
-  els.korrekturSubtitle.textContent = 'Was stimmt am Tablet nicht?';
+  els.korrekturTitle.textContent = t('Seiten korrigieren');
+  els.korrekturSubtitle.textContent = t('Was stimmt am Tablet nicht?');
   els.korrekturSeitenErkl.textContent =
-    'Die Spieler stehen auf der anderen Hälfte als am Tablet. Namen und Punkte '
-    + 'wandern gemeinsam, der Stand bleibt.';
+    t('Die Spieler stehen auf der anderen Hälfte als am Tablet. Namen und Punkte wandern gemeinsam, der Stand bleibt.');
   // „Mannschaften tauschen" nur, wenn der Turnier-PC das Ereignis kennt
   // (ADR 0067), und nur, solange der Zettel noch Platz hat.
   els.korrekturAb.hidden = !STATE.hostKannBerichtigung;
   const platz = platzFuerKorrektur(STATE.events, isDoubles());
   els.korrekturAb.classList.toggle('disabled', !platz);
   els.korrekturAbErkl.textContent = platz
-    ? 'Die Namen stehen auf der falschen Seite. Die Punkte bleiben, nur die '
-      + 'Namen wechseln — der gemeldete Stand dreht sich.'
-    : 'Korrektur nicht mehr möglich — bitte der Turnierleitung melden.';
+    ? t('Die Namen stehen auf der falschen Seite. Die Punkte bleiben, nur die Namen wechseln — der gemeldete Stand dreht sich.')
+    : t('Korrektur nicht mehr möglich — bitte der Turnierleitung melden.');
   els.korrekturWahl.hidden = false;
   els.korrekturVorschau.hidden = true;
   els.korrekturFrage.hidden = true;
@@ -5492,8 +5852,8 @@ function schliesseKorrektur() {
 function zeigeKorrekturFrage(art) {
   if (!korrekturMoeglich()) { schliesseKorrektur(); return; }
   korrekturArt = art;
-  els.korrekturTitle.textContent = art === 'seiten' ? 'Seiten tauschen?' : 'Mannschaften tauschen?';
-  els.korrekturSubtitle.textContent = 'So sieht es danach aus:';
+  els.korrekturTitle.textContent = art === 'seiten' ? t('Seiten tauschen?') : t('Mannschaften tauschen?');
+  els.korrekturSubtitle.textContent = t('So sieht es danach aus:');
   els.korrekturVorschau.innerHTML = korrekturVorschauHtml(art);
   els.korrekturWahl.hidden = true;
   els.korrekturVorschau.hidden = false;
@@ -5501,33 +5861,33 @@ function zeigeKorrekturFrage(art) {
 }
 
 function korrekturVorschauHtml(art) {
-  const t = art === 'seiten' ? seitenGetauscht(STATE) : mannschaftenGetauscht(STATE);
-  if (!t) return '';
-  const z = { ...STATE, ...t };
+  const tausch = art === 'seiten' ? seitenGetauscht(STATE) : mannschaftenGetauscht(STATE);
+  if (!tausch) return '';
+  const z = { ...STATE, ...tausch };
   const namen = (k) => STATE.match[k === 'a' ? 'teamA' : 'teamB'].map(p => p.name).join(' / ');
   const auf = (side) => (z.teamOnSide.a === side ? 'a' : 'b');
   const gross = (w) => w.charAt(0).toUpperCase() + w.slice(1);
   const zeile = (side) => `<b>${gross(seiteWort(side))}:</b> ${escapeHtml(namen(auf(side)))}`
-    + (z.finished ? '' : ` — ${z.currentSet[side]} Punkte`);
+    + (z.finished ? '' : ` — ${t('{n} Punkte', { n: z.currentSet[side] })}`);
   const ab = standAB(z);
   const staende = [
     ...ab.saetze.map(x => `${x.a}:${x.b}`),
     ...(z.finished ? [] : [`${ab.aktuell.a}:${ab.aktuell.b}`]),
   ].join(' · ');
   const teile = [zeile('left'), zeile('right'),
-    `Gemeldet (${escapeHtml(namen('a'))} zuerst): <b>${staende}</b>`];
+    `${t('Gemeldet ({name} zuerst):', { name: escapeHtml(namen('a')) })} <b>${staende}</b>`];
   if (art === 'ab') {
     if (z.finished && (STATE.retired || STATE.walkover)) {
-      teile.push('Den Sieger wählst du danach neu.');
+      teile.push(t('Den Sieger wählst du danach neu.'));
     } else if (z.finished) {
       const need = requiredSetsToWin(STATE.match.bestOfSets);
       const a = ab.saetze.filter(x => x.a > x.b).length;
       const b = ab.saetze.filter(x => x.b > x.a).length;
       const sieger = a >= need ? 'a' : b >= need ? 'b' : null;
-      if (sieger) teile.push(`Sieger: <b>${escapeHtml(namen(sieger))}</b>`);
+      if (sieger) teile.push(`${t('Sieger')}: <b>${escapeHtml(namen(sieger))}</b>`);
     }
     if (brauchtAbfrage(STATE, isDoubles())) {
-      teile.push('Danach fragt das Tablet, wer gerade aufschlägt und wer annimmt.');
+      teile.push(t('Danach fragt das Tablet, wer gerade aufschlägt und wer annimmt.'));
     }
   } else if (!STATE.finished && !STATE.midGameSwitchDone && STATE.match.bestOfSets > 1) {
     // Der reguläre Seitenwechsel bei 11 im Entscheidungssatz kommt trotzdem
@@ -5537,7 +5897,7 @@ function korrekturVorschauHtml(art) {
     const r = STATE.setsCompleted.filter(x => x.right > x.left).length;
     const bei = intervalThreshold();
     if (l === need - 1 && r === need - 1 && bei != null) {
-      teile.push(`<span class="warnung">Bei ${bei} Punkten wechseln die Seiten trotzdem noch einmal.</span>`);
+      teile.push(`<span class="warnung">${t('Bei {n} Punkten wechseln die Seiten trotzdem noch einmal.', { n: bei })}</span>`);
     }
   }
   return teile.join('<br>');
@@ -5727,22 +6087,21 @@ function finishManually() {
   sendScoreUpdate();
 }
 
-// Öffnet den Match-beenden-Dialog (zweisprachig). Aufgabe/Kampflos sind ab
+// Öffnet den Match-beenden-Dialog. Aufgabe/Kampflos sind ab
 // 0:0 möglich; „Regulär beenden" nur, wenn schon gespielt wurde.
 function openFinishModal() {
   if (!STATE.match || STATE.finished || STATE.setup !== 'playing'
       || STATE.locked || STATE.occupied) return;
-  fillBilingual(els.finishTitle, 'Spiel beenden?', 'End the match?', 't-en');
+  els.finishTitle.textContent = t('Spiel beenden?');
   // Zwei Aufgabe-Varianten: nur dieses Spiel ODER (Verletzung) auch die
   // Folgespiele der Disziplin kampflos werten.
-  els.finishRetireOne.textContent = 'Aufgabe – nur dieses Spiel · Retire (this match)';
-  els.finishRetireInjury.textContent =
-    'Verletzung – auch Folgespiele der Disziplin · Injury (rest of discipline)';
-  els.finishWalkover.textContent = 'Kampflos · Walkover';
+  els.finishRetireOne.textContent = t('Aufgabe – nur dieses Spiel');
+  els.finishRetireInjury.textContent = t('Verletzung – auch Folgespiele der Disziplin');
+  els.finishWalkover.textContent = t('Kampflos');
   const hasSets = STATE.setsCompleted.length > 0
     || STATE.currentSet.left > 0 || STATE.currentSet.right > 0;
   els.finishRegular.hidden = !hasSets;
-  els.finishRegular.textContent = 'Regulär beenden · Finish normally';
+  els.finishRegular.textContent = t('Regulär beenden');
   els.finishModal.classList.add('visible');
 }
 
@@ -5883,7 +6242,7 @@ function applyEnterScoreMode() {
   const live = els.enterScoreLive.checked;
   els.enterScoreCompletedLabel.hidden = !live;
   els.enterScoreCurrentWrap.hidden = !live;
-  els.enterScoreOk.textContent = live ? 'Weiterzählen · Continue' : 'Übernehmen · Apply';
+  els.enterScoreOk.textContent = live ? t('Weiterzählen') : t('Übernehmen');
   if (live) renderEnterCurrentSet();
 }
 
@@ -5891,10 +6250,10 @@ function renderEnterScoreRows() {
   els.enterScoreRows.innerHTML = '';
   enterScoreSets.forEach((s, i) => {
     els.enterScoreRows.appendChild(makeScoreRow(
-      `Satz ${i + 1}`,
+      t('Satz {n}', { n: i + 1 }),
       () => enterScoreSets[i],
       (v) => { enterScoreSets[i] = v; },
-      `Satz ${i + 1}`,
+      t('Satz {n}', { n: i + 1 }),
       true,
     ));
   });
@@ -5906,7 +6265,7 @@ function renderEnterCurrentSet() {
     '',
     () => enterCurrentSet,
     (v) => { enterCurrentSet = v; },
-    'Aktueller Satz',
+    t('Aktueller Satz'),
   ));
 }
 
@@ -5934,9 +6293,10 @@ function validateCompletedSets(sets, target, requireDecided) {
   const bad = sets.findIndex(s =>
     timeFormat ? s.left === s.right : setWinnerSide(s, target) === null);
   if (bad >= 0) {
+    const w = { n: bad + 1, stand: sets[bad].left + ':' + sets[bad].right };
     enterScoreError(timeFormat
-      ? `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist unentschieden.`
-      : `Satz ${bad + 1} (${sets[bad].left}:${sets[bad].right}) ist nicht regulär zu Ende gespielt.`);
+      ? t('Satz {n} ({stand}) ist unentschieden.', w)
+      : t('Satz {n} ({stand}) ist nicht regulär zu Ende gespielt.', w));
     return null;
   }
   // Über dem Deckel kann kein Satz enden. `setWinnerSide` fragt nur, ob
@@ -5950,9 +6310,8 @@ function validateCompletedSets(sets, target, requireDecided) {
     const zuHoch = sets.findIndex(s => Math.max(s.left, s.right) > cap);
     if (zuHoch >= 0) {
       const s = sets[zuHoch];
-      enterScoreError(
-        `Satz ${zuHoch + 1} (${s.left}:${s.right}) geht über den Deckel — `
-        + `bis ${target}, höchstens ${cap}.`);
+      enterScoreError(t('Satz {n} ({stand}) geht über den Deckel — bis {ziel}, höchstens {deckel}.',
+        { n: zuHoch + 1, stand: s.left + ':' + s.right, ziel: target, deckel: cap }));
       return null;
     }
   }
@@ -5961,19 +6320,19 @@ function validateCompletedSets(sets, target, requireDecided) {
   const r = sets.filter(s => s.right > s.left).length;
   if (requireDecided) {
     if (sets.length === 0 || (l < need && r < need) || l === r) {
-      enterScoreError('Kein eindeutiger Sieger — bitte Satzstände prüfen.');
+      enterScoreError(t('Kein eindeutiger Sieger — bitte Satzstände prüfen.'));
       return null;
     }
     const priorL = sets.slice(0, -1).filter(s => s.left > s.right).length;
     const priorR = sets.slice(0, -1).filter(s => s.right > s.left).length;
     if (priorL >= need || priorR >= need) {
-      enterScoreError('Zu viele Sätze — das Spiel war schon vorher entschieden.');
+      enterScoreError(t('Zu viele Sätze — das Spiel war schon vorher entschieden.'));
       return null;
     }
   } else if (l >= need || r >= need) {
     // Weiterzählen: die abgeschlossenen Sätze dürfen das Match noch NICHT
     // entschieden haben (sonst ist es vorbei → Endstand-Modus nutzen).
-    enterScoreError('Das Spiel ist mit diesen Sätzen schon entschieden — Haken „Spiel läuft noch" entfernen.');
+    enterScoreError(t('Das Spiel ist mit diesen Sätzen schon entschieden — Haken „Spiel läuft noch" entfernen.'));
     return null;
   }
   return sets;
@@ -5996,7 +6355,7 @@ function submitEnterScore() {
     // zu den abgeschlossenen Sätzen).
     const curDecided = target >= 99 ? false : setWinnerSide(cur, target) !== null;
     if (curDecided) {
-      enterScoreError('Der aktuelle Satz ist bereits entschieden — bitte oben als abgeschlossenen Satz eintragen.');
+      enterScoreError(t('Der aktuelle Satz ist bereits entschieden — bitte oben als abgeschlossenen Satz eintragen.'));
       return;
     }
     closeEnterScore();
@@ -6422,22 +6781,10 @@ function playerById(id) {
   return STATE.match.teamA.find(p => p.id === id) ?? STATE.match.teamB.find(p => p.id === id);
 }
 
-// Schreibt deutschen Text + englische Übersetzung (im <span>) per
-// textContent in ein Element – DOM-Aufbau statt innerHTML, damit keine
-// HTML-Injektion möglich ist.
-function fillBilingual(host, de, en, enClass) {
-  host.textContent = de;
-  const span = document.createElement('span');
-  span.className = enClass;
-  span.textContent = en;
-  host.appendChild(span);
-}
-
-// Setzt Titel + Untertitel des Setup-Modals zweisprachig (Deutsch oben,
-// Englisch darunter).
-function setSetupText(titleDe, titleEn, subDe, subEn) {
-  fillBilingual(els.setupTitle, titleDe, titleEn, 't-en');
-  fillBilingual(els.setupSubtitle, subDe, subEn, 's-en');
+// Setzt Titel + Untertitel des Setup-Modals (in der gewählten Sprache).
+function setSetupText(titel, unter) {
+  els.setupTitle.textContent = titel;
+  els.setupSubtitle.textContent = unter;
 }
 
 /** Wo der Setup-Assistent steht: `{ n, m }` für „Schritt n von m" — oder
@@ -6506,7 +6853,7 @@ function renderSetupModal() {
   els.setupModal.classList.add('visible');
   const schritt = setupSchritt();
   els.setupSchritt.hidden = !schritt;
-  if (schritt) els.setupSchritt.textContent = `Schritt ${schritt.n} von ${schritt.m}`;
+  if (schritt) els.setupSchritt.textContent = t('Schritt {n} von {m}', schritt);
   // Zurück-Schritt ab dem zweiten Setup-Schritt anbieten. Bei der Per-Satz-
   // Aufschlagwahl ist 'choose-server' der erste Schritt (kein Zurück — das
   // Gewinnerteam steht durch den Satzstand fest, nicht zur Wahl).
@@ -6517,8 +6864,8 @@ function renderSetupModal() {
     || (STATE.setup === 'choose-server' && STATE.serveSetupTeam && !STATE.berichtigtAbfrage && !zurPause);
   els.setupBack.style.display = hideBack ? 'none' : '';
   els.setupBack.textContent = STATE.setup === 'choose-server' && STATE.berichtigtAbfrage
-    ? '← Korrektur zurücknehmen'
-    : zurPause ? '← Zurück zur Pause · Back to interval' : '← Zurück · Back';
+    ? t('← Korrektur zurücknehmen')
+    : zurPause ? t('← Zurück zur Pause') : t('← Zurück');
   // Hinweis Zähltafelbediener nur im ersten Schritt (Seitenwahl), wenn ein
   // Vorspiel auf dem Feld bekannt ist: der Verlierer bedient die Zähltafel.
   renderScorekeeperHint(STATE.setup === 'choose-side');
@@ -6527,14 +6874,12 @@ function renderSetupModal() {
   if (STATE.setup === 'choose-side') {
     if (uebereinander()) {
       setSetupText(
-        'Welches Team steht vorne (unten)?', 'Which team is on the near side?',
-        'Tippe das Team an, das auf der Court-Hälfte vor dir spielt.',
-        'Tap the team playing on the half of the court nearest to you.');
+        t('Welches Team steht vorne (unten)?'),
+        t('Tippe das Team an, das auf der Court-Hälfte vor dir spielt.'));
     } else {
       setSetupText(
-        'Welches Team steht links?', 'Which team is on the left?',
-        'Tippe das Team an, das auf der linken Court-Hälfte spielt.',
-        'Tap the team playing on the left half of the court.');
+        t('Welches Team steht links?'),
+        t('Tippe das Team an, das auf der linken Court-Hälfte spielt.'));
     }
     const teamAName = STATE.match.teamA.map(p => p.name).join(' / ');
     const teamBName = STATE.match.teamB.map(p => p.name).join(' / ');
@@ -6551,25 +6896,21 @@ function renderSetupModal() {
       ? STATE.serveSetupTeam : null;
     if (repromptTeam && STATE.berichtigtAbfrage) {
       setSetupText(
-        'Mannschaften getauscht — wer schlägt gerade auf?', 'Teams swapped — who is serving now?',
-        'Der Stand bleibt. Tippe den Spieler an, der gerade aufschlägt.',
-        'The score stays. Tap the player serving now.');
+        t('Mannschaften getauscht — wer schlägt gerade auf?'),
+        t('Der Stand bleibt. Tippe den Spieler an, der gerade aufschlägt.'));
     } else if (repromptTeam) {
       setSetupText(
-        'Neuer Satz — wer schlägt auf?', 'New set — who serves?',
-        'Tippe den Aufschläger im Gewinnerteam des letzten Satzes an.',
-        'Tap the server in the team that won the previous set.');
+        t('Neuer Satz — wer schlägt auf?'),
+        t('Tippe den Aufschläger im Gewinnerteam des letzten Satzes an.'));
     } else if (STATE.midGameSetup) {
       // Einstieg mitten im Spiel (Plan 12b): das Match läuft schon.
       setSetupText(
-        'Wer schlägt gerade auf?', 'Who is serving now?',
-        'Tippe auf den Spieler, der beim aktuellen Stand aufschlägt.',
-        'Tap the player serving at the current score.');
+        t('Wer schlägt gerade auf?'),
+        t('Tippe auf den Spieler, der beim aktuellen Stand aufschlägt.'));
     } else {
       setSetupText(
-        'Wer schlägt zuerst auf?', 'Who serves first?',
-        'Tippe auf den Spieler, der das Spiel eröffnet.',
-        'Tap the player who starts the match.');
+        t('Wer schlägt zuerst auf?'),
+        t('Tippe auf den Spieler, der das Spiel eröffnet.'));
     }
     // Feldbild: Wählbar ist, wer aufschlagen darf; die übrigen stehen zur
     // Orientierung auf ihrer Hälfte.
@@ -6580,9 +6921,8 @@ function renderSetupModal() {
     ));
   } else if (STATE.setup === 'choose-receiver') {
     setSetupText(
-      'Wer nimmt den Aufschlag an?', 'Who receives the serve?',
-      'Tippe auf den Annehmer im gegnerischen Team.',
-      'Tap the receiver in the opposing team.');
+      t('Wer nimmt den Aufschlag an?'),
+      t('Tippe auf den Annehmer im gegnerischen Team.'));
     // pendingServer wird nicht persistiert. Steht setup nach einem Reload auf
     // 'choose-receiver', fehlt der gewählte Aufschläger → einen Schritt zurück
     // zur Aufschläger-Wahl (sonst bliebe das Modal leer/gestrandet).
@@ -6600,7 +6940,7 @@ function renderSetupModal() {
       // sonst beide Partner markiert.
       const er = spieler === aufschlag.player
         || (spieler.id != null && spieler.id === aufschlag.player.id);
-      return er ? { notiz: 'schlägt auf' } : {};
+      return er ? { notiz: t('schlägt auf') } : {};
     });
   }
 }
@@ -6608,7 +6948,7 @@ function renderSetupModal() {
 // Zeigt im Setup-Modal an, wer voraussichtlich die Zähltafel bedient: das
 // Verlierer-Team des zuletzt auf diesem Feld beendeten Spiels (kommt als
 // `scorekeeper` im MatchBrief vom Server). `show=false` oder keine Namen →
-// ausgeblendet. Zweisprachig wie das übrige Modal.
+// ausgeblendet.
 function renderScorekeeperHint(show) {
   const names = (STATE.match && Array.isArray(STATE.match.scorekeeper))
     ? STATE.match.scorekeeper : [];
@@ -6618,7 +6958,7 @@ function renderScorekeeperHint(show) {
   }
   const joined = names.map(escapeHtml).join(' / ');
   els.setupScorekeeper.innerHTML =
-    `🧮 <span class="sk-label">Zähltafel / Scoreboard:</span> ` +
+    `🧮 <span class="sk-label">${t('Zähltafel')}:</span> ` +
     `<span class="sk-names">${joined}</span>`;
   els.setupScorekeeper.hidden = false;
 }
@@ -6639,11 +6979,11 @@ function renderOfficialsHint(show) {
   }
   const teile = [];
   if (sr.length) {
-    teile.push(`<span class="sk-label">Schiedsrichter / Umpire:</span> ` +
+    teile.push(`<span class="sk-label">${t('Schiedsrichter')}:</span> ` +
       `<span class="sk-names">${sr.map(escapeHtml).join(' / ')}</span>`);
   }
   if (ar.length) {
-    teile.push(`<span class="sk-label">Aufschlagrichter / Service judge:</span> ` +
+    teile.push(`<span class="sk-label">${t('Aufschlagrichter')}:</span> ` +
       `<span class="sk-names">${ar.map(escapeHtml).join(' / ')}</span>`);
   }
   els.setupOfficials.innerHTML = `⚖️ ` + teile.join(' · ');
@@ -6669,7 +7009,7 @@ function renderAnwesenheit(show) {
   els.setupAnwesend.innerHTML = '';
   const titel = document.createElement('div');
   titel.className = 'aw-titel';
-  titel.textContent = 'Anwesenheit bestätigen · Confirm presence (antippen)';
+  titel.textContent = t('Anwesenheit bestätigen (antippen)');
   els.setupAnwesend.appendChild(titel);
   const liste = document.createElement('div');
   liste.className = 'aw-liste';
@@ -6848,7 +7188,7 @@ function render() {
   }
 
   if (!STATE.match) {
-    els.eventLabel.textContent = DEMO ? 'Übungsspiel' : '— kein Spiel —';
+    els.eventLabel.textContent = DEMO ? t('Übungsspiel') : t('— kein Spiel —');
     els.demoWahl.hidden = !DEMO;
     els.emptyView.style.display = '';
     els.playView.style.display = 'none';
@@ -6856,15 +7196,22 @@ function render() {
     els.undoBtn.disabled = true;
     return;
   }
-  els.eventLabel.textContent = STATE.match.eventLabel;
+  // Demofeld: Die Klasse des Übungsspiels folgt der Sprache, auch nach einem
+  // Wechsel mitten im Spiel. Ein echtes Etikett kommt aus BTP und bleibt.
+  els.eventLabel.textContent = DEMO && STATE.match.demoKlasse
+    ? t('Übung') + ' · ' + t(STATE.match.demoKlasse)
+    : STATE.match.eventLabel;
   els.emptyView.style.display = 'none';
   els.playView.style.display = '';
 
   // Score (in Side-Koordinaten)
   els.scoreLeft.textContent = STATE.currentSet.left;
   els.scoreRight.textContent = STATE.currentSet.right;
-  els.currentSetLabel.textContent =
-    `Satz ${STATE.setsCompleted.length + 1} · best of ${STATE.match.bestOfSets} · bis ${STATE.match.targetScore >= 99 ? 'Zeit' : STATE.match.targetScore}`;
+  els.currentSetLabel.textContent = t('Satz {n} · best of {b} · bis {z}', {
+    n: STATE.setsCompleted.length + 1,
+    b: STATE.match.bestOfSets,
+    z: STATE.match.targetScore >= 99 ? t('Zeit') : STATE.match.targetScore,
+  });
   els.setHistory.innerHTML = STATE.setsCompleted.map((s, i) =>
     `<span class="pip">${i+1}: <strong>${s.left}:${s.right}</strong></span>`
   ).join('');
@@ -6888,26 +7235,26 @@ function render() {
       ? STATE.match[key === 'a' ? 'teamA' : 'teamB'].map(p => p.name).join(' / ')
       : '';
     if (STATE.retired || STATE.walkover) {
-      const statusDe = STATE.walkover
-        ? 'Kampflos'
-        : (STATE.cascadeWalkover ? 'Aufgabe · Verletzung' : 'Aufgabe');
+      const statusText = STATE.walkover
+        ? t('Kampflos')
+        : (STATE.cascadeWalkover ? t('Aufgabe · Verletzung') : t('Aufgabe'));
       els.winnerBanner.textContent = STATE.retiredWinner
-        ? `🏆 ${teamName(STATE.retiredWinner)} · ${statusDe}`
-        : (STATE.walkover ? 'Kampflos — Sieger wählen' : 'Spiel abgebrochen — Aufgabe');
+        ? `🏆 ${teamName(STATE.retiredWinner)} · ${statusText}`
+        : (STATE.walkover ? t('Kampflos — Sieger wählen') : t('Spiel abgebrochen — Aufgabe'));
       els.retirePick.style.display = STATE.retiredWinner ? 'none' : '';
       els.retirePickLabel.textContent = STATE.walkover
-        ? 'Kampflos — wer gewinnt? · Walkover — who wins?'
-        : 'Aufgabe — wer gewinnt das Spiel? · Retirement — who wins?';
+        ? t('Kampflos — wer gewinnt?')
+        : t('Aufgabe — wer gewinnt das Spiel?');
       els.retireWinnerA.textContent = teamName('a');
       els.retireWinnerB.textContent = teamName('b');
     } else {
       const winnerSide = matchWinnerSide();
-      let teamLabel = '— manueller Abschluss —';
+      let teamLabel = t('— manueller Abschluss —');
       if (winnerSide && STATE.teamOnSide && STATE.match) {
         const winnerTeamKey = STATE.teamOnSide.a === winnerSide ? 'a' : 'b';
         teamLabel = teamName(winnerTeamKey);
       }
-      els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Spiel beendet';
+      els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : t('Spiel beendet');
       els.retirePick.style.display = 'none';
     }
     renderEndstand();
@@ -6935,12 +7282,12 @@ function render() {
     els.submitBtn.disabled = lage.sendenGesperrt;
     els.reopenBtn.disabled = lage.korrekturGesperrt;
     els.reopenBtn.textContent = korrekturOben
-      ? '↩ Korrektur zurücknehmen' : 'Spiel wieder öffnen';
-    els.submitStatus.textContent = lage.status;
+      ? t('↩ Korrektur zurücknehmen') : t('Spiel wieder öffnen');
+    els.submitStatus.textContent = abschlussStatus(lage);
     // Demofeld: Die lokale `/result`-Antwort ist immer „angenommen" — der
     // Text sagt ehrlich, dass nichts angekommen ist.
     if (DEMO && STATE.submittedOk) {
-      els.submitStatus.textContent = '✓ Übung beendet — im echten Spiel ginge das Ergebnis jetzt an die Turnierleitung.';
+      els.submitStatus.textContent = t('✓ Übung beendet — im echten Spiel ginge das Ergebnis jetzt an die Turnierleitung.');
     }
     els.demoNeuFertig.hidden = !DEMO;
   } else {
@@ -6958,6 +7305,18 @@ function siegerSeite() {
       : null;
   }
   return matchWinnerSide();
+}
+
+/** Statuszeile des Abschlusses in der gewählten Sprache. `abschlussLage`
+ *  ist eine Inline-Kopie (Drift-Test) und liefert deutsche Texte; übersetzt
+ *  wird erst hier. Der Ablehnungsgrund des Turnier-PCs bleibt, wie er kam —
+ *  nur der eigene Ersatztext („… hat das Ergebnis abgelehnt") wird übersetzt. */
+function abschlussStatus(lage) {
+  if (STATE.resultRejected && lage.status.startsWith('✗ Nicht angenommen: ')) {
+    return t('✗ Nicht angenommen: {grund} — bitte den Stand prüfen oder die Turnierleitung ansprechen.',
+      { grund: t(STATE.resultRejected) });
+  }
+  return t(lage.status);
 }
 
 /** Endstand-Tabelle am Spielende: eine Zeile je Mannschaft, die Sätze als
@@ -6994,7 +7353,7 @@ function renderEndstand() {
     const zeile = document.createElement('tr');
     if (seite === sieger) zeile.className = 'sieger';
     // Ohne Aufstellung (kein Name bekannt) spricht die Zeile in Seiten.
-    const name = sideTeamName(seite) || (seite === 'left' ? 'Links' : 'Rechts');
+    const name = sideTeamName(seite) || (seite === 'left' ? t('Links') : t('Rechts'));
     zeile.append(zelle('td', name, 'name'),
       ...saetze.map((s) => zelle('td', String(s[seite]), gewinner(s) === seite ? 'gewonnen' : '')));
     tab.append(zeile);
@@ -7051,6 +7410,41 @@ function zeigeMenueAnsicht(welche) {
   els.settingsMainView.hidden = welche !== 'geraet';
 }
 
+/** Alles, was nicht an `render()` hängt, in die gewählte Sprache bringen:
+ *  feste Blatt-Texte, `lang` (Silbentrennung, Vorlese-Hilfen), die Marke am
+ *  Menü-Eintrag und im Demofeld Titel und Szenarien. */
+function spracheAnwenden() {
+  document.documentElement.lang = SPRACHE;
+  statischUebersetzen();
+  els.spracheDe.classList.toggle('sprache-aktiv', SPRACHE === 'de');
+  els.spracheEn.classList.toggle('sprache-aktiv', SPRACHE === 'en');
+  if (DEMO) {
+    document.title = t('Demofeld – Übungsspiel');
+    // Ein echter Feldname kommt aus BTP und bleibt, wie er ist; das Demofeld
+    // heißt nur bei uns so.
+    document.querySelectorAll('[data-feldname]').forEach((el) => { el.textContent = t('Demofeld'); });
+    demoAuswahlBauen();
+  }
+}
+
+/** Sprache wechseln — ohne Neuladen, damit ein laufendes Spiel, eine Pause
+ *  oder ein offenes Setup nicht unterbrochen werden. */
+function setzeSprache(neu) {
+  if (neu !== SPRACHE) {
+    SPRACHE = neu;
+    try { localStorage.setItem(SPRACHE_KEY, neu); } catch { /* ignore */ }
+    tlog('info', 'sprache', { sprache: neu });
+    spracheAnwenden();
+    lesbarAnwenden();
+    setzeConn(connLage);
+    // Die Aufruf-Uhr schreibt nur bei Änderung ins DOM — Merker leeren.
+    aufrufUhrGezeigt = '';
+    renderAufrufUhr();
+  }
+  closeSettings();
+  render();
+}
+
 /** „⋯ Mehr": das freie Menü öffnen. */
 function openSettings() {
   settingsPinEntry = '';
@@ -7084,7 +7478,7 @@ function renderMenue() {
   els.settingsDemoNeu.hidden = !DEMO;
   // Das Schloss nur, solange wirklich nach der PIN gefragt wird.
   els.menuGeraet.textContent = (DEMO || pinFreigabeAktiv() ? '' : '🔒 ')
-    + 'Feld wechseln · Anzeige …';
+    + t('Feld wechseln · Anzeige …');
 }
 
 /** Menü-Eintrag, der einen Dialog öffnet: ERST das Menü schließen. Es
@@ -7119,11 +7513,11 @@ function renderWarten() {
     && Date.now() - offlineSeit >= OFFLINE_HINWEIS_MS;
   els.emptyView.classList.toggle('offline', offline);
   els.idleWait.textContent = offline
-    ? 'Keine Verbindung zum Turnier-PC'
-    : 'Warte auf das nächste Spiel';
+    ? t('Keine Verbindung zum Turnier-PC')
+    : t('Warte auf das nächste Spiel');
   els.idleHint.textContent = offline
-    ? 'Das Tablet versucht es von selbst weiter. Dauert es länger: WLAN prüfen oder der Turnierleitung Bescheid geben.'
-    : 'Die Zähltafel startet von selbst, sobald die Turnierleitung ein Spiel zuweist.';
+    ? t('Das Tablet versucht es von selbst weiter. Dauert es länger: WLAN prüfen oder der Turnierleitung Bescheid geben.')
+    : t('Die Zähltafel startet von selbst, sobald die Turnierleitung ein Spiel zuweist.');
 }
 
 /** Auf welcher Seite der letzte Punkt gezählt wurde — für den Text des
@@ -7153,12 +7547,12 @@ function seiteDesLetztenPunkts() {
 /** Text des Rückgängig-Knopfs: sagt, was der Tipp zurücknimmt. In Seiten,
  *  nicht in Namen — die Bediener kennen die Spieler oft nicht. */
 function undoText(korrekturOben, fresh) {
-  if (korrekturOben) return '↩ Korrektur zurücknehmen';
-  if (fresh) return '↩ Aufstellung ändern';
+  if (korrekturOben) return t('↩ Korrektur zurücknehmen');
+  if (fresh) return t('↩ Aufstellung ändern');
   const seite = seiteDesLetztenPunkts();
-  if (!seite) return '↩ Letzten Punkt zurück';
+  if (!seite) return t('↩ Letzten Punkt zurück');
   const wort = seiteWort(seite);
-  return `↩ Punkt für ${wort.charAt(0).toUpperCase()}${wort.slice(1)} zurück`;
+  return t('↩ Punkt für {seite} zurück', { seite: wort.charAt(0).toUpperCase() + wort.slice(1) });
 }
 
 function pinKey(k) {
@@ -7173,7 +7567,7 @@ function pinKey(k) {
       pinFreigabeMerken();
       showSettingsMain();
     } else {
-      els.settingsPinDisplay.textContent = 'PIN falsch';
+      els.settingsPinDisplay.textContent = t('PIN falsch');
       settingsPinEntry = '';
       setTimeout(renderPinDisplay, 800);
     }
@@ -7181,22 +7575,22 @@ function pinKey(k) {
 }
 
 function loadCourtList() {
-  els.settingsCourtList.textContent = 'Lade Felder…';
+  els.settingsCourtList.textContent = t('Lade Felder…');
   fetch(BASE_PATH + '/courts', { cache: 'no-store' })
     .then(r => (r.ok ? r.json() : Promise.reject()))
     .then(list => {
       els.settingsCourtList.textContent = '';
       if (!Array.isArray(list) || list.length === 0) {
-        els.settingsCourtList.textContent = 'Keine Felder gefunden.';
+        els.settingsCourtList.textContent = t('Keine Felder gefunden.');
         demoEintragAnhaengen();
         return;
       }
       list.forEach(c => {
-        const name = c.label || ('Feld ' + c.id);
+        const name = c.label || (t('Feld') + ' ' + c.id);
         const b = document.createElement('div');
         const current = Number(c.id) === COURT_ID;
         b.className = 'opt' + (current ? ' court-current' : '');
-        b.textContent = current ? name + ' (aktuell)' : name;
+        b.textContent = current ? name + ' (' + t('aktuell') + ')' : name;
         if (!current) {
           b.addEventListener('click', () => {
             location.href = BASE_PATH + '/court/' + encodeURIComponent(c.id);
@@ -7207,7 +7601,7 @@ function loadCourtList() {
       demoEintragAnhaengen();
     })
     .catch(() => {
-      els.settingsCourtList.textContent = 'Feldliste nicht erreichbar.';
+      els.settingsCourtList.textContent = t('Feldliste nicht erreichbar.');
       demoEintragAnhaengen();
     });
 }
@@ -7217,7 +7611,7 @@ function loadCourtList() {
 function demoEintragAnhaengen() {
   const b = document.createElement('div');
   b.className = 'opt' + (DEMO ? ' court-current' : '');
-  b.textContent = DEMO ? 'Demofeld (aktuell)' : 'Demofeld · Übungsspiel';
+  b.textContent = DEMO ? t('Demofeld (aktuell)') : t('Demofeld · Übungsspiel');
   if (!DEMO) {
     b.addEventListener('click', () => { location.href = BASE_PATH + '/court/demo'; });
   }
@@ -7441,7 +7835,7 @@ function renderPunktLage() {
   els.punktLage.hidden = !lage;
   els.punktLage.parentElement.classList.toggle('mit-lage', !!lage);
   if (!lage) return;
-  els.punktLage.textContent = `${lage.wort} ${lage.seite ? seiteWort(lage.seite) : 'beide'}`;
+  els.punktLage.textContent = `${t(lage.wort)} ${lage.seite ? seiteWort(lage.seite) : t('beide')}`;
   els.punktLage.classList.toggle('links', lage.seite === 'left');
   els.punktLage.classList.toggle('rechts', lage.seite === 'right');
 }
@@ -7523,10 +7917,11 @@ function einspielZeitText() {
 function umpAnnouncement() {
   if (!STATE.match) return { say: '', badge: '' };
   if (STATE.finished) return { say: umpMatchEndSpoken(), badge: '' };
-  if (STATE.setup !== 'playing') return { say: 'Aufstellung wählen …', badge: '' };
+  // Kein Ansagetext, sondern ein Hinweis an den Bediener — folgt der Sprache.
+  if (STATE.setup !== 'playing') return { say: t('Aufstellung wählen …'), badge: '' };
   if (STATE.pause) {
     // Anhang 4, 3.11.1.
-    if (STATE.pause.kind === 'injury') return { say: 'Das Spiel ist unterbrochen.', badge: 'Pause' };
+    if (STATE.pause.kind === 'injury') return { say: 'Das Spiel ist unterbrochen.', badge: t('Pause') };
     if (STATE.pause.kind === 'eleven') {
       // Anhang 4, 7.2: „Aufschlagwechsel" (sofern zutreffend), Stand,
       // „Pause" — und NUR im Entscheidungssatz „Feldseiten wechseln"
@@ -7535,10 +7930,10 @@ function umpAnnouncement() {
       const ev = STATE.lastEvent;
       const vorn = ev && ev.type === 'point' && ev.serveChanged ? 'Aufschlagwechsel, ' : '';
       const wechsel = umpIstEntscheidungssatz() ? ' Feldseiten wechseln.' : '';
-      return { say: `${vorn}${umpScoreSpoken()} – Pause.${wechsel}`, badge: 'Pause' };
+      return { say: `${vorn}${umpScoreSpoken()} – Pause.${wechsel}`, badge: t('Pause') };
     }
     if (STATE.pause.kind === 'game') {
-      return { say: umpSetEndSpoken(), badge: 'Satzpause' };
+      return { say: umpSetEndSpoken(), badge: t('Satzpause') };
     }
   }
   const noPoint = STATE.currentSet.left === 0 && STATE.currentSet.right === 0;
@@ -7560,8 +7955,8 @@ function umpAnnouncement() {
   }
   const ev = STATE.lastEvent;
   if (ev && ev.type === 'card') {
-    const badge = ev.color === 'yellow' ? 'Verwarnung'
-      : ev.color === 'red' ? 'Rote Karte' : 'Disqualifikation';
+    const badge = ev.color === 'yellow' ? t('Verwarnung')
+      : ev.color === 'red' ? t('Rote Karte') : t('Disqualifikation');
     return { say: ev.say, badge };
   }
   let say = umpScoreSpoken();
@@ -7574,7 +7969,7 @@ function umpCap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
 function renderUmpireBar() {
   if (els.settingsUmpire) {
-    els.settingsUmpire.textContent = 'Schiri-Modus: ' + (STATE.umpireMode ? 'an' : 'aus');
+    els.settingsUmpire.textContent = t('Schiri-Modus') + ': ' + (STATE.umpireMode ? t('an') : t('aus'));
   }
   // Ohne Schiri-Modus erscheint die Leiste nur für die Einspielzeit — und
   // dann ohne Ansage, Karten und Karten-Knopf (Wunsch 08.11.2026: die
@@ -8092,9 +8487,9 @@ els.cardBlack.addEventListener('click', () => applyCard('black'));
 function anordnungAnwenden() {
   const ueber = uebereinander();
   els.playView.classList.toggle('uebereinander', ueber);
-  els.plusLeftLabel.textContent = ueber ? 'Vorne' : 'Links';
-  els.plusRightLabel.textContent = ueber ? 'Hinten' : 'Rechts';
-  els.settingsAnordnung.textContent = 'Anordnung: ' + ANORDNUNG_LABEL[anordnungWahl];
+  els.plusLeftLabel.textContent = ueber ? t('Vorne') : t('Links');
+  els.plusRightLabel.textContent = ueber ? t('Hinten') : t('Rechts');
+  els.settingsAnordnung.textContent = t('Anordnung') + ': ' + t(ANORDNUNG_LABEL[anordnungWahl]);
 }
 // render() ruft anordnungAnwenden() selbst; `resize` fängt Browser ohne
 // `change`-Ereignis und ist sonst harmlos doppelt (idempotent).
@@ -8130,7 +8525,7 @@ els.settingsUmpire.addEventListener('click', toggleUmpireMode);
 // die Ansage-Größe liest `ansageEinpassen` aus derselben Variable.
 function lesbarAnwenden() {
   document.body.classList.toggle('lesbar', grosseSchrift);
-  els.settingsLesbar.textContent = 'Große Schrift: ' + (grosseSchrift ? 'an' : 'aus');
+  els.settingsLesbar.textContent = t('Große Schrift') + ': ' + (grosseSchrift ? t('an') : t('aus'));
 }
 function toggleGrosseSchrift() {
   grosseSchrift = !grosseSchrift;
@@ -8141,6 +8536,8 @@ function toggleGrosseSchrift() {
   render();
 }
 els.settingsLesbar.addEventListener('click', toggleGrosseSchrift);
+els.spracheDe.addEventListener('click', () => setzeSprache('de'));
+els.spracheEn.addEventListener('click', () => setzeSprache('en'));
 lesbarAnwenden();
 els.mehrBtn.addEventListener('click', openSettings);
 els.menuClose.addEventListener('click', closeSettings);
@@ -8411,7 +8808,9 @@ function demoBrief(sz) {
     matchId: 900000000 + (Date.now() % 100000000),
     teamA: spieler(sz.a),
     teamB: spieler(sz.b),
-    eventLabel: 'Übung · ' + sz.klasse,
+    eventLabel: t('Übung') + ' · ' + t(sz.klasse),
+    // Deutscher Schlüssel für die Anzeige — siehe `eventLabel` in `render`.
+    demoKlasse: sz.klasse,
     bestOfSets: 3,
     targetScore: 21,
     capScore: 30,
@@ -8456,11 +8855,11 @@ function demoAuswahlBauen() {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'demo-szenario';
-    const t = document.createElement('b');
-    t.textContent = sz.titel;
+    const titel = document.createElement('b');
+    titel.textContent = t(sz.titel);
     const u = document.createElement('span');
-    u.textContent = sz.text;
-    b.append(t, u);
+    u.textContent = t(sz.text);
+    b.append(titel, u);
     b.addEventListener('click', () => demoStarten(sz));
     els.demoListe.appendChild(b);
   });
@@ -8468,12 +8867,13 @@ function demoAuswahlBauen() {
 
 if (DEMO) {
   document.body.classList.add('demo');
-  document.title = 'Demofeld – Übungsspiel';
-  demoAuswahlBauen();
   els.settingsDemoNeu.addEventListener('click', demoNeu);
   els.demoNeuFertig.addEventListener('click', demoNeu);
 }
 
+// Erst hier: Die Sprache fasst Blatt-Texte, Titel und (im Demofeld) die
+// Szenarien-Liste an — alles, was dafür gebraucht wird, ist jetzt definiert.
+spracheAnwenden();
 restorePersistedState();
 render();
 connect();

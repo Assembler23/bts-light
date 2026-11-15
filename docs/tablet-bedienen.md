@@ -91,7 +91,7 @@ einen Blick, ob hier gerade jemand vermisst wird.
 
 Ein kurzer Assistent führt dann durch drei Fragen. Über jeder Frage steht, wo
 du bist – zum Beispiel **„Schritt 2 von 3"**:
-<!-- pruef: "`Schritt ${schritt.n} von ${schritt.m}`" in src-tauri/assets/tablet.html -->
+<!-- pruef: "t('Schritt {n} von {m}', schritt)" in src-tauri/assets/tablet.html -->
 
 1. **Welches Team steht links?**
 2. **Wer schlägt zuerst auf?**
@@ -115,7 +115,7 @@ der Spieler (und des Schiedsrichters) unter **Anwesenheit bestätigen**. Wer
 da ist, tippt seinen Namen an — der Haken geht an die Turnierleitung. Das ist
 nur ein Hinweis für sie: Gezählt werden kann jederzeit, auch ohne
 Bestätigung. Siehe [meetingpoint.md](meetingpoint.md).
-<!-- pruef: "Anwesenheit bestätigen · Confirm presence" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Anwesenheit bestätigen (antippen)" in src-tauri/assets/tablet.html -->
 
 ## Zählen
 
@@ -149,7 +149,7 @@ Farbe: **„Satzpunkt links"** oder „… rechts" (hinter dem Feld
 das Spiel, heißt sie **„Spielpunkt …"**. Sie bleibt stehen, solange der
 Satzpunkt besteht — du musst dafür nichts einschalten.
 <!-- pruef: "'Spielpunkt' : 'Satzpunkt'" in src-tauri/assets/tablet.html -->
-<!-- pruef: "seiteWort(lage.seite) : 'beide'" in src-tauri/assets/tablet.html -->
+<!-- pruef: "seiteWort(lage.seite) : t('beide')" in src-tauri/assets/tablet.html -->
 
 Ein Fehltipp lässt sich zurücknehmen — mit dem orangen Knopf **unten
 links**. Es gibt nur diesen einen (seit v0.9.423; vorher waren es bis zu
@@ -300,7 +300,7 @@ Zwei Meldungen gehen vom Tablet an die Turnierleitung, beide ohne PIN:
   eine Rückfrage, damit nichts aus Versehen ausgelöst wird. Der Knopf
   erscheint, sobald die Aufstellung bestätigt ist — ohne Spiel und während
   der Seitenwahl fehlt er.
-  <!-- pruef: /<span class="txt">Turnierleitung<\/span>/ in src-tauri/assets/tablet.html -->
+  <!-- pruef: /<span class="txt" data-t>Turnierleitung<\/span>/ in src-tauri/assets/tablet.html -->
 
 Beide Meldungen erscheinen bei der Turnierleitung in einer Leiste, die auf
 jeder Seite sichtbar ist — mit Feldnummer. **Aufgelöst werden sie am Tablet**,
@@ -318,6 +318,7 @@ Kopf- und Fußzeile, der Rest hinter einem Zahnrad mit PIN). Das Menü öffnet
 |---|---|
 | **Spiel** | **Ergebnis eintragen …** · **Spiel beenden …** · **⇄ Seiten / Mannschaften korrigieren** · **✚ Verletzung · Behandlung** |
 | **Schiedsrichter** | **Schiri-Modus: an/aus** — ohne PIN |
+| **Sprache · Language** | **Deutsch** · **English** — ohne PIN |
 | **Gerät** | **Feld wechseln · Anzeige …** — hinter der PIN |
 <!-- pruef: "Ergebnis eintragen …" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Schiri-Modus: " in src-tauri/assets/tablet.html -->
@@ -326,6 +327,24 @@ Kopf- und Fußzeile, der Rest hinter einem Zahnrad mit PIN). Das Menü öffnet
 Solange kein Spiel gezählt wird, fehlt der Abschnitt „Spiel". Auf breiten
 Tablets stehen die Einträge zweispaltig; passt das Menü nicht auf den Schirm,
 lässt es sich verschieben. **Schließen** steht als Rahmen-Knopf ganz unten.
+
+### Sprache: Deutsch oder English
+
+Das Tablet spricht Deutsch oder Englisch (seit v0.9.423). Umgestellt wird
+unter **⋯ Mehr** im Abschnitt **Sprache · Language**: **Deutsch** oder
+**English** antippen — ohne PIN, auch mitten im Spiel. Der Stand, die Uhr und
+eine laufende Pause bleiben dabei, wie sie sind.
+<!-- pruef: "Sprache · Language" in src-tauri/assets/tablet.html -->
+<!-- pruef: /id="sprache-en">English</ in src-tauri/assets/tablet.html -->
+
+- Die Wahl gilt **für dieses Tablet** und bleibt gespeichert — auch nach
+  einem Feldwechsel und über Nacht. Andere Tablets und die Monitore ändern
+  sich nicht.
+- **Deutsch bleiben** die Ansagetexte des Schiri-Modus (sie werden in der
+  Halle vorgelesen), die Namen von Feld, Klasse und Spielern und ein
+  Ablehnungsgrund, den die Turnierleitung zurückschickt.
+- Bis v0.9.422 standen einige Knöpfe in beiden Sprachen zugleich
+  („Zurück · Back"). Das gibt es nicht mehr.
 
 ### Gerät — hinter der PIN
 
@@ -456,7 +475,7 @@ Wahl hat unterschiedliche Folgen:
 |---|---|
 | **Aufgabe — nur dieses Spiel** | Dieses Spiel wird als Aufgabe gewertet. Alles andere läuft weiter. |
 | **Verletzung — auch Folgespiele der Disziplin** | Zusätzlich werden die **restlichen Spiele dieser Disziplin** kampflos gewertet. |
-| **Kampflos · Walkover** | Eine Partei ist nicht angetreten. Geht ab 0:0. |
+| **Kampflos** | Eine Partei ist nicht angetreten. Geht ab 0:0. |
 
 > **Die mittlere Wahl ist die folgenreichste am ganzen Tablet.** Sie wirkt über
 > das aktuelle Spiel hinaus auf die gesamte Disziplin. Im Zweifel die erste

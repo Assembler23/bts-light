@@ -113,6 +113,8 @@ function funktion(name) {
 const FUNKTIONEN = [
   "geparktGueltig", "geparktLaden", "mussParken", "parken", "aufloesen", "geparktFuer", "zuPruefen",
   "freigeben", "geparktSichtbar", "naechstePruefungMs", "saetzeText", "spielName", "bandText", "frageText", "verwerfenText",
+  // Sprachumschalter: Die Meldungen laufen über `t` und die Hüllen der Inline-Kopie.
+  "t", "geparktWerte", "geparktBand",
   "geparktLesen", "geparktSichern", "parkeFremdenAuftrag", "geparktEntfernen", "zeigeGeparktMeldung",
   "geparktAntwort", "planeGeparktPruefung", "sendeGeparktes", "pruefeGeparkte",
   "geparktBeiFinalisierungAufloesen", "geparktRueckkehr", "geparktJetztSenden", "geparktVerwerfen",
@@ -145,6 +147,8 @@ function tablet(speicher = {}) {
   const attrappen = {
     STATE, localStorage,
     COURT_ID: 101, COURT_LABEL: "Feld 1", BASE_PATH: "", RESULT_ABORT_MS: 1000, RESULT_RETRY_MS: 5000,
+    // Deutsch ist die Grundsprache; die englische Fassung prüft test-tablet-sprache.mjs.
+    SPRACHE: "de", EN: {},
     RESULT_OHNE_GRUND: "abgelehnt", PERSIST_KEY: "badhub.tablet.state.101",
     tlog: (stufe, was, d) => log.push([was, d]),
     render: () => {}, persistState: () => { speicher["badhub.tablet.state.101"] = JSON.stringify({ match: STATE.match, pendingResult: STATE.pendingResult }); },
@@ -175,7 +179,7 @@ function tablet(speicher = {}) {
       "let geparktMeldung = '', geparktMeldungTimer = null, geparktVerwerfenFrage = null, geparktKarenzTimer = null;\n" +
       FUNKTIONEN.map(funktion).join("\n") +
       "\nlet GEPARKT = geparktLesen();\n" +
-      "return { geparkt: () => GEPARKT, meldung: () => geparktMeldung, band: () => geparktMeldung || bandText(geparktSichtbar(GEPARKT, Date.now())),\n" +
+      "return { geparkt: () => GEPARKT, meldung: () => geparktMeldung, band: () => geparktMeldung || geparktBand(geparktSichtbar(GEPARKT, Date.now())),\n" +
       "  planeGeparktPruefung, pruefeGeparkte, geparktRueckkehr, geparktJetztSenden, geparktVerwerfen,\n" +
       "  beiMatchAssigned, loadMatch, clearMatch, submit, trySubmitPending };",
   )(...namen.map((n) => attrappen[n]));
