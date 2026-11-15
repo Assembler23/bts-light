@@ -52,7 +52,8 @@ und wie groß das Tablet war.
   kleinste Stufe nicht, **scrollt die Leiste**, statt sich über Kopfzeile oder
   Plus-Knöpfe zu legen (das tat die Eröffnungsansage in der Anordnung
   „übereinander" vorher).
-- **„Große Schrift: an"** im Zahnrad-Menü, Abschnitt „Schiedsrichter". Gilt
+- **„Große Schrift: an"** im Zahnrad-Menü, Abschnitt „Anzeige" (bis v0.9.422
+  „Schiedsrichter"). Gilt
   **je Gerät** (`localStorage`, Schlüssel `badhub.tablet.grosseSchrift`), nicht
   je Feld, und wirkt auch ohne Schiri-Modus. Setzt die Klasse `lesbar` am
   `<body>`: Ansage Schwarz auf Weiß mit kräftigem Rahmen, Marke und

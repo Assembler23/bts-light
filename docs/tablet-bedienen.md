@@ -107,13 +107,22 @@ Auf dem Schirm steht dabei:
 - auf Wunsch **Vereinsname und Wappen** unter den Spielernamen. Das schaltet
   die Turnierleitung turnierweit; das Tablet übernimmt es mit der nächsten
   Zuweisung, ohne Neuladen.
-- der Knopf **📈 Verlauf** mit dem Punktverlauf je Satz. Der wird lokal
-  mitgeschrieben und **funktioniert auch ohne Netz**.
+- der Knopf **📈 Verlauf** rechts neben dem Spielstand, mit dem Punktverlauf
+  je Satz. Der wird lokal mitgeschrieben und **funktioniert auch ohne Netz**.
+  Bis zum ersten Punkt bleibt sein Platz leer.
+- oben rechts ein **Punkt** für die Verbindung: grün = verbunden. Auf
+  kleineren Tablets steht bei bestehender Verbindung nur der Punkt; „verbinde…"
+  und „getrennt" stehen immer als Text daneben.
 
-Ein Fehltipp lässt sich zurücknehmen. Der Verlauf wird dabei mit korrigiert.
+Ein Fehltipp lässt sich zurücknehmen — mit dem großen orangen **↩** am Spielstand
+(links daneben bzw. darüber) oder mit **„Letzten Punkt zurück"** unten. Der Verlauf wird dabei
+mit korrigiert. (Bis v0.9.422 gab es einen dritten ↩-Knopf oben links in der
+Kopfzeile; er ist entfallen.)
 
 **Im Entscheidungssatz** weist das Tablet beim Erreichen der Pausen-Schwelle
-darauf hin, dass die **Seiten gewechselt** werden.
+darauf hin, dass die **Seiten gewechselt** werden: In der Pause steht unter der
+Überschrift ein oranges Band **„↔ Seitenwechsel"** — ebenso in jeder Satzpause.
+<!-- pruef: "↔ Seitenwechsel — Spieler tauschen die Hälften" in src-tauri/assets/tablet.html -->
 
 ## Seiten oder Mannschaften korrigieren
 
@@ -252,19 +261,27 @@ Hinter dem Zahnrad stecken die Dinge, die man selten braucht und deshalb nicht
 aus Versehen antippen soll. Es ist durch eine **PIN** geschützt (voreingestellt
 `0000`, die Turnierleitung kennt sie):
 
-- **Feld wechseln**, ohne einen QR-Code zu scannen,
+Das Menü ist in drei Abschnitte gegliedert (seit v0.9.423). Auf breiten
+Tablets stehen die Schalter zweispaltig; passt das Menü nicht auf den Schirm,
+lässt es sich verschieben. **Schließen** steht als Rahmen-Knopf ganz unten.
+
+**Feld wechseln** — ohne einen QR-Code zu scannen.
+
+**Anzeige:**
+
 - **Anzeige (nur Spielstand)** — macht das Gerät zur reinen Zähltafel,
 - **Ansicht: …** — Seiten und Anordnung in einem Zug (seit v0.9.292): der
   Zyklus läuft automatisch → links/rechts → rechts/links → oben/unten →
   unten/oben. In der Anzeige-Hülle genügt dafür ein **Tipp auf die
   Punktzahlen**, ohne PIN; ein kurzes Etikett nennt die neue Ansicht.
 <!-- pruef: "Ansicht:" in src-tauri/assets/tablet.html -->
-- **Schiri-Modus ein- und ausschalten**,
 - **Große Schrift: an/aus** (seit v0.9.414) — für alle, die schlecht sehen:
   größere Ansagetexte, Schwarz auf Weiß, kräftigere Spielernamen. Die
   Einstellung bleibt auf diesem Tablet gespeichert,
 <!-- pruef: "Große Schrift: " in src-tauri/assets/tablet.html -->
 - **Vollbild**.
+
+**Schiedsrichter:** **Schiri-Modus** ein- und ausschalten.
 
 > **Die PIN wird fünf Minuten gemerkt** (seit v0.9.284). Nach einer richtigen
 > Eingabe öffnet das Zahnrad fünf Minuten lang ohne erneute Eingabe — auch über
@@ -293,7 +310,10 @@ Details: [Schiri-Modus am Zähltablett](umpire-mode.md).
 
 ### Regulär
 
-Nach dem letzten Punkt zeigt das Tablet das Spielende.
+Nach dem letzten Punkt zeigt das Tablet das Spielende: den Sieger und darunter
+die Satzstände **aus Sicht des Siegers** („21:16 · 21:18"). Darunter steht groß
+**„Ergebnis übermitteln"**; „Korrektur — Match wieder öffnen" ist bewusst nur
+ein rot umrandeter Knopf, damit er nicht aus Versehen getroffen wird.
 
 > **Das Ergebnis geht nicht von allein weg.** Du musst
 > **„Ergebnis übermitteln"** tippen. Erst danach wandert es zur Turnierleitung

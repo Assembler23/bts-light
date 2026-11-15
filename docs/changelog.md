@@ -4,6 +4,29 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.423
+
+- **Zähl-Tablet aufgeräumt.** Alle Ansichten wurden im Zusammenhang
+  durchgesehen; vieles war nach und nach dazugekommen.
+  - **Kopfzeile:** Der dritte ↩-Knopf oben links ist weg (es bleiben der große
+    ↩ am Spielstand und „Letzten Punkt zurück" unten). Feld und Spiel stehen
+    je in einer Zeile; auf kleineren Tablets zeigt die Verbindung bei
+    bestehender Verbindung nur den grünen Punkt.
+  - **Spielstand größer (Querformat):** „📈 Verlauf" sitzt jetzt rechts neben
+    dem Stand.
+  - **Spielende:** Satzstände aus Sicht des Siegers („21:16 · 21:18" statt
+    „16:21 · 18:21"). „Ergebnis übermitteln" ist der große Knopf, „Match wieder
+    öffnen" nur noch rot umrandet statt ein riesiger roter Block.
+  - **Pausen:** Der Seitenwechsel steht als oranges Band in der Pause, statt
+    als Hinweis über Text und Knöpfen zu liegen.
+  - **Zahnrad-Menü:** passt wieder auf den Schirm (Titel und „Schließen" waren
+    abgeschnitten), zweispaltig, „Große Schrift" und „Vollbild" jetzt unter
+    „Anzeige".
+  - **Dialoge:** „Abbrechen" ist überall ein ruhiger Rahmen-Knopf und sieht
+    nicht mehr wie eine weitere Wahl aus.
+  - **Fehlerbehebung:** „Ergebnis eintragen" zeigte „Aktueller Satz (läuft)"
+    auch ohne Haken bei „Spiel läuft noch".
+
 ## v0.9.421
 
 - **Schiri-Modus: „Satzpunkt" wirklich nur einmal je Satz.** Rückmeldung der

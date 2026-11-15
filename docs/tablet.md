@@ -647,6 +647,46 @@ Erweiterung 06.09.2026):
   Ansage laufen ausschließlich auf den Ansage-Rechnern (Turnierleitung +
   ferne-Halle-Slave, `src/io/announcer.ts`), nie in `tablet.html`.
 
+## Aufgeräumte Bedienung (Usability-Durchgang, v0.9.423)
+
+Nach vielen einzelnen Erweiterungen wurden alle Ansichten im Demofeld bei
+1280×800, 962×601 (Fire HD 8) und 800×1280 (hochkant) durchgesehen. Geändert:
+
+- **Ein ↩ weniger.** Der Rückgängig-Knopf in der Kopfzeile (`#undo-btn-top`)
+  ist entfallen; es bleiben der große ↩ am Satzstand und „Letzten Punkt
+  zurück" in der Fußleiste. Die Kopfzeile hatte zuvor bis zu elf Elemente.
+- **Kopfzeile einzeilig.** Feldname und Spiel enden bei Platzmangel mit „…"
+  statt über drei Zeilen umzubrechen. Unter 1000 px Breite steht bei
+  bestehender Verbindung nur der grüne Punkt (`.conn:has(.dot.ok)`); andere
+  Zustände und der Übungshinweis bleiben Text. Ohne `:has` bleibt alles wie
+  vorher.
+- **Satzstand größer.** „📈 Verlauf" sitzt rechts neben dem Stand als
+  Gegenstück zum ↩ (gleich groß; ohne Verlauf unsichtbar, aber platzhaltend,
+  damit der Stand nicht springt). Die Tafel wird dadurch flacher, die Ziffern
+  wachsen im Querformat auf `clamp(1.9rem, 8.5vmin, 4.4rem)` (hochkant gilt
+  weiter die eigene Deckelung). In der Anordnung
+  „übereinander" bleibt der Knopf eine schmale Zeile ohne Platzhalter.
+- **Spielende.** Knöpfe als eine Spalte gleicher Breite (vorher wuchsen sie
+  über das allgemeine `button { flex: 1 }` zu hohen Blöcken). „Korrektur —
+  Match wieder öffnen" ist nur noch rot umrandet. Die Satzstände stehen aus
+  Sicht des Siegers (`satzZeile`/`siegerSeite`): Gespeichert sind sie nach
+  Seiten, und nach dem letzten Satzwechsel stand der Verlierer links — unter
+  dem Siegernamen las man „16:21 · 18:21".
+- **Pausen.** Der Seitenwechsel steht als Band `#break-wechsel` im Overlay (in
+  jeder Satzpause und bei der Punktepause im Entscheidungssatz); der Toast
+  `#switch-toast` erscheint nur noch ohne Pause — er lag vorher über
+  Hinweistext und Knöpfen. Hinweistexte gekürzt.
+- **Zahnrad-Menü.** Scrollt bei Überlauf (vorher lagen Titel und „Schließen"
+  bei 800 px Höhe außerhalb des Schirms). Abschnitte: Feld wechseln ·
+  Anzeige (Anzeige, Ansicht, Große Schrift, Vollbild) · Schiedsrichter;
+  ab 700 px zweispaltig.
+- **Dialoge.** „Abbrechen"/„Schließen"/„Zurück" (Klasse `.opt.abbrechen`)
+  sind ruhige Rahmen-Knöpfe auf eigener Zeile statt gleichwertiger weißer
+  Karten — in „Spiel beenden?" sah Abbrechen wie eine vierte Beendigungsart
+  aus. Haupthandlungen in Dialogen sind gefüllt (`.opt.primaer`).
+- **Fehler „Ergebnis eintragen".** „Aktueller Satz (läuft)" stand auch ohne
+  Haken da: Ein Inline-`style="display:flex"` schlug das `hidden`-Attribut.
+
 ## Akkustand am Tablet (seit v0.9.293)
 
 Im Kiosk fehlt die Android-Statusleiste — den Akkustand eines Tablets

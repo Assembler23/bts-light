@@ -62,18 +62,6 @@
       background: #fff; border-radius: .3rem; padding: .15rem;
     }
     @media (max-width: 640px) { .sponsor-bar { display: none; } }
-    .header-undo {
-      flex: 0 0 auto;
-      width: 2.8rem; height: 2.8rem;
-      padding: 0; min-height: 0;
-      display: inline-flex; align-items: center; justify-content: center;
-      font-size: 1.5rem; font-weight: 700; line-height: 1;
-      background: var(--surface-2); color: var(--text);
-      border: 1px solid var(--line); border-radius: .5rem; cursor: pointer;
-      touch-action: manipulation;
-    }
-    .header-undo:disabled { opacity: .35; cursor: not-allowed; }
-    .header-undo:active:not(:disabled) { background: var(--surface-3); }
     /* Verletzungs- und Megafon-Button rechts in der Kopfzeile. */
     .header-btn {
       flex: 0 0 auto;
@@ -150,7 +138,16 @@
       text-transform: uppercase; color: var(--text);
     }
     .event-label { color: var(--muted); font-size: 1rem; font-weight: 600; }
+    /* Feld und Spiel je EINE Zeile, zu Langes endet mit „…": Im Hochformat
+       brach „Übung · Damen-Einzel" sonst über drei Zeilen und machte die
+       Kopfzeile doppelt so hoch (Usability-Durchgang 15.11.2026). */
+    .court-label, .event-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .conn { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--muted); }
+    /* Unter 1000 px Breite steht bei bestehender Verbindung nur der grüne
+       Punkt — „verbunden" sagt nichts Neues und nahm den Knöpfen den Platz.
+       „verbinde…", „getrennt" und der Übungshinweis bleiben als Text.
+       Ohne `:has` (alte WebViews) steht der Text wie bisher. */
+    @media (max-width: 1000px) { .conn:has(.dot.ok) #conn-text { display: none; } }
     /* Akkustand in der Kopfzeile (Spec-Erweiterung 13.09.2026): schlicht,
        ohne Animation — die Anzeige darf selbst nicht am Akku zehren. Unter
        20 % orange, unter 10 % rot (Schwellen aus src/io/akku.mjs). */
@@ -244,7 +241,7 @@
     .center { display: flex; flex-direction: column; min-height: 0; min-width: 0; gap: .35rem; }
     .score-board {
       display: flex; align-items: center; justify-content: center;
-      background: var(--surface); padding: .4rem .6rem .4rem .4rem; gap: .6rem;
+      background: var(--surface); padding: .4rem; gap: .6rem;
       border-radius: .6rem; border: 1px solid var(--line); flex-shrink: 0;
       box-shadow: 0 1px 3px rgba(15,23,42,.08);
     }
@@ -276,9 +273,11 @@
        ohne Brille zu klein, Tilo 20.07.), aber bewusst gedeckelt: das
        Score-Board darf das Spielfeld darunter NICHT verdrängen (der Court
        mit dem Aufschläger-Punkt bleibt die zweite Hauptinformation).
-       vmin → wächst maßvoll mit dem Bildschirm. */
+       vmin → wächst maßvoll mit dem Bildschirm. Seit der Verlauf-Knopf
+       neben statt unter dem Stand sitzt (15.11.2026), ist die Tafel
+       flacher — der gewonnene Platz geht an größere Ziffern. */
     .current-score {
-      font-size: clamp(1.9rem, 7vmin, 3.6rem); font-weight: 800; line-height: 1;
+      font-size: clamp(1.9rem, 8.5vmin, 4.4rem); font-weight: 800; line-height: 1;
       font-variant-numeric: tabular-nums;
       display: flex; gap: .5rem; align-items: baseline;
     }
@@ -556,6 +555,54 @@
     /* Über den Lock-/Belegt-Overlays (z-index 25), damit das PIN-Menü auch
        dann oben liegt und bedienbar bleibt (Feldwechsel als Recovery). */
     #settings-modal { z-index: 28; }
+    /* Zahnrad- und Ereignis-Menü: Passt der Inhalt nicht, scrollt er. Vorher
+       lagen Titel und „Schließen" bei 800 px Höhe außerhalb des Schirms und
+       waren nicht erreichbar (Usability-Durchgang 15.11.2026). Zentriert
+       über automatische Ränder statt `safe center` — wie beim Pausen-Overlay
+       (ältere Fire-OS-WebViews). */
+    #settings-modal, #card-modal { overflow-y: auto; justify-content: flex-start; }
+    #settings-modal .settings-view, #card-modal .settings-view { margin: auto 0; flex: 0 0 auto; gap: .8rem; }
+    #settings-modal .opt.settings-wide { width: min(22rem, 100%); padding: .95rem 1rem; }
+    #settings-main-view .settings-section {
+      margin-top: .4rem; font-size: .85rem; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8;
+    }
+    #settings-main-view .options { max-width: 44rem; }
+    /* Im Querformat zwei Spalten: Abschnittstitel und Feldliste über die
+       ganze Breite, die Schalter paarweise nebeneinander. */
+    @media (min-width: 700px) {
+      #settings-main-view {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 21rem));
+        justify-content: center; gap: .7rem .8rem;
+      }
+      #settings-main-view[hidden] { display: none; }
+      #settings-main-view > .title, #settings-main-view > .subtitle,
+      #settings-main-view > .settings-section, #settings-main-view > .options,
+      #settings-main-view > .abbrechen { grid-column: 1 / -1; justify-self: center; }
+      #settings-main-view > .subtitle { margin-top: -.4rem; }
+      #settings-main-view .opt.settings-wide { width: 100%; min-width: 0; }
+      #settings-main-view > .opt.abbrechen { width: min(22rem, 100%); margin-top: .4rem; }
+    }
+    /* Abbrechen / Schließen / Zurück: ein ruhiger Rahmen-Knopf auf eigener
+       Zeile, nicht als gleichwertige weiße Karte neben den echten Wahlen
+       (sah im „Spiel beenden?"-Dialog wie eine vierte Beendigungsart aus). */
+    .modal .opt.abbrechen {
+      background: transparent; color: #e2e8f0; border: 2px solid #64748b;
+      padding: .8rem 1rem; font-size: 1.05rem; font-weight: 700;
+    }
+    .modal .opt.abbrechen:active { background: rgba(148, 163, 184, .2); }
+    .modal .options > .opt.abbrechen { flex: 0 0 100%; max-width: 100%; }
+    /* Abbrechen neben der Haupthandlung (Ergebnis eintragen): beide Knöpfe
+       gleich breit, Text einzeilig. */
+    .modal .options > .opt.abbrechen.nebeneinander { margin: 0; }
+    #enter-score-cancel, #enter-score-ok { flex: 1 1 0; min-width: 0; max-width: none; white-space: nowrap; }
+    /* Haupthandlung eines Dialogs: gefüllt statt nur farbig umrandet. */
+    .modal .opt.primaer { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .modal .opt.primaer:active { background: #166534; }
+    .modal .es-laufend { display: flex; flex-direction: column; gap: .4rem; align-items: center; }
+    .modal .es-laufend[hidden] { display: none; }
+    @media (min-width: 700px) {
+      .modal .options > .opt.abbrechen { flex-basis: 22rem; margin: 0 calc((100% - 22rem) / 2); }
+    }
 
     /* Schiri-Modus: Ansage-Leiste (immer sichtbar, zum Vorlesen). */
     .umpire-bar {
@@ -622,8 +669,26 @@
       z-index: 10;
     }
     .match-finished-overlay.visible { display: flex; }
+    /* Wie im Pausen-Overlay: EINE Spalte gleich breiter Knöpfe. Vorher griff
+       das allgemeine `button { flex: 1 }` — „Ergebnis übermitteln" und
+       „Match wieder öffnen" wuchsen zu hohen Blöcken, und der rote
+       Korrektur-Knopf war das Auffälligste auf dem Schirm
+       (Usability-Durchgang 15.11.2026). Bei Überlauf scrollt die Ansicht. */
+    .match-finished-overlay { overflow-y: auto; justify-content: flex-start; }
+    .match-finished-overlay > :first-child { margin-top: auto; }
+    .match-finished-overlay > :last-child { margin-bottom: auto; }
+    .match-finished-overlay > * { flex: 0 0 auto; }
+    #finished-overlay > button {
+      width: min(26rem, 100%); padding: .85rem 1rem; font-size: 1.05rem; font-weight: 700;
+    }
+    #finished-overlay > button.primary { padding: 1.3rem 1rem; font-size: 1.5rem; font-weight: 800; margin-bottom: .5rem; }
+    /* „Wieder öffnen" bleibt rot (gefährlich), aber als Rahmen — die
+       Haupthandlung ist das Übermitteln. */
+    #finished-overlay > #reopen-btn { background: transparent; color: #fca5a5; border: 2px solid #dc2626; }
+    #finished-overlay > #reopen-btn:active:not(:disabled) { background: rgba(220, 38, 38, .2); }
+    #finished-overlay > #reopen-btn:disabled { opacity: .4; background: transparent; color: #fca5a5; }
     .winner-banner { font-size: 2rem; font-weight: 800; color: #fbbf24; }
-    .set-summary { font-size: 1.3rem; font-variant-numeric: tabular-nums; color: #e2e8f0; }
+    .set-summary { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; color: #e2e8f0; }
     .submit-status { font-size: .95rem; color: #cbd5e1; min-height: 1.2em; }
 
     /* ─── Sieger-Wahl bei Aufgabe ────────────────────────────────────── */
@@ -687,6 +752,11 @@
        wird — unmissverständlich auch aus einigen Metern Entfernung. */
     .break-countdown.overrun { color: #f87171; }
     .break-richtzeit { font-size: 1.1rem; color: #cbd5e1; }
+    .break-wechsel {
+      background: #f59e0b; color: #1f2937; padding: .55rem 1.4rem; border-radius: 999px;
+      font-size: 1.25rem; font-weight: 800; margin-top: -.4rem;
+    }
+    .break-wechsel[hidden] { display: none; }
     .break-hint { font-size: 1rem; line-height: 1.4; color: #cbd5e1; width: min(26rem, 100%); }
     /* Schiri-Ansage in der Pausen-Überlagerung (Satzende/„Bitte spielen" …). */
     .break-umpire {
@@ -750,13 +820,25 @@
     /* ── Punktverlauf-Graph (Spec punktverlauf-graph) ──────────────────
        Kleiner Abruf-Knopf am Score-Board + Overlay mit je Satz einem
        SVG-Liniendiagramm aus den lokalen Verlaufsdaten. */
+    /* Gleich groß wie das ↩ links, damit der Satzstand genau mittig steht.
+       Ohne Verlauf bleibt der Platz frei (unsichtbar statt weg) — sonst
+       spränge der Stand beim ersten Punkt zur Seite. */
     .rally-btn {
-      margin-top: .3rem; padding: .25rem .7rem;
-      font-size: .8rem; font-weight: 600;
+      flex: 0 0 auto; width: 4.5rem; height: 4.5rem; min-height: 0; padding: .2rem;
+      display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem;
+      font-size: .78rem; font-weight: 700;
       background: var(--surface-2); color: var(--muted);
-      border: 1px solid var(--line); border-radius: .5rem;
+      border: 1px solid var(--line); border-radius: .75rem;
       cursor: pointer; touch-action: manipulation;
     }
+    .rally-btn .rally-ico { font-size: 1.5rem; line-height: 1; }
+    .rally-btn[hidden] { display: inline-flex; visibility: hidden; }
+    .rally-btn:active { background: var(--surface-3); }
+    /* Neben dem hochkanten Court steht die Tafel als Spalte: dort kein
+       Platzhalter, und der Knopf wird eine schmale Zeile. */
+    .play.uebereinander .rally-btn { width: auto; height: auto; flex-direction: row; padding: .3rem .7rem; }
+    .play.uebereinander .rally-btn .rally-ico { font-size: 1rem; }
+    .play.uebereinander .rally-btn[hidden] { display: none; }
     .rally-overlay {
       position: fixed; inset: 0; z-index: 60;
       display: flex; align-items: center; justify-content: center;
@@ -900,14 +982,9 @@
 <body>
 <div class="app">
   <header>
-    <button
-      type="button"
-      id="undo-btn-top"
-      class="header-undo"
-      disabled
-      aria-label="Letzten Punkt zurück"
-      title="Letzten Punkt zurück"
-    >↩</button>
+    <!-- Kein ↩ mehr in der Kopfzeile (Usability-Durchgang 15.11.2026): Der
+         große Knopf am Satzstand und der in der Fußleiste reichen; der
+         dritte verdrängte nur die Kopfzeilen-Knöpfe. -->
     <div class="header-info">
       <div class="court-label">__COURT_LABEL__</div>
       <div class="event-label" id="event-label">— kein Match —</div>
@@ -1016,12 +1093,14 @@
               <span id="score-right" class="right-score">0</span>
             </div>
             <div class="set-history" id="set-history"></div>
-            <!-- Punktverlauf-Graph: erscheint, sobald Ballwechsel
-                 aufgezeichnet sind — rein lokal, funktioniert offline. -->
-            <button type="button" id="rally-btn" class="rally-btn" hidden>
-              📈 Verlauf
-            </button>
           </div>
+          <!-- Punktverlauf-Graph: erscheint, sobald Ballwechsel
+               aufgezeichnet sind — rein lokal, funktioniert offline. Rechts
+               neben dem Satzstand als Gegenstück zum ↩ links: Der Stand
+               bleibt mittig, und die Tafel wird nicht höher. -->
+          <button type="button" id="rally-btn" class="rally-btn" hidden
+            aria-label="Punktverlauf anzeigen" title="Punktverlauf anzeigen"
+          ><span class="rally-ico" aria-hidden="true">📈</span><span class="rally-txt">Verlauf</span></button>
         </div>
 
         <!-- Schiri-Modus: immer sichtbare Ansage zum Vorlesen (hidden, bis aktiviert). -->
@@ -1133,14 +1212,16 @@
   <div class="options" id="enter-score-rows" style="flex-direction:column; max-width:26rem"></div>
   <button type="button" id="enter-score-add" class="setup-back">+ Satz · Add set</button>
   <!-- Laufender Satz (nur bei „Spiel läuft noch"). -->
-  <div id="enter-score-current-wrap" hidden style="display:flex;flex-direction:column;gap:.4rem;align-items:center">
+  <!-- Anordnung über die Klasse statt `style="display:flex"`: Der Inline-Stil
+       schlug `hidden`, und „Aktueller Satz (läuft)" stand auch ohne Haken da. -->
+  <div id="enter-score-current-wrap" class="es-laufend" hidden>
     <div style="color:#cbd5e1;font-size:.9rem">Aktueller Satz (läuft)</div>
     <div id="enter-score-current" style="display:flex;align-items:center;gap:.5rem"></div>
   </div>
   <div class="sk-hint" id="enter-score-error" hidden></div>
   <div class="options" style="max-width:26rem">
-    <button type="button" id="enter-score-cancel" class="opt" style="min-width:9rem">Abbrechen · Cancel</button>
-    <button type="button" id="enter-score-ok" class="opt team-a" style="min-width:9rem">Übernehmen · Apply</button>
+    <button type="button" id="enter-score-cancel" class="opt abbrechen nebeneinander">Abbrechen · Cancel</button>
+    <button type="button" id="enter-score-ok" class="opt primaer">Übernehmen · Apply</button>
   </div>
 </div>
 
@@ -1246,16 +1327,21 @@
   </div>
   <div class="submit-status" id="submit-status"></div>
   <button class="primary" id="submit-btn">Ergebnis übermitteln</button>
+  <!-- Demofeld: nach dem Abschluss gleich das nächste Übungsspiel. Steht
+       bewusst NICHT am Ende: Das letzte Kind trägt `margin-bottom: auto`
+       zum Zentrieren und muss immer sichtbar sein (`#reopen-btn`). -->
+  <button class="primary" id="demo-neu-fertig" hidden>Neues Übungsspiel</button>
   <!-- Die Ansicht verdeckt die Kopfzeile — deshalb hier ein eigener Knopf. -->
   <button id="finished-korrektur">⇄ Seiten / Mannschaften korrigieren</button>
   <button class="danger" id="reopen-btn">Korrektur — Match wieder öffnen</button>
-  <!-- Demofeld: nach dem Abschluss gleich das nächste Übungsspiel. -->
-  <button class="primary" id="demo-neu-fertig" hidden>Neues Übungsspiel</button>
 </div>
 
 <!-- Pausen-Overlay: offizielle BWF-Intervalle mit Countdown -->
 <div class="break-overlay" id="break-overlay">
   <div class="break-title" id="break-title"></div>
+  <!-- Seitenwechsel als Teil der Pause statt als Toast darüber: Der Toast
+       lag über Hinweistext und Knöpfen (Usability-Durchgang 15.11.2026). -->
+  <div class="break-wechsel" id="break-wechsel" hidden>↔ Seitenwechsel — Spieler tauschen die Hälften</div>
   <!-- Schiri-Modus: Ansage zum Vorlesen, auch während der Pause sichtbar. -->
   <div class="break-umpire" id="break-umpire" hidden></div>
   <div class="break-countdown" id="break-countdown">1:00</div>
@@ -1281,10 +1367,8 @@
     Spiel abbrechen · Aufgabe
   </button>
   <div class="break-hint" id="break-hint">
-    Tippe „Weiterspielen", wenn die Spieler:innen bereit sind — nach Ablauf
-    der Zeit zählt die Anzeige rot weiter, bis es weitergeht. „Korrektur"
-    bricht die Pause ab und nimmt den letzten Punkt zurück (z. B. Ball
-    wiederholen).
+    Nach Ablauf zählt die Uhr rot weiter — die Pause endet erst mit
+    „Weiterspielen".
   </div>
 </div>
 
@@ -1299,7 +1383,7 @@
     <div class="opt" id="finish-retire-injury"></div>
     <div class="opt" id="finish-walkover"></div>
     <div class="opt" id="finish-regular" hidden></div>
-    <div class="opt" id="finish-cancel">Abbrechen · Cancel</div>
+    <div class="opt abbrechen" id="finish-cancel">Abbrechen · Cancel</div>
   </div>
 </div>
 
@@ -1311,7 +1395,7 @@
   <div class="options" id="korrektur-wahl">
     <div class="opt" id="korrektur-seiten">Seiten tauschen<span class="erklaerung" id="korrektur-seiten-erkl"></span></div>
     <div class="opt" id="korrektur-ab">Mannschaften tauschen<span class="erklaerung" id="korrektur-ab-erkl"></span></div>
-    <div class="opt" id="korrektur-abbrechen">Abbrechen</div>
+    <div class="opt abbrechen" id="korrektur-abbrechen">Abbrechen</div>
   </div>
   <div class="korrektur-vorschau" id="korrektur-vorschau" hidden></div>
   <div class="options" id="korrektur-frage" hidden>
@@ -1327,7 +1411,7 @@
   <div class="megaphone-text" id="megaphone-text"></div>
   <div class="options">
     <div class="opt" id="megaphone-confirm"></div>
-    <div class="opt" id="megaphone-cancel">Abbrechen · Cancel</div>
+    <div class="opt abbrechen" id="megaphone-cancel">Abbrechen · Cancel</div>
   </div>
 </div>
 
@@ -1370,11 +1454,13 @@
     <!-- Anordnung der Zählansicht: nebeneinander (seitlich am Netz) oder
          übereinander (hinter dem Feld); automatisch = nach Ausrichtung. -->
     <div class="opt settings-wide" id="settings-anordnung">Anordnung: automatisch</div>
-    <div class="settings-section">Schiedsrichter</div>
-    <div class="opt settings-wide" id="settings-umpire">Schiri-Modus: aus</div>
+    <!-- Große Schrift und Vollbild stehen bei „Anzeige", nicht mehr unter
+         „Schiedsrichter": Beides gilt für jeden am Tablet. -->
     <div class="opt settings-wide" id="settings-lesbar">Große Schrift: aus</div>
     <div class="opt settings-wide" id="settings-fullscreen">Vollbild ein/aus</div>
-    <div class="opt settings-wide" id="settings-close">Schließen</div>
+    <div class="settings-section">Schiedsrichter</div>
+    <div class="opt settings-wide" id="settings-umpire">Schiri-Modus: aus</div>
+    <div class="opt settings-wide abbrechen" id="settings-close">Schließen</div>
   </div>
 </div>
 
@@ -1393,13 +1479,13 @@
       <div class="opt" data-kind="overrule">↩ Überstimmung</div>
       <div class="opt" data-kind="referee_call">📣 Oberschiedsrichter gerufen</div>
     </div>
-    <div class="opt settings-wide" id="card-kind-cancel">Abbrechen</div>
+    <div class="opt settings-wide abbrechen" id="card-kind-cancel">Abbrechen</div>
   </div>
   <div class="settings-view" id="card-player-view" hidden>
     <div class="title">Karte / Verwarnung</div>
     <div class="subtitle">Spieler wählen</div>
     <div class="options" id="card-player-list"></div>
-    <div class="opt settings-wide" id="card-cancel">Abbrechen</div>
+    <div class="opt settings-wide abbrechen" id="card-cancel">Abbrechen</div>
   </div>
   <div class="settings-view" id="card-color-view" hidden>
     <div class="title">Karte für <span id="card-player-name"></span></div>
@@ -1411,7 +1497,7 @@
     <div class="hinweis" id="card-red-hint" hidden>
       Rot ist gerade nicht möglich: Der Punkt ließe sich nicht buchen.
     </div>
-    <div class="opt settings-wide" id="card-back">Zurück</div>
+    <div class="opt settings-wide abbrechen" id="card-back">Zurück</div>
   </div>
 </div>
 
@@ -2052,7 +2138,6 @@ const els = {
   teamLabelRight: document.getElementById('team-label-right'),
   undoBtns: /** @type {HTMLButtonElement[]} */ ([
     document.getElementById('undo-btn-board'),
-    document.getElementById('undo-btn-top'),
     document.getElementById('undo-btn-bottom'),
   ].filter(Boolean)),
   undoBtnBottom: document.getElementById('undo-btn-bottom'),
@@ -2086,6 +2171,7 @@ const els = {
   reopenBtn: document.getElementById('reopen-btn'),
   breakOverlay: document.getElementById('break-overlay'),
   breakTitle: document.getElementById('break-title'),
+  breakWechsel: document.getElementById('break-wechsel'),
   breakUmpire: document.getElementById('break-umpire'),
   breakCountdown: document.getElementById('break-countdown'),
   breakSkip: document.getElementById('break-skip'),
@@ -3099,11 +3185,15 @@ function renderBreak() {
     return;
   }
   els.breakRichtzeit.hidden = true;
+  // Seitenwechsel: in jeder Satzpause und bei der Punktepause im
+  // Entscheidungssatz (dort tauscht `scorePoint` die Seiten).
+  els.breakWechsel.hidden = !(STATE.pause.kind === 'game'
+    || (STATE.pause.kind === 'eleven' && STATE.midGameSwitchDone));
   // Der Hinweis spricht von Korrektur und Pausenzeit — beides gibt es in der
   // Behandlung nicht; dort ein eigener Text.
   if (!els.breakHint.dataset.bwf) els.breakHint.dataset.bwf = els.breakHint.textContent.trim();
   els.breakHint.textContent = STATE.pause.kind === 'injury'
-    ? 'Tippe „Weiterspielen", wenn die Behandlung beendet ist. Die Uhr wird nach der Richtzeit rot und zählt weiter — die Pause endet nur hier.'
+    ? 'Nach der Richtzeit wird die Uhr rot und zählt weiter — die Pause endet erst mit „Weiterspielen".'
     : els.breakHint.dataset.bwf;
   if (STATE.pause.kind === 'injury') {
     // Hochzählende Uhr ab ✚ (Spec verletzungsunterbrechung); ein alter Stand
@@ -4658,7 +4748,9 @@ function addPointOnSide(side) {
 
   // Für die Schiri-Ansage: war das ein Aufschlagwechsel?
   STATE.lastEvent = { type: 'point', serveChanged: side !== prevServing };
-  if (triggeredMidGameSwitch) showSwitchToast();
+  // Mit Pause steht der Seitenwechsel im Pausen-Overlay; der Toast nur,
+  // wenn keine Pause kommt.
+  if (triggeredMidGameSwitch && !triggeredBreak) showSwitchToast();
   // skipCommit=true: commitScoreView() unten übernimmt render+persist einmalig
   // (die Pause ist im STATE gesetzt, wird also mit persistiert).
   if (triggeredBreak) startBreak(triggeredBreak, true);
@@ -6555,7 +6647,7 @@ function render() {
       els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Match beendet';
       els.retirePick.style.display = 'none';
     }
-    els.setSummary.textContent = STATE.setsCompleted.map(s => `${s.left}:${s.right}`).join(' · ');
+    els.setSummary.textContent = satzZeile(STATE.setsCompleted, siegerSeite());
     // Schiri-Modus: Spielende-Ansage auch auf der beendet-Überlagerung zeigen
     // (sonst verdeckt sie die Ansage-Leiste darunter).
     if (STATE.umpireMode) {
@@ -6592,6 +6684,27 @@ function render() {
     els.finishedOverlay.classList.remove('visible');
     els.retirePick.style.display = 'none';
   }
+}
+
+/** Seite des Siegers ('left'/'right') oder null. Bei Aufgabe/Kampflos die
+ *  Seite des gewählten Siegerteams. */
+function siegerSeite() {
+  if (STATE.retired || STATE.walkover) {
+    return STATE.retiredWinner && STATE.teamOnSide
+      ? STATE.teamOnSide[STATE.retiredWinner] || null
+      : null;
+  }
+  return matchWinnerSide();
+}
+
+/** Satzstände am Spielende aus Sicht des Siegers („21:16 · 21:18").
+ *  Gespeichert sind sie nach Seiten, und nach dem letzten Satzwechsel stand
+ *  dort der Verlierer links — unter dem Siegernamen las man „16:21 · 18:21"
+ *  (Usability-Durchgang 15.11.2026). Ohne Sieger bleibt links:rechts. */
+function satzZeile(saetze, seite) {
+  return saetze
+    .map((s) => (seite === 'right' ? `${s.right}:${s.left}` : `${s.left}:${s.right}`))
+    .join(' · ');
 }
 
 // ─────────────────────────────── Wiring ───────────────────────────────
