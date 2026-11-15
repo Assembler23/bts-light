@@ -478,6 +478,31 @@ export function SetupWizard({
    *  wie beim Start. */
   const tpStand = useRef({ eingetragen: tpGuidJetzt, feldLeer: tpFeldLeer });
   tpStand.current = { eingetragen: tpGuidJetzt, feldLeer: tpFeldLeer };
+  // Die Automatik hat außerhalb des Setups geschrieben (Schreibzähler
+  // gestiegen, ADR 0098): die TP-Felder und die Kennung dieses offenen
+  // Formulars nachziehen — sonst zeigte es den alten Stand, und der Kern
+  // verwürfe dessen TP-Teil beim Speichern.
+  const tpStandGesehen = useRef(initialConfig.tp_upload.stand ?? 0);
+  useEffect(() => {
+    const stand = initialConfig.tp_upload.stand ?? 0;
+    if (stand === tpStandGesehen.current) return;
+    tpStandGesehen.current = stand;
+    tpLauf.current++;
+    setTpPath(initialConfig.tp_upload.path);
+    setTpGuid(initialConfig.tp_upload.tournament_uuid);
+    setTpFinden(initialConfig.tp_upload.finden_automatisch ?? true);
+    setTournamentGuid(initialConfig.tournament_uuid);
+    setTpFrage(null);
+    setTpError("");
+    setTpHinweis("");
+    setTpSuchInfo("");
+    setTpInfo(null);
+    if (initialConfig.tp_upload.path) {
+      tpFileCheck(initialConfig.tp_upload.path).then(setTpInfo).catch(() => {});
+    }
+    // Nur der Zähler löst aus; die übrigen Werte gehören zu genau diesem Stand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialConfig.tp_upload.stand]);
   /** Zähler der Wahl-/Suchläufe: Ein später Fund darf eine inzwischen
    *  getroffene Handwahl oder eine neuere Suche nicht überschreiben. */
   const tpLauf = useRef(0);
@@ -912,6 +937,9 @@ export function SetupWizard({
         // 1–1440: Rust klemmt unter 5; oberhalb von u16 schlüge sonst das ganze Speichern fehl.
         auto_minutes: Math.min(1440, Math.max(1, Math.round(Number(tpMinutes) || 15))),
         finden_automatisch: tpFinden,
+        // Schreibzähler unverändert zurück: Hat die Automatik inzwischen
+        // geschrieben, erkennt der Kern das Formular daran als veraltet.
+        stand: initialConfig.tp_upload.stand ?? 0,
         ereignis_enabled: tpEreignis,
         ereignis_minuten: Math.min(
           1440,

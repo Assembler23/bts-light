@@ -105,7 +105,7 @@ die Turnierdatei ein, und bts-light liest sie beim Wählen und beim Finden mit:
   Kennung oben durch die aus der Datei und speichert die Datei; **Abbrechen**
   speichert nichts. Vor dem Klick kurz prüfen: Ist das die richtige Datei —
   oder die vom Vorjahr? Die Kennung steuert auch Liveticker, Check-In und
-  Aushang; deshalb übernimmt bts-light sie nie still, sondern nur nach
+  Aushang; deshalb ersetzt bts-light eine eingetragene Kennung nie still, sondern nur nach
   deiner Bestätigung. Dieselbe Rückfrage kommt, wenn oben etwas steht, das
   keine Kennung ist (etwa eine halbe Adresse).
   <!-- pruef: "gehört zu Turnier" in src/pages/SetupWizard.tsx -->
@@ -130,6 +130,44 @@ gerade geschriebene Datei nicht immer vollständig.
 
 Im **Ansage-Slave-Modus** gibt es den Abschnitt nicht: Nur der Master lädt
 hoch ([Master und Slave](master-slave.md)).
+
+### Die Suche läuft mit
+
+Solange **TP-Datei automatisch finden** an ist, sieht bts-light von selbst
+nach, welche Datei in BTP geöffnet ist: beim Programmstart, beim Start der
+Übertragung und danach **jede Minute**, solange die Übertragung läuft.
+<!-- pruef: /TP_FINDEN_TAKT: Duration = Duration::from_secs\(60\)/ in src-tauri/src/commands.rs -->
+
+- **Dieselbe Turnier-Kennung, anderer Ort** (Datei verschoben oder in BTP
+  unter neuem Namen gespeichert): bts-light übernimmt den neuen Pfad ohne
+  Zutun. Die Übertragung läuft weiter; ein angehaltener automatischer Upload
+  startet wieder. Oben im Fenster steht dann ein blauer Hinweis **„TP-Datei
+  gewechselt: In BTP ist jetzt … geöffnet"**, bis du ihn wegklickst. Stimmt
+  die Datei nicht — etwa weil du versehentlich eine Sicherungskopie geöffnet
+  hast —, öffne in BTP wieder die richtige.
+  <!-- pruef: "TP-Datei gewechselt: In BTP ist jetzt" in src/components/TpFundBanner.tsx -->
+- **Ein anderes Turnier ist in BTP geöffnet** (oder die Datei nennt keine
+  Kennung): Nichts ändert sich von allein. Oben im Fenster erscheint auf jeder
+  Seite ein orangefarbener Balken „In BTP ist … geöffnet. Die Datei gehört zu
+  Turnier …, eingetragen ist …. Datei und Kennung übernehmen?"
+  <!-- pruef: "Datei und Kennung übernehmen?" in src/io/tpWahl.mjs -->
+  - **Ja, übernehmen** ersetzt Datei und Turnier-Kennung. Läuft die
+    Übertragung, startet bts-light sie dabei kurz neu — der Balken sagt das
+    vorher an. Danach zeigen Liveticker, Check-In und Aushang auf das neue
+    Turnier.
+    <!-- pruef: "Ja, übernehmen" in src/components/TpFundBanner.tsx -->
+    <!-- pruef: "Die Übertragung startet dabei kurz neu." in src/io/tpWahl.mjs -->
+  - **Nein** lässt alles, wie es ist, und schaltet die Suche aus. Der
+    automatische Upload sendet die fremde Datei ohnehin nie.
+  - Schließt du die fremde Datei in BTP wieder und öffnest dein Turnier,
+    verschwindet der Balken von selbst.
+- **Noch keine Turnier-Kennung eingetragen:** Außerhalb der Einstellungen
+  trägt bts-light nichts ein. Öffne die Einstellungen — dort übernimmt es
+  Datei und Kennung sichtbar, und du speicherst.
+
+Kurz in eine andere Datei schauen (etwa die vom Vorjahr) ist damit
+ungefährlich: Solange du die Frage nicht mit Ja beantwortest, bleibt dein
+Turnier eingetragen.
 
 ## Senden: der Knopf im Status-Fenster
 

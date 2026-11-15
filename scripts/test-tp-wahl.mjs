@@ -3,7 +3,7 @@
  * Datei (Spec tp-datei-finden, AK1–AK5; ADR 0097) — Modul `src/io/tpWahl.mjs`.
  */
 import assert from "node:assert/strict";
-import { tpInfoText, tpSucheText, tpWahl } from "../src/io/tpWahl.mjs";
+import { tpFrageText, tpInfoText, tpSucheText, tpWahl } from "../src/io/tpWahl.mjs";
 
 const A = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
 const B = "9AA7FE89-0000-4000-8000-000000000001";
@@ -91,5 +91,16 @@ assert.equal(
 for (const art of ["gefunden", "laeuft_schon", "nicht_verfuegbar"]) {
   assert.equal(tpSucheText({ art }), null, art);
 }
+
+// Banner außerhalb des Setups (PR 2): Der Neustart wird nur angekündigt,
+// wenn die Übertragung läuft UND die Kennung wechselt.
+const kurz = (g) => g.slice(0, 8);
+const fremd = { name: "b.TP", datei_guid: B, eingetragen: A, laeuft: true };
+assert.match(tpFrageText(fremd, kurz), /gehört zu Turnier 9AA7FE89, eingetragen ist 0EA5FD86/);
+assert.match(tpFrageText(fremd, kurz), /startet dabei kurz neu/);
+assert.doesNotMatch(tpFrageText({ ...fremd, laeuft: false }, kurz), /startet dabei/);
+const ohneKennung = { name: "o.TP", datei_guid: null, eingetragen: A, laeuft: true };
+assert.match(tpFrageText(ohneKennung, kurz), /nennt keine Turnier-Kennung/);
+assert.doesNotMatch(tpFrageText(ohneKennung, kurz), /startet dabei/);
 
 console.log("test-tp-wahl: OK");

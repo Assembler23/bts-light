@@ -197,6 +197,33 @@ export interface TpUploadConfig {
   /** Die in BTP geöffnete Datei selbst finden (Spec tp-datei-finden). Standard an;
    *  Handwahl oder ein Nein auf die Rückfrage schaltet es aus. */
   finden_automatisch: boolean;
+  /** Schreibzähler der Automatik außerhalb des Setups (ADR 0098). Das Setup
+   *  schickt ihn unverändert zurück; weicht er ab, gilt das Formular als veraltet. */
+  stand: number;
+}
+
+/** Offene Rückfrage der TP-Datei-Automatik (Rust: `commands::TpFrageSicht`). */
+export interface TpFrageSicht {
+  name: string;
+  /** Kennung aus der Datei; null = die Datei nennt keine. */
+  datei_guid: string | null;
+  eingetragen: string;
+  /** Läuft die Übertragung? Dann startet ein Ja sie neu. */
+  laeuft: boolean;
+}
+
+/** Stand der TP-Datei-Automatik (Rust: `commands::TpFindenStatus`). */
+export interface TpFindenStatus {
+  frage: TpFrageSicht | null;
+  /** Dateiname einer still übernommenen Datei, bis der Hinweis weggeklickt ist. */
+  gewechselt: string | null;
+  stand: number;
+}
+
+/** Ergebnis einer beantworteten Rückfrage (Rust: `commands::TpFindenAntwort`). */
+export interface TpFindenAntwort {
+  config: AppConfig;
+  neustart: boolean;
 }
 
 /** Ergebnis der Suche nach der in BTP geöffneten Datei (Rust: `tp_finden::TpSuche`). */

@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.424
+
+- **TP-Datei: die Suche läuft jetzt von selbst mit.** bts-light sieht beim
+  Programmstart, beim Start der Übertragung und danach **jede Minute** nach,
+  welche Datei in BTP geöffnet ist. Liegt die Datei deines Turniers
+  inzwischen woanders (verschoben, „Speichern unter"), wird der neue Pfad
+  ohne Zutun übernommen — ein angehaltener automatischer Upload läuft
+  wieder an. Ist in BTP ein **anderes Turnier** geöffnet, ändert sich
+  nichts von allein: Oben im Fenster erscheint ein orangefarbener Balken
+  mit der Frage, ob Datei und Turnier-Kennung übernommen werden sollen.
+  **Ja** übernimmt beides und startet eine laufende Übertragung kurz neu;
+  **Nein** lässt alles, wie es ist, und schaltet die Suche aus. Der Pfad
+  der TP-Datei reist nicht mehr im Identitäts-Bündel mit — er gilt je PC.
+
 ## v0.9.423
 
 - **TP-Datei: bts-light findet sie selbst.** Im Setup-Abschnitt „TP-Datei

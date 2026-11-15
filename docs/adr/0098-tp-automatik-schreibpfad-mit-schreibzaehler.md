@@ -1,6 +1,6 @@
 # 0098 — TP-Automatik schreibt die Config außerhalb des Setups, geschützt durch einen Schreibzähler
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-11-15
 
 ## Kontext
