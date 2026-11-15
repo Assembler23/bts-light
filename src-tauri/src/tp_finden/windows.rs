@@ -7,8 +7,9 @@
 //! eine Datei auf einem Datenträger, nennt `GetFinalPathNameByHandleW` den
 //! Pfad. Nur dokumentierte Aufrufe.
 //!
-//! **Read-only gegenüber BTP:** nie `DUPLICATE_CLOSE_SOURCE`; geschlossen
-//! werden nur das eigene Prozess-Handle und die eigenen Kopien.
+//! **Read-only gegenüber BTP:** Die Kopien tragen keinerlei Zugriffsrecht
+//! (Zugriff 0), nie `DUPLICATE_CLOSE_SOURCE`; geschlossen werden nur das
+//! eigene Prozess-Handle und die eigenen Kopien.
 //!
 //! **Frist:** `GetFileType` kann an einem Pipe-Handle blockieren. Die
 //! Abfrage läuft deshalb in einem Arbeiter-Thread; meldet er sich
@@ -21,7 +22,7 @@ use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use windows::Win32::Foundation::{
-    CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, ERROR_ACCESS_DENIED, HANDLE,
+    CloseHandle, DuplicateHandle, DUPLICATE_HANDLE_OPTIONS, ERROR_ACCESS_DENIED, HANDLE,
 };
 use windows::Win32::Storage::FileSystem::{
     GetFileType, GetFinalPathNameByHandleW, FILE_TYPE_DISK, GETFINALPATHNAMEBYHANDLE_FLAGS,
@@ -123,8 +124,11 @@ fn arbeiter(
                 break;
             }
             let mut kopie = HANDLE::default();
-            // Bewusst nur DUPLICATE_SAME_ACCESS — nie DUPLICATE_CLOSE_SOURCE,
-            // das nähme BTP das Handle weg.
+            // Kopie **ohne Rechte** (Zugriff 0, keine Optionen): Für Typ und
+            // Pfad genügt das (gemessen 15.11.2026, gleiche 19 Dateien wie
+            // mit BTPs Rechten). So hält bts-light nie BTPs Schreibrecht auf
+            // die Datenbank, auch nicht kurz. Und nie DUPLICATE_CLOSE_SOURCE
+            // — das nähme BTP das Handle weg.
             let geholt = DuplicateHandle(
                 prozess,
                 HANDLE(h as *mut core::ffi::c_void),
@@ -132,7 +136,7 @@ fn arbeiter(
                 &mut kopie,
                 0,
                 false,
-                DUPLICATE_SAME_ACCESS,
+                DUPLICATE_HANDLE_OPTIONS(0),
             );
             if geholt.is_ok() {
                 melde(Meldung::Geoeffnet(h));

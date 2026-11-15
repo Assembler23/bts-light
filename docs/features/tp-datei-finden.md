@@ -271,9 +271,9 @@ Liveticker-Testturnier.
   noch einmal gegen diesen Review prüfen.
 - **Annahme:** Eine LAN-IP oder der Rechnername des eigenen PCs als
   BTP-Adresse gilt als „nicht lokal" (nur Loopback zählt).
-- **In PR 1 nachzumessen:** ob für `GetFileType` und
-  `GetFinalPathNameByHandleW` eine Handle-Kopie mit minimalem Zugriff genügt
-  statt `DUPLICATE_SAME_ACCESS` (das kopiert kurzzeitig BTPs Schreibrecht).
+- **Gemessen 15.11.2026:** Eine Handle-Kopie ohne jedes Zugriffsrecht genügt
+  für `GetFileType` und `GetFinalPathNameByHandleW`. Die Suche kopiert
+  deshalb mit Zugriff 0 und hält nie BTPs Schreibrecht auf die Datenbank.
 - **In PR 1 zu bestätigen:** ob die drei `windows`-Features ohne
   `Win32_Security` reichen (zeigt der Windows-CI-Build).
 - **Gesetzt, vom Nutzer nicht ausdrücklich bestätigt:** Takt 60 s; Handwahl

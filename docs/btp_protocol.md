@@ -1242,10 +1242,14 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
     Windows-Sitzung gibt es also höchstens ein `btp.exe` und damit höchstens
     eine offene `.tp` — eine Auswahl zwischen mehreren Treffern braucht die
     Automatik nicht. (Ungeprüft: zwei Windows-Benutzer am selben PC.)
-  - Offen: Netzlaufwerk, Virenscanner — und ob eine Handle-Kopie mit
-    weniger Rechten genügt (Zeilen `MINIMAL …` der Sonde). Bis dahin kopiert
-    die Suche mit `DUPLICATE_SAME_ACCESS`, also für Mikrosekunden samt BTPs
-    Schreibrecht.
+  - **Handle-Kopie ohne Rechte genügt (gemessen 15.11.2026):** Mit Zugriff 0
+    (kein `DUPLICATE_SAME_ACCESS`) liefern `GetFileType` und
+    `GetFinalPathNameByHandleW` dieselben 19 Dateien samt der `.tp` wie mit
+    BTPs Rechten. Mit „nur Attribute lesen" (0x80) kamen nur 7 Dateien — die
+    `.tp` war dabei, aber die Variante ist die schlechtere. Die Suche
+    kopiert deshalb ohne Rechte und hält nie BTPs Schreibrecht.
+  - Offen: USB-Stick, Virenscanner. Dateien im Netz öffnet die Suche bewusst
+    nicht (nur lokale Laufwerke).
   Aufruf am Windows-PC mit laufendem BTP:
   `cargo test -p bts-light --test btp_tp_pfad_probe -- --ignored --nocapture`.
 - `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst

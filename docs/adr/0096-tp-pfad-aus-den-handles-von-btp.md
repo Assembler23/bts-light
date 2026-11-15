@@ -20,8 +20,10 @@ bts-light liest den Pfad aus den Handles von `btp.exe`: jeden Handle-Wert
 `GetFileType` auf Datenträger-Dateien filtern, mit
 `GetFinalPathNameByHandleW` den Pfad fragen. Dabei gilt:
 
-- **Read-only:** nie `DUPLICATE_CLOSE_SOURCE`; geschlossen werden nur eigene
-  Kopien.
+- **Read-only:** Die Kopien tragen kein Zugriffsrecht (Zugriff 0 — gemessen:
+  für Typ und Pfad genügt das); nie `DUPLICATE_CLOSE_SOURCE`; geschlossen
+  werden nur eigene Kopien.
+- **Nur lokale Laufwerke:** Eine Datei im Netz öffnet die Suche nicht.
 - **Frist und Deckel:** Die Abfrage läuft in einem Arbeiter-Thread mit 3 s
   Frist je Handle; höchstens zwei Überspringer je Suche, ab drei noch
   blockierten Threads startet keine Suche mehr.
