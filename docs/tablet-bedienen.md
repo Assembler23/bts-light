@@ -46,11 +46,15 @@ geht **mitten im laufenden Turnier**, an jedem Turnier-Tablet:
 <!-- pruef: "Demofeld · Übungsspiel" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Ausprobieren — antippen" in src-tauri/assets/lobby.html -->
 
-Dann wählst du ein **Übungsspiel**: Einzel, Doppel oder Mixed ab 0:0, oder
-einen Zwischenstand zum gezielten Üben — Entscheidungssatz (Seitenwechsel
-bei 11), Verlängerung ab 19:19 oder ein Spielpunkt bei 20:18 bis zum
-Übermitteln des Ergebnisses. Alles läuft wie im echten Spiel: Seitenwahl,
-Aufschlag, Pausen, Karten, Korrektur, Schiri-Modus.
+Zuerst die **Zählweise**: **Sätze bis 21** oder **Sätze bis 15** (seit
+v0.9.422). Dann wählst du ein **Übungsspiel**: Einzel, Doppel oder Mixed ab
+0:0, oder einen Zwischenstand zum gezielten Üben — Entscheidungssatz
+(Seitenwechsel bei 11 bzw. 8), Verlängerung ab 19:19 bzw. 13:13 oder ein
+Spielpunkt bei 20:18 bzw. 14:12 bis zum Übermitteln des Ergebnisses. Alles
+läuft wie im echten Spiel: Seitenwahl, Aufschlag, Pausen, Karten, Korrektur,
+Schiri-Modus. Der **Ballzähler** ist auf dem Demofeld immer an.
+<!-- pruef: "'Sätze ' + z.name" in src-tauri/assets/tablet.html -->
+<!-- pruef: "name: 'bis 15', ziel: 15, cap: 21, pause: 8" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Übungsspiel wählen" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Doppel · Verlängerung" in src-tauri/assets/tablet.html -->
 

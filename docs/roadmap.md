@@ -299,7 +299,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 - **Demofeld: weitere Übungsszenarien** (Spec `tablet-demofeld`, v0.9.416).
   Szenarien sind ein Eintrag in `DEMO_SZENARIEN` (`tablet.html`). Denkbar
-  sind ein Satz bis 15 bzw. 11, eine Aufgabe in der Behandlungspause, ein
+  sind ein Satz bis 11 (bis 15 gibt es seit v0.9.422), eine Aufgabe in der Behandlungspause, ein
   Fehlaufschlag mit Karte oder ein Seitenfehler zum Korrigieren.
 
 - **Ergebnis-Write ohne CourtID löscht den Spielort.** Messung 09.11.2026

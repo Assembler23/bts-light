@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.422
+
+- **Demofeld: Zählweise wählbar, Ballzähler an.** Über den Übungsspielen
+  steht jetzt die Wahl **Sätze bis 21** oder **Sätze bis 15** (Obergrenze
+  21, Pause bei 8). Die Zwischenstände passen sich an — Verlängerung ab
+  13:13, Spielpunkt bei 14:12. Der Ballzähler ist auf dem Demofeld immer
+  eingeschaltet, damit er sich mitüben lässt; wie alles dort bleibt die
+  Zahl auf dem Tablet.
+
 ## v0.9.421
 
 - **Schiri-Modus: „Satzpunkt" wirklich nur einmal je Satz.** Rückmeldung der
