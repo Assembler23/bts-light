@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.420
+
+- **Zähl-Tablet: Uhr für die Behandlungspause.** Nach ✚ zählt eine große Uhr
+  die Behandlung hoch, darunter steht die Richtzeit des Turniers. Ist sie
+  erreicht, wird die Uhr rot („Behandlungspause — Richtzeit überschritten") und
+  zählt weiter; die Pause endet nur mit „Weiterspielen".
+  - **✚ auch in der Pause:** In der Pause bei 11 und in der Satzpause gibt es
+    den Knopf „✚ Verletzung · Behandlung" — die Pause wird zur
+    Behandlungspause. Nach Spielende ist ✚ gesperrt.
+  - **Automatisch auf dem Zettel:** Beginn, Ende und Dauer der Behandlung
+    sowie eine „Aufgabe" stehen ohne weiteren Tipp auf dem
+    Schiedsrichterzettel — in jedem Modus, ohne Spielername. Die Einträge
+    „Behandlung beginnt/endet" im Schiri-Menü entfallen dafür. Hinter einem
+    Turnier-PC vor v0.9.418 läuft nur die Uhr.
+  - **Behoben:** Nach „Spiel abbrechen" nahm „Wieder öffnen" auch den letzten
+    Punkt zurück. Jetzt nimmt es nur den Abbruch zurück.
+
 ## v0.9.419
 
 - **Schiedsrichterzettel: Korrektur löscht keine Behandlung mehr.** Wird nach
