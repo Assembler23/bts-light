@@ -1213,6 +1213,21 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
   der `.TP` folgt. Die zu messenden Fälle (Doppelklick-Start, „Datei →
   Öffnen", BTP als Administrator, Netzlaufwerk, zwei BTP-Fenster,
   Virenscanner) stehen im Kopf der Sonde; **Ergebnisse hier nachtragen.**
+  - **Fall „Doppelklick-Start" (gemessen 15.11.2026):** Die Kommandozeile
+    trägt den vollen Pfad als zweites, in Anführungszeichen gesetztes
+    Argument. Die Handles liefern **genau eine** `.tp` — denselben Pfad,
+    lesbar, mit Jet-Kopf; die Datei lag in einem OneDrive-Ordner mit
+    Leerzeichen im Pfad. Durchgang 62 ms, kein Hänger (253 Handles
+    dupliziert, davon 19 Dateien, 2 Pipes; Windows zählt 409).
+  - **Der Fenstertitel nennt den Turniernamen, nicht den Dateinamen**
+    (`Liveticker Test Turnier` bei Datei `LivetickerTestTurnier.TP`) — die
+    Angabe oben stimmte nur zufällig. Als Gegenprobe taugt er nicht; die
+    Zuordnung muss über die Turnier-GUID aus der Datei laufen.
+  - BTP hält daneben eine zweite Sperrdatei `tp.ldb` unter
+    `C:\ProgramData\Visual Reality\Badminton Turnier Planer\` (eigene
+    Programmdatenbank). Sie endet nicht auf `.tp` und stört die Suche nicht.
+  - Offen: „Datei → Öffnen", BTP als Administrator, Netzlaufwerk, zwei
+    BTP-Fenster, Virenscanner.
   Aufruf am Windows-PC mit laufendem BTP:
   `cargo test -p bts-light --test btp_tp_pfad_probe -- --ignored --nocapture`.
 - `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst
