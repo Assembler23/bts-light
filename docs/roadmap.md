@@ -297,6 +297,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Als Nächstes
 
+- **Demofeld: weitere Übungsszenarien** (Spec `tablet-demofeld`, v0.9.416).
+  Szenarien sind ein Eintrag in `DEMO_SZENARIEN` (`tablet.html`). Denkbar
+  sind ein Satz bis 15 bzw. 11, eine Aufgabe in der Behandlungspause, ein
+  Fehlaufschlag mit Karte oder ein Seitenfehler zum Korrigieren.
+
 - **Ergebnis-Write ohne CourtID löscht den Spielort.** Messung 09.11.2026
   (`docs/btp_protocol.md`): BTP übernimmt die CourtID aus jedem Write mit
   `Official*`. `update_request` mit `free_court_id: None` (kampflos aus
@@ -615,6 +620,13 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Verletzungsunterbrechung: Uhr am Tablet + Eintrag im Spielbericht** — Spec:
+  [features/verletzungsunterbrechung.md](features/verletzungsunterbrechung.md)
+  (freigegeben 14.11.2026, ADR 0095). ✚ startet eine hochzählende Uhr (rot ab turnierweiter
+  Richtzeit, Standard 5 min, auch im TL-Web), ✚ geht auch aus der 11er-/Satzpause, und der
+  Schiedsrichterzettel bekommt Beginn, Ende und Dauer automatisch in jedem Modus — ohne Person,
+  mit Marke „B" im Raster. Vier PRs (Zettel-Renderer zuerst im Release), Relay-Deploy über die
+  Seiten.
 - **Stream-Werbung (zweite OBS-Ebene)** — Spec:
   [features/stream-werbung.md](features/stream-werbung.md)
   (freigegeben 12.11.2026, ADR 0092). Transparente Sponsoren-Ebene für OBS unter
@@ -1631,6 +1643,10 @@ verliehen):
   (`…/display?courts=3,4`).
 
 ## Bekannte Einschränkungen / technische Schuld
+
+- **Zettel-Anhang schneidet nach ~32 Zeilen ab** (Befund 14.11.2026, `blatt.rs` Anhang mit
+  `break`): weitere Protokollzeilen fehlen still. Abhilfe offen („… n weitere" oder zweite
+  Anhangseite); durch die Verletzungsunterbrechung wahrscheinlicher.
 
 - **Azure-Schlüssel offen am Relay** (Befund 29.10.2026, Grill zur
   Ansage-Seite): `/{ns}/info/announce/state` liefert die geerbte

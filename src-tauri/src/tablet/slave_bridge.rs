@@ -127,6 +127,8 @@ fn felder_page_html(master_ns: &str, courts: &[CourtBrief], hall: &str, lokal: b
             "<p class=\"hint\">Noch keine Felder – warte auf den Master (Cloud aktiv?).</p>",
         );
     }
+    // Demofeld (Spec tablet-demofeld): immer lokal, braucht kein Netz.
+    buttons.push_str("<a class=\"feld demo\" href=\"/court/demo\">Demofeld · Übung</a>");
     format!(
         "<!doctype html><html lang=\"de\" translate=\"no\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
@@ -140,6 +142,7 @@ gap:.8rem;padding:0 1rem 1rem}}\
 background:#1e293b;color:#f8fafc;text-decoration:none;border-radius:.8rem;\
 font-size:1.3rem;font-weight:700;border:2px solid #334155}}\
 .feld:active{{background:#334155}}\
+.feld.demo{{border-color:#7c3aed;background:#1e1338;font-size:1.05rem}}\
 .hint{{padding:0 1rem;color:#94a3b8}}\
 </style></head><body><h1>Feld wählen</h1><div class=\"grid\">{buttons}</div></body></html>"
     )
@@ -319,6 +322,13 @@ async fn court(State(cfg): State<Arc<BridgeConfig>>, Path(id): Path<i64>) -> Res
         // den Pong (siehe Modul-Doku).
         .replace("__SEITEN_MARKE__", assets::seiten_marke());
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
+}
+
+/// `/court/demo` — Demofeld (Spec `tablet-demofeld`). Immer hier
+/// ausgeliefert, auch ohne Träger: Die Seite braucht kein Netz.
+async fn demo_court() -> impl IntoResponse {
+    let body = relay_proto::demo_tablet_seite(assets::TABLET_HTML, "", assets::seiten_marke());
+    ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
 /// `/felder` — Feld-Auswahlseite (Felder dieser Halle).
@@ -765,6 +775,7 @@ pub async fn run(
         .route("/monitor", get(monitor))
         .route("/felder", get(felder))
         .route("/court/{id}", get(court))
+        .route("/court/demo", get(demo_court))
         .route("/court/{id}/display", get(court_display))
         .route("/ws", get(tablet_ws))
         .route("/monitor-ws", get(monitor_ws))

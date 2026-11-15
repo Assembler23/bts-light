@@ -1648,6 +1648,8 @@ fn router(broker: Broker, tl_an: bool) -> Router {
     let app = Router::new()
         .route("/health", get(health))
         .route("/{ns}/court/{id}", get(court_page))
+        // Demofeld (Spec tablet-demofeld); statisches Segment vor `{id}`.
+        .route("/{ns}/court/demo", get(demo_court_page))
         .route("/{ns}/courts", get(courts_list))
         .route("/{ns}/anzeige", get(anzeige_page))
         .route("/{ns}/court/{id}/display", get(monitor_page))
@@ -1796,6 +1798,17 @@ async fn health(State(broker): State<Broker>) -> Json<serde_json::Value> {
         // Prüfpunkt vor jedem Merge: Läuft gerade ein Turnier über die Cloud?
         "hosts": map.values().filter(|n| n.host.is_some()).count(),
     }))
+}
+
+/// Demofeld (`/{ns}/court/demo`, Spec `tablet-demofeld`): die Tablet-Seite
+/// im abgekapselten Übungsmodus. Berührt den Namespace nicht — die Seite
+/// öffnet keinen WebSocket und sendet nichts. PIN leer wie bei `court_page`.
+async fn demo_court_page(Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let body = relay_proto::demo_tablet_seite(TABLET_HTML, "", seiten_marke());
+    ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
 /// Liefert die Tablet-UI für ein Feld (per CourtID; kein Caching – immer
@@ -9637,6 +9650,25 @@ mod tests {
         broker
             .bilder_bytes
             .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Spec tablet-demofeld: Der Router baut mit der statischen Demo-Route
+    /// neben `/{ns}/court/{id}` (sonst panickte der Start), und die Seite
+    /// kommt im Übungsmodus, ohne einen Namespace anzulegen.
+    #[tokio::test]
+    async fn demofeld_seite_im_uebungsmodus_ohne_namespace_anzulegen() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let _ = router(broker.clone(), true);
+        let antwort = demo_court_page(Path(test_ns())).await.into_response();
+        assert_eq!(antwort.status(), StatusCode::OK);
+        let rumpf = axum::body::to_bytes(antwort.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(rumpf.to_vec()).unwrap();
+        assert!(text.contains("const DEMO = '1' === '1';"));
+        assert!(broker.namespaces.lock().await.is_empty());
+        let falsch = demo_court_page(Path("../x".into())).await.into_response();
+        assert_eq!(falsch.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
