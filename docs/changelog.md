@@ -4,6 +4,20 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.421
+
+- **Schiri-Modus: „Satzpunkt" wirklich nur einmal je Satz.** Rückmeldung der
+  Schiedsrichter: Das Tablet sagte den Satz- bzw. Spielpunkt in der
+  Verlängerung bei jedem neuen Vorsprung wieder an (21:20, 22:21 …). Jetzt
+  steht das Wort nur beim ersten Mal in der Ansage („20 Satzpunkt 19"),
+  danach nur noch der Stand. Ausnahme bleibt der letzte Punkt vor der
+  Obergrenze: „29 Satzpunkt 28" und „29 Satzpunkt beide" (im 15er-Satz bei
+  20, im 11er-Satz bei 14). Das Abzeichen „Satzpunkt" bleibt sichtbar,
+  solange er besteht.
+- **Schiri-Modus: Satz- und Spielende ohne „mit".** Die Ansage lautet jetzt
+  „Das Spiel wurde gewonnen von … 21:17 und 21:15." bzw. „Der erste Satz
+  wurde gewonnen von … 21:12." — das „mit" vor dem Stand ist gestrichen.
+
 ## v0.9.420
 
 - **Zähl-Tablet: Uhr für die Behandlungspause.** Nach ✚ zählt eine große Uhr

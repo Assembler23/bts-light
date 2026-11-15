@@ -6798,8 +6798,9 @@ function umpReceiverName() {
 // Schiri-Feedback 08.11.2026: „Satzpunkt", nicht „Satzball".
 function umpScoreSpoken() {
   const lage = umpPunktLage();
-  // Das Wort nur beim NEUEN Satzpunkt (`satzpunktAnsagen`), sonst der
-  // reine Stand: „20 Satzpunkt 15", dann „20:16".
+  // Das Wort nur beim ERSTEN Satzpunkt des Satzes und am letzten Punkt vor
+  // der Obergrenze (`satzpunktAnsagen`), sonst der reine Stand:
+  // „20 Satzpunkt 15", dann „20:16", auch „21:20".
   const wort = lage && lage.ansagen ? ` ${lage.wort} ` : null;
   let sv = STATE.currentSet.left, rv = STATE.currentSet.right;
   if (STATE.servingSide === 'right') [sv, rv] = [rv, sv];
@@ -6848,10 +6849,11 @@ function umpSetEndSpoken() {
   const winSide = last.left > last.right ? 'left' : 'right';
   const winner = umpTeamNames(umpSideTeam(winSide));
   const hi = Math.max(last.left, last.right), lo = Math.min(last.left, last.right);
-  // Wortlaut nach dem DBV-Ablauf: „Der erste Satz wurde gewonnen von X mit
-  // 21:12." — nicht „Den ersten Satz gewinnt X".
+  // Wortlaut nach dem DBV-Ablauf: „Der erste Satz wurde gewonnen von X
+  // 21:12." — nicht „Den ersten Satz gewinnt X", und ohne „mit" vor dem
+  // Stand (Schiri-Rückmeldung 15.11.2026).
   const n = STATE.setsCompleted.length;
-  let s = `Satz. Der ${umpOrdinalNom(n)} Satz wurde gewonnen von ${winner} mit ${hi}:${lo}.`;
+  let s = `Satz. Der ${umpOrdinalNom(n)} Satz wurde gewonnen von ${winner} ${hi}:${lo}.`;
   // Steht es nach diesem Satz gleich, gehört der Zwischenstand dazu: „Einen
   // Satz beide." Ohne ihn fehlt der Ansage genau die Angabe, auf die es im
   // Saal ankommt. (Bei Führung sagt der Ablaufplan nichts — dann auch wir
@@ -6868,8 +6870,8 @@ function umpMatchEndSpoken() {
   const winsLeft = STATE.setsCompleted.filter(s => s.left > s.right).length;
   const winsRight = STATE.setsCompleted.filter(s => s.right > s.left).length;
   // Satzstände aus Sicht des Siegers (gewonnene Sätze zuerst je Satz).
-  // Wortlaut nach dem DBV-Ablauf: „Das Spiel wurde gewonnen von X mit 21:17,
-  // 15:21 und 24:22." — die Satzbilanz („zwei Sätze zu eins") gehört nicht in
+  // Wortlaut nach dem DBV-Ablauf: „Das Spiel wurde gewonnen von X 21:17,
+  // 15:21 und 24:22." (ohne „mit", Schiri-Rückmeldung 15.11.2026) — die Satzbilanz („zwei Sätze zu eins") gehört nicht in
   // die Ansage, die Satzstände sagen sie ohnehin.
   const standAus = winSide => {
     const sets = STATE.setsCompleted
@@ -6887,11 +6889,11 @@ function umpMatchEndSpoken() {
     // den gespielten Ständen, soweit es welche gibt.
     const verlierer = umpTeamNames(w === 'a' ? 'b' : 'a');
     const stand = standAus(umpSideTeam('left') === w ? 'left' : 'right');
-    return `${verlierer} aufgegeben. Das Spiel wurde gewonnen von ${sieger}${stand ? ` mit ${stand}` : ''}.`;
+    return `${verlierer} aufgegeben. Das Spiel wurde gewonnen von ${sieger}${stand ? ` ${stand}` : ''}.`;
   }
   const winSide = winsLeft >= winsRight ? 'left' : 'right';
   const winner = umpTeamNames(umpSideTeam(winSide));
-  return `Spiel. Das Spiel wurde gewonnen von ${winner} mit ${standAus(winSide)}.`;
+  return `Spiel. Das Spiel wurde gewonnen von ${winner} ${standAus(winSide)}.`;
 }
 
 /** Satzpunkt/Spielpunkt: Gewinnt eine Seite mit dem nächsten Ballwechsel
@@ -6901,8 +6903,9 @@ function umpMatchEndSpoken() {
  *  `null` = kein Satzpunkt; sonst { wort, beide, ansagen }. Spielpunkt,
  *  wenn der Satz zugleich das Spiel entschiede (bei „beide" nur, wenn das
  *  für beide Seiten gilt — sonst „Satzpunkt beide"). `ansagen`: Der
- *  Satzpunkt ist mit dem letzten Ballwechsel NEU entstanden — nur dann
- *  gehört das Wort in die Ansage (DBV Anhang 4, 7.1.1/7.1.2; Regeln in
+ *  Satzpunkt ist der erste des Satzes oder eine Seite hat soeben den
+ *  letzten Punkt vor der Obergrenze erreicht — nur dann gehört das Wort
+ *  in die Ansage (DBV Anhang 4, 7.1.1/7.1.2; Regeln in
  *  `src/io/satzpunkt.mjs`). Das Abzeichen zeigt ihn unabhängig davon,
  *  solange er besteht. */
 function umpPunktLage() {
@@ -6914,8 +6917,8 @@ function umpPunktLage() {
   const links = seiten.left, rechts = seiten.right;
   if (!links && !rechts) return null;
   const ansagen = satzpunktAnsagen(
-    satzpunktTeams(STATE.currentSet, target, cap, STATE.teamOnSide),
-    umpVorigerSatzpunkt(target, cap));
+    punkteTeams(STATE.currentSet, STATE.teamOnSide),
+    umpVorigerStand(), target, cap);
   const need = requiredSetsToWin(STATE.match.bestOfSets);
   const spielFuer = side => STATE.setsCompleted.filter(s =>
     side === 'left' ? s.left > s.right : s.right > s.left).length === need - 1;
@@ -6925,15 +6928,20 @@ function umpPunktLage() {
   return { wort: spiel ? 'Spielpunkt' : 'Satzpunkt', beide: links && rechts, ansagen };
 }
 
-/** Satzpunkt-Lage je Mannschaft im Stand VOR dem letzten Ballwechsel —
- *  aus dem jüngsten Undo-Stand, solange er im selben Satz liegt. Sonst
- *  `null` (unbekannt → `satzpunktAnsagen` sagt an). */
-function umpVorigerSatzpunkt(target, cap) {
+/** Punktestand je Mannschaft VOR dem letzten Ballwechsel — aus dem
+ *  jüngsten Undo-Stand, solange er im selben Satz liegt. Sonst `null`
+ *  (unbekannt → `satzpunktAnsagen` sagt an). */
+function umpVorigerStand() {
   const h = STATE.history;
   const vor = h && h.length ? h[h.length - 1] : null;
   if (!vor || !vor.currentSet || !Array.isArray(vor.setsCompleted)) return null;
   if (vor.setsCompleted.length !== STATE.setsCompleted.length) return null;
-  return satzpunktTeams(vor.currentSet, target, cap, vor.teamOnSide);
+  // Eine Korrektur (Seiten/Mannschaften tauschen) ist kein Ballwechsel: Der
+  // Stand davor ist der jetzige. „Mannschaften tauschen" vertauscht nur die
+  // Zuordnung — der Vergleich je Mannschaft sähe sonst bei 29:28 einen
+  // neuen Satzpunkt.
+  if (vor.korrektur) return punkteTeams(STATE.currentSet, STATE.teamOnSide);
+  return punkteTeams(vor.currentSet, vor.teamOnSide);
 }
 
 // ─── Satzpunkt-Ansage ──────────────────────────────────────────────────
@@ -6955,15 +6963,16 @@ function satzpunktSeiten(stand, ziel, cap) {
     right: satzSieger({ left: stand.left, right: stand.right + 1 }, ziel, cap) === 'right',
   };
 }
-function satzpunktTeams(stand, ziel, cap, teamOnSide) {
-  const s = satzpunktSeiten(stand, ziel, cap);
+function punkteTeams(stand, teamOnSide) {
   const aLinks = !teamOnSide || teamOnSide.a !== 'right';
-  return aLinks ? { a: s.left, b: s.right } : { a: s.right, b: s.left };
+  return aLinks ? { a: stand.left, b: stand.right } : { a: stand.right, b: stand.left };
 }
-function satzpunktAnsagen(jetzt, vorher) {
-  if (!jetzt.a && !jetzt.b) return false;
+function satzpunktAnsagen(jetzt, vorher, ziel, cap) {
+  const s = satzpunktSeiten({ left: jetzt.a, right: jetzt.b }, ziel, cap);
+  if (!s.left && !s.right) return false;
   if (!vorher) return true;
-  return (jetzt.a && !vorher.a) || (jetzt.b && !vorher.b);
+  if (vorher.a < ziel - 1 && vorher.b < ziel - 1) return true;
+  return (jetzt.a === cap - 1 && vorher.a < cap - 1) || (jetzt.b === cap - 1 && vorher.b < cap - 1);
 }
 
 /** Einspielphase: Aufstellung (Wahl) bestätigt, aber noch kein Ballwechsel
