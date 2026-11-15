@@ -1207,6 +1207,14 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
 - **BTP-Prozess:** heißt `btp.exe`, Fenstertitel
   `Badminton Turnier Planer - <Dateiname ohne .TP>`. Eine Automatik zum Finden
   der Datei hätte damit einen Anhaltspunkt (nicht umgesetzt).
+- **Pfad aus dem Prozess (Messung offen, Sonde seit 15.11.2026):**
+  `tests/btp_tp_pfad_probe.rs` liest Kommandozeile, Fenstertitel und die
+  offenen Datei-Handles von `btp.exe` und meldet, ob daraus der volle Pfad
+  der `.TP` folgt. Die zu messenden Fälle (Doppelklick-Start, „Datei →
+  Öffnen", BTP als Administrator, Netzlaufwerk, zwei BTP-Fenster,
+  Virenscanner) stehen im Kopf der Sonde; **Ergebnisse hier nachtragen.**
+  Aufruf am Windows-PC mit laufendem BTP:
+  `cargo test -p bts-light --test btp_tp_pfad_probe -- --ignored --nocapture`.
 - `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst
   **leer** — ein Artefakt der bekannten Null-Bitmap-Schwäche des Parsers; der
   badhub-Extraktor mit seiner Reparatur (`tabelle_lesen`) liest aus derselben
