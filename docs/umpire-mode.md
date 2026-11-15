@@ -88,12 +88,16 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 | Aufgabe | „{Unterlegene Seite} aufgegeben. Das Spiel wurde gewonnen von {Sieger} {gespielte Stände}." (Anhang 4, 6.5 + 6.4). Das Tablet kennt nur die Seite, nicht den einzelnen Spieler — im Doppel nennt es beide Namen. |
 | Behandlungspause | „Das Spiel ist unterbrochen." (Anhang 4, 3.11.1) |
 
-Badges: **Satzpunkt** / **Spielpunkt** (bis v0.9.350 „Satzball"/„Matchball";
+Marke **Satzpunkt** / **Spielpunkt** (bis v0.9.350 „Satzball"/„Matchball";
 Schiri-Feedback vom 08.11.2026 — das Vokabular sagt „Satzpunkt").
-Das Abzeichen steht, **solange** ein Satzpunkt besteht — auch an den
-Ständen, an denen die Ansage das Wort weglässt. Die Regel liegt in
-`src/io/satzpunkt.mjs` (Test `scripts/test-satzpunkt.mjs`, Inline-Kopie im
-Tablet).
+Die Marke steht, **solange** ein Satzpunkt besteht — auch an den
+Ständen, an denen die Ansage das Wort weglässt. Seit v0.9.423 sitzt sie
+**am Stand** (`#punkt-lage`, `renderPunktLage`) statt als Abzeichen in der
+Ansage-Leiste, nennt die Seite („Satzpunkt links", bei beiden „Satzpunkt
+beide") und erscheint **auch ohne Schiri-Modus** — Zähltafelbediener sehen
+sie genauso. Das Abzeichen der Leiste (`#umpire-badge`) gehört damit allein
+den Karten. Die Regel liegt in `src/io/satzpunkt.mjs` (Test
+`scripts/test-satzpunkt.mjs`, Inline-Kopie im Tablet).
 <!-- pruef: "Spielpunkt" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Feldseiten wechseln." in src-tauri/assets/tablet.html -->
 <!-- pruef: "schlägt auf zu" in src-tauri/assets/tablet.html -->

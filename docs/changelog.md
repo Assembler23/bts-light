@@ -38,6 +38,12 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
     „Anzeige".
   - **Dialoge:** „Abbrechen" ist überall ein ruhiger Rahmen-Knopf und sieht
     nicht mehr wie eine weitere Wahl aus.
+  - **Gezählt? Die Ziffer leuchtet.** Nach jedem Punkt springt die gezählte
+    Zahl kurz auf. Die +1-Flächen werden dafür nicht mehr blass — die kurze
+    Sperre gegen Doppeltipps bleibt, man sieht sie nur nicht mehr.
+  - **Satzpunkt und Spielpunkt am Stand:** „Satzpunkt links" (bzw. rechts,
+    vorne, hinten, beide) steht über dem Stand — für alle, nicht nur im
+    Schiri-Modus.
   - **Fehlerbehebung:** „Ergebnis eintragen" zeigte „Aktueller Satz (läuft)"
     auch ohne Haken bei „Spiel läuft noch".
 

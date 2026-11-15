@@ -747,6 +747,27 @@ jedem Ballwechsel gebraucht wird, steht offen da; alles Seltene liegt hinter
   Relay. Steht die, während der Turnier-PC selbst offline ist, bleibt es bei
   „Warte auf das nächste Spiel".
 
+### Tipp-Rückmeldung und Satzpunkt am Stand
+
+Dritter Teil (ebenfalls v0.9.423):
+
+- **Sperre unsichtbar, Ziffer leuchtet.** Der Doppel-Eingabe-Schutz
+  (`SCORE_COOLDOWN_MS`, 700 ms) dimmte die +1-Flächen bisher auf 40 % — nach
+  jedem Punkt sah das wie eine Störung aus. Jetzt nimmt `.plus-btn.cooling`
+  nur noch keine Tipps an. Die Rückmeldung „gezählt" gibt die Ziffer selbst
+  (`zifferLeuchten`, Klasse `.gezaehlt`, 450 ms: kurz größer, amber
+  nachleuchtend; mit `prefers-reduced-motion` nur das Leuchten). Sie
+  leuchtet auf der Seite, auf der der Punkt **jetzt steht** — nach dem
+  Seitenwechsel im Entscheidungssatz also gegenüber; nach einem Satzende
+  (Stand wieder 0:0) gar nicht.
+- **Satz-/Spielpunkt am Stand** (`#punkt-lage`, `renderPunktLage`): eine
+  Marke neben der Satzbezeichnung, in beiden Betriebsarten. Sie spricht in
+  **Seiten** („Satzpunkt links", übereinander „vorne"/„hinten", sonst
+  „Satzpunkt beide") und trägt die Farbe der Seite; `umpPunktLage()` liefert
+  dafür zusätzlich `seite`. In einer Pause und nach dem Spielende steht sie
+  nicht. Die Regel selbst ist unverändert (`src/io/satzpunkt.mjs`); das
+  Abzeichen in der Schiri-Leiste zeigt nur noch Karten.
+
 ## Akkustand am Tablet (seit v0.9.293)
 
 Im Kiosk fehlt die Android-Statusleiste — den Akkustand eines Tablets

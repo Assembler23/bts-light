@@ -129,6 +129,17 @@ Auf dem Schirm steht dabei:
   kleineren Tablets steht bei bestehender Verbindung nur der Punkt; „verbinde…"
   und „getrennt" stehen immer als Text daneben.
 
+**Dein Tipp hat gezählt, wenn die Ziffer aufleuchtet:** Die Zahl der Seite,
+die den Punkt bekommen hat, springt kurz auf und leuchtet orange nach.
+
+Steht eine Seite einen Punkt vor dem Satzgewinn, erscheint über dem Stand eine
+Marke in ihrer Farbe: **„Satzpunkt links"** oder „… rechts" (hinter dem Feld
+„vorne"/„hinten"), bei 29:29 „Satzpunkt beide". Entschiede der Satz zugleich
+das Spiel, heißt sie **„Spielpunkt …"**. Sie bleibt stehen, solange der
+Satzpunkt besteht — du musst dafür nichts einschalten.
+<!-- pruef: "'Spielpunkt' : 'Satzpunkt'" in src-tauri/assets/tablet.html -->
+<!-- pruef: "seiteWort(lage.seite) : 'beide'" in src-tauri/assets/tablet.html -->
+
 Ein Fehltipp lässt sich zurücknehmen — mit dem orangen Knopf **unten
 links**. Es gibt nur diesen einen (seit v0.9.423; vorher waren es bis zu
 drei), und er sagt, was er zurücknimmt: **„↩ Punkt für Links zurück"** oder
@@ -550,9 +561,12 @@ Turnierleitung; voreingestellt ist `0000`. Siehe
 Das ist kein Fehler, sondern gewollt — sie wartet auf **Weiterspielen**.
 
 **Das Tablet reagiert nach einem Punkt kurz nicht.**
-Nach jedem gezählten Punkt ist die Zähltafel für einen Sekundenbruchteil
-gesperrt. Das verhindert, dass ein hektischer Doppeltipp zwei Punkte vergibt.
+Nach jedem gezählten Punkt nimmt die Zähltafel für einen Sekundenbruchteil
+keinen weiteren Tipp an. Das verhindert, dass ein hektischer Doppeltipp zwei
+Punkte vergibt. Man sieht die Sperre nicht (bis v0.9.422 wurden die Flächen
+dabei blass) — ob dein Tipp gezählt hat, zeigt die **aufleuchtende Ziffer**.
 Kurz warten und normal weitertippen — es ist nichts verloren.
+<!-- pruef: "var SCORE_COOLDOWN_MS = 700;" in src-tauri/assets/tablet.html -->
 
 **„Ergebnis übermitteln" bleibt gesperrt.**
 Bei Aufgabe und kampfloser Wertung muss zuerst der **Sieger** gewählt werden.

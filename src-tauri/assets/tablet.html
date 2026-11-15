@@ -248,9 +248,12 @@
     .plus-left:active { background: var(--team-a-strong); }
     .plus-right { background: var(--team-b); }
     .plus-right:active { background: var(--team-b-strong); }
-    /* Doppel-Eingabe-Schutz: kurz nach einem Punkt gesperrt (gedimmt, keine
-       Taps) – verhindert versehentliche zweite Punkte. */
-    .plus-btn.cooling { opacity: .4; pointer-events: none; transition: opacity .15s; }
+    /* Doppel-Eingabe-Schutz: kurz nach einem Punkt nehmen die Flächen
+       keinen Tipp an – verhindert versehentliche zweite Punkte. Bewusst
+       UNSICHTBAR (Usability-Durchgang 15.11.2026): Das frühere Abdunkeln auf
+       40 % sah nach jedem Punkt wie eine Störung aus. Die Rückmeldung
+       „gezählt" gibt stattdessen die aufleuchtende Ziffer (`.gezaehlt`). */
+    .plus-btn.cooling { pointer-events: none; }
 
     /* Court + Score Block in der Mitte */
     /* min-width: 0 → die mittlere Spalte darf schrumpfen; sonst könnte der
@@ -282,7 +285,37 @@
     .current-score .left-score { color: var(--team-a); }
     .current-score .right-score { color: var(--team-b); }
     .current-score .colon { opacity: .35; font-size: .7em; color: var(--muted); }
+    /* Tipp-Rückmeldung: Die gezählte Ziffer springt kurz auf und leuchtet
+       amber nach — der Bediener sieht, DASS und WO sein Tipp gezählt hat,
+       ohne den Stand nachzurechnen. Amber statt der Seitenfarbe, damit es
+       sich von der ruhenden Ziffer abhebt. */
+    .current-score .gezaehlt { animation: gezaehlt .45s ease-out; }
+    @keyframes gezaehlt {
+      0%   { transform: scale(1.35); text-shadow: 0 0 .35em rgba(245, 158, 11, .95); }
+      100% { transform: scale(1); text-shadow: 0 0 0 rgba(245, 158, 11, 0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      /* Ohne Bewegung bleibt nur das Nachleuchten. */
+      @keyframes gezaehlt {
+        0%   { text-shadow: 0 0 .35em rgba(245, 158, 11, .95); }
+        100% { text-shadow: 0 0 0 rgba(245, 158, 11, 0); }
+      }
+    }
+    /* Satzzeile: Bezeichnung des Satzes und – solange er besteht – der
+       Satz- bzw. Spielpunkt. In EINER Zeile, damit das Feld darunter nicht
+       springt, wenn die Marke erscheint. */
+    .set-zeile { display: flex; align-items: center; justify-content: center; gap: .5rem; flex-wrap: wrap; }
     .current-set-label { font-size: 1rem; color: var(--muted); font-weight: 700; letter-spacing: .03em; }
+    /* Satz-/Spielpunkt am Stand, auch ohne Schiri-Modus: in der Farbe der
+       Seite, die ihn hat; bei „beide" amber. */
+    .punkt-lage {
+      padding: .08rem .65rem; border-radius: 999px; font-size: .95rem; font-weight: 800;
+      letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
+      background: #f59e0b; color: #1a1206;
+    }
+    .punkt-lage[hidden] { display: none; }
+    .punkt-lage.links { background: var(--team-a); color: #fff; }
+    .punkt-lage.rechts { background: var(--team-b); color: #fff; }
     .set-history { display: flex; gap: .6rem; font-size: 1.05rem; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; flex-wrap: wrap; justify-content: center; }
 
     /* Badminton-Court mit echten Linien-Markierungen.
@@ -813,6 +846,7 @@
     body.lesbar .break-title { color: #fff; }
     body.lesbar .break-hint { font-size: 1.2rem; color: #fff; }
     body.lesbar .current-set-label, body.lesbar .set-history { font-size: 1.2rem; font-weight: 800; }
+    body.lesbar .punkt-lage { font-size: 1.2rem; }
     body.lesbar .court { background: #14532d; }
     body.lesbar .court .cell { font-weight: 800; color: #fff; }
     body.lesbar .court .cell .player-name { font-size: clamp(1.1rem, 2.8vw, 2.1rem); }
@@ -1077,7 +1111,12 @@
       <div class="center">
         <div class="score-board">
           <div class="score-stack">
-            <div class="current-set-label" id="current-set-label">Satz 1</div>
+            <div class="set-zeile">
+              <div class="current-set-label" id="current-set-label">Satz 1</div>
+              <!-- Satz-/Spielpunkt: steht, solange er besteht – für
+                   Zähltafelbediener wie für Schiedsrichter. -->
+              <div class="punkt-lage" id="punkt-lage" hidden></div>
+            </div>
             <div class="current-score">
               <span id="score-left" class="left-score">0</span>
               <span class="colon">:</span>
@@ -2254,6 +2293,7 @@ const els = {
   spielBeginntBtn: document.getElementById('spiel-beginnt-btn'),
   umpireEinspielZeit: document.getElementById('umpire-einspiel-zeit'),
   umpireBadge: document.getElementById('umpire-badge'),
+  punktLage: document.getElementById('punkt-lage'),
   umpireSay: document.getElementById('umpire-say'),
   umpireCards: document.getElementById('umpire-cards'),
   umpireCardBtn: document.getElementById('umpire-card-btn'),
@@ -4635,8 +4675,9 @@ function restoreSnapshot(snap) {
 }
 
 // Doppel-Eingabe-Schutz: nach einem Punkt sind die +1-Flächen kurz gesperrt
-// (gedimmt), damit ein zitternder Finger nicht zwei Punkte zählt. Undo hebt
-// die Sperre sofort auf (Korrektur soll nicht warten).
+// (unsichtbar – die aufleuchtende Ziffer ist die Rückmeldung, siehe
+// `zifferLeuchten`), damit ein zitternder Finger nicht zwei Punkte zählt.
+// Undo hebt die Sperre sofort auf (Korrektur soll nicht warten).
 //
 // **0,7 s statt 3 s** (09.08.2026, aus dem Test am Gerät): Drei Sekunden
 // waren aus der Annahme heraus gewählt, Punkte fielen ohnehin nicht im
@@ -4659,6 +4700,17 @@ function startScoreCooldown() {
   if (els.plusRight) els.plusRight.classList.add('cooling');
   if (scoreCooldownTimer) clearTimeout(scoreCooldownTimer);
   scoreCooldownTimer = setTimeout(clearScoreCooldown, SCORE_COOLDOWN_MS);
+}
+
+// Tipp-Rückmeldung: Die Ziffer der Seite, die den Punkt bekam, leuchtet
+// kurz auf. Klasse entfernen → Reflow → setzen, damit die Animation auch
+// beim nächsten Punkt derselben Seite neu startet.
+function zifferLeuchten(side) {
+  const el = side === 'left' ? els.scoreLeft : els.scoreRight;
+  if (!el) return;
+  el.classList.remove('gezaehlt');
+  void el.offsetWidth;
+  el.classList.add('gezaehlt');
 }
 
 // Klick-Delay verkürzen (Plan 13): Der sichtbare Punktstand wird SOFORT
@@ -4779,6 +4831,12 @@ function addPointOnSide(side) {
   if (triggeredBreak) startBreak(triggeredBreak, true);
   // Anzeige sofort, Persistenz/Push nachgelagert (siehe commitScoreView).
   commitScoreView();
+  // Rückmeldung an der gezählten Ziffer. Nach einem Satzende steht dort
+  // 0:0 (nichts zum Aufleuchten); nach dem Seitenwechsel im
+  // Entscheidungssatz steht der Punkt auf der anderen Seite.
+  if (!winnerOfSet) {
+    zifferLeuchten(triggeredMidGameSwitch ? (side === 'left' ? 'right' : 'left') : side);
+  }
   if (rally) sendRally(rally);
 }
 
@@ -6619,6 +6677,7 @@ function render() {
   els.setHistory.innerHTML = STATE.setsCompleted.map((s, i) =>
     `<span class="pip">${i+1}: <strong>${s.left}:${s.right}</strong></span>`
   ).join('');
+  renderPunktLage();
 
   renderCourt();
 
@@ -7144,7 +7203,24 @@ function umpPunktLage() {
   const spiel = links && rechts
     ? spielFuer('left') && spielFuer('right')
     : spielFuer(links ? 'left' : 'right');
-  return { wort: spiel ? 'Spielpunkt' : 'Satzpunkt', beide: links && rechts, ansagen };
+  return {
+    wort: spiel ? 'Spielpunkt' : 'Satzpunkt', beide: links && rechts, ansagen,
+    // Für die Marke am Stand: wer ihn hat (bei „beide" keine Seite).
+    seite: links && rechts ? null : (links ? 'left' : 'right'),
+  };
+}
+
+/** Satz-/Spielpunkt als Marke am Stand — in beiden Betriebsarten, in Seiten
+ *  gesprochen („Satzpunkt links", hinter dem Feld „vorne"/„hinten"). Die
+ *  Marke steht, solange der Satzpunkt besteht; in einer Pause und nach dem
+ *  Spielende nicht. */
+function renderPunktLage() {
+  const lage = STATE.setup === 'playing' && !STATE.pause ? umpPunktLage() : null;
+  els.punktLage.hidden = !lage;
+  if (!lage) return;
+  els.punktLage.textContent = `${lage.wort} ${lage.seite ? seiteWort(lage.seite) : 'beide'}`;
+  els.punktLage.classList.toggle('links', lage.seite === 'left');
+  els.punktLage.classList.toggle('rechts', lage.seite === 'right');
 }
 
 /** Punktestand je Mannschaft VOR dem letzten Ballwechsel — aus dem
@@ -7267,8 +7343,9 @@ function umpAnnouncement() {
   }
   let say = umpScoreSpoken();
   if (ev && ev.type === 'point' && ev.serveChanged) say = 'Aufschlagwechsel, ' + say;
-  const lage = umpPunktLage();
-  return { say, badge: lage ? lage.wort : '' };
+  // Satz-/Spielpunkt steht als Marke am Stand (`renderPunktLage`), in
+  // beiden Betriebsarten — das Abzeichen der Leiste gehört den Karten.
+  return { say, badge: '' };
 }
 function umpCap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
