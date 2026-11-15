@@ -131,7 +131,7 @@ gerade geschriebene Datei nicht immer vollständig.
 Im **Ansage-Slave-Modus** gibt es den Abschnitt nicht: Nur der Master lädt
 hoch ([Master und Slave](master-slave.md)).
 
-### Die Suche läuft mit — auch außerhalb der Einstellungen
+### Die Suche läuft mit
 
 Solange **TP-Datei automatisch finden** an ist, sieht bts-light von selbst
 nach, welche Datei in BTP geöffnet ist: beim Programmstart, beim Start der
