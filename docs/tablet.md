@@ -780,8 +780,10 @@ Vierter Teil (ebenfalls v0.9.423):
 - **Endstand als Tabelle** (`renderEndstand`, `table.endstand#set-summary`):
   eine Zeile je Mannschaft, die Sätze als Spalten, der Sieger oben und in
   Gold; je Satz ist die gewonnene Zahl hell (`td.gewonnen`), die verlorene
-  gedämpft. Die Zeile „21:16 · 18:21 · 21:15" musste man im Kopf den Namen
-  zuordnen. Die Namensspalte kürzt mit „…" (der volle Siegername steht im
+  gedämpft. Hell ist nur ein wirklich **gewonnener** Satz
+  (`setWinnerSide`): Bei einer Aufgabe steht der abgebrochene Satz mit in der
+  Tabelle, dessen höhere Zahl bleibt gedämpft. Die Zeile
+  „21:16 · 18:21 · 21:15" musste man im Kopf den Namen zuordnen. Die Namensspalte kürzt mit „…" (der volle Siegername steht im
   Banner darüber); ohne Aufstellung heißen die Zeilen „Links"/„Rechts", ohne
   Satz (Kampflos) bleibt die Tabelle weg. Aufgebaut per `textContent`, nie
   per `innerHTML` — die Namen kommen aus BTP.
@@ -795,12 +797,42 @@ Vierter Teil (ebenfalls v0.9.423):
   21:0 bis 21:19 sein). Der Vorschlag ist gelb hinterlegt (`.es-vorschlag`),
   folgt der Eingabe („1" → 21, „11" → 21, „20" → 22) und verschwindet, wenn
   sie keinen mehr hergibt. Ein von Hand gesetzter Wert wird **nie**
-  überschrieben (Merker `auto` je Feld in `makeScoreRow`). Nur in den
+  überschrieben — eine **0 gilt als leer** (neben einem Verlierer-Stand
+  kann sie in einem beendeten Satz nicht stimmen). Der Merker „ist ein
+  Vorschlag" hängt am Satz-Objekt (`SATZ_VORSCHLAG`, eine `WeakMap`), nicht
+  an der Zeile: „+ Satz" baut alle Zeilen neu, und der Vorschlag soll danach
+  weiter der Eingabe folgen. Nur in den
   Zeilen beendeter Sätze — der laufende Satz im Weiterzählen-Modus ist ja
   gerade nicht zu Ende — und nicht im Zeitformat (`target ≥ 99`). Die
   Plausibilitätsprüfung beim Übernehmen bleibt unverändert und gilt auch
   für Vorschläge. Beim Antippen wird der Feldinhalt markiert, damit die
   vorbelegte „0" überschrieben statt ergänzt wird.
+
+### Setup: Schrittzähler und Feldbild
+
+Fünfter Teil (ebenfalls v0.9.423), siehe auch „Match-Setup" weiter oben.
+
+- **„Schritt n von m"** (`#setup-schritt`, `setupSchritt()`): Über der Frage
+  steht, wo man ist. Am Spielbeginn und beim Einstieg in ein laufendes Spiel
+  sind es Seite → Aufschläger → Annehmer (Einzel: zwei Schritte). Die
+  Aufschlagwahl je Satz und die Neuabfrage nach „Mannschaften tauschen"
+  beginnen beim Aufschläger (`serveSetupTeam` gesetzt) und zählen
+  „1 von 2". Gibt es nur eine Frage, bleibt der Zähler weg. Vorher wusste
+  niemand, ob nach dem Aufschläger noch etwas kommt.
+- **Feldbild statt Kachelreihe** (`baueSetupFeld`, `.setup-feld`): Aufschläger
+  und Annehmer wählt man auf einem kleinen Feld — jede Mannschaft auf ihrer
+  Hälfte (so wie in Schritt 1 gewählt), dazwischen das Netz, darüber
+  „links"/„rechts" bzw. „vorne"/„hinten". In der Anordnung übereinander liegt
+  die nahe Hälfte unten. Vorher standen vier gleiche Kacheln nebeneinander,
+  und wer zu wem gehört, musste man an der Randfarbe und am Zusatz „mit …"
+  ablesen (`renderPartnerHint` ist entfallen).
+- **Wer nicht wählbar ist, steht trotzdem da** (`.fest`, gestrichelt): Bei der
+  Annehmer-Wahl die aufschlagende Mannschaft — der gewählte Aufschläger gelb
+  hinterlegt mit „schlägt auf" —, bei der Aufschlagwahl je Satz die
+  Mannschaft, die den Satz verloren hat. Das Bild bleibt so vollständig.
+- Aufgebaut per DOM und `textContent`, nie per `innerHTML` — die Namen kommen
+  aus BTP. Die Seitenwahl (Schritt 1) bleibt bei zwei großen Kacheln: Dort
+  steht ja noch niemand auf einer Seite.
 
 ## Akkustand am Tablet (seit v0.9.293)
 

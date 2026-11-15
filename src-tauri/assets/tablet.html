@@ -542,7 +542,55 @@
     .modal .opt[hidden] { display: none; }
     .modal .opt.team-a { border-color: var(--team-a); }
     .modal .opt.team-b { border-color: var(--team-b); }
-    .modal .opt .partner { font-size: .85rem; color: var(--muted); margin-top: .3rem; font-weight: 400; }
+    /* Wo man im Setup steht („Schritt 2 von 3"): Der Assistent hat je nach
+       Disziplin zwei oder drei Fragen — ohne Zähler wusste niemand, ob nach
+       dem Aufschläger noch etwas kommt (Usability-Durchgang 15.11.2026). */
+    .modal .setup-schritt {
+      font-size: .85rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: #94a3b8; margin-bottom: -.6rem;
+    }
+    .modal .setup-schritt[hidden] { display: none; }
+    /* Aufschläger und Annehmer wählt man auf einem FELDBILD: Jede
+       Mannschaft steht auf ihrer Hälfte, so wie man sie vor sich sieht,
+       dazwischen das Netz. Vorher waren es vier gleiche Kacheln in einer
+       Reihe — wer zu wem gehört und wo steht, musste man an der Randfarbe
+       und am Zusatz „mit …" ablesen. */
+    .modal .setup-feld {
+      display: flex; align-items: stretch; gap: .6rem;
+      width: min(54rem, 100%); padding: .7rem;
+      background: var(--court); border-radius: .6rem;
+      box-shadow: inset 0 0 0 2px #f8fafc;
+    }
+    .modal .setup-feld .netz { flex: 0 0 4px; background: #0f172a; border-radius: 2px; }
+    .modal .setup-feld .haelfte {
+      flex: 1 1 0; min-width: 0;
+      display: flex; flex-direction: column; justify-content: flex-start; gap: .5rem;
+    }
+    .modal .setup-feld .seite {
+      font-size: .78rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: #dcfce7; text-align: center;
+    }
+    .modal .setup-feld .opt { flex: 0 0 auto; min-width: 0; max-width: none; text-align: center; }
+    /* Randfarbe nach der SEITE, nicht nach der Mannschaft: Blau ist überall
+       links (bzw. vorne), Rot rechts — wie die +1-Flächen und der Stand.
+       Nach einem Seitenwechsel stünde sonst Rot auf der blauen Seite. */
+    .modal .setup-feld .opt.links { border-color: var(--team-a); }
+    .modal .setup-feld .opt.rechts { border-color: var(--team-b); }
+    /* Nicht wählbar: steht nur da, damit das Bild vollständig ist. */
+    .modal .setup-feld .fest {
+      padding: 1.25rem .6rem; border-radius: .75rem; text-align: center;
+      border: 2px dashed rgba(248, 250, 252, .45);
+      font-size: 1.05rem; font-weight: 600; color: #f8fafc;
+    }
+    .modal .setup-feld .fest.schlaegt-auf { border-style: solid; background: rgba(251, 191, 36, .22); }
+    .modal .setup-feld .fest small { display: block; font-size: .8rem; font-weight: 700; color: #fde68a; margin-top: .2rem; }
+    /* Hinter dem Feld (Anordnung übereinander): die ferne Hälfte oben, die
+       nahe unten, die Spieler einer Hälfte nebeneinander. */
+    .modal .setup-feld.hoch { flex-direction: column-reverse; width: min(40rem, 100%); }
+    .modal .setup-feld.hoch .netz { flex-basis: 4px; }
+    .modal .setup-feld.hoch .haelfte { flex-direction: row; flex-wrap: wrap; align-items: stretch; }
+    .modal .setup-feld.hoch .seite { flex: 1 0 100%; }
+    .modal .setup-feld.hoch .opt, .modal .setup-feld.hoch .fest { flex: 1 1 0; }
     .modal .opt .club { font-size: .8rem; color: var(--muted); margin-top: .25rem; font-weight: 400; }
     /* Englische Übersetzung unter dem deutschen Text (zweisprachige Anzeige). */
     .modal .title .t-en {
@@ -1281,6 +1329,7 @@
 <!-- Setup-Modal: Seitenwahl, Aufschläger + (bei Doppel) Annehmer.
      Zweisprachig (DE/EN) wegen internationaler Spieler:innen. -->
 <div class="modal" id="setup-modal">
+  <div class="setup-schritt" id="setup-schritt" hidden></div>
   <div class="title" id="setup-title">Wer schlägt zuerst auf?</div>
   <div class="subtitle" id="setup-subtitle"></div>
   <!-- Wahl während der Satzpause: die Pausenuhr bleibt sichtbar. -->
@@ -2223,6 +2272,7 @@ const els = {
   enterScoreCurrentWrap: document.getElementById('enter-score-current-wrap'),
   enterScoreCurrent: document.getElementById('enter-score-current'),
   setupModal: document.getElementById('setup-modal'),
+  setupSchritt: document.getElementById('setup-schritt'),
   setupTitle: document.getElementById('setup-title'),
   setupSubtitle: document.getElementById('setup-subtitle'),
   setupOptions: document.getElementById('setup-options'),
@@ -5739,6 +5789,12 @@ function gegenfeldNach(eingabe, gegenWert, gegenAuto, target, cap) {
 // selbst aus, sobald die Punkte des Verlierers stehen (11 → 21, 20 → 22).
 // Der laufende Satz im Weiterzählen-Modus bekommt keinen Vorschlag — er
 // ist ja gerade nicht zu Ende.
+// Merker „dieser Wert ist ein Vorschlag" je Satz-Objekt. Er hängt am
+// Objekt und nicht an der Zeile, weil „+ Satz" alle Zeilen neu baut — sonst
+// gälte ein Vorschlag danach als von Hand getippt und folgte der Eingabe
+// nicht mehr.
+const SATZ_VORSCHLAG = new WeakMap();
+
 function makeScoreRow(labelText, get, set, ariaBase, ergaenzen) {
   const row = document.createElement('div');
   row.style.cssText = 'display:flex;align-items:center;gap:.5rem;justify-content:center;width:100%';
@@ -5758,7 +5814,12 @@ function makeScoreRow(labelText, get, set, ariaBase, ergaenzen) {
   const felder = { left: inL, right: inR };
   // Stammt der Wert eines Felds aus einem Vorschlag? Nur dann darf die
   // Autovervollständigung ihn weiter anpassen oder zurücknehmen.
-  const auto = { left: false, right: false };
+  let auto = SATZ_VORSCHLAG.get(get());
+  if (!auto) {
+    auto = { left: false, right: false };
+    SATZ_VORSCHLAG.set(get(), auto);
+  }
+  for (const key of ['left', 'right']) felder[key].classList.toggle('es-vorschlag', auto[key]);
   const vorschlagSetzen = (key, wert) => {
     const cur = get(); cur[key] = wert; set(cur);
     felder[key].value = String(wert);
@@ -5781,8 +5842,13 @@ function makeScoreRow(labelText, get, set, ariaBase, ergaenzen) {
       if (neu !== null) vorschlagSetzen(gegen, neu);
     });
     // Beim Antippen den Inhalt markieren: Die vorbelegte „0" wird so
-    // überschrieben statt ergänzt („011").
-    inp.addEventListener('focus', () => inp.select());
+    // überschrieben statt ergänzt („011"). Zusätzlich einen Takt später:
+    // iPad-Safari setzt nach dem Tipp den Cursor und hebt die Markierung
+    // sonst gleich wieder auf.
+    inp.addEventListener('focus', () => {
+      inp.select();
+      setTimeout(() => { if (document.activeElement === inp) inp.select(); }, 0);
+    });
   };
   bind(inL, 'left'); bind(inR, 'right');
   const colon = document.createElement('span');
@@ -6369,12 +6435,73 @@ function setSetupText(titleDe, titleEn, subDe, subEn) {
   fillBilingual(els.setupSubtitle, subDe, subEn, 's-en');
 }
 
+/** Wo der Setup-Assistent steht: `{ n, m }` für „Schritt n von m" — oder
+ *  `null`, wenn es nur eine Frage gibt. Am Spielbeginn (und beim Einstieg
+ *  in ein laufendes Spiel) kommt zuerst die Seitenwahl; die Aufschlagwahl
+ *  je Satz und die Neuabfrage nach „Mannschaften tauschen" beginnen beim
+ *  Aufschläger (`serveSetupTeam`). Der Annehmer wird nur im Doppel gefragt. */
+function setupSchritt() {
+  const schritte = [
+    ...(STATE.serveSetupTeam ? [] : ['choose-side']),
+    'choose-server',
+    ...(isDoubles() ? ['choose-receiver'] : []),
+  ];
+  const n = schritte.indexOf(STATE.setup) + 1;
+  return n > 0 && schritte.length > 1 ? { n, m: schritte.length } : null;
+}
+
+/** Baut das Feldbild der Aufschläger-/Annehmerwahl in `#setup-options`:
+ *  jede Mannschaft auf ihrer Hälfte, dazwischen das Netz. `rolle(spieler,
+ *  teamKey)` sagt je Spieler, was er ist: `{ wahl: fn }` = antippbar,
+ *  `{ notiz }` = steht fest (z. B. der schon gewählte Aufschläger), `{}` =
+ *  nur zur Orientierung. Aufgebaut per DOM, nie per `innerHTML` — die Namen
+ *  kommen aus BTP. */
+function baueSetupFeld(rolle) {
+  const feld = document.createElement('div');
+  feld.className = 'setup-feld' + (uebereinander() ? ' hoch' : '');
+  const seiten = STATE.teamOnSide || { a: 'left', b: 'right' };
+  const haelfte = (seite) => {
+    const teamKey = seiten.a === seite ? 'a' : 'b';
+    const box = document.createElement('div');
+    box.className = 'haelfte';
+    const wort = document.createElement('div');
+    wort.className = 'seite';
+    wort.textContent = seiteWort(seite);
+    box.append(wort);
+    for (const spieler of STATE.match[teamKey === 'a' ? 'teamA' : 'teamB']) {
+      const r = rolle(spieler, teamKey);
+      const el = document.createElement('div');
+      el.textContent = spieler.name;
+      if (r.wahl) {
+        el.className = `opt ${seite === 'left' ? 'links' : 'rechts'}`;
+        el.addEventListener('click', r.wahl);
+      } else {
+        el.className = 'fest' + (r.notiz ? ' schlaegt-auf' : '');
+        if (r.notiz) {
+          const klein = document.createElement('small');
+          klein.textContent = r.notiz;
+          el.append(klein);
+        }
+      }
+      box.append(el);
+    }
+    return box;
+  };
+  const netz = document.createElement('div');
+  netz.className = 'netz';
+  feld.append(haelfte('left'), netz, haelfte('right'));
+  els.setupOptions.replaceChildren(feld);
+}
+
 function renderSetupModal() {
   if (!STATE.match || STATE.setup === 'playing' || STATE.setup === 'pending') {
     els.setupModal.classList.remove('visible');
     return;
   }
   els.setupModal.classList.add('visible');
+  const schritt = setupSchritt();
+  els.setupSchritt.hidden = !schritt;
+  if (schritt) els.setupSchritt.textContent = `Schritt ${schritt.n} von ${schritt.m}`;
   // Zurück-Schritt ab dem zweiten Setup-Schritt anbieten. Bei der Per-Satz-
   // Aufschlagwahl ist 'choose-server' der erste Schritt (kein Zurück — das
   // Gewinnerteam steht durch den Satzstand fest, nicht zur Wahl).
@@ -6439,21 +6566,13 @@ function renderSetupModal() {
         'Tippe auf den Spieler, der das Match eröffnet.',
         'Tap the player who starts the match.');
     }
-    const opts = repromptTeam
-      ? STATE.match[repromptTeam === 'a' ? 'teamA' : 'teamB']
-          .map(p => ({ player: p, teamKey: repromptTeam }))
-      : [
-          ...STATE.match.teamA.map(p => ({ player: p, teamKey: 'a' })),
-          ...STATE.match.teamB.map(p => ({ player: p, teamKey: 'b' })),
-        ];
-    els.setupOptions.innerHTML = opts.map((o, i) =>
-      `<div class="opt team-${o.teamKey}" data-i="${i}">${escapeHtml(o.player.name)}${
-        renderPartnerHint(o.teamKey, o.player.id)
-      }</div>`
-    ).join('');
-    [...els.setupOptions.children].forEach((node, i) => {
-      node.addEventListener('click', () => chooseServer(opts[i].player, opts[i].teamKey));
-    });
+    // Feldbild: Wählbar ist, wer aufschlagen darf; die übrigen stehen zur
+    // Orientierung auf ihrer Hälfte.
+    baueSetupFeld((spieler, teamKey) => (
+      !repromptTeam || teamKey === repromptTeam
+        ? { wahl: () => chooseServer(spieler, teamKey) }
+        : {}
+    ));
   } else if (STATE.setup === 'choose-receiver') {
     setSetupText(
       'Wer nimmt den Aufschlag an?', 'Who receives the serve?',
@@ -6467,13 +6586,12 @@ function renderSetupModal() {
       renderSetupModal();
       return;
     }
-    const otherTeamKey = STATE.pendingServer.fromTeamKey === 'a' ? 'b' : 'a';
-    const otherTeam = STATE.match[otherTeamKey === 'a' ? 'teamA' : 'teamB'];
-    els.setupOptions.innerHTML = otherTeam.map((p, i) =>
-      `<div class="opt team-${otherTeamKey}" data-i="${i}">${escapeHtml(p.name)}</div>`
-    ).join('');
-    [...els.setupOptions.children].forEach((node, i) => {
-      node.addEventListener('click', () => chooseReceiver(otherTeam[i], otherTeamKey));
+    // Feldbild: Der gewählte Aufschläger steht markiert auf seiner Hälfte,
+    // gegenüber wählt man den Annehmer.
+    const aufschlag = STATE.pendingServer;
+    baueSetupFeld((spieler, teamKey) => {
+      if (teamKey !== aufschlag.fromTeamKey) return { wahl: () => chooseReceiver(spieler, teamKey) };
+      return spieler.id === aufschlag.player.id ? { notiz: 'schlägt auf' } : {};
     });
   }
 }
@@ -6573,14 +6691,6 @@ async function anwesenheitMelden(matchId, platz, present) {
     }
   } catch (e) { /* Netz weg: nichts gemerkt, erneut antippen */ }
   if (STATE.match && STATE.match.matchId === matchId) renderAnwesenheit(STATE.setup === 'choose-side');
-}
-
-function renderPartnerHint(teamKey, playerId) {
-  const team = STATE.match[teamKey === 'a' ? 'teamA' : 'teamB'];
-  if (team.length < 2) return '';
-  const partner = team.find(p => p.id !== playerId);
-  if (!partner) return '';
-  return `<div class="partner">mit / with ${escapeHtml(partner.name)}</div>`;
 }
 
 function renderCourt() {
@@ -6855,6 +6965,13 @@ function renderEndstand() {
   if (tab.hidden) return;
   const sieger = siegerSeite();
   const seiten = sieger === 'right' ? ['right', 'left'] : ['left', 'right'];
+  // Hell ist nur ein GEWONNENER Satz. Bei einer Aufgabe steht der
+  // abgebrochene Satz mit in der Liste — dessen höhere Zahl hat niemand
+  // gewonnen. Im Zeitformat gibt es kein Satzziel: dort zählt die höhere Zahl.
+  const target = STATE.match ? STATE.match.targetScore : 99;
+  const gewinner = (s) => (target >= 99
+    ? (s.left > s.right ? 'left' : s.right > s.left ? 'right' : null)
+    : setWinnerSide(s, target));
   const zelle = (tag, text, klasse) => {
     const el = document.createElement(tag);
     el.textContent = text;
@@ -6865,13 +6982,12 @@ function renderEndstand() {
   kopf.append(zelle('th', ''), ...saetze.map((_, i) => zelle('th', String(i + 1))));
   tab.append(kopf);
   for (const seite of seiten) {
-    const gegen = seite === 'left' ? 'right' : 'left';
     const zeile = document.createElement('tr');
     if (seite === sieger) zeile.className = 'sieger';
     // Ohne Aufstellung (kein Name bekannt) spricht die Zeile in Seiten.
     const name = sideTeamName(seite) || (seite === 'left' ? 'Links' : 'Rechts');
     zeile.append(zelle('td', name, 'name'),
-      ...saetze.map((s) => zelle('td', String(s[seite]), s[seite] > s[gegen] ? 'gewonnen' : '')));
+      ...saetze.map((s) => zelle('td', String(s[seite]), gewinner(s) === seite ? 'gewonnen' : '')));
     tab.append(zeile);
   }
 }

@@ -32,6 +32,10 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
     Mannschaft, die Sätze als Spalten, der Sieger oben (vorher „16:21 · 18:21"
     unter dem Siegernamen). „Ergebnis übermitteln" ist der große Knopf, „Match
     wieder öffnen" nur noch rot umrandet statt ein riesiger roter Block.
+  - **Setup mit Schrittzähler und Feldbild:** Über jeder Frage des
+    Assistenten steht „Schritt 2 von 3". Aufschläger und Annehmer wählt man
+    auf einem kleinen Feld – jede Mannschaft auf ihrer Hälfte, dazwischen das
+    Netz; der gewählte Aufschläger steht bei der Annehmer-Wahl markiert da.
   - **Ergebnis eintragen ergänzt den Sieger:** Tippst du die Punkte des
     Verlierers, füllt das Tablet das Gegenfeld selbst aus (11 → 21, 20 → 22).
     Der Vorschlag ist gelb hinterlegt und lässt sich übertippen.

@@ -89,11 +89,21 @@ Liegt ein Spiel auf dem Feld, zeigt die Kopfzeile eine **Aufruf-Uhr**:
 auffälliger. Sie läuft, bis die Aufstellung bestätigt ist, und sagt dir auf
 einen Blick, ob hier gerade jemand vermisst wird.
 
-Ein kurzer Assistent führt dann durch drei Fragen:
+Ein kurzer Assistent führt dann durch drei Fragen. Über jeder Frage steht, wo
+du bist – zum Beispiel **„Schritt 2 von 3"**:
+<!-- pruef: "`Schritt ${schritt.n} von ${schritt.m}`" in src-tauri/assets/tablet.html -->
 
 1. **Welches Team steht links?**
 2. **Wer schlägt zuerst auf?**
 3. **Wer nimmt an?** — nur im Doppel.
+
+Aufschläger und Annehmer wählst du auf einem kleinen **Feldbild**: Jede
+Mannschaft steht auf ihrer Hälfte, so wie du sie vor dir siehst, dazwischen
+das Netz. Du tippst den Namen an. Bei der dritten Frage steht der gewählte
+Aufschläger gelb markiert mit **„schlägt auf"** auf seiner Seite, den Annehmer
+tippst du gegenüber an.
+<!-- pruef: "schlägt auf" in src-tauri/assets/tablet.html -->
+<!-- pruef: "setup-feld" in src-tauri/assets/tablet.html -->
 
 Bei Doppel und Mixed wird **nach jedem Satz neu gefragt**, wer aufschlägt und
 annimmt. Das ist gewollt: Die Aufstellung darf sich zwischen den Sätzen ändern.
@@ -370,7 +380,8 @@ Details: [Schiri-Modus am Zähltablett](umpire-mode.md).
 
 Nach dem letzten Punkt zeigt das Tablet das Spielende: den Sieger und darunter
 eine kleine **Tabelle** – eine Zeile je Mannschaft, die Sätze als Spalten, der
-Sieger oben. Gewonnene Sätze sind hell, verlorene blasser. Darunter steht groß
+Sieger oben. Gewonnene Sätze sind hell, verlorene blasser (ein durch Aufgabe
+abgebrochener Satz hat keinen Gewinner und bleibt blass). Darunter steht groß
 **„Ergebnis übermitteln"**; „Korrektur — Match wieder öffnen" ist bewusst nur
 ein rot umrandeter Knopf, damit er nicht aus Versehen getroffen wird.
 
@@ -471,7 +482,7 @@ Spiel** an — du übernimmst dann mit dem aktuellen Stand und zählst weiter.
 **Du tippst nur die Punkte des Verlierers.** Das Tablet ergänzt den Sieger
 selbst: aus 11 wird 21:11, aus 20 wird 22:20. Der ergänzte Wert ist gelb
 hinterlegt – stimmt er nicht, tippst du ihn einfach über; was du selbst
-eingetragen hast, ändert das Tablet nie. Tippst du die Punkte des Siegers (21
+eingetragen hast, ändert das Tablet nie (eine 0 zählt als leer). Tippst du die Punkte des Siegers (21
 oder mehr), ergänzt es nichts, denn dann ist der Gegner offen.
 <!-- pruef: "es-vorschlag" in src-tauri/assets/tablet.html -->
 <!-- pruef: "if (punkte < target - 1) return target;" in src-tauri/assets/tablet.html -->
